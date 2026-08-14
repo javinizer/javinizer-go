@@ -102,7 +102,7 @@ func (s *Scraper) resolveContentID(ctx context.Context, movieID string, scraperN
 // without significantly increasing CPU or memory pressure.
 var maxQueryConcurrency = runtime.NumCPU()
 
-func (s *Scraper) queryAll(ctx context.Context, movieID, resolvedMovieID string, scrapers []models.Scraper, startTime time.Time) ([]*models.ScraperResult, []models.ScraperError) {
+func (s *Scraper) queryAll(ctx context.Context, movieID, resolvedMovieID, rawInput string, scrapers []models.Scraper, startTime time.Time) ([]*models.ScraperResult, []models.ScraperError) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -111,7 +111,7 @@ func (s *Scraper) queryAll(ctx context.Context, movieID, resolvedMovieID string,
 		if len(scrapers) == 0 {
 			return nil, nil
 		}
-		outcome := s.queryWithBreaker(ctx, resolvedMovieID, movieID, scrapers[0])
+		outcome := s.queryWithBreaker(ctx, resolvedMovieID, rawInput, scrapers[0])
 		var results []*models.ScraperResult
 		var failures []models.ScraperError
 		if outcome.result != nil {
@@ -138,7 +138,7 @@ func (s *Scraper) queryAll(ctx context.Context, movieID, resolvedMovieID string,
 				return gCtx.Err()
 			default:
 			}
-			outcomes[i] = s.queryWithBreaker(gCtx, resolvedMovieID, movieID, scraper)
+			outcomes[i] = s.queryWithBreaker(gCtx, resolvedMovieID, rawInput, scraper)
 			return nil // errors are captured in outcomes[i].failure
 		})
 	}

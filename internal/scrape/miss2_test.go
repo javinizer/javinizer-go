@@ -93,7 +93,7 @@ func TestScrapeMiss2_QueryAll_NilContext(t *testing.T) {
 	scrapers := []models.Scraper{
 		&mockScraper{name: "test", enabled: true, result: &models.ScraperResult{ID: "TEST-001"}},
 	}
-	results, failures := s.queryAll(nil, "TEST-001", "test-001", scrapers, time.Now())
+	results, failures := s.queryAll(nil, "TEST-001", "test-001", "TEST-001", scrapers, time.Now())
 	assert.Len(t, results, 1)
 	assert.Empty(t, failures)
 }
@@ -102,7 +102,7 @@ func TestScrapeMiss2_QueryAll_NilContext(t *testing.T) {
 
 func TestScrapeMiss2_QueryAll_EmptyScrapers(t *testing.T) {
 	s := &Scraper{}
-	results, failures := s.queryAll(context.Background(), "TEST-001", "test-001", nil, time.Now())
+	results, failures := s.queryAll(context.Background(), "TEST-001", "test-001", "TEST-001", nil, time.Now())
 	assert.Nil(t, results)
 	assert.Nil(t, failures)
 }
@@ -114,7 +114,7 @@ func TestScrapeMiss2_QueryAll_SingleScraperError(t *testing.T) {
 	scrapers := []models.Scraper{
 		&mockScraper{name: "fail", enabled: true, err: errors.New("network error")},
 	}
-	results, failures := s.queryAll(context.Background(), "TEST-001", "test-001", scrapers, time.Now())
+	results, failures := s.queryAll(context.Background(), "TEST-001", "test-001", "TEST-001", scrapers, time.Now())
 	assert.Empty(t, results)
 	assert.Len(t, failures, 1)
 	assert.Equal(t, "fail", failures[0].Scraper)
@@ -128,7 +128,7 @@ func TestScrapeMiss2_QueryAll_MultipleScrapers(t *testing.T) {
 		&mockScraper{name: "ok", enabled: true, result: &models.ScraperResult{ID: "TEST-001"}},
 		&mockScraper{name: "fail", enabled: true, err: errors.New("network error")},
 	}
-	results, failures := s.queryAll(context.Background(), "TEST-001", "test-001", scrapers, time.Now())
+	results, failures := s.queryAll(context.Background(), "TEST-001", "test-001", "TEST-001", scrapers, time.Now())
 	assert.Len(t, results, 1)
 	assert.Len(t, failures, 1)
 }
@@ -144,7 +144,7 @@ func TestScrapeMiss2_QueryAll_ContextCancelled(t *testing.T) {
 		&mockScraper{name: "test1", enabled: true, result: &models.ScraperResult{ID: "TEST-001"}},
 		&mockScraper{name: "test2", enabled: true, result: &models.ScraperResult{ID: "TEST-001"}},
 	}
-	_, failures := s.queryAll(ctx, "TEST-001", "test-001", scrapers, time.Now())
+	_, failures := s.queryAll(ctx, "TEST-001", "test-001", "TEST-001", scrapers, time.Now())
 	// The appended parent-context failure must be friendly and typed, never
 	// the raw "context canceled" sentinel leaking into buildNoResultsError.
 	var contextFailure *models.ScraperError

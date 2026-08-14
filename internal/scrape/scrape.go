@@ -236,6 +236,15 @@ func New(
 // to extract MovieID and determine optimal scrapers. Returns the resolved
 // ScrapeCmd or an error if MovieID is empty after resolution.
 func resolveScrapeInput(ctx context.Context, cmd ScrapeCmd, registry ScraperInstanceResolver, cfg *Config) (ScrapeCmd, error) {
+	if cmd.RawInput == "" && cmd.MovieID != "" {
+		if parsed, parseErr := matcher.ParseInput(cmd.MovieID, registry); parseErr == nil && parsed.IsURL {
+			cmd.RawInput = cmd.MovieID
+			cmd.MovieID = parsed.ID
+			if len(cmd.SelectedScrapers) == 0 && len(parsed.CompatibleScrapers) > 0 {
+				cmd.PriorityOverride = matcher.CalculateOptimalScrapers(nil, cfg.ScrapersPriority, parsed)
+			}
+		}
+	}
 	if cmd.RawInput != "" {
 		parsed, parseErr := matcher.ParseInput(cmd.RawInput, registry)
 		if parseErr != nil {
@@ -365,7 +374,11 @@ func (s *Scraper) Scrape(ctx context.Context, cmd ScrapeCmd) (*ScrapeResult, err
 	resolvedID := s.resolveContentID(ctx, cmd.MovieID, scraperNames)
 	scrapers := filterMovieScrapers(s.registry.GetInstancesByPriorityForInput(scraperNames, resolvedID))
 
-	results, failures := s.queryAll(ctx, cmd.MovieID, resolvedID, scrapers, startTime)
+	rawInput := cmd.RawInput
+	if rawInput == "" {
+		rawInput = cmd.MovieID
+	}
+	results, failures := s.queryAll(ctx, cmd.MovieID, resolvedID, rawInput, scrapers, startTime)
 	if len(results) == 0 {
 		return failedResult(cmd.MovieID, buildNoResultsError(failures), classifyFailures(failures), startTime), nil
 	}

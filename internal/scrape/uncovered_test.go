@@ -241,7 +241,7 @@ func TestQuerySingle_PanicRecoveryUncovered(t *testing.T) {
 
 func TestQueryAll_EmptyScrapersUncovered(t *testing.T) {
 	s := New(nil, nil, nil, nil, nil, &Config{}, nil, nil)
-	results, failures := s.queryAll(context.Background(), "MOV-001", "MOV-001", nil, time.Now())
+	results, failures := s.queryAll(context.Background(), "MOV-001", "MOV-001", "MOV-001", nil, time.Now())
 	assert.Nil(t, results)
 	assert.Nil(t, failures)
 }
@@ -251,7 +251,7 @@ func TestQueryAll_SingleScraperUncovered(t *testing.T) {
 	registry.RegisterInstance(&mockScraper{name: "test", enabled: true, result: &models.ScraperResult{ID: "MOV-001", Title: "Test"}, err: nil})
 	scrapers := registry.GetInstancesByPriorityForInput([]string{"test"}, "")
 	s := New(registry, nil, nil, nil, nil, &Config{}, nil, nil)
-	results, failures := s.queryAll(context.Background(), "MOV-001", "MOV-001", scrapers, time.Now())
+	results, failures := s.queryAll(context.Background(), "MOV-001", "MOV-001", "MOV-001", scrapers, time.Now())
 	require.Len(t, results, 1)
 	assert.Equal(t, "MOV-001", results[0].ID)
 	_ = failures
