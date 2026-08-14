@@ -192,6 +192,7 @@ func enrichActressesFromResolvers(ctx context.Context, scraped *models.Movie, re
 	if len(priorityOverride) > 0 && len(priorityOverride[0]) > 0 {
 		priority = priorityOverride[0]
 	}
+	var resolverWarnings []string
 	resolvers := collectMetadataResolvers(registry, priority, cfg, len(priorityOverride) > 0 && len(priorityOverride[0]) > 0)
 	if len(resolvers) == 0 {
 		return 0
@@ -285,7 +286,8 @@ func enrichActressesFromResolvers(ctx context.Context, scraped *models.Movie, re
 				ThumbURL:     firstNonBlank(actress.ThumbURL, picks["actress_url"].value),
 			})
 			if resolverErr != nil {
-				logging.Debugf("Resolver %s failed for actress %s: %v", resolverName(resolver), actress.FullName(), resolverErr)
+				logging.Warnf("Actress resolver %s failed for %s: %v", resolverName(resolver), actress.FullName(), resolverErr)
+				_ = resolverWarnings
 				continue
 			}
 			if metadata.DMMID != actress.DMMID && actress.DMMID > 0 {

@@ -31,7 +31,7 @@ func isTestDumpURL(rawURL string) bool {
 	return os.Getenv("JAVINIZER_R18DEV_DUMP_URL") != ""
 }
 
-const maxDumpDecompressedBytes int64 = 1 << 30
+const maxDumpDecompressedBytes int64 = 4 << 30
 
 var allowedDumpHosts = regexp.MustCompile(`^(.+\.)?(r18\.dev|amazonaws\.com|wasabisys\.com)$`)
 

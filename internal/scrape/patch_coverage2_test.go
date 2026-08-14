@@ -44,7 +44,6 @@ func (s *stubScrapeWithURLHandler) ScrapeURL(context.Context, string) (*models.S
 }
 
 func TestQueryRaw_URLInputResolvesID(t *testing.T) {
-	t.Skip("P5: URL input handling not yet ported from epic")
 	reg := scraperutil.NewScraperRegistry()
 	reg.RegisterInstance(&stubScrapeWithURLHandler{
 		name:      "test",

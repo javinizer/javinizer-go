@@ -164,7 +164,7 @@ func TestScrapeMiss2_QueryAll_ContextCancelled(t *testing.T) {
 
 func TestScrapeMiss2_QuerySingle_PanicRecovery(t *testing.T) {
 	panickingScraper := &panicScraper{name: "panic"}
-	outcome := querySingle(context.Background(), "TEST-001", panickingScraper)
+	outcome := querySingle(context.Background(), "TEST-001", "", panickingScraper)
 	assert.Nil(t, outcome.result)
 	require.NotNil(t, outcome.failure)
 	// safeSearch recovers the panic and returns it as an error,
@@ -179,7 +179,7 @@ func TestScrapeMiss2_QuerySingle_ContextCancelled(t *testing.T) {
 	cancel()
 
 	scraper := &mockScraper{name: "test", enabled: true, result: &models.ScraperResult{}}
-	outcome := querySingle(ctx, "TEST-001", scraper)
+	outcome := querySingle(ctx, "TEST-001", "", scraper)
 	assert.Nil(t, outcome.result)
 	require.NotNil(t, outcome.failure)
 	assert.Equal(t, "test", outcome.failure.Scraper)
@@ -194,7 +194,7 @@ func TestScrapeMiss2_QuerySingle_ErrorWithMappedQueryRetry(t *testing.T) {
 		err:         errors.New("not found with mapped"),
 		result:      &models.ScraperResult{ID: "TEST-001"},
 	}
-	outcome := querySingle(context.Background(), "TEST-001", scraper)
+	outcome := querySingle(context.Background(), "TEST-001", "", scraper)
 	require.NotNil(t, outcome.result)
 	assert.Equal(t, "TEST-001", outcome.result.ID)
 }
@@ -208,7 +208,7 @@ func TestScrapeMiss2_QuerySingle_ErrorWithMappedQueryRetryFails(t *testing.T) {
 		err:         errors.New("not found"),
 		retryErr:    errors.New("also not found"),
 	}
-	outcome := querySingle(context.Background(), "TEST-001", scraper)
+	outcome := querySingle(context.Background(), "TEST-001", "", scraper)
 	assert.Nil(t, outcome.result)
 	require.NotNil(t, outcome.failure)
 	assert.Contains(t, outcome.failure.Message, "mapped query")
@@ -218,7 +218,7 @@ func TestScrapeMiss2_QuerySingle_ErrorWithMappedQueryRetryFails(t *testing.T) {
 
 func TestScrapeMiss2_QuerySingle_ErrorNoMappedQuery(t *testing.T) {
 	scraper := &mockScraper{name: "fail", enabled: true, err: errors.New("network error")}
-	outcome := querySingle(context.Background(), "TEST-001", scraper)
+	outcome := querySingle(context.Background(), "TEST-001", "", scraper)
 	assert.Nil(t, outcome.result)
 	require.NotNil(t, outcome.failure)
 	assert.Equal(t, "fail", outcome.failure.Scraper)

@@ -374,7 +374,6 @@ func (f *failingContentIDResolver) ResolveContentIDCtx(_ context.Context, _ stri
 }
 
 func TestClassifyScraperError_TypedUnknownTransportReclassified(t *testing.T) {
-	t.Skip("P5: typed ScraperError reclassification not yet ported")
 	// A scraper wraps a transport error in a ScraperError with Kind=Unknown,
 	// StatusCode=0, and Cause=transport error (e.g. JavDB's pattern).
 	// classifyScraperError must reclassify it as Unavailable so the breaker trips.

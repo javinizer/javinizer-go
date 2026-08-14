@@ -231,7 +231,7 @@ func TestResolveScraperNames_PriorityOverrideOnlyUncovered(t *testing.T) {
 
 func TestQuerySingle_PanicRecoveryUncovered(t *testing.T) {
 	panicScraper := &panicScraperUncovered{name: "panic"}
-	outcome := querySingle(context.Background(), "MOV-001", panicScraper)
+	outcome := querySingle(context.Background(), "MOV-001", "", panicScraper)
 	assert.NotNil(t, outcome.failure)
 	assert.Equal(t, "panic", outcome.failure.Scraper)
 	// safeSearch catches the panic and returns an error, which querySingle stores as Cause

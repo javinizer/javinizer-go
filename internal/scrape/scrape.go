@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/aggregator"
@@ -169,9 +170,14 @@ func (s *Scraper) QueryRaw(ctx context.Context, movieID, scraperName string) (*m
 			Message: fmt.Sprintf("scraper %q is not enabled", scraperName),
 		}
 	}
-	// Skip content-ID resolution in raw mode — it reads/writes the DB cache,
-	// which contradicts the no-persistence contract.
-	outcome := querySingle(ctx, movieID, scraper)
+	// Resolve URL-shaped inputs to their extracted ID so the Search fallback
+	// receives the product code, not the raw URL.
+	resolvedID := movieID
+	rawInput := strings.TrimSpace(movieID)
+	if parsed, parseErr := matcher.ParseInput(rawInput, s.registry); parseErr == nil && parsed.IsURL {
+		resolvedID = parsed.ID
+	}
+	outcome := querySingle(ctx, resolvedID, rawInput, scraper)
 	if outcome.failure != nil {
 		return nil, outcome.failure
 	}
@@ -222,6 +228,7 @@ func New(
 		cfg:         cfg,
 		translator:  translator,
 		fs:          fs,
+		breaker:     newScraperCircuitBreaker(circuitBreakerThreshold),
 	}
 }
 

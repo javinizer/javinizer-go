@@ -35,7 +35,7 @@ func (m *mappedRetryScraper) Search(_ context.Context, query string) (*models.Sc
 
 func TestQuerySingle_MappedQueryRetryContextError(t *testing.T) {
 	scraper := &mappedRetryScraper{name: "mapped"}
-	outcome := querySingle(context.Background(), "TEST-001", scraper)
+	outcome := querySingle(context.Background(), "TEST-001", "", scraper)
 	require.NotNil(t, outcome.failure)
 	assert.Equal(t, "mapped", outcome.failure.Scraper)
 	assert.Equal(t, models.ScraperErrorKindUnavailable, outcome.failure.Kind)

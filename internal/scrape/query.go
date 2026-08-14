@@ -111,7 +111,7 @@ func (s *Scraper) queryAll(ctx context.Context, movieID, resolvedMovieID string,
 		if len(scrapers) == 0 {
 			return nil, nil
 		}
-		outcome := querySingle(ctx, resolvedMovieID, scrapers[0])
+		outcome := s.queryWithBreaker(ctx, resolvedMovieID, movieID, scrapers[0])
 		var results []*models.ScraperResult
 		var failures []models.ScraperError
 		if outcome.result != nil {
@@ -138,7 +138,7 @@ func (s *Scraper) queryAll(ctx context.Context, movieID, resolvedMovieID string,
 				return gCtx.Err()
 			default:
 			}
-			outcomes[i] = querySingle(gCtx, resolvedMovieID, scraper)
+			outcomes[i] = s.queryWithBreaker(gCtx, resolvedMovieID, movieID, scraper)
 			return nil // errors are captured in outcomes[i].failure
 		})
 	}
@@ -170,7 +170,7 @@ func (s *Scraper) queryAll(ctx context.Context, movieID, resolvedMovieID string,
 	return results, failures
 }
 
-func querySingle(ctx context.Context, movieID string, scraper models.Scraper) (outcome queryOutcome) {
+func querySingle(ctx context.Context, movieID, rawInput string, scraper models.Scraper) (outcome queryOutcome) {
 	defer func() {
 		if r := recover(); r != nil {
 			outcome = queryOutcome{
@@ -181,6 +181,37 @@ func querySingle(ctx context.Context, movieID string, scraper models.Scraper) (o
 			}
 		}
 	}()
+
+	if rawInput != "" {
+		if uh, ok := scraper.(models.URLHandler); ok && uh.CanHandleURL(rawInput) {
+			result, err := safeScrapeURL(ctx, uh, rawInput)
+			if err == nil && result != nil {
+				if strings.TrimSpace(result.ID) == "" {
+					err = models.NewScraperNotFoundError(scraper.Name(), "direct URL returned result without ID")
+				} else {
+					outcome = queryOutcome{result: result}
+					return
+				}
+			}
+			if err == nil && result == nil {
+				err = models.NewScraperNotFoundError(scraper.Name(), "URL handler returned no result")
+			}
+			if isContextError(ctx, err) {
+				outcome = queryOutcome{failure: classifyContextError(scraper.Name(), err)}
+				return
+			}
+			if se, ok := models.AsScraperError(err); ok {
+				if se.Kind != models.ScraperErrorKindNotFound {
+					se.Scraper = scraper.Name()
+					outcome = queryOutcome{failure: se}
+					return
+				}
+			} else {
+				outcome = queryOutcome{failure: classifyScraperError(scraper.Name(), err, "")}
+				return
+			}
+		}
+	}
 
 	scraperQuery := movieID
 	if mappedQuery, ok := models.ResolveSearchQueryForScraper(scraper, movieID); ok {
@@ -265,6 +296,11 @@ func classifyScraperError(scraperName string, err error, fallbackMsg string) *mo
 		if copied.Message == "" {
 			copied.Message = err.Error()
 		}
+		if copied.Kind == models.ScraperErrorKindUnknown && isTransportError(copied.Cause) {
+			copied.Kind = models.ScraperErrorKindUnavailable
+			copied.Retryable = true
+			copied.Temporary = true
+		}
 		return &copied
 	}
 	msg := fallbackMsg
@@ -314,7 +350,7 @@ func (s *Scraper) queryWithBreaker(ctx context.Context, movieID, rawInput string
 			return queryOutcome{failure: skip}
 		}
 	}
-	outcome := querySingle(ctx, movieID, scraper)
+	outcome := querySingle(ctx, movieID, rawInput, scraper)
 	if s.breaker != nil && ctx.Err() == nil {
 		if outcome.result != nil {
 			s.breaker.recordOutcome(scraper.Name(), nil)

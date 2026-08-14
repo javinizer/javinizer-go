@@ -140,7 +140,7 @@ func TestContextContentIDResolverAndQueryPanic(t *testing.T) {
 			assert.Equal(t, tc.want, s.resolveContentID(t.Context(), "original", []string{"ctx"}))
 		})
 	}
-	outcome := querySingle(t.Context(), "id", &panicQueryScraper{stubScrapeWithResult: &stubScrapeWithResult{name: "panic-query", enabled: true, result: &models.ScraperResult{}}})
+	outcome := querySingle(t.Context(), "id", "", &panicQueryScraper{stubScrapeWithResult: &stubScrapeWithResult{name: "panic-query", enabled: true, result: &models.ScraperResult{}}})
 	require.NotNil(t, outcome.failure)
 	assert.Contains(t, outcome.failure.Message, "query resolver panic")
 }
