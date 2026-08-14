@@ -192,7 +192,6 @@ func enrichActressesFromResolvers(ctx context.Context, scraped *models.Movie, re
 	if len(priorityOverride) > 0 && len(priorityOverride[0]) > 0 {
 		priority = priorityOverride[0]
 	}
-	var resolverWarnings []string
 	resolvers := collectMetadataResolvers(registry, priority, cfg, len(priorityOverride) > 0 && len(priorityOverride[0]) > 0)
 	if len(resolvers) == 0 {
 		return 0
@@ -287,7 +286,7 @@ func enrichActressesFromResolvers(ctx context.Context, scraped *models.Movie, re
 			})
 			if resolverErr != nil {
 				logging.Warnf("Actress resolver %s failed for %s: %v", resolverName(resolver), actress.FullName(), resolverErr)
-				_ = resolverWarnings
+				cfg.ResolverWarnings = append(cfg.ResolverWarnings, fmt.Sprintf("%s: %v", resolverName(resolver), resolverErr))
 				continue
 			}
 			if metadata.DMMID != actress.DMMID && actress.DMMID > 0 {

@@ -24,6 +24,7 @@ type Config struct {
 	Referer                  string
 	TempDir                  string
 	ValidateActressThumbnail func(context.Context, string) error
+	ResolverWarnings         []string
 }
 
 // Translator is the interface for applying metadata translation to a scraped Movie.

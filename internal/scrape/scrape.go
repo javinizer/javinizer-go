@@ -91,6 +91,7 @@ type ScrapeResult struct {
 	ActressSources map[string]string
 	Status         ScrapeStatus
 	Message        string
+	Warning        string
 	FailureKind    models.ScraperErrorKind
 
 	// Cached indicates this result was served from the movie DB cache
@@ -239,7 +240,7 @@ func resolveScrapeInput(ctx context.Context, cmd ScrapeCmd, registry ScraperInst
 	if cmd.RawInput == "" && cmd.MovieID != "" {
 		if parsed, parseErr := matcher.ParseInput(cmd.MovieID, registry); parseErr == nil {
 			if parsed.IsURL {
-				cmd.RawInput = cmd.MovieID
+				cmd.RawInput = strings.TrimSpace(cmd.MovieID)
 			}
 			cmd.MovieID = parsed.ID
 			if len(cmd.SelectedScrapers) == 0 && len(parsed.CompatibleScrapers) > 0 {
@@ -333,6 +334,12 @@ func postProcessScraped(ctx context.Context, scraped *models.Movie, results []*m
 		Status:             StatusCompleted,
 		StartedAt:          startTime,
 		EndedAt:            now,
+	}
+	if len(cfg.ResolverWarnings) > 0 {
+		if result.Warning != "" {
+			result.Warning += "; "
+		}
+		result.Warning += strings.Join(cfg.ResolverWarnings, "; ")
 	}
 
 	return result, nil

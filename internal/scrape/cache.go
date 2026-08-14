@@ -2,6 +2,7 @@ package scrape
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/database"
@@ -84,6 +85,23 @@ func (s *Scraper) tryCache(ctx context.Context, cmd ScrapeCmd, actressRepo datab
 	}
 
 	now := time.Now()
+	if len(s.cfg.ResolverWarnings) > 0 {
+		result := &ScrapeResult{
+			Movie:              scrapedToReturn,
+			FieldSources:       fieldSources,
+			ActressSources:     actressSources,
+			ScraperResults:     []*models.ScraperResult{ScraperResultFromCachedMovie(cached)},
+			Cached:             true,
+			TranslationWarning: translationWarning,
+			TranslationOutput:  translationOutput,
+			Status:             StatusCompleted,
+			NeedsPersistence:   needsPersistence,
+			StartedAt:          startTime,
+			EndedAt:            now,
+			Warning:            strings.Join(s.cfg.ResolverWarnings, "; "),
+		}
+		return result
+	}
 	return &ScrapeResult{
 		Movie:              scrapedToReturn,
 		FieldSources:       fieldSources,
