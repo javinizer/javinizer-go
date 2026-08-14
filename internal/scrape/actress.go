@@ -303,6 +303,7 @@ func enrichActressesFromResolvers(ctx context.Context, scraped *models.Movie, re
 			if breaker != nil {
 				if skip := breaker.skipFailure(resolverName(resolver)); skip != nil {
 					logging.Debugf("Actress resolver %s skipped by circuit breaker for %s", resolverName(resolver), actress.FullName())
+					*warnings = append(*warnings, fmt.Sprintf("%s: circuit breaker open", resolverName(resolver)))
 					continue
 				}
 			}
@@ -319,7 +320,7 @@ func enrichActressesFromResolvers(ctx context.Context, scraped *models.Movie, re
 			if resolverErr != nil {
 				logging.Warnf("Actress resolver %s failed for %s: %v", resolverName(resolver), actress.FullName(), resolverErr)
 				*warnings = append(*warnings, fmt.Sprintf("%s: %v", resolverName(resolver), resolverErr))
-				if breaker != nil {
+				if breaker != nil && ctx.Err() == nil {
 					breaker.recordOutcome(resolverName(resolver), classifyScraperError(resolverName(resolver), resolverErr, ""))
 				}
 				continue
