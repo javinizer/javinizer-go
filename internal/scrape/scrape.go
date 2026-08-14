@@ -333,6 +333,22 @@ func postProcessScraped(ctx context.Context, scraped *models.Movie, results []*m
 			actressSources[k] = v
 		}
 	}
+	for i := range scraped.Actresses {
+		newKey := ActressSourceKey(scraped.Actresses[i])
+		if newKey == "" {
+			continue
+		}
+		if _, hasSource := actressSources[newKey]; hasSource {
+			continue
+		}
+		for oldKey, source := range actressSourcesPreEnrichment {
+			if source != "" {
+				actressSources[newKey] = source
+				break
+			}
+			_ = oldKey
+		}
+	}
 
 	var translationWarning string
 	var translationOutput *translation.TranslationOutput
