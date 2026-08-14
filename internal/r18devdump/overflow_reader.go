@@ -13,7 +13,7 @@ type overflowReader struct {
 
 func (o *overflowReader) Read(p []byte) (int, error) {
 	remaining := o.max - o.n
-	if remaining <= 0 {
+	if remaining < 0 {
 		return 0, fmt.Errorf("r18dev dump: decompressed size exceeds %d bytes (possible corrupt or hostile dump)", o.max)
 	}
 	if int64(len(p)) > remaining {
