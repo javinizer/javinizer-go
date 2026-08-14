@@ -82,6 +82,7 @@
 //	cfg.Metadata.NFO.Feature.IncludeTrailer         → nfo
 //	cfg.Metadata.NFO.Feature.PerFile                → api/core, nfo, workflow
 //	cfg.Metadata.Priority                    → aggregator
+//	cfg.Metadata.Priority.Fields            → scrape
 //	cfg.System.ImageCacheEnabled               → api/core, api/temp
 //	cfg.System.ImageCacheMaxSizeMB             → api/core, api/temp
 //	cfg.System.ImageCacheTTLHours              → api/core, api/temp

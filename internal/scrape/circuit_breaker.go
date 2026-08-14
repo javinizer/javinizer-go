@@ -14,6 +14,8 @@ import (
 // every file re-attempting a dead host and blocking on its per-request
 // timeout. A successful result resets the counter, so a single transient
 // failure does not disable a scraper.
+//
+//nolint:unused // used by circuit_breaker_test.go
 const circuitBreakerThreshold = 2
 
 // circuitBreakerCooldown is how long a tripped breaker stays fully closed
@@ -22,6 +24,8 @@ const circuitBreakerThreshold = 2
 // in API/TUI mode (so the breaker outlives a single batch), a tripped scraper
 // recovers automatically once the host comes back. A probe that succeeds
 // clears the breaker; one that fails re-arms the cooldown.
+//
+//nolint:unused // used by circuit_breaker_test.go
 const circuitBreakerCooldown = 60 * time.Second
 
 // scraperCircuitBreaker tracks consecutive circuit-breakable failures per
@@ -43,6 +47,7 @@ type scraperCircuitBreaker struct {
 	cooldown  time.Duration
 }
 
+//nolint:unused // used by circuit_breaker_test.go
 func newScraperCircuitBreaker(threshold int) *scraperCircuitBreaker {
 	if threshold < 1 {
 		threshold = circuitBreakerThreshold

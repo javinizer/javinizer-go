@@ -6352,6 +6352,9 @@ const docTemplate = `{
                 "sources_used": {
                     "type": "integer",
                     "example": 2
+                },
+                "warning": {
+                    "type": "string"
                 }
             }
         },
