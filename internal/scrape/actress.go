@@ -319,7 +319,13 @@ func enrichActressesFromResolvers(ctx context.Context, scraped *models.Movie, re
 			if resolverErr != nil {
 				logging.Warnf("Actress resolver %s failed for %s: %v", resolverName(resolver), actress.FullName(), resolverErr)
 				*warnings = append(*warnings, fmt.Sprintf("%s: %v", resolverName(resolver), resolverErr))
+				if breaker != nil {
+					breaker.recordOutcome(resolverName(resolver), classifyScraperError(resolverName(resolver), resolverErr, ""))
+				}
 				continue
+			}
+			if breaker != nil {
+				breaker.recordOutcome(resolverName(resolver), nil)
 			}
 			if metadata.DMMID != actress.DMMID && actress.DMMID > 0 {
 				continue
