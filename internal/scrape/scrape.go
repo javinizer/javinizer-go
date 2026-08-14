@@ -377,7 +377,7 @@ func (s *Scraper) Scrape(ctx context.Context, cmd ScrapeCmd) (*ScrapeResult, err
 	// Capture caller-supplied selections before resolveScrapeInput can
 	// synthesize PriorityOverride from URL parsing; synthesized overrides
 	// must not make actress enrichment exclusive later.
-	explicitSelection := len(cmd.SelectedScrapers) > 0 || len(cmd.PriorityOverride) > 0
+	explicitSelection := len(cmd.SelectedScrapers) > 0
 
 	cmd, err := resolveScrapeInput(ctx, cmd, s.registry, s.cfg)
 	if err != nil {

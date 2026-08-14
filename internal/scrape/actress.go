@@ -18,10 +18,10 @@ func builtinCacheAllowedForPriority(cfg *Config, effectivePriority []string) boo
 		return true
 	}
 	var priority []string
-	if len(effectivePriority) > 0 {
-		priority = effectivePriority
-	} else if len(cfg.ActressFieldPriority) > 0 {
+	if len(cfg.ActressFieldPriority) > 0 {
 		priority = cfg.ActressFieldPriority
+	} else if len(effectivePriority) > 0 {
+		priority = effectivePriority
 	} else {
 		priority = cfg.ScrapersPriority
 	}
