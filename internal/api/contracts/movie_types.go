@@ -19,6 +19,7 @@ type ScrapeResponse struct {
 	Movie       *MovieView `json:"movie"`
 	SourcesUsed int        `json:"sources_used,omitempty" example:"2"`
 	Errors      []string   `json:"errors,omitempty"`
+	Warning     string     `json:"warning,omitempty"`
 }
 
 // MovieResponse represents a movie response

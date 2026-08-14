@@ -1403,6 +1403,8 @@ definitions:
       sources_used:
         example: 2
         type: integer
+      warning:
+        type: string
     type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.ScraperInfo:
     properties:
