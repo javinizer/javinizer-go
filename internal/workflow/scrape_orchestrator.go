@@ -96,7 +96,7 @@ func (o *scrapeOrchImpl) Execute(ctx context.Context, cmd scrape.ScrapeCmd) (*sc
 			meta.TranslationWarning = &s
 		}
 		if result.Warning != "" {
-			meta.ResolverWarning = result.Warning
+			meta.OrchestrationState.ResolverWarning = result.Warning
 		}
 		if result.NeedsPersistence {
 			meta.NeedsPersistence = true

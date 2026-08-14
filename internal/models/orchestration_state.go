@@ -18,6 +18,7 @@ type OrchestrationState struct {
 	Persisted           bool    `json:"persisted,omitempty"`             // true if the scraped movie was persisted to the database
 	PosterError         *string `json:"poster_error,omitempty"`          // non-nil if poster generation failed
 	TranslationWarning  *string `json:"translation_warning,omitempty"`   // non-nil if translation produced a partial result
+	ResolverWarning     string  `json:"resolver_warning,omitempty"`      // non-empty if actress resolver enrichment had transient failures
 }
 
 // Clone returns a deep copy of the OrchestrationState.
