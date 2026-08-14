@@ -243,6 +243,9 @@ func resolveScrapeInput(ctx context.Context, cmd ScrapeCmd, registry ScraperInst
 			if len(cmd.SelectedScrapers) == 0 && len(parsed.CompatibleScrapers) > 0 {
 				cmd.PriorityOverride = matcher.CalculateOptimalScrapers(nil, cfg.ScrapersPriority, parsed)
 			}
+		} else if parseErr != nil {
+			logging.Warnf("[scrape] MovieID parse failed for %q: %v (using as-is)", RedactURLQuery(cmd.MovieID), parseErr)
+			cmd.ParseWarning = fmt.Sprintf("input could not be parsed: %v", parseErr)
 		}
 	}
 	if cmd.RawInput != "" {

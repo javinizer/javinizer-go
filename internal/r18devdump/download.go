@@ -28,7 +28,7 @@ func isTestDumpURL(rawURL string) bool {
 			return true
 		}
 	}
-	return os.Getenv("JAVINIZER_R18DEV_DUMP_URL") != ""
+	return false
 }
 
 const maxDumpDecompressedBytes int64 = 4 << 30
@@ -95,6 +95,9 @@ func Download(ctx context.Context, client *http.Client, currentSourceURL string,
 		host := strings.ToLower(req.URL.Hostname())
 		if !allowedDumpHosts.MatchString(host) && !isTestDumpURL(via[0].URL.String()) {
 			return fmt.Errorf("r18dev dump: refusing redirect to %s", req.URL.Redacted())
+		}
+		if checkRedirect != nil {
+			return checkRedirect(req, via)
 		}
 		return nil
 	}
