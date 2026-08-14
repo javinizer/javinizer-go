@@ -290,6 +290,10 @@ func postProcessScraped(ctx context.Context, scraped *models.Movie, results []*m
 	}
 
 	actressSourcesPreEnrichment := buildActressSourcesFromScrapeResults(results, resolvedPriorities, cmd.SelectedScrapers, scraped.Actresses)
+	actressOldKeys := make([]string, len(scraped.Actresses))
+	for i := range scraped.Actresses {
+		actressOldKeys[i] = ActressSourceKey(scraped.Actresses[i])
+	}
 
 	if actressRepo != nil {
 		if enriched := enrichActressesFromDB(ctx, scraped, actressRepo, cfg); enriched > 0 {
@@ -335,18 +339,14 @@ func postProcessScraped(ctx context.Context, scraped *models.Movie, results []*m
 	}
 	for i := range scraped.Actresses {
 		newKey := ActressSourceKey(scraped.Actresses[i])
-		if newKey == "" {
+		if newKey == "" || newKey == actressOldKeys[i] {
 			continue
 		}
 		if _, hasSource := actressSources[newKey]; hasSource {
 			continue
 		}
-		for oldKey, source := range actressSourcesPreEnrichment {
-			if source != "" {
-				actressSources[newKey] = source
-				break
-			}
-			_ = oldKey
+		if oldSource, ok := actressSourcesPreEnrichment[actressOldKeys[i]]; ok && oldSource != "" {
+			actressSources[newKey] = oldSource
 		}
 	}
 
