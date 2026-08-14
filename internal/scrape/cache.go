@@ -38,7 +38,11 @@ func (s *Scraper) tryCache(ctx context.Context, cmd ScrapeCmd, actressRepo datab
 			actressEnriched = true
 		}
 	}
-	if builtinCacheAllowedForPriority(s.cfg, resolveScraperNames(cmd.SelectedScrapers, cmd.PriorityOverride, s.cfg)) {
+	var cacheEffectivePriority []string
+	if explicitSelection {
+		cacheEffectivePriority = resolveScraperNames(cmd.SelectedScrapers, cmd.PriorityOverride, s.cfg)
+	}
+	if builtinCacheAllowedForPriority(s.cfg, cacheEffectivePriority) {
 		if enriched := enrichActressesFromBuiltinCache(scrapedToReturn); enriched > 0 {
 			needsPersistence = true
 			actressEnriched = true
