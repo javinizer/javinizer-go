@@ -300,8 +300,6 @@ func postProcessScraped(ctx context.Context, scraped *models.Movie, results []*m
 		}
 	}
 
-	actressSources := buildActressSourcesFromScrapeResults(results, resolvedPriorities, cmd.SelectedScrapers, scraped.Actresses)
-
 	if invalid := validateActressThumbnails(scraped, cfg); invalid > 0 {
 		logging.Debugf("[scrape] Rejected %d invalid actress thumbnails", invalid)
 	}
@@ -319,6 +317,8 @@ func postProcessScraped(ctx context.Context, scraped *models.Movie, results []*m
 			logging.Debugf("[scrape] Enriched %d actresses from metadata resolvers", enriched)
 		}
 	}
+
+	actressSources := buildActressSourcesFromScrapeResults(results, resolvedPriorities, cmd.SelectedScrapers, scraped.Actresses)
 
 	var translationWarning string
 	var translationOutput *translation.TranslationOutput

@@ -71,7 +71,8 @@ type DownloadResult struct {
 func Download(ctx context.Context, client *http.Client, currentSourceURL string,
 	progress func(compressedBytes, totalBytes int64), importFn func(io.Reader, DownloadResult) error) (DownloadResult, error) {
 
-	hardenedClient := client
+	clientCopy := *client
+	hardenedClient := &clientCopy
 	dumpURL := DumpURLOverride()
 	if !isTestDumpURL(dumpURL) {
 		transport, ok := client.Transport.(*http.Transport)

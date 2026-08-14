@@ -14,8 +14,19 @@ import (
 var lookupBuiltinActress = actresscache.Lookup
 
 func builtinCacheAllowedForPriority(cfg *Config) bool {
-	if cfg == nil || len(cfg.ActressFieldPriority) == 0 {
+	if cfg == nil {
 		return true
+	}
+	if len(cfg.ActressFieldPriority) == 0 {
+		if len(cfg.ScrapersPriority) == 0 {
+			return true
+		}
+		for _, name := range cfg.ScrapersPriority {
+			if strings.EqualFold(strings.TrimSpace(name), "dmm") {
+				return true
+			}
+		}
+		return false
 	}
 	if len(cfg.ActressFieldPriority) == 1 && strings.EqualFold(strings.TrimSpace(cfg.ActressFieldPriority[0]), "__skip__") {
 		return false
