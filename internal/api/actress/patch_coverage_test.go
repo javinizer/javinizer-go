@@ -98,6 +98,8 @@ func TestSyncJobHandlerLifecycle(t *testing.T) {
 	require.NoError(t, json.Unmarshal(create.Body.Bytes(), &created))
 	require.NotEmpty(t, created.Job.ID)
 
+	rt.EnsureActressSyncManager().Stop()
+
 	for _, path := range []string{"/jobs/active", "/jobs/" + created.Job.ID, "/jobs/" + created.Job.ID + "/tasks"} {
 		assert.Eventually(t, func() bool {
 			w := httptest.NewRecorder()
