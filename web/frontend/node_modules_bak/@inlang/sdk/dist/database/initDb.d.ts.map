@@ -1,0 +1,1 @@
+{"version":3,"file":"initDb.d.ts","sourceRoot":"/","sources":["database/initDb.ts"],"names":[],"mappings":"AAAA,OAAO,EAAmB,MAAM,EAAE,MAAM,QAAQ,CAAC;AACjD,OAAO,EAAe,KAAK,oBAAoB,EAAE,MAAM,aAAa,CAAC;AACrE,OAAO,EAAiB,KAAK,kBAAkB,EAAE,MAAM,oBAAoB,CAAC;AAK5E,wBAAgB,MAAM,CAAC,IAAI,EAAE;IAAE,MAAM,EAAE,kBAAkB,CAAA;CAAE,gCAa1D"}

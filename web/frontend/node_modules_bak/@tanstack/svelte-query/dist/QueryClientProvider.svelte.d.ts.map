@@ -1,0 +1,1 @@
+{"version":3,"file":"QueryClientProvider.svelte.d.ts","sourceRoot":"","sources":["../src/QueryClientProvider.svelte.ts"],"names":[],"mappings":"AAMA,OAAO,KAAK,EAAE,wBAAwB,EAAE,MAAM,YAAY,CAAC;AA0B3D,QAAA,MAAM,mBAAmB,8DAAwC,CAAC;AAClE,KAAK,mBAAmB,GAAG,UAAU,CAAC,OAAO,mBAAmB,CAAC,CAAC;AAClE,eAAe,mBAAmB,CAAC"}

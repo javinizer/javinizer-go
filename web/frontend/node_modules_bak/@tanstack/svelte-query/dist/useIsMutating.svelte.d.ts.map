@@ -1,0 +1,1 @@
+{"version":3,"file":"useIsMutating.svelte.d.ts","sourceRoot":"","sources":["../src/useIsMutating.svelte.ts"],"names":[],"mappings":"AACA,OAAO,EAAE,aAAa,EAAE,MAAM,wBAAwB,CAAA;AACtD,OAAO,KAAK,EAAE,eAAe,EAAE,WAAW,EAAE,MAAM,sBAAsB,CAAA;AAExE,wBAAgB,aAAa,CAC3B,OAAO,CAAC,EAAE,eAAe,EACzB,WAAW,CAAC,EAAE,WAAW,GACxB,aAAa,CAAC,MAAM,CAAC,CAQvB"}

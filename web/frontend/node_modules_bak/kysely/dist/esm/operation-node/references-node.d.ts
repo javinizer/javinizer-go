@@ -1,0 +1,24 @@
+import type { OperationNode } from './operation-node.js';
+import type { ColumnNode } from './column-node.js';
+import type { TableNode } from './table-node.js';
+import type { ArrayItemType } from '../util/type-utils.js';
+export declare const ON_MODIFY_FOREIGN_ACTIONS: readonly ["no action", "restrict", "cascade", "set null", "set default"];
+export type OnModifyForeignAction = ArrayItemType<typeof ON_MODIFY_FOREIGN_ACTIONS>;
+export interface ReferencesNode extends OperationNode {
+    readonly kind: 'ReferencesNode';
+    readonly table: TableNode;
+    readonly columns: ReadonlyArray<ColumnNode>;
+    readonly onDelete?: OnModifyForeignAction;
+    readonly onUpdate?: OnModifyForeignAction;
+}
+type ReferencesNodeFactory = Readonly<{
+    is(node: OperationNode): node is ReferencesNode;
+    create(table: TableNode, columns: ReadonlyArray<ColumnNode>): Readonly<ReferencesNode>;
+    cloneWithOnDelete(references: ReferencesNode, onDelete: OnModifyForeignAction): Readonly<ReferencesNode>;
+    cloneWithOnUpdate(references: ReferencesNode, onUpdate: OnModifyForeignAction): Readonly<ReferencesNode>;
+}>;
+/**
+ * @internal
+ */
+export declare const ReferencesNode: ReferencesNodeFactory;
+export {};

@@ -1,0 +1,10 @@
+import { type JoinType } from '../operation-node/join-node.js';
+import { JoinBuilder } from '../query-builder/join-builder.js';
+import { OverBuilder } from '../query-builder/over-builder.js';
+import { type SelectQueryBuilder } from '../query-builder/select-query-builder.js';
+import { QueryCreator } from '../query-creator.js';
+import { type TableExpression } from './table-parser.js';
+export declare function createSelectQueryBuilder(): SelectQueryBuilder<any, any, any>;
+export declare function createQueryCreator(): QueryCreator<any>;
+export declare function createJoinBuilder(joinType: JoinType, table: TableExpression<any, any>): JoinBuilder<any, any>;
+export declare function createOverBuilder(): OverBuilder<any, any>;

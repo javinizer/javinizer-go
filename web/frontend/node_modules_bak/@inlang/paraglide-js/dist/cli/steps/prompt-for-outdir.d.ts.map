@@ -1,0 +1,1 @@
+{"version":3,"file":"prompt-for-outdir.d.ts","sourceRoot":"","sources":["../../../src/cli/steps/prompt-for-outdir.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,MAAM,EAAE,MAAM,gCAAgC,CAAC;AAG7D,OAAO,KAAK,EAAE,OAAO,EAAE,MAAM,aAAa,CAAC;AAE3C,eAAO,MAAM,eAAe,EAAE,OAAO,CACpC;IACC,MAAM,EAAE,MAAM,CAAC;CACf,EACD;IACC,4CAA4C;IAC5C,MAAM,EAAE,MAAM,CAAC;CACf,CAwBD,CAAC"}

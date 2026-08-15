@@ -1,0 +1,1 @@
+{"version":3,"file":"useMutationState.svelte.d.ts","sourceRoot":"","sources":["../src/useMutationState.svelte.ts"],"names":[],"mappings":"AAEA,OAAO,KAAK,EAEV,aAAa,EACb,WAAW,EACZ,MAAM,sBAAsB,CAAA;AAC7B,OAAO,KAAK,EAAE,oBAAoB,EAAE,MAAM,YAAY,CAAA;AActD,wBAAgB,gBAAgB,CAAC,OAAO,GAAG,aAAa,EACtD,OAAO,GAAE,oBAAoB,CAAC,OAAO,CAAM,EAC3C,WAAW,CAAC,EAAE,WAAW,GACxB,KAAK,CAAC,OAAO,CAAC,CA+BhB"}

@@ -585,6 +585,8 @@ export interface ActressMergePreviewResponse {
 	proposed_merged: Actress;
 	conflicts: ActressMergeConflict[];
 	default_resolutions: Record<string, ActressMergeResolution>;
+	target_updated_at: string;
+	source_updated_at: string;
 }
 
 export interface ActressMergeRequest {
@@ -714,6 +716,8 @@ export interface ScraperInfo {
 	display_title: string;
 	enabled: boolean;
 	options?: ScraperOption[];
+	supports_movie_search?: boolean;
+	supports_actress_metadata?: boolean;
 }
 
 export interface Scraper {
@@ -721,6 +725,8 @@ export interface Scraper {
 	display_title: string;
 	enabled: boolean;
 	options?: Record<string, string | number | boolean>;
+	supports_movie_search?: boolean;
+	supports_actress_metadata?: boolean;
 }
 
 export interface AvailableScrapersResponse {
@@ -1434,4 +1440,92 @@ export interface DumpSearchResult {
 	dvd_id: string | null;
 	state?: 'mapped' | 'no_dvd_id';
 	matches?: DumpSearchMatch[];
+}
+
+export type ActressSyncJobStatus = 'pending' | 'running' | 'completed' | 'cancelled';
+export type ActressSyncTaskStatus =
+	| 'pending'
+	| 'running'
+	| 'completed'
+	| 'skipped'
+	| 'conflict'
+	| 'failed'
+	| 'cancelled';
+
+export interface ActressSyncJob {
+	id: string;
+	status: ActressSyncJobStatus;
+	scope: string;
+	total_tasks: number;
+	completed: number;
+	updated: number;
+	warnings: number;
+	skipped: number;
+	conflicts: number;
+	failed: number;
+	cancelled: number;
+	cancel_requested: boolean;
+	created_at: string;
+	started_at?: string;
+	completed_at?: string;
+}
+
+export interface ActressSyncTask {
+	id: string;
+	job_id: string;
+	actress_id?: number;
+	label: string;
+	dedupe_key: string;
+	status: ActressSyncTaskStatus;
+	stage: string;
+	outcome?: string;
+	messages: string[];
+	updated_fields: string[];
+	warning?: string;
+	error_message?: string;
+	heartbeat_at?: string;
+	lease_expires_at?: string;
+	attempts: number;
+	created_at: string;
+	started_at?: string;
+	completed_at?: string;
+}
+
+export interface ActressSyncCandidatesResponse {
+	ids: number[];
+	actresses: Actress[];
+	total: number;
+}
+export interface ActressSyncJobResponse {
+	job: ActressSyncJob;
+	skipped_ids: number[];
+}
+export interface ActressSyncJobsResponse {
+	jobs: ActressSyncJob[];
+}
+export interface ActressSyncTasksResponse {
+	tasks: ActressSyncTask[];
+	total: number;
+}
+export interface ActressSyncJobCreateRequest {
+	scope: 'missing' | 'selected';
+	actress_ids?: number[];
+}
+export interface ActressSyncNoCandidatesResponse {
+	error: string;
+	skipped_ids: number[];
+}
+
+export type ActressFilter =
+	| 'missing_dmm'
+	| 'has_dmm'
+	| 'missing_thumbnail'
+	| 'missing_japanese_name'
+	| 'japanese_name_only'
+	| 'missing_metadata';
+
+export interface ActressListParams {
+	limit?: number;
+	offset?: number;
+	filter?: ActressFilter;
 }

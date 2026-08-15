@@ -1,0 +1,17 @@
+import { ColumnNode } from './column-node.js';
+import type { OperationNode } from './operation-node.js';
+import { TableNode } from './table-node.js';
+export interface CommonTableExpressionNameNode extends OperationNode {
+    readonly kind: 'CommonTableExpressionNameNode';
+    readonly table: TableNode;
+    readonly columns?: ReadonlyArray<ColumnNode>;
+}
+type CommonTableExpressionNameNodeFactory = Readonly<{
+    is(node: OperationNode): node is CommonTableExpressionNameNode;
+    create(tableName: string, columnNames?: ReadonlyArray<string>): Readonly<CommonTableExpressionNameNode>;
+}>;
+/**
+ * @internal
+ */
+export declare const CommonTableExpressionNameNode: CommonTableExpressionNameNodeFactory;
+export {};

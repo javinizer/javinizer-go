@@ -1,0 +1,45 @@
+import { toLocale } from "./check-locale.js";
+/**
+ * Extracts a locale from the accept-language header.
+ *
+ * Use the function on the server to extract the locale
+ * from the accept-language header that is sent by the client.
+ *
+ * @example
+ *   const locale = extractLocaleFromHeader(request);
+ *
+ * @param {Request} request - The request object to extract the locale from.
+ * @returns {Locale | undefined} The negotiated preferred language.
+ */
+export function extractLocaleFromHeader(request) {
+    const acceptLanguageHeader = request.headers.get("accept-language");
+    if (acceptLanguageHeader) {
+        // Parse language preferences with their q-values and base language codes
+        const languages = acceptLanguageHeader
+            .split(",")
+            .map((lang) => {
+            const [tag, q = "1"] = lang.trim().split(";q=");
+            // Get both the full tag and base language code
+            const baseTag = tag?.split("-")[0];
+            return {
+                fullTag: tag,
+                baseTag,
+                q: Number(q),
+            };
+        })
+            .sort((a, b) => b.q - a.q);
+        for (const lang of languages) {
+            const fullLocale = toLocale(lang.fullTag);
+            if (fullLocale) {
+                return fullLocale;
+            }
+            const baseLocale = toLocale(lang.baseTag);
+            if (baseLocale) {
+                return baseLocale;
+            }
+        }
+        return undefined;
+    }
+    return undefined;
+}
+//# sourceMappingURL=extract-locale-from-header.js.map

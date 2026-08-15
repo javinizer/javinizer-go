@@ -1,0 +1,84 @@
+import { loadProjectFromDirectory } from "@inlang/sdk";
+import path from "node:path";
+import { compileProject } from "./compile-project.js";
+import { writeOutput } from "../services/file-handling/write-output.js";
+// import {
+// 	getLocalAccount,
+// 	saveLocalAccount,
+// } from "../services/account/index.js";
+import { defaultCompilerOptions, } from "./compiler-options.js";
+import { Logger } from "../services/logger/index.js";
+// This is a workaround to prevent multiple compilations from running at the same time.
+// https://github.com/opral/inlang-paraglide-js/issues/320#issuecomment-2596951222
+let compilationInProgress = null;
+const logger = new Logger();
+/**
+ * Loads, compiles, and writes the output to disk.
+ *
+ * This is the main function to use when you want to compile a project.
+ * If you want to adjust inlang project loading, or the output, use
+ * `compileProject()` instead.
+ *
+ * @example
+ *   await compile({
+ *     project: 'path/to/project',
+ *     outdir: 'path/to/output',
+ *   })
+ */
+export async function compile(options) {
+    const withDefaultOptions = {
+        ...defaultCompilerOptions,
+        ...options,
+    };
+    if (compilationInProgress) {
+        await compilationInProgress;
+    }
+    compilationInProgress = (async () => {
+        try {
+            const fs = withDefaultOptions.fs ?? (await import("node:fs"));
+            const absoluteOutdir = path.resolve(process.cwd(), withDefaultOptions.outdir);
+            // const localAccount = getLocalAccount({ fs });
+            const project = await loadProjectFromDirectory({
+                path: withDefaultOptions.project,
+                fs,
+                // account: localAccount,
+            });
+            const output = await compileProject({
+                compilerOptions: withDefaultOptions,
+                project,
+                projectPath: withDefaultOptions.project,
+            });
+            const outputHashes = await writeOutput({
+                directory: absoluteOutdir,
+                output,
+                cleanDirectory: withDefaultOptions.cleanOutdir,
+                fs: fs.promises,
+                previousOutputHashes: options.previousCompilation?.outputHashes,
+            });
+            // if (!localAccount) {
+            // 	const activeAccount = await project.lix.db
+            // 		.selectFrom("active_account as aa")
+            // 		.innerJoin("account_all as a", "a.id", "aa.account_id")
+            // 		.where("a.lixcol_version_id", "=", "global")
+            // 		.select(["a.id", "a.name"])
+            // 		.executeTakeFirstOrThrow();
+            // 	saveLocalAccount({ fs, account: activeAccount });
+            // }
+            const warningsAndErrors = await project.errors.get();
+            for (const warningOrError of warningsAndErrors) {
+                logger.warn(warningOrError);
+            }
+            await project.close();
+            return { outputHashes };
+        }
+        catch (e) {
+            // release the lock in case of an error
+            compilationInProgress = null;
+            throw e;
+        }
+    })();
+    const result = structuredClone(await compilationInProgress);
+    compilationInProgress = null;
+    return result;
+}
+//# sourceMappingURL=compile.js.map

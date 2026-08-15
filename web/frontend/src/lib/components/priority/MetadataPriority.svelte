@@ -5,6 +5,7 @@
 	import { X, Info } from 'lucide-svelte';
 	import { portalToBody } from '$lib/actions/portal';
 	import { confirmDialog } from '$lib/stores/dialog.svelte';
+	import { toastStore } from '$lib/stores/toast';
 	import Card from '../ui/Card.svelte';
 	import Button from '../ui/Button.svelte';
 	import DraggableList from './DraggableList.svelte';
@@ -17,6 +18,9 @@
 		getFieldStatus,
 		applyEnabledReorderToFull,
 		buildFieldPriorityOverride,
+		filterFieldEligibleScrapers,
+		isExclusivelyActressOnly,
+		ACTRESS_FIELD_KEY,
 		SKIP_SENTINEL
 	} from './priority';
 	import { formatScraperName } from './scraperNames';
@@ -25,9 +29,11 @@
 		config: SettingsConfig;
 		onUpdate: (config: SettingsConfig) => void;
 		onScraperUsageQuery?: (scraperName: string) => { count: number; fields: string[] };
+		/** Scrapers that resolve actress metadata but never movie metadata. */
+		actressOnlyScrapers?: ReadonlySet<string>;
 	}
 
-	let { config, onUpdate, onScraperUsageQuery }: Props = $props();
+	let { config, onUpdate, onScraperUsageQuery, actressOnlyScrapers }: Props = $props();
 
 	type PriorityMode = 'simple' | 'advanced';
 	let mode = $state<PriorityMode>('simple');
@@ -172,7 +178,10 @@
 		if (stored && stored.length === 1 && stored[0] === SKIP_SENTINEL) {
 			editingPriority = [];
 		} else {
-			editingPriority = [...getFieldPriority(config, fieldKey)];
+			// Use the stored/derived list verbatim: filtering actress-only resolvers
+		// here would silently narrow their enrichment role on a plain save.
+		// New entries are constrained by the eligible-only chips and Add all.
+		editingPriority = [...getFieldPriority(config, fieldKey)];
 		}
 	}
 
@@ -181,6 +190,13 @@
 		if (!editingField) return;
 
 		if (!config.metadata) config.metadata = {};
+
+		// An actress override made up solely of actress-only resolvers would
+		// leave aggregation with no scraper able to produce the cast; refuse.
+		if (editingField === ACTRESS_FIELD_KEY && isExclusivelyActressOnly(editingPriority, actressOnlyScrapers)) {
+			toastStore.error(m.priority_actress_only_not_sole());
+			return;
+		}
 
 		// Mark this field as touched
 		touchedFields.add(editingField);
@@ -238,7 +254,7 @@
 
 	// Shortcut: add every global scraper not already in the field's list.
 	function addAllScrapers() {
-		const global = getGlobalPriority(config);
+		const global = filterFieldEligibleScrapers(editingField ?? '', getGlobalPriority(config), actressOnlyScrapers);
 		const present = new Set(editingPriority);
 		editingPriority = [...editingPriority, ...global.filter((s) => !present.has(s))];
 	}
@@ -256,7 +272,11 @@
 	// editing list, filtered to only enabled scrapers.
 	const availableScrapersToAdd = $derived(
 		editingField
-			? filterEnabledScrapers(getGlobalPriority(config)).filter((s) => !editingPriority.includes(s))
+			? filterFieldEligibleScrapers(
+					editingField,
+					filterEnabledScrapers(getGlobalPriority(config)).filter((s) => !editingPriority.includes(s)),
+					actressOnlyScrapers,
+				)
 			: []
 	);
 

@@ -15,6 +15,8 @@
 		enabled: boolean;
 		displayName: string;
 		expanded: boolean;
+		supportsMovieSearch: boolean;
+		supportsActressMetadata: boolean;
 		options: ScraperOption[];
 	}
 

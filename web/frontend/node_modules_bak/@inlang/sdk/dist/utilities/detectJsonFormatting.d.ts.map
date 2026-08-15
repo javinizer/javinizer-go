@@ -1,0 +1,1 @@
+{"version":3,"file":"detectJsonFormatting.d.ts","sourceRoot":"/","sources":["utilities/detectJsonFormatting.ts"],"names":[],"mappings":"AAAA;;;;;;;;GAQG;AACH,eAAO,MAAM,oBAAoB,SAC1B,MAAM,KACV,CAAC,CACH,KAAK,EAAE,UAAU,CAAC,OAAO,IAAI,CAAC,SAAS,CAAC,CAAC,CAAC,CAAC,EAC3C,QAAQ,CAAC,EAAE,UAAU,CAAC,OAAO,IAAI,CAAC,SAAS,CAAC,CAAC,CAAC,CAAC,KAE3C,MAAM,CAOV,CAAC"}

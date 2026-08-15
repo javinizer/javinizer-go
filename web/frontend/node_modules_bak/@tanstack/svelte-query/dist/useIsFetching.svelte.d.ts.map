@@ -1,0 +1,1 @@
+{"version":3,"file":"useIsFetching.svelte.d.ts","sourceRoot":"","sources":["../src/useIsFetching.svelte.ts"],"names":[],"mappings":"AAAA,OAAO,EAAE,aAAa,EAAE,MAAM,wBAAwB,CAAA;AAEtD,OAAO,KAAK,EAAE,WAAW,EAAE,YAAY,EAAE,MAAM,sBAAsB,CAAA;AAErE,wBAAgB,aAAa,CAC3B,OAAO,CAAC,EAAE,YAAY,EACtB,WAAW,CAAC,EAAE,WAAW,GACxB,aAAa,CAAC,MAAM,CAAC,CAQvB"}

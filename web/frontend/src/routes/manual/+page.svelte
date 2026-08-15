@@ -27,7 +27,6 @@
 	} from './logic/build-manual-scrape-request';
 	import type { ManualRow } from './logic/build-manual-scrape-request';
 	import type { BatchScrapeResponse } from '$lib/api/types';
-	import { applyPlanSummary, normalizePersistedApplyPlan } from '$lib/apply-plan';
 	import {
 		loadManualInputs,
 		persistManualInputs,
@@ -38,6 +37,7 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import ScraperSelector from '$lib/components/ScraperSelector.svelte';
 	import { createScrapersQuery } from '$lib/query/queries';
+	import { movieSearchScrapers, movieSearchScraperNames } from '$lib/scraper-capabilities';
 	import { portalToBody } from '$lib/actions/portal';
 	import { fade, scale } from 'svelte/transition';
 	import { quintOut } from 'svelte/easing';
@@ -54,14 +54,10 @@
 	const queryClient = useQueryClient();
 	const scrapersQuery = createScrapersQuery();
 	const enabledScrapers = $derived(
-		(scrapersQuery.data ?? []).filter((s) => s.enabled).map((s) => s.display_title || s.name)
+		movieSearchScrapers(scrapersQuery.data ?? []).filter((s) => s.enabled).map((s) => s.display_title || s.name)
 	);
 
 	const overridesCount = $derived(rows.filter((r) => r.input.trim() !== '').length);
-	const planSummary = $derived.by(() => {
-		const current = snapshot as PendingScrape | null;
-		return current?.applyPlan ? applyPlanSummary(current.applyPlan) : [];
-	});
 
 	function classifyKind(input: string): 'auto' | 'id' | 'url' {
 		const k = classifyInput(input);
@@ -112,10 +108,24 @@
 	function openScraperModal() {
 		if (!snapshot) return;
 		modalSelectedScrapers = snapshot.showScraperSelector
-			? [...snapshot.selectedScrapers]
-			: (scrapersQuery.data ?? []).filter((s) => s.enabled).map((s) => s.name);
+			? sanitizeMovieSelection(snapshot.selectedScrapers)
+			: movieSearchScrapers(scrapersQuery.data ?? []).filter((s) => s.enabled).map((s) => s.name);
 		showScraperModal = true;
 	}
+
+	function sanitizeMovieSelection(names: string[]): string[] {
+		const data = scrapersQuery.data;
+		if (!data || data.length === 0) return names;
+		return movieSearchScraperNames(movieSearchScrapers(data), names);
+	}
+
+	$effect(() => {
+		if (!snapshot?.showScraperSelector || !scrapersQuery.data?.length) return;
+		const selectedScrapers = sanitizeMovieSelection(snapshot.selectedScrapers);
+		if (selectedScrapers.length !== snapshot.selectedScrapers.length) {
+			snapshot = { ...snapshot, selectedScrapers };
+		}
+	});
 
 	function applyScraperSelection() {
 		if (!snapshot) return;
@@ -125,14 +135,12 @@
 			selectedScrapers: [...modalSelectedScrapers]
 		};
 		showScraperModal = false;
-		persistSnapshot();
 	}
 
 	function resetScraperSelection() {
 		if (!snapshot) return;
 		snapshot = { ...snapshot, showScraperSelector: false, selectedScrapers: [] };
 		showScraperModal = false;
-		persistSnapshot();
 	}
 
 	onMount(() => {
@@ -157,9 +165,15 @@
 		persistManualInputs(batchKey, map);
 	});
 
-	function persistSnapshot() {
-		if (snapshot) setPendingScrape(snapshot);
-	}
+	// Persist inherited-setting edits (operation mode, destination, scrapers,
+	// force, update/strategy) back to the pending-scrape store so a refresh on
+	// /manual re-hydrates the user's edits, not the original /browse snapshot.
+	// Reads `snapshot` (local $state) and writes to the store (sessionStorage +
+	// module state) — the store's state is not read here, so no loop.
+	$effect(() => {
+		if (!snapshot) return;
+		setPendingScrape(snapshot);
+	});
 
 	function removeRow(idx: number) {
 		rows = rows.filter((_, i) => i !== idx);
@@ -168,7 +182,6 @@
 			// recovery (which rebuilds from snapshot.files) doesn't restore a
 			// removed file, and the persisted pending-scrape stays consistent.
 			snapshot = { ...snapshot, files: rows.map((row) => row.filePath) };
-			persistSnapshot();
 		}
 	}
 
@@ -178,23 +191,20 @@
 
 	async function submit() {
 		if (!snapshot || submitting) return;
-		if (!snapshot.applyPlan) {
-			errorMsg = snapshot.migrationWarning ?? m.manual_plan_required();
-			return;
-		}
-		try {
-			normalizePersistedApplyPlan(snapshot.applyPlan);
-		} catch (error) {
-			errorMsg = error instanceof Error ? error.message : m.manual_plan_required();
-			return;
-		}
 		submitting = true;
 		errorMsg = null;
 		try {
 			const req = buildManualScrapeRequest(rows, {
-				apply_plan: snapshot.applyPlan,
-				selected_scrapers: snapshot.showScraperSelector ? snapshot.selectedScrapers : undefined,
-				force: snapshot.force
+				destination: snapshot.destination.trim() || undefined,
+				operation_mode: snapshot.effectiveOperationMode,
+				selected_scrapers: snapshot.showScraperSelector
+					? sanitizeMovieSelection(snapshot.selectedScrapers)
+					: undefined,
+				force: snapshot.force,
+				preset: snapshot.update ? (snapshot.preset || undefined) : undefined,
+				scalar_strategy: snapshot.update ? snapshot.scalarStrategy : undefined,
+				array_strategy: snapshot.update ? snapshot.arrayStrategy : undefined,
+				update: snapshot.update
 			});
 			const res: BatchScrapeResponse = await apiClient.batchScrape(req);
 			startJob(res.job_id);
@@ -239,32 +249,123 @@
 						{m.manual_selected_settings()}
 					</h2>
 				</div>
-				{#if snapshot.migrationWarning}
-					<div class="mb-4 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-200" role="alert">
-						{snapshot.migrationWarning}
-					</div>
-				{/if}
-				<div class="grid gap-5 lg:grid-cols-[minmax(0,1fr)_auto]">
+				<dl class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-8 gap-y-4">
 					<div>
-						<p class="text-xs text-muted-foreground mb-2">{m.manual_plan_title()}</p>
-						{#if planSummary.length > 0}
-							<ul class="space-y-1 text-sm">
-								{#each planSummary as line}<li class="flex gap-2"><span aria-hidden="true">•</span><span class="min-w-0 break-words">{line}</span></li>{/each}
-							</ul>
-						{:else}
-							<p class="text-sm text-destructive">{m.manual_return_to_browse()}</p>
-						{/if}
+						<dt class="text-xs text-muted-foreground">{m.manual_mode()}</dt>
+						<dd class="mt-0.5">
+							<div class="inline-flex rounded-md border bg-background p-0.5 text-xs">
+								<button type="button" onclick={() => { if (snapshot) snapshot.update = false; }} class="rounded px-2.5 py-1 transition-colors {!snapshot.update ? 'bg-primary text-primary-foreground font-medium' : 'text-muted-foreground hover:text-foreground'}">{m.manual_mode_scrape_organize()}</button>
+								<button type="button" onclick={() => { if (snapshot) snapshot.update = true; }} class="rounded px-2.5 py-1 transition-colors {snapshot.update ? 'bg-primary text-primary-foreground font-medium' : 'text-muted-foreground hover:text-foreground'}">{m.manual_mode_update_metadata()}</button>
+							</div>
+						</dd>
 					</div>
-					<div class="flex flex-wrap items-end gap-4">
-						<button type="button" class="rounded-md border px-3 py-2 text-sm hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onclick={openScraperModal}>
-							{m.manual_scrapers()}
-						</button>
-						<label class="flex items-center gap-2 text-sm">
-							<input type="checkbox" bind:checked={snapshot.force} onchange={persistSnapshot} class="h-4 w-4" />
-							{m.manual_force_refresh()}
-						</label>
+					<div>
+						<dt class="text-xs text-muted-foreground">{m.manual_operation()}</dt>
+						<dd class="mt-0.5">
+							<select
+								class="w-full h-8 px-2 text-sm border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all"
+								bind:value={snapshot.effectiveOperationMode}
+								aria-label={m.manual_operation_aria()}
+							>
+								<option value="organize">{m.manual_op_organize()}</option>
+								<option value="in-place">{m.manual_op_in_place()}</option>
+								<option value="in-place-norenamefolder">{m.manual_op_in_place_keep()}</option>
+								<option value="metadata-artwork">{m.manual_op_metadata_artwork()}</option>
+								<option value="preview">{m.manual_op_preview()}</option>
+							</select>
+						</dd>
 					</div>
-				</div>
+					{#if !snapshot.update}
+						<div>
+							<dt class="text-xs text-muted-foreground">{m.manual_destination()}</dt>
+							<dd class="mt-0.5">
+								<input
+									type="text"
+									bind:value={snapshot.destination}
+									placeholder={m.manual_destination_placeholder()}
+									class="w-full h-8 px-2 text-sm border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all font-mono"
+									aria-label={m.manual_destination_aria()}
+								/>
+							</dd>
+						</div>
+					{/if}
+					<div class="sm:col-span-2 lg:col-span-3">
+						<dt class="text-xs text-muted-foreground">{m.manual_scrapers()}</dt>
+						<dd class="mt-0.5">
+							<button
+								type="button"
+								class="group -m-1 cursor-pointer rounded-md p-1 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+								onclick={openScraperModal}
+								aria-label={m.manual_scrapers_edit_aria()}
+								title={m.manual_scrapers_edit_title()}
+							>
+								<div class="flex flex-wrap gap-1.5">
+									{#each (snapshot.showScraperSelector ? snapshot.selectedScrapers : enabledScrapers) as scraper}
+										<span class="rounded-md bg-muted px-2 py-0.5 text-xs font-medium text-foreground transition-colors group-hover:bg-primary/10 group-hover:text-primary">{scraper}</span>
+									{/each}
+									{#if (snapshot.showScraperSelector ? snapshot.selectedScrapers : enabledScrapers).length === 0}
+										<span class="text-sm font-medium">{m.manual_scrapers_all_enabled()}</span>
+									{/if}
+								</div>
+							</button>
+						</dd>
+					</div>
+					{#if snapshot.update}
+						<div>
+							<dt class="text-xs text-muted-foreground">{m.manual_preset()}</dt>
+							<dd class="mt-0.5">
+								<select
+									class="w-full h-8 px-2 text-sm border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all"
+									bind:value={snapshot.preset}
+									aria-label={m.manual_preset_aria()}
+								>
+									<option value="">{m.manual_preset_none()}</option>
+									<option value="conservative">{m.manual_preset_conservative()}</option>
+									<option value="gap-fill">{m.manual_preset_gap_fill()}</option>
+									<option value="aggressive">{m.manual_preset_aggressive()}</option>
+								</select>
+							</dd>
+						</div>
+						<div>
+							<dt class="text-xs text-muted-foreground">{m.manual_strategies()}</dt>
+							<dd class="mt-0.5 space-y-1">
+								<select
+									class="w-full h-8 px-2 text-sm border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all"
+									bind:value={snapshot.scalarStrategy}
+									aria-label={m.manual_scalar_strategy_aria()}
+								>
+									<option value="prefer-nfo">{m.manual_scalar_prefer_nfo()}</option>
+									<option value="prefer-scraper">{m.manual_scalar_prefer_scraper()}</option>
+									<option value="preserve-existing">{m.manual_scalar_preserve_existing()}</option>
+									<option value="fill-missing-only">{m.manual_scalar_fill_missing()}</option>
+								</select>
+								<select
+									class="w-full h-8 px-2 text-sm border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all"
+									bind:value={snapshot.arrayStrategy}
+									aria-label={m.manual_array_strategy_aria()}
+								>
+									<option value="merge">{m.manual_array_merge()}</option>
+									<option value="replace">{m.manual_array_replace()}</option>
+								</select>
+							</dd>
+						</div>
+					{/if}
+					<div>
+						<dt class="text-xs text-muted-foreground">{m.manual_force_refresh()}</dt>
+						<dd class="mt-0.5">
+							<button
+								type="button"
+								role="switch"
+								aria-checked={snapshot.force}
+								onclick={() => { if (snapshot) snapshot.force = !snapshot.force; }}
+								class="relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring {snapshot.force ? 'bg-primary' : 'bg-muted'}"
+								aria-label={m.manual_force_refresh_aria()}
+							>
+								<span class="inline-block h-4 w-4 transform rounded-full bg-background shadow transition-transform {snapshot.force ? 'translate-x-4' : 'translate-x-0.5'}"></span>
+							</button>
+						</dd>
+					</div>
+				</dl>
 			</Card>
 
 			{#if errorMsg}
@@ -417,7 +518,7 @@
 							{m.manual_scraper_order_desc()}
 						</p>
 						<ScraperSelector
-							scrapers={scrapersQuery.data ?? []}
+							scrapers={movieSearchScrapers(scrapersQuery.data ?? [])}
 							bind:selected={modalSelectedScrapers}
 							disabled={false}
 						/>

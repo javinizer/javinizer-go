@@ -14,6 +14,7 @@
 	import StepDirectories from './StepDirectories.svelte';
 	import StepScrapers from './StepScrapers.svelte';
 	import type { Scraper } from '$lib/api/types';
+	import { movieSearchScrapers } from '$lib/scraper-capabilities';
 	import {
 		ArrowLeft,
 		ArrowRight,
@@ -98,7 +99,7 @@
 		if (scrapersFetched || scrapersLoading) return;
 		scrapersLoading = true;
 		try {
-			availableScrapers = await apiClient.getScrapers();
+			availableScrapers = movieSearchScrapers(await apiClient.getScrapers());
 			selectedScrapers = availableScrapers.filter((s) => s.enabled).map((s) => s.name);
 		} catch {
 			error = m.setup_err_load_scrapers();

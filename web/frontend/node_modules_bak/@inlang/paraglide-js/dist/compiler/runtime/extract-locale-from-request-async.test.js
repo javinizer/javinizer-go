@@ -1,0 +1,140 @@
+import { newProject } from "@inlang/sdk";
+import { expect, test } from "vitest";
+import { createParaglide } from "../create-paraglide.js";
+test("returns locale from custom strategy which is async", async () => {
+    const runtime = await createParaglide({
+        blob: await newProject({
+            settings: {
+                baseLocale: "en",
+                locales: ["en", "fr", "de"],
+            },
+        }),
+        strategy: ["custom-header", "baseLocale"],
+    });
+    class FakeDB {
+        db = new Map();
+        constructor() {
+            this.db.set("1", "fr");
+        }
+        async getUserLocaleById(id) {
+            return this.db.get(id);
+        }
+    }
+    const db = new FakeDB();
+    async function getLocaleFromUserRequest(request) {
+        const userId = request?.headers.get("X-Custom-User-ID") ?? undefined;
+        if (!userId)
+            throw Error("No User ID");
+        const locale = await db.getUserLocaleById(userId);
+        return locale;
+    }
+    runtime.defineCustomServerStrategy("custom-header", {
+        getLocale: async (request) => (await getLocaleFromUserRequest(request)) ?? undefined,
+    });
+    const request = new Request("http://example.com", {
+        headers: {
+            "X-Custom-User-ID": "1",
+        },
+    });
+    const locale = await runtime.extractLocaleFromRequestAsync(request);
+    expect(locale).toBe("fr");
+});
+test("falls back to next strategy when custom strategy returns undefined", async () => {
+    const runtime = await createParaglide({
+        blob: await newProject({
+            settings: {
+                baseLocale: "en",
+                locales: ["en", "fr"],
+            },
+        }),
+        strategy: ["custom-fallback", "baseLocale"],
+    });
+    runtime.defineCustomServerStrategy("custom-fallback", {
+        getLocale: () => undefined,
+    });
+    const request = new Request("http://example.com");
+    const locale = await runtime.extractLocaleFromRequestAsync(request);
+    expect(locale).toBe("en"); // Should fall back to baseLocale
+});
+test("uses the provided public url for url strategy matching", async () => {
+    const runtime = await createParaglide({
+        blob: await newProject({
+            settings: {
+                baseLocale: "en",
+                locales: ["en", "fr"],
+            },
+        }),
+        strategy: ["url", "baseLocale"],
+        urlPatterns: [
+            {
+                pattern: "https://example.com/:path(.*)?",
+                localized: [
+                    ["en", "https://example.com/en/:path(.*)?"],
+                    ["fr", "https://example.com/fr/:path(.*)?"],
+                ],
+            },
+        ],
+    });
+    const request = new Request("http://internal.example.com/en/home");
+    const locale = await runtime.extractLocaleFromRequestAsync(request, {
+        effectiveRequestUrl: "https://example.com/fr/home",
+    });
+    expect(locale).toBe("fr");
+});
+test("resolves relative effectiveRequestUrl strings against request.url", async () => {
+    const runtime = await createParaglide({
+        blob: await newProject({
+            settings: {
+                baseLocale: "en",
+                locales: ["en", "fr"],
+            },
+        }),
+        strategy: ["url", "baseLocale"],
+        urlPatterns: [
+            {
+                pattern: "https://example.com/:path(.*)?",
+                localized: [
+                    ["en", "https://example.com/en/:path(.*)?"],
+                    ["fr", "https://example.com/fr/:path(.*)?"],
+                ],
+            },
+        ],
+    });
+    const request = new Request("https://example.com/en/home");
+    const locale = await runtime.extractLocaleFromRequestAsync(request, {
+        effectiveRequestUrl: "/fr/home",
+    });
+    expect(locale).toBe("fr");
+});
+test("uses normalized effectiveRequestUrl for route strategy selection", async () => {
+    const runtime = await createParaglide({
+        blob: await newProject({
+            settings: {
+                baseLocale: "en",
+                locales: ["en", "fr"],
+            },
+        }),
+        strategy: ["baseLocale"],
+        urlPatterns: [
+            {
+                pattern: "https://example.com/:path(.*)?",
+                localized: [
+                    ["en", "https://example.com/en/:path(.*)?"],
+                    ["fr", "https://example.com/fr/:path(.*)?"],
+                ],
+            },
+        ],
+        routeStrategies: [
+            {
+                match: "https://example.com/:path(.*)?",
+                strategy: ["url", "baseLocale"],
+            },
+        ],
+    });
+    const request = new Request("https://example.com/en/home");
+    const locale = await runtime.extractLocaleFromRequestAsync(request, {
+        effectiveRequestUrl: "/fr/home",
+    });
+    expect(locale).toBe("fr");
+});
+//# sourceMappingURL=extract-locale-from-request-async.test.js.map
