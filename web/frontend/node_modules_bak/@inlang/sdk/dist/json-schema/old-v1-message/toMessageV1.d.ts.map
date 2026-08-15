@@ -1,1 +1,0 @@
-{"version":3,"file":"toMessageV1.d.ts","sourceRoot":"/","sources":["json-schema/old-v1-message/toMessageV1.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,YAAY,EAAE,MAAM,0BAA0B,CAAC;AAE7D,OAAO,KAAK,EAEX,SAAS,EAGT,MAAM,eAAe,CAAC;AAEvB;;;;GAIG;AACH,wBAAgB,WAAW,CAAC,MAAM,EAAE,YAAY,GAAG,SAAS,CAkC3D"}

@@ -1,1 +1,0 @@
-{"version":3,"file":"rollup.js","sourceRoot":"","sources":["../../src/bundler-plugins/rollup.ts"],"names":[],"mappings":"AAAA,OAAO,EAAE,kBAAkB,EAAE,MAAM,UAAU,CAAC;AAC9C,OAAO,EAAE,eAAe,EAAE,MAAM,eAAe,CAAC;AAEhD,MAAM,CAAC,MAAM,qBAAqB,GAAG,kBAAkB,CAAC,eAAe,CAAC,CAAC"}

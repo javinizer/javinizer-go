@@ -1,1 +1,0 @@
-{"version":3,"file":"esbuild.js","sourceRoot":"","sources":["../../src/bundler-plugins/esbuild.ts"],"names":[],"mappings":"AAAA,OAAO,EAAE,mBAAmB,EAAE,MAAM,UAAU,CAAC;AAC/C,OAAO,EAAE,eAAe,EAAE,MAAM,eAAe,CAAC;AAEhD,MAAM,CAAC,MAAM,sBAAsB,GAAG,mBAAmB,CAAC,eAAe,CAAC,CAAC"}

@@ -1,1 +1,0 @@
-{"version":3,"file":"inlangLixPluginV1.d.ts","sourceRoot":"/","sources":["lix-plugin/inlangLixPluginV1.ts"],"names":[],"mappings":"AAGA,OAAO,KAAK,EAAc,SAAS,EAAE,MAAM,aAAa,CAAC;AAKzD,OAAO,KAAK,EAAE,MAAM,EAAE,OAAO,EAAE,OAAO,EAAE,MAAM,uBAAuB,CAAC;AAEtE,eAAO,MAAM,iBAAiB,EAAE,SAAS,CAAC;IACzC,MAAM,EAAE,MAAM,CAAC;IACf,OAAO,EAAE,OAAO,CAAC;IACjB,OAAO,EAAE,OAAO,CAAC;CACjB,CAoFA,CAAC"}
