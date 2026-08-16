@@ -311,7 +311,7 @@ type OutputDownloadConfig struct {
 	DownloadExtrafanart bool               `yaml:"download_extrafanart" json:"download_extrafanart"`
 	DownloadTrailer     bool               `yaml:"download_trailer" json:"download_trailer"`
 	DownloadActress     bool               `yaml:"download_actress" json:"download_actress"`
-	DownloadTimeout     int                `yaml:"download_timeout" json:"download_timeout"` // Timeout in seconds for HTTP downloads (default: 60)
+	DownloadTimeout     int                `yaml:"download_timeout" json:"download_timeout"` // Idle/stall timeout in seconds for media downloads. Aborts if no bytes received for this duration. 0 = no idle timeout (rely on worker context). Default: 120
 	DownloadProxy       models.ProxyConfig `yaml:"download_proxy" json:"download_proxy"`     // Separate proxy for downloads (optional)
 }
 

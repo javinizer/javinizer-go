@@ -113,6 +113,12 @@ func (d *Downloader) download(ctx context.Context, url, destPath string, mediaTy
 		result.Duration = time.Since(startTime)
 		return result, result.Error
 	}
+	idleTimeout := time.Duration(d.config.DownloadTimeout) * time.Second
+	var stallBody *StallReader
+	if idleTimeout > 0 {
+		stallBody = NewStallReader(resp.Body, idleTimeout, ctx)
+		resp.Body = stallBody
+	}
 	defer func() {
 		_ = httpclient.DrainAndClose(resp.Body)
 	}()
@@ -137,6 +143,10 @@ func (d *Downloader) download(ctx context.Context, url, destPath string, mediaTy
 		err = closeErr
 	}
 
+	if stallBody != nil && err == nil {
+		stallBody.Disarm()
+	}
+
 	if err != nil {
 		_ = d.fs.Remove(tempPath)
 		result.Error = fmt.Errorf("failed to write file: %w", err)
@@ -150,7 +160,7 @@ func (d *Downloader) download(ctx context.Context, url, destPath string, mediaTy
 	// --overwrite-existing-media, so refuse before any replacement.
 	if written == 0 {
 		_ = d.fs.Remove(tempPath)
-		result.Error = fmt.Errorf("downloaded 0 bytes for %s", url)
+		result.Error = fmt.Errorf("%w: downloaded 0 bytes for %s", errDownloadEmpty, url)
 		result.Duration = time.Since(startTime)
 		return result, result.Error
 	}
@@ -165,7 +175,7 @@ func (d *Downloader) download(ctx context.Context, url, destPath string, mediaTy
 	// "unspecified" for close-delimited responses, and -1 is chunked.
 	if resp.ContentLength > 0 && written != resp.ContentLength {
 		_ = d.fs.Remove(tempPath)
-		result.Error = fmt.Errorf("downloaded %d of %d bytes for %s (truncated)", written, resp.ContentLength, url)
+		result.Error = fmt.Errorf("%w: downloaded %d of %d bytes for %s (truncated)", errDownloadTruncated, written, resp.ContentLength, url)
 		result.Duration = time.Since(startTime)
 		return result, result.Error
 	}
@@ -397,6 +407,16 @@ func isRetryableError(err error) bool {
 		default:
 			return false
 		}
+	}
+
+	if errors.Is(err, errDownloadStalled) ||
+		errors.Is(err, errDownloadTruncated) ||
+		errors.Is(err, errDownloadEmpty) {
+		return true
+	}
+
+	if errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
 	}
 
 	var netErr net.Error

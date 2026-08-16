@@ -1369,7 +1369,7 @@ output:
   download_extrafanart: true
   download_trailer: true
   download_actress: true
-  download_timeout: 60
+  download_timeout: 120
 ```
 
 ### Database Defaults

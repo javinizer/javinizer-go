@@ -473,7 +473,7 @@ output:
     download_extrafanart: true                  # Download screenshots to extrafanart folder
     download_trailer: true
     download_actress: true
-    download_timeout: 60
+    download_timeout: 120 # idle/stall timeout: abort if no bytes received for this duration (0 = no idle timeout)
     # Download proxy override (optional):
     # - If disabled, downloads use scrapers.proxy automatically when scraper proxy is enabled.
     # - Enable only when you need a separate proxy just for downloads.

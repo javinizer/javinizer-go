@@ -31,7 +31,7 @@ func TestDownloadFromURL_CloseErrorOnTempFile(t *testing.T) {
 	defer srv.Close()
 
 	fs := afero.NewMemMapFs()
-	pm := NewPosterManager(fs, "/tmp", srv.Client()).WithSSRFCheck(func(_ string) error { return nil })
+	pm := NewPosterManager(fs, "/tmp", srv.Client(), 0).WithSSRFCheck(func(_ string) error { return nil })
 
 	result, err := pm.DownloadFromURL(context.Background(), "job1", "ABC-123", srv.URL+"/img.jpg", "", "")
 	require.NoError(t, err)
@@ -56,7 +56,7 @@ func TestDownloadFromURL_RenameFailure(t *testing.T) {
 
 	// Wrap with read-only to cause rename failure
 	readOnlyFS := afero.NewReadOnlyFs(memFS)
-	pm := NewPosterManager(readOnlyFS, "/tmp", srv.Client()).WithSSRFCheck(func(_ string) error { return nil })
+	pm := NewPosterManager(readOnlyFS, "/tmp", srv.Client(), 0).WithSSRFCheck(func(_ string) error { return nil })
 
 	_, err := pm.DownloadFromURL(context.Background(), "job1", "ABC-123", srv.URL+"/img.jpg", "", "")
 	assert.Error(t, err)
@@ -94,7 +94,7 @@ func TestDownloadFromURL_CropFailsFallsBackToCopy(t *testing.T) {
 	defer srv.Close()
 
 	fs := afero.NewMemMapFs()
-	pm := NewPosterManager(fs, "/tmp", srv.Client()).WithSSRFCheck(func(_ string) error { return nil })
+	pm := NewPosterManager(fs, "/tmp", srv.Client(), 0).WithSSRFCheck(func(_ string) error { return nil })
 
 	result, err := pm.DownloadFromURL(context.Background(), "job1", "ABC-123", srv.URL+"/img.jpg", "", "")
 	// Even if crop fails, copyFile fallback should succeed
@@ -121,7 +121,7 @@ func TestDownloadFromURL_CropAndCopyBothFail(t *testing.T) {
 
 	// Use a custom fs that fails on Open (used by copyFile)
 	failOpenFS := &failOpenFs{Fs: memFS}
-	pm := NewPosterManager(failOpenFS, "/tmp", srv.Client()).WithSSRFCheck(func(_ string) error { return nil })
+	pm := NewPosterManager(failOpenFS, "/tmp", srv.Client(), 0).WithSSRFCheck(func(_ string) error { return nil })
 
 	_, err := pm.DownloadFromURL(context.Background(), "job1", "ABC-123", srv.URL+"/img.jpg", "", "")
 	// Should fail because crop and copy both fail
@@ -147,7 +147,7 @@ func TestDownloadFromURL_CleanupOnFailure(t *testing.T) {
 	defer srv.Close()
 
 	fs := afero.NewMemMapFs()
-	pm := NewPosterManager(fs, "/tmp", srv.Client()).WithSSRFCheck(func(_ string) error { return nil })
+	pm := NewPosterManager(fs, "/tmp", srv.Client(), 0).WithSSRFCheck(func(_ string) error { return nil })
 
 	_, err := pm.DownloadFromURL(context.Background(), "job1", "ABC-123", srv.URL+"/img.jpg", "", "")
 	assert.Error(t, err)
@@ -215,7 +215,7 @@ func TestDownloadFromURL_AutoRefererFromURL(t *testing.T) {
 	defer srv.Close()
 
 	fs := afero.NewMemMapFs()
-	pm := NewPosterManager(fs, "/tmp", srv.Client()).WithSSRFCheck(func(_ string) error { return nil })
+	pm := NewPosterManager(fs, "/tmp", srv.Client(), 0).WithSSRFCheck(func(_ string) error { return nil })
 
 	_, err := pm.DownloadFromURL(context.Background(), "job1", "ABC-123", srv.URL+"/img.jpg", "", "")
 	require.NoError(t, err)
@@ -238,7 +238,7 @@ func TestDownloadFromURL_TempFileCreationFails(t *testing.T) {
 	// Read-only fs can't create temp files
 	memFS := afero.NewMemMapFs()
 	readOnlyFS := afero.NewReadOnlyFs(memFS)
-	pm := NewPosterManager(readOnlyFS, "/tmp", srv.Client()).WithSSRFCheck(func(_ string) error { return nil })
+	pm := NewPosterManager(readOnlyFS, "/tmp", srv.Client(), 0).WithSSRFCheck(func(_ string) error { return nil })
 
 	_, err := pm.DownloadFromURL(context.Background(), "job1", "ABC-123", srv.URL+"/img.jpg", "", "")
 	assert.Error(t, err)
@@ -256,7 +256,7 @@ func TestDownloadFromURL_WideImageCrop(t *testing.T) {
 	defer srv.Close()
 
 	fs := afero.NewMemMapFs()
-	pm := NewPosterManager(fs, "/tmp", srv.Client()).WithSSRFCheck(func(_ string) error { return nil })
+	pm := NewPosterManager(fs, "/tmp", srv.Client(), 0).WithSSRFCheck(func(_ string) error { return nil })
 
 	result, err := pm.DownloadFromURL(context.Background(), "job1", "ABC-123", srv.URL+"/img.jpg", "", "")
 	require.NoError(t, err)
@@ -284,7 +284,7 @@ func TestDownloadFromURL_RemovesPreviousFullImage(t *testing.T) {
 	defer srv.Close()
 
 	fs := afero.NewMemMapFs()
-	pm := NewPosterManager(fs, "/tmp", srv.Client()).WithSSRFCheck(func(_ string) error { return nil })
+	pm := NewPosterManager(fs, "/tmp", srv.Client(), 0).WithSSRFCheck(func(_ string) error { return nil })
 
 	// First download creates the full image
 	result1, err := pm.DownloadFromURL(context.Background(), "job1", "ABC-123", srv.URL+"/img.jpg", "", "")

@@ -1,8 +1,10 @@
 package downloader
 
 import (
+	"context"
 	"crypto/sha256"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -17,7 +19,7 @@ import (
 // NewHTTPClient creates an HTTP client for the downloader using pre-resolved configuration.
 // The bridge function resolves all proxy profiles so this function never imports internal/config.
 func NewHTTPClient(cfg HTTPClientConfig) (httpclient.HTTPClient, error) {
-	logging.Debugf("Downloader: HTTP client timeout=%s", timeout.FromDuration(cfg.Timeout, "config:downloader.timeout"))
+	logging.Debugf("Downloader: HTTP client idle/stall timeout=%s (client timeout disabled)", timeout.FromDuration(cfg.Timeout, "config:downloader.timeout"))
 	adaptiveClient := &adaptiveDownloaderHTTPClient{
 		timeout:        cfg.Timeout,
 		httpCfg:        cfg,
@@ -27,29 +29,26 @@ func NewHTTPClient(cfg HTTPClientConfig) (httpclient.HTTPClient, error) {
 
 	// Explicit download proxy override still takes precedence when configured.
 	if cfg.DownloadProxy != nil && cfg.DownloadProxy.URL != "" {
-		client, err := httpclient.NewHTTPClient(cfg.DownloadProxy, cfg.Timeout)
+		client, err := httpclient.NewHTTPClient(cfg.DownloadProxy, 0)
 		if err != nil {
 			logging.Errorf("Downloader: Failed to create download proxy client: %v, using adaptive routing", err)
 		} else {
+			setDownloadResponseHeaderTimeout(client, cfg.Timeout)
 			logging.Infof("Downloader: Using download proxy %s", httpclient.SanitizeProxyURL(cfg.DownloadProxy.URL))
 			adaptiveClient.forceClient = client
 			return adaptiveClient, nil
 		}
 	}
 
-	// Default direct client
-	directClient, err := httpclient.NewHTTPClient(nil, cfg.Timeout)
+	// Default direct client — timeout=0 (stall watchdog governs body reads;
+	// worker context governs overall budget). ResponseHeaderTimeout catches
+	// dead servers at the transport level.
+	directClient, err := httpclient.NewHTTPClient(nil, 0)
 	if err != nil {
-		logging.Errorf("Downloader: Failed to create direct HTTP client: %v, using standard http client", err)
-		directClient = &http.Client{
-			Timeout: cfg.Timeout,
-			Transport: &http.Transport{
-				MaxIdleConns:        10,
-				IdleConnTimeout:     30 * time.Second,
-				DisableCompression:  false,
-				MaxIdleConnsPerHost: 2,
-			},
-		}
+		logging.Errorf("Downloader: Failed to create direct HTTP client: %v, using fallback client", err)
+		directClient = newFallbackDownloadClient(cfg.Timeout)
+	} else {
+		setDownloadResponseHeaderTimeout(directClient, cfg.Timeout)
 	}
 	adaptiveClient.directClient = directClient
 
@@ -194,11 +193,62 @@ func (c *adaptiveDownloaderHTTPClient) getOrCreateProxyClient(proxyProfile *mode
 		return client, nil
 	}
 
-	client, err := httpclient.NewHTTPClient(proxyProfile, c.timeout)
+	client, err := httpclient.NewHTTPClient(proxyProfile, 0)
 	if err != nil {
 		return nil, err
 	}
+	setDownloadResponseHeaderTimeout(client, c.timeout)
 	c.clients[key] = client
 	logging.Infof("Downloader: Using scraper-level proxy for media host via %s", httpclient.SanitizeProxyURL(proxyProfile.URL))
 	return client, nil
+}
+
+func setDownloadResponseHeaderTimeout(client httpclient.HTTPClient, idleTimeout time.Duration) {
+	if dc, ok := unwrapClient(client); ok {
+		if t, ok := dc.Transport.(*http.Transport); ok {
+			if idleTimeout > 0 {
+				t.ResponseHeaderTimeout = idleTimeout
+				t.TLSHandshakeTimeout = idleTimeout
+				if t.DialContext != nil {
+					origDial := t.DialContext
+					t.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+						dialCtx, cancel := context.WithTimeout(ctx, idleTimeout)
+						defer cancel()
+						return origDial(dialCtx, network, addr)
+					}
+				} else {
+					t.DialContext = (&net.Dialer{Timeout: idleTimeout}).DialContext
+				}
+			}
+		}
+	}
+}
+
+func unwrapClient(client httpclient.HTTPClient) (*http.Client, bool) {
+	if dc, ok := client.(*http.Client); ok {
+		return dc, true
+	}
+	return nil, false
+}
+
+func newFallbackDownloadClient(idleTimeout time.Duration) *http.Client {
+	base := http.DefaultTransport.(*http.Transport).Clone()
+	if idleTimeout > 0 {
+		base.ResponseHeaderTimeout = idleTimeout
+		base.TLSHandshakeTimeout = idleTimeout
+		if base.DialContext != nil {
+			origDial := base.DialContext
+			base.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+				dialCtx, cancel := context.WithTimeout(ctx, idleTimeout)
+				defer cancel()
+				return origDial(dialCtx, network, addr)
+			}
+		} else {
+			base.DialContext = (&net.Dialer{Timeout: idleTimeout}).DialContext
+		}
+	}
+	base.Proxy = nil
+	return &http.Client{
+		Transport: base,
+	}
 }

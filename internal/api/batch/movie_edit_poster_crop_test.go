@@ -162,7 +162,7 @@ func TestPosterFromURL_SuccessClearsGeometry(t *testing.T) {
 	// Pre-seed BEFORE any handler call crops/populates the shared cache.
 	rt := testkit.GetTestRuntime(deps)
 	rt.GetRuntime().GetPosterManager(func() poster.PosterManagerInterface {
-		return poster.NewPosterManager(deps.GetFs(), "data/temp", &http.Client{}).
+		return poster.NewPosterManager(deps.GetFs(), "data/temp", &http.Client{}, 0).
 			WithSSRFCheck(func(string) error { return nil })
 	})
 

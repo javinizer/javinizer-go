@@ -2071,7 +2071,7 @@
   "settings_output_download_extrafanart": "下载额外背景图",
   "settings_output_download_heading": "下载选项",
   "settings_output_download_poster": "下载海报",
-  "settings_output_download_timeout_desc": "等待图片/视频下载完成的最长时间",
+  "settings_output_download_timeout_desc": "空闲/停滞超时：如果在此期间内未收到字节，则中止下载。0 = 无空闲超时（依赖工作上下文）。默认值：120",
   "settings_output_download_timeout_label": "下载超时",
   "settings_output_download_trailer": "下载预告片",
   "settings_output_fanart_format_desc": "背景图/封面图片的命名模板",

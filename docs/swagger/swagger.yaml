@@ -1966,7 +1966,9 @@ definitions:
         - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.ProxyConfig'
         description: Separate proxy for downloads (optional)
       download_timeout:
-        description: 'Timeout in seconds for HTTP downloads (default: 60)'
+        description: 'Idle/stall timeout in seconds for media downloads. Aborts if
+          no bytes received for this duration. 0 = no idle timeout (rely on worker
+          context). Default: 120'
         type: integer
       download_trailer:
         type: boolean

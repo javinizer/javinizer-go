@@ -260,7 +260,30 @@ func (d *Downloader) downloadTrailer(ctx context.Context, movie *models.Movie, d
 	tmplCtx := d.buildTemplateContext(movie, multipart)
 	destPath := d.pathResolver.ResolveTrailerPath(movie, true, tmplCtx, destDir)
 
-	return d.download(ctx, movie.TrailerURL, destPath, MediaTypeTrailer, overwriteExisting, dedup)
+	op := &retryableOperation{
+		initialDelay: 100 * time.Millisecond,
+		maxDelay:     10 * time.Second,
+	}
+
+	var lastResult *DownloadResult
+	retryErr := op.ExecuteWithRetry(ctx, func() error {
+		res, err := d.download(ctx, movie.TrailerURL, destPath, MediaTypeTrailer, overwriteExisting, dedup)
+		if err == nil {
+			lastResult = res
+		}
+		return err
+	}, 2, redactURL(movie.TrailerURL))
+
+	if retryErr != nil {
+		return &DownloadResult{
+			URL:       movie.TrailerURL,
+			LocalPath: destPath,
+			Type:      MediaTypeTrailer,
+			Error:     retryErr,
+		}, retryErr
+	}
+
+	return lastResult, nil
 }
 
 func (d *Downloader) downloadActressImages(ctx context.Context, movie *models.Movie, destDir string, options ...any) ([]DownloadResult, error) {

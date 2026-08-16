@@ -19,7 +19,7 @@ func TestDownloadFromURL_MkdirFailure(t *testing.T) {
 	// Use a read-only fs so MkdirAll fails
 	fs := afero.NewMemMapFs()
 	fs = afero.NewReadOnlyFs(fs)
-	pm := NewPosterManager(fs, "/tmp", http.DefaultClient).WithSSRFCheck(func(_ string) error { return nil })
+	pm := NewPosterManager(fs, "/tmp", http.DefaultClient, 0).WithSSRFCheck(func(_ string) error { return nil })
 
 	_, err := pm.DownloadFromURL(context.Background(), "job1", "ABC-123", "http://example.com/img.jpg", "", "")
 	assert.Error(t, err)
@@ -149,7 +149,7 @@ func TestDownloadFromURL_RenamesTempFile(t *testing.T) {
 	defer srv.Close()
 
 	fs := afero.NewMemMapFs()
-	pm := NewPosterManager(fs, "/tmp", srv.Client()).WithSSRFCheck(func(_ string) error { return nil })
+	pm := NewPosterManager(fs, "/tmp", srv.Client(), 0).WithSSRFCheck(func(_ string) error { return nil })
 
 	result, err := pm.DownloadFromURL(context.Background(), "job1", "ABC-123", srv.URL+"/img.jpg", "", "")
 	require.NoError(t, err)

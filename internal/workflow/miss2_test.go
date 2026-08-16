@@ -477,12 +477,12 @@ func TestBuildDownloadHTTPCfg_ZeroTimeout(t *testing.T) {
 	require.NoError(t, err)
 
 	downloadCfg := downloader.ConfigFromAppConfig(cfg, nfo.NFONameConfigFromAppConfig(cfg))
-	downloadCfg.DownloadTimeout = 0 // zero timeout should default to 60s
+	downloadCfg.DownloadTimeout = 0 // zero timeout = no idle timeout (not clamped)
 	scrapeCfg := scrape.ConfigFromAppConfig(cfg)
 	registry := scraperutil.NewScraperRegistry()
 
 	result := buildDownloadHTTPCfg(cfg, downloadCfg, scrapeCfg, registry)
-	assert.Equal(t, 60, int(result.Timeout.Seconds()), "zero timeout should default to 60s")
+	assert.Equal(t, 0, int(result.Timeout.Seconds()), "zero timeout should not be clamped to 60s")
 }
 
 // ---------------------------------------------------------------------------

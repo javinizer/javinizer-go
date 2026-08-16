@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
+	"net/http"
 	"sync"
 	"time"
 
@@ -434,8 +436,10 @@ func (s *RuntimeSnapshot) PosterManager() poster.PosterManagerInterface {
 	}
 	r := s.rt
 	buildFromSnap := func() poster.PosterManagerInterface {
-		httpClient := ssrf.NewSSRFSafeClient(60 * time.Second)
-		return poster.NewPosterManager(r.deps.GetFs(), s.cfg.System.TempDir, httpClient)
+		httpClient := ssrf.NewSSRFSafeClient(0)
+		idleTimeout := time.Duration(s.cfg.Output.Download.DownloadTimeout) * time.Second
+		setPosterHeaderTimeout(httpClient, idleTimeout)
+		return poster.NewPosterManager(r.deps.GetFs(), s.cfg.System.TempDir, httpClient, idleTimeout)
 	}
 	rs := r.GetRuntime()
 	if rs == nil {
@@ -639,13 +643,17 @@ func (r *APIRuntime) GetPosterManager() poster.PosterManagerInterface {
 	rs := r.GetRuntime()
 	if rs == nil {
 		// Fallback: create a fresh instance if runtime state is not yet initialized.
-		httpClient := ssrf.NewSSRFSafeClient(60 * time.Second)
-		return poster.NewPosterManager(r.deps.GetFs(), cfg.System.TempDir, httpClient)
+		httpClient := ssrf.NewSSRFSafeClient(0)
+		idleTimeout := time.Duration(cfg.Output.Download.DownloadTimeout) * time.Second
+		setPosterHeaderTimeout(httpClient, idleTimeout)
+		return poster.NewPosterManager(r.deps.GetFs(), cfg.System.TempDir, httpClient, idleTimeout)
 	}
 
 	return rs.GetPosterManager(func() poster.PosterManagerInterface {
-		httpClient := ssrf.NewSSRFSafeClient(60 * time.Second)
-		return poster.NewPosterManager(r.deps.GetFs(), cfg.System.TempDir, httpClient)
+		httpClient := ssrf.NewSSRFSafeClient(0)
+		idleTimeout := time.Duration(cfg.Output.Download.DownloadTimeout) * time.Second
+		setPosterHeaderTimeout(httpClient, idleTimeout)
+		return poster.NewPosterManager(r.deps.GetFs(), cfg.System.TempDir, httpClient, idleTimeout)
 	})
 }
 
@@ -694,3 +702,20 @@ func shutdownDeps(rt *APIRuntime) {
 // lifecycle operations without constructing an APIRuntime explicitly.
 // New code in production paths should use *APIRuntime directly.
 // ---------------------------------------------------------------------------
+
+func setPosterHeaderTimeout(client *http.Client, idleTimeout time.Duration) {
+	if t, ok := client.Transport.(*http.Transport); ok && idleTimeout > 0 {
+		t.ResponseHeaderTimeout = idleTimeout
+		t.TLSHandshakeTimeout = idleTimeout
+		if t.DialContext != nil {
+			origDial := t.DialContext
+			t.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+				dialCtx, cancel := context.WithTimeout(ctx, idleTimeout)
+				defer cancel()
+				return origDial(dialCtx, network, addr)
+			}
+		} else {
+			t.DialContext = (&net.Dialer{Timeout: idleTimeout}).DialContext
+		}
+	}
+}

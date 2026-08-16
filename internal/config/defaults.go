@@ -271,7 +271,7 @@ func defaultOutputConfig() OutputConfig {
 			DownloadExtrafanart: true,
 			DownloadTrailer:     true,
 			DownloadActress:     true,
-			DownloadTimeout:     60, // 60 seconds default
+			DownloadTimeout:     120, // idle/stall timeout: abort if no bytes received for this duration (0 = no idle timeout)
 			DownloadProxy: models.ProxyConfig{
 				Enabled: false,
 			},

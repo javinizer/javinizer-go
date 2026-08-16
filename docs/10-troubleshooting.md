@@ -286,7 +286,7 @@ For Docker/Unraid deployments:
 - Check your internet connection
 - Verify the image URL is accessible (it may be region-locked or behind a CDN that needs `scrapers.referer`/proxy)
 - Check available disk space
-- Confirm the download is enabled in `config.yaml` (`output.download_cover`, `output.download_poster`) and raise `output.download_timeout` (default 60s) if downloads time out
+- Confirm the download is enabled in `config.yaml` (`output.download_cover`, `output.download_poster`) and raise `output.download_timeout` (default 120s — idle/stall timeout: aborts if no bytes received for this duration) if downloads stall. Note: `download_timeout` is NOT a total deadline — large trailer downloads can take longer than this as long as bytes keep flowing. If the worker context (`performance.worker_timeout`) is too short, increase that instead.
 - Retry the operation
 
 ### "Downloaded file is corrupt"

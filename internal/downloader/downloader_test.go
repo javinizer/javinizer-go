@@ -1120,14 +1120,22 @@ func TestDownloader_Download_Timeout(t *testing.T) {
 		t.Skip("Skipping timeout test in short mode")
 	}
 
-	// Create a server that delays response
+	// Create a server that sends headers then stalls mid-body — the stall
+	// watchdog should fire after DownloadTimeout seconds of no byte progress.
+	handlerDone := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(3 * time.Second)
 		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Length", "10000")
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("data"))
+		_, _ = w.Write([]byte("partial"))
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		// Block until the test signals completion so server.Close() doesn't hang.
+		<-handlerDone
 	}))
 	defer server.Close()
+	defer close(handlerDone)
 
 	tmpDir := t.TempDir()
 	movie := createTestMovie()
@@ -1135,10 +1143,10 @@ func TestDownloader_Download_Timeout(t *testing.T) {
 
 	cfg := &Config{
 		DownloadCover:   true,
-		DownloadTimeout: 1, // 1 second timeout
+		DownloadTimeout: 1, // 1 second idle/stall timeout
 	}
 
-	// Create HTTP client with timeout for this test
+	// Create HTTP client — timeout=0 (stall watchdog governs body reads).
 	httpClient, err := NewHTTPClient(HTTPClientConfig{
 		Timeout: time.Duration(cfg.DownloadTimeout) * time.Second,
 	})
@@ -1148,13 +1156,30 @@ func TestDownloader_Download_Timeout(t *testing.T) {
 
 	downloader := NewDownloader(httpClient, afero.NewOsFs(), cfg, nil)
 
-	result, err := downloader.downloadCover(context.Background(), movie, tmpDir, nil)
+	// Use a context with a generous deadline so only the stall watchdog fires.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	start := time.Now()
+	result, err := downloader.downloadCover(ctx, movie, tmpDir, nil)
+	elapsed := time.Since(start)
+
 	if err == nil {
-		t.Error("Expected timeout error")
+		t.Error("Expected stall timeout error")
 	}
 
 	if result.Downloaded {
-		t.Error("Expected Downloaded to be false on timeout")
+		t.Error("Expected Downloaded to be false on stall timeout")
+	}
+
+	// The stall should fire within ~2x the idle timeout (1s), not the 10s
+	// context deadline.
+	if elapsed > 5*time.Second {
+		t.Errorf("Stall watchdog took too long: %v (expected ~1s idle timeout)", elapsed)
+	}
+
+	if !IsDownloadStalled(err) {
+		t.Errorf("Expected errDownloadStalled, got: %v", err)
 	}
 }
 

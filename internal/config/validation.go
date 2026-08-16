@@ -144,6 +144,9 @@ func validateProxyProfileConfig(c *Config) error {
 	}
 
 	// Validate output.download_proxy (not a scraper, special case)
+	if c.Output.Download.DownloadTimeout < 0 {
+		return fmt.Errorf("output.download_timeout must be >= 0 (0 = no idle timeout, rely on worker context)")
+	}
 	if err := validateProxyProfileRef("output.download_proxy", &c.Output.Download.DownloadProxy, profiles); err != nil {
 		return err
 	}

@@ -2071,7 +2071,7 @@
   "settings_output_download_extrafanart": "エクストラファンアートをダウンロード",
   "settings_output_download_heading": "ダウンロードオプション",
   "settings_output_download_poster": "ポスターをダウンロード",
-  "settings_output_download_timeout_desc": "画像/動画ダウンロード完了の最大待機時間",
+  "settings_output_download_timeout_desc": "アイドル/ストールタイムアウト: この時間内にバイトが受信されない場合、ダウンロードを中止します。0 = アイドルタイムアウトなし（ワーカーコンテキストに依存）。デフォルト: 120",
   "settings_output_download_timeout_label": "ダウンロードタイムアウト",
   "settings_output_download_trailer": "予告編をダウンロード",
   "settings_output_fanart_format_desc": "ファンアート/カバー画像用命名テンプレート",

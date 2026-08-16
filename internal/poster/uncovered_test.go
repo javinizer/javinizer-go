@@ -86,12 +86,12 @@ func TestMaxPosterSize_Uncovered(t *testing.T) {
 }
 
 func TestNewPosterManager_Uncovered(t *testing.T) {
-	pm := NewPosterManager(nil, "/tmp", nil)
+	pm := NewPosterManager(nil, "/tmp", nil, 0)
 	assert.NotNil(t, pm)
 }
 
 func TestPosterManager_WithSSRFCheck_Uncovered(t *testing.T) {
-	pm := NewPosterManager(nil, "/tmp", nil)
+	pm := NewPosterManager(nil, "/tmp", nil, 0)
 	pm2 := pm.WithSSRFCheck(func(rawURL string) error {
 		return nil
 	})

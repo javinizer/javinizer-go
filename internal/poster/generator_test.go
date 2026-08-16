@@ -30,7 +30,7 @@ func TestScrapePosterGenerator_NilMovie(t *testing.T) {
 }
 
 func TestScrapePosterGenerator_NoPosterOrCoverURL(t *testing.T) {
-	pm := NewPosterManager(afero.NewMemMapFs(), "/tmp", http.DefaultClient)
+	pm := NewPosterManager(afero.NewMemMapFs(), "/tmp", http.DefaultClient, 0)
 	gen := NewScrapePosterGenerator(pm, "", "")
 	movie := &models.Movie{ID: "TEST-001"}
 	err := gen.GeneratePoster(context.Background(), "test-job", movie)
@@ -47,7 +47,7 @@ func TestScrapePosterGenerator_Success(t *testing.T) {
 	defer srv.Close()
 
 	fs := afero.NewMemMapFs()
-	pm := NewPosterManager(fs, "/tmp", srv.Client()).WithSSRFCheck(func(_ string) error { return nil })
+	pm := NewPosterManager(fs, "/tmp", srv.Client(), 0).WithSSRFCheck(func(_ string) error { return nil })
 	gen := NewScrapePosterGenerator(pm, "TestAgent", "")
 
 	movie := &models.Movie{ID: "TEST-001", Poster: models.PosterState{PosterURL: srv.URL + "/poster.jpg"}}
@@ -79,7 +79,7 @@ func TestScrapePosterGenerator_PreservesShouldCropPoster(t *testing.T) {
 	defer srv.Close()
 
 	fs := afero.NewMemMapFs()
-	pm := NewPosterManager(fs, "/tmp", srv.Client()).WithSSRFCheck(func(_ string) error { return nil })
+	pm := NewPosterManager(fs, "/tmp", srv.Client(), 0).WithSSRFCheck(func(_ string) error { return nil })
 	gen := NewScrapePosterGenerator(pm, "TestAgent", "")
 
 	// Simulate a cropping source (e.g. javbus/dmm): the aggregator has set
@@ -112,7 +112,7 @@ func TestScrapePosterGenerator_UsesCoverURLFallback(t *testing.T) {
 	defer srv.Close()
 
 	fs := afero.NewMemMapFs()
-	pm := NewPosterManager(fs, "/tmp", srv.Client()).WithSSRFCheck(func(_ string) error { return nil })
+	pm := NewPosterManager(fs, "/tmp", srv.Client(), 0).WithSSRFCheck(func(_ string) error { return nil })
 	gen := NewScrapePosterGenerator(pm, "", "")
 
 	movie := &models.Movie{ID: "TEST-002", Poster: models.PosterState{CoverURL: srv.URL + "/cover.jpg"}}
@@ -122,7 +122,7 @@ func TestScrapePosterGenerator_UsesCoverURLFallback(t *testing.T) {
 }
 
 func TestScrapePosterGenerator_DownloadError_Sanitized(t *testing.T) {
-	pm := NewPosterManager(afero.NewMemMapFs(), "/tmp", &genFailingHTTPClient{})
+	pm := NewPosterManager(afero.NewMemMapFs(), "/tmp", &genFailingHTTPClient{}, 0)
 	gen := NewScrapePosterGenerator(pm, "", "")
 
 	movie := &models.Movie{ID: "TEST-003", Poster: models.PosterState{PosterURL: "http://example.com/poster.jpg"}}
@@ -147,7 +147,7 @@ func TestScrapePosterGenerator_RefererPassthrough(t *testing.T) {
 	defer srv.Close()
 
 	fs := afero.NewMemMapFs()
-	pm := NewPosterManager(fs, "/tmp", srv.Client()).WithSSRFCheck(func(_ string) error { return nil })
+	pm := NewPosterManager(fs, "/tmp", srv.Client(), 0).WithSSRFCheck(func(_ string) error { return nil })
 
 	// Test with explicit referer.
 	gen := NewScrapePosterGenerator(pm, "", "https://custom.referer.com/")
@@ -173,7 +173,7 @@ func TestScrapePosterGenerator_SSRFCheckPropagation(t *testing.T) {
 	defer srv.Close()
 
 	fs := afero.NewMemMapFs()
-	pm := NewPosterManager(fs, "/tmp", srv.Client()).WithSSRFCheck(func(_ string) error { return nil })
+	pm := NewPosterManager(fs, "/tmp", srv.Client(), 0).WithSSRFCheck(func(_ string) error { return nil })
 	gen := NewScrapePosterGenerator(pm, "", "").WithSSRFCheck(func(_ string) error { return nil })
 
 	movie := &models.Movie{ID: "TEST-004", Poster: models.PosterState{PosterURL: srv.URL + "/poster.jpg"}}

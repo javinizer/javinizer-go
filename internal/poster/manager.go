@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/javinizer/javinizer-go/internal/downloader"
 	httpclientiface "github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/javinizer/javinizer-go/internal/imageutil"
 	"github.com/javinizer/javinizer-go/internal/logging"
@@ -76,22 +77,22 @@ type ssrfCheckFunc func(rawURL string) error
 // PosterManager implements PosterManagerInterface using an afero filesystem,
 // a temporary directory, and an HTTP client.
 type PosterManager struct {
-	fs         afero.Fs
-	tempDir    string
-	httpClient httpclientiface.HTTPClient
-	// ssrfCheck validates a URL for SSRF safety. Defaults to ssrf.CheckURL.
-	// Override via WithSSRFCheck for testing only.
-	ssrfCheck ssrfCheckFunc
+	fs          afero.Fs
+	tempDir     string
+	httpClient  httpclientiface.HTTPClient
+	idleTimeout time.Duration
+	ssrfCheck   ssrfCheckFunc
 }
 
 // NewPosterManager creates a PosterManager backed by the given filesystem,
 // temp directory root, and HTTP client.
-func NewPosterManager(fs afero.Fs, tempDir string, httpClient httpclientiface.HTTPClient) *PosterManager {
+func NewPosterManager(fs afero.Fs, tempDir string, httpClient httpclientiface.HTTPClient, idleTimeout time.Duration) *PosterManager {
 	return &PosterManager{
-		fs:         fs,
-		tempDir:    tempDir,
-		httpClient: httpClient,
-		ssrfCheck:  ssrf.CheckURL,
+		fs:          fs,
+		tempDir:     tempDir,
+		httpClient:  httpClient,
+		idleTimeout: idleTimeout,
+		ssrfCheck:   ssrf.CheckURL,
 	}
 }
 
@@ -231,6 +232,10 @@ func (pm *PosterManager) DownloadFromURL(ctx context.Context, jobID, posterID, r
 		return nil, fmt.Errorf("failed to download image: %w", err)
 	}
 	defer func() { _ = drainAndClose(resp.Body) }()
+
+	if pm.idleTimeout > 0 {
+		resp.Body = downloader.NewStallReader(resp.Body, pm.idleTimeout, ctx)
+	}
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("image download failed with status %d", resp.StatusCode)

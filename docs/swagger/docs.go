@@ -6975,7 +6975,7 @@ const docTemplate = `{
                     ]
                 },
                 "download_timeout": {
-                    "description": "Timeout in seconds for HTTP downloads (default: 60)",
+                    "description": "Idle/stall timeout in seconds for media downloads. Aborts if no bytes received for this duration. 0 = no idle timeout (rely on worker context). Default: 120",
                     "type": "integer"
                 },
                 "download_trailer": {

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	httpclientiface "github.com/javinizer/javinizer-go/internal/httpclient"
+	httpclient "github.com/javinizer/javinizer-go/internal/httpclient"
 
 	"github.com/javinizer/javinizer-go/internal/aggregator"
 	"github.com/javinizer/javinizer-go/internal/config"
@@ -69,7 +69,7 @@ type workflowFactoryConfig struct {
 	NFOGenerator nfo.GeneratorInterface
 	NFOIface     nfo.NFOInterface // Composite passed to sub-orchestrators that narrow it: compare→NFOFieldMerger, preview→NFOFieldMerger, apply→NFOFileMerger, revertLog→NFOFieldMerger
 	Downloader   downloader.DownloaderInterface
-	HTTPClient   httpclientiface.HTTPClient
+	HTTPClient   httpclient.HTTPClient
 	PosterGen    poster.PosterGenerator
 	Scraper      scrape.ScraperInterface
 	Aggregator   aggregator.AggregatorInterface
@@ -169,9 +169,6 @@ func buildDownloadHTTPCfg(cfg *config.Config, downloadCfg *downloader.Config, sc
 	proxyResolvers := registry.CollectDownloadProxyResolvers(scrapeCfg.ScrapersPriority)
 
 	downloadTimeout := downloadCfg.DownloadTimeout
-	if downloadTimeout <= 0 {
-		downloadTimeout = 60
-	}
 	return downloader.HTTPClientConfig{
 		Timeout:           time.Duration(downloadTimeout) * time.Second,
 		DownloadProxy:     downloadProxyProfile,
@@ -192,7 +189,7 @@ func buildScanner(fs afero.Fs, snCfg *scanner.Config) scanner.ScannerInterface {
 // Per D-8: accepts ContentRepos + ReplacementRepos instead of the full Repositories
 // bag, making the dependency surface explicit — callers see exactly which domains
 // the scraper needs.
-func buildScraper(scrapeCfg *scrape.Config, aggCfg *aggregator.Config, translator scrape.Translator, registry ScraperResolver, httpClient httpclientiface.HTTPClient, fs afero.Fs, content database.ContentRepos, replacement database.ReplacementRepos) (scrape.ScraperInterface, aggregator.AggregatorInterface, error) {
+func buildScraper(scrapeCfg *scrape.Config, aggCfg *aggregator.Config, translator scrape.Translator, registry ScraperResolver, httpClient httpclient.HTTPClient, fs afero.Fs, content database.ContentRepos, replacement database.ReplacementRepos) (scrape.ScraperInterface, aggregator.AggregatorInterface, error) {
 	// MovieRepo is strictly required — it is accessed unconditionally during
 	// scraping and persistence. The other repos (ActressRepo, ActressAliasRepo,
 	// GenreReplacementRepo, WordReplacementRepo) are passed to the aggregator
@@ -268,7 +265,7 @@ func buildNFO(fs afero.Fs, nfoCfg *nfo.Config, engine *template.Engine) (nfo.Gen
 }
 
 // buildDownloader constructs the media downloader and its HTTP client.
-func buildDownloader(httpCfg downloader.HTTPClientConfig, fs afero.Fs, downloadCfg *downloader.Config, engine *template.Engine) (downloader.DownloaderInterface, httpclientiface.HTTPClient, error) {
+func buildDownloader(httpCfg downloader.HTTPClientConfig, fs afero.Fs, downloadCfg *downloader.Config, engine *template.Engine) (downloader.DownloaderInterface, httpclient.HTTPClient, error) {
 	httpClient, httpErr := downloader.NewHTTPClient(httpCfg)
 	if httpErr != nil {
 		return nil, nil, fmt.Errorf("buildDownloader: failed to create HTTP client: %w", httpErr)
@@ -277,8 +274,8 @@ func buildDownloader(httpCfg downloader.HTTPClientConfig, fs afero.Fs, downloadC
 }
 
 // buildPosterGenerator constructs the poster generator from its dependencies.
-func buildPosterGenerator(fs afero.Fs, scrapeCfg *scrape.Config, httpClient httpclientiface.HTTPClient) poster.PosterGenerator {
-	posterManager := poster.NewPosterManager(fs, scrapeCfg.TempDir, httpClient)
+func buildPosterGenerator(fs afero.Fs, scrapeCfg *scrape.Config, httpClient httpclient.HTTPClient, idleTimeout time.Duration) poster.PosterGenerator {
+	posterManager := poster.NewPosterManager(fs, scrapeCfg.TempDir, httpClient, idleTimeout)
 	return poster.NewScrapePosterGenerator(posterManager, scrapeCfg.UserAgent, scrapeCfg.Referer)
 }
 
@@ -363,7 +360,7 @@ func NewFactoryConfigFromRepos(cfg *config.Config, registry ScraperResolver, rep
 	if httpErr != nil {
 		return workflowFactoryConfig{}, httpErr
 	}
-	posterGen := buildPosterGenerator(fs, dcs.scrapeCfg, httpClient)
+	posterGen := buildPosterGenerator(fs, dcs.scrapeCfg, httpClient, time.Duration(dcs.downloadCfg.DownloadTimeout)*time.Second)
 
 	scraperObj, agg, scraperErr := buildScraper(dcs.scrapeCfg, dcs.aggCfg, dcs.translation, registry, httpClient, fs, repos.ContentRepos, repos.ReplacementRepos)
 	previewCfg, applyCfg := buildOrchestratorConfigs(cfg, dcs, fs, fileMatcher, sharedEngine)

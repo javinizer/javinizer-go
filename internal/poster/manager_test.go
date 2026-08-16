@@ -40,7 +40,7 @@ func createTestJPEG(fs afero.Fs, path string, width, height int) error {
 func newTestManager(httpClient httpclientiface.HTTPClient) *PosterManager {
 	fs := afero.NewMemMapFs()
 	tempDir := "/tmp/javinizer-test"
-	return NewPosterManager(fs, tempDir, httpClient)
+	return NewPosterManager(fs, tempDir, httpClient, 0)
 }
 
 // newTestManagerBypassSSRF creates a PosterManager that skips SSRF checks
@@ -454,7 +454,7 @@ func TestPosterManagerInterface_Satisfied(t *testing.T) {
 	// This test exists for documentation; the compile-time check is the
 	// var _ assignment in manager.go. We verify NewPosterManager returns a
 	// usable value.
-	pm := NewPosterManager(afero.NewMemMapFs(), "/tmp", http.DefaultClient)
+	pm := NewPosterManager(afero.NewMemMapFs(), "/tmp", http.DefaultClient, 0)
 	assert.NotNil(t, pm)
 }
 
@@ -542,7 +542,7 @@ func TestDownloadFromURL_CreatesTempDir(t *testing.T) {
 
 	// Use a fresh fs so the temp dir doesn't exist yet.
 	fs := afero.NewMemMapFs()
-	pm := NewPosterManager(fs, "/fresh-tmp", srv.Client()).WithSSRFCheck(func(_ string) error { return nil })
+	pm := NewPosterManager(fs, "/fresh-tmp", srv.Client(), 0).WithSSRFCheck(func(_ string) error { return nil })
 
 	result, err := pm.DownloadFromURL(
 		context.Background(), "job1", "ABC-123",
@@ -566,7 +566,7 @@ func TestDownloadFromURL_CleansUpTempOnError(t *testing.T) {
 	defer srv.Close()
 
 	fs := afero.NewMemMapFs()
-	pm := NewPosterManager(fs, "/tmp", srv.Client())
+	pm := NewPosterManager(fs, "/tmp", srv.Client(), 0)
 
 	_, err := pm.DownloadFromURL(
 		context.Background(), "job1", "ABC-123",

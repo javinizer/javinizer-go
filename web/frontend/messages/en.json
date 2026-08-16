@@ -2069,7 +2069,7 @@
   "settings_output_download_extrafanart": "Download Extrafanart",
   "settings_output_download_heading": "Download Options",
   "settings_output_download_poster": "Download Poster",
-  "settings_output_download_timeout_desc": "Maximum time to wait for image/video downloads to complete",
+  "settings_output_download_timeout_desc": "Idle/stall timeout: aborts a download if no bytes are received for this duration. 0 = no idle timeout (rely on worker context). Default: 120",
   "settings_output_download_timeout_label": "Download timeout",
   "settings_output_download_trailer": "Download Trailer",
   "settings_output_fanart_format_desc": "Naming template for fanart/cover images",

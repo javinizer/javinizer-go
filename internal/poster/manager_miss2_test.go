@@ -20,7 +20,7 @@ import (
 
 func TestMiss2_CropWithBounds_SourcePathTraversal(t *testing.T) {
 	fs := afero.NewMemMapFs()
-	pm := NewPosterManager(fs, "/tmp", http.DefaultClient)
+	pm := NewPosterManager(fs, "/tmp", http.DefaultClient, 0)
 
 	// Create a poster file that exists but with a posterID that causes path traversal
 	posterID := "../../etc/passwd"
@@ -36,7 +36,7 @@ func TestMiss2_CropWithBounds_SourcePathTraversal(t *testing.T) {
 
 func TestMiss2_CropWithBounds_ValidPosterIDWithTraversal(t *testing.T) {
 	fs := afero.NewMemMapFs()
-	pm := NewPosterManager(fs, "/tmp", http.DefaultClient)
+	pm := NewPosterManager(fs, "/tmp", http.DefaultClient, 0)
 
 	posterID := "valid-id"
 	posterDir := filepath.Join("/tmp", "posters", "job1")
@@ -53,7 +53,7 @@ func TestMiss2_CropWithBounds_ValidPosterIDWithTraversal(t *testing.T) {
 
 func TestMiss2_CropWithBounds_FallbackToNonFull(t *testing.T) {
 	fs := afero.NewMemMapFs()
-	pm := NewPosterManager(fs, "/tmp", http.DefaultClient)
+	pm := NewPosterManager(fs, "/tmp", http.DefaultClient, 0)
 
 	posterID := "fallback-id"
 	posterDir := filepath.Join("/tmp", "posters", "job1")
@@ -86,7 +86,7 @@ func TestMiss2_DownloadFromURL_ImageTooLargeTruncation(t *testing.T) {
 	defer srv.Close()
 
 	fs := afero.NewMemMapFs()
-	pm := NewPosterManager(fs, "/tmp", srv.Client()).WithSSRFCheck(func(_ string) error { return nil })
+	pm := NewPosterManager(fs, "/tmp", srv.Client(), 0).WithSSRFCheck(func(_ string) error { return nil })
 
 	_, err := pm.DownloadFromURL(context.Background(), "job1", "ABC-123", srv.URL+"/img.jpg", "", "")
 	assert.Error(t, err)
@@ -101,7 +101,7 @@ func TestMiss2_DownloadFromURL_ImageTooLargeTruncation(t *testing.T) {
 
 func TestMiss2_DownloadFromURL_SSRFValidationFail(t *testing.T) {
 	fs := afero.NewMemMapFs()
-	pm := NewPosterManager(fs, "/tmp", http.DefaultClient)
+	pm := NewPosterManager(fs, "/tmp", http.DefaultClient, 0)
 	// Default SSRF check should reject private IPs
 	_, err := pm.DownloadFromURL(context.Background(), "job1", "ABC-123", "http://192.168.1.1/img.jpg", "", "")
 	assert.Error(t, err)
@@ -112,7 +112,7 @@ func TestMiss2_DownloadFromURL_SSRFValidationFail(t *testing.T) {
 
 func TestMiss2_DownloadFromURL_InvalidURL(t *testing.T) {
 	fs := afero.NewMemMapFs()
-	pm := NewPosterManager(fs, "/tmp", http.DefaultClient).WithSSRFCheck(func(_ string) error { return nil })
+	pm := NewPosterManager(fs, "/tmp", http.DefaultClient, 0).WithSSRFCheck(func(_ string) error { return nil })
 
 	_, err := pm.DownloadFromURL(context.Background(), "job1", "ABC-123", "://invalid-url", "", "")
 	assert.Error(t, err)
@@ -132,7 +132,7 @@ func TestMiss2_DownloadFromURL_CustomHeaders(t *testing.T) {
 	defer srv.Close()
 
 	fs := afero.NewMemMapFs()
-	pm := NewPosterManager(fs, "/tmp", srv.Client()).WithSSRFCheck(func(_ string) error { return nil })
+	pm := NewPosterManager(fs, "/tmp", srv.Client(), 0).WithSSRFCheck(func(_ string) error { return nil })
 
 	_, err := pm.DownloadFromURL(context.Background(), "job1", "ABC-123", srv.URL+"/img.jpg", "CustomUA/1.0", "https://referer.example.com/")
 	require.NoError(t, err)
@@ -147,7 +147,7 @@ func TestMiss2_DownloadFromURL_CustomHeaders(t *testing.T) {
 
 func TestMiss2_DownloadFromURL_PathTraversalPosterID(t *testing.T) {
 	fs := afero.NewMemMapFs()
-	pm := NewPosterManager(fs, "/tmp", http.DefaultClient).WithSSRFCheck(func(_ string) error { return nil })
+	pm := NewPosterManager(fs, "/tmp", http.DefaultClient, 0).WithSSRFCheck(func(_ string) error { return nil })
 
 	// A posterID with path separators should fail validation
 	_, err := pm.DownloadFromURL(context.Background(), "job1", "../escape", "http://example.com/img.jpg", "", "")
@@ -241,7 +241,7 @@ func TestMiss2_DownloadFromURL_MkdirAllFailure(t *testing.T) {
 	// Read-only fs can't create directories
 	memFS := afero.NewMemMapFs()
 	readOnlyFS := afero.NewReadOnlyFs(memFS)
-	pm := NewPosterManager(readOnlyFS, "/tmp", srv.Client()).WithSSRFCheck(func(_ string) error { return nil })
+	pm := NewPosterManager(readOnlyFS, "/tmp", srv.Client(), 0).WithSSRFCheck(func(_ string) error { return nil })
 
 	_, err := pm.DownloadFromURL(context.Background(), "job1", "ABC-123", srv.URL+"/img.jpg", "", "")
 	assert.Error(t, err)

@@ -168,8 +168,8 @@
 		<FormNumberInput
 			label={m.settings_output_download_timeout_label()}
 			description={m.settings_output_download_timeout_desc()}
-			value={config.output.download_timeout ?? 60}
-			min={5}
+			value={config.output.download_timeout ?? 120}
+			min={0}
 			max={600}
 			unit="seconds"
 			onchange={(val) => {

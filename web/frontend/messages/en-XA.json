@@ -1411,7 +1411,7 @@
   "settings_output_download_extrafanart": "[ Döwñlöåd Ëxtråfåñårt ]",
   "settings_output_download_heading": "[ Döwñlöåd Öptíöñs ]",
   "settings_output_download_poster": "[ Döwñlöåd Pöstër ]",
-  "settings_output_download_timeout_desc": "[ Måxímüm tímë tö wåít för ímågë/vídëö döwñlöåds tö çömplëtë ]",
+  "settings_output_download_timeout_desc": "[ Ïðlë/ßtåll tëmpöråõüt: åbörtß å ðoŵñlöåð íf ño ßytëß årë nëcëíväð förr ðhíß ðüråtíöñ. 0 = ño íðlë tëmpöråõüt (rëlý oñ ẃörkërr çoñtëxt). Ðëfåült: 120 ]",
   "settings_output_download_timeout_label": "[ Döwñlöåd tímëöüt ]",
   "settings_output_download_trailer": "[ Döwñlöåd Tråílër ]",
   "settings_output_fanart_format_desc": "[ Ñåmíñg tëmplåtë för fåñårt/çövër ímågës ]",
