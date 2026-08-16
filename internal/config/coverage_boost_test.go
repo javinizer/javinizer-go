@@ -1374,3 +1374,12 @@ func TestValidate_ImageCacheMaxSizeNegative(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "image_cache_max_size_mb")
 }
+
+func TestValidateProxyProfileConfig_NegativeDownloadTimeout(t *testing.T) {
+	cfg := DefaultConfig(nil, nil)
+	cfg.Output.Download.DownloadTimeout = -1
+
+	err := validateProxyProfileConfig(cfg)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "download_timeout must be >= 0")
+}
