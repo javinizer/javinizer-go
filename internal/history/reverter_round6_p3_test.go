@@ -139,3 +139,47 @@ func mustJSON(t *testing.T, gf models.GeneratedFilesJSON) string {
 	require.NoError(t, err)
 	return string(raw)
 }
+
+// codex P3 R16-1: two SPELLINGS of one physical destination in one chain
+// must restore as a single ordered group — never split into two groups
+// unwound in map order.
+func TestRevert_SpellingSplitChain_GroupsCanonically(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	repo := newP3OpRepo()
+	ctx := context.Background()
+
+	require.NoError(t, fs.MkdirAll("/dst/SPL", config.DirPerm))
+	destV1 := "/dst/SPL/Poster.jpg" // op.spelling #1
+	destV2 := "/dst/SPL/poster.jpg" // op spelling #2 — same file on win/mac-cs
+	require.NoError(t, afero.WriteFile(fs, destV1, []byte("final"), config.FilePerm))
+	require.NoError(t, afero.WriteFile(fs, destV1+".dlbak.b1", []byte("original"), config.FilePerm))
+	require.NoError(t, afero.WriteFile(fs, destV2+".dlbak.b2", []byte("mid"), config.FilePerm))
+
+	f := &p3Fixture{fs: fs, repo: repo}
+	op, _ := f.addAppliedOp(t, "job-1", "SPL-001", false, "unused")
+
+	raw, err := json.Marshal(models.GeneratedFilesJSON{Replacements: []models.ReplacementEntry{
+		{Destination: destV1, Backup: destV1 + ".dlbak.b1", DestSeq: 1},
+		{Destination: destV2, Backup: destV2 + ".dlbak.b2", DestSeq: 2},
+	}})
+	require.NoError(t, err)
+	op.GeneratedFiles = string(raw)
+	require.NoError(t, repo.Update(ctx, op))
+
+	r := NewReverter(fs, repo)
+	res, err := r.RevertBatch(ctx, "job-1")
+	require.NoError(t, err)
+	require.Equal(t, 1, res.Succeeded, "split-spelling chain unwinds as ONE destination")
+	require.Equal(t, "original", string(mustRead2(t, fs, destV1)),
+		"oldest bytes win — regardless of group order (seq1 last)")
+	exists, _ := afero.Exists(fs, destV1+".dlbak.b1")
+	require.False(t, exists)
+	exists, _ = afero.Exists(fs, destV2+".dlbak.b2")
+	require.False(t, exists)
+
+	row, err := repo.FindByID(ctx, op.ID)
+	require.NoError(t, err)
+	gf, err := models.ParseGeneratedFiles(row.GeneratedFiles)
+	require.NoError(t, err)
+	require.Empty(t, gf.Replacements)
+}

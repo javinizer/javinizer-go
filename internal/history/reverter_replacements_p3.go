@@ -96,10 +96,20 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 		return restored, nil
 	}
 
-	// Group entries by destination, highest sequence first per destination.
+	// Group entries by destination — CANONICAL key, not the raw string
+	// (codex P3 R16-1): one operation can journal the same physical path with
+	// two spellings (`Poster.jpg`, `poster.jpg`, separators); raw grouping
+	// would split one shared DestSeq chain into two groups and unwind them in
+	// nondeterministic map order. The restore TARGET keeps the op's own
+	// recorded spelling (both forms resolve to one file).
 	byDest := make(map[string][]models.ReplacementEntry)
+	destSpelling := make(map[string]string)
 	for _, e := range gf.Replacements {
-		byDest[e.Destination] = append(byDest[e.Destination], e)
+		key := fsutil.DestKey(e.Destination)
+		byDest[key] = append(byDest[key], e)
+		if destSpelling[key] == "" {
+			destSpelling[key] = e.Destination
+		}
 	}
 	for dest := range byDest {
 		sort.SliceStable(byDest[dest], func(i, j int) bool { return byDest[dest][i].DestSeq > byDest[dest][j].DestSeq })
@@ -110,7 +120,8 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 	// R7-1): a concurrent apply can journal a newer replacement between any
 	// preflight read and lock acquisition — restoring from a stale ownership
 	// snapshot would clobber freshly installed bytes.
-	for dest, entries := range byDest {
+	for key, entries := range byDest {
+		dest := destSpelling[key]
 		release := fsutil.SharedDestLocks().Acquire(dest)
 		minOwn := entries[0].DestSeq
 		for _, e := range entries {
@@ -156,8 +167,7 @@ func (r *Reverter) consumeReplacementEntry(ctx context.Context, op *models.Batch
 	if frErr != nil || fresh == nil {
 		return fmt.Errorf("failed to re-read row for consumption on op %d: %v", op.ID, frErr)
 	}
-	op = fresh
-	gf, err := models.ParseGeneratedFiles(op.GeneratedFiles)
+	gf, err := models.ParseGeneratedFiles(fresh.GeneratedFiles)
 	if err != nil {
 		return fmt.Errorf("failed to re-parse journal for consumption on op %d: %w", op.ID, err)
 	}
@@ -175,10 +185,14 @@ func (r *Reverter) consumeReplacementEntry(ctx context.Context, op *models.Batch
 	if err != nil {
 		return fmt.Errorf("failed to marshal consumed journal for op %d: %w", op.ID, err)
 	}
-	op.GeneratedFiles = string(data)
-	if err := r.batchFileOpRepo.Update(ctx, op); err != nil {
+	fresh.GeneratedFiles = string(data)
+	if err := r.batchFileOpRepo.Update(ctx, fresh); err != nil {
 		return fmt.Errorf("backup %s restored to %s but journal consumption failed for op %d: %w", entry.Backup, entry.Destination, op.ID, err)
 	}
+	// Sync the caller's in-memory view — partial restores must be visible to
+	// this op's later passes or the consumed entry is retried against a
+	// vanished backup (count-N flake).
+	op.GeneratedFiles = string(data)
 	return nil
 }
 
