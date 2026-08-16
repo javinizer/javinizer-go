@@ -135,27 +135,20 @@ func (s *ReplacementSweeper) Sweep(ctx context.Context) (int, error) {
 	}
 	healed := 0
 	for dir := range idx.dirs {
-		// R4-2/R7-3: recursion bounded by 8 levels — SubfolderFormat templates
-		// nest deeper than 3 legitimately, and the orchestrator additionally
-		// seeds the organizer's exact leaf folder post-organize so the common
-		// path never depends on the walk bound.
-		const maxDepth = 8
-		_ = afero.Walk(s.fs, filepath.FromSlash(dir), func(path string, info os.FileInfo, werr error) error {
-			if werr != nil {
-				return nil //nolint:nilerr // walk-callback contract: skip unreadable subtrees, continue the sweep
+		// R11-2: FLAT scans only — no recursion into media libraries. Crash
+		// windows are covered exactly by the orchestrator's per-organize leaf
+		// seed (R7-3), so startup cost stays O(ledgered dirs), independent of
+		// library size.
+		entries, rdErr := afero.ReadDir(s.fs, filepath.FromSlash(dir))
+		if rdErr != nil {
+			continue
+		}
+		for _, e := range entries {
+			if e.IsDir() || !IsReplacementBackupName(e.Name()) {
+				continue
 			}
-			if info.IsDir() {
-				rel, rerr := filepath.Rel(filepath.FromSlash(dir), path)
-				if rerr == nil && strings.Count(rel, string(filepath.Separator)) > maxDepth {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-			if IsReplacementBackupName(info.Name()) {
-				healed += s.sweepOne(ctx, idx, sweepSlash(filepath.Dir(path)), info)
-			}
-			return nil
-		})
+			healed += s.sweepOne(ctx, idx, dir, e)
+		}
 	}
 	return healed, nil
 }
@@ -214,8 +207,7 @@ func (s *ReplacementSweeper) sweepOne(ctx context.Context, idx *replacementLedge
 		// can install new bytes between the classification read and the lock
 		// (codex P3 R3-2), and the backup must never clobber those
 		// freshly-installed artifacts.
-		armed := !journalEntryInstalled(owner, backupSlash)
-		if s.restoreAndConsume(ctx, owner, backup, dest, armed) {
+		if s.restoreAndConsume(ctx, owner, backup, dest, backupSlash) {
 			delete(idx.journaled, backup)
 			return 1
 		}
@@ -273,7 +265,7 @@ func (s *ReplacementSweeper) sweepOne(ctx context.Context, idx *replacementLedge
 // destination under the destination lock and consumes the journal entry (a
 // stranded entry would otherwise poison future reverts with a missing
 // backup).
-func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.BatchFileOperation, backup, dest string, armed bool) bool {
+func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.BatchFileOperation, backup, dest, backupSlash string) bool {
 	release := fsutil.SharedDestLocks().Acquire(dest)
 	defer release()
 
@@ -286,11 +278,19 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 		logging.Warnf("replacement sweep %s: destination indeterminate (%v) — kept", backup, statErr)
 		return false
 	}
-	// R4-3: auto-restore only the PROVABLE crash window — an armed (never
-	// install-confirmed) entry. A confirmed entry + missing destination is
-	// deleted-afterwards media; restoring it resurrects artwork a user or
-	// another process intentionally removed.
-	if !armed {
+
+	// R11-1: re-read the journal FRESH under the lock — the index snapshot
+	// may predate the install-confirm; an armed flag read stale would
+	// misclassify a deleted-afterwards destination as an interrupted install.
+	freshRow, frErr := s.repo.FindByID(ctx, row.ID)
+	if frErr != nil || freshRow == nil {
+		logging.Warnf("replacement sweep %s: owner row unreadable (%v) — kept", backup, frErr)
+		return false
+	}
+	if freshRow.RevertStatus == models.RevertStatusReverted {
+		return false // consumed meanwhile
+	}
+	if journalEntryInstalled(freshRow, backupSlash) {
 		logging.Infof("replacement sweep %s: destination missing but install was confirmed — backup retained, no auto-restore", backup)
 		return false
 	}

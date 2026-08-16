@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -91,21 +90,23 @@ func TestSweep_OrphanFreshRecheckUnderLock_KeepsJustJournaledBackup(t *testing.T
 	require.True(t, exists)
 }
 
-// codex P3 R4-2: media lands in the organizer's nested leaf dir — the sweep
-// must descend bounded levels below the recorded base root.
-func TestSweep_NestedRoot_BackupDiscoveredThreeLevelsDeep(t *testing.T) {
+// codex P3 R11-2: sweeps scan recorded dirs FLAT — the orchestrator seeds
+// the organizer's exact leaf folder (R7-3), and library-scale recursion is
+// forbidden at startup. Nested libs are discovered via the leaf seed, never
+// by descent.
+func TestSweep_NestedRoot_BackupDiscoveredViaLeafSeed(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	repo := newP3OpRepo()
 	ctx := context.Background()
 
-	dest := "/out/base/Movie (2020)/poster.jpg"
+	dest := "/out/base/Deep (1)/Sub/Movie (2020)/poster.jpg"
 	backup := dest + ".dlbak.0123456789abcdef"
-	require.NoError(t, fs.MkdirAll("/out/base/Movie (2020)", config.DirPerm))
+	require.NoError(t, fs.MkdirAll("/out/base/Deep (1)/Sub/Movie (2020)", config.DirPerm))
 	require.NoError(t, afero.WriteFile(fs, backup, []byte("nested-old"), config.FilePerm))
 	old := time.Now().Add(-time.Hour)
 	require.NoError(t, fs.Chtimes(backup, old, old))
 
-	raw, _ := json.Marshal(models.GeneratedFilesJSON{Roots: []string{"/out/base"}})
+	raw, _ := json.Marshal(models.GeneratedFilesJSON{Roots: []string{"/out/base", "/out/base/Deep (1)/Sub/Movie (2020)"}})
 	op := &models.BatchFileOperation{
 		BatchJobID: "job-1", MovieID: "NST-001", OriginalPath: "/src/nst.mkv",
 		OperationType: models.OperationTypeUpdate, GeneratedFiles: string(raw),
@@ -117,7 +118,6 @@ func TestSweep_NestedRoot_BackupDiscoveredThreeLevelsDeep(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, healed)
 	require.Equal(t, "nested-old", string(mustRead2(t, fs, dest)))
-	fmt.Println("") // keep fmt import referenced across build variants
 }
 
 // codex P3 R5-3: restores stream through a bounded buffer — a trailer-class
@@ -278,4 +278,63 @@ func (m *flakySweepRepo) Update(ctx context.Context, op *models.BatchFileOperati
 		return errors.New("transient outage")
 	}
 	return m.p3OpRepo.Update(ctx, op)
+}
+
+// codex P3 R11-1: the armed flag is re-read from a FRESH row under the dest
+// lock — an index snapshot taken before install-confirm must not misclassify
+// a deleted-afterwards destination.
+func TestSweep_StaleArmedFlag_ReclassifiedByFreshRead(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	repo := newP3OpRepo()
+	ctx := context.Background()
+
+	dest := "/out/STL/poster.jpg"
+	backup := dest + ".dlbak.0123456789abcdef"
+	require.NoError(t, fs.MkdirAll("/out/STL", config.DirPerm))
+	require.NoError(t, afero.WriteFile(fs, backup, []byte("old"), config.FilePerm))
+	backdate(t, fs, backup)
+
+	// Repo row is CONFIRMED (installed), but the sweeper's index sees a stale
+	// ARMED snapshot of it — the index predates the confirmation.
+	rawArmed, _ := json.Marshal(models.GeneratedFilesJSON{Replacements: []models.ReplacementEntry{
+		{Destination: dest, Backup: backup, DestSeq: 1, Installed: false},
+	}})
+	op := &models.BatchFileOperation{
+		BatchJobID: "job-1", MovieID: "STL-001", OriginalPath: "/src/stl.mkv",
+		OperationType: models.OperationTypeUpdate, GeneratedFiles: string(rawArmed),
+		RevertStatus: models.RevertStatusApplied,
+	}
+	require.NoError(t, repo.Create(ctx, op))
+
+	s := NewReplacementSweeper(fs, repo)
+	staleIdx := &replacementLedgerIndex{
+		journaled: map[string]*models.BatchFileOperation{backup: op},
+		dirs:      map[string]bool{"/out/STL": true},
+	}
+	// Now the row flips to confirmed (as if the apply raced the index build).
+	rawInstalled, _ := json.Marshal(models.GeneratedFilesJSON{Replacements: []models.ReplacementEntry{
+		{Destination: dest, Backup: backup, DestSeq: 1, Installed: true},
+	}})
+	op.GeneratedFiles = string(rawInstalled)
+	require.NoError(t, repo.Update(ctx, op))
+
+	staleIdx.journaled[backup] = mustRow(t, repo, op.ID)
+	// Force the stale-armed case: the index's owner row is the ARMED snapshot.
+	rawArmedOp := *op
+	rawArmedOp.GeneratedFiles = string(rawArmed)
+	staleIdx.journaled[backup] = &rawArmedOp
+
+	info, err := fs.Stat(backup)
+	require.NoError(t, err)
+	got := s.sweepOne(ctx, staleIdx, "/out/STL", info)
+	require.Equal(t, 0, got, "fresh row read wins over the stale index flag")
+	exists, _ := afero.Exists(fs, backup)
+	require.True(t, exists)
+}
+
+func mustRow(t *testing.T, repo *p3OpRepo, id uint) *models.BatchFileOperation {
+	t.Helper()
+	row, err := repo.FindByID(context.Background(), id)
+	require.NoError(t, err)
+	return row
 }
