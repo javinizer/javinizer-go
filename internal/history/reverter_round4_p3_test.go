@@ -602,8 +602,10 @@ type readDirFailFs struct {
 
 func (f *readDirFailFs) Open(name string) (afero.File, error) {
 	// afero.ReadDir routes through Open — failing a directory's read means
-	// failing its Open.
-	if strings.Contains(name, f.failDir) && !strings.HasSuffix(name, ".jpg") && !strings.Contains(name, ".dlbak.") {
+	// failing its Open. Normalize separators: on Windows the enumerator hands
+	// backslash-joined paths.
+	normName := strings.ReplaceAll(name, "\\", "/")
+	if strings.Contains(normName, f.failDir) && !strings.HasSuffix(normName, ".jpg") && !strings.Contains(normName, ".dlbak.") {
 		return nil, errors.New("io wedged")
 	}
 	return f.Fs.Open(name)

@@ -121,19 +121,24 @@ func (m *p3OpRepo) FindOperationsWithReplacements(_ context.Context) ([]models.B
 }
 
 func (m *p3OpRepo) FindOperationsByDestination(_ context.Context, destination string) ([]models.BatchFileOperation, error) {
+	// Mirror production (database repo): destination comparisons use the
+	// canonical key form — backslash/slash and case folding on Windows.
+	want := sweepSlash2Test(destination)
 	return m.byPred(func(op *models.BatchFileOperation) bool {
 		gf, err := models.ParseGeneratedFiles(op.GeneratedFiles)
 		if err != nil {
 			return false
 		}
 		for _, rep := range gf.Replacements {
-			if rep.Destination == destination {
+			if sweepSlash2Test(rep.Destination) == want {
 				return true
 			}
 		}
 		return false
 	}), nil
 }
+
+func sweepSlash2Test(p string) string { return sweepSlash(p) }
 
 // p3Fixture builds one applied Move operation whose apply overwrote media at
 // <dest> (current content there is `current`), journaling the backup bytes
