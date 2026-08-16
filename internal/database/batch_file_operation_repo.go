@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -159,4 +160,34 @@ func (r *BatchFileOperationRepository) CountRevertedByBatchJobIDs(ctx context.Co
 		m[r.BatchJobID] = r.Count
 	}
 	return m, nil
+}
+
+// FindOperationsByDestination returns every operation whose generated-files
+// ledger journals a replacement for destination. SQL LIKE pre-filters
+// candidates; entries are matched exactly in-process so path substrings and
+// LIKE metacharacters can neither over- nor under-match.
+func (r *BatchFileOperationRepository) FindOperationsByDestination(ctx context.Context, destination string) ([]models.BatchFileOperation, error) {
+	escaped := strings.NewReplacer("\\", "\\\\", "%", "\\%", "_", "\\_").Replace(destination)
+	likePattern := "%" + escaped + "%"
+	var candidates []models.BatchFileOperation
+	err := r.GetDB().WithContext(ctx).
+		Where("generated_files LIKE ? ESCAPE '\\'", likePattern).
+		Order("id ASC").Find(&candidates).Error
+	if err != nil {
+		return nil, wrapDBErr("find", "batch file operations by destination", err)
+	}
+	matched := make([]models.BatchFileOperation, 0, len(candidates))
+	for _, op := range candidates {
+		gf, perr := models.ParseGeneratedFiles(op.GeneratedFiles)
+		if perr != nil {
+			continue // unparsable legacy rows never match a destination journal
+		}
+		for _, rep := range gf.Replacements {
+			if rep.Destination == destination {
+				matched = append(matched, op)
+				break
+			}
+		}
+	}
+	return matched, nil
 }

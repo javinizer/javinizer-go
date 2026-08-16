@@ -144,7 +144,7 @@ func TestStepDownload_OverwriteOverlaysScrapedMediaOntoMergedMovie(t *testing.T)
 	cmd := ApplyCmd{Movie: scraped, Download: true, OverwriteExistingMedia: true, Dedup: dedup}
 
 	require.NoError(t, o.stepMerge(cmd, state, &stepCompletion{}))
-	require.NoError(t, o.stepDownload(context.Background(), cmd, state, &stepCompletion{}))
+	require.NoError(t, o.stepDownload(context.Background(), cmd, "op-test", state, &stepCompletion{}))
 	require.NotNil(t, capture.cmd.Movie)
 	assert.Equal(t, "/merged-destination", capture.cmd.DestDir)
 	assert.Equal(t, "new-cover", capture.cmd.Movie.Poster.CoverURL)
@@ -172,7 +172,7 @@ func TestStepDownload_UsesOnlyCreatedPathsForRevert(t *testing.T) {
 		OverwriteExistingMedia: true,
 	}
 
-	require.NoError(t, o.stepDownload(context.Background(), cmd, state, &stepCompletion{}))
+	require.NoError(t, o.stepDownload(context.Background(), cmd, "op-test", state, &stepCompletion{}))
 	assert.Empty(t, state.downloadPaths)
 }
 

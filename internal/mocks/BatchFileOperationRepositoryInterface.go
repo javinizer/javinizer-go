@@ -636,6 +636,74 @@ func (_c *MockBatchFileOperationRepositoryInterface_FindByID_Call) RunAndReturn(
 	return _c
 }
 
+// FindOperationsByDestination provides a mock function for the type MockBatchFileOperationRepositoryInterface
+func (_mock *MockBatchFileOperationRepositoryInterface) FindOperationsByDestination(ctx context.Context, destination string) ([]models.BatchFileOperation, error) {
+	ret := _mock.Called(ctx, destination)
+
+	if len(ret) == 0 {
+		panic("no return value specified for FindOperationsByDestination")
+	}
+
+	var r0 []models.BatchFileOperation
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) ([]models.BatchFileOperation, error)); ok {
+		return returnFunc(ctx, destination)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) []models.BatchFileOperation); ok {
+		r0 = returnFunc(ctx, destination)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]models.BatchFileOperation)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = returnFunc(ctx, destination)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockBatchFileOperationRepositoryInterface_FindOperationsByDestination_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FindOperationsByDestination'
+type MockBatchFileOperationRepositoryInterface_FindOperationsByDestination_Call struct {
+	*mock.Call
+}
+
+// FindOperationsByDestination is a helper method to define mock.On call
+//   - ctx context.Context
+//   - destination string
+func (_e *MockBatchFileOperationRepositoryInterface_Expecter) FindOperationsByDestination(ctx any, destination any) *MockBatchFileOperationRepositoryInterface_FindOperationsByDestination_Call {
+	return &MockBatchFileOperationRepositoryInterface_FindOperationsByDestination_Call{Call: _e.mock.On("FindOperationsByDestination", ctx, destination)}
+}
+
+func (_c *MockBatchFileOperationRepositoryInterface_FindOperationsByDestination_Call) Run(run func(ctx context.Context, destination string)) *MockBatchFileOperationRepositoryInterface_FindOperationsByDestination_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockBatchFileOperationRepositoryInterface_FindOperationsByDestination_Call) Return(batchFileOperations []models.BatchFileOperation, err error) *MockBatchFileOperationRepositoryInterface_FindOperationsByDestination_Call {
+	_c.Call.Return(batchFileOperations, err)
+	return _c
+}
+
+func (_c *MockBatchFileOperationRepositoryInterface_FindOperationsByDestination_Call) RunAndReturn(run func(ctx context.Context, destination string) ([]models.BatchFileOperation, error)) *MockBatchFileOperationRepositoryInterface_FindOperationsByDestination_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Update provides a mock function for the type MockBatchFileOperationRepositoryInterface
 func (_mock *MockBatchFileOperationRepositoryInterface) Update(ctx context.Context, op *models.BatchFileOperation) error {
 	ret := _mock.Called(ctx, op)

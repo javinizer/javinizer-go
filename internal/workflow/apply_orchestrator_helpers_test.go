@@ -74,3 +74,7 @@ func (s *stubRevertLog) CompleteFailed(_ context.Context, opID OperationID, _ *A
 	s.completeCalls = append(s.completeCalls, opID)
 	return nil
 }
+
+func (s *stubRevertLog) RecordReplacement(_ context.Context, _ OperationID, _, _ string) error {
+	return nil
+}

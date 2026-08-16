@@ -70,6 +70,17 @@ type RevertLog interface {
 	// RevertStatusFailed. Use this when a later pipeline step fails after an
 	// earlier step has already mutated the filesystem.
 	CompleteFailed(ctx context.Context, opID OperationID, result *ApplyResult) error
+
+	// RecordReplacement implements the downloader's ReplacementRecorder seam
+	// (POSTER-WRITE-HARDENING P3): the pre-existing bytes at replacedPath have
+	// already been moved aside to backupPath under the downloader's
+	// per-destination lock; this journals the pair on the operation row BEFORE
+	// the new bytes install. Appends are serialized per operation row and each
+	// entry carries a restart-persistent per-destination sequence (assigned
+	// inside the downloader's destination lock, so call order is the true
+	// replace order). Complete/CompleteFailed merge these incremental entries
+	// into the final generated-files ledger.
+	RecordReplacement(ctx context.Context, opID OperationID, replacedPath, backupPath string) error
 }
 
 // RevertLogConfig holds the subset of configuration needed by dbRevertLog.
@@ -122,6 +133,13 @@ func (noOpRevertLog) Complete(_ context.Context, _ OperationID, _ *ApplyResult) 
 }
 
 func (noOpRevertLog) CompleteFailed(_ context.Context, _ OperationID, _ *ApplyResult) error {
+	return nil
+}
+
+func (noOpRevertLog) RecordReplacement(_ context.Context, _ OperationID, _, _ string) error {
+	// No durable store — journal nothing. Callers must not arm the downloader
+	// ledger with a no-op recorder: workflow threads the recorder only when the
+	// concrete RevertLog is the DB-backed implementation (see replacementRecorder).
 	return nil
 }
 
@@ -194,6 +212,40 @@ func newPreOrganizeRecord(batchJobID, movieID, originalPath, nfoSnapshot, nfoPat
 		InPlaceRenamed:  inPlaceRenamed,
 		OriginalDirPath: originalDirPath,
 	}
+}
+
+// mergeReplacementLedger carries replacement entries journaled incrementally
+// by RecordReplacement into the freshly-built generated-files payload so
+// Complete/CompleteFailed never drop the revert-ledger's move-back journal.
+// newRaw == "" (no delete/move-back output) upgrades to a payload carrying
+// just the replacements; unparseable prior content degrades to newRaw.
+func mergeReplacementLedger(logger logging.Logger, priorRaw, newRaw string) string {
+	if priorRaw == "" {
+		return newRaw
+	}
+	prior, err := models.ParseGeneratedFiles(priorRaw)
+	if err != nil || len(prior.Replacements) == 0 {
+		return newRaw
+	}
+	if newRaw == "" {
+		data, mErr := json.Marshal(models.GeneratedFilesJSON{Replacements: prior.Replacements})
+		if mErr != nil {
+			logger.Warnf("Failed to marshal replacement-only generatedFilesJSON: %v", mErr)
+			return newRaw
+		}
+		return string(data)
+	}
+	fresh, err := models.ParseGeneratedFiles(newRaw)
+	if err != nil {
+		return newRaw
+	}
+	fresh.Replacements = prior.Replacements
+	data, mErr := json.Marshal(fresh)
+	if mErr != nil {
+		logger.Warnf("Failed to re-marshal merged generatedFilesJSON: %v", mErr)
+		return newRaw
+	}
+	return string(data)
 }
 
 func buildGeneratedFilesJSON(logger logging.Logger, nfoPath string, subtitleMoves []models.SubtitleMove, downloadPaths []string) string {
@@ -355,6 +407,9 @@ func (l *dbRevertLog) Complete(ctx context.Context, opID OperationID, result *Ap
 	}
 	recordID := uint(recordID64)
 
+	release := replacementLedgerLocks.Acquire(opID)
+	defer release()
+
 	preRecord, err := l.repo.FindByID(ctx, recordID)
 	if err != nil {
 		return fmt.Errorf("revert log Complete: find record %s: %w", opID, err)
@@ -390,7 +445,7 @@ func (l *dbRevertLog) Complete(ctx context.Context, opID OperationID, result *Ap
 		}
 	}
 
-	generatedFilesJSON := buildGeneratedFilesJSON(resolveLogger(l.logger), result.NFOPath, subtitles, result.DownloadPaths)
+	generatedFilesJSON := mergeReplacementLedger(resolveLogger(l.logger), preRecord.GeneratedFiles, buildGeneratedFilesJSON(resolveLogger(l.logger), result.NFOPath, subtitles, result.DownloadPaths))
 
 	if result.FoundNFOPath != "" {
 		preRecord.NFOPath = result.FoundNFOPath
@@ -420,6 +475,9 @@ func (l *dbRevertLog) CompleteFailed(ctx context.Context, opID OperationID, resu
 		return nil
 	}
 	recordID := uint(recordID64)
+
+	release := replacementLedgerLocks.Acquire(opID)
+	defer release()
 
 	preRecord, err := l.repo.FindByID(ctx, recordID)
 	if err != nil {
@@ -455,7 +513,7 @@ func (l *dbRevertLog) CompleteFailed(ctx context.Context, opID OperationID, resu
 			sourceDir = result.OrganizeResult.OldDirectoryPath
 		}
 	}
-	generatedFilesJSON := buildGeneratedFilesJSON(resolveLogger(l.logger), result.NFOPath, subtitles, result.DownloadPaths)
+	generatedFilesJSON := mergeReplacementLedger(resolveLogger(l.logger), preRecord.GeneratedFiles, buildGeneratedFilesJSON(resolveLogger(l.logger), result.NFOPath, subtitles, result.DownloadPaths))
 	if result.FoundNFOPath != "" {
 		preRecord.NFOPath = result.FoundNFOPath
 	}
@@ -469,6 +527,89 @@ func (l *dbRevertLog) CompleteFailed(ctx context.Context, opID OperationID, resu
 	}
 	resolveLogger(l.logger).Warnf("[revert-log] Apply failed for %s after filesystem mutation — record kept revertable (NewPath=%q)", opID, newPath)
 	return nil
+}
+
+// replacementLedgerLocks serializes RecordReplacement appends per operation row
+// so concurrent downloader goroutines journaling onto one row never lose an
+// append (load-modify-write under the keyed lock).
+var replacementLedgerLocks = fsutil.NewKeyedLockRegistry()
+
+// RecordReplacement journals one replaced byte pair onto the operation row.
+// The caller (downloader installOverwriting) already holds the
+// per-destination lock and has moved the pre-existing bytes aside — the
+// per-destination sequence assigned here is therefore the true replace order
+// within this process; the sequence floor is read back from the database so
+// it stays monotonic across restarts.
+func (l *dbRevertLog) RecordReplacement(ctx context.Context, opID OperationID, replacedPath, backupPath string) error {
+	if opID == "" {
+		return fmt.Errorf("revert log RecordReplacement: empty operation ID")
+	}
+	recordID64, err := strconv.ParseUint(opID, 10, 64)
+	if err != nil || recordID64 == 0 {
+		return fmt.Errorf("revert log RecordReplacement: unparsable operation ID %q", opID)
+	}
+
+	release := replacementLedgerLocks.Acquire(opID)
+	defer release()
+
+	preRecord, err := l.repo.FindByID(ctx, uint(recordID64))
+	if err != nil {
+		return fmt.Errorf("revert log RecordReplacement: find record %s: %w", opID, err)
+	}
+	if preRecord == nil {
+		return fmt.Errorf("revert log RecordReplacement: record %s not found", opID)
+	}
+
+	// Legacy tolerance: rows written before the journal existed (or with no
+	// ledger at all) start from the zero value.
+	gf, err := models.ParseGeneratedFiles(preRecord.GeneratedFiles)
+	if err != nil {
+		return fmt.Errorf("revert log RecordReplacement: parse ledger for record %s: %w", opID, err)
+	}
+
+	seq, err := nextDestSequence(ctx, l.repo, replacedPath)
+	if err != nil {
+		return fmt.Errorf("revert log RecordReplacement: sequence for %s: %w", replacedPath, err)
+	}
+	gf.Replacements = append(gf.Replacements, models.ReplacementEntry{
+		Destination: replacedPath,
+		Backup:      backupPath,
+		DestSeq:     seq,
+	})
+
+	data, err := json.Marshal(gf)
+	if err != nil {
+		return fmt.Errorf("revert log RecordReplacement: marshal ledger for record %s: %w", opID, err)
+	}
+	preRecord.GeneratedFiles = string(data)
+	if err := l.repo.Update(ctx, preRecord); err != nil {
+		return fmt.Errorf("revert log RecordReplacement: persist record %s: %w", opID, err)
+	}
+	return nil
+}
+
+// nextDestSequence returns the next per-destination sequence: the maximum
+// DestSeq already journaled for this destination across ALL operations
+// (applied and failed rows both count — a failed record's backups are still
+// restorable), plus one. Restart-persistent because it derives from rows.
+func nextDestSequence(ctx context.Context, repo database.BatchFileOperationRepositoryInterface, destination string) (int64, error) {
+	rows, err := repo.FindOperationsByDestination(ctx, destination)
+	if err != nil {
+		return 0, err
+	}
+	var maxSeq int64
+	for i := range rows {
+		gf, err := models.ParseGeneratedFiles(rows[i].GeneratedFiles)
+		if err != nil {
+			continue // unparsable rows contribute no sequence floor
+		}
+		for _, rep := range gf.Replacements {
+			if rep.Destination == destination && rep.DestSeq > maxSeq {
+				maxSeq = rep.DestSeq
+			}
+		}
+	}
+	return maxSeq + 1, nil
 }
 
 // NewRevertLogFromConfig creates the appropriate RevertLog based on config.

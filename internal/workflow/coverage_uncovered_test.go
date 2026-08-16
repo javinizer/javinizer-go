@@ -819,6 +819,10 @@ func (e errorRevertLog) CompleteFailed(_ context.Context, _ OperationID, _ *Appl
 	return e.completeErr
 }
 
+func (e errorRevertLog) RecordReplacement(_ context.Context, _ OperationID, _, _ string) error {
+	return e.completeErr
+}
+
 func TestCompleteRevertLog_CompleteError(t *testing.T) {
 	impl := &applyOrchImpl{
 		revertLog: errorRevertLog{completeErr: errors.New("complete failed")},
