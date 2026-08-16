@@ -704,6 +704,68 @@ func (_c *MockBatchFileOperationRepositoryInterface_FindOperationsByDestination_
 	return _c
 }
 
+// FindOperationsWithLedger provides a mock function for the type MockBatchFileOperationRepositoryInterface
+func (_mock *MockBatchFileOperationRepositoryInterface) FindOperationsWithLedger(ctx context.Context) ([]models.BatchFileOperation, error) {
+	ret := _mock.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for FindOperationsWithLedger")
+	}
+
+	var r0 []models.BatchFileOperation
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context) ([]models.BatchFileOperation, error)); ok {
+		return returnFunc(ctx)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context) []models.BatchFileOperation); ok {
+		r0 = returnFunc(ctx)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]models.BatchFileOperation)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = returnFunc(ctx)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockBatchFileOperationRepositoryInterface_FindOperationsWithLedger_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FindOperationsWithLedger'
+type MockBatchFileOperationRepositoryInterface_FindOperationsWithLedger_Call struct {
+	*mock.Call
+}
+
+// FindOperationsWithLedger is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *MockBatchFileOperationRepositoryInterface_Expecter) FindOperationsWithLedger(ctx any) *MockBatchFileOperationRepositoryInterface_FindOperationsWithLedger_Call {
+	return &MockBatchFileOperationRepositoryInterface_FindOperationsWithLedger_Call{Call: _e.mock.On("FindOperationsWithLedger", ctx)}
+}
+
+func (_c *MockBatchFileOperationRepositoryInterface_FindOperationsWithLedger_Call) Run(run func(ctx context.Context)) *MockBatchFileOperationRepositoryInterface_FindOperationsWithLedger_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockBatchFileOperationRepositoryInterface_FindOperationsWithLedger_Call) Return(batchFileOperations []models.BatchFileOperation, err error) *MockBatchFileOperationRepositoryInterface_FindOperationsWithLedger_Call {
+	_c.Call.Return(batchFileOperations, err)
+	return _c
+}
+
+func (_c *MockBatchFileOperationRepositoryInterface_FindOperationsWithLedger_Call) RunAndReturn(run func(ctx context.Context) ([]models.BatchFileOperation, error)) *MockBatchFileOperationRepositoryInterface_FindOperationsWithLedger_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // FindOperationsWithReplacements provides a mock function for the type MockBatchFileOperationRepositoryInterface
 func (_mock *MockBatchFileOperationRepositoryInterface) FindOperationsWithReplacements(ctx context.Context) ([]models.BatchFileOperation, error) {
 	ret := _mock.Called(ctx)

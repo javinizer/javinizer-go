@@ -987,16 +987,24 @@ func TestGuardDoubleRevert_CopyModeNotRevertible(t *testing.T) {
 	mockRepo.On("UpdateRevertStatus", mock.Anything, uint(600), models.RevertStatusFailed).Return(nil)
 	r := NewReverter(fs, mockRepo)
 
+	// P3: the copy-mode rejection now happens INSIDE revertFile, after the
+	// replacement-journal replay — the guard helper itself is status-only.
+	// Anchor (copy-mode: NewPath) present so the flow reaches the type gate.
+	require.NoError(t, fs.MkdirAll("/dst/T600", 0o755))
+	require.NoError(t, afero.WriteFile(fs, "/dst/T600/T600.mkv", []byte("video"), 0o644))
 	op := &models.BatchFileOperation{
 		ID:            600,
 		RevertStatus:  models.RevertStatusApplied,
 		OperationType: models.OperationTypeCopy,
+		NewPath:       "/dst/T600/T600.mkv",
+		OriginalPath:  "/src/T600.mkv",
 	}
-	result, err := r.guardDoubleRevert(context.Background(), op)
+	result, err := r.revertFile(context.Background(), op)
 	require.NoError(t, err)
 	assert.NotNil(t, result)
 	assert.Equal(t, models.RevertOutcomeFailed, result.Outcome)
 	assert.Equal(t, models.RevertReasonUnexpectedPathState, result.Reason)
+	assert.Contains(t, result.Error, "cannot be reverted")
 	mockRepo.AssertExpectations(t)
 }
 

@@ -156,8 +156,10 @@ func NewJobStore(jobRepo database.JobRepositoryInterface, batchFileOpRepo databa
 		tempDir:        tempDir,
 		templateEngine: engine,
 		fs:             filesystem,
-		tempCleaner:    NewTempDirCleaner(filesystem, tempDir, jobRepo),
+		tempCleaner:    nil, // built below with the admission probe attached
 	}
+
+	s.tempCleaner = NewTempDirCleaner(filesystem, tempDir, jobRepo, WithAdmissionProbe(s.admissionBusy))
 
 	// Apply options, which may override the default persistence.
 	for _, opt := range opts {
@@ -852,6 +854,10 @@ func (s *JobStore) getTempCleaner() *TempDirCleaner {
 	s.tempCleanerOnce.Do(func() {
 		if s.tempCleaner == nil {
 			s.tempCleaner = NewTempDirCleaner(s.fs, s.tempDir, s.jobRepo, WithAdmissionProbe(s.admissionBusy))
+		} else if s.tempCleaner.admissionProbe == nil {
+			// Eagerly-constructed cleaners (NewJobStore) must carry the same
+			// lease protection — attaching here covers both paths (codex P3 R2-2).
+			s.tempCleaner.admissionProbe = s.admissionBusy
 		}
 	})
 	return s.tempCleaner

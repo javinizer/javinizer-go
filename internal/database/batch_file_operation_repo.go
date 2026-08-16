@@ -215,3 +215,16 @@ func (r *BatchFileOperationRepository) FindOperationsWithReplacements(ctx contex
 	}
 	return matched, nil
 }
+
+// FindOperationsWithLedger returns every operation carrying a non-empty
+// generated-files ledger of any shape.
+func (r *BatchFileOperationRepository) FindOperationsWithLedger(ctx context.Context) ([]models.BatchFileOperation, error) {
+	var rows []models.BatchFileOperation
+	err := r.GetDB().WithContext(ctx).
+		Where("generated_files IS NOT NULL AND generated_files <> ''").
+		Order("id ASC").Find(&rows).Error
+	if err != nil {
+		return nil, wrapDBErr("find", "batch file operations with ledger", err)
+	}
+	return rows, nil
+}

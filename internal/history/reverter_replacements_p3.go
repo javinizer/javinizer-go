@@ -5,10 +5,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
+	"sync/atomic"
+
+	"github.com/javinizer/javinizer-go/internal/config"
 
 	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/spf13/afero"
 )
 
 // POSTER-WRITE-HARDENING P3 — revert-ledger move-back for journalized media
@@ -112,7 +117,11 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 	}
 
 	// Execute restores. The shared per-destination lock registry serializes
-	// restores against in-flight downloader overwrites of the same path.
+	// restores against in-flight downloader overwrites of the same path. The
+	// restore is staged-copy based: the journal entry is consumed from the
+	// database BEFORE the backup file is removed, so a consumption failure
+	// leaves a retryable row + intact backup instead of a dangling pointer
+	// to consumed bytes (codex P3 R2-4).
 	for dest, entries := range byDest {
 		release := fsutil.SharedDestLocks().Acquire(dest)
 		for _, e := range entries {
@@ -120,16 +129,17 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 				release()
 				return restored, fmt.Errorf("journaled backup %s for destination %s is unreadable: %w", e.Backup, dest, statErr)
 			}
-			if repErr := fsutil.ReplaceFile(r.fs, e.Backup, dest); repErr != nil {
+			if repErr := copyRestoreBytes(r.fs, e.Backup, dest); repErr != nil {
 				release()
 				return restored, fmt.Errorf("failed to restore %s → %s: %w", e.Backup, dest, repErr)
 			}
 			restored[dest] = true
-			restored[e.Backup] = true
 			if cErr := r.consumeReplacementEntry(ctx, op, e); cErr != nil {
 				release()
 				return restored, cErr
 			}
+			// Consumption persisted — the backup file is redundant now.
+			_ = r.fs.Remove(e.Backup)
 		}
 		release()
 	}
@@ -194,6 +204,29 @@ func (r *Reverter) sweepJournaledDestinations(ctx context.Context, ops []models.
 	if _, err := r.sweeper.SweepDestinations(ctx, dests); err != nil {
 		logging.Warnf("pre-revert replacement sweep failed: %v (continuing with revert)", err)
 	}
+}
+
+// restoreCopyNonce uniquifies the staged copy path for a destination restore.
+var restoreCopyNonce atomic.Uint64
+
+// copyRestoreBytes restores the backup bytes onto dest WITHOUT consuming the
+// backup file: bytes are staged adjacent and swapped in with replace-aware
+// rename; the caller removes the backup only after its journal entry is
+// durably consumed.
+func copyRestoreBytes(fs afero.Fs, backup, dest string) error {
+	data, err := afero.ReadFile(fs, backup)
+	if err != nil {
+		return fmt.Errorf("read backup: %w", err)
+	}
+	staged := dest + ".rstr." + strconv.FormatUint(restoreCopyNonce.Add(1), 16)
+	if err := afero.WriteFile(fs, staged, data, config.FilePerm); err != nil {
+		return fmt.Errorf("stage restore: %w", err)
+	}
+	if err := fsutil.ReplaceFile(fs, staged, dest); err != nil {
+		_ = fs.Remove(staged)
+		return fmt.Errorf("swap staged restore: %w", err)
+	}
+	return nil
 }
 
 // maxJournalSeq reports the highest journaled destination sequence on an

@@ -76,6 +76,11 @@ func (s *ReplacementSweeper) index(ctx context.Context) (*replacementLedgerIndex
 	if err != nil {
 		return nil, err
 	}
+	ledgerRows, lerr := s.repo.FindOperationsWithLedger(ctx)
+	if lerr != nil {
+		return nil, lerr
+	}
+	rows = append(rows, ledgerRows...)
 	idx := &replacementLedgerIndex{
 		journaled: map[string]*models.BatchFileOperation{},
 		dirs:      map[string]bool{},
@@ -89,6 +94,13 @@ func (s *ReplacementSweeper) index(ctx context.Context) (*replacementLedgerIndex
 		for _, rep := range gf.Replacements {
 			idx.journaled[sweepSlash(rep.Backup)] = row
 			idx.dirs[sweepSlash(filepath.Dir(rep.Destination))] = true
+		}
+		// R2-3: delete-listed paths name download destinations even when NO
+		// replacement was (yet) journaled — the crash window between
+		// backup-aside and RecordReplacement leaves the backup in exactly such
+		// a directory.
+		for _, delPath := range gf.Delete {
+			idx.dirs[sweepSlash(filepath.Dir(delPath))] = true
 		}
 	}
 	return idx, nil
@@ -204,7 +216,7 @@ func (s *ReplacementSweeper) sweepOne(ctx context.Context, idx *replacementLedge
 func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.BatchFileOperation, backup, dest string) bool {
 	release := fsutil.SharedDestLocks().Acquire(dest)
 	defer release()
-	if rnErr := s.fs.Rename(backup, dest); rnErr != nil {
+	if rnErr := copyRestoreBytes(s.fs, backup, dest); rnErr != nil {
 		logging.Warnf("replacement sweep restore %s→%s: %v", backup, dest, rnErr)
 		return false
 	}
@@ -228,6 +240,8 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 	row.GeneratedFiles = string(data)
 	if uErr := s.repo.Update(ctx, row); uErr != nil {
 		logging.Warnf("replacement sweep: journal consumption failed for op %d: %v", row.ID, uErr)
+		return false // bytes restored but entry not consumed — keep the backup for the retry
 	}
+	_ = s.fs.Remove(backup)
 	return true
 }

@@ -176,14 +176,24 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 		return result, err
 	}
 
-	// P3: replay the replacement journal (reverse destination-sequence) before
-	// any generated-file cleanup. Restored content is subtracted from the
-	// delete list. Rejections and restore failures leave the row untouched
-	// (Applied / failed) so the revert can be retried in the right order.
+	// P3: replay the replacement journal (reverse destination-sequence) BEFORE
+	// any generated-file cleanup AND before the legacy copy-mode rejection —
+	// copy/hardlink/symlink applies can journal media overwrites too, and
+	// rejecting first would strand them restoreless forever (codex P3 R2-1).
+	// Restored content is subtracted from the delete list. Rejections and
+	// restore failures leave the row untouched so a retry runs in order.
 	restored, rejErr := r.restoreReplacementJournal(ctx, op)
 	if rejErr != nil {
 		logging.Warnf("Replacement journal restore refused/failed for op %d: %v", op.ID, rejErr)
 		return rejectedRevert(op, rejErr.Error()), nil
+	}
+
+	if op.OperationType != models.OperationTypeMove && op.OperationType != models.OperationTypeUpdate {
+		msg := ErrCopyModeNotRevertible.Error()
+		if len(restored) > 0 {
+			msg += fmt.Sprintf(" (%d journaled replacement(s) restored first)", len(restored)/2)
+		}
+		return failRevert(ctx, r.batchFileOpRepo, op, models.RevertReasonUnexpectedPathState, msg), nil
 	}
 
 	isUpdate := op.OperationType == models.OperationTypeUpdate
@@ -234,10 +244,6 @@ func (r *Reverter) guardDoubleRevert(ctx context.Context, op *models.BatchFileOp
 
 	if op.RevertStatus != models.RevertStatusApplied && op.RevertStatus != models.RevertStatusFailed {
 		return nil, fmt.Errorf("operation has unexpected revert status: %s", op.RevertStatus)
-	}
-
-	if op.OperationType != models.OperationTypeMove && op.OperationType != models.OperationTypeUpdate {
-		return failRevert(ctx, r.batchFileOpRepo, op, models.RevertReasonUnexpectedPathState, ErrCopyModeNotRevertible.Error()), nil
 	}
 
 	return nil, nil

@@ -109,6 +109,10 @@ func (m *p3OpRepo) CountRevertedByBatchJobIDs(context.Context, []string) (map[st
 	return nil, nil
 }
 
+func (m *p3OpRepo) FindOperationsWithLedger(_ context.Context) ([]models.BatchFileOperation, error) {
+	return m.byPred(func(op *models.BatchFileOperation) bool { return op.GeneratedFiles != "" }), nil
+}
+
 func (m *p3OpRepo) FindOperationsWithReplacements(_ context.Context) ([]models.BatchFileOperation, error) {
 	return m.byPred(func(op *models.BatchFileOperation) bool {
 		gf, err := models.ParseGeneratedFiles(op.GeneratedFiles)

@@ -51,6 +51,16 @@ func (m *mockBatchFileOpRepo) FindByBatchJobIDAndRevertStatus(ctx context.Contex
 	return nil, nil
 }
 
+func (m *mockBatchFileOpRepo) FindOperationsWithLedger(ctx context.Context) ([]models.BatchFileOperation, error) {
+	matched := make([]models.BatchFileOperation, 0, len(m.ops))
+	for _, op := range m.ops {
+		if op.GeneratedFiles != "" {
+			matched = append(matched, *op)
+		}
+	}
+	return matched, nil
+}
+
 func (m *mockBatchFileOpRepo) FindOperationsWithReplacements(ctx context.Context) ([]models.BatchFileOperation, error) {
 	matched := make([]models.BatchFileOperation, 0, 1)
 	for _, op := range m.ops {

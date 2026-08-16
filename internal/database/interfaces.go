@@ -162,6 +162,11 @@ type BatchFileOperationRepositoryInterface interface {
 	// FindOperationsWithReplacements returns every operation whose ledger journals
 	// at least one replacement — the replacement sweeper's row scan (P3).
 	FindOperationsWithReplacements(ctx context.Context) ([]models.BatchFileOperation, error)
+	// FindOperationsWithLedger returns every operation carrying ANY generated-files
+	// ledger (delete/move-back/replacements). The sweeper derives destination
+	// directories from it so pre-journal crash windows (backup set aside, process
+	// died before RecordReplacement) remain discoverable (codex P3 R2-3).
+	FindOperationsWithLedger(ctx context.Context) ([]models.BatchFileOperation, error)
 }
 
 // ApiTokenRepositoryInterface defines the contract for API token operations
