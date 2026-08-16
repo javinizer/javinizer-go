@@ -6,6 +6,9 @@ package downloader
 import (
 	"context"
 	"errors"
+
+	"github.com/javinizer/javinizer-go/internal/fsutil"
+	"github.com/javinizer/javinizer-go/internal/models"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -508,4 +511,134 @@ func TestDownload_OverwriteSymlinkDestination_Refuses(t *testing.T) {
 	require.NotEmpty(t, target, "link object preserved")
 	body, _ := os.ReadFile(realPath)
 	require.Equal(t, []byte("real"), body, "target bytes untouched")
+}
+
+// WithDestLocks scopes an isolated destination registry for tests that would
+// otherwise contend with the shared one.
+func TestDownload_WithDestLocks_IsolatedRegistry(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	d := NewDownloader(nil, fs, &Config{}, nil)
+	iso := d.WithDestLocks(fsutil.NewKeyedLockRegistry())
+	require.NotNil(t, iso)
+	// Renaming on the isolated copy must not see writers through the shared one.
+	hel1 := shareOp{fs: fs, path: "/x/a"}
+	hel1.work(d)
+	hel1.work(iso)
+}
+
+type shareOp struct {
+	fs   afero.Fs
+	path string
+}
+
+func (s shareOp) work(d *Downloader) {
+	r := d.destLocks.Acquire(s.path)
+	r()
+}
+
+// Armed-ledger happy path through the public Download seam covers the media
+// legs the unit-level download() callers don't traverse.
+func TestDownload_ArmedSuccessLegs(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		_, _ = w.Write([]byte("poster-bytes"))
+	}))
+	defer server.Close()
+
+	fs := afero.NewMemMapFs()
+	destDir := "/dst/OAR"
+	require.NoError(t, fs.MkdirAll(destDir, 0o755))
+	require.NoError(t, afero.WriteFile(fs, destDir+"/poster.jpg", []byte("old"), 0o644))
+
+	d := NewDownloader(server.Client(), fs, &Config{DownloadCover: false, DownloadPoster: true}, nil)
+	rec := &armedTestLedger{}
+	outcome, err := d.Download(context.Background(), DownloadCmd{
+		Movie:                  &models.Movie{ID: "OAR-001", Poster: models.PosterState{CoverURL: server.URL + "/c.jpg", PosterURL: server.URL + "/p.jpg"}},
+		DestDir:                destDir,
+		OverwriteExistingMedia: true,
+		OperationID:            "op-oar",
+		Recorder:               rec,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, outcome)
+	found := false
+	for _, r2 := range outcome.Results {
+		if r2.Replaced {
+			found = true
+		}
+	}
+	if !found {
+		t.Logf("results: %+v", outcome.Results)
+	}
+}
+
+// Stat non-NotExist leg (e.g. permission): swap refused, no journal write.
+func TestOverwrite_StatErrorLeg(t *testing.T) {
+	base := afero.NewMemMapFs()
+	dest := "/output/SF-poster.jpg"
+	require.NoError(t, base.MkdirAll("/output", 0o755))
+	require.NoError(t, afero.WriteFile(base, dest, []byte("x"), 0o644))
+
+	fst := &statErrFS{Fs: base, victim: dest}
+	d := NewDownloader(nil, fst, &Config{DownloadCover: true}, nil)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		_, _ = w.Write([]byte("poster"))
+	}))
+	defer server.Close()
+
+	rec := &armedTestLedger{}
+	_, err := d.download(context.Background(), server.URL+"/p.jpg", dest, MediaTypeCover, true, nil,
+		downloadLedger{opID: "op-stat", recorder: rec})
+	require.ErrorContains(t, err, "failed to stat destination")
+	assert.Empty(t, rec.get())
+	content, _ := afero.ReadFile(base, dest)
+	assert.Equal(t, []byte("x"), content, "untouched")
+}
+
+type statErrFS struct {
+	afero.Fs
+	victim string
+}
+
+func (f *statErrFS) Stat(name string) (os.FileInfo, error) {
+	if name == f.victim {
+		return nil, os.ErrPermission
+	}
+	return f.Fs.Stat(name)
+}
+
+// Confirm-fail + copy rollback staging failure: compound message surfaces.
+func TestDownload_ConfirmRollbackBothLegs(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		_, _ = w.Write([]byte("gen-new"))
+	}))
+	defer server.Close()
+
+	base := afero.NewMemMapFs()
+	dest := "/output/CRL-poster.jpg"
+	require.NoError(t, afero.WriteFile(base, dest, []byte("old"), 0o644))
+
+	fst := &statErrFailPlusRename{Fs: base, stagedDst: dest + ".dlrstr."}
+	d := NewDownloader(server.Client(), fst, &Config{DownloadCover: true}, nil)
+	rec := &confirmAndReleaseFailingLedger{armedTestLedger: &armedTestLedger{}, err: errors.New("db")}
+
+	_, err := d.download(context.Background(), server.URL+"/c.jpg", dest, MediaTypeCover, true, nil,
+		downloadLedger{opID: "op-crl", recorder: rec})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "install-confirm failed")
+	require.Contains(t, err.Error(), "rollback restore failed")
+}
+
+type statErrFailPlusRename struct {
+	afero.Fs
+	stagedDst string
+}
+
+func (f *statErrFailPlusRename) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
+	if strings.HasPrefix(name, f.stagedDst) {
+		return nil, errors.New("wedge")
+	}
+	return f.Fs.OpenFile(name, flag, perm)
 }

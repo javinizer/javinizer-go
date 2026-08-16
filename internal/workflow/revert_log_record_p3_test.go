@@ -12,6 +12,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/downloader"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/organizer"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 )
@@ -520,4 +521,96 @@ func TestRevertLog_MergeFallbacks(t *testing.T) {
 	row.GeneratedFiles = `definitely-broken`
 	require.NoError(t, repo.Update(ctx, row))
 	require.Error(t, rl.RecordReplacement(ctx, opID, dest+"2", dest+"2.b"))
+}
+
+// All no-op log method legs directly.
+func TestNoOpRevertLog_AllMethodsNoPanic(t *testing.T) {
+	ctx := context.Background()
+	l := NewRevertLogFromConfig(nil, NewRevertLogConfig(true, nil), "j", afero.NewMemMapFs(), nil, nil, nil)
+
+	op, err := l.Begin(ctx, ApplyCmd{})
+	require.NoError(t, err)
+	require.Empty(t, op)
+	l.CaptureSnapshot(ctx, "", ApplyCmd{})
+	require.NoError(t, l.Complete(ctx, "", nil))
+	require.NoError(t, l.CompleteFailed(ctx, "", nil))
+	require.NoError(t, l.RecordReplacement(ctx, "", "d", "b"))
+	require.NoError(t, l.ReleaseReplacement(ctx, "", "d", "b"))
+	require.NoError(t, l.ConfirmReplacement(ctx, "", "d", "b"))
+	require.Nil(t, replacementRecorder(l), "no-op never arms")
+}
+
+// Begin with a nil movie no-ops.
+func TestBegin_NilMovieReturnsEmptyID(t *testing.T) {
+	db, _, rl := newP3RecorderHarness(t, ":memory:")
+	defer func() { _ = db.Close() }()
+	op, err := rl.Begin(context.Background(), ApplyCmd{})
+	require.NoError(t, err)
+	require.Empty(t, op)
+}
+
+// Complete/CompleteFailed: FindByID failure legs.
+func TestComplete_FindByIDFailureLegs(t *testing.T) {
+	db, repo, rl := newP3RecorderHarness(t, ":memory:")
+	defer func() { _ = db.Close() }()
+	ctx := context.Background()
+	opID := beginP3Op(t, rl, "CPL-001")
+
+	flaky := &failFindBFORepo{repo: repo, err: errors.New("read wedged")}
+	broken := NewDBRevertLog(flaky, NewRevertLogConfig(true, nil), "job-x", afero.NewMemMapFs(), nil, nil, nil)
+	require.Error(t, broken.Complete(ctx, opID, &ApplyResult{}))
+	require.Error(t, broken.CompleteFailed(ctx, opID, nil))
+
+	flaky.err = nil
+	require.NoError(t, broken.Complete(ctx, opID, &ApplyResult{Movie: &models.Movie{ID: "CPL-001"}}))
+	require.NoError(t, broken.CompleteFailed(ctx, opID, &ApplyResult{Movie: &models.Movie{ID: "CPL-001"}, OrganizeResult: &organizer.OrganizeResult{}}))
+}
+
+type failFindBFORepo struct {
+	repo *database.BatchFileOperationRepository
+	err  error
+}
+
+func (f *failFindBFORepo) Create(ctx context.Context, op *models.BatchFileOperation) error {
+	return f.repo.Create(ctx, op)
+}
+func (f *failFindBFORepo) CreateBatch(ctx context.Context, ops []*models.BatchFileOperation) error {
+	return f.repo.CreateBatch(ctx, ops)
+}
+func (f *failFindBFORepo) FindByID(ctx context.Context, id uint) (*models.BatchFileOperation, error) {
+	if f.err != nil {
+		return nil, errors.New("read wedged")
+	}
+	return f.repo.FindByID(ctx, id)
+}
+func (f *failFindBFORepo) FindByBatchJobID(ctx context.Context, id string) ([]models.BatchFileOperation, error) {
+	return f.repo.FindByBatchJobID(ctx, id)
+}
+func (f *failFindBFORepo) FindByBatchJobIDAndRevertStatus(ctx context.Context, id string, s models.RevertStatusEnum) ([]models.BatchFileOperation, error) {
+	return f.repo.FindByBatchJobIDAndRevertStatus(ctx, id, s)
+}
+func (f *failFindBFORepo) Update(ctx context.Context, op *models.BatchFileOperation) error {
+	return f.repo.Update(ctx, op)
+}
+func (f *failFindBFORepo) UpdateRevertStatus(ctx context.Context, id uint, s models.RevertStatusEnum) error {
+	return f.repo.UpdateRevertStatus(ctx, id, s)
+}
+func (f *failFindBFORepo) CountByBatchJobID(context.Context, string) (int64, error) { return 0, nil }
+func (f *failFindBFORepo) CountByBatchJobIDAndRevertStatus(context.Context, string, models.RevertStatusEnum) (int64, error) {
+	return 0, nil
+}
+func (f *failFindBFORepo) CountByBatchJobIDs(context.Context, []string) (map[string]int64, error) {
+	return nil, nil
+}
+func (f *failFindBFORepo) CountRevertedByBatchJobIDs(context.Context, []string) (map[string]int64, error) {
+	return nil, nil
+}
+func (f *failFindBFORepo) FindOperationsByDestination(ctx context.Context, d string) ([]models.BatchFileOperation, error) {
+	return f.repo.FindOperationsByDestination(ctx, d)
+}
+func (f *failFindBFORepo) FindOperationsWithReplacements(ctx context.Context) ([]models.BatchFileOperation, error) {
+	return f.repo.FindOperationsWithReplacements(ctx)
+}
+func (f *failFindBFORepo) FindOperationsWithLedger(ctx context.Context) ([]models.BatchFileOperation, error) {
+	return f.repo.FindOperationsWithLedger(ctx)
 }

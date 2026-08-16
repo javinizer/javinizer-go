@@ -94,13 +94,10 @@ func bootstrapAPIDeps(cfg *config.Config, configFile string, auth commandutil.Au
 	// orphans left by downloader overwrites. Bounded by construction (only
 	// directories holding journaled destinations are scanned) and safe to run
 	// inline — the sweep is read-mostly and destination-locked per byte move.
-	if sweeper := history.NewReplacementSweeper(fs, repos.BatchFileOpRepo); sweeper != nil {
-		if healed, err := sweeper.Sweep(context.Background()); err != nil {
-			logging.Warnf("startup replacement sweep failed: %v", err)
-		} else if healed > 0 {
-			logging.Infof("startup replacement sweep healed %d backup(s)", healed)
-		}
-	}
+	// P3 revert-ledger sweep (startup) — wraps the two-call choreography in a
+	// tested seam so bootstrap stays thin and the error path is coverable from
+	// history's package tests without bootstrapping the API.
+	history.SweepOnStartup(fs, repos.BatchFileOpRepo)
 
 	// Temp poster cleanup is intentionally NOT started automatically.
 	// Running CleanupStaleTempDirs on startup (or on a periodic ticker) wipes

@@ -377,3 +377,87 @@ func TestIsReplacementBackupName_Matrix(t *testing.T) {
 	require.False(t, IsReplacementBackupName("x.jpg.rsbak.0123456789abcdef"))
 	require.False(t, IsReplacementBackupName("poster.jpg.backup"))
 }
+
+// copyRestoreBytes injectable-failure legs: open failure, staged create
+// wedge, swap-rename wedge — all return errors without touching the dest.
+func TestCopyRestoreBytes_ErrorLegs(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	require.NoError(t, afero.WriteFile(fs, "/b", []byte("old"), 0o644))
+	dst := "/out/d"
+	require.NoError(t, fs.MkdirAll("/out", 0o755))
+	require.NoError(t, afero.WriteFile(fs, dst, []byte("new"), 0o644))
+
+	// missing backup → read failure
+	require.Error(t, copyRestoreBytes(fs, "/missing", dst))
+	// open wedge on the staged path
+	require.Error(t, copyRestoreBytes(stagedWedgeHistoryFs{Fs: fs}, "/b", dst))
+	// swap rename wedge: staged write succeeds, ReplaceFile fails
+	require.Error(t, copyRestoreBytes(renameDestWedgeHistoryFs{Fs: fs, dst: dst}, "/b", dst))
+	got, err := afero.ReadFile(fs, dst)
+	require.NoError(t, err)
+	require.Equal(t, []byte("new"), got, "dest preserved through every failure")
+}
+
+type stagedWedgeHistoryFs struct{ afero.Fs }
+
+func (f stagedWedgeHistoryFs) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
+	if strings.Contains(name, ".rstr.") {
+		return nil, errors.New("staged wedge")
+	}
+	return f.Fs.OpenFile(name, flag, perm)
+}
+
+type renameDestWedgeHistoryFs struct {
+	afero.Fs
+	dst string
+}
+
+func (f renameDestWedgeHistoryFs) Rename(from, to string) error {
+	if to == f.dst {
+		return errors.New("swap wedge")
+	}
+	return f.Fs.Rename(from, to)
+}
+
+// Orphan backup with destination present: delete failure is non-fatal (kept).
+func TestOrphanBackup_RemoveFailureKeeps(t *testing.T) {
+	inner := afero.NewMemMapFs()
+	fs := &removeFailFs{Fs: inner, victim: "/out/ORM/poster.jpg.dlbak.0123456789abcdef"}
+	repo := newP3OpRepo()
+	dest := "/out/ORM/poster.jpg"
+	require.NoError(t, fs.MkdirAll("/out/ORM", config.DirPerm))
+	require.NoError(t, afero.WriteFile(fs, dest, []byte("cur"), config.FilePerm))
+	require.NoError(t, afero.WriteFile(fs, fs.victim, []byte("old"), config.FilePerm))
+	backdate(t, fs, fs.victim)
+
+	raw, _ := json.Marshal(models.GeneratedFilesJSON{Roots: []string{"/out/ORM"}})
+	op := &models.BatchFileOperation{
+		BatchJobID: "job-1", MovieID: "ORM-001", OriginalPath: "/src/orm.mkv",
+		OperationType: models.OperationTypeUpdate, GeneratedFiles: string(raw),
+		RevertStatus: models.RevertStatusApplied,
+	}
+	require.NoError(t, repo.Create(context.Background(), op))
+
+	healed, err := NewReplacementSweeper(fs, repo).Sweep(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, 0, healed, "remove failure keeps the stale backup (not harmful)")
+	exists, _ := afero.Exists(fs, fs.victim)
+	require.True(t, exists)
+}
+
+type removeFailFs struct {
+	afero.Fs
+	victim string
+}
+
+func (f *removeFailFs) Remove(name string) error {
+	if name == f.victim {
+		return errors.New("remove wedged")
+	}
+	return f.Fs.Remove(name)
+}
+
+func TestMustJournal_ToleratesGarbage(t *testing.T) {
+	require.Nil(t, mustJournal(&models.BatchFileOperation{GeneratedFiles: "drivel"}))
+	require.Empty(t, mustJournal(&models.BatchFileOperation{}))
+}

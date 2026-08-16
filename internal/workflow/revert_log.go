@@ -237,13 +237,9 @@ func newPreOrganizeRecord(batchJobID, movieID, originalPath, nfoSnapshot, nfoPat
 // newRaw == "" (no delete/move-back output) upgrades to a payload carrying
 // just the replacements; unparseable prior content degrades to newRaw.
 // appendLedgerRoot adds root to the ledger's seeded discovery roots (dedup).
-func appendLedgerRoot(logger logging.Logger, raw, root string) string {
+func appendLedgerRoot(raw, root string) string {
 	if raw == "" {
-		data, err := json.Marshal(models.GeneratedFilesJSON{Roots: []string{root}})
-		if err != nil {
-			return raw
-		}
-		return string(data)
+		return models.MarshalLedgerJSON(models.GeneratedFilesJSON{Roots: []string{root}})
 	}
 	gf, err := models.ParseGeneratedFiles(raw)
 	if err != nil {
@@ -255,15 +251,11 @@ func appendLedgerRoot(logger logging.Logger, raw, root string) string {
 		}
 	}
 	gf.Roots = append(gf.Roots, root)
-	data, err := json.Marshal(gf)
-	if err != nil {
-		logger.Warnf("Failed to append ledger root %s: %v", root, err)
-		return raw
-	}
-	return string(data)
+	data := models.MarshalLedgerJSON(gf)
+	return data
 }
 
-func mergeReplacementLedger(logger logging.Logger, priorRaw, newRaw string) string {
+func mergeReplacementLedger(priorRaw, newRaw string) string {
 	if priorRaw == "" {
 		return newRaw
 	}
@@ -272,12 +264,7 @@ func mergeReplacementLedger(logger logging.Logger, priorRaw, newRaw string) stri
 		return newRaw
 	}
 	if newRaw == "" {
-		data, mErr := json.Marshal(models.GeneratedFilesJSON{Replacements: prior.Replacements, Roots: prior.Roots})
-		if mErr != nil {
-			logger.Warnf("Failed to marshal replacement-only generatedFilesJSON: %v", mErr)
-			return newRaw
-		}
-		return string(data)
+		return models.MarshalLedgerJSON(models.GeneratedFilesJSON{Replacements: prior.Replacements, Roots: prior.Roots})
 	}
 	fresh, err := models.ParseGeneratedFiles(newRaw)
 	if err != nil {
@@ -287,12 +274,7 @@ func mergeReplacementLedger(logger logging.Logger, priorRaw, newRaw string) stri
 	if len(fresh.Roots) == 0 {
 		fresh.Roots = prior.Roots
 	}
-	data, mErr := json.Marshal(fresh)
-	if mErr != nil {
-		logger.Warnf("Failed to re-marshal merged generatedFilesJSON: %v", mErr)
-		return newRaw
-	}
-	return string(data)
+	return models.MarshalLedgerJSON(fresh)
 }
 
 func buildGeneratedFilesJSON(logger logging.Logger, nfoPath string, subtitleMoves []models.SubtitleMove, downloadPaths []string) string {
@@ -500,11 +482,11 @@ func (l *dbRevertLog) Complete(ctx context.Context, opID OperationID, result *Ap
 		}
 	}
 
-	generatedFilesJSON := mergeReplacementLedger(resolveLogger(l.logger), preRecord.GeneratedFiles, buildGeneratedFilesJSON(resolveLogger(l.logger), result.NFOPath, subtitles, result.DownloadPaths))
+	generatedFilesJSON := mergeReplacementLedger(preRecord.GeneratedFiles, buildGeneratedFilesJSON(resolveLogger(l.logger), result.NFOPath, subtitles, result.DownloadPaths))
 	// R4-2: media actually lands in the organizer's leaf folder — add it to
 	// the seeded roots so the sweeper's bounded recursion starts there.
 	if result.OrganizeResult != nil && result.OrganizeResult.FolderPath != "" {
-		generatedFilesJSON = appendLedgerRoot(resolveLogger(l.logger), generatedFilesJSON, result.OrganizeResult.FolderPath)
+		generatedFilesJSON = appendLedgerRoot(generatedFilesJSON, result.OrganizeResult.FolderPath)
 	}
 
 	if result.FoundNFOPath != "" {
@@ -573,7 +555,7 @@ func (l *dbRevertLog) CompleteFailed(ctx context.Context, opID OperationID, resu
 			sourceDir = result.OrganizeResult.OldDirectoryPath
 		}
 	}
-	generatedFilesJSON := mergeReplacementLedger(resolveLogger(l.logger), preRecord.GeneratedFiles, buildGeneratedFilesJSON(resolveLogger(l.logger), result.NFOPath, subtitles, result.DownloadPaths))
+	generatedFilesJSON := mergeReplacementLedger(preRecord.GeneratedFiles, buildGeneratedFilesJSON(resolveLogger(l.logger), result.NFOPath, subtitles, result.DownloadPaths))
 	if result.FoundNFOPath != "" {
 		preRecord.NFOPath = result.FoundNFOPath
 	}
@@ -638,11 +620,8 @@ func (l *dbRevertLog) RecordReplacement(ctx context.Context, opID OperationID, r
 		DestSeq:     seq,
 	})
 
-	data, err := json.Marshal(gf)
-	if err != nil {
-		return fmt.Errorf("revert log RecordReplacement: marshal ledger for record %s: %w", opID, err)
-	}
-	preRecord.GeneratedFiles = string(data)
+	data := models.MarshalLedgerJSON(gf)
+	preRecord.GeneratedFiles = data
 	if err := l.repo.Update(ctx, preRecord); err != nil {
 		return fmt.Errorf("revert log RecordReplacement: persist record %s: %w", opID, err)
 	}
@@ -686,11 +665,8 @@ func (l *dbRevertLog) ReleaseReplacement(ctx context.Context, opID OperationID, 
 		return nil // entry already gone (e.g. sweep consumed it) — idempotent
 	}
 	gf.Replacements = kept
-	data, err := json.Marshal(gf)
-	if err != nil {
-		return fmt.Errorf("revert log ReleaseReplacement: marshal ledger for record %s: %w", opID, err)
-	}
-	preRecord.GeneratedFiles = string(data)
+	data := models.MarshalLedgerJSON(gf)
+	preRecord.GeneratedFiles = data
 	if err := l.repo.Update(ctx, preRecord); err != nil {
 		return fmt.Errorf("revert log ReleaseReplacement: persist record %s: %w", opID, err)
 	}
@@ -732,11 +708,8 @@ func (l *dbRevertLog) ConfirmReplacement(ctx context.Context, opID OperationID, 
 	if !changed {
 		return nil // entry already confirmed or retracted — idempotent
 	}
-	data, err := json.Marshal(gf)
-	if err != nil {
-		return fmt.Errorf("revert log ConfirmReplacement: marshal ledger for record %s: %w", opID, err)
-	}
-	preRecord.GeneratedFiles = string(data)
+	data := models.MarshalLedgerJSON(gf)
+	preRecord.GeneratedFiles = data
 	if err := l.repo.Update(ctx, preRecord); err != nil {
 		return fmt.Errorf("revert log ConfirmReplacement: persist record %s: %w", opID, err)
 	}
@@ -767,7 +740,7 @@ func (l *dbRevertLog) seedRoot(ctx context.Context, opID OperationID, root strin
 	if preRecord == nil {
 		return fmt.Errorf("revert log seedRoot: record %s not found", opID)
 	}
-	next := appendLedgerRoot(resolveLogger(l.logger), preRecord.GeneratedFiles, root)
+	next := appendLedgerRoot(preRecord.GeneratedFiles, root)
 	if next != preRecord.GeneratedFiles {
 		preRecord.GeneratedFiles = next
 		if err := l.repo.Update(ctx, preRecord); err != nil {

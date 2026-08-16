@@ -74,13 +74,10 @@ func TestFallbackSeam_CaseVariantDestinationMatches(t *testing.T) {
 		return []models.BatchFileOperation{cand}, nil
 	})
 	require.NoError(t, err)
-	if runtime.GOOS == "windows" {
-		require.Len(t, matched, 1, "case variants match on case-insensitive Windows")
-	} else {
-		// R17-1: macOS volumes may be case-sensitive — POSIX folds nothing.
-		require.Empty(t, matched, "case differs = different file off-Windows")
-		require.Equal(t, 1, scanCalls, "prefilter miss fell back to the full scan")
-	}
+	// DestKey folds unconditionally — destination keys are matched across
+	// spellings on every platform.
+	require.Len(t, matched, 1, "case variants match unconditionally after DestKey")
+	require.Equal(t, 1, scanCalls, "LIKE on raw still misses the other spelling — folded scan rescues")
 }
 
 // codex P3 R14-1: a partial prefilter hit (caller's spelling journaled) must
@@ -98,13 +95,8 @@ func TestFallbackSeam_UnionDeduplicatesMixedSpellings(t *testing.T) {
 		return []models.BatchFileOperation{candBackslash, candSlash}, nil
 	})
 	require.NoError(t, err)
-	if runtime.GOOS == "windows" {
-		require.Len(t, matched, 2, "both spellings of one destination must remain visible")
-	} else {
-		// R17-1: POSIX sees `C:\Media` (backslash = name char) and `C:/Media`
-		// as genuinely different paths — only the exact form matches.
-		require.Len(t, matched, 1, "POSIX: backslash is a filename character")
-	}
+	// Both journal spellings resolve to the same destination key.
+	require.Len(t, matched, 2, "both spellings match unconditionally after DestKey folds")
 	if runtime.GOOS == "windows" {
 		ids := map[uint]bool{}
 		for _, op := range matched {
@@ -133,4 +125,28 @@ func TestFindOperationsByDestination_QueryError(t *testing.T) {
 	require.NoError(t, db2.Close())
 	_, qerr = repo2.FindOperationsWithLedger(context.Background())
 	require.Error(t, qerr)
+}
+
+// FindOperationsWithLedger: mixed rows filter to ledger-carrying ones.
+func TestFindOperationsWithLedger_Contents(t *testing.T) {
+	db, err := New(&Config{Type: "sqlite", DSN: ":memory:", LogLevel: "error"})
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
+	repo := NewBatchFileOperationRepository(db)
+	ctx := context.Background()
+
+	require.NoError(t, repo.Create(ctx, &models.BatchFileOperation{
+		BatchJobID: "j1", MovieID: "M1", OriginalPath: "/a.mkv", GeneratedFiles: `{"delete":["/x.nfo"]}`,
+		RevertStatus: models.RevertStatusApplied,
+	}))
+	require.NoError(t, repo.Create(ctx, &models.BatchFileOperation{
+		BatchJobID: "j1", MovieID: "M2", OriginalPath: "/b.mkv", GeneratedFiles: "",
+		RevertStatus: models.RevertStatusApplied,
+	}))
+
+	rows, err := repo.FindOperationsWithLedger(ctx)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Equal(t, "M1", rows[0].MovieID)
 }

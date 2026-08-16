@@ -2,9 +2,12 @@ package worker
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/mocks"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/spf13/afero"
@@ -83,4 +86,33 @@ func TestCleanupStaleTempDirs_RespectsAdmissionLease(t *testing.T) {
 	n, err = store.CleanupStaleTempDirs(ctx)
 	require.NoError(t, err)
 	require.Equal(t, 1, n, "all leases released — sweep proceeds")
+}
+
+// The failing-removal leg of processStaleJobDir: error → dir keeps existing.
+func TestProcessStaleJobDir_RemoveFail(t *testing.T) {
+	base := afero.NewMemMapFs()
+	fs := &rmFailFs{Fs: base, victim: "/out/posters/STALEDIR"}
+	require.NoError(t, fs.MkdirAll("/out/posters/STALEDIR", 0o755))
+	require.NoError(t, afero.WriteFile(fs, "/out/posters/STALEDIR/x", []byte("x"), 0o644))
+
+	r := mocks.NewMockJobRepositoryInterface(t)
+	r.EXPECT().FindByID(mock.Anything, "STALEDIR").Return(nil, database.ErrNotFound)
+
+	e, ferr := fs.Stat("/out/posters/STALEDIR")
+	require.NoError(t, ferr)
+	cleaner := &TempDirCleaner{fs: fs, tempDir: "/out", jobRepo: r}
+	res := cleaner.processStaleJobDir(context.Background(), "/out/posters", "STALEDIR", e)
+	require.False(t, res, "removal failure must not report the dir as cleaned")
+}
+
+type rmFailFs struct {
+	afero.Fs
+	victim string
+}
+
+func (f *rmFailFs) Remove(name string) error {
+	if strings.HasPrefix(name, f.victim) {
+		return errors.New("remove wedged")
+	}
+	return f.Fs.Remove(name)
 }

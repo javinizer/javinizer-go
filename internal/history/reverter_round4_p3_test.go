@@ -637,3 +637,47 @@ func TestRevertRestore_PreservesBackupPermissions(t *testing.T) {
 		"revert must not widen 0600 media to world-readable")
 	require.Equal(t, "original-poster", string(mustRead2(t, fs, dest)))
 }
+
+// Startup sweep seam: default (nothing to heal) + error-surface + heal-log.
+func TestSweepOnStartup(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	repo := newP3OpRepo()
+
+	healthy := NewReplacementSweeper(fs, repo)
+	SweepOnStartup(fs, repo) // zero state: nothing pending
+	_ = healthy
+
+	// Heal-log branch: a crash-window backup exists.
+	dest := "/out/SOS/poster.jpg"
+	backup := dest + ".dlbak.0123456789abcdef"
+	require.NoError(t, fs.MkdirAll("/out/SOS", config.DirPerm))
+	require.NoError(t, afero.WriteFile(fs, backup, []byte("old"), config.FilePerm))
+	backdate(t, fs, backup)
+	op := &models.BatchFileOperation{
+		BatchJobID: "job-sos", MovieID: "SOS-001", OriginalPath: "/src/s.mkv",
+		OperationType:  models.OperationTypeUpdate,
+		GeneratedFiles: mustJSONMarshall(t, []string{backup}, []string{dest}),
+		RevertStatus:   models.RevertStatusApplied,
+	}
+	require.NoError(t, repo.Create(context.Background(), op))
+	SweepOnStartup(fs, repo)
+	require.Equal(t, "old", string(mustRead2(t, fs, dest)))
+
+	// Error branch: unparseable ledger
+	op.GeneratedFiles = `{"replacements":broken`
+	require.NoError(t, repo.Update(context.Background(), op))
+	SweepOnStartup(fs, repo)
+}
+
+func mustJSONMarshall(t *testing.T, backups []string, dests []string) string {
+	t.Helper()
+	gf := models.GeneratedFilesJSON{}
+	for i := range backups {
+		gf.Replacements = append(gf.Replacements, models.ReplacementEntry{
+			Destination: dests[i], Backup: backups[i], DestSeq: int64(i + 1),
+		})
+	}
+	raw, err := json.Marshal(gf)
+	require.NoError(t, err)
+	return string(raw)
+}

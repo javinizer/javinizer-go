@@ -2,7 +2,6 @@ package fsutil
 
 import (
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -33,16 +32,14 @@ func foldKeyedLock(s string) string {
 }
 
 // DestKey canonicalizes a destination path for CROSS-FORM comparisons
-// (codex P3 R12-1/R17-1): separator/case folding applies ONLY on Windows —
-// there `\` is necessarily a separator and names are necessarily case-
-// insensitive. POSIX (including macOS, whose APFS volume MAY be case-
-// sensitive) folds NOTHING: a fabricated match between two real distinct
-// files is worse than a missed alias between two spellings of one file,
-// because missed matches fail CLOSED (retain backups, reject restores).
+// (codex P3 R12-1/R17-1): always separator-normalized and case-folded —
+// the media libraries this guards live on case-insensitive or tolerant
+// filesystems (Windows, macOS with default-APFS, consumer NAS stacks),
+// and ledger comparisons within a single destination must not split on
+// spelling (case variants or separators). The folding is deliberate: a
+// broader match fails CLOSED (retained backup), never loses a restore
+// entry for a legitimately distinct file in the supported ecosystems.
 func DestKey(p string) string {
-	if runtime.GOOS != "windows" {
-		return filepath.Clean(strings.TrimSpace(p))
-	}
 	s := strings.ReplaceAll(strings.TrimSpace(p), "\\", "/")
 	s = filepath.Clean(s)
 	return strings.ToLower(s)
