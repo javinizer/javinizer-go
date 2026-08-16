@@ -114,16 +114,6 @@ func (b *admissionBarrier) releaseShared() {
 	b.mu.Unlock()
 }
 
-// inFlight reports whether the barrier currently guards any work: shared
-// edit/exclusion/rescrape leases held, an exclusive delete-drain held or
-// pending, or a phase start queued. POSTER-WRITE-HARDENING P3: temp-dir
-// cleanup consults this before wiping a job's poster staging area.
-func (b *admissionBarrier) inFlight() bool {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.shared > 0 || b.exclusive || b.pendingExclusive > 0 || b.pendingPhase > 0
-}
-
 // AdmitExclusive acquires the exclusive lease (delete-drain): waits for all
 // shared leases to be released; new shared admissions wait behind it.
 func (b *admissionBarrier) AdmitExclusive() (release func(), err error) {
