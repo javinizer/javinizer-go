@@ -245,12 +245,22 @@ func (s *ReplacementSweeper) sweepOne(ctx context.Context, idx *replacementLedge
 			}
 		}
 	}
-	if _, statErr := s.fs.Stat(dest); errors.Is(statErr, afero.ErrFileNotFound) {
-		if rnErr := s.fs.Rename(backup, dest); rnErr != nil {
+	statErr := func() error { _, err := s.fs.Stat(dest); return err }()
+	if errors.Is(statErr, afero.ErrFileNotFound) {
+		if rnErr := copyRestoreBytes(s.fs, backup, dest); rnErr != nil {
 			logging.Warnf("replacement sweep restore %s→%s: %v", backup, dest, rnErr)
 			return 0
 		}
+		// Orphan: no consumption to persist — the moved copy is redundant now.
+		_ = s.fs.Remove(backup)
 		return 1
+	}
+	if statErr != nil {
+		// R8-1: indeterminate destination state (permission/IO) must NEVER
+		// read as "present" — the unjournaled backup may be the ONLY copy of
+		// the pre-replace bytes. Touch nothing; retry next sweep.
+		logging.Warnf("replacement sweep %s: destination indeterminate (%v) — kept", backup, statErr)
+		return 0
 	}
 	if rmErr := s.fs.Remove(backup); rmErr != nil {
 		logging.Warnf("replacement sweep remove %s: %v", backup, rmErr)
