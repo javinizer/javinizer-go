@@ -86,6 +86,10 @@ type RevertLog interface {
 	// itself (record landed, install failed, backup restored over the
 	// destination). The row must not keep pointing at the consumed backup.
 	ReleaseReplacement(ctx context.Context, opID OperationID, replacedPath, backupPath string) error
+
+	// ConfirmReplacement marks the journaled entry installed after the new
+	// bytes landed (P3 R4-3 crash-window marker).
+	ConfirmReplacement(ctx context.Context, opID OperationID, replacedPath, backupPath string) error
 }
 
 // RevertLogConfig holds the subset of configuration needed by dbRevertLog.
@@ -149,6 +153,10 @@ func (noOpRevertLog) RecordReplacement(_ context.Context, _ OperationID, _, _ st
 }
 
 func (noOpRevertLog) ReleaseReplacement(_ context.Context, _ OperationID, _, _ string) error {
+	return nil
+}
+
+func (noOpRevertLog) ConfirmReplacement(_ context.Context, _ OperationID, _, _ string) error {
 	return nil
 }
 
@@ -228,6 +236,33 @@ func newPreOrganizeRecord(batchJobID, movieID, originalPath, nfoSnapshot, nfoPat
 // Complete/CompleteFailed never drop the revert-ledger's move-back journal.
 // newRaw == "" (no delete/move-back output) upgrades to a payload carrying
 // just the replacements; unparseable prior content degrades to newRaw.
+// appendLedgerRoot adds root to the ledger's seeded discovery roots (dedup).
+func appendLedgerRoot(logger logging.Logger, raw, root string) string {
+	if raw == "" {
+		data, err := json.Marshal(models.GeneratedFilesJSON{Roots: []string{root}})
+		if err != nil {
+			return raw
+		}
+		return string(data)
+	}
+	gf, err := models.ParseGeneratedFiles(raw)
+	if err != nil {
+		return raw
+	}
+	for _, r := range gf.Roots {
+		if r == root {
+			return raw
+		}
+	}
+	gf.Roots = append(gf.Roots, root)
+	data, err := json.Marshal(gf)
+	if err != nil {
+		logger.Warnf("Failed to append ledger root %s: %v", root, err)
+		return raw
+	}
+	return string(data)
+}
+
 func mergeReplacementLedger(logger logging.Logger, priorRaw, newRaw string) string {
 	if priorRaw == "" {
 		return newRaw
@@ -466,6 +501,11 @@ func (l *dbRevertLog) Complete(ctx context.Context, opID OperationID, result *Ap
 	}
 
 	generatedFilesJSON := mergeReplacementLedger(resolveLogger(l.logger), preRecord.GeneratedFiles, buildGeneratedFilesJSON(resolveLogger(l.logger), result.NFOPath, subtitles, result.DownloadPaths))
+	// R4-2: media actually lands in the organizer's leaf folder — add it to
+	// the seeded roots so the sweeper's bounded recursion starts there.
+	if result.OrganizeResult != nil && result.OrganizeResult.FolderPath != "" {
+		generatedFilesJSON = appendLedgerRoot(resolveLogger(l.logger), generatedFilesJSON, result.OrganizeResult.FolderPath)
+	}
 
 	if result.FoundNFOPath != "" {
 		preRecord.NFOPath = result.FoundNFOPath
@@ -652,6 +692,52 @@ func (l *dbRevertLog) ReleaseReplacement(ctx context.Context, opID OperationID, 
 	preRecord.GeneratedFiles = string(data)
 	if err := l.repo.Update(ctx, preRecord); err != nil {
 		return fmt.Errorf("revert log ReleaseReplacement: persist record %s: %w", opID, err)
+	}
+	return nil
+}
+
+// ConfirmReplacement flips the matching journal entry to installed.
+func (l *dbRevertLog) ConfirmReplacement(ctx context.Context, opID OperationID, replacedPath, backupPath string) error {
+	if opID == "" {
+		return fmt.Errorf("revert log ConfirmReplacement: empty operation ID")
+	}
+	recordID64, err := strconv.ParseUint(opID, 10, 64)
+	if err != nil || recordID64 == 0 {
+		return fmt.Errorf("revert log ConfirmReplacement: unparsable operation ID %q", opID)
+	}
+
+	release := replacementLedgerLocks.Acquire(opID)
+	defer release()
+
+	preRecord, err := l.repo.FindByID(ctx, uint(recordID64))
+	if err != nil {
+		return fmt.Errorf("revert log ConfirmReplacement: find record %s: %w", opID, err)
+	}
+	if preRecord == nil {
+		return fmt.Errorf("revert log ConfirmReplacement: record %s not found", opID)
+	}
+	gf, err := models.ParseGeneratedFiles(preRecord.GeneratedFiles)
+	if err != nil {
+		return fmt.Errorf("revert log ConfirmReplacement: parse ledger for record %s: %w", opID, err)
+	}
+	changed := false
+	for i := range gf.Replacements {
+		e := &gf.Replacements[i]
+		if e.Destination == replacedPath && e.Backup == backupPath && !e.Installed {
+			e.Installed = true
+			changed = true
+		}
+	}
+	if !changed {
+		return nil // entry already confirmed or retracted — idempotent
+	}
+	data, err := json.Marshal(gf)
+	if err != nil {
+		return fmt.Errorf("revert log ConfirmReplacement: marshal ledger for record %s: %w", opID, err)
+	}
+	preRecord.GeneratedFiles = string(data)
+	if err := l.repo.Update(ctx, preRecord); err != nil {
+		return fmt.Errorf("revert log ConfirmReplacement: persist record %s: %w", opID, err)
 	}
 	return nil
 }

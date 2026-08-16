@@ -1,6 +1,7 @@
 package fsutil
 
 import (
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -27,7 +28,11 @@ func NewKeyedLockRegistry() *KeyedLockRegistry {
 }
 
 func foldKeyedLock(s string) string {
-	return strings.ToUpper(strings.TrimSpace(s))
+	// codex P3 R4-4: destination locks must match regardless of separator
+	// spelling — on Windows the downloader joins with `\` while journaled
+	// histories use `/`; both resolve to one file and must share one mutex.
+	s = strings.ReplaceAll(strings.TrimSpace(s), "\\", "/")
+	return strings.ToUpper(filepath.Clean(s))
 }
 
 // Acquire blocks until the mutex for key is held and returns a release

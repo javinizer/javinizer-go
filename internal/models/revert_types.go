@@ -27,6 +27,12 @@ type ReplacementEntry struct {
 	Destination string `json:"destination"` // Where the new bytes landed
 	Backup      string `json:"backup"`      // Where the pre-existing bytes were set aside
 	DestSeq     int64  `json:"dest_seq"`    // Per-destination monotonic sequence (1-based)
+	// Installed flips true when the downloader confirms the replace landed.
+	// An armed-but-unconfirmed entry + a missing destination is the ONLY state
+	// in which the pre-install crash window is provable (P3 R4-3): a confirmed
+	// entry with a missing destination instead means someone deleted the
+	// media afterwards, and restoring it would resurrect deleted artwork.
+	Installed bool `json:"installed,omitempty"`
 }
 
 // FileMove represents a file that was moved during organize and should be moved back on revert.

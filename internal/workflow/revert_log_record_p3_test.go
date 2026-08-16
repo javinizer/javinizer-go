@@ -239,3 +239,25 @@ func TestRevertLog_Begin_SeedsDiscoveryRoot(t *testing.T) {
 	require.Equal(t, []string{"/dest/rooted"}, gf.Roots, "Complete preserves the seeded root")
 	require.Contains(t, gf.Delete, "/dest/rooted/rnd.nfo")
 }
+
+func TestRevertLog_ConfirmInstallMarker(t *testing.T) {
+	db, repo, rl := newP3RecorderHarness(t, ":memory:")
+	defer func() { _ = db.Close() }()
+	ctx := context.Background()
+
+	opID := beginP3Op(t, rl, "CNF-001")
+	dest := "/dst/CNF-001/poster.jpg"
+	backup := dest + ".dlbak.x"
+	require.NoError(t, rl.RecordReplacement(ctx, opID, dest, backup))
+
+	gf := p3Ledger(t, repo, opID)
+	require.False(t, gf.Replacements[0].Installed, "armed at record — crash window live")
+
+	require.NoError(t, rl.ConfirmReplacement(ctx, opID, dest, backup))
+	gf = p3Ledger(t, repo, opID)
+	require.True(t, gf.Replacements[0].Installed, "confirmed after the install landed")
+
+	// Idempotent; missing rows surface.
+	require.NoError(t, rl.ConfirmReplacement(ctx, opID, dest, backup))
+	require.Error(t, rl.ConfirmReplacement(ctx, "424242", dest, backup))
+}

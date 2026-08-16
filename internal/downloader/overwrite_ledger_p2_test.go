@@ -36,6 +36,10 @@ func (l *armedTestLedger) RecordReplacement(_ context.Context, _, replacedPath, 
 	return nil
 }
 
+func (l *armedTestLedger) ConfirmReplacement(_ context.Context, _, _, _ string) error {
+	return nil
+}
+
 func (l *armedTestLedger) ReleaseReplacement(_ context.Context, _, replacedPath, backupPath string) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -126,6 +130,10 @@ type failingTestLedger struct{ err error }
 
 func (l *failingTestLedger) RecordReplacement(context.Context, string, string, string) error {
 	return l.err
+}
+
+func (l *failingTestLedger) ConfirmReplacement(context.Context, string, string, string) error {
+	return nil
 }
 
 func (l *failingTestLedger) ReleaseReplacement(context.Context, string, string, string) error {

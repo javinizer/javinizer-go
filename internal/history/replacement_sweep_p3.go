@@ -38,6 +38,21 @@ import (
 
 var replacementBackupName = regexp.MustCompile(`\.dlbak\.[0-9a-f]{16}(\.[0-9a-f]{1,16})?`)
 
+// journalEntryInstalled reports whether the row journals this backup with
+// the install-confirm marker set.
+func journalEntryInstalled(row *models.BatchFileOperation, backupSlash string) bool {
+	gf, err := models.ParseGeneratedFiles(row.GeneratedFiles)
+	if err != nil {
+		return false // unparseable row — treat as armed (conservative restore posture)
+	}
+	for _, rep := range gf.Replacements {
+		if sweepSlash(rep.Backup) == backupSlash {
+			return rep.Installed
+		}
+	}
+	return false
+}
+
 // sweepSlash normalizes a path for journal comparison: the journaled ledger
 // stores paths however the downloader recorded them (slash form), while the
 // enumerator joins with OS separators — on Windows the two spellings differ.
@@ -120,16 +135,26 @@ func (s *ReplacementSweeper) Sweep(ctx context.Context) (int, error) {
 	}
 	healed := 0
 	for dir := range idx.dirs {
-		entries, rdErr := afero.ReadDir(s.fs, filepath.FromSlash(dir))
-		if rdErr != nil {
-			continue
-		}
-		for _, e := range entries {
-			if e.IsDir() || !IsReplacementBackupName(e.Name()) {
-				continue
+		// R4-2: bounded recursion (≤3 levels) — applies land media in the
+		// nested movie directory the organizer creates under the recorded
+		// base root; a flat ReadDir of the base never sees those backups.
+		const maxDepth = 3
+		_ = afero.Walk(s.fs, filepath.FromSlash(dir), func(path string, info os.FileInfo, werr error) error {
+			if werr != nil {
+				return nil
 			}
-			healed += s.sweepOne(ctx, idx, dir, e)
-		}
+			if info.IsDir() {
+				rel, rerr := filepath.Rel(filepath.FromSlash(dir), path)
+				if rerr == nil && strings.Count(rel, string(filepath.Separator)) > maxDepth {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if IsReplacementBackupName(info.Name()) {
+				healed += s.sweepOne(ctx, idx, sweepSlash(filepath.Dir(path)), info)
+			}
+			return nil
+		})
 	}
 	return healed, nil
 }
@@ -188,18 +213,33 @@ func (s *ReplacementSweeper) sweepOne(ctx context.Context, idx *replacementLedge
 		// can install new bytes between the classification read and the lock
 		// (codex P3 R3-2), and the backup must never clobber those
 		// freshly-installed artifacts.
-		if s.restoreAndConsume(ctx, owner, backup, dest) {
+		armed := !journalEntryInstalled(owner, backupSlash)
+		if s.restoreAndConsume(ctx, owner, backup, dest, armed) {
 			delete(idx.journaled, backup)
 			return 1
 		}
 		return 0
 	}
 
-	// Orphan: no row journals this backup anymore (entry consumed post-revert
-	// or the row was pruned). Classification runs UNDER the destination lock
-	// for the same TOCTOU reason.
+	// Orphan: no row journals this backup anymore. CLASSIFY FRESH INSIDE THE
+	// LOCK (codex P3 R4-1): the index snapshot may predate the downloader's
+	// RecordReplacement — deleting a just-journaled backup because the
+	// destination exists would leave that row permanently unrevertable.
 	release := fsutil.SharedDestLocks().Acquire(dest)
 	defer release()
+	if fresh, fErr := s.repo.FindOperationsByDestination(ctx, dest); fErr == nil {
+		for i := range fresh {
+			gf, pErr := models.ParseGeneratedFiles(fresh[i].GeneratedFiles)
+			if pErr != nil {
+				continue
+			}
+			for _, rep := range gf.Replacements {
+				if sweepSlash(rep.Backup) == backupSlash {
+					return 0 // freshly journaled — keep; next sweep arbitrates it as journaled
+				}
+			}
+		}
+	}
 	if _, statErr := s.fs.Stat(dest); errors.Is(statErr, afero.ErrFileNotFound) {
 		if rnErr := s.fs.Rename(backup, dest); rnErr != nil {
 			logging.Warnf("replacement sweep restore %s→%s: %v", backup, dest, rnErr)
@@ -218,7 +258,7 @@ func (s *ReplacementSweeper) sweepOne(ctx context.Context, idx *replacementLedge
 // destination under the destination lock and consumes the journal entry (a
 // stranded entry would otherwise poison future reverts with a missing
 // backup).
-func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.BatchFileOperation, backup, dest string) bool {
+func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.BatchFileOperation, backup, dest string, armed bool) bool {
 	release := fsutil.SharedDestLocks().Acquire(dest)
 	defer release()
 
@@ -229,6 +269,14 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 		return false
 	} else if !errors.Is(statErr, afero.ErrFileNotFound) {
 		logging.Warnf("replacement sweep %s: destination indeterminate (%v) — kept", backup, statErr)
+		return false
+	}
+	// R4-3: auto-restore only the PROVABLE crash window — an armed (never
+	// install-confirmed) entry. A confirmed entry + missing destination is
+	// deleted-afterwards media; restoring it resurrects artwork a user or
+	// another process intentionally removed.
+	if !armed {
+		logging.Infof("replacement sweep %s: destination missing but install was confirmed — backup retained, no auto-restore", backup)
 		return false
 	}
 	if rnErr := copyRestoreBytes(s.fs, backup, dest); rnErr != nil {

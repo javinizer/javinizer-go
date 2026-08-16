@@ -14,6 +14,10 @@ type ReplacementRecorder interface {
 	// It runs AFTER the backup has been renamed aside and BEFORE the new
 	// bytes install — a failure must keep the downloader from replacing.
 	RecordReplacement(ctx context.Context, opID, replacedPath, backupPath string) error
+	// ConfirmReplacement flips the entry to installed AFTER the new bytes
+	// landed — distinguishing "install never completed" (crash window) from
+	// "media deleted afterwards" for the sweeper (P3 R4-3).
+	ConfirmReplacement(ctx context.Context, opID, replacedPath, backupPath string) error
 	// ReleaseReplacement retracts a journal entry whose bytes were rolled
 	// back by the downloader itself (record landed but the install failed,
 	// so the backup was restored over the destination). Without retraction

@@ -93,5 +93,11 @@ func (d *Downloader) installOverwriting(ctx context.Context, stagedPath, destPat
 		}
 		return false, true, fmt.Errorf("failed to replace file: %w", err)
 	}
+	// R4-3: confirm the install so the sweeper can distinguish "backup
+	// journaled but install never landed" (auto-restorable crash window) from
+	// "installed media deleted afterwards" (must NOT be resurrected).
+	if cErr := ledger.recorder.ConfirmReplacement(ctx, ledger.opID, destPath, backupPath); cErr != nil {
+		logging.Warnf("downloader: install-confirm failed for %s: %v (entry stays armed; sweep retains conservative posture)", destPath, cErr)
+	}
 	return false, true, nil
 }
