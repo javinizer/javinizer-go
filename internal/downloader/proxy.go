@@ -236,15 +236,14 @@ func newFallbackDownloadClient(idleTimeout time.Duration) *http.Client {
 	if idleTimeout > 0 {
 		base.ResponseHeaderTimeout = idleTimeout
 		base.TLSHandshakeTimeout = idleTimeout
-		if base.DialContext != nil {
-			origDial := base.DialContext
-			base.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-				dialCtx, cancel := context.WithTimeout(ctx, idleTimeout)
-				defer cancel()
-				return origDial(dialCtx, network, addr)
-			}
-		} else {
-			base.DialContext = (&net.Dialer{Timeout: idleTimeout}).DialContext
+		origDial := base.DialContext
+		if origDial == nil {
+			origDial = (&net.Dialer{Timeout: idleTimeout}).DialContext
+		}
+		base.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			dialCtx, cancel := context.WithTimeout(ctx, idleTimeout)
+			defer cancel()
+			return origDial(dialCtx, network, addr)
 		}
 	}
 	base.Proxy = nil

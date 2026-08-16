@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"net"
 	"net/http"
 	"testing"
@@ -22,6 +23,8 @@ func TestSetPosterHeaderTimeout_WithDialContext(t *testing.T) {
 	if transport.DialContext == nil {
 		t.Error("DialContext should not be nil after wrapping")
 	}
+	ctx := context.Background()
+	_, _ = transport.DialContext(ctx, "tcp", "localhost:1")
 }
 
 func TestSetPosterHeaderTimeout_NilDialContext(t *testing.T) {
