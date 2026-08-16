@@ -318,11 +318,11 @@ func TestSweep_StaleArmedFlag_ReclassifiedByFreshRead(t *testing.T) {
 	op.GeneratedFiles = string(rawInstalled)
 	require.NoError(t, repo.Update(ctx, op))
 
-	staleIdx.journaled[backup] = mustRow(t, repo, op.ID)
+	staleIdx.journaled[sweepSlash(backup)] = mustRow(t, repo, op.ID)
 	// Force the stale-armed case: the index's owner row is the ARMED snapshot.
 	rawArmedOp := *op
 	rawArmedOp.GeneratedFiles = string(rawArmed)
-	staleIdx.journaled[backup] = &rawArmedOp
+	staleIdx.journaled[sweepSlash(backup)] = &rawArmedOp
 
 	info, err := fs.Stat(backup)
 	require.NoError(t, err)
@@ -547,4 +547,64 @@ func TestSweepOne_ModtimeFresh_Skips(t *testing.T) {
 	healed, err := s0.Sweep(ctx)
 	require.NoError(t, err)
 	require.Equal(t, 0, healed)
+}
+
+// Ledger-scan failure during the index build surfaces (SweepDestinations
+// shares the same index call and also propagates).
+func TestSweep_LedgerScanError_Surfaces(t *testing.T) {
+	repo := &errLedgerScanRepo{p3OpRepo: newP3OpRepo(), err: errors.New("ledger wedged")}
+	_, err := NewReplacementSweeper(afero.NewMemMapFs(), repo).Sweep(context.Background())
+	require.Error(t, err)
+	_, err = NewReplacementSweeper(afero.NewMemMapFs(), repo).SweepDestinations(context.Background(), []string{"/x/y.jpg"})
+	require.Error(t, err)
+}
+
+type errLedgerScanRepo struct {
+	*p3OpRepo
+	err error
+}
+
+func (m *errLedgerScanRepo) FindOperationsWithLedger(context.Context) ([]models.BatchFileOperation, error) {
+	return nil, m.err
+}
+
+// Per-dir ReadDir failure skips that directory silently (other dirs still sweep).
+func TestSweep_ReadDirErrorSkipsDir(t *testing.T) {
+	fs := &readDirFailFs{Fs: afero.NewMemMapFs(), failDir: "/out/RDE"}
+	repo := newP3OpRepo()
+	ctx := context.Background()
+
+	dest := "/out/RDE/poster.jpg"
+	backup := dest + ".dlbak.0123456789abcdef"
+	require.NoError(t, fs.MkdirAll("/out/RDE", config.DirPerm))
+	require.NoError(t, afero.WriteFile(fs, backup, []byte("old"), config.FilePerm))
+	backdate(t, fs, backup)
+
+	raw, _ := json.Marshal(models.GeneratedFilesJSON{Roots: []string{"/out/RDE"}})
+	op := &models.BatchFileOperation{
+		BatchJobID: "job-1", MovieID: "RDE-001", OriginalPath: "/src/rde.mkv",
+		OperationType: models.OperationTypeUpdate, GeneratedFiles: string(raw),
+		RevertStatus: models.RevertStatusApplied,
+	}
+	require.NoError(t, repo.Create(ctx, op))
+
+	healed, err := NewReplacementSweeper(fs, repo).Sweep(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 0, healed, "unreadable dir → keep, retry next sweep")
+	exists, _ := afero.Exists(fs, backup)
+	require.True(t, exists)
+}
+
+type readDirFailFs struct {
+	afero.Fs
+	failDir string
+}
+
+func (f *readDirFailFs) Open(name string) (afero.File, error) {
+	// afero.ReadDir routes through Open — failing a directory's read means
+	// failing its Open.
+	if strings.Contains(name, f.failDir) && !strings.HasSuffix(name, ".jpg") && !strings.Contains(name, ".dlbak.") {
+		return nil, errors.New("io wedged")
+	}
+	return f.Fs.Open(name)
 }

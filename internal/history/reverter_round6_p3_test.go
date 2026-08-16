@@ -3,6 +3,7 @@ package history
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"testing"
 
@@ -237,4 +238,27 @@ func TestRevert_ChainUnwindsThroughSkippedBlockers(t *testing.T) {
 		require.NoError(t, err)
 		require.Empty(t, gf.Replacements)
 	}
+}
+
+// Chain-check query failures surface as revert errors (never an open door).
+func TestCheckDestBlocking_ScanError(t *testing.T) {
+	repo := &errScanRepo2{p3OpRepo: newP3OpRepo(), err: errors.New("scan wedged")}
+	r := NewReverter(afero.NewMemMapFs(), repo)
+	op := &models.BatchFileOperation{
+		BatchJobID: "job-1", MovieID: "SCN-001", OriginalPath: "/src/s.mkv",
+		OperationType: models.OperationTypeUpdate,
+		RevertStatus:  models.RevertStatusApplied,
+	}
+	err := r.checkDestBlocking(context.Background(), op, "/dst/s/poster.jpg", 1)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "destination journal")
+}
+
+type errScanRepo2 struct {
+	*p3OpRepo
+	err error
+}
+
+func (m *errScanRepo2) FindOperationsByDestination(context.Context, string) ([]models.BatchFileOperation, error) {
+	return nil, m.err
 }
