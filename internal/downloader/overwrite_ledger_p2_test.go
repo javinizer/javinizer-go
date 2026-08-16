@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -447,4 +449,65 @@ func (f rejectSpecificRenameFS) Rename(src, dst string) error {
 		return errors.New("rename wedged")
 	}
 	return f.Fs.Rename(src, dst)
+}
+
+// codex P3 R17-2 side: a destination that IS a directory must be refused —
+// never rename a tree aside for a file write; nothing journals.
+func TestDownload_OverwriteDirectoryDestination_RefusesTree(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		_, _ = w.Write([]byte("new"))
+	}))
+	defer server.Close()
+
+	fs := afero.NewMemMapFs()
+	dest := "/output/DEST-DIR"
+	require.NoError(t, fs.MkdirAll(dest, 0o755))
+	require.NoError(t, afero.WriteFile(fs, dest+"/keep.txt", []byte("keep"), 0o644))
+
+	d := NewDownloader(server.Client(), fs, &Config{DownloadCover: true}, nil)
+	rec := &armedTestLedger{}
+	result, err := d.download(context.Background(), server.URL+"/cover.jpg", dest, MediaTypeCover, true, nil,
+		downloadLedger{opID: "op-dir", recorder: rec})
+	require.NoError(t, err)
+	require.False(t, result.Downloaded)
+	assert.True(t, result.Skipped, "directory destination skips instead of overwriting")
+	assert.Empty(t, rec.get())
+	exists, _ := afero.Exists(fs, dest+"/keep.txt")
+	require.True(t, exists, "directory's contents never moved")
+}
+
+// Symlinked destinations stay links — never get journaled/overwritten.
+func TestDownload_OverwriteSymlinkDestination_Refuses(t *testing.T) {
+	fs := afero.NewOsFs()
+	tmp := t.TempDir()
+	canon, _ := os.Readlink(filepath.Join(tmp, "link.jpg"))
+	_ = canon
+	realPath := filepath.Join(tmp, "real.jpg")
+	linkPath := filepath.Join(tmp, "link.jpg")
+	require.NoError(t, os.WriteFile(realPath, []byte("real"), 0o644))
+	require.NoError(t, os.Symlink(realPath, linkPath))
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation needs privilege on Windows")
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		_, _ = w.Write([]byte("new"))
+	}))
+	defer server.Close()
+
+	d := NewDownloader(server.Client(), fs, &Config{DownloadCover: true}, nil)
+	rec := &armedTestLedger{}
+	result, err := d.download(context.Background(), server.URL+"/cover.jpg", linkPath, MediaTypeCover, true, nil,
+		downloadLedger{opID: "op-sym", recorder: rec})
+	require.NoError(t, err)
+	assert.True(t, result.Skipped)
+	assert.False(t, result.Downloaded)
+	assert.Empty(t, rec.get())
+
+	target, _ := os.Readlink(linkPath)
+	require.NotEmpty(t, target, "link object preserved")
+	body, _ := os.ReadFile(realPath)
+	require.Equal(t, []byte("real"), body, "target bytes untouched")
 }

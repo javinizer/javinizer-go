@@ -37,7 +37,12 @@ func copyBackupToDest(fsys afero.Fs, backup, dest string) error {
 	}
 	defer func() { _ = src.Close() }()
 	staged := dest + ".dlrstr." + strconv.FormatUint(restoreCopyOrdinal.Add(1), 16)
-	dstFile, err := fsys.OpenFile(staged, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	// codex P3 R18h: keep the backup's permission bits through the swap too.
+	mode := os.FileMode(0o644)
+	if info, serr := fsys.Stat(backup); serr == nil {
+		mode = info.Mode().Perm()
+	}
+	dstFile, err := fsys.OpenFile(staged, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
 	if err != nil {
 		return fmt.Errorf("stage rollback: %w", err)
 	}
@@ -92,14 +97,28 @@ func (d *Downloader) installOverwriting(ctx context.Context, stagedPath, destPat
 	release := d.destLocks.Acquire(destPath)
 	defer release()
 
-	_, statErr := d.fs.Stat(destPath)
+	info, statErr := d.fs.Stat(destPath)
 	switch {
-	case statErr == nil:
-		// replace flow below
-	case os.IsNotExist(statErr):
+	case statErr != nil && os.IsNotExist(statErr):
 		return false, false, fsutil.ReplaceFile(d.fs, stagedPath, destPath)
-	default:
+	case statErr != nil:
 		return false, false, fmt.Errorf("failed to stat destination: %w", statErr)
+	}
+
+	// R20-1/R20-3 type-discipline: the ledger legs only model REGULAR files.
+	// A directory destination would rename a whole tree into a .dlbak backup
+	// that copyRestoreBytes then refuses; a symlinked destination whiffed by
+	// Stat-follows-link semantics would come back a regular file.
+	// Both are refused pre-journal (skip+warn — existing object untouched).
+	if info.IsDir() {
+		logging.Warnf("downloader: overwrite of %s refused — destination is a directory; keeping it intact", destPath)
+		return true, true, nil
+	}
+	if Ls, ok := d.fs.(afero.Lstater); ok {
+		if li, _, lerr := Ls.LstatIfPossible(destPath); lerr == nil && li.Mode()&os.ModeSymlink != 0 {
+			logging.Warnf("downloader: overwrite of %s refused — destination is a symlink; keeping the link intact", destPath)
+			return true, true, nil
+		}
 	}
 
 	if !ledger.armed() {

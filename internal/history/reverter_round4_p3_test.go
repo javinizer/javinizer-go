@@ -610,3 +610,26 @@ func (f *readDirFailFs) Open(name string) (afero.File, error) {
 	}
 	return f.Fs.Open(name)
 }
+
+// codex P3 R18h: restore keeps the backup's permission bits.
+func TestRevertRestore_PreservesBackupPermissions(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	repo := newP3OpRepo()
+	ctx := context.Background()
+
+	f := &p3Fixture{fs: fs, repo: repo}
+	_, dest := f.addAppliedOp(t, "job-1", "PM-001", false, "new-poster", p3Replacement{seq: 1, backupBytes: "original-poster"})
+	backup := dest + ".dlbak.a"
+	require.NoError(t, fs.Chmod(backup, 0o600))
+
+	r := NewReverter(fs, repo)
+	res, err := r.RevertBatch(ctx, "job-1")
+	require.NoError(t, err)
+	require.Equal(t, 1, res.Succeeded)
+
+	info, err := fs.Stat(dest)
+	require.NoError(t, err)
+	require.Equal(t, os.FileMode(0o600), info.Mode().Perm(),
+		"revert must not widen 0600 media to world-readable")
+	require.Equal(t, "original-poster", string(mustRead2(t, fs, dest)))
+}
