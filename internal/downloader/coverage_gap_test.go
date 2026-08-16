@@ -58,13 +58,13 @@ func TestStallReader_WatchdogTimerStop(t *testing.T) {
 
 func TestStallReader_WatchdogTimerAlreadyFired(t *testing.T) {
 	body := newMockReadCloser(nil, time.Hour)
-	r := NewStallReader(body, 50*time.Millisecond, context.Background())
+	r := NewStallReader(body, 1*time.Millisecond, context.Background())
 	buf := make([]byte, 10)
 	go func() {
-		time.Sleep(100 * time.Millisecond)
-		r.Disarm()
+		_, _ = r.Read(buf)
 	}()
-	_, _ = r.Read(buf)
+	time.Sleep(50 * time.Millisecond)
+	r.Disarm()
 	r.Close()
 }
 

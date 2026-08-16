@@ -12,9 +12,6 @@ func setPosterHeaderTimeout(client *http.Client, idleTimeout time.Duration) {
 		t.ResponseHeaderTimeout = idleTimeout
 		t.TLSHandshakeTimeout = idleTimeout
 		origDial := t.DialContext
-		if origDial == nil {
-			origDial = (&net.Dialer{Timeout: idleTimeout}).DialContext
-		}
 		t.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 			dialCtx, cancel := context.WithTimeout(ctx, idleTimeout)
 			defer cancel()

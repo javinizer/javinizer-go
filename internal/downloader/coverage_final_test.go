@@ -27,7 +27,8 @@ func TestNewFallbackDownloadClient_WrapsDialContext(t *testing.T) {
 	if tr.TLSHandshakeTimeout != 15*time.Second {
 		t.Errorf("expected 15s, got %v", tr.TLSHandshakeTimeout)
 	}
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
 	_, _ = tr.DialContext(ctx, "tcp", "localhost:1")
 }
 
