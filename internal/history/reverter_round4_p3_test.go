@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -613,6 +614,9 @@ func (f *readDirFailFs) Open(name string) (afero.File, error) {
 
 // codex P3 R18h: restore keeps the backup's permission bits.
 func TestRevertRestore_PreservesBackupPermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("meaningless on Windows")
+	}
 	fs := afero.NewMemMapFs()
 	repo := newP3OpRepo()
 	ctx := context.Background()

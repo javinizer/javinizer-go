@@ -479,17 +479,15 @@ func TestDownload_OverwriteDirectoryDestination_RefusesTree(t *testing.T) {
 
 // Symlinked destinations stay links — never get journaled/overwritten.
 func TestDownload_OverwriteSymlinkDestination_Refuses(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation needs elevated privilege on Windows")
+	}
 	fs := afero.NewOsFs()
 	tmp := t.TempDir()
-	canon, _ := os.Readlink(filepath.Join(tmp, "link.jpg"))
-	_ = canon
 	realPath := filepath.Join(tmp, "real.jpg")
 	linkPath := filepath.Join(tmp, "link.jpg")
 	require.NoError(t, os.WriteFile(realPath, []byte("real"), 0o644))
 	require.NoError(t, os.Symlink(realPath, linkPath))
-	if runtime.GOOS == "windows" {
-		t.Skip("symlink creation needs privilege on Windows")
-	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/octet-stream")
