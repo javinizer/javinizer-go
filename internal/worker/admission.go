@@ -133,7 +133,10 @@ func (b *admissionBarrier) AdmitExclusive() (release func(), err error) {
 func (b *admissionBarrier) TryAdmitExclusive() (release func(), ok bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.shared > 0 || b.exclusive || b.gone.Load() {
+	// Queued phase starts and queued deletes CARRY intent — a cleanup-style
+	// exclusive grab must not cut in front of them (codex P3 R6-5), and a
+	// blocked try can never strand an indecisive waiter either.
+	if b.shared > 0 || b.exclusive || b.pendingExclusive > 0 || b.pendingPhase > 0 || b.gone.Load() {
 		return nil, false
 	}
 	b.exclusive = true

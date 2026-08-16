@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -185,20 +186,41 @@ func (r *BatchFileOperationRepository) FindOperationsByDestination(ctx context.C
 	if err != nil {
 		return nil, wrapDBErr("find", "batch file operations by destination", err)
 	}
-	matched := make([]models.BatchFileOperation, 0, len(candidates))
-	for _, op := range candidates {
+	// R6-4: callers hand us the destination in whatever separator form the
+	// sweeper distilled (slash-normalized) while rows store the downloader's
+	// form — match on the normalized comparison. The LIKE prefilter CAN'T see
+	// through a form change, so a form-mismatch miss falls back to scanning
+	// every ledger row before concluding absence.
+	norm := func(p string) string { return filepath.ToSlash(filepath.Clean(p)) }
+	matched := matchOpsByDestination(candidates, destination, norm)
+	if len(matched) == 0 {
+		fallback, ferr := r.FindOperationsWithLedger(ctx)
+		if ferr != nil {
+			return matched, nil //nolint:nilerr // prefilter miss + unreadable fallback — empty beats error
+		}
+		matched = matchOpsByDestination(fallback, destination, norm)
+	}
+	return matched, nil
+}
+
+// matchOpsByDestination keeps rows journaling the destination, compared under
+// the caller's normalizer.
+func matchOpsByDestination(ops []models.BatchFileOperation, destination string, norm func(string) string) []models.BatchFileOperation {
+	want := norm(destination)
+	matched := make([]models.BatchFileOperation, 0, len(ops))
+	for _, op := range ops {
 		gf, perr := models.ParseGeneratedFiles(op.GeneratedFiles)
 		if perr != nil {
 			continue // unparsable legacy rows never match a destination journal
 		}
 		for _, rep := range gf.Replacements {
-			if rep.Destination == destination {
+			if norm(rep.Destination) == want {
 				matched = append(matched, op)
 				break
 			}
 		}
 	}
-	return matched, nil
+	return matched
 }
 
 // FindOperationsWithReplacements returns every operation whose generated-files

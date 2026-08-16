@@ -100,7 +100,9 @@ func (d *Downloader) installOverwriting(ctx context.Context, stagedPath, destPat
 	// destination) and retracts the journal — never report success with an
 	// armed entry, or a later user deletion reads as a crash window.
 	if cErr := ledger.recorder.ConfirmReplacement(ctx, ledger.opID, destPath, backupPath); cErr != nil {
-		if rErr := d.fs.Rename(backupPath, destPath); rErr != nil {
+		// R6-3: replace-aware rollback — plain Rename cannot overwrite the
+		// just-installed destination on Windows.
+		if rErr := fsutil.ReplaceFile(d.fs, backupPath, destPath); rErr != nil {
 			return false, true, fmt.Errorf("install-confirm failed: %w (AND rollback restore failed: %v — bytes remain at %s)", cErr, rErr, backupPath)
 		}
 		if relErr := ledger.recorder.ReleaseReplacement(ctx, ledger.opID, destPath, backupPath); relErr != nil {

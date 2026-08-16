@@ -3,6 +3,7 @@ package history
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -50,6 +51,18 @@ func rejectedRevert(op *models.BatchFileOperation, errMsg string) *RevertFileRes
 		Reason:       models.RevertReasonDestinationConflict,
 		Error:        errMsg,
 	}
+}
+
+// withRetryable tags the rejection as resolvable by sibling progress within
+// the same run (codex P3 R6-1): a newer-APPLIED rejection is retried after
+// its blocker is consumed. Hardware/restore failures are not retryable
+// within the run.
+func (r *RevertFileResult) withRetryable(cause error) *RevertFileResult {
+	var nerr *NewerAppliedDestError
+	if errors.As(cause, &nerr) {
+		r.orderRetryable = true
+	}
+	return r
 }
 
 // restoreReplacementJournal replays an operation's replacement journal in

@@ -52,6 +52,10 @@ type RevertFileResult struct {
 	Outcome      models.RevertOutcomeEnum // RevertOutcome: reverted, skipped, or failed
 	Reason       models.RevertReasonEnum  // RevertReason: why the outcome occurred (empty for success)
 	Error        string                   // Error message for failed outcomes
+
+	// orderRetryable marks cross-operation ORDER rejections: the run retries
+	// the operation once its blocker's journal entries are consumed (R6-1).
+	orderRetryable bool
 }
 
 var (
@@ -172,20 +176,21 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 	if result, err := r.guardDoubleRevert(ctx, op); result != nil || err != nil {
 		return result, err
 	}
-	if result, err := r.checkAnchor(ctx, op); result != nil || err != nil {
-		return result, err
-	}
 
-	// P3: replay the replacement journal (reverse destination-sequence) BEFORE
-	// any generated-file cleanup AND before the legacy copy-mode rejection —
-	// copy/hardlink/symlink applies can journal media overwrites too, and
-	// rejecting first would strand them restoreless forever (codex P3 R2-1).
-	// Restored content is subtracted from the delete list. Rejections and
-	// restore failures leave the row untouched so a retry runs in order.
+	// P3: replay the replacement journal BEFORE the anchor check AND before
+	// the copy-mode rejection (codex P3 R2-1/R6-in-2): a deleted primary
+	// anchor must not strand independently recoverable overwritten media —
+	// least of all for copy-mode operations whose only forward-recoverable
+	// state IS the journal. Restored content is subtracted from the delete
+	// list. Order rejections are tagged retryable for this run's fixpoint.
 	restored, rejErr := r.restoreReplacementJournal(ctx, op)
 	if rejErr != nil {
 		logging.Warnf("Replacement journal restore refused/failed for op %d: %v", op.ID, rejErr)
-		return rejectedRevert(op, rejErr.Error()), nil
+		return rejectedRevert(op, rejErr.Error()).withRetryable(rejErr), nil
+	}
+
+	if result, err := r.checkAnchor(ctx, op); result != nil || err != nil {
+		return result, err
 	}
 
 	if op.OperationType != models.OperationTypeMove && op.OperationType != models.OperationTypeUpdate {
@@ -550,28 +555,61 @@ func cleanupEmptyDirDownwardFS(fs afero.Fs, dirPath string, stopAt string) {
 // (best-effort: individual failures don't abort the batch). Returns the ordered
 // list of per-operation results.
 func (r *Reverter) revertOperations(ctx context.Context, ops []models.BatchFileOperation, revertFn func(ctx context.Context, op *models.BatchFileOperation) (*RevertFileResult, error)) []RevertFileResult {
-	// P3: operations carrying journaled replacements revert in true reverse
-	// replace order (highest destination sequence first, per-operation max).
-	// Stable sort keeps row order for un-journaled operations.
-	sort.SliceStable(ops, func(i, j int) bool {
-		return maxJournalSeq(&ops[i]) > maxJournalSeq(&ops[j])
-	})
+	// P3 + codex R6-1: per-destination sequences are not chronologically
+	// comparable ACROSS destinations, so newest-first per-op maxima are only
+	// an approximation. A newer-applied rejection is therefore RETRIED once
+	// its blocker's entries are consumed — passes iterate to a fixpoint and
+	// terminate because consumption shrinks journals monotonically.
+	remaining := append([]models.BatchFileOperation(nil), ops...)
 	var outcomes []RevertFileResult
-	for i := range ops {
-		op := &ops[i]
-		res, sysErr := revertFn(ctx, op)
-		if sysErr != nil {
-			outcomes = append(outcomes, RevertFileResult{
-				OperationID:  op.ID,
-				MovieID:      op.MovieID,
-				OriginalPath: op.OriginalPath,
-				NewPath:      op.NewPath,
-				Outcome:      models.RevertOutcomeFailed,
-				Error:        sysErr.Error(),
-			})
-			continue
+	for {
+		sort.SliceStable(remaining, func(i, j int) bool {
+			return maxJournalSeq(&remaining[i]) > maxJournalSeq(&remaining[j])
+		})
+		progressed := false
+		var retryNext []models.BatchFileOperation
+		for i := range remaining {
+			op := &remaining[i]
+			res, sysErr := revertFn(ctx, op)
+			if sysErr != nil {
+				outcomes = append(outcomes, RevertFileResult{
+					OperationID:  op.ID,
+					MovieID:      op.MovieID,
+					OriginalPath: op.OriginalPath,
+					NewPath:      op.NewPath,
+					Outcome:      models.RevertOutcomeFailed,
+					Error:        sysErr.Error(),
+				})
+				continue
+			}
+			if res.orderRetryable {
+				retryNext = append(retryNext, *op)
+				continue
+			}
+			outcomes = append(outcomes, *res)
+			if res.Outcome == models.RevertOutcomeReverted {
+				progressed = true
+			}
 		}
-		outcomes = append(outcomes, *res)
+		if len(retryNext) == 0 {
+			break
+		}
+		if !progressed {
+			// No blocker reverted this pass — re-run once so the standing
+			// rejection is reported as a normal (final) outcome.
+			for i := range retryNext {
+				op := &retryNext[i]
+				res, sysErr := revertFn(ctx, op)
+				if sysErr != nil {
+					outcomes = append(outcomes, RevertFileResult{OperationID: op.ID, MovieID: op.MovieID, OriginalPath: op.OriginalPath, NewPath: op.NewPath, Outcome: models.RevertOutcomeFailed, Error: sysErr.Error()})
+					continue
+				}
+				res.orderRetryable = false
+				outcomes = append(outcomes, *res)
+			}
+			break
+		}
+		remaining = retryNext
 	}
 	return outcomes
 }
