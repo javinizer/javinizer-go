@@ -36,7 +36,10 @@ import (
 //     it is stale residue (deleted); with the destination missing it is the
 //     last copy of somebody's bytes (restored).
 
-var replacementBackupName = regexp.MustCompile(`\.dlbak\.[0-9a-f]{16}(\.[0-9a-f]{1,16})?`)
+// R12-3: end-anchored — a destination legitimately named with a
+// marker-shaped substring must not confuse the suffix detector; only the
+// FINAL marker counts. R4-4's ordinal tail is the optional trailing group.
+var replacementBackupName = regexp.MustCompile(`\.dlbak\.[0-9a-f]{16}(\.[0-9a-f]{1,16})?$`)
 
 // journalEntryInstalled reports whether the row journals this backup with
 // the install-confirm marker set.
@@ -53,17 +56,14 @@ func journalEntryInstalled(row *models.BatchFileOperation, backupSlash string) b
 	return false
 }
 
-// sweepSlash normalizes a path for journal comparison: the journaled ledger
-// stores paths however the downloader recorded them (slash form), while the
-// enumerator joins with OS separators — on Windows the two spellings differ.
-func sweepSlash(p string) string { return filepath.ToSlash(filepath.Clean(p)) }
+// sweepSlash normalizes a path for journal comparison via the canonical
+// dest key (separator + platform case folding — R12-1/R12-4).
+func sweepSlash(p string) string { return fsutil.DestKey(p) }
 
 // IsReplacementBackupName reports whether name carries the revert-ledger
 // ownership marker (destination-adjacent backup from downloader overwrites).
 func IsReplacementBackupName(name string) bool {
-	// Anchored: the marker must reach the end of the name.
-	m := replacementBackupName.FindString(name)
-	return m != "" && strings.HasSuffix(name, m)
+	return replacementBackupName.MatchString(name)
 }
 
 // ReplacementSweeper reaps replacement backups under conservative ownership.
@@ -108,19 +108,21 @@ func (s *ReplacementSweeper) index(ctx context.Context) (*replacementLedgerIndex
 		}
 		for _, rep := range gf.Replacements {
 			idx.journaled[sweepSlash(rep.Backup)] = row
-			idx.dirs[sweepSlash(filepath.Dir(rep.Destination))] = true
+			// Dirs are FS ENUMERATION paths — keep their recorded case (the
+			// canonical key is only a comparison form).
+			idx.dirs[filepath.ToSlash(filepath.Clean(filepath.Dir(rep.Destination)))] = true
 		}
 		// R2-3: delete-listed paths name download destinations even when NO
 		// replacement was (yet) journaled — the crash window between
 		// backup-aside and RecordReplacement leaves the backup in exactly such
 		// a directory.
 		for _, delPath := range gf.Delete {
-			idx.dirs[sweepSlash(filepath.Dir(delPath))] = true
+			idx.dirs[filepath.ToSlash(filepath.Clean(filepath.Dir(delPath)))] = true
 		}
 		// R3-3: Begin-seeded roots name the destination dir directly (a root
 		// is a destination directory, not a file path).
 		for _, root := range gf.Roots {
-			idx.dirs[sweepSlash(root)] = true
+			idx.dirs[filepath.ToSlash(filepath.Clean(root))] = true
 		}
 	}
 	return idx, nil
@@ -164,7 +166,7 @@ func (s *ReplacementSweeper) SweepDestinations(ctx context.Context, destinations
 	seen := map[string]bool{}
 	healed := 0
 	for _, dest := range destinations {
-		dir := sweepSlash(filepath.Dir(dest))
+		dir := filepath.ToSlash(filepath.Clean(filepath.Dir(dest)))
 		if seen[dir] {
 			continue
 		}
@@ -192,23 +194,25 @@ func (s *ReplacementSweeper) SweepDestinations(ctx context.Context, destinations
 // sweepOne arbitrates one ownership-marker backup file.
 func (s *ReplacementSweeper) sweepOne(ctx context.Context, idx *replacementLedgerIndex, dirSlash string, e os.FileInfo) int {
 	backup := filepath.FromSlash(dirSlash + "/" + e.Name())
-	backupSlash := sweepSlash(backup)
+	// Journal comparisons run under the canonical KEY (R12-1: separator +
+	// platform case folding); the actual fs paths keep their recorded case.
+	backupKey := sweepSlash(backup)
 
 	// Younger than this process: plausibly in-flight under a live downloader
 	// lock — never arbitrate what we cannot see journaled yet.
 	if !e.ModTime().Before(s.startedAt) {
 		return 0
 	}
-	dest := strings.TrimSuffix(backupSlash, replacementBackupName.FindString(backupSlash))
+	dest := strings.TrimSuffix(backup, replacementBackupName.FindString(e.Name()))
 
-	if owner, ok := idx.journaled[backupSlash]; ok {
+	if owner, ok := idx.journaled[backupKey]; ok {
 		// Journaled — handled under the lock inside restoreAndConsume, which
 		// RECHECKS the destination state in the critical section: a downloader
 		// can install new bytes between the classification read and the lock
 		// (codex P3 R3-2), and the backup must never clobber those
 		// freshly-installed artifacts.
-		if s.restoreAndConsume(ctx, owner, backup, dest, backupSlash) {
-			delete(idx.journaled, backup)
+		if s.restoreAndConsume(ctx, owner, backup, dest, backupKey) {
+			delete(idx.journaled, backupKey)
 			return 1
 		}
 		return 0
@@ -232,7 +236,7 @@ func (s *ReplacementSweeper) sweepOne(ctx context.Context, idx *replacementLedge
 			continue
 		}
 		for _, rep := range gf.Replacements {
-			if sweepSlash(rep.Backup) == backupSlash {
+			if sweepSlash(rep.Backup) == backupKey {
 				return 0 // freshly journaled — keep; next sweep arbitrates it as journaled
 			}
 		}

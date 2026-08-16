@@ -338,3 +338,30 @@ func mustRow(t *testing.T, repo *p3OpRepo, id uint) *models.BatchFileOperation {
 	require.NoError(t, err)
 	return row
 }
+
+// codex P3 R12-3: a destination whose own name contains a marker-shaped
+// suffix must still see its real backup discovered and restored.
+func TestSweep_MarkerInfixDestination_BackupFound(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	repo := newP3OpRepo()
+	ctx := context.Background()
+
+	dest := "/out/MIX/poster.dlbak.0123456789abcdef.jpg" // marker-shaped INFIX
+	backup := dest + ".dlbak.fedcba9876543210"
+	require.NoError(t, fs.MkdirAll("/out/MIX", config.DirPerm))
+	require.NoError(t, afero.WriteFile(fs, backup, []byte("pre"), config.FilePerm))
+	backdate(t, fs, backup)
+
+	raw, _ := json.Marshal(models.GeneratedFilesJSON{Roots: []string{"/out/MIX"}})
+	op := &models.BatchFileOperation{
+		BatchJobID: "job-1", MovieID: "MIX-001", OriginalPath: "/src/mix.mkv",
+		OperationType: models.OperationTypeUpdate, GeneratedFiles: string(raw),
+		RevertStatus: models.RevertStatusApplied,
+	}
+	require.NoError(t, repo.Create(ctx, op))
+
+	healed, err := NewReplacementSweeper(fs, repo).Sweep(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 1, healed)
+	require.Equal(t, "pre", string(mustRead2(t, fs, dest)))
+}

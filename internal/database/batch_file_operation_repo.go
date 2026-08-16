@@ -4,9 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/javinizer/javinizer-go/internal/fsutil"
 
 	"github.com/javinizer/javinizer-go/internal/models"
 	"gorm.io/gorm"
@@ -186,12 +187,11 @@ func (r *BatchFileOperationRepository) FindOperationsByDestination(ctx context.C
 	if err != nil {
 		return nil, wrapDBErr("find", "batch file operations by destination", err)
 	}
-	// R6-4: callers hand us the destination in whatever separator form the
-	// sweeper distilled (slash-normalized) while rows store the downloader's
-	// form — match on the normalized comparison. The LIKE prefilter CAN'T see
-	// through a form change, so a form-mismatch miss falls back to scanning
-	// every ledger row before concluding absence.
-	norm := func(p string) string { return filepath.ToSlash(filepath.Clean(p)) }
+	// R6-4 + R12-1: match on the canonical dest key — separator-folded and,
+	// on case-insensitive-default platforms, case-folded. The LIKE prefilter
+	// CAN'T see through a form change, so a form-mismatch miss falls back to
+	// scanning every ledger row before concluding absence.
+	norm := fsutil.DestKey
 	seam := fallbackSeam{}
 	return seam.finish(ctx, candidates, destination, norm, func(ctx2 context.Context) ([]models.BatchFileOperation, error) {
 		return r.FindOperationsWithLedger(ctx2)

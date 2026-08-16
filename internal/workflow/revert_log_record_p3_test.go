@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -292,4 +293,70 @@ func TestRevertLog_SeedRoot_ClosesNestedDiscoveryGap(t *testing.T) {
 		count++
 	}
 	require.Equal(t, 2, count)
+}
+
+// codex P3 R12-2: seed-root persistence failures SURFACE — a destructive
+// overwrite run must never proceed seedless.
+func TestRevertLog_SeedRoot_FailureSurfaces(t *testing.T) {
+	db, repo, rl := newP3RecorderHarness(t, ":memory:")
+	defer func() { _ = db.Close() }()
+
+	flaky := &failUpdateBFORepo{repo: repo, err: errors.New("outage")}
+	broken := NewDBRevertLog(flaky, NewRevertLogConfig(true, nil), "job-x", afero.NewMemMapFs(), nil, nil, nil).(*dbRevertLog)
+
+	ctx := context.Background()
+	opID := beginP3Op(t, rl, "SED-001")
+	require.Error(t, broken.seedRoot(ctx, opID, "/out/leaf"), "persist failure must surface")
+	flaky.err = nil
+	require.NoError(t, broken.seedRoot(ctx, opID, "/out/leaf"), "healed repo seeds cleanly")
+	require.Error(t, broken.seedRoot(ctx, "424242", "/out/leaf"), "missing row surfaces")
+}
+
+type failUpdateBFORepo struct {
+	repo *database.BatchFileOperationRepository
+	err  error
+}
+
+func (f *failUpdateBFORepo) Create(ctx context.Context, op *models.BatchFileOperation) error {
+	return f.repo.Create(ctx, op)
+}
+func (f *failUpdateBFORepo) CreateBatch(ctx context.Context, ops []*models.BatchFileOperation) error {
+	return f.repo.CreateBatch(ctx, ops)
+}
+func (f *failUpdateBFORepo) FindByID(ctx context.Context, id uint) (*models.BatchFileOperation, error) {
+	return f.repo.FindByID(ctx, id)
+}
+func (f *failUpdateBFORepo) FindByBatchJobID(ctx context.Context, id string) ([]models.BatchFileOperation, error) {
+	return f.repo.FindByBatchJobID(ctx, id)
+}
+func (f *failUpdateBFORepo) FindByBatchJobIDAndRevertStatus(ctx context.Context, id string, s models.RevertStatusEnum) ([]models.BatchFileOperation, error) {
+	return f.repo.FindByBatchJobIDAndRevertStatus(ctx, id, s)
+}
+func (f *failUpdateBFORepo) Update(ctx context.Context, op *models.BatchFileOperation) error {
+	if f.err != nil {
+		return f.err
+	}
+	return f.repo.Update(ctx, op)
+}
+func (f *failUpdateBFORepo) UpdateRevertStatus(ctx context.Context, id uint, s models.RevertStatusEnum) error {
+	return f.repo.UpdateRevertStatus(ctx, id, s)
+}
+func (f *failUpdateBFORepo) CountByBatchJobID(context.Context, string) (int64, error) { return 0, nil }
+func (f *failUpdateBFORepo) CountByBatchJobIDAndRevertStatus(context.Context, string, models.RevertStatusEnum) (int64, error) {
+	return 0, nil
+}
+func (f *failUpdateBFORepo) CountByBatchJobIDs(context.Context, []string) (map[string]int64, error) {
+	return nil, nil
+}
+func (f *failUpdateBFORepo) CountRevertedByBatchJobIDs(context.Context, []string) (map[string]int64, error) {
+	return nil, nil
+}
+func (f *failUpdateBFORepo) FindOperationsByDestination(ctx context.Context, d string) ([]models.BatchFileOperation, error) {
+	return f.repo.FindOperationsByDestination(ctx, d)
+}
+func (f *failUpdateBFORepo) FindOperationsWithReplacements(ctx context.Context) ([]models.BatchFileOperation, error) {
+	return f.repo.FindOperationsWithReplacements(ctx)
+}
+func (f *failUpdateBFORepo) FindOperationsWithLedger(ctx context.Context) ([]models.BatchFileOperation, error) {
+	return f.repo.FindOperationsWithLedger(ctx)
 }

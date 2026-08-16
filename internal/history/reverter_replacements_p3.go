@@ -221,7 +221,7 @@ func (r *Reverter) checkDestBlocking(ctx context.Context, op *models.BatchFileOp
 			continue
 		}
 		for _, e := range rowGf.Replacements {
-			if e.Destination != dest {
+			if fsutil.DestKey(e.Destination) != fsutil.DestKey(dest) {
 				continue
 			}
 			// Newer owner above the op's chain, or a foreign entry INTERLEAVED

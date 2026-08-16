@@ -385,11 +385,14 @@ func (o *applyOrchImpl) stepDownload(ctx context.Context, cmd ApplyCmd, opID Ope
 			downloadMovie = state.scrapedMediaURLs.overlay(downloadMovie)
 		}
 	}
-	// R7-3: media install into the organizer's leaf folder — seed it as the
-	// discovery root pre-download so the startup sweep finds crash-window
-	// backups even when the folder nests beyond the walk bound.
+	// R7-3/R12-2: media install into the organizer's leaf folder — seed it
+	// as the discovery root pre-download; a DESTRUCTIVE run must never
+	// proceed with an unseeded discovery path (the startup sweep would be
+	// blind to a pre-journal crash window there).
 	if rl, ok := o.revertLog.(*dbRevertLog); ok && opID != "" && state.finalDir != "" {
-		rl.seedRoot(ctx, opID, state.finalDir)
+		if sErr := rl.seedRoot(ctx, opID, state.finalDir); sErr != nil && cmd.OverwriteExistingMedia {
+			return fmt.Errorf("discovery-root seed failed for overwrite run: %w", sErr)
+		}
 	}
 	outcome, dlErr := o.downloader.Download(ctx, downloader.DownloadCmd{
 		Movie:                  downloadMovie,

@@ -3,8 +3,10 @@ package database
 import (
 	"context"
 	"errors"
+	"runtime"
 	"testing"
 
+	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/require"
 )
@@ -58,4 +60,24 @@ func TestFindOperationsByDestination_FallbackErrorPropagates(t *testing.T) {
 	})
 	require.ErrorIs(t, err, sentinel, "fallback failure must surface, not masquerade as absence")
 	require.Equal(t, "marker", gotCtx.Value(ctxKey{}), "R10-1: the caller's context rides the fallback scan")
+}
+
+// codex P3 R12-1: destination matching follows platform case semantics —
+// Windows/macOS fold case, so a differently-cased apply must match.
+func TestFallbackSeam_CaseVariantDestinationMatches(t *testing.T) {
+	raw := `{"replacements":[{"destination":"C:\\Media\\poster.jpg","backup":"C:\\Media\\poster.jpg.dlbak.aaaaaaaaaaaaaaaa","dest_seq":1}]}`
+	cand := models.BatchFileOperation{MovieID: "CV-1", GeneratedFiles: raw}
+	helper := fallbackSeam{}
+	scanCalls := 0
+	matched, err := helper.finish(context.Background(), []models.BatchFileOperation{cand}, `c:\media\poster.jpg`, fsutil.DestKey, func(context.Context) ([]models.BatchFileOperation, error) {
+		scanCalls++
+		return []models.BatchFileOperation{cand}, nil
+	})
+	require.NoError(t, err)
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
+		require.Len(t, matched, 1, "case variants match on case-insensitive platforms")
+	} else {
+		require.Empty(t, matched, "case differs = different file on case-sensitive filesystems")
+		require.Equal(t, 1, scanCalls, "prefilter miss fell back to the full scan")
+	}
 }

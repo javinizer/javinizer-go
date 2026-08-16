@@ -2,6 +2,7 @@ package fsutil
 
 import (
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -28,11 +29,21 @@ func NewKeyedLockRegistry() *KeyedLockRegistry {
 }
 
 func foldKeyedLock(s string) string {
-	// codex P3 R4-4: destination locks must match regardless of separator
-	// spelling — on Windows the downloader joins with `\` while journaled
-	// histories use `/`; both resolve to one file and must share one mutex.
-	s = strings.ReplaceAll(strings.TrimSpace(s), "\\", "/")
-	return strings.ToUpper(filepath.Clean(s))
+	return strings.ToUpper(DestKey(s))
+}
+
+// DestKey canonicalizes a destination path for CROSS-FORM comparisons
+// (codex P3 R12-1): separator-folded and cleaned, and case-folded on
+// case-insensitive-by-default filesystems (Windows, and macOS's default
+// APFS). Linux keeps case semantics — a false-positive match there would
+// fabricate chain links between two REAL distinct files.
+func DestKey(p string) string {
+	s := strings.ReplaceAll(strings.TrimSpace(p), "\\", "/")
+	s = strings.TrimSuffix(filepath.Clean(s), "/.")
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
+		return strings.ToLower(s)
+	}
+	return s
 }
 
 // Acquire blocks until the mutex for key is held and returns a release

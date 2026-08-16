@@ -742,32 +742,38 @@ func (l *dbRevertLog) ConfirmReplacement(ctx context.Context, opID OperationID, 
 	return nil
 }
 
-// seedRoot appends a discovery root to the operation ledger (dedup). Used
+// seedRoot appends a discovery root to the operation ledger (dedup). R12-2:
+// failures SURFACE (silent log-and-proceed would arm a destructive download
+// whose pre-journal crash window the startup sweep cannot discover). Used
 // by the orchestrator right after organize: media land in the organizer's
 // leaf folder — possibly nested beyond the sweeper's walk bound (codex P3
 // R7-3) — so the exact folder is recorded while the run is still alive,
 // closing the pre-Complete discovery gap entirely.
-func (l *dbRevertLog) seedRoot(ctx context.Context, opID OperationID, root string) {
+func (l *dbRevertLog) seedRoot(ctx context.Context, opID OperationID, root string) error {
 	if opID == "" || root == "" {
-		return
+		return nil
 	}
 	recordID64, err := strconv.ParseUint(opID, 10, 64)
 	if err != nil || recordID64 == 0 {
-		return
+		return nil
 	}
 	release := replacementLedgerLocks.Acquire(opID)
 	defer release()
 	preRecord, err := l.repo.FindByID(ctx, uint(recordID64))
-	if err != nil || preRecord == nil {
-		return
+	if err != nil {
+		return fmt.Errorf("revert log seedRoot: find record %s: %w", opID, err)
+	}
+	if preRecord == nil {
+		return fmt.Errorf("revert log seedRoot: record %s not found", opID)
 	}
 	next := appendLedgerRoot(resolveLogger(l.logger), preRecord.GeneratedFiles, root)
 	if next != preRecord.GeneratedFiles {
 		preRecord.GeneratedFiles = next
 		if err := l.repo.Update(ctx, preRecord); err != nil {
-			resolveLogger(l.logger).Warnf("[revert-log] seedRoot: failed to persist root %s for %s: %v", root, opID, err)
+			return fmt.Errorf("revert log seedRoot: persist root %s for %s: %w", root, opID, err)
 		}
 	}
+	return nil
 }
 
 // nextDestSequence returns the next per-destination sequence: the maximum
