@@ -586,7 +586,14 @@ func (r *Reverter) revertOperations(ctx context.Context, ops []models.BatchFileO
 		var retryNext []models.BatchFileOperation
 		for i := range remaining {
 			op := &remaining[i]
+			// R18-1: CONSUMPTION is progress too — a blocker whose journal got
+			// replayed but whose primary anchor was missing lands Skipped;
+			// counted as progress, deeper chains (A←B←C) keep unwinding.
+			journaledBefore := len(mustJournal(op))
 			res, sysErr := revertFn(ctx, op)
+			if journaledAfter := len(mustJournal(op)); journaledAfter < journaledBefore {
+				progressed = true
+			}
 			if sysErr != nil {
 				outcomes = append(outcomes, RevertFileResult{
 					OperationID:  op.ID,
@@ -628,6 +635,16 @@ func (r *Reverter) revertOperations(ctx context.Context, ops []models.BatchFileO
 		remaining = retryNext
 	}
 	return outcomes
+}
+
+// mustJournal optimistically parses an op's replacement journal (zero on
+// malformed/absent).
+func mustJournal(op *models.BatchFileOperation) []models.ReplacementEntry {
+	gf, err := models.ParseGeneratedFiles(op.GeneratedFiles)
+	if err != nil {
+		return nil
+	}
+	return gf.Replacements
 }
 
 // summarizeOutcomes computes aggregate succeeded/skipped/failed counts from

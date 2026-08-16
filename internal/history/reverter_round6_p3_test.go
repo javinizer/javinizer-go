@@ -3,6 +3,7 @@ package history
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/config"
@@ -182,4 +183,58 @@ func TestRevert_SpellingSplitChain_GroupsCanonically(t *testing.T) {
 	gf, err := models.ParseGeneratedFiles(row.GeneratedFiles)
 	require.NoError(t, err)
 	require.Empty(t, gf.Replacements)
+}
+
+// codex P3 R18-1: a blocker that consumes its journal but SKIPs (anchor
+// missing) is still progress — consumption lets deeper chains unwind instead
+// of stalling after one pass.
+func TestRevert_ChainUnwindsThroughSkippedBlockers(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	repo := newP3OpRepo()
+	ctx := context.Background()
+
+	dest := "/dst/CHN3/poster.jpg"
+	require.NoError(t, fs.MkdirAll("/dst/CHN3", config.DirPerm))
+	require.NoError(t, afero.WriteFile(fs, dest, []byte("C-final"), config.FilePerm))
+	require.NoError(t, afero.WriteFile(fs, dest+".dlbak.1", []byte("original"), config.FilePerm))
+	require.NoError(t, afero.WriteFile(fs, dest+".dlbak.2", []byte("post-A"), config.FilePerm))
+	require.NoError(t, afero.WriteFile(fs, dest+".dlbak.3", []byte("post-B"), config.FilePerm))
+
+	mk := func(movieID string, seq int64) *models.BatchFileOperation {
+		newPath := "/dst/" + movieID + "/" + movieID + ".mkv"
+		require.NoError(t, fs.MkdirAll("/dst/"+movieID, config.DirPerm))
+		require.NoError(t, afero.WriteFile(fs, newPath, []byte("video"), config.FilePerm))
+		raw, err := json.Marshal(models.GeneratedFilesJSON{Replacements: []models.ReplacementEntry{
+			{Destination: dest, Backup: dest + fmt.Sprintf(".dlbak.%d", seq), DestSeq: seq},
+		}})
+		require.NoError(t, err)
+		op := &models.BatchFileOperation{
+			BatchJobID: "job-1", MovieID: movieID, OriginalPath: "/src/" + movieID + ".mkv", NewPath: newPath,
+			OperationType: models.OperationTypeMove, GeneratedFiles: string(raw),
+			RevertStatus: models.RevertStatusApplied,
+		}
+		require.NoError(t, repo.Create(ctx, op))
+		return op
+	}
+	ops := []*models.BatchFileOperation{mk("D3-AAA", 1), mk("D3-BBB", 2), mk("D3-CCC", 3)}
+	// All three anchors deleted out-of-band → every op SKIPs at the row
+	// level, but the journal chain must still unwind fully.
+	for _, op := range ops {
+		require.NoError(t, fs.Remove(op.NewPath))
+	}
+
+	r := NewReverter(fs, repo)
+	res, err := r.RevertBatch(ctx, "job-1")
+	require.NoError(t, err)
+	require.Equal(t, 3, res.Skipped, "every op anchors-missing once its journal unwound")
+	require.Equal(t, 0, res.Failed)
+	require.Equal(t, "original", string(mustRead2(t, fs, dest)),
+		"the whole chain rewound to the oldest bytes through skipped blockers")
+	for _, op := range ops {
+		row, err := repo.FindByID(ctx, op.ID)
+		require.NoError(t, err)
+		gf, err := models.ParseGeneratedFiles(row.GeneratedFiles)
+		require.NoError(t, err)
+		require.Empty(t, gf.Replacements)
+	}
 }
