@@ -74,10 +74,11 @@ func TestFallbackSeam_CaseVariantDestinationMatches(t *testing.T) {
 		return []models.BatchFileOperation{cand}, nil
 	})
 	require.NoError(t, err)
-	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
-		require.Len(t, matched, 1, "case variants match on case-insensitive platforms")
+	if runtime.GOOS == "windows" {
+		require.Len(t, matched, 1, "case variants match on case-insensitive Windows")
 	} else {
-		require.Empty(t, matched, "case differs = different file on case-sensitive filesystems")
+		// R17-1: macOS volumes may be case-sensitive — POSIX folds nothing.
+		require.Empty(t, matched, "case differs = different file off-Windows")
 		require.Equal(t, 1, scanCalls, "prefilter miss fell back to the full scan")
 	}
 }
@@ -97,10 +98,18 @@ func TestFallbackSeam_UnionDeduplicatesMixedSpellings(t *testing.T) {
 		return []models.BatchFileOperation{candBackslash, candSlash}, nil
 	})
 	require.NoError(t, err)
-	require.Len(t, matched, 2, "both spellings of one destination must remain visible")
-	ids := map[uint]bool{}
-	for _, op := range matched {
-		ids[op.ID] = true
+	if runtime.GOOS == "windows" {
+		require.Len(t, matched, 2, "both spellings of one destination must remain visible")
+	} else {
+		// R17-1: POSIX sees `C:\Media` (backslash = name char) and `C:/Media`
+		// as genuinely different paths — only the exact form matches.
+		require.Len(t, matched, 1, "POSIX: backslash is a filename character")
 	}
-	require.True(t, ids[7] && ids[9], "deduped union of prefilter + normalized scan")
+	if runtime.GOOS == "windows" {
+		ids := map[uint]bool{}
+		for _, op := range matched {
+			ids[op.ID] = true
+		}
+		require.True(t, ids[7] && ids[9], "deduped union of prefilter + normalized scan")
+	}
 }

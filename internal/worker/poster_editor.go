@@ -896,7 +896,7 @@ func (m *LockedMovieOps) UpdateMovieFamily(ctx context.Context, movie *models.Mo
 	// publish must see those normalized IDs (stale-ID anti-resurrection).
 	for _, cand := range candidates {
 		cand.Movie = movie
-		cand.FileMatchInfo.MovieID = movie.ID
+		retainMovieAlias(cand, movie.ID)
 	}
 	// Relocate the poster pair BEFORE the commit (codex r27): a failed
 	// relocation means no DB/envelope mutation at all; a failed COMMIT after
@@ -1241,7 +1241,7 @@ func (m *LockedMovieOps) ApplyFieldOverride(ctx context.Context, resultID, field
 
 	cand := result.Clone()
 	cand.Movie = movie
-	cand.FileMatchInfo.MovieID = movie.ID
+	retainMovieAlias(cand, movie.ID)
 	// Predict the publication revision (codex r16): the envelope already
 	// encoded by commit time would otherwise store revision N while
 	// publication bumps memory to N+1 — after restart, conflict state
@@ -1549,7 +1549,7 @@ func (m *LockedMovieOps) updateMovieSingleLocked(ctx context.Context, filePath s
 	sanitizePosterCropGeometry(movie, have, curPosterURL, curCoverURL, curShouldCrop)
 	cand := current.Clone()
 	cand.Movie = movie // alias the live pointer: post-Upsert normalization must flow to envelope + publish
-	cand.FileMatchInfo.MovieID = movie.ID
+	retainMovieAlias(cand, movie.ID)
 	cand.Revision = current.Revision + 1
 	return m.commitCandidate(ctx, map[string]*resultstore.MovieResult{filePath: cand}, nil, func(plan *EditCommitPlan) {
 		plan.UpsertMovie = movie
@@ -1960,4 +1960,14 @@ func establishScrapedBaseline(target, source *models.Movie) {
 		target.Poster.OriginalShouldCropPoster = nil
 	}
 	target.Poster.OriginalCoverURL = strings.TrimSpace(source.Poster.CoverURL)
+}
+
+// retainMovieAlias writes the canonical movie ID over the matcher alias ONLY
+// when a canonical ID exists (codex P3 R17-2): committing an empty ID over a
+// legacy row would erase the alias the eviction-witness recovery arbitrates
+// on (uncommitted classification → witness deleted with the pair orphaned).
+func retainMovieAlias(cand *resultstore.MovieResult, movieID string) {
+	if strings.TrimSpace(movieID) != "" {
+		cand.FileMatchInfo.MovieID = movieID
+	}
 }

@@ -33,17 +33,19 @@ func foldKeyedLock(s string) string {
 }
 
 // DestKey canonicalizes a destination path for CROSS-FORM comparisons
-// (codex P3 R12-1): separator-folded and cleaned, and case-folded on
-// case-insensitive-by-default filesystems (Windows, and macOS's default
-// APFS). Linux keeps case semantics — a false-positive match there would
-// fabricate chain links between two REAL distinct files.
+// (codex P3 R12-1/R17-1): separator/case folding applies ONLY on Windows —
+// there `\` is necessarily a separator and names are necessarily case-
+// insensitive. POSIX (including macOS, whose APFS volume MAY be case-
+// sensitive) folds NOTHING: a fabricated match between two real distinct
+// files is worse than a missed alias between two spellings of one file,
+// because missed matches fail CLOSED (retain backups, reject restores).
 func DestKey(p string) string {
-	s := strings.ReplaceAll(strings.TrimSpace(p), "\\", "/")
-	s = strings.TrimSuffix(filepath.Clean(s), "/.")
-	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
-		return strings.ToLower(s)
+	if runtime.GOOS != "windows" {
+		return filepath.Clean(strings.TrimSpace(p))
 	}
-	return s
+	s := strings.ReplaceAll(strings.TrimSpace(p), "\\", "/")
+	s = filepath.Clean(s)
+	return strings.ToLower(s)
 }
 
 // Acquire blocks until the mutex for key is held and returns a release

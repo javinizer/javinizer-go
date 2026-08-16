@@ -363,3 +363,20 @@ func TestRescrape_StagedCommitFailureRecorded(t *testing.T) {
 	assert.True(t, committed.PosterGenerated)
 	assert.Equal(t, 1, discarded, "failed promote discards the staged residue")
 }
+
+// codex P3 R17-2: an empty canonical ID must never erase a legacy matcher
+// alias — the eviction witness recovery arbitrates on it.
+func TestRetainMovieAlias(t *testing.T) {
+	legacy := &resultstore.MovieResult{
+		Movie:         &models.Movie{},
+		FileMatchInfo: models.FileMatchInfo{MovieID: "ABC-123"},
+	}
+	retainMovieAlias(legacy, "")
+	require.Equal(t, "ABC-123", legacy.FileMatchInfo.MovieID, "empty canonical ID preserves the alias")
+
+	retainMovieAlias(legacy, "\t ")
+	require.Equal(t, "ABC-123", legacy.FileMatchInfo.MovieID, "whitespace ID preserves the alias")
+
+	retainMovieAlias(legacy, "DEF-456")
+	require.Equal(t, "DEF-456", legacy.FileMatchInfo.MovieID, "real canonical ID overwrites as before")
+}
