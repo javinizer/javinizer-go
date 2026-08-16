@@ -851,7 +851,7 @@ func (s *JobStore) CleanupStaleTempDirs(ctx context.Context) (int, error) {
 func (s *JobStore) getTempCleaner() *TempDirCleaner {
 	s.tempCleanerOnce.Do(func() {
 		if s.tempCleaner == nil {
-			s.tempCleaner = NewTempDirCleaner(s.fs, s.tempDir, s.jobRepo)
+			s.tempCleaner = NewTempDirCleaner(s.fs, s.tempDir, s.jobRepo, WithAdmissionProbe(s.admissionBusy))
 		}
 	})
 	return s.tempCleaner

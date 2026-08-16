@@ -30,18 +30,23 @@ import (
 // responsibility with its own dependencies (fs, tempDir, jobRepo), rather
 // than being embedded in the 591-line JobStore.
 type TempDirCleaner struct {
-	fs      afero.Fs
-	tempDir string
-	jobRepo database.JobRepositoryInterface
+	fs             afero.Fs
+	tempDir        string
+	jobRepo        database.JobRepositoryInterface
+	admissionProbe AdmissionProbe // P3: skip jobs holding any admission lease
 }
 
 // NewTempDirCleaner creates a TempDirCleaner with the minimum required dependencies.
-func NewTempDirCleaner(fs afero.Fs, tempDir string, jobRepo database.JobRepositoryInterface) *TempDirCleaner {
-	return &TempDirCleaner{
+func NewTempDirCleaner(fs afero.Fs, tempDir string, jobRepo database.JobRepositoryInterface, opts ...func(*TempDirCleaner)) *TempDirCleaner {
+	c := &TempDirCleaner{
 		fs:      fs,
 		tempDir: tempDir,
 		jobRepo: jobRepo,
 	}
+	for _, opt := range opts {
+		opt(c)
+	}
+	return c
 }
 
 // CleanupStaleTempDirs removes temp poster directories for jobs that are either:
@@ -77,6 +82,14 @@ func (c *TempDirCleaner) CleanupStaleTempDirs(ctx context.Context) (int, error) 
 			continue
 		}
 		jobID := entry.Name()
+
+		// P3: a job holding ANY admission lease (edit in flight, delete-drain
+		// or phase start queued) owns its staging dir right now — skip until
+		// the operation releases. Cancel ordering resolves the same way: the
+		// cancelled edit's release makes a later sweep see the dir again.
+		if c.admissionProbe != nil && c.admissionProbe(jobID) {
+			continue
+		}
 
 		shouldRemove := false
 
