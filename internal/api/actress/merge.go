@@ -22,6 +22,11 @@ func writeActressMergeError(c *gin.Context, err error) {
 		c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "actress not found"})
 	case errors.Is(err, database.ErrActressMergeUniqueConstraint):
 		c.JSON(http.StatusConflict, contracts.ErrorResponse{Error: err.Error()})
+	case errors.Is(err, database.ErrActressMergeStalePlan):
+		c.JSON(http.StatusConflict, contracts.ErrorResponse{
+			Error: err.Error(),
+			Code:  "ACTRESS_MERGE_STALE_PLAN",
+		})
 	default:
 		core.RespondInternalError(c, err)
 	}
@@ -70,6 +75,8 @@ func previewActressMerge(deps ActressDeps) gin.HandlerFunc {
 			ProposedMerged:     preview.ProposedMerged,
 			Conflicts:          conflicts,
 			DefaultResolutions: preview.DefaultResolutions,
+			TargetUpdatedAt:    preview.Target.UpdatedAt,
+			SourceUpdatedAt:    preview.Source.UpdatedAt,
 		})
 	}
 }
@@ -94,8 +101,16 @@ func mergeActresses(deps ActressDeps) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
-
-		result, err := deps.ActressRepo.Merge(c.Request.Context(), req.TargetID, req.SourceID, req.Resolutions)
+		var result *database.ActressMergeResult
+		var err error
+		if req.TargetUpdatedAt.IsZero() && req.SourceUpdatedAt.IsZero() {
+			result, err = deps.ActressRepo.Merge(c.Request.Context(), req.TargetID, req.SourceID, req.Resolutions)
+		} else if req.TargetUpdatedAt.IsZero() || req.SourceUpdatedAt.IsZero() {
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "target_updated_at and source_updated_at must both be provided or both omitted"})
+			return
+		} else {
+			result, err = deps.ActressRepo.MergeWithVersions(c.Request.Context(), req.TargetID, req.SourceID, req.Resolutions, req.TargetUpdatedAt, req.SourceUpdatedAt)
+		}
 		if err != nil {
 			writeActressMergeError(c, err)
 			return

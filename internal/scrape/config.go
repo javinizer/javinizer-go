@@ -4,21 +4,26 @@ import (
 	"context"
 
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/imageutil"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/translation"
 )
 
 // Config holds the subset of application configuration needed by the Scrape seam.
 type Config struct {
-	ScrapersPriority        []string
-	TranslationEnabled      bool
-	TranslationSettingsHash string
-	TranslationTargetLang   string
-	ActressDBEnabled        bool
-	ScrapeActress           bool
-	UserAgent               string
-	Referer                 string
-	TempDir                 string
+	ScrapersPriority []string
+	// ActressFieldPriority ranks scrapers for actress metadata picks — the
+	// metadata priority "actress" field list; empty inherits ScrapersPriority.
+	ActressFieldPriority     []string
+	TranslationEnabled       bool
+	TranslationSettingsHash  string
+	TranslationTargetLang    string
+	ActressDBEnabled         bool
+	ScrapeActress            bool
+	UserAgent                string
+	Referer                  string
+	TempDir                  string
+	ValidateActressThumbnail func(context.Context, string) error
 }
 
 // Translator is the interface for applying metadata translation to a scraped Movie.
@@ -97,8 +102,8 @@ func (a *translationAdapter) Translate(ctx context.Context, movie *models.Movie)
 
 // ConfigFromAppConfig extracts Scrape-relevant fields from the application config.
 //
-// Config-bridge reads: cfg.Scrapers.Priority, cfg.Metadata.Translation.Enabled,
-// cfg.Metadata.Translation.TargetLanguage, cfg.Metadata.Translation.SettingsHash(),
+// Config-bridge reads: cfg.Scrapers.Priority, cfg.Metadata.Priority.Fields,
+// cfg.Metadata.Translation.Enabled, cfg.Metadata.Translation.TargetLanguage, cfg.Metadata.Translation.SettingsHash(),
 // cfg.Metadata.ActressDatabase.Enabled, cfg.Scrapers.ScrapeActress,
 // cfg.Scrapers.UserAgent, cfg.Scrapers.Referer, cfg.System.TempDir
 func ConfigFromAppConfig(cfg *config.Config) *Config {
@@ -106,14 +111,16 @@ func ConfigFromAppConfig(cfg *config.Config) *Config {
 		return nil
 	}
 	c := &Config{
-		ScrapersPriority:      cfg.Scrapers.Priority,
-		TranslationEnabled:    cfg.Metadata.Translation.Enabled,
-		TranslationTargetLang: cfg.Metadata.Translation.TargetLanguage,
-		ActressDBEnabled:      cfg.Metadata.ActressDatabase.Enabled,
-		ScrapeActress:         cfg.Scrapers.ScrapeActress,
-		UserAgent:             cfg.Scrapers.UserAgent,
-		Referer:               cfg.Scrapers.Referer,
-		TempDir:               cfg.System.TempDir,
+		ScrapersPriority:         cfg.Scrapers.Priority,
+		ActressFieldPriority:     append([]string(nil), cfg.Metadata.Priority.Fields["actress"]...),
+		TranslationEnabled:       cfg.Metadata.Translation.Enabled,
+		TranslationTargetLang:    cfg.Metadata.Translation.TargetLanguage,
+		ActressDBEnabled:         cfg.Metadata.ActressDatabase.Enabled,
+		ScrapeActress:            cfg.Scrapers.ScrapeActress,
+		UserAgent:                cfg.Scrapers.UserAgent,
+		Referer:                  cfg.Scrapers.Referer,
+		TempDir:                  cfg.System.TempDir,
+		ValidateActressThumbnail: imageutil.ValidateRemoteImage,
 	}
 	if c.TranslationEnabled {
 		c.TranslationSettingsHash = cfg.Metadata.Translation.SettingsHash()

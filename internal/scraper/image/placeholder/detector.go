@@ -29,28 +29,24 @@ func isPlaceholder(ctx context.Context, client *resty.Client, url string, cfg Co
 		hashSet[h] = true
 	}
 
-	resp, err := client.R().SetContext(ctx).Head(url)
-	if err != nil {
-		return false, fmt.Errorf("HEAD request failed: %w", err)
-	}
-
-	if resp.StatusCode() == 404 {
+	resp, headErr := client.R().SetContext(ctx).Head(url)
+	if headErr == nil && resp.StatusCode() == http.StatusNotFound {
 		logging.Debugf("placeholder: 404 response for %s, treating as missing", url)
 		return false, nil
 	}
-
-	if resp.StatusCode() >= 400 {
-		return false, models.NewScraperStatusError("placeholder", resp.StatusCode(), "HEAD request failed")
-	}
-
-	contentLengthStr := resp.Header().Get("Content-Length")
-	logging.Debugf("placeholder: HEAD check for %s: Content-Length=%s, threshold=%d", url, contentLengthStr, cfg.Threshold)
-
-	if contentLengthStr != "" {
-		contentLength, err := strconv.ParseInt(contentLengthStr, 10, 64)
-		if err == nil && contentLength >= cfg.Threshold {
-			return false, nil
+	if headErr == nil && resp.StatusCode() < http.StatusBadRequest {
+		contentLengthStr := resp.Header().Get("Content-Length")
+		logging.Debugf("placeholder: HEAD check for %s: Content-Length=%s, threshold=%d", url, contentLengthStr, cfg.Threshold)
+		if contentLengthStr != "" {
+			contentLength, parseErr := strconv.ParseInt(contentLengthStr, 10, 64)
+			if parseErr == nil && contentLength >= cfg.Threshold {
+				return false, nil
+			}
 		}
+	} else if headErr != nil {
+		logging.Debugf("placeholder: HEAD check failed for %s, falling back to GET: %v", url, headErr)
+	} else {
+		logging.Debugf("placeholder: HEAD returned status %d for %s, falling back to GET", resp.StatusCode(), url)
 	}
 
 	httpClient := client.GetClient()

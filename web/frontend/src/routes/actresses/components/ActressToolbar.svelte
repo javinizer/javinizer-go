@@ -4,6 +4,7 @@
 	import { Search, ArrowUpDown, GitMerge } from 'lucide-svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
+	import type { ActressFilter } from '$lib/api/types';
 	import * as m from '$lib/paraglide/messages';
 
 	let {
@@ -12,6 +13,7 @@
 		viewMode = $bindable(),
 		sortBy = $bindable(),
 		sortOrder,
+		filter = $bindable(),
 		selectedIds,
 		total,
 		actressesCount,
@@ -28,6 +30,7 @@
 		viewMode: 'cards' | 'compact' | 'table';
 		sortBy: string;
 		sortOrder: 'asc' | 'desc';
+		filter: ActressFilter | '';
 		selectedIds: number[];
 		total: number;
 		actressesCount: number;

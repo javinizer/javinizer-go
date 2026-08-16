@@ -1,6 +1,7 @@
 package ssrf
 
 import (
+	"context"
 	"net"
 	"testing"
 
@@ -16,7 +17,7 @@ func TestSetLookupIPForTest(t *testing.T) {
 
 	result := currentLookupIP()
 	require.NotNil(t, result)
-	ips, err := result("example.com")
+	ips, err := result(context.Background(), "example.com")
 	assert.NoError(t, err)
 	assert.Len(t, ips, 1)
 	assert.Equal(t, net.ParseIP("1.2.3.4"), ips[0])

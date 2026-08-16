@@ -868,10 +868,14 @@ func TestActressMergePreviewAndApply(t *testing.T) {
 	assert.Equal(t, source.ID, previewResp.Source.ID)
 	assert.NotEmpty(t, previewResp.Conflicts)
 	assert.Equal(t, "target", previewResp.DefaultResolutions["dmm_id"])
+	assert.False(t, previewResp.TargetUpdatedAt.IsZero())
+	assert.False(t, previewResp.SourceUpdatedAt.IsZero())
 
 	mergeBody := map[string]interface{}{
-		"target_id": target.ID,
-		"source_id": source.ID,
+		"target_id":         target.ID,
+		"source_id":         source.ID,
+		"target_updated_at": previewResp.TargetUpdatedAt,
+		"source_updated_at": previewResp.SourceUpdatedAt,
 		"resolutions": map[string]string{
 			"dmm_id":    "source",
 			"thumb_url": "source",
@@ -913,8 +917,10 @@ func TestActressMergeValidationAndNotFound(t *testing.T) {
 
 	// Same target/source should return 400.
 	sameBody := map[string]interface{}{
-		"target_id": target.ID,
-		"source_id": target.ID,
+		"target_id":         target.ID,
+		"source_id":         target.ID,
+		"target_updated_at": target.UpdatedAt,
+		"source_updated_at": target.UpdatedAt,
 	}
 	sameJSON, err := json.Marshal(sameBody)
 	require.NoError(t, err)
@@ -927,8 +933,10 @@ func TestActressMergeValidationAndNotFound(t *testing.T) {
 
 	// Missing source actress should return 404.
 	missingBody := map[string]interface{}{
-		"target_id": target.ID,
-		"source_id": 999999,
+		"target_id":         target.ID,
+		"source_id":         999999,
+		"target_updated_at": target.UpdatedAt,
+		"source_updated_at": target.UpdatedAt,
 	}
 	missingJSON, err := json.Marshal(missingBody)
 	require.NoError(t, err)
@@ -967,9 +975,11 @@ func TestActressMergeInvalidResolutionPayload(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			body := map[string]interface{}{
-				"target_id":   target.ID,
-				"source_id":   source.ID,
-				"resolutions": tt.resolution,
+				"target_id":         target.ID,
+				"source_id":         source.ID,
+				"resolutions":       tt.resolution,
+				"target_updated_at": target.UpdatedAt,
+				"source_updated_at": source.UpdatedAt,
 			}
 			payload, err := json.Marshal(body)
 			require.NoError(t, err)
@@ -1017,8 +1027,10 @@ func TestActressMergeConflictStatus409(t *testing.T) {
 	router.POST("/actresses/merge", mergeActresses(ActressDeps{ContentRepos: database.ContentRepos{ActressRepo: repo}}))
 
 	body := map[string]interface{}{
-		"target_id": target.ID,
-		"source_id": source.ID,
+		"target_id":         target.ID,
+		"source_id":         source.ID,
+		"target_updated_at": target.UpdatedAt,
+		"source_updated_at": source.UpdatedAt,
 		"resolutions": map[string]string{
 			"dmm_id": "source",
 		},

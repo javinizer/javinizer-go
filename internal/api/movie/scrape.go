@@ -199,6 +199,7 @@ func scrapeMovie(deps MovieDeps) gin.HandlerFunc {
 			Cached:      cached,
 			Movie:       contracts.MovieViewFromModel(result.Movie),
 			SourcesUsed: sourcesUsed,
+			Warning:     result.Warning,
 		})
 	}
 }

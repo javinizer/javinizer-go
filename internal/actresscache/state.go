@@ -1,0 +1,265 @@
+package actresscache
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
+)
+
+// syncFile models the file operations durability needs, so tests can fault
+// each stage independently.
+type syncFile interface {
+	Write([]byte) (int, error)
+	Sync() error
+	Close() error
+}
+
+// stateSyncOpen is seam-injectable for failure coverage of each stage.
+var stateSyncOpen = func(path string, perm os.FileMode) (syncFile, error) {
+	return os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
+}
+
+// writeFileSync writes data with fsync before close: compactions rename over
+// the live journal, so an unsynced tmp file could rename to a TORN state
+// file after power loss and destroy the resumable last-good entries.
+func writeFileSync(path string, data []byte, perm os.FileMode) error {
+	f, err := stateSyncOpen(path, perm)
+	if err != nil {
+		return err
+	}
+	_, werr := f.Write(data)
+	if serr := f.Sync(); serr != nil && werr == nil {
+		werr = serr
+	}
+	cerr := f.Close()
+	if werr != nil {
+		return werr
+	}
+	return cerr
+}
+
+var (
+	stateReadFile       = os.ReadFile
+	stateRepairTail     = repairStateTail
+	stateMkdirAll       = os.MkdirAll
+	stateOpenFile       = os.OpenFile
+	stateOpenRepairFile = os.OpenFile
+	stateTruncate       = func(file *os.File, size int64) error { return file.Truncate(size) }
+	stateSeekEnd        = func(file *os.File) error { _, err := file.Seek(0, io.SeekEnd); return err }
+	stateWriteNewline   = func(file *os.File) error { _, err := file.Write([]byte{10}); return err }
+	stateRename         = atomicReplace
+	stateWriteFileNew   = writeFileSync
+)
+
+type stateStore struct {
+	mu      sync.Mutex
+	entries map[string]StateEntry
+	file    *os.File
+	encoder *json.Encoder
+}
+
+func openState(path string) (*stateStore, error) {
+	store := &stateStore{entries: make(map[string]StateEntry)}
+	if path == "" {
+		return store, nil
+	}
+	data, err := stateReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return openStateWriter(path, store)
+	}
+	if err != nil {
+		return nil, err
+	}
+	incompleteTail, err := parseState(data, store.entries)
+	if err != nil {
+		// Mid-file corruption: quarantine the file and rebuild from scratch
+		// instead of failing every build until manual deletion.
+		corruptPath := path + ".corrupt"
+		if renameErr := stateRename(path, corruptPath); renameErr != nil {
+			return nil, fmt.Errorf("parse state: %w (quarantine to %s failed: %w)", err, corruptPath, renameErr)
+		}
+		log.Printf("actresscache: state file %s corrupt (%v); quarantined to %s", path, err, corruptPath)
+		return openStateWriter(path, &stateStore{entries: make(map[string]StateEntry)})
+	}
+	if err := stateRepairTail(path, data, incompleteTail); err != nil {
+		return nil, err
+	}
+	if len(data) > stateCompactionThreshold {
+		// The journal is append-only and whole-file slurped on open; bound it.
+		if err := compactStateFile(path, store.entries); err != nil {
+			return nil, fmt.Errorf("compact actress cache state: %w", err)
+		}
+	}
+	return openStateWriter(path, store)
+}
+
+// stateCompactionThreshold bounds the append-only journal; over it the file
+// is compacted to the latest entry per key on open.
+const stateCompactionThreshold = 8 << 20
+
+// compactStateFile atomically rewrites the journal with the latest entry per
+// key (sorted for deterministic output). Resume semantics are unchanged.
+func compactStateFile(path string, entries map[string]StateEntry) error {
+	var buf bytes.Buffer
+	encoder := json.NewEncoder(&buf)
+	keys := make([]string, 0, len(entries))
+	for key := range entries {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		// Encoding into an in-memory buffer cannot fail; entries came from a
+		// successfully parsed journal.
+		_ = encoder.Encode(entries[key])
+	}
+	tmpPath := path + ".compact-tmp"
+	if err := stateWriteFileNew(tmpPath, buf.Bytes(), 0o600); err != nil {
+		return err
+	}
+	return stateRename(tmpPath, path)
+}
+
+func openStateWriter(path string, store *stateStore) (*stateStore, error) {
+	if err := stateMkdirAll(filepath.Dir(path), 0o750); err != nil {
+		return nil, err
+	}
+	file, err := stateOpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	store.file = file
+	store.encoder = json.NewEncoder(file)
+	return store, nil
+}
+func parseState(data []byte, entries map[string]StateEntry) (bool, error) {
+	lines := bytes.Split(data, []byte{10})
+	for index, line := range lines {
+		line = bytes.TrimSpace(line)
+		if len(line) == 0 {
+			continue
+		}
+		var entry StateEntry
+		if err := json.Unmarshal(line, &entry); err != nil {
+			if index == len(lines)-1 && !bytes.HasSuffix(data, []byte{10}) {
+				return true, nil
+			}
+			return false, fmt.Errorf("parse state line %d: %w", index+1, err)
+		}
+		if entry.Key != "" {
+			entries[entry.Key] = entry
+		}
+	}
+	return false, nil
+}
+
+func repairStateTail(path string, data []byte, incomplete bool) error {
+	if len(data) == 0 || bytes.HasSuffix(data, []byte{10}) {
+		return nil
+	}
+	file, err := stateOpenRepairFile(path, os.O_WRONLY, 0)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = file.Close() }()
+	if incomplete {
+		cutoff := bytes.LastIndexByte(data, 10) + 1
+		if err := stateTruncate(file, int64(cutoff)); err != nil {
+			return err
+		}
+	} else {
+		if err := stateSeekEnd(file); err != nil {
+			return err
+		}
+		if err := stateWriteNewline(file); err != nil {
+			return err
+		}
+	}
+	return file.Sync()
+}
+
+func (s *stateStore) get(key string) (StateEntry, bool) {
+	if s == nil {
+		return StateEntry{}, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry, ok := s.entries[key]
+	return entry, ok
+}
+
+func (s *stateStore) append(entry StateEntry) error {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.entries[entry.Key] = entry
+	if s.encoder == nil {
+		return nil
+	}
+	if err := s.encoder.Encode(entry); err != nil {
+		return err
+	}
+	return s.file.Sync()
+}
+
+// JournalStale commits prune decisions for keys whose source stopped
+// enumerating them. It runs ONLY after the caller's publish succeeded, so a
+// write failure in audit/runtime output never orphans last-good state into a
+// vanished cache.
+func JournalStale(path string, keys []string) error {
+	if len(keys) == 0 || path == "" {
+		return nil
+	}
+	store, err := openState(path)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = store.close() }()
+	return markStaleEntries(store, keys)
+}
+
+func (s *stateStore) close() error {
+	if s == nil || s.file == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.file.Close()
+}
+
+//nolint:unused // used by tests
+func readState(reader io.Reader, entries map[string]StateEntry) error {
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		return err
+	}
+	content := string(data)
+	endsWithNewline := strings.HasSuffix(content, "\n")
+	lines := strings.Split(strings.TrimRight(content, "\n"), "\n")
+	for i, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var entry StateEntry
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			if i == len(lines)-1 && !endsWithNewline {
+				continue
+			}
+			return err
+		}
+		if entry.Key != "" {
+			entries[entry.Key] = entry
+		}
+	}
+	return nil
+}

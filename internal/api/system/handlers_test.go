@@ -55,6 +55,16 @@ type mockScraper struct {
 	enabled bool
 }
 
+type actressOnlyMockScraper struct {
+	*mockScraper
+}
+
+func (m *actressOnlyMockScraper) SupportsMovieSearch() bool { return false }
+
+func (m *actressOnlyMockScraper) ResolveActressMetadata(_ context.Context, actress models.ActressInfo) (models.ActressInfo, error) {
+	return actress, nil
+}
+
 func (m *mockScraper) Name() string {
 	return m.name
 }
@@ -271,6 +281,18 @@ func TestGetAvailableScrapers(t *testing.T) {
 			},
 		},
 		{
+			name: "actress metadata only scraper capabilities",
+			scrapers: []models.Scraper{
+				&actressOnlyMockScraper{mockScraper: &mockScraper{name: "minnanoav", enabled: true}},
+			},
+			expectedStatus: 200,
+			validateFn: func(t *testing.T, resp contracts.AvailableScrapersResponse) {
+				require.Len(t, resp.Scrapers, 1)
+				assert.False(t, resp.Scrapers[0].SupportsMovieSearch)
+				assert.True(t, resp.Scrapers[0].SupportsActressMetadata)
+			},
+		},
+		{
 			name: "javdb scraper with options",
 			scrapers: []models.Scraper{
 				&mockScraper{name: "javdb", enabled: true},
@@ -481,6 +503,7 @@ func TestTestProxy(t *testing.T) {
 		return []net.IP{net.ParseIP("8.8.8.8")}, nil
 	})
 	t.Cleanup(cleanup)
+	t.Cleanup(ssrf.AllowHostForTest("127.0.0.1"))
 
 	t.Run("direct proxy success", func(t *testing.T) {
 		target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -3,8 +3,9 @@ import { confirmDialog } from '$lib/stores/dialog.svelte';
 import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query';
 import { apiClient } from '$lib/api/client';
 import { toastStore } from '$lib/stores/toast';
-import type { Actress, ActressUpsertRequest, ActressMergeResolution } from '$lib/api/types';
+import type { Actress, ActressUpsertRequest, ActressMergeResolution, ActressFilter } from '$lib/api/types';
 import { formatActressName } from '$lib/utils/actress';
+import { loadActressSortPreferences, saveActressSortPreferences } from '../sort-preferences';
 import * as m from '$lib/paraglide/messages';
 
 export type ActressForm = {
@@ -30,6 +31,22 @@ export function createActressStore() {
 		'name',
 	);
 	let sortOrder = $state<'asc' | 'desc'>('asc');
+	let sortPreferencesHydrated = $state(false);
+	let filter = $state<ActressFilter | ''>('');
+
+	function hydrateSortPreferences() {
+		const preferences = loadActressSortPreferences(typeof localStorage === 'undefined' ? null : localStorage);
+		sortBy = preferences.sortBy;
+		sortOrder = preferences.sortOrder;
+		offset = 0;
+		sortPreferencesHydrated = true;
+	}
+
+	$effect(() => {
+		const preferences = { sortBy, sortOrder };
+		if (!sortPreferencesHydrated || typeof localStorage === 'undefined') return;
+		saveActressSortPreferences(localStorage, preferences);
+	});
 
 	let editingId = $state<number | null>(null);
 	let form = $state<ActressForm>(emptyForm());
@@ -39,7 +56,7 @@ export function createActressStore() {
 	const actressesQuery = createQuery(() => ({
 		queryKey: [
 			'actresses',
-			{ limit, offset, q: activeQuery, sort_by: sortBy, sort_order: sortOrder },
+			{ limit, offset, q: activeQuery, sort_by: sortBy, sort_order: sortOrder, filter },
 		],
 		queryFn: () =>
 			apiClient.listActresses({
@@ -48,6 +65,7 @@ export function createActressStore() {
 				q: activeQuery || undefined,
 				sort_by: sortBy,
 				sort_order: sortOrder,
+				filter: filter || undefined,
 			}),
 		placeholderData: (prev) => prev,
 	}));
@@ -459,6 +477,13 @@ export function createActressStore() {
 		get sortOrder() {
 			return sortOrder;
 		},
+		get filter() {
+			return filter;
+		},
+		set filter(v: ActressFilter | '') {
+			filter = v;
+		},
+		hydrateSortPreferences,
 		get editingId() {
 			return editingId;
 		},

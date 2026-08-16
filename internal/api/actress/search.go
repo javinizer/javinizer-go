@@ -18,7 +18,7 @@ type actressSearchResponse = models.Actress
 
 // searchActresses handles GET /api/v1/actresses/search?q=query
 // @Summary Search actresses
-// @Description Search for actresses by name (first, last, or Japanese)
+// @Description Search for actresses by name or DMM ID
 // @Tags actress
 // @Produce json
 // @Param q query string false "Search query"
