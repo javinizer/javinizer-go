@@ -73,6 +73,12 @@ const docTemplate = `{
                         "description": "Language code to include translations for (e.g., 'en')",
                         "name": "include_translations",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter actresses: missing_dmm, has_dmm, missing_thumbnail, missing_japanese_name, japanese_name_only, missing_metadata",
+                        "name": "filter",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -300,7 +306,7 @@ const docTemplate = `{
         },
         "/api/v1/actresses/search": {
             "get": {
-                "description": "Search for actresses by name (first, last, or Japanese)",
+                "description": "Search for actresses by name or DMM ID",
                 "produces": [
                     "application/json"
                 ],
@@ -334,6 +340,274 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/actresses/sync-candidates": {
+            "get": {
+                "description": "Return actresses with a DMM ID that lack thumbnail, Japanese name, or romanized names, plus named actresses without a DMM ID pending identity resolution.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "actress"
+                ],
+                "summary": "List actresses eligible for metadata sync",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Registered actress filter",
+                        "name": "filter",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 500,
+                        "description": "Max results (1-1000; default 500)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 0,
+                        "description": "Pagination offset",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_actress.actressSyncCandidatesResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/actresses/sync-jobs": {
+            "post": {
+                "description": "Queue a background sync job over actresses with missing metadata or explicit IDs.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "actress"
+                ],
+                "summary": "Start an actress metadata sync job",
+                "parameters": [
+                    {
+                        "description": "Sync job request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_worker.ActressSyncCreateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Accepted",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_actress.actressSyncJobResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_actress.actressSyncNoCandidatesResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/actresses/sync-jobs/active": {
+            "get": {
+                "description": "Return pending and running actress sync jobs, oldest first.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "actress"
+                ],
+                "summary": "List active actress sync jobs",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_actress.actressSyncJobsResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/actresses/sync-jobs/{jobID}": {
+            "get": {
+                "description": "Return a single actress sync job with its aggregate counters.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "actress"
+                ],
+                "summary": "Get an actress sync job",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sync job ID",
+                        "name": "jobID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_actress.actressSyncJobResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/actresses/sync-jobs/{jobID}/cancel": {
+            "post": {
+                "description": "Mark the job cancelled: pending tasks are cancelled and running tasks are aborted.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "actress"
+                ],
+                "summary": "Request cancellation of an actress sync job",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sync job ID",
+                        "name": "jobID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_actress.actressSyncJobResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/actresses/sync-jobs/{jobID}/tasks": {
+            "get": {
+                "description": "List tasks of a sync job: all by default, only running tasks with view=active, or the bounded terminal diagnostics with view=diagnostics.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "actress"
+                ],
+                "summary": "List actress sync job tasks",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sync job ID",
+                        "name": "jobID",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Task view: active or diagnostics (default: bounded all-tasks list)",
+                        "name": "view",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 500,
+                        "description": "Max tasks for the default view (1-1000; default 500)",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_actress.actressSyncTasksResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
                         }
@@ -4224,8 +4498,14 @@ const docTemplate = `{
                 "source": {
                     "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress"
                 },
+                "source_updated_at": {
+                    "type": "string"
+                },
                 "target": {
                     "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress"
+                },
+                "target_updated_at": {
+                    "type": "string"
                 }
             }
         },
@@ -4250,9 +4530,16 @@ const docTemplate = `{
                     "type": "integer",
                     "example": 34
                 },
+                "source_updated_at": {
+                    "type": "string"
+                },
                 "target_id": {
                     "type": "integer",
                     "example": 12
+                },
+                "target_updated_at": {
+                    "description": "TargetUpdatedAt/SourceUpdatedAt fence the merge against concurrent edits\nobserved in a merge preview. They are optional for backward compatibility:\nomitting them performs an unfenced merge (pre-versioning behavior).",
+                    "type": "string"
                 }
             }
         },
@@ -6203,6 +6490,9 @@ const docTemplate = `{
                 "sources_used": {
                     "type": "integer",
                     "example": 2
+                },
+                "warning": {
+                    "type": "string"
                 }
             }
         },
@@ -6226,6 +6516,14 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ScraperOption"
                     }
+                },
+                "supports_actress_metadata": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "supports_movie_search": {
+                    "type": "boolean",
+                    "example": true
                 }
             }
         },
@@ -7556,6 +7854,12 @@ const docTemplate = `{
         "github_com_javinizer_javinizer-go_internal_models.ActressInfo": {
             "type": "object",
             "properties": {
+                "aliases": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "dmm_id": {
                     "description": "DMM actress ID for unique identification",
                     "type": "integer"
@@ -7570,6 +7874,124 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "thumb_url": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_javinizer_javinizer-go_internal_models.ActressSyncJob": {
+            "type": "object",
+            "properties": {
+                "cancel_requested": {
+                    "type": "boolean"
+                },
+                "cancelled": {
+                    "type": "integer"
+                },
+                "completed": {
+                    "type": "integer"
+                },
+                "completed_at": {
+                    "type": "string"
+                },
+                "conflicts": {
+                    "type": "integer"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "failed": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "scope": {
+                    "type": "string"
+                },
+                "skipped": {
+                    "type": "integer"
+                },
+                "started_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "total_tasks": {
+                    "type": "integer"
+                },
+                "updated": {
+                    "type": "integer"
+                },
+                "warnings": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_javinizer_javinizer-go_internal_models.ActressSyncTask": {
+            "type": "object",
+            "properties": {
+                "actress_id": {
+                    "type": "integer"
+                },
+                "attempts": {
+                    "type": "integer"
+                },
+                "completed_at": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "dedupe_key": {
+                    "type": "string"
+                },
+                "error_message": {
+                    "type": "string"
+                },
+                "heartbeat_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "job_id": {
+                    "type": "string"
+                },
+                "label": {
+                    "type": "string"
+                },
+                "lease_expires_at": {
+                    "type": "string"
+                },
+                "messages": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "outcome": {
+                    "type": "string"
+                },
+                "stage": {
+                    "type": "string"
+                },
+                "stale_retry_count": {
+                    "type": "integer"
+                },
+                "started_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "updated_fields": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "warning": {
                     "type": "string"
                 }
             }
@@ -8265,6 +8687,20 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_javinizer_javinizer-go_internal_worker.ActressSyncCreateRequest": {
+            "type": "object",
+            "properties": {
+                "actress_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "scope": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_api_actress.actressRequest": {
             "type": "object",
             "properties": {
@@ -8326,6 +8762,102 @@ const docTemplate = `{
                 },
                 "updated_at": {
                     "type": "string"
+                }
+            }
+        },
+        "internal_api_actress.actressSyncCandidateItem": {
+            "type": "object",
+            "properties": {
+                "dmm_id": {
+                    "type": "integer"
+                },
+                "first_name": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "japanese_name": {
+                    "type": "string"
+                },
+                "last_name": {
+                    "type": "string"
+                },
+                "thumb_url": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_api_actress.actressSyncCandidatesResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_api_actress.actressSyncCandidateItem"
+                    }
+                },
+                "limit": {
+                    "type": "integer"
+                },
+                "offset": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "internal_api_actress.actressSyncJobResponse": {
+            "type": "object",
+            "properties": {
+                "job": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.ActressSyncJob"
+                },
+                "skipped_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                }
+            }
+        },
+        "internal_api_actress.actressSyncJobsResponse": {
+            "type": "object",
+            "properties": {
+                "jobs": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.ActressSyncJob"
+                    }
+                }
+            }
+        },
+        "internal_api_actress.actressSyncNoCandidatesResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string"
+                },
+                "skipped_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                }
+            }
+        },
+        "internal_api_actress.actressSyncTasksResponse": {
+            "type": "object",
+            "properties": {
+                "tasks": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.ActressSyncTask"
+                    }
+                },
+                "total": {
+                    "type": "integer"
                 }
             }
         },

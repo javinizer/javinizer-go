@@ -124,6 +124,8 @@ func NewServer(rt *core.APIRuntime) *gin.Engine {
 	runtime := rt.EnsureRuntime()
 	runtime.ResetWebSocketHub()
 
+	rt.EnsureActressSyncManager()
+
 	runtime.SetWebSocketUpgrader(websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool {
 			origin := r.Header.Get("Origin")

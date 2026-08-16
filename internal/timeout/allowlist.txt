@@ -5,4 +5,7 @@ internal/api/system/proxy.go
 internal/api/system/translation.go
 internal/imageutil/poster.go
 internal/imageutil/screenshot.go
+internal/imageutil/validate.go
 internal/ssrf/ssrf.go
+internal/actresscache/fetch.go
+cmd/build-actress-cache/main.go

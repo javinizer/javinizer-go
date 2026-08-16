@@ -2,26 +2,36 @@ package ssrf
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
+	"runtime"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
+	"weak"
 )
 
 var (
 	lookupIPMu sync.RWMutex
-	lookupIP   = net.LookupIP
+	lookupIP   = func(ctx context.Context, host string) ([]net.IP, error) {
+		return net.DefaultResolver.LookupIP(ctx, "ip", host)
+	}
 )
 
-// setLookupIPForTest overrides the DNS resolver for testing. Returns a cleanup
-// function that restores the original resolver.
+// testAllowedHosts are exact hostnames the guard bypasses for tests.
+// Production code must never call AllowHostForTest.
+var testAllowedHosts sync.Map
+
 func setLookupIPForTest(fn func(string) ([]net.IP, error)) func() {
 	lookupIPMu.Lock()
 	defer lookupIPMu.Unlock()
 	original := lookupIP
-	lookupIP = fn
+	lookupIP = func(_ context.Context, host string) ([]net.IP, error) { return fn(host) }
 	return func() {
 		lookupIPMu.Lock()
 		defer lookupIPMu.Unlock()
@@ -29,61 +39,266 @@ func setLookupIPForTest(fn func(string) ([]net.IP, error)) func() {
 	}
 }
 
-func currentLookupIP() func(string) ([]net.IP, error) {
+func currentLookupIP() func(context.Context, string) ([]net.IP, error) {
 	lookupIPMu.RLock()
 	defer lookupIPMu.RUnlock()
 	return lookupIP
 }
 
-func isPrivateIP(ip net.IP) bool {
+func hostAllowedForTest(host string) bool {
+	_, ok := testAllowedHosts.Load(normalizeHost(host))
+	return ok
+}
+
+// blockedTargetPrefixes are special-use/internal ranges that must never be
+// dialed from URL-driven fetch paths: RFC1918, loopback, link-local, CGNAT
+// (cloud metadata endpoints live there), IETF/protocol-assignment and
+// benchmark space, documentation prefixes, multicast/reserved space, and the
+// IPv6 transition ranges that tunnel embedded IPv4 through anycast relays.
+var blockedTargetPrefixes = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"),
+	// NAT64 well-known + local-use prefixes embed/carry translated IPv4.
+	netip.MustParsePrefix("64:ff9b::/96"),
+	netip.MustParsePrefix("64:ff9b:1::/48"),
+	netip.MustParsePrefix("10.0.0.0/8"),
+	netip.MustParsePrefix("100.64.0.0/10"),
+	netip.MustParsePrefix("127.0.0.0/8"),
+	netip.MustParsePrefix("169.254.0.0/16"),
+	netip.MustParsePrefix("172.16.0.0/12"),
+	netip.MustParsePrefix("192.0.0.0/24"),
+	netip.MustParsePrefix("192.0.2.0/24"),
+	netip.MustParsePrefix("192.31.196.0/24"),
+	netip.MustParsePrefix("192.52.193.0/24"),
+	netip.MustParsePrefix("192.88.99.0/24"),
+	netip.MustParsePrefix("192.168.0.0/16"),
+	netip.MustParsePrefix("192.175.48.0/24"),
+	netip.MustParsePrefix("198.18.0.0/15"),
+	netip.MustParsePrefix("198.51.100.0/24"),
+	netip.MustParsePrefix("203.0.113.0/24"),
+	netip.MustParsePrefix("224.0.0.0/4"),
+	netip.MustParsePrefix("240.0.0.0/4"),
+	netip.MustParsePrefix("::/3"),
+	netip.MustParsePrefix("2001::/23"),
+	netip.MustParsePrefix("2001:db8::/32"),
+	netip.MustParsePrefix("2002::/16"),
+	netip.MustParsePrefix("2620:4f:8000::/48"),
+	netip.MustParsePrefix("3fff::/20"),
+	netip.MustParsePrefix("4000::/2"),
+	netip.MustParsePrefix("8000::/1"),
+}
+
+// IsBlockedIP reports whether ip is internal, non-public, or special-use.
+func IsBlockedIP(ip net.IP) bool {
 	if ip == nil {
-		return false
-	}
-	if ip.IsLoopback() {
 		return true
 	}
-	if ip.IsPrivate() {
+	address, ok := netip.AddrFromSlice(ip)
+	if !ok {
 		return true
 	}
-	if ip.IsLinkLocalUnicast() {
+	address = address.Unmap()
+	if !address.IsGlobalUnicast() || address.IsLoopback() || address.IsLinkLocalUnicast() ||
+		address.IsLinkLocalMulticast() || address.IsMulticast() || address.IsUnspecified() ||
+		address.IsPrivate() {
 		return true
 	}
-	if ip.IsLinkLocalMulticast() {
-		return true
-	}
-	if ip.IsUnspecified() {
-		return true
+	for _, prefix := range blockedTargetPrefixes {
+		if prefix.Contains(address) {
+			return true
+		}
 	}
 	return false
 }
 
-// CheckURL validates that rawURL uses an http(s) scheme and does not resolve to a private or internal IP address.
+func normalizeHost(host string) string {
+	return strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))
+}
+
+// IsBlockedHost reports whether host lexically targets internal space:
+// localhost names or an IP literal matching IsBlockedIP. Hostnames are not
+// resolved here.
+func IsBlockedHost(host string) bool {
+	host = normalizeHost(host)
+	if host == "" || host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return true
+	}
+	if ip := HostIPLiteral(host); ip != nil {
+		return IsBlockedIP(ip)
+	}
+	return false
+}
+
+// HostIPLiteral parses host as an IP literal, tolerating IPv6 zones and
+// bracketed forms; returns nil for hostnames.
+func HostIPLiteral(host string) net.IP {
+	host = normalizeHost(host)
+	if i := strings.LastIndex(host, "%"); i >= 0 {
+		host = host[:i]
+	}
+	host = strings.TrimPrefix(strings.TrimSuffix(host, "]"), "[")
+	if ip := net.ParseIP(host); ip != nil {
+		return ip
+	}
+	// inet_aton-style aliases DNS and proxies normalize: dword (127.0.0.1 as
+	// 2130706433), short forms (127.1), hex (0x7f000001), octal (0177.0.0.1).
+	// Treating them as hostnames would let a remote DNS answer map them onto
+	// loopback/private space, so policy checks must recognize them.
+	return parseIPv4AlternateForms(host)
+}
+
+// parseIPv4AlternateForms accepts the classic inet_aton syntaxes
+// (a.b.c.d / a.b.c / a.b / a, each component decimal, 0x-hex, or 0-octal)
+// that net.ParseIP rejects but resolvers/proxies happily normalize.
+func parseIPv4AlternateForms(host string) net.IP {
+	if host == "" {
+		return nil
+	}
+	parts := strings.Split(host, ".")
+	if len(parts) > 4 {
+		return nil
+	}
+	values := make([]uint64, len(parts))
+	for i, part := range parts {
+		if part == "" {
+			return nil
+		}
+		v, err := strconv.ParseUint(part, 0, 32)
+		if err != nil {
+			return nil
+		}
+		var max uint64
+		if i == len(parts)-1 {
+			// Final component spans every remaining byte (a.b: b is 24-bit,
+			// a alone is 32-bit).
+			shift := uint(8 * (5 - len(parts)))
+			max = (1 << shift) - 1
+		} else {
+			max = 0xff
+		}
+		if v > max {
+			return nil
+		}
+		values[i] = v
+	}
+	b := []byte{0, 0, 0, 0}
+	for i, byteIdx := 0, 0; i < len(values)-1; i, byteIdx = i+1, byteIdx+1 {
+		b[byteIdx] = byte(values[i])
+	}
+	remaining := 4 - (len(values) - 1)
+	last := values[len(values)-1]
+	for j := remaining - 1; j >= 0; j-- {
+		b[len(b)-1-j] = byte(last >> (8 * j))
+	}
+	_ = b
+	netIP := net.IPv4(b[0], b[1], b[2], b[3])
+	return netIP
+}
+
+// BlockedTargetError rejects a URL or address that maps to internal or
+// special-use network space (policy block, never retryable).
+type BlockedTargetError struct {
+	Target string
+	Reason string
+}
+
+// Error ...
+func (e *BlockedTargetError) Error() string {
+	if e.Reason == "" {
+		return fmt.Sprintf("SSRF blocked: %s", e.Target)
+	}
+	return fmt.Sprintf("SSRF blocked: %s (%s)", e.Target, e.Reason)
+}
+
+// UnverifiableHostError fails closed when a hostname cannot be proven public
+// (DNS failure, empty answer). It is a transient classification: callers
+// must not record it as a permanent rejection.
+type UnverifiableHostError struct {
+	Host string
+	Err  error
+}
+
+// Error ...
+func (e *UnverifiableHostError) Error() string {
+	return fmt.Sprintf("SSRF unverifiable: hostname %q cannot be proven public: %v", e.Host, e.Err)
+}
+
+// Unwrap ...
+func (e *UnverifiableHostError) Unwrap() error { return e.Err }
+
+// resolvePublicIPs resolves host and verifies every answer is public. A
+// literal IP skips resolution. DNS failure yields *UnverifiableHostError;
+// blocked answers yield *BlockedTargetError.
+func resolvePublicIPs(ctx context.Context, host string) ([]net.IP, error) {
+	if hostAllowedForTest(host) {
+		ips, err := currentLookupIP()(ctx, host)
+		if err != nil {
+			return nil, err
+		}
+		if len(ips) == 0 {
+			if ip := net.ParseIP(host); ip != nil {
+				return []net.IP{ip}, nil
+			}
+			return nil, fmt.Errorf("no addresses")
+		}
+		return ips, nil
+	}
+	if ip := HostIPLiteral(host); ip != nil {
+		if IsBlockedIP(ip) {
+			return nil, &BlockedTargetError{Target: host, Reason: "private/internal IP literal"}
+		}
+		return []net.IP{ip}, nil
+	}
+	ips, err := currentLookupIP()(ctx, host)
+	if err != nil {
+		return nil, &UnverifiableHostError{Host: host, Err: err}
+	}
+	if len(ips) == 0 {
+		return nil, &UnverifiableHostError{Host: host, Err: errors.New("resolved to no addresses")}
+	}
+	for _, ip := range ips {
+		if IsBlockedIP(ip) {
+			return nil, &BlockedTargetError{Target: host, Reason: "resolves to private/internal IP"}
+		}
+	}
+	return ips, nil
+}
+
+// CheckTarget validates u for outbound fetching: http(s) scheme, non-empty
+// hostname, and a publicly resolvable target.
+func CheckTarget(ctx context.Context, u *url.URL) error {
+	if u == nil {
+		return &BlockedTargetError{Target: "<nil>", Reason: "nil URL"}
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return &BlockedTargetError{Target: u.Scheme, Reason: "non-http(s) scheme"}
+	}
+	host := u.Hostname()
+	if host == "" {
+		return &BlockedTargetError{Target: u.String(), Reason: "empty hostname"}
+	}
+	if IsBlockedHost(host) && !hostAllowedForTest(host) {
+		return &BlockedTargetError{Target: host, Reason: "private/internal target"}
+	}
+	if HostIPLiteral(host) != nil {
+		return nil
+	}
+	_, err := resolvePublicIPs(ctx, host)
+	return err
+}
+
+// CheckURL validates that rawURL uses an http(s) scheme and does not resolve
+// to a private or internal IP address. Kept for compatibility with the
+// pre-unification API; new code should use CheckTarget.
 func CheckURL(rawURL string) error {
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
 		return fmt.Errorf("invalid URL: %w", err)
 	}
-	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return fmt.Errorf("SSRF blocked: non-http(s) scheme %q", parsed.Scheme)
-	}
-	host := parsed.Hostname()
-	if host == "" {
-		return fmt.Errorf("SSRF blocked: empty hostname")
-	}
-	ips, err := currentLookupIP()(host)
-	if err != nil {
-		return fmt.Errorf("SSRF blocked: failed to resolve hostname %q: %w", host, err)
-	}
-	for _, ip := range ips {
-		if isPrivateIP(ip) {
-			return fmt.Errorf("SSRF blocked: %s resolves to private/internal IP", host)
-		}
-	}
-	return nil
+	return CheckTarget(context.Background(), parsed)
 }
 
 func checkRedirect(req *http.Request, via []*http.Request) error {
-	if err := CheckURL(req.URL.String()); err != nil {
+	if err := CheckTarget(req.Context(), req.URL); err != nil {
 		return fmt.Errorf("SSRF blocked: redirect to private/internal IP: %w", err)
 	}
 	if len(via) >= 10 {
@@ -92,31 +307,91 @@ func checkRedirect(req *http.Request, via []*http.Request) error {
 	return nil
 }
 
-// NewSSRFSafeClient returns an HTTP client that blocks requests to private or internal IP addresses.
-func NewSSRFSafeClient(timeout time.Duration) *http.Client {
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.Proxy = nil
-	originalDialContext := transport.DialContext
-	transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-		host, _, err := net.SplitHostPort(addr)
-		if err != nil {
-			return nil, fmt.Errorf("SSRF blocked: invalid address %q: %w", addr, err)
-		}
-		ips, err := currentLookupIP()(host)
-		if err != nil {
-			return nil, fmt.Errorf("SSRF blocked: failed to resolve %q: %w", host, err)
-		}
-		for _, ip := range ips {
-			if isPrivateIP(ip) {
-				return nil, fmt.Errorf("SSRF blocked: %s resolves to private/internal IP %s", host, ip)
-			}
-		}
-		if originalDialContext != nil {
-			return originalDialContext(ctx, network, addr)
-		}
-		return (&net.Dialer{Timeout: 30 * time.Second}).DialContext(ctx, network, addr)
+// dialPinned resolves addr's host once, validates every answer, and dials
+// only validated IPs (trying each in order for DNS failover). The hostname
+// is never re-resolved at connect time, so DNS rebinding between the check
+// and the dial cannot redirect the connection.
+func dialPinned(ctx context.Context, network, addr string, fallback func(context.Context, string, string) (net.Conn, error), preserveHostname bool) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, fmt.Errorf("SSRF blocked: invalid address %q: %w", addr, err)
 	}
+	if hostAllowedForTest(host) {
+		return fallback(ctx, network, addr)
+	}
+	if preserveHostname {
+		// Remote-DNS dialers (SOCKS5) own NAME resolution completely: the
+		// hostname goes to the proxy unresolved so proxy-only names and
+		// split-horizon answers work. IP LITERALS need no DNS at all, though,
+		// so private/internal literals stay blocked here regardless of who
+		// would have resolved them.
+		if ip := HostIPLiteral(host); ip != nil && IsBlockedIP(ip) {
+			return nil, &BlockedTargetError{Target: host, Reason: "private/internal IP literal"}
+		}
+		return fallback(ctx, network, addr)
+	}
+	ips, err := resolvePublicIPs(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	var dialErr error
+	for _, ip := range ips {
+		conn, derr := fallback(ctx, network, net.JoinHostPort(ip.String(), port))
+		if derr == nil {
+			return conn, nil
+		}
+		dialErr = errors.Join(dialErr, derr)
+	}
+	return nil, dialErr
+}
 
+// NewPinnedDialTransport clones base (or http.DefaultTransport when nil) and
+// installs a dial function that pins connections to pre-validated public
+// IPs. Proxy behavior: whatever is dialed is validated — with a proxy
+// configured that is the proxy connection (target policy still applies at
+// the URL layer via CheckTarget/redirect checks); without one it is the
+// target itself. Fails closed for exotic transports.
+func NewPinnedDialTransport(base *http.Transport) (*http.Transport, error) {
+	if base == nil {
+		t, ok := http.DefaultTransport.(*http.Transport)
+		if !ok {
+			return nil, errors.New("SSRF: http.DefaultTransport is not a *http.Transport")
+		}
+		base = t
+	}
+	// Fails closed: a custom TLS dialer bypasses DialContext for HTTPS, which
+	// would silently skip validation+pinning.
+	if base.DialTLSContext != nil || base.DialTLS != nil { //nolint:staticcheck // reading deprecated DialTLS is required to fail closed on transports that would bypass the pinned dial
+		return nil, errors.New("SSRF: transports with DialTLSContext/DialTLS cannot be pinned")
+	}
+	clone := base.Clone()
+	// Honor a legacy-only Dial hook: assigning DialContext while ignoring it
+	// would silently discard the caller's configured dialer.
+	fallback := DialContextFunc(clone)
+	// NewPinnedDialTransport keeps IP-pinning semantics even when the original
+	// had a proxy (the proxy itself gets pinned) — its callers are hardened
+	// wrapper paths, not SOCKS-compat ones.
+	clone.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		return dialPinned(ctx, network, addr, fallback, false)
+	}
+	return clone, nil
+}
+
+// NewSSRFSafeClient returns an HTTP client that blocks requests to private or
+// internal IP addresses, with pinned dialing and per-redirect revalidation.
+// Kept for compatibility; new code should prefer NewPinnedDialTransport.
+func NewSSRFSafeClient(timeout time.Duration) *http.Client {
+	// Construction cannot fail with a nil base unless http.DefaultTransport is
+	// exotic; in that case fall back to a fresh *http.Transport (still pinned),
+	// NEVER to an unguarded one.
+	base := &http.Transport{}
+	if dt, ok := http.DefaultTransport.(*http.Transport); ok && dt.DialTLSContext == nil && dt.DialTLS == nil { //nolint:staticcheck // fail closed on unpinnable defaults
+		base = dt
+	}
+	// base is always pinnable here (fresh or devoid of TLS dialers), so this
+	// cannot fail.
+	transport, _ := NewPinnedDialTransport(base)
+	transport.Proxy = nil
 	return &http.Client{
 		Transport:     transport,
 		Timeout:       timeout,
@@ -124,27 +399,131 @@ func NewSSRFSafeClient(timeout time.Duration) *http.Client {
 	}
 }
 
-// WrapTransportWithSSRFCheck wraps the given transport's dialer to block connections to private or internal IP addresses.
+// WrapTransportWithSSRFCheck installs pinned public-IP dialing on transport
+// in place. Kept for compatibility; new code should use
+// NewPinnedDialTransport and keep the returned clone.
+//
+// A custom TLS dialer would bypass the pinned DialContext for HTTPS, so any
+// DialTLS/DialTLSContext on the transport is cleared here rather than
+// silently left to defeat the guard.
 func WrapTransportWithSSRFCheck(transport *http.Transport) *http.Transport {
-	originalDialContext := transport.DialContext
-	if originalDialContext == nil {
-		originalDialContext = (&net.Dialer{Timeout: 30 * time.Second}).DialContext
+	// Pin by default even when Proxy is set: net/http dials the PROXY address,
+	// which we resolve+validate; dialing the original hostname afterwards
+	// would re-resolve it and allow DNS rebinding onto a private address.
+	// Only explicit remote-DNS paths (WrapTransportPreservingHostnames, used
+	// for SOCKS5 DialContext transports) may keep the hostname.
+	return wrapTransport(transport, false)
+}
+
+// remoteDNSTransports tracks transports whose dial path owns hostname
+// resolution (SOCKS5 via x/net/proxy installs DialContext while
+// http.Transport.Proxy stays nil, so policy code cannot rely on Proxy != nil
+// or on named-func method detection -- Go erases either at assignment).
+//
+// Keys are WEAK pointers: evicting a marker whose transport is still live
+// would silently misroute its traffic through local DNS/pinning, and strong
+// keys would retain transports forever. runtime cleanup deletes the entry as
+// soon as the transport becomes unreachable.
+var remoteDNSRegistry = struct {
+	sync.Mutex
+	set map[weak.Pointer[http.Transport]]struct{}
+}{set: make(map[weak.Pointer[http.Transport]]struct{})}
+
+// MarkRemoteDNSTransport declares that tr's dial path resolves names
+// remotely. Wrappers must preserve hostnames (never locally pin), while
+// still blocking private IP literals. Re-marking the same pointer is a no-op.
+func MarkRemoteDNSTransport(tr *http.Transport) {
+	if tr == nil {
+		return
 	}
-	transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-		host, _, err := net.SplitHostPort(addr)
-		if err != nil {
-			return nil, fmt.Errorf("SSRF blocked: invalid address %q: %w", addr, err)
-		}
-		ips, err := currentLookupIP()(host)
-		if err != nil {
-			return nil, fmt.Errorf("SSRF blocked: failed to resolve %q: %w", host, err)
-		}
-		for _, ip := range ips {
-			if isPrivateIP(ip) {
-				return nil, fmt.Errorf("SSRF blocked: %s resolves to private/internal IP %s", host, ip)
+	wp := weak.Make(tr)
+	remoteDNSRegistry.Lock()
+	if _, exists := remoteDNSRegistry.set[wp]; exists {
+		remoteDNSRegistry.Unlock()
+		return
+	}
+	remoteDNSRegistry.set[wp] = struct{}{}
+	remoteDNSRegistry.Unlock()
+	runtime.AddCleanup(tr, func(key weak.Pointer[http.Transport]) {
+		remoteDNSRegistry.Lock()
+		defer remoteDNSRegistry.Unlock()
+		delete(remoteDNSRegistry.set, key)
+	}, wp)
+}
+
+// TransportResolvesRemotely reports whether tr's dial path owns DNS. Check
+// BEFORE cloning a transport -- clones are distinct pointers. (Native socks5
+// proxying through Transport.Proxy is NOT probed here -- calling the policy
+// has side effects on stateful/rotating policies.)
+func TransportResolvesRemotely(tr *http.Transport) bool {
+	if tr == nil {
+		return false
+	}
+	remoteDNSRegistry.Lock()
+	defer remoteDNSRegistry.Unlock()
+	_, ok := remoteDNSRegistry.set[weak.Make(tr)]
+	return ok
+}
+
+// DialContextFunc returns the transport's effective dial entry point:
+// DialContext when set; otherwise a context-wrapped adaptation of the
+// deprecated Dial hook; otherwise a default dialer. Wrappers must use this
+// instead of checking DialContext alone -- installing a DialContext while
+// ignoring a legacy Dial makes net/http silently discard the caller's dialer.
+func DialContextFunc(transport *http.Transport) func(ctx context.Context, network, addr string) (net.Conn, error) {
+	if transport.DialContext != nil {
+		return transport.DialContext
+	}
+	if transport.Dial != nil { //nolint:staticcheck // reading the deprecated hook is required to respect it
+		legacy := transport.Dial //nolint:staticcheck // honored on purpose
+		return func(ctx context.Context, network, addr string) (net.Conn, error) {
+			type outcome struct {
+				conn net.Conn
+				err  error
+			}
+			result := make(chan outcome)
+			abandoned := make(chan struct{})
+			go func() {
+				conn, err := legacy(network, addr)
+				select {
+				case result <- outcome{conn, err}:
+				case <-abandoned:
+					// The caller already gave up: a late-arriving connection
+					// must be closed by the owner that created it, not leaked.
+					if conn != nil {
+						_ = conn.Close()
+					}
+				}
+			}()
+			select {
+			case o := <-result:
+				return o.conn, o.err
+			case <-ctx.Done():
+				// Legacy Dial cannot be canceled: abandon, and let the goroutine
+				// close whatever eventually arrives.
+				close(abandoned)
+				return nil, ctx.Err()
 			}
 		}
-		return originalDialContext(ctx, network, addr)
+	}
+	return (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext
+}
+
+// WrapTransportPreservingHostnames is WrapTransportWithSSRFCheck for dial
+// paths whose hostname resolution happens remotely (SOCKS5 via x/net/proxy
+// installs DialContext while http.Transport.Proxy stays nil). Without this
+// the wrapper would pin to a locally resolved IP and defeat SOCKS5 remote-DNS
+// and split-horizon semantics.
+func WrapTransportPreservingHostnames(transport *http.Transport) *http.Transport {
+	return wrapTransport(transport, true)
+}
+
+func wrapTransport(transport *http.Transport, preserveHostnames bool) *http.Transport {
+	transport.DialTLSContext = nil
+	transport.DialTLS = nil //nolint:staticcheck // cleared intentionally: unpinnable
+	fallback := DialContextFunc(transport)
+	transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		return dialPinned(ctx, network, addr, fallback, preserveHostnames)
 	}
 	return transport
 }

@@ -19,6 +19,22 @@ func wrapDBErr(op, entity string, err error) error {
 	return fmt.Errorf("%s %s: %w", op, entity, err)
 }
 
+// IsUniqueConstraint ...
+func IsUniqueConstraint(err error) bool {
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return true
+	}
+	var sqliteErr sqlite3.Error
+	if errors.As(err, &sqliteErr) {
+		return sqliteErr.ExtendedCode == sqlite3.ErrConstraintUnique || sqliteErr.ExtendedCode == sqlite3.ErrConstraintPrimaryKey
+	}
+	var sqliteErrPointer *sqlite3.Error
+	if errors.As(err, &sqliteErrPointer) {
+		return sqliteErrPointer.ExtendedCode == sqlite3.ErrConstraintUnique || sqliteErrPointer.ExtendedCode == sqlite3.ErrConstraintPrimaryKey
+	}
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "unique constraint")
+}
+
 func isLocked(err error) bool {
 	var sqliteErr *sqlite3.Error
 	if errors.As(err, &sqliteErr) {

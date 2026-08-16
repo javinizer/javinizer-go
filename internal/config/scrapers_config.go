@@ -266,11 +266,22 @@ func (s *ScrapersConfig) UnmarshalYAML(node *yaml.Node) error {
 				return fmt.Errorf("failed to decode config for scraper %q: %w", key, err)
 			}
 			ss.SetEnabledPresence(scraperYAMLHasEnabledKey(valNode))
+			// rate_limit presence matters: explicit 0 means "no delay", which
+			// differs from omitted (conservative 1s default). The canonical key
+			// counts, and so does its deprecated request_delay alias — an alias
+			// zero is still an explicit user choice and must survive
+			// MergeDefaultsFrom (codex). Canonical value precedence is kept by
+			// applyYAMLAliases.
+			ss.SetRateLimitPresence(scraperYAMLHasKey(valNode, "rate_limit") || scraperYAMLHasKey(valNode, "request_delay"))
+			ss.SetRetryCountPresence(scraperYAMLHasKey(valNode, "retry_count") || scraperYAMLHasKey(valNode, "max_retries"))
+			ss.SetTimeoutPresence(scraperYAMLHasKey(valNode, "timeout"))
 
 			// Handle deprecated aliases: request_delay → rate_limit, max_retries → retry_count.
 			// Walk the node content to find alias keys and apply them if the canonical
 			// field is still zero (canonical takes precedence).
-			s.applyYAMLAliases(valNode, &ss)
+			if err := s.applyYAMLAliases(valNode, &ss); err != nil {
+				return fmt.Errorf("failed to decode config for scraper %q: %w", key, err)
+			}
 
 			// Unknown-field checking: walk the node's Content pairs and compare
 			// against the known-fields set for ScraperSettings.
@@ -287,38 +298,60 @@ func (s *ScrapersConfig) UnmarshalYAML(node *yaml.Node) error {
 
 // applyYAMLAliases handles deprecated YAML aliases request_delay→rate_limit
 // and max_retries→retry_count in a scraper entry's value node.
-func (s *ScrapersConfig) applyYAMLAliases(valNode *yaml.Node, ss *models.ScraperSettings) {
+func (s *ScrapersConfig) applyYAMLAliases(valNode *yaml.Node, ss *models.ScraperSettings) error {
 	if valNode.Kind != yaml.MappingNode {
-		return
+		return nil
 	}
+	// Canonical presence (not merely a zero decode) wins: an explicit
+	// rate_limit: 0 is a real choice; the deprecated alias must not overwrite
+	// it (codex P2 round 7).
+	// Alias presence now counts as explicit (see caller), so key the
+	// precedence decision on the canonical key alone instead of the
+	// zero/explicit combo — otherwise an alias-only entry would never apply.
+	hasRateKey := scraperYAMLHasKey(valNode, "rate_limit")
+	hasRetryKey := scraperYAMLHasKey(valNode, "retry_count")
 	for i := 0; i < len(valNode.Content); i += 2 {
 		k := valNode.Content[i].Value
 		switch k {
 		case "request_delay":
-			if ss.RateLimit == 0 {
+			if !hasRateKey {
+				// Propagate conversion failures: silently dropping a malformed
+				// alias whose presence is already recorded would accept the
+				// config AND pin the zero as explicit — MergeDefaultsFrom then
+				// skips the default and throttling ends up disabled (codex).
 				var v int
-				if err := valNode.Content[i+1].Decode(&v); err == nil {
-					ss.RateLimit = v
+				if err := valNode.Content[i+1].Decode(&v); err != nil {
+					return fmt.Errorf("request_delay must be an integer: %w", err)
 				}
+				ss.RateLimit = v
 			}
 		case "max_retries":
-			if ss.RetryCount == 0 {
+			if !hasRetryKey && ss.RetryCount == 0 {
 				var v int
-				if err := valNode.Content[i+1].Decode(&v); err == nil {
-					ss.RetryCount = v
+				if err := valNode.Content[i+1].Decode(&v); err != nil {
+					return fmt.Errorf("max_retries must be an integer: %w", err)
 				}
+				ss.RetryCount = v
 			}
 		}
 	}
+	return nil
 }
 
 func scraperYAMLHasEnabledKey(valNode *yaml.Node) bool {
+	return scraperYAMLHasKey(valNode, "enabled")
+}
+
+// scraperYAMLHasKey reports whether a mapping node carries any of the given keys.
+func scraperYAMLHasKey(valNode *yaml.Node, keys ...string) bool {
 	if valNode == nil || valNode.Kind != yaml.MappingNode {
 		return false
 	}
 	for i := 0; i+1 < len(valNode.Content); i += 2 {
-		if valNode.Content[i].Value == "enabled" {
-			return true
+		for _, key := range keys {
+			if valNode.Content[i].Value == key {
+				return true
+			}
 		}
 	}
 	return false

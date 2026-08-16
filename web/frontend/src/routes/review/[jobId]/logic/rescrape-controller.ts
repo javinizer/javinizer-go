@@ -134,6 +134,18 @@ export function createRescrapeController(deps: RescrapeControllerDeps) {
 			}
 		}
 
+		const availableScrapers = deps.getAvailableScrapers();
+		const movieSearchScrapers = selectedScrapers.filter((name) => {
+			const scraper = availableScrapers.find((s) => s.name === name);
+			return scraper && (scraper.supports_movie_search ?? true);
+		});
+		deps.setSelectedScrapers(movieSearchScrapers);
+
+		if (movieSearchScrapers.length === 0) {
+			deps.toastError('Please select at least one movie search scraper');
+			return;
+		}
+
 		const rescrapeResultId = deps.getRescrapeResultId();
 		setRescrapingState(deps, rescrapeResultId, true);
 
@@ -143,7 +155,7 @@ export function createRescrapeController(deps: RescrapeControllerDeps) {
 
 			const response = await deps.api.rescrapeBatchMovie(deps.getJobId(), rescrapeResultId, {
 				force: true,
-				selected_scrapers: selectedScrapers,
+				selected_scrapers: movieSearchScrapers,
 				manual_search_input: effectiveManualSearchMode
 					? effectiveManualSearchInput.trim()
 					: undefined,

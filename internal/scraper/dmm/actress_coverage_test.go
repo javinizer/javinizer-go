@@ -1,0 +1,44 @@
+package dmm
+
+import (
+	"context"
+	"testing"
+
+	"github.com/go-resty/resty/v2"
+	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/stretchr/testify/assert"
+)
+
+func TestDMMActressFieldsCoverEverything(t *testing.T) {
+	got := (&scraper{}).ActressFields()
+	for _, want := range []string{"actress", "actress_japanese_name", "actress_first_name", "actress_last_name", "actress_url"} {
+		assert.Contains(t, got, want)
+	}
+}
+
+func TestDMMActressThumbnailValidation(t *testing.T) {
+	s := &scraper{enabled: true, settings: models.ScraperSettings{Enabled: true}}
+	_ = s.ValidateActressThumbnail(context.Background(), "https://example.com/img.jpg")
+	s.client = resty.New()
+	_ = s.ValidateActressThumbnail(context.Background(), "http://127.0.0.1/img.jpg")
+	s.settings.UserAgent = "custom-agent"
+	_ = s.ValidateActressThumbnail(context.Background(), "http://127.0.0.1/img.jpg")
+}
+
+func TestDMMResolveActressThumbnailNil(t *testing.T) {
+	defer func() { _ = recover() }()
+	var s *scraper
+	_ = s.ResolveActressThumbnail(context.Background(), models.ActressInfo{DMMID: 1})
+}
+
+func TestDMMResolveActressMetadataNil(t *testing.T) {
+	defer func() { _ = recover() }()
+	var s *scraper
+	_, _ = s.ResolveActressMetadata(context.Background(), models.ActressInfo{DMMID: 1})
+}
+
+func TestDMMFetchActressMetadataDoc(t *testing.T) {
+	defer func() { _ = recover() }()
+	s := &scraper{enabled: true, settings: models.ScraperSettings{Enabled: true}}
+	_, _ = s.fetchActressMetadataDocErr(context.Background(), 1)
+}

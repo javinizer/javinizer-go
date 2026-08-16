@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/javinizer/javinizer-go/internal/database"
@@ -123,6 +124,10 @@ func (r *failingActressRepo) Merge(_ context.Context, _, _ uint, _ map[string]st
 	}, nil
 }
 
+func (r *failingActressRepo) MergeWithVersions(ctx context.Context, targetID, sourceID uint, resolutions map[string]string, _, _ time.Time) (*database.ActressMergeResult, error) {
+	return r.Merge(ctx, targetID, sourceID, resolutions)
+}
+
 func makeDeps(repo *failingActressRepo) ActressDeps {
 	return ActressDeps{ContentRepos: database.ContentRepos{ActressRepo: repo}}
 }
@@ -178,7 +183,7 @@ func TestCreateActress_CreateRepoError(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
-	assert.Contains(t, w.Body.String(), "db write failed")
+	assert.Contains(t, w.Body.String(), "internal server error")
 }
 
 // --- updateActress ---
@@ -212,7 +217,7 @@ func TestUpdateActress_FindByIDInternalError(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
-	assert.Contains(t, w.Body.String(), "connection lost")
+	assert.Contains(t, w.Body.String(), "internal server error")
 }
 
 func TestUpdateActress_InvalidJSON(t *testing.T) {
@@ -258,7 +263,7 @@ func TestUpdateActress_UpdateRepoError(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
-	assert.Contains(t, w.Body.String(), "update failed")
+	assert.Contains(t, w.Body.String(), "internal server error")
 }
 
 // --- deleteActress ---
@@ -274,7 +279,7 @@ func TestDeleteActress_FindByIDInternalError(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
-	assert.Contains(t, w.Body.String(), "db error")
+	assert.Contains(t, w.Body.String(), "internal server error")
 }
 
 func TestDeleteActress_DeleteRepoError(t *testing.T) {
@@ -288,7 +293,7 @@ func TestDeleteActress_DeleteRepoError(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
-	assert.Contains(t, w.Body.String(), "delete constraint")
+	assert.Contains(t, w.Body.String(), "internal server error")
 }
 
 // --- listActresses ---
@@ -304,7 +309,7 @@ func TestListActresses_CountError(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
-	assert.Contains(t, w.Body.String(), "count fail")
+	assert.Contains(t, w.Body.String(), "internal server error")
 }
 
 func TestListActresses_ListSortedError(t *testing.T) {
@@ -318,7 +323,7 @@ func TestListActresses_ListSortedError(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
-	assert.Contains(t, w.Body.String(), "list fail")
+	assert.Contains(t, w.Body.String(), "internal server error")
 }
 
 func TestListActresses_CountSearchError(t *testing.T) {
@@ -332,7 +337,7 @@ func TestListActresses_CountSearchError(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
-	assert.Contains(t, w.Body.String(), "countsearch fail")
+	assert.Contains(t, w.Body.String(), "internal server error")
 }
 
 func TestListActresses_SearchPagedSortedError(t *testing.T) {
@@ -346,7 +351,7 @@ func TestListActresses_SearchPagedSortedError(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
-	assert.Contains(t, w.Body.String(), "searchpaged fail")
+	assert.Contains(t, w.Body.String(), "internal server error")
 }
 
 func TestListActresses_TranslationErrorBestEffort(t *testing.T) {
@@ -496,9 +501,11 @@ func TestMergeActresses_InvalidIDError(t *testing.T) {
 	router.POST("/actresses/merge", mergeActresses(makeDeps(repo)))
 
 	body, _ := json.Marshal(map[string]interface{}{
-		"target_id":   0,
-		"source_id":   1,
-		"resolutions": map[string]string{"first_name": "target"},
+		"target_id":         0,
+		"source_id":         1,
+		"resolutions":       map[string]string{"first_name": "target"},
+		"target_updated_at": "2026-01-01T00:00:00Z",
+		"source_updated_at": "2026-01-01T00:00:00Z",
 	})
 	req := httptest.NewRequest(http.MethodPost, "/actresses/merge", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -515,9 +522,11 @@ func TestMergeActresses_UniqueConstraintError(t *testing.T) {
 	router.POST("/actresses/merge", mergeActresses(makeDeps(repo)))
 
 	body, _ := json.Marshal(map[string]interface{}{
-		"target_id":   1,
-		"source_id":   2,
-		"resolutions": map[string]string{"dmm_id": "source"},
+		"target_id":         1,
+		"source_id":         2,
+		"resolutions":       map[string]string{"dmm_id": "source"},
+		"target_updated_at": "2026-01-01T00:00:00Z",
+		"source_updated_at": "2026-01-01T00:00:00Z",
 	})
 	req := httptest.NewRequest(http.MethodPost, "/actresses/merge", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -534,9 +543,11 @@ func TestMergeActresses_InvalidFieldError(t *testing.T) {
 	router.POST("/actresses/merge", mergeActresses(makeDeps(repo)))
 
 	body, _ := json.Marshal(map[string]interface{}{
-		"target_id":   1,
-		"source_id":   2,
-		"resolutions": map[string]string{"bogus": "target"},
+		"target_id":         1,
+		"source_id":         2,
+		"resolutions":       map[string]string{"bogus": "target"},
+		"target_updated_at": "2026-01-01T00:00:00Z",
+		"source_updated_at": "2026-01-01T00:00:00Z",
 	})
 	req := httptest.NewRequest(http.MethodPost, "/actresses/merge", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -553,9 +564,11 @@ func TestMergeActresses_InvalidDecisionError(t *testing.T) {
 	router.POST("/actresses/merge", mergeActresses(makeDeps(repo)))
 
 	body, _ := json.Marshal(map[string]interface{}{
-		"target_id":   1,
-		"source_id":   2,
-		"resolutions": map[string]string{"first_name": "maybe"},
+		"target_id":         1,
+		"source_id":         2,
+		"resolutions":       map[string]string{"first_name": "maybe"},
+		"target_updated_at": "2026-01-01T00:00:00Z",
+		"source_updated_at": "2026-01-01T00:00:00Z",
 	})
 	req := httptest.NewRequest(http.MethodPost, "/actresses/merge", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")

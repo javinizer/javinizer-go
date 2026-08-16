@@ -1,7 +1,7 @@
 .PHONY: help build run run-api run-api-dev test test-short test-race test-verbose bench clean clean-all deps install web-dev web-build web-preview web-install web-clean web-restore-placeholder web-test
 .PHONY: coverage coverage-fast coverage-html coverage-check coverage-pkg coverage-patch coverage-patch-check coverage-func ci ci-full config-drift config-sync check-import-guard check-mocks i18n-check simulate-ci
 .PHONY: fmt lint vet vuln swagger docs mocks test-e2e-fullstack test-e2e-frontend test-static-e2e test-e2e-field-drop test-e2e-cli test-e2e-live test-coverage
-.PHONY: build-cli-linux build-cli-darwin build-cli-windows build-cli-all
+.PHONY: build-cli-linux build-cli-darwin build-cli-windows build-cli-all build-actress-cache
 .PHONY: build-app-darwin build-app-local build-app-windows build-app-linux build-app-all
 .PHONY: act-list act-test act-build act-lint act-docker act-cli-release act-ci act-dry act-help
 .PHONY: docker-build docker-build-no-cache docker-run docker-stop docker-restart docker-clean docker-push docker-test docker-logs docker-help
@@ -16,6 +16,7 @@ help:
 	@echo ""
 	@echo "Build & Run:"
 	@echo "  make build              - Build single binary (API + embedded Web UI)"
+	@echo "  make build-actress-cache ACTRESS_CACHE_ARGS=... - Build maintainer cache"
 	@echo "  make run                - Run CLI directly (no build)"
 	@echo "  make run-api            - Run API server directly"
 	@echo "  make run-api-dev        - Run API server with hot reload (air)"
@@ -115,6 +116,10 @@ LDFLAGS_RELEASE := -ldflags "\
 build: web-build
 	@echo "Building javinizer $(VERSION) (commit: $(COMMIT))..."
 	./scripts/with_embedded_web.sh go build $(LDFLAGS) -o bin/javinizer ./cmd/javinizer
+
+# Build the checked-in maintainer actress cache.
+build-actress-cache:
+	go run ./cmd/build-actress-cache $(ACTRESS_CACHE_ARGS)
 
 # Run the CLI (primary target)
 run:

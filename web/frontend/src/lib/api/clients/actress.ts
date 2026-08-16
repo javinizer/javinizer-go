@@ -10,6 +10,11 @@ import type {
 	ActressesImportRequest,
 	ImportResponse,
 	ActressAliasGroup,
+	ActressSyncJobCreateRequest,
+	ActressSyncJobResponse,
+	ActressSyncJobsResponse,
+	ActressSyncTasksResponse,
+	ActressSyncCandidatesResponse,
 } from '../types';
 import { BaseClient } from './common';
 
@@ -28,6 +33,38 @@ export class ActressClient extends BaseClient {
 
 	async getActress(id: number): Promise<Actress> {
 		return this.request<Actress>(`/api/v1/actresses/${id}`);
+	}
+
+	async getActressSyncCandidates(): Promise<ActressSyncCandidatesResponse> {
+		return this.request<ActressSyncCandidatesResponse>('/api/v1/actresses/sync-candidates');
+	}
+
+	async createActressSyncJob(
+		request: ActressSyncJobCreateRequest,
+	): Promise<ActressSyncJobResponse> {
+		return this.request<ActressSyncJobResponse>('/api/v1/actresses/sync-jobs', {
+			method: 'POST',
+			body: JSON.stringify(request),
+		});
+	}
+
+	async listActiveActressSyncJobs(): Promise<ActressSyncJobsResponse> {
+		return this.request<ActressSyncJobsResponse>('/api/v1/actresses/sync-jobs/active');
+	}
+
+	async getActressSyncJob(jobID: string): Promise<ActressSyncJobResponse> {
+		return this.request<ActressSyncJobResponse>(`/api/v1/actresses/sync-jobs/${jobID}`);
+	}
+
+	async listActressSyncJobTasks(jobID: string, view?: 'active' | 'diagnostics'): Promise<ActressSyncTasksResponse> {
+		const query = view ? `?view=${view}` : '';
+		return this.request<ActressSyncTasksResponse>(`/api/v1/actresses/sync-jobs/${jobID}/tasks${query}`);
+	}
+
+	async cancelActressSyncJob(jobID: string): Promise<ActressSyncJobResponse> {
+		return this.request<ActressSyncJobResponse>(`/api/v1/actresses/sync-jobs/${jobID}/cancel`, {
+			method: 'POST',
+		});
 	}
 
 	async createActress(request: ActressUpsertRequest): Promise<Actress> {

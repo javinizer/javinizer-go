@@ -87,6 +87,12 @@ func InitScraperClient(settings *models.ScraperSettings, globalProxy *models.Pro
 		Proxy:         settings.Proxy,
 		DownloadProxy: settings.DownloadProxy,
 	}
+	if settings.TimeoutIsExplicit() {
+		scraperCfg.SetTimeoutPresence(true)
+	}
+	if settings.RetryCountIsExplicit() {
+		scraperCfg.SetRetryCountPresence(true)
+	}
 
 	globalProxyVal := models.ProxyConfig{}
 	if globalProxy != nil {

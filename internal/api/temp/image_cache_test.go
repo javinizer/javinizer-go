@@ -400,8 +400,8 @@ func TestImageCache_OversizedReturns502(t *testing.T) {
 }
 
 func TestImageCache_SSRFFailureWithStaleServesStale(t *testing.T) {
-	cleanup := ssrf.SetLookupIPForTest(lookupPublicIP)
-	t.Cleanup(cleanup)
+	allow := ssrf.AllowHostForTest("127.0.0.1")
+	t.Cleanup(func() { ssrf.AllowHostForTest("127.0.0.1") })
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/jpeg")
@@ -422,8 +422,7 @@ func TestImageCache_SSRFFailureWithStaleServesStale(t *testing.T) {
 	pastTime := time.Now().Add(-200 * time.Hour)
 	require.NoError(t, fs.Chtimes(entryPath, pastTime, pastTime))
 
-	cleanup2 := ssrf.SetLookupIPForTest(lookupOffline)
-	t.Cleanup(cleanup2)
+	allow()
 
 	w2 := requestImage(router, imgURL)
 	require.Equal(t, http.StatusOK, w2.Code, "stale entry + SSRF failure should serve stale")

@@ -260,6 +260,24 @@ class APIClient {
 	async importActresses(request: Parameters<ActressClient['importActresses']>[0]) {
 		return this.actresses.importActresses(request);
 	}
+	async getActressSyncCandidates() {
+		return this.actresses.getActressSyncCandidates();
+	}
+	async createActressSyncJob(request: Parameters<ActressClient['createActressSyncJob']>[0]) {
+		return this.actresses.createActressSyncJob(request);
+	}
+	async listActiveActressSyncJobs() {
+		return this.actresses.listActiveActressSyncJobs();
+	}
+	async getActressSyncJob(jobID: string) {
+		return this.actresses.getActressSyncJob(jobID);
+	}
+	async listActressSyncJobTasks(jobID: string, view?: 'active' | 'diagnostics') {
+		return this.actresses.listActressSyncJobTasks(jobID, view);
+	}
+	async cancelActressSyncJob(jobID: string) {
+		return this.actresses.cancelActressSyncJob(jobID);
+	}
 
 	// Replacements
 	async listGenreReplacements(params?: Parameters<ReplacementClient['listGenreReplacements']>[0]) {

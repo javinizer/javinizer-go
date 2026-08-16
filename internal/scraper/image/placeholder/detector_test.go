@@ -17,8 +17,11 @@ import (
 
 func TestDefaultDMMPlaceholderHashes(t *testing.T) {
 	assert.NotNil(t, DefaultDMMPlaceholderHashes)
-	assert.Len(t, DefaultDMMPlaceholderHashes, 1)
-	assert.Len(t, DefaultDMMPlaceholderHashes[0], 64)
+	assert.Len(t, DefaultDMMPlaceholderHashes, 2)
+	assert.Contains(t, DefaultDMMPlaceholderHashes, "05eb3f0d2454f912dd4266c8a83d6b4f3c8f087fb7c8cca8670e91de7ea8ce88")
+	for _, hash := range DefaultDMMPlaceholderHashes {
+		assert.Len(t, hash, 64)
+	}
 }
 
 func TestConfigFromSettings(t *testing.T) {
@@ -185,6 +188,21 @@ func TestIsPlaceholder(t *testing.T) {
 			},
 			cfg:        Config{Enabled: true, Threshold: 10 * 1024, Hashes: []string{}},
 			wantResult: false,
+			wantErr:    false,
+		},
+		{
+			name: "HEAD failure falls back to download and hash check",
+			setupServer: func() *httptest.Server {
+				return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.Method == http.MethodHead {
+						w.WriteHeader(http.StatusMethodNotAllowed)
+						return
+					}
+					_, _ = w.Write(placeholderImage)
+				}))
+			},
+			cfg:        Config{Enabled: true, Threshold: 10 * 1024, Hashes: []string{placeholderHash}},
+			wantResult: true,
 			wantErr:    false,
 		},
 		{
