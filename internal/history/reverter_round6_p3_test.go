@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/config"
@@ -317,4 +319,61 @@ func TestCheckDestBlocking_ToleranceLegs(t *testing.T) {
 	r := NewReverter(fs, repo)
 	require.NoError(t, r.checkDestBlocking(ctx, op, dest, 1),
 		"reverted+malformed rows never block")
+}
+
+// journaled dest with an indeterminate stat keeps the backup (no restore,
+// no consume) — the permission mid-tier branch of restoreAndConsume.
+func TestSweepJournaled_IndeterminateDest_KeepsBackup(t *testing.T) {
+	fs := &indeterminateStatFs{Fs: afero.NewMemMapFs(), failPath: "/out/IVD/poster.jpg"}
+	repo := newP3OpRepo()
+	ctx := context.Background()
+	dest := "/out/IVD/poster.jpg"
+	backup := dest + ".dlbak.0123456789abcdef"
+	require.NoError(t, fs.MkdirAll("/out/IVD", config.DirPerm))
+	require.NoError(t, afero.WriteFile(fs, backup, []byte("old"), config.FilePerm))
+	backdate(t, fs, backup)
+
+	raw, _ := json.Marshal(models.GeneratedFilesJSON{Replacements: []models.ReplacementEntry{
+		{Destination: dest, Backup: backup, DestSeq: 1},
+	}})
+	op := &models.BatchFileOperation{
+		BatchJobID: "job-1", MovieID: "IVD-001", OriginalPath: "/src/ivd.mkv",
+		OperationType: models.OperationTypeUpdate, GeneratedFiles: string(raw),
+		RevertStatus: models.RevertStatusApplied,
+	}
+	require.NoError(t, repo.Create(ctx, op))
+
+	healed, err := NewReplacementSweeper(fs, repo).Sweep(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 0, healed, "indeterminate journaled destination = keep")
+	exists, _ := afero.Exists(fs, backup)
+	require.True(t, exists)
+	row, _ := repo.FindByID(ctx, op.ID)
+	gf, _ := models.ParseGeneratedFiles(row.GeneratedFiles)
+	require.Len(t, gf.Replacements, 1, "no consumption happened")
+}
+
+type indeterminateStatFs struct {
+	afero.Fs
+	failPath string
+}
+
+func (f *indeterminateStatFs) Stat(name string) (os.FileInfo, error) {
+	norm := strings.ReplaceAll(name, "\\", "/")
+	if norm == f.failPath {
+		return nil, errors.New("permission denied")
+	}
+	return f.Fs.Stat(name)
+}
+
+// Marker-name immunity matrix incl. almost-correct tail lengths.
+func TestIsReplacementBackupName_Matrix(t *testing.T) {
+	require.True(t, IsReplacementBackupName("x.jpg.dlbak.0123456789abcdef"))
+	require.True(t, IsReplacementBackupName("x.jpg.dlbak.0123456789abcdef.5")) // ordinal tail
+	require.False(t, IsReplacementBackupName("x.jpg.dlbak.0123456789abcde"))   // 15 hex
+	require.False(t, IsReplacementBackupName("x.jpg.dlbak.0123456789abcdef0")) // 17
+	require.False(t, IsReplacementBackupName("x.jpg.dlbak.0123456789abcdeG"))
+	require.False(t, IsReplacementBackupName("x.jpg.dlbak.0123456789abcdef.jpg"))
+	require.False(t, IsReplacementBackupName("x.jpg.rsbak.0123456789abcdef"))
+	require.False(t, IsReplacementBackupName("poster.jpg.backup"))
 }
