@@ -81,6 +81,11 @@ type RevertLog interface {
 	// replace order). Complete/CompleteFailed merge these incremental entries
 	// into the final generated-files ledger.
 	RecordReplacement(ctx context.Context, opID OperationID, replacedPath, backupPath string) error
+
+	// ReleaseReplacement retracts a journal entry the downloader rolled back
+	// itself (record landed, install failed, backup restored over the
+	// destination). The row must not keep pointing at the consumed backup.
+	ReleaseReplacement(ctx context.Context, opID OperationID, replacedPath, backupPath string) error
 }
 
 // RevertLogConfig holds the subset of configuration needed by dbRevertLog.
@@ -140,6 +145,10 @@ func (noOpRevertLog) RecordReplacement(_ context.Context, _ OperationID, _, _ st
 	// No durable store — journal nothing. Callers must not arm the downloader
 	// ledger with a no-op recorder: workflow threads the recorder only when the
 	// concrete RevertLog is the DB-backed implementation (see replacementRecorder).
+	return nil
+}
+
+func (noOpRevertLog) ReleaseReplacement(_ context.Context, _ OperationID, _, _ string) error {
 	return nil
 }
 
@@ -584,6 +593,54 @@ func (l *dbRevertLog) RecordReplacement(ctx context.Context, opID OperationID, r
 	preRecord.GeneratedFiles = string(data)
 	if err := l.repo.Update(ctx, preRecord); err != nil {
 		return fmt.Errorf("revert log RecordReplacement: persist record %s: %w", opID, err)
+	}
+	return nil
+}
+
+// ReleaseReplacement removes the journaled entry for a backup the downloader
+// rolled back onto its destination. Missing entries are tolerated (idempotent
+// rollback); a missing row is not.
+func (l *dbRevertLog) ReleaseReplacement(ctx context.Context, opID OperationID, replacedPath, backupPath string) error {
+	if opID == "" {
+		return fmt.Errorf("revert log ReleaseReplacement: empty operation ID")
+	}
+	recordID64, err := strconv.ParseUint(opID, 10, 64)
+	if err != nil || recordID64 == 0 {
+		return fmt.Errorf("revert log ReleaseReplacement: unparsable operation ID %q", opID)
+	}
+
+	release := replacementLedgerLocks.Acquire(opID)
+	defer release()
+
+	preRecord, err := l.repo.FindByID(ctx, uint(recordID64))
+	if err != nil {
+		return fmt.Errorf("revert log ReleaseReplacement: find record %s: %w", opID, err)
+	}
+	if preRecord == nil {
+		return fmt.Errorf("revert log ReleaseReplacement: record %s not found", opID)
+	}
+	gf, err := models.ParseGeneratedFiles(preRecord.GeneratedFiles)
+	if err != nil {
+		return fmt.Errorf("revert log ReleaseReplacement: parse ledger for record %s: %w", opID, err)
+	}
+	kept := gf.Replacements[:0]
+	for _, e := range gf.Replacements {
+		if e.Destination == replacedPath && e.Backup == backupPath {
+			continue
+		}
+		kept = append(kept, e)
+	}
+	if len(kept) == len(gf.Replacements) {
+		return nil // entry already gone (e.g. sweep consumed it) — idempotent
+	}
+	gf.Replacements = kept
+	data, err := json.Marshal(gf)
+	if err != nil {
+		return fmt.Errorf("revert log ReleaseReplacement: marshal ledger for record %s: %w", opID, err)
+	}
+	preRecord.GeneratedFiles = string(data)
+	if err := l.repo.Update(ctx, preRecord); err != nil {
+		return fmt.Errorf("revert log ReleaseReplacement: persist record %s: %w", opID, err)
 	}
 	return nil
 }

@@ -75,6 +75,10 @@ func (s *stubRevertLog) CompleteFailed(_ context.Context, opID OperationID, _ *A
 	return nil
 }
 
+func (s *stubRevertLog) ReleaseReplacement(_ context.Context, _ OperationID, _, _ string) error {
+	return nil
+}
+
 func (s *stubRevertLog) RecordReplacement(_ context.Context, _ OperationID, _, _ string) error {
 	return nil
 }

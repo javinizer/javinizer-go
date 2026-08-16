@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"strconv"
+	"sync/atomic"
 
 	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/logging"
@@ -13,12 +15,18 @@ import (
 
 const backupSuffixForDest = ".dlbak"
 
-// overwriteBackupPath names the destination's backup for one operation.
-// The opID is folded in as a hash (never a path component) so a stacked
-// second overwrite on the same destination never clobbers the first
-// operation's recoverable bytes.
+// backupOrdinal gives every backup leg a never-repeating tail. opID alone
+// cannot disambiguate: ONE operation may overwrite the same destination
+// twice (e.g. poster + cropped re-write), and without the ordinal the second
+// rename would clobber the first backup while both journal entries point at
+// it — revert could never recover the original bytes (codex P3 round 1).
+var backupOrdinal atomic.Uint64
+
+// overwriteBackupPath names the destination's backup for one replacement:
+// opID folded as a hash (never a path component) plus a process-unique
+// ordinal, so stacked same-op or cross-op overwrites never clobber a backup.
 func overwriteBackupPath(destPath, opID string) string {
-	return destPath + backupSuffixForDest + "." + sha1hex8(opID)
+	return destPath + backupSuffixForDest + "." + sha1hex8(opID) + "." + strconv.FormatUint(backupOrdinal.Add(1), 16)
 }
 
 // sha1hex8 folds an op's identity to 16 lowercase hex chars for backup path
@@ -77,9 +85,13 @@ func (d *Downloader) installOverwriting(ctx context.Context, stagedPath, destPat
 		if rErr := d.fs.Rename(backupPath, destPath); rErr != nil {
 			return false, true, fmt.Errorf("failed to replace %s: %w (AND backup restore failed: %v — bytes remain at %s)", destPath, err, rErr, backupPath)
 		}
+		// The backup was consumed by the rollback restore — retract the journal
+		// entry or the row permanently points at a vanished backup and every
+		// later revert of this op fails stat-ing it (codex P3 round 1).
+		if relErr := ledger.recorder.ReleaseReplacement(ctx, ledger.opID, destPath, backupPath); relErr != nil {
+			logging.Warnf("downloader: release of rolled-back journal entry failed for %s: %v (sweep retains it; destination is correct)", destPath, relErr)
+		}
 		return false, true, fmt.Errorf("failed to replace file: %w", err)
-		// the recorded entry stays: the failed op keeps its ledger row for
-		// reconciliation (status failed rows are never auto-deleted).
 	}
 	return false, true, nil
 }

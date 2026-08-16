@@ -36,12 +36,19 @@ import (
 //     it is stale residue (deleted); with the destination missing it is the
 //     last copy of somebody's bytes (restored).
 
-var replacementBackupName = regexp.MustCompile(`\.dlbak\.[0-9a-f]{16}$`)
+var replacementBackupName = regexp.MustCompile(`\.dlbak\.[0-9a-f]{16}(\.[0-9a-f]{1,16})?`)
+
+// sweepSlash normalizes a path for journal comparison: the journaled ledger
+// stores paths however the downloader recorded them (slash form), while the
+// enumerator joins with OS separators — on Windows the two spellings differ.
+func sweepSlash(p string) string { return filepath.ToSlash(filepath.Clean(p)) }
 
 // IsReplacementBackupName reports whether name carries the revert-ledger
 // ownership marker (destination-adjacent backup from downloader overwrites).
 func IsReplacementBackupName(name string) bool {
-	return replacementBackupName.MatchString(name)
+	// Anchored: the marker must reach the end of the name.
+	m := replacementBackupName.FindString(name)
+	return m != "" && strings.HasSuffix(name, m)
 }
 
 // ReplacementSweeper reaps replacement backups under conservative ownership.
@@ -80,8 +87,8 @@ func (s *ReplacementSweeper) index(ctx context.Context) (*replacementLedgerIndex
 			continue
 		}
 		for _, rep := range gf.Replacements {
-			idx.journaled[rep.Backup] = row
-			idx.dirs[filepath.Dir(rep.Destination)] = true
+			idx.journaled[sweepSlash(rep.Backup)] = row
+			idx.dirs[sweepSlash(filepath.Dir(rep.Destination))] = true
 		}
 	}
 	return idx, nil
@@ -96,7 +103,7 @@ func (s *ReplacementSweeper) Sweep(ctx context.Context) (int, error) {
 	}
 	healed := 0
 	for dir := range idx.dirs {
-		entries, rdErr := afero.ReadDir(s.fs, dir)
+		entries, rdErr := afero.ReadDir(s.fs, filepath.FromSlash(dir))
 		if rdErr != nil {
 			continue
 		}
@@ -121,12 +128,12 @@ func (s *ReplacementSweeper) SweepDestinations(ctx context.Context, destinations
 	seen := map[string]bool{}
 	healed := 0
 	for _, dest := range destinations {
-		dir := filepath.Dir(dest)
+		dir := sweepSlash(filepath.Dir(dest))
 		if seen[dir] {
 			continue
 		}
 		seen[dir] = true
-		entries, rdErr := afero.ReadDir(s.fs, dir)
+		entries, rdErr := afero.ReadDir(s.fs, filepath.FromSlash(dir))
 		if rdErr != nil {
 			continue
 		}
@@ -135,8 +142,9 @@ func (s *ReplacementSweeper) SweepDestinations(ctx context.Context, destinations
 				continue
 			}
 			// Targeted sweep only arbitrates backups of the named destinations.
-			candidate := filepath.Join(dir, e.Name())
-			if !strings.HasPrefix(candidate, dest) && strings.TrimSuffix(candidate, replacementBackupName.FindString(candidate)) != dest {
+			candidate := sweepSlash(filepath.Join(dir, e.Name()))
+			destSlash := sweepSlash(dest)
+			if !strings.HasPrefix(candidate, destSlash) {
 				continue
 			}
 			healed += s.sweepOne(ctx, idx, dir, e)
@@ -146,17 +154,18 @@ func (s *ReplacementSweeper) SweepDestinations(ctx context.Context, destinations
 }
 
 // sweepOne arbitrates one ownership-marker backup file.
-func (s *ReplacementSweeper) sweepOne(ctx context.Context, idx *replacementLedgerIndex, dir string, e os.FileInfo) int {
-	backup := filepath.Join(dir, e.Name())
+func (s *ReplacementSweeper) sweepOne(ctx context.Context, idx *replacementLedgerIndex, dirSlash string, e os.FileInfo) int {
+	backup := filepath.FromSlash(dirSlash + "/" + e.Name())
+	backupSlash := sweepSlash(backup)
 
 	// Younger than this process: plausibly in-flight under a live downloader
 	// lock — never arbitrate what we cannot see journaled yet.
 	if !e.ModTime().Before(s.startedAt) {
 		return 0
 	}
-	dest := strings.TrimSuffix(backup, replacementBackupName.FindString(backup))
+	dest := strings.TrimSuffix(backupSlash, replacementBackupName.FindString(backupSlash))
 
-	if owner, ok := idx.journaled[backup]; ok {
+	if owner, ok := idx.journaled[backupSlash]; ok {
 		// Journaled — retained by default. Crash-window: destination missing
 		// means the new bytes NEVER landed; restore old bytes and consume.
 		if _, statErr := s.fs.Stat(dest); errors.Is(statErr, afero.ErrFileNotFound) {
@@ -206,7 +215,7 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 	}
 	kept := gf.Replacements[:0]
 	for _, rep := range gf.Replacements {
-		if rep.Backup == backup {
+		if sweepSlash(rep.Backup) == sweepSlash(backup) {
 			continue
 		}
 		kept = append(kept, rep)

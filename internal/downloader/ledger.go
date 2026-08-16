@@ -14,6 +14,12 @@ type ReplacementRecorder interface {
 	// It runs AFTER the backup has been renamed aside and BEFORE the new
 	// bytes install — a failure must keep the downloader from replacing.
 	RecordReplacement(ctx context.Context, opID, replacedPath, backupPath string) error
+	// ReleaseReplacement retracts a journal entry whose bytes were rolled
+	// back by the downloader itself (record landed but the install failed,
+	// so the backup was restored over the destination). Without retraction
+	// the row keeps pointing at a consumed backup and every later revert
+	// fails stat-ing it (codex P3 round 1).
+	ReleaseReplacement(ctx context.Context, opID, replacedPath, backupPath string) error
 }
 
 // downloadLedger is the internal option wrapper folding command-level

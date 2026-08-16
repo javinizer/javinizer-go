@@ -1100,7 +1100,7 @@ func TestRevertFile_UpdateOperation(t *testing.T) {
 	mockRepo.On("UpdateRevertStatus", mock.Anything, uint(800), models.RevertStatusReverted).Return(nil)
 
 	r := NewReverter(fs, mockRepo)
-	result, err := r.revertFile(context.Background(), op, nil)
+	result, err := r.revertFile(context.Background(), op)
 	require.NoError(t, err)
 	assert.Equal(t, models.RevertOutcomeReverted, result.Outcome)
 	mockRepo.AssertExpectations(t)
@@ -1124,7 +1124,7 @@ func TestRevertFile_MoveOperation(t *testing.T) {
 	mockRepo.On("UpdateRevertStatus", mock.Anything, uint(801), models.RevertStatusReverted).Return(nil)
 
 	r := NewReverter(fs, mockRepo)
-	result, err := r.revertFile(context.Background(), op, nil)
+	result, err := r.revertFile(context.Background(), op)
 	require.NoError(t, err)
 	assert.Equal(t, models.RevertOutcomeReverted, result.Outcome)
 
@@ -1145,7 +1145,7 @@ func TestRevertFile_AlreadyReverted(t *testing.T) {
 		RevertStatus:  models.RevertStatusReverted,
 		OperationType: models.OperationTypeMove,
 	}
-	result, err := r.revertFile(context.Background(), op, nil)
+	result, err := r.revertFile(context.Background(), op)
 	assert.Nil(t, result)
 	assert.Equal(t, ErrBatchAlreadyReverted, err)
 }
@@ -1163,7 +1163,7 @@ func TestRevertFile_AnchorMissing(t *testing.T) {
 		OperationType: models.OperationTypeMove,
 		RevertStatus:  models.RevertStatusApplied,
 	}
-	result, err := r.revertFile(context.Background(), op, nil)
+	result, err := r.revertFile(context.Background(), op)
 	require.NoError(t, err)
 	assert.Equal(t, models.RevertOutcomeSkipped, result.Outcome)
 	assert.Equal(t, models.RevertReasonAnchorMissing, result.Reason)
@@ -1187,7 +1187,7 @@ func TestRevertFile_DBPersistFails(t *testing.T) {
 	mockRepo.On("UpdateRevertStatus", mock.Anything, uint(804), models.RevertStatusReverted).Return(errors.New("db write failed"))
 
 	r := NewReverter(fs, mockRepo)
-	result, err := r.revertFile(context.Background(), op, nil)
+	result, err := r.revertFile(context.Background(), op)
 	assert.Nil(t, result)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to persist revert status")
@@ -1216,7 +1216,7 @@ func TestRevertFile_WithNFOWarning(t *testing.T) {
 
 	errorFs := &nfoWriteErrorFs{Fs: fs}
 	r := NewReverter(errorFs, mockRepo)
-	result, err := r.revertFile(context.Background(), op, nil)
+	result, err := r.revertFile(context.Background(), op)
 	require.NoError(t, err)
 	assert.Equal(t, models.RevertOutcomeReverted, result.Outcome)
 	assert.Contains(t, result.Error, "NFO restore failed")

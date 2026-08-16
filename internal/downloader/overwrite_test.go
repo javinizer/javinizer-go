@@ -714,7 +714,11 @@ func TestDownload_OverwriteReplaceFailurePreservesExisting(t *testing.T) {
 	for _, e := range entries {
 		assert.False(t, strings.Contains(e.Name(), ".dlbak."), "backup swept after restore: %s", e.Name())
 	}
-	assert.Len(t, rec.get(), 1, "the replacement was journaled before the swap")
+	assert.Empty(t, rec.get(), "rollback consumed its backup: journal entry retracted via ReleaseReplacement")
+	rec.mu.Lock()
+	released := append([]replacementRecord(nil), rec.released...)
+	rec.mu.Unlock()
+	assert.Len(t, released, 1, "the journaled entry was released on rollback, not left dangling")
 }
 
 func TestDownload_DedupSharedDestinationClaimsOnce(t *testing.T) {

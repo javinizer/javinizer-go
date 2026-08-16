@@ -190,3 +190,25 @@ func TestReplacementRecorder_ArmingGate(t *testing.T) {
 	defer func() { _ = db.Close() }()
 	require.NotNil(t, replacementRecorder(rl), "DB-backed log arms the downloader ledger")
 }
+
+func TestRevertLog_ReleaseReplacement_RetractsRolledBackEntry(t *testing.T) {
+	db, repo, rl := newP3RecorderHarness(t, ":memory:")
+	defer func() { _ = db.Close() }()
+	ctx := context.Background()
+
+	opID := beginP3Op(t, rl, "REL-001")
+	dest := "/dst/REL-001/poster.jpg"
+	backup := dest + ".dlbak.x"
+	require.NoError(t, rl.RecordReplacement(ctx, opID, dest, backup))
+	require.Len(t, p3Ledger(t, repo, opID).Replacements, 1)
+
+	require.NoError(t, rl.ReleaseReplacement(ctx, opID, dest, backup))
+	require.Empty(t, p3Ledger(t, repo, opID).Replacements,
+		"rolled-back entry retracted — the row must not point at a consumed backup")
+
+	// Idempotent: a second release of the same entry is a no-op.
+	require.NoError(t, rl.ReleaseReplacement(ctx, opID, dest, backup))
+
+	// Missing rows still surface.
+	require.Error(t, rl.ReleaseReplacement(ctx, "999999", dest, backup))
+}

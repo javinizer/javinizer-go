@@ -19,8 +19,9 @@ import (
 
 // armedTestLedger captures replacement records for assertion.
 type armedTestLedger struct {
-	mu      sync.Mutex
-	records []replacementRecord
+	mu       sync.Mutex
+	records  []replacementRecord
+	released []replacementRecord
 }
 
 type replacementRecord struct {
@@ -32,6 +33,19 @@ func (l *armedTestLedger) RecordReplacement(_ context.Context, _, replacedPath, 
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.records = append(l.records, replacementRecord{replacedPath, backupPath})
+	return nil
+}
+
+func (l *armedTestLedger) ReleaseReplacement(_ context.Context, _, replacedPath, backupPath string) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.released = append(l.released, replacementRecord{replacedPath: replacedPath, backupPath: backupPath})
+	for i, r := range l.records {
+		if r.replacedPath == replacedPath && r.backupPath == backupPath {
+			l.records = append(l.records[:i], l.records[i+1:]...)
+			break
+		}
+	}
 	return nil
 }
 
@@ -112,6 +126,10 @@ type failingTestLedger struct{ err error }
 
 func (l *failingTestLedger) RecordReplacement(context.Context, string, string, string) error {
 	return l.err
+}
+
+func (l *failingTestLedger) ReleaseReplacement(context.Context, string, string, string) error {
+	return nil
 }
 
 func TestDownloader_OverwriteLedgerRecordFailure_RestoresBackupAndFails(t *testing.T) {
@@ -211,4 +229,52 @@ func TestDownloader_ExistedDetectionInsideDestLock(t *testing.T) {
 	got, rerr := afero.ReadFile(fs, path)
 	require.NoError(t, rerr)
 	assert.Contains(t, [][]byte{srvPayload["a"], srvPayload["b"]}, got, "final bytes are one complete payload")
+}
+
+func TestDownloader_SameOpDoubleOverwrite_UniqueBackups(t *testing.T) {
+	// codex P3 round 1 (F1): ONE operation overwriting the same destination
+	// twice must journal TWO backups at two distinct paths — with opID-only
+	// naming the second rename clobbers the first backup and revert can never
+	// recover the original bytes.
+	newStaticMediaServer := func(body []byte) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/octet-stream")
+			_, _ = w.Write(body)
+		}))
+	}
+	serverA := newStaticMediaServer([]byte("gen-A"))
+	defer serverA.Close()
+	serverB := newStaticMediaServer([]byte("gen-B"))
+	defer serverB.Close()
+
+	fs := afero.NewMemMapFs()
+	dest := "/out/DBL/poster.jpg"
+	require.NoError(t, fs.MkdirAll("/out/DBL", 0o755))
+	require.NoError(t, afero.WriteFile(fs, dest, []byte("original"), 0o644))
+
+	d := NewDownloader(serverA.Client(), fs, &Config{}, nil)
+	ledger := &armedTestLedger{}
+	lg := downloadLedger{opID: "op-double", recorder: ledger}
+
+	_, err := d.download(context.Background(), serverA.URL+"/poster.jpg", dest, MediaTypeCover, true, nil, lg)
+	require.NoError(t, err)
+	_, err = d.download(context.Background(), serverB.URL+"/poster.jpg", dest, MediaTypeCover, true, nil, lg)
+	require.NoError(t, err)
+
+	recs := ledger.get()
+	require.Len(t, recs, 2)
+	require.NotEqual(t, recs[0].backupPath, recs[1].backupPath,
+		"stacked same-op overwrites must journal distinct backups")
+
+	// Both backups retain THEIR generations; the second is the first install's
+	// bytes, the first is the original.
+	b1, err := afero.ReadFile(fs, recs[0].backupPath)
+	require.NoError(t, err)
+	require.Equal(t, []byte("original"), b1)
+	b2, err := afero.ReadFile(fs, recs[1].backupPath)
+	require.NoError(t, err)
+	require.Equal(t, []byte("gen-A"), b2)
+	final, err := afero.ReadFile(fs, dest)
+	require.NoError(t, err)
+	require.Equal(t, []byte("gen-B"), final)
 }

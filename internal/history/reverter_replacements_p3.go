@@ -49,8 +49,14 @@ func rejectedRevert(op *models.BatchFileOperation, errMsg string) *RevertFileRes
 // true reverse destination-sequence order (per destination, highest DestSeq
 // first — the sequence is assigned inside the downloader's destination lock,
 // so it captures the actual replace order regardless of op begin order or row
-// ids). inFlight excludes the operations being reverted together in this run
-// from the newer-applied rejection rule.
+// ids).
+//
+// The newer-applied rejection consults the LIVE journal only: an operation
+// reverted earlier in this run has already consumed its entries (invisible
+// here), while an operation whose revert failed or got skipped KEEPS its
+// entries and correctly blocks older operations from climbing over it — the
+// blanket "same run" exclusion could otherwise corrupt the replacement chain
+// (codex P3 round 1).
 //
 // Returns the restored paths (destinations AND consumed backups) for the
 // delete-list subtraction: restored content must never be swept by the
@@ -60,7 +66,7 @@ func rejectedRevert(op *models.BatchFileOperation, errMsg string) *RevertFileRes
 // journal immediately, so a partially-failed restore leaves an accurate
 // ledger. Any restore failure aborts the revert leaving the operation
 // Applied (full move-back success gate).
-func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.BatchFileOperation, inFlight map[uint]bool) (map[string]bool, error) {
+func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.BatchFileOperation) (map[string]bool, error) {
 	restored := map[string]bool{}
 	gf, err := models.ParseGeneratedFiles(op.GeneratedFiles)
 	if err != nil {
@@ -90,7 +96,7 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 		}
 		for i := range rows {
 			row := &rows[i]
-			if row.ID == op.ID || inFlight[row.ID] || row.RevertStatus == models.RevertStatusReverted {
+			if row.ID == op.ID || row.RevertStatus == models.RevertStatusReverted {
 				continue
 			}
 			rowGf, pErr := models.ParseGeneratedFiles(row.GeneratedFiles)
@@ -158,6 +164,11 @@ func (r *Reverter) consumeReplacementEntry(ctx context.Context, op *models.Batch
 	}
 	return nil
 }
+
+// NOTE: revert order drives safety, not exclusion: batch/scrape sorts ops
+// by max journaled DestSeq descending, so a newer owner is always attempted
+// first; if it succeeds its entries are consumed and the older op proceeds,
+// and if it fails the entries remain visible and the older op is rejected.
 
 // sweepJournaledDestinations runs the pre-revert targeted sweep over every
 // destination journaled by the operations about to revert: crash-window

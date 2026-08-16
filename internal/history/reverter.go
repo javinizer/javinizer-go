@@ -165,7 +165,7 @@ func (a *aferoFSReverter) restoreNFO(ctx context.Context, op *models.BatchFileOp
 	return restoreNFOFS(ctx, a.fs, a.batchFileOpRepo, op, hardFailure)
 }
 
-func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation, inFlight map[uint]bool) (*RevertFileResult, error) {
+func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation) (*RevertFileResult, error) {
 	logging.Debugf("Reverting operation %d: movie=%s type=%s original=%s new=%s revert_status=%s",
 		op.ID, op.MovieID, op.OperationType, op.OriginalPath, op.NewPath, op.RevertStatus)
 
@@ -180,7 +180,7 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 	// any generated-file cleanup. Restored content is subtracted from the
 	// delete list. Rejections and restore failures leave the row untouched
 	// (Applied / failed) so the revert can be retried in the right order.
-	restored, rejErr := r.restoreReplacementJournal(ctx, op, inFlight)
+	restored, rejErr := r.restoreReplacementJournal(ctx, op)
 	if rejErr != nil {
 		logging.Warnf("Replacement journal restore refused/failed for op %d: %v", op.ID, rejErr)
 		return rejectedRevert(op, rejErr.Error()), nil
@@ -543,21 +543,17 @@ func cleanupEmptyDirDownwardFS(fs afero.Fs, dirPath string, stopAt string) {
 // tracking per-operation outcomes. Each operation is processed independently
 // (best-effort: individual failures don't abort the batch). Returns the ordered
 // list of per-operation results.
-func (r *Reverter) revertOperations(ctx context.Context, ops []models.BatchFileOperation, revertFn func(ctx context.Context, op *models.BatchFileOperation, inFlight map[uint]bool) (*RevertFileResult, error)) []RevertFileResult {
+func (r *Reverter) revertOperations(ctx context.Context, ops []models.BatchFileOperation, revertFn func(ctx context.Context, op *models.BatchFileOperation) (*RevertFileResult, error)) []RevertFileResult {
 	// P3: operations carrying journaled replacements revert in true reverse
 	// replace order (highest destination sequence first, per-operation max).
 	// Stable sort keeps row order for un-journaled operations.
 	sort.SliceStable(ops, func(i, j int) bool {
 		return maxJournalSeq(&ops[i]) > maxJournalSeq(&ops[j])
 	})
-	inFlight := make(map[uint]bool, len(ops))
-	for i := range ops {
-		inFlight[ops[i].ID] = true
-	}
 	var outcomes []RevertFileResult
 	for i := range ops {
 		op := &ops[i]
-		res, sysErr := revertFn(ctx, op, inFlight)
+		res, sysErr := revertFn(ctx, op)
 		if sysErr != nil {
 			outcomes = append(outcomes, RevertFileResult{
 				OperationID:  op.ID,
