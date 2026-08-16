@@ -2,6 +2,7 @@ package resultstore
 
 import (
 	"fmt"
+	"reflect"
 
 	"github.com/javinizer/javinizer-go/internal/models"
 )
@@ -133,9 +134,21 @@ func (ru *resultUpdater) AtomicUpdateFileResultWithProvenance(filePath string, u
 	if p := ru.Provenance[filePath]; p != nil {
 		provCopy = p.Clone()
 	}
-	updated, newProv, err := updateFn(current.Clone(), provCopy)
+	curArg := current.Clone()
+	updated, newProv, err := updateFn(curArg, provCopy)
 	if err != nil {
 		return err
+	}
+	// P3 R13-1: a callback returning its inputs UNMUTATED declined the
+	// write (identity-mismatch skips on concurrent rekey return the captured
+	// clones as-is — ordinary callbacks mutate the clone in place). A
+	// revision bump on a content-identical write would fabricate a phantom
+	// mutation that later captured-revision reads and poster-recovery
+	// arbitration pin on.
+	if updated == curArg && newProv == provCopy &&
+		reflect.DeepEqual(curArg, current) &&
+		reflect.DeepEqual(provCopy, ru.Provenance[filePath]) {
+		return nil
 	}
 
 	updated.Revision = current.Revision + 1

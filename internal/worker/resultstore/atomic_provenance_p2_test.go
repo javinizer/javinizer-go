@@ -148,3 +148,31 @@ var errSimulated = errSimulatedType{}
 type errSimulatedType struct{}
 
 func (errSimulatedType) Error() string { return "simulated callback failure" }
+
+// codex P3 R13-1: returning the inputs unchanged declines the write — no
+// revision bump, no publish. False revisions poison later captured-revision
+// checks and poster-recovery arbitration.
+func TestAtomicUpdateFileResultWithProvenance_IdentitySkipPublishesNothing(t *testing.T) {
+	state := &resultTrackerState{
+		Results:      map[string]*MovieResult{"/f/skip.mp4": {Status: models.JobStatusRunning, Revision: 4}},
+		Excluded:     map[string]bool{},
+		Provenance:   map[string]*ProvenanceData{"/f/skip.mp4": {FieldSources: map[string]string{"title": "orig"}}},
+		movieIDIndex: map[string][]string{},
+	}
+	ru := &resultUpdater{resultTrackerState: state}
+
+	err := ru.AtomicUpdateFileResultWithProvenance("/f/skip.mp4", func(cur *MovieResult, prov *ProvenanceData) (*MovieResult, *ProvenanceData, error) {
+		return cur, prov, nil // declined — concurrent rekey changed the family
+	})
+	require.NoError(t, err)
+	assert.Equal(t, uint64(4), state.Results["/f/skip.mp4"].Revision, "no phantom revision")
+	assert.Equal(t, "orig", state.Provenance["/f/skip.mp4"].FieldSources["title"])
+
+	// A REAL change beside the skip convention still publishes.
+	err = ru.AtomicUpdateFileResultWithProvenance("/f/skip.mp4", func(cur *MovieResult, prov *ProvenanceData) (*MovieResult, *ProvenanceData, error) {
+		cur.Status = models.JobStatusCompleted
+		return cur, prov, nil
+	})
+	require.NoError(t, err)
+	assert.Equal(t, uint64(5), state.Results["/f/skip.mp4"].Revision, "mutations still advance the revision")
+}
