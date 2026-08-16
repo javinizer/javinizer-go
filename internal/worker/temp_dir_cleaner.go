@@ -74,7 +74,6 @@ func (c *TempDirCleaner) CleanupStaleTempDirs(ctx context.Context) (int, error) 
 		return 0, nil
 	}
 
-	cutoff := time.Now().Add(-24 * time.Hour)
 	removed := 0
 
 	for _, entry := range entries {
@@ -83,58 +82,72 @@ func (c *TempDirCleaner) CleanupStaleTempDirs(ctx context.Context) (int, error) 
 		}
 		jobID := entry.Name()
 
-		// P3: a job holding ANY admission lease (edit in flight, delete-drain
-		// or phase start queued) owns its staging dir right now — skip until
-		// the operation releases. Cancel ordering resolves the same way: the
-		// cancelled edit's release makes a later sweep see the dir again.
-		if c.admissionProbe != nil && c.admissionProbe(jobID) {
-			continue
-		}
-
-		shouldRemove := false
-
-		if c.jobRepo != nil {
-			job, err := c.jobRepo.FindByID(ctx, jobID)
-			if err != nil {
-				if errors.Is(err, database.ErrNotFound) {
-					// Job no longer in database — orphaned directory, safe to remove.
-					shouldRemove = true
-				} else {
-					// Transient DB error — do NOT delete; retry on next cycle.
-					logging.Warnf("CleanupStaleTempDirs: lookup failed for job %s: %v", jobID, err)
-					continue
-				}
-			} else if job == nil {
-				// Defensive: the canonical JobRepository (BaseRepository.FindByID)
-				// never returns (nil, nil), but guard against alternative
-				// JobRepositoryInterface implementations that might.
-				shouldRemove = true
-			} else if isPastActiveStatus(job.Status) {
-				// Past-active state — check if it's been inactive for >24h
-				terminalTime := latestInactiveTime(job)
-				if terminalTime != nil && terminalTime.Before(cutoff) {
-					shouldRemove = true
-				}
-			}
-		} else {
-			// No job repo available — clean up directories older than 24h as a heuristic
-			if entry.ModTime().Before(cutoff) {
-				shouldRemove = true
-			}
-		}
-
-		if shouldRemove {
-			dirPath := filepath.Join(postersDir, jobID)
-			if err := fsutil.AferoRemoveAll(c.fs, dirPath); err != nil {
-				logging.Warnf("CleanupStaleTempDirs: failed to remove %s: %v", dirPath, err)
-			} else {
-				removed++
-				logging.Debugf("CleanupStaleTempDirs: removed stale temp dir for job %s", jobID)
-			}
+		// P3: process each job under its exclusive admission lease (held for
+		// the whole decision + removal). Held: an edit/phase/delete owns the
+		// job → skip. Taken: no edit can admit until the dir is removed
+		// (codex P3 R3-4). The closure keeps the release scoped to the job.
+		if c.processStaleJobDir(ctx, postersDir, jobID, entry) {
+			removed++
 		}
 	}
 
 	return removed, nil
+}
+
+// processStaleJobDir runs one job-entry removal decision under the exclusive
+// admission lease; returns true when the dir was removed.
+func (c *TempDirCleaner) processStaleJobDir(ctx context.Context, postersDir, jobID string, entry os.FileInfo) bool {
+	cutoff := time.Now().Add(-24 * time.Hour)
+	if c.admissionProbe != nil {
+		release, ok := c.admissionProbe(jobID)
+		if !ok {
+			return false
+		}
+		defer release()
+	}
+
+	shouldRemove := false
+
+	if c.jobRepo != nil {
+		job, err := c.jobRepo.FindByID(ctx, jobID)
+		if err != nil {
+			if errors.Is(err, database.ErrNotFound) {
+				// Job no longer in database — orphaned directory, safe to remove.
+				shouldRemove = true
+			} else {
+				// Transient DB error — do NOT delete; retry on next cycle.
+				logging.Warnf("CleanupStaleTempDirs: lookup failed for job %s: %v", jobID, err)
+				return false
+			}
+		} else if job == nil {
+			// Defensive: the canonical JobRepository (BaseRepository.FindByID)
+			// never returns (nil, nil), but guard against alternative
+			// JobRepositoryInterface implementations that might.
+			shouldRemove = true
+		} else if isPastActiveStatus(job.Status) {
+			// Past-active state — check if it's been inactive for >24h
+			terminalTime := latestInactiveTime(job)
+			if terminalTime != nil && terminalTime.Before(cutoff) {
+				shouldRemove = true
+			}
+		}
+	} else {
+		// No job repo available — clean up directories older than 24h as a heuristic
+		if entry.ModTime().Before(cutoff) {
+			shouldRemove = true
+		}
+	}
+
+	if shouldRemove {
+		dirPath := filepath.Join(postersDir, jobID)
+		if err := fsutil.AferoRemoveAll(c.fs, dirPath); err != nil {
+			logging.Warnf("CleanupStaleTempDirs: failed to remove %s: %v", dirPath, err)
+			return false
+		}
+		logging.Debugf("CleanupStaleTempDirs: removed stale temp dir for job %s", jobID)
+		return true
+	}
+	return false
 }
 
 // CleanJobTempDir removes the temp poster directory for the given job ID.

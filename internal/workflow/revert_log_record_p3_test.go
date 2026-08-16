@@ -212,3 +212,30 @@ func TestRevertLog_ReleaseReplacement_RetractsRolledBackEntry(t *testing.T) {
 	// Missing rows still surface.
 	require.Error(t, rl.ReleaseReplacement(ctx, "999999", dest, backup))
 }
+
+func TestRevertLog_Begin_SeedsDiscoveryRoot(t *testing.T) {
+	db, repo, rl := newP3RecorderHarness(t, ":memory:")
+	defer func() { _ = db.Close() }()
+	ctx := context.Background()
+
+	opID, err := rl.Begin(ctx, ApplyCmd{
+		Movie:    &models.Movie{ID: "RND-001"},
+		Match:    models.FileMatchInfo{Path: "/src/rnd.mkv"},
+		DestPath: "/dest/rooted",
+	})
+	require.NoError(t, err)
+
+	gf := p3Ledger(t, repo, opID)
+	require.Equal(t, []string{"/dest/rooted"}, gf.Roots,
+		"the discovery root is persisted at Begin, before any journal exists")
+
+	// Complete merges, never clobbers the seeded root.
+	require.NoError(t, rl.Complete(ctx, opID, &ApplyResult{
+		Movie:         &models.Movie{ID: "RND-001"},
+		NFOPath:       "/dest/rooted/rnd.nfo",
+		DownloadPaths: []string{"/dest/rooted/poster.jpg"},
+	}))
+	gf = p3Ledger(t, repo, opID)
+	require.Equal(t, []string{"/dest/rooted"}, gf.Roots, "Complete preserves the seeded root")
+	require.Contains(t, gf.Delete, "/dest/rooted/rnd.nfo")
+}

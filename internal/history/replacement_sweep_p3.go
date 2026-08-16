@@ -102,6 +102,11 @@ func (s *ReplacementSweeper) index(ctx context.Context) (*replacementLedgerIndex
 		for _, delPath := range gf.Delete {
 			idx.dirs[sweepSlash(filepath.Dir(delPath))] = true
 		}
+		// R3-3: Begin-seeded roots name the destination dir directly (a root
+		// is a destination directory, not a file path).
+		for _, root := range gf.Roots {
+			idx.dirs[sweepSlash(root)] = true
+		}
 	}
 	return idx, nil
 }
@@ -178,24 +183,24 @@ func (s *ReplacementSweeper) sweepOne(ctx context.Context, idx *replacementLedge
 	dest := strings.TrimSuffix(backupSlash, replacementBackupName.FindString(backupSlash))
 
 	if owner, ok := idx.journaled[backupSlash]; ok {
-		// Journaled — retained by default. Crash-window: destination missing
-		// means the new bytes NEVER landed; restore old bytes and consume.
-		if _, statErr := s.fs.Stat(dest); errors.Is(statErr, afero.ErrFileNotFound) {
-			if s.restoreAndConsume(ctx, owner, backup, dest) {
-				delete(idx.journaled, backup)
-				return 1
-			}
-		} else if statErr != nil {
-			logging.Warnf("replacement sweep %s: destination indeterminate (%v) — kept", backup, statErr)
+		// Journaled — handled under the lock inside restoreAndConsume, which
+		// RECHECKS the destination state in the critical section: a downloader
+		// can install new bytes between the classification read and the lock
+		// (codex P3 R3-2), and the backup must never clobber those
+		// freshly-installed artifacts.
+		if s.restoreAndConsume(ctx, owner, backup, dest) {
+			delete(idx.journaled, backup)
+			return 1
 		}
 		return 0
 	}
 
 	// Orphan: no row journals this backup anymore (entry consumed post-revert
-	// or the row was pruned).
+	// or the row was pruned). Classification runs UNDER the destination lock
+	// for the same TOCTOU reason.
+	release := fsutil.SharedDestLocks().Acquire(dest)
+	defer release()
 	if _, statErr := s.fs.Stat(dest); errors.Is(statErr, afero.ErrFileNotFound) {
-		release := fsutil.SharedDestLocks().Acquire(dest)
-		defer release()
 		if rnErr := s.fs.Rename(backup, dest); rnErr != nil {
 			logging.Warnf("replacement sweep restore %s→%s: %v", backup, dest, rnErr)
 			return 0
@@ -216,6 +221,16 @@ func (s *ReplacementSweeper) sweepOne(ctx context.Context, idx *replacementLedge
 func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.BatchFileOperation, backup, dest string) bool {
 	release := fsutil.SharedDestLocks().Acquire(dest)
 	defer release()
+
+	// Recheck INSIDE the lock: if the destination now has bytes (a concurrent
+	// apply installed them since classification), the crash-window premise
+	// no longer holds — retain the journaled backup, touching nothing.
+	if _, statErr := s.fs.Stat(dest); statErr == nil {
+		return false
+	} else if !errors.Is(statErr, afero.ErrFileNotFound) {
+		logging.Warnf("replacement sweep %s: destination indeterminate (%v) — kept", backup, statErr)
+		return false
+	}
 	if rnErr := copyRestoreBytes(s.fs, backup, dest); rnErr != nil {
 		logging.Warnf("replacement sweep restore %s→%s: %v", backup, dest, rnErr)
 		return false

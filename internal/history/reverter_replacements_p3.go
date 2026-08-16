@@ -94,7 +94,12 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 	// any byte moves: refuse to climb above an unconsumed newer entry owned by
 	// an operation outside this run.
 	for dest, entries := range byDest {
-		maxOwn := entries[0].DestSeq
+		minOwn := entries[0].DestSeq
+		for _, e := range entries {
+			if e.DestSeq < minOwn {
+				minOwn = e.DestSeq
+			}
+		}
 		rows, qErr := r.batchFileOpRepo.FindOperationsByDestination(ctx, dest)
 		if qErr != nil {
 			return restored, fmt.Errorf("failed to inspect destination journal for %s: %w", dest, qErr)
@@ -109,7 +114,15 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 				continue
 			}
 			for _, e := range rowGf.Replacements {
-				if e.Destination == dest && e.DestSeq > maxOwn {
+				if e.Destination != dest {
+					continue
+				}
+				// Newer owner above the op's chain: climbing over it corrupts.
+				// Foreign entry INTERLEAVED inside the op's own chain: restoring
+				// the chain would cross that entry's still-applied bytes
+				// (codex P3 R3-1) — a foreign entry strictly inside
+				// (minOwn, maxOwn) must reject exactly as a newer one does.
+				if e.DestSeq > minOwn {
 					return restored, &NewerAppliedDestError{Destination: dest, NewerOpID: row.ID, NewerMovieID: row.MovieID}
 				}
 			}

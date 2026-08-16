@@ -233,11 +233,11 @@ func mergeReplacementLedger(logger logging.Logger, priorRaw, newRaw string) stri
 		return newRaw
 	}
 	prior, err := models.ParseGeneratedFiles(priorRaw)
-	if err != nil || len(prior.Replacements) == 0 {
+	if err != nil || (len(prior.Replacements) == 0 && len(prior.Roots) == 0) {
 		return newRaw
 	}
 	if newRaw == "" {
-		data, mErr := json.Marshal(models.GeneratedFilesJSON{Replacements: prior.Replacements})
+		data, mErr := json.Marshal(models.GeneratedFilesJSON{Replacements: prior.Replacements, Roots: prior.Roots})
 		if mErr != nil {
 			logger.Warnf("Failed to marshal replacement-only generatedFilesJSON: %v", mErr)
 			return newRaw
@@ -249,6 +249,9 @@ func mergeReplacementLedger(logger logging.Logger, priorRaw, newRaw string) stri
 		return newRaw
 	}
 	fresh.Replacements = prior.Replacements
+	if len(fresh.Roots) == 0 {
+		fresh.Roots = prior.Roots
+	}
 	data, mErr := json.Marshal(fresh)
 	if mErr != nil {
 		logger.Warnf("Failed to re-marshal merged generatedFilesJSON: %v", mErr)
@@ -318,11 +321,19 @@ func (l *dbRevertLog) Begin(ctx context.Context, cmd ApplyCmd) (OperationID, err
 
 	// write the DB record without NFO snapshot.
 	// CaptureSnapshot will fill in the snapshot content separately.
+	// Seed the discovery root NOW, pre-mutation: the row must name where
+	// downloads will land even if the process dies before any journal entry
+	// exists (codex P3 R3-3 — the pre-journal crash window).
+	seed, _ := json.Marshal(models.GeneratedFilesJSON{Roots: []string{cmd.DestPath}})
+	if cmd.DestPath == "" {
+		seed = nil
+	}
 	preRecord := newPreOrganizeRecord(
 		l.jobID, cmd.Movie.ID, cmd.Match.Path,
 		"", "", sourceDir, // no snapshot yet
 		opType, false,
 	)
+	preRecord.GeneratedFiles = string(seed)
 	if err := l.repo.Create(ctx, preRecord); err != nil {
 		return "", fmt.Errorf("revert log Begin failed: %w", err)
 	}
