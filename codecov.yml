@@ -40,6 +40,10 @@ ignore:
   - "web/**"
   # Vendored deps that ship Go files (e.g. flatted/golang).
   - "**/node_modules/**"
+  # mockery-generated mocks — regenerated wholesale on every interface
+  # change; their bodies have no testable behavior (CI's make check-mocks
+  # guards freshness instead).
+  - "internal/mocks/**"
 
 comment:
   layout: "reach,diff,flags,files"

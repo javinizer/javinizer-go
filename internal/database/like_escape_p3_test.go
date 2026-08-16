@@ -113,3 +113,24 @@ func TestFallbackSeam_UnionDeduplicatesMixedSpellings(t *testing.T) {
 		require.True(t, ids[7] && ids[9], "deduped union of prefilter + normalized scan")
 	}
 }
+
+// A dead DB surfaces a query error, not a fake empty result.
+func TestFindOperationsByDestination_QueryError(t *testing.T) {
+	db, err := New(&Config{Type: "sqlite", DSN: ":memory:", LogLevel: "error"})
+	require.NoError(t, err)
+	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
+	repo := NewBatchFileOperationRepository(db)
+	require.NoError(t, db.Close())
+
+	_, qerr := repo.FindOperationsByDestination(context.Background(), "/x/poster.jpg")
+	require.Error(t, qerr)
+
+	db2, err := New(&Config{Type: "sqlite", DSN: ":memory:", LogLevel: "error"})
+	require.NoError(t, err)
+	defer func() { _ = db2.Close() }()
+	require.NoError(t, db2.RunMigrationsOnStartup(context.Background()))
+	repo2 := NewBatchFileOperationRepository(db2)
+	require.NoError(t, db2.Close())
+	_, qerr = repo2.FindOperationsWithLedger(context.Background())
+	require.Error(t, qerr)
+}

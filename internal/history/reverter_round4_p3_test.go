@@ -419,3 +419,132 @@ func TestSweep_ConsumeFromLiveRow_PreservesConcurrentEntry(t *testing.T) {
 	require.Len(t, gf.Replacements, 1, "concurrent entry survived the consumption update")
 	require.Equal(t, dest2, gf.Replacements[0].Destination)
 }
+
+// Sweep index failure must surface rather than scan nothing.
+func TestSweep_IndexErrorPropagates(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	repo := newP3OpRepo()
+	broken := &errIdxRepo{p3OpRepo: repo, err: errors.New("scan down")}
+	_, err := NewReplacementSweeper(fs, broken).Sweep(context.Background())
+	require.Error(t, err)
+}
+
+type errIdxRepo struct {
+	*p3OpRepo
+	err error
+}
+
+func (m *errIdxRepo) FindOperationsWithReplacements(context.Context) ([]models.BatchFileOperation, error) {
+	return nil, m.err
+}
+
+// Live-row disappearance between owner classification and consumption:
+// restore is undone; backup kept; nothing bleeds.
+func TestSweepOne_LiveRowGone_RestoreUndone(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	repo := newP3OpRepo()
+	ctx := context.Background()
+
+	dest := "/out/LGD/poster.jpg"
+	backup := dest + ".dlbak.0123456789abcdef"
+	require.NoError(t, fs.MkdirAll("/out/LGD", config.DirPerm))
+	require.NoError(t, afero.WriteFile(fs, backup, []byte("old"), config.FilePerm))
+	backdate(t, fs, backup)
+
+	raw, _ := json.Marshal(models.GeneratedFilesJSON{Replacements: []models.ReplacementEntry{
+		{Destination: dest, Backup: backup, DestSeq: 1},
+	}})
+	op := &models.BatchFileOperation{
+		BatchJobID: "job-1", MovieID: "LGD-001", OriginalPath: "/src/lgd.mkv",
+		OperationType: models.OperationTypeUpdate, GeneratedFiles: string(raw),
+		RevertStatus: models.RevertStatusApplied,
+	}
+	require.NoError(t, repo.Create(ctx, op))
+
+	// Row vanishes between index build and consumption.
+	goneRepo := &rowGoneRepo{p3OpRepo: repo, goneID: op.ID}
+	s := NewReplacementSweeper(fs, goneRepo)
+	staleIdx := &replacementLedgerIndex{
+		journaled: map[string]*models.BatchFileOperation{sweepSlash(backup): op},
+		dirs:      map[string]bool{"/out/LGD": true},
+	}
+	info, err := fs.Stat(backup)
+	require.NoError(t, err)
+	got := s.sweepOne(ctx, staleIdx, "/out/LGD", info)
+	require.Equal(t, 0, got)
+	exists, _ := afero.Exists(fs, backup)
+	require.True(t, exists, "row gone = backup kept for a later sweep")
+	exists, _ = afero.Exists(fs, dest)
+	require.False(t, exists, "restore undone when the live row is unreadable")
+}
+
+type rowGoneRepo struct {
+	*p3OpRepo
+	goneID uint
+}
+
+func (m *rowGoneRepo) FindByID(ctx context.Context, id uint) (*models.BatchFileOperation, error) {
+	if id == m.goneID {
+		return nil, errors.New("not found")
+	}
+	return m.p3OpRepo.FindByID(ctx, id)
+}
+
+// Targeted pre-revert sweep over named destinations.
+func TestSweepDestinations_TargetedHandling(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	repo := newP3OpRepo()
+	ctx := context.Background()
+
+	dest := "/out/TGT/poster.jpg"
+	backup := dest + ".dlbak.0123456789abcdef"
+	otherDest := "/out/OTHER/poster.jpg"
+	otherBackup := otherDest + ".dlbak.fedcba9876543210"
+	require.NoError(t, fs.MkdirAll("/out/TGT", config.DirPerm))
+	require.NoError(t, fs.MkdirAll("/out/OTHER", config.DirPerm))
+	require.NoError(t, afero.WriteFile(fs, backup, []byte("target-old"), config.FilePerm))
+	require.NoError(t, afero.WriteFile(fs, otherBackup, []byte("other-old"), config.FilePerm))
+	backdate(t, fs, backup)
+	backdate(t, fs, otherBackup)
+
+	raw, _ := json.Marshal(models.GeneratedFilesJSON{Roots: []string{"/out/TGT", "/out/OTHER"}})
+	op := &models.BatchFileOperation{
+		BatchJobID: "job-1", MovieID: "TGT-001", OriginalPath: "/src/tgt.mkv",
+		OperationType: models.OperationTypeUpdate, GeneratedFiles: string(raw),
+		RevertStatus: models.RevertStatusApplied,
+	}
+	require.NoError(t, repo.Create(ctx, op))
+
+	// Named-destination sweep handles only its own dir.
+	healed, err := NewReplacementSweeper(fs, repo).SweepDestinations(ctx, []string{dest})
+	require.NoError(t, err)
+	require.Equal(t, 1, healed)
+	require.Equal(t, "target-old", string(mustRead2(t, fs, dest)))
+	exists, _ := afero.Exists(fs, otherBackup)
+	require.True(t, exists, "other directory untouched by the targeted sweep")
+}
+
+// young-modtime skip never touches the file.
+func TestSweepOne_ModtimeFresh_Skips(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	repo := newP3OpRepo()
+	ctx := context.Background()
+	dest := "/out/YG/poster.jpg"
+	backup := dest + ".dlbak.0123456789abcdef"
+	require.NoError(t, fs.MkdirAll("/out/YG", config.DirPerm))
+	s0 := NewReplacementSweeper(fs, repo) // process start stamp BEFORE the write
+	require.NoError(t, afero.WriteFile(fs, backup, []byte("young"), config.FilePerm))
+	// The file is written after the sweeper's start → treated as in-flight.
+
+	raw, _ := json.Marshal(models.GeneratedFilesJSON{Roots: []string{"/out/YG"}})
+	op := &models.BatchFileOperation{
+		BatchJobID: "job-1", MovieID: "YG-001", OriginalPath: "/src/yg.mkv",
+		OperationType: models.OperationTypeUpdate, GeneratedFiles: string(raw),
+		RevertStatus: models.RevertStatusApplied,
+	}
+	require.NoError(t, repo.Create(ctx, op))
+
+	healed, err := s0.Sweep(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 0, healed)
+}

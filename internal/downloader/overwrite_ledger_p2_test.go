@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -365,6 +366,16 @@ func TestDownload_ConfirmAndReleaseBothFail_BackupSurvivesRollback(t *testing.T)
 	assert.Equal(t, old, data)
 }
 
+// stagedWedgeFS fails OpenFile on downloader restore-staging paths.
+type stagedWedgeFS struct{ afero.Fs }
+
+func (f stagedWedgeFS) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
+	if strings.Contains(name, ".dlrstr.") {
+		return nil, errors.New("staged wedge")
+	}
+	return f.Fs.OpenFile(name, flag, perm)
+}
+
 type confirmAndReleaseFailingLedger struct {
 	*armedTestLedger
 	err error
@@ -375,4 +386,28 @@ func (l *confirmAndReleaseFailingLedger) ConfirmReplacement(context.Context, str
 }
 func (l *confirmAndReleaseFailingLedger) ReleaseReplacement(context.Context, string, string, string) error {
 	return l.err
+}
+
+// copyBackupToDest never masks unreadable sources.
+func TestCopyBackupToDest_ErrorsSurface(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	require.Error(t, copyBackupToDest(fs, "/missing.backup", "/dest"))
+
+	require.NoError(t, afero.WriteFile(fs, "/b.bin", []byte("x"), 0o644))
+	wedged := stagedWedgeFS{Fs: afero.NewMemMapFs()}
+	require.NoError(t, afero.WriteFile(wedged, "/b.bin", []byte("x"), 0o644))
+	require.Error(t, copyBackupToDest(wedged, "/b.bin", "/d"), "staged-open failure surfaces")
+	// The staged artifact is cleaned up on error.
+	entries, _ := afero.ReadDir(wedged, "/")
+	for _, e := range entries {
+		require.NotContains(t, e.Name(), ".dlrstr.", "staged residue after copy failure")
+	}
+}
+
+func TestBackupPathFormat(t *testing.T) {
+	p1 := overwriteBackupPath("/a/poster.jpg", "op-1")
+	p2 := overwriteBackupPath("/a/poster.jpg", "op-1")
+	require.NotEqual(t, p1, p2, "same-op repeats never collide")
+	require.Contains(t, p1, ".dlbak.")
+	require.NotContains(t, p1, "op-1", "opIDs never leak as path segments")
 }

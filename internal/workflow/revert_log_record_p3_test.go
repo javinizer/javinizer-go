@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/database"
+	"github.com/javinizer/javinizer-go/internal/downloader"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
@@ -359,4 +360,164 @@ func (f *failUpdateBFORepo) FindOperationsWithReplacements(ctx context.Context) 
 }
 func (f *failUpdateBFORepo) FindOperationsWithLedger(ctx context.Context) ([]models.BatchFileOperation, error) {
 	return f.repo.FindOperationsWithLedger(ctx)
+}
+
+// codex P3 R12-2 gate at the orchestrator: overwrite runs refuse to
+// download when the leaf discovery root can't be persisted.
+func TestStepDownload_SeedFailureBlocksOverwriteOnly(t *testing.T) {
+	db, repo, goodLog := newP3RecorderHarness(t, ":memory:")
+	defer func() { _ = db.Close() }()
+	ctx := context.Background()
+	opID, err := goodLog.Begin(ctx, ApplyCmd{
+		Movie:    &models.Movie{ID: "GATE-1"},
+		Match:    models.FileMatchInfo{Path: "/src/gate.mkv"},
+		DestPath: "/out",
+	})
+	require.NoError(t, err)
+
+	flaky := &failUpdateBFORepo{repo: repo, err: errors.New("outage")}
+	broken := NewDBRevertLog(flaky, NewRevertLogConfig(true, nil), "job-x", afero.NewMemMapFs(), nil, nil, nil)
+	capture := &capturingDownloader{outcome: &downloader.DownloadOutcome{}}
+	o := &applyOrchImpl{downloader: capture, revertLog: broken}
+	state := &applyPipelineState{movie: &models.Movie{ID: "GATE-1"}, finalDir: "/out/leaf"}
+
+	// Destructive run + unpersistable seed → refused.
+	err = o.stepDownload(ctx, ApplyCmd{Movie: state.movie, Match: models.FileMatchInfo{Path: "/src/gate.mkv"}, Download: true, OverwriteExistingMedia: true}, opID, state, &stepCompletion{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "discovery-root seed")
+
+	// Non-destructive run proceeds despite the seed failure (download is
+	// create-only in that mode).
+	err = o.stepDownload(ctx, ApplyCmd{Movie: state.movie, Match: models.FileMatchInfo{Path: "/src/gate.mkv"}, Download: true, OverwriteExistingMedia: false}, opID, state, &stepCompletion{})
+	require.NoError(t, err)
+
+	// Healthy log passes both modes.
+	flaky.err = nil
+	healthy := &applyOrchImpl{downloader: capture, revertLog: goodLog}
+	err = healthy.stepDownload(ctx, ApplyCmd{Movie: state.movie, Match: models.FileMatchInfo{Path: "/src/gate.mkv"}, Download: true, OverwriteExistingMedia: true}, opID, state, &stepCompletion{})
+	require.NoError(t, err)
+}
+
+func TestRevertLog_ErrorLegs(t *testing.T) {
+	db, repo, rl := newP3RecorderHarness(t, ":memory:")
+	defer func() { _ = db.Close() }()
+	ctx := context.Background()
+	dest := "/dst/ERR/poster.jpg"
+
+	require.Error(t, rl.RecordReplacement(ctx, "", dest, dest+".b"), "empty opID")
+	require.Error(t, rl.RecordReplacement(ctx, "not-a-number", dest, dest+".b"), "unparsable")
+	require.Error(t, rl.RecordReplacement(ctx, "424242", dest, dest+".b"), "unmatched row")
+
+	require.Error(t, rl.ReleaseReplacement(ctx, "", dest, dest+".b"))
+	require.Error(t, rl.ReleaseReplacement(ctx, "nan", dest, dest+".b"))
+
+	require.Error(t, rl.ConfirmReplacement(ctx, "", dest, dest+".b"))
+	require.Error(t, rl.ConfirmReplacement(ctx, "nan", dest, dest+".b"))
+
+	dbl := rl.(*dbRevertLog)
+	require.NoError(t, dbl.seedRoot(ctx, "", "/x"))
+	require.NoError(t, dbl.seedRoot(ctx, "nan", "/x"))
+	require.NoError(t, dbl.seedRoot(ctx, "0", "/x")) // recordID 0 → early nil
+	require.NoError(t, dbl.seedRoot(ctx, "424242", ""))
+	require.Error(t, dbl.seedRoot(ctx, "424242", "/x"), "missing row surfaces")
+
+	// Malformed persisted ledger bodies surface on the mutators.
+	opID := beginP3Op(t, rl, "ERR-001")
+	row, err := repo.FindByID(ctx, uintFromOpID(t, opID))
+	require.NoError(t, err)
+	row.GeneratedFiles = `{"replacements":definitely-not-json`
+	require.NoError(t, repo.Update(ctx, row))
+	require.Error(t, rl.RecordReplacement(ctx, opID, dest, dest+".b"))
+	require.Error(t, rl.ReleaseReplacement(ctx, opID, dest, dest+".b"))
+	require.Error(t, rl.ConfirmReplacement(ctx, opID, dest, dest+".b"))
+}
+
+func uintFromOpID(t *testing.T, opID OperationID) uint {
+	t.Helper()
+	var id uint
+	_, err := fmt.Sscanf(opID, "%d", &id)
+	require.NoError(t, err)
+	return id
+}
+
+// CaptureSnapshot's defensive legs run without panicking on every row state.
+func TestCaptureSnapshot_ErrorLegs(t *testing.T) {
+	db, repo, rl := newP3RecorderHarness(t, ":memory:")
+	defer func() { _ = db.Close() }()
+	ctx := context.Background()
+
+	cmd := ApplyCmd{
+		Movie: &models.Movie{ID: "CS-001"},
+		Match: models.FileMatchInfo{Path: "/src/cs.mkv"},
+	}
+	// Empty opID, malformed opID, missing row, healthy row.
+	rl.CaptureSnapshot(ctx, "", cmd)
+	rl.CaptureSnapshot(ctx, "not-a-number", cmd)
+	rl.CaptureSnapshot(ctx, "31337", cmd)
+	opID := beginP3Op(t, rl, "CS-001")
+	rl.CaptureSnapshot(ctx, opID, cmd)
+	row, err := repo.FindByID(ctx, uintFromOpID(t, opID))
+	require.NoError(t, err)
+	require.NotNil(t, row)
+}
+
+// Repo FindByID failures surface on every mutator; non-numeric/missing rows too.
+func TestRevertLog_RepoFailureLegs(t *testing.T) {
+	db, repo, rl := newP3RecorderHarness(t, ":memory:")
+	defer func() { _ = db.Close() }()
+	ctx := context.Background()
+
+	opID := beginP3Op(t, rl, "FL-001")
+	dest := "/dst/FL/poster.jpg"
+	require.NoError(t, rl.RecordReplacement(ctx, opID, dest, dest+".b"))
+
+	flaky := &failUpdateBFORepo{repo: repo, err: errors.New("find wedged")}
+	broken := NewDBRevertLog(flaky, NewRevertLogConfig(true, nil), "job-x", afero.NewMemMapFs(), nil, nil, nil)
+	opIDStr := opID
+
+	// update-failure legs on all three mutators against a VALID row.
+	require.Error(t, broken.RecordReplacement(ctx, opIDStr, dest, dest+".c"))
+	require.Error(t, broken.ReleaseReplacement(ctx, opIDStr, dest, dest+".b"))
+	require.Error(t, broken.ConfirmReplacement(ctx, opIDStr, dest, dest+".b"))
+	require.Error(t, broken.(*dbRevertLog).seedRoot(ctx, opIDStr, "/out/z"))
+
+	// nextDestSequence on a repo whose destination scan fails.
+	flaky2 := &failDestScanRepo{BatchFileOperationRepositoryInterface: database.BatchFileOperationRepositoryInterface(repo), err: errors.New("scan wedged")}
+	broken2 := NewDBRevertLog(flaky2, NewRevertLogConfig(true, nil), "job-x", afero.NewMemMapFs(), nil, nil, nil)
+	require.Error(t, broken2.RecordReplacement(ctx, opIDStr, dest, dest+".d"))
+}
+
+type failDestScanRepo struct {
+	database.BatchFileOperationRepositoryInterface
+	err error
+}
+
+func (f *failDestScanRepo) FindOperationsByDestination(context.Context, string) ([]models.BatchFileOperation, error) {
+	return nil, f.err
+}
+
+// mergeReplacementLedger fallbacks: unparseable prior wins nothing; empty new
+// turns replacement-only; appendLedgerRoot on unparseable stays.
+func TestRevertLog_MergeFallbacks(t *testing.T) {
+	db, repo, rl := newP3RecorderHarness(t, ":memory:")
+	defer func() { _ = db.Close() }()
+	ctx := context.Background()
+
+	opID := beginP3Op(t, rl, "MG-001")
+	dest := "/dst/MG/poster.jpg"
+	require.NoError(t, rl.RecordReplacement(ctx, opID, dest, dest+".b"))
+
+	// Complete with EMPTY result payloads (no NFO, no downloads) → ledger
+	// payload keeps just the journal.
+	require.NoError(t, rl.Complete(ctx, opID, &ApplyResult{Movie: &models.Movie{ID: "MG-001"}}))
+	gf := p3Ledger(t, repo, opID)
+	require.Len(t, gf.Replacements, 1)
+	require.Empty(t, gf.Delete)
+
+	// Unparseable prior ledger degrades to the fresh payload.
+	row, err := repo.FindByID(ctx, uintFromOpID(t, opID))
+	require.NoError(t, err)
+	row.GeneratedFiles = `definitely-broken`
+	require.NoError(t, repo.Update(ctx, row))
+	require.Error(t, rl.RecordReplacement(ctx, opID, dest+"2", dest+"2.b"))
 }
