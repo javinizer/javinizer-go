@@ -148,6 +148,15 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 // row's ledger and persists it. The in-memory op is updated too so the
 // cleanup that follows sees the post-restore journal.
 func (r *Reverter) consumeReplacementEntry(ctx context.Context, op *models.BatchFileOperation, entry models.ReplacementEntry) error {
+	// R15-1: serialize with every other row mutator and consume from the
+	// FRESH row — never from a possibly-stale snapshot.
+	release := fsutil.SharedJournalLocks().Acquire(fmt.Sprintf("%d", op.ID))
+	defer release()
+	fresh, frErr := r.batchFileOpRepo.FindByID(ctx, op.ID)
+	if frErr != nil || fresh == nil {
+		return fmt.Errorf("failed to re-read row for consumption on op %d: %v", op.ID, frErr)
+	}
+	op = fresh
 	gf, err := models.ParseGeneratedFiles(op.GeneratedFiles)
 	if err != nil {
 		return fmt.Errorf("failed to re-parse journal for consumption on op %d: %w", op.ID, err)

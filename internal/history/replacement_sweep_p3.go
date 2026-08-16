@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -302,25 +303,50 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 		logging.Warnf("replacement sweep restore %s→%s: %v", backup, dest, rnErr)
 		return false
 	}
-	gf, err := models.ParseGeneratedFiles(row.GeneratedFiles)
+
+	// R15-1: consume from a row re-read under the shared journal lock — an
+	// index-time snapshot can overwrite an entry recorded or confirmed
+	// meanwhile. Lock order dest→journal matches the reverter's consumption.
+	undoRestore := func() {
+		if rmErr := s.fs.Remove(dest); rmErr != nil {
+			logging.Warnf("replacement sweep %s: restore undo failed: %v", backup, rmErr)
+		}
+	}
+	jrel := fsutil.SharedJournalLocks().Acquire(strconv.Itoa(int(row.ID)))
+	defer jrel()
+	liveRow, lErr := s.repo.FindByID(ctx, row.ID)
+	if lErr != nil || liveRow == nil {
+		undoRestore()
+		return false
+	}
+	gf, err := models.ParseGeneratedFiles(liveRow.GeneratedFiles)
 	if err != nil {
-		logging.Warnf("replacement sweep: journal re-parse failed for op %d: %v", row.ID, err)
-		return true // bytes restored; entry consumption retried next sweep
+		undoRestore()
+		return false
 	}
 	kept := gf.Replacements[:0]
+	removedSelf := false
 	for _, rep := range gf.Replacements {
 		if sweepSlash(rep.Backup) == sweepSlash(backup) {
+			removedSelf = true
 			continue
 		}
 		kept = append(kept, rep)
 	}
+	if !removedSelf {
+		// Already consumed (e.g. a reverter raced us) — clean the backup and
+		// count the restore done.
+		_ = s.fs.Remove(backup)
+		return true
+	}
 	gf.Replacements = kept
 	data, mErr := json.Marshal(gf)
 	if mErr != nil {
-		return true
+		undoRestore()
+		return false
 	}
-	row.GeneratedFiles = string(data)
-	if uErr := s.repo.Update(ctx, row); uErr != nil {
+	liveRow.GeneratedFiles = string(data)
+	if uErr := s.repo.Update(ctx, liveRow); uErr != nil {
 		// R9-2: the repair is NOT complete while the entry persists. Undo the
 		// restore (the destination was proven missing pre-restore) so the next
 		// sweep reproduces the same state exactly — a lingering armed entry

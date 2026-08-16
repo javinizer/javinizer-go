@@ -589,10 +589,11 @@ func (l *dbRevertLog) CompleteFailed(ctx context.Context, opID OperationID, resu
 	return nil
 }
 
-// replacementLedgerLocks serializes RecordReplacement appends per operation row
-// so concurrent downloader goroutines journaling onto one row never lose an
-// append (load-modify-write under the keyed lock).
-var replacementLedgerLocks = fsutil.NewKeyedLockRegistry()
+// replacementLedgerLocks serializes read-modify-writes per operation row
+// across every ledger mutation (record/release/confirm/seed/complete) and
+// the sweeper's consumption — ALL parties hold the SAME process registry
+// (codex P3 R15-1).
+var replacementLedgerLocks = fsutil.SharedJournalLocks()
 
 // RecordReplacement journals one replaced byte pair onto the operation row.
 // The caller (downloader installOverwriting) already holds the

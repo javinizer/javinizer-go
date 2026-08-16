@@ -329,19 +329,24 @@ func TestRevert_MoveBackFailure_LeavesOperationApplied(t *testing.T) {
 
 func TestCleanupGeneratedFiles_MoveBackBeforeDelete_NoClobber(t *testing.T) {
 	f := newP3Fixture()
-	// The apply recorded the replaced destination on the delete list (it was a
-	// downloaded path). Revert restores the original bytes there FIRST and
-	// subtracts the path from the sweep — deleting it would clobber the revert.
+	// codex R15-2 model: delete-list membership proves the op CREATED this
+	// path (CreatedPaths excludes replaced destinations). A create-then-
+	// replace chain inside one op unwinds to NOTHING pre-existing: the
+	// journaled backup holds THIS op's intermediate bytes, and the revert
+	// winds the whole chain away.
 	_, dest := f.addAppliedOp(t, "job-1", "MBD-001", true, "new-poster", p3Replacement{seq: 1, backupBytes: "original-poster"})
 
 	r := NewReverter(f.fs, f.repo)
 	res, err := r.RevertBatch(context.Background(), "job-1")
 	require.NoError(t, err)
 	require.Equal(t, 1, res.Succeeded)
-	require.Equal(t, "original-poster", p3ReadFile(t, f.fs, dest),
-		"restored destination must survive the generated-files sweep")
 
-	exists, err := afero.Exists(f.fs, "/dst/MBD-001/extra-info.txt")
+	exists, err := afero.Exists(f.fs, dest)
+	require.NoError(t, err)
+	require.False(t, exists,
+		"op-created chain fully unwinds — nothing pre-existed at this destination")
+
+	exists, err = afero.Exists(f.fs, "/dst/MBD-001/extra-info.txt")
 	require.NoError(t, err)
 	require.False(t, exists, "non-restored delete-list entries still sweep")
 }

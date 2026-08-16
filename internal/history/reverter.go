@@ -471,10 +471,14 @@ func cleanupGeneratedFilesFS(fs afero.Fs, op *models.BatchFileOperation, stopAt 
 	// Track parent directories of deleted files for cleanup
 	dirsToCheck := make(map[string]bool)
 	// Delete files in the Delete array (best-effort — skip IsNotExist).
-	// Paths restored by the replacement journal are subtracted — they now hold
-	// pre-apply bytes; deleting them would silently clobber the revert.
+	// R15-2: a restored path is subtracted ONLY when it was a genuine
+	// pre-existing replacement. The delete list is populated from
+	// op-CREATED paths (CreatedPaths excludes replaced destinations), so a
+	// journaled destination ON it means the op created-then-replaced the file
+	// within one run — nothing pre-existed; the whole chain unwinds to absent
+	// and the path must still be deleted.
 	for _, path := range gf.Delete {
-		if subtract[path] {
+		if subtract[path] && !isOpCreatedDestination(gf, path) {
 			continue
 		}
 		if err := fs.Remove(path); err != nil && !os.IsNotExist(err) {
@@ -500,6 +504,18 @@ func cleanupGeneratedFilesFS(fs afero.Fs, op *models.BatchFileOperation, stopAt 
 		}
 		cleanupEmptyDirDownwardFS(fs, cleanDir, stopAt)
 	}
+}
+
+// isOpCreatedDestination reports whether the delete-list membership means
+// the path was created by this operation (R15-2): the ledger's create half
+// is authoritative pre-revert.
+func isOpCreatedDestination(gf models.GeneratedFilesJSON, path string) bool {
+	for _, d := range gf.Delete {
+		if d == path {
+			return true
+		}
+	}
+	return false
 }
 
 // isDescendant checks if path is inside parentDir (or equal to it).

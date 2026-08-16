@@ -109,6 +109,15 @@ func (r *KeyedLockRegistry) AcquireMany(keys []string) func() {
 	}
 }
 
+// sharedJournalLocks serializes read-modify-write mutation of one journal
+// ROW across the workflow recorder, the reverter's consumption, and the
+// sweeper (codex P3 R15-1): a sweeper updating a row snapshot from an
+// index-time read could otherwise erase entries confirmed meanwhile.
+var sharedJournalLocks = NewKeyedLockRegistry()
+
+// SharedJournalLocks returns the process-wide per-operation-row journal registry.
+func SharedJournalLocks() *KeyedLockRegistry { return sharedJournalLocks }
+
 // sharedDestLocks is the process-wide destination lock registry shared by
 // the downloader's overwrite discipline and the history reverter's restore
 // path (POSTER-WRITE-HARDENING P3 D8).

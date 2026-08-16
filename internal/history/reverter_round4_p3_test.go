@@ -365,3 +365,57 @@ func TestSweep_MarkerInfixDestination_BackupFound(t *testing.T) {
 	require.Equal(t, 1, healed)
 	require.Equal(t, "pre", string(mustRead2(t, fs, dest)))
 }
+
+// codex P3 R15-1: consumption reads the row FRESH under the shared journal
+// lock — entries recorded after the index snapshot survived the consume
+// update.
+func TestSweep_ConsumeFromLiveRow_PreservesConcurrentEntry(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	repo := newP3OpRepo()
+	ctx := context.Background()
+
+	dest1 := "/out/DRF/poster.jpg"
+	dest2 := "/out/DRF/fanart.jpg"
+	backup1 := dest1 + ".dlbak.0123456789abcdef"
+	backup2 := dest2 + ".dlbak.fedcba9876543210"
+	require.NoError(t, fs.MkdirAll("/out/DRF", config.DirPerm))
+	require.NoError(t, afero.WriteFile(fs, backup1, []byte("old-1"), config.FilePerm))
+	backdate(t, fs, backup1)
+
+	// The live row journals TWO entries; the sweeper's member for
+	// arbitration is a STALE snapshot carrying only the first one.
+	mk := func(entries ...models.ReplacementEntry) string {
+		raw, err := json.Marshal(models.GeneratedFilesJSON{Replacements: entries})
+		require.NoError(t, err)
+		return string(raw)
+	}
+	op := &models.BatchFileOperation{
+		BatchJobID: "job-1", MovieID: "DRF-001", OriginalPath: "/src/drf.mkv",
+		OperationType: models.OperationTypeUpdate,
+		GeneratedFiles: mk(
+			models.ReplacementEntry{Destination: dest1, Backup: backup1, DestSeq: 1},
+			models.ReplacementEntry{Destination: dest2, Backup: backup2, DestSeq: 1},
+		),
+		RevertStatus: models.RevertStatusApplied,
+	}
+	require.NoError(t, repo.Create(ctx, op))
+	stale := *op
+	stale.GeneratedFiles = mk(models.ReplacementEntry{Destination: dest1, Backup: backup1, DestSeq: 1})
+
+	s := NewReplacementSweeper(fs, repo)
+	staleIdx := &replacementLedgerIndex{
+		journaled: map[string]*models.BatchFileOperation{sweepSlash(backup1): &stale},
+		dirs:      map[string]bool{"/out/DRF": true},
+	}
+	info, err := fs.Stat(backup1)
+	require.NoError(t, err)
+	got := s.sweepOne(ctx, staleIdx, "/out/DRF", info)
+	require.Equal(t, 1, got, "crash-window restore completes (armed + dest-missing)")
+
+	row, err := repo.FindByID(ctx, op.ID)
+	require.NoError(t, err)
+	gf, err := models.ParseGeneratedFiles(row.GeneratedFiles)
+	require.NoError(t, err)
+	require.Len(t, gf.Replacements, 1, "concurrent entry survived the consumption update")
+	require.Equal(t, dest2, gf.Replacements[0].Destination)
+}
