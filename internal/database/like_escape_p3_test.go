@@ -81,3 +81,26 @@ func TestFallbackSeam_CaseVariantDestinationMatches(t *testing.T) {
 		require.Equal(t, 1, scanCalls, "prefilter miss fell back to the full scan")
 	}
 }
+
+// codex P3 R14-1: a partial prefilter hit (caller's spelling journaled) must
+// NOT hide differently-spelled rows owning the SAME destination — the seam
+// unions both sources.
+func TestFallbackSeam_UnionDeduplicatesMixedSpellings(t *testing.T) {
+	backslash := `{"replacements":[{"destination":"C:\\Media\\poster.jpg","backup":"C:\\Media\\poster.jpg.dlbak.aaaaaaaaaaaaaaaa","dest_seq":1}]}`
+	slash := `{"replacements":[{"destination":"C:/Media/poster.jpg","backup":"C:/Media/poster.jpg.dlbak.bbbbbbbbbbbbbbbb","dest_seq":2}]}`
+	candBackslash := models.BatchFileOperation{ID: 7, MovieID: "CV-BS", GeneratedFiles: backslash}
+	candSlash := models.BatchFileOperation{ID: 9, MovieID: "CV-SL", GeneratedFiles: slash}
+
+	helper := fallbackSeam{}
+	query := `C:/Media/poster.jpg` // slash-form query — the SQL prefilter (raw form) misses all
+	matched, err := helper.finish(context.Background(), []models.BatchFileOperation{candBackslash}, query, fsutil.DestKey, func(context.Context) ([]models.BatchFileOperation, error) {
+		return []models.BatchFileOperation{candBackslash, candSlash}, nil
+	})
+	require.NoError(t, err)
+	require.Len(t, matched, 2, "both spellings of one destination must remain visible")
+	ids := map[uint]bool{}
+	for _, op := range matched {
+		ids[op.ID] = true
+	}
+	require.True(t, ids[7] && ids[9], "deduped union of prefilter + normalized scan")
+}

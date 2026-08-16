@@ -205,15 +205,26 @@ type fallbackSeam struct{}
 
 func (fallbackSeam) finish(ctx context.Context, candidates []models.BatchFileOperation, destination string, norm func(string) string, ledgerScan func(context.Context) ([]models.BatchFileOperation, error)) ([]models.BatchFileOperation, error) {
 	matched := matchOpsByDestination(candidates, destination, norm)
-	if len(matched) != 0 {
-		return matched, nil
-	}
-	// R10-1: the caller's context (cancellation/deadline) rides the fallback.
+	// R14-1 + R10-1: ALWAYS union the normalized full scan — the SQL
+	// prefilter keys on the caller's spelling, so a same-destination row
+	// journaled under a DIFFERENT-but-equivalent spelling can hide behind a
+	// partial prefilter hit and vanish from chain checks. Caller context
+	// (deadline) rides the scan; scan failures surface, never masquerade.
 	fallback, ferr := ledgerScan(ctx)
 	if ferr != nil {
 		return nil, wrapDBErr("find", "batch file operations by destination fallback", ferr)
 	}
-	return matchOpsByDestination(fallback, destination, norm), nil
+	seen := map[uint]bool{}
+	for i := range matched {
+		seen[matched[i].ID] = true
+	}
+	for _, op := range matchOpsByDestination(fallback, destination, norm) {
+		if !seen[op.ID] {
+			matched = append(matched, op)
+			seen[op.ID] = true
+		}
+	}
+	return matched, nil
 }
 
 // matchOpsByDestination keeps rows journaling the destination, compared under
