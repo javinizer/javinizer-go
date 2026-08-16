@@ -41,7 +41,7 @@ func TestMiss_CheckAnchor_AccessDenied(t *testing.T) {
 
 	mockRepo.On("UpdateRevertStatus", mock.Anything, uint(9070), models.RevertStatusFailed).Return(nil)
 
-	res, err := errorReverter.revertFile(context.Background(), op)
+	res, err := errorReverter.revertFile(context.Background(), op, nil)
 	require.NoError(t, err)
 	assert.Equal(t, models.RevertOutcomeFailed, res.Outcome)
 	assert.Equal(t, models.RevertReasonAccessDenied, res.Reason)

@@ -193,7 +193,7 @@ func TestCleanupGeneratedFilesFS_DeletesFiles(t *testing.T) {
 	op := &models.BatchFileOperation{
 		GeneratedFiles: string(gfJSON),
 	}
-	cleanupGeneratedFilesFS(fs, op, "/dst")
+	cleanupGeneratedFilesFS(fs, op, "/dst", nil)
 
 	_, err := fs.Stat("/dst/ABC-123.nfo")
 	assert.True(t, os.IsNotExist(err), "NFO should be deleted")
@@ -217,7 +217,7 @@ func TestCleanupGeneratedFilesFS_MoveBack(t *testing.T) {
 	op := &models.BatchFileOperation{
 		GeneratedFiles: string(gfJSON),
 	}
-	cleanupGeneratedFilesFS(fs, op, "/dst")
+	cleanupGeneratedFilesFS(fs, op, "/dst", nil)
 
 	_, err := fs.Stat("/src/sub.srt")
 	assert.NoError(t, err, "file should be moved back to original")
@@ -229,14 +229,14 @@ func TestCleanupGeneratedFilesFS_EmptyGeneratedFiles(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	op := &models.BatchFileOperation{GeneratedFiles: ""}
 	// Should be a no-op
-	cleanupGeneratedFilesFS(fs, op, "/dst")
+	cleanupGeneratedFilesFS(fs, op, "/dst", nil)
 }
 
 func TestCleanupGeneratedFilesFS_InvalidJSON(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	op := &models.BatchFileOperation{GeneratedFiles: "not-valid-json"}
 	// Should be a no-op (logs error, doesn't panic)
-	cleanupGeneratedFilesFS(fs, op, "/dst")
+	cleanupGeneratedFilesFS(fs, op, "/dst", nil)
 }
 
 func TestCleanupGeneratedFilesFS_DeletesAndCleansEmptyDirs(t *testing.T) {
@@ -252,7 +252,7 @@ func TestCleanupGeneratedFilesFS_DeletesAndCleansEmptyDirs(t *testing.T) {
 	op := &models.BatchFileOperation{
 		GeneratedFiles: string(gfJSON),
 	}
-	cleanupGeneratedFilesFS(fs, op, "/dst")
+	cleanupGeneratedFilesFS(fs, op, "/dst", nil)
 
 	_, err := fs.Stat("/dst/ABC-123/ABC-123.nfo")
 	assert.True(t, os.IsNotExist(err), "NFO should be deleted")
@@ -275,7 +275,7 @@ func TestCleanupGeneratedFilesFS_SkipsDirOutsideBatchRoot(t *testing.T) {
 		GeneratedFiles: string(gfJSON),
 	}
 	// stopAt is /dst but the file is under /other — dir cleanup should be skipped
-	cleanupGeneratedFilesFS(fs, op, "/dst")
+	cleanupGeneratedFilesFS(fs, op, "/dst", nil)
 
 	_, err := fs.Stat("/other/dir/file.nfo")
 	assert.True(t, os.IsNotExist(err), "file itself should still be deleted")
@@ -295,7 +295,7 @@ func TestCleanupGeneratedFilesFS_MissingFileSkipped(t *testing.T) {
 		GeneratedFiles: string(gfJSON),
 	}
 	// Should not panic on missing file
-	cleanupGeneratedFilesFS(fs, op, "/dst")
+	cleanupGeneratedFilesFS(fs, op, "/dst", nil)
 }
 
 // ============================================================================
@@ -1100,7 +1100,7 @@ func TestRevertFile_UpdateOperation(t *testing.T) {
 	mockRepo.On("UpdateRevertStatus", mock.Anything, uint(800), models.RevertStatusReverted).Return(nil)
 
 	r := NewReverter(fs, mockRepo)
-	result, err := r.revertFile(context.Background(), op)
+	result, err := r.revertFile(context.Background(), op, nil)
 	require.NoError(t, err)
 	assert.Equal(t, models.RevertOutcomeReverted, result.Outcome)
 	mockRepo.AssertExpectations(t)
@@ -1124,7 +1124,7 @@ func TestRevertFile_MoveOperation(t *testing.T) {
 	mockRepo.On("UpdateRevertStatus", mock.Anything, uint(801), models.RevertStatusReverted).Return(nil)
 
 	r := NewReverter(fs, mockRepo)
-	result, err := r.revertFile(context.Background(), op)
+	result, err := r.revertFile(context.Background(), op, nil)
 	require.NoError(t, err)
 	assert.Equal(t, models.RevertOutcomeReverted, result.Outcome)
 
@@ -1145,7 +1145,7 @@ func TestRevertFile_AlreadyReverted(t *testing.T) {
 		RevertStatus:  models.RevertStatusReverted,
 		OperationType: models.OperationTypeMove,
 	}
-	result, err := r.revertFile(context.Background(), op)
+	result, err := r.revertFile(context.Background(), op, nil)
 	assert.Nil(t, result)
 	assert.Equal(t, ErrBatchAlreadyReverted, err)
 }
@@ -1163,7 +1163,7 @@ func TestRevertFile_AnchorMissing(t *testing.T) {
 		OperationType: models.OperationTypeMove,
 		RevertStatus:  models.RevertStatusApplied,
 	}
-	result, err := r.revertFile(context.Background(), op)
+	result, err := r.revertFile(context.Background(), op, nil)
 	require.NoError(t, err)
 	assert.Equal(t, models.RevertOutcomeSkipped, result.Outcome)
 	assert.Equal(t, models.RevertReasonAnchorMissing, result.Reason)
@@ -1187,7 +1187,7 @@ func TestRevertFile_DBPersistFails(t *testing.T) {
 	mockRepo.On("UpdateRevertStatus", mock.Anything, uint(804), models.RevertStatusReverted).Return(errors.New("db write failed"))
 
 	r := NewReverter(fs, mockRepo)
-	result, err := r.revertFile(context.Background(), op)
+	result, err := r.revertFile(context.Background(), op, nil)
 	assert.Nil(t, result)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to persist revert status")
@@ -1216,7 +1216,7 @@ func TestRevertFile_WithNFOWarning(t *testing.T) {
 
 	errorFs := &nfoWriteErrorFs{Fs: fs}
 	r := NewReverter(errorFs, mockRepo)
-	result, err := r.revertFile(context.Background(), op)
+	result, err := r.revertFile(context.Background(), op, nil)
 	require.NoError(t, err)
 	assert.Equal(t, models.RevertOutcomeReverted, result.Outcome)
 	assert.Contains(t, result.Error, "NFO restore failed")

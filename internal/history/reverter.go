@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
@@ -75,7 +76,9 @@ type fileSystemReverter interface {
 	// revertPrimaryFile moves the primary file back to its original location.
 	revertPrimaryFile(ctx context.Context, op *models.BatchFileOperation) (*RevertFileResult, error)
 	// cleanupGeneratedFiles removes generated artifacts (NFO, images) for an operation.
-	cleanupGeneratedFiles(op *models.BatchFileOperation, stopAt string)
+	// subtract lists paths restored by the replacement journal this run — they
+	// hold pre-apply bytes and must never be swept.
+	cleanupGeneratedFiles(op *models.BatchFileOperation, stopAt string, subtract map[string]bool)
 	// cleanupEmptyDir removes empty directories, walking up to stopAt.
 	cleanupEmptyDir(dirPath string, stopAt string)
 	// restoreNFO restores the NFO snapshot for a reverted operation.
@@ -146,8 +149,8 @@ func (a *aferoFSReverter) revertPrimaryFile(ctx context.Context, op *models.Batc
 	return revertPrimaryFileFS(ctx, a.fs, a.batchFileOpRepo, op, a.cleanupEmptyDir)
 }
 
-func (a *aferoFSReverter) cleanupGeneratedFiles(op *models.BatchFileOperation, stopAt string) {
-	cleanupGeneratedFilesFS(a.fs, op, stopAt)
+func (a *aferoFSReverter) cleanupGeneratedFiles(op *models.BatchFileOperation, stopAt string, subtract map[string]bool) {
+	cleanupGeneratedFilesFS(a.fs, op, stopAt, subtract)
 }
 
 func (a *aferoFSReverter) cleanupEmptyDir(dirPath string, stopAt string) {
@@ -158,7 +161,7 @@ func (a *aferoFSReverter) restoreNFO(ctx context.Context, op *models.BatchFileOp
 	return restoreNFOFS(ctx, a.fs, a.batchFileOpRepo, op, hardFailure)
 }
 
-func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation) (*RevertFileResult, error) {
+func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation, inFlight map[uint]bool) (*RevertFileResult, error) {
 	logging.Debugf("Reverting operation %d: movie=%s type=%s original=%s new=%s revert_status=%s",
 		op.ID, op.MovieID, op.OperationType, op.OriginalPath, op.NewPath, op.RevertStatus)
 
@@ -169,15 +172,25 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 		return result, err
 	}
 
+	// P3: replay the replacement journal (reverse destination-sequence) before
+	// any generated-file cleanup. Restored content is subtracted from the
+	// delete list. Rejections and restore failures leave the row untouched
+	// (Applied / failed) so the revert can be retried in the right order.
+	restored, rejErr := r.restoreReplacementJournal(ctx, op, inFlight)
+	if rejErr != nil {
+		logging.Warnf("Replacement journal restore refused/failed for op %d: %v", op.ID, rejErr)
+		return rejectedRevert(op, rejErr.Error()), nil
+	}
+
 	isUpdate := op.OperationType == models.OperationTypeUpdate
 	if isUpdate {
-		r.fsReverter.cleanupGeneratedFiles(op, filepath.Dir(filepath.Dir(op.OriginalPath)))
+		r.fsReverter.cleanupGeneratedFiles(op, filepath.Dir(filepath.Dir(op.OriginalPath)), restored)
 	} else {
 		if result, err := r.fsReverter.revertPrimaryFile(ctx, op); result != nil || err != nil {
 			return result, err
 		}
 		destRoot := filepath.Dir(filepath.Dir(op.NewPath))
-		r.fsReverter.cleanupGeneratedFiles(op, destRoot)
+		r.fsReverter.cleanupGeneratedFiles(op, destRoot, restored)
 		if !op.InPlaceRenamed {
 			r.fsReverter.cleanupEmptyDir(filepath.Dir(op.NewPath), destRoot)
 		}
@@ -432,7 +445,7 @@ func cleanupEmptyDirFS(fs afero.Fs, dirPath string, stopAt string) {
 // After deleting files, it removes empty parent directories left behind,
 // stopping at stopAt boundary to prevent removing shared ancestor directories.
 // Best-effort: missing files are skipped (os.IsNotExist), errors don't fail the revert.
-func cleanupGeneratedFilesFS(fs afero.Fs, op *models.BatchFileOperation, stopAt string) {
+func cleanupGeneratedFilesFS(fs afero.Fs, op *models.BatchFileOperation, stopAt string, subtract map[string]bool) {
 	if op.GeneratedFiles == "" {
 		return
 	}
@@ -442,8 +455,13 @@ func cleanupGeneratedFilesFS(fs afero.Fs, op *models.BatchFileOperation, stopAt 
 	}
 	// Track parent directories of deleted files for cleanup
 	dirsToCheck := make(map[string]bool)
-	// Delete files in the Delete array (best-effort — skip IsNotExist)
+	// Delete files in the Delete array (best-effort — skip IsNotExist).
+	// Paths restored by the replacement journal are subtracted — they now hold
+	// pre-apply bytes; deleting them would silently clobber the revert.
 	for _, path := range gf.Delete {
+		if subtract[path] {
+			continue
+		}
 		if err := fs.Remove(path); err != nil && !os.IsNotExist(err) {
 			logging.Debugf("cleanupGeneratedFiles: failed to remove %s: %v", path, err)
 		}
@@ -521,11 +539,21 @@ func cleanupEmptyDirDownwardFS(fs afero.Fs, dirPath string, stopAt string) {
 // tracking per-operation outcomes. Each operation is processed independently
 // (best-effort: individual failures don't abort the batch). Returns the ordered
 // list of per-operation results.
-func (r *Reverter) revertOperations(ctx context.Context, ops []models.BatchFileOperation, revertFn func(ctx context.Context, op *models.BatchFileOperation) (*RevertFileResult, error)) []RevertFileResult {
+func (r *Reverter) revertOperations(ctx context.Context, ops []models.BatchFileOperation, revertFn func(ctx context.Context, op *models.BatchFileOperation, inFlight map[uint]bool) (*RevertFileResult, error)) []RevertFileResult {
+	// P3: operations carrying journaled replacements revert in true reverse
+	// replace order (highest destination sequence first, per-operation max).
+	// Stable sort keeps row order for un-journaled operations.
+	sort.SliceStable(ops, func(i, j int) bool {
+		return maxJournalSeq(&ops[i]) > maxJournalSeq(&ops[j])
+	})
+	inFlight := make(map[uint]bool, len(ops))
+	for i := range ops {
+		inFlight[ops[i].ID] = true
+	}
 	var outcomes []RevertFileResult
 	for i := range ops {
 		op := &ops[i]
-		res, sysErr := revertFn(ctx, op)
+		res, sysErr := revertFn(ctx, op, inFlight)
 		if sysErr != nil {
 			outcomes = append(outcomes, RevertFileResult{
 				OperationID:  op.ID,
