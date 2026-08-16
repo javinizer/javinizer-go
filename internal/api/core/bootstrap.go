@@ -90,6 +90,18 @@ func bootstrapAPIDeps(cfg *config.Config, configFile string, auth commandutil.Au
 
 	startImageCacheCleanup(rt, imageCacheCleanupOptions{})
 
+	// P3 revert-ledger sweep (startup): restore crash-windowed backups and reap
+	// orphans left by downloader overwrites. Bounded by construction (only
+	// directories holding journaled destinations are scanned) and safe to run
+	// inline — the sweep is read-mostly and destination-locked per byte move.
+	if sweeper := history.NewReplacementSweeper(fs, repos.BatchFileOpRepo); sweeper != nil {
+		if healed, err := sweeper.Sweep(context.Background()); err != nil {
+			logging.Warnf("startup replacement sweep failed: %v", err)
+		} else if healed > 0 {
+			logging.Infof("startup replacement sweep healed %d backup(s)", healed)
+		}
+	}
+
 	// Temp poster cleanup is intentionally NOT started automatically.
 	// Running CleanupStaleTempDirs on startup (or on a periodic ticker) wipes
 	// temp poster artifacts for terminal/orphaned jobs, but the DB still holds

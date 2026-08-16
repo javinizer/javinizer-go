@@ -704,6 +704,68 @@ func (_c *MockBatchFileOperationRepositoryInterface_FindOperationsByDestination_
 	return _c
 }
 
+// FindOperationsWithReplacements provides a mock function for the type MockBatchFileOperationRepositoryInterface
+func (_mock *MockBatchFileOperationRepositoryInterface) FindOperationsWithReplacements(ctx context.Context) ([]models.BatchFileOperation, error) {
+	ret := _mock.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for FindOperationsWithReplacements")
+	}
+
+	var r0 []models.BatchFileOperation
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context) ([]models.BatchFileOperation, error)); ok {
+		return returnFunc(ctx)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context) []models.BatchFileOperation); ok {
+		r0 = returnFunc(ctx)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]models.BatchFileOperation)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = returnFunc(ctx)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockBatchFileOperationRepositoryInterface_FindOperationsWithReplacements_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FindOperationsWithReplacements'
+type MockBatchFileOperationRepositoryInterface_FindOperationsWithReplacements_Call struct {
+	*mock.Call
+}
+
+// FindOperationsWithReplacements is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *MockBatchFileOperationRepositoryInterface_Expecter) FindOperationsWithReplacements(ctx any) *MockBatchFileOperationRepositoryInterface_FindOperationsWithReplacements_Call {
+	return &MockBatchFileOperationRepositoryInterface_FindOperationsWithReplacements_Call{Call: _e.mock.On("FindOperationsWithReplacements", ctx)}
+}
+
+func (_c *MockBatchFileOperationRepositoryInterface_FindOperationsWithReplacements_Call) Run(run func(ctx context.Context)) *MockBatchFileOperationRepositoryInterface_FindOperationsWithReplacements_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockBatchFileOperationRepositoryInterface_FindOperationsWithReplacements_Call) Return(batchFileOperations []models.BatchFileOperation, err error) *MockBatchFileOperationRepositoryInterface_FindOperationsWithReplacements_Call {
+	_c.Call.Return(batchFileOperations, err)
+	return _c
+}
+
+func (_c *MockBatchFileOperationRepositoryInterface_FindOperationsWithReplacements_Call) RunAndReturn(run func(ctx context.Context) ([]models.BatchFileOperation, error)) *MockBatchFileOperationRepositoryInterface_FindOperationsWithReplacements_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Update provides a mock function for the type MockBatchFileOperationRepositoryInterface
 func (_mock *MockBatchFileOperationRepositoryInterface) Update(ctx context.Context, op *models.BatchFileOperation) error {
 	ret := _mock.Called(ctx, op)

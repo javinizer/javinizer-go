@@ -7,6 +7,7 @@ import (
 	"sort"
 
 	"github.com/javinizer/javinizer-go/internal/fsutil"
+	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 )
 
@@ -156,6 +157,32 @@ func (r *Reverter) consumeReplacementEntry(ctx context.Context, op *models.Batch
 		return fmt.Errorf("backup %s restored to %s but journal consumption failed for op %d: %w", entry.Backup, entry.Destination, op.ID, err)
 	}
 	return nil
+}
+
+// sweepJournaledDestinations runs the pre-revert targeted sweep over every
+// destination journaled by the operations about to revert: crash-window
+// restores land before the rejection/restore checks read destination state.
+// Best-effort — a sweeper failure never blocks the revert path.
+func (r *Reverter) sweepJournaledDestinations(ctx context.Context, ops []models.BatchFileOperation) {
+	if r.sweeper == nil {
+		return
+	}
+	dests := make([]string, 0, len(ops))
+	for i := range ops {
+		gf, err := models.ParseGeneratedFiles(ops[i].GeneratedFiles)
+		if err != nil {
+			continue
+		}
+		for _, rep := range gf.Replacements {
+			dests = append(dests, rep.Destination)
+		}
+	}
+	if len(dests) == 0 {
+		return
+	}
+	if _, err := r.sweeper.SweepDestinations(ctx, dests); err != nil {
+		logging.Warnf("pre-revert replacement sweep failed: %v (continuing with revert)", err)
+	}
 }
 
 // maxJournalSeq reports the highest journaled destination sequence on an

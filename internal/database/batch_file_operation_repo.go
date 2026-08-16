@@ -191,3 +191,27 @@ func (r *BatchFileOperationRepository) FindOperationsByDestination(ctx context.C
 	}
 	return matched, nil
 }
+
+// FindOperationsWithReplacements returns every operation whose generated-files
+// ledger journals at least one replacement entry (any revert status — the
+// sweeper must see applied and failed rows alike).
+func (r *BatchFileOperationRepository) FindOperationsWithReplacements(ctx context.Context) ([]models.BatchFileOperation, error) {
+	var candidates []models.BatchFileOperation
+	err := r.GetDB().WithContext(ctx).
+		Where("generated_files LIKE ?", "%\"replacements\"%").
+		Order("id ASC").Find(&candidates).Error
+	if err != nil {
+		return nil, wrapDBErr("find", "batch file operations with replacements", err)
+	}
+	matched := make([]models.BatchFileOperation, 0, len(candidates))
+	for _, op := range candidates {
+		gf, perr := models.ParseGeneratedFiles(op.GeneratedFiles)
+		if perr != nil {
+			continue
+		}
+		if len(gf.Replacements) > 0 {
+			matched = append(matched, op)
+		}
+	}
+	return matched, nil
+}

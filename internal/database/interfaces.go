@@ -159,6 +159,9 @@ type BatchFileOperationRepositoryInterface interface {
 	// holds a replacement journal entry for destination — SQL LIKE pre-filter plus
 	// exact in-process filter (POSTER-WRITE-HARDENING P3 revert-ledger read path).
 	FindOperationsByDestination(ctx context.Context, destination string) ([]models.BatchFileOperation, error)
+	// FindOperationsWithReplacements returns every operation whose ledger journals
+	// at least one replacement — the replacement sweeper's row scan (P3).
+	FindOperationsWithReplacements(ctx context.Context) ([]models.BatchFileOperation, error)
 }
 
 // ApiTokenRepositoryInterface defines the contract for API token operations

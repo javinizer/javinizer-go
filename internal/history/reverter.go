@@ -92,7 +92,8 @@ type fileSystemReverter interface {
 type Reverter struct {
 	fs              afero.Fs
 	batchFileOpRepo database.BatchFileOperationRepositoryInterface
-	fsReverter      fileSystemReverter // filesystem operations seam
+	fsReverter      fileSystemReverter  // filesystem operations seam
+	sweeper         *ReplacementSweeper // P3 crash-window sweep before revert
 }
 
 // failRevert records a failed revert in the database and returns a RevertFileResult
@@ -134,6 +135,9 @@ func NewReverter(fs afero.Fs, batchFileOpRepo database.BatchFileOperationReposit
 		batchFileOpRepo: batchFileOpRepo,
 	}
 	r.fsReverter = &aferoFSReverter{fs: fs, batchFileOpRepo: batchFileOpRepo}
+	if fs != nil && batchFileOpRepo != nil {
+		r.sweeper = NewReplacementSweeper(fs, batchFileOpRepo)
+	}
 	return r
 }
 
@@ -631,6 +635,8 @@ func (r *Reverter) RevertBatch(ctx context.Context, batchJobID string) (*RevertB
 		return nil, ErrNoOperationsFound
 	}
 
+	r.sweepJournaledDestinations(ctx, processable)
+
 	outcomes := r.revertOperations(ctx, processable, r.revertFile)
 	succeeded, skipped, failed := summarizeOutcomes(outcomes)
 
@@ -678,6 +684,8 @@ func (r *Reverter) RevertScrape(ctx context.Context, batchJobID string, movieID 
 	if len(matching) == 0 {
 		return nil, fmt.Errorf("no processable operations found for movie %s in batch %s", movieID, batchJobID)
 	}
+
+	r.sweepJournaledDestinations(ctx, matching)
 
 	outcomes := r.revertOperations(ctx, matching, r.revertFile)
 	succeeded, skipped, failed := summarizeOutcomes(outcomes)
