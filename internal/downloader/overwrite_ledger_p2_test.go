@@ -411,3 +411,40 @@ func TestBackupPathFormat(t *testing.T) {
 	require.Contains(t, p1, ".dlbak.")
 	require.NotContains(t, p1, "op-1", "opIDs never leak as path segments")
 }
+
+// The set-aside failure leg: destination can't move aside → replace refused.
+func TestDownload_OverwriteAsideFailureRefusesDestroy(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		_, _ = w.Write([]byte("new"))
+	}))
+	defer server.Close()
+
+	base := afero.NewMemMapFs()
+	dest := "/output/ASF-poster.jpg"
+	old := []byte("old")
+	require.NoError(t, afero.WriteFile(base, dest, old, 0644))
+	fs := rejectSpecificRenameFS{Fs: base, blockSrc: dest}
+	d := NewDownloader(server.Client(), fs, &Config{DownloadCover: true}, nil)
+	rec := &armedTestLedger{}
+	_, err := d.download(context.Background(), server.URL+"/cover.jpg", dest, MediaTypeCover, true, nil,
+		downloadLedger{opID: "op-asf", recorder: rec})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "set aside")
+	got, rerr := afero.ReadFile(base, dest)
+	require.NoError(t, rerr)
+	assert.Equal(t, old, got, "pre-existing bytes intact after the refused swap")
+	assert.Empty(t, rec.get(), "nothing journaled when the set-aside failed")
+}
+
+type rejectSpecificRenameFS struct {
+	afero.Fs
+	blockSrc string
+}
+
+func (f rejectSpecificRenameFS) Rename(src, dst string) error {
+	if strings.Contains(src, f.blockSrc) || strings.Contains(dst, f.blockSrc) {
+		return errors.New("rename wedged")
+	}
+	return f.Fs.Rename(src, dst)
+}

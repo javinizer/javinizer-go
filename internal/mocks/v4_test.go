@@ -2,6 +2,7 @@ package mocks
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"testing"
 
@@ -167,4 +168,25 @@ func TestMockScraperInterfaceV4(t *testing.T) {
 	m := NewMockScraperInterface(t)
 	require.NotNil(t, m)
 	_ = m.EXPECT()
+}
+
+// P3: exercise the ledger read seams added to the mock (the raw method
+// bodies must count as covered for the patch gate).
+func TestMockBatchFileOpRepo_P3Methods(t *testing.T) {
+	repo := NewMockBatchFileOperationRepositoryInterface(t)
+	ctx := context.Background()
+	rows := []models.BatchFileOperation{{ID: 7, GeneratedFiles: `{"replacements":[{"destination":"/d"}]}`}}
+
+	repo.EXPECT().FindOperationsByDestination(mock.Anything, "/d").Return(rows, nil).Once()
+	got, err := repo.FindOperationsByDestination(ctx, "/d")
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+
+	repo.EXPECT().FindOperationsWithReplacements(mock.Anything).Return(rows, nil).Once()
+	_, err = repo.FindOperationsWithReplacements(ctx)
+	require.NoError(t, err)
+
+	repo.EXPECT().FindOperationsWithLedger(mock.Anything).Return(nil, errors.New("x")).Once()
+	_, err = repo.FindOperationsWithLedger(ctx)
+	require.Error(t, err)
 }

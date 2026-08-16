@@ -262,3 +262,59 @@ type errScanRepo2 struct {
 func (m *errScanRepo2) FindOperationsByDestination(context.Context, string) ([]models.BatchFileOperation, error) {
 	return nil, m.err
 }
+
+// consumeReplacementEntry legs: unreadable row, malformed ledger body.
+func TestConsumeReplacementEntry_ErrorLegs(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	repo := newP3OpRepo()
+	ctx := context.Background()
+	op, _ := (&p3Fixture{fs: fs, repo: repo}).addAppliedOp(t, "job-1", "CER-001", false, "x", p3Replacement{seq: 1, backupBytes: "y"})
+
+	r := NewReverter(fs, repo)
+	entry := models.ReplacementEntry{Destination: "/dst/CER-001/poster.jpg", Backup: "b", DestSeq: 1}
+
+	// unreadable row
+	goneRepo := &rowGoneRepo2{p3OpRepo: repo, goneID: op.ID}
+	r2 := NewReverter(fs, goneRepo)
+	require.Error(t, r2.consumeReplacementEntry(ctx, op, entry), "unreadable row surfaces")
+
+	// malformed ledger body on the live row.
+	row, err := repo.FindByID(ctx, op.ID)
+	require.NoError(t, err)
+	row.GeneratedFiles = `{"replacements":broken`
+	require.NoError(t, repo.Update(ctx, row))
+	require.Error(t, r.consumeReplacementEntry(ctx, op, entry), "malformed ledger surfaces")
+}
+
+type rowGoneRepo2 struct {
+	*p3OpRepo
+	goneID uint
+}
+
+func (m *rowGoneRepo2) FindByID(ctx context.Context, id uint) (*models.BatchFileOperation, error) {
+	if id == m.goneID {
+		return nil, errors.New("office vacated")
+	}
+	return m.p3OpRepo.FindByID(ctx, id)
+}
+
+// checkDestBlocking tolerance legs: reverted rows skip, unparseable rows skip.
+func TestCheckDestBlocking_ToleranceLegs(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	repo := newP3OpRepo()
+	ctx := context.Background()
+	dest := "/dst/TOL/poster.jpg"
+	op := &models.BatchFileOperation{BatchJobID: "job-1", MovieID: "TOL-001", OperationType: models.OperationTypeUpdate, RevertStatus: models.RevertStatusApplied}
+	require.NoError(t, repo.Create(ctx, op))
+
+	rev := &models.BatchFileOperation{BatchJobID: "job-1", MovieID: "TOL-002", OperationType: models.OperationTypeUpdate, RevertStatus: models.RevertStatusReverted,
+		GeneratedFiles: `{"replacements":[{"destination":"/dst/TOL/poster.jpg","backup":"b","dest_seq":9}]}`}
+	require.NoError(t, repo.Create(ctx, rev))
+	mal := &models.BatchFileOperation{BatchJobID: "job-1", MovieID: "TOL-003", OperationType: models.OperationTypeUpdate, RevertStatus: models.RevertStatusApplied,
+		GeneratedFiles: `{"replacements":nope`}
+	require.NoError(t, repo.Create(ctx, mal))
+
+	r := NewReverter(fs, repo)
+	require.NoError(t, r.checkDestBlocking(ctx, op, dest, 1),
+		"reverted+malformed rows never block")
+}
