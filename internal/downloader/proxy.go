@@ -16,6 +16,8 @@ import (
 	"github.com/javinizer/javinizer-go/internal/timeout"
 )
 
+var newHTTPClientFunc = httpclient.NewHTTPClient
+
 // NewHTTPClient creates an HTTP client for the downloader using pre-resolved configuration.
 // The bridge function resolves all proxy profiles so this function never imports internal/config.
 func NewHTTPClient(cfg HTTPClientConfig) (httpclient.HTTPClient, error) {
@@ -29,7 +31,7 @@ func NewHTTPClient(cfg HTTPClientConfig) (httpclient.HTTPClient, error) {
 
 	// Explicit download proxy override still takes precedence when configured.
 	if cfg.DownloadProxy != nil && cfg.DownloadProxy.URL != "" {
-		client, err := httpclient.NewHTTPClient(cfg.DownloadProxy, 0)
+		client, err := newHTTPClientFunc(cfg.DownloadProxy, 0)
 		if err != nil {
 			logging.Errorf("Downloader: Failed to create download proxy client: %v, using adaptive routing", err)
 		} else {
@@ -43,7 +45,7 @@ func NewHTTPClient(cfg HTTPClientConfig) (httpclient.HTTPClient, error) {
 	// Default direct client — timeout=0 (stall watchdog governs body reads;
 	// worker context governs overall budget). ResponseHeaderTimeout catches
 	// dead servers at the transport level.
-	directClient, err := httpclient.NewHTTPClient(nil, 0)
+	directClient, err := newHTTPClientFunc(nil, 0)
 	if err != nil {
 		logging.Errorf("Downloader: Failed to create direct HTTP client: %v, using fallback client", err)
 		directClient = newFallbackDownloadClient(cfg.Timeout)

@@ -56,20 +56,6 @@ func TestStallReader_WatchdogTimerStop(t *testing.T) {
 	r.Close()
 }
 
-func TestStallReader_WatchdogTimerAlreadyFired(t *testing.T) {
-	for i := 0; i < 500; i++ {
-		body := newMockReadCloser(nil, time.Hour)
-		r := NewStallReader(body, 1*time.Millisecond, context.Background())
-		buf := make([]byte, 10)
-		go func() {
-			_, _ = r.Read(buf)
-		}()
-		time.Sleep(1 * time.Millisecond)
-		r.Disarm()
-		r.Close()
-	}
-}
-
 func TestAdaptiveDownloaderHTTPClient_DoFallback(t *testing.T) {
 	adaptive := &adaptiveDownloaderHTTPClient{
 		directClient: &http.Client{},

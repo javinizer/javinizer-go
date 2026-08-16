@@ -1,8 +1,8 @@
 package downloader
 
 import (
+	"errors"
 	"fmt"
-	"github.com/javinizer/javinizer-go/internal/organizer"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -10,6 +10,7 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/organizer"
 	"github.com/javinizer/javinizer-go/internal/template"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -148,10 +149,8 @@ func TestResolveProfile_InheritsCredentialsFromGlobal(t *testing.T) {
 		},
 	}
 	result := c.resolveProfile("partial", &models.ProxyConfig{
-		Enabled: true,
-		Profiles: map[string]models.ProxyProfile{
-			"partial": {Username: "localuser"}, // URL and Password missing → inherit from global
-		},
+		Enabled:  true,
+		Profiles: map[string]models.ProxyProfile{"partial": {Username: "localuser"}},
 	})
 	require.NotNil(t, result)
 	assert.Equal(t, "http://global:8080", result.URL, "inherited URL from global")
@@ -245,7 +244,7 @@ func TestDo_ProxyClientCreationFails_FallsBackToDirect(t *testing.T) {
 		directClient: directClient,
 		httpCfg: HTTPClientConfig{
 			GlobalProxyConfig: &models.ProxyConfig{Enabled: true},
-			GlobalProxy:       &models.ProxyProfile{URL: "http://[::1]:%invalid"}, // invalid URL
+			GlobalProxy:       &models.ProxyProfile{URL: "http://[::1]:%invalid"},
 		},
 		proxyResolvers: []models.DownloadProxyResolver{
 			testDownloadProxyResolver{
@@ -283,6 +282,46 @@ func TestNewHTTPClient_DownloadProxyInvalidURL(t *testing.T) {
 	adaptive := client.(*adaptiveDownloaderHTTPClient)
 	assert.Nil(t, adaptive.forceClient, "invalid proxy URL should not set forceClient")
 	assert.NotNil(t, adaptive.directClient, "should fall back to direct client")
+}
+
+// --- NewHTTPClient: test-injectable error paths via newHTTPClientFunc ---
+
+func TestNewHTTPClient_FallbackOnDirectClientError(t *testing.T) {
+	origFunc := newHTTPClientFunc
+	newHTTPClientFunc = func(proxyProfile *models.ProxyProfile, timeout time.Duration) (*http.Client, error) {
+		return nil, errors.New("mock transport error")
+	}
+	t.Cleanup(func() { newHTTPClientFunc = origFunc })
+
+	cfg := HTTPClientConfig{Timeout: 5 * time.Second}
+	client, err := NewHTTPClient(cfg)
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if client == nil {
+		t.Fatal("expected non-nil client")
+	}
+}
+
+func TestNewHTTPClient_FallbackOnProxyClientError(t *testing.T) {
+	origFunc := newHTTPClientFunc
+	newHTTPClientFunc = func(proxyProfile *models.ProxyProfile, timeout time.Duration) (*http.Client, error) {
+		return nil, errors.New("mock proxy error")
+	}
+	t.Cleanup(func() { newHTTPClientFunc = origFunc })
+
+	proxyURL := "http://proxy.example.com:8080"
+	cfg := HTTPClientConfig{
+		Timeout:       5 * time.Second,
+		DownloadProxy: &models.ProxyProfile{URL: proxyURL},
+	}
+	client, err := NewHTTPClient(cfg)
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if client == nil {
+		t.Fatal("expected non-nil client")
+	}
 }
 
 // --- generateActressFilename coverage ---

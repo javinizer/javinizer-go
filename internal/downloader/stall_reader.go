@@ -58,12 +58,7 @@ func (r *StallReader) watchdog() {
 		r.stalled.Store(true)
 		_ = r.body.Close()
 	case <-r.stop:
-		if !r.timer.Stop() {
-			select {
-			case <-r.timer.C:
-			default:
-			}
-		}
+		r.timer.Stop()
 	}
 }
 
