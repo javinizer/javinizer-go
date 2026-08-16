@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
-	"net/http"
 	"sync"
 	"time"
 
@@ -657,8 +655,6 @@ func (r *APIRuntime) GetPosterManager() poster.PosterManagerInterface {
 	})
 }
 
-// Server lifecycle methods (ServerCtx, Shutdown) are defined in server_lifecycle.go.
-
 // SetConfig sets the full application config and rebuilds the APIConfig snapshot.
 // This is a convenience method for test setup. Production code should use
 // APIRuntime.ReplaceReloadable() instead.
@@ -676,10 +672,6 @@ func (r *APIRuntime) SetConfig(cfg *config.Config) {
 	r.invalidateFactoriesLocked(cfg)
 }
 
-// ReloadConfig is defined in hot_reload.go.
-
-// InvalidateWorkflowCaches and InvalidateWorkflowCachesOnRuntime are defined in hot_reload.go.
-
 // shutdownDeps gracefully shuts down runtime resources in APIRuntime.
 //
 //nolint:unused // used by same-package tests
@@ -694,28 +686,9 @@ func shutdownDeps(rt *APIRuntime) {
 	rs.Shutdown()
 }
 
-// invalidateFactories is defined in hot_reload.go.
-
 // ---------------------------------------------------------------------------
 // Legacy compatibility — these package-level functions delegate to APIRuntime.
 // They exist so that callers that only have *APIDeps can still perform
 // lifecycle operations without constructing an APIRuntime explicitly.
 // New code in production paths should use *APIRuntime directly.
 // ---------------------------------------------------------------------------
-
-func setPosterHeaderTimeout(client *http.Client, idleTimeout time.Duration) {
-	if t, ok := client.Transport.(*http.Transport); ok && idleTimeout > 0 {
-		t.ResponseHeaderTimeout = idleTimeout
-		t.TLSHandshakeTimeout = idleTimeout
-		if t.DialContext != nil {
-			origDial := t.DialContext
-			t.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-				dialCtx, cancel := context.WithTimeout(ctx, idleTimeout)
-				defer cancel()
-				return origDial(dialCtx, network, addr)
-			}
-		} else {
-			t.DialContext = (&net.Dialer{Timeout: idleTimeout}).DialContext
-		}
-	}
-}
