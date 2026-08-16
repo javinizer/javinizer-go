@@ -193,7 +193,7 @@ func (r *BatchFileOperationRepository) FindOperationsByDestination(ctx context.C
 	// every ledger row before concluding absence.
 	norm := func(p string) string { return filepath.ToSlash(filepath.Clean(p)) }
 	seam := fallbackSeam{}
-	return seam.finish(candidates, destination, norm, func(ctx2 context.Context) ([]models.BatchFileOperation, error) {
+	return seam.finish(ctx, candidates, destination, norm, func(ctx2 context.Context) ([]models.BatchFileOperation, error) {
 		return r.FindOperationsWithLedger(ctx2)
 	})
 }
@@ -203,12 +203,13 @@ func (r *BatchFileOperationRepository) FindOperationsByDestination(ctx context.C
 // whose error MUST surface (R7-2) rather than masquerade as absence.
 type fallbackSeam struct{}
 
-func (fallbackSeam) finish(candidates []models.BatchFileOperation, destination string, norm func(string) string, ledgerScan func(context.Context) ([]models.BatchFileOperation, error)) ([]models.BatchFileOperation, error) {
+func (fallbackSeam) finish(ctx context.Context, candidates []models.BatchFileOperation, destination string, norm func(string) string, ledgerScan func(context.Context) ([]models.BatchFileOperation, error)) ([]models.BatchFileOperation, error) {
 	matched := matchOpsByDestination(candidates, destination, norm)
 	if len(matched) != 0 {
 		return matched, nil
 	}
-	fallback, ferr := ledgerScan(nil)
+	// R10-1: the caller's context (cancellation/deadline) rides the fallback.
+	fallback, ferr := ledgerScan(ctx)
 	if ferr != nil {
 		return nil, wrapDBErr("find", "batch file operations by destination fallback", ferr)
 	}

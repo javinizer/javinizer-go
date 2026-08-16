@@ -196,7 +196,7 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 	if op.OperationType != models.OperationTypeMove && op.OperationType != models.OperationTypeUpdate {
 		msg := ErrCopyModeNotRevertible.Error()
 		if len(restored) > 0 {
-			msg += fmt.Sprintf(" (%d journaled replacement(s) restored first)", len(restored)/2)
+			msg += fmt.Sprintf(" (%d journaled replacement(s) restored first)", len(restored))
 		}
 		return failRevert(ctx, r.batchFileOpRepo, op, models.RevertReasonUnexpectedPathState, msg), nil
 	}

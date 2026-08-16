@@ -49,8 +49,13 @@ func TestFindOperationsByDestination_FallbackErrorPropagates(t *testing.T) {
 	helper := fallbackSeam{}
 	sentinel := errors.New("db wedged")
 	identity := func(p string) string { return p }
-	_, err := helper.finish(nil, "/slash/form/poster.jpg", identity, func(context.Context) ([]models.BatchFileOperation, error) {
+	type ctxKey struct{}
+	ctx := context.WithValue(context.Background(), ctxKey{}, "marker")
+	gotCtx := context.Context(nil)
+	_, err := helper.finish(ctx, nil, "/slash/form/poster.jpg", identity, func(c context.Context) ([]models.BatchFileOperation, error) {
+		gotCtx = c
 		return nil, sentinel
 	})
 	require.ErrorIs(t, err, sentinel, "fallback failure must surface, not masquerade as absence")
+	require.Equal(t, "marker", gotCtx.Value(ctxKey{}), "R10-1: the caller's context rides the fallback scan")
 }
