@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -38,4 +39,18 @@ func TestFindOperationsByDestination_WindowsJSONEscaping(t *testing.T) {
 	misses, err := repo.FindOperationsByDestination(ctx, `D:\media\library\ABC-001\poster2.jpg`)
 	require.NoError(t, err)
 	require.Empty(t, misses)
+}
+
+// codex P3 R7-2: the cross-form ownership fallback must propagate query
+// failures — destructive callers treat empty-with-error as keep-and-retry.
+func TestFindOperationsByDestination_FallbackErrorPropagates(t *testing.T) {
+	// The fallback seam is exercised directly: a failing ledger scan must
+	// surface as an error, never as an empty result.
+	helper := fallbackSeam{}
+	sentinel := errors.New("db wedged")
+	identity := func(p string) string { return p }
+	_, err := helper.finish(nil, "/slash/form/poster.jpg", identity, func(context.Context) ([]models.BatchFileOperation, error) {
+		return nil, sentinel
+	})
+	require.ErrorIs(t, err, sentinel, "fallback failure must surface, not masquerade as absence")
 }

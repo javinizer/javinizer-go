@@ -192,15 +192,27 @@ func (r *BatchFileOperationRepository) FindOperationsByDestination(ctx context.C
 	// through a form change, so a form-mismatch miss falls back to scanning
 	// every ledger row before concluding absence.
 	norm := func(p string) string { return filepath.ToSlash(filepath.Clean(p)) }
+	seam := fallbackSeam{}
+	return seam.finish(candidates, destination, norm, func(ctx2 context.Context) ([]models.BatchFileOperation, error) {
+		return r.FindOperationsWithLedger(ctx2)
+	})
+}
+
+// fallbackSeam factors the form-mismatch fallback for direct testing: the
+// prefilter match runs first; a full-miss defers to the full ledger scan,
+// whose error MUST surface (R7-2) rather than masquerade as absence.
+type fallbackSeam struct{}
+
+func (fallbackSeam) finish(candidates []models.BatchFileOperation, destination string, norm func(string) string, ledgerScan func(context.Context) ([]models.BatchFileOperation, error)) ([]models.BatchFileOperation, error) {
 	matched := matchOpsByDestination(candidates, destination, norm)
-	if len(matched) == 0 {
-		fallback, ferr := r.FindOperationsWithLedger(ctx)
-		if ferr != nil {
-			return matched, nil //nolint:nilerr // prefilter miss + unreadable fallback — empty beats error
-		}
-		matched = matchOpsByDestination(fallback, destination, norm)
+	if len(matched) != 0 {
+		return matched, nil
 	}
-	return matched, nil
+	fallback, ferr := ledgerScan(nil)
+	if ferr != nil {
+		return nil, wrapDBErr("find", "batch file operations by destination fallback", ferr)
+	}
+	return matchOpsByDestination(fallback, destination, norm), nil
 }
 
 // matchOpsByDestination keeps rows journaling the destination, compared under

@@ -105,53 +105,23 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 		sort.SliceStable(byDest[dest], func(i, j int) bool { return byDest[dest][i].DestSeq > byDest[dest][j].DestSeq })
 	}
 
-	// Pre-flight the newer-applied rejection across ALL destinations before
-	// any byte moves: refuse to climb above an unconsumed newer entry owned by
-	// an operation outside this run.
+	// Execute per destination under its lock. The newer-applied / interleave
+	// rejection is re-evaluated INSIDE the lock with a FRESH query (codex P3
+	// R7-1): a concurrent apply can journal a newer replacement between any
+	// preflight read and lock acquisition — restoring from a stale ownership
+	// snapshot would clobber freshly installed bytes.
 	for dest, entries := range byDest {
+		release := fsutil.SharedDestLocks().Acquire(dest)
 		minOwn := entries[0].DestSeq
 		for _, e := range entries {
 			if e.DestSeq < minOwn {
 				minOwn = e.DestSeq
 			}
 		}
-		rows, qErr := r.batchFileOpRepo.FindOperationsByDestination(ctx, dest)
-		if qErr != nil {
-			return restored, fmt.Errorf("failed to inspect destination journal for %s: %w", dest, qErr)
+		if rjErr := r.checkDestBlocking(ctx, op, dest, minOwn); rjErr != nil {
+			release()
+			return restored, rjErr
 		}
-		for i := range rows {
-			row := &rows[i]
-			if row.ID == op.ID || row.RevertStatus == models.RevertStatusReverted {
-				continue
-			}
-			rowGf, pErr := models.ParseGeneratedFiles(row.GeneratedFiles)
-			if pErr != nil {
-				continue
-			}
-			for _, e := range rowGf.Replacements {
-				if e.Destination != dest {
-					continue
-				}
-				// Newer owner above the op's chain: climbing over it corrupts.
-				// Foreign entry INTERLEAVED inside the op's own chain: restoring
-				// the chain would cross that entry's still-applied bytes
-				// (codex P3 R3-1) — a foreign entry strictly inside
-				// (minOwn, maxOwn) must reject exactly as a newer one does.
-				if e.DestSeq > minOwn {
-					return restored, &NewerAppliedDestError{Destination: dest, NewerOpID: row.ID, NewerMovieID: row.MovieID}
-				}
-			}
-		}
-	}
-
-	// Execute restores. The shared per-destination lock registry serializes
-	// restores against in-flight downloader overwrites of the same path. The
-	// restore is staged-copy based: the journal entry is consumed from the
-	// database BEFORE the backup file is removed, so a consumption failure
-	// leaves a retryable row + intact backup instead of a dangling pointer
-	// to consumed bytes (codex P3 R2-4).
-	for dest, entries := range byDest {
-		release := fsutil.SharedDestLocks().Acquire(dest)
 		for _, e := range entries {
 			if _, statErr := r.fs.Stat(e.Backup); statErr != nil {
 				release()
@@ -232,6 +202,37 @@ func (r *Reverter) sweepJournaledDestinations(ctx context.Context, ops []models.
 	if _, err := r.sweeper.SweepDestinations(ctx, dests); err != nil {
 		logging.Warnf("pre-revert replacement sweep failed: %v (continuing with revert)", err)
 	}
+}
+
+// checkDestBlocking applies the newcomer/interleave rule against the LIVE
+// journal for one destination. Caller holds the destination lock.
+func (r *Reverter) checkDestBlocking(ctx context.Context, op *models.BatchFileOperation, dest string, minOwn int64) error {
+	rows, qErr := r.batchFileOpRepo.FindOperationsByDestination(ctx, dest)
+	if qErr != nil {
+		return fmt.Errorf("failed to inspect destination journal for %s: %w", dest, qErr)
+	}
+	for i := range rows {
+		row := &rows[i]
+		if row.ID == op.ID || row.RevertStatus == models.RevertStatusReverted {
+			continue
+		}
+		rowGf, pErr := models.ParseGeneratedFiles(row.GeneratedFiles)
+		if pErr != nil {
+			continue
+		}
+		for _, e := range rowGf.Replacements {
+			if e.Destination != dest {
+				continue
+			}
+			// Newer owner above the op's chain, or a foreign entry INTERLEAVED
+			// strictly inside (minOwn, ...) — either way an op-granular restore
+			// would cross that operation's still-applied bytes (R3-1).
+			if e.DestSeq > minOwn {
+				return &NewerAppliedDestError{Destination: dest, NewerOpID: row.ID, NewerMovieID: row.MovieID}
+			}
+		}
+	}
+	return nil
 }
 
 // restoreCopyNonce uniquifies the staged copy path for a destination restore.

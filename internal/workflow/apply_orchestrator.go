@@ -385,6 +385,12 @@ func (o *applyOrchImpl) stepDownload(ctx context.Context, cmd ApplyCmd, opID Ope
 			downloadMovie = state.scrapedMediaURLs.overlay(downloadMovie)
 		}
 	}
+	// R7-3: media install into the organizer's leaf folder — seed it as the
+	// discovery root pre-download so the startup sweep finds crash-window
+	// backups even when the folder nests beyond the walk bound.
+	if rl, ok := o.revertLog.(*dbRevertLog); ok && opID != "" && state.finalDir != "" {
+		rl.seedRoot(ctx, opID, state.finalDir)
+	}
 	outcome, dlErr := o.downloader.Download(ctx, downloader.DownloadCmd{
 		Movie:                  downloadMovie,
 		DestDir:                state.finalDir,

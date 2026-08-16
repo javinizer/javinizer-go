@@ -135,10 +135,11 @@ func (s *ReplacementSweeper) Sweep(ctx context.Context) (int, error) {
 	}
 	healed := 0
 	for dir := range idx.dirs {
-		// R4-2: bounded recursion (≤3 levels) — applies land media in the
-		// nested movie directory the organizer creates under the recorded
-		// base root; a flat ReadDir of the base never sees those backups.
-		const maxDepth = 3
+		// R4-2/R7-3: recursion bounded by 8 levels — SubfolderFormat templates
+		// nest deeper than 3 legitimately, and the orchestrator additionally
+		// seeds the organizer's exact leaf folder post-organize so the common
+		// path never depends on the walk bound.
+		const maxDepth = 8
 		_ = afero.Walk(s.fs, filepath.FromSlash(dir), func(path string, info os.FileInfo, werr error) error {
 			if werr != nil {
 				return nil //nolint:nilerr // walk-callback contract: skip unreadable subtrees, continue the sweep
@@ -227,16 +228,20 @@ func (s *ReplacementSweeper) sweepOne(ctx context.Context, idx *replacementLedge
 	// destination exists would leave that row permanently unrevertable.
 	release := fsutil.SharedDestLocks().Acquire(dest)
 	defer release()
-	if fresh, fErr := s.repo.FindOperationsByDestination(ctx, dest); fErr == nil {
-		for i := range fresh {
-			gf, pErr := models.ParseGeneratedFiles(fresh[i].GeneratedFiles)
-			if pErr != nil {
-				continue
-			}
-			for _, rep := range gf.Replacements {
-				if sweepSlash(rep.Backup) == backupSlash {
-					return 0 // freshly journaled — keep; next sweep arbitrates it as journaled
-				}
+	fresh, fErr := s.repo.FindOperationsByDestination(ctx, dest)
+	if fErr != nil {
+		// R7-2/R4-1: an unreadable ownership answer is NEVER absence — keep
+		// the backup; the next sweep retries with a live view.
+		return 0
+	}
+	for i := range fresh {
+		gf, pErr := models.ParseGeneratedFiles(fresh[i].GeneratedFiles)
+		if pErr != nil {
+			continue
+		}
+		for _, rep := range gf.Replacements {
+			if sweepSlash(rep.Backup) == backupSlash {
+				return 0 // freshly journaled — keep; next sweep arbitrates it as journaled
 			}
 		}
 	}

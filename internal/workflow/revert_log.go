@@ -742,6 +742,34 @@ func (l *dbRevertLog) ConfirmReplacement(ctx context.Context, opID OperationID, 
 	return nil
 }
 
+// seedRoot appends a discovery root to the operation ledger (dedup). Used
+// by the orchestrator right after organize: media land in the organizer's
+// leaf folder — possibly nested beyond the sweeper's walk bound (codex P3
+// R7-3) — so the exact folder is recorded while the run is still alive,
+// closing the pre-Complete discovery gap entirely.
+func (l *dbRevertLog) seedRoot(ctx context.Context, opID OperationID, root string) {
+	if opID == "" || root == "" {
+		return
+	}
+	recordID64, err := strconv.ParseUint(opID, 10, 64)
+	if err != nil || recordID64 == 0 {
+		return
+	}
+	release := replacementLedgerLocks.Acquire(opID)
+	defer release()
+	preRecord, err := l.repo.FindByID(ctx, uint(recordID64))
+	if err != nil || preRecord == nil {
+		return
+	}
+	next := appendLedgerRoot(resolveLogger(l.logger), preRecord.GeneratedFiles, root)
+	if next != preRecord.GeneratedFiles {
+		preRecord.GeneratedFiles = next
+		if err := l.repo.Update(ctx, preRecord); err != nil {
+			resolveLogger(l.logger).Warnf("[revert-log] seedRoot: failed to persist root %s for %s: %v", root, opID, err)
+		}
+	}
+}
+
 // nextDestSequence returns the next per-destination sequence: the maximum
 // DestSeq already journaled for this destination across ALL operations
 // (applied and failed rows both count — a failed record's backups are still

@@ -261,3 +261,35 @@ func TestRevertLog_ConfirmInstallMarker(t *testing.T) {
 	require.NoError(t, rl.ConfirmReplacement(ctx, opID, dest, backup))
 	require.Error(t, rl.ConfirmReplacement(ctx, "424242", dest, backup))
 }
+
+// codex P3 R7-3: the orchestrator seeds the organizer's leaf folder as a
+// discovery root right after organize, so a nested crash-window backup is
+// findable without relying on the walk bound.
+func TestRevertLog_SeedRoot_ClosesNestedDiscoveryGap(t *testing.T) {
+	db, repo, rl := newP3RecorderHarness(t, ":memory:")
+	defer func() { _ = db.Close() }()
+	ctx := context.Background()
+
+	opID, err := rl.Begin(ctx, ApplyCmd{
+		Movie:    &models.Movie{ID: "DEP-001"},
+		Match:    models.FileMatchInfo{Path: "/src/dep.mkv"},
+		DestPath: "/out/base",
+	})
+	require.NoError(t, err)
+	db2, ok := rl.(*dbRevertLog)
+	require.True(t, ok)
+	db2.seedRoot(ctx, opID, "/out/base/A/B/C/D/Movie (2020)")
+
+	gf := p3Ledger(t, repo, opID)
+	require.Contains(t, gf.Roots, "/out/base", "Begin-seeded base root kept")
+	require.Contains(t, gf.Roots, "/out/base/A/B/C/D/Movie (2020)", "leaf seeded post-organize")
+
+	// Idempotent: no duplicate roots.
+	db2.seedRoot(ctx, opID, "/out/base/A/B/C/D/Movie (2020)")
+	gf = p3Ledger(t, repo, opID)
+	count := 0
+	for range gf.Roots {
+		count++
+	}
+	require.Equal(t, 2, count)
+}

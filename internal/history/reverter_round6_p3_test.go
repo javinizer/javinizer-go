@@ -88,3 +88,54 @@ func TestRevert_AnchorMissing_StillRestoresReplacementJournal(t *testing.T) {
 	exists, _ := afero.Exists(fs, dest+".dlbak.a")
 	require.False(t, exists, "backup consumed")
 }
+
+// codex P3 R7-1: the newer/journal fresh check runs against the LIVE row set
+// under the destination lock — a row created mid-run still blocks an older
+// operation's restore.
+func TestCheckDestBlocking_LiveJournal(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	repo := newP3OpRepo()
+	ctx := context.Background()
+
+	dest := "/dst/LIVE/poster.jpg"
+	require.NoError(t, fs.MkdirAll("/dst/LIVE", config.DirPerm))
+
+	r := NewReverter(fs, repo)
+	self := &models.BatchFileOperation{
+		BatchJobID: "job-1", MovieID: "LIVE-OLD",
+		OperationType: models.OperationTypeUpdate,
+		GeneratedFiles: mustJSON(t, models.GeneratedFilesJSON{Replacements: []models.ReplacementEntry{
+			{Destination: dest, Backup: dest + ".dlbak.1", DestSeq: 1},
+		}}),
+		RevertStatus: models.RevertStatusApplied,
+	}
+	require.NoError(t, repo.Create(ctx, self))
+	require.NoError(t, r.checkDestBlocking(ctx, self, dest, 1), "own entries never block")
+
+	// A NEWER row appears — possibly journaled after any preflight.
+	newer := &models.BatchFileOperation{
+		BatchJobID: "job-1", MovieID: "LIVE-NEW",
+		OperationType: models.OperationTypeUpdate,
+		GeneratedFiles: mustJSON(t, models.GeneratedFilesJSON{Replacements: []models.ReplacementEntry{
+			{Destination: dest, Backup: dest + ".dlbak.2", DestSeq: 2},
+		}}),
+		RevertStatus: models.RevertStatusApplied,
+	}
+	require.NoError(t, repo.Create(ctx, newer))
+	err := r.checkDestBlocking(ctx, self, dest, 1)
+	require.Error(t, err)
+	var nad *NewerAppliedDestError
+	require.ErrorAs(t, err, &nad)
+	require.Equal(t, newer.ID, nad.NewerOpID)
+
+	// Reverted newer rows stop blocking (entries consumed in practice).
+	require.NoError(t, repo.UpdateRevertStatus(ctx, newer.ID, models.RevertStatusReverted))
+	require.NoError(t, r.checkDestBlocking(ctx, self, dest, 1))
+}
+
+func mustJSON(t *testing.T, gf models.GeneratedFilesJSON) string {
+	t.Helper()
+	raw, err := json.Marshal(gf)
+	require.NoError(t, err)
+	return string(raw)
+}
