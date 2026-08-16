@@ -317,8 +317,17 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 	}
 	row.GeneratedFiles = string(data)
 	if uErr := s.repo.Update(ctx, row); uErr != nil {
-		logging.Warnf("replacement sweep: journal consumption failed for op %d: %v", row.ID, uErr)
-		return false // bytes restored but entry not consumed — keep the backup for the retry
+		// R9-2: the repair is NOT complete while the entry persists. Undo the
+		// restore (the destination was proven missing pre-restore) so the next
+		// sweep reproduces the same state exactly — a lingering armed entry
+		// beside a present destination would never converge, and a later user
+		// deletion would re-fire the restore.
+		if rmErr := s.fs.Remove(dest); rmErr != nil {
+			logging.Warnf("replacement sweep %s: consumption failed AND restore-undo failed (%v after %v)", backup, rmErr, uErr)
+		} else {
+			logging.Warnf("replacement sweep %s: consumption failed (%v) — restore undone, will retry", backup, uErr)
+		}
+		return false
 	}
 	_ = s.fs.Remove(backup)
 	return true

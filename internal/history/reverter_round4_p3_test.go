@@ -3,6 +3,7 @@ package history
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -212,3 +213,69 @@ func (f *statFailingFs) Stat(name string) (os.FileInfo, error) {
 type pathErrPermission string
 
 func (e pathErrPermission) Error() string { return "permission denied: " + string(e) }
+
+// codex P3 R9-2: when the consumption update fails after the crash-window
+// restore, the restore is undone — each sweep attempt replays the exact same
+// state until the entry is durably consumed.
+func TestSweep_CrashRestoreConsumptionFailure_UndoesThenRetries(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	repo := newP3OpRepo()
+	flaky := &flakySweepRepo{p3OpRepo: repo}
+	ctx := context.Background()
+
+	dest := "/out/UND/poster.jpg"
+	backup := dest + ".dlbak.0123456789abcdef"
+	require.NoError(t, fs.MkdirAll("/out/UND", config.DirPerm))
+	require.NoError(t, afero.WriteFile(fs, backup, []byte("pre-crash"), config.FilePerm))
+	backdate(t, fs, backup)
+
+	raw, _ := json.Marshal(models.GeneratedFilesJSON{Replacements: []models.ReplacementEntry{
+		{Destination: dest, Backup: backup, DestSeq: 1},
+	}})
+	op := &models.BatchFileOperation{
+		BatchJobID: "job-1", MovieID: "UND-001", OriginalPath: "/src/und.mkv",
+		OperationType: models.OperationTypeUpdate, GeneratedFiles: string(raw),
+		RevertStatus: models.RevertStatusApplied,
+	}
+	require.NoError(t, repo.Create(ctx, op))
+
+	flaky.fail = true
+	s := NewReplacementSweeper(fs, flaky)
+	healed, err := s.Sweep(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 0, healed, "consumption failure aborts the repair")
+	exists, _ := afero.Exists(fs, dest)
+	require.False(t, exists, "restore undone — pre-crash state reproduced")
+	exists, _ = afero.Exists(fs, backup)
+	require.True(t, exists, "backup intact for the retry")
+
+	flaky.fail = false
+	healed, err = s.Sweep(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 1, healed)
+	require.Equal(t, "pre-crash", string(mustRead2(t, fs, dest)))
+	row, err := repo.FindByID(ctx, op.ID)
+	require.NoError(t, err)
+	gf, err := models.ParseGeneratedFiles(row.GeneratedFiles)
+	require.NoError(t, err)
+	require.Empty(t, gf.Replacements, "durable consumption on the retry")
+
+	// And a user deleting the restored media afterwards must NOT fire another
+	// restore — the entry is gone by then.
+	require.NoError(t, fs.Remove(dest))
+	healed, err = s.Sweep(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 0, healed)
+}
+
+type flakySweepRepo struct {
+	*p3OpRepo
+	fail bool
+}
+
+func (m *flakySweepRepo) Update(ctx context.Context, op *models.BatchFileOperation) error {
+	if m.fail {
+		return errors.New("transient outage")
+	}
+	return m.p3OpRepo.Update(ctx, op)
+}

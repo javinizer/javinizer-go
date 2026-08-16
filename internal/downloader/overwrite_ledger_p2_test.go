@@ -312,10 +312,17 @@ func TestDownload_ConfirmFailureRollsBackAndRetracts(t *testing.T) {
 	require.NoError(t, rerr)
 	assert.Equal(t, old, got, "rollback restored pre-existing bytes")
 	assert.Empty(t, rec.get(), "stale entry retracted via ReleaseReplacement")
+	// R9-1: the rollback preserves the backup (copy + swap, not a consuming
+	// rename) so a simultaneous retract failure can never dangle the journal.
+	// The released entry makes it an orphan — the sweeper reaps it.
 	entries, _ := afero.ReadDir(fs, "/output")
+	backups := 0
 	for _, e := range entries {
-		assert.False(t, strings.Contains(e.Name(), ".dlbak."), "backup residue after rollback: %s", e.Name())
+		if strings.Contains(e.Name(), ".dlbak.") {
+			backups++
+		}
 	}
+	assert.Equal(t, 1, backups, "rollback keeps the intact backup for the orphan sweep")
 }
 
 type confirmFailingLedger struct {
@@ -324,5 +331,48 @@ type confirmFailingLedger struct {
 }
 
 func (l *confirmFailingLedger) ConfirmReplacement(context.Context, string, string, string) error {
+	return l.err
+}
+
+// codex P3 R9-1: confirm AND release failing together (one outage) must
+// leave entry + backup + destination mutually consistent — backup intact
+// on disk, entry armed and pointing at it, destination rolled back.
+func TestDownload_ConfirmAndReleaseBothFail_BackupSurvivesRollback(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		_, _ = w.Write([]byte("new-bytes"))
+	}))
+	defer server.Close()
+
+	fs := afero.NewMemMapFs()
+	dest := "/output/CRF-poster.jpg"
+	old := []byte("old-bytes")
+	require.NoError(t, afero.WriteFile(fs, dest, old, 0644))
+
+	d := NewDownloader(server.Client(), fs, &Config{DownloadCover: true}, nil)
+	rec := &confirmAndReleaseFailingLedger{armedTestLedger: &armedTestLedger{}, err: errors.New("outage")}
+	_, err := d.download(context.Background(), server.URL+"/cover.jpg", dest, MediaTypeCover, true, nil,
+		downloadLedger{opID: "op-crf", recorder: rec})
+
+	require.Error(t, err)
+	got, rerr := afero.ReadFile(fs, dest)
+	require.NoError(t, rerr)
+	assert.Equal(t, old, got, "destination rolled back to pre-existing bytes")
+	recs := rec.get()
+	require.Len(t, recs, 1, "armed entry persists when retract also fails")
+	data, rerr := afero.ReadFile(fs, recs[0].backupPath)
+	require.NoError(t, rerr, "the journaled backup file must still exist")
+	assert.Equal(t, old, data)
+}
+
+type confirmAndReleaseFailingLedger struct {
+	*armedTestLedger
+	err error
+}
+
+func (l *confirmAndReleaseFailingLedger) ConfirmReplacement(context.Context, string, string, string) error {
+	return l.err
+}
+func (l *confirmAndReleaseFailingLedger) ReleaseReplacement(context.Context, string, string, string) error {
 	return l.err
 }

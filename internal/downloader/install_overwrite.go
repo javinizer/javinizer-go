@@ -5,9 +5,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"sync/atomic"
+
+	"github.com/spf13/afero"
 
 	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/logging"
@@ -21,6 +24,39 @@ const backupSuffixForDest = ".dlbak"
 // rename would clobber the first backup while both journal entries point at
 // it — revert could never recover the original bytes (codex P3 round 1).
 var backupOrdinal atomic.Uint64
+var restoreCopyOrdinal atomic.Uint64
+
+// copyBackupToDest restores the backup bytes onto dest WITHOUT consuming the
+// backup: staged adjacent write + replace-aware swap (Win-safe), streamed
+// through a bounded buffer. Used by the confirm-failure rollback so the
+// journal entry can never end up pointing at consumed bytes (codex P3 R9-1).
+func copyBackupToDest(fsys afero.Fs, backup, dest string) error {
+	src, err := fsys.Open(backup)
+	if err != nil {
+		return fmt.Errorf("open backup: %w", err)
+	}
+	defer func() { _ = src.Close() }()
+	staged := dest + ".dlrstr." + strconv.FormatUint(restoreCopyOrdinal.Add(1), 16)
+	dstFile, err := fsys.OpenFile(staged, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		return fmt.Errorf("stage rollback: %w", err)
+	}
+	buf := make([]byte, 256*1024)
+	if _, cerr := io.CopyBuffer(dstFile, src, buf); cerr != nil {
+		_ = dstFile.Close()
+		_ = fsys.Remove(staged)
+		return fmt.Errorf("copy rollback: %w", cerr)
+	}
+	if err := dstFile.Close(); err != nil {
+		_ = fsys.Remove(staged)
+		return fmt.Errorf("close rollback: %w", err)
+	}
+	if err := fsutil.ReplaceFile(fsys, staged, dest); err != nil {
+		_ = fsys.Remove(staged)
+		return fmt.Errorf("swap rollback: %w", err)
+	}
+	return nil
+}
 
 // overwriteBackupPath names the destination's backup for one replacement:
 // opID folded as a hash (never a path component) plus a process-unique
@@ -93,20 +129,19 @@ func (d *Downloader) installOverwriting(ctx context.Context, stagedPath, destPat
 		}
 		return false, true, fmt.Errorf("failed to replace file: %w", err)
 	}
-	// R4-3/R5-2: confirm the install so the sweeper can distinguish "backup
-	// journaled but install never landed" from "installed media deleted
-	// afterwards". An unconfirmed entry MUST NOT outlive a successful return:
-	// a transient confirm failure rolls the install back (backup onto the
-	// destination) and retracts the journal — never report success with an
-	// armed entry, or a later user deletion reads as a crash window.
+	// R4-3/R5-2/R9-1: confirm the install so the sweeper can distinguish
+	// "backup journaled but install never landed" from "installed media
+	// deleted afterwards". An unconfirmed entry MUST NOT outlive a
+	// successful return: a transient confirm failure rolls the install back
+	// WITHOUT consuming the backup (staged copy + swap), so even a
+	// simultaneous retract failure leaves entry + backup + restored
+	// destination mutually consistent for sweep/retry.
 	if cErr := ledger.recorder.ConfirmReplacement(ctx, ledger.opID, destPath, backupPath); cErr != nil {
-		// R6-3: replace-aware rollback — plain Rename cannot overwrite the
-		// just-installed destination on Windows.
-		if rErr := fsutil.ReplaceFile(d.fs, backupPath, destPath); rErr != nil {
+		if rErr := copyBackupToDest(d.fs, backupPath, destPath); rErr != nil {
 			return false, true, fmt.Errorf("install-confirm failed: %w (AND rollback restore failed: %v — bytes remain at %s)", cErr, rErr, backupPath)
 		}
 		if relErr := ledger.recorder.ReleaseReplacement(ctx, ledger.opID, destPath, backupPath); relErr != nil {
-			return false, true, fmt.Errorf("install-confirm failed (%w); rolled back but journal retract failed: %v (backup consumed, entry stale — row stays failed for sweep/retry)", cErr, relErr)
+			return false, true, fmt.Errorf("install-confirm retract failed after rollback (%v): %w (backup %s intact — entry stays armed for the sweeper)", cErr, relErr, backupPath)
 		}
 		return false, true, fmt.Errorf("install-confirm failed, rolled back to pre-existing bytes: %w", cErr)
 	}
