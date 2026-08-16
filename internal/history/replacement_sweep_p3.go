@@ -141,7 +141,7 @@ func (s *ReplacementSweeper) Sweep(ctx context.Context) (int, error) {
 		const maxDepth = 3
 		_ = afero.Walk(s.fs, filepath.FromSlash(dir), func(path string, info os.FileInfo, werr error) error {
 			if werr != nil {
-				return nil
+				return nil //nolint:nilerr // walk-callback contract: skip unreadable subtrees, continue the sweep
 			}
 			if info.IsDir() {
 				rel, rerr := filepath.Rel(filepath.FromSlash(dir), path)

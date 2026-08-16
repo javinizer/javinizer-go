@@ -116,3 +116,33 @@ func TestSweep_NestedRoot_BackupDiscoveredThreeLevelsDeep(t *testing.T) {
 	require.Equal(t, "nested-old", string(mustRead2(t, fs, dest)))
 	fmt.Println("") // keep fmt import referenced across build variants
 }
+
+// codex P3 R5-3: restores stream through a bounded buffer — a trailer-class
+// backup restores byte-exactly without whole-file buffering.
+func TestRevertRestore_StreamsLargeBackup(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	repo := newP3OpRepo()
+	ctx := context.Background()
+
+	const size = 6 << 20 // 6 MiB — plain evidence the path works above the buffer size
+	big := make([]byte, size)
+	for i := range big {
+		big[i] = byte(i % 251)
+	}
+
+	f := &p3Fixture{fs: fs, repo: repo}
+	op, dest := f.addAppliedOp(t, "job-1", "BIG-001", false, "new", p3Replacement{seq: 1, backupBytes: ""})
+	// Replace the tiny fixture backup with the big one.
+	require.NoError(t, afero.WriteFile(fs, dest+".dlbak.a", big, config.FilePerm))
+	require.NotNil(t, op)
+
+	r := NewReverter(fs, repo)
+	res, err := r.RevertBatch(ctx, "job-1")
+	require.NoError(t, err)
+	require.Equal(t, 1, res.Succeeded)
+
+	got, err := afero.ReadFile(fs, dest)
+	require.NoError(t, err)
+	require.Equal(t, len(big), len(got))
+	require.Equal(t, big, got, "restored bytes must be byte-identical")
+}

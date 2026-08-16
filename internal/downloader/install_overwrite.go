@@ -93,11 +93,20 @@ func (d *Downloader) installOverwriting(ctx context.Context, stagedPath, destPat
 		}
 		return false, true, fmt.Errorf("failed to replace file: %w", err)
 	}
-	// R4-3: confirm the install so the sweeper can distinguish "backup
-	// journaled but install never landed" (auto-restorable crash window) from
-	// "installed media deleted afterwards" (must NOT be resurrected).
+	// R4-3/R5-2: confirm the install so the sweeper can distinguish "backup
+	// journaled but install never landed" from "installed media deleted
+	// afterwards". An unconfirmed entry MUST NOT outlive a successful return:
+	// a transient confirm failure rolls the install back (backup onto the
+	// destination) and retracts the journal — never report success with an
+	// armed entry, or a later user deletion reads as a crash window.
 	if cErr := ledger.recorder.ConfirmReplacement(ctx, ledger.opID, destPath, backupPath); cErr != nil {
-		logging.Warnf("downloader: install-confirm failed for %s: %v (entry stays armed; sweep retains conservative posture)", destPath, cErr)
+		if rErr := d.fs.Rename(backupPath, destPath); rErr != nil {
+			return false, true, fmt.Errorf("install-confirm failed: %w (AND rollback restore failed: %v — bytes remain at %s)", cErr, rErr, backupPath)
+		}
+		if relErr := ledger.recorder.ReleaseReplacement(ctx, ledger.opID, destPath, backupPath); relErr != nil {
+			return false, true, fmt.Errorf("install-confirm failed (%w); rolled back but journal retract failed: %v (backup consumed, entry stale — row stays failed for sweep/retry)", cErr, relErr)
+		}
+		return false, true, fmt.Errorf("install-confirm failed, rolled back to pre-existing bytes: %w", cErr)
 	}
 	return false, true, nil
 }

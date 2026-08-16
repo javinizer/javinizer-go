@@ -286,3 +286,43 @@ func TestDownloader_SameOpDoubleOverwrite_UniqueBackups(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []byte("gen-B"), final)
 }
+
+// codex P3 R5-2: a transient confirm failure must roll the install back and
+// retract the journal — success is never reported against an armed entry.
+func TestDownload_ConfirmFailureRollsBackAndRetracts(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		_, _ = w.Write([]byte("new-bytes"))
+	}))
+	defer server.Close()
+
+	fs := afero.NewMemMapFs()
+	dest := "/output/CNF-1-poster.jpg"
+	old := []byte("old-bytes")
+	require.NoError(t, afero.WriteFile(fs, dest, old, 0644))
+
+	d := NewDownloader(server.Client(), fs, &Config{DownloadCover: true}, nil)
+	rec := &confirmFailingLedger{armedTestLedger: &armedTestLedger{}, err: errors.New("db wedged")}
+	result, err := d.download(context.Background(), server.URL+"/cover.jpg", dest, MediaTypeCover, true, nil,
+		downloadLedger{opID: "op-confirm-fail", recorder: rec})
+
+	require.Error(t, err, "unconfirmed installs must not report success")
+	assert.False(t, result.Downloaded)
+	got, rerr := afero.ReadFile(fs, dest)
+	require.NoError(t, rerr)
+	assert.Equal(t, old, got, "rollback restored pre-existing bytes")
+	assert.Empty(t, rec.get(), "stale entry retracted via ReleaseReplacement")
+	entries, _ := afero.ReadDir(fs, "/output")
+	for _, e := range entries {
+		assert.False(t, strings.Contains(e.Name(), ".dlbak."), "backup residue after rollback: %s", e.Name())
+	}
+}
+
+type confirmFailingLedger struct {
+	*armedTestLedger
+	err error
+}
+
+func (l *confirmFailingLedger) ConfirmReplacement(context.Context, string, string, string) error {
+	return l.err
+}

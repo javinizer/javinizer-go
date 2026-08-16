@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"os"
 	"sort"
 	"strconv"
 	"sync/atomic"
@@ -227,13 +229,28 @@ var restoreCopyNonce atomic.Uint64
 // rename; the caller removes the backup only after its journal entry is
 // durably consumed.
 func copyRestoreBytes(fs afero.Fs, backup, dest string) error {
-	data, err := afero.ReadFile(fs, backup)
+	src, err := fs.Open(backup)
 	if err != nil {
 		return fmt.Errorf("read backup: %w", err)
 	}
+	defer func() { _ = src.Close() }()
 	staged := dest + ".rstr." + strconv.FormatUint(restoreCopyNonce.Add(1), 16)
-	if err := afero.WriteFile(fs, staged, data, config.FilePerm); err != nil {
-		return fmt.Errorf("stage restore: %w", err)
+	dstFile, err := fs.OpenFile(staged, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, config.FilePerm)
+	if err != nil {
+		return fmt.Errorf("stage restore open: %w", err)
+	}
+	// R5-3: stream with a bounded buffer — trailer-class backups can reach
+	// gigabytes; a whole-file read would exhaust memory on revert/startup
+	// recovery alike.
+	buf := make([]byte, 256*1024)
+	if _, cerr := io.CopyBuffer(dstFile, src, buf); cerr != nil {
+		_ = dstFile.Close()
+		_ = fs.Remove(staged)
+		return fmt.Errorf("stage restore copy: %w", cerr)
+	}
+	if err := dstFile.Close(); err != nil {
+		_ = fs.Remove(staged)
+		return fmt.Errorf("stage restore close: %w", err)
 	}
 	if err := fsutil.ReplaceFile(fs, staged, dest); err != nil {
 		_ = fs.Remove(staged)

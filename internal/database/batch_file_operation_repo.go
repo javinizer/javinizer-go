@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -167,7 +168,15 @@ func (r *BatchFileOperationRepository) CountRevertedByBatchJobIDs(ctx context.Co
 // candidates; entries are matched exactly in-process so path substrings and
 // LIKE metacharacters can neither over- nor under-match.
 func (r *BatchFileOperationRepository) FindOperationsByDestination(ctx context.Context, destination string) ([]models.BatchFileOperation, error) {
-	escaped := strings.NewReplacer("\\", "\\\\", "%", "\\%", "_", "\\_").Replace(destination)
+	// R5-1: destinations live inside JSON, whose encoder escapes `\` (and
+	// `"`/controls); matching the RAW path against the JSON column under-matches
+	// on Windows (`D:\a` is stored as `D:\\a`). Shape the pattern from the
+	// JSON encoding of the path first, then apply LIKE escaping on top.
+	jsonEsc := destination
+	if enc, err := json.Marshal(destination); err == nil && len(enc) >= 2 {
+		jsonEsc = string(enc[1 : len(enc)-1])
+	}
+	escaped := strings.NewReplacer("\\", "\\\\", "%", "\\%", "_", "\\_").Replace(jsonEsc)
 	likePattern := "%" + escaped + "%"
 	var candidates []models.BatchFileOperation
 	err := r.GetDB().WithContext(ctx).
