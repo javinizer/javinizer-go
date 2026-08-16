@@ -156,7 +156,7 @@ func fromURLFixture(t *testing.T, movieID string) (*coreDepsOut, *worker.BatchJo
 
 	rt := testkit.GetTestRuntime(deps)
 	rt.GetRuntime().GetPosterManager(func() poster.PosterManagerInterface {
-		return poster.NewPosterManager(deps.GetFs(), "data/temp", &http.Client{}).
+		return poster.NewPosterManager(deps.GetFs(), "data/temp", &http.Client{}, 0).
 			WithSSRFCheck(func(string) error { return nil })
 	})
 

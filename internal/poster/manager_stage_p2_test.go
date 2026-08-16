@@ -56,7 +56,7 @@ func TestPosterManager_CropWithBounds_FailedInstallKeepsPreviousPreview(t *testi
 	base2 := &renameFailWhereFS{Fs: base, fail: func(o, n string) bool {
 		return strings.Contains(o, ".tmp") && strings.HasSuffix(n, "/ST-1.jpg")
 	}}
-	pm := NewPosterManager(base2, "/tmp/p2", nil)
+	pm := NewPosterManager(base2, "/tmp/p2", nil, 0)
 
 	_, err := pm.CropWithBounds(context.Background(), "job1", "ST-1", 0, 0, 100, 150, 0)
 	require.Error(t, err, "install failure must surface")
@@ -85,7 +85,7 @@ func TestPosterManager_CropWithBounds_InstallWritesFinalPathOnlyViaRename(t *tes
 	require.NoError(t, afero.WriteFile(base, dir+"/ST-2.jpg", []byte("old-preview-bytes"), 0o644))
 
 	spy := &writeSpyFS{Fs: base, writes: map[string]int{}}
-	pm := NewPosterManager(spy, "/tmp/p2", nil)
+	pm := NewPosterManager(spy, "/tmp/p2", nil, 0)
 
 	res, err := pm.CropWithBounds(context.Background(), "job1", "ST-2", 0, 0, 100, 150, 0)
 	require.NoError(t, err)
@@ -108,7 +108,7 @@ func TestPosterManager_SnapshotRestore_RoundTrip(t *testing.T) {
 	require.NoError(t, base.MkdirAll(dir, 0o755))
 	require.NoError(t, afero.WriteFile(base, dir+"/SN-1-full.jpg", jpegBytes(200, 300), 0o644))
 	require.NoError(t, afero.WriteFile(base, dir+"/SN-1.jpg", []byte("crop-v1"), 0o644))
-	pm := NewPosterManager(base, "/tmp/p2", nil)
+	pm := NewPosterManager(base, "/tmp/p2", nil, 0)
 
 	snap, err := pm.SnapshotAssets("job1", "SN-1")
 	require.NoError(t, err)
@@ -134,7 +134,7 @@ func TestPosterManager_SnapshotRestore_RemovesCreatedAssets(t *testing.T) {
 	dir := "/tmp/p2/posters/job1"
 	require.NoError(t, base.MkdirAll(dir, 0o755))
 	require.NoError(t, afero.WriteFile(base, dir+"/SN-2-full.jpg", jpegBytes(200, 300), 0o644))
-	pm := NewPosterManager(base, "/tmp/p2", nil)
+	pm := NewPosterManager(base, "/tmp/p2", nil, 0)
 
 	snap, err := pm.SnapshotAssets("job1", "SN-2")
 	require.NoError(t, err)
@@ -203,7 +203,7 @@ func TestPosterManager_CropWithBounds_AsideFailureKeepsEverything(t *testing.T) 
 	wedged := openFileFailWhereFS{Fs: base, fail: func(n string, flag int) bool {
 		return strings.Contains(n, ".bak") && flag&os.O_CREATE != 0
 	}}
-	pm := NewPosterManager(wedged, "/tmp/p2", nil)
+	pm := NewPosterManager(wedged, "/tmp/p2", nil, 0)
 
 	_, err := pm.CropWithBounds(context.Background(), "job1", "ST-3", 0, 0, 100, 150, 0)
 	require.ErrorContains(t, err, "back up previous preview")
@@ -230,7 +230,7 @@ func TestPosterManager_CropWithBounds_InstallFailureKeepsOld(t *testing.T) {
 	wedged := renameFailWhereFS{Fs: base, fail: func(o, n string) bool {
 		return strings.Contains(o, ".tmp") && strings.HasSuffix(n, "/ST-4.jpg")
 	}}
-	pm := NewPosterManager(wedged, "/tmp/p2", nil)
+	pm := NewPosterManager(wedged, "/tmp/p2", nil, 0)
 
 	_, err := pm.CropWithBounds(context.Background(), "job1", "ST-4", 0, 0, 100, 150, 0)
 	require.Error(t, err)
@@ -258,7 +258,7 @@ func TestPosterManager_CropWithBounds_BackupSweepWarnKeepsSuccess(t *testing.T) 
 	require.NoError(t, afero.WriteFile(base, dir+"/ST-5-full.jpg", jpegBytes(200, 300), 0o644))
 	require.NoError(t, afero.WriteFile(base, dir+"/ST-5.jpg", []byte("old-preview"), 0o644))
 	wedged := removeFailWhereFS{Fs: base, fail: func(n string) bool { return strings.HasSuffix(n, ".bak") }}
-	pm := NewPosterManager(wedged, "/tmp/p2", nil)
+	pm := NewPosterManager(wedged, "/tmp/p2", nil, 0)
 
 	res, err := pm.CropWithBounds(context.Background(), "job1", "ST-5", 0, 0, 100, 150, 0)
 	require.NoError(t, err, "sweep wedge is warn-only")
@@ -274,7 +274,7 @@ func TestPosterManager_SnapshotAssets_ReadFaultSurfaces(t *testing.T) {
 	dir := "/tmp/p2/posters/job1"
 	require.NoError(t, base.MkdirAll(dir, 0o755))
 	require.NoError(t, afero.WriteFile(base, dir+"/SN-9-full.jpg", jpegBytes(200, 300), 0o644))
-	pm := NewPosterManager(openFailSuffixFS{Fs: base, suffix: "/SN-9-full.jpg"}, "/tmp/p2", nil)
+	pm := NewPosterManager(openFailSuffixFS{Fs: base, suffix: "/SN-9-full.jpg"}, "/tmp/p2", nil, 0)
 	_, err := pm.SnapshotAssets("job1", "SN-9")
 	require.ErrorContains(t, err, "snapshot assets")
 }
@@ -282,13 +282,13 @@ func TestPosterManager_SnapshotAssets_ReadFaultSurfaces(t *testing.T) {
 // Nil snapshot is a no-op; the crop-leg read fault also surfaces.
 func TestPosterManager_SnapshotRestore_EdgeArms(t *testing.T) {
 	base := afero.NewMemMapFs()
-	pm := NewPosterManager(base, "/tmp/p2", nil)
+	pm := NewPosterManager(base, "/tmp/p2", nil, 0)
 	require.NoError(t, pm.RestoreAssets(nil))
 
 	dir := "/tmp/p2/posters/job1"
 	require.NoError(t, base.MkdirAll(dir, 0o755))
 	require.NoError(t, afero.WriteFile(base, dir+"/SN-8.jpg", []byte("crop"), 0o644))
-	pm2 := NewPosterManager(openFailSuffixFS{Fs: base, suffix: "/SN-8.jpg"}, "/tmp/p2", nil)
+	pm2 := NewPosterManager(openFailSuffixFS{Fs: base, suffix: "/SN-8.jpg"}, "/tmp/p2", nil, 0)
 	_, err := pm2.SnapshotAssets("job1", "SN-8")
 	require.ErrorContains(t, err, "snapshot assets")
 }
@@ -301,20 +301,20 @@ func TestPosterManager_RestoreAssets_LegFailureArms(t *testing.T) {
 	dir := "/tmp/p2/posters/job1"
 	require.NoError(t, base.MkdirAll(dir, 0o755))
 	require.NoError(t, afero.WriteFile(base, dir+"/SN-3-full.jpg", jpegBytes(200, 300), 0o644))
-	pm := NewPosterManager(base, "/tmp/p2", nil)
+	pm := NewPosterManager(base, "/tmp/p2", nil, 0)
 	snap, err := pm.SnapshotAssets("job1", "SN-3")
 	require.NoError(t, err)
 	require.NoError(t, afero.WriteFile(base, dir+"/SN-3.jpg", jpegBytes(100, 150), 0o644))
 
 	wedged := removeFailWhereFS{Fs: base, fail: func(n string) bool { return strings.HasSuffix(n, "/SN-3.jpg") }}
-	pmWedged := NewPosterManager(wedged, "/tmp/p2", nil)
+	pmWedged := NewPosterManager(wedged, "/tmp/p2", nil, 0)
 	require.ErrorContains(t, pmWedged.RestoreAssets(snap), "remove created leg")
 
 	// staged-write wedge when restoring an existing leg
 	base2 := afero.NewMemMapFs()
 	require.NoError(t, base2.MkdirAll(dir, 0o755))
 	require.NoError(t, afero.WriteFile(base2, dir+"/SN-4.jpg", []byte("v1"), 0o644))
-	pm2 := NewPosterManager(base2, "/tmp/p2", nil)
+	pm2 := NewPosterManager(base2, "/tmp/p2", nil, 0)
 	snap2, err := pm2.SnapshotAssets("job1", "SN-4")
 	require.NoError(t, err)
 	require.NoError(t, afero.WriteFile(base2, dir+"/SN-4.jpg", []byte("v2"), 0o644))
@@ -322,7 +322,7 @@ func TestPosterManager_RestoreAssets_LegFailureArms(t *testing.T) {
 	stageWedged := openFileFailWhereFS{Fs: base2, fail: func(n string, flag int) bool {
 		return strings.HasSuffix(n, ".tmp") && flag&os.O_CREATE != 0
 	}}
-	pm3 := NewPosterManager(stageWedged, "/tmp/p2", nil)
+	pm3 := NewPosterManager(stageWedged, "/tmp/p2", nil, 0)
 	require.ErrorContains(t, pm3.RestoreAssets(snap2), "stage leg")
 	got, rerr := afero.ReadFile(base2, dir+"/SN-4.jpg")
 	require.NoError(t, rerr)
@@ -330,7 +330,7 @@ func TestPosterManager_RestoreAssets_LegFailureArms(t *testing.T) {
 
 	// install wedge when restoring: error surfaces and no residue remains
 	installWedged := renameFailWhereFS{Fs: base2, fail: func(o, n string) bool { return strings.Contains(o, ".tmp") }}
-	pm4 := NewPosterManager(installWedged, "/tmp/p2", nil)
+	pm4 := NewPosterManager(installWedged, "/tmp/p2", nil, 0)
 	require.ErrorContains(t, pm4.RestoreAssets(snap2), "install leg")
 	entries, derr := afero.ReadDir(base2, dir)
 	require.NoError(t, derr)
@@ -341,7 +341,7 @@ func TestPosterManager_RestoreAssets_LegFailureArms(t *testing.T) {
 
 // Validation arms: a hostile jobID/posterID fails before any fs access.
 func TestPosterManager_SnapshotRestore_ValidationArms(t *testing.T) {
-	pm := NewPosterManager(afero.NewMemMapFs(), "/tmp/p2", nil)
+	pm := NewPosterManager(afero.NewMemMapFs(), "/tmp/p2", nil, 0)
 	if _, err := pm.SnapshotAssets("../escape", "V-1"); err == nil {
 		t.Fatal("invalid jobID must fail")
 	}
@@ -357,7 +357,7 @@ func TestPosterManager_RestoreAssets_FullLegFailureAbortsCropLeg(t *testing.T) {
 	require.NoError(t, base.MkdirAll(dir, 0o755))
 	require.NoError(t, afero.WriteFile(base, dir+"/SN-7-full.jpg", jpegBytes(200, 300), 0o644))
 	require.NoError(t, afero.WriteFile(base, dir+"/SN-7.jpg", []byte("crop-v1"), 0o644))
-	pm := NewPosterManager(base, "/tmp/p2", nil)
+	pm := NewPosterManager(base, "/tmp/p2", nil, 0)
 	snap, err := pm.SnapshotAssets("job1", "SN-7")
 	require.NoError(t, err)
 	require.NoError(t, afero.WriteFile(base, dir+"/SN-7.jpg", []byte("crop-v2"), 0o644))
@@ -366,7 +366,7 @@ func TestPosterManager_RestoreAssets_FullLegFailureAbortsCropLeg(t *testing.T) {
 	wedged := openFileFailWhereFS{Fs: base, fail: func(n string, flag int) bool {
 		return strings.Contains(n, "SN-7-full.jpg.") && strings.HasSuffix(n, ".tmp") && flag&os.O_CREATE != 0
 	}}
-	pmWedged := NewPosterManager(wedged, "/tmp/p2", nil)
+	pmWedged := NewPosterManager(wedged, "/tmp/p2", nil, 0)
 	err2 := pmWedged.RestoreAssets(snap)
 	require.ErrorContains(t, err2, "stage leg")
 	got, rerr := afero.ReadFile(base, dir+"/SN-7.jpg")
@@ -381,7 +381,7 @@ func TestPosterManager_CropWithBounds_StagedCleanupWarnOnFailure(t *testing.T) {
 	require.NoError(t, base.MkdirAll(dir, 0o755))
 	require.NoError(t, afero.WriteFile(base, dir+"/ST-6-full.jpg", jpegBytes(200, 300), 0o644))
 	wedged := removeFailWhereFS{Fs: base, fail: func(n string) bool { return strings.HasSuffix(n, ".tmp") }}
-	pm := NewPosterManager(wedged, "/tmp/p2", nil)
+	pm := NewPosterManager(wedged, "/tmp/p2", nil, 0)
 
 	// Out-of-range bounds: crop fails after the staged name is allocated.
 	_, err := pm.CropWithBounds(context.Background(), "job1", "ST-6", 0, 0, 99999, 99999, 0)
@@ -397,7 +397,7 @@ func TestInstallStagedPreview_StatWedgeFailsClosed(t *testing.T) {
 	require.NoError(t, base.MkdirAll(dir, 0o755))
 	require.NoError(t, afero.WriteFile(base, dir+"/FC-1.jpg", []byte("old-preview"), 0o644))
 	wedged := statFailExactFS{Fs: base, path: dir + "/FC-1.jpg"}
-	pm := NewPosterManager(wedged, "/tmp/p2", nil)
+	pm := NewPosterManager(wedged, "/tmp/p2", nil, 0)
 
 	staged := dir + "/FC-1.jpg.staged.tmp"
 	require.NoError(t, afero.WriteFile(base, staged, []byte("new-preview"), 0o644))
@@ -428,7 +428,7 @@ func TestInstallStagedPreview_NeverRemovesCanonical(t *testing.T) {
 	wedgeRemoveFinal := removeFailWhereFS{Fs: base, fail: func(n string) bool {
 		return strings.HasSuffix(n, "/NG-1.jpg")
 	}}
-	pm := NewPosterManager(wedgeRemoveFinal, "/tmp/p2", nil)
+	pm := NewPosterManager(wedgeRemoveFinal, "/tmp/p2", nil, 0)
 
 	err := pm.installStagedPreview(dir+"/NG-1.jpg", dir+"/NG-1.jpg.staged.tmp")
 	require.NoError(t, err, "no Remove(final) step exists at all — swap is rename-atomic")
@@ -447,7 +447,7 @@ func TestInstallStagedPreview_FailedInstallBackupSweepWarnOnly(t *testing.T) {
 	combo := removeFailWhereFS{Fs: renameFailWhereFS{Fs: base, fail: func(o, n string) bool {
 		return strings.Contains(o, ".tmp") && strings.HasSuffix(n, "/NG-2.jpg")
 	}}, fail: func(n string) bool { return strings.HasSuffix(n, ".bak") }}
-	pm := NewPosterManager(combo, "/tmp/p2", nil)
+	pm := NewPosterManager(combo, "/tmp/p2", nil, 0)
 
 	err := pm.installStagedPreview(dir+"/NG-2.jpg", dir+"/NG-2.jpg.staged.tmp")
 	require.ErrorContains(t, err, "failed to install staged preview")

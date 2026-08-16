@@ -34,7 +34,7 @@ func TestStagePosterDownload_WritesNothingCanonicalBeforePromote(t *testing.T) {
 	srv := stageImageServer(t)
 	base := afero.NewMemMapFs()
 	spy := &writeSpyFS{Fs: base, writes: map[string]int{}}
-	pm := NewPosterManager(spy, "/tmp/p2", srv.Client()).WithSSRFCheck(func(string) error { return nil })
+	pm := NewPosterManager(spy, "/tmp/p2", srv.Client(), 0).WithSSRFCheck(func(string) error { return nil })
 
 	staged, err := pm.StagePosterDownload(context.Background(), StagePosterRequest{
 		JobID: "job1", PosterID: "ST-P1", URL: srv.URL + "/img.jpg",
@@ -87,7 +87,7 @@ func TestPromoteStagedPoster_PartialFailureRestoresFirstLeg(t *testing.T) {
 	require.NoError(t, base.MkdirAll(dir, 0o755))
 	require.NoError(t, afero.WriteFile(base, dir+"/ST-P2-full.jpg", []byte("old-full"), 0o644))
 	require.NoError(t, afero.WriteFile(base, dir+"/ST-P2.jpg", []byte("old-crop"), 0o644))
-	pm := NewPosterManager(base, "/tmp/p2", srv.Client()).WithSSRFCheck(func(string) error { return nil })
+	pm := NewPosterManager(base, "/tmp/p2", srv.Client(), 0).WithSSRFCheck(func(string) error { return nil })
 
 	// Stage via the public seam, then rehang on a rename-wedged fs.
 	staged, err := pm.StagePosterDownload(context.Background(), StagePosterRequest{
@@ -99,7 +99,7 @@ func TestPromoteStagedPoster_PartialFailureRestoresFirstLeg(t *testing.T) {
 	wedged := renameFailWhereFS{Fs: base, fail: func(o, n string) bool {
 		return strings.Contains(o, ".stage-") && strings.HasSuffix(n, "/ST-P2.jpg")
 	}}
-	pmWedged := NewPosterManager(wedged, "/tmp/p2", nil)
+	pmWedged := NewPosterManager(wedged, "/tmp/p2", nil, 0)
 
 	_, err2 := pmWedged.PromoteStagedPoster(staged)
 	require.ErrorContains(t, err2, "promote staged poster")
@@ -115,7 +115,7 @@ func TestPromoteStagedPoster_PartialFailureRestoresFirstLeg(t *testing.T) {
 func TestStagedPoster_DiscardAndNilSafety(t *testing.T) {
 	srv := stageImageServer(t)
 	base := afero.NewMemMapFs()
-	pm := NewPosterManager(base, "/tmp/p2", srv.Client()).WithSSRFCheck(func(string) error { return nil })
+	pm := NewPosterManager(base, "/tmp/p2", srv.Client(), 0).WithSSRFCheck(func(string) error { return nil })
 	staged, err := pm.StagePosterDownload(context.Background(), StagePosterRequest{
 		JobID: "job1", PosterID: "ST-P3", URL: srv.URL + "/img.jpg",
 	})
@@ -135,7 +135,7 @@ func TestStagedPoster_DiscardAndNilSafety(t *testing.T) {
 func TestScrapePosterGeneratorStageSplit(t *testing.T) {
 	srv := stageImageServer(t)
 	base := afero.NewMemMapFs()
-	pm := NewPosterManager(base, "/tmp/p2", srv.Client()).WithSSRFCheck(func(string) error { return nil })
+	pm := NewPosterManager(base, "/tmp/p2", srv.Client(), 0).WithSSRFCheck(func(string) error { return nil })
 	gen := NewScrapePosterGenerator(pm, "", "")
 
 	movie := &models.Movie{ID: "G-1", Poster: models.PosterState{CoverURL: srv.URL + "/cover.jpg"}}
@@ -160,7 +160,7 @@ func TestScrapePosterGeneratorStageSplit(t *testing.T) {
 
 func TestStagePosterDownload_ValidationAndDownloadErrors(t *testing.T) {
 	srv := stageImageServer(t)
-	pm := NewPosterManager(afero.NewMemMapFs(), "/tmp/p2", srv.Client()).WithSSRFCheck(func(string) error { return nil })
+	pm := NewPosterManager(afero.NewMemMapFs(), "/tmp/p2", srv.Client(), 0).WithSSRFCheck(func(string) error { return nil })
 	if _, err := pm.StagePosterDownload(context.Background(), StagePosterRequest{JobID: "../escape", PosterID: "X-1", URL: srv.URL}); err == nil {
 		t.Fatal("invalid jobID must fail")
 	}
@@ -191,7 +191,7 @@ func TestPromoteStagedPoster_StagingStatErrorAborts(t *testing.T) {
 	require.NoError(t, base.MkdirAll("/tmp/p2/posters/job1", 0o755))
 	require.NoError(t, afero.WriteFile(base, "/tmp/p2/posters/job1/ST-P4.stage-x.jpg", []byte("s"), 0o644))
 	wedged := statFailExactFS{Fs: base, path: "/tmp/p2/posters/job1/ST-P4.stage-x-full.jpg"}
-	pm := NewPosterManager(wedged, "/tmp/p2", nil)
+	pm := NewPosterManager(wedged, "/tmp/p2", nil, 0)
 	_, err := pm.PromoteStagedPoster(NewStagedPosterHandleForTest("job1", "ST-P4.stage-x", "ST-P4", ""))
 	require.ErrorContains(t, err, "promote staging stat")
 }
@@ -205,7 +205,7 @@ func TestPromoteStagedPoster_CanonicalStatErrorAborts(t *testing.T) {
 	require.NoError(t, afero.WriteFile(base, dir+"/ST-P5.stage-x.jpg", []byte("s-crop"), 0o644))
 	require.NoError(t, afero.WriteFile(base, dir+"/ST-P5-full.jpg", []byte("c"), 0o644))
 	wedged := statFailExactFS{Fs: base, path: dir + "/ST-P5-full.jpg"}
-	pm := NewPosterManager(wedged, "/tmp/p2", nil)
+	pm := NewPosterManager(wedged, "/tmp/p2", nil, 0)
 	_, err := pm.PromoteStagedPoster(NewStagedPosterHandleForTest("job1", "ST-P5.stage-x", "ST-P5", ""))
 	require.ErrorContains(t, err, "promote canonical stat")
 	got, _ := afero.ReadFile(base, dir+"/ST-P5-full.jpg")
@@ -226,7 +226,7 @@ func TestPromoteStagedPoster_AsideFailureRestoresEarlierLegs(t *testing.T) {
 	wedged := renameFailWhereFS{Fs: base, fail: func(o, n string) bool {
 		return strings.HasSuffix(n, ".bak") && strings.Contains(o, "ST-P6.jpg")
 	}}
-	pm := NewPosterManager(wedged, "/tmp/p2", nil)
+	pm := NewPosterManager(wedged, "/tmp/p2", nil, 0)
 	_, err := pm.PromoteStagedPoster(NewStagedPosterHandleForTest("job1", "ST-P6.stage-x", "ST-P6", ""))
 	require.ErrorContains(t, err, "back up")
 	got, _ := afero.ReadFile(base, dir+"/ST-P6-full.jpg")
@@ -247,7 +247,7 @@ func TestPromoteStagedPoster_Phase2FailureWithoutBackup(t *testing.T) {
 	wedged := renameFailWhereFS{Fs: base, fail: func(o, n string) bool {
 		return strings.Contains(o, ".stage-") && strings.HasSuffix(n, "/ST-P7.jpg")
 	}}
-	pm := NewPosterManager(wedged, "/tmp/p2", nil)
+	pm := NewPosterManager(wedged, "/tmp/p2", nil, 0)
 	_, err := pm.PromoteStagedPoster(NewStagedPosterHandleForTest("job1", "ST-P7.stage-x", "ST-P7", ""))
 	require.ErrorContains(t, err, "promote staged poster")
 	_, ferr := base.Stat(dir + "/ST-P7-full.jpg")
@@ -270,7 +270,7 @@ func TestPromoteStagedPoster_RestoreFailureWarnsKeepsBackup(t *testing.T) {
 	wedged := renameFailWhereFS{Fs: base, fail: func(_, n string) bool {
 		return strings.HasSuffix(n, "/ST-P8-full.jpg")
 	}}
-	pm := NewPosterManager(wedged, "/tmp/p2", nil)
+	pm := NewPosterManager(wedged, "/tmp/p2", nil, 0)
 	_, err := pm.PromoteStagedPoster(NewStagedPosterHandleForTest("job1", "ST-P8.stage-x", "ST-P8", ""))
 	require.ErrorContains(t, err, "promote staged poster")
 }
@@ -284,7 +284,7 @@ func TestPromoteStagedPoster_BackupSweepWarnIsNonFatal(t *testing.T) {
 	require.NoError(t, afero.WriteFile(base, dir+"/ST-P9-stagez.jpg", []byte("s"), 0o644))
 	require.NoError(t, afero.WriteFile(base, dir+"/ST-P9.jpg", []byte("c"), 0o644))
 	wedged := removeFailWhereFS{Fs: base, fail: func(n string) bool { return strings.HasSuffix(n, ".bak") }}
-	pm := NewPosterManager(wedged, "/tmp/p2", nil)
+	pm := NewPosterManager(wedged, "/tmp/p2", nil, 0)
 	res, err := pm.PromoteStagedPoster(NewStagedPosterHandleForTest("job1", "ST-P9-stagez", "ST-P9", dir+"/ST-P9.jpg"))
 	require.NoError(t, err)
 	require.NotNil(t, res)
@@ -306,7 +306,7 @@ func TestStagedPoster_DiscardRemoveFailureWarns(t *testing.T) {
 	dir := "/tmp/p2/posters/job1"
 	require.NoError(t, base.MkdirAll(dir, 0o755))
 	require.NoError(t, afero.WriteFile(base, dir+"/ST-P10.stage-x.jpg", []byte("s"), 0o644))
-	pm := NewPosterManager(removeFailWhereFS{Fs: base, fail: func(string) bool { return true }}, "/tmp/p2", nil)
+	pm := NewPosterManager(removeFailWhereFS{Fs: base, fail: func(string) bool { return true }}, "/tmp/p2", nil, 0)
 	pm.DiscardStagedPoster(NewStagedPosterHandleForTest("job1", "ST-P10.stage-x", "ST-P10", "")) // warn-only, must not panic
 }
 
@@ -395,7 +395,7 @@ func TestPromoteStagedPoster_CanonicalStatWedgedRestoresAsidedLeg(t *testing.T) 
 	// The crop leg's canonical Stat fails transiently: the full leg has
 	// already been asided to .bak — the restore must put it back.
 	wedged := statFailExactFS{Fs: base, path: dir + "/PC-1.jpg"}
-	pm := NewPosterManager(wedged, "/tmp/p2", nil)
+	pm := NewPosterManager(wedged, "/tmp/p2", nil, 0)
 	_, err := pm.PromoteStagedPoster(NewStagedPosterHandleForTest("job1", "PC-1.stage-x", "PC-1", ""))
 	require.ErrorContains(t, err, "promote canonical stat")
 
@@ -432,7 +432,7 @@ func TestPromoteStagedPoster_RestoreRenameWedgedKeepsBackup(t *testing.T) {
 		}
 		return strings.Contains(o, ".bak") && strings.HasSuffix(n, "/R-4-full.jpg")
 	}}
-	pm := NewPosterManager(wedged, "/tmp/p2", nil)
+	pm := NewPosterManager(wedged, "/tmp/p2", nil, 0)
 	_, err := pm.PromoteStagedPoster(NewStagedPosterHandleForTest("job1", "R-4.stage-x", "R-4", ""))
 	require.ErrorContains(t, err, "promote staged poster")
 
@@ -468,7 +468,7 @@ func TestPromoteStagedPoster_IncompleteStageFails(t *testing.T) {
 	require.NoError(t, afero.WriteFile(base, dir+"/INC-1.stage-x.jpg", []byte("s-crop"), 0o644))
 	require.NoError(t, afero.WriteFile(base, dir+"/INC-1-full.jpg", []byte("c-full"), 0o644))
 	require.NoError(t, afero.WriteFile(base, dir+"/INC-1.jpg", []byte("c-crop"), 0o644))
-	pm := NewPosterManager(base, "/tmp/p2", nil)
+	pm := NewPosterManager(base, "/tmp/p2", nil, 0)
 
 	_, err := pm.PromoteStagedPoster(NewStagedPosterHandleForTest("job1", "INC-1.stage-x", "INC-1", ""))
 	require.ErrorContains(t, err, "incomplete stage")

@@ -52,7 +52,7 @@ func TestDownloadFromURL_FailureRestoresParkedPair(t *testing.T) {
 	require.NoError(t, afero.WriteFile(base, dir+"/BAD-1-full.jpg", []byte("originalfull"), 0o644))
 	require.NoError(t, afero.WriteFile(base, dir+"/BAD-1.jpg", []byte("originalcrop"), 0o644))
 	fs := createFailSuffixFS{Fs: base, suffix: "BAD-1.jpg"}
-	pm := NewPosterManager(fs, "/tmp/javinizer-test", srv.Client()).WithSSRFCheck(func(_ string) error { return nil })
+	pm := NewPosterManager(fs, "/tmp/javinizer-test", srv.Client(), 0).WithSSRFCheck(func(_ string) error { return nil })
 
 	_, err := pm.DownloadFromURL(context.Background(), "job1", "BAD-1", srv.URL+"/img.jpg", "", "")
 	require.Error(t, err)
@@ -94,7 +94,7 @@ func TestDownloadFromURL_ParkFailureAbortsClean(t *testing.T) {
 	require.NoError(t, base.MkdirAll(dir, 0o755))
 	require.NoError(t, afero.WriteFile(base, dir+"/BAD-2-full.jpg", []byte("originalfull"), 0o644))
 	fs := renameFailWhereFS{Fs: base, fail: func(_, n string) bool { return strings.HasSuffix(n, ".dlbak") }}
-	pm := NewPosterManager(fs, "/tmp/javinizer-test", srv.Client()).WithSSRFCheck(func(_ string) error { return nil })
+	pm := NewPosterManager(fs, "/tmp/javinizer-test", srv.Client(), 0).WithSSRFCheck(func(_ string) error { return nil })
 	_, err := pm.DownloadFromURL(context.Background(), "job1", "BAD-2", srv.URL+"/img.jpg", "", "")
 	require.ErrorContains(t, err, "failed to park previous full poster")
 	got, rerr := afero.ReadFile(base, dir+"/BAD-2-full.jpg")
@@ -119,7 +119,7 @@ func TestDownloadFromURL_FinalizeFailureRestoresPair(t *testing.T) {
 	fs := renameFailWhereFS{Fs: base, fail: func(o, n string) bool {
 		return n == filepath.ToSlash(target) && !strings.HasSuffix(o, ".dlbak") // finalize (and restore) fail; park succeeds
 	}}
-	pm := NewPosterManager(fs, "/tmp/javinizer-test", srv.Client()).WithSSRFCheck(func(_ string) error { return nil })
+	pm := NewPosterManager(fs, "/tmp/javinizer-test", srv.Client(), 0).WithSSRFCheck(func(_ string) error { return nil })
 	_, err := pm.DownloadFromURL(context.Background(), "job1", "BAD-3", srv.URL+"/img.jpg", "", "")
 	require.ErrorContains(t, err, "failed to finalize image download")
 	got, rerr := afero.ReadFile(base, target)
@@ -141,7 +141,7 @@ func TestDownloadFromURL_CropParkFailureRestoresFull(t *testing.T) {
 	require.NoError(t, afero.WriteFile(base, dir+"/BAD-4-full.jpg", []byte("origfull"), 0o644))
 	require.NoError(t, afero.WriteFile(base, dir+"/BAD-4.jpg", []byte("origcrop"), 0o644))
 	fs := renameFailWhereFS{Fs: base, fail: func(_, n string) bool { return strings.HasSuffix(n, "BAD-4.jpg.dlbak") }}
-	pm := NewPosterManager(fs, "/tmp/javinizer-test", srv.Client()).WithSSRFCheck(func(_ string) error { return nil })
+	pm := NewPosterManager(fs, "/tmp/javinizer-test", srv.Client(), 0).WithSSRFCheck(func(_ string) error { return nil })
 	_, err := pm.DownloadFromURL(context.Background(), "job1", "BAD-4", srv.URL+"/img.jpg", "", "")
 	require.ErrorContains(t, err, "failed to park previous cropped poster")
 	full, ferr := afero.ReadFile(base, dir+"/BAD-4-full.jpg")
@@ -170,7 +170,7 @@ func TestDownloadFromURL_CropParkFailureRestoreWarns(t *testing.T) {
 			(strings.HasSuffix(o, ".dlbak") && n == filepath.ToSlash(dir)+"/BAD-5-full.jpg")
 	}
 	fs := renameFailWhereFS{Fs: base, fail: wedged}
-	pm := NewPosterManager(fs, "/tmp/javinizer-test", srv.Client()).WithSSRFCheck(func(_ string) error { return nil })
+	pm := NewPosterManager(fs, "/tmp/javinizer-test", srv.Client(), 0).WithSSRFCheck(func(_ string) error { return nil })
 	_, err := pm.DownloadFromURL(context.Background(), "job1", "BAD-5", srv.URL+"/img.jpg", "", "")
 	require.ErrorContains(t, err, "failed to park previous cropped poster")
 	_, bakErr := base.Stat(dir + "/BAD-5-full.jpg.dlbak")
@@ -197,7 +197,7 @@ func TestDownloadFromURL_DeferRestoreWarns(t *testing.T) {
 			return strings.HasSuffix(o, ".dlbak") && (n == filepath.ToSlash(dir)+"/BAD-6-full.jpg" || n == filepath.ToSlash(dir)+"/BAD-6.jpg")
 		},
 	}
-	pm := NewPosterManager(fs, "/tmp/javinizer-test", srv.Client()).WithSSRFCheck(func(_ string) error { return nil })
+	pm := NewPosterManager(fs, "/tmp/javinizer-test", srv.Client(), 0).WithSSRFCheck(func(_ string) error { return nil })
 	_, err := pm.DownloadFromURL(context.Background(), "job2", "BAD-6", srv.URL+"/img.jpg", "", "")
 	require.Error(t, err)
 	for _, p := range []string{dir + "/BAD-6-full.jpg.dlbak", dir + "/BAD-6.jpg.dlbak"} {
@@ -239,7 +239,7 @@ func TestDownloadFromURL_SuccessDiscardsParkedPair(t *testing.T) {
 	require.NoError(t, base.MkdirAll(dir, 0o755))
 	require.NoError(t, afero.WriteFile(base, dir+"/GOOD-1-full.jpg", []byte("stalefull"), 0o644))
 	require.NoError(t, afero.WriteFile(base, dir+"/GOOD-1.jpg", []byte("stalecrop"), 0o644))
-	pm := NewPosterManager(base, "/tmp/javinizer-test", srv.Client()).WithSSRFCheck(func(_ string) error { return nil })
+	pm := NewPosterManager(base, "/tmp/javinizer-test", srv.Client(), 0).WithSSRFCheck(func(_ string) error { return nil })
 
 	res, err := pm.DownloadFromURL(context.Background(), "job1", "GOOD-1", srv.URL+"/img.jpg", "", "")
 	require.NoError(t, err)
@@ -279,7 +279,7 @@ func TestDownloadFromURL_FullStatErrorRefusesDownload(t *testing.T) {
 	require.NoError(t, afero.WriteFile(base, dir+"/FULLST-1-full.jpg", []byte("originalfull"), 0o644))
 	require.NoError(t, afero.WriteFile(base, dir+"/FULLST-1.jpg", []byte("originalcrop"), 0o644))
 	fs := statFailExactFS{Fs: base, path: dir + "/FULLST-1-full.jpg"}
-	pm := NewPosterManager(fs, "/tmp/javinizer-test", srv.Client()).WithSSRFCheck(func(_ string) error { return nil })
+	pm := NewPosterManager(fs, "/tmp/javinizer-test", srv.Client(), 0).WithSSRFCheck(func(_ string) error { return nil })
 
 	_, err := pm.DownloadFromURL(context.Background(), "job1", "FULLST-1", srv.URL+"/img.jpg", "", "")
 	require.ErrorContains(t, err, "failed to inspect previous full poster")
@@ -310,7 +310,7 @@ func TestDownloadFromURL_FinalizeFailureRestoreAlsoFails(t *testing.T) {
 	// Every rename landing ON the canonical full name fails: the finalize and
 	// the subsequent restore attempt alike.
 	fs := renameFailWhereFS{Fs: base, fail: func(_, n string) bool { return strings.HasSuffix(n, "/FIN-2-full.jpg") }}
-	pm := NewPosterManager(fs, "/tmp/javinizer-test", srv.Client()).WithSSRFCheck(func(_ string) error { return nil })
+	pm := NewPosterManager(fs, "/tmp/javinizer-test", srv.Client(), 0).WithSSRFCheck(func(_ string) error { return nil })
 
 	_, err := pm.DownloadFromURL(context.Background(), "job1", "FIN-2", srv.URL+"/img.jpg", "", "")
 	require.ErrorContains(t, err, "failed to finalize image download")
@@ -335,7 +335,7 @@ func TestDownloadFromURL_CropStatErrorRestoreAlsoFails(t *testing.T) {
 	require.NoError(t, afero.WriteFile(base, dir+"/CST-2.jpg", []byte("originalcrop"), 0o644))
 	inner := renameFailWhereFS{Fs: base, fail: func(o, _ string) bool { return strings.HasSuffix(o, ".dlbak") }}
 	fs := statFailExactFS{Fs: inner, path: dir + "/CST-2.jpg"}
-	pm := NewPosterManager(fs, "/tmp/javinizer-test", srv.Client()).WithSSRFCheck(func(_ string) error { return nil })
+	pm := NewPosterManager(fs, "/tmp/javinizer-test", srv.Client(), 0).WithSSRFCheck(func(_ string) error { return nil })
 
 	_, err := pm.DownloadFromURL(context.Background(), "job1", "CST-2", srv.URL+"/img.jpg", "", "")
 	require.ErrorContains(t, err, "failed to inspect previous cropped poster")
@@ -360,7 +360,7 @@ func TestDownloadFromURL_CropStatErrorRestoresFullLeg(t *testing.T) {
 	require.NoError(t, afero.WriteFile(base, dir+"/CROPST-1-full.jpg", []byte("originalfull"), 0o644))
 	require.NoError(t, afero.WriteFile(base, dir+"/CROPST-1.jpg", []byte("originalcrop"), 0o644))
 	fs := statFailExactFS{Fs: base, path: dir + "/CROPST-1.jpg"}
-	pm := NewPosterManager(fs, "/tmp/javinizer-test", srv.Client()).WithSSRFCheck(func(_ string) error { return nil })
+	pm := NewPosterManager(fs, "/tmp/javinizer-test", srv.Client(), 0).WithSSRFCheck(func(_ string) error { return nil })
 
 	_, err := pm.DownloadFromURL(context.Background(), "job1", "CROPST-1", srv.URL+"/img.jpg", "", "")
 	require.ErrorContains(t, err, "failed to inspect previous cropped poster")

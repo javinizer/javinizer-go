@@ -289,7 +289,7 @@ func TestPosterFromURL_GenericDownloadErrorIs500(t *testing.T) {
 	rt2 := testkit.GetTestRuntime(deps)
 	rt2.GetRuntime().InvalidatePosterManager()
 	rt2.GetRuntime().GetPosterManager(func() poster.PosterManagerInterface {
-		return poster.NewPosterManager(deps.GetFs(), "data/temp", &http.Client{}).WithSSRFCheck(func(string) error { return nil })
+		return poster.NewPosterManager(deps.GetFs(), "data/temp", &http.Client{}, 0).WithSSRFCheck(func(string) error { return nil })
 	})
 	w := postFromURLRequest(t, router, job, "URLC-7", ts.URL+"/pic.jpg")
 	assert.Equal(t, 500, w.Code, "%s", w.Body.String())
@@ -378,7 +378,7 @@ func fromURLFixtureRealJob(t *testing.T, movieID string) (*coreDepsOut, *worker.
 
 	rt := testkit.GetTestRuntime(deps)
 	rt.GetRuntime().GetPosterManager(func() poster.PosterManagerInterface {
-		return poster.NewPosterManager(deps.GetFs(), "data/temp", &http.Client{}).
+		return poster.NewPosterManager(deps.GetFs(), "data/temp", &http.Client{}, 0).
 			WithSSRFCheck(func(string) error { return nil })
 	})
 
