@@ -36,13 +36,13 @@ func copyBackupToDest(fsys afero.Fs, backup, dest string) error {
 		return fmt.Errorf("open backup: %w", err)
 	}
 	defer func() { _ = src.Close() }()
-	staged := dest + ".dlrstr." + strconv.FormatUint(restoreCopyOrdinal.Add(1), 16)
+	stagedOrdinal := restoreCopyOrdinal.Add(1)
 	// codex P3 R18h: keep the backup's permission bits through the swap too.
 	mode := os.FileMode(0o644)
 	if info, serr := fsys.Stat(backup); serr == nil {
 		mode = info.Mode().Perm()
 	}
-	dstFile, err := fsys.OpenFile(staged, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
+	staged, dstFile, err := fsutil.CreateExclusiveStagingFile(fsys, dest, ".dlrstr", stagedOrdinal, mode)
 	if err != nil {
 		return fmt.Errorf("stage rollback: %w", err)
 	}

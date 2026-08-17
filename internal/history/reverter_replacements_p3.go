@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"sort"
-	"strconv"
 	"sync/atomic"
 
 	"github.com/javinizer/javinizer-go/internal/config"
@@ -290,14 +289,14 @@ func copyRestoreBytes(fs afero.Fs, backup, dest string) error {
 		return fmt.Errorf("read backup: %w", err)
 	}
 	defer func() { _ = src.Close() }()
-	staged := dest + ".rstr." + strconv.FormatUint(restoreCopyNonce.Add(1), 16)
+	stagedOrdinal := restoreCopyNonce.Add(1)
 	// codex P3 R18h: stage with the backup's OWN permission bits so a revert
 	// never widens restrictive media (0600 trailer) into world-readable.
 	mode := os.FileMode(config.FilePerm)
 	if info, serr := fs.Stat(backup); serr == nil {
 		mode = info.Mode().Perm()
 	}
-	dstFile, err := fs.OpenFile(staged, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
+	staged, dstFile, err := fsutil.CreateExclusiveStagingFile(fs, dest, ".rstr", stagedOrdinal, mode)
 	if err != nil {
 		return fmt.Errorf("stage restore open: %w", err)
 	}
