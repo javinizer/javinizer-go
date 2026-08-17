@@ -642,3 +642,14 @@ func (f *statErrFailPlusRename) OpenFile(name string, flag int, perm os.FileMode
 	}
 	return f.Fs.OpenFile(name, flag, perm)
 }
+
+// The cancel-respect legs with redirected async work: the entire rollback chain terminates the leg.
+func TestCopyBackupToDest_CancelRollBackLeftover(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	require.NoError(t, afero.WriteFile(fs, "/b", []byte("x"), 0o644))
+	err := copyBackupToDest(fs, "/b", "/d")
+	require.NoError(t, err)
+	got, rerr := afero.ReadFile(fs, "/d")
+	require.NoError(t, rerr)
+	require.Equal(t, []byte("x"), got)
+}
