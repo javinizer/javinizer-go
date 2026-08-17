@@ -536,3 +536,28 @@ func TestSweep_ReverterErrorLegs(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, res.Failed, "destination-conflict tracked as failure")
 }
+
+// Exercises consume-entry path in replaceOrder-themed mode: entries evicted by
+// re-zeroing DestSeq floor and chain-check legs across reverted-vs-missing
+// rows (coverage of the checkDestBlocking parse-continue branch of rowGf).
+func TestCheckDestBlocking_malformed_foreign_row(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	repo := newP3OpRepo()
+	ctx := context.Background()
+	dest := "/dst/CHK/poster.jpg"
+
+	self := &models.BatchFileOperation{
+		BatchJobID: "job-1", MovieID: "CHK-SELF", OperationType: models.OperationTypeUpdate,
+		RevertStatus: models.RevertStatusApplied,
+	}
+	require.NoError(t, repo.Create(ctx, self))
+
+	broken := &models.BatchFileOperation{
+		BatchJobID: "job-1", MovieID: "CHK-BAD", OperationType: models.OperationTypeUpdate,
+		RevertStatus: models.RevertStatusApplied, GeneratedFiles: `{"replacements":oops`,
+	}
+	require.NoError(t, repo.Create(ctx, broken))
+
+	r := NewReverter(fs, repo)
+	require.NoError(t, r.checkDestBlocking(ctx, self, dest, 1), "malformed foreign row skipped")
+}
