@@ -185,7 +185,7 @@ func TestSweep_OrphanRestoreByteExact_AndIndeterminateKeeps(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, payload, got, "restore is byte-exact")
 	exists, _ := afero.Exists(fs, backup)
-	require.False(t, exists, "orphan backup removed after a successful streamed restore")
+	require.True(t, exists, "unjournaled marker backup remains after a successful streamed restore")
 
 	// Indeterminate destination: wrap the fs so Stat(dest) fails.
 	fs2 := &statFailingFs{Fs: afero.NewMemMapFs(), failPath: dest}

@@ -40,7 +40,7 @@ func TestReplacementSweepCoverage_TargetedPrefixSplit(t *testing.T) {
 	require.Equal(t, "target", string(mustRead2(t, fs, dest)))
 	exists, err := afero.Exists(fs, targetBackup)
 	require.NoError(t, err)
-	require.False(t, exists)
+	require.True(t, exists, "restored unjournaled marker remains available for manual ownership review")
 	exists, err = afero.Exists(fs, siblingBackup)
 	require.NoError(t, err)
 	require.True(t, exists, "a marker backup for a different named destination is skipped")
@@ -88,11 +88,11 @@ func TestReplacementSweepCoverage_OrphanFreshLedgerParseAndSuccess(t *testing.T)
 
 	healed, err := NewReplacementSweeper(fs, repo).Sweep(ctx)
 	require.NoError(t, err)
-	require.Equal(t, 1, healed)
+	require.Equal(t, 0, healed)
 	require.Equal(t, "current", string(mustRead2(t, fs, dest)))
 	exists, err := afero.Exists(fs, backup)
 	require.NoError(t, err)
-	require.False(t, exists)
+	require.True(t, exists, "an unjournaled marker-shaped file is retained")
 }
 
 func TestReplacementSweepCoverage_OrphanRestoreCopyError(t *testing.T) {

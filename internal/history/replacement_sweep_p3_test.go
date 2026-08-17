@@ -13,7 +13,7 @@ import (
 
 // P3 replacement sweeper: conservative ownership markers, retention for rows
 // in ANY non-reverted status, crash-window restore with journal consumption,
-// and orphan reaping.
+// and conservative orphan handling.
 
 const (
 	p3HexA = "0123456789abcdef"
@@ -80,19 +80,20 @@ func TestSweep_RootsAndMarkers(t *testing.T) {
 		return fs, newP3OpRepo()
 	}
 
-	t.Run("orphan with destination present is removed", func(t *testing.T) {
+	t.Run("orphan with destination present is retained", func(t *testing.T) {
 		fs, repo := newSweepHarness(t)
 		dest := "/out/SWP/poster.jpg"
+		backup := dest + ".dlbak." + p3HexA
 		writeSweepFile(t, fs, dest, "final", time.Hour)
-		writeSweepFile(t, fs, dest+".dlbak."+p3HexA, "stale", time.Hour)
+		writeSweepFile(t, fs, backup, "stale", time.Hour)
 		// A journaled destination in the same directory puts the dir in scope.
 		journalRow(t, repo, "job-1", "SWP-001", "/out/SWP/other.jpg", "/out/SWP/other.jpg.dlbak."+p3HexC, 1, models.RevertStatusApplied)
 
 		healed, err := NewReplacementSweeper(fs, repo).Sweep(context.Background())
 		require.NoError(t, err)
-		require.Equal(t, 1, healed)
-		exists, _ := afero.Exists(fs, dest+".dlbak."+p3HexA)
-		require.False(t, exists, "stale orphan residue must be removed")
+		require.Equal(t, 0, healed)
+		exists, _ := afero.Exists(fs, backup)
+		require.True(t, exists, "marker shape without journal proof must not delete the orphan")
 		require.Equal(t, "final", string(mustRead2(t, fs, dest)), "destination bytes untouched")
 	})
 
@@ -168,7 +169,7 @@ func TestSweep_RootsAndMarkers(t *testing.T) {
 		journalRow(t, repo, "job-1", "SWP-002", "/out/SWP/other.jpg", "/out/SWP/other.jpg.dlbak."+p3HexC, 1, models.RevertStatusApplied)
 
 		// First sweep: retained (journaled). Then prune the row; the backup
-		// turns orphan and the next sweep removes it (destination present).
+		// turns unjournaled and the next sweep retains it (destination present).
 		healed, err := NewReplacementSweeper(fs, repo).Sweep(context.Background())
 		require.NoError(t, err)
 		require.Equal(t, 0, healed)
@@ -176,9 +177,9 @@ func TestSweep_RootsAndMarkers(t *testing.T) {
 
 		healed, err = NewReplacementSweeper(fs, repo).Sweep(context.Background())
 		require.NoError(t, err)
-		require.Equal(t, 1, healed)
+		require.Equal(t, 0, healed)
 		exists, _ := afero.Exists(fs, backup)
-		require.False(t, exists, "prune-hook coverage: backup of a deleted record is reaped")
+		require.True(t, exists, "prune-hook coverage: unjournaled marker backup is retained")
 	})
 }
 

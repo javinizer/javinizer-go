@@ -32,9 +32,10 @@ import (
 //     window between set-aside and install: the new bytes never landed, so
 //     the old bytes are restored to the destination and the journal entry is
 //     consumed (the row otherwise stays failed/unrevertable forever).
-//   - A backup journaled NOWHERE is an orphan: with the destination present
-//     it is stale residue (deleted); with the destination missing it is the
-//     last copy of somebody's bytes (restored).
+//   - A backup journaled NOWHERE is not ownership-proven by its name alone:
+//     with the destination present it is retained and warned about; with the
+//     destination missing it is the last copy of somebody's bytes (restored),
+//     but the marker file is retained for manual inspection.
 
 // R12-3: end-anchored — a destination legitimately named with a
 // marker-shaped substring must not confuse the suffix detector; only the
@@ -64,6 +65,14 @@ func sweepSlash(p string) string { return fsutil.DestKey(p) }
 // ownership marker (destination-adjacent backup from downloader overwrites).
 func IsReplacementBackupName(name string) bool {
 	return replacementBackupName.MatchString(name)
+}
+
+// warnRetainedUnjournaledBackup keeps name-only matches inspectable. Marker
+// shape is not ownership proof, so the conservative restore posture leaves
+// manual deletion to the user when no journal entry proves Javinizer created it.
+func warnRetainedUnjournaledBackup(backup string) {
+	absoluteBackup, _ := filepath.Abs(backup)
+	logging.Warnf("replacement sweep retained unjournaled marker-shaped file %s: no journal entry proves ownership; user can delete it manually", absoluteBackup)
 }
 
 // ReplacementSweeper reaps replacement backups under conservative ownership.
@@ -247,8 +256,10 @@ func (s *ReplacementSweeper) sweepOne(ctx context.Context, idx *replacementLedge
 			logging.Warnf("replacement sweep restore %s→%s: %v", backup, dest, rnErr)
 			return 0
 		}
-		// Orphan: no consumption to persist — the moved copy is redundant now.
-		_ = s.fs.Remove(backup)
+		// The restore repairs the missing destination, but marker shape alone is
+		// not ownership proof. Retain the source for inspection rather than
+		// deleting a possible user-owned file; the user can remove it manually.
+		warnRetainedUnjournaledBackup(backup)
 		return 1
 	}
 	if statErr != nil {
@@ -258,11 +269,11 @@ func (s *ReplacementSweeper) sweepOne(ctx context.Context, idx *replacementLedge
 		logging.Warnf("replacement sweep %s: destination indeterminate (%v) — kept", backup, statErr)
 		return 0
 	}
-	if rmErr := s.fs.Remove(backup); rmErr != nil {
-		logging.Warnf("replacement sweep remove %s: %v", backup, rmErr)
-		return 0
-	}
-	return 1
+	// Marker shape alone is not ownership proof. Retain this unjournaled file
+	// for inspection rather than permanently deleting user-owned data; the
+	// conservative restore posture leaves manual deletion to the user.
+	warnRetainedUnjournaledBackup(backup)
+	return 0
 }
 
 // restoreAndConsume moves a journaled crash-window backup back onto its
