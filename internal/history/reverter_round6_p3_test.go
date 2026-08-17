@@ -561,3 +561,31 @@ func TestCheckDestBlocking_malformed_foreign_row(t *testing.T) {
 	r := NewReverter(fs, repo)
 	require.NoError(t, r.checkDestBlocking(ctx, self, dest, 1), "malformed foreign row skipped")
 }
+
+// codex P3 R19-2: a crash-window sweep now consumes its journal entry BEFORE
+// RevertBatch reads the row — the revert doesn't chase a backup the sweep
+// deleted-restored minutes earlier.
+func TestSweepConsumeThenRevert_UsesFreshJournal(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	repo := newP3OpRepo()
+	ctx := context.Background()
+
+	f := &p3Fixture{fs: fs, repo: repo}
+	op, dest := f.addAppliedOp(t, "job-1", "SR-001", false, "unused", p3Replacement{seq: 1, backupBytes: "old-bytes"})
+
+	// Crash-window: destination missing, backup on disk, entry armed.
+	require.NoError(t, fs.Remove(dest))
+
+	r := NewReverter(fs, repo)
+	res, err := r.RevertBatch(ctx, "job-1")
+	require.NoError(t, err)
+	require.Equal(t, 1, res.Succeeded, "revert proceeds against the refreshed journal")
+	require.Equal(t, "old-bytes", string(mustRead2(t, fs, dest)),
+		"sweep crash-window restore holds the bytes — revert doesn't reprocess them")
+
+	row, err := repo.FindByID(ctx, op.ID)
+	require.NoError(t, err)
+	gf, err := models.ParseGeneratedFiles(row.GeneratedFiles)
+	require.NoError(t, err)
+	require.Empty(t, gf.Replacements, "entry consumed once — never double-consumed")
+}

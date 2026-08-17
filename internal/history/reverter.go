@@ -710,6 +710,23 @@ func (r *Reverter) RevertBatch(ctx context.Context, batchJobID string) (*RevertB
 
 	r.sweepJournaledDestinations(ctx, processable)
 
+	// leniently-promote reload: the sweep consumed/persisted; re-read the rows so
+	// the revert's in-memory journal can't chase backups the sweep deleted.
+	if len(processable) > 0 {
+		fresh, freshErr := r.batchFileOpRepo.FindByBatchJobID(ctx, processable[0].BatchJobID)
+		if freshErr == nil {
+			byID := make(map[uint]models.BatchFileOperation, len(fresh))
+			for i := range fresh {
+				byID[fresh[i].ID] = fresh[i]
+			}
+			for i := range processable {
+				if freshRow, ok := byID[processable[i].ID]; ok {
+					processable[i] = freshRow
+				}
+			}
+		}
+	}
+
 	outcomes := r.revertOperations(ctx, processable, r.revertFile)
 	succeeded, skipped, failed := summarizeOutcomes(outcomes)
 
@@ -759,6 +776,21 @@ func (r *Reverter) RevertScrape(ctx context.Context, batchJobID string, movieID 
 	}
 
 	r.sweepJournaledDestinations(ctx, matching)
+
+	if len(matching) > 0 {
+		fresh, freshErr := r.batchFileOpRepo.FindByBatchJobID(ctx, matching[0].BatchJobID)
+		if freshErr == nil {
+			byID := make(map[uint]models.BatchFileOperation, len(fresh))
+			for i := range fresh {
+				byID[fresh[i].ID] = fresh[i]
+			}
+			for i := range matching {
+				if freshRow, ok := byID[matching[i].ID]; ok {
+					matching[i] = freshRow
+				}
+			}
+		}
+	}
 
 	outcomes := r.revertOperations(ctx, matching, r.revertFile)
 	succeeded, skipped, failed := summarizeOutcomes(outcomes)
