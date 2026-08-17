@@ -33,6 +33,10 @@ type ReplacementEntry struct {
 	// entry with a missing destination instead means someone deleted the
 	// media afterwards, and restoring it would resurrect deleted artwork.
 	Installed bool `json:"installed,omitempty"`
+	// RestorePending marks a history/sweep restore whose destination bytes are
+	// in place but whose backup cleanup could not yet complete. It is separate
+	// from Installed so downloader crash-window semantics remain unchanged.
+	RestorePending bool `json:"restore_pending,omitempty"`
 }
 
 // FileMove represents a file that was moved during organize and should be moved back on revert.

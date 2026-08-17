@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
 	"sync/atomic"
 
@@ -87,10 +88,9 @@ func (r *RevertFileResult) withRetryable(cause error) *RevertFileResult {
 // delete-list subtraction: restored content must never be swept by the
 // generated-files cleanup that follows.
 //
-// Consumption: every successfully restored entry is removed from the row's
-// journal immediately, so a partially-failed restore leaves an accurate
-// ledger. Any restore failure aborts the revert leaving the operation
-// Applied (full move-back success gate).
+// Consumption: every successfully restored entry has its backup removed
+// before the row is consumed. A failed backup removal leaves the entry armed
+// and retryable; any later journal failure re-arms the backup before returning.
 func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.BatchFileOperation) (map[string]bool, error) {
 	restored := map[string]bool{}
 	gf, err := models.ParseGeneratedFiles(op.GeneratedFiles)
@@ -165,12 +165,22 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 				return restored, fmt.Errorf("failed to restore %s → %s: %w", e.Backup, dest, repErr)
 			}
 			restored[dest] = true
+			if rmErr := removeReplacementBackup(r.fs, e.Backup, "replacement restore"); rmErr != nil {
+				if markErr := markReplacementEntryRestorePending(ctx, r.batchFileOpRepo, op.ID, sweepSlash(e.Backup)); markErr != nil {
+					absoluteBackup, _ := filepath.Abs(e.Backup)
+					logging.Warnf("replacement restore failed to retain cleanup marker for backup %s: %v", absoluteBackup, markErr)
+				}
+				release()
+				return restored, fmt.Errorf("restored %s → %s but backup cleanup failed: %w", e.Backup, dest, rmErr)
+			}
 			if cErr := r.consumeReplacementEntry(ctx, op, e); cErr != nil {
+				if rearmErr := fsutil.CopyFileFs(r.fs, dest, e.Backup); rearmErr != nil {
+					absoluteBackup, _ := filepath.Abs(e.Backup)
+					logging.Warnf("replacement restore failed to re-arm backup %s after consumption failure: %v", absoluteBackup, rearmErr)
+				}
 				release()
 				return restored, cErr
 			}
-			// Consumption persisted — the backup file is redundant now.
-			_ = r.fs.Remove(e.Backup)
 		}
 		release()
 	}
@@ -281,8 +291,7 @@ var restoreCopyNonce atomic.Uint64
 
 // copyRestoreBytes restores the backup bytes onto dest WITHOUT consuming the
 // backup file: bytes are staged adjacent and swapped in with replace-aware
-// rename; the caller removes the backup only after its journal entry is
-// durably consumed.
+// rename; the caller removes the backup before consuming its journal entry.
 func copyRestoreBytes(fs afero.Fs, backup, dest string) error {
 	src, err := fs.Open(backup)
 	if err != nil {
