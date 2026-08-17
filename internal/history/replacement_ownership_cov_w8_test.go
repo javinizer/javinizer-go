@@ -188,7 +188,9 @@ func TestReplacementOwnershipCovW8_PendingMarkerUpdateFailureStillRetries(t *tes
 	healed, err := s.Sweep(ctx)
 	require.NoError(t, err)
 	require.Equal(t, 0, healed)
-	require.Equal(t, "old", string(mustRead2(t, fs, dest)))
+	exists, err := afero.Exists(fs, dest)
+	require.NoError(t, err)
+	require.False(t, exists, "failed marker persistence must undo the restore")
 	require.Equal(t, "old", string(mustRead2(t, fs, backup)))
 
 	fs.fail = false

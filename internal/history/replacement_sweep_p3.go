@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/database"
@@ -147,6 +148,9 @@ func rearmReplacementBackup(fs afero.Fs, dest, backup string, info os.FileInfo) 
 	if info == nil {
 		return nil
 	}
+	if err := fs.Chmod(backup, info.Mode().Perm()); err != nil {
+		return err
+	}
 	return fs.Chtimes(backup, info.ModTime(), info.ModTime())
 }
 
@@ -155,6 +159,7 @@ type ReplacementSweeper struct {
 	fs              afero.Fs
 	repo            database.BatchFileOperationRepositoryInterface
 	startedAt       time.Time
+	pendingMu       sync.Mutex      // API-triggered sweeps share pendingRemovals; never hold across fs/repo calls.
 	pendingRemovals map[string]bool // backup key → restore installed, cleanup pending
 }
 
@@ -165,6 +170,8 @@ func NewReplacementSweeper(fs afero.Fs, repo database.BatchFileOperationReposito
 }
 
 func (s *ReplacementSweeper) rememberPendingRemoval(backupKey string) {
+	s.pendingMu.Lock()
+	defer s.pendingMu.Unlock()
 	if s.pendingRemovals == nil {
 		s.pendingRemovals = map[string]bool{}
 	}
@@ -172,10 +179,14 @@ func (s *ReplacementSweeper) rememberPendingRemoval(backupKey string) {
 }
 
 func (s *ReplacementSweeper) hasPendingRemoval(backupKey string) bool {
+	s.pendingMu.Lock()
+	defer s.pendingMu.Unlock()
 	return s.pendingRemovals != nil && s.pendingRemovals[backupKey]
 }
 
 func (s *ReplacementSweeper) forgetPendingRemoval(backupKey string) {
+	s.pendingMu.Lock()
+	defer s.pendingMu.Unlock()
 	if s.pendingRemovals != nil {
 		delete(s.pendingRemovals, backupKey)
 	}
@@ -449,6 +460,8 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 	// Removal is the ownership boundary. Keep the row armed when it fails and
 	// persist a distinct marker so a later sweep can clean a present destination
 	// without mistaking an ordinary armed apply for a completed restore.
+	// Capture the backup metadata before removal so a failed consume can
+	// re-arm the original permissions and timestamps.
 	backupInfo, _ := s.fs.Stat(backup)
 	if rmErr := removeReplacementBackup(s.fs, backup, "replacement sweep"); rmErr != nil {
 		s.rememberPendingRemoval(backupSlash)
@@ -457,6 +470,10 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 			if markErr := s.repo.Update(ctx, liveRow); markErr != nil {
 				absoluteBackup, _ := filepath.Abs(backup)
 				logging.Warnf("replacement sweep failed to retain cleanup marker for backup %s: %v", absoluteBackup, markErr)
+				// Without a durable marker, do not leave the restored destination
+				// behind: restore the armed, backup-present retry state instead.
+				s.forgetPendingRemoval(backupSlash)
+				undoRestore()
 			}
 		}
 		return false
@@ -525,6 +542,8 @@ func (s *ReplacementSweeper) retryPendingRemoval(ctx context.Context, rowID uint
 	if !gf.Replacements[target].RestorePending && !s.hasPendingRemoval(backupSlash) {
 		return false
 	}
+	// Capture metadata before removing the backup; consumption failure below
+	// must recreate the original permission bits as well as its timestamps.
 	backupInfo, _ := s.fs.Stat(backup)
 	if rmErr := removeReplacementBackup(s.fs, backup, "replacement sweep"); rmErr != nil {
 		s.rememberPendingRemoval(backupSlash)
