@@ -111,7 +111,7 @@ type rmFailFs struct {
 }
 
 func (f *rmFailFs) Remove(name string) error {
-	if strings.HasPrefix(name, f.victim) {
+	if strings.HasPrefix(strings.ReplaceAll(name, "\\", "/"), f.victim) {
 		return errors.New("remove wedged")
 	}
 	return f.Fs.Remove(name)
