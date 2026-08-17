@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"runtime"
 	"testing"
 	"time"
 
@@ -104,6 +105,12 @@ func TestReplacementSweepW14A_BusyMarkerErrorKeepsBackup(t *testing.T) {
 
 func writeW14ABusy(t *testing.T, fs afero.Fs, dest string, pid int) {
 	t.Helper()
-	content := fmt.Sprintf("pid=%d,time=%d", pid, time.Now().UnixNano())
+	created := time.Now()
+	if runtime.GOOS == "windows" && pid != os.Getpid() {
+		// Windows cannot reliably probe a foreign PID; stale ownership is
+		// time-based there, so make this synthetic dead marker old enough.
+		created = created.Add(-time.Hour)
+	}
+	content := fmt.Sprintf("pid=%d,time=%d", pid, created.UnixNano())
 	require.NoError(t, afero.WriteFile(fs, dest+".dlbusy", []byte(content), 0o600))
 }

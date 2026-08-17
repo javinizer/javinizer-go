@@ -142,50 +142,69 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 		}
 	}
 
-	// Phase 2 — per-destination restore under its lock. Same structure as
-	// before: fresh journal query INSIDE the lock keeps serializable safety
-	// against in-flight applies racing this revert.
+	// Phase 2 — per-destination restore under its process-local lock. The
+	// durable marker is claimed before the fresh journal check or any backup /
+	// destination read, then retained through every restore and consumption
+	// leg. The closure keeps each destination's marker lifetime scoped to that
+	// destination instead of deferring all releases until this method returns.
 	for key, entries := range byDest {
 		dest := destSpelling[key]
-		release := fsutil.SharedDestLocks().Acquire(dest)
-		minOwn := entries[0].DestSeq
-		for _, e := range entries {
-			if e.DestSeq < minOwn {
-				minOwn = e.DestSeq
+		restoreErr := func() error {
+			release := fsutil.SharedDestLocks().Acquire(dest)
+			defer release()
+
+			// SharedDestLocks only arbitrates goroutines in this process. Claim
+			// the durable marker before checking/restoring so a downloader in
+			// another process cannot be between rename-to-backup and journaling
+			// while this revert consumes an older backup. Acquire is deliberately
+			// non-blocking for a live marker, including one owned by this process;
+			// that preserves W14a's same-process liveness contract.
+			busyRelease, busyErr := fsutil.AcquireReplacementBusy(r.fs, dest)
+			if errors.Is(busyErr, fsutil.ErrReplacementBusy) {
+				return fmt.Errorf("replacement destination %s is busy: %w", dest, busyErr)
 			}
-		}
-		if rjErr := r.checkDestBlocking(ctx, op, dest, minOwn); rjErr != nil {
-			release()
-			return restored, rjErr
-		}
-		for _, e := range entries {
-			if _, statErr := r.fs.Stat(e.Backup); statErr != nil {
-				release()
-				return restored, fmt.Errorf("journaled backup %s for destination %s is unreadable: %w", e.Backup, dest, statErr)
+			if busyErr != nil {
+				return fmt.Errorf("failed to arm replacement busy marker for %s: %w", dest, busyErr)
 			}
-			if repErr := copyRestoreBytes(r.fs, e.Backup, dest); repErr != nil {
-				release()
-				return restored, fmt.Errorf("failed to restore %s → %s: %w", e.Backup, dest, repErr)
-			}
-			restored[dest] = true
-			if rmErr := removeReplacementBackup(r.fs, e.Backup, "replacement restore"); rmErr != nil {
-				if markErr := markReplacementEntryRestorePending(ctx, r.batchFileOpRepo, op.ID, sweepSlash(e.Backup)); markErr != nil {
-					absoluteBackup, _ := filepath.Abs(e.Backup)
-					logging.Warnf("replacement restore failed to retain cleanup marker for backup %s: %v", absoluteBackup, markErr)
+			defer busyRelease()
+
+			minOwn := entries[0].DestSeq
+			for _, e := range entries {
+				if e.DestSeq < minOwn {
+					minOwn = e.DestSeq
 				}
-				release()
-				return restored, fmt.Errorf("restored %s → %s but backup cleanup failed: %w", e.Backup, dest, rmErr)
 			}
-			if cErr := r.consumeReplacementEntry(ctx, op, e); cErr != nil {
-				if rearmErr := fsutil.CopyFileFs(r.fs, dest, e.Backup); rearmErr != nil {
-					absoluteBackup, _ := filepath.Abs(e.Backup)
-					logging.Warnf("replacement restore failed to re-arm backup %s after consumption failure: %v", absoluteBackup, rearmErr)
+			if rjErr := r.checkDestBlocking(ctx, op, dest, minOwn); rjErr != nil {
+				return rjErr
+			}
+			for _, e := range entries {
+				if _, statErr := r.fs.Stat(e.Backup); statErr != nil {
+					return fmt.Errorf("journaled backup %s for destination %s is unreadable: %w", e.Backup, dest, statErr)
 				}
-				release()
-				return restored, cErr
+				if repErr := copyRestoreBytes(r.fs, e.Backup, dest); repErr != nil {
+					return fmt.Errorf("failed to restore %s → %s: %w", e.Backup, dest, repErr)
+				}
+				restored[dest] = true
+				if rmErr := removeReplacementBackup(r.fs, e.Backup, "replacement restore"); rmErr != nil {
+					if markErr := markReplacementEntryRestorePending(ctx, r.batchFileOpRepo, op.ID, sweepSlash(e.Backup)); markErr != nil {
+						absoluteBackup, _ := filepath.Abs(e.Backup)
+						logging.Warnf("replacement restore failed to retain cleanup marker for backup %s: %v", absoluteBackup, markErr)
+					}
+					return fmt.Errorf("restored %s → %s but backup cleanup failed: %w", e.Backup, dest, rmErr)
+				}
+				if cErr := r.consumeReplacementEntry(ctx, op, e); cErr != nil {
+					if rearmErr := fsutil.CopyFileFs(r.fs, dest, e.Backup); rearmErr != nil {
+						absoluteBackup, _ := filepath.Abs(e.Backup)
+						logging.Warnf("replacement restore failed to re-arm backup %s after consumption failure: %v", absoluteBackup, rearmErr)
+					}
+					return cErr
+				}
 			}
+			return nil
+		}()
+		if restoreErr != nil {
+			return restored, restoreErr
 		}
-		release()
 	}
 	return restored, nil
 }

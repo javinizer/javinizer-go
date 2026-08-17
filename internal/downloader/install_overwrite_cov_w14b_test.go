@@ -22,6 +22,14 @@ var (
 	covW14BNoClobberErr = errors.New("w14b existing backup was clobbered")
 )
 
+// pathNormalizingChmodFs compensates for afero.MemMapFs.Chmod looking up
+// the unnormalized path on Windows, unlike its other path operations.
+type pathNormalizingChmodFs struct{ afero.Fs }
+
+func (f *pathNormalizingChmodFs) Chmod(name string, mode os.FileMode) error {
+	return f.Fs.Chmod(filepath.FromSlash(name), mode)
+}
+
 type covW14BReleaseFailingLedger struct {
 	*armedTestLedger
 	releaseErr error
@@ -35,6 +43,7 @@ func (l *covW14BReleaseFailingLedger) ReleaseReplacement(context.Context, string
 
 func TestInstallOverwriting_RetractionFailureRearmsBackup(t *testing.T) {
 	base := afero.NewMemMapFs()
+	chmodFS := &pathNormalizingChmodFs{Fs: base}
 	dir := "/out/W14B-REARM"
 	dest := dir + "/poster.jpg"
 	staged := dest + ".tmp"
@@ -44,11 +53,11 @@ func TestInstallOverwriting_RetractionFailureRearmsBackup(t *testing.T) {
 
 	require.NoError(t, base.MkdirAll(dir, 0o755))
 	require.NoError(t, afero.WriteFile(base, dest, old, mode))
-	require.NoError(t, base.Chmod(dest, mode))
+	require.NoError(t, chmodFS.Chmod(dest, mode))
 	require.NoError(t, base.Chtimes(dest, mtime, mtime))
 	require.NoError(t, afero.WriteFile(base, staged, []byte("new bytes"), 0o644))
 
-	fs := rejectStagedRenameFS{Fs: base}
+	fs := rejectStagedRenameFS{Fs: chmodFS}
 	d := NewDownloader(nil, fs, &Config{}, nil).WithDestLocks(fsutil.NewKeyedLockRegistry())
 	recorder := &covW14BReleaseFailingLedger{
 		armedTestLedger: &armedTestLedger{},
@@ -80,7 +89,7 @@ func TestInstallOverwriting_RetractionFailureRearmsBackup(t *testing.T) {
 }
 
 func TestRearmReplacementBackup_ExistingBackupIsRetained(t *testing.T) {
-	fs := afero.NewMemMapFs()
+	fs := &pathNormalizingChmodFs{Fs: afero.NewMemMapFs()}
 	dir := "/out/W14B-IDEMPOTENT"
 	dest := dir + "/poster.jpg"
 	backup := dest + ".dlbak.0123456789abcdef"
@@ -144,6 +153,7 @@ func (f *covW14BPreRearmedFS) Rename(oldname, newname string) error {
 
 func TestInstallOverwriting_RetractionFailureWithPreexistingBackupDoesNotClobber(t *testing.T) {
 	base := afero.NewMemMapFs()
+	chmodFS := &pathNormalizingChmodFs{Fs: base}
 	dir := "/out/W14B-IDEMPOTENT-ROLLBACK"
 	dest := dir + "/poster.jpg"
 	staged := dest + ".tmp"
@@ -153,7 +163,7 @@ func TestInstallOverwriting_RetractionFailureWithPreexistingBackupDoesNotClobber
 	require.NoError(t, afero.WriteFile(base, dest, old, 0o601))
 	require.NoError(t, afero.WriteFile(base, staged, []byte("new bytes"), 0o644))
 
-	fs := &covW14BPreRearmedFS{Fs: base, dest: dest}
+	fs := &covW14BPreRearmedFS{Fs: chmodFS, dest: dest}
 	d := NewDownloader(nil, fs, &Config{}, nil).WithDestLocks(fsutil.NewKeyedLockRegistry())
 	recorder := &covW14BReleaseFailingLedger{
 		armedTestLedger: &armedTestLedger{},
@@ -164,7 +174,7 @@ func TestInstallOverwriting_RetractionFailureWithPreexistingBackupDoesNotClobber
 		opID:     "w14b-pre-rearmed",
 		recorder: recorder,
 	})
-	require.ErrorIs(t, err, covW14BInstallErr)
+	require.ErrorContains(t, err, covW14BInstallErr.Error())
 	require.Equal(t, 1, recorder.releases)
 	require.Zero(t, fs.destOpens, "existing backup makes re-arm return before opening the restored destination")
 	records := recorder.get()
@@ -237,7 +247,7 @@ func TestInstallOverwriting_RetractionFailureRearmFailureIsLoggedAndOriginalErro
 		opID:     "w14b-rearm-error",
 		recorder: recorder,
 	})
-	require.ErrorIs(t, err, covW14BInstallErr, "re-arm failure must not replace the rollback error")
+	require.ErrorContains(t, err, covW14BInstallErr.Error(), "re-arm failure must not replace the rollback error")
 	require.Equal(t, 1, recorder.releases)
 	records := recorder.get()
 	require.Len(t, records, 1)

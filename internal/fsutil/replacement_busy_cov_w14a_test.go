@@ -3,6 +3,7 @@ package fsutil
 import (
 	"errors"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -29,7 +30,12 @@ func TestReplacementBusyW14A_LifecycleAndReclamation(t *testing.T) {
 	_, err = fs.Stat(ReplacementBusyPath(dest))
 	require.ErrorIs(t, err, os.ErrNotExist)
 
-	writeW14ABusyToken(t, fs, dest, 999999999, time.Now())
+	deadMarkerTime := time.Now()
+	if runtime.GOOS == "windows" {
+		// Windows uses the marker timestamp rather than probing a PID.
+		deadMarkerTime = deadMarkerTime.Add(-time.Hour)
+	}
+	writeW14ABusyToken(t, fs, dest, 999999999, deadMarkerTime)
 	release, err = AcquireReplacementBusy(fs, dest)
 	require.NoError(t, err, "dead-PID markers are reclaimable")
 	release()
