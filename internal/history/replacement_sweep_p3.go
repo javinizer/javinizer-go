@@ -2,7 +2,6 @@ package history
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -340,12 +339,7 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 		return true
 	}
 	gf.Replacements = kept
-	data, mErr := json.Marshal(gf)
-	if mErr != nil {
-		undoRestore()
-		return false
-	}
-	liveRow.GeneratedFiles = string(data)
+	liveRow.GeneratedFiles = models.MarshalLedgerJSON(gf)
 	if uErr := s.repo.Update(ctx, liveRow); uErr != nil {
 		// R9-2: the repair is NOT complete while the entry persists. Undo the
 		// restore (the destination was proven missing pre-restore) so the next

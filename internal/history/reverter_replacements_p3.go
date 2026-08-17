@@ -2,7 +2,6 @@ package history
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -205,18 +204,14 @@ func (r *Reverter) consumeReplacementEntry(ctx context.Context, op *models.Batch
 		kept = append(kept, e)
 	}
 	gf.Replacements = kept
-	data, err := json.Marshal(gf)
-	if err != nil {
-		return fmt.Errorf("failed to marshal consumed journal for op %d: %w", op.ID, err)
-	}
-	fresh.GeneratedFiles = string(data)
+	fresh.GeneratedFiles = models.MarshalLedgerJSON(gf)
 	if err := r.batchFileOpRepo.Update(ctx, fresh); err != nil {
 		return fmt.Errorf("backup %s restored to %s but journal consumption failed for op %d: %w", entry.Backup, entry.Destination, op.ID, err)
 	}
 	// Sync the caller's in-memory view — partial restores must be visible to
 	// this op's later passes or the consumed entry is retried against a
 	// vanished backup (count-N flake).
-	op.GeneratedFiles = string(data)
+	op.GeneratedFiles = fresh.GeneratedFiles
 	return nil
 }
 

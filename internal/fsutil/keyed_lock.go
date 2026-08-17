@@ -84,9 +84,6 @@ func (r *KeyedLockRegistry) AcquireMany(keys []string) func() {
 	seen := make(map[string]struct{}, len(keys))
 	for _, k := range keys {
 		fk := foldKeyedLock(k)
-		if fk == "" {
-			continue
-		}
 		if _, ok := seen[fk]; ok {
 			continue
 		}

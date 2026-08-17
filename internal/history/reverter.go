@@ -80,9 +80,7 @@ type fileSystemReverter interface {
 	// revertPrimaryFile moves the primary file back to its original location.
 	revertPrimaryFile(ctx context.Context, op *models.BatchFileOperation) (*RevertFileResult, error)
 	// cleanupGeneratedFiles removes generated artifacts (NFO, images) for an operation.
-	// subtract lists paths restored by the replacement journal this run — they
-	// hold pre-apply bytes and must never be swept.
-	cleanupGeneratedFiles(op *models.BatchFileOperation, stopAt string, subtract map[string]bool)
+	cleanupGeneratedFiles(op *models.BatchFileOperation, stopAt string)
 	// cleanupEmptyDir removes empty directories, walking up to stopAt.
 	cleanupEmptyDir(dirPath string, stopAt string)
 	// restoreNFO restores the NFO snapshot for a reverted operation.
@@ -157,8 +155,8 @@ func (a *aferoFSReverter) revertPrimaryFile(ctx context.Context, op *models.Batc
 	return revertPrimaryFileFS(ctx, a.fs, a.batchFileOpRepo, op, a.cleanupEmptyDir)
 }
 
-func (a *aferoFSReverter) cleanupGeneratedFiles(op *models.BatchFileOperation, stopAt string, subtract map[string]bool) {
-	cleanupGeneratedFilesFS(a.fs, op, stopAt, subtract)
+func (a *aferoFSReverter) cleanupGeneratedFiles(op *models.BatchFileOperation, stopAt string) {
+	cleanupGeneratedFilesFS(a.fs, op, stopAt)
 }
 
 func (a *aferoFSReverter) cleanupEmptyDir(dirPath string, stopAt string) {
@@ -181,8 +179,9 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 	// the copy-mode rejection (codex P3 R2-1/R6-in-2): a deleted primary
 	// anchor must not strand independently recoverable overwritten media —
 	// least of all for copy-mode operations whose only forward-recoverable
-	// state IS the journal. Restored content is subtracted from the delete
-	// list. Order rejections are tagged retryable for this run's fixpoint.
+	// state IS the journal. Restored destinations are structurally excluded
+	// from the generated-file Delete list. Order rejections are tagged
+	// retryable for this run's fixpoint.
 	restored, rejErr := r.restoreReplacementJournal(ctx, op)
 	if rejErr != nil {
 		logging.Warnf("Replacement journal restore refused/failed for op %d: %v", op.ID, rejErr)
@@ -203,13 +202,13 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 
 	isUpdate := op.OperationType == models.OperationTypeUpdate
 	if isUpdate {
-		r.fsReverter.cleanupGeneratedFiles(op, filepath.Dir(filepath.Dir(op.OriginalPath)), restored)
+		r.fsReverter.cleanupGeneratedFiles(op, filepath.Dir(filepath.Dir(op.OriginalPath)))
 	} else {
 		if result, err := r.fsReverter.revertPrimaryFile(ctx, op); result != nil || err != nil {
 			return result, err
 		}
 		destRoot := filepath.Dir(filepath.Dir(op.NewPath))
-		r.fsReverter.cleanupGeneratedFiles(op, destRoot, restored)
+		r.fsReverter.cleanupGeneratedFiles(op, destRoot)
 		if !op.InPlaceRenamed {
 			r.fsReverter.cleanupEmptyDir(filepath.Dir(op.NewPath), destRoot)
 		}
@@ -460,7 +459,7 @@ func cleanupEmptyDirFS(fs afero.Fs, dirPath string, stopAt string) {
 // After deleting files, it removes empty parent directories left behind,
 // stopping at stopAt boundary to prevent removing shared ancestor directories.
 // Best-effort: missing files are skipped (os.IsNotExist), errors don't fail the revert.
-func cleanupGeneratedFilesFS(fs afero.Fs, op *models.BatchFileOperation, stopAt string, subtract map[string]bool) {
+func cleanupGeneratedFilesFS(fs afero.Fs, op *models.BatchFileOperation, stopAt string) {
 	if op.GeneratedFiles == "" {
 		return
 	}
@@ -470,17 +469,11 @@ func cleanupGeneratedFilesFS(fs afero.Fs, op *models.BatchFileOperation, stopAt 
 	}
 	// Track parent directories of deleted files for cleanup
 	dirsToCheck := make(map[string]bool)
-	// Delete files in the Delete array (best-effort — skip IsNotExist).
-	// R15-2: a restored path is subtracted ONLY when it was a genuine
-	// pre-existing replacement. The delete list is populated from
-	// op-CREATED paths (CreatedPaths excludes replaced destinations), so a
-	// journaled destination ON it means the op created-then-replaced the file
-	// within one run — nothing pre-existed; the whole chain unwinds to absent
-	// and the path must still be deleted.
+	// Delete is populated at journal-write time from op-created paths only;
+	// replaced destinations are journaled separately in Replacements. Restored
+	// pre-existing destinations are therefore never members of Delete, so this
+	// cleanup cannot delete anything put back by replacement restore.
 	for _, path := range gf.Delete {
-		if subtract[path] && !isOpCreatedDestination(gf, path) {
-			continue
-		}
 		if err := fs.Remove(path); err != nil && !os.IsNotExist(err) {
 			logging.Debugf("cleanupGeneratedFiles: failed to remove %s: %v", path, err)
 		}
@@ -504,18 +497,6 @@ func cleanupGeneratedFilesFS(fs afero.Fs, op *models.BatchFileOperation, stopAt 
 		}
 		cleanupEmptyDirDownwardFS(fs, cleanDir, stopAt)
 	}
-}
-
-// isOpCreatedDestination reports whether the delete-list membership means
-// the path was created by this operation (R15-2): the ledger's create half
-// is authoritative pre-revert.
-func isOpCreatedDestination(gf models.GeneratedFilesJSON, path string) bool {
-	for _, d := range gf.Delete {
-		if d == path {
-			return true
-		}
-	}
-	return false
 }
 
 // isDescendant checks if path is inside parentDir (or equal to it).

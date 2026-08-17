@@ -193,7 +193,7 @@ func TestCleanupGeneratedFilesFS_DeletesFiles(t *testing.T) {
 	op := &models.BatchFileOperation{
 		GeneratedFiles: string(gfJSON),
 	}
-	cleanupGeneratedFilesFS(fs, op, "/dst", nil)
+	cleanupGeneratedFilesFS(fs, op, "/dst")
 
 	_, err := fs.Stat("/dst/ABC-123.nfo")
 	assert.True(t, os.IsNotExist(err), "NFO should be deleted")
@@ -217,7 +217,7 @@ func TestCleanupGeneratedFilesFS_MoveBack(t *testing.T) {
 	op := &models.BatchFileOperation{
 		GeneratedFiles: string(gfJSON),
 	}
-	cleanupGeneratedFilesFS(fs, op, "/dst", nil)
+	cleanupGeneratedFilesFS(fs, op, "/dst")
 
 	_, err := fs.Stat("/src/sub.srt")
 	assert.NoError(t, err, "file should be moved back to original")
@@ -229,14 +229,14 @@ func TestCleanupGeneratedFilesFS_EmptyGeneratedFiles(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	op := &models.BatchFileOperation{GeneratedFiles: ""}
 	// Should be a no-op
-	cleanupGeneratedFilesFS(fs, op, "/dst", nil)
+	cleanupGeneratedFilesFS(fs, op, "/dst")
 }
 
 func TestCleanupGeneratedFilesFS_InvalidJSON(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	op := &models.BatchFileOperation{GeneratedFiles: "not-valid-json"}
 	// Should be a no-op (logs error, doesn't panic)
-	cleanupGeneratedFilesFS(fs, op, "/dst", nil)
+	cleanupGeneratedFilesFS(fs, op, "/dst")
 }
 
 func TestCleanupGeneratedFilesFS_DeletesAndCleansEmptyDirs(t *testing.T) {
@@ -252,7 +252,7 @@ func TestCleanupGeneratedFilesFS_DeletesAndCleansEmptyDirs(t *testing.T) {
 	op := &models.BatchFileOperation{
 		GeneratedFiles: string(gfJSON),
 	}
-	cleanupGeneratedFilesFS(fs, op, "/dst", nil)
+	cleanupGeneratedFilesFS(fs, op, "/dst")
 
 	_, err := fs.Stat("/dst/ABC-123/ABC-123.nfo")
 	assert.True(t, os.IsNotExist(err), "NFO should be deleted")
@@ -275,7 +275,7 @@ func TestCleanupGeneratedFilesFS_SkipsDirOutsideBatchRoot(t *testing.T) {
 		GeneratedFiles: string(gfJSON),
 	}
 	// stopAt is /dst but the file is under /other — dir cleanup should be skipped
-	cleanupGeneratedFilesFS(fs, op, "/dst", nil)
+	cleanupGeneratedFilesFS(fs, op, "/dst")
 
 	_, err := fs.Stat("/other/dir/file.nfo")
 	assert.True(t, os.IsNotExist(err), "file itself should still be deleted")
@@ -295,7 +295,35 @@ func TestCleanupGeneratedFilesFS_MissingFileSkipped(t *testing.T) {
 		GeneratedFiles: string(gfJSON),
 	}
 	// Should not panic on missing file
-	cleanupGeneratedFilesFS(fs, op, "/dst", nil)
+	cleanupGeneratedFilesFS(fs, op, "/dst")
+}
+
+func TestCleanupGeneratedFilesFS_LogsRemoveAndMoveBackErrors(t *testing.T) {
+	base := afero.NewMemMapFs()
+	require.NoError(t, base.MkdirAll("/dst", 0777))
+	require.NoError(t, afero.WriteFile(base, "/dst/delete.err", []byte("delete"), 0666))
+	require.NoError(t, afero.WriteFile(base, "/dst/move.err", []byte("move"), 0666))
+
+	fs := &removeFailFs{
+		Fs:     &renameErrorFs{Fs: base},
+		victim: "/dst/delete.err",
+	}
+	gf := models.GeneratedFilesJSON{
+		Delete:   []string{"/dst/delete.err"},
+		MoveBack: []models.FileMove{{OriginalPath: "/src/move.err", NewPath: "/dst/move.err"}},
+	}
+	gfJSON, err := json.Marshal(gf)
+	require.NoError(t, err)
+
+	op := &models.BatchFileOperation{GeneratedFiles: string(gfJSON)}
+	cleanupGeneratedFilesFS(fs, op, "/dst")
+
+	_, err = fs.Stat("/dst/delete.err")
+	require.NoError(t, err, "remove failure should leave the delete path in place")
+	_, err = fs.Stat("/dst/move.err")
+	require.NoError(t, err, "rename failure should leave the move-back source in place")
+	_, err = fs.Stat("/src/move.err")
+	require.Error(t, err, "rename failure should not create the move-back destination")
 }
 
 // ============================================================================
