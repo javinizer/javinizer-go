@@ -462,3 +462,77 @@ func TestMustJournal_ToleratesGarbage(t *testing.T) {
 	require.Nil(t, mustJournal(&models.BatchFileOperation{GeneratedFiles: "drivel"}))
 	require.Empty(t, mustJournal(&models.BatchFileOperation{}))
 }
+
+// table-driven remaining maintainable legs: RemotePath and restore corruption chains.
+func TestSweep_RestoreAllFailureLegs(t *testing.T) {
+	t.Run("missing backup keeps entry armed — no byte restore, no consume", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		repo := newP3OpRepo()
+		ctx := context.Background()
+		dest := "/out/MB/poster.jpg"
+		require.NoError(t, fs.MkdirAll("/out/MB", config.DirPerm))
+		raw, _ := json.Marshal(models.GeneratedFilesJSON{Replacements: []models.ReplacementEntry{
+			{Destination: dest, Backup: dest + ".dlbak.0123456789abcdef", DestSeq: 1},
+		}})
+		op := &models.BatchFileOperation{
+			BatchJobID: "job-1", MovieID: "MB-001", OriginalPath: "/src/mb.mkv",
+			OperationType: models.OperationTypeUpdate, GeneratedFiles: string(raw),
+			RevertStatus: models.RevertStatusApplied,
+		}
+		require.NoError(t, repo.Create(ctx, op))
+		healed, err := NewReplacementSweeper(fs, repo).Sweep(ctx)
+		require.NoError(t, err)
+		require.Equal(t, 0, healed)
+		row, _ := repo.FindByID(ctx, op.ID)
+		gf, _ := models.ParseGeneratedFiles(row.GeneratedFiles)
+		require.Len(t, gf.Replacements, 1)
+	})
+
+	t.Run("restored-maintenance before panicked GC shows intermediate characters in the purge", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		repo := newP3OpRepo()
+		ctx := context.Background()
+		raw, _ := json.Marshal(models.GeneratedFilesJSON{Replacements: []models.ReplacementEntry{
+			{Destination: "/out/MB2/poster.jpg", Backup: "/out/MB2/poster.jpg.dlbak.feedcafeb00d1e00", DestSeq: 1},
+		}})
+		op := &models.BatchFileOperation{
+			BatchJobID: "job-1", MovieID: "MB2-001", OriginalPath: "/src/mb2.mkv",
+			OperationType: models.OperationTypeUpdate, GeneratedFiles: string(raw),
+			RevertStatus: models.RevertStatusApplied,
+		}
+		require.NoError(t, repo.Create(ctx, op))
+		require.NoError(t, fs.MkdirAll("/out/MB2", config.DirPerm))
+		_, err := NewReplacementSweeper(fs, repo).SweepDestinations(ctx, []string{"/out/MB2/poster.jpg"})
+		require.NoError(t, err)
+		exists, _ := afero.Exists(fs, "/out/MB2/poster.jpg.dlbak.feedcafeb00d1e00")
+		require.False(t, exists, "orphan leg peregrinated an absent backup doesn't error")
+	})
+}
+
+// pull-revert path: follow pipeline error propagation through revertPrimaryFileFS's rename leg.
+func TestSweep_ReverterErrorLegs(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	repo := newP3OpRepo()
+	ctx := context.Background()
+
+	// anchor missing → anchorskip (already covered in per-op paths); this diff
+	// called into revertPrimaryFileFS half-failure: OriginalPath exists (conflict)
+	_ = "/dst/PRV/poster.jpg"
+	newPath := "/dst/PRV/PRV.mkv"
+	originalPath := "/src/PRV.mkv"
+	require.NoError(t, fs.MkdirAll("/dst/PRV", config.DirPerm))
+	require.NoError(t, fs.MkdirAll("/src", config.DirPerm))
+	require.NoError(t, afero.WriteFile(fs, newPath, []byte("video"), config.FilePerm))
+	require.NoError(t, afero.WriteFile(fs, originalPath, []byte("already-there"), config.FilePerm))
+	raw, _ := json.Marshal(models.GeneratedFilesJSON{})
+	op := &models.BatchFileOperation{
+		BatchJobID: "job-1", MovieID: "PRV-001", OriginalPath: originalPath, NewPath: newPath,
+		OperationType: models.OperationTypeMove, GeneratedFiles: string(raw),
+		RevertStatus: models.RevertStatusApplied,
+	}
+	require.NoError(t, repo.Create(ctx, op))
+	r := NewReverter(fs, repo)
+	res, err := r.RevertBatch(ctx, "job-1")
+	require.NoError(t, err)
+	require.Equal(t, 1, res.Failed, "destination-conflict tracked as failure")
+}

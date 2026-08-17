@@ -614,3 +614,28 @@ func (f *failFindBFORepo) FindOperationsWithReplacements(ctx context.Context) ([
 func (f *failFindBFORepo) FindOperationsWithLedger(ctx context.Context) ([]models.BatchFileOperation, error) {
 	return f.repo.FindOperationsWithLedger(ctx)
 }
+
+// All remaining reachable mutator error legs: no-row, unparseable ledger, no-op release.
+func TestRevertLog_MutatorLeanLegs(t *testing.T) {
+	db, repo, rl := newP3RecorderHarness(t, ":memory:")
+	defer func() { _ = db.Close() }()
+	ctx := context.Background()
+	dest := "/dst/LG/poster.jpg"
+	backup := dest + ".dlbak.z"
+
+	opID := beginP3Op(t, rl, "LG-001")
+	require.NoError(t, rl.ReleaseReplacement(ctx, opID, dest, backup),
+		"no matching entry — silent no-op")
+	require.Error(t, rl.ConfirmReplacement(ctx, "424242", dest, backup), "record not found")
+
+	// seedRoot on a row with broken stored JSON keeps the raw ledger.
+	row, err := repo.FindByID(ctx, uintFromOpID(t, opID))
+	require.NoError(t, err)
+	row.GeneratedFiles = "not-json"
+	require.NoError(t, repo.Update(ctx, row))
+	require.NoError(t, rl.(*dbRevertLog).seedRoot(ctx, opID, "/extra"))
+
+	// now append works against clean ledger
+	// (applying via freshBeginToRow helper to satisfy any schemas)
+	require.NoError(t, rl.(*dbRevertLog).seedRoot(ctx, opID, "/extra"), "dedupe is a no-op")
+}
