@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -30,6 +31,8 @@ var restoreCopyOrdinal atomic.Uint64
 // backup: staged adjacent write + replace-aware swap (Win-safe), streamed
 // through a bounded buffer. Used by the confirm-failure rollback so the
 // journal entry can never end up pointing at consumed bytes (codex P3 R9-1).
+// Re-arm callers reverse backup and dest to copy restored destination bytes
+// back into a consumed backup using the same metadata-preserving semantics.
 func copyBackupToDest(fsys afero.Fs, backup, dest string) error {
 	src, err := fsys.Open(backup)
 	if err != nil {
@@ -69,6 +72,20 @@ func copyBackupToDest(fsys afero.Fs, backup, dest string) error {
 		return fmt.Errorf("swap rollback: %w", err)
 	}
 	return nil
+}
+
+// rearmReplacementBackup recreates a backup consumed by a rollback restore.
+// An existing backup wins: another rollback may already have re-armed it, and
+// retention must never clobber those bytes. The reverse copy reuses
+// copyBackupToDest's exclusive adjacent staging, atomic replace, source mode,
+// and source ModTime preservation.
+func rearmReplacementBackup(fsys afero.Fs, dest, backup string) error {
+	if _, err := fsys.Stat(backup); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("stat backup for re-arm: %w", err)
+	}
+	return copyBackupToDest(fsys, dest, backup)
 }
 
 // overwriteBackupPath names the destination's backup for one replacement:
@@ -140,6 +157,20 @@ func (d *Downloader) installOverwriting(ctx context.Context, stagedPath, destPat
 		return true, true, nil
 	}
 
+	// The marker is created before the destination is renamed aside. It is
+	// visible to a CLI/startup sweep in another process for the entire
+	// journal-arm/install-confirm window, and its PID makes dead owners
+	// reclaimable instead of retaining crash leftovers forever.
+	busyRelease, busyErr := fsutil.AcquireReplacementBusy(d.fs, destPath)
+	if errors.Is(busyErr, fsutil.ErrReplacementBusy) {
+		logging.Warnf("downloader: overwrite of %s refused — another process owns the replacement", destPath)
+		return true, true, nil
+	}
+	if busyErr != nil {
+		return false, true, fmt.Errorf("failed to arm replacement busy marker for %s: %w", destPath, busyErr)
+	}
+	defer busyRelease()
+
 	backupPath := overwriteBackupPath(destPath, ledger.opID)
 	if err := d.fs.Rename(destPath, backupPath); err != nil {
 		return false, true, fmt.Errorf("failed to set aside existing bytes for %s: %w", destPath, err)
@@ -158,7 +189,10 @@ func (d *Downloader) installOverwriting(ctx context.Context, stagedPath, destPat
 		// entry or the row permanently points at a vanished backup and every
 		// later revert of this op fails stat-ing it (codex P3 round 1).
 		if relErr := ledger.recorder.ReleaseReplacement(ctx, ledger.opID, destPath, backupPath); relErr != nil {
-			logging.Warnf("downloader: release of rolled-back journal entry failed for %s: %v (sweep retains it; destination is correct)", destPath, relErr)
+			logging.Warnf("downloader: release of rolled-back journal entry failed for %s: %v (destination is correct); re-arming backup", destPath, relErr)
+			if rearmErr := rearmReplacementBackup(d.fs, destPath, backupPath); rearmErr != nil {
+				logging.Warnf("downloader: re-arm of rolled-back backup failed for %s: %v (journal entry remains armed)", backupPath, rearmErr)
+			}
 		}
 		return false, true, fmt.Errorf("failed to replace file: %w", err)
 	}

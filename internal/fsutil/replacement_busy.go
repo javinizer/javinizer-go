@@ -1,0 +1,163 @@
+package fsutil
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"runtime"
+	"strconv"
+	"strings"
+	"sync"
+	"syscall"
+	"time"
+
+	"github.com/spf13/afero"
+)
+
+const (
+	// ReplacementBusySuffix is adjacent to a destination so every process
+	// arbitrating that destination observes the same ownership marker.
+	ReplacementBusySuffix   = ".dlbusy"
+	replacementBusyStaleAge = 2 * time.Minute
+)
+
+// ErrReplacementBusy means another live process owns a destination replacement.
+var ErrReplacementBusy = errors.New("replacement destination is busy")
+
+// replacementBusyBootAt prevents a PID reused after this process started from
+// being mistaken for an owner from this boot. The timestamp in the marker is
+// written before the writer renames the destination aside.
+var replacementBusyBootAt = time.Now()
+var replacementFindProcess = os.FindProcess
+var replacementIsWindows = runtime.GOOS == "windows"
+
+// ReplacementBusyPath returns the durable in-flight marker for dest.
+func ReplacementBusyPath(dest string) string { return dest + ReplacementBusySuffix }
+
+// AcquireReplacementBusy atomically claims the destination-adjacent marker.
+// Writers create it before moving the destination aside; sweepers create it
+// before touching a backup. A marker from a dead PID is reclaimed, while a
+// malformed marker is retained until its mtime is stale so a partial write
+// cannot open a race window.
+func AcquireReplacementBusy(fs afero.Fs, dest string) (func(), error) {
+	path := ReplacementBusyPath(dest)
+	for {
+		token := replacementBusyToken()
+		file, err := fs.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err == nil {
+			if _, err = file.WriteString(token); err != nil {
+				_ = file.Close()
+				_ = fs.Remove(path)
+				return nil, fmt.Errorf("write replacement busy marker: %w", err)
+			}
+			if err = file.Sync(); err != nil {
+				_ = file.Close()
+				_ = fs.Remove(path)
+				return nil, fmt.Errorf("sync replacement busy marker: %w", err)
+			}
+			if err = file.Close(); err != nil {
+				_ = fs.Remove(path)
+				return nil, fmt.Errorf("close replacement busy marker: %w", err)
+			}
+			var once sync.Once
+			return func() {
+				once.Do(func() { releaseReplacementBusy(fs, path, token) })
+			}, nil
+		}
+		if !os.IsExist(err) {
+			return nil, fmt.Errorf("create replacement busy marker: %w", err)
+		}
+
+		stale, inspectErr := replacementBusyStale(fs, path)
+		if inspectErr != nil {
+			return nil, fmt.Errorf("inspect replacement busy marker: %w", inspectErr)
+		}
+		if !stale {
+			return nil, ErrReplacementBusy
+		}
+		if removeErr := fs.Remove(path); removeErr != nil && !os.IsNotExist(removeErr) {
+			return nil, fmt.Errorf("reclaim replacement busy marker: %w", removeErr)
+		}
+	}
+}
+
+func replacementBusyToken() string {
+	return fmt.Sprintf("pid=%d,time=%d", os.Getpid(), time.Now().UnixNano())
+}
+
+func releaseReplacementBusy(fs afero.Fs, path, token string) {
+	content, err := afero.ReadFile(fs, path)
+	if err != nil || string(content) != token {
+		return
+	}
+	_ = fs.Remove(path)
+}
+
+func replacementBusyStale(fs afero.Fs, path string) (bool, error) {
+	content, err := afero.ReadFile(fs, path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return true, nil
+		}
+		return false, err
+	}
+	info, err := fs.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return true, nil
+		}
+		return false, err
+	}
+	pid, created, ok := parseReplacementBusyToken(string(content))
+	if !ok {
+		return time.Since(info.ModTime()) > replacementBusyStaleAge, nil
+	}
+	createdAt := time.Unix(0, created)
+	if pid == os.Getpid() {
+		return createdAt.Before(replacementBusyBootAt), nil
+	}
+	if replacementIsWindows {
+		return time.Since(createdAt) > replacementBusyStaleAge, nil
+	}
+	return !replacementProcessAlive(pid), nil
+}
+
+func parseReplacementBusyToken(content string) (pid int, created int64, ok bool) {
+	var pidSet, timeSet bool
+	parts := strings.FieldsFunc(content, func(r rune) bool {
+		return r == ',' || r == '\n' || r == '\r' || r == '\t' || r == ' '
+	})
+	for _, part := range parts {
+		keyValue := strings.SplitN(part, "=", 2)
+		if len(keyValue) != 2 {
+			continue
+		}
+		switch strings.TrimSpace(keyValue[0]) {
+		case "pid":
+			value, err := strconv.Atoi(strings.TrimSpace(keyValue[1]))
+			if err != nil {
+				return 0, 0, false
+			}
+			pid, pidSet = value, true
+		case "time":
+			value, err := strconv.ParseInt(strings.TrimSpace(keyValue[1]), 10, 64)
+			if err != nil {
+				return 0, 0, false
+			}
+			created, timeSet = value, true
+		}
+	}
+	return pid, created, pidSet && timeSet
+}
+
+func replacementProcessAlive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	process, err := replacementFindProcess(pid)
+	if err != nil {
+		return false
+	}
+	err = process.Signal(syscall.Signal(0))
+	return err == nil || err == syscall.EPERM
+}

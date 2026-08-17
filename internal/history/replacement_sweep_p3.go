@@ -29,6 +29,11 @@ import (
 //     retained — it is the only copy of that row's pre-replace bytes.
 //   - A backup younger than this process is in-flight (another live operation
 //     may own it) and is skipped.
+//   - Before arbitrating any candidate, the sweeper claims the durable
+//     destination-adjacent `<dest>.dlbusy` marker. A live owner (including a
+//     marker from this boot) makes the candidate stay untouched; dead-PID
+//     markers are reclaimed. Malformed markers are retained until their mtime
+//     is older than the two-minute stale threshold.
 //   - A journaled backup whose destination went missing belongs to the crash
 //     window between set-aside and install: the new bytes never landed, so
 //     the old bytes are restored to the destination and the journal entry is
@@ -320,6 +325,20 @@ func (s *ReplacementSweeper) sweepOne(ctx context.Context, idx *replacementLedge
 		return 0
 	}
 	dest := strings.TrimSuffix(backup, replacementBackupName.FindString(e.Name()))
+
+	// The marker is an on-disk cross-process exclusion. Acquire it before
+	// reading or changing ownership state: the downloader creates the same
+	// marker before moving the destination aside, so a live API install cannot
+	// be mistaken for a stale crash window by this process (or at startup).
+	busyRelease, busyErr := fsutil.AcquireReplacementBusy(s.fs, dest)
+	if errors.Is(busyErr, fsutil.ErrReplacementBusy) {
+		return 0
+	}
+	if busyErr != nil {
+		logging.Warnf("replacement sweep %s: busy-marker arbitration failed (%v) — kept", backup, busyErr)
+		return 0
+	}
+	defer busyRelease()
 
 	if owner, ok := idx.journaled[backupKey]; ok {
 		// Journaled — handled under the lock inside restoreAndConsume, which
