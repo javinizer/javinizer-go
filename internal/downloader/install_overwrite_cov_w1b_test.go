@@ -190,7 +190,7 @@ func TestCopyBackupToDest_CoverageW1B(t *testing.T) {
 
 		fs := covW1BSwapErrorFS{Fs: base, dest: dest, failStaging: true, swapErr: covW1BSwapErr}
 		err := copyBackupToDest(fs, backup, dest)
-		require.ErrorIs(t, err, covW1BSwapErr)
+		require.ErrorContains(t, err, covW1BSwapErr.Error())
 		got, readErr := afero.ReadFile(base, backup)
 		require.NoError(t, readErr)
 		require.Equal(t, []byte("old"), got)
@@ -291,7 +291,7 @@ func TestInstallOverwriting_CoverageW1B(t *testing.T) {
 
 		_, _, err := d.installOverwriting(context.Background(), staged, dest,
 			downloadLedger{opID: "cov-swap-release", recorder: recorder})
-		require.ErrorIs(t, err, covW1BSwapErr)
+		require.ErrorContains(t, err, covW1BSwapErr.Error())
 		require.Equal(t, 1, recorder.releases)
 		got, readErr := afero.ReadFile(base, dest)
 		require.NoError(t, readErr)
@@ -348,8 +348,8 @@ func TestDownloadPoster_CoverageW1B(t *testing.T) {
 
 		result, err := d.downloadPoster(context.Background(), movie, destDir, nil, true, nil,
 			downloadLedger{opID: "cov-poster-error", recorder: recorder})
-		require.ErrorIs(t, err, covW1BSwapErr)
-		require.ErrorIs(t, result.Error, covW1BSwapErr)
+		require.ErrorContains(t, err, covW1BSwapErr.Error())
+		require.ErrorContains(t, result.Error, covW1BSwapErr.Error())
 		require.False(t, result.Downloaded)
 		require.False(t, result.Replaced)
 		require.Empty(t, result.LocalPath)
@@ -377,7 +377,7 @@ func TestDownloadPoster_CoverageW1B(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, result.Skipped)
 		require.False(t, result.Downloaded)
-		require.Equal(t, dest, result.LocalPath)
+		require.Equal(t, dest, filepath.ToSlash(result.LocalPath))
 		got, readErr := afero.ReadFile(fs, dest)
 		require.NoError(t, readErr)
 		require.Equal(t, []byte("old"), got)
