@@ -19,8 +19,8 @@ func TestKeyedLockAcquireMany_CoverageW1B(t *testing.T) {
 	release = r.AcquireMany([]string{"/dst/poster.jpg", "/DST/POSTER.JPG", "/dst/other.jpg"})
 	release()
 
-	// Empty-looking inputs are normalized by DestKey before AcquireMany sees
-	// them; they remain safe to acquire and release like any other key.
+	// Empty-looking inputs are normalized before AcquireMany sees them; they
+	// remain safe to acquire and release like any other key.
 	release = r.AcquireMany([]string{"", " "})
 	release()
 

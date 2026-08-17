@@ -62,9 +62,17 @@ func TestFindOperationsByDestination_FallbackErrorPropagates(t *testing.T) {
 	require.Equal(t, "marker", gotCtx.Value(ctxKey{}), "R10-1: the caller's context rides the fallback scan")
 }
 
-// codex P3 R12-1: destination matching follows platform case semantics —
-// Windows/macOS fold case, so a differently-cased apply must match.
+// codex P3 R12-1: destination matching follows the probed root semantics —
+// this regression pins the legacy insensitive behavior explicitly.
 func TestFallbackSeam_CaseVariantDestinationMatches(t *testing.T) {
+	previous := fsutil.CaseSensitiveProbe
+	fsutil.CaseSensitiveProbe = func(string) (bool, error) { return false, nil }
+	fsutil.ResetCaseSensitivityCache()
+	t.Cleanup(func() {
+		fsutil.CaseSensitiveProbe = previous
+		fsutil.ResetCaseSensitivityCache()
+	})
+
 	raw := `{"replacements":[{"destination":"C:\\Media\\poster.jpg","backup":"C:\\Media\\poster.jpg.dlbak.aaaaaaaaaaaaaaaa","dest_seq":1}]}`
 	cand := models.BatchFileOperation{MovieID: "CV-1", GeneratedFiles: raw}
 	helper := fallbackSeam{}
@@ -74,9 +82,8 @@ func TestFallbackSeam_CaseVariantDestinationMatches(t *testing.T) {
 		return []models.BatchFileOperation{cand}, nil
 	})
 	require.NoError(t, err)
-	// DestKey folds unconditionally — destination keys are matched across
-	// spellings on every platform.
-	require.Len(t, matched, 1, "case variants match unconditionally after DestKey")
+	// The injected insensitive probe preserves the legacy folded match.
+	require.Len(t, matched, 1, "case variants match after the insensitive DestKey probe")
 	require.Equal(t, 1, scanCalls, "LIKE on raw still misses the other spelling — folded scan rescues")
 }
 
@@ -96,7 +103,7 @@ func TestFallbackSeam_UnionDeduplicatesMixedSpellings(t *testing.T) {
 	})
 	require.NoError(t, err)
 	// Both journal spellings resolve to the same destination key.
-	require.Len(t, matched, 2, "both spellings match unconditionally after DestKey folds")
+	require.Len(t, matched, 2, "slash and backslash forms match after DestKey normalization")
 	if runtime.GOOS == "windows" {
 		ids := map[uint]bool{}
 		for _, op := range matched {

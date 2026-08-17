@@ -766,7 +766,7 @@ func nextDestSequence(ctx context.Context, repo database.BatchFileOperationRepos
 			continue // unparsable rows contribute no sequence floor
 		}
 		for _, rep := range gf.Replacements {
-			if rep.Destination == destination && rep.DestSeq > maxSeq {
+			if fsutil.DestKey(rep.Destination) == fsutil.DestKey(destination) && rep.DestSeq > maxSeq {
 				maxSeq = rep.DestSeq
 			}
 		}

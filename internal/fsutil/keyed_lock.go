@@ -1,10 +1,13 @@
 package fsutil
 
 import (
+	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 // KeyedLockRegistry provides per-key mutexes with reference-counted eviction
@@ -28,21 +31,186 @@ func NewKeyedLockRegistry() *KeyedLockRegistry {
 }
 
 func foldKeyedLock(s string) string {
-	return strings.ToUpper(DestKey(s))
+	// Acquisition deliberately remains folded even on case-sensitive volumes:
+	// extra contention is harmless, and every spelling of one chain still
+	// serializes under the same lock.
+	return strings.ToUpper(strings.ToLower(normalizeDestPath(s)))
 }
 
-// DestKey canonicalizes a destination path for CROSS-FORM comparisons
-// (codex P3 R12-1/R17-1): always separator-normalized and case-folded —
-// the media libraries this guards live on case-insensitive or tolerant
-// filesystems (Windows, macOS with default-APFS, consumer NAS stacks),
-// and ledger comparisons within a single destination must not split on
-// spelling (case variants or separators). The folding is deliberate: a
-// broader match fails CLOSED (retained backup), never loses a restore
-// entry for a legitimately distinct file in the supported ecosystems.
+// caseSensitivityProbe is intentionally injectable so filesystem semantics can
+// be forced by tests without changing the journal format.
+type caseSensitivityProbe func(root string) (bool, error)
+
+// CaseSensitiveProbe is the process-wide probe seam. A probe error is treated
+// as case-insensitive by IsCaseSensitiveRoot (fail closed).
+var CaseSensitiveProbe caseSensitivityProbe = defaultCaseSensitiveProbe
+
+var (
+	caseSensitivityCacheMu sync.Mutex
+	caseSensitivityCache   = make(map[string]bool)
+	caseProbeOrdinal       atomic.Uint64
+)
+
+// ResetCaseSensitivityCache clears the process cache. It is primarily a test
+// seam; production callers should retain the one-probe-per-root lifetime.
+func ResetCaseSensitivityCache() {
+	caseSensitivityCacheMu.Lock()
+	caseSensitivityCache = make(map[string]bool)
+	caseSensitivityCacheMu.Unlock()
+}
+
+// IsCaseSensitiveRoot reports the cached case behavior for root. Probe errors,
+// nil probe seams, and unwritable roots all resolve to false (insensitive).
+func IsCaseSensitiveRoot(root string) bool {
+	root = cleanProbeRoot(root)
+	caseSensitivityCacheMu.Lock()
+	defer caseSensitivityCacheMu.Unlock()
+	if result, ok := caseSensitivityCache[root]; ok {
+		return result
+	}
+	probe := CaseSensitiveProbe
+	if probe == nil {
+		caseSensitivityCache[root] = false
+		return false
+	}
+	result, err := probe(root)
+	if err != nil {
+		result = false
+	}
+	caseSensitivityCache[root] = result
+	return result
+}
+
+// DestKey canonicalizes a destination path for CROSS-FORM comparisons while
+// respecting the destination root's filesystem semantics. Separators are
+// always normalized. Case is folded on insensitive/tolerant roots, preserving
+// the earlier fail-closed behavior; case-sensitive roots retain the spelling
+// so distinct files such as Poster.jpg and poster.jpg do not share a journal
+// bucket.
 func DestKey(p string) string {
-	s := strings.ReplaceAll(strings.TrimSpace(p), "\\", "/")
-	s = filepath.Clean(s)
+	return DestKeyForRoot(destinationProbeRoot(p), p)
+}
+
+// DestKeyForRoot is DestKey with an explicit destination root. The explicit
+// form is useful to callers that already know the media-library root.
+func DestKeyForRoot(root, p string) string {
+	s := normalizeDestPath(p)
+	if IsCaseSensitiveRoot(root) {
+		return s
+	}
 	return strings.ToLower(s)
+}
+
+func normalizeDestPath(p string) string {
+	s := strings.ReplaceAll(strings.TrimSpace(p), "\\", "/")
+	return filepath.ToSlash(filepath.Clean(filepath.FromSlash(s)))
+}
+
+var probeRootStat = os.Stat
+
+// destinationProbeRoot selects the destination's directory, or its nearest
+// existing ancestor, so the probe creates a sibling rather than touching the
+// destination itself.
+func destinationProbeRoot(p string) string {
+	root := filepath.Dir(filepath.FromSlash(normalizeDestPath(p)))
+	for {
+		if info, err := probeRootStat(root); err == nil && info.IsDir() {
+			return cleanProbeRoot(root)
+		}
+		parent := filepath.Dir(root)
+		if parent == root {
+			return cleanProbeRoot(root)
+		}
+		root = parent
+	}
+}
+
+func cleanProbeRoot(root string) string {
+	root = strings.ReplaceAll(strings.TrimSpace(root), "\\", "/")
+	if root == "" {
+		root = "."
+	}
+	root = filepath.Clean(filepath.FromSlash(root))
+	absolute, _ := filepath.Abs(root)
+	return filepath.Clean(absolute)
+}
+
+type caseProbeFile interface {
+	Close() error
+}
+
+type caseProbeOps struct {
+	openFile func(string, int, os.FileMode) (caseProbeFile, error)
+	stat     func(string) (os.FileInfo, error)
+	readDir  func(string) ([]os.DirEntry, error)
+	remove   func(string) error
+}
+
+var osCaseProbeOps = caseProbeOps{
+	openFile: func(name string, flag int, perm os.FileMode) (caseProbeFile, error) {
+		return os.OpenFile(name, flag, perm)
+	},
+	stat:    os.Stat,
+	readDir: os.ReadDir,
+	remove:  os.Remove,
+}
+
+// defaultCaseSensitiveProbe creates one uniquely named file and stats its
+// differently-cased spelling. Directory enumeration is the fallback when the
+// alternate stat is indeterminate. The temporary entries are always removed;
+// any probe or cleanup failure is returned for the caller's fail-closed path.
+func defaultCaseSensitiveProbe(root string) (bool, error) {
+	return probeCaseSensitive(osCaseProbeOps, root)
+}
+
+func probeCaseSensitive(ops caseProbeOps, root string) (bool, error) {
+	token := strconv.FormatUint(caseProbeOrdinal.Add(1), 10)
+	name := ".javinizer_case_probe_" + token
+	alternate := ".JAVINIZER_CASE_PROBE_" + token
+	path := filepath.Join(root, name)
+	alternatePath := filepath.Join(root, alternate)
+	file, err := ops.openFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return false, err
+	}
+	cleanup := func() error {
+		var cleanupErr error
+		if err := ops.remove(path); err != nil && !os.IsNotExist(err) {
+			cleanupErr = err
+		}
+		if err := ops.remove(alternatePath); err != nil && !os.IsNotExist(err) && cleanupErr == nil {
+			cleanupErr = err
+		}
+		return cleanupErr
+	}
+	if err := file.Close(); err != nil {
+		_ = cleanup()
+		return false, err
+	}
+
+	caseSensitive := false
+	if _, statErr := ops.stat(alternatePath); statErr == nil {
+		caseSensitive = false
+	} else if os.IsNotExist(statErr) {
+		caseSensitive = true
+	} else {
+		entries, readErr := ops.readDir(root)
+		if readErr != nil {
+			_ = cleanup()
+			return false, readErr
+		}
+		caseSensitive = true
+		for _, entry := range entries {
+			if strings.EqualFold(entry.Name(), name) {
+				caseSensitive = false
+				break
+			}
+		}
+	}
+	if err := cleanup(); err != nil {
+		return false, err
+	}
+	return caseSensitive, nil
 }
 
 // Acquire blocks until the mutex for key is held and returns a release

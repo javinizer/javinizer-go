@@ -71,8 +71,9 @@ func journalEntryRestorePending(row *models.BatchFileOperation, backupSlash stri
 	return false
 }
 
-// sweepSlash normalizes a path for journal comparison via the canonical
-// dest key (separator + platform case folding — R12-1/R12-4).
+// sweepSlash normalizes a path for journal comparison via the probe-aware
+// destination key: separators always normalize, and case folds only on an
+// insensitive/tolerant destination root.
 func sweepSlash(p string) string { return fsutil.DestKey(p) }
 
 // IsReplacementBackupName reports whether name carries the revert-ledger
@@ -222,7 +223,7 @@ func (s *ReplacementSweeper) index(ctx context.Context) (*replacementLedgerIndex
 		for _, rep := range gf.Replacements {
 			idx.journaled[sweepSlash(rep.Backup)] = row
 			// Dirs are FS ENUMERATION paths — keep their recorded case (the
-			// canonical key is only a comparison form).
+			// probe-aware key is only a comparison form).
 			idx.dirs[filepath.ToSlash(filepath.Clean(filepath.Dir(rep.Destination)))] = true
 		}
 		// R2-3: delete-listed paths name download destinations even when NO
@@ -307,8 +308,8 @@ func (s *ReplacementSweeper) SweepDestinations(ctx context.Context, destinations
 // sweepOne arbitrates one ownership-marker backup file.
 func (s *ReplacementSweeper) sweepOne(ctx context.Context, idx *replacementLedgerIndex, dirSlash string, e os.FileInfo) int {
 	backup := filepath.FromSlash(dirSlash + "/" + e.Name())
-	// Journal comparisons run under the canonical KEY (R12-1: separator +
-	// platform case folding); the actual fs paths keep their recorded case.
+	// Journal comparisons run under the probe-aware key (separator normalization
+	// plus conditional case folding); actual fs paths keep their recorded case.
 	backupKey := sweepSlash(backup)
 
 	// Younger than this process: plausibly in-flight under a live downloader

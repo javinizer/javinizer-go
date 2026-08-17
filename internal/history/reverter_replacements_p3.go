@@ -101,12 +101,11 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 		return restored, nil
 	}
 
-	// Group entries by destination — CANONICAL key, not the raw string
-	// (codex P3 R16-1): one operation can journal the same physical path with
-	// two spellings (`Poster.jpg`, `poster.jpg`, separators); raw grouping
-	// would split one shared DestSeq chain into two groups and unwind them in
-	// nondeterministic map order. The restore TARGET keeps the op's own
-	// recorded spelling (both forms resolve to one file).
+	// Group entries by destination — probe-aware key, not the raw string:
+	// separator variants always match, while case variants match only when the
+	// destination root is insensitive/tolerant. On a case-sensitive root,
+	// `Poster.jpg` and `poster.jpg` remain independent chains. The restore
+	// target keeps each group's recorded spelling.
 	byDest := make(map[string][]models.ReplacementEntry)
 	destSpelling := make(map[string]string)
 	for _, e := range gf.Replacements {

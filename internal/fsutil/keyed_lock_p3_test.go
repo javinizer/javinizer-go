@@ -9,10 +9,9 @@ import (
 )
 
 // codex P3 R4-4: destination-lock keys fold separator spelling AND case —
-// the downloader joins with the OS separator while journals use slashes. The
-// fold is UNCONDITIONAL: the journals compared here persist exclusively on
-// consumer media filesystems (NTFS, default-APFS, NAS fuse drivers) where
-// case variants and separator spellings of a destination mean one file.
+// the downloader joins with the OS separator while journals use slashes. Lock
+// acquisition remains folded even on case-sensitive volumes; grouping keys
+// use the probe-aware DestKey separately.
 func TestFoldKeyedLock_NormalizesSeparatorsAndCase(t *testing.T) {
 	require.Equal(t, foldKeyedLock("/DST/a/Poster.JPG"), foldKeyedLock("/dst/a/poster.jpg"))
 	require.Equal(t, foldKeyedLock("/dst/A/poster.jpg"), foldKeyedLock("\\dst\\A\\poster.jpg"))
