@@ -38,18 +38,25 @@ func (e *NewerAppliedDestError) Error() string {
 	return fmt.Sprintf("destination %s carries a newer journalized replacement from operation %d (movie %s); revert that operation first", e.Destination, e.NewerOpID, e.NewerMovieID)
 }
 
-// rejectedRevert reports a failed revert whose cause is a refusal — the
-// operation row's status stays Applied so the newer owner can be reverted
-// first and this operation retried.
-func rejectedRevert(op *models.BatchFileOperation, errMsg string) *RevertFileResult {
+// rejectedRevert reports a failed revert whose cause is a refusal —
+// the operation row's status stays Applied so a retry in the right order
+// resolves the rejection. A `NewerAppliedDestError` marks it as an
+// ordering-only rejection (R20-2); everything else (I/O, persistence)
+// is reported as unexpected path state.
+func rejectedRevert(op *models.BatchFileOperation, err error) *RevertFileResult {
+	var chainErr *NewerAppliedDestError
+	reason := models.RevertReasonUnexpectedPathState
+	if errors.As(err, &chainErr) {
+		reason = models.RevertReasonDestinationConflict
+	}
 	return &RevertFileResult{
 		OperationID:  op.ID,
 		MovieID:      op.MovieID,
 		OriginalPath: op.OriginalPath,
 		NewPath:      op.NewPath,
 		Outcome:      models.RevertOutcomeFailed,
-		Reason:       models.RevertReasonDestinationConflict,
-		Error:        errMsg,
+		Reason:       reason,
+		Error:        err.Error(),
 	}
 }
 
@@ -115,11 +122,28 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 		sort.SliceStable(byDest[dest], func(i, j int) bool { return byDest[dest][i].DestSeq > byDest[dest][j].DestSeq })
 	}
 
-	// Execute per destination under its lock. The newer-applied / interleave
-	// rejection is re-evaluated INSIDE the lock with a FRESH query (codex P3
-	// R7-1): a concurrent apply can journal a newer replacement between any
-	// preflight read and lock acquisition — restoring from a stale ownership
-	// snapshot would clobber freshly installed bytes.
+	// codex P3 R20-1: phase-split preflight from restore. Preflight iterates
+	// byDest WITHOUT locks so rejected ops halt BEFORE any bytes move — a
+	// multi-destination op can then refuse while its secondary destinations
+	// are still untouched (the interleaved minus hit). The per-destination
+	// lock-gated phase still revisits the journal under the dest lock for
+	// in-lock freshness.
+	for key, entries := range byDest {
+		dest := destSpelling[key]
+		minOwn := entries[0].DestSeq
+		for _, e := range entries {
+			if e.DestSeq < minOwn {
+				minOwn = e.DestSeq
+			}
+		}
+		if rjErr := r.checkDestBlocking(ctx, op, dest, minOwn); rjErr != nil {
+			return restored, rjErr
+		}
+	}
+
+	// Phase 2 — per-destination restore under its lock. Same structure as
+	// before: fresh journal query INSIDE the lock keeps serializable safety
+	// against in-flight applies racing this revert.
 	for key, entries := range byDest {
 		dest := destSpelling[key]
 		release := fsutil.SharedDestLocks().Acquire(dest)

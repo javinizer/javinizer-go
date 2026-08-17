@@ -186,7 +186,7 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 	restored, rejErr := r.restoreReplacementJournal(ctx, op)
 	if rejErr != nil {
 		logging.Warnf("Replacement journal restore refused/failed for op %d: %v", op.ID, rejErr)
-		return rejectedRevert(op, rejErr.Error()).withRetryable(rejErr), nil
+		return rejectedRevert(op, rejErr).withRetryable(rejErr), nil
 	}
 
 	if result, err := r.checkAnchor(ctx, op); result != nil || err != nil {
