@@ -72,8 +72,10 @@ func journalEntryRestorePending(row *models.BatchFileOperation, backupSlash stri
 }
 
 // sweepSlash normalizes a path for journal comparison via the probe-aware
-// destination key: separators always normalize, and case folds only on an
-// insensitive/tolerant destination root.
+// destination key: backslash separators normalize only under the Windows
+// seam, and case folds only on an insensitive/tolerant destination root.
+// Audit: POSIX sweep journals carry `/` spellings, so literal `\\` names stay
+// distinct; Windows legacy backup spellings continue to cross-match.
 func sweepSlash(p string) string { return fsutil.DestKey(p) }
 
 // IsReplacementBackupName reports whether name carries the revert-ledger

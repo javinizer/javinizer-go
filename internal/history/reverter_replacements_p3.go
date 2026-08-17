@@ -102,10 +102,14 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 	}
 
 	// Group entries by destination — probe-aware key, not the raw string:
-	// separator variants always match, while case variants match only when the
-	// destination root is insensitive/tolerant. On a case-sensitive root,
-	// `Poster.jpg` and `poster.jpg` remain independent chains. The restore
-	// target keeps each group's recorded spelling.
+	// backslash separator variants match only under the Windows separator seam;
+	// on POSIX a backslash remains part of the filename. Case variants match
+	// only when the destination root is insensitive/tolerant. On a
+	// case-sensitive root, `Poster.jpg` and `poster.jpg` remain independent
+	// chains. The restore target keeps each group's recorded spelling.
+	// Audit: POSIX journals carry `/` path spellings, so history correctness
+	// never depended on translating a literal `\\`; Windows legacy journals
+	// retain cross-form matching.
 	byDest := make(map[string][]models.ReplacementEntry)
 	destSpelling := make(map[string]string)
 	for _, e := range gf.Replacements {
@@ -255,7 +259,9 @@ func (r *Reverter) sweepJournaledDestinations(ctx context.Context, ops []models.
 }
 
 // checkDestBlocking applies the newcomer/interleave rule against the LIVE
-// journal for one destination. Caller holds the destination lock.
+// journal for one destination. Caller holds the destination lock. Its
+// DestKey comparisons inherit the same POSIX-literal/Windows-separator policy;
+// POSIX journals use `/` spellings and do not rely on `\\` translation.
 func (r *Reverter) checkDestBlocking(ctx context.Context, op *models.BatchFileOperation, dest string, minOwn int64) error {
 	rows, qErr := r.batchFileOpRepo.FindOperationsByDestination(ctx, dest)
 	if qErr != nil {

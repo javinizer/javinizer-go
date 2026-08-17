@@ -122,8 +122,8 @@ func (m *p3OpRepo) FindOperationsWithReplacements(_ context.Context) ([]models.B
 
 func (m *p3OpRepo) FindOperationsByDestination(_ context.Context, destination string) ([]models.BatchFileOperation, error) {
 	// Mirror production (database repo): destination comparisons use the
-	// probe-aware key form — backslash/slash always normalize and case folds
-	// only on insensitive/tolerant roots.
+	// probe-aware key form — backslash/slash normalize under the configured
+	// platform seam and case folds only on insensitive/tolerant roots.
 	want := sweepSlash2Test(destination)
 	return m.byPred(func(op *models.BatchFileOperation) bool {
 		gf, err := models.ParseGeneratedFiles(op.GeneratedFiles)

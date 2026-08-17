@@ -3,6 +3,7 @@ package fsutil
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -32,10 +33,15 @@ func NewKeyedLockRegistry() *KeyedLockRegistry {
 
 func foldKeyedLock(s string) string {
 	// Acquisition deliberately remains folded even on case-sensitive volumes:
-	// extra contention is harmless, and every spelling of one chain still
-	// serializes under the same lock.
+	// extra contention is harmless. normalizeDestPath still applies platform
+	// separator semantics, so POSIX backslashes remain distinct filename chars.
 	return strings.ToUpper(strings.ToLower(normalizeDestPath(s)))
 }
+
+// PathBackslashesAreSeparators is the path-separator seam used by destination
+// keys and keyed locks. It defaults to the runtime platform behavior, while
+// tests may select either platform's spelling rules on one host.
+var PathBackslashesAreSeparators = runtime.GOOS == "windows"
 
 // caseSensitivityProbe is intentionally injectable so filesystem semantics can
 // be forced by tests without changing the journal format.
@@ -82,11 +88,11 @@ func IsCaseSensitiveRoot(root string) bool {
 }
 
 // DestKey canonicalizes a destination path for CROSS-FORM comparisons while
-// respecting the destination root's filesystem semantics. Separators are
-// always normalized. Case is folded on insensitive/tolerant roots, preserving
-// the earlier fail-closed behavior; case-sensitive roots retain the spelling
-// so distinct files such as Poster.jpg and poster.jpg do not share a journal
-// bucket.
+// respecting the destination root's filesystem semantics. Backslash
+// separators are normalized only when PathBackslashesAreSeparators is true.
+// Case is folded on insensitive/tolerant roots, preserving the earlier
+// fail-closed behavior; case-sensitive roots retain the spelling so distinct
+// files such as Poster.jpg and poster.jpg do not share a journal bucket.
 func DestKey(p string) string {
 	return DestKeyForRoot(destinationProbeRoot(p), p)
 }
@@ -102,7 +108,14 @@ func DestKeyForRoot(root, p string) string {
 }
 
 func normalizeDestPath(p string) string {
-	s := strings.ReplaceAll(strings.TrimSpace(p), "\\", "/")
+	// Apply separator policy before filepath.Clean: Windows legacy journals may
+	// use either slash spelling, while POSIX filepath names may contain a
+	// literal backslash that must survive cleaning. Case folding is applied by
+	// DestKeyForRoot only after this platform-aware path canonicalization.
+	s := strings.TrimSpace(p)
+	if PathBackslashesAreSeparators {
+		s = strings.ReplaceAll(s, "\\", "/")
+	}
 	return filepath.ToSlash(filepath.Clean(filepath.FromSlash(s)))
 }
 
@@ -126,7 +139,10 @@ func destinationProbeRoot(p string) string {
 }
 
 func cleanProbeRoot(root string) string {
-	root = strings.ReplaceAll(strings.TrimSpace(root), "\\", "/")
+	root = strings.TrimSpace(root)
+	if PathBackslashesAreSeparators {
+		root = strings.ReplaceAll(root, "\\", "/")
+	}
 	if root == "" {
 		root = "."
 	}

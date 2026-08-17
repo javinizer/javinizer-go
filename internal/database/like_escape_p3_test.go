@@ -3,7 +3,6 @@ package database
 import (
 	"context"
 	"errors"
-	"runtime"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/fsutil"
@@ -91,6 +90,13 @@ func TestFallbackSeam_CaseVariantDestinationMatches(t *testing.T) {
 // NOT hide differently-spelled rows owning the SAME destination — the seam
 // unions both sources.
 func TestFallbackSeam_UnionDeduplicatesMixedSpellings(t *testing.T) {
+	// W12 flip: this earlier R14-1 regression intentionally selects the
+	// Windows separator seam; the new POSIX distinction is covered in fsutil
+	// and history *_cov_w12_test.go files.
+	previous := fsutil.PathBackslashesAreSeparators
+	fsutil.PathBackslashesAreSeparators = true
+	t.Cleanup(func() { fsutil.PathBackslashesAreSeparators = previous })
+
 	backslash := `{"replacements":[{"destination":"C:\\Media\\poster.jpg","backup":"C:\\Media\\poster.jpg.dlbak.aaaaaaaaaaaaaaaa","dest_seq":1}]}`
 	slash := `{"replacements":[{"destination":"C:/Media/poster.jpg","backup":"C:/Media/poster.jpg.dlbak.bbbbbbbbbbbbbbbb","dest_seq":2}]}`
 	candBackslash := models.BatchFileOperation{ID: 7, MovieID: "CV-BS", GeneratedFiles: backslash}
@@ -103,14 +109,12 @@ func TestFallbackSeam_UnionDeduplicatesMixedSpellings(t *testing.T) {
 	})
 	require.NoError(t, err)
 	// Both journal spellings resolve to the same destination key.
-	require.Len(t, matched, 2, "slash and backslash forms match after DestKey normalization")
-	if runtime.GOOS == "windows" {
-		ids := map[uint]bool{}
-		for _, op := range matched {
-			ids[op.ID] = true
-		}
-		require.True(t, ids[7] && ids[9], "deduped union of prefilter + normalized scan")
+	require.Len(t, matched, 2, "slash and backslash forms match under the Windows seam")
+	ids := map[uint]bool{}
+	for _, op := range matched {
+		ids[op.ID] = true
 	}
+	require.True(t, ids[7] && ids[9], "deduped union of prefilter + normalized scan")
 }
 
 // A dead DB surfaces a query error, not a fake empty result.

@@ -187,10 +187,13 @@ func (r *BatchFileOperationRepository) FindOperationsByDestination(ctx context.C
 	if err != nil {
 		return nil, wrapDBErr("find", "batch file operations by destination", err)
 	}
-	// R6-4 + R12-1: match on the probe-aware destination key — separators
-	// normalize everywhere and case folds only on an insensitive/tolerant root.
-	// The LIKE prefilter CAN'T see through a form change, so a form-mismatch
-	// miss falls back to scanning every ledger row before concluding absence.
+	// R6-4 + R12-1: match on the probe-aware destination key — backslash
+	// separators normalize only under the Windows seam and case folds only on
+	// an insensitive/tolerant root. The LIKE prefilter CAN'T see through a form
+	// change, so a form-mismatch miss falls back to scanning every ledger row
+	// before concluding absence. Audit: POSIX journal paths use `/` spellings,
+	// and the normalized scan preserves literal backslashes rather than relying
+	// on their translation; Windows legacy slash/backslash forms still match.
 	norm := fsutil.DestKey
 	seam := fallbackSeam{}
 	return seam.finish(ctx, candidates, destination, norm, func(ctx2 context.Context) ([]models.BatchFileOperation, error) {

@@ -12,7 +12,13 @@ import (
 // the downloader joins with the OS separator while journals use slashes. Lock
 // acquisition remains folded even on case-sensitive volumes; grouping keys
 // use the probe-aware DestKey separately.
+// W12 flip: this earlier cross-form regression explicitly selects the Windows
+// seam; keyed_lock_cov_w12_test.go covers the POSIX literal-backslash posture.
 func TestFoldKeyedLock_NormalizesSeparatorsAndCase(t *testing.T) {
+	previous := PathBackslashesAreSeparators
+	PathBackslashesAreSeparators = true
+	t.Cleanup(func() { PathBackslashesAreSeparators = previous })
+
 	require.Equal(t, foldKeyedLock("/DST/a/Poster.JPG"), foldKeyedLock("/dst/a/poster.jpg"))
 	require.Equal(t, foldKeyedLock("/dst/A/poster.jpg"), foldKeyedLock("\\dst\\A\\poster.jpg"))
 	require.Equal(t, DestKey("/dst/A/poster.jpg"), DestKey("\\dst\\A\\poster.jpg"))

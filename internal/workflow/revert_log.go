@@ -754,6 +754,9 @@ func (l *dbRevertLog) seedRoot(ctx context.Context, opID OperationID, root strin
 // DestSeq already journaled for this destination across ALL operations
 // (applied and failed rows both count — a failed record's backups are still
 // restorable), plus one. Restart-persistent because it derives from rows.
+// Audit: this workflow grouping follows fsutil's platform separator seam;
+// POSIX journals use `/` spellings and keep literal backslashes distinct,
+// while Windows legacy slash/backslash spellings remain one destination.
 func nextDestSequence(ctx context.Context, repo database.BatchFileOperationRepositoryInterface, destination string) (int64, error) {
 	rows, err := repo.FindOperationsByDestination(ctx, destination)
 	if err != nil {
