@@ -95,6 +95,12 @@ func sha1hex8(s string) string {
 // in-lock classification the callers' results carry.
 func (d *Downloader) installOverwriting(ctx context.Context, stagedPath, destPath string, ledger downloadLedger) (bool, bool, error) {
 	release := d.destLocks.Acquire(destPath)
+	// codex PR#215 R22-3: a caller canceled while queued on the destination
+	// lock must not publish staged media after the lock is finally granted.
+	if cerr := ctx.Err(); cerr != nil {
+		release()
+		return false, true, cerr
+	}
 	defer release()
 
 	info, statErr := d.fs.Stat(destPath)
