@@ -451,7 +451,8 @@ type removeFailFs struct {
 }
 
 func (f *removeFailFs) Remove(name string) error {
-	if name == f.victim {
+	// The sweeper joins under OS separators — normalize for the lookup.
+	if strings.ReplaceAll(name, "\\", "/") == f.victim {
 		return errors.New("remove wedged")
 	}
 	return f.Fs.Remove(name)
