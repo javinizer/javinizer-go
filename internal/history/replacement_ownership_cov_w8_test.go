@@ -55,7 +55,7 @@ func TestReplacementOwnershipCovW8_ReverterRemoveFailureRetainsAndRetries(t *tes
 
 	absoluteBackup, err := filepath.Abs(backup)
 	require.NoError(t, err)
-	require.Contains(t, logs.String(), absoluteBackup)
+	requireLogPathContains(t, logs.String(), absoluteBackup)
 	require.Contains(t, logs.String(), "backup remove wedged")
 
 	fs.fail = false
@@ -102,7 +102,7 @@ func TestReplacementOwnershipCovW8_SweepRemoveFailureRetriesCleanup(t *testing.T
 
 	absoluteBackup, err := filepath.Abs(backup)
 	require.NoError(t, err)
-	require.Contains(t, logs.String(), absoluteBackup)
+	requireLogPathContains(t, logs.String(), absoluteBackup)
 	require.Contains(t, logs.String(), "sweep remove wedged")
 
 	fs.fail = false
@@ -249,14 +249,15 @@ func TestReplacementOwnershipCovW8_PendingHelperLegs(t *testing.T) {
 
 func TestReplacementOwnershipCovW8_RearmHelperLegs(t *testing.T) {
 	base := afero.NewMemMapFs()
+	fs := &pathNormalizingChmodFs{Fs: base}
 	dest := "/out/W8-REARM/dest.jpg"
 	backup := "/out/W8-REARM/dest.jpg.dlbak." + p3HexA
-	require.NoError(t, base.MkdirAll(filepath.Dir(dest), config.DirPerm))
-	require.NoError(t, afero.WriteFile(base, dest, []byte("old"), config.FilePerm))
-	info, err := base.Stat(dest)
+	require.NoError(t, fs.MkdirAll(filepath.Dir(dest), config.DirPerm))
+	require.NoError(t, afero.WriteFile(fs, dest, []byte("old"), config.FilePerm))
+	info, err := fs.Stat(dest)
 	require.NoError(t, err)
-	require.NoError(t, rearmReplacementBackup(base, dest, backup, nil))
-	require.NoError(t, rearmReplacementBackup(base, dest, backup, info))
+	require.NoError(t, rearmReplacementBackup(fs, dest, backup, nil))
+	require.NoError(t, rearmReplacementBackup(fs, dest, backup, info))
 	require.Error(t, rearmReplacementBackup(afero.NewReadOnlyFs(base), dest, backup, info))
 }
 
@@ -424,6 +425,20 @@ type w8NilRowRepo struct{ *p3OpRepo }
 
 func (r *w8NilRowRepo) FindByID(context.Context, uint) (*models.BatchFileOperation, error) {
 	return nil, nil
+}
+
+// pathNormalizingChmodFs compensates for afero.MemMapFs.Chmod looking up
+// the unnormalized path on Windows, unlike its other path operations.
+type pathNormalizingChmodFs struct{ afero.Fs }
+
+func (f *pathNormalizingChmodFs) Chmod(name string, mode os.FileMode) error {
+	return f.Fs.Chmod(filepath.FromSlash(name), mode)
+}
+
+func requireLogPathContains(t *testing.T, logs, path string) {
+	t.Helper()
+	normalizedLogs := filepath.ToSlash(strings.ReplaceAll(logs, `\\`, `\`))
+	require.Contains(t, normalizedLogs, filepath.ToSlash(path))
 }
 
 type w8RearmFailFs struct{ afero.Fs }

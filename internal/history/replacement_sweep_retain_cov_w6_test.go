@@ -37,7 +37,7 @@ func TestReplacementSweepRetainCovW6_UnjournaledMarkerWarns(t *testing.T) {
 
 	absoluteBackup, err := filepath.Abs(backup)
 	require.NoError(t, err)
-	require.Contains(t, logs.String(), absoluteBackup)
+	requireLogPathContains(t, logs.String(), absoluteBackup)
 	require.Contains(t, logs.String(), "no journal entry proves ownership")
 	require.Contains(t, logs.String(), "user can delete it manually")
 }
@@ -66,6 +66,6 @@ func TestReplacementSweepRetainCovW6_UnjournaledRestoreKeepsMarker(t *testing.T)
 
 	absoluteBackup, err := filepath.Abs(backup)
 	require.NoError(t, err)
-	require.Contains(t, logs.String(), absoluteBackup)
+	requireLogPathContains(t, logs.String(), absoluteBackup)
 	require.Contains(t, logs.String(), "no journal entry proves ownership")
 }

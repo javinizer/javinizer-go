@@ -109,19 +109,20 @@ func TestReplacementPendingCovW9_ConcurrentSweepsSynchronizePendingState(t *test
 
 func TestReplacementPendingCovW9_RearmPreservesModeAndMtime(t *testing.T) {
 	base := afero.NewMemMapFs()
+	fs := &pathNormalizingChmodFs{Fs: base}
 	repo := &flakySweepRepo{p3OpRepo: newP3OpRepo(), fail: true}
 	ctx := context.Background()
 	dest := "/out/W9-PERM/poster.jpg"
 	backup := dest + ".dlbak." + p3HexA
-	require.NoError(t, base.MkdirAll(filepath.Dir(dest), config.DirPerm))
-	require.NoError(t, afero.WriteFile(base, backup, []byte("old"), 0o600))
+	require.NoError(t, fs.MkdirAll(filepath.Dir(dest), config.DirPerm))
+	require.NoError(t, afero.WriteFile(fs, backup, []byte("old"), 0o600))
 	originalMtime := time.Now().Add(-2 * time.Hour)
 	require.NoError(t, base.Chtimes(backup, originalMtime, originalMtime))
 	originalInfo, err := base.Stat(backup)
 	require.NoError(t, err)
 	journalRow(t, repo.p3OpRepo, "job-1", "W9-PERM", dest, backup, 1, models.RevertStatusApplied)
 
-	s := NewReplacementSweeper(base, repo)
+	s := NewReplacementSweeper(fs, repo)
 	healed, err := s.Sweep(ctx)
 	require.NoError(t, err)
 	require.Equal(t, 0, healed, "the injected consumption failure must re-arm the backup")

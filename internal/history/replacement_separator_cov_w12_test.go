@@ -3,6 +3,7 @@ package history
 import (
 	"context"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/config"
@@ -13,6 +14,9 @@ import (
 )
 
 func TestRestoreReplacementJournal_W12POSIXKeepsBackslashDestinationDistinct(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX literal-backslash semantics require a host where filepath treats backslashes as name characters")
+	}
 	previousPathPolicy := fsutil.PathBackslashesAreSeparators
 	previousCaseProbe := fsutil.CaseSensitiveProbe
 	fsutil.PathBackslashesAreSeparators = false

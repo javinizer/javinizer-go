@@ -1,6 +1,7 @@
 package fsutil
 
 import (
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -25,6 +26,9 @@ func w12SetCasePolicy(t *testing.T, sensitive bool) {
 }
 
 func TestDestKey_W12POSIXPreservesLiteralBackslashes(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX literal-backslash semantics require a host where filepath treats backslashes as name characters")
+	}
 	w12SetPathBackslashPolicy(t, false)
 	w12SetCasePolicy(t, true)
 
@@ -68,6 +72,9 @@ func TestDestKey_W12SeparatorAndCasePoliciesCompose(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			if runtime.GOOS == "windows" && !tc.separators {
+				t.Skip("POSIX separator expectations are not meaningful on a Windows filepath host")
+			}
 			PathBackslashesAreSeparators = tc.separators
 			CaseSensitiveProbe = func(string) (bool, error) { return tc.caseSensitive, nil }
 			ResetCaseSensitivityCache()
