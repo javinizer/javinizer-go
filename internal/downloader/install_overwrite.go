@@ -39,7 +39,9 @@ func copyBackupToDest(fsys afero.Fs, backup, dest string) error {
 	stagedOrdinal := restoreCopyOrdinal.Add(1)
 	// codex P3 R18h: keep the backup's permission bits through the swap too.
 	mode := os.FileMode(0o644)
+	var backupInfo os.FileInfo
 	if info, serr := fsys.Stat(backup); serr == nil {
+		backupInfo = info
 		mode = info.Mode().Perm()
 	}
 	staged, dstFile, err := fsutil.CreateExclusiveStagingFile(fsys, dest, ".dlrstr", stagedOrdinal, mode)
@@ -55,6 +57,12 @@ func copyBackupToDest(fsys afero.Fs, backup, dest string) error {
 	if err := dstFile.Close(); err != nil {
 		_ = fsys.Remove(staged)
 		return fmt.Errorf("close rollback: %w", err)
+	}
+	if backupInfo != nil {
+		if err := fsys.Chtimes(staged, backupInfo.ModTime(), backupInfo.ModTime()); err != nil {
+			_ = fsys.Remove(staged)
+			return fmt.Errorf("stage rollback times: %w", err)
+		}
 	}
 	if err := fsutil.ReplaceFile(fsys, staged, dest); err != nil {
 		_ = fsys.Remove(staged)

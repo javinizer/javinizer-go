@@ -301,7 +301,9 @@ func copyRestoreBytes(fs afero.Fs, backup, dest string) error {
 	// codex P3 R18h: stage with the backup's OWN permission bits so a revert
 	// never widens restrictive media (0600 trailer) into world-readable.
 	mode := os.FileMode(config.FilePerm)
+	var backupInfo os.FileInfo
 	if info, serr := fs.Stat(backup); serr == nil {
+		backupInfo = info
 		mode = info.Mode().Perm()
 	}
 	staged, dstFile, err := fsutil.CreateExclusiveStagingFile(fs, dest, ".rstr", stagedOrdinal, mode)
@@ -320,6 +322,12 @@ func copyRestoreBytes(fs afero.Fs, backup, dest string) error {
 	if err := dstFile.Close(); err != nil {
 		_ = fs.Remove(staged)
 		return fmt.Errorf("stage restore close: %w", err)
+	}
+	if backupInfo != nil {
+		if err := fs.Chtimes(staged, backupInfo.ModTime(), backupInfo.ModTime()); err != nil {
+			_ = fs.Remove(staged)
+			return fmt.Errorf("stage restore times: %w", err)
+		}
 	}
 	if err := fsutil.ReplaceFile(fs, staged, dest); err != nil {
 		_ = fs.Remove(staged)
