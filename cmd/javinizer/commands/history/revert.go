@@ -79,6 +79,11 @@ func runHistoryRevert(cmd *cobra.Command, args []string, configFile string) erro
 		return fmt.Errorf("job is not in organized status (current: %s). Only organized jobs can be reverted", job.Status)
 	}
 
+	// codex P3 (R18 CLI): sweep for any leftover replacement backups from an
+	// interrupted CLI apply before revert — matches the API startup sweep.
+	deps2 := deps.DB.Repositories()
+	historypkg.SweepOnStartup(afero.NewOsFs(), deps2.BatchFileOpRepo)
+
 	// Create Reverter
 	reverter := historypkg.NewReverter(afero.NewOsFs(), batchFileOpRepo)
 

@@ -90,13 +90,6 @@ func bootstrapAPIDeps(cfg *config.Config, configFile string, auth commandutil.Au
 
 	startImageCacheCleanup(rt, imageCacheCleanupOptions{})
 
-	// P3 revert-ledger sweep (startup): restore crash-windowed backups and reap
-	// orphans left by downloader overwrites. Bounded by construction (only
-	// directories holding journaled destinations are scanned) and safe to run
-	// inline — the sweep is read-mostly and destination-locked per byte move.
-	// P3 revert-ledger sweep (startup) — wraps the two-call choreography in a
-	// tested seam so bootstrap stays thin and the error path is coverable from
-	// history's package tests without bootstrapping the API.
 	history.SweepOnStartup(fs, repos.BatchFileOpRepo)
 
 	// Temp poster cleanup is intentionally NOT started automatically.
