@@ -681,3 +681,27 @@ func mustJSONMarshall(t *testing.T, backups []string, dests []string) string {
 	require.NoError(t, err)
 	return string(raw)
 }
+
+// Remaining cleanup legs: swap-fails downgrade lanes to await a sweep drive,
+// and the armed-ledger confirmation legs with indexed lifetime already sane.
+func TestSweep_TemporaryArmedLayerLegs(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	repo := newP3OpRepo()
+	ctx := context.Background()
+
+	op := &models.BatchFileOperation{
+		BatchJobID: "job-1", MovieID: "TAR-001", OriginalPath: "/src/tar.mkv",
+		OperationType:  models.OperationTypeUpdate,
+		GeneratedFiles: `{"replacements":[{ "destination": "/dst/TAR/poster.jpg", "backup": "/dst/TAR/poster.jpg.dlbak." + "bcdef", "dest_seq": 1 }]}`,
+		RevertStatus:   models.RevertStatusApplied,
+	}
+	require.NoError(t, repo.Create(ctx, op))
+
+	// licensing backup path under lock remainder sweeps any missing dest war.
+	require.NoError(t, fs.MkdirAll("/dst/TAR", config.DirPerm))
+	require.NoError(t, afero.WriteFile(fs, "/dst/TAR/poster.jpg.dlbak.bcdef", []byte("old"), config.FilePerm))
+
+	healed, err := NewReplacementSweeper(fs, repo).Sweep(ctx)
+	require.NoError(t, err)
+	_ = healed
+}
