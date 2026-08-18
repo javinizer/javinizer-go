@@ -20,6 +20,12 @@ import (
 const (
 	backupSuffixForDest  = ".dlbak"
 	backupNameClaimTries = 64
+	// createPublishMaxAttempts bounds the create path's collision
+	// reclassification (wave-15): every pass means a foreign writer won the
+	// publish against the no-replace primitive and its bytes take the
+	// armed-overwrite discipline. Churn beyond the bound fails the install
+	// rather than spinning against an adversarial name.
+	createPublishMaxAttempts = 8
 )
 
 // backupOrdinal gives every backup attempt a process-local tail. opID alone
@@ -287,10 +293,30 @@ func (d *Downloader) installOverwriting(ctx context.Context, stagedPath, destPat
 	// symlinks, so a DANGLING symlink at the destination reports ENOENT and
 	// the create path would overwrite the link object itself — no ledger
 	// entry, no symlink refusal. Lstat sees the link object directly.
+	//
+	// codex PR#215 wave-15 (P2): the create path publishes through
+	// fsutil.PublishNoReplace. Between the Lstat-ENOENT here and a plain
+	// ReplaceFile a foreign writer can claim the destination, and the replace
+	// would destroy the racer's bytes with no backup and no ledger entry
+	// while the download reports success. An occupied destination is therefore
+	// a RECLASSIFICATION, not a failure: the destination is now present, so
+	// it falls into the armed-overwrite discipline below and the racer's
+	// bytes are set aside + journaled exactly like any other pre-existing
+	// destination. The bounded loop also tolerates a racer whose entry is
+	// created and deleted again across repeated publishes.
 	info, statErr := lstatBackupCandidate(d.fs, destPath)
+	for createAttempts := 0; statErr != nil && os.IsNotExist(statErr); createAttempts++ {
+		if createAttempts >= createPublishMaxAttempts {
+			return false, true, fmt.Errorf("failed to install %s: foreign writers claimed the destination across %d no-replace publishes: %w", destPath, createAttempts, fsutil.ErrPublishCollision)
+		}
+		pubErr := fsutil.PublishNoReplace(d.fs, stagedPath, destPath)
+		if !errors.Is(pubErr, fsutil.ErrPublishCollision) {
+			return false, false, pubErr
+		}
+		logging.Warnf("downloader: create install of %s raced a foreign writer — no-replace publish preserved its bytes; reclassifying destination as present", destPath)
+		info, statErr = lstatBackupCandidate(d.fs, destPath)
+	}
 	switch {
-	case statErr != nil && os.IsNotExist(statErr):
-		return false, false, fsutil.ReplaceFile(d.fs, stagedPath, destPath)
 	case statErr != nil:
 		return false, false, fmt.Errorf("failed to stat destination: %w", statErr)
 	case info == nil:

@@ -96,12 +96,21 @@ func (m *mockBatchFileOpRepo) Update(ctx context.Context, op *models.BatchFileOp
 	return nil
 }
 
-// UpdateNonJournalFields mirrors the wave-10 production contract in-memory:
-// non-journal columns follow op while the stored row keeps its journal.
+// UpdateNonJournalFields mirrors the wave-15 production contract in-memory:
+// non-journal columns follow op while the stored row keeps its journal and,
+// when the stored row is already reverted while op carries a completion
+// status, its reverted status (the typed race error surfaces, exactly like
+// the sqlite repository's ErrOperationRowReverted).
 func (m *mockBatchFileOpRepo) UpdateNonJournalFields(ctx context.Context, op *models.BatchFileOperation) error {
 	cp := *op
 	if stored, ok := m.ops[op.ID]; ok {
 		cp.GeneratedFiles = stored.GeneratedFiles
+		if stored.RevertStatus == models.RevertStatusReverted && op.RevertStatus != models.RevertStatusReverted {
+			cp.RevertStatus = stored.RevertStatus
+			cp.RevertedAt = stored.RevertedAt
+			m.ops[op.ID] = &cp
+			return fmt.Errorf("w15 mirror: %w: batch file operation %d", database.ErrOperationRowReverted, op.ID)
+		}
 	}
 	m.ops[op.ID] = &cp
 	return nil

@@ -213,6 +213,16 @@ func (r *BatchFileOperationRepository) Update(ctx context.Context, op *models.Ba
 	return nil
 }
 
+// ErrOperationRowReverted classifies UpdateNonJournalFields' suppressed
+// revert-status write (POSTER-WRITE-HARDENING wave-15 codex P1): a concurrent
+// writer (UpdateRevertStatus) committed RevertStatusReverted before this
+// caller's completion-status update landed. Only the non-status columns
+// persisted; the stored reverted state (and its original reverted_at stamp)
+// stays authoritative so a stale Applied/Failed snapshot never resurfaces a
+// reverted operation as live. Callers treat it as benign: warn through the
+// logging seam and finish as if the write succeeded.
+var ErrOperationRowReverted = errors.New("batch file operation row already reverted")
+
 // UpdateNonJournalFields persists one row's non-journal columns WITHOUT
 // touching generated_files (POSTER-WRITE-HARDENING wave-10 codex follow-up):
 // wave-9 moved the journal read-modify-write into UpdateJournalInTx's BEGIN
@@ -222,36 +232,108 @@ func (r *BatchFileOperationRepository) Update(ctx context.Context, op *models.Ba
 // Save was silently erased/resurrected. From wave-10 on, generated_files is
 // written ONLY by UpdateJournalInTx.
 //
-// The column set is the full non-journal persisted set (Save-parity) listed
-// explicitly as a map so zero values persist exactly like Save (a plain
-// struct Updates would skip false/""/nil fields); the primary key and
-// generated_files are excluded. updated_at is stamped like Save and
-// UpdateJournalInTx.
+// The column set is the full non-journal persisted set (Save-parity); zero
+// values persist exactly like Save (the statements bind every listed column
+// explicitly — a plain struct Updates would skip false/""/nil fields); the
+// primary key and generated_files are excluded. updated_at is stamped like
+// Save and UpdateJournalInTx.
+//
+// Wave-15 (codex P1) makes the revert-status columns CONDITIONAL. Callers
+// carry a stale in-memory row, and a concurrent UpdateRevertStatus(Reverted)
+// committing between their read and this write was silently overwritten back
+// to Applied/Failed — a reverted operation looked live again. The update now
+// runs as TWO statements inside one BEGIN IMMEDIATE transaction (same
+// cross-process serialization as UpdateJournalInTx): (a) the non-status
+// columns unconditionally, then (b) revert_status/reverted_at only WHERE the
+// STORED row is not already reverted — the guard is re-evaluated against the
+// locked committed row at statement time, never against the caller's
+// snapshot. A suppressed (b) while the caller carried a completion status
+// reports ErrOperationRowReverted AFTER the commit (columns from (a) stay
+// persisted — that is the intended outcome); a suppressed (b) carrying
+// Reverted itself is an idempotent no-op, and a missing row keeps the
+// wave-10 no-op contract.
 func (r *BatchFileOperationRepository) UpdateNonJournalFields(ctx context.Context, op *models.BatchFileOperation) error {
 	if op == nil {
 		return fmt.Errorf("update non-journal fields for batch file operation: record must not be nil")
 	}
 	label := fmt.Sprintf("batch file operation %d", op.ID)
-	if err := r.GetDB().WithContext(ctx).Model(&models.BatchFileOperation{}).
-		Where("id = ?", op.ID).
-		Updates(map[string]any{
-			"batch_job_id":      op.BatchJobID,
-			"movie_id":          op.MovieID,
-			"original_path":     op.OriginalPath,
-			"new_path":          op.NewPath,
-			"operation_type":    op.OperationType,
-			"nfo_snapshot":      op.NFOSnapshot,
-			"nfo_path":          op.NFOPath,
-			"revert_status":     op.RevertStatus,
-			"reverted_at":       op.RevertedAt,
-			"in_place_renamed":  op.InPlaceRenamed,
-			"original_dir_path": op.OriginalDirPath,
-			"created_at":        op.CreatedAt,
-			"updated_at":        time.Now().UTC(),
-		}).Error; err != nil {
+	sqlDB, err := r.GetDB().DB.DB()
+	if err != nil {
 		return wrapDBErr("update non-journal fields", label, err)
 	}
-	return nil
+	conn, err := sqlDB.Conn(ctx)
+	if err != nil {
+		return wrapDBErr("update non-journal fields", label, err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		return wrapDBErr("update non-journal fields", label, err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			// ctx may already be cancelled (it is one of the failure legs);
+			// release the write lock on a fresh context before the conn re-pools.
+			_, _ = conn.ExecContext(context.Background(), "ROLLBACK")
+		}
+	}()
+
+	now := time.Now().UTC()
+	// (a) Non-status columns unconditionally — the wave-10 Save-parity set.
+	if _, err := conn.ExecContext(ctx,
+		`UPDATE batch_file_operations SET batch_job_id = ?, movie_id = ?, original_path = ?, new_path = ?, operation_type = ?, nfo_snapshot = ?, nfo_path = ?, in_place_renamed = ?, original_dir_path = ?, created_at = ?, updated_at = ? WHERE id = ?`,
+		op.BatchJobID, op.MovieID, op.OriginalPath, op.NewPath, op.OperationType,
+		op.NFOSnapshot, op.NFOPath, op.InPlaceRenamed, op.OriginalDirPath,
+		op.CreatedAt, now, op.ID,
+	); err != nil {
+		return wrapDBErr("update non-journal fields", label, err)
+	}
+
+	// (b) Revert-status columns only while the stored row is NOT already
+	// reverted: a concurrent revert committed first must never be clobbered by
+	// the caller's stale completion status.
+	res, err := conn.ExecContext(ctx,
+		`UPDATE batch_file_operations SET revert_status = ?, reverted_at = ?, updated_at = ? WHERE id = ? AND (revert_status IS NULL OR revert_status <> ?)`,
+		op.RevertStatus, op.RevertedAt, now, op.ID, models.RevertStatusReverted,
+	)
+	if err != nil {
+		return wrapDBErr("update non-journal fields", label, err)
+	}
+
+	var suppressedErr error
+	if affected, affErr := res.RowsAffected(); affErr == nil && affected == 0 {
+		// The guard suppressed the status write — or the row vanished. Re-read
+		// INSIDE the transaction so the classification observes the same locked
+		// state (b) did.
+		var stored models.RevertStatusEnum
+		scanErr := conn.QueryRowContext(ctx,
+			"SELECT revert_status FROM batch_file_operations WHERE id = ?", op.ID,
+		).Scan(&stored)
+		switch {
+		case errors.Is(scanErr, sql.ErrNoRows):
+			// Missing row: keep the wave-10 no-op contract (Updates on a
+			// missing row affects zero rows without erroring).
+		case scanErr != nil:
+			return wrapDBErr("update non-journal fields", label, scanErr)
+		case stored == models.RevertStatusReverted && op.RevertStatus != models.RevertStatusReverted:
+			// Lost the race: the non-status columns commit below and the
+			// caller's stale completion status is suppressed.
+			suppressedErr = fmt.Errorf("%w: %s (stale %s completion status suppressed; stored row stays reverted)", ErrOperationRowReverted, label, op.RevertStatus)
+		default:
+			// Stored already reverted and the caller aimed at reverted too:
+			// idempotent no-op (the original reverted_at stamp is preserved).
+		}
+	}
+
+	// COMMIT before surfacing the suppressed classification: the non-status
+	// columns persist either way; only the status clobber is refused.
+	_, commitErr := conn.ExecContext(ctx, "COMMIT")
+	committed = commitErr == nil
+	if commitErr != nil {
+		return wrapDBErr("update non-journal fields", label, commitErr)
+	}
+	return suppressedErr
 }
 
 // countByBatchJobIDsResult is a GORM scan target for GROUP BY queries.

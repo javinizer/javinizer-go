@@ -91,15 +91,24 @@ func (m *p3OpRepo) Update(_ context.Context, op *models.BatchFileOperation) erro
 	return nil
 }
 
-// UpdateNonJournalFields mirrors the wave-10 production contract in-memory:
+// UpdateNonJournalFields mirrors the wave-15 production contract in-memory:
 // every non-journal column follows op; generated_files stays with the stored
-// row (UpdateJournalInTx owns it).
+// row (UpdateJournalInTx owns it); and when the stored row is already
+// reverted while op carries a completion status, the reverted status stays
+// authoritative and the typed ErrOperationRowReverted race error surfaces,
+// exactly like the sqlite repository.
 func (m *p3OpRepo) UpdateNonJournalFields(_ context.Context, op *models.BatchFileOperation) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	cp := *op
 	if stored, ok := m.ops[op.ID]; ok {
 		cp.GeneratedFiles = stored.GeneratedFiles
+		if stored.RevertStatus == models.RevertStatusReverted && op.RevertStatus != models.RevertStatusReverted {
+			cp.RevertStatus = stored.RevertStatus
+			cp.RevertedAt = stored.RevertedAt
+			m.ops[op.ID] = &cp
+			return fmt.Errorf("w15 mirror: %w: batch file operation %d", database.ErrOperationRowReverted, op.ID)
+		}
 	}
 	m.ops[op.ID] = &cp
 	return nil

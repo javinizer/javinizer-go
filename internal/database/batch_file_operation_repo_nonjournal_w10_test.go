@@ -24,7 +24,11 @@ func TestW10UpdateNonJournalFields_PersistsAllNonJournalColumns(t *testing.T) {
 	repo := NewBatchFileOperationRepository(db)
 	ctx := context.Background()
 
-	revertedAt := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	// Wave-15 note: the stored row must NOT be reverted here — the guarded
+	// status columns (wave-15: never clobber a stored reverted status) would
+	// suppress exactly the transition this envelope test exercises. The
+	// applied→failed transition keeps full Save-parity coverage; the
+	// suppressed reverted-row transition lives in the w15 tests.
 	original := &models.BatchFileOperation{
 		BatchJobID:      "job-w10",
 		MovieID:         "W10-001",
@@ -34,8 +38,8 @@ func TestW10UpdateNonJournalFields_PersistsAllNonJournalColumns(t *testing.T) {
 		NFOSnapshot:     "<nfo>old</nfo>",
 		NFOPath:         "/dst/old/W10-001.nfo",
 		GeneratedFiles:  models.MarshalLedgerJSON(models.GeneratedFilesJSON{Roots: []string{"/dst/old"}}),
-		RevertStatus:    models.RevertStatusReverted,
-		RevertedAt:      &revertedAt,
+		RevertStatus:    models.RevertStatusApplied,
+		RevertedAt:      nil,
 		InPlaceRenamed:  true,
 		OriginalDirPath: "/dst/old",
 	}

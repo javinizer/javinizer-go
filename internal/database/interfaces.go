@@ -179,6 +179,11 @@ type BatchFileOperationRepositoryInterface interface {
 	// never re-persist its (possibly stale) journal snapshot — a concurrent
 	// append/consume committed in between would otherwise be erased/resurrected
 	// (POSTER-WRITE-HARDENING wave-10 codex follow-up).
+	// Wave-15: the revert-status columns are conditional — they persist only
+	// while the STORED row is not already reverted, so a completion carrying a
+	// stale Applied/Failed snapshot can never resurface a concurrently
+	// reverted operation as live; a suppressed status write reports
+	// ErrOperationRowReverted with the non-status columns committed.
 	UpdateNonJournalFields(ctx context.Context, op *models.BatchFileOperation) error
 }
 

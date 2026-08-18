@@ -379,6 +379,25 @@ func (l *dbRevertLog) mergeJournalInTx(ctx context.Context, recordID uint, opID 
 	return merged, nil
 }
 
+// persistNonJournalColumns is the wave-15 seam every completion-side
+// non-journal column publish routes through (POSTER-WRITE-HARDENING codex
+// P1): the repository reports database.ErrOperationRowReverted when a
+// concurrent writer reverted the row before this update's status columns
+// landed — the non-status columns committed while the stored reverted state
+// stays authoritative. The completion LOST the race: warn through the logger
+// seam, reflect the truth on the in-memory record so later readers never see
+// the reverted operation resurface as live, and report success — external
+// behavior is unchanged except that the reverted row is never clobbered.
+func (l *dbRevertLog) persistNonJournalColumns(ctx context.Context, opID OperationID, record *models.BatchFileOperation) error {
+	err := l.repo.UpdateNonJournalFields(ctx, record)
+	if errors.Is(err, database.ErrOperationRowReverted) {
+		resolveLogger(l.logger).Warnf("[revert-log] record %s was reverted concurrently with this completion; completion columns persisted, reverted status preserved", opID)
+		record.RevertStatus = models.RevertStatusReverted
+		return nil
+	}
+	return err
+}
+
 // ctx is accepted for future use when repository methods support context propagation
 // Begin is a pure database write — no filesystem I/O.
 func (l *dbRevertLog) Begin(ctx context.Context, cmd ApplyCmd) (OperationID, error) {
@@ -484,7 +503,9 @@ func (l *dbRevertLog) CaptureSnapshot(ctx context.Context, opID OperationID, cmd
 	// Wave-10: non-journal columns only — the generated_files column is owned
 	// by UpdateJournalInTx, so a concurrent journal append between FindByID
 	// and this write must not be clobbered by a full Save of the snapshot.
-	if updateErr := l.repo.UpdateNonJournalFields(ctx, preRecord); updateErr != nil {
+	// Wave-15: a concurrent revert committed first is tolerated (warned,
+	// never clobbered) inside persistNonJournalColumns.
+	if updateErr := l.persistNonJournalColumns(ctx, opID, preRecord); updateErr != nil {
 		resolveLogger(l.logger).Warnf("[revert-log] CaptureSnapshot: failed to update record %s: %v", opID, updateErr)
 	}
 }
@@ -518,7 +539,10 @@ func (l *dbRevertLog) Complete(ctx context.Context, opID OperationID, result *Ap
 		preRecord.RevertStatus = models.RevertStatusFailed
 		// Wave-10: generated_files stays with UpdateJournalInTx even here — a
 		// full Save of this snapshot could erase a foreign journal append.
-		if updateErr := l.repo.UpdateNonJournalFields(ctx, preRecord); updateErr != nil {
+		// Wave-15: a concurrent revert suppresses this Failed mark
+		// (persistNonJournalColumns warns + tolerates) instead of being
+		// clobbered by it.
+		if updateErr := l.persistNonJournalColumns(ctx, opID, preRecord); updateErr != nil {
 			return fmt.Errorf("revert log Complete: mark record %s as failed: %w", opID, updateErr)
 		}
 		resolveLogger(l.logger).Warnf("[revert-log] Apply failed for %s — pre-record marked as incomplete", opID)
@@ -566,7 +590,7 @@ func (l *dbRevertLog) Complete(ctx context.Context, opID OperationID, result *Ap
 	}
 
 	updatePostOrganize(preRecord, newPath, inPlaceRenamed, sourceDir, mergedJournal)
-	if err := l.repo.UpdateNonJournalFields(ctx, preRecord); err != nil {
+	if err := l.persistNonJournalColumns(ctx, opID, preRecord); err != nil {
 		return fmt.Errorf("revert log Complete: update post-apply record for %s: %w", opID, err)
 	}
 	return nil
@@ -602,7 +626,10 @@ func (l *dbRevertLog) CompleteFailed(ctx context.Context, opID OperationID, resu
 		updatePostOrganize(preRecord, "", false, preRecord.OriginalDirPath, "")
 		preRecord.RevertStatus = models.RevertStatusFailed
 		// Wave-10: non-journal columns only (see Complete's nil-result path).
-		if updateErr := l.repo.UpdateNonJournalFields(ctx, preRecord); updateErr != nil {
+		// Wave-15: a concurrent revert suppresses this Failed mark
+		// (persistNonJournalColumns warns + tolerates) instead of being
+		// clobbered by it.
+		if updateErr := l.persistNonJournalColumns(ctx, opID, preRecord); updateErr != nil {
 			return fmt.Errorf("revert log CompleteFailed: mark record %s as failed: %w", opID, updateErr)
 		}
 		resolveLogger(l.logger).Warnf("[revert-log] Apply failed for %s — pre-record marked as incomplete", opID)
@@ -645,7 +672,7 @@ func (l *dbRevertLog) CompleteFailed(ctx context.Context, opID OperationID, resu
 	}
 	updatePostOrganize(preRecord, newPath, inPlaceRenamed, sourceDir, mergedJournal)
 	preRecord.RevertStatus = models.RevertStatusFailed
-	if err := l.repo.UpdateNonJournalFields(ctx, preRecord); err != nil {
+	if err := l.persistNonJournalColumns(ctx, opID, preRecord); err != nil {
 		return fmt.Errorf("revert log CompleteFailed: update failed record for %s: %w", opID, err)
 	}
 	resolveLogger(l.logger).Warnf("[revert-log] Apply failed for %s after filesystem mutation — record kept revertable (NewPath=%q)", opID, newPath)

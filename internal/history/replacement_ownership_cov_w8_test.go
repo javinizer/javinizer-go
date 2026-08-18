@@ -258,9 +258,12 @@ func TestReplacementOwnershipCovW8_RearmHelperLegs(t *testing.T) {
 	require.NoError(t, afero.WriteFile(fs, dest, []byte("old"), config.FilePerm))
 	info, err := fs.Stat(dest)
 	require.NoError(t, err)
+	// Wave-15: each call targets a FRESH backup name — the re-arm publish is a
+	// no-replace install (fsutil.PublishNoReplace), so re-arming onto an
+	// already-created backup collides by design instead of clobbering it.
 	require.NoError(t, rearmReplacementBackup(fs, dest, backup, nil))
-	require.NoError(t, rearmReplacementBackup(fs, dest, backup, info))
-	require.Error(t, rearmReplacementBackup(afero.NewReadOnlyFs(base), dest, backup, info))
+	require.NoError(t, rearmReplacementBackup(fs, dest, backup+".b", info))
+	require.Error(t, rearmReplacementBackup(afero.NewReadOnlyFs(base), dest, backup+".c", info))
 }
 
 func TestReplacementOwnershipCovW8_ReverterWarningLegs(t *testing.T) {

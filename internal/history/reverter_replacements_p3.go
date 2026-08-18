@@ -650,9 +650,12 @@ func openRearmSource(fs afero.Fs, dest string) (afero.File, error) {
 }
 
 // copyRearmSourceBytes streams an already-open, identity-verified re-arm
-// source into the backup path through a same-directory temp file + atomic
-// rename — fsutil.CopyFileFs's write side WITHOUT its path re-open, which
-// would drop the no-follow handle openRearmSource established.
+// source into the backup path through a same-directory temp file + a
+// no-replace publish — fsutil.CopyFileFs's write side WITHOUT its path
+// re-open, which would drop the no-follow handle openRearmSource established.
+// Wave-15: the publish is fsutil.PublishNoReplace, never a bare rename — an
+// occupied backup name yields fsutil.ErrPublishCollision (staged copy dropped,
+// foreign bytes intact) instead of a silent clobber.
 func copyRearmSourceBytes(fs afero.Fs, src io.Reader, backup string) error {
 	if err := fs.MkdirAll(filepath.Dir(backup), config.DirPerm); err != nil {
 		return fmt.Errorf("re-arm create backup directory: %w", err)
@@ -672,7 +675,16 @@ func copyRearmSourceBytes(fs afero.Fs, src io.Reader, backup string) error {
 		_ = fs.Remove(tmp)
 		return fmt.Errorf("re-arm close backup %s: %w", backup, err)
 	}
-	if err := fs.Rename(tmp, backup); err != nil {
+	// Wave-15 (codex P2): publish the staged re-arm with NO-REPLACE semantics.
+	// The original backup was REMOVED by the caller before this compensation
+	// ran, so the window between staging the copy and this rename is wide: a
+	// foreign writer claiming the backup name mid-window would be destroyed by
+	// a plain rename, destroying unrelated bytes with no ledger trace. The
+	// no-replace publish refuses an occupied backup name instead; callers
+	// treat any re-arm failure as kept+warn (the journal entry stays armed),
+	// so the collision surfaces through the typed fsutil.ErrPublishCollision
+	// class with the foreign bytes intact and the staged copy dropped.
+	if err := fsutil.PublishNoReplace(fs, tmp, backup); err != nil {
 		_ = fs.Remove(tmp)
 		return fmt.Errorf("re-arm install backup %s: %w", backup, err)
 	}
