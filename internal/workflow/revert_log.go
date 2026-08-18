@@ -325,6 +325,58 @@ func updatePostOrganize(op *models.BatchFileOperation, newPath string, inPlaceRe
 	op.GeneratedFiles = generatedFilesJSON
 }
 
+// completionLedgerMerge computes the completion-transaction journal: the apply
+// outcome's generated-files payload (newRaw) merges into the row's FRESH
+// in-transaction journal bytes (currentRaw) — replacement entries and seeded
+// discovery roots on the fresh row carry into the merged ledger — and the
+// organizer's leaf folder is appended as a discovery root (R4-2: media
+// actually lands there, so the sweeper's bounded recursion starts there).
+// persist=false reports an idempotent no-op (merged bytes identical to what
+// the row already carries, e.g. a retried completion).
+func completionLedgerMerge(currentRaw, newRaw, folderRoot string) (next models.GeneratedFilesJSON, persist bool, merged string, err error) {
+	merged = mergeReplacementLedger(currentRaw, newRaw)
+	if folderRoot != "" {
+		merged = appendLedgerRoot(merged, folderRoot)
+	}
+	if merged == currentRaw {
+		return models.GeneratedFilesJSON{}, false, merged, nil
+	}
+	gf, perr := models.ParseGeneratedFiles(merged)
+	if perr != nil {
+		// Unreachable through mergeReplacementLedger's byte contract (its output
+		// is always empty or marshaled JSON); refuse the transaction rather than
+		// persist a blob journal readers cannot parse.
+		return models.GeneratedFilesJSON{}, false, "", perr
+	}
+	return gf, true, merged, nil
+}
+
+// mergeJournalInTx persists a completion's journal contribution through the
+// serialized journal transaction (codex review 4960250562 follow-up, wave-9):
+// the merge runs against the row re-read INSIDE the BEGIN IMMEDIATE
+// transaction, never against the completion's stale preRecord snapshot, so a
+// concurrent process appending (RecordReplacement) or consuming (revert/sweep)
+// entries can no longer be overwritten by a full Save — resurrected consumed
+// entries and erased new entries both came from that snapshot merge. Only the
+// journal column moves through the transaction; the caller's follow-up Update
+// re-persists the returned (tx-derived) bytes alongside the non-journal
+// columns, so the persisted journal always derives from the in-tx row.
+func (l *dbRevertLog) mergeJournalInTx(ctx context.Context, recordID uint, opID OperationID, caller, newRaw, folderRoot string) (string, error) {
+	var merged string
+	txErr := l.repo.UpdateJournalInTx(ctx, recordID, func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
+		next, persist, m, err := completionLedgerMerge(current.GeneratedFiles, newRaw, folderRoot)
+		merged = m
+		return next, persist, err
+	})
+	switch {
+	case errors.Is(txErr, database.ErrNotFound):
+		return "", fmt.Errorf("revert log %s: record %s not found", caller, opID)
+	case txErr != nil:
+		return "", fmt.Errorf("revert log %s: persist journal for record %s: %w", caller, opID, txErr)
+	}
+	return merged, nil
+}
+
 // ctx is accepted for future use when repository methods support context propagation
 // Begin is a pure database write — no filesystem I/O.
 func (l *dbRevertLog) Begin(ctx context.Context, cmd ApplyCmd) (OperationID, error) {
@@ -483,11 +535,19 @@ func (l *dbRevertLog) Complete(ctx context.Context, opID OperationID, result *Ap
 		}
 	}
 
-	generatedFilesJSON := mergeReplacementLedger(preRecord.GeneratedFiles, buildGeneratedFilesJSON(resolveLogger(l.logger), result.NFOPath, subtitles, result.DownloadPaths))
-	// R4-2: media actually lands in the organizer's leaf folder — add it to
-	// the seeded roots so the sweeper's bounded recursion starts there.
-	if result.OrganizeResult != nil && result.OrganizeResult.FolderPath != "" {
-		generatedFilesJSON = appendLedgerRoot(generatedFilesJSON, result.OrganizeResult.FolderPath)
+	// Wave-9 (codex review 4960250562 follow-up): the journal read-modify-write
+	// runs inside the row transaction against the FRESH row — merging into the
+	// preRecord snapshot here let a concurrent append/consume be overwritten by
+	// the follow-up full Save. The non-journal columns below keep the existing
+	// Update path; its Save re-persists the tx-derived journal bytes verbatim.
+	folderRoot := ""
+	if result.OrganizeResult != nil {
+		folderRoot = result.OrganizeResult.FolderPath
+	}
+	mergedJournal, err := l.mergeJournalInTx(ctx, recordID, opID, "Complete",
+		buildGeneratedFilesJSON(resolveLogger(l.logger), result.NFOPath, subtitles, result.DownloadPaths), folderRoot)
+	if err != nil {
+		return err
 	}
 
 	if result.FoundNFOPath != "" {
@@ -497,7 +557,7 @@ func (l *dbRevertLog) Complete(ctx context.Context, opID OperationID, result *Ap
 		preRecord.NFOPath = result.NFOPath
 	}
 
-	updatePostOrganize(preRecord, newPath, inPlaceRenamed, sourceDir, generatedFilesJSON)
+	updatePostOrganize(preRecord, newPath, inPlaceRenamed, sourceDir, mergedJournal)
 	if err := l.repo.Update(ctx, preRecord); err != nil {
 		return fmt.Errorf("revert log Complete: update post-apply record for %s: %w", opID, err)
 	}
@@ -556,14 +616,23 @@ func (l *dbRevertLog) CompleteFailed(ctx context.Context, opID OperationID, resu
 			sourceDir = result.OrganizeResult.OldDirectoryPath
 		}
 	}
-	generatedFilesJSON := mergeReplacementLedger(preRecord.GeneratedFiles, buildGeneratedFilesJSON(resolveLogger(l.logger), result.NFOPath, subtitles, result.DownloadPaths))
+	// Wave-9 (codex review 4960250562 follow-up): same journal-transaction
+	// routing as Complete — the merge must see the FRESH row, not the stale
+	// preRecord snapshot, so a concurrent journal mutation can no longer be
+	// clobbered by the follow-up full Save.
+	mergedJournal, err := l.mergeJournalInTx(ctx, recordID, opID, "CompleteFailed",
+		buildGeneratedFilesJSON(resolveLogger(l.logger), result.NFOPath, subtitles, result.DownloadPaths), "")
+	if err != nil {
+		return err
+	}
+
 	if result.FoundNFOPath != "" {
 		preRecord.NFOPath = result.FoundNFOPath
 	}
 	if result.NFOPath != "" && preRecord.NFOPath == "" {
 		preRecord.NFOPath = result.NFOPath
 	}
-	updatePostOrganize(preRecord, newPath, inPlaceRenamed, sourceDir, generatedFilesJSON)
+	updatePostOrganize(preRecord, newPath, inPlaceRenamed, sourceDir, mergedJournal)
 	preRecord.RevertStatus = models.RevertStatusFailed
 	if err := l.repo.Update(ctx, preRecord); err != nil {
 		return fmt.Errorf("revert log CompleteFailed: update failed record for %s: %w", opID, err)

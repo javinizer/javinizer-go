@@ -425,6 +425,23 @@ func (r *Reverter) checkDestBlocking(ctx context.Context, op *models.BatchFileOp
 // restoreCopyNonce uniquifies the staged copy path for a destination restore.
 var restoreCopyNonce atomic.Uint64
 
+// restoreOpenReplacementSource opens a journaled restore backup for reading
+// with each platform's strongest protection against a final-component
+// symlink swap between the Lstat gate and the open. The default passes the
+// platform's no-follow flag through afero.OsFs to os.OpenFile (see
+// restore_source_nofollow_unix.go / restore_source_nofollow_other.go); the
+// Windows build replaces this at init with a reparse-point handle open (see
+// restore_source_nofollow_windows.go), mirroring the downloader's wave-7
+// rollback restore open.
+var restoreOpenReplacementSource = openRestoreSourceNoFollow
+
+// openRestoreSourceNoFollow is the POSIX/default restore source open: OsFs
+// forwards restoreSourceNoFollow to os.OpenFile, while MemMapFs ignores the
+// unknown flag bit and relies on the caller's Lstat gate.
+func openRestoreSourceNoFollow(fsys afero.Fs, backup string) (afero.File, error) {
+	return fsys.OpenFile(backup, os.O_RDONLY|restoreSourceNoFollow, 0)
+}
+
 // restoreStagingOwnershipFn forwards the history restore path to the wave-7
 // fsutil ownership helper behind a package seam (same discipline as the
 // downloader's rollback restore): POSIX tests record the requested uid/gid
@@ -465,11 +482,14 @@ func copyRestoreBytes(fs afero.Fs, backup, dest string) error {
 		return refuseRestoreSource(backup, fmt.Sprintf("backup is not a regular file (mode %s)", sourceInfo.Mode()))
 	}
 
-	// OsFs passes this flag through to os.OpenFile. MemMapFs ignores unknown
-	// read flags and has no symlink representation; the Lstat+regularity gate
-	// above is therefore its available protection, with the documented residual
-	// Lstat/OpenFile TOCTOU for non-OsFs implementations.
-	src, err := fs.OpenFile(backup, os.O_RDONLY|restoreSourceNoFollow, 0)
+	// The open itself is platform-specific (see restoreOpenReplacementSource):
+	// POSIX passes O_NOFOLLOW through OsFs to os.OpenFile; Windows opens with
+	// FILE_FLAG_OPEN_REPARSE_POINT and refuses a reparse point on the returned
+	// handle. MemMapFs ignores unknown read flags and has no symlink
+	// representation; the Lstat+regularity gate above is therefore its
+	// available protection, with the documented residual Lstat/OpenFile TOCTOU
+	// for non-OsFs implementations.
+	src, err := restoreOpenReplacementSource(fs, backup)
 	if err != nil {
 		return fmt.Errorf("read backup: %w", err)
 	}

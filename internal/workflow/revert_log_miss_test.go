@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/mocks"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -285,6 +286,13 @@ func TestMiss_dbRevertLog_Complete_SuccessResult(t *testing.T) {
 		RevertStatus: models.RevertStatusApplied,
 	}
 	mockRepo.On("FindByID", mock.Anything, uint(1)).Return(preRecord, nil)
+	// Wave-9: the ledger merge runs through the journal transaction against the
+	// fresh row before the non-journal Save.
+	mockRepo.On("UpdateJournalInTx", mock.Anything, uint(1), mock.Anything).
+		Return(func(_ context.Context, id uint, fn database.JournalUpdateFn) error {
+			_, _, err := fn(&models.BatchFileOperation{ID: id})
+			return err
+		})
 	mockRepo.On("Update", mock.Anything, mock.AnythingOfType("*models.BatchFileOperation")).Return(nil)
 
 	result := &ApplyResult{
@@ -310,6 +318,11 @@ func TestMiss_dbRevertLog_Complete_SuccessResultUpdateError(t *testing.T) {
 		RevertStatus: models.RevertStatusApplied,
 	}
 	mockRepo.On("FindByID", mock.Anything, uint(1)).Return(preRecord, nil)
+	mockRepo.On("UpdateJournalInTx", mock.Anything, uint(1), mock.Anything).
+		Return(func(_ context.Context, id uint, fn database.JournalUpdateFn) error {
+			_, _, err := fn(&models.BatchFileOperation{ID: id})
+			return err
+		})
 	mockRepo.On("Update", mock.Anything, mock.AnythingOfType("*models.BatchFileOperation")).Return(fmt.Errorf("db error"))
 
 	result := &ApplyResult{}

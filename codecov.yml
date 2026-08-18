@@ -35,6 +35,10 @@ ignore:
   - "internal/history/restore_source_nofollow_other.go"
   - "internal/downloader/restore_source_identity_other.go"
   - "internal/downloader/restore_source_nofollow_other.go"
+  # //go:build windows companions to the stubs above — compiled only on
+  # Windows hosts, so no coverage-upload job ever hits them either.
+  - "internal/history/restore_source_nofollow_windows.go"
+  - "internal/downloader/restore_source_nofollow_windows.go"
   # Desktop-only build-tagged file (//go:build desktop). The real Wails
   # runner pulls in per-platform webview headers and must not enter the
   # default build/test path; without this ignore, its new lines all count

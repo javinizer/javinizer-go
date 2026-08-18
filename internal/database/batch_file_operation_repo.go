@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/javinizer/javinizer-go/internal/fsutil"
 
@@ -303,6 +304,31 @@ func (r *BatchFileOperationRepository) FindOperationsByDestination(ctx context.C
 	})
 }
 
+// destinationLikePatternCap bounds the LIKE-pattern set per destination
+// lookup. When Unicode case variants would push the set past the cap the
+// caller falls back to the un-prefiltered full-ledger scan (the pre-wave-7
+// path), so correctness never depends on the cap.
+const destinationLikePatternCap = 8
+
+// hasCaseFoldingNonASCII reports whether s contains a non-ASCII letter whose
+// simple Unicode case-fold differs from the letter itself. Those are the ONLY
+// runes SQLite's built-in like() cannot fold — it folds ASCII letters only
+// (SQLITE_CASE_SENSITIVE_LIKE aside, the default LIKE is ASCII-insensitive),
+// so a journal row stored as `…\Ä.jpg` is invisible to an `…/ä.jpg` prefilter
+// even though DestKey folds them together on an insensitive root. Go's
+// strings.ToUpper/ToLower run full simple case mapping, so generating BOTH
+// transports of the destination lets the prefilter see the row again. ASCII
+// letters need no variants: LIKE already folds them, keeping pure-ASCII
+// destinations byte-identical to wave-8 behavior.
+func hasCaseFoldingNonASCII(s string) bool {
+	for _, r := range s {
+		if r > unicode.MaxASCII && (unicode.ToLower(r) != r || unicode.ToUpper(r) != r) {
+			return true
+		}
+	}
+	return false
+}
+
 // destinationLikePatterns returns the bounded LIKE-pattern set for the
 // fallback's prefilter: the caller's spelling plus, when the destination
 // contains a path separator, BOTH cross-spellings ('/'↔'\\'). Wave-8 codex
@@ -313,19 +339,53 @@ func (r *BatchFileOperationRepository) FindOperationsByDestination(ctx context.C
 // never fetched the row. Separator rewriting happens on the RAW path and
 // destinationLikePattern re-applies JSON-shaping + LIKE-escaping AFTER each
 // rewrite — rewriting an escaped pattern instead would corrupt the escape
-// '\\' pairs. At most two extra patterns are generated; spellings that
-// rewrite to the caller's own bytes are dropped (separator-free destinations
-// yield exactly the wave-7 single pattern).
+// '\\' pairs.
+//
+// Wave-9 codex P2 follow-up: when the destination contains non-ASCII letters
+// whose simple case-fold differs (see hasCaseFoldingNonASCII), BOTH
+// full-string ToLower and ToUpper transports are layered onto every separator
+// spelling, because SQLite LIKE folds ASCII only. The set is deduped and
+// HARD-CAPPED at destinationLikePatternCap patterns; a nil return signals the
+// cap was exceeded and the caller must execute the un-prefiltered full-ledger
+// query instead — a bounded prefilter that could miss a live chain would
+// corrupt sequence allocation and revert conflict checks. Spellings that
+// rewrite to the caller's own bytes are dropped (separator-free, ASCII-only
+// destinations yield exactly the wave-8 patterns).
 func destinationLikePatterns(destination string) []string {
+	raws := []string{destination}
+	if hasCaseFoldingNonASCII(destination) {
+		if v := strings.ToLower(destination); v != destination {
+			raws = append(raws, v)
+		}
+		if v := strings.ToUpper(destination); v != destination {
+			raws = append(raws, v)
+		}
+	}
 	patterns := make([]string, 0, 3)
-	patterns = append(patterns, destinationLikePattern(destination))
-	if strings.ContainsAny(destination, `/\`) {
-		if v := strings.ReplaceAll(destination, "/", `\`); v != destination {
-			patterns = append(patterns, destinationLikePattern(v))
+	seen := map[string]bool{}
+	for _, raw := range raws {
+		spellings := []string{raw}
+		if strings.ContainsAny(raw, `/\`) {
+			if v := strings.ReplaceAll(raw, "/", `\`); v != raw {
+				spellings = append(spellings, v)
+			}
+			if v := strings.ReplaceAll(raw, `\`, "/"); v != raw {
+				spellings = append(spellings, v)
+			}
 		}
-		if v := strings.ReplaceAll(destination, `\`, "/"); v != destination {
-			patterns = append(patterns, destinationLikePattern(v))
+		for _, spelling := range spellings {
+			p := destinationLikePattern(spelling)
+			if !seen[p] {
+				seen[p] = true
+				patterns = append(patterns, p)
+			}
 		}
+	}
+	if len(patterns) > destinationLikePatternCap {
+		// Unicode case fan-out exceeded the bound: the prefilter cannot safely
+		// narrow, so signal the full-ledger fallback instead of silently
+		// truncating a pattern that might name a live chain.
+		return nil
 	}
 	return patterns
 }
@@ -335,12 +395,23 @@ func destinationLikePatterns(destination string) []string {
 // (plus its separator cross-spellings — see destinationLikePatterns) to
 // generated_files AND new_path so only candidate rows are hydrated, then
 // leaves exact matching to the caller's in-process pass. SQLite LIKE folds
-// ASCII case, so differently-cased spellings of one destination still reach
-// the normalized comparison; the new_path clause keeps rows discoverable
-// through the organized media path recorded by the same organizer computation
-// when their journal carries an equivalent-but-differently-spelled entry.
+// ASCII case only, so Unicode case variants are generated Go-side (see
+// destinationLikePatterns) and differently-cased spellings of one destination
+// still reach the normalized comparison; when the variant fan-out exceeds the
+// pattern cap, this falls back to the un-prefiltered full-ledger scan so a
+// live chain can never hide behind the cap. The new_path clause keeps rows
+// discoverable through the organized media path recorded by the same
+// organizer computation when their journal carries an equivalent-but-
+// differently-spelled entry.
 func (r *BatchFileOperationRepository) findDestinationCandidates(ctx context.Context, destination string) ([]models.BatchFileOperation, error) {
 	patterns := destinationLikePatterns(destination)
+	if patterns == nil {
+		// Unicode case-variant fan-out exceeded the pattern cap: the prefilter
+		// cannot safely narrow this destination, so hydrate the full ledger (the
+		// pre-wave-7 path) and let the caller's in-process exact matcher decide
+		// — correctness never depends on the cap.
+		return r.FindOperationsWithLedger(ctx)
+	}
 	conds := make([]string, 0, len(patterns))
 	args := make([]any, 0, len(patterns)*2)
 	for _, p := range patterns {
