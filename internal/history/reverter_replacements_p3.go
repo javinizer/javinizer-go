@@ -116,12 +116,17 @@ func (r *RevertFileResult) withRetryable(cause error) *RevertFileResult {
 // Consumption: every successfully restored entry has its backup removed
 // before the row is consumed. A failed backup removal leaves the entry armed
 // and retryable; any later journal failure re-arms the backup before
-// returning — and when that re-arm is REFUSED with the occupied-name classes
-// (fsutil.ErrPublishCollision / ErrPublishNoReplaceUnsupported), the entry is
-// instead marked RestorePending with the wave-19 rearm-refused kind (codex
-// P2, PR#215 rounds 18+19): an entry armed against a foreign occupant must
-// never be reachable from here, and the pending retry consumes the entry
-// WITHOUT any path operation against the unowned (foreign or absent) name.
+// returning — and when that re-arm FAILS with ANY class (wave-20, codex P2,
+// PR#215), the entry is instead marked RestorePending with the kind
+// rearmPendingKind derives: the occupied-name refusal classes (fsutil
+// .ErrPublishCollision / ErrPublishNoReplaceUnsupported, rounds 18+19) and
+// every pre-publish failure leave the backup name foreign or absent and map
+// to the rearm-refused kind — the pending retry consumes the entry WITHOUT
+// any path operation against the unowned name — while a failure after the
+// staged copy definitely published keeps this operation's bytes at the name
+// and maps to the clean kind. An entry left armed against an unproven name
+// must never be reachable from here: foreign occupants corrupt restores,
+// and absent names wedge the retry's source stat forever.
 func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.BatchFileOperation) (map[string]bool, error) {
 	restored := map[string]bool{}
 	gf, err := models.ParseGeneratedFiles(op.GeneratedFiles)
@@ -311,30 +316,40 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 				if cErr := r.consumeReplacementEntry(ctx, op, e); cErr != nil {
 					if rearmErr := rearmReplacementBackup(r.fs, dest, e.Backup, backupInfo); rearmErr != nil {
 						absoluteBackup, _ := filepath.Abs(e.Backup)
-						if rearmOccupiedClass(rearmErr) {
-							// codex P2 (PR#215 rounds 18+19): the re-arm could not
-							// reclaim the backup name — a foreign writer owns it now,
-							// or the volume cannot express a no-replace publish at
-							// all. An entry left ARMED would aim the next restore at
-							// the occupant: foreign bytes over the restored
-							// destination, then the occupant deleted. Persist the
-							// durable RestorePending marker WITH THE REARM-REFUSED
-							// KIND so every retry runs only the consumption leg — the
-							// marker certifies the destination already carries the
-							// restored bytes, and the kind keeps every retry off the
-							// unowned name (an absent name must not wedge the source
-							// stat; a foreign occupant must never be removed). The
-							// occupant is never clobbered by the no-replace re-arm and
-							// the failure surfaces through cErr exactly like the
-							// neighboring consumption legs; the marker outcome is
-							// logged via the logger seam only.
-							if markErr := markReplacementEntryRestorePendingKind(ctx, r.batchFileOpRepo, op.ID, sweepSlash(e.Backup), models.RestorePendingKindRearmRefused); markErr != nil {
+						// codex P2 (PR#215 rounds 18+19+20): the re-arm could not
+						// re-establish the armed, backup-present retry posture, so
+						// the entry must NOT stay ARMED regardless of the failure
+						// class — a foreign occupant would be restored over the
+						// destination and then deleted (rounds 18+19), and wave-20
+						// closes the NON-refusal hole: a plain re-arm failure left
+						// the entry armed against an ABSENT backup, so every later
+						// explicit revert failed at the backup source stat forever
+						// while sweeps saw an ordinary armed row with a present
+						// destination and found nothing to repair. Persist the
+						// durable RestorePending marker for EVERY re-arm failure
+						// class; only the KIND routes on name ownership
+						// (rearmPendingKind): refusal classes and pre-publish
+						// failures leave the name foreign or absent (rearm-refused —
+						// every retry runs only the consumption leg, journal-only),
+						// while a failure after the staged copy definitely published
+						// (post-publish metadata fix-ups, or fsutil's
+						// ErrPublishCompleted) leaves THIS operation's bytes at the
+						// name (clean — the retry removes it). The marker certifies
+						// the destination already carries the restored bytes; the
+						// original consumption failure surfaces through cErr exactly
+						// like the neighboring consumption legs, and the marker
+						// outcome is logged via the logger seam only.
+						pendingKind := rearmPendingKind(rearmErr)
+						if markErr := markReplacementEntryRestorePendingKind(ctx, r.batchFileOpRepo, op.ID, sweepSlash(e.Backup), pendingKind); markErr != nil {
+							if rearmOccupiedClass(rearmErr) {
 								logging.Warnf("replacement restore %s: consumption failed (%v), re-arm refused (%v), and restore-pending persistence failed (%v) — restored destination retained, backup occupant untouched", absoluteBackup, cErr, rearmErr, markErr)
 							} else {
-								logging.Warnf("replacement restore %s: consumption failed (%v) and re-arm refused (%v) — restored destination retained, entry marked restore-pending", absoluteBackup, cErr, rearmErr)
+								logging.Warnf("replacement restore %s: consumption failed (%v), re-arm failed (%v), and restore-pending persistence failed (%v) — restored destination retained, entry stays armed (intended pending kind %s)", absoluteBackup, cErr, rearmErr, markErr, pendingKind)
 							}
+						} else if rearmOccupiedClass(rearmErr) {
+							logging.Warnf("replacement restore %s: consumption failed (%v) and re-arm refused (%v) — restored destination retained, entry marked restore-pending", absoluteBackup, cErr, rearmErr)
 						} else {
-							logging.Warnf("replacement restore failed to re-arm backup %s after consumption failure: %v", absoluteBackup, rearmErr)
+							logging.Warnf("replacement restore %s: consumption failed (%v) and re-arm failed (%v) — restored destination retained, entry marked restore-pending (%s)", absoluteBackup, cErr, rearmErr, pendingKind)
 						}
 					}
 					return cErr
@@ -784,9 +799,10 @@ func copyRearmSourceBytes(fs afero.Fs, src io.Reader, backup string) error {
 	// foreign writer claiming the backup name mid-window would be destroyed by
 	// a plain rename, destroying unrelated bytes with no ledger trace. The
 	// no-replace publish refuses an occupied backup name instead; callers
-	// treat any re-arm failure as kept+warn (the journal entry stays armed),
-	// so the collision surfaces through the typed fsutil.ErrPublishCollision
-	// class with the foreign bytes intact and the staged copy dropped.
+	// disarm any re-arm failure into a restore-pending marker (wave-20 kinds:
+	// rearm-refused unless the publish definitely completed), so the collision
+	// surfaces through the typed fsutil.ErrPublishCollision class with the
+	// foreign bytes intact and the staged copy dropped.
 	if err := fsutil.PublishNoReplace(fs, tmp, backup); err != nil {
 		_ = fs.Remove(tmp)
 		return fmt.Errorf("re-arm install backup %s: %w", backup, err)

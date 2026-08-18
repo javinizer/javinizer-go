@@ -183,13 +183,50 @@ func rearmOccupiedClass(err error) bool {
 	return fsutil.PublishRefusal(err)
 }
 
+// errRearmAfterPublish wraps the re-arm failures that happen strictly AFTER
+// the staged copy was published onto the backup name — the metadata fix-ups
+// (Chmod/Chtimes) following a successful copyRearmSourceBytes. The name
+// carries THIS operation's own bytes despite the failure, so the
+// restore-pending classification is the CLEAN kind (wave-20, codex P2,
+// PR#215): the pending retry's removal leg reaps the owned name, exactly as
+// it reaps a kept backup after a plain removal failure.
+var errRearmAfterPublish = errors.New("re-arm failed after the backup name was published")
+
+// rearmPendingKind classifies a FAILED re-arm for the restore-pending marker
+// every compensation leg persists (wave-20, codex P2, PR#215). ANY re-arm
+// failure must disarm the entry — one left ARMED against an absent backup
+// name wedges every explicit retry at the source stat forever while sweeps
+// see an ordinary armed row with a present destination and repair nothing.
+// Only the KIND varies with backup-name ownership:
+//   - publish REFUSAL classes (rearmOccupiedClass: occupied name, or a
+//     volume that cannot express no-replace) leave the name foreign or
+//     absent → RestorePendingKindRearmRefused;
+//   - failures BEFORE any publish attempt completed (re-arm source open,
+//     staging open/write/close, a failed no-replace publish) prove nothing
+//     about the name — it is unproven/absent → RestorePendingKindRearmRefused;
+//   - failures AFTER the staged copy definitely PUBLISHED (the post-publish
+//     metadata fix-ups — errRearmAfterPublish — or fsutil.ErrPublishCompleted,
+//     the hard-link fallback's cleanup-plus-failed-rollback leg) mean the
+//     name carries THIS operation's own bytes → RestorePendingKindClean: the
+//     pending retry removes the owned name and consumes the entry.
+func rearmPendingKind(rearmErr error) string {
+	if errors.Is(rearmErr, errRearmAfterPublish) || errors.Is(rearmErr, fsutil.ErrPublishCompleted) {
+		return models.RestorePendingKindClean
+	}
+	return models.RestorePendingKindRearmRefused
+}
+
 // rearmReplacementBackup recreates the backup from the destination's bytes
 // when a journal consumption fails AFTER the backup was removed, restoring
 // the armed retry posture (callers keep info's permission bits and mtime).
 // A refused no-replace publish (fsutil.PublishRefusal classes) leaves the
 // name foreign-occupied or absent — wave-19 callers mark the entry
 // rearm-refused restore-pending instead of leaving it armed against the
-// unowned name.
+// unowned name. Wave-20 (codex P2): EVERY failure class is disarmed by the
+// callers now — the kind comes from rearmPendingKind, where ONLY the
+// post-publish legs below (Chmod/Chtimes after a successful publish, wrapped
+// as errRearmAfterPublish) and fsutil.ErrPublishCompleted resolve to the
+// clean kind because the name provably carries this operation's own bytes.
 // Wave-10 codex follow-up: the destination used to be copied via a plain
 // fs.Open — an attacker swapping dest for a symlink in the removal→re-arm
 // window got a protected file copied into the media-dir backup, armed for a
@@ -227,10 +264,17 @@ func rearmReplacementBackup(fs afero.Fs, dest, backup string, info os.FileInfo) 
 	// original owner once the backup is consumed. Best-effort semantics ride
 	// the helper (EPERM swallowed; windows no-op), same as the restore path.
 	restoreStagingOwnershipFn(fs, osBackup, info)
+	// Wave-20 (codex P2): the metadata fix-ups run strictly AFTER the publish
+	// above, so their failure wraps errRearmAfterPublish — callers classify the
+	// backup name as OWNED (restore-pending clean kind), never as absent/
+	// foreign (rearm-refused). See rearmPendingKind.
 	if err := fs.Chmod(osBackup, info.Mode().Perm()); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", errRearmAfterPublish, err)
 	}
-	return fs.Chtimes(osBackup, info.ModTime(), info.ModTime())
+	if err := fs.Chtimes(osBackup, info.ModTime(), info.ModTime()); err != nil {
+		return fmt.Errorf("%w: %w", errRearmAfterPublish, err)
+	}
+	return nil
 }
 
 // ReplacementSweeper reaps replacement backups under conservative ownership.
@@ -777,16 +821,22 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 		if rearmErr := rearmReplacementBackup(s.fs, dest, backup, backupInfo); rearmErr != nil {
 			// Wave-19 (codex P2): a failed re-arm leaves the backup name UNOWNED
 			// in every failure mode — foreign-occupied on the published-refusal
-			// classes, absent on a plain failure — so the durable marker and the
-			// in-process fallback both record the rearm-refused kind: no later
-			// retry may stat/copy/remove that path (a removal would delete a
-			// foreign occupant, an existence check would fail forever on the
-			// absent name).
-			s.rememberPendingRemovalKind(backupSlash, models.RestorePendingKindRearmRefused)
-			if markErr := s.persistRestorePendingMarkerKind(ctx, row.ID, backupSlash, models.RestorePendingKindRearmRefused); markErr != nil {
-				logging.Warnf("replacement sweep %s: consumption failed (%v), re-arm failed (%v), and restore-pending persistence failed (%v) — restored destination retained, backup path untouched", backup, uErr, rearmErr, markErr)
+			// classes, absent on a plain failure. Wave-20 (codex P2): the kind is
+			// classified by rearmPendingKind instead of unconditionally — a
+			// failure AFTER the staged copy published (post-publish metadata
+			// fix-ups, or the hard-link fallback's completed-despite-error leg)
+			// proves the name carries THIS operation's own bytes, so the durable
+			// marker and the in-process fallback record the CLEAN kind and the
+			// pending retry reaps the owned name; refusal and pre-publish failure
+			// classes keep the rearm-refused kind: no later retry may stat/copy/
+			// remove that path (a removal would delete a foreign occupant, an
+			// existence check would fail forever on the absent name).
+			persistKind := rearmPendingKind(rearmErr)
+			s.rememberPendingRemovalKind(backupSlash, persistKind)
+			if markErr := s.persistRestorePendingMarkerKind(ctx, row.ID, backupSlash, persistKind); markErr != nil {
+				logging.Warnf("replacement sweep %s: consumption failed (%v), re-arm failed (%v), and restore-pending persistence failed (%v) — restored destination retained, backup path untouched (pending kind %s)", backup, uErr, rearmErr, markErr, persistKind)
 			} else {
-				logging.Warnf("replacement sweep %s: consumption failed (%v) and re-arm failed (%v) — restored destination retained, cleanup marked restore-pending", backup, uErr, rearmErr)
+				logging.Warnf("replacement sweep %s: consumption failed (%v) and re-arm failed (%v) — restored destination retained, cleanup marked restore-pending (%s)", backup, uErr, rearmErr, persistKind)
 			}
 			return false
 		}
@@ -937,13 +987,16 @@ func (s *ReplacementSweeper) retryPendingRemoval(ctx context.Context, rowID uint
 			// Wave-19: the occupied-name refusal classes mean the just-removed
 			// name raced a FOREIGN claimant — the marker (and the in-process
 			// fallback below) upgrades to the rearm-refused kind so the next
-			// retry never touches that path. A plain re-arm failure leaves the
-			// name absent and keeps the clean posture, whose removal leg
-			// already tolerates the missing name.
-			persistKind := models.RestorePendingKindClean
-			if rearmOccupiedClass(rearmErr) {
-				persistKind = models.RestorePendingKindRearmRefused
-			}
+			// retry never touches that path.
+			// Wave-20 (codex P2): the kind now comes from rearmPendingKind for
+			// EVERY failure class — a plain pre-publish failure leaves the name
+			// ABSENT (unproven), which the rearm-refused kind covers: this
+			// sweep's own removal leg tolerates a missing name, but an explicit
+			// revert reading a clean-pending entry with an absent backup wedges
+			// at the source stat forever. Only a failure after the staged copy
+			// definitely published keeps the clean posture (owned bytes at the
+			// name; the retry reaps it).
+			persistKind := rearmPendingKind(rearmErr)
 			fallbackKind = persistKind
 			if markErr := s.persistRestorePendingMarkerKind(ctx, rowID, backupSlash, persistKind); markErr != nil {
 				absoluteBackup, _ := filepath.Abs(backup)

@@ -85,9 +85,12 @@ func publishNoReplaceFallback(src, dst string) error {
 		// The destination link already carries the staged bytes; only the
 		// staged cleanup failed. Undo the destination link so the publish
 		// fails closed with the caller's pre-publish state (staged intact,
-		// destination absent) instead of a duplicated inode pair.
+		// destination absent) instead of a duplicated inode pair. If the
+		// rollback ITSELF fails the destination name keeps the staged bytes,
+		// so the error wraps ErrPublishCompleted (wave-20): compensating
+		// callers must classify the name as OWNED, not un-owned.
 		if rbErr := publishNoReplaceRemove(dst); rbErr != nil {
-			return fmt.Errorf("no-replace publish %s -> %s: staged cleanup failed: %v (AND publish rollback failed: %w)", src, dst, err, rbErr)
+			return fmt.Errorf("no-replace publish %s -> %s: staged cleanup failed: %v (AND publish rollback failed: %w): %w", src, dst, err, rbErr, ErrPublishCompleted)
 		}
 		return fmt.Errorf("no-replace publish %s -> %s: staged cleanup failed: %w", src, dst, err)
 	}

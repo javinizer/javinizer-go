@@ -441,6 +441,14 @@ func (r *BatchFileOperationRepository) FindOperationsByDestination(ctx context.C
 // so a journal row stored as `…\Ä.jpg` is invisible to an `…/ä.jpg` prefilter
 // even though DestKey folds them together on an insensitive root. Pure-ASCII
 // destinations need no help: LIKE already folds them, keeping wave-8 behavior.
+//
+// Wave-20 (codex P2): DestKey's insensitive form now runs FULL Unicode case
+// folding (golang.org/x/text/cases.Fold instead of strings.ToLower), so the
+// in-process exact matcher also resolves pairs simple lowering never touched
+// (final sigma ς≡σ, ß≡ss, …). This gate stays as a conservative superset:
+// fallback hydration plus the Fold matcher cover the whole pair space, so no
+// tighter trigger (full-fold-only runes) is required — any non-ASCII cased
+// letter keeps taking the unfiltered full-ledger leg.
 func hasCaseFoldingNonASCII(s string) bool {
 	for _, r := range s {
 		if r > unicode.MaxASCII && (unicode.ToLower(r) != r || unicode.ToUpper(r) != r) {
@@ -477,6 +485,11 @@ func hasCaseFoldingNonASCII(s string) bool {
 // destinations (and non-cased runes) keep the wave-8 byte-identical patterns
 // and separator cross-spellings — spellings that rewrite to the caller's own
 // bytes are dropped.
+//
+// Wave-20 (codex P2): the full-ledger fallback pairs with DestKey's
+// cases.Fold exact matcher, so final-sigma-class pairs (stored ς-spelling,
+// queried σ-spelling — ToLower kept them distinct) are FOUND through this
+// fallback leg; the nil-pattern gate itself is unchanged.
 func destinationLikePatterns(destination string) []string {
 	if hasCaseFoldingNonASCII(destination) {
 		// See the doc comment: bounded case variants cannot be complete for

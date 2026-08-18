@@ -14,6 +14,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"golang.org/x/text/cases"
 )
 
 // KeyedLockRegistry provides per-key mutexes with reference-counted eviction
@@ -144,14 +146,29 @@ func DestKey(p string) string {
 	return DestKeyForRoot(destinationProbeRoot(p), p)
 }
 
+// destKeyFolder computes the insensitive destination-key form with FULL
+// Unicode case folding (wave-20, codex P2, PR#215). Plain strings.ToLower is
+// a per-rune simple case mapping: it leaves GREEK SMALL LETTER FINAL SIGMA
+// (ς) un-folded against σ although both uppercase to Σ and are
+// case-equivalent on insensitive filesystems, so two spellings of ONE file
+// (`…/στ.jpg` journaled, `…/ΣΤ.jpg` queried) produced different journal keys
+// — equivalent spellings stayed invisible to the exact matcher, corrupting
+// sequence reuse and conflict checks. cases.Fold follows the Unicode default
+// case-fold table (ς→σ alongside σ, ß→ss alongside ẞ, …), is byte-identical
+// to ToLower for ASCII, and the returned Caser is stateless and safe for
+// concurrent use.
+var destKeyFolder = cases.Fold()
+
 // DestKeyForRoot is DestKey with an explicit destination root. The explicit
-// form is useful to callers that already know the media-library root.
+// form is useful to callers that already know the media-library root. The
+// case-SENSITIVE leg stays byte-identical (normalizeDestPath only); the
+// insensitive leg full-folds through destKeyFolder.
 func DestKeyForRoot(root, p string) string {
 	s := normalizeDestPath(p)
 	if IsCaseSensitiveRoot(root) {
 		return s
 	}
-	return strings.ToLower(s)
+	return destKeyFolder.String(s)
 }
 
 func normalizeDestPath(p string) string {

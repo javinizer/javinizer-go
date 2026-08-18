@@ -30,6 +30,20 @@ var ErrPublishCollision = errors.New("no-replace publish destination already occ
 // never as license to fall back to replacing semantics.
 var ErrPublishNoReplaceUnsupported = errors.New("filesystem cannot express an atomic no-replace publish")
 
+// ErrPublishCompleted classifies a publish error returned AFTER the staged
+// bytes were installed at the destination name (wave-20, codex P2, PR#215):
+// the POSIX hard-link fallback's staged-source cleanup can fail AFTER
+// link(2) created the destination link, and when the destination rollback
+// ALSO fails the name stays occupied by the staged bytes even though an
+// error returns. Callers compensating a failed publish classify on
+// errors.Is(err, ErrPublishCompleted) BEFORE assuming an error means
+// "nothing published" — history's backup re-arm treats this class as an
+// OWNED name (the restore-pending CLEAN kind: the pending retry removes the
+// name), never as an unowned one. The refusal classes never wrap it: a
+// refusal installed nothing by definition, so PublishRefusal and
+// ErrPublishCompleted are disjoint signals for one publish error.
+var ErrPublishCompleted = errors.New("publish completed despite the returned error")
+
 // PublishRefusal reports whether err carries one of the typed no-replace
 // REFUSAL classes — ErrPublishCollision (a foreign writer owns the name now)
 // or ErrPublishNoReplaceUnsupported (the volume cannot express an atomic

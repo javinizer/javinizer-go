@@ -102,11 +102,19 @@ func TestReverterRearmCollisionW18C_MarksRestorePendingAndNeverRestoresOccupant(
 	require.Empty(t, gf.Replacements, "the deferred consumption completes")
 }
 
-// (c2) a NON-class re-arm failure keeps the established posture: plain warn,
-// no marker write, entry stays armed — the backup name is simply EMPTY (no
-// foreign occupant exists to arm against), which the pre-round-18 retry
-// posture already covers.
-func TestReverterRearmCollisionW18C_PlainRearmFailureKeepsArmedPosture(t *testing.T) {
+// (c2) — SUPERSEDED by wave-20 (codex P2, PR#215): a NON-class re-arm
+// failure used to keep the armed posture — plain warn, no marker write —
+// which left the entry armed against an ABSENT backup name: every later
+// explicit revert failed at the backup source stat forever, and sweeps saw
+// an ordinary armed row with a present destination (nothing to repair).
+// Wave-20 marks the entry restore-pending(rearm-refused) for every
+// pre-publish re-arm failure class; the dedicated wave-20 pins live in
+// reverter_rearm_pending_w20_test.go (classifier unit, staging-open AND
+// staging-write wedges, post-publish clean kind, marker-failure-on-top).
+// What stays true here (and this regression now pins): the failed staging
+// open published nothing — the backup name is EMPTY, never occupied — and
+// the healed retry consumes journal-only.
+func TestReverterRearmCollisionW18C_PlainRearmFailureMarksRearmRefusedPendingAndHeals(t *testing.T) {
 	fixture := newP3Fixture()
 	op, dest := fixture.addAppliedOp(t, "job-w18c", "W18C-PLAIN-ERR", false, "new", p3Replacement{seq: 1, backupBytes: "old"})
 	backup := dest + ".dlbak.a"
@@ -133,9 +141,34 @@ func TestReverterRearmCollisionW18C_PlainRearmFailureKeepsArmedPosture(t *testin
 	gf, perr := models.ParseGeneratedFiles(row.GeneratedFiles)
 	require.NoError(t, perr)
 	require.Len(t, gf.Replacements, 1)
-	require.False(t, gf.Replacements[0].RestorePending, "no marker is written for a non-class re-arm failure")
-	require.Equal(t, 1, repo.calls, "only the consumption transaction ran — no marker attempt")
-	require.Contains(t, logs.String(), "failed to re-arm backup")
+	// Wave-20: the entry is disarmed — it can no longer wedge the retry at the
+	// absent backup's source stat. A pre-publish staging failure leaves the
+	// name absent (unproven), so the marker carries the rearm-refused kind.
+	require.True(t, gf.Replacements[0].RestorePending, "every re-arm failure class disarms the entry now")
+	require.Equal(t, models.RestorePendingKindRearmRefused, gf.Replacements[0].PendingKind(),
+		"a pre-publish (staging-open) failure leaves the name absent — rearm-refused")
+	require.Equal(t, 2, repo.calls, "consumption attempt + marker persistence")
+	require.Contains(t, logs.String(), "consumption failed")
+	require.Contains(t, logs.String(), "re-arm failed")
+	require.Contains(t, logs.String(), "marked restore-pending")
+
+	// The healed retry consumes JOURNAL-ONLY: no stat, copy, or removal ever
+	// runs against the absent backup name (the wedge fs stays armed).
+	repo.fail = nil
+	retryRow, ferr := fixture.repo.FindByID(ctx, op.ID)
+	require.NoError(t, ferr)
+	fresh := *retryRow
+	restored, err = NewReverter(fs, repo).restoreReplacementJournal(ctx, &fresh)
+	require.NoError(t, err, "the rearm-refused pending retry needs no backup-path operation")
+	require.True(t, restored[dest])
+	require.Equal(t, "old", p3ReadFile(t, fixture.fs, dest), "the marker-certified destination is kept byte-for-byte")
+	_, serr = fixture.fs.Stat(backup)
+	require.ErrorIs(t, serr, os.ErrNotExist, "nothing was re-published at the unowned name")
+	row, ferr = fixture.repo.FindByID(ctx, op.ID)
+	require.NoError(t, ferr)
+	gf, perr = models.ParseGeneratedFiles(row.GeneratedFiles)
+	require.NoError(t, perr)
+	require.Empty(t, gf.Replacements, "the deferred consumption completes")
 }
 
 // (c3) RestorePending-marking failure on top: the occupant and the restored
