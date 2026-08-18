@@ -471,6 +471,10 @@ func (f *w23bBackupCountFs) openCount(name string) int {
 	return f.opens[name]
 }
 
+// w23bBlockingUpdateRepo gates the journal consumption write; consumption
+// moved from Update to UpdateJournalInTx (review 4960250562), so the gate
+// follows — busy marker and journal lock must both be held across the
+// transaction.
 type w23bBlockingUpdateRepo struct {
 	*p3OpRepo
 	fs       afero.Fs
@@ -481,12 +485,12 @@ type w23bBlockingUpdateRepo struct {
 	busyHeld bool
 }
 
-func (r *w23bBlockingUpdateRepo) Update(ctx context.Context, op *models.BatchFileOperation) error {
+func (r *w23bBlockingUpdateRepo) UpdateJournalInTx(ctx context.Context, id uint, fn database.JournalUpdateFn) error {
 	r.once.Do(func() {
 		_, err := r.fs.Stat(fsutil.ReplacementBusyPath(r.dest))
 		r.busyHeld = err == nil
 		close(r.entered)
 		<-r.release
 	})
-	return r.p3OpRepo.Update(ctx, op)
+	return r.p3OpRepo.UpdateJournalInTx(ctx, id, fn)
 }

@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
+	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
@@ -316,4 +318,33 @@ func (r *covFindByIDRepo) FindByID(ctx context.Context, id uint) (*models.BatchF
 	}
 	r.calls++
 	return r.p3OpRepo.FindByID(ctx, id)
+}
+
+// UpdateJournalInTx continues the SAME sequenced injection at the journal
+// transaction seam (review 4960250562): the sweeper's live-row re-read under
+// the journal lock now rides UpdateJournalInTx, so the next scripted result
+// plays the role the second FindByID call used to play.
+func (r *covFindByIDRepo) UpdateJournalInTx(ctx context.Context, id uint, fn database.JournalUpdateFn) error {
+	if r.calls < len(r.results) {
+		result := r.results[r.calls]
+		r.calls++
+		if result.row == nil {
+			if result.err != nil {
+				return result.err
+			}
+			return fmt.Errorf("update journal tx row %d: %w", id, database.ErrNotFound)
+		}
+		copy := *result.row
+		next, persist, err := fn(&copy)
+		if err != nil {
+			return err
+		}
+		if persist {
+			copy.GeneratedFiles = models.MarshalLedgerJSON(next)
+			return r.p3OpRepo.Update(ctx, &copy)
+		}
+		return nil
+	}
+	r.calls++
+	return r.p3OpRepo.UpdateJournalInTx(ctx, id, fn)
 }

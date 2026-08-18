@@ -123,27 +123,27 @@ func markReplacementRestorePending(gf *models.GeneratedFilesJSON, backupSlash st
 	return false
 }
 
-// markReplacementEntryRestorePending applies the marker to a fresh row. It is
-// used by the explicit reverter when backup removal fails before consumption.
+// markReplacementEntryRestorePending applies the marker to a fresh row inside
+// the journal read-modify-write transaction (review 4960250562: atomic across
+// processes, not just this process's lock registry). It is used by the
+// explicit reverter when backup removal fails before consumption.
 func markReplacementEntryRestorePending(ctx context.Context, repo database.BatchFileOperationRepositoryInterface, rowID uint, backupSlash string) error {
 	release := fsutil.SharedJournalLocks().Acquire(strconv.Itoa(int(rowID)))
 	defer release()
-	liveRow, err := repo.FindByID(ctx, rowID)
-	if err != nil {
-		return err
-	}
-	if liveRow == nil {
+	txErr := repo.UpdateJournalInTx(ctx, rowID, func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
+		gf, err := models.ParseGeneratedFiles(current.GeneratedFiles)
+		if err != nil {
+			return models.GeneratedFilesJSON{}, false, err
+		}
+		if !markReplacementRestorePending(&gf, backupSlash) {
+			return gf, false, nil
+		}
+		return gf, true, nil
+	})
+	if errors.Is(txErr, database.ErrNotFound) {
 		return fmt.Errorf("owner row %d not found", rowID)
 	}
-	gf, err := models.ParseGeneratedFiles(liveRow.GeneratedFiles)
-	if err != nil {
-		return err
-	}
-	if !markReplacementRestorePending(&gf, backupSlash) {
-		return nil
-	}
-	liveRow.GeneratedFiles = models.MarshalLedgerJSON(gf)
-	return repo.Update(ctx, liveRow)
+	return txErr
 }
 
 func rearmReplacementBackup(fs afero.Fs, dest, backup string, info os.FileInfo) error {
@@ -275,20 +275,42 @@ func (s *ReplacementSweeper) Sweep(ctx context.Context) (int, error) {
 // SweepDestinations runs the targeted pre-revert sweep over the destinations
 // an operation's journal names: crash-window restores complete BEFORE the
 // revert's rejection/restore checks evaluate the destination state.
+//
+// Requested destinations are grouped by directory up front: when several
+// destinations share one folder (cover.jpg + poster.jpg), the folder is
+// scanned once and every candidate is tested against the WHOLE group —
+// otherwise only the first destination's backups would arbitrate and a
+// crash-window backup for a later destination would leak past the revert's
+// destination-conflict checks (codex P2 review 4960491781). The group key is
+// the probe-aware destination key (sweepSlash), so two case-folded spellings
+// of one insensitive folder share a single scan; the enumeration path keeps
+// the first-seen recorded case for afero.ReadDir.
 func (s *ReplacementSweeper) SweepDestinations(ctx context.Context, destinations []string) (int, error) {
 	idx, err := s.index(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("replacement sweep: row scan failed: %w", err)
 	}
-	seen := map[string]bool{}
-	healed := 0
+	type destGroup struct {
+		enumDir  string   // first-seen enumeration spelling (recorded case kept for ReadDir)
+		destKeys []string // probe-aware keys of every requested destination in the folder
+	}
+	groups := map[string]*destGroup{}
+	var order []string // first-appearance order of each directory group (matches the pre-grouping scan order)
 	for _, dest := range destinations {
 		dir := filepath.ToSlash(filepath.Clean(filepath.Dir(dest)))
-		if seen[dir] {
-			continue
+		groupKey := sweepSlash(dir)
+		g, ok := groups[groupKey]
+		if !ok {
+			g = &destGroup{enumDir: dir}
+			groups[groupKey] = g
+			order = append(order, groupKey)
 		}
-		seen[dir] = true
-		entries, rdErr := afero.ReadDir(s.fs, filepath.FromSlash(dir))
+		g.destKeys = append(g.destKeys, sweepSlash(dest))
+	}
+	healed := 0
+	for _, groupKey := range order {
+		g := groups[groupKey]
+		entries, rdErr := afero.ReadDir(s.fs, filepath.FromSlash(g.enumDir))
 		if rdErr != nil {
 			continue
 		}
@@ -296,13 +318,20 @@ func (s *ReplacementSweeper) SweepDestinations(ctx context.Context, destinations
 			if e.IsDir() || !IsReplacementBackupName(e.Name()) {
 				continue
 			}
-			// Targeted sweep only arbitrates backups of the named destinations.
-			candidate := sweepSlash(filepath.Join(dir, e.Name()))
-			destSlash := sweepSlash(dest)
-			if !strings.HasPrefix(candidate, destSlash) {
+			// Targeted sweep only arbitrates backups of the named destinations;
+			// test the candidate against EVERY destination in the group.
+			candidate := sweepSlash(filepath.Join(g.enumDir, e.Name()))
+			matched := false
+			for _, destKey := range g.destKeys {
+				if strings.HasPrefix(candidate, destKey) {
+					matched = true
+					break
+				}
+			}
+			if !matched {
 				continue
 			}
-			healed += s.sweepOne(ctx, idx, dir, e)
+			healed += s.sweepOne(ctx, idx, g.enumDir, e)
 		}
 	}
 	return healed, nil
@@ -433,9 +462,14 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 		return false
 	}
 
-	// R15-1: consume from a row re-read under the shared journal lock — an
-	// index-time snapshot can overwrite an entry recorded or confirmed
-	// meanwhile. Lock order dest→journal matches the reverter's consumption.
+	// R15-1 + review 4960250562: the journal section runs entirely through
+	// UpdateJournalInTx — each round is a BEGIN IMMEDIATE transaction whose
+	// in-transaction re-read merges against the latest committed ledger, so an
+	// apply in ANOTHER process arming a DIFFERENT destination of this row can
+	// neither clobber this consumption nor be resurrected by it. The marker
+	// shape of the classification below (armed entry present vs already
+	// consumed) tracks the state fn observed, never an index-time snapshot.
+	// Lock order dest→journal matches the reverter's consumption.
 	undoRestore := func() {
 		if rmErr := s.fs.Remove(dest); rmErr != nil {
 			logging.Warnf("replacement sweep %s: restore undo failed: %v", backup, rmErr)
@@ -443,24 +477,29 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 	}
 	jrel := fsutil.SharedJournalLocks().Acquire(strconv.Itoa(int(row.ID)))
 	defer jrel()
-	liveRow, lErr := s.repo.FindByID(ctx, row.ID)
-	if lErr != nil || liveRow == nil {
-		undoRestore()
-		return false
-	}
-	gf, err := models.ParseGeneratedFiles(liveRow.GeneratedFiles)
-	if err != nil {
-		undoRestore()
-		return false
-	}
-	removedSelf := false
-	for _, rep := range gf.Replacements {
-		if sweepSlash(rep.Backup) == backupSlash {
-			removedSelf = true
-			break
+
+	entryPresent := false
+	pErr := s.repo.UpdateJournalInTx(ctx, row.ID, func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
+		gf, err := models.ParseGeneratedFiles(current.GeneratedFiles)
+		if err != nil {
+			return models.GeneratedFilesJSON{}, false, err
 		}
+		for _, rep := range gf.Replacements {
+			if sweepSlash(rep.Backup) == backupSlash {
+				entryPresent = true
+				break
+			}
+		}
+		return gf, false, nil
+	})
+	if pErr != nil {
+		// Owner row unreadable (or journal unparseable) inside the
+		// transaction — the restore is undone exactly as the pre-transaction
+		// live-row read failure did.
+		undoRestore()
+		return false
 	}
-	if !removedSelf {
+	if !entryPresent {
 		// Already consumed (e.g. a reverter raced us) — the backup is no longer
 		// journal-owned, so remove it before reporting the restore complete.
 		if rmErr := removeReplacementBackup(s.fs, backup, "replacement sweep"); rmErr != nil {
@@ -478,29 +517,42 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 	backupInfo, _ := lstatRestoreSource(s.fs, backup)
 	if rmErr := removeReplacementBackup(s.fs, backup, "replacement sweep"); rmErr != nil {
 		s.rememberPendingRemoval(backupSlash)
-		if markReplacementRestorePending(&gf, backupSlash) {
-			liveRow.GeneratedFiles = models.MarshalLedgerJSON(gf)
-			if markErr := s.repo.Update(ctx, liveRow); markErr != nil {
-				absoluteBackup, _ := filepath.Abs(backup)
-				logging.Warnf("replacement sweep failed to retain cleanup marker for backup %s: %v", absoluteBackup, markErr)
-				// Without a durable marker, do not leave the restored destination
-				// behind: restore the armed, backup-present retry state instead.
-				s.forgetPendingRemoval(backupSlash)
-				undoRestore()
+		markErr := s.repo.UpdateJournalInTx(ctx, row.ID, func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
+			gf, err := models.ParseGeneratedFiles(current.GeneratedFiles)
+			if err != nil {
+				return models.GeneratedFilesJSON{}, false, err
 			}
+			if !markReplacementRestorePending(&gf, backupSlash) {
+				return gf, false, nil
+			}
+			return gf, true, nil
+		})
+		if markErr != nil {
+			absoluteBackup, _ := filepath.Abs(backup)
+			logging.Warnf("replacement sweep failed to retain cleanup marker for backup %s: %v", absoluteBackup, markErr)
+			// Without a durable marker, do not leave the restored destination
+			// behind: restore the armed, backup-present retry state instead.
+			s.forgetPendingRemoval(backupSlash)
+			undoRestore()
 		}
 		return false
 	}
 
-	kept := gf.Replacements[:0]
-	for _, rep := range gf.Replacements {
-		if sweepSlash(rep.Backup) != backupSlash {
-			kept = append(kept, rep)
+	uErr := s.repo.UpdateJournalInTx(ctx, row.ID, func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
+		gf, err := models.ParseGeneratedFiles(current.GeneratedFiles)
+		if err != nil {
+			return models.GeneratedFilesJSON{}, false, err
 		}
-	}
-	gf.Replacements = kept
-	liveRow.GeneratedFiles = models.MarshalLedgerJSON(gf)
-	if uErr := s.repo.Update(ctx, liveRow); uErr != nil {
+		kept := gf.Replacements[:0]
+		for _, rep := range gf.Replacements {
+			if sweepSlash(rep.Backup) != backupSlash {
+				kept = append(kept, rep)
+			}
+		}
+		gf.Replacements = kept
+		return gf, true, nil
+	})
+	if uErr != nil {
 		// The backup was removed first, so re-arm it before undoing the restore.
 		// This preserves the old retry posture even when journal persistence is
 		// temporarily unavailable.
@@ -521,38 +573,51 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 
 // retryPendingRemoval handles the present-destination state left by a failed
 // backup Remove. It consumes only after the retry Remove succeeds (or reports
-// os.IsNotExist), and uses the live row under the journal lock.
+// os.IsNotExist), reading and writing through the same journal transaction
+// every other row mutator uses (review 4960250562).
 func (s *ReplacementSweeper) retryPendingRemoval(ctx context.Context, rowID uint, backup, dest, backupSlash string) bool {
 	jrel := fsutil.SharedJournalLocks().Acquire(strconv.Itoa(int(rowID)))
 	defer jrel()
-	liveRow, err := s.repo.FindByID(ctx, rowID)
-	if err != nil || liveRow == nil {
-		logging.Warnf("replacement sweep %s: owner row unreadable during cleanup (%v) — kept", backup, err)
-		return false
-	}
-	if liveRow.RevertStatus == models.RevertStatusReverted {
-		return false
-	}
-	gf, err := models.ParseGeneratedFiles(liveRow.GeneratedFiles)
-	if err != nil {
-		logging.Warnf("replacement sweep %s: cleanup journal unreadable (%v) — kept", backup, err)
-		return false
-	}
-	target := -1
-	for i := range gf.Replacements {
-		if sweepSlash(gf.Replacements[i].Backup) == backupSlash {
-			target = i
-			break
+	var rowReverted, targetFound, authorized bool
+	var fnErr error
+	err := s.repo.UpdateJournalInTx(ctx, rowID, func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
+		if current.RevertStatus == models.RevertStatusReverted {
+			rowReverted = true
+			return models.GeneratedFilesJSON{}, false, nil
 		}
+		gf, err := models.ParseGeneratedFiles(current.GeneratedFiles)
+		if err != nil {
+			fnErr = err
+			return models.GeneratedFilesJSON{}, false, err
+		}
+		for i := range gf.Replacements {
+			if sweepSlash(gf.Replacements[i].Backup) == backupSlash {
+				targetFound = true
+				authorized = gf.Replacements[i].RestorePending || s.hasPendingRemoval(backupSlash)
+				break
+			}
+		}
+		return gf, false, nil
+	})
+	if err != nil {
+		if fnErr != nil {
+			logging.Warnf("replacement sweep %s: cleanup journal unreadable (%v) — kept", backup, err)
+		} else {
+			logging.Warnf("replacement sweep %s: owner row unreadable during cleanup (%v) — kept", backup, err)
+		}
+		return false
 	}
-	if target < 0 {
+	if rowReverted {
+		return false
+	}
+	if !targetFound {
 		if rmErr := removeReplacementBackup(s.fs, backup, "replacement sweep"); rmErr != nil {
 			return false
 		}
 		s.forgetPendingRemoval(backupSlash)
 		return true
 	}
-	if !gf.Replacements[target].RestorePending && !s.hasPendingRemoval(backupSlash) {
+	if !authorized {
 		return false
 	}
 	// Capture metadata without following a swapped-in symlink; consumption
@@ -562,21 +627,27 @@ func (s *ReplacementSweeper) retryPendingRemoval(ctx context.Context, rowID uint
 		s.rememberPendingRemoval(backupSlash)
 		return false
 	}
-	kept := gf.Replacements[:0]
-	for i, rep := range gf.Replacements {
-		if i != target {
-			kept = append(kept, rep)
+	uErr := s.repo.UpdateJournalInTx(ctx, rowID, func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
+		gf, err := models.ParseGeneratedFiles(current.GeneratedFiles)
+		if err != nil {
+			return models.GeneratedFilesJSON{}, false, err
 		}
-	}
-	gf.Replacements = kept
-	liveRow.GeneratedFiles = models.MarshalLedgerJSON(gf)
-	if err := s.repo.Update(ctx, liveRow); err != nil {
+		kept := gf.Replacements[:0]
+		for _, rep := range gf.Replacements {
+			if sweepSlash(rep.Backup) != backupSlash {
+				kept = append(kept, rep)
+			}
+		}
+		gf.Replacements = kept
+		return gf, true, nil
+	})
+	if uErr != nil {
 		if rearmErr := rearmReplacementBackup(s.fs, dest, backup, backupInfo); rearmErr != nil {
 			absoluteBackup, _ := filepath.Abs(backup)
 			logging.Warnf("replacement sweep failed to re-arm backup %s after pending cleanup failure: %v", absoluteBackup, rearmErr)
 		}
 		s.rememberPendingRemoval(backupSlash)
-		logging.Warnf("replacement sweep %s: pending cleanup consumption failed: %v", backup, err)
+		logging.Warnf("replacement sweep %s: pending cleanup consumption failed: %v", backup, uErr)
 		return false
 	}
 	s.forgetPendingRemoval(backupSlash)

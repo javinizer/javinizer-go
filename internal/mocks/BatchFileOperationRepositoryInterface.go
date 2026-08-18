@@ -7,6 +7,7 @@ package mocks
 import (
 	"context"
 
+	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/models"
 	mock "github.com/stretchr/testify/mock"
 )
@@ -881,6 +882,69 @@ func (_c *MockBatchFileOperationRepositoryInterface_Update_Call) Return(err erro
 }
 
 func (_c *MockBatchFileOperationRepositoryInterface_Update_Call) RunAndReturn(run func(ctx context.Context, op *models.BatchFileOperation) error) *MockBatchFileOperationRepositoryInterface_Update_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// UpdateJournalInTx provides a mock function for the type MockBatchFileOperationRepositoryInterface
+func (_mock *MockBatchFileOperationRepositoryInterface) UpdateJournalInTx(ctx context.Context, id uint, fn database.JournalUpdateFn) error {
+	ret := _mock.Called(ctx, id, fn)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateJournalInTx")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, uint, database.JournalUpdateFn) error); ok {
+		r0 = returnFunc(ctx, id, fn)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockBatchFileOperationRepositoryInterface_UpdateJournalInTx_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateJournalInTx'
+type MockBatchFileOperationRepositoryInterface_UpdateJournalInTx_Call struct {
+	*mock.Call
+}
+
+// UpdateJournalInTx is a helper method to define mock.On call
+//   - ctx context.Context
+//   - id uint
+//   - fn database.JournalUpdateFn
+func (_e *MockBatchFileOperationRepositoryInterface_Expecter) UpdateJournalInTx(ctx any, id any, fn any) *MockBatchFileOperationRepositoryInterface_UpdateJournalInTx_Call {
+	return &MockBatchFileOperationRepositoryInterface_UpdateJournalInTx_Call{Call: _e.mock.On("UpdateJournalInTx", ctx, id, fn)}
+}
+
+func (_c *MockBatchFileOperationRepositoryInterface_UpdateJournalInTx_Call) Run(run func(ctx context.Context, id uint, fn database.JournalUpdateFn)) *MockBatchFileOperationRepositoryInterface_UpdateJournalInTx_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 uint
+		if args[1] != nil {
+			arg1 = args[1].(uint)
+		}
+		var arg2 database.JournalUpdateFn
+		if args[2] != nil {
+			arg2 = args[2].(database.JournalUpdateFn)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
+func (_c *MockBatchFileOperationRepositoryInterface_UpdateJournalInTx_Call) Return(err error) *MockBatchFileOperationRepositoryInterface_UpdateJournalInTx_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockBatchFileOperationRepositoryInterface_UpdateJournalInTx_Call) RunAndReturn(run func(ctx context.Context, id uint, fn database.JournalUpdateFn) error) *MockBatchFileOperationRepositoryInterface_UpdateJournalInTx_Call {
 	_c.Call.Return(run)
 	return _c
 }

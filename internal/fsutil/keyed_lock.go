@@ -40,6 +40,9 @@ func foldKeyedLock(s string) string {
 	// Acquisition deliberately remains folded even on case-sensitive volumes:
 	// extra contention is harmless. normalizeDestPath still applies platform
 	// separator semantics, so POSIX backslashes remain distinct filename chars.
+	// Whitespace is equally a filename character here: spellings that differ
+	// only in surrounding whitespace fold to DISTINCT keys, never one shared
+	// lock.
 	return strings.ToUpper(strings.ToLower(normalizeDestPath(s)))
 }
 
@@ -104,6 +107,8 @@ func IsCaseSensitiveRoot(root string) bool {
 // Case is folded on insensitive/tolerant roots, preserving the earlier
 // fail-closed behavior; case-sensitive roots retain the spelling so distinct
 // files such as Poster.jpg and poster.jpg do not share a journal bucket.
+// Whitespace is NEVER folded under either case posture: it is part of the
+// filename, and trimming it would alias byte-distinct files into one bucket.
 func DestKey(p string) string {
 	return DestKeyForRoot(destinationProbeRoot(p), p)
 }
@@ -119,11 +124,18 @@ func DestKeyForRoot(root, p string) string {
 }
 
 func normalizeDestPath(p string) string {
+	// Key derivation must stay byte-distinct for byte-distinct names: leading
+	// and trailing whitespace are legal filename characters (POSIX plainly;
+	// Win32 trims by API convention while NTFS keeps them), so a trimmed key
+	// would alias different physical files ('poster.jpg' vs 'poster.jpg ')
+	// into one lock and one journal bucket. Whitespace is therefore never
+	// folded here — the ONLY collapses are the platform separator policy and
+	// filepath.Clean.
 	// Apply separator policy before filepath.Clean: Windows legacy journals may
 	// use either slash spelling, while POSIX filepath names may contain a
 	// literal backslash that must survive cleaning. Case folding is applied by
 	// DestKeyForRoot only after this platform-aware path canonicalization.
-	s := strings.TrimSpace(p)
+	s := p
 	if PathBackslashesAreSeparators {
 		s = strings.ReplaceAll(s, "\\", "/")
 	}
@@ -152,7 +164,11 @@ func destinationProbeRoot(p string) string {
 }
 
 func cleanProbeRoot(root string) string {
-	root = strings.TrimSpace(root)
+	// The probe root is part of the key trail: it selects the cache entry and
+	// the directory actually probed. It must not be whitespace-trimmed either
+	// — distinct roots whose names differ only in surrounding whitespace stay
+	// byte-distinct, and trimming would silently probe a DIFFERENT directory's
+	// case posture. Only the empty string falls back to ".".
 	if PathBackslashesAreSeparators {
 		root = strings.ReplaceAll(root, "\\", "/")
 	}

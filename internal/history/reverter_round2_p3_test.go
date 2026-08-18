@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
@@ -122,17 +123,19 @@ func TestRevert_ConsumptionFailure_KeepsBackupRetryable(t *testing.T) {
 	require.Equal(t, "old", string(mustRead2(t, fs, dest)))
 }
 
-// failingUpdateRepo fails Update calls until cleared.
+// failingUpdateRepo fails journal transaction calls until cleared. The
+// consumption/marker persistence legs moved from Update to UpdateJournalInTx
+// (review 4960250562), so the failure injection rides the transaction seam.
 type failingUpdateRepo struct {
 	*p3OpRepo
 	updateErr error
 }
 
-func (m *failingUpdateRepo) Update(ctx context.Context, op *models.BatchFileOperation) error {
+func (m *failingUpdateRepo) UpdateJournalInTx(ctx context.Context, id uint, fn database.JournalUpdateFn) error {
 	if m.updateErr != nil {
 		return m.updateErr
 	}
-	return m.p3OpRepo.Update(ctx, op)
+	return m.p3OpRepo.UpdateJournalInTx(ctx, id, fn)
 }
 
 func jsonMarshalLedger(t *testing.T, dest, backup string) (string, error) {

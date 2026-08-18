@@ -167,6 +167,12 @@ type BatchFileOperationRepositoryInterface interface {
 	// directories from it so pre-journal crash windows (backup set aside, process
 	// died before RecordReplacement) remain discoverable (codex P3 R2-3).
 	FindOperationsWithLedger(ctx context.Context) ([]models.BatchFileOperation, error)
+	// UpdateJournalInTx atomically rewrites one row's generated-files journal:
+	// BEGIN IMMEDIATE → re-read the row → fn merges against that fresh state →
+	// UPDATE generated_files only → COMMIT (POSTER-WRITE-HARDENING review
+	// 4960250562 — durable cross-process serialization beyond the process-local
+	// journal locks and per-destination .dlbusy markers).
+	UpdateJournalInTx(ctx context.Context, id uint, fn JournalUpdateFn) error
 }
 
 // ApiTokenRepositoryInterface defines the contract for API token operations

@@ -3,8 +3,10 @@ package history
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
+	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
@@ -91,6 +93,29 @@ func (m *mockBatchFileOpRepo) FindOperationsByDestination(ctx context.Context, d
 
 func (m *mockBatchFileOpRepo) Update(ctx context.Context, op *models.BatchFileOperation) error {
 	m.ops[op.ID] = op
+	return nil
+}
+
+// UpdateJournalInTx mirrors the production journal transaction for the
+// in-memory fixture: the stored row is re-read lean and the merge result
+// replaces its generated-files ledger only when persist is requested.
+func (m *mockBatchFileOpRepo) UpdateJournalInTx(ctx context.Context, id uint, fn database.JournalUpdateFn) error {
+	stored, ok := m.ops[id]
+	if !ok {
+		return fmt.Errorf("update journal tx row %d: %w", id, database.ErrNotFound)
+	}
+	current := &models.BatchFileOperation{
+		ID:             stored.ID,
+		GeneratedFiles: stored.GeneratedFiles,
+		RevertStatus:   stored.RevertStatus,
+	}
+	next, persist, err := fn(current)
+	if err != nil {
+		return err
+	}
+	if persist {
+		stored.GeneratedFiles = models.MarshalLedgerJSON(next)
+	}
 	return nil
 }
 

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/spf13/afero"
@@ -140,6 +141,9 @@ func (f *w15BusyClaimErrorFs) OpenFile(name string, flag int, perm os.FileMode) 
 	return f.Fs.OpenFile(name, flag, perm)
 }
 
+// w15ObserveUpdateRepo observes whether the durable busy marker is still held
+// when the journal consumption lands; that persistence moved from Update to
+// UpdateJournalInTx (review 4960250562), so the observation point follows.
 type w15ObserveUpdateRepo struct {
 	*p3OpRepo
 	fs            afero.Fs
@@ -147,9 +151,9 @@ type w15ObserveUpdateRepo struct {
 	updateSawBusy bool
 }
 
-func (r *w15ObserveUpdateRepo) Update(ctx context.Context, op *models.BatchFileOperation) error {
+func (r *w15ObserveUpdateRepo) UpdateJournalInTx(ctx context.Context, id uint, fn database.JournalUpdateFn) error {
 	if _, err := r.fs.Stat(fsutil.ReplacementBusyPath(r.dest)); err == nil {
 		r.updateSawBusy = true
 	}
-	return r.p3OpRepo.Update(ctx, op)
+	return r.p3OpRepo.UpdateJournalInTx(ctx, id, fn)
 }

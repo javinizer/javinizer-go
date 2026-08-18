@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
@@ -269,16 +270,23 @@ func TestSweep_CrashRestoreConsumptionFailure_UndoesThenRetries(t *testing.T) {
 	require.Equal(t, 0, healed)
 }
 
+// flakySweepRepo fails journal transaction calls while fail is set — except
+// the FIRST call. The sweep's journal section probes entry presence in one
+// transaction before the persistence transaction it diagnoses (review
+// 4960250562), so failing the very first call would mask the intended
+// persist-failure leg behind the presence-probe failure leg.
 type flakySweepRepo struct {
 	*p3OpRepo
-	fail bool
+	fail  bool
+	calls int
 }
 
-func (m *flakySweepRepo) Update(ctx context.Context, op *models.BatchFileOperation) error {
-	if m.fail {
+func (m *flakySweepRepo) UpdateJournalInTx(ctx context.Context, id uint, fn database.JournalUpdateFn) error {
+	m.calls++
+	if m.fail && m.calls > 1 {
 		return errors.New("transient outage")
 	}
-	return m.p3OpRepo.Update(ctx, op)
+	return m.p3OpRepo.UpdateJournalInTx(ctx, id, fn)
 }
 
 // codex P3 R11-1: the armed flag is re-read from a FRESH row under the dest
@@ -489,6 +497,15 @@ func (m *rowGoneRepo) FindByID(ctx context.Context, id uint) (*models.BatchFileO
 		return nil, errors.New("not found")
 	}
 	return m.p3OpRepo.FindByID(ctx, id)
+}
+
+// UpdateJournalInTx mirrors the same row-gone injection for the journal
+// transaction seam (review 4960250562) the consumption legs now use.
+func (m *rowGoneRepo) UpdateJournalInTx(ctx context.Context, id uint, fn database.JournalUpdateFn) error {
+	if id == m.goneID {
+		return errors.New("not found")
+	}
+	return m.p3OpRepo.UpdateJournalInTx(ctx, id, fn)
 }
 
 // Targeted pre-revert sweep over named destinations.

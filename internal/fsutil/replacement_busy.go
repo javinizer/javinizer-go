@@ -47,6 +47,20 @@ const (
 
 var replacementProbePIDAliveAware = replacementProbePIDAliveAwarePlatform
 var replacementProcessStartTime = replacementProcessStartTimePlatform
+
+// replacementStartTimeFromUnixNano validates a platform-provided owner start
+// time. A non-positive stamp (Windows handed back a zero/1601 FILETIME, or a
+// platform reported the Unix epoch itself) cannot describe a real marker
+// owner, so it yields nil and classification keeps the liveness-only fallback
+// rather than comparing garbage against the marker timestamp.
+func replacementStartTimeFromUnixNano(nsec int64) *time.Time {
+	if nsec <= 0 {
+		return nil
+	}
+	start := time.Unix(0, nsec)
+	return &start
+}
+
 var replacementBusyRandom = replacementBusyRandomPlatform
 var replacementCryptoRandomRead = cryptorand.Read
 
@@ -258,7 +272,10 @@ type replacementBusyInspection struct {
 //  2. A well-formed marker whose PID probe proves alive is never expired by
 //     age.
 //  3. Within that live arm, W20's start-time proof that the PID started after
-//     the marker marks it stale as PID reuse.
+//     the marker marks it stale as PID reuse. Linux derives the start time
+//     from /proc/<pid>/stat; K4 arms Windows with the same proof through
+//     K32 GetProcessTimes. An unreadable start time keeps the liveness-only
+//     behavior rather than inventing evidence.
 //  4. A probe that proves the PID is dead marks the marker stale.
 //  5. On POSIX, age is consulted only when the probe is
 //     undecidable/unprobeable; Windows retains its conservative access-denied

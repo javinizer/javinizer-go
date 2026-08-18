@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -595,35 +596,44 @@ func (l *dbRevertLog) RecordReplacement(ctx context.Context, opID OperationID, r
 	release := replacementLedgerLocks.Acquire(opID)
 	defer release()
 
-	preRecord, err := l.repo.FindByID(ctx, uint(recordID64))
-	if err != nil {
-		return fmt.Errorf("revert log RecordReplacement: find record %s: %w", opID, err)
-	}
-	if preRecord == nil {
-		return fmt.Errorf("revert log RecordReplacement: record %s not found", opID)
-	}
-
-	// Legacy tolerance: rows written before the journal existed (or with no
-	// ledger at all) start from the zero value.
-	gf, err := models.ParseGeneratedFiles(preRecord.GeneratedFiles)
-	if err != nil {
-		return fmt.Errorf("revert log RecordReplacement: parse ledger for record %s: %w", opID, err)
-	}
-
+	// The sequence floor is computed OUTSIDE the row transaction: per-destination
+	// .dlbusy markers already exclude any cross-process armer of THIS
+	// destination, and the floor depends only on other rows for the same
+	// destination — a concurrent foreign-destination append to this row cannot
+	// shift it.
 	seq, err := nextDestSequence(ctx, l.repo, replacedPath)
 	if err != nil {
 		return fmt.Errorf("revert log RecordReplacement: sequence for %s: %w", replacedPath, err)
 	}
-	gf.Replacements = append(gf.Replacements, models.ReplacementEntry{
-		Destination: replacedPath,
-		Backup:      backupPath,
-		DestSeq:     seq,
-	})
 
-	data := models.MarshalLedgerJSON(gf)
-	preRecord.GeneratedFiles = data
-	if err := l.repo.Update(ctx, preRecord); err != nil {
-		return fmt.Errorf("revert log RecordReplacement: persist record %s: %w", opID, err)
+	// Review 4960250562: the append merges against the row re-read INSIDE a
+	// BEGIN IMMEDIATE transaction, so a revert/sweep consuming a different
+	// destination of this row in another process can no longer be resurrected
+	// by a stale snapshot here (nor clobber this arm).
+	var fnErr error
+	txErr := l.repo.UpdateJournalInTx(ctx, uint(recordID64), func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
+		// Legacy tolerance: rows written before the journal existed (or with no
+		// ledger at all) start from the zero value; malformed content still
+		// refuses rather than silently dropping the persisted ledger.
+		gf, perr := models.ParseGeneratedFiles(current.GeneratedFiles)
+		if perr != nil {
+			fnErr = fmt.Errorf("revert log RecordReplacement: parse ledger for record %s: %w", opID, perr)
+			return models.GeneratedFilesJSON{}, false, fnErr
+		}
+		gf.Replacements = append(gf.Replacements, models.ReplacementEntry{
+			Destination: replacedPath,
+			Backup:      backupPath,
+			DestSeq:     seq,
+		})
+		return gf, true, nil
+	})
+	switch {
+	case fnErr != nil:
+		return fnErr
+	case errors.Is(txErr, database.ErrNotFound):
+		return fmt.Errorf("revert log RecordReplacement: record %s not found", opID)
+	case txErr != nil:
+		return fmt.Errorf("revert log RecordReplacement: persist record %s: %w", opID, txErr)
 	}
 	return nil
 }
@@ -643,32 +653,33 @@ func (l *dbRevertLog) ReleaseReplacement(ctx context.Context, opID OperationID, 
 	release := replacementLedgerLocks.Acquire(opID)
 	defer release()
 
-	preRecord, err := l.repo.FindByID(ctx, uint(recordID64))
-	if err != nil {
-		return fmt.Errorf("revert log ReleaseReplacement: find record %s: %w", opID, err)
-	}
-	if preRecord == nil {
-		return fmt.Errorf("revert log ReleaseReplacement: record %s not found", opID)
-	}
-	gf, err := models.ParseGeneratedFiles(preRecord.GeneratedFiles)
-	if err != nil {
-		return fmt.Errorf("revert log ReleaseReplacement: parse ledger for record %s: %w", opID, err)
-	}
-	kept := gf.Replacements[:0]
-	for _, e := range gf.Replacements {
-		if e.Destination == replacedPath && e.Backup == backupPath {
-			continue
+	var fnErr error
+	txErr := l.repo.UpdateJournalInTx(ctx, uint(recordID64), func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
+		gf, perr := models.ParseGeneratedFiles(current.GeneratedFiles)
+		if perr != nil {
+			fnErr = fmt.Errorf("revert log ReleaseReplacement: parse ledger for record %s: %w", opID, perr)
+			return models.GeneratedFilesJSON{}, false, fnErr
 		}
-		kept = append(kept, e)
-	}
-	if len(kept) == len(gf.Replacements) {
-		return nil // entry already gone (e.g. sweep consumed it) — idempotent
-	}
-	gf.Replacements = kept
-	data := models.MarshalLedgerJSON(gf)
-	preRecord.GeneratedFiles = data
-	if err := l.repo.Update(ctx, preRecord); err != nil {
-		return fmt.Errorf("revert log ReleaseReplacement: persist record %s: %w", opID, err)
+		kept := gf.Replacements[:0]
+		for _, e := range gf.Replacements {
+			if e.Destination == replacedPath && e.Backup == backupPath {
+				continue
+			}
+			kept = append(kept, e)
+		}
+		if len(kept) == len(gf.Replacements) {
+			return gf, false, nil // entry already gone (e.g. sweep consumed it) — idempotent
+		}
+		gf.Replacements = kept
+		return gf, true, nil
+	})
+	switch {
+	case fnErr != nil:
+		return fnErr
+	case errors.Is(txErr, database.ErrNotFound):
+		return fmt.Errorf("revert log ReleaseReplacement: record %s not found", opID)
+	case txErr != nil:
+		return fmt.Errorf("revert log ReleaseReplacement: persist record %s: %w", opID, txErr)
 	}
 	return nil
 }
@@ -686,32 +697,33 @@ func (l *dbRevertLog) ConfirmReplacement(ctx context.Context, opID OperationID, 
 	release := replacementLedgerLocks.Acquire(opID)
 	defer release()
 
-	preRecord, err := l.repo.FindByID(ctx, uint(recordID64))
-	if err != nil {
-		return fmt.Errorf("revert log ConfirmReplacement: find record %s: %w", opID, err)
-	}
-	if preRecord == nil {
-		return fmt.Errorf("revert log ConfirmReplacement: record %s not found", opID)
-	}
-	gf, err := models.ParseGeneratedFiles(preRecord.GeneratedFiles)
-	if err != nil {
-		return fmt.Errorf("revert log ConfirmReplacement: parse ledger for record %s: %w", opID, err)
-	}
-	changed := false
-	for i := range gf.Replacements {
-		e := &gf.Replacements[i]
-		if e.Destination == replacedPath && e.Backup == backupPath && !e.Installed {
-			e.Installed = true
-			changed = true
+	var fnErr error
+	txErr := l.repo.UpdateJournalInTx(ctx, uint(recordID64), func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
+		gf, perr := models.ParseGeneratedFiles(current.GeneratedFiles)
+		if perr != nil {
+			fnErr = fmt.Errorf("revert log ConfirmReplacement: parse ledger for record %s: %w", opID, perr)
+			return models.GeneratedFilesJSON{}, false, fnErr
 		}
-	}
-	if !changed {
-		return nil // entry already confirmed or retracted — idempotent
-	}
-	data := models.MarshalLedgerJSON(gf)
-	preRecord.GeneratedFiles = data
-	if err := l.repo.Update(ctx, preRecord); err != nil {
-		return fmt.Errorf("revert log ConfirmReplacement: persist record %s: %w", opID, err)
+		changed := false
+		for i := range gf.Replacements {
+			e := &gf.Replacements[i]
+			if e.Destination == replacedPath && e.Backup == backupPath && !e.Installed {
+				e.Installed = true
+				changed = true
+			}
+		}
+		if !changed {
+			return gf, false, nil // entry already confirmed or retracted — idempotent
+		}
+		return gf, true, nil
+	})
+	switch {
+	case fnErr != nil:
+		return fnErr
+	case errors.Is(txErr, database.ErrNotFound):
+		return fmt.Errorf("revert log ConfirmReplacement: record %s not found", opID)
+	case txErr != nil:
+		return fmt.Errorf("revert log ConfirmReplacement: persist record %s: %w", opID, txErr)
 	}
 	return nil
 }
@@ -733,19 +745,28 @@ func (l *dbRevertLog) seedRoot(ctx context.Context, opID OperationID, root strin
 	}
 	release := replacementLedgerLocks.Acquire(opID)
 	defer release()
-	preRecord, err := l.repo.FindByID(ctx, uint(recordID64))
-	if err != nil {
-		return fmt.Errorf("revert log seedRoot: find record %s: %w", opID, err)
-	}
-	if preRecord == nil {
-		return fmt.Errorf("revert log seedRoot: record %s not found", opID)
-	}
-	next := appendLedgerRoot(preRecord.GeneratedFiles, root)
-	if next != preRecord.GeneratedFiles {
-		preRecord.GeneratedFiles = next
-		if err := l.repo.Update(ctx, preRecord); err != nil {
-			return fmt.Errorf("revert log seedRoot: persist root %s for %s: %w", root, opID, err)
+	// Review 4960250562: root seeding rides the same transaction as every other
+	// journal mutation. appendLedgerRoot's tolerances are preserved in struct
+	// form: a malformed body is left byte-identical (no write), an existing root
+	// dedups to a no-op, otherwise the re-marshaled ledger carries the new root.
+	txErr := l.repo.UpdateJournalInTx(ctx, uint(recordID64), func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
+		gf, perr := models.ParseGeneratedFiles(current.GeneratedFiles)
+		if perr != nil {
+			return models.GeneratedFilesJSON{}, false, nil
 		}
+		for _, r := range gf.Roots {
+			if r == root {
+				return gf, false, nil
+			}
+		}
+		gf.Roots = append(gf.Roots, root)
+		return gf, true, nil
+	})
+	switch {
+	case errors.Is(txErr, database.ErrNotFound):
+		return fmt.Errorf("revert log seedRoot: record %s not found", opID)
+	case txErr != nil:
+		return fmt.Errorf("revert log seedRoot: persist root %s for %s: %w", root, opID, txErr)
 	}
 	return nil
 }

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
@@ -163,4 +164,149 @@ func (f *w9ChmodFailFs) Chmod(name string, mode os.FileMode) error {
 		return errors.New("chmod wedged")
 	}
 	return f.Fs.Chmod(name, mode)
+}
+
+// w9MalformedSecondCallRepo serves a corrupted row on a chosen journal
+// transaction call: with backup removal FAILING, call 2 is restoreAndConsume's
+// marker merge; with removal succeeding, call 2 is the consumption merge.
+// Covers the post-classification parse/undo legs (review 4960250562
+// restructured the journal section into explicit transactions).
+type w9MalformedSecondCallRepo struct {
+	*p3OpRepo
+	calls int
+	at    int
+}
+
+func (r *w9MalformedSecondCallRepo) UpdateJournalInTx(ctx context.Context, id uint, fn database.JournalUpdateFn) error {
+	r.calls++
+	at := r.at
+	if at == 0 {
+		at = 2
+	}
+	if r.calls == at {
+		_, _, err := fn(&models.BatchFileOperation{ID: id, GeneratedFiles: "{\"replacements\":broken"})
+		return err
+	}
+	return r.p3OpRepo.UpdateJournalInTx(ctx, id, fn)
+}
+
+func TestReplacementPendingCovW9_MarkerMergeMalformedLedgerUndoesRestore(t *testing.T) {
+	base := afero.NewMemMapFs()
+	fs := &w8RemoveFs{Fs: base, err: errors.New("backup remove wedged"), fail: true}
+	baseRepo := newP3OpRepo()
+	repo := &w9MalformedSecondCallRepo{p3OpRepo: baseRepo}
+	ctx := context.Background()
+	dest := "/out/W9-MALFORMED/poster.jpg"
+	backup := dest + ".dlbak." + p3HexA
+	require.NoError(t, fs.MkdirAll(filepath.Dir(dest), config.DirPerm))
+	writeSweepFile(t, fs, backup, "old", time.Hour)
+	fs.victim = backup
+	op := journalRow(t, baseRepo, "job-1", "W9-MALFORMED", dest, backup, 1, models.RevertStatusApplied)
+
+	s := NewReplacementSweeper(fs, repo)
+	healed, err := s.Sweep(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 0, healed)
+	exists, err := afero.Exists(fs, dest)
+	require.NoError(t, err)
+	require.False(t, exists, "an unparseable marker ledger undoes the restore")
+	require.Equal(t, "old", string(mustRead2(t, fs, backup)), "backup retained for the retry")
+	require.False(t, s.hasPendingRemoval(sweepSlash(backup)), "in-process fallback cleared after the undo")
+	row, err := baseRepo.FindByID(ctx, op.ID)
+	require.NoError(t, err)
+	gf, err := models.ParseGeneratedFiles(row.GeneratedFiles)
+	require.NoError(t, err)
+	require.False(t, gf.Replacements[0].RestorePending, "no marker persisted")
+}
+
+// The consumption merge re-reads with the same discipline: a ledger that turns
+// unparseable between the presence probe and the consumption transaction
+// re-arms the backup and undoes the restored destination for a clean retry.
+func TestReplacementPendingCovW9_ConsumeMergeMalformedLedgerRearmsAndUndoes(t *testing.T) {
+	base := afero.NewMemMapFs()
+	baseRepo := newP3OpRepo()
+	repo := &w9MalformedSecondCallRepo{p3OpRepo: baseRepo}
+	ctx := context.Background()
+	dest := "/out/W9-MALCONSUME/poster.jpg"
+	backup := dest + ".dlbak." + p3HexA
+	require.NoError(t, base.MkdirAll(filepath.Dir(dest), config.DirPerm))
+	writeSweepFile(t, base, backup, "old", time.Hour)
+	journalRow(t, baseRepo, "job-1", "W9-MALCONSUME", dest, backup, 1, models.RevertStatusApplied)
+
+	s := NewReplacementSweeper(base, repo)
+	healed, err := s.Sweep(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 0, healed)
+	exists, err := afero.Exists(base, dest)
+	require.NoError(t, err)
+	require.False(t, exists, "failed consumption undoes the restored destination")
+	require.Equal(t, "old", string(mustRead2(t, base, backup)), "backup re-armed for the retry")
+}
+
+// retryPendingRemoval's consumption merge honours the same contract: the
+// backup bytes come back onto the destination and the in-process pending
+// fallback re-arms, so a healed row can complete the cleanup.
+func TestReplacementPendingCovW9_RetryConsumeMalformedLedgerRearms(t *testing.T) {
+	base := afero.NewMemMapFs()
+	baseRepo := newP3OpRepo()
+	repo := &w9MalformedSecondCallRepo{p3OpRepo: baseRepo}
+	ctx := context.Background()
+	dest := "/out/W9-RETRYMAL/dest.jpg"
+	backup := dest + ".dlbak." + p3HexA
+	require.NoError(t, base.MkdirAll(filepath.Dir(dest), config.DirPerm))
+	require.NoError(t, afero.WriteFile(base, dest, []byte("new"), config.FilePerm))
+	require.NoError(t, afero.WriteFile(base, backup, []byte("old"), config.FilePerm))
+	op := &models.BatchFileOperation{
+		BatchJobID: "job-1", MovieID: "W9-RETRYMAL", OriginalPath: "/src/w9-retrymal.mkv",
+		OperationType: models.OperationTypeUpdate,
+		GeneratedFiles: models.MarshalLedgerJSON(models.GeneratedFilesJSON{Replacements: []models.ReplacementEntry{{
+			Destination: dest, Backup: backup, DestSeq: 1, RestorePending: true,
+		}}}),
+		RevertStatus: models.RevertStatusApplied,
+	}
+	require.NoError(t, baseRepo.Create(ctx, op))
+
+	s := NewReplacementSweeper(base, repo)
+	require.False(t, s.retryPendingRemoval(ctx, op.ID, backup, dest, sweepSlash(backup)))
+	require.Equal(t, "new", string(mustRead2(t, base, backup)), "backup re-armed from the restored destination after the failed consume")
+	require.True(t, s.hasPendingRemoval(sweepSlash(backup)), "pending fallback re-armed")
+	row, err := baseRepo.FindByID(ctx, op.ID)
+	require.NoError(t, err)
+	require.True(t, journalEntryRestorePending(row, sweepSlash(backup)), "base row untouched by the broken merge")
+}
+
+// A row already carrying the durable RestorePending marker needs no marker
+// write at all when the backup removal fails again: the no-change merge keeps
+// the restored destination in place (there is nothing left to undo for).
+func TestReplacementPendingCovW9_AlreadyDurableMarkerNeedsNoRewrite(t *testing.T) {
+	base := afero.NewMemMapFs()
+	fs := &w8RemoveFs{Fs: base, err: errors.New("backup remove wedged"), fail: true}
+	repo := newP3OpRepo()
+	ctx := context.Background()
+	dest := "/out/W9-MARKED/poster.jpg"
+	backup := dest + ".dlbak." + p3HexA
+	require.NoError(t, fs.MkdirAll(filepath.Dir(dest), config.DirPerm))
+	writeSweepFile(t, fs, backup, "old", time.Hour)
+	fs.victim = backup
+	op := &models.BatchFileOperation{
+		BatchJobID: "job-1", MovieID: "W9-MARKED", OriginalPath: "/src/w9-marked.mkv",
+		OperationType: models.OperationTypeUpdate,
+		GeneratedFiles: models.MarshalLedgerJSON(models.GeneratedFilesJSON{Replacements: []models.ReplacementEntry{{
+			Destination: dest, Backup: backup, DestSeq: 1, RestorePending: true,
+		}}}),
+		RevertStatus: models.RevertStatusApplied,
+	}
+	require.NoError(t, repo.Create(ctx, op))
+
+	s := NewReplacementSweeper(fs, repo)
+	healed, err := s.Sweep(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 0, healed, "backup removal still wedged — nothing completes")
+	require.Equal(t, "old", string(mustRead2(t, fs, dest)),
+		"the no-change marker merge does not undo a restore the durable marker already owns")
+	require.Equal(t, "old", string(mustRead2(t, fs, backup)))
+	require.True(t, s.hasPendingRemoval(sweepSlash(backup)), "in-process fallback armed for the retry")
+	row, err := repo.FindByID(ctx, op.ID)
+	require.NoError(t, err)
+	require.True(t, journalEntryRestorePending(row, sweepSlash(backup)), "marker kept")
 }

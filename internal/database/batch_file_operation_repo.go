@@ -2,7 +2,9 @@ package database
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -104,6 +106,95 @@ func (r *BatchFileOperationRepository) CountByBatchJobIDAndRevertStatus(ctx cont
 		return 0, wrapDBErr("count", fmt.Sprintf("batch file operations for job %s with status %s", batchJobID, status), err)
 	}
 	return count, nil
+}
+
+// JournalUpdateFn computes the next generated-files ledger for one operation
+// row inside UpdateJournalInTx's write transaction. current is the row state
+// re-read INSIDE that transaction: ID, GeneratedFiles, and RevertStatus are
+// hydrated from the latest committed state; every other field is zero, so
+// merge decisions must key off the ledger and status only. Returning
+// persist=false commits the transaction untouched (an idempotent no-op); a
+// non-nil error rolls it back and propagates verbatim.
+type JournalUpdateFn func(current *models.BatchFileOperation) (next models.GeneratedFilesJSON, persist bool, err error)
+
+// UpdateJournalInTx serializes generated-files journal read-modify-writes
+// DURABLY, including across processes sharing one SQLite file (review
+// 4960250562): the process-local journal locks and per-destination .dlbusy
+// markers cannot order two processes updating DIFFERENT destinations of the
+// SAME row, so both used to read one GeneratedFiles snapshot and Save
+// divergent results — the loser's entries were silently clobbered.
+//
+// BEGIN IMMEDIATE takes the SQLite write lock up front (the pool's busy
+// timeout waits out a concurrent writer), so the row re-read observes every
+// previously committed journal mutation, fn merges against that truth, and
+// the UPDATE lands atomically with it. A deferred-transaction RMW cannot
+// substitute: under WAL, a read-then-write upgrade after a concurrent commit
+// dies with SQLITE_BUSY_SNAPSHOT instead of waiting.
+//
+// ONLY generated_files (+updated_at, Save-parity) is written — concurrent
+// non-journal column writes are never clobbered. fn owns the merge
+// discipline (armed/installed/pending invariants live with the callers); a
+// missing row reports ErrNotFound before fn runs.
+func (r *BatchFileOperationRepository) UpdateJournalInTx(ctx context.Context, id uint, fn JournalUpdateFn) error {
+	label := fmt.Sprintf("batch file operation %d", id)
+	if fn == nil {
+		return fmt.Errorf("update journal for %s: merge function must not be nil", label)
+	}
+	sqlDB, err := r.GetDB().DB.DB()
+	if err != nil {
+		return wrapDBErr("update journal", label, err)
+	}
+	conn, err := sqlDB.Conn(ctx)
+	if err != nil {
+		return wrapDBErr("update journal", label, err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		return wrapDBErr("update journal", label, err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			// ctx may already be cancelled (it is one of the failure legs);
+			// release the write lock on a fresh context before the conn re-pools.
+			_, _ = conn.ExecContext(context.Background(), "ROLLBACK")
+		}
+	}()
+
+	var raw sql.NullString
+	var status models.RevertStatusEnum
+	scanErr := conn.QueryRowContext(ctx,
+		"SELECT generated_files, revert_status FROM batch_file_operations WHERE id = ?", id,
+	).Scan(&raw, &status)
+	if errors.Is(scanErr, sql.ErrNoRows) {
+		return fmt.Errorf("update journal for %s: %w", label, ErrNotFound)
+	}
+	if scanErr != nil {
+		return wrapDBErr("update journal", label, scanErr)
+	}
+
+	next, persist, fnErr := fn(&models.BatchFileOperation{
+		ID:             id,
+		GeneratedFiles: raw.String,
+		RevertStatus:   status,
+	})
+	if fnErr != nil {
+		return fnErr
+	}
+	if persist {
+		if _, err := conn.ExecContext(ctx,
+			"UPDATE batch_file_operations SET generated_files = ?, updated_at = ? WHERE id = ?",
+			models.MarshalLedgerJSON(next), time.Now().UTC(), id,
+		); err != nil {
+			return wrapDBErr("update journal", label, err)
+		}
+	}
+	// COMMIT is branchless: wrapDBErr maps a nil error to nil, and the deferred
+	// ROLLBACK above is the compensation for any failure before committed=true.
+	_, commitErr := conn.ExecContext(ctx, "COMMIT")
+	committed = commitErr == nil
+	return wrapDBErr("update journal", label, commitErr)
 }
 
 // Update saves all fields of the given batch file operation record.

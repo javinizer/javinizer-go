@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
@@ -298,6 +299,17 @@ func (m *rowGoneRepo2) FindByID(ctx context.Context, id uint) (*models.BatchFile
 		return nil, errors.New("office vacated")
 	}
 	return m.p3OpRepo.FindByID(ctx, id)
+}
+
+// UpdateJournalInTx mirrors the row-gone injection at the journal transaction
+// seam (review 4960250562) consumeReplacementEntry now persists through,
+// surfacing ErrNotFound the way the production transaction does so callers'
+// not-found mapping legs are exercised.
+func (m *rowGoneRepo2) UpdateJournalInTx(ctx context.Context, id uint, fn database.JournalUpdateFn) error {
+	if id == m.goneID {
+		return fmt.Errorf("update journal tx row %d: %w", id, database.ErrNotFound)
+	}
+	return m.p3OpRepo.UpdateJournalInTx(ctx, id, fn)
 }
 
 // checkDestBlocking tolerance legs: reverted rows skip, unparseable rows skip.

@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/spf13/afero"
@@ -423,8 +425,10 @@ func TestReplacementOwnershipCovW8_RetryPendingRemovalLegs(t *testing.T) {
 
 type w8NilRowRepo struct{ *p3OpRepo }
 
-func (r *w8NilRowRepo) FindByID(context.Context, uint) (*models.BatchFileOperation, error) {
-	return nil, nil
+// The owner-row-missing leg moved from FindByID to UpdateJournalInTx (review
+// 4960250562): a missing row surfaces as ErrNotFound before fn runs.
+func (r *w8NilRowRepo) UpdateJournalInTx(context.Context, uint, database.JournalUpdateFn) error {
+	return fmt.Errorf("owner row missing: %w", database.ErrNotFound)
 }
 
 // pathNormalizingChmodFs compensates for afero.MemMapFs.Chmod looking up

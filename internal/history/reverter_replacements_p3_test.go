@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sort"
 	"sync"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
@@ -86,6 +88,34 @@ func (m *p3OpRepo) Update(_ context.Context, op *models.BatchFileOperation) erro
 	defer m.mu.Unlock()
 	cp := *op
 	m.ops[op.ID] = &cp
+	return nil
+}
+
+// UpdateJournalInTx mirrors the production repo's transaction contract
+// in-memory: the mutex plays the BEGIN IMMEDIATE write lock, the merge runs
+// against the freshly read stored row (ID/GeneratedFiles/RevertStatus
+// hydrated, as the real lean view is), and a fn error rolls back untouched.
+func (m *p3OpRepo) UpdateJournalInTx(_ context.Context, id uint, fn database.JournalUpdateFn) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	stored, ok := m.ops[id]
+	if !ok {
+		return fmt.Errorf("update journal tx row %d: %w", id, database.ErrNotFound)
+	}
+	current := &models.BatchFileOperation{
+		ID:             stored.ID,
+		GeneratedFiles: stored.GeneratedFiles,
+		RevertStatus:   stored.RevertStatus,
+	}
+	next, persist, err := fn(current)
+	if err != nil {
+		return err
+	}
+	if persist {
+		cp := *stored
+		cp.GeneratedFiles = models.MarshalLedgerJSON(next)
+		m.ops[id] = &cp
+	}
 	return nil
 }
 

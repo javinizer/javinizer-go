@@ -340,6 +340,12 @@ func (f *failUpdateBFORepo) Update(ctx context.Context, op *models.BatchFileOper
 	}
 	return f.repo.Update(ctx, op)
 }
+func (f *failUpdateBFORepo) UpdateJournalInTx(ctx context.Context, id uint, fn database.JournalUpdateFn) error {
+	if f.err != nil {
+		return f.err
+	}
+	return f.repo.UpdateJournalInTx(ctx, id, fn)
+}
 func (f *failUpdateBFORepo) UpdateRevertStatus(ctx context.Context, id uint, s models.RevertStatusEnum) error {
 	return f.repo.UpdateRevertStatus(ctx, id, s)
 }
@@ -591,6 +597,9 @@ func (f *failFindBFORepo) FindByBatchJobIDAndRevertStatus(ctx context.Context, i
 }
 func (f *failFindBFORepo) Update(ctx context.Context, op *models.BatchFileOperation) error {
 	return f.repo.Update(ctx, op)
+}
+func (f *failFindBFORepo) UpdateJournalInTx(ctx context.Context, id uint, fn database.JournalUpdateFn) error {
+	return f.repo.UpdateJournalInTx(ctx, id, fn)
 }
 func (f *failFindBFORepo) UpdateRevertStatus(ctx context.Context, id uint, s models.RevertStatusEnum) error {
 	return f.repo.UpdateRevertStatus(ctx, id, s)

@@ -10,6 +10,7 @@ import (
 	"sort"
 	"sync/atomic"
 
+	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -306,42 +307,54 @@ func (r *Reverter) replacementEntryIsLive(ctx context.Context, op *models.BatchF
 // cleanup that follows sees the post-restore journal.
 func (r *Reverter) consumeReplacementEntry(ctx context.Context, op *models.BatchFileOperation, entry models.ReplacementEntry) error {
 	// R15-1: serialize with every other row mutator and consume from the
-	// FRESH row — never from a possibly-stale snapshot.
+	// FRESH row — never from a possibly-stale snapshot. Review 4960250562: the
+	// merge additionally runs inside a BEGIN IMMEDIATE transaction so an apply
+	// in ANOTHER process (which neither this process lock nor the distinct
+	// per-destination .dlbusy marker orders against) records or retracts its
+	// entries against the same committed ledger instead of a divergent Save.
 	release := fsutil.SharedJournalLocks().Acquire(fmt.Sprintf("%d", op.ID))
 	defer release()
-	fresh, frErr := r.batchFileOpRepo.FindByID(ctx, op.ID)
-	if frErr != nil || fresh == nil {
-		return fmt.Errorf("failed to re-read row for consumption on op %d: %v", op.ID, frErr)
-	}
-	gf, err := models.ParseGeneratedFiles(fresh.GeneratedFiles)
-	if err != nil {
-		return fmt.Errorf("failed to re-parse journal for consumption on op %d: %w", op.ID, err)
-	}
-	kept := gf.Replacements[:0]
-	removed := false
-	for _, e := range gf.Replacements {
-		if !removed && e.Destination == entry.Destination && e.Backup == entry.Backup && e.DestSeq == entry.DestSeq {
-			removed = true
-			continue
+	var finalBlob string
+	var fnErr error
+	txErr := r.batchFileOpRepo.UpdateJournalInTx(ctx, op.ID, func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
+		gf, err := models.ParseGeneratedFiles(current.GeneratedFiles)
+		if err != nil {
+			fnErr = fmt.Errorf("failed to re-parse journal for consumption on op %d: %w", op.ID, err)
+			return models.GeneratedFilesJSON{}, false, fnErr
 		}
-		kept = append(kept, e)
-	}
-	if !removed {
-		// Another consumer won the race after this caller's snapshot. Its
-		// restore leg already installed the bytes; do not issue a redundant row
-		// update or make the caller retry a vanished backup.
-		op.GeneratedFiles = fresh.GeneratedFiles
-		return nil
-	}
-	gf.Replacements = kept
-	fresh.GeneratedFiles = models.MarshalLedgerJSON(gf)
-	if err := r.batchFileOpRepo.Update(ctx, fresh); err != nil {
-		return fmt.Errorf("backup %s restored to %s but journal consumption failed for op %d: %w", entry.Backup, entry.Destination, op.ID, err)
+		kept := gf.Replacements[:0]
+		removed := false
+		for _, e := range gf.Replacements {
+			if !removed && e.Destination == entry.Destination && e.Backup == entry.Backup && e.DestSeq == entry.DestSeq {
+				removed = true
+				continue
+			}
+			kept = append(kept, e)
+		}
+		if !removed {
+			// Another consumer committed first. Its restore leg already installed
+			// the bytes; persist nothing and adopt its ledger as the fresh view.
+			finalBlob = current.GeneratedFiles
+			return gf, false, nil
+		}
+		gf.Replacements = kept
+		finalBlob = models.MarshalLedgerJSON(gf)
+		return gf, true, nil
+	})
+	switch {
+	case fnErr != nil:
+		return fnErr
+	case errors.Is(txErr, database.ErrNotFound):
+		// Row vanished after the restore leg re-read it: the restore is retried
+		// through the caller's re-arm path as before.
+		return fmt.Errorf("failed to re-read row for consumption on op %d: row not found", op.ID)
+	case txErr != nil:
+		return fmt.Errorf("backup %s restored to %s but journal consumption failed for op %d: %w", entry.Backup, entry.Destination, op.ID, txErr)
 	}
 	// Sync the caller's in-memory view — partial restores must be visible to
 	// this op's later passes or the consumed entry is retried against a
 	// vanished backup (count-N flake).
-	op.GeneratedFiles = fresh.GeneratedFiles
+	op.GeneratedFiles = finalBlob
 	return nil
 }
 
