@@ -11,10 +11,50 @@ import (
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
 	historypkg "github.com/javinizer/javinizer-go/internal/history"
+	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/spf13/afero"
 	"github.com/spf13/cobra"
 )
+
+// preRevertSweepTimeout bounds the CLI's pre-revert replacement sweep
+// (codex P2 review): without a cap, PreRunE's all-roots sweep ran under
+// context.Background(), so one hung network filesystem blocked the revert
+// forever. Package-level (not const) so tests can shrink it.
+var preRevertSweepTimeout = 30 * time.Second
+
+// Pre-revert sweep seams: production wires the real history-package sweeps;
+// tests substitute capture/blocking doubles to observe scoping and force the
+// deadline/fallback legs deterministically.
+var (
+	preRevertScopedSweep = historypkg.SweepRootsOnStartupWithContext
+	preRevertFullSweep   = historypkg.SweepOnStartupWithContext
+	preRevertFindOps     = func(ctx context.Context, repo database.BatchFileOperationRepositoryInterface, batchID string) ([]models.BatchFileOperation, error) {
+		return repo.FindByBatchJobID(ctx, batchID)
+	}
+)
+
+// runPreRevertReplacementSweep heals leftover crash-window replacement backups
+// before the revert reads destination state. The target batch's operations
+// are resolved FIRST and only their unique root set (media columns +
+// generated-files ledger — historypkg.OperationSweepRoots) is swept; an
+// op-resolution failure falls back to all journaled roots (the previous
+// behavior). The sweep context carries preRevertSweepTimeout; a deadline is
+// logged and swallowed — the revert proceeds either way.
+func runPreRevertReplacementSweep(ctx context.Context, repo database.BatchFileOperationRepositoryInterface, batchID string) {
+	sweepCtx, cancel := context.WithTimeout(ctx, preRevertSweepTimeout)
+	defer cancel()
+	ops, err := preRevertFindOps(sweepCtx, repo, batchID)
+	if err != nil {
+		logging.Warnf("pre-revert sweep: root resolution for batch %s failed (%v) — sweeping all journaled roots", batchID, err)
+		preRevertFullSweep(sweepCtx, afero.NewOsFs(), repo)
+	} else {
+		preRevertScopedSweep(sweepCtx, afero.NewOsFs(), repo, historypkg.OperationSweepRoots(ops))
+	}
+	if errors.Is(sweepCtx.Err(), context.DeadlineExceeded) {
+		logging.Warnf("pre-revert sweep for batch %s exceeded %s — continuing with revert anyway", batchID, preRevertSweepTimeout)
+	}
+}
 
 // NewRevertCommand creates the revert subcommand for history.
 func NewRevertCommand() *cobra.Command {
@@ -79,10 +119,12 @@ func runHistoryRevert(cmd *cobra.Command, args []string, configFile string) erro
 		return fmt.Errorf("job is not in organized status (current: %s). Only organized jobs can be reverted", job.Status)
 	}
 
-	// codex P3 (R18 CLI): sweep for any leftover replacement backups from an
-	// interrupted CLI apply before revert — matches the API startup sweep.
+	// codex P2 (R18 CLI): sweep for any leftover replacement backups from an
+	// interrupted CLI apply before revert — but BOUNDED: scoped to the target
+	// batch's roots and time-capped, so a hung network root can never block
+	// the revert forever (a deadline logs and the revert proceeds).
 	deps2 := deps.DB.Repositories()
-	historypkg.SweepOnStartup(afero.NewOsFs(), deps2.BatchFileOpRepo)
+	runPreRevertReplacementSweep(ctx, deps2.BatchFileOpRepo, batchID)
 
 	// Create Reverter
 	reverter := historypkg.NewReverter(afero.NewOsFs(), batchFileOpRepo)

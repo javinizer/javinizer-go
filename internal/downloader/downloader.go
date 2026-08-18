@@ -3,6 +3,7 @@ package downloader
 import (
 	"context"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -13,6 +14,22 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/template"
 )
+
+// restoreOpenReplacementSource opens a rollback-restore backup for reading
+// with each platform's strongest protection against a final-component
+// symlink swap between the Lstat gate and the open. The default passes the
+// platform's no-follow flag through afero.OsFs to os.OpenFile (see
+// restore_source_nofollow_unix.go / restore_source_nofollow_other.go); the
+// Windows build replaces this at init with a reparse-point handle open (see
+// restore_source_nofollow_windows.go).
+var restoreOpenReplacementSource = openRestoreSourceNoFollow
+
+// openRestoreSourceNoFollow is the POSIX/default rollback source open: OsFs
+// forwards restoreSourceNoFollow to os.OpenFile, while MemMapFs ignores the
+// unknown flag bit and relies on the caller's Lstat gate.
+func openRestoreSourceNoFollow(fsys afero.Fs, backup string) (afero.File, error) {
+	return fsys.OpenFile(backup, os.O_RDONLY|restoreSourceNoFollow, 0)
+}
 
 // Downloader handles media file downloads
 type Downloader struct {

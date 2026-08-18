@@ -248,12 +248,20 @@ func (s *ReplacementSweeper) index(ctx context.Context) (*replacementLedgerIndex
 // Sweep runs a full startup sweep: every directory that holds a journaled
 // destination is scanned for ownership-marker backups.
 func (s *ReplacementSweeper) Sweep(ctx context.Context) (int, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
 	idx, err := s.index(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("replacement sweep: row scan failed: %w", err)
 	}
 	healed := 0
 	for dir := range idx.dirs {
+		// Cancellation (e.g. the CLI revert's sweep deadline) wins over
+		// progress: a hung root must not chain-delay the caller.
+		if err := ctx.Err(); err != nil {
+			return healed, err
+		}
 		// R11-2: FLAT scans only — no recursion into media libraries. Crash
 		// windows are covered exactly by the orchestrator's per-organize leaf
 		// seed (R7-3), so startup cost stays O(ledgered dirs), independent of
@@ -267,6 +275,48 @@ func (s *ReplacementSweeper) Sweep(ctx context.Context) (int, error) {
 				continue
 			}
 			healed += s.sweepOne(ctx, idx, dir, e)
+		}
+	}
+	return healed, nil
+}
+
+// SweepDirs runs a SCOPED sweep (codex P2 CLI bound): only the named
+// directories are scanned for ownership-marker backups, while ownership
+// arbitration still consults the FULL journal index (a scoped scan is about
+// bounding filesystem work — a journaled backup found in scope is restored
+// against its owner's ledger wherever that owner lives). The CLI revert uses
+// this to heal exactly the roots the target batch can touch rather than every
+// journaled root, so a hung network share unrelated to the revert can never
+// block it. Duplicate and unreadable directories collapse harmlessly.
+func (s *ReplacementSweeper) SweepDirs(ctx context.Context, dirs []string) (int, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	idx, err := s.index(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("replacement sweep: row scan failed: %w", err)
+	}
+	healed := 0
+	seen := map[string]bool{}
+	for _, dir := range dirs {
+		if err := ctx.Err(); err != nil {
+			return healed, err
+		}
+		cleaned := filepath.ToSlash(filepath.Clean(dir))
+		if seen[cleaned] {
+			continue
+		}
+		seen[cleaned] = true
+		// As in Sweep: FLAT scans only, unreadable dirs are skipped.
+		entries, rdErr := afero.ReadDir(s.fs, filepath.FromSlash(cleaned))
+		if rdErr != nil {
+			continue
+		}
+		for _, e := range entries {
+			if e.IsDir() || !IsReplacementBackupName(e.Name()) {
+				continue
+			}
+			healed += s.sweepOne(ctx, idx, cleaned, e)
 		}
 	}
 	return healed, nil
@@ -309,6 +359,9 @@ func (s *ReplacementSweeper) SweepDestinations(ctx context.Context, destinations
 	}
 	healed := 0
 	for _, groupKey := range order {
+		if err := ctx.Err(); err != nil {
+			return healed, err
+		}
 		g := groups[groupKey]
 		entries, rdErr := afero.ReadDir(s.fs, filepath.FromSlash(g.enumDir))
 		if rdErr != nil {

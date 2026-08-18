@@ -256,21 +256,27 @@ func (r *BatchFileOperationRepository) CountRevertedByBatchJobIDs(ctx context.Co
 	return m, nil
 }
 
-// FindOperationsByDestination returns every operation whose generated-files
-// ledger journals a replacement for destination. SQL LIKE pre-filters
-// candidates; entries are matched exactly in-process so path substrings and
-// LIKE metacharacters can neither over- nor under-match.
-func (r *BatchFileOperationRepository) FindOperationsByDestination(ctx context.Context, destination string) ([]models.BatchFileOperation, error) {
-	// R5-1: destinations live inside JSON, whose encoder escapes `\` (and
-	// `"`/controls); matching the RAW path against the JSON column under-matches
-	// on Windows (`D:\a` is stored as `D:\\a`). Shape the pattern from the
-	// JSON encoding of the path first, then apply LIKE escaping on top.
+// destinationLikePattern builds the SQL LIKE prefilter pattern matching a
+// destination as it appears inside the persisted text columns (ESCAPE '\').
+// R5-1: destinations live inside JSON, whose encoder escapes `\` (and
+// `"`/controls); matching the RAW path against the JSON column under-matches
+// on Windows (`D:\a` is stored as `D:\\a`). Shape the pattern from the JSON
+// encoding of the path first, then apply LIKE escaping on top.
+func destinationLikePattern(destination string) string {
 	jsonEsc := destination
 	if enc, err := json.Marshal(destination); err == nil && len(enc) >= 2 {
 		jsonEsc = string(enc[1 : len(enc)-1])
 	}
 	escaped := strings.NewReplacer("\\", "\\\\", "%", "\\%", "_", "\\_").Replace(jsonEsc)
-	likePattern := "%" + escaped + "%"
+	return "%" + escaped + "%"
+}
+
+// FindOperationsByDestination returns every operation whose generated-files
+// ledger journals a replacement for destination. SQL LIKE pre-filters
+// candidates; entries are matched exactly in-process so path substrings and
+// LIKE metacharacters can neither over- nor under-match.
+func (r *BatchFileOperationRepository) FindOperationsByDestination(ctx context.Context, destination string) ([]models.BatchFileOperation, error) {
+	likePattern := destinationLikePattern(destination)
 	var candidates []models.BatchFileOperation
 	err := r.GetDB().WithContext(ctx).
 		Where("generated_files LIKE ? ESCAPE '\\'", likePattern).
@@ -281,29 +287,57 @@ func (r *BatchFileOperationRepository) FindOperationsByDestination(ctx context.C
 	// R6-4 + R12-1: match on the probe-aware destination key — backslash
 	// separators normalize only under the Windows seam and case folds only on
 	// an insensitive/tolerant root. The LIKE prefilter CAN'T see through a form
-	// change, so a form-mismatch miss falls back to scanning every ledger row
-	// before concluding absence. Audit: POSIX journal paths use `/` spellings,
-	// and the normalized scan preserves literal backslashes rather than relying
-	// on their translation; Windows legacy slash/backslash forms still match.
+	// change, so form mismatches fall back to a candidate scan that re-applies
+	// the same escaped prefilter to BOTH destination-bearing columns
+	// (generated_files and new_path) instead of hydrating every ledger row
+	// (P2 review: the unbounded FindOperationsWithLedger scan ran once per
+	// destination lookup — per RecordReplacement, per revert conflict check,
+	// and per orphan candidate — so large ledgers made every replacement
+	// O(rows)). Audit: POSIX journal paths use `/` spellings, and the
+	// normalized scan preserves literal backslashes rather than relying on
+	// their translation; Windows legacy slash/backslash forms still match.
 	norm := fsutil.DestKey
 	seam := fallbackSeam{}
 	return seam.finish(ctx, candidates, destination, norm, func(ctx2 context.Context) ([]models.BatchFileOperation, error) {
-		return r.FindOperationsWithLedger(ctx2)
+		return r.findDestinationCandidates(ctx2, destination)
 	})
 }
 
+// findDestinationCandidates is the bounded cross-form fallback for
+// FindOperationsByDestination: it applies the escaped destination prefilter
+// to generated_files AND new_path so only candidate rows are hydrated, then
+// leaves exact matching to the caller's in-process pass. SQLite LIKE folds
+// ASCII case, so differently-cased spellings of one destination still reach
+// the normalized comparison; the new_path clause keeps rows discoverable
+// through the organized media path recorded by the same organizer computation
+// when their journal carries an equivalent-but-differently-spelled entry.
+func (r *BatchFileOperationRepository) findDestinationCandidates(ctx context.Context, destination string) ([]models.BatchFileOperation, error) {
+	likePattern := destinationLikePattern(destination)
+	var rows []models.BatchFileOperation
+	err := r.GetDB().WithContext(ctx).
+		Where("generated_files LIKE ? ESCAPE '\\' OR new_path LIKE ? ESCAPE '\\'", likePattern, likePattern).
+		Order("id ASC").Find(&rows).Error
+	if err != nil {
+		return nil, wrapDBErr("find", "batch file operations by destination candidates", err)
+	}
+	return rows, nil
+}
+
 // fallbackSeam factors the form-mismatch fallback for direct testing: the
-// prefilter match runs first; a full-miss defers to the full ledger scan,
-// whose error MUST surface (R7-2) rather than masquerade as absence.
+// prefilter match runs first; the union defers to the (P2 review: bounded)
+// candidate scan, whose error MUST surface (R7-2) rather than masquerade as
+// absence.
 type fallbackSeam struct{}
 
 func (fallbackSeam) finish(ctx context.Context, candidates []models.BatchFileOperation, destination string, norm func(string) string, ledgerScan func(context.Context) ([]models.BatchFileOperation, error)) ([]models.BatchFileOperation, error) {
 	matched := matchOpsByDestination(candidates, destination, norm)
-	// R14-1 + R10-1: ALWAYS union the normalized full scan — the SQL
+	// R14-1 + R10-1: ALWAYS union the normalized candidate scan — the SQL
 	// prefilter keys on the caller's spelling, so a same-destination row
 	// journaled under a DIFFERENT-but-equivalent spelling can hide behind a
-	// partial prefilter hit and vanish from chain checks. Caller context
-	// (deadline) rides the scan; scan failures surface, never masquerade.
+	// partial prefilter hit and vanish from chain checks. The scan is
+	// prefiltered itself now (P2 review), so the union stays cheap. Caller
+	// context (deadline) rides the scan; scan failures surface, never
+	// masquerade.
 	fallback, ferr := ledgerScan(ctx)
 	if ferr != nil {
 		return nil, wrapDBErr("find", "batch file operations by destination fallback", ferr)

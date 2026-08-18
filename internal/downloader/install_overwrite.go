@@ -54,10 +54,13 @@ func copyBackupToDest(fsys afero.Fs, backup, dest string) error {
 		return refuseRestoreSource(backup, fmt.Sprintf("backup is not a regular file (mode %s)", sourceInfo.Mode()))
 	}
 
-	// OsFs passes O_NOFOLLOW through to os.OpenFile. MemMapFs has no symlink
-	// representation and safely ignores the platform flag; the Lstat gate
-	// above remains its available protection.
-	src, err := fsys.OpenFile(backup, os.O_RDONLY|restoreSourceNoFollow, 0)
+	// The open itself is platform-specific (see downloader.go's
+	// restoreOpenReplacementSource): POSIX passes O_NOFOLLOW through OsFs to
+	// os.OpenFile; Windows opens with FILE_FLAG_OPEN_REPARSE_POINT and refuses
+	// a reparse point on the returned handle. MemMapFs has no symlink
+	// representation and safely ignores the protection; the Lstat gate above
+	// remains its available protection.
+	src, err := restoreOpenReplacementSource(fsys, backup)
 	if err != nil {
 		// A no-follow open can report the race before a handle exists. Recheck
 		// with Lstat so a path that became a symlink is reported as the same
@@ -106,6 +109,11 @@ func copyBackupToDest(fsys afero.Fs, backup, dest string) error {
 		_ = fsys.Remove(staged)
 		return fmt.Errorf("stage rollback times: %w", err)
 	}
+	// Re-apply the backup's ownership before the swap: a privileged restore of
+	// another account's backup must not leave the restored bytes owned by the
+	// Javinizer account once the backup is deleted. Best-effort —
+	// unprivileged restores cannot chown and must still succeed.
+	fsutil.RestoreStagingOwnership(fsys, staged, openedInfo)
 	if err := fsutil.ReplaceFile(fsys, staged, dest); err != nil {
 		_ = fsys.Remove(staged)
 		return fmt.Errorf("swap rollback: %w", err)
@@ -163,19 +171,40 @@ func lstatBackupCandidate(fsys afero.Fs, candidate string) (os.FileInfo, error) 
 	return fsys.Stat(candidate)
 }
 
-// claimOverwriteBackupPath chooses a free destination-adjacent backup name.
-// The caller holds both the process-local destination lock and the durable
-// .dlbusy marker, so the Lstat-to-Rename window is serialized for all
-// participating writers of this destination.
+// claimOverwriteBackupPath chooses a free destination-adjacent backup name
+// and ATOMICALLY RESERVES it: after observing a free candidate the name is
+// claimed with O_CREATE|O_EXCL, closing the Lstat-to-Rename window in which
+// a foreign writer (one that does not honor the .dlbusy marker) could occupy
+// the observed-free name — POSIX rename would then silently overwrite its
+// bytes before the journal ever saw them (codex PR#215). An O_EXCL collision
+// on an observed-free candidate means a racer reserved it first and the
+// claim climbs to the next name. The returned placeholder is a 0-byte file;
+// the caller's dest→backup rename (and the Windows ReplaceFile swap) safely
+// replaces the reservation, so every participant either wins a unique name
+// or fails closed.
 func claimOverwriteBackupPath(fsys afero.Fs, destPath, opID string) (string, error) {
 	for attempt := 0; attempt < backupNameClaimTries; attempt++ {
 		candidate := overwriteBackupPath(destPath, opID)
 		if _, err := lstatBackupCandidate(fsys, candidate); err == nil {
 			continue
-		} else if os.IsNotExist(err) {
-			return candidate, nil
-		} else {
+		} else if !os.IsNotExist(err) {
 			return "", fmt.Errorf("inspect backup candidate %s: %w", candidate, err)
+		}
+		reservation, reserveErr := fsys.OpenFile(candidate, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		switch {
+		case reserveErr == nil:
+			if err := reservation.Close(); err != nil {
+				// A reservation whose close failed is in an unknown on-disk
+				// state — drop it rather than renaming over unverified bytes.
+				_ = fsys.Remove(candidate)
+				return "", fmt.Errorf("close backup reservation %s: %w", candidate, err)
+			}
+			return candidate, nil
+		case os.IsExist(reserveErr):
+			// A foreign claimant won the Lstat-to-OpenFile window; climb.
+			continue
+		default:
+			return "", fmt.Errorf("reserve backup candidate %s: %w", candidate, reserveErr)
 		}
 	}
 	return "", fmt.Errorf("backup names exhausted for %s after %d attempts", destPath, backupNameClaimTries)
@@ -185,14 +214,23 @@ func claimOverwriteBackupPath(fsys afero.Fs, destPath, opID string) (string, err
 // destPath under the per-destination lock with the replace-ledger discipline
 // (POSTER-WRITE-HARDENING P3):
 //
-//  1. Existence is classified INSIDE the lock (concurrent writers serialize;
-//     the second operation measures the just-installed bytes correctly).
-//  2. A create (nothing at destination) installs directly — no ledger arm.
-//  3. A replace requires the revert ledger armed (operation ID recorded);
+//  1. The durable .dlbusy marker is claimed BEFORE any existence
+//     classification and held through BOTH the create and replace paths:
+//     a foreign process may hold the marker while it has the destination
+//     renamed aside, so an observed-absent destination must never take the
+//     create path under a live owner (codex PR#215). The deferred release
+//     runs on every exit, including the busy-refusal and error returns.
+//  2. Existence is classified INSIDE the lock with Lstat semantics so a
+//     dangling symlink is refused instead of falling into the create path
+//     (os.Stat follows links and would report ENOENT, replacing the link
+//     object with no ledger entry). Concurrent writers serialize; the
+//     second operation measures the just-installed bytes correctly.
+//  3. A create (nothing at destination) installs directly — no ledger arm.
+//  4. A replace requires the revert ledger armed (operation ID recorded);
 //     without it the overwrite is refused: destination preserved, skip+warn.
-//  4. The pre-existing bytes are moved aside to a per-operation backup; the
-//     record is journaled BEFORE the replace; a record-or-replace failure
-//     restores the backup under the same lock.
+//  5. The pre-existing bytes are moved aside to an atomically reserved
+//     per-operation backup; the record is journaled BEFORE the replace; a
+//     record-or-replace failure restores the backup under the same lock.
 //
 // Returns (skipped, replaced, err): skipped reports a refused destructive
 // overwrite (destination unchanged, no error); replaced reports the final
@@ -207,43 +245,11 @@ func (d *Downloader) installOverwriting(ctx context.Context, stagedPath, destPat
 	}
 	defer release()
 
-	info, statErr := d.fs.Stat(destPath)
-	switch {
-	case statErr != nil && os.IsNotExist(statErr):
-		return false, false, fsutil.ReplaceFile(d.fs, stagedPath, destPath)
-	case statErr != nil:
-		return false, false, fmt.Errorf("failed to stat destination: %w", statErr)
-	}
-
-	// R20-1/R20-3 type-discipline: the ledger legs only model REGULAR files.
-	// A non-regular destination would be moved into a .dlbak backup that the
-	// restore path cannot safely consume; a symlinked destination whiffed by
-	// Stat-follows-link semantics would come back a regular file.
-	// All such objects are refused pre-journal (skip+warn — existing object untouched).
-	if info.IsDir() {
-		logging.Warnf("downloader: overwrite of %s refused — destination is a directory; keeping it intact", destPath)
-		return true, true, nil
-	}
-	if !info.Mode().IsRegular() {
-		logging.Warnf("downloader: overwrite of %s refused — destination is not a regular file (mode %s); keeping it intact", destPath, info.Mode())
-		return true, true, nil
-	}
-	if Ls, ok := d.fs.(afero.Lstater); ok {
-		if li, _, lerr := Ls.LstatIfPossible(destPath); lerr == nil && li.Mode()&os.ModeSymlink != 0 {
-			logging.Warnf("downloader: overwrite of %s refused — destination is a symlink; keeping the link intact", destPath)
-			return true, true, nil
-		}
-	}
-
-	if !ledger.armed() {
-		logging.Warnf("downloader: overwrite of %s refused — no revert-ledger operation recorded; keeping existing bytes", destPath)
-		return true, true, nil
-	}
-
-	// The marker is created before the destination is renamed aside. It is
-	// visible to a CLI/startup sweep in another process for the entire
-	// journal-arm/install-confirm window, and its PID makes dead owners
-	// reclaimable instead of retaining crash leftovers forever.
+	// codex PR#215: the busy marker is armed BEFORE the destination is
+	// classified. Marked-absence is not proof of absence — the owner may be
+	// mid-replacement — so the claim precedes both the create path and the
+	// replacement path. AcquireReplacementBusy self-cleans on error, so only
+	// a successful claim needs the deferred release below.
 	busyRelease, busyErr := fsutil.AcquireReplacementBusy(d.fs, destPath)
 	if errors.Is(busyErr, fsutil.ErrReplacementBusy) {
 		logging.Warnf("downloader: overwrite of %s refused — another process owns the replacement", destPath)
@@ -254,11 +260,55 @@ func (d *Downloader) installOverwriting(ctx context.Context, stagedPath, destPat
 	}
 	defer busyRelease()
 
+	// codex PR#215: classify existence with Lstat, not Stat. os.Stat follows
+	// symlinks, so a DANGLING symlink at the destination reports ENOENT and
+	// the create path would overwrite the link object itself — no ledger
+	// entry, no symlink refusal. Lstat sees the link object directly.
+	info, statErr := lstatBackupCandidate(d.fs, destPath)
+	switch {
+	case statErr != nil && os.IsNotExist(statErr):
+		return false, false, fsutil.ReplaceFile(d.fs, stagedPath, destPath)
+	case statErr != nil:
+		return false, false, fmt.Errorf("failed to stat destination: %w", statErr)
+	case info == nil:
+		return false, false, fmt.Errorf("failed to stat destination %s: filesystem returned no file information", destPath)
+	}
+
+	// R20-1/R20-3 type-discipline: the ledger legs only model REGULAR files.
+	// A non-regular destination would be moved into a .dlbak backup that the
+	// restore path cannot safely consume; a symlink (Lstat never follows) is
+	// refused with the link itself intact.
+	// All such objects are refused pre-journal (skip+warn — existing object untouched).
+	if info.Mode()&os.ModeSymlink != 0 {
+		logging.Warnf("downloader: overwrite of %s refused — destination is a symlink; keeping the link intact", destPath)
+		return true, true, nil
+	}
+	if info.IsDir() {
+		logging.Warnf("downloader: overwrite of %s refused — destination is a directory; keeping it intact", destPath)
+		return true, true, nil
+	}
+	if !info.Mode().IsRegular() {
+		logging.Warnf("downloader: overwrite of %s refused — destination is not a regular file (mode %s); keeping it intact", destPath, info.Mode())
+		return true, true, nil
+	}
+
+	if !ledger.armed() {
+		logging.Warnf("downloader: overwrite of %s refused — no revert-ledger operation recorded; keeping existing bytes", destPath)
+		return true, true, nil
+	}
+
+	// The marker armed above covers the entire claim-aside/journal/install/
+	// confirm window below: it is visible to a CLI/startup sweep in another
+	// process, and its PID makes dead owners reclaimable instead of retaining
+	// crash leftovers forever.
 	backupPath, claimErr := claimOverwriteBackupPath(d.fs, destPath, ledger.opID)
 	if claimErr != nil {
 		return false, true, fmt.Errorf("failed to claim backup path for %s: %w", destPath, claimErr)
 	}
 	if err := d.fs.Rename(destPath, backupPath); err != nil {
+		// The failed rename left our 0-byte reservation in place — release it
+		// so a retry never has to climb past (or worse, journal) a placeholder.
+		_ = d.fs.Remove(backupPath)
 		return false, true, fmt.Errorf("failed to set aside existing bytes for %s: %w", destPath, err)
 	}
 	if err := ledger.recorder.RecordReplacement(ctx, ledger.opID, destPath, backupPath); err != nil {
