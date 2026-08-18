@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -454,7 +455,9 @@ var restoreStagingOwnershipFn = fsutil.RestoreStagingOwnership
 // lstatRestoreSource describes a restore source without following its final
 // path component when the injected filesystem supports afero.Lstater. Afero's
 // MemMapFs has no symlink model; its regularity check still runs before
-// opening, while production OsFs delegates to os.Lstat.
+// opening, while production OsFs delegates to os.Lstat. The sweeper also uses
+// it to classify a DESTINATION without following: a dangling symlink is an
+// existing directory entry, never the restore-able absent state Stat reports.
 func lstatRestoreSource(fs afero.Fs, backup string) (info os.FileInfo, err error) {
 	if ls, ok := fs.(afero.Lstater); ok {
 		info, _, err := ls.LstatIfPossible(backup)
@@ -464,10 +467,37 @@ func lstatRestoreSource(fs afero.Fs, backup string) (info os.FileInfo, err error
 	return info, err
 }
 
+// restoreOSPath converts a possibly slash-normalized absolute path (journal
+// spellings, sweepSlash/DestKey-derived keys, filepath.ToSlash'd sweep
+// enumeration paths) into OS-native separator form BEFORE it reaches an OS
+// call. Windows legacy journals retain either separator spelling, and the
+// separator forms diverge downstream: afero's MemMapFs indexes filepath.Clean'd
+// names while its Chmod performs a RAW map lookup, so a slash-form path misses
+// the just-installed entry on the Windows runner ("chmod <path>: file does not
+// exist"), and fsutil.ReplaceFile's native MoveFileEx receives the path
+// verbatim. The leg follows the same fsutil.PathBackslashesAreSeparators seam
+// DestKey/foldKeyedLock use, instead of a build tag, so the Windows posture is
+// decidable in tests on any host; on POSIX the default posture is a no-op so
+// literal-backslash filenames stay byte-exact. The conversion leg is
+// filepath.FromSlash's Windows expansion spelled as strings.ReplaceAll —
+// FromSlash itself is a compile-time no-op on POSIX builds and could never
+// expose the Windows branch to a cross-host unit test.
+func restoreOSPath(p string) string {
+	if fsutil.PathBackslashesAreSeparators {
+		return strings.ReplaceAll(p, "/", "\\")
+	}
+	return p
+}
+
 // copyRestoreBytes restores the backup bytes onto dest WITHOUT consuming the
 // backup file: bytes are staged adjacent and swapped in with replace-aware
 // rename; the caller removes the backup before consuming its journal entry.
 func copyRestoreBytes(fs afero.Fs, backup, dest string) error {
+	// Journal spellings may carry the legacy `/` form on Windows: every OS call
+	// built on dest below (the .rstr staging name -> mode fix-up Chmod,
+	// Chtimes, and ReplaceFile's native MoveFileEx on the swap) sees the
+	// OS-native spelling. See restoreOSPath for the MemMapFs-raw-Chmod miss.
+	dest = restoreOSPath(dest)
 	// Lstat is deliberately before OpenFile: Stat/Open would follow a hostile
 	// backup symlink and copy its target into the media directory.
 	sourceInfo, err := lstatRestoreSource(fs, backup)

@@ -164,16 +164,25 @@ func rearmReplacementBackup(fs afero.Fs, dest, backup string, info os.FileInfo) 
 		return err
 	}
 	defer func() { _ = src.Close() }()
-	if err := copyRearmSourceBytes(fs, src, backup); err != nil {
+	// The backup spelling can arrive slash-normalized (journal legacy spellings,
+	// sweep enumeration paths) while OS metadata calls need the native form:
+	// afero MemMapFs indexes filepath.Clean'd names but its Chmod performs a RAW
+	// lookup, so the slash spelling missed the just-renamed entry with
+	// "chmod ...: file does not exist" on the Windows runner. The conversion is
+	// restoreOSPath's single seam; dest stays verbatim for the no-follow seam
+	// (its own calls normalize internally, and the w10 test pins the observed
+	// opened-path string). See restoreOSPath for the POSIX no-op posture.
+	osBackup := restoreOSPath(backup)
+	if err := copyRearmSourceBytes(fs, src, osBackup); err != nil {
 		return err
 	}
 	if info == nil {
 		return nil
 	}
-	if err := fs.Chmod(backup, info.Mode().Perm()); err != nil {
+	if err := fs.Chmod(osBackup, info.Mode().Perm()); err != nil {
 		return err
 	}
-	return fs.Chtimes(backup, info.ModTime(), info.ModTime())
+	return fs.Chtimes(osBackup, info.ModTime(), info.ModTime())
 }
 
 // ReplacementSweeper reaps replacement backups under conservative ownership.
@@ -466,8 +475,14 @@ func (s *ReplacementSweeper) sweepOne(ctx context.Context, idx *replacementLedge
 			}
 		}
 	}
-	statErr := func() error { _, err := s.fs.Stat(dest); return err }()
-	if errors.Is(statErr, afero.ErrFileNotFound) {
+	// codex P2: same Lstat-first classification as restoreAndConsume — an
+	// unjournaled marker-shaped file is the more dangerous case for the
+	// Stat-misclassification: Stat on a dangling symlink reports ENOENT, and
+	// copyRestoreBytes would then REPLACE THE LINK OBJECT, destroying a
+	// directory entry no journal rows describe. Lstat success (any mode) means
+	// the destination is present and the conservative retain leg applies.
+	_, lstatErr := lstatRestoreSource(s.fs, dest)
+	if errors.Is(lstatErr, afero.ErrFileNotFound) {
 		if rnErr := copyRestoreBytes(s.fs, backup, dest); rnErr != nil {
 			logging.Warnf("replacement sweep restore %s→%s: %v", backup, dest, rnErr)
 			return 0
@@ -478,11 +493,11 @@ func (s *ReplacementSweeper) sweepOne(ctx context.Context, idx *replacementLedge
 		warnRetainedUnjournaledBackup(backup)
 		return 1
 	}
-	if statErr != nil {
+	if lstatErr != nil {
 		// R8-1: indeterminate destination state (permission/IO) must NEVER
 		// read as "present" — the unjournaled backup may be the ONLY copy of
 		// the pre-replace bytes. Touch nothing; retry next sweep.
-		logging.Warnf("replacement sweep %s: destination indeterminate (%v) — kept", backup, statErr)
+		logging.Warnf("replacement sweep %s: destination indeterminate (%v) — kept", backup, lstatErr)
 		return 0
 	}
 	// Marker shape alone is not ownership proof. Retain this unjournaled file
@@ -502,13 +517,20 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 	// A prior restore can leave the destination present when backup cleanup
 	// failed. Only the explicit pending marker (or the same-process fallback)
 	// authorizes cleanup here; an ordinary armed/installed row remains retained.
-	if _, statErr := s.fs.Stat(dest); statErr == nil {
+	//
+	// codex P2: classify with Lstat, NOT Stat — a DANGLING SYMLINK at dest
+	// reads as ENOENT under Stat (the target is gone), so the restore below
+	// would then rename over the link object itself and destroy an unjournaled
+	// directory entry. Any Lstat-success object — symlink included — is PRESENT
+	// and follows the present-dest paths; only a genuine Lstat-ENOENT may flow
+	// into the absent-dest restore; other Lstat errors stay indeterminate (kept).
+	if _, lstatErr := lstatRestoreSource(s.fs, dest); lstatErr == nil {
 		if !s.hasPendingRemoval(backupSlash) && !journalEntryRestorePending(row, backupSlash) {
 			return false
 		}
 		return s.retryPendingRemoval(ctx, row.ID, backup, dest, backupSlash)
-	} else if !errors.Is(statErr, afero.ErrFileNotFound) {
-		logging.Warnf("replacement sweep %s: destination indeterminate (%v) — kept", backup, statErr)
+	} else if !errors.Is(lstatErr, afero.ErrFileNotFound) {
+		logging.Warnf("replacement sweep %s: destination indeterminate (%v) — kept", backup, lstatErr)
 		return false
 	}
 
