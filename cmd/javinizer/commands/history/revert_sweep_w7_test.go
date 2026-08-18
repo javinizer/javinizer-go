@@ -151,10 +151,18 @@ func TestRunPreRevertSweep_DeadlineExceededLogsAndProceeds(t *testing.T) {
 	runPreRevertReplacementSweep(context.Background(), nil, "job-hang")
 	elapsed := time.Since(start)
 
+	require.Less(t, elapsed, 25*time.Second, "the caller proceeds at the deadline instead of hanging on the sweep")
+	// Since wave-8 the caller stops waiting at the deadline and then cancels
+	// the sweep context; the stub records the teardown error from its own
+	// goroutine, so wait for that record rather than sampling synchronously.
+	require.Eventually(t, func() bool {
+		cap.mu.Lock()
+		defer cap.mu.Unlock()
+		return cap.sawCtxErr != nil
+	}, 2*time.Second, 5*time.Millisecond, "the sweep context is torn down after the deadline")
 	cap.mu.Lock()
 	defer cap.mu.Unlock()
-	require.ErrorIs(t, cap.sawCtxErr, context.DeadlineExceeded, "the sweep observes the deadline")
-	require.Less(t, elapsed, 25*time.Second, "the caller proceeds at the deadline instead of hanging on the sweep")
+	require.Error(t, cap.sawCtxErr, "the sweep observes the deadline teardown")
 }
 
 // TestRunHistoryRevert_PreRevertSweepHealsInScopeOnly drives the full command

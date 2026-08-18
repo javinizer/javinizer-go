@@ -303,19 +303,53 @@ func (r *BatchFileOperationRepository) FindOperationsByDestination(ctx context.C
 	})
 }
 
+// destinationLikePatterns returns the bounded LIKE-pattern set for the
+// fallback's prefilter: the caller's spelling plus, when the destination
+// contains a path separator, BOTH cross-spellings ('/'↔'\\'). Wave-8 codex
+// P2 follow-up: the wave-7 fallback keyed on the caller's literal spelling
+// only, so a Windows journal written with backslashes was invisible to a
+// caller supplying forward slashes (and vice versa) — the exact matcher
+// accepts either form under the Windows separator seam, but the SQL prefilter
+// never fetched the row. Separator rewriting happens on the RAW path and
+// destinationLikePattern re-applies JSON-shaping + LIKE-escaping AFTER each
+// rewrite — rewriting an escaped pattern instead would corrupt the escape
+// '\\' pairs. At most two extra patterns are generated; spellings that
+// rewrite to the caller's own bytes are dropped (separator-free destinations
+// yield exactly the wave-7 single pattern).
+func destinationLikePatterns(destination string) []string {
+	patterns := make([]string, 0, 3)
+	patterns = append(patterns, destinationLikePattern(destination))
+	if strings.ContainsAny(destination, `/\`) {
+		if v := strings.ReplaceAll(destination, "/", `\`); v != destination {
+			patterns = append(patterns, destinationLikePattern(v))
+		}
+		if v := strings.ReplaceAll(destination, `\`, "/"); v != destination {
+			patterns = append(patterns, destinationLikePattern(v))
+		}
+	}
+	return patterns
+}
+
 // findDestinationCandidates is the bounded cross-form fallback for
 // FindOperationsByDestination: it applies the escaped destination prefilter
-// to generated_files AND new_path so only candidate rows are hydrated, then
+// (plus its separator cross-spellings — see destinationLikePatterns) to
+// generated_files AND new_path so only candidate rows are hydrated, then
 // leaves exact matching to the caller's in-process pass. SQLite LIKE folds
 // ASCII case, so differently-cased spellings of one destination still reach
 // the normalized comparison; the new_path clause keeps rows discoverable
 // through the organized media path recorded by the same organizer computation
 // when their journal carries an equivalent-but-differently-spelled entry.
 func (r *BatchFileOperationRepository) findDestinationCandidates(ctx context.Context, destination string) ([]models.BatchFileOperation, error) {
-	likePattern := destinationLikePattern(destination)
+	patterns := destinationLikePatterns(destination)
+	conds := make([]string, 0, len(patterns))
+	args := make([]any, 0, len(patterns)*2)
+	for _, p := range patterns {
+		conds = append(conds, "(generated_files LIKE ? ESCAPE '\\' OR new_path LIKE ? ESCAPE '\\')")
+		args = append(args, p, p)
+	}
 	var rows []models.BatchFileOperation
 	err := r.GetDB().WithContext(ctx).
-		Where("generated_files LIKE ? ESCAPE '\\' OR new_path LIKE ? ESCAPE '\\'", likePattern, likePattern).
+		Where(strings.Join(conds, " OR "), args...).
 		Order("id ASC").Find(&rows).Error
 	if err != nil {
 		return nil, wrapDBErr("find", "batch file operations by destination candidates", err)

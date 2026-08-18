@@ -425,6 +425,13 @@ func (r *Reverter) checkDestBlocking(ctx context.Context, op *models.BatchFileOp
 // restoreCopyNonce uniquifies the staged copy path for a destination restore.
 var restoreCopyNonce atomic.Uint64
 
+// restoreStagingOwnershipFn forwards the history restore path to the wave-7
+// fsutil ownership helper behind a package seam (same discipline as the
+// downloader's rollback restore): POSIX tests record the requested uid/gid
+// hand-off without kernel privileges. The helper itself is NOT duplicated
+// here — this is only the observation point.
+var restoreStagingOwnershipFn = fsutil.RestoreStagingOwnership
+
 // lstatRestoreSource describes a restore source without following its final
 // path component when the injected filesystem supports afero.Lstater. Afero's
 // MemMapFs has no symlink model; its regularity check still runs before
@@ -508,6 +515,14 @@ func copyRestoreBytes(fs afero.Fs, backup, dest string) error {
 		_ = fs.Remove(staged)
 		return fmt.Errorf("stage restore times: %w", err)
 	}
+	// Wave-8 codex P2 follow-up: hand the staged inode back to the backup's
+	// owner BEFORE the swap, mirroring the downloader's rollback restore
+	// (install_overwrite.go). A privileged history restore (or startup sweep —
+	// both funnels share this staging path) of a backup owned by another
+	// account otherwise loses the original uid/gid the moment the backup is
+	// deleted after the swap. Best-effort semantics ride the helper: EPERM
+	// escalations are swallowed there and restore resilience is unchanged.
+	restoreStagingOwnershipFn(fs, staged, openedInfo)
 	if err := fsutil.ReplaceFile(fs, staged, dest); err != nil {
 		_ = fs.Remove(staged)
 		return fmt.Errorf("swap staged restore: %w", err)

@@ -196,16 +196,31 @@ func TestSweep_CancellationBetweenDirsStopsFullSweep(t *testing.T) {
 	base := afero.NewMemMapFs()
 	repo := newP3OpRepo()
 	_, destA, _ := seedCrashWindow(t, base, repo, "job-1", "SWC-A", "/sweep-a", p3HexA)
-	_, _, backupB := seedCrashWindow(t, base, repo, "job-1", "SWC-B", "/sweep-b", p3HexB)
+	_, destB, backupB := seedCrashWindow(t, base, repo, "job-1", "SWC-B", "/sweep-b", p3HexB)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	fs := &cancelOnFirstOpenFs{Fs: base, cancel: cancel}
-	_, err := NewReplacementSweeper(fs, repo).Sweep(ctx)
+	healed, err := NewReplacementSweeper(fs, repo).Sweep(ctx)
 	require.ErrorIs(t, err, context.Canceled, "the full sweep honors cancellation between directories")
-	require.Equal(t, "original-SWC-A", string(mustRead2(t, base, destA)), "healing completed before the deadline")
+	// Directory iteration over the index map is intentionally unordered, and
+	// the single-shot cancel fires during whichever directory heals FIRST:
+	// exactly one of the two dirs must be healed (the one in progress when
+	// the deadline landed) while the other remains completely untouched.
+	require.Equal(t, 1, healed, "the in-flight directory completes; the sweep stops before the next one")
+	_, destAErr := fs.Stat(destA)
+	_, destBErr := fs.Stat(destB)
+	aHealed := destAErr == nil
 	backupBExists, ferr := afero.Exists(base, backupB)
 	require.NoError(t, ferr)
-	require.True(t, backupBExists, "the not-yet-scanned directory is untouched")
+	if aHealed {
+		require.Equal(t, "original-SWC-A", string(mustRead2(t, base, destA)), "healing completed before the deadline landed")
+		require.True(t, backupBExists, "the not-yet-scanned directory is untouched")
+	} else {
+		require.True(t, errors.Is(destAErr, afero.ErrFileNotFound), "the not-yet-scanned directory is untouched")
+		require.NoError(t, destBErr, "healing completed before the deadline landed on B")
+		require.Equal(t, "original-SWC-B", string(mustRead2(t, base, destB)), "B's heal restored the original bytes")
+		require.False(t, backupBExists, "B's backup consumed by the completed heal")
+	}
 }
 
 func TestSweepDestinations_CancellationBetweenGroupsStopsSweep(t *testing.T) {
