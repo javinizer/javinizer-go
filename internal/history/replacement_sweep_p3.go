@@ -179,6 +179,13 @@ func rearmReplacementBackup(fs afero.Fs, dest, backup string, info os.FileInfo) 
 	if info == nil {
 		return nil
 	}
+	// Codex P2 (w14): the re-armed backup must carry the ORIGINAL ownership
+	// too — otherwise a privileged sweep/revert whose consumption update
+	// failed would leave a Javinizer-owned backup, and the next retry's
+	// copyRestoreBytes would derive uid/gid from it, permanently losing the
+	// original owner once the backup is consumed. Best-effort semantics ride
+	// the helper (EPERM swallowed; windows no-op), same as the restore path.
+	restoreStagingOwnershipFn(fs, osBackup, info)
 	if err := fs.Chmod(osBackup, info.Mode().Perm()); err != nil {
 		return err
 	}
