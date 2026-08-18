@@ -37,7 +37,7 @@ func TestReplacementBusyW14A_LifecycleAndReclamation(t *testing.T) {
 	}
 	writeW14ABusyToken(t, fs, dest, 999999999, deadMarkerTime)
 	release, err = AcquireReplacementBusy(fs, dest)
-	require.NoError(t, err, "dead-PID markers are reclaimable")
+	require.NoError(t, err, "old foreign markers are reclaimable")
 	release()
 
 	writeW14ABusyToken(t, fs, dest, os.Getpid(), time.Now().Add(-time.Hour))
@@ -45,7 +45,17 @@ func TestReplacementBusyW14A_LifecycleAndReclamation(t *testing.T) {
 	require.NoError(t, err, "same-PID markers from before this boot are stale")
 	release()
 
-	require.True(t, replacementProcessAlive(os.Getpid()))
+	if runtime.GOOS == "windows" {
+		// Windows ownership is timestamp-driven for foreign PIDs; a recent
+		// marker remains busy without probing the PID.
+		writeW14ABusyToken(t, fs, dest, 999999999, time.Now())
+		stale, err := replacementBusyStale(fs, ReplacementBusyPath(dest))
+		require.NoError(t, err)
+		require.False(t, stale, "a recent foreign marker is live on Windows")
+		require.NoError(t, fs.Remove(ReplacementBusyPath(dest)))
+	} else {
+		require.True(t, replacementProcessAlive(os.Getpid()))
+	}
 	require.False(t, replacementProcessAlive(0))
 	findProcess := replacementFindProcess
 	replacementFindProcess = func(int) (*os.Process, error) { return nil, errors.New("find process wedged") }
@@ -77,11 +87,16 @@ func TestReplacementBusyW14A_MalformedFreshAndStale(t *testing.T) {
 	release()
 
 	foreign := "/out/w14a-malformed/foreign.jpg"
-	writeW14ABusyToken(t, fs, foreign, 999999999, time.Now().Add(-time.Hour))
 	isWindows := replacementIsWindows
 	replacementIsWindows = true
+	t.Cleanup(func() { replacementIsWindows = isWindows })
+	writeW14ABusyToken(t, fs, foreign, 999999999, time.Now())
 	stale, err = replacementBusyStale(fs, ReplacementBusyPath(foreign))
-	replacementIsWindows = isWindows
+	require.NoError(t, err)
+	require.False(t, stale, "a recent foreign marker is live under Windows timestamp policy")
+	require.NoError(t, fs.Remove(ReplacementBusyPath(foreign)))
+	writeW14ABusyToken(t, fs, foreign, 999999999, time.Now().Add(-time.Hour))
+	stale, err = replacementBusyStale(fs, ReplacementBusyPath(foreign))
 	require.NoError(t, err)
 	require.True(t, stale)
 

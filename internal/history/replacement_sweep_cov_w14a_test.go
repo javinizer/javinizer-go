@@ -74,7 +74,7 @@ func TestReplacementSweepW14A_DeadBusyIsReclaimed(t *testing.T) {
 
 	healed, err := NewReplacementSweeper(fs, repo).Sweep(ctx)
 	require.NoError(t, err)
-	require.Equal(t, 1, healed, "a dead owner is stale and remains sweepable")
+	require.Equal(t, 1, healed, "an old foreign marker is stale and remains sweepable")
 	require.Equal(t, "old", string(mustRead2(t, fs, dest)))
 	_, err = fs.Stat(backup)
 	require.ErrorIs(t, err, os.ErrNotExist)
