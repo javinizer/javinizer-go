@@ -227,8 +227,8 @@ type covW2DReadErrorFs struct {
 	failPath string
 }
 
-func (f *covW2DReadErrorFs) Open(name string) (afero.File, error) {
-	file, err := f.Fs.Open(name)
+func (f *covW2DReadErrorFs) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
+	file, err := f.Fs.OpenFile(name, flag, perm)
 	if err != nil || name != f.failPath {
 		return file, err
 	}

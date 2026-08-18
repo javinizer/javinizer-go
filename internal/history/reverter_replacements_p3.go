@@ -10,8 +10,6 @@ import (
 	"sort"
 	"sync/atomic"
 
-	"github.com/javinizer/javinizer-go/internal/config"
-
 	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -23,6 +21,29 @@ import (
 // operation row (models.ReplacementEntry) BEFORE the new bytes land; reverting
 // an operation restores the set-aside backups to their destinations with
 // replace-aware rename semantics.
+
+// ErrRestoreSourceRefused identifies a restore refusal caused by an unsafe
+// backup object. Callers can classify this through errors.Is without losing
+// the path-specific reason wrapped around it.
+var ErrRestoreSourceRefused = errors.New("restore source refused")
+
+// RestoreSourceRefusedError is returned when a journaled backup is not a
+// regular, non-symlink file that can safely be used as a restore source.
+type RestoreSourceRefusedError struct {
+	Backup string
+	Reason string
+}
+
+func (e *RestoreSourceRefusedError) Error() string {
+	return fmt.Sprintf("restore source %s refused: %s", e.Backup, e.Reason)
+}
+
+func (e *RestoreSourceRefusedError) Unwrap() error { return ErrRestoreSourceRefused }
+
+func refuseRestoreSource(backup, reason string) error {
+	logging.Warnf("replacement restore refused for backup %s: %s; backup and journal retained", backup, reason)
+	return &RestoreSourceRefusedError{Backup: backup, Reason: reason}
+}
 
 // NewerAppliedDestError rejects an operation revert whose destinations would
 // climb above a newer journalized replacement owned by an operation that is
@@ -180,7 +201,7 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 			for _, e := range entries {
 				// Capture the original backup metadata before removal so a failed
 				// journal consumption can re-arm the same permission bits and mtime.
-				backupInfo, statErr := r.fs.Stat(e.Backup)
+				backupInfo, _, statErr := lstatRestoreSource(r.fs, e.Backup)
 				if statErr != nil {
 					return fmt.Errorf("journaled backup %s for destination %s is unreadable: %w", e.Backup, dest, statErr)
 				}
@@ -316,24 +337,68 @@ func (r *Reverter) checkDestBlocking(ctx context.Context, op *models.BatchFileOp
 // restoreCopyNonce uniquifies the staged copy path for a destination restore.
 var restoreCopyNonce atomic.Uint64
 
+// lstatRestoreSource describes a restore source without following its final
+// path component when the injected filesystem supports afero.Lstater. Afero's
+// MemMapFs reports usedLstat=false because it has no symlink model; its
+// regularity check still runs before opening, while production OsFs delegates
+// to os.Lstat.
+func lstatRestoreSource(fs afero.Fs, backup string) (info os.FileInfo, usedLstat bool, err error) {
+	if ls, ok := fs.(afero.Lstater); ok {
+		return ls.LstatIfPossible(backup)
+	}
+	info, err = fs.Stat(backup)
+	return info, false, err
+}
+
 // copyRestoreBytes restores the backup bytes onto dest WITHOUT consuming the
 // backup file: bytes are staged adjacent and swapped in with replace-aware
 // rename; the caller removes the backup before consuming its journal entry.
 func copyRestoreBytes(fs afero.Fs, backup, dest string) error {
-	src, err := fs.Open(backup)
+	// Lstat is deliberately before OpenFile: Stat/Open would follow a hostile
+	// backup symlink and copy its target into the media directory.
+	sourceInfo, _, err := lstatRestoreSource(fs, backup)
+	if err != nil {
+		return fmt.Errorf("read backup: %w", err)
+	}
+	if sourceInfo == nil {
+		return refuseRestoreSource(backup, "filesystem returned no file information")
+	}
+	if sourceInfo.Mode()&os.ModeSymlink != 0 {
+		return refuseRestoreSource(backup, "backup is a symlink")
+	}
+	if !sourceInfo.Mode().IsRegular() {
+		return refuseRestoreSource(backup, fmt.Sprintf("backup is not a regular file (mode %s)", sourceInfo.Mode()))
+	}
+
+	// OsFs passes this flag through to os.OpenFile. MemMapFs ignores unknown
+	// read flags and has no symlink representation; the Lstat+regularity gate
+	// above is therefore its available protection, with the documented residual
+	// Lstat/OpenFile TOCTOU for non-OsFs implementations.
+	src, err := fs.OpenFile(backup, os.O_RDONLY|restoreSourceNoFollow, 0)
 	if err != nil {
 		return fmt.Errorf("read backup: %w", err)
 	}
 	defer func() { _ = src.Close() }()
+
+	// File.Stat is fstat for afero OsFs. Verify the object actually opened is
+	// still regular, and compare identity when the OsFs Stat_t is available.
+	openedInfo, err := src.Stat()
+	if err != nil {
+		return fmt.Errorf("stat opened backup: %w", err)
+	}
+	if openedInfo == nil || openedInfo.Mode()&os.ModeSymlink != 0 || !openedInfo.Mode().IsRegular() {
+		return refuseRestoreSource(backup, "opened object is not a regular file")
+	}
+	if sourceDev, sourceIno, sourceOK := restoreSourceIdentity(sourceInfo); sourceOK {
+		if openedDev, openedIno, openedOK := restoreSourceIdentity(openedInfo); openedOK && (sourceDev != openedDev || sourceIno != openedIno) {
+			return refuseRestoreSource(backup, "opened object differs from the Lstat object")
+		}
+	}
+
 	stagedOrdinal := restoreCopyNonce.Add(1)
 	// codex P3 R18h: stage with the backup's OWN permission bits so a revert
 	// never widens restrictive media (0600 trailer) into world-readable.
-	mode := os.FileMode(config.FilePerm)
-	var backupInfo os.FileInfo
-	if info, serr := fs.Stat(backup); serr == nil {
-		backupInfo = info
-		mode = info.Mode().Perm()
-	}
+	mode := openedInfo.Mode().Perm()
 	staged, dstFile, err := fsutil.CreateExclusiveStagingFile(fs, dest, ".rstr", stagedOrdinal, mode)
 	if err != nil {
 		return fmt.Errorf("stage restore open: %w", err)
@@ -351,11 +416,9 @@ func copyRestoreBytes(fs afero.Fs, backup, dest string) error {
 		_ = fs.Remove(staged)
 		return fmt.Errorf("stage restore close: %w", err)
 	}
-	if backupInfo != nil {
-		if err := fs.Chtimes(staged, backupInfo.ModTime(), backupInfo.ModTime()); err != nil {
-			_ = fs.Remove(staged)
-			return fmt.Errorf("stage restore times: %w", err)
-		}
+	if err := fs.Chtimes(staged, openedInfo.ModTime(), openedInfo.ModTime()); err != nil {
+		_ = fs.Remove(staged)
+		return fmt.Errorf("stage restore times: %w", err)
 	}
 	if err := fsutil.ReplaceFile(fs, staged, dest); err != nil {
 		_ = fs.Remove(staged)

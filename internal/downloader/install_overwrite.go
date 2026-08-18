@@ -17,13 +17,17 @@ import (
 	"github.com/javinizer/javinizer-go/internal/logging"
 )
 
-const backupSuffixForDest = ".dlbak"
+const (
+	backupSuffixForDest  = ".dlbak"
+	backupNameClaimTries = 64
+)
 
-// backupOrdinal gives every backup leg a never-repeating tail. opID alone
+// backupOrdinal gives every backup attempt a process-local tail. opID alone
 // cannot disambiguate: ONE operation may overwrite the same destination
 // twice (e.g. poster + cropped re-write), and without the ordinal the second
 // rename would clobber the first backup while both journal entries point at
 // it — revert could never recover the original bytes (codex P3 round 1).
+// claimOverwriteBackupPath advances past occupied tails across restarts.
 var backupOrdinal atomic.Uint64
 var restoreCopyOrdinal atomic.Uint64
 
@@ -102,6 +106,35 @@ func sha1hex8(s string) string {
 	return hex.EncodeToString(sum[:8])
 }
 
+// lstatBackupCandidate treats every existing directory entry — including a
+// symlink, directory, or older backup — as occupied. OsFs uses Lstat, while
+// MemMapFs has no symlink model and safely falls back to Stat.
+func lstatBackupCandidate(fsys afero.Fs, candidate string) (os.FileInfo, error) {
+	if ls, ok := fsys.(afero.Lstater); ok {
+		info, _, err := ls.LstatIfPossible(candidate)
+		return info, err
+	}
+	return fsys.Stat(candidate)
+}
+
+// claimOverwriteBackupPath chooses a free destination-adjacent backup name.
+// The caller holds both the process-local destination lock and the durable
+// .dlbusy marker, so the Lstat-to-Rename window is serialized for all
+// participating writers of this destination.
+func claimOverwriteBackupPath(fsys afero.Fs, destPath, opID string) (string, error) {
+	for attempt := 0; attempt < backupNameClaimTries; attempt++ {
+		candidate := overwriteBackupPath(destPath, opID)
+		if _, err := lstatBackupCandidate(fsys, candidate); err == nil {
+			continue
+		} else if os.IsNotExist(err) {
+			return candidate, nil
+		} else {
+			return "", fmt.Errorf("inspect backup candidate %s: %w", candidate, err)
+		}
+	}
+	return "", fmt.Errorf("backup names exhausted for %s after %d attempts", destPath, backupNameClaimTries)
+}
+
 // installOverwriting installs staged (already-downloaded) bytes onto
 // destPath under the per-destination lock with the replace-ledger discipline
 // (POSTER-WRITE-HARDENING P3):
@@ -171,7 +204,10 @@ func (d *Downloader) installOverwriting(ctx context.Context, stagedPath, destPat
 	}
 	defer busyRelease()
 
-	backupPath := overwriteBackupPath(destPath, ledger.opID)
+	backupPath, claimErr := claimOverwriteBackupPath(d.fs, destPath, ledger.opID)
+	if claimErr != nil {
+		return false, true, fmt.Errorf("failed to claim backup path for %s: %w", destPath, claimErr)
+	}
 	if err := d.fs.Rename(destPath, backupPath); err != nil {
 		return false, true, fmt.Errorf("failed to set aside existing bytes for %s: %w", destPath, err)
 	}

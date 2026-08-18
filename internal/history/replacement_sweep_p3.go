@@ -473,9 +473,9 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 	// Removal is the ownership boundary. Keep the row armed when it fails and
 	// persist a distinct marker so a later sweep can clean a present destination
 	// without mistaking an ordinary armed apply for a completed restore.
-	// Capture the backup metadata before removal so a failed consume can
-	// re-arm the original permissions and timestamps.
-	backupInfo, _ := s.fs.Stat(backup)
+	// Capture the backup metadata without following a swapped-in symlink so a
+	// failed consume can re-arm only the original object metadata.
+	backupInfo, _, _ := lstatRestoreSource(s.fs, backup)
 	if rmErr := removeReplacementBackup(s.fs, backup, "replacement sweep"); rmErr != nil {
 		s.rememberPendingRemoval(backupSlash)
 		if markReplacementRestorePending(&gf, backupSlash) {
@@ -555,9 +555,9 @@ func (s *ReplacementSweeper) retryPendingRemoval(ctx context.Context, rowID uint
 	if !gf.Replacements[target].RestorePending && !s.hasPendingRemoval(backupSlash) {
 		return false
 	}
-	// Capture metadata before removing the backup; consumption failure below
-	// must recreate the original permission bits as well as its timestamps.
-	backupInfo, _ := s.fs.Stat(backup)
+	// Capture metadata without following a swapped-in symlink; consumption
+	// failure below must recreate the original permission bits and timestamps.
+	backupInfo, _, _ := lstatRestoreSource(s.fs, backup)
 	if rmErr := removeReplacementBackup(s.fs, backup, "replacement sweep"); rmErr != nil {
 		s.rememberPendingRemoval(backupSlash)
 		return false
