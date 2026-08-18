@@ -406,10 +406,21 @@ func (s *ReplacementSweeper) SweepDestinations(ctx context.Context, destinations
 			}
 			// Targeted sweep only arbitrates backups of the named destinations;
 			// test the candidate against EVERY destination in the group.
-			candidate := sweepSlash(filepath.Join(g.enumDir, e.Name()))
+			// Wave-17 (codex P2): derive the candidate's destination by
+			// STRIPPING the validated `.dlbak.<16hex>` ownership marker (the
+			// same derivation sweepOne/journal spelling comparisons use) and
+			// require EXACT equality with a requested destination. The
+			// pre-wave-17 prefix test admitted sibling-name decoys — e.g.
+			// 'cover.jpg.old.dlbak.<hex>' prefixed a targeted 'cover.jpg', so
+			// the sweep would arbitrate (and possibly restore/delete) a backup
+			// belonging to a destination the caller never named. Both sides are
+			// compared under the probe-aware sweepSlash key, so separator and
+			// case normalization stay exactly DestKey-consistent.
+			candidateDest := sweepSlash(filepath.Join(g.enumDir,
+				strings.TrimSuffix(e.Name(), replacementBackupName.FindString(e.Name()))))
 			matched := false
 			for _, destKey := range g.destKeys {
-				if strings.HasPrefix(candidate, destKey) {
+				if candidateDest == destKey {
 					matched = true
 					break
 				}

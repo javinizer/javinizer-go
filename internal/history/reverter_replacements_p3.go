@@ -521,6 +521,12 @@ func copyRestoreBytes(fs afero.Fs, backup, dest string) error {
 // staged restore" wrap; every sweep caller lands errors on its kept/warn leg
 // (backup retained, journal entry unconsumed), exactly the conservative
 // posture the window demands.
+//
+// Wave-17 (codex P2): a no-replace-UNSUPPORTED volume (typed
+// fsutil.ErrPublishNoReplaceUnsupported — FAT/exFAT, where neither
+// renameat2 nor hard links exist) maps onto the SAME kept/warn leg: the
+// restore refuses rather than falling back to replacing semantics, the
+// backup stays retained, and the journal entry stays unconsumed.
 func copyRestoreBytesNoReplace(fs afero.Fs, backup, dest string) error {
 	return copyRestoreBytesPublish(fs, backup, dest, fsutil.PublishNoReplace)
 }
@@ -676,7 +682,10 @@ func openRearmSource(fs afero.Fs, dest string) (afero.File, error) {
 // re-open, which would drop the no-follow handle openRearmSource established.
 // Wave-15: the publish is fsutil.PublishNoReplace, never a bare rename — an
 // occupied backup name yields fsutil.ErrPublishCollision (staged copy dropped,
-// foreign bytes intact) instead of a silent clobber.
+// foreign bytes intact) instead of a silent clobber. Wave-17: a volume that
+// cannot express no-replace at all yields fsutil.ErrPublishNoReplaceUnsupported
+// through the same publish error — the caller's re-arm failure stays the
+// kept+warn posture (the conservative leg), never a replacing rename.
 func copyRearmSourceBytes(fs afero.Fs, src io.Reader, backup string) error {
 	if err := fs.MkdirAll(filepath.Dir(backup), config.DirPerm); err != nil {
 		return fmt.Errorf("re-arm create backup directory: %w", err)

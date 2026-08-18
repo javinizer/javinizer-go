@@ -201,6 +201,32 @@ func replacementBusyReturnTakeover(fs afero.Fs, path, takeoverPath string, conte
 	placeholder, err := fs.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err == nil {
 		if closeErr := placeholder.Close(); closeErr != nil {
+			// codex PR#215 w17: returning here with the placeholder still at
+			// path strands a zero-byte (tokenless) marker — and malformed
+			// markers are deliberately NEVER reclaimed, so the destination
+			// would busy-block forever. Recover before surfacing the close
+			// error, in the order that can never strand BOTH the displaced
+			// bytes and an unreclaimable marker:
+			//
+			//  1. RESTORE the takeover bytes back onto path first (the wave-12
+			//     ReplaceFile leg renames over the placeholder we still own).
+			//     Doing this FIRST keeps the placeholder's serialization
+			//     property through the restore: a remove-first order would open
+			//     a window in which a foreign claimant creates its own live
+			//     marker and then has it clobbered by our trailing restore.
+			//  2. Only if the restore itself fails, REMOVE the placeholder: an
+			//     ABSENT marker self-heals (the next claimant re-creates it),
+			//     while an unreclaimable 0-byte one does not. The takeover
+			//     bytes then stay in their uniquely-named sibling — inspectable
+			//     garbage, never a busy-block.
+			//
+			// The original close error still surfaces either way.
+			if restoreErr := ReplaceFile(fs, takeoverPath, path); restoreErr != nil {
+				logging.Warnf("replacement busy takeover restore after placeholder close failure failed for %s: %v; removing the placeholder (claimed bytes retained at %s)", path, restoreErr, takeoverPath)
+				if removeErr := fs.Remove(path); removeErr != nil && !os.IsNotExist(removeErr) {
+					logging.Warnf("replacement busy restore placeholder %s could not be removed after close failure: %v; the destination may busy-block until the marker is removed manually", path, removeErr)
+				}
+			}
 			return fmt.Errorf("close replacement busy restore placeholder: %w", closeErr)
 		}
 		// The rename target is the 0-byte placeholder just claimed above, so

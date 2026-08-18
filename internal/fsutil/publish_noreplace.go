@@ -16,6 +16,20 @@ import (
 // instead of retrying the publish against the same name.
 var ErrPublishCollision = errors.New("no-replace publish destination already occupied")
 
+// ErrPublishNoReplaceUnsupported means the destination filesystem cannot
+// express an ATOMIC no-replace publish at all — the kernel no-replace
+// primitive (renameat2 RENAME_NOREPLACE) is unimplemented/rejected AND
+// hard links are unsupported (FAT/exFAT-class media volumes answer link(2)
+// with EPERM/ENOSYS/EOPNOTSUPP/ENOTSUP). The pre-wave-17 chain degraded to
+// classify-then-rename there, which is NOT atomic: a foreign file created at
+// the destination inside the window was silently overwritten, weakening every
+// caller's collision guarantee to nothing on exactly the volumes that need it
+// (POSTER-WRITE-HARDENING wave-17, codex P2). Callers MUST treat
+// errors.Is(err, ErrPublishNoReplaceUnsupported) as a REFUSAL — the same
+// conservative fail/kept-with-warn leg they apply to ErrPublishCollision —
+// never as license to fall back to replacing semantics.
+var ErrPublishNoReplaceUnsupported = errors.New("filesystem cannot express an atomic no-replace publish")
+
 // publishCollision wraps the destination name in the collision class.
 func publishCollision(dst string) error {
 	return fmt.Errorf("%w: %s", ErrPublishCollision, dst)

@@ -155,6 +155,12 @@ func copyBackupToDestPublish(fsys afero.Fs, backup, dest string, publish func(af
 // the refusal reason verbatim. The reverse copy's publish is itself
 // no-replace (copyBackupToDestNoReplace), closing the window between this
 // classification and the staged publish for a name claimed inside it.
+//
+// Wave-17 (codex P2): a no-replace-UNSUPPORTED volume (typed
+// fsutil.ErrPublishNoReplaceUnsupported) takes the identical conservative
+// leg — the publish error propagates to the caller's kept+warn handling, the
+// journal entry stays armed/pending, and replacing semantics are never used
+// to force the re-arm through.
 func rearmReplacementBackup(fsys afero.Fs, dest, backup string) error {
 	if _, err := fsys.Stat(backup); err == nil {
 		logging.Warnf("downloader: re-arm of rolled-back backup %s refused — backup name occupied by a foreign object; journal entry remains armed/pending, foreign bytes kept", backup)
@@ -163,6 +169,48 @@ func rearmReplacementBackup(fsys afero.Fs, dest, backup string) error {
 		return fmt.Errorf("stat backup for re-arm: %w", err)
 	}
 	return copyBackupToDestNoReplace(fsys, dest, backup)
+}
+
+// restoreAsideBackup rolls a failed install back to its set-aside backup
+// WITHOUT ever renaming over a foreign writer (wave-17, codex P2): the
+// window between moving the destination aside and this rollback is wide (the
+// busy marker deters Javinizer participants, not foreign processes), and the
+// pre-wave-17 bare os.Rename silently REPLACED a foreign file created at
+// destPath inside the window — no backup, no journal entry (POSIX rename
+// overwrites in place). The restore therefore publishes NO-REPLACE:
+//   - success CONSUMES the backup (restored=true) and callers keep their
+//     prior bookkeeping (journal release / re-arm);
+//   - an occupied destination (typed fsutil.ErrPublishCollision) or a volume
+//     that cannot express no-replace (typed
+//     fsutil.ErrPublishNoReplaceUnsupported) REFUSES the restore: the
+//     foreign file keeps destPath byte-intact, the backup is RETAINED in
+//     place at backupPath as the still-armed backup — the original bytes stay
+//     recoverable through the existing sweep/revert flow (journaled entry) or
+//     the orphan sweep's conservative retention (record-failure leg) — and
+//     the refusal surfaces as a warn while the CALLER's primary error keeps
+//     surfacing unchanged;
+//   - any other publish failure is a genuine restore failure (restored=false,
+//     err set — bytes remain at backupPath).
+func restoreAsideBackup(fsys afero.Fs, destPath, backupPath string) (bool, error) {
+	switch err := fsutil.PublishNoReplace(fsys, backupPath, destPath); {
+	case err == nil:
+		return true, nil
+	case rollbackRestoreRefused(err):
+		logging.Warnf("downloader: rollback restore of %s refused — %v; backup %s retained in place (foreign/unsupported destination never clobbered, original bytes stay recoverable)", destPath, err, backupPath)
+		return false, nil
+	default:
+		return false, err
+	}
+}
+
+// rollbackRestoreRefused reports whether a failed no-replace rollback restore
+// is one of the REFUSAL classes (foreign-occupied destination,
+// no-replace-unsupported volume) whose conservative posture retains the
+// backup and warns rather than erroring: in both classes nothing was
+// attempted that could have touched the destination's bytes.
+func rollbackRestoreRefused(err error) bool {
+	return errors.Is(err, fsutil.ErrPublishCollision) ||
+		errors.Is(err, fsutil.ErrPublishNoReplaceUnsupported)
 }
 
 // removeRollbackBackup follows the established ownership-cleanup rule: a
@@ -226,8 +274,10 @@ func lstatBackupCandidate(fsys afero.Fs, candidate string) (os.FileInfo, error) 
 // tests; both legs are behaviorally identical on a POSIX host because
 // POSIX ReplaceFile is itself a rename. The set-aside is the only leg that
 // renames into a reserved (pre-existing placeholder) target; the rollback
-// renames below restore onto a path the set-aside just vacated and keep
-// plain rename (Windows fails closed instead of clobbering a foreign dest).
+// restores below publish onto a path the set-aside just vacated with
+// NO-REPLACE semantics (restoreAsideBackup, wave-17), so a foreign dest
+// claimed mid-window is refused and kept instead of clobbered (Windows's
+// MoveFileExW-without-replace refusal maps into the same retained class).
 func moveIntoReservedBackup(fsys afero.Fs, src, dst string) error {
 	if fsutil.PathBackslashesAreSeparators {
 		return fsutil.ReplaceFile(fsys, src, dst)
@@ -328,6 +378,14 @@ func (d *Downloader) installOverwriting(ctx context.Context, stagedPath, destPat
 	// bytes are set aside + journaled exactly like any other pre-existing
 	// destination. The bounded loop also tolerates a racer whose entry is
 	// created and deleted again across repeated publishes.
+	//
+	// Wave-17 (codex P2): a volume that cannot express an atomic no-replace
+	// publish at all (renameat2 AND hard links both unsupported — FAT/exFAT)
+	// answers with the typed fsutil.ErrPublishNoReplaceUnsupported, which is
+	// a REFUSAL, not a reclassification: the install fails cleanly through
+	// the plain publish-error leg below (destination untouched, staged file
+	// retained, nothing journaled) — replacing semantics are never used to
+	// paper over the missing primitive.
 	info, statErr := lstatBackupCandidate(d.fs, destPath)
 	for createAttempts := 0; statErr != nil && os.IsNotExist(statErr); createAttempts++ {
 		if createAttempts >= createPublishMaxAttempts {
@@ -385,14 +443,31 @@ func (d *Downloader) installOverwriting(ctx context.Context, stagedPath, destPat
 		return false, true, fmt.Errorf("failed to set aside existing bytes for %s: %w", destPath, err)
 	}
 	if err := ledger.recorder.RecordReplacement(ctx, ledger.opID, destPath, backupPath); err != nil {
-		if rErr := d.fs.Rename(backupPath, destPath); rErr != nil {
+		restored, rErr := restoreAsideBackup(d.fs, destPath, backupPath)
+		if rErr != nil {
 			return false, true, fmt.Errorf("revert-ledger record failed: %w (AND backup restore failed: %v — bytes remain at %s)", err, rErr, backupPath)
+		}
+		if !restored {
+			// wave-17: the rollback was REFUSED (a foreign file claimed the
+			// vacated destination, or the volume cannot express no-replace).
+			// The foreign file is never replaced or removed; the retained
+			// backup is UNJOURNALED here (the record failed) and stays
+			// recoverable through the orphan sweep's conservative retention.
+			return false, true, fmt.Errorf("revert-ledger record failed for %s: %w (rollback restore refused — destination occupied or no-replace unsupported; backup retained at %s with no journal entry)", destPath, err, backupPath)
 		}
 		return false, true, fmt.Errorf("revert-ledger record failed for %s: %w", destPath, err)
 	}
 	if err := fsutil.ReplaceFile(d.fs, stagedPath, destPath); err != nil {
-		if rErr := d.fs.Rename(backupPath, destPath); rErr != nil {
+		restored, rErr := restoreAsideBackup(d.fs, destPath, backupPath)
+		if rErr != nil {
 			return false, true, fmt.Errorf("failed to replace %s: %w (AND backup restore failed: %v — bytes remain at %s)", destPath, err, rErr, backupPath)
+		}
+		if !restored {
+			// wave-17: rollback REFUSED — the foreign destination keeps its
+			// bytes and the journal entry stays armed against the retained
+			// backup (still at backupPath): a later sweep/revert recovers the
+			// original bytes. Nothing to retract — the backup was NOT consumed.
+			return false, true, fmt.Errorf("failed to replace %s: %w (rollback restore refused — destination occupied or no-replace unsupported; journal entry stays armed against the retained backup %s)", destPath, err, backupPath)
 		}
 		// The backup was consumed by the rollback restore — retract the journal
 		// entry or the row permanently points at a vanished backup and every

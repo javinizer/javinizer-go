@@ -3,8 +3,10 @@
 package fsutil
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"syscall"
 
 	"github.com/spf13/afero"
 )
@@ -38,17 +40,44 @@ var (
 	publishNoReplaceRemove = os.Remove
 )
 
+// linkUnsupportedClass reports whether a link(2) failure means the
+// FILESYSTEM cannot express hard links at all (FAT/exFAT-class volumes
+// answer EPERM on Linux, ENOTSUP/EPERM on Darwin), as opposed to a
+// publish-specific refusal. ENOTSUP aliases EOPNOTSUPP on Linux, so both
+// are listed for the Darwin spelling. Only these classes justify the
+// wave-17 unsupported refusal: any other failure (EACCES, EIO, EMLINK,
+// a missing staged source, ...) keeps the pre-existing degrade into the
+// classified rename leg, refusing nothing the old behavior accepted.
+func linkUnsupportedClass(err error) bool {
+	return errors.Is(err, syscall.EPERM) ||
+		errors.Is(err, syscall.ENOSYS) ||
+		errors.Is(err, syscall.EOPNOTSUPP) ||
+		errors.Is(err, syscall.ENOTSUP)
+}
+
 // publishNoReplaceFallback publishes via hard link: link(2) fails EEXIST
 // atomically when dst is occupied, giving POSIX filesystems without a
 // renameat2 wrapper the same no-replace semantics — the destination link and
 // the staged source name the same inode, exactly as rename would leave them.
-// Filesystems without hard-link support (FAT/exFAT media volumes) degrade to
-// the classified rename leg: no stricter than the pre-hardening publish
-// there, where their rename could never express no-replace anyway.
+//
+// Filesystems without hard-link support (FAT/exFAT media volumes) used to
+// degrade to the classified rename leg (Stat-then-Rename), which is NOT
+// atomic: a foreign writer occupying dst inside the classify→rename window
+// was silently overwritten, collapsing every caller's no-replace guarantee to
+// nothing on exactly the volumes that could express only the weak form
+// (wave-17, codex P2). When the kernel no-replace primitive ALSO failed
+// unsupported-class (or, on non-Linux POSIX, does not exist), the fallback
+// now REFUSES with the typed ErrPublishNoReplaceUnsupported instead, and
+// callers map it onto the same conservative leg as a collision: the
+// operation fails cleanly, the armed/kept posture holds, and no foreign
+// bytes are gambled away for a best-effort install.
 func publishNoReplaceFallback(src, dst string) error {
 	if err := publishNoReplaceLink(src, dst); err != nil {
 		if os.IsExist(err) {
 			return publishCollision(dst)
+		}
+		if linkUnsupportedClass(err) {
+			return fmt.Errorf("no-replace publish %s -> %s: %w: %w", src, dst, ErrPublishNoReplaceUnsupported, err)
 		}
 		return publishNoReplaceVirtual(&afero.OsFs{}, src, dst)
 	}
