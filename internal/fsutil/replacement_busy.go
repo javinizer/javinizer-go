@@ -192,9 +192,9 @@ func replacementBusyQuarantinePath(path string) (string, error) {
 }
 
 // replacementBusyReturnTakeover puts back the bytes found after a successful
-// claimant rename. The exclusive placeholder makes the restore no-replace:
-// other claimants can observe it, but cannot acquire or replace it while the
-// owned successor is renamed back. If the destination is already occupied,
+// claimant rename. The exclusive placeholder serializes the restore: other
+// claimants can observe it, but cannot acquire or replace it while the owned
+// successor is renamed back over it. If the destination is already occupied,
 // preserve the bytes in a unique quarantine sibling instead of overwriting
 // that live marker.
 func replacementBusyReturnTakeover(fs afero.Fs, path, takeoverPath string, content []byte) error {
@@ -203,7 +203,16 @@ func replacementBusyReturnTakeover(fs afero.Fs, path, takeoverPath string, conte
 		if closeErr := placeholder.Close(); closeErr != nil {
 			return fmt.Errorf("close replacement busy restore placeholder: %w", closeErr)
 		}
-		if renameErr := fs.Rename(takeoverPath, path); renameErr != nil {
+		// The rename target is the 0-byte placeholder just claimed above, so
+		// this leg renames onto an EXISTING path: route through the
+		// platform-aware replacement primitive. Windows OsFs rename
+		// (MoveFileW) refuses an existing destination, which would strand a
+		// malformed 0-byte .dlbusy marker no claimant can reclaim — a
+		// permanent busy block on that destination (codex PR#215 w12).
+		// ReplaceFile is MoveFileExW+MOVEFILE_REPLACE_EXISTING for OsFs and a
+		// plain atomic rename on POSIX, where renaming over the placeholder
+		// is already safe.
+		if renameErr := ReplaceFile(fs, takeoverPath, path); renameErr != nil {
 			return fmt.Errorf("restore replacement busy marker: %w", renameErr)
 		}
 		return nil

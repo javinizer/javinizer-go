@@ -219,8 +219,20 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 				// Capture the destination state before replacing it. A clean
 				// missing result is the R9-2 crash-window state; an existing (or
 				// indeterminate) destination must never be deleted as compensation.
-				destPresentBeforeRestore, destStatErr := afero.Exists(r.fs, dest)
-				destMissingBeforeRestore := destStatErr == nil && !destPresentBeforeRestore
+				//
+				// codex PR#215 w12: classify with Lstat, NOT Stat/afero.Exists —
+				// exactly the wave-11 sweep classifier (restoreAndConsume,
+				// sweepOne): Stat FOLLOWS a dangling symlink and reports it ENOENT,
+				// so the retention rule read a pre-existing link object as
+				// "absent"; when backup removal then failed AND RestorePending
+				// persistence failed too, the compensation deleted the restored
+				// destination even though a directory entry predated the restore,
+				// vacuuming bytes that entry's presence must protect. Any
+				// Lstat-success object — symlink included — is PRESENT; only a
+				// genuine Lstat ENOENT is missing; every other Lstat error stays
+				// conservatively present.
+				_, destLstatErr := lstatRestoreSource(r.fs, dest)
+				destMissingBeforeRestore := errors.Is(destLstatErr, afero.ErrFileNotFound)
 
 				// Capture the original backup metadata before removal so a failed
 				// journal consumption can re-arm the same permission bits and mtime.

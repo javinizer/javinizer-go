@@ -179,9 +179,32 @@ func lstatBackupCandidate(fsys afero.Fs, candidate string) (os.FileInfo, error) 
 // bytes before the journal ever saw them (codex PR#215). An O_EXCL collision
 // on an observed-free candidate means a racer reserved it first and the
 // claim climbs to the next name. The returned placeholder is a 0-byte file;
-// the caller's dest→backup rename (and the Windows ReplaceFile swap) safely
-// replaces the reservation, so every participant either wins a unique name
-// or fails closed.
+// the caller's dest→backup handoff (moveIntoReservedBackup — replace-aware,
+// ReplaceFile on Windows) safely replaces the reservation, so every
+// participant either wins a unique name or fails closed.
+// moveIntoReservedBackup hands the destination bytes to the atomically
+// RESERVED backup name returned by claimOverwriteBackupPath: that name is
+// occupied by the claim's 0-byte placeholder, so the handoff must REPLACE an
+// existing target. POSIX rename does so atomically; Windows rename
+// (OsFs.Rename → MoveFileW) REFUSES an existing destination, which turned
+// every ledger-armed overwrite of an existing file into a set-aside failure
+// on Windows (codex PR#215 w12). The Windows leg therefore routes through
+// fsutil.ReplaceFile (OsFs → MoveFileExW with MOVEFILE_REPLACE_EXISTING).
+// The leg is keyed on the same fsutil.PathBackslashesAreSeparators
+// Windows-posture seam the history package's restoreOSPath/DestKey use —
+// instead of a build tag — so the Windows branch is exercisable in host
+// tests; both legs are behaviorally identical on a POSIX host because
+// POSIX ReplaceFile is itself a rename. The set-aside is the only leg that
+// renames into a reserved (pre-existing placeholder) target; the rollback
+// renames below restore onto a path the set-aside just vacated and keep
+// plain rename (Windows fails closed instead of clobbering a foreign dest).
+func moveIntoReservedBackup(fsys afero.Fs, src, dst string) error {
+	if fsutil.PathBackslashesAreSeparators {
+		return fsutil.ReplaceFile(fsys, src, dst)
+	}
+	return fsys.Rename(src, dst)
+}
+
 func claimOverwriteBackupPath(fsys afero.Fs, destPath, opID string) (string, error) {
 	for attempt := 0; attempt < backupNameClaimTries; attempt++ {
 		candidate := overwriteBackupPath(destPath, opID)
@@ -305,8 +328,8 @@ func (d *Downloader) installOverwriting(ctx context.Context, stagedPath, destPat
 	if claimErr != nil {
 		return false, true, fmt.Errorf("failed to claim backup path for %s: %w", destPath, claimErr)
 	}
-	if err := d.fs.Rename(destPath, backupPath); err != nil {
-		// The failed rename left our 0-byte reservation in place — release it
+	if err := moveIntoReservedBackup(d.fs, destPath, backupPath); err != nil {
+		// The failed handoff left our 0-byte reservation in place — release it
 		// so a retry never has to climb past (or worse, journal) a placeholder.
 		_ = d.fs.Remove(backupPath)
 		return false, true, fmt.Errorf("failed to set aside existing bytes for %s: %w", destPath, err)
