@@ -178,7 +178,10 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 				return rjErr
 			}
 			for _, e := range entries {
-				if _, statErr := r.fs.Stat(e.Backup); statErr != nil {
+				// Capture the original backup metadata before removal so a failed
+				// journal consumption can re-arm the same permission bits and mtime.
+				backupInfo, statErr := r.fs.Stat(e.Backup)
+				if statErr != nil {
 					return fmt.Errorf("journaled backup %s for destination %s is unreadable: %w", e.Backup, dest, statErr)
 				}
 				if repErr := copyRestoreBytes(r.fs, e.Backup, dest); repErr != nil {
@@ -193,7 +196,7 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 					return fmt.Errorf("restored %s → %s but backup cleanup failed: %w", e.Backup, dest, rmErr)
 				}
 				if cErr := r.consumeReplacementEntry(ctx, op, e); cErr != nil {
-					if rearmErr := fsutil.CopyFileFs(r.fs, dest, e.Backup); rearmErr != nil {
+					if rearmErr := rearmReplacementBackup(r.fs, dest, e.Backup, backupInfo); rearmErr != nil {
 						absoluteBackup, _ := filepath.Abs(e.Backup)
 						logging.Warnf("replacement restore failed to re-arm backup %s after consumption failure: %v", absoluteBackup, rearmErr)
 					}

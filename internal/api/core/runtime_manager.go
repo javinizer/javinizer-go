@@ -161,6 +161,12 @@ type APIRuntime struct {
 	serverCtxOnce sync.Once
 	serverCtx     context.Context
 	serverCancel  context.CancelFunc
+
+	// startupSweep is configured during bootstrap and started by the API server
+	// after bootstrap has returned. Once makes the startup repair one-shot even
+	// if a caller constructs the router more than once for the same runtime.
+	startupSweepOnce sync.Once
+	startupSweep     func()
 }
 
 // NewAPIRuntime creates an APIRuntime that manages the given APIDeps.

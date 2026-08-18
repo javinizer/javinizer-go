@@ -172,17 +172,4 @@ func TestProbeCaseSensitive_CoversOpenCloseAndCleanupFailures(t *testing.T) {
 	got, err = probeCaseSensitive(ops, root)
 	require.ErrorIs(t, err, cleanupErr)
 	require.False(t, got)
-
-	secondCleanupErr := errors.New("second cleanup failed")
-	removeCalls := 0
-	ops.remove = func(string) error {
-		removeCalls++
-		if removeCalls == 2 {
-			return secondCleanupErr
-		}
-		return nil
-	}
-	got, err = probeCaseSensitive(ops, root)
-	require.ErrorIs(t, err, secondCleanupErr)
-	require.False(t, got)
 }

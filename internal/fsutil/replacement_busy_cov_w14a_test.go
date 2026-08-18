@@ -82,9 +82,11 @@ func TestReplacementBusyW14A_MalformedFreshAndStale(t *testing.T) {
 
 	old := time.Now().Add(-time.Hour)
 	require.NoError(t, fs.Chtimes(path, old, old))
-	release, err := AcquireReplacementBusy(fs, dest)
-	require.NoError(t, err, "an old malformed marker is eventually reclaimable")
-	release()
+	_, err = AcquireReplacementBusy(fs, dest)
+	require.ErrorIs(t, err, ErrReplacementBusy, "an old malformed marker is preserved when ownership is unproven")
+	content, readErr := afero.ReadFile(fs, path)
+	require.NoError(t, readErr)
+	require.Equal(t, "partial", string(content))
 
 	foreign := "/out/w14a-malformed/foreign.jpg"
 	isWindows := replacementIsWindows

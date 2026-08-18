@@ -157,6 +157,11 @@ func NewServer(rt *core.APIRuntime) *gin.Engine {
 	registerNoRouteHandler(router, webAssets, rt)
 	logRegisteredRoutes(router)
 
+	// BootstrapAPI only configured the repair task. Start it at the server
+	// boundary, after bootstrap has returned, so slow/unavailable ledger roots
+	// cannot hold up API availability. It is one-shot and tied to rt.Shutdown.
+	rt.StartStartupSweep()
+
 	return router
 }
 

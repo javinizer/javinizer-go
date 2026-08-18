@@ -78,6 +78,11 @@ func bootstrapAPIDeps(cfg *config.Config, configFile string, auth commandutil.Au
 	rt.SetConfig(cfg)
 	rt.EnsureRuntime()
 
+	// Configure the one-shot replacement repair without running it here. The
+	// API server starts it after BootstrapAPI returns, on rt.ServerCtx(), so
+	// ledger scans and filesystem recovery cannot block bootstrap availability.
+	rt.configureStartupSweep(fs, repos.BatchFileOpRepo)
+
 	if configFile != "" {
 		if diskCfg, err := config.Load(configFile); err == nil {
 			rt.SetInitialConfigs(cfg, diskCfg)
@@ -89,8 +94,6 @@ func bootstrapAPIDeps(cfg *config.Config, configFile string, auth commandutil.Au
 	startUpdateChecker(rt, cfg, update.ServiceOptions{})
 
 	startImageCacheCleanup(rt, imageCacheCleanupOptions{})
-
-	history.SweepOnStartup(fs, repos.BatchFileOpRepo)
 
 	// Temp poster cleanup is intentionally NOT started automatically.
 	// Running CleanupStaleTempDirs on startup (or on a periodic ticker) wipes

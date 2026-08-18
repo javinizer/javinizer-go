@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/spf13/afero"
 )
 
@@ -37,8 +38,8 @@ func ReplacementBusyPath(dest string) string { return dest + ReplacementBusySuff
 // AcquireReplacementBusy atomically claims the destination-adjacent marker.
 // Writers create it before moving the destination aside; sweepers create it
 // before touching a backup. A marker from a dead PID is reclaimed, while a
-// malformed marker is retained until its mtime is stale so a partial write
-// cannot open a race window.
+// malformed marker is never reclaimed based on its age alone so an unowned
+// file cannot be mistaken for Javinizer's marker.
 func AcquireReplacementBusy(fs afero.Fs, dest string) (func(), error) {
 	path := ReplacementBusyPath(dest)
 	for {
@@ -68,11 +69,15 @@ func AcquireReplacementBusy(fs afero.Fs, dest string) (func(), error) {
 			return nil, fmt.Errorf("create replacement busy marker: %w", err)
 		}
 
-		stale, inspectErr := replacementBusyStale(fs, path)
+		stale, reclaimable, inspectErr := replacementBusyState(fs, path)
 		if inspectErr != nil {
 			return nil, fmt.Errorf("inspect replacement busy marker: %w", inspectErr)
 		}
 		if !stale {
+			return nil, ErrReplacementBusy
+		}
+		if !reclaimable {
+			logging.Warnf("replacement busy marker %s is stale but not a recognized Javinizer marker; preserving it", path)
 			return nil, ErrReplacementBusy
 		}
 		if removeErr := fs.Remove(path); removeErr != nil && !os.IsNotExist(removeErr) {
@@ -94,32 +99,40 @@ func releaseReplacementBusy(fs afero.Fs, path, token string) {
 }
 
 func replacementBusyStale(fs afero.Fs, path string) (bool, error) {
+	stale, _, err := replacementBusyState(fs, path)
+	return stale, err
+}
+
+// replacementBusyState separates age/liveness from ownership. An old
+// malformed marker may be stale for arbitration purposes, but it is not safe
+// to remove because its name and mtime do not prove Javinizer created it.
+func replacementBusyState(fs afero.Fs, path string) (stale, reclaimable bool, err error) {
 	content, err := afero.ReadFile(fs, path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return true, nil
+			return true, true, nil
 		}
-		return false, err
+		return false, false, err
 	}
 	info, err := fs.Stat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return true, nil
+			return true, true, nil
 		}
-		return false, err
+		return false, false, err
 	}
 	pid, created, ok := parseReplacementBusyToken(string(content))
 	if !ok {
-		return time.Since(info.ModTime()) > replacementBusyStaleAge, nil
+		return time.Since(info.ModTime()) > replacementBusyStaleAge, false, nil
 	}
 	createdAt := time.Unix(0, created)
 	if pid == os.Getpid() {
-		return createdAt.Before(replacementBusyBootAt), nil
+		return createdAt.Before(replacementBusyBootAt), true, nil
 	}
 	if replacementIsWindows {
-		return time.Since(createdAt) > replacementBusyStaleAge, nil
+		return time.Since(createdAt) > replacementBusyStaleAge, true, nil
 	}
-	return !replacementProcessAlive(pid), nil
+	return !replacementProcessAlive(pid), true, nil
 }
 
 func parseReplacementBusyToken(content string) (pid int, created int64, ok bool) {

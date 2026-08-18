@@ -173,8 +173,10 @@ var osCaseProbeOps = caseProbeOps{
 
 // defaultCaseSensitiveProbe creates one uniquely named file and stats its
 // differently-cased spelling. Directory enumeration is the fallback when the
-// alternate stat is indeterminate. The temporary entries are always removed;
-// any probe or cleanup failure is returned for the caller's fail-closed path.
+// alternate stat is indeterminate. Cleanup removes only the exact probe path
+// created by O_EXCL; the alternate spelling may belong to the user and is
+// never a cleanup target. Any probe or cleanup failure is returned for the
+// caller's fail-closed path.
 func defaultCaseSensitiveProbe(root string) (bool, error) {
 	return probeCaseSensitive(osCaseProbeOps, root)
 }
@@ -190,14 +192,10 @@ func probeCaseSensitive(ops caseProbeOps, root string) (bool, error) {
 		return false, err
 	}
 	cleanup := func() error {
-		var cleanupErr error
 		if err := ops.remove(path); err != nil && !os.IsNotExist(err) {
-			cleanupErr = err
+			return err
 		}
-		if err := ops.remove(alternatePath); err != nil && !os.IsNotExist(err) && cleanupErr == nil {
-			cleanupErr = err
-		}
-		return cleanupErr
+		return nil
 	}
 	if err := file.Close(); err != nil {
 		_ = cleanup()
