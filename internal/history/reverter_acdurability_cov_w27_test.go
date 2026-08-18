@@ -14,9 +14,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestReverterACDurabilityCovW27_MarkerPersistFailureUndoesRestore(t *testing.T) {
+func TestReverterACDurabilityCovW27_MissingDestinationMarkerPersistFailureUndoesRestore(t *testing.T) {
 	base := afero.NewMemMapFs()
 	dest, backup := newW27ArmedReplacement(t, base, "W27-UNDO")
+	// This helper deliberately leaves dest absent: W27 covers the R9-2
+	// crash-window compensation branch, not an installed destination.
 	removeErr := errors.New("backup remove wedged")
 	fs := &w27RemoveFailFs{Fs: base, backup: backup, backupErr: removeErr, failBackup: true}
 	repo := newP3OpRepo()
@@ -40,9 +42,11 @@ func TestReverterACDurabilityCovW27_MarkerPersistFailureUndoesRestore(t *testing
 	require.False(t, gf.Replacements[0].RestorePending)
 }
 
-func TestReverterACDurabilityCovW27_UndoFailureUsesCompoundWarning(t *testing.T) {
+func TestReverterACDurabilityCovW27_MissingDestinationUndoFailureUsesCompoundWarning(t *testing.T) {
 	base := afero.NewMemMapFs()
 	dest, backup := newW27ArmedReplacement(t, base, "W27-UNDO-FAIL")
+	// Keep the pre-restore destination missing so the injected undo failure
+	// exercises the legitimate R9-2 remove path.
 	removeErr := errors.New("backup remove wedged")
 	undoErr := errors.New("restore undo wedged")
 	fs := &w27RemoveFailFs{
@@ -81,7 +85,7 @@ func TestReverterACDurabilityCovW27_UndoFailureUsesCompoundWarning(t *testing.T)
 	require.Contains(t, logs.String(), undoErr.Error())
 }
 
-func TestReverterACDurabilityCovW27_FreshSweeperRetriesAfterExplicitUndo(t *testing.T) {
+func TestReverterACDurabilityCovW27_MissingDestinationFreshSweeperRetriesAfterExplicitUndo(t *testing.T) {
 	base := afero.NewMemMapFs()
 	dest, backup := newW27ArmedReplacement(t, base, "W27-RESTART")
 	fs := &w27RemoveFailFs{

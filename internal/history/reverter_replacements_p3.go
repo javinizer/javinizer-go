@@ -212,6 +212,12 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 					continue
 				}
 
+				// Capture the destination state before replacing it. A clean
+				// missing result is the R9-2 crash-window state; an existing (or
+				// indeterminate) destination must never be deleted as compensation.
+				destPresentBeforeRestore, destStatErr := afero.Exists(r.fs, dest)
+				destMissingBeforeRestore := destStatErr == nil && !destPresentBeforeRestore
+
 				// Capture the original backup metadata before removal so a failed
 				// journal consumption can re-arm the same permission bits and mtime.
 				backupInfo, statErr := lstatRestoreSource(r.fs, e.Backup)
@@ -226,14 +232,20 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 					if markErr := markReplacementEntryRestorePending(ctx, r.batchFileOpRepo, op.ID, sweepSlash(e.Backup)); markErr != nil {
 						absoluteBackup, _ := filepath.Abs(e.Backup)
 						logging.Warnf("replacement restore failed to retain cleanup marker for backup %s: %v", absoluteBackup, markErr)
-						// Without a durable marker, undo the restore while the
-						// destination/busy locks are still held. The armed entry and
-						// intact backup then describe the same retryable state as the
-						// startup sweep's R9-2 compensation path.
-						if undoErr := r.fs.Remove(dest); undoErr != nil {
-							logging.Warnf("replacement restore %s: cleanup marker persistence failed AND restore-undo failed (%v after %v)", absoluteBackup, undoErr, markErr)
+						// Without a durable marker, only undo a restore whose
+						// destination was proven missing before the copy. That is the
+						// armed-entry + intact-backup R9-2 compensation state.
+						if destMissingBeforeRestore {
+							if undoErr := r.fs.Remove(dest); undoErr != nil {
+								logging.Warnf("replacement restore %s: cleanup marker persistence failed AND restore-undo failed (%v after %v)", absoluteBackup, undoErr, markErr)
+							} else {
+								logging.Warnf("replacement restore %s: cleanup marker persistence failed (%v) — restore undone, will retry", absoluteBackup, markErr)
+							}
 						} else {
-							logging.Warnf("replacement restore %s: cleanup marker persistence failed (%v) — restore undone, will retry", absoluteBackup, markErr)
+							// The destination was not proven missing before this restore.
+							// Keep the backup bytes in place and leave the armed entry
+							// for an explicit retry; removing them would create a hole.
+							logging.Warnf("replacement restore %s: cleanup marker persistence failed (%v) — restored destination retained for retry", absoluteBackup, markErr)
 						}
 					}
 					return fmt.Errorf("restored %s → %s but backup cleanup failed: %w", e.Backup, dest, rmErr)

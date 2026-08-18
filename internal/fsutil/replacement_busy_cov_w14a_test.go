@@ -63,10 +63,10 @@ func TestReplacementBusyW14A_ReadNotExistIsReclaimable(t *testing.T) {
 	_, statErr := fs.Stat(path)
 	require.NoError(t, statErr, "the underlying marker remains stat-able")
 
-	stale, reclaimable, err := replacementBusyState(&w14AReadFailureFs{Fs: fs, err: os.ErrNotExist}, path)
+	inspection, err := replacementBusyInspect(&w14AReadFailureFs{Fs: fs, err: os.ErrNotExist}, path)
 	require.NoError(t, err)
-	require.True(t, stale)
-	require.True(t, reclaimable)
+	require.True(t, inspection.stale)
+	require.True(t, inspection.reclaimable)
 }
 
 func TestReplacementBusyW14A_MalformedFreshAndStale(t *testing.T) {

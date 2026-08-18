@@ -1,6 +1,7 @@
 package fsutil
 
 import (
+	"bytes"
 	cryptorand "crypto/rand"
 	"encoding/binary"
 	"errors"
@@ -19,8 +20,9 @@ import (
 const (
 	// ReplacementBusySuffix is adjacent to a destination so every process
 	// arbitrating that destination observes the same ownership marker.
-	ReplacementBusySuffix   = ".dlbusy"
-	replacementBusyStaleAge = 2 * time.Minute
+	ReplacementBusySuffix         = ".dlbusy"
+	replacementBusyStaleAge       = 2 * time.Minute
+	replacementBusyQuarantineMark = ".quarantine-"
 )
 
 // ErrReplacementBusy means another live process owns a destination replacement.
@@ -85,23 +87,28 @@ func AcquireReplacementBusy(fs afero.Fs, dest string) (func(), error) {
 			return nil, fmt.Errorf("create replacement busy marker: %w", err)
 		}
 
-		stale, reclaimable, inspectErr := replacementBusyState(fs, path)
+		inspection, inspectErr := replacementBusyInspect(fs, path)
 		if inspectErr != nil {
 			return nil, fmt.Errorf("inspect replacement busy marker: %w", inspectErr)
 		}
-		if !stale {
+		if !inspection.stale {
 			return nil, ErrReplacementBusy
 		}
-		if !reclaimable {
+		if !inspection.reclaimable {
 			logging.Warnf("replacement busy marker %s is stale but not a recognized Javinizer marker; preserving it", path)
 			return nil, ErrReplacementBusy
+		}
+		if !inspection.hasObservedToken {
+			// The marker disappeared while it was being inspected. Refresh from
+			// the create attempt instead of renaming without bytes to validate.
+			continue
 		}
 
 		// Do not remove path based on the earlier inspection. Another claimant
 		// may have won the same stale-marker decision in the meantime. Rename
 		// is the portable afero ownership claim: only the claimant whose source
-		// rename succeeds may remove its uniquely named successor and recreate
-		// the marker.
+		// rename succeeds may inspect and dispose of its uniquely named
+		// successor.
 		takeoverPath, nameErr := replacementBusyTakeoverPath(path)
 		if nameErr != nil {
 			return nil, fmt.Errorf("name replacement busy takeover marker: %w", nameErr)
@@ -114,18 +121,31 @@ func AcquireReplacementBusy(fs afero.Fs, dest string) (func(), error) {
 			// A failed source rename means another claimant won. Re-read the
 			// marker from scratch; never apply the stale result above to the
 			// winner's replacement marker.
-			stale, reclaimable, inspectErr = replacementBusyState(fs, path)
-			if inspectErr != nil {
-				return nil, fmt.Errorf("reinspect replacement busy marker: %w", inspectErr)
+			refreshed, refreshErr := replacementBusyInspect(fs, path)
+			if refreshErr != nil {
+				return nil, fmt.Errorf("reinspect replacement busy marker: %w", refreshErr)
 			}
-			if !stale {
+			if !refreshed.stale {
 				return nil, ErrReplacementBusy
 			}
-			if !reclaimable {
+			if !refreshed.reclaimable {
 				logging.Warnf("replacement busy marker %s is stale but not a recognized Javinizer marker; preserving it", path)
 				return nil, ErrReplacementBusy
 			}
 			continue
+		}
+
+		claimedToken, readErr := afero.ReadFile(fs, takeoverPath)
+		if readErr != nil {
+			// We own the successor, but cannot prove which marker it contains.
+			// Leave it in place and fail closed rather than consuming it.
+			return nil, fmt.Errorf("read replacement busy takeover marker: %w", readErr)
+		}
+		if !bytes.Equal(claimedToken, inspection.observedToken) {
+			if returnErr := replacementBusyReturnTakeover(fs, path, takeoverPath, claimedToken); returnErr != nil {
+				return nil, returnErr
+			}
+			return nil, ErrReplacementBusy
 		}
 		if removeErr := fs.Remove(takeoverPath); removeErr != nil {
 			// The successful rename proves ownership of takeoverPath. If its
@@ -147,6 +167,64 @@ func replacementBusyTakeoverPath(path string) (string, error) {
 	return fmt.Sprintf("%s.takeover-%d-%x", path, os.Getpid(), random), nil
 }
 
+func replacementBusyQuarantinePath(path string) (string, error) {
+	random, err := replacementBusyRandom()
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%s%s%d-%x", path, replacementBusyQuarantineMark, os.Getpid(), random), nil
+}
+
+// replacementBusyReturnTakeover puts back the bytes found after a successful
+// claimant rename. The exclusive placeholder makes the restore no-replace:
+// other claimants can observe it, but cannot acquire or replace it while the
+// owned successor is renamed back. If the destination is already occupied,
+// preserve the bytes in a unique quarantine sibling instead of overwriting
+// that live marker.
+func replacementBusyReturnTakeover(fs afero.Fs, path, takeoverPath string, content []byte) error {
+	placeholder, err := fs.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err == nil {
+		if closeErr := placeholder.Close(); closeErr != nil {
+			return fmt.Errorf("close replacement busy restore placeholder: %w", closeErr)
+		}
+		if renameErr := fs.Rename(takeoverPath, path); renameErr != nil {
+			return fmt.Errorf("restore replacement busy marker: %w", renameErr)
+		}
+		return nil
+	}
+	if !os.IsExist(err) {
+		return fmt.Errorf("reserve replacement busy restore path: %w", err)
+	}
+
+	quarantinePath, nameErr := replacementBusyQuarantinePath(path)
+	if nameErr != nil {
+		return fmt.Errorf("name replacement busy quarantine marker: %w", nameErr)
+	}
+	quarantine, openErr := fs.OpenFile(quarantinePath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if openErr != nil {
+		return fmt.Errorf("create replacement busy quarantine marker: %w", openErr)
+	}
+	if written, writeErr := quarantine.Write(content); writeErr != nil {
+		_ = quarantine.Close()
+		return fmt.Errorf("write replacement busy quarantine marker: %w", writeErr)
+	} else if written != len(content) {
+		_ = quarantine.Close()
+		return fmt.Errorf("write replacement busy quarantine marker: short write (%d/%d)", written, len(content))
+	}
+	if syncErr := quarantine.Sync(); syncErr != nil {
+		_ = quarantine.Close()
+		return fmt.Errorf("sync replacement busy quarantine marker: %w", syncErr)
+	}
+	if closeErr := quarantine.Close(); closeErr != nil {
+		return fmt.Errorf("close replacement busy quarantine marker: %w", closeErr)
+	}
+	logging.Warnf("replacement busy marker %s was claimed by another process; preserved it in quarantine %s", path, quarantinePath)
+	if removeErr := fs.Remove(takeoverPath); removeErr != nil {
+		return fmt.Errorf("remove replacement busy takeover marker after quarantine: %w", removeErr)
+	}
+	return nil
+}
+
 func replacementBusyRandomPlatform() (uint64, error) {
 	var raw [8]byte
 	if _, err := replacementCryptoRandomRead(raw[:]); err != nil {
@@ -163,7 +241,14 @@ func releaseReplacementBusy(fs afero.Fs, path, token string) {
 	_ = fs.Remove(path)
 }
 
-// replacementBusyState separates age/liveness/start-time classification from
+type replacementBusyInspection struct {
+	stale            bool
+	reclaimable      bool
+	observedToken    []byte
+	hasObservedToken bool
+}
+
+// replacementBusyInspect separates age/liveness/start-time classification from
 // ownership. An old malformed marker may be stale for arbitration purposes,
 // but it is not safe to remove because its name and mtime do not prove
 // Javinizer created it.
@@ -178,31 +263,35 @@ func releaseReplacementBusy(fs afero.Fs, path, token string) {
 //  5. On POSIX, age is consulted only when the probe is
 //     undecidable/unprobeable; Windows retains its conservative access-denied
 //     behavior and does not expire an unprobeable owner by age.
-func replacementBusyState(fs afero.Fs, path string) (stale, reclaimable bool, err error) {
+func replacementBusyInspect(fs afero.Fs, path string) (replacementBusyInspection, error) {
 	content, err := afero.ReadFile(fs, path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return true, true, nil
+			return replacementBusyInspection{stale: true, reclaimable: true}, nil
 		}
-		return false, false, err
+		return replacementBusyInspection{}, err
 	}
+	inspection := replacementBusyInspection{observedToken: content, hasObservedToken: true}
 	info, err := fs.Stat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return true, true, nil
+			return replacementBusyInspection{stale: true, reclaimable: true, observedToken: content, hasObservedToken: true}, nil
 		}
-		return false, false, err
+		return replacementBusyInspection{}, err
 	}
 	pid, created, ok := parseReplacementBusyToken(string(content))
 	if !ok {
-		return time.Since(info.ModTime()) > replacementBusyStaleAge, false, nil
+		inspection.stale = time.Since(info.ModTime()) > replacementBusyStaleAge
+		return inspection, nil
 	}
 	createdAt := time.Unix(0, created)
 	if pid == os.Getpid() {
 		// This timestamp is a PID-reuse boundary, not a two-minute lease:
 		// markers from before this process started belong to a prior owner,
 		// while current-run markers stay busy for as long as this process runs.
-		return createdAt.Before(replacementBusyBootAt), true, nil
+		inspection.stale = createdAt.Before(replacementBusyBootAt)
+		inspection.reclaimable = true
+		return inspection, nil
 	}
 	// First prove that the recorded owner is live. Linux then distinguishes a
 	// reused PID by comparing /proc starttime with the marker's wall-clock
@@ -214,23 +303,32 @@ func replacementBusyState(fs afero.Fs, path string) (stale, reclaimable bool, er
 	case replacementPIDAlive:
 		if replacementProcessStartTime != nil {
 			if processStartTime := replacementProcessStartTime(pid); processStartTime != nil && processStartTime.After(createdAt) {
-				return true, true, nil
+				inspection.stale = true
+				inspection.reclaimable = true
+				return inspection, nil
 			}
 		}
-		return false, true, nil
+		inspection.reclaimable = true
+		return inspection, nil
 	case replacementPIDDead:
-		return true, true, nil
+		inspection.stale = true
+		inspection.reclaimable = true
+		return inspection, nil
 	case replacementPIDUnprobeable:
 		if replacementIsWindows {
 			// Access denial does not prove that a Windows owner is gone; retain
 			// the marker rather than allowing an untrusted process to reclaim it.
-			return false, true, nil
+			inspection.reclaimable = true
+			return inspection, nil
 		}
-		return time.Since(createdAt) > replacementBusyStaleAge, true, nil
+		inspection.stale = time.Since(createdAt) > replacementBusyStaleAge
+		inspection.reclaimable = true
+		return inspection, nil
 	default:
 		// An unknown result is not the explicit undecidable seam. Fail closed
 		// rather than letting an unexpected value use the age fallback.
-		return false, true, nil
+		inspection.reclaimable = true
+		return inspection, nil
 	}
 }
 
