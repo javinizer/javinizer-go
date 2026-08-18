@@ -32,9 +32,9 @@ var ErrReplacementBusy = errors.New("replacement destination is busy")
 var replacementBusyBootAt = time.Now()
 var replacementIsWindows = runtime.GOOS == "windows"
 
-// replacementPIDLiveness is deliberately richer than a bool on Windows:
-// failure to open a process can mean either that the PID is gone or that the
-// caller lacks permission to inspect a still-live owner.
+// replacementPIDLiveness is richer than a bool: failure to inspect a PID can
+// mean that the owner is gone, still alive, or simply undecidable from this
+// process's permissions and platform probes.
 type replacementPIDLiveness uint8
 
 const (
@@ -167,6 +167,17 @@ func releaseReplacementBusy(fs afero.Fs, path, token string) {
 // ownership. An old malformed marker may be stale for arbitration purposes,
 // but it is not safe to remove because its name and mtime do not prove
 // Javinizer created it.
+//
+// Classification precedence (the first applicable arm wins):
+//  1. Malformed content is retained and is never reclaimable by age alone.
+//  2. A well-formed marker whose PID probe proves alive is never expired by
+//     age.
+//  3. Within that live arm, W20's start-time proof that the PID started after
+//     the marker marks it stale as PID reuse.
+//  4. A probe that proves the PID is dead marks the marker stale.
+//  5. On POSIX, age is consulted only when the probe is
+//     undecidable/unprobeable; Windows retains its conservative access-denied
+//     behavior and does not expire an unprobeable owner by age.
 func replacementBusyState(fs afero.Fs, path string) (stale, reclaimable bool, err error) {
 	content, err := afero.ReadFile(fs, path)
 	if err != nil {
@@ -196,32 +207,31 @@ func replacementBusyState(fs afero.Fs, path string) (stale, reclaimable bool, er
 	// First prove that the recorded owner is live. Linux then distinguishes a
 	// reused PID by comparing /proc starttime with the marker's wall-clock
 	// timestamp. A start time after the marker proves that this is a different
-	// process and makes the marker stale.
+	// process and makes the marker stale. If start time cannot be established,
+	// the positive liveness proof still wins over marker age.
 	liveness := replacementProbePIDAliveAware(pid)
-	if liveness == replacementPIDAlive {
+	switch liveness {
+	case replacementPIDAlive:
 		if replacementProcessStartTime != nil {
-			if processStartTime := replacementProcessStartTime(pid); processStartTime != nil {
-				return processStartTime.After(createdAt), true, nil
+			if processStartTime := replacementProcessStartTime(pid); processStartTime != nil && processStartTime.After(createdAt) {
+				return true, true, nil
 			}
 		}
-
-		// macOS and other non-Linux POSIX hosts have no portable process-start
-		// syscall here, so retain the existing age fallback. A reused PID whose
-		// marker is younger than the threshold can still block repair; that is
-		// the documented residual risk. Windows keeps its existing live-probe
-		// contract: an opened process remains busy, and access-denied/unprobeable
-		// owners are never expired by age.
-		if !replacementIsWindows {
-			return time.Since(createdAt) > replacementBusyStaleAge, true, nil
+		return false, true, nil
+	case replacementPIDDead:
+		return true, true, nil
+	case replacementPIDUnprobeable:
+		if replacementIsWindows {
+			// Access denial does not prove that a Windows owner is gone; retain
+			// the marker rather than allowing an untrusted process to reclaim it.
+			return false, true, nil
 		}
+		return time.Since(createdAt) > replacementBusyStaleAge, true, nil
+	default:
+		// An unknown result is not the explicit undecidable seam. Fail closed
+		// rather than letting an unexpected value use the age fallback.
 		return false, true, nil
 	}
-	if replacementIsWindows && liveness == replacementPIDUnprobeable {
-		// Windows access failures do not prove that the owner is dead. Retain
-		// the marker rather than allowing an untrusted process to reclaim it.
-		return false, true, nil
-	}
-	return liveness == replacementPIDDead, true, nil
 }
 
 func parseReplacementBusyToken(content string) (pid int, created int64, ok bool) {

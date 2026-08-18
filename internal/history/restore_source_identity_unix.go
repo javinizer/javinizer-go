@@ -15,5 +15,5 @@ func restoreSourceIdentity(info os.FileInfo) (device, inode uint64, ok bool) {
 	if !ok || stat == nil {
 		return 0, 0, false
 	}
-	return uint64(stat.Dev), uint64(stat.Ino), true
+	return uint64(stat.Dev), stat.Ino, true
 }

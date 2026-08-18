@@ -199,9 +199,22 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 				return rjErr
 			}
 			for _, e := range entries {
+				// The operation snapshot can predate another revert loop's
+				// consumption. Re-read before touching the backup: a consumed entry
+				// means the other loop already restored these bytes, so reopening
+				// (and restoring) it would turn a harmless duplicate revert into a
+				// missing-backup failure or a double restore.
+				armed, freshErr := r.replacementEntryIsLive(ctx, op, e)
+				if freshErr != nil {
+					return freshErr
+				}
+				if !armed {
+					continue
+				}
+
 				// Capture the original backup metadata before removal so a failed
 				// journal consumption can re-arm the same permission bits and mtime.
-				backupInfo, _, statErr := lstatRestoreSource(r.fs, e.Backup)
+				backupInfo, statErr := lstatRestoreSource(r.fs, e.Backup)
 				if statErr != nil {
 					return fmt.Errorf("journaled backup %s for destination %s is unreadable: %w", e.Backup, dest, statErr)
 				}
@@ -233,6 +246,40 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 	return restored, nil
 }
 
+// replacementEntryIsLive re-reads the operation row before a restore leg
+// opens its backup. A false result is a successful no-op: another revert or
+// sweep already restored and consumed this exact entry, so the caller must not
+// touch the destination again.
+func (r *Reverter) replacementEntryIsLive(ctx context.Context, op *models.BatchFileOperation, entry models.ReplacementEntry) (bool, error) {
+	release := fsutil.SharedJournalLocks().Acquire(fmt.Sprintf("%d", op.ID))
+	defer release()
+
+	fresh, frErr := r.batchFileOpRepo.FindByID(ctx, op.ID)
+	if frErr != nil {
+		return false, fmt.Errorf("failed to re-read row before restoring on op %d: %w", op.ID, frErr)
+	}
+	if fresh == nil {
+		return false, fmt.Errorf("failed to re-read row before restoring on op %d: row not found", op.ID)
+	}
+	gf, parseErr := models.ParseGeneratedFiles(fresh.GeneratedFiles)
+	if parseErr != nil {
+		return false, fmt.Errorf("failed to re-parse journal before restoring on op %d: %w", op.ID, parseErr)
+	}
+
+	// Keep all later cleanup/consumption decisions on the same fresh ledger
+	// even when this particular snapshot entry has already disappeared. The
+	// status matters too: the primary revert must not follow a stale snapshot
+	// after another request has already completed the operation.
+	op.GeneratedFiles = fresh.GeneratedFiles
+	op.RevertStatus = fresh.RevertStatus
+	for _, live := range gf.Replacements {
+		if live.Destination == entry.Destination && live.Backup == entry.Backup && live.DestSeq == entry.DestSeq {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // consumeReplacementEntry removes one journaled entry from the operation
 // row's ledger and persists it. The in-memory op is updated too so the
 // cleanup that follows sees the post-restore journal.
@@ -257,6 +304,13 @@ func (r *Reverter) consumeReplacementEntry(ctx context.Context, op *models.Batch
 			continue
 		}
 		kept = append(kept, e)
+	}
+	if !removed {
+		// Another consumer won the race after this caller's snapshot. Its
+		// restore leg already installed the bytes; do not issue a redundant row
+		// update or make the caller retry a vanished backup.
+		op.GeneratedFiles = fresh.GeneratedFiles
+		return nil
 	}
 	gf.Replacements = kept
 	fresh.GeneratedFiles = models.MarshalLedgerJSON(gf)
@@ -339,15 +393,15 @@ var restoreCopyNonce atomic.Uint64
 
 // lstatRestoreSource describes a restore source without following its final
 // path component when the injected filesystem supports afero.Lstater. Afero's
-// MemMapFs reports usedLstat=false because it has no symlink model; its
-// regularity check still runs before opening, while production OsFs delegates
-// to os.Lstat.
-func lstatRestoreSource(fs afero.Fs, backup string) (info os.FileInfo, usedLstat bool, err error) {
+// MemMapFs has no symlink model; its regularity check still runs before
+// opening, while production OsFs delegates to os.Lstat.
+func lstatRestoreSource(fs afero.Fs, backup string) (info os.FileInfo, err error) {
 	if ls, ok := fs.(afero.Lstater); ok {
-		return ls.LstatIfPossible(backup)
+		info, _, err := ls.LstatIfPossible(backup)
+		return info, err
 	}
 	info, err = fs.Stat(backup)
-	return info, false, err
+	return info, err
 }
 
 // copyRestoreBytes restores the backup bytes onto dest WITHOUT consuming the
@@ -356,7 +410,7 @@ func lstatRestoreSource(fs afero.Fs, backup string) (info os.FileInfo, usedLstat
 func copyRestoreBytes(fs afero.Fs, backup, dest string) error {
 	// Lstat is deliberately before OpenFile: Stat/Open would follow a hostile
 	// backup symlink and copy its target into the media directory.
-	sourceInfo, _, err := lstatRestoreSource(fs, backup)
+	sourceInfo, err := lstatRestoreSource(fs, backup)
 	if err != nil {
 		return fmt.Errorf("read backup: %w", err)
 	}

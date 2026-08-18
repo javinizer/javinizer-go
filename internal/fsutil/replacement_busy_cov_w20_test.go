@@ -138,9 +138,13 @@ func TestAcquireReplacementBusyW20C_PIDReuseStartTimeArms(t *testing.T) {
 	require.Equal(t, before, after)
 }
 
-func TestAcquireReplacementBusyW20D_StartTimeFallbackUsesMarkerAge(t *testing.T) {
+// W20D is retained as a regression test, but its old POSIX age expectation is
+// deliberately adapted for W23: a positive liveness result remains busy when
+// start time is unavailable; only an undecidable probe may use marker age.
+func TestAcquireReplacementBusyW20D_LivenessPrecedesAgeAndUndecidableFallsBack(t *testing.T) {
 	base := afero.NewMemMapFs()
 	dest := "/out/w20-fallback/poster.jpg"
+	path := ReplacementBusyPath(dest)
 	require.NoError(t, base.MkdirAll("/out/w20-fallback", 0o755))
 	pid := os.Getpid() + 10001
 
@@ -157,14 +161,28 @@ func TestAcquireReplacementBusyW20D_StartTimeFallbackUsesMarkerAge(t *testing.T)
 	})
 
 	writeW20BusyToken(t, base, dest, pid, time.Now().Add(-replacementBusyStaleAge-time.Second))
+	_, err := AcquireReplacementBusy(base, dest)
+	require.ErrorIs(t, err, ErrReplacementBusy, "a live POSIX marker stays busy past the old age threshold")
+
+	require.NoError(t, base.Remove(path))
+	// The injectable probe models macOS/other non-Linux POSIX when liveness is
+	// undecidable; this is the only arm that may fall back to marker age.
+	replacementProbePIDAliveAware = func(int) replacementPIDLiveness { return replacementPIDUnprobeable }
+	writeW20BusyToken(t, base, dest, pid, time.Now().Add(-replacementBusyStaleAge-time.Second))
 	release, err := AcquireReplacementBusy(base, dest)
-	require.NoError(t, err, "an unavailable start time falls back to the stale-age rule")
+	require.NoError(t, err, "an undecidable POSIX probe uses the stale-age fallback")
 	release()
 
+	replacementProbePIDAliveAware = func(int) replacementPIDLiveness { return replacementPIDUnprobeable }
 	writeW20BusyToken(t, base, dest, pid, time.Now())
-	replacementProcessStartTime = nil
 	_, err = AcquireReplacementBusy(base, dest)
-	require.ErrorIs(t, err, ErrReplacementBusy, "a young marker remains busy when start time is unavailable")
+	require.ErrorIs(t, err, ErrReplacementBusy, "a fresh undecidable marker remains busy")
+
+	require.NoError(t, base.Remove(path))
+	replacementProbePIDAliveAware = func(int) replacementPIDLiveness { return replacementPIDLiveness(99) }
+	writeW20BusyToken(t, base, dest, pid, time.Now().Add(-replacementBusyStaleAge-time.Second))
+	_, err = AcquireReplacementBusy(base, dest)
+	require.ErrorIs(t, err, ErrReplacementBusy, "an unknown probe result fails closed")
 }
 
 func TestAcquireReplacementBusyW20E_ClaimFailuresFailClosed(t *testing.T) {

@@ -63,9 +63,11 @@ func TestReverterCoverageW2D_CopyRestoreOpenError(t *testing.T) {
 		ID:             301,
 		GeneratedFiles: covW2DJournal(t, dest, backup, 1),
 	}
+	repo := newP3OpRepo()
+	require.NoError(t, repo.Create(context.Background(), op))
 	r := &Reverter{
 		fs:              &stagedWedgeHistoryFs{Fs: inner},
-		batchFileOpRepo: newP3OpRepo(),
+		batchFileOpRepo: repo,
 	}
 
 	restored, err := r.restoreReplacementJournal(context.Background(), op)

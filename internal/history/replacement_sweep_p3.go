@@ -475,7 +475,7 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 	// without mistaking an ordinary armed apply for a completed restore.
 	// Capture the backup metadata without following a swapped-in symlink so a
 	// failed consume can re-arm only the original object metadata.
-	backupInfo, _, _ := lstatRestoreSource(s.fs, backup)
+	backupInfo, _ := lstatRestoreSource(s.fs, backup)
 	if rmErr := removeReplacementBackup(s.fs, backup, "replacement sweep"); rmErr != nil {
 		s.rememberPendingRemoval(backupSlash)
 		if markReplacementRestorePending(&gf, backupSlash) {
@@ -557,7 +557,7 @@ func (s *ReplacementSweeper) retryPendingRemoval(ctx context.Context, rowID uint
 	}
 	// Capture metadata without following a swapped-in symlink; consumption
 	// failure below must recreate the original permission bits and timestamps.
-	backupInfo, _, _ := lstatRestoreSource(s.fs, backup)
+	backupInfo, _ := lstatRestoreSource(s.fs, backup)
 	if rmErr := removeReplacementBackup(s.fs, backup, "replacement sweep"); rmErr != nil {
 		s.rememberPendingRemoval(backupSlash)
 		return false

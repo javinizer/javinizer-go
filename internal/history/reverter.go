@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
@@ -65,6 +66,11 @@ var (
 	ErrCopyModeNotRevertible = errors.New("copy-mode operations cannot be reverted")
 	// ErrNoOperationsFound is returned when no operations exist for the given batch.
 	ErrNoOperationsFound = errors.New("no operations found for batch")
+
+	// canonicalizeNFOPathFunc is a narrow seam for the soft NFO restore fallback.
+	// filepath.Abs normally succeeds for ordinary test paths, so forcing its
+	// error without changing the process working directory is otherwise brittle.
+	canonicalizeNFOPathFunc = fsutil.CanonicalizePath
 )
 
 // fileSystemReverter abstracts filesystem revert operations so that Reverter.revertFile
@@ -167,7 +173,64 @@ func (a *aferoFSReverter) restoreNFO(ctx context.Context, op *models.BatchFileOp
 	return restoreNFOFS(ctx, a.fs, a.batchFileOpRepo, op, hardFailure)
 }
 
+// operationRevertLockRegistry serializes the complete revert flow for one
+// operation, including journal replay and the primary file move. The keyed
+// registry keeps unrelated operations parallel; active counts only tell a
+// waiter that its input snapshot may now be stale.
+type operationRevertLockRegistry struct {
+	registry *fsutil.KeyedLockRegistry
+	mu       sync.Mutex
+	active   map[string]int
+}
+
+func newOperationRevertLockRegistry() *operationRevertLockRegistry {
+	return &operationRevertLockRegistry{
+		registry: fsutil.NewKeyedLockRegistry(),
+		active:   make(map[string]int),
+	}
+}
+
+func (r *operationRevertLockRegistry) acquire(key string) (func(), bool) {
+	r.mu.Lock()
+	waited := r.active[key] > 0
+	r.active[key]++
+	r.mu.Unlock()
+
+	releaseKey := r.registry.Acquire(key)
+	return func() {
+		releaseKey()
+		r.mu.Lock()
+		r.active[key]--
+		if r.active[key] == 0 {
+			delete(r.active, key)
+		}
+		r.mu.Unlock()
+	}, waited
+}
+
+// revertOperationLocks is process-wide so separate Reverter instances (for
+// example, concurrent API requests) still serialize the same operation.
+var revertOperationLocks = newOperationRevertLockRegistry()
+
 func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation) (*RevertFileResult, error) {
+	release, waited := revertOperationLocks.acquire(fmt.Sprintf("rev-op:%d", op.ID))
+	defer release()
+
+	// A request may have loaded its operation row before another request won
+	// the lock. Refresh only that contended path so existing single-revert
+	// callers keep their established read behavior and the winner's status is
+	// authoritative before any primary filesystem leg runs.
+	if waited {
+		fresh, err := r.batchFileOpRepo.FindByID(ctx, op.ID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to re-read operation %d after waiting for revert lock: %w", op.ID, err)
+		}
+		if fresh == nil {
+			return nil, fmt.Errorf("failed to re-read operation %d after waiting for revert lock: row not found", op.ID)
+		}
+		*op = *fresh
+	}
+
 	logging.Debugf("Reverting operation %d: movie=%s type=%s original=%s new=%s revert_status=%s",
 		op.ID, op.MovieID, op.OperationType, op.OriginalPath, op.NewPath, op.RevertStatus)
 
@@ -186,6 +249,13 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 	if rejErr != nil {
 		logging.Warnf("Replacement journal restore refused/failed for op %d: %v", op.ID, rejErr)
 		return rejectedRevert(op, rejErr).withRetryable(rejErr), nil
+	}
+
+	// Journal replay may have refreshed a stale caller snapshot. Re-check the
+	// status before touching the primary path so a request that entered just
+	// after another request finished cannot run the primary revert twice.
+	if result, err := r.guardDoubleRevert(ctx, op); result != nil || err != nil {
+		return result, err
 	}
 
 	if result, err := r.checkAnchor(ctx, op); result != nil || err != nil {
@@ -222,6 +292,7 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 	if err := r.batchFileOpRepo.UpdateRevertStatus(ctx, op.ID, models.RevertStatusReverted); err != nil {
 		return nil, fmt.Errorf("filesystem reverted but failed to persist revert status for op %d: %w", op.ID, err)
 	}
+	op.RevertStatus = models.RevertStatusReverted
 
 	result := &RevertFileResult{
 		OperationID:  op.ID,
@@ -403,7 +474,7 @@ func restoreNFOHardFailure(ctx context.Context, fs afero.Fs, batchFileOpRepo dat
 
 func restoreNFOSoftFailure(fs afero.Fs, op *models.BatchFileOperation, nfoPath string) (string, *RevertFileResult) {
 	nfoDir := filepath.Dir(op.OriginalPath)
-	canonicalNfoDir, err := fsutil.CanonicalizePath(nfoDir)
+	canonicalNfoDir, err := canonicalizeNFOPathFunc(nfoDir)
 	if err != nil {
 		logging.Warnf("restoreNFOSoftFailure: failed to resolve absolute path for %q: %v", nfoDir, err)
 		canonicalNfoDir = filepath.Clean(nfoDir)

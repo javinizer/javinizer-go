@@ -3,6 +3,7 @@
 package fsutil
 
 import (
+	"errors"
 	"os"
 	"syscall"
 )
@@ -13,22 +14,31 @@ var replacementSignalZero = func(p *os.Process) error {
 }
 
 func replacementProbePIDAliveAwarePlatform(pid int) replacementPIDLiveness {
-	if replacementProcessAlive(pid) {
-		return replacementPIDAlive
-	}
-	// POSIX keeps the existing conservative liveness contract: a failed
-	// FindProcess/Signal(0) probe is treated as a dead owner.
-	return replacementPIDDead
+	return replacementProcessLiveness(pid)
 }
 
-func replacementProcessAlive(pid int) bool {
+// replacementProcessLiveness keeps POSIX probe outcomes distinct: ESRCH is a
+// proof that the process is gone, while other inspection failures are
+// undecidable and may use the classifier's age fallback.
+func replacementProcessLiveness(pid int) replacementPIDLiveness {
 	if pid <= 0 {
-		return false
+		return replacementPIDDead
 	}
 	process, err := replacementFindProcess(pid)
 	if err != nil {
-		return false
+		return replacementPIDUnprobeable
 	}
 	err = replacementSignalZero(process)
-	return err == nil || err == syscall.EPERM
+	switch {
+	case err == nil, errors.Is(err, syscall.EPERM):
+		return replacementPIDAlive
+	case errors.Is(err, syscall.ESRCH), errors.Is(err, os.ErrProcessDone):
+		return replacementPIDDead
+	default:
+		return replacementPIDUnprobeable
+	}
+}
+
+func replacementProcessAlive(pid int) bool {
+	return replacementProcessLiveness(pid) == replacementPIDAlive
 }
