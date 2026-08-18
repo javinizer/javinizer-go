@@ -358,9 +358,11 @@ func completionLedgerMerge(currentRaw, newRaw, folderRoot string) (next models.G
 // concurrent process appending (RecordReplacement) or consuming (revert/sweep)
 // entries can no longer be overwritten by a full Save — resurrected consumed
 // entries and erased new entries both came from that snapshot merge. Only the
-// journal column moves through the transaction; the caller's follow-up Update
-// re-persists the returned (tx-derived) bytes alongside the non-journal
-// columns, so the persisted journal always derives from the in-tx row.
+// journal column moves through the transaction; the caller's follow-up
+// UpdateNonJournalFields persists ONLY the non-journal columns (wave-10: the
+// follow-up full Save used to re-persist the tx-derived bytes, which still
+// clobbered any journal mutation committed between the tx commit and the
+// Save), so generated_files is owned exclusively by UpdateJournalInTx.
 func (l *dbRevertLog) mergeJournalInTx(ctx context.Context, recordID uint, opID OperationID, caller, newRaw, folderRoot string) (string, error) {
 	var merged string
 	txErr := l.repo.UpdateJournalInTx(ctx, recordID, func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
@@ -479,7 +481,10 @@ func (l *dbRevertLog) CaptureSnapshot(ctx context.Context, opID OperationID, cmd
 		preRecord.OriginalDirPath = sourceDir
 	}
 
-	if updateErr := l.repo.Update(ctx, preRecord); updateErr != nil {
+	// Wave-10: non-journal columns only — the generated_files column is owned
+	// by UpdateJournalInTx, so a concurrent journal append between FindByID
+	// and this write must not be clobbered by a full Save of the snapshot.
+	if updateErr := l.repo.UpdateNonJournalFields(ctx, preRecord); updateErr != nil {
 		resolveLogger(l.logger).Warnf("[revert-log] CaptureSnapshot: failed to update record %s: %v", opID, updateErr)
 	}
 }
@@ -511,7 +516,9 @@ func (l *dbRevertLog) Complete(ctx context.Context, opID OperationID, result *Ap
 	if result == nil {
 		updatePostOrganize(preRecord, "", false, preRecord.OriginalDirPath, "")
 		preRecord.RevertStatus = models.RevertStatusFailed
-		if updateErr := l.repo.Update(ctx, preRecord); updateErr != nil {
+		// Wave-10: generated_files stays with UpdateJournalInTx even here — a
+		// full Save of this snapshot could erase a foreign journal append.
+		if updateErr := l.repo.UpdateNonJournalFields(ctx, preRecord); updateErr != nil {
 			return fmt.Errorf("revert log Complete: mark record %s as failed: %w", opID, updateErr)
 		}
 		resolveLogger(l.logger).Warnf("[revert-log] Apply failed for %s — pre-record marked as incomplete", opID)
@@ -538,8 +545,9 @@ func (l *dbRevertLog) Complete(ctx context.Context, opID OperationID, result *Ap
 	// Wave-9 (codex review 4960250562 follow-up): the journal read-modify-write
 	// runs inside the row transaction against the FRESH row — merging into the
 	// preRecord snapshot here let a concurrent append/consume be overwritten by
-	// the follow-up full Save. The non-journal columns below keep the existing
-	// Update path; its Save re-persists the tx-derived journal bytes verbatim.
+	// the follow-up full Save. Wave-10 closes the residual window: the follow-up
+	// itself (UpdateNonJournalFields below) no longer writes generated_files at
+	// all, so an append/consume committed after this tx commit survives.
 	folderRoot := ""
 	if result.OrganizeResult != nil {
 		folderRoot = result.OrganizeResult.FolderPath
@@ -558,7 +566,7 @@ func (l *dbRevertLog) Complete(ctx context.Context, opID OperationID, result *Ap
 	}
 
 	updatePostOrganize(preRecord, newPath, inPlaceRenamed, sourceDir, mergedJournal)
-	if err := l.repo.Update(ctx, preRecord); err != nil {
+	if err := l.repo.UpdateNonJournalFields(ctx, preRecord); err != nil {
 		return fmt.Errorf("revert log Complete: update post-apply record for %s: %w", opID, err)
 	}
 	return nil
@@ -593,7 +601,8 @@ func (l *dbRevertLog) CompleteFailed(ctx context.Context, opID OperationID, resu
 	if result == nil {
 		updatePostOrganize(preRecord, "", false, preRecord.OriginalDirPath, "")
 		preRecord.RevertStatus = models.RevertStatusFailed
-		if updateErr := l.repo.Update(ctx, preRecord); updateErr != nil {
+		// Wave-10: non-journal columns only (see Complete's nil-result path).
+		if updateErr := l.repo.UpdateNonJournalFields(ctx, preRecord); updateErr != nil {
 			return fmt.Errorf("revert log CompleteFailed: mark record %s as failed: %w", opID, updateErr)
 		}
 		resolveLogger(l.logger).Warnf("[revert-log] Apply failed for %s — pre-record marked as incomplete", opID)
@@ -618,8 +627,10 @@ func (l *dbRevertLog) CompleteFailed(ctx context.Context, opID OperationID, resu
 	}
 	// Wave-9 (codex review 4960250562 follow-up): same journal-transaction
 	// routing as Complete — the merge must see the FRESH row, not the stale
-	// preRecord snapshot, so a concurrent journal mutation can no longer be
-	// clobbered by the follow-up full Save.
+	// preRecord snapshot. Wave-10: the follow-up column update below excludes
+	// generated_files entirely, so a journal mutation committed after this tx
+	// is no longer clobbered by the re-persist (UpdateJournalInTx owns that
+	// column exclusively).
 	mergedJournal, err := l.mergeJournalInTx(ctx, recordID, opID, "CompleteFailed",
 		buildGeneratedFilesJSON(resolveLogger(l.logger), result.NFOPath, subtitles, result.DownloadPaths), "")
 	if err != nil {
@@ -634,7 +645,7 @@ func (l *dbRevertLog) CompleteFailed(ctx context.Context, opID OperationID, resu
 	}
 	updatePostOrganize(preRecord, newPath, inPlaceRenamed, sourceDir, mergedJournal)
 	preRecord.RevertStatus = models.RevertStatusFailed
-	if err := l.repo.Update(ctx, preRecord); err != nil {
+	if err := l.repo.UpdateNonJournalFields(ctx, preRecord); err != nil {
 		return fmt.Errorf("revert log CompleteFailed: update failed record for %s: %w", opID, err)
 	}
 	resolveLogger(l.logger).Warnf("[revert-log] Apply failed for %s after filesystem mutation — record kept revertable (NewPath=%q)", opID, newPath)

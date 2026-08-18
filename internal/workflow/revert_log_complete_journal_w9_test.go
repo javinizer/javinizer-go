@@ -20,7 +20,10 @@ import (
 // payload against the row re-read INSIDE the journal transaction — never
 // against the stale preRecord snapshot — so a concurrent journal mutation
 // (append/consume in another process) is neither resurrected nor erased by
-// the completion's full Save.
+// the completion's full Save. Wave-10 (same review): the completion's
+// follow-up column write no longer persists generated_files AT ALL
+// (UpdateNonJournalFields) — UpdateJournalInTx owns the journal column — so
+// a mutation committed after the journal tx survives the follow-up.
 
 // runFnMock installs an UpdateJournalInTx expectation that executes fn
 // against current and returns fn's error, mirroring the repository contract.
@@ -39,8 +42,9 @@ func runFnMock(repo *mocks.MockBatchFileOperationRepositoryInterface, id uint, c
 // Complete's preRecord read and its journal transaction (a foreign process
 // appended a destination-B entry). The final journal must keep BOTH the
 // concurrent entry and Complete's own contribution, and the follow-up
-// non-journal Save must re-persist the tx-derived bytes — not the stale
-// snapshot.
+// non-journal column update carries the in-memory (tx-derived) journal bytes
+// — but as of wave-10 it never WRITES them (UpdateJournalInTx owns that
+// column), so nothing committed after the tx can be clobbered.
 func TestW9CompleteMergesAgainstFreshInTxRow(t *testing.T) {
 	repo := mocks.NewMockBatchFileOperationRepositoryInterface(t)
 	log := NewDBRevertLog(repo, nil, "job-w9", nil, nil, nil, nil)
@@ -64,7 +68,7 @@ func TestW9CompleteMergesAgainstFreshInTxRow(t *testing.T) {
 		RevertStatus: models.RevertStatusApplied, GeneratedFiles: staleJournal,
 	}, nil)
 	runFnMock(repo, 7, &models.BatchFileOperation{ID: 7, GeneratedFiles: freshJournal, RevertStatus: models.RevertStatusApplied}, &txPersisted)
-	repo.On("Update", mock.Anything, mock.AnythingOfType("*models.BatchFileOperation")).
+	repo.On("UpdateNonJournalFields", mock.Anything, mock.AnythingOfType("*models.BatchFileOperation")).
 		Run(func(args mock.Arguments) { saved = *args.Get(1).(*models.BatchFileOperation) }).Return(nil)
 
 	err := log.Complete(context.Background(), "7", &ApplyResult{
@@ -85,10 +89,11 @@ func TestW9CompleteMergesAgainstFreshInTxRow(t *testing.T) {
 	require.Contains(t, gf.Roots, "/dst/lib", "R4-2 organizer leaf folder seeds a root")
 
 	require.Equal(t, txPersisted, saved.GeneratedFiles,
-		"the non-journal Save re-persists the tx-derived journal, never the stale snapshot")
+		"the column update's in-memory record carries the tx-derived journal, never the stale snapshot")
 	require.Equal(t, "/dst/w9.mp4", saved.NewPath)
 	require.Equal(t, models.RevertStatusApplied, saved.RevertStatus)
 	require.NotEqual(t, staleJournal, saved.GeneratedFiles, "the stale snapshot must not win")
+	repo.AssertNotCalled(t, "Update", mock.Anything, mock.Anything)
 }
 
 // TestW9CompleteFailedMergesAgainstFreshInTxRow is the CompleteFailed twin: a
@@ -117,7 +122,7 @@ func TestW9CompleteFailedMergesAgainstFreshInTxRow(t *testing.T) {
 		RevertStatus: models.RevertStatusApplied, GeneratedFiles: staleJournal,
 	}, nil)
 	runFnMock(repo, 8, &models.BatchFileOperation{ID: 8, GeneratedFiles: freshJournal, RevertStatus: models.RevertStatusApplied}, &txPersisted)
-	repo.On("Update", mock.Anything, mock.AnythingOfType("*models.BatchFileOperation")).
+	repo.On("UpdateNonJournalFields", mock.Anything, mock.AnythingOfType("*models.BatchFileOperation")).
 		Run(func(args mock.Arguments) { saved = *args.Get(1).(*models.BatchFileOperation) }).Return(nil)
 
 	err := log.CompleteFailed(context.Background(), "8", &ApplyResult{
@@ -137,6 +142,7 @@ func TestW9CompleteFailedMergesAgainstFreshInTxRow(t *testing.T) {
 	require.Equal(t, txPersisted, saved.GeneratedFiles)
 	require.Equal(t, models.RevertStatusFailed, saved.RevertStatus, "CompleteFailed still marks the record failed")
 	require.Equal(t, "/dst/w9b.mp4", saved.NewPath, "partial state remains persisted")
+	repo.AssertNotCalled(t, "Update", mock.Anything, mock.Anything)
 }
 
 // TestW9CompleteJournalTxNotFound: the row vanished between the preRecord

@@ -251,7 +251,7 @@ func TestMiss_dbRevertLog_Complete_NilResult(t *testing.T) {
 		RevertStatus: models.RevertStatusApplied,
 	}
 	mockRepo.On("FindByID", mock.Anything, uint(1)).Return(preRecord, nil)
-	mockRepo.On("Update", mock.Anything, mock.AnythingOfType("*models.BatchFileOperation")).Return(nil)
+	mockRepo.On("UpdateNonJournalFields", mock.Anything, mock.AnythingOfType("*models.BatchFileOperation")).Return(nil)
 
 	err := log.Complete(context.Background(), "1", nil)
 	assert.NoError(t, err)
@@ -268,7 +268,7 @@ func TestMiss_dbRevertLog_Complete_NilResultUpdateError(t *testing.T) {
 		RevertStatus: models.RevertStatusApplied,
 	}
 	mockRepo.On("FindByID", mock.Anything, uint(1)).Return(preRecord, nil)
-	mockRepo.On("Update", mock.Anything, mock.AnythingOfType("*models.BatchFileOperation")).Return(fmt.Errorf("db error"))
+	mockRepo.On("UpdateNonJournalFields", mock.Anything, mock.AnythingOfType("*models.BatchFileOperation")).Return(fmt.Errorf("db error"))
 
 	err := log.Complete(context.Background(), "1", nil)
 	assert.Error(t, err)
@@ -293,7 +293,7 @@ func TestMiss_dbRevertLog_Complete_SuccessResult(t *testing.T) {
 			_, _, err := fn(&models.BatchFileOperation{ID: id})
 			return err
 		})
-	mockRepo.On("Update", mock.Anything, mock.AnythingOfType("*models.BatchFileOperation")).Return(nil)
+	mockRepo.On("UpdateNonJournalFields", mock.Anything, mock.AnythingOfType("*models.BatchFileOperation")).Return(nil)
 
 	result := &ApplyResult{
 		OrganizeResult: &organizer.OrganizeResult{
@@ -323,7 +323,7 @@ func TestMiss_dbRevertLog_Complete_SuccessResultUpdateError(t *testing.T) {
 			_, _, err := fn(&models.BatchFileOperation{ID: id})
 			return err
 		})
-	mockRepo.On("Update", mock.Anything, mock.AnythingOfType("*models.BatchFileOperation")).Return(fmt.Errorf("db error"))
+	mockRepo.On("UpdateNonJournalFields", mock.Anything, mock.AnythingOfType("*models.BatchFileOperation")).Return(fmt.Errorf("db error"))
 
 	result := &ApplyResult{}
 	err := log.Complete(context.Background(), "1", result)
@@ -481,7 +481,7 @@ func TestMiss_dbRevertLog_CaptureSnapshot_NFOFound(t *testing.T) {
 		RevertStatus: models.RevertStatusApplied,
 	}
 	mockRepo.On("FindByID", mock.Anything, uint(1)).Return(preRecord, nil)
-	mockRepo.On("Update", mock.Anything, mock.AnythingOfType("*models.BatchFileOperation")).Return(nil)
+	mockRepo.On("UpdateNonJournalFields", mock.Anything, mock.AnythingOfType("*models.BatchFileOperation")).Return(nil)
 
 	cmd := ApplyCmd{
 		Movie: &models.Movie{ID: "TEST-001"},

@@ -91,6 +91,20 @@ func (m *p3OpRepo) Update(_ context.Context, op *models.BatchFileOperation) erro
 	return nil
 }
 
+// UpdateNonJournalFields mirrors the wave-10 production contract in-memory:
+// every non-journal column follows op; generated_files stays with the stored
+// row (UpdateJournalInTx owns it).
+func (m *p3OpRepo) UpdateNonJournalFields(_ context.Context, op *models.BatchFileOperation) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cp := *op
+	if stored, ok := m.ops[op.ID]; ok {
+		cp.GeneratedFiles = stored.GeneratedFiles
+	}
+	m.ops[op.ID] = &cp
+	return nil
+}
+
 // UpdateJournalInTx mirrors the production repo's transaction contract
 // in-memory: the mutex plays the BEGIN IMMEDIATE write lock, the merge runs
 // against the freshly read stored row (ID/GeneratedFiles/RevertStatus

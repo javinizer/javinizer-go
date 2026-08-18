@@ -9,7 +9,9 @@ import (
 	"path/filepath"
 	"sort"
 	"sync/atomic"
+	"time"
 
+	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/logging"
@@ -546,6 +548,91 @@ func copyRestoreBytes(fs afero.Fs, backup, dest string) error {
 	if err := fsutil.ReplaceFile(fs, staged, dest); err != nil {
 		_ = fs.Remove(staged)
 		return fmt.Errorf("swap staged restore: %w", err)
+	}
+	return nil
+}
+
+// openRearmSource opens the destination whose bytes must rebuild a removed
+// backup (journal-consumption compensation, rearmReplacementBackup) under the
+// SAME discipline copyRestoreBytes applies to the backup open: Lstat first
+// (never following the final component), require a regular non-symlink file,
+// open through the platform no-follow seam, then verify the opened object is
+// still that same regular file (dev+inode identity when the filesystem
+// exposes it). Wave-10 codex follow-up: the compensation path used to copy
+// dest→backup via a plain path open, so an attacker swapping the destination
+// for a symlink between the backup removal and the re-arm got a PROTECTED
+// file copied into the media-dir backup, armed for a later restore. The
+// caller MUST stream from the returned handle — reopening the path would
+// re-widen exactly this Lstat→open window.
+func openRearmSource(fs afero.Fs, dest string) (afero.File, error) {
+	sourceInfo, err := lstatRestoreSource(fs, dest)
+	if err != nil {
+		return nil, fmt.Errorf("re-arm source %s: %w", dest, err)
+	}
+	if sourceInfo == nil {
+		return nil, refuseRestoreSource(dest, "filesystem returned no file information")
+	}
+	if sourceInfo.Mode()&os.ModeSymlink != 0 {
+		return nil, refuseRestoreSource(dest, "destination is a symlink")
+	}
+	if !sourceInfo.Mode().IsRegular() {
+		return nil, refuseRestoreSource(dest, fmt.Sprintf("destination is not a regular file (mode %s)", sourceInfo.Mode()))
+	}
+
+	// Waves 7–9 discipline mirrored from copyRestoreBytes: POSIX passes
+	// O_NOFOLLOW through OsFs to os.OpenFile (a symlink swapped in after the
+	// Lstat gate fails here); Windows opens with FILE_FLAG_OPEN_REPARSE_POINT
+	// and refuses a reparse point on the returned handle. MemMapFs ignores the
+	// unknown read flag and has no symlink model; the Lstat+regularity gate
+	// above is its available protection.
+	src, err := restoreOpenReplacementSource(fs, dest)
+	if err != nil {
+		return nil, fmt.Errorf("re-arm source %s: %w", dest, err)
+	}
+	openedInfo, err := src.Stat()
+	if err != nil {
+		_ = src.Close()
+		return nil, fmt.Errorf("stat opened re-arm source %s: %w", dest, err)
+	}
+	if openedInfo == nil || openedInfo.Mode()&os.ModeSymlink != 0 || !openedInfo.Mode().IsRegular() {
+		_ = src.Close()
+		return nil, refuseRestoreSource(dest, "opened object is not a regular file")
+	}
+	if sourceDev, sourceIno, sourceOK := restoreSourceIdentity(sourceInfo); sourceOK {
+		if openedDev, openedIno, openedOK := restoreSourceIdentity(openedInfo); openedOK && (sourceDev != openedDev || sourceIno != openedIno) {
+			_ = src.Close()
+			return nil, refuseRestoreSource(dest, "opened object differs from the Lstat object")
+		}
+	}
+	return src, nil
+}
+
+// copyRearmSourceBytes streams an already-open, identity-verified re-arm
+// source into the backup path through a same-directory temp file + atomic
+// rename — fsutil.CopyFileFs's write side WITHOUT its path re-open, which
+// would drop the no-follow handle openRearmSource established.
+func copyRearmSourceBytes(fs afero.Fs, src io.Reader, backup string) error {
+	if err := fs.MkdirAll(filepath.Dir(backup), config.DirPerm); err != nil {
+		return fmt.Errorf("re-arm create backup directory: %w", err)
+	}
+	tmp := filepath.Join(filepath.Dir(backup),
+		fmt.Sprintf(".%s.tmp-%d-%d", filepath.Base(backup), time.Now().UnixNano(), os.Getpid()))
+	dstFile, err := fs.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, config.FilePerm)
+	if err != nil {
+		return fmt.Errorf("re-arm create backup %s: %w", backup, err)
+	}
+	if _, cerr := io.Copy(dstFile, src); cerr != nil {
+		_ = dstFile.Close()
+		_ = fs.Remove(tmp)
+		return fmt.Errorf("re-arm copy bytes for %s: %w", backup, cerr)
+	}
+	if err := dstFile.Close(); err != nil {
+		_ = fs.Remove(tmp)
+		return fmt.Errorf("re-arm close backup %s: %w", backup, err)
+	}
+	if err := fs.Rename(tmp, backup); err != nil {
+		_ = fs.Remove(tmp)
+		return fmt.Errorf("re-arm install backup %s: %w", backup, err)
 	}
 	return nil
 }

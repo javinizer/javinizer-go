@@ -949,6 +949,63 @@ func (_c *MockBatchFileOperationRepositoryInterface_UpdateJournalInTx_Call) RunA
 	return _c
 }
 
+// UpdateNonJournalFields provides a mock function for the type MockBatchFileOperationRepositoryInterface
+func (_mock *MockBatchFileOperationRepositoryInterface) UpdateNonJournalFields(ctx context.Context, op *models.BatchFileOperation) error {
+	ret := _mock.Called(ctx, op)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateNonJournalFields")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, *models.BatchFileOperation) error); ok {
+		r0 = returnFunc(ctx, op)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockBatchFileOperationRepositoryInterface_UpdateNonJournalFields_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateNonJournalFields'
+type MockBatchFileOperationRepositoryInterface_UpdateNonJournalFields_Call struct {
+	*mock.Call
+}
+
+// UpdateNonJournalFields is a helper method to define mock.On call
+//   - ctx context.Context
+//   - op *models.BatchFileOperation
+func (_e *MockBatchFileOperationRepositoryInterface_Expecter) UpdateNonJournalFields(ctx any, op any) *MockBatchFileOperationRepositoryInterface_UpdateNonJournalFields_Call {
+	return &MockBatchFileOperationRepositoryInterface_UpdateNonJournalFields_Call{Call: _e.mock.On("UpdateNonJournalFields", ctx, op)}
+}
+
+func (_c *MockBatchFileOperationRepositoryInterface_UpdateNonJournalFields_Call) Run(run func(ctx context.Context, op *models.BatchFileOperation)) *MockBatchFileOperationRepositoryInterface_UpdateNonJournalFields_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 *models.BatchFileOperation
+		if args[1] != nil {
+			arg1 = args[1].(*models.BatchFileOperation)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockBatchFileOperationRepositoryInterface_UpdateNonJournalFields_Call) Return(err error) *MockBatchFileOperationRepositoryInterface_UpdateNonJournalFields_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockBatchFileOperationRepositoryInterface_UpdateNonJournalFields_Call) RunAndReturn(run func(ctx context.Context, op *models.BatchFileOperation) error) *MockBatchFileOperationRepositoryInterface_UpdateNonJournalFields_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // UpdateRevertStatus provides a mock function for the type MockBatchFileOperationRepositoryInterface
 func (_mock *MockBatchFileOperationRepositoryInterface) UpdateRevertStatus(ctx context.Context, id uint, status models.RevertStatusEnum) error {
 	ret := _mock.Called(ctx, id, status)

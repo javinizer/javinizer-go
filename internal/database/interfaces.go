@@ -173,6 +173,13 @@ type BatchFileOperationRepositoryInterface interface {
 	// 4960250562 — durable cross-process serialization beyond the process-local
 	// journal locks and per-destination .dlbusy markers).
 	UpdateJournalInTx(ctx context.Context, id uint, fn JournalUpdateFn) error
+	// UpdateNonJournalFields persists one row's non-journal columns WITHOUT
+	// writing generated_files: the journal column is owned exclusively by
+	// UpdateJournalInTx, so a completion's post-transaction column update must
+	// never re-persist its (possibly stale) journal snapshot — a concurrent
+	// append/consume committed in between would otherwise be erased/resurrected
+	// (POSTER-WRITE-HARDENING wave-10 codex follow-up).
+	UpdateNonJournalFields(ctx context.Context, op *models.BatchFileOperation) error
 }
 
 // ApiTokenRepositoryInterface defines the contract for API token operations

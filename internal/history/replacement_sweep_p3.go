@@ -146,8 +146,25 @@ func markReplacementEntryRestorePending(ctx context.Context, repo database.Batch
 	return txErr
 }
 
+// rearmReplacementBackup recreates the backup from the destination's bytes
+// when a journal consumption fails AFTER the backup was removed, restoring
+// the armed retry posture (callers keep info's permission bits and mtime).
+// Wave-10 codex follow-up: the destination used to be copied via a plain
+// fs.Open — an attacker swapping dest for a symlink in the removal→re-arm
+// window got a protected file copied into the media-dir backup, armed for a
+// later restore (privilege escalation). The open now runs through the same
+// no-follow + regular-file + identity discipline as the restore source open
+// (openRearmSource) and the copy streams from THAT handle.
 func rearmReplacementBackup(fs afero.Fs, dest, backup string, info os.FileInfo) error {
-	if err := fsutil.CopyFileFs(fs, dest, backup); err != nil {
+	if filepath.Clean(dest) == filepath.Clean(backup) {
+		return nil // CopyFileFs parity (wave-9): identical paths are a no-op
+	}
+	src, err := openRearmSource(fs, dest)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = src.Close() }()
+	if err := copyRearmSourceBytes(fs, src, backup); err != nil {
 		return err
 	}
 	if info == nil {

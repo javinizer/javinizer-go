@@ -199,9 +199,57 @@ func (r *BatchFileOperationRepository) UpdateJournalInTx(ctx context.Context, id
 }
 
 // Update saves all fields of the given batch file operation record.
+//
+// Callers carrying a generated-files journal MUST NOT use this: a full Save
+// rewrites generated_files with whatever snapshot the caller hydrated, so any
+// journal mutation committed after that snapshot is clobbered/resurrected.
+// The journal column is owned exclusively by UpdateJournalInTx; non-journal
+// completion writes go through UpdateNonJournalFields (wave-10 codex
+// follow-up).
 func (r *BatchFileOperationRepository) Update(ctx context.Context, op *models.BatchFileOperation) error {
 	if err := r.GetDB().WithContext(ctx).Save(op).Error; err != nil {
 		return wrapDBErr("update", fmt.Sprintf("batch file operation %d", op.ID), err)
+	}
+	return nil
+}
+
+// UpdateNonJournalFields persists one row's non-journal columns WITHOUT
+// touching generated_files (POSTER-WRITE-HARDENING wave-10 codex follow-up):
+// wave-9 moved the journal read-modify-write into UpdateJournalInTx's BEGIN
+// IMMEDIATE transaction, but the completion's follow-up full Save re-persisted
+// tx-derived journal bytes AFTER the commit — a concurrent append (apply arm)
+// or consume (revert/sweep) landing between the transaction commit and that
+// Save was silently erased/resurrected. From wave-10 on, generated_files is
+// written ONLY by UpdateJournalInTx.
+//
+// The column set is the full non-journal persisted set (Save-parity) listed
+// explicitly as a map so zero values persist exactly like Save (a plain
+// struct Updates would skip false/""/nil fields); the primary key and
+// generated_files are excluded. updated_at is stamped like Save and
+// UpdateJournalInTx.
+func (r *BatchFileOperationRepository) UpdateNonJournalFields(ctx context.Context, op *models.BatchFileOperation) error {
+	if op == nil {
+		return fmt.Errorf("update non-journal fields for batch file operation: record must not be nil")
+	}
+	label := fmt.Sprintf("batch file operation %d", op.ID)
+	if err := r.GetDB().WithContext(ctx).Model(&models.BatchFileOperation{}).
+		Where("id = ?", op.ID).
+		Updates(map[string]any{
+			"batch_job_id":      op.BatchJobID,
+			"movie_id":          op.MovieID,
+			"original_path":     op.OriginalPath,
+			"new_path":          op.NewPath,
+			"operation_type":    op.OperationType,
+			"nfo_snapshot":      op.NFOSnapshot,
+			"nfo_path":          op.NFOPath,
+			"revert_status":     op.RevertStatus,
+			"reverted_at":       op.RevertedAt,
+			"in_place_renamed":  op.InPlaceRenamed,
+			"original_dir_path": op.OriginalDirPath,
+			"created_at":        op.CreatedAt,
+			"updated_at":        time.Now().UTC(),
+		}).Error; err != nil {
+		return wrapDBErr("update non-journal fields", label, err)
 	}
 	return nil
 }

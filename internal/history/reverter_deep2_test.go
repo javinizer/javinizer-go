@@ -96,6 +96,17 @@ func (m *mockBatchFileOpRepo) Update(ctx context.Context, op *models.BatchFileOp
 	return nil
 }
 
+// UpdateNonJournalFields mirrors the wave-10 production contract in-memory:
+// non-journal columns follow op while the stored row keeps its journal.
+func (m *mockBatchFileOpRepo) UpdateNonJournalFields(ctx context.Context, op *models.BatchFileOperation) error {
+	cp := *op
+	if stored, ok := m.ops[op.ID]; ok {
+		cp.GeneratedFiles = stored.GeneratedFiles
+	}
+	m.ops[op.ID] = &cp
+	return nil
+}
+
 // UpdateJournalInTx mirrors the production journal transaction for the
 // in-memory fixture: the stored row is re-read lean and the merge result
 // replaces its generated-files ledger only when persist is requested.

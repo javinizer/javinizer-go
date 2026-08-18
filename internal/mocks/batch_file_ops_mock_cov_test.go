@@ -41,6 +41,34 @@ func TestMockBatchFileOperationRepositoryInterface_Delegators(t *testing.T) {
 		require.Error(t, err)
 	})
 
+	// Wave-10: coverage for the UpdateNonJournalFields mock delegator and its
+	// expecter wrappers (Run/Return/RunAndReturn).
+	t.Run("UpdateNonJournalFields wrappers", func(t *testing.T) {
+		op := &models.BatchFileOperation{ID: 42}
+		m := NewMockBatchFileOperationRepositoryInterface(t)
+		m.EXPECT().UpdateNonJournalFields(mock.Anything, op).
+			Run(func(ctx context.Context, op *models.BatchFileOperation) {}).
+			Return(nil)
+		require.NoError(t, m.UpdateNonJournalFields(ctx, op))
+
+		m2 := NewMockBatchFileOperationRepositoryInterface(t)
+		m2.EXPECT().UpdateNonJournalFields(mock.Anything, op).
+			RunAndReturn(func(ctx context.Context, op *models.BatchFileOperation) error {
+				return nil
+			})
+		require.NoError(t, m2.UpdateNonJournalFields(ctx, op))
+
+		m3 := NewMockBatchFileOperationRepositoryInterface(t)
+		m3.On("UpdateNonJournalFields", mock.Anything, op).Return(errors.New("boom"))
+		require.Error(t, m3.UpdateNonJournalFields(ctx, op))
+
+		// Empty varargs Return() leaves no values for the delegator — the
+		// mock's missing-return guard panics (same guard every delegator has).
+		m4 := &MockBatchFileOperationRepositoryInterface{}
+		m4.On("UpdateNonJournalFields", mock.Anything, op).Return()
+		require.Panics(t, func() { _ = m4.UpdateNonJournalFields(ctx, op) })
+	})
+
 	t.Run("scalar delegators", func(t *testing.T) {
 		m := NewMockBatchFileOperationRepositoryInterface(t)
 		m.On("CountByBatchJobIDAndRevertStatus", mock.Anything, "j", models.RevertStatusReverted).Return(int64(2), nil)
@@ -65,6 +93,8 @@ func TestMockBatchFileOperationRepositoryInterface_Delegators(t *testing.T) {
 		assert.NoError(t, m.CreateBatch(ctx, []*models.BatchFileOperation{op}))
 		m.On("Update", mock.Anything, op).Return(nil)
 		assert.NoError(t, m.Update(ctx, op))
+		m.On("UpdateNonJournalFields", mock.Anything, op).Return(nil)
+		assert.NoError(t, m.UpdateNonJournalFields(ctx, op))
 		m.On("UpdateRevertStatus", mock.Anything, uint(9), models.RevertStatusReverted).Return(nil)
 		assert.NoError(t, m.UpdateRevertStatus(ctx, uint(9), models.RevertStatusReverted))
 		m.On("UpdateJournalInTx", mock.Anything, uint(9), mock.Anything).Return(nil)
