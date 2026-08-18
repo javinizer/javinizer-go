@@ -45,7 +45,7 @@ func replacementProcessStartTimePlatform(pid int) *time.Time {
 	}
 	seconds := startTicks / clockTicks
 	remainingTicks := startTicks % clockTicks
-	if seconds > int64((1<<63-1)/int64(time.Second)) {
+	if seconds > int64((1<<63-1)/time.Second) {
 		return nil
 	}
 	start := time.Unix(bootSeconds, 0).

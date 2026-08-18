@@ -90,6 +90,8 @@ func TestDestinationProbeRoot_StopsAtUnstatableFilesystemRoot(t *testing.T) {
 	require.Equal(t, cleanProbeRoot("/"), destinationProbeRoot("/"))
 }
 
+// Probe filenames are process-unique; this test intentionally verifies the
+// stat/enumeration behavior without depending on the old fixed basename.
 func TestProbeCaseSensitive_CoversStatAndEnumerationPaths(t *testing.T) {
 	root := t.TempDir()
 	base := w10RealProbeOps()

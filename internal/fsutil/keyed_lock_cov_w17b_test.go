@@ -10,6 +10,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// The user-owned alternate spelling is seeded from the generated probe name;
+// the test does not rely on a fixed probe basename.
 func TestProbeCaseSensitiveW17B_SensitiveRootPreservesUppercaseUserFile(t *testing.T) {
 	root := t.TempDir()
 	ops := &w17BProbeFS{
@@ -28,6 +30,8 @@ func TestProbeCaseSensitiveW17B_SensitiveRootPreservesUppercaseUserFile(t *testi
 	require.Equal(t, "user-owned probe", ops.files[ops.key(ops.userPath)].content)
 }
 
+// The generated name may vary per attempt, but cleanup must still target only
+// the exact spelling successfully created by O_EXCL.
 func TestProbeCaseSensitiveW17B_InsensitiveRootCleansCreatedFile(t *testing.T) {
 	root := t.TempDir()
 	ops := &w17BProbeFS{

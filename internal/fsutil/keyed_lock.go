@@ -1,6 +1,10 @@
 package fsutil
 
 import (
+	cryptorand "crypto/rand"
+	"encoding/hex"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -9,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // KeyedLockRegistry provides per-key mutexes with reference-counted eviction
@@ -51,10 +56,16 @@ type caseSensitivityProbe func(root string) (bool, error)
 // as case-insensitive by IsCaseSensitiveRoot (fail closed).
 var CaseSensitiveProbe caseSensitivityProbe = defaultCaseSensitiveProbe
 
+const caseProbeMaxAttempts = 8
+
 var (
 	caseSensitivityCacheMu sync.Mutex
 	caseSensitivityCache   = make(map[string]bool)
 	caseProbeOrdinal       atomic.Uint64
+	// caseProbeRandReader is a seam for entropy failure tests. The production
+	// source is cryptographically random, so probe names do not expose any
+	// path or user data.
+	caseProbeRandReader io.Reader = cryptorand.Reader
 )
 
 // ResetCaseSensitivityCache clears the process cache. It is primarily a test
@@ -123,7 +134,9 @@ var probeRootStat = os.Stat
 
 // destinationProbeRoot selects the destination's directory, or its nearest
 // existing ancestor, so the probe creates a sibling rather than touching the
-// destination itself.
+// destination itself. Selection is intentionally stat-only: an existing
+// read-only directory remains the probe root, and the later create failure
+// retains the fail-closed insensitive result.
 func destinationProbeRoot(p string) string {
 	root := filepath.Dir(filepath.FromSlash(normalizeDestPath(p)))
 	for {
@@ -171,8 +184,34 @@ var osCaseProbeOps = caseProbeOps{
 	remove:  os.Remove,
 }
 
-// defaultCaseSensitiveProbe creates one uniquely named file and stats its
-// differently-cased spelling. Directory enumeration is the fallback when the
+func caseProbeToken() string {
+	ordinal := caseProbeOrdinal.Add(1)
+	if caseProbeRandReader != nil {
+		entropy := make([]byte, 8)
+		if _, err := io.ReadFull(caseProbeRandReader, entropy); err == nil {
+			return strings.Join([]string{
+				strconv.Itoa(os.Getpid()),
+				hex.EncodeToString(entropy),
+				strconv.FormatUint(ordinal, 10),
+			}, "_")
+		}
+	}
+	return strings.Join([]string{
+		strconv.Itoa(os.Getpid()),
+		strconv.FormatInt(time.Now().UnixNano(), 10),
+		strconv.FormatUint(ordinal, 10),
+	}, "_")
+}
+
+func caseProbeName() string {
+	return ".javinizer_case_probe_" + caseProbeToken()
+}
+
+// defaultCaseSensitiveProbe creates one process-unique file and stats its
+// differently-cased spelling. The name carries the PID, fresh crypto entropy,
+// and an ordinal (with a timestamp fallback if entropy is unavailable). An
+// O_EXCL collision gets a bounded retry with a fresh name; other open failures
+// retain the fail-closed path. Directory enumeration is the fallback when the
 // alternate stat is indeterminate. Cleanup removes only the exact probe path
 // created by O_EXCL; the alternate spelling may belong to the user and is
 // never a cleanup target. Any probe or cleanup failure is returned for the
@@ -182,49 +221,52 @@ func defaultCaseSensitiveProbe(root string) (bool, error) {
 }
 
 func probeCaseSensitive(ops caseProbeOps, root string) (bool, error) {
-	token := strconv.FormatUint(caseProbeOrdinal.Add(1), 10)
-	name := ".javinizer_case_probe_" + token
-	alternate := ".JAVINIZER_CASE_PROBE_" + token
-	path := filepath.Join(root, name)
-	alternatePath := filepath.Join(root, alternate)
-	file, err := ops.openFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		return false, err
-	}
-	cleanup := func() error {
-		if err := ops.remove(path); err != nil && !os.IsNotExist(err) {
-			return err
+	for attempt := 0; ; attempt++ {
+		name := caseProbeName()
+		path := filepath.Join(root, name)
+		file, err := ops.openFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		if err != nil {
+			if errors.Is(err, os.ErrExist) && attempt+1 < caseProbeMaxAttempts {
+				continue
+			}
+			return false, err
 		}
-		return nil
-	}
-	if err := file.Close(); err != nil {
-		_ = cleanup()
-		return false, err
-	}
-
-	caseSensitive := false
-	if _, statErr := ops.stat(alternatePath); statErr == nil {
-		caseSensitive = false
-	} else if os.IsNotExist(statErr) {
-		caseSensitive = true
-	} else {
-		entries, readErr := ops.readDir(root)
-		if readErr != nil {
+		alternatePath := filepath.Join(root, strings.ToUpper(name))
+		cleanup := func() error {
+			if err := ops.remove(path); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+			return nil
+		}
+		if err := file.Close(); err != nil {
 			_ = cleanup()
-			return false, readErr
+			return false, err
 		}
-		caseSensitive = true
-		for _, entry := range entries {
-			if strings.EqualFold(entry.Name(), name) {
-				caseSensitive = false
-				break
+
+		caseSensitive := false
+		if _, statErr := ops.stat(alternatePath); statErr == nil {
+			caseSensitive = false
+		} else if os.IsNotExist(statErr) {
+			caseSensitive = true
+		} else {
+			entries, readErr := ops.readDir(root)
+			if readErr != nil {
+				_ = cleanup()
+				return false, readErr
+			}
+			caseSensitive = true
+			for _, entry := range entries {
+				if strings.EqualFold(entry.Name(), name) {
+					caseSensitive = false
+					break
+				}
 			}
 		}
+		if err := cleanup(); err != nil {
+			return false, err
+		}
+		return caseSensitive, nil
 	}
-	if err := cleanup(); err != nil {
-		return false, err
-	}
-	return caseSensitive, nil
 }
 
 // Acquire blocks until the mutex for key is held and returns a release
