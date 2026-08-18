@@ -73,13 +73,16 @@ func TestIsCaseSensitiveRoot_ProbeFailureAndNilFallbackAreCached(t *testing.T) {
 		return true, probeErr
 	}
 	ResetCaseSensitivityCache()
-	require.False(t, IsCaseSensitiveRoot(root))
-	require.False(t, IsCaseSensitiveRoot(root))
-	require.Equal(t, 1, calls, "probe failure is cached as insensitive")
+	// Codex P2: a probe ERROR leaves the case decision undecidable, so the
+	// conservative posture preserves case distinctions instead of folding on a
+	// guess; folding requires a positive insensitivity determination.
+	require.True(t, IsCaseSensitiveRoot(root), "probe failure preserves case distinctions")
+	require.True(t, IsCaseSensitiveRoot(root), "the conservative posture is cached")
+	require.Equal(t, 1, calls, "probe failure is cached as case-preserving without a second probe")
 
 	CaseSensitiveProbe = nil
 	ResetCaseSensitivityCache()
-	require.False(t, IsCaseSensitiveRoot(t.TempDir()), "nil probe seam fails closed")
+	require.False(t, IsCaseSensitiveRoot(t.TempDir()), "the nil probe seam is a deliberate forced-insensitive test posture, not a probe failure")
 	require.False(t, IsCaseSensitiveRoot(""), "an empty root is normalized before probing")
 }
 

@@ -46,7 +46,13 @@ func TestReverterCoverageW7_RestoreStageCollisionRetry(t *testing.T) {
 
 	fs := &covW7HistoryRenameFS{Fs: base, dest: dest}
 	require.NoError(t, copyRestoreBytes(fs, backup, dest))
-	require.Equal(t, dest+".rstr.3", fs.renamedFrom, "first free staging slot must be used")
+	// Wave-11's restoreOSPath normalizes dest once at copyRestoreBytes entry,
+	// so the staged rename surfaces in PLATFORM-NATIVE spelling on Windows
+	// (\out\W7-COLLISION\poster.jpg.rstr.3) while POSIX keeps the journal slash
+	// spelling. Compare separator-agnostically; the native spelling is
+	// intentional production behavior.
+	require.Equal(t, filepath.ToSlash(dest+".rstr.3"), filepath.ToSlash(fs.renamedFrom),
+		"first free staging slot must be used")
 	require.Equal(t, "restored", string(mustRead2(t, base, dest)))
 	require.Equal(t, "occupied-one", string(mustRead2(t, base, dest+".rstr.1")))
 	require.Equal(t, "occupied-two", string(mustRead2(t, base, dest+".rstr.2")))

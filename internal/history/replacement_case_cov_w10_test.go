@@ -113,7 +113,11 @@ func TestReplacementSweep_CaseSensitiveKeepsCrossCaseBackupsDistinct(t *testing.
 	require.Empty(t, gf.Replacements)
 }
 
-func TestProbeFailureFallsBackToInsensitiveMatching(t *testing.T) {
+// Codex P2 (keyed-lock probe posture): a probe ERROR leaves the case decision
+// undecidable. Folding on that guess could alias byte-distinct files on a
+// case-sensitive volume, so the conservative fallback PRESERVES case
+// distinctions; only a positive insensitivity determination unlocks folding.
+func TestProbeFailurePreservesCaseKeyedMatching(t *testing.T) {
 	previous := fsutil.CaseSensitiveProbe
 	probeErr := errors.New("probe unavailable")
 	fsutil.CaseSensitiveProbe = func(string) (bool, error) { return true, probeErr }
@@ -124,9 +128,9 @@ func TestProbeFailureFallsBackToInsensitiveMatching(t *testing.T) {
 	})
 
 	root := t.TempDir()
-	require.False(t, fsutil.IsCaseSensitiveRoot(root), "probe failure must fail closed")
-	require.Equal(t,
+	require.True(t, fsutil.IsCaseSensitiveRoot(root), "an undecidable probe must not fold case")
+	require.NotEqual(t,
 		fsutil.DestKeyForRoot(root, root+"/Poster.jpg"),
 		fsutil.DestKeyForRoot(root, root+"/poster.jpg"),
-		"probe failure must retain broader folded matching")
+		"probe failure keeps distinct keys; folded matching needs a positive determination")
 }

@@ -55,8 +55,9 @@ var PathBackslashesAreSeparators = runtime.GOOS == "windows"
 // be forced by tests without changing the journal format.
 type caseSensitivityProbe func(root string) (bool, error)
 
-// CaseSensitiveProbe is the process-wide probe seam. A probe error is treated
-// as case-insensitive by IsCaseSensitiveRoot (fail closed).
+// CaseSensitiveProbe is the process-wide probe seam. A probe error is
+// undecidable, so IsCaseSensitiveRoot keeps case distinctions for that root
+// (conservative distinct-key posture) rather than folding on a guess.
 var CaseSensitiveProbe caseSensitivityProbe = defaultCaseSensitiveProbe
 
 const caseProbeMaxAttempts = 8
@@ -79,23 +80,52 @@ func ResetCaseSensitivityCache() {
 	caseSensitivityCacheMu.Unlock()
 }
 
-// IsCaseSensitiveRoot reports the cached case behavior for root. Probe errors,
-// nil probe seams, and unwritable roots all resolve to false (insensitive).
+// IsCaseSensitiveRoot reports the cached case behavior for root.
+//
+// One probe, zero mutex-held IO (codex P2): the filesystem probe runs WITHOUT
+// the cache mutex — holding it across the create/stat/remove probe serialized
+// every destination-key derivation process-wide behind one root's slow IO.
+// Concurrent first-time queries for one root may therefore probe in parallel
+// (still exactly one probe per call); the revalidation under the mutex
+// publishes a single entry, and a caller whose speculative result loses the
+// race adopts the published posture so all callers converge.
+//
+// Case folding requires a POSITIVE insensitivity determination (codex P2):
+//   - a probe ERROR (unwritable root, transient IO) leaves the case decision
+//     undecided, so the root is treated as case-PRESERVING — folding on a
+//     guess could alias byte-distinct files (Poster.jpg vs poster.jpg) on what
+//     is actually a case-sensitive volume, while preserved distinctions only
+//     ever cost an extra (safe) bucket;
+//   - a nil probe seam is not a failure but a deliberate test posture for
+//     forced-insensitive matching, and keeps the folded result.
 func IsCaseSensitiveRoot(root string) bool {
 	root = cleanProbeRoot(root)
 	caseSensitivityCacheMu.Lock()
-	defer caseSensitivityCacheMu.Unlock()
 	if result, ok := caseSensitivityCache[root]; ok {
+		caseSensitivityCacheMu.Unlock()
 		return result
 	}
+	caseSensitivityCacheMu.Unlock()
+
 	probe := CaseSensitiveProbe
+	result := false
 	if probe == nil {
-		caseSensitivityCache[root] = false
-		return false
-	}
-	result, err := probe(root)
-	if err != nil {
+		// Explicit test posture, not a probe failure (see doc comment).
 		result = false
+	} else if probed, err := probe(root); err != nil {
+		// Undecided root: preserve case distinctions; only a positive
+		// insensitivity determination may fold.
+		result = true
+	} else {
+		result = probed
+	}
+
+	caseSensitivityCacheMu.Lock()
+	defer caseSensitivityCacheMu.Unlock()
+	if cached, ok := caseSensitivityCache[root]; ok {
+		// A parallel first probe published meanwhile: adopt the authoritative
+		// entry rather than racing in a divergent posture.
+		return cached
 	}
 	caseSensitivityCache[root] = result
 	return result
@@ -104,9 +134,10 @@ func IsCaseSensitiveRoot(root string) bool {
 // DestKey canonicalizes a destination path for CROSS-FORM comparisons while
 // respecting the destination root's filesystem semantics. Backslash
 // separators are normalized only when PathBackslashesAreSeparators is true.
-// Case is folded on insensitive/tolerant roots, preserving the earlier
-// fail-closed behavior; case-sensitive roots retain the spelling so distinct
-// files such as Poster.jpg and poster.jpg do not share a journal bucket.
+// Case is folded only after a positive insensitivity determination;
+// undecidable (probe-failed) and case-sensitive roots retain the spelling so
+// distinct files such as Poster.jpg and poster.jpg do not share a journal
+// bucket.
 // Whitespace is NEVER folded under either case posture: it is part of the
 // filename, and trimming it would alias byte-distinct files into one bucket.
 func DestKey(p string) string {

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -425,7 +426,11 @@ type renameDestWedgeHistoryFs struct {
 }
 
 func (f renameDestWedgeHistoryFs) Rename(from, to string) error {
-	if to == f.dst {
+	// Wave-11's restoreOSPath normalizes dest once at copyRestoreBytes entry,
+	// so the swap arrives with the OS-native separator spelling (backslashed on
+	// Windows) rather than the journal slash spelling f.dst carries. Key the
+	// wedge separator-agnostically so it matches the post-normalization call.
+	if filepath.ToSlash(to) == filepath.ToSlash(f.dst) {
 		return errors.New("swap wedge")
 	}
 	return f.Fs.Rename(from, to)

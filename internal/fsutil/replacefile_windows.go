@@ -3,15 +3,14 @@
 package fsutil
 
 import (
-	"errors"
-	"fmt"
-
 	"github.com/spf13/afero"
 	"golang.org/x/sys/windows"
 )
 
-var ErrReplaceUnsupported = errors.New("replace existing destination unsupported")
-
+// ReplaceFile atomically replaces dst with src: MoveFileEx +
+// MOVEFILE_REPLACE_EXISTING for OsFs; virtual filesystems fall back to the
+// shared rename leg (replacefile.go), which keeps the filesystem's own error
+// unwrap-reachable next to ErrReplaceUnsupported.
 func ReplaceFile(fs afero.Fs, src, dst string) error {
 	if _, ok := fs.(*afero.OsFs); ok {
 		srcPtr, err := windows.UTF16PtrFromString(src)
@@ -24,8 +23,5 @@ func ReplaceFile(fs afero.Fs, src, dst string) error {
 		}
 		return windows.MoveFileEx(srcPtr, dstPtr, windows.MOVEFILE_REPLACE_EXISTING)
 	}
-	if err := fs.Rename(src, dst); err != nil {
-		return fmt.Errorf("%w: %v", ErrReplaceUnsupported, err)
-	}
-	return nil
+	return replaceFileVirtualFallback(fs, src, dst)
 }
