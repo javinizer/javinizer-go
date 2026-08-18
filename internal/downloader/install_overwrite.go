@@ -38,19 +38,56 @@ var restoreCopyOrdinal atomic.Uint64
 // Re-arm callers reverse backup and dest to copy restored destination bytes
 // back into a consumed backup using the same metadata-preserving semantics.
 func copyBackupToDest(fsys afero.Fs, backup, dest string) error {
-	src, err := fsys.Open(backup)
+	// Validate the path before opening it: Stat/Open would follow a hostile
+	// backup symlink and copy its target into the media directory.
+	sourceInfo, err := lstatRestoreSource(fsys, backup)
 	if err != nil {
 		return fmt.Errorf("open backup: %w", err)
 	}
+	if sourceInfo == nil {
+		return refuseRestoreSource(backup, "filesystem returned no file information")
+	}
+	if sourceInfo.Mode()&os.ModeSymlink != 0 {
+		return refuseRestoreSource(backup, "backup is a symlink")
+	}
+	if !sourceInfo.Mode().IsRegular() {
+		return refuseRestoreSource(backup, fmt.Sprintf("backup is not a regular file (mode %s)", sourceInfo.Mode()))
+	}
+
+	// OsFs passes O_NOFOLLOW through to os.OpenFile. MemMapFs has no symlink
+	// representation and safely ignores the platform flag; the Lstat gate
+	// above remains its available protection.
+	src, err := fsys.OpenFile(backup, os.O_RDONLY|restoreSourceNoFollow, 0)
+	if err != nil {
+		// A no-follow open can report the race before a handle exists. Recheck
+		// with Lstat so a path that became a symlink is reported as the same
+		// safe refusal posture as the pre-open gate; unrelated open errors keep
+		// their original classification for callers and retries.
+		if currentInfo, lerr := lstatRestoreSource(fsys, backup); lerr == nil && currentInfo != nil && currentInfo.Mode()&os.ModeSymlink != 0 {
+			return refuseRestoreSource(backup, "backup became a symlink before open")
+		}
+		return fmt.Errorf("open backup: %w", err)
+	}
 	defer func() { _ = src.Close() }()
+
+	// File.Stat is fstat for afero.OsFs. Verify the object actually opened is
+	// still regular, and compare identity when the platform exposes Dev/Ino.
+	openedInfo, err := src.Stat()
+	if err != nil {
+		return fmt.Errorf("stat opened backup: %w", err)
+	}
+	if openedInfo == nil || openedInfo.Mode()&os.ModeSymlink != 0 || !openedInfo.Mode().IsRegular() {
+		return refuseRestoreSource(backup, "opened object is not a regular file")
+	}
+	if sourceDev, sourceIno, sourceOK := restoreSourceIdentity(sourceInfo); sourceOK {
+		if openedDev, openedIno, openedOK := restoreSourceIdentity(openedInfo); openedOK && (sourceDev != openedDev || sourceIno != openedIno) {
+			return refuseRestoreSource(backup, "opened object differs from the Lstat object")
+		}
+	}
+
 	stagedOrdinal := restoreCopyOrdinal.Add(1)
 	// codex P3 R18h: keep the backup's permission bits through the swap too.
-	mode := os.FileMode(0o644)
-	var backupInfo os.FileInfo
-	if info, serr := fsys.Stat(backup); serr == nil {
-		backupInfo = info
-		mode = info.Mode().Perm()
-	}
+	mode := openedInfo.Mode().Perm()
 	staged, dstFile, err := fsutil.CreateExclusiveStagingFile(fsys, dest, ".dlrstr", stagedOrdinal, mode)
 	if err != nil {
 		return fmt.Errorf("stage rollback: %w", err)
@@ -65,11 +102,9 @@ func copyBackupToDest(fsys afero.Fs, backup, dest string) error {
 		_ = fsys.Remove(staged)
 		return fmt.Errorf("close rollback: %w", err)
 	}
-	if backupInfo != nil {
-		if err := fsys.Chtimes(staged, backupInfo.ModTime(), backupInfo.ModTime()); err != nil {
-			_ = fsys.Remove(staged)
-			return fmt.Errorf("stage rollback times: %w", err)
-		}
+	if err := fsys.Chtimes(staged, openedInfo.ModTime(), openedInfo.ModTime()); err != nil {
+		_ = fsys.Remove(staged)
+		return fmt.Errorf("stage rollback times: %w", err)
 	}
 	if err := fsutil.ReplaceFile(fsys, staged, dest); err != nil {
 		_ = fsys.Remove(staged)
@@ -90,6 +125,17 @@ func rearmReplacementBackup(fsys afero.Fs, dest, backup string) error {
 		return fmt.Errorf("stat backup for re-arm: %w", err)
 	}
 	return copyBackupToDest(fsys, dest, backup)
+}
+
+// removeRollbackBackup follows the established ownership-cleanup rule: a
+// missing backup is already removed, while any other error retains durable
+// journal ownership so a later sweep/retry can try the removal again.
+func removeRollbackBackup(fsys afero.Fs, backup, phase string) error {
+	if err := fsys.Remove(backup); err != nil && !os.IsNotExist(err) {
+		logging.Warnf("downloader: %s failed to remove backup %s: %v; journal entry remains armed", phase, backup, err)
+		return err
+	}
+	return nil
 }
 
 // overwriteBackupPath names the destination's backup for one replacement:
@@ -170,12 +216,16 @@ func (d *Downloader) installOverwriting(ctx context.Context, stagedPath, destPat
 	}
 
 	// R20-1/R20-3 type-discipline: the ledger legs only model REGULAR files.
-	// A directory destination would rename a whole tree into a .dlbak backup
-	// that copyRestoreBytes then refuses; a symlinked destination whiffed by
+	// A non-regular destination would be moved into a .dlbak backup that the
+	// restore path cannot safely consume; a symlinked destination whiffed by
 	// Stat-follows-link semantics would come back a regular file.
-	// Both are refused pre-journal (skip+warn — existing object untouched).
+	// All such objects are refused pre-journal (skip+warn — existing object untouched).
 	if info.IsDir() {
 		logging.Warnf("downloader: overwrite of %s refused — destination is a directory; keeping it intact", destPath)
+		return true, true, nil
+	}
+	if !info.Mode().IsRegular() {
+		logging.Warnf("downloader: overwrite of %s refused — destination is not a regular file (mode %s); keeping it intact", destPath, info.Mode())
 		return true, true, nil
 	}
 	if Ls, ok := d.fs.(afero.Lstater); ok {
@@ -236,15 +286,23 @@ func (d *Downloader) installOverwriting(ctx context.Context, stagedPath, destPat
 	// "backup journaled but install never landed" from "installed media
 	// deleted afterwards". An unconfirmed entry MUST NOT outlive a
 	// successful return: a transient confirm failure rolls the install back
-	// WITHOUT consuming the backup (staged copy + swap), so even a
-	// simultaneous retract failure leaves entry + backup + restored
-	// destination mutually consistent for sweep/retry.
+	// WITHOUT consuming the backup (staged copy + swap). The backup is then
+	// removed while the journal still owns it, before the successful retract.
+	// If retract itself fails, re-arm the backup so the still-armed journal
+	// remains mutually consistent for sweep/retry.
 	if cErr := ledger.recorder.ConfirmReplacement(ctx, ledger.opID, destPath, backupPath); cErr != nil {
 		if rErr := copyBackupToDest(d.fs, backupPath, destPath); rErr != nil {
 			return false, true, fmt.Errorf("install-confirm failed: %w (AND rollback restore failed: %v — bytes remain at %s)", cErr, rErr, backupPath)
 		}
+		if rmErr := removeRollbackBackup(d.fs, backupPath, "install-confirm rollback"); rmErr != nil {
+			return false, true, fmt.Errorf("install-confirm failed, rolled back to pre-existing bytes, but backup cleanup failed: %w (confirmation error: %v; entry stays armed)", rmErr, cErr)
+		}
 		if relErr := ledger.recorder.ReleaseReplacement(ctx, ledger.opID, destPath, backupPath); relErr != nil {
-			return false, true, fmt.Errorf("install-confirm retract failed after rollback (%v): %w (backup %s intact — entry stays armed for the sweeper)", cErr, relErr, backupPath)
+			logging.Warnf("downloader: release of install-confirm rollback entry failed for %s: %v; re-arming backup", destPath, relErr)
+			if rearmErr := rearmReplacementBackup(d.fs, destPath, backupPath); rearmErr != nil {
+				logging.Warnf("downloader: re-arm of install-confirm rollback backup failed for %s: %v (journal entry remains armed)", backupPath, rearmErr)
+			}
+			return false, true, fmt.Errorf("install-confirm retract failed after rollback (%v): %w (backup %s re-arm attempted; entry stays armed for the sweeper)", cErr, relErr, backupPath)
 		}
 		return false, true, fmt.Errorf("install-confirm failed, rolled back to pre-existing bytes: %w", cErr)
 	}

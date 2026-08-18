@@ -318,9 +318,9 @@ func TestDownload_ConfirmFailureRollsBackAndRetracts(t *testing.T) {
 	require.NoError(t, rerr)
 	assert.Equal(t, old, got, "rollback restored pre-existing bytes")
 	assert.Empty(t, rec.get(), "stale entry retracted via ReleaseReplacement")
-	// R9-1: the rollback preserves the backup (copy + swap, not a consuming
-	// rename) so a simultaneous retract failure can never dangle the journal.
-	// The released entry makes it an orphan — the sweeper reaps it.
+	// R9-1: rollback copies the backup before cleanup so the destination is
+	// restored without consuming the source. Once ReleaseReplacement succeeds,
+	// ownership is retracted only after the backup has been removed.
 	entries, _ := afero.ReadDir(fs, "/output")
 	backups := 0
 	for _, e := range entries {
@@ -328,7 +328,7 @@ func TestDownload_ConfirmFailureRollsBackAndRetracts(t *testing.T) {
 			backups++
 		}
 	}
-	assert.Equal(t, 1, backups, "rollback keeps the intact backup for the orphan sweep")
+	assert.Equal(t, 0, backups, "a successfully released rollback must not leak an unjournaled backup")
 }
 
 type confirmFailingLedger struct {

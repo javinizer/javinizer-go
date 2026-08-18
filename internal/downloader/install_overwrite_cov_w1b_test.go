@@ -52,8 +52,8 @@ type covW1BReadErrorFS struct {
 	err    error
 }
 
-func (f covW1BReadErrorFS) Open(name string) (afero.File, error) {
-	file, err := f.Fs.Open(name)
+func (f covW1BReadErrorFS) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
+	file, err := f.Fs.OpenFile(name, flag, perm)
 	if err != nil {
 		return nil, err
 	}

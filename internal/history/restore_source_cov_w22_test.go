@@ -161,7 +161,18 @@ func TestRestoreSourceW22_IdentitySwapRefused(t *testing.T) {
 	require.NoError(t, os.WriteFile(backup, []byte("old"), 0o640))
 	require.NoError(t, os.WriteFile(replacement, []byte("other"), 0o640))
 	require.NoError(t, os.WriteFile(dest, []byte("current"), 0o644))
-	fs := &restoreSourceSwapW22Fs{Fs: afero.NewOsFs(), backup: backup, replacement: replacement}
+
+	// The swap refusal relies on a stable Dev/Ino identity. Windows and
+	// identity-less afero filesystems still enforce their regular-file/no-follow
+	// contract, but must not be made to pretend they have POSIX inode values.
+	base := afero.NewOsFs()
+	sourceInfo, sourceStatErr := lstatRestoreSource(base, backup)
+	require.NoError(t, sourceStatErr)
+	if _, _, ok := restoreSourceIdentity(sourceInfo); !ok {
+		t.Skip("filesystem does not expose a stable Dev/Ino identity")
+	}
+
+	fs := &restoreSourceSwapW22Fs{Fs: base, backup: backup, replacement: replacement}
 
 	err := copyRestoreBytes(fs, backup, dest)
 	require.Error(t, err)

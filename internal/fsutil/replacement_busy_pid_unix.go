@@ -38,7 +38,3 @@ func replacementProcessLiveness(pid int) replacementPIDLiveness {
 		return replacementPIDUnprobeable
 	}
 }
-
-func replacementProcessAlive(pid int) bool {
-	return replacementProcessLiveness(pid) == replacementPIDAlive
-}
