@@ -504,7 +504,28 @@ func restoreOSPath(p string) string {
 // copyRestoreBytes restores the backup bytes onto dest WITHOUT consuming the
 // backup file: bytes are staged adjacent and swapped in with replace-aware
 // rename; the caller removes the backup before consuming its journal entry.
+// Replace semantics are the reverter's: undo puts old bytes over whatever the
+// destination currently holds (a chained restore replaces the newer link).
 func copyRestoreBytes(fs afero.Fs, backup, dest string) error {
+	return copyRestoreBytesPublish(fs, backup, dest, fsutil.ReplaceFile)
+}
+
+// copyRestoreBytesNoReplace is copyRestoreBytes whose staged publish NEVER
+// replaces an occupied destination — the sweep's MISSING-destination restore
+// (its Lstat-ENOENT classification proved dest absent). Wave-16 (codex P2):
+// the pre-wave-16 plain replace destroyed a foreign writer's bytes when it
+// claimed the destination in the classify→publish window, then the sweep
+// removed the backup and consumed the journal entry — the racer's bytes
+// ended up backed up NOWHERE and unrecoverable. A collision drops the staged
+// copy and returns the typed fsutil.ErrPublishCollision through the "swap
+// staged restore" wrap; every sweep caller lands errors on its kept/warn leg
+// (backup retained, journal entry unconsumed), exactly the conservative
+// posture the window demands.
+func copyRestoreBytesNoReplace(fs afero.Fs, backup, dest string) error {
+	return copyRestoreBytesPublish(fs, backup, dest, fsutil.PublishNoReplace)
+}
+
+func copyRestoreBytesPublish(fs afero.Fs, backup, dest string, publish func(afero.Fs, string, string) error) error {
 	// Journal spellings may carry the legacy `/` form on Windows: every OS call
 	// built on dest below (the .rstr staging name -> mode fix-up Chmod,
 	// Chtimes, and ReplaceFile's native MoveFileEx on the swap) sees the
@@ -587,7 +608,7 @@ func copyRestoreBytes(fs afero.Fs, backup, dest string) error {
 	// deleted after the swap. Best-effort semantics ride the helper: EPERM
 	// escalations are swallowed there and restore resilience is unchanged.
 	restoreStagingOwnershipFn(fs, staged, openedInfo)
-	if err := fsutil.ReplaceFile(fs, staged, dest); err != nil {
+	if err := publish(fs, staged, dest); err != nil {
 		_ = fs.Remove(staged)
 		return fmt.Errorf("swap staged restore: %w", err)
 	}

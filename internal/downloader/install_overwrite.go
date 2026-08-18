@@ -41,9 +41,20 @@ var restoreCopyOrdinal atomic.Uint64
 // backup: staged adjacent write + replace-aware swap (Win-safe), streamed
 // through a bounded buffer. Used by the confirm-failure rollback so the
 // journal entry can never end up pointing at consumed bytes (codex P3 R9-1).
-// Re-arm callers reverse backup and dest to copy restored destination bytes
-// back into a consumed backup using the same metadata-preserving semantics.
 func copyBackupToDest(fsys afero.Fs, backup, dest string) error {
+	return copyBackupToDestPublish(fsys, backup, dest, fsutil.ReplaceFile)
+}
+
+// copyBackupToDestNoReplace is copyBackupToDest whose staged publish NEVER
+// replaces an occupied destination: callers who copy onto a name their own
+// rollback just vacated (the re-arm direction) must not clobber a foreign
+// object that claimed the name mid-window. A collision drops the staged copy
+// and returns the typed fsutil.ErrPublishCollision (see wave-15).
+func copyBackupToDestNoReplace(fsys afero.Fs, backup, dest string) error {
+	return copyBackupToDestPublish(fsys, backup, dest, fsutil.PublishNoReplace)
+}
+
+func copyBackupToDestPublish(fsys afero.Fs, backup, dest string, publish func(afero.Fs, string, string) error) error {
 	// Validate the path before opening it: Stat/Open would follow a hostile
 	// backup symlink and copy its target into the media directory.
 	sourceInfo, err := lstatRestoreSource(fsys, backup)
@@ -120,25 +131,38 @@ func copyBackupToDest(fsys afero.Fs, backup, dest string) error {
 	// Javinizer account once the backup is deleted. Best-effort —
 	// unprivileged restores cannot chown and must still succeed.
 	fsutil.RestoreStagingOwnership(fsys, staged, openedInfo)
-	if err := fsutil.ReplaceFile(fsys, staged, dest); err != nil {
+	if err := publish(fsys, staged, dest); err != nil {
 		_ = fsys.Remove(staged)
 		return fmt.Errorf("swap rollback: %w", err)
 	}
 	return nil
 }
 
-// rearmReplacementBackup recreates a backup consumed by a rollback restore.
-// An existing backup wins: another rollback may already have re-armed it, and
-// retention must never clobber those bytes. The reverse copy reuses
-// copyBackupToDest's exclusive adjacent staging, atomic replace, source mode,
-// and source ModTime preservation.
+// rearmReplacementBackup recreates a backup consumed by a rollback restore,
+// using the same metadata-preserving reverse copy as the confirm rollback.
+//
+// Wave-16 (codex P2) — an OCCUPIED backup name is a REFUSAL, never an
+// acceptance: the rollback that prompts this re-arm removed the journal's
+// verified backup first, so any object occupying the name afterwards is
+// FOREIGN (a rename-over/impersonation — a conflicting rollback cannot exist:
+// the destination lock and busy marker serialize the whole rollback window).
+// The pre-wave-16 shortcut treated a Stat-success there as success and
+// silently armed the journal entry against those unrelated bytes — a later
+// revert/sweep would have restored them over the destination and then deleted
+// them. The refusal leaves the journal entry in its prior armed/pending
+// state, keeps the foreign object byte-intact, and surfaces through the
+// typed fsutil.ErrPublishCollision class so the caller's kept+warn leg logs
+// the refusal reason verbatim. The reverse copy's publish is itself
+// no-replace (copyBackupToDestNoReplace), closing the window between this
+// classification and the staged publish for a name claimed inside it.
 func rearmReplacementBackup(fsys afero.Fs, dest, backup string) error {
 	if _, err := fsys.Stat(backup); err == nil {
-		return nil
+		logging.Warnf("downloader: re-arm of rolled-back backup %s refused — backup name occupied by a foreign object; journal entry remains armed/pending, foreign bytes kept", backup)
+		return fmt.Errorf("re-arm backup %s refused: name occupied: %w", backup, fsutil.ErrPublishCollision)
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("stat backup for re-arm: %w", err)
 	}
-	return copyBackupToDest(fsys, dest, backup)
+	return copyBackupToDestNoReplace(fsys, dest, backup)
 }
 
 // removeRollbackBackup follows the established ownership-cleanup rule: a

@@ -28,6 +28,16 @@ func PublishNoReplace(fs afero.Fs, src, dst string) error {
 	return publishNoReplaceVirtual(fs, src, dst)
 }
 
+// publishNoReplaceLink / publishNoReplaceRemove are the fallback's syscall
+// pair, exposed as test seams (same discipline as probeRootStat /
+// restoreChown): a running host kernel cannot be coerced into the
+// link-succeeded-then-staged-unlink-failed orderings (EPERM mid-rollback on
+// BOTH legs needs a mid-call permission change), so tests replay them here.
+var (
+	publishNoReplaceLink   = os.Link
+	publishNoReplaceRemove = os.Remove
+)
+
 // publishNoReplaceFallback publishes via hard link: link(2) fails EEXIST
 // atomically when dst is occupied, giving POSIX filesystems without a
 // renameat2 wrapper the same no-replace semantics — the destination link and
@@ -36,18 +46,18 @@ func PublishNoReplace(fs afero.Fs, src, dst string) error {
 // the classified rename leg: no stricter than the pre-hardening publish
 // there, where their rename could never express no-replace anyway.
 func publishNoReplaceFallback(src, dst string) error {
-	if err := os.Link(src, dst); err != nil {
+	if err := publishNoReplaceLink(src, dst); err != nil {
 		if os.IsExist(err) {
 			return publishCollision(dst)
 		}
 		return publishNoReplaceVirtual(&afero.OsFs{}, src, dst)
 	}
-	if err := os.Remove(src); err != nil {
+	if err := publishNoReplaceRemove(src); err != nil {
 		// The destination link already carries the staged bytes; only the
 		// staged cleanup failed. Undo the destination link so the publish
 		// fails closed with the caller's pre-publish state (staged intact,
 		// destination absent) instead of a duplicated inode pair.
-		if rbErr := os.Remove(dst); rbErr != nil {
+		if rbErr := publishNoReplaceRemove(dst); rbErr != nil {
 			return fmt.Errorf("no-replace publish %s -> %s: staged cleanup failed: %v (AND publish rollback failed: %w)", src, dst, err, rbErr)
 		}
 		return fmt.Errorf("no-replace publish %s -> %s: staged cleanup failed: %w", src, dst, err)

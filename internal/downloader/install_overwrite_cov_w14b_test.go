@@ -88,12 +88,20 @@ func TestInstallOverwriting_RetractionFailureRearmsBackup(t *testing.T) {
 	require.Equal(t, mtime.UnixNano(), backupInfo.ModTime().UnixNano())
 }
 
-func TestRearmReplacementBackup_ExistingBackupIsRetained(t *testing.T) {
+// Wave-16 (codex P2) supersedes this pin: it used to capture the
+// Stat-success ACCEPTANCE of an occupied backup name as idempotent success.
+// The wave-16 contract is the refusal: the rollback that prompts a re-arm
+// removed the journal's verified backup first, so an object occupying the
+// name afterwards is FOREIGN, and accepting its bytes would arm the journal
+// entry against them — a later revert/sweep would restore them over the
+// destination and delete them. The refusal preserves both sides
+// byte-identical and reports the typed collision class.
+func TestRearmReplacementBackup_OccupiedBackupNameIsRefused(t *testing.T) {
 	fs := &pathNormalizingChmodFs{Fs: afero.NewMemMapFs()}
 	dir := "/out/W14B-IDEMPOTENT"
 	dest := dir + "/poster.jpg"
 	backup := dest + ".dlbak.0123456789abcdef"
-	backupBytes := []byte("already re-armed bytes")
+	backupBytes := []byte("foreign bytes at the backup name")
 	backupMode := os.FileMode(0o640)
 	backupMTime := time.Unix(222222222, 222222000)
 
@@ -103,14 +111,19 @@ func TestRearmReplacementBackup_ExistingBackupIsRetained(t *testing.T) {
 	require.NoError(t, fs.Chmod(backup, backupMode))
 	require.NoError(t, fs.Chtimes(backup, backupMTime, backupMTime))
 
-	require.NoError(t, rearmReplacementBackup(fs, dest, backup))
-	got, err := afero.ReadFile(fs, backup)
-	require.NoError(t, err)
-	require.Equal(t, backupBytes, got, "an existing re-arm must not be clobbered")
-	info, err := fs.Stat(backup)
-	require.NoError(t, err)
+	err := rearmReplacementBackup(fs, dest, backup)
+	require.ErrorIs(t, err, fsutil.ErrPublishCollision, "an occupied backup name is the refusal class")
+	require.ErrorContains(t, err, "refused")
+	got, readErr := afero.ReadFile(fs, backup)
+	require.NoError(t, readErr)
+	require.Equal(t, backupBytes, got, "the foreign object at the backup name is never clobbered")
+	info, statErr := fs.Stat(backup)
+	require.NoError(t, statErr)
 	require.Equal(t, backupMode.Perm(), info.Mode().Perm())
 	require.Equal(t, backupMTime.UnixNano(), info.ModTime().UnixNano())
+	got, readErr = afero.ReadFile(fs, dest)
+	require.NoError(t, readErr)
+	require.Equal(t, "restored destination", string(got), "the restored destination is untouched")
 }
 
 type covW14BPreRearmedFS struct {

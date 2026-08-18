@@ -434,22 +434,13 @@ func (r *BatchFileOperationRepository) FindOperationsByDestination(ctx context.C
 	})
 }
 
-// destinationLikePatternCap bounds the LIKE-pattern set per destination
-// lookup. When Unicode case variants would push the set past the cap the
-// caller falls back to the un-prefiltered full-ledger scan (the pre-wave-7
-// path), so correctness never depends on the cap.
-const destinationLikePatternCap = 8
-
 // hasCaseFoldingNonASCII reports whether s contains a non-ASCII letter whose
 // simple Unicode case-fold differs from the letter itself. Those are the ONLY
 // runes SQLite's built-in like() cannot fold — it folds ASCII letters only
 // (SQLITE_CASE_SENSITIVE_LIKE aside, the default LIKE is ASCII-insensitive),
 // so a journal row stored as `…\Ä.jpg` is invisible to an `…/ä.jpg` prefilter
-// even though DestKey folds them together on an insensitive root. Go's
-// strings.ToUpper/ToLower run full simple case mapping, so generating BOTH
-// transports of the destination lets the prefilter see the row again. ASCII
-// letters need no variants: LIKE already folds them, keeping pure-ASCII
-// destinations byte-identical to wave-8 behavior.
+// even though DestKey folds them together on an insensitive root. Pure-ASCII
+// destinations need no help: LIKE already folds them, keeping wave-8 behavior.
 func hasCaseFoldingNonASCII(s string) bool {
 	for _, r := range s {
 		if r > unicode.MaxASCII && (unicode.ToLower(r) != r || unicode.ToUpper(r) != r) {
@@ -471,51 +462,45 @@ func hasCaseFoldingNonASCII(s string) bool {
 // rewrite — rewriting an escaped pattern instead would corrupt the escape
 // '\\' pairs.
 //
-// Wave-9 codex P2 follow-up: when the destination contains non-ASCII letters
-// whose simple case-fold differs (see hasCaseFoldingNonASCII), BOTH
-// full-string ToLower and ToUpper transports are layered onto every separator
-// spelling, because SQLite LIKE folds ASCII only. The set is deduped and
-// HARD-CAPPED at destinationLikePatternCap patterns; a nil return signals the
-// cap was exceeded and the caller must execute the un-prefiltered full-ledger
-// query instead — a bounded prefilter that could miss a live chain would
-// corrupt sequence allocation and revert conflict checks. Spellings that
-// rewrite to the caller's own bytes are dropped (separator-free, ASCII-only
-// destinations yield exactly the wave-8 patterns).
+// Wave-16 codex P2 follow-up (supersedes wave-9's ToLower/ToUpper variant
+// layering): when the destination contains a NON-ASCII cased letter
+// (hasCaseFoldingNonASCII) the bounded set CANNOT cover the stored spelling
+// space. All-lower and all-upper variants only rescue all-lower and all-upper
+// STORED spellings — a mixed-case non-ASCII journal spelling (stored `äÖ`
+// against a queried `ÄÖ`) is invisible to every bounded variant set because
+// SQLite's LIKE folds ASCII only, and enumerating per-letter case spellings
+// is exponential in the destination's cased non-ASCII letters. Hiding a live
+// chain behind an incomplete prefilter corrupts sequence allocation and
+// revert conflict checks, so the pattern generator returns NIL for those
+// destinations and the caller takes the pre-wave-7 unfiltered full-ledger
+// scan; correctness never again depends on variant completeness. Pure-ASCII
+// destinations (and non-cased runes) keep the wave-8 byte-identical patterns
+// and separator cross-spellings — spellings that rewrite to the caller's own
+// bytes are dropped.
 func destinationLikePatterns(destination string) []string {
-	raws := []string{destination}
 	if hasCaseFoldingNonASCII(destination) {
-		if v := strings.ToLower(destination); v != destination {
-			raws = append(raws, v)
-		}
-		if v := strings.ToUpper(destination); v != destination {
-			raws = append(raws, v)
-		}
+		// See the doc comment: bounded case variants cannot be complete for
+		// foldable non-ASCII destinations, so this query takes the safe
+		// full-ledger fallback (the pre-wave-7 unfiltered scan).
+		return nil
 	}
 	patterns := make([]string, 0, 3)
 	seen := map[string]bool{}
-	for _, raw := range raws {
-		spellings := []string{raw}
-		if strings.ContainsAny(raw, `/\`) {
-			if v := strings.ReplaceAll(raw, "/", `\`); v != raw {
-				spellings = append(spellings, v)
-			}
-			if v := strings.ReplaceAll(raw, `\`, "/"); v != raw {
-				spellings = append(spellings, v)
-			}
+	spellings := []string{destination}
+	if strings.ContainsAny(destination, `/\`) {
+		if v := strings.ReplaceAll(destination, "/", `\`); v != destination {
+			spellings = append(spellings, v)
 		}
-		for _, spelling := range spellings {
-			p := destinationLikePattern(spelling)
-			if !seen[p] {
-				seen[p] = true
-				patterns = append(patterns, p)
-			}
+		if v := strings.ReplaceAll(destination, `\`, "/"); v != destination {
+			spellings = append(spellings, v)
 		}
 	}
-	if len(patterns) > destinationLikePatternCap {
-		// Unicode case fan-out exceeded the bound: the prefilter cannot safely
-		// narrow, so signal the full-ledger fallback instead of silently
-		// truncating a pattern that might name a live chain.
-		return nil
+	for _, spelling := range spellings {
+		p := destinationLikePattern(spelling)
+		if !seen[p] {
+			seen[p] = true
+			patterns = append(patterns, p)
+		}
 	}
 	return patterns
 }
@@ -525,21 +510,19 @@ func destinationLikePatterns(destination string) []string {
 // (plus its separator cross-spellings — see destinationLikePatterns) to
 // generated_files AND new_path so only candidate rows are hydrated, then
 // leaves exact matching to the caller's in-process pass. SQLite LIKE folds
-// ASCII case only, so Unicode case variants are generated Go-side (see
-// destinationLikePatterns) and differently-cased spellings of one destination
-// still reach the normalized comparison; when the variant fan-out exceeds the
-// pattern cap, this falls back to the un-prefiltered full-ledger scan so a
-// live chain can never hide behind the cap. The new_path clause keeps rows
+// ASCII case only, so a destination carrying a foldable non-ASCII letter gets
+// NO patterns (wave-16, see destinationLikePatterns) and this falls back to
+// the un-prefiltered full-ledger scan — a live mixed-case chain can never
+// hide behind an incomplete variant set. The new_path clause keeps rows
 // discoverable through the organized media path recorded by the same
 // organizer computation when their journal carries an equivalent-but-
 // differently-spelled entry.
 func (r *BatchFileOperationRepository) findDestinationCandidates(ctx context.Context, destination string) ([]models.BatchFileOperation, error) {
 	patterns := destinationLikePatterns(destination)
 	if patterns == nil {
-		// Unicode case-variant fan-out exceeded the pattern cap: the prefilter
-		// cannot safely narrow this destination, so hydrate the full ledger (the
-		// pre-wave-7 path) and let the caller's in-process exact matcher decide
-		// — correctness never depends on the cap.
+		// The destination carries a foldable non-ASCII letter: the prefilter
+		// cannot safely narrow it, so hydrate the full ledger (the pre-wave-7
+		// path) and let the caller's in-process exact matcher decide.
 		return r.FindOperationsWithLedger(ctx)
 	}
 	conds := make([]string, 0, len(patterns))

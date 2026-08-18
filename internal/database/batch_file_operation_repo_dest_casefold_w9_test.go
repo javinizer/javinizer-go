@@ -12,9 +12,16 @@ import (
 // prefilter): SQLite's built-in LIKE folds ASCII case only, so a journal row
 // stored under a differently-cased Unicode spelling (`…\Ä.jpg` vs `…/ä.jpg`)
 // used to slip the bounded prefilter — the in-process DestKey matcher folds
-// them together on an insensitive root, but the row was never fetched. The
-// prefilter now generates Go-side ToLower/ToUpper transports of the full
-// destination, hard-capped, with a full-ledger fallback on cap overflow.
+// them together on an insensitive root, but the row was never fetched.
+//
+// SUPERSEDED by wave-16 (codex P2): the wave-9 answer generated ToLower /
+// ToUpper transports of the full destination, but all-lower and all-upper
+// variants only rescue all-lower and all-upper STORED spellings — a
+// mixed-case non-ASCII journal spelling (stored `äÖ` vs queried `ÄÖ`) still
+// hid from the prefilter. destinationLikePatterns now returns NIL for any
+// destination carrying a foldable non-ASCII letter and the candidate fetch
+// takes the pre-wave-7 full-ledger scan; these tests re-pin the surviving
+// wave-8 shape (pure-ASCII patterns) and the wave-16 fallback engagement.
 
 // forceCaseFoldEnvironmentW9 pins BOTH destination-key seams for deterministic
 // cross-platform runs: Windows separator policy (both spellings fold to one
@@ -43,8 +50,8 @@ func TestHasCaseFoldingNonASCIIW9(t *testing.T) {
 }
 
 // TestDestinationLikePatternsW9_ASCIIByteIdentical re-pins wave-8 behavior:
-// pure-ASCII destinations (and non-folding non-ASCII runes) never grow case
-// variants.
+// pure-ASCII destinations (and non-folding non-ASCII runes) engage the
+// prefilter with exactly the wave-8 patterns — no fallback.
 func TestDestinationLikePatternsW9_ASCIIByteIdentical(t *testing.T) {
 	require.Equal(t,
 		[]string{destinationLikePattern("poster.jpg")},
@@ -57,39 +64,43 @@ func TestDestinationLikePatternsW9_ASCIIByteIdentical(t *testing.T) {
 		destinationLikePatterns("a/中.jpg"), "non-folding non-ASCII keeps wave-8 patterns")
 }
 
-// TestDestinationLikePatternsW9_UnicodeCaseVariants: a differently-casable
-// non-ASCII letter layers BOTH full-string case transports onto each
-// separator spelling, deduped and bounded — caller casing first.
-func TestDestinationLikePatternsW9_UnicodeCaseVariants(t *testing.T) {
-	patterns := destinationLikePatterns("D:/Media/ä.jpg")
-	require.NotNil(t, patterns, "the variant set stays under the hard cap")
-	require.Len(t, patterns, 6, "3 case forms × 2 separator spellings")
-	require.Equal(t, destinationLikePattern("D:/Media/ä.jpg"), patterns[0], "caller spelling first")
-	require.Contains(t, patterns, destinationLikePattern(`D:\Media\ä.jpg`))
-	require.Contains(t, patterns, destinationLikePattern("d:/media/ä.jpg"), "ToLower transport, slash spelling")
-	require.Contains(t, patterns, destinationLikePattern(`d:\media\ä.jpg`), "ToLower transport, backslash spelling")
-	require.Contains(t, patterns, destinationLikePattern("D:/MEDIA/Ä.JPG"), "ToUpper transport, slash spelling")
-	require.Contains(t, patterns, destinationLikePattern(`D:\MEDIA\Ä.JPG`), "ToUpper transport names the stored uppercase form")
-
-	// A case-idempotent destination adds only the differing transports.
-	folded := destinationLikePatterns("d:/media/ä.jpg")
-	require.Len(t, folded, 4, "ToLower of an all-lower destination dedupes away")
-	require.NotContains(t, folded, destinationLikePattern("D:/Media/ä.jpg"), "the caller's exact casing appears once")
+// TestDestinationLikePatternsW16_NonASCIICasedEngagesFallback: every spelling
+// containing a foldable non-ASCII letter yields NO pattern set — the query
+// takes the full-ledger fallback — because all-lower/all-upper variants
+// cannot cover mixed-case stored spellings, and per-letter enumeration is
+// exponential (SQLite LIKE folds ASCII only).
+func TestDestinationLikePatternsW16_NonASCIICasedEngagesFallback(t *testing.T) {
+	require.Nil(t, destinationLikePatterns("D:/Media/ä.jpg"),
+		"a single foldable non-ASCII letter engages the fallback — no bounded variant set")
+	require.Nil(t, destinationLikePatterns(`D:\Media\Ä.jpg`),
+		"backslash spelling with a foldable rune engages it too")
+	require.Nil(t, destinationLikePatterns("d:/media/äBÖ.mkv"),
+		"multiple cased letters (exponential enumeration) engage it at any count")
+	require.NotNil(t, destinationLikePatterns("D:/Media/MOVIE-001.mkv"),
+		"control: pure-ASCII never falls back")
+	require.NotNil(t, destinationLikePatterns("a/中.jpg"),
+		"control: non-cased runes keep the patterned path")
 }
 
-// TestDestinationLikePatternsW9_CapOverflowSignalsFallback: when the case ×
-// separator fan-out exceeds the hard cap the generator returns nil rather
-// than truncating a pattern that could name a live chain.
-func TestDestinationLikePatternsW9_CapOverflowSignalsFallback(t *testing.T) {
-	mixed := `C:/Mi\Xed/Ärger.jpg` // both separator classes + folding non-ASCII
+// TestDestinationLikePatternsW16_PureASCIIMixedSeparatorsStayPatterned:
+// mixed '/' + '\' pure-ASCII destinations still ride the schema of separator
+// cross-spellings — never the fallback (pure-ASCII has no case gap).
+func TestDestinationLikePatternsW16_PureASCIIMixedSeparatorsStayPatterned(t *testing.T) {
+	patterns := destinationLikePatterns(`C:/Mi\Xed/Arger.jpg`)
+	require.NotNil(t, patterns)
+	require.Equal(t, []string{
+		destinationLikePattern(`C:/Mi\Xed/Arger.jpg`),
+		destinationLikePattern(`C:\Mi\Xed\Arger.jpg`),
+		destinationLikePattern(`C:/Mi/Xed/Arger.jpg`),
+	}, patterns, "three spellings, no case variants, no fallback")
 	require.NotNil(t, destinationLikePatterns("C:/Mi"), "control: tiny destination generates patterns")
-	require.Nil(t, destinationLikePatterns(mixed), "3 case forms × 3 separator spellings = 9 > cap → nil fallback")
 }
 
 // TestFindOperationsByDestinationW9_UnicodeCaseCrossSpelling: a row journaled
-// with the uppercase backslash spelling is found by a lowercase slash query —
-// fetched THROUGH the bounded pattern prefilter (not the full-ledger
-// fallback), with a decoy row proving the prefilter still narrows.
+// with the uppercase backslash spelling is found by a lowercase slash query.
+// Wave-16: this rides the FULL-LEDGER fallback now — the behavioral probe
+// proving it is the decoy ledger row, which shows up in the UN-prefiltered
+// candidate fetch but is rejected by the caller's exact matcher.
 func TestFindOperationsByDestinationW9_UnicodeCaseCrossSpelling(t *testing.T) {
 	forceCaseFoldEnvironmentW9(t)
 	db := newDatabaseTestDB(t)
@@ -97,27 +108,32 @@ func TestFindOperationsByDestinationW9_UnicodeCaseCrossSpelling(t *testing.T) {
 	ctx := context.Background()
 
 	id := seedDestJournalRowW8(t, repo, "W9-UAUT", `D:\Media\Ä.jpg`, 11)
-	seedDestJournalRowW8(t, repo, "W9-UDECOY", `D:\Media\Poster.jpg`, 99)
+	decoyID := seedDestJournalRowW8(t, repo, "W9-UDECOY", `D:\Media\Poster.jpg`, 99)
 
-	require.NotNil(t, destinationLikePatterns("D:/Media/ä.jpg"), "this destination stays under the cap — patterned path")
+	require.Nil(t, destinationLikePatterns("D:/Media/ä.jpg"), "foldable non-ASCII → fallback, not a variant set")
 	candidates, err := repo.findDestinationCandidates(ctx, "D:/Media/ä.jpg")
 	require.NoError(t, err)
-	require.Len(t, candidates, 1, "the Unicode case variant prefilter fetches exactly the stored row")
-	require.Equal(t, id, candidates[0].ID, "fetched through the pattern set, not a full scan (decoy excluded)")
+	ids := make([]uint, 0, len(candidates))
+	for _, c := range candidates {
+		ids = append(ids, c.ID)
+	}
+	require.Contains(t, ids, decoyID,
+		"behavioral probe: the un-prefiltered scan hydrates even nonmatching ledger rows")
+	require.Contains(t, ids, id)
 
 	rows, err := repo.FindOperationsByDestination(ctx, "D:/Media/ä.jpg")
 	require.NoError(t, err)
-	require.Len(t, rows, 1)
+	require.Len(t, rows, 1, "the in-process exact matcher keeps only the live chain")
 	require.Equal(t, id, rows[0].ID)
 	require.Equal(t, int64(11), maxJournaledSeqW8(t, rows), "sequence allocation rides the rescued row")
 }
 
-// TestFindOperationsByDestinationW9_CapOverflowFullLedgerFallback: a
-// mixed-separator destination with folding non-ASCII overflows the pattern
-// cap, and the candidate fetch falls back to the un-prefiltered full-ledger
-// scan — the in-process exact match still finds the live chain while the
-// decoy is rejected by the normalizer, never by a truncated prefilter.
-func TestFindOperationsByDestinationW9_CapOverflowFullLedgerFallback(t *testing.T) {
+// TestFindOperationsByDestinationW9_NonASCIIFullLedgerFallback: a mixed-separator
+// destination with folding non-ASCII gets no prefilter, the candidate fetch
+// falls back to the un-prefiltered full-ledger scan, and the in-process exact
+// match still finds the live chain while the decoy is rejected by the
+// normalizer, never by a pattern set.
+func TestFindOperationsByDestinationW9_NonASCIIFullLedgerFallback(t *testing.T) {
 	forceCaseFoldEnvironmentW9(t)
 	db := newDatabaseTestDB(t)
 	repo := NewBatchFileOperationRepository(db)
@@ -127,7 +143,7 @@ func TestFindOperationsByDestinationW9_CapOverflowFullLedgerFallback(t *testing.
 	seedDestJournalRowW8(t, repo, "W9-UODECOY", `C:\Mi\Xed\Arger.jpg`, 8)
 
 	query := `c:/MI\xed/ärger.jpg` // mixed separators, inverse casing
-	require.Nil(t, destinationLikePatterns(query), "fan-out exceeds the cap → fallback engaged")
+	require.Nil(t, destinationLikePatterns(query), "foldable non-ASCII → fallback engaged")
 
 	rows, err := repo.FindOperationsByDestination(ctx, query)
 	require.NoError(t, err)

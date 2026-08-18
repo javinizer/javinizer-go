@@ -13,6 +13,7 @@ package workflow
 
 import (
 	"context"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"testing"
@@ -172,6 +173,9 @@ func TestW15CaptureSnapshotKeepsConcurrentRevert(t *testing.T) {
 	require.Equal(t, models.RevertStatusReverted, row.RevertStatus,
 		"the snapshot write never resurrects the concurrently reverted row")
 	require.NotNil(t, row.RevertedAt)
-	require.Equal(t, "/src", row.OriginalDirPath,
+	// OriginalDirPath is filepath.Dir-derived from the source path, so its
+	// separator spelling follows the host OS — compare slash-normalized (the
+	// wave-13 w7/r6 alignment pattern) instead of a literal "/src".
+	require.Equal(t, filepath.ToSlash("/src"), filepath.ToSlash(row.OriginalDirPath),
 		"the snapshot's non-journal columns still persisted")
 }

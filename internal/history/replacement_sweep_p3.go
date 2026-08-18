@@ -490,7 +490,12 @@ func (s *ReplacementSweeper) sweepOne(ctx context.Context, idx *replacementLedge
 	// the destination is present and the conservative retain leg applies.
 	_, lstatErr := lstatRestoreSource(s.fs, dest)
 	if errors.Is(lstatErr, afero.ErrFileNotFound) {
-		if rnErr := copyRestoreBytes(s.fs, backup, dest); rnErr != nil {
+		// Wave-16 (codex P2): the destination was proven ABSENT, so the
+		// restore publishes no-replace — a foreign writer claiming the name
+		// mid-window collides into the kept leg below (typed
+		// fsutil.ErrPublishCollision): racer bytes intact, backup retained,
+		// nothing journaled or removed.
+		if rnErr := copyRestoreBytesNoReplace(s.fs, backup, dest); rnErr != nil {
 			logging.Warnf("replacement sweep restore %s→%s: %v", backup, dest, rnErr)
 			return 0
 		}
@@ -556,7 +561,13 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 		logging.Infof("replacement sweep %s: destination missing but install was confirmed — backup retained, no auto-restore", backup)
 		return false
 	}
-	if rnErr := copyRestoreBytes(s.fs, backup, dest); rnErr != nil {
+	// Wave-16 (codex P2): the destination was proven ABSENT above, so the
+	// restore publishes no-replace — a foreign writer claiming the name
+	// mid-window collides into this kept/warn leg (typed
+	// fsutil.ErrPublishCollision) with the racer's bytes intact; on collision
+	// the backup is retained and the journal entry is NOT consumed (the
+	// removal and consumption below never run).
+	if rnErr := copyRestoreBytesNoReplace(s.fs, backup, dest); rnErr != nil {
 		logging.Warnf("replacement sweep restore %s→%s: %v", backup, dest, rnErr)
 		return false
 	}
