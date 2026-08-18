@@ -32,6 +32,10 @@ func (*w14ABusyObservingRecorder) ReleaseReplacement(context.Context, string, st
 	return nil
 }
 
+func (*w14ABusyObservingRecorder) MarkReplacementRestorePending(context.Context, string, string, string) error {
+	return nil
+}
+
 func TestInstallOverwritingW14A_BusyMarkerCoversArmToConfirm(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	dest := "/out/W14A-DL/poster.jpg"

@@ -145,6 +145,10 @@ func (r *covW1BRecorder) ReleaseReplacement(context.Context, string, string, str
 	return r.releaseErr
 }
 
+func (r *covW1BRecorder) MarkReplacementRestorePending(context.Context, string, string, string) error {
+	return nil
+}
+
 func covW1BDownloader(fs afero.Fs) *Downloader {
 	return NewDownloader(nil, fs, &Config{}, nil).WithDestLocks(fsutil.NewKeyedLockRegistry())
 }

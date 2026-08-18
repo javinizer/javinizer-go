@@ -79,6 +79,10 @@ func (s *stubRevertLog) ConfirmReplacement(_ context.Context, _ OperationID, _, 
 	return nil
 }
 
+func (s *stubRevertLog) MarkReplacementRestorePending(_ context.Context, _ OperationID, _, _ string) error {
+	return nil
+}
+
 func (s *stubRevertLog) ReleaseReplacement(_ context.Context, _ OperationID, _, _ string) error {
 	return nil
 }

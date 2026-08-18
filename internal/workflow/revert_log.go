@@ -88,6 +88,16 @@ type RevertLog interface {
 	// destination). The row must not keep pointing at the consumed backup.
 	ReleaseReplacement(ctx context.Context, opID OperationID, replacedPath, backupPath string) error
 
+	// MarkReplacementRestorePending disarms a journaled entry the downloader
+	// rolled back but whose backup re-arm was REFUSED with the occupied-name
+	// classes (fsutil.PublishRefusal): the backup name is foreign-occupied or
+	// absent, so leaving the entry armed would aim the next revert at bytes
+	// this operation does not own. The rollback already restored the
+	// destination, so the entry is marked RestorePending with the wave-19
+	// rearm-refused kind — certified destination, consumption retry without
+	// any backup-path operation (codex P2, PR#215 wave-19).
+	MarkReplacementRestorePending(ctx context.Context, opID OperationID, replacedPath, backupPath string) error
+
 	// ConfirmReplacement marks the journaled entry installed after the new
 	// bytes landed (P3 R4-3 crash-window marker).
 	ConfirmReplacement(ctx context.Context, opID OperationID, replacedPath, backupPath string) error
@@ -154,6 +164,10 @@ func (noOpRevertLog) RecordReplacement(_ context.Context, _ OperationID, _, _ st
 }
 
 func (noOpRevertLog) ReleaseReplacement(_ context.Context, _ OperationID, _, _ string) error {
+	return nil
+}
+
+func (noOpRevertLog) MarkReplacementRestorePending(_ context.Context, _ OperationID, _, _ string) error {
 	return nil
 }
 
@@ -787,6 +801,58 @@ func (l *dbRevertLog) ReleaseReplacement(ctx context.Context, opID OperationID, 
 		return fmt.Errorf("revert log ReleaseReplacement: record %s not found", opID)
 	case txErr != nil:
 		return fmt.Errorf("revert log ReleaseReplacement: persist record %s: %w", opID, txErr)
+	}
+	return nil
+}
+
+// MarkReplacementRestorePending durably marks the matching journal entry
+// restore-pending with the wave-19 rearm-refused kind (codex P2 PR#215): the
+// downloader's rollback already restored the destination bytes but the
+// backup re-arm was REFUSED with the occupied-name classes
+// (fsutil.PublishRefusal) — the name is foreign-occupied or absent. The
+// marker certifies the destination and keeps every retry off the unowned
+// name. Matching follows the downloader seam's exact-spelling convention
+// (same as Record/Release/ConfirmReplacement); a missing entry is tolerated
+// (idempotent, exactly like ReleaseReplacement), a missing row is not. The
+// merge discipline (one-way upgrade, never a downgrade to clean) lives in
+// models.ReplacementEntry.SetRestorePending.
+func (l *dbRevertLog) MarkReplacementRestorePending(ctx context.Context, opID OperationID, replacedPath, backupPath string) error {
+	if opID == "" {
+		return fmt.Errorf("revert log MarkReplacementRestorePending: empty operation ID")
+	}
+	recordID64, err := strconv.ParseUint(opID, 10, 64)
+	if err != nil || recordID64 == 0 {
+		return fmt.Errorf("revert log MarkReplacementRestorePending: unparsable operation ID %q", opID)
+	}
+
+	release := replacementLedgerLocks.Acquire(opID)
+	defer release()
+
+	var fnErr error
+	txErr := l.repo.UpdateJournalInTx(ctx, uint(recordID64), func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
+		gf, perr := models.ParseGeneratedFiles(current.GeneratedFiles)
+		if perr != nil {
+			fnErr = fmt.Errorf("revert log MarkReplacementRestorePending: parse ledger for record %s: %w", opID, perr)
+			return models.GeneratedFilesJSON{}, false, fnErr
+		}
+		for i := range gf.Replacements {
+			e := &gf.Replacements[i]
+			if e.Destination == replacedPath && e.Backup == backupPath {
+				if !e.SetRestorePending(models.RestorePendingKindRearmRefused) {
+					return gf, false, nil // already carries the rearm-refused mark — idempotent
+				}
+				return gf, true, nil
+			}
+		}
+		return gf, false, nil // entry already gone (e.g. consumed meanwhile) — idempotent
+	})
+	switch {
+	case fnErr != nil:
+		return fnErr
+	case errors.Is(txErr, database.ErrNotFound):
+		return fmt.Errorf("revert log MarkReplacementRestorePending: record %s not found", opID)
+	case txErr != nil:
+		return fmt.Errorf("revert log MarkReplacementRestorePending: persist record %s: %w", opID, txErr)
 	}
 	return nil
 }

@@ -207,10 +207,36 @@ func restoreAsideBackup(fsys afero.Fs, destPath, backupPath string) (bool, error
 // is one of the REFUSAL classes (foreign-occupied destination,
 // no-replace-unsupported volume) whose conservative posture retains the
 // backup and warns rather than erroring: in both classes nothing was
-// attempted that could have touched the destination's bytes.
+// attempted that could have touched the destination's bytes. Wave-19: the
+// classifier itself is fsutil.PublishRefusal, shared with history's re-arm
+// compensation.
 func rollbackRestoreRefused(err error) bool {
-	return errors.Is(err, fsutil.ErrPublishCollision) ||
-		errors.Is(err, fsutil.ErrPublishNoReplaceUnsupported)
+	return fsutil.PublishRefusal(err)
+}
+
+// markRollbackRearmRefused disarms the ledger after a rollback whose backup
+// re-arm failed (wave-19, codex P2 PR#215). A REFUSED no-replace re-arm
+// (fsutil.PublishRefusal classes — a foreign writer owns the backup name, or
+// the volume cannot express the publish) means the arm/pending journal entry
+// points at an UNOWNED name: left as-is, a later revert would restore those
+// foreign bytes over the (correctly rolled-back) destination and then delete
+// the occupant. The destination bytes are provably the restored pre-existing
+// bytes (the rollback restore that prompts this re-arm only runs after
+// producing exactly that state), so the entry is durably marked
+// rearm-refused restore-pending and the foreign/absent name receives no
+// further path operation from any retry. A plain re-arm failure keeps the
+// pre-wave-19 warn-only posture (the name is simply absent; the wave-18
+// armed/absent state covers it).
+func markRollbackRearmRefused(ctx context.Context, ledger downloadLedger, destPath, backupPath string, rearmErr error) {
+	if !fsutil.PublishRefusal(rearmErr) {
+		logging.Warnf("downloader: re-arm of rolled-back backup failed for %s: %v (journal entry remains armed)", backupPath, rearmErr)
+		return
+	}
+	if markErr := ledger.recorder.MarkReplacementRestorePending(ctx, ledger.opID, destPath, backupPath); markErr != nil {
+		logging.Warnf("downloader: re-arm of rolled-back backup %s refused (%v) and restore-pending marking failed (%v) — journal entry stays armed, unowned backup name untouched", backupPath, rearmErr, markErr)
+		return
+	}
+	logging.Warnf("downloader: re-arm of rolled-back backup %s refused (%v) — journal entry marked restore-pending (rearm-refused), unowned backup name untouched", backupPath, rearmErr)
 }
 
 // removeRollbackBackup follows the established ownership-cleanup rule: a
@@ -475,7 +501,7 @@ func (d *Downloader) installOverwriting(ctx context.Context, stagedPath, destPat
 		if relErr := ledger.recorder.ReleaseReplacement(ctx, ledger.opID, destPath, backupPath); relErr != nil {
 			logging.Warnf("downloader: release of rolled-back journal entry failed for %s: %v (destination is correct); re-arming backup", destPath, relErr)
 			if rearmErr := rearmReplacementBackup(d.fs, destPath, backupPath); rearmErr != nil {
-				logging.Warnf("downloader: re-arm of rolled-back backup failed for %s: %v (journal entry remains armed)", backupPath, rearmErr)
+				markRollbackRearmRefused(ctx, ledger, destPath, backupPath, rearmErr)
 			}
 		}
 		return false, true, fmt.Errorf("failed to replace file: %w", err)
@@ -498,9 +524,9 @@ func (d *Downloader) installOverwriting(ctx context.Context, stagedPath, destPat
 		if relErr := ledger.recorder.ReleaseReplacement(ctx, ledger.opID, destPath, backupPath); relErr != nil {
 			logging.Warnf("downloader: release of install-confirm rollback entry failed for %s: %v; re-arming backup", destPath, relErr)
 			if rearmErr := rearmReplacementBackup(d.fs, destPath, backupPath); rearmErr != nil {
-				logging.Warnf("downloader: re-arm of install-confirm rollback backup failed for %s: %v (journal entry remains armed)", backupPath, rearmErr)
+				markRollbackRearmRefused(ctx, ledger, destPath, backupPath, rearmErr)
 			}
-			return false, true, fmt.Errorf("install-confirm retract failed after rollback (%v): %w (backup %s re-arm attempted; entry stays armed for the sweeper)", cErr, relErr, backupPath)
+			return false, true, fmt.Errorf("install-confirm retract failed after rollback (%v): %w (backup %s re-arm attempted; entry stays journaled for sweep/revert recovery)", cErr, relErr, backupPath)
 		}
 		return false, true, fmt.Errorf("install-confirm failed, rolled back to pre-existing bytes: %w", cErr)
 	}

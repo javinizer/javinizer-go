@@ -79,9 +79,11 @@ func TestReverterRearmCollisionW18C_MarksRestorePendingAndNeverRestoresOccupant(
 	_, markerErr := fixture.fs.Stat(fsutil.ReplacementBusyPath(dest))
 	require.ErrorIs(t, markerErr, os.ErrNotExist, "the destination busy marker is released")
 
-	// The RETRY must never treat the occupied path as a restore source: the
-	// marker-certified destination is kept byte-for-byte, the occupant is
-	// cleaned off the journal-owned backup name, and the entry is consumed.
+	// The RETRY must never treat the occupied path as a restore source AND
+	// (wave-19) must never REMOVE it either: the durable marker carries the
+	// rearm-refused kind, so the retry runs NO backup-path operation — the
+	// marker-certified destination is kept byte-for-byte, the foreign
+	// occupant stays untouched, and the entry is consumed journal-only.
 	repo.fail = nil
 	retryRow, ferr := fixture.repo.FindByID(ctx, op.ID)
 	require.NoError(t, ferr)
@@ -91,8 +93,8 @@ func TestReverterRearmCollisionW18C_MarksRestorePendingAndNeverRestoresOccupant(
 	require.True(t, restored[dest], "the marker-certified destination stays in the delete-subtraction set")
 	require.Equal(t, "old", p3ReadFile(t, fixture.fs, dest),
 		"the retry never copies the foreign occupant over the marker-certified destination")
-	_, serr := fixture.fs.Stat(backup)
-	require.ErrorIs(t, serr, os.ErrNotExist, "cleanup removed the occupant from the journal-owned backup name")
+	require.Equal(t, "foreign-bytes", p3ReadFile(t, fixture.fs, backup),
+		"wave-19: the rearm-refused retry never removes the foreign occupant — the backup name is unowned")
 	row, ferr = fixture.repo.FindByID(ctx, op.ID)
 	require.NoError(t, ferr)
 	gf, perr = models.ParseGeneratedFiles(row.GeneratedFiles)

@@ -118,8 +118,10 @@ func (r *RevertFileResult) withRetryable(cause error) *RevertFileResult {
 // and retryable; any later journal failure re-arms the backup before
 // returning — and when that re-arm is REFUSED with the occupied-name classes
 // (fsutil.ErrPublishCollision / ErrPublishNoReplaceUnsupported), the entry is
-// instead marked RestorePending (codex P2, PR#215 round 18): an entry armed
-// against a foreign occupant must never be reachable from here.
+// instead marked RestorePending with the wave-19 rearm-refused kind (codex
+// P2, PR#215 rounds 18+19): an entry armed against a foreign occupant must
+// never be reachable from here, and the pending retry consumes the entry
+// WITHOUT any path operation against the unowned (foreign or absent) name.
 func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.BatchFileOperation) (map[string]bool, error) {
 	restored := map[string]bool{}
 	gf, err := models.ParseGeneratedFiles(op.GeneratedFiles)
@@ -212,13 +214,14 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 				// means the other loop already restored these bytes, so reopening
 				// (and restoring) it would turn a harmless duplicate revert into a
 				// missing-backup failure or a double restore.
-				armed, restorePending, freshErr := r.replacementEntryIsLive(ctx, op, e)
+				armed, pendingKind, freshErr := r.replacementEntryIsLive(ctx, op, e)
 				if freshErr != nil {
 					return freshErr
 				}
 				if !armed {
 					continue
 				}
+				restorePending := pendingKind != ""
 
 				// Capture the destination state before replacing it. A clean
 				// missing result is the R9-2 crash-window state; an existing (or
@@ -238,6 +241,28 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 				_, destLstatErr := lstatRestoreSource(r.fs, dest)
 				destMissingBeforeRestore := errors.Is(destLstatErr, afero.ErrFileNotFound)
 
+				// Wave-19 (codex P2): a rearm-refused pending entry's backup name
+				// is UNOWNED — a refused no-replace re-arm left it foreign-
+				// occupied or absent. The retry therefore runs NO backup-path
+				// operation at all: neither the source stat (an absent name would
+				// fail every explicit revert forever) nor the removal below (a
+				// foreign occupant must never be deleted). The destination
+				// certified in place when the marker was written must still be
+				// present before the only journal record of the restore is
+				// consumed.
+				if restorePending && pendingKind == models.RestorePendingKindRearmRefused {
+					if destLstatErr != nil {
+						return fmt.Errorf("journaled rearm-refused pending entry for destination %s cannot be consumed: destination unreadable: %w", dest, destLstatErr)
+					}
+					restored[dest] = true
+					if cErr := r.consumeReplacementEntry(ctx, op, e); cErr != nil {
+						absoluteBackup, _ := filepath.Abs(e.Backup)
+						logging.Warnf("replacement restore %s: consumption of a rearm-refused pending entry failed: %v — unowned backup name untouched, durable marker retained for retry", absoluteBackup, cErr)
+						return cErr
+					}
+					continue
+				}
+
 				// Capture the original backup metadata before removal so a failed
 				// journal consumption can re-arm the same permission bits and mtime.
 				backupInfo, statErr := lstatRestoreSource(r.fs, e.Backup)
@@ -247,11 +272,14 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 				// A live entry carrying the durable RestorePending marker has its
 				// destination bytes certified in place already: only the backup
 				// cleanup and the journal consumption remain. NEVER copy from the
-				// backup path for it — after a collided re-arm the occupant can be a
-				// FOREIGN file (codex P2, PR#215 round 18), and restoring it over the
-				// destination would destroy the restored bytes. Skip the copy and
-				// land dest in the delete-subtraction map; the cleanup/consumption
-				// legs below run unchanged.
+				// backup path for a pending entry (codex P2, PR#215 round 18):
+				// the marker certifies the destination carries the restored
+				// bytes, and restoring anything onto it would destroy them. Skip
+				// the copy and land dest in the delete-subtraction map; the
+				// cleanup/consumption legs below run unchanged for the legacy
+				// clean kind. (The rearm-refused kind never reaches this
+				// copy-or-remove region: it consumed above without touching the
+				// backup path.)
 				if !restorePending {
 					if repErr := copyRestoreBytes(r.fs, e.Backup, dest); repErr != nil {
 						return fmt.Errorf("failed to restore %s → %s: %w", e.Backup, dest, repErr)
@@ -284,20 +312,23 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 					if rearmErr := rearmReplacementBackup(r.fs, dest, e.Backup, backupInfo); rearmErr != nil {
 						absoluteBackup, _ := filepath.Abs(e.Backup)
 						if rearmOccupiedClass(rearmErr) {
-							// codex P2 (PR#215 round 18): the re-arm could not reclaim
-							// the backup name — a foreign writer owns it now, or the
-							// volume cannot express a no-replace publish at all. An
-							// entry left ARMED would aim the next restore at the
-							// occupant: foreign bytes over the restored destination,
-							// then the occupant deleted. Persist the durable
-							// RestorePending marker so every retry runs only the
-							// cleanup + consumption legs (the marker certifies the
-							// destination already carries the restored bytes). The
+							// codex P2 (PR#215 rounds 18+19): the re-arm could not
+							// reclaim the backup name — a foreign writer owns it now,
+							// or the volume cannot express a no-replace publish at
+							// all. An entry left ARMED would aim the next restore at
+							// the occupant: foreign bytes over the restored
+							// destination, then the occupant deleted. Persist the
+							// durable RestorePending marker WITH THE REARM-REFUSED
+							// KIND so every retry runs only the consumption leg — the
+							// marker certifies the destination already carries the
+							// restored bytes, and the kind keeps every retry off the
+							// unowned name (an absent name must not wedge the source
+							// stat; a foreign occupant must never be removed). The
 							// occupant is never clobbered by the no-replace re-arm and
 							// the failure surfaces through cErr exactly like the
 							// neighboring consumption legs; the marker outcome is
 							// logged via the logger seam only.
-							if markErr := markReplacementEntryRestorePending(ctx, r.batchFileOpRepo, op.ID, sweepSlash(e.Backup)); markErr != nil {
+							if markErr := markReplacementEntryRestorePendingKind(ctx, r.batchFileOpRepo, op.ID, sweepSlash(e.Backup), models.RestorePendingKindRearmRefused); markErr != nil {
 								logging.Warnf("replacement restore %s: consumption failed (%v), re-arm refused (%v), and restore-pending persistence failed (%v) — restored destination retained, backup occupant untouched", absoluteBackup, cErr, rearmErr, markErr)
 							} else {
 								logging.Warnf("replacement restore %s: consumption failed (%v) and re-arm refused (%v) — restored destination retained, entry marked restore-pending", absoluteBackup, cErr, rearmErr)
@@ -322,24 +353,27 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 // opens its backup. A false first result is a successful no-op: another revert
 // or sweep already restored and consumed this exact entry, so the caller must
 // not touch the destination again. The second result is the FRESH entry's
-// RestorePending marker: the destination bytes are certified in place and only
-// cleanup/consumption pend, so the caller must never use the backup path as a
-// restore source for that entry — the occupant can be a foreign file after a
-// collided consumption-failure re-arm (codex P2, PR#215 round 18).
-func (r *Reverter) replacementEntryIsLive(ctx context.Context, op *models.BatchFileOperation, entry models.ReplacementEntry) (bool, bool, error) {
+// normalized restore-pending kind ("" when not pending): the destination
+// bytes are certified in place and only cleanup/consumption pend, so the
+// caller must never use the backup path as a restore source for that entry —
+// the occupant can be a foreign file after a collided consumption-failure
+// re-arm (codex P2, PR#215 round 18). Wave-19: the kind tells the caller
+// whether the cleanup retry may touch the backup path at all — the
+// rearm-refused kind forbids every path operation against the unowned name.
+func (r *Reverter) replacementEntryIsLive(ctx context.Context, op *models.BatchFileOperation, entry models.ReplacementEntry) (bool, string, error) {
 	release := fsutil.SharedJournalLocks().Acquire(fmt.Sprintf("%d", op.ID))
 	defer release()
 
 	fresh, frErr := r.batchFileOpRepo.FindByID(ctx, op.ID)
 	if frErr != nil {
-		return false, false, fmt.Errorf("failed to re-read row before restoring on op %d: %w", op.ID, frErr)
+		return false, "", fmt.Errorf("failed to re-read row before restoring on op %d: %w", op.ID, frErr)
 	}
 	if fresh == nil {
-		return false, false, fmt.Errorf("failed to re-read row before restoring on op %d: row not found", op.ID)
+		return false, "", fmt.Errorf("failed to re-read row before restoring on op %d: row not found", op.ID)
 	}
 	gf, parseErr := models.ParseGeneratedFiles(fresh.GeneratedFiles)
 	if parseErr != nil {
-		return false, false, fmt.Errorf("failed to re-parse journal before restoring on op %d: %w", op.ID, parseErr)
+		return false, "", fmt.Errorf("failed to re-parse journal before restoring on op %d: %w", op.ID, parseErr)
 	}
 
 	// Keep all later cleanup/consumption decisions on the same fresh ledger
@@ -350,10 +384,10 @@ func (r *Reverter) replacementEntryIsLive(ctx context.Context, op *models.BatchF
 	op.RevertStatus = fresh.RevertStatus
 	for _, cur := range gf.Replacements {
 		if cur.Destination == entry.Destination && cur.Backup == entry.Backup && cur.DestSeq == entry.DestSeq {
-			return true, cur.RestorePending, nil
+			return true, cur.PendingKind(), nil
 		}
 	}
-	return false, false, nil
+	return false, "", nil
 }
 
 // consumeReplacementEntry removes one journaled entry from the operation

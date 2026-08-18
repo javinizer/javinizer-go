@@ -126,17 +126,18 @@ func TestReplacementSweepCompensationW18C_ConsumeFailRearmCollisionRetainsDest(t
 	require.ErrorIs(t, markerErr, os.ErrNotExist, "the destination busy marker is released")
 
 	// The deferred recovery needs NO same-process state: a fresh sweeper,
-	// driven only by the durable RestorePending marker, finishes the cleanup
-	// and the consumption — and never restores FROM the occupied path.
+	// driven only by the durable RestorePending marker, finishes the
+	// consumption — and (wave-19) never restores FROM nor removes the
+	// occupied path: the rearm-refused kind routes the retry to a journal-only
+	// consumption that leaves the foreign occupant untouched.
 	repo.fail = nil
 	healed, err = NewReplacementSweeper(fs, repo).Sweep(ctx)
 	require.NoError(t, err)
 	require.Equal(t, 1, healed)
 	require.Equal(t, "old", string(mustRead2(t, base, dest)),
 		"the retained destination survives the retry byte-for-byte")
-	_, err = base.Stat(backup)
-	require.ErrorIs(t, err, os.ErrNotExist,
-		"the retry consumes the entry and removes the occupant from the journal-owned backup name")
+	require.Equal(t, "foreign-bytes", string(mustRead2(t, base, backup)),
+		"wave-19: the rearm-refused retry never removes the foreign occupant — the backup name is unowned")
 	row, err = baseRepo.FindByID(ctx, op.ID)
 	require.NoError(t, err)
 	gf, err = models.ParseGeneratedFiles(row.GeneratedFiles)
@@ -238,17 +239,17 @@ func TestReplacementSweepCompensationW18C_ConsumeFailRearmCollisionMarkerFailure
 	require.True(t, sweeper.hasPendingRemoval(sweepSlash(backup)),
 		"this process's pending-removal fallback carries the recovery")
 
-	// Heal persistence; the SAME sweeper (in-process fallback authorization,
-	// no durable marker) completes the deferred cleanup without ever
-	// restoring from the occupied path.
+	// Heal persistence; the SAME sweeper completes the deferred cleanup — the
+	// in-process fallback carries the rearm-refused kind (wave-19), so the
+	// retry never restores from NOR removes the occupied path.
 	repo.fail = nil
 	repo.brokeAt = 0
 	healed, err = sweeper.Sweep(ctx)
 	require.NoError(t, err)
 	require.Equal(t, 1, healed)
 	require.Equal(t, "old", string(mustRead2(t, base, dest)))
-	_, err = base.Stat(backup)
-	require.ErrorIs(t, err, os.ErrNotExist)
+	require.Equal(t, "foreign-bytes", string(mustRead2(t, base, backup)),
+		"wave-19: the fallback-authorized rearm-refused retry also stays off the unowned backup name")
 	row, err = baseRepo.FindByID(ctx, op.ID)
 	require.NoError(t, err)
 	gf, err = models.ParseGeneratedFiles(row.GeneratedFiles)
@@ -306,13 +307,14 @@ func TestReplacementSweepCompensationW18C_RetryPendingRearmCollisionKeepsPending
 	require.Contains(t, out, fsutil.ErrPublishCollision.Error())
 	require.Contains(t, out, "marked restore-pending")
 
-	// Recovery on a healed repository: cleanup + consumption complete with
-	// the destination bytes intact.
+	// Recovery on a healed repository: the wave-19 collision upgrade marked
+	// the entry rearm-refused, so the consumption completes with the
+	// destination bytes intact and the occupant never removed.
 	repo.fail = nil
 	require.True(t, sweeper.retryPendingRemoval(ctx, op.ID, backup, dest, sweepSlash(backup)))
 	require.Equal(t, "old", string(mustRead2(t, base, dest)))
-	_, err = base.Stat(backup)
-	require.ErrorIs(t, err, os.ErrNotExist)
+	require.Equal(t, "foreign-bytes", string(mustRead2(t, base, backup)),
+		"the refused re-arm upgraded the marker to rearm-refused: the retry runs no backup-path operation")
 	row, err = baseRepo.FindByID(ctx, op.ID)
 	require.NoError(t, err)
 	gf, err := models.ParseGeneratedFiles(row.GeneratedFiles)

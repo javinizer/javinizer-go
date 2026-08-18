@@ -9,9 +9,17 @@ package downloader
 // over the destination and then delete — and its staged publish would
 // replace a racer claiming the name inside the copy window. The re-arm now
 // refusES occupied names (typed fsutil.ErrPublishCollision, foreign bytes
-// intact, journal entry kept in its prior armed/pending state) and publishes
-// its staged copy with fsutil.PublishNoReplace. These tests replay both
-// claim timings through installOverwriting's ReplaceFile-rollback leg.
+// intact, journal entry kept in its prior armed/pending state by the re-arm
+// itself) and publishes its staged copy with fsutil.PublishNoReplace. These
+// tests replay both claim timings through installOverwriting's ReplaceFile-
+// rollback leg.
+//
+// Wave-19 (codex P2) refines the journal outcome of exactly these refusals:
+// the caller (markRollbackRearmRefused) converts the still-armed entry into
+// the rearm-refused RESTORE-PENDING state so a later revert consumes it
+// without ever touching the occupied name — the byte-safety assertions below
+// are unchanged (see install_overwrite_pending_w19_test.go for the
+// conversion pins).
 
 import (
 	"bytes"

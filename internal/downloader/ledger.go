@@ -24,6 +24,17 @@ type ReplacementRecorder interface {
 	// the row keeps pointing at a consumed backup and every later revert
 	// fails stat-ing it (codex P3 round 1).
 	ReleaseReplacement(ctx context.Context, opID, replacedPath, backupPath string) error
+	// MarkReplacementRestorePending disarms a journaled entry whose rollback
+	// already restored the destination bytes but whose re-arm was REFUSED
+	// with the occupied-name classes (fsutil.PublishRefusal — a foreign
+	// writer owns backupPath now, or the volume cannot express a no-replace
+	// publish). Leaving the entry ARMED would aim the next revert at the
+	// unowned name: foreign bytes restored over the destination, then the
+	// occupant deleted. The entry is instead durably marked RestorePending
+	// with the wave-19 rearm-refused kind — the destination bytes are
+	// certified in place, so the consumption retry runs WITHOUT any
+	// backup-path operation (codex P2, PR#215 wave-19). Idempotent.
+	MarkReplacementRestorePending(ctx context.Context, opID, replacedPath, backupPath string) error
 }
 
 // downloadLedger is the internal option wrapper folding command-level

@@ -217,9 +217,9 @@ func TestReplacementOwnershipCovW8_PendingHelperLegs(t *testing.T) {
 		{Backup: "/out/W8-HELP/other.dlbak." + p3HexB},
 		{Backup: backup},
 	}}
-	require.True(t, markReplacementRestorePending(&gf, sweepSlash(backup)))
-	require.False(t, markReplacementRestorePending(&gf, sweepSlash(backup)))
-	require.False(t, markReplacementRestorePending(&gf, sweepSlash("/out/W8-HELP/missing.dlbak."+p3HexA)))
+	require.True(t, markReplacementRestorePendingKind(&gf, sweepSlash(backup), models.RestorePendingKindClean))
+	require.False(t, markReplacementRestorePendingKind(&gf, sweepSlash(backup), models.RestorePendingKindClean), "identical re-mark is a no-op")
+	require.False(t, markReplacementRestorePendingKind(&gf, sweepSlash("/out/W8-HELP/missing.dlbak."+p3HexA), models.RestorePendingKindClean))
 
 	repo := newP3OpRepo()
 	live := &models.BatchFileOperation{GeneratedFiles: models.MarshalLedgerJSON(models.GeneratedFilesJSON{

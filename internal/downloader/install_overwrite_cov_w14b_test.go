@@ -191,7 +191,9 @@ func TestInstallOverwriting_RetractionFailureWithPreexistingBackupDoesNotClobber
 	require.Equal(t, 1, recorder.releases)
 	require.Zero(t, fs.destOpens, "existing backup makes re-arm return before opening the restored destination")
 	records := recorder.get()
-	require.Len(t, records, 1)
+	require.Len(t, records, 1, "entry kept pending persisted journal state")
+	require.Len(t, recorder.getPendings(), 1,
+		"wave-19: the occupied-name refusal converts the armed entry to rearm-refused restore-pending")
 	backupBytes, readErr := afero.ReadFile(base, records[0].backupPath)
 	require.NoError(t, readErr)
 	require.Equal(t, old, backupBytes, "pre-existing re-arm remains untouched")

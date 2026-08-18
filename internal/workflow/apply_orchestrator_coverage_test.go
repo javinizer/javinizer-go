@@ -152,6 +152,10 @@ func (r *recordingRevertLog) ConfirmReplacement(_ context.Context, _ OperationID
 	return nil
 }
 
+func (r *recordingRevertLog) MarkReplacementRestorePending(_ context.Context, _ OperationID, _, _ string) error {
+	return nil
+}
+
 func (r *recordingRevertLog) ReleaseReplacement(_ context.Context, _ OperationID, _, _ string) error {
 	return nil
 }

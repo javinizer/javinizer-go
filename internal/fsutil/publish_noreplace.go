@@ -30,6 +30,19 @@ var ErrPublishCollision = errors.New("no-replace publish destination already occ
 // never as license to fall back to replacing semantics.
 var ErrPublishNoReplaceUnsupported = errors.New("filesystem cannot express an atomic no-replace publish")
 
+// PublishRefusal reports whether err carries one of the typed no-replace
+// REFUSAL classes — ErrPublishCollision (a foreign writer owns the name now)
+// or ErrPublishNoReplaceUnsupported (the volume cannot express an atomic
+// no-replace publish at all). In both classes nothing was attempted that
+// could have touched the occupied bytes, so the name is UNOWNED from the
+// caller's perspective: history (re-arm compensation) and the downloader
+// (rollback re-arm) share this classifier to decide that a journaled entry
+// must never be retried through the occupied/absent path (wave-19, codex P2
+// PR#215).
+func PublishRefusal(err error) bool {
+	return errors.Is(err, ErrPublishCollision) || errors.Is(err, ErrPublishNoReplaceUnsupported)
+}
+
 // publishCollision wraps the destination name in the collision class.
 func publishCollision(dst string) error {
 	return fmt.Errorf("%w: %s", ErrPublishCollision, dst)

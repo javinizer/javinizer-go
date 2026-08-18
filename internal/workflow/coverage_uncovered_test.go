@@ -823,6 +823,10 @@ func (e errorRevertLog) ConfirmReplacement(_ context.Context, _ OperationID, _, 
 	return e.completeErr
 }
 
+func (e errorRevertLog) MarkReplacementRestorePending(_ context.Context, _ OperationID, _, _ string) error {
+	return e.completeErr
+}
+
 func (e errorRevertLog) ReleaseReplacement(_ context.Context, _ OperationID, _, _ string) error {
 	return e.completeErr
 }

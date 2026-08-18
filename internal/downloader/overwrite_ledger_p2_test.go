@@ -28,6 +28,7 @@ type armedTestLedger struct {
 	mu       sync.Mutex
 	records  []replacementRecord
 	released []replacementRecord
+	pendings []replacementRecord // entries marked restore-pending (wave-19 rearm-refused)
 }
 
 type replacementRecord struct {
@@ -44,6 +45,25 @@ func (l *armedTestLedger) RecordReplacement(_ context.Context, _, replacedPath, 
 
 func (l *armedTestLedger) ConfirmReplacement(_ context.Context, _, _, _ string) error {
 	return nil
+}
+
+// MarkReplacementRestorePending records the wave-19 rearm-refused pending
+// mark WITHOUT releasing the entry: it stays journaled (the durable row
+// equivalent keeps it too), so tests assert both the untriggered release
+// and the delivered mark.
+func (l *armedTestLedger) MarkReplacementRestorePending(_ context.Context, _, replacedPath, backupPath string) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.pendings = append(l.pendings, replacementRecord{replacedPath, backupPath})
+	return nil
+}
+
+func (l *armedTestLedger) getPendings() []replacementRecord {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	out := make([]replacementRecord, len(l.pendings))
+	copy(out, l.pendings)
+	return out
 }
 
 func (l *armedTestLedger) ReleaseReplacement(_ context.Context, _, replacedPath, backupPath string) error {
@@ -143,6 +163,10 @@ func (l *failingTestLedger) ConfirmReplacement(context.Context, string, string, 
 }
 
 func (l *failingTestLedger) ReleaseReplacement(context.Context, string, string, string) error {
+	return nil
+}
+
+func (l *failingTestLedger) MarkReplacementRestorePending(context.Context, string, string, string) error {
 	return nil
 }
 

@@ -73,6 +73,23 @@ func journalEntryRestorePending(row *models.BatchFileOperation, backupSlash stri
 	return false
 }
 
+// journalEntryPendingKind reports the journaled entry's NORMALIZED
+// restore-pending kind ("" when the entry is missing or not pending). Sweep
+// legs route on this: the wave-19 rearm-refused kind must never drive any
+// path operation against the (unowned) backup name.
+func journalEntryPendingKind(row *models.BatchFileOperation, backupSlash string) string {
+	gf, err := models.ParseGeneratedFiles(row.GeneratedFiles)
+	if err != nil {
+		return ""
+	}
+	for _, rep := range gf.Replacements {
+		if sweepSlash(rep.Backup) == backupSlash {
+			return rep.PendingKind()
+		}
+	}
+	return ""
+}
+
 // sweepSlash normalizes a path for journal comparison via the probe-aware
 // destination key: backslash separators normalize only under the Windows
 // seam, and case folds only on an insensitive/tolerant destination root.
@@ -105,20 +122,18 @@ func removeReplacementBackup(fs afero.Fs, backup, phase string) error {
 	return nil
 }
 
-// markReplacementRestorePending records that restore bytes are installed while
-// the backup cleanup still needs a retry. Installed remains the downloader's
-// confirmation bit; this marker only disambiguates a repaired destination from
-// an armed apply whose destination happened to be present.
-func markReplacementRestorePending(gf *models.GeneratedFilesJSON, backupSlash string) bool {
+// markReplacementRestorePendingKind records that restore bytes are installed while
+// the backup cleanup still needs a retry — with an explicit pending kind.
+// explicit pending kind (wave-19). The merge discipline lives in
+// models.ReplacementEntry.SetRestorePending: identical re-marks no-op, and a
+// rearm-refused kind upgrade is one-way (a name once proven unowned never
+// re-enters the removal path).
+func markReplacementRestorePendingKind(gf *models.GeneratedFilesJSON, backupSlash, kind string) bool {
 	for i := range gf.Replacements {
 		if sweepSlash(gf.Replacements[i].Backup) != backupSlash {
 			continue
 		}
-		if gf.Replacements[i].RestorePending {
-			return false
-		}
-		gf.Replacements[i].RestorePending = true
-		return true
+		return gf.Replacements[i].SetRestorePending(kind)
 	}
 	return false
 }
@@ -126,8 +141,17 @@ func markReplacementRestorePending(gf *models.GeneratedFilesJSON, backupSlash st
 // markReplacementEntryRestorePending applies the marker to a fresh row inside
 // the journal read-modify-write transaction (review 4960250562: atomic across
 // processes, not just this process's lock registry). It is used by the
-// explicit reverter when backup removal fails before consumption.
+// explicit reverter when backup removal fails before consumption — the legacy
+// CLEAN kind, where the backup name still holds the operation's own bytes.
 func markReplacementEntryRestorePending(ctx context.Context, repo database.BatchFileOperationRepositoryInterface, rowID uint, backupSlash string) error {
+	return markReplacementEntryRestorePendingKind(ctx, repo, rowID, backupSlash, models.RestorePendingKindClean)
+}
+
+// markReplacementEntryRestorePendingKind is markReplacementEntryRestorePending
+// with an explicit pending kind (wave-19): the explicit reverter's refused
+// re-arm compensation marks rearm-refused, certifying the destination bytes
+// while keeping every retry off the unowned backup name.
+func markReplacementEntryRestorePendingKind(ctx context.Context, repo database.BatchFileOperationRepositoryInterface, rowID uint, backupSlash, kind string) error {
 	release := fsutil.SharedJournalLocks().Acquire(strconv.Itoa(int(rowID)))
 	defer release()
 	txErr := repo.UpdateJournalInTx(ctx, rowID, func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
@@ -135,7 +159,7 @@ func markReplacementEntryRestorePending(ctx context.Context, repo database.Batch
 		if err != nil {
 			return models.GeneratedFilesJSON{}, false, err
 		}
-		if !markReplacementRestorePending(&gf, backupSlash) {
+		if !markReplacementRestorePendingKind(&gf, backupSlash, kind) {
 			return gf, false, nil
 		}
 		return gf, true, nil
@@ -153,13 +177,19 @@ func markReplacementEntryRestorePending(ctx context.Context, repo database.Batch
 // journaled backup name is unreclaimable, so a journal entry left ARMED would
 // point later restores at content this operation does not own: the retry must
 // be driven by the durable RestorePending marker, never by the occupied path.
+// Wave-19: the classifier itself is fsutil.PublishRefusal, shared with the
+// downloader's rollback re-arm refusal handling.
 func rearmOccupiedClass(err error) bool {
-	return errors.Is(err, fsutil.ErrPublishCollision) || errors.Is(err, fsutil.ErrPublishNoReplaceUnsupported)
+	return fsutil.PublishRefusal(err)
 }
 
 // rearmReplacementBackup recreates the backup from the destination's bytes
 // when a journal consumption fails AFTER the backup was removed, restoring
 // the armed retry posture (callers keep info's permission bits and mtime).
+// A refused no-replace publish (fsutil.PublishRefusal classes) leaves the
+// name foreign-occupied or absent — wave-19 callers mark the entry
+// rearm-refused restore-pending instead of leaving it armed against the
+// unowned name.
 // Wave-10 codex follow-up: the destination used to be copied via a plain
 // fs.Open — an attacker swapping dest for a symlink in the removal→re-arm
 // window got a protected file copied into the media-dir backup, armed for a
@@ -207,29 +237,56 @@ func rearmReplacementBackup(fs afero.Fs, dest, backup string, info os.FileInfo) 
 type ReplacementSweeper struct {
 	fs              afero.Fs
 	repo            database.BatchFileOperationRepositoryInterface
-	pendingMu       sync.Mutex      // API-triggered sweeps share pendingRemovals; never hold across fs/repo calls.
-	pendingRemovals map[string]bool // backup key → restore installed, cleanup pending
+	pendingMu       sync.Mutex        // API-triggered sweeps share pendingRemovals; never hold across fs/repo calls.
+	pendingRemovals map[string]string // backup key → restore-pending kind: cleanup authorized, routing on kind (wave-19)
 }
 
 // NewReplacementSweeper constructs a sweeper whose in-flight arbitration is
 // durable and destination-specific via the `.dlbusy` marker.
 func NewReplacementSweeper(fs afero.Fs, repo database.BatchFileOperationRepositoryInterface) *ReplacementSweeper {
-	return &ReplacementSweeper{fs: fs, repo: repo, pendingRemovals: map[string]bool{}}
+	return &ReplacementSweeper{fs: fs, repo: repo, pendingRemovals: map[string]string{}}
 }
 
+// rememberPendingRemoval records the in-process cleanup authorization with
+// the legacy CLEAN kind (the backup name still holds the operation's own
+// bytes — e.g. its removal just failed).
 func (s *ReplacementSweeper) rememberPendingRemoval(backupKey string) {
+	s.rememberPendingRemovalKind(backupKey, models.RestorePendingKindClean)
+}
+
+// rememberPendingRemovalKind is rememberPendingRemoval with a kind (wave-19):
+// the compensation legs that watched a no-replace re-arm get refused record
+// the rearm-refused kind so a fallback-authorized retry also stays off the
+// unowned backup name. A remembered rearm-refused kind is never downgraded by
+// a later clean-kind memory for the same key.
+func (s *ReplacementSweeper) rememberPendingRemovalKind(backupKey, kind string) {
 	s.pendingMu.Lock()
 	defer s.pendingMu.Unlock()
 	if s.pendingRemovals == nil {
-		s.pendingRemovals = map[string]bool{}
+		s.pendingRemovals = map[string]string{}
 	}
-	s.pendingRemovals[backupKey] = true
+	if s.pendingRemovals[backupKey] == models.RestorePendingKindRearmRefused {
+		return
+	}
+	s.pendingRemovals[backupKey] = kind
 }
 
 func (s *ReplacementSweeper) hasPendingRemoval(backupKey string) bool {
 	s.pendingMu.Lock()
 	defer s.pendingMu.Unlock()
-	return s.pendingRemovals != nil && s.pendingRemovals[backupKey]
+	_, ok := s.pendingRemovals[backupKey]
+	return ok
+}
+
+// pendingRemovalKind reports the in-process fallback's restore-pending kind
+// for a key; the rearm-refused kind dominates a durable clean marker on
+// routing (a refused re-arm in THIS process is fresher ownership evidence
+// than the committed ledger's clean posture).
+func (s *ReplacementSweeper) pendingRemovalKind(backupKey string) (string, bool) {
+	s.pendingMu.Lock()
+	defer s.pendingMu.Unlock()
+	kind, ok := s.pendingRemovals[backupKey]
+	return kind, ok
 }
 
 func (s *ReplacementSweeper) forgetPendingRemoval(backupKey string) {
@@ -245,14 +302,23 @@ func (s *ReplacementSweeper) forgetPendingRemoval(backupKey string) {
 // caller MUST already hold the row's SharedJournalLocks lock — the sweep legs
 // below run their whole journal section under it. The reverter's equivalent
 // outside the journal lock is markReplacementEntryRestorePending, which
-// acquires the lock itself (the registry is not reentrant).
+// acquires the lock itself (the registry is not reentrant). This is the
+// legacy CLEAN-kind form.
 func (s *ReplacementSweeper) persistRestorePendingMarker(ctx context.Context, rowID uint, backupSlash string) error {
+	return s.persistRestorePendingMarkerKind(ctx, rowID, backupSlash, models.RestorePendingKindClean)
+}
+
+// persistRestorePendingMarkerKind is persistRestorePendingMarker with an
+// explicit pending kind (wave-19): refused re-arm compensation passes the
+// rearm-refused kind so the durable marker itself keeps every later retry
+// off the unowned backup name.
+func (s *ReplacementSweeper) persistRestorePendingMarkerKind(ctx context.Context, rowID uint, backupSlash, kind string) error {
 	return s.repo.UpdateJournalInTx(ctx, rowID, func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
 		gf, err := models.ParseGeneratedFiles(current.GeneratedFiles)
 		if err != nil {
 			return models.GeneratedFilesJSON{}, false, err
 		}
-		if !markReplacementRestorePending(&gf, backupSlash) {
+		if !markReplacementRestorePendingKind(&gf, backupSlash, kind) {
 			return gf, false, nil
 		}
 		return gf, true, nil
@@ -602,6 +668,16 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 		logging.Infof("replacement sweep %s: destination missing but install was confirmed — backup retained, no auto-restore", backup)
 		return false
 	}
+	// Wave-19 (codex P2): a rearm-refused pending entry may NEVER be restored
+	// FROM its backup name — the name is foreign-occupied or absent (a refused
+	// no-replace re-arm left it unowned), and the restored destination the
+	// marker certified is now gone. Copying the path could install foreign
+	// bytes; consuming the entry would erase the only record that the restore
+	// happened. Retain both untouched for manual recovery.
+	if journalEntryPendingKind(freshRow, backupSlash) == models.RestorePendingKindRearmRefused {
+		logging.Warnf("replacement sweep %s: destination missing but the journal entry is rearm-refused restore-pending — restored bytes are gone and the backup name is unowned; entry and name retained untouched", backup)
+		return false
+	}
 	// Wave-16 (codex P2): the destination was proven ABSENT above, so the
 	// restore publishes no-replace — a foreign writer claiming the name
 	// mid-window collides into this kept/warn leg (typed
@@ -681,18 +757,7 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 	}
 
 	uErr := s.repo.UpdateJournalInTx(ctx, row.ID, func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
-		gf, err := models.ParseGeneratedFiles(current.GeneratedFiles)
-		if err != nil {
-			return models.GeneratedFilesJSON{}, false, err
-		}
-		kept := gf.Replacements[:0]
-		for _, rep := range gf.Replacements {
-			if sweepSlash(rep.Backup) != backupSlash {
-				kept = append(kept, rep)
-			}
-		}
-		gf.Replacements = kept
-		return gf, true, nil
+		return consumeSweepJournalEntry(current, backupSlash)
 	})
 	if uErr != nil {
 		// The backup was removed first, so re-arm it before undoing the
@@ -710,8 +775,15 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 		// cleanup + consumption and never restores from the occupied path),
 		// warn with BOTH causes, and leave the occupant untouched.
 		if rearmErr := rearmReplacementBackup(s.fs, dest, backup, backupInfo); rearmErr != nil {
-			s.rememberPendingRemoval(backupSlash)
-			if markErr := s.persistRestorePendingMarker(ctx, row.ID, backupSlash); markErr != nil {
+			// Wave-19 (codex P2): a failed re-arm leaves the backup name UNOWNED
+			// in every failure mode — foreign-occupied on the published-refusal
+			// classes, absent on a plain failure — so the durable marker and the
+			// in-process fallback both record the rearm-refused kind: no later
+			// retry may stat/copy/remove that path (a removal would delete a
+			// foreign occupant, an existence check would fail forever on the
+			// absent name).
+			s.rememberPendingRemovalKind(backupSlash, models.RestorePendingKindRearmRefused)
+			if markErr := s.persistRestorePendingMarkerKind(ctx, row.ID, backupSlash, models.RestorePendingKindRearmRefused); markErr != nil {
 				logging.Warnf("replacement sweep %s: consumption failed (%v), re-arm failed (%v), and restore-pending persistence failed (%v) — restored destination retained, backup path untouched", backup, uErr, rearmErr, markErr)
 			} else {
 				logging.Warnf("replacement sweep %s: consumption failed (%v) and re-arm failed (%v) — restored destination retained, cleanup marked restore-pending", backup, uErr, rearmErr)
@@ -729,14 +801,37 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 	return true
 }
 
+// consumeSweepJournalEntry drops every journal entry matching backupSlash
+// from the freshly re-read row. All three sweep consumption sites share it so
+// the removal posture lives exactly once (review 4960250562 transactions).
+func consumeSweepJournalEntry(current *models.BatchFileOperation, backupSlash string) (models.GeneratedFilesJSON, bool, error) {
+	gf, err := models.ParseGeneratedFiles(current.GeneratedFiles)
+	if err != nil {
+		return models.GeneratedFilesJSON{}, false, err
+	}
+	kept := gf.Replacements[:0]
+	for _, rep := range gf.Replacements {
+		if sweepSlash(rep.Backup) != backupSlash {
+			kept = append(kept, rep)
+		}
+	}
+	gf.Replacements = kept
+	return gf, true, nil
+}
+
 // retryPendingRemoval handles the present-destination state left by a failed
-// backup Remove. It consumes only after the retry Remove succeeds (or reports
-// os.IsNotExist), reading and writing through the same journal transaction
-// every other row mutator uses (review 4960250562).
+// backup Remove. The retry routes on the entry's restore-pending KIND
+// (wave-19, codex P2): the legacy clean kind consumes only after the retry
+// Remove succeeds (or reports os.IsNotExist), while the rearm-refused kind
+// consumes WITHOUT any backup-path operation — the name is foreign-occupied
+// or absent, so an existence check could wedge forever and a removal would
+// delete a foreign file. Reads and writes run through the same journal
+// transaction every other row mutator uses (review 4960250562).
 func (s *ReplacementSweeper) retryPendingRemoval(ctx context.Context, rowID uint, backup, dest, backupSlash string) bool {
 	jrel := fsutil.SharedJournalLocks().Acquire(strconv.Itoa(int(rowID)))
 	defer jrel()
 	var rowReverted, targetFound, authorized bool
+	var durableKind string
 	var fnErr error
 	err := s.repo.UpdateJournalInTx(ctx, rowID, func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
 		if current.RevertStatus == models.RevertStatusReverted {
@@ -752,6 +847,7 @@ func (s *ReplacementSweeper) retryPendingRemoval(ctx context.Context, rowID uint
 			if sweepSlash(gf.Replacements[i].Backup) == backupSlash {
 				targetFound = true
 				authorized = gf.Replacements[i].RestorePending || s.hasPendingRemoval(backupSlash)
+				durableKind = gf.Replacements[i].PendingKind()
 				break
 			}
 		}
@@ -769,6 +865,15 @@ func (s *ReplacementSweeper) retryPendingRemoval(ctx context.Context, rowID uint
 		return false
 	}
 	if !targetFound {
+		// Wave-19: a consumed entry whose in-process fallback still remembers a
+		// rearm-refused kind can leave a FOREIGN occupant at the backup name —
+		// the consumption proved the journal only, never the path's ownership.
+		// Keep the name (the next orphan arbitration retains+warns it) instead
+		// of deleting bytes nobody journaled.
+		if kind, ok := s.pendingRemovalKind(backupSlash); ok && kind == models.RestorePendingKindRearmRefused {
+			s.forgetPendingRemoval(backupSlash)
+			return true
+		}
 		if rmErr := removeReplacementBackup(s.fs, backup, "replacement sweep"); rmErr != nil {
 			return false
 		}
@@ -778,6 +883,36 @@ func (s *ReplacementSweeper) retryPendingRemoval(ctx context.Context, rowID uint
 	if !authorized {
 		return false
 	}
+
+	// Routing kind: the durable marker is authoritative, but an in-process
+	// rearm-refused memory DOMINATES — a refused re-arm this process watched
+	// is fresher ownership evidence than the committed (clean) posture.
+	effectiveKind := durableKind
+	if fallbackKind, ok := s.pendingRemovalKind(backupSlash); ok && fallbackKind == models.RestorePendingKindRearmRefused {
+		effectiveKind = models.RestorePendingKindRearmRefused
+	}
+	if effectiveKind == models.RestorePendingKindRearmRefused {
+		// Rearm-refused pending (wave-19): destination bytes were certified in
+		// place when the marker was set and the backup name is unowned — skip
+		// the metadata capture AND the removal entirely. Consumption failure
+		// needs no re-arm compensation (nothing was removed); the durable and
+		// in-process markers simply persist the same retry posture again.
+		uErr := s.repo.UpdateJournalInTx(ctx, rowID, func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
+			return consumeSweepJournalEntry(current, backupSlash)
+		})
+		if uErr != nil {
+			s.rememberPendingRemovalKind(backupSlash, models.RestorePendingKindRearmRefused)
+			if markErr := s.persistRestorePendingMarkerKind(ctx, rowID, backupSlash, models.RestorePendingKindRearmRefused); markErr != nil {
+				logging.Warnf("replacement sweep %s: rearm-refused pending consumption failed (%v) and restore-pending persistence failed (%v) — restored destination retained, unowned backup name untouched", backup, uErr, markErr)
+			} else {
+				logging.Warnf("replacement sweep %s: rearm-refused pending consumption failed: %v — restored destination retained, unowned backup name untouched", backup, uErr)
+			}
+			return false
+		}
+		s.forgetPendingRemoval(backupSlash)
+		return true
+	}
+
 	// Capture metadata without following a swapped-in symlink; consumption
 	// failure below must recreate the original permission bits and timestamps.
 	backupInfo, _ := lstatRestoreSource(s.fs, backup)
@@ -786,20 +921,10 @@ func (s *ReplacementSweeper) retryPendingRemoval(ctx context.Context, rowID uint
 		return false
 	}
 	uErr := s.repo.UpdateJournalInTx(ctx, rowID, func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
-		gf, err := models.ParseGeneratedFiles(current.GeneratedFiles)
-		if err != nil {
-			return models.GeneratedFilesJSON{}, false, err
-		}
-		kept := gf.Replacements[:0]
-		for _, rep := range gf.Replacements {
-			if sweepSlash(rep.Backup) != backupSlash {
-				kept = append(kept, rep)
-			}
-		}
-		gf.Replacements = kept
-		return gf, true, nil
+		return consumeSweepJournalEntry(current, backupSlash)
 	})
 	if uErr != nil {
+		fallbackKind := models.RestorePendingKindClean
 		if rearmErr := rearmReplacementBackup(s.fs, dest, backup, backupInfo); rearmErr != nil {
 			// codex P2 (PR#215 round 18): identical recovery contract as
 			// restoreAndConsume's consumption-failure leg. The destination
@@ -809,7 +934,18 @@ func (s *ReplacementSweeper) retryPendingRemoval(ctx context.Context, rowID uint
 			// persist the durable RestorePending marker so the retry runs only
 			// removal + consumption. The marker merge is a no-op when the entry
 			// already carries the marker (the usual entry point into this leg).
-			if markErr := s.persistRestorePendingMarker(ctx, rowID, backupSlash); markErr != nil {
+			// Wave-19: the occupied-name refusal classes mean the just-removed
+			// name raced a FOREIGN claimant — the marker (and the in-process
+			// fallback below) upgrades to the rearm-refused kind so the next
+			// retry never touches that path. A plain re-arm failure leaves the
+			// name absent and keeps the clean posture, whose removal leg
+			// already tolerates the missing name.
+			persistKind := models.RestorePendingKindClean
+			if rearmOccupiedClass(rearmErr) {
+				persistKind = models.RestorePendingKindRearmRefused
+			}
+			fallbackKind = persistKind
+			if markErr := s.persistRestorePendingMarkerKind(ctx, rowID, backupSlash, persistKind); markErr != nil {
 				absoluteBackup, _ := filepath.Abs(backup)
 				logging.Warnf("replacement sweep failed to re-arm backup %s after pending cleanup failure (%v), re-arm failed (%v), and restore-pending persistence failed (%v) — restored destination retained, backup path untouched", absoluteBackup, uErr, rearmErr, markErr)
 			} else {
@@ -817,7 +953,7 @@ func (s *ReplacementSweeper) retryPendingRemoval(ctx context.Context, rowID uint
 				logging.Warnf("replacement sweep failed to re-arm backup %s after pending cleanup failure: %v — entry marked restore-pending", absoluteBackup, rearmErr)
 			}
 		}
-		s.rememberPendingRemoval(backupSlash)
+		s.rememberPendingRemovalKind(backupSlash, fallbackKind)
 		logging.Warnf("replacement sweep %s: pending cleanup consumption failed: %v", backup, uErr)
 		return false
 	}
