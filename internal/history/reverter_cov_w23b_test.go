@@ -263,7 +263,7 @@ func TestRevertW23B_WaiterRefreshFailures(t *testing.T) {
 		repo database.BatchFileOperationRepositoryInterface
 		want string
 	}{
-		{name: "find error", repo: &w23bFindByIDErrorRepo{p3OpRepo: newP3OpRepo(), err: errors.New("waiter row unavailable")}, want: "after waiting for revert lock"},
+		{name: "find error", repo: &w23bFindByIDErrorRepo{p3OpRepo: newP3OpRepo(), err: errors.New("waiter row unavailable")}, want: "after acquiring revert lock"},
 		{name: "nil row", repo: &w23bNilFindByIDRepo{p3OpRepo: newP3OpRepo()}, want: "row not found"},
 	}
 	for _, tc := range cases {

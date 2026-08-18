@@ -175,12 +175,18 @@ func (a *aferoFSReverter) restoreNFO(ctx context.Context, op *models.BatchFileOp
 
 // operationRevertLockRegistry serializes the complete revert flow for one
 // operation, including journal replay and the primary file move. The keyed
-// registry keeps unrelated operations parallel; active counts only tell a
-// waiter that its input snapshot may now be stale.
+// registry keeps unrelated operations parallel; active is only contention
+// accounting because it is incremented before the keyed lock is acquired.
 type operationRevertLockRegistry struct {
 	registry *fsutil.KeyedLockRegistry
 	mu       sync.Mutex
 	active   map[string]int
+
+	// Optional synchronization seams make the active-count/keyed-lock gap
+	// deterministic in concurrency regression tests without changing the
+	// production lock order.
+	afterActiveIncrement func(key string)
+	afterAcquire         func(key string, waited bool)
 }
 
 func newOperationRevertLockRegistry() *operationRevertLockRegistry {
@@ -196,7 +202,13 @@ func (r *operationRevertLockRegistry) acquire(key string) (func(), bool) {
 	r.active[key]++
 	r.mu.Unlock()
 
+	if r.afterActiveIncrement != nil {
+		r.afterActiveIncrement(key)
+	}
 	releaseKey := r.registry.Acquire(key)
+	if r.afterAcquire != nil {
+		r.afterAcquire(key, waited)
+	}
 	return func() {
 		releaseKey()
 		r.mu.Lock()
@@ -213,23 +225,22 @@ func (r *operationRevertLockRegistry) acquire(key string) (func(), bool) {
 var revertOperationLocks = newOperationRevertLockRegistry()
 
 func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation) (*RevertFileResult, error) {
-	release, waited := revertOperationLocks.acquire(fmt.Sprintf("rev-op:%d", op.ID))
+	release, _ := revertOperationLocks.acquire(fmt.Sprintf("rev-op:%d", op.ID))
 	defer release()
 
-	// A request may have loaded its operation row before another request won
-	// the lock. Refresh only that contended path so existing single-revert
-	// callers keep their established read behavior and the winner's status is
-	// authoritative before any primary filesystem leg runs.
-	if waited {
-		fresh, err := r.batchFileOpRepo.FindByID(ctx, op.ID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to re-read operation %d after waiting for revert lock: %w", op.ID, err)
-		}
-		if fresh == nil {
-			return nil, fmt.Errorf("failed to re-read operation %d after waiting for revert lock: row not found", op.ID)
-		}
-		*op = *fresh
+	// Refresh after every keyed-lock acquisition. The active count is bumped
+	// before registry.Acquire, so a caller that reports waited=false can still
+	// have been preempted while another caller acquired the keyed lock first.
+	// The fresh row is authoritative for both resume and already-reverted
+	// abort paths before any journal, primary, cleanup, or NFO leg runs.
+	fresh, err := r.batchFileOpRepo.FindByID(ctx, op.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to re-read operation %d after acquiring revert lock: %w", op.ID, err)
 	}
+	if fresh == nil {
+		return nil, fmt.Errorf("failed to re-read operation %d after acquiring revert lock: row not found", op.ID)
+	}
+	*op = *fresh
 
 	logging.Debugf("Reverting operation %d: movie=%s type=%s original=%s new=%s revert_status=%s",
 		op.ID, op.MovieID, op.OperationType, op.OriginalPath, op.NewPath, op.RevertStatus)

@@ -792,6 +792,7 @@ func TestRevertBatch_SuccessfulRevert(t *testing.T) {
 		},
 	}
 	mockRepo.On("FindByBatchJobID", mock.Anything, "batch-1").Return(ops, nil)
+	mockRepo.On("FindByID", mock.Anything, uint(300)).Return(&ops[0], nil)
 	mockRepo.On("UpdateRevertStatus", mock.Anything, uint(300), models.RevertStatusReverted).Return(nil)
 
 	r := NewReverter(fs, mockRepo)
@@ -832,6 +833,7 @@ func TestRevertBatch_MixedStatuses(t *testing.T) {
 		},
 	}
 	mockRepo.On("FindByBatchJobID", mock.Anything, "batch-1").Return(ops, nil)
+	mockRepo.On("FindByID", mock.Anything, uint(301)).Return(&ops[0], nil)
 	mockRepo.On("UpdateRevertStatus", mock.Anything, uint(301), models.RevertStatusReverted).Return(nil)
 
 	r := NewReverter(fs, mockRepo)
@@ -925,6 +927,7 @@ func TestRevertScrape_Success(t *testing.T) {
 		},
 	}
 	mockRepo.On("FindByBatchJobID", mock.Anything, "batch-1").Return(ops, nil)
+	mockRepo.On("FindByID", mock.Anything, uint(401)).Return(&ops[0], nil)
 	mockRepo.On("UpdateRevertStatus", mock.Anything, uint(401), models.RevertStatusReverted).Return(nil)
 
 	r := NewReverter(fs, mockRepo)
@@ -963,6 +966,7 @@ func TestRevertOperations_SystemError(t *testing.T) {
 		},
 	}
 	mockRepo.On("FindByBatchJobID", mock.Anything, "batch-1").Return(ops, nil)
+	mockRepo.On("FindByID", mock.Anything, uint(500)).Return(&ops[0], nil)
 	mockRepo.On("UpdateRevertStatus", mock.Anything, uint(500), models.RevertStatusReverted).Return(errors.New("db persist failed"))
 
 	r := NewReverter(fs, mockRepo)
@@ -1027,6 +1031,7 @@ func TestGuardDoubleRevert_CopyModeNotRevertible(t *testing.T) {
 		NewPath:       "/dst/T600/T600.mkv",
 		OriginalPath:  "/src/T600.mkv",
 	}
+	mockRepo.On("FindByID", mock.Anything, uint(600)).Return(op, nil)
 	result, err := r.revertFile(context.Background(), op)
 	require.NoError(t, err)
 	assert.NotNil(t, result)
@@ -1133,6 +1138,7 @@ func TestRevertFile_UpdateOperation(t *testing.T) {
 		NFOSnapshot:   "<original/>",
 		NFOPath:       "/src/ABC-123.nfo",
 	}
+	mockRepo.On("FindByID", mock.Anything, uint(800)).Return(op, nil)
 	mockRepo.On("UpdateRevertStatus", mock.Anything, uint(800), models.RevertStatusReverted).Return(nil)
 
 	r := NewReverter(fs, mockRepo)
@@ -1157,6 +1163,7 @@ func TestRevertFile_MoveOperation(t *testing.T) {
 		OperationType: models.OperationTypeMove,
 		RevertStatus:  models.RevertStatusApplied,
 	}
+	mockRepo.On("FindByID", mock.Anything, uint(801)).Return(op, nil)
 	mockRepo.On("UpdateRevertStatus", mock.Anything, uint(801), models.RevertStatusReverted).Return(nil)
 
 	r := NewReverter(fs, mockRepo)
@@ -1181,6 +1188,7 @@ func TestRevertFile_AlreadyReverted(t *testing.T) {
 		RevertStatus:  models.RevertStatusReverted,
 		OperationType: models.OperationTypeMove,
 	}
+	mockRepo.On("FindByID", mock.Anything, uint(802)).Return(op, nil)
 	result, err := r.revertFile(context.Background(), op)
 	assert.Nil(t, result)
 	assert.Equal(t, ErrBatchAlreadyReverted, err)
@@ -1199,6 +1207,7 @@ func TestRevertFile_AnchorMissing(t *testing.T) {
 		OperationType: models.OperationTypeMove,
 		RevertStatus:  models.RevertStatusApplied,
 	}
+	mockRepo.On("FindByID", mock.Anything, uint(803)).Return(op, nil)
 	result, err := r.revertFile(context.Background(), op)
 	require.NoError(t, err)
 	assert.Equal(t, models.RevertOutcomeSkipped, result.Outcome)
@@ -1220,6 +1229,7 @@ func TestRevertFile_DBPersistFails(t *testing.T) {
 		OperationType: models.OperationTypeMove,
 		RevertStatus:  models.RevertStatusApplied,
 	}
+	mockRepo.On("FindByID", mock.Anything, uint(804)).Return(op, nil)
 	mockRepo.On("UpdateRevertStatus", mock.Anything, uint(804), models.RevertStatusReverted).Return(errors.New("db write failed"))
 
 	r := NewReverter(fs, mockRepo)
@@ -1248,6 +1258,7 @@ func TestRevertFile_WithNFOWarning(t *testing.T) {
 		NFOPath:       "/src/ABC-123.nfo",
 	}
 	// NFO write will fail due to nfoWriteErrorFs, but it's a soft failure in move mode
+	mockRepo.On("FindByID", mock.Anything, uint(805)).Return(op, nil)
 	mockRepo.On("UpdateRevertStatus", mock.Anything, uint(805), models.RevertStatusReverted).Return(nil)
 
 	errorFs := &nfoWriteErrorFs{Fs: fs}

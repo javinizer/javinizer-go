@@ -1,4 +1,4 @@
-//go:build darwin || dragonfly || freebsd || linux || netbsd || openbsd || solaris
+//go:build freebsd || linux || netbsd || solaris
 
 package downloader
 
@@ -15,5 +15,5 @@ func restoreSourceIdentity(info os.FileInfo) (device, inode uint64, ok bool) {
 	if !ok || stat == nil {
 		return 0, 0, false
 	}
-	return uint64(stat.Dev), stat.Ino, true
+	return stat.Dev, stat.Ino, true
 }

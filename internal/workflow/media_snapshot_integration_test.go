@@ -57,7 +57,7 @@ func TestUpdateMediaRevertPreservesReplacementsAndDeletesCreated(t *testing.T) {
 	require.NoError(t, err)
 
 	repo := mocks.NewMockBatchFileOperationRepositoryInterface(t)
-	repo.On("FindByBatchJobID", mock.Anything, "job-016").Return([]models.BatchFileOperation{{
+	op := models.BatchFileOperation{
 		ID:             1600,
 		BatchJobID:     "job-016",
 		MovieID:        "TEST-016",
@@ -65,7 +65,9 @@ func TestUpdateMediaRevertPreservesReplacementsAndDeletesCreated(t *testing.T) {
 		OperationType:  models.OperationTypeUpdate,
 		RevertStatus:   models.RevertStatusApplied,
 		GeneratedFiles: string(generated),
-	}}, nil)
+	}
+	repo.On("FindByBatchJobID", mock.Anything, "job-016").Return([]models.BatchFileOperation{op}, nil)
+	repo.On("FindByID", mock.Anything, uint(1600)).Return(&op, nil)
 	repo.On("UpdateRevertStatus", mock.Anything, uint(1600), models.RevertStatusReverted).Return(nil)
 
 	result, err := history.NewReverter(fs, repo).RevertScrape(context.Background(), "job-016", "TEST-016")
