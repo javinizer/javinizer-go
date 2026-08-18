@@ -1,6 +1,8 @@
 package fsutil
 
 import (
+	cryptorand "crypto/rand"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"os"
@@ -42,6 +44,9 @@ const (
 )
 
 var replacementProbePIDAliveAware = replacementProbePIDAliveAwarePlatform
+var replacementProcessStartTime = replacementProcessStartTimePlatform
+var replacementBusyRandom = replacementBusyRandomPlatform
+var replacementCryptoRandomRead = cryptorand.Read
 
 // ReplacementBusyPath returns the durable in-flight marker for dest.
 func ReplacementBusyPath(dest string) string { return dest + ReplacementBusySuffix }
@@ -91,7 +96,40 @@ func AcquireReplacementBusy(fs afero.Fs, dest string) (func(), error) {
 			logging.Warnf("replacement busy marker %s is stale but not a recognized Javinizer marker; preserving it", path)
 			return nil, ErrReplacementBusy
 		}
-		if removeErr := fs.Remove(path); removeErr != nil && !os.IsNotExist(removeErr) {
+
+		// Do not remove path based on the earlier inspection. Another claimant
+		// may have won the same stale-marker decision in the meantime. Rename
+		// is the portable afero ownership claim: only the claimant whose source
+		// rename succeeds may remove its uniquely named successor and recreate
+		// the marker.
+		takeoverPath, nameErr := replacementBusyTakeoverPath(path)
+		if nameErr != nil {
+			return nil, fmt.Errorf("name replacement busy takeover marker: %w", nameErr)
+		}
+		if renameErr := fs.Rename(path, takeoverPath); renameErr != nil {
+			if !os.IsNotExist(renameErr) {
+				return nil, fmt.Errorf("claim replacement busy marker: %w", renameErr)
+			}
+
+			// A failed source rename means another claimant won. Re-read the
+			// marker from scratch; never apply the stale result above to the
+			// winner's replacement marker.
+			stale, reclaimable, inspectErr = replacementBusyState(fs, path)
+			if inspectErr != nil {
+				return nil, fmt.Errorf("reinspect replacement busy marker: %w", inspectErr)
+			}
+			if !stale {
+				return nil, ErrReplacementBusy
+			}
+			if !reclaimable {
+				logging.Warnf("replacement busy marker %s is stale but not a recognized Javinizer marker; preserving it", path)
+				return nil, ErrReplacementBusy
+			}
+			continue
+		}
+		if removeErr := fs.Remove(takeoverPath); removeErr != nil {
+			// The successful rename proves ownership of takeoverPath. If its
+			// removal fails, stop rather than guessing about on-disk state.
 			return nil, fmt.Errorf("reclaim replacement busy marker: %w", removeErr)
 		}
 	}
@@ -99,6 +137,22 @@ func AcquireReplacementBusy(fs afero.Fs, dest string) (func(), error) {
 
 func replacementBusyToken() string {
 	return fmt.Sprintf("pid=%d,time=%d", os.Getpid(), time.Now().UnixNano())
+}
+
+func replacementBusyTakeoverPath(path string) (string, error) {
+	random, err := replacementBusyRandom()
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%s.takeover-%d-%x", path, os.Getpid(), random), nil
+}
+
+func replacementBusyRandomPlatform() (uint64, error) {
+	var raw [8]byte
+	if _, err := replacementCryptoRandomRead(raw[:]); err != nil {
+		return 0, err
+	}
+	return binary.LittleEndian.Uint64(raw[:]), nil
 }
 
 func releaseReplacementBusy(fs afero.Fs, path, token string) {
@@ -109,9 +163,10 @@ func releaseReplacementBusy(fs afero.Fs, path, token string) {
 	_ = fs.Remove(path)
 }
 
-// replacementBusyState separates age/liveness from ownership. An old
-// malformed marker may be stale for arbitration purposes, but it is not safe
-// to remove because its name and mtime do not prove Javinizer created it.
+// replacementBusyState separates age/liveness/start-time classification from
+// ownership. An old malformed marker may be stale for arbitration purposes,
+// but it is not safe to remove because its name and mtime do not prove
+// Javinizer created it.
 func replacementBusyState(fs afero.Fs, path string) (stale, reclaimable bool, err error) {
 	content, err := afero.ReadFile(fs, path)
 	if err != nil {
@@ -138,10 +193,27 @@ func replacementBusyState(fs afero.Fs, path string) (stale, reclaimable bool, er
 		// while current-run markers stay busy for as long as this process runs.
 		return createdAt.Before(replacementBusyBootAt), true, nil
 	}
-	// A well-formed foreign marker is decided by owner liveness, never by its
-	// age. In particular, Windows must not expire a live critical section.
+	// First prove that the recorded owner is live. Linux then distinguishes a
+	// reused PID by comparing /proc starttime with the marker's wall-clock
+	// timestamp. A start time after the marker proves that this is a different
+	// process and makes the marker stale.
 	liveness := replacementProbePIDAliveAware(pid)
 	if liveness == replacementPIDAlive {
+		if replacementProcessStartTime != nil {
+			if processStartTime := replacementProcessStartTime(pid); processStartTime != nil {
+				return processStartTime.After(createdAt), true, nil
+			}
+		}
+
+		// macOS and other non-Linux POSIX hosts have no portable process-start
+		// syscall here, so retain the existing age fallback. A reused PID whose
+		// marker is younger than the threshold can still block repair; that is
+		// the documented residual risk. Windows keeps its existing live-probe
+		// contract: an opened process remains busy, and access-denied/unprobeable
+		// owners are never expired by age.
+		if !replacementIsWindows {
+			return time.Since(createdAt) > replacementBusyStaleAge, true, nil
+		}
 		return false, true, nil
 	}
 	if replacementIsWindows && liveness == replacementPIDUnprobeable {

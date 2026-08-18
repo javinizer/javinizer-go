@@ -4,9 +4,14 @@ package fsutil
 
 import (
 	"errors"
+	"time"
 
 	"golang.org/x/sys/windows"
 )
+
+// Windows keeps the existing live-probe behavior; native process start-time
+// access is deliberately not part of this portable seam.
+func replacementProcessStartTimePlatform(int) *time.Time { return nil }
 
 func replacementProbePIDAliveAwarePlatform(pid int) replacementPIDLiveness {
 	if pid <= 0 {

@@ -237,7 +237,7 @@ type w14ARemoveFailureFs struct {
 }
 
 func (f *w14ARemoveFailureFs) Remove(name string) error {
-	if strings.HasSuffix(name, ReplacementBusySuffix) {
+	if strings.HasSuffix(name, ReplacementBusySuffix) || strings.Contains(name, ReplacementBusySuffix+".takeover-") {
 		return f.err
 	}
 	return f.Fs.Remove(name)
