@@ -7,8 +7,10 @@ package history
 // silently destroyed. copyRearmSourceBytes now publishes through
 // fsutil.PublishNoReplace: a collision drops the staged copy and reports the
 // typed fsutil.ErrPublishCollision class through rearmReplacementBackup,
-// leaving the foreign bytes intact and the caller's armed posture untouched
-// (every re-arm caller already treats a failed re-arm as kept+warn).
+// leaving the foreign bytes intact (every re-arm caller treats a failed
+// re-arm as kept+warn; round 18 (codex P2) then refines the caller side so
+// an entry whose re-arm was refused with an occupied-name class is marked
+// RestorePending instead of staying armed against the occupant).
 
 import (
 	"context"
@@ -147,7 +149,9 @@ func (m *w15ConsumeFailRepo) UpdateJournalInTx(ctx context.Context, id uint, fn 
 // End-to-end through the reverter's consume-failure compensation: the restore
 // lands, the consumption fails, the re-arm collides with the foreign claim —
 // and the sweep-facing posture is exactly the pre-fix kept path: the error
-// surfaces, the journal entry STAYS armed, and the foreign bytes survive.
+// surfaces, the journal entry is kept for a retry (round 18: marked
+// RestorePending, never left armed against the occupant), and the foreign
+// bytes survive.
 func TestW15ReverterRearmCollisionKeepsArmedPostureAndForeignBytes(t *testing.T) {
 	fixture := newP3Fixture()
 	op, dest := fixture.addAppliedOp(t, "job-w15-rearm", "W15-REARM", false, "new", p3Replacement{seq: 1, backupBytes: "old"})
@@ -171,8 +175,10 @@ func TestW15ReverterRearmCollisionKeepsArmedPostureAndForeignBytes(t *testing.T)
 	require.NoError(t, ferr)
 	gf, perr := models.ParseGeneratedFiles(row.GeneratedFiles)
 	require.NoError(t, perr)
-	require.Len(t, gf.Replacements, 1, "the failed consumption keeps the journal entry armed (the kept posture)")
+	require.Len(t, gf.Replacements, 1, "the failed consumption keeps the journal entry (the kept posture)")
 	require.Equal(t, backup, gf.Replacements[0].Backup)
+	require.True(t, gf.Replacements[0].RestorePending,
+		"round 18 (codex P2): after a collided re-arm the entry is marked restore-pending — never left armed against the foreign occupant")
 
 	for _, name := range w15DirListing(t, fixture.fs, filepath.Dir(dest)) {
 		require.False(t, strings.Contains(name, ".tmp-"), "no staged re-arm residue (saw %q)", name)

@@ -146,6 +146,17 @@ func markReplacementEntryRestorePending(ctx context.Context, repo database.Batch
 	return txErr
 }
 
+// rearmOccupiedClass reports whether a re-arm failure carries the typed
+// occupied-name classes — fsutil.ErrPublishCollision (a foreign writer owns
+// the backup name now) or fsutil.ErrPublishNoReplaceUnsupported (the volume
+// cannot express an atomic no-replace publish at all). In both classes the
+// journaled backup name is unreclaimable, so a journal entry left ARMED would
+// point later restores at content this operation does not own: the retry must
+// be driven by the durable RestorePending marker, never by the occupied path.
+func rearmOccupiedClass(err error) bool {
+	return errors.Is(err, fsutil.ErrPublishCollision) || errors.Is(err, fsutil.ErrPublishNoReplaceUnsupported)
+}
+
 // rearmReplacementBackup recreates the backup from the destination's bytes
 // when a journal consumption fails AFTER the backup was removed, restoring
 // the armed retry posture (callers keep info's permission bits and mtime).
@@ -227,6 +238,25 @@ func (s *ReplacementSweeper) forgetPendingRemoval(backupKey string) {
 	if s.pendingRemovals != nil {
 		delete(s.pendingRemovals, backupKey)
 	}
+}
+
+// persistRestorePendingMarker durably records the RestorePending cleanup
+// marker for the journaled backup through the row's journal transaction. The
+// caller MUST already hold the row's SharedJournalLocks lock — the sweep legs
+// below run their whole journal section under it. The reverter's equivalent
+// outside the journal lock is markReplacementEntryRestorePending, which
+// acquires the lock itself (the registry is not reentrant).
+func (s *ReplacementSweeper) persistRestorePendingMarker(ctx context.Context, rowID uint, backupSlash string) error {
+	return s.repo.UpdateJournalInTx(ctx, rowID, func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
+		gf, err := models.ParseGeneratedFiles(current.GeneratedFiles)
+		if err != nil {
+			return models.GeneratedFilesJSON{}, false, err
+		}
+		if !markReplacementRestorePending(&gf, backupSlash) {
+			return gf, false, nil
+		}
+		return gf, true, nil
+	})
 }
 
 // replacementLedgerIndex maps journaled backup paths to their owning row for
@@ -638,16 +668,7 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 	backupInfo, _ := lstatRestoreSource(s.fs, backup)
 	if rmErr := removeReplacementBackup(s.fs, backup, "replacement sweep"); rmErr != nil {
 		s.rememberPendingRemoval(backupSlash)
-		markErr := s.repo.UpdateJournalInTx(ctx, row.ID, func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
-			gf, err := models.ParseGeneratedFiles(current.GeneratedFiles)
-			if err != nil {
-				return models.GeneratedFilesJSON{}, false, err
-			}
-			if !markReplacementRestorePending(&gf, backupSlash) {
-				return gf, false, nil
-			}
-			return gf, true, nil
-		})
+		markErr := s.persistRestorePendingMarker(ctx, row.ID, backupSlash)
 		if markErr != nil {
 			absoluteBackup, _ := filepath.Abs(backup)
 			logging.Warnf("replacement sweep failed to retain cleanup marker for backup %s: %v", absoluteBackup, markErr)
@@ -674,12 +695,28 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 		return gf, true, nil
 	})
 	if uErr != nil {
-		// The backup was removed first, so re-arm it before undoing the restore.
-		// This preserves the old retry posture even when journal persistence is
-		// temporarily unavailable.
+		// The backup was removed first, so re-arm it before undoing the
+		// restore. ONLY a SUCCEEDED re-arm re-establishes the armed,
+		// backup-present retry posture that licenses undoing the restore (codex
+		// P2, PR#215 round 18): with the re-arm failed — a foreign writer
+		// occupying the backup name (typed fsutil.ErrPublishCollision /
+		// ErrPublishNoReplaceUnsupported) or any other cause — the restored
+		// destination is the ONLY remaining copy of the pre-crash bytes, and
+		// removing it would lose those bytes forever while leaving the journal
+		// armed against whatever occupies the backup path (a later restore
+		// would install those foreign bytes over the destination and then
+		// delete the occupant). Retain the destination instead, drive the
+		// recovery through the durable RestorePending marker (a retry runs only
+		// cleanup + consumption and never restores from the occupied path),
+		// warn with BOTH causes, and leave the occupant untouched.
 		if rearmErr := rearmReplacementBackup(s.fs, dest, backup, backupInfo); rearmErr != nil {
-			absoluteBackup, _ := filepath.Abs(backup)
-			logging.Warnf("replacement sweep failed to re-arm backup %s after consumption failure: %v", absoluteBackup, rearmErr)
+			s.rememberPendingRemoval(backupSlash)
+			if markErr := s.persistRestorePendingMarker(ctx, row.ID, backupSlash); markErr != nil {
+				logging.Warnf("replacement sweep %s: consumption failed (%v), re-arm failed (%v), and restore-pending persistence failed (%v) — restored destination retained, backup path untouched", backup, uErr, rearmErr, markErr)
+			} else {
+				logging.Warnf("replacement sweep %s: consumption failed (%v) and re-arm failed (%v) — restored destination retained, cleanup marked restore-pending", backup, uErr, rearmErr)
+			}
+			return false
 		}
 		if rmErr := s.fs.Remove(dest); rmErr != nil {
 			logging.Warnf("replacement sweep %s: consumption failed AND restore-undo failed (%v after %v)", backup, rmErr, uErr)
@@ -764,8 +801,21 @@ func (s *ReplacementSweeper) retryPendingRemoval(ctx context.Context, rowID uint
 	})
 	if uErr != nil {
 		if rearmErr := rearmReplacementBackup(s.fs, dest, backup, backupInfo); rearmErr != nil {
-			absoluteBackup, _ := filepath.Abs(backup)
-			logging.Warnf("replacement sweep failed to re-arm backup %s after pending cleanup failure: %v", absoluteBackup, rearmErr)
+			// codex P2 (PR#215 round 18): identical recovery contract as
+			// restoreAndConsume's consumption-failure leg. The destination
+			// already holds the restored bytes and never gets undone here, so
+			// the entry must not stay ARMED against a backup name the re-arm
+			// could not reclaim (a foreign occupant, or any other cause):
+			// persist the durable RestorePending marker so the retry runs only
+			// removal + consumption. The marker merge is a no-op when the entry
+			// already carries the marker (the usual entry point into this leg).
+			if markErr := s.persistRestorePendingMarker(ctx, rowID, backupSlash); markErr != nil {
+				absoluteBackup, _ := filepath.Abs(backup)
+				logging.Warnf("replacement sweep failed to re-arm backup %s after pending cleanup failure (%v), re-arm failed (%v), and restore-pending persistence failed (%v) — restored destination retained, backup path untouched", absoluteBackup, uErr, rearmErr, markErr)
+			} else {
+				absoluteBackup, _ := filepath.Abs(backup)
+				logging.Warnf("replacement sweep failed to re-arm backup %s after pending cleanup failure: %v — entry marked restore-pending", absoluteBackup, rearmErr)
+			}
 		}
 		s.rememberPendingRemoval(backupSlash)
 		logging.Warnf("replacement sweep %s: pending cleanup consumption failed: %v", backup, uErr)

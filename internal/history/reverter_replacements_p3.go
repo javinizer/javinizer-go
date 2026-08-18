@@ -115,7 +115,11 @@ func (r *RevertFileResult) withRetryable(cause error) *RevertFileResult {
 //
 // Consumption: every successfully restored entry has its backup removed
 // before the row is consumed. A failed backup removal leaves the entry armed
-// and retryable; any later journal failure re-arms the backup before returning.
+// and retryable; any later journal failure re-arms the backup before
+// returning — and when that re-arm is REFUSED with the occupied-name classes
+// (fsutil.ErrPublishCollision / ErrPublishNoReplaceUnsupported), the entry is
+// instead marked RestorePending (codex P2, PR#215 round 18): an entry armed
+// against a foreign occupant must never be reachable from here.
 func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.BatchFileOperation) (map[string]bool, error) {
 	restored := map[string]bool{}
 	gf, err := models.ParseGeneratedFiles(op.GeneratedFiles)
@@ -208,7 +212,7 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 				// means the other loop already restored these bytes, so reopening
 				// (and restoring) it would turn a harmless duplicate revert into a
 				// missing-backup failure or a double restore.
-				armed, freshErr := r.replacementEntryIsLive(ctx, op, e)
+				armed, restorePending, freshErr := r.replacementEntryIsLive(ctx, op, e)
 				if freshErr != nil {
 					return freshErr
 				}
@@ -240,8 +244,18 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 				if statErr != nil {
 					return fmt.Errorf("journaled backup %s for destination %s is unreadable: %w", e.Backup, dest, statErr)
 				}
-				if repErr := copyRestoreBytes(r.fs, e.Backup, dest); repErr != nil {
-					return fmt.Errorf("failed to restore %s → %s: %w", e.Backup, dest, repErr)
+				// A live entry carrying the durable RestorePending marker has its
+				// destination bytes certified in place already: only the backup
+				// cleanup and the journal consumption remain. NEVER copy from the
+				// backup path for it — after a collided re-arm the occupant can be a
+				// FOREIGN file (codex P2, PR#215 round 18), and restoring it over the
+				// destination would destroy the restored bytes. Skip the copy and
+				// land dest in the delete-subtraction map; the cleanup/consumption
+				// legs below run unchanged.
+				if !restorePending {
+					if repErr := copyRestoreBytes(r.fs, e.Backup, dest); repErr != nil {
+						return fmt.Errorf("failed to restore %s → %s: %w", e.Backup, dest, repErr)
+					}
 				}
 				restored[dest] = true
 				if rmErr := removeReplacementBackup(r.fs, e.Backup, "replacement restore"); rmErr != nil {
@@ -269,7 +283,28 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 				if cErr := r.consumeReplacementEntry(ctx, op, e); cErr != nil {
 					if rearmErr := rearmReplacementBackup(r.fs, dest, e.Backup, backupInfo); rearmErr != nil {
 						absoluteBackup, _ := filepath.Abs(e.Backup)
-						logging.Warnf("replacement restore failed to re-arm backup %s after consumption failure: %v", absoluteBackup, rearmErr)
+						if rearmOccupiedClass(rearmErr) {
+							// codex P2 (PR#215 round 18): the re-arm could not reclaim
+							// the backup name — a foreign writer owns it now, or the
+							// volume cannot express a no-replace publish at all. An
+							// entry left ARMED would aim the next restore at the
+							// occupant: foreign bytes over the restored destination,
+							// then the occupant deleted. Persist the durable
+							// RestorePending marker so every retry runs only the
+							// cleanup + consumption legs (the marker certifies the
+							// destination already carries the restored bytes). The
+							// occupant is never clobbered by the no-replace re-arm and
+							// the failure surfaces through cErr exactly like the
+							// neighboring consumption legs; the marker outcome is
+							// logged via the logger seam only.
+							if markErr := markReplacementEntryRestorePending(ctx, r.batchFileOpRepo, op.ID, sweepSlash(e.Backup)); markErr != nil {
+								logging.Warnf("replacement restore %s: consumption failed (%v), re-arm refused (%v), and restore-pending persistence failed (%v) — restored destination retained, backup occupant untouched", absoluteBackup, cErr, rearmErr, markErr)
+							} else {
+								logging.Warnf("replacement restore %s: consumption failed (%v) and re-arm refused (%v) — restored destination retained, entry marked restore-pending", absoluteBackup, cErr, rearmErr)
+							}
+						} else {
+							logging.Warnf("replacement restore failed to re-arm backup %s after consumption failure: %v", absoluteBackup, rearmErr)
+						}
 					}
 					return cErr
 				}
@@ -284,23 +319,27 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 }
 
 // replacementEntryIsLive re-reads the operation row before a restore leg
-// opens its backup. A false result is a successful no-op: another revert or
-// sweep already restored and consumed this exact entry, so the caller must not
-// touch the destination again.
-func (r *Reverter) replacementEntryIsLive(ctx context.Context, op *models.BatchFileOperation, entry models.ReplacementEntry) (bool, error) {
+// opens its backup. A false first result is a successful no-op: another revert
+// or sweep already restored and consumed this exact entry, so the caller must
+// not touch the destination again. The second result is the FRESH entry's
+// RestorePending marker: the destination bytes are certified in place and only
+// cleanup/consumption pend, so the caller must never use the backup path as a
+// restore source for that entry — the occupant can be a foreign file after a
+// collided consumption-failure re-arm (codex P2, PR#215 round 18).
+func (r *Reverter) replacementEntryIsLive(ctx context.Context, op *models.BatchFileOperation, entry models.ReplacementEntry) (bool, bool, error) {
 	release := fsutil.SharedJournalLocks().Acquire(fmt.Sprintf("%d", op.ID))
 	defer release()
 
 	fresh, frErr := r.batchFileOpRepo.FindByID(ctx, op.ID)
 	if frErr != nil {
-		return false, fmt.Errorf("failed to re-read row before restoring on op %d: %w", op.ID, frErr)
+		return false, false, fmt.Errorf("failed to re-read row before restoring on op %d: %w", op.ID, frErr)
 	}
 	if fresh == nil {
-		return false, fmt.Errorf("failed to re-read row before restoring on op %d: row not found", op.ID)
+		return false, false, fmt.Errorf("failed to re-read row before restoring on op %d: row not found", op.ID)
 	}
 	gf, parseErr := models.ParseGeneratedFiles(fresh.GeneratedFiles)
 	if parseErr != nil {
-		return false, fmt.Errorf("failed to re-parse journal before restoring on op %d: %w", op.ID, parseErr)
+		return false, false, fmt.Errorf("failed to re-parse journal before restoring on op %d: %w", op.ID, parseErr)
 	}
 
 	// Keep all later cleanup/consumption decisions on the same fresh ledger
@@ -309,12 +348,12 @@ func (r *Reverter) replacementEntryIsLive(ctx context.Context, op *models.BatchF
 	// after another request has already completed the operation.
 	op.GeneratedFiles = fresh.GeneratedFiles
 	op.RevertStatus = fresh.RevertStatus
-	for _, live := range gf.Replacements {
-		if live.Destination == entry.Destination && live.Backup == entry.Backup && live.DestSeq == entry.DestSeq {
-			return true, nil
+	for _, cur := range gf.Replacements {
+		if cur.Destination == entry.Destination && cur.Backup == entry.Backup && cur.DestSeq == entry.DestSeq {
+			return true, cur.RestorePending, nil
 		}
 	}
-	return false, nil
+	return false, false, nil
 }
 
 // consumeReplacementEntry removes one journaled entry from the operation
