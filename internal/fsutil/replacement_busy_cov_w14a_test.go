@@ -30,11 +30,7 @@ func TestReplacementBusyW14A_LifecycleAndReclamation(t *testing.T) {
 	_, err = fs.Stat(ReplacementBusyPath(dest))
 	require.ErrorIs(t, err, os.ErrNotExist)
 
-	deadMarkerTime := time.Now()
-	if runtime.GOOS == "windows" {
-		// Windows uses the marker timestamp rather than probing a PID.
-		deadMarkerTime = deadMarkerTime.Add(-time.Hour)
-	}
+	deadMarkerTime := time.Now().Add(-time.Hour)
 	writeW14ABusyToken(t, fs, dest, 999999999, deadMarkerTime)
 	release, err = AcquireReplacementBusy(fs, dest)
 	require.NoError(t, err, "old foreign markers are reclaimable")
@@ -46,21 +42,15 @@ func TestReplacementBusyW14A_LifecycleAndReclamation(t *testing.T) {
 	release()
 
 	if runtime.GOOS == "windows" {
-		// Windows ownership is timestamp-driven for foreign PIDs; a recent
-		// marker remains busy without probing the PID.
-		writeW14ABusyToken(t, fs, dest, 999999999, time.Now())
-		stale, err := replacementBusyStale(fs, ReplacementBusyPath(dest))
-		require.NoError(t, err)
-		require.False(t, stale, "a recent foreign marker is live on Windows")
+		// A current-PID marker is live even when its timestamp is recent; the
+		// public acquisition surface must refuse it rather than reclaim it.
+		writeW14ABusyToken(t, fs, dest, os.Getpid(), time.Now())
+		_, err = AcquireReplacementBusy(fs, dest)
+		require.ErrorIs(t, err, ErrReplacementBusy)
 		require.NoError(t, fs.Remove(ReplacementBusyPath(dest)))
-	} else {
-		require.True(t, replacementProcessAlive(os.Getpid()))
 	}
-	require.False(t, replacementProcessAlive(0))
-	findProcess := replacementFindProcess
-	replacementFindProcess = func(int) (*os.Process, error) { return nil, errors.New("find process wedged") }
-	require.False(t, replacementProcessAlive(123))
-	replacementFindProcess = findProcess
+	require.Equal(t, replacementPIDAlive, replacementProbePIDAliveAware(os.Getpid()))
+	require.Equal(t, replacementPIDDead, replacementProbePIDAliveAware(0))
 	require.True(t, ReplacementBusyPath(dest) != dest)
 }
 
@@ -73,12 +63,13 @@ func TestReplacementBusyW14A_MalformedFreshAndStale(t *testing.T) {
 
 	_, err := AcquireReplacementBusy(fs, dest)
 	require.ErrorIs(t, err, ErrReplacementBusy, "a fresh partial marker is treated as live")
-	stale, err := replacementBusyStale(fs, "/out/w14a-malformed/missing.dlbusy")
+	release, err := AcquireReplacementBusy(fs, "/out/w14a-malformed/missing")
 	require.NoError(t, err)
-	require.True(t, stale)
-	stale, err = replacementBusyStale(&w14AStatNotExistFs{Fs: fs}, path)
-	require.NoError(t, err)
-	require.True(t, stale)
+	release()
+	release, err = AcquireReplacementBusy(&w14AStatNotExistFs{Fs: fs}, dest)
+	require.NoError(t, err, "a marker that disappears during inspection is reclaimable")
+	release()
+	require.NoError(t, afero.WriteFile(fs, path, []byte("partial"), 0o600))
 
 	old := time.Now().Add(-time.Hour)
 	require.NoError(t, fs.Chtimes(path, old, old))
@@ -92,15 +83,14 @@ func TestReplacementBusyW14A_MalformedFreshAndStale(t *testing.T) {
 	isWindows := replacementIsWindows
 	replacementIsWindows = true
 	t.Cleanup(func() { replacementIsWindows = isWindows })
-	writeW14ABusyToken(t, fs, foreign, 999999999, time.Now())
-	stale, err = replacementBusyStale(fs, ReplacementBusyPath(foreign))
-	require.NoError(t, err)
-	require.False(t, stale, "a recent foreign marker is live under Windows timestamp policy")
+	writeW14ABusyToken(t, fs, foreign, os.Getpid(), time.Now())
+	_, err = AcquireReplacementBusy(fs, foreign)
+	require.ErrorIs(t, err, ErrReplacementBusy, "a recent well-formed marker from this live process remains busy")
 	require.NoError(t, fs.Remove(ReplacementBusyPath(foreign)))
 	writeW14ABusyToken(t, fs, foreign, 999999999, time.Now().Add(-time.Hour))
-	stale, err = replacementBusyStale(fs, ReplacementBusyPath(foreign))
-	require.NoError(t, err)
-	require.True(t, stale)
+	release, err = AcquireReplacementBusy(fs, foreign)
+	require.NoError(t, err, "a well-formed dead marker is reclaimable")
+	release()
 
 	for _, raw := range []string{"", "pid=x,time=1", "pid=1,time=x", "pid=1", "time=1", "junk"} {
 		_, _, ok := parseReplacementBusyToken(raw)

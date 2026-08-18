@@ -3,6 +3,7 @@ package history
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"testing"
 	"time"
 
@@ -126,16 +127,19 @@ func TestSweep_RootsAndMarkers(t *testing.T) {
 		require.Equal(t, 0, healed)
 	})
 
-	t.Run("younger-than-process backups are skipped", func(t *testing.T) {
+	t.Run("live-marker backups are skipped", func(t *testing.T) {
 		fs, repo := newSweepHarness(t)
 		dest := "/out/SWP/poster.jpg"
 		writeSweepFile(t, fs, dest, "final", time.Hour)
 		writeSweepFile(t, fs, dest+".dlbak."+p3HexA, "in-flight", -time.Minute) // future mtime
+		// A future mtime alone is no longer an in-flight signal; the durable
+		// owner marker supplies the skip decision.
+		writeW14ABusy(t, fs, dest, os.Getpid())
 		journalRow(t, repo, "job-1", "SWP-001", "/out/SWP/other.jpg", "/out/SWP/other.jpg.dlbak."+p3HexC, 1, models.RevertStatusApplied)
 
 		healed, err := NewReplacementSweeper(fs, repo).Sweep(context.Background())
 		require.NoError(t, err)
-		require.Equal(t, 0, healed, "in-flight backup must outlive the sweep")
+		require.Equal(t, 0, healed, "live-owner backup must outlive the sweep")
 	})
 
 	t.Run("journaled backup with missing destination restores and consumes", func(t *testing.T) {

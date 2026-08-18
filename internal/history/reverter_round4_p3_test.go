@@ -525,17 +525,17 @@ func TestSweepDestinations_TargetedHandling(t *testing.T) {
 	require.True(t, exists, "other directory untouched by the targeted sweep")
 }
 
-// young-modtime skip never touches the file.
-func TestSweepOne_ModtimeFresh_Skips(t *testing.T) {
+// A live durable marker, rather than a young mtime, keeps the file untouched.
+func TestSweepOne_LiveBusy_Skips(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	repo := newP3OpRepo()
 	ctx := context.Background()
 	dest := "/out/YG/poster.jpg"
 	backup := dest + ".dlbak.0123456789abcdef"
 	require.NoError(t, fs.MkdirAll("/out/YG", config.DirPerm))
-	s0 := NewReplacementSweeper(fs, repo) // process start stamp BEFORE the write
+	s0 := NewReplacementSweeper(fs, repo)
 	require.NoError(t, afero.WriteFile(fs, backup, []byte("young"), config.FilePerm))
-	// The file is written after the sweeper's start → treated as in-flight.
+	writeW14ABusy(t, fs, dest, os.Getpid())
 
 	raw, _ := json.Marshal(models.GeneratedFilesJSON{Roots: []string{"/out/YG"}})
 	op := &models.BatchFileOperation{
@@ -548,6 +548,7 @@ func TestSweepOne_ModtimeFresh_Skips(t *testing.T) {
 	healed, err := s0.Sweep(ctx)
 	require.NoError(t, err)
 	require.Equal(t, 0, healed)
+	require.Equal(t, "young", string(mustRead2(t, fs, backup)))
 }
 
 // Ledger-scan failure during the index build surfaces (SweepDestinations

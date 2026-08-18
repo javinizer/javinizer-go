@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/fsutil"
@@ -27,13 +26,11 @@ import (
 //     hex>` are eligible; foreign lookalikes are never touched.
 //   - A backup journaled on ANY operation row (applied OR failed) is always
 //     retained — it is the only copy of that row's pre-replace bytes.
-//   - A backup younger than this process is in-flight (another live operation
-//     may own it) and is skipped.
 //   - Before arbitrating any candidate, the sweeper claims the durable
 //     destination-adjacent `<dest>.dlbusy` marker. A live owner (including a
 //     marker from this boot) makes the candidate stay untouched; dead-PID
-//     markers are reclaimed. Malformed markers are retained until their mtime
-//     is older than the two-minute stale threshold.
+//     markers are reclaimed. Malformed markers are retained because age alone
+//     does not prove ownership.
 //   - A journaled backup whose destination went missing belongs to the crash
 //     window between set-aside and install: the new bytes never landed, so
 //     the old bytes are restored to the destination and the journal entry is
@@ -166,15 +163,14 @@ func rearmReplacementBackup(fs afero.Fs, dest, backup string, info os.FileInfo) 
 type ReplacementSweeper struct {
 	fs              afero.Fs
 	repo            database.BatchFileOperationRepositoryInterface
-	startedAt       time.Time
 	pendingMu       sync.Mutex      // API-triggered sweeps share pendingRemovals; never hold across fs/repo calls.
 	pendingRemovals map[string]bool // backup key → restore installed, cleanup pending
 }
 
-// NewReplacementSweeper constructs the sweeper; startedAt defaults to now
-// (process start) so in-flight backups created after boot are never swept.
+// NewReplacementSweeper constructs a sweeper whose in-flight arbitration is
+// durable and destination-specific via the `.dlbusy` marker.
 func NewReplacementSweeper(fs afero.Fs, repo database.BatchFileOperationRepositoryInterface) *ReplacementSweeper {
-	return &ReplacementSweeper{fs: fs, repo: repo, startedAt: time.Now(), pendingRemovals: map[string]bool{}}
+	return &ReplacementSweeper{fs: fs, repo: repo, pendingRemovals: map[string]bool{}}
 }
 
 func (s *ReplacementSweeper) rememberPendingRemoval(backupKey string) {
@@ -319,11 +315,6 @@ func (s *ReplacementSweeper) sweepOne(ctx context.Context, idx *replacementLedge
 	// plus conditional case folding); actual fs paths keep their recorded case.
 	backupKey := sweepSlash(backup)
 
-	// Younger than this process: plausibly in-flight under a live downloader
-	// lock — never arbitrate what we cannot see journaled yet.
-	if !e.ModTime().Before(s.startedAt) {
-		return 0
-	}
 	dest := strings.TrimSuffix(backup, replacementBackupName.FindString(e.Name()))
 
 	// The marker is an on-disk cross-process exclusion. Acquire it before

@@ -66,13 +66,14 @@ func TestReverterRearmMetaCovW17A_PreservesModeAndMtimeOnConsumptionFailure(t *t
 
 func TestReverterRearmMetaCovW17A_RearmChmodFailureLeg(t *testing.T) {
 	base := afero.NewMemMapFs()
+	normalizingFS := &pathNormalizingChmodFs{Fs: base}
 	repo := &failingUpdateRepo{p3OpRepo: newP3OpRepo()}
-	fixture := &p3Fixture{fs: base, repo: repo.p3OpRepo}
+	fixture := &p3Fixture{fs: normalizingFS, repo: repo.p3OpRepo}
 	op, dest := fixture.addAppliedOp(t, "job-w17a", "W17A-CHMOD", false, "new", p3Replacement{seq: 1, backupBytes: "old"})
 	backup := dest + ".dlbak.a"
-	require.NoError(t, base.Chmod(backup, 0o600))
+	require.NoError(t, normalizingFS.Chmod(backup, 0o600))
 
-	fs := &w17aChmodFailFs{Fs: base, failPath: backup}
+	fs := &w17aChmodFailFs{Fs: normalizingFS, failPath: backup}
 	consumeErr := errors.New("transient consumption outage")
 	repo.updateErr = consumeErr
 	restored, err := NewReverter(fs, repo).restoreReplacementJournal(context.Background(), op)

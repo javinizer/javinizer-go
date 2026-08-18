@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/logging"
@@ -29,8 +28,20 @@ var ErrReplacementBusy = errors.New("replacement destination is busy")
 // being mistaken for an owner from this boot. The timestamp in the marker is
 // written before the writer renames the destination aside.
 var replacementBusyBootAt = time.Now()
-var replacementFindProcess = os.FindProcess
 var replacementIsWindows = runtime.GOOS == "windows"
+
+// replacementPIDLiveness is deliberately richer than a bool on Windows:
+// failure to open a process can mean either that the PID is gone or that the
+// caller lacks permission to inspect a still-live owner.
+type replacementPIDLiveness uint8
+
+const (
+	replacementPIDDead replacementPIDLiveness = iota
+	replacementPIDAlive
+	replacementPIDUnprobeable
+)
+
+var replacementProbePIDAliveAware = replacementProbePIDAliveAwarePlatform
 
 // ReplacementBusyPath returns the durable in-flight marker for dest.
 func ReplacementBusyPath(dest string) string { return dest + ReplacementBusySuffix }
@@ -98,11 +109,6 @@ func releaseReplacementBusy(fs afero.Fs, path, token string) {
 	_ = fs.Remove(path)
 }
 
-func replacementBusyStale(fs afero.Fs, path string) (bool, error) {
-	stale, _, err := replacementBusyState(fs, path)
-	return stale, err
-}
-
 // replacementBusyState separates age/liveness from ownership. An old
 // malformed marker may be stale for arbitration purposes, but it is not safe
 // to remove because its name and mtime do not prove Javinizer created it.
@@ -127,12 +133,23 @@ func replacementBusyState(fs afero.Fs, path string) (stale, reclaimable bool, er
 	}
 	createdAt := time.Unix(0, created)
 	if pid == os.Getpid() {
+		// This timestamp is a PID-reuse boundary, not a two-minute lease:
+		// markers from before this process started belong to a prior owner,
+		// while current-run markers stay busy for as long as this process runs.
 		return createdAt.Before(replacementBusyBootAt), true, nil
 	}
-	if replacementIsWindows {
-		return time.Since(createdAt) > replacementBusyStaleAge, true, nil
+	// A well-formed foreign marker is decided by owner liveness, never by its
+	// age. In particular, Windows must not expire a live critical section.
+	liveness := replacementProbePIDAliveAware(pid)
+	if liveness == replacementPIDAlive {
+		return false, true, nil
 	}
-	return !replacementProcessAlive(pid), true, nil
+	if replacementIsWindows && liveness == replacementPIDUnprobeable {
+		// Windows access failures do not prove that the owner is dead. Retain
+		// the marker rather than allowing an untrusted process to reclaim it.
+		return false, true, nil
+	}
+	return liveness == replacementPIDDead, true, nil
 }
 
 func parseReplacementBusyToken(content string) (pid int, created int64, ok bool) {
@@ -161,16 +178,4 @@ func parseReplacementBusyToken(content string) (pid int, created int64, ok bool)
 		}
 	}
 	return pid, created, pidSet && timeSet
-}
-
-func replacementProcessAlive(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-	process, err := replacementFindProcess(pid)
-	if err != nil {
-		return false
-	}
-	err = process.Signal(syscall.Signal(0))
-	return err == nil || err == syscall.EPERM
 }

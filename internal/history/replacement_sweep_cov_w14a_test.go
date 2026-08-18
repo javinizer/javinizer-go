@@ -14,8 +14,8 @@ import (
 )
 
 // W14A regression coverage for cross-process replacement ownership. The
-// process-local startedAt/SharedDestLocks guards are intentionally bypassed by
-// these fixtures: the durable .dlbusy marker is the only live-owner signal.
+// process-local SharedDestLocks guard is intentionally bypassed by these
+// fixtures: the durable .dlbusy marker is the only live-owner signal.
 func TestReplacementSweepW14A_LiveBusySkipsCLI(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	repo := newP3OpRepo()
