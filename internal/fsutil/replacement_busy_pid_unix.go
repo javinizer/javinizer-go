@@ -8,6 +8,9 @@ import (
 )
 
 var replacementFindProcess = os.FindProcess
+var replacementSignalZero = func(p *os.Process) error {
+	return p.Signal(syscall.Signal(0))
+}
 
 func replacementProbePIDAliveAwarePlatform(pid int) replacementPIDLiveness {
 	if replacementProcessAlive(pid) {
@@ -26,6 +29,6 @@ func replacementProcessAlive(pid int) bool {
 	if err != nil {
 		return false
 	}
-	err = process.Signal(syscall.Signal(0))
+	err = replacementSignalZero(process)
 	return err == nil || err == syscall.EPERM
 }

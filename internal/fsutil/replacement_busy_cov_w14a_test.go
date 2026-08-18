@@ -54,6 +54,21 @@ func TestReplacementBusyW14A_LifecycleAndReclamation(t *testing.T) {
 	require.True(t, ReplacementBusyPath(dest) != dest)
 }
 
+func TestReplacementBusyW14A_ReadNotExistIsReclaimable(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	dest := "/out/w14a-read-not-exist/poster.jpg"
+	path := ReplacementBusyPath(dest)
+	require.NoError(t, fs.MkdirAll("/out/w14a-read-not-exist", 0o755))
+	require.NoError(t, afero.WriteFile(fs, path, []byte("marker"), 0o600))
+	_, statErr := fs.Stat(path)
+	require.NoError(t, statErr, "the underlying marker remains stat-able")
+
+	stale, reclaimable, err := replacementBusyState(&w14AReadFailureFs{Fs: fs, err: os.ErrNotExist}, path)
+	require.NoError(t, err)
+	require.True(t, stale)
+	require.True(t, reclaimable)
+}
+
 func TestReplacementBusyW14A_MalformedFreshAndStale(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	dest := "/out/w14a-malformed/poster.jpg"
