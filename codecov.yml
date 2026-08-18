@@ -27,6 +27,14 @@ ignore:
   # not compile them, so they never appear in coverage.out; without this
   # ignore, adding an e2e test file fails the 80% patch gate on every PR.
   - "test/e2e/**"
+  # Custom-tagged platform stubs (non-_GOOS-suffixed //go:build !unix files).
+  # Compiled only on non-Unix hosts; no coverage-upload job can ever hit them,
+  # so their diff lines permanently failed the server-side patch gate (see the
+  # earlier e2e/desktop entries for precedent).
+  - "internal/history/restore_source_identity_other.go"
+  - "internal/history/restore_source_nofollow_other.go"
+  - "internal/downloader/restore_source_identity_other.go"
+  - "internal/downloader/restore_source_nofollow_other.go"
   # Desktop-only build-tagged file (//go:build desktop). The real Wails
   # runner pulls in per-platform webview headers and must not enter the
   # default build/test path; without this ignore, its new lines all count
