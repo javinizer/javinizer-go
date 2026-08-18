@@ -752,6 +752,10 @@ func (l *dbRevertLog) seedRoot(ctx context.Context, opID OperationID, root strin
 	txErr := l.repo.UpdateJournalInTx(ctx, uint(recordID64), func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
 		gf, perr := models.ParseGeneratedFiles(current.GeneratedFiles)
 		if perr != nil {
+			// Deliberate tolerance (Review 4960250562 note above): a malformed
+			// ledger body is left byte-identical and seeding dedups to a no-op
+			// rather than failing the journal transaction.
+			//nolint:nilerr // intentional: malformed ledgers skip the write instead of failing seedRoot.
 			return models.GeneratedFilesJSON{}, false, nil
 		}
 		for _, r := range gf.Roots {

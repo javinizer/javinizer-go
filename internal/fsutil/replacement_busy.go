@@ -53,6 +53,8 @@ var replacementProcessStartTime = replacementProcessStartTimePlatform
 // platform reported the Unix epoch itself) cannot describe a real marker
 // owner, so it yields nil and classification keeps the liveness-only fallback
 // rather than comparing garbage against the marker timestamp.
+//
+//nolint:unused // wired in the windows-tagged seam (replacement_busy_pid_windows.go); host-GOOS lint cannot see the cross-platform use.
 func replacementStartTimeFromUnixNano(nsec int64) *time.Time {
 	if nsec <= 0 {
 		return nil

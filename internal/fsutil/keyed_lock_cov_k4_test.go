@@ -3,6 +3,7 @@ package fsutil
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -107,6 +108,22 @@ func TestIsCaseSensitiveRoot_K4WhitespaceRootsStayByteDistinct(t *testing.T) {
 	require.True(t, IsCaseSensitiveRoot(spaced))
 	cleanPlain := cleanProbeRoot(plain)
 	cleanSpaced := cleanProbeRoot(spaced)
+	if runtime.GOOS == "windows" {
+		// Byte-distinct probe roots are a POSIX-only contract: Win32
+		// GetFullPathName (beneath filepath.Abs/syscall.FullPath) strips a
+		// trailing space at the OS normalization layer before the probe seam
+		// ever sees it (Windows CI job 95712522465), and WinFS cannot form a
+		// trailing-space directory at all. Both spellings therefore legitimately
+		// fold onto the plain root's entry. What Windows must still prove:
+		// neither spelling errors, the collapse is total, and the folded
+		// sibling is served from the one cache entry without a second probe.
+		require.Equal(t, cleanPlain, cleanSpaced, "Win32 full-path normalization folds the trailing-space root")
+		require.Equal(t, []string{cleanPlain}, probed, "the folded spelling is not probed in its own right")
+		require.True(t, IsCaseSensitiveRoot(plain))
+		require.True(t, IsCaseSensitiveRoot(spaced))
+		require.Len(t, probed, 1, "repeat queries stay on the single folded cache entry")
+		return
+	}
 	require.NotEqual(t, cleanPlain, cleanSpaced, "probe cache keys keep whitespace-distinct roots distinct")
 	require.True(t, strings.HasSuffix(cleanSpaced, "probe "), "the real spelling is probed, not its trimmed alias")
 	require.Equal(t, []string{cleanPlain, cleanSpaced}, probed, "each distinct root is probed once in its own right")
