@@ -30,6 +30,24 @@ package downloader
 //     the same R4 posture history adopted this wave.
 //
 // Any wedge step removes NOTHING and leaves the journal entry live.
+//
+// Wave-30 follow-on (codex P2, PR#215 findings F1+F2), mirroring history's
+// wave-36 construction (replacement_backup_quarantine.go) exactly:
+//   - F1: the claim hands the caller the reservation's captured identity
+//     (the open handle's pre-close Stat) and the move re-derives it first
+//     (rollbackQuarantineReservationStillOurs) — a foreign writer renaming
+//     the placeholder away and planting its own occupant at the reserved
+//     name no longer gets its bytes silently displaced by the replace-aware
+//     quarantine move; divergence is the typed collision class and behaves
+//     exactly like the claim-failure leg (journal entry live).
+//   - F2: the wedge move-back (restoreQuarantinedRollbackBackup, the hold's
+//     restore) RETURNS its failure classified
+//     (errRollbackQuarantineRestoreFailed): a failed move-back means the
+//     journaled name is UNOWNED while the verified bytes sit at the .dlq.
+//     name, so internal wedge legs JOIN the classification into the removal
+//     error and the install_overwrite caller persists the rearm-refused
+//     restore-pending kind instead of leaving the entry armed against a
+//     foreign-claimed name.
 
 import (
 	cryptorand "crypto/rand"
@@ -63,6 +81,17 @@ const rollbackQuarantineClaimTries = 64
 // consumed removal.
 var errRollbackQuarantineVanished = errors.New("quarantined rollback backup vanished before its verified unlink completed")
 
+// errRollbackQuarantineRestoreFailed classifies the wedge-compensation
+// failure (finding F2): the verified object moved to its quarantine name but
+// could NOT be restored onto the journaled name, which is therefore unowned
+// (foreign-occupied or wedged) while the owned bytes stay recoverable at the
+// quarantine name. Callers with a live journal entry persist the
+// rearm-refused restore-pending kind for it — no later retry may stat, copy
+// from, or remove the journaled name — instead of leaving the entry armed
+// against bytes nobody journals. errors.Is matches it through a joined
+// wedge error chain.
+var errRollbackQuarantineRestoreFailed = errors.New("quarantined rollback backup could not be restored onto its journaled name")
+
 // rollbackQuarantineRandReader is the entropy source behind the quarantine
 // token, exposed as a seam (same discipline as history's
 // backupQuarantineRandReader): production is cryptographically random and
@@ -75,37 +104,77 @@ var rollbackQuarantineRandReader io.Reader = cryptorand.Reader
 // free, claim it O_CREATE|O_EXCL. The observation-to-claim race resolves in
 // favor of the claim (os.IsExist → re-draw), so the returned name is
 // provably owned by this process — a 0-byte placeholder the caller's
-// replace-aware quarantine move then displaces (safe: it displaces OUR
-// reservation, never a foreign file).
-func claimRollbackQuarantineName(fsys afero.Fs, backup string) (string, error) {
+// replace-aware quarantine move then displaces. Finding F1: the claim ALSO
+// hands the caller the reservation's own captured identity (the open
+// handle's pre-close Stat) so the reservation stays IDENTITY-BOUND through
+// the claim→move handoff (rollbackQuarantineReservationStillOurs) — a
+// foreign writer renaming the placeholder away and planting its own
+// occupant at the reserved name no longer gets its bytes silently displaced
+// by the replace-aware quarantine move.
+func claimRollbackQuarantineName(fsys afero.Fs, backup string) (string, os.FileInfo, error) {
 	for attempt := 0; attempt < rollbackQuarantineClaimTries; attempt++ {
 		var token [16]byte
 		if _, err := io.ReadFull(rollbackQuarantineRandReader, token[:]); err != nil {
-			return "", fmt.Errorf("quarantine token for %s: %w", backup, err)
+			return "", nil, fmt.Errorf("quarantine token for %s: %w", backup, err)
 		}
 		candidate := backup + rollbackQuarantineSuffix + hex.EncodeToString(token[:])
 		if _, err := lstatBackupCandidate(fsys, candidate); err == nil {
 			continue // the draw is occupied (or a wedge tombstone) — draw again
 		} else if !os.IsNotExist(err) {
-			return "", fmt.Errorf("inspect quarantine candidate %s: %w", candidate, err)
+			return "", nil, fmt.Errorf("inspect quarantine candidate %s: %w", candidate, err)
 		}
 		reservation, rerr := fsys.OpenFile(candidate, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 		switch {
 		case rerr == nil:
+			info, serr := reservation.Stat()
+			if serr != nil {
+				// A reservation whose identity cannot even be read is in an
+				// unknown on-disk state — drop it rather than renaming over
+				// unverified bytes.
+				_ = reservation.Close()
+				_ = fsys.Remove(candidate)
+				return "", nil, fmt.Errorf("stat quarantine reservation %s: %w", candidate, serr)
+			}
 			if cerr := reservation.Close(); cerr != nil {
 				// A reservation whose close failed is in an unknown on-disk
 				// state — drop it rather than renaming over unverified bytes.
 				_ = fsys.Remove(candidate)
-				return "", fmt.Errorf("close quarantine reservation %s: %w", candidate, cerr)
+				return "", nil, fmt.Errorf("close quarantine reservation %s: %w", candidate, cerr)
 			}
-			return candidate, nil
+			return candidate, info, nil
 		case os.IsExist(rerr):
 			continue // a racer claimed this draw first — draw again
 		default:
-			return "", fmt.Errorf("reserve quarantine candidate %s: %w", candidate, rerr)
+			return "", nil, fmt.Errorf("reserve quarantine candidate %s: %w", candidate, rerr)
 		}
 	}
-	return "", fmt.Errorf("quarantine names exhausted for %s after %d attempts", backup, rollbackQuarantineClaimTries)
+	return "", nil, fmt.Errorf("quarantine names exhausted for %s after %d attempts", backup, rollbackQuarantineClaimTries)
+}
+
+// rollbackQuarantineReservationStillOurs re-derives the O_EXCL reservation's
+// identity IMMEDIATELY BEFORE the quarantine move (finding F1): the reserved
+// name must still address THE claimed placeholder — dev/inode where the
+// filesystem exposes them, plus size 0, mtime, and a regular non-symlink
+// shape on every platform. A foreign writer swapping its own object onto
+// the name between claim and move is refused with the typed collision class
+// (fsutil.ErrPublishCollision): the occupant keeps its bytes byte-intact,
+// the journaled backup is never quarantined over it, and the caller's
+// claim-failure leg leaves the journal entry live.
+func rollbackQuarantineReservationStillOurs(fsys afero.Fs, quarantine string, claim os.FileInfo) error {
+	absoluteQuarantine, _ := filepath.Abs(quarantine)
+	cur, err := lstatBackupCandidate(fsys, quarantine)
+	switch {
+	case err != nil:
+		return fmt.Errorf("inspect quarantine reservation %s before the move: %w", absoluteQuarantine, err)
+	case cur == nil || cur.Mode()&os.ModeSymlink != 0 || !cur.Mode().IsRegular() || cur.Size() != 0 || !cur.ModTime().Equal(claim.ModTime()):
+		return fmt.Errorf("quarantine reservation %s no longer names the claimed empty placeholder (foreign reservation swap) — foreign bytes preserved: %w", absoluteQuarantine, fsutil.ErrPublishCollision)
+	}
+	if claimDev, claimIno, claimOK := restoreSourceIdentity(claim); claimOK {
+		if curDev, curIno, curOK := restoreSourceIdentity(cur); curOK && (claimDev != curDev || claimIno != curIno) {
+			return fmt.Errorf("quarantine reservation %s no longer names the claimed placeholder (dev/inode mismatch) — foreign bytes preserved: %w", absoluteQuarantine, fsutil.ErrPublishCollision)
+		}
+	}
+	return nil
 }
 
 // moveVerifiedRollbackBackupToQuarantine renames the verified backup object
@@ -133,12 +202,18 @@ func moveVerifiedRollbackBackupToQuarantine(fsys afero.Fs, backup, quarantine st
 // retained journal entry keeps pointing at exactly the bytes it armed
 // against. A racer's occupant at the journaled name is never clobbered
 // (typed fsutil.ErrPublishCollision keeps the object at the quarantine name
-// for manual recovery). Best-effort: a failure only warns and never
-// reclassifies the wedge.
-func restoreQuarantinedRollbackBackup(fsys afero.Fs, phase, backup, quarantine string) {
+// for manual recovery). Finding F2: the compensation result is RETURNED,
+// not just logged — a failed move-back means the journaled name is UNOWNED
+// (a foreign claimant holds it, or the publish failed outright) while the
+// owned bytes sit at the quarantine name, and callers with a live journal
+// entry must route it to the rearm-refused pending kind rather than leaving
+// it armed against that name.
+func restoreQuarantinedRollbackBackup(fsys afero.Fs, phase, backup, quarantine string) error {
 	if back := fsutil.PublishNoReplace(fsys, quarantine, backup); back != nil {
-		logging.Warnf("downloader: %s failed to restore quarantined backup %s from %s after the removal wedge: %v — the original bytes stay recoverable at the quarantine name", phase, backup, quarantine, back)
+		logging.Warnf("downloader: %s failed to restore quarantined backup %s from %s after the removal wedge: %v — the original bytes stay recoverable at the quarantine name, the journaled name is unowned", phase, backup, quarantine, back)
+		return back
 	}
+	return nil
 }
 
 // rollbackBackupQuarantine carries the wave-32 split between the verified
@@ -159,12 +234,35 @@ type rollbackBackupQuarantine struct {
 // restore moves the quarantined verified object back onto the journaled
 // backup name NO-REPLACE (the caller's destination re-gate diverged).
 // Idempotent: only a live (moved, not yet unlinked) hold acts.
-func (h *rollbackBackupQuarantine) restore() {
+// Finding F2: the move-back result is RETURNED to the caller. A failure
+// means the journaled name is unowned (foreign-claimed or wedged) while the
+// verified bytes sit at the quarantine name — the error wraps the typed
+// errRollbackQuarantineRestoreFailed class so callers persist the
+// rearm-refused pending kind for the entry rather than leaving it armed
+// against that name. A failed restore leaves moved=true so a later caller
+// retry can re-attempt the compensation against the same quarantine name.
+func (h *rollbackBackupQuarantine) restore() error {
 	if !h.moved || h.unlinked {
-		return
+		return nil
 	}
-	restoreQuarantinedRollbackBackup(h.fsys, h.phase, h.backup, h.quarantine)
+	if err := restoreQuarantinedRollbackBackup(h.fsys, h.phase, h.backup, h.quarantine); err != nil {
+		return fmt.Errorf("%w: %s stays recoverable at quarantine %s: %v", errRollbackQuarantineRestoreFailed, h.backup, h.quarantine, err)
+	}
 	h.moved = false
+	return nil
+}
+
+// restoreOrJoin runs the wedge move-back for internal quarantine legs and
+// JOINS its failure into the wedge's own error (finding F2): the entry
+// caller then sees the errRollbackQuarantineRestoreFailed class through
+// errors.Is and persists the rearm-refused pending kind, since the journaled
+// name is unowned once the compensation failed. A successful move-back
+// leaves the wedge error untouched, byte-identical to the pre-F2 return.
+func (h *rollbackBackupQuarantine) restoreOrJoin(err error) error {
+	if rerr := h.restore(); rerr != nil {
+		return errors.Join(err, rerr)
+	}
+	return err
 }
 
 // removeVerified performs the one unlink of the rollback quarantine flow:
@@ -188,23 +286,19 @@ func (h *rollbackBackupQuarantine) removeVerified() error {
 		absoluteQuarantine, _ := filepath.Abs(h.quarantine)
 		return fmt.Errorf("%w: %s (quarantine %s empty at the unlink)", errRollbackQuarantineVanished, absoluteBackup, absoluteQuarantine)
 	case lerr != nil:
-		h.restore()
 		logging.Warnf("downloader: %s failed to re-verify quarantined backup %s (quarantine %s) at the unlink: %v — journal entry remains armed", h.phase, absoluteBackup, h.quarantine, lerr)
-		return lerr
+		return h.restoreOrJoin(lerr)
 	}
 	if cur == nil || cur.Mode()&os.ModeSymlink != 0 || !cur.Mode().IsRegular() {
-		h.restore()
-		return refuseRollbackBackupRemoval(h.backup, h.phase, fmt.Sprintf("quarantine %s no longer names the verified regular file at the unlink", h.quarantine))
+		return h.restoreOrJoin(refuseRollbackBackupRemoval(h.backup, h.phase, fmt.Sprintf("quarantine %s no longer names the verified regular file at the unlink", h.quarantine)))
 	}
 	if quarDev, quarIno, quarOK := restoreSourceIdentity(h.quar); quarOK {
 		if curDev, curIno, curOK := restoreSourceIdentity(cur); curOK && (quarDev != curDev || quarIno != curIno) {
-			h.restore()
-			return refuseRollbackBackupRemoval(h.backup, h.phase, fmt.Sprintf("quarantine %s names a different object than the re-verified one at the unlink (dev/inode mismatch) — foreign bytes preserved", h.quarantine))
+			return h.restoreOrJoin(refuseRollbackBackupRemoval(h.backup, h.phase, fmt.Sprintf("quarantine %s names a different object than the re-verified one at the unlink (dev/inode mismatch) — foreign bytes preserved", h.quarantine)))
 		}
 	}
 	if cur.Size() != h.quar.Size() || !cur.ModTime().Equal(h.quar.ModTime()) {
-		h.restore()
-		return refuseRollbackBackupRemoval(h.backup, h.phase, fmt.Sprintf("quarantine %s metadata changed between the re-verify and the unlink — foreign bytes preserved", h.quarantine))
+		return h.restoreOrJoin(refuseRollbackBackupRemoval(h.backup, h.phase, fmt.Sprintf("quarantine %s metadata changed between the re-verify and the unlink — foreign bytes preserved", h.quarantine)))
 	}
 	if err := h.fsys.Remove(h.quarantine); err != nil {
 		if os.IsNotExist(err) {
@@ -212,9 +306,8 @@ func (h *rollbackBackupQuarantine) removeVerified() error {
 			absoluteQuarantine, _ := filepath.Abs(h.quarantine)
 			return fmt.Errorf("%w: %s (quarantine %s vanished under the unlink)", errRollbackQuarantineVanished, absoluteBackup, absoluteQuarantine)
 		}
-		h.restore()
 		logging.Warnf("downloader: %s failed to remove quarantined backup %s (quarantine %s): %v", h.phase, absoluteBackup, h.quarantine, err)
-		return err
+		return h.restoreOrJoin(err)
 	}
 	h.moved = false
 	h.unlinked = true
@@ -279,10 +372,21 @@ func quarantineRollbackBackupForRemoval(fsys afero.Fs, backup string, copiedFrom
 		}
 	}
 
-	quarantine, cerr := claimRollbackQuarantineName(fsys, backup)
+	quarantine, reservation, cerr := claimRollbackQuarantineName(fsys, backup)
 	if cerr != nil {
 		logging.Warnf("downloader: %s could not reserve a quarantine name for backup %s: %v — journal entry remains armed", phase, absoluteBackup, cerr)
 		return nil, cerr
+	}
+	// Finding F1: keep the reservation IDENTITY bound through the handoff —
+	// immediately before the move the reserved name must still address the
+	// claimed 0-byte placeholder. A foreign writer renaming the reservation
+	// away and planting its own occupant used to get its bytes silently
+	// displaced by the replace-aware rename; the refusal keeps the occupant
+	// intact and behaves exactly like the claim-failure leg above (journal
+	// entry live).
+	if rerr := rollbackQuarantineReservationStillOurs(fsys, quarantine, reservation); rerr != nil {
+		logging.Warnf("downloader: %s refused the quarantine move for backup %s: %v — journal entry remains armed", phase, absoluteBackup, rerr)
+		return nil, rerr
 	}
 	if renErr := moveVerifiedRollbackBackupToQuarantine(fsys, backup, quarantine, handle); renErr != nil {
 		// The rename is atomic: a failed move relocated NOTHING. Cleaning
@@ -307,23 +411,19 @@ func quarantineRollbackBackupForRemoval(fsys afero.Fs, backup string, copiedFrom
 		absoluteQuarantine, _ := filepath.Abs(quarantine)
 		return nil, fmt.Errorf("%w: %s (quarantine %s empty at the post-move re-verify)", errRollbackQuarantineVanished, absoluteBackup, absoluteQuarantine)
 	case qerr != nil:
-		hold.restore()
 		logging.Warnf("downloader: %s failed to re-verify quarantined backup %s (quarantine %s) before removal: %v — journal entry remains armed", phase, absoluteBackup, quarantine, qerr)
-		return nil, qerr
+		return nil, hold.restoreOrJoin(qerr)
 	}
 	if quarInfo == nil || quarInfo.Mode()&os.ModeSymlink != 0 || !quarInfo.Mode().IsRegular() {
-		hold.restore()
-		return nil, refuseRollbackBackupRemoval(backup, phase, fmt.Sprintf("quarantined object at %s is not the verified regular file", quarantine))
+		return nil, hold.restoreOrJoin(refuseRollbackBackupRemoval(backup, phase, fmt.Sprintf("quarantined object at %s is not the verified regular file", quarantine)))
 	}
 	if verDev, verIno, verOK := restoreSourceIdentity(openedInfo); verOK {
 		if quarDev, quarIno, quarOK := restoreSourceIdentity(quarInfo); quarOK && (verDev != quarDev || verIno != quarIno) {
-			hold.restore()
-			return nil, refuseRollbackBackupRemoval(backup, phase, fmt.Sprintf("quarantined object at %s is not the verified object (dev/inode mismatch) — foreign bytes preserved", quarantine))
+			return nil, hold.restoreOrJoin(refuseRollbackBackupRemoval(backup, phase, fmt.Sprintf("quarantined object at %s is not the verified object (dev/inode mismatch) — foreign bytes preserved", quarantine)))
 		}
 	}
 	if quarInfo.Size() != openedInfo.Size() || !quarInfo.ModTime().Equal(openedInfo.ModTime()) {
-		hold.restore()
-		return nil, refuseRollbackBackupRemoval(backup, phase, fmt.Sprintf("quarantined object at %s metadata differs from the verified object — foreign bytes preserved", quarantine))
+		return nil, hold.restoreOrJoin(refuseRollbackBackupRemoval(backup, phase, fmt.Sprintf("quarantined object at %s metadata differs from the verified object — foreign bytes preserved", quarantine)))
 	}
 	hold.quar = quarInfo
 	return hold, nil

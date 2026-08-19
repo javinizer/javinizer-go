@@ -344,6 +344,25 @@ func pendingKindLabel(kind string) string {
 	return kind
 }
 
+// markRollbackQuarantineRestoreFailed disarms the ledger after a rollback
+// quarantine wedge whose verified move-back FAILED (finding F2, codex P2
+// PR#215 — the downloader mirror of history's wave-36 F3 caller shape): the
+// journaled backup name is UNOWNED (a foreign claimant holds it or the
+// no-replace publish wedged) while the restored bytes stay recoverable at
+// the quarantine name. Left ARMED (or clean-pending), a later sweep/revert
+// would stat/copy/remove the foreign occupant at that name, so the entry is
+// durably marked restore-pending with the REARM-REFUSED kind (journal-only
+// retry, the quarantined bytes recovered manually). Only a failed marker
+// write keeps the armed posture (both causes logged), mirroring
+// markRollbackRearmFailed's last-resort discipline.
+func markRollbackQuarantineRestoreFailed(ctx context.Context, ledger downloadLedger, destPath, backupPath, quarantine string, restoreErr error) {
+	if markErr := ledger.recorder.MarkReplacementRestorePendingKind(ctx, ledger.opID, destPath, backupPath, models.RestorePendingKindRearmRefused); markErr != nil {
+		logging.Warnf("downloader: rollback quarantine move-back of backup %s failed (%v) AND the rearm-refused restore-pending marking failed (%v) — journal entry stays armed against an unowned name; restored bytes recoverable at the quarantine name %s", backupPath, restoreErr, markErr, quarantine)
+		return
+	}
+	logging.Warnf("downloader: rollback quarantine move-back of backup %s failed (%v) — journal entry marked restore-pending (rearm-refused); restored bytes recoverable at the quarantine name %s", backupPath, restoreErr, quarantine)
+}
+
 // markRollbackRearmFailed disarms the ledger after a rollback whose backup
 // re-arm failed — for EVERY failure class (wave-19 refusal classes,
 // generalized by wave-21, codex P2 PR#215). The destination bytes are
@@ -923,7 +942,18 @@ func (d *Downloader) installOverwriting(ctx context.Context, stagedPath, destPat
 		// and only then is the QUARANTINED object unlinked.
 		hold, rmErr := quarantineRollbackBackupForRemoval(d.fs, backupPath, copyFacts.copied, "install-confirm rollback")
 		if rmErr == nil && !rollbackRestoredDestStillOurs(d.fs, destPath, copyFacts.restored) {
-			hold.restore()
+			if rerr := hold.restore(); rerr != nil {
+				// Finding F2 (codex P2 PR#215, mirroring history's wave-36 F3
+				// caller shape): the move-back failed — the journaled backup name
+				// is unowned (a foreign claimant holds it or the publish wedged)
+				// while the restored bytes sit at the quarantine name. Propagate
+				// the failure AND disarm the entry: left armed it would later
+				// stat/copy/remove the foreign occupant at that name, so the
+				// rearm-refused pending kind persists instead (journal-only
+				// retry; the quarantined bytes stay recoverable manually).
+				markRollbackQuarantineRestoreFailed(ctx, ledger, destPath, backupPath, hold.quarantine, rerr)
+				return false, true, fmt.Errorf("install-confirm failed: %w (rollback restore of %s landed but the destination diverged after the backup was quarantined and the verified move-back failed: %v — the journaled backup name is unowned; entry marked restore-pending (rearm-refused), restored bytes recoverable at the quarantine name %s)", cErr, destPath, rerr, hold.quarantine)
+			}
 			logging.Warnf("downloader: confirm-failure rollback of %s restored the pre-existing bytes but the destination diverged after the backup was quarantined — backup %s restored to its journaled name, journal entry stays armed, destination untouched", destPath, backupPath)
 			return false, true, fmt.Errorf("install-confirm failed: %w (rollback restore of %s landed but the destination diverged after the backup was quarantined; backup restored to %s, journal entry stays armed, destination untouched)", cErr, destPath, backupPath)
 		}
@@ -931,6 +961,18 @@ func (d *Downloader) installOverwriting(ctx context.Context, stagedPath, destPat
 			rmErr = hold.removeVerified()
 		}
 		if rmErr != nil {
+			if errors.Is(rmErr, errRollbackQuarantineRestoreFailed) {
+				// Finding F2: an internal wedge leg's move-back JOINED into the
+				// removal error — the journaled backup name is unowned while the
+				// restored bytes sit at the quarantine name, so the entry leaves
+				// the armed state as rearm-refused pending (journal-only retry).
+				quarantine := "(unknown)"
+				if hold != nil {
+					quarantine = hold.quarantine
+				}
+				markRollbackQuarantineRestoreFailed(ctx, ledger, destPath, backupPath, quarantine, rmErr)
+				return false, true, fmt.Errorf("install-confirm failed, rolled back to pre-existing bytes, but backup cleanup failed and the verified move-back also failed: %w (confirmation error: %v; journaled backup name unowned; entry marked restore-pending (rearm-refused), restored bytes recoverable at the quarantine name)", rmErr, cErr)
+			}
 			return false, true, fmt.Errorf("install-confirm failed, rolled back to pre-existing bytes, but backup cleanup failed: %w (confirmation error: %v; entry stays armed)", rmErr, cErr)
 		}
 		if relErr := ledger.recorder.ReleaseReplacement(ctx, ledger.opID, destPath, backupPath); relErr != nil {
