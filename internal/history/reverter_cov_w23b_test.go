@@ -67,7 +67,7 @@ func TestRevertW23B_SerializesOperationAndRunsPrimaryOnce(t *testing.T) {
 	require.Nil(t, results[1])
 	require.Equal(t, 1, fs.primaryMoveCount())
 	require.Equal(t, 4, fs.backupOpenCount(),
-		"the winner opens each backup exactly twice: the no-follow restore read + the wave-25 pre-unlink identity verify open")
+		"the winner opens each backup exactly twice: the no-follow restore read + the pre-unlink identity verify open (quarantine-reservation draws ride along and are excluded)")
 
 	for _, dest := range dests {
 		rowBytes, err := afero.ReadFile(base, dest)
@@ -413,7 +413,11 @@ type w23bRestoreGateFs struct {
 }
 
 func (f *w23bRestoreGateFs) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
-	if strings.Contains(filepath.ToSlash(name), ".dlbak.") {
+	// Wave-26: backup=...dlbak.<hex>.dlq.<token> names are the removal gate's
+	// quarantine RESERVATIONS, not backup reads — exclude them so the count
+	// keeps pinning the winner's backup opens (restore read + identity
+	// verify) and, through it, the loser's serialization.
+	if strings.Contains(filepath.ToSlash(name), ".dlbak.") && !strings.Contains(filepath.ToSlash(name), backupQuarantineSuffix) {
 		f.mu.Lock()
 		f.backupOpens++
 		block := !f.blocked

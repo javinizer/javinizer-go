@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/logging"
@@ -165,7 +166,14 @@ type w27RemoveFailFs struct {
 
 func (f *w27RemoveFailFs) Remove(name string) error {
 	clean := filepath.Clean(filepath.FromSlash(name))
-	if f.failBackup && clean == filepath.Clean(filepath.FromSlash(f.backup)) {
+	backupClean := filepath.Clean(filepath.FromSlash(f.backup))
+	// Wave-26: the removal gate unlinks the QUARANTINE name
+	// (backup + ".dlq." + token) instead of the journaled pathname, so the
+	// wedge matches both spellings — the quarantined verified object moves
+	// back to the journaled name by compensation, which keeps every
+	// assertion below (backup bytes preserved at the journaled name, armed
+	// entry, clean retry) true for the quarantine flow.
+	if f.failBackup && (clean == backupClean || strings.HasPrefix(clean, backupClean+".dlq.")) {
 		return f.backupErr
 	}
 	if f.failDest && clean == filepath.Clean(filepath.FromSlash(f.dest)) {

@@ -71,6 +71,17 @@ var ErrPublishStagedClose = errors.New("staged handle close failed before publis
 // source backup: nothing may be consumed after this error.
 var ErrPublishStagedIdentityBreak = errors.New("destination does not provably name the staged inode after publish")
 
+// ErrPublishStagedForeignOccupant means the post-publish destination
+// occupant is neither the staged inode NOR the window plant recorded at
+// mismatch detection (wave-26, codex P2, PR#215 finding 1): a legitimate
+// writer claimed the destination AFTER a successful publish but BEFORE the
+// recovery unlink could run, so removing the occupant by the pre-recorded
+// plant assumption would have destroyed unjournaled bytes. The occupant is
+// left byte-intact, NOTHING is consumed, and the caller retains its backup.
+// Always joined with ErrPublishStagedIdentityBreak so the whole refusal
+// family stays reachable through the identity-break classifiers.
+var ErrPublishStagedForeignOccupant = errors.New("destination occupant is neither the recorded window plant nor the staged inode")
+
 // ErrPublishStagedExhausted means a directory writer kept substituting the
 // staged name across the whole bounded re-stage/re-publish budget. Every
 // displaced plant was foreign (proven-absent destinations only — never
@@ -173,9 +184,12 @@ type StagedPublish struct {
 //     ErrPublishNoReplaceLinkFailed ...) keeps working through the caller's
 //     existing wraps;
 //   - an error wrapping ErrPublishStagedIdentityBreak /
-//     ErrPublishStagedExhausted: a substitution was proven after a
-//     successful publish and recovery was refused or exhausted; NOTHING was
-//     consumed and the caller retains its backup.
+//     ErrPublishStagedExhausted / ErrPublishStagedForeignOccupant: a
+//     substitution was proven after a successful publish and recovery was
+//     refused or exhausted — or (wave-26) the recovery unlink found a
+//     post-publish occupant it could not prove was the window plant, so
+//     the foreign bytes were preserved instead; NOTHING was consumed and
+//     the caller retains its backup.
 //
 // In every error class except the pre-publish verify failure the caller's
 // historical "remove the original staged name" cleanup stays safe: that

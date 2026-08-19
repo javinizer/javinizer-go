@@ -176,8 +176,16 @@ func journaledEntryFacts(row *models.BatchFileOperation, backupSlash string) *mo
 //     the removal refuses instead of deleting the replacement.
 //  4. Reopen the name NO-FOLLOW and require the opened object to be the
 //     Lstat object (same dev/inode when exposed, regular file): narrows the
-//     Lstat→Remove window; the final Remove stays path-scoped (documented
-//     residual — no portable unlink-by-handle exists).
+//     Lstat→Remove window.
+//  5. Wave-26 (codex P2, PR#215 finding 4): quarantine-then-reverify — the
+//     wave-25 tail closed the handle and unlinked the journaled PATHNAME,
+//     shifting the substitution window to just-before-unlink. The verified
+//     object now moves to a hard-to-guess O_EXCL-reserved quarantine name
+//     (POSIX: with the no-follow handle still OPEN), is re-proven against
+//     the verified snapshot at the quarantine name, and only THE QUARANTINE
+//     is unlinked — a plant swapped onto the journaled pathname is never
+//     removed, and a substitution moved to the quarantine by the rename is
+//     caught by the re-verify (see replacement_backup_quarantine.go).
 //
 // A refused removal returns *BackupRemovalRefusedError; callers' existing
 // "entry retained live" compensation handles it without a special case.
@@ -225,8 +233,12 @@ func removeReplacementBackup(fs afero.Fs, backup, phase string, entry *models.Re
 		logging.Warnf("%s failed to reopen backup %s before removal: %v — journal entry retained live", phase, absoluteBackup, oerr)
 		return oerr
 	}
+	// Wave-26: the handle stays OPEN past the fstat — the quarantine move
+	// below keeps it open through the rename on POSIX so the moved object is
+	// provably the opened one (Windows posture closes it first inside
+	// moveVerifiedBackupToQuarantine; the re-verify still binds).
+	defer func() { _ = handle.Close() }()
 	openedInfo, serr := handle.Stat()
-	_ = handle.Close()
 	if serr != nil {
 		logging.Warnf("%s failed to stat opened backup %s before removal: %v — journal entry retained live", phase, absoluteBackup, serr)
 		return serr
@@ -239,11 +251,7 @@ func removeReplacementBackup(fs afero.Fs, backup, phase string, entry *models.Re
 			return refuseReplacementBackupRemoval(backup, phase, "opened object differs from the Lstat object")
 		}
 	}
-	if err := fs.Remove(backup); err != nil && !os.IsNotExist(err) {
-		logging.Warnf("%s failed to remove backup %s: %v", phase, absoluteBackup, err)
-		return err
-	}
-	return nil
+	return removeVerifiedBackupByQuarantine(fs, backup, phase, handle, openedInfo)
 }
 
 // markReplacementRestorePendingKind records that restore bytes are installed while

@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/logging"
@@ -135,7 +136,12 @@ type w12PresenceFs struct {
 }
 
 func (f *w12PresenceFs) Remove(name string) error {
-	if f.failBackup && filepath.Clean(name) == filepath.Clean(f.backup) {
+	// Wave-26: the removal gate unlinks the quarantine sibling (backup +
+	// ".dlq." + token), never the journaled pathname; wedge both spellings.
+	// The failed-unlink compensation moves the quarantined object back, so
+	// "backup retained" assertions still observe the journaled name.
+	if f.failBackup && filepath.Clean(name) == filepath.Clean(f.backup) ||
+		f.failBackup && strings.HasPrefix(filepath.Clean(name), filepath.Clean(f.backup)+backupQuarantineSuffix) {
 		return f.backupErr
 	}
 	return f.Fs.Remove(name)

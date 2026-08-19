@@ -338,11 +338,15 @@ func captureReplacementBackupFacts(fsys afero.Fs, backupPath string) (models.Rep
 }
 
 // installedDestIdentity binds a confirm-failure rollback to the exact object
-// the install just published at the destination (wave-25, codex P3 PR#215
+// the install published at the destination (wave-25, codex P3 PR#215
 // finding 3): dev/inode when the filesystem exposes them, plus size and
 // mtime. known=false records a capture failure — the rollback then has
 // NOTHING verifiable to restore over and must refuse rather than overwrite
-// an occupant it cannot identify.
+// an occupant it cannot identify. Wave-26 (codex P2): the identity is
+// captured from the STAGED file BEFORE the publish (rename keeps inode,
+// size, and mtime across ReplaceFile) and verified against the destination
+// immediately after it, so an occupant swapped in around the publish is
+// never appointed the rollback baseline.
 type installedDestIdentity struct {
 	known     bool
 	hasDevIno bool
@@ -351,9 +355,12 @@ type installedDestIdentity struct {
 	modTime   time.Time
 }
 
-// captureInstalledDestIdentity Lstats the destination right after a
-// successful install publish. Anything other than a regular, non-symlink
-// object (including a read failure) yields the unknown identity.
+// captureInstalledDestIdentity Lstats the staged install file BEFORE its
+// publish (wave-26; wave-25 captured the destination AFTER the publish, which
+// appointed any occupant swapped into that window as the rollback baseline).
+// The same capture shape serves both the pre-publish staged read and the
+// post-publish destination rechecks. Anything other than a regular,
+// non-symlink object (including a read failure) yields the unknown identity.
 func captureInstalledDestIdentity(fsys afero.Fs, destPath string) installedDestIdentity {
 	info, err := lstatBackupCandidate(fsys, destPath)
 	if err != nil || info == nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
@@ -369,8 +376,9 @@ func captureInstalledDestIdentity(fsys afero.Fs, destPath string) installedDestI
 
 // destStillHoldsInstalledObject re-derives the destination's identity the
 // no-follow way and requires it to still name the object the install
-// published (wave-25): dev/inode mismatch when both sides expose it, then
-// size and mtime on every platform. Any failure, substitution, or failed
+// published — the wave-26 baseline captured from the STAGED file pre-publish
+// and post-publish-verified: dev/inode mismatch when both sides expose it,
+// then size and mtime on every platform. Any failure, substitution, or failed
 // capture answers false — the confirm-failure rollback treats false as a
 // REFUSAL (backup retained, journal entry armed), never a clobber.
 func destStillHoldsInstalledObject(fsys afero.Fs, destPath string, id installedDestIdentity) bool {
@@ -636,17 +644,40 @@ func (d *Downloader) installOverwriting(ctx context.Context, stagedPath, destPat
 		}
 		return false, true, fmt.Errorf("revert-ledger record failed for %s: %w", destPath, armErr)
 	}
-	if err := fsutil.ReplaceFile(d.fs, stagedPath, destPath); err != nil {
+	// Wave-26 (codex P2, PR#215 finding 3): the confirm-rollback baseline is
+	// captured from the STAGED file BEFORE the publish, never from the
+	// destination AFTER it. Wave-25 captured the destination right after
+	// ReplaceFile — an object swapped onto the destination inside that window
+	// was recorded as the baseline and the later rollback then overwrote the
+	// foreign bytes. POSIX rename/MoveFileEx make the destination hold the
+	// STAGED inode the moment the publish completes, so the staged capture
+	// IS the published object's identity; a post-publish verification proves
+	// the destination still names it, and the rollback recheck below compares
+	// against THAT post-publish-verified baseline rather than any fresh
+	// capture. A capture that cannot read the staged file fails closed to the
+	// wave-25 unknown-identity posture (no verification here, rollback
+	// refusal below) instead of turning a good publish into a rollback.
+	installedIdentity := captureInstalledDestIdentity(d.fs, stagedPath)
+	replaceErr := fsutil.ReplaceFile(d.fs, stagedPath, destPath)
+	if replaceErr == nil && installedIdentity.known && !destStillHoldsInstalledObject(d.fs, destPath, installedIdentity) {
+		// The publish reported success but the destination does NOT name the
+		// staged object — a foreign writer displaced it inside the publish
+		// window. Route through the publish-failure rollback: the no-replace
+		// restore preserves the foreign occupant (or lands the backup when
+		// the destination vanished) exactly like a publish error.
+		replaceErr = fmt.Errorf("post-publish identity break — destination %s does not name the staged install object: %w", destPath, fsutil.ErrPublishStagedIdentityBreak)
+	}
+	if replaceErr != nil {
 		restored, rErr := restoreAsideBackup(d.fs, destPath, backupPath)
 		if rErr != nil {
-			return false, true, fmt.Errorf("failed to replace %s: %w (AND backup restore failed: %v — bytes remain at %s)", destPath, err, rErr, backupPath)
+			return false, true, fmt.Errorf("failed to replace %s: %w (AND backup restore failed: %v — bytes remain at %s)", destPath, replaceErr, rErr, backupPath)
 		}
 		if !restored {
 			// wave-17: rollback REFUSED — the foreign destination keeps its
 			// bytes and the journal entry stays armed against the retained
 			// backup (still at backupPath): a later sweep/revert recovers the
 			// original bytes. Nothing to retract — the backup was NOT consumed.
-			return false, true, fmt.Errorf("failed to replace %s: %w (rollback restore refused — destination occupied or no-replace unsupported; journal entry stays armed against the retained backup %s)", destPath, err, backupPath)
+			return false, true, fmt.Errorf("failed to replace %s: %w (rollback restore refused — destination occupied or no-replace unsupported; journal entry stays armed against the retained backup %s)", destPath, replaceErr, backupPath)
 		}
 		// The backup was consumed by the rollback restore — retract the journal
 		// entry or the row permanently points at a vanished backup and every
@@ -659,7 +690,7 @@ func (d *Downloader) installOverwriting(ctx context.Context, stagedPath, destPat
 				markRollbackRearmFailed(ctx, ledger, destPath, backupPath, rearmErr)
 			}
 		}
-		return false, true, fmt.Errorf("failed to replace file: %w", err)
+		return false, true, fmt.Errorf("failed to replace file: %w", replaceErr)
 	}
 	// R4-3/R5-2/R9-1: confirm the install so the sweeper can distinguish
 	// "backup journaled but install never landed" from "installed media
@@ -675,13 +706,16 @@ func (d *Downloader) installOverwriting(ctx context.Context, stagedPath, destPat
 	// — the busy marker deters Javinizer participants, not other processes —
 	// and the rollback's copy runs with REPLACE semantics, so restoring
 	// unconditionally would DESTROY a foreign writer's new destination bytes.
-	// The installed object's identity captured right after the publish
-	// (dev/inode when exposed, plus size + mtime; a failed capture is a
-	// refusal, never an overwrite of the unverifiable) must therefore still
-	// describe the destination when the rollback restores: a mismatch refuses
-	// with the backup RETAINED and the journal entry left armed (a later
-	// sweep/revert arbitrates ownership), while a match restores as before.
-	installedIdentity := captureInstalledDestIdentity(d.fs, destPath)
+	// The installed object's identity (dev/inode when exposed, plus size +
+	// mtime; a failed capture is a refusal, never an overwrite of the
+	// unverifiable) must therefore still describe the destination when the
+	// rollback restores: a mismatch refuses with the backup RETAINED and the
+	// journal entry left armed (a later sweep/revert arbitrates ownership),
+	// while a match restores as before. Wave-26 (codex P2): the baseline is
+	// the STAGED object's identity captured BEFORE the publish and verified
+	// against the destination right after it (above) — the rollback recheck
+	// never re-learns an occupant, so a foreign inode swapped in around the
+	// publish can never be appointed baseline.
 	if cErr := ledger.recorder.ConfirmReplacement(ctx, ledger.opID, destPath, backupPath); cErr != nil {
 		if !destStillHoldsInstalledObject(d.fs, destPath, installedIdentity) {
 			logging.Warnf("downloader: rollback restore of %s refused — destination no longer names the just-installed object after confirm failure (%v); foreign bytes kept, backup %s retained in place, journal entry stays armed", destPath, cErr, backupPath)

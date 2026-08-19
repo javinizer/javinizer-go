@@ -469,7 +469,13 @@ type w8RemoveFs struct {
 }
 
 func (f *w8RemoveFs) Remove(name string) error {
-	if f.fail && strings.ReplaceAll(name, "\\", "/") == f.victim {
+	normName := strings.ReplaceAll(name, "\\", "/")
+	// Wave-26: the removal gate unlinks the backup's QUARANTINE sibling
+	// (victim + ".dlq." + token) rather than the journaled pathname; the
+	// wedge covers both spellings. The compensation moves the quarantined
+	// verified object back onto the journaled name, so the fixtures'
+	// assertions (bytes still at the backup name, entry armed) hold.
+	if f.fail && (normName == f.victim || strings.HasPrefix(normName, f.victim+backupQuarantineSuffix)) {
 		if f.notExist {
 			_ = f.Fs.Remove(name)
 			return os.ErrNotExist

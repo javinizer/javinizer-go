@@ -24,6 +24,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/spf13/afero"
@@ -554,7 +555,10 @@ func TestRemoveReplacementBackupW25_InspectionLegs(t *testing.T) {
 	})
 }
 
-// w25RemoveFailFs fails the final Remove for the victim name.
+// w25RemoveFailFs fails the final Remove for the victim name. Wave-26: the
+// removal gate unlinks the QUARANTINE sibling (victim + ".dlq." + token),
+// so the wedge covers both spellings; the wedge compensation then moves the
+// quarantined object back, keeping the pre-wave-26 assertions intact.
 type w25RemoveFailFs struct {
 	afero.Fs
 	victim string
@@ -562,7 +566,7 @@ type w25RemoveFailFs struct {
 }
 
 func (f *w25RemoveFailFs) Remove(name string) error {
-	if name == f.victim {
+	if name == f.victim || strings.HasPrefix(name, f.victim+backupQuarantineSuffix) {
 		return f.err
 	}
 	return f.Fs.Remove(name)
@@ -576,15 +580,19 @@ func TestW25_JournalFactHelpers_TolerateBrokenLedger(t *testing.T) {
 	require.Equal(t, "", journalEntryPendingKind(broken, "any"),
 		"an unparseable ledger yields no pending kind (armed posture)")
 
+	// Lookup keys are pre-normalized DestKeys — on Windows that uppercases +
+	// backslashes, so derive the expected keys through sweepSlash instead of
+	// hardcoding the posix spellings.
 	row := &models.BatchFileOperation{GeneratedFiles: models.MarshalLedgerJSON(models.GeneratedFilesJSON{
 		Replacements: []models.ReplacementEntry{{Destination: "/d", Backup: "/b", BackupSize: 3, BackupModUnix: 9}},
 	})}
-	require.Nil(t, journaledEntryFacts(row, "other"))
-	entry := journaledEntryFacts(row, "/b")
+	require.Nil(t, journaledEntryFacts(row, sweepSlash("other")))
+	keyB := sweepSlash("/b")
+	entry := journaledEntryFacts(row, keyB)
 	require.NotNil(t, entry)
 	require.Equal(t, int64(3), entry.BackupSize)
 	require.Equal(t, int64(9), entry.BackupModUnix)
 	entry.BackupSize = 99
-	require.Equal(t, int64(3), journaledEntryFacts(row, "/b").BackupSize,
+	require.Equal(t, int64(3), journaledEntryFacts(row, keyB).BackupSize,
 		"the returned facts are a copy — mutating them never edits the ledger snapshot")
 }

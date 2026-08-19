@@ -12,6 +12,8 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/fsutil"
 
+	"golang.org/x/text/unicode/norm"
+
 	"github.com/javinizer/javinizer-go/internal/models"
 	"gorm.io/gorm"
 )
@@ -458,6 +460,26 @@ func hasCaseFoldingNonASCII(s string) bool {
 	return false
 }
 
+// hasNormalizationVariants reports whether s differs from EITHER canonical
+// normalization form (NFC or NFD). Wave-26 (codex P2, PR#215): the wave-16
+// fallback gate checks cased non-ASCII letters only, but SQLite's LIKE also
+// folds nothing about canonical decomposition — a destination carrying a
+// DECOMPOSED spelling (e.g. `e` + COMBINING ACUTE for é-NFD) is pure ASCII
+// cased letters plus a combining MARK (no case fold), so the gate stayed
+// dark while the prefilter LIKE'd the literal NFD bytes against a journal
+// stored in NFC: the row never hydrated and chain/conflict logic went blind
+// exactly like the wave-16 failure. Any destination whose own
+// normalization is unstable — an NFD spelling contains composable pairs
+// (NFC(s) ≠ s), an NFC spelling contains precomposed runes (NFD(s) ≠ s) —
+// therefore takes the unfiltered full-ledger fallback too: DestKey NFC-
+// canonicalizes both spellings of one root-relative name on normalization-
+// insensitive roots (fsutil.IsNormalizationInsensitiveRoot), so the
+// in-process exact matcher equates what the SQL LIKE cannot. Pure-ASCII
+// destinations are already NFC/NFD-stable and keep the bounded patterns.
+func hasNormalizationVariants(s string) bool {
+	return norm.NFC.String(s) != s || norm.NFD.String(s) != s
+}
+
 // destinationLikePatterns returns the bounded LIKE-pattern set for the
 // fallback's prefilter: the caller's spelling plus, when the destination
 // contains a path separator, BOTH cross-spellings ('/'↔'\\'). Wave-8 codex
@@ -491,10 +513,12 @@ func hasCaseFoldingNonASCII(s string) bool {
 // queried σ-spelling — ToLower kept them distinct) are FOUND through this
 // fallback leg; the nil-pattern gate itself is unchanged.
 func destinationLikePatterns(destination string) []string {
-	if hasCaseFoldingNonASCII(destination) {
+	if hasCaseFoldingNonASCII(destination) || hasNormalizationVariants(destination) {
 		// See the doc comment: bounded case variants cannot be complete for
-		// foldable non-ASCII destinations, so this query takes the safe
-		// full-ledger fallback (the pre-wave-7 unfiltered scan).
+		// foldable non-ASCII destinations, and (wave-26, codex P2) byte-LIKE
+		// cannot cross canonical-decomposition spellings at all, so either
+		// class takes the safe full-ledger fallback (the pre-wave-7
+		// unfiltered scan).
 		return nil
 	}
 	patterns := make([]string, 0, 3)

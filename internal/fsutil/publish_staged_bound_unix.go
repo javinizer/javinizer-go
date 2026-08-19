@@ -37,11 +37,18 @@ var publishStagedBoundDeferredChtimes = func(fs afero.Fs, name string, atime, mt
 //  4. re-verify: Lstat(dest) must name the handle's inode. A match is
 //     done. A mismatch means the publish installed a window PLANT — ours
 //     was renamed away and stays reachable via the open handle. For a
-//     no-replace publish into a caller-proven-absent dest, the plant is
-//     necessarily this operation's own install (never pre-existing bytes)
-//     and is displaced; genuine bytes are re-staged FROM THE HANDLE into a
-//     fresh O_EXCL name and republished. A dest that VANISHED between
-//     publish and reverify recovers the same way with nothing to displace.
+//     no-replace publish into a caller-proven-absent dest, the plant as
+//     RECORDED by the detection Lstat is necessarily this operation's own
+//     install (never pre-existing bytes) and is displaced; genuine bytes
+//     are re-staged FROM THE HANDLE into a fresh O_EXCL name and
+//     republished. A dest that VANISHED between publish and reverify
+//     recovers the same way with nothing to displace. Wave-26 (codex P2,
+//     PR#215 finding 1): the displacement unlink is BOUND TO THE RECORDED
+//     PLANT INODE — the occupant is re-verified against the detection
+//     Lstat's dev/ino immediately before removal, so a legitimate writer's
+//     file created at dest AFTER the publish (different inode again) is
+//     never unlinked on the plant assumption; that class, and any
+//     indeterminate re-lookup, is a typed refusal keeping the backup.
 //  5. an indeterminate dest lookup, a restaging failure, or a persistent
 //     substitution past the budget returns typed errors — the genuine
 //     source backup is retained by every caller, so nothing is consumed.
@@ -106,11 +113,41 @@ func publishStagedBoundOS(p StagedPublish) error {
 		// The published bytes are NOT ours (mismatch) or are gone again
 		// (ENOENT): the staged inode survives on the handle. Displace the
 		// proven plant — only for no-replace publishes into a
-		// caller-proven-absent dest, where a mismatched occupant is
+		// caller-proven-absent dest, where the occupant AT DETECTION is
 		// necessarily this publish's own install — then re-stage the
 		// genuine bytes FROM THE HANDLE and retry within the budget.
 		if !os.IsNotExist(lerr) && p.NoReplace {
-			_ = p.FS.Remove(p.Dest)
+			// Wave-26 (codex P2, PR#215 finding 1): bind the unlink to the
+			// plant RECORDED at mismatch detection (destInfo). Between that
+			// reverify and this removal a legitimate writer may have displaced
+			// the plant itself — the mismatched occupant is then THEIR file,
+			// created AFTER the publish, and unverifiable removal would destroy
+			// unjournaled bytes. Re-verify the occupant and displace ONLY the
+			// recorded plant's own inode; a different occupant and any
+			// indeterminate re-lookup are typed refusals (backup retained,
+			// nothing consumed). The remaining Lstat→Remove window is the
+			// documented portability residual: no portable unlink-by-handle
+			// exists, so the binding narrows it to the verified-inode check.
+			occupant, oerr := publishStagedBoundDestLstat(p.Dest)
+			switch {
+			case oerr == nil && os.SameFile(occupant, destInfo):
+				// The occupant is STILL the recorded window plant — bound
+				// displacement of the verified foreign install.
+				_ = p.FS.Remove(p.Dest)
+			case oerr == nil:
+				// Neither the recorded plant nor our inode: a post-publish
+				// legitimate occupant. Preserve it byte-intact and refuse
+				// typed rather than restaging over unverified bytes.
+				_ = fh.Close()
+				return fmt.Errorf("%w at %s — post-publish occupant preserved, recovery refused (re-stage from handle not attempted over unverified foreign bytes): %w", ErrPublishStagedForeignOccupant, p.Dest, ErrPublishStagedIdentityBreak)
+			case !os.IsNotExist(oerr):
+				// Indeterminate re-lookup: nothing is proven about the name —
+				// refuse typed, same posture as the detection-side failure.
+				_ = fh.Close()
+				return fmt.Errorf("post-publish occupant binding lookup of %s: %w: %w", p.Dest, oerr, ErrPublishStagedIdentityBreak)
+			}
+			// os.IsNotExist(oerr): the plant vanished inside the window —
+			// nothing to displace; the restage below republishes into absence.
 		}
 		if attempt+1 >= PublishStagedBoundAttempts {
 			// Budget spent under a persistent substitution: refuse TYPED.
