@@ -474,6 +474,15 @@ func (s *ReplacementSweeper) persistRestorePendingMarkerKind(ctx context.Context
 // replacementLedgerIndex maps journaled backup paths to their owning row for
 // sweep arbitration, and destinations to the owning rows.
 type replacementLedgerIndex struct {
+	// journaled is the sweep-local MUTABLE view of LIVE ledger state:
+	// consumption legs REMOVE each entry's (backup → row) mapping the moment
+	// the journal transaction commits (sweepOne after restoreAndConsume;
+	// Sweep's refusedPendings ledger leg), so a candidate marker file scanned
+	// later in the SAME sweep is never routed through an owner whose entry
+	// was consumed mid-sweep (wave-33, codex local review round 3, PR#215
+	// finding R1). A mapping left behind would drive the consumed-entry
+	// removal legs on stale evidence alone — an ownership decision only the
+	// LIVE ledger may authorize (the orphan posture retains + warns instead).
 	journaled       map[string]*models.BatchFileOperation // backup path → owning row
 	dirs            map[string]bool                       // directories holding journaled destinations
 	refusedPendings []rearmRefusedLedgerEntry             // wave-29: ledger-only rearm-refused pendings
@@ -579,12 +588,17 @@ func (s *ReplacementSweeper) Sweep(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("replacement sweep: row scan failed: %w", err)
 	}
+	// The ledger leg runs BEFORE the directory scans, and every entry it
+	// consumes is retracted from idx.journaled on the spot (wave-33, finding
+	// R1): a marker planted at a just-consumed name after its absent-proof
+	// must arbitrate through the orphan leg against the LIVE ledger — never
+	// through this index's stale owner copy.
 	healed := 0
 	for _, entry := range idx.refusedPendings {
 		if err := ctx.Err(); err != nil {
 			return healed, err
 		}
-		healed += s.consumeRearmRefusedPending(ctx, entry)
+		healed += s.consumeRearmRefusedPending(ctx, idx, entry)
 	}
 	for dir := range idx.dirs {
 		// Cancellation (e.g. the CLI revert's sweep deadline) wins over
@@ -759,7 +773,10 @@ func (s *ReplacementSweeper) sweepOne(ctx context.Context, idx *replacementLedge
 		// RECHECKS the destination state in the critical section: a downloader
 		// can install new bytes between the classification read and the lock
 		// (codex P3 R3-2), and the backup must never clobber those
-		// freshly-installed artifacts.
+		// freshly-installed artifacts. The idx mapping is the sweep-local LIVE
+		// view (wave-33, finding R1): a successful consumption retracts it here
+		// exactly like the ledger leg retracts its own — every later candidate
+		// consults only state still present in the ledger.
 		if s.restoreAndConsume(ctx, owner, backup, dest, backupKey) {
 			delete(idx.journaled, backupKey)
 			return 1
@@ -847,6 +864,27 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 	if _, lstatErr := lstatRestoreSource(s.fs, dest); lstatErr == nil {
 		if !s.hasPendingRemoval(backupSlash) && !journalEntryRestorePending(row, backupSlash) {
 			return false
+		}
+		// Wave-33 (codex local review round 3, PR#215 finding R1): when the
+		// cleanup authorization comes from the INDEX-TIME row copy alone (no
+		// in-process memory from this process's own failed removal), re-verify
+		// the entry STILL exists restore-pending in the live ledger before any
+		// pending-retry removal may run — the snapshot may predate a mid-sweep
+		// or concurrent consumption, and the retry's consumed-entry legs would
+		// otherwise remove a byte-string ownership no longer authorizes.
+		// A consumed (or otherwise de-pended) entry makes the occupant's
+		// ownership unproven: ORPHAN posture — retain the bytes and warn,
+		// exactly like a never-journaled marker.
+		if !s.hasPendingRemoval(backupSlash) {
+			freshOwner, ferErr := s.repo.FindByID(ctx, row.ID)
+			switch {
+			case ferErr != nil || freshOwner == nil:
+				logging.Warnf("replacement sweep %s: owner row unreadable before cleanup authorization (%v) — kept", backup, ferErr)
+				return false
+			case !journalEntryRestorePending(freshOwner, backupSlash):
+				warnRetainedUnjournaledBackup(backup)
+				return false
+			}
 		}
 		return s.retryPendingRemoval(ctx, row.ID, backup, dest, backupSlash)
 	} else if !errors.Is(lstatErr, afero.ErrFileNotFound) {
@@ -1322,7 +1360,7 @@ func (s *ReplacementSweeper) retryPendingRemoval(ctx context.Context, rowID uint
 // A consumption failure keeps the entry live (retryPendingRemoval re-persists
 // the durable marker and warns). A live busy marker keeps the name untouched
 // for the owner process's own lifecycle, mirroring sweepOne's posture.
-func (s *ReplacementSweeper) consumeRearmRefusedPending(ctx context.Context, entry rearmRefusedLedgerEntry) int {
+func (s *ReplacementSweeper) consumeRearmRefusedPending(ctx context.Context, idx *replacementLedgerIndex, entry rearmRefusedLedgerEntry) int {
 	busyRelease, busyErr := fsutil.AcquireReplacementBusy(s.fs, entry.dest)
 	if errors.Is(busyErr, fsutil.ErrReplacementBusy) {
 		return 0
@@ -1353,6 +1391,15 @@ func (s *ReplacementSweeper) consumeRearmRefusedPending(ctx context.Context, ent
 		return 0
 	}
 	if s.retryPendingRemoval(ctx, entry.rowID, entry.backup, entry.dest, entry.backupSlash) {
+		// Wave-33 (codex local review round 3, PR#215 finding R1): the
+		// journal-only consumption removed the entry from the LIVE ledger —
+		// retract its idx.journaled mapping NOW so a later directory scan of
+		// this sweep never routes a candidate marker at this name through the
+		// stale owner copy (a marker planted here after the absent-proof above
+		// must arbitrate ORPHAN — retain + warn — never owned-removable). A
+		// FAILED consumption leaves the entry live, so the mapping correctly
+		// stays.
+		delete(idx.journaled, entry.backupSlash)
 		return 1
 	}
 	return 0

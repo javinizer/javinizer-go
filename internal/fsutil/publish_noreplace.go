@@ -103,6 +103,25 @@ var ErrPublishNoReplaceLinkFailed = errors.New("no-replace hard-link publish fai
 // rearm-refused kind like any other unowned-name failure.
 var ErrPublishNoReplaceRollbackUnverified = errors.New("no-replace publish rollback could not re-prove the destination")
 
+// ErrPublishNoReplaceStagedUnverified classifies the POSIX hard-link
+// fallback's staged-cleanup REFUSAL (wave-33, codex local review round 3,
+// PR#215 finding R2): link(2) already landed the staged inode at the
+// destination, but the staged NAME could no longer be re-proven to address
+// the just-linked object before its unlink — a foreign writer swapped the
+// staged name inside the link→unlink window (or mutated/re-stamped the
+// object), or the reverify lookup itself was indeterminate. Pre-wave-33 the
+// pathname unlink removed whatever the staged name then held, destroying
+// foreign bytes the operation never owned. The staged name is now left
+// BYTE-INTACT on every unproven answer; only a staged name that VANISHED on
+// its own needs no unlink and reports plain success (the cleanup completed
+// itself, no foreign object was ever at risk). The PUBLISHED destination
+// stands by construction — the link landed before any of this ran — so the
+// error always wraps ErrPublishCompleted alongside this sentinel: the shared
+// pending-kind classifiers (PublishCompleted) keep treating the DESTINATION
+// name as OWNED (the pending retry reaps it), exactly like the wave-20
+// completed-despite-error leg.
+var ErrPublishNoReplaceStagedUnverified = errors.New("no-replace publish staged source could not be re-proven after linking")
+
 // publishCollision wraps the destination name in the collision class.
 func publishCollision(dst string) error {
 	return fmt.Errorf("%w: %s", ErrPublishCollision, dst)

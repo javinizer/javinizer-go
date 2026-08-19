@@ -58,6 +58,33 @@ var (
 		}
 		return os.SameFile(srcInfo, dstInfo), nil
 	}
+	// publishNoReplaceStagedVerify re-proves — after a successful link(2),
+	// BEFORE the staged-source pathname unlink — that src still names the
+	// object that was linked (wave-33, codex local review round 3, PR#215
+	// finding R2): a foreign writer swapping the staged name inside the
+	// link→unlink window otherwise gets ITS bytes removed by our staged
+	// cleanup. The pre-link Lstat snapshot (no-follow) is compared against a
+	// fresh no-follow Lstat by os.SameFile (dev/ino) plus size/mtime — the
+	// same binding discipline as publishNoReplaceRollbackVerify — and only a
+	// match may unlink. Same seam discipline as the link/remove pair: a
+	// running host kernel cannot be coerced into the swap-inside-window
+	// ordering, so tests replay it here.
+	publishNoReplaceStagedVerify = func(src string, before os.FileInfo) (bool, error) {
+		after, err := os.Lstat(src)
+		if err != nil {
+			return false, err
+		}
+		if !os.SameFile(before, after) {
+			return false, nil
+		}
+		if after.Size() != before.Size() || !after.ModTime().Equal(before.ModTime()) {
+			// Same inode but re-stamped mid-window: the object was mutated
+			// after the link — the keep posture treats it as unproven rather
+			// than unlinking something whose tail writes are no longer ours.
+			return false, nil
+		}
+		return true, nil
+	}
 )
 
 // linkUnsupportedClass reports whether a link(2) failure means the
@@ -102,6 +129,17 @@ func linkUnsupportedClass(err error) bool {
 // doubles by PublishNoReplace's dispatch (publish_noreplace.go), never as an
 // OsFs degrade.
 func publishNoReplaceFallback(src, dst string) error {
+	// Wave-33 (codex local review round 3, PR#215 finding R2): capture the
+	// staged source's identity BEFORE the link so the staged cleanup below
+	// unlinks only the object that was actually linked — never a foreign
+	// occupant swapped onto the staged name inside the link→unlink window.
+	// When the staged source cannot be identified at all the publish fails
+	// closed exactly like a failed link(2) against a missing staged source
+	// (nothing linked, nothing unlinked).
+	srcIdentity, statErr := os.Lstat(src)
+	if statErr != nil {
+		return fmt.Errorf("no-replace publish %s -> %s: staged source unidentifiable: %w: %w", src, dst, ErrPublishNoReplaceLinkFailed, statErr)
+	}
 	if err := publishNoReplaceLink(src, dst); err != nil {
 		if os.IsExist(err) {
 			return publishCollision(dst)
@@ -110,6 +148,28 @@ func publishNoReplaceFallback(src, dst string) error {
 			return fmt.Errorf("no-replace publish %s -> %s: %w: %w", src, dst, ErrPublishNoReplaceUnsupported, err)
 		}
 		return fmt.Errorf("no-replace publish %s -> %s: %w: %w", src, dst, ErrPublishNoReplaceLinkFailed, err)
+	}
+	// Wave-33 (finding R2): the destination link already carries the staged
+	// bytes, so the publish STANDS regardless of what happens to the staged
+	// name now — but the staged-source unlink below must stay bound to the
+	// just-linked object. A staged name that no longer names it (foreign swap
+	// or mutation in the link→cleanup window) is left BYTE-INTACT and the
+	// refusal is typed ErrPublishNoReplaceStagedUnverified joined with
+	// ErrPublishCompleted (the destination is provably ours — pending-kind
+	// classifiers route the clean/owned-name kind). A staged name that
+	// VANISHED on its own completes the cleanup by itself: plain success, no
+	// foreign object was ever at risk. An indeterminate reverify proves
+	// nothing, so it keeps the name and the same typed refusal.
+	verified, verr := publishNoReplaceStagedVerify(src, srcIdentity)
+	switch {
+	case verr == nil && verified:
+		// proven — the staged unlink below removes exactly the linked object
+	case verr != nil && os.IsNotExist(verr):
+		return nil
+	case verr != nil:
+		return fmt.Errorf("no-replace publish %s -> %s: staged source reverify indeterminate (%w) — staged name left untouched: %w: %w", src, dst, verr, ErrPublishNoReplaceStagedUnverified, ErrPublishCompleted)
+	default:
+		return fmt.Errorf("no-replace publish %s -> %s: staged source no longer names the just-linked object (foreign swap or mutation in the link→cleanup window) — staged name left untouched: %w: %w", src, dst, ErrPublishNoReplaceStagedUnverified, ErrPublishCompleted)
 	}
 	if err := publishNoReplaceRemove(src); err != nil {
 		// The destination link already carries the staged bytes; only the
