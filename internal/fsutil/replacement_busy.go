@@ -71,9 +71,12 @@ func ReplacementBusyPath(dest string) string { return dest + ReplacementBusySuff
 
 // AcquireReplacementBusy atomically claims the destination-adjacent marker.
 // Writers create it before moving the destination aside; sweepers create it
-// before touching a backup. A marker from a dead PID is reclaimed, while a
-// malformed marker is never reclaimed based on its age alone so an unowned
-// file cannot be mistaken for Javinizer's marker.
+// before touching a backup. A marker from a dead PID is reclaimed, as is a
+// well-formed marker carrying released=1 (an owner whose final unlink failed
+// transiently records the release in-band so a wedged removal cannot
+// busy-block the destination for that process's lifetime), while a malformed
+// marker is never reclaimed based on its age alone so an unowned file cannot
+// be mistaken for Javinizer's marker.
 func AcquireReplacementBusy(fs afero.Fs, dest string) (func(), error) {
 	path := ReplacementBusyPath(dest)
 	for {
@@ -284,12 +287,71 @@ func replacementBusyRandomPlatform() (uint64, error) {
 	return binary.LittleEndian.Uint64(raw[:]), nil
 }
 
+// replacementBusyReleaseBackoff is the brief delay between release unlink
+// retries. A worthy unlink failure is typically a transient network-FS
+// hiccup, so two short retries buy recovery time without stalling callers.
+var replacementBusyReleaseBackoff = []time.Duration{10 * time.Millisecond, 25 * time.Millisecond}
+
+// replacementBusyReleasedField is appended (keeping the pid/time fields so
+// the token still parses as well-formed) when the final unlink could not
+// remove the marker: the in-band release that replacementBusyInspect decodes.
+const replacementBusyReleasedField = "released=1"
+
+// releaseReplacementBusy removes the marker only when its bytes still carry
+// our token. A transiently failing final unlink would otherwise leave a
+// well-formed same-process-PID marker that replacementBusyInspect treats as
+// live for this process's whole lifetime (regardless of age), busy-blocking
+// every later overwrite/sweep/revert of the destination even after the FS
+// recovers. So the unlink is retried with replacementBusyReleaseBackoff, and
+// on persistent failure the marker is rewritten in place with the released
+// form (best-effort, only while its bytes still match our token): any later
+// claimant can then reclaim it through the normal takeover/quarantine rules.
 func releaseReplacementBusy(fs afero.Fs, path, token string) {
 	content, err := afero.ReadFile(fs, path)
 	if err != nil || string(content) != token {
 		return
 	}
-	_ = fs.Remove(path)
+	var removeErr error
+	for attempt := 0; ; attempt++ {
+		removeErr = fs.Remove(path)
+		if removeErr == nil || os.IsNotExist(removeErr) {
+			return
+		}
+		if attempt >= len(replacementBusyReleaseBackoff) {
+			break
+		}
+		time.Sleep(replacementBusyReleaseBackoff[attempt])
+	}
+	current, readErr := afero.ReadFile(fs, path)
+	if readErr != nil || string(current) != token {
+		logging.Warnf("replacement busy marker %s could not be removed on release (%v) and its bytes no longer match this release's token; later claims arbitrate the current marker normally", path, removeErr)
+		return
+	}
+	if writeErr := afero.WriteFile(fs, path, []byte(replacementBusyReleasedToken(token)), 0o600); writeErr != nil {
+		logging.Warnf("replacement busy marker %s could not be removed on release (%v) and rewriting it as released failed: %v; the destination may busy-block until the marker is removed manually", path, removeErr, writeErr)
+		return
+	}
+	logging.Warnf("replacement busy marker %s could not be removed on release (%v); rewrote it as released so a later claim can reclaim it", path, removeErr)
+}
+
+func replacementBusyReleasedToken(token string) string {
+	return token + "," + replacementBusyReleasedField
+}
+
+// replacementBusyIsReleased decodes the in-band release field with the same
+// field discipline as parseReplacementBusyToken so a hand-crafted lookalike
+// (missing pid/time) still classifies as malformed, never as released.
+func replacementBusyIsReleased(content string) bool {
+	parts := strings.FieldsFunc(content, func(r rune) bool {
+		return r == ',' || r == '\n' || r == '\r' || r == '\t' || r == ' '
+	})
+	for _, part := range parts {
+		keyValue := strings.SplitN(part, "=", 2)
+		if len(keyValue) == 2 && strings.TrimSpace(keyValue[0]) == "released" && strings.TrimSpace(keyValue[1]) == "1" {
+			return true
+		}
+	}
+	return false
 }
 
 type replacementBusyInspection struct {
@@ -306,15 +368,23 @@ type replacementBusyInspection struct {
 //
 // Classification precedence (the first applicable arm wins):
 //  1. Malformed content is retained and is never reclaimable by age alone.
-//  2. A well-formed marker whose PID probe proves alive is never expired by
+//  2. A well-formed marker carrying the released field (the owner's final
+//     unlink failed transiently and it recorded the release in-band via
+//     releaseReplacementBusy) is stale and reclaimable regardless of PID
+//     liveness or age, ending the process-lifetime block a wedged removal
+//     would otherwise create. The reclaim still goes through the wave
+//     takeover/quarantine rules; the released bytes are preserved or
+//     returned, never silently overwritten. This arm deliberately precedes
+//     the live-PID arms because a marker may carry this very process's PID.
+//  3. A well-formed marker whose PID probe proves alive is never expired by
 //     age.
-//  3. Within that live arm, W20's start-time proof that the PID started after
+//  4. Within that live arm, W20's start-time proof that the PID started after
 //     the marker marks it stale as PID reuse. Linux derives the start time
 //     from /proc/<pid>/stat; K4 arms Windows with the same proof through
 //     K32 GetProcessTimes. An unreadable start time keeps the liveness-only
 //     behavior rather than inventing evidence.
-//  4. A probe that proves the PID is dead marks the marker stale.
-//  5. On POSIX, age is consulted only when the probe is
+//  5. A probe that proves the PID is dead marks the marker stale.
+//  6. On POSIX, age is consulted only when the probe is
 //     undecidable/unprobeable; Windows retains its conservative access-denied
 //     behavior and does not expire an unprobeable owner by age.
 func replacementBusyInspect(fs afero.Fs, path string) (replacementBusyInspection, error) {
@@ -336,6 +406,15 @@ func replacementBusyInspect(fs afero.Fs, path string) (replacementBusyInspection
 	pid, created, ok := parseReplacementBusyToken(string(content))
 	if !ok {
 		inspection.stale = time.Since(info.ModTime()) > replacementBusyStaleAge
+		return inspection, nil
+	}
+	if replacementBusyIsReleased(string(content)) {
+		// The owner declared the release in-band after its final unlink wedged.
+		// This arm deliberately precedes the same-PID and live-probe arms: the
+		// marker is well-formed and may carry this very process's PID, but the
+		// recorded release supersedes both, exactly as a proven-dead PID would.
+		inspection.stale = true
+		inspection.reclaimable = true
 		return inspection, nil
 	}
 	createdAt := time.Unix(0, created)
