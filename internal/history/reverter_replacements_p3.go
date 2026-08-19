@@ -2,6 +2,7 @@ package history
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -367,7 +368,22 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 						diverged = true
 					}
 					if diverged {
-						hold.restore()
+						if rerr := hold.restore(); rerr != nil {
+							// Wave-36 (codex local review round 6, PR#215 finding F3):
+							// the move-back failed — the journaled backup name is
+							// unowned (a foreign claimant holds it or the publish
+							// wedged) while the verified bytes sit at the quarantine
+							// name. Propagate to the caller through the error AND disarm
+							// the entry: left armed (or clean-pending) it would later
+							// stat/copy/remove the foreign occupant at that name, so the
+							// rearm-refused pending kind persists instead (journal-only
+							// retry; the quarantined bytes stay recoverable manually).
+							absoluteBackupPath, _ := filepath.Abs(e.Backup)
+							if markErr := markReplacementEntryRestorePendingKind(ctx, r.batchFileOpRepo, op.ID, sweepSlash(e.Backup), models.RestorePendingKindRearmRefused); markErr != nil {
+								logging.Warnf("replacement restore %s: destination diverged after the backup was quarantined, the verified move-back failed (%v), AND the rearm-refused marker could not be persisted (%v) — entry left as-is, destination untouched, verified bytes recoverable at the quarantine name %s", absoluteBackupPath, rerr, markErr, hold.quarantine)
+							}
+							return fmt.Errorf("restored %s → %s but the destination diverged after the backup was quarantined and the verified move-back failed: %v — the journaled name is unowned; entry marked restore-pending (rearm-refused), verified bytes recoverable at the quarantine name %s", e.Backup, dest, rerr, hold.quarantine)
+						}
 						return fmt.Errorf("restored %s → %s but the destination diverged after the backup was quarantined (foreign swap or deletion inside the check-to-delete window); backup restored to its journaled name, journal entry left live, destination untouched", e.Backup, dest)
 					}
 					rmErr = hold.removeVerified()
@@ -964,13 +980,20 @@ func copyRestoreBytesPublish(fs afero.Fs, backup, dest string, publish func(afer
 	}
 	// R5-3: stream with a bounded buffer — trailer-class backups can reach
 	// gigabytes; a whole-file read would exhaust memory on revert/startup
-	// recovery alike.
+	// recovery alike. Wave-36 (codex local review round 6, PR#215 finding F2):
+	// tee the stream through SHA-256 as it lands — the digest of the bytes this
+	// pass PUBLISHES rides the returned identity, so the rechecks and the
+	// wave-35 undo-quarantine can reject an inode-reused substitute whose
+	// content was swapped after the identity metadata still matched.
 	buf := make([]byte, 256*1024)
-	if _, cerr := io.CopyBuffer(dstFile, src, buf); cerr != nil {
+	digest := sha256.New()
+	if _, cerr := io.CopyBuffer(dstFile, io.TeeReader(src, digest), buf); cerr != nil {
 		_ = dstFile.Close()
 		_ = fs.Remove(staged)
 		return restoredDestIdentity{}, fmt.Errorf("stage restore copy: %w", cerr)
 	}
+	var publishedSum [32]byte
+	copy(publishedSum[:], digest.Sum(nil))
 	// Wave-8 codex P2 follow-up: hand the staged inode back to the backup's
 	// owner BEFORE the swap, mirroring the downloader's rollback restore
 	// (install_overwrite.go). A privileged history restore (or startup sweep —
@@ -1048,7 +1071,7 @@ func copyRestoreBytesPublish(fs afero.Fs, backup, dest string, publish func(afer
 			return restoredDestIdentity{}, fmt.Errorf("swap staged restore: %w", pubErr)
 		}
 	}
-	return restoredDestIdentityFrom(published), nil
+	return restoredDestIdentityFromContent(published, publishedSum), nil
 }
 
 // openRearmSource opens the destination whose bytes must rebuild a removed

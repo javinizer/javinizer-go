@@ -45,6 +45,18 @@ package history
 // The loader/warning nouns inside the shared quarantine legs still say
 // "backup"; the destination flow deliberately reuses them rather than
 // forking identity-verified quarantine code per noun.
+//
+// Wave-36 (codex local review round 6, PR#215 finding F2): identity
+// metadata alone is not enough — unlink+recreate can REUSE the inode of a
+// same-size, same-mtime file, so the dev/inode + metadata binding below can
+// bless a foreign substitute. When the identity carries the PUBLISHED
+// BYTES' digest (known && hashed — every restore copy records the digest at
+// publish time, and only identity-bearing legs use it), the gate
+// additionally hashes the current destination content (no-follow open) and
+// requires equality before the quarantine+unlink. An inode-reused
+// substitute with different bytes is refused; a substitute holding the
+// EXACT published bytes with the same mtime is content-indistinguishable
+// from ours — deleting it is equivalent to deleting ours.
 
 import (
 	"fmt"
@@ -95,6 +107,26 @@ func quarantineRestoredDestForUnlink(fs afero.Fs, dest, phase string, id restore
 		}
 		if pre.Size() != id.info.Size() || !pre.ModTime().Equal(id.info.ModTime()) {
 			return nil, fmt.Errorf("%s refused the undo unlink of restored destination %s: the occupant metadata no longer matches the published restore object — foreign bytes preserved, nothing removed", phase, absoluteDest)
+		}
+	}
+	if id.known && id.hashed {
+		// Wave-36 (finding F2): the identity gates above cannot distinguish an
+		// unlink+recreate substitute that REUSED the published object's inode
+		// while replaying its size and mtime — only the bytes can. Hash the
+		// current occupant no-follow and require the published content: a
+		// mismatch refuses byte-intact, while a hash-equal occupant with equal
+		// metadata is content-indistinguishable from the published object
+		// (deleting it is equivalent to deleting ours). An unreadable occupant
+		// is indeterminate — fail closed, exactly like the pre-move snapshot.
+		// The known=false virtual/wrapper leg keeps its documented residual:
+		// no provable identity exists there, so the pre-move snapshot re-derived
+		// below stays the verified reference.
+		curSum, herr := hashRestoredDestContent(fs, dest)
+		switch {
+		case herr != nil:
+			return nil, fmt.Errorf("%s cannot bind restored destination %s for the undo unlink: %w — nothing removed", phase, absoluteDest, herr)
+		case curSum != id.sum:
+			return nil, fmt.Errorf("%s refused the undo unlink of restored destination %s: the occupant content no longer matches the published restore bytes — foreign bytes preserved, nothing removed", phase, absoluteDest)
 		}
 	}
 	// pre is the VERIFIED destination snapshot: quarantineVerifiedBackup's

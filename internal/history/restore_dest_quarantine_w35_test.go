@@ -17,6 +17,7 @@ package history
 //   - the claim/move/gate wedge legs remove nothing.
 
 import (
+	"crypto/sha256"
 	"errors"
 	"os"
 	"runtime"
@@ -96,9 +97,47 @@ func TestRestoredDestQuarantineW35_SubstitutedDestRefusedForeignSurvives(t *test
 	require.Len(t, entries, 1, "nothing was quarantined or removed besides the refusal itself")
 }
 
-// Same-length substitution with replayed timestamps: only the dev/inode
-// gate can tell the occupant apart from the published object, and it does.
-func TestRestoredDestQuarantineW35_SubstitutedDestDevInodeMismatchRefused(t *testing.T) {
+// Same-length substitution with replayed timestamps (CI-1 + wave-36 finding
+// F2): remove+create on CI runners routinely REUSES the freed inode, so the
+// dev/inode + metadata binding can bless the foreign plant — only the
+// wave-36 content gate separates it deterministically on every platform and
+// on inode-reusing filesystems alike (where the inode was NOT reused, the
+// dev/inode leg refuses first; both answers are the same refusal class).
+func TestRestoredDestQuarantineW35_SubstitutedDestContentMismatchRefused(t *testing.T) {
+	base := afero.NewOsFs()
+	tmp := t.TempDir()
+	dest := tmp + "/poster.jpg"
+	published := []byte("abcdefghij")
+	require.NoError(t, os.WriteFile(dest, published, 0o640))
+	pubInfo, err := os.Lstat(dest)
+	require.NoError(t, err)
+	id := restoredDestIdentityFromContent(pubInfo, sha256.Sum256(published))
+
+	// Foreign plant with identical size AND replayed mtime (and, on
+	// inode-reusing filesystems, the SAME dev/inode): metadata
+	// identity alone would bless it; the published-bytes digest refuses.
+	require.NoError(t, os.Remove(dest))
+	require.NoError(t, os.WriteFile(dest, []byte("KLMNOPQRST"), 0o644))
+	require.NoError(t, os.Chtimes(dest, pubInfo.ModTime(), pubInfo.ModTime()))
+
+	err = removeRestoredDestQuarantined(base, dest, "w35 unit", id)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "refused the undo unlink of restored destination")
+	require.Contains(t, err.Error(), "foreign bytes preserved")
+	got, rerr := os.ReadFile(dest)
+	require.NoError(t, rerr)
+	require.Equal(t, "KLMNOPQRST", string(got), "the foreign plant survives the refused undo")
+	entries, derr := os.ReadDir(tmp)
+	require.NoError(t, derr)
+	require.Len(t, entries, 1, "nothing was quarantined or removed besides the refusal itself")
+}
+
+// The dev/inode pre-move gate leg, deterministically covered: the scripted
+// no-follow lookup answers a genuinely-foreign object's FileInfo (same size,
+// replayed mtime — two simultaneously-existing real files, so the inode
+// comparison can never collapse) while the on-disk destination is the
+// published object untouched.
+func TestRestoredDestQuarantineW35_ScriptedDevInodeMismatchRefused(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("dev/inode identity is POSIX-shaped")
 	}
@@ -108,20 +147,110 @@ func TestRestoredDestQuarantineW35_SubstitutedDestDevInodeMismatchRefused(t *tes
 	require.NoError(t, os.WriteFile(dest, []byte("abcdefghij"), 0o640))
 	pubInfo, err := os.Lstat(dest)
 	require.NoError(t, err)
-	id := restoredDestIdentityFrom(pubInfo)
+	foreign := tmp + "/foreign"
+	require.NoError(t, os.WriteFile(foreign, []byte("KLMNOPQRST"), 0o644))
+	require.NoError(t, os.Chtimes(foreign, pubInfo.ModTime(), pubInfo.ModTime()))
+	foreignInfo, ferr := os.Lstat(foreign)
+	require.NoError(t, ferr)
 
-	// Foreign plant with identical size AND replayed mtime: the metadata
-	// comparison alone would bless it; the identity comparison refuses.
+	fs := &w35DestLstatFs{Fs: base, dest: dest, info: foreignInfo}
+	err = removeRestoredDestQuarantined(fs, dest, "w35 unit", restoredDestIdentityFrom(pubInfo))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "dev/inode mismatch")
+	require.Equal(t, "abcdefghij", string(mustRead2(t, base, dest)),
+		"the real destination is untouched — the scripted answer above is what the gate refused")
+}
+
+// The wave-36 hash-open wedge: the occupant cannot even be read no-follow —
+// indeterminate, so the undo fails closed BEFORE anything moves.
+func TestRestoredDestQuarantineW35_HashOpenFailureBindsNothing(t *testing.T) {
+	base := afero.NewOsFs()
+	tmp := t.TempDir()
+	dest := tmp + "/poster.jpg"
+	published := []byte("abcdefghij")
+	require.NoError(t, os.WriteFile(dest, published, 0o640))
+	pubInfo, err := os.Lstat(dest)
+	require.NoError(t, err)
+	id := restoredDestIdentityFromContent(pubInfo, sha256.Sum256(published))
+
+	sentinel := errors.New("w36 dest open wedged")
+	fs := &w36DestOpenFailFs{Fs: base, dest: dest, err: sentinel}
+	err = removeRestoredDestQuarantined(fs, dest, "w35 unit", id)
+	require.Error(t, err)
+	require.ErrorIs(t, err, sentinel)
+	require.Contains(t, err.Error(), "cannot bind restored destination")
+	require.Equal(t, "abcdefghij", string(mustRead2(t, base, dest)), "indeterminate content binds nothing")
+	entries, derr := os.ReadDir(tmp)
+	require.NoError(t, derr)
+	require.Len(t, entries, 1, "nothing was claimed, moved, or removed")
+}
+
+// The published-bytes binding accepts the genuine object end-to-end: a
+// hashed identity unlinked cleanly with nothing else touched.
+func TestRestoredDestQuarantineW35_ContentBoundPlainUnlink(t *testing.T) {
+	base := afero.NewOsFs()
+	tmp := t.TempDir()
+	dest := tmp + "/poster.jpg"
+	published := []byte("restored bytes")
+	require.NoError(t, os.WriteFile(dest, published, 0o640))
+	pubInfo, err := os.Lstat(dest)
+	require.NoError(t, err)
+	id := restoredDestIdentityFromContent(pubInfo, sha256.Sum256(published))
+
+	require.NoError(t, removeRestoredDestQuarantined(base, dest, "w35 unit", id))
+	_, serr := os.Lstat(dest)
+	require.ErrorIs(t, serr, os.ErrNotExist)
+	entries, derr := os.ReadDir(tmp)
+	require.NoError(t, derr)
+	require.Empty(t, entries, "the quarantined verified object was unlinked")
+}
+
+// The content-mismatch leg DETERMINISTICALLY (every platform, no
+// inode-reuse dependence): the scripted no-follow lookup answers the
+// published object's OWN FileInfo — dev/inode AND metadata pass by
+// construction — while the on-disk destination carries foreign bytes with a
+// replayed mtime. Only the published-bytes digest refuses the undo.
+func TestRestoredDestQuarantineW36_ContentMismatchAfterIdentityMatchRefused(t *testing.T) {
+	base := afero.NewOsFs()
+	tmp := t.TempDir()
+	dest := tmp + "/poster.jpg"
+	published := []byte("abcdefghij")
+	require.NoError(t, os.WriteFile(dest, published, 0o640))
+	pubInfo, err := os.Lstat(dest)
+	require.NoError(t, err)
+	id := restoredDestIdentityFromContent(pubInfo, sha256.Sum256(published))
+
+	// The swap: same size, replayed mtime, scripted-IDENTICAL identity — and
+	// different bytes.
 	require.NoError(t, os.Remove(dest))
 	require.NoError(t, os.WriteFile(dest, []byte("KLMNOPQRST"), 0o644))
 	require.NoError(t, os.Chtimes(dest, pubInfo.ModTime(), pubInfo.ModTime()))
+	fs := &w35DestLstatFs{Fs: base, dest: dest, info: pubInfo}
 
-	err = removeRestoredDestQuarantined(base, dest, "w35 unit", id)
+	err = removeRestoredDestQuarantined(fs, dest, "w35 unit", id)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "dev/inode mismatch")
+	require.Contains(t, err.Error(), "occupant content no longer matches the published restore bytes")
 	got, rerr := os.ReadFile(dest)
 	require.NoError(t, rerr)
 	require.Equal(t, "KLMNOPQRST", string(got), "the foreign plant survives the refused undo")
+	entries, derr := os.ReadDir(tmp)
+	require.NoError(t, derr)
+	require.Len(t, entries, 1, "nothing was claimed, moved, or removed besides the refusal itself")
+}
+
+// w36DestOpenFailFs fails the no-follow open of the destination while every
+// other call passes through — the wave-36 content-gate's hash-open wedge.
+type w36DestOpenFailFs struct {
+	afero.Fs
+	dest string
+	err  error
+}
+
+func (f *w36DestOpenFailFs) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
+	if name == f.dest && flag&os.O_WRONLY == 0 && flag&os.O_RDWR == 0 && flag&os.O_CREATE == 0 {
+		return nil, f.err
+	}
+	return f.Fs.OpenFile(name, flag, perm)
 }
 
 // The plain path: dest still names the published object — it is quarantined,
@@ -180,7 +309,11 @@ func TestRestoredDestQuarantineW35_SubstitutionBeforeMoveRefusesAndPreserves(t *
 
 	err = removeRestoredDestQuarantined(fs, dest, "w35 unit", restoredDestIdentityFrom(pubInfo))
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "is not the verified object")
+	var refused *BackupRemovalRefusedError
+	require.ErrorAs(t, err, &refused,
+		"typed proven-foreign refusal on every platform (the dev/inode vs metadata identity leg depends on whether the runner's filesystem reused the substituted inode)")
+	require.Contains(t, refused.Reason, "the verified object")
+	require.Contains(t, refused.Reason, "foreign bytes preserved")
 	got, rerr := os.ReadFile(dest)
 	require.NoError(t, rerr)
 	require.Equal(t, "foreign plant substituted before the move", string(got),

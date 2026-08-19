@@ -27,6 +27,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -216,8 +217,16 @@ func TestRemoveReplacementBackupW32_UnlinkTimeLegs(t *testing.T) {
 
 		err := quarantineAndRemoveVerifiedReplacementBackup(fs, backupOS, "w32 unit", nil, nil)
 		var refused *BackupRemovalRefusedError
-		require.ErrorAs(t, err, &refused)
-		require.Contains(t, refused.Reason, "dev/inode mismatch")
+		require.ErrorAs(t, err, &refused,
+			"both platform legs are the SAME refusal class — a proven-foreign answer at the unlink")
+		if runtime.GOOS == "windows" {
+			// The Windows Stat_t identity is unavailable (restoreSourceIdentity
+			// reports ok=false), so the dev/inode comparison never runs there;
+			// the scripted same-window substitution lands on the metadata leg.
+			require.Contains(t, refused.Reason, "metadata changed between the re-verify and the unlink")
+		} else {
+			require.Contains(t, refused.Reason, "dev/inode mismatch")
+		}
 		require.Equal(t, "old", string(mustRead2(t, base, backupOS)))
 		entries, derr := os.ReadDir(dir)
 		require.NoError(t, derr)

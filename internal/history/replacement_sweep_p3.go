@@ -336,9 +336,14 @@ func rearmPendingKind(rearmErr error) string {
 // ledger-enumerated rearm-refused retry converges without any file. Every
 // other failure class leaves the name's ownership live (attempt retained,
 // foreign plant restored back, or nothing moved at all) and keeps the
-// ordinary clean marker.
+// ordinary clean marker. Wave-36 (codex local review round 6, PR#215
+// finding F3): a FAILED wedge-compensation move-back
+// (errBackupQuarantineRestoreFailed, joined into the removal error chain)
+// takes the same rearm-refused routing — the journaled name is UNOWNED
+// there too (foreign-claimed while the verified bytes stayed recoverable at
+// the quarantine name), so no retry may stat/copy/remove it either.
 func pendingKindForRemovalError(rmErr error) string {
-	if errors.Is(rmErr, errReplacementBackupQuarantineVanished) {
+	if errors.Is(rmErr, errReplacementBackupQuarantineVanished) || errors.Is(rmErr, errBackupQuarantineRestoreFailed) {
 		return models.RestorePendingKindRearmRefused
 	}
 	return models.RestorePendingKindClean
@@ -1019,7 +1024,16 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 		// name and nothing is removed.
 		hold, rmErr := quarantineReplacementBackupForRemoval(s.fs, backup, "replacement sweep", nil, backupInfoBeforeCopy)
 		if rmErr == nil && !restoredDestStillOurs(s.fs, dest, restoredID) {
-			hold.restore()
+			if rerr := hold.restore(); rerr != nil {
+				// Wave-36 (codex local review round 6, PR#215 finding F3): the
+				// move-back failed — the backup name is unowned (a foreign claimant
+				// holds it or the publish wedged) while the verified bytes stay
+				// recoverable at the quarantine name. No journal entry survives to
+				// mark on this leg (consumed elsewhere), so the failure only surfaces:
+				// the foreign occupant and the quarantined bytes both stay intact.
+				logging.Warnf("replacement sweep %s: restored destination %s diverged after the backup was quarantined AND the verified move-back failed (%v) — the unowned backup name keeps its occupant, verified bytes recoverable at the quarantine name %s; nothing consumed, nothing removed", backup, dest, rerr, hold.quarantine)
+				return false
+			}
 			logging.Warnf("replacement sweep %s: restored destination %s diverged after the backup was quarantined (foreign swap or deletion inside the check-to-delete window) — backup restored to its journaled name, destination untouched", backup, dest)
 			return false
 		}
@@ -1054,7 +1068,24 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 	// place.
 	hold, rmErr := quarantineReplacementBackupForRemoval(s.fs, backup, "replacement sweep", journaledEntryFacts(row, backupSlash), backupInfoBeforeCopy)
 	if rmErr == nil && !restoredDestStillOurs(s.fs, dest, restoredID) {
-		hold.restore()
+		if rerr := hold.restore(); rerr != nil {
+			// Wave-36 (codex local review round 6, PR#215 finding F3): the
+			// move-back failed — the journaled name is unowned (a foreign
+			// claimant holds it or the publish wedged) while the verified bytes
+			// sit at the quarantine name. The entry must NOT stay armed against
+			// that name (a later leg would restore from or remove the foreign
+			// occupant): persist the rearm-refused restore-pending kind — the
+			// marker still certifies the destination carries the restored bytes
+			// and every retry runs journal-only. The quarantined bytes stay
+			// retained for manual recovery in every persist outcome.
+			s.rememberPendingRemovalKind(backupSlash, models.RestorePendingKindRearmRefused)
+			if markErr := s.persistRestorePendingMarkerKind(ctx, row.ID, backupSlash, models.RestorePendingKindRearmRefused); markErr != nil {
+				logging.Warnf("replacement sweep %s: restored destination %s diverged after the backup was quarantined, the verified move-back failed (%v), AND the rearm-refused marker could not be persisted (%v) — entry left armed, foreign name untouched, verified bytes recoverable at %s", backup, dest, rerr, markErr, hold.quarantine)
+			} else {
+				logging.Warnf("replacement sweep %s: restored destination %s diverged after the backup was quarantined and the verified move-back failed (%v) — entry marked restore-pending (rearm-refused), foreign name untouched, verified bytes recoverable at %s", backup, dest, rerr, hold.quarantine)
+			}
+			return false
+		}
 		logging.Warnf("replacement sweep %s: restored destination %s diverged after the backup was quarantined (foreign swap or deletion inside the check-to-delete window) — backup restored to its journaled name, journal entry left armed, destination untouched", backup, dest)
 		return false
 	}
@@ -1237,7 +1268,14 @@ func (s *ReplacementSweeper) retryPendingRemoval(ctx context.Context, rowID uint
 		hold, rmErr := quarantineReplacementBackupForRemoval(s.fs, backup, "replacement sweep", nil, nil)
 		if rmErr == nil {
 			if _, derr := lstatRestoreSource(s.fs, dest); derr != nil {
-				hold.restore()
+				if rerr := hold.restore(); rerr != nil {
+					// Wave-36 (codex local review round 6, PR#215 finding F3): the
+					// move-back failed and no durable entry survives on this legacy leg
+					// — the failure only surfaces: the unowned backup name keeps its
+					// occupant, the verified bytes stay at the quarantine name.
+					logging.Warnf("replacement sweep %s: pending cleanup kept — destination %s not present after the backup was quarantined (%v) AND the verified move-back failed (%v); the unowned backup name keeps its occupant, verified bytes recoverable at the quarantine name %s", backup, dest, derr, rerr, hold.quarantine)
+					return false
+				}
 				logging.Warnf("replacement sweep %s: pending cleanup kept — destination %s not present after the backup was quarantined (%v); backup restored to its journaled name", backup, dest, derr)
 				return false
 			}
@@ -1298,7 +1336,20 @@ func (s *ReplacementSweeper) retryPendingRemoval(ctx context.Context, rowID uint
 	hold, rmErr := quarantineReplacementBackupForRemoval(s.fs, backup, "replacement sweep", &durableEntry, backupInfo)
 	if rmErr == nil {
 		if _, derr := lstatRestoreSource(s.fs, dest); derr != nil {
-			hold.restore()
+			if rerr := hold.restore(); rerr != nil {
+				// Wave-36 (codex local review round 6, PR#215 finding F3): the
+				// move-back failed — the journaled name is unowned while the
+				// verified bytes stay recoverable at the quarantine name, so the
+				// durable pending entry upgrades to the rearm-refused kind
+				// (journal-only retry; no leg touches the foreign name again).
+				s.rememberPendingRemovalKind(backupSlash, models.RestorePendingKindRearmRefused)
+				if markErr := s.persistRestorePendingMarkerKind(ctx, rowID, backupSlash, models.RestorePendingKindRearmRefused); markErr != nil {
+					logging.Warnf("replacement sweep %s: pending cleanup kept — destination %s not present after the backup was quarantined (%v), the verified move-back failed (%v), AND the rearm-refused marker could not be persisted (%v); verified bytes recoverable at the quarantine name %s", backup, dest, derr, rerr, markErr, hold.quarantine)
+				} else {
+					logging.Warnf("replacement sweep %s: pending cleanup kept — destination %s not present after the backup was quarantined (%v) and the verified move-back failed (%v); entry upgraded to the rearm-refused pending kind, verified bytes recoverable at the quarantine name %s", backup, dest, derr, rerr, hold.quarantine)
+				}
+				return false
+			}
 			logging.Warnf("replacement sweep %s: pending cleanup kept — destination %s not present after the backup was quarantined (%v); backup restored to its journaled name", backup, dest, derr)
 			s.rememberPendingRemoval(backupSlash)
 			return false

@@ -56,7 +56,12 @@ type w33PlantOnScanFs struct {
 }
 
 func (f *w33PlantOnScanFs) Open(name string) (afero.File, error) {
-	if !f.done && name == f.scanDir {
+	// Compare through the sweep's own probe-aware destination key: the
+	// sweeper may open the directory under a different separator spelling
+	// than the fixture used (Windows journal spellings/deriving normalize
+	// through sweepSlash), and a literal byte comparison silently never
+	// fired the plant on the Windows runner (CI CI-4).
+	if !f.done && sweepSlash(name) == sweepSlash(f.scanDir) {
 		f.done = true
 		if err := afero.WriteFile(f.Fs, f.plant, f.contents, 0o644); err != nil {
 			return nil, err

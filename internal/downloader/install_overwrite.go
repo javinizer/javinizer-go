@@ -553,32 +553,75 @@ func moveIntoReservedBackup(fsys afero.Fs, src, dst string) error {
 	return fsys.Rename(src, dst)
 }
 
-func claimOverwriteBackupPath(fsys afero.Fs, destPath, opID string) (string, error) {
+// claimOverwriteBackupPath returns the reserved backup name AND the
+// reservation's own captured identity (the open handle's pre-close Stat).
+// Wave-36 (codex local review round 6, PR#215 finding F1): the claimed
+// placeholder was previously DROPPED after Close with nothing binding its
+// identity to the later dest→backup rename — a foreign writer could rename
+// the reservation away and plant its own object at the backup name, and the
+// replacing move then destroyed the occupant. The returned identity lets the
+// caller re-derive the reservation immediately before the move and climb to
+// a fresh name on any mismatch (overwriteBackupReservationStillOurs), never
+// touching the foreign occupant.
+func claimOverwriteBackupPath(fsys afero.Fs, destPath, opID string) (string, os.FileInfo, error) {
 	for attempt := 0; attempt < backupNameClaimTries; attempt++ {
 		candidate := overwriteBackupPath(destPath, opID)
 		if _, err := lstatBackupCandidate(fsys, candidate); err == nil {
 			continue
 		} else if !os.IsNotExist(err) {
-			return "", fmt.Errorf("inspect backup candidate %s: %w", candidate, err)
+			return "", nil, fmt.Errorf("inspect backup candidate %s: %w", candidate, err)
 		}
 		reservation, reserveErr := fsys.OpenFile(candidate, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 		switch {
 		case reserveErr == nil:
+			info, statErr := reservation.Stat()
+			if statErr != nil {
+				// A reservation whose identity cannot even be read is in an
+				// unknown on-disk state — drop it rather than renaming over
+				// unverified bytes.
+				_ = reservation.Close()
+				_ = fsys.Remove(candidate)
+				return "", nil, fmt.Errorf("stat backup reservation %s: %w", candidate, statErr)
+			}
 			if err := reservation.Close(); err != nil {
 				// A reservation whose close failed is in an unknown on-disk
 				// state — drop it rather than renaming over unverified bytes.
 				_ = fsys.Remove(candidate)
-				return "", fmt.Errorf("close backup reservation %s: %w", candidate, err)
+				return "", nil, fmt.Errorf("close backup reservation %s: %w", candidate, err)
 			}
-			return candidate, nil
+			return candidate, info, nil
 		case os.IsExist(reserveErr):
 			// A foreign claimant won the Lstat-to-OpenFile window; climb.
 			continue
 		default:
-			return "", fmt.Errorf("reserve backup candidate %s: %w", candidate, reserveErr)
+			return "", nil, fmt.Errorf("reserve backup candidate %s: %w", candidate, reserveErr)
 		}
 	}
-	return "", fmt.Errorf("backup names exhausted for %s after %d attempts", destPath, backupNameClaimTries)
+	return "", nil, fmt.Errorf("backup names exhausted for %s after %d attempts", destPath, backupNameClaimTries)
+}
+
+// overwriteBackupReservationStillOurs re-derives the O_EXCL reservation's
+// identity IMMEDIATELY BEFORE the dest→backup move (wave-36, finding F1):
+// the backup name must still address THE claimed placeholder — dev/inode
+// where the filesystem exposes them, plus size 0, mtime, and a regular
+// non-symlink shape on every platform. Any divergence means a foreign writer
+// owns the name now: the answer is the typed collision class
+// (fsutil.ErrPublishCollision), the occupant is never touched, and the
+// caller climbs to a fresh backup name.
+func overwriteBackupReservationStillOurs(fsys afero.Fs, backupPath string, claim os.FileInfo) error {
+	cur, err := lstatBackupCandidate(fsys, backupPath)
+	switch {
+	case err != nil:
+		return fmt.Errorf("inspect backup reservation %s before the move: %w", backupPath, err)
+	case cur == nil || cur.Mode()&os.ModeSymlink != 0 || !cur.Mode().IsRegular() || cur.Size() != 0 || !cur.ModTime().Equal(claim.ModTime()):
+		return fmt.Errorf("backup reservation %s no longer names the claimed empty placeholder (foreign reservation swap) — foreign bytes preserved: %w", backupPath, fsutil.ErrPublishCollision)
+	}
+	if claimDev, claimIno, claimOK := restoreSourceIdentity(claim); claimOK {
+		if curDev, curIno, curOK := restoreSourceIdentity(cur); curOK && (claimDev != curDev || claimIno != curIno) {
+			return fmt.Errorf("backup reservation %s no longer names the claimed placeholder (dev/inode mismatch) — foreign bytes preserved: %w", backupPath, fsutil.ErrPublishCollision)
+		}
+	}
+	return nil
 }
 
 // installOverwriting installs staged (already-downloaded) bytes onto
@@ -700,8 +743,30 @@ func (d *Downloader) installOverwriting(ctx context.Context, stagedPath, destPat
 	// confirm window below: it is visible to a CLI/startup sweep in another
 	// process, and its PID makes dead owners reclaimable instead of retaining
 	// crash leftovers forever.
-	backupPath, claimErr := claimOverwriteBackupPath(d.fs, destPath, ledger.opID)
-	if claimErr != nil {
+	// Wave-36 (codex local review round 6, PR#215 finding F1): the claimed
+	// reservation stays IDENTITY-BOUND through the handoff — immediately
+	// before the dest→backup move the name must still address THE claimed
+	// 0-byte placeholder (overwriteBackupReservationStillOurs). A foreign
+	// writer renaming the reservation away and planting its own occupant used
+	// to have its bytes silently displaced by the replacing rename; the swap
+	// now climbs to a fresh backup name exactly like a claim collision, and
+	// the foreign occupant is never touched.
+	var backupPath string
+	var claimErr error
+	for attempt := 0; attempt < backupNameClaimTries && backupPath == ""; attempt++ {
+		candidate, reservation, err := claimOverwriteBackupPath(d.fs, destPath, ledger.opID)
+		if err != nil {
+			claimErr = err
+			break
+		}
+		if verErr := overwriteBackupReservationStillOurs(d.fs, candidate, reservation); verErr != nil {
+			logging.Warnf("downloader: backup reservation for %s was displaced between claim and move (%v) — climbing to a fresh backup name; the foreign occupant is never touched", destPath, verErr)
+			claimErr = verErr
+			continue
+		}
+		backupPath = candidate
+	}
+	if backupPath == "" {
 		return false, true, fmt.Errorf("failed to claim backup path for %s: %w", destPath, claimErr)
 	}
 	if err := moveIntoReservedBackup(d.fs, destPath, backupPath); err != nil {

@@ -37,6 +37,8 @@ package history
 // absent destination is left untouched.
 
 import (
+	"crypto/sha256"
+	"io"
 	"os"
 
 	"github.com/spf13/afero"
@@ -50,11 +52,16 @@ import (
 // the ENOSYS deferred-times legs report lookup failures as typed refusals
 // the copy legs return as errors, so an indeterminate identity never flows
 // into this type on a real filesystem. The virtual legs keep the pre-wave-31
-// documented residual posture — the recheck is skipped rather than trusted
-// or refused on nothing.
+// documented residual posture for an identity-less recheck: skipped rather
+// than trusted or refused on nothing. Wave-36 (codex local review round 6,
+// PR#215 finding F2): every restore copy records the published bytes'
+// SHA-256, and identity-bearing legs (the real filesystems, where inode
+// reuse is meaningful) gain the content qualifier from it.
 type restoredDestIdentity struct {
-	known bool
-	info  os.FileInfo
+	known  bool
+	info   os.FileInfo
+	sum    [32]byte
+	hashed bool
 }
 
 // restoredDestIdentityFrom wraps fsutil.PublishStagedBoundInfo's answer: a
@@ -66,12 +73,54 @@ func restoredDestIdentityFrom(info os.FileInfo) restoredDestIdentity {
 	return restoredDestIdentity{known: true, info: info}
 }
 
+// restoredDestIdentityFromContent is restoredDestIdentityFrom plus the
+// published-bytes content digest (wave-36, codex local review round 6,
+// PR#215 finding F2): dev/inode can be REUSED by an unlink+recreate
+// substitute carrying the same size and a replayed mtime, so identity
+// metadata alone can bless a foreign object. The copy legs stream-hash the
+// restored payload as it lands (cheap — poster-sized files) and hand the
+// digest here, so the recheck and the wave-35 undo-quarantine can require
+// the current destination bytes to hash equal before any removal is armed —
+// on identity-bearing legs (pending legs never re-published and carry no
+// digest; the virtual-leg residual of known=false stands as documented).
+func restoredDestIdentityFromContent(info os.FileInfo, sum [32]byte) restoredDestIdentity {
+	id := restoredDestIdentityFrom(info)
+	id.hashed = true
+	id.sum = sum
+	return id
+}
+
+// hashRestoredDestContent streams the CURRENT occupant at dest through
+// SHA-256 under the same no-follow discipline the restore source open uses
+// (restoreOpenReplacementSource): a symlink swapped in mid-window is refused
+// by the platform open, never hashed. Any open/read failure makes the
+// content unverifiable — callers fail closed.
+func hashRestoredDestContent(fs afero.Fs, dest string) ([32]byte, error) {
+	src, err := restoreOpenReplacementSource(fs, dest)
+	if err != nil {
+		return [32]byte{}, err
+	}
+	defer func() { _ = src.Close() }()
+	h := sha256.New()
+	buf := make([]byte, 256*1024)
+	if _, err := io.CopyBuffer(h, src, buf); err != nil {
+		return [32]byte{}, err
+	}
+	var sum [32]byte
+	copy(sum[:], h.Sum(nil))
+	return sum, nil
+}
+
 // destStillNamesRestoredObject rechecks dest the no-follow way and requires
 // it to still name id's object: dev/inode when both sides expose it (the
 // os.SameFile comparison through restoreSourceIdentity), then size and mtime
 // on every platform. Absence, an indeterminate stat, a symlink or
-// non-regular occupant, and any fact mismatch all answer false. An unknown
-// identity skips the check (see the type comment).
+// non-regular occupant, and any fact mismatch all answer false. Wave-36
+// (finding F2): when the identity carries the published-bytes digest, the
+// occupant's CONTENT must hash equal too — sibling identity gates (the
+// restoredDestStillOurs recheck funnel) share this qualifier wherever the
+// restored bytes are known. A fully unknown identity skips the check (see
+// the type comment).
 func destStillNamesRestoredObject(fs afero.Fs, dest string, id restoredDestIdentity) bool {
 	if !id.known {
 		return true
@@ -85,7 +134,24 @@ func destStillNamesRestoredObject(fs afero.Fs, dest string, id restoredDestIdent
 			return false
 		}
 	}
-	return now.Size() == id.info.Size() && now.ModTime().Equal(id.info.ModTime())
+	if now.Size() != id.info.Size() || !now.ModTime().Equal(id.info.ModTime()) {
+		return false
+	}
+	// Wave-36 (finding F2): the content qualifier runs wherever BOTH the
+	// provable identity and the published bytes are known (the real-filesystem
+	// legs — the virtual/wrapper residual of the skip above stands, as
+	// documented at the wave-32 audit). An inode-reused substitute whose
+	// bytes differ is rejected; a substitute holding the EXACT published
+	// bytes with the same mtime is content-indistinguishable from the
+	// published object — answering true there is equivalent to answering for
+	// ours. An unreadable occupant fails closed.
+	if id.hashed {
+		cur, herr := hashRestoredDestContent(fs, dest)
+		if herr != nil || cur != id.sum {
+			return false
+		}
+	}
+	return true
 }
 
 // restoredDestStillOurs is the restore-window destination recheck behind a
