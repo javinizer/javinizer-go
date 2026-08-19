@@ -38,12 +38,19 @@ const (
 var backupOrdinal atomic.Uint64
 var restoreCopyOrdinal atomic.Uint64
 
+// restoreStagingOwnershipFn is the downloader rollback's ownership hand-off
+// seam, mirroring history's same-named discipline (restoreStagingOwnershipFn
+// in reverter_replacements_p3.go): production forwards to
+// fsutil.RestoreStagingOwnership; tests record/replay the exact mid-flow
+// instant between the staged copy and the wave-30 bound publish.
+var restoreStagingOwnershipFn = fsutil.RestoreStagingOwnership
+
 // copyBackupToDest restores the backup bytes onto dest WITHOUT consuming the
 // backup: staged adjacent write + replace-aware swap (Win-safe), streamed
 // through a bounded buffer. Used by the confirm-failure rollback so the
 // journal entry can never end up pointing at consumed bytes (codex P3 R9-1).
 func copyBackupToDest(fsys afero.Fs, backup, dest string) error {
-	return copyBackupToDestPublish(fsys, backup, dest, fsutil.ReplaceFile)
+	return copyBackupToDestPublish(fsys, backup, dest, fsutil.ReplaceFile, false)
 }
 
 // copyBackupToDestNoReplace is copyBackupToDest whose staged publish NEVER
@@ -52,10 +59,10 @@ func copyBackupToDest(fsys afero.Fs, backup, dest string) error {
 // object that claimed the name mid-window. A collision drops the staged copy
 // and returns the typed fsutil.ErrPublishCollision (see wave-15).
 func copyBackupToDestNoReplace(fsys afero.Fs, backup, dest string) error {
-	return copyBackupToDestPublish(fsys, backup, dest, fsutil.PublishNoReplace)
+	return copyBackupToDestPublish(fsys, backup, dest, fsutil.PublishNoReplace, true)
 }
 
-func copyBackupToDestPublish(fsys afero.Fs, backup, dest string, publish func(afero.Fs, string, string) error) error {
+func copyBackupToDestPublish(fsys afero.Fs, backup, dest string, publish func(afero.Fs, string, string) error, noReplace bool) error {
 	// Validate the path before opening it: Stat/Open would follow a hostile
 	// backup symlink and copy its target into the media directory.
 	sourceInfo, err := lstatRestoreSource(fsys, backup)
@@ -127,27 +134,47 @@ func copyBackupToDestPublish(fsys afero.Fs, backup, dest string, publish func(af
 	// remaining metadata leg runs THROUGH THE OPEN HANDLE before the publish —
 	// a directory writer renaming the staged name away mid-flow can no longer
 	// redirect chmod/times/chown through a planted link.
-	fsutil.RestoreStagingOwnership(fsys, dstFile, openedInfo)
-	// Publish-time identity proof: a swapped staged NAME must never be
-	// published by path — the planted object is foreign and stays untouched.
-	if vErr := fsutil.VerifyStagedIdentity(fsys, staged, dstFile); vErr != nil {
-		_ = dstFile.Close()
-		return fmt.Errorf("stage rollback identity: %w", vErr)
-	}
-	// CloseStaged lands the times THROUGH THE OPEN HANDLE on the real OsFs
-	// before closing (virtual filesystems take the post-close name-based leg;
-	// the path-based publish that follows requires a closed handle on Windows).
-	if err := fsutil.CloseStaged(fsys, staged, dstFile, openedInfo.ModTime(), openedInfo.ModTime(), true); err != nil {
-		_ = fsys.Remove(staged)
+	restoreStagingOwnershipFn(fsys, dstFile, openedInfo)
+	// wave-30 (codex P1, PR#215): the staging tail runs through
+	// fsutil.PublishStagedBound — history's restore/re-arm flows bind the
+	// staged identity ACROSS the publish through the same helper, so the
+	// verify/publish/re-verify discipline cannot drift between the three
+	// funnels. The wave-29 proof alone left a verify→publish window where a
+	// directory writer could plant a substitute that the path publish then
+	// installed at dest before the genuine backup was consumed; the bound
+	// helper holds the handle through the publish (POSIX) and re-verifies
+	// the landed destination, republishing from the handle after a proven
+	// substitution and refusing typed (backup retained) on exhaustion.
+	pubErr := fsutil.PublishStagedBound(fsutil.StagedPublish{
+		FS:          fsys,
+		Publish:     publish,
+		NoReplace:   noReplace,
+		Staged:      staged,
+		Handle:      dstFile,
+		Dest:        dest,
+		Atime:       openedInfo.ModTime(),
+		Mtime:       openedInfo.ModTime(),
+		ApplyTimes:  true,
+		Suffix:      ".dlrstr",
+		NextOrdinal: func() uint64 { return restoreCopyOrdinal.Add(1) },
+	})
+	if pubErr != nil {
 		var timesErr *fsutil.StagingTimesError
-		if errors.As(err, &timesErr) {
-			return fmt.Errorf("stage rollback times: %w", err)
+		switch {
+		case errors.Is(pubErr, fsutil.ErrPublishStagedVerify):
+			// Unproven staged name (possible foreign plant): never removed,
+			// handle already closed by the helper — wave-29 posture.
+			return fmt.Errorf("stage rollback identity: %w", pubErr)
+		case errors.As(pubErr, &timesErr):
+			_ = fsys.Remove(staged)
+			return fmt.Errorf("stage rollback times: %w", pubErr)
+		case errors.Is(pubErr, fsutil.ErrPublishStagedClose):
+			_ = fsys.Remove(staged)
+			return fmt.Errorf("close rollback: %w", pubErr)
+		default:
+			_ = fsys.Remove(staged)
+			return fmt.Errorf("swap rollback: %w", pubErr)
 		}
-		return fmt.Errorf("close rollback: %w", err)
-	}
-	if err := publish(fsys, staged, dest); err != nil {
-		_ = fsys.Remove(staged)
-		return fmt.Errorf("swap rollback: %w", err)
 	}
 	return nil
 }

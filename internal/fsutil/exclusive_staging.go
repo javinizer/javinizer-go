@@ -61,11 +61,17 @@ func stagedVirtualModePath(staged string) string { return filepath.Clean(staged)
 // RestoreStagingOwnership / VerifyStagedIdentity / CloseStaged so no
 // unverified path-based metadata operation ever touches the staged name
 // again.
+// wave-30 (codex P1, PR#215): the handle opens O_RDWR, not O_WRONLY —
+// PublishStagedBound's publish-with-reverify loop re-stages bytes FROM THE
+// OPEN HANDLE (seek 0 + copy into a fresh O_EXCL name) when a directory
+// writer swapped the staged name mid-publish, which a write-only descriptor
+// cannot serve. The wider mode grants nothing to the staged NAME: O_EXCL
+// still pins the inode, and the fd never escapes the staging flow.
 func CreateExclusiveStagingFile(fs afero.Fs, dest, suffix string, start uint64, mode os.FileMode) (string, afero.File, error) {
 	for attempt := uint64(0); attempt < exclusiveStagingAttempts; attempt++ {
 		ordinal := start + attempt
 		staged := dest + suffix + "." + strconv.FormatUint(ordinal, 16)
-		file, err := fs.OpenFile(staged, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
+		file, err := fs.OpenFile(staged, os.O_CREATE|os.O_EXCL|os.O_RDWR, mode)
 		if err == nil {
 			// The kernel narrows `mode` by the process umask at O_CREATE time
 			// (e.g. 0666 becomes 0644 under umask 0077) and nothing else

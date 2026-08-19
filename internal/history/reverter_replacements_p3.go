@@ -615,7 +615,7 @@ func restoreOSPath(p string) string {
 // Replace semantics are the reverter's: undo puts old bytes over whatever the
 // destination currently holds (a chained restore replaces the newer link).
 func copyRestoreBytes(fs afero.Fs, backup, dest string) error {
-	return copyRestoreBytesPublish(fs, backup, dest, fsutil.ReplaceFile)
+	return copyRestoreBytesPublish(fs, backup, dest, fsutil.ReplaceFile, false)
 }
 
 // copyRestoreBytesNoReplace is copyRestoreBytes whose staged publish NEVER
@@ -636,10 +636,10 @@ func copyRestoreBytes(fs afero.Fs, backup, dest string) error {
 // restore refuses rather than falling back to replacing semantics, the
 // backup stays retained, and the journal entry stays unconsumed.
 func copyRestoreBytesNoReplace(fs afero.Fs, backup, dest string) error {
-	return copyRestoreBytesPublish(fs, backup, dest, fsutil.PublishNoReplace)
+	return copyRestoreBytesPublish(fs, backup, dest, fsutil.PublishNoReplace, true)
 }
 
-func copyRestoreBytesPublish(fs afero.Fs, backup, dest string, publish func(afero.Fs, string, string) error) error {
+func copyRestoreBytesPublish(fs afero.Fs, backup, dest string, publish func(afero.Fs, string, string) error, noReplace bool) error {
 	// Journal spellings may carry the legacy `/` form on Windows: every OS call
 	// built on dest below (the .rstr staging name -> mode fix-up Chmod,
 	// Chtimes, and ReplaceFile's native MoveFileEx on the swap) sees the
@@ -723,30 +723,45 @@ func copyRestoreBytesPublish(fs afero.Fs, backup, dest string, publish func(afer
 	// the stored spelling inside the fsutil helpers (they have no symlink
 	// model).
 	restoreStagingOwnershipFn(fs, dstFile, openedInfo)
-	// wave-29 publish-time identity proof: the staged PATH must still name the
-	// inode the handle addresses before any path-based publish runs; on a
-	// mismatch the staged name is FOREIGN — drop the handle and fail WITHOUT
-	// removing or publishing the name (the caller's re-arm classification
-	// treats the name as unproven, i.e. rearm-refused).
-	if vErr := fsutil.VerifyStagedIdentity(fs, staged, dstFile); vErr != nil {
-		_ = dstFile.Close()
-		return fmt.Errorf("stage restore identity: %w", vErr)
-	}
-	// CloseStaged lands the times THROUGH THE OPEN HANDLE on the real OsFs
-	// before closing (virtual filesystems take the post-close name-based leg
-	// against the stored spelling; the path-based publish that follows
-	// requires a closed handle on Windows).
-	if err := fsutil.CloseStaged(fs, staged, dstFile, openedInfo.ModTime(), openedInfo.ModTime(), true); err != nil {
-		_ = fs.Remove(staged)
+	// wave-30 (codex P1, PR#215): the whole staging tail — identity proof,
+	// times, close, publish — runs through fsutil.PublishStagedBound, which
+	// binds the staged identity ACROSS the publish (hold-through-publish +
+	// post-publish reverify + bounded re-stage-from-handle loop on POSIX;
+	// prove-close-publish-reverify on Windows). The wave-29 proof alone left
+	// a verify→publish window in which a directory writer could rename the
+	// staged name away and plant a substitute that the path publish then
+	// installed at dest — genuine backup bytes were consumed afterwards. The
+	// caller-facing phase split below preserves every pre-wave-30 wrap text
+	// and cleanup posture: an unproven staged name is never removed; a
+	// proven-ours staged name is removed exactly where wave-29 removed it.
+	pubErr := fsutil.PublishStagedBound(fsutil.StagedPublish{
+		FS:          fs,
+		Publish:     publish,
+		NoReplace:   noReplace,
+		Staged:      staged,
+		Handle:      dstFile,
+		Dest:        dest,
+		Atime:       openedInfo.ModTime(),
+		Mtime:       openedInfo.ModTime(),
+		ApplyTimes:  true,
+		Suffix:      ".rstr",
+		NextOrdinal: func() uint64 { return restoreCopyNonce.Add(1) },
+	})
+	if pubErr != nil {
 		var timesErr *fsutil.StagingTimesError
-		if errors.As(err, &timesErr) {
-			return fmt.Errorf("stage restore times: %w", err)
+		switch {
+		case errors.Is(pubErr, fsutil.ErrPublishStagedVerify):
+			return fmt.Errorf("stage restore identity: %w", pubErr)
+		case errors.As(pubErr, &timesErr):
+			_ = fs.Remove(staged)
+			return fmt.Errorf("stage restore times: %w", pubErr)
+		case errors.Is(pubErr, fsutil.ErrPublishStagedClose):
+			_ = fs.Remove(staged)
+			return fmt.Errorf("stage restore close: %w", pubErr)
+		default:
+			_ = fs.Remove(staged)
+			return fmt.Errorf("swap staged restore: %w", pubErr)
 		}
-		return fmt.Errorf("stage restore close: %w", err)
-	}
-	if err := publish(fs, staged, dest); err != nil {
-		_ = fs.Remove(staged)
-		return fmt.Errorf("swap staged restore: %w", err)
 	}
 	return nil
 }
@@ -869,44 +884,61 @@ func copyRearmSourceBytes(fs afero.Fs, src io.Reader, backup string, info os.Fil
 		// helper (EPERM swallowed; windows no-op), same as the restore path.
 		restoreStagingOwnershipFn(fs, dstFile, info)
 	}
-	// wave-29 publish-time identity proof (fsutil.VerifyStagedIdentity): prove
-	// the staged name still addresses the handle's inode before publishing by
-	// path; on failure the staged name is FOREIGN and is left untouched.
-	if vErr := fsutil.VerifyStagedIdentity(fs, staged, dstFile); vErr != nil {
-		_ = dstFile.Close()
-		return fmt.Errorf("re-arm stage backup identity %s: %w", backup, vErr)
-	}
-	// CloseStaged closes the handle AND lands the times: THROUGH THE OPEN
-	// HANDLE on the real OsFs before closing (a Windows MoveFileEx publish
-	// cannot run on an open file, and POSIX no longer needs the descriptor
-	// afterwards), name-based post-close on virtual filesystems whose handles
-	// re-stamp ModTime at close. info == nil skips the times leg entirely.
+	// wave-30 (codex P1, PR#215): the staging tail runs through
+	// fsutil.PublishStagedBound (same bind as the restore path): the wave-29
+	// pre-publish proof alone left a verify→publish window where the staged
+	// name could be swapped for a plant that the no-replace publish then
+	// installed at the ABSENT backup name, while the caller consumed the
+	// journal as if the re-arm landed. The bound helper holds the handle
+	// through the publish and re-verifies afterwards (POSIX recovery loop).
+	// info == nil skips the times leg entirely (pre-wave-30 parity).
 	var atime, mtime time.Time
 	if info != nil {
 		atime, mtime = info.ModTime(), info.ModTime()
 	}
-	if err := fsutil.CloseStaged(fs, staged, dstFile, atime, mtime, info != nil); err != nil {
-		_ = fs.Remove(staged)
+	pubErr := fsutil.PublishStagedBound(fsutil.StagedPublish{
+		FS:          fs,
+		Publish:     func(fsys afero.Fs, src, dst string) error { return rearmPublishFn(fsys, src, dst) },
+		NoReplace:   true,
+		Staged:      staged,
+		Handle:      dstFile,
+		Dest:        backup,
+		Atime:       atime,
+		Mtime:       mtime,
+		ApplyTimes:  info != nil,
+		Suffix:      rearmStagingSuffix,
+		NextOrdinal: func() uint64 { return rearmCopyNonce.Add(1) },
+	})
+	if pubErr != nil {
+		// Wave-15 (codex P2): publish the staged re-arm with NO-REPLACE
+		// semantics. The original backup was REMOVED by the caller before
+		// this compensation ran, so the window between staging the copy and
+		// the publish is wide: a foreign writer claiming the backup name
+		// mid-window would be destroyed by a plain rename, destroying
+		// unrelated bytes with no ledger trace. The no-replace publish
+		// refuses an occupied backup name instead; callers disarm any re-arm
+		// failure into a restore-pending marker (kinds: rearm-refused unless
+		// the publish definitely completed — fsutil.PublishCompleted — the
+		// only post-publish signal left), so the collision surfaces through
+		// the typed fsutil.ErrPublishCollision class with the foreign bytes
+		// intact and the staged copy dropped. wave-30's identity break /
+		// exhaustion classes take the same unproven-name classification.
 		var timesErr *fsutil.StagingTimesError
-		if errors.As(err, &timesErr) {
-			return fmt.Errorf("re-arm stage backup times %s: %w", backup, err)
+		switch {
+		case errors.Is(pubErr, fsutil.ErrPublishStagedVerify):
+			// The staged name is unproven (foreign): left untouched, handle
+			// already closed by the helper — wave-29 posture.
+			return fmt.Errorf("re-arm stage backup identity %s: %w", backup, pubErr)
+		case errors.As(pubErr, &timesErr):
+			_ = fs.Remove(staged)
+			return fmt.Errorf("re-arm stage backup times %s: %w", backup, pubErr)
+		case errors.Is(pubErr, fsutil.ErrPublishStagedClose):
+			_ = fs.Remove(staged)
+			return fmt.Errorf("re-arm close backup %s: %w", backup, pubErr)
+		default:
+			_ = fs.Remove(staged)
+			return fmt.Errorf("re-arm install backup %s: %w", backup, pubErr)
 		}
-		return fmt.Errorf("re-arm close backup %s: %w", backup, err)
-	}
-	// Wave-15 (codex P2): publish the staged re-arm with NO-REPLACE semantics.
-	// The original backup was REMOVED by the caller before this compensation
-	// ran, so the window between staging the copy and this publish is wide: a
-	// foreign writer claiming the backup name mid-window would be destroyed by
-	// a plain rename, destroying unrelated bytes with no ledger trace. The
-	// no-replace publish refuses an occupied backup name instead; callers
-	// disarm any re-arm failure into a restore-pending marker (kinds:
-	// rearm-refused unless the publish definitely completed —
-	// fsutil.PublishCompleted — the only post-publish signal left), so the
-	// collision surfaces through the typed fsutil.ErrPublishCollision class
-	// with the foreign bytes intact and the staged copy dropped.
-	if err := rearmPublishFn(fs, staged, backup); err != nil {
-		_ = fs.Remove(staged)
-		return fmt.Errorf("re-arm install backup %s: %w", backup, err)
 	}
 	return nil
 }

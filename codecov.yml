@@ -39,6 +39,13 @@ ignore:
   # Windows hosts, so no coverage-upload job ever hits them either.
   - "internal/history/restore_source_nofollow_windows.go"
   - "internal/downloader/restore_source_nofollow_windows.go"
+  # //go:build windows leg of the wave-30 publish-with-reverify helper
+  # (PublishStagedBound): MoveFileEx cannot rename an open Go handle, so the
+  # Windows leg keeps a prove-close-publish-reverify posture that compiles
+  # only on Windows — no ubuntu coverage-upload job ever hits those lines.
+  # The shared interface + POSIX recovery legs ARE fully covered
+  # (publish_staged_bound.go / publish_staged_bound_unix.go).
+  - "internal/fsutil/publish_staged_bound_windows.go"
   # Desktop-only build-tagged file (//go:build desktop). The real Wails
   # runner pulls in per-platform webview headers and must not enter the
   # default build/test path; without this ignore, its new lines all count

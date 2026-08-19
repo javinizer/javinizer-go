@@ -34,26 +34,40 @@ var ErrStagedIdentityMismatch = errors.New("staged name no longer names the excl
 // model, and wrapper filesystems must observe path operations, never handle
 // syscalls. On a name lookup failure the publish is refused too: an
 // indeterminate staged name must never be treated as ours.
+//
+// wave-30 (codex P1, PR#215) note: the proof closes only the window UP TO
+// the publish call. PublishStagedBound reuses it (via stagedIdentityProof)
+// inside the verify/publish/re-verify loop that binds the identity ACROSS
+// the publish itself; direct callers acting on the staged name without that
+// loop keep this exported shape.
 func VerifyStagedIdentity(fs afero.Fs, staged string, fh afero.File) error {
+	_, err := stagedIdentityProof(fs, staged, fh)
+	return err
+}
+
+// stagedIdentityProof is VerifyStagedIdentity's shared core, additionally
+// returning the handle's FileInfo so the wave-30 publish loop can bind the
+// post-publish destination check (and any re-stage) to the SAME inode
+// snapshot without a second fstat: while the handle stays open the identity
+// it reports cannot change.
+func stagedIdentityProof(fs afero.Fs, staged string, fh afero.File) (os.FileInfo, error) {
 	if _, ok := osStagingHandle(fs, fh); !ok {
-		return nil
+		return nil, nil
 	}
 	handleInfo, err := fh.Stat()
 	if err != nil {
-		return fmt.Errorf("staged identity proof for %s: %w", staged, err)
+		return nil, fmt.Errorf("staged identity proof for %s: %w", staged, err)
 	}
-	var nameInfo os.FileInfo
-	var lerr error
-	if ls, ok := fs.(afero.Lstater); ok {
-		nameInfo, _, lerr = ls.LstatIfPossible(staged)
-	} else {
-		nameInfo, lerr = fs.Stat(staged)
-	}
+	// The gate above already proved fs is the real *afero.OsFs (the only
+	// Filesystem carrying a native *os.File handle), so the staged NAME is
+	// looked up with os.Lstat directly — OsFs's Lstat wrapper — never
+	// following a planted link.
+	nameInfo, lerr := os.Lstat(staged)
 	if lerr != nil {
-		return fmt.Errorf("staged identity proof for %s: %w", staged, lerr)
+		return nil, fmt.Errorf("staged identity proof for %s: %w", staged, lerr)
 	}
 	if !os.SameFile(handleInfo, nameInfo) {
-		return fmt.Errorf("%w: %s", ErrStagedIdentityMismatch, staged)
+		return nil, fmt.Errorf("%w: %s", ErrStagedIdentityMismatch, staged)
 	}
-	return nil
+	return handleInfo, nil
 }
