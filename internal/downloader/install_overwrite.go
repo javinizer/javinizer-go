@@ -751,7 +751,18 @@ func (d *Downloader) installOverwriting(ctx context.Context, stagedPath, destPat
 	// to have its bytes silently displaced by the replacing rename; the swap
 	// now climbs to a fresh backup name exactly like a claim collision, and
 	// the foreign occupant is never touched.
+	//
+	// Wave-37 (codex P2, PR#215): the handoff itself is ATOMIC where the
+	// platform offers the primitive — renameat2(RENAME_EXCHANGE) on
+	// Linux/OsFs (backup_handoff_linux.go) swaps the dest and reservation
+	// dentries with no window for a plant, then unlinks the exchange-parked
+	// placeholder only after re-proving dest still names the claim — and
+	// IDENTITY-BOUND everywhere else (handoffViaVerifiedRename re-derives the
+	// reservation at syscall adjacency and binds the failure cleanup to the
+	// claimed placeholder), so neither the overwrite nor the cleanup-unlink
+	// can ever name a foreign occupant on POSIX or Windows.
 	var backupPath string
+	var backupClaim os.FileInfo
 	var claimErr error
 	for attempt := 0; attempt < backupNameClaimTries && backupPath == ""; attempt++ {
 		candidate, reservation, err := claimOverwriteBackupPath(d.fs, destPath, ledger.opID)
@@ -765,14 +776,12 @@ func (d *Downloader) installOverwriting(ctx context.Context, stagedPath, destPat
 			continue
 		}
 		backupPath = candidate
+		backupClaim = reservation
 	}
 	if backupPath == "" {
 		return false, true, fmt.Errorf("failed to claim backup path for %s: %w", destPath, claimErr)
 	}
-	if err := moveIntoReservedBackup(d.fs, destPath, backupPath); err != nil {
-		// The failed handoff left our 0-byte reservation in place — release it
-		// so a retry never has to climb past (or worse, journal) a placeholder.
-		_ = d.fs.Remove(backupPath)
+	if err := handoffToReservedBackup(d.fs, destPath, backupPath, backupClaim); err != nil {
 		return false, true, fmt.Errorf("failed to set aside existing bytes for %s: %w", destPath, err)
 	}
 	// Wave-25 (codex P3 PR#215 finding 2): stamp the journal entry with the
