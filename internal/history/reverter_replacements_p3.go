@@ -467,10 +467,39 @@ func (r *Reverter) consumeReplacementEntry(ctx context.Context, op *models.Batch
 // first; if it succeeds its entries are consumed and the older op proceeds,
 // and if it fails the entries remain visible and the older op is rejected.
 
+// reverterSweepTimeout bounds the reverter's pre-revert targeted sweep
+// (codex P2, PR#215 #discussion_r3808360868): the CLI's wave-8 pre-sweep
+// already ran under its own 30s cap, but the IMMEDIATELY following
+// RevertBatch/RevertScrape drove this sweep with the caller's UNBOUNDED ctx,
+// so one stalled network filesystem hung the whole revert right after the
+// bounded pre-sweep passed. Package-level (not const) so tests can shrink it.
+var reverterSweepTimeout = 30 * time.Second
+
+// reverterSweepDestinations is the targeted-sweep invocation seam:
+// production wires the concrete sweeper method; tests substitute
+// capture/blocking doubles to force the deadline and error legs
+// deterministically (a wedged afero.ReadDir that never observes its context
+// cannot be staged otherwise).
+var reverterSweepDestinations = func(ctx context.Context, sweeper *ReplacementSweeper, dests []string) (int, error) {
+	return sweeper.SweepDestinations(ctx, dests)
+}
+
 // sweepJournaledDestinations runs the pre-revert targeted sweep over every
 // destination journaled by the operations about to revert: crash-window
 // restores land before the rejection/restore checks read destination state.
 // Best-effort — a sweeper failure never blocks the revert path.
+//
+// The sweep runs under the wave-8 bounded discipline (the same shape the
+// CLI's runPreRevertReplacementSweep uses): SweepDestinations observes its
+// context only BETWEEN directory scans — a stalled network filesystem blocks
+// forever INSIDE afero.ReadDir where no context check can reach it — so the
+// sweep runs in a goroutine behind a derived deadline and the caller selects
+// on it. A sweep that outlives the budget is abandoned mid-flight: its
+// goroutine stays parked on the wedged ReadDir until the filesystem answers
+// (one goroutine per stuck revert — the accepted, bounded-leak tradeoff so
+// the revert itself never wedges). The overrun is logged and the revert
+// proceeds either way. On fast filesystems the sweep still completes fully
+// before the revert reads destination state: external behavior is unchanged.
 func (r *Reverter) sweepJournaledDestinations(ctx context.Context, ops []models.BatchFileOperation) {
 	if r.sweeper == nil {
 		return
@@ -488,9 +517,28 @@ func (r *Reverter) sweepJournaledDestinations(ctx context.Context, ops []models.
 	if len(dests) == 0 {
 		return
 	}
-	if _, err := r.sweeper.SweepDestinations(ctx, dests); err != nil {
-		logging.Warnf("pre-revert replacement sweep failed: %v (continuing with revert)", err)
+
+	sweepCtx, cancel := context.WithTimeout(ctx, reverterSweepTimeout)
+	// Buffered so an abandoned sweep (deadline leg below) never parks on the
+	// send after the caller has moved on.
+	sweep := reverterSweepDestinations
+	done := make(chan error, 1)
+	go func() {
+		_, err := sweep(sweepCtx, r.sweeper, dests)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		// Happy path: the sweep answered inside its budget.
+		if err != nil {
+			logging.Warnf("pre-revert replacement sweep failed: %v (continuing with revert)", err)
+		}
+	case <-sweepCtx.Done():
+		logging.Warnf("pre-revert replacement sweep over %d destination(s) exceeded %s budget; continuing with revert", len(dests), reverterSweepTimeout)
 	}
+	// Called on EVERY path: the happy path releases the timer immediately; on
+	// the deadline leg the context is already spent and cancel is a no-op.
+	cancel()
 }
 
 // checkDestBlocking applies the newcomer/interleave rule against the LIVE

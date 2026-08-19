@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"time"
 
 	"github.com/spf13/afero"
@@ -96,6 +97,17 @@ var publishStagedBoundRestream = func(src afero.File, dst io.Writer) error {
 	_, err := io.Copy(dst, src)
 	return err
 }
+
+// publishStagedBoundDestLstat is the post-publish destination lookup, exposed
+// as a package-level seam (same discipline as stagedHandleChtimes /
+// publishStagedBoundRestream): production wiring is os.Lstat — the os gating
+// callers already proved the real OsFs, and Lstat never follows a plant —
+// while tests replay the INDETERMINATE-lookup leg through it. No portable
+// setup denies a directory lookup deterministically for BOTH uid 0 and an
+// ordinary user, and codecov/CI may run as root: chmod-based denial (the
+// pre-wave-24 test shape) silently succeeds for root and left this leg
+// uncovered offline and the test failing on root CI hosts.
+var publishStagedBoundDestLstat = os.Lstat
 
 // StagedPublish carries one PublishStagedBound invocation. It subsumes the
 // pre-wave-30 staging tail (identity proof, times landing, handle close,

@@ -7,7 +7,19 @@ import (
 	"fmt"
 	"os"
 	"syscall"
+	"time"
+
+	"github.com/spf13/afero"
 )
+
+// publishStagedBoundDeferredChtimes is the ENOSYS-platform deferred times leg
+// (fd-scoped wrappers missing, staging_times_unixother.go): a Chtimes on the
+// PUBLISHED destination name. Seam discipline like stagedHandleChtimes: no
+// portable setup fails utimens on a just-published name for BOTH uid 0 and
+// an ordinary user, so the failure leg is replayed here.
+var publishStagedBoundDeferredChtimes = func(fs afero.Fs, name string, atime, mtime time.Time) error {
+	return fs.Chtimes(name, atime, mtime)
+}
 
 // publishStagedBoundOS is PublishStagedBound's POSIX leg: the staged handle
 // stays OPEN through the path publish (rename/hard-link publishes never
@@ -67,9 +79,10 @@ func publishStagedBoundOS(p StagedPublish) error {
 		}
 		// Post-publish reverify. The handle still names our inode regardless
 		// of any directory-level renaming, so only the destination side is
-		// looked up by name — os.Lstat directly: this leg only runs under the
-		// osStagingHandle gate, i.e. the real OsFs (Lstat, never follows).
-		destInfo, lerr := os.Lstat(p.Dest)
+		// looked up by name — through the Lstat seam (production: os.Lstat;
+		// this leg only runs under the osStagingHandle gate, i.e. the real
+		// OsFs, and Lstat never follows).
+		destInfo, lerr := publishStagedBoundDestLstat(p.Dest)
 		switch {
 		case lerr == nil && os.SameFile(handleInfo, destInfo):
 			// The publish provably landed OUR inode at dest. Times deferred
@@ -77,7 +90,7 @@ func publishStagedBoundOS(p StagedPublish) error {
 			// then closes — a post-publish close error cannot undo the
 			// proven install and is deliberately not surfaced.
 			if pendingTimes {
-				if cerr := p.FS.Chtimes(p.Dest, p.Atime, p.Mtime); cerr != nil {
+				if cerr := publishStagedBoundDeferredChtimes(p.FS, p.Dest, p.Atime, p.Mtime); cerr != nil {
 					_ = fh.Close()
 					return &StagingTimesError{Staged: p.Dest, Err: cerr}
 				}

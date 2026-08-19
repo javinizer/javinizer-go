@@ -52,8 +52,9 @@ func publishStagedBoundOS(p StagedPublish) error {
 		return pubErr
 	}
 	// The osStagingHandle gate above already proved the real OsFs — look the
-	// destination up by name with os.Lstat directly (never follows a plant).
-	destInfo, lerr := os.Lstat(p.Dest)
+	// destination up by name through the Lstat seam (production: os.Lstat,
+	// never follows a plant).
+	destInfo, lerr := publishStagedBoundDestLstat(p.Dest)
 	switch {
 	case lerr == nil && os.SameFile(handleInfo, destInfo):
 		return nil

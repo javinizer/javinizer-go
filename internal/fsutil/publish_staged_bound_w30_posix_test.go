@@ -230,36 +230,45 @@ func TestPublishStagedBoundW30POSIX_DestVanishedAfterPublish(t *testing.T) {
 }
 
 // An indeterminate post-publish destination lookup refuses typed WITHOUT
-// removing anything (nothing is proven about the name).
+// removing anything (nothing is proven about the name). The denial is
+// replayed through the publishStagedBoundDestLstat seam (wave-24 fix,
+// codex PR#215): the pre-wave-24 test denied the directory with chmod 000,
+// which silently SUCCEEDS for uid 0 — on root CI hosts the lookup answered,
+// the refusal leg never ran, and the test failed/left the leg uncovered.
+// The seam fires deterministically under root and non-root alike.
 func TestPublishStagedBoundW30POSIX_ReverifyIndeterminateRefuses(t *testing.T) {
 	fs := afero.NewOsFs()
 	dir := t.TempDir()
 	dest := filepath.Join(dir, "poster.jpg")
 	staged, fh := w30Stage(t, fs, dest, ".rstr", 0o640)
 
-	wedge := func(f afero.Fs, src, dst string) error {
-		if err := PublishNoReplace(f, src, dst); err != nil {
-			return err
+	lookupDenied := errors.New("post-publish destination lookup indeterminate")
+	prevLookup := publishStagedBoundDestLstat
+	publishStagedBoundDestLstat = func(name string) (os.FileInfo, error) {
+		if name == dest {
+			// The racer made the destination state unprovable between the
+			// publish and the reverify.
+			return nil, lookupDenied
 		}
-		// The racer denies the directory between publish and reverify so the
-		// destination state cannot be established at all.
-		require.NoError(t, os.Chmod(dir, 0o000))
-		return nil
+		return prevLookup(name)
 	}
-	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+	t.Cleanup(func() { publishStagedBoundDestLstat = prevLookup })
 
 	err := PublishStagedBound(StagedPublish{
-		FS: fs, Publish: wedge, NoReplace: true,
+		FS: fs, Publish: PublishNoReplace, NoReplace: true,
 		Staged: staged, Handle: fh, Dest: dest,
 		Suffix: ".rstr", NextOrdinal: w30Ordinal(4),
 	})
 	require.ErrorIs(t, err, ErrPublishStagedIdentityBreak)
+	require.ErrorIs(t, err, lookupDenied, "the lookup failure stays unwrap-reachable")
 	require.NotErrorIs(t, err, ErrPublishStagedExhausted)
-	require.NoError(t, os.Chmod(dir, 0o755))
 	got, rerr := os.ReadFile(dest)
 	require.NoError(t, rerr)
 	require.Equal(t, "genuine staged bytes", string(got),
-		"the genuine publish landed — the refusal only withholds the proof; nothing foreign was planted")
+		"the genuine publish landed — the refusal only withholds the proof; nothing foreign was planted and nothing was removed")
+	_, lerr := os.Lstat(staged)
+	require.ErrorIs(t, lerr, os.ErrNotExist,
+		"the publish consumed the staged name before the lookup turned indeterminate — the refusal removes nothing else")
 }
 
 // ENOSYS from the fd times seam defers the times onto the PUBLISHED name

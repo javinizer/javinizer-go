@@ -1,0 +1,343 @@
+package fsutil
+
+// POSTER-WRITE-HARDENING codex PR#215 wave-24 (P2) — destination keys must
+// fold Unicode NORMALIZATION on normalization-insensitive roots: APFS/HFS+
+// address one file by its NFC and NFD spellings alike, so a journaled NFD
+// spelling and a queried NFC spelling must derive ONE key — two buckets for
+// one physical file corrupts sequence reuse and destination-conflict checks
+// (the same class wave-20's final-sigma collapse fixed for CASE). The probe
+// mirrors the case probe: write an NFD-form temp name, stat its NFC spelling
+// (success = insensitive), cache per root, fail closed on error. Folding is
+// NFC canonicalization IN ADDITION to the wave-21 per-rune ToUpper, applied
+// ToUpper-first-then-NFC so the finished key is always canonical.
+
+import (
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"unicode"
+
+	"github.com/stretchr/testify/require"
+	"golang.org/x/text/unicode/norm"
+)
+
+// w24SetNormProbe forces the normalization-probe posture and resets the
+// per-root cache around it (mirrors w13SetProbe for the case probe).
+func w24SetNormProbe(t *testing.T, probe caseSensitivityProbe) {
+	t.Helper()
+	previous := NormalizationProbe
+	NormalizationProbe = probe
+	ResetNormalizationCache()
+	t.Cleanup(func() {
+		NormalizationProbe = previous
+		ResetNormalizationCache()
+	})
+}
+
+func w24ForceInsensitiveCase(t *testing.T) {
+	t.Helper()
+	w13SetProbe(t, func(string) (bool, error) { return false, nil })
+}
+
+// The finding itself: under a positive insensitivity determination the NFC
+// and NFD spellings of one name collapse onto ONE key; case folding keeps
+// composing with it (mixed-case NFD ≡ precomposed-uppercase NFC).
+func TestDestKeyW24_NFCAndNFDFoldTogetherOnlyUnderInsensitiveNorm(t *testing.T) {
+	w24ForceInsensitiveCase(t)
+	w24SetNormProbe(t, func(string) (bool, error) { return true, nil })
+	root := t.TempDir()
+
+	nfc := filepath.Join(root, "caf\u00e9.jpg")  // U+00E9 precomposed
+	nfd := filepath.Join(root, "cafe\u0301.jpg") // e + U+0301 combining acute
+	require.NotEqual(t, nfc, nfd, "fixture spellings must differ byte-wise")
+	require.Equal(t, DestKeyForRoot(root, nfc), DestKeyForRoot(root, nfd),
+		"the two spellings of one file share ONE key on a normalization-insensitive root")
+
+	// Case + normalization compose: mixed-case NFD equals precomposed-upper NFC.
+	mixedNFD := filepath.Join(root, "Cafe\u0301.jpg")
+	upperNFC := filepath.Join(root, "CAF\u00c9.JPG")
+	require.Equal(t, DestKeyForRoot(root, upperNFC), DestKeyForRoot(root, mixedNFD),
+		"ToUpper + NFC compose — case and normalization folds stack")
+
+	// DestKey (root derived from the path) resolves the same probe root.
+	require.Equal(t, DestKey(nfd), DestKeyForRoot(root, nfc),
+		"the implicit-root form lands in the same probe-root bucket")
+}
+
+// Conservative postures: a sensitive determination OR a probe error keeps the
+// byte-distinct spellings on DISTINCT keys — folding on a guess would alias
+// files that coexist on the volume.
+func TestDestKeyW24_NFCAndNFDStayDistinctUnderSensitiveNormAndProbeError(t *testing.T) {
+	w24ForceInsensitiveCase(t)
+	root := t.TempDir()
+	nfc := filepath.Join(root, "caf\u00e9.jpg")
+	nfd := filepath.Join(root, "cafe\u0301.jpg")
+
+	w24SetNormProbe(t, func(string) (bool, error) { return false, nil })
+	require.False(t, IsNormalizationInsensitiveRoot(root))
+	require.NotEqual(t, DestKeyForRoot(root, nfc), DestKeyForRoot(root, nfd),
+		"normalization-sensitive root: spellings stay byte-distinct")
+
+	probeErr := errors.New("w24 normalization probe undecidable")
+	w24SetNormProbe(t, func(string) (bool, error) { return true, probeErr })
+	require.False(t, IsNormalizationInsensitiveRoot(root),
+		"a probe error is undecidable — conservative no-fold posture")
+	require.NotEqual(t, DestKeyForRoot(root, nfc), DestKeyForRoot(root, nfd),
+		"probe failure never folds normalization on a guess")
+}
+
+// Case-sensitive roots still fold normalization ALONE: the fold is gated on
+// the normalization probe, independent of the case posture.
+func TestDestKeyW24_NormalizationFoldsIndependentlyOfCasePosture(t *testing.T) {
+	w13SetProbe(t, func(string) (bool, error) { return true, nil }) // case-SENSITIVE
+	w24SetNormProbe(t, func(string) (bool, error) { return true, nil })
+	root := t.TempDir()
+
+	require.Equal(t,
+		DestKeyForRoot(root, filepath.Join(root, "caf\u00e9.jpg")),
+		DestKeyForRoot(root, filepath.Join(root, "cafe\u0301.jpg")),
+		"case-sensitive but normalization-insensitive: spellings fold without case folding")
+	require.NotEqual(t,
+		DestKeyForRoot(root, filepath.Join(root, "Caf\u00e9.jpg")),
+		DestKeyForRoot(root, filepath.Join(root, "caf\u00e9.jpg")),
+		"case distinctions survive on the case-sensitive leg")
+
+	// Both sensitive: nothing folds at all.
+	w24SetNormProbe(t, func(string) (bool, error) { return false, nil })
+	require.NotEqual(t,
+		DestKeyForRoot(root, filepath.Join(root, "caf\u00e9.jpg")),
+		DestKeyForRoot(root, filepath.Join(root, "cafe\u0301.jpg")),
+		"normalization-sensitive roots never fold normalization")
+}
+
+// Ordering pin: the fold runs per-rune ToUpper FIRST and NFC canonical
+// composition LAST. A combining sequence that becomes composable only AFTER
+// the uppercase mapping (LATIN SMALL LETTER LONG S + COMBINING DOT ABOVE →
+// S + dot → Ṡ) must land on the precomposed spelling's key — an
+// NFC-first-then-ToUpper ordering would leave the key permanently
+// DECOMPOSED and split the bucket.
+func TestDestKeyW24_ToUpperRunsBeforeNFCCanonicalization(t *testing.T) {
+	w24ForceInsensitiveCase(t)
+	w24SetNormProbe(t, func(string) (bool, error) { return true, nil })
+	root := t.TempDir()
+
+	longS := filepath.Join(root, "\u017f\u0307.jpg") // U+017F + U+0307
+	precomposed := filepath.Join(root, "\u1e60.jpg") // U+1E60, S WITH DOT ABOVE
+
+	k1, k2 := DestKeyForRoot(root, longS), DestKeyForRoot(root, precomposed)
+	require.Equal(t, k1, k2,
+		"ToUpper(\u017f+dot) → S+dot → NFC composes it onto the precomposed Ṡ key")
+
+	// Shape pin against the reference pipeline: per-rune ToUpper, then NFC.
+	expected := norm.NFC.String(strings.Map(unicode.ToUpper, normalizeDestPath(longS)))
+	require.Equal(t, filepath.ToSlash(expected), filepath.ToSlash(k1),
+		"the fold is exactly strings.Map(unicode.ToUpper, …) followed by norm.NFC")
+	require.Equal(t, filepath.ToSlash(expected), filepath.ToSlash(k2))
+}
+
+// The nil-probe seam is the forced-insensitive test posture (mirrors
+// CaseSensitiveProbe): result is folded without any filesystem access.
+func TestIsNormalizationInsensitiveRootW24_NilProbeForcesInsensitive(t *testing.T) {
+	w24SetNormProbe(t, nil)
+	require.True(t, IsNormalizationInsensitiveRoot(t.TempDir()),
+		"nil probe seam = deliberate forced-insensitive posture")
+}
+
+// Probe results publish once per root: a cached posture is not re-probed.
+func TestIsNormalizationInsensitiveRootW24_ResultCachedPerRoot(t *testing.T) {
+	root := t.TempDir()
+	var calls atomic.Int32
+	w24SetNormProbe(t, func(string) (bool, error) { calls.Add(1); return true, nil })
+
+	require.True(t, IsNormalizationInsensitiveRoot(root))
+	require.True(t, IsNormalizationInsensitiveRoot(root))
+	require.Equal(t, int32(1), calls.Load(), "one probe per root per process")
+}
+
+// Racing first probes on one root converge on a single published posture:
+// the speculative loser adopts the cached entry (the double-checked leg).
+func TestIsNormalizationInsensitiveRootW24_ConcurrentFirstProbesPublishOnePosture(t *testing.T) {
+	root := t.TempDir()
+	var entered atomic.Int32
+	bothEntered := make(chan struct{})
+	w24SetNormProbe(t, func(string) (bool, error) {
+		if entered.Add(1) == 2 {
+			close(bothEntered)
+		}
+		<-bothEntered
+		return true, nil
+	})
+
+	var wg sync.WaitGroup
+	results := make([]bool, 2)
+	for i := range results {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			results[i] = IsNormalizationInsensitiveRoot(root)
+		}(i)
+	}
+	wg.Wait()
+	require.Equal(t, int32(2), entered.Load(), "both first-time callers probed exactly once")
+	require.True(t, results[0])
+	require.True(t, results[1], "racing probes converge on one posture")
+	require.True(t, IsNormalizationInsensitiveRoot(root),
+		"the published posture is adopted from cache afterwards")
+	require.Equal(t, int32(2), entered.Load(), "a cached root is not re-probed after publication")
+}
+
+// Probe leg suite, injected ops (mirrors the wave-21 case-probe suite): the
+// create/stat/remove choreography is host-independent and deterministic.
+func TestProbeNormalizationInsensitiveW24_StatSuccessMeansInsensitive(t *testing.T) {
+	root := t.TempDir()
+	var opened, removed []string
+	ops := caseProbeOps{
+		openFile: func(name string, flag int, perm os.FileMode) (caseProbeFile, error) {
+			opened = append(opened, name)
+			return os.OpenFile(name, flag, perm)
+		},
+		stat: func(string) (os.FileInfo, error) { return nil, nil },
+		readDir: func(string) ([]os.DirEntry, error) {
+			t.Fatal("normalization evidence comes from the stat alone")
+			return nil, nil
+		},
+		remove: func(name string) error {
+			removed = append(removed, name)
+			return os.Remove(name)
+		},
+	}
+
+	got, err := probeNormalizationInsensitive(ops, root)
+	require.NoError(t, err)
+	require.True(t, got, "NFC visible for the NFD-created probe = insensitive")
+	require.Len(t, opened, 1)
+	require.Equal(t, opened, removed, "cleanup removes exactly the created probe name")
+	require.Contains(t, opened[0], "_a\u0308", "the probe name is created in NFD form")
+}
+
+func TestProbeNormalizationInsensitiveW24_ENOENTMeansSensitive(t *testing.T) {
+	root := t.TempDir()
+	ops := caseProbeOps{
+		openFile: func(name string, flag int, perm os.FileMode) (caseProbeFile, error) {
+			return os.OpenFile(name, flag, perm)
+		},
+		stat:    func(string) (os.FileInfo, error) { return nil, os.ErrNotExist },
+		readDir: func(string) ([]os.DirEntry, error) { t.Fatal("unused"); return nil, nil },
+		remove:  os.Remove,
+	}
+	got, err := probeNormalizationInsensitive(ops, root)
+	require.NoError(t, err)
+	require.False(t, got, "byte-distinct normalization forms = sensitive, no error")
+	entries, rdErr := os.ReadDir(root)
+	require.NoError(t, rdErr)
+	require.Empty(t, entries, "the probe cleans up after itself on every verdict")
+}
+
+func TestProbeNormalizationInsensitiveW24_IndeterminateStatFailsClosed(t *testing.T) {
+	statErr := errors.New("w24 indeterminate stat")
+	removed := 0
+	ops := caseProbeOps{
+		openFile: func(name string, flag int, perm os.FileMode) (caseProbeFile, error) {
+			return os.OpenFile(name, flag, perm)
+		},
+		stat:    func(string) (os.FileInfo, error) { return nil, statErr },
+		readDir: func(string) ([]os.DirEntry, error) { t.Fatal("unused"); return nil, nil },
+		remove: func(name string) error {
+			removed++
+			return os.Remove(name)
+		},
+	}
+	got, err := probeNormalizationInsensitive(ops, t.TempDir())
+	require.ErrorIs(t, err, statErr)
+	require.False(t, got)
+	require.Equal(t, 1, removed, "the created probe is removed on the indeterminate leg")
+}
+
+func TestProbeNormalizationInsensitiveW24_OpenErrorPropagates(t *testing.T) {
+	openErr := errors.New("w24 open failure")
+	ops := caseProbeOps{
+		openFile: func(string, int, os.FileMode) (caseProbeFile, error) { return nil, openErr },
+		stat:     func(string) (os.FileInfo, error) { t.Fatal("unused"); return nil, nil },
+		readDir:  func(string) ([]os.DirEntry, error) { t.Fatal("unused"); return nil, nil },
+		remove:   func(string) error { t.Fatal("nothing created"); return nil },
+	}
+	got, err := probeNormalizationInsensitive(ops, t.TempDir())
+	require.ErrorIs(t, err, openErr)
+	require.False(t, got)
+}
+
+func TestProbeNormalizationInsensitiveW24_CollisionRetriesWithFreshName(t *testing.T) {
+	root := t.TempDir()
+	var opened []string
+	ops := caseProbeOps{
+		openFile: func(name string, flag int, perm os.FileMode) (caseProbeFile, error) {
+			opened = append(opened, name)
+			if len(opened) == 1 {
+				return nil, os.ErrExist
+			}
+			return os.OpenFile(name, flag, perm)
+		},
+		stat:    func(string) (os.FileInfo, error) { return nil, os.ErrNotExist },
+		readDir: func(string) ([]os.DirEntry, error) { t.Fatal("unused"); return nil, nil },
+		remove:  os.Remove,
+	}
+	got, err := probeNormalizationInsensitive(ops, root)
+	require.NoError(t, err)
+	require.False(t, got)
+	require.Len(t, opened, 2)
+	require.NotEqual(t, opened[0], opened[1], "EEXIST retry draws a fresh process-unique name")
+}
+
+type w24CloseErrProbeFile struct{ err error }
+
+func (f w24CloseErrProbeFile) Close() error { return f.err }
+
+func TestProbeNormalizationInsensitiveW24_CloseErrorPropagates(t *testing.T) {
+	closeErr := errors.New("w24 close failure")
+	removed := 0
+	ops := caseProbeOps{
+		openFile: func(string, int, os.FileMode) (caseProbeFile, error) { return w24CloseErrProbeFile{closeErr}, nil },
+		stat:     func(string) (os.FileInfo, error) { t.Fatal("unused"); return nil, nil },
+		readDir:  func(string) ([]os.DirEntry, error) { t.Fatal("unused"); return nil, nil },
+		remove:   func(string) error { removed++; return nil },
+	}
+	got, err := probeNormalizationInsensitive(ops, t.TempDir())
+	require.ErrorIs(t, err, closeErr)
+	require.False(t, got)
+	require.Equal(t, 1, removed, "cleanup still removes the created name when close fails")
+}
+
+func TestProbeNormalizationInsensitiveW24_CleanupErrorPropagates(t *testing.T) {
+	removeErr := errors.New("w24 remove failure")
+	ops := caseProbeOps{
+		openFile: func(name string, flag int, perm os.FileMode) (caseProbeFile, error) {
+			return os.OpenFile(name, flag, perm)
+		},
+		stat:    func(string) (os.FileInfo, error) { return nil, os.ErrNotExist },
+		readDir: func(string) ([]os.DirEntry, error) { t.Fatal("unused"); return nil, nil },
+		remove:  func(string) error { return removeErr },
+	}
+	got, err := probeNormalizationInsensitive(ops, t.TempDir())
+	require.ErrorIs(t, err, removeErr)
+	require.False(t, got)
+}
+
+// Host observation contract: wherever the suite runs, the REAL probe agrees
+// with a manual NFD-create/NFC-stat experiment against the same root.
+func TestIsNormalizationInsensitiveRootW24_RealProbeMatchesObservation(t *testing.T) {
+	ResetNormalizationCache()
+	t.Cleanup(ResetNormalizationCache)
+	root := t.TempDir()
+
+	nfd := filepath.Join(root, "w24observe_a\u0308.jpg")
+	require.NoError(t, os.WriteFile(nfd, []byte("x"), 0o600))
+	_, statErr := os.Lstat(filepath.Join(root, "w24observe_\u00e4.jpg"))
+	expected := statErr == nil
+
+	require.Equal(t, expected, IsNormalizationInsensitiveRoot(root),
+		"the probe verdict tracks the filesystem's observable alias behavior")
+}

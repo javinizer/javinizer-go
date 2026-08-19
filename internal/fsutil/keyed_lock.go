@@ -15,6 +15,8 @@ import (
 	"sync/atomic"
 	"time"
 	"unicode"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 // KeyedLockRegistry provides per-key mutexes with reference-counted eviction
@@ -138,7 +140,12 @@ func IsCaseSensitiveRoot(root string) bool {
 // Case is folded only after a positive insensitivity determination;
 // undecidable (probe-failed) and case-sensitive roots retain the spelling so
 // distinct files such as Poster.jpg and poster.jpg do not share a journal
-// bucket.
+// bucket. Unicode NORMALIZATION is folded (NFC) only after a positive
+// normalization-insensitivity determination for the root: on APFS/HFS+ the
+// filesystem itself aliases the NFC/NFD spellings of one name, so the two
+// spellings of one journaled file must share one key; on
+// normalization-sensitive roots (ext4 and friends) both spellings may
+// coexist as separate files and must keep separate buckets.
 // Whitespace is NEVER folded under either case posture: it is part of the
 // filename, and trimming it would alias byte-distinct files into one bucket.
 func DestKey(p string) string {
@@ -174,14 +181,149 @@ func destKeyInsensitive(s string) string {
 
 // DestKeyForRoot is DestKey with an explicit destination root. The explicit
 // form is useful to callers that already know the media-library root. The
-// case-SENSITIVE leg stays byte-identical (normalizeDestPath only); the
-// insensitive leg maps through destKeyInsensitive.
+// case-SENSITIVE leg stays byte-identical (normalizeDestPath only) unless
+// the root is also normalization-insensitive, in which case the spelling is
+// NFC-canonicalized; the insensitive leg maps through destKeyInsensitive and
+// THEN NFC — per-rune uppercase first, canonical composition last — so the
+// finished key is always in NFC form when normalization folds apply (e.g. a
+// name combining only post-uppercase, like the long-s + dot-above sequence,
+// lands on the same key as its precomposed spelling).
 func DestKeyForRoot(root, p string) string {
 	s := normalizeDestPath(p)
+	normInsensitive := IsNormalizationInsensitiveRoot(root)
 	if IsCaseSensitiveRoot(root) {
+		if normInsensitive {
+			return norm.NFC.String(s)
+		}
 		return s
 	}
-	return destKeyInsensitive(s)
+	s = destKeyInsensitive(s)
+	if normInsensitive {
+		s = norm.NFC.String(s)
+	}
+	return s
+}
+
+// NormalizationProbe is the process-wide Unicode-normalization probe seam,
+// mirroring CaseSensitiveProbe. A probe error is undecidable, so
+// IsNormalizationInsensitiveRoot keeps normalization distinctions for that
+// root (conservative no-fold posture) rather than aliasing byte-distinct
+// NFD/NFC files on a guess; a nil probe seam is a deliberate test posture
+// for forced-insensitive folding and keeps the folded result.
+var NormalizationProbe caseSensitivityProbe = defaultNormalizationInsensitiveProbe
+
+var (
+	normalizationCacheMu sync.Mutex
+	normalizationCache   = make(map[string]bool)
+)
+
+// ResetNormalizationCache clears the per-root normalization-probe cache. It
+// is primarily a test seam; production callers retain the
+// one-probe-per-root lifetime.
+func ResetNormalizationCache() {
+	normalizationCacheMu.Lock()
+	normalizationCache = make(map[string]bool)
+	normalizationCacheMu.Unlock()
+}
+
+// IsNormalizationInsensitiveRoot reports the cached normalization behavior
+// for root: TRUE only when the probe positively established that creating a
+// name in NFD form is later addressable by its NFC spelling (APFS/HFS+
+// filename comparison). The caching pattern mirrors IsCaseSensitiveRoot —
+// one probe per root, zero mutex-held IO, racing first probes converging on
+// the single published posture.
+func IsNormalizationInsensitiveRoot(root string) bool {
+	root = cleanProbeRoot(root)
+	normalizationCacheMu.Lock()
+	if result, ok := normalizationCache[root]; ok {
+		normalizationCacheMu.Unlock()
+		return result
+	}
+	normalizationCacheMu.Unlock()
+
+	probe := NormalizationProbe
+	result := false
+	if probe == nil {
+		// Explicit test posture, not a probe failure (see seam doc).
+		result = true
+	} else if probed, err := probe(root); err != nil {
+		// Undecided root: preserve normalization distinctions; only a
+		// positive insensitivity determination may fold.
+		result = false
+	} else {
+		result = probed
+	}
+
+	normalizationCacheMu.Lock()
+	defer normalizationCacheMu.Unlock()
+	if cached, ok := normalizationCache[root]; ok {
+		// A parallel first probe published meanwhile: adopt the authoritative
+		// entry rather than racing in a divergent posture.
+		return cached
+	}
+	normalizationCache[root] = result
+	return result
+}
+
+// normProbeName returns the process-unique NFD probe name: the tail carries
+// a canonically DECOMPOSED ä (a + COMBINING DIAERESIS) so the created name
+// and its NFC spelling differ byte-wise while addressing one file on a
+// normalization-insensitive volume.
+func normProbeName() string {
+	return ".javinizer_norm_probe_" + caseProbeToken() + "_a\u0308"
+}
+
+// defaultNormalizationInsensitiveProbe writes one process-unique NFD-form
+// name and stats its NFC spelling: stat success proves the filesystem
+// aliases the two normalization forms of one name (insensitive); a clean
+// ENOENT proves the forms stay byte-distinct (sensitive). The O_EXCL
+// collision retry, fail-closed error legs, and create-path-only cleanup all
+// mirror the case probe (probeCaseSensitive).
+func defaultNormalizationInsensitiveProbe(root string) (bool, error) {
+	return probeNormalizationInsensitive(osCaseProbeOps, root)
+}
+
+func probeNormalizationInsensitive(ops caseProbeOps, root string) (bool, error) {
+	for attempt := 0; ; attempt++ {
+		name := normProbeName()
+		path := filepath.Join(root, name)
+		file, err := ops.openFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		if err != nil {
+			if errors.Is(err, os.ErrExist) && attempt+1 < caseProbeMaxAttempts {
+				continue
+			}
+			return false, err
+		}
+		// The NFC spelling may belong to the user and is never a cleanup
+		// target; only the exact NFD path this probe created is removed.
+		alternatePath := filepath.Join(root, norm.NFC.String(name))
+		cleanup := func() error {
+			if err := ops.remove(path); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+			return nil
+		}
+		if err := file.Close(); err != nil {
+			_ = cleanup()
+			return false, err
+		}
+
+		insensitive := false
+		if _, statErr := ops.stat(alternatePath); statErr == nil {
+			// The NFC spelling addresses the NFD-created probe: the FS
+			// normalizes names on comparison.
+			insensitive = true
+		} else if !os.IsNotExist(statErr) {
+			// Indeterminate lookup: undecidable posture, fail closed.
+			_ = cleanup()
+			return false, statErr
+		}
+		// A clean ENOENT keeps insensitive=false: byte-distinct forms.
+		if err := cleanup(); err != nil {
+			return false, err
+		}
+		return insensitive, nil
+	}
 }
 
 func normalizeDestPath(p string) string {
