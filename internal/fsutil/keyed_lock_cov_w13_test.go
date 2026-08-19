@@ -84,36 +84,51 @@ func TestIsCaseSensitiveRootW13_SlowProbeDoesNotSerializeOtherRoots(t *testing.T
 	}
 }
 
-// Racing FIRST acquisitions on one root: each caller probes at most once, no
-// deadlock, and the speculative-cache revalidation publishes exactly one
-// posture that both callers adopt.
+// Racing FIRST acquisitions on one root (wave-25 single-flight): exactly ONE
+// filesystem probe runs; the racing callers share the in-flight probe's
+// outcome, and the definitive publish is adopted from cache afterwards.
 func TestIsCaseSensitiveRootW13_ConcurrentFirstProbesPublishOnePosture(t *testing.T) {
 	root := t.TempDir()
 	var entered atomic.Int32
-	bothEntered := make(chan struct{})
+	probeInFlight := make(chan struct{})
+	releaseProbe := make(chan struct{})
 	w13SetProbe(t, func(string) (bool, error) {
-		if entered.Add(1) == 2 {
-			close(bothEntered)
+		if entered.Add(1) == 1 {
+			close(probeInFlight)
 		}
-		<-bothEntered
+		<-releaseProbe
 		return true, nil
 	})
 
 	var wg sync.WaitGroup
-	results := make([]bool, 2)
-	for i := range results {
+	results := make([]bool, 3)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		results[0] = IsCaseSensitiveRoot(root)
+	}()
+	require.Eventually(t, func() bool { return entered.Load() == 1 },
+		2*time.Second, time.Millisecond, "the racing flight leader must be probing")
+	// Racers arriving while the leader's probe is in flight JOIN it rather
+	// than issuing probes of their own.
+	for i := 1; i < 3; i++ {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
 			results[i] = IsCaseSensitiveRoot(root)
 		}(i)
 	}
+	// Give the joiners a scheduling beat to reach the flight wait.
+	require.Never(t, func() bool { return entered.Load() != 1 },
+		200*time.Millisecond, time.Millisecond, "no second probe while the first is in flight")
+	close(releaseProbe)
 	wg.Wait()
-	require.Equal(t, int32(2), entered.Load(),
-		"both first-time callers probed in parallel (no mutex serialization), exactly once each")
+	require.Equal(t, int32(1), entered.Load(),
+		"three racing first-time callers share ONE probe (single-flight)")
 	require.True(t, results[0])
-	require.True(t, results[1], "racing probes converge on one posture")
+	require.True(t, results[1])
+	require.True(t, results[2], "flight sharers converge on the leader's posture")
 	require.True(t, IsCaseSensitiveRoot(root),
-		"the loser of the speculative publish adopts the cached entry instead of re-probing")
-	require.Equal(t, int32(2), entered.Load(), "a cached root is not re-probed after publication")
+		"the definitive outcome is adopted from cache afterwards")
+	require.Equal(t, int32(1), entered.Load(), "a cached root is not re-probed after publication")
 }

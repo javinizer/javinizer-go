@@ -65,42 +65,63 @@ var CaseSensitiveProbe caseSensitivityProbe = defaultCaseSensitiveProbe
 
 const caseProbeMaxAttempts = 8
 
+// probeFlight is the single-flight slot for one root's in-flight probe
+// (wave-25, codex P3 PR#215): concurrent first-time derivations for one root
+// share ONE filesystem probe — a slow probe serializes only its own root's
+// first derivation, never other roots, and never the whole process. The
+// runner publishes ONLY a definitive outcome to the cache; a probe ERROR is
+// delivered to every sharer uncached so the next derivation retries (an
+// error is undecidable, not a cached posture). done is closed under the
+// cache mutex after result is set, so sharers observe a complete write.
+type probeFlight struct {
+	done   chan struct{}
+	result bool
+}
+
 var (
-	caseSensitivityCacheMu sync.Mutex
-	caseSensitivityCache   = make(map[string]bool)
-	caseProbeOrdinal       atomic.Uint64
+	caseSensitivityCacheMu  sync.Mutex
+	caseSensitivityCache    = make(map[string]bool)
+	caseSensitivityInflight = make(map[string]*probeFlight)
+	caseProbeOrdinal        atomic.Uint64
 	// caseProbeRandReader is a seam for entropy failure tests. The production
 	// source is cryptographically random, so probe names do not expose any
 	// path or user data.
 	caseProbeRandReader io.Reader = cryptorand.Reader
 )
 
-// ResetCaseSensitivityCache clears the process cache. It is primarily a test
-// seam; production callers should retain the one-probe-per-root lifetime.
+// ResetCaseSensitivityCache clears the process cache and any recorded
+// in-flight slots. It is primarily a test seam; production callers should
+// retain the one-probe-per-root lifetime. Waiters that already joined a
+// flight before the reset still receive that flight's own result.
 func ResetCaseSensitivityCache() {
 	caseSensitivityCacheMu.Lock()
 	caseSensitivityCache = make(map[string]bool)
+	caseSensitivityInflight = make(map[string]*probeFlight)
 	caseSensitivityCacheMu.Unlock()
 }
 
 // IsCaseSensitiveRoot reports the cached case behavior for root.
 //
-// One probe, zero mutex-held IO (codex P2): the filesystem probe runs WITHOUT
-// the cache mutex — holding it across the create/stat/remove probe serialized
-// every destination-key derivation process-wide behind one root's slow IO.
-// Concurrent first-time queries for one root may therefore probe in parallel
-// (still exactly one probe per call); the revalidation under the mutex
-// publishes a single entry, and a caller whose speculative result loses the
-// race adopts the published posture so all callers converge.
+// One probe per root per process, zero mutex-held IO, single-flight (wave-25,
+// codex P3 PR#215): concurrent first-time derivations for one root share the
+// ONE in-flight probe through probeFlight instead of probing in parallel —
+// and, crucially, a probe ERROR is never cached. Caching a transient probe
+// failure (unwritable root, a raced cleanup, a momentary IO fault) as a
+// permanent "sensitive" posture would split destination keys forever:
+// spellings that address ONE file would land in different journal buckets, so
+// cross-chain sequence reuse and conflict checks would miss them. The caller
+// that observed the error returns the conservative case-preserving posture
+// to its sharers WITHOUT publishing; the very next derivation re-probes.
+// A nil probe seam remains the deliberate forced-insensitive test posture
+// (a definitive outcome — cached), never an error.
 //
 // Case folding requires a POSITIVE insensitivity determination (codex P2):
-//   - a probe ERROR (unwritable root, transient IO) leaves the case decision
-//     undecided, so the root is treated as case-PRESERVING — folding on a
-//     guess could alias byte-distinct files (Poster.jpg vs poster.jpg) on what
-//     is actually a case-sensitive volume, while preserved distinctions only
-//     ever cost an extra (safe) bucket;
-//   - a nil probe seam is not a failure but a deliberate test posture for
-//     forced-insensitive matching, and keeps the folded result.
+//   - a probe ERROR leaves the case decision undecided, so THIS derivation
+//     treats the root as case-PRESERVING — folding on a guess could alias
+//     byte-distinct files (Poster.jpg vs poster.jpg) on what is actually a
+//     case-sensitive volume, while preserved distinctions only ever cost an
+//     extra (safe) bucket — and the NEXT derivation retries the probe instead
+//     of inheriting the transient failure.
 func IsCaseSensitiveRoot(root string) bool {
 	root = cleanProbeRoot(root)
 	caseSensitivityCacheMu.Lock()
@@ -108,29 +129,49 @@ func IsCaseSensitiveRoot(root string) bool {
 		caseSensitivityCacheMu.Unlock()
 		return result
 	}
+	if flight, ok := caseSensitivityInflight[root]; ok {
+		// Single-flight: another caller is probing this root right now — share
+		// its outcome instead of issuing a second filesystem probe.
+		caseSensitivityCacheMu.Unlock()
+		<-flight.done
+		return flight.result
+	}
+	flight := &probeFlight{done: make(chan struct{})}
+	caseSensitivityInflight[root] = flight
 	caseSensitivityCacheMu.Unlock()
 
 	probe := CaseSensitiveProbe
 	result := false
+	definitive := false
 	if probe == nil {
 		// Explicit test posture, not a probe failure (see doc comment).
 		result = false
+		definitive = true
 	} else if probed, err := probe(root); err != nil {
-		// Undecided root: preserve case distinctions; only a positive
-		// insensitivity determination may fold.
+		// Undecided root: preserve case distinctions WITHOUT caching; only a
+		// positive insensitivity determination may fold, and only a definitive
+		// outcome may publish.
 		result = true
 	} else {
 		result = probed
+		definitive = true
 	}
 
 	caseSensitivityCacheMu.Lock()
 	defer caseSensitivityCacheMu.Unlock()
-	if cached, ok := caseSensitivityCache[root]; ok {
-		// A parallel first probe published meanwhile: adopt the authoritative
-		// entry rather than racing in a divergent posture.
-		return cached
+	if definitive {
+		if _, ok := caseSensitivityCache[root]; !ok {
+			caseSensitivityCache[root] = result
+		}
 	}
-	caseSensitivityCache[root] = result
+	// Publish the flight result to every sharer after the cache decision so a
+	// definitive outcome is visible before they continue; drop only OUR slot
+	// (a Reset-affected slot never collides with a later flight's).
+	if caseSensitivityInflight[root] == flight {
+		delete(caseSensitivityInflight, root)
+	}
+	flight.result = result
+	close(flight.done)
 	return result
 }
 
@@ -213,16 +254,18 @@ func DestKeyForRoot(root, p string) string {
 var NormalizationProbe caseSensitivityProbe = defaultNormalizationInsensitiveProbe
 
 var (
-	normalizationCacheMu sync.Mutex
-	normalizationCache   = make(map[string]bool)
+	normalizationCacheMu  sync.Mutex
+	normalizationCache    = make(map[string]bool)
+	normalizationInflight = make(map[string]*probeFlight)
 )
 
-// ResetNormalizationCache clears the per-root normalization-probe cache. It
-// is primarily a test seam; production callers retain the
-// one-probe-per-root lifetime.
+// ResetNormalizationCache clears the per-root normalization-probe cache and
+// any recorded in-flight slots. It is primarily a test seam; production
+// callers retain the one-probe-per-root lifetime.
 func ResetNormalizationCache() {
 	normalizationCacheMu.Lock()
 	normalizationCache = make(map[string]bool)
+	normalizationInflight = make(map[string]*probeFlight)
 	normalizationCacheMu.Unlock()
 }
 
@@ -230,8 +273,12 @@ func ResetNormalizationCache() {
 // for root: TRUE only when the probe positively established that creating a
 // name in NFD form is later addressable by its NFC spelling (APFS/HFS+
 // filename comparison). The caching pattern mirrors IsCaseSensitiveRoot —
-// one probe per root, zero mutex-held IO, racing first probes converging on
-// the single published posture.
+// one probe per root per process, zero mutex-held IO, single-flight sharing
+// of the in-flight probe, and NO cached error outcomes (wave-25, codex P3
+// PR#215): a transient probe failure returns the conservative no-fold
+// posture to its sharers and leaves the cache EMPTY so the next derivation
+// retries, while the nil probe seam stays the deliberate forced-insensitive
+// test posture (definitive — cached).
 func IsNormalizationInsensitiveRoot(root string) bool {
 	root = cleanProbeRoot(root)
 	normalizationCacheMu.Lock()
@@ -239,29 +286,44 @@ func IsNormalizationInsensitiveRoot(root string) bool {
 		normalizationCacheMu.Unlock()
 		return result
 	}
+	if flight, ok := normalizationInflight[root]; ok {
+		// Single-flight: share the in-flight probe's outcome.
+		normalizationCacheMu.Unlock()
+		<-flight.done
+		return flight.result
+	}
+	flight := &probeFlight{done: make(chan struct{})}
+	normalizationInflight[root] = flight
 	normalizationCacheMu.Unlock()
 
 	probe := NormalizationProbe
 	result := false
+	definitive := false
 	if probe == nil {
 		// Explicit test posture, not a probe failure (see seam doc).
 		result = true
+		definitive = true
 	} else if probed, err := probe(root); err != nil {
-		// Undecided root: preserve normalization distinctions; only a
-		// positive insensitivity determination may fold.
+		// Undecided root: preserve normalization distinctions WITHOUT caching;
+		// only a positive insensitivity determination may fold.
 		result = false
 	} else {
 		result = probed
+		definitive = true
 	}
 
 	normalizationCacheMu.Lock()
 	defer normalizationCacheMu.Unlock()
-	if cached, ok := normalizationCache[root]; ok {
-		// A parallel first probe published meanwhile: adopt the authoritative
-		// entry rather than racing in a divergent posture.
-		return cached
+	if definitive {
+		if _, ok := normalizationCache[root]; !ok {
+			normalizationCache[root] = result
+		}
 	}
-	normalizationCache[root] = result
+	if normalizationInflight[root] == flight {
+		delete(normalizationInflight, root)
+	}
+	flight.result = result
+	close(flight.done)
 	return result
 }
 

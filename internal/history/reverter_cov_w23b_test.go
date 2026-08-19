@@ -66,7 +66,8 @@ func TestRevertW23B_SerializesOperationAndRunsPrimaryOnce(t *testing.T) {
 	require.ErrorIs(t, errs[1], ErrBatchAlreadyReverted)
 	require.Nil(t, results[1])
 	require.Equal(t, 1, fs.primaryMoveCount())
-	require.Equal(t, 2, fs.backupOpenCount(), "the winner opens each backup once")
+	require.Equal(t, 4, fs.backupOpenCount(),
+		"the winner opens each backup exactly twice: the no-follow restore read + the wave-25 pre-unlink identity verify open")
 
 	for _, dest := range dests {
 		rowBytes, err := afero.ReadFile(base, dest)
@@ -148,8 +149,10 @@ func TestRestoreReplacementJournalW23B_SkipsConsumedSnapshotEntry(t *testing.T) 
 	require.NoError(t, err)
 	require.False(t, restored[firstDest], "consumed-and-restored entry must not be restored twice")
 	require.True(t, restored[secondDest])
-	require.Equal(t, 1, fs.openCount(secondBackup))
-	require.Equal(t, 0, fs.openCount(firstBackup))
+	require.Equal(t, 2, fs.openCount(secondBackup),
+		"restore read + the wave-25 pre-unlink identity verify open")
+	require.Equal(t, 0, fs.openCount(firstBackup),
+		"the consumed entry is never even verified for removal")
 	require.Equal(t, "old-poster", string(mustRead2(t, base, firstDest)))
 	require.Equal(t, "old-fanart", string(mustRead2(t, base, secondDest)))
 

@@ -58,7 +58,7 @@ func TestDestKey_CaseProbeCacheAndConditionalFolding(t *testing.T) {
 		"insensitive roots preserve folded matching")
 }
 
-func TestIsCaseSensitiveRoot_ProbeFailureAndNilFallbackAreCached(t *testing.T) {
+func TestIsCaseSensitiveRoot_ProbeFailureRetriesAndNilFallbackCaches(t *testing.T) {
 	previous := CaseSensitiveProbe
 	t.Cleanup(func() {
 		CaseSensitiveProbe = previous
@@ -77,8 +77,23 @@ func TestIsCaseSensitiveRoot_ProbeFailureAndNilFallbackAreCached(t *testing.T) {
 	// conservative posture preserves case distinctions instead of folding on a
 	// guess; folding requires a positive insensitivity determination.
 	require.True(t, IsCaseSensitiveRoot(root), "probe failure preserves case distinctions")
-	require.True(t, IsCaseSensitiveRoot(root), "the conservative posture is cached")
-	require.Equal(t, 1, calls, "probe failure is cached as case-preserving without a second probe")
+	// Wave-25 (codex P3 PR#215): the error outcome is NOT cached — caching a
+	// transient probe failure would permanently split keys for spellings that
+	// address ONE file. Every derivation while the root stays broken probes
+	// anew, and the very next one after recovery folds correctly.
+	require.True(t, IsCaseSensitiveRoot(root), "an uncached failure keeps the conservative posture per call")
+	require.Equal(t, 2, calls, "probe failure is not cached — the second derivation re-probes")
+
+	upper := filepath.Join(root, "A", "x.jpg")
+	lower := filepath.Join(root, "a", "x.jpg")
+	require.NotEqual(t, DestKeyForRoot(root, upper), DestKeyForRoot(root, lower),
+		"first-probe-error keeps spellings distinct only while the root stays undecidable")
+	CaseSensitiveProbe = func(string) (bool, error) { calls++; return false, nil }
+	require.False(t, IsCaseSensitiveRoot(root), "the retried probe folds after the transient failure clears")
+	require.Equal(t, DestKeyForRoot(root, upper), DestKeyForRoot(root, lower),
+		"first-probe-error → second derivation re-probes and folds correctly afterward")
+	require.False(t, IsCaseSensitiveRoot(root), "the recovered definitive outcome IS cached")
+	require.Equal(t, 5, calls, "every undecidable derivation re-probed (two direct + one per DestKeyForRoot); the recovered definitive publish is then served from cache")
 
 	CaseSensitiveProbe = nil
 	ResetCaseSensitivityCache()

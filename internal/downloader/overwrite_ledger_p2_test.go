@@ -43,7 +43,7 @@ type pendingRecord struct {
 	kind         string
 }
 
-func (l *armedTestLedger) RecordReplacement(_ context.Context, _, replacedPath, backupPath string) error {
+func (l *armedTestLedger) RecordReplacement(_ context.Context, _, replacedPath, backupPath string, _ ...models.ReplacementBackupFacts) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.records = append(l.records, replacementRecord{replacedPath, backupPath})
@@ -161,7 +161,7 @@ func TestDownloader_OverwriteWithoutOperationRecord_IsSkippedWithWarning(t *test
 // unchanged), surface the error, and leave no staged temp.
 type failingTestLedger struct{ err error }
 
-func (l *failingTestLedger) RecordReplacement(context.Context, string, string, string) error {
+func (l *failingTestLedger) RecordReplacement(context.Context, string, string, string, ...models.ReplacementBackupFacts) error {
 	return l.err
 }
 

@@ -3,6 +3,8 @@ package downloader
 import (
 	"context"
 	"strings"
+
+	"github.com/javinizer/javinizer-go/internal/models"
 )
 
 // ReplacementRecorder is owned by the downloader and implemented by the
@@ -13,7 +15,12 @@ type ReplacementRecorder interface {
 	// RecordReplacement persists the (replaced → backup) mapping for opID.
 	// It runs AFTER the backup has been renamed aside and BEFORE the new
 	// bytes install — a failure must keep the downloader from replacing.
-	RecordReplacement(ctx context.Context, opID, replacedPath, backupPath string) error
+	// Wave-25 (codex P3 PR#215): the optional trailing facts stamp the
+	// set-aside backup's identity (size + mtime seconds) into the journaled
+	// entry so history's removal gate can bind later unlinks to the OWNED
+	// object rather than to the pathname alone; a missing/failed capture
+	// leaves the entry unstamped (legacy removal posture).
+	RecordReplacement(ctx context.Context, opID, replacedPath, backupPath string, backupFacts ...models.ReplacementBackupFacts) error
 	// ConfirmReplacement flips the entry to installed AFTER the new bytes
 	// landed — distinguishing "install never completed" (crash window) from
 	// "media deleted afterwards" for the sweeper (P3 R4-3).

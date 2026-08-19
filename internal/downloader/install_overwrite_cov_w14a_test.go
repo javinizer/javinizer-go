@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/fsutil"
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 )
@@ -16,7 +17,7 @@ type w14ABusyObservingRecorder struct {
 	confirmSawBusy bool
 }
 
-func (r *w14ABusyObservingRecorder) RecordReplacement(_ context.Context, _, replacedPath, _ string) error {
+func (r *w14ABusyObservingRecorder) RecordReplacement(_ context.Context, _, replacedPath, _ string, _ ...models.ReplacementBackupFacts) error {
 	_, err := r.fs.Stat(fsutil.ReplacementBusyPath(replacedPath))
 	r.recordSawBusy = err == nil
 	return nil

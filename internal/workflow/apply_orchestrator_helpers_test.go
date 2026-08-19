@@ -91,6 +91,6 @@ func (s *stubRevertLog) ReleaseReplacement(_ context.Context, _ OperationID, _, 
 	return nil
 }
 
-func (s *stubRevertLog) RecordReplacement(_ context.Context, _ OperationID, _, _ string) error {
+func (s *stubRevertLog) RecordReplacement(_ context.Context, _ OperationID, _, _ string, _ ...models.ReplacementBackupFacts) error {
 	return nil
 }

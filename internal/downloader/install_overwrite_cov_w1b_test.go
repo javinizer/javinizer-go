@@ -132,7 +132,7 @@ type covW1BRecorder struct {
 	releases   int
 }
 
-func (r *covW1BRecorder) RecordReplacement(context.Context, string, string, string) error {
+func (r *covW1BRecorder) RecordReplacement(context.Context, string, string, string, ...models.ReplacementBackupFacts) error {
 	return r.recordErr
 }
 

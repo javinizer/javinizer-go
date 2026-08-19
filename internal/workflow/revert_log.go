@@ -81,7 +81,11 @@ type RevertLog interface {
 	// inside the downloader's destination lock, so call order is the true
 	// replace order). Complete/CompleteFailed merge these incremental entries
 	// into the final generated-files ledger.
-	RecordReplacement(ctx context.Context, opID OperationID, replacedPath, backupPath string) error
+	// Wave-25 (codex P3 PR#215): the optional trailing backupFacts stamp the
+	// set-aside backup's size + mtime into the entry so history's removal gate
+	// can verify the object at backupPath is the OWNED set-aside before
+	// unlinking it (journal-append and stamp are one atomic write here).
+	RecordReplacement(ctx context.Context, opID OperationID, replacedPath, backupPath string, backupFacts ...models.ReplacementBackupFacts) error
 
 	// ReleaseReplacement retracts a journal entry the downloader rolled back
 	// itself (record landed, install failed, backup restored over the
@@ -167,7 +171,7 @@ func (noOpRevertLog) CompleteFailed(_ context.Context, _ OperationID, _ *ApplyRe
 	return nil
 }
 
-func (noOpRevertLog) RecordReplacement(_ context.Context, _ OperationID, _, _ string) error {
+func (noOpRevertLog) RecordReplacement(_ context.Context, _ OperationID, _, _ string, _ ...models.ReplacementBackupFacts) error {
 	// No durable store — journal nothing. Callers must not arm the downloader
 	// ledger with a no-op recorder: workflow threads the recorder only when the
 	// concrete RevertLog is the DB-backed implementation (see replacementRecorder).
@@ -720,7 +724,7 @@ var replacementLedgerLocks = fsutil.SharedJournalLocks()
 // per-destination sequence assigned here is therefore the true replace order
 // within this process; the sequence floor is read back from the database so
 // it stays monotonic across restarts.
-func (l *dbRevertLog) RecordReplacement(ctx context.Context, opID OperationID, replacedPath, backupPath string) error {
+func (l *dbRevertLog) RecordReplacement(ctx context.Context, opID OperationID, replacedPath, backupPath string, backupFacts ...models.ReplacementBackupFacts) error {
 	if opID == "" {
 		return fmt.Errorf("revert log RecordReplacement: empty operation ID")
 	}
@@ -756,10 +760,20 @@ func (l *dbRevertLog) RecordReplacement(ctx context.Context, opID OperationID, r
 			fnErr = fmt.Errorf("revert log RecordReplacement: parse ledger for record %s: %w", opID, perr)
 			return models.GeneratedFilesJSON{}, false, fnErr
 		}
+		// Wave-25: stamp the set-aside backup's identity facts into the same
+		// journal write — the removal gate (history removeReplacementBackup)
+		// later binds its unlink to these facts, so an unstamped entry reads as
+		// legacy while a stamped entry can only ever name the OWNED object.
+		var facts models.ReplacementBackupFacts
+		if len(backupFacts) > 0 {
+			facts = backupFacts[0]
+		}
 		gf.Replacements = append(gf.Replacements, models.ReplacementEntry{
-			Destination: replacedPath,
-			Backup:      backupPath,
-			DestSeq:     seq,
+			Destination:   replacedPath,
+			Backup:        backupPath,
+			DestSeq:       seq,
+			BackupSize:    facts.Size,
+			BackupModUnix: facts.ModUnix,
 		})
 		return gf, true, nil
 	})

@@ -164,7 +164,7 @@ func (r *recordingRevertLog) ReleaseReplacement(_ context.Context, _ OperationID
 	return nil
 }
 
-func (r *recordingRevertLog) RecordReplacement(_ context.Context, _ OperationID, _, _ string) error {
+func (r *recordingRevertLog) RecordReplacement(_ context.Context, _ OperationID, _, _ string, _ ...models.ReplacementBackupFacts) error {
 	return nil
 }
 

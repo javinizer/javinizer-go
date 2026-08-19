@@ -111,11 +111,135 @@ func warnRetainedUnjournaledBackup(backup string) {
 	logging.Warnf("replacement sweep retained unjournaled marker-shaped file %s: no journal entry proves ownership; user can delete it manually", absoluteBackup)
 }
 
-// removeReplacementBackup is the ownership gate for every journal consume path:
-// a non-missing removal error leaves the journal entry armed and retryable.
-func removeReplacementBackup(fs afero.Fs, backup, phase string) error {
+// BackupRemovalRefusedError reports a refused backup removal (wave-25,
+// codex P3 PR#215 finding 2): the object currently occupying the journaled
+// backup name failed the ownership binding, so it must be a foreign plant —
+// unlinking it would destroy bytes nobody journaled AND consume the only
+// journal record of the restore. The entry stays live for retry/inspection.
+type BackupRemovalRefusedError struct {
+	Backup string // journaled backup path whose removal was refused
+	Reason string // which ownership fact failed
+}
+
+func (e *BackupRemovalRefusedError) Error() string {
+	return fmt.Sprintf("backup removal %s refused: %s", e.Backup, e.Reason)
+}
+
+func refuseReplacementBackupRemoval(backup, phase, reason string) error {
+	absoluteBackup, _ := filepath.Abs(backup)
+	logging.Warnf("%s refused to remove backup %s: %s; journal entry retained live", phase, absoluteBackup, reason)
+	return &BackupRemovalRefusedError{Backup: backup, Reason: reason}
+}
+
+// journaledEntryFacts returns a COPY of the journal entry naming backupSlash
+// in row's (possibly index-time) ledger, or nil when the ledger has no such
+// entry / cannot be parsed. Entry facts are written once at journal-append
+// time and never rewritten, so an index-time snapshot's facts stay valid for
+// a later removal gate (wave-25).
+func journaledEntryFacts(row *models.BatchFileOperation, backupSlash string) *models.ReplacementEntry {
+	gf, err := models.ParseGeneratedFiles(row.GeneratedFiles)
+	if err != nil {
+		return nil
+	}
+	for _, rep := range gf.Replacements {
+		if sweepSlash(rep.Backup) == backupSlash {
+			entry := rep
+			return &entry
+		}
+	}
+	return nil
+}
+
+// removeReplacementBackup is the ownership gate for every journal consume
+// path: a non-missing removal error leaves the journal entry armed and
+// retryable.
+//
+// Wave-25 (codex P3 PR#215 finding 2): the removal is bound to the OWNED
+// object, never to the pathname alone — between the journal write (or a
+// restore's source read) and this unlink a directory writer can rename our
+// backup away and plant a foreign file at the same name; a name-only unlink
+// would delete the foreign bytes and then consume the journal record. The
+// gate, in order:
+//  1. Lstat the occupant (no follow): a genuinely ENOENT name is already
+//     removed; any other stat failure retains the entry (kept posture).
+//     A symlink or non-regular object at the name is NEVER ours — refuse.
+//  2. Journaled arm-time facts (entry carries BackupSize/BackupModUnix
+//     stamped by the downloader — dev/inode are deliberately NOT journaled,
+//     see models.ReplacementEntry): a mismatch means the occupant is not the
+//     set-aside this entry owns — refuse. Unstamped (legacy) entries skip
+//     this leg; their removal keeps the pre-wave-25 pathname posture with
+//     the documented residual swap window (the re-arm compensations preserve
+//     size + mtime byte-faithful, so stamped entries also survive re-arms).
+//  3. Restore-read binding (copiedFrom non-nil): a leg that just streamed
+//     the backup compares dev/inode (when both sides expose them) plus size
+//     and mtime against the object it read — a swap between that read and
+//     the removal refuses instead of deleting the replacement.
+//  4. Reopen the name NO-FOLLOW and require the opened object to be the
+//     Lstat object (same dev/inode when exposed, regular file): narrows the
+//     Lstat→Remove window; the final Remove stays path-scoped (documented
+//     residual — no portable unlink-by-handle exists).
+//
+// A refused removal returns *BackupRemovalRefusedError; callers' existing
+// "entry retained live" compensation handles it without a special case.
+func removeReplacementBackup(fs afero.Fs, backup, phase string, entry *models.ReplacementEntry, copiedFrom os.FileInfo) error {
+	absoluteBackup, _ := filepath.Abs(backup)
+	info, lerr := lstatRestoreSource(fs, backup)
+	if lerr != nil {
+		if errors.Is(lerr, afero.ErrFileNotFound) {
+			return nil // already gone == removed (established ownership rule)
+		}
+		logging.Warnf("%s failed to inspect backup %s before removal: %v — journal entry retained live", phase, absoluteBackup, lerr)
+		return lerr
+	}
+	if info == nil {
+		err := fmt.Errorf("filesystem returned no file information for %s", backup)
+		logging.Warnf("%s failed to inspect backup %s before removal: %v — journal entry retained live", phase, absoluteBackup, err)
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return refuseReplacementBackupRemoval(backup, phase, "name names a symlink, never the owned set-aside")
+	}
+	if !info.Mode().IsRegular() {
+		return refuseReplacementBackupRemoval(backup, phase, fmt.Sprintf("name names a non-regular object (mode %s)", info.Mode()))
+	}
+	if entry != nil && entry.BackupFactsStamped() {
+		if info.Size() != entry.BackupSize || info.ModTime().Unix() != entry.BackupModUnix {
+			return refuseReplacementBackupRemoval(backup, phase, fmt.Sprintf("occupant identity mismatch — journaled %d bytes @ %d, found %d bytes @ %d", entry.BackupSize, entry.BackupModUnix, info.Size(), info.ModTime().Unix()))
+		}
+	}
+	if copiedFrom != nil {
+		if srcDev, srcIno, srcOK := restoreSourceIdentity(copiedFrom); srcOK {
+			if curDev, curIno, curOK := restoreSourceIdentity(info); curOK && (srcDev != curDev || srcIno != curIno) {
+				return refuseReplacementBackupRemoval(backup, phase, "occupant is not the object the restore read (dev/inode mismatch)")
+			}
+		}
+		if info.Size() != copiedFrom.Size() || !info.ModTime().Equal(copiedFrom.ModTime()) {
+			return refuseReplacementBackupRemoval(backup, phase, "occupant metadata differs from the object the restore read")
+		}
+	}
+	handle, oerr := restoreOpenReplacementSource(fs, backup)
+	if oerr != nil {
+		if os.IsNotExist(oerr) {
+			return nil // vanished under us == removed
+		}
+		logging.Warnf("%s failed to reopen backup %s before removal: %v — journal entry retained live", phase, absoluteBackup, oerr)
+		return oerr
+	}
+	openedInfo, serr := handle.Stat()
+	_ = handle.Close()
+	if serr != nil {
+		logging.Warnf("%s failed to stat opened backup %s before removal: %v — journal entry retained live", phase, absoluteBackup, serr)
+		return serr
+	}
+	if openedInfo == nil || openedInfo.Mode()&os.ModeSymlink != 0 || !openedInfo.Mode().IsRegular() {
+		return refuseReplacementBackupRemoval(backup, phase, "opened object is not the regular file Lstat verified")
+	}
+	if curDev, curIno, curOK := restoreSourceIdentity(info); curOK {
+		if opDev, opIno, opOK := restoreSourceIdentity(openedInfo); opOK && (curDev != opDev || curIno != opIno) {
+			return refuseReplacementBackupRemoval(backup, phase, "opened object differs from the Lstat object")
+		}
+	}
 	if err := fs.Remove(backup); err != nil && !os.IsNotExist(err) {
-		absoluteBackup, _ := filepath.Abs(backup)
 		logging.Warnf("%s failed to remove backup %s: %v", phase, absoluteBackup, err)
 		return err
 	}
@@ -763,6 +887,10 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 	// fsutil.ErrPublishCollision) with the racer's bytes intact; on collision
 	// the backup is retained and the journal entry is NOT consumed (the
 	// removal and consumption below never run).
+	// Wave-25 (codex P3 PR#215 finding 2): capture the restore SOURCE's
+	// identity before the copy so the backup removals below can refuse any
+	// object that no longer matches what this leg actually restored.
+	backupInfoBeforeCopy, _ := lstatRestoreSource(s.fs, backup)
 	if rnErr := copyRestoreBytesNoReplace(s.fs, backup, dest); rnErr != nil {
 		logging.Warnf("replacement sweep restore %s→%s: %v", backup, dest, rnErr)
 		return false
@@ -808,7 +936,9 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 	if !entryPresent {
 		// Already consumed (e.g. a reverter raced us) — the backup is no longer
 		// journal-owned, so remove it before reporting the restore complete.
-		if rmErr := removeReplacementBackup(s.fs, backup, "replacement sweep"); rmErr != nil {
+		// No journal entry survives to stamp facts: the removal binds solely to
+		// the object this leg restored from (wave-25).
+		if rmErr := removeReplacementBackup(s.fs, backup, "replacement sweep", nil, backupInfoBeforeCopy); rmErr != nil {
 			return false
 		}
 		s.forgetPendingRemoval(backupSlash)
@@ -819,9 +949,13 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 	// persist a distinct marker so a later sweep can clean a present destination
 	// without mistaking an ordinary armed apply for a completed restore.
 	// Capture the backup metadata without following a swapped-in symlink so a
-	// failed consume can re-arm only the original object metadata.
+	// failed consume can re-arm only the original object metadata. Wave-25:
+	// the removal gate verifies those bindings — the journaled arm-time facts
+	// (index-time snapshot; facts are written once) AND the object this leg
+	// restored from — before unlinking, so a foreign occupant swapped onto
+	// the backup name after our copy is retained instead of deleted.
 	backupInfo, _ := lstatRestoreSource(s.fs, backup)
-	if rmErr := removeReplacementBackup(s.fs, backup, "replacement sweep"); rmErr != nil {
+	if rmErr := removeReplacementBackup(s.fs, backup, "replacement sweep", journaledEntryFacts(row, backupSlash), backupInfoBeforeCopy); rmErr != nil {
 		s.rememberPendingRemoval(backupSlash)
 		markErr := s.persistRestorePendingMarker(ctx, row.ID, backupSlash)
 		if markErr != nil {
@@ -919,6 +1053,11 @@ func (s *ReplacementSweeper) retryPendingRemoval(ctx context.Context, rowID uint
 	var rowReverted, targetFound, authorized bool
 	var durableKind string
 	var fnErr error
+	// Wave-25: carry the durable entry's arm-time facts out of the read
+	// transaction so the removal gate below can bind its unlink to the OWNED
+	// object rather than to the pathname alone (facts are written once at
+	// journal-append time and never rewritten).
+	var durableEntry models.ReplacementEntry
 	err := s.repo.UpdateJournalInTx(ctx, rowID, func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
 		if current.RevertStatus == models.RevertStatusReverted {
 			rowReverted = true
@@ -934,6 +1073,7 @@ func (s *ReplacementSweeper) retryPendingRemoval(ctx context.Context, rowID uint
 				targetFound = true
 				authorized = gf.Replacements[i].RestorePending || s.hasPendingRemoval(backupSlash)
 				durableKind = gf.Replacements[i].PendingKind()
+				durableEntry = gf.Replacements[i]
 				break
 			}
 		}
@@ -960,7 +1100,10 @@ func (s *ReplacementSweeper) retryPendingRemoval(ctx context.Context, rowID uint
 			s.forgetPendingRemoval(backupSlash)
 			return true
 		}
-		if rmErr := removeReplacementBackup(s.fs, backup, "replacement sweep"); rmErr != nil {
+		// No durable entry carries facts for this name anymore (a prior leg
+		// consumed it): the pre-wave-25 pathname posture applies with its
+		// documented residual swap window.
+		if rmErr := removeReplacementBackup(s.fs, backup, "replacement sweep", nil, nil); rmErr != nil {
 			return false
 		}
 		s.forgetPendingRemoval(backupSlash)
@@ -1001,8 +1144,11 @@ func (s *ReplacementSweeper) retryPendingRemoval(ctx context.Context, rowID uint
 
 	// Capture metadata without following a swapped-in symlink; consumption
 	// failure below must recreate the original permission bits and timestamps.
+	// Wave-25: the removal gate verifies the durable entry's arm-time facts
+	// plus this just-captured identity before unlinking — a foreign occupant
+	// swapped onto the backup name is retained, never deleted-then-consumed.
 	backupInfo, _ := lstatRestoreSource(s.fs, backup)
-	if rmErr := removeReplacementBackup(s.fs, backup, "replacement sweep"); rmErr != nil {
+	if rmErr := removeReplacementBackup(s.fs, backup, "replacement sweep", &durableEntry, backupInfo); rmErr != nil {
 		s.rememberPendingRemoval(backupSlash)
 		return false
 	}

@@ -835,7 +835,7 @@ func (e errorRevertLog) ReleaseReplacement(_ context.Context, _ OperationID, _, 
 	return e.completeErr
 }
 
-func (e errorRevertLog) RecordReplacement(_ context.Context, _ OperationID, _, _ string) error {
+func (e errorRevertLog) RecordReplacement(_ context.Context, _ OperationID, _, _ string, _ ...models.ReplacementBackupFacts) error {
 	return e.completeErr
 }
 

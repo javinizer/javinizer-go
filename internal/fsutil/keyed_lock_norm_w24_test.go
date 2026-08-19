@@ -19,6 +19,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 	"unicode"
 
 	"github.com/stretchr/testify/require"
@@ -83,11 +84,26 @@ func TestDestKeyW24_NFCAndNFDStayDistinctUnderSensitiveNormAndProbeError(t *test
 		"normalization-sensitive root: spellings stay byte-distinct")
 
 	probeErr := errors.New("w24 normalization probe undecidable")
-	w24SetNormProbe(t, func(string) (bool, error) { return true, probeErr })
+	var errCalls atomic.Int32
+	w24SetNormProbe(t, func(string) (bool, error) { errCalls.Add(1); return true, probeErr })
 	require.False(t, IsNormalizationInsensitiveRoot(root),
 		"a probe error is undecidable — conservative no-fold posture")
 	require.NotEqual(t, DestKeyForRoot(root, nfc), DestKeyForRoot(root, nfd),
 		"probe failure never folds normalization on a guess")
+	require.False(t, IsNormalizationInsensitiveRoot(root),
+		"wave-25: the error outcome is NOT cached — the undecidable root re-probes")
+	require.Equal(t, int32(4), errCalls.Load(),
+		"every derivation re-probes while the root stays undecidable (two direct + one per DestKeyForRoot)")
+
+	// After recovery the retried probe folds correctly — the finding's
+	// first-error → re-probe → fold contract for the normalization probe.
+	var okCalls atomic.Int32
+	NormalizationProbe = func(string) (bool, error) { okCalls.Add(1); return true, nil }
+	ResetNormalizationCache()
+	require.True(t, IsNormalizationInsensitiveRoot(root), "the retried probe folds after the transient failure clears")
+	require.Equal(t, DestKeyForRoot(root, nfc), DestKeyForRoot(root, nfd),
+		"first-probe-error → second derivation re-probes and folds correctly afterward")
+	require.Equal(t, int32(1), okCalls.Load(), "the recovered definitive outcome is served from cache afterwards")
 }
 
 // Case-sensitive roots still fold normalization ALONE: the fold is gated on
@@ -158,36 +174,48 @@ func TestIsNormalizationInsensitiveRootW24_ResultCachedPerRoot(t *testing.T) {
 	require.Equal(t, int32(1), calls.Load(), "one probe per root per process")
 }
 
-// Racing first probes on one root converge on a single published posture:
-// the speculative loser adopts the cached entry (the double-checked leg).
+// Racing first probes on one root converge on a single published posture
+// (wave-25 single-flight): exactly ONE probe runs; the racer JOINS the
+// in-flight probe and adopts its outcome; the definitive publish is then
+// served from cache.
 func TestIsNormalizationInsensitiveRootW24_ConcurrentFirstProbesPublishOnePosture(t *testing.T) {
 	root := t.TempDir()
 	var entered atomic.Int32
-	bothEntered := make(chan struct{})
+	probeInFlight := make(chan struct{})
+	releaseProbe := make(chan struct{})
 	w24SetNormProbe(t, func(string) (bool, error) {
-		if entered.Add(1) == 2 {
-			close(bothEntered)
+		if entered.Add(1) == 1 {
+			close(probeInFlight)
 		}
-		<-bothEntered
+		<-releaseProbe
 		return true, nil
 	})
 
 	var wg sync.WaitGroup
 	results := make([]bool, 2)
-	for i := range results {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			results[i] = IsNormalizationInsensitiveRoot(root)
-		}(i)
-	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		results[0] = IsNormalizationInsensitiveRoot(root)
+	}()
+	require.Eventually(t, func() bool { return entered.Load() == 1 },
+		2*time.Second, time.Millisecond, "the flight leader must be probing")
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		results[1] = IsNormalizationInsensitiveRoot(root)
+	}()
+	require.Never(t, func() bool { return entered.Load() != 1 },
+		200*time.Millisecond, time.Millisecond, "no second probe while the first is in flight")
+	close(releaseProbe)
 	wg.Wait()
-	require.Equal(t, int32(2), entered.Load(), "both first-time callers probed exactly once")
+	require.Equal(t, int32(1), entered.Load(),
+		"racing first-time callers share ONE probe (single-flight)")
 	require.True(t, results[0])
-	require.True(t, results[1], "racing probes converge on one posture")
+	require.True(t, results[1], "the flight sharer converges on the leader's posture")
 	require.True(t, IsNormalizationInsensitiveRoot(root),
-		"the published posture is adopted from cache afterwards")
-	require.Equal(t, int32(2), entered.Load(), "a cached root is not re-probed after publication")
+		"the definitive outcome is adopted from cache afterwards")
+	require.Equal(t, int32(1), entered.Load(), "a cached root is not re-probed after publication")
 }
 
 // Probe leg suite, injected ops (mirrors the wave-21 case-probe suite): the

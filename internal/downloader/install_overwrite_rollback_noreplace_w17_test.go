@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/javinizer/javinizer-go/internal/fsutil"
+	"github.com/javinizer/javinizer-go/internal/models"
 )
 
 var (
@@ -48,7 +49,7 @@ type w17PlantAtRecordLedger struct {
 	err     error
 }
 
-func (l *w17PlantAtRecordLedger) RecordReplacement(context.Context, string, string, string) error {
+func (l *w17PlantAtRecordLedger) RecordReplacement(context.Context, string, string, string, ...models.ReplacementBackupFacts) error {
 	_ = afero.WriteFile(l.fs, l.dest, l.foreign, 0o644)
 	return l.err
 }

@@ -47,7 +47,41 @@ type ReplacementEntry struct {
 	// operation — a path existence check would fail forever on the absent
 	// name, and a removal would delete a foreign file.
 	RestorePendingKind string `json:"restore_pending_kind,omitempty"`
+	// BackupSize/BackupModUnix bind later backup-path removals to the OWNED
+	// object (wave-25, codex P3 PR#215): the downloader stamps the set-aside
+	// backup's size and mtime (Unix seconds) into the entry at journal-write
+	// time, and history's removal gate refuses to unlink a same-pathname
+	// occupant whose facts differ — deleting a directory writer's swapped-in
+	// file would both destroy foreign bytes and consume the only journal
+	// record of the restore. Dev/inode are deliberately NOT journaled: the
+	// consumption-failure re-arm compensation republishes the backup under a
+	// FRESH inode while preserving size and mtime byte-faithful, so a
+	// journaled inode would misjudge the owner's own re-armed backup as
+	// foreign and wedge the pending retry forever.
+	//
+	// BackupModUnix == 0 means the entry predates the stamp (or the capture
+	// failed): such legacy entries fall back to pathname-only removal with a
+	// documented residual window. Both fields stay omitempty so pre-wave-25
+	// blobs serialize byte-identically.
+	BackupSize    int64 `json:"backup_size,omitempty"`
+	BackupModUnix int64 `json:"backup_mod_unix,omitempty"`
 }
+
+// ReplacementBackupFacts are the backup object's identity facts captured by
+// the downloader at set-aside time and carried into the journal entry
+// (wave-25, codex P3 PR#215). ModUnix == 0 marks "facts unavailable" — the
+// recorded entry then reads as legacy and the removal gate falls back to the
+// pathname-only posture documented on the entry fields.
+type ReplacementBackupFacts struct {
+	Size    int64 // byte length of the set-aside backup file
+	ModUnix int64 // backup mtime in Unix seconds
+}
+
+// BackupFactsStamped reports whether an entry carries usable identity facts
+// (wave-25): the mtime stamp is the gate — a set-aside backup's mtime is
+// never the Unix epoch in practice, while a zero file length is a real
+// possibility for overwritten placeholder files.
+func (e ReplacementEntry) BackupFactsStamped() bool { return e.BackupModUnix != 0 }
 
 // Restore-pending kinds carried by ReplacementEntry.RestorePendingKind. The
 // persistence contract keeps the clean kind UNWRITTEN ("") so wave-19 blobs

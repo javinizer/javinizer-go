@@ -10,6 +10,7 @@ import (
 	"os"
 	"strconv"
 	"sync/atomic"
+	"time"
 
 	"github.com/spf13/afero"
 
@@ -316,6 +317,79 @@ func removeRollbackBackup(fsys afero.Fs, backup, phase string) error {
 	return nil
 }
 
+// captureReplacementBackupFacts reads the JUST-established set-aside's
+// identity facts for the journal stamp (wave-25, codex P3 PR#215 finding 2).
+// Only size + mtime (Unix seconds) are journaled — NOT dev/inode: the
+// consumption-failure re-arm compensations republish the backup under a
+// FRESH inode while preserving bytes, size, and mtime, so a journaled inode
+// would misjudge the operation's own re-armed backup as foreign and wedge
+// the removal gate forever. A failed read is returned to the caller (the
+// install compensates like a record failure) rather than stamping nothing
+// silently.
+func captureReplacementBackupFacts(fsys afero.Fs, backupPath string) (models.ReplacementBackupFacts, error) {
+	info, err := lstatBackupCandidate(fsys, backupPath)
+	if err != nil {
+		return models.ReplacementBackupFacts{}, err
+	}
+	if info == nil {
+		return models.ReplacementBackupFacts{}, errors.New("filesystem returned no file information")
+	}
+	return models.ReplacementBackupFacts{Size: info.Size(), ModUnix: info.ModTime().Unix()}, nil
+}
+
+// installedDestIdentity binds a confirm-failure rollback to the exact object
+// the install just published at the destination (wave-25, codex P3 PR#215
+// finding 3): dev/inode when the filesystem exposes them, plus size and
+// mtime. known=false records a capture failure — the rollback then has
+// NOTHING verifiable to restore over and must refuse rather than overwrite
+// an occupant it cannot identify.
+type installedDestIdentity struct {
+	known     bool
+	hasDevIno bool
+	dev, ino  uint64
+	size      int64
+	modTime   time.Time
+}
+
+// captureInstalledDestIdentity Lstats the destination right after a
+// successful install publish. Anything other than a regular, non-symlink
+// object (including a read failure) yields the unknown identity.
+func captureInstalledDestIdentity(fsys afero.Fs, destPath string) installedDestIdentity {
+	info, err := lstatBackupCandidate(fsys, destPath)
+	if err != nil || info == nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return installedDestIdentity{}
+	}
+	id := installedDestIdentity{known: true, size: info.Size(), modTime: info.ModTime()}
+	if dev, ino, ok := restoreSourceIdentity(info); ok {
+		id.hasDevIno = true
+		id.dev, id.ino = dev, ino
+	}
+	return id
+}
+
+// destStillHoldsInstalledObject re-derives the destination's identity the
+// no-follow way and requires it to still name the object the install
+// published (wave-25): dev/inode mismatch when both sides expose it, then
+// size and mtime on every platform. Any failure, substitution, or failed
+// capture answers false — the confirm-failure rollback treats false as a
+// REFUSAL (backup retained, journal entry armed), never a clobber.
+func destStillHoldsInstalledObject(fsys afero.Fs, destPath string, id installedDestIdentity) bool {
+	if !id.known {
+		return false
+	}
+	info, err := lstatBackupCandidate(fsys, destPath)
+	if err != nil || info == nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return false
+	}
+	if id.hasDevIno {
+		dev, ino, ok := restoreSourceIdentity(info)
+		if ok && (dev != id.dev || ino != id.ino) {
+			return false
+		}
+	}
+	return info.Size() == id.size && info.ModTime().Equal(id.modTime)
+}
+
 // overwriteBackupPath names the destination's backup for one replacement:
 // opID folded as a hash (never a path component) plus a process-unique
 // ordinal, so stacked same-op or cross-op overwrites never clobber a backup.
@@ -534,10 +608,23 @@ func (d *Downloader) installOverwriting(ctx context.Context, stagedPath, destPat
 		_ = d.fs.Remove(backupPath)
 		return false, true, fmt.Errorf("failed to set aside existing bytes for %s: %w", destPath, err)
 	}
-	if err := ledger.recorder.RecordReplacement(ctx, ledger.opID, destPath, backupPath); err != nil {
+	// Wave-25 (codex P3 PR#215 finding 2): stamp the journal entry with the
+	// OWNED backup object's identity facts (size + mtime) captured right after
+	// the handoff — history's removal gate later binds its unlink to these
+	// facts, so a foreign occupant swapped onto the backup NAME is never
+	// deleted in place of our set-aside. A capture failure rolls back exactly
+	// like a record failure: an armed entry whose ownership facts were never
+	// verifiable is not worth journaling.
+	var armErr error
+	if facts, factsErr := captureReplacementBackupFacts(d.fs, backupPath); factsErr != nil {
+		armErr = fmt.Errorf("capture backup identity facts: %w", factsErr)
+	} else {
+		armErr = ledger.recorder.RecordReplacement(ctx, ledger.opID, destPath, backupPath, facts)
+	}
+	if armErr != nil {
 		restored, rErr := restoreAsideBackup(d.fs, destPath, backupPath)
 		if rErr != nil {
-			return false, true, fmt.Errorf("revert-ledger record failed: %w (AND backup restore failed: %v — bytes remain at %s)", err, rErr, backupPath)
+			return false, true, fmt.Errorf("revert-ledger record failed: %w (AND backup restore failed: %v — bytes remain at %s)", armErr, rErr, backupPath)
 		}
 		if !restored {
 			// wave-17: the rollback was REFUSED (a foreign file claimed the
@@ -545,9 +632,9 @@ func (d *Downloader) installOverwriting(ctx context.Context, stagedPath, destPat
 			// The foreign file is never replaced or removed; the retained
 			// backup is UNJOURNALED here (the record failed) and stays
 			// recoverable through the orphan sweep's conservative retention.
-			return false, true, fmt.Errorf("revert-ledger record failed for %s: %w (rollback restore refused — destination occupied or no-replace unsupported; backup retained at %s with no journal entry)", destPath, err, backupPath)
+			return false, true, fmt.Errorf("revert-ledger record failed for %s: %w (rollback restore refused — destination occupied or no-replace unsupported; backup retained at %s with no journal entry)", destPath, armErr, backupPath)
 		}
-		return false, true, fmt.Errorf("revert-ledger record failed for %s: %w", destPath, err)
+		return false, true, fmt.Errorf("revert-ledger record failed for %s: %w", destPath, armErr)
 	}
 	if err := fsutil.ReplaceFile(d.fs, stagedPath, destPath); err != nil {
 		restored, rErr := restoreAsideBackup(d.fs, destPath, backupPath)
@@ -582,7 +669,24 @@ func (d *Downloader) installOverwriting(ctx context.Context, stagedPath, destPat
 	// removed while the journal still owns it, before the successful retract.
 	// If retract itself fails, re-arm the backup so the still-armed journal
 	// remains mutually consistent for sweep/retry.
+	//
+	// Wave-25 (codex P3 PR#215 finding 3): the window between the install
+	// publish above and a confirm-failure rollback is open to foreign writers
+	// — the busy marker deters Javinizer participants, not other processes —
+	// and the rollback's copy runs with REPLACE semantics, so restoring
+	// unconditionally would DESTROY a foreign writer's new destination bytes.
+	// The installed object's identity captured right after the publish
+	// (dev/inode when exposed, plus size + mtime; a failed capture is a
+	// refusal, never an overwrite of the unverifiable) must therefore still
+	// describe the destination when the rollback restores: a mismatch refuses
+	// with the backup RETAINED and the journal entry left armed (a later
+	// sweep/revert arbitrates ownership), while a match restores as before.
+	installedIdentity := captureInstalledDestIdentity(d.fs, destPath)
 	if cErr := ledger.recorder.ConfirmReplacement(ctx, ledger.opID, destPath, backupPath); cErr != nil {
+		if !destStillHoldsInstalledObject(d.fs, destPath, installedIdentity) {
+			logging.Warnf("downloader: rollback restore of %s refused — destination no longer names the just-installed object after confirm failure (%v); foreign bytes kept, backup %s retained in place, journal entry stays armed", destPath, cErr, backupPath)
+			return false, true, fmt.Errorf("install-confirm failed: %w (rollback restore refused — destination no longer holds the installed object; foreign bytes preserved, backup retained at %s, journal entry stays armed)", cErr, backupPath)
+		}
 		if rErr := copyBackupToDest(d.fs, backupPath, destPath); rErr != nil {
 			return false, true, fmt.Errorf("install-confirm failed: %w (AND rollback restore failed: %v — bytes remain at %s)", cErr, rErr, backupPath)
 		}

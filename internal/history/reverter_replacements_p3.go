@@ -291,7 +291,15 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 					}
 				}
 				restored[dest] = true
-				if rmErr := removeReplacementBackup(r.fs, e.Backup, "replacement restore"); rmErr != nil {
+				// Wave-25 (codex P3 PR#215 finding 2): the removal must bind to the
+				// OWNED object — the entry's arm-time facts (downloader-stamped
+				// size/mtime) plus the identity of the object this leg just classed
+				// (backupInfo; for the armed leg, the exact object the restore
+				// streamed) — never to the backup pathname alone: a foreign file
+				// swapped onto the name must be retained, never deleted-then-
+				// consumed.
+				entryFacts := e
+				if rmErr := removeReplacementBackup(r.fs, e.Backup, "replacement restore", &entryFacts, backupInfo); rmErr != nil {
 					if markErr := markReplacementEntryRestorePending(ctx, r.batchFileOpRepo, op.ID, sweepSlash(e.Backup)); markErr != nil {
 						absoluteBackup, _ := filepath.Abs(e.Backup)
 						logging.Warnf("replacement restore failed to retain cleanup marker for backup %s: %v", absoluteBackup, markErr)
