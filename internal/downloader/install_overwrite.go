@@ -50,7 +50,38 @@ var restoreStagingOwnershipFn = fsutil.RestoreStagingOwnership
 // backup: staged adjacent write + replace-aware swap (Win-safe), streamed
 // through a bounded buffer. Used by the confirm-failure rollback so the
 // journal entry can never end up pointing at consumed bytes (codex P3 R9-1).
+//
+//nolint:unused // test-facing error-only shape pinned across waves 7–30; the confirm-failure rollback rides the wave-31 bound variant.
 func copyBackupToDest(fsys afero.Fs, backup, dest string) error {
+	_, err := copyBackupToDestBound(fsys, backup, dest)
+	return err
+}
+
+// rollbackCopyFacts carries the two ownership bindings a confirm-failure
+// rollback needs AFTER the restore copy (wave-31, codex local round 1,
+// PR#215 findings L1/L2):
+//
+//   - restored binds the object the copy PUBLISHED at dest — the post-publish
+//     destination stat fsutil.PublishStagedBoundInfo proved SameFile with the
+//     staged inode (never a pre-publish staged capture, which the recovery
+//     loop's re-stage would invalidate, nor a window-poisonable fresh
+//     capture). The destination must still name it before the backup is
+//     removed and the journal entry retracted.
+//   - copied binds the backup object the copy STREAMED FROM — the validated
+//     pre-open no-follow Lstat object (dev/inode when the filesystem exposes
+//     it, size and mtime), the in-memory twin of history's wave-25
+//     removeReplacementBackup copiedFrom binding. The backup NAME's
+//     occupant is verified against it before any removal.
+type rollbackCopyFacts struct {
+	restored installedDestIdentity
+	copied   os.FileInfo
+}
+
+// copyBackupToDestBound is copyBackupToDest with both ownership bindings
+// handed back (wave-31): the confirm-failure rollback revalidates the
+// destination against restored before releasing the backup, and binds the
+// backup removal to copied.
+func copyBackupToDestBound(fsys afero.Fs, backup, dest string) (rollbackCopyFacts, error) {
 	return copyBackupToDestPublish(fsys, backup, dest, fsutil.ReplaceFile, false)
 }
 
@@ -60,24 +91,25 @@ func copyBackupToDest(fsys afero.Fs, backup, dest string) error {
 // object that claimed the name mid-window. A collision drops the staged copy
 // and returns the typed fsutil.ErrPublishCollision (see wave-15).
 func copyBackupToDestNoReplace(fsys afero.Fs, backup, dest string) error {
-	return copyBackupToDestPublish(fsys, backup, dest, fsutil.PublishNoReplace, true)
+	_, err := copyBackupToDestPublish(fsys, backup, dest, fsutil.PublishNoReplace, true)
+	return err
 }
 
-func copyBackupToDestPublish(fsys afero.Fs, backup, dest string, publish func(afero.Fs, string, string) error, noReplace bool) error {
+func copyBackupToDestPublish(fsys afero.Fs, backup, dest string, publish func(afero.Fs, string, string) error, noReplace bool) (rollbackCopyFacts, error) {
 	// Validate the path before opening it: Stat/Open would follow a hostile
 	// backup symlink and copy its target into the media directory.
 	sourceInfo, err := lstatRestoreSource(fsys, backup)
 	if err != nil {
-		return fmt.Errorf("open backup: %w", err)
+		return rollbackCopyFacts{}, fmt.Errorf("open backup: %w", err)
 	}
 	if sourceInfo == nil {
-		return refuseRestoreSource(backup, "filesystem returned no file information")
+		return rollbackCopyFacts{}, refuseRestoreSource(backup, "filesystem returned no file information")
 	}
 	if sourceInfo.Mode()&os.ModeSymlink != 0 {
-		return refuseRestoreSource(backup, "backup is a symlink")
+		return rollbackCopyFacts{}, refuseRestoreSource(backup, "backup is a symlink")
 	}
 	if !sourceInfo.Mode().IsRegular() {
-		return refuseRestoreSource(backup, fmt.Sprintf("backup is not a regular file (mode %s)", sourceInfo.Mode()))
+		return rollbackCopyFacts{}, refuseRestoreSource(backup, fmt.Sprintf("backup is not a regular file (mode %s)", sourceInfo.Mode()))
 	}
 
 	// The open itself is platform-specific (see downloader.go's
@@ -93,9 +125,9 @@ func copyBackupToDestPublish(fsys afero.Fs, backup, dest string, publish func(af
 		// safe refusal posture as the pre-open gate; unrelated open errors keep
 		// their original classification for callers and retries.
 		if currentInfo, lerr := lstatRestoreSource(fsys, backup); lerr == nil && currentInfo != nil && currentInfo.Mode()&os.ModeSymlink != 0 {
-			return refuseRestoreSource(backup, "backup became a symlink before open")
+			return rollbackCopyFacts{}, refuseRestoreSource(backup, "backup became a symlink before open")
 		}
-		return fmt.Errorf("open backup: %w", err)
+		return rollbackCopyFacts{}, fmt.Errorf("open backup: %w", err)
 	}
 	defer func() { _ = src.Close() }()
 
@@ -103,29 +135,38 @@ func copyBackupToDestPublish(fsys afero.Fs, backup, dest string, publish func(af
 	// still regular, and compare identity when the platform exposes Dev/Ino.
 	openedInfo, err := src.Stat()
 	if err != nil {
-		return fmt.Errorf("stat opened backup: %w", err)
+		return rollbackCopyFacts{}, fmt.Errorf("stat opened backup: %w", err)
 	}
 	if openedInfo == nil || openedInfo.Mode()&os.ModeSymlink != 0 || !openedInfo.Mode().IsRegular() {
-		return refuseRestoreSource(backup, "opened object is not a regular file")
+		return rollbackCopyFacts{}, refuseRestoreSource(backup, "opened object is not a regular file")
 	}
 	if sourceDev, sourceIno, sourceOK := restoreSourceIdentity(sourceInfo); sourceOK {
 		if openedDev, openedIno, openedOK := restoreSourceIdentity(openedInfo); openedOK && (sourceDev != openedDev || sourceIno != openedIno) {
-			return refuseRestoreSource(backup, "opened object differs from the Lstat object")
+			return rollbackCopyFacts{}, refuseRestoreSource(backup, "opened object differs from the Lstat object")
 		}
 	}
+	// Wave-31 (L2): the backup removal after this copy binds to the exact
+	// object streamed here — history's wave-25 copiedFrom discipline: the
+	// validated pre-open no-follow Lstat object (identity-proven against the
+	// opened handle above), carried as the FileInfo so a foreign plant
+	// swapped onto the backup NAME in the copy→remove window is never
+	// unlinked in its place. On virtual filesystems the infos are live
+	// views, keeping the removal-side comparison self-consistent exactly
+	// like history's gate.
+	facts := rollbackCopyFacts{copied: sourceInfo}
 
 	stagedOrdinal := restoreCopyOrdinal.Add(1)
 	// codex P3 R18h: keep the backup's permission bits through the swap too.
 	mode := openedInfo.Mode().Perm()
 	staged, dstFile, err := fsutil.CreateExclusiveStagingFile(fsys, dest, ".dlrstr", stagedOrdinal, mode)
 	if err != nil {
-		return fmt.Errorf("stage rollback: %w", err)
+		return rollbackCopyFacts{}, fmt.Errorf("stage rollback: %w", err)
 	}
 	buf := make([]byte, 256*1024)
 	if _, cerr := io.CopyBuffer(dstFile, src, buf); cerr != nil {
 		_ = dstFile.Close()
 		_ = fsys.Remove(staged)
-		return fmt.Errorf("copy rollback: %w", cerr)
+		return rollbackCopyFacts{}, fmt.Errorf("copy rollback: %w", cerr)
 	}
 	// Re-apply the backup's ownership before the swap: a privileged restore of
 	// another account's backup must not leave the restored bytes owned by the
@@ -146,7 +187,12 @@ func copyBackupToDestPublish(fsys afero.Fs, backup, dest string, publish func(af
 	// helper holds the handle through the publish (POSIX) and re-verifies
 	// the landed destination, republishing from the handle after a proven
 	// substitution and refusing typed (backup retained) on exhaustion.
-	pubErr := fsutil.PublishStagedBound(fsutil.StagedPublish{
+	// wave-31 (codex local round 1, PR#215 finding L1): the Info variant hands
+	// back the post-publish-VERIFIED destination object so the caller can
+	// revalidate dest against exactly the staged object as it landed —
+	// recovery-loop re-stages included — before the backup is removed and the
+	// journal entry retracted.
+	published, pubErr := fsutil.PublishStagedBoundInfo(fsutil.StagedPublish{
 		FS:          fsys,
 		Publish:     publish,
 		NoReplace:   noReplace,
@@ -165,19 +211,20 @@ func copyBackupToDestPublish(fsys afero.Fs, backup, dest string, publish func(af
 		case errors.Is(pubErr, fsutil.ErrPublishStagedVerify):
 			// Unproven staged name (possible foreign plant): never removed,
 			// handle already closed by the helper — wave-29 posture.
-			return fmt.Errorf("stage rollback identity: %w", pubErr)
+			return rollbackCopyFacts{}, fmt.Errorf("stage rollback identity: %w", pubErr)
 		case errors.As(pubErr, &timesErr):
 			_ = fsys.Remove(staged)
-			return fmt.Errorf("stage rollback times: %w", pubErr)
+			return rollbackCopyFacts{}, fmt.Errorf("stage rollback times: %w", pubErr)
 		case errors.Is(pubErr, fsutil.ErrPublishStagedClose):
 			_ = fsys.Remove(staged)
-			return fmt.Errorf("close rollback: %w", pubErr)
+			return rollbackCopyFacts{}, fmt.Errorf("close rollback: %w", pubErr)
 		default:
 			_ = fsys.Remove(staged)
-			return fmt.Errorf("swap rollback: %w", pubErr)
+			return rollbackCopyFacts{}, fmt.Errorf("swap rollback: %w", pubErr)
 		}
 	}
-	return nil
+	facts.restored = installedIdentityFromFileInfo(published)
+	return facts, nil
 }
 
 // rearmReplacementBackup recreates a backup consumed by a rollback restore,
@@ -309,12 +356,60 @@ func markRollbackRearmFailed(ctx context.Context, ledger downloadLedger, destPat
 // removeRollbackBackup follows the established ownership-cleanup rule: a
 // missing backup is already removed, while any other error retains durable
 // journal ownership so a later sweep/retry can try the removal again.
-func removeRollbackBackup(fsys afero.Fs, backup, phase string) error {
+//
+// Wave-31 (codex local round 1, PR#215 finding L2): the unlink is bound to
+// the object the rollback COPIED, never to the pathname alone — between the
+// copy and this removal a directory writer can rename the owned backup away
+// and plant a foreign file on the name; deleting by path used to destroy
+// those unjournaled bytes while the caller's ReleaseReplacement forgot the
+// ledger record of the set-aside. The copiedFrom binding is history's
+// wave-25 removal-gate restore-read step verbatim (dev/inode when both
+// sides expose it, then size + mtime — carried as the validated no-follow
+// Lstat object, never snapshotted into values, so virtual-filesystem live
+// views stay self-consistent with the removal-side lookup): a
+// symlink/non-regular occupant, any fact mismatch, or an indeterminate stat
+// all REFUSE the deletion so the occupant stays byte-intact and the journal
+// entry remains armed. The documented residual is the wave-25 check→Remove
+// window (porting history's wave-26 quarantine move was weighed and kept
+// out as the larger lift); a nil copiedFrom keeps the pre-wave-31 pathname
+// posture.
+func removeRollbackBackup(fsys afero.Fs, backup string, copiedFrom os.FileInfo, phase string) error {
+	if copiedFrom != nil {
+		info, lerr := lstatBackupCandidate(fsys, backup)
+		switch {
+		case lerr == nil:
+			if info == nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+				return refuseRollbackBackupRemoval(backup, phase, "name no longer names the copied object (foreign occupant preserved)")
+			}
+			if srcDev, srcIno, srcOK := restoreSourceIdentity(copiedFrom); srcOK {
+				if curDev, curIno, curOK := restoreSourceIdentity(info); curOK && (srcDev != curDev || srcIno != curIno) {
+					return refuseRollbackBackupRemoval(backup, phase, "occupant is not the object the rollback copied (dev/inode mismatch) — foreign bytes preserved")
+				}
+			}
+			if info.Size() != copiedFrom.Size() || !info.ModTime().Equal(copiedFrom.ModTime()) {
+				return refuseRollbackBackupRemoval(backup, phase, "occupant metadata differs from the object the rollback copied — foreign bytes preserved")
+			}
+		case os.IsNotExist(lerr):
+			// Already gone == removed (the established ownership rule above).
+		default:
+			logging.Warnf("downloader: %s failed to inspect backup %s before removal: %v; journal entry remains armed", phase, backup, lerr)
+			return lerr
+		}
+	}
 	if err := fsys.Remove(backup); err != nil && !os.IsNotExist(err) {
 		logging.Warnf("downloader: %s failed to remove backup %s: %v; journal entry remains armed", phase, backup, err)
 		return err
 	}
 	return nil
+}
+
+// refuseRollbackBackupRemoval keeps a proven-foreign backup occupant
+// byte-intact and surfaces the refusal through the caller's
+// backup-cleanup-failed leg (journal entry stays armed), mirroring history's
+// refuseReplacementBackupRemoval warn+typed-error discipline.
+func refuseRollbackBackupRemoval(backup, phase, reason string) error {
+	logging.Warnf("downloader: %s refused to remove backup %s: %s; journal entry remains armed", phase, backup, reason)
+	return fmt.Errorf("%s: rollback backup removal %s refused: %s", phase, backup, reason)
 }
 
 // captureReplacementBackupFacts reads the JUST-established set-aside's
@@ -363,7 +458,20 @@ type installedDestIdentity struct {
 // non-symlink object (including a read failure) yields the unknown identity.
 func captureInstalledDestIdentity(fsys afero.Fs, destPath string) installedDestIdentity {
 	info, err := lstatBackupCandidate(fsys, destPath)
-	if err != nil || info == nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+	if err != nil {
+		return installedDestIdentity{}
+	}
+	return installedIdentityFromFileInfo(info)
+}
+
+// installedIdentityFromFileInfo builds an installedDestIdentity from an
+// already-looked-up FileInfo (wave-31): the no-follow rollback SOURCE handle's
+// fstat (rollbackCopyFacts.copied) and fsutil.PublishStagedBoundInfo's
+// post-publish-VERIFIED destination stat (rollbackCopyFacts.restored) both
+// arrive as FileInfo. A nil, symlink, or non-regular answer yields the
+// unknown identity — never a guess.
+func installedIdentityFromFileInfo(info os.FileInfo) installedDestIdentity {
+	if info == nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
 		return installedDestIdentity{}
 	}
 	id := installedDestIdentity{known: true, size: info.Size(), modTime: info.ModTime()}
@@ -372,6 +480,22 @@ func captureInstalledDestIdentity(fsys afero.Fs, destPath string) installedDestI
 		id.dev, id.ino = dev, ino
 	}
 	return id
+}
+
+// rollbackRestoredDestStillOurs is the confirm-rollback's restored-destination
+// recheck seam (wave-31, codex local round 1, PR#215 finding L1): production
+// wiring is destStillHoldsInstalledObject against the rollback copy's
+// published identity; an UNKNOWN identity (virtual/wrapper filesystem legs
+// report no publish identity) SKIPS the check — the documented wave-31
+// residual — rather than refusing a good rollback on nothing. Tests replay
+// the foreign swap/deletion landing inside the publish→recheck window, an
+// instant no afero double can reach while the wave-30 real-OsFs identity gate
+// is up; the real-OsFs detection itself is pinned by direct unit tests.
+var rollbackRestoredDestStillOurs = func(fsys afero.Fs, dest string, id installedDestIdentity) bool {
+	if !id.known {
+		return true
+	}
+	return destStillHoldsInstalledObject(fsys, dest, id)
 }
 
 // destStillHoldsInstalledObject re-derives the destination's identity the
@@ -721,10 +845,30 @@ func (d *Downloader) installOverwriting(ctx context.Context, stagedPath, destPat
 			logging.Warnf("downloader: rollback restore of %s refused — destination no longer names the just-installed object after confirm failure (%v); foreign bytes kept, backup %s retained in place, journal entry stays armed", destPath, cErr, backupPath)
 			return false, true, fmt.Errorf("install-confirm failed: %w (rollback restore refused — destination no longer holds the installed object; foreign bytes preserved, backup retained at %s, journal entry stays armed)", cErr, backupPath)
 		}
-		if rErr := copyBackupToDest(d.fs, backupPath, destPath); rErr != nil {
+		copyFacts, rErr := copyBackupToDestBound(d.fs, backupPath, destPath)
+		if rErr != nil {
 			return false, true, fmt.Errorf("install-confirm failed: %w (AND rollback restore failed: %v — bytes remain at %s)", cErr, rErr, backupPath)
 		}
-		if rmErr := removeRollbackBackup(d.fs, backupPath, "install-confirm rollback"); rmErr != nil {
+		// Wave-31 (codex local round 1, PR#215 finding L1): the copy returned
+		// the destination's OWN post-publish object identity; the destination
+		// must STILL name the restored object before the backup — the sole
+		// remaining copy of the pre-existing bytes — is removed and the journal
+		// entry retracted. A foreign writer swapping or deleting the
+		// destination inside the publish→remove window otherwise had the
+		// (now-foreign) destination blessed while the backup was unlinked and
+		// the entry released. On mismatch: refuse — the destination stays
+		// untouched, the backup is RETAINED, and the entry stays ARMED for
+		// sweep/revert arbitration.
+		if !rollbackRestoredDestStillOurs(d.fs, destPath, copyFacts.restored) {
+			logging.Warnf("downloader: confirm-failure rollback of %s restored the pre-existing bytes but the destination no longer names the restored object — backup %s retained in place, journal entry stays armed, destination untouched", destPath, backupPath)
+			return false, true, fmt.Errorf("install-confirm failed: %w (rollback restore of %s landed but the destination no longer names the restored object; backup retained at %s, journal entry stays armed)", cErr, destPath, backupPath)
+		}
+		// Wave-31 (codex local round 1, PR#215 finding L2): the backup removal
+		// is bound to the object the rollback COPIED (the in-memory facts
+		// recorded from the no-follow source handle) — a foreign plant swapped
+		// onto the backup name inside the copy→remove window is kept
+		// byte-intact instead of being unlinked in the set-aside's place.
+		if rmErr := removeRollbackBackup(d.fs, backupPath, copyFacts.copied, "install-confirm rollback"); rmErr != nil {
 			return false, true, fmt.Errorf("install-confirm failed, rolled back to pre-existing bytes, but backup cleanup failed: %w (confirmation error: %v; entry stays armed)", rmErr, cErr)
 		}
 		if relErr := ledger.recorder.ReleaseReplacement(ctx, ledger.opID, destPath, backupPath); relErr != nil {

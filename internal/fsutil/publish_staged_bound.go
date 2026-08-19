@@ -197,6 +197,33 @@ type StagedPublish struct {
 // a foreign plant sits on it, removing it discards attacker junk (never
 // genuine bytes: those live on the handle until close).
 func PublishStagedBound(p StagedPublish) error {
+	_, err := PublishStagedBoundInfo(p)
+	return err
+}
+
+// PublishStagedBoundInfo is PublishStagedBound with the PUBLISHED object's
+// identity handed back (wave-31, codex local round 1, PR#215 findings
+// L1/L2): a restore/rollback caller must revalidate that its destination
+// still names the object the publish landed BEFORE it deletes its source
+// backup or consumes the journal — a foreign writer using the
+// publish→remove window otherwise gets the last recoverable copy destroyed.
+//
+// On a proven publish the returned FileInfo is the destination's own
+// post-publish stat, os.SameFile-bound to the staged inode:
+//
+//   - POSIX legs hand back the reverify lookup (with a fresh relookup after
+//     the ENOSYS deferred-times leg so the stats carry the applied times);
+//   - the Windows leg hands back its post-publish reverify stat;
+//   - the VIRTUAL leg (wrapper/MemMap filesystems — no rename-away threat
+//     model, no handle identity) reports nil with the publish's own error
+//     result: a nil info with a nil error means the publish succeeded but
+//     there is no provable identity to revalidate against, and the caller
+//     keeps its documented pre-wave-31 residual posture for that leg
+//     instead of either trusting or refusing on nothing.
+//
+// Every error class is exactly PublishStagedBound's — the identity is nil
+// on any failure.
+func PublishStagedBoundInfo(p StagedPublish) (os.FileInfo, error) {
 	if _, ok := osStagingHandle(p.FS, p.Handle); !ok {
 		// Virtual/wrapper leg: the exact pre-wave-30 tail — fd-hardness does
 		// not exist here, mem handles re-stamp at Close, and the path
@@ -204,11 +231,11 @@ func PublishStagedBound(p StagedPublish) error {
 		if err := CloseStaged(p.FS, p.Staged, p.Handle, p.Atime, p.Mtime, p.ApplyTimes); err != nil {
 			var timesErr *StagingTimesError
 			if errors.As(err, &timesErr) {
-				return err
+				return nil, err
 			}
-			return fmt.Errorf("%w: %s: %w", ErrPublishStagedClose, p.Staged, err)
+			return nil, fmt.Errorf("%w: %s: %w", ErrPublishStagedClose, p.Staged, err)
 		}
-		return p.Publish(p.FS, p.Staged, p.Dest)
+		return nil, p.Publish(p.FS, p.Staged, p.Dest)
 	}
 	return publishStagedBoundOS(p)
 }

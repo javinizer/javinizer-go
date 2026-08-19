@@ -899,8 +899,23 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 	// identity before the copy so the backup removals below can refuse any
 	// object that no longer matches what this leg actually restored.
 	backupInfoBeforeCopy, _ := lstatRestoreSource(s.fs, backup)
-	if rnErr := copyRestoreBytesNoReplace(s.fs, backup, dest); rnErr != nil {
+	restoredID, rnErr := copyRestoreBytesNoReplaceIdentity(s.fs, backup, dest)
+	if rnErr != nil {
 		logging.Warnf("replacement sweep restore %s→%s: %v", backup, dest, rnErr)
+		return false
+	}
+	// Wave-31 (codex local round 1, PR#215 finding L1): before ANY backup
+	// removal or journal consumption below (the already-consumed shortcut and
+	// the armed consumption alike), the destination must STILL name the exact
+	// object this leg just published. A foreign writer swapping or deleting
+	// dest in the publish→remove window no longer gets the backup (the sole
+	// remaining copy of the pre-replacement bytes) unlinked nor the entry
+	// consumed: both stay retained, the destination is left untouched, and
+	// the entry stays ARMED — deliberately NOT marked restore-pending, whose
+	// marker would certify dest carries restored bytes (unproven now) and
+	// drive a backup removal + consumption without a restore.
+	if !restoredDestStillOurs(s.fs, dest, restoredID) {
+		logging.Warnf("replacement sweep %s: restored destination %s no longer names the published restore object (foreign swap or deletion in the restore window) — backup retained, journal entry left armed, destination untouched", backup, dest)
 		return false
 	}
 

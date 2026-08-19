@@ -274,6 +274,11 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 				if statErr != nil {
 					return fmt.Errorf("journaled backup %s for destination %s is unreadable: %w", e.Backup, dest, statErr)
 				}
+				// Wave-31: the identity the wave-31 recheck binds to is declared
+				// here so the armed leg's copy can fill it; the pending legs copy
+				// nothing (their dest was certified when the marker was written)
+				// and skip the recheck entirely.
+				var restoredID restoredDestIdentity
 				// A live entry carrying the durable RestorePending marker has its
 				// destination bytes certified in place already: only the backup
 				// cleanup and the journal consumption remain. NEVER copy from the
@@ -286,11 +291,26 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 				// copy-or-remove region: it consumed above without touching the
 				// backup path.)
 				if !restorePending {
-					if repErr := copyRestoreBytes(r.fs, e.Backup, dest); repErr != nil {
+					var repErr error
+					restoredID, repErr = copyRestoreBytesIdentity(r.fs, e.Backup, dest)
+					if repErr != nil {
 						return fmt.Errorf("failed to restore %s → %s: %w", e.Backup, dest, repErr)
 					}
 				}
 				restored[dest] = true
+				// Wave-31 (codex local round 1, PR#215 finding L1): an armed leg just
+				// PUBLISHED the restored bytes at dest — before the backup removal +
+				// journal consumption below, dest must STILL name that exact object.
+				// A foreign writer swapping or deleting dest in the publish→remove
+				// window no longer gets the backup (the sole remaining copy of the
+				// pre-replacement bytes) unlinked or the only journal record of the
+				// restore consumed: the entry stays ARMED (never marked pending —
+				// that marker certifies dest carries restored bytes, unproven now),
+				// the backup and destination stay untouched, and the op surfaces
+				// unexpected-path-state for an explicit retry.
+				if !restorePending && !restoredDestStillOurs(r.fs, dest, restoredID) {
+					return fmt.Errorf("restored %s → %s but the destination no longer names the restored object (foreign swap or deletion in the restore window) — backup retained, journal entry left armed, destination untouched", e.Backup, dest)
+				}
 				// Wave-25 (codex P3 PR#215 finding 2): the removal must bind to the
 				// OWNED object — the entry's arm-time facts (downloader-stamped
 				// size/mtime) plus the identity of the object this leg just classed
@@ -670,7 +690,18 @@ func restoreOSPath(p string) string {
 // rename; the caller removes the backup before consuming its journal entry.
 // Replace semantics are the reverter's: undo puts old bytes over whatever the
 // destination currently holds (a chained restore replaces the newer link).
+//
+//nolint:unused // test-facing error-only shape pinned across waves 7–30; production restore legs ride the wave-31 identity variant.
 func copyRestoreBytes(fs afero.Fs, backup, dest string) error {
+	_, err := copyRestoreBytesIdentity(fs, backup, dest)
+	return err
+}
+
+// copyRestoreBytesIdentity is copyRestoreBytes with the restored object's
+// publish-time identity handed back (wave-31, codex local round 1, PR#215
+// finding L1): the caller revalidates that dest still names THAT object
+// before any backup deletion or journal consumption runs.
+func copyRestoreBytesIdentity(fs afero.Fs, backup, dest string) (restoredDestIdentity, error) {
 	return copyRestoreBytesPublish(fs, backup, dest, fsutil.ReplaceFile, false)
 }
 
@@ -692,10 +723,19 @@ func copyRestoreBytes(fs afero.Fs, backup, dest string) error {
 // restore refuses rather than falling back to replacing semantics, the
 // backup stays retained, and the journal entry stays unconsumed.
 func copyRestoreBytesNoReplace(fs afero.Fs, backup, dest string) error {
+	_, err := copyRestoreBytesNoReplaceIdentity(fs, backup, dest)
+	return err
+}
+
+// copyRestoreBytesNoReplaceIdentity is copyRestoreBytesNoReplace with the
+// restored object's publish-time identity handed back (wave-31): the sweep's
+// restore-and-consume leg revalidates dest against it before the backup
+// removals and journal consumptions below ever run.
+func copyRestoreBytesNoReplaceIdentity(fs afero.Fs, backup, dest string) (restoredDestIdentity, error) {
 	return copyRestoreBytesPublish(fs, backup, dest, fsutil.PublishNoReplace, true)
 }
 
-func copyRestoreBytesPublish(fs afero.Fs, backup, dest string, publish func(afero.Fs, string, string) error, noReplace bool) error {
+func copyRestoreBytesPublish(fs afero.Fs, backup, dest string, publish func(afero.Fs, string, string) error, noReplace bool) (restoredDestIdentity, error) {
 	// Journal spellings may carry the legacy `/` form on Windows: every OS call
 	// built on dest below (the .rstr staging name -> mode fix-up Chmod,
 	// Chtimes, and ReplaceFile's native MoveFileEx on the swap) sees the
@@ -705,16 +745,16 @@ func copyRestoreBytesPublish(fs afero.Fs, backup, dest string, publish func(afer
 	// backup symlink and copy its target into the media directory.
 	sourceInfo, err := lstatRestoreSource(fs, backup)
 	if err != nil {
-		return fmt.Errorf("read backup: %w", err)
+		return restoredDestIdentity{}, fmt.Errorf("read backup: %w", err)
 	}
 	if sourceInfo == nil {
-		return refuseRestoreSource(backup, "filesystem returned no file information")
+		return restoredDestIdentity{}, refuseRestoreSource(backup, "filesystem returned no file information")
 	}
 	if sourceInfo.Mode()&os.ModeSymlink != 0 {
-		return refuseRestoreSource(backup, "backup is a symlink")
+		return restoredDestIdentity{}, refuseRestoreSource(backup, "backup is a symlink")
 	}
 	if !sourceInfo.Mode().IsRegular() {
-		return refuseRestoreSource(backup, fmt.Sprintf("backup is not a regular file (mode %s)", sourceInfo.Mode()))
+		return restoredDestIdentity{}, refuseRestoreSource(backup, fmt.Sprintf("backup is not a regular file (mode %s)", sourceInfo.Mode()))
 	}
 
 	// The open itself is platform-specific (see restoreOpenReplacementSource):
@@ -726,7 +766,7 @@ func copyRestoreBytesPublish(fs afero.Fs, backup, dest string, publish func(afer
 	// for non-OsFs implementations.
 	src, err := restoreOpenReplacementSource(fs, backup)
 	if err != nil {
-		return fmt.Errorf("read backup: %w", err)
+		return restoredDestIdentity{}, fmt.Errorf("read backup: %w", err)
 	}
 	defer func() { _ = src.Close() }()
 
@@ -734,14 +774,14 @@ func copyRestoreBytesPublish(fs afero.Fs, backup, dest string, publish func(afer
 	// still regular, and compare identity when the OsFs Stat_t is available.
 	openedInfo, err := src.Stat()
 	if err != nil {
-		return fmt.Errorf("stat opened backup: %w", err)
+		return restoredDestIdentity{}, fmt.Errorf("stat opened backup: %w", err)
 	}
 	if openedInfo == nil || openedInfo.Mode()&os.ModeSymlink != 0 || !openedInfo.Mode().IsRegular() {
-		return refuseRestoreSource(backup, "opened object is not a regular file")
+		return restoredDestIdentity{}, refuseRestoreSource(backup, "opened object is not a regular file")
 	}
 	if sourceDev, sourceIno, sourceOK := restoreSourceIdentity(sourceInfo); sourceOK {
 		if openedDev, openedIno, openedOK := restoreSourceIdentity(openedInfo); openedOK && (sourceDev != openedDev || sourceIno != openedIno) {
-			return refuseRestoreSource(backup, "opened object differs from the Lstat object")
+			return restoredDestIdentity{}, refuseRestoreSource(backup, "opened object differs from the Lstat object")
 		}
 	}
 
@@ -751,7 +791,7 @@ func copyRestoreBytesPublish(fs afero.Fs, backup, dest string, publish func(afer
 	mode := openedInfo.Mode().Perm()
 	staged, dstFile, err := fsutil.CreateExclusiveStagingFile(fs, dest, ".rstr", stagedOrdinal, mode)
 	if err != nil {
-		return fmt.Errorf("stage restore open: %w", err)
+		return restoredDestIdentity{}, fmt.Errorf("stage restore open: %w", err)
 	}
 	// R5-3: stream with a bounded buffer — trailer-class backups can reach
 	// gigabytes; a whole-file read would exhaust memory on revert/startup
@@ -760,7 +800,7 @@ func copyRestoreBytesPublish(fs afero.Fs, backup, dest string, publish func(afer
 	if _, cerr := io.CopyBuffer(dstFile, src, buf); cerr != nil {
 		_ = dstFile.Close()
 		_ = fs.Remove(staged)
-		return fmt.Errorf("stage restore copy: %w", cerr)
+		return restoredDestIdentity{}, fmt.Errorf("stage restore copy: %w", cerr)
 	}
 	// Wave-8 codex P2 follow-up: hand the staged inode back to the backup's
 	// owner BEFORE the swap, mirroring the downloader's rollback restore
@@ -790,7 +830,11 @@ func copyRestoreBytesPublish(fs afero.Fs, backup, dest string, publish func(afer
 	// caller-facing phase split below preserves every pre-wave-30 wrap text
 	// and cleanup posture: an unproven staged name is never removed; a
 	// proven-ours staged name is removed exactly where wave-29 removed it.
-	pubErr := fsutil.PublishStagedBound(fsutil.StagedPublish{
+	// wave-31 (codex local round 1, PR#215 finding L1): the Info variant hands
+	// back the post-publish-VERIFIED destination object — the staged inode as
+	// it landed — so the caller can revalidate dest against exactly what this
+	// restore published before deleting the backup or consuming the journal.
+	published, pubErr := fsutil.PublishStagedBoundInfo(fsutil.StagedPublish{
 		FS:          fs,
 		Publish:     publish,
 		NoReplace:   noReplace,
@@ -807,19 +851,19 @@ func copyRestoreBytesPublish(fs afero.Fs, backup, dest string, publish func(afer
 		var timesErr *fsutil.StagingTimesError
 		switch {
 		case errors.Is(pubErr, fsutil.ErrPublishStagedVerify):
-			return fmt.Errorf("stage restore identity: %w", pubErr)
+			return restoredDestIdentity{}, fmt.Errorf("stage restore identity: %w", pubErr)
 		case errors.As(pubErr, &timesErr):
 			_ = fs.Remove(staged)
-			return fmt.Errorf("stage restore times: %w", pubErr)
+			return restoredDestIdentity{}, fmt.Errorf("stage restore times: %w", pubErr)
 		case errors.Is(pubErr, fsutil.ErrPublishStagedClose):
 			_ = fs.Remove(staged)
-			return fmt.Errorf("stage restore close: %w", pubErr)
+			return restoredDestIdentity{}, fmt.Errorf("stage restore close: %w", pubErr)
 		default:
 			_ = fs.Remove(staged)
-			return fmt.Errorf("swap staged restore: %w", pubErr)
+			return restoredDestIdentity{}, fmt.Errorf("swap staged restore: %w", pubErr)
 		}
 	}
-	return nil
+	return restoredDestIdentityFrom(published), nil
 }
 
 // openRearmSource opens the destination whose bytes must rebuild a removed

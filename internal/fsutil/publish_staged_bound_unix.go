@@ -25,7 +25,9 @@ var publishStagedBoundDeferredChtimes = func(fs afero.Fs, name string, atime, mt
 // stays OPEN through the path publish (rename/hard-link publishes never
 // needed it closed), and a successful publish is re-verified against the
 // handle's identity — fh identity was captured by the pre-publish fstat and
-// cannot change while the descriptor stays open.
+// cannot change while the descriptor stays open. The post-publish VERIFIED
+// destination stat rides the first return (wave-31): callers revalidate the
+// destination against it before deleting their restore source.
 //
 // The loop, bounded by PublishStagedBoundAttempts:
 //
@@ -52,7 +54,7 @@ var publishStagedBoundDeferredChtimes = func(fs afero.Fs, name string, atime, mt
 //  5. an indeterminate dest lookup, a restaging failure, or a persistent
 //     substitution past the budget returns typed errors — the genuine
 //     source backup is retained by every caller, so nothing is consumed.
-func publishStagedBoundOS(p StagedPublish) error {
+func publishStagedBoundOS(p StagedPublish) (os.FileInfo, error) {
 	staged, fh := p.Staged, p.Handle
 	// Recomputed after every re-stage; the caller's gate (osStagingHandle)
 	// guarantees the first unwrapping succeeds, and re-stages always produce
@@ -64,14 +66,14 @@ func publishStagedBoundOS(p StagedPublish) error {
 			// The staged name is unproven (foreign or vanished): refuse
 			// BEFORE any publish, leave the name untouched, drop the handle.
 			_ = fh.Close()
-			return fmt.Errorf("%w: %w", ErrPublishStagedVerify, verr)
+			return nil, fmt.Errorf("%w: %w", ErrPublishStagedVerify, verr)
 		}
 		pendingTimes := false
 		if p.ApplyTimes {
 			if terr := stagedHandleChtimes(of.Fd(), p.Atime, p.Mtime); terr != nil {
 				if !errors.Is(terr, syscall.ENOSYS) {
 					_ = fh.Close()
-					return &StagingTimesError{Staged: staged, Err: terr}
+					return nil, &StagingTimesError{Staged: staged, Err: terr}
 				}
 				// No fd-scoped timestamp wrapper on this platform (see
 				// staging_times_unixother.go): defer to the name-based leg
@@ -82,7 +84,7 @@ func publishStagedBoundOS(p StagedPublish) error {
 		}
 		if pubErr := p.Publish(p.FS, staged, p.Dest); pubErr != nil {
 			_ = fh.Close()
-			return pubErr
+			return nil, pubErr
 		}
 		// Post-publish reverify. The handle still names our inode regardless
 		// of any directory-level renaming, so only the destination side is
@@ -99,16 +101,28 @@ func publishStagedBoundOS(p StagedPublish) error {
 			if pendingTimes {
 				if cerr := publishStagedBoundDeferredChtimes(p.FS, p.Dest, p.Atime, p.Mtime); cerr != nil {
 					_ = fh.Close()
-					return &StagingTimesError{Staged: p.Dest, Err: cerr}
+					return nil, &StagingTimesError{Staged: p.Dest, Err: cerr}
 				}
+				// wave-31: hand back a FRESH destination identity carrying the
+				// just-applied times — destInfo predates the deferred Chtimes,
+				// and the callers' destination revalidations compare mtime. A
+				// failed relookup keeps the proven publish but reports NO
+				// identity (nil answer): the caller's documented residual posture
+				// instead of a stale-mtime false refusal.
+				fresh, ferr := publishStagedBoundDestLstat(p.Dest)
+				_ = fh.Close()
+				if ferr != nil {
+					fresh = nil
+				}
+				return fresh, nil
 			}
 			_ = fh.Close()
-			return nil
+			return destInfo, nil
 		case lerr != nil && !os.IsNotExist(lerr):
 			// Indeterminate destination: nothing proven about the name —
 			// refuse typed, keep the caller's backup, touch nothing.
 			_ = fh.Close()
-			return fmt.Errorf("post-publish publish reverify of %s: %w: %w", p.Dest, lerr, ErrPublishStagedIdentityBreak)
+			return nil, fmt.Errorf("post-publish publish reverify of %s: %w: %w", p.Dest, lerr, ErrPublishStagedIdentityBreak)
 		}
 		// The published bytes are NOT ours (mismatch) or are gone again
 		// (ENOENT): the staged inode survives on the handle. Displace the
@@ -139,12 +153,12 @@ func publishStagedBoundOS(p StagedPublish) error {
 				// legitimate occupant. Preserve it byte-intact and refuse
 				// typed rather than restaging over unverified bytes.
 				_ = fh.Close()
-				return fmt.Errorf("%w at %s — post-publish occupant preserved, recovery refused (re-stage from handle not attempted over unverified foreign bytes): %w", ErrPublishStagedForeignOccupant, p.Dest, ErrPublishStagedIdentityBreak)
+				return nil, fmt.Errorf("%w at %s — post-publish occupant preserved, recovery refused (re-stage from handle not attempted over unverified foreign bytes): %w", ErrPublishStagedForeignOccupant, p.Dest, ErrPublishStagedIdentityBreak)
 			case !os.IsNotExist(oerr):
 				// Indeterminate re-lookup: nothing is proven about the name —
 				// refuse typed, same posture as the detection-side failure.
 				_ = fh.Close()
-				return fmt.Errorf("post-publish occupant binding lookup of %s: %w: %w", p.Dest, oerr, ErrPublishStagedIdentityBreak)
+				return nil, fmt.Errorf("post-publish occupant binding lookup of %s: %w: %w", p.Dest, oerr, ErrPublishStagedIdentityBreak)
 			}
 			// os.IsNotExist(oerr): the plant vanished inside the window —
 			// nothing to displace; the restage below republishes into absence.
@@ -155,18 +169,18 @@ func publishStagedBoundOS(p StagedPublish) error {
 			// callers' conservative legs retain the genuine backup — the
 			// finding's consume-after-plant harm is closed even here.
 			_ = fh.Close()
-			return fmt.Errorf("%w after %d attempts for %s: %w", ErrPublishStagedExhausted, PublishStagedBoundAttempts, p.Dest, ErrPublishStagedIdentityBreak)
+			return nil, fmt.Errorf("%w after %d attempts for %s: %w", ErrPublishStagedExhausted, PublishStagedBoundAttempts, p.Dest, ErrPublishStagedIdentityBreak)
 		}
 		newStaged, newFh, serr := CreateExclusiveStagingFile(p.FS, p.Dest, p.Suffix, p.NextOrdinal(), handleInfo.Mode().Perm())
 		if serr != nil {
 			_ = fh.Close()
-			return fmt.Errorf("re-stage substituted staged file for %s: %w: %w", p.Dest, serr, ErrPublishStagedIdentityBreak)
+			return nil, fmt.Errorf("re-stage substituted staged file for %s: %w: %w", p.Dest, serr, ErrPublishStagedIdentityBreak)
 		}
 		if rerr := publishStagedBoundRestream(fh, newFh); rerr != nil {
 			_ = newFh.Close()
 			_ = fh.Close()
 			_ = p.FS.Remove(newStaged)
-			return fmt.Errorf("re-stage substituted bytes for %s: %w: %w", p.Dest, rerr, ErrPublishStagedIdentityBreak)
+			return nil, fmt.Errorf("re-stage substituted bytes for %s: %w: %w", p.Dest, rerr, ErrPublishStagedIdentityBreak)
 		}
 		// The fresh inode mirrors the original's metadata: ownership rides
 		// the handle again (best-effort, same as the callers' pre-publish

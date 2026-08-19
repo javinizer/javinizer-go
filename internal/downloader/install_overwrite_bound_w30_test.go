@@ -66,8 +66,13 @@ func TestRollbackW30_PlantedBetweenVerifyAndPublishRepublishesGenuine(t *testing
 		}
 		return fsutil.ReplaceFile(fsys, src, dst)
 	}
-	err := copyBackupToDestPublish(fs, backup, dest, wedge, false)
+	facts, err := copyBackupToDestPublish(fs, backup, dest, wedge, false)
 	require.NoError(t, err, "the reverify republish recovers the rollback")
+	require.True(t, facts.restored.known, "the recovery loop's final published inode is the returned identity")
+	require.NotNil(t, facts.copied, "the streamed backup object's binding rides back for the removal gate")
+	curInfo, serr := os.Lstat(dest)
+	require.NoError(t, serr)
+	require.Equal(t, facts.restored.size, curInfo.Size())
 	require.Equal(t, 1, attacked)
 	got, rerr := os.ReadFile(dest)
 	require.NoError(t, rerr)
@@ -108,7 +113,8 @@ func TestRollbackW30_RearmPersistentPlantExhaustsTyped(t *testing.T) {
 
 // copyBackupToDestNoReplace with a wedged publish for the attack tests.
 func copyBackupToDestNoReplaceW30(fsys afero.Fs, backup, dest string, wedge func(afero.Fs, string, string) error) error {
-	return copyBackupToDestPublish(fsys, backup, dest, wedge, true)
+	_, err := copyBackupToDestPublish(fsys, backup, dest, wedge, true)
+	return err
 }
 
 // A name swapped BEFORE the helper's own verify refuses typed through the
