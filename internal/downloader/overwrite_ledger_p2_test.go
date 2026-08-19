@@ -28,12 +28,19 @@ type armedTestLedger struct {
 	mu       sync.Mutex
 	records  []replacementRecord
 	released []replacementRecord
-	pendings []replacementRecord // entries marked restore-pending (wave-19 rearm-refused)
+	pendings []pendingRecord // entries marked restore-pending (kind-carrying, wave-19+21)
 }
 
 type replacementRecord struct {
 	replacedPath string
 	backupPath   string
+}
+
+// pendingRecord is a restore-pending mark WITH its wave-21 routing kind.
+type pendingRecord struct {
+	replacedPath string
+	backupPath   string
+	kind         string
 }
 
 func (l *armedTestLedger) RecordReplacement(_ context.Context, _, replacedPath, backupPath string) error {
@@ -47,21 +54,21 @@ func (l *armedTestLedger) ConfirmReplacement(_ context.Context, _, _, _ string) 
 	return nil
 }
 
-// MarkReplacementRestorePending records the wave-19 rearm-refused pending
-// mark WITHOUT releasing the entry: it stays journaled (the durable row
-// equivalent keeps it too), so tests assert both the untriggered release
-// and the delivered mark.
-func (l *armedTestLedger) MarkReplacementRestorePending(_ context.Context, _, replacedPath, backupPath string) error {
+// MarkReplacementRestorePendingKind records the restore-pending mark WITH
+// its routing kind WITHOUT releasing the entry: it stays journaled (the
+// durable row equivalent keeps it too), so tests assert both the
+// untriggered release and the delivered mark+kind.
+func (l *armedTestLedger) MarkReplacementRestorePendingKind(_ context.Context, _, replacedPath, backupPath, kind string) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.pendings = append(l.pendings, replacementRecord{replacedPath, backupPath})
+	l.pendings = append(l.pendings, pendingRecord{replacedPath: replacedPath, backupPath: backupPath, kind: kind})
 	return nil
 }
 
-func (l *armedTestLedger) getPendings() []replacementRecord {
+func (l *armedTestLedger) getPendings() []pendingRecord {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	out := make([]replacementRecord, len(l.pendings))
+	out := make([]pendingRecord, len(l.pendings))
 	copy(out, l.pendings)
 	return out
 }
@@ -166,7 +173,7 @@ func (l *failingTestLedger) ReleaseReplacement(context.Context, string, string, 
 	return nil
 }
 
-func (l *failingTestLedger) MarkReplacementRestorePending(context.Context, string, string, string) error {
+func (l *failingTestLedger) MarkReplacementRestorePendingKind(context.Context, string, string, string, string) error {
 	return nil
 }
 

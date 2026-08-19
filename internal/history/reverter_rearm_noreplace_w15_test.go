@@ -85,7 +85,7 @@ func TestW15RearmPublishCollisionPreservesForeignBackup(t *testing.T) {
 	require.Equal(t, "current-bytes", string(mustReadHistoryW15(t, base, dest)),
 		"the re-arm source is untouched")
 	for _, name := range w15DirListing(t, base, dir) {
-		require.NotContains(t, name, ".tmp-", "the staged re-arm copy is cleaned up (saw %q)", name)
+		require.NotContains(t, name, rearmStagingSuffix+".", "the staged re-arm copy is cleaned up (saw %q)", name)
 	}
 }
 
@@ -105,7 +105,7 @@ func TestW15RearmPublishOccupiedAtClassifyPreservesForeignBackup(t *testing.T) {
 	require.Equal(t, "foreign-bytes", string(mustReadHistoryW15(t, base, backup)))
 	require.Equal(t, "current-bytes", string(mustReadHistoryW15(t, base, dest)))
 	for _, name := range w15DirListing(t, base, dir) {
-		require.NotContains(t, name, ".tmp-", "the staged re-arm copy is cleaned up")
+		require.NotContains(t, name, rearmStagingSuffix+".", "the staged re-arm copy is cleaned up")
 	}
 }
 
@@ -181,7 +181,7 @@ func TestW15ReverterRearmCollisionKeepsArmedPostureAndForeignBytes(t *testing.T)
 		"round 18 (codex P2): after a collided re-arm the entry is marked restore-pending — never left armed against the foreign occupant")
 
 	for _, name := range w15DirListing(t, fixture.fs, filepath.Dir(dest)) {
-		require.False(t, strings.Contains(name, ".tmp-"), "no staged re-arm residue (saw %q)", name)
+		require.False(t, strings.Contains(name, rearmStagingSuffix+"."), "no staged re-arm residue (saw %q)", name)
 	}
 	_, markerErr := fixture.fs.Stat(fsutil.ReplacementBusyPath(dest))
 	require.ErrorIs(t, markerErr, os.ErrNotExist, "the destination busy marker is released")

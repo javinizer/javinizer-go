@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -142,25 +143,34 @@ func TestReplacementPendingCovW9_RearmPreservesModeAndMtime(t *testing.T) {
 	require.ErrorIs(t, err, os.ErrNotExist)
 }
 
+// Wave-21 (codex P1) re-pointed this wedge: the re-arm's mode application
+// is the create-time Chmod on the exclusively staged `<backup>.dlrarm.<hex>`
+// name inside fsutil.CreateExclusiveStagingFile — no Chmod ever targets the
+// published backup path — so the failure is strictly PRE-publish and the
+// backup never materializes.
 func TestReplacementPendingCovW9_RearmChmodFailure(t *testing.T) {
 	base := afero.NewMemMapFs()
-	fs := &w9ChmodFailFs{Fs: base, failPath: "/out/W9-CHMOD/dest.jpg.dlbak." + p3HexA}
+	fs := &w9ChmodFailFs{Fs: base}
 	dest := "/out/W9-CHMOD/dest.jpg"
-	backup := fs.failPath
+	backup := dest + ".dlbak." + p3HexA
 	require.NoError(t, base.MkdirAll(filepath.Dir(dest), config.DirPerm))
 	require.NoError(t, afero.WriteFile(base, dest, []byte("old"), config.FilePerm))
 	info, err := base.Stat(dest)
 	require.NoError(t, err)
 	require.Error(t, rearmReplacementBackup(fs, dest, backup, info))
+	require.True(t, fs.fired, "the staged-name chmod wedge fired")
+	_, serr := base.Stat(backup)
+	require.ErrorIs(t, serr, os.ErrNotExist, "a pre-publish mode failure publishes nothing")
 }
 
 type w9ChmodFailFs struct {
 	afero.Fs
-	failPath string
+	fired bool
 }
 
 func (f *w9ChmodFailFs) Chmod(name string, mode os.FileMode) error {
-	if filepath.Clean(name) == filepath.Clean(f.failPath) {
+	if strings.Contains(name, rearmStagingSuffix+".") {
+		f.fired = true
 		return errors.New("chmod wedged")
 	}
 	return f.Fs.Chmod(name, mode)

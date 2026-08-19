@@ -15,12 +15,35 @@ package fsutil
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
+
+// Wave-21 (codex P2): PublishCompleted is the exported classifier sharing
+// the ownership signal with both compensating callers (history's
+// rearmPendingKind, the downloader's rollbackRearmPendingKind) — pin its
+// exact truth table, including wrap traversal and refusal disjointness.
+func TestPublishCompletedW21_ClassifierTruthTable(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"sentinel", ErrPublishCompleted, true},
+		{"wrapped", fmt.Errorf("no-replace publish /a -> /b: staged cleanup failed AND publish rollback failed: %w", ErrPublishCompleted), true},
+		{"double-wrapped", fmt.Errorf("swap rollback: %w", fmt.Errorf("outer: %w", ErrPublishCompleted)), true},
+		{"collision", ErrPublishCollision, false},
+		{"unsupported", ErrPublishNoReplaceUnsupported, false},
+		{"plain failure", errors.New("staged cleanup failed"), false},
+		{"nil", nil, false},
+	} {
+		require.Equal(t, tc.want, PublishCompleted(tc.err), tc.name)
+	}
+}
 
 // link(2) succeeded, staged unlink failed, destination rollback failed too:
 // the error must carry ErrPublishCompleted (both real causes still wrapped),

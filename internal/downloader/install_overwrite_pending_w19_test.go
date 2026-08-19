@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/javinizer/javinizer-go/internal/fsutil"
+	"github.com/javinizer/javinizer-go/internal/models"
 )
 
 // w19RearmStageRaceFs claims the RE-ARM publish target with foreign bytes
@@ -62,7 +63,7 @@ type w19MarkFailLedger struct {
 	marks   int
 }
 
-func (l *w19MarkFailLedger) MarkReplacementRestorePending(context.Context, string, string, string) error {
+func (l *w19MarkFailLedger) MarkReplacementRestorePendingKind(context.Context, string, string, string, string) error {
 	l.marks++
 	return l.markErr
 }
@@ -188,10 +189,16 @@ func TestInstallOverwritingW19_MarkFailureOnTopKeepsArmedPosture(t *testing.T) {
 	require.Contains(t, out, "restore-pending marking failed")
 }
 
-// A NON-class (plain) re-arm failure keeps the wave-18 posture: warn-only,
-// no marker write, entry stays armed — the backup name is simply absent, and
-// the wave-18 armed/absent state covers it.
-func TestInstallOverwritingW19_PlainRearmFailureKeepsWarnOnlyArmed(t *testing.T) {
+// A NON-class (plain) re-arm failure — SUPERSEDED by wave-21 (codex P2
+// PR#215): it used to keep the wave-18 warn-only armed posture, but that
+// left the entry ARMED against an ABSENT backup name — every later explicit
+// revert wedged statting the absent source forever, and sweeps saw an
+// ordinary armed row with a present destination (nothing to repair).
+// Wave-21 disarms EVERY re-arm failure class; the plain pre-publish staging
+// failure leaves the name absent, so it takes the rearm-refused kind exactly
+// like the refusal classes. (The kind-routing pins live in
+// install_overwrite_rearm_pending_w21_test.go.)
+func TestInstallOverwritingW19_PlainRearmFailureMarksRearmRefusedPending(t *testing.T) {
 	logs := w16CaptureLogging(t)
 	base := afero.NewMemMapFs()
 	dir := "/out/W19-PLAIN"
@@ -206,10 +213,15 @@ func TestInstallOverwritingW19_PlainRearmFailureKeepsWarnOnlyArmed(t *testing.T)
 	require.ErrorIs(t, err, covW14BInstallErr)
 
 	records := recorder.get()
-	require.Len(t, records, 1, "the entry stays armed")
-	require.Empty(t, recorder.getPendings(), "a plain re-arm failure writes no pending marker")
+	require.Len(t, records, 1, "the entry stays journaled — cleanup is deferred by the pending marker")
+	pendings := recorder.getPendings()
+	require.Len(t, pendings, 1, "wave-21: a plain (pre-publish) re-arm failure writes a pending marker")
+	require.Equal(t, dest, pendings[0].replacedPath)
+	require.Equal(t, records[0].backupPath, pendings[0].backupPath)
+	require.Equal(t, models.RestorePendingKindRearmRefused, pendings[0].kind,
+		"the name is absent (unproven) — journal-only retries, like the refusal classes")
 	_, statErr := base.Stat(records[0].backupPath)
 	require.Error(t, statErr, "the failed re-arm published nothing — the name stays absent")
 	require.Equal(t, "original bytes", string(mustReadDownloaderW7(t, base, dest)))
-	require.Contains(t, logs.String(), "journal entry remains armed")
+	require.Contains(t, logs.String(), "marked restore-pending (rearm-refused)")
 }

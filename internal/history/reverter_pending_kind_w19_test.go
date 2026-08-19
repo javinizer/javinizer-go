@@ -168,7 +168,7 @@ func TestReverterPendingKindW19_RearmRefusedConsumptionFailureKeepsMarker(t *tes
 	require.Equal(t, "old", p3ReadFile(t, fixture.fs, dest))
 	require.Equal(t, "foreign-bytes", p3ReadFile(t, fixture.fs, backup))
 	for _, name := range w15DirListing(t, fixture.fs, filepath.Dir(dest)) {
-		require.NotContains(t, name, ".tmp-", "no staged re-arm copy: consumption failure needs no compensation")
+		require.NotContains(t, name, rearmStagingSuffix+".", "no staged re-arm copy: consumption failure needs no compensation")
 	}
 }
 

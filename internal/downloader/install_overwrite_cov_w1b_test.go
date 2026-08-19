@@ -145,7 +145,7 @@ func (r *covW1BRecorder) ReleaseReplacement(context.Context, string, string, str
 	return r.releaseErr
 }
 
-func (r *covW1BRecorder) MarkReplacementRestorePending(context.Context, string, string, string) error {
+func (r *covW1BRecorder) MarkReplacementRestorePendingKind(context.Context, string, string, string, string) error {
 	return nil
 }
 

@@ -5,6 +5,7 @@ package history
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,7 +17,12 @@ import (
 // after a restore removed the backup, the re-armed backup must carry the
 // ORIGINAL ownership — otherwise a later restore-through-copyRestoreBytes
 // derives uid/gid from the Javinizer-owned re-arm and permanently loses the
-// media's original owner when the backup is consumed.
+// media's original owner when the backup is consumed. Wave-21 (codex P1):
+// the hand-off (and the mode/times fix-ups) target the EXCLUSIVELY OWNED
+// staged inode BEFORE the publish, never the published backup path — a
+// post-publish path-based chown/chmod/chtimes could follow a symlink swapped
+// into a shared-writable directory. The published backup still ends up with
+// the full mode+times+ownership, with no post-publish metadata calls.
 func TestRearmReplacementBackupW14_PreservesOwnershipModeAndTimes(t *testing.T) {
 	fs := afero.NewOsFs()
 	dir := t.TempDir()
@@ -32,8 +38,10 @@ func TestRearmReplacementBackupW14_PreservesOwnershipModeAndTimes(t *testing.T) 
 	calls := swapRestoreOwnershipW8(t, nil)
 	require.NoError(t, rearmReplacementBackup(fs, dest, backup, info))
 
-	require.Len(t, *calls, 1, "ownership hand-off runs once for the re-armed backup")
-	require.Equal(t, backup, (*calls)[0].staged, "hand-off targets the re-armed backup path")
+	require.Len(t, *calls, 1, "ownership hand-off runs once for the re-arm")
+	staged := (*calls)[0].staged
+	require.True(t, strings.HasPrefix(staged, backup) && strings.Contains(filepath.Base(staged), rearmStagingSuffix),
+		"wave-21: the hand-off targets the exclusively-staged inode (%q), never the published backup path", staged)
 	require.True(t, (*calls)[0].haveIDs, "uid/gid derived from the source info")
 
 	got, err := os.ReadFile(backup)
@@ -41,7 +49,7 @@ func TestRearmReplacementBackupW14_PreservesOwnershipModeAndTimes(t *testing.T) 
 	require.Equal(t, "rearm-bytes", string(got))
 	fi, err := os.Stat(backup)
 	require.NoError(t, err)
-	require.Equal(t, os.FileMode(0o664), fi.Mode().Perm(), "mode applied after the ownership hand-off")
+	require.Equal(t, os.FileMode(0o664), fi.Mode().Perm(), "mode applied at the staging create, carried through the publish")
 	require.True(t, fi.ModTime().Equal(mtime) || fi.ModTime().Equal(info.ModTime()) || !fi.ModTime().Before(mtime.Add(-2*time.Second)),
 		"timestamps track the source info (got %s)", fi.ModTime())
 }

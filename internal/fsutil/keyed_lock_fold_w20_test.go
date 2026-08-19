@@ -1,15 +1,23 @@
 package fsutil
 
-// POSTER-WRITE-HARDENING codex PR#215 wave-20 (P2) — "use full Unicode case
-// folding for destination keys": the insensitive DestKey form used to run
-// strings.ToLower, a per-rune SIMPLE case mapping that never folds GREEK
-// SMALL LETTER FINAL SIGMA (ς) against σ even though both uppercase to Σ and
-// are case-equivalent on insensitive filesystems. Equivalent journal
-// spellings (`…/στ.jpg` vs `…/ΣΤ.jpg`) produced different keys and stayed
-// invisible to the exact matcher — sequence reuse, missed conflicts. The
-// insensitive leg now runs cases.Fold (full Unicode folding); these tests pin
-// the equivalence table (final-sigma pairs included), the case-SENSITIVE
-// leg's byte identity, and ASCII ToLower parity.
+// POSTER-WRITE-HARDENING codex PR#215 wave-20 (P2), refined by wave-21 —
+// "fold the case-equivalent spellings of one insensitive-root file onto one
+// destination key, WITHOUT aliasing filesystem-distinct names": the
+// insensitive DestKey form used to run strings.ToLower, a per-rune SIMPLE
+// case mapping that never unifies GREEK SMALL LETTER FINAL SIGMA (ς) with σ
+// even though both uppercase to Σ and are case-equivalent on insensitive
+// filesystems. Equivalent journal spellings (`…/στ.jpg` vs `…/ΣΤ.jpg`)
+// produced different keys and stayed invisible to the exact matcher —
+// sequence reuse, missed conflicts. Wave-20 swapped in cases.Fold (full
+// Unicode folding), which over-corrected: its one-to-many table entries
+// (ß→ss, ﬃ→ffi) aliased NTFS-DISTINCT filenames into one bucket. Wave-21
+// (codex P2) settles on the per-rune simple uppercase mapping
+// (destKeyInsensitive — strings.Map over unicode.ToUpper): final-sigma
+// pairs still unify (ς→Σ alongside σ→Σ), while multi-char folds stay
+// distinct exactly as the filesystem treats them. These tests pin the
+// equivalence table (final-sigma pairs included), the case-SENSITIVE leg's
+// byte identity, and ASCII ToUpper parity. The filesystem-DISTINCTION pins
+// (Straße≢Strasse, ﬃ≢FFI) live in keyed_lock_fold_w21_test.go.
 
 import (
 	"path/filepath"
@@ -20,19 +28,17 @@ import (
 )
 
 // w20FoldTable lists spelling groups that MUST collapse to ONE destination
-// key on an insensitive root. Every group final-sigma pair uppercases
-// identically while simple lowering sees them differently — the exact hole
-// the finding reports.
+// key on an insensitive root. Every group member uppercases rune-for-rune to
+// the same string while simple LOWERING sees some of them differently — the
+// exact hole the wave-20 finding reported. Only per-rune equivalences belong
+// here: one-to-many expansions (ß→ss, ligatures) are pinned DISTINCT in the
+// wave-21 file.
 var w20FoldTable = [][]string{
 	// The reported case: lowercase sigma, uppercase, and mixed forms —
 	// plus the final sigma (ς) variant that ToLower kept distinct.
 	{"στ.jpg", "ΣΤ.jpg", "Στ.jpg", "ςτ.jpg", "στ.jpg"},
-	// Plain ASCII keeps folding (ToLower parity).
+	// Plain ASCII keeps folding (ToUpper parity with the wave-8 shapes).
 	{"POSTER.JPG", "poster.jpg", "PoStEr.JpG"},
-	// Full-fold pairs beyond Greek: ß/ẞ and the ss expansion fold together.
-	{"straße.jpg", "STRASSE.jpg", "STRAẞE.jpg", "strasse.jpg"},
-	// Ligature expansion folds to the decomposed letters.
-	{"ﬃ.jpg", "ffi.jpg", "FFI.jpg"},
 	// Cased non-ASCII accented letters (wave-16 fallback companions).
 	{"ÄÖ.jpg", "äö.jpg", "äÖ.jpg", "Äö.jpg"},
 }
@@ -90,18 +96,20 @@ func TestDestKeyW20_SensitiveLegByteIdentity(t *testing.T) {
 	}
 }
 
-// Insensitive ASCII folds are byte-identical to strings.ToLower — the Fold
-// switch changes nothing for the wave-8 pattern-family destinations, whose
-// LIKE prefilters assume the ToLower shape.
-func TestDestKeyW20_ASCIIInsensitiveParityWithToLower(t *testing.T) {
+// Insensitive ASCII folds are byte-identical to strings.ToUpper — the
+// wave-21 per-rune mapping changes nothing for the wave-8 pattern-family
+// destinations (the SQL LIKE prefilters consume raw spellings and fold
+// ASCII in the database itself, so only this in-process exact-matcher shape
+// matters).
+func TestDestKeyW20_ASCIIInsensitiveParityWithToUpper(t *testing.T) {
 	k4SetSeams(t, false, false)
 	root := t.TempDir()
 
 	for _, spelling := range []string{"Poster.jpg", "MOVIE-001.MKV", "a/B/c.PNG"} {
 		p := filepath.Join(root, spelling)
-		require.Equal(t, filepath.ToSlash(strings.ToLower(normalizeDestPath(p))),
+		require.Equal(t, filepath.ToSlash(strings.ToUpper(normalizeDestPath(p))),
 			filepath.ToSlash(DestKeyForRoot(root, p)),
-			"ASCII insensitive fold is ToLower-identical")
+			"ASCII insensitive fold is ToUpper-identical")
 	}
 }
 

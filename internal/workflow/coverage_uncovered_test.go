@@ -827,6 +827,10 @@ func (e errorRevertLog) MarkReplacementRestorePending(_ context.Context, _ Opera
 	return e.completeErr
 }
 
+func (e errorRevertLog) MarkReplacementRestorePendingKind(_ context.Context, _ OperationID, _, _, _ string) error {
+	return e.completeErr
+}
+
 func (e errorRevertLog) ReleaseReplacement(_ context.Context, _ OperationID, _, _ string) error {
 	return e.completeErr
 }

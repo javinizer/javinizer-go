@@ -105,7 +105,7 @@ func TestReplacementSweepCompensationW18C_ConsumeFailRearmCollisionRetainsDest(t
 		"the foreign occupant at the backup name is untouched")
 	w16NoStagedRestoreLeftovers(t, base, dir)
 	for _, name := range w15DirListing(t, base, dir) {
-		require.NotContains(t, name, ".tmp-", "the staged re-arm copy is cleaned up (saw %q)", name)
+		require.NotContains(t, name, rearmStagingSuffix+".", "the staged re-arm copy is cleaned up (saw %q)", name)
 	}
 
 	row, err := baseRepo.FindByID(ctx, op.ID)

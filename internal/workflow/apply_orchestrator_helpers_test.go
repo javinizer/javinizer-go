@@ -83,6 +83,10 @@ func (s *stubRevertLog) MarkReplacementRestorePending(_ context.Context, _ Opera
 	return nil
 }
 
+func (s *stubRevertLog) MarkReplacementRestorePendingKind(_ context.Context, _ OperationID, _, _, _ string) error {
+	return nil
+}
+
 func (s *stubRevertLog) ReleaseReplacement(_ context.Context, _ OperationID, _, _ string) error {
 	return nil
 }

@@ -254,7 +254,7 @@ func TestReplacementSweepPendingKindW19_RetryPendingRearmRefusedConsumptionFailu
 	entries, rdErr := afero.ReadDir(base, dir)
 	require.NoError(t, rdErr)
 	for _, e := range entries {
-		require.NotContains(t, e.Name(), ".tmp-", "no staged re-arm copy: nothing was removed, so no compensation ran")
+		require.NotContains(t, e.Name(), rearmStagingSuffix+".", "no staged re-arm copy: nothing was removed, so no compensation ran")
 	}
 }
 

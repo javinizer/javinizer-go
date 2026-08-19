@@ -10,7 +10,6 @@ import (
 	"sort"
 	"strings"
 	"sync/atomic"
-	"time"
 
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
@@ -332,8 +331,9 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 						// failures leave the name foreign or absent (rearm-refused —
 						// every retry runs only the consumption leg, journal-only),
 						// while a failure after the staged copy definitely published
-						// (post-publish metadata fix-ups, or fsutil's
-						// ErrPublishCompleted) leaves THIS operation's bytes at the
+						// (fsutil's ErrPublishCompleted hard-link fallback leg —
+						// wave-21 applies metadata pre-publish, so no other
+						// post-publish class remains) leaves THIS operation's bytes at the
 						// name (clean — the retry removes it). The marker certifies
 						// the destination already carries the restored bytes; the
 						// original consumption failure surfaces through cErr exactly
@@ -527,6 +527,23 @@ func (r *Reverter) checkDestBlocking(ctx context.Context, op *models.BatchFileOp
 
 // restoreCopyNonce uniquifies the staged copy path for a destination restore.
 var restoreCopyNonce atomic.Uint64
+
+// rearmCopyNonce uniquifies the exclusively-staged copy path for the backup
+// re-arm (journal-consumption compensation).
+var rearmCopyNonce atomic.Uint64
+
+// rearmStagingSuffix names the transient staged re-arm copy next to its
+// backup — destination-adjacent like the `.rstr` restore staging, but a
+// distinct marker: it must never match the sweeper's `.dlbak.<16hex>`
+// ownership grammar (the suffix's non-hex letters keep it out).
+const rearmStagingSuffix = ".dlrarm"
+
+// rearmPublishFn is the publish seam behind copyRearmSourceBytes (same
+// discipline as restoreStagingOwnershipFn): production publishes through
+// fsutil.PublishNoReplace; tests record invocation order against the
+// pre-publish metadata seams and replay the typed publish error classes
+// (the ErrPublishCompleted compensation leg included).
+var rearmPublishFn = fsutil.PublishNoReplace
 
 // restoreOpenReplacementSource opens a journaled restore backup for reading
 // with each platform's strongest protection against a final-component
@@ -765,46 +782,77 @@ func openRearmSource(fs afero.Fs, dest string) (afero.File, error) {
 }
 
 // copyRearmSourceBytes streams an already-open, identity-verified re-arm
-// source into the backup path through a same-directory temp file + a
-// no-replace publish — fsutil.CopyFileFs's write side WITHOUT its path
-// re-open, which would drop the no-follow handle openRearmSource established.
+// source into the backup path through an EXCLUSIVELY OWNED same-directory
+// staging file + a no-replace publish — fsutil.CopyFileFs's write side
+// WITHOUT its path re-open, which would drop the no-follow handle
+// openRearmSource established.
+//
 // Wave-15: the publish is fsutil.PublishNoReplace, never a bare rename — an
 // occupied backup name yields fsutil.ErrPublishCollision (staged copy dropped,
 // foreign bytes intact) instead of a silent clobber. Wave-17: a volume that
 // cannot express no-replace at all yields fsutil.ErrPublishNoReplaceUnsupported
 // through the same publish error — the caller's re-arm failure stays the
 // kept+warn posture (the conservative leg), never a replacing rename.
-func copyRearmSourceBytes(fs afero.Fs, src io.Reader, backup string) error {
+//
+// Wave-21 (codex P1, PR#215): the stage is fsutil.CreateExclusiveStagingFile
+// (O_EXCL — the staged inode is PROVABLY ours) with the caller's requested
+// mode applied at create, and ALL remaining metadata (times, ownership) is
+// applied to the staged name BEFORE the publish. The pre-wave-21 flow ran
+// RestoreStagingOwnership/Chmod/Chtimes on the PUBLISHED backup path: in a
+// directory writable by another user the name could be swapped for a
+// symlink inside the publish→metadata window, and the path-based
+// chown/chmod/chtimes would follow the link to an arbitrary target. Path
+// operations on the O_EXCL-created staged name are safe, and the published
+// backup lands with the requested mode+times+ownership complete — NO
+// post-publish metadata calls remain in this flow.
+func copyRearmSourceBytes(fs afero.Fs, src io.Reader, backup string, info os.FileInfo) error {
 	if err := fs.MkdirAll(filepath.Dir(backup), config.DirPerm); err != nil {
 		return fmt.Errorf("re-arm create backup directory: %w", err)
 	}
-	tmp := filepath.Join(filepath.Dir(backup),
-		fmt.Sprintf(".%s.tmp-%d-%d", filepath.Base(backup), time.Now().UnixNano(), os.Getpid()))
-	dstFile, err := fs.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, config.FilePerm)
+	// info == nil keeps wave-9's copy-only posture with the default mode;
+	// otherwise the requested permission bits land on the staged inode at
+	// create (CreateExclusiveStagingFile re-asserts them past the umask).
+	mode := os.FileMode(config.FilePerm)
+	if info != nil {
+		mode = info.Mode().Perm()
+	}
+	staged, dstFile, err := fsutil.CreateExclusiveStagingFile(fs, backup, rearmStagingSuffix, rearmCopyNonce.Add(1), mode)
 	if err != nil {
-		return fmt.Errorf("re-arm create backup %s: %w", backup, err)
+		return fmt.Errorf("re-arm staging backup %s: %w", backup, err)
 	}
 	if _, cerr := io.Copy(dstFile, src); cerr != nil {
 		_ = dstFile.Close()
-		_ = fs.Remove(tmp)
+		_ = fs.Remove(staged)
 		return fmt.Errorf("re-arm copy bytes for %s: %w", backup, cerr)
 	}
 	if err := dstFile.Close(); err != nil {
-		_ = fs.Remove(tmp)
+		_ = fs.Remove(staged)
 		return fmt.Errorf("re-arm close backup %s: %w", backup, err)
+	}
+	if info != nil {
+		if err := fs.Chtimes(staged, info.ModTime(), info.ModTime()); err != nil {
+			_ = fs.Remove(staged)
+			return fmt.Errorf("re-arm stage backup times %s: %w", backup, err)
+		}
+		// Wave-14's ownership hand-off, moved strictly pre-publish (wave-21):
+		// the staged inode receives the original backup's uid/gid before it
+		// becomes the backup. Best-effort semantics ride the helper (EPERM
+		// swallowed; windows no-op), same as the restore path.
+		restoreStagingOwnershipFn(fs, staged, info)
 	}
 	// Wave-15 (codex P2): publish the staged re-arm with NO-REPLACE semantics.
 	// The original backup was REMOVED by the caller before this compensation
-	// ran, so the window between staging the copy and this rename is wide: a
+	// ran, so the window between staging the copy and this publish is wide: a
 	// foreign writer claiming the backup name mid-window would be destroyed by
 	// a plain rename, destroying unrelated bytes with no ledger trace. The
 	// no-replace publish refuses an occupied backup name instead; callers
-	// disarm any re-arm failure into a restore-pending marker (wave-20 kinds:
-	// rearm-refused unless the publish definitely completed), so the collision
-	// surfaces through the typed fsutil.ErrPublishCollision class with the
-	// foreign bytes intact and the staged copy dropped.
-	if err := fsutil.PublishNoReplace(fs, tmp, backup); err != nil {
-		_ = fs.Remove(tmp)
+	// disarm any re-arm failure into a restore-pending marker (kinds:
+	// rearm-refused unless the publish definitely completed —
+	// fsutil.PublishCompleted — the only post-publish signal left), so the
+	// collision surfaces through the typed fsutil.ErrPublishCollision class
+	// with the foreign bytes intact and the staged copy dropped.
+	if err := rearmPublishFn(fs, staged, backup); err != nil {
+		_ = fs.Remove(staged)
 		return fmt.Errorf("re-arm install backup %s: %w", backup, err)
 	}
 	return nil

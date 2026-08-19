@@ -74,7 +74,7 @@ func TestReverterRearmCollisionW18C_MarksRestorePendingAndNeverRestoresOccupant(
 	requireLogPathContains(t, out, absoluteBackup)
 
 	for _, name := range w15DirListing(t, fixture.fs, filepath.Dir(dest)) {
-		require.False(t, strings.Contains(name, ".tmp-"), "no staged re-arm residue (saw %q)", name)
+		require.False(t, strings.Contains(name, rearmStagingSuffix+"."), "no staged re-arm residue (saw %q)", name)
 	}
 	_, markerErr := fixture.fs.Stat(fsutil.ReplacementBusyPath(dest))
 	require.ErrorIs(t, markerErr, os.ErrNotExist, "the destination busy marker is released")

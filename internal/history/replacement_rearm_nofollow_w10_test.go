@@ -292,7 +292,9 @@ func (f *w10CloseFailFs) OpenFile(name string, flag int, perm os.FileMode) (afer
 	if err != nil {
 		return nil, err
 	}
-	if flag&os.O_CREATE != 0 && strings.Contains(filepath.Base(name), ".tmp-") {
+	// Wave-21: the re-arm stages through the exclusive `<backup>.dlrarm.<hex>`
+	// name (CreateExclusiveStagingFile), so the wedge keys on its marker.
+	if flag&os.O_CREATE != 0 && strings.Contains(name, rearmStagingSuffix+".") {
 		return &w10CloseFailFile{File: file}, nil
 	}
 	return file, nil

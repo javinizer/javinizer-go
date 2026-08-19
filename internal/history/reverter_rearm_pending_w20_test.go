@@ -1,28 +1,32 @@
 package history
 
-// POSTER-WRITE-HARDENING codex PR#215 wave-20 (P2) — "persist pending state
-// after every failed re-arm": before this wave only the PublishRefusal
-// classes disarmed the entry (waves 18+19). A consumption failure followed by
-// a NON-refusal re-arm failure (staging open/write outage, post-publish
-// metadata failure) left the entry ARMED against a backup name the failed
-// re-arm never reclaimed — every later explicit revert failed statting the
-// absent name forever, and sweeps saw an ordinary armed row with a present
-// destination (nothing to repair). Wave-20 disarms into the durable
-// RestorePending marker for EVERY re-arm failure class, routing on
-// backup-name ownership via rearmPendingKind:
+// POSTER-WRITE-HARDENING codex PR#215 wave-20 (P2), refined by wave-21 —
+// "persist pending state after every failed re-arm": before this wave only
+// the PublishRefusal classes disarmed the entry (waves 18+19). A consumption
+// failure followed by a NON-refusal re-arm failure left the entry ARMED
+// against a backup name the failed re-arm never reclaimed — every later
+// explicit revert failed statting the absent name forever, and sweeps saw an
+// ordinary armed row with a present destination (nothing to repair). Wave-20
+// disarms into the durable RestorePending marker for EVERY re-arm failure
+// class, routing on backup-name ownership via rearmPendingKind:
 //   - refusal classes (occupied name / no-replace-unsupported volume)
 //     → rearm_refused (unchanged from wave 19);
 //   - failures BEFORE any publish completed (re-arm source open, staging
-//     open/write/close, failed publish) leave the name unproven/absent
-//     → rearm_refused (journal-only retries);
-//   - failures AFTER the staged copy definitely published (post-publish
-//     Chmod/Chtimes fix-ups, wrapping errRearmAfterPublish; fsutil's
-//     ErrPublishCompleted link-fallback leg) leave THIS operation's bytes at
-//     the name → clean (the pending retry reaps the owned name).
+//     open/write/close, failed publish, and — wave-21, codex P1 — the
+//     PRE-publish metadata fix-ups on the exclusively-staged inode: mode at
+//     the O_EXCL create, Chtimes/ownership on the staged name) leave the
+//     name unproven/absent → rearm_refused (journal-only retries);
+//   - failures AFTER the staged copy definitely PUBLISHED — exactly fsutil's
+//     ErrPublishCompleted link-fallback leg now, since wave-21 moved every
+//     metadata fix-up pre-publish, deleting wave-20's post-publish
+//     Chmod/Chtimes-on-the-published-name legs (and their errRearmAfterPublish
+//     wrapper) entirely — leave THIS operation's bytes at the name → clean
+//     (the pending retry reaps the owned name).
 //
 // The explicit-reverter legs live here; the wave-18/19 refusal pins stay in
 // reverter_rearm_collision_w18c_test.go (c1/c3) and
-// reverter_pending_kind_w19_test.go.
+// reverter_pending_kind_w19_test.go. The wave-21 staged-inode ordering pins
+// live in replacement_rearm_staged_w21_test.go.
 
 import (
 	"bytes"
@@ -41,8 +45,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The classifier itself: every failure class resolves to exactly the kind its
-// backup-name ownership state demands, and the two "completed" signals stay
+// The classifier itself: every failure class resolves to exactly the kind
+// its backup-name ownership state demands, and the only "completed" signal
+// (fsutil.PublishCompleted, shared with the downloader — wave-21) stays
 // disjoint from the refusal classifier.
 func TestRearmPendingKindW20_ClassifierLegs(t *testing.T) {
 	require.Equal(t, models.RestorePendingKindRearmRefused,
@@ -57,17 +62,17 @@ func TestRearmPendingKindW20_ClassifierLegs(t *testing.T) {
 	require.Equal(t, models.RestorePendingKindRearmRefused,
 		rearmPendingKind(fmt.Errorf("re-arm install backup /b: %w", fsutil.ErrPublishNoReplaceUnsupported)),
 		"the volume-cannot-publish refusal stays refused")
-	require.Equal(t, models.RestorePendingKindClean,
-		rearmPendingKind(fmt.Errorf("%w: re-arm chmod wedged", errRearmAfterPublish)),
-		"a post-publish metadata failure leaves THIS operation's bytes at the name — clean")
+	require.Equal(t, models.RestorePendingKindRearmRefused,
+		rearmPendingKind(fmt.Errorf("re-arm stage backup times /b: %w", errors.New("re-arm chtimes wedged"))),
+		"wave-21: a PRE-publish metadata failure (staged-name Chtimes) publishes nothing — refused")
 	require.Equal(t, models.RestorePendingKindClean,
 		rearmPendingKind(fmt.Errorf("re-arm install backup /b: %w", fsutil.ErrPublishCompleted)),
 		"fsutil's completed-despite-error publish leaves the staged copy at the name — clean")
 
-	// Disjointness with the wave-19 refusal classifier: the two
-	// ownership-positive signals classify clean, everything else refused.
+	// Disjointness with the wave-19 refusal classifier: only the refusal
+	// classes classify occupied; the completed class is never a refusal, and
+	// plain failures are neither.
 	verify := map[error]bool{
-		fmt.Errorf("%w: meta wedged", errRearmAfterPublish):              false,
 		fmt.Errorf("install: %w", fsutil.ErrPublishCompleted):            false,
 		fmt.Errorf("install: %w", fsutil.ErrPublishCollision):            true,
 		fmt.Errorf("install: %w", fsutil.ErrPublishNoReplaceUnsupported): true,
@@ -80,11 +85,19 @@ func TestRearmPendingKindW20_ClassifierLegs(t *testing.T) {
 			require.Equal(t, models.RestorePendingKindRearmRefused, rearmPendingKind(err))
 		}
 	}
+	// The shared publish-completed classifier agrees with the local kind
+	// mapping on every entry above.
+	for err := range verify {
+		require.Equal(t, fsutil.PublishCompleted(err),
+			rearmPendingKind(err) == models.RestorePendingKindClean,
+			"clean kind ⇔ fsutil.PublishCompleted for %v", err)
+	}
 }
 
-// w20RearmWriteFailFs wedges the re-arm's STAGING WRITE leg: the temp open
-// itself succeeds, but the first Write into a ".tmp-" staging name fails —
-// the publish is never attempted, so the backup name stays absent (unproven).
+// w20RearmWriteFailFs wedges the re-arm's STAGING WRITE leg: the exclusive
+// staging open itself succeeds, but the first Write into the staged
+// `<backup>.dlrarm.<hex>` name fails — the publish is never attempted, so
+// the backup name stays absent (unproven).
 type w20RearmWriteFailFs struct {
 	afero.Fs
 	fired bool
@@ -105,7 +118,7 @@ func (f *w20RearmWriteFailFs) OpenFile(name string, flag int, perm os.FileMode) 
 	if err != nil {
 		return nil, err
 	}
-	if strings.Contains(filepath.Base(name), ".tmp-") {
+	if strings.Contains(name, rearmStagingSuffix+".") {
 		return &w20FailWriteFile{File: base, owner: f}, nil
 	}
 	return base, nil
@@ -138,7 +151,7 @@ func TestReverterRearmPendingW20_StagingWriteFailureMarksRearmRefusedAndHeals(t 
 	_, serr := fixture.fs.Stat(backup)
 	require.ErrorIs(t, serr, os.ErrNotExist, "no publish was attempted — the backup name is absent")
 	for _, name := range w15DirListing(t, fixture.fs, filepath.Dir(dest)) {
-		require.NotContains(t, name, ".tmp-", "the staged re-arm copy is cleaned up (saw %q)", name)
+		require.NotContains(t, name, rearmStagingSuffix+".", "the staged re-arm copy is cleaned up (saw %q)", name)
 	}
 
 	gf := w19Journal(t, fixture.repo, op.ID)
@@ -166,41 +179,43 @@ func TestReverterRearmPendingW20_StagingWriteFailureMarksRearmRefusedAndHeals(t 
 	require.Empty(t, w19Journal(t, fixture.repo, op.ID).Replacements, "journal-only consumption completes")
 }
 
-// Explicit revert: consumption failure + POST-PUBLISH re-arm failure (the
-// staged copy was published but the Chmod metadata fix-up wedged) → the
-// backup name carries THIS operation's own bytes, so the entry marks
-// pending(CLEAN) — the healed retry stats/removes the owned name and
-// consumes, exactly like the wave-9 clean-pending flow.
-func TestReverterRearmPendingW20_PostPublishFailureMarksCleanPendingAndRetryReapsOwnedBackup(t *testing.T) {
+// Explicit revert: consumption failure + PUBLISH-COMPLETED re-arm failure
+// (the staged copy PUBLISHED at the backup name but the publish reports
+// fsutil.ErrPublishCompleted — the hard-link fallback's
+// cleanup-with-failed-rollback leg; wave-21: this is the ONLY post-publish
+// failure class left now that every metadata fix-up runs pre-publish on the
+// staged inode) → the backup name carries THIS operation's own bytes, so the
+// entry marks pending(CLEAN) — the healed retry stats/removes the owned
+// name and consumes, exactly like the wave-9 clean-pending flow.
+func TestReverterRearmPendingW20_PublishCompletedMarksCleanPendingAndRetryReapsOwnedBackup(t *testing.T) {
 	fixture := newP3Fixture()
-	normalizing := &pathNormalizingChmodFs{Fs: fixture.fs}
-	fixture.fs = normalizing
-	op, dest := fixture.addAppliedOp(t, "job-w20", "W20-POSTPUB", false, "new", p3Replacement{seq: 1, backupBytes: "old"})
+	op, dest := fixture.addAppliedOp(t, "job-w20", "W20-PUBDONE", false, "new", p3Replacement{seq: 1, backupBytes: "old"})
 	backup := dest + ".dlbak.a"
-	require.NoError(t, normalizing.Chmod(backup, 0o600), "restrictive original bits exercise the fix-up leg")
 
 	consumeErr := errors.New("w20 consumption transaction wedged")
 	repo := &w18TxFailRepo{p3OpRepo: fixture.repo, fail: map[int]error{1: consumeErr}}
-	fs := &w17aChmodFailFs{Fs: normalizing, failPath: backup}
+	published := false
+	w21RearmPublishCompletedSeam(t, &published)
 
 	var logs bytes.Buffer
 	restoreLog := logging.SetOutput(&logs)
 	defer restoreLog()
 
 	ctx := context.Background()
-	restored, err := NewReverter(fs, repo).restoreReplacementJournal(ctx, op)
+	restored, err := NewReverter(fixture.fs, repo).restoreReplacementJournal(ctx, op)
 	require.ErrorIs(t, err, consumeErr)
 	require.True(t, restored[dest])
+	require.True(t, published, "the publish completed BEFORE the compensating error")
 	require.Equal(t, "old", p3ReadFile(t, fixture.fs, dest), "the restored destination is retained")
 	require.Equal(t, "old", p3ReadFile(t, fixture.fs, backup),
-		"the publish COMPLETED before the metadata wedge — the name carries this operation's own bytes")
+		"the publish COMPLETED — the name carries this operation's own bytes")
 
 	row, ferr := fixture.repo.FindByID(ctx, op.ID)
 	require.NoError(t, ferr)
 	gf, perr := models.ParseGeneratedFiles(row.GeneratedFiles)
 	require.NoError(t, perr)
 	require.Len(t, gf.Replacements, 1)
-	require.True(t, gf.Replacements[0].RestorePending, "the post-publish failure disarms too")
+	require.True(t, gf.Replacements[0].RestorePending, "the completed-despite-error failure disarms too")
 	require.Equal(t, models.RestorePendingKindClean, gf.Replacements[0].PendingKind(),
 		"the name provably holds owned bytes — the clean kind reaps it")
 	require.Equal(t, "", gf.Replacements[0].RestorePendingKind,
@@ -214,7 +229,7 @@ func TestReverterRearmPendingW20_PostPublishFailureMarksCleanPendingAndRetryReap
 	retryRow, ferr := fixture.repo.FindByID(ctx, op.ID)
 	require.NoError(t, ferr)
 	fresh := *retryRow
-	restored, err = NewReverter(fs, repo).restoreReplacementJournal(ctx, &fresh)
+	restored, err = NewReverter(fixture.fs, repo).restoreReplacementJournal(ctx, &fresh)
 	require.NoError(t, err, "the clean-pending retry completes — no wedge on the stat leg")
 	require.True(t, restored[dest])
 	require.Equal(t, "old", p3ReadFile(t, fixture.fs, dest), "the certified destination is never re-restored")
@@ -223,28 +238,32 @@ func TestReverterRearmPendingW20_PostPublishFailureMarksCleanPendingAndRetryReap
 	require.Empty(t, w19Journal(t, fixture.repo, op.ID).Replacements, "the deferred consumption completes")
 }
 
-// The CHTIMES post-publish leg classifies the same way as the Chmod leg.
-func TestReverterRearmPendingW20_PostPublishChtimesFailureAlsoClean(t *testing.T) {
+// The wave-21 PRE-publish Chtimes leg (the metadata fix-up on the staged
+// inode) classifies opposite to wave-20's published-name leg: the publish is
+// never attempted, the name stays absent, and the entry marks
+// pending(REARM-REFUSED) — journal-only retries.
+func TestReverterRearmPendingW20_PrePublishChtimesFailureMarksRearmRefused(t *testing.T) {
 	fixture := newP3Fixture()
 	op, dest := fixture.addAppliedOp(t, "job-w20", "W20-CTIMES", false, "new", p3Replacement{seq: 1, backupBytes: "old"})
 	backup := dest + ".dlbak.a"
 
 	consumeErr := errors.New("w20 consumption transaction wedged")
 	repo := &w18TxFailRepo{p3OpRepo: fixture.repo, fail: map[int]error{1: consumeErr}}
-	fs := &w17aChtimesFailFs{Fs: fixture.fs, failPath: backup}
+	fs := &w17aChtimesFailFs{Fs: fixture.fs}
 
 	ctx := context.Background()
 	_, err := NewReverter(fs, repo).restoreReplacementJournal(ctx, op)
 	require.ErrorIs(t, err, consumeErr)
-	require.Equal(t, "old", p3ReadFile(t, fixture.fs, dest))
-	require.Equal(t, "old", p3ReadFile(t, fixture.fs, backup), "the publish completed before Chtimes")
+	require.Equal(t, "old", p3ReadFile(t, fixture.fs, dest), "the restored destination is retained")
+	_, serr := fixture.fs.Stat(backup)
+	require.ErrorIs(t, serr, os.ErrNotExist,
+		"wave-21: a pre-publish Chtimes failure never publishes — the name stays absent")
 
 	gf := w19Journal(t, fixture.repo, op.ID)
 	require.Len(t, gf.Replacements, 1)
 	require.True(t, gf.Replacements[0].RestorePending)
-	require.Equal(t, models.RestorePendingKindClean, gf.Replacements[0].PendingKind(),
-		"the Chtimes fix-up failure is post-publish too — clean kind")
-	require.Equal(t, "", gf.Replacements[0].RestorePendingKind)
+	require.Equal(t, models.RestorePendingKindRearmRefused, gf.Replacements[0].PendingKind(),
+		"a pre-publish metadata failure leaves the name unproven/absent — rearm_refused")
 }
 
 // Triple failure, non-refusal class: marker persistence fails ON TOP of the
@@ -338,14 +357,14 @@ func TestReplacementSweepPendingW20_RetryPendingPlainRearmFailurePersistsRearmRe
 	require.Empty(t, w19Journal(t, baseRepo, op.ID).Replacements)
 }
 
-// Sweep mirror — restoreAndConsume's consumption failure + POST-PUBLISH
-// re-arm failure (Chmod wedged) persists the CLEAN kind: the crash-window
-// restore landed, the re-arm re-published the operation's own bytes at the
-// backup name, and only the metadata fix-up failed. The healed sweep reaps
-// the owned name and consumes.
-func TestReplacementSweepPendingW20_RestoreAndConsumePostPublishRearmFailurePersistsClean(t *testing.T) {
+// Sweep mirror — restoreAndConsume's consumption failure + PUBLISH-COMPLETED
+// re-arm failure (fsutil.ErrPublishCompleted — wave-21: the only surviving
+// post-publish class) persists the CLEAN kind: the crash-window restore
+// landed, the re-arm re-published the operation's own bytes at the backup
+// name, and only the publish cleanup/rollback leg reported failure. The
+// healed sweep reaps the owned name and consumes.
+func TestReplacementSweepPendingW20_RestoreAndConsumePublishCompletedPersistsClean(t *testing.T) {
 	base := afero.NewMemMapFs()
-	normalizing := &pathNormalizingChmodFs{Fs: base}
 	baseRepo := newP3OpRepo()
 	ctx := context.Background()
 	dir := "/out/W20-RAC"
@@ -357,19 +376,21 @@ func TestReplacementSweepPendingW20_RestoreAndConsumePostPublishRearmFailurePers
 
 	consumeErr := errors.New("w20 consumption transaction wedged")
 	repo := &w18TxFailRepo{p3OpRepo: baseRepo, fail: map[int]error{2: consumeErr}}
-	fs := &w17aChmodFailFs{Fs: normalizing, failPath: backup}
+	published := false
+	w21RearmPublishCompletedSeam(t, &published)
 
 	var logs bytes.Buffer
 	restoreLog := logging.SetOutput(&logs)
 	defer restoreLog()
 
-	healed, err := NewReplacementSweeper(fs, repo).Sweep(ctx)
+	healed, err := NewReplacementSweeper(base, repo).Sweep(ctx)
 	require.NoError(t, err)
 	require.Equal(t, 0, healed, "the failed consumption defers the heal")
 
+	require.True(t, published, "the re-arm publish completed before the compensating error")
 	require.Equal(t, "old", string(mustRead2(t, base, dest)), "the crash-window restore landed")
 	require.Equal(t, "old", string(mustRead2(t, base, backup)),
-		"the re-arm PUBLISHED before the Chmod wedge — the name carries owned bytes")
+		"the re-arm PUBLISHED — the name carries owned bytes")
 
 	gf := w19Journal(t, baseRepo, op.ID)
 	require.Len(t, gf.Replacements, 1)
@@ -382,7 +403,7 @@ func TestReplacementSweepPendingW20_RestoreAndConsumePostPublishRearmFailurePers
 	// Healed: a fresh sweeper (durable marker only) removes the owned backup
 	// through the clean pending leg and consumes the entry.
 	repo.fail = nil
-	healed, err = NewReplacementSweeper(fs, repo).Sweep(ctx)
+	healed, err = NewReplacementSweeper(base, repo).Sweep(ctx)
 	require.NoError(t, err)
 	require.Equal(t, 1, healed)
 	require.Equal(t, "old", string(mustRead2(t, base, dest)))

@@ -57,7 +57,14 @@ func TestDestKey_K4TrailingSpaceNamesStayDistinct(t *testing.T) {
 			keyLeading := DestKeyForRoot(root, leading)
 			require.NotEqual(t, keyPlain, keyTrailing, "whitespace is a filename character, never folded")
 			require.NotEqual(t, keyPlain, keyLeading)
-			require.True(t, strings.HasSuffix(keyTrailing, "poster.jpg "),
+			// Wave-21: the insensitive leg uppercases (per-rune simple mapping),
+			// so the survival shape is case-posture-dependent; the SPACE is the
+			// pinned char either way.
+			want := "poster.jpg "
+			if !tc.caseSensitive {
+				want = strings.ToUpper(want)
+			}
+			require.True(t, strings.HasSuffix(keyTrailing, want),
 				"the trailing-space spelling must survive canonicalization: %q", keyTrailing)
 
 			// Lock-key derivation shares normalizeDestPath and must inherit the

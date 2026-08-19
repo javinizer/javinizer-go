@@ -183,34 +183,29 @@ func rearmOccupiedClass(err error) bool {
 	return fsutil.PublishRefusal(err)
 }
 
-// errRearmAfterPublish wraps the re-arm failures that happen strictly AFTER
-// the staged copy was published onto the backup name — the metadata fix-ups
-// (Chmod/Chtimes) following a successful copyRearmSourceBytes. The name
-// carries THIS operation's own bytes despite the failure, so the
-// restore-pending classification is the CLEAN kind (wave-20, codex P2,
-// PR#215): the pending retry's removal leg reaps the owned name, exactly as
-// it reaps a kept backup after a plain removal failure.
-var errRearmAfterPublish = errors.New("re-arm failed after the backup name was published")
-
 // rearmPendingKind classifies a FAILED re-arm for the restore-pending marker
 // every compensation leg persists (wave-20, codex P2, PR#215). ANY re-arm
 // failure must disarm the entry — one left ARMED against an absent backup
 // name wedges every explicit retry at the source stat forever while sweeps
 // see an ordinary armed row with a present destination and repair nothing.
 // Only the KIND varies with backup-name ownership:
-//   - publish REFUSAL classes (rearmOccupiedClass: occupied name, or a
-//     volume that cannot express no-replace) leave the name foreign or
-//     absent → RestorePendingKindRearmRefused;
-//   - failures BEFORE any publish attempt completed (re-arm source open,
-//     staging open/write/close, a failed no-replace publish) prove nothing
-//     about the name — it is unproven/absent → RestorePendingKindRearmRefused;
-//   - failures AFTER the staged copy definitely PUBLISHED (the post-publish
-//     metadata fix-ups — errRearmAfterPublish — or fsutil.ErrPublishCompleted,
-//     the hard-link fallback's cleanup-plus-failed-rollback leg) mean the
-//     name carries THIS operation's own bytes → RestorePendingKindClean: the
-//     pending retry removes the owned name and consumes the entry.
+//   - failures AFTER the staged copy definitely PUBLISHED — exactly the
+//     fsutil.PublishCompleted class (fsutil.ErrPublishCompleted, the
+//     hard-link fallback's cleanup-plus-failed-rollback leg) shared with the
+//     downloader so both packages read one publish error the same (wave-21,
+//     codex P2) — mean the name carries THIS operation's own bytes →
+//     RestorePendingKindClean: the pending retry removes the owned name and
+//     consumes the entry;
+//   - everything else proves NOTHING about the name and takes
+//     RestorePendingKindRearmRefused: the publish REFUSAL classes
+//     (rearmOccupiedClass: occupied name, or a volume that cannot express
+//     no-replace) leaving it foreign or absent, AND failures BEFORE any
+//     publish completed (re-arm source open, staging open/write/close,
+//     pre-publish metadata fix-ups — wave-21 applies mode/times/ownership
+//     to the staged inode, never the published name, so their failure means
+//     nothing published).
 func rearmPendingKind(rearmErr error) string {
-	if errors.Is(rearmErr, errRearmAfterPublish) || errors.Is(rearmErr, fsutil.ErrPublishCompleted) {
+	if fsutil.PublishCompleted(rearmErr) {
 		return models.RestorePendingKindClean
 	}
 	return models.RestorePendingKindRearmRefused
@@ -224,15 +219,23 @@ func rearmPendingKind(rearmErr error) string {
 // rearm-refused restore-pending instead of leaving it armed against the
 // unowned name. Wave-20 (codex P2): EVERY failure class is disarmed by the
 // callers now — the kind comes from rearmPendingKind, where ONLY the
-// post-publish legs below (Chmod/Chtimes after a successful publish, wrapped
-// as errRearmAfterPublish) and fsutil.ErrPublishCompleted resolve to the
-// clean kind because the name provably carries this operation's own bytes.
+// definitely-published class (fsutil.PublishCompleted, shared with the
+// downloader) resolves to the clean kind because the name provably carries
+// this operation's own bytes.
 // Wave-10 codex follow-up: the destination used to be copied via a plain
 // fs.Open — an attacker swapping dest for a symlink in the removal→re-arm
 // window got a protected file copied into the media-dir backup, armed for a
 // later restore (privilege escalation). The open now runs through the same
 // no-follow + regular-file + identity discipline as the restore source open
 // (openRearmSource) and the copy streams from THAT handle.
+// Wave-21 (codex P1, PR#215): copyRearmSourceBytes threads the WHOLE
+// metadata application — mode at the O_EXCL staging create, times and the
+// ownership seam on the staged name — INSIDE, strictly BEFORE the no-replace
+// publish. The pre-wave-21 tail below chmod'ed/chtimes'ed/chown'ed the
+// PUBLISHED backup path: in a directory writable by another user the name
+// could be swapped for a symlink inside the publish→metadata window, and the
+// path-based calls would follow the link to an arbitrary target. No
+// post-publish metadata calls remain on this path.
 func rearmReplacementBackup(fs afero.Fs, dest, backup string, info os.FileInfo) error {
 	if filepath.Clean(dest) == filepath.Clean(backup) {
 		return nil // CopyFileFs parity (wave-9): identical paths are a no-op
@@ -251,30 +254,7 @@ func rearmReplacementBackup(fs afero.Fs, dest, backup string, info os.FileInfo) 
 	// (its own calls normalize internally, and the w10 test pins the observed
 	// opened-path string). See restoreOSPath for the POSIX no-op posture.
 	osBackup := restoreOSPath(backup)
-	if err := copyRearmSourceBytes(fs, src, osBackup); err != nil {
-		return err
-	}
-	if info == nil {
-		return nil
-	}
-	// Codex P2 (w14): the re-armed backup must carry the ORIGINAL ownership
-	// too — otherwise a privileged sweep/revert whose consumption update
-	// failed would leave a Javinizer-owned backup, and the next retry's
-	// copyRestoreBytes would derive uid/gid from it, permanently losing the
-	// original owner once the backup is consumed. Best-effort semantics ride
-	// the helper (EPERM swallowed; windows no-op), same as the restore path.
-	restoreStagingOwnershipFn(fs, osBackup, info)
-	// Wave-20 (codex P2): the metadata fix-ups run strictly AFTER the publish
-	// above, so their failure wraps errRearmAfterPublish — callers classify the
-	// backup name as OWNED (restore-pending clean kind), never as absent/
-	// foreign (rearm-refused). See rearmPendingKind.
-	if err := fs.Chmod(osBackup, info.Mode().Perm()); err != nil {
-		return fmt.Errorf("%w: %w", errRearmAfterPublish, err)
-	}
-	if err := fs.Chtimes(osBackup, info.ModTime(), info.ModTime()); err != nil {
-		return fmt.Errorf("%w: %w", errRearmAfterPublish, err)
-	}
-	return nil
+	return copyRearmSourceBytes(fs, src, osBackup, info)
 }
 
 // ReplacementSweeper reaps replacement backups under conservative ownership.
@@ -823,8 +803,9 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 			// in every failure mode — foreign-occupied on the published-refusal
 			// classes, absent on a plain failure. Wave-20 (codex P2): the kind is
 			// classified by rearmPendingKind instead of unconditionally — a
-			// failure AFTER the staged copy published (post-publish metadata
-			// fix-ups, or the hard-link fallback's completed-despite-error leg)
+			// failure AFTER the staged copy definitely published (fsutil's
+			// hard-link fallback completed-despite-error leg — the shared
+			// fsutil.PublishCompleted class, wave-21)
 			// proves the name carries THIS operation's own bytes, so the durable
 			// marker and the in-process fallback record the CLEAN kind and the
 			// pending retry reaps the owned name; refusal and pre-publish failure

@@ -32,7 +32,7 @@ func (*w14ABusyObservingRecorder) ReleaseReplacement(context.Context, string, st
 	return nil
 }
 
-func (*w14ABusyObservingRecorder) MarkReplacementRestorePending(context.Context, string, string, string) error {
+func (*w14ABusyObservingRecorder) MarkReplacementRestorePendingKind(context.Context, string, string, string, string) error {
 	return nil
 }
 

@@ -15,11 +15,13 @@ package downloader
 // rollback leg.
 //
 // Wave-19 (codex P2) refines the journal outcome of exactly these refusals:
-// the caller (markRollbackRearmRefused) converts the still-armed entry into
-// the rearm-refused RESTORE-PENDING state so a later revert consumes it
-// without ever touching the occupied name — the byte-safety assertions below
-// are unchanged (see install_overwrite_pending_w19_test.go for the
-// conversion pins).
+// the caller (markRollbackRearmFailed — wave-21 renamed it when the
+// conversion generalized to EVERY re-arm failure class) converts the
+// still-armed entry into the rearm-refused RESTORE-PENDING state so a later
+// revert consumes it without ever touching the occupied name — the
+// byte-safety assertions below are unchanged (see
+// install_overwrite_pending_w19_test.go for the refusal-kind pins and
+// install_overwrite_rearm_pending_w21_test.go for the generalization).
 
 import (
 	"bytes"

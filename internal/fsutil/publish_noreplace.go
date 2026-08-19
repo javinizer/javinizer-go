@@ -57,6 +57,21 @@ func PublishRefusal(err error) bool {
 	return errors.Is(err, ErrPublishCollision) || errors.Is(err, ErrPublishNoReplaceUnsupported)
 }
 
+// PublishCompleted reports whether err carries ErrPublishCompleted — a
+// publish error returned AFTER the staged bytes were installed at the
+// destination name (the POSIX hard-link fallback's staged-source cleanup
+// with a failed destination-rollback leg). It is the shared compensation
+// classifier pairing with PublishRefusal (wave-21, codex P2, PR#215):
+// history's backup re-arm pending-kind classifier and the downloader's
+// rollback re-arm mark read one publish error through the same pair —
+// PublishRefusal classes left the name FOREIGN/ABSENT (never touched again),
+// PublishCompleted left it OWNED by this operation's own bytes (the pending
+// retry reaps it), and every other publish error proves nothing (treated as
+// unowned).
+func PublishCompleted(err error) bool {
+	return errors.Is(err, ErrPublishCompleted)
+}
+
 // publishCollision wraps the destination name in the collision class.
 func publishCollision(dst string) error {
 	return fmt.Errorf("%w: %s", ErrPublishCollision, dst)

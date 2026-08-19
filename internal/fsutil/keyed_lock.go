@@ -14,8 +14,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"golang.org/x/text/cases"
+	"unicode"
 )
 
 // KeyedLockRegistry provides per-key mutexes with reference-counted eviction
@@ -146,29 +145,43 @@ func DestKey(p string) string {
 	return DestKeyForRoot(destinationProbeRoot(p), p)
 }
 
-// destKeyFolder computes the insensitive destination-key form with FULL
-// Unicode case folding (wave-20, codex P2, PR#215). Plain strings.ToLower is
-// a per-rune simple case mapping: it leaves GREEK SMALL LETTER FINAL SIGMA
-// (ς) un-folded against σ although both uppercase to Σ and are
-// case-equivalent on insensitive filesystems, so two spellings of ONE file
-// (`…/στ.jpg` journaled, `…/ΣΤ.jpg` queried) produced different journal keys
-// — equivalent spellings stayed invisible to the exact matcher, corrupting
-// sequence reuse and conflict checks. cases.Fold follows the Unicode default
-// case-fold table (ς→σ alongside σ, ß→ss alongside ẞ, …), is byte-identical
-// to ToLower for ASCII, and the returned Caser is stateless and safe for
-// concurrent use.
-var destKeyFolder = cases.Fold()
+// destKeyInsensitive computes the insensitive destination-key form with a
+// PER-RUNE simple uppercase mapping (strings.Map + unicode.ToUpper). Two
+// codex PR#215 findings bound this choice from both sides:
+//
+//   - wave-20 (codex P2 — KEEP): plain strings.ToLower leaves GREEK SMALL
+//     LETTER FINAL SIGMA (ς) un-folded against σ although both uppercase to
+//     Σ and are case-equivalent on insensitive filesystems, so two spellings
+//     of ONE file (`…/στ.jpg` journaled, `…/ΣΤ.jpg` queried) produced
+//     different journal keys and stayed invisible to the exact matcher,
+//     corrupting sequence reuse and conflict checks. unicode.ToUpper maps
+//     ς→Σ and σ→Σ identically, preserving that rescue (foldKeyedLock has
+//     unified the sigma forms this way all along).
+//   - wave-21 (codex P2 — the change): wave-20's cases.Fold runs the FULL
+//     Unicode case-fold table, which also expands one-to-many folds:
+//     ß→"ss" (Straße ≡ Strasse) and the ﬃ ligature → "ffi". Those
+//     multi-char folds are NOT filename equivalences on NTFS/APFS — their
+//     filesystem upcase tables map per code unit and never expand — so the
+//     full fold aliased byte-distinct files that can coexist in one
+//     directory, merging separate replacement chains under one journal key.
+//     restoreReplacementJournal would then restore EVERY entry to the
+//     first-recorded spelling, overwriting one file with another's backups.
+//     Simple per-rune uppercase never expands, keeping Straße/Strasse and
+//     ﬃ/FFI distinct while unifying exactly the true case variants.
+func destKeyInsensitive(s string) string {
+	return strings.Map(unicode.ToUpper, s)
+}
 
 // DestKeyForRoot is DestKey with an explicit destination root. The explicit
 // form is useful to callers that already know the media-library root. The
 // case-SENSITIVE leg stays byte-identical (normalizeDestPath only); the
-// insensitive leg full-folds through destKeyFolder.
+// insensitive leg maps through destKeyInsensitive.
 func DestKeyForRoot(root, p string) string {
 	s := normalizeDestPath(p)
 	if IsCaseSensitiveRoot(root) {
 		return s
 	}
-	return destKeyFolder.String(s)
+	return destKeyInsensitive(s)
 }
 
 func normalizeDestPath(p string) string {

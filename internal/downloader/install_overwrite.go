@@ -15,6 +15,7 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/logging"
+	"github.com/javinizer/javinizer-go/internal/models"
 )
 
 const (
@@ -214,29 +215,54 @@ func rollbackRestoreRefused(err error) bool {
 	return fsutil.PublishRefusal(err)
 }
 
-// markRollbackRearmRefused disarms the ledger after a rollback whose backup
-// re-arm failed (wave-19, codex P2 PR#215). A REFUSED no-replace re-arm
-// (fsutil.PublishRefusal classes — a foreign writer owns the backup name, or
-// the volume cannot express the publish) means the arm/pending journal entry
-// points at an UNOWNED name: left as-is, a later revert would restore those
-// foreign bytes over the (correctly rolled-back) destination and then delete
-// the occupant. The destination bytes are provably the restored pre-existing
-// bytes (the rollback restore that prompts this re-arm only runs after
-// producing exactly that state), so the entry is durably marked
-// rearm-refused restore-pending and the foreign/absent name receives no
-// further path operation from any retry. A plain re-arm failure keeps the
-// pre-wave-19 warn-only posture (the name is simply absent; the wave-18
-// armed/absent state covers it).
-func markRollbackRearmRefused(ctx context.Context, ledger downloadLedger, destPath, backupPath string, rearmErr error) {
-	if !fsutil.PublishRefusal(rearmErr) {
-		logging.Warnf("downloader: re-arm of rolled-back backup failed for %s: %v (journal entry remains armed)", backupPath, rearmErr)
+// rollbackRearmPendingKind routes the downloader's failed rollback re-arm
+// onto the journal's restore-pending kind (wave-21, codex P2 PR#215),
+// mirroring history's wave-20 trichotomy through the SHARED fsutil
+// classifiers (never duplicated): the fsutil.PublishCompleted class means
+// the failed re-arm still published THIS operation's own bytes at the backup
+// name — restore-pending CLEAN, the pending retry reaps the owned name and
+// consumes; every other failure — the fsutil.PublishRefusal classes (a
+// foreign writer owns the name, or the volume cannot express a no-replace
+// publish) AND plain pre-publish failures (staging open/write/close, a
+// failed publish) — leaves the name unowned (foreign or absent) and takes
+// the REARM-REFUSED kind: retries consume journal-only, off the unowned name.
+func rollbackRearmPendingKind(rearmErr error) string {
+	if fsutil.PublishCompleted(rearmErr) {
+		return models.RestorePendingKindClean
+	}
+	return models.RestorePendingKindRearmRefused
+}
+
+// pendingKindLabel renders the durable kind for log lines in the wave-19
+// phrasing (rearm-refused / clean).
+func pendingKindLabel(kind string) string {
+	if kind == models.RestorePendingKindRearmRefused {
+		return "rearm-refused"
+	}
+	return kind
+}
+
+// markRollbackRearmFailed disarms the ledger after a rollback whose backup
+// re-arm failed — for EVERY failure class (wave-19 refusal classes,
+// generalized by wave-21, codex P2 PR#215). The destination bytes are
+// provably the restored pre-existing bytes (the rollback restore that
+// prompts this re-arm only runs after producing exactly that state), so the
+// entry is durably marked restore-pending with rollbackRearmPendingKind's
+// kind instead of staying armed: left ARMED, a refusal class would point at
+// an unowned name (a later revert restores foreign bytes over the
+// destination and deletes the occupant), and a NON-refusal pre-publish
+// failure leaves the journal ARMED against an ABSENT backupPath — every
+// explicit revert wedges statting that absent source forever, and sweeps see
+// an ordinary armed row with a present destination (nothing to repair). Only
+// a failed marker write keeps the armed posture (last-resort logged),
+// unchanged from wave-19.
+func markRollbackRearmFailed(ctx context.Context, ledger downloadLedger, destPath, backupPath string, rearmErr error) {
+	kind := rollbackRearmPendingKind(rearmErr)
+	if markErr := ledger.recorder.MarkReplacementRestorePendingKind(ctx, ledger.opID, destPath, backupPath, kind); markErr != nil {
+		logging.Warnf("downloader: re-arm of rolled-back backup %s failed (%v) and restore-pending marking failed (%v) — journal entry stays armed, backup name untouched (pending kind %s)", backupPath, rearmErr, markErr, pendingKindLabel(kind))
 		return
 	}
-	if markErr := ledger.recorder.MarkReplacementRestorePending(ctx, ledger.opID, destPath, backupPath); markErr != nil {
-		logging.Warnf("downloader: re-arm of rolled-back backup %s refused (%v) and restore-pending marking failed (%v) — journal entry stays armed, unowned backup name untouched", backupPath, rearmErr, markErr)
-		return
-	}
-	logging.Warnf("downloader: re-arm of rolled-back backup %s refused (%v) — journal entry marked restore-pending (rearm-refused), unowned backup name untouched", backupPath, rearmErr)
+	logging.Warnf("downloader: re-arm of rolled-back backup %s failed (%v) — journal entry marked restore-pending (%s)", backupPath, rearmErr, pendingKindLabel(kind))
 }
 
 // removeRollbackBackup follows the established ownership-cleanup rule: a
@@ -501,7 +527,9 @@ func (d *Downloader) installOverwriting(ctx context.Context, stagedPath, destPat
 		if relErr := ledger.recorder.ReleaseReplacement(ctx, ledger.opID, destPath, backupPath); relErr != nil {
 			logging.Warnf("downloader: release of rolled-back journal entry failed for %s: %v (destination is correct); re-arming backup", destPath, relErr)
 			if rearmErr := rearmReplacementBackup(d.fs, destPath, backupPath); rearmErr != nil {
-				markRollbackRearmRefused(ctx, ledger, destPath, backupPath, rearmErr)
+				// Wave-21: EVERY failure class disarms the entry; only the kind
+				// routes on backup-name ownership (rollbackRearmPendingKind).
+				markRollbackRearmFailed(ctx, ledger, destPath, backupPath, rearmErr)
 			}
 		}
 		return false, true, fmt.Errorf("failed to replace file: %w", err)
@@ -524,7 +552,9 @@ func (d *Downloader) installOverwriting(ctx context.Context, stagedPath, destPat
 		if relErr := ledger.recorder.ReleaseReplacement(ctx, ledger.opID, destPath, backupPath); relErr != nil {
 			logging.Warnf("downloader: release of install-confirm rollback entry failed for %s: %v; re-arming backup", destPath, relErr)
 			if rearmErr := rearmReplacementBackup(d.fs, destPath, backupPath); rearmErr != nil {
-				markRollbackRearmRefused(ctx, ledger, destPath, backupPath, rearmErr)
+				// Wave-21: EVERY failure class disarms the entry; only the kind
+				// routes on backup-name ownership (rollbackRearmPendingKind).
+				markRollbackRearmFailed(ctx, ledger, destPath, backupPath, rearmErr)
 			}
 			return false, true, fmt.Errorf("install-confirm retract failed after rollback (%v): %w (backup %s re-arm attempted; entry stays journaled for sweep/revert recovery)", cErr, relErr, backupPath)
 		}

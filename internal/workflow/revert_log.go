@@ -98,6 +98,17 @@ type RevertLog interface {
 	// any backup-path operation (codex P2, PR#215 wave-19).
 	MarkReplacementRestorePending(ctx context.Context, opID OperationID, replacedPath, backupPath string) error
 
+	// MarkReplacementRestorePendingKind is MarkReplacementRestorePending with
+	// an explicit restore-pending kind (wave-21, codex P2 PR#215): the
+	// downloader's rollback re-arm now disarms the journal entry for EVERY
+	// re-arm failure class, and the kind alone routes on backup-name
+	// ownership — models.RestorePendingKindRearmRefused for the unowned
+	// (foreign-occupied or absent) name, models.RestorePendingKindClean when
+	// the failed re-arm demonstrably published this operation's own bytes
+	// (the fsutil.PublishCompleted class). Unknown kinds are rejected, never
+	// persisted.
+	MarkReplacementRestorePendingKind(ctx context.Context, opID OperationID, replacedPath, backupPath, kind string) error
+
 	// ConfirmReplacement marks the journaled entry installed after the new
 	// bytes landed (P3 R4-3 crash-window marker).
 	ConfirmReplacement(ctx context.Context, opID OperationID, replacedPath, backupPath string) error
@@ -168,6 +179,10 @@ func (noOpRevertLog) ReleaseReplacement(_ context.Context, _ OperationID, _, _ s
 }
 
 func (noOpRevertLog) MarkReplacementRestorePending(_ context.Context, _ OperationID, _, _ string) error {
+	return nil
+}
+
+func (noOpRevertLog) MarkReplacementRestorePendingKind(_ context.Context, _ OperationID, _, _, _ string) error {
 	return nil
 }
 
@@ -811,18 +826,39 @@ func (l *dbRevertLog) ReleaseReplacement(ctx context.Context, opID OperationID, 
 // backup re-arm was REFUSED with the occupied-name classes
 // (fsutil.PublishRefusal) — the name is foreign-occupied or absent. The
 // marker certifies the destination and keeps every retry off the unowned
-// name. Matching follows the downloader seam's exact-spelling convention
-// (same as Record/Release/ConfirmReplacement); a missing entry is tolerated
+// name. The kind-carrying generalization lives in
+// MarkReplacementRestorePendingKind; this is the wave-19 shorthand it
+// delegates to.
+func (l *dbRevertLog) MarkReplacementRestorePending(ctx context.Context, opID OperationID, replacedPath, backupPath string) error {
+	return l.MarkReplacementRestorePendingKind(ctx, opID, replacedPath, backupPath, models.RestorePendingKindRearmRefused)
+}
+
+// MarkReplacementRestorePendingKind is MarkReplacementRestorePending with an
+// explicit restore-pending kind (wave-21, codex P2 PR#215). The downloader's
+// rollback re-arm disarms the journaled entry for EVERY failure class, with
+// the kind routing the retry: models.RestorePendingKindRearmRefused for an
+// unowned (foreign-occupied or absent) backup name — retries consume
+// journal-only — and models.RestorePendingKindClean when the failed re-arm
+// demonstrably published this operation's own bytes at the name (the
+// fsutil.PublishCompleted class — retries reap it first). Matching follows
+// the downloader seam's exact-spelling convention (same as
+// Record/Release/ConfirmReplacement); a missing entry is tolerated
 // (idempotent, exactly like ReleaseReplacement), a missing row is not. The
 // merge discipline (one-way upgrade, never a downgrade to clean) lives in
-// models.ReplacementEntry.SetRestorePending.
-func (l *dbRevertLog) MarkReplacementRestorePending(ctx context.Context, opID OperationID, replacedPath, backupPath string) error {
+// models.ReplacementEntry.SetRestorePending. Any other kind is rejected:
+// this build must never persist a marker whose routing it cannot interpret.
+func (l *dbRevertLog) MarkReplacementRestorePendingKind(ctx context.Context, opID OperationID, replacedPath, backupPath, kind string) error {
 	if opID == "" {
 		return fmt.Errorf("revert log MarkReplacementRestorePending: empty operation ID")
 	}
 	recordID64, err := strconv.ParseUint(opID, 10, 64)
 	if err != nil || recordID64 == 0 {
 		return fmt.Errorf("revert log MarkReplacementRestorePending: unparsable operation ID %q", opID)
+	}
+	switch kind {
+	case models.RestorePendingKindClean, models.RestorePendingKindRearmRefused:
+	default:
+		return fmt.Errorf("revert log MarkReplacementRestorePending: unknown restore-pending kind %q", kind)
 	}
 
 	release := replacementLedgerLocks.Acquire(opID)
@@ -838,8 +874,8 @@ func (l *dbRevertLog) MarkReplacementRestorePending(ctx context.Context, opID Op
 		for i := range gf.Replacements {
 			e := &gf.Replacements[i]
 			if e.Destination == replacedPath && e.Backup == backupPath {
-				if !e.SetRestorePending(models.RestorePendingKindRearmRefused) {
-					return gf, false, nil // already carries the rearm-refused mark — idempotent
+				if !e.SetRestorePending(kind) {
+					return gf, false, nil // already carries the mark at this kind — idempotent
 				}
 				return gf, true, nil
 			}

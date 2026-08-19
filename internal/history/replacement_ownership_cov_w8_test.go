@@ -450,8 +450,11 @@ func requireLogPathContains(t *testing.T, logs, path string) {
 
 type w8RearmFailFs struct{ afero.Fs }
 
+// The wedge targets the re-arm's exclusively-staged copy name (wave-21:
+// `<backup>.dlrarm.<hex>`), so the failure lands BEFORE any publish attempt
+// — the re-arm's pre-publish failure class.
 func (f *w8RearmFailFs) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
-	if strings.Contains(filepath.Base(name), ".tmp-") {
+	if strings.Contains(name, rearmStagingSuffix+".") {
 		return nil, errors.New("re-arm temp open wedged")
 	}
 	return f.Fs.OpenFile(name, flag, perm)
