@@ -242,15 +242,22 @@ func TestInstallOverwritingW25_ConfirmRollbackForeignSwapDevIno(t *testing.T) {
 	require.NoError(t, os.WriteFile(staged, payload, 0o644))
 	require.NoError(t, os.WriteFile(dest, []byte("old poster bytes here."), 0o644))
 
+	// A pre-built foreign object with identical bytes: on CI filesystems
+	// (overlayfs/tmpfs) remove+create at the SAME path routinely reuses the
+	// freed inode, which would make the substitution undetectable. Renaming
+	// a distinct pre-created file over the destination guarantees a foreign
+	// inode regardless of allocation policy.
+	foreign := filepath.Join(tmp, "foreign-plant.jpg")
+	require.NoError(t, os.WriteFile(foreign, payload, 0o644))
+
 	d := NewDownloader(nil, base, &Config{}, nil).WithDestLocks(fsutil.NewKeyedLockRegistry())
 	ledger := &w25Ledger{confirmErr: errors.New("journal store wedged")}
 	ledger.confirmHook = func() {
-		// Swap in a NEW inode carrying bytes of the SAME length — only
+		// Swap in the foreign inode carrying bytes of the SAME length — only
 		// dev/inode can tell it apart from the just-installed object.
 		info, err := os.Lstat(dest)
 		require.NoError(t, err)
-		require.NoError(t, os.Remove(dest))
-		require.NoError(t, os.WriteFile(dest, payload, 0o644)) // identical bytes, foreign object
+		require.NoError(t, os.Rename(foreign, dest))
 		// Even a matching mtime must not rescue the substitution.
 		require.NoError(t, os.Chtimes(dest, info.ModTime(), info.ModTime()))
 	}
