@@ -15,6 +15,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -46,12 +47,16 @@ func TestReverterSweepW24_StuckInnerSweepReleasesAtBudget(t *testing.T) {
 	var gotDests []string
 	var gotDeadline time.Time
 	var gotDeadlineOK bool
+	// Wave-34 (finding F4): the substituted seam answers BOTH pre-sweep
+	// invocations (destinations, then roots) — the closes stay idempotent
+	// for the second call once the first one drained.
+	var enteredOnce, unblockedOnce sync.Once
 	w24SwapReverterSweep(t, func(ctx context.Context, _ *ReplacementSweeper, dests []string) (int, error) {
 		gotDests = append([]string(nil), dests...)
 		gotDeadline, gotDeadlineOK = ctx.Deadline()
-		close(entered)
+		enteredOnce.Do(func() { close(entered) })
 		<-unblock // wedged afero.ReadDir stand-in: deliberately never observes ctx
-		close(unblocked)
+		unblockedOnce.Do(func() { close(unblocked) })
 		return 0, nil
 	}, 75*time.Millisecond)
 
@@ -161,10 +166,13 @@ func TestReverterSweepW24_RevertBatchProceedsPastWedgedSweep(t *testing.T) {
 	entered := make(chan struct{})
 	unblock := make(chan struct{})
 	unblocked := make(chan struct{})
+	// Wave-34 (finding F4): the seam is invoked for the destinations AND the
+	// roots sweep (the second call drains immediately once unblocked).
+	var enteredOnce, unblockedOnce sync.Once
 	w24SwapReverterSweep(t, func(context.Context, *ReplacementSweeper, []string) (int, error) {
-		close(entered)
+		enteredOnce.Do(func() { close(entered) })
 		<-unblock
-		close(unblocked)
+		unblockedOnce.Do(func() { close(unblocked) })
 		return 0, nil
 	}, 75*time.Millisecond)
 

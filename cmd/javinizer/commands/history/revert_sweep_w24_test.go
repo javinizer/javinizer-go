@@ -14,6 +14,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -56,12 +57,16 @@ func TestRunHistoryRevertW24_WedgedInnerSweepReleasesCommand(t *testing.T) {
 	entered := make(chan struct{})
 	unblock := make(chan struct{})
 	unblocked := make(chan struct{})
+	// Wave-34 (finding F4): the substituted seam answers BOTH pre-sweep
+	// invocations (destinations, then roots) — the closes must stay
+	// idempotent for the second call once the first one drained.
+	var enteredOnce, unblockedOnce sync.Once
 	restore := historypkg.SwapReverterSweepForTest(
 		func(sweepCtx context.Context, _ *historypkg.ReplacementSweeper, dests []string) (int, error) {
 			// Wedged-network-filesystem stand-in: deliberately never observes
 			// sweepCtx, exactly like afero.ReadDir cannot.
-			defer close(unblocked)
-			close(entered)
+			defer unblockedOnce.Do(func() { close(unblocked) })
+			enteredOnce.Do(func() { close(entered) })
 			<-unblock
 			return 0, nil
 		}, 100*time.Millisecond)

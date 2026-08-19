@@ -204,11 +204,19 @@ type StagedPublish struct {
 //     the foreign bytes were preserved instead; NOTHING was consumed and
 //     the caller retains its backup.
 //
-// In every error class except the pre-publish verify failure the caller's
-// historical "remove the original staged name" cleanup stays safe: that
-// name is either still ours or already consumed by the publish — and where
-// a foreign plant sits on it, removing it discards attacker junk (never
-// genuine bytes: those live on the handle until close).
+// In every error class except the pre-publish verify failure AND the
+// ErrPublishCompleted-carrying classes (wave-34, codex local review round 4,
+// PR#215 finding F3) the caller's historical "remove the original staged
+// name" cleanup stays safe: that name is either still ours or already
+// consumed by the publish — and where a foreign plant sits on it, removing
+// it discards attacker junk (never genuine bytes: those live on the handle
+// until close). The publish's OWN ErrPublishCompleted-carrying error (the
+// POSIX hard-link fallback's staged-cleanup refusal, wave-33's
+// ErrPublishNoReplaceStagedUnverified, or the wave-20 cleanup+rollback
+// failure leg) is the exception: the staged name was DELIBERATELY left in
+// place and may address a foreign object, so callers must check
+// errors.Is(err, ErrPublishCompleted) BEFORE any staged removal — the
+// destination provably carries the published bytes regardless.
 func PublishStagedBound(p StagedPublish) error {
 	_, err := PublishStagedBoundInfo(p)
 	return err

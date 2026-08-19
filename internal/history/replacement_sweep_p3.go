@@ -955,7 +955,19 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 	// shape of the classification below (armed entry present vs already
 	// consumed) tracks the state fn observed, never an index-time snapshot.
 	// Lock order dest→journal matches the reverter's consumption.
+	// Wave-34 (codex local review round 4, PR#215 finding F1): the undo unlink
+	// is IDENTITY-BOUND to the object this leg published — a pathname remove
+	// after the wave-31/wave-32 re-gates succeeded would delete a foreign
+	// occupant swapped onto dest inside the gate→undo window. The seam
+	// re-derives the no-follow identity and requires SameFile; on divergence
+	// (or an indeterminate verdict) the destination AND the backup stay
+	// retained and the journal entry stays live, exactly like the publish-time
+	// refusal legs.
 	undoRestore := func() {
+		if !restoredDestStillOurs(s.fs, dest, restoredID) {
+			logging.Warnf("replacement sweep %s: restore undo REFUSED — restored destination %s no longer names the published restore object (foreign swap or deletion in the undo window); destination and backup retained, journal entry left live", backup, dest)
+			return
+		}
 		if rmErr := s.fs.Remove(dest); rmErr != nil {
 			logging.Warnf("replacement sweep %s: restore undo failed: %v", backup, rmErr)
 		}
@@ -1100,6 +1112,16 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 			} else {
 				logging.Warnf("replacement sweep %s: consumption failed (%v) and re-arm failed (%v) — restored destination retained, cleanup marked restore-pending (%s)", backup, uErr, rearmErr, persistKind)
 			}
+			return false
+		}
+		// Wave-34 (codex local review round 4, PR#215 finding F1): the undo
+		// unlink stays identity-bound even after the SUCCEEDED re-arm — a
+		// foreign occupant swapped onto dest in the re-arm→undo window must
+		// never be deleted by pathname. Divergence retains the destination and
+		// the freshly re-armed backup with the journal entry left live; only a
+		// destination still naming the published restore object is unlinked.
+		if !restoredDestStillOurs(s.fs, dest, restoredID) {
+			logging.Warnf("replacement sweep %s: consumption failed (%v) and restore undo REFUSED — restored destination %s no longer names the published restore object (foreign swap or deletion in the re-arm→undo window); destination and re-armed backup retained, journal entry left live", backup, uErr, dest)
 			return false
 		}
 		if rmErr := s.fs.Remove(dest); rmErr != nil {

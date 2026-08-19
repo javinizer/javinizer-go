@@ -384,11 +384,32 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 						// Without a durable marker, only undo a restore whose
 						// destination was proven missing before the copy. That is the
 						// armed-entry + intact-backup R9-2 compensation state.
+						// Wave-34 (codex local review round 4, PR#215 finding F2):
+						// destMissingBeforeRestore is the PRE-COPY Lstat — it says
+						// nothing about the object answering at dest NOW. The undo
+						// unlink is bound to the identity THIS pass published
+						// (restoredID, the wave-31 publish identity): the seam
+						// re-derives the no-follow identity + SameFile, and a foreign
+						// create/swap landing inside the classify→undo window is
+						// RETAINED byte-intact (never deleted), the entry left in its
+						// armed live state like the retained neighbor legs. A PENDING
+						// leg published nothing on this pass (restoredID is empty by
+						// construction), so an occupant at a destination classified
+						// missing pre-copy is necessarily foreign — retain it without
+						// an unlink. An indeterminate verdict fails closed exactly
+						// like the wave-31 publish-time recheck.
 						if destMissingBeforeRestore {
-							if undoErr := r.fs.Remove(dest); undoErr != nil {
-								logging.Warnf("replacement restore %s: cleanup marker persistence failed AND restore-undo failed (%v after %v)", absoluteBackup, undoErr, markErr)
-							} else {
-								logging.Warnf("replacement restore %s: cleanup marker persistence failed (%v) — restore undone, will retry", absoluteBackup, markErr)
+							switch {
+							case restorePending:
+								logging.Warnf("replacement restore %s: cleanup marker persistence failed (%v) — restored destination retained for retry: this pending leg published nothing, so the occupant at a destination classified missing pre-copy is foreign and never deleted", absoluteBackup, markErr)
+							case !restoredDestStillOurs(r.fs, dest, restoredID):
+								logging.Warnf("replacement restore %s: cleanup marker persistence failed (%v) — restored destination retained for retry: it no longer names the published restore object (foreign swap or creation in the undo window)", absoluteBackup, markErr)
+							default:
+								if undoErr := r.fs.Remove(dest); undoErr != nil {
+									logging.Warnf("replacement restore %s: cleanup marker persistence failed AND restore-undo failed (%v after %v)", absoluteBackup, undoErr, markErr)
+								} else {
+									logging.Warnf("replacement restore %s: cleanup marker persistence failed (%v) — restore undone, will retry", absoluteBackup, markErr)
+								}
 							}
 						} else {
 							// The destination was not proven missing before this restore.
@@ -570,9 +591,65 @@ var reverterSweepDestinations = func(ctx context.Context, sweeper *ReplacementSw
 	return sweeper.SweepDestinations(ctx, dests)
 }
 
+// reverterSweepRoots is the root-directory invocation seam (wave-34, codex
+// local review round 4, PR#215 finding F4): the direct-revert pre-sweep also
+// scans the operations' Begin-persisted roots, exactly where a process dying
+// between the destination move-aside and RecordReplacement strands the
+// destination-adjacent backup its never-written journal entry cannot name
+// for the destination-only sweep set. Production wires the concrete sweeper
+// method; SwapReverterSweepForTest substitutes it together with the
+// destinations seam so the whole pre-sweep surface shares one wedge/timeout
+// discipline.
+var reverterSweepRoots = func(ctx context.Context, sweeper *ReplacementSweeper, dirs []string) (int, error) {
+	return sweeper.SweepDirs(ctx, dirs)
+}
+
+// opSweepRoots computes the pre-sweep DIRECTORY scope of one operation
+// (wave-34, codex local review round 4, PR#215 finding F4): the
+// Begin-persisted destination roots (gf.Roots) ∪ the journaled replacement
+// destination directories. The destination-only sweep set (gf.Replacements
+// dests) misses the crash window between the destination move-aside and
+// RecordReplacement entirely: that window leaves NO journaled entry, so the
+// stranded backup sits under a Begin root its sweep never scanned and the
+// original bytes were never recovered, even though gf.Roots covers the
+// window. An unparseable ledger contributes nothing — the pre-sweep's
+// destination collection skips the op the same way.
+func opSweepRoots(op *models.BatchFileOperation) []string {
+	gf, err := models.ParseGeneratedFiles(op.GeneratedFiles)
+	if err != nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	var dirs []string
+	add := func(d string) {
+		if strings.TrimSpace(d) == "" {
+			return
+		}
+		cleaned := filepath.ToSlash(filepath.Clean(d))
+		if seen[cleaned] {
+			return
+		}
+		seen[cleaned] = true
+		dirs = append(dirs, cleaned)
+	}
+	for _, root := range gf.Roots {
+		add(root)
+	}
+	for _, rep := range gf.Replacements {
+		add(filepath.Dir(rep.Destination))
+	}
+	return dirs
+}
+
 // sweepJournaledDestinations runs the pre-revert targeted sweep over every
 // destination journaled by the operations about to revert: crash-window
 // restores land before the rejection/restore checks read destination state.
+// Wave-34 (codex local review round 4, PR#215 finding F4): the sweep scope
+// unions the operations' Begin-persisted roots (+ replacement destination
+// dirs, opSweepRoots) through SweepDirs AFTER the unchanged destination set,
+// so a stranded backup left by a process dying between the move-aside and
+// RecordReplacement (no journaled entry at all) is seen by the orphan
+// arbitration legs and healed instead of leaking past the revert.
 // Best-effort — a sweeper failure never blocks the revert path.
 //
 // The sweep runs under the wave-8 bounded discipline (the same shape the
@@ -591,6 +668,8 @@ func (r *Reverter) sweepJournaledDestinations(ctx context.Context, ops []models.
 		return
 	}
 	dests := make([]string, 0, len(ops))
+	var roots []string
+	rootsSeen := map[string]bool{}
 	for i := range ops {
 		gf, err := models.ParseGeneratedFiles(ops[i].GeneratedFiles)
 		if err != nil {
@@ -599,19 +678,45 @@ func (r *Reverter) sweepJournaledDestinations(ctx context.Context, ops []models.
 		for _, rep := range gf.Replacements {
 			dests = append(dests, rep.Destination)
 		}
+		// Wave-34 (finding F4): the operations' roots (Begin-persisted,
+		// covering the pre-RecordReplacement crash window) join the sweep
+		// scope alongside the journaled destinations.
+		for _, dir := range opSweepRoots(&ops[i]) {
+			if rootsSeen[dir] {
+				continue
+			}
+			rootsSeen[dir] = true
+			roots = append(roots, dir)
+		}
 	}
-	if len(dests) == 0 {
+	if len(dests) == 0 && len(roots) == 0 {
 		return
 	}
 
 	sweepCtx, cancel := context.WithTimeout(ctx, reverterSweepTimeout)
 	// Buffered so an abandoned sweep (deadline leg below) never parks on the
 	// send after the caller has moved on.
-	sweep := reverterSweepDestinations
+	sweepDests := reverterSweepDestinations
+	sweepRoots := reverterSweepRoots
 	done := make(chan error, 1)
 	go func() {
-		_, err := sweep(sweepCtx, r.sweeper, dests)
-		done <- err
+		// The destination sweep runs FIRST (its arbitration set and ordering
+		// are the pre-wave-34 contract — unchanged); the roots sweep then
+		// heals the roots-only leftovers (finding F4). Each leg is
+		// best-effort; the FIRST error surfacing keeps the caller's failure
+		// log exactly as before.
+		var firstErr error
+		if len(dests) > 0 {
+			if _, err := sweepDests(sweepCtx, r.sweeper, dests); err != nil {
+				firstErr = err
+			}
+		}
+		if len(roots) > 0 {
+			if _, err := sweepRoots(sweepCtx, r.sweeper, roots); err != nil && firstErr == nil {
+				firstErr = err
+			}
+		}
+		done <- firstErr
 	}()
 	select {
 	case err := <-done:
@@ -917,7 +1022,23 @@ func copyRestoreBytesPublish(fs afero.Fs, backup, dest string, publish func(afer
 			_ = fs.Remove(staged)
 			return restoredDestIdentity{}, fmt.Errorf("stage restore close: %w", pubErr)
 		default:
-			_ = fs.Remove(staged)
+			// Wave-34 (codex local review round 4, PR#215 finding F3): a
+			// publish failure carrying fsutil.ErrPublishCompleted proves the
+			// DESTINATION already carries the staged bytes while fsutil
+			// DELIBERATELY left the staged name in place — the POSIX hard-link
+			// fallback's staged cleanup could not re-prove it
+			// (fsutil.ErrPublishNoReplaceStagedUnverified: the name may now
+			// address a foreign object swapped on mid-window) or its unlink
+			// failed with the destination rollback failing too (wave-20). An
+			// unlink here could destroy those possibly-foreign bytes, so the
+			// staged cleanup runs ONLY for error classes that prove nothing
+			// was published (our own staged copy, safe to drop); the retained
+			// litter is a transient staging name, never a backup-grammar file.
+			if fsutil.PublishCompleted(pubErr) {
+				logging.Warnf("staged restore copy %s left in place — publish completed but the staged name could not be re-proven (possibly foreign); manual cleanup advised: %v", staged, pubErr)
+			} else {
+				_ = fs.Remove(staged)
+			}
 			return restoredDestIdentity{}, fmt.Errorf("swap staged restore: %w", pubErr)
 		}
 	}
@@ -1094,7 +1215,19 @@ func copyRearmSourceBytes(fs afero.Fs, src io.Reader, backup string, info os.Fil
 			_ = fs.Remove(staged)
 			return fmt.Errorf("re-arm close backup %s: %w", backup, pubErr)
 		default:
-			_ = fs.Remove(staged)
+			// Wave-34 (codex local review round 4, PR#215 finding F3): the
+			// staged-cleanup discipline of the restore publish applies here too
+			// — an fsutil.ErrPublishCompleted-carrying publish failure (the
+			// wave-33 staged-cleanup refusal, joined with the completed class,
+			// or the wave-20 rollback-failure leg) left the staged name in place
+			// DELIBERATELY because it may address a foreign object; the backup
+			// name already carries this operation's bytes. Refuse the cleanup
+			// for that class and drop only provably-unpublished staged copies.
+			if fsutil.PublishCompleted(pubErr) {
+				logging.Warnf("staged re-arm copy %s left in place — publish completed but the staged name could not be re-proven (possibly foreign); manual cleanup advised: %v", staged, pubErr)
+			} else {
+				_ = fs.Remove(staged)
+			}
 			return fmt.Errorf("re-arm install backup %s: %w", backup, pubErr)
 		}
 	}

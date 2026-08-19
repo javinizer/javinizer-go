@@ -219,7 +219,21 @@ func copyBackupToDestPublish(fsys afero.Fs, backup, dest string, publish func(af
 			_ = fsys.Remove(staged)
 			return rollbackCopyFacts{}, fmt.Errorf("close rollback: %w", pubErr)
 		default:
-			_ = fsys.Remove(staged)
+			// Wave-34 (codex local review round 4, PR#215 finding F3): a
+			// publish failure carrying fsutil.ErrPublishCompleted proves the
+			// DESTINATION already carries the staged bytes while fsutil
+			// DELIBERATELY left the staged name in place — the POSIX hard-link
+			// fallback's staged cleanup could not re-prove it
+			// (fsutil.ErrPublishNoReplaceStagedUnverified: the name may now
+			// address a foreign object swapped on mid-window) or its unlink
+			// failed with the destination rollback failing too (wave-20).
+			// Unlinking here could destroy those possibly-foreign bytes, so
+			// only a provably-unpublished staged copy (our own) is dropped.
+			if fsutil.PublishCompleted(pubErr) {
+				logging.Warnf("downloader: staged rollback copy %s left in place — publish completed but the staged name could not be re-proven (possibly foreign); manual cleanup advised: %v", staged, pubErr)
+			} else {
+				_ = fsys.Remove(staged)
+			}
 			return rollbackCopyFacts{}, fmt.Errorf("swap rollback: %w", pubErr)
 		}
 	}
