@@ -1,6 +1,7 @@
 package downloader
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -73,15 +74,16 @@ func handoffViaVerifiedRename(fsys afero.Fs, destPath, backupPath string, claim 
 // preserved.
 func releaseClaimedReservation(fsys afero.Fs, backupPath string, claim os.FileInfo) {
 	err := overwriteBackupReservationStillOurs(fsys, backupPath, claim)
-	switch {
-	case err == nil:
+	if err == nil {
 		// Proven ours at syscall adjacency — release the placeholder so a
 		// retry never has to climb past (or worse, journal) it.
 		_ = fsys.Remove(backupPath)
-	case os.IsNotExist(err):
+		return
+	}
+	if errors.Is(err, os.ErrNotExist) {
 		// The reservation vanished on its own — nothing foreign to protect,
 		// nothing left to remove.
-	default:
-		logging.Warnf("downloader: failed set-aside cleanup of %s refused — the reservation no longer provably names our claimed placeholder (%v); the occupant is left byte-intact", backupPath, err)
+		return
 	}
+	logging.Warnf("downloader: failed set-aside cleanup of %s refused — the reservation no longer provably names our claimed placeholder (%v); the occupant is left byte-intact", backupPath, err)
 }
