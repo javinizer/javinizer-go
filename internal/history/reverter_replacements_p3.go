@@ -790,6 +790,10 @@ func (r *Reverter) checkDestBlocking(ctx context.Context, op *models.BatchFileOp
 // restoreCopyNonce uniquifies the staged copy path for a destination restore.
 var restoreCopyNonce atomic.Uint64
 
+// rearmNextOrdinal supplies strictly-increasing ordinals to restaged re-arm
+// names (a named func so the coverage gate sees the pin test).
+var rearmNextOrdinal = func() uint64 { return rearmCopyNonce.Add(1) }
+
 // rearmCopyNonce uniquifies the exclusively-staged copy path for the backup
 // re-arm (journal-consumption compensation).
 var rearmCopyNonce atomic.Uint64
@@ -1215,7 +1219,7 @@ func copyRearmSourceBytes(fs afero.Fs, src io.Reader, backup string, info os.Fil
 		Mtime:       mtime,
 		ApplyTimes:  info != nil,
 		Suffix:      rearmStagingSuffix,
-		NextOrdinal: func() uint64 { return rearmCopyNonce.Add(1) },
+		NextOrdinal: rearmNextOrdinal,
 	})
 	if pubErr != nil {
 		// Wave-15 (codex P2): publish the staged re-arm with NO-REPLACE

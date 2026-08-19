@@ -544,33 +544,22 @@ func lstatBackupCandidate(fsys afero.Fs, candidate string) (os.FileInfo, error) 
 // bytes before the journal ever saw them (codex PR#215). An O_EXCL collision
 // on an observed-free candidate means a racer reserved it first and the
 // claim climbs to the next name. The returned placeholder is a 0-byte file;
-// the caller's dest→backup handoff (moveIntoReservedBackup — replace-aware,
-// ReplaceFile on Windows) safely replaces the reservation, so every
-// participant either wins a unique name or fails closed.
-// moveIntoReservedBackup hands the destination bytes to the atomically
-// RESERVED backup name returned by claimOverwriteBackupPath: that name is
-// occupied by the claim's 0-byte placeholder, so the handoff must REPLACE an
-// existing target. POSIX rename does so atomically; Windows rename
-// (OsFs.Rename → MoveFileW) REFUSES an existing destination, which turned
-// every ledger-armed overwrite of an existing file into a set-aside failure
-// on Windows (codex PR#215 w12). The Windows leg therefore routes through
-// fsutil.ReplaceFile (OsFs → MoveFileExW with MOVEFILE_REPLACE_EXISTING).
-// The leg is keyed on the same fsutil.PathBackslashesAreSeparators
-// Windows-posture seam the history package's restoreOSPath/DestKey use —
-// instead of a build tag — so the Windows branch is exercisable in host
-// tests; both legs are behaviorally identical on a POSIX host because
-// POSIX ReplaceFile is itself a rename. The set-aside is the only leg that
-// renames into a reserved (pre-existing placeholder) target; the rollback
-// restores below publish onto a path the set-aside just vacated with
-// NO-REPLACE semantics (restoreAsideBackup, wave-17), so a foreign dest
-// claimed mid-window is refused and kept instead of clobbered (Windows's
-// MoveFileExW-without-replace refusal maps into the same retained class).
-func moveIntoReservedBackup(fsys afero.Fs, src, dst string) error {
-	if fsutil.PathBackslashesAreSeparators {
-		return fsutil.ReplaceFile(fsys, src, dst)
-	}
-	return fsys.Rename(src, dst)
-}
+// the caller's dest→backup handoff (wave-38: handoffToReservedBackup) is
+// CONDITIONAL on it: the placeholder is first taken aside through the bound
+// take-aside (Linux/OsFs parks it at dest via the atomic RENAME_EXCHANGE and
+// the take-aside removes it there), then dest moves onto the freed backup
+// name NO-REPLACE — no foreign claim is ever displaced and every participant
+// either wins a unique name or fails closed.
+// (Pre-wave-38 the handoff renamed dest onto the reserved name in place:
+// POSIX rename replaced the placeholder atomically in the verify→rename
+// window, while Windows rename — OsFs.Rename → MoveFileW — REFUSED the
+// existing placeholder and rode fsutil.ReplaceFile instead (codex PR#215
+// w12). Wave-38's dest move now targets a vacancy on every platform, riding
+// fsutil.PublishNoReplace's collision-class refusal. The rollback restores
+// below publish onto a path the set-aside just vacated with NO-REPLACE
+// semantics (restoreAsideBackup, wave-17), so a foreign dest claimed
+// mid-window is refused and kept instead of clobbered (Windows's
+// MoveFileExW-without-replace refusal maps into the same retained class).)
 
 // claimOverwriteBackupPath returns the reserved backup name AND the
 // reservation's own captured identity (the open handle's pre-close Stat).
@@ -771,15 +760,17 @@ func (d *Downloader) installOverwriting(ctx context.Context, stagedPath, destPat
 	// now climbs to a fresh backup name exactly like a claim collision, and
 	// the foreign occupant is never touched.
 	//
-	// Wave-37 (codex P2, PR#215): the handoff itself is ATOMIC where the
-	// platform offers the primitive — renameat2(RENAME_EXCHANGE) on
+	// Wave-37/wave-38 (codex P2, PR#215): the handoff itself is ATOMIC where
+	// the platform offers the primitive — renameat2(RENAME_EXCHANGE) on
 	// Linux/OsFs (backup_handoff_linux.go) swaps the dest and reservation
-	// dentries with no window for a plant, then unlinks the exchange-parked
-	// placeholder only after re-proving dest still names the claim — and
-	// IDENTITY-BOUND everywhere else (handoffViaVerifiedRename re-derives the
-	// reservation at syscall adjacency and binds the failure cleanup to the
-	// claimed placeholder), so neither the overwrite nor the cleanup-unlink
-	// can ever name a foreign occupant on POSIX or Windows.
+	// dentries with no window for a plant, then removes the exchange-parked
+	// placeholder through the wave-38 take-aside (dest→scratch no-replace
+	// take + claim-bound unlink) — and CONDITIONAL everywhere else
+	// (handoffViaVerifiedRename takes the placeholder ASIDE onto a bound
+	// scratch first, moves dest onto the freed backup name NO-REPLACE, and
+	// unlinks only the scratch re-bound against the claim), so neither the
+	// overwrite nor any cleanup can ever name a foreign occupant on POSIX or
+	// Windows.
 	var backupPath string
 	var backupClaim os.FileInfo
 	var claimErr error

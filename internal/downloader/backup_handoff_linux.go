@@ -10,14 +10,12 @@ import (
 
 	"github.com/spf13/afero"
 	"golang.org/x/sys/unix"
-
-	"github.com/javinizer/javinizer-go/internal/fsutil"
-	"github.com/javinizer/javinizer-go/internal/logging"
 )
 
-// POSTER-WRITE-HARDENING wave-37 (codex P2, PR#215) — the POSIX-preferred
-// reserved-backup handoff: ATOMIC where the kernel offers the exchange
-// primitive.
+// POSTER-WRITE-HARDENING wave-37/wave-38 (codex P2, PR#215) — the
+// POSIX-preferred reserved-backup handoff: ATOMIC where the kernel offers
+// the exchange primitive, with the exchange-parked placeholder's removal
+// rebound through the wave-38 take-aside (finding F3).
 
 // backupExchangeKernel is the syscall behind the atomic handoff, exposed as a
 // test seam (same discipline as fsutil's renameNoReplaceKernel): a host
@@ -42,9 +40,11 @@ func handoffToReservedBackup(fsys afero.Fs, destPath, backupPath string, claim o
 // receives the original destination bytes and dest receives the reservation
 // placeholder with NO verify→rename window in which a foreign writer could
 // plant an occupant to overwrite. The placeholder parked at dest is then
-// removed ONLY after re-proving dest still names the claimed reservation
-// object (releaseExchangedPlaceholder) — a foreign occupant that rode the
-// swap is left byte-intact with a typed refusal.
+// removed ONLY through the take-aside binding (releaseExchangedPlaceholder):
+// dest→scratch onto a fresh reserved quarantine name, identity re-proof at
+// the scratch name against the claim, unlink of the scratch re-bound at
+// unlink time — the pre-wave-38 verify-then-unlink-by-name gap (finding F3)
+// can no longer delete a foreign file swapped in after the check.
 //
 // Returns (exchanged, err): exchanged=false means no exchange was attempted
 // (non-OsFs) or the kernel/filesystem cannot express RENAME_EXCHANGE
@@ -68,49 +68,4 @@ func exchangeBackupHandoff(fsys afero.Fs, destPath, backupPath string, claim os.
 		releaseClaimedReservation(fsys, backupPath, claim)
 		return true, fmt.Errorf("atomic backup exchange %s -> %s: %w", destPath, backupPath, err)
 	}
-}
-
-// releaseExchangedPlaceholder removes the reservation placeholder a
-// successful exchange parked at destPath, leaving the destination absent for
-// the staged publish. The unlink is bound to the claim's identity: dest must
-// STILL name the claimed reservation object (dev/inode where the filesystem
-// exposes them, plus size 0, mtime, and a regular non-symlink shape) at
-// syscall adjacency. A placeholder that VANISHED on its own completed the
-// cleanup by itself. Anything else — a foreign occupant that rode the swap,
-// an indeterminate lookup, a failed unlink — is a refusal: the install fails
-// closed, the destination is left byte-intact, and the set-aside backup
-// (which holds the original bytes by then) is retained for the orphan sweep.
-func releaseExchangedPlaceholder(fsys afero.Fs, destPath string, claim os.FileInfo) error {
-	cur, err := lstatBackupCandidate(fsys, destPath)
-	switch {
-	case err != nil && os.IsNotExist(err):
-		return nil
-	case err != nil:
-		return fmt.Errorf("inspect exchanged placeholder %s before its removal: %w", destPath, err)
-	case !destPlaceholderMatchesClaim(cur, claim):
-		logging.Warnf("downloader: exchange-parked placeholder at %s no longer names the claimed reservation — a foreign occupant rode the swap; destination left byte-intact, set-aside backup retained", destPath)
-		return fmt.Errorf("placeholder the exchange parked at %s no longer names the claimed reservation (foreign occupant preserved): %w", destPath, fsutil.ErrPublishCollision)
-	}
-	if rmErr := fsys.Remove(destPath); rmErr != nil {
-		return fmt.Errorf("remove exchange-parked placeholder %s (verified ours): %w", destPath, rmErr)
-	}
-	return nil
-}
-
-// destPlaceholderMatchesClaim reports whether cur — the object currently
-// named by dest after the exchange — is still THE claimed reservation
-// placeholder: regular, non-symlink, size 0, same mtime on every platform,
-// and same dev/inode where the filesystem exposes them. The shape mirrors
-// overwriteBackupReservationStillOurs (wave-36) for the exchange leg's dest
-// side.
-func destPlaceholderMatchesClaim(cur, claim os.FileInfo) bool {
-	if cur == nil || cur.Mode()&os.ModeSymlink != 0 || !cur.Mode().IsRegular() || cur.Size() != 0 || !cur.ModTime().Equal(claim.ModTime()) {
-		return false
-	}
-	if claimDev, claimIno, claimOK := restoreSourceIdentity(claim); claimOK {
-		if curDev, curIno, curOK := restoreSourceIdentity(cur); curOK && (claimDev != curDev || claimIno != curIno) {
-			return false
-		}
-	}
-	return true
 }

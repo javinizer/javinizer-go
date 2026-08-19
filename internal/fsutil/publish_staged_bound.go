@@ -31,13 +31,22 @@ import (
 //  2. re-verify immediately AFTER a successful publish: the destination
 //     must name the handle's inode (os.SameFile);
 //  3. on a mismatch the published object is not ours — ours was renamed
-//     away and we still hold its handle — so the foreign destination is
-//     displaced ONLY for publishes into a proven-absent destination (the
-//     caller's classification + the no-replace primitive together prove
-//     the published bytes are the window plant, never pre-existing data),
-//     and the genuine bytes are re-staged FROM THE HANDLE (seek 0, copy
-//     into a fresh O_EXCL staging name) and republished under a BOUNDED
-//     attempt budget;
+//     away and we still hold its handle — so the genuine bytes are
+//     re-staged FROM THE HANDLE (seek 0, copy into a fresh O_EXCL staging
+//     name) and republished under a BOUNDED attempt budget. Wave-38 (codex
+//     P2, PR#215 finding F1): a destination object is ONLY ever displaced
+//     when tied to PRE-PUBLISH existence evidence — a no-replace publish
+//     attempt that refused on ErrPublishCollision proves its obstacle
+//     existed before that attempt (it is never pre-existing data: the
+//     caller classified the destination absent), so the recorded obstacle
+//     is displaced after a bound re-proof and the publish retried. A
+//     post-publish SUCCESS→mismatch occupant, by contrast, necessarily
+//     arrived AFTER the kernel-proven-free rename — the staged-name plant
+//     the publish moved onto dest and a legitimate file created inside the
+//     publish→reverify gap are indistinguishable there, so BOTH are
+//     preserved byte-intact with a typed ErrPublishStagedForeignOccupant
+//     refusal; recovery continues only when the occupant VANISHED (the
+//     restage republishes into proven absence);
 //  4. exhaustion, an indeterminate destination, or (Windows leg) any
 //     post-publish identity break returns typed errors and NOTHING is
 //     consumed: the caller's conservative legs keep the backup armed.
@@ -71,15 +80,19 @@ var ErrPublishStagedClose = errors.New("staged handle close failed before publis
 // source backup: nothing may be consumed after this error.
 var ErrPublishStagedIdentityBreak = errors.New("destination does not provably name the staged inode after publish")
 
-// ErrPublishStagedForeignOccupant means the post-publish destination
-// occupant is neither the staged inode NOR the window plant recorded at
-// mismatch detection (wave-26, codex P2, PR#215 finding 1): a legitimate
-// writer claimed the destination AFTER a successful publish but BEFORE the
-// recovery unlink could run, so removing the occupant by the pre-recorded
-// plant assumption would have destroyed unjournaled bytes. The occupant is
-// left byte-intact, NOTHING is consumed, and the caller retains its backup.
-// Always joined with ErrPublishStagedIdentityBreak so the whole refusal
-// family stays reachable through the identity-break classifiers.
+// ErrPublishStagedForeignOccupant means a destination occupant could NOT be
+// tied to pre-publish existence evidence, so recovery is refused with the
+// occupant preserved byte-intact, NOTHING consumed, and the caller
+// retaining its backup. Two shapes (wave-38, codex P2, PR#215 finding F1):
+// the post-publish SUCCESS→mismatch occupant (a successful no-replace
+// publish proved the destination free at the rename instant, so anything
+// there arrived afterwards — possibly the staged-name plant the publish
+// moved over, possibly a legitimate file created inside the
+// publish→reverify gap; indistinguishable, both preserved), and the
+// collision-displacement binding finding a SUCCESSOR where the recorded
+// pre-publish plant stood. Always joined with ErrPublishStagedIdentityBreak
+// so the whole refusal family stays reachable through the identity-break
+// classifiers.
 var ErrPublishStagedForeignOccupant = errors.New("destination occupant is neither the recorded window plant nor the staged inode")
 
 // ErrPublishStagedIdentityIndeterminate means a post-publish destination
@@ -148,12 +161,16 @@ type StagedPublish struct {
 	// fsutil.PublishNoReplace at every production site).
 	Publish func(afero.Fs, string, string) error
 	// NoReplace records that Publish has no-replace semantics AND the caller
-	// proved the destination absent by classification. Only then may a
-	// published-but-mismatched destination be displaced: the publish only
-	// succeeds into absence, so a mismatched occupant is necessarily the
-	// window plant this operation itself installed — never pre-existing
-	// bytes. Replace-style publishes re-stage and republish OVER the plant
-	// instead (replacing destination bytes is their operation's meaning).
+	// proved the destination absent by classification. Only then does the
+	// no-replace recovery displacing rule apply (wave-38, codex P2, PR#215
+	// finding F1): an obstacle that refused a publish attempt with
+	// ErrPublishCollision is displaced after a bound re-proof (it provably
+	// pre-dated the publish — never pre-existing data), while a post-publish
+	// SUCCESS→mismatch occupant is never displaced (it provably arrived after
+	// the kernel-proven-free rename — plant and legitimate gap file are
+	// indistinguishable there). Replace-style publishes re-stage and
+	// republish OVER the plant instead (replacing destination bytes is their
+	// operation's meaning).
 	NoReplace bool
 	// Staged/Handle are the O_EXCL-created staging name and its open
 	// descriptor (CreateExclusiveStagingFile, wave-30 O_RDWR), Dest the
@@ -199,10 +216,10 @@ type StagedPublish struct {
 //     ErrPublishStagedExhausted / ErrPublishStagedForeignOccupant /
 //     ErrPublishStagedIdentityIndeterminate: a
 //     substitution was proven after a successful publish and recovery was
-//     refused or exhausted — or (wave-26) the recovery unlink found a
-//     post-publish occupant it could not prove was the window plant, so
-//     the foreign bytes were preserved instead; NOTHING was consumed and
-//     the caller retains its backup.
+//     refused or exhausted — or (wave-38) a destination occupant could not
+//     be tied to pre-publish existence evidence, so the foreign bytes were
+//     preserved instead; NOTHING was consumed and the caller retains its
+//     backup.
 //
 // In every error class except the pre-publish verify failure AND the
 // ErrPublishCompleted-carrying classes (wave-34, codex local review round 4,

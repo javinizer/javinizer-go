@@ -126,6 +126,14 @@ type w25RemoveBackupErrorFs struct {
 func (f *w25RemoveBackupErrorFs) Remove(name string) error {
 	if strings.Contains(filepath.Base(name), backupSuffixForDest+".") {
 		f.calls++
+		if f.calls == 1 {
+			// Wave-38: the FIRST .dlbak-sibling remove is the handoff's
+			// take-aside scratch (the reservation placeholder, pre-journal)
+			// — a warn-only litter leg, not the journaled backup cleanup
+			// this test wedges. The SECOND is the rollback's quarantine
+			// unlink of the journaled backup, which must fail.
+			return f.Fs.Remove(name)
+		}
 		return f.err
 	}
 	return f.Fs.Remove(name)
@@ -151,7 +159,8 @@ func TestInstallOverwritingW25_ConfirmRollbackBackupRemovalFailureKeepsOwnership
 	})
 	require.ErrorIs(t, err, removeErr)
 	require.Contains(t, err.Error(), "backup cleanup")
-	require.Equal(t, 1, fs.calls)
+	require.Equal(t, 2, fs.calls,
+		"wave-38: the handoff's take-aside scratch unlink (succeeds) + the wedged quarantine unlink of the journaled backup")
 	require.Zero(t, recorder.releaseCalls, "failed cleanup must not retract durable ownership")
 	records := recorder.get()
 	require.Len(t, records, 1)

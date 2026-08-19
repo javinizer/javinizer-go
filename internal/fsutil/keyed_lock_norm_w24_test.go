@@ -223,12 +223,18 @@ func TestIsNormalizationInsensitiveRootW24_ConcurrentFirstProbesPublishOnePostur
 func TestProbeNormalizationInsensitiveW24_StatSuccessMeansInsensitive(t *testing.T) {
 	root := t.TempDir()
 	var opened, removed []string
+	// Wave-38 (finding F5): the created identity rides the OPEN handle —
+	// model handle stat and alternate lookup answering THE SAME fake object.
+	sentinel := &w38ProbeInfo{}
 	ops := caseProbeOps{
 		openFile: func(name string, flag int, perm os.FileMode) (caseProbeFile, error) {
 			opened = append(opened, name)
-			return os.OpenFile(name, flag, perm)
+			if _, err := os.OpenFile(name, flag, perm); err != nil {
+				return nil, err
+			}
+			return w38StatProbeFile{info: sentinel}, nil
 		},
-		stat: func(string) (os.FileInfo, error) { return nil, nil },
+		stat: func(string) (os.FileInfo, error) { return sentinel, nil },
 		readDir: func(string) ([]os.DirEntry, error) {
 			t.Fatal("normalization evidence comes from the stat alone")
 			return nil, nil
@@ -239,8 +245,7 @@ func TestProbeNormalizationInsensitiveW24_StatSuccessMeansInsensitive(t *testing
 		},
 	}
 
-	// w31 binding: the fake answers stats with shared nil infos — model the
-	// "same object" proof through the seam.
+	// w31 binding: model the "same object" proof through the seam.
 	prev := probeSameFile
 	probeSameFile = func(a, b os.FileInfo) bool { return a == b }
 	t.Cleanup(func() { probeSameFile = prev })
@@ -329,6 +334,10 @@ func TestProbeNormalizationInsensitiveW24_CollisionRetriesWithFreshName(t *testi
 type w24CloseErrProbeFile struct{ err error }
 
 func (f w24CloseErrProbeFile) Close() error { return f.err }
+
+// Stat satisfies the wave-38 probe-handle identity channel; a failed close
+// is asserted before any verdict comparison, so a nil identity suffices.
+func (w24CloseErrProbeFile) Stat() (os.FileInfo, error) { return nil, nil }
 
 func TestProbeNormalizationInsensitiveW24_CloseErrorPropagates(t *testing.T) {
 	closeErr := errors.New("w24 close failure")

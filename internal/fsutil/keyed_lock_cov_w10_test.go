@@ -15,6 +15,10 @@ type w10ProbeFile struct {
 
 func (f w10ProbeFile) Close() error { return f.err }
 
+// Stat satisfies the wave-38 probe-handle identity channel; close-failure
+// legs never reach a verdict comparison, so a nil identity suffices.
+func (w10ProbeFile) Stat() (os.FileInfo, error) { return nil, nil }
+
 func w10RealProbeOps() caseProbeOps {
 	return caseProbeOps{
 		openFile: func(name string, flag int, perm os.FileMode) (caseProbeFile, error) {
@@ -115,10 +119,14 @@ func TestProbeCaseSensitive_CoversStatAndEnumerationPaths(t *testing.T) {
 	base := w10RealProbeOps()
 	notFound := func(string) (os.FileInfo, error) { return nil, os.ErrNotExist }
 
+	// Wave-38 (finding F5): an alternate spelling that stats but addresses a
+	// DIFFERENT object than the created probe (here: the root directory
+	// itself) is NOT case evidence — only an identity match against the
+	// open handle's snapshot proves insensitivity.
 	base.stat = func(string) (os.FileInfo, error) { return os.Stat(root) }
 	got, err := probeCaseSensitive(base, root)
 	require.NoError(t, err)
-	require.False(t, got, "an alternate spelling that stats is insensitive")
+	require.True(t, got, "an alternate spelling naming a different object stays sensitive")
 
 	base.stat = notFound
 	got, err = probeCaseSensitive(base, root)

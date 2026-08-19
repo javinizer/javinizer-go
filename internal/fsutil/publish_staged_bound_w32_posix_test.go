@@ -6,10 +6,14 @@ package fsutil
 // findings R2+R3+R5):
 //
 //   - R2: the recorded-plant displacement unlink used to swallow its Remove
-//     error and fall into the republish loop; it now refuses typed (a failed
-//     displacement must never proceed to a republish over the surviving
-//     foreign object). The windows-leg twin compiles only on Windows (its
-//     own waves pin the shape there).
+//     error and fall into the republish loop; it refused typed from wave-32
+//     on, and wave-38 (codex P2, PR#215 finding F1) retired the displacement
+//     entirely: NOTHING recorded post-publish is ever unlinked — the
+//     post-publish mismatch occupant (plant or legitimate gap file,
+//     indistinguishable) is preserved with a typed foreign-occupant refusal,
+//     and recovery proceeds only when the binding re-lookup finds the
+//     destination free again (the vanish leg). The windows-leg twin compiles
+//     only on Windows (its own waves pin the shape there).
 //   - R5: the ENOSYS deferred-times legs re-prove the published name against
 //     the staged inode around the name-based Chtimes: a foreign occupant or
 //     vanished/indeterminate answer skips the times and refuses typed, the
@@ -66,7 +70,7 @@ func (b *w32PlantBundle) publishWedge(t *testing.T) func(afero.Fs, string, strin
 
 // scriptLstats drives the destination-lookup seam: the first lookup (the
 // mismatch detection) catches the real plant and records its identity; the
-// SECOND lookup (the removal binding) runs fn before answering.
+// SECOND lookup (the wave-38 vanish-check binding) runs fn before answering.
 func (b *w32PlantBundle) scriptLstats(t *testing.T, onSecond func(name string)) {
 	t.Helper()
 	prev := publishStagedBoundDestLstat
@@ -79,22 +83,20 @@ func (b *w32PlantBundle) scriptLstats(t *testing.T, onSecond func(name string)) 
 		if b.lookups == 1 {
 			b.plantInfo = info
 		}
-		if b.lookups == 2 {
-			return b.plantInfo, err // replay the recorded plant identity
-		}
 		return info, err
 	}
 	t.Cleanup(func() { publishStagedBoundDestLstat = prev })
 }
 
-// R2 (i): the displacement Remove fails — the recorded plant (verified by
-// the binding re-lookup) cannot be unlinked (a non-empty directory occupies
-// the real path at that instant). The leg refuses typed instead of wedging
-// the delete and republishing over the surviving occupant.
-func TestPublishStagedBoundW32POSIX_PlantDisplacementFailureRefuses(t *testing.T) {
+// R2 (i) re-shaped by wave-38 (finding F1): between the detection and the
+// binding re-lookup the recorded plant is replaced BY A DIRECTORY (a
+// non-empty, un-unlinkable occupant) — the refusal is typed through the
+// foreign-occupant class, NOTHING is ever removed by this leg whatever the
+// occupant's shape, and recovery never proceeds over it.
+func TestPublishStagedBoundW32POSIX_PlantReplacedByDirectoryPreserved(t *testing.T) {
 	b := newW32PlantBundle(t)
 	b.scriptLstats(t, func(name string) {
-		// The reverify→unlink window, replayed: the real path no longer
+		// The detection→binding window, replayed: the real path no longer
 		// holds the plant at all — a non-empty directory took its place.
 		require.NoError(t, os.Remove(b.dest))
 		require.NoError(t, os.Mkdir(b.dest, 0o755))
@@ -102,10 +104,10 @@ func TestPublishStagedBoundW32POSIX_PlantDisplacementFailureRefuses(t *testing.T
 	})
 
 	err := PublishStagedBoundInfo_(t, b)
+	require.ErrorIs(t, err, ErrPublishStagedForeignOccupant)
 	require.ErrorIs(t, err, ErrPublishStagedIdentityBreak)
-	require.Contains(t, err.Error(), "displacement of the recorded plant")
 	entries, derr := os.ReadDir(b.dest)
-	require.NoError(t, derr, "a failed displacement never proceeds to a republish — the directory survives")
+	require.NoError(t, derr, "the directory occupant is never touched — no republish proceeds over it")
 	require.Len(t, entries, 1)
 	require.Equal(t, 2, b.lookups)
 }
@@ -120,13 +122,14 @@ func PublishStagedBoundInfo_(t *testing.T, b *w32PlantBundle) error {
 	return err
 }
 
-// R2 (ii): the recorded plant vanished between the binding lookup and the
-// unlink (Remove answers ENOENT) — the loop proceeds to restage from the
-// handle and republishes the genuine bytes.
+// R2 (ii): the recorded plant vanished between the detection and the
+// binding re-lookup — nothing stands at dest, so the loop proceeds to
+// restage from the handle and republishes the genuine bytes into proven
+// absence (the wave-30 vanish leg, unchanged by wave-38).
 func TestPublishStagedBoundW32POSIX_PlantVanishedAtUnlinkRestages(t *testing.T) {
 	b := newW32PlantBundle(t)
 	b.scriptLstats(t, func(name string) {
-		require.NoError(t, os.Remove(b.dest), "the plant vanished in the binding→unlink window")
+		require.NoError(t, os.Remove(b.dest), "the plant vanished in the detection→binding window")
 	})
 
 	_, err := PublishStagedBoundInfo(StagedPublish{

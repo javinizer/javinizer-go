@@ -46,6 +46,12 @@ ignore:
   # The shared interface + POSIX recovery legs ARE fully covered
   # (publish_staged_bound.go / publish_staged_bound_unix.go).
   - "internal/fsutil/publish_staged_bound_windows.go"
+  # The non-Linux variants of the wave-38 bound take-aside kernel identity
+  # extractor (bound_take.go): //go:build windows (other) and darwin-family
+  # (narrow unix) files — the ubuntu coverage-upload job compiles only the
+  # posix variant.
+  - "internal/fsutil/bound_identity_narrow_unix.go"
+  - "internal/fsutil/bound_identity_other.go"
   # Desktop-only build-tagged file (//go:build desktop). The real Wails
   # runner pulls in per-platform webview headers and must not enter the
   # default build/test path; without this ignore, its new lines all count

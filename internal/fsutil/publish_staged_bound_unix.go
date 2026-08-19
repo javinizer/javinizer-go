@@ -21,6 +21,14 @@ var publishStagedBoundDeferredChtimes = func(fs afero.Fs, name string, atime, mt
 	return fs.Chtimes(name, atime, mtime)
 }
 
+// publishStagedBoundOsRemove is the bound unlink behind
+// displacePrePublishCollisionPlant (wave-38, finding F1), exposed as a test
+// seam (same discipline as publishStagedBoundDestLstat): this leg only runs
+// under the osStagingHandle gate — i.e. the real OsFs — and the wedge legs
+// cannot be replayed through wrapper filesystems without demoting the whole
+// publish to the virtual tail, so tests replay them here.
+var publishStagedBoundOsRemove = func(fs afero.Fs, name string) error { return fs.Remove(name) }
+
 // publishStagedBoundOS is PublishStagedBound's POSIX leg: the staged handle
 // stays OPEN through the path publish (rename/hard-link publishes never
 // needed it closed), and a successful publish is re-verified against the
@@ -37,21 +45,31 @@ var publishStagedBoundDeferredChtimes = func(fs afero.Fs, name string, atime, mt
 //     the published name below);
 //  3. publish by path;
 //  4. re-verify: Lstat(dest) must name the handle's inode. A match is
-//     done. A mismatch means the publish installed a window PLANT — ours
-//     was renamed away and stays reachable via the open handle. For a
-//     no-replace publish into a caller-proven-absent dest, the occupant
-//     RECORDED at the mismatch instant is displaced — but ONLY that
-//     recorded inode, re-proven by a fresh Lstat immediately before the
-//     unlink (wave-26 + wave-32, PR#215 findings: the recorded occupant
-//     may itself be a foreign file created in the publish→reverify
-//     window, and the window between the binding re-lookup and the
-//     unlink may swap in a successor; neither is ever deleted). Genuine
-//     bytes are then re-staged FROM THE HANDLE into a fresh O_EXCL name
-//     and republished; a differing occupant, a failed displacement, or
-//     an indeterminate lookup refuses typed with nothing consumed. A
-//     dest that VANISHED between publish and reverify recovers the same
-//     way with nothing to displace.
-//  5. an indeterminate dest lookup, a restaging failure, or a persistent
+//     done. A mismatch means the published bytes are not ours — ours was
+//     renamed away and stays reachable via the open handle. For a
+//     no-replace publish into a caller-proven-absent dest the recovery
+//     restages FROM THE HANDLE into a fresh O_EXCL name and republishes —
+//     but ONLY ever displaces a destination object tied to PRE-PUBLISH
+//     existence evidence, and never the object the post-publish Lstat
+//     recorded at the mismatch instant (wave-38, codex P2, PR#215 finding
+//     F1 — see the big comment in the mismatch leg below): the kernel
+//     proved dest FREE at the instant a successful no-replace rename
+//     landed, so every mismatch occupant — hostile plant or a legitimate
+//     file created inside the publish→first-Lstat gap — arrived AFTER the
+//     publish and is preserved byte-intact with a typed refusal. A dest
+//     that VANISHED between publish and reverify (or vanished at the one
+//     binding re-lookup) recovers via restage+republish with nothing to
+//     displace.
+//  5. a publish attempt that FAILED with ErrPublishCollision carries the
+//     other tie: the occupant provably existed BEFORE the publish (it is
+//     the obstacle the no-replace primitive refused on), so it is
+//     RECORDED at the collision instant and displaced after a bound
+//     re-proof (fresh Lstat + os.SameFile immediately before the unlink),
+//     and the loop retries the publish with the staged name still intact.
+//     A different occupant at the binding lookup, an indeterminate
+//     lookup, or a failed displacement refuses typed with nothing
+//     consumed.
+//  6. an indeterminate dest lookup, a restaging failure, or a persistent
 //     substitution past the budget returns typed errors — the genuine
 //     source backup is retained by every caller, so nothing is consumed.
 func publishStagedBoundOS(p StagedPublish) (os.FileInfo, error) {
@@ -83,6 +101,31 @@ func publishStagedBoundOS(p StagedPublish) (os.FileInfo, error) {
 			}
 		}
 		if pubErr := p.Publish(p.FS, staged, p.Dest); pubErr != nil {
+			// Wave-38 (codex P2, PR#215 finding F1) — evidence channel (a):
+			// a no-replace publish that REFUSED on an occupied destination
+			// proves the occupant existed BEFORE this attempt (it is the
+			// obstacle the no-replace primitive reported). That pre-publish
+			// existence tie is THE ONLY circumstance under which a dest
+			// occupant may be displaced: RECORD the plant at the collision
+			// instant, re-prove the name still addresses THE recorded object
+			// (bound unlink — a successor swapped in afterwards is a typed
+			// refusal, never deleted), drop the obstacle, and retry the
+			// publish within the budget. The staged name was untouched by the
+			// failed publish, so no re-stage is needed on this leg.
+			if p.NoReplace && errors.Is(pubErr, ErrPublishCollision) {
+				// Displace the recorded obstacle FIRST: the (a) evidence ties
+				// it regardless of the remaining retry budget, exactly like the
+				// pre-wave-38 exhaustion leg displaced its last proven plant.
+				if derr := displacePrePublishCollisionPlant(p.FS, p.Dest); derr != nil {
+					_ = fh.Close()
+					return nil, derr
+				}
+				if attempt+1 >= PublishStagedBoundAttempts {
+					_ = fh.Close()
+					return nil, fmt.Errorf("%w after %d attempts for %s: %w", ErrPublishStagedExhausted, PublishStagedBoundAttempts, p.Dest, ErrPublishStagedIdentityBreak)
+				}
+				continue
+			}
 			_ = fh.Close()
 			return nil, pubErr
 		}
@@ -157,54 +200,49 @@ func publishStagedBoundOS(p StagedPublish) (os.FileInfo, error) {
 		// replacement is never unverified-deleted) — then re-stage the
 		// genuine bytes FROM THE HANDLE and retry within the budget.
 		if !os.IsNotExist(lerr) && p.NoReplace {
-			// Wave-26 (codex P2, PR#215 finding 1) + wave-32 (codex local
-			// review round 2, PR#215 finding R2): bind the unlink to the plant
-			// RECORDED AT THE MISMATCH INSTANT (destInfo). The recorded object
-			// may itself be a foreign replacement that claimed dest in the
-			// publish→reverify window — no leg can distinguish it from a
-			// pre-publish plant there — so the binding guarantees the narrower
-			// property: ONLY the exact object recorded at detection (re-proven
-			// here by SameFile against a fresh Lstat) is ever unlinked, never
-			// a successor swapped in afterwards. A different occupant and any
-			// indeterminate re-lookup are typed refusals (backup retained,
-			// nothing consumed), and a FAILED displacement refuses typed
-			// instead of proceeding to a republish over the surviving
-			// occupant. The remaining Lstat→Remove window is the documented
-			// portability residual: no portable unlink-by-handle exists, so
-			// the binding narrows it to the verified-inode check.
-			occupant, oerr := publishStagedBoundDestLstat(p.Dest)
+			// Wave-38 (codex P2, PR#215 finding F1): the post-publish mismatch
+			// occupant (destInfo, recorded at the detection instant) is NEVER
+			// unlinked. A successful no-replace publish PROVED the destination
+			// free at the rename instant, so the occupant necessarily arrived
+			// afterwards — the hostile staged-name plant the publish itself
+			// moved onto dest and a LEGITIMATE file created inside the
+			// publish→first-Lstat gap are indistinguishable at this layer, and
+			// the wave-26/32 record-then-displace binding deleted both. The
+			// occupancy-tie rule: ONLY an occupant tied to PRE-PUBLISH
+			// existence evidence (a collision-refused publish attempt, handled
+			// at the publish site above) may ever be displaced. Everything
+			// recorded here is preserved byte-intact with a typed
+			// ErrPublishStagedForeignOccupant refusal (backup retained, nothing
+			// consumed, no restage over unverified bytes — the no-replace
+			// republish would collision-fail anyway).
+			//
+			// ONE binding re-lookup still runs: an occupant that VANISHED
+			// again inside the detection→recovery window leaves the
+			// destination free, which is exactly the wave-30 vanish leg —
+			// restage from the handle and republish into absence below.
+			_, oerr := publishStagedBoundDestLstat(p.Dest)
 			switch {
-			case oerr == nil && os.SameFile(occupant, destInfo):
-				// The occupant is STILL the recorded window plant — bound
-				// displacement of the verified foreign install.
-				if rmErr := p.FS.Remove(p.Dest); rmErr != nil && !os.IsNotExist(rmErr) {
-					// The verified object could not be unlinked: refuse typed
-					// rather than republish over it (a no-replace republish
-					// would collision-fail anyway; a replace-style one would now
-					// destroy the very object this leg proved foreign).
-					_ = fh.Close()
-					return nil, fmt.Errorf("post-publish displacement of the recorded plant at %s failed: %v: %w", p.Dest, rmErr, ErrPublishStagedIdentityBreak)
-				}
-			case oerr == nil:
-				// Neither the recorded plant nor our inode: a post-publish
-				// legitimate occupant. Preserve it byte-intact and refuse
-				// typed rather than restaging over unverified bytes.
-				_ = fh.Close()
-				return nil, fmt.Errorf("%w at %s — post-publish occupant preserved, recovery refused (re-stage from handle not attempted over unverified foreign bytes): %w", ErrPublishStagedForeignOccupant, p.Dest, ErrPublishStagedIdentityBreak)
-			case !os.IsNotExist(oerr):
+			case os.IsNotExist(oerr):
+				// The occupant vanished inside the window — nothing to
+				// displace; the restage below republishes into absence.
+			case oerr != nil:
 				// Indeterminate re-lookup: nothing is proven about the name —
 				// refuse typed, same posture as the detection-side failure.
 				_ = fh.Close()
 				return nil, fmt.Errorf("post-publish occupant binding lookup of %s: %w: %w", p.Dest, oerr, ErrPublishStagedIdentityBreak)
+			default:
+				// Still occupied — post-publish occupant (recorded: destInfo)
+				// preserved byte-intact; recovery refused typed.
+				_ = fh.Close()
+				return nil, fmt.Errorf("%w at %s — post-publish occupant preserved, recovery refused (no evidence tied it to pre-publish obstruction; re-stage from handle never attempted over unverified foreign bytes): %w", ErrPublishStagedForeignOccupant, p.Dest, ErrPublishStagedIdentityBreak)
 			}
-			// os.IsNotExist(oerr): the plant vanished inside the window —
-			// nothing to displace; the restage below republishes into absence.
 		}
 		if attempt+1 >= PublishStagedBoundAttempts {
 			// Budget spent under a persistent substitution: refuse TYPED.
-			// The plant was displaced above (no-replace legs) and the
-			// callers' conservative legs retain the genuine backup — the
-			// finding's consume-after-plant harm is closed even here.
+			// Evidence-tied obstacles were displaced above where the rule
+			// licensed it, and the callers' conservative legs retain the
+			// genuine backup — the finding's consume-after-plant harm is
+			// closed even here.
 			_ = fh.Close()
 			return nil, fmt.Errorf("%w after %d attempts for %s: %w", ErrPublishStagedExhausted, PublishStagedBoundAttempts, p.Dest, ErrPublishStagedIdentityBreak)
 		}
@@ -227,5 +265,49 @@ func publishStagedBoundOS(p StagedPublish) (os.FileInfo, error) {
 		_ = fh.Close()
 		staged, fh = newStaged, newFh
 		of, _ = osStagingHandle(p.FS, fh)
+	}
+}
+
+// displacePrePublishCollisionPlant removes the destination obstacle a
+// collision-refused no-replace publish just PROVED to pre-date the publish
+// attempt (wave-38, codex P2, PR#215 finding F1 — evidence channel (a)):
+// the occupant is recorded at the collision instant and unlinked ONLY while
+// the destination still addresses THE recorded object (fresh no-follow
+// Lstat + os.SameFile immediately before the Remove). Every divergence is a
+// typed refusal with the occupant preserved byte-intact:
+//
+//   - record lookup VANISHED (or the binding re-lookup did): nothing to
+//     displace — the retried publish republishes into absence (nil);
+//   - either lookup INDETERMINATE: nothing is proven about the name —
+//     ErrPublishStagedIdentityBreak, nothing removed;
+//   - the binding re-lookup names a DIFFERENT object: the recorded plant
+//     was displaced by some racer inside the binding window —
+//     ErrPublishStagedForeignOccupant, that successor preserved (never a
+//     delete-by-record);
+//   - the bound unlink FAILED: ErrPublishStagedIdentityBreak — the loop
+//     never proceeds to a republish over the surviving occupant.
+func displacePrePublishCollisionPlant(fs afero.Fs, dest string) error {
+	plant, perr := publishStagedBoundDestLstat(dest)
+	switch {
+	case os.IsNotExist(perr):
+		return nil
+	case perr != nil:
+		return fmt.Errorf("pre-publish plant record of %s: %w: %w", dest, perr, ErrPublishStagedIdentityBreak)
+	}
+	occupant, oerr := publishStagedBoundDestLstat(dest)
+	switch {
+	case oerr == nil && os.SameFile(occupant, plant):
+		// The obstacle is STILL the recorded pre-publish plant — bound
+		// displacement of the evidence-tied object.
+		if rmErr := publishStagedBoundOsRemove(fs, dest); rmErr != nil && !os.IsNotExist(rmErr) {
+			return fmt.Errorf("pre-publish plant displacement at %s failed: %w: %w", dest, rmErr, ErrPublishStagedIdentityBreak)
+		}
+		return nil
+	case oerr == nil:
+		return fmt.Errorf("%w at %s — a successor replaced the recorded pre-publish plant inside the binding window, preserved byte-intact: %w", ErrPublishStagedForeignOccupant, dest, ErrPublishStagedIdentityBreak)
+	case !os.IsNotExist(oerr):
+		return fmt.Errorf("pre-publish plant binding lookup of %s: %w: %w", dest, oerr, ErrPublishStagedIdentityBreak)
+	default: // os.IsNotExist(oerr)
+		return nil
 	}
 }

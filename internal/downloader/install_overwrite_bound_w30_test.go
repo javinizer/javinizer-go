@@ -88,9 +88,11 @@ func TestRollbackW30_PlantedBetweenVerifyAndPublishRepublishesGenuine(t *testing
 }
 
 // Re-arm direction: no-replace publish onto the vacated backup name under a
-// persistent substitution — typed exhaustion, plants displaced, both names
-// keep genuine bytes.
-func TestRollbackW30_RearmPersistentPlantExhaustsTyped(t *testing.T) {
+// substitution — wave-38 (finding F1): the post-publish mismatch occupant is
+// NEVER displaced (plant vs legitimate gap file indistinguishable), so the
+// first mismatch refuses typed through the foreign-occupant class, the plant
+// stands at the backup name byte-intact, and the re-arm source is untouched.
+func TestRollbackW30_RearmPlantPreservedTypedForeignOccupantRefusal(t *testing.T) {
 	fs := afero.NewOsFs()
 	dir := t.TempDir()
 	dest := filepath.Join(dir, "poster.jpg")
@@ -102,10 +104,12 @@ func TestRollbackW30_RearmPersistentPlantExhaustsTyped(t *testing.T) {
 		return fsutil.PublishNoReplace(fsys, src, dst)
 	}
 	err := copyBackupToDestNoReplaceW30(fs, dest, backup, wedge)
-	require.ErrorIs(t, err, fsutil.ErrPublishStagedExhausted)
+	require.ErrorIs(t, err, fsutil.ErrPublishStagedForeignOccupant)
+	require.ErrorIs(t, err, fsutil.ErrPublishStagedIdentityBreak)
 	require.ErrorContains(t, err, "swap rollback")
-	_, derr := os.Lstat(backup)
-	require.ErrorIs(t, derr, os.ErrNotExist, "plants displaced — foreign bytes never survive at the backup name")
+	require.NotErrorIs(t, err, fsutil.ErrPublishStagedExhausted)
+	require.Equal(t, "foreign window plant", string(readW30File(t, backup)),
+		"the planted occupant is preserved at the backup name — never displaced")
 	got, rerr := os.ReadFile(dest)
 	require.NoError(t, rerr)
 	require.Equal(t, "dest-bytes", string(got), "the re-arm source is untouched")

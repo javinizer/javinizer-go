@@ -145,7 +145,10 @@ func TestInstallOverwritingW37_RenameFailureCleanupKeepsForeign(t *testing.T) {
 		err: sentinel,
 		at: func(newname string) {
 			victim = newname
-			require.NoError(t, base.Remove(newname))
+			// Wave-38: the no-replace dest publish now targets a FREED name
+			// (the placeholder is taken aside first) — the plant claims it
+			// unconditionally.
+			_ = base.Remove(newname)
 			require.NoError(t, afero.WriteFile(base, newname, []byte("foreign occupant"), 0o600))
 		},
 	}
@@ -205,7 +208,9 @@ func TestInstallOverwritingW37_RenameFailureVanishedReservationSilent(t *testing
 		t:   t,
 		err: sentinel,
 		at: func(newname string) {
-			require.NoError(t, base.Remove(newname))
+			// Wave-38: the reservation was already taken aside; nothing else
+			// lives at the name at this instant.
+			_ = base.Remove(newname)
 		},
 	}
 	recorder := &armedTestLedger{}

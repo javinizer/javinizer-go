@@ -99,12 +99,16 @@ func TestVerifyStagedIdentityW30_ClosedHandleStatFails(t *testing.T) {
 	require.Contains(t, err.Error(), "staged identity proof")
 }
 
-// THE finding's window closed: the attack lands BETWEEN verify and publish.
-// The plant gets installed at dest by the no-replace publish, the post-publish
-// reverify proves the occupant is not ours, the plant is displaced (dest was
-// proven absent), and the loop re-stages FROM THE HANDLE into a fresh O_EXCL
-// name and republishes: dest ends with the GENUINE bytes.
-func TestPublishStagedBoundW30POSIX_MismatchRepublishesGenuineNoReplace(t *testing.T) {
+// THE wave-30 finding's window: the attack lands BETWEEN verify and publish.
+// The plant gets installed at dest by the no-replace publish and the
+// post-publish reverify proves the occupant is not ours. Wave-38 (codex P2,
+// PR#215 finding F1): the occupant is NEVER deleted here — the kernel proved
+// dest free at the rename instant, so what the publish installed and what a
+// legitimate writer created in the publish→reverify gap are
+// indistinguishable; both are preserved byte-intact with the typed
+// ErrPublishStagedForeignOccupant refusal, the genuine inode survives on the
+// handle (for its owner under the attacker's name), and nothing is consumed.
+func TestPublishStagedBoundW30POSIX_MismatchPreservesOccupantTypedRefusal(t *testing.T) {
 	fs := afero.NewOsFs()
 	dir := t.TempDir()
 	dest := filepath.Join(dir, "poster.jpg")
@@ -123,23 +127,18 @@ func TestPublishStagedBoundW30POSIX_MismatchRepublishesGenuineNoReplace(t *testi
 		Staged: staged, Handle: fh, Dest: dest,
 		Suffix: ".rstr", NextOrdinal: w30Ordinal(4),
 	})
-	require.NoError(t, err, "the recovery leg republishes the genuine bytes")
-	require.Equal(t, 1, attacked)
+	require.ErrorIs(t, err, ErrPublishStagedForeignOccupant,
+		"the post-publish occupant is preserved, never displaced")
+	require.ErrorIs(t, err, ErrPublishStagedIdentityBreak)
+	require.Equal(t, 1, attacked, "no republish ever runs over unverified bytes")
 	got, rerr := os.ReadFile(dest)
 	require.NoError(t, rerr)
-	require.Equal(t, "genuine staged bytes", string(got),
-		"dest holds the GENUINE staged bytes after the reverify republish")
-	entries, derr := os.ReadDir(dir)
-	require.NoError(t, derr)
-	for _, e := range entries {
-		body, _ := os.ReadFile(filepath.Join(dir, e.Name()))
-		require.NotContains(t, string(body), "foreign window plant",
-			"the plant never survives the bound loop")
-	}
+	require.Equal(t, "foreign window plant", string(got),
+		"the plant survives byte-intact at dest — the finding's lost-write stays closed")
 	away, rerr := os.ReadFile(staged + ".w30-away")
 	require.NoError(t, rerr)
 	require.Equal(t, "genuine staged bytes", string(away),
-		"the first staged inode stays reachable under the attacker's name until unlinked")
+		"the genuine inode stays reachable under the attacker's name until unlinked by its owner")
 }
 
 // Same window, replace-semantics publish over an occupied dest: the plant is
@@ -171,10 +170,13 @@ func TestPublishStagedBoundW30POSIX_MismatchRepublishesGenuineReplace(t *testing
 	require.Equal(t, "genuine staged bytes", string(got))
 }
 
-// Persistent substitution across the whole budget: typed exhaustion joined
-// with the identity-break class, every plant displaced, nothing consumed —
+// Persistent PRE-publish obstacles across the whole budget: every publish
+// attempt collides on a fresh plant that provably pre-dates the attempt (the
+// wave-38 evidence channel (a) — the collision report itself), each is
+// displaced after its bound re-proof, and the budget ends in typed
+// exhaustion joined with the identity-break class; nothing is consumed —
 // the caller's kept/warn leg retains the genuine backup.
-func TestPublishStagedBoundW30POSIX_PersistentPlantExhausts(t *testing.T) {
+func TestPublishStagedBoundW30POSIX_PersistentPrePublishCollisionExhausts(t *testing.T) {
 	fs := afero.NewOsFs()
 	dir := t.TempDir()
 	dest := filepath.Join(dir, "poster.jpg")
@@ -182,7 +184,9 @@ func TestPublishStagedBoundW30POSIX_PersistentPlantExhausts(t *testing.T) {
 
 	attacks := 0
 	wedge := func(f afero.Fs, src, dst string) error {
-		w30SwapPlant(t, src)
+		// A plant claims dest BEFORE the publish attempt: the no-replace
+		// publish collides, tying the occupant to pre-publish evidence.
+		require.NoError(t, os.WriteFile(dst, []byte("foreign window plant"), 0o644))
 		attacks++
 		return PublishNoReplace(f, src, dst)
 	}
@@ -194,9 +198,17 @@ func TestPublishStagedBoundW30POSIX_PersistentPlantExhausts(t *testing.T) {
 	require.ErrorIs(t, err, ErrPublishStagedExhausted)
 	require.ErrorIs(t, err, ErrPublishStagedIdentityBreak)
 	require.Equal(t, PublishStagedBoundAttempts, attacks, "one publish per budgeted attempt")
-	_, derr := os.Lstat(dest)
-	require.ErrorIs(t, derr, os.ErrNotExist,
-		"the last plant was displaced before the typed refusal — foreign bytes never survive at dest")
+	entries, derr := os.ReadDir(dir)
+	require.NoError(t, derr)
+	for _, e := range entries {
+		body, _ := os.ReadFile(filepath.Join(dir, e.Name()))
+		require.NotContains(t, string(body), "foreign window plant",
+			"evidence-tied obstacles were displaced — foreign bytes never survive at dest")
+	}
+	got, rerr := os.ReadFile(staged)
+	require.NoError(t, rerr)
+	require.Equal(t, "genuine staged bytes", string(got),
+		"the collided publish never consumed the staged name — genuine bytes retained for the caller")
 }
 
 // The published destination VANISHING between publish and reverify is the
@@ -360,9 +372,17 @@ func TestPublishStagedBoundW30POSIX_RestageNamesExhausted(t *testing.T) {
 	for i := 4; i < 4+64; i++ {
 		require.NoError(t, os.WriteFile(dest+".rstr."+strconv.FormatUint(uint64(i), 16), []byte("x"), 0o644))
 	}
+	vanished := 0
 	wedge := func(f afero.Fs, src, dst string) error {
-		if _, err := os.Lstat(src + ".w30-away"); os.IsNotExist(err) {
-			w30SwapPlant(t, src)
+		if vanished == 0 {
+			vanished++
+			if err := PublishNoReplace(f, src, dst); err != nil {
+				return err
+			}
+			// The racer unlinks the just-published name before the reverify:
+			// the wave-38-safe vanish leg restages from the handle.
+			require.NoError(t, os.Remove(dst))
+			return nil
 		}
 		return PublishNoReplace(f, src, dst)
 	}
@@ -387,9 +407,15 @@ func TestPublishStagedBoundW30POSIX_RestreamFailure(t *testing.T) {
 	dest := filepath.Join(dir, "poster.jpg")
 	staged, fh := w30Stage(t, fs, dest, ".rstr", 0o640)
 
+	vanished := 0
 	wedge := func(f afero.Fs, src, dst string) error {
-		if _, err := os.Lstat(src + ".w30-away"); os.IsNotExist(err) {
-			w30SwapPlant(t, src)
+		if vanished == 0 {
+			vanished++
+			if err := PublishNoReplace(f, src, dst); err != nil {
+				return err
+			}
+			require.NoError(t, os.Remove(dst), "the racer unlinks the just-published name before the reverify")
+			return nil
 		}
 		return PublishNoReplace(f, src, dst)
 	}
@@ -401,5 +427,5 @@ func TestPublishStagedBoundW30POSIX_RestreamFailure(t *testing.T) {
 	require.ErrorIs(t, err, ErrPublishStagedIdentityBreak)
 	require.Contains(t, err.Error(), "replayed restream failure")
 	_, derr := os.Lstat(dest)
-	require.ErrorIs(t, derr, os.ErrNotExist, "the displaced plant was never restored")
+	require.ErrorIs(t, derr, os.ErrNotExist, "the vanish leg leaves dest free — nothing of ours ever occupies it")
 }

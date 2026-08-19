@@ -128,6 +128,10 @@ func TestInstallOverwritingW7S_NilLstatInfoFailsClosed(t *testing.T) {
 	require.False(t, replaced)
 	require.Equal(t, "old", string(mustReadDownloaderW7(t, base, dest)), "destination bytes are intact")
 	require.Empty(t, recorder.get())
+	// Wave-38 (finding F4): on this pathological filesystem even the release
+	// cannot PROVE which object a name addresses (every Lstat answers nil
+	// info) — the take-aside release refuses closed and NEVER deletes by
+	// pathname, so the marker survives for the stale rules to arbitrate.
 	_, markerErr := base.Stat(fsutil.ReplacementBusyPath(dest))
-	require.ErrorIs(t, markerErr, os.ErrNotExist, "marker released on the classification failure")
+	require.NoError(t, markerErr, "release refuses on an unprovable filesystem rather than deleting by pathname")
 }

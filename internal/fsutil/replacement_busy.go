@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"runtime"
 	"strconv"
@@ -72,11 +73,11 @@ func ReplacementBusyPath(dest string) string { return dest + ReplacementBusySuff
 // AcquireReplacementBusy atomically claims the destination-adjacent marker.
 // Writers create it before moving the destination aside; sweepers create it
 // before touching a backup. A marker from a dead PID is reclaimed, as is a
-// well-formed marker carrying released=1 (an owner whose final unlink failed
-// transiently records the release in-band so a wedged removal cannot
-// busy-block the destination for that process's lifetime), while a malformed
-// marker is never reclaimed based on its age alone so an unowned file cannot
-// be mistaken for Javinizer's marker.
+// well-formed marker carrying released=1 (the in-band release pre-wave-38
+// wedged releases recorded so a wedged removal could not busy-block the
+// destination for that process's lifetime), while a malformed marker is
+// never reclaimed based on its age alone so an unowned file cannot be
+// mistaken for Javinizer's marker.
 func AcquireReplacementBusy(fs afero.Fs, dest string) (func(), error) {
 	path := ReplacementBusyPath(dest)
 	for {
@@ -292,50 +293,147 @@ func replacementBusyRandomPlatform() (uint64, error) {
 // hiccup, so two short retries buy recovery time without stalling callers.
 var replacementBusyReleaseBackoff = []time.Duration{10 * time.Millisecond, 25 * time.Millisecond}
 
-// replacementBusyReleasedField is appended (keeping the pid/time fields so
-// the token still parses as well-formed) when the final unlink could not
-// remove the marker: the in-band release that replacementBusyInspect decodes.
-const replacementBusyReleasedField = "released=1"
+// replacementBusyReleasedField is the in-band release field
+// replacementBusyInspect decodes (keeping the pid/time fields so the token
+// still parses as well-formed). Wave-38 (codex P2, PR#215 finding F4) moved
+// the release path to the take-aside unlink (a wedged release frees the
+// marker name BEFORE any unlink can wedge, so release no longer rewrites
+// anything); the decode arm stays for markers left on disk by pre-wave-38
+// wedged releases, which remain reclaimable through the takeover rules.
 
-// releaseReplacementBusy removes the marker only when its bytes still carry
-// our token. A transiently failing final unlink would otherwise leave a
-// well-formed same-process-PID marker that replacementBusyInspect treats as
-// live for this process's whole lifetime (regardless of age), busy-blocking
-// every later overwrite/sweep/revert of the destination even after the FS
-// recovers. So the unlink is retried with replacementBusyReleaseBackoff, and
-// on persistent failure the marker is rewritten in place with the released
-// form (best-effort, only while its bytes still match our token): any later
-// claimant can then reclaim it through the normal takeover/quarantine rules.
+// releaseReplacementBusy removes the marker only when its bytes AND its
+// identity still carry our token — and never by the marker PATHNAME
+// (wave-38, codex P2, PR#215 finding F4): a directory writer swapping the
+// marker between the token read and a pathname Remove would have release
+// delete the REPLACEMENT marker, letting a third process acquire the name
+// while the replacement marker's real owner stays active. The release runs
+// the generalized no-replace take-aside instead:
+//
+//  1. OBSERVE the marker through one open handle (replacementBusyReleaseObserve):
+//     the identity snapshot (dev/inode where exposed, size, mtime) rides the
+//     same descriptor as THE bytes read, so the recorded token can never be
+//     aliased to a successor object;
+//  2. TAKE the observed marker aside onto a fresh O_EXCL-reserved sibling
+//     scratch (a take can never displace foreign bytes: the scratch is our
+//     own claimed placeholder) and re-prove the moved object at the scratch
+//     name against the observed identity — a mid-take swap restores the
+//     moved object back NO-REPLACE where the name is still free (carry-on,
+//     never a deletion of what it cannot prove);
+//  3. UNLINK only the scratch, re-bound to the observed identity at every
+//     unlink attempt. A transiently failing take-aside unlink is retried
+//     with replacementBusyReleaseBackoff; a persistent wedge leaves only the
+//     inert scratch sibling (the marker name is already free, so the release
+//     is achieved and no later claimant is ever busy-blocked) and is
+//     surfaced through a warn for manual cleanup.
 func releaseReplacementBusy(fs afero.Fs, path, token string) {
-	content, err := afero.ReadFile(fs, path)
-	if err != nil || string(content) != token {
+	content, observed, ok := replacementBusyReleaseObserve(fs, path)
+	if !ok || content != token {
+		return
+	}
+	scratch, claim, cerr := replacementBusyClaimReleaseScratch(fs, path)
+	if cerr != nil {
+		logging.Warnf("replacement busy marker %s could not reserve a release take-aside name (%v); the marker stays as-is — later claims arbitrate it through the normal stale rules", path, cerr)
+		return
+	}
+	hold, terr := TakeAside(TakeAsideSpec{
+		FS:      fs,
+		Src:     path,
+		Scratch: scratch,
+		Claim:   claim,
+		Prove: func(moved os.FileInfo) error {
+			if !asideSameObject(moved, observed) {
+				return fmt.Errorf("marker taken aside from %s is not the observed token object — foreign marker preserved: %w", path, ErrTakeAsideForeign)
+			}
+			return nil
+		},
+	})
+	if terr != nil {
+		logging.Warnf("replacement busy marker %s could not be taken aside for release (%v); nothing was removed by name — later claims arbitrate the marker normally", path, terr)
 		return
 	}
 	var removeErr error
 	for attempt := 0; ; attempt++ {
-		removeErr = fs.Remove(path)
-		if removeErr == nil || os.IsNotExist(removeErr) {
-			return
+		removeErr = hold.Unlink()
+		if removeErr == nil || errors.Is(removeErr, ErrTakeAsideForeign) {
+			// nil: taken-aside object removed (or vanished by itself).
+			// Foreign: a swap raced the unlink window — the refusal preserved
+			// it and the marker name is already free; retrying cannot help.
+			break
 		}
 		if attempt >= len(replacementBusyReleaseBackoff) {
 			break
 		}
 		time.Sleep(replacementBusyReleaseBackoff[attempt])
 	}
-	current, readErr := afero.ReadFile(fs, path)
-	if readErr != nil || string(current) != token {
-		logging.Warnf("replacement busy marker %s could not be removed on release (%v) and its bytes no longer match this release's token; later claims arbitrate the current marker normally", path, removeErr)
-		return
+	if removeErr != nil {
+		logging.Warnf("replacement busy marker %s release: the take-aside unlink of %s failed (%v); the marker name is free, the inert scratch awaits manual cleanup", path, scratch, removeErr)
 	}
-	if writeErr := afero.WriteFile(fs, path, []byte(replacementBusyReleasedToken(token)), 0o600); writeErr != nil {
-		logging.Warnf("replacement busy marker %s could not be removed on release (%v) and rewriting it as released failed: %v; the destination may busy-block until the marker is removed manually", path, removeErr, writeErr)
-		return
-	}
-	logging.Warnf("replacement busy marker %s could not be removed on release (%v); rewrote it as released so a later claim can reclaim it", path, removeErr)
 }
 
-func replacementBusyReleasedToken(token string) string {
-	return token + "," + replacementBusyReleasedField
+// replacementBusyReleaseObserve reads the marker and captures ITS identity
+// through one open handle (wave-38, finding F4): Stat and Read ride the SAME
+// descriptor, so the recorded token and the dev/inode snapshot provably
+// belong to ONE observed object — a pathname swap between a path-based read
+// and a separate Lstat could never alias the record. Close errors are
+// ignored: a read-only close mutates nothing and the identity is already
+// bound. Any observation failure answers not-ok (best-effort release posture).
+func replacementBusyReleaseObserve(fs afero.Fs, path string) (string, os.FileInfo, bool) {
+	handle, err := fs.Open(path)
+	if err != nil {
+		return "", nil, false
+	}
+	info, serr := handle.Stat()
+	content := []byte(nil)
+	var rerr error
+	if serr == nil {
+		content, rerr = io.ReadAll(handle)
+	}
+	_ = handle.Close()
+	if serr != nil || rerr != nil {
+		return "", nil, false
+	}
+	return string(content), info, true
+}
+
+// replacementBusyReleaseClaimTries bounds the release-take-aside scratch
+// claim loop; every collision or racing claimant costs one draw.
+const replacementBusyReleaseClaimTries = 16
+
+// replacementBusyClaimReleaseScratch atomically reserves a uniquely named
+// sibling scratch for the release take-aside (wave-38, finding F4): mint via
+// the takeover-name grammar (PID + crypto random), claim O_CREATE|O_EXCL,
+// capture the reservation's own identity through the open handle's pre-close
+// Stat (mirroring the quarantine-claim discipline) so the take's pre-move
+// re-proof can refuse a foreign reservation swap. An O_EXCL collision
+// re-draws; a reservation whose identity cannot be read (or whose close
+// fails) is dropped rather than renaming over unverified bytes.
+func replacementBusyClaimReleaseScratch(fs afero.Fs, path string) (string, os.FileInfo, error) {
+	for attempt := 0; attempt < replacementBusyReleaseClaimTries; attempt++ {
+		candidate, err := replacementBusyTakeoverPath(path)
+		if err != nil {
+			return "", nil, fmt.Errorf("name release take-aside scratch for %s: %w", path, err)
+		}
+		reservation, rerr := fs.OpenFile(candidate, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		switch {
+		case rerr == nil:
+			info, serr := reservation.Stat()
+			if serr != nil {
+				_ = reservation.Close()
+				_ = fs.Remove(candidate)
+				return "", nil, fmt.Errorf("stat release take-aside reservation %s: %w", candidate, serr)
+			}
+			if cerr := reservation.Close(); cerr != nil {
+				_ = fs.Remove(candidate)
+				return "", nil, fmt.Errorf("close release take-aside reservation %s: %w", candidate, cerr)
+			}
+			return candidate, info, nil
+		case os.IsExist(rerr):
+			continue // a racer claimed this draw first — draw again
+		default:
+			return "", nil, fmt.Errorf("reserve release take-aside scratch %s: %w", candidate, rerr)
+		}
+	}
+	return "", nil, fmt.Errorf("release take-aside names exhausted for %s after %d attempts", path, replacementBusyReleaseClaimTries)
 }
 
 // replacementBusyIsReleased decodes the in-band release field with the same

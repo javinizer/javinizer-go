@@ -93,7 +93,7 @@ func (f *w17BProbeFS) openFile(name string, _ int, _ os.FileMode) (caseProbeFile
 		return nil, os.ErrExist
 	}
 	f.files[key] = w17BProbeEntry{path: name}
-	return w17BProbeFile{}, nil
+	return w17BProbeFile{info: w17BProbeInfo{path: name}}, nil
 }
 
 func (f *w17BProbeFS) stat(name string) (os.FileInfo, error) {
@@ -123,9 +123,16 @@ func (f *w17BProbeFS) key(name string) string {
 	return strings.ToLower(name)
 }
 
-type w17BProbeFile struct{}
+// w17BProbeFile carries the created probe's identity the wave-38 way: Stat
+// answers the same fake FileInfo the fake filesystem's stat op later answers
+// for the created name (a shared struct value models the shared inode).
+type w17BProbeFile struct {
+	info os.FileInfo
+}
 
 func (w17BProbeFile) Close() error { return nil }
+
+func (f w17BProbeFile) Stat() (os.FileInfo, error) { return f.info, nil }
 
 type w17BProbeInfo struct{ path string }
 

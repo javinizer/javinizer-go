@@ -370,9 +370,19 @@ func probeNormalizationInsensitive(ops caseProbeOps, root string) (bool, error) 
 			}
 			return nil
 		}
+		// Codex P2 (wave-38, PR#215 finding F5): capture the created
+		// object's identity from the OPEN handle BEFORE closing — a watcher
+		// renaming the probe away after close could otherwise substitute a
+		// successor for a create-path re-stat to borrow as proof. A failed
+		// identity capture fails closed exactly like a failed close.
+		created, sErr := file.Stat()
 		if err := file.Close(); err != nil {
 			_ = cleanup()
 			return false, err
+		}
+		if sErr != nil {
+			_ = cleanup()
+			return false, sErr
 		}
 
 		insensitive := false
@@ -380,8 +390,9 @@ func probeNormalizationInsensitive(ops caseProbeOps, root string) (bool, error) 
 			// Codex P2 (w31): the alternate spelling can belong to a racer's
 			// file created between our O_EXCL create and this stat — accept
 			// "insensitive" only when it addresses THE SAME object we just
-			// created; a distinct inode keeps spellings byte-distinct.
-			if created, cErr := ops.stat(path); cErr == nil && probeSameFile(created, altInfo) {
+			// created (bound to the handle's pre-close snapshot); a distinct
+			// inode keeps spellings byte-distinct.
+			if probeSameFile(created, altInfo) {
 				// The NFC spelling addresses the NFD-created probe: the FS
 				// normalizes names on comparison.
 				insensitive = true
@@ -456,7 +467,14 @@ func cleanProbeRoot(root string) string {
 	return filepath.Clean(absolute)
 }
 
+// caseProbeFile is the O_EXCL-created probe handle. Stat is the
+// IDENTITY channel (wave-38, codex P2, PR#215 finding F5): the created
+// object's identity must be captured from the OPEN handle — never by
+// re-statting the create-path afterwards, where a watcher could have
+// renamed the probe away and parked a successor the probe would then
+// borrow as evidence.
 type caseProbeFile interface {
+	Stat() (os.FileInfo, error)
 	Close() error
 }
 
@@ -530,16 +548,27 @@ func probeCaseSensitive(ops caseProbeOps, root string) (bool, error) {
 			}
 			return nil
 		}
+		// Codex P2 (wave-38, PR#215 finding F5): the created object's
+		// identity is captured from the OPEN handle BEFORE closing — the
+		// case probe repeats the normalization probe's defect when it
+		// re-stats the mutable create-path afterwards (a watcher's successor
+		// object would be borrowed as case evidence). A failed identity
+		// capture fails closed exactly like a failed close.
+		created, sErr := file.Stat()
 		if err := file.Close(); err != nil {
 			_ = cleanup()
 			return false, err
+		}
+		if sErr != nil {
+			_ = cleanup()
+			return false, sErr
 		}
 
 		caseSensitive := false
 		if altInfo, statErr := ops.stat(alternatePath); statErr == nil {
 			// Codex P2 (w31): a racer's uppercased file must not masquerade
 			// as our probe — only an identity match proves case-insensitivity.
-			if created, cErr := ops.stat(path); cErr == nil && probeSameFile(created, altInfo) {
+			if probeSameFile(created, altInfo) {
 				caseSensitive = false
 			} else {
 				caseSensitive = true

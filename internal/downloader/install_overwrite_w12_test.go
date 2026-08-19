@@ -2,24 +2,22 @@ package downloader
 
 // POSTER-WRITE-HARDENING codex PR#215 w12 (P1): the wave-7 backup claim
 // reserves its name with a 0-byte O_EXCL placeholder, so the dest→backup
-// set-aside renames INTO an occupied path. Windows OsFs rename (MoveFileW)
-// refuses an existing destination, which failed EVERY ledger-armed overwrite
-// of an existing file on Windows. moveIntoReservedBackup now routes that leg
-// through the platform-aware replacement primitive (fsutil.ReplaceFile —
-// MoveFileExW with MOVEFILE_REPLACE_EXISTING for OsFs) behind the
-// fsutil.PathBackslashesAreSeparators Windows-posture seam (the same seam
-// style as keyed_lock_p3 and history's restoreOSPath), so both legs run in
-// host tests. Rollback renames intentionally stay plain renames: their target
-// is the just-vacated destination, absent by construction, and keeping
-// fail-closed Windows behavior there is the safer posture.
+// set-aside must either REPLACE that placeholder or (wave-38, finding F2)
+// take it aside and move dest onto the freed name NO-REPLACE. Windows OsFs
+// rename (MoveFileW) refuses an existing destination, which failed EVERY
+// ledger-armed overwrite of an existing file on Windows pre-w12; the w12 fix
+// routed the set-aside through the platform-aware replacement primitive, and
+// wave-38's conditional handoff keeps the full claim → handoff → journal →
+// install flow succeeding with the reservation in place on every platform.
+// Rollback renames intentionally stay plain renames: their target is the
+// just-vacated destination, absent by construction, and keeping fail-closed
+// Windows behavior there is the safer posture.
 
 import (
 	"context"
 	"os"
-	"path/filepath"
 	"testing"
 
-	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 
 	"github.com/javinizer/javinizer-go/internal/fsutil"
@@ -48,33 +46,6 @@ func TestInstallOverwritingW12_ArmedOverwriteReplacesReservedBackup(t *testing.T
 		"the set-aside handoff replaced the 0-byte reservation with the pre-existing destination bytes")
 	_, markerErr := base.Stat(fsutil.ReplacementBusyPath(dest))
 	require.ErrorIs(t, markerErr, os.ErrNotExist, "the busy marker is released")
-}
-
-// Seam-leg unit coverage for the handoff itself: with EITHER platform leg
-// selected, a 0-byte reservation at the backup name is replaced by the
-// destination bytes. On a POSIX host fsutil.ReplaceFile is itself a rename,
-// so both legs land behaviorally identical here; the Windows CI run exercises
-// this same dispatch against the MemMapFs rename, and fsutil's own
-// TestReplaceFileWindows_AtomicReplace covers the native OsFs MoveFileEx leg.
-func TestMoveIntoReservedBackupW12_BothLegsReplaceTheReservation(t *testing.T) {
-	previous := fsutil.PathBackslashesAreSeparators
-	t.Cleanup(func() { fsutil.PathBackslashesAreSeparators = previous })
-
-	for _, windowsPosture := range []bool{false, true} {
-		fsutil.PathBackslashesAreSeparators = windowsPosture
-		fs := afero.NewMemMapFs()
-		src := "/out/W12-LEG/poster.jpg"
-		dst := backupCandidateW22(src, "w12-leg", 1)
-		require.NoError(t, fs.MkdirAll(filepath.Dir(src), 0o755))
-		require.NoError(t, afero.WriteFile(fs, src, []byte("set-aside-bytes"), 0o644))
-		require.NoError(t, afero.WriteFile(fs, dst, nil, 0o600), "the claim's 0-byte reservation")
-
-		require.NoError(t, moveIntoReservedBackup(fs, src, dst), "windowsPosture=%v", windowsPosture)
-		require.Equal(t, "set-aside-bytes", string(mustReadDownloaderW7(t, fs, dst)),
-			"the reservation placeholder is replaced (windowsPosture=%v)", windowsPosture)
-		_, statErr := fs.Stat(src)
-		require.ErrorIs(t, statErr, os.ErrNotExist, "the source moved (windowsPosture=%v)", windowsPosture)
-	}
 }
 
 // The armed-overwrite path THROUGH the ReplaceFile leg: under the Windows
