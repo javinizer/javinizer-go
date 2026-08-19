@@ -398,6 +398,12 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 						// missing pre-copy is necessarily foreign — retain it without
 						// an unlink. An indeterminate verdict fails closed exactly
 						// like the wave-31 publish-time recheck.
+						// Wave-35 (codex local review round 5, PR#215): the undo unlink
+						// runs through the destination quarantine
+						// (restore_dest_quarantine_w35) — the seam verdict's
+						// check→Remove window closes (a foreign substitute inside it
+						// is refused byte-intact), and a wedge puts the verified
+						// object back NO-REPLACE.
 						if destMissingBeforeRestore {
 							switch {
 							case restorePending:
@@ -405,7 +411,7 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 							case !restoredDestStillOurs(r.fs, dest, restoredID):
 								logging.Warnf("replacement restore %s: cleanup marker persistence failed (%v) — restored destination retained for retry: it no longer names the published restore object (foreign swap or creation in the undo window)", absoluteBackup, markErr)
 							default:
-								if undoErr := r.fs.Remove(dest); undoErr != nil {
+								if undoErr := removeRestoredDestQuarantined(r.fs, dest, "replacement restore", restoredID); undoErr != nil {
 									logging.Warnf("replacement restore %s: cleanup marker persistence failed AND restore-undo failed (%v after %v)", absoluteBackup, undoErr, markErr)
 								} else {
 									logging.Warnf("replacement restore %s: cleanup marker persistence failed (%v) — restore undone, will retry", absoluteBackup, markErr)

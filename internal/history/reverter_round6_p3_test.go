@@ -469,7 +469,12 @@ type removeFailFs struct {
 
 func (f *removeFailFs) Remove(name string) error {
 	// The sweeper joins under OS separators — normalize for the lookup.
-	if strings.ReplaceAll(name, "\\", "/") == f.victim {
+	// Wave-35: a destination/backup victim is quarantined before its verified
+	// unlink, so wedge the quarantine sibling spelling (victim + ".dlq." +
+	// token) too; the wedge compensation moves the verified object back onto
+	// the original name, keeping the callers' byte-retention assertions true.
+	norm := strings.ReplaceAll(name, "\\", "/")
+	if norm == f.victim || strings.HasPrefix(norm, f.victim+backupQuarantineSuffix) {
 		return errors.New("remove wedged")
 	}
 	return f.Fs.Remove(name)

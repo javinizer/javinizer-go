@@ -176,7 +176,12 @@ func (f *w27RemoveFailFs) Remove(name string) error {
 	if f.failBackup && (clean == backupClean || strings.HasPrefix(clean, backupClean+".dlq.")) {
 		return f.backupErr
 	}
-	if f.failDest && clean == filepath.Clean(filepath.FromSlash(f.dest)) {
+	// Wave-35: the destination undo unlink quarantines first, so the unlinked
+	// spelling is the quarantine sibling (dest + ".dlq." + token); wedge both
+	// spellings. The failed-unlink compensation moves the verified object
+	// back onto dest no-replace, so the test's byte-retention assertions hold.
+	if f.failDest && (clean == filepath.Clean(filepath.FromSlash(f.dest)) ||
+		strings.HasPrefix(clean, filepath.Clean(filepath.FromSlash(f.dest))+backupQuarantineSuffix)) {
 		return f.destErr
 	}
 	return f.Fs.Remove(name)

@@ -963,12 +963,18 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 	// (or an indeterminate verdict) the destination AND the backup stay
 	// retained and the journal entry stays live, exactly like the publish-time
 	// refusal legs.
+	// Wave-35 (codex local review round 5, PR#215): the unlink itself runs
+	// through the destination quarantine (restore_dest_quarantine_w35) — the
+	// seam verdict's check→Remove window closes: the verified object moves
+	// aside under an O_EXCL-reserved sibling name, is re-proven, and only
+	// the quarantine name is unlinked; wedge legs compensate NO-REPLACE so a
+	// racer's occupant at dest is never clobbered or deleted.
 	undoRestore := func() {
 		if !restoredDestStillOurs(s.fs, dest, restoredID) {
 			logging.Warnf("replacement sweep %s: restore undo REFUSED — restored destination %s no longer names the published restore object (foreign swap or deletion in the undo window); destination and backup retained, journal entry left live", backup, dest)
 			return
 		}
-		if rmErr := s.fs.Remove(dest); rmErr != nil {
+		if rmErr := removeRestoredDestQuarantined(s.fs, dest, "replacement sweep", restoredID); rmErr != nil {
 			logging.Warnf("replacement sweep %s: restore undo failed: %v", backup, rmErr)
 		}
 	}
@@ -1120,11 +1126,14 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 		// never be deleted by pathname. Divergence retains the destination and
 		// the freshly re-armed backup with the journal entry left live; only a
 		// destination still naming the published restore object is unlinked.
+		// Wave-35 (codex local review round 5, PR#215): the unlink runs
+		// through the destination quarantine (see undoRestore above), closing
+		// the remaining verdict→Remove window against a foreign substitution.
 		if !restoredDestStillOurs(s.fs, dest, restoredID) {
 			logging.Warnf("replacement sweep %s: consumption failed (%v) and restore undo REFUSED — restored destination %s no longer names the published restore object (foreign swap or deletion in the re-arm→undo window); destination and re-armed backup retained, journal entry left live", backup, uErr, dest)
 			return false
 		}
-		if rmErr := s.fs.Remove(dest); rmErr != nil {
+		if rmErr := removeRestoredDestQuarantined(s.fs, dest, "replacement sweep", restoredID); rmErr != nil {
 			logging.Warnf("replacement sweep %s: consumption failed AND restore-undo failed (%v after %v)", backup, rmErr, uErr)
 		} else {
 			logging.Warnf("replacement sweep %s: consumption failed (%v) — restore undone, will retry", backup, uErr)

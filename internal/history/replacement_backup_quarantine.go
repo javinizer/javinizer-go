@@ -121,9 +121,11 @@ func claimBackupQuarantineName(fs afero.Fs, backup string) (string, error) {
 // cannot rename a file with an open Go handle (no FILE_SHARE_DELETE), so the
 // Windows-posture seam closes it first; the re-verify still binds the moved
 // object to the verified snapshot, narrowing that platform's close→rename
-// gap to a refusable mismatch instead of a silent foreign-bytes unlink.
+// gap to a refusable mismatch instead of a silent foreign-bytes unlink. A
+// nil handle (the wave-35 destination undo flow — restore_dest_quarantine_w35)
+// skips the close dance entirely: no open descriptor exists to pin or close.
 func moveVerifiedBackupToQuarantine(fs afero.Fs, backup, quarantine string, handle afero.File) error {
-	if fsutil.PathBackslashesAreSeparators {
+	if handle != nil && fsutil.PathBackslashesAreSeparators {
 		_ = handle.Close()
 	}
 	return fsutil.ReplaceFile(fs, backup, quarantine)
@@ -180,7 +182,11 @@ type replacementBackupQuarantine struct {
 // quarantineVerifiedBackup runs removeReplacementBackup's wave-26 final legs
 // STOPPING before the unlink: the caller has ALREADY bound the backup name's
 // occupant to the journal/restore facts AND re-opened it no-follow (verified
-// is the open handle's own stat). The verified object moves aside under a
+// is the open handle's own stat). Wave-35: a nil handle is the destination
+// undo flow (restore_dest_quarantine_w35) — it binds the CURRENT dest
+// occupant to the published restore identity itself and passes that
+// snapshot as verified, so no no-follow descriptor ever exists.
+// The verified object moves aside under a
 // hard-to-guess O_EXCL-reserved quarantine name (with the handle open where
 // the platform allows) and is re-proven at the quarantine name against the
 // verified snapshot. Every wedge step — claim failure, rename failure,
