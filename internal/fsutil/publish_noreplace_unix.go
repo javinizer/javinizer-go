@@ -71,6 +71,16 @@ func linkUnsupportedClass(err error) bool {
 // callers map it onto the same conservative leg as a collision: the
 // operation fails cleanly, the armed/kept posture holds, and no foreign
 // bytes are gambled away for a best-effort install.
+//
+// wave-29 (codex P2, PR#215) closes the remaining degrade: ANY other link(2)
+// failure (EMLINK, EACCES, EIO, a missing staged source, ...) used to fall
+// into the same non-atomic virtual leg on an OsFs, re-introducing the very
+// window the fallback exists to close. Every non-EEXIST, non-unsupported link
+// failure now refuses TYPED (ErrPublishNoReplaceLinkFailed, original errno
+// unwrap-reachable) with NOTHING published and the staged file intact; the
+// non-atomic classify-then-rename leg is served exclusively to non-OsFs test
+// doubles by PublishNoReplace's dispatch (publish_noreplace.go), never as an
+// OsFs degrade.
 func publishNoReplaceFallback(src, dst string) error {
 	if err := publishNoReplaceLink(src, dst); err != nil {
 		if os.IsExist(err) {
@@ -79,7 +89,7 @@ func publishNoReplaceFallback(src, dst string) error {
 		if linkUnsupportedClass(err) {
 			return fmt.Errorf("no-replace publish %s -> %s: %w: %w", src, dst, ErrPublishNoReplaceUnsupported, err)
 		}
-		return publishNoReplaceVirtual(&afero.OsFs{}, src, dst)
+		return fmt.Errorf("no-replace publish %s -> %s: %w: %w", src, dst, ErrPublishNoReplaceLinkFailed, err)
 	}
 	if err := publishNoReplaceRemove(src); err != nil {
 		// The destination link already carries the staged bytes; only the

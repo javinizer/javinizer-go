@@ -11,8 +11,9 @@ package fsutil
 // the publishNoReplaceLink / publishNoReplaceRemove seams for the failure
 // orderings a host kernel cannot be coerced into mid-call — pinning its
 // full contract: EEXIST maps to the typed collision, a non-EEXIST link error
-// degrades into the classified rename, every staged-cleanup failure publishes
-// closed (destination rolled back, staged source intact).
+// refuses TYPED (wave-29 fail-closed — never a classified-rename degrade),
+// and every staged-cleanup failure publishes closed (destination rolled back,
+// staged source intact).
 
 import (
 	"errors"
@@ -55,17 +56,21 @@ func TestPublishNoReplaceFallbackW16_OccupiedDestinationCollides(t *testing.T) {
 	require.Equal(t, "racer", string(got), "the existing destination is never touched")
 }
 
-// A non-EEXIST link failure (unlinkable staged source, no hard-link support,
-// ...) degrades into the classified rename leg instead of masquerading as a
-// collision or silently succeeding. Here the staged source is missing: the
-// degrade runs its own rename, whose ENOENT surfaces verbatim.
-func TestPublishNoReplaceFallbackW16_LinkErrorDegradesToClassifiedRename(t *testing.T) {
+// A non-EEXIST link failure (missing staged source here) refuses TYPED
+// instead of masquerading as a collision, silently succeeding, or —
+// pre-wave-29 — degrading into the non-atomic classified rename leg
+// (wave-29, codex P2, PR#215): the original errno stays unwrap-reachable
+// behind ErrPublishNoReplaceLinkFailed and nothing is ever published.
+func TestPublishNoReplaceFallbackW16_LinkErrorRefusesTyped(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "never-staged.tmp")
 	dst := filepath.Join(dir, "poster.jpg")
 
 	err := publishNoReplaceFallback(src, dst)
 	require.Error(t, err)
+	require.ErrorIs(t, err, ErrPublishNoReplaceLinkFailed,
+		"wave-29: a missing staged source is the typed link-failure class, not a virtual-leg degrade")
+	require.ErrorIs(t, err, os.ErrNotExist, "the kernel ENOENT stays unwrap-reachable")
 	require.NotErrorIs(t, err, ErrPublishCollision, "an unrelated link failure is not a collision")
 	_, statErr := os.Stat(dst)
 	require.ErrorIs(t, statErr, os.ErrNotExist, "nothing was published")

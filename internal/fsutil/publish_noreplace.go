@@ -72,6 +72,21 @@ func PublishCompleted(err error) bool {
 	return errors.Is(err, ErrPublishCompleted)
 }
 
+// ErrPublishNoReplaceLinkFailed classifies a POSIX hard-link fallback
+// failure that is NEITHER an occupied destination (ErrPublishCollision), NOR
+// an unsupported-volume refusal (ErrPublishNoReplaceUnsupported), NOR a
+// completed publish (ErrPublishCompleted) — EMLINK, EACCES, EIO, a missing
+// staged source, and every other unexpected link(2) failure (wave-29, codex
+// P2, PR#215). Pre-wave-29 such failures degraded into the NON-ATOMIC
+// classify-then-rename virtual leg even for OsFs, silently restoring
+// replacing semantics on a kernel-capable volume: a foreign writer occupying
+// the destination inside the window was overwritten. These failures now
+// refuse with the original link error wrapped behind this sentinel; nothing
+// is published, the staged file stays intact, and callers map the class onto
+// their existing conservative legs (name unproven → rearm-refused pending /
+// rollback-error surfaces) exactly like any other pre-publish failure.
+var ErrPublishNoReplaceLinkFailed = errors.New("no-replace hard-link publish failed")
+
 // publishCollision wraps the destination name in the collision class.
 func publishCollision(dst string) error {
 	return fmt.Errorf("%w: %s", ErrPublishCollision, dst)

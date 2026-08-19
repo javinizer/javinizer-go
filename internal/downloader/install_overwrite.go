@@ -119,19 +119,32 @@ func copyBackupToDestPublish(fsys afero.Fs, backup, dest string, publish func(af
 		_ = fsys.Remove(staged)
 		return fmt.Errorf("copy rollback: %w", cerr)
 	}
-	if err := dstFile.Close(); err != nil {
-		_ = fsys.Remove(staged)
-		return fmt.Errorf("close rollback: %w", err)
-	}
-	if err := fsys.Chtimes(staged, openedInfo.ModTime(), openedInfo.ModTime()); err != nil {
-		_ = fsys.Remove(staged)
-		return fmt.Errorf("stage rollback times: %w", err)
-	}
 	// Re-apply the backup's ownership before the swap: a privileged restore of
 	// another account's backup must not leave the restored bytes owned by the
 	// Javinizer account once the backup is deleted. Best-effort —
 	// unprivileged restores cannot chown and must still succeed.
-	fsutil.RestoreStagingOwnership(fsys, staged, openedInfo)
+	// wave-29 (codex P1, PR#215): like history's restore/re-arm staging, every
+	// remaining metadata leg runs THROUGH THE OPEN HANDLE before the publish —
+	// a directory writer renaming the staged name away mid-flow can no longer
+	// redirect chmod/times/chown through a planted link.
+	fsutil.RestoreStagingOwnership(fsys, dstFile, openedInfo)
+	// Publish-time identity proof: a swapped staged NAME must never be
+	// published by path — the planted object is foreign and stays untouched.
+	if vErr := fsutil.VerifyStagedIdentity(fsys, staged, dstFile); vErr != nil {
+		_ = dstFile.Close()
+		return fmt.Errorf("stage rollback identity: %w", vErr)
+	}
+	// CloseStaged lands the times THROUGH THE OPEN HANDLE on the real OsFs
+	// before closing (virtual filesystems take the post-close name-based leg;
+	// the path-based publish that follows requires a closed handle on Windows).
+	if err := fsutil.CloseStaged(fsys, staged, dstFile, openedInfo.ModTime(), openedInfo.ModTime(), true); err != nil {
+		_ = fsys.Remove(staged)
+		var timesErr *fsutil.StagingTimesError
+		if errors.As(err, &timesErr) {
+			return fmt.Errorf("stage rollback times: %w", err)
+		}
+		return fmt.Errorf("close rollback: %w", err)
+	}
 	if err := publish(fsys, staged, dest); err != nil {
 		_ = fsys.Remove(staged)
 		return fmt.Errorf("swap rollback: %w", err)

@@ -63,6 +63,12 @@ func TestRearmPendingKindW20_ClassifierLegs(t *testing.T) {
 		rearmPendingKind(fmt.Errorf("re-arm install backup /b: %w", fsutil.ErrPublishNoReplaceUnsupported)),
 		"the volume-cannot-publish refusal stays refused")
 	require.Equal(t, models.RestorePendingKindRearmRefused,
+		rearmPendingKind(fmt.Errorf("re-arm install backup /b: %w", fsutil.ErrPublishNoReplaceLinkFailed)),
+		"wave-29: a fail-closed hard-link error (EMLINK & friends) never installed anything — refused")
+	require.Equal(t, models.RestorePendingKindRearmRefused,
+		rearmPendingKind(fmt.Errorf("re-arm stage backup identity /b: %w", fsutil.ErrStagedIdentityMismatch)),
+		"wave-29: a swapped staged name proves nothing about the name — refused")
+	require.Equal(t, models.RestorePendingKindRearmRefused,
 		rearmPendingKind(fmt.Errorf("re-arm stage backup times /b: %w", errors.New("re-arm chtimes wedged"))),
 		"wave-21: a PRE-publish metadata failure (staged-name Chtimes) publishes nothing — refused")
 	require.Equal(t, models.RestorePendingKindClean,
@@ -76,6 +82,8 @@ func TestRearmPendingKindW20_ClassifierLegs(t *testing.T) {
 		fmt.Errorf("install: %w", fsutil.ErrPublishCompleted):            false,
 		fmt.Errorf("install: %w", fsutil.ErrPublishCollision):            true,
 		fmt.Errorf("install: %w", fsutil.ErrPublishNoReplaceUnsupported): true,
+		fmt.Errorf("install: %w", fsutil.ErrPublishNoReplaceLinkFailed):  false,
+		fmt.Errorf("identity: %w", fsutil.ErrStagedIdentityMismatch):     false,
 		errors.New("staging write wedged"):                               false,
 		fmt.Errorf("no-replace publish /s -> /d: staged cleanup failed"): false,
 	}

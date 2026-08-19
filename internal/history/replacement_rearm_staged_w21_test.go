@@ -12,9 +12,16 @@ package history
 // (fsutil.CreateExclusiveStagingFile — O_EXCL, the mode asserted at create,
 // wave-7) strictly BEFORE the no-replace publish, so the published backup
 // lands with mode+times+ownership complete and NO post-publish metadata
-// calls remain in the flow. These tests pin the ordering through recording
-// seams, the untouched refusal path, and the wave-20 clean-kind publish
-// class's surviving trigger. The wave-20 trichotomy pins live in
+// calls remain in the flow. wave-29 (codex P1) hardened the pre-publish
+// operations further: every staged-inode metadata leg runs THROUGH THE OPEN
+// HANDLE (fchmod at create, handle-scoped times, fchown ownership) plus a
+// publish-time identity proof (fsutil.VerifyStagedIdentity), so a staged
+// NAME planted mid-flow can never redirect the metadata or the publish. On
+// the virtual filesystems below, the fsutil helpers fall back to name-based
+// legs against the stored (filepath.Clean'd) spelling, recorded through the
+// same event log. These tests pin the ordering through recording seams, the
+// untouched refusal path, and the wave-20 clean-kind publish class's
+// surviving trigger. The wave-20 trichotomy pins live in
 // reverter_rearm_pending_w20_test.go (which reuses the
 // w21RearmPublishCompletedSeam helper below).
 
@@ -89,7 +96,10 @@ func w21SeamedRearmFixture(t *testing.T, dir string) (fs *w21RecordMetaFs, dest,
 	dest = dir + "/poster.jpg"
 	backup = dest + ".dlbak." + p3HexA
 	require.NoError(t, afero.WriteFile(base, dest, []byte("current-bytes"), 0o640))
-	require.NoError(t, base.Chmod(dest, 0o640))
+	// afero MemMapFs stores entries under filepath.Clean'd keys while its
+	// Chmod does a RAW name lookup — normalize exactly like the wave-17a
+	// harness so the slash-spelled fixture name hits on the Windows runner.
+	require.NoError(t, base.Chmod(filepath.FromSlash(dest), 0o640))
 	mtime := time.Unix(1690000000, 0)
 	require.NoError(t, base.Chtimes(dest, mtime, mtime))
 	var statErr error
@@ -100,8 +110,12 @@ func w21SeamedRearmFixture(t *testing.T, dir string) (fs *w21RecordMetaFs, dest,
 	fs = &w21RecordMetaFs{Fs: base, events: events}
 
 	prevOwn := restoreStagingOwnershipFn
-	restoreStagingOwnershipFn = func(_ afero.Fs, staged string, _ os.FileInfo) {
-		*events = append(*events, w21MetaEvent{op: "ownership", path: staged})
+	restoreStagingOwnershipFn = func(_ afero.Fs, staged afero.File, _ os.FileInfo) {
+		stagedName := ""
+		if staged != nil {
+			stagedName = staged.Name()
+		}
+		*events = append(*events, w21MetaEvent{op: "ownership", path: stagedName})
 	}
 	prevPub := rearmPublishFn
 	rearmPublishFn = func(fsys afero.Fs, src, dst string) error {
@@ -115,11 +129,19 @@ func w21SeamedRearmFixture(t *testing.T, dir string) (fs *w21RecordMetaFs, dest,
 	return fs, dest, backup, info, events
 }
 
+// w21Slash normalizes separator spellings for assertions. Journal spellings
+// stay slash-formed while the wave-29 handle-metadata fallbacks record the
+// stored (filepath.Clean'd — backslash on the Windows runner) spelling; both
+// forms name the same staged inode.
+func w21Slash(p string) string { return strings.ReplaceAll(p, "\\", "/") }
+
 // w21StagedName checks that path names the wave-21 exclusive re-arm staging
-// inode for backup.
+// inode for backup. The comparison is slash-neutral: the MemMapFs keying and
+// the journal spelling legitimately diverge on the Windows runner.
 func w21StagedName(t *testing.T, path, backup string) {
 	t.Helper()
-	require.True(t, strings.HasPrefix(path, backup) && strings.Contains(filepath.Base(path), rearmStagingSuffix),
+	normalizedPath, normalizedBackup := w21Slash(path), w21Slash(backup)
+	require.True(t, strings.HasPrefix(normalizedPath, normalizedBackup) && strings.Contains(filepath.Base(path), rearmStagingSuffix),
 		"%q must be the exclusively staged inode (<%s>%s.<hex>)", path, backup, rearmStagingSuffix)
 }
 
@@ -136,12 +158,12 @@ func TestRearmW21_MetadataAppliedToStagedInodeBeforePublish(t *testing.T) {
 	for i, e := range *events {
 		switch e.op {
 		case "chmod", "chtimes", "ownership":
-			require.NotEqual(t, backup, e.path,
+			require.NotEqual(t, w21Slash(backup), w21Slash(e.path),
 				"post-publish metadata on the PUBLISHED name (%s %s) — the wave-21 hole", e.op, e.path)
 			w21StagedName(t, e.path, backup)
 			require.Equal(t, -1, publishIdx, "%s must run BEFORE the publish", e.op)
 		case "publish":
-			require.Equal(t, backup, e.path, "the publish targets the backup name")
+			require.Equal(t, w21Slash(backup), w21Slash(e.path), "the publish targets the backup name")
 			require.Equal(t, -1, publishIdx, "exactly one publish")
 			publishIdx = i
 		}
@@ -190,7 +212,7 @@ func TestRearmW21_NilInfoRunsNoMetadataLegs(t *testing.T) {
 	}
 	require.NotEmpty(t, *events)
 	require.Equal(t, "publish", (*events)[len(*events)-1].op, "the publish stays the final operation")
-	require.Equal(t, backup, (*events)[len(*events)-1].path)
+	require.Equal(t, w21Slash(backup), w21Slash((*events)[len(*events)-1].path))
 	require.Equal(t, "current-bytes", string(mustRead2(t, fs, backup)))
 }
 
@@ -211,7 +233,7 @@ func TestRearmW21_RefusalPathUnchanged(t *testing.T) {
 		if e.op == "publish" {
 			continue
 		}
-		require.NotEqual(t, backup, e.path, "%s never targets the published backup name", e.op)
+		require.NotEqual(t, w21Slash(backup), w21Slash(e.path), "%s never targets the published backup name", e.op)
 		w21StagedName(t, e.path, backup)
 	}
 	require.Equal(t, "foreign-bytes", string(mustRead2(t, fs, backup)), "the foreign occupant is untouched")

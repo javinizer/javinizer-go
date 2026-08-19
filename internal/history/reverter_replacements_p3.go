@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
@@ -565,8 +566,10 @@ func openRestoreSourceNoFollow(fsys afero.Fs, backup string) (afero.File, error)
 // restoreStagingOwnershipFn forwards the history restore path to the wave-7
 // fsutil ownership helper behind a package seam (same discipline as the
 // downloader's rollback restore): POSIX tests record the requested uid/gid
-// hand-off without kernel privileges. The helper itself is NOT duplicated
-// here — this is only the observation point.
+// hand-off without kernel privileges. wave-29 (codex P1, PR#215): the helper
+// and this seam take the OPEN STAGING HANDLE — the ownership hand-off is
+// fchown-scoped, never a path operation on the staged name. The helper itself
+// is NOT duplicated here — this is only the observation point.
 var restoreStagingOwnershipFn = fsutil.RestoreStagingOwnership
 
 // lstatRestoreSource describes a restore source without following its final
@@ -703,14 +706,6 @@ func copyRestoreBytesPublish(fs afero.Fs, backup, dest string, publish func(afer
 		_ = fs.Remove(staged)
 		return fmt.Errorf("stage restore copy: %w", cerr)
 	}
-	if err := dstFile.Close(); err != nil {
-		_ = fs.Remove(staged)
-		return fmt.Errorf("stage restore close: %w", err)
-	}
-	if err := fs.Chtimes(staged, openedInfo.ModTime(), openedInfo.ModTime()); err != nil {
-		_ = fs.Remove(staged)
-		return fmt.Errorf("stage restore times: %w", err)
-	}
 	// Wave-8 codex P2 follow-up: hand the staged inode back to the backup's
 	// owner BEFORE the swap, mirroring the downloader's rollback restore
 	// (install_overwrite.go). A privileged history restore (or startup sweep —
@@ -718,7 +713,37 @@ func copyRestoreBytesPublish(fs afero.Fs, backup, dest string, publish func(afer
 	// account otherwise loses the original uid/gid the moment the backup is
 	// deleted after the swap. Best-effort semantics ride the helper: EPERM
 	// escalations are swallowed there and restore resilience is unchanged.
-	restoreStagingOwnershipFn(fs, staged, openedInfo)
+	// wave-29 (codex P1, PR#215): the hand-off is fchown THROUGH THE OPEN
+	// HANDLE — the mode re-assert at create, the ownership here, and the times
+	// inside CloseStaged all ride the descriptor, so a directory writer
+	// renaming the staged name away and planting a symlink inside the window
+	// can no longer redirect chmod/times/chown onto an arbitrary target (the
+	// pre-wave-29 path-based calls on the staged name would have followed the
+	// planted link). Virtual filesystems keep name-based fallback legs against
+	// the stored spelling inside the fsutil helpers (they have no symlink
+	// model).
+	restoreStagingOwnershipFn(fs, dstFile, openedInfo)
+	// wave-29 publish-time identity proof: the staged PATH must still name the
+	// inode the handle addresses before any path-based publish runs; on a
+	// mismatch the staged name is FOREIGN — drop the handle and fail WITHOUT
+	// removing or publishing the name (the caller's re-arm classification
+	// treats the name as unproven, i.e. rearm-refused).
+	if vErr := fsutil.VerifyStagedIdentity(fs, staged, dstFile); vErr != nil {
+		_ = dstFile.Close()
+		return fmt.Errorf("stage restore identity: %w", vErr)
+	}
+	// CloseStaged lands the times THROUGH THE OPEN HANDLE on the real OsFs
+	// before closing (virtual filesystems take the post-close name-based leg
+	// against the stored spelling; the path-based publish that follows
+	// requires a closed handle on Windows).
+	if err := fsutil.CloseStaged(fs, staged, dstFile, openedInfo.ModTime(), openedInfo.ModTime(), true); err != nil {
+		_ = fs.Remove(staged)
+		var timesErr *fsutil.StagingTimesError
+		if errors.As(err, &timesErr) {
+			return fmt.Errorf("stage restore times: %w", err)
+		}
+		return fmt.Errorf("stage restore close: %w", err)
+	}
 	if err := publish(fs, staged, dest); err != nil {
 		_ = fs.Remove(staged)
 		return fmt.Errorf("swap staged restore: %w", err)
@@ -797,7 +822,7 @@ func openRearmSource(fs afero.Fs, dest string) (afero.File, error) {
 // Wave-21 (codex P1, PR#215): the stage is fsutil.CreateExclusiveStagingFile
 // (O_EXCL — the staged inode is PROVABLY ours) with the caller's requested
 // mode applied at create, and ALL remaining metadata (times, ownership) is
-// applied to the staged name BEFORE the publish. The pre-wave-21 flow ran
+// applied BEFORE the publish. The pre-wave-21 flow ran
 // RestoreStagingOwnership/Chmod/Chtimes on the PUBLISHED backup path: in a
 // directory writable by another user the name could be swapped for a
 // symlink inside the publish→metadata window, and the path-based
@@ -805,6 +830,18 @@ func openRearmSource(fs afero.Fs, dest string) (afero.File, error) {
 // operations on the O_EXCL-created staged name are safe, and the published
 // backup lands with the requested mode+times+ownership complete — NO
 // post-publish metadata calls remain in this flow.
+//
+// wave-29 (codex P1, PR#215) hardens the pre-publish operations themselves:
+// O_EXCL pins the INODE, not the NAME — a directory writer can still rename
+// the staged name away and plant a symlink on it inside the copy/metadata
+// window, so times+ownership+the publish-time identity proof now ride the
+// OPEN HANDLE (fsutil.CloseStaged applies fd-scoped times before closing;
+// fsutil.RestoreStagingOwnership takes the handle for fchown;
+// fsutil.VerifyStagedIdentity must pass before the path-based publish may
+// run). On identity failure the staged name is foreign: the handle is
+// closed, NOTHING is removed at the name (removing it would delete the
+// plant), and the failure classifies like every other pre-publish failure
+// (rearmPendingKind → rearm-refused).
 func copyRearmSourceBytes(fs afero.Fs, src io.Reader, backup string, info os.FileInfo) error {
 	if err := fs.MkdirAll(filepath.Dir(backup), config.DirPerm); err != nil {
 		return fmt.Errorf("re-arm create backup directory: %w", err)
@@ -825,20 +862,36 @@ func copyRearmSourceBytes(fs afero.Fs, src io.Reader, backup string, info os.Fil
 		_ = fs.Remove(staged)
 		return fmt.Errorf("re-arm copy bytes for %s: %w", backup, cerr)
 	}
-	if err := dstFile.Close(); err != nil {
-		_ = fs.Remove(staged)
-		return fmt.Errorf("re-arm close backup %s: %w", backup, err)
-	}
 	if info != nil {
-		if err := fs.Chtimes(staged, info.ModTime(), info.ModTime()); err != nil {
-			_ = fs.Remove(staged)
+		// Wave-14's ownership hand-off, pre-publish and now THROUGH THE HANDLE
+		// (wave-29): the staged inode receives the original backup's uid/gid via
+		// fchown before it becomes the backup. Best-effort semantics ride the
+		// helper (EPERM swallowed; windows no-op), same as the restore path.
+		restoreStagingOwnershipFn(fs, dstFile, info)
+	}
+	// wave-29 publish-time identity proof (fsutil.VerifyStagedIdentity): prove
+	// the staged name still addresses the handle's inode before publishing by
+	// path; on failure the staged name is FOREIGN and is left untouched.
+	if vErr := fsutil.VerifyStagedIdentity(fs, staged, dstFile); vErr != nil {
+		_ = dstFile.Close()
+		return fmt.Errorf("re-arm stage backup identity %s: %w", backup, vErr)
+	}
+	// CloseStaged closes the handle AND lands the times: THROUGH THE OPEN
+	// HANDLE on the real OsFs before closing (a Windows MoveFileEx publish
+	// cannot run on an open file, and POSIX no longer needs the descriptor
+	// afterwards), name-based post-close on virtual filesystems whose handles
+	// re-stamp ModTime at close. info == nil skips the times leg entirely.
+	var atime, mtime time.Time
+	if info != nil {
+		atime, mtime = info.ModTime(), info.ModTime()
+	}
+	if err := fsutil.CloseStaged(fs, staged, dstFile, atime, mtime, info != nil); err != nil {
+		_ = fs.Remove(staged)
+		var timesErr *fsutil.StagingTimesError
+		if errors.As(err, &timesErr) {
 			return fmt.Errorf("re-arm stage backup times %s: %w", backup, err)
 		}
-		// Wave-14's ownership hand-off, moved strictly pre-publish (wave-21):
-		// the staged inode receives the original backup's uid/gid before it
-		// becomes the backup. Best-effort semantics ride the helper (EPERM
-		// swallowed; windows no-op), same as the restore path.
-		restoreStagingOwnershipFn(fs, staged, info)
+		return fmt.Errorf("re-arm close backup %s: %w", backup, err)
 	}
 	// Wave-15 (codex P2): publish the staged re-arm with NO-REPLACE semantics.
 	// The original backup was REMOVED by the caller before this compensation

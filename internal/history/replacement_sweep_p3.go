@@ -352,8 +352,22 @@ func (s *ReplacementSweeper) persistRestorePendingMarkerKind(ctx context.Context
 // replacementLedgerIndex maps journaled backup paths to their owning row for
 // sweep arbitration, and destinations to the owning rows.
 type replacementLedgerIndex struct {
-	journaled map[string]*models.BatchFileOperation // backup path → owning row
-	dirs      map[string]bool                       // directories holding journaled destinations
+	journaled       map[string]*models.BatchFileOperation // backup path → owning row
+	dirs            map[string]bool                       // directories holding journaled destinations
+	refusedPendings []rearmRefusedLedgerEntry             // wave-29: ledger-only rearm-refused pendings
+}
+
+// rearmRefusedLedgerEntry is one journaled restore-pending entry of the
+// REARM-REFUSED kind as read from the ledger index (wave-29, codex P2,
+// PR#215). Its backup name is UNOWNED — foreign-occupied or outright ABSENT
+// after a refused no-replace re-arm — so it never materializes as a marker
+// file in any directory scan. Only the recorded spellings are carried; the
+// consumption leg re-verifies everything against the live journal.
+type rearmRefusedLedgerEntry struct {
+	rowID       uint
+	backup      string // recorded spelling — never a path-operation target here
+	dest        string // recorded spelling of the certified destination
+	backupSlash string // probe-aware journal key
 }
 
 func (s *ReplacementSweeper) index(ctx context.Context) (*replacementLedgerIndex, error) {
@@ -370,6 +384,11 @@ func (s *ReplacementSweeper) index(ctx context.Context) (*replacementLedgerIndex
 		journaled: map[string]*models.BatchFileOperation{},
 		dirs:      map[string]bool{},
 	}
+	// rows = FindOperationsWithReplacements + FindOperationsWithLedger — the
+	// two queries overlap (a journaled row satisfies both), so the
+	// ledger-enumerated pending leg dedupes per (row, backup) exactly like the
+	// journaled map does.
+	seenRefusedPendings := map[string]bool{}
 	for i := range rows {
 		row := &rows[i]
 		gf, perr := models.ParseGeneratedFiles(row.GeneratedFiles)
@@ -381,6 +400,24 @@ func (s *ReplacementSweeper) index(ctx context.Context) (*replacementLedgerIndex
 			// Dirs are FS ENUMERATION paths — keep their recorded case (the
 			// probe-aware key is only a comparison form).
 			idx.dirs[filepath.ToSlash(filepath.Clean(filepath.Dir(rep.Destination)))] = true
+			// wave-29 (codex P2): enumerate rearm-refused pendings straight from
+			// the LEDGER — see Sweep for the consumption leg. ONLY the
+			// rearm-refused kind qualifies: clean-kind pendings still authorize a
+			// backup-name removal and must be driven by the marker file the
+			// directory scans find, never by this ledger-only leg.
+			if rep.RestorePending && rep.PendingKind() == models.RestorePendingKindRearmRefused {
+				key := strconv.Itoa(int(row.ID)) + "\x00" + sweepSlash(rep.Backup)
+				if seenRefusedPendings[key] {
+					continue
+				}
+				seenRefusedPendings[key] = true
+				idx.refusedPendings = append(idx.refusedPendings, rearmRefusedLedgerEntry{
+					rowID:       row.ID,
+					backup:      rep.Backup,
+					dest:        rep.Destination,
+					backupSlash: sweepSlash(rep.Backup),
+				})
+			}
 		}
 		// R2-3: delete-listed paths name download destinations even when NO
 		// replacement was (yet) journaled — the crash window between
@@ -400,6 +437,18 @@ func (s *ReplacementSweeper) index(ctx context.Context) (*replacementLedgerIndex
 
 // Sweep runs a full startup sweep: every directory that holds a journaled
 // destination is scanned for ownership-marker backups.
+//
+// wave-29 (codex P2, PR#215): the sweep ALSO retries restore-pending entries
+// of the REARM-REFUSED kind enumerated straight from the LEDGER (index()). An
+// absent backup name never appears as a marker file in the directory scans,
+// so these entries were invisible to every sweep — they stayed live
+// indefinitely and blocked older replacement chains (checkedDestBlocking
+// still sees the armed journal row). The ledger leg consumes them
+// journal-only (no path operation against the unowned backup name) while the
+// wave-19 contracts are upheld: the certified destination must still be
+// present, and a clean-kind pending untouched by this leg keeps needing the
+// marker file. Scoped/targeted sweeps (SweepDirs / SweepDestinations)
+// deliberately keep their marker-file semantics and never run the ledger leg.
 func (s *ReplacementSweeper) Sweep(ctx context.Context) (int, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err
@@ -409,6 +458,12 @@ func (s *ReplacementSweeper) Sweep(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("replacement sweep: row scan failed: %w", err)
 	}
 	healed := 0
+	for _, entry := range idx.refusedPendings {
+		if err := ctx.Err(); err != nil {
+			return healed, err
+		}
+		healed += s.consumeRearmRefusedPending(ctx, entry)
+	}
 	for dir := range idx.dirs {
 		// Cancellation (e.g. the CLI revert's sweep deadline) wins over
 		// progress: a hung root must not chain-delay the caller.
@@ -993,4 +1048,66 @@ func (s *ReplacementSweeper) retryPendingRemoval(ctx context.Context, rowID uint
 	}
 	s.forgetPendingRemoval(backupSlash)
 	return true
+}
+
+// consumeRearmRefusedPending retries ONE ledger-enumerated rearm-refused
+// restore-pending entry during a FULL sweep (wave-29, codex P2, PR#215). Such
+// an entry's backup name is UNOWNED — foreign-occupied or absent after a
+// refused no-replace re-arm — so no directory scan will ever produce it as a
+// marker file; without this leg it would stay live forever and its operation
+// row would keep blocking older replacement chains. The retry is JOURNAL-ONLY
+// through retryPendingRemoval's wave-19 kind routing (re-verified fresh
+// inside the journal transaction): the destination bytes were certified in
+// place when the marker was written, so consumption must never touch the
+// backup path — an existence check would wedge forever on the absent name and
+// a removal could delete a foreign occupant.
+//
+// Pre-conditions verified here, conservatively:
+//   - the destination must classify PRESENT by Lstat (any object — the
+//     wave-12 posture: only a genuine ENOENT is missing, and a missing or
+//     indeterminate destination breaks the wave-19 consumption contract:
+//     instead of consuming the only record that a restore happened, the entry
+//     is kept and warned);
+//   - the backup NAME must classify ABSENT. An occupant at the name is the
+//     directory scan's arbitration (the wave-19 journaled/orphan legs reach
+//     it through the marker file); this leg exists exactly for the names a
+//     scan cannot see.
+//
+// A consumption failure keeps the entry live (retryPendingRemoval re-persists
+// the durable marker and warns). A live busy marker keeps the name untouched
+// for the owner process's own lifecycle, mirroring sweepOne's posture.
+func (s *ReplacementSweeper) consumeRearmRefusedPending(ctx context.Context, entry rearmRefusedLedgerEntry) int {
+	busyRelease, busyErr := fsutil.AcquireReplacementBusy(s.fs, entry.dest)
+	if errors.Is(busyErr, fsutil.ErrReplacementBusy) {
+		return 0
+	}
+	if busyErr != nil {
+		logging.Warnf("replacement sweep %s: busy-marker arbitration failed (%v) — rearm-refused pending kept", entry.backup, busyErr)
+		return 0
+	}
+	defer busyRelease()
+
+	release := fsutil.SharedDestLocks().Acquire(entry.dest)
+	defer release()
+
+	// The destination the marker certified must still be present before the
+	// only journal record of the restore is consumed.
+	if _, lstatErr := lstatRestoreSource(s.fs, entry.dest); lstatErr != nil {
+		logging.Warnf("replacement sweep %s: rearm-refused pending kept — the restore-certified destination is not present (%v); entry retained for later arbitration", entry.backup, lstatErr)
+		return 0
+	}
+	// This leg exists for the names a directory scan cannot see: the backup
+	// name must be ABSENT. An occupant (or an indeterminate answer) defers to
+	// the marker-file scans — a removal decision here could destroy foreign
+	// bytes.
+	if _, backupErr := lstatRestoreSource(s.fs, entry.backup); backupErr == nil {
+		return 0
+	} else if !errors.Is(backupErr, afero.ErrFileNotFound) {
+		logging.Warnf("replacement sweep %s: rearm-refused pending kept — backup name state indeterminate (%v)", entry.backup, backupErr)
+		return 0
+	}
+	if s.retryPendingRemoval(ctx, entry.rowID, entry.backup, entry.dest, entry.backupSlash) {
+		return 1
+	}
+	return 0
 }

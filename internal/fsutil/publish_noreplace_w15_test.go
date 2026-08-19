@@ -179,8 +179,9 @@ func TestPublishNoReplaceW15_OsFsOccupiedDestinationCollides(t *testing.T) {
 }
 
 // A missing staged source on the OsFs leg is an error, never a collision:
-// the hard-link publish fails ENOENT and degrades into the classified rename,
-// whose own rename failure surfaces as-is.
+// the kernel no-replace primitive or the hard-link fallback fails ENOENT and
+// refuses (wave-29: typed ErrPublishNoReplaceLinkFailed on the fallback leg),
+// publishing nothing.
 func TestPublishNoReplaceW15_OsFsMissingSourceIsNotACollision(t *testing.T) {
 	fs := afero.NewOsFs()
 	dir := t.TempDir()

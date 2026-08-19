@@ -20,11 +20,16 @@ import (
 // sweep sharing copyRestoreBytes — must hand the staged inode back to the
 // backup's owner before the swap, or a privileged revert of another account's
 // backup permanently loses its uid/gid when the backup is deleted. The chown
-// seam itself (restoreChown) lives in fsutil and is reachable only from that
+// seam itself (restoreFchown) lives in fsutil and is reachable only from that
 // package's tests (already covered there in wave 7); this package's seam
 // restoreStagingOwnershipFn wraps the fsutil helper and records the same
-// (staged, uid, gid) triple restoreChown receives — the fsutil wave-7 tests
-// prove the 1:1 mapping from this triple to the chown call.
+// (staged, uid, gid) triple restoreFchown receives — the fsutil wave-7 tests
+// prove the 1:1 mapping from this triple to the fchown call.
+//
+// wave-29 (codex P1, PR#215): the seam carries the OPEN STAGING HANDLE
+// instead of the staged path — the hand-off is a handle-scoped fchown. The
+// recorder restores the staged NAME from the handle (afero.File.Name()) so
+// ordering/state assertions stay name-based.
 
 // ownershipHandoffW8 records one restoreStagingOwnershipFn invocation.
 type ownershipHandoffW8 struct {
@@ -41,8 +46,12 @@ func swapRestoreOwnershipW8(t *testing.T, hook func(h ownershipHandoffW8)) *[]ow
 	t.Helper()
 	calls := new([]ownershipHandoffW8)
 	prev := restoreStagingOwnershipFn
-	restoreStagingOwnershipFn = func(_ afero.Fs, staged string, source os.FileInfo) {
-		h := ownershipHandoffW8{staged: staged}
+	restoreStagingOwnershipFn = func(_ afero.Fs, staged afero.File, source os.FileInfo) {
+		stagedName := ""
+		if staged != nil {
+			stagedName = staged.Name()
+		}
+		h := ownershipHandoffW8{staged: stagedName}
 		if st, ok := source.Sys().(*syscall.Stat_t); ok {
 			h.uid, h.gid, h.haveIDs = int(st.Uid), int(st.Gid), true
 		}

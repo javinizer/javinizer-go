@@ -50,9 +50,11 @@ func TestRollbackRearmPendingKindW21_Trichotomy(t *testing.T) {
 		errors.New("re-arm staging open wedged"),
 		fmt.Errorf("stat backup for re-arm: %w", os.ErrNotExist),
 		errors.New("w21 re-arm staging write wedged"),
+		fmt.Errorf("no-replace publish /a -> /b: %w: %w", fsutil.ErrPublishNoReplaceLinkFailed, errors.New("link EMLINK")),
+		fmt.Errorf("stage rollback identity: %w", fsutil.ErrStagedIdentityMismatch),
 	} {
 		require.Equal(t, models.RestorePendingKindRearmRefused, rollbackRearmPendingKind(err),
-			"refusal and pre-publish classes take the unowned-name kind: %v", err)
+			"refusal, wave-29 fail-closed link failures, identity mismatches, and pre-publish classes take the unowned-name kind: %v", err)
 	}
 	require.Equal(t, models.RestorePendingKindClean,
 		rollbackRearmPendingKind(fmt.Errorf("swap rollback: no-replace publish /s -> /b: staged cleanup failed: %w", fsutil.ErrPublishCompleted)),
@@ -60,7 +62,8 @@ func TestRollbackRearmPendingKindW21_Trichotomy(t *testing.T) {
 	// Agreement with history's classifier contract: the downloader's kind
 	// equals fsutil.PublishCompleted-driven routing on every leg.
 	for _, err := range []error{
-		fsutil.ErrPublishCompleted, fsutil.ErrPublishCollision, fsutil.ErrPublishNoReplaceUnsupported, errors.New("plain"),
+		fsutil.ErrPublishCompleted, fsutil.ErrPublishCollision, fsutil.ErrPublishNoReplaceUnsupported,
+		fsutil.ErrPublishNoReplaceLinkFailed, fsutil.ErrStagedIdentityMismatch, errors.New("plain"),
 	} {
 		require.Equal(t, fsutil.PublishCompleted(err),
 			rollbackRearmPendingKind(err) == models.RestorePendingKindClean,
