@@ -255,6 +255,15 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 				// certified in place when the marker was written must still be
 				// present before the only journal record of the restore is
 				// consumed.
+				//
+				// Wave-32 (codex local review round 2, PR#215 finding R1 — pending
+				// legs): destination PRESENCE is deliberately the whole gate here.
+				// The wave-25 backup-facts binding cannot apply: this kind exists
+				// precisely because the backup name is UNOWNED — the recorded facts
+				// describe the operation's own set-aside, which no longer owns the
+				// name (a refusal left it foreign or absent), so any facts verdict
+				// against that name measures foreign bytes. Legacy-unstamped
+				// entries keep the same presence posture (documented residual).
 				if restorePending && pendingKind == models.RestorePendingKindRearmRefused {
 					if destLstatErr != nil {
 						return fmt.Errorf("journaled rearm-refused pending entry for destination %s cannot be consumed: destination unreadable: %w", dest, destLstatErr)
@@ -319,8 +328,57 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 				// swapped onto the name must be retained, never deleted-then-
 				// consumed.
 				entryFacts := e
-				if rmErr := removeReplacementBackup(r.fs, e.Backup, "replacement restore", &entryFacts, backupInfo); rmErr != nil {
-					if markErr := markReplacementEntryRestorePending(ctx, r.batchFileOpRepo, op.ID, sweepSlash(e.Backup)); markErr != nil {
+				// Wave-32 (codex local review round 2, PR#215 finding R1): the
+				// wave-31 destination identity check above ran BEFORE the removal;
+				// a foreign swap or deletion landing between the two used to get
+				// the backup — the sole remaining copy of the pre-replacement
+				// bytes — unlinked with consumption going through. The removal
+				// therefore runs through the split quarantine: the verified backup
+				// object moves aside first, then the destination is re-gated, and
+				// only then is the QUARANTINED object unlinked. The re-gate is the
+				// finding's pending-retry requirement made explicit — never mere
+				// presence alone on the armed leg:
+				//   - the armed leg re-proves that dest still names the object
+				//     THIS pass just published (the wave-31 identity);
+				//   - the pending-clean leg re-proves destination PRESENCE (the
+				//     durable marker certified the restored bytes there; any
+				//     Lstat-success object is present, wave-12 posture), with the
+				//     removal side bound by the recorded backup-facts identity
+				//     (wave-25) applied inside the quarantine above.
+				//
+				// On divergence the verified object moves back onto the journaled
+				// name (NO-REPLACE — never clobbering a racer), the entry keeps its
+				// armed/pending posture (never newly marked restore-pending against
+				// an unproven destination), and the op surfaces unexpected-path-
+				// state for an explicit retry. Any wedge step removes nothing and
+				// leaves the entry live.
+				hold, rmErr := quarantineReplacementBackupForRemoval(r.fs, e.Backup, "replacement restore", &entryFacts, backupInfo)
+				if rmErr == nil {
+					diverged := false
+					if restorePending {
+						// Pending-clean retry: destination presence re-gate. The
+						// rearm-refused kind never reaches this leg — its backup
+						// name is unowned (wave-19) and its consumption above is
+						// journal-only by design.
+						if _, derr := lstatRestoreSource(r.fs, dest); derr != nil {
+							diverged = true
+						}
+					} else if !restoredDestStillOurs(r.fs, dest, restoredID) {
+						diverged = true
+					}
+					if diverged {
+						hold.restore()
+						return fmt.Errorf("restored %s → %s but the destination diverged after the backup was quarantined (foreign swap or deletion inside the check-to-delete window); backup restored to its journaled name, journal entry left live, destination untouched", e.Backup, dest)
+					}
+					rmErr = hold.removeVerified()
+				}
+				if rmErr != nil {
+					// Wave-32 (finding R4): the vanished class marked the
+					// rearm-refused (journal-only) kind — the journaled name is
+					// absent by construction, so no retry may touch it — while
+					// every other class keeps the clean marker for the
+					// file-driven retry.
+					if markErr := markReplacementEntryRestorePendingKind(ctx, r.batchFileOpRepo, op.ID, sweepSlash(e.Backup), pendingKindForRemovalError(rmErr)); markErr != nil {
 						absoluteBackup, _ := filepath.Abs(e.Backup)
 						logging.Warnf("replacement restore failed to retain cleanup marker for backup %s: %v", absoluteBackup, markErr)
 						// Without a durable marker, only undo a restore whose

@@ -353,56 +353,6 @@ func markRollbackRearmFailed(ctx context.Context, ledger downloadLedger, destPat
 	logging.Warnf("downloader: re-arm of rolled-back backup %s failed (%v) — journal entry marked restore-pending (%s)", backupPath, rearmErr, pendingKindLabel(kind))
 }
 
-// removeRollbackBackup follows the established ownership-cleanup rule: a
-// missing backup is already removed, while any other error retains durable
-// journal ownership so a later sweep/retry can try the removal again.
-//
-// Wave-31 (codex local round 1, PR#215 finding L2): the unlink is bound to
-// the object the rollback COPIED, never to the pathname alone — between the
-// copy and this removal a directory writer can rename the owned backup away
-// and plant a foreign file on the name; deleting by path used to destroy
-// those unjournaled bytes while the caller's ReleaseReplacement forgot the
-// ledger record of the set-aside. The copiedFrom binding is history's
-// wave-25 removal-gate restore-read step verbatim (dev/inode when both
-// sides expose it, then size + mtime — carried as the validated no-follow
-// Lstat object, never snapshotted into values, so virtual-filesystem live
-// views stay self-consistent with the removal-side lookup): a
-// symlink/non-regular occupant, any fact mismatch, or an indeterminate stat
-// all REFUSE the deletion so the occupant stays byte-intact and the journal
-// entry remains armed. The documented residual is the wave-25 check→Remove
-// window (porting history's wave-26 quarantine move was weighed and kept
-// out as the larger lift); a nil copiedFrom keeps the pre-wave-31 pathname
-// posture.
-func removeRollbackBackup(fsys afero.Fs, backup string, copiedFrom os.FileInfo, phase string) error {
-	if copiedFrom != nil {
-		info, lerr := lstatBackupCandidate(fsys, backup)
-		switch {
-		case lerr == nil:
-			if info == nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-				return refuseRollbackBackupRemoval(backup, phase, "name no longer names the copied object (foreign occupant preserved)")
-			}
-			if srcDev, srcIno, srcOK := restoreSourceIdentity(copiedFrom); srcOK {
-				if curDev, curIno, curOK := restoreSourceIdentity(info); curOK && (srcDev != curDev || srcIno != curIno) {
-					return refuseRollbackBackupRemoval(backup, phase, "occupant is not the object the rollback copied (dev/inode mismatch) — foreign bytes preserved")
-				}
-			}
-			if info.Size() != copiedFrom.Size() || !info.ModTime().Equal(copiedFrom.ModTime()) {
-				return refuseRollbackBackupRemoval(backup, phase, "occupant metadata differs from the object the rollback copied — foreign bytes preserved")
-			}
-		case os.IsNotExist(lerr):
-			// Already gone == removed (the established ownership rule above).
-		default:
-			logging.Warnf("downloader: %s failed to inspect backup %s before removal: %v; journal entry remains armed", phase, backup, lerr)
-			return lerr
-		}
-	}
-	if err := fsys.Remove(backup); err != nil && !os.IsNotExist(err) {
-		logging.Warnf("downloader: %s failed to remove backup %s: %v; journal entry remains armed", phase, backup, err)
-		return err
-	}
-	return nil
-}
-
 // refuseRollbackBackupRemoval keeps a proven-foreign backup occupant
 // byte-intact and surfaces the refusal through the caller's
 // backup-cleanup-failed leg (journal entry stays armed), mirroring history's
@@ -485,12 +435,18 @@ func installedIdentityFromFileInfo(info os.FileInfo) installedDestIdentity {
 // rollbackRestoredDestStillOurs is the confirm-rollback's restored-destination
 // recheck seam (wave-31, codex local round 1, PR#215 finding L1): production
 // wiring is destStillHoldsInstalledObject against the rollback copy's
-// published identity; an UNKNOWN identity (virtual/wrapper filesystem legs
-// report no publish identity) SKIPS the check — the documented wave-31
-// residual — rather than refusing a good rollback on nothing. Tests replay
-// the foreign swap/deletion landing inside the publish→recheck window, an
-// instant no afero double can reach while the wave-30 real-OsFs identity gate
-// is up; the real-OsFs detection itself is pinned by direct unit tests.
+// published identity. Wave-32 caller audit (codex local round 2, PR#215
+// finding R5): an UNKNOWN identity reaches here ONLY from virtual/wrapper
+// filesystem legs (fsutil reports no publish identity there) — the wave-32
+// fsutil deferred-times legs refuse an indeterminate relookup with a typed
+// error instead of degrading to a nil identity, and the copy leg propagates
+// that error, so a real-filesystem publish never arrives with an
+// indeterminate identity to skip on. The virtual-leg unknown continues to
+// SKIP (the documented wave-31 residual) rather than refusing a good
+// rollback on nothing. Tests replay the foreign swap/deletion landing inside
+// the publish→recheck window, an instant no afero double can reach while the
+// wave-30 real-OsFs identity gate is up; the real-OsFs detection itself is
+// pinned by direct unit tests.
 var rollbackRestoredDestStillOurs = func(fsys afero.Fs, dest string, id installedDestIdentity) bool {
 	if !id.known {
 		return true
@@ -868,7 +824,25 @@ func (d *Downloader) installOverwriting(ctx context.Context, stagedPath, destPat
 		// recorded from the no-follow source handle) — a foreign plant swapped
 		// onto the backup name inside the copy→remove window is kept
 		// byte-intact instead of being unlinked in the set-aside's place.
-		if rmErr := removeRollbackBackup(d.fs, backupPath, copyFacts.copied, "install-confirm rollback"); rmErr != nil {
+		//
+		// Wave-32 (codex local review round 2, PR#215 finding R1): the wave-31
+		// destination check above ran BEFORE the removal; a foreign swap or
+		// deletion landing between the two used to get the backup — the sole
+		// remaining copy of the pre-existing bytes — unlinked while the journal
+		// release went through. The removal therefore runs through history's
+		// quarantine construction (ported to rollback_backup_quarantine.go):
+		// the verified backup object moves aside, the destination is re-gated,
+		// and only then is the QUARANTINED object unlinked.
+		hold, rmErr := quarantineRollbackBackupForRemoval(d.fs, backupPath, copyFacts.copied, "install-confirm rollback")
+		if rmErr == nil && !rollbackRestoredDestStillOurs(d.fs, destPath, copyFacts.restored) {
+			hold.restore()
+			logging.Warnf("downloader: confirm-failure rollback of %s restored the pre-existing bytes but the destination diverged after the backup was quarantined — backup %s restored to its journaled name, journal entry stays armed, destination untouched", destPath, backupPath)
+			return false, true, fmt.Errorf("install-confirm failed: %w (rollback restore of %s landed but the destination diverged after the backup was quarantined; backup restored to %s, journal entry stays armed, destination untouched)", cErr, destPath, backupPath)
+		}
+		if rmErr == nil {
+			rmErr = hold.removeVerified()
+		}
+		if rmErr != nil {
 			return false, true, fmt.Errorf("install-confirm failed, rolled back to pre-existing bytes, but backup cleanup failed: %w (confirmation error: %v; entry stays armed)", rmErr, cErr)
 		}
 		if relErr := ledger.recorder.ReleaseReplacement(ctx, ledger.opID, destPath, backupPath); relErr != nil {

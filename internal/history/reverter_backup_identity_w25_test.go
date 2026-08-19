@@ -16,7 +16,9 @@ package history
 //   - facts mismatch (the foreign-substitution shape) → NO unlink, entry
 //     retained (armed→pending-clean / pending-clean stays pending)
 //   - legacy unstamped entries → legacy removal path (pinned)
-//   - every removeReplacementBackup refusal/error leg at the unit level
+//   - every backup-removal refusal/error leg at the unit level (wave-32:
+//     exercised through the successor chain quarantineReplacementBackupForRemoval
+//     + hold.removeVerified)
 
 import (
 	"context"
@@ -281,7 +283,7 @@ func TestSweepW25_CrashWindowRestoreLegacyUnstampedHeals(t *testing.T) {
 	require.Empty(t, w25JournalEntries(t, repo, op.ID))
 }
 
-// --- removeReplacementBackup unit legs ---
+// --- backup removal unit legs (the wave-32 successor chain) ---
 
 type w25LstatFailFs struct {
 	afero.Fs
@@ -342,7 +344,7 @@ func TestRemoveReplacementBackupW25_InspectionLegs(t *testing.T) {
 
 	t.Run("missing backup is already removed", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
-		require.NoError(t, removeReplacementBackup(fs, ctxBackup, "w25 unit", nil, nil))
+		require.NoError(t, quarantineAndRemoveVerifiedReplacementBackup(fs, ctxBackup, "w25 unit", nil, nil))
 	})
 
 	t.Run("lstat failure retains the entry", func(t *testing.T) {
@@ -350,14 +352,14 @@ func TestRemoveReplacementBackupW25_InspectionLegs(t *testing.T) {
 		base := afero.NewMemMapFs()
 		require.NoError(t, afero.WriteFile(base, ctxBackup, []byte("x"), 0o644))
 		fs := &w25LstatFailFs{Fs: base, victim: ctxBackup, err: sentinel}
-		err := removeReplacementBackup(fs, ctxBackup, "w25 unit", nil, nil)
+		err := quarantineAndRemoveVerifiedReplacementBackup(fs, ctxBackup, "w25 unit", nil, nil)
 		require.ErrorIs(t, err, sentinel)
 		require.Equal(t, "x", string(mustRead2(t, base, ctxBackup)), "nothing was removed")
 	})
 
 	t.Run("lstat nil answer retains the entry", func(t *testing.T) {
 		fs := &w25LstatNilFs{Fs: afero.NewMemMapFs()}
-		err := removeReplacementBackup(fs, ctxBackup, "w25 unit", nil, nil)
+		err := quarantineAndRemoveVerifiedReplacementBackup(fs, ctxBackup, "w25 unit", nil, nil)
 		require.Error(t, err)
 		var refused *BackupRemovalRefusedError
 		require.False(t, errors.As(err, &refused), "an indeterminate read is a keep-error, not a foreign-occupant refusal")
@@ -366,7 +368,7 @@ func TestRemoveReplacementBackupW25_InspectionLegs(t *testing.T) {
 	t.Run("directory occupant refused", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
 		require.NoError(t, fs.MkdirAll(ctxBackup, 0o755))
-		err := removeReplacementBackup(fs, ctxBackup, "w25 unit", nil, nil)
+		err := quarantineAndRemoveVerifiedReplacementBackup(fs, ctxBackup, "w25 unit", nil, nil)
 		var refused *BackupRemovalRefusedError
 		require.ErrorAs(t, err, &refused)
 	})
@@ -381,7 +383,7 @@ func TestRemoveReplacementBackupW25_InspectionLegs(t *testing.T) {
 		link := filepath.Join(tmp, "poster.jpg.dlbak.aaaaaaaaaaaaaaaa")
 		require.NoError(t, os.WriteFile(target, []byte("foreign"), 0o644))
 		require.NoError(t, os.Symlink(target, link))
-		err := removeReplacementBackup(base, link, "w25 unit", nil, nil)
+		err := quarantineAndRemoveVerifiedReplacementBackup(base, link, "w25 unit", nil, nil)
 		var refused *BackupRemovalRefusedError
 		require.ErrorAs(t, err, &refused, "a symlink at the backup name is never unlinked by this gate")
 		st, lerr := os.Lstat(link)
@@ -395,7 +397,7 @@ func TestRemoveReplacementBackupW25_InspectionLegs(t *testing.T) {
 		size, modUnix := w25StampBackupFacts(t, fs, ctxBackup)
 		entry := &models.ReplacementEntry{BackupSize: size + 1, BackupModUnix: modUnix}
 		var refused *BackupRemovalRefusedError
-		require.ErrorAs(t, removeReplacementBackup(fs, ctxBackup, "w25 unit", entry, nil), &refused)
+		require.ErrorAs(t, quarantineAndRemoveVerifiedReplacementBackup(fs, ctxBackup, "w25 unit", entry, nil), &refused)
 		require.Equal(t, "12345", string(mustRead2(t, fs, ctxBackup)))
 	})
 
@@ -405,7 +407,7 @@ func TestRemoveReplacementBackupW25_InspectionLegs(t *testing.T) {
 		size, modUnix := w25StampBackupFacts(t, fs, ctxBackup)
 		entry := &models.ReplacementEntry{BackupSize: size, BackupModUnix: modUnix + 60}
 		var refused *BackupRemovalRefusedError
-		require.ErrorAs(t, removeReplacementBackup(fs, ctxBackup, "w25 unit", entry, nil), &refused)
+		require.ErrorAs(t, quarantineAndRemoveVerifiedReplacementBackup(fs, ctxBackup, "w25 unit", entry, nil), &refused)
 	})
 
 	t.Run("stale re-arm substitute mismatches the restore-read identity", func(t *testing.T) {
@@ -422,7 +424,7 @@ func TestRemoveReplacementBackupW25_InspectionLegs(t *testing.T) {
 		require.NoError(t, err)
 		// copiedFrom binds a DIFFERENT object than the removal target.
 		var refused *BackupRemovalRefusedError
-		require.ErrorAs(t, removeReplacementBackup(base, other, "w25 unit", nil, readInfo), &refused,
+		require.ErrorAs(t, quarantineAndRemoveVerifiedReplacementBackup(base, other, "w25 unit", nil, readInfo), &refused,
 			"dev/inode binding catches a same-size same-mtime substitute")
 		require.Equal(t, "same-size", string(mustRead2(t, base, other)))
 	})
@@ -434,7 +436,7 @@ func TestRemoveReplacementBackupW25_InspectionLegs(t *testing.T) {
 		otherInfo, err := lstatRestoreSource(fs, "/w25u/other")
 		require.NoError(t, err)
 		var refused *BackupRemovalRefusedError
-		require.ErrorAs(t, removeReplacementBackup(fs, ctxBackup, "w25 unit", nil, otherInfo), &refused,
+		require.ErrorAs(t, quarantineAndRemoveVerifiedReplacementBackup(fs, ctxBackup, "w25 unit", nil, otherInfo), &refused,
 			"size/mtime binding independent of dev/inode availability")
 	})
 
@@ -443,7 +445,7 @@ func TestRemoveReplacementBackupW25_InspectionLegs(t *testing.T) {
 		base := afero.NewMemMapFs()
 		require.NoError(t, afero.WriteFile(base, ctxBackup, []byte("x"), 0o644))
 		fs := &w25OpenFailFs{Fs: base, victim: ctxBackup, err: sentinel}
-		err := removeReplacementBackup(fs, ctxBackup, "w25 unit", nil, nil)
+		err := quarantineAndRemoveVerifiedReplacementBackup(fs, ctxBackup, "w25 unit", nil, nil)
 		require.ErrorIs(t, err, sentinel)
 		require.Equal(t, "x", string(mustRead2(t, base, ctxBackup)))
 	})
@@ -452,7 +454,7 @@ func TestRemoveReplacementBackupW25_InspectionLegs(t *testing.T) {
 		base := afero.NewMemMapFs()
 		require.NoError(t, afero.WriteFile(base, ctxBackup, []byte("x"), 0o644))
 		fs := &w25OpenFailFs{Fs: base, victim: ctxBackup, err: os.ErrNotExist}
-		require.NoError(t, removeReplacementBackup(fs, ctxBackup, "w25 unit", nil, nil))
+		require.NoError(t, quarantineAndRemoveVerifiedReplacementBackup(fs, ctxBackup, "w25 unit", nil, nil))
 	})
 
 	t.Run("opened fstat failure retains the entry", func(t *testing.T) {
@@ -467,7 +469,7 @@ func TestRemoveReplacementBackupW25_InspectionLegs(t *testing.T) {
 			return w25StatBrokenFile{File: inner}, nil
 		}
 		defer func() { restoreOpenReplacementSource = prev }()
-		err := removeReplacementBackup(base, ctxBackup, "w25 unit", nil, nil)
+		err := quarantineAndRemoveVerifiedReplacementBackup(base, ctxBackup, "w25 unit", nil, nil)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "fstat wedged")
 		require.Equal(t, "x", string(mustRead2(t, base, ctxBackup)))
@@ -486,7 +488,7 @@ func TestRemoveReplacementBackupW25_InspectionLegs(t *testing.T) {
 		}
 		defer func() { restoreOpenReplacementSource = prev }()
 		var refused *BackupRemovalRefusedError
-		require.ErrorAs(t, removeReplacementBackup(base, ctxBackup, "w25 unit", nil, nil), &refused)
+		require.ErrorAs(t, quarantineAndRemoveVerifiedReplacementBackup(base, ctxBackup, "w25 unit", nil, nil), &refused)
 	})
 
 	t.Run("opened non-regular refused", func(t *testing.T) {
@@ -504,7 +506,7 @@ func TestRemoveReplacementBackupW25_InspectionLegs(t *testing.T) {
 		}
 		defer func() { restoreOpenReplacementSource = prev }()
 		var refused *BackupRemovalRefusedError
-		require.ErrorAs(t, removeReplacementBackup(base, ctxBackup, "w25 unit", nil, nil), &refused)
+		require.ErrorAs(t, quarantineAndRemoveVerifiedReplacementBackup(base, ctxBackup, "w25 unit", nil, nil), &refused)
 	})
 
 	t.Run("opened object differs from the Lstat object", func(t *testing.T) {
@@ -525,7 +527,7 @@ func TestRemoveReplacementBackupW25_InspectionLegs(t *testing.T) {
 		}
 		defer func() { restoreOpenReplacementSource = prev }()
 		var refused *BackupRemovalRefusedError
-		require.ErrorAs(t, removeReplacementBackup(base, backup, "w25 unit", nil, nil), &refused)
+		require.ErrorAs(t, quarantineAndRemoveVerifiedReplacementBackup(base, backup, "w25 unit", nil, nil), &refused)
 		require.Equal(t, "owned", string(mustRead2(t, base, backup)), "the verified object survived")
 	})
 
@@ -541,7 +543,7 @@ func TestRemoveReplacementBackupW25_InspectionLegs(t *testing.T) {
 		entry := &models.ReplacementEntry{BackupSize: stamp, BackupModUnix: modUnix}
 		copied, err := lstatRestoreSource(base, backup)
 		require.NoError(t, err)
-		require.NoError(t, removeReplacementBackup(base, backup, "w25 unit", entry, copied))
+		require.NoError(t, quarantineAndRemoveVerifiedReplacementBackup(base, backup, "w25 unit", entry, copied))
 		_, statErr := os.Lstat(backup)
 		require.ErrorIs(t, statErr, os.ErrNotExist)
 	})
@@ -550,7 +552,7 @@ func TestRemoveReplacementBackupW25_InspectionLegs(t *testing.T) {
 		sentinel := errors.New("w25 remove wedged")
 		fs := &w25RemoveFailFs{Fs: afero.NewMemMapFs(), victim: ctxBackup, err: sentinel}
 		require.NoError(t, afero.WriteFile(fs, ctxBackup, []byte("x"), 0o644))
-		err := removeReplacementBackup(fs, ctxBackup, "w25 unit", nil, nil)
+		err := quarantineAndRemoveVerifiedReplacementBackup(fs, ctxBackup, "w25 unit", nil, nil)
 		require.ErrorIs(t, err, sentinel)
 	})
 }

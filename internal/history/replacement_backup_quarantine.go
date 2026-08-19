@@ -29,6 +29,13 @@ package history
 // or a quarantined object that is not the verified one — removes NOTHING
 // and leaves the journal entry live (the *BackupRemovalRefusedError class
 // for proven-foreign objects, plain errors for indeterminate ones).
+//
+// Wave-32 (codex local review round 2, PR#215 findings R1+R4): the flow
+// splits into quarantineVerifiedBackup → [caller's destination re-gate] →
+// (*replacementBackupQuarantine).removeVerified so restore/rollback callers
+// re-prove the destination between the verified move and the unlink (R1),
+// and the unlink itself re-binds the name at Remove time with ENOENT no
+// longer consumed (R4).
 
 import (
 	cryptorand "crypto/rand"
@@ -139,23 +146,58 @@ func restoreQuarantinedBackup(fs afero.Fs, phase, backup, quarantine string) {
 	}
 }
 
-// removeVerifiedBackupByQuarantine is removeReplacementBackup's final leg
-// (wave-26): the caller has ALREADY bound the backup name's occupant to the
-// journal/restore facts AND re-opened it no-follow (verified is the open
-// handle's own stat). The verified object is moved aside under a
-// hard-to-guess quarantine name (with the handle open where the platform
-// allows), re-verified at the quarantine name, and only THE QUARANTINE is
-// unlinked — a plant swapped onto the journaled pathname anywhere inside the
-// sequence keeps its bytes (it either raced onto the original path after our
-// move, untouched, or was moved to the quarantine itself, where the
-// re-verify refuses the unlink). Every refusal/wedge leaves the journal
-// entry live exactly like removeReplacementBackup's earlier legs.
-func removeVerifiedBackupByQuarantine(fs afero.Fs, backup, phase string, handle afero.File, verified os.FileInfo) error {
+// errReplacementBackupQuarantineVanished classifies the quarantine name
+// being empty AFTER the verified object provably moved onto it (wave-32,
+// codex local review round 2, PR#215 finding R4): the pre-wave-32 legs
+// answered that ENOENT as "removed" and let the journal entry CONSUME, even
+// though the owned bytes vanished through a path this flow never unlinked —
+// unownably destroyed, with the ledger record erased as if we had removed
+// them safely. The vanished legs now refuse typed instead: nothing reports
+// consumed, the journal entry stays live (the convergent pending/sweep retry
+// legs still tolerate the absent journaled name on their regular gate), and
+// no compensation move-back runs — there is nothing at the quarantine name
+// to move.
+var errReplacementBackupQuarantineVanished = errors.New("quarantined backup vanished before its verified unlink completed")
+
+// replacementBackupQuarantine carries the wave-32 split between the verified
+// quarantine MOVE and the only unlink (findings R1+R4): restore/rollback
+// callers re-prove their DESTINATION between the two, so a foreign
+// swap/deletion landing in the former check→delete window can no longer get
+// the (quarantined) recoverable bytes unlinked or the journal consumed. When
+// the destination gate diverges the caller runs (*...).restore() — the
+// verified object moves back onto the journaled name NO-REPLACE — and leaves
+// the entry live; otherwise removeVerified performs the unlink.
+type replacementBackupQuarantine struct {
+	fs         afero.Fs
+	backup     string
+	phase      string
+	quarantine string
+	quar       os.FileInfo
+	moved      bool // the verified object currently sits at the quarantine name
+	unlinked   bool // the verified unlink completed
+}
+
+// quarantineVerifiedBackup runs removeReplacementBackup's wave-26 final legs
+// STOPPING before the unlink: the caller has ALREADY bound the backup name's
+// occupant to the journal/restore facts AND re-opened it no-follow (verified
+// is the open handle's own stat). The verified object moves aside under a
+// hard-to-guess O_EXCL-reserved quarantine name (with the handle open where
+// the platform allows) and is re-proven at the quarantine name against the
+// verified snapshot. Every wedge step — claim failure, rename failure,
+// indeterminate re-verify, a vanished quarantine name, or a quarantined
+// object that is not the verified one — removes NOTHING and leaves the
+// journal entry live exactly like removeReplacementBackup's earlier legs
+// (the *BackupRemovalRefusedError class for proven-foreign objects, plain
+// errors for indeterminate ones, the vanished sentinel for unownable loss).
+// A successful hold names the quarantine and its re-verified object so the
+// caller's destination re-gate and removeVerified can finish the wave-32
+// sequence.
+func quarantineVerifiedBackup(fs afero.Fs, backup, phase string, handle afero.File, verified os.FileInfo) (*replacementBackupQuarantine, error) {
 	absoluteBackup, _ := filepath.Abs(backup)
 	quarantine, cerr := claimBackupQuarantineName(fs, backup)
 	if cerr != nil {
 		logging.Warnf("%s could not reserve a quarantine name for backup %s: %v — journal entry retained live", phase, absoluteBackup, cerr)
-		return cerr
+		return nil, cerr
 	}
 	if renErr := moveVerifiedBackupToQuarantine(fs, backup, quarantine, handle); renErr != nil {
 		// The rename is atomic: a failed move relocated NOTHING. Cleaning the
@@ -163,43 +205,116 @@ func removeVerifiedBackupByQuarantine(fs afero.Fs, backup, phase string, handle 
 		// entry stay untouched for the conservative retry legs.
 		_ = fs.Remove(quarantine)
 		logging.Warnf("%s failed to quarantine backup %s before removal: %v — journal entry retained live", phase, absoluteBackup, renErr)
-		return renErr
+		return nil, renErr
+	}
+	hold := &replacementBackupQuarantine{
+		fs: fs, backup: backup, phase: phase, quarantine: quarantine, moved: true,
 	}
 	// The object the journaled name addressed at move time now sits at the
-	// quarantine name. RE-PROVE it before any unlink: a substitution inside
-	// the open→rename window moved a FOREIGN plant instead, and that plant —
-	// plus anything that raced onto the original path since — is never
-	// removed by this gate.
+	// quarantine name. RE-PROVE it before returning the hold: a substitution
+	// inside the open→rename window moved a FOREIGN plant instead, and that
+	// plant — plus anything that raced onto the original path since — is
+	// never removed by this gate.
 	quarInfo, qerr := lstatRestoreSource(fs, quarantine)
 	switch {
 	case errors.Is(qerr, afero.ErrFileNotFound):
-		// vanished under us == removed (the established ownership rule).
-		return nil
+		// Wave-32 (finding R4): vanished-under-us is NOT "removed" — the
+		// verified bytes disappeared unownably. Indeterminate retention:
+		// nothing consumed, entry live, no move-back (nothing to move).
+		hold.moved = false
+		absoluteQuarantine, _ := filepath.Abs(quarantine)
+		return nil, fmt.Errorf("%w: %s (quarantine %s empty at the post-move re-verify)", errReplacementBackupQuarantineVanished, absoluteBackup, absoluteQuarantine)
 	case qerr != nil:
-		restoreQuarantinedBackup(fs, phase, backup, quarantine)
+		hold.restore()
 		logging.Warnf("%s failed to re-verify quarantined backup %s (quarantine %s) before removal: %v — journal entry retained live", phase, absoluteBackup, quarantine, qerr)
-		return qerr
+		return nil, qerr
 	}
 	if quarInfo == nil || quarInfo.Mode()&os.ModeSymlink != 0 || !quarInfo.Mode().IsRegular() {
-		restoreQuarantinedBackup(fs, phase, backup, quarantine)
-		return refuseReplacementBackupRemoval(backup, phase, fmt.Sprintf("quarantined object at %s is not the verified regular file", quarantine))
+		hold.restore()
+		return nil, refuseReplacementBackupRemoval(backup, phase, fmt.Sprintf("quarantined object at %s is not the verified regular file", quarantine))
 	}
 	if verDev, verIno, verOK := restoreSourceIdentity(verified); verOK {
 		if quarDev, quarIno, quarOK := restoreSourceIdentity(quarInfo); quarOK && (verDev != quarDev || verIno != quarIno) {
-			restoreQuarantinedBackup(fs, phase, backup, quarantine)
-			return refuseReplacementBackupRemoval(backup, phase, fmt.Sprintf("quarantined object at %s is not the verified object (dev/inode mismatch) — foreign bytes preserved", quarantine))
+			hold.restore()
+			return nil, refuseReplacementBackupRemoval(backup, phase, fmt.Sprintf("quarantined object at %s is not the verified object (dev/inode mismatch) — foreign bytes preserved", quarantine))
 		}
 	}
 	if quarInfo.Size() != verified.Size() || !quarInfo.ModTime().Equal(verified.ModTime()) {
-		restoreQuarantinedBackup(fs, phase, backup, quarantine)
-		return refuseReplacementBackupRemoval(backup, phase, fmt.Sprintf("quarantined object at %s metadata differs from the verified object — foreign bytes preserved", quarantine))
+		hold.restore()
+		return nil, refuseReplacementBackupRemoval(backup, phase, fmt.Sprintf("quarantined object at %s metadata differs from the verified object — foreign bytes preserved", quarantine))
 	}
-	// Bound and re-verified: unlink the QUARANTINE name, never the journaled
-	// pathname — a plant that raced onto the original path keeps its bytes.
-	if err := fs.Remove(quarantine); err != nil && !os.IsNotExist(err) {
-		restoreQuarantinedBackup(fs, phase, backup, quarantine)
-		logging.Warnf("%s failed to remove quarantined backup %s (quarantine %s): %v", phase, absoluteBackup, quarantine, err)
+	hold.quar = quarInfo
+	return hold, nil
+}
+
+// restore is the wave-32 wedge compensation exposure: with the verified
+// object moved aside but NOT yet unlinked, a caller whose destination
+// re-gate diverged (finding R1) moves it back onto the journaled name
+// NO-REPLACE so the retained journal entry keeps pointing at exactly the
+// bytes it armed against. Idempotent: only a live (moved, not yet unlinked)
+// hold performs the move-back.
+func (h *replacementBackupQuarantine) restore() {
+	if !h.moved || h.unlinked {
+		return
+	}
+	restoreQuarantinedBackup(h.fs, h.phase, h.backup, h.quarantine)
+	h.moved = false
+}
+
+// removeVerified performs the one unlink of the quarantine flow: only THE
+// QUARANTINE name is ever unlinked, never the journaled pathname.
+//
+// Wave-32 (finding R4): the fs.Remove is path-based, so the re-verify→Remove
+// window is a watcher's. The quarantine name is re-derived no-follow AT
+// UNLINK TIME and must STILL name the re-verified object (dev/inode when
+// exposed, then size + mtime — the same binding the post-move re-verify
+// applied) before the unlink runs; a substitution inside the window is
+// restored back and refused, never deleted. And ENOENT at Remove time is no
+// longer consumed (the owned bytes vanished unownably): it answers the typed
+// vanished sentinel so the journal entry stays live.
+func (h *replacementBackupQuarantine) removeVerified() error {
+	if h.unlinked {
+		return nil // absent-at-gate (or already completed) hold: nothing to do
+	}
+	absoluteBackup, _ := filepath.Abs(h.backup)
+	cur, lerr := lstatRestoreSource(h.fs, h.quarantine)
+	switch {
+	case errors.Is(lerr, afero.ErrFileNotFound):
+		h.moved = false
+		absoluteQuarantine, _ := filepath.Abs(h.quarantine)
+		return fmt.Errorf("%w: %s (quarantine %s empty at the unlink)", errReplacementBackupQuarantineVanished, absoluteBackup, absoluteQuarantine)
+	case lerr != nil:
+		h.restore()
+		logging.Warnf("%s failed to re-verify quarantined backup %s (quarantine %s) at the unlink: %v — journal entry retained live", h.phase, absoluteBackup, h.quarantine, lerr)
+		return lerr
+	}
+	if cur == nil || cur.Mode()&os.ModeSymlink != 0 || !cur.Mode().IsRegular() {
+		h.restore()
+		return refuseReplacementBackupRemoval(h.backup, h.phase, fmt.Sprintf("quarantine %s no longer names the verified regular file at the unlink", h.quarantine))
+	}
+	if quarDev, quarIno, quarOK := restoreSourceIdentity(h.quar); quarOK {
+		if curDev, curIno, curOK := restoreSourceIdentity(cur); curOK && (quarDev != curDev || quarIno != curIno) {
+			h.restore()
+			return refuseReplacementBackupRemoval(h.backup, h.phase, fmt.Sprintf("quarantine %s names a different object than the re-verified one at the unlink (dev/inode mismatch) — foreign bytes preserved", h.quarantine))
+		}
+	}
+	if cur.Size() != h.quar.Size() || !cur.ModTime().Equal(h.quar.ModTime()) {
+		h.restore()
+		return refuseReplacementBackupRemoval(h.backup, h.phase, fmt.Sprintf("quarantine %s metadata changed between the re-verify and the unlink — foreign bytes preserved", h.quarantine))
+	}
+	if err := h.fs.Remove(h.quarantine); err != nil {
+		if os.IsNotExist(err) {
+			// The unlink-window vanish: indeterminate retention (finding R4),
+			// never a consumed removal.
+			h.moved = false
+			absoluteQuarantine, _ := filepath.Abs(h.quarantine)
+			return fmt.Errorf("%w: %s (quarantine %s vanished under the unlink)", errReplacementBackupQuarantineVanished, absoluteBackup, absoluteQuarantine)
+		}
+		h.restore()
+		logging.Warnf("%s failed to remove quarantined backup %s (quarantine %s): %v", h.phase, absoluteBackup, h.quarantine, err)
 		return err
 	}
+	h.moved = false
+	h.unlinked = true
 	return nil
 }

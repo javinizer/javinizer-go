@@ -11,11 +11,12 @@ package downloader
 // L1: copyBackupToDestBound hands back the post-publish-VERIFIED destination
 // identity (fsutil.PublishStagedBoundInfo) and the confirm leg rechecks the
 // destination against it (rollbackRestoredDestStillOurs — the wave-25
-// installedDestIdentity discipline) before removeRollbackBackup +
-// ReleaseReplacement ever run. Mismatch/absence refuses: destination
+// installedDestIdentity discipline) before the backup removal (wave-32: the
+// successor chain quarantineRollbackBackupForRemoval + hold.removeVerified)
+// and ReleaseReplacement ever run. Mismatch/absence refuses: destination
 // untouched, backup retained, entry left armed.
 //
-// L2: removeRollbackBackup binds the unlink to the object the rollback
+// L2: the rollback backup removal binds the unlink to the object the rollback
 // COPIED (history's wave-25 copiedFrom shape — the validated no-follow
 // Lstat object: dev/inode when exposed, then size + mtime). A foreign plant
 // swapped onto the backup name is kept byte-intact and the removal refuses.
@@ -141,7 +142,8 @@ func readW31(t *testing.T, fs afero.Fs, path string) []byte {
 	return data
 }
 
-// removeRollbackBackup unit legs: every ownership binding.
+// Rollback backup removal unit legs (the wave-32 successor chain): every
+// ownership binding.
 func TestRemoveRollbackBackupW31_OwnershipLegs(t *testing.T) {
 	setup := func(t *testing.T) (afero.Fs, string, os.FileInfo) {
 		fs := afero.NewMemMapFs()
@@ -154,7 +156,7 @@ func TestRemoveRollbackBackupW31_OwnershipLegs(t *testing.T) {
 
 	t.Run("matching binding removes", func(t *testing.T) {
 		fs, backup, copied := setup(t)
-		require.NoError(t, removeRollbackBackup(fs, backup, copied, "w31"))
+		require.NoError(t, quarantineAndRemoveVerifiedRollbackBackup(fs, backup, copied, "w31"))
 		exists, _ := afero.Exists(fs, backup)
 		require.False(t, exists)
 	})
@@ -163,7 +165,7 @@ func TestRemoveRollbackBackupW31_OwnershipLegs(t *testing.T) {
 		fs, backup, copied := setup(t)
 		require.NoError(t, fs.Remove(backup))
 		require.NoError(t, afero.WriteFile(fs, backup, []byte("foreign occupant — different size"), 0o644))
-		err := removeRollbackBackup(fs, backup, copied, "w31")
+		err := quarantineAndRemoveVerifiedRollbackBackup(fs, backup, copied, "w31")
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "refused")
 		require.Equal(t, []byte("foreign occupant — different size"), readW31(t, fs, backup))
@@ -173,7 +175,7 @@ func TestRemoveRollbackBackupW31_OwnershipLegs(t *testing.T) {
 		fs, backup, copied := setup(t)
 		require.NoError(t, fs.Remove(backup))
 		require.NoError(t, fs.Mkdir(backup, 0o755))
-		err := removeRollbackBackup(fs, backup, copied, "w31")
+		err := quarantineAndRemoveVerifiedRollbackBackup(fs, backup, copied, "w31")
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "refused")
 		info, serr := fs.Stat(backup)
@@ -183,7 +185,7 @@ func TestRemoveRollbackBackupW31_OwnershipLegs(t *testing.T) {
 
 	t.Run("nil binding keeps the pre-wave-31 pathname posture", func(t *testing.T) {
 		fs, backup, _ := setup(t)
-		require.NoError(t, removeRollbackBackup(fs, backup, nil, "w31"))
+		require.NoError(t, quarantineAndRemoveVerifiedRollbackBackup(fs, backup, nil, "w31"))
 		exists, _ := afero.Exists(fs, backup)
 		require.False(t, exists)
 	})
@@ -191,13 +193,13 @@ func TestRemoveRollbackBackupW31_OwnershipLegs(t *testing.T) {
 	t.Run("already gone is removed", func(t *testing.T) {
 		fs, backup, copied := setup(t)
 		require.NoError(t, fs.Remove(backup))
-		require.NoError(t, removeRollbackBackup(fs, backup, copied, "w31"))
+		require.NoError(t, quarantineAndRemoveVerifiedRollbackBackup(fs, backup, copied, "w31"))
 	})
 
 	t.Run("indeterminate inspect keeps ownership", func(t *testing.T) {
 		fs, backup, copied := setup(t)
 		sentinel := errors.New("w31 stat wedged")
-		err := removeRollbackBackup(&w25StatErrFs{Fs: fs, victim: backup, err: sentinel}, backup, copied, "w31")
+		err := quarantineAndRemoveVerifiedRollbackBackup(&w25StatErrFs{Fs: fs, victim: backup, err: sentinel}, backup, copied, "w31")
 		require.ErrorIs(t, err, sentinel)
 		require.Equal(t, []byte("copied bytes"), readW31(t, fs, backup), "nothing was removed")
 	})
@@ -225,7 +227,7 @@ func TestRemoveRollbackBackupW31_DevInoAndSymlinkLegs(t *testing.T) {
 	require.NoError(t, os.Rename(backupForeign, backup))
 	require.NoError(t, os.Chtimes(backup, copied.ModTime(), copied.ModTime()))
 
-	err = removeRollbackBackup(fs, backup, copied, "w31")
+	err = quarantineAndRemoveVerifiedRollbackBackup(fs, backup, copied, "w31")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "refused")
 	current, lerr := os.Lstat(backup)
@@ -236,7 +238,7 @@ func TestRemoveRollbackBackupW31_DevInoAndSymlinkLegs(t *testing.T) {
 	// the link object itself stays intact.
 	require.NoError(t, os.Remove(backup))
 	require.NoError(t, os.Symlink(filepath.Join(dir, "nowhere"), backup))
-	err = removeRollbackBackup(fs, backup, copied, "w31")
+	err = quarantineAndRemoveVerifiedRollbackBackup(fs, backup, copied, "w31")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "refused")
 	linkInfo, lerr2 := os.Lstat(backup)

@@ -13,7 +13,8 @@ package history
 // quarantine unlink compensates by moving the verified object back onto the
 // journaled name (no-replace) so the armed entry retries from pre-state.
 //
-// Test matrix (unit legs run through removeReplacementBackup; the sweep leg
+// Test matrix (unit legs run through the wave-32 successor chain
+// quarantineReplacementBackupForRemoval + hold.removeVerified; the sweep leg
 // pins the journal posture end-to-end):
 //   - plant racing onto the journaled name after the move → plant SURVIVES,
 //     quarantined verified object removed (OsFs, dev/ino binding)
@@ -87,7 +88,7 @@ func TestRemoveReplacementBackupW26_PlantAtJournaledNameSurvivesQuarantine(t *te
 		require.NoError(t, os.WriteFile(backup, []byte("foreign plant on the journaled name"), 0o644))
 	}}
 
-	require.NoError(t, removeReplacementBackup(fs, backup, "w26 unit", nil, nil),
+	require.NoError(t, quarantineAndRemoveVerifiedReplacementBackup(fs, backup, "w26 unit", nil, nil),
 		"the verified object was quarantined + re-verified + removed — the removal itself succeeds")
 	got, err := os.ReadFile(backup)
 	require.NoError(t, err)
@@ -118,7 +119,7 @@ func TestRemoveReplacementBackupW26_SubstitutionBeforeMoveRefusesAndPreserves(t 
 		require.NoError(t, os.WriteFile(backup, []byte("foreign plant substituted before the move"), 0o644))
 	}}
 
-	err := removeReplacementBackup(fs, backup, "w26 unit", nil, nil)
+	err := quarantineAndRemoveVerifiedReplacementBackup(fs, backup, "w26 unit", nil, nil)
 	var refused *BackupRemovalRefusedError
 	require.ErrorAs(t, err, &refused,
 		"the quarantined plant mismatches the re-verify — typed refusal, no removal")
@@ -232,7 +233,7 @@ func TestRemoveReplacementBackupW26_ReverifyLegs(t *testing.T) {
 		w26WriteBackup(t, base, backup, "old")
 		fs := &w26QuarLstatFs{Fs: base, err: sentinel}
 
-		err := removeReplacementBackup(fs, backup, "w26 unit", nil, nil)
+		err := quarantineAndRemoveVerifiedReplacementBackup(fs, backup, "w26 unit", nil, nil)
 		require.ErrorIs(t, err, sentinel)
 		var refused *BackupRemovalRefusedError
 		require.False(t, errors.As(err, &refused), "an indeterminate re-verify is a keep-error, not a foreign-occupant refusal")
@@ -249,7 +250,7 @@ func TestRemoveReplacementBackupW26_ReverifyLegs(t *testing.T) {
 		require.NoError(t, err)
 		fs := &w26QuarLstatFs{Fs: base, info: otherInfo}
 
-		err = removeReplacementBackup(fs, backup, "w26 unit", nil, nil)
+		err = quarantineAndRemoveVerifiedReplacementBackup(fs, backup, "w26 unit", nil, nil)
 		var refused *BackupRemovalRefusedError
 		require.ErrorAs(t, err, &refused, "the quarantine-reverify mismatch leg refuses typed")
 		require.Contains(t, refused.Reason, "metadata differs")
@@ -265,7 +266,7 @@ func TestRemoveReplacementBackupW26_ReverifyLegs(t *testing.T) {
 		require.NoError(t, err)
 		fs := &w26QuarLstatFs{Fs: base, info: dirInfo}
 
-		err = removeReplacementBackup(fs, backup, "w26 unit", nil, nil)
+		err = quarantineAndRemoveVerifiedReplacementBackup(fs, backup, "w26 unit", nil, nil)
 		var refused *BackupRemovalRefusedError
 		require.ErrorAs(t, err, &refused)
 		require.Contains(t, refused.Reason, "not the verified regular file")
@@ -277,20 +278,26 @@ func TestRemoveReplacementBackupW26_ReverifyLegs(t *testing.T) {
 		w26WriteBackup(t, base, backup, "old")
 		fs := &w26QuarLstatFs{Fs: base, substituteNil: true}
 
-		err := removeReplacementBackup(fs, backup, "w26 unit", nil, nil)
+		err := quarantineAndRemoveVerifiedReplacementBackup(fs, backup, "w26 unit", nil, nil)
 		var refused *BackupRemovalRefusedError
 		require.ErrorAs(t, err, &refused)
 		require.Contains(t, refused.Reason, "not the verified regular file")
 		require.Equal(t, "old", string(mustRead2(t, base, backup)))
 	})
 
-	t.Run("vanished under us counts as removed", func(t *testing.T) {
+	t.Run("vanished under us is indeterminate retention, not consumption", func(t *testing.T) {
 		base := afero.NewMemMapFs()
 		w26WriteBackup(t, base, backup, "old")
 		fs := &w26QuarLstatFs{Fs: base, err: afero.ErrFileNotFound}
 
-		require.NoError(t, removeReplacementBackup(fs, backup, "w26 unit", nil, nil),
-			"the quarantined object vanishing post-move satisfies the removal's purpose")
+		err := quarantineAndRemoveVerifiedReplacementBackup(fs, backup, "w26 unit", nil, nil)
+		require.ErrorIs(t, err, errReplacementBackupQuarantineVanished,
+			"wave-32 (finding R4): owned bytes that vanished unownably are never marked consumed")
+		var refused *BackupRemovalRefusedError
+		require.False(t, errors.As(err, &refused), "the vanished class is indeterminate retention, not a foreign-occupant refusal")
+		_, statErr := base.Stat(backup)
+		require.ErrorIs(t, statErr, os.ErrNotExist,
+			"the move already relocated the object — the journaled name stays absent")
 	})
 }
 
@@ -303,20 +310,24 @@ func TestRemoveReplacementBackupW26_FinalUnlinkLegs(t *testing.T) {
 		w26WriteBackup(t, base, backup, "old")
 		fs := &w26QuarGateFs{Fs: base, removeErr: sentinel}
 
-		err := removeReplacementBackup(fs, backup, "w26 unit", nil, nil)
+		err := quarantineAndRemoveVerifiedReplacementBackup(fs, backup, "w26 unit", nil, nil)
 		require.ErrorIs(t, err, sentinel)
 		require.Equal(t, "old", string(mustRead2(t, base, backup)),
 			"the failed quarantine unlink moves the verified object back onto the journaled name")
 		require.Empty(t, w26DirQuarNames(t, base, "/w26g"), "the compensation consumed the quarantine name")
 	})
 
-	t.Run("already-removed quarantine unlink succeeds", func(t *testing.T) {
+	t.Run("already-removed quarantine unlink is indeterminate retention", func(t *testing.T) {
 		base := afero.NewMemMapFs()
 		w26WriteBackup(t, base, backup, "old")
 		fs := &w26QuarGateFs{Fs: base, notExist: true}
 
-		require.NoError(t, removeReplacementBackup(fs, backup, "w26 unit", nil, nil))
-		require.Empty(t, w26DirQuarNames(t, base, "/w26g"))
+		err := quarantineAndRemoveVerifiedReplacementBackup(fs, backup, "w26 unit", nil, nil)
+		require.ErrorIs(t, err, errReplacementBackupQuarantineVanished,
+			"wave-32 (finding R4): ENOENT at Remove time means the owned bytes vanished unownably — not consumed")
+		require.Empty(t, w26DirQuarNames(t, base, "/w26g"), "the object really is gone")
+		_, statErr := base.Stat(backup)
+		require.ErrorIs(t, statErr, os.ErrNotExist)
 	})
 
 	t.Run("move-back collision keeps the verified object at the quarantine name", func(t *testing.T) {
@@ -331,7 +342,7 @@ func TestRemoveReplacementBackupW26_FinalUnlinkLegs(t *testing.T) {
 			},
 		}
 
-		err := removeReplacementBackup(fs, backup, "w26 unit", nil, nil)
+		err := quarantineAndRemoveVerifiedReplacementBackup(fs, backup, "w26 unit", nil, nil)
 		require.ErrorIs(t, err, sentinel, "the original unlink failure still surfaces")
 		require.Equal(t, "racer occupant on the journaled name", string(mustRead2(t, base, backup)),
 			"the NO-REPLACE compensation never clobbers the racer's occupant")
@@ -411,7 +422,7 @@ func TestRemoveReplacementBackupW26_QuarantineClaimLegs(t *testing.T) {
 		backupQuarantineRandReader = w26ErrReader{err: sentinel}
 		t.Cleanup(func() { backupQuarantineRandReader = prev })
 
-		err := removeReplacementBackup(base, backup, "w26 unit", nil, nil)
+		err := quarantineAndRemoveVerifiedReplacementBackup(base, backup, "w26 unit", nil, nil)
 		require.ErrorIs(t, err, sentinel)
 		require.Contains(t, err.Error(), "quarantine token")
 		require.Equal(t, "old", string(mustRead2(t, base, backup)))
@@ -423,7 +434,7 @@ func TestRemoveReplacementBackupW26_QuarantineClaimLegs(t *testing.T) {
 		w26WriteBackup(t, base, backup, "old")
 		fs := &w26QuarClaimFs{Fs: base, lstatErr: sentinel}
 
-		err := removeReplacementBackup(fs, backup, "w26 unit", nil, nil)
+		err := quarantineAndRemoveVerifiedReplacementBackup(fs, backup, "w26 unit", nil, nil)
 		require.ErrorIs(t, err, sentinel)
 		require.Contains(t, err.Error(), "inspect quarantine candidate")
 		require.Equal(t, "old", string(mustRead2(t, base, backup)))
@@ -434,7 +445,7 @@ func TestRemoveReplacementBackupW26_QuarantineClaimLegs(t *testing.T) {
 		w26WriteBackup(t, base, backup, "old")
 		fs := &w26QuarClaimFs{Fs: base, lstatOccupiedAnswers: 1}
 
-		require.NoError(t, removeReplacementBackup(fs, backup, "w26 unit", nil, nil),
+		require.NoError(t, quarantineAndRemoveVerifiedReplacementBackup(fs, backup, "w26 unit", nil, nil),
 			"the second draw claims and the removal completes")
 		require.Empty(t, w26DirQuarNames(t, base, "/w26c"))
 	})
@@ -444,7 +455,7 @@ func TestRemoveReplacementBackupW26_QuarantineClaimLegs(t *testing.T) {
 		w26WriteBackup(t, base, backup, "old")
 		fs := &w26QuarClaimFs{Fs: base, openExistAnswers: 1}
 
-		require.NoError(t, removeReplacementBackup(fs, backup, "w26 unit", nil, nil))
+		require.NoError(t, quarantineAndRemoveVerifiedReplacementBackup(fs, backup, "w26 unit", nil, nil))
 		require.Empty(t, w26DirQuarNames(t, base, "/w26c"))
 	})
 
@@ -454,7 +465,7 @@ func TestRemoveReplacementBackupW26_QuarantineClaimLegs(t *testing.T) {
 		w26WriteBackup(t, base, backup, "old")
 		fs := &w26QuarClaimFs{Fs: base, openErr: sentinel}
 
-		err := removeReplacementBackup(fs, backup, "w26 unit", nil, nil)
+		err := quarantineAndRemoveVerifiedReplacementBackup(fs, backup, "w26 unit", nil, nil)
 		require.ErrorIs(t, err, sentinel)
 		require.Contains(t, err.Error(), "reserve quarantine candidate")
 		require.Equal(t, "old", string(mustRead2(t, base, backup)))
@@ -466,7 +477,7 @@ func TestRemoveReplacementBackupW26_QuarantineClaimLegs(t *testing.T) {
 		w26WriteBackup(t, base, backup, "old")
 		fs := &w26QuarClaimFs{Fs: base, closeErr: sentinel}
 
-		err := removeReplacementBackup(fs, backup, "w26 unit", nil, nil)
+		err := quarantineAndRemoveVerifiedReplacementBackup(fs, backup, "w26 unit", nil, nil)
 		require.ErrorIs(t, err, sentinel)
 		require.Contains(t, err.Error(), "close quarantine reservation")
 		require.Equal(t, "old", string(mustRead2(t, base, backup)))
@@ -478,7 +489,7 @@ func TestRemoveReplacementBackupW26_QuarantineClaimLegs(t *testing.T) {
 		w26WriteBackup(t, base, backup, "old")
 		fs := &w26QuarClaimFs{Fs: base, lstatOccupiedAnswers: backupQuarantineClaimTries}
 
-		err := removeReplacementBackup(fs, backup, "w26 unit", nil, nil)
+		err := quarantineAndRemoveVerifiedReplacementBackup(fs, backup, "w26 unit", nil, nil)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "quarantine names exhausted")
 		require.Equal(t, "old", string(mustRead2(t, base, backup)))
@@ -490,7 +501,7 @@ func TestRemoveReplacementBackupW26_QuarantineClaimLegs(t *testing.T) {
 		w26WriteBackup(t, base, backup, "old")
 		fs := &w26MoveFailFs{Fs: base, err: sentinel}
 
-		err := removeReplacementBackup(fs, backup, "w26 unit", nil, nil)
+		err := quarantineAndRemoveVerifiedReplacementBackup(fs, backup, "w26 unit", nil, nil)
 		require.ErrorIs(t, err, sentinel)
 		require.Equal(t, "old", string(mustRead2(t, base, backup)),
 			"a failed move relocated nothing — the journaled occupant stays put")
@@ -524,7 +535,7 @@ func TestRemoveReplacementBackupW26_WindowsPostureSeam(t *testing.T) {
 	fsutil.PathBackslashesAreSeparators = true
 	t.Cleanup(func() { fsutil.PathBackslashesAreSeparators = prev })
 
-	require.NoError(t, removeReplacementBackup(base, backup, "w26 unit", nil, nil))
+	require.NoError(t, quarantineAndRemoveVerifiedReplacementBackup(base, backup, "w26 unit", nil, nil))
 	exists, _ := afero.Exists(base, backup)
 	require.False(t, exists, "the handle-close-first windows posture completes the removal")
 	require.Empty(t, w26DirQuarNames(t, base, "/w26w"))

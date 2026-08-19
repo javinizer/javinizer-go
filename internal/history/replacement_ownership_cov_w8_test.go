@@ -120,7 +120,13 @@ func TestReplacementOwnershipCovW8_SweepRemoveFailureRetriesCleanup(t *testing.T
 	require.Empty(t, gf.Replacements)
 }
 
-func TestReplacementOwnershipCovW8_RemoveNotExistConsumes(t *testing.T) {
+// TestReplacementOwnershipCovW8_RemoveNotExistRetainsThenConverges pins the
+// wave-32 (codex local review round 2, PR#215 finding R4) contract for an
+// ENOENT landing at the quarantine unlink itself: the bytes vanished
+// unownably, so NOTHING is consumed in that round — the sweep keeps the
+// entry (healed 0) and marks it restore-pending; the convergent retry then
+// finds the journaled name genuinely absent and consumes on the next sweep.
+func TestReplacementOwnershipCovW8_RemoveNotExistRetainsThenConverges(t *testing.T) {
 	base := afero.NewMemMapFs()
 	fs := &w8RemoveFs{Fs: base, notExist: true, fail: true}
 	repo := newP3OpRepo()
@@ -134,13 +140,25 @@ func TestReplacementOwnershipCovW8_RemoveNotExistConsumes(t *testing.T) {
 
 	healed, err := NewReplacementSweeper(fs, repo).Sweep(ctx)
 	require.NoError(t, err)
-	require.Equal(t, 1, healed)
-	require.Equal(t, "old", string(mustRead2(t, fs, dest)))
-	_, err = fs.Stat(backup)
-	require.ErrorIs(t, err, os.ErrNotExist)
+	require.Equal(t, 0, healed,
+		"the vanished quarantine is indeterminate retention, not a consumed removal")
+	require.Equal(t, "old", string(mustRead2(t, base, dest)), "the restore itself landed")
+	_, err = base.Stat(backup)
+	require.ErrorIs(t, err, os.ErrNotExist, "the verified object was moved aside, then vanished")
 	row, err := repo.FindByID(ctx, op.ID)
 	require.NoError(t, err)
 	gf, err := models.ParseGeneratedFiles(row.GeneratedFiles)
+	require.NoError(t, err)
+	require.Len(t, gf.Replacements, 1, "the entry stays live")
+	require.True(t, gf.Replacements[0].RestorePending)
+
+	// Convergent retry: the pending leg's absent-name posture consumes.
+	healed, err = NewReplacementSweeper(fs, repo).Sweep(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 1, healed)
+	row, err = repo.FindByID(ctx, op.ID)
+	require.NoError(t, err)
+	gf, err = models.ParseGeneratedFiles(row.GeneratedFiles)
 	require.NoError(t, err)
 	require.Empty(t, gf.Replacements)
 }
@@ -226,23 +244,23 @@ func TestReplacementOwnershipCovW8_PendingHelperLegs(t *testing.T) {
 		Replacements: []models.ReplacementEntry{{Backup: backup}},
 	})}
 	require.NoError(t, repo.Create(context.Background(), live))
-	require.NoError(t, markReplacementEntryRestorePending(context.Background(), repo, live.ID, sweepSlash(backup)))
-	require.NoError(t, markReplacementEntryRestorePending(context.Background(), repo, live.ID, sweepSlash(backup)))
+	require.NoError(t, markReplacementEntryRestorePendingKind(context.Background(), repo, live.ID, sweepSlash(backup), models.RestorePendingKindClean))
+	require.NoError(t, markReplacementEntryRestorePendingKind(context.Background(), repo, live.ID, sweepSlash(backup), models.RestorePendingKindClean))
 	gone := &rowGoneRepo2{p3OpRepo: repo, goneID: live.ID}
-	require.Error(t, markReplacementEntryRestorePending(context.Background(), gone, live.ID, sweepSlash(backup)))
+	require.Error(t, markReplacementEntryRestorePendingKind(context.Background(), gone, live.ID, sweepSlash(backup), models.RestorePendingKindClean))
 	nilRepo := &w8NilRowRepo{p3OpRepo: repo}
-	require.Error(t, markReplacementEntryRestorePending(context.Background(), nilRepo, live.ID, sweepSlash(backup)))
+	require.Error(t, markReplacementEntryRestorePendingKind(context.Background(), nilRepo, live.ID, sweepSlash(backup), models.RestorePendingKindClean))
 	broken := *live
 	broken.GeneratedFiles = `{"replacements":broken`
 	require.NoError(t, repo.Update(context.Background(), &broken))
-	require.Error(t, markReplacementEntryRestorePending(context.Background(), repo, live.ID, sweepSlash(backup)))
+	require.Error(t, markReplacementEntryRestorePendingKind(context.Background(), repo, live.ID, sweepSlash(backup), models.RestorePendingKindClean))
 
 	updateRepo := &failingUpdateRepo{p3OpRepo: newP3OpRepo(), updateErr: errors.New("marker update wedged")}
 	updateRow := &models.BatchFileOperation{GeneratedFiles: models.MarshalLedgerJSON(models.GeneratedFilesJSON{
 		Replacements: []models.ReplacementEntry{{Backup: backup}},
 	})}
 	require.NoError(t, updateRepo.Create(context.Background(), updateRow))
-	require.Error(t, markReplacementEntryRestorePending(context.Background(), updateRepo, updateRow.ID, sweepSlash(backup)))
+	require.Error(t, markReplacementEntryRestorePendingKind(context.Background(), updateRepo, updateRow.ID, sweepSlash(backup), models.RestorePendingKindClean))
 
 	zero := &ReplacementSweeper{}
 	zero.rememberPendingRemoval("w8-zero")

@@ -82,6 +82,18 @@ var ErrPublishStagedIdentityBreak = errors.New("destination does not provably na
 // family stays reachable through the identity-break classifiers.
 var ErrPublishStagedForeignOccupant = errors.New("destination occupant is neither the recorded window plant nor the staged inode")
 
+// ErrPublishStagedIdentityIndeterminate means a post-publish destination
+// lookup could not PROVE which object the destination names (wave-32, codex
+// local review round 2, PR#215 finding R5): the ENOSYS deferred-times legs
+// glimpse the published name again before/after the name-based Chtimes, and
+// a failed glimpse used to degrade to a nil-identity success that callers
+// classified as "no provable identity"; it is NOT safe. The legs now
+// refuse typed instead — nothing is consumed, the caller's conservative
+// legs retain the source backup, and the journal entry stays live. Always
+// joined with ErrPublishStagedIdentityBreak so identity-break classifiers
+// catch it.
+var ErrPublishStagedIdentityIndeterminate = errors.New("post-publish destination identity is indeterminate")
+
 // ErrPublishStagedExhausted means a directory writer kept substituting the
 // staged name across the whole bounded re-stage/re-publish budget. Every
 // displaced plant was foreign (proven-absent destinations only — never
@@ -184,7 +196,8 @@ type StagedPublish struct {
 //     ErrPublishNoReplaceLinkFailed ...) keeps working through the caller's
 //     existing wraps;
 //   - an error wrapping ErrPublishStagedIdentityBreak /
-//     ErrPublishStagedExhausted / ErrPublishStagedForeignOccupant: a
+//     ErrPublishStagedExhausted / ErrPublishStagedForeignOccupant /
+//     ErrPublishStagedIdentityIndeterminate: a
 //     substitution was proven after a successful publish and recovery was
 //     refused or exhausted — or (wave-26) the recovery unlink found a
 //     post-publish occupant it could not prove was the window plant, so
@@ -212,7 +225,14 @@ func PublishStagedBound(p StagedPublish) error {
 // post-publish stat, os.SameFile-bound to the staged inode:
 //
 //   - POSIX legs hand back the reverify lookup (with a fresh relookup after
-//     the ENOSYS deferred-times leg so the stats carry the applied times);
+//     the ENOSYS deferred-times leg so the stats carry the applied times).
+//     Wave-32 (finding R5): the deferred legs RE-PROVE the name against the
+//     staged inode around the name-based Chtimes; a foreign occupant
+//     mid-leg skips the times and refuses typed, a failed relookup no longer
+//     degrades to a nil-identity success (that answer flowed into callers'
+//     permissive skip postures) but returns the typed
+//     ErrPublishStagedIdentityIndeterminate refusal, and a relookup naming a
+//     different inode is never handed back as the published identity;
 //   - the Windows leg hands back its post-publish reverify stat;
 //   - the VIRTUAL leg (wrapper/MemMap filesystems — no rename-away threat
 //     model, no handle identity) reports nil with the publish's own error

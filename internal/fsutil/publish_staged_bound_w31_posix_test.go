@@ -111,8 +111,12 @@ func TestPublishStagedBoundInfoW31POSIX_ENOSYSRelookFailureYieldsNoIdentity(t *t
 		ApplyTimes: true, Atime: time.Now(), Mtime: time.Now(),
 		Suffix: ".rstr", NextOrdinal: w30Ordinal(4),
 	})
-	require.NoError(t, err, "a wedged relookup never turns a proven publish into an error")
-	require.Nil(t, info, "no provable identity — callers keep their documented residual posture")
+	require.ErrorIs(t, err, ErrPublishStagedIdentityIndeterminate,
+		"a wedged relookup is a typed indeterminate refusal, not a nil-identity success")
+	require.ErrorIs(t, err, ErrPublishStagedIdentityBreak,
+		"the whole refusal family stays reachable through the identity-break class")
+	require.ErrorIs(t, err, sentinel)
+	require.Nil(t, info, "no identity is returned on the refusal")
 	require.Equal(t, 2, calls)
 	got, rerr := os.ReadFile(dest)
 	require.NoError(t, rerr)

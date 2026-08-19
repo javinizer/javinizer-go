@@ -150,108 +150,99 @@ func journaledEntryFacts(row *models.BatchFileOperation, backupSlash string) *mo
 	return nil
 }
 
-// removeReplacementBackup is the ownership gate for every journal consume
-// path: a non-missing removal error leaves the journal entry armed and
-// retryable.
-//
-// Wave-25 (codex P3 PR#215 finding 2): the removal is bound to the OWNED
-// object, never to the pathname alone — between the journal write (or a
-// restore's source read) and this unlink a directory writer can rename our
-// backup away and plant a foreign file at the same name; a name-only unlink
-// would delete the foreign bytes and then consume the journal record. The
-// gate, in order:
-//  1. Lstat the occupant (no follow): a genuinely ENOENT name is already
-//     removed; any other stat failure retains the entry (kept posture).
-//     A symlink or non-regular object at the name is NEVER ours — refuse.
-//  2. Journaled arm-time facts (entry carries BackupSize/BackupModUnix
-//     stamped by the downloader — dev/inode are deliberately NOT journaled,
-//     see models.ReplacementEntry): a mismatch means the occupant is not the
-//     set-aside this entry owns — refuse. Unstamped (legacy) entries skip
-//     this leg; their removal keeps the pre-wave-25 pathname posture with
-//     the documented residual swap window (the re-arm compensations preserve
-//     size + mtime byte-faithful, so stamped entries also survive re-arms).
-//  3. Restore-read binding (copiedFrom non-nil): a leg that just streamed
-//     the backup compares dev/inode (when both sides expose them) plus size
-//     and mtime against the object it read — a swap between that read and
-//     the removal refuses instead of deleting the replacement.
-//  4. Reopen the name NO-FOLLOW and require the opened object to be the
-//     Lstat object (same dev/inode when exposed, regular file): narrows the
-//     Lstat→Remove window.
-//  5. Wave-26 (codex P2, PR#215 finding 4): quarantine-then-reverify — the
-//     wave-25 tail closed the handle and unlinked the journaled PATHNAME,
-//     shifting the substitution window to just-before-unlink. The verified
-//     object now moves to a hard-to-guess O_EXCL-reserved quarantine name
-//     (POSIX: with the no-follow handle still OPEN), is re-proven against
-//     the verified snapshot at the quarantine name, and only THE QUARANTINE
-//     is unlinked — a plant swapped onto the journaled pathname is never
-//     removed, and a substitution moved to the quarantine by the rename is
-//     caught by the re-verify (see replacement_backup_quarantine.go).
-//
-// A refused removal returns *BackupRemovalRefusedError; callers' existing
-// "entry retained live" compensation handles it without a special case.
-func removeReplacementBackup(fs afero.Fs, backup, phase string, entry *models.ReplacementEntry, copiedFrom os.FileInfo) error {
+// quarantineReplacementBackupForRemoval runs removeReplacementBackup's
+// ownership-binding legs plus the wave-26 verified quarantine move, then
+// STOPS before the only unlink (wave-32, codex local review round 2, PR#215
+// finding R1): the caller re-proves its destination gate against the hold
+// between the move and the unlink, and either finishes with the hold's
+// removeVerified or puts the verified object back with the hold's restore.
+// Errors are exactly removeReplacementBackup's (nil == the name was already
+// gone, *BackupRemovalRefusedError for a proven-foreign occupant, plain
+// errors for indeterminate states, plus the wave-32 vanished sentinel for
+// unownable post-move loss).
+func quarantineReplacementBackupForRemoval(fs afero.Fs, backup, phase string, entry *models.ReplacementEntry, copiedFrom os.FileInfo) (*replacementBackupQuarantine, error) {
+	handle, verified, err := openVerifiedReplacementBackup(fs, backup, phase, entry, copiedFrom)
+	if err != nil {
+		return nil, err
+	}
+	if handle == nil {
+		// The journaled name was genuinely absent — removed already.
+		return &replacementBackupQuarantine{fs: fs, backup: backup, phase: phase, unlinked: true}, nil
+	}
+	defer func() { _ = handle.Close() }()
+	return quarantineVerifiedBackup(fs, backup, phase, handle, verified)
+}
+
+// openVerifiedReplacementBackup carries removeReplacementBackup's gate legs:
+// Lstat the occupant no-follow and gate its shape + journaled facts +
+// restore-read binding, then reopen the name NO-FOLLOW and require the
+// opened object to be the Lstat object. (nil, nil, nil) reports a genuinely
+// absent name — "already gone == removed" (the established ownership rule).
+func openVerifiedReplacementBackup(fs afero.Fs, backup, phase string, entry *models.ReplacementEntry, copiedFrom os.FileInfo) (afero.File, os.FileInfo, error) {
 	absoluteBackup, _ := filepath.Abs(backup)
 	info, lerr := lstatRestoreSource(fs, backup)
 	if lerr != nil {
 		if errors.Is(lerr, afero.ErrFileNotFound) {
-			return nil // already gone == removed (established ownership rule)
+			return nil, nil, nil // already gone == removed (established ownership rule)
 		}
 		logging.Warnf("%s failed to inspect backup %s before removal: %v — journal entry retained live", phase, absoluteBackup, lerr)
-		return lerr
+		return nil, nil, lerr
 	}
 	if info == nil {
 		err := fmt.Errorf("filesystem returned no file information for %s", backup)
 		logging.Warnf("%s failed to inspect backup %s before removal: %v — journal entry retained live", phase, absoluteBackup, err)
-		return err
+		return nil, nil, err
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
-		return refuseReplacementBackupRemoval(backup, phase, "name names a symlink, never the owned set-aside")
+		return nil, nil, refuseReplacementBackupRemoval(backup, phase, "name names a symlink, never the owned set-aside")
 	}
 	if !info.Mode().IsRegular() {
-		return refuseReplacementBackupRemoval(backup, phase, fmt.Sprintf("name names a non-regular object (mode %s)", info.Mode()))
+		return nil, nil, refuseReplacementBackupRemoval(backup, phase, fmt.Sprintf("name names a non-regular object (mode %s)", info.Mode()))
 	}
 	if entry != nil && entry.BackupFactsStamped() {
 		if info.Size() != entry.BackupSize || info.ModTime().Unix() != entry.BackupModUnix {
-			return refuseReplacementBackupRemoval(backup, phase, fmt.Sprintf("occupant identity mismatch — journaled %d bytes @ %d, found %d bytes @ %d", entry.BackupSize, entry.BackupModUnix, info.Size(), info.ModTime().Unix()))
+			return nil, nil, refuseReplacementBackupRemoval(backup, phase, fmt.Sprintf("occupant identity mismatch — journaled %d bytes @ %d, found %d bytes @ %d", entry.BackupSize, entry.BackupModUnix, info.Size(), info.ModTime().Unix()))
 		}
 	}
 	if copiedFrom != nil {
 		if srcDev, srcIno, srcOK := restoreSourceIdentity(copiedFrom); srcOK {
 			if curDev, curIno, curOK := restoreSourceIdentity(info); curOK && (srcDev != curDev || srcIno != curIno) {
-				return refuseReplacementBackupRemoval(backup, phase, "occupant is not the object the restore read (dev/inode mismatch)")
+				return nil, nil, refuseReplacementBackupRemoval(backup, phase, "occupant is not the object the restore read (dev/inode mismatch)")
 			}
 		}
 		if info.Size() != copiedFrom.Size() || !info.ModTime().Equal(copiedFrom.ModTime()) {
-			return refuseReplacementBackupRemoval(backup, phase, "occupant metadata differs from the object the restore read")
+			return nil, nil, refuseReplacementBackupRemoval(backup, phase, "occupant metadata differs from the object the restore read")
 		}
 	}
 	handle, oerr := restoreOpenReplacementSource(fs, backup)
 	if oerr != nil {
 		if os.IsNotExist(oerr) {
-			return nil // vanished under us == removed
+			return nil, nil, nil // vanished under us == removed
 		}
 		logging.Warnf("%s failed to reopen backup %s before removal: %v — journal entry retained live", phase, absoluteBackup, oerr)
-		return oerr
+		return nil, nil, oerr
 	}
-	// Wave-26: the handle stays OPEN past the fstat — the quarantine move
-	// below keeps it open through the rename on POSIX so the moved object is
-	// provably the opened one (Windows posture closes it first inside
-	// moveVerifiedBackupToQuarantine; the re-verify still binds).
-	defer func() { _ = handle.Close() }()
 	openedInfo, serr := handle.Stat()
 	if serr != nil {
+		_ = handle.Close()
 		logging.Warnf("%s failed to stat opened backup %s before removal: %v — journal entry retained live", phase, absoluteBackup, serr)
-		return serr
+		return nil, nil, serr
 	}
 	if openedInfo == nil || openedInfo.Mode()&os.ModeSymlink != 0 || !openedInfo.Mode().IsRegular() {
-		return refuseReplacementBackupRemoval(backup, phase, "opened object is not the regular file Lstat verified")
+		_ = handle.Close()
+		return nil, nil, refuseReplacementBackupRemoval(backup, phase, "opened object is not the regular file Lstat verified")
 	}
 	if curDev, curIno, curOK := restoreSourceIdentity(info); curOK {
 		if opDev, opIno, opOK := restoreSourceIdentity(openedInfo); opOK && (curDev != opDev || curIno != opIno) {
-			return refuseReplacementBackupRemoval(backup, phase, "opened object differs from the Lstat object")
+			_ = handle.Close()
+			return nil, nil, refuseReplacementBackupRemoval(backup, phase, "opened object differs from the Lstat object")
 		}
 	}
-	return removeVerifiedBackupByQuarantine(fs, backup, phase, handle, openedInfo)
+	// Wave-26: the handle stays OPEN past the fstat — the quarantine move
+	// keeps it open through the rename on POSIX so the moved object is
+	// provably the opened one (Windows posture closes it first inside
+	// moveVerifiedBackupToQuarantine; the re-verify still binds).
+	return handle, openedInfo, nil
 }
 
 // markReplacementRestorePendingKind records that restore bytes are installed while
@@ -268,15 +259,6 @@ func markReplacementRestorePendingKind(gf *models.GeneratedFilesJSON, backupSlas
 		return gf.Replacements[i].SetRestorePending(kind)
 	}
 	return false
-}
-
-// markReplacementEntryRestorePending applies the marker to a fresh row inside
-// the journal read-modify-write transaction (review 4960250562: atomic across
-// processes, not just this process's lock registry). It is used by the
-// explicit reverter when backup removal fails before consumption — the legacy
-// CLEAN kind, where the backup name still holds the operation's own bytes.
-func markReplacementEntryRestorePending(ctx context.Context, repo database.BatchFileOperationRepositoryInterface, rowID uint, backupSlash string) error {
-	return markReplacementEntryRestorePendingKind(ctx, repo, rowID, backupSlash, models.RestorePendingKindClean)
 }
 
 // markReplacementEntryRestorePendingKind is markReplacementEntryRestorePending
@@ -341,6 +323,25 @@ func rearmPendingKind(rearmErr error) string {
 		return models.RestorePendingKindClean
 	}
 	return models.RestorePendingKindRearmRefused
+}
+
+// pendingKindForRemovalError routes a FAILED wave-32 quarantine removal onto
+// the durable pending kind the retry shape requires. The vanished class
+// (finding R4) is special: the verified object moved to its quarantine name
+// and then vanished unownably — the journaled name is ABSENT by
+// construction, so no retry may ever stat/copy/remove it (the clean-kind
+// retry legs would stitch to a forever-absent source). The rearm-refused
+// kind's journal-only consumption is the exact fit: the marker still
+// certifies the destination carries the restored bytes, and the wave-29
+// ledger-enumerated rearm-refused retry converges without any file. Every
+// other failure class leaves the name's ownership live (attempt retained,
+// foreign plant restored back, or nothing moved at all) and keeps the
+// ordinary clean marker.
+func pendingKindForRemovalError(rmErr error) string {
+	if errors.Is(rmErr, errReplacementBackupQuarantineVanished) {
+		return models.RestorePendingKindRearmRefused
+	}
+	return models.RestorePendingKindClean
 }
 
 // rearmReplacementBackup recreates the backup from the destination's bytes
@@ -451,17 +452,6 @@ func (s *ReplacementSweeper) forgetPendingRemoval(backupKey string) {
 	if s.pendingRemovals != nil {
 		delete(s.pendingRemovals, backupKey)
 	}
-}
-
-// persistRestorePendingMarker durably records the RestorePending cleanup
-// marker for the journaled backup through the row's journal transaction. The
-// caller MUST already hold the row's SharedJournalLocks lock — the sweep legs
-// below run their whole journal section under it. The reverter's equivalent
-// outside the journal lock is markReplacementEntryRestorePending, which
-// acquires the lock itself (the registry is not reentrant). This is the
-// legacy CLEAN-kind form.
-func (s *ReplacementSweeper) persistRestorePendingMarker(ctx context.Context, rowID uint, backupSlash string) error {
-	return s.persistRestorePendingMarkerKind(ctx, rowID, backupSlash, models.RestorePendingKindClean)
 }
 
 // persistRestorePendingMarkerKind is persistRestorePendingMarker with an
@@ -961,7 +951,26 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 		// journal-owned, so remove it before reporting the restore complete.
 		// No journal entry survives to stamp facts: the removal binds solely to
 		// the object this leg restored from (wave-25).
-		if rmErr := removeReplacementBackup(s.fs, backup, "replacement sweep", nil, backupInfoBeforeCopy); rmErr != nil {
+		//
+		// Wave-32 (codex local review round 2, PR#215 finding R1): the wave-31
+		// destination check above ran BEFORE the removal; a foreign swap or
+		// deletion landing between the two used to get the recoverable bytes
+		// unlinked with consumption already done elsewhere. The removal
+		// therefore runs through the split quarantine: the verified backup
+		// object moves aside, the destination is re-proven to STILL name the
+		// object this leg published, and only then is the quarantined object
+		// unlinked. On divergence the object moves back onto the journaled
+		// name and nothing is removed.
+		hold, rmErr := quarantineReplacementBackupForRemoval(s.fs, backup, "replacement sweep", nil, backupInfoBeforeCopy)
+		if rmErr == nil && !restoredDestStillOurs(s.fs, dest, restoredID) {
+			hold.restore()
+			logging.Warnf("replacement sweep %s: restored destination %s diverged after the backup was quarantined (foreign swap or deletion inside the check-to-delete window) — backup restored to its journaled name, destination untouched", backup, dest)
+			return false
+		}
+		if rmErr == nil {
+			rmErr = hold.removeVerified()
+		}
+		if rmErr != nil {
 			return false
 		}
 		s.forgetPendingRemoval(backupSlash)
@@ -978,9 +987,31 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 	// restored from — before unlinking, so a foreign occupant swapped onto
 	// the backup name after our copy is retained instead of deleted.
 	backupInfo, _ := lstatRestoreSource(s.fs, backup)
-	if rmErr := removeReplacementBackup(s.fs, backup, "replacement sweep", journaledEntryFacts(row, backupSlash), backupInfoBeforeCopy); rmErr != nil {
-		s.rememberPendingRemoval(backupSlash)
-		markErr := s.persistRestorePendingMarker(ctx, row.ID, backupSlash)
+	// Wave-32 (codex local review round 2, PR#215 finding R1): same split as
+	// the already-consumed leg above — quarantine the verified backup object,
+	// re-prove the destination STILL names the published restore object, and
+	// only then unlink the quarantined name. A divergence between the wave-31
+	// check and the unlink can no longer destroy the recoverable bytes with
+	// consumption pending: the object moves back onto the journaled name and
+	// the entry stays ARMED — deliberately NOT marked restore-pending, whose
+	// marker certifies destination bytes that are no longer provably in
+	// place.
+	hold, rmErr := quarantineReplacementBackupForRemoval(s.fs, backup, "replacement sweep", journaledEntryFacts(row, backupSlash), backupInfoBeforeCopy)
+	if rmErr == nil && !restoredDestStillOurs(s.fs, dest, restoredID) {
+		hold.restore()
+		logging.Warnf("replacement sweep %s: restored destination %s diverged after the backup was quarantined (foreign swap or deletion inside the check-to-delete window) — backup restored to its journaled name, journal entry left armed, destination untouched", backup, dest)
+		return false
+	}
+	if rmErr == nil {
+		rmErr = hold.removeVerified()
+	}
+	if rmErr != nil {
+		// Wave-32 (finding R4): the vanished class marks the rearm-refused
+		// kind (journal-only retry — the name is absent by construction);
+		// every other class keeps the clean marker for the file-driven retry.
+		persistKind := pendingKindForRemovalError(rmErr)
+		s.rememberPendingRemovalKind(backupSlash, persistKind)
+		markErr := s.persistRestorePendingMarkerKind(ctx, row.ID, backupSlash, persistKind)
 		if markErr != nil {
 			absoluteBackup, _ := filepath.Abs(backup)
 			logging.Warnf("replacement sweep failed to retain cleanup marker for backup %s: %v", absoluteBackup, markErr)
@@ -1126,7 +1157,24 @@ func (s *ReplacementSweeper) retryPendingRemoval(ctx context.Context, rowID uint
 		// No durable entry carries facts for this name anymore (a prior leg
 		// consumed it): the pre-wave-25 pathname posture applies with its
 		// documented residual swap window.
-		if rmErr := removeReplacementBackup(s.fs, backup, "replacement sweep", nil, nil); rmErr != nil {
+		//
+		// Wave-32 (codex local review round 2, PR#215 finding R1): the pending
+		// retry's identity gate = destination PRESENCE re-proven AFTER the
+		// verified backup object moved to its quarantine name (facts are
+		// absent on this legacy leg by construction). A missing or
+		// indeterminate destination puts the bytes back and keeps the entry
+		// live for the next arbitration instead of consuming the record of a
+		// restore whose destination no longer stands.
+		hold, rmErr := quarantineReplacementBackupForRemoval(s.fs, backup, "replacement sweep", nil, nil)
+		if rmErr == nil {
+			if _, derr := lstatRestoreSource(s.fs, dest); derr != nil {
+				hold.restore()
+				logging.Warnf("replacement sweep %s: pending cleanup kept — destination %s not present after the backup was quarantined (%v); backup restored to its journaled name", backup, dest, derr)
+				return false
+			}
+			rmErr = hold.removeVerified()
+		}
+		if rmErr != nil {
 			return false
 		}
 		s.forgetPendingRemoval(backupSlash)
@@ -1171,7 +1219,36 @@ func (s *ReplacementSweeper) retryPendingRemoval(ctx context.Context, rowID uint
 	// plus this just-captured identity before unlinking — a foreign occupant
 	// swapped onto the backup name is retained, never deleted-then-consumed.
 	backupInfo, _ := lstatRestoreSource(s.fs, backup)
-	if rmErr := removeReplacementBackup(s.fs, backup, "replacement sweep", &durableEntry, backupInfo); rmErr != nil {
+	// Wave-32 (codex local review round 2, PR#215 finding R1): the pending
+	// retry's identity gate = the recorded backup-facts binding (wave-25,
+	// applied inside the quarantine through durableEntry) + destination
+	// PRESENCE re-proven AFTER the verified object moved aside; only then
+	// does the quarantined unlink run. A destination that vanished or turned
+	// indeterminate mid-window keeps the bytes at their journaled name and
+	// the pending marker live.
+	hold, rmErr := quarantineReplacementBackupForRemoval(s.fs, backup, "replacement sweep", &durableEntry, backupInfo)
+	if rmErr == nil {
+		if _, derr := lstatRestoreSource(s.fs, dest); derr != nil {
+			hold.restore()
+			logging.Warnf("replacement sweep %s: pending cleanup kept — destination %s not present after the backup was quarantined (%v); backup restored to its journaled name", backup, dest, derr)
+			s.rememberPendingRemoval(backupSlash)
+			return false
+		}
+		rmErr = hold.removeVerified()
+	}
+	if rmErr != nil {
+		// Wave-32 (finding R4): the vanished class leaves the journaled name
+		// absent by construction, so the pending entry converts to the
+		// rearm-refused (journal-only) kind — durable and in-process alike —
+		// or the clean-kind retry would wait forever on a file that can
+		// never reappear.
+		if errors.Is(rmErr, errReplacementBackupQuarantineVanished) {
+			s.rememberPendingRemovalKind(backupSlash, models.RestorePendingKindRearmRefused)
+			if markErr := s.persistRestorePendingMarkerKind(ctx, rowID, backupSlash, models.RestorePendingKindRearmRefused); markErr != nil {
+				logging.Warnf("replacement sweep %s: vanished-quarantine removal could not persist the rearm-refused upgrade (%v after %v) — entry stays clean-pending for later arbitration", backup, markErr, rmErr)
+			}
+			return false
+		}
 		s.rememberPendingRemoval(backupSlash)
 		return false
 	}

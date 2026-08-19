@@ -38,6 +38,26 @@ func PublishNoReplace(fs afero.Fs, src, dst string) error {
 var (
 	publishNoReplaceLink   = os.Link
 	publishNoReplaceRemove = os.Remove
+	// publishNoReplaceRollbackVerify re-proves — after a successful link(2)
+	// and a failed staged-source unlink — that dst still names the
+	// just-linked inode (dev/ino via Lstat(dst) vs Stat(src)) BEFORE the
+	// rollback unlink touches the name (wave-32, codex local review round 2,
+	// PR#215 finding R3). A foreign replacement claimed the destination in
+	// the link→unlink window when this answers false, and the rollback must
+	// never delete it. Same seam discipline as the link/remove pair: a
+	// running host kernel cannot be coerced into the swap-inside-window
+	// orderings, so tests replay them here.
+	publishNoReplaceRollbackVerify = func(src, dst string) (bool, error) {
+		srcInfo, serr := os.Stat(src)
+		if serr != nil {
+			return false, serr
+		}
+		dstInfo, derr := os.Lstat(dst)
+		if derr != nil {
+			return false, derr
+		}
+		return os.SameFile(srcInfo, dstInfo), nil
+	}
 )
 
 // linkUnsupportedClass reports whether a link(2) failure means the
@@ -93,12 +113,33 @@ func publishNoReplaceFallback(src, dst string) error {
 	}
 	if err := publishNoReplaceRemove(src); err != nil {
 		// The destination link already carries the staged bytes; only the
-		// staged cleanup failed. Undo the destination link so the publish
-		// fails closed with the caller's pre-publish state (staged intact,
-		// destination absent) instead of a duplicated inode pair. If the
-		// rollback ITSELF fails the destination name keeps the staged bytes,
-		// so the error wraps ErrPublishCompleted (wave-20): compensating
-		// callers must classify the name as OWNED, not un-owned.
+		// staged cleanup failed. Wave-32 (codex local review round 2, PR#215
+		// finding R3): the rollback unlink is BOUND to the just-linked inode —
+		// the destination is re-proven against the source's own identity
+		// before ANY removal. A foreign replacement (or an unanswerable
+		// reverify) in the link→unlink window previously had its bytes
+		// deleted by the pathname rollback; the name is now left untouched
+		// and the refusal goes typed (never ErrPublishCompleted — the name is
+		// not provably ours).
+		linked, verr := publishNoReplaceRollbackVerify(src, dst)
+		switch {
+		case verr != nil && os.IsNotExist(verr):
+			// The destination vanished on its own: no foreign bytes are
+			// endangered and no publish residue remains. The staged cleanup
+			// failure stands alone (no completed marker — nothing is ours).
+			return fmt.Errorf("no-replace publish %s -> %s: staged cleanup failed: %w", src, dst, err)
+		case verr != nil:
+			return fmt.Errorf("no-replace publish %s -> %s: staged cleanup failed: %w (AND the destination reverify was indeterminate: %w) — destination untouched: %w", src, dst, err, verr, ErrPublishNoReplaceRollbackUnverified)
+		case !linked:
+			return fmt.Errorf("no-replace publish %s -> %s: staged cleanup failed: %w (AND the destination no longer names the just-linked inode — foreign occupant preserved): %w", src, dst, err, ErrPublishNoReplaceRollbackUnverified)
+		}
+		// Undo the destination link so the publish fails closed with the
+		// caller's pre-publish state (staged intact, destination absent)
+		// instead of a duplicated inode pair — dst provably still names the
+		// staged inode here. If the rollback ITSELF fails the destination
+		// name keeps the staged bytes, so the error wraps ErrPublishCompleted
+		// (wave-20): compensating callers must classify the name as OWNED,
+		// not un-owned.
 		if rbErr := publishNoReplaceRemove(dst); rbErr != nil {
 			return fmt.Errorf("no-replace publish %s -> %s: staged cleanup failed: %v (AND publish rollback failed: %w): %w", src, dst, err, rbErr, ErrPublishCompleted)
 		}

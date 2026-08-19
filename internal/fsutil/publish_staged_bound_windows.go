@@ -64,15 +64,19 @@ func publishStagedBoundOS(p StagedPublish) (os.FileInfo, error) {
 		// Proven-absent destination + successful no-replace publish + a
 		// mismatched occupant: the occupant AS RECORDED is the window plant
 		// this publish itself installed — displace it, then refuse typed.
-		// Wave-26 (codex P2, PR#215 finding 1): bind the unlink to the
-		// recorded plant's inode exactly like the POSIX leg — a legitimate
-		// writer's post-publish occupant (a different inode than BOTH the
-		// recorded plant and the published snapshot) is preserved and the
-		// refusal goes typed without removal.
+		// Wave-26 (codex P2, PR#215 finding 1) + wave-32 (codex local review
+		// round 2, PR#215 finding R2): bind the unlink to the object
+		// RECORDED AT THE MISMATCH INSTANT exactly like the POSIX leg — a
+		// post-publish occupant (a different inode than the recorded plant)
+		// is preserved byte-intact and the refusal goes typed without
+		// removal, and a FAILED displacement of the recorded plant surfaces
+		// its cause instead of vanishing into an unconditional refusal.
 		occupant, oerr := publishStagedBoundDestLstat(p.Dest)
 		switch {
 		case oerr == nil && os.SameFile(occupant, destInfo):
-			_ = p.FS.Remove(p.Dest)
+			if rmErr := p.FS.Remove(p.Dest); rmErr != nil && !os.IsNotExist(rmErr) {
+				return nil, fmt.Errorf("publish of %s installed a substituted name (recorded plant displacement failed: %v): %w", p.Staged, rmErr, ErrPublishStagedIdentityBreak)
+			}
 			return nil, fmt.Errorf("publish of %s installed a substituted name (displaced): %w", p.Staged, ErrPublishStagedIdentityBreak)
 		case oerr == nil:
 			return nil, fmt.Errorf("%w at %s — post-publish occupant preserved: %w", ErrPublishStagedForeignOccupant, p.Dest, ErrPublishStagedIdentityBreak)

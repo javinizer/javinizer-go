@@ -87,6 +87,22 @@ func PublishCompleted(err error) bool {
 // rollback-error surfaces) exactly like any other pre-publish failure.
 var ErrPublishNoReplaceLinkFailed = errors.New("no-replace hard-link publish failed")
 
+// ErrPublishNoReplaceRollbackUnverified classifies the POSIX hard-link
+// fallback's rollback REFUSAL (wave-32, codex local review round 2, PR#215
+// finding R3): link(2) landed the staged inode at the destination and the
+// staged-source unlink then failed, so the fallback tried to undo the
+// destination link by pathname — but the pathname could NO LONGER be
+// re-proven to name the just-linked inode (a foreign replacement claimed it
+// in the link→unlink window, it vanished, or the reverify answer was
+// indeterminate). Pre-wave-32 the rollback deleted whatever the name held,
+// destroying a racer's unjournaled bytes. The destination is now left
+// BYTE-INTACT in every refusal class, and the error deliberately does NOT
+// wrap ErrPublishCompleted — the name is NOT provably this operation's own
+// object — so pending-kind classifiers (history's rearmPendingKind, the
+// downloader's rollbackRearmPendingKind) route the failure to the
+// rearm-refused kind like any other unowned-name failure.
+var ErrPublishNoReplaceRollbackUnverified = errors.New("no-replace publish rollback could not re-prove the destination")
+
 // publishCollision wraps the destination name in the collision class.
 func publishCollision(dst string) error {
 	return fmt.Errorf("%w: %s", ErrPublishCollision, dst)
