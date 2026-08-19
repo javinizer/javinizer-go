@@ -345,6 +345,11 @@ func defaultNormalizationInsensitiveProbe(root string) (bool, error) {
 	return probeNormalizationInsensitive(osCaseProbeOps, root)
 }
 
+// probeSameFile is the identity comparator for case/normalization probes
+// (os.SameFile in production). Test doubles whose fake FileInfos carry no
+// kernel identity override this seam (same discipline as restoreChown).
+var probeSameFile = os.SameFile
+
 func probeNormalizationInsensitive(ops caseProbeOps, root string) (bool, error) {
 	for attempt := 0; ; attempt++ {
 		name := normProbeName()
@@ -371,10 +376,16 @@ func probeNormalizationInsensitive(ops caseProbeOps, root string) (bool, error) 
 		}
 
 		insensitive := false
-		if _, statErr := ops.stat(alternatePath); statErr == nil {
-			// The NFC spelling addresses the NFD-created probe: the FS
-			// normalizes names on comparison.
-			insensitive = true
+		if altInfo, statErr := ops.stat(alternatePath); statErr == nil {
+			// Codex P2 (w31): the alternate spelling can belong to a racer's
+			// file created between our O_EXCL create and this stat — accept
+			// "insensitive" only when it addresses THE SAME object we just
+			// created; a distinct inode keeps spellings byte-distinct.
+			if created, cErr := ops.stat(path); cErr == nil && probeSameFile(created, altInfo) {
+				// The NFC spelling addresses the NFD-created probe: the FS
+				// normalizes names on comparison.
+				insensitive = true
+			}
 		} else if !os.IsNotExist(statErr) {
 			// Indeterminate lookup: undecidable posture, fail closed.
 			_ = cleanup()
@@ -525,8 +536,14 @@ func probeCaseSensitive(ops caseProbeOps, root string) (bool, error) {
 		}
 
 		caseSensitive := false
-		if _, statErr := ops.stat(alternatePath); statErr == nil {
-			caseSensitive = false
+		if altInfo, statErr := ops.stat(alternatePath); statErr == nil {
+			// Codex P2 (w31): a racer's uppercased file must not masquerade
+			// as our probe — only an identity match proves case-insensitivity.
+			if created, cErr := ops.stat(path); cErr == nil && probeSameFile(created, altInfo) {
+				caseSensitive = false
+			} else {
+				caseSensitive = true
+			}
 		} else if os.IsNotExist(statErr) {
 			caseSensitive = true
 		} else {

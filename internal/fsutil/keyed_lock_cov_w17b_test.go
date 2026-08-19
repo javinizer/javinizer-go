@@ -19,10 +19,16 @@ func TestProbeCaseSensitiveW17B_SensitiveRootPreservesUppercaseUserFile(t *testi
 		seedAlternate: true,
 		files:         make(map[string]w17BProbeEntry),
 	}
+	// Codex P2 (w31): identity binding on the probe — the seeded user file
+	// is a DISTINCT object from the created probe, so the root stays
+	// case-sensitive and the user's bytes are preserved.
+	prev := probeSameFile
+	probeSameFile = func(a, b os.FileInfo) bool { return a == b }
+	t.Cleanup(func() { probeSameFile = prev })
 
 	got, err := probeCaseSensitive(ops.ops(), root)
 	require.NoError(t, err)
-	require.False(t, got, "the pre-existing alternate spelling is visible to stat")
+	require.True(t, got, "a distinct user-owned alternate spelling must not downgrade the root to insensitive")
 	require.Len(t, ops.opened, 1)
 	require.Len(t, ops.removed, 1, "cleanup must remove only the created spelling")
 	require.Equal(t, ops.opened[0], ops.removed[0])
@@ -38,6 +44,12 @@ func TestProbeCaseSensitiveW17B_InsensitiveRootCleansCreatedFile(t *testing.T) {
 		caseSensitive: false,
 		files:         make(map[string]w17BProbeEntry),
 	}
+	// w31 binding: the insensitive fake resolves both spellings to one
+	// keyed entry — the same struct value — so value equality models the
+	// shared inode.
+	prev := probeSameFile
+	probeSameFile = func(a, b os.FileInfo) bool { return a == b }
+	t.Cleanup(func() { probeSameFile = prev })
 
 	got, err := probeCaseSensitive(ops.ops(), root)
 	require.NoError(t, err)

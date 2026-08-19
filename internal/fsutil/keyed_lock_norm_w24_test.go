@@ -239,6 +239,12 @@ func TestProbeNormalizationInsensitiveW24_StatSuccessMeansInsensitive(t *testing
 		},
 	}
 
+	// w31 binding: the fake answers stats with shared nil infos — model the
+	// "same object" proof through the seam.
+	prev := probeSameFile
+	probeSameFile = func(a, b os.FileInfo) bool { return a == b }
+	t.Cleanup(func() { probeSameFile = prev })
+
 	got, err := probeNormalizationInsensitive(ops, root)
 	require.NoError(t, err)
 	require.True(t, got, "NFC visible for the NFD-created probe = insensitive")
