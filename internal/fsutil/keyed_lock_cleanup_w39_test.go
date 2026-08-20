@@ -51,6 +51,14 @@ func TestBoundProbeCleanupW39_Legs(t *testing.T) {
 	unusedStat := func(string) (os.FileInfo, error) { t.Fatal("unused stat"); return nil, nil }
 	unusedRename := func(string, string) error { t.Fatal("unused rename"); return nil }
 	unusedRemove := func(string) error { t.Fatal("unused remove"); return nil }
+	// Wave-34 bind leg (bindScratchForUnlink): the verified scratch is
+	// re-opened O_RDONLY and must re-prove THE created identity by
+	// descriptor before the unlink runs. Legs reaching the unlink answer
+	// that read-open with the same fake identity; legs wedging earlier keep
+	// a nil openFile so a misrouted read-open panics instead of passing.
+	bindReadOpen := func(string, int, os.FileMode) (caseProbeFile, error) {
+		return w38StatProbeFile{info: created}, nil
+	}
 
 	t.Run("nil identity: plain remove runs and succeeds", func(t *testing.T) {
 		removed := 0
@@ -174,18 +182,20 @@ func TestBoundProbeCleanupW39_Legs(t *testing.T) {
 	t.Run("verified unlink failure surfaces wrapped", func(t *testing.T) {
 		sentinel := errors.New("w39 scratch remove wedged")
 		ops := caseProbeOps{
-			stat:   func(string) (os.FileInfo, error) { return created, nil },
-			rename: func(string, string) error { return nil },
-			remove: func(string) error { return sentinel },
+			openFile: bindReadOpen,
+			stat:     func(string) (os.FileInfo, error) { return created, nil },
+			rename:   func(string, string) error { return nil },
+			remove:   func(string) error { return sentinel },
 		}
 		require.ErrorIs(t, boundProbeCleanup(ops, path, created), sentinel)
 	})
 
 	t.Run("unlink answering ENOENT completes the cleanup", func(t *testing.T) {
 		ops := caseProbeOps{
-			stat:   func(string) (os.FileInfo, error) { return created, nil },
-			rename: func(string, string) error { return nil },
-			remove: func(string) error { return os.ErrNotExist },
+			openFile: bindReadOpen,
+			stat:     func(string) (os.FileInfo, error) { return created, nil },
+			rename:   func(string, string) error { return nil },
+			remove:   func(string) error { return os.ErrNotExist },
 		}
 		require.NoError(t, boundProbeCleanup(ops, path, created))
 	})
@@ -194,9 +204,10 @@ func TestBoundProbeCleanupW39_Legs(t *testing.T) {
 		var renamed [][2]string
 		var removed []string
 		ops := caseProbeOps{
-			stat:   func(string) (os.FileInfo, error) { return created, nil },
-			rename: func(from, to string) error { renamed = append(renamed, [2]string{from, to}); return nil },
-			remove: func(name string) error { removed = append(removed, name); return nil },
+			openFile: bindReadOpen,
+			stat:     func(string) (os.FileInfo, error) { return created, nil },
+			rename:   func(from, to string) error { renamed = append(renamed, [2]string{from, to}); return nil },
+			remove:   func(name string) error { removed = append(removed, name); return nil },
 		}
 		require.NoError(t, boundProbeCleanup(ops, path, created))
 		require.Equal(t, [][2]string{{path, scratch}}, renamed)

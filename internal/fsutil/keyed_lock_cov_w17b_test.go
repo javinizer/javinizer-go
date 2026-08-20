@@ -83,7 +83,20 @@ func (f *w17BProbeFS) ops() caseProbeOps {
 	}
 }
 
-func (f *w17BProbeFS) openFile(name string, _ int, _ os.FileMode) (caseProbeFile, error) {
+func (f *w17BProbeFS) openFile(name string, flag int, perm os.FileMode) (caseProbeFile, error) {
+	if flag&os.O_CREATE == 0 {
+		// Wave-34 bind leg: the verified scratch is re-opened O_RDONLY to
+		// re-prove THE created identity by descriptor — serve it from the fake
+		// inode table (identity = the entry's pre-move path payload, the same
+		// value stat answers). A vanished scratch answers ENOENT, which the
+		// bind leg reads as a completed cleanup. Not a create attempt: it is
+		// neither seeded as the user alternate nor recorded in opened.
+		entry, ok := f.files[f.key(name)]
+		if !ok {
+			return nil, os.ErrNotExist
+		}
+		return w17BProbeFile{info: w17BProbeInfo{path: entry.path}}, nil
+	}
 	if f.seedAlternate && len(f.opened) == 0 {
 		f.userPath = filepath.Join(filepath.Dir(name), strings.ToUpper(filepath.Base(name)))
 		f.files[f.key(f.userPath)] = w17BProbeEntry{path: f.userPath, content: "user-owned probe"}

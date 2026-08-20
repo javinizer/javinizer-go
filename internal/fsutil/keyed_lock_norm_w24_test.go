@@ -228,6 +228,12 @@ func TestProbeNormalizationInsensitiveW24_StatSuccessMeansInsensitive(t *testing
 	sentinel := &w38ProbeInfo{}
 	ops := caseProbeOps{
 		openFile: func(name string, flag int, perm os.FileMode) (caseProbeFile, error) {
+			if flag&os.O_CREATE == 0 {
+				// Wave-34 bind leg: the verified scratch re-opens O_RDONLY and
+				// re-proves THE created identity by descriptor — answer with the
+				// same scripted identity without counting as a create attempt.
+				return w38StatProbeFile{info: sentinel}, nil
+			}
 			opened = append(opened, name)
 			real, err := os.OpenFile(name, flag, perm)
 			if err != nil {
@@ -329,6 +335,11 @@ func TestProbeNormalizationInsensitiveW24_CollisionRetriesWithFreshName(t *testi
 	var opened []string
 	ops := caseProbeOps{
 		openFile: func(name string, flag int, perm os.FileMode) (caseProbeFile, error) {
+			if flag&os.O_CREATE == 0 {
+				// Wave-34 bind leg: O_RDONLY re-open of the verified scratch — the
+				// real renamed object answers; it is not a create attempt.
+				return os.OpenFile(name, flag, perm)
+			}
 			opened = append(opened, name)
 			if len(opened) == 1 {
 				return nil, os.ErrExist

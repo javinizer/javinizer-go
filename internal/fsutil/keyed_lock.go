@@ -572,10 +572,56 @@ func boundProbeCleanup(ops caseProbeOps, path string, created os.FileInfo) error
 		// is left entirely alone and the cleanup refuses closed.
 		return fmt.Errorf("probe cleanup scratch %s no longer names the created probe (foreign substitution under the take-aside) — foreign bytes preserved: %w", scratch, ErrTakeAsideForeign)
 	}
+	// Codex P2 (w34): bind the final unlink to the verified object at
+	// syscall adjacency — the scratch is re-opened O_RDONLY and BOTH its
+	// descriptor identity and a fresh pathname lookup must match the created
+	// probe's identity before the pathname unlink runs. A substitute at the
+	// scratch name is preserved (typed refusal); a vanished scratch completes
+	// silently. The residual lookup→unlink boundary is the documented POSIX
+	// pathname-unlink limit at a crypto-random 0-byte name.
+	proceed, ferr := bindScratchForUnlink(ops, scratch, created)
+	if ferr != nil {
+		return ferr
+	}
+	if !proceed {
+		return nil // vanished during binding — nothing left to unlink
+	}
 	if err := ops.remove(scratch); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("remove probe cleanup scratch %s (verified): %w", scratch, err)
 	}
 	return nil
+}
+
+// bindScratchForUnlink proves the pathname's current object equals the
+// created probe's identity twice over — by descriptor fstat and by lookup —
+// immediately before the caller unlinks the name.
+func bindScratchForUnlink(ops caseProbeOps, scratch string, created os.FileInfo) (bool, error) {
+	fh, err := ops.openFile(scratch, os.O_RDONLY, 0)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil // vanished on its own — nothing left to unlink
+		}
+		return false, fmt.Errorf("open probe cleanup scratch %s for binding: %w", scratch, err)
+	}
+	defer func() { _ = fh.Close() }()
+	fdStat, serr := fh.Stat()
+	if serr != nil {
+		return false, fmt.Errorf("fstat probe cleanup scratch %s: %w", scratch, serr)
+	}
+	if !probeSameFile(created, fdStat) {
+		return false, fmt.Errorf("probe cleanup scratch %s fails descriptor identity — foreign bytes preserved: %w", scratch, ErrTakeAsideForeign)
+	}
+	linkStat, lerr := ops.stat(scratch)
+	if lerr != nil {
+		if os.IsNotExist(lerr) {
+			return false, nil
+		}
+		return false, fmt.Errorf("stat probe cleanup scratch %s during binding: %w", scratch, lerr)
+	}
+	if !probeSameFile(fdStat, linkStat) {
+		return false, fmt.Errorf("probe cleanup scratch %s pathname identity diverged while bound — foreign bytes preserved: %w", scratch, ErrTakeAsideForeign)
+	}
+	return true, nil
 }
 
 func caseProbeToken() string {

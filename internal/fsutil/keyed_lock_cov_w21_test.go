@@ -21,6 +21,12 @@ func TestProbeCaseSensitiveW21_CollisionRetriesAndStatsCreatedProbe(t *testing.T
 	// the alternate spelling the verdict actually asks about.
 	ops := caseProbeOps{
 		openFile: func(name string, flag int, perm os.FileMode) (caseProbeFile, error) {
+			if flag&os.O_CREATE == 0 {
+				// Wave-34 bind leg: O_RDONLY re-open of the verified scratch — the
+				// real renamed object answers; it is not a create attempt (the
+				// stat legs below assert exactly two created names).
+				return os.OpenFile(name, flag, perm)
+			}
 			opened = append(opened, name)
 			if len(opened) == 1 {
 				// Model another process winning the first O_EXCL name. This is a
