@@ -17,7 +17,9 @@ import (
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/httpclient"
+	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/spf13/afero"
 )
 
@@ -194,6 +196,27 @@ func (d *Downloader) download(ctx context.Context, url, destPath string, mediaTy
 	ledger := resolveDownloadLedger(options)
 	skipped, replaced, instErr := d.installOverwriting(ctx, tempPath, destPath, ledger)
 	if instErr != nil {
+		// Wave-41 (codex P2, PR#215): an install error carrying
+		// fsutil.ErrPublishCompleted proves the destination WAS published with
+		// the staged bytes — the POSIX hard-link fallback's staged cleanup could
+		// not re-prove tempPath (fsutil.ErrPublishNoReplaceStagedUnverified: it
+		// may now address a FOREIGN occupant fsutil deliberately left
+		// byte-intact) or its unlink failed with the destination rollback
+		// failing too (wave-20). This is a completed download, never a failure:
+		// record it exactly like the success leg below (dest enters
+		// CreatedPaths through Downloaded && !Replaced, so a later revert
+		// leaves the new media behind) and NEVER remove tempPath — unlinking
+		// there could destroy foreign bytes. The retained staged name is
+		// warn-logged for manual cleanup, matching copyBackupToDestPublish's
+		// wave-34 posture. Every other error keeps the prior failure leg.
+		if fsutil.PublishCompleted(instErr) {
+			logging.Warnf("downloader: install of %s completed despite the returned error (%v) — staged name %s could not be re-proven (possibly foreign) and is left in place; manual cleanup advised", destPath, instErr, tempPath)
+			result.Size = written
+			result.Downloaded = true
+			result.Replaced = replaced
+			result.Duration = time.Since(startTime)
+			return result, nil
+		}
 		_ = d.fs.Remove(tempPath)
 		result.Error = instErr
 		result.Duration = time.Since(startTime)
