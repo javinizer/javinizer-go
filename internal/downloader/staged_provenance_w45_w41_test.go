@@ -352,9 +352,19 @@ func TestValidateDownloadedMediaW45_ReturnsHandleIdentity(t *testing.T) {
 }
 
 // w45SwapFS interposes the validation→install window deterministically: the
-// FIRST no-follow lookup of the download temp name renames the validated
-// object aside and plants a foreign substitute at the name — exactly the
-// directory-writer race finding F1 closes.
+// FIRST no-follow lookup of the download temp name substitutes a foreign
+// payload at the name — exactly the directory-writer race finding F1 closes.
+//
+// Platform-limited swap shape: POSIX plays the race as rename-aside + plant
+// (the validated object survives at name.hidden while a fresh inode takes
+// the name). Windows can never express that shape here — the wave-48
+// validated handle holds the temp name OPEN and Go opens files without
+// FILE_SHARE_DELETE, so MoveFileW on it fails ("being used by another
+// process"); the expressible Windows substitution is the IN-PLACE rewrite
+// under the write share (same name, new bytes). Both land the identical
+// refusal through the every-platform size+mtime comparator — the Windows
+// identity binding is checked but the rename-away evidence shape simply
+// does not exist there (the .hidden assertions below are POSIX-only).
 type w45SwapFS struct {
 	afero.Fs
 	mu      sync.Mutex
@@ -366,7 +376,15 @@ func (f *w45SwapFS) LstatIfPossible(name string) (os.FileInfo, bool, error) {
 	f.mu.Lock()
 	if !f.swapped && f.swapErr == nil && strings.HasSuffix(name, ".tmp") {
 		if _, err := f.Fs.Stat(name); err == nil {
-			if rerr := f.Fs.Rename(name, name+".hidden"); rerr != nil {
+			if runtime.GOOS == "windows" {
+				// In-place rewrite: the rename-away race is inexpressible while
+				// the validated handle is open on Windows.
+				if werr := afero.WriteFile(f.Fs, name, []byte("planted substitute payload"), 0o600); werr != nil {
+					f.swapErr = werr
+				} else {
+					f.swapped = true
+				}
+			} else if rerr := f.Fs.Rename(name, name+".hidden"); rerr != nil {
 				f.swapErr = rerr
 			} else if werr := afero.WriteFile(f.Fs, name, []byte("planted substitute payload"), 0o600); werr != nil {
 				f.swapErr = werr
@@ -425,8 +443,14 @@ func TestDownloadW45_SwapBetweenValidationAndInstallRefused(t *testing.T) {
 	require.NoError(t, serr)
 	require.Equal(t, "planted substitute payload", string(substitute),
 		"http.download must NOT unlink the substitute on the substitution refusal")
-	require.Len(t, hiddenNames, 1)
-	validated, verr := os.ReadFile(filepath.Join(tmpDir, hiddenNames[0]))
-	require.NoError(t, verr)
-	require.Equal(t, payload, validated, "the validated object rode out the refusal untouched")
+	if runtime.GOOS == "windows" {
+		// Windows' expressible substitution was the in-place rewrite (see
+		// w45SwapFS): there is no rename-aside evidence file at all.
+		require.Empty(t, hiddenNames, "the rename-away race is inexpressible under a held handle on Windows")
+	} else {
+		require.Len(t, hiddenNames, 1)
+		validated, verr := os.ReadFile(filepath.Join(tmpDir, hiddenNames[0]))
+		require.NoError(t, verr)
+		require.Equal(t, payload, validated, "the validated object rode out the refusal untouched")
+	}
 }

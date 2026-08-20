@@ -170,13 +170,13 @@ func TestPublishStagedBoundW30POSIX_MismatchRepublishesGenuineReplace(t *testing
 	require.Equal(t, "genuine staged bytes", string(got))
 }
 
-// Persistent PRE-publish obstacles across the whole budget: every publish
-// attempt collides on a fresh plant that provably pre-dates the attempt (the
-// wave-38 evidence channel (a) — the collision report itself), each is
-// displaced after its bound re-proof, and the budget ends in typed
-// exhaustion joined with the identity-break class; nothing is consumed —
-// the caller's kept/warn leg retains the genuine backup.
-func TestPublishStagedBoundW30POSIX_PersistentPrePublishCollisionExhausts(t *testing.T) {
+// A PRE-publish obstacle: the plant claims dest before the first publish
+// attempt, so the no-replace publish collides. Wave-49 (codex P2, PR#215):
+// the collision is a REFUSAL surfaced verbatim, not a displace-then-retry —
+// the racer WON the no-replace race and its bytes prevail byte-intact; the
+// collided publish never consumed the staged name, so the genuine bytes are
+// retained for the caller's wave-15 reclassification legs.
+func TestPublishStagedBoundW30POSIX_PrePublishCollisionRefusesVerbatim(t *testing.T) {
 	fs := afero.NewOsFs()
 	dir := t.TempDir()
 	dest := filepath.Join(dir, "poster.jpg")
@@ -185,7 +185,7 @@ func TestPublishStagedBoundW30POSIX_PersistentPrePublishCollisionExhausts(t *tes
 	attacks := 0
 	wedge := func(f afero.Fs, src, dst string) error {
 		// A plant claims dest BEFORE the publish attempt: the no-replace
-		// publish collides, tying the occupant to pre-publish evidence.
+		// publish collides, and the winner's bytes must prevail.
 		require.NoError(t, os.WriteFile(dst, []byte("foreign window plant"), 0o644))
 		attacks++
 		return PublishNoReplace(f, src, dst)
@@ -195,17 +195,16 @@ func TestPublishStagedBoundW30POSIX_PersistentPrePublishCollisionExhausts(t *tes
 		Staged: staged, Handle: fh, Dest: dest,
 		Suffix: ".rstr", NextOrdinal: w30Ordinal(4),
 	})
-	require.ErrorIs(t, err, ErrPublishStagedExhausted)
-	require.ErrorIs(t, err, ErrPublishStagedIdentityBreak)
-	require.Equal(t, PublishStagedBoundAttempts, attacks, "one publish per budgeted attempt")
-	entries, derr := os.ReadDir(dir)
-	require.NoError(t, derr)
-	for _, e := range entries {
-		body, _ := os.ReadFile(filepath.Join(dir, e.Name()))
-		require.NotContains(t, string(body), "foreign window plant",
-			"evidence-tied obstacles were displaced — foreign bytes never survive at dest")
-	}
-	got, rerr := os.ReadFile(staged)
+	require.ErrorIs(t, err, ErrPublishCollision,
+		"wave-49: the collision winner's race is the verbatim no-replace refusal — never displaced")
+	require.NotErrorIs(t, err, ErrPublishStagedExhausted)
+	require.NotErrorIs(t, err, ErrPublishStagedIdentityBreak)
+	require.Equal(t, 1, attacks, "no displace-then-retry: exactly one publish attempt ran")
+	got, rerr := os.ReadFile(dest)
+	require.NoError(t, rerr)
+	require.Equal(t, "foreign window plant", string(got),
+		"the collision winner's bytes survive at dest byte-intact")
+	got, rerr = os.ReadFile(staged)
 	require.NoError(t, rerr)
 	require.Equal(t, "genuine staged bytes", string(got),
 		"the collided publish never consumed the staged name — genuine bytes retained for the caller")

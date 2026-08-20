@@ -168,8 +168,18 @@ func TestInstallOverwritingW48_PrePublishSubstitutionRefusedClosesHandle(t *test
 	fs := afero.NewOsFs()
 	dir := t.TempDir()
 	staged, dest, prov := w48Stage(t, fs, dir, "VALIDATED")
-	require.NoError(t, os.Rename(staged, staged+".hidden"))
-	require.NoError(t, os.WriteFile(staged, []byte("VALIDATED-plant"), 0o600))
+	// Platform-limited substitution shape: the validated handle is OPEN, and
+	// on Windows Go opens files without FILE_SHARE_DELETE, so renaming the
+	// staged name away from under it fails ("being used by another
+	// process"). Windows' expressible substitution is the IN-PLACE rewrite
+	// under the write share; POSIX keeps the rename-away shape. Both land a
+	// name↔record mismatch (different size) at the wave-45 classify gate.
+	if runtime.GOOS == "windows" {
+		require.NoError(t, os.WriteFile(staged, []byte("VALIDATED-plant"), 0o600))
+	} else {
+		require.NoError(t, os.Rename(staged, staged+".hidden"))
+		require.NoError(t, os.WriteFile(staged, []byte("VALIDATED-plant"), 0o600))
+	}
 
 	d := NewDownloader(nil, fs, &Config{}, nil).WithDestLocks(fsutil.NewKeyedLockRegistry())
 	skipped, replaced, err := d.installOverwriting(context.Background(), staged, dest, downloadLedger{}, prov)
@@ -179,7 +189,10 @@ func TestInstallOverwritingW48_PrePublishSubstitutionRefusedClosesHandle(t *test
 	require.False(t, replaced)
 	require.True(t, w48Closed(prov.handle))
 	require.Equal(t, "VALIDATED-plant", string(mustReadW48(t, staged)), "the substitute is preserved, never unlinked")
-	require.Equal(t, "VALIDATED", string(mustReadW48(t, staged+".hidden")))
+	if runtime.GOOS != "windows" {
+		require.Equal(t, "VALIDATED", string(mustReadW48(t, staged+".hidden")),
+			"POSIX rename-away: the validated object survived under the attacker's name")
+	}
 	_, derr := os.Lstat(dest)
 	require.True(t, os.IsNotExist(derr), "no byte ever flowed into the destination")
 }
@@ -220,6 +233,26 @@ func TestInstallOverwritingW48_MidPublishSubstitutionOnCreateWindow(t *testing.T
 		downloadLedger{opID: "w48-window", recorder: ledger}, prov)
 	require.Error(t, err, "a window substitution never reports an installed success")
 	require.True(t, attacked, "the verify→publish window wedge fired")
+
+	if runtime.GOOS == "windows" {
+		// Platform-limited posture: MoveFileEx cannot act on an open handle,
+		// so the Windows bound publish closes the validated handle BEFORE the
+		// path publish (identity captured pre-close, re-verified post-publish)
+		// — the verify→publish window wedge is fully expressible, but the
+		// POSIX self-heal (restage from the still-open handle) is not: without
+		// a live fd the genuine inode cannot be restaged, so the post-publish
+		// identity break is a typed refusal-only posture on Windows.
+		require.ErrorIs(t, err, errStagedInputSubstituted,
+			"the closed-handle window substitution is the typed substitution refusal")
+		require.Equal(t, "w48 window plant", string(mustReadW48(t, dest)),
+			"the kernel-moved window plant is preserved at the destination name, byte-intact and never claimed as ours")
+		require.Equal(t, "w48 validation-genuine", string(mustReadW48(t, staged+".w48-away")),
+			"the validated object rode out the attack under the attacker's chosen name")
+		require.Empty(t, ledger.released, "the create leg journalized nothing — no entry to retract")
+		require.True(t, w48Closed(prov.handle))
+		return
+	}
+
 	require.NotErrorIs(t, err, errStagedInputSubstituted,
 		"the reclassified plant left the staged name VANISHED when the replace leg re-bound — the documented indeterminate error, not a proven-substitution reading of the plant")
 	require.Contains(t, err.Error(), "vanished before the publish bind")
@@ -266,10 +299,53 @@ func TestInstallOverwritingW48_MidPublishSubstitutionOnReplaceRepublishesGenuine
 	d := NewDownloader(nil, fs, &Config{}, nil).WithDestLocks(fsutil.NewKeyedLockRegistry())
 	skipped, replaced, err := d.installOverwriting(context.Background(), staged, dest,
 		downloadLedger{opID: "w48-replace-window", recorder: ledger}, prov)
-	require.NoError(t, err, "the restage loop republished the validated object through the window attack")
-	require.False(t, skipped)
-	require.True(t, replaced)
 	require.True(t, attacked)
+	require.False(t, skipped)
+
+	if runtime.GOOS == "windows" {
+		// Platform-limited posture: the validated handle is CLOSED before the
+		// path publish (MoveFileEx cannot act on an open handle), so the
+		// POSIX restage-from-handle self-heal is inexpressible — the
+		// post-publish identity break is the typed substitution refusal, and
+		// it rides the unchanged publish-failure compensation: the plant
+		// occupies the destination when the no-replace restore runs, so the
+		// rollback is REFUSED (foreign bytes never clobbered), the journal
+		// entry stays armed against the retained backup, and a later
+		// sweep/revert recovers the original bytes. What matters — never
+		// reported as success, attacker bytes preserved but never claimed,
+		// pre-existing bytes recoverable — holds identically.
+		require.Error(t, err)
+		require.ErrorIs(t, err, errStagedInputSubstituted)
+		require.True(t, replaced)
+		require.Equal(t, "w48 replace window plant", string(mustReadW48(t, dest)),
+			"the window plant is preserved at the destination byte-intact — the refused rollback never clobbers it")
+		require.Equal(t, 1, ledger.records)
+		require.Equal(t, 0, ledger.confirmed, "no success was ever confirmed")
+		require.Empty(t, ledger.released, "the armed entry stays armed against the retained backup")
+		require.True(t, w48Closed(prov.handle))
+		var backupBodies []string
+		entries, derr := os.ReadDir(dir)
+		require.NoError(t, derr)
+		awayFound := false
+		for _, e := range entries {
+			body, _ := os.ReadFile(filepath.Join(dir, e.Name()))
+			if strings.Contains(e.Name(), ".dlbak.") {
+				backupBodies = append(backupBodies, string(body))
+			}
+			if e.Name() == filepath.Base(staged)+".w48-away" {
+				awayFound = true
+				require.Equal(t, "w48 replace genuine bytes", string(body),
+					"the validated object survived under the attacker's chosen name")
+			}
+		}
+		require.Equal(t, []string{"old poster bytes"}, backupBodies,
+			"the retained backup keeps the pre-existing bytes recoverable")
+		require.True(t, awayFound)
+		return
+	}
+
+	require.NoError(t, err, "the restage loop republished the validated object through the window attack")
+	require.True(t, replaced)
 	require.Equal(t, "w48 replace genuine bytes", string(mustReadW48(t, dest)),
 		"the destination provably holds the validated object — the reverify caught the plant and the restage republished ours")
 	require.Equal(t, 1, ledger.confirmed)
@@ -653,10 +729,18 @@ func TestDownloadW48_ReplaceWindowSubstitutionRidesCompensation(t *testing.T) {
 	substitute, serr := os.ReadFile(filepath.Join(tmpDir, tempNames[0]))
 	require.NoError(t, serr)
 	require.Equal(t, "planted substitute payload", string(substitute))
-	require.Len(t, hiddenNames, 1)
-	validated, verr := os.ReadFile(filepath.Join(tmpDir, hiddenNames[0]))
-	require.NoError(t, verr)
-	require.Equal(t, payload, validated, "the validated object rode out the refusal untouched")
+	if runtime.GOOS == "windows" {
+		// Windows' expressible substitution was the in-place rewrite (see
+		// w45SwapFS): the rename-aside evidence file never existed, and the
+		// identity binding was still checked before any byte flow — the
+		// platform-limited "handle cannot be held across mutations" posture.
+		require.Empty(t, hiddenNames, "the rename-away race is inexpressible under a held handle on Windows")
+	} else {
+		require.Len(t, hiddenNames, 1)
+		validated, verr := os.ReadFile(filepath.Join(tmpDir, hiddenNames[0]))
+		require.NoError(t, verr)
+		require.Equal(t, payload, validated, "the validated object rode out the refusal untouched")
+	}
 }
 
 // Finding 6, media leg: the cropped candidate's no-follow fd rides the bound

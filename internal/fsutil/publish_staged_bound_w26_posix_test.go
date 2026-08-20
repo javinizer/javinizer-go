@@ -15,9 +15,9 @@ package fsutil
 // unlinked now: a still-present occupant is a typed
 // ErrPublishStagedForeignOccupant refusal with the bytes preserved and the
 // caller's backup retained; recovery continues only when the occupant
-// VANISHED (dest free — the wave-30 vanish leg). Displacement exists only
-// for an obstacle tied to PRE-PUBLISH evidence (a collision-refused publish
-// attempt — the wave-38 posix suite). These tests replay the binding's legs
+// VANISHED (dest free — the wave-30 vanish leg). Wave-49 removed the last
+// displacement channel too: a collision winner's bytes prevail and the
+// refusal surfaces verbatim. These tests replay the binding's legs
 // deterministically by counting destination lookups through the
 // publishStagedBoundDestLstat seam.
 

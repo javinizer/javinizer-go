@@ -34,19 +34,20 @@ import (
 //     away and we still hold its handle — so the genuine bytes are
 //     re-staged FROM THE HANDLE (seek 0, copy into a fresh O_EXCL staging
 //     name) and republished under a BOUNDED attempt budget. Wave-38 (codex
-//     P2, PR#215 finding F1): a destination object is ONLY ever displaced
-//     when tied to PRE-PUBLISH existence evidence — a no-replace publish
-//     attempt that refused on ErrPublishCollision proves its obstacle
-//     existed before that attempt (it is never pre-existing data: the
-//     caller classified the destination absent), so the recorded obstacle
-//     is displaced after a bound re-proof and the publish retried. A
-//     post-publish SUCCESS→mismatch occupant, by contrast, necessarily
-//     arrived AFTER the kernel-proven-free rename — the staged-name plant
-//     the publish moved onto dest and a legitimate file created inside the
-//     publish→reverify gap are indistinguishable there, so BOTH are
-//     preserved byte-intact with a typed ErrPublishStagedForeignOccupant
-//     refusal; recovery continues only when the occupant VANISHED (the
-//     restage republishes into proven absence);
+//     P2, PR#215 finding F1): a post-publish SUCCESS→mismatch occupant
+//     necessarily arrived AFTER the kernel-proven-free rename — the
+//     staged-name plant the publish moved onto dest and a legitimate file
+//     created inside the publish→reverify gap are indistinguishable there,
+//     so BOTH are preserved byte-intact with a typed
+//     ErrPublishStagedForeignOccupant refusal; recovery continues only when
+//     the occupant VANISHED (the restage republishes into proven absence).
+//     Wave-49 (codex P2, PR#215) removes the wave-38 pre-publish COLLISION
+//     displacement too: a no-replace publish that refused on
+//     ErrPublishCollision names a racer that WON the race — 'no-replace'
+//     means creating only when absent, so the winner's bytes must prevail
+//     (the delete-then-retry leg destroyed a legitimate writer with no
+//     backup and no ledger entry). The collision now surfaces verbatim so
+//     callers reclassify through their wave-15/wave-17 legs;
 //  4. exhaustion, an indeterminate destination, or (Windows leg) any
 //     post-publish identity break returns typed errors and NOTHING is
 //     consumed: the caller's conservative legs keep the backup armed.
@@ -73,26 +74,25 @@ var ErrPublishStagedClose = errors.New("staged handle close failed before publis
 // failure: the publish reported success but the destination does not
 // provably name the staged inode (it names a window plant, it vanished
 // again before the reverify could run, or the lookup was indeterminate).
-// On the POSIX legs the recovery loop displaces the plant and republishes
-// before ever returning this class; reaching the caller means the bounded
-// budget ran out or the leg cannot recover (see ErrPublishStagedExhausted,
-// and the Windows leg's documented refusal-only posture). Callers keep the
-// source backup: nothing may be consumed after this error.
+// On the POSIX legs the recovery loop restages the genuine bytes and
+// republishes into proven absence before ever returning this class;
+// reaching the caller means the bounded budget ran out or the leg cannot
+// recover (see ErrPublishStagedExhausted, and the Windows leg's documented
+// refusal-only posture). Callers keep the source backup: nothing may be
+// consumed after this error.
 var ErrPublishStagedIdentityBreak = errors.New("destination does not provably name the staged inode after publish")
 
 // ErrPublishStagedForeignOccupant means a destination occupant could NOT be
-// tied to pre-publish existence evidence, so recovery is refused with the
-// occupant preserved byte-intact, NOTHING consumed, and the caller
-// retaining its backup. Two shapes (wave-38, codex P2, PR#215 finding F1):
-// the post-publish SUCCESS→mismatch occupant (a successful no-replace
-// publish proved the destination free at the rename instant, so anything
-// there arrived afterwards — possibly the staged-name plant the publish
-// moved over, possibly a legitimate file created inside the
-// publish→reverify gap; indistinguishable, both preserved), and the
-// collision-displacement binding finding a SUCCESSOR where the recorded
-// pre-publish plant stood. Always joined with ErrPublishStagedIdentityBreak
-// so the whole refusal family stays reachable through the identity-break
-// classifiers.
+// tied to this operation's own published object, so recovery is refused
+// with the occupant preserved byte-intact, NOTHING consumed, and the caller
+// retaining its backup (wave-38, codex P2, PR#215 finding F1): the
+// post-publish SUCCESS→mismatch occupant (a successful no-replace publish
+// proved the destination free at the rename instant, so anything there
+// arrived afterwards — possibly the staged-name plant the publish moved
+// over, possibly a legitimate file created inside the publish→reverify
+// gap; indistinguishable, both preserved). Always joined with
+// ErrPublishStagedIdentityBreak so the whole refusal family stays reachable
+// through the identity-break classifiers.
 var ErrPublishStagedForeignOccupant = errors.New("destination occupant is neither the recorded window plant nor the staged inode")
 
 // ErrPublishStagedIdentityIndeterminate means a post-publish destination
@@ -108,12 +108,12 @@ var ErrPublishStagedForeignOccupant = errors.New("destination occupant is neithe
 var ErrPublishStagedIdentityIndeterminate = errors.New("post-publish destination identity is indeterminate")
 
 // ErrPublishStagedExhausted means a directory writer kept substituting the
-// staged name across the whole bounded re-stage/re-publish budget. Every
-// displaced plant was foreign (proven-absent destinations only — never
-// pre-existing bytes), the genuine inode stayed reachable via the handle
-// until the final attempt's close, and the caller's conservative legs
-// retain the backup. Always joined with ErrPublishStagedIdentityBreak so
-// identity-break classifiers catch the whole refusal family.
+// staged name across the whole bounded re-stage/re-publish budget. No
+// destination occupant was ever displaced (proven-absence republishes
+// only), the genuine inode stayed reachable via the handle until the final
+// attempt's close, and the caller's conservative legs retain the backup.
+// Always joined with ErrPublishStagedIdentityBreak so identity-break
+// classifiers catch the whole refusal family.
 var ErrPublishStagedExhausted = errors.New("staged-name substitution outlasted the bounded republish budget")
 
 // PublishStagedBoundAttempts bounds the POSIX re-stage/re-publish loop: the
@@ -162,13 +162,14 @@ type StagedPublish struct {
 	Publish func(afero.Fs, string, string) error
 	// NoReplace records that Publish has no-replace semantics AND the caller
 	// proved the destination absent by classification. Only then does the
-	// no-replace recovery displacing rule apply (wave-38, codex P2, PR#215
-	// finding F1): an obstacle that refused a publish attempt with
-	// ErrPublishCollision is displaced after a bound re-proof (it provably
-	// pre-dated the publish — never pre-existing data), while a post-publish
-	// SUCCESS→mismatch occupant is never displaced (it provably arrived after
-	// the kernel-proven-free rename — plant and legitimate gap file are
-	// indistinguishable there). Replace-style publishes re-stage and
+	// wave-38 post-publish preservation rule apply (codex P2, PR#215 finding
+	// F1): a SUCCESS→mismatch occupant is never displaced (it provably
+	// arrived after the kernel-proven-free rename — plant and legitimate gap
+	// file are indistinguishable there) and recovery continues only into
+	// proven absence. Wave-49 (codex P2, PR#215): a publish attempt that
+	// FAILS with ErrPublishCollision is never displaced either — the
+	// collision winner's bytes prevail and the refusal surfaces verbatim for
+	// the caller's reclassification. Replace-style publishes re-stage and
 	// republish OVER the plant instead (replacing destination bytes is their
 	// operation's meaning).
 	NoReplace bool

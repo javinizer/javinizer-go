@@ -190,6 +190,16 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 			// non-blocking for a live marker, including one owned by this process;
 			// that preserves W14a's same-process liveness contract.
 			busyRelease, busyErr := fsutil.AcquireReplacementBusy(r.fs, dest)
+			if errors.Is(busyErr, fsutil.ErrReplacementBusy) && reclaimAbandonedSweepBusyMarker(dest) {
+				// Wave-49 (codex P2): the blocker is a marker this process's own
+				// abandoned pre-revert sweep claimed before its ctx died (the
+				// wave-8 deadline proceed). The reclaim revoked it through the
+				// claim's own once-guarded, token-bound release — retry the
+				// acquisition once against the freed name. A marker owned by
+				// anything still waited on (or another process entirely) is
+				// never touched and keeps the ordinary busy refusal below.
+				busyRelease, busyErr = fsutil.AcquireReplacementBusy(r.fs, dest)
+			}
 			if errors.Is(busyErr, fsutil.ErrReplacementBusy) {
 				return fmt.Errorf("replacement destination %s is busy: %w", dest, busyErr)
 			}

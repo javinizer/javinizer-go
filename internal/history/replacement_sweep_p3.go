@@ -801,6 +801,14 @@ func (s *ReplacementSweeper) sweepOne(ctx context.Context, idx *replacementLedge
 		return 0
 	}
 	defer busyRelease()
+	// Wave-49 (codex P2): journal the claim in the in-process, ctx-scoped
+	// ledger BEFORE it can outlive its waiter — a window between the
+	// acquisition and any later ctx check is exactly how the wave-8 deadline
+	// strands a live marker against the continued revert. The untrack runs
+	// before the marker release (LIFO), and a reclaim by the continued revert
+	// consumes the once-guarded release, making this goroutine's deferred
+	// release a no-op (never a double-free of a successor marker).
+	defer recordSweepBusyClaim(ctx, dest, busyRelease)()
 
 	if owner, ok := idx.journaled[backupKey]; ok {
 		// Journaled — handled under the lock inside restoreAndConsume, which
@@ -1481,6 +1489,10 @@ func (s *ReplacementSweeper) consumeRearmRefusedPending(ctx context.Context, idx
 		return 0
 	}
 	defer busyRelease()
+	// Wave-49 (codex P2): same ctx-scoped claim ledger as sweepOne — an
+	// abandoned full sweep must not strand this marker against the
+	// continued revert either.
+	defer recordSweepBusyClaim(ctx, entry.dest, busyRelease)()
 
 	release := fsutil.SharedDestLocks().Acquire(entry.dest)
 	defer release()
