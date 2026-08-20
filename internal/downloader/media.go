@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/imageutil"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -102,7 +103,20 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 	// and auto crop all reuse the already-downloaded bytes, so a single-use or
 	// signed poster URL cannot be consumed twice.
 	fullPath := uniqueTempPath(destPath, "full.tmp")
-	defer func() { _ = d.fs.Remove(fullPath) }()
+	// Wave-42 (codex P2, PR#215): when the cropped install below returns an
+	// error carrying fsutil.ErrPublishCompleted, the staged (candidate) name
+	// could not be re-proven and may now address a FOREIGN occupant fsutil
+	// deliberately left byte-intact. The deferred scratch unlinks must then
+	// skip the candidate name — stagedRetained gates BOTH scratch legs (the
+	// candidate is fullPath when no crop applied, cropPath when it did);
+	// every other scratch cleans exactly as before. Plain failures keep the
+	// prior cleanup (stagedRetained stays "").
+	stagedRetained := ""
+	defer func() {
+		if stagedRetained != fullPath {
+			_ = d.fs.Remove(fullPath)
+		}
+	}()
 
 	fullResult, err := d.download(ctx, posterURL, fullPath, MediaTypePoster, overwriteExisting, nil, ledger)
 	fullResult.LocalPath = ""
@@ -114,7 +128,11 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 	}
 
 	cropPath := uniqueTempPath(destPath, "crop.tmp")
-	defer func() { _ = d.fs.Remove(cropPath) }()
+	defer func() {
+		if stagedRetained != cropPath {
+			_ = d.fs.Remove(cropPath)
+		}
+	}()
 
 	candidate := fullPath
 	cropped := false
@@ -138,6 +156,30 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 		skipped, replaced, instErr := d.installOverwriting(ctx, candidate, destPath, ledger)
 		switch {
 		case instErr != nil:
+			// Wave-42 (codex P2, PR#215): an install error carrying
+			// fsutil.ErrPublishCompleted proves the destination WAS published
+			// with the candidate bytes — the POSIX hard-link fallback's staged
+			// cleanup could not re-prove the candidate name
+			// (fsutil.ErrPublishNoReplaceStagedUnverified: it may now address a
+			// FOREIGN occupant fsutil deliberately left byte-intact) or its
+			// unlink failed with the destination rollback failing too (wave-20).
+			// This is a completed download, never a failure: record it exactly
+			// like the success leg below (dest enters CreatedPaths through
+			// Downloaded && !Replaced, so a later revert leaves the new media
+			// behind) and NEVER remove the candidate name — unlinking there
+			// could destroy foreign bytes. The retained staged name is
+			// warn-logged for manual cleanup, matching download()'s wave-41
+			// posture in http.go. Every other error keeps the prior failure leg
+			// (both scratch names reaped by the deferred cleanups).
+			if fsutil.PublishCompleted(instErr) {
+				logging.Warnf("downloadPoster: install of %s completed despite the returned error (%v) — staged name %s could not be re-proven (possibly foreign) and is left in place; manual cleanup advised", destPath, instErr, candidate)
+				stagedRetained = candidate
+				fullResult.Downloaded = true
+				fullResult.Replaced = replaced
+				d.finalizePosterResult(fullResult, destPath)
+				fullResult.Duration = time.Since(startTime)
+				return fullResult, nil
+			}
 			fullResult.Error = instErr
 			fullResult.Downloaded = false
 			fullResult.Replaced = false
