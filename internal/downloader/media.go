@@ -153,21 +153,25 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 		candidate = cropPath
 	}
 
-	// Wave-47 (codex P2, PR#215 finding F1-media): bind the candidate NAME to
-	// the exact object downloadPoster just produced, mirroring http.download's
-	// wave-45 provenance — that pipeline freezes the open validation handle's
-	// identity; the crop writers hand back no handle, so the capture is the
-	// post-write no-follow lstat of the candidate name immediately after the
-	// crop/write completes (captureInstalledDestIdentity's wave-26 shape — a
-	// failed capture degrades to the unrecorded posture, never a failure).
-	// installOverwriting re-proves the candidate name against this snapshot
-	// before every byte flow into destPath (the create path's no-replace
-	// publishes AND the replace path's wave-26 baseline), so a substitute
+	// Wave-47 (codex P2, PR#215 finding F1-media) as deepened by wave-48
+	// (codex P2, PR#215 finding 6): the candidate NAME is bound to the exact
+	// object downloadPoster just produced end to end. The crop writers hand
+	// back no handle, so the candidate is re-opened O_RDONLY no-follow
+	// immediately after the crop/write completes and THAT fd rides as the
+	// install provenance (bindCandidateProvenance — identity frozen from its
+	// own fstat; a failed open/fstat degrades to the wave-47 post-write
+	// no-follow capture, never a failure). installOverwriting owns the handle
+	// through every publish (the wave-29/30 bound-publish family closes it at
+	// publish adjacency and re-proves the landed destination), so a substitute
 	// rotated onto the candidate name inside the crop/write→install window is
-	// refused instead of being published and confirmed as ours. The
-	// non-overwrite rename promote below predates the overwrite discipline and
-	// keeps its legacy unprovenanced posture.
-	provenance := captureInstalledDestIdentity(d.fs, candidate)
+	// refused — before any bytes-at-dest mutation — instead of being published
+	// and confirmed as ours. The non-overwrite rename promote below predates
+	// the overwrite discipline and keeps its legacy unprovenanced posture (no
+	// handle is opened for it — the promote runs by name on Windows too).
+	var provenance stagedInstallProvenance
+	if overwriteExisting {
+		provenance = bindCandidateProvenance(d.fs, candidate)
+	}
 
 	if overwriteExisting {
 		skipped, replaced, instErr := d.installOverwriting(ctx, candidate, destPath, ledger, provenance)

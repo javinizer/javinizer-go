@@ -183,7 +183,7 @@ func (d *Downloader) download(ctx context.Context, url, destPath string, mediaTy
 		return result, result.Error
 	}
 
-	validatedInfo, err := validateDownloadedMedia(d.fs, tempPath, resp.Header.Get("Content-Type"), destPath)
+	validatedInfo, validatedHandle, err := validateDownloadedMedia(d.fs, tempPath, resp.Header.Get("Content-Type"), destPath)
 	if err != nil {
 		_ = d.fs.Remove(tempPath)
 		result.Error = err
@@ -195,7 +195,15 @@ func (d *Downloader) download(ctx context.Context, url, destPath string, mediaTy
 	// provenance snapshot — installOverwriting re-proves the staged name
 	// against it before every publish, so a substitute planted between
 	// validation and install is refused instead of landing at destPath.
-	provenance := installedIdentityFromFileInfo(validatedInfo)
+	// Wave-48 (codex P2, PR#215 finding 6): the validated handle itself stays
+	// OPEN and rides with the record — installOverwriting owns it end to end
+	// (the bound publishes consume it; every other exit closes it), so the
+	// publish never mutates the destination with a staging object merely
+	// re-derived by PATH.
+	provenance := stagedInstallProvenance{
+		identity: installedIdentityFromFileInfo(validatedInfo),
+		handle:   validatedHandle,
+	}
 
 	// P3: the byte install runs through the overwrite discipline — per-dest
 	// lock, in-lock existence classification, ledger-armed skip+warn for
@@ -274,7 +282,15 @@ func (d *Downloader) download(ctx context.Context, url, destPath string, mediaTy
 // (installedIdentityFromFileInfo) so a substitute rotated onto tempPath
 // between validation and install can never publish in the validated object's
 // place. A failed identity capture fails the validation closed.
-func validateDownloadedMedia(fs afero.Fs, tempPath, contentType, destPath string) (os.FileInfo, error) {
+//
+// Wave-48 (codex P2, PR#215 finding 6): on acceptance the sniffer's read
+// handle itself is handed back OPEN alongside the identity record (returns
+// info, handle, nil) — the identity-bearing object rides into install through
+// the bound publish end to end (on filesystems where rename cannot span an
+// open descriptor, fsutil's bound publish closes it at publish adjacency and
+// re-proves the landed destination against the captured snapshot). Every
+// refusal closes the handle and returns none.
+func validateDownloadedMedia(fs afero.Fs, tempPath, contentType, destPath string) (os.FileInfo, afero.File, error) {
 	ct := strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
 	// Any declared text/* type is provably not image/video payload —
 	// "text/plain" prose like "rate limit exceeded" must not reach
@@ -283,14 +299,13 @@ func validateDownloadedMedia(fs afero.Fs, tempPath, contentType, destPath string
 	if strings.HasPrefix(ct, "text/") || strings.HasPrefix(ct, "application/json") ||
 		strings.HasPrefix(ct, "application/xml") ||
 		strings.HasSuffix(ct, "+xml") {
-		return nil, fmt.Errorf("downloaded %q instead of media for %s (likely an auth challenge or proxy error response)", ct, destPath)
+		return nil, nil, fmt.Errorf("downloaded %q instead of media for %s (likely an auth challenge or proxy error response)", ct, destPath)
 	}
 
 	f, err := fs.Open(tempPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read downloaded file: %w", err)
+		return nil, nil, fmt.Errorf("failed to read downloaded file: %w", err)
 	}
-	defer func() { _ = f.Close() }()
 
 	// Capture the validated object's identity THROUGH THE HANDLE before the
 	// sniff read: on OsFs this is fstat — dev/inode, size, and mtime of
@@ -299,22 +314,25 @@ func validateDownloadedMedia(fs afero.Fs, tempPath, contentType, destPath string
 	// path re-lookup of the mutable temp name.
 	info, err := f.Stat()
 	if err != nil {
-		return nil, fmt.Errorf("failed to stat downloaded file: %w", err)
+		_ = f.Close()
+		return nil, nil, fmt.Errorf("failed to stat downloaded file: %w", err)
 	}
 
 	head := make([]byte, 256)
 	n, err := f.Read(head)
 	if err != nil && !errors.Is(err, io.EOF) {
-		return nil, fmt.Errorf("failed to read downloaded file: %w", err)
+		_ = f.Close()
+		return nil, nil, fmt.Errorf("failed to read downloaded file: %w", err)
 	}
 	trimmed := strings.TrimSpace(strings.ToLower(string(head[:n])))
 	if strings.HasPrefix(trimmed, "<!doctype") || strings.HasPrefix(trimmed, "<html") ||
 		strings.HasPrefix(trimmed, "<head") || strings.HasPrefix(trimmed, "<?xml") ||
 		strings.HasPrefix(trimmed, "<error") || strings.HasPrefix(trimmed, "<response") ||
 		strings.HasPrefix(trimmed, "{") {
-		return nil, fmt.Errorf("downloaded an HTML/JSON document instead of media for %s (likely an auth challenge or proxy error)", destPath)
+		_ = f.Close()
+		return nil, nil, fmt.Errorf("downloaded an HTML/JSON document instead of media for %s (likely an auth challenge or proxy error)", destPath)
 	}
-	return info, nil
+	return info, f, nil
 }
 
 func resolveDownloadOptions(options []any) (bool, *sync.Map) {

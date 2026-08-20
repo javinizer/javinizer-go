@@ -76,18 +76,25 @@ func TestValidateDownloadedMedia(t *testing.T) {
 			t.Parallel()
 			fs := afero.NewMemMapFs()
 			tmp := writeTmp(fs, tc.body)
-			_, err := validateDownloadedMedia(fs, tmp, tc.contentType, tc.dest)
+			info, handle, err := validateDownloadedMedia(fs, tmp, tc.contentType, tc.dest)
+			if handle != nil {
+				defer func() { _ = handle.Close() }()
+			}
 			if tc.wantErr {
 				require.Error(t, err)
+				require.Nil(t, handle, "every refusal closes and returns no handle (wave-48)")
+				require.Nil(t, info)
 			} else {
 				require.NoError(t, err)
+				require.NotNil(t, handle, "acceptance hands the validated object's handle back OPEN (wave-48)")
+				require.NotNil(t, info)
 			}
 		})
 	}
 
 	t.Run("open failure surfaces as error", func(t *testing.T) {
 		t.Parallel()
-		_, err := validateDownloadedMedia(errOpenFS{Fs: afero.NewMemMapFs(), err: errors.New("boom")}, "/gone", "", "/out/cover.jpg")
+		_, _, err := validateDownloadedMedia(errOpenFS{Fs: afero.NewMemMapFs(), err: errors.New("boom")}, "/gone", "", "/out/cover.jpg")
 		require.Error(t, err)
 	})
 
@@ -95,7 +102,7 @@ func TestValidateDownloadedMedia(t *testing.T) {
 		t.Parallel()
 		fs := afero.NewMemMapFs()
 		tmp := writeTmp(fs, "opaque")
-		_, err := validateDownloadedMedia(openErrReadFS{Fs: fs}, tmp, "", "/out/cover.jpg")
+		_, _, err := validateDownloadedMedia(openErrReadFS{Fs: fs}, tmp, "", "/out/cover.jpg")
 		require.Error(t, err)
 	})
 }

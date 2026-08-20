@@ -81,9 +81,12 @@ func (l *w45Ledger) MarkReplacementRestorePendingKind(context.Context, string, s
 }
 
 // w45Fixture stages one download input and returns its validation-time
-// provenance snapshot exactly the way http.download captures it (through the
-// open handle's Stat → installedIdentityFromFileInfo).
-func w45Fixture(t *testing.T, fs afero.Fs, dir, stagedBody string) (staged, dest string, provenance installedDestIdentity) {
+// provenance bundle exactly the way http.download captures it (through the
+// open handle's Stat → installedIdentityFromFileInfo). The wave-45 recorded-
+// only posture is kept here — no retained handle — so these tests continue to
+// pin the snapshot-gate behavior; wave-48's handle-bound legs live in
+// install_overwrite_bound_w48_test.go.
+func w45Fixture(t *testing.T, fs afero.Fs, dir, stagedBody string) (staged, dest string, provenance stagedInstallProvenance) {
 	t.Helper()
 	require.NoError(t, fs.MkdirAll(dir, 0o755))
 	dest = dir + "/poster.jpg"
@@ -94,7 +97,7 @@ func w45Fixture(t *testing.T, fs afero.Fs, dir, stagedBody string) (staged, dest
 	info, err := fh.Stat()
 	require.NoError(t, err)
 	require.NoError(t, fh.Close())
-	return staged, dest, installedIdentityFromFileInfo(info)
+	return staged, dest, stagedInstallProvenance{identity: installedIdentityFromFileInfo(info)}
 }
 
 // Finding F1, create path: a substitute rotated onto the staged name between
@@ -225,7 +228,7 @@ func TestInstallOverwritingW45_OsFsKernelIdentityBinding(t *testing.T) {
 		info, err := fh.Stat()
 		require.NoError(t, err)
 		require.NoError(t, fh.Close())
-		provenance := installedIdentityFromFileInfo(info)
+		identity := installedIdentityFromFileInfo(info)
 		// restoreSourceIdentity exposes dev/inode only on the POSIX Stat_t
 		// targets (restore_source_identity_other.go answers not-OK elsewhere):
 		// on windows Sys() carries no unix dev/ino, so the kernel-identity
@@ -236,16 +239,16 @@ func TestInstallOverwritingW45_OsFsKernelIdentityBinding(t *testing.T) {
 		// and by the every-platform size+mtime comparator (pointed back at
 		// the staged input) where it is not.
 		if _, _, ok := restoreSourceIdentity(info); ok {
-			require.True(t, provenance.hasDevIno, "OsFs stat carries kernel identity")
+			require.True(t, identity.hasDevIno, "OsFs stat carries kernel identity")
 		} else {
-			require.False(t, provenance.hasDevIno, "this platform's OsFs stat exposes no dev/ino — size+mtime carries the refusal")
+			require.False(t, identity.hasDevIno, "this platform's OsFs stat exposes no dev/ino — size+mtime carries the refusal")
 		}
 
 		require.NoError(t, os.Rename(staged, staged+".hidden"))
 		require.NoError(t, os.WriteFile(staged, []byte("VALID-DATA!"), 0o600))
 
 		d := NewDownloader(nil, fs, &Config{}, nil).WithDestLocks(fsutil.NewKeyedLockRegistry())
-		_, _, ierr := d.installOverwriting(context.Background(), staged, dest, downloadLedger{}, provenance)
+		_, _, ierr := d.installOverwriting(context.Background(), staged, dest, downloadLedger{}, stagedInstallProvenance{identity: identity})
 		require.ErrorIs(t, ierr, errStagedInputSubstituted)
 		kept, rerr := os.ReadFile(staged)
 		require.NoError(t, rerr)
@@ -271,7 +274,7 @@ func TestInstallOverwritingW45_OsFsKernelIdentityBinding(t *testing.T) {
 
 		d := NewDownloader(nil, fs, &Config{}, nil).WithDestLocks(fsutil.NewKeyedLockRegistry())
 		skipped, replaced, ierr := d.installOverwriting(context.Background(), staged, dest,
-			downloadLedger{}, installedIdentityFromFileInfo(info))
+			downloadLedger{}, stagedInstallProvenance{identity: installedIdentityFromFileInfo(info)})
 		require.NoError(t, ierr)
 		require.False(t, skipped)
 		require.False(t, replaced)
@@ -307,7 +310,7 @@ func TestInstallOverwritingW45_SymlinkOccupantRefused(t *testing.T) {
 
 	d := NewDownloader(nil, fs, &Config{}, nil).WithDestLocks(fsutil.NewKeyedLockRegistry())
 	_, _, ierr := d.installOverwriting(context.Background(), staged, dest,
-		downloadLedger{}, installedIdentityFromFileInfo(info))
+		downloadLedger{}, stagedInstallProvenance{identity: installedIdentityFromFileInfo(info)})
 	require.ErrorIs(t, ierr, errStagedInputSubstituted)
 	linkInfo, lerr := os.Lstat(staged)
 	require.NoError(t, lerr)
@@ -323,9 +326,9 @@ func TestClassifyStagedInputW45(t *testing.T) {
 		"no provenance record → legacy posture")
 
 	_, _, provenance := w45Fixture(t, fs, "/w45/cls", "AAA")
-	require.Equal(t, stagedInputIndeterminate, classifyStagedInput(fs, "/w45/cls/absent", provenance),
+	require.Equal(t, stagedInputIndeterminate, classifyStagedInput(fs, "/w45/cls/absent", provenance.identity),
 		"lookup failure is indeterminate, never a proven substitution")
-	require.Equal(t, stagedInputMatch, classifyStagedInput(fs, "/w45/cls/.staged-download", provenance))
+	require.Equal(t, stagedInputMatch, classifyStagedInput(fs, "/w45/cls/.staged-download", provenance.identity))
 }
 
 // Finding F1: validateDownloadedMedia hands back the handle-derived identity;
@@ -334,14 +337,16 @@ func TestValidateDownloadedMediaW45_ReturnsHandleIdentity(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	require.NoError(t, afero.WriteFile(fs, "/tmp-dl", []byte("\xff\xd8\xff\xe0jpeg-bytes"), 0o644))
 
-	info, err := validateDownloadedMedia(fs, "/tmp-dl", "", "/out/cover.jpg")
+	info, handle, err := validateDownloadedMedia(fs, "/tmp-dl", "", "/out/cover.jpg")
 	require.NoError(t, err)
 	require.NotNil(t, info)
+	require.NotNil(t, handle, "wave-48: acceptance hands the validated object's handle back OPEN")
+	defer func() { _ = handle.Close() }()
 	require.EqualValues(t, len("\xff\xd8\xff\xe0jpeg-bytes"), info.Size())
 	provenance := installedIdentityFromFileInfo(info)
 	require.True(t, provenance.known, "the validated record freezes into a usable provenance snapshot")
 
-	_, err = validateDownloadedMedia(w45StatFailFS{Fs: fs}, "/tmp-dl", "", "/out/cover.jpg")
+	_, _, err = validateDownloadedMedia(w45StatFailFS{Fs: fs}, "/tmp-dl", "", "/out/cover.jpg")
 	require.ErrorContains(t, err, "failed to stat downloaded file")
 	require.ErrorIs(t, err, errW45Stat)
 }
