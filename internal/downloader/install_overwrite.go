@@ -651,9 +651,11 @@ type stagedInputVerdict int
 
 const (
 	// stagedInputUnrecorded keeps the pre-wave-45 posture: the caller handed
-	// no provenance snapshot down (the poster-crop candidate's bytes are
-	// produced locally from an already-validated temp, never sniffed — the
-	// documented wave-45 residual).
+	// no provenance snapshot down. (The wave-45 residual for the poster-crop
+	// candidate — produced locally from an already-validated temp, never
+	// sniffed — was closed by wave-47: downloadPoster freezes the candidate's
+	// post-write identity and passes it down, so an unrecorded verdict now
+	// means a caller never recorded one at all.)
 	stagedInputUnrecorded stagedInputVerdict = iota
 	// stagedInputMatch: the staged name still addresses the validated object.
 	stagedInputMatch

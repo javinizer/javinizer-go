@@ -2,6 +2,7 @@ package downloader
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -152,10 +153,47 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 		candidate = cropPath
 	}
 
+	// Wave-47 (codex P2, PR#215 finding F1-media): bind the candidate NAME to
+	// the exact object downloadPoster just produced, mirroring http.download's
+	// wave-45 provenance — that pipeline freezes the open validation handle's
+	// identity; the crop writers hand back no handle, so the capture is the
+	// post-write no-follow lstat of the candidate name immediately after the
+	// crop/write completes (captureInstalledDestIdentity's wave-26 shape — a
+	// failed capture degrades to the unrecorded posture, never a failure).
+	// installOverwriting re-proves the candidate name against this snapshot
+	// before every byte flow into destPath (the create path's no-replace
+	// publishes AND the replace path's wave-26 baseline), so a substitute
+	// rotated onto the candidate name inside the crop/write→install window is
+	// refused instead of being published and confirmed as ours. The
+	// non-overwrite rename promote below predates the overwrite discipline and
+	// keeps its legacy unprovenanced posture.
+	provenance := captureInstalledDestIdentity(d.fs, candidate)
+
 	if overwriteExisting {
-		skipped, replaced, instErr := d.installOverwriting(ctx, candidate, destPath, ledger)
+		skipped, replaced, instErr := d.installOverwriting(ctx, candidate, destPath, ledger, provenance)
 		switch {
 		case instErr != nil:
+			// Wave-47 (codex P2, PR#215 finding F1-media): the candidate name
+			// provably stopped naming the crop/write-produced object inside the
+			// capture→install window — the staged occupant is now FOREIGN bytes.
+			// The install published nothing on the create path (the destination
+			// was never touched) and already ran the set-aside restore + journal
+			// retraction on the replace path, so the only remaining duty is
+			// retaining the candidate name: stagedRetained gates BOTH deferred
+			// scratch unlinks off it (the wave-42 retained-candidate discipline —
+			// the possibly-foreign substitute stays byte-intact for manual
+			// inspection, warn-logged, matching download()'s wave-45 refusal
+			// posture in http.go) while the non-candidate scratch still reaps.
+			if errors.Is(instErr, errStagedInputSubstituted) {
+				logging.Warnf("downloadPoster: install of %s refused — candidate name %s no longer names the crop/write-produced object (foreign substitution between crop and install); substitute preserved, destination untouched, manual cleanup advised", destPath, candidate)
+				stagedRetained = candidate
+				fullResult.Error = instErr
+				fullResult.Downloaded = false
+				fullResult.Replaced = false
+				fullResult.LocalPath = ""
+				fullResult.Duration = time.Since(startTime)
+				return fullResult, fullResult.Error
+			}
 			// Wave-42 (codex P2, PR#215): an install error carrying
 			// fsutil.ErrPublishCompleted proves the destination WAS published
 			// with the candidate bytes — the POSIX hard-link fallback's staged
