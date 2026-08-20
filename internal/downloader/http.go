@@ -183,19 +183,40 @@ func (d *Downloader) download(ctx context.Context, url, destPath string, mediaTy
 		return result, result.Error
 	}
 
-	if err := validateDownloadedMedia(d.fs, tempPath, resp.Header.Get("Content-Type"), destPath); err != nil {
+	validatedInfo, err := validateDownloadedMedia(d.fs, tempPath, resp.Header.Get("Content-Type"), destPath)
+	if err != nil {
 		_ = d.fs.Remove(tempPath)
 		result.Error = err
 		result.Duration = time.Since(startTime)
 		return result, result.Error
 	}
+	// Wave-45 (codex P2, PR#215 finding F1): freeze the VALIDATED object's
+	// identity (from the open handle the sniffer just read) into the install
+	// provenance snapshot — installOverwriting re-proves the staged name
+	// against it before every publish, so a substitute planted between
+	// validation and install is refused instead of landing at destPath.
+	provenance := installedIdentityFromFileInfo(validatedInfo)
 
 	// P3: the byte install runs through the overwrite discipline — per-dest
 	// lock, in-lock existence classification, ledger-armed skip+warn for
 	// unrecorded replacements, backup-aside + restore-on-failure.
 	ledger := resolveDownloadLedger(options)
-	skipped, replaced, instErr := d.installOverwriting(ctx, tempPath, destPath, ledger)
+	skipped, replaced, instErr := d.installOverwriting(ctx, tempPath, destPath, ledger, provenance)
 	if instErr != nil {
+		// Wave-45 (codex P2, PR#215 finding F1): the staged name provably
+		// stopped naming the validated download object — a directory writer
+		// rotated a substitute onto it inside the validation→install window.
+		// The substitute is FOREIGN bytes: never unlink it here (the create
+		// path published nothing; the replace path already restored its
+		// set-aside and retracted the journal through the publish-failure
+		// compensation). Dest is untouched on the create path; the retained
+		// staged name is warn-logged for manual cleanup.
+		if errors.Is(instErr, errStagedInputSubstituted) {
+			logging.Warnf("downloader: install of %s refused — staged name %s no longer names the validated download object (foreign substitution after validation); substitute preserved, destination untouched, manual cleanup advised", destPath, tempPath)
+			result.Error = instErr
+			result.Duration = time.Since(startTime)
+			return result, result.Error
+		}
 		// Wave-41 (codex P2, PR#215): an install error carrying
 		// fsutil.ErrPublishCompleted proves the destination WAS published with
 		// the staged bytes — the POSIX hard-link fallback's staged cleanup could
@@ -246,7 +267,14 @@ func (d *Downloader) download(ctx context.Context, url, destPath string, mediaTy
 // payload, while unknown binary bytes pass through untouched — so unusual
 // but real image/video encodings and fixture bytes are never rejected by
 // mistake.
-func validateDownloadedMedia(fs afero.Fs, tempPath, contentType, destPath string) error {
+//
+// Wave-45 (codex P2, PR#215 finding F1): on acceptance the validated object's
+// FileInfo is handed back, captured FROM THE OPEN HANDLE the sniffer read —
+// the caller freezes it into the install provenance snapshot
+// (installedIdentityFromFileInfo) so a substitute rotated onto tempPath
+// between validation and install can never publish in the validated object's
+// place. A failed identity capture fails the validation closed.
+func validateDownloadedMedia(fs afero.Fs, tempPath, contentType, destPath string) (os.FileInfo, error) {
 	ct := strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
 	// Any declared text/* type is provably not image/video payload —
 	// "text/plain" prose like "rate limit exceeded" must not reach
@@ -255,28 +283,38 @@ func validateDownloadedMedia(fs afero.Fs, tempPath, contentType, destPath string
 	if strings.HasPrefix(ct, "text/") || strings.HasPrefix(ct, "application/json") ||
 		strings.HasPrefix(ct, "application/xml") ||
 		strings.HasSuffix(ct, "+xml") {
-		return fmt.Errorf("downloaded %q instead of media for %s (likely an auth challenge or proxy error response)", ct, destPath)
+		return nil, fmt.Errorf("downloaded %q instead of media for %s (likely an auth challenge or proxy error response)", ct, destPath)
 	}
 
 	f, err := fs.Open(tempPath)
 	if err != nil {
-		return fmt.Errorf("failed to read downloaded file: %w", err)
+		return nil, fmt.Errorf("failed to read downloaded file: %w", err)
 	}
 	defer func() { _ = f.Close() }()
+
+	// Capture the validated object's identity THROUGH THE HANDLE before the
+	// sniff read: on OsFs this is fstat — dev/inode, size, and mtime of
+	// exactly the object being sniffed. InstallOverwriting's provenance gate
+	// compares the staged name against this snapshot, never against a later
+	// path re-lookup of the mutable temp name.
+	info, err := f.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("failed to stat downloaded file: %w", err)
+	}
 
 	head := make([]byte, 256)
 	n, err := f.Read(head)
 	if err != nil && !errors.Is(err, io.EOF) {
-		return fmt.Errorf("failed to read downloaded file: %w", err)
+		return nil, fmt.Errorf("failed to read downloaded file: %w", err)
 	}
 	trimmed := strings.TrimSpace(strings.ToLower(string(head[:n])))
 	if strings.HasPrefix(trimmed, "<!doctype") || strings.HasPrefix(trimmed, "<html") ||
 		strings.HasPrefix(trimmed, "<head") || strings.HasPrefix(trimmed, "<?xml") ||
 		strings.HasPrefix(trimmed, "<error") || strings.HasPrefix(trimmed, "<response") ||
 		strings.HasPrefix(trimmed, "{") {
-		return fmt.Errorf("downloaded an HTML/JSON document instead of media for %s (likely an auth challenge or proxy error)", destPath)
+		return nil, fmt.Errorf("downloaded an HTML/JSON document instead of media for %s (likely an auth challenge or proxy error)", destPath)
 	}
-	return nil
+	return info, nil
 }
 
 func resolveDownloadOptions(options []any) (bool, *sync.Map) {

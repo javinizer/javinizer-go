@@ -232,19 +232,71 @@ func destKeyInsensitive(s string) string {
 // name combining only post-uppercase, like the long-s + dot-above sequence,
 // lands on the same key as its precomposed spelling).
 func DestKeyForRoot(root, p string) string {
-	s := normalizeDestPath(p)
-	normInsensitive := IsNormalizationInsensitiveRoot(root)
-	if IsCaseSensitiveRoot(root) {
-		if normInsensitive {
+	posture := destKeyPosture{normInsensitive: IsNormalizationInsensitiveRoot(root)}
+	posture.caseSensitive = IsCaseSensitiveRoot(root)
+	return posture.key(p)
+}
+
+// destKeyPosture carries one probe root's fold decisions resolved ONCE
+// (wave-45, codex P2, PR#215 finding F2) — see DestKeyResolver.
+type destKeyPosture struct {
+	caseSensitive   bool
+	normInsensitive bool
+}
+
+// key computes DestKeyForRoot's key form against pre-resolved postures, with
+// zero probe calls. The fold ORDER is byte-identical to DestKeyForRoot: case
+// posture picks the branch (preserved spelling vs destKeyInsensitive's
+// per-rune uppercase), then the normalization posture applies NFC last.
+func (p destKeyPosture) key(s string) string {
+	s = normalizeDestPath(s)
+	if p.caseSensitive {
+		if p.normInsensitive {
 			return norm.NFC.String(s)
 		}
 		return s
 	}
 	s = destKeyInsensitive(s)
-	if normInsensitive {
+	if p.normInsensitive {
 		s = norm.NFC.String(s)
 	}
 	return s
+}
+
+// DestKeyResolver pre-resolves destination fold postures ONCE PER ROOT and
+// derives keys with zero further probe calls (wave-45, codex P2, PR#215
+// finding F2). DestKey re-resolves per CALL, and a transient probe error is
+// deliberately never cached (wave-25) — so two successive entries of ONE
+// journal, probed under different error/success mixtures, could derive
+// under opposite postures: one file's case-variant cousins sorted into
+// separate destination-key buckets, and the buckets' downstream map
+// iteration restored the stacked chains in a nondeterministic interleave
+// (leaving intermediate bytes last). A grouping pass therefore resolves each
+// present root exactly once through a resolver and derives every key of the
+// pass from that frozen posture set. The process-wide probe caches still
+// carry definitive outcomes across invocations (their wave-25 contract is
+// unchanged); only the call-local horizon is frozen.
+type DestKeyResolver struct {
+	postures map[string]destKeyPosture
+}
+
+// NewDestKeyResolver returns an empty resolver whose per-root postures freeze
+// on first derivation.
+func NewDestKeyResolver() *DestKeyResolver {
+	return &DestKeyResolver{postures: make(map[string]destKeyPosture)}
+}
+
+// Key canonicalizes p exactly like DestKey, resolving p's probe root's
+// postures on first use and reusing that frozen resolution afterwards.
+func (r *DestKeyResolver) Key(p string) string {
+	root := destinationProbeRoot(p)
+	posture, ok := r.postures[root]
+	if !ok {
+		posture = destKeyPosture{normInsensitive: IsNormalizationInsensitiveRoot(root)}
+		posture.caseSensitive = IsCaseSensitiveRoot(root)
+		r.postures[root] = posture
+	}
+	return posture.key(p)
 }
 
 // NormalizationProbe is the process-wide Unicode-normalization probe seam,

@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/spf13/afero"
+
+	"github.com/javinizer/javinizer-go/internal/logging"
 )
 
 const exclusiveStagingAttempts = 64
@@ -81,8 +83,10 @@ func CreateExclusiveStagingFile(fs afero.Fs, dest, suffix string, start uint64, 
 			// exclusively ours; see replacements_posix.go /
 			// replacements_windows.go for the strict-vs-best-effort split.
 			if cerr := restoreStagingMode(fs, staged, file, mode.Perm()); cerr != nil {
-				_ = file.Close()
-				_ = fs.Remove(staged)
+				// wave-45 (codex P2, PR#215 finding F3): the cleanup is bound to
+				// the OPENED INODE — discarding by path alone could unlink a
+				// substitute planted after the staged name was renamed away.
+				discardFailedExclusiveStaging(fs, staged, file)
 				return "", nil, fmt.Errorf("apply exclusive staging mode for %s: %w", staged, cerr)
 			}
 			return staged, file, nil
@@ -92,6 +96,43 @@ func CreateExclusiveStagingFile(fs afero.Fs, dest, suffix string, start uint64, 
 		}
 	}
 	return "", nil, fmt.Errorf("exclusive staging names exhausted for %s%s after %d attempts", dest, suffix, exclusiveStagingAttempts)
+}
+
+// discardFailedExclusiveStaging is the restoreStagingMode failure leg's
+// cleanup (wave-45, codex P2, PR#215 finding F3). Pre-wave-45 the leg closed
+// the handle and removed the staged NAME: a directory writer renaming the
+// just-created staged name away and planting a substitute inside the
+// close→remove window got ITS object unlinked. On the real OsFs the unlink
+// is now bound to the opened inode: the handle's fstat must match a
+// no-follow Lstat of the staged name (taken while the handle is still open —
+// the pinned inode makes the comparison itself race-free) BEFORE the handle
+// is closed and any Remove runs; a mismatch, or an indeterminate lookup,
+// preserves whatever occupies the name byte-intact and warn-logs the
+// retained name for manual cleanup, and the verified-then-closed
+// lookup→unlink boundary keeps the documented POSIX pathname-unlink
+// residual. Virtual filesystems (afero's mem FileInfo carries no kernel
+// identity — os.SameFile is always false there even for one object — and
+// there is no symlink model a directory writer could plant with) keep the
+// plain close+remove fallback against the stored spelling.
+func discardFailedExclusiveStaging(fs afero.Fs, staged string, fh afero.File) {
+	of, ok := osStagingHandle(fs, fh)
+	if !ok {
+		_ = fh.Close()
+		_ = fs.Remove(staged)
+		return
+	}
+	handleInfo, statErr := of.Stat()
+	stagedInfo, lstatErr := os.Lstat(staged)
+	_ = of.Close()
+	if statErr != nil || lstatErr != nil || handleInfo == nil || stagedInfo == nil {
+		logging.Warnf("exclusive staging %s could not be re-proven against its handle after a mode failure (%v/%v) — name left in place (possibly foreign); manual cleanup advised", staged, statErr, lstatErr)
+		return
+	}
+	if !os.SameFile(handleInfo, stagedInfo) {
+		logging.Warnf("exclusive staging %s no longer names the handle's inode after a mode failure (foreign substitution) — substitute preserved; manual cleanup advised", staged)
+		return
+	}
+	_ = fs.Remove(staged)
 }
 
 // StagingTimesError distinguishes CloseStaged's times-application legs from

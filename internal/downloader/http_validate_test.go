@@ -76,7 +76,7 @@ func TestValidateDownloadedMedia(t *testing.T) {
 			t.Parallel()
 			fs := afero.NewMemMapFs()
 			tmp := writeTmp(fs, tc.body)
-			err := validateDownloadedMedia(fs, tmp, tc.contentType, tc.dest)
+			_, err := validateDownloadedMedia(fs, tmp, tc.contentType, tc.dest)
 			if tc.wantErr {
 				require.Error(t, err)
 			} else {
@@ -87,7 +87,7 @@ func TestValidateDownloadedMedia(t *testing.T) {
 
 	t.Run("open failure surfaces as error", func(t *testing.T) {
 		t.Parallel()
-		err := validateDownloadedMedia(errOpenFS{Fs: afero.NewMemMapFs(), err: errors.New("boom")}, "/gone", "", "/out/cover.jpg")
+		_, err := validateDownloadedMedia(errOpenFS{Fs: afero.NewMemMapFs(), err: errors.New("boom")}, "/gone", "", "/out/cover.jpg")
 		require.Error(t, err)
 	})
 
@@ -95,7 +95,7 @@ func TestValidateDownloadedMedia(t *testing.T) {
 		t.Parallel()
 		fs := afero.NewMemMapFs()
 		tmp := writeTmp(fs, "opaque")
-		err := validateDownloadedMedia(openErrReadFS{Fs: fs}, tmp, "", "/out/cover.jpg")
+		_, err := validateDownloadedMedia(openErrReadFS{Fs: fs}, tmp, "", "/out/cover.jpg")
 		require.Error(t, err)
 	})
 }

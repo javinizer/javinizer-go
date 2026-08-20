@@ -147,27 +147,18 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 	// Audit: POSIX journals carry `/` path spellings, so history correctness
 	// never depended on translating a literal `\\`; Windows legacy journals
 	// retain cross-form matching.
-	byDest := make(map[string][]models.ReplacementEntry)
-	destSpelling := make(map[string]string)
-	for _, e := range gf.Replacements {
-		key := fsutil.DestKey(e.Destination)
-		byDest[key] = append(byDest[key], e)
-		if destSpelling[key] == "" {
-			destSpelling[key] = e.Destination
-		}
-	}
-	for dest := range byDest {
-		sort.SliceStable(byDest[dest], func(i, j int) bool { return byDest[dest][i].DestSeq > byDest[dest][j].DestSeq })
-	}
+	byDest, destSpelling, destOrder := groupReplacementEntries(gf.Replacements)
 
 	// codex P3 R20-1: phase-split preflight from restore. Preflight iterates
 	// byDest WITHOUT locks so rejected ops halt BEFORE any bytes move — a
 	// multi-destination op can then refuse while its secondary destinations
 	// are still untouched (the interleaved minus hit). The per-destination
 	// lock-gated phase still revisits the journal under the dest lock for
-	// in-lock freshness.
-	for key, entries := range byDest {
+	// in-lock freshness. Wave-45: both phases walk destOrder — the
+	// deterministic group order — never Go map iteration.
+	for _, key := range destOrder {
 		dest := destSpelling[key]
+		entries := byDest[key]
 		minOwn := entries[0].DestSeq
 		for _, e := range entries {
 			if e.DestSeq < minOwn {
@@ -184,8 +175,10 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 	// destination read, then retained through every restore and consumption
 	// leg. The closure keeps each destination's marker lifetime scoped to that
 	// destination instead of deferring all releases until this method returns.
-	for key, entries := range byDest {
+	// Wave-45: deterministic destOrder walk (same order as the preflight).
+	for _, key := range destOrder {
 		dest := destSpelling[key]
+		entries := byDest[key]
 		restoreErr := func() error {
 			release := fsutil.SharedDestLocks().Acquire(dest)
 			defer release()
@@ -492,6 +485,60 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 		}
 	}
 	return restored, nil
+}
+
+// groupReplacementEntries buckets one invocation's replacement journal by
+// destination key and hands back the DETERMINISTIC group iteration order
+// (wave-45, codex P2, PR#215 finding F2):
+//
+//   - Posture freeze: fsutil.DestKey resolves the case/normalization probe
+//     postures PER CALL, and a transient probe error is deliberately never
+//     cached (wave-25) — so entries of ONE journal used to derive under
+//     successively different postures (first entry: probe error → conserved
+//     case; second entry: probe success → folded). One file's case-variant
+//     cousins then sorted into SEPARATE destination groups, and the restore
+//     loops' Go map iteration interleaved the stacked chains in an arbitrary
+//     order, leaving intermediate bytes on the last restore. The
+//     fsutil.DestKeyResolver resolves each present root exactly once per
+//     invocation; every key of the invocation derives from that frozen
+//     posture set (one probe per root per restoreReplacementJournal call on
+//     an uncached, erroring root at most).
+//   - Order: entries within a group sort by DestSeq descending as before
+//     (true reverse replace order per destination); the GROUPS walk highest
+//     journaled DestSeq first (reverse replace order across destinations),
+//     destination key ascending on ties — Go map iteration order can never
+//     pick the interleave.
+func groupReplacementEntries(reps []models.ReplacementEntry) (map[string][]models.ReplacementEntry, map[string]string, []string) {
+	resolver := fsutil.NewDestKeyResolver()
+	byDest := make(map[string][]models.ReplacementEntry)
+	destSpelling := make(map[string]string)
+	for _, e := range reps {
+		key := resolver.Key(e.Destination)
+		byDest[key] = append(byDest[key], e)
+		if destSpelling[key] == "" {
+			destSpelling[key] = e.Destination
+		}
+	}
+	for key := range byDest {
+		sort.SliceStable(byDest[key], func(i, j int) bool { return byDest[key][i].DestSeq > byDest[key][j].DestSeq })
+	}
+	maxSeq := make(map[string]int64, len(byDest))
+	destOrder := make([]string, 0, len(byDest))
+	for key, entries := range byDest {
+		destOrder = append(destOrder, key)
+		for _, e := range entries {
+			if e.DestSeq > maxSeq[key] {
+				maxSeq[key] = e.DestSeq
+			}
+		}
+	}
+	sort.Slice(destOrder, func(i, j int) bool {
+		if maxSeq[destOrder[i]] != maxSeq[destOrder[j]] {
+			return maxSeq[destOrder[i]] > maxSeq[destOrder[j]]
+		}
+		return destOrder[i] < destOrder[j]
+	})
+	return byDest, destSpelling, destOrder
 }
 
 // replacementEntryIsLive re-reads the operation row before a restore leg

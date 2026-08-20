@@ -632,6 +632,72 @@ func overwriteBackupReservationStillOurs(fsys afero.Fs, backupPath string, claim
 	return nil
 }
 
+// errStagedInputSubstituted refuses byte flow when the staged install input
+// provably stopped naming the exact object its producer validated (wave-45,
+// codex P2, PR#215 finding F1). http.download validates the downloaded bytes
+// and hands the validation-time, handle-derived identity snapshot down as the
+// install provenance; a directory writer rotating the staged name onto a
+// foreign substitute inside the validation→install window trips this class.
+// Callers never unlink the staged name for this class — the substitute is
+// foreign bytes preserved byte-intact (the create path published nothing, so
+// the destination is untouched; the replace path refused BEFORE any publish
+// and rode the publish-failure compensation, so the set-aside restore and
+// journal retraction already ran).
+var errStagedInputSubstituted = errors.New("staged install input substituted after validation")
+
+// stagedInputVerdict is the provenance gate's classification of the staged
+// install input against the validation-time identity snapshot (wave-45).
+type stagedInputVerdict int
+
+const (
+	// stagedInputUnrecorded keeps the pre-wave-45 posture: the caller handed
+	// no provenance snapshot down (the poster-crop candidate's bytes are
+	// produced locally from an already-validated temp, never sniffed — the
+	// documented wave-45 residual).
+	stagedInputUnrecorded stagedInputVerdict = iota
+	// stagedInputMatch: the staged name still addresses the validated object.
+	stagedInputMatch
+	// stagedInputMismatch: the staged name provably addresses a foreign
+	// substitute — bytes must never publish.
+	stagedInputMismatch
+	// stagedInputIndeterminate: the staged lookup failed — no proof either
+	// way, so the legacy publish legs keep their own error handling
+	// (a vanished staged name fails the publish with its usual not-exist
+	// error instead of being misreported as a substitution).
+	stagedInputIndeterminate
+)
+
+// classifyStagedInput re-derives the staged install input's identity the
+// no-follow way (lstatBackupCandidate — a planted symlink is seen as the
+// link object, never followed) and compares it against the validation-time
+// provenance snapshot: dev/inode when the filesystem exposed kernel identity
+// AT VALIDATION TIME (the os.SameFile kernel carrier), then size + mtime on
+// every platform — the same comparator shape as
+// destStillHoldsInstalledObject, pointed back at the staged input. The
+// snapshot stores VALUES (never the live FileInfo), so a virtual
+// filesystem's live identity views cannot drift the record after capture.
+func classifyStagedInput(fsys afero.Fs, stagedPath string, provenance installedDestIdentity) stagedInputVerdict {
+	if !provenance.known {
+		return stagedInputUnrecorded
+	}
+	cur, err := lstatBackupCandidate(fsys, stagedPath)
+	if err != nil || cur == nil {
+		return stagedInputIndeterminate
+	}
+	if cur.Mode()&os.ModeSymlink != 0 || !cur.Mode().IsRegular() {
+		return stagedInputMismatch
+	}
+	if provenance.hasDevIno {
+		if dev, ino, ok := restoreSourceIdentity(cur); ok && (dev != provenance.dev || ino != provenance.ino) {
+			return stagedInputMismatch
+		}
+	}
+	if cur.Size() != provenance.size || !cur.ModTime().Equal(provenance.modTime) {
+		return stagedInputMismatch
+	}
+	return stagedInputMatch
+}
+
 // installOverwriting installs staged (already-downloaded) bytes onto
 // destPath under the per-destination lock with the replace-ledger discipline
 // (POSTER-WRITE-HARDENING P3):
@@ -657,7 +723,22 @@ func overwriteBackupReservationStillOurs(fsys afero.Fs, backupPath string, claim
 // Returns (skipped, replaced, err): skipped reports a refused destructive
 // overwrite (destination unchanged, no error); replaced reports the final
 // in-lock classification the callers' results carry.
-func (d *Downloader) installOverwriting(ctx context.Context, stagedPath, destPath string, ledger downloadLedger) (bool, bool, error) {
+//
+// Wave-45 (codex P2, PR#215 finding F1): provenance optionally carries the
+// validation-time identity snapshot of the staged input
+// (installedIdentityFromFileInfo of the handle validateDownloadedMedia read).
+// Both publish legs re-derive the staged input through the no-follow
+// classifier before any byte flow into destPath: the CREATE path re-proves
+// before EVERY no-replace publish attempt, and the replace path refuses
+// (routing through the set-aside/journal compensation like a failed publish)
+// when the wave-26 baseline would otherwise capture a window substitute.
+// A refusal surfaces the typed errStagedInputSubstituted — the caller must
+// not unlink the staged name: its occupant is preserved foreign bytes.
+func (d *Downloader) installOverwriting(ctx context.Context, stagedPath, destPath string, ledger downloadLedger, provenance ...installedDestIdentity) (bool, bool, error) {
+	var provenanceID installedDestIdentity
+	if len(provenance) > 0 {
+		provenanceID = provenance[0]
+	}
 	release := d.destLocks.Acquire(destPath)
 	// codex PR#215 R22-3: a caller canceled while queued on the destination
 	// lock must not publish staged media after the lock is finally granted.
@@ -709,6 +790,12 @@ func (d *Downloader) installOverwriting(ctx context.Context, stagedPath, destPat
 	for createAttempts := 0; statErr != nil && os.IsNotExist(statErr); createAttempts++ {
 		if createAttempts >= createPublishMaxAttempts {
 			return false, true, fmt.Errorf("failed to install %s: foreign writers claimed the destination across %d no-replace publishes: %w", destPath, createAttempts, fsutil.ErrPublishCollision)
+		}
+		// Wave-45 (finding F1): re-derive the staged input before EVERY
+		// no-replace publish attempt — only the validated object's bytes may
+		// flow into destPath on the create path.
+		if classifyStagedInput(d.fs, stagedPath, provenanceID) == stagedInputMismatch {
+			return false, false, fmt.Errorf("create install refused for %s — staged input %s no longer names the validated download object (foreign substitution after validation); substitute preserved, destination untouched: %w", destPath, stagedPath, errStagedInputSubstituted)
 		}
 		pubErr := fsutil.PublishNoReplace(d.fs, stagedPath, destPath)
 		if !errors.Is(pubErr, fsutil.ErrPublishCollision) {
@@ -835,8 +922,21 @@ func (d *Downloader) installOverwriting(ctx context.Context, stagedPath, destPat
 	// capture. A capture that cannot read the staged file fails closed to the
 	// wave-25 unknown-identity posture (no verification here, rollback
 	// refusal below) instead of turning a good publish into a rollback.
-	installedIdentity := captureInstalledDestIdentity(d.fs, stagedPath)
-	replaceErr := fsutil.ReplaceFile(d.fs, stagedPath, destPath)
+	// Wave-45 (codex P2, PR#215 finding F1): the wave-26 baseline capture must
+	// prove it is THE VALIDATED object, not a window substitute — a proven
+	// substitute never publishes on the replace path either. The refusal
+	// routes through the publish-failure compensation below unmodified: the
+	// set-aside restore and journal retraction run exactly like a failed
+	// ReplaceFile, and the typed sentinel rides the same %w wrap so the
+	// caller keeps the staged (substitute) name intact.
+	installedIdentity := installedDestIdentity{}
+	var replaceErr error
+	if classifyStagedInput(d.fs, stagedPath, provenanceID) == stagedInputMismatch {
+		replaceErr = fmt.Errorf("staged install input %s no longer names the validated download object before replace of %s (foreign substitution after validation) — substitute preserved: %w", stagedPath, destPath, errStagedInputSubstituted)
+	} else {
+		installedIdentity = captureInstalledDestIdentity(d.fs, stagedPath)
+		replaceErr = fsutil.ReplaceFile(d.fs, stagedPath, destPath)
+	}
 	if replaceErr == nil && installedIdentity.known && !destStillHoldsInstalledObject(d.fs, destPath, installedIdentity) {
 		// The publish reported success but the destination does NOT name the
 		// staged object — a foreign writer displaced it inside the publish
