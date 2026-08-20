@@ -128,6 +128,38 @@ func TestTakeAsideW38_ReservationLegs(t *testing.T) {
 		_, lerr := base.Stat(scratch)
 		require.ErrorIs(t, lerr, os.ErrNotExist, "OUR still-claimed reservation was dropped best-effort")
 	})
+
+	t.Run("w43: failed move preserves a swapped scratch occupant", func(t *testing.T) {
+		base := afero.NewMemMapFs()
+		src, scratch, claim := w38TakeFixture(t, base, "/out/w38-move-fail-swap")
+		srcInfo, _ := base.Stat(src)
+		moveErr := errors.New("w38 rename wedged")
+		fs := &w38RenamePlantFs{Fs: base, from: src, err: moveErr, swapPath: scratch, foreign: []byte("foreign-placement")}
+
+		hold, err := TakeAside(TakeAsideSpec{FS: fs, Src: src, Scratch: scratch, Claim: claim, Prove: w38SameProve(srcInfo)})
+		require.Nil(t, hold)
+		require.ErrorIs(t, err, moveErr)
+		require.Equal(t, "foreign-placement", string(w38Read(t, base, scratch)),
+			"the occupant swapped in during the failed move is preserved byte-intact")
+	})
+}
+
+// w38RenamePlantFs wedges the take-aside rename and plants foreign bytes at
+// the reservation path in the verifying-cleanup window.
+type w38RenamePlantFs struct {
+	afero.Fs
+	from     string
+	err      error
+	swapPath string
+	foreign  []byte
+}
+
+func (f *w38RenamePlantFs) Rename(oldname, newname string) error {
+	if oldname == f.from {
+		_ = f.Fs.Remove(f.swapPath)
+		return errors.Join(f.err, afero.WriteFile(f.Fs, f.swapPath, f.foreign, 0o600))
+	}
+	return f.Fs.Rename(oldname, newname)
 }
 
 func TestTakeAsideW38_PostMoveLegs(t *testing.T) {

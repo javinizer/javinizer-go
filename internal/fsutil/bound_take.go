@@ -150,10 +150,14 @@ func TakeAside(spec TakeAsideSpec) (*BoundAside, error) {
 		return nil, fmt.Errorf("take-aside reservation %s no longer names the claimed placeholder — foreign reservation swap: %w", spec.Scratch, ErrTakeAsideForeign)
 	}
 	if merr := ReplaceFile(spec.FS, spec.Src, spec.Scratch); merr != nil {
-		// The rename is atomic: a failed move relocated NOTHING, so the
-		// reservation at the scratch name is still OUR claimed placeholder —
-		// drop it best-effort exactly like the quarantine claim cleanups.
-		_ = spec.FS.Remove(spec.Scratch)
+		// The rename is atomic: a failed move relocated NOTHING. Codex P2
+		// (w43): the scratch reservation is re-proven against the claim
+		// BEFORE the drop — a writer that occupied the name after our claim
+		// is never unlinked; on any doubt the reservation is retained and
+		// the move error surfaces alone.
+		if cur, cerr := asideLstat(spec.FS, spec.Scratch); cerr == nil && asideSameObject(cur, spec.Claim) {
+			_ = spec.FS.Remove(spec.Scratch)
+		}
 		return nil, fmt.Errorf("take-aside move of %s onto %s: %w", spec.Src, spec.Scratch, merr)
 	}
 	hold := &BoundAside{fs: spec.FS, src: spec.Src, scratch: spec.Scratch, moved: true}
