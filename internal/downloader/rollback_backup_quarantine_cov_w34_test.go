@@ -220,14 +220,20 @@ func TestRollbackBackupQuarantineCovW34_WindowsPostureMoveClosesHandle(t *testin
 	src, err := base.OpenFile(backup, os.O_RDONLY, 0)
 	require.NoError(t, err)
 	closed := false
-	err = moveVerifiedRollbackBackupToQuarantine(base, backup, quarantine, w34CloseTrackFile{File: src, closed: &closed})
+	// Wave-42: the conditional handoff wants the claimed reservation's
+	// captured identity (the wave-30 production claim hands it over).
+	reservation, rerr := lstatBackupCandidate(base, quarantine)
+	require.NoError(t, rerr)
+	err = moveVerifiedRollbackBackupToQuarantine(base, backup, quarantine, reservation, w34CloseTrackFile{File: src, closed: &closed})
 	require.NoError(t, err)
-	require.True(t, closed, "the Windows-posture move closes the handle before the rename")
+	require.True(t, closed, "the Windows-posture move closes the handle before the publish rename")
 	require.Equal(t, "old bytes", string(mustReadDownloaderW7(t, base, quarantine)),
 		"the verified object moved onto the reserved quarantine name")
 	exists, eerr := afero.Exists(base, backup)
 	require.NoError(t, eerr)
 	require.False(t, exists, "the journaled name is vacated by the move")
+	require.Equal(t, []string{filepath.Base(quarantine)}, w32RollbackQuarNames(t, base, "/w34dl-win"),
+		"only the published quarantine name remains — the take-aside placeholder never lingers")
 }
 
 // POSIX posture control: the handle stays OPEN through the rename (the
@@ -246,9 +252,13 @@ func TestRollbackBackupQuarantineCovW34_PosixPostureMoveKeepsHandleOpen(t *testi
 	src, err := base.OpenFile(backup, os.O_RDONLY, 0)
 	require.NoError(t, err)
 	closed := false
-	err = moveVerifiedRollbackBackupToQuarantine(base, backup, quarantine, w34CloseTrackFile{File: src, closed: &closed})
+	reservation, rerr := lstatBackupCandidate(base, quarantine)
+	require.NoError(t, rerr)
+	err = moveVerifiedRollbackBackupToQuarantine(base, backup, quarantine, reservation, w34CloseTrackFile{File: src, closed: &closed})
 	require.NoError(t, err)
 	require.False(t, closed, "the POSIX move never closes the handle — the caller owns its lifecycle")
 	require.Equal(t, "old bytes", string(mustReadDownloaderW7(t, base, quarantine)))
+	require.Equal(t, []string{filepath.Base(quarantine)}, w32RollbackQuarNames(t, base, "/w34dl-posix"),
+		"only the published quarantine name remains — the take-aside placeholder never lingers")
 	_ = src.Close()
 }

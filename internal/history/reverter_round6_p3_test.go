@@ -473,9 +473,17 @@ func (f *removeFailFs) Remove(name string) error {
 	// unlink, so wedge the quarantine sibling spelling (victim + ".dlq." +
 	// token) too; the wedge compensation moves the verified object back onto
 	// the original name, keeping the callers' byte-retention assertions true.
+	// Wave-42: the conditional handoff ALSO unlinks its 0-byte take-aside
+	// placeholder under the same suffix (a warn-only leg the wedge must never
+	// hit), so the sibling arm fires only for the NON-EMPTY verified object.
 	norm := strings.ReplaceAll(name, "\\", "/")
-	if norm == f.victim || strings.HasPrefix(norm, f.victim+backupQuarantineSuffix) {
+	if norm == f.victim {
 		return errors.New("remove wedged")
+	}
+	if strings.HasPrefix(norm, f.victim+backupQuarantineSuffix) {
+		if info, serr := f.Fs.Stat(name); serr == nil && info.Size() > 0 {
+			return errors.New("remove wedged")
+		}
 	}
 	return f.Fs.Remove(name)
 }

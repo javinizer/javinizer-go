@@ -48,6 +48,17 @@ package downloader
 //     error and the install_overwrite caller persists the rearm-refused
 //     restore-pending kind instead of leaving the entry armed against a
 //     foreign-claimed name.
+//
+// Wave-42 (codex P2, PR#215 — the history twin): the quarantine handoff
+// itself is now the CONDITIONAL take-aside (fsutil/bound_take.go's TakeAside
+// shape — precisely the construction the wave-38 fallback handoff in
+// backup_handoff.go added), applied identically to history's
+// moveVerifiedBackupToQuarantine. The F1 verify-then-ReplaceFile
+// construction re-proved the reservation and then REPLACED whatever occupied
+// the name at rename time — a foreign plant landing between the two had its
+// bytes silently destroyed before the post-move re-verify could reject. The
+// verified object now moves exclusively through NO-REPLACE renames
+// (moveVerifiedRollbackBackupToQuarantine carries the legs).
 
 import (
 	cryptorand "crypto/rand"
@@ -177,20 +188,125 @@ func rollbackQuarantineReservationStillOurs(fsys afero.Fs, quarantine string, cl
 	return nil
 }
 
-// moveVerifiedRollbackBackupToQuarantine renames the verified backup object
-// onto its reserved quarantine name. The rename must be replace-aware on
-// every platform (the reservation placeholder occupies the name by design),
-// so it rides fsutil.ReplaceFile exactly like moveIntoReservedBackup. The
-// open no-follow handle stays OPEN through the rename on POSIX (the
-// descriptor pins the inode regardless of names, so the re-verify compares
-// against the object that was actually read); Windows cannot rename a file
-// with an open Go handle, so the Windows-posture seam closes it first and
-// the re-verify still binds the moved object to the verified snapshot.
-func moveVerifiedRollbackBackupToQuarantine(fsys afero.Fs, backup, quarantine string, handle afero.File) error {
+// moveVerifiedRollbackBackupToQuarantine moves the verified backup object
+// onto its reserved quarantine name — wave-42 (codex P2, PR#215): the move
+// is the CONDITIONAL take-aside handoff, the exact construction the wave-38
+// fallback handoff (backup_handoff.go's handoffViaVerifiedRename) uses,
+// applied identically to history's moveVerifiedBackupToQuarantine. The F1
+// verify-then-ReplaceFile construction re-proved the reservation and then
+// replaced whatever occupied the name at rename time: a foreign plant
+// landing between the re-proof and the rename had its bytes silently
+// destroyed before the post-move re-verify could reject. ReplaceFile no
+// longer moves src anywhere in this flow:
+//
+//  1. the reservation placeholder is taken ASIDE onto a fresh O_EXCL-reserved
+//     sibling (claimRollbackQuarantineName — the taken name mixes in the
+//     crypto token with the same uniqueness discipline), and the landed
+//     object is re-proven against the reservation's claim identity at
+//     syscall adjacency (destPlaceholderMatchesClaim). A plant swapped in
+//     after the caller's re-proof is what the take moves; the proof refuses
+//     it (typed fsutil.ErrPublishCollision) and it rides back onto the
+//     reservation name no-replace, byte-intact;
+//  2. a source-freedom proof pins the verify→move window: immediately after
+//     the take the reservation name must Lstat ENOENT — a racer reclaiming
+//     it mid-window is the typed collision class, its plant preserved, the
+//     placeholder restored no-replace where the name is still free;
+//  3. the verified object is recorded INTO the provably-free reservation
+//     name by a NO-REPLACE rename (fsutil.PublishNoReplace). A plant winning
+//     the freedom→publish gap is refused typed: BOTH the source object (it
+//     was never moved) and the plant survive; the compensation moves the
+//     placeholder back from the taken name NO-REPLACE only when free — an
+//     occupied name keeps BOTH foreign objects byte-intact and strands just
+//     our own placeholder at the taken name;
+//  4. only the taken name is unlinked afterwards, re-bound to the
+//     reservation claim identity at unlink time (the claimed placeholder is
+//     the only thing this flow ever deletes); a wedge leaves the inert
+//     0-byte sibling for manual cleanup with a warn — the handoff stands.
+//
+// Every failure leg releases the still-claimed reservation placeholder ONLY
+// through releaseClaimedReservation (identity-bound) — proven-foreign
+// occupants are never unlinked, and the caller's failure leg no longer
+// touches the quarantine name at all (its pre-wave-42 blind Remove could
+// unlink a mid-window plant).
+//
+// The open no-follow handle stays OPEN through the take and the publish on
+// POSIX (the descriptor pins the inode regardless of names, so the re-verify
+// compares against the object that was actually read); Windows cannot rename
+// a file with an open Go handle, so the Windows-posture seam closes it
+// immediately before the publish — the only rename of the handle-addressed
+// object.
+func moveVerifiedRollbackBackupToQuarantine(fsys afero.Fs, backup, quarantine string, reservation os.FileInfo, handle afero.File) error {
+	taken, takenClaim, cerr := claimRollbackQuarantineName(fsys, backup)
+	if cerr != nil {
+		releaseClaimedReservation(fsys, quarantine, reservation)
+		return fmt.Errorf("reserve the take-aside name for quarantine %s: %w", quarantine, cerr)
+	}
+	hold, terr := fsutil.TakeAside(fsutil.TakeAsideSpec{
+		FS:      fsys,
+		Src:     quarantine,
+		Scratch: taken,
+		Claim:   takenClaim,
+		Prove: func(moved os.FileInfo) error {
+			if !destPlaceholderMatchesClaim(moved, reservation) {
+				return fmt.Errorf("object taken aside from %s is not the claimed reservation placeholder — foreign bytes preserved: %w", quarantine, fsutil.ErrPublishCollision)
+			}
+			return nil
+		},
+	})
+	if terr != nil {
+		releaseClaimedReservation(fsys, quarantine, reservation)
+		return fmt.Errorf("take-aside of the quarantine reservation %s: %w", quarantine, terr)
+	}
+	// The codex-specified proof after the take: the reservation name must
+	// Lstat ENOENT (the take freed it) — a racer reclaiming it mid-window is
+	// the typed collision class, its plant preserved, the placeholder
+	// restored back no-replace where the name is still free (a collision
+	// there keeps the foreign claimant byte-intact and strands only our own
+	// placeholder).
+	if _, lerr := lstatBackupCandidate(fsys, quarantine); lerr == nil {
+		rerr := hold.Restore()
+		if rerr == nil {
+			releaseClaimedReservation(fsys, quarantine, reservation)
+		}
+		return errors.Join(
+			fmt.Errorf("quarantine reservation %s re-occupied between the take-aside and the source-freedom proof (plant preserved): %w", quarantine, fsutil.ErrPublishCollision),
+			rerr,
+		)
+	} else if !os.IsNotExist(lerr) {
+		rerr := hold.Restore()
+		if rerr == nil {
+			releaseClaimedReservation(fsys, quarantine, reservation)
+		}
+		return errors.Join(
+			fmt.Errorf("quarantine reservation %s indeterminate after the take-aside: %w", quarantine, lerr),
+			rerr,
+		)
+	}
+	// The reservation name is provably FREE: record the verified object onto
+	// it NO-REPLACE. On any failure (collision → the plant is preserved, the
+	// source never moved; kernel/IO → nothing moved) the placeholder rides
+	// back no-replace and, when the restore lands, is released identity-bound.
 	if fsutil.PathBackslashesAreSeparators {
 		_ = handle.Close()
 	}
-	return fsutil.ReplaceFile(fsys, backup, quarantine)
+	if moveErr := fsutil.PublishNoReplace(fsys, backup, quarantine); moveErr != nil {
+		rerr := hold.Restore()
+		if rerr == nil {
+			releaseClaimedReservation(fsys, quarantine, reservation)
+		}
+		return errors.Join(
+			fmt.Errorf("quarantine handoff (no-replace move of the verified object onto %s): %w", quarantine, moveErr),
+			rerr,
+		)
+	}
+	// Handoff achieved: only the taken name is unlinked, re-bound against the
+	// reservation claim identity at unlink time. A wedged unlink leaves the
+	// inert 0-byte quarantine sibling (sweeps never arbitrate .dlq. names) —
+	// the handoff stands.
+	if uerr := hold.Unlink(); uerr != nil {
+		logging.Warnf("downloader: take-aside release of the rollback quarantine reservation placeholder at %s failed: %v — inert scratch retained for manual cleanup", hold.Scratch(), uerr)
+	}
+	return nil
 }
 
 // restoreQuarantinedRollbackBackup is the wedge compensation for the
@@ -388,11 +504,14 @@ func quarantineRollbackBackupForRemoval(fsys afero.Fs, backup string, copiedFrom
 		logging.Warnf("downloader: %s refused the quarantine move for backup %s: %v — journal entry remains armed", phase, absoluteBackup, rerr)
 		return nil, rerr
 	}
-	if renErr := moveVerifiedRollbackBackupToQuarantine(fsys, backup, quarantine, handle); renErr != nil {
-		// The rename is atomic: a failed move relocated NOTHING. Cleaning
-		// the reservation drops OUR 0-byte claim file; the journaled name
-		// and the entry stay untouched.
-		_ = fsys.Remove(quarantine)
+	if renErr := moveVerifiedRollbackBackupToQuarantine(fsys, backup, quarantine, reservation, handle); renErr != nil {
+		// Wave-42: the conditional handoff owns its residue — a failed move
+		// relocated NOTHING foreign, the still-claimed reservation
+		// placeholder was released identity-bound where provable, and
+		// proven-foreign occupants keep their bytes. The pre-wave-42 blind
+		// Remove of the quarantine name is gone: after a take-aside/publish
+		// wedge the name may name a foreign plant that must never be
+		// unlinked.
 		logging.Warnf("downloader: %s failed to quarantine backup %s before removal: %v — journal entry remains armed", phase, absoluteBackup, renErr)
 		return nil, renErr
 	}

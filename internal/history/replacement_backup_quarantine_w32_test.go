@@ -40,29 +40,37 @@ import (
 )
 
 // w32QuarFs scripts the quarantine fs surface: armed latches on the
-// quarantining rename, post-arm quarantine-name lookups route through lstat
-// by call number (call 1 = the phase-1 post-move re-verify, call 2 = the
-// unlink-time re-verify), and Remove wedges the quarantine unlink.
+// quarantining PUBLISH rename (wave-42: the conditional handoff issues two
+// suffix renames — the take-aside (suffix→suffix) and the publish (src→
+// suffix) — the scripted surface keys on the publish, when the verified
+// object lands at the quarantine name), post-arm quarantine-name lookups
+// route through lstat by call number (call 1 = the phase-1 post-move
+// re-verify, call 2 = the unlink-time re-verify), and Remove wedges the
+// quarantine unlink.
 type w32QuarFs struct {
 	afero.Fs
-	armed   bool
-	moves   int
-	lookups int
-	lstat   func(call int, name string) (os.FileInfo, error)
-	remove  func(name string) error
+	armed    bool
+	quarName string // the publish target, learned at the publish rename (wave-42)
+	moves    int
+	lookups  int
+	lstat    func(call int, name string) (os.FileInfo, error)
+	remove   func(name string) error
 }
 
 func (f *w32QuarFs) Rename(oldname, newname string) error {
 	err := f.Fs.Rename(oldname, newname)
 	if err == nil && strings.Contains(newname, backupQuarantineSuffix) {
-		f.armed = true
 		f.moves++
+		if !strings.Contains(oldname, backupQuarantineSuffix) {
+			f.armed = true
+			f.quarName = newname
+		}
 	}
 	return err
 }
 
 func (f *w32QuarFs) LstatIfPossible(name string) (os.FileInfo, bool, error) {
-	if f.armed && strings.Contains(name, backupQuarantineSuffix) {
+	if f.armed && name == f.quarName {
 		f.lookups++
 		if f.lstat != nil {
 			info, err := f.lstat(f.lookups, name)
@@ -77,7 +85,9 @@ func (f *w32QuarFs) LstatIfPossible(name string) (os.FileInfo, bool, error) {
 }
 
 func (f *w32QuarFs) Remove(name string) error {
-	if f.armed && strings.Contains(name, backupQuarantineSuffix) && f.remove != nil {
+	// Wave-42: the take-aside placeholder unlink (a 0-byte scratch whose
+	// wedge posture is warn-only) is never the scripted victim.
+	if f.armed && f.remove != nil && name == f.quarName {
 		return f.remove(name)
 	}
 	return f.Fs.Remove(name)

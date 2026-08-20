@@ -25,13 +25,17 @@ import (
 )
 
 // w32RollbackQuarFs scripts the rollback quarantine fs surface: armed latches
-// on the quarantining rename, post-arm quarantine-name lookups route through
-// lstat by call number (call 1 = the post-move re-verify, call 2 = the
-// unlink-time re-verify), Remove/ OpenFile wedge the named surfaces, and
-// lstatAny wedges the BACKUP-name inspect leg.
+// on the quarantining PUBLISH rename (wave-42: the conditional handoff issues
+// two suffix renames — the take-aside (suffix→suffix) and the publish
+// (src→suffix) — the scripted surface keys on the publish, when the verified
+// object lands at the quarantine name), post-arm quarantine-name lookups
+// route through lstat by call number (call 1 = the post-move re-verify,
+// call 2 = the unlink-time re-verify), Remove/OpenFile wedge the named
+// surfaces, and lstatAny wedges the BACKUP-name inspect leg.
 type w32RollbackQuarFs struct {
 	afero.Fs
 	armed    bool
+	quarName string
 	lookups  int
 	lstat    func(call int, name string) (os.FileInfo, error)
 	removeFn func(name string) error
@@ -40,14 +44,15 @@ type w32RollbackQuarFs struct {
 
 func (f *w32RollbackQuarFs) Rename(oldname, newname string) error {
 	err := f.Fs.Rename(oldname, newname)
-	if err == nil && strings.Contains(newname, rollbackQuarantineSuffix) {
+	if err == nil && strings.Contains(newname, rollbackQuarantineSuffix) && !strings.Contains(oldname, rollbackQuarantineSuffix) {
 		f.armed = true
+		f.quarName = newname
 	}
 	return err
 }
 
 func (f *w32RollbackQuarFs) LstatIfPossible(name string) (os.FileInfo, bool, error) {
-	if f.armed && strings.Contains(name, rollbackQuarantineSuffix) {
+	if f.armed && name == f.quarName {
 		f.lookups++
 		if f.lstat != nil {
 			info, err := f.lstat(f.lookups, name)
@@ -62,7 +67,10 @@ func (f *w32RollbackQuarFs) LstatIfPossible(name string) (os.FileInfo, bool, err
 }
 
 func (f *w32RollbackQuarFs) Remove(name string) error {
-	if f.armed && strings.Contains(name, rollbackQuarantineSuffix) && f.removeFn != nil {
+	// Wave-42: the take-aside placeholder unlink (a 0-byte scratch whose
+	// wedge posture is warn-only) is never the scripted victim — only the
+	// publish-target quarantine name carries the scripted unlink arms.
+	if f.armed && name == f.quarName && f.removeFn != nil {
 		return f.removeFn(name)
 	}
 	return f.Fs.Remove(name)

@@ -98,6 +98,15 @@ type w34QuarantineUnlinkWedge struct {
 func (f *w34QuarantineUnlinkWedge) Remove(name string) error {
 	norm := strings.ReplaceAll(name, "\\", "/")
 	if norm == f.backup || strings.HasPrefix(norm, f.backup+backupQuarantineSuffix) {
+		if norm != f.backup {
+			// Wave-42: the conditional handoff also unlinks its 0-byte
+			// take-aside placeholder under the same suffix — a warn-only
+			// release the wedge must never hit. Only the NON-EMPTY
+			// quarantined verified object is the wedged instant.
+			if info, serr := f.Fs.Stat(name); serr != nil || info.Size() == 0 {
+				return f.Fs.Remove(name)
+			}
+		}
 		if f.dest != "" {
 			_ = afero.WriteFile(f.Fs, f.dest, f.foreign, 0o600)
 		}

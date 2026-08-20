@@ -332,22 +332,22 @@ func TestInstallOverwritingW30_MoveBackFailureMarkFailureLogsBothCauses(t *testi
 
 // w30UnlinkFailClaimFs wedges the quarantine unlink itself AND replays a
 // foreign claimant taking the vacated journaled backup name — the removeVerified
-// Remove-failure leg whose move-back compensation is then refused. Wave-38:
-// the flow now issues TWO .dlq. Removes — the backup handoff's take-aside
-// scratch first (pre-journal; wedging it would clobber the just-moved set-aside
-// with the claimant mid-test), then the rollback's quarantine unlink — so the
-// wedge fires from the SECOND .dlq. removal onward.
+// Remove-failure leg whose move-back compensation is then refused. The flow
+// issues THREE .dlq. Removes — the backup handoff's take-aside scratch first
+// (pre-journal, wave-38), then the rollback handoff's take-aside placeholder
+// (wave-42), then the rollback's quarantine unlink — and only the LAST may be
+// wedged (wedging a placeholder's warn-only release would clobber the
+// just-moved set-aside with the claimant mid-test). The wedge therefore keys
+// on the unlink of a NON-EMPTY .dlq. object: the quarantined verified backup.
 type w30UnlinkFailClaimFs struct {
 	afero.Fs
 	err      error
 	claimant []byte
-	calls    int
 }
 
 func (f *w30UnlinkFailClaimFs) Remove(name string) error {
 	if strings.Contains(name, rollbackQuarantineSuffix) {
-		f.calls++
-		if f.calls > 1 {
+		if info, serr := f.Fs.Stat(name); serr == nil && info.Size() > 0 {
 			backup := strings.SplitN(name, rollbackQuarantineSuffix, 2)[0]
 			_ = afero.WriteFile(f.Fs, backup, f.claimant, 0o644)
 			return f.err

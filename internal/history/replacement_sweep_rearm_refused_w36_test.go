@@ -49,9 +49,12 @@ type w36QuarMovePlantFs struct {
 	armed bool
 }
 
+// Wave-42: the conditional handoff issues two suffix renames — the
+// take-aside (suffix→suffix) and the publish (src→suffix); the plant lands
+// when the PUBLISH (the verified object's move) lands, never the take.
 func (f *w36QuarMovePlantFs) Rename(oldname, newname string) error {
 	err := f.Fs.Rename(oldname, newname)
-	if err == nil && !f.armed && strings.Contains(newname, backupQuarantineSuffix) {
+	if err == nil && !f.armed && strings.Contains(newname, backupQuarantineSuffix) && !strings.Contains(oldname, backupQuarantineSuffix) {
 		f.armed = true
 		if werr := afero.WriteFile(f.Fs, f.plant, f.bytes, 0o644); werr != nil {
 			return werr
@@ -72,9 +75,12 @@ type w36DestGatePlantFs struct {
 	armed   bool
 }
 
+// Wave-42: arms on the PUBLISH rename (oldname lacks the suffix) — never
+// the take-aside — so the destination gate wedges only once the verified
+// object provably sits at the quarantine name.
 func (f *w36DestGatePlantFs) Rename(oldname, newname string) error {
 	err := f.Fs.Rename(oldname, newname)
-	if err == nil && strings.Contains(newname, backupQuarantineSuffix) {
+	if err == nil && strings.Contains(newname, backupQuarantineSuffix) && !strings.Contains(oldname, backupQuarantineSuffix) {
 		f.armed = true
 		if werr := afero.WriteFile(f.Fs, f.plant, f.bytes, 0o644); werr != nil {
 			return werr

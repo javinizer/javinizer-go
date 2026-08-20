@@ -36,6 +36,17 @@ package history
 // re-prove the destination between the verified move and the unlink (R1),
 // and the unlink itself re-binds the name at Remove time with ENOENT no
 // longer consumed (R4).
+//
+// Wave-42 (codex P2, PR#215): the quarantine handoff itself is now the
+// CONDITIONAL take-aside (fsutil/bound_take.go's TakeAside shape, mirrored
+// from the downloader fallback handoff in downloader/backup_handoff.go).
+// The wave-36 verify-then-ReplaceFile construction re-proved the reservation
+// and then REPLACED whatever occupied the name at rename time — a foreign
+// plant landing between the two had its bytes silently destroyed before the
+// post-move re-verify could reject. The handoff now takes the reservation
+// ASIDE (no object is ever replaced), proves the reservation name free, and
+// records the verified object onto it with a NO-REPLACE rename
+// (moveVerifiedBackupToQuarantine carries the legs).
 
 import (
 	cryptorand "crypto/rand"
@@ -150,28 +161,170 @@ func backupQuarantineReservationStillOurs(fs afero.Fs, quarantine string, claim 
 	return nil
 }
 
-// moveVerifiedBackupToQuarantine renames the verified backup object onto its
-// reserved quarantine name. The rename must be replace-aware on every
-// platform: the reservation placeholder occupies the name by design, and a
-// non-replacing rename (Windows MoveFileW semantics — or any wrapper whose
-// rename refuses existing targets) would fail against OUR OWN placeholder.
-// fsutil.ReplaceFile supplies the atomicity (POSIX rename replaces in place;
-// Windows routes to MoveFileExW's replace form).
+// releaseBackupQuarantineReservation unlinks a still-claimed quarantine
+// reservation after a failed handoff — bound to the claim's identity (same
+// discipline as the downloader's releaseClaimedReservation): only the
+// verified 0-byte placeholder this operation reserved may be removed. A
+// reservation that VANISHED on its own needs no cleanup. Any other answer —
+// foreign occupant, identity mismatch, indeterminate lookup — is a REFUSAL:
+// the name is left byte-intact and the handoff failure surfaces with the
+// occupant preserved.
+func releaseBackupQuarantineReservation(fs afero.Fs, quarantine string, claim os.FileInfo) {
+	err := backupQuarantineReservationStillOurs(fs, quarantine, claim)
+	if err == nil {
+		// Proven ours at syscall adjacency — release the placeholder so a
+		// retry never has to climb past it.
+		_ = fs.Remove(quarantine)
+		return
+	}
+	if errors.Is(err, afero.ErrFileNotFound) {
+		return
+	}
+	logging.Warnf("failed quarantine-reservation cleanup of %s refused — the reservation no longer provably names our claimed placeholder (%v); the occupant is left byte-intact", quarantine, err)
+}
+
+// backupQuarantinePlaceholderMatches reports whether cur — the object the
+// take-aside landed at the taken-aside name — is still THE claimed
+// reservation placeholder: regular, non-symlink, size 0, same mtime on every
+// platform, and same dev/inode where the filesystem exposes them (the
+// take-aside Prove binding; the shape mirrors
+// backupQuarantineReservationStillOurs).
+func backupQuarantinePlaceholderMatches(cur, claim os.FileInfo) bool {
+	if cur == nil || cur.Mode()&os.ModeSymlink != 0 || !cur.Mode().IsRegular() || cur.Size() != 0 || !cur.ModTime().Equal(claim.ModTime()) {
+		return false
+	}
+	if claimDev, claimIno, claimOK := restoreSourceIdentity(claim); claimOK {
+		if curDev, curIno, curOK := restoreSourceIdentity(cur); curOK && (claimDev != curDev || claimIno != curIno) {
+			return false
+		}
+	}
+	return true
+}
+
+// moveVerifiedBackupToQuarantine moves the verified backup object onto its
+// reserved quarantine name — wave-42 (codex P2, PR#215): the move is the
+// CONDITIONAL take-aside handoff (fsutil/bound_take.go's TakeAside shape,
+// mirrored from the downloader's fallback handoff in
+// downloader/backup_handoff.go). The pre-wave-42 verify-then-ReplaceFile
+// construction re-proved the reservation and then replaced whatever occupied
+// the name at rename time: a foreign plant landing between the re-proof and
+// the rename had its bytes silently destroyed before the post-move re-verify
+// could reject. ReplaceFile no longer moves src anywhere in this flow:
 //
-// Handle discipline: the open no-follow handle stays OPEN through the rename
-// on POSIX (the descriptor pins the inode regardless of names, so the step-3
-// re-verify compares against the object that was actually read). Windows
-// cannot rename a file with an open Go handle (no FILE_SHARE_DELETE), so the
-// Windows-posture seam closes it first; the re-verify still binds the moved
-// object to the verified snapshot, narrowing that platform's close→rename
-// gap to a refusable mismatch instead of a silent foreign-bytes unlink. A
-// nil handle (the wave-35 destination undo flow — restore_dest_quarantine_w35)
-// skips the close dance entirely: no open descriptor exists to pin or close.
-func moveVerifiedBackupToQuarantine(fs afero.Fs, backup, quarantine string, handle afero.File) error {
+//  1. the reservation placeholder is taken ASIDE: a fresh O_EXCL-reserved
+//     sibling — drawn through claimBackupQuarantineName, so the taken name
+//     mixes in the crypto token with the same uniqueness discipline —
+//     receives the placeholder through TakeAside's rename (replace-aware
+//     ONLY against OUR OWN freshly claimed placeholder, re-proven at take
+//     time), and the landed object is re-proven against the reservation's
+//     claim identity at syscall adjacency. A plant swapped in after the
+//     caller's re-proof is what the take moves; the proof refuses it (typed
+//     fsutil.ErrPublishCollision) and it rides back onto the reservation
+//     name no-replace, byte-intact;
+//  2. a source-freedom proof pins the window the old check→replace left
+//     open: immediately after the take the reservation name must Lstat
+//     ENOENT — a racer reclaiming it mid-window is the typed collision
+//     class, its plant preserved, the placeholder restored no-replace;
+//  3. the verified object is recorded INTO the provably-free reservation
+//     name by a NO-REPLACE rename (fsutil.PublishNoReplace). A plant winning
+//     the freedom→publish gap is refused typed: BOTH the source object (it
+//     was never moved — a failed publish relocates nothing) and the plant
+//     survive; the compensation moves the placeholder back from the taken
+//     name onto the reservation name ONLY when free (no-replace) — an
+//     occupied name keeps BOTH foreign objects byte-intact and strands just
+//     our own placeholder at the taken name;
+//  4. only the taken name is unlinked afterwards, re-bound to the reservation
+//     claim identity at unlink time (the claimed placeholder is the only
+//     thing this flow ever deletes). A wedge there leaves the inert 0-byte
+//     sibling for manual cleanup with a warn — sweeps never arbitrate .dlq.
+//     names, and the handoff stands.
+//
+// Residue discipline: every failure leg above releases the still-claimed
+// reservation placeholder ONLY through releaseBackupQuarantineReservation —
+// proven-foreign occupants are never unlinked by this flow, and the caller's
+// failure leg no longer touches the quarantine name at all (its pre-wave-42
+// blind Remove could unlink a mid-window plant).
+//
+// Handle discipline: the open no-follow handle stays OPEN through the take
+// and the publish on POSIX (the descriptor pins the inode regardless of
+// names, so the post-move re-verify compares against the object that was
+// actually read). Windows cannot rename a file with an open Go handle (no
+// FILE_SHARE_DELETE), so the Windows-posture seam closes it immediately
+// before the publish — the only rename of the handle-addressed object. A
+// nil handle (the wave-35 destination undo flow —
+// restore_dest_quarantine_w35) skips the close dance entirely.
+func moveVerifiedBackupToQuarantine(fs afero.Fs, backup, quarantine string, reservation os.FileInfo, handle afero.File) error {
+	taken, takenClaim, cerr := claimBackupQuarantineName(fs, backup)
+	if cerr != nil {
+		releaseBackupQuarantineReservation(fs, quarantine, reservation)
+		return fmt.Errorf("reserve the take-aside name for quarantine %s: %w", quarantine, cerr)
+	}
+	hold, terr := fsutil.TakeAside(fsutil.TakeAsideSpec{
+		FS:      fs,
+		Src:     quarantine,
+		Scratch: taken,
+		Claim:   takenClaim,
+		Prove: func(moved os.FileInfo) error {
+			if !backupQuarantinePlaceholderMatches(moved, reservation) {
+				return fmt.Errorf("object taken aside from %s is not the claimed reservation placeholder — foreign bytes preserved: %w", quarantine, fsutil.ErrPublishCollision)
+			}
+			return nil
+		},
+	})
+	if terr != nil {
+		releaseBackupQuarantineReservation(fs, quarantine, reservation)
+		return fmt.Errorf("take-aside of the quarantine reservation %s: %w", quarantine, terr)
+	}
+	// The codex-specified proof after the take: the reservation name must
+	// Lstat ENOENT (the take freed it) — a racer reclaiming it mid-window is
+	// the typed collision class, its plant preserved, the placeholder
+	// restored back no-replace where the name is still free (a collision
+	// there keeps the foreign claimant byte-intact and strands only our own
+	// placeholder).
+	if _, lerr := lstatRestoreSource(fs, quarantine); lerr == nil {
+		rerr := hold.Restore()
+		if rerr == nil {
+			releaseBackupQuarantineReservation(fs, quarantine, reservation)
+		}
+		return errors.Join(
+			fmt.Errorf("quarantine reservation %s re-occupied between the take-aside and the source-freedom proof (plant preserved): %w", quarantine, fsutil.ErrPublishCollision),
+			rerr,
+		)
+	} else if !errors.Is(lerr, afero.ErrFileNotFound) {
+		rerr := hold.Restore()
+		if rerr == nil {
+			releaseBackupQuarantineReservation(fs, quarantine, reservation)
+		}
+		return errors.Join(
+			fmt.Errorf("quarantine reservation %s indeterminate after the take-aside: %w", quarantine, lerr),
+			rerr,
+		)
+	}
+	// The reservation name is provably FREE: record the verified object onto
+	// it NO-REPLACE. On any failure (collision → the plant is preserved, the
+	// source never moved; kernel/IO → nothing moved) the placeholder rides
+	// back no-replace and, when the restore lands, is released identity-bound.
 	if handle != nil && fsutil.PathBackslashesAreSeparators {
 		_ = handle.Close()
 	}
-	return fsutil.ReplaceFile(fs, backup, quarantine)
+	if moveErr := fsutil.PublishNoReplace(fs, backup, quarantine); moveErr != nil {
+		rerr := hold.Restore()
+		if rerr == nil {
+			releaseBackupQuarantineReservation(fs, quarantine, reservation)
+		}
+		return errors.Join(
+			fmt.Errorf("quarantine handoff (no-replace move of the verified object onto %s): %w", quarantine, moveErr),
+			rerr,
+		)
+	}
+	// Handoff achieved: only the taken name is unlinked, re-bound against the
+	// reservation claim identity at unlink time. A wedged unlink leaves the
+	// inert 0-byte quarantine sibling (sweeps never arbitrate .dlq. names) —
+	// the handoff stands.
+	if uerr := hold.Unlink(); uerr != nil {
+		logging.Warnf("take-aside release of the quarantine reservation placeholder at %s failed: %v — inert scratch retained for manual cleanup", hold.Scratch(), uerr)
+	}
+	return nil
 }
 
 // restoreQuarantinedBackup is the wedge compensation for the quarantine
@@ -278,11 +431,13 @@ func quarantineVerifiedBackup(fs afero.Fs, backup, phase string, handle afero.Fi
 		logging.Warnf("%s refused the quarantine move for backup %s: %v — journal entry retained live", phase, absoluteBackup, rerr)
 		return nil, rerr
 	}
-	if renErr := moveVerifiedBackupToQuarantine(fs, backup, quarantine, handle); renErr != nil {
-		// The rename is atomic: a failed move relocated NOTHING. Cleaning the
-		// reservation drops OUR 0-byte claim file; the journaled name and the
-		// entry stay untouched for the conservative retry legs.
-		_ = fs.Remove(quarantine)
+	if renErr := moveVerifiedBackupToQuarantine(fs, backup, quarantine, reservation, handle); renErr != nil {
+		// Wave-42: the conditional handoff owns its residue — a failed move
+		// relocated NOTHING foreign, the still-claimed reservation placeholder
+		// was released identity-bound where provable, and proven-foreign
+		// occupants keep their bytes. The pre-wave-42 blind Remove of the
+		// quarantine name is gone: after a take-aside/publish wedge the name
+		// may name a foreign plant that must never be unlinked.
 		logging.Warnf("%s failed to quarantine backup %s before removal: %v — journal entry retained live", phase, absoluteBackup, renErr)
 		return nil, renErr
 	}

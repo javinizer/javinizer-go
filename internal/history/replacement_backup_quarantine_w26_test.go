@@ -48,7 +48,9 @@ import (
 
 // w26RenameHookFs replays the directory writer racing inside the removal
 // gate's open→rename window: the hook fires exactly once, right BEFORE the
-// quarantining rename delegates.
+// quarantining rename delegates. Wave-42: the conditional handoff issues TWO
+// suffix renames — the take-aside (suffix→suffix) and the publish (src→
+// suffix); the hooks bind to the PUBLISH, the move of the journaled occupant.
 type w26RenameHookFs struct {
 	afero.Fs
 	beforeMove func()
@@ -56,7 +58,7 @@ type w26RenameHookFs struct {
 }
 
 func (f *w26RenameHookFs) Rename(oldname, newname string) error {
-	if strings.Contains(newname, backupQuarantineSuffix) {
+	if strings.Contains(newname, backupQuarantineSuffix) && !strings.Contains(oldname, backupQuarantineSuffix) {
 		if f.beforeMove != nil {
 			f.beforeMove()
 		}
@@ -136,12 +138,16 @@ func TestRemoveReplacementBackupW26_SubstitutionBeforeMoveRefusesAndPreserves(t 
 }
 
 // w26QuarLstatFs rewrites post-move Lstat answers for quarantine names (the
-// wedge flag flips on the successful quarantining rename), replaying rashly
-// indeterminate or foreign re-verify answers. Claim-time lookups run before
-// any move and pass through. disabled lifts the wedge for retry legs.
+// wedge flag flips on the successful quarantining PUBLISH rename — wave-42:
+// the take-aside rename (suffix→suffix) no longer arms the seam, only the
+// verified object's landing rename does — and only THE publish-target name is
+// scripted), replaying rashly indeterminate or foreign re-verify answers.
+// Claim-time lookups run before any move and pass through. disabled lifts
+// the wedge for retry legs.
 type w26QuarLstatFs struct {
 	afero.Fs
 	moved         bool
+	quarName      string      // the publish target, learned at the publish rename (wave-42)
 	info          os.FileInfo // substituted re-verify answer (takes precedence after err)
 	err           error       // substituted lookup error (afero.ErrFileNotFound models the vanish leg)
 	substituteNil bool        // answer (nil, nil) — the indeterminate nil arm
@@ -150,14 +156,15 @@ type w26QuarLstatFs struct {
 
 func (f *w26QuarLstatFs) Rename(oldname, newname string) error {
 	err := f.Fs.Rename(oldname, newname)
-	if err == nil && strings.Contains(newname, backupQuarantineSuffix) {
+	if err == nil && strings.Contains(newname, backupQuarantineSuffix) && !strings.Contains(oldname, backupQuarantineSuffix) {
 		f.moved = true
+		f.quarName = newname
 	}
 	return err
 }
 
 func (f *w26QuarLstatFs) LstatIfPossible(name string) (os.FileInfo, bool, error) {
-	if f.moved && !f.disabled && strings.Contains(name, backupQuarantineSuffix) {
+	if f.moved && !f.disabled && name == f.quarName {
 		switch {
 		case f.err != nil:
 			return nil, false, f.err
@@ -175,10 +182,14 @@ func (f *w26QuarLstatFs) LstatIfPossible(name string) (os.FileInfo, bool, error)
 }
 
 // w26QuarGateFs stages the final-unlink legs: afterMove plants a foreign file
-// on the journaled name after the quarantine move, removeErr wedges the
-// quarantine unlink itself, and notExist answers it already-removed.
+// on the journaled name after the quarantine PUBLISH move (wave-42: the
+// take-aside rename never fires it), removeErr wedges the quarantine unlink
+// itself, and notExist answers it already-removed. The wave-42 take-aside
+// placeholder unlink (a 0-byte scratch with a warn-only wedge posture) is
+// never the scripted victim — the wedge keys on the publish-target name.
 type w26QuarGateFs struct {
 	afero.Fs
+	quarName  string
 	afterMove func()
 	removeErr error
 	notExist  bool
@@ -186,14 +197,17 @@ type w26QuarGateFs struct {
 
 func (f *w26QuarGateFs) Rename(oldname, newname string) error {
 	err := f.Fs.Rename(oldname, newname)
-	if err == nil && strings.Contains(newname, backupQuarantineSuffix) && f.afterMove != nil {
-		f.afterMove()
+	if err == nil && strings.Contains(newname, backupQuarantineSuffix) && !strings.Contains(oldname, backupQuarantineSuffix) {
+		f.quarName = newname
+		if f.afterMove != nil {
+			f.afterMove()
+		}
 	}
 	return err
 }
 
 func (f *w26QuarGateFs) Remove(name string) error {
-	if strings.Contains(name, backupQuarantineSuffix) {
+	if name == f.quarName {
 		if f.notExist {
 			_ = f.Fs.Remove(name)
 			return os.ErrNotExist
