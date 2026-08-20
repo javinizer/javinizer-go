@@ -801,25 +801,37 @@ func (s *ReplacementSweeper) sweepOne(ctx context.Context, idx *replacementLedge
 		return 0
 	}
 	defer busyRelease()
-	// Wave-50 (codex P2, PR#215 finding F1): the destination lock is acquired
-	// BEFORE the claim record so the record is born binding BOTH arbitration
-	// holds — a stranded goroutine parks mid-op holding marker AND lock, and
-	// the reverter's pre-acquisition reclaim consult must be able to free both
-	// through the claim's once-guarded releases. Recording before acquiring
-	// would open an acquire→bind window a reclaim can race (a released-marker
-	// consult freeing nothing of the lock still being taken), and any leg
-	// acquiring the lock apart from the record could hold it UNTRACKED past
-	// abandonment.
-	rawDestRelease := fsutil.SharedDestLocks().Acquire(dest)
-	// Wave-49 (codex P2): journal the claim in the in-process, ctx-scoped
-	// ledger BEFORE it can outlive its waiter — a window between the
-	// acquisition and any later ctx check is exactly how the wave-8 deadline
-	// strands a live marker against the continued revert. The untrack runs
-	// before the marker release (LIFO), and a reclaim by the continued revert
-	// consumes the once-guarded releases, making this goroutine's deferred
-	// releases no-ops (never a double-free of a successor marker or lock).
-	claim, untrackSweepClaim := recordSweepBusyClaim(ctx, dest, busyRelease, rawDestRelease)
+	// Wave-52 (codex local review round 7, PR#215 finding F2): journal the
+	// claim in the in-process, ctx-scoped ledger at BUSY-MARKER ACQUIRE TIME —
+	// BEFORE the blocking destination-lock wait below. The wave-50 order
+	// (dest lock first, claim record second) left a ctx expiring DURING the
+	// wait with an OWNED marker no ledger record named: the continued
+	// revert's pre-acquisition reclaim consult found nothing, and the
+	// destination kept its busy refusal for the whole stranding. The record
+	// is born binding the marker release and carrying a pending cell for the
+	// dest-lock release (bindDestLock fills it below), so the wave-49 ledger
+	// sees the incoming claim for the ENTIRE wait and no held lock is ever
+	// untracked. The untrack runs before the marker release (LIFO), and a
+	// reclaim by the continued revert consumes the once-guarded releases,
+	// making this goroutine's deferred releases no-ops (never a double-free
+	// of a successor marker or lock).
+	claim, untrackSweepClaim := recordSweepBusyClaim(ctx, dest, busyRelease)
 	defer untrackSweepClaim()
+	rawDestRelease := fsutil.SharedDestLocks().Acquire(dest)
+	if !claim.bindDestLock(rawDestRelease) {
+		// The claim was reclaimed DURING the dest-lock wait (the reclaim ran
+		// against the empty cell): this wait then completing means the
+		// just-acquired lock belongs to this goroutine alone — the
+		// once-guard never became visible to the reclaim — so the release is
+		// this goroutine's direct responsibility. The revocation flag is
+		// already set (the reclaim revokes before it releases); log through
+		// the gate seam and abandon before any further classification read or
+		// mutation — the wave-51 stage gates below would stop the first
+		// mutation anyway.
+		rawDestRelease()
+		claim.abandonIfRevoked("destination lock acquisition", backup, dest)
+		return 0
+	}
 	defer claim.releaseDestLock()
 
 	if owner, ok := idx.journaled[backupKey]; ok {
@@ -1073,16 +1085,33 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 	// Abandoning here leaves a coherent armed shape: the restored bytes may
 	// already stand at dest (a complete publish), the backup stays at its
 	// journaled name, and the journal entry keeps its pre-mutation
-	// classification — never clobbered with partially-mutated data. The gate
-	// deliberately stands at the unit's ENTRY rather than between the unit's
-	// own syscalls: the reclaim cannot wait on this worker, so no in-unit
-	// check could close a syscall-adjacent gap — those windows are exactly
-	// what the wave-26/32/34/35/36 identity bindings and compensation legs
-	// already close against foreign racers. A unit that PASSED this gate and
-	// observes revocation mid-flight completes through that audited vocabulary,
-	// and the reverter's fresh-read ordering (documented at
-	// restoreReplacementJournal) resolves the commit-vs-restore race into the
-	// completed-consume posture.
+	// classification — never clobbered with partially-mutated data.
+	// Wave-52 (codex local review round 7, PR#215 finding F1 — "the entry
+	// gate is not the unit fence"): a claim revoked AFTER passing this gate
+	// let the unit run on: its consume/persist legs then fail under the dead
+	// ctx and the compensations (re-arm publishes, undo unlinks, marker
+	// persists) moved or destroyed names against arbitration the continued
+	// revert already owns — and the row surfaced armed against whatever shape
+	// that interlude left. The unit is now fenced PER STAGE: every mutation
+	// stage below — (b) the quarantine claim/move/unlink arms on either
+	// classification leg, (c) each pending persist, (d) the consumption
+	// update, (e) each compensation leg that destroys or moves names —
+	// consults the claim's revocation flag IMMEDIATELY BEFORE its first
+	// mutation and abandons with zero further mutation. The entry
+	// classification stays exactly where the last completed stage left it, and
+	// a stage whose syscall sequence already began completes through the
+	// audited wave-26/32/34/35/36 identity bindings (the next stage's gate is
+	// what stops the unit — the in-stage syscalls are never reopened). Two
+	// resting shapes matter:
+	//   - publish NOT yet consumed but the backup unlinked (stages d/e below):
+	//     the wave-19 unlandable-consume contract — the entry restages to the
+	//     rearm-refused restore-pending kind (destination certified, backup
+	//     name unowned), NEVER a re-arm publish or a restore undo, so the
+	//     reclaiming revert consumes it journal-only;
+	//   - every earlier stage: a bare stop, classification untouched.
+	// The reverter's reclaim→arbitrate→fresh-read→mutate ordering (documented
+	// at restoreReplacementJournal) resolves the commit-vs-restore race into
+	// the completed-consume posture on top.
 	if claim.abandonIfRevoked("backup removal and journal consumption", backup, dest) {
 		return false
 	}
@@ -1107,6 +1136,15 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 		// Owner row unreadable (or journal unparseable) inside the
 		// transaction — the restore is undone exactly as the pre-transaction
 		// live-row read failure did.
+		// Wave-52 (round 7, finding F1, stage e): the undo UNLINKS the
+		// published destination — a name-destroying compensation a reclaimed
+		// claim must never run. The revoked stop leaves the completed publish
+		// exactly where it landed (destination present with the restored
+		// bytes, backup at its journaled name, entry armed) for the
+		// reclaiming arbitration to converge.
+		if claim.abandonIfRevoked("journal-read failure compensation (restore undo)", backup, dest) {
+			return false
+		}
 		undoRestore()
 		return false
 	}
@@ -1125,6 +1163,15 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 		// object this leg published, and only then is the quarantined object
 		// unlinked. On divergence the object moves back onto the journaled
 		// name and nothing is removed.
+		// Wave-52 (round 7, finding F1, stage b): the quarantine
+		// claim/move/unlink arms are ONE gated stage — a reclaimed claim stops
+		// BEFORE the verified object moves: the completed publish stands, the
+		// backup keeps its journaled name, the already-consumed journal is
+		// untouched, and the next live arbitration re-classifies the leftover
+		// name as an ordinary orphan.
+		if claim.abandonIfRevoked("consumed-entry backup quarantine removal", backup, dest) {
+			return false
+		}
 		hold, rmErr := quarantineReplacementBackupForRemoval(s.fs, backup, "replacement sweep", nil, backupInfoBeforeCopy)
 		if rmErr == nil && !restoredDestStillOurs(s.fs, dest, restoredID) {
 			if rerr := hold.restore(); rerr != nil {
@@ -1169,6 +1216,14 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 	// the entry stays ARMED — deliberately NOT marked restore-pending, whose
 	// marker certifies destination bytes that are no longer provably in
 	// place.
+	// Wave-52 (round 7, finding F1, stage b): the armed entry's quarantine
+	// arms — reclaimed ⇒ the publish stage's result stands (destination
+	// carries the restored bytes), the backup never leaves its journaled
+	// name, and the entry keeps its armed classification for the reclaiming
+	// arbitration to re-run this unit from scratch.
+	if claim.abandonIfRevoked("armed-entry backup quarantine removal", backup, dest) {
+		return false
+	}
 	hold, rmErr := quarantineReplacementBackupForRemoval(s.fs, backup, "replacement sweep", journaledEntryFacts(row, backupSlash), backupInfoBeforeCopy)
 	if rmErr == nil && !restoredDestStillOurs(s.fs, dest, restoredID) {
 		if rerr := hold.restore(); rerr != nil {
@@ -1181,6 +1236,15 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 			// marker still certifies the destination carries the restored bytes
 			// and every retry runs journal-only. The quarantined bytes stay
 			// retained for manual recovery in every persist outcome.
+			// Wave-52 (round 7, finding F1, stage c): the pending-persist
+			// classification update is revocation-fenced — a reclaimed claim
+			// stops bare: the entry KEEPS its armed classification (the wave-36
+			// persist-failure posture), the foreign occupant at the journaled
+			// name stays byte-intact, and the verified bytes stay recoverable at
+			// the quarantine name.
+			if claim.abandonIfRevoked("divergence recovery restore-pending persist", backup, dest) {
+				return false
+			}
 			s.rememberPendingRemovalKind(backupSlash, models.RestorePendingKindRearmRefused)
 			if markErr := s.persistRestorePendingMarkerKind(ctx, row.ID, backupSlash, models.RestorePendingKindRearmRefused); markErr != nil {
 				logging.Warnf("replacement sweep %s: restored destination %s diverged after the backup was quarantined, the verified move-back failed (%v), AND the rearm-refused marker could not be persisted (%v) — entry left armed, foreign name untouched, verified bytes recoverable at %s", backup, dest, rerr, markErr, hold.quarantine)
@@ -1196,6 +1260,15 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 		rmErr = hold.removeVerified()
 	}
 	if rmErr != nil {
+		// Wave-52 (round 7, finding F1, stages c+e): the failed removal's
+		// pending persist — and its persist-failure undo compensation — are
+		// fenced together: a reclaimed claim stops bare with the entry's armed
+		// classification untouched and the fs exactly as the removal attempt
+		// left it (destination published, backup name in the post-attempt
+		// shape).
+		if claim.abandonIfRevoked("removal-failure pending persist", backup, dest) {
+			return false
+		}
 		// Wave-32 (finding R4): the vanished class marks the rearm-refused
 		// kind (journal-only retry — the name is absent by construction);
 		// every other class keeps the clean marker for the file-driven retry.
@@ -1213,10 +1286,40 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 		return false
 	}
 
+	// Wave-52 (round 7, finding F1, stage d): the consumption update is the
+	// unit's last mutation stage. A claim revoked here — the restore ALREADY
+	// published and verified, the backup ALREADY unlinked — is never
+	// compensated backward (no re-arm publish, no restore undo): the wave-19
+	// unlandable-consume contract supplies the RESTING classification
+	// instead — the rearm-refused restore-pending marker (best-effort
+	// durable + in-process fallback): the destination is certified carrying
+	// the restored bytes and the backup name is unowned (absent), so the
+	// reclaiming revert consumes the entry journal-only.
+	if claim.abandonIfRevoked("journal consumption", backup, dest) {
+		s.rememberPendingRemovalKind(backupSlash, models.RestorePendingKindRearmRefused)
+		if markErr := s.persistRestorePendingMarkerKind(ctx, row.ID, backupSlash, models.RestorePendingKindRearmRefused); markErr != nil {
+			logging.Warnf("replacement sweep %s: claim reclaimed after the backup removal — the consumption was skipped AND the rearm-refused restore-pending restage could not be persisted (%v) — restored destination retained, absent backup name untouched", backup, markErr)
+		}
+		return false
+	}
 	uErr := s.repo.UpdateJournalInTx(ctx, row.ID, func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
 		return consumeSweepJournalEntry(current, backupSlash)
 	})
 	if uErr != nil {
+		// Wave-52 (round 7, finding F1, stage e): the consumption-failure
+		// compensation (re-arm publish → undo unlink) moves or destroys names
+		// a reclaimed claim owns no longer — both legs are fenced. The resting
+		// classification is the same wave-19 unlandable-consume contract: the
+		// rearm-refused restore-pending restage (the re-arm's refusal outcome
+		// WITHOUT the re-arm itself — no publish ever ran here, so the absent
+		// name is unowned), destination retained, backup path untouched.
+		if claim.abandonIfRevoked("consumption failure compensation (re-arm)", backup, dest) {
+			s.rememberPendingRemovalKind(backupSlash, models.RestorePendingKindRearmRefused)
+			if markErr := s.persistRestorePendingMarkerKind(ctx, row.ID, backupSlash, models.RestorePendingKindRearmRefused); markErr != nil {
+				logging.Warnf("replacement sweep %s: consumption failed (%v) under a reclaimed claim AND the rearm-refused restore-pending restage could not be persisted (%v) — restored destination retained, no re-arm attempted, absent backup name untouched", backup, uErr, markErr)
+			}
+			return false
+		}
 		// The backup was removed first, so re-arm it before undoing the
 		// restore. ONLY a SUCCEEDED re-arm re-establishes the armed,
 		// backup-present retry posture that licenses undoing the restore (codex
@@ -1265,6 +1368,18 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 		// the remaining verdict→Remove window against a foreign substitution.
 		if !restoredDestStillOurs(s.fs, dest, restoredID) {
 			logging.Warnf("replacement sweep %s: consumption failed (%v) and restore undo REFUSED — restored destination %s no longer names the published restore object (foreign swap or deletion in the re-arm→undo window); destination and re-armed backup retained, journal entry left live", backup, uErr, dest)
+			return false
+		}
+		// Wave-52 (round 7, finding F1, stage e): the undo unlink is the
+		// unit's last name-destroying leg — a claim revoked ANYWHERE past the
+		// re-arm's success (including inside the identity check above, the
+		// one parkable read inside this stage) leaves the fully repaired armed
+		// retry shape standing (backup re-armed from the published
+		// destination, entry armed, destination untouched): nothing further
+		// unlinks, and the next live arbitration converges the retry. The gate
+		// stands between the verdict and the unlink so no read inside the
+		// stage can smuggle a revocation past it.
+		if claim.abandonIfRevoked("consumption failure compensation (restore undo)", backup, dest) {
 			return false
 		}
 		if rmErr := removeRestoredDestQuarantined(s.fs, dest, "replacement sweep", restoredID); rmErr != nil {
@@ -1447,6 +1562,13 @@ func (s *ReplacementSweeper) retryPendingRemovalClaimed(ctx context.Context, row
 			return consumeSweepJournalEntry(current, backupSlash)
 		})
 		if uErr != nil {
+			// Wave-52 (round 7, finding F1, stage c): the failed consumption's
+			// pending re-persist is revocation-fenced — a reclaimed claim stops
+			// bare; the durable rearm-refused marker stands unchanged for the
+			// next live retry (nothing fs-side ever moved on this leg).
+			if claim.abandonIfRevoked("rearm-refused pending re-persist", backup, dest) {
+				return false
+			}
 			s.rememberPendingRemovalKind(backupSlash, models.RestorePendingKindRearmRefused)
 			if markErr := s.persistRestorePendingMarkerKind(ctx, rowID, backupSlash, models.RestorePendingKindRearmRefused); markErr != nil {
 				logging.Warnf("replacement sweep %s: rearm-refused pending consumption failed (%v) and restore-pending persistence failed (%v) — restored destination retained, unowned backup name untouched", backup, uErr, markErr)
@@ -1472,6 +1594,14 @@ func (s *ReplacementSweeper) retryPendingRemovalClaimed(ctx context.Context, row
 	// does the quarantined unlink run. A destination that vanished or turned
 	// indeterminate mid-window keeps the bytes at their journaled name and
 	// the pending marker live.
+	// Wave-52 (round 7, finding F1, stage b): the wedged-Lstat park above is
+	// exactly where a reclaim must catch the unit before its quarantine arms
+	// move — a reclaimed claim stops bare: the durable clean marker stands,
+	// the backup never leaves its journaled name, and the unit re-enters from
+	// its entry on the next live retry.
+	if claim.abandonIfRevoked("clean pending backup quarantine removal", backup, dest) {
+		return false
+	}
 	hold, rmErr := quarantineReplacementBackupForRemoval(s.fs, backup, "replacement sweep", &durableEntry, backupInfo)
 	if rmErr == nil {
 		if _, derr := lstatRestoreSource(s.fs, dest); derr != nil {
@@ -1481,6 +1611,15 @@ func (s *ReplacementSweeper) retryPendingRemovalClaimed(ctx context.Context, row
 				// verified bytes stay recoverable at the quarantine name, so the
 				// durable pending entry upgrades to the rearm-refused kind
 				// (journal-only retry; no leg touches the foreign name again).
+				// Wave-52 (round 7, finding F1, stage c): the rearm-refused upgrade
+				// persist is revocation-fenced — a reclaimed claim stops bare: the
+				// durable CLEAN marker (this leg's entry point) stands unchanged,
+				// the in-process fallback stays unset, the journaled name keeps
+				// whatever occupant the failed move-back left, and the verified
+				// bytes stay recoverable at the quarantine name.
+				if claim.abandonIfRevoked("clean pending divergence marker persist", backup, dest) {
+					return false
+				}
 				s.rememberPendingRemovalKind(backupSlash, models.RestorePendingKindRearmRefused)
 				if markErr := s.persistRestorePendingMarkerKind(ctx, rowID, backupSlash, models.RestorePendingKindRearmRefused); markErr != nil {
 					logging.Warnf("replacement sweep %s: pending cleanup kept — destination %s not present after the backup was quarantined (%v), the verified move-back failed (%v), AND the rearm-refused marker could not be persisted (%v); verified bytes recoverable at the quarantine name %s", backup, dest, derr, rerr, markErr, hold.quarantine)
@@ -1496,6 +1635,15 @@ func (s *ReplacementSweeper) retryPendingRemovalClaimed(ctx context.Context, row
 		rmErr = hold.removeVerified()
 	}
 	if rmErr != nil {
+		// Wave-52 (round 7, finding F1, stage c): the removal-failure marker
+		// updates (the vanished-class rearm-refused upgrade persist, or the
+		// in-process clean re-authorization) are revocation-fenced — a
+		// reclaimed claim stops bare: the durable CLEAN marker stands
+		// unchanged and the post-attempt fs shape is exactly what the stage
+		// left.
+		if claim.abandonIfRevoked("clean pending removal-failure marker persist", backup, dest) {
+			return false
+		}
 		// Wave-32 (finding R4): the vanished class leaves the journaled name
 		// absent by construction, so the pending entry converts to the
 		// rearm-refused (journal-only) kind — durable and in-process alike —
@@ -1511,10 +1659,26 @@ func (s *ReplacementSweeper) retryPendingRemovalClaimed(ctx context.Context, row
 		s.rememberPendingRemoval(backupSlash)
 		return false
 	}
+	// Wave-52 (round 7, finding F1, stage d): the consumption update — a
+	// reclaimed claim stops bare AFTER the completed removal stage: the
+	// backup name is already absent (the clean-kind retry tolerates that),
+	// the destination stands untouched, and the durable CLEAN restore-pending
+	// marker remains the retry's authorization — nothing further mutates.
+	if claim.abandonIfRevoked("clean pending journal consumption", backup, dest) {
+		return false
+	}
 	uErr := s.repo.UpdateJournalInTx(ctx, rowID, func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
 		return consumeSweepJournalEntry(current, backupSlash)
 	})
 	if uErr != nil {
+		// Wave-52 (round 7, finding F1, stage e): the re-arm compensation
+		// PUBLISHES the backup name — a reclaimed claim never runs it. The
+		// durable clean restore-pending marker still stands (this leg's entry
+		// point), and the clean-kind retry tolerates the absent name — the
+		// resting shape needs nothing else.
+		if claim.abandonIfRevoked("clean pending consumption compensation (re-arm)", backup, dest) {
+			return false
+		}
 		fallbackKind := models.RestorePendingKindClean
 		if rearmErr := rearmReplacementBackup(s.fs, dest, backup, backupInfo); rearmErr != nil {
 			// codex P2 (PR#215 round 18): identical recovery contract as
@@ -1593,12 +1757,22 @@ func (s *ReplacementSweeper) consumeRearmRefusedPending(ctx context.Context, idx
 	defer busyRelease()
 	// Wave-49 (codex P2): same ctx-scoped claim ledger as sweepOne — an
 	// abandoned full sweep must not strand this marker against the
-	// continued revert either. Wave-50 (finding F1): same lock-before-record
-	// discipline as sweepOne — the record is born binding the dest lock, so
-	// the reverter's pre-acquisition reclaim frees both holds.
-	rawDestRelease := fsutil.SharedDestLocks().Acquire(entry.dest)
-	claim, untrackSweepClaim := recordSweepBusyClaim(ctx, entry.dest, busyRelease, rawDestRelease)
+	// continued revert either. Wave-52 (codex local review round 7, PR#215
+	// finding F2): same record-at-marker-acquire-time discipline as sweepOne
+	// — the record lands BEFORE the dest-lock wait carrying a pending cell
+	// for the lock release, so the reverter's reclaim consult sees the claim
+	// for the whole wait and frees both holds once bound.
+	claim, untrackSweepClaim := recordSweepBusyClaim(ctx, entry.dest, busyRelease)
 	defer untrackSweepClaim()
+	rawDestRelease := fsutil.SharedDestLocks().Acquire(entry.dest)
+	if !claim.bindDestLock(rawDestRelease) {
+		// Reclaimed during the wait (empty cell): the just-acquired lock is
+		// this goroutine's alone to release; then abandon — the revocation
+		// flag is already set and every stage gate below reads it.
+		rawDestRelease()
+		claim.abandonIfRevoked("destination lock acquisition", entry.backup, entry.dest)
+		return 0
+	}
 	defer claim.releaseDestLock()
 
 	// The destination the marker certified must still be present before the

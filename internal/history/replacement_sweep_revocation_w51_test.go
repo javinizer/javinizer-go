@@ -93,7 +93,7 @@ func swapRevokeLog(t *testing.T) *w51RevokeLog {
 func w51ReclaimedClaim(t *testing.T, dest string) *sweepBusyMarkerClaim {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-	claim, untrack := recordSweepBusyClaim(ctx, dest, func() {}, nil)
+	claim, untrack := recordSweepBusyClaim(ctx, dest, func() {})
 	cancel() // the wave-8 deadline fired; the goroutine is stranded mid-op
 	require.True(t, reclaimAbandonedSweepBusyMarker(dest), "the abandoned claim reclaims")
 	require.True(t, claim.isRevoked(), "the reclaim flipped the revocation flag before the releases")
@@ -110,11 +110,11 @@ func TestSweepBusyClaimW51_RevocationOrdering(t *testing.T) {
 
 	ctxA, cancelA := context.WithCancel(context.Background())
 	defer cancelA()
-	rec1, untrack1 := ledger.record(ctxA, dest, func() {}, nil)
+	rec1, untrack1 := ledger.record(ctxA, dest, func() {})
 	ctxB, cancelB := context.WithCancel(context.Background())
 	var releaseObservedRevoked bool
 	var rec2 *sweepBusyMarkerClaim
-	rec2, untrack2 := ledger.record(ctxB, dest, func() { releaseObservedRevoked = rec2.isRevoked() }, nil)
+	rec2, untrack2 := ledger.record(ctxB, dest, func() { releaseObservedRevoked = rec2.isRevoked() })
 
 	require.Positive(t, rec1.epoch, "claims carry a ledger-issued epoch")
 	require.Greater(t, rec2.epoch, rec1.epoch, "claim epochs are monotonic across records")

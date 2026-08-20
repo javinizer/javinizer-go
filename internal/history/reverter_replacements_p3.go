@@ -213,6 +213,12 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 			// the destination the worker just restored and nothing wipes or
 			// re-removes its backup-side state. No restore leg below may touch
 			// the destination, the backup, or the journal ahead of its (3).
+			// Wave-52 (codex local review round 7, PR#215 finding F1): the order
+			// is pinned end-to-end by
+			// TestReverterW52_ConsumeBetweenReclaimAndFreshReadSkips — a worker
+			// consume committing between the reclaim's return and the fresh read
+			// at (3) reads back as not-live there and is skipped, never
+			// re-restored.
 			reclaimAbandonedSweepBusyMarker(dest)
 			preDestLockConsultHook(dest)
 			release := fsutil.SharedDestLocks().Acquire(dest)

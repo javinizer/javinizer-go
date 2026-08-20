@@ -39,9 +39,10 @@ func TestRestoreReplacementJournalW50_ReclaimsAbandonedSweepDestLock(t *testing.
 	// is parked on the wedged fs and never reaches its defers.
 	sweepRelease, err := fsutil.AcquireReplacementBusy(fixture.fs, dest)
 	require.NoError(t, err)
-	rawDestRelease := fsutil.SharedDestLocks().Acquire(dest)
 	sweepCtx, sweepCancel := context.WithCancel(context.Background())
-	claim, untrack := recordSweepBusyClaim(sweepCtx, dest, sweepRelease, rawDestRelease)
+	claim, untrack := recordSweepBusyClaim(sweepCtx, dest, sweepRelease)
+	require.True(t, claim.bindDestLock(fsutil.SharedDestLocks().Acquire(dest)),
+		"the sweep's pending dest-lock cell takes the release the instant the wait completes (wave-52)")
 
 	// The deadline passes with the sweep still stranded mid-op, holding BOTH
 	// the marker and the dest lock — the wave-8 shape proceeds to the revert
@@ -99,10 +100,10 @@ func TestRestoreReplacementJournalW50_LiveSweepClaimKeepsTheBlockingPosture(t *t
 
 	sweepRelease, err := fsutil.AcquireReplacementBusy(fixture.fs, dest)
 	require.NoError(t, err)
-	rawDestRelease := fsutil.SharedDestLocks().Acquire(dest)
 	sweepCtx, sweepCancel := context.WithCancel(context.Background())
 	t.Cleanup(sweepCancel)
-	claim, untrack := recordSweepBusyClaim(sweepCtx, dest, sweepRelease, rawDestRelease)
+	claim, untrack := recordSweepBusyClaim(sweepCtx, dest, sweepRelease)
+	require.True(t, claim.bindDestLock(fsutil.SharedDestLocks().Acquire(dest)))
 
 	blocked := make(chan error, 1)
 	go func() {
@@ -158,7 +159,7 @@ func TestRestoreReplacementJournalW50_LateRecordedClaimReclaimedByBusyLeg(t *tes
 			return
 		}
 		hooked = true
-		_, untrack = recordSweepBusyClaim(sweepCtx, dest, sweepRelease, nil)
+		_, untrack = recordSweepBusyClaim(sweepCtx, dest, sweepRelease)
 	}
 
 	restored, err := NewReverter(fixture.fs, fixture.repo).restoreReplacementJournal(context.Background(), op)
@@ -185,9 +186,9 @@ func TestSweepBusyClaimW50_RecordBindsBothArbitrationHolds(t *testing.T) {
 
 	sweepRelease, err := fsutil.AcquireReplacementBusy(fs, dest)
 	require.NoError(t, err)
-	rawDestRelease := fsutil.SharedDestLocks().Acquire(dest)
 	ctx, cancel := context.WithCancel(context.Background())
-	claim, untrack := recordSweepBusyClaim(ctx, dest, sweepRelease, rawDestRelease)
+	claim, untrack := recordSweepBusyClaim(ctx, dest, sweepRelease)
+	require.True(t, claim.bindDestLock(fsutil.SharedDestLocks().Acquire(dest)))
 
 	require.False(t, reclaimAbandonedSweepBusyMarker(dest), "a live claim is never reclaimed")
 
@@ -220,7 +221,7 @@ func TestSweepBusyClaimW50_RecordBindsBothArbitrationHolds(t *testing.T) {
 	markerOnly, err := fsutil.AcquireReplacementBusy(fs, dest)
 	require.NoError(t, err)
 	ctx2, cancel2 := context.WithCancel(context.Background())
-	_, untrack2 := recordSweepBusyClaim(ctx2, dest, markerOnly, nil)
+	_, untrack2 := recordSweepBusyClaim(ctx2, dest, markerOnly)
 	cancel2()
 	require.True(t, reclaimAbandonedSweepBusyMarker(dest))
 	untrack2()
@@ -253,7 +254,7 @@ func TestSweepBusyClaimW50_FrozenKeySurvivesProbeDrift(t *testing.T) {
 
 	releaseCount := 0
 	ctx, cancel := context.WithCancel(context.Background())
-	_, untrack := ledger.record(ctx, dest, func() { releaseCount++ }, nil)
+	_, untrack := ledger.record(ctx, dest, func() { releaseCount++ })
 	require.Equal(t, 1, probeCalls, "the record derives its key under the first (failing) probe")
 
 	cancel() // the sweep is abandoned at the deadline

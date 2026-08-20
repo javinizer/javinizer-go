@@ -38,14 +38,12 @@ package history
 //     legs / the full-sweep ledger leg), and the wave-49 marker-only reclaim
 //     could never free THAT: the continued revert blocked on the dest lock
 //     BEFORE its ledger consult and hung indefinitely for exactly the
-//     stranding the reclaim existed to heal. The record is now born binding
-//     BOTH arbitration holds: sweep callers acquire the dest lock FIRST and
-//     record (dest → {ctx, marker release, dest-lock release}) atomically, so
-//     no leg can ever hold the lock untracked (there is no acquire→bind
-//     window a reclaim could race). The reverter consults the ledger FIRST
-//     (before the blocking acquisition) and retries the acquisition against
-//     the freed arbitration; the reclaim runs the dest-lock release AHEAD of
-//     the marker release because a keyed-registry release is pure in-process
+//     stranding the reclaim existed to heal. The record binds BOTH
+//     arbitration holds (the dest-lock release through the claim's pending
+//     cell — wave-52 below). The reverter consults the ledger FIRST (before
+//     the blocking acquisition) and retries the acquisition against the
+//     freed arbitration; the reclaim runs the dest-lock release AHEAD of the
+//     marker release because a keyed-registry release is pure in-process
 //     work that cannot wedge on the stranded filesystem (the marker's
 //     take-aside unlink may — the established wave-49 posture). Both releases
 //     share once-guards with the stranded goroutine's own defers, so the
@@ -66,6 +64,24 @@ package history
 //     so record and reclaim always agree regardless of probe drift. The
 //     sweep-only legs (journal spelling comparisons through sweepSlash) are
 //     unchanged.
+//
+// Wave-52 (codex local review round 7, PR#215 finding F2 — "register the
+// claim at busy-marker acquire time"): the wave-50 order (acquire the dest
+// lock, THEN record the claim) left a fundamentally unhealable interval — a
+// sweep ctx expiring DURING the blocking dest-lock wait owned the marker
+// with NO ledger record at all, so the reverter's reclaim consult found
+// nothing and the destination kept busy-refusing (ErrReplacementBusy) for
+// the whole stranding. The record now lands at MARKER ACQUIRE TIME — before
+// the dest-lock wait — born binding the marker release and carrying a
+// PENDING CELL for the dest-lock release (bindDestLock fills it the instant
+// the wait completes). The cell handshake preserves the wave-50 F1
+// guarantees without the window: an owned marker is ledger-visible for the
+// entire wait; a held lock is never untracked (the cell is populated
+// atomically with acquisition completion, under the claim mutex the reclaim
+// also takes); and a reclaim landing mid-wait marks the cell reclaimed, so
+// the wait's late completion hands the just-acquired lock back to the
+// stranded goroutine as its SOLE release responsibility with the revocation
+// flag already visible (the goroutine abandons before any further work).
 //
 // Wave-51 (codex P1, PR#215 — "do not revoke the lock while the sweep is
 // still running"): the wave-49/50 reclaim fired the recorded releases even
@@ -94,18 +110,27 @@ import (
 
 // sweepBusyMarkerClaim records ONE sweep-owned arbitration stance: the sweep
 // invocation's context (abandonment = ctx done), the .dlbusy acquisition's
-// once-guarded, token-bound release closure, and (wave-50, F1) the
-// once-guarded destination-lock release bound at record time — nil only for
-// marker-only claims staged by tests. Wave-51 adds the epoch-ownership gate
-// fields: a monotonic ledger epoch (diagnostic ordering for the gate log)
-// and the in-process revocation flag the claimant itself consults before
-// every mutation surface after a resume.
+// once-guarded, token-bound release closure, and the once-guarded
+// destination-lock release — held in a PENDING CELL the caller fills the
+// instant its blocking SharedDestLocks wait completes (wave-52, F2: the
+// record is born at marker-acquire time, before the wait, so an owned marker
+// is ledger-visible for the whole wait; nil only for marker-only claims
+// staged by tests). Wave-51 adds the epoch-ownership gate fields: a
+// monotonic ledger epoch (diagnostic ordering for the gate log) and the
+// in-process revocation flag the claimant itself consults before every
+// mutation surface after a resume. The claim mutex serializes cell
+// population (bindDestLock) against the reclaim's releaseForReclaim so a
+// reclaim mid-wait (empty cell) and a reclaim post-bind (filled cell) each
+// fire exactly the releases somebody owns.
 type sweepBusyMarkerClaim struct {
-	ctx         context.Context
-	release     func()
-	destRelease func()
-	epoch       uint64      // ledger-wide monotonic claim epoch (assigned under the ledger mutex)
-	revoked     atomic.Bool // wave-51: flipped by the reclaimer BEFORE the releases fire
+	ctx     context.Context
+	release func()
+	epoch   uint64      // ledger-wide monotonic claim epoch (assigned under the ledger mutex)
+	revoked atomic.Bool // wave-51: flipped by the reclaimer BEFORE the releases fire
+
+	mu          sync.Mutex // wave-52: guards the pending dest-lock cell handshake below
+	destRelease func()     // once-guarded dest-lock release — nil until bindDestLock fills the cell
+	reclaimed   bool       // releaseForReclaim already fired — a late bind keeps sole release ownership
 }
 
 // revoke flips the claim's in-process revocation flag. Only the ledger's
@@ -144,12 +169,39 @@ func (c *sweepBusyMarkerClaim) abandonIfRevoked(phase, backup, dest string) bool
 	return true
 }
 
+// bindDestLock fills the claim's pending dest-lock cell the instant the
+// caller's blocking SharedDestLocks wait completes (wave-52, F2): the lock
+// is ledger-trackable from the exact moment it is held, and the cell
+// handshake against releaseForReclaim leaves no acquire→bind window a
+// reclaim could race. False means the claim was reclaimed DURING the wait
+// (the reclaim fired against the empty cell): the once-guarded release never
+// became visible to the reclaim, the just-acquired lock belongs to the
+// caller alone, and the caller must release it directly and abandon — the
+// revocation flag is already set (revoke precedes the releases). True means
+// the cell took the once-guarded release: the reclaim path and the caller's
+// own defer now share its single firing.
+func (c *sweepBusyMarkerClaim) bindDestLock(release func()) bool {
+	var once sync.Once
+	guarded := func() { once.Do(release) }
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.reclaimed {
+		return false
+	}
+	c.destRelease = guarded
+	return true
+}
+
 // releaseDestLock frees the claim's bound destination lock (no-op for
-// marker-only claims). The once-guard shared with the reclaim path makes the
-// stranded goroutine's post-abandonment defer a no-op.
+// marker-only claims and for claims still waiting on the lock — an empty
+// cell). The once-guard shared with the reclaim path makes the stranded
+// goroutine's post-abandonment defer a no-op.
 func (c *sweepBusyMarkerClaim) releaseDestLock() {
-	if c.destRelease != nil {
-		c.destRelease()
+	c.mu.Lock()
+	destRelease := c.destRelease
+	c.mu.Unlock()
+	if destRelease != nil {
+		destRelease()
 	}
 }
 
@@ -158,9 +210,18 @@ func (c *sweepBusyMarkerClaim) releaseDestLock() {
 // can never wedge on the stranded filesystem, so it must be freed even when
 // the marker release wedges), then the marker's once-guarded, token-bound
 // take-aside release (wave-38; a wedged unlink leaves only the inert scratch
-// sibling behind — the established wave-49 posture).
+// sibling behind — the established wave-49 posture). Wave-52: the reclaimed
+// flag is latched under the claim mutex BEFORE either release fires, so a
+// dest-lock wait completing during (or after) the reclaim reads false from
+// bindDestLock and self-releases instead of double-tracking the cell.
 func (c *sweepBusyMarkerClaim) releaseForReclaim() {
-	c.releaseDestLock()
+	c.mu.Lock()
+	c.reclaimed = true
+	destRelease := c.destRelease
+	c.mu.Unlock()
+	if destRelease != nil {
+		destRelease()
+	}
 	c.release()
 }
 
@@ -191,24 +252,25 @@ func newSweepBusyClaimLedger() *sweepBusyClaimLedger {
 var sweepBusyClaims = newSweepBusyClaimLedger()
 
 // recordSweepBusyClaim journals the sweep's freshly acquired busy marker for
-// dest TOGETHER with the destination lock the caller already holds (wave-50,
-// F1): callers take the dest lock BEFORE recording so the record is born
-// binding both holds — no acquire→bind window a reclaim could race, and no
-// leg can hold the lock untracked. The dest-lock release is wrapped in a
-// once-guard at record time so the reclaim and the claimer's own defer share
+// dest AT MARKER ACQUIRE TIME (wave-52, codex local review round 7, PR#215
+// finding F2): the record lands BEFORE the caller's blocking destination-lock
+// wait, so the wave-49 ledger names the claim for the entire wait — a sweep
+// ctx expiring mid-wait no longer leaves an owned marker the reverter's
+// reclaim consult cannot find (the finding's report: the pre-wave-52
+// lock-then-record order stranded exactly those claims into ErrReplacementBusy
+// for their whole stranding). The record is born binding the marker release
+// and carrying an EMPTY dest-lock cell; the caller fills it the instant the
+// wait completes through bindDestLock, which wraps the release in a
+// once-guard at cell time so the reclaim and the claimer's own defer share
 // one firing. The returned untrack removes ONLY this exact record (pointer
 // identity — a re-recorded claim for the same dest is never retracted by a
 // stale holder) and is always deferred by the claimer ahead of the releases.
-func recordSweepBusyClaim(ctx context.Context, dest string, release, destRelease func()) (*sweepBusyMarkerClaim, func()) {
-	return sweepBusyClaims.record(ctx, dest, release, destRelease)
+func recordSweepBusyClaim(ctx context.Context, dest string, release func()) (*sweepBusyMarkerClaim, func()) {
+	return sweepBusyClaims.record(ctx, dest, release)
 }
 
-func (l *sweepBusyClaimLedger) record(ctx context.Context, dest string, release, destRelease func()) (*sweepBusyMarkerClaim, func()) {
+func (l *sweepBusyClaimLedger) record(ctx context.Context, dest string, release func()) (*sweepBusyMarkerClaim, func()) {
 	rec := &sweepBusyMarkerClaim{ctx: ctx, release: release}
-	if destRelease != nil {
-		var once sync.Once
-		rec.destRelease = func() { once.Do(destRelease) }
-	}
 	l.mu.Lock()
 	l.epoch++
 	rec.epoch = l.epoch
