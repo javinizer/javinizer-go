@@ -79,6 +79,7 @@ func TestTakeAsideW38_HappyAndBoundUnlink(t *testing.T) {
 			require.ErrorIs(t, lerr, os.ErrNotExist, "the bound unlink removed the scratch")
 			require.NoError(t, hold.Unlink(), "a finalized hold's unlink is a no-op")
 			require.NoError(t, hold.Restore(), "a finalized hold's restore is a no-op")
+			require.Empty(t, w43VacNames(t, fs, dir), "wave-43: the vacated placeholder was dropped claim-bound — no litter")
 		})
 	}
 }
@@ -126,7 +127,8 @@ func TestTakeAsideW38_ReservationLegs(t *testing.T) {
 		require.ErrorIs(t, err, moveErr)
 		require.Equal(t, "journal bytes", string(w38Read(t, base, src)), "the failed move relocated nothing")
 		_, lerr := base.Stat(scratch)
-		require.ErrorIs(t, lerr, os.ErrNotExist, "OUR still-claimed reservation was dropped best-effort")
+		require.ErrorIs(t, lerr, os.ErrNotExist,
+			"wave-43: the vacated reservation rode back onto the free scratch and was dropped re-proven — the same free-or-foreign failure shape the wave-38 best-effort drop kept")
 	})
 
 	t.Run("w43: failed move preserves a swapped scratch occupant", func(t *testing.T) {
@@ -139,8 +141,12 @@ func TestTakeAsideW38_ReservationLegs(t *testing.T) {
 		hold, err := TakeAside(TakeAsideSpec{FS: fs, Src: src, Scratch: scratch, Claim: claim, Prove: w38SameProve(srcInfo)})
 		require.Nil(t, hold)
 		require.ErrorIs(t, err, moveErr)
+		require.ErrorIs(t, err, ErrTakeAsideRestoreFailed,
+			"wave-43: the publish refusal collided with the plant — the vacated placeholder strands recoverable at the vacated name")
 		require.Equal(t, "foreign-placement", string(w38Read(t, base, scratch)),
 			"the occupant swapped in during the failed move is preserved byte-intact")
+		require.Len(t, w43VacNames(t, base, "/out/w38-move-fail-swap"), 1,
+			"only our inert 0-byte placeholder lingers at the vacated name")
 	})
 }
 
@@ -167,7 +173,10 @@ func TestTakeAsideW38_PostMoveLegs(t *testing.T) {
 		base := afero.NewMemMapFs()
 		src, scratch, claim := w38TakeFixture(t, base, "/out/w38-postmove-vanish")
 		srcInfo, _ := base.Stat(src)
-		fs := &w38VanishOnStatFs{Fs: base, victim: scratch, afterCalls: 1} // reservation re-proof must succeed
+		// Wave-43 ordering: scratch Stat #1 is the reservation re-proof, #2 the
+		// no-replace publish's destination classification, #3 the post-move
+		// re-proof — the vanish replay fires there (once).
+		fs := &w38VanishOnStatFs{Fs: base, victim: scratch, afterCalls: 2}
 
 		hold, err := TakeAside(TakeAsideSpec{FS: fs, Src: src, Scratch: scratch, Claim: claim, Prove: w38SameProve(srcInfo)})
 		require.Nil(t, hold)
@@ -175,6 +184,10 @@ func TestTakeAsideW38_PostMoveLegs(t *testing.T) {
 		_, lerr := base.Stat(src)
 		require.ErrorIs(t, lerr, os.ErrNotExist,
 			"the move relocated the object before it vanished from the scratch — no compensation runs on nothing")
+		_, lerr = base.Stat(scratch)
+		require.ErrorIs(t, lerr, os.ErrNotExist,
+			"the vacated placeholder rode back and was dropped re-proven — no residue")
+		require.Empty(t, w43VacNames(t, base, "/out/w38-postmove-vanish"), "no vacated-name litter")
 	})
 
 	t.Run("post-move indeterminate lookup restores the source name", func(t *testing.T) {
@@ -182,7 +195,8 @@ func TestTakeAsideW38_PostMoveLegs(t *testing.T) {
 		src, scratch, claim := w38TakeFixture(t, base, "/out/w38-postmove-indet")
 		srcInfo, _ := base.Stat(src)
 		sentinel := errors.New("w38 post-move lstat wedged")
-		fs := &w38FailNthStatFs{Fs: base, victim: scratch, n: 2, err: sentinel}
+		// Wave-43 ordering: scratch Stat #3 is the post-move re-proof lookup.
+		fs := &w38FailNthStatFs{Fs: base, victim: scratch, n: 3, err: sentinel}
 
 		hold, err := TakeAside(TakeAsideSpec{FS: fs, Src: src, Scratch: scratch, Claim: claim, Prove: w38SameProve(srcInfo)})
 		require.Nil(t, hold)
@@ -213,7 +227,10 @@ func TestTakeAsideW38_PostMoveLegs(t *testing.T) {
 		base := afero.NewMemMapFs()
 		src, scratch, claim := w38TakeFixture(t, base, "/out/w38-prove-reclaim")
 		prove := func(os.FileInfo) error { return errors.New("w38 prove refused") }
-		fs := &w38ClaimOnPostMoveStatFs{Fs: base, victim: scratch, plantAt: src}
+		// Wave-43 ordering: the racer's re-claim of the source name lands at
+		// scratch Stat #3 (the post-move re-proof) — inside the publish's
+		// move→prove window it vacated.
+		fs := &w38ClaimOnPostMoveStatFs{Fs: base, victim: scratch, plantAt: src, n: 3}
 
 		hold, err := TakeAside(TakeAsideSpec{FS: fs, Src: src, Scratch: scratch, Claim: claim, Prove: prove})
 		require.Nil(t, hold)
@@ -385,9 +402,10 @@ func (f *w38FailNthStatFs) Stat(name string) (os.FileInfo, error) {
 	return f.Fs.Stat(name)
 }
 
-// w38VanishOnStatFs answers os.ErrNotExist for the victim once afterCalls
-// lookups for it have passed (used to vanish the scratch between the move
-// and the post-move re-proof).
+// w38VanishOnStatFs answers os.ErrNotExist for the victim ONCE, at the
+// lookup after afterCalls lookups for it have passed (used to vanish the
+// scratch between the move and the post-move re-proof); later lookups pass
+// through so the wave-43 ride-back + re-proven drop can complete.
 type w38VanishOnStatFs struct {
 	afero.Fs
 	victim     string
@@ -398,7 +416,7 @@ type w38VanishOnStatFs struct {
 func (f *w38VanishOnStatFs) Stat(name string) (os.FileInfo, error) {
 	if name == f.victim {
 		f.calls++
-		if f.calls > f.afterCalls {
+		if f.calls == f.afterCalls+1 {
 			_ = f.Fs.Remove(name)
 			return nil, os.ErrNotExist
 		}
@@ -407,18 +425,20 @@ func (f *w38VanishOnStatFs) Stat(name string) (os.FileInfo, error) {
 }
 
 // w38ClaimOnPostMoveStatFs plants a racer claimant at plantAt when the
-// victim scratch is inspected at its second lookup (the post-move re-proof).
+// victim scratch is inspected at its nth lookup (wave-43: n=3 is the
+// post-move re-proof).
 type w38ClaimOnPostMoveStatFs struct {
 	afero.Fs
 	victim  string
 	plantAt string
+	n       int
 	calls   int
 }
 
 func (f *w38ClaimOnPostMoveStatFs) Stat(name string) (os.FileInfo, error) {
 	if name == f.victim {
 		f.calls++
-		if f.calls == 2 {
+		if f.calls == f.n {
 			if err := afero.WriteFile(f.Fs, f.plantAt, []byte("racer at source"), 0o600); err != nil {
 				return nil, err
 			}

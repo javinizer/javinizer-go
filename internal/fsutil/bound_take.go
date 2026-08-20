@@ -10,18 +10,48 @@ package fsutil
 //  1. the caller reserves a scratch sibling name O_EXCL and captures its
 //     identity (each flow keeps its naming grammar + entropy seam);
 //  2. TakeAside re-derives the reservation immediately before the move
-//     (still THE claimed placeholder — never a foreign swap), then moves the
-//     object src names onto the scratch with the replace-aware rename
-//     (ReplaceFile): the scratch is provably OUR claimed placeholder, so the
-//     move can never displace foreign bytes;
+//     (still THE claimed placeholder — never a foreign swap);
 //  3. the moved object is re-proven AT the scratch name against the
 //     caller's identity proof — a swap between the caller's pre-take
 //     verification and the move moved a DIFFERENT object, and that object
 //     is never acted on destructively;
 //  4. the ONLY unlink ever issued (BoundAside.Unlink) targets the scratch
 //     name and re-binds the object at syscall adjacency (no-follow Lstat,
-//     dev/inode where exposed, then size + mtime) before
-//     fs.Remove runs.
+//     dev/inode where exposed, then size + mtime) before fs.Remove runs.
+//
+// POSTER-WRITE-HARDENING wave-43 (codex P2, PR#215) — the take itself is now
+// CONDITIONAL, lifting the wave-42 downloader/history quarantine handoff
+// construction INTO the shared helper so every backup/quarantine flow
+// inherits it: the wave-38 step-2 re-proof was followed by a REPLACE-AWARE
+// rename of src onto the scratch name, so a plant landing between the verify
+// and the move got its bytes overwritten (the post-move proof detected the
+// substitution post-hoc, but the plant's bytes were already gone).
+// ReplaceFile no longer moves src anywhere in this flow:
+//
+//  a. after the reservation re-proof the RESERVATION itself is taken aside:
+//     a fresh unpredictable vacated name (scratch + ".vac." + crypto token)
+//     is claimed O_EXCL with its own captured identity (the wave-38 claim
+//     discipline) and released identity-bound, then the reservation object
+//     moves scratch→vacatedName through a NO-REPLACE rename
+//     (PublishNoReplace). A plant swapped in after the re-proof is what the
+//     vacate moves — it arrives byte-intact (never overwritten), and the
+//     post-vacate re-proof (vacatedName must still == the claim identity at
+//     syscall adjacency) refuses it (ErrTakeAsideForeign) and rides it back
+//     NO-REPLACE;
+//  b. the scratch name is then provably FREE: src publishes onto it
+//     NO-REPLACE (PublishNoReplace). A plant winning the vacate→publish gap
+//     is the typed collision refusal — the plant is preserved, src never
+//     moved, and the vacated reservation rides BACK onto scratch NO-REPLACE
+//     (restoring the pre-call reservation state where the name is free,
+//     released identity-bound when the ride-back lands, stranded
+//     recoverable at the vacated name where the ride-back collides);
+//  c. steps 3+4 above run unchanged at the scratch name;
+//  d. the vacated reservation placeholder is removed ONLY after the vacated
+//     name re-binds to the claim identity at syscall adjacency (the claimed
+//     placeholder is the sole object this flow ever deletes there,
+//     documented choice (a) of the wave-43 resolution) — a refused or
+//     indeterminate cleanup keeps the occupant byte-intact with a warn and
+//     the take stands.
 //
 // Every wedge compensation restores original names with NO-REPLACE moves
 // (PublishNoReplace): a racer claiming the source name mid-wedge is never
@@ -31,11 +61,16 @@ package fsutil
 // keeps its conservative failure posture.
 
 import (
+	cryptorand "crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/spf13/afero"
+
+	"github.com/javinizer/javinizer-go/internal/logging"
 )
 
 // ErrTakeAsideForeign classifies a taken-aside object (or a take-aside
@@ -47,15 +82,17 @@ var ErrTakeAsideForeign = errors.New("take-aside object failed the identity proo
 
 // ErrTakeAsideVanished classifies the take-aside scratch name being empty at
 // a binding instant where a proven object was expected (post-move re-proof
-// or unlink-time re-derivation). The owned object vanished through a path
-// this flow never unlinked — indeterminate, never a consumed removal.
+// or unlink-time re-derivation), or the just-vacated reservation name being
+// empty at its post-vacate re-proof. The owned object vanished through a
+// path this flow never unlinked — indeterminate, never a consumed removal.
 var ErrTakeAsideVanished = errors.New("take-aside object vanished before its bound operation completed")
 
 // ErrTakeAsideRestoreFailed classifies the wedge-compensation failure: the
 // taken-aside object could NOT be moved back onto the source name
-// NO-REPLACE (a foreign claimant holds it, or the publish failed outright),
-// so the source name is unowned while the object stays recoverable at the
-// scratch name.
+// NO-REPLACE, or the vacated reservation could not be moved back onto the
+// scratch name NO-REPLACE (a foreign claimant holds the name, or the publish
+// failed outright), so the target name is unowned while the object stays
+// recoverable at the scratch / vacated name.
 var ErrTakeAsideRestoreFailed = errors.New("take-aside compensation could not restore the source name no-replace")
 
 // TakeAsideSpec carries one TakeAside invocation.
@@ -109,6 +146,130 @@ func asideSameObject(cur, expect os.FileInfo) bool {
 	return cur.Size() == expect.Size() && cur.ModTime().Equal(expect.ModTime())
 }
 
+// takeAsideVacClaimTries bounds the vacated-name draw loop; every collision
+// or racing claimant costs one draw.
+const takeAsideVacClaimTries = 64
+
+// takeAsideVacRandReader is the entropy source behind the vacated-name
+// token, exposed as a seam (same discipline as history's
+// backupQuarantineRandReader): production is cryptographically random and
+// the token carries no path or user data, while tests wedge the failure leg
+// deterministically.
+var takeAsideVacRandReader io.Reader = cryptorand.Reader
+
+// claimTakeAsideVacName atomically reserves a fresh unpredictable vacated
+// sibling name for the reservation vacate (wave-43): draw a token, claim
+// scratch+".vac."+token O_CREATE|O_EXCL (the observation-to-claim race
+// resolves in favor of the claim — os.IsExist re-draws), capture the
+// reservation's own identity through the open handle's pre-close Stat
+// (mirroring the quarantine-claim discipline). A reservation whose identity
+// cannot be read (or whose close fails) is dropped rather than relocating
+// anything near unverified bytes.
+func claimTakeAsideVacName(fs afero.Fs, scratch string) (string, os.FileInfo, error) {
+	for attempt := 0; attempt < takeAsideVacClaimTries; attempt++ {
+		var token [16]byte
+		if _, err := io.ReadFull(takeAsideVacRandReader, token[:]); err != nil {
+			return "", nil, fmt.Errorf("vacated-name token for %s: %w", scratch, err)
+		}
+		candidate := scratch + ".vac." + hex.EncodeToString(token[:])
+		reservation, rerr := fs.OpenFile(candidate, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		switch {
+		case rerr == nil:
+			info, serr := reservation.Stat()
+			if serr != nil {
+				_ = reservation.Close()
+				_ = fs.Remove(candidate)
+				return "", nil, fmt.Errorf("stat take-aside vacated reservation %s: %w", candidate, serr)
+			}
+			if cerr := reservation.Close(); cerr != nil {
+				_ = fs.Remove(candidate)
+				return "", nil, fmt.Errorf("close take-aside vacated reservation %s: %w", candidate, cerr)
+			}
+			return candidate, info, nil
+		case os.IsExist(rerr):
+			continue // a racer claimed this draw first — draw again
+		default:
+			return "", nil, fmt.Errorf("reserve take-aside vacated name %s: %w", candidate, rerr)
+		}
+	}
+	return "", nil, fmt.Errorf("take-aside vacated names exhausted for %s after %d attempts", scratch, takeAsideVacClaimTries)
+}
+
+// releaseTakeAsideVacClaim frees the just-claimed vacated name for the
+// no-replace vacate rename — identity-bound: only our own claimed
+// placeholder is ever unlinked here. A name that vanished on its own is
+// already free; a foreign swap inside the claim→release window is preserved
+// byte-intact and refuses the take with NOTHING relocated (the reservation
+// stays claimed at the scratch name, the caller's src untouched); a wedged
+// unlink refuses likewise with our own placeholder retained.
+func releaseTakeAsideVacClaim(fs afero.Fs, vacName string, vacClaim os.FileInfo) error {
+	cur, lerr := asideLstat(fs, vacName)
+	switch {
+	case os.IsNotExist(lerr):
+		return nil
+	case lerr != nil:
+		return fmt.Errorf("inspect the take-aside vacated claim %s before its release: %w", vacName, lerr)
+	case !asideSameObject(cur, vacClaim):
+		return fmt.Errorf("take-aside vacated claim %s no longer names our claimed placeholder — foreign bytes preserved: %w", vacName, ErrTakeAsideForeign)
+	}
+	if rerr := fs.Remove(vacName); rerr != nil && !os.IsNotExist(rerr) {
+		return fmt.Errorf("remove the take-aside vacated claim %s (verified ours): %w", vacName, rerr)
+	}
+	return nil
+}
+
+// dropVacatedReservation is the wave-43 success-path cleanup (the resolving
+// construction's documented choice): the vacated reservation — the claimed
+// placeholder, the ONLY object this flow ever removes at the vacated name —
+// is unlinked ONLY after the vacated name re-binds to the claim identity at
+// syscall adjacency (asideSameObject = the established dev/inode + size +
+// mtime SameFile discipline). A refused or indeterminate binding (foreign
+// swap, wedged lookup) keeps the occupant byte-intact with a warn — the
+// take itself already stands; a name that vanished on its own completed the
+// cleanup by itself.
+func dropVacatedReservation(fs afero.Fs, vacName string, claim os.FileInfo) {
+	cur, lerr := asideLstat(fs, vacName)
+	switch {
+	case os.IsNotExist(lerr):
+		return
+	case lerr != nil || !asideSameObject(cur, claim):
+		logging.Warnf("take-aside vacated reservation cleanup of %s refused — the occupant no longer provably names the claimed placeholder; left byte-intact for manual cleanup", vacName)
+		return
+	}
+	if rerr := fs.Remove(vacName); rerr != nil && !os.IsNotExist(rerr) {
+		logging.Warnf("take-aside vacated reservation %s could not be removed after a successful take (%v) — inert residue left for manual cleanup", vacName, rerr)
+	}
+}
+
+// dropClaimedReservation re-proves the object at name against its claim and
+// unlinks ONLY it — the wave-38 failed-move leg's re-prove-then-drop
+// posture: on any doubt (vanished, indeterminate, mismatched) the name is
+// retained and the surfacing error stands alone.
+func dropClaimedReservation(fs afero.Fs, name string, claim os.FileInfo) {
+	if cur, lerr := asideLstat(fs, name); lerr == nil && asideSameObject(cur, claim) {
+		_ = fs.Remove(name)
+	}
+}
+
+// vacRestoreOrDrop runs the wave-43 wedge compensation for the conditional
+// handoff's failure legs: the vacated object (our reservation placeholder —
+// or the plant a refusal preserved) rides BACK onto the scratch name
+// NO-REPLACE, restoring the pre-vacate reservation state where the name is
+// free; when the ride-back lands, the restored reservation is dropped
+// re-proven (dropClaimedReservation), keeping the caller-visible failure
+// shape byte-identical to the wave-38 failed-move leg — the scratch name
+// ends free or foreign, never this helper's own litter. A ride-back
+// collision (or indeterminate classification) leaves BOTH occupants
+// byte-intact and joins ErrTakeAsideRestoreFailed — our own placeholder
+// stays recoverable at the vacated name.
+func vacRestoreOrDrop(fs afero.Fs, scratch, vacName string, claim os.FileInfo, err error) error {
+	if back := PublishNoReplace(fs, vacName, scratch); back != nil {
+		return errors.Join(err, fmt.Errorf("%w: scratch %s occupied or indeterminate — the vacated object stays recoverable at %s: %v", ErrTakeAsideRestoreFailed, scratch, vacName, back))
+	}
+	dropClaimedReservation(fs, scratch, claim)
+	return err
+}
+
 // BoundAside carries a TakeAside hold: the moved object sits at the scratch
 // name until the caller either finishes with Unlink or compensates with
 // Restore.
@@ -123,21 +284,44 @@ type BoundAside struct {
 // Scratch returns the reserved scratch name (for diagnostics/logging).
 func (h *BoundAside) Scratch() string { return h.scratch }
 
-// TakeAside runs steps 2+3 of the take-aside sequence (see the package
-// doc above): the reservation is re-proven against Claim, the src object is
-// moved onto the scratch name with the replace-aware rename, and the moved
-// object is re-proven at the scratch name through Prove. On success the
-// returned hold names the re-proven object (held).
+// TakeAside runs steps 2+3 of the take-aside sequence through the wave-43
+// conditional handoff (see the package doc above): the reservation is
+// re-proven against Claim, the reservation ITSELF vacates onto a fresh
+// claimed vacated name NO-REPLACE (re-proven == Claim there), src publishes
+// onto the provably-free scratch name NO-REPLACE, the moved object is
+// re-proven at the scratch name through Prove, and the vacated placeholder
+// is removed claim-bound. On success the returned hold names the re-proven
+// object (held).
 //
 // Wedge legs:
 //   - a reservation that no longer names Claim (foreign swap) or an
 //     indeterminate reservation lookup: nothing was moved — typed
 //     ErrTakeAsideForeign / plain wrapped error, foreign bytes preserved;
-//   - a failed move: the rename is atomic, nothing relocated — OUR scratch
-//     reservation is dropped best-effort and the move error surfaces;
+//   - a failed vacated-name claim, claim release, or vacate: nothing was
+//     relocated — the still-claimed scratch reservation is dropped
+//     best-effort re-proven (the wave-38 failed-move leg's posture), so the
+//     scratch name ends free or foreign, never this helper's own litter;
+//   - the reservation VANISHING before its vacate (ENOENT from the
+//     no-replace vacate): indeterminate refusal — nothing was relocated,
+//     the scratch name is provably free;
+//   - a vacate collision/failure: nothing relocated (no-replace), src, the
+//     reservation, and any plant all preserved in place;
+//   - the vacated name VANISHED post-vacate: ErrTakeAsideVanished — the
+//     placeholder went through a path this flow never unlinked; src never
+//     moved and nothing sits at the vacated name to move back;
+//   - the vacated object failing the claim re-proof (a plant moved by the
+//     vacate) or an indeterminate post-vacate lookup: the object rides back
+//     onto scratch NO-REPLACE byte-intact (typed ErrTakeAsideForeign / plain
+//     wrapped error; a ride-back collision JOINS ErrTakeAsideRestoreFailed
+//     and strands only our own placeholder at the vacated name);
+//   - the src publish refusing (collision = typed, plant preserved; src
+//     never moved): the reservation rides back + is released identity-bound,
+//     or stays recoverable at the vacated name with the joined
+//     ErrTakeAsideRestoreFailed;
 //   - post-move scratch VANISHED: the owned object went through a path this
-//     flow never unlinked — ErrTakeAsideVanished, no compensation (nothing
-//     sits at the scratch name to move back);
+//     flow never unlinked — ErrTakeAsideVanished, no object compensation
+//     (nothing sits at the scratch name to move back); the vacated
+//     reservation still rides back + drops re-proven where free;
 //   - post-move indeterminate lookup or Prove refusal: the object moves
 //     BACK onto src NO-REPLACE first (restoring the caller's pre-call
 //     names); a failed move-back JOINS ErrTakeAsideRestoreFailed.
@@ -149,31 +333,80 @@ func TakeAside(spec TakeAsideSpec) (*BoundAside, error) {
 	case !asideSameObject(reservation, spec.Claim):
 		return nil, fmt.Errorf("take-aside reservation %s no longer names the claimed placeholder — foreign reservation swap: %w", spec.Scratch, ErrTakeAsideForeign)
 	}
-	if merr := ReplaceFile(spec.FS, spec.Src, spec.Scratch); merr != nil {
-		// The rename is atomic: a failed move relocated NOTHING. Codex P2
-		// (w43): the scratch reservation is re-proven against the claim
-		// BEFORE the drop — a writer that occupied the name after our claim
-		// is never unlinked; on any doubt the reservation is retained and
-		// the move error surfaces alone.
-		if cur, cerr := asideLstat(spec.FS, spec.Scratch); cerr == nil && asideSameObject(cur, spec.Claim) {
-			_ = spec.FS.Remove(spec.Scratch)
+	// Wave-43 (a): claim + free a fresh vacated name, then take the
+	// RESERVATION itself aside onto it NO-REPLACE — whatever the scratch name
+	// holds at this instant rides over byte-intact and is re-proven against
+	// the claim immediately (a plant swapped in after the re-proof is refused,
+	// never overwritten).
+	vacName, vacClaim, cerr := claimTakeAsideVacName(spec.FS, spec.Scratch)
+	if cerr != nil {
+		// Nothing relocated — the still-claimed scratch reservation is
+		// dropped best-effort (the wave-38 failed-move leg's posture).
+		dropClaimedReservation(spec.FS, spec.Scratch, spec.Claim)
+		return nil, fmt.Errorf("reserve the take-aside vacated name for %s: %w", spec.Scratch, cerr)
+	}
+	if relErr := releaseTakeAsideVacClaim(spec.FS, vacName, vacClaim); relErr != nil {
+		dropClaimedReservation(spec.FS, spec.Scratch, spec.Claim)
+		return nil, relErr
+	}
+	if vacErr := PublishNoReplace(spec.FS, spec.Scratch, vacName); vacErr != nil {
+		if os.IsNotExist(vacErr) {
+			// The reservation vanished between the re-proof and the vacate —
+			// indeterminate refusal; this flow relocated nothing.
+			return nil, fmt.Errorf("take-aside reservation %s vanished before its no-replace vacate: %w", spec.Scratch, vacErr)
 		}
-		return nil, fmt.Errorf("take-aside move of %s onto %s: %w", spec.Src, spec.Scratch, merr)
+		// Collision at the vacated name (a plant) or a hard failure:
+		// no-replace relocated NOTHING — src, the reservation, and the plant
+		// are all preserved in place, and the still-claimed reservation
+		// drops best-effort re-proven before the refusal surfaces.
+		dropClaimedReservation(spec.FS, spec.Scratch, spec.Claim)
+		return nil, fmt.Errorf("take-aside vacate of the reservation %s onto %s refused — occupant preserved byte-intact: %w", spec.Scratch, vacName, vacErr)
+	}
+	// Wave-43 (2): the vacated name must address the claim identity at
+	// syscall adjacency (dev/inode where exposed, size + mtime always —
+	// asideSameObject is the established SameFile binding).
+	vacated, verr := asideLstat(spec.FS, vacName)
+	switch {
+	case os.IsNotExist(verr):
+		// The vacated placeholder vanished unownably right after the vacate
+		// — indeterminate: src never moved and nothing sits at the vacated
+		// name to move back.
+		return nil, fmt.Errorf("%w: %s (vacated reservation empty at the post-vacate re-proof)", ErrTakeAsideVanished, vacName)
+	case verr != nil:
+		return nil, vacRestoreOrDrop(spec.FS, spec.Scratch, vacName, spec.Claim,
+			fmt.Errorf("inspect the vacated reservation %s after the vacate: %w", vacName, verr))
+	case !asideSameObject(vacated, spec.Claim):
+		return nil, vacRestoreOrDrop(spec.FS, spec.Scratch, vacName, spec.Claim,
+			fmt.Errorf("take-aside vacated a foreign plant from %s, not the claimed placeholder — plant preserved byte-intact: %w", spec.Scratch, ErrTakeAsideForeign))
+	}
+	// Wave-43 (b): the scratch name is provably FREE — publish src onto it
+	// NO-REPLACE. A plant winning the vacate→publish gap is the typed
+	// refusal: the plant is preserved, src never moved, and the reservation
+	// rides back onto scratch NO-REPLACE (vacRestoreOrDrop).
+	if pubErr := PublishNoReplace(spec.FS, spec.Src, spec.Scratch); pubErr != nil {
+		return nil, vacRestoreOrDrop(spec.FS, spec.Scratch, vacName, spec.Claim,
+			fmt.Errorf("take-aside publish of %s onto the freed scratch %s refused — occupant preserved byte-intact: %w", spec.Src, spec.Scratch, pubErr))
 	}
 	hold := &BoundAside{fs: spec.FS, src: spec.Src, scratch: spec.Scratch, moved: true}
 	moved, merr := asideLstat(spec.FS, spec.Scratch)
 	switch {
 	case os.IsNotExist(merr):
 		// The moved object vanished unownably right after the move —
-		// indeterminate, nothing to move back (the scratch name is empty).
+		// indeterminate, nothing sits at the scratch name to move back.
 		hold.moved = false
-		return nil, fmt.Errorf("%w: %s (scratch empty at the post-move re-proof)", ErrTakeAsideVanished, spec.Scratch)
+		return nil, vacRestoreOrDrop(spec.FS, spec.Scratch, vacName, spec.Claim,
+			fmt.Errorf("%w: %s (scratch empty at the post-move re-proof)", ErrTakeAsideVanished, spec.Scratch))
 	case merr != nil:
-		return nil, hold.restoreOrJoin(fmt.Errorf("inspect take-aside object %s after the move: %w", spec.Scratch, merr))
+		return nil, hold.restoreOrJoinVac(vacName, spec.Claim, fmt.Errorf("inspect take-aside object %s after the move: %w", spec.Scratch, merr))
 	}
 	if perr := spec.Prove(moved); perr != nil {
-		return nil, hold.restoreOrJoin(fmt.Errorf("take-aside object at %s failed the identity proof: %w", spec.Scratch, perr))
+		return nil, hold.restoreOrJoinVac(vacName, spec.Claim, fmt.Errorf("take-aside object at %s failed the identity proof: %w", spec.Scratch, perr))
 	}
+	// Wave-43 (d): the claimed vacated placeholder is unlinked ONLY after
+	// the vacated name re-binds to the claim identity at syscall adjacency;
+	// a refused/indeterminate cleanup keeps the occupant byte-intact with a
+	// warn and the take stands.
+	dropVacatedReservation(spec.FS, vacName, spec.Claim)
 	hold.held = moved
 	return hold, nil
 }
@@ -187,6 +420,16 @@ func (h *BoundAside) restoreOrJoin(err error) error {
 		return errors.Join(err, rerr)
 	}
 	return err
+}
+
+// restoreOrJoinVac extends restoreOrJoin with the wave-43 vacated-name
+// compensation: after the moved object rode back onto src NO-REPLACE (or
+// its restore failed), the vacated reservation rides back onto the freed
+// scratch NO-REPLACE as well (vacRestoreOrDrop) — an occupied scratch (its
+// own restore having failed) strands only our own placeholder at the
+// vacated name with the joined ErrTakeAsideRestoreFailed.
+func (h *BoundAside) restoreOrJoinVac(vacName string, claim os.FileInfo, err error) error {
+	return vacRestoreOrDrop(h.fs, h.scratch, vacName, claim, h.restoreOrJoin(err))
 }
 
 // Restore compensates a live hold: the taken-aside object moves BACK onto

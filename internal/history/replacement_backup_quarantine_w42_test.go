@@ -43,17 +43,23 @@ import (
 	"github.com/javinizer/javinizer-go/internal/logging"
 )
 
-// w42HandoffFs replays the wave-42 handoff windows: suffix→suffix renames are
-// the take-aside (the FIRST one latches and teaches the seam the reservation
-// + taken names; later ones are wedge compensations riding straight through),
-// src→suffix renames are the publish, and lookups of the reservation name are
-// counted once the take lands (lookup 1 = the freedom proof, lookup 2 = the
-// no-replace publish's own classification).
+// w42HandoffFs replays the wave-42 handoff windows. Wave-43: TakeAside's
+// conditional handoff issues its own internal suffix renames (the
+// reservation's vacate scratch→vac, compensating ride-backs, restores), so
+// suffix-shape keying alone is ambiguous — the double LEARNS the two claimed
+// names from the O_EXCL claims (claim 1 = the reservation name, claim 2 =
+// the take-aside taken name; the transient ".vac." claim rides through):
+// reservation→taken renames are the take-aside (it latches and fires the
+// take hooks), backup→reservation renames are the publish, and lookups of
+// the reservation name are counted once the take lands (lookup 1 = the
+// freedom proof, lookup 2 = the no-replace publish's own classification or
+// the restore's).
 type w42HandoffFs struct {
 	afero.Fs
 	taken          bool
-	quar           string // the reservation name = the publish target
-	takenName      string // the fresh O_EXCL-reserved take-aside name
+	quar           string // the reservation name = the publish target (learned: claim 1)
+	takenName      string // the fresh O_EXCL-reserved take-aside name (learned: claim 2)
+	claims         int
 	onTakeBefore   func(oldname, newname string)
 	onTakeAfter    func(oldname, newname string)
 	proofScript    func() (os.FileInfo, error) // scripted answer for the freedom proof; nil → pass through
@@ -72,25 +78,38 @@ func (f *w42HandoffFs) realLstat(name string) (os.FileInfo, bool, error) {
 	return info, false, err
 }
 
+func (f *w42HandoffFs) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
+	if flag&os.O_EXCL != 0 && strings.Contains(name, backupQuarantineSuffix) && !strings.Contains(name, ".vac.") {
+		f.claims++
+		switch f.claims {
+		case 1:
+			f.quar = name
+		case 2:
+			f.takenName = name
+		}
+	}
+	return f.Fs.OpenFile(name, flag, perm)
+}
+
 func (f *w42HandoffFs) Rename(oldname, newname string) error {
-	oldHas := strings.Contains(oldname, backupQuarantineSuffix)
-	newHas := strings.Contains(newname, backupQuarantineSuffix)
 	switch {
-	case oldHas && newHas && !f.taken:
-		// The take-aside: reservation name → taken name.
+	case oldname == f.quar && newname == f.takenName && !f.taken:
+		// The take-aside: reservation name → taken name (wave-43: the
+		// no-replace publish inside TakeAside).
 		if f.onTakeBefore != nil {
 			f.onTakeBefore(oldname, newname)
 		}
 		err := f.Fs.Rename(oldname, newname)
 		if err == nil {
-			f.taken, f.quar, f.takenName = true, oldname, newname
+			f.taken = true
 			if f.onTakeAfter != nil {
 				f.onTakeAfter(oldname, newname)
 			}
 		}
 		return err
-	case !oldHas && newHas:
-		// The publish: the verified object → the reservation name.
+	case newname == f.quar && !strings.Contains(oldname, backupQuarantineSuffix):
+		// The publish: the verified object → the reservation name (the
+		// restore leg taken→reservation rides through on the suffix gate).
 		if f.publishErr != nil {
 			return f.publishErr
 		}

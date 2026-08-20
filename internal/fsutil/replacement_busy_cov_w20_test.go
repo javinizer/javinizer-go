@@ -432,11 +432,16 @@ func (f *w20LostMalformedFs) Rename(oldpath, newpath string) error {
 }
 
 func (f *w20VanishedTakeoverFs) Rename(oldpath, newpath string) error {
-	f.renameCalls.Add(1)
-	if err := f.Fs.Remove(oldpath); err != nil {
-		return err
+	// The vanish replays ONLY at acquire's reclaim rename (the first rename
+	// of the flow); wave-43's take-aside renames inside the later release
+	// behave normally.
+	if f.renameCalls.Add(1) == 1 {
+		if err := f.Fs.Remove(oldpath); err != nil {
+			return err
+		}
+		return os.ErrNotExist
 	}
-	return os.ErrNotExist
+	return f.Fs.Rename(oldpath, newpath)
 }
 
 func (f *w20LostTakeoverFs) Open(name string) (afero.File, error) {

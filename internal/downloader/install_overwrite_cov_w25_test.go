@@ -119,24 +119,41 @@ func TestInstallOverwritingW25_ConfirmFailureRemovesBackupBeforeSuccessfulReleas
 
 type w25RemoveBackupErrorFs struct {
 	afero.Fs
-	err   error
-	calls int
+	err      error
+	match    int
+	armed    bool
+	postArms int
+	calls    int
+}
+
+// Wave-43: the take-asides' claim-bound housekeeping (vacated-name
+// release/cleanup, scratch+placeholder unlinks) runs on ".dlq." siblings
+// and rides through. The scripted wedge keys on backup→quarantine-shaped
+// publishes: the FIRST is the fallback handoff's internal take-aside
+// publish (backup → its scratch), the SECOND is the rollback handoff's
+// publish of the journaled backup onto its quarantine name; after it, the
+// SECOND backup-family remove is the rollback's quarantine unlink of the
+// journaled backup (the first is the take-aside hold's placeholder unlink),
+// which must fail.
+func (f *w25RemoveBackupErrorFs) Rename(oldname, newname string) error {
+	err := f.Fs.Rename(oldname, newname)
+	if err == nil && strings.Contains(newname, rollbackQuarantineSuffix) &&
+		strings.Contains(filepath.Base(oldname), backupSuffixForDest+".") && !strings.Contains(oldname, rollbackQuarantineSuffix) {
+		f.match++
+		if f.match == 2 {
+			f.armed = true
+		}
+	}
+	return err
 }
 
 func (f *w25RemoveBackupErrorFs) Remove(name string) error {
-	if strings.Contains(filepath.Base(name), backupSuffixForDest+".") {
-		f.calls++
-		if f.calls <= 2 {
-			// Wave-38: the FIRST .dlbak-sibling remove is the handoff's
-			// take-aside scratch (the reservation placeholder, pre-journal)
-			// — a warn-only litter leg, not the journaled backup cleanup
-			// this test wedges. Wave-42: the rollback quarantine handoff added
-			// its own take-aside placeholder unlink (the SECOND remove), so
-			// the THIRD is the rollback's quarantine unlink of the journaled
-			// backup, which must fail.
-			return f.Fs.Remove(name)
+	if f.armed && strings.Contains(filepath.Base(name), backupSuffixForDest+".") {
+		f.postArms++
+		if f.postArms == 2 {
+			f.calls++
+			return f.err
 		}
-		return f.err
 	}
 	return f.Fs.Remove(name)
 }
@@ -161,8 +178,8 @@ func TestInstallOverwritingW25_ConfirmRollbackBackupRemovalFailureKeepsOwnership
 	})
 	require.ErrorIs(t, err, removeErr)
 	require.Contains(t, err.Error(), "backup cleanup")
-	require.Equal(t, 3, fs.calls,
-		"wave-38+42: the handoff's take-aside scratch unlink (succeeds) + the rollback handoff's take-aside placeholder unlink (succeeds) + the wedged quarantine unlink of the journaled backup")
+	require.Equal(t, 1, fs.calls,
+		"wave-43: the take-asides' claim-bound housekeeping rides through; only the journaled backup's quarantine unlink is wedged")
 	require.Zero(t, recorder.releaseCalls, "failed cleanup must not retract durable ownership")
 	records := recorder.get()
 	require.Len(t, records, 1)

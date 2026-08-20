@@ -458,6 +458,9 @@ func setW34ReleaseBackoff(t *testing.T, backoff []time.Duration) {
 
 // w34RemoveCountFs counts Removes of the marker pathname vs scratch names —
 // the wave-38 architecture claim "never unlinked by the marker pathname".
+// Wave-43: the take-aside's internal vacated-name housekeeping
+// (".takeover-...vac.<tok>") is claim-bound identity cleanup, never the
+// bound scratch unlink, so it is excluded from the scratch count.
 type w34RemoveCountFs struct {
 	afero.Fs
 	path           string
@@ -468,7 +471,7 @@ type w34RemoveCountFs struct {
 func (f *w34RemoveCountFs) Remove(name string) error {
 	if name == f.path {
 		f.pathRemoves.Add(1)
-	} else if strings.Contains(name, ".takeover-") {
+	} else if strings.Contains(name, ".takeover-") && !strings.Contains(name, ".vac.") {
 		f.scratchRemoves.Add(1)
 	}
 	return f.Fs.Remove(name)
@@ -476,8 +479,10 @@ func (f *w34RemoveCountFs) Remove(name string) error {
 
 // w34RemoveWedgeFs wedges the SCRATCH-side unlink (the wave-38 release no
 // longer removes the marker path at all): the first allowAfter+1 Removes of
-// any ".takeover-" name fail with scratchErr (allowAfter < 0 wedges every
-// scratch remove).
+// a bound scratch name fail with scratchErr (allowAfter < 0 wedges every
+// scratch remove). Wave-43: the take-aside's internal vacated-name
+// housekeeping (".vac.") is claim-bound cleanup, never the bound unlink
+// under test, so it rides through.
 type w34RemoveWedgeFs struct {
 	afero.Fs
 	path       string
@@ -487,7 +492,7 @@ type w34RemoveWedgeFs struct {
 }
 
 func (f *w34RemoveWedgeFs) Remove(name string) error {
-	if !strings.Contains(name, ".takeover-") {
+	if !strings.Contains(name, ".takeover-") || strings.Contains(name, ".vac.") {
 		return f.Fs.Remove(name)
 	}
 	attempt := f.attempts.Add(1)
@@ -699,18 +704,19 @@ func (f *w34ObserveFailFile) Read(p []byte) (int, error) {
 }
 
 // w34ScratchSwapFs swaps a foreign object onto the scratch name between
-// the take and the unlink: the wave-38 take inspects a scratch name THREE
-// times (reservation re-proof, post-move proof, and the unlink-time binding
-// lookup — wrappers fall back to Stat for them), so the swap lands at the
-// THIRD scratch lookup and the bound unlink must refuse + preserve the
-// foreign object at the scratch name.
+// the take and the unlink: the wave-43 conditional take inspects a scratch
+// name FOUR times (reservation re-proof, no-replace publish classification,
+// post-move proof, and the unlink-time binding lookup — wrappers fall back
+// to Stat for them; the internal ".vac." housekeeping names are excluded),
+// so the swap lands at the FOURTH scratch lookup and the bound unlink must
+// refuse + preserve the foreign object at the scratch name.
 type w34ScratchSwapFs struct {
 	afero.Fs
 	calls atomic.Int32
 }
 
 func (f *w34ScratchSwapFs) Stat(name string) (os.FileInfo, error) {
-	if strings.Contains(name, ".takeover-") && f.calls.Add(1) == 3 {
+	if strings.Contains(name, ".takeover-") && !strings.Contains(name, ".vac.") && f.calls.Add(1) == 4 {
 		// The unlink's binding lookup: the swap lands first — a fresh foreign
 		// object replaces the taken-aside marker at the scratch name.
 		_ = f.Fs.Remove(name)

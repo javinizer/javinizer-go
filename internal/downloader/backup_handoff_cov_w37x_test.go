@@ -252,16 +252,28 @@ func (f *w37LstatFailFs) LstatIfPossible(name string) (os.FileInfo, bool, error)
 	return info, false, err
 }
 
-// w37RemoveFailFs forces removal failures for names carrying the victim
-// substring (wave-38: the take-aside scratch name).
+// w37RemoveFailFs wedges the ONE bound scratch unlink (the take-aside's
+// held scratch name — wave-38). Wave-43: the conditional take-aside runs
+// its own identity-bound vacated-name housekeeping (claim release, cleanup
+// drop) through Remove as well, and those must ride through — the double
+// LEARNS the scratch name from the first O_EXCL quarantine claim (the
+// ".vac." claim comes second and is ignored) and fails only its Removes.
 type w37RemoveFailFs struct {
 	afero.Fs
 	victim string
 	err    error
+	name   string // learned scratch name
+}
+
+func (f *w37RemoveFailFs) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
+	if f.name == "" && flag&os.O_EXCL != 0 && strings.Contains(name, f.victim) && !strings.Contains(name, ".vac.") {
+		f.name = name
+	}
+	return f.Fs.OpenFile(name, flag, perm)
 }
 
 func (f *w37RemoveFailFs) Remove(name string) error {
-	if strings.Contains(name, f.victim) {
+	if name == f.name {
 		return f.err
 	}
 	return f.Fs.Remove(name)
@@ -273,26 +285,38 @@ type w37xFailReader struct{ err error }
 func (r *w37xFailReader) Read([]byte) (int, error) { return 0, r.err }
 
 // w37xScratchSwapFs replays a foreign object claiming the scratch name
-// between the take-aside move and the bound unlink: only after the move
-// landed does the Stat hook arm, and the swap lands at the SECOND post-move
-// scratch lookup (the first is the post-move re-proof, the second is the
-// unlink's binding re-derivation).
+// between the take-aside move and the bound unlink. Wave-43: the take
+// inspects the scratch name through the conditional handoff (reservation
+// re-proof, publish classification, post-move re-proof, unlink binding),
+// with the internal ".vac." housekeeping riding separate names, so the
+// double LEARNS the scratch name from the first O_EXCL quarantine claim,
+// arms once the publish rename lands there (oldname carries no suffix),
+// and the swap lands at the SECOND post-arm scratch lookup (the first is
+// the post-move re-proof, the second is the unlink's binding re-derivation).
 type w37xScratchSwapFs struct {
 	afero.Fs
+	scratch    string
 	moved      bool
 	afterMoves int
 }
 
+func (f *w37xScratchSwapFs) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
+	if f.scratch == "" && flag&os.O_EXCL != 0 && strings.Contains(name, rollbackQuarantineSuffix) && !strings.Contains(name, ".vac.") {
+		f.scratch = name
+	}
+	return f.Fs.OpenFile(name, flag, perm)
+}
+
 func (f *w37xScratchSwapFs) Rename(oldname, newname string) error {
 	err := f.Fs.Rename(oldname, newname)
-	if err == nil && strings.Contains(newname, rollbackQuarantineSuffix) {
+	if err == nil && newname == f.scratch && !strings.Contains(oldname, rollbackQuarantineSuffix) {
 		f.moved = true
 	}
 	return err
 }
 
 func (f *w37xScratchSwapFs) Stat(name string) (os.FileInfo, error) {
-	if f.moved && strings.Contains(name, rollbackQuarantineSuffix) {
+	if f.moved && name == f.scratch {
 		f.afterMoves++
 		if f.afterMoves == 2 {
 			if err := f.Fs.Remove(name); err == nil {
