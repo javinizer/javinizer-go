@@ -290,23 +290,34 @@ func TestTakeAsideW38_UnlinkLegs(t *testing.T) {
 			"the swapped-in occupant is never unlinked")
 	})
 
-	t.Run("hard unlink failure surfaces wrapped", func(t *testing.T) {
+	t.Run("wedged terminal unlink rewinds and the retry lands", func(t *testing.T) {
+		// Wave-44: the bound unlink no longer path-removes the scratch —
+		// the wedge targets the fresh terminal name's remove; the rewind
+		// rides the re-verified object back onto the freed scratch NO-REPLACE.
 		base, _, scratch, hold := newHold(t, "/out/w38-unlink-fail")
-		sentinel := errors.New("w38 scratch remove wedged")
-		whold := &BoundAside{fs: &w38RemoveFailFs{Fs: base, victim: scratch, err: sentinel}, scratch: scratch, held: hold.held, moved: true}
+		sentinel := errors.New("w38 terminal remove wedged")
+		wfs := &w44TerminalRemoveFailFs{Fs: base, err: sentinel, fail: 1}
+		whold := &BoundAside{fs: wfs, scratch: scratch, held: hold.held, moved: true}
 		err := whold.Unlink()
 		require.ErrorIs(t, err, sentinel)
-		require.Contains(t, err.Error(), "remove take-aside object")
+		require.Contains(t, err.Error(), "remove the bound unlink's verified terminal object")
+		require.NotErrorIs(t, err, ErrTakeAsideRestoreFailed,
+			"the scratch name was free — the rewind rode the verified object back no-replace")
 		require.Equal(t, "journal bytes", string(w38Read(t, base, scratch)),
-			"a failed unlink leaves the object in place")
+			"a wedged terminal unlink rewinds the object onto the scratch name — never a silent loss")
+		require.Empty(t, w43VacNames(t, base, "/out/w38-unlink-fail"), "the rewind freed the terminal name")
+		require.NoError(t, whold.Unlink(), "the retry re-runs the whole bound construction")
+		_, lerr := base.Stat(scratch)
+		require.ErrorIs(t, lerr, os.ErrNotExist)
 	})
 
-	t.Run("unlink answering ENOENT after a racer's unlink completes the hold", func(t *testing.T) {
+	t.Run("terminal unlink answering ENOENT after a racer's unlink completes the hold", func(t *testing.T) {
 		base, _, scratch, hold := newHold(t, "/out/w38-unlink-enoent")
-		whold := &BoundAside{fs: &w38RemoveEnoentFs{Fs: base, victim: scratch}, scratch: scratch, held: hold.held, moved: true}
+		whold := &BoundAside{fs: &w44TerminalRemoveEnoentFs{Fs: base}, scratch: scratch, held: hold.held, moved: true}
 		require.NoError(t, whold.Unlink())
 		_, lerr := base.Stat(scratch)
 		require.ErrorIs(t, lerr, os.ErrNotExist)
+		require.Empty(t, w43VacNames(t, base, "/out/w38-unlink-enoent"))
 	})
 
 	t.Run("dead holds take no further action", func(t *testing.T) {
@@ -458,36 +469,6 @@ func (f *w38RenameFailFs) Rename(oldname, newname string) error {
 		return f.err
 	}
 	return f.Fs.Rename(oldname, newname)
-}
-
-type w38RemoveFailFs struct {
-	afero.Fs
-	victim string
-	err    error
-}
-
-func (f *w38RemoveFailFs) Remove(name string) error {
-	if name == f.victim {
-		return f.err
-	}
-	return f.Fs.Remove(name)
-}
-
-// w38RemoveEnoentFs unlinks the victim itself and answers os.ErrNotExist —
-// the racer-won-the-unlink race replayed.
-type w38RemoveEnoentFs struct {
-	afero.Fs
-	victim string
-}
-
-func (f *w38RemoveEnoentFs) Remove(name string) error {
-	if name == f.victim {
-		if err := f.Fs.Remove(name); err != nil {
-			return err
-		}
-		return os.ErrNotExist
-	}
-	return f.Fs.Remove(name)
 }
 
 func w38Read(t *testing.T, fs afero.Fs, path string) []byte {

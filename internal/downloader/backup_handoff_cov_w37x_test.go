@@ -96,9 +96,9 @@ func TestReleaseExchangedPlaceholderW37_Legs(t *testing.T) {
 		base := afero.NewMemMapFs()
 		claim := claimOf(t, base, "/dest")
 		sentinel := errors.New("w37 remove wedged")
-		// Wave-38: the only unlink targets the take-aside SCRATCH name
-		// (a .dlq. sibling) — the destination name is never removed by
-		// pathname.
+		// Wave-38/44: the only unlink targets the take-aside's fresh
+		// terminal name (a .dlq..vac. sibling) — neither the destination
+		// name nor the scratch name is ever removed by pathname.
 		fsys := &w37RemoveFailFs{Fs: base, victim: rollbackQuarantineSuffix, err: sentinel}
 		err := releaseExchangedPlaceholder(fsys, "/dest", claim)
 		require.ErrorIs(t, err, sentinel)
@@ -252,17 +252,32 @@ func (f *w37LstatFailFs) LstatIfPossible(name string) (os.FileInfo, bool, error)
 	return info, false, err
 }
 
-// w37RemoveFailFs wedges the ONE bound scratch unlink (the take-aside's
-// held scratch name — wave-38). Wave-43: the conditional take-aside runs
-// its own identity-bound vacated-name housekeeping (claim release, cleanup
-// drop) through Remove as well, and those must ride through — the double
-// LEARNS the scratch name from the first O_EXCL quarantine claim (the
-// ".vac." claim comes second and is ignored) and fails only its Removes.
+// w37RemoveFailFs wedges the ONE bound unlink (wave-38/43: the take-aside's
+// held scratch name; wave-44: the scratch name itself is never path-removed
+// — the bound unlink vacates the proven object onto a FRESH claimed
+// terminal name and unlinks only that). The double LEARNS the scratch name
+// from the first O_EXCL quarantine claim (the ".vac." claim is ignored),
+// then arms the SECOND scratch→".vac." rename target — the FIRST is the
+// conditional take's internal reservation vacate, the second is the bound
+// unlink's terminal vacate — and fails only the armed terminal name's
+// Removes. The take's own claim-bound housekeeping rides through.
 type w37RemoveFailFs struct {
 	afero.Fs
-	victim string
-	err    error
-	name   string // learned scratch name
+	victim   string
+	err      error
+	name     string // learned scratch name
+	vacates  int    // scratch→".vac." renames observed
+	terminal string // armed terminal name (the second vacate's target)
+}
+
+func (f *w37RemoveFailFs) Rename(oldname, newname string) error {
+	if f.name != "" && oldname == f.name && strings.Contains(newname, ".vac.") {
+		f.vacates++
+		if f.vacates == 2 {
+			f.terminal = newname
+		}
+	}
+	return f.Fs.Rename(oldname, newname)
 }
 
 func (f *w37RemoveFailFs) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
@@ -273,7 +288,7 @@ func (f *w37RemoveFailFs) OpenFile(name string, flag int, perm os.FileMode) (afe
 }
 
 func (f *w37RemoveFailFs) Remove(name string) error {
-	if name == f.name {
+	if f.terminal != "" && name == f.terminal {
 		return f.err
 	}
 	return f.Fs.Remove(name)

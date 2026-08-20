@@ -128,13 +128,16 @@ type w25RemoveBackupErrorFs struct {
 
 // Wave-43: the take-asides' claim-bound housekeeping (vacated-name
 // release/cleanup, scratch+placeholder unlinks) runs on ".dlq." siblings
-// and rides through. The scripted wedge keys on backup→quarantine-shaped
-// publishes: the FIRST is the fallback handoff's internal take-aside
-// publish (backup → its scratch), the SECOND is the rollback handoff's
-// publish of the journaled backup onto its quarantine name; after it, the
-// SECOND backup-family remove is the rollback's quarantine unlink of the
-// journaled backup (the first is the take-aside hold's placeholder unlink),
-// which must fail.
+// and rides through. Wave-44: the bound unlink NEVER path-removes the
+// scratch — its placeholder vacates onto a fresh claimed terminal name and
+// only that re-bound remove runs, on a ".vac." sibling — so the backup-
+// family remove count excludes ".vac." names entirely. The scripted wedge
+// keys on backup→quarantine-shaped publishes: the FIRST is the fallback
+// handoff's internal take-aside publish (backup → its scratch), the SECOND
+// is the rollback handoff's publish of the journaled backup onto its
+// quarantine name; after it, the FIRST non-".vac." backup-family remove is
+// the rollback's quarantine unlink of the journaled backup, which must
+// fail.
 func (f *w25RemoveBackupErrorFs) Rename(oldname, newname string) error {
 	err := f.Fs.Rename(oldname, newname)
 	if err == nil && strings.Contains(newname, rollbackQuarantineSuffix) &&
@@ -148,9 +151,9 @@ func (f *w25RemoveBackupErrorFs) Rename(oldname, newname string) error {
 }
 
 func (f *w25RemoveBackupErrorFs) Remove(name string) error {
-	if f.armed && strings.Contains(filepath.Base(name), backupSuffixForDest+".") {
+	if f.armed && strings.Contains(filepath.Base(name), backupSuffixForDest+".") && !strings.Contains(name, ".vac.") {
 		f.postArms++
-		if f.postArms == 2 {
+		if f.postArms == 1 {
 			f.calls++
 			return f.err
 		}
@@ -179,7 +182,7 @@ func TestInstallOverwritingW25_ConfirmRollbackBackupRemovalFailureKeepsOwnership
 	require.ErrorIs(t, err, removeErr)
 	require.Contains(t, err.Error(), "backup cleanup")
 	require.Equal(t, 1, fs.calls,
-		"wave-43: the take-asides' claim-bound housekeeping rides through; only the journaled backup's quarantine unlink is wedged")
+		"wave-43/44: the take-asides' claim-bound + terminal housekeeping rides through; only the journaled backup's quarantine unlink is wedged")
 	require.Zero(t, recorder.releaseCalls, "failed cleanup must not retract durable ownership")
 	records := recorder.get()
 	require.Len(t, records, 1)

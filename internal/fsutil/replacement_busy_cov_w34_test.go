@@ -21,7 +21,9 @@ import (
 // wave-38 take-aside closes it: observe through one open handle (token +
 // identity ride one descriptor), take the observed object aside onto an
 // O_EXCL-reserved scratch, re-prove identity there, and unlink only the
-// scratch re-bound at every attempt. A transiently wedged unlink is retried
+// re-bound object — wave-44: vacated onto a fresh claimed terminal name
+// first, so even the scratch name never sees a verify→Remove pathname pair.
+// A transiently wedged unlink is retried
 // with backoff; a persistent wedge frees the marker name regardless and
 // leaves only the inert scratch (never a busy-block), while a released
 // marker left on disk by a pre-wave-38 wedged release still decodes and
@@ -31,9 +33,10 @@ func w34ReleasedToken(token string) string {
 	return token + ",released=1"
 }
 
-// The headline wave-38 release: the marker is taken aside and only the
-// scratch name is ever unlinked — the marker name is never removed by
-// pathname.
+// The headline wave-38 release (wave-44 terminal shape): the marker is
+// taken aside and only the fresh crypto-claimed terminal name is ever
+// unlinked — neither the marker name nor the caller-predictable scratch
+// name is ever removed by pathname.
 func TestReplacementBusyW34_ReleaseTakesMarkerAside(t *testing.T) {
 	setW34ReleaseBackoff(t, []time.Duration{time.Nanosecond, time.Nanosecond})
 	base := afero.NewMemMapFs()
@@ -46,7 +49,10 @@ func TestReplacementBusyW34_ReleaseTakesMarkerAside(t *testing.T) {
 	require.NoError(t, err)
 	release()
 	require.Zero(t, fs.pathRemoves.Load(), "the release NEVER unlinks the marker by pathname")
-	require.EqualValues(t, 1, fs.scratchRemoves.Load(), "exactly one bound scratch unlink")
+	require.Zero(t, fs.scratchRemoves.Load(),
+		"wave-44: the scratch name the caller (or a watcher) can predict is never path-removed either")
+	require.EqualValues(t, 1, fs.terminalRemoves.Load(),
+		"exactly one bound unlink — at the fresh claimed terminal name after the identity re-bind")
 	_, err = base.Stat(path)
 	require.ErrorIs(t, err, os.ErrNotExist, "the marker is gone")
 	require.Empty(t, w28RecoveryFiles(t, base, "/out/w34-takeaside", ".takeover-"),
@@ -67,6 +73,10 @@ func TestReplacementBusyW34_ReleaseRetryLegs(t *testing.T) {
 		require.NoError(t, base.MkdirAll("/out/w34-retry", 0o755))
 		dest := "/out/w34-retry/poster.jpg"
 		fs := &w34RemoveWedgeFs{Fs: base, scratchErr: errors.New("unlinked transiently"), allowAfter: 1}
+		// wave-44: attempt 1 wedges the terminal remove — the verified object
+		// rewinds onto the freed scratch NO-REPLACE and the backoff retry
+		// re-runs the whole bound construction (re-bind, fresh terminal claim,
+		// vacate, re-bind, remove) against the pre-Unlink names.
 
 		var logs bytes.Buffer
 		restoreLog := logging.SetOutput(&logs)
@@ -75,7 +85,7 @@ func TestReplacementBusyW34_ReleaseRetryLegs(t *testing.T) {
 		release, err := AcquireReplacementBusy(fs, dest)
 		require.NoError(t, err)
 		release()
-		require.EqualValues(t, 2, fs.attempts.Load(), "first scratch unlink fails, first backoff retry succeeds")
+		require.EqualValues(t, 2, fs.attempts.Load(), "first terminal unlink fails (the object rewinds onto the scratch), first backoff retry succeeds")
 		_, err = base.Stat(ReplacementBusyPath(dest))
 		require.ErrorIs(t, err, os.ErrNotExist)
 		require.Empty(t, logs.String(), "a recovered unlink must not warn")
@@ -119,7 +129,7 @@ func TestReplacementBusyW34_ReleaseRetryLegs(t *testing.T) {
 		release()
 
 		require.EqualValues(t, 1+len(replacementBusyReleaseBackoff), fs.attempts.Load(),
-			"a persistent wedge burns the unlink plus every backoff retry")
+			"a persistent wedge burns the terminal unlink plus every backoff retry (each attempt rewinds onto the scratch first)")
 		_, err = base.Stat(path)
 		require.ErrorIs(t, err, os.ErrNotExist,
 			"the marker name is freed by the take-aside even when every unlink wedges")
@@ -456,16 +466,36 @@ func setW34ReleaseBackoff(t *testing.T, backoff []time.Duration) {
 	t.Cleanup(func() { replacementBusyReleaseBackoff = old })
 }
 
-// w34RemoveCountFs counts Removes of the marker pathname vs scratch names —
-// the wave-38 architecture claim "never unlinked by the marker pathname".
-// Wave-43: the take-aside's internal vacated-name housekeeping
-// (".takeover-...vac.<tok>") is claim-bound identity cleanup, never the
-// bound scratch unlink, so it is excluded from the scratch count.
+// w34RemoveCountFs counts Removes of the marker pathname vs scratch names
+// vs terminal names — the wave-38 architecture claim "never unlinked by the
+// marker pathname", extended by wave-44 (codex P2, PR#215 finding F2):
+// the bound unlink no longer path-removes the SCRATCH name either (the
+// object vacates onto a fresh crypto-claimed terminal name NO-REPLACE and
+// only the terminal name — re-bound to the held identity — is unlinked).
+// The terminal name is learned as the newest rename target (the
+// scratch→terminal vacate; the claim housekeeping's O_EXCL placeholder is
+// released BEFORE and is never a rename target).
 type w34RemoveCountFs struct {
 	afero.Fs
-	path           string
-	pathRemoves    atomic.Int32
-	scratchRemoves atomic.Int32
+	path            string
+	terminal        atomic.Value // string: the armed terminal name
+	pathRemoves     atomic.Int32
+	scratchRemoves  atomic.Int32
+	terminalRemoves atomic.Int32
+}
+
+func (f *w34RemoveCountFs) Rename(oldname, newname string) error {
+	err := f.Fs.Rename(oldname, newname)
+	// Arm only a terminal name carrying a REAL object (the unlink's
+	// scratch→terminal vacate): the take-aside's internal vacated-name
+	// housekeeping vacates the 0-byte reservation placeholder beneath the
+	// same suffix shape and must not count.
+	if err == nil && strings.Contains(newname, ".takeover-") && strings.Contains(newname, ".vac.") {
+		if info, serr := f.Fs.Stat(newname); serr == nil && info.Size() > 0 {
+			f.terminal.Store(newname)
+		}
+	}
+	return err
 }
 
 func (f *w34RemoveCountFs) Remove(name string) error {
@@ -473,26 +503,44 @@ func (f *w34RemoveCountFs) Remove(name string) error {
 		f.pathRemoves.Add(1)
 	} else if strings.Contains(name, ".takeover-") && !strings.Contains(name, ".vac.") {
 		f.scratchRemoves.Add(1)
+	} else if name == f.terminal.Load() {
+		f.terminalRemoves.Add(1)
 	}
 	return f.Fs.Remove(name)
 }
 
-// w34RemoveWedgeFs wedges the SCRATCH-side unlink (the wave-38 release no
-// longer removes the marker path at all): the first allowAfter+1 Removes of
-// a bound scratch name fail with scratchErr (allowAfter < 0 wedges every
-// scratch remove). Wave-43: the take-aside's internal vacated-name
-// housekeeping (".vac.") is claim-bound cleanup, never the bound unlink
-// under test, so it rides through.
+// w34RemoveWedgeFs wedges the bound unlink's TERMINAL remove (wave-44: the
+// release no longer removes the marker path or the scratch name at all —
+// the proven object vacates onto a fresh claimed terminal name first, and
+// only that re-bound remove is the unlink under test): the first
+// allowAfter Removes of a rename-armed terminal name fail with scratchErr
+// (allowAfter < 0 wedges every terminal remove). The claim housekeeping's
+// O_EXCL placeholder release is never a rename target and rides through.
 type w34RemoveWedgeFs struct {
 	afero.Fs
 	path       string
 	scratchErr error
 	allowAfter int32
+	terminal   atomic.Value // string: the armed terminal name
 	attempts   atomic.Int32
 }
 
+func (f *w34RemoveWedgeFs) Rename(oldname, newname string) error {
+	err := f.Fs.Rename(oldname, newname)
+	// Arm only a terminal name carrying a REAL object (the unlink's
+	// scratch→terminal vacate); the take-aside's internal 0-byte
+	// placeholder housekeeping rides the same suffix shape and is never
+	// the unlink under test.
+	if err == nil && strings.Contains(newname, ".takeover-") && strings.Contains(newname, ".vac.") {
+		if info, serr := f.Fs.Stat(newname); serr == nil && info.Size() > 0 {
+			f.terminal.Store(newname)
+		}
+	}
+	return err
+}
+
 func (f *w34RemoveWedgeFs) Remove(name string) error {
-	if !strings.Contains(name, ".takeover-") || strings.Contains(name, ".vac.") {
+	if name != f.terminal.Load() {
 		return f.Fs.Remove(name)
 	}
 	attempt := f.attempts.Add(1)

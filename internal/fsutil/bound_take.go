@@ -59,6 +59,24 @@ package fsutil
 // and the error classifies (ErrTakeAsideRestoreFailed). Whichever arm
 // wedges, NO foreign bytes are ever removed and the operation's caller
 // keeps its conservative failure posture.
+//
+// POSTER-WRITE-HARDENING wave-44 (codex P2, PR#215 finding F2) — the bound
+// unlink itself loses its verify→Remove pathname window: the wave-38/43
+// Unlink re-proved the scratch name and then unlinked it BY PATH (two
+// syscalls a directory writer could interpose — a plant replacing the
+// occupant in between had its foreign bytes deleted by OUR bound unlink).
+// The unlink now runs the take's own vacate→verify→drop construction: the
+// proven-held object moves a SECOND time onto a fresh crypto-claimed
+// terminal name (claimed O_EXCL, released identity-bound, published
+// NO-REPLACE), is re-bound to the held identity at the terminal name, and
+// only THE TERMINAL NAME is unlinked. Every name an attacker can predict
+// rides a re-proof; the terminal name's residual verify→Remove gap can be
+// raced only by reclaiming the unpredictable crypto-token draw itself (the
+// codex-accepted fresh-claimed-name terminal boundary, documented in
+// Unlink). Any doubt — a substituted occupant, an indeterminate answer, a
+// wedged terminal remove — retains every occupant and refuses typed,
+// rewinding the terminal object onto the scratch name NO-REPLACE so a
+// caller retry re-runs the whole bound construction.
 
 import (
 	cryptorand "crypto/rand"
@@ -449,22 +467,54 @@ func (h *BoundAside) Restore() error {
 	return nil
 }
 
-// Unlink performs the one bound unlink of the take-aside flow: only THE
-// SCRATCH name is ever removed, never the source pathname. Because
-// fs.Remove is path-based, so the scratch name is re-derived no-follow AT
-// UNLINK TIME and must still name the re-proven held object (dev/inode
-// where exposed, plus size + mtime, regular and non-symlink) before the
-// unlink runs; a substitution inside the window is refused with
-// ErrTakeAsideForeign, never deleted. A scratch name that VANISHED on its
-// own completed the hold by itself (no foreign bytes were ever at risk) —
-// answering success, not the vanished sentinel, because the finalized
-// object gone from the scratch name is precisely the outcome the unlink
-// exists to reach.
+// Unlink performs the one bound unlink of the take-aside flow: only the
+// object the hold PROVED is ever removed, never the source pathname — and
+// (wave-44, codex P2, PR#215 finding F2) never through a verify→Remove
+// pathname pair on the caller-known scratch name either. The wave-38
+// construction re-derived the scratch name no-follow and unlinked it by
+// path; a plant replacing the occupant between the two syscalls had its
+// foreign bytes deleted by OUR bound unlink. The unlink now runs the
+// take's own vacate→verify→drop construction:
 //
-// A wedge returns the failure WITHOUT compensating: the scratch name's
-// state is left to the caller (F3-style flows Restore the placeholder back
-// onto the source name; F4-style flows leave the inert scratch for manual
-// cleanup and carry on).
+//  1. the scratch name is re-derived no-follow and must still name the
+//     re-proven held object (dev/inode where exposed, plus size + mtime,
+//     regular and non-symlink) — the unchanged wave-38 binding;
+//  2. the proven object moves a SECOND time onto a FRESH crypto-claimed
+//     terminal name: claimed O_EXCL (claimTakeAsideVacName), released
+//     identity-bound, then published NO-REPLACE — a collision means a racer
+//     owns the fresh draw: nothing relocated, the occupant kept, the
+//     refusal typed. The publish-completed class is deliberately NOT
+//     honored here (unlike the quarantine handoff's install publish —
+//     wave-44 finding F1): a completed-with-residue vacate can leave the
+//     scratch name STILL addressing the object (the hard-link fallback's
+//     staged cleanup), so claiming a finalized delete would lie — every
+//     publish error retains every name and refuses;
+//  3. the terminal name is re-bound to the held identity at syscall
+//     adjacency: a mismatch means the vacate moved a PLANT swapped onto the
+//     scratch name inside step 1's re-proof→vacate window — the plant rides
+//     back onto the freed scratch NO-REPLACE byte-intact (a ride-back
+//     collision strands it recoverable at the terminal name with
+//     ErrTakeAsideRestoreFailed joined) and the unlink refuses typed;
+//  4. only the terminal name — provably the held object — is unlinked. A
+//     wedged remove rewinds the object onto the freed scratch NO-REPLACE
+//     and surfaces the wedge, so the caller's retry re-runs the whole bound
+//     construction instead of losing the residue to silence.
+//
+// Terminal boundary (the codex-accepted fresh-claimed-name shape): the
+// residual re-bind→Remove gap on the terminal name can be raced only by
+// reclaiming the unpredictable crypto-token draw itself; every earlier
+// attacker-predictable name rode a re-proof, and this flow never overwrites
+// an occupant anywhere. A scratch name (or a just-vacated terminal name)
+// that VANISHED on its own completed the hold by itself — the finalized
+// object gone is precisely the outcome the unlink exists to reach, no
+// foreign bytes were ever at risk — so those ENOENT legs answer success,
+// not the vanished sentinel.
+//
+// The remaining wedges return the failure WITHOUT unlinking anything: a
+// successful rewind leaves the hold live for Restore/retry (F3-style flows
+// move the placeholder back onto the source name; F4-style flows leave the
+// inert scratch for manual cleanup); a failed rewind strands the object
+// recoverable at the terminal name with ErrTakeAsideRestoreFailed joined.
 func (h *BoundAside) Unlink() error {
 	if !h.moved || h.held == nil {
 		return nil
@@ -479,13 +529,59 @@ func (h *BoundAside) Unlink() error {
 	case !asideSameObject(cur, h.held):
 		return fmt.Errorf("take-aside object %s no longer names the verified object at the unlink: %w", h.scratch, ErrTakeAsideForeign)
 	}
-	if rerr := h.fs.Remove(h.scratch); rerr != nil {
+	vacName, vacClaim, cerr := claimTakeAsideVacName(h.fs, h.scratch)
+	if cerr != nil {
+		return fmt.Errorf("reserve the bound unlink's terminal name for %s: %w", h.scratch, cerr)
+	}
+	if relErr := releaseTakeAsideVacClaim(h.fs, vacName, vacClaim); relErr != nil {
+		return relErr
+	}
+	if pubErr := PublishNoReplace(h.fs, h.scratch, vacName); pubErr != nil {
+		// No-replace relocated NOTHING on a refusal: the fresh draw's
+		// claimant is preserved and the held object stays at the scratch
+		// name. The publish-completed class keeps the same refusal posture
+		// (see the doc): the object may sit at BOTH names, so nothing is
+		// unlinked and the caller's retry re-derives this attempt's outcome.
+		return fmt.Errorf("bound unlink's terminal vacate of %s onto %s refused — every occupant preserved byte-intact: %w", h.scratch, vacName, pubErr)
+	}
+	terminal, terr := asideLstat(h.fs, vacName)
+	switch {
+	case os.IsNotExist(terr):
+		// Our own vacate moved the held object and it vanished before the
+		// re-bind: the outcome the unlink exists to reach — success.
+		h.moved = false
+		return nil
+	case terr != nil:
+		return h.rerideTerminal(vacName, fmt.Errorf("inspect the bound unlink's terminal object %s: %w", vacName, terr))
+	case !asideSameObject(terminal, h.held):
+		return h.rerideTerminal(vacName, fmt.Errorf("bound unlink's terminal vacate moved a substituted occupant from %s (never unlinked): %w", h.scratch, ErrTakeAsideForeign))
+	}
+	if rerr := h.fs.Remove(vacName); rerr != nil {
 		if os.IsNotExist(rerr) {
 			h.moved = false
 			return nil
 		}
-		return fmt.Errorf("remove take-aside object %s (verified): %w", h.scratch, rerr)
+		return h.rerideTerminal(vacName, fmt.Errorf("remove the bound unlink's verified terminal object %s: %w", vacName, rerr))
 	}
 	h.moved = false
 	return nil
+}
+
+// rerideTerminal runs the wave-44 terminal-leg rewind: whatever the terminal
+// name holds after a doubt leg (the re-verified held object after a wedged
+// remove, the preserved plant after a substitution, the unproven occupant
+// after an indeterminate lookup) moves BACK onto the freed scratch name
+// NO-REPLACE, restoring the pre-Unlink occupancy so the caller's retry or
+// compensation re-derives this attempt's outcome against the pre-Unlink
+// names. A ride-back refusal keeps BOTH occupants byte-intact and strands
+// the terminal object recoverable at the terminal name with
+// ErrTakeAsideRestoreFailed joined; the hold then reports the scratch
+// vacated — nothing provably ours sits at the scratch name for Restore to
+// move.
+func (h *BoundAside) rerideTerminal(vacName string, err error) error {
+	if back := PublishNoReplace(h.fs, vacName, h.scratch); back != nil {
+		h.moved = false
+		return errors.Join(err, fmt.Errorf("%w: scratch %s re-claimed or indeterminate — the terminal object stays recoverable at %s: %v", ErrTakeAsideRestoreFailed, h.scratch, vacName, back))
+	}
+	return err
 }

@@ -289,7 +289,7 @@ func moveVerifiedRollbackBackupToQuarantine(fsys afero.Fs, backup, quarantine st
 	if fsutil.PathBackslashesAreSeparators {
 		_ = handle.Close()
 	}
-	if moveErr := fsutil.PublishNoReplace(fsys, backup, quarantine); moveErr != nil {
+	if moveErr := fsutil.PublishNoReplace(fsys, backup, quarantine); moveErr != nil && !fsutil.PublishCompleted(moveErr) {
 		rerr := hold.Restore()
 		if rerr == nil {
 			releaseClaimedReservation(fsys, quarantine, reservation)
@@ -298,6 +298,25 @@ func moveVerifiedRollbackBackupToQuarantine(fsys afero.Fs, backup, quarantine st
 			fmt.Errorf("quarantine handoff (no-replace move of the verified object onto %s): %w", quarantine, moveErr),
 			rerr,
 		)
+	} else if moveErr != nil {
+		// Wave-44 (codex P2, PR#215 finding F1, mirrored from history's
+		// moveVerifiedBackupToQuarantine): an error carrying
+		// fsutil.ErrPublishCompleted means the verified object LANDED at the
+		// quarantine name (the hard-link fallback's staged-source
+		// cleanup/reverify failed AFTER the destination stood and the
+		// rollback also failed). The handoff is INSTALLED, not failed — fall
+		// into the caller's post-move verification + hold construction
+		// exactly like the clean publish (the moved object was verified
+		// pre-publish; the post-move reverify still re-binds the quarantine
+		// name, so a vanish/substitution takes the existing conservative
+		// legs). The placeholder must NOT ride back onto the reservation
+		// name: the completed publish consumed the name with our own bytes,
+		// so the restore would collide and join a spurious restore-failure
+		// while the journal entry stayed armed against an absent/foreign
+		// journaled name with the owned bytes stranded under .dlq. — the
+		// wave-21 OWNED-name rule. The staged (journaled) name may keep a
+		// residue link; sweeps never arbitrate those names destructively.
+		logging.Warnf("downloader: quarantine handoff of rollback backup %s onto %s completed with a staged-residue error (%v) — the publish provably landed; treating the quarantine as INSTALLED like the wave-21 owned-name rule", backup, quarantine, moveErr)
 	}
 	// Handoff achieved: only the taken name is unlinked, re-bound against the
 	// reservation claim identity at unlink time. A wedged unlink leaves the
