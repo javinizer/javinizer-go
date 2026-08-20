@@ -80,7 +80,7 @@ func TestReplacementBusyW17T_PlaceholderCloseFailureRestoresDisplacedMarker(t *t
 	closeErr := errors.New("w17t placeholder close wedged")
 	fs := &w17PlaceholderWedgeFs{Fs: base, path: path, takeover: takeover, closeErr: closeErr}
 
-	err := replacementBusyReturnTakeover(fs, path, takeover, content)
+	err := replacementBusyReturnTakeover(fs, path, takeover, content, w28TakeoverIdentity(t, base, takeover))
 	require.ErrorIs(t, err, closeErr)
 	require.ErrorContains(t, err, "close replacement busy restore placeholder")
 
@@ -107,7 +107,7 @@ func TestReplacementBusyW17T_CloseAndRestoreFailRemovesPlaceholder(t *testing.T)
 	restoreErr := errors.New("w17t takeover restore wedged")
 	fs := &w17PlaceholderWedgeFs{Fs: base, path: path, takeover: takeover, closeErr: closeErr, restoreErr: restoreErr}
 
-	err := replacementBusyReturnTakeover(fs, path, takeover, content)
+	err := replacementBusyReturnTakeover(fs, path, takeover, content, w28TakeoverIdentity(t, base, takeover))
 	require.ErrorIs(t, err, closeErr)
 
 	_, statErr := base.Stat(path)
@@ -143,7 +143,7 @@ func TestReplacementBusyW17T_AllRecoveriesFailWarnAndSurface(t *testing.T) {
 	fs := &w17PlaceholderWedgeFs{Fs: base, path: path, takeover: takeover,
 		closeErr: closeErr, restoreErr: restoreErr, removeErr: removeErr}
 
-	err := replacementBusyReturnTakeover(fs, path, takeover, content)
+	err := replacementBusyReturnTakeover(fs, path, takeover, content, w28TakeoverIdentity(t, base, takeover))
 	require.ErrorIs(t, err, closeErr)
 
 	require.Contains(t, logs.String(), "removing the placeholder")

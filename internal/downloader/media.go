@@ -245,15 +245,55 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 		}
 	}
 	if !overwriteExisting {
-		if rerr := d.fs.Rename(candidate, destPath); rerr != nil {
-			logging.Warnf("downloadPoster: failed to promote %s: %v", candidate, rerr)
-			fullResult.Downloaded = false
-			fullResult.Replaced = false
-			fullResult.LocalPath = ""
-			fullResult.Size = 0
-			fullResult.Error = fmt.Errorf("failed to finalize poster: %w", rerr)
-			fullResult.Duration = time.Since(startTime)
-			return fullResult, fullResult.Error
+		// Wave-51 (codex P2 parity for the legacy promote): the non-overwrite
+		// promote must NEVER replace an occupied destination — 'existing
+		// artwork is never replaced outside overwrite mode' covers a racer that
+		// claimed destPath inside the download→promote window too. The
+		// pre-shape plain Rename CLOBBERED that racer on POSIX (replace
+		// semantics: its bytes destroyed, no backup, no ledger entry) while
+		// Windows's MoveFileW refused — the wave-15 classifier window on the
+		// legacy leg, plus a POSIX/Windows parity break. The promote now rides
+		// the shared no-replace primitive: a collision keeps the racer's bytes
+		// byte-intact and lands exactly the pre-download existing-artwork
+		// outcome, and the publish-completed class (the POSIX hard-link
+		// fallback's staged-residue legs) is honored like the wave-42 install
+		// path — the destination provably carries the candidate bytes and the
+		// possibly-foreign candidate name is retained for manual cleanup.
+		if rerr := fsutil.PublishNoReplace(d.fs, candidate, destPath); rerr != nil {
+			switch {
+			case errors.Is(rerr, fsutil.ErrPublishCollision):
+				logging.Warnf("downloadPoster: promote of %s onto %s refused — a foreign writer claimed the destination inside the download window; keeping the existing artwork (non-overwrite mode), racer's bytes preserved", candidate, destPath)
+				// fullResult carries the FULL download's bookkeeping: reset it to
+				// the pre-download existing-artwork outcome so the racer's
+				// destination NEVER enters CreatedPaths (a later revert would
+				// delete those foreign bytes) — exactly the early-classification
+				// leg's shape above.
+				fullResult.Downloaded = false
+				fullResult.Replaced = false
+				if info, serr := d.fs.Stat(destPath); serr == nil {
+					fullResult.LocalPath = destPath
+					fullResult.Size = info.Size()
+				}
+				fullResult.Duration = time.Since(startTime)
+				return fullResult, nil
+			case fsutil.PublishCompleted(rerr):
+				logging.Warnf("downloadPoster: promote of %s onto %s completed despite the returned error (%v) — the staged name could not be re-proven (possibly foreign) and is left in place; manual cleanup advised", candidate, destPath, rerr)
+				stagedRetained = candidate
+				fullResult.Downloaded = true
+				fullResult.Replaced = false
+				d.finalizePosterResult(fullResult, destPath)
+				fullResult.Duration = time.Since(startTime)
+				return fullResult, nil
+			default:
+				logging.Warnf("downloadPoster: failed to promote %s: %v", candidate, rerr)
+				fullResult.Downloaded = false
+				fullResult.Replaced = false
+				fullResult.LocalPath = ""
+				fullResult.Size = 0
+				fullResult.Error = fmt.Errorf("failed to finalize poster: %w", rerr)
+				fullResult.Duration = time.Since(startTime)
+				return fullResult, fullResult.Error
+			}
 		}
 	}
 

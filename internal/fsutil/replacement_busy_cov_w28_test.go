@@ -210,7 +210,7 @@ func TestReplacementBusyW28_ReturnTakeoverErrorBranches(t *testing.T) {
 		base, path, takeover, content := newW28TakeoverFixture(t, false)
 		closeErr := errors.New("restore placeholder close wedged")
 		fs := &w28FailureFileFs{Fs: base, failPath: path, closeErr: closeErr}
-		err := replacementBusyReturnTakeover(fs, path, takeover, content)
+		err := replacementBusyReturnTakeover(fs, path, takeover, content, w28TakeoverIdentity(t, base, takeover))
 		require.ErrorIs(t, err, closeErr)
 	})
 
@@ -218,7 +218,7 @@ func TestReplacementBusyW28_ReturnTakeoverErrorBranches(t *testing.T) {
 		base, path, takeover, content := newW28TakeoverFixture(t, false)
 		renameErr := errors.New("restore rename wedged")
 		fs := &w28RenameFailureFs{Fs: base, oldPath: takeover, newPath: path, err: renameErr}
-		err := replacementBusyReturnTakeover(fs, path, takeover, content)
+		err := replacementBusyReturnTakeover(fs, path, takeover, content, w28TakeoverIdentity(t, base, takeover))
 		require.ErrorIs(t, err, renameErr)
 	})
 
@@ -226,7 +226,7 @@ func TestReplacementBusyW28_ReturnTakeoverErrorBranches(t *testing.T) {
 		base, path, takeover, content := newW28TakeoverFixture(t, false)
 		reserveErr := errors.New("reserve path wedged")
 		fs := &w28OpenFileFailureFs{Fs: base, failPath: path, err: reserveErr}
-		err := replacementBusyReturnTakeover(fs, path, takeover, content)
+		err := replacementBusyReturnTakeover(fs, path, takeover, content, w28TakeoverIdentity(t, base, takeover))
 		require.ErrorIs(t, err, reserveErr)
 	})
 
@@ -236,7 +236,7 @@ func TestReplacementBusyW28_ReturnTakeoverErrorBranches(t *testing.T) {
 		oldRandom := replacementBusyRandom
 		replacementBusyRandom = func() (uint64, error) { return 0, randomErr }
 		t.Cleanup(func() { replacementBusyRandom = oldRandom })
-		err := replacementBusyReturnTakeover(base, path, takeover, content)
+		err := replacementBusyReturnTakeover(base, path, takeover, content, w28TakeoverIdentity(t, base, takeover))
 		require.ErrorIs(t, err, randomErr)
 	})
 
@@ -244,7 +244,7 @@ func TestReplacementBusyW28_ReturnTakeoverErrorBranches(t *testing.T) {
 		base, path, takeover, content := newW28TakeoverFixture(t, true)
 		openErr := errors.New("quarantine open wedged")
 		fs := &w28OpenFileFailureFs{Fs: base, failContains: replacementBusyQuarantineMark, err: openErr}
-		err := replacementBusyReturnTakeover(fs, path, takeover, content)
+		err := replacementBusyReturnTakeover(fs, path, takeover, content, w28TakeoverIdentity(t, base, takeover))
 		require.ErrorIs(t, err, openErr)
 	})
 
@@ -252,14 +252,14 @@ func TestReplacementBusyW28_ReturnTakeoverErrorBranches(t *testing.T) {
 		base, path, takeover, content := newW28TakeoverFixture(t, true)
 		writeErr := errors.New("quarantine write wedged")
 		fs := &w28FailureFileFs{Fs: base, failContains: replacementBusyQuarantineMark, writeErr: writeErr}
-		err := replacementBusyReturnTakeover(fs, path, takeover, content)
+		err := replacementBusyReturnTakeover(fs, path, takeover, content, w28TakeoverIdentity(t, base, takeover))
 		require.ErrorIs(t, err, writeErr)
 	})
 
 	t.Run("quarantine short write", func(t *testing.T) {
 		base, path, takeover, content := newW28TakeoverFixture(t, true)
 		fs := &w28FailureFileFs{Fs: base, failContains: replacementBusyQuarantineMark, shortWrite: true}
-		err := replacementBusyReturnTakeover(fs, path, takeover, content)
+		err := replacementBusyReturnTakeover(fs, path, takeover, content, w28TakeoverIdentity(t, base, takeover))
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "short write")
 	})
@@ -268,7 +268,7 @@ func TestReplacementBusyW28_ReturnTakeoverErrorBranches(t *testing.T) {
 		base, path, takeover, content := newW28TakeoverFixture(t, true)
 		syncErr := errors.New("quarantine sync wedged")
 		fs := &w28FailureFileFs{Fs: base, failContains: replacementBusyQuarantineMark, syncErr: syncErr}
-		err := replacementBusyReturnTakeover(fs, path, takeover, content)
+		err := replacementBusyReturnTakeover(fs, path, takeover, content, w28TakeoverIdentity(t, base, takeover))
 		require.ErrorIs(t, err, syncErr)
 	})
 
@@ -276,7 +276,7 @@ func TestReplacementBusyW28_ReturnTakeoverErrorBranches(t *testing.T) {
 		base, path, takeover, content := newW28TakeoverFixture(t, true)
 		closeErr := errors.New("quarantine close wedged")
 		fs := &w28FailureFileFs{Fs: base, failContains: replacementBusyQuarantineMark, closeErr: closeErr}
-		err := replacementBusyReturnTakeover(fs, path, takeover, content)
+		err := replacementBusyReturnTakeover(fs, path, takeover, content, w28TakeoverIdentity(t, base, takeover))
 		require.ErrorIs(t, err, closeErr)
 	})
 
@@ -284,9 +284,19 @@ func TestReplacementBusyW28_ReturnTakeoverErrorBranches(t *testing.T) {
 		base, path, takeover, content := newW28TakeoverFixture(t, true)
 		removeErr := errors.New("quarantine remove wedged")
 		fs := &w28RemoveFailureFs{Fs: base, takeoverPath: takeover, err: removeErr}
-		err := replacementBusyReturnTakeover(fs, path, takeover, content)
+		err := replacementBusyReturnTakeover(fs, path, takeover, content, w28TakeoverIdentity(t, base, takeover))
 		require.ErrorIs(t, err, removeErr)
 	})
+}
+
+// w28TakeoverIdentity captures the takeover file's current identity for the
+// wave-47 bound takeover-return signature (the restore/quarantine removes
+// re-prove the name against THIS).
+func w28TakeoverIdentity(t *testing.T, fs afero.Fs, takeover string) os.FileInfo {
+	t.Helper()
+	info, err := fs.Stat(takeover)
+	require.NoError(t, err)
+	return info
 }
 
 func writeW28StaleMarker(t *testing.T, fs afero.Fs, dest string) {

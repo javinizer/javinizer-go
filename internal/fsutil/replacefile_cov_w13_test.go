@@ -62,7 +62,7 @@ func TestReplacementBusyW13_RestoreRenameWedgeSurvivesEveryWrapLayer(t *testing.
 	wedge := errors.New("restore rename wedged")
 	fs := &w28RenameFailureFs{Fs: base, oldPath: takeover, newPath: path, err: wedge}
 
-	err := replacementBusyReturnTakeover(fs, path, takeover, content)
+	err := replacementBusyReturnTakeover(fs, path, takeover, content, w28TakeoverIdentity(t, base, takeover))
 	require.ErrorIs(t, err, wedge, "the wedge stays unwrap-reachable through every intermediate wrap layer")
 	require.Contains(t, err.Error(), "restore replacement busy marker", "the takeover-restore layer labels the chain")
 	require.Contains(t, err.Error(), "restore rename wedged", "the wedge text is preserved, not replaced")

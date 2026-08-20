@@ -801,25 +801,39 @@ func (s *ReplacementSweeper) sweepOne(ctx context.Context, idx *replacementLedge
 		return 0
 	}
 	defer busyRelease()
+	// Wave-50 (codex P2, PR#215 finding F1): the destination lock is acquired
+	// BEFORE the claim record so the record is born binding BOTH arbitration
+	// holds — a stranded goroutine parks mid-op holding marker AND lock, and
+	// the reverter's pre-acquisition reclaim consult must be able to free both
+	// through the claim's once-guarded releases. Recording before acquiring
+	// would open an acquire→bind window a reclaim can race (a released-marker
+	// consult freeing nothing of the lock still being taken), and any leg
+	// acquiring the lock apart from the record could hold it UNTRACKED past
+	// abandonment.
+	rawDestRelease := fsutil.SharedDestLocks().Acquire(dest)
 	// Wave-49 (codex P2): journal the claim in the in-process, ctx-scoped
 	// ledger BEFORE it can outlive its waiter — a window between the
 	// acquisition and any later ctx check is exactly how the wave-8 deadline
 	// strands a live marker against the continued revert. The untrack runs
 	// before the marker release (LIFO), and a reclaim by the continued revert
-	// consumes the once-guarded release, making this goroutine's deferred
-	// release a no-op (never a double-free of a successor marker).
-	defer recordSweepBusyClaim(ctx, dest, busyRelease)()
+	// consumes the once-guarded releases, making this goroutine's deferred
+	// releases no-ops (never a double-free of a successor marker or lock).
+	claim, untrackSweepClaim := recordSweepBusyClaim(ctx, dest, busyRelease, rawDestRelease)
+	defer untrackSweepClaim()
+	defer claim.releaseDestLock()
 
 	if owner, ok := idx.journaled[backupKey]; ok {
-		// Journaled — handled under the lock inside restoreAndConsume, which
-		// RECHECKS the destination state in the critical section: a downloader
-		// can install new bytes between the classification read and the lock
-		// (codex P3 R3-2), and the backup must never clobber those
-		// freshly-installed artifacts. The idx mapping is the sweep-local LIVE
-		// view (wave-33, finding R1): a successful consumption retracts it here
+		// Journaled — handled inside restoreAndConsume, which RECHECKS the
+		// destination state in the critical section: a downloader can install
+		// new bytes between the classification read and the lock (codex P3
+		// R3-2), and the backup must never clobber those freshly-installed
+		// artifacts. The dest lock is already held (bound to claim above), so
+		// restoreAndConsume must NOT re-acquire it — SharedDestLocks mutexes
+		// are not reentrant. The idx mapping is the sweep-local LIVE view
+		// (wave-33, finding R1): a successful consumption retracts it here
 		// exactly like the ledger leg retracts its own — every later candidate
 		// consults only state still present in the ledger.
-		if s.restoreAndConsume(ctx, owner, backup, dest, backupKey) {
+		if s.restoreAndConsume(ctx, owner, backup, dest, backupKey, claim) {
 			delete(idx.journaled, backupKey)
 			return 1
 		}
@@ -829,9 +843,9 @@ func (s *ReplacementSweeper) sweepOne(ctx context.Context, idx *replacementLedge
 	// Orphan: no row journals this backup anymore. CLASSIFY FRESH INSIDE THE
 	// LOCK (codex P3 R4-1): the index snapshot may predate the downloader's
 	// RecordReplacement — deleting a just-journaled backup because the
-	// destination exists would leave that row permanently unrevertable.
-	release := fsutil.SharedDestLocks().Acquire(dest)
-	defer release()
+	// destination exists would leave that row permanently unrevertable. (The
+	// dest lock is the one bound to the claim above; released by the deferred
+	// claim release on return.)
 	fresh, fErr := s.repo.FindOperationsByDestination(ctx, dest)
 	if fErr != nil {
 		// R7-2/R4-1: an unreadable ownership answer is NEVER absence — keep
@@ -857,6 +871,15 @@ func (s *ReplacementSweeper) sweepOne(ctx context.Context, idx *replacementLedge
 	// the destination is present and the conservative retain leg applies.
 	_, lstatErr := lstatRestoreSource(s.fs, dest)
 	if errors.Is(lstatErr, afero.ErrFileNotFound) {
+		// Wave-51 (codex P1, PR#215) — epoch-ownership gate at the orphan
+		// restore publish: a claim reclaimed while this worker was parked in
+		// the orphan classification reads above must not publish now — the
+		// continued revert owns the destination's arbitration. Abandoning
+		// leaves dest absent and the unjournaled marker file byte-intact (the
+		// next live sweep re-arbitrates it from scratch).
+		if claim.abandonIfRevoked("orphan destination publish", backup, dest) {
+			return 0
+		}
 		// Wave-16 (codex P2): the destination was proven ABSENT, so the
 		// restore publishes no-replace — a foreign writer claiming the name
 		// mid-window collides into the kept leg below (typed
@@ -889,9 +912,17 @@ func (s *ReplacementSweeper) sweepOne(ctx context.Context, idx *replacementLedge
 // restoreAndConsume moves a journaled crash-window backup back onto its
 // destination under the destination lock. Backup removal is completed before
 // the journal entry is consumed; a failed removal leaves ownership armed.
-func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.BatchFileOperation, backup, dest, backupSlash string) bool {
-	release := fsutil.SharedDestLocks().Acquire(dest)
-	defer release()
+//
+// Wave-50 (codex P2, PR#215 finding F1): production callers (sweepOne) hand
+// in the ctx-scoped claim whose record already BINDS this destination's lock
+// — the lock is held across this call and released through the claim's
+// once-guarded release. A nil claim is the direct-caller (test/legacy)
+// posture: the lock is self-acquired and self-released here.
+func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.BatchFileOperation, backup, dest, backupSlash string, claim *sweepBusyMarkerClaim) bool {
+	if claim == nil {
+		release := fsutil.SharedDestLocks().Acquire(dest)
+		defer release()
+	}
 
 	// A prior restore can leave the destination present when backup cleanup
 	// failed. Only the explicit pending marker (or the same-process fallback)
@@ -928,7 +959,7 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 				return false
 			}
 		}
-		return s.retryPendingRemoval(ctx, row.ID, backup, dest, backupSlash)
+		return s.retryPendingRemovalClaimed(ctx, row.ID, backup, dest, backupSlash, claim)
 	} else if !errors.Is(lstatErr, afero.ErrFileNotFound) {
 		logging.Warnf("replacement sweep %s: destination indeterminate (%v) — kept", backup, lstatErr)
 		return false
@@ -969,6 +1000,19 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 	// identity before the copy so the backup removals below can refuse any
 	// object that no longer matches what this leg actually restored.
 	backupInfoBeforeCopy, _ := lstatRestoreSource(s.fs, backup)
+	// Wave-51 (codex P1, PR#215) — epoch-ownership gate at the destination
+	// publish: a worker RESUMING from a wedged fs read above (the fs call
+	// answered only after the wave-8 deadline proceeded with the revert and
+	// the reclaim flipped this claim's revocation flag) must not publish now
+	// — the continued revert already owns this destination's arbitration, and
+	// a publish here would fork a second restore sequence against the same
+	// backup. Abandoning leaves every classification pre-mutation: dest stays
+	// absent, the backup stays at its journaled name, and the journal entry
+	// keeps its armed classification for the reclaiming revert (or the next
+	// live sweep) to heal.
+	if claim.abandonIfRevoked("destination publish", backup, dest) {
+		return false
+	}
 	restoredID, rnErr := copyRestoreBytesNoReplaceIdentity(s.fs, backup, dest)
 	if rnErr != nil {
 		logging.Warnf("replacement sweep restore %s→%s: %v", backup, dest, rnErr)
@@ -1019,6 +1063,28 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 		if rmErr := removeRestoredDestQuarantined(s.fs, dest, "replacement sweep", restoredID); rmErr != nil {
 			logging.Warnf("replacement sweep %s: restore undo failed: %v", backup, rmErr)
 		}
+	}
+	// Wave-51 (codex P1, PR#215) — epoch-ownership gate at the ENTRY of the
+	// backup-removal + journal-consumption unit: a claim reclaimed while this
+	// worker was parked in the publish or verification legs above means the
+	// continued revert owns the arbitration now, so the quarantine move, the
+	// verified unlink, the entry-presence transaction, the consumption, and
+	// every pending-persist compensation below must not even START.
+	// Abandoning here leaves a coherent armed shape: the restored bytes may
+	// already stand at dest (a complete publish), the backup stays at its
+	// journaled name, and the journal entry keeps its pre-mutation
+	// classification — never clobbered with partially-mutated data. The gate
+	// deliberately stands at the unit's ENTRY rather than between the unit's
+	// own syscalls: the reclaim cannot wait on this worker, so no in-unit
+	// check could close a syscall-adjacent gap — those windows are exactly
+	// what the wave-26/32/34/35/36 identity bindings and compensation legs
+	// already close against foreign racers. A unit that PASSED this gate and
+	// observes revocation mid-flight completes through that audited vocabulary,
+	// and the reverter's fresh-read ordering (documented at
+	// restoreReplacementJournal) resolves the commit-vs-restore race into the
+	// completed-consume posture.
+	if claim.abandonIfRevoked("backup removal and journal consumption", backup, dest) {
+		return false
 	}
 	jrel := fsutil.SharedJournalLocks().Acquire(strconv.Itoa(int(row.ID)))
 	defer jrel()
@@ -1238,7 +1304,23 @@ func consumeSweepJournalEntry(current *models.BatchFileOperation, backupSlash st
 // or absent, so an existence check could wedge forever and a removal would
 // delete a foreign file. Reads and writes run through the same journal
 // transaction every other row mutator uses (review 4960250562).
+//
+// retryPendingRemoval is the direct-caller (test/legacy) entry — the wave-50
+// nil-claim discipline: a nil claim is never revoked, so the wave-51 gates
+// below never fire on this path. Production in-sweep callers hand their
+// ctx-scoped claim to retryPendingRemovalClaimed.
+//
+//nolint:unused // test-facing entry pinned across waves 8–50; production pending legs ride the wave-51 claimed variant.
 func (s *ReplacementSweeper) retryPendingRemoval(ctx context.Context, rowID uint, backup, dest, backupSlash string) bool {
+	return s.retryPendingRemovalClaimed(ctx, rowID, backup, dest, backupSlash, nil)
+}
+
+// retryPendingRemovalClaimed is retryPendingRemoval under the wave-51
+// epoch-ownership gate: every mutation unit below (the orphan-shaped
+// cleanup, the clean-kind removal sequence, the rearm-refused journal-only
+// consumption) consults the claim's revocation flag at its entry and abandons
+// without further mutation once the claim was reclaimed.
+func (s *ReplacementSweeper) retryPendingRemovalClaimed(ctx context.Context, rowID uint, backup, dest, backupSlash string, claim *sweepBusyMarkerClaim) bool {
 	jrel := fsutil.SharedJournalLocks().Acquire(strconv.Itoa(int(rowID)))
 	defer jrel()
 	var rowReverted, targetFound, authorized bool
@@ -1295,6 +1377,15 @@ func (s *ReplacementSweeper) retryPendingRemoval(ctx context.Context, rowID uint
 		// consumed it): the pre-wave-25 pathname posture applies with its
 		// documented residual swap window.
 		//
+		// Wave-51 (codex P1, PR#215) — revocation gate before the
+		// no-longer-journaled pending cleanup mutates: a reclaimed claim means
+		// nothing below (quarantine move, verified unlink, destination
+		// re-gate) may even start. Abandoning leaves the backup byte-intact
+		// at its name, the fallback memory recorded, and no journal record
+		// touched.
+		if claim.abandonIfRevoked("unowned pending-entry backup cleanup", backup, dest) {
+			return false
+		}
 		// Wave-32 (codex local review round 2, PR#215 finding R1): the pending
 		// retry's identity gate = destination PRESENCE re-proven AFTER the
 		// verified backup object moved to its quarantine name (facts are
@@ -1325,6 +1416,17 @@ func (s *ReplacementSweeper) retryPendingRemoval(ctx context.Context, rowID uint
 		return true
 	}
 	if !authorized {
+		return false
+	}
+	// Wave-51 (codex P1, PR#215) — revocation gate covering the pending
+	// entry's cleanup unit on EITHER kind: the rearm-refused leg below is a
+	// pure journal consumption (nothing fs-side precedes it, so abandoning is
+	// exact), and the clean leg's quarantine→unlink→consume sequence keeps
+	// the same entry-gated unit posture as restoreAndConsume's. A revocation
+	// observed here leaves the durable pending marker and its kind untouched
+	// (the journal stays), the backup wherever it already stood, and the retry
+	// converges through the wave-19/29 legs when the caller is live again.
+	if claim.abandonIfRevoked("pending-entry cleanup and journal consumption", backup, dest) {
 		return false
 	}
 
@@ -1491,11 +1593,13 @@ func (s *ReplacementSweeper) consumeRearmRefusedPending(ctx context.Context, idx
 	defer busyRelease()
 	// Wave-49 (codex P2): same ctx-scoped claim ledger as sweepOne — an
 	// abandoned full sweep must not strand this marker against the
-	// continued revert either.
-	defer recordSweepBusyClaim(ctx, entry.dest, busyRelease)()
-
-	release := fsutil.SharedDestLocks().Acquire(entry.dest)
-	defer release()
+	// continued revert either. Wave-50 (finding F1): same lock-before-record
+	// discipline as sweepOne — the record is born binding the dest lock, so
+	// the reverter's pre-acquisition reclaim frees both holds.
+	rawDestRelease := fsutil.SharedDestLocks().Acquire(entry.dest)
+	claim, untrackSweepClaim := recordSweepBusyClaim(ctx, entry.dest, busyRelease, rawDestRelease)
+	defer untrackSweepClaim()
+	defer claim.releaseDestLock()
 
 	// The destination the marker certified must still be present before the
 	// only journal record of the restore is consumed.
@@ -1513,7 +1617,7 @@ func (s *ReplacementSweeper) consumeRearmRefusedPending(ctx context.Context, idx
 		logging.Warnf("replacement sweep %s: rearm-refused pending kept — backup name state indeterminate (%v)", entry.backup, backupErr)
 		return 0
 	}
-	if s.retryPendingRemoval(ctx, entry.rowID, entry.backup, entry.dest, entry.backupSlash) {
+	if s.retryPendingRemovalClaimed(ctx, entry.rowID, entry.backup, entry.dest, entry.backupSlash, claim) {
 		// Wave-33 (codex local review round 3, PR#215 finding R1): the
 		// journal-only consumption removed the entry from the LIVE ledger —
 		// retract its idx.journaled mapping NOW so a later directory scan of

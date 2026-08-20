@@ -178,8 +178,11 @@ func copyBackupToDestPublish(fsys afero.Fs, backup, dest string, publish func(af
 	}
 	buf := make([]byte, 256*1024)
 	if _, cerr := io.CopyBuffer(dstFile, src, buf); cerr != nil {
-		_ = dstFile.Close()
-		_ = fsys.Remove(staged)
+		// The staged name (dest-adjacent .dlrstr.<ordinal>) is
+		// near-predictable: discard ONLY while it provably names the handle's
+		// inode — a substitute planted in the copy→remove window is preserved
+		// byte-intact (the wave-45 bound cleanup; it closes the handle).
+		fsutil.DiscardFailedExclusiveStaging(fsys, staged, dstFile)
 		return rollbackCopyFacts{}, fmt.Errorf("copy rollback: %w", cerr)
 	}
 	// Re-apply the backup's ownership before the swap: a privileged restore of

@@ -85,17 +85,23 @@ func AcquireReplacementBusy(fs afero.Fs, dest string) (func(), error) {
 		file, err := fs.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 		if err == nil {
 			if _, err = file.WriteString(token); err != nil {
-				_ = file.Close()
-				_ = fs.Remove(path)
+				discardBusyMarkerClaim(fs, path, file, nil)
 				return nil, fmt.Errorf("write replacement busy marker: %w", err)
 			}
 			if err = file.Sync(); err != nil {
-				_ = file.Close()
-				_ = fs.Remove(path)
+				discardBusyMarkerClaim(fs, path, file, nil)
 				return nil, fmt.Errorf("sync replacement busy marker: %w", err)
 			}
+			// The identity anchor is captured BEFORE the close: the close-failure
+			// leg below (and only it) runs with the handle already shut, where a
+			// fstat can no longer be taken.
+			claimIdentity, claimStatErr := file.Stat()
+			if claimStatErr != nil {
+				discardBusyMarkerClaim(fs, path, file, nil)
+				return nil, fmt.Errorf("stat replacement busy marker: %w", claimStatErr)
+			}
 			if err = file.Close(); err != nil {
-				_ = fs.Remove(path)
+				discardBusyMarkerClaim(fs, path, file, claimIdentity)
 				return nil, fmt.Errorf("close replacement busy marker: %w", err)
 			}
 			var once sync.Once
@@ -155,21 +161,30 @@ func AcquireReplacementBusy(fs afero.Fs, dest string) (func(), error) {
 			continue
 		}
 
-		claimedToken, readErr := afero.ReadFile(fs, takeoverPath)
+		// The takeover content AND its identity are observed through ONE open
+		// handle (the releaseObserve discipline): the token bytes and the
+		// identity snapshot ride the same descriptor, so the byte-compare below
+		// can never alias the recorded token to a successor object, and the
+		// reclaim unlink re-proves the name against THAT identity at unlink
+		// adjacency — a foreign swap inside the read→remove window is refused
+		// byte-intact instead of being deleted as the stale marker.
+		claimedToken, observedIdentity, readErr := replacementBusyObserveTakeover(fs, takeoverPath)
 		if readErr != nil {
 			// We own the successor, but cannot prove which marker it contains.
 			// Leave it in place and fail closed rather than consuming it.
 			return nil, fmt.Errorf("read replacement busy takeover marker: %w", readErr)
 		}
 		if !bytes.Equal(claimedToken, inspection.observedToken) {
-			if returnErr := replacementBusyReturnTakeover(fs, path, takeoverPath, claimedToken); returnErr != nil {
+			if returnErr := replacementBusyReturnTakeover(fs, path, takeoverPath, claimedToken, observedIdentity); returnErr != nil {
 				return nil, returnErr
 			}
 			return nil, ErrReplacementBusy
 		}
-		if removeErr := fs.Remove(takeoverPath); removeErr != nil {
-			// The successful rename proves ownership of takeoverPath. If its
-			// removal fails, stop rather than guessing about on-disk state.
+		if removeErr := releaseClaimedBusyObject(fs, takeoverPath, observedIdentity); removeErr != nil {
+			// The successful rename proves ownership of takeoverPath AT THE
+			// RENAME INSTANT; the bound release re-derives it at unlink
+			// adjacency and refuses a swapped occupant. Any wedge stops the
+			// acquire rather than guessing about on-disk state.
 			return nil, fmt.Errorf("reclaim replacement busy marker: %w", removeErr)
 		}
 	}
@@ -197,53 +212,84 @@ func replacementBusyQuarantinePath(path string) (string, error) {
 
 // replacementBusyReturnTakeover puts back the bytes found after a successful
 // claimant rename. The exclusive placeholder serializes the restore: other
-// claimants can observe it, but cannot acquire or replace it while the owned
-// successor is renamed back over it. If the destination is already occupied,
+// claimants can observe it, but cannot acquire from it while the owned
+// successor rides back home. If the destination is already occupied,
 // preserve the bytes in a unique quarantine sibling instead of overwriting
 // that live marker.
-func replacementBusyReturnTakeover(fs afero.Fs, path, takeoverPath string, content []byte) error {
+//
+// POSTER-WRITE-HARDENING wave-47 (codex P2, PR#215): the restore itself is
+// rebound end to end —
+//
+//  1. the placeholder's identity is captured THROUGH ITS OPEN HANDLE before
+//     the close, and the name is FREED by the identity-bound release
+//     (releaseClaimedBusyObject): the placeholder was previously overwritten
+//     by a replace-aware restore rename — a foreign occupant swapped onto
+//     the predictable .dlbusy name inside the claim→restore window had its
+//     bytes silently replaced. Only the provably-ours placeholder is ever
+//     freed now; any divergence preserves the occupant byte-intact and
+//     routes the takeover bytes to quarantine instead;
+//  2. the freed name then receives the takeover bytes NO-REPLACE
+//     (PublishNoReplace): a claimant winning the release→restore window owns
+//     a LIVE marker that must prevail (typed refusal) — the takeover bytes
+//     land in quarantine byte-intact, exactly like the occupied-path leg;
+//  3. the takeover file's own removal is bound to the identity the caller
+//     observed it with (wave-47's handle-bound observe), never a bare
+//     pathname.
+//
+// The w17 close-failure contract is unchanged: the restore attempt still
+// rides over the placeholder claim (the name is never left stranded with a
+// tokenless marker where the identity release can run), the close error
+// always surfaces, and an unrestorable close keeps the takeover bytes at
+// their uniquely-named sibling.
+func replacementBusyReturnTakeover(fs afero.Fs, path, takeoverPath string, content []byte, observed os.FileInfo) error {
 	placeholder, err := fs.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err == nil {
-		if closeErr := placeholder.Close(); closeErr != nil {
-			// codex PR#215 w17: returning here with the placeholder still at
-			// path strands a zero-byte (tokenless) marker — and malformed
-			// markers are deliberately NEVER reclaimed, so the destination
-			// would busy-block forever. Recover before surfacing the close
-			// error, in the order that can never strand BOTH the displaced
-			// bytes and an unreclaimable marker:
-			//
-			//  1. RESTORE the takeover bytes back onto path first (the wave-12
-			//     ReplaceFile leg renames over the placeholder we still own).
-			//     Doing this FIRST keeps the placeholder's serialization
-			//     property through the restore: a remove-first order would open
-			//     a window in which a foreign claimant creates its own live
-			//     marker and then has it clobbered by our trailing restore.
-			//  2. Only if the restore itself fails, REMOVE the placeholder: an
-			//     ABSENT marker self-heals (the next claimant re-creates it),
-			//     while an unreclaimable 0-byte one does not. The takeover
-			//     bytes then stay in their uniquely-named sibling — inspectable
-			//     garbage, never a busy-block.
-			//
-			// The original close error still surfaces either way.
-			if restoreErr := ReplaceFile(fs, takeoverPath, path); restoreErr != nil {
-				logging.Warnf("replacement busy takeover restore after placeholder close failure failed for %s: %v; removing the placeholder (claimed bytes retained at %s)", path, restoreErr, takeoverPath)
-				if removeErr := fs.Remove(path); removeErr != nil && !os.IsNotExist(removeErr) {
-					logging.Warnf("replacement busy restore placeholder %s could not be removed after close failure: %v; the destination may busy-block until the marker is removed manually", path, removeErr)
-				}
+		placeholderIdentity, statErr := placeholder.Stat()
+		closeErr := placeholder.Close()
+		if statErr != nil {
+			// The placeholder's own identity is unreadable — never release by
+			// pathname what cannot be re-proven. Both occupants stay for manual
+			// cleanup (the w17 residual); the close error dominates surfacing
+			// exactly like the pre-shape close-failure leg.
+			logging.Warnf("replacement busy takeover return of %s: the restore placeholder's identity could not be captured (%v); the placeholder and the takeover bytes at %s are both left for manual cleanup", path, statErr, takeoverPath)
+			if closeErr != nil {
+				return fmt.Errorf("close replacement busy restore placeholder: %w", closeErr)
 			}
+			return fmt.Errorf("stat replacement busy restore placeholder %s: %w", path, statErr)
+		}
+		if relErr := releaseClaimedBusyObject(fs, path, placeholderIdentity); relErr != nil {
+			if closeErr == nil {
+				// The marker name is UNPROVEN (a foreign occupant survived there
+				// or the release wedged): never restore over it — the takeover
+				// bytes ride to quarantine beside the original occupied leg, and
+				// the marker path is left exactly as found.
+				return replacementBusyQuarantineTakeover(fs, path, takeoverPath, content, observed)
+			}
+			logging.Warnf("replacement busy takeover restore after placeholder close failure AND the identity-bound placeholder release failed for %s: removing the placeholder did not complete (%v) — the placeholder could not be removed provably-bound; the destination may busy-block until the marker is removed manually; displaced bytes stay recoverable at %s", path, relErr, takeoverPath)
 			return fmt.Errorf("close replacement busy restore placeholder: %w", closeErr)
 		}
-		// The rename target is the 0-byte placeholder just claimed above, so
-		// this leg renames onto an EXISTING path: route through the
-		// platform-aware replacement primitive. Windows OsFs rename
-		// (MoveFileW) refuses an existing destination, which would strand a
-		// malformed 0-byte .dlbusy marker no claimant can reclaim — a
-		// permanent busy block on that destination (codex PR#215 w12).
-		// ReplaceFile is MoveFileExW+MOVEFILE_REPLACE_EXISTING for OsFs and a
-		// plain atomic rename on POSIX, where renaming over the placeholder
-		// is already safe.
-		if renameErr := ReplaceFile(fs, takeoverPath, path); renameErr != nil {
+		// The marker name is provably FREE: the takeover bytes ride home
+		// NO-REPLACE. A claimant winning the release→restore window (typed
+		// refusal) keeps its live marker and the takeover bytes are preserved
+		// in quarantine; any harder publish failure keeps the takeover file
+		// recoverable at its own unique name (the w17 residual), unchanged.
+		if renameErr := PublishNoReplace(fs, takeoverPath, path); renameErr != nil {
+			if PublishRefusal(renameErr) {
+				logging.Warnf("replacement busy marker %s was re-claimed inside the takeover-restore window by another process; preserved the displaced bytes in quarantine", path)
+				qErr := replacementBusyQuarantineTakeover(fs, path, takeoverPath, content, observed)
+				if closeErr != nil {
+					return fmt.Errorf("close replacement busy restore placeholder: %w", closeErr)
+				}
+				return qErr
+			}
+			if closeErr != nil {
+				logging.Warnf("replacement busy takeover restore after placeholder close failure failed for %s: %v; removing the placeholder proceeded identity-bound before the restore attempt and the claimed bytes stay recoverable at %s (an absent marker self-heals)", path, renameErr, takeoverPath)
+				return fmt.Errorf("close replacement busy restore placeholder: %w", closeErr)
+			}
 			return fmt.Errorf("restore replacement busy marker: %w", renameErr)
+		}
+		if closeErr != nil {
+			return fmt.Errorf("close replacement busy restore placeholder: %w", closeErr)
 		}
 		return nil
 	}
@@ -251,6 +297,15 @@ func replacementBusyReturnTakeover(fs afero.Fs, path, takeoverPath string, conte
 		return fmt.Errorf("reserve replacement busy restore path: %w", err)
 	}
 
+	return replacementBusyQuarantineTakeover(fs, path, takeoverPath, content, observed)
+}
+
+// replacementBusyQuarantineTakeover preserves the displaced takeover bytes
+// in a fresh unique quarantine sibling (the occupied/proven-unfree marker
+// path is never touched) and then frees the takeover name — bound to the
+// identity the caller observed the takeover with, so a foreign swap under
+// the takeover name is never unlinked in its place.
+func replacementBusyQuarantineTakeover(fs afero.Fs, path, takeoverPath string, content []byte, observed os.FileInfo) error {
 	quarantinePath, nameErr := replacementBusyQuarantinePath(path)
 	if nameErr != nil {
 		return fmt.Errorf("name replacement busy quarantine marker: %w", nameErr)
@@ -274,10 +329,95 @@ func replacementBusyReturnTakeover(fs afero.Fs, path, takeoverPath string, conte
 		return fmt.Errorf("close replacement busy quarantine marker: %w", closeErr)
 	}
 	logging.Warnf("replacement busy marker %s was claimed by another process; preserved it in quarantine %s", path, quarantinePath)
-	if removeErr := fs.Remove(takeoverPath); removeErr != nil {
+	if removeErr := releaseClaimedBusyObject(fs, takeoverPath, observed); removeErr != nil {
 		return fmt.Errorf("remove replacement busy takeover marker after quarantine: %w", removeErr)
 	}
 	return nil
+}
+
+// replacementBusyObserveTakeover reads the takeover file and captures ITS
+// identity through one open handle (the releaseObserve discipline): Stat and
+// Read ride the SAME descriptor, so the recorded bytes and the identity
+// snapshot provably belong to ONE object — a pathname swap between a
+// path-based read and a separate Lstat could never alias the pair, and the
+// callers' bound releases re-prove the name against this snapshot at unlink
+// adjacency. Close errors are ignored: a read-only close mutates nothing and
+// the identity is already bound.
+func replacementBusyObserveTakeover(fs afero.Fs, takeoverPath string) ([]byte, os.FileInfo, error) {
+	handle, err := fs.Open(takeoverPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	info, serr := handle.Stat()
+	content, rerr := io.ReadAll(handle)
+	_ = handle.Close()
+	if serr != nil {
+		return nil, nil, serr
+	}
+	if rerr != nil {
+		return nil, nil, rerr
+	}
+	return content, info, nil
+}
+
+// releaseClaimedBusyObject unlinks path ONLY while the no-follow name lookup
+// at unlink adjacency still names expect — observed shape (the bound_drop
+// discipline history's take-aside shares): regular and non-symlink, dev/inode
+// where the filesystem exposes it, then size + mtime. A name that vanished
+// on its own completed the cleanup by itself; anything else (foreign swap,
+// indeterminate lookup) is REFUSED — the occupant keeps its bytes byte-intact
+// and the caller routes around the name rather than deleting what it cannot
+// prove.
+func releaseClaimedBusyObject(fs afero.Fs, path string, expect os.FileInfo) error {
+	cur, lerr := asideLstat(fs, path)
+	switch {
+	case os.IsNotExist(lerr):
+		return nil // vanished on its own — nothing left to unlink
+	case lerr != nil:
+		return fmt.Errorf("inspect claimed object %s before the bound release: %w", path, lerr)
+	case !asideSameObject(cur, expect):
+		return fmt.Errorf("claimed object %s no longer names the observed object — foreign bytes preserved: %w", path, ErrTakeAsideForeign)
+	}
+	if rerr := fs.Remove(path); rerr != nil && !os.IsNotExist(rerr) {
+		return fmt.Errorf("remove claimed object %s (verified ours): %w", path, rerr)
+	}
+	return nil
+}
+
+// discardBusyMarkerClaim is the AcquireReplacementBusy claim-failure cleanup
+// with the wave-45 identity binding (DiscardFailedExclusiveStaging's shape):
+// the marker name is PREDICTABLE (dest + .dlbusy), so the failure legs never
+// unlink it by pathname alone. The name is re-derived no-follow while the
+// handle is still open (the pinned inode makes the comparison race-free —
+// the handle stat feeds expect when the leg can still fstat, otherwise the
+// caller's pre-close capture rides in through expect already set), and only
+// a current occupant that provably names OUR claimed marker is ever
+// removed. Every other answer — a foreign swap, an indeterminate lookup, an
+// unreadable handle identity — keeps the occupant byte-intact with a warn;
+// a name that vanished on its own completed the cleanup by itself.
+func discardBusyMarkerClaim(fs afero.Fs, path string, fh afero.File, expect os.FileInfo) {
+	if expect == nil {
+		info, serr := fh.Stat()
+		if serr != nil {
+			_ = fh.Close()
+			logging.Warnf("replacement busy marker %s claim cleanup could not read the claim handle's identity (%v) — the marker is left in place (possibly foreign); manual cleanup advised", path, serr)
+			return
+		}
+		expect = info
+	}
+	cur, lerr := asideLstat(fs, path)
+	_ = fh.Close()
+	switch {
+	case os.IsNotExist(lerr):
+		return // vanished on its own — nothing left to clean
+	case lerr != nil:
+		logging.Warnf("replacement busy marker %s claim cleanup could not inspect the name (%v) — the occupant is left byte-intact; manual cleanup advised", path, lerr)
+		return
+	case !asideSameObject(cur, expect):
+		logging.Warnf("replacement busy marker %s no longer names this process's claim during cleanup (foreign substitution) — the substitute is preserved byte-intact; manual cleanup advised", path)
+		return
+	}
+	_ = fs.Remove(path)
 }
 
 func replacementBusyRandomPlatform() (uint64, error) {

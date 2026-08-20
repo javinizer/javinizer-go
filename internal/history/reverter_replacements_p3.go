@@ -180,6 +180,41 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 		dest := destSpelling[key]
 		entries := byDest[key]
 		restoreErr := func() error {
+			// Wave-50 (codex P2, PR#215 finding F1): consult the abandoned-sweep
+			// claim ledger BEFORE the blocking dest-lock acquisition. A sweep
+			// stranded past the wave-8 deadline parks on its wedged fs call while
+			// holding this dest lock (bound to its claim at record time), so
+			// blocking first would hang this revert behind the stranding forever
+			// — ahead of the marker-reclaim consult below. A ctx-done record
+			// reclaims BOTH holds through the claim's once-guarded releases (dest
+			// lock first — pure in-process work that cannot wedge on the stranded
+			// filesystem — then the marker) and the acquisition retried below
+			// proceeds against the freed arbitration. A live record (a sweep
+			// someone still waits on) refuses, and the acquire keeps its ordinary
+			// blocking posture.
+			// Wave-51 (codex P1, PR#215) — ORDERING CONTRACT between the stranded
+			// worker's journal commit and this restore loop's mutations. The
+			// reclaim below flips the abandoned claim's revocation flag BEFORE
+			// releasing its arbitration holds, and every sweep mutation surface
+			// then refuses to start (the gates in restoreAndConsume/
+			// retryPendingRemovalClaimed/sweepOne). But a worker whose wedged fs
+			// call resumed BEFORE the flag was set may still COMMIT its journal
+			// consumption afterwards — the "last recorded mutation already
+			// succeeded" case — and a revert that mutated on a stale journal
+			// would fork a second restore of the same backup. This path therefore
+			// holds a fixed order: (1) consult + revoke abandoned claims BEFORE
+			// the dest-lock acquisition, (2) arbitrate (dest lock + busy marker),
+			// (3) fresh journal re-read per entry under that row's journal lock
+			// (replacementEntryIsLive — serialized against the worker's
+			// consumption transaction through SharedJournalLocks), and only then
+			// (4) any restore mutation. A worker commit landing anywhere in
+			// (1)–(3) is observed by (3), the entry is SKIPPED, and the reclaim
+			// flops to the completed-consume posture: nothing re-publishes onto
+			// the destination the worker just restored and nothing wipes or
+			// re-removes its backup-side state. No restore leg below may touch
+			// the destination, the backup, or the journal ahead of its (3).
+			reclaimAbandonedSweepBusyMarker(dest)
+			preDestLockConsultHook(dest)
 			release := fsutil.SharedDestLocks().Acquire(dest)
 			defer release()
 
@@ -197,7 +232,9 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 				// claim's own once-guarded, token-bound release — retry the
 				// acquisition once against the freed name. A marker owned by
 				// anything still waited on (or another process entirely) is
-				// never touched and keeps the ordinary busy refusal below.
+				// never touched and keeps the ordinary busy refusal below. Wave-50
+				// (finding F1): a claim recorded AFTER the consult above still
+				// reclaims here — both consults share the frozen-key ledger.
 				busyRelease, busyErr = fsutil.AcquireReplacementBusy(r.fs, dest)
 			}
 			if errors.Is(busyErr, fsutil.ErrReplacementBusy) {
@@ -670,6 +707,14 @@ var reverterSweepDestinations = func(ctx context.Context, sweeper *ReplacementSw
 	return sweeper.SweepDestinations(ctx, dests)
 }
 
+// preDestLockConsultHook is a coverage/test seam fired in the window
+// BETWEEN the wave-50 pre-acquisition claim-ledger consult and the blocking
+// dest-lock acquisition (wave-50, codex P2, PR#215 finding F1): with the
+// consult running first, the wave-49 busy-retry leg below is reachable in
+// tests only by recording an abandoned claim inside exactly that window.
+// Production wires a no-op.
+var preDestLockConsultHook = func(string) {}
+
 // reverterSweepRoots is the root-directory invocation seam (wave-34, codex
 // local review round 4, PR#215 finding F4): the direct-revert pre-sweep also
 // scans the operations' Begin-persisted roots, exactly where a process dying
@@ -1049,8 +1094,11 @@ func copyRestoreBytesPublish(fs afero.Fs, backup, dest string, publish func(afer
 	buf := make([]byte, 256*1024)
 	digest := sha256.New()
 	if _, cerr := io.CopyBuffer(dstFile, io.TeeReader(src, digest), buf); cerr != nil {
-		_ = dstFile.Close()
-		_ = fs.Remove(staged)
+		// The staged name (dest-adjacent .rstr.<ordinal>) is
+		// near-predictable: discard ONLY while it provably names the handle's
+		// inode — a substitute planted in the copy→remove window is preserved
+		// byte-intact (the wave-45 bound cleanup; it closes the handle).
+		fsutil.DiscardFailedExclusiveStaging(fs, staged, dstFile)
 		return restoredDestIdentity{}, fmt.Errorf("stage restore copy: %w", cerr)
 	}
 	var publishedSum [32]byte
@@ -1242,8 +1290,11 @@ func copyRearmSourceBytes(fs afero.Fs, src io.Reader, backup string, info os.Fil
 		return fmt.Errorf("re-arm staging backup %s: %w", backup, err)
 	}
 	if _, cerr := io.Copy(dstFile, src); cerr != nil {
-		_ = dstFile.Close()
-		_ = fs.Remove(staged)
+		// Same wave-45 bound discard as the restore copy: the staged name
+		// (backup-adjacent .dlrarm.<ordinal>) is near-predictable — unlink it
+		// only while it provably names the handle's inode, preserving any
+		// mid-window substitute byte-intact. The helper closes the handle.
+		fsutil.DiscardFailedExclusiveStaging(fs, staged, dstFile)
 		return fmt.Errorf("re-arm copy bytes for %s: %w", backup, cerr)
 	}
 	if info != nil {

@@ -145,7 +145,7 @@ func TestSweepW33_StalePendingOwnerConsumedEntryOrphanRetains(t *testing.T) {
 	restore := logging.SetOutput(&logs)
 	defer restore()
 
-	got := NewReplacementSweeper(fs, repo).restoreAndConsume(ctx, op, backup, dest, sweepSlash(backup))
+	got := NewReplacementSweeper(fs, repo).restoreAndConsume(ctx, op, backup, dest, sweepSlash(backup), nil)
 	require.False(t, got, "stale-snapshot authorization alone never cleans up")
 	require.Equal(t, "planted-foreign", string(mustRead2(t, fs, backup)), "the occupant survives untouched")
 	require.Equal(t, "restored", string(mustRead2(t, fs, dest)))
@@ -175,7 +175,7 @@ func TestSweepW33_StalePendingOwnerRowUnreadableRetained(t *testing.T) {
 	restore := logging.SetOutput(&logs)
 	defer restore()
 
-	got := NewReplacementSweeper(fs, repo).restoreAndConsume(ctx, stale, backup, dest, sweepSlash(backup))
+	got := NewReplacementSweeper(fs, repo).restoreAndConsume(ctx, stale, backup, dest, sweepSlash(backup), nil)
 	require.False(t, got)
 	require.Contains(t, logs.String(), "owner row unreadable before cleanup authorization")
 	require.Equal(t, "planted-foreign", string(mustRead2(t, fs, backup)))
@@ -208,7 +208,7 @@ func TestSweepW33_InProcessMemorySkipsTheFreshReverify(t *testing.T) {
 	sweeper := NewReplacementSweeper(fs, repo)
 	backupKey := sweepSlash(backup)
 	sweeper.rememberPendingRemoval(backupKey)
-	require.True(t, sweeper.restoreAndConsume(ctx, op, backup, dest, backupKey))
+	require.True(t, sweeper.restoreAndConsume(ctx, op, backup, dest, backupKey, nil))
 
 	_, serr := fs.Stat(backup)
 	require.ErrorIs(t, serr, os.ErrNotExist, "the owned backup is removed")

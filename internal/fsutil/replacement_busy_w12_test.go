@@ -103,7 +103,7 @@ func TestReplacementBusyW12_ReturnTakeoverRestoresOverReservedPath(t *testing.T)
 	content := []byte("pid=123,time=456")
 	require.NoError(t, afero.WriteFile(base, takeover, content, 0o600))
 
-	require.NoError(t, replacementBusyReturnTakeover(base, path, takeover, content))
+	require.NoError(t, replacementBusyReturnTakeover(base, path, takeover, content, w28TakeoverIdentity(t, base, takeover)))
 	restored, readErr := afero.ReadFile(base, path)
 	require.NoError(t, readErr)
 	require.Equal(t, content, restored,

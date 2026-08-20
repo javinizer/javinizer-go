@@ -86,7 +86,7 @@ func CreateExclusiveStagingFile(fs afero.Fs, dest, suffix string, start uint64, 
 				// wave-45 (codex P2, PR#215 finding F3): the cleanup is bound to
 				// the OPENED INODE — discarding by path alone could unlink a
 				// substitute planted after the staged name was renamed away.
-				discardFailedExclusiveStaging(fs, staged, file)
+				DiscardFailedExclusiveStaging(fs, staged, file)
 				return "", nil, fmt.Errorf("apply exclusive staging mode for %s: %w", staged, cerr)
 			}
 			return staged, file, nil
@@ -98,23 +98,27 @@ func CreateExclusiveStagingFile(fs afero.Fs, dest, suffix string, start uint64, 
 	return "", nil, fmt.Errorf("exclusive staging names exhausted for %s%s after %d attempts", dest, suffix, exclusiveStagingAttempts)
 }
 
-// discardFailedExclusiveStaging is the restoreStagingMode failure leg's
-// cleanup (wave-45, codex P2, PR#215 finding F3). Pre-wave-45 the leg closed
-// the handle and removed the staged NAME: a directory writer renaming the
-// just-created staged name away and planting a substitute inside the
-// close→remove window got ITS object unlinked. On the real OsFs the unlink
-// is now bound to the opened inode: the handle's fstat must match a
-// no-follow Lstat of the staged name (taken while the handle is still open —
-// the pinned inode makes the comparison itself race-free) BEFORE the handle
-// is closed and any Remove runs; a mismatch, or an indeterminate lookup,
-// preserves whatever occupies the name byte-intact and warn-logs the
-// retained name for manual cleanup, and the verified-then-closed
-// lookup→unlink boundary keeps the documented POSIX pathname-unlink
-// residual. Virtual filesystems (afero's mem FileInfo carries no kernel
-// identity — os.SameFile is always false there even for one object — and
-// there is no symlink model a directory writer could plant with) keep the
-// plain close+remove fallback against the stored spelling.
-func discardFailedExclusiveStaging(fs afero.Fs, staged string, fh afero.File) {
+// DiscardFailedExclusiveStaging is the restoreStagingMode failure leg's
+// cleanup (wave-45, codex P2, PR#215 finding F3), shared with every staged
+// copy-failure leg that used to close+Remove the staged NAME unbound: the
+// staged names are ordinal/PID-shaped (`.rstr.<hex>`, `.dlrarm.<hex>`,
+// `.dlrstr.<hex>` — attacker-observable or near-predictable), so a
+// directory writer renaming the just-created staged name away and planting
+// a substitute inside the close→remove window got ITS object unlinked. On
+// the real OsFs the unlink is now bound to the opened inode: the handle's
+// fstat must match a no-follow Lstat of the staged name (taken while the
+// handle is still open — the pinned inode makes the comparison itself
+// race-free) BEFORE the handle is closed and any Remove runs; a mismatch,
+// or an indeterminate lookup, preserves whatever occupies the name
+// byte-intact and warn-logs the retained name for manual cleanup, and the
+// verified-then-closed lookup→unlink boundary keeps the documented POSIX
+// pathname-unlink residual. Virtual filesystems (afero's mem FileInfo
+// carries no kernel identity — os.SameFile is always false there even for
+// one object — and there is no symlink model a directory writer could plant
+// with) keep the plain close+remove fallback against the stored spelling.
+//
+// The helper closes fh on every path: callers MUST NOT close it themselves.
+func DiscardFailedExclusiveStaging(fs afero.Fs, staged string, fh afero.File) {
 	of, ok := osStagingHandle(fs, fh)
 	if !ok {
 		_ = fh.Close()

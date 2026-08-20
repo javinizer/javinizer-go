@@ -32,7 +32,7 @@ func TestSweepBusyClaimW49_ReclaimGatesOnAbandonment(t *testing.T) {
 	require.NoError(t, err)
 	liveCtx, liveCancel := context.WithCancel(context.Background())
 	t.Cleanup(liveCancel)
-	untrack := recordSweepBusyClaim(liveCtx, dest, release)
+	_, untrack := recordSweepBusyClaim(liveCtx, dest, release, nil)
 
 	require.False(t, reclaimAbandonedSweepBusyMarker(dest),
 		"a live sweep's marker is never reclaimed — someone still waits on it")
@@ -68,8 +68,8 @@ func TestSweepBusyClaimW49_UntrackIsPointerScoped(t *testing.T) {
 	ctxB, cancelB := context.WithCancel(context.Background())
 	t.Cleanup(cancelB)
 
-	recA := recordSweepBusyClaim(ctxA, "/w49/dup/poster.jpg", func() {})
-	recordSweepBusyClaim(ctxB, "/w49/dup/poster.jpg", func() {})
+	_, recA := recordSweepBusyClaim(ctxA, "/w49/dup/poster.jpg", func() {}, nil)
+	_, _ = recordSweepBusyClaim(ctxB, "/w49/dup/poster.jpg", func() {}, nil)
 	recA() // stale holder must not retract the live record
 	require.False(t, reclaimAbandonedSweepBusyMarker("/w49/dup/poster.jpg"),
 		"the live re-recorded claim survived the stale untrack")
@@ -89,7 +89,7 @@ func TestRestoreReplacementJournalW49_ReclaimsAbandonedSweepMarker(t *testing.T)
 	sweepRelease, err := fsutil.AcquireReplacementBusy(fixture.fs, dest)
 	require.NoError(t, err)
 	sweepCtx, sweepCancel := context.WithCancel(context.Background())
-	untrack := recordSweepBusyClaim(sweepCtx, dest, sweepRelease)
+	_, untrack := recordSweepBusyClaim(sweepCtx, dest, sweepRelease, nil)
 
 	// While the sweep is LIVE the revert keeps the ordinary busy refusal.
 	restored, err := NewReverter(fixture.fs, fixture.repo).restoreReplacementJournal(context.Background(), op)

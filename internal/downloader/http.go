@@ -132,8 +132,7 @@ func (d *Downloader) download(ctx context.Context, url, destPath string, mediaTy
 		return result, result.Error
 	}
 
-	tempPath := uniqueTempPath(destPath, "tmp")
-	outFile, err := d.fs.Create(tempPath)
+	tempPath, outFile, err := createDownloadTempFile(d.fs, destPath)
 	if err != nil {
 		result.Error = fmt.Errorf("failed to create file: %w", err)
 		result.Duration = time.Since(startTime)
@@ -393,6 +392,34 @@ func uniqueTempPath(destPath, suffix string) string {
 	buf := make([]byte, 8)
 	_, _ = rand.Read(buf)
 	return destPath + "." + hex.EncodeToString(buf) + "." + suffix
+}
+
+// downloadTempClaimTries bounds the exclusive temp-name claim loop; every
+// collision (or racing claimant) costs one draw.
+const downloadTempClaimTries = 8
+
+// createDownloadTempFile claims the download's staging temp name with
+// O_CREATE|O_EXCL|O_WRONLY, redrawing on collision (POSTER-WRITE-HARDENING
+// wave-51): the pre-shape d.fs.Create opened the drawn name with O_TRUNC —
+// anything sitting at the fresh name (a stale temp shard reused by another
+// tool, a watcher pre-planting the namespace) was silently truncated before
+// any bytes were even fetched. The claim loop never truncates an occupant:
+// either the draw wins a provably-fresh name or the download fails and the
+// occupant keeps its bytes byte-intact.
+func createDownloadTempFile(fs afero.Fs, destPath string) (string, afero.File, error) {
+	for attempt := 0; attempt < downloadTempClaimTries; attempt++ {
+		tempPath := uniqueTempPath(destPath, "tmp")
+		outFile, err := fs.OpenFile(tempPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o666)
+		switch {
+		case err == nil:
+			return tempPath, outFile, nil
+		case os.IsExist(err):
+			continue // a racer (or a stale shard) owns this draw — draw again
+		default:
+			return "", nil, err
+		}
+	}
+	return "", nil, fmt.Errorf("download temp names exhausted for %s after %d attempts", destPath, downloadTempClaimTries)
 }
 
 // retryableOperation wraps an attempt function with retry logic for transient errors.

@@ -225,9 +225,15 @@ func publishStagedBoundOS(p StagedPublish) (os.FileInfo, error) {
 			return nil, fmt.Errorf("re-stage substituted staged file for %s: %w: %w", p.Dest, serr, ErrPublishStagedIdentityBreak)
 		}
 		if rerr := publishStagedBoundRestream(fh, newFh); rerr != nil {
-			_ = newFh.Close()
+			// The restage failed with the fresh staged name still ours at create
+			// time — but a directory writer could have renamed newStaged away and
+			// planted a substitute inside the copy→remove window (the ordinal
+			// staging names are near-predictable). Discard through the wave-45
+			// bound cleanup (DiscardFailedExclusiveStaging closes newFh and only
+			// unlinks the name while it provably names the opened inode); the
+			// plant is preserved byte-intact.
+			DiscardFailedExclusiveStaging(p.FS, newStaged, newFh)
 			_ = fh.Close()
-			_ = p.FS.Remove(newStaged)
 			return nil, fmt.Errorf("re-stage substituted bytes for %s: %w: %w", p.Dest, rerr, ErrPublishStagedIdentityBreak)
 		}
 		// The fresh inode mirrors the original's metadata: ownership rides
