@@ -4,6 +4,7 @@ import (
 	cryptorand "crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -16,6 +17,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/spf13/afero"
 	"golang.org/x/text/unicode/norm"
 )
 
@@ -362,23 +364,21 @@ func probeNormalizationInsensitive(ops caseProbeOps, root string) (bool, error) 
 			return false, err
 		}
 		// The NFC spelling may belong to the user and is never a cleanup
-		// target; only the exact NFD path this probe created is removed.
+		// target; only the exact NFD path this probe created is removed, and
+		// only after re-proving it still names THE created object (wave-39
+		// bound cleanup — see boundProbeCleanup).
 		alternatePath := filepath.Join(root, norm.NFC.String(name))
-		cleanup := func() error {
-			if err := ops.remove(path); err != nil && !os.IsNotExist(err) {
-				return err
-			}
-			return nil
-		}
 		// Codex P2 (wave-38, PR#215 finding F5): capture the created
 		// object's identity from the OPEN handle BEFORE closing — a watcher
 		// renaming the probe away after close could otherwise substitute a
 		// successor for a create-path re-stat to borrow as proof. A failed
 		// identity capture fails closed exactly like a failed close.
 		created, sErr := file.Stat()
-		if err := file.Close(); err != nil {
+		closeErr := file.Close()
+		cleanup := func() error { return boundProbeCleanup(ops, path, created) }
+		if closeErr != nil {
 			_ = cleanup()
-			return false, err
+			return false, closeErr
 		}
 		if sErr != nil {
 			_ = cleanup()
@@ -481,17 +481,101 @@ type caseProbeFile interface {
 type caseProbeOps struct {
 	openFile func(string, int, os.FileMode) (caseProbeFile, error)
 	stat     func(string) (os.FileInfo, error)
-	readDir  func(string) ([]os.DirEntry, error)
-	remove   func(string) error
+	// rename is the cleanup take-aside's NO-REPLACE move (wave-39, codex P2,
+	// PR#215 — bound probe cleanup): an occupied target REFUSES rather than
+	// dislodging whatever sits there. Production wires PublishNoReplace
+	// (Windows MoveFileExW without the replace flag; POSIX renameat2
+	// NOREPLACE / the verified hard-link fallback).
+	rename func(oldPath, newPath string) error
+	remove func(string) error
 }
 
 var osCaseProbeOps = caseProbeOps{
 	openFile: func(name string, flag int, perm os.FileMode) (caseProbeFile, error) {
 		return os.OpenFile(name, flag, perm)
 	},
-	stat:    os.Stat,
-	readDir: os.ReadDir,
-	remove:  os.Remove,
+	stat:   os.Stat,
+	rename: probeRenameNoReplace,
+	remove: os.Remove,
+}
+
+// probeRenameNoReplace is the production cleanup take-aside move: an atomic
+// no-replace rename of the verified probe onto its scratch sibling, refusing
+// (collision class) rather than displacing anything that claimed the scratch
+// name mid-window.
+func probeRenameNoReplace(oldPath, newPath string) error {
+	return PublishNoReplace(afero.NewOsFs(), oldPath, newPath)
+}
+
+// probeCleanupScratchSuffix marks the scratch sibling both probes park their
+// verified created object on before the ONLY unlink runs (bound cleanup).
+const probeCleanupScratchSuffix = ".cleanup"
+
+// boundProbeCleanup is BOTH filesystem-semantics probes' bound cleanup
+// (wave-39, codex P2, PR#215): pre-wave-39 the probes unlinked the mutable
+// CREATE-PATH directly, so a watcher renaming the probe away and parking a
+// substitute at that name got its own object deleted. The cleanup now runs
+// the take-aside sequence (mirroring bound_take.go):
+//
+//  1. the create-path's current occupant is re-proven against the
+//     handle-captured identity — a path that vanished completed the cleanup
+//     by itself, and a SUBSTITUTE is left byte-intact while the cleanup
+//     refuses closed (typed ErrTakeAsideForeign);
+//  2. the verified object moves onto a sibling scratch name NO-REPLACE — an
+//     occupied scratch refuses instead of displacing anything;
+//  3. the scratch object is re-proven against the same identity (a
+//     substitution under the take-aside is left entirely alone);
+//  4. only THE SCRATCH name is ever unlinked; a scratch that vanished on
+//     its own completed the cleanup.
+//
+// A nil created (the handle's identity capture itself failed) is the one
+// leg with no identity channel to bind against: the just-created O_EXCL
+// path is removed best-effort by pathname, exactly as before.
+func boundProbeCleanup(ops caseProbeOps, path string, created os.FileInfo) error {
+	if created == nil {
+		if err := ops.remove(path); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		return nil
+	}
+	cur, statErr := ops.stat(path)
+	switch {
+	case os.IsNotExist(statErr):
+		// The probe vanished on its own (or was renamed away): nothing of
+		// ours sits at the create-path — the cleanup completed itself.
+		return nil
+	case statErr != nil:
+		return statErr
+	case !probeSameFile(created, cur):
+		// A substitute occupies the create-path: foreign bytes are never
+		// moved or unlinked — the cleanup fails closed instead.
+		return fmt.Errorf("case/normalization probe path %s no longer names the created probe (foreign substitution) — foreign bytes preserved: %w", path, ErrTakeAsideForeign)
+	}
+	scratch := path + probeCleanupScratchSuffix
+	if err := ops.rename(path, scratch); err != nil {
+		if os.IsNotExist(err) {
+			// The verified probe vanished under the take-aside move —
+			// indistinguishable from a completed cleanup, nothing to unlink.
+			return nil
+		}
+		return fmt.Errorf("move probe %s onto cleanup scratch %s: %w", path, scratch, err)
+	}
+	moved, statErr := ops.stat(scratch)
+	switch {
+	case os.IsNotExist(statErr):
+		// The verified object vanished from the scratch on its own.
+		return nil
+	case statErr != nil:
+		return statErr
+	case !probeSameFile(created, moved):
+		// A substitution landed under the take-aside: the scratch occupant
+		// is left entirely alone and the cleanup refuses closed.
+		return fmt.Errorf("probe cleanup scratch %s no longer names the created probe (foreign substitution under the take-aside) — foreign bytes preserved: %w", scratch, ErrTakeAsideForeign)
+	}
+	if err := ops.remove(scratch); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove probe cleanup scratch %s (verified): %w", scratch, err)
+	}
+	return nil
 }
 
 func caseProbeToken() string {
@@ -521,11 +605,11 @@ func caseProbeName() string {
 // differently-cased spelling. The name carries the PID, fresh crypto entropy,
 // and an ordinal (with a timestamp fallback if entropy is unavailable). An
 // O_EXCL collision gets a bounded retry with a fresh name; other open failures
-// retain the fail-closed path. Directory enumeration is the fallback when the
-// alternate stat is indeterminate. Cleanup removes only the exact probe path
-// created by O_EXCL; the alternate spelling may belong to the user and is
-// never a cleanup target. Any probe or cleanup failure is returned for the
-// caller's fail-closed path.
+// retain the fail-closed path. Cleanup removes only the exact probe path
+// created by O_EXCL — bound to the handle-captured identity through the
+// wave-39 take-aside (boundProbeCleanup); the alternate spelling may belong
+// to the user and is never a cleanup target. Any probe or cleanup failure is
+// returned for the caller's fail-closed path.
 func defaultCaseSensitiveProbe(root string) (bool, error) {
 	return probeCaseSensitive(osCaseProbeOps, root)
 }
@@ -541,13 +625,10 @@ func probeCaseSensitive(ops caseProbeOps, root string) (bool, error) {
 			}
 			return false, err
 		}
+		// Only the exact probe path created by O_EXCL is ever removed, bound
+		// to the handle-captured identity (wave-39 — boundProbeCleanup); the
+		// alternate spelling may belong to the user and is never a target.
 		alternatePath := filepath.Join(root, strings.ToUpper(name))
-		cleanup := func() error {
-			if err := ops.remove(path); err != nil && !os.IsNotExist(err) {
-				return err
-			}
-			return nil
-		}
 		// Codex P2 (wave-38, PR#215 finding F5): the created object's
 		// identity is captured from the OPEN handle BEFORE closing — the
 		// case probe repeats the normalization probe's defect when it
@@ -555,9 +636,11 @@ func probeCaseSensitive(ops caseProbeOps, root string) (bool, error) {
 		// object would be borrowed as case evidence). A failed identity
 		// capture fails closed exactly like a failed close.
 		created, sErr := file.Stat()
-		if err := file.Close(); err != nil {
+		closeErr := file.Close()
+		cleanup := func() error { return boundProbeCleanup(ops, path, created) }
+		if closeErr != nil {
 			_ = cleanup()
-			return false, err
+			return false, closeErr
 		}
 		if sErr != nil {
 			_ = cleanup()
@@ -568,26 +651,21 @@ func probeCaseSensitive(ops caseProbeOps, root string) (bool, error) {
 		if altInfo, statErr := ops.stat(alternatePath); statErr == nil {
 			// Codex P2 (w31): a racer's uppercased file must not masquerade
 			// as our probe — only an identity match proves case-insensitivity.
-			if probeSameFile(created, altInfo) {
-				caseSensitive = false
-			} else {
+			if !probeSameFile(created, altInfo) {
 				caseSensitive = true
 			}
 		} else if os.IsNotExist(statErr) {
 			caseSensitive = true
 		} else {
-			entries, readErr := ops.readDir(root)
-			if readErr != nil {
-				_ = cleanup()
-				return false, readErr
-			}
-			caseSensitive = true
-			for _, entry := range entries {
-				if strings.EqualFold(entry.Name(), name) {
-					caseSensitive = false
-					break
-				}
-			}
+			// Codex P2 (wave-39, PR#215): an indeterminate alternate-stat is
+			// UNDECIDABLE — the pre-wave-39 readDir fallback necessarily
+			// matched the probe's OWN name via EqualFold, permanently caching
+			// the root as case-INSENSITIVE even on a sensitive volume and
+			// aliasing DestKeys for byte-distinct files. Fail closed WITHOUT
+			// enumerating; the wave-25 contract keeps error outcomes uncached
+			// so the next derivation re-probes.
+			_ = cleanup()
+			return false, statErr
 		}
 		if err := cleanup(); err != nil {
 			return false, err

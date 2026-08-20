@@ -229,16 +229,21 @@ func TestProbeNormalizationInsensitiveW24_StatSuccessMeansInsensitive(t *testing
 	ops := caseProbeOps{
 		openFile: func(name string, flag int, perm os.FileMode) (caseProbeFile, error) {
 			opened = append(opened, name)
-			if _, err := os.OpenFile(name, flag, perm); err != nil {
+			real, err := os.OpenFile(name, flag, perm)
+			if err != nil {
+				return nil, err
+			}
+			// The real create leaves something name-honest for cleanup to act
+			// on; its handle must CLOSE before the scripted fake replaces it —
+			// a leaked handle keeps Windows from unlinking the probe at all
+			// ("file being used by another process", CI test-vs-platform).
+			if err := real.Close(); err != nil {
 				return nil, err
 			}
 			return w38StatProbeFile{info: sentinel}, nil
 		},
-		stat: func(string) (os.FileInfo, error) { return sentinel, nil },
-		readDir: func(string) ([]os.DirEntry, error) {
-			t.Fatal("normalization evidence comes from the stat alone")
-			return nil, nil
-		},
+		stat:   func(string) (os.FileInfo, error) { return sentinel, nil },
+		rename: probeRenameNoReplace,
 		remove: func(name string) error {
 			removed = append(removed, name)
 			return os.Remove(name)
@@ -254,19 +259,31 @@ func TestProbeNormalizationInsensitiveW24_StatSuccessMeansInsensitive(t *testing
 	require.NoError(t, err)
 	require.True(t, got, "NFC visible for the NFD-created probe = insensitive")
 	require.Len(t, opened, 1)
-	require.Equal(t, opened, removed, "cleanup removes exactly the created probe name")
+	require.Equal(t, []string{opened[0] + probeCleanupScratchSuffix}, removed,
+		"the bound cleanup unlinks only the verified probe's scratch name (wave-39)")
 	require.Contains(t, opened[0], "_a\u0308", "the probe name is created in NFD form")
 }
 
 func TestProbeNormalizationInsensitiveW24_ENOENTMeansSensitive(t *testing.T) {
 	root := t.TempDir()
+	var opened []string
 	ops := caseProbeOps{
 		openFile: func(name string, flag int, perm os.FileMode) (caseProbeFile, error) {
+			opened = append(opened, name)
 			return os.OpenFile(name, flag, perm)
 		},
-		stat:    func(string) (os.FileInfo, error) { return nil, os.ErrNotExist },
-		readDir: func(string) ([]os.DirEntry, error) { t.Fatal("unused"); return nil, nil },
-		remove:  os.Remove,
+		// The scripted ENOENT answers ONLY the alternate (NFC) lookup; the
+		// wave-39 bound cleanup's own stat/re-stat of the created probe and
+		// its scratch sibling must see the real object (host-independent on
+		// case- or normalization-insensitive volumes).
+		stat: func(name string) (os.FileInfo, error) {
+			if name == opened[len(opened)-1] || name == opened[len(opened)-1]+probeCleanupScratchSuffix {
+				return os.Stat(name)
+			}
+			return nil, os.ErrNotExist
+		},
+		rename: probeRenameNoReplace,
+		remove: os.Remove,
 	}
 	got, err := probeNormalizationInsensitive(ops, root)
 	require.NoError(t, err)
@@ -283,8 +300,7 @@ func TestProbeNormalizationInsensitiveW24_IndeterminateStatFailsClosed(t *testin
 		openFile: func(name string, flag int, perm os.FileMode) (caseProbeFile, error) {
 			return os.OpenFile(name, flag, perm)
 		},
-		stat:    func(string) (os.FileInfo, error) { return nil, statErr },
-		readDir: func(string) ([]os.DirEntry, error) { t.Fatal("unused"); return nil, nil },
+		stat: func(string) (os.FileInfo, error) { return nil, statErr },
 		remove: func(name string) error {
 			removed++
 			return os.Remove(name)
@@ -293,7 +309,7 @@ func TestProbeNormalizationInsensitiveW24_IndeterminateStatFailsClosed(t *testin
 	got, err := probeNormalizationInsensitive(ops, t.TempDir())
 	require.ErrorIs(t, err, statErr)
 	require.False(t, got)
-	require.Equal(t, 1, removed, "the created probe is removed on the indeterminate leg")
+	require.Zero(t, removed, "wave-39: with the lookup indeterminate the bound cleanup has no identity proof to unlink against — the probe is left for the next retry rather than unlinked by a bare pathname")
 }
 
 func TestProbeNormalizationInsensitiveW24_OpenErrorPropagates(t *testing.T) {
@@ -301,7 +317,6 @@ func TestProbeNormalizationInsensitiveW24_OpenErrorPropagates(t *testing.T) {
 	ops := caseProbeOps{
 		openFile: func(string, int, os.FileMode) (caseProbeFile, error) { return nil, openErr },
 		stat:     func(string) (os.FileInfo, error) { t.Fatal("unused"); return nil, nil },
-		readDir:  func(string) ([]os.DirEntry, error) { t.Fatal("unused"); return nil, nil },
 		remove:   func(string) error { t.Fatal("nothing created"); return nil },
 	}
 	got, err := probeNormalizationInsensitive(ops, t.TempDir())
@@ -320,9 +335,16 @@ func TestProbeNormalizationInsensitiveW24_CollisionRetriesWithFreshName(t *testi
 			}
 			return os.OpenFile(name, flag, perm)
 		},
-		stat:    func(string) (os.FileInfo, error) { return nil, os.ErrNotExist },
-		readDir: func(string) ([]os.DirEntry, error) { t.Fatal("unused"); return nil, nil },
-		remove:  os.Remove,
+		// Only the alternate lookup belongs to the probe's case evidence;
+		// the bound cleanup's stat legs see the real created probe.
+		stat: func(name string) (os.FileInfo, error) {
+			if name == opened[len(opened)-1] || name == opened[len(opened)-1]+probeCleanupScratchSuffix {
+				return os.Stat(name)
+			}
+			return nil, os.ErrNotExist
+		},
+		rename: probeRenameNoReplace,
+		remove: os.Remove,
 	}
 	got, err := probeNormalizationInsensitive(ops, root)
 	require.NoError(t, err)
@@ -344,8 +366,7 @@ func TestProbeNormalizationInsensitiveW24_CloseErrorPropagates(t *testing.T) {
 	removed := 0
 	ops := caseProbeOps{
 		openFile: func(string, int, os.FileMode) (caseProbeFile, error) { return w24CloseErrProbeFile{closeErr}, nil },
-		stat:     func(string) (os.FileInfo, error) { t.Fatal("unused"); return nil, nil },
-		readDir:  func(string) ([]os.DirEntry, error) { t.Fatal("unused"); return nil, nil },
+		stat:     func(string) (os.FileInfo, error) { t.Fatal("unused on the close-failure leg"); return nil, nil },
 		remove:   func(string) error { removed++; return nil },
 	}
 	got, err := probeNormalizationInsensitive(ops, t.TempDir())
@@ -356,13 +377,22 @@ func TestProbeNormalizationInsensitiveW24_CloseErrorPropagates(t *testing.T) {
 
 func TestProbeNormalizationInsensitiveW24_CleanupErrorPropagates(t *testing.T) {
 	removeErr := errors.New("w24 remove failure")
+	var opened []string
 	ops := caseProbeOps{
 		openFile: func(name string, flag int, perm os.FileMode) (caseProbeFile, error) {
+			opened = append(opened, name)
 			return os.OpenFile(name, flag, perm)
 		},
-		stat:    func(string) (os.FileInfo, error) { return nil, os.ErrNotExist },
-		readDir: func(string) ([]os.DirEntry, error) { t.Fatal("unused"); return nil, nil },
-		remove:  func(string) error { return removeErr },
+		// The scripted ENOENT must NOT cover the bound cleanup's own probes:
+		// the take-aside rename and verified unlink need the real object.
+		stat: func(name string) (os.FileInfo, error) {
+			if name == opened[0] || name == opened[0]+probeCleanupScratchSuffix {
+				return os.Stat(name)
+			}
+			return nil, os.ErrNotExist
+		},
+		rename: probeRenameNoReplace,
+		remove: func(string) error { return removeErr },
 	}
 	got, err := probeNormalizationInsensitive(ops, t.TempDir())
 	require.ErrorIs(t, err, removeErr)

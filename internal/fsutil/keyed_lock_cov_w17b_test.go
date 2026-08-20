@@ -30,8 +30,9 @@ func TestProbeCaseSensitiveW17B_SensitiveRootPreservesUppercaseUserFile(t *testi
 	require.NoError(t, err)
 	require.True(t, got, "a distinct user-owned alternate spelling must not downgrade the root to insensitive")
 	require.Len(t, ops.opened, 1)
-	require.Len(t, ops.removed, 1, "cleanup must remove only the created spelling")
-	require.Equal(t, ops.opened[0], ops.removed[0])
+	require.Len(t, ops.removed, 1, "cleanup unlinks once, through the take-aside scratch name")
+	require.Equal(t, ops.opened[0]+probeCleanupScratchSuffix, ops.removed[0],
+		"the ONLY unlink targets the verified object's scratch name (wave-39 bound cleanup)")
 	require.NotEqual(t, ops.userPath, ops.removed[0])
 	require.Equal(t, "user-owned probe", ops.files[ops.key(ops.userPath)].content)
 }
@@ -55,7 +56,7 @@ func TestProbeCaseSensitiveW17B_InsensitiveRootCleansCreatedFile(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, got, "the alternate spelling resolves to the created file")
 	require.Len(t, ops.opened, 1)
-	require.Equal(t, []string{ops.opened[0]}, ops.removed)
+	require.Equal(t, []string{ops.opened[0] + probeCleanupScratchSuffix}, ops.removed)
 	require.Empty(t, ops.files, "the normal insensitive probe leaves no temporary file")
 }
 
@@ -77,7 +78,7 @@ func (f *w17BProbeFS) ops() caseProbeOps {
 	return caseProbeOps{
 		openFile: f.openFile,
 		stat:     f.stat,
-		readDir:  f.readDir,
+		rename:   f.rename,
 		remove:   f.remove,
 	}
 }
@@ -104,7 +105,23 @@ func (f *w17BProbeFS) stat(name string) (os.FileInfo, error) {
 	return w17BProbeInfo{path: entry.path}, nil
 }
 
-func (f *w17BProbeFS) readDir(string) ([]os.DirEntry, error) { return nil, nil }
+// rename models the cleanup take-aside's no-replace move (wave-39): the
+// entry's IDENTITY (its path payload) survives the move — the fake models
+// an inode as an immutable struct value — while an occupied target refuses
+// instead of being displaced.
+func (f *w17BProbeFS) rename(oldPath, newPath string) error {
+	oldKey, newKey := f.key(oldPath), f.key(newPath)
+	entry, ok := f.files[oldKey]
+	if !ok {
+		return os.ErrNotExist
+	}
+	if _, occupied := f.files[newKey]; occupied {
+		return os.ErrExist
+	}
+	delete(f.files, oldKey)
+	f.files[newKey] = entry
+	return nil
+}
 
 func (f *w17BProbeFS) remove(name string) error {
 	f.removed = append(f.removed, name)

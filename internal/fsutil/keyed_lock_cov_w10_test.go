@@ -24,9 +24,9 @@ func w10RealProbeOps() caseProbeOps {
 		openFile: func(name string, flag int, perm os.FileMode) (caseProbeFile, error) {
 			return os.OpenFile(name, flag, perm)
 		},
-		stat:    os.Stat,
-		readDir: os.ReadDir,
-		remove:  os.Remove,
+		stat:   os.Stat,
+		rename: probeRenameNoReplace,
+		remove: os.Remove,
 	}
 }
 
@@ -113,43 +113,63 @@ func TestDestinationProbeRoot_StopsAtUnstatableFilesystemRoot(t *testing.T) {
 }
 
 // Probe filenames are process-unique; this test intentionally verifies the
-// stat/enumeration behavior without depending on the old fixed basename.
+// stat legs without depending on the old fixed basename. Wave-39 (codex P2,
+// PR#215): the readDir enumeration fallback is GONE — it necessarily matched
+// the probe's OWN name via EqualFold, permanently caching a case-INSENSITIVE
+// verdict on a sensitive volume; an indeterminate alternate stat now fails
+// closed (uncached error), exactly like the normalization probe.
 func TestProbeCaseSensitive_CoversStatAndEnumerationPaths(t *testing.T) {
 	root := t.TempDir()
 	base := w10RealProbeOps()
+	// Wave-39 (bound cleanup): scripted stat answers must ONLY shape the
+	// verdict's alternate-spelling lookup — the bound cleanup's own stat
+	// re-proofs of the created probe and its scratch sibling need the real
+	// on-disk object. The double dispatches by which name is asked about.
+	var opened []string
+	base.openFile = func(name string, flag int, perm os.FileMode) (caseProbeFile, error) {
+		opened = append(opened, name)
+		return os.OpenFile(name, flag, perm)
+	}
+	statWith := func(alternate func(string) (os.FileInfo, error)) func(string) (os.FileInfo, error) {
+		return func(name string) (os.FileInfo, error) {
+			cur := opened[len(opened)-1]
+			if name == cur || name == cur+probeCleanupScratchSuffix {
+				return os.Stat(name)
+			}
+			return alternate(name)
+		}
+	}
 	notFound := func(string) (os.FileInfo, error) { return nil, os.ErrNotExist }
 
 	// Wave-38 (finding F5): an alternate spelling that stats but addresses a
 	// DIFFERENT object than the created probe (here: the root directory
 	// itself) is NOT case evidence — only an identity match against the
 	// open handle's snapshot proves insensitivity.
-	base.stat = func(string) (os.FileInfo, error) { return os.Stat(root) }
+	base.stat = statWith(func(string) (os.FileInfo, error) { return os.Stat(root) })
 	got, err := probeCaseSensitive(base, root)
 	require.NoError(t, err)
 	require.True(t, got, "an alternate spelling naming a different object stays sensitive")
 
-	base.stat = notFound
+	base.stat = statWith(notFound)
 	got, err = probeCaseSensitive(base, root)
 	require.NoError(t, err)
 	require.True(t, got, "a missing alternate spelling is sensitive")
 
+	// Wave-39: an indeterminate alternate lookup is undecidable — it fails
+	// closed with the stat error (uncached) instead of enumerating, which
+	// could only ever "find" the probe's own name and fold wrongly.
 	statErr := errors.New("stat indeterminate")
-	base.stat = func(string) (os.FileInfo, error) { return nil, statErr }
-	base.readDir = func(string) ([]os.DirEntry, error) { return nil, nil }
+	base.stat = statWith(func(string) (os.FileInfo, error) { return nil, statErr })
+	got, err = probeCaseSensitive(base, root)
+	require.ErrorIs(t, err, statErr)
+	require.False(t, got, "an indeterminate alternate lookup fails closed — no enumeration fallback")
+
+	// The undecidable root is NOT cached: the very next derivation re-probes
+	// and, once the transient failure clears, folds correctly.
+	base.stat = statWith(notFound)
 	got, err = probeCaseSensitive(base, root)
 	require.NoError(t, err)
-	require.True(t, got, "an enumeration without a folded name is sensitive")
-
-	base.readDir = os.ReadDir
-	got, err = probeCaseSensitive(base, root)
-	require.NoError(t, err)
-	require.False(t, got, "enumeration finds the created name when stat is indeterminate")
-
-	readErr := errors.New("enumeration unavailable")
-	base.readDir = func(string) ([]os.DirEntry, error) { return nil, readErr }
-	got, err = probeCaseSensitive(base, root)
-	require.ErrorIs(t, err, readErr)
-	require.False(t, got, "enumeration failure fails closed")
+	require.True(t, got, "the re-probed root answers from fresh evidence")
 
 	got, err = defaultCaseSensitiveProbe(root)
 	require.NoError(t, err)

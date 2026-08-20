@@ -15,6 +15,10 @@ import (
 func TestProbeCaseSensitiveW21_CollisionRetriesAndStatsCreatedProbe(t *testing.T) {
 	root := t.TempDir()
 	var opened []string
+	// Wave-39 (bound cleanup): after the verdict the take-aside cleanup also
+	// stats the CREATE-PATH and its scratch sibling — the double answers the
+	// real lookup for names the probe owns and the scripted ENOENT only for
+	// the alternate spelling the verdict actually asks about.
 	ops := caseProbeOps{
 		openFile: func(name string, flag int, perm os.FileMode) (caseProbeFile, error) {
 			opened = append(opened, name)
@@ -27,17 +31,18 @@ func TestProbeCaseSensitiveW21_CollisionRetriesAndStatsCreatedProbe(t *testing.T
 		},
 		stat: func(name string) (os.FileInfo, error) {
 			require.Len(t, opened, 2)
+			if name == opened[1] || name == opened[1]+probeCleanupScratchSuffix {
+				return os.Stat(name)
+			}
 			require.Equal(t, filepath.Join(root, strings.ToUpper(filepath.Base(opened[1]))), name)
 			// The alternate spelling is absent, so the created second probe
 			// proves this injected root is case-sensitive.
 			return nil, os.ErrNotExist
 		},
-		readDir: func(string) ([]os.DirEntry, error) {
-			t.Fatal("stat result should decide sensitivity without enumeration")
-			return nil, nil
-		},
+		rename: probeRenameNoReplace,
 		remove: func(name string) error {
-			require.Equal(t, opened[1], name, "cleanup must remove only the probe that was created")
+			require.Equal(t, opened[1]+probeCleanupScratchSuffix, name,
+				"cleanup must unlink only the verified probe's scratch name")
 			return os.Remove(name)
 		},
 	}
@@ -83,10 +88,6 @@ func TestProbeCaseSensitiveW21_ExistRetryIsBounded(t *testing.T) {
 		},
 		stat: func(string) (os.FileInfo, error) {
 			t.Fatal("stat must not run when no probe was created")
-			return nil, nil
-		},
-		readDir: func(string) ([]os.DirEntry, error) {
-			t.Fatal("directory enumeration must not run when no probe was created")
 			return nil, nil
 		},
 		remove: func(string) error {

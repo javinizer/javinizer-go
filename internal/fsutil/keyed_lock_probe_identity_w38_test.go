@@ -50,7 +50,14 @@ func TestProbeCaseSensitiveW38_HandleStatFailureFailsClosed(t *testing.T) {
 	removed := 0
 	ops := caseProbeOps{
 		openFile: func(name string, _ int, _ os.FileMode) (caseProbeFile, error) {
-			if _, err := os.Create(name); err != nil {
+			real, err := os.Create(name)
+			if err != nil {
+				return nil, err
+			}
+			// Close the real create's handle BEFORE handing back the scripted
+			// fake — a leaked handle would keep Windows from unlinking the
+			// probe at cleanup time ("file being used by another process").
+			if err := real.Close(); err != nil {
 				return nil, err
 			}
 			return w38StatProbeFile{statErr: statErr}, nil
@@ -59,7 +66,6 @@ func TestProbeCaseSensitiveW38_HandleStatFailureFailsClosed(t *testing.T) {
 			t.Fatal("no verdict runs on a failed identity capture")
 			return nil, nil
 		},
-		readDir: func(string) ([]os.DirEntry, error) { t.Fatal("unused"); return nil, nil },
 		remove: func(name string) error {
 			removed++
 			return os.Remove(name)
@@ -77,16 +83,17 @@ func TestProbeNormalizationInsensitiveW38_HandleStatFailureFailsClosed(t *testin
 	removed := 0
 	ops := caseProbeOps{
 		openFile: func(name string, _ int, _ os.FileMode) (caseProbeFile, error) {
-			if _, err := os.Create(name); err != nil {
+			real, err := os.Create(name)
+			if err != nil {
 				return nil, err
 			}
+			withClosedW39(t, real)
 			return w38StatProbeFile{statErr: statErr}, nil
 		},
 		stat: func(string) (os.FileInfo, error) {
 			t.Fatal("no verdict runs on a failed identity capture")
 			return nil, nil
 		},
-		readDir: func(string) ([]os.DirEntry, error) { t.Fatal("unused"); return nil, nil },
 		remove: func(name string) error {
 			removed++
 			return os.Remove(name)
@@ -98,6 +105,15 @@ func TestProbeNormalizationInsensitiveW38_HandleStatFailureFailsClosed(t *testin
 	require.Equal(t, 1, removed)
 }
 
+// withClosedW39 closes the real on-disk create behind a scripted probe
+// handle BEFORE the fake rides it: the wave-39 bound cleanup unlinks the
+// probe for real, and a leaked handle blocks that unlink outright on
+// Windows ("file being used by another process" — CI test-vs-platform).
+func withClosedW39(t *testing.T, f *os.File) {
+	t.Helper()
+	require.NoError(t, f.Close())
+}
+
 // The identity snapshot outlives close + rename-away: a watcher renames the
 // probe and plants a lookalike at the create-path after close; the verdict
 // must ride the HANDLE's captured identity, so the successor at the mutable
@@ -107,17 +123,19 @@ func TestProbeCaseSensitiveW38_VerdictRidesHandleIdentity(t *testing.T) {
 	sentinel := &w38ProbeInfo{}
 	ops := caseProbeOps{
 		openFile: func(name string, _ int, _ os.FileMode) (caseProbeFile, error) {
-			if _, err := os.Create(name); err != nil {
+			real, err := os.Create(name)
+			if err != nil {
 				return nil, err
 			}
+			withClosedW39(t, real)
 			return w38StatProbeFile{info: sentinel}, nil
 		},
 		// The alternate spelling answers THE created object (same fake
 		// identity): insensitive regardless of what the create-path now
 		// holds (the watcher already renamed it away — no stat of it runs).
-		stat:    func(string) (os.FileInfo, error) { return sentinel, nil },
-		readDir: func(string) ([]os.DirEntry, error) { t.Fatal("unused"); return nil, nil },
-		remove:  os.Remove,
+		stat:   func(string) (os.FileInfo, error) { return sentinel, nil },
+		rename: probeRenameNoReplace,
+		remove: os.Remove,
 	}
 	prev := probeSameFile
 	probeSameFile = func(a, b os.FileInfo) bool { return a == b }
@@ -135,14 +153,16 @@ func TestProbeNormalizationInsensitiveW38_VerdictRidesHandleIdentity(t *testing.
 	ops := caseProbeOps{
 		openFile: func(name string, _ int, _ os.FileMode) (caseProbeFile, error) {
 			opened = append(opened, name)
-			if _, err := os.Create(name); err != nil {
+			real, err := os.Create(name)
+			if err != nil {
 				return nil, err
 			}
+			withClosedW39(t, real)
 			return w38StatProbeFile{info: sentinel}, nil
 		},
-		stat:    func(string) (os.FileInfo, error) { return sentinel, nil },
-		readDir: func(string) ([]os.DirEntry, error) { t.Fatal("unused"); return nil, nil },
-		remove:  os.Remove,
+		stat:   func(string) (os.FileInfo, error) { return sentinel, nil },
+		rename: probeRenameNoReplace,
+		remove: os.Remove,
 	}
 	prev := probeSameFile
 	probeSameFile = func(a, b os.FileInfo) bool { return a == b }
@@ -158,16 +178,28 @@ func TestProbeNormalizationInsensitiveW38_VerdictRidesHandleIdentity(t *testing.
 // the verdict keeps spellings byte-distinct (the w17B tables pin the same
 // on their seeded fakes; these keep the w38 regression name-addressable).
 func TestProbeCaseSensitiveW38_DistinctAlternateStaysSensitive(t *testing.T) {
+	created := &w38ProbeInfo{}
+	var opened []string
 	ops := caseProbeOps{
 		openFile: func(name string, _ int, _ os.FileMode) (caseProbeFile, error) {
-			if _, err := os.Create(name); err != nil {
+			opened = append(opened, name)
+			real, err := os.Create(name)
+			if err != nil {
 				return nil, err
 			}
-			return w38StatProbeFile{info: &w38ProbeInfo{}}, nil
+			withClosedW39(t, real)
+			return w38StatProbeFile{info: created}, nil
 		},
-		stat:    func(string) (os.FileInfo, error) { return &w38ProbeInfo{}, nil },
-		readDir: func(string) ([]os.DirEntry, error) { t.Fatal("unused"); return nil, nil },
-		remove:  os.Remove,
+		// The ALTERNATE lookup answers a distinct object; the wave-39 bound
+		// cleanup's stat of the probe's own names answers THE created one.
+		stat: func(name string) (os.FileInfo, error) {
+			if name == opened[0] || name == opened[0]+probeCleanupScratchSuffix {
+				return created, nil
+			}
+			return &w38ProbeInfo{}, nil
+		},
+		rename: probeRenameNoReplace,
+		remove: os.Remove,
 	}
 	prev := probeSameFile
 	probeSameFile = func(a, b os.FileInfo) bool { return a == b }

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -184,8 +185,18 @@ func TestDestPlaceholderMatchesClaimW37_Legs(t *testing.T) {
 	require.NoError(t, os.Chtimes(filepath.Join(tmp, "other"), claim.ModTime(), claim.ModTime()))
 	otherSameTime, err := os.Lstat(filepath.Join(tmp, "other"))
 	require.NoError(t, err)
-	require.False(t, destPlaceholderMatchesClaim(otherSameTime, claim),
-		"same shape, different inode — dev/inode binding refuses")
+	// restoreSourceIdentity exposes dev/inode only on the POSIX Stat_t
+	// targets (restore_source_identity_other.go answers not-OK elsewhere):
+	// on Windows the SAME-SHAPE different-inode leg degrades to the shape
+	// binding alone, so the refusal is asserted only where a kernel identity
+	// exists (the w12/k4-style windows-keyed expectation).
+	if runtime.GOOS == "windows" {
+		require.True(t, destPlaceholderMatchesClaim(otherSameTime, claim),
+			"windows exposes no dev/ino — the shape binding alone answers")
+	} else {
+		require.False(t, destPlaceholderMatchesClaim(otherSameTime, claim),
+			"same shape, different inode — dev/inode binding refuses")
+	}
 
 	mk("mutated", nil)
 	require.NoError(t, os.Chtimes(filepath.Join(tmp, "mutated"), claim.ModTime().Add(123), claim.ModTime().Add(123)))

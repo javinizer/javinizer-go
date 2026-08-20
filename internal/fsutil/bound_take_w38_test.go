@@ -12,6 +12,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/spf13/afero"
@@ -287,7 +288,17 @@ func TestAsideSameObjectW38_ShapeTable(t *testing.T) {
 	require.NoError(t, os.Chtimes(filepath.Join(tmp, "other"), expect.ModTime(), expect.ModTime()))
 	otherInfo, err := os.Lstat(filepath.Join(tmp, "other"))
 	require.NoError(t, err)
-	require.False(t, asideSameObject(otherInfo, expect), "same shape, different inode refuses via dev/ino")
+	// boundObjectIdentity exposes dev/inode only on the POSIX Stat_t targets
+	// (bound_identity_other.go answers not-OK elsewhere): on Windows the
+	// SAME-SHAPE different-inode leg degrades to the shape/metadata legs, so
+	// the refusal is asserted only where a kernel identity exists.
+	if runtime.GOOS == "windows" {
+		require.True(t, asideSameObject(otherInfo, expect),
+			"windows exposes no dev/ino — the shape binding alone answers")
+	} else {
+		require.False(t, asideSameObject(otherInfo, expect),
+			"same shape, different inode refuses via dev/ino")
+	}
 
 	bigger := mk("bigger", []byte("xyz"))
 	require.False(t, asideSameObject(bigger, expect), "size divergence refuses")
