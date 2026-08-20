@@ -5,10 +5,10 @@ import (
 	"errors"
 	"path/filepath"
 	"sort"
-	"sync"
 	"testing"
 	"time"
 
+	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
@@ -17,25 +17,6 @@ import (
 // POSTER-WRITE-HARDENING P2 review (bounded CLI pre-revert sweep): scoped
 // root computation, dir-scoped sweeping, and context responsiveness. A hung
 // or unrelated root must never delay a targeted revert.
-
-// cancelOnFirstOpenFs cancels the bound context during the FIRST Open — the
-// deterministic stand-in for a caller deadline landing mid-sweep.
-type cancelOnFirstOpenFs struct {
-	afero.Fs
-	cancel context.CancelFunc
-	mu     sync.Mutex
-	done   bool
-}
-
-func (f *cancelOnFirstOpenFs) Open(name string) (afero.File, error) {
-	f.mu.Lock()
-	if !f.done {
-		f.done = true
-		f.cancel()
-	}
-	f.mu.Unlock()
-	return f.Fs.Open(name)
-}
 
 // seedCrashWindow journals one armed (install never confirmed) replacement
 // whose destination is missing — the sweep must restore backup → dest and
@@ -179,7 +160,12 @@ func TestSweepDirs_CancellationBetweenDirsStopsSweep(t *testing.T) {
 	_, destB, backupB := seedCrashWindow(t, base, repo, "job-1", "MID-B", "/mid-b", p3HexB)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	fs := &cancelOnFirstOpenFs{Fs: base, cancel: cancel}
+	// Wave-46 restaging: the deadline lands at the FIRST dir's busy claim
+	// (mid-heal, past the post-ReadDir gate) instead of inside its ReadDir —
+	// cancellation inside the scan itself now stops that dir before any
+	// arbitration (see replacement_sweep_abandoned_w46_test.go).
+	fs := &w46CancelOnFirstTouchFs{Fs: base, cancel: cancel,
+		trigger: map[string]bool{filepath.ToSlash(fsutil.ReplacementBusyPath(destA)): true}}
 	healed, err := NewReplacementSweeper(fs, repo).SweepDirs(ctx, []string{"/mid-a", "/mid-b"})
 	require.ErrorIs(t, err, context.Canceled, "cancellation between dirs ends the sweep with progress reported")
 	require.Equal(t, 1, healed, "the first dir healed before the deadline landed")
@@ -199,7 +185,13 @@ func TestSweep_CancellationBetweenDirsStopsFullSweep(t *testing.T) {
 	_, destB, backupB := seedCrashWindow(t, base, repo, "job-1", "SWC-B", "/sweep-b", p3HexB)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	fs := &cancelOnFirstOpenFs{Fs: base, cancel: cancel}
+	// Wave-46 restaging: cancellation lands at whichever dir's busy claim
+	// fires FIRST (the map-ordered scan heals it), not inside that dir's
+	// ReadDir — the in-flight dir completes exactly as before.
+	fs := &w46CancelOnFirstTouchFs{Fs: base, cancel: cancel, trigger: map[string]bool{
+		filepath.ToSlash(fsutil.ReplacementBusyPath(destA)): true,
+		filepath.ToSlash(fsutil.ReplacementBusyPath(destB)): true,
+	}}
 	healed, err := NewReplacementSweeper(fs, repo).Sweep(ctx)
 	require.ErrorIs(t, err, context.Canceled, "the full sweep honors cancellation between directories")
 	// Directory iteration over the index map is intentionally unordered, and
@@ -232,7 +224,10 @@ func TestSweepDestinations_CancellationBetweenGroupsStopsSweep(t *testing.T) {
 	_ = opB
 
 	ctx, cancel := context.WithCancel(context.Background())
-	fs := &cancelOnFirstOpenFs{Fs: base, cancel: cancel}
+	// Wave-46 restaging: the deadline lands at group A's busy claim instead
+	// of inside its ReadDir — same healed-then-stop contract.
+	fs := &w46CancelOnFirstTouchFs{Fs: base, cancel: cancel,
+		trigger: map[string]bool{filepath.ToSlash(fsutil.ReplacementBusyPath(destA)): true}}
 	healed, err := NewReplacementSweeper(fs, repo).SweepDestinations(ctx, []string{destA, destB})
 	require.ErrorIs(t, err, context.Canceled)
 	require.Equal(t, 1, healed)

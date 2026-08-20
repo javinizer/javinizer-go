@@ -226,7 +226,20 @@ func TestInstallOverwritingW45_OsFsKernelIdentityBinding(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, fh.Close())
 		provenance := installedIdentityFromFileInfo(info)
-		require.True(t, provenance.hasDevIno, "OsFs stat carries kernel identity")
+		// restoreSourceIdentity exposes dev/inode only on the POSIX Stat_t
+		// targets (restore_source_identity_other.go answers not-OK elsewhere):
+		// on windows Sys() carries no unix dev/ino, so the kernel-identity
+		// precondition keys on ACTUAL identity availability (the w25/w37x
+		// platform-keyed posture). The substitute below diverges in SIZE too
+		// ("VALID-DATA!" vs "VALID-DATA"), so the refusal further down is
+		// proven on every platform — by the dev/ino binding where exposed,
+		// and by the every-platform size+mtime comparator (pointed back at
+		// the staged input) where it is not.
+		if _, _, ok := restoreSourceIdentity(info); ok {
+			require.True(t, provenance.hasDevIno, "OsFs stat carries kernel identity")
+		} else {
+			require.False(t, provenance.hasDevIno, "this platform's OsFs stat exposes no dev/ino — size+mtime carries the refusal")
+		}
 
 		require.NoError(t, os.Rename(staged, staged+".hidden"))
 		require.NoError(t, os.WriteFile(staged, []byte("VALID-DATA!"), 0o600))

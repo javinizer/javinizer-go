@@ -724,11 +724,26 @@ func TestStartDownload_NilHTTPClient(t *testing.T) {
 	h.startDownload(c)
 	require.Equal(t, http.StatusAccepted, w.Code)
 
-	require.Eventually(t, func() bool {
+	// The nil client forces the production fallback `&http.Client{}` (the
+	// branch under coverage): its first request pays the process-wide
+	// default transport's setup, which on windows CI runners (system proxy
+	// detection, AV-scanned temp IO) lands seconds beyond the other tests'
+	// warmed srv.Client() pipelines — the import finished ~2s PAST the old
+	// 10s polling window in CI (pre-existing platform timing, no retry
+	// layer is involved). Poll generously, and JOIN the async download
+	// before any failure return: require.Eventually's FailNow would
+	// otherwise skip <-h.done and abandon the import mid-flight with the
+	// dump .tmp file still open — on windows the locked file then fails
+	// t.TempDir cleanup ("being used by another process") as a second
+	// failure. Asserting the flag AFTER the join keeps the dump-DB
+	// expectation unchanged while the cleanup path never races a leftover.
+	created := assert.Eventually(t, func() bool {
 		_, err := os.Stat(dumpPath)
 		return err == nil
-	}, 10*time.Second, 100*time.Millisecond, "dump DB should be created")
+	}, 60*time.Second, 100*time.Millisecond, "dump DB should be created")
 	<-h.done
+	_ = os.Remove(dumpPath + ".tmp") // handler best-effort already removes it
+	require.True(t, created, "dump DB should be created")
 }
 
 func TestStartDownload_ImportError(t *testing.T) {

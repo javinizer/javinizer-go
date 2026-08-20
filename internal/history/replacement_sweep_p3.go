@@ -619,6 +619,14 @@ func (s *ReplacementSweeper) Sweep(ctx context.Context) (int, error) {
 		if rdErr != nil {
 			continue
 		}
+		// Wave-46 (codex P2): recheck cancellation the moment a stalled
+		// ReadDir returns. The wave-8 bounded sweep abandons its goroutine
+		// at the deadline: entries a post-deadline ReadDir surfaces must
+		// NEVER feed sweepOne, whose busy-marker claims would collide with
+		// the revert that already continued (ErrReplacementBusy).
+		if err := ctx.Err(); err != nil {
+			return healed, err
+		}
 		for _, e := range entries {
 			if e.IsDir() || !IsReplacementBackupName(e.Name()) {
 				continue
@@ -660,6 +668,11 @@ func (s *ReplacementSweeper) SweepDirs(ctx context.Context, dirs []string) (int,
 		entries, rdErr := afero.ReadDir(s.fs, filepath.FromSlash(cleaned))
 		if rdErr != nil {
 			continue
+		}
+		// Wave-46 (codex P2): same post-ReadDir cancellation gate as Sweep —
+		// an abandoned post-deadline scan processes NOTHING from this dir.
+		if err := ctx.Err(); err != nil {
+			return healed, err
 		}
 		for _, e := range entries {
 			if e.IsDir() || !IsReplacementBackupName(e.Name()) {
@@ -716,6 +729,12 @@ func (s *ReplacementSweeper) SweepDestinations(ctx context.Context, destinations
 		if rdErr != nil {
 			continue
 		}
+		// Wave-46 (codex P2): this targeted scan feeds the reverter's wave-8
+		// goroutine discipline directly — a ReadDir answering past the
+		// deadline is already abandoned, so recheck before any arbitration.
+		if err := ctx.Err(); err != nil {
+			return healed, err
+		}
 		for _, e := range entries {
 			if e.IsDir() || !IsReplacementBackupName(e.Name()) {
 				continue
@@ -752,6 +771,16 @@ func (s *ReplacementSweeper) SweepDestinations(ctx context.Context, destinations
 
 // sweepOne arbitrates one ownership-marker backup file.
 func (s *ReplacementSweeper) sweepOne(ctx context.Context, idx *replacementLedgerIndex, dirSlash string, e os.FileInfo) int {
+	// Wave-46 (codex P2): an abandoned post-deadline sweep is a STRICT
+	// no-op. Without this gate a sweep whose ctx died mid-scan (the wave-8
+	// bounded goroutine outliving its budget) would claim the
+	// destination's .dlbusy marker — and journal ops — for a restore
+	// nobody waits on, colliding with the revert that already continued at
+	// the deadline (ErrReplacementBusy). The gate precedes EVERY busy
+	// claim and journal operation below.
+	if err := ctx.Err(); err != nil {
+		return 0
+	}
 	backup := filepath.FromSlash(dirSlash + "/" + e.Name())
 	// Journal comparisons run under the probe-aware key (separator normalization
 	// plus conditional case folding); actual fs paths keep their recorded case.
