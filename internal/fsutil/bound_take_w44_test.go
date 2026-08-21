@@ -13,8 +13,11 @@ package fsutil
 // joined when a racer holds the name).
 //
 // ".vac." Stat ordinals inside ONE Unlink call (claim-handle Stats bypass
-// the wrappers): #1 = terminal-claim release verify, #2 = the no-replace
-// vacate's classification, #3 = the post-vacate identity re-bind.
+// the wrappers): #1 = terminal-claim release verify, #2 = the release's
+// unlink-adjacent re-proof (wave-58 dual-reproof), #3 = the no-replace
+// vacate's classification, #4 = the post-vacate identity re-bind. Windows
+// that must survive further ordinal shifts are scripted STRUCTURALLY (see
+// the wave-43 doubles), not by counting lookups.
 
 import (
 	"errors"
@@ -104,12 +107,13 @@ func TestTakeAsideW44_UnlinkTerminalLegs(t *testing.T) {
 	t.Run("indeterminate terminal lookup rewinds onto the scratch", func(t *testing.T) {
 		base, _, scratch, hold := newHold(t, "/out/w44-vacindet")
 		sentinel := errors.New("w44 terminal lstat wedged")
-		fs := &w43FailNthVacStatFs{Fs: base, n: 3, err: sentinel}
+		fs := &w43FailPostVacateLookupFs{Fs: base, err: sentinel}
 		whold := &BoundAside{fs: fs, scratch: scratch, held: hold.held, moved: true}
 
 		err := whold.Unlink()
-		require.ErrorIs(t, err, sentinel)
-		require.ErrorContains(t, err, "inspect the bound unlink's terminal object")
+		require.ErrorIs(t, err, sentinel,
+			"the indeterminate answer at the terminal identity re-bind refuses typed — the wrap text rides the wave-58 release's own arming, so only the class is pinned")
+		require.True(t, fs.done, "the wedge fired at the post-vacate binding instant, not inside the release's own proofs")
 		require.NotErrorIs(t, err, ErrTakeAsideRestoreFailed, "the rewind landed on the free scratch")
 		require.Equal(t, "journal bytes", string(w38Read(t, base, scratch)),
 			"the unproven object rewound onto the pre-Unlink name — nothing deleted on doubt")
@@ -152,7 +156,7 @@ func TestTakeAsideW44_UnlinkVacatePublishLegs(t *testing.T) {
 	t.Run("collision at the fresh terminal name retains everything typed", func(t *testing.T) {
 		base, _, scratch, hold := newHold(t, "/out/w44-vaccoll")
 		plant := []byte("racer owning the fresh terminal draw")
-		fs := &w43PlantOnVacateClassifyFs{Fs: base, plant: plant}
+		fs := &w43PlantAfterVacReleaseFs{Fs: base, plant: plant}
 		whold := &BoundAside{fs: fs, scratch: scratch, held: hold.held, moved: true}
 
 		err := whold.Unlink()

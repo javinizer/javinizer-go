@@ -230,6 +230,22 @@ func releaseTakeAsideVacClaim(fs afero.Fs, vacName string, vacClaim os.FileInfo)
 	case !asideSameObject(cur, vacClaim):
 		return fmt.Errorf("take-aside vacated claim %s no longer names our claimed placeholder — foreign bytes preserved: %w", vacName, ErrTakeAsideForeign)
 	}
+	// Codex P2 (wave-58): the claim's OWN check-then-Remove window is closed
+	// by re-verifying the freshly claimed name against the recorded claim
+	// identity at syscall adjacency to the unlink (asideLstat's facts are
+	// captured at the head of this call — the re-prove below pins it again
+	// immediately before the destructive syscall so a swap in that narrow
+	// interval is preserved and refused).
+	repro, rerr2 := asideLstat(fs, vacName)
+	if rerr2 != nil {
+		if os.IsNotExist(rerr2) {
+			return nil
+		}
+		return fmt.Errorf("re-prove the vacated claim %s before its unlink: %w", vacName, rerr2)
+	}
+	if !asideSameObject(repro, vacClaim) || !asideSameObject(repro, cur) {
+		return fmt.Errorf("take-aside vacated claim %s changed identity between the proof and the unlink — foreign bytes preserved: %w", vacName, ErrTakeAsideForeign)
+	}
 	if rerr := fs.Remove(vacName); rerr != nil && !os.IsNotExist(rerr) {
 		return fmt.Errorf("remove the take-aside vacated claim %s (verified ours): %w", vacName, rerr)
 	}
