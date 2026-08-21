@@ -221,6 +221,14 @@ func claimTakeAsideVacName(fs afero.Fs, scratch string) (string, os.FileInfo, er
 // stays claimed at the scratch name, the caller's src untouched); a wedged
 // unlink refuses likewise with our own placeholder retained.
 func releaseTakeAsideVacClaim(fs afero.Fs, vacName string, vacClaim os.FileInfo) error {
+	// Codex P2 (wave-58): the vacated claim's own verify-then-remove window
+	// is closed by re-binding the vacated name twice at syscall adjacency —
+	// the fresh proof must equal BOTH the claim record and the head-of-call
+	// proof — before the terminal unlink. A swap in any narrow interval
+	// preserves the occupant byte-intact (typed refusal). This is the exact
+	// converse of Unlink's internal chain (which calls back into this
+	// helper); the release terminal CANNOT ride Unlink or the recursion
+	// would never bottom out.
 	cur, lerr := asideLstat(fs, vacName)
 	switch {
 	case os.IsNotExist(lerr):
@@ -230,24 +238,18 @@ func releaseTakeAsideVacClaim(fs afero.Fs, vacName string, vacClaim os.FileInfo)
 	case !asideSameObject(cur, vacClaim):
 		return fmt.Errorf("take-aside vacated claim %s no longer names our claimed placeholder — foreign bytes preserved: %w", vacName, ErrTakeAsideForeign)
 	}
-	// Codex P2 (wave-58): the claim's OWN check-then-Remove window is closed
-	// by re-verifying the freshly claimed name against the recorded claim
-	// identity at syscall adjacency to the unlink (asideLstat's facts are
-	// captured at the head of this call — the re-prove below pins it again
-	// immediately before the destructive syscall so a swap in that narrow
-	// interval is preserved and refused).
-	repro, rerr2 := asideLstat(fs, vacName)
-	if rerr2 != nil {
-		if os.IsNotExist(rerr2) {
+	repro, rerr := asideLstat(fs, vacName)
+	if rerr != nil {
+		if os.IsNotExist(rerr) {
 			return nil
 		}
-		return fmt.Errorf("re-prove the vacated claim %s before its unlink: %w", vacName, rerr2)
+		return fmt.Errorf("re-prove the vacated claim %s before its unlink: %w", vacName, rerr)
 	}
 	if !asideSameObject(repro, vacClaim) || !asideSameObject(repro, cur) {
 		return fmt.Errorf("take-aside vacated claim %s changed identity between the proof and the unlink — foreign bytes preserved: %w", vacName, ErrTakeAsideForeign)
 	}
 	if rerr := fs.Remove(vacName); rerr != nil && !os.IsNotExist(rerr) {
-		return fmt.Errorf("remove the take-aside vacated claim %s (verified ours): %w", vacName, rerr)
+		return fmt.Errorf("remove the take-aside vacated claim %s (verified ours twice at syscall adjacency): %w", vacName, rerr)
 	}
 	return nil
 }
