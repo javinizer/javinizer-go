@@ -618,12 +618,20 @@ func replacementBusyClaimReleaseScratch(fs afero.Fs, path string) (string, os.Fi
 		case rerr == nil:
 			info, serr := reservation.Stat()
 			if serr != nil {
+				// Codex P2 (r21): with no identity read there is nothing to
+				// authenticate — the claim's own name may already be foreign, so
+				// the occupant stays for manual cleanup (never a blind pathname unlink).
 				_ = reservation.Close()
-				_ = fs.Remove(candidate)
+				logging.Warnf("replacement busy release reservation %s retained — identity unproven on claim (%v); manual cleanup advised", candidate, serr)
 				return "", nil, fmt.Errorf("stat release take-aside reservation %s: %w", candidate, serr)
 			}
 			if cerr := reservation.Close(); cerr != nil {
-				_ = fs.Remove(candidate)
+				// Codex P2 (r21): bind the cleanup to the captured claim identity
+				// — SameFile reproof at adjacency to the unlink; a swapped
+				// occupant is preserved.
+				if relErr := releaseClaimedBusyObject(fs, candidate, info); relErr != nil {
+					logging.Warnf("replacement busy release reservation %s retained — failed close and bound cleanup refused (%v); manual cleanup advised", candidate, relErr)
+				}
 				return "", nil, fmt.Errorf("close release take-aside reservation %s: %w", candidate, cerr)
 			}
 			return candidate, info, nil
