@@ -164,18 +164,21 @@ func (f w53OpenFileFailFs) OpenFile(name string, flags int, perm os.FileMode) (a
 	return nil, errors.New("w53 candidate open wedge")
 }
 
-func TestPromotePosterCandidateW53_DegradedRecordedOnlyPosturePublishesByName(t *testing.T) {
+func TestPromotePosterCandidateW53_DegradedRecordedOnlyPostureRefused(t *testing.T) {
 	fs, candidate, dest := w53StageCandidate(t, "cropped candidate")
 	// Wrap so the promote's bindCandidateProvenance degrades: Lstat succeeds
-	// (known identity) but the no-follow re-open fails (no handle) — the
-	// wave-47 plain no-replace publish residual.
+	// (known identity) but the no-follow re-open fails (no handle). Wave-54
+	// (finding 3) refuses typed instead of publishing by mutation of a merely-
+	// recorded pathname — the candidate is preserved byte-intact, the
+	// destination untouched (the re-acquire bind also fails the re-open).
 	degraded := w53OpenFileFailFs{Fs: fs}
 	outcome, err := promotePosterCandidateNoReplace(degraded, candidate, dest)
-	require.NoError(t, err)
-	require.Equal(t, promotePosterCandidateSucceeded, outcome, "the degraded leg publishes by name into proven absence")
-	got, rerr := os.ReadFile(dest)
-	require.NoError(t, rerr)
-	require.Equal(t, "cropped candidate", string(got))
+	require.ErrorIs(t, err, errStagedInputSubstituted, "the degraded leg re-acquires or refuses — never publishes by name")
+	require.Equal(t, promotePosterCandidateRetained, outcome)
+	_, rerr := os.ReadFile(dest)
+	require.Error(t, rerr, "the destination is untouched — nothing published by name")
+	got, _ := os.ReadFile(candidate)
+	require.Equal(t, "cropped candidate", string(got), "the candidate is preserved byte-intact")
 }
 
 // TestDownloadPosterW53_PromoteSubstitutionRetainsCandidate covers the

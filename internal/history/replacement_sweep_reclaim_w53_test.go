@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/javinizer/javinizer-go/internal/fsutil"
+	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 )
 
@@ -75,4 +77,28 @@ func TestSweepBusyClaimW53_WaitReleasedTimesOut(t *testing.T) {
 	defer untrack()
 	require.False(t, claim.waitReleased(), "no release signal → bounded grace timeout returns false")
 	require.False(t, claim.released.Load())
+}
+
+// Wave-54 (codex P1, PR#215 finding 1): a worker wedged past the ack bound
+// keeps the on-disk marker write-protective (nothing else acquires it); the
+// reverter's consult reclaims the dest lock (in-process) but leaves the
+// marker, then proceeds graced under the dest lock — the tombstone releases
+// the acquirer's busy leg. The worker self-releases when it wakes and gates.
+func TestReverterW54_GracedMarkerHeldRevertProceeds(t *testing.T) {
+	base := afero.NewMemMapFs()
+	repo := newP3OpRepo()
+	op, dest, _ := seedCrashWindow(t, base, repo, "job-w54", "GRD-001", "/w54", p3HexA)
+	busyRelease, err := fsutil.AcquireReplacementBusy(base, dest)
+	require.NoError(t, err)
+	defer busyRelease() // the worker self-releases when it wakes and gates
+	sweepCtx, cancel := context.WithCancel(context.Background())
+	_, untrack := recordSweepBusyClaim(sweepCtx, dest, busyRelease)
+	defer untrack()
+	cancel() // the sweep's deadline fired; the worker is stranded (never acks)
+	restored, rerr := NewReverter(base, repo).restoreReplacementJournal(context.Background(), op)
+	require.NoError(t, rerr, "the reverter proceeds graced under the dest lock")
+	require.True(t, restored[dest], "the restore completed despite the held marker")
+	require.True(t, sweepBusyClaims.markerGraced(dest), "the marker is graced (held, not released)")
+	exists, _ := afero.Exists(base, fsutil.ReplacementBusyPath(dest))
+	require.True(t, exists, "the marker stays write-protective until the worker self-releases")
 }

@@ -222,7 +222,7 @@ func (c *sweepBusyMarkerClaim) releaseDestLock() {
 // the holds are freed anyway (the small residual race is accepted over an
 // unbounded reverter block that would defeat the sweep bound the reclaim
 // exists to heal). Tests shorten this through swapReclaimTimers.
-var sweepReclaimWorkerAckBound = 200 * time.Millisecond
+var sweepReclaimWorkerAckBound = 2 * time.Second
 
 // sweepReclaimWorkerAckPoll is the worker-ack polling interval.
 var sweepReclaimWorkerAckPoll = 25 * time.Millisecond
@@ -278,25 +278,13 @@ func (c *sweepBusyMarkerClaim) waitReleased() bool {
 	}
 }
 
-// releaseForReclaim frees EVERYTHING bound to the claim — the destination
-// lock FIRST (wave-50, F1: a keyed-registry release is purely in-process and
-// can never wedge on the stranded filesystem, so it must be freed even when
-// the marker release wedges), then the marker's once-guarded, token-bound
-// take-aside release (wave-38; a wedged unlink leaves only the inert scratch
-// sibling behind — the established wave-49 posture). Wave-52: the reclaimed
-// flag is latched under the claim mutex BEFORE either release fires, so a
-// dest-lock wait completing during (or after) the reclaim reads false from
-// bindDestLock and self-releases instead of double-tracking the cell.
-// Wave-53 (findings 1+4): BEFORE freeing either hold the function waits a
-// BOUNDED grace for the stranded worker to acknowledge the revocation
-// (waitWorkerAck) — the worker acks at its next abandonIfRevoked gate, so a
-// worker parked past a gate's syscall gets there before the holds free and
-// the reverter mutates; a wedge parks it inside an uninterruptible fs call and
-// the bound expires. The whole release runs in a goroutine detached by reclaim
-// so the reverter never blocks on the marker's take-aside fs work, and the
-// released flag signals the reverter's bounded grace.
+// releaseForReclaim frees the dest lock FIRST (in-process, can never wedge),
+// then the marker's once-guarded take-aside release (wave-38/49/50/52 posture).
+// Wave-54 (finding 1): the dest lock is freed BEFORE the bounded worker-ack
+// wait; the on-disk marker is freed ONLY after the worker acknowledges — a
+// wedged worker keeps it write-protective until it wakes and self-releases,
+// while the reverter proceeds graced (markerGraced). Detached by reclaim.
 func (c *sweepBusyMarkerClaim) releaseForReclaim() {
-	c.waitWorkerAck() // wave-53, finding 1: bounded worker-ack before freeing the holds
 	c.mu.Lock()
 	c.reclaimed = true
 	destRelease := c.destRelease
@@ -304,7 +292,9 @@ func (c *sweepBusyMarkerClaim) releaseForReclaim() {
 	if destRelease != nil {
 		destRelease()
 	}
-	c.release()
+	if c.waitWorkerAck() { // wave-54, finding 1: free the marker ONLY after the worker acks
+		c.release()
+	}
 	c.released.Store(true) // wave-53, finding 4: signal the detached releases completed
 }
 
@@ -315,18 +305,24 @@ func (c *sweepBusyMarkerClaim) releaseForReclaim() {
 // (transient failure vs definitive recovery between record and reclaim) can
 // never split one claim across two keys. DestKeyResolver caches postures in a
 // plain map, hence the mutex-scoped derivations. The epoch counter (wave-51)
-// issues each claim's monotonic epoch under the same mutex.
+// issues each claim's monotonic epoch under the same mutex. Wave-54 (finding 1):
+// a reclaimed-but-unreleased claim lives on as a TOMBSTONE so the reverter's
+// marker-busy consult can grace the revert past a wedged worker (the marker
+// stays write-protective until the worker wakes and self-releases; untrack drops it).
 type sweepBusyClaimLedger struct {
-	mu       sync.Mutex
-	resolver *fsutil.DestKeyResolver
-	byDest   map[string]*sweepBusyMarkerClaim
-	epoch    uint64
+	mu         sync.Mutex
+	resolver   *fsutil.DestKeyResolver
+	byDest     map[string]*sweepBusyMarkerClaim
+	tombstones map[string]*sweepBusyMarkerClaim
+
+	epoch uint64
 }
 
 func newSweepBusyClaimLedger() *sweepBusyClaimLedger {
 	return &sweepBusyClaimLedger{
-		resolver: fsutil.NewDestKeyResolver(),
-		byDest:   make(map[string]*sweepBusyMarkerClaim),
+		resolver:   fsutil.NewDestKeyResolver(),
+		byDest:     make(map[string]*sweepBusyMarkerClaim),
+		tombstones: make(map[string]*sweepBusyMarkerClaim),
 	}
 }
 
@@ -365,6 +361,9 @@ func (l *sweepBusyClaimLedger) record(ctx context.Context, dest string, release 
 		if l.byDest[key] == rec {
 			delete(l.byDest, key)
 		}
+		if l.tombstones[key] == rec {
+			delete(l.tombstones, key)
+		}
 		l.mu.Unlock()
 	}
 }
@@ -396,6 +395,7 @@ func (l *sweepBusyClaimLedger) reclaim(dest string) bool {
 		return false
 	}
 	delete(l.byDest, key)
+	l.tombstones[key] = rec
 	// Wave-51: flip the claim's OWN revocation flag under the ledger mutex and
 	// ONLY THEN fire the releases — the stranded claimant must read "revoked"
 	// at its mutation gates from the instant the freed arbitration lets the
@@ -415,4 +415,15 @@ func (l *sweepBusyClaimLedger) reclaim(dest string) bool {
 	go rec.releaseForReclaim()
 	rec.waitReleased()
 	return true
+}
+
+// markerGraced reports whether dest carries a revoked-but-unreleased tombstone
+// whose marker is still held (wave-54, finding 1). Called by the reverter only
+// after waitReleased settled the ack outcome: a tombstone here means the worker
+// never acked within the bound — the reverter proceeds graced under the dest lock.
+func (l *sweepBusyClaimLedger) markerGraced(dest string) bool {
+	l.mu.Lock()
+	_, ok := l.tombstones[l.resolver.Key(dest)]
+	l.mu.Unlock()
+	return ok
 }

@@ -823,6 +823,13 @@ func bindCandidateProvenance(fsys afero.Fs, candidate string) (stagedInstallProv
 		_ = handle.Close()
 		return provenance, nil //nolint:nilerr // intentional degrade: identity known from Lstat, no handle (fstat failed)
 	}
+	// Wave-54 (finding 2): the no-follow open + fstat MUST equal the 1st Lstat
+	// snapshot — a racer substituting the candidate before the open publishes
+	// the substitute. Mismatch → typed refusal, substitute preserved, nothing installed.
+	if provenance.identity.known && !identityInfoMatchesRecord(info, provenance.identity) {
+		_ = handle.Close()
+		return stagedInstallProvenance{}, fmt.Errorf("candidate %s no longer names the Lstat-verified object at the no-follow open (fd fstat ≠ 1st snapshot; foreign substitution mid-window) — substitute preserved byte-intact, nothing installed: %w", candidate, errStagedInputSubstituted)
+	}
 	provenance.identity = installedIdentityFromFileInfo(info)
 	provenance.handle = handle
 	return provenance, nil

@@ -49,6 +49,7 @@ func TestRestoreReplacementJournalW50_ReclaimsAbandonedSweepDestLock(t *testing.
 	// only AFTER the budget is spent, so the record is already ctx-done when
 	// the revert consults the ledger.
 	sweepCancel()
+	claim.workerAcked.Add(1) // the stranded worker reached a revocation gate (wave-54)
 
 	// The continued revert must proceed: its pre-acquisition reclaim consult
 	// frees the bound dest lock FIRST and the marker second, and the restore
@@ -154,12 +155,14 @@ func TestRestoreReplacementJournalW50_LateRecordedClaimReclaimedByBusyLeg(t *tes
 	t.Cleanup(func() { preDestLockConsultHook = prevHook })
 	hooked := false
 	var untrack func()
+	var lateClaim *sweepBusyMarkerClaim
 	preDestLockConsultHook = func(d string) {
 		if d != dest || hooked {
 			return
 		}
 		hooked = true
-		_, untrack = recordSweepBusyClaim(sweepCtx, dest, sweepRelease)
+		lateClaim, untrack = recordSweepBusyClaim(sweepCtx, dest, sweepRelease)
+		lateClaim.workerAcked.Add(1) // the stranded worker reached a revocation gate (wave-54)
 	}
 
 	restored, err := NewReverter(fixture.fs, fixture.repo).restoreReplacementJournal(context.Background(), op)
@@ -192,7 +195,8 @@ func TestSweepBusyClaimW50_RecordBindsBothArbitrationHolds(t *testing.T) {
 
 	require.False(t, reclaimAbandonedSweepBusyMarker(dest), "a live claim is never reclaimed")
 
-	cancel() // the deadline fired; the goroutine is stranded mid-op
+	cancel()                 // the deadline fired; the goroutine is stranded mid-op
+	claim.workerAcked.Add(1) // the stranded worker reached a revocation gate (wave-54)
 	require.True(t, reclaimAbandonedSweepBusyMarker(dest),
 		"the abandoned claim is reclaimed through its bound releases")
 	busyGone, err := afero.Exists(fs, fsutil.ReplacementBusyPath(dest))
@@ -254,10 +258,11 @@ func TestSweepBusyClaimW50_FrozenKeySurvivesProbeDrift(t *testing.T) {
 
 	releaseCount := 0
 	ctx, cancel := context.WithCancel(context.Background())
-	_, untrack := ledger.record(ctx, dest, func() { releaseCount++ })
+	rec, untrack := ledger.record(ctx, dest, func() { releaseCount++ })
 	require.Equal(t, 1, probeCalls, "the record derives its key under the first (failing) probe")
 
-	cancel() // the sweep is abandoned at the deadline
+	cancel()               // the sweep is abandoned at the deadline
+	rec.workerAcked.Add(1) // the stranded worker reached a revocation gate (wave-54)
 	require.True(t, ledger.reclaim(dest),
 		"the frozen record key survives the probe drift — the reclaim finds the abandoned claim")
 	require.Equal(t, 1, releaseCount, "the recorded release ran exactly once")

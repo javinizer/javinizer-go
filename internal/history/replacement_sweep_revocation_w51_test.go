@@ -134,7 +134,8 @@ func TestSweepBusyClaimW51_RevocationOrdering(t *testing.T) {
 	require.False(t, ledger.reclaim(dest), "a live sweep's record is never reclaimed")
 	require.False(t, rec2.isRevoked(), "a live claim is never revoked")
 
-	cancelB() // the deadline fired; the goroutine is stranded mid-op
+	cancelB()               // the deadline fired; the goroutine is stranded mid-op
+	rec2.workerAcked.Add(1) // the stranded worker reached a revocation gate (wave-54)
 	require.True(t, ledger.reclaim(dest))
 	require.True(t, rec2.isRevoked(), "the reclaim set the revocation flag")
 	require.True(t, releaseObservedRevoked,
@@ -184,7 +185,7 @@ func TestSweepW51_StrandedResumeAfterRevokeStopsAtPublishGate(t *testing.T) {
 	require.True(t, reclaimAbandonedSweepBusyMarker(dest), "the continued revert reclaims the stranded claim")
 	markerExists, err := afero.Exists(base, filepath.ToSlash(fsutil.ReplacementBusyPath(dest)))
 	require.NoError(t, err)
-	require.False(t, markerExists, "the reclaim freed the busy marker")
+	require.True(t, markerExists, "wave-54: the marker stays write-protective until the worker acks/releases")
 
 	close(fs.release) // the wedged filesystem finally answers
 	require.Equal(t, 0, <-healed, "a revoked claim heals nothing")

@@ -138,6 +138,7 @@ func TestSweepBusyClaimW52_PendingDestLockCell(t *testing.T) {
 		require.True(t, rec.bindDestLock(fire("lock")), "an unreclaimed cell accepts the bind")
 		require.False(t, ledger.reclaim(dest), "a live claim never reclaims")
 		cancel()
+		rec.workerAcked.Add(1) // the stranded worker reached a revocation gate (wave-54)
 		require.True(t, ledger.reclaim(dest))
 		mu.Lock()
 		require.Equal(t, []string{"lock", "marker"}, order, "dest-lock release precedes the marker release")
@@ -157,6 +158,7 @@ func TestSweepBusyClaimW52_PendingDestLockCell(t *testing.T) {
 		rec, untrack := ledger.record(ctx, dest, func() { markerFired++ })
 		rec.releaseDestLock() // empty cell — a no-op while the wait is in flight
 		cancel()
+		rec.workerAcked.Add(1) // the stranded worker reached a revocation gate (wave-54)
 		require.True(t, ledger.reclaim(dest), "the mid-wait claim reclaims against the empty cell")
 		require.Equal(t, 1, markerFired)
 		require.False(t, rec.bindDestLock(func() { lockFired++ }),
@@ -220,7 +222,7 @@ func TestSweepOneW52_LedgerSeesClaimDuringDestLockWait(t *testing.T) {
 		"the ledger consult sees the claim DURING the dest-lock wait — register-before-wait")
 	markerExists, err := afero.Exists(base, filepath.ToSlash(fsutil.ReplacementBusyPath(dest)))
 	require.NoError(t, err)
-	require.False(t, markerExists, "the reclaim freed the marker while the worker still waited")
+	require.True(t, markerExists, "wave-54: the marker stays write-protective until the worker acks/releases")
 
 	holdRelease() // the dest-lock wait finally completes — stranded side
 	require.Equal(t, 0, <-healed, "a claim reclaimed during the wait abandons immediately")
@@ -847,6 +849,7 @@ func TestReverterW52_ConsumeBetweenReclaimAndFreshReadSkips(t *testing.T) {
 	sweepCancel() // the wave-8 deadline already fired
 	claim, untrack := recordSweepBusyClaim(sweepCtx, dest, sweepRelease)
 	require.True(t, claim.bindDestLock(fsutil.SharedDestLocks().Acquire(dest)))
+	claim.workerAcked.Add(1) // the stranded worker reached a revocation gate (wave-54)
 	defer claim.releaseDestLock()
 	defer sweepRelease()
 	defer untrack()

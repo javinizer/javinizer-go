@@ -81,7 +81,13 @@ func promotePosterCandidateNoReplace(fs afero.Fs, candidate, destPath string) (p
 		return promotePosterCandidateRetained, provErr
 	}
 	var rerr error
-	if prov.handle != nil {
+	if prov.handle == nil {
+		// Wave-54 (finding 3): a merely-recorded pathname is never published by
+		// mutation — the no-follow re-open failed, so the candidate is unproven;
+		// refuse typed (never publish unauthenticated by name), candidate preserved.
+		rerr = fmt.Errorf("candidate %s could not be bound to a publish handle (no-follow re-open failed) — never publish by mutation of a merely-recorded pathname: %w", candidate, errStagedInputSubstituted)
+	}
+	if rerr == nil {
 		// Bound publish: the candidate name re-proves itself against the
 		// handle's fd identity at publish adjacency; NoReplace=true keeps the
 		// racer's bytes byte-intact on collision. publishStagedBoundFn (the
@@ -102,11 +108,6 @@ func promotePosterCandidateNoReplace(fs afero.Fs, candidate, destPath string) (p
 		if rerr == nil {
 			rerr = pubErr // collision / completed / plain failure ride through verbatim
 		}
-	} else {
-		// Degraded (recorded-only) posture: the candidate opened/fstat'd
-		// cleanly enough for an identity snapshot but no handle rides — the
-		// plain no-replace publish keeps the wave-47 residual.
-		rerr = fsutil.PublishNoReplace(fs, candidate, destPath)
 	}
 	if rerr == nil {
 		return promotePosterCandidateSucceeded, nil

@@ -32,12 +32,13 @@ func TestSweepBusyClaimW49_ReclaimGatesOnAbandonment(t *testing.T) {
 	require.NoError(t, err)
 	liveCtx, liveCancel := context.WithCancel(context.Background())
 	t.Cleanup(liveCancel)
-	_, untrack := recordSweepBusyClaim(liveCtx, dest, release)
+	claim, untrack := recordSweepBusyClaim(liveCtx, dest, release)
 
 	require.False(t, reclaimAbandonedSweepBusyMarker(dest),
 		"a live sweep's marker is never reclaimed — someone still waits on it")
 
-	liveCancel() // the deadline fired; the goroutine is stranded mid-op
+	liveCancel()             // the deadline fired; the goroutine is stranded mid-op
+	claim.workerAcked.Add(1) // the stranded worker reached a revocation gate (wave-54)
 	require.True(t, reclaimAbandonedSweepBusyMarker(dest), "the abandoned sweep's claim is reclaimed")
 	busyGone, err := afero.Exists(fs, fsutil.ReplacementBusyPath(dest))
 	require.NoError(t, err)
@@ -89,7 +90,7 @@ func TestRestoreReplacementJournalW49_ReclaimsAbandonedSweepMarker(t *testing.T)
 	sweepRelease, err := fsutil.AcquireReplacementBusy(fixture.fs, dest)
 	require.NoError(t, err)
 	sweepCtx, sweepCancel := context.WithCancel(context.Background())
-	_, untrack := recordSweepBusyClaim(sweepCtx, dest, sweepRelease)
+	claim, untrack := recordSweepBusyClaim(sweepCtx, dest, sweepRelease)
 
 	// While the sweep is LIVE the revert keeps the ordinary busy refusal.
 	restored, err := NewReverter(fixture.fs, fixture.repo).restoreReplacementJournal(context.Background(), op)
@@ -101,6 +102,7 @@ func TestRestoreReplacementJournalW49_ReclaimsAbandonedSweepMarker(t *testing.T)
 	// The deadline proceeds with the revert: the sweep's ctx is done while it
 	// still owns the marker — the revert reclaims it and completes.
 	sweepCancel()
+	claim.workerAcked.Add(1) // the stranded worker reached a revocation gate (wave-54)
 	restored, err = NewReverter(fixture.fs, fixture.repo).restoreReplacementJournal(context.Background(), op)
 	require.NoError(t, err, "the abandoned sweep's marker no longer blocks the revert")
 	require.True(t, restored[dest])

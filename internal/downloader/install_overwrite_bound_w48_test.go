@@ -585,6 +585,34 @@ type w48StatFailFile struct{ afero.File }
 
 func (w48StatFailFile) Stat() (os.FileInfo, error) { return nil, errors.New("w48 fd stat wedge") }
 
+// w54SubstFs wraps an OpenFile result so the descriptor's Stat reports a
+// FOREIGN size (wave-54, finding 2): Lstat captures the real object, the
+// no-follow open + fstat diverges — a racer substituted the candidate inside
+// the Lstat→open window. bindCandidateProvenance must refuse typed.
+type w54SubstFs struct{ afero.Fs }
+
+func (f w54SubstFs) OpenFile(name string, flags int, perm os.FileMode) (afero.File, error) {
+	base, err := f.Fs.OpenFile(name, flags, perm)
+	if err != nil {
+		return nil, err
+	}
+	return w54SubstFile{File: base}, nil
+}
+
+type w54SubstFile struct{ afero.File }
+
+type w54SubstInfo struct{ os.FileInfo }
+
+func (w54SubstInfo) Size() int64 { return 9999 } // foreign size → fstat ≠ Lstat snapshot
+
+func (f w54SubstFile) Stat() (os.FileInfo, error) {
+	info, err := f.File.Stat()
+	if err != nil {
+		return nil, err
+	}
+	return w54SubstInfo{FileInfo: info}, nil
+}
+
 // Finding 6, media leg: downloadPoster's candidate binding hands an open fd
 // when the crop/write output opens cleanly, and degrades to the recorded-only
 // wave-47 posture (never a failure) when it does not.
@@ -640,6 +668,19 @@ func TestBindCandidateProvenanceW48(t *testing.T) {
 		require.ErrorIs(t, err, errCandidateProvenanceUnprobeable)
 		require.False(t, prov.identity.known, "nothing verifiable is handed down on the both-fail refusal")
 		require.Nil(t, prov.handle, "no handle is opened on the both-fail refusal")
+	})
+
+	// Wave-54 (codex P2, PR#215 finding 2): the no-follow open + fstat MUST
+	// equal the 1st Lstat snapshot — a racer substituting the candidate before
+	// the open publishes the substitute. A fstat that diverges (foreign size)
+	// is refused typed; the substitute is preserved, nothing installed.
+	t.Run("fstat diverges from the Lstat snapshot refuses typed", func(t *testing.T) {
+		fs := w54SubstFs{Fs: afero.NewMemMapFs()}
+		require.NoError(t, afero.WriteFile(fs, "/candidate", []byte("cropped"), 0o644))
+		prov, err := bindCandidateProvenance(fs, "/candidate")
+		require.ErrorIs(t, err, errStagedInputSubstituted)
+		require.False(t, prov.identity.known, "nothing verifiable is handed down on the substitution refusal")
+		require.Nil(t, prov.handle)
 	})
 }
 

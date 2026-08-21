@@ -28,7 +28,7 @@ func seedCrashWindow(t *testing.T, fs afero.Fs, repo *p3OpRepo, jobID, movieID, 
 	require.NoError(t, fs.MkdirAll(filepath.FromSlash(dir), 0o755))
 	writeSweepFile(t, fs, backup, "original-"+movieID, time.Hour)
 	op := journalRow(t, repo, jobID, movieID, dest, backup, 1, models.RevertStatusApplied)
-	return op, filepath.FromSlash(dest), filepath.FromSlash(backup)
+	return op, dest, backup
 }
 
 func requireLedgerReplacements(t *testing.T, repo *p3OpRepo, id uint) []models.ReplacementEntry {
