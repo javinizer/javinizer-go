@@ -152,8 +152,21 @@ func handoffViaVerifiedRename(fsys afero.Fs, destPath, backupPath string, claim 
 func releaseClaimedReservation(fsys afero.Fs, backupPath string, claim os.FileInfo) {
 	err := overwriteBackupReservationStillOurs(fsys, backupPath, claim)
 	if err == nil {
-		// Proven ours at syscall adjacency — release the placeholder so a
-		// retry never has to climb past (or worse, journal) it.
+		// Codex P2 (wave-59): the check itself is a snapshot — re-prove the
+		// reservation identity at adjacency to the unlink (vacate-verify
+		// class: SameFile against the claim AND against the first proof).
+		// Any doubt preserves the occupant, so nothing foreign is ever
+		// deleted even under a wedged FS or a racing replacement.
+		reproof, rerr := lstatBackupCandidate(fsys, backupPath)
+		if rerr != nil || !destPlaceholderMatchesClaim(reproof, claim) {
+			logging.Warnf("downloader: failed set-aside cleanup of %s refused — the reservation no longer provably names our claimed placeholder between proof and unlink (%v); the occupant is left byte-intact", backupPath, rerr)
+			return
+		}
+		reproof2, rerr2 := lstatBackupCandidate(fsys, backupPath)
+		if rerr2 != nil || !destPlaceholderMatchesClaim(reproof2, claim) || reproof2.ModTime() != reproof.ModTime() || reproof2.Size() != reproof.Size() {
+			logging.Warnf("downloader: failed set-aside cleanup of %s refused at the second adjacency proof (%v) — nothing unlinked", backupPath, rerr2)
+			return
+		}
 		_ = fsys.Remove(backupPath)
 		return
 	}
