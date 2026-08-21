@@ -58,6 +58,30 @@ var (
 		}
 		return os.SameFile(srcInfo, dstInfo), nil
 	}
+	// publishNoReplaceRemoveBound is the staged-source cleanup counterpart of
+	// publishNoReplaceRemove (codex P2, PR#215): the SameFile proof on src and
+	// the unlink remain separate syscalls unless we re-verify at adjacency.
+	// Two consecutive bound proofs pin the same inode; a swap between them or
+	// at the unlink is preserved byte-intact and refused typed. Wherever the
+	// filesystem refuses to expose identity (memfs) the seam's answer already
+	// is the record.
+	publishNoReplaceRemoveBound = func(src string, before os.FileInfo) error {
+		ok, verr := publishNoReplaceStagedVerify(src, before)
+		if verr != nil {
+			return verr
+		}
+		if !ok {
+			return fmt.Errorf("no-replace staged source %s no longer names the verified inode: %w", src, ErrTakeAsideForeign)
+		}
+		ok2, verr2 := publishNoReplaceStagedVerify(src, before)
+		if verr2 != nil {
+			return verr2
+		}
+		if !ok2 {
+			return fmt.Errorf("no-replace staged source %s changed identity between the bound proofs: %w", src, ErrTakeAsideForeign)
+		}
+		return publishNoReplaceRemove(src)
+	}
 	// publishNoReplaceStagedVerify re-proves — after a successful link(2),
 	// BEFORE the staged-source pathname unlink — that src still names the
 	// object that was linked (wave-33, codex local review round 3, PR#215
@@ -171,7 +195,7 @@ func publishNoReplaceFallback(src, dst string) error {
 	default:
 		return fmt.Errorf("no-replace publish %s -> %s: staged source no longer names the just-linked object (foreign swap or mutation in the link→cleanup window) — staged name left untouched: %w: %w", src, dst, ErrPublishNoReplaceStagedUnverified, ErrPublishCompleted)
 	}
-	if err := publishNoReplaceRemove(src); err != nil {
+	if err := publishNoReplaceRemoveBound(src, srcIdentity); err != nil {
 		// The destination link already carries the staged bytes; only the
 		// staged cleanup failed. Wave-32 (codex local review round 2, PR#215
 		// finding R3): the rollback unlink is BOUND to the just-linked inode —
