@@ -140,10 +140,14 @@ func claimRollbackQuarantineName(fsys afero.Fs, backup string) (string, os.FileI
 			info, serr := reservation.Stat()
 			if serr != nil {
 				// A reservation whose identity cannot even be read is in an
-				// unknown on-disk state — drop it rather than renaming over
-				// unverified bytes.
+				// unknown on-disk state. Wave-65 (codex P2, PR#215 finding F2,
+				// mirroring claimOverwriteBackupPath's wave-62 fix): the name's
+				// identity is UNPROVEN — between our O_EXCL create and now another
+				// writer may have replaced it, so unlinking the path could delete
+				// foreign bytes. Retain it for manual cleanup (the name stays
+				// claimed and visible; nothing here mutates on doubt).
 				_ = reservation.Close()
-				_ = fsys.Remove(candidate)
+				logging.Warnf("downloader: quarantine reservation %s left in place — its identity could not be proven (%v); manual cleanup advised", candidate, serr)
 				return "", nil, fmt.Errorf("stat quarantine reservation %s: %w", candidate, serr)
 			}
 			if cerr := reservation.Close(); cerr != nil {

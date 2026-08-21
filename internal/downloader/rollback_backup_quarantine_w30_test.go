@@ -28,6 +28,7 @@ package downloader
 // marker-failure both-cause log, and the joined unlink-failure routing).
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -40,6 +41,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/javinizer/javinizer-go/internal/fsutil"
+	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 )
 
@@ -178,19 +180,28 @@ func (f *w30QuarStatFailFs) OpenFile(name string, flag int, perm os.FileMode) (a
 }
 
 // The claim's reservation-Stat wedge: the unknown-state placeholder is
-// dropped and the claim fails closed before any move consideration.
-func TestRollbackBackupQuarantineW30_ReservationStatFailureDropsPlaceholder(t *testing.T) {
+// RETAINED (wave-65, finding F2 — mirroring claimOverwriteBackupPath's
+// wave-62 rule): the name's identity is UNPROVEN, so unlinking it could
+// delete foreign bytes another writer rotated onto it. The claim fails
+// closed before any move consideration; the placeholder stays claimed and
+// visible for manual cleanup.
+func TestRollbackBackupQuarantineW30_ReservationStatFailureRetainsPlaceholder(t *testing.T) {
 	base := afero.NewMemMapFs()
 	const backup = "/w30t/poster.jpg.dlbak.abcd"
 	w32RollbackBackup(t, base, backup, "old")
 	sentinel := errors.New("w30 quarantine reservation stat wedged")
 	fs := &w30QuarStatFailFs{Fs: base, err: sentinel}
 
+	var logs bytes.Buffer
+	restoreLog := logging.SetOutput(&logs)
+	defer restoreLog()
+
 	err := quarantineAndRemoveVerifiedRollbackBackup(fs, backup, nil, "w30 unit")
 	require.ErrorIs(t, err, sentinel)
 	require.Contains(t, err.Error(), "stat quarantine reservation")
 	require.Equal(t, "old", string(readW31(t, base, backup)))
-	require.Empty(t, w32RollbackQuarNames(t, base, "/w30t"), "the unknown-state placeholder was dropped")
+	require.Len(t, w32RollbackQuarNames(t, base, "/w30t"), 1, "the unproven placeholder is retained for manual cleanup — never unlinked on doubt")
+	require.Contains(t, logs.String(), "left in place", "the retained placeholder is warn-logged for manual cleanup")
 }
 
 // F2: the hold's move-back surfaces the classified failure bound to the

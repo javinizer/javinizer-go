@@ -167,20 +167,26 @@ func TestDownloadPosterW42_PublishCompletedBenignRecordsCreated(t *testing.T) {
 
 // (c) A plain install failure (nothing published, no ErrPublishCompleted)
 // keeps the pre-wave-42 leg: error surfaced, BOTH scratch names reaped, dest
-// absent — the completed-only gate never engages.
+// absent — the completed-only gate never engages. Run on the real OsFs so
+// the wave-65 identity probe matches (a read-only fd's close never re-stamps
+// the candidate the way afero's mem handle does) and both scratches reap
+// exactly as before; the MemMapFs re-stamp retain leg is covered by the
+// cov-w1b install-error test.
 func TestDownloadPosterW42_PlainInstallFailureStillReapsBothScratchNames(t *testing.T) {
 	server := serveTwoToneSource(t)
 
-	base := afero.NewMemMapFs()
+	base := afero.NewOsFs()
+	destDir := t.TempDir()
 	sentinel := errors.New("w42 publish wedged before landing")
 	fsW := &w15PublishWedgeFs{Fs: base}
 	movie := w42CropMovie("W42-PLAIN", server.URL+"/cover.jpg")
-	dest := w42ResolvePosterDest(NewDownloader(nil, base, w42CropPosterConfig(), nil), movie)
+	rd := NewDownloader(nil, base, w42CropPosterConfig(), nil)
+	dest := rd.pathResolver.ResolvePosterPath(movie, nil, true, rd.buildTemplateContext(movie, nil), destDir)
 	fsW.dest = dest
 	fsW.err = sentinel
 	d := NewDownloader(server.Client(), fsW, w42CropPosterConfig(), nil)
 
-	result, err := d.downloadPoster(context.Background(), movie, "/output", nil, true)
+	result, err := d.downloadPoster(context.Background(), movie, destDir, nil, true)
 	require.ErrorIs(t, err, sentinel)
 	require.False(t, result.Downloaded)
 	require.ErrorIs(t, result.Error, sentinel)
@@ -188,7 +194,7 @@ func TestDownloadPosterW42_PlainInstallFailureStillReapsBothScratchNames(t *test
 
 	_, statErr := base.Stat(dest)
 	require.ErrorIs(t, statErr, os.ErrNotExist, "nothing was published")
-	entries, readErr := afero.ReadDir(base, filepath.Dir(dest))
+	entries, readErr := os.ReadDir(destDir)
 	require.NoError(t, readErr)
 	require.Empty(t, entries, "plain failures keep the prior leg: full AND crop scratch names are reaped")
 }

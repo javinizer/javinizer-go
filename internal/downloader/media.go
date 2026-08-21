@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/spf13/afero"
+
 	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/imageutil"
 	"github.com/javinizer/javinizer-go/internal/logging"
@@ -112,10 +114,22 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 	// candidate is fullPath when no crop applied, cropPath when it did);
 	// every other scratch cleans exactly as before. Plain failures keep the
 	// prior cleanup (stagedRetained stays "").
+	// Wave-65 (codex P2, PR#215 finding F1): BOTH scratch defers are now
+	// identity-bound exactly like the wave-62 failed-install cleanup — the
+	// scratch FileInfo is captured at the write instant (fullPath right after
+	// the download; cropPath at the crop, or at the provenance bind's first
+	// no-follow Lstat in overwrite mode) and before removal the defer
+	// SameFile-probes the name still names that record; a foreign write
+	// rotated into the crop→cleanup window is preserved byte-intact for
+	// manual cleanup instead of being destroyed by a pathname Remove.
+	// stagedRetained's carve-outs still cover substitution / completed-publish
+	// detection (the candidate skip); the binding covers the non-retained
+	// scratch and the candidate on its plain-success/failure legs.
 	stagedRetained := ""
+	var fullIdentity installedDestIdentity
 	defer func() {
 		if stagedRetained != fullPath {
-			_ = d.fs.Remove(fullPath)
+			removeScratchIfStillOurs(d.fs, fullPath, fullIdentity, "downloaded")
 		}
 	}()
 
@@ -127,11 +141,13 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 		fullResult.Duration = time.Since(startTime)
 		return fullResult, err
 	}
+	fullIdentity = captureInstalledDestIdentity(d.fs, fullPath)
 
 	cropPath := uniqueTempPath(destPath, "crop.tmp")
+	var cropIdentity installedDestIdentity
 	defer func() {
 		if stagedRetained != cropPath {
-			_ = d.fs.Remove(cropPath)
+			removeScratchIfStillOurs(d.fs, cropPath, cropIdentity, "cropped")
 		}
 	}()
 
@@ -140,6 +156,9 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 	if geometryUsable && d.cropDownloadedPoster(fullPath, cropPath, bounds) {
 		candidate = cropPath
 		cropped = true
+		if !overwriteExisting {
+			cropIdentity = captureInstalledDestIdentity(d.fs, cropPath)
+		}
 	}
 	if !cropped && movie.Poster.ShouldCropPoster {
 		if err := imageutil.CropPosterFromCover(d.fs, fullPath, cropPath, d.config.MaxPosterHeight); err != nil {
@@ -151,6 +170,9 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 			return fullResult, fullResult.Error
 		}
 		candidate = cropPath
+		if !overwriteExisting {
+			cropIdentity = captureInstalledDestIdentity(d.fs, cropPath)
+		}
 	}
 
 	// Wave-47 (codex P2, PR#215 finding F1-media) as deepened by wave-48
@@ -188,6 +210,13 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 			fullResult.LocalPath = ""
 			fullResult.Duration = time.Since(startTime)
 			return fullResult, fullResult.Error
+		}
+		// Wave-65 (finding F1): the candidate's write-instant identity rides
+		// the bind's first no-follow Lstat (captured here, NOT at the crop
+		// site, so no extra Lstat precedes the bind the w47 substitution window
+		// replays against) and binds the matching scratch defer.
+		if candidate == cropPath {
+			cropIdentity = provenance.identity
 		}
 	}
 
@@ -343,6 +372,26 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 	d.finalizePosterResult(fullResult, destPath)
 	fullResult.Duration = time.Since(startTime)
 	return fullResult, nil
+}
+
+// removeScratchIfStillOurs is downloadPoster's wave-65 identity-bound scratch
+// cleanup (codex P2, PR#215 finding F1), mirroring http.go's wave-62
+// failed-install cleanup: remove the scratch name ONLY when it still provably
+// names the object the caller captured at the write instant (dev/inode when
+// exposed, then size + mtime). A foreign write rotated onto the name inside
+// the crop→cleanup window is preserved byte-intact for manual cleanup
+// instead of being destroyed by a pathname Remove. An unproven/unknown
+// identity (the write never completed, or the capture failed) retains too —
+// never unlink on doubt. A name that already vanished (ENOENT) is a silent
+// no-op.
+func removeScratchIfStillOurs(fs afero.Fs, path string, id installedDestIdentity, what string) {
+	if destStillHoldsInstalledObject(fs, path, id) {
+		_ = fs.Remove(path)
+		return
+	}
+	if _, lerr := lstatBackupCandidate(fs, path); !os.IsNotExist(lerr) {
+		logging.Warnf("downloadPoster: scratch name %s left in place — it no longer provably names the %s object (foreign substitution or indeterminate); preserved byte-intact for manual cleanup", path, what)
+	}
 }
 
 // finalizePosterResult points result at the promoted poster, or clears the
