@@ -54,7 +54,7 @@ func TestAcquireReplacementBusyW20A_AtomicTakeoverClaim(t *testing.T) {
 	require.NotNil(t, first.release)
 	require.ErrorIs(t, second.err, ErrReplacementBusy, "the rename loser must re-read the new live marker")
 	require.Nil(t, second.release)
-	require.Equal(t, int32(2), fs.renameCalls.Load(), "both claimants make one platform rename attempt")
+	require.Equal(t, int32(3), fs.renameCalls.Load(), "two platform takeover renames + the wave-59 bound-unlink vacate rename of the reclaimed takeover")
 
 	content, err := afero.ReadFile(base, path)
 	require.NoError(t, err)

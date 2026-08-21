@@ -251,7 +251,20 @@ func (d *Downloader) download(ctx context.Context, url, destPath string, mediaTy
 		return result, result.Error
 	}
 	if skipped {
-		_ = d.fs.Remove(tempPath)
+		// Wave-59 (codex P2, PR#215 finding F2): bind the skipped-download
+		// cleanup to the staged object — installOverwriting published nothing
+		// on skip, so tempPath still holds the downloaded bytes OR a foreign
+		// substitute swapped in after validation (the provenance handle is
+		// already closed by installOverwriting's bound-publish ownership, so
+		// the validation-time identity snapshot — the handle's never-mutable
+		// fstat — binds the cleanup). Remove ONLY when tempPath still provably
+		// names the validated object; a foreign occupant is preserved
+		// byte-intact for manual cleanup, never destroyed by a pathname Remove.
+		if destStillHoldsInstalledObject(d.fs, tempPath, provenance.identity) {
+			_ = d.fs.Remove(tempPath)
+		} else if _, lerr := lstatBackupCandidate(d.fs, tempPath); !os.IsNotExist(lerr) {
+			logging.Warnf("downloader: skipped install of %s left staged name %s in place — it no longer provably names the validated download (foreign substitution or indeterminate); preserved byte-intact for manual cleanup", destPath, tempPath)
+		}
 		result.Skipped = true
 		result.Downloaded = false
 		result.LocalPath = destPath // the preserved existing artwork

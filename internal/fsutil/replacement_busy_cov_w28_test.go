@@ -283,7 +283,10 @@ func TestReplacementBusyW28_ReturnTakeoverErrorBranches(t *testing.T) {
 	t.Run("quarantine remove", func(t *testing.T) {
 		base, path, takeover, content := newW28TakeoverFixture(t, true)
 		removeErr := errors.New("quarantine remove wedged")
-		fs := &w28RemoveFailureFs{Fs: base, takeoverPath: takeover, err: removeErr}
+		// Wave-59: releaseClaimedBusyObject delegates to the wave-44 bound
+		// unlink, so the terminal remove targets the fresh ".vac." name the
+		// vacate rename armed — w59TerminalRemoveFailFs learns that name.
+		fs := &w59TerminalRemoveFailFs{Fs: base, err: removeErr, fail: 1}
 		err := replacementBusyReturnTakeover(fs, path, takeover, content, w28TakeoverIdentity(t, base, takeover))
 		require.ErrorIs(t, err, removeErr)
 	})
@@ -450,19 +453,6 @@ func (f *w28FailureFile) Close() error {
 		return f.closeErr
 	}
 	return err
-}
-
-type w28RemoveFailureFs struct {
-	afero.Fs
-	takeoverPath string
-	err          error
-}
-
-func (f *w28RemoveFailureFs) Remove(name string) error {
-	if name == f.takeoverPath {
-		return f.err
-	}
-	return f.Fs.Remove(name)
 }
 
 func setW28DeadProbe(t *testing.T) {

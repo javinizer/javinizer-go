@@ -15,6 +15,8 @@ import (
 	"bytes"
 	"errors"
 	"os"
+	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/logging"
@@ -36,8 +38,10 @@ func (f *w17CloseFailFile) Close() error {
 
 // w17PlaceholderWedgeFs wedges the takeover-return close path: Close failure
 // on the marker placeholder, an optional restore (rename) failure for the
-// takeover→path leg, and an optional placeholder removal failure. Nil errors
-// delegate.
+// takeover→path leg, and an optional terminal-remove failure (wave-59: the
+// bound unlink removes the placeholder via a fresh ".vac." terminal name, so
+// the wedge arms that name through the vacate rename and fails its remove).
+// Nil errors delegate.
 type w17PlaceholderWedgeFs struct {
 	afero.Fs
 	path       string
@@ -45,6 +49,7 @@ type w17PlaceholderWedgeFs struct {
 	closeErr   error
 	restoreErr error
 	removeErr  error
+	armed      atomic.Value // string: the vacate-armed terminal name
 }
 
 func (f *w17PlaceholderWedgeFs) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
@@ -62,11 +67,15 @@ func (f *w17PlaceholderWedgeFs) Rename(oldpath, newpath string) error {
 	if f.restoreErr != nil && oldpath == f.takeover && newpath == f.path {
 		return f.restoreErr
 	}
-	return f.Fs.Rename(oldpath, newpath)
+	err := f.Fs.Rename(oldpath, newpath)
+	if err == nil && f.removeErr != nil && strings.Contains(newpath, ".vac.") {
+		f.armed.Store(newpath)
+	}
+	return err
 }
 
 func (f *w17PlaceholderWedgeFs) Remove(name string) error {
-	if f.removeErr != nil && name == f.path {
+	if f.removeErr != nil && name == f.armed.Load() {
 		return f.removeErr
 	}
 	return f.Fs.Remove(name)

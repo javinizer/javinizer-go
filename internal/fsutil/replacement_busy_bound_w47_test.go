@@ -77,9 +77,11 @@ func (f *w47StatWedgeFs) w47ConfirmFired(t *testing.T, what string) {
 	require.True(t, f.fired.Load(), "the wedge must have replayed %s", what)
 }
 
-// w47RacerOnRemoveFs installs a racer's marker at target immediately after a
-// successful Remove of it (the release→restore window of the takeover
-// return).
+// w47RacerOnRemoveFs installs a racer's marker at target immediately after
+// the wave-59 bound unlink's vacate rename frees it (the release→restore
+// window of the takeover return): the vacate Rename(target, ".vac.") moves
+// the placeholder off the name, and the racer claims the freed name before
+// the restore's no-replace publish can land.
 type w47RacerOnRemoveFs struct {
 	afero.Fs
 	target string
@@ -87,29 +89,12 @@ type w47RacerOnRemoveFs struct {
 	fired  atomic.Bool
 }
 
-func (f *w47RacerOnRemoveFs) Remove(name string) error {
-	if err := f.Fs.Remove(name); err != nil {
-		return err
+func (f *w47RacerOnRemoveFs) Rename(oldname, newname string) error {
+	err := f.Fs.Rename(oldname, newname)
+	if err == nil && oldname == f.target && strings.Contains(newname, ".vac.") && f.fired.CompareAndSwap(false, true) {
+		_ = afero.WriteFile(f.Fs, f.target, f.racer, 0o600)
 	}
-	if name == f.target && f.fired.CompareAndSwap(false, true) {
-		return afero.WriteFile(f.Fs, f.target, f.racer, 0o600)
-	}
-	return nil
-}
-
-// w47RemoveFailOnceFs fails the first matched Remove — the wedged-unlink leg.
-type w47RemoveFailOnceFs struct {
-	afero.Fs
-	target string
-	err    error
-	fired  atomic.Bool
-}
-
-func (f *w47RemoveFailOnceFs) Remove(name string) error {
-	if name == f.target && f.fired.CompareAndSwap(false, true) {
-		return f.err
-	}
-	return f.Fs.Remove(name)
+	return err
 }
 
 // w47ClaimWedgeFs drives AcquireReplacementBusy's claim legs: the O_EXCL
@@ -643,14 +628,12 @@ func (f *w47RefusalCloseFailFs) OpenFile(name string, flag int, perm os.FileMode
 	return file, nil
 }
 
-func (f *w47RefusalCloseFailFs) Remove(name string) error {
-	if err := f.Fs.Remove(name); err != nil {
-		return err
+func (f *w47RefusalCloseFailFs) Rename(oldname, newname string) error {
+	err := f.Fs.Rename(oldname, newname)
+	if err == nil && oldname == f.target && strings.Contains(newname, ".vac.") && f.raced.CompareAndSwap(false, true) {
+		_ = afero.WriteFile(f.Fs, f.target, f.racer, 0o600)
 	}
-	if name == f.target && f.raced.CompareAndSwap(false, true) {
-		return afero.WriteFile(f.Fs, f.target, f.racer, 0o600)
-	}
-	return nil
+	return err
 }
 
 type w47RefusalCloseFailFile struct {
@@ -713,7 +696,11 @@ func TestReplacementBusyW47_ReturnTakeoverWedgedReleaseQuarantines(t *testing.T)
 	require.NoError(t, afero.WriteFile(base, takeover, content, 0o600))
 
 	removeErr := errors.New("placeholder unlink wedged")
-	wedge := &w47RemoveFailOnceFs{Fs: base, target: path, err: removeErr}
+	// Wave-59: releaseClaimedBusyObject delegates to the wave-44 bound
+	// unlink, so the wedged remove targets the fresh ".vac." terminal name
+	// the vacate rename armed — w59TerminalRemoveFailFs learns that name
+	// (size-agnostic: the placeholder is 0 bytes).
+	wedge := &w59TerminalRemoveFailFs{Fs: base, err: removeErr, fail: 1}
 
 	err := replacementBusyReturnTakeover(wedge, path, takeover, content, w28TakeoverIdentity(t, base, takeover))
 	require.NoError(t, err)

@@ -404,28 +404,22 @@ func replacementBusyObserveTakeover(fs afero.Fs, takeoverPath string) ([]byte, o
 	return content, info, nil
 }
 
-// releaseClaimedBusyObject unlinks path ONLY while the no-follow name lookup
-// at unlink adjacency still names expect — observed shape (the bound_drop
-// discipline history's take-aside shares): regular and non-symlink, dev/inode
-// where the filesystem exposes it, then size + mtime. A name that vanished
-// on its own completed the cleanup by itself; anything else (foreign swap,
-// indeterminate lookup) is REFUSED — the occupant keeps its bytes byte-intact
-// and the caller routes around the name rather than deleting what it cannot
-// prove.
+// releaseClaimedBusyObject unlinks the object at path ONLY while it still
+// provably names expect, through the wave-44 bound-unlink construction
+// (BoundAside.Unlink): path is re-proved no-follow against expect, the
+// proven object vacates onto a fresh claimed terminal name NO-REPLACE, is
+// re-bound to expect at the terminal name, and only the terminal name is
+// unlinked. A name that vanished on its own completed the cleanup by itself;
+// anything else — a foreign swap inside the verify→unlink window, an
+// indeterminate lookup — is REFUSED typed (ErrTakeAsideForeign), the occupant
+// rewound onto path NO-REPLACE byte-intact, so the caller routes around the
+// name rather than deleting what it cannot prove. Wave-59 (codex P2, PR#215
+// finding F1): the pre-shape verify→Remove pair unlinked path BY PATHNAME —
+// a swap between the no-follow re-prove and fs.Remove deleted the foreign
+// occupant (on the canonical .dlbusy path, another claimant's live marker);
+// the bound construction closes that window end to end.
 func releaseClaimedBusyObject(fs afero.Fs, path string, expect os.FileInfo) error {
-	cur, lerr := asideLstat(fs, path)
-	switch {
-	case os.IsNotExist(lerr):
-		return nil // vanished on its own — nothing left to unlink
-	case lerr != nil:
-		return fmt.Errorf("inspect claimed object %s before the bound release: %w", path, lerr)
-	case !asideSameObject(cur, expect):
-		return fmt.Errorf("claimed object %s no longer names the observed object — foreign bytes preserved: %w", path, ErrTakeAsideForeign)
-	}
-	if rerr := fs.Remove(path); rerr != nil && !os.IsNotExist(rerr) {
-		return fmt.Errorf("remove claimed object %s (verified ours): %w", path, rerr)
-	}
-	return nil
+	return (&BoundAside{fs: fs, scratch: path, held: expect, moved: true}).Unlink()
 }
 
 // discardBusyMarkerClaim is the AcquireReplacementBusy claim-failure cleanup
