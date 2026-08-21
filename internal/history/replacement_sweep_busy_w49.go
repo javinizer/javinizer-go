@@ -135,6 +135,7 @@ type sweepBusyMarkerClaim struct {
 	reclaimed   bool       // releaseForReclaim already fired — a late bind keeps sole release ownership
 
 	released atomic.Bool // wave-53: signaled by releaseForReclaim once both holds are freed
+	wedged   atomic.Bool // wave-57: admission timeout — holds retained, reverter skips (busy-class)
 
 	fs    afero.Fs // wave-55: filesystem the marker was claimed on, for the ownership-attestation gate
 	token string   // wave-55: the busy-marker token this claim wrote ("" for markerless test claims)
@@ -320,6 +321,9 @@ func (c *sweepBusyMarkerClaim) waitReleased() bool {
 		if c.released.Load() {
 			return true
 		}
+		if c.wedged.Load() {
+			return false // wave-57: release wedged — holds retained, reclaim must not signal success
+		}
 		if !time.Now().Before(deadline) {
 			return c.released.Load()
 		}
@@ -352,6 +356,23 @@ func (c *sweepBusyMarkerClaim) releaseForReclaim() {
 	destRelease := c.destRelease
 	c.mu.Unlock()
 	admitted := c.waitAdmitted() // bounded TryLock poll; true = reclaim holds the admit gate
+	if !admitted && destRelease != nil {
+		// Wave-57 (codex P1, PR#215 — "keep arbitration held when admission times
+		// out"): an admitted mutation is still in flight and could not be drained
+		// within the admit grace. Freeing the dest lock + marker would let the
+		// reverter mutate concurrently — UNSAFE. Retain both holds; the revocation
+		// flag (set by reclaim before detaching) gates the worker's next stage, and
+		// when the wedge unblocks the worker abandons via abandonIfRevoked and its
+		// deferred releases self-fire. The claim stays wedged in the ledger so the
+		// reverter's consult skips this dest (busy-class); reclaim still reports
+		// true (the revoke landed) — the reverter consults sweepClaimIsWedged, not
+		// the boolean, to skip. The wedge fires only for a bound claim
+		// (bindDestLock): a markerless test claim frees nothing real, so its
+		// reclaim keeps the ordinary released posture; in production a claim always
+		// binds its dest lock before any admitted mutation.
+		c.wedged.Store(true)
+		return
+	}
 	if destRelease != nil {
 		destRelease() // free the dest lock (in-process, fast) — while reclaim holds the admit gate
 	}
@@ -472,11 +493,35 @@ func reclaimAbandonedSweepBusyMarker(dest string) bool {
 	return sweepBusyClaims.reclaim(dest)
 }
 
+// sweepClaimIsWedged reports whether dest has a wedged sweep claim whose holds
+// are retained after an admission timeout (wave-57). The reverter consults this
+// after the pre-acquisition reclaim and skips the destination (busy-class) so it
+// never blocks on the still-held dest lock nor mutates concurrently with the
+// sweep's in-flight syscall — the wedged claim self-releases when the fs
+// unblocks and a later retry succeeds.
+func sweepClaimIsWedged(dest string) bool {
+	return sweepBusyClaims.isWedged(dest)
+}
+
+func (l *sweepBusyClaimLedger) isWedged(dest string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	rec := l.byDest[l.resolver.Key(dest)]
+	return rec != nil && rec.wedged.Load()
+}
+
 func (l *sweepBusyClaimLedger) reclaim(dest string) bool {
 	l.mu.Lock()
 	key := l.resolver.Key(dest)
 	rec := l.byDest[key]
 	if rec == nil || rec.ctx.Err() == nil {
+		l.mu.Unlock()
+		return false
+	}
+	if rec.wedged.Load() {
+		// Already wedged (a prior consult hit the admission timeout): holds are
+		// retained — signal not-reclaimed so the reverter skips this dest instead
+		// of blocking on the still-held dest lock.
 		l.mu.Unlock()
 		return false
 	}
@@ -501,5 +546,16 @@ func (l *sweepBusyClaimLedger) reclaim(dest string) bool {
 	// freed marker under its own token and never bypasses a still-owned marker.
 	go rec.releaseForReclaim()
 	rec.waitReleased()
+	if rec.wedged.Load() {
+		// Wave-57: the release wedged (admission timeout) — holds retained. Re-insert
+		// so the reverter's consult skips this dest; the stranded worker's untrack
+		// removes it once it self-releases. The revoke already landed, so report
+		// true — the reverter consults sweepClaimIsWedged (not this boolean) to skip.
+		l.mu.Lock()
+		if l.byDest[key] == nil {
+			l.byDest[key] = rec
+		}
+		l.mu.Unlock()
+	}
 	return true
 }

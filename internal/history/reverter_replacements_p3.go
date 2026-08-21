@@ -176,6 +176,10 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 	// leg. The closure keeps each destination's marker lifetime scoped to that
 	// destination instead of deferring all releases until this method returns.
 	// Wave-45: deterministic destOrder walk (same order as the preflight).
+	// Wave-57: a wedged sweep claim skips its dest (busy-class) without
+	// overhanging the loop — other dests still process; the op fails busy at
+	// loop end so a later retry restores the wedged dest once it self-releases.
+	var wedgedDest string
 	for _, key := range destOrder {
 		dest := destSpelling[key]
 		entries := byDest[key]
@@ -220,6 +224,11 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 			// at (3) reads back as not-live there and is skipped, never
 			// re-restored.
 			reclaimAbandonedSweepBusyMarker(dest)
+			if sweepClaimIsWedged(dest) {
+				logging.Warnf("replacement restore %s: sweep claim wedged (in-flight mutation, holds retained) — skipping destination for retry", dest)
+				wedgedDest = dest
+				return nil
+			}
 			preDestLockConsultHook(dest)
 			release := fsutil.SharedDestLocks().Acquire(dest)
 			defer release()
@@ -541,6 +550,11 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 		if restoreErr != nil {
 			return restored, restoreErr
 		}
+	}
+	if wedgedDest != "" {
+		// Wave-57: a wedged dest was skipped — the op fails busy (stays Applied) so
+		// a later sweep/RevertBatch retries it once the wedge self-releases.
+		return restored, fmt.Errorf("replacement destination %s is wedged by an in-flight sweep mutation: %w", wedgedDest, fsutil.ErrReplacementBusy)
 	}
 	return restored, nil
 }
