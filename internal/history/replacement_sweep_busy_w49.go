@@ -137,6 +137,13 @@ type sweepBusyMarkerClaim struct {
 	released atomic.Bool // wave-53: signaled by releaseForReclaim once both holds are freed
 	wedged   atomic.Bool // wave-57: admission timeout — holds retained, reverter skips (busy-class)
 
+	// completed is flipped by the worker's untrack closure under the ledger
+	// mutex (sweepBusyClaimLedger.mu) BEFORE the delete, so the wave-58
+	// wedged-claim reinsertion (same lock) reinserts ONLY while the worker is
+	// still running; a worker that already finished (untrack + releases) is
+	// not resurrected (the dest would stay pinned wedged until restart).
+	completed bool
+
 	fs    afero.Fs // wave-55: filesystem the marker was claimed on, for the ownership-attestation gate
 	token string   // wave-55: the busy-marker token this claim wrote ("" for markerless test claims)
 
@@ -468,6 +475,7 @@ func (l *sweepBusyClaimLedger) record(ctx context.Context, fs afero.Fs, dest, to
 	l.mu.Unlock()
 	return rec, func() {
 		l.mu.Lock()
+		rec.completed = true // wave-58: mark the worker finished before untrack, under the ledger lock
 		if l.byDest[key] == rec {
 			delete(l.byDest, key)
 		}
@@ -551,8 +559,12 @@ func (l *sweepBusyClaimLedger) reclaim(dest string) bool {
 		// so the reverter's consult skips this dest; the stranded worker's untrack
 		// removes it once it self-releases. The revoke already landed, so report
 		// true — the reverter consults sweepClaimIsWedged (not this boolean) to skip.
+		// Wave-58: reinsert ONLY while the worker is still running — its untrack
+		// flips `completed` under this same lock before releasing, so a worker that
+		// finished between the ledger-unlock and here is not resurrected (it would
+		// pin the dest wedged until restart). `nil` keeps the pointer-scoped guard.
 		l.mu.Lock()
-		if l.byDest[key] == nil {
+		if l.byDest[key] == nil && !rec.completed {
 			l.byDest[key] = rec
 		}
 		l.mu.Unlock()
