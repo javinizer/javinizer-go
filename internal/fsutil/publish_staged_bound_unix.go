@@ -137,7 +137,23 @@ func publishStagedBoundOS(p StagedPublish) (os.FileInfo, error) {
 					return nil, fmt.Errorf("published destination %s indeterminate before the deferred times leg: %w: %w: %w", p.Dest, oerr, ErrPublishStagedIdentityIndeterminate, ErrPublishStagedIdentityBreak)
 				}
 				if cerr := publishStagedBoundDeferredChtimes(p.FS, p.Dest, p.Atime, p.Mtime); cerr != nil {
+					// wave-60 (codex P2, PR#215): this leg runs ONLY after a
+					// verified no-replace publish AND a pre-Chtimes relookup
+					// that re-proved dest still names the staged inode, so a
+					// Chtimes failure here is NOT a pre-publish staging failure
+					// — the destination already carries the published bytes.
+					// Re-derive dest's identity at the error step: if dest
+					// STILL names the published inode, surface the times error
+					// joined with ErrPublishCompleted so callers run their
+					// completed-publish discipline (journal confirm + backup
+					// consumed paths, established wave-34); if the identity
+					// drifted the published bytes are no longer provably at
+					// dest, so keep the plain *StagingTimesError (retained
+					// backup, unconfirmed journal) like a pre-publish failure.
 					_ = fh.Close()
+					if verified, verr := publishStagedBoundDestLstat(p.Dest); verr == nil && os.SameFile(handleInfo, verified) {
+						return nil, fmt.Errorf("deferred staged times for %s after a verified publish (destination carries the published bytes): %w: %w", p.Dest, cerr, ErrPublishCompleted)
+					}
 					return nil, &StagingTimesError{Staged: p.Dest, Err: cerr}
 				}
 				// wave-31: hand back a FRESH destination identity carrying the

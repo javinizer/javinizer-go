@@ -230,9 +230,12 @@ type StagedPublish struct {
 // it discards attacker junk (never genuine bytes: those live on the handle
 // until close). The publish's OWN ErrPublishCompleted-carrying error (the
 // POSIX hard-link fallback's staged-cleanup refusal, wave-33's
-// ErrPublishNoReplaceStagedUnverified, or the wave-20 cleanup+rollback
-// failure leg) is the exception: the staged name was DELIBERATELY left in
-// place and may address a foreign object, so callers must check
+// ErrPublishNoReplaceStagedUnverified, the wave-20 cleanup+rollback
+// failure leg, or wave-60's ENOSYS deferred-times failure on an
+// identity-VERIFIED destination — the publish already landed and dest
+// still names the staged inode at the error step) is the exception: the
+// staged name was DELIBERATELY left in place and may address a foreign
+// object, so callers must check
 // errors.Is(err, ErrPublishCompleted) BEFORE any staged removal — the
 // destination provably carries the published bytes regardless.
 func PublishStagedBound(p StagedPublish) error {

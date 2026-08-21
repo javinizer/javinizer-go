@@ -5,19 +5,21 @@ package fsutil
 // POSTER-WRITE-HARDENING codex PR#215 wave-24 (coverage fallout of the
 // seam-driven wave-30 hardening): the defensive legs of PublishStagedBound
 // that no host setup can fail deterministically are replayed through the
-// package seams — the restream seam's own seek failure, the virtual/wrapper
-// leg's CloseStaged failures, and the ENOSYS-deferred destination Chtimes
-// failure. The indeterminate post-publish destination lookup itself moved
-// onto publishStagedBoundDestLstat (see the wave-30 POSIX companion): chmod
+// package seams — the restream seam's own seek failure and the
+// virtual/wrapper leg's CloseStaged failures. The ENOSYS-deferred
+// destination Chtimes failure moved to wave-60 (see
+// publish_staged_bound_w60_posix_test.go): wave-60 reclassifies a
+// deferred-times failure on an identity-VERIFIED destination as a completed
+// publish (ErrPublishCompleted) rather than a pre-publish staging failure.
+// The indeterminate post-publish destination lookup itself moved onto
+// publishStagedBoundDestLstat (see the wave-30 POSIX companion): chmod
 // -based directory denial does not fail for uid 0 and silently reopened
 // those legs on root CI hosts.
 
 import (
 	"errors"
 	"os"
-	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -113,41 +115,4 @@ func TestPublishStagedBoundW24_VirtualLegCloseErrorWrapsTyped(t *testing.T) {
 	require.Equal(t, 0, published, "the publish never runs when close fails")
 	_, serr := inner.Stat(staged)
 	require.NoError(t, serr, "the staged name survives for the caller's cleanup")
-}
-
-// ENOSYS from the fd-times seam defers the times onto the PUBLISHED name;
-// when THAT Chtimes fails the publish's success is already proven, and the
-// failure still surfaces as *StagingTimesError against the destination —
-// replayed through publishStagedBoundDeferredChtimes because no portable
-// setup fails utimens on a just-published name for root and non-root alike.
-func TestPublishStagedBoundW24_DeferredTimesFailureSurfacesTyped(t *testing.T) {
-	prevFd := stagedHandleChtimes
-	stagedHandleChtimes = func(fd uintptr, atime, mtime time.Time) error { return syscall.ENOSYS }
-	t.Cleanup(func() { stagedHandleChtimes = prevFd })
-
-	deferredErr := errors.New("w24 deferred chtimes failure")
-	prevDeferred := publishStagedBoundDeferredChtimes
-	publishStagedBoundDeferredChtimes = func(afero.Fs, string, time.Time, time.Time) error { return deferredErr }
-	t.Cleanup(func() { publishStagedBoundDeferredChtimes = prevDeferred })
-
-	fs := afero.NewOsFs()
-	dir := t.TempDir()
-	dest := filepath.Join(dir, "poster.jpg")
-	staged, fh := w30Stage(t, fs, dest, ".rstr", 0o640)
-
-	err := PublishStagedBound(StagedPublish{
-		FS: fs, Publish: PublishNoReplace, NoReplace: true,
-		Staged: staged, Handle: fh, Dest: dest,
-		Atime: time.Now(), Mtime: time.Now(), ApplyTimes: true,
-		Suffix: ".rstr", NextOrdinal: w30Ordinal(4),
-	})
-	var timesErr *StagingTimesError
-	require.ErrorAs(t, err, &timesErr)
-	require.ErrorIs(t, err, deferredErr)
-	require.Equal(t, dest, timesErr.Staged,
-		"the deferred failure names the PUBLISHED destination, not the consumed staged name")
-	got, rerr := os.ReadFile(dest)
-	require.NoError(t, rerr)
-	require.Equal(t, "genuine staged bytes", string(got),
-		"the proven publish is never undone by the deferred times failure")
 }
