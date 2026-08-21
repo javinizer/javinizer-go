@@ -70,6 +70,34 @@ var replacementCryptoRandomRead = cryptorand.Read
 // ReplacementBusyPath returns the durable in-flight marker for dest.
 func ReplacementBusyPath(dest string) string { return dest + ReplacementBusySuffix }
 
+// ReadReplacementBusyToken reads the bytes of dest's durable busy marker. The
+// sweep records the token its O_EXCL claim just wrote (wave-55) so each
+// mutating stage gate can re-prove the on-disk marker still names this
+// claimant's token. A marker that vanished, was taken aside, or was
+// re-acquired by another claimant reads a different (or absent) token.
+func ReadReplacementBusyToken(fs afero.Fs, dest string) (string, error) {
+	content, err := afero.ReadFile(fs, ReplacementBusyPath(dest))
+	if err != nil {
+		return "", err
+	}
+	return string(content), nil
+}
+
+// ReplacementBusyMarkerIsOurs reports whether dest's durable busy marker
+// currently reads exactly token. A marker that is missing, unreadable, or
+// byte-divergent is not provably ours: another claimant owns the name now (the
+// reclaim took it aside, or a successor re-claimed it), so the caller must
+// abandon its stage before mutating. The token carries the claimant's pid and
+// a nanosecond timestamp, so byte equality is the ownership identity fact — no
+// two live claims share it.
+func ReplacementBusyMarkerIsOurs(fs afero.Fs, dest, token string) bool {
+	current, err := ReadReplacementBusyToken(fs, dest)
+	if err != nil {
+		return false
+	}
+	return current == token
+}
+
 // AcquireReplacementBusy atomically claims the destination-adjacent marker.
 // Writers create it before moving the destination aside; sweepers create it
 // before touching a backup. A marker from a dead PID is reclaimed, as is a

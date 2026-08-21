@@ -11,60 +11,29 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// POSTER-WRITE-HARDENING wave-53 (codex P1/P5, PR#215 findings 1+4) — the
-// reclaim path now waits a BOUNDED worker-ack (~200ms) before freeing the
-// stranded sweep's holds and detaches the releases to a goroutine, waiting a
-// BOUNDED grace (~250ms) for them to land. Production keeps those bounds; the
-// test binary shortens them (the worker is always parked in the choreography,
-// so the ack wait times out regardless of the bound — the behavior under test
-// is identical, only faster). A TestMain is the single seam that keeps every
-// existing reclaim-exercising test fast without per-test churn, and the
-// production binary is unaffected (it never compiles this file).
+// POSTER-WRITE-HARDENING wave-55 (codex P1, PR#215 finding 1 — full close):
+// the wave-54 tombstone/grace design let the reverter proceed past a
+// still-owned marker while a wedged worker could complete a mutation after
+// the reverter started. The airtight fix makes the sweep's MUTATIONS
+// ownership-conditional: every mutating stage gate (abandonIfRevoked)
+// re-reads the on-disk marker and requires it still names THIS claim's
+// token. The reclaim now takes the marker aside directly (no bounded
+// worker-ack wait), so the reverter re-acquires the freed marker under its
+// own token and never bypasses a still-owned one. The ack is subsumed as an
+// optimization — no fixed deadline is needed once every mutating stage is
+// attested. These tests pin the attestation gates and the reverter's
+// reclaim-frees-marker posture. A TestMain shortens the release grace (the
+// production binary is unaffected — it never compiles this file).
 func TestMain(m *testing.M) {
-	prevAckBound := sweepReclaimWorkerAckBound
-	prevAckPoll := sweepReclaimWorkerAckPoll
 	prevGrace := sweepReclaimReleaseGrace
 	prevGracePoll := sweepReclaimReleasePoll
-	sweepReclaimWorkerAckBound = 5 * time.Millisecond
-	sweepReclaimWorkerAckPoll = time.Millisecond
 	sweepReclaimReleaseGrace = 50 * time.Millisecond
 	sweepReclaimReleasePoll = time.Millisecond
 	defer func() {
-		sweepReclaimWorkerAckBound = prevAckBound
-		sweepReclaimWorkerAckPoll = prevAckPoll
 		sweepReclaimReleaseGrace = prevGrace
 		sweepReclaimReleasePoll = prevGracePoll
 	}()
 	os.Exit(m.Run())
-}
-
-// waitWorkerAck returns true once the stranded worker acknowledges the
-// revocation through an abandonIfRevoked gate within the bound (wave-53,
-// finding 1). The existing e2e tests park the worker inside an fs call so the
-// wait times out; this covers the ack-in-time branch directly.
-func TestSweepBusyClaimW53_WaitWorkerAckReturnsTrueOnAck(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	claim, untrack := recordSweepBusyClaim(ctx, "/w53-ack", func() {})
-	defer untrack()
-	go func() {
-		time.Sleep(time.Millisecond)
-		claim.revoke()
-		claim.abandonIfRevoked("test gate", "backup", "/w53-ack") // the worker acks
-	}()
-	require.True(t, claim.waitWorkerAck(), "the worker acked within the bound")
-	require.True(t, claim.workerAcked.Load() > 0)
-}
-
-// waitWorkerAck returns false on timeout when no worker acks (the bounded
-// grace accepts the residual race over an unbounded reverter block).
-func TestSweepBusyClaimW53_WaitWorkerAckTimesOut(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	claim, untrack := recordSweepBusyClaim(ctx, "/w53-ack-timeout", func() {})
-	defer untrack()
-	require.False(t, claim.waitWorkerAck(), "no ack → bounded timeout returns false")
-	require.Equal(t, int32(0), claim.workerAcked.Load())
 }
 
 // waitReleased returns false on timeout when releaseForReclaim never signals
@@ -73,32 +42,122 @@ func TestSweepBusyClaimW53_WaitWorkerAckTimesOut(t *testing.T) {
 func TestSweepBusyClaimW53_WaitReleasedTimesOut(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	claim, untrack := recordSweepBusyClaim(ctx, "/w53-rel-timeout", func() {})
+	claim, untrack := recordSweepBusyClaim(ctx, nil, "/w53-rel-timeout", func() {})
 	defer untrack()
 	require.False(t, claim.waitReleased(), "no release signal → bounded grace timeout returns false")
 	require.False(t, claim.released.Load())
 }
 
-// Wave-54 (codex P1, PR#215 finding 1): a worker wedged past the ack bound
-// keeps the on-disk marker write-protective (nothing else acquires it); the
-// reverter's consult reclaims the dest lock (in-process) but leaves the
-// marker, then proceeds graced under the dest lock — the tombstone releases
-// the acquirer's busy leg. The worker self-releases when it wakes and gates.
-func TestReverterW54_GracedMarkerHeldRevertProceeds(t *testing.T) {
+// Token-attestation gate (wave-55, finding 1): at every mutating stage the
+// worker re-reads the marker it claimed and requires the on-disk bytes still
+// name its token. A live claim with its own marker passes; a swapped (another
+// claimant took over) or gone (reclaimed) marker abandons before mutating —
+// even when the in-process revocation flag is NOT set.
+func TestSweepBusyClaimW55_TokenAttestationGate(t *testing.T) {
+	t.Run("own marker passes the attestation", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		require.NoError(t, fs.MkdirAll("/w55-own", 0o755))
+		dest := "/w55-own/poster.jpg"
+		release, err := fsutil.AcquireReplacementBusy(fs, dest)
+		require.NoError(t, err)
+		defer release()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		claim, untrack := recordSweepBusyClaim(ctx, fs, dest, release)
+		defer untrack()
+
+		require.False(t, claim.isRevoked(), "the claim is live")
+		log := swapRevokeLog(t)
+		require.False(t, claim.abandonIfRevoked("test attestation", "backup", dest),
+			"a live claim whose marker still names its token passes every gate")
+		require.Empty(t, log.phases, "no gate fired — the attestation proved ownership")
+	})
+
+	t.Run("swapped marker abandons without revocation", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		require.NoError(t, fs.MkdirAll("/w55-swap", 0o755))
+		dest := "/w55-swap/poster.jpg"
+		release, err := fsutil.AcquireReplacementBusy(fs, dest)
+		require.NoError(t, err)
+		token, err := fsutil.ReadReplacementBusyToken(fs, dest)
+		require.NoError(t, err)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		claim, untrack := recordSweepBusyClaim(ctx, fs, dest, release)
+		defer untrack()
+
+		// Another claimant takes the name over (the reclaim took it aside and a
+		// successor — the reverter — re-claimed it under a different token).
+		release()
+		successor, err := fsutil.AcquireReplacementBusy(fs, dest)
+		require.NoError(t, err)
+		defer successor()
+		successorToken, err := fsutil.ReadReplacementBusyToken(fs, dest)
+		require.NoError(t, err)
+		require.NotEqual(t, token, successorToken, "the successor claimed a different token")
+
+		require.False(t, claim.isRevoked(), "the revocation flag is NOT set — only the marker swapped")
+		log := swapRevokeLog(t)
+		require.True(t, claim.abandonIfRevoked("test attestation", "backup", dest),
+			"a swapped marker (different token) abandons even without revocation")
+		require.Equal(t, []string{"test attestation"}, log.phases)
+		require.Positive(t, log.epochs[0], "the gate reported the claim's ledger epoch")
+	})
+
+	t.Run("gone marker abandons without revocation", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		require.NoError(t, fs.MkdirAll("/w55-gone", 0o755))
+		dest := "/w55-gone/poster.jpg"
+		release, err := fsutil.AcquireReplacementBusy(fs, dest)
+		require.NoError(t, err)
+		token, err := fsutil.ReadReplacementBusyToken(fs, dest)
+		require.NoError(t, err)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		claim, untrack := recordSweepBusyClaim(ctx, fs, dest, release)
+		defer untrack()
+
+		// The reclaim took the marker aside and no successor re-claimed it: the
+		// name is gone, so the attestation read fails closed.
+		release()
+		require.False(t, fsutil.ReplacementBusyMarkerIsOurs(fs, dest, token), "the marker is gone")
+
+		require.False(t, claim.isRevoked(), "the revocation flag is NOT set — only the marker is gone")
+		require.True(t, claim.abandonIfRevoked("test attestation", "backup", dest),
+			"a gone marker abandons even without revocation")
+	})
+}
+
+// The bypass is gone (wave-55): a worker wedged past the deadline owns a
+// marker the continued revert's reclaim takes aside directly. The reverter
+// re-acquires the freed marker under its OWN token and proceeds — it never
+// accepts a still-owned marker. A resuming worker reads a swapped/gone
+// marker at its next attestation gate and abandons before mutating.
+func TestReverterW55_AbandonedSweepMarkerReclaimedRevertAcquiresOwnToken(t *testing.T) {
 	base := afero.NewMemMapFs()
 	repo := newP3OpRepo()
-	op, dest, _ := seedCrashWindow(t, base, repo, "job-w54", "GRD-001", "/w54", p3HexA)
+	op, dest, _ := seedCrashWindow(t, base, repo, "job-w55", "GRD-001", "/w55", p3HexA)
 	busyRelease, err := fsutil.AcquireReplacementBusy(base, dest)
 	require.NoError(t, err)
 	defer busyRelease() // the worker self-releases when it wakes and gates
 	sweepCtx, cancel := context.WithCancel(context.Background())
-	_, untrack := recordSweepBusyClaim(sweepCtx, dest, busyRelease)
+	claim, untrack := recordSweepBusyClaim(sweepCtx, base, dest, busyRelease)
 	defer untrack()
-	cancel() // the sweep's deadline fired; the worker is stranded (never acks)
+	cancel() // the sweep's deadline fired; the worker is stranded mid-mutation
+
+	workerToken, err := fsutil.ReadReplacementBusyToken(base, dest)
+	require.NoError(t, err)
+
 	restored, rerr := NewReverter(base, repo).restoreReplacementJournal(context.Background(), op)
-	require.NoError(t, rerr, "the reverter proceeds graced under the dest lock")
-	require.True(t, restored[dest], "the restore completed despite the held marker")
-	require.True(t, sweepBusyClaims.markerGraced(dest), "the marker is graced (held, not released)")
+	require.NoError(t, rerr, "the reclaim took the marker aside — the reverter acquires its own token and proceeds (no bypass)")
+	require.True(t, restored[dest], "the restore completed")
+	require.True(t, claim.isRevoked(), "the reclaim revoked the stranded claim")
+
+	// The reverter acquired its own marker during the restore and released it
+	// on return; no graced tombstone remains. A resuming worker's attestation
+	// gate reads a gone marker and abandons.
 	exists, _ := afero.Exists(base, fsutil.ReplacementBusyPath(dest))
-	require.True(t, exists, "the marker stays write-protective until the worker self-releases")
+	require.False(t, exists, "the reverter released its own marker — no graced tombstone remains")
+	require.False(t, fsutil.ReplacementBusyMarkerIsOurs(base, dest, workerToken),
+		"the worker's token no longer owns the name — a resuming worker abandons at its next attestation gate")
 }

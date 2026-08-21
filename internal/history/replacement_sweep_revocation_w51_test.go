@@ -105,7 +105,7 @@ func swapRevokeLog(t *testing.T) *w51RevokeLog {
 func w51ReclaimedClaim(t *testing.T, dest string) *sweepBusyMarkerClaim {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-	claim, untrack := recordSweepBusyClaim(ctx, dest, func() {})
+	claim, untrack := recordSweepBusyClaim(ctx, nil, dest, func() {})
 	cancel() // the wave-8 deadline fired; the goroutine is stranded mid-op
 	require.True(t, reclaimAbandonedSweepBusyMarker(dest), "the abandoned claim reclaims")
 	require.True(t, claim.isRevoked(), "the reclaim flipped the revocation flag before the releases")
@@ -122,11 +122,11 @@ func TestSweepBusyClaimW51_RevocationOrdering(t *testing.T) {
 
 	ctxA, cancelA := context.WithCancel(context.Background())
 	defer cancelA()
-	rec1, untrack1 := ledger.record(ctxA, dest, func() {})
+	rec1, untrack1 := ledger.record(ctxA, nil, dest, func() {})
 	ctxB, cancelB := context.WithCancel(context.Background())
 	var releaseObservedRevoked bool
 	var rec2 *sweepBusyMarkerClaim
-	rec2, untrack2 := ledger.record(ctxB, dest, func() { releaseObservedRevoked = rec2.isRevoked() })
+	rec2, untrack2 := ledger.record(ctxB, nil, dest, func() { releaseObservedRevoked = rec2.isRevoked() })
 
 	require.Positive(t, rec1.epoch, "claims carry a ledger-issued epoch")
 	require.Greater(t, rec2.epoch, rec1.epoch, "claim epochs are monotonic across records")
@@ -134,8 +134,7 @@ func TestSweepBusyClaimW51_RevocationOrdering(t *testing.T) {
 	require.False(t, ledger.reclaim(dest), "a live sweep's record is never reclaimed")
 	require.False(t, rec2.isRevoked(), "a live claim is never revoked")
 
-	cancelB()               // the deadline fired; the goroutine is stranded mid-op
-	rec2.workerAcked.Add(1) // the stranded worker reached a revocation gate (wave-54)
+	cancelB() // the deadline fired; the goroutine is stranded mid-op
 	require.True(t, ledger.reclaim(dest))
 	require.True(t, rec2.isRevoked(), "the reclaim set the revocation flag")
 	require.True(t, releaseObservedRevoked,
@@ -185,7 +184,7 @@ func TestSweepW51_StrandedResumeAfterRevokeStopsAtPublishGate(t *testing.T) {
 	require.True(t, reclaimAbandonedSweepBusyMarker(dest), "the continued revert reclaims the stranded claim")
 	markerExists, err := afero.Exists(base, filepath.ToSlash(fsutil.ReplacementBusyPath(dest)))
 	require.NoError(t, err)
-	require.True(t, markerExists, "wave-54: the marker stays write-protective until the worker acks/releases")
+	require.False(t, markerExists, "wave-55: the reclaim took the marker aside — the reverter re-acquires it under its own token")
 
 	close(fs.release) // the wedged filesystem finally answers
 	require.Equal(t, 0, <-healed, "a revoked claim heals nothing")

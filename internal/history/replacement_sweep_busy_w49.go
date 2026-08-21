@@ -107,6 +107,7 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/logging"
+	"github.com/spf13/afero"
 )
 
 // sweepBusyMarkerClaim records ONE sweep-owned arbitration stance: the sweep
@@ -133,8 +134,10 @@ type sweepBusyMarkerClaim struct {
 	destRelease func()     // once-guarded dest-lock release — nil until bindDestLock fills the cell
 	reclaimed   bool       // releaseForReclaim already fired — a late bind keeps sole release ownership
 
-	workerAcked atomic.Int32 // wave-53: incremented at each abandonIfRevoked gate the worker reaches after revocation (the worker-ack stage counter)
-	released    atomic.Bool  // wave-53: signaled by releaseForReclaim once both holds are freed
+	released atomic.Bool // wave-53: signaled by releaseForReclaim once both holds are freed
+
+	fs    afero.Fs // wave-55: filesystem the marker was claimed on, for the ownership-attestation gate
+	token string   // wave-55: the busy-marker token this claim wrote ("" for markerless test claims)
 }
 
 // revoke flips the claim's in-process revocation flag. Only the ledger's
@@ -160,22 +163,44 @@ var sweepClaimRevokedLogFn = func(phase string, epoch uint64, backup, dest strin
 
 // abandonIfRevoked is the epoch-ownership gate consulted by the sweep worker
 // at each mutation surface after its claim can have outlived its waiter:
-// true means the claim was reclaimed and the caller abandons WITHOUT any
-// further mutation, leaving dest/journal/backup exactly as its current
-// pre-mutation state classified them. A worker parked INSIDE a wedged fs
-// call (uninterruptible; the wave-8 shape) whose arbitration was reclaimed
-// meanwhile resumes here and stops silently apart from the seam log.
-// Wave-53 (codex P1/P5, PR#215 findings 1+4): a reclaimed worker ACKS here —
-// the worker-ack stage counter increments so the reclaim's bounded wait
-// (releaseForReclaim.waitWorkerAck) can observe that the worker reached a
-// gate and stopped before the holds are freed.
+// true means the claim was reclaimed (or its marker swapped out from under
+// it) and the caller abandons WITHOUT any further mutation, leaving
+// dest/journal/backup exactly as its current pre-mutation state classified
+// them. A worker parked INSIDE a wedged fs call (uninterruptible; the
+// wave-8 shape) whose arbitration was reclaimed meanwhile resumes here and
+// stops silently apart from the seam log.
+//
+// Wave-55 (codex P1, PR#215 finding 1 — full close): the gate now ALSO
+// attests ownership of the on-disk marker at every mutating stage, not just
+// the in-process revocation flag. The reclaim frees the dest lock (so the
+// reverter can mutate) and takes the marker aside (so the reverter
+// re-acquires it under its own token) WITHOUT waiting for a bounded worker
+// ack — a deadline was the wave-53 safety bound, but a worker wedged
+// mid-mutation between the flag check and the syscall could still complete
+// that mutation after the reverter started. The airtight fix is to make the
+// sweep's MUTATIONS themselves ownership-conditional: at every gate the
+// worker re-reads the marker and requires it still names THIS claim's token.
+// A marker taken aside by reclaim (or re-acquired by the reverter, or gone)
+// reads a different token and the worker abandons before mutating. The ack
+// is subsumed: no fixed deadline is needed once every mutating stage is
+// attested, so the wave-53 worker-ack bound is removed (the reclaim frees the
+// marker directly; the reverter never bypasses a still-owned marker).
 func (c *sweepBusyMarkerClaim) abandonIfRevoked(phase, backup, dest string) bool {
-	if !c.isRevoked() {
+	if c.isRevoked() {
+		sweepClaimRevokedLogFn(phase, c.epoch, backup, dest)
+		return true
+	}
+	if c == nil {
 		return false
 	}
-	c.workerAcked.Add(1) // the worker observed the revocation and is stopping
-	sweepClaimRevokedLogFn(phase, c.epoch, backup, dest)
-	return true
+	// Ownership attestation: a markerless claim (test/direct-caller posture,
+	// token == "") skips the on-disk check and relies on the revocation flag
+	// alone. A claimed marker requires the on-disk bytes still name our token.
+	if c.token != "" && c.fs != nil && !fsutil.ReplacementBusyMarkerIsOurs(c.fs, dest, c.token) {
+		sweepClaimRevokedLogFn(phase, c.epoch, backup, dest)
+		return true
+	}
+	return false
 }
 
 // bindDestLock fills the claim's pending dest-lock cell the instant the
@@ -214,49 +239,17 @@ func (c *sweepBusyMarkerClaim) releaseDestLock() {
 	}
 }
 
-// sweepReclaimWorkerAckBound is the bounded grace releaseForReclaim waits for
-// the stranded worker to acknowledge the revocation (wave-53, codex P1/P5,
-// PR#215 findings 1+4) before freeing the destination lock and the busy
-// marker. The worker acks at its next abandonIfRevoked gate; a wedge parks it
-// inside an uninterruptible fs call, so the wait is bounded — once it expires
-// the holds are freed anyway (the small residual race is accepted over an
-// unbounded reverter block that would defeat the sweep bound the reclaim
-// exists to heal). Tests shorten this through swapReclaimTimers.
-var sweepReclaimWorkerAckBound = 2 * time.Second
-
-// sweepReclaimWorkerAckPoll is the worker-ack polling interval.
-var sweepReclaimWorkerAckPoll = 25 * time.Millisecond
-
 // sweepReclaimReleaseGrace is the bounded grace the reverter's reclaim waits
 // for the detached releaseForReclaim to finish freeing BOTH holds (wave-53,
 // finding 4). On a healthy filesystem the releases complete in microseconds;
 // a wedged marker take-aside outlasts the grace and the reverter proceeds —
 // the dest lock is already freed (pure in-process work, never wedged), so the
 // reverter's dest-lock acquisition is never unbounded. Tests shorten this
-// through swapReclaimTimers.
+// through TestMain.
 var sweepReclaimReleaseGrace = 250 * time.Millisecond
 
 // sweepReclaimReleasePoll is the released-signal polling interval.
 var sweepReclaimReleasePoll = 25 * time.Millisecond
-
-// waitWorkerAck blocks up to sweepReclaimWorkerAckBound (polling
-// sweepReclaimWorkerAckPoll) for the stranded worker to acknowledge the
-// revocation through an abandonIfRevoked gate (wave-53, finding 1). Returns
-// true if the worker acked within the bound, false on timeout (the holds are
-// freed anyway — the bounded grace accepts the small residual race over an
-// unbounded reverter block).
-func (c *sweepBusyMarkerClaim) waitWorkerAck() bool {
-	deadline := time.Now().Add(sweepReclaimWorkerAckBound)
-	for {
-		if c.workerAcked.Load() > 0 {
-			return true
-		}
-		if !time.Now().Before(deadline) {
-			return c.workerAcked.Load() > 0
-		}
-		time.Sleep(sweepReclaimWorkerAckPoll)
-	}
-}
 
 // waitReleased blocks up to sweepReclaimReleaseGrace (polling
 // sweepReclaimReleasePoll) for the detached releaseForReclaim to signal that
@@ -280,10 +273,15 @@ func (c *sweepBusyMarkerClaim) waitReleased() bool {
 
 // releaseForReclaim frees the dest lock FIRST (in-process, can never wedge),
 // then the marker's once-guarded take-aside release (wave-38/49/50/52 posture).
-// Wave-54 (finding 1): the dest lock is freed BEFORE the bounded worker-ack
-// wait; the on-disk marker is freed ONLY after the worker acknowledges — a
-// wedged worker keeps it write-protective until it wakes and self-releases,
-// while the reverter proceeds graced (markerGraced). Detached by reclaim.
+// Wave-55 (codex P1, PR#215 finding 1 — full close): the marker is freed
+// directly — NO bounded worker-ack wait gates the release. The wave-54
+// tombstone/grace design let the reverter proceed past a still-owned marker
+// while a wedged worker could complete a mutation after the reverter started;
+// the airtight fix makes the sweep's mutations ownership-conditional
+// (abandonIfRevoked attests the on-disk marker token at every mutating stage),
+// so the reclaim taking the marker aside is safe without a deadline: a worker
+// resuming reads a swapped/gone marker and abandons before mutating. The ack
+// is subsumed as an optimization, not the safety bound. Detached by reclaim.
 func (c *sweepBusyMarkerClaim) releaseForReclaim() {
 	c.mu.Lock()
 	c.reclaimed = true
@@ -292,9 +290,7 @@ func (c *sweepBusyMarkerClaim) releaseForReclaim() {
 	if destRelease != nil {
 		destRelease()
 	}
-	if c.waitWorkerAck() { // wave-54, finding 1: free the marker ONLY after the worker acks
-		c.release()
-	}
+	c.release()            // wave-55: free the marker directly — the attestation gates the worker
 	c.released.Store(true) // wave-53, finding 4: signal the detached releases completed
 }
 
@@ -305,24 +301,22 @@ func (c *sweepBusyMarkerClaim) releaseForReclaim() {
 // (transient failure vs definitive recovery between record and reclaim) can
 // never split one claim across two keys. DestKeyResolver caches postures in a
 // plain map, hence the mutex-scoped derivations. The epoch counter (wave-51)
-// issues each claim's monotonic epoch under the same mutex. Wave-54 (finding 1):
-// a reclaimed-but-unreleased claim lives on as a TOMBSTONE so the reverter's
-// marker-busy consult can grace the revert past a wedged worker (the marker
-// stays write-protective until the worker wakes and self-releases; untrack drops it).
+// issues each claim's monotonic epoch under the same mutex. Wave-55 (finding 1):
+// a reclaimed claim's marker is taken aside immediately (no tombstone/grace);
+// the reverter re-acquires the freed marker under its own token, and the
+// worker's attestation gates refuse every further mutation.
 type sweepBusyClaimLedger struct {
-	mu         sync.Mutex
-	resolver   *fsutil.DestKeyResolver
-	byDest     map[string]*sweepBusyMarkerClaim
-	tombstones map[string]*sweepBusyMarkerClaim
+	mu       sync.Mutex
+	resolver *fsutil.DestKeyResolver
+	byDest   map[string]*sweepBusyMarkerClaim
 
 	epoch uint64
 }
 
 func newSweepBusyClaimLedger() *sweepBusyClaimLedger {
 	return &sweepBusyClaimLedger{
-		resolver:   fsutil.NewDestKeyResolver(),
-		byDest:     make(map[string]*sweepBusyMarkerClaim),
-		tombstones: make(map[string]*sweepBusyMarkerClaim),
+		resolver: fsutil.NewDestKeyResolver(),
+		byDest:   make(map[string]*sweepBusyMarkerClaim),
 	}
 }
 
@@ -341,15 +335,22 @@ var sweepBusyClaims = newSweepBusyClaimLedger()
 // and carrying an EMPTY dest-lock cell; the caller fills it the instant the
 // wait completes through bindDestLock, which wraps the release in a
 // once-guard at cell time so the reclaim and the claimer's own defer share
-// one firing. The returned untrack removes ONLY this exact record (pointer
-// identity — a re-recorded claim for the same dest is never retracted by a
-// stale holder) and is always deferred by the claimer ahead of the releases.
-func recordSweepBusyClaim(ctx context.Context, dest string, release func()) (*sweepBusyMarkerClaim, func()) {
-	return sweepBusyClaims.record(ctx, dest, release)
+// one firing. Wave-55 (finding 1): the claim also records the filesystem and
+// the marker token it just wrote, so every mutating stage gate can re-prove
+// the on-disk marker still names this claimant's token. The returned untrack
+// removes ONLY this exact record (pointer identity — a re-recorded claim for
+// the same dest is never retracted by a stale holder) and is always deferred
+// by the claimer ahead of the releases.
+func recordSweepBusyClaim(ctx context.Context, fs afero.Fs, dest string, release func()) (*sweepBusyMarkerClaim, func()) {
+	return sweepBusyClaims.record(ctx, fs, dest, release)
 }
 
-func (l *sweepBusyClaimLedger) record(ctx context.Context, dest string, release func()) (*sweepBusyMarkerClaim, func()) {
-	rec := &sweepBusyMarkerClaim{ctx: ctx, release: release}
+func (l *sweepBusyClaimLedger) record(ctx context.Context, fs afero.Fs, dest string, release func()) (*sweepBusyMarkerClaim, func()) {
+	var token string
+	if fs != nil {
+		token, _ = fsutil.ReadReplacementBusyToken(fs, dest)
+	}
+	rec := &sweepBusyMarkerClaim{ctx: ctx, fs: fs, token: token, release: release}
 	l.mu.Lock()
 	l.epoch++
 	rec.epoch = l.epoch
@@ -360,9 +361,6 @@ func (l *sweepBusyClaimLedger) record(ctx context.Context, dest string, release 
 		l.mu.Lock()
 		if l.byDest[key] == rec {
 			delete(l.byDest, key)
-		}
-		if l.tombstones[key] == rec {
-			delete(l.tombstones, key)
 		}
 		l.mu.Unlock()
 	}
@@ -395,7 +393,6 @@ func (l *sweepBusyClaimLedger) reclaim(dest string) bool {
 		return false
 	}
 	delete(l.byDest, key)
-	l.tombstones[key] = rec
 	// Wave-51: flip the claim's OWN revocation flag under the ledger mutex and
 	// ONLY THEN fire the releases — the stranded claimant must read "revoked"
 	// at its mutation gates from the instant the freed arbitration lets the
@@ -410,20 +407,11 @@ func (l *sweepBusyClaimLedger) reclaim(dest string) bool {
 	// grace for the detached releases to land — waitReleased returns once both
 	// holds are freed, or after the grace if a wedge outlasts it (the dest lock
 	// is already freed by then — pure in-process work — so the reverter's
-	// dest-lock acquisition is never unbounded). releaseForReclaim waits a
-	// bounded worker-ack (finding 1) before freeing the holds.
+	// dest-lock acquisition is never unbounded). Wave-55 (finding 1):
+	// releaseForReclaim frees the marker directly (no bounded worker-ack wait);
+	// the on-disk attestation gates the worker, so the reverter re-acquires the
+	// freed marker under its own token and never bypasses a still-owned marker.
 	go rec.releaseForReclaim()
 	rec.waitReleased()
 	return true
-}
-
-// markerGraced reports whether dest carries a revoked-but-unreleased tombstone
-// whose marker is still held (wave-54, finding 1). Called by the reverter only
-// after waitReleased settled the ack outcome: a tombstone here means the worker
-// never acked within the bound — the reverter proceeds graced under the dest lock.
-func (l *sweepBusyClaimLedger) markerGraced(dest string) bool {
-	l.mu.Lock()
-	_, ok := l.tombstones[l.resolver.Key(dest)]
-	l.mu.Unlock()
-	return ok
 }

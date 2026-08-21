@@ -241,16 +241,12 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 				// never touched and keeps the ordinary busy refusal below. Wave-50
 				// (finding F1): a claim recorded AFTER the consult above still
 				// reclaims here — both consults share the frozen-key ledger.
+				// Wave-55 (finding 1): the reclaim takes the marker aside directly
+				// (no tombstone/grace) — the worker's mutations are ownership-
+				// attested at every stage gate, so the reverter re-acquires the
+				// freed marker under its own token and never bypasses a
+				// still-owned one.
 				busyRelease, busyErr = fsutil.AcquireReplacementBusy(r.fs, dest)
-			}
-			if errors.Is(busyErr, fsutil.ErrReplacementBusy) && sweepBusyClaims.markerGraced(dest) {
-				// Wave-54 (codex P1, PR#215 finding 1): the marker is held by a
-				// revoked-but-unreleased sweep claim (worker wedged past the ack
-				// bound). The on-disk marker stays write-protective (nothing else
-				// acquires it); proceed graced under the dest lock — the worker
-				// self-releases when it wakes and hits its revocation gate.
-				busyRelease = func() {}
-				busyErr = nil
 			}
 			if errors.Is(busyErr, fsutil.ErrReplacementBusy) {
 				return fmt.Errorf("replacement destination %s is busy: %w", dest, busyErr)

@@ -103,7 +103,7 @@ func w52LiveClaim(t *testing.T, dest string) (*sweepBusyMarkerClaim, context.Can
 	t.Helper()
 	sweepCtx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	claim, untrack := recordSweepBusyClaim(sweepCtx, dest, func() {})
+	claim, untrack := recordSweepBusyClaim(sweepCtx, nil, dest, func() {})
 	t.Cleanup(untrack)
 	reclaim := func() {
 		cancel()
@@ -134,11 +134,10 @@ func TestSweepBusyClaimW52_PendingDestLockCell(t *testing.T) {
 		var order []string
 		var mu sync.Mutex
 		fire := func(what string) func() { return func() { mu.Lock(); order = append(order, what); mu.Unlock() } }
-		rec, untrack := ledger.record(ctx, dest, fire("marker"))
+		rec, untrack := ledger.record(ctx, nil, dest, fire("marker"))
 		require.True(t, rec.bindDestLock(fire("lock")), "an unreclaimed cell accepts the bind")
 		require.False(t, ledger.reclaim(dest), "a live claim never reclaims")
 		cancel()
-		rec.workerAcked.Add(1) // the stranded worker reached a revocation gate (wave-54)
 		require.True(t, ledger.reclaim(dest))
 		mu.Lock()
 		require.Equal(t, []string{"lock", "marker"}, order, "dest-lock release precedes the marker release")
@@ -155,10 +154,9 @@ func TestSweepBusyClaimW52_PendingDestLockCell(t *testing.T) {
 		ledger := newSweepBusyClaimLedger()
 		ctx, cancel := context.WithCancel(context.Background())
 		markerFired, lockFired := 0, 0
-		rec, untrack := ledger.record(ctx, dest, func() { markerFired++ })
+		rec, untrack := ledger.record(ctx, nil, dest, func() { markerFired++ })
 		rec.releaseDestLock() // empty cell — a no-op while the wait is in flight
 		cancel()
-		rec.workerAcked.Add(1) // the stranded worker reached a revocation gate (wave-54)
 		require.True(t, ledger.reclaim(dest), "the mid-wait claim reclaims against the empty cell")
 		require.Equal(t, 1, markerFired)
 		require.False(t, rec.bindDestLock(func() { lockFired++ }),
@@ -176,7 +174,7 @@ func TestSweepBusyClaimW52_PendingDestLockCell(t *testing.T) {
 		ledger := newSweepBusyClaimLedger()
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		rec, untrack := ledger.record(ctx, dest, func() {})
+		rec, untrack := ledger.record(ctx, nil, dest, func() {})
 		require.True(t, rec.bindDestLock(func() {}))
 		untrack()
 		cancel()
@@ -222,7 +220,7 @@ func TestSweepOneW52_LedgerSeesClaimDuringDestLockWait(t *testing.T) {
 		"the ledger consult sees the claim DURING the dest-lock wait — register-before-wait")
 	markerExists, err := afero.Exists(base, filepath.ToSlash(fsutil.ReplacementBusyPath(dest)))
 	require.NoError(t, err)
-	require.True(t, markerExists, "wave-54: the marker stays write-protective until the worker acks/releases")
+	require.False(t, markerExists, "wave-55: the reclaim took the marker aside — the reverter re-acquires it under its own token")
 
 	holdRelease() // the dest-lock wait finally completes — stranded side
 	require.Equal(t, 0, <-healed, "a claim reclaimed during the wait abandons immediately")
@@ -847,9 +845,8 @@ func TestReverterW52_ConsumeBetweenReclaimAndFreshReadSkips(t *testing.T) {
 	require.NoError(t, err)
 	sweepCtx, sweepCancel := context.WithCancel(context.Background())
 	sweepCancel() // the wave-8 deadline already fired
-	claim, untrack := recordSweepBusyClaim(sweepCtx, dest, sweepRelease)
+	claim, untrack := recordSweepBusyClaim(sweepCtx, fixture.fs, dest, sweepRelease)
 	require.True(t, claim.bindDestLock(fsutil.SharedDestLocks().Acquire(dest)))
-	claim.workerAcked.Add(1) // the stranded worker reached a revocation gate (wave-54)
 	defer claim.releaseDestLock()
 	defer sweepRelease()
 	defer untrack()

@@ -815,7 +815,7 @@ func (s *ReplacementSweeper) sweepOne(ctx context.Context, idx *replacementLedge
 	// reclaim by the continued revert consumes the once-guarded releases,
 	// making this goroutine's deferred releases no-ops (never a double-free
 	// of a successor marker or lock).
-	claim, untrackSweepClaim := recordSweepBusyClaim(ctx, dest, busyRelease)
+	claim, untrackSweepClaim := recordSweepBusyClaim(ctx, s.fs, dest, busyRelease)
 	defer untrackSweepClaim()
 	rawDestRelease := fsutil.SharedDestLocks().Acquire(dest)
 	if !claim.bindDestLock(rawDestRelease) {
@@ -1762,7 +1762,7 @@ func (s *ReplacementSweeper) consumeRearmRefusedPending(ctx context.Context, idx
 	// — the record lands BEFORE the dest-lock wait carrying a pending cell
 	// for the lock release, so the reverter's reclaim consult sees the claim
 	// for the whole wait and frees both holds once bound.
-	claim, untrackSweepClaim := recordSweepBusyClaim(ctx, entry.dest, busyRelease)
+	claim, untrackSweepClaim := recordSweepBusyClaim(ctx, s.fs, entry.dest, busyRelease)
 	defer untrackSweepClaim()
 	rawDestRelease := fsutil.SharedDestLocks().Acquire(entry.dest)
 	if !claim.bindDestLock(rawDestRelease) {

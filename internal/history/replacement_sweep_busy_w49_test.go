@@ -32,14 +32,13 @@ func TestSweepBusyClaimW49_ReclaimGatesOnAbandonment(t *testing.T) {
 	require.NoError(t, err)
 	liveCtx, liveCancel := context.WithCancel(context.Background())
 	t.Cleanup(liveCancel)
-	claim, untrack := recordSweepBusyClaim(liveCtx, dest, release)
+	_, untrack := recordSweepBusyClaim(liveCtx, fs, dest, release)
 
 	require.False(t, reclaimAbandonedSweepBusyMarker(dest),
 		"a live sweep's marker is never reclaimed — someone still waits on it")
 
-	liveCancel()             // the deadline fired; the goroutine is stranded mid-op
-	claim.workerAcked.Add(1) // the stranded worker reached a revocation gate (wave-54)
-	require.True(t, reclaimAbandonedSweepBusyMarker(dest), "the abandoned sweep's claim is reclaimed")
+	liveCancel() // the deadline fired; the goroutine is stranded mid-op
+	require.True(t, reclaimAbandonedSweepBusyMarker(dest), "the abandoned claim reclaims and frees the marker")
 	busyGone, err := afero.Exists(fs, fsutil.ReplacementBusyPath(dest))
 	require.NoError(t, err)
 	require.False(t, busyGone, "the reclaim freed the marker name")
@@ -69,8 +68,8 @@ func TestSweepBusyClaimW49_UntrackIsPointerScoped(t *testing.T) {
 	ctxB, cancelB := context.WithCancel(context.Background())
 	t.Cleanup(cancelB)
 
-	_, recA := recordSweepBusyClaim(ctxA, "/w49/dup/poster.jpg", func() {})
-	_, _ = recordSweepBusyClaim(ctxB, "/w49/dup/poster.jpg", func() {})
+	_, recA := recordSweepBusyClaim(ctxA, nil, "/w49/dup/poster.jpg", func() {})
+	_, _ = recordSweepBusyClaim(ctxB, nil, "/w49/dup/poster.jpg", func() {})
 	recA() // stale holder must not retract the live record
 	require.False(t, reclaimAbandonedSweepBusyMarker("/w49/dup/poster.jpg"),
 		"the live re-recorded claim survived the stale untrack")
@@ -90,7 +89,7 @@ func TestRestoreReplacementJournalW49_ReclaimsAbandonedSweepMarker(t *testing.T)
 	sweepRelease, err := fsutil.AcquireReplacementBusy(fixture.fs, dest)
 	require.NoError(t, err)
 	sweepCtx, sweepCancel := context.WithCancel(context.Background())
-	claim, untrack := recordSweepBusyClaim(sweepCtx, dest, sweepRelease)
+	_, untrack := recordSweepBusyClaim(sweepCtx, fixture.fs, dest, sweepRelease)
 
 	// While the sweep is LIVE the revert keeps the ordinary busy refusal.
 	restored, err := NewReverter(fixture.fs, fixture.repo).restoreReplacementJournal(context.Background(), op)
@@ -102,7 +101,6 @@ func TestRestoreReplacementJournalW49_ReclaimsAbandonedSweepMarker(t *testing.T)
 	// The deadline proceeds with the revert: the sweep's ctx is done while it
 	// still owns the marker — the revert reclaims it and completes.
 	sweepCancel()
-	claim.workerAcked.Add(1) // the stranded worker reached a revocation gate (wave-54)
 	restored, err = NewReverter(fixture.fs, fixture.repo).restoreReplacementJournal(context.Background(), op)
 	require.NoError(t, err, "the abandoned sweep's marker no longer blocks the revert")
 	require.True(t, restored[dest])
