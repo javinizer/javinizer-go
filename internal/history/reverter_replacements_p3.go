@@ -938,6 +938,15 @@ const rearmStagingSuffix = ".dlrarm"
 // (the ErrPublishCompleted compensation leg included).
 var rearmPublishFn = fsutil.PublishNoReplace
 
+// publishStagedBoundInfoFn is the bound-publish seam behind
+// copyRestoreBytesPublish (same discipline as rearmPublishFn): production
+// publishes through fsutil.PublishStagedBoundInfo; tests replay wave-61's
+// completed-with-identity outcome (the ENOSYS-times-skipped leg on
+// AIX/Solaris/illumos, where stagedHandleChtimes answers ENOSYS and r12
+// refuses the name-based fallback) without the cross-package fd-times
+// plumbing.
+var publishStagedBoundInfoFn = fsutil.PublishStagedBoundInfo
+
 // restoreOpenReplacementSource opens a journaled restore backup for reading
 // with each platform's strongest protection against a final-component
 // symlink swap between the Lstat gate and the open. The default passes the
@@ -1160,7 +1169,7 @@ func copyRestoreBytesPublish(fs afero.Fs, backup, dest string, publish func(afer
 	// back the post-publish-VERIFIED destination object — the staged inode as
 	// it landed — so the caller can revalidate dest against exactly what this
 	// restore published before deleting the backup or consuming the journal.
-	published, pubErr := fsutil.PublishStagedBoundInfo(fsutil.StagedPublish{
+	published, pubErr := publishStagedBoundInfoFn(fsutil.StagedPublish{
 		FS:          fs,
 		Publish:     publish,
 		NoReplace:   noReplace,
@@ -1202,6 +1211,23 @@ func copyRestoreBytesPublish(fs afero.Fs, backup, dest string, publish func(afer
 			// identity-verified publish (the name-based fallback is refused),
 			// and the successful publish itself consumed the staged name, so
 			// there the skipped Remove has nothing to do; the posture is shared.
+			// Wave-61 (codex P2, PR#215): when that completed leg carries a
+			// VERIFIED non-nil identity (the ENOSYS-times-skipped publish —
+			// fsutil.PublishStagedBoundInfo hands back the post-publish-verified
+			// destination stat), the publish SUCCEEDED: dest provably carries
+			// the restored bytes. Treat it as a successful restore — hand the
+			// identity back so the caller's wave-31 revalidation + backup
+			// removal + journal consumption run exactly like the plain-success
+			// leg; on drift mid-revalidation the caller's wave-31 refusal
+			// fires (no consumption, no overwrite of a substitute). Pre-wave-61
+			// this returned the error, so the backup + journal entry were never
+			// consumed and every retry republished and failed again. A nil
+			// identity (the hard-link fallback's staged-cleanup refusal /
+			// rollback failure) keeps the legacy completed discipline below: no
+			// verified identity to revalidate against.
+			if fsutil.PublishCompleted(pubErr) && published != nil {
+				return restoredDestIdentityFromContent(published, publishedSum), nil
+			}
 			if fsutil.PublishCompleted(pubErr) {
 				logging.Warnf("staged restore copy %s left in place — publish completed but the staged name could not be re-proven (possibly foreign); manual cleanup advised: %v", staged, pubErr)
 			} else {
