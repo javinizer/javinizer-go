@@ -77,8 +77,7 @@ func TestPublishStagedBoundInfoW31POSIX_ENOSYSLegSkipsTimesNoIdentity(t *testing
 	require.ErrorIs(t, err, ErrPublishCompleted,
 		"times skipped on the ENOSYS leg classify as the completed publish, never a staging failure")
 	require.ErrorIs(t, err, syscall.ENOSYS)
-	require.Nil(t, info,
-		"no identity is handed back when the times were not applied — no stale-mtime false revalidation")
+	require.NotNil(t, info, "wave-61 (codex P2): the verified publish result IS handed back")
 
 	current, lerr := os.Lstat(dest)
 	require.NoError(t, lerr)
@@ -125,7 +124,7 @@ func TestPublishStagedBoundInfoW31POSIX_ENOSYSLegNeverRelookupsDest(t *testing.T
 	require.NotErrorIs(t, err, sentinel, "the wedged second lookup is never reached")
 	require.NotErrorIs(t, err, ErrPublishStagedIdentityIndeterminate,
 		"the indeterminate-refusal class has no producer on this leg anymore")
-	require.Nil(t, info)
+	require.NotNil(t, info, "wave-61 — handed back so restore converges")
 	require.Equal(t, 1, calls)
 	got, rerr := os.ReadFile(dest)
 	require.NoError(t, rerr)

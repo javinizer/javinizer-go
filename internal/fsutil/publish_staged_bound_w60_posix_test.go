@@ -93,7 +93,8 @@ func TestPublishStagedBoundW60POSIX_ENOSYSLegSkipsTimesSurfacesCompleted(t *test
 		"never the pre-publish times arm — its staged-name cleanup would remove a name the publish consumed")
 	require.NotErrorIs(t, err, ErrPublishStagedIdentityBreak,
 		"the publish was verified — no identity break")
-	require.Nil(t, info, "no identity is handed back on the times-skipped completed leg")
+	require.NotNil(t, info,
+		"wave-61 — destInfo travels with the completed outcome so reverts converge")
 
 	require.Equal(t, 1, *fdCalls, "exactly one fd-times attempt — the ENOSYS answer itself")
 	require.Equal(t, []string{dest}, *lookups,
@@ -158,7 +159,7 @@ func TestPublishStagedBoundW60POSIX_ENOSYSLegSubstituteAfterReverifyUntouched(t 
 	require.ErrorIs(t, err, syscall.ENOSYS)
 	require.NotErrorIs(t, err, ErrPublishStagedForeignOccupant,
 		"no foreign-occupant arm remains on this leg — nothing is inspected past the reverify")
-	require.Nil(t, info)
+	require.NotNil(t, info)
 	require.Equal(t, 1, lookups, "exactly one dest lookup: no check→apply window can be widened into a stamp")
 
 	linkInfo, lerr := os.Lstat(dest)

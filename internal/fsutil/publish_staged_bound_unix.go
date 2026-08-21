@@ -126,7 +126,12 @@ func publishStagedBoundOS(p StagedPublish) (os.FileInfo, error) {
 				// successful publish already consumed) and NOT an identity
 				// break; callers run their completed-publish discipline and
 				// their wave-31 revalidation owns post-reverify drift.
-				return nil, fmt.Errorf("staged times for %s never applied — no fd-scoped times primitive on this platform and the name-based fallback is refused (its check/apply window could chase a planted substitute); the destination carries the published bytes: %w: %w", p.Dest, deferredTimesErr, ErrPublishCompleted)
+				// Wave-61 (codex P2, PR#215): preserve destInfo through the completed
+				// outcome — callers (copyRestoreBytesPublish et al) read it and run the
+				// wave-31 revalidation + consumption flows; a nil identity with a
+				// journal-present entry would leave every later revert looping onto
+				// the same published destination forever.
+				return destInfo, fmt.Errorf("staged times for %s never applied — no fd-scoped times primitive on this platform and the name-based fallback is refused (its check/apply window could chase a planted substitute); the destination carries the published bytes: %w: %w", p.Dest, deferredTimesErr, ErrPublishCompleted)
 			}
 			return destInfo, nil
 		case lerr != nil && !os.IsNotExist(lerr):
