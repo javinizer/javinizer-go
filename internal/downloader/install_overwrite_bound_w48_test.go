@@ -585,6 +585,19 @@ type w48StatFailFile struct{ afero.File }
 
 func (w48StatFailFile) Stat() (os.FileInfo, error) { return nil, errors.New("w48 fd stat wedge") }
 
+// w57LstatFailFs wedges the path-identity capture (LstatIfPossible) while
+// leaving OpenFile intact, so the no-follow re-open still succeeds against an
+// existing candidate. It isolates bindCandidateProvenance's SECOND both-fail
+// leg — Lstat fails AND the re-opened handle's fstat fails (oerr == nil,
+// serr != nil, identity unknown) — from the first leg, where an absent name
+// fails BOTH Lstat and the open. Composed over w48StatFailOpenFileFs the
+// opened fd's Stat wedges, exercising the wave-57 serr != nil refusal.
+type w57LstatFailFs struct{ afero.Fs }
+
+func (w57LstatFailFs) LstatIfPossible(string) (os.FileInfo, bool, error) {
+	return nil, false, errors.New("w57 lstat wedge")
+}
+
 // w54SubstFs wraps an OpenFile result so the descriptor's Stat reports a
 // FOREIGN size (wave-54, finding 2): Lstat captures the real object, the
 // no-follow open + fstat diverges — a racer substituted the candidate inside
@@ -670,7 +683,42 @@ func TestBindCandidateProvenanceW48(t *testing.T) {
 		require.Nil(t, prov.handle, "no handle is opened on the both-fail refusal")
 	})
 
-	// Wave-54 (codex P2, PR#215 finding 2): the no-follow open + fstat MUST
+	// Wave-57 (codex P2): Lstat fails AND the fd fstat fails — neither the
+	// first snapshot nor the handle yields an identity, so a path-only publish
+	// is refused closed (errCandidateProvenanceUnprobeable), with nothing
+	// recorded or touched.
+	t.Run("unprobeable fstat on a missing candidate refuses closed", func(t *testing.T) {
+		fs := w48StatFailOpenFileFs{Fs: afero.NewMemMapFs()}
+		// Absent on the underlying FS: capture cannot prove identity; the
+		// open succeeds through the fake but its Stat wedged.
+		prov, err := bindCandidateProvenance(fs, "/candidate-w57")
+		require.ErrorIs(t, err, errCandidateProvenanceUnprobeable)
+		require.False(t, prov.identity.known)
+		require.Nil(t, prov.handle)
+	})
+
+	// Wave-57 (codex P2): the SECOND both-fail leg — Lstat fails AND the
+	// no-follow re-open SUCCEEDS but its fstat wedges. The opened handle yields
+	// no identity either (serr != nil, identity unknown), so a pathname-only
+	// publish is refused closed (errCandidateProvenanceUnprobeable). Unlike the
+	// "missing candidate" case above — where the absent name fails BOTH Lstat
+	// and the open — here the candidate IS openable: only its path identity and
+	// the fd's own fstat are unprobeable, so the leg guarded by
+	// `if serr != nil { ... if !provenance.identity.known` is actually reached.
+	t.Run("unprobeable fstat on an openable candidate refuses closed", func(t *testing.T) {
+		fs := w57LstatFailFs{Fs: w48StatFailOpenFileFs{Fs: afero.NewMemMapFs()}}
+		// The candidate EXISTS on the underlying FS so the no-follow re-open
+		// succeeds; w57LstatFailFs wedges the Lstat gate (identity unknown),
+		// and w48StatFailFile wedges the opened fd's Stat.
+		require.NoError(t, afero.WriteFile(fs, "/candidate-w57", []byte("cropped"), 0o644))
+
+		prov, err := bindCandidateProvenance(fs, "/candidate-w57")
+		require.ErrorIs(t, err, errCandidateProvenanceUnprobeable)
+		require.False(t, prov.identity.known, "Lstat wedged → no path identity handed down")
+		require.Nil(t, prov.handle, "the wedged fd is closed on the refusal")
+	})
+
+	// Wave-54 (codex P2): the no-follow open + fstat MUST
 	// equal the 1st Lstat snapshot — a racer substituting the candidate before
 	// the open publishes the substitute. A fstat that diverges (foreign size)
 	// is refused typed; the substitute is preserved, nothing installed.

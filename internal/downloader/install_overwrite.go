@@ -821,7 +821,16 @@ func bindCandidateProvenance(fsys afero.Fs, candidate string) (stagedInstallProv
 	info, serr := handle.Stat()
 	if serr != nil {
 		_ = handle.Close()
-		return provenance, nil //nolint:nilerr // intentional degrade: identity known from Lstat, no handle (fstat failed)
+		if !provenance.identity.known {
+			// Codex P2 (w57): Lstat failed AND fstat failed — neither the
+			// first snapshot nor the opened handle yields an identity, so a
+			// pathname-only publish would install an authenticated-nothing.
+			// Fail closed with no state change inc to the name or journal.
+			return stagedInstallProvenance{}, fmt.Errorf("candidate %s could not be proven for publish (path Lstat failed AND no-follow handle fstat failed: %v) — refusing to publish by pathname alone: %w", candidate, serr, errCandidateProvenanceUnprobeable)
+		}
+		// The Lstat snapshot already proves identity; we just lack a handle
+		// — degrade per the wave-45 posture is documented in the callers.
+		return provenance, nil //nolint:nilerr // identity known from Lstat; no handle available
 	}
 	// Wave-54 (finding 2): the no-follow open + fstat MUST equal the 1st Lstat
 	// snapshot — a racer substituting the candidate before the open publishes
