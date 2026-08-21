@@ -245,7 +245,16 @@ func (d *Downloader) download(ctx context.Context, url, destPath string, mediaTy
 			result.Duration = time.Since(startTime)
 			return result, nil
 		}
-		_ = d.fs.Remove(tempPath)
+		// Codex P2 (PR#215 finding, wave-62): install failed WITHOUT any
+		// publish — tempPath still names the validated object, or a foreign
+		// substitute swapped in after validation while our handle was open.
+		// Bind the cleanup to the identity snapshot exactly like the wave-59
+		// skipped leg; the closed provenance handle's identity is immutable.
+		if destStillHoldsInstalledObject(d.fs, tempPath, provenance.identity) {
+			_ = d.fs.Remove(tempPath)
+		} else if _, lerr := lstatBackupCandidate(d.fs, tempPath); !os.IsNotExist(lerr) {
+			logging.Warnf("downloader: failed install of %s left staged name %s in place — it no longer provably names the validated download (foreign substitution or indeterminate); preserved byte-intact for manual cleanup", destPath, tempPath)
+		}
 		result.Error = instErr
 		result.Duration = time.Since(startTime)
 		return result, result.Error
