@@ -131,13 +131,18 @@ type w25RemoveBackupErrorFs struct {
 // and rides through. Wave-44: the bound unlink NEVER path-removes the
 // scratch — its placeholder vacates onto a fresh claimed terminal name and
 // only that re-bound remove runs, on a ".vac." sibling — so the backup-
-// family remove count excludes ".vac." names entirely. The scripted wedge
-// keys on backup→quarantine-shaped publishes: the FIRST is the fallback
-// handoff's internal take-aside publish (backup → its scratch), the SECOND
-// is the rollback handoff's publish of the journaled backup onto its
-// quarantine name; after it, the FIRST non-".vac." backup-family remove is
-// the rollback's quarantine unlink of the journaled backup, which must
-// fail.
+// family remove count excludes ".vac." names entirely. Wave-r19: the
+// verified unlink's OWN bound terminal is likewise a ".vac." sibling, but
+// it holds the verified object (non-zero); the take-aside's 0-byte
+// placeholder removes (warn-only) and the bound-unlink's 0-byte terminal-
+// placeholder release ride through (size 0). Only the object-bearing
+// remove is the journaled backup's quarantine unlink, which must fail.
+// The scripted wedge keys on backup→quarantine-shaped publishes: the
+// FIRST is the fallback handoff's internal take-aside publish (backup →
+// its scratch), the SECOND is the rollback handoff's publish of the
+// journaled backup onto its quarantine name; after it, the FIRST object-
+// bearing backup-family remove is the rollback's quarantine unlink of the
+// journaled backup, which must fail.
 func (f *w25RemoveBackupErrorFs) Rename(oldname, newname string) error {
 	err := f.Fs.Rename(oldname, newname)
 	if err == nil && strings.Contains(newname, rollbackQuarantineSuffix) &&
@@ -151,11 +156,13 @@ func (f *w25RemoveBackupErrorFs) Rename(oldname, newname string) error {
 }
 
 func (f *w25RemoveBackupErrorFs) Remove(name string) error {
-	if f.armed && strings.Contains(filepath.Base(name), backupSuffixForDest+".") && !strings.Contains(name, ".vac.") {
-		f.postArms++
-		if f.postArms == 1 {
-			f.calls++
-			return f.err
+	if f.armed && strings.Contains(filepath.Base(name), backupSuffixForDest+".") {
+		if info, err := f.Fs.Stat(name); err == nil && info.Size() > 0 {
+			f.postArms++
+			if f.postArms == 1 {
+				f.calls++
+				return f.err
+			}
 		}
 	}
 	return f.Fs.Remove(name)

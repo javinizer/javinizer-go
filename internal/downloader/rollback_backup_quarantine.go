@@ -152,8 +152,13 @@ func claimRollbackQuarantineName(fsys afero.Fs, backup string) (string, os.FileI
 			}
 			if cerr := reservation.Close(); cerr != nil {
 				// A reservation whose close failed is in an unknown on-disk
-				// state — drop it rather than renaming over unverified bytes.
-				_ = fsys.Remove(candidate)
+				// state, but its identity WAS captured. Wave-r19 (codex P2,
+				// PR#215 finding F4 — the rollback twin): bind cleanup to the
+				// captured info — re-prove the candidate still names our
+				// claimed placeholder (SameFile) and unlink only when matching;
+				// retain on doubt (never a pathname Remove of an unproven
+				// object).
+				releaseClaimedReservation(fsys, candidate, info)
 				return "", nil, fmt.Errorf("close quarantine reservation %s: %w", candidate, cerr)
 			}
 			return candidate, info, nil
@@ -439,14 +444,30 @@ func (h *rollbackBackupQuarantine) removeVerified() error {
 	if cur.Size() != h.quar.Size() || !cur.ModTime().Equal(h.quar.ModTime()) {
 		return h.restoreOrJoin(refuseRollbackBackupRemoval(h.backup, h.phase, fmt.Sprintf("quarantine %s metadata changed between the re-verify and the unlink — foreign bytes preserved", h.quarantine)))
 	}
-	if err := h.fsys.Remove(h.quarantine); err != nil {
-		if os.IsNotExist(err) {
+	// F2 (codex P2, PR#215 — the downloader twin of history's F1): the final
+	// Remove ran by pathname after the identity checks — a swap in the
+	// verify→Remove gap deleted the replacement. The unlink now runs the
+	// file's own conditional take-aside binding (vacate→rebind→unlink
+	// terminal): the proven object vacates onto a fresh crypto-claimed
+	// terminal sibling, the terminal re-binds to the verified identity at
+	// syscall adjacency, and only the terminal — provably the verified
+	// object — is unlinked. Never a pathname Remove of an unproven object;\t// a plant swapped onto the quarantine name after the re-verify rides
+	// the no-replace vacate onto the terminal, fails the rebind, and
+	// rewinds byte-intact.
+	if uerr := fsutil.UnlinkVerified(h.fsys, h.quarantine, h.quar); uerr != nil {
+		if errors.Is(uerr, fsutil.ErrTakeAsideVanished) {
 			h.moved = false
 			absoluteQuarantine, _ := filepath.Abs(h.quarantine)
 			return fmt.Errorf("%w: %s (quarantine %s vanished under the unlink)", errRollbackQuarantineVanished, absoluteBackup, absoluteQuarantine)
 		}
-		logging.Warnf("downloader: %s failed to remove quarantined backup %s (quarantine %s): %v", h.phase, absoluteBackup, h.quarantine, err)
-		return h.restoreOrJoin(err)
+		// Any other wedge — a foreign terminal (ErrTakeAsideForeign), a
+		// wedged vacate/rebind/remove, or a wedged rewind — leaves the
+		// object byte-intact: the reride inside UnlinkVerified already
+		// rewound it onto the quarantine name NO-REPLACE, so restoreOrJoin
+		// moves it back onto the journaled name. Never a pathname Remove
+		// of an unproven object; the foreign bytes are preserved.
+		logging.Warnf("downloader: %s failed to bound-unlink quarantined backup %s (quarantine %s): %v", h.phase, absoluteBackup, h.quarantine, uerr)
+		return h.restoreOrJoin(uerr)
 	}
 	h.moved = false
 	h.unlinked = true

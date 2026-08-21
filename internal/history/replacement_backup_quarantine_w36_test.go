@@ -27,6 +27,7 @@ package history
 // unlink-time refusal classes.
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -39,6 +40,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/javinizer/javinizer-go/internal/fsutil"
+	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 )
 
@@ -178,18 +180,25 @@ func (f *w36QuarStatFailFs) OpenFile(name string, flag int, perm os.FileMode) (a
 
 // The claim's reservation-Stat wedge: the unknown-state placeholder is
 // dropped and the claim fails closed before any move consideration.
-func TestRemoveReplacementBackupW36_ReservationStatFailureDropsPlaceholder(t *testing.T) {
+func TestRemoveReplacementBackupW36_ReservationStatFailureRetainsPlaceholder(t *testing.T) {
 	base := afero.NewMemMapFs()
 	const backup = "/w36t/poster.jpg.dlbak." + p3HexA
 	w26WriteBackup(t, base, backup, "old")
 	sentinel := errors.New("w36 quarantine reservation stat wedged")
 	fs := &w36QuarStatFailFs{Fs: base, err: sentinel}
 
+	var logs bytes.Buffer
+	restoreLog := logging.SetOutput(&logs)
+	defer restoreLog()
+
 	err := quarantineAndRemoveVerifiedReplacementBackup(fs, backup, "w36 unit", nil, nil)
 	require.ErrorIs(t, err, sentinel)
 	require.Contains(t, err.Error(), "stat quarantine reservation")
 	require.Equal(t, "old", string(mustRead2(t, base, backup)))
-	require.Empty(t, w26DirQuarNames(t, base, "/w36t"), "the unknown-state placeholder was dropped")
+	require.Len(t, w26DirQuarNames(t, base, "/w36t"), 1,
+		"wave-r19 (F3): the unproven placeholder is retained for manual cleanup — never unlinked when identity is unprovable")
+	require.Contains(t, logs.String(), "left in place",
+		"the retain-on-doubt leg warned that the placeholder's identity could not be proven")
 }
 
 // F3: the hold's move-back surfaces the classified failure bound to the

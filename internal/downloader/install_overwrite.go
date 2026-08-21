@@ -650,8 +650,12 @@ func claimOverwriteBackupPath(fsys afero.Fs, destPath, opID string) (string, os.
 			}
 			if err := reservation.Close(); err != nil {
 				// A reservation whose close failed is in an unknown on-disk
-				// state — drop it rather than renaming over unverified bytes.
-				_ = fsys.Remove(candidate)
+				// state, but its identity WAS captured. Wave-r19 (codex P2,
+				// PR#215 finding F4): bind cleanup to the captured info — re-prove
+				// the candidate still names our claimed placeholder (SameFile)
+				// and unlink only when matching; retain on doubt (never a
+				// pathname Remove of an unproven object).
+				releaseClaimedReservation(fsys, candidate, info)
 				return "", nil, fmt.Errorf("close backup reservation %s: %w", candidate, err)
 			}
 			return candidate, info, nil

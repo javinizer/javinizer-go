@@ -207,13 +207,22 @@ func (f *w26QuarGateFs) Rename(oldname, newname string) error {
 }
 
 func (f *w26QuarGateFs) Remove(name string) error {
-	if name == f.quarName {
-		if f.notExist {
-			_ = f.Fs.Remove(name)
-			return os.ErrNotExist
-		}
-		if f.removeErr != nil {
-			return f.removeErr
+	// Wave-r19: the verified unlink runs the bound terminal unlink
+	// (vacate→rebind→unlink terminal), so the scripted victim is the
+	// object-bearing terminal Remove (a .dlq.-bearing name holding the
+	// verified object after the vacate), not the vacated quarantine name.
+	// The take-aside's 0-byte placeholder removes (warn-only) and the
+	// bound-unlink's own 0-byte terminal-placeholder release fall through
+	// (size 0); only the object-bearing remove carries the scripted arms.
+	if strings.Contains(name, backupQuarantineSuffix) {
+		if info, err := f.Fs.Stat(name); err == nil && info.Size() > 0 {
+			if f.notExist {
+				_ = f.Fs.Remove(name)
+				return os.ErrNotExist
+			}
+			if f.removeErr != nil {
+				return f.removeErr
+			}
 		}
 	}
 	return f.Fs.Remove(name)

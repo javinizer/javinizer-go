@@ -603,3 +603,67 @@ func (h *BoundAside) rerideTerminal(vacName string, err error) error {
 	}
 	return err
 }
+
+// UnlinkVerified performs the bound terminal unlink of a named object given
+// its verified identity — wave-r19 (codex P2, PR#215 findings F1/F2, the
+// removeVerified unlink window). The verified object vacates onto a fresh
+// crypto-claimed terminal sibling (claimed O_EXCL, released identity-bound
+// through the wave-58 double reproof), the terminal re-binds to the verified
+// identity at syscall adjacency, and ONLY the terminal — provably the
+// verified object — is unlinked: never a pathname Remove of an unproven
+// object. A plant swapped onto the name between the caller's verify and the
+// vacate rides the no-replace vacate onto the terminal, fails the rebind,
+// and rewinds byte-intact (the terminal object rides BACK onto the freed
+// name NO-REPLACE so the caller's compensation restores it). Any vanish —
+// the name before/during the vacate, the terminal after the vacate or at
+// the Remove — answers ErrTakeAsideVanished (the owned bytes vanished
+// unownably, never a consumed removal — the R4 posture the quarantine
+// holds carry); a foreign terminal answers ErrTakeAsideForeign (preserved
+// byte-intact); a wedged rewind joins ErrTakeAsideRestoreFailed (the
+// terminal object stays recoverable at the terminal name).
+func UnlinkVerified(fs afero.Fs, name string, verified os.FileInfo) error {
+	terminal, termClaim, cerr := claimTakeAsideVacName(fs, name)
+	if cerr != nil {
+		return fmt.Errorf("reserve the bound-unlink terminal for %s: %w", name, cerr)
+	}
+	if relErr := releaseTakeAsideVacClaim(fs, terminal, termClaim); relErr != nil {
+		return relErr
+	}
+	if moveErr := PublishNoReplace(fs, name, terminal); moveErr != nil {
+		if os.IsNotExist(moveErr) {
+			return fmt.Errorf("%w: %s vanished under the bound unlink", ErrTakeAsideVanished, name)
+		}
+		return fmt.Errorf("bound-unlink vacate of %s onto %s refused — occupant preserved byte-intact: %w", name, terminal, moveErr)
+	}
+	term, terr := asideLstat(fs, terminal)
+	switch {
+	case os.IsNotExist(terr):
+		return fmt.Errorf("%w: %s (terminal %s empty after the vacate)", ErrTakeAsideVanished, name, terminal)
+	case terr != nil:
+		return rerideBoundUnlink(fs, terminal, name, fmt.Errorf("inspect the bound-unlink terminal %s: %w", terminal, terr))
+	case !asideSameObject(term, verified):
+		return rerideBoundUnlink(fs, terminal, name, fmt.Errorf("bound-unlink terminal %s names a foreign object, not the verified one — foreign bytes preserved (never unlinked): %w", terminal, ErrTakeAsideForeign))
+	}
+	if rerr := fs.Remove(terminal); rerr != nil {
+		if os.IsNotExist(rerr) {
+			return fmt.Errorf("%w: %s (terminal %s vanished under the unlink)", ErrTakeAsideVanished, name, terminal)
+		}
+		return rerideBoundUnlink(fs, terminal, name, fmt.Errorf("remove the bound-unlink terminal %s: %w", terminal, rerr))
+	}
+	return nil
+}
+
+// rerideBoundUnlink rewinds the bound-unlink terminal object BACK onto the
+// freed name NO-REPLACE after a doubt leg (a foreign terminal, an
+// indeterminate lookup, or a wedged remove), restoring the pre-vacate
+// occupancy so the caller's compensation re-derives this attempt's outcome
+// against the pre-unlink names. A rewind refusal (the name re-claimed or
+// indeterminate) keeps BOTH occupants byte-intact and strands the terminal
+// object recoverable at the terminal name with ErrTakeAsideRestoreFailed
+// joined.
+func rerideBoundUnlink(fs afero.Fs, terminal, name string, err error) error {
+	if back := PublishNoReplace(fs, terminal, name); back != nil {
+		return errors.Join(err, fmt.Errorf("%w: %s re-claimed or indeterminate — the terminal object stays recoverable at %s: %v", ErrTakeAsideRestoreFailed, name, terminal, back))
+	}
+	return err
+}
