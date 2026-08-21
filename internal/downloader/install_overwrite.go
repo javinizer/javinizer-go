@@ -67,6 +67,15 @@ var publishStagedBoundFn = fsutil.PublishStagedBoundInfo
 // instant between the staged copy and the wave-30 bound publish.
 var restoreStagingOwnershipFn = fsutil.RestoreStagingOwnership
 
+// rollbackPublishStagedBoundInfoFn is the bound-publish seam behind
+// copyBackupToDestPublish (mirroring history's publishStagedBoundInfoFn):
+// production forwards to fsutil.PublishStagedBoundInfo; tests replay the
+// r15 completed-with-identity outcome (the ENOSYS-times-skipped leg —
+// PublishStagedBoundInfo hands back the post-publish-verified destination
+// stat alongside an ErrPublishCompleted-carrying error) without the
+// cross-package fd-times plumbing.
+var rollbackPublishStagedBoundInfoFn = fsutil.PublishStagedBoundInfo
+
 // copyBackupToDest restores the backup bytes onto dest WITHOUT consuming the
 // backup: staged adjacent write + replace-aware swap (Win-safe), streamed
 // through a bounded buffer. Used by the confirm-failure rollback so the
@@ -216,7 +225,7 @@ func copyBackupToDestPublish(fsys afero.Fs, backup, dest string, publish func(af
 	// revalidate dest against exactly the staged object as it landed —
 	// recovery-loop re-stages included — before the backup is removed and the
 	// journal entry retracted.
-	published, pubErr := fsutil.PublishStagedBoundInfo(fsutil.StagedPublish{
+	published, pubErr := rollbackPublishStagedBoundInfoFn(fsutil.StagedPublish{
 		FS:          fsys,
 		Publish:     publish,
 		NoReplace:   noReplace,
@@ -257,6 +266,21 @@ func copyBackupToDestPublish(fsys afero.Fs, backup, dest string, publish func(af
 			// joins the completed class with the times SKIPPED after a verified
 			// publish — the successful publish consumed the staged name there,
 			// so the skipped Remove is a no-op on that leg as well.
+			// r15 (codex P2, PR#215 — mirror r14's copyRestoreBytesPublish):
+			// a completed leg carrying a VERIFIED non-nil identity (the
+			// ENOSYS-times-skipped publish — PublishStagedBoundInfo hands back
+			// the post-publish-verified destination stat) means the publish
+			// SUCCEEDED: dest provably carries the restored bytes. Return the
+			// identity so the caller's wave-31 revalidation + backup removal +
+			// journal retraction run like the plain-success leg; on drift the
+			// caller's wave-31 refusal fires. Pre-r15 this returned the error,
+			// so the ConfirmReplacement-failure rollback never removed the backup
+			// nor retracted the entry — the armed journal entry stayed against
+			// the dest forever. A nil identity keeps the legacy discipline below.
+			if fsutil.PublishCompleted(pubErr) && published != nil {
+				facts.restored = installedIdentityFromFileInfo(published)
+				return facts, nil
+			}
 			if fsutil.PublishCompleted(pubErr) {
 				logging.Warnf("downloader: staged rollback copy %s left in place — publish completed but the staged name could not be re-proven (possibly foreign); manual cleanup advised: %v", staged, pubErr)
 			} else {
