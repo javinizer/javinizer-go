@@ -236,11 +236,18 @@ func TestInstallOverwritingW36_ClaimStatFailureDropsPlaceholder(t *testing.T) {
 	require.True(t, replaced)
 	require.Equal(t, "current", string(mustReadDownloaderW7(t, base, dest)), "destination untouched")
 	require.Empty(t, recorder.get(), "a failed claim never arms the ledger")
+	// Wave-62 (codex P2): with the placeholder's identity unprovable, the
+	// name might ALREADY be foreign — it is RETAINED for manual cleanup
+	// rather than unlinked by pathname.
 	entries, rerr := afero.ReadDir(base, dir)
 	require.NoError(t, rerr)
+	kept := 0
 	for _, e := range entries {
-		require.NotContains(t, e.Name(), backupSuffixForDest+".", "the unknown-state placeholder was dropped")
+		if strings.Contains(e.Name(), backupSuffixForDest+".") {
+			kept++
+		}
 	}
+	require.Equal(t, 1, kept, "the unproven reservation is retained for manual cleanup, never unlinked blind")
 }
 
 // w36StatFailOpenFs fails the Stat of every freshly-claimed backup

@@ -614,10 +614,14 @@ func claimOverwriteBackupPath(fsys afero.Fs, destPath, opID string) (string, os.
 			info, statErr := reservation.Stat()
 			if statErr != nil {
 				// A reservation whose identity cannot even be read is in an
-				// unknown on-disk state — drop it rather than renaming over
-				// unverified bytes.
+				// unknown on-disk state. Codex P2 (wave-62): the name's
+				// identity is UNPROVEN — between our O_EXCL create and now
+				// another writer may have replaced it, so unlinking the path
+				// could delete foreign bytes. Retain it for manual cleanup
+				// (the name stays claimed and visible; nothing here mutates
+				// on doubt).
 				_ = reservation.Close()
-				_ = fsys.Remove(candidate)
+				logging.Warnf("downloader: backup reservation %s left in place — its identity could not be proven (%v); manual cleanup advised", candidate, statErr)
 				return "", nil, fmt.Errorf("stat backup reservation %s: %w", candidate, statErr)
 			}
 			if err := reservation.Close(); err != nil {
@@ -1006,6 +1010,14 @@ func (d *Downloader) installOverwriting(ctx context.Context, stagedPath, destPat
 		return false, true, fmt.Errorf("failed to arm replacement busy marker for %s: %w", destPath, busyErr)
 	}
 	defer busyRelease()
+
+	// Codex P2 (wave-62): the blocking marker acquisition may complete only
+	// after ctx canceled — a stalled-Fs wait under a running cancellation must
+	// NOT publish the media. Gate the remainder on ctx.Err() like the other
+	// blocking checks in this flow.
+	if cerr := ctx.Err(); cerr != nil {
+		return false, true, fmt.Errorf("install overwrite of %s canceled while acquiring the busy marker: %w", destPath, cerr)
+	}
 
 	// codex PR#215: classify existence with Lstat, not Stat. os.Stat follows
 	// symlinks, so a DANGLING symlink at the destination reports ENOENT and
