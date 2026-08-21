@@ -159,7 +159,7 @@ func TestReplacementBusyW57_ClaimCleanupUnlinkFailurePreservesOccupant(t *testin
 	fs := &w59TerminalRemoveFailFs{
 		Fs:   &w47ClaimWedgeFs{Fs: base, writeErr: writeErr},
 		err:  removeErr,
-		fail: 1,
+		fail: 2, // 1 = dropVacatedReservation's bound cleanup (F2), 2 = hold.Unlink's marker terminal
 	}
 
 	var logs bytes.Buffer
@@ -168,10 +168,12 @@ func TestReplacementBusyW57_ClaimCleanupUnlinkFailurePreservesOccupant(t *testin
 
 	_, err := AcquireReplacementBusy(fs, dest)
 	require.ErrorIs(t, err, writeErr, "the original claim write failure still surfaces")
-	require.Equal(t, 1, fs.fails,
-		"the bound unlink's terminal remove must have been armed and refused exactly once")
+	require.Equal(t, 2, fs.fails,
+		"both bound unlinks' terminal removes must have been armed and refused")
+	require.Contains(t, logs.String(), "could not be bound-unlinked",
+		"the claim cleanup warned when the vacated reservation's bound cleanup refused (F2)")
 	require.Contains(t, logs.String(), "unlink refused",
-		"the claim cleanup warned when the bound unlink refused")
+		"the claim cleanup warned when the marker's bound unlink refused")
 	// The marker was taken aside onto the scratch name and the unlink
 	// refused — the predictable marker name is free (the take-aside moved
 	// it off), and the object survives byte-intact at the inert scratch

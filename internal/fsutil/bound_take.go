@@ -181,8 +181,12 @@ var takeAsideVacRandReader io.Reader = cryptorand.Reader
 // resolves in favor of the claim — os.IsExist re-draws), capture the
 // reservation's own identity through the open handle's pre-close Stat
 // (mirroring the quarantine-claim discipline). A reservation whose identity
-// cannot be read (or whose close fails) is dropped rather than relocating
-// anything near unverified bytes.
+// cannot be read is RETAINED for manual cleanup (wave-r19, finding F1 — the
+// name's identity is unproven, so a pathname Remove could delete foreign
+// bytes; nothing here mutates on doubt). A reservation whose close fails
+// keeps its captured identity, and the cleanup is bound to it: the candidate
+// is released identity-bound (releaseTakeAsideVacClaim — SameFile at unlink
+// adjacency, retain on doubt, never a pathname Remove of an unproven object).
 func claimTakeAsideVacName(fs afero.Fs, scratch string) (string, os.FileInfo, error) {
 	for attempt := 0; attempt < takeAsideVacClaimTries; attempt++ {
 		var token [16]byte
@@ -195,12 +199,28 @@ func claimTakeAsideVacName(fs afero.Fs, scratch string) (string, os.FileInfo, er
 		case rerr == nil:
 			info, serr := reservation.Stat()
 			if serr != nil {
+				// Wave-r19 (codex P2, PR#215 finding F1, mirroring
+				// claimBackupQuarantineName's wave-62 fix): the name's
+				// identity is UNPROVEN — between our O_EXCL create and
+				// now another writer may have replaced it, so unlinking
+				// the path could delete foreign bytes. Retain it for
+				// manual cleanup (the name stays claimed and visible;
+				// nothing here mutates on doubt).
 				_ = reservation.Close()
-				_ = fs.Remove(candidate)
+				logging.Warnf("take-aside vacated reservation %s left in place — its identity could not be proven (%v); manual cleanup advised", candidate, serr)
 				return "", nil, fmt.Errorf("stat take-aside vacated reservation %s: %w", candidate, serr)
 			}
 			if cerr := reservation.Close(); cerr != nil {
-				_ = fs.Remove(candidate)
+				// The reservation's identity WAS captured (info). Wave-r19
+				// (codex P2, PR#215 finding F1 — the history twin): bind
+				// the cleanup to the captured identity — re-prove the
+				// candidate still names our claimed placeholder (SameFile
+				// at unlink adjacency) and unlink only when matching;
+				// retain on doubt (never a pathname Remove of an
+				// unproven object).
+				if relErr := releaseTakeAsideVacClaim(fs, candidate, info); relErr != nil {
+					logging.Warnf("take-aside vacated reservation %s close-failure cleanup refused — the occupant no longer provably names our claimed placeholder (%v); left byte-intact for manual cleanup", candidate, relErr)
+				}
 				return "", nil, fmt.Errorf("close take-aside vacated reservation %s: %w", candidate, cerr)
 			}
 			return candidate, info, nil
@@ -272,8 +292,24 @@ func dropVacatedReservation(fs afero.Fs, vacName string, claim os.FileInfo) {
 		logging.Warnf("take-aside vacated reservation cleanup of %s refused — the occupant no longer provably names the claimed placeholder; left byte-intact for manual cleanup", vacName)
 		return
 	}
-	if rerr := fs.Remove(vacName); rerr != nil && !os.IsNotExist(rerr) {
-		logging.Warnf("take-aside vacated reservation %s could not be removed after a successful take (%v) — inert residue left for manual cleanup", vacName, rerr)
+	// F2 (codex P2, PR#215): the final Remove ran by pathname after the
+	// identity check — a swap in the verify→Remove gap deleted the
+	// replacement. Route the removal through the wave-r19 conditional
+	// construction (UnlinkVerified — same discipline as the history/
+	// downloader quarantine twins): the proven object vacates onto a fresh
+	// crypto-claimed terminal sibling, the terminal re-binds to the claim
+	// identity at syscall adjacency, and only the terminal — provably the
+	// claimed placeholder — is unlinked. Never a pathname Remove of an
+	// unproven object; a plant swapped onto the vacated name after the
+	// re-proof rides the no-replace vacate onto the terminal, fails the
+	// rebind, and rewinds byte-intact. A name that vanished on its own
+	// completed the cleanup by itself; any other doubt retains the
+	// occupant byte-intact with a warn (the take itself already stands).
+	if uerr := UnlinkVerified(fs, vacName, claim); uerr != nil {
+		if errors.Is(uerr, ErrTakeAsideVanished) {
+			return // the placeholder vanished on its own — cleanup done by itself
+		}
+		logging.Warnf("take-aside vacated reservation %s could not be bound-unlinked after a successful take (%v) — occupant left byte-intact for manual cleanup", vacName, uerr)
 	}
 }
 

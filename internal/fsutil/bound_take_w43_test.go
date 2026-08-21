@@ -22,6 +22,7 @@ package fsutil
 // by counting lookups.
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"strings"
@@ -29,6 +30,8 @@ import (
 
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
+
+	"github.com/javinizer/javinizer-go/internal/logging"
 )
 
 // w43VacNames lists the vacated-name residue (".vac." siblings) in dir.
@@ -261,21 +264,28 @@ func TestTakeAsideW43_VacatedClaimLegs(t *testing.T) {
 		require.Equal(t, "journal bytes", string(w38Read(t, base, src)))
 	})
 
-	t.Run("claim whose identity cannot be read drops its own reservation", func(t *testing.T) {
+	t.Run("claim whose identity cannot be read is retained (wave-r19, F1)", func(t *testing.T) {
 		base := afero.NewMemMapFs()
 		src, scratch, claim := w38TakeFixture(t, base, "/out/w43-claimstat")
 		srcInfo, _ := base.Stat(src)
 		sentinel := errors.New("w43 claim stat wedged")
 		fs := &w43VacClaimHandleFailFs{Fs: base, statErr: sentinel}
 
+		var logs bytes.Buffer
+		restoreLog := logging.SetOutput(&logs)
+		t.Cleanup(restoreLog)
+
 		hold, err := TakeAside(TakeAsideSpec{FS: fs, Src: src, Scratch: scratch, Claim: claim, Prove: w38SameProve(srcInfo)})
 		require.Nil(t, hold)
 		require.ErrorIs(t, err, sentinel)
 		require.ErrorContains(t, err, "stat take-aside vacated reservation")
-		require.Empty(t, w43VacNames(t, base, "/out/w43-claimstat"), "the unreadable claim dropped itself")
+		require.Len(t, w43VacNames(t, base, "/out/w43-claimstat"), 1,
+			"wave-r19 (F1): the unproven claim is retained for manual cleanup — never unlinked when identity is unprovable")
+		require.Contains(t, logs.String(), "left in place",
+			"the retain-on-doubt leg warned that the placeholder's identity could not be proven")
 	})
 
-	t.Run("claim whose close fails drops its own reservation", func(t *testing.T) {
+	t.Run("claim whose close fails releases its reservation identity-bound (wave-r19, F1)", func(t *testing.T) {
 		base := afero.NewMemMapFs()
 		src, scratch, claim := w38TakeFixture(t, base, "/out/w43-claimclose")
 		srcInfo, _ := base.Stat(src)
@@ -383,6 +393,36 @@ func TestTakeAsideW43_VacatedClaimLegs(t *testing.T) {
 	})
 }
 
+// Wave-r19 (codex P2, PR#215 finding F1): the close-failure leg binds the
+// cleanup to the captured identity (releaseTakeAsideVacClaim — SameFile at
+// unlink adjacency, retain on doubt, never a pathname Remove). A foreign plant
+// swapped onto the candidate at Close is refused by the identity-bound release
+// and retained byte-intact; the close error still surfaces.
+func TestClaimTakeAsideVacNameW19_CloseFailureForeignSwapRetains(t *testing.T) {
+	base := afero.NewMemMapFs()
+	require.NoError(t, base.MkdirAll("/out", 0o755))
+	scratch := "/out/scratch"
+	plant := []byte("foreign plant swapped onto the vacated claim")
+	closeErr := errors.New("w19 claim close wedged")
+	fs := &w43VacClaimHandleFailFs{Fs: base, closeErr: closeErr, plant: plant}
+
+	var logs bytes.Buffer
+	restoreLog := logging.SetOutput(&logs)
+	t.Cleanup(restoreLog)
+
+	name, info, err := claimTakeAsideVacName(fs, scratch)
+	require.ErrorIs(t, err, closeErr, "the original close failure still surfaces")
+	require.Empty(t, name)
+	require.Nil(t, info)
+	require.Contains(t, logs.String(), "close-failure cleanup refused",
+		"the close-failure cleanup warned when the identity-bound release refused the swapped occupant")
+	// The foreign plant is retained at the candidate name byte-intact — the
+	// identity-bound release never unlinked an unproven occupant.
+	names := w43VacNames(t, base, "/out")
+	require.Len(t, names, 1, "the foreign plant is retained — never a pathname Remove")
+	require.Equal(t, plant, w38Read(t, base, "/out/"+names[0]))
+}
+
 func TestTakeAsideW43_CleanupLegs(t *testing.T) {
 	t.Run("vacated name vanished on its own completes the cleanup", func(t *testing.T) {
 		base := afero.NewMemMapFs()
@@ -402,7 +442,7 @@ func TestTakeAsideW43_CleanupLegs(t *testing.T) {
 		src, scratch, claim := w38TakeFixture(t, base, "/out/w43-cleanfail")
 		srcInfo, _ := base.Stat(src)
 		sentinel := errors.New("w43 cleanup unlink wedged")
-		fs := &w43VacRemoveFailFs{Fs: base, err: sentinel, failAt: 2}
+		fs := &w43VacRemoveFailFs{Fs: base, err: sentinel, failAt: 3}
 
 		hold, err := TakeAside(TakeAsideSpec{FS: fs, Src: src, Scratch: scratch, Claim: claim, Prove: w38SameProve(srcInfo)})
 		require.NoError(t, err, "the cleanup wedge is warn-only — the take stands")
@@ -740,6 +780,7 @@ type w43VacClaimHandleFailFs struct {
 	afero.Fs
 	statErr  error
 	closeErr error
+	plant    []byte // non-nil: swap the candidate for these bytes at Close (the F1 close-failure foreign-swap leg)
 	done     bool
 }
 
@@ -749,13 +790,16 @@ func (f *w43VacClaimHandleFailFs) OpenFile(name string, flag int, perm os.FileMo
 		return file, err
 	}
 	f.done = true
-	return &w43VacClaimHandleFailFile{File: file, statErr: f.statErr, closeErr: f.closeErr}, nil
+	return &w43VacClaimHandleFailFile{File: file, fs: f.Fs, name: name, statErr: f.statErr, closeErr: f.closeErr, plant: f.plant}, nil
 }
 
 type w43VacClaimHandleFailFile struct {
 	afero.File
+	fs       afero.Fs
+	name     string
 	statErr  error
 	closeErr error
+	plant    []byte
 }
 
 func (f *w43VacClaimHandleFailFile) Stat() (os.FileInfo, error) {
@@ -766,14 +810,23 @@ func (f *w43VacClaimHandleFailFile) Stat() (os.FileInfo, error) {
 }
 
 func (f *w43VacClaimHandleFailFile) Close() error {
+	_ = f.File.Close()
 	if f.closeErr != nil {
+		if f.plant != nil {
+			// Wave-r19 (F1): swap the candidate for a foreign plant before the
+			// identity-bound release — the close-failure cleanup must refuse it
+			// byte-intact (never a pathname Remove of an unproven object).
+			_ = f.fs.Remove(f.name)
+			_ = afero.WriteFile(f.fs, f.name, f.plant, 0o600)
+		}
 		return f.closeErr
 	}
-	return f.File.Close()
+	return nil
 }
 
 // w43VacRemoveFailFs wedges the failAt-th Remove of a ".vac." name (1 = the
-// claim release, 2 = the success-path cleanup).
+// claim release, 2 = the bound cleanup's terminal release (wave-r19, F2),
+// 3 = the bound cleanup's verified terminal unlink).
 type w43VacRemoveFailFs struct {
 	afero.Fs
 	err    error

@@ -173,24 +173,48 @@ func backupQuarantineReservationStillOurs(fs afero.Fs, quarantine string, claim 
 
 // releaseBackupQuarantineReservation unlinks a still-claimed quarantine
 // reservation after a failed handoff — bound to the claim's identity (same
-// discipline as the downloader's releaseClaimedReservation): only the
-// verified 0-byte placeholder this operation reserved may be removed. A
-// reservation that VANISHED on its own needs no cleanup. Any other answer —
-// foreign occupant, identity mismatch, indeterminate lookup — is a REFUSAL:
-// the name is left byte-intact and the handoff failure surfaces with the
-// occupant preserved.
+// discipline as the downloader's releaseClaimedReservation and fsutil's
+// releaseTakeAsideVacClaim): only the verified 0-byte placeholder this
+// operation reserved may be removed. A reservation that VANISHED on its own
+// needs no cleanup. Any other answer — foreign occupant, identity mismatch,
+// indeterminate lookup — is a REFUSAL: the name is left byte-intact and the
+// handoff failure surfaces with the occupant preserved. Wave-r19 (codex P2,
+// PR#215 finding F3): the claim's identity is carried from claim time and
+// re-proved twice at unlink adjacency (SameFile-lstat pair) before the
+// Remove, so a plant swapped into the verify→Remove window keeps its bytes.
 func releaseBackupQuarantineReservation(fs afero.Fs, quarantine string, claim os.FileInfo) {
-	err := backupQuarantineReservationStillOurs(fs, quarantine, claim)
-	if err == nil {
-		// Proven ours at syscall adjacency — release the placeholder so a
-		// retry never has to climb past it.
-		_ = fs.Remove(quarantine)
+	// F3 (codex P2, PR#215): the verify→Remove window —
+	// backupQuarantineReservationStillOurs proved the reservation ours then
+	// fs.Remove ran by pathname; a plant swapped in between had its foreign
+	// bytes deleted. Carry the reservation's identity from claim time and
+	// unlink ONLY when still equal at adjacency (SameFile-lstat pair: a
+	// second no-follow Lstat must equal BOTH the claim record and the first
+	// proof), retain with warn on doubt. Mirrors fsutil's
+	// releaseTakeAsideVacClaim and the downloader's releaseClaimedReservation.
+	cur, lerr := lstatRestoreSource(fs, quarantine)
+	switch {
+	case errors.Is(lerr, afero.ErrFileNotFound):
+		return
+	case lerr != nil:
+		logging.Warnf("failed quarantine-reservation cleanup of %s refused — the reservation could not be inspected before its release (%v); the occupant is left byte-intact", quarantine, lerr)
+		return
+	case !backupQuarantinePlaceholderMatches(cur, claim):
+		logging.Warnf("failed quarantine-reservation cleanup of %s refused — the reservation no longer names our claimed placeholder; the occupant is left byte-intact", quarantine)
 		return
 	}
-	if errors.Is(err, afero.ErrFileNotFound) {
+	repro, rerr := lstatRestoreSource(fs, quarantine)
+	if rerr != nil {
+		if errors.Is(rerr, afero.ErrFileNotFound) {
+			return
+		}
+		logging.Warnf("failed quarantine-reservation cleanup of %s refused at the adjacency re-proof (%v); the occupant is left byte-intact", quarantine, rerr)
 		return
 	}
-	logging.Warnf("failed quarantine-reservation cleanup of %s refused — the reservation no longer provably names our claimed placeholder (%v); the occupant is left byte-intact", quarantine, err)
+	if !backupQuarantinePlaceholderMatches(repro, claim) || !backupQuarantinePlaceholderMatches(repro, cur) {
+		logging.Warnf("failed quarantine-reservation cleanup of %s refused — the reservation changed identity between the proof and the unlink; the occupant is left byte-intact", quarantine)
+		return
+	}
+	_ = fs.Remove(quarantine)
 }
 
 // backupQuarantinePlaceholderMatches reports whether cur — the object the
