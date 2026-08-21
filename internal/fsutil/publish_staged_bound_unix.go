@@ -7,19 +7,7 @@ import (
 	"fmt"
 	"os"
 	"syscall"
-	"time"
-
-	"github.com/spf13/afero"
 )
-
-// publishStagedBoundDeferredChtimes is the ENOSYS-platform deferred times leg
-// (fd-scoped wrappers missing, staging_times_unixother.go): a Chtimes on the
-// PUBLISHED destination name. Seam discipline like stagedHandleChtimes: no
-// portable setup fails utimens on a just-published name for BOTH uid 0 and
-// an ordinary user, so the failure leg is replayed here.
-var publishStagedBoundDeferredChtimes = func(fs afero.Fs, name string, atime, mtime time.Time) error {
-	return fs.Chtimes(name, atime, mtime)
-}
 
 // publishStagedBoundOS is PublishStagedBound's POSIX leg: the staged handle
 // stays OPEN through the path publish (rename/hard-link publishes never
@@ -33,8 +21,11 @@ var publishStagedBoundDeferredChtimes = func(fs afero.Fs, name string, atime, mt
 //
 //  1. verify the staged name STILL addresses the handle's inode (a swapped
 //     name is refused BEFORE touching it, exactly like wave-29);
-//  2. land the times through the handle (ENOSYS platforms defer them onto
-//     the published name below);
+//  2. land the times through the handle (ENOSYS platforms have no
+//     fd-scoped primitive: the times are SKIPPED there and the verified
+//     publish classifies completed per wave-60 — r12, codex P2, PR#215
+//     "keep deferred timestamps bound to the published inode" — refuses
+//     the pre-r12 name-based Chtimes onto the published name entirely);
 //  3. publish by path;
 //  4. re-verify: Lstat(dest) must name the handle's inode. A match is
 //     done. A mismatch means the published bytes are not ours — ours was
@@ -77,7 +68,7 @@ func publishStagedBoundOS(p StagedPublish) (os.FileInfo, error) {
 			_ = fh.Close()
 			return nil, fmt.Errorf("%w: %w", ErrPublishStagedVerify, verr)
 		}
-		pendingTimes := false
+		var deferredTimesErr error
 		if p.ApplyTimes {
 			if terr := stagedHandleChtimes(of.Fd(), p.Atime, p.Mtime); terr != nil {
 				if !errors.Is(terr, syscall.ENOSYS) {
@@ -85,10 +76,18 @@ func publishStagedBoundOS(p StagedPublish) (os.FileInfo, error) {
 					return nil, &StagingTimesError{Staged: staged, Err: terr}
 				}
 				// No fd-scoped timestamp wrapper on this platform (see
-				// staging_times_unixother.go): defer to the name-based leg
-				// against the PUBLISHED name — the staged name no longer
-				// exists by then.
-				pendingTimes = true
+				// staging_times_unixother.go). r12: the pre-r12 fallback —
+				// deferring the times onto the PUBLISHED name — is REFUSED
+				// entirely: its identity re-proof→Chtimes window (the staged
+				// name is consumed by then, so a pathname was the only
+				// spelling) let a directory writer land OUR stamp on a
+				// substitute's metadata — planted symlinks are chased — and
+				// wave-60's error-step re-derivation could classify that harm,
+				// never prevent it. Record the ENOSYS answer; the verified-
+				// publish arm below reports the completed classification with
+				// the times skipped (never touching foreign bytes OR foreign
+				// metadata).
+				deferredTimesErr = terr
 			}
 		}
 		if pubErr := p.Publish(p.FS, staged, p.Dest); pubErr != nil {
@@ -111,70 +110,24 @@ func publishStagedBoundOS(p StagedPublish) (os.FileInfo, error) {
 		destInfo, lerr := publishStagedBoundDestLstat(p.Dest)
 		switch {
 		case lerr == nil && os.SameFile(handleInfo, destInfo):
-			// The publish provably landed OUR inode at dest. Times deferred
-			// on ENOSYS platforms land on the published name now; the handle
-			// then closes — a post-publish close error cannot undo the
-			// proven install and is deliberately not surfaced.
-			if pendingTimes {
-				// wave-32 (codex local round 2, PR#215 finding R5): the name-
-				// based times leg re-proves the published name STILL addresses
-				// the staged inode BEFORE the Chtimes — a foreign occupant in
-				// the match→Chtimes window never gets its times clobbered, it
-				// gets a typed refusal with the times skipped; an indeterminate
-				// lookup is refused the same way.
-				ownerNow, oerr := publishStagedBoundDestLstat(p.Dest)
-				switch {
-				case oerr == nil && os.SameFile(handleInfo, ownerNow):
-					// still ours — the deferred times may land on the name.
-				case oerr == nil:
-					_ = fh.Close()
-					return nil, fmt.Errorf("%w at %s — foreign occupant before the deferred times leg, name-based times skipped: %w: %w", ErrPublishStagedForeignOccupant, p.Dest, ErrPublishStagedIdentityIndeterminate, ErrPublishStagedIdentityBreak)
-				case os.IsNotExist(oerr):
-					_ = fh.Close()
-					return nil, fmt.Errorf("published destination %s vanished before the deferred times leg: %w: %w", p.Dest, ErrPublishStagedIdentityIndeterminate, ErrPublishStagedIdentityBreak)
-				default:
-					_ = fh.Close()
-					return nil, fmt.Errorf("published destination %s indeterminate before the deferred times leg: %w: %w: %w", p.Dest, oerr, ErrPublishStagedIdentityIndeterminate, ErrPublishStagedIdentityBreak)
-				}
-				if cerr := publishStagedBoundDeferredChtimes(p.FS, p.Dest, p.Atime, p.Mtime); cerr != nil {
-					// wave-60 (codex P2, PR#215): this leg runs ONLY after a
-					// verified no-replace publish AND a pre-Chtimes relookup
-					// that re-proved dest still names the staged inode, so a
-					// Chtimes failure here is NOT a pre-publish staging failure
-					// — the destination already carries the published bytes.
-					// Re-derive dest's identity at the error step: if dest
-					// STILL names the published inode, surface the times error
-					// joined with ErrPublishCompleted so callers run their
-					// completed-publish discipline (journal confirm + backup
-					// consumed paths, established wave-34); if the identity
-					// drifted the published bytes are no longer provably at
-					// dest, so keep the plain *StagingTimesError (retained
-					// backup, unconfirmed journal) like a pre-publish failure.
-					_ = fh.Close()
-					if verified, verr := publishStagedBoundDestLstat(p.Dest); verr == nil && os.SameFile(handleInfo, verified) {
-						return nil, fmt.Errorf("deferred staged times for %s after a verified publish (destination carries the published bytes): %w: %w", p.Dest, cerr, ErrPublishCompleted)
-					}
-					return nil, &StagingTimesError{Staged: p.Dest, Err: cerr}
-				}
-				// wave-31: hand back a FRESH destination identity carrying the
-				// just-applied times — destInfo predates the deferred Chtimes,
-				// and the callers' destination revalidations compare mtime.
-				// wave-32 (finding R5): a FAILED relookup used to degrade to a
-				// nil identity the callers read as "nothing to check — safe";
-				// it proves NOTHING about the published name, so it now refuses
-				// typed. Equally, a relookup naming a DIFFERENT inode is never
-				// handed back as the published identity.
-				fresh, ferr := publishStagedBoundDestLstat(p.Dest)
-				_ = fh.Close()
-				if ferr != nil {
-					return nil, fmt.Errorf("post-publish identity relookup of %s after the deferred times leg: %w: %w: %w", p.Dest, ferr, ErrPublishStagedIdentityIndeterminate, ErrPublishStagedIdentityBreak)
-				}
-				if !os.SameFile(handleInfo, fresh) {
-					return nil, fmt.Errorf("%w at %s — destination no longer names the staged inode after the deferred times leg: %w", ErrPublishStagedForeignOccupant, p.Dest, ErrPublishStagedIdentityBreak)
-				}
-				return fresh, nil
-			}
+			// The publish provably landed OUR inode at dest. The handle
+			// closes — a post-publish close error cannot undo the proven
+			// install and is deliberately not surfaced.
 			_ = fh.Close()
+			if deferredTimesErr != nil {
+				// r12: the ENOSYS deferral completes the publish WITHOUT the
+				// times (and without any further name lookup or mutation of
+				// the destination — the match above is the LAST dest proof
+				// this leg needs, so no check→apply window exists at all).
+				// The classification is wave-60's completed one: the
+				// destination was VERIFIED to carry the published bytes, so
+				// this is NOT a *StagingTimesError (a pre-publish staging
+				// failure whose cleanup removes the staged name — a name the
+				// successful publish already consumed) and NOT an identity
+				// break; callers run their completed-publish discipline and
+				// their wave-31 revalidation owns post-reverify drift.
+				return nil, fmt.Errorf("staged times for %s never applied — no fd-scoped times primitive on this platform and the name-based fallback is refused (its check/apply window could chase a planted substitute); the destination carries the published bytes: %w: %w", p.Dest, deferredTimesErr, ErrPublishCompleted)
+			}
 			return destInfo, nil
 		case lerr != nil && !os.IsNotExist(lerr):
 			// Indeterminate destination: nothing proven about the name —

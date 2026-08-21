@@ -97,14 +97,15 @@ var ErrPublishStagedForeignOccupant = errors.New("destination occupant is neithe
 
 // ErrPublishStagedIdentityIndeterminate means a post-publish destination
 // lookup could not PROVE which object the destination names (wave-32, codex
-// local review round 2, PR#215 finding R5): the ENOSYS deferred-times legs
-// glimpse the published name again before/after the name-based Chtimes, and
-// a failed glimpse used to degrade to a nil-identity success that callers
-// classified as "no provable identity"; it is NOT safe. The legs now
-// refuse typed instead — nothing is consumed, the caller's conservative
-// legs retain the source backup, and the journal entry stays live. Always
-// joined with ErrPublishStagedIdentityBreak so identity-break classifiers
-// catch it.
+// local review round 2, PR#215 finding R5): the (pre-r12) ENOSYS
+// deferred-times legs glimpsed the published name again before/after the
+// name-based Chtimes, and a failed glimpse used to degrade to a nil-identity
+// success that callers classified as "no provable identity"; it is NOT
+// safe. r12 removed those legs with the name-based fallback itself (the
+// publish completes with the times skipped instead), so no production
+// producer remains; the class stays part of the exported refusal vocabulary
+// so callers' identity-break classifiers keep their shape. Always joined
+// with ErrPublishStagedIdentityBreak so identity-break classifiers catch it.
 var ErrPublishStagedIdentityIndeterminate = errors.New("post-publish destination identity is indeterminate")
 
 // ErrPublishStagedExhausted means a directory writer kept substituting the
@@ -180,9 +181,13 @@ type StagedPublish struct {
 	Handle afero.File
 	Dest   string
 	// Atime/Mtime/ApplyTimes mirror CloseStaged's times contract: they land
-	// THROUGH THE OPEN HANDLE on the real OsFs before the publish (the
-	// ENOSYS platforms defer to a post-publish name-based Chtimes on Dest,
-	// documented against staging_times_unixother.go).
+	// THROUGH THE OPEN HANDLE on the real OsFs before the publish. The
+	// ENOSYS platforms (staging_times_unixother.go) have no fd-scoped
+	// primitive, so the times are SKIPPED there (r12: the pre-r12
+	// name-based Chtimes onto the published Dest kept an identity re-proof
+	// →utimens window in which a directory writer's substitute — a planted
+	// symlink included — would receive the stamp); the identity-verified
+	// publish instead surfaces ErrPublishCompleted with the times unapplied.
 	Atime, Mtime time.Time
 	ApplyTimes   bool
 	// Suffix + NextOrdinal name fresh O_EXCL staging files when the loop
@@ -231,9 +236,10 @@ type StagedPublish struct {
 // until close). The publish's OWN ErrPublishCompleted-carrying error (the
 // POSIX hard-link fallback's staged-cleanup refusal, wave-33's
 // ErrPublishNoReplaceStagedUnverified, the wave-20 cleanup+rollback
-// failure leg, or wave-60's ENOSYS deferred-times failure on an
-// identity-VERIFIED destination — the publish already landed and dest
-// still names the staged inode at the error step) is the exception: the
+// failure leg, or r12's ENOSYS leg on an identity-
+// VERIFIED destination — the times are refused onto the published name
+// with the publish already landed, wave-60's completed classification) is
+// the exception: the
 // staged name was DELIBERATELY left in place and may address a foreign
 // object, so callers must check
 // errors.Is(err, ErrPublishCompleted) BEFORE any staged removal — the
@@ -253,15 +259,18 @@ func PublishStagedBound(p StagedPublish) error {
 // On a proven publish the returned FileInfo is the destination's own
 // post-publish stat, os.SameFile-bound to the staged inode:
 //
-//   - POSIX legs hand back the reverify lookup (with a fresh relookup after
-//     the ENOSYS deferred-times leg so the stats carry the applied times).
-//     Wave-32 (finding R5): the deferred legs RE-PROVE the name against the
-//     staged inode around the name-based Chtimes; a foreign occupant
-//     mid-leg skips the times and refuses typed, a failed relookup no longer
-//     degrades to a nil-identity success (that answer flowed into callers'
-//     permissive skip postures) but returns the typed
-//     ErrPublishStagedIdentityIndeterminate refusal, and a relookup naming a
-//     different inode is never handed back as the published identity;
+//   - POSIX legs hand back the reverify lookup. r12 (codex P2 — "keep
+//     deferred timestamps bound to the published inode"): the ENOSYS
+//     deferred-times leg NO LONGER EXISTS — a platform without an
+//     fd-scoped times primitive (staging_times_unixother.go) skips the
+//     times entirely instead of ever touching the published name (its
+//     identity re-proof→Chtimes window could have stamped a substitute,
+//     symlink chase included). The verified publish still surfaces
+//     wave-60's completed classification (ErrPublishCompleted, NIL
+//     identity): destination bytes proven, foreign bytes AND foreign
+//     metadata untouched. The whole wave-32 foreign-occupant/indeterminate
+//     refusal family of the name-based legs is gone with them — no
+//     post-reverify destination lookup runs at all;
 //   - the Windows leg hands back its post-publish reverify stat;
 //   - the VIRTUAL leg (wrapper/MemMap filesystems — no rename-away threat
 //     model, no handle identity) reports nil with the publish's own error

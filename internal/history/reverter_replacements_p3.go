@@ -1197,6 +1197,11 @@ func copyRestoreBytesPublish(fs afero.Fs, backup, dest string, publish func(afer
 			// staged cleanup runs ONLY for error classes that prove nothing
 			// was published (our own staged copy, safe to drop); the retained
 			// litter is a transient staging name, never a backup-grammar file.
+			// r12: the ENOSYS leg (a platform with no fd-scoped times primitive)
+			// joins the completed class too — the times are SKIPPED after an
+			// identity-verified publish (the name-based fallback is refused),
+			// and the successful publish itself consumed the staged name, so
+			// there the skipped Remove has nothing to do; the posture is shared.
 			if fsutil.PublishCompleted(pubErr) {
 				logging.Warnf("staged restore copy %s left in place — publish completed but the staged name could not be re-proven (possibly foreign); manual cleanup advised: %v", staged, pubErr)
 			} else {
@@ -1389,6 +1394,11 @@ func copyRearmSourceBytes(fs afero.Fs, src io.Reader, backup string, info os.Fil
 			// DELIBERATELY because it may address a foreign object; the backup
 			// name already carries this operation's bytes. Refuse the cleanup
 			// for that class and drop only provably-unpublished staged copies.
+			// r12: the ENOSYS leg (platform without an fd-scoped times primitive)
+			// joins the completed class with the times SKIPPED after a verified
+			// publish — its successful publish consumed the staged name, so the
+			// skipped Remove below is a no-op there too (same posture, nothing
+			// foreign ever stamped or removed by the times leg).
 			if fsutil.PublishCompleted(pubErr) {
 				logging.Warnf("staged re-arm copy %s left in place — publish completed but the staged name could not be re-proven (possibly foreign); manual cleanup advised: %v", staged, pubErr)
 			} else {

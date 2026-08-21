@@ -7,10 +7,11 @@ package fsutil
 // that no host setup can fail deterministically are replayed through the
 // package seams — the restream seam's own seek failure and the
 // virtual/wrapper leg's CloseStaged failures. The ENOSYS-deferred
-// destination Chtimes failure moved to wave-60 (see
-// publish_staged_bound_w60_posix_test.go): wave-60 reclassifies a
-// deferred-times failure on an identity-VERIFIED destination as a completed
-// publish (ErrPublishCompleted) rather than a pre-publish staging failure.
+// destination Chtimes failure moved to wave-60, and r12 retired the
+// deferred leg itself (see publish_staged_bound_w60_posix_test.go): the
+// ENOSYS leg completes the identity-VERIFIED publish with the times
+// SKIPPED, classified ErrPublishCompleted rather than a pre-publish
+// staging failure — never a pathname Chtimes on the published name.
 // The indeterminate post-publish destination lookup itself moved onto
 // publishStagedBoundDestLstat (see the wave-30 POSIX companion): chmod
 // -based directory denial does not fail for uid 0 and silently reopened

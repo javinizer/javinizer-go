@@ -253,6 +253,10 @@ func copyBackupToDestPublish(fsys afero.Fs, backup, dest string, publish func(af
 			// failed with the destination rollback failing too (wave-20).
 			// Unlinking here could destroy those possibly-foreign bytes, so
 			// only a provably-unpublished staged copy (our own) is dropped.
+			// r12: the ENOSYS leg (no fd-scoped times primitive on the platform)
+			// joins the completed class with the times SKIPPED after a verified
+			// publish — the successful publish consumed the staged name there,
+			// so the skipped Remove is a no-op on that leg as well.
 			if fsutil.PublishCompleted(pubErr) {
 				logging.Warnf("downloader: staged rollback copy %s left in place — publish completed but the staged name could not be re-proven (possibly foreign); manual cleanup advised: %v", staged, pubErr)
 			} else {
@@ -494,10 +498,11 @@ func installedIdentityFromFileInfo(info os.FileInfo) installedDestIdentity {
 // wiring is destStillHoldsInstalledObject against the rollback copy's
 // published identity. Wave-32 caller audit (codex local round 2, PR#215
 // finding R5): an UNKNOWN identity reaches here ONLY from virtual/wrapper
-// filesystem legs (fsutil reports no publish identity there) — the wave-32
-// fsutil deferred-times legs refuse an indeterminate relookup with a typed
-// error instead of degrading to a nil identity, and the copy leg propagates
-// that error, so a real-filesystem publish never arrives with an
+// filesystem legs (fsutil reports no publish identity there) — r12 removed
+// the wave-32 fsutil deferred-times legs (the ENOSYS leg skips the times
+// and surfaces the completed classification, never a name-based fallback
+// nor a degraded nil-identity success), and the copy leg propagates its
+// errors unchanged, so a real-filesystem publish never arrives with an
 // indeterminate identity to skip on. The virtual-leg unknown continues to
 // SKIP (the documented wave-31 residual) rather than refusing a good
 // rollback on nothing. Tests replay the foreign swap/deletion landing inside

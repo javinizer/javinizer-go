@@ -81,8 +81,9 @@ func TestPublishStagedBoundW30_HappyPathReplaceOverOccupied(t *testing.T) {
 }
 
 // With times requested, the published destination carries the exact atime /
-// mtime the caller staged (through the handle where the platform offers it,
-// by the published name on the ENOSYS fallback).
+// mtime the caller staged through the open handle (platforms without an
+// fd-scoped primitive — the ENOSYS leg — SKIP the times instead: r12 pins
+// that shape plus the completed classification in the posix tests).
 func TestPublishStagedBoundW30_HappyPathTimesLand(t *testing.T) {
 	fs := afero.NewOsFs()
 	dir := t.TempDir()

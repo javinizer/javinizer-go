@@ -7,13 +7,13 @@ package history
 // Wave-32 (codex local review round 2, PR#215 finding R5) — caller audit:
 // the ENOSYS deferred-times legs of fsutil.PublishStagedBound no longer
 // degrade a failed post-publish relookup to a nil-identity success (that
-// flowed HERE as known=false and the recheck SKIPPED it — "safe"). fsutil
-// now returns the typed ErrPublishStagedIdentityIndeterminate refusal, so an
-// indeterminate identity can never reach this file: the copy legs return the
-// error and every caller's conservative posture (backup retained, journal
-// entry live) applies BEFORE any identity is constructed. The ONLY remaining
-// source of an unknown identity is a virtual/wrapper filesystem leg, whose
-// documented residual below stands.
+// flowed HERE as known=false and the recheck SKIPPED it — "safe"). r12
+// removed the deferred fallback ENTIRELY: the ENOSYS leg skips the times
+// and surfaces the wave-60 completed classification (nil identity, backup
+// consumed paths per the completed discipline), never a degraded success
+// — so an indeterminate identity can never reach this file from a real
+// filesystem. The ONLY remaining source of an unknown identity is a
+// virtual/wrapper filesystem leg, whose documented residual below stands.
 //
 // The copy legs (copyRestoreBytesPublish / its no-replace twin) land the
 // restored bytes through fsutil.PublishStagedBound, whose post-publish
@@ -49,8 +49,9 @@ import (
 // (the post-publish-VERIFIED destination stat, never a window-poisonable
 // re-capture). known=false means the publish ran on a leg with no provable
 // identity — VIRTUAL/WRAPPER FILESYSTEMS ONLY since wave-32 (finding R5):
-// the ENOSYS deferred-times legs report lookup failures as typed refusals
-// the copy legs return as errors, so an indeterminate identity never flows
+// the (pre-r12) ENOSYS deferred-times legs reported lookup failures as
+// typed refusals, and r12 removed those legs entirely (times skipped,
+// completed classification), so an indeterminate identity never flows
 // into this type on a real filesystem. The virtual legs keep the pre-wave-31
 // documented residual posture for an identity-less recheck: skipped rather
 // than trusted or refused on nothing. Wave-36 (codex local review round 6,

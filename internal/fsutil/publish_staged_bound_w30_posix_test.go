@@ -282,10 +282,14 @@ func TestPublishStagedBoundW30POSIX_ReverifyIndeterminateRefuses(t *testing.T) {
 		"the publish consumed the staged name before the lookup turned indeterminate — the refusal removes nothing else")
 }
 
-// ENOSYS from the fd times seam defers the times onto the PUBLISHED name
-// (the staging_times_unixother.go posture on platforms without an fd-scoped
-// wrapper).
-func TestPublishStagedBoundW30POSIX_TimesENOSYSLandsOnPublishedName(t *testing.T) {
+// r12 (codex P2 — "keep deferred timestamps bound to the published
+// inode"): ENOSYS from the fd times seam (the staging_times_unixother.go
+// posture on platforms without an fd-scoped wrapper) no longer defers the
+// times onto the PUBLISHED name — the check→apply window could chase a
+// planted substitute — so the verified publish completes with the times
+// SKIPPED under wave-60's completed classification, and dest keeps the
+// staged inode's own times.
+func TestPublishStagedBoundW30POSIX_TimesENOSYSSkippedCompletedNoTimesLand(t *testing.T) {
 	prev := stagedHandleChtimes
 	stagedHandleChtimes = func(fd uintptr, atime, mtime time.Time) error { return syscall.ENOSYS }
 	t.Cleanup(func() { stagedHandleChtimes = prev })
@@ -294,6 +298,8 @@ func TestPublishStagedBoundW30POSIX_TimesENOSYSLandsOnPublishedName(t *testing.T
 	dir := t.TempDir()
 	dest := filepath.Join(dir, "poster.jpg")
 	staged, fh := w30Stage(t, fs, dest, ".rstr", 0o640)
+	preInfo, perr := fh.Stat()
+	require.NoError(t, perr)
 	mt := time.Date(2004, 5, 6, 7, 8, 9, 0, time.UTC)
 
 	err := PublishStagedBound(StagedPublish{
@@ -302,11 +308,18 @@ func TestPublishStagedBoundW30POSIX_TimesENOSYSLandsOnPublishedName(t *testing.T
 		Atime: mt, Mtime: mt, ApplyTimes: true,
 		Suffix: ".rstr", NextOrdinal: w30Ordinal(4),
 	})
-	require.NoError(t, err)
+	require.ErrorIs(t, err, ErrPublishCompleted,
+		"the verified publish is completed — the skipped times never demote it to a staging failure")
+	require.ErrorIs(t, err, syscall.ENOSYS, "the platform answer stays unwrap-reachable")
+	got, rerr := os.ReadFile(dest)
+	require.NoError(t, rerr)
+	require.Equal(t, "genuine staged bytes", string(got))
 	info, serr := os.Stat(dest)
 	require.NoError(t, serr)
-	require.WithinDuration(t, mt, info.ModTime(), 2*time.Second,
-		"the deferred times landed on the published destination")
+	require.True(t, info.ModTime().Equal(preInfo.ModTime()),
+		"the published destination keeps the staged inode's own times — no pathname Chtimes lands")
+	require.False(t, info.ModTime().Equal(mt),
+		"the requested times were skipped, not stamped onto the published name")
 }
 
 // A hard fd-times failure is the pre-wave-30 *StagingTimesError class: the

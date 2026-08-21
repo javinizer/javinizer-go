@@ -7,9 +7,9 @@ package fsutil
 // destination identity back to restore/rollback callers so they can
 // revalidate the destination against exactly the object the publish landed
 // BEFORE deleting their source backup or consuming the journal. These legs
-// pin the POSIX legs: the reverify stat, the ENOSYS deferred-times relookup
-// (the returned identity must carry the applied times), and the relookup
-// failure degrading to no-identity (never a stale-mtime false refusal).
+// pin the POSIX legs: the reverify stat, and (r12) the ENOSYS leg
+// completing the verified publish with the times SKIPPED — no deferred
+// landing, no post-reverify relookup, no handed-back identity.
 
 import (
 	"errors"
@@ -49,11 +49,13 @@ func TestPublishStagedBoundInfoW31POSIX_ReturnsPublishedDestIdentity(t *testing.
 	require.False(t, info.IsDir())
 }
 
-// ENOSYS fd-times (solaris/aix posture): the deferred Chtimes lands on the
-// published name, and the returned identity is the FRESH relookup so its
-// mtime carries the applied times — a stale reverify stat would false-refuse
-// every caller revalidation on those platforms.
-func TestPublishStagedBoundInfoW31POSIX_ENOSYSDeferredTimesFreshIdentity(t *testing.T) {
+// ENOSYS fd-times (solaris/aix posture) — r12: the pre-r12 deferred
+// Chtimes onto the published name is REFUSED entirely, so there is no
+// fresh relookup to hand back at all: the verified publish surfaces the
+// completed classification with the times skipped (nil identity — the
+// caller's wave-31 revalidation rides the completed-publish discipline),
+// and dest keeps the staged inode's own times.
+func TestPublishStagedBoundInfoW31POSIX_ENOSYSLegSkipsTimesNoIdentity(t *testing.T) {
 	prevTimes := stagedHandleChtimes
 	stagedHandleChtimes = func(uintptr, time.Time, time.Time) error { return syscall.ENOSYS }
 	t.Cleanup(func() { stagedHandleChtimes = prevTimes })
@@ -62,6 +64,8 @@ func TestPublishStagedBoundInfoW31POSIX_ENOSYSDeferredTimesFreshIdentity(t *test
 	dir := t.TempDir()
 	dest := filepath.Join(dir, "poster.jpg")
 	staged, fh := w30Stage(t, fs, dest, ".rstr", 0o640)
+	preInfo, serr := fh.Stat()
+	require.NoError(t, serr)
 	when := time.Date(2019, 7, 8, 9, 10, 11, 0, time.UTC)
 
 	info, err := PublishStagedBoundInfo(StagedPublish{
@@ -70,20 +74,25 @@ func TestPublishStagedBoundInfoW31POSIX_ENOSYSDeferredTimesFreshIdentity(t *test
 		ApplyTimes: true, Atime: when, Mtime: when,
 		Suffix: ".rstr", NextOrdinal: w30Ordinal(4),
 	})
-	require.NoError(t, err)
-	require.NotNil(t, info)
+	require.ErrorIs(t, err, ErrPublishCompleted,
+		"times skipped on the ENOSYS leg classify as the completed publish, never a staging failure")
+	require.ErrorIs(t, err, syscall.ENOSYS)
+	require.Nil(t, info,
+		"no identity is handed back when the times were not applied — no stale-mtime false revalidation")
 
 	current, lerr := os.Lstat(dest)
 	require.NoError(t, lerr)
-	require.True(t, info.ModTime().Equal(current.ModTime()),
-		"the returned identity carries the DEFERRED applied mtime, not the pre-Chtimes reverify snapshot")
-	require.True(t, current.ModTime().Equal(when), "the deferred leg actually landed the requested times")
+	require.True(t, current.ModTime().Equal(preInfo.ModTime()),
+		"dest keeps the staged inode's own mtime — the requested times are skipped, never stamped")
+	require.False(t, current.ModTime().Equal(when))
 }
 
-// The deferred-times relookup failing keeps the proven publish but reports
-// NO identity (nil, nil) — the caller's documented residual posture instead
-// of an identity with a stale mtime.
-func TestPublishStagedBoundInfoW31POSIX_ENOSYSRelookFailureYieldsNoIdentity(t *testing.T) {
+// r12: the ENOSYS leg runs NO destination lookup past the post-publish
+// reverify — wedge EVERY second lookup and prove it is unreachable (the
+// pre-r12 pre/post-Chtimes glimpses and the wave-60 error-step re-
+// derivation are gone, so the indeterminate-relookup refusal class has no
+// producer left on this leg).
+func TestPublishStagedBoundInfoW31POSIX_ENOSYSLegNeverRelookupsDest(t *testing.T) {
 	prevTimes := stagedHandleChtimes
 	stagedHandleChtimes = func(uintptr, time.Time, time.Time) error { return syscall.ENOSYS }
 	t.Cleanup(func() { stagedHandleChtimes = prevTimes })
@@ -96,7 +105,7 @@ func TestPublishStagedBoundInfoW31POSIX_ENOSYSRelookFailureYieldsNoIdentity(t *t
 		if calls == 1 {
 			return os.Lstat(name) // the post-publish reverify: must succeed
 		}
-		return nil, sentinel // the deferred-times relookup: wedged
+		return nil, sentinel // any second glimpse of the published name
 	}
 	t.Cleanup(func() { publishStagedBoundDestLstat = prevLstat })
 
@@ -111,13 +120,13 @@ func TestPublishStagedBoundInfoW31POSIX_ENOSYSRelookFailureYieldsNoIdentity(t *t
 		ApplyTimes: true, Atime: time.Now(), Mtime: time.Now(),
 		Suffix: ".rstr", NextOrdinal: w30Ordinal(4),
 	})
-	require.ErrorIs(t, err, ErrPublishStagedIdentityIndeterminate,
-		"a wedged relookup is a typed indeterminate refusal, not a nil-identity success")
-	require.ErrorIs(t, err, ErrPublishStagedIdentityBreak,
-		"the whole refusal family stays reachable through the identity-break class")
-	require.ErrorIs(t, err, sentinel)
-	require.Nil(t, info, "no identity is returned on the refusal")
-	require.Equal(t, 2, calls)
+	require.ErrorIs(t, err, ErrPublishCompleted,
+		"the completed classification needs no second lookup — it stands from the reverify instant")
+	require.NotErrorIs(t, err, sentinel, "the wedged second lookup is never reached")
+	require.NotErrorIs(t, err, ErrPublishStagedIdentityIndeterminate,
+		"the indeterminate-refusal class has no producer on this leg anymore")
+	require.Nil(t, info)
+	require.Equal(t, 1, calls)
 	got, rerr := os.ReadFile(dest)
 	require.NoError(t, rerr)
 	require.Equal(t, "genuine staged bytes", string(got), "the publish itself landed")
