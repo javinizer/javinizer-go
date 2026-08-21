@@ -165,12 +165,30 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 	// publish adjacency and re-proves the landed destination), so a substitute
 	// rotated onto the candidate name inside the crop/write→install window is
 	// refused — before any bytes-at-dest mutation — instead of being published
-	// and confirmed as ours. The non-overwrite rename promote below predates
-	// the overwrite discipline and keeps its legacy unprovenanced posture (no
-	// handle is opened for it — the promote runs by name on Windows too).
+	// and confirmed as ours. Wave-53 (codex P2, PR#215 finding 2): the
+	// non-overwrite rename promote below now shares the SAME candidate-provenance
+	// binding — the bound publish re-proves the candidate name at publish
+	// adjacency, so a substitute rotated onto it inside the crop/write→promote
+	// window is refused too (the pre-shape legacy leg published by name
+	// unprovenanced). Wave-53 (codex P3, PR#215 finding 3): when both the
+	// path identity capture and the no-follow re-open fail, bindCandidateProvenance
+	// returns the typed errCandidateProvenanceUnprobeable refusal — fail CLOSED
+	// on either leg (never publish unauthenticated; nothing recorded or touched,
+	// candidate preserved for manual cleanup).
 	var provenance stagedInstallProvenance
 	if overwriteExisting {
-		provenance = bindCandidateProvenance(d.fs, candidate)
+		var provErr error
+		provenance, provErr = bindCandidateProvenanceFn(d.fs, candidate)
+		if provErr != nil {
+			logging.Warnf("downloadPoster: install of %s refused — candidate %s could not be proven (path identity capture and no-follow re-open both failed); refusing to publish unauthenticated, destination untouched, candidate preserved for manual cleanup", destPath, candidate)
+			stagedRetained = candidate
+			fullResult.Error = provErr
+			fullResult.Downloaded = false
+			fullResult.Replaced = false
+			fullResult.LocalPath = ""
+			fullResult.Duration = time.Since(startTime)
+			return fullResult, fullResult.Error
+		}
 	}
 
 	if overwriteExisting {
@@ -259,41 +277,64 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 		// fallback's staged-residue legs) is honored like the wave-42 install
 		// path — the destination provably carries the candidate bytes and the
 		// possibly-foreign candidate name is retained for manual cleanup.
-		if rerr := fsutil.PublishNoReplace(d.fs, candidate, destPath); rerr != nil {
-			switch {
-			case errors.Is(rerr, fsutil.ErrPublishCollision):
-				logging.Warnf("downloadPoster: promote of %s onto %s refused — a foreign writer claimed the destination inside the download window; keeping the existing artwork (non-overwrite mode), racer's bytes preserved", candidate, destPath)
-				// fullResult carries the FULL download's bookkeeping: reset it to
-				// the pre-download existing-artwork outcome so the racer's
-				// destination NEVER enters CreatedPaths (a later revert would
-				// delete those foreign bytes) — exactly the early-classification
-				// leg's shape above.
-				fullResult.Downloaded = false
-				fullResult.Replaced = false
-				if info, serr := d.fs.Stat(destPath); serr == nil {
-					fullResult.LocalPath = destPath
-					fullResult.Size = info.Size()
-				}
-				fullResult.Duration = time.Since(startTime)
-				return fullResult, nil
-			case fsutil.PublishCompleted(rerr):
-				logging.Warnf("downloadPoster: promote of %s onto %s completed despite the returned error (%v) — the staged name could not be re-proven (possibly foreign) and is left in place; manual cleanup advised", candidate, destPath, rerr)
-				stagedRetained = candidate
-				fullResult.Downloaded = true
-				fullResult.Replaced = false
-				d.finalizePosterResult(fullResult, destPath)
-				fullResult.Duration = time.Since(startTime)
-				return fullResult, nil
-			default:
-				logging.Warnf("downloadPoster: failed to promote %s: %v", candidate, rerr)
-				fullResult.Downloaded = false
-				fullResult.Replaced = false
-				fullResult.LocalPath = ""
-				fullResult.Size = 0
-				fullResult.Error = fmt.Errorf("failed to finalize poster: %w", rerr)
-				fullResult.Duration = time.Since(startTime)
-				return fullResult, fullResult.Error
+		// Wave-53 (codex P2, PR#215 finding 2): the candidate is now bound to its
+		// validated-handle provenance BEFORE the promote publish through
+		// promotePosterCandidateNoReplace (the same bindCandidateProvenance +
+		// bound-publish discipline the overwrite install uses). A substitute
+		// rotated onto the candidate name inside the crop/write→promote window
+		// is refused (errStagedInputSubstituted) instead of being published
+		// unprovenanced — the legacy leg's last unprovenanced publish surface is
+		// closed. The both-fail refusal (finding 3) fails closed there too.
+		outcome, promoteErr := promotePosterCandidateNoReplace(d.fs, candidate, destPath)
+		switch outcome {
+		case promotePosterCandidateCollision:
+			// fullResult carries the FULL download's bookkeeping: reset it to
+			// the pre-download existing-artwork outcome so the racer's
+			// destination NEVER enters CreatedPaths (a later revert would
+			// delete those foreign bytes) — exactly the early-classification
+			// leg's shape above.
+			fullResult.Downloaded = false
+			fullResult.Replaced = false
+			if info, serr := d.fs.Stat(destPath); serr == nil {
+				fullResult.LocalPath = destPath
+				fullResult.Size = info.Size()
 			}
+			fullResult.Duration = time.Since(startTime)
+			return fullResult, nil
+		case promotePosterCandidateCompleted:
+			stagedRetained = candidate
+			fullResult.Downloaded = true
+			fullResult.Replaced = false
+			d.finalizePosterResult(fullResult, destPath)
+			fullResult.Duration = time.Since(startTime)
+			return fullResult, nil
+		case promotePosterCandidateRetained:
+			// Substitution (errStagedInputSubstituted) or both-fail refusal
+			// (errCandidateProvenanceUnprobeable): the candidate name is
+			// possibly foreign — preserve it byte-intact for manual cleanup.
+			stagedRetained = candidate
+			fullResult.Error = promoteErr
+			fullResult.Downloaded = false
+			fullResult.Replaced = false
+			fullResult.LocalPath = ""
+			fullResult.Duration = time.Since(startTime)
+			return fullResult, fullResult.Error
+		case promotePosterCandidateFailed:
+			// A plain publish failure — the candidate is provably ours, so the
+			// deferred cleanup reaps both scratch names; surface the error.
+			fullResult.Downloaded = false
+			fullResult.Replaced = false
+			fullResult.LocalPath = ""
+			fullResult.Size = 0
+			fullResult.Error = promoteErr
+			fullResult.Duration = time.Since(startTime)
+			return fullResult, fullResult.Error
+		default: // promotePosterCandidateSucceeded
+			fullResult.Downloaded = true
+			fullResult.Replaced = existed
+			d.finalizePosterResult(fullResult, destPath)
+			fullResult.Duration = time.Since(startTime)
+			return fullResult, nil
 		}
 	}
 

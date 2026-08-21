@@ -46,6 +46,13 @@ var restoreCopyOrdinal atomic.Uint64
 // never .dlbak ownership identifiers.
 var stagedRepublishOrdinal atomic.Uint64
 
+// nextStagedRepublishOrdinal mints the next bound-publish re-stage ordinal
+// (wave-53): a named func rather than a per-call literal so the minting has
+// one coverable site shared by every bound-publish caller (the re-stage runs
+// only in the rare proven-substitution recovery leg, which no unit test
+// triggers end-to-end; a focused test covers the minting directly).
+func nextStagedRepublishOrdinal() uint64 { return stagedRepublishOrdinal.Add(1) }
+
 // publishStagedBoundFn is the wave-48 bound-publish production seam
 // (fsutil.PublishStagedBoundInfo), mirroring restoreStagingOwnershipFn's
 // seam discipline: production never deviates, tests wedge the
@@ -763,6 +770,29 @@ func stagedPublishVerdict(err error) error {
 	return nil
 }
 
+// errCandidateProvenanceUnprobeable refuses byte flow when the downloadPoster
+// candidate is completely unprobeable (wave-53, codex P3, PR#215 finding 3):
+// BOTH the path-based identity capture (captureInstalledDestIdentity/Lstat)
+// AND the no-follow re-open (restoreOpenReplacementSource) failed, so there is
+// NOTHING verifiable about the name — neither an identity snapshot for the
+// wave-45 classify gate nor a handle for the wave-48 bound publish. The
+// pre-shape posture degraded here to an unauthenticated path-only publish
+// (provenanceID.known == false, no handle → installOverwriting's else-branch
+// PublishNoReplace by name), letting a substituted candidate publish
+// unchallenged. The both-fail leg now fails CLOSED: nothing is recorded or
+// touched, the candidate is preserved byte-intact for manual cleanup, and
+// the typed refusal surfaces so the caller never reports success. A Lstat
+// success (known identity) keeps the wave-48 degrade posture — the
+// snapshot gate and bindStagedProvenanceHandle re-prove the name at publish
+// adjacency.
+var errCandidateProvenanceUnprobeable = errors.New("candidate provenance unprobeable — path identity capture and no-follow re-open both failed")
+
+// bindCandidateProvenanceFn is the wave-53 production seam over
+// bindCandidateProvenance: production never deviates, tests inject the both-fail
+// refusal (finding 3) at the overwrite install path's bind step without
+// staging a candidate-vanish race. Mirrors publishStagedBoundFn's discipline.
+var bindCandidateProvenanceFn = bindCandidateProvenance
+
 // bindCandidateProvenance binds the downloadPoster crop/write candidate to an
 // open handle end to end (wave-48, codex P2, PR#215 finding 6 media leg):
 // the crop writers (imageutil.CropPosterFromCover / CropPosterWithBounds)
@@ -771,21 +801,31 @@ func stagedPublishVerdict(err error) error {
 // from its own fstat — rides into installOverwriting as the bound
 // provenance. A failed open or fstat degrades to the wave-47 posture (the
 // post-crop no-follow name capture, no handle), never a failure: the wave-45
-// snapshot gate still guards the publish legs there.
-func bindCandidateProvenance(fsys afero.Fs, candidate string) stagedInstallProvenance {
+// snapshot gate still guards the publish legs there. Wave-53 (finding 3):
+// when the path-based capture AND the no-follow re-open BOTH fail the name
+// is completely unprobeable — fail closed (typed refusal) instead of
+// degrading to an unauthenticated path-only publish.
+func bindCandidateProvenance(fsys afero.Fs, candidate string) (stagedInstallProvenance, error) {
 	provenance := stagedInstallProvenance{identity: captureInstalledDestIdentity(fsys, candidate)}
 	handle, oerr := restoreOpenReplacementSource(fsys, candidate)
 	if oerr != nil {
-		return provenance
+		if !provenance.identity.known {
+			// BOTH the path-based identity capture AND the no-follow re-open
+			// failed — there is nothing verifiable about the candidate name.
+			// Fail closed: never publish unauthenticated, preserve the
+			// occupant byte-intact for manual cleanup.
+			return stagedInstallProvenance{}, fmt.Errorf("candidate %s could not be proven for publish (path identity capture and no-follow re-open both failed): %w", candidate, errCandidateProvenanceUnprobeable)
+		}
+		return provenance, nil // degrade: identity known from Lstat, no handle
 	}
 	info, serr := handle.Stat()
 	if serr != nil {
 		_ = handle.Close()
-		return provenance
+		return provenance, nil //nolint:nilerr // intentional degrade: identity known from Lstat, no handle (fstat failed)
 	}
 	provenance.identity = installedIdentityFromFileInfo(info)
 	provenance.handle = handle
-	return provenance
+	return provenance, nil
 }
 
 // errStagedInputSubstituted refuses byte flow when the staged install input

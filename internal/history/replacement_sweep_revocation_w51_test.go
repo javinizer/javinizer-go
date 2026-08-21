@@ -38,6 +38,18 @@ import (
 // w51ParkFs wedges the n-th matched LstatIfPossible call like a stalled
 // network filesystem: the caller releases it after staging the reclaim. Every
 // later call flows through (the release channel stays closed).
+//
+// Wave-53 (codex P5, PR#215 — the windows CI hang): the path match is
+// PLATFORM-AGNOSTIC — both sides normalize through filepath.ToSlash before
+// the equality test. seedCrashWindow hands back a filepath.FromSlash'd dest
+// (backslash separators on Windows), so the pre-shape comparison
+// `filepath.ToSlash(name) == f.destSlash` matched a slash-form name against a
+// backslash-form destSlash on Windows and NEVER fired: <-fs.entered blocked
+// forever and timed out the whole history suite (10m). The fake models the
+// fs-call-ordering choreography on every platform once the comparison is
+// separator-agnostic; the revocation contract this test pins (gate-stop at
+// the destination publish) is covered unchanged on Windows too — coverage is
+// not weakened.
 type w51ParkFs struct {
 	afero.Fs
 	destSlash string // slash-form path whose n-th LstatIfPossible wedges
@@ -50,7 +62,7 @@ type w51ParkFs struct {
 }
 
 func (f *w51ParkFs) LstatIfPossible(name string) (os.FileInfo, bool, error) {
-	if filepath.ToSlash(name) == f.destSlash {
+	if filepath.ToSlash(name) == filepath.ToSlash(f.destSlash) {
 		f.mu.Lock()
 		f.count++
 		hit := f.count == f.n

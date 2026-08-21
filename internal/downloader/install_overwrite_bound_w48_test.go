@@ -595,7 +595,8 @@ func TestBindCandidateProvenanceW48(t *testing.T) {
 		candidate := filepath.Join(dir, "poster.jpg.crop.tmp")
 		require.NoError(t, os.WriteFile(candidate, []byte("cropped candidate"), 0o644))
 
-		prov := bindCandidateProvenance(fs, candidate)
+		prov, err := bindCandidateProvenance(fs, candidate)
+		require.NoError(t, err)
 		require.True(t, prov.identity.known)
 		require.NotNil(t, prov.handle, "the candidate's fd rides into the install bound end to end")
 		defer func() { _ = prov.handle.Close() }()
@@ -608,7 +609,8 @@ func TestBindCandidateProvenanceW48(t *testing.T) {
 		fs := w48OpenFileFailFs{Fs: afero.NewMemMapFs(), err: errors.New("w48 candidate open wedge")}
 		require.NoError(t, afero.WriteFile(fs, "/candidate", []byte("cropped"), 0o644))
 
-		prov := bindCandidateProvenance(fs, "/candidate")
+		prov, err := bindCandidateProvenance(fs, "/candidate")
+		require.NoError(t, err, "a Lstat-known candidate with a failed re-open degrades, never fails closed")
 		require.Nil(t, prov.handle)
 		require.True(t, prov.identity.known, "the wave-47 post-write capture is still handed down")
 		require.EqualValues(t, len("cropped"), prov.identity.size)
@@ -618,9 +620,26 @@ func TestBindCandidateProvenanceW48(t *testing.T) {
 		fs := w48StatFailOpenFileFs{Fs: afero.NewMemMapFs()}
 		require.NoError(t, afero.WriteFile(fs, "/candidate", []byte("cropped"), 0o644))
 
-		prov := bindCandidateProvenance(fs, "/candidate")
+		prov, err := bindCandidateProvenance(fs, "/candidate")
+		require.NoError(t, err, "a Lstat-known candidate with a failed fstat degrades, never fails closed")
 		require.Nil(t, prov.handle)
 		require.True(t, prov.identity.known)
+	})
+
+	// Wave-53 (codex P3, PR#215 finding 3): when BOTH the path identity capture
+	// and the no-follow re-open fail, the candidate is completely unprobeable —
+	// fail CLOSED (typed refusal, nothing recorded or touched) instead of
+	// degrading to an unauthenticated path-only publish.
+	t.Run("both capture and re-open fail refuses closed", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		// No file at /candidate: captureInstalledDestIdentity (Lstat) returns
+		// not-exist (known=false) AND restoreOpenReplacementSource (the no-follow
+		// re-open) returns not-exist — both fail, so the candidate is unprobeable.
+		prov, err := bindCandidateProvenance(fs, "/candidate")
+		require.Error(t, err)
+		require.ErrorIs(t, err, errCandidateProvenanceUnprobeable)
+		require.False(t, prov.identity.known, "nothing verifiable is handed down on the both-fail refusal")
+		require.Nil(t, prov.handle, "no handle is opened on the both-fail refusal")
 	})
 }
 

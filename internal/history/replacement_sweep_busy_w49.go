@@ -103,6 +103,7 @@ import (
 	"context"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/logging"
@@ -131,6 +132,9 @@ type sweepBusyMarkerClaim struct {
 	mu          sync.Mutex // wave-52: guards the pending dest-lock cell handshake below
 	destRelease func()     // once-guarded dest-lock release — nil until bindDestLock fills the cell
 	reclaimed   bool       // releaseForReclaim already fired — a late bind keeps sole release ownership
+
+	workerAcked atomic.Int32 // wave-53: incremented at each abandonIfRevoked gate the worker reaches after revocation (the worker-ack stage counter)
+	released    atomic.Bool  // wave-53: signaled by releaseForReclaim once both holds are freed
 }
 
 // revoke flips the claim's in-process revocation flag. Only the ledger's
@@ -161,10 +165,15 @@ var sweepClaimRevokedLogFn = func(phase string, epoch uint64, backup, dest strin
 // pre-mutation state classified them. A worker parked INSIDE a wedged fs
 // call (uninterruptible; the wave-8 shape) whose arbitration was reclaimed
 // meanwhile resumes here and stops silently apart from the seam log.
+// Wave-53 (codex P1/P5, PR#215 findings 1+4): a reclaimed worker ACKS here —
+// the worker-ack stage counter increments so the reclaim's bounded wait
+// (releaseForReclaim.waitWorkerAck) can observe that the worker reached a
+// gate and stopped before the holds are freed.
 func (c *sweepBusyMarkerClaim) abandonIfRevoked(phase, backup, dest string) bool {
 	if !c.isRevoked() {
 		return false
 	}
+	c.workerAcked.Add(1) // the worker observed the revocation and is stopping
 	sweepClaimRevokedLogFn(phase, c.epoch, backup, dest)
 	return true
 }
@@ -205,6 +214,70 @@ func (c *sweepBusyMarkerClaim) releaseDestLock() {
 	}
 }
 
+// sweepReclaimWorkerAckBound is the bounded grace releaseForReclaim waits for
+// the stranded worker to acknowledge the revocation (wave-53, codex P1/P5,
+// PR#215 findings 1+4) before freeing the destination lock and the busy
+// marker. The worker acks at its next abandonIfRevoked gate; a wedge parks it
+// inside an uninterruptible fs call, so the wait is bounded — once it expires
+// the holds are freed anyway (the small residual race is accepted over an
+// unbounded reverter block that would defeat the sweep bound the reclaim
+// exists to heal). Tests shorten this through swapReclaimTimers.
+var sweepReclaimWorkerAckBound = 200 * time.Millisecond
+
+// sweepReclaimWorkerAckPoll is the worker-ack polling interval.
+var sweepReclaimWorkerAckPoll = 25 * time.Millisecond
+
+// sweepReclaimReleaseGrace is the bounded grace the reverter's reclaim waits
+// for the detached releaseForReclaim to finish freeing BOTH holds (wave-53,
+// finding 4). On a healthy filesystem the releases complete in microseconds;
+// a wedged marker take-aside outlasts the grace and the reverter proceeds —
+// the dest lock is already freed (pure in-process work, never wedged), so the
+// reverter's dest-lock acquisition is never unbounded. Tests shorten this
+// through swapReclaimTimers.
+var sweepReclaimReleaseGrace = 250 * time.Millisecond
+
+// sweepReclaimReleasePoll is the released-signal polling interval.
+var sweepReclaimReleasePoll = 25 * time.Millisecond
+
+// waitWorkerAck blocks up to sweepReclaimWorkerAckBound (polling
+// sweepReclaimWorkerAckPoll) for the stranded worker to acknowledge the
+// revocation through an abandonIfRevoked gate (wave-53, finding 1). Returns
+// true if the worker acked within the bound, false on timeout (the holds are
+// freed anyway — the bounded grace accepts the small residual race over an
+// unbounded reverter block).
+func (c *sweepBusyMarkerClaim) waitWorkerAck() bool {
+	deadline := time.Now().Add(sweepReclaimWorkerAckBound)
+	for {
+		if c.workerAcked.Load() > 0 {
+			return true
+		}
+		if !time.Now().Before(deadline) {
+			return c.workerAcked.Load() > 0
+		}
+		time.Sleep(sweepReclaimWorkerAckPoll)
+	}
+}
+
+// waitReleased blocks up to sweepReclaimReleaseGrace (polling
+// sweepReclaimReleasePoll) for the detached releaseForReclaim to signal that
+// both holds are freed (wave-53, finding 4). Returns true if the releases
+// landed within the grace, false on timeout (the reverter proceeds — the dest
+// lock is already freed; a wedged marker take-aside continues in the
+// background and the reverter's marker acquisition retries through its bounded
+// grace).
+func (c *sweepBusyMarkerClaim) waitReleased() bool {
+	deadline := time.Now().Add(sweepReclaimReleaseGrace)
+	for {
+		if c.released.Load() {
+			return true
+		}
+		if !time.Now().Before(deadline) {
+			return c.released.Load()
+		}
+		time.Sleep(sweepReclaimReleasePoll)
+	}
+}
+
 // releaseForReclaim frees EVERYTHING bound to the claim — the destination
 // lock FIRST (wave-50, F1: a keyed-registry release is purely in-process and
 // can never wedge on the stranded filesystem, so it must be freed even when
@@ -214,7 +287,16 @@ func (c *sweepBusyMarkerClaim) releaseDestLock() {
 // flag is latched under the claim mutex BEFORE either release fires, so a
 // dest-lock wait completing during (or after) the reclaim reads false from
 // bindDestLock and self-releases instead of double-tracking the cell.
+// Wave-53 (findings 1+4): BEFORE freeing either hold the function waits a
+// BOUNDED grace for the stranded worker to acknowledge the revocation
+// (waitWorkerAck) — the worker acks at its next abandonIfRevoked gate, so a
+// worker parked past a gate's syscall gets there before the holds free and
+// the reverter mutates; a wedge parks it inside an uninterruptible fs call and
+// the bound expires. The whole release runs in a goroutine detached by reclaim
+// so the reverter never blocks on the marker's take-aside fs work, and the
+// released flag signals the reverter's bounded grace.
 func (c *sweepBusyMarkerClaim) releaseForReclaim() {
+	c.waitWorkerAck() // wave-53, finding 1: bounded worker-ack before freeing the holds
 	c.mu.Lock()
 	c.reclaimed = true
 	destRelease := c.destRelease
@@ -223,6 +305,7 @@ func (c *sweepBusyMarkerClaim) releaseForReclaim() {
 		destRelease()
 	}
 	c.release()
+	c.released.Store(true) // wave-53, finding 4: signal the detached releases completed
 }
 
 // sweepBusyClaimLedger is the in-process ledger of sweep-owned busy markers.
@@ -320,6 +403,16 @@ func (l *sweepBusyClaimLedger) reclaim(dest string) bool {
 	// flag still reads live.
 	rec.revoke()
 	l.mu.Unlock()
-	rec.releaseForReclaim()
+	// Wave-53 (codex P5, PR#215 finding 4): detach the releases to a goroutine
+	// so the reverter never blocks on the marker's take-aside fs work (a wedged
+	// unlink could outlast the sweep bound the reclaim exists to heal). The
+	// reverter waits only on the revocation flag (set above) plus this bounded
+	// grace for the detached releases to land — waitReleased returns once both
+	// holds are freed, or after the grace if a wedge outlasts it (the dest lock
+	// is already freed by then — pure in-process work — so the reverter's
+	// dest-lock acquisition is never unbounded). releaseForReclaim waits a
+	// bounded worker-ack (finding 1) before freeing the holds.
+	go rec.releaseForReclaim()
+	rec.waitReleased()
 	return true
 }
