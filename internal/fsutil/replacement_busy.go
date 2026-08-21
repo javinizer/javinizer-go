@@ -455,7 +455,29 @@ func discardBusyMarkerClaim(fs afero.Fs, path string, fh afero.File, expect os.F
 		logging.Warnf("replacement busy marker %s no longer names this process's claim during cleanup (foreign substitution) — the substitute is preserved byte-intact; manual cleanup advised", path)
 		return
 	}
-	_ = fs.Remove(path)
+	// Codex P2 (wave-57B): the verify→unlink window must stay bound — a
+	// racing claimant that replaced the canonical name after asideLstat
+	// would otherwise have ITS marker deleted. Vacate the proven-us object
+	// onto a fresh claimed terminal name, re-bind identity, and unlink only
+	// that terminal; any doubt preserves bytes.
+	vacName, vacClaim, cerr := claimTakeAsideVacName(fs, path)
+	if cerr != nil {
+		logging.Warnf("replacement busy marker %s claim cleanup could not reserve its terminal name (%v) — the occupant is left byte-intact; manual cleanup advised", path, cerr)
+		return
+	}
+	hold, terr := TakeAside(TakeAsideSpec{FS: fs, Src: path, Scratch: vacName, Claim: vacClaim, Prove: func(cur os.FileInfo) error {
+		if !asideSameObject(cur, expect) {
+			return fmt.Errorf("take-aside occupant diverged from the claimed marker")
+		}
+		return nil
+	}})
+	if terr != nil {
+		logging.Warnf("replacement busy marker %s claim cleanup take-aside failed (%v) — the occupant is left byte-intact; manual cleanup advised", path, terr)
+		return
+	}
+	if ulErr := hold.Unlink(); ulErr != nil {
+		logging.Warnf("replacement busy marker %s claim cleanup unlink refused (%v) — the occupant is preserved; manual cleanup advised", path, ulErr)
+	}
 }
 
 func replacementBusyRandomPlatform() (uint64, error) {
