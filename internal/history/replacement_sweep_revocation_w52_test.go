@@ -103,7 +103,7 @@ func w52LiveClaim(t *testing.T, dest string) (*sweepBusyMarkerClaim, context.Can
 	t.Helper()
 	sweepCtx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	claim, untrack := recordSweepBusyClaim(sweepCtx, nil, dest, func() {})
+	claim, untrack := recordSweepBusyClaim(sweepCtx, nil, dest, "", func() {})
 	t.Cleanup(untrack)
 	reclaim := func() {
 		cancel()
@@ -134,7 +134,7 @@ func TestSweepBusyClaimW52_PendingDestLockCell(t *testing.T) {
 		var order []string
 		var mu sync.Mutex
 		fire := func(what string) func() { return func() { mu.Lock(); order = append(order, what); mu.Unlock() } }
-		rec, untrack := ledger.record(ctx, nil, dest, fire("marker"))
+		rec, untrack := ledger.record(ctx, nil, dest, "", fire("marker"))
 		require.True(t, rec.bindDestLock(fire("lock")), "an unreclaimed cell accepts the bind")
 		require.False(t, ledger.reclaim(dest), "a live claim never reclaims")
 		cancel()
@@ -154,7 +154,7 @@ func TestSweepBusyClaimW52_PendingDestLockCell(t *testing.T) {
 		ledger := newSweepBusyClaimLedger()
 		ctx, cancel := context.WithCancel(context.Background())
 		markerFired, lockFired := 0, 0
-		rec, untrack := ledger.record(ctx, nil, dest, func() { markerFired++ })
+		rec, untrack := ledger.record(ctx, nil, dest, "", func() { markerFired++ })
 		rec.releaseDestLock() // empty cell — a no-op while the wait is in flight
 		cancel()
 		require.True(t, ledger.reclaim(dest), "the mid-wait claim reclaims against the empty cell")
@@ -174,7 +174,7 @@ func TestSweepBusyClaimW52_PendingDestLockCell(t *testing.T) {
 		ledger := newSweepBusyClaimLedger()
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		rec, untrack := ledger.record(ctx, nil, dest, func() {})
+		rec, untrack := ledger.record(ctx, nil, dest, "", func() {})
 		require.True(t, rec.bindDestLock(func() {}))
 		untrack()
 		cancel()
@@ -841,11 +841,11 @@ func TestReverterW52_ConsumeBetweenReclaimAndFreshReadSkips(t *testing.T) {
 	backup := dest + ".dlbak.a"
 
 	// The stranded sweep shape: marker + dest lock both held, ctx dead.
-	sweepRelease, err := fsutil.AcquireReplacementBusy(fixture.fs, dest)
+	sweepRelease, sweepToken, err := fsutil.AcquireReplacementBusyEx(fixture.fs, dest)
 	require.NoError(t, err)
 	sweepCtx, sweepCancel := context.WithCancel(context.Background())
 	sweepCancel() // the wave-8 deadline already fired
-	claim, untrack := recordSweepBusyClaim(sweepCtx, fixture.fs, dest, sweepRelease)
+	claim, untrack := recordSweepBusyClaim(sweepCtx, fixture.fs, dest, sweepToken, sweepRelease)
 	require.True(t, claim.bindDestLock(fsutil.SharedDestLocks().Acquire(dest)))
 	defer claim.releaseDestLock()
 	defer sweepRelease()

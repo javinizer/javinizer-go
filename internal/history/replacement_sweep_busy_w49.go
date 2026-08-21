@@ -138,6 +138,17 @@ type sweepBusyMarkerClaim struct {
 
 	fs    afero.Fs // wave-55: filesystem the marker was claimed on, for the ownership-attestation gate
 	token string   // wave-55: the busy-marker token this claim wrote ("" for markerless test claims)
+
+	// Wave-56 (codex P1, PR#215 finding F1): per-claim admission gate. The
+	// sweep goroutine holds admitMu across each attested mutation (admit →
+	// mutation → done), so reclaim — which frees the dest lock and takes the
+	// marker aside — can only finish AFTER an in-flight admitted stage
+	// completes. admitHeld tracks whether THIS sweep goroutine currently owns
+	// admitMu (sweep-goroutine-only; reclaim touches admitMu solely through
+	// TryLock, never admitHeld), so releaseAdmit unlocks exactly the holds it
+	// owns and never a gate reclaim acquired for its release.
+	admitMu   sync.Mutex
+	admitHeld bool
 }
 
 // revoke flips the claim's in-process revocation flag. Only the ledger's
@@ -185,22 +196,53 @@ var sweepClaimRevokedLogFn = func(phase string, epoch uint64, backup, dest strin
 // is subsumed: no fixed deadline is needed once every mutating stage is
 // attested, so the wave-53 worker-ack bound is removed (the reclaim frees the
 // marker directly; the reverter never bypasses a still-owned marker).
+//
+// Wave-56 (codex P1, PR#215 finding F1 — hold arbitration across each attested
+// mutation): the attestation above ran as a SEPARATE check ahead of the
+// caller's mutation — a reclaim landing in that gap freed the dest lock and
+// marker while the already-admitted mutation had not yet run, so the reverter
+// mutated concurrently with the sweep's mutation. The gate now wraps the
+// attestation and the mutation in ONE in-process admission: admit releases
+// the PREVIOUS stage's gate, try-locks a fresh one, and attests ownership
+// UNDER the lock; the gate stays held until the next admit (or releaseAdmit,
+// deferred by every gated entry point) — i.e. across the mutation. Reclaim's
+// releaseForReclaim polls TryLock on admitMu (bounded by
+// sweepReclaimAdmitGrace) and only then frees the dest lock, so the reverter
+// never mutates while an admitted sweep mutation is in flight. A TryLock
+// failure means reclaim holds the gate for its release — the stage abandons.
 func (c *sweepBusyMarkerClaim) abandonIfRevoked(phase, backup, dest string) bool {
-	if c.isRevoked() {
-		sweepClaimRevokedLogFn(phase, c.epoch, backup, dest)
-		return true
-	}
 	if c == nil {
 		return false
 	}
-	// Ownership attestation: a markerless claim (test/direct-caller posture,
-	// token == "") skips the on-disk check and relies on the revocation flag
-	// alone. A claimed marker requires the on-disk bytes still name our token.
-	if c.token != "" && c.fs != nil && !fsutil.ReplacementBusyMarkerIsOurs(c.fs, dest, c.token) {
+	// Release the previous stage's admit gate, then try-lock a fresh one and
+	// attest ownership UNDER it: reclaim cannot take the marker aside between
+	// the attestation and the mutation that follows this return.
+	c.releaseAdmit()
+	if !c.admitMu.TryLock() {
+		// reclaim holds the gate for its release — abandon without mutating.
 		sweepClaimRevokedLogFn(phase, c.epoch, backup, dest)
 		return true
 	}
+	if c.isRevoked() || (c.token != "" && c.fs != nil && !fsutil.ReplacementBusyMarkerIsOurs(c.fs, dest, c.token)) {
+		c.admitMu.Unlock()
+		sweepClaimRevokedLogFn(phase, c.epoch, backup, dest)
+		return true
+	}
+	c.admitHeld = true // the gate is held across the caller's mutation
 	return false
+}
+
+// releaseAdmit frees the admit gate held by the last successful
+// abandonIfRevoked. It is nil-safe and a no-op when no gate is held, so
+// every gated entry point can `defer claim.releaseAdmit()` unconditionally.
+// Sweep-goroutine-only: reclaim never calls it (it unlocks admitMu directly
+// from releaseForReclaim when waitAdmitted acquired it).
+func (c *sweepBusyMarkerClaim) releaseAdmit() {
+	if c == nil || !c.admitHeld {
+		return
+	}
+	c.admitHeld = false
+	c.admitMu.Unlock()
 }
 
 // bindDestLock fills the claim's pending dest-lock cell the instant the
@@ -251,6 +293,20 @@ var sweepReclaimReleaseGrace = 250 * time.Millisecond
 // sweepReclaimReleasePoll is the released-signal polling interval.
 var sweepReclaimReleasePoll = 25 * time.Millisecond
 
+// sweepReclaimAdmitGrace bounds how long reclaim's releaseForReclaim waits for
+// an IN-FLIGHT admitted sweep mutation to finish before freeing the dest lock
+// (wave-56, finding F1). The dest lock is pure in-process work (never wedged),
+// so freeing it lets the reverter's dest-lock acquisition proceed; the bound
+// caps the residual risk that a mutation wedged past the grace completes
+// after the reverter starts. Normal fs stages (publish, quarantine, unlink,
+// journal tx) finish well within the grace; a truly wedged fs call outlasts
+// it and reclaim proceeds (the dest lock is freed in-process regardless).
+// Tests shorten this through TestMain.
+var sweepReclaimAdmitGrace = 100 * time.Millisecond
+
+// sweepReclaimAdmitPoll is the admit-gate TryLock polling interval.
+var sweepReclaimAdmitPoll = 5 * time.Millisecond
+
 // waitReleased blocks up to sweepReclaimReleaseGrace (polling
 // sweepReclaimReleasePoll) for the detached releaseForReclaim to signal that
 // both holds are freed (wave-53, finding 4). Returns true if the releases
@@ -282,16 +338,46 @@ func (c *sweepBusyMarkerClaim) waitReleased() bool {
 // so the reclaim taking the marker aside is safe without a deadline: a worker
 // resuming reads a swapped/gone marker and abandons before mutating. The ack
 // is subsumed as an optimization, not the safety bound. Detached by reclaim.
+// Wave-56 (finding F1): before freeing the dest lock, reclaim polls TryLock
+// on the admit gate (bounded by sweepReclaimAdmitGrace) so an in-flight
+// admitted mutation finishes first — the reverter never mutates concurrently
+// with an already-admitted sweep mutation. On success reclaim HOLDS the gate
+// across the in-process dest-lock free (new sweep admits TryLock-fail and
+// abandon), then unlocks it; the marker take-aside runs after (may wedge). A
+// timeout (wedged mutation) proceeds without holding — the dest lock is
+// freed in-process regardless, the residual risk bounded by the grace.
 func (c *sweepBusyMarkerClaim) releaseForReclaim() {
 	c.mu.Lock()
 	c.reclaimed = true
 	destRelease := c.destRelease
 	c.mu.Unlock()
+	admitted := c.waitAdmitted() // bounded TryLock poll; true = reclaim holds the admit gate
 	if destRelease != nil {
-		destRelease()
+		destRelease() // free the dest lock (in-process, fast) — while reclaim holds the admit gate
+	}
+	if admitted {
+		c.admitMu.Unlock() // new sweep admits now TryLock-fail and read revoked → abandon
 	}
 	c.release()            // wave-55: free the marker directly — the attestation gates the worker
 	c.released.Store(true) // wave-53, finding 4: signal the detached releases completed
+}
+
+// waitAdmitted polls TryLock on the admit gate up to sweepReclaimAdmitGrace:
+// true means no admitted mutation is in flight (reclaim holds the gate across
+// the dest-lock free); false means a mutation outlasted the grace (reclaim
+// proceeds without holding — the residual, bounded risk). The poll is
+// non-blocking so a wedged worker never strands the reverter's reclaim.
+func (c *sweepBusyMarkerClaim) waitAdmitted() bool {
+	deadline := time.Now().Add(sweepReclaimAdmitGrace)
+	for {
+		if c.admitMu.TryLock() {
+			return true
+		}
+		if !time.Now().Before(deadline) {
+			return false
+		}
+		time.Sleep(sweepReclaimAdmitPoll)
+	}
 }
 
 // sweepBusyClaimLedger is the in-process ledger of sweep-owned busy markers.
@@ -337,19 +423,21 @@ var sweepBusyClaims = newSweepBusyClaimLedger()
 // once-guard at cell time so the reclaim and the claimer's own defer share
 // one firing. Wave-55 (finding 1): the claim also records the filesystem and
 // the marker token it just wrote, so every mutating stage gate can re-prove
-// the on-disk marker still names this claimant's token. The returned untrack
+// the on-disk marker still names this claimant's token. Wave-56 (finding F2):
+// the token MUST ride the acquisition API (fsutil.AcquireReplacementBusyEx)
+// — the ledger never re-reads the marker by pathname here, so a racing swap
+// or a transient read failure after the acquire cannot adopt an empty or
+// foreign token and silently disarm the attestation gate. The caller refuses
+// to record a claim whose provenance is unavailable (empty token with a
+// non-nil fs): it treats that as a failed acquire. The returned untrack
 // removes ONLY this exact record (pointer identity — a re-recorded claim for
 // the same dest is never retracted by a stale holder) and is always deferred
 // by the claimer ahead of the releases.
-func recordSweepBusyClaim(ctx context.Context, fs afero.Fs, dest string, release func()) (*sweepBusyMarkerClaim, func()) {
-	return sweepBusyClaims.record(ctx, fs, dest, release)
+func recordSweepBusyClaim(ctx context.Context, fs afero.Fs, dest, token string, release func()) (*sweepBusyMarkerClaim, func()) {
+	return sweepBusyClaims.record(ctx, fs, dest, token, release)
 }
 
-func (l *sweepBusyClaimLedger) record(ctx context.Context, fs afero.Fs, dest string, release func()) (*sweepBusyMarkerClaim, func()) {
-	var token string
-	if fs != nil {
-		token, _ = fsutil.ReadReplacementBusyToken(fs, dest)
-	}
+func (l *sweepBusyClaimLedger) record(ctx context.Context, fs afero.Fs, dest, token string, release func()) (*sweepBusyMarkerClaim, func()) {
 	rec := &sweepBusyMarkerClaim{ctx: ctx, fs: fs, token: token, release: release}
 	l.mu.Lock()
 	l.epoch++

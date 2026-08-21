@@ -107,6 +107,22 @@ func ReplacementBusyMarkerIsOurs(fs afero.Fs, dest, token string) bool {
 // never reclaimed based on its age alone so an unowned file cannot be
 // mistaken for Javinizer's marker.
 func AcquireReplacementBusy(fs afero.Fs, dest string) (func(), error) {
+	release, _, err := AcquireReplacementBusyEx(fs, dest)
+	return release, err
+}
+
+// AcquireReplacementBusyEx is AcquireReplacementBusy with a provenance-bound
+// token return (wave-56, history finding F2): the token the claimant just
+// wrote rides the acquisition API itself, so a ledger that records it never
+// re-reads the marker by pathname — a racing swap or a transient read
+// failure after the acquire could otherwise adopt an empty/foreign token
+// and silently disarm the ownership-attestation gate. Callers that journal
+// the claim for the in-process sweep ledger MUST record THIS token; the
+// once-guarded release closes over the same token. The token is always
+// non-empty on a nil error (a fresh pid+time marker); a caller that treats
+// an empty token as a failed acquire refuses to record the claim (provenance
+// unavailable).
+func AcquireReplacementBusyEx(fs afero.Fs, dest string) (func(), string, error) {
 	path := ReplacementBusyPath(dest)
 	for {
 		token := replacementBusyToken()
@@ -114,11 +130,11 @@ func AcquireReplacementBusy(fs afero.Fs, dest string) (func(), error) {
 		if err == nil {
 			if _, err = file.WriteString(token); err != nil {
 				discardBusyMarkerClaim(fs, path, file, nil)
-				return nil, fmt.Errorf("write replacement busy marker: %w", err)
+				return nil, "", fmt.Errorf("write replacement busy marker: %w", err)
 			}
 			if err = file.Sync(); err != nil {
 				discardBusyMarkerClaim(fs, path, file, nil)
-				return nil, fmt.Errorf("sync replacement busy marker: %w", err)
+				return nil, "", fmt.Errorf("sync replacement busy marker: %w", err)
 			}
 			// The identity anchor is captured BEFORE the close: the close-failure
 			// leg below (and only it) runs with the handle already shut, where a
@@ -126,31 +142,31 @@ func AcquireReplacementBusy(fs afero.Fs, dest string) (func(), error) {
 			claimIdentity, claimStatErr := file.Stat()
 			if claimStatErr != nil {
 				discardBusyMarkerClaim(fs, path, file, nil)
-				return nil, fmt.Errorf("stat replacement busy marker: %w", claimStatErr)
+				return nil, "", fmt.Errorf("stat replacement busy marker: %w", claimStatErr)
 			}
 			if err = file.Close(); err != nil {
 				discardBusyMarkerClaim(fs, path, file, claimIdentity)
-				return nil, fmt.Errorf("close replacement busy marker: %w", err)
+				return nil, "", fmt.Errorf("close replacement busy marker: %w", err)
 			}
 			var once sync.Once
 			return func() {
 				once.Do(func() { releaseReplacementBusy(fs, path, token) })
-			}, nil
+			}, token, nil
 		}
 		if !os.IsExist(err) {
-			return nil, fmt.Errorf("create replacement busy marker: %w", err)
+			return nil, "", fmt.Errorf("create replacement busy marker: %w", err)
 		}
 
 		inspection, inspectErr := replacementBusyInspect(fs, path)
 		if inspectErr != nil {
-			return nil, fmt.Errorf("inspect replacement busy marker: %w", inspectErr)
+			return nil, "", fmt.Errorf("inspect replacement busy marker: %w", inspectErr)
 		}
 		if !inspection.stale {
-			return nil, ErrReplacementBusy
+			return nil, "", ErrReplacementBusy
 		}
 		if !inspection.reclaimable {
 			logging.Warnf("replacement busy marker %s is stale but not a recognized Javinizer marker; preserving it", path)
-			return nil, ErrReplacementBusy
+			return nil, "", ErrReplacementBusy
 		}
 		if !inspection.hasObservedToken {
 			// The marker disappeared while it was being inspected. Refresh from
@@ -165,11 +181,11 @@ func AcquireReplacementBusy(fs afero.Fs, dest string) (func(), error) {
 		// successor.
 		takeoverPath, nameErr := replacementBusyTakeoverPath(path)
 		if nameErr != nil {
-			return nil, fmt.Errorf("name replacement busy takeover marker: %w", nameErr)
+			return nil, "", fmt.Errorf("name replacement busy takeover marker: %w", nameErr)
 		}
 		if renameErr := fs.Rename(path, takeoverPath); renameErr != nil {
 			if !os.IsNotExist(renameErr) {
-				return nil, fmt.Errorf("claim replacement busy marker: %w", renameErr)
+				return nil, "", fmt.Errorf("claim replacement busy marker: %w", renameErr)
 			}
 
 			// A failed source rename means another claimant won. Re-read the
@@ -177,14 +193,14 @@ func AcquireReplacementBusy(fs afero.Fs, dest string) (func(), error) {
 			// winner's replacement marker.
 			refreshed, refreshErr := replacementBusyInspect(fs, path)
 			if refreshErr != nil {
-				return nil, fmt.Errorf("reinspect replacement busy marker: %w", refreshErr)
+				return nil, "", fmt.Errorf("reinspect replacement busy marker: %w", refreshErr)
 			}
 			if !refreshed.stale {
-				return nil, ErrReplacementBusy
+				return nil, "", ErrReplacementBusy
 			}
 			if !refreshed.reclaimable {
 				logging.Warnf("replacement busy marker %s is stale but not a recognized Javinizer marker; preserving it", path)
-				return nil, ErrReplacementBusy
+				return nil, "", ErrReplacementBusy
 			}
 			continue
 		}
@@ -200,20 +216,20 @@ func AcquireReplacementBusy(fs afero.Fs, dest string) (func(), error) {
 		if readErr != nil {
 			// We own the successor, but cannot prove which marker it contains.
 			// Leave it in place and fail closed rather than consuming it.
-			return nil, fmt.Errorf("read replacement busy takeover marker: %w", readErr)
+			return nil, "", fmt.Errorf("read replacement busy takeover marker: %w", readErr)
 		}
 		if !bytes.Equal(claimedToken, inspection.observedToken) {
 			if returnErr := replacementBusyReturnTakeover(fs, path, takeoverPath, claimedToken, observedIdentity); returnErr != nil {
-				return nil, returnErr
+				return nil, "", returnErr
 			}
-			return nil, ErrReplacementBusy
+			return nil, "", ErrReplacementBusy
 		}
 		if removeErr := releaseClaimedBusyObject(fs, takeoverPath, observedIdentity); removeErr != nil {
 			// The successful rename proves ownership of takeoverPath AT THE
 			// RENAME INSTANT; the bound release re-derives it at unlink
 			// adjacency and refuses a swapped occupant. Any wedge stops the
 			// acquire rather than guessing about on-disk state.
-			return nil, fmt.Errorf("reclaim replacement busy marker: %w", removeErr)
+			return nil, "", fmt.Errorf("reclaim replacement busy marker: %w", removeErr)
 		}
 	}
 }

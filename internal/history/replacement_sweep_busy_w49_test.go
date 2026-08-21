@@ -28,11 +28,11 @@ func TestSweepBusyClaimW49_ReclaimGatesOnAbandonment(t *testing.T) {
 
 	require.False(t, reclaimAbandonedSweepBusyMarker(dest), "no record — nothing to reclaim")
 
-	release, err := fsutil.AcquireReplacementBusy(fs, dest)
+	release, token, err := fsutil.AcquireReplacementBusyEx(fs, dest)
 	require.NoError(t, err)
 	liveCtx, liveCancel := context.WithCancel(context.Background())
 	t.Cleanup(liveCancel)
-	_, untrack := recordSweepBusyClaim(liveCtx, fs, dest, release)
+	_, untrack := recordSweepBusyClaim(liveCtx, fs, dest, token, release)
 
 	require.False(t, reclaimAbandonedSweepBusyMarker(dest),
 		"a live sweep's marker is never reclaimed — someone still waits on it")
@@ -68,8 +68,8 @@ func TestSweepBusyClaimW49_UntrackIsPointerScoped(t *testing.T) {
 	ctxB, cancelB := context.WithCancel(context.Background())
 	t.Cleanup(cancelB)
 
-	_, recA := recordSweepBusyClaim(ctxA, nil, "/w49/dup/poster.jpg", func() {})
-	_, _ = recordSweepBusyClaim(ctxB, nil, "/w49/dup/poster.jpg", func() {})
+	_, recA := recordSweepBusyClaim(ctxA, nil, "/w49/dup/poster.jpg", "", func() {})
+	_, _ = recordSweepBusyClaim(ctxB, nil, "/w49/dup/poster.jpg", "", func() {})
 	recA() // stale holder must not retract the live record
 	require.False(t, reclaimAbandonedSweepBusyMarker("/w49/dup/poster.jpg"),
 		"the live re-recorded claim survived the stale untrack")
@@ -86,10 +86,10 @@ func TestRestoreReplacementJournalW49_ReclaimsAbandonedSweepMarker(t *testing.T)
 
 	// The abandoned sweep, sweepOne-shaped: the marker claim landed before
 	// its ctx died mid-op (the wedged fs the goroutine parks on).
-	sweepRelease, err := fsutil.AcquireReplacementBusy(fixture.fs, dest)
+	sweepRelease, sweepToken, err := fsutil.AcquireReplacementBusyEx(fixture.fs, dest)
 	require.NoError(t, err)
 	sweepCtx, sweepCancel := context.WithCancel(context.Background())
-	_, untrack := recordSweepBusyClaim(sweepCtx, fixture.fs, dest, sweepRelease)
+	_, untrack := recordSweepBusyClaim(sweepCtx, fixture.fs, dest, sweepToken, sweepRelease)
 
 	// While the sweep is LIVE the revert keeps the ordinary busy refusal.
 	restored, err := NewReverter(fixture.fs, fixture.repo).restoreReplacementJournal(context.Background(), op)

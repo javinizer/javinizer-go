@@ -45,6 +45,16 @@ import (
 // FINAL marker counts. R4-4's ordinal tail is the optional trailing group.
 var replacementBackupName = regexp.MustCompile(`\.dlbak\.[0-9a-f]{16}(\.[0-9a-f]{1,16})?$`)
 
+// acquireReplacementBusyExFn is the busy-marker acquisition seam behind
+// sweepOne/consumeRearmRefusedPending (same discipline as
+// rearmPublishFn/restoreStagingOwnershipFn in reverter_replacements_p3.go):
+// production acquires through fsutil.AcquireReplacementBusyEx; tests drive
+// the wave-56 (finding F2) provenance-unavailable refusal leg — an acquire
+// that yields a non-nil release with an empty token and a nil error. The
+// token is always non-empty on a nil error in production, so the refusal
+// leg is only reachable through this seam.
+var acquireReplacementBusyExFn = fsutil.AcquireReplacementBusyEx
+
 // journalEntryInstalled reports whether the row journals this backup with
 // the install-confirm marker set.
 func journalEntryInstalled(row *models.BatchFileOperation, backupSlash string) bool {
@@ -792,12 +802,19 @@ func (s *ReplacementSweeper) sweepOne(ctx context.Context, idx *replacementLedge
 	// reading or changing ownership state: the downloader creates the same
 	// marker before moving the destination aside, so a live API install cannot
 	// be mistaken for a stale crash window by this process (or at startup).
-	busyRelease, busyErr := fsutil.AcquireReplacementBusy(s.fs, dest)
+	busyRelease, busyToken, busyErr := acquireReplacementBusyExFn(s.fs, dest)
 	if errors.Is(busyErr, fsutil.ErrReplacementBusy) {
 		return 0
 	}
 	if busyErr != nil {
 		logging.Warnf("replacement sweep %s: busy-marker arbitration failed (%v) — kept", backup, busyErr)
+		return 0
+	}
+	if busyToken == "" {
+		// Wave-56 (finding F2): provenance unavailable — refuse to record the
+		// claim (treat as a failed acquire on the sweep side).
+		busyRelease()
+		logging.Warnf("replacement sweep %s: busy-marker token provenance unavailable — kept", backup)
 		return 0
 	}
 	defer busyRelease()
@@ -815,8 +832,9 @@ func (s *ReplacementSweeper) sweepOne(ctx context.Context, idx *replacementLedge
 	// reclaim by the continued revert consumes the once-guarded releases,
 	// making this goroutine's deferred releases no-ops (never a double-free
 	// of a successor marker or lock).
-	claim, untrackSweepClaim := recordSweepBusyClaim(ctx, s.fs, dest, busyRelease)
+	claim, untrackSweepClaim := recordSweepBusyClaim(ctx, s.fs, dest, busyToken, busyRelease)
 	defer untrackSweepClaim()
+	defer claim.releaseAdmit() // wave-56 (finding F1): release the last admit gate at return
 	rawDestRelease := fsutil.SharedDestLocks().Acquire(dest)
 	if !claim.bindDestLock(rawDestRelease) {
 		// The claim was reclaimed DURING the dest-lock wait (the reclaim ran
@@ -935,6 +953,7 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 		release := fsutil.SharedDestLocks().Acquire(dest)
 		defer release()
 	}
+	defer claim.releaseAdmit() // wave-56 (finding F1): release the last admit gate at return
 
 	// A prior restore can leave the destination present when backup cleanup
 	// failed. Only the explicit pending marker (or the same-process fallback)
@@ -1438,6 +1457,7 @@ func (s *ReplacementSweeper) retryPendingRemoval(ctx context.Context, rowID uint
 func (s *ReplacementSweeper) retryPendingRemovalClaimed(ctx context.Context, rowID uint, backup, dest, backupSlash string, claim *sweepBusyMarkerClaim) bool {
 	jrel := fsutil.SharedJournalLocks().Acquire(strconv.Itoa(int(rowID)))
 	defer jrel()
+	defer claim.releaseAdmit() // wave-56 (finding F1): release the last admit gate at return
 	var rowReverted, targetFound, authorized bool
 	var durableKind string
 	var fnErr error
@@ -1746,12 +1766,19 @@ func (s *ReplacementSweeper) retryPendingRemovalClaimed(ctx context.Context, row
 // the durable marker and warns). A live busy marker keeps the name untouched
 // for the owner process's own lifecycle, mirroring sweepOne's posture.
 func (s *ReplacementSweeper) consumeRearmRefusedPending(ctx context.Context, idx *replacementLedgerIndex, entry rearmRefusedLedgerEntry) int {
-	busyRelease, busyErr := fsutil.AcquireReplacementBusy(s.fs, entry.dest)
+	busyRelease, busyToken, busyErr := acquireReplacementBusyExFn(s.fs, entry.dest)
 	if errors.Is(busyErr, fsutil.ErrReplacementBusy) {
 		return 0
 	}
 	if busyErr != nil {
 		logging.Warnf("replacement sweep %s: busy-marker arbitration failed (%v) — rearm-refused pending kept", entry.backup, busyErr)
+		return 0
+	}
+	if busyToken == "" {
+		// Wave-56 (finding F2): provenance unavailable — refuse to record the
+		// claim (treat as a failed acquire on the sweep side).
+		busyRelease()
+		logging.Warnf("replacement sweep %s: busy-marker token provenance unavailable — rearm-refused pending kept", entry.backup)
 		return 0
 	}
 	defer busyRelease()
@@ -1762,8 +1789,9 @@ func (s *ReplacementSweeper) consumeRearmRefusedPending(ctx context.Context, idx
 	// — the record lands BEFORE the dest-lock wait carrying a pending cell
 	// for the lock release, so the reverter's reclaim consult sees the claim
 	// for the whole wait and frees both holds once bound.
-	claim, untrackSweepClaim := recordSweepBusyClaim(ctx, s.fs, entry.dest, busyRelease)
+	claim, untrackSweepClaim := recordSweepBusyClaim(ctx, s.fs, entry.dest, busyToken, busyRelease)
 	defer untrackSweepClaim()
+	defer claim.releaseAdmit() // wave-56 (finding F1): release the last admit gate at return
 	rawDestRelease := fsutil.SharedDestLocks().Acquire(entry.dest)
 	if !claim.bindDestLock(rawDestRelease) {
 		// Reclaimed during the wait (empty cell): the just-acquired lock is
