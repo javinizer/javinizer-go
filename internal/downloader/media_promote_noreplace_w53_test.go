@@ -49,7 +49,7 @@ func w53StageCandidate(t *testing.T, body string) (fs afero.Fs, candidate, dest 
 
 func TestPromotePosterCandidateW53_BoundHandlePublishesCleanly(t *testing.T) {
 	fs, candidate, dest := w53StageCandidate(t, "cropped candidate")
-	outcome, err := promotePosterCandidateNoReplace(fs, candidate, dest)
+	outcome, err := promotePosterCandidateNoReplace(fs, candidate, dest, captureInstalledDestIdentity(fs, candidate))
 	require.NoError(t, err)
 	require.Equal(t, promotePosterCandidateSucceeded, outcome)
 	got, rerr := os.ReadFile(dest)
@@ -61,7 +61,7 @@ func TestPromotePosterCandidateW53_CollisionKeepsRacer(t *testing.T) {
 	fs, candidate, dest := w53StageCandidate(t, "cropped candidate")
 	// Plant racer bytes at the destination before the promote publish.
 	require.NoError(t, os.WriteFile(dest, []byte("racer"), 0o644))
-	outcome, err := promotePosterCandidateNoReplace(fs, candidate, dest)
+	outcome, err := promotePosterCandidateNoReplace(fs, candidate, dest, captureInstalledDestIdentity(fs, candidate))
 	require.NoError(t, err, "a collision is the existing-artwork outcome, not a failure")
 	require.Equal(t, promotePosterCandidateCollision, outcome)
 	got, rerr := os.ReadFile(dest)
@@ -80,7 +80,7 @@ func TestPromotePosterCandidateW53_PublishCompletedRetainsCandidate(t *testing.T
 		return nil, errors.Join(fsutil.ErrPublishNoReplaceStagedUnverified, fsutil.ErrPublishCompleted)
 	}
 	t.Cleanup(func() { publishStagedBoundFn = prev })
-	outcome, err := promotePosterCandidateNoReplace(fs, candidate, dest)
+	outcome, err := promotePosterCandidateNoReplace(fs, candidate, dest, captureInstalledDestIdentity(fs, candidate))
 	require.NoError(t, err, "a completed-despite-error publish is a completed download")
 	require.Equal(t, promotePosterCandidateCompleted, outcome)
 	// The candidate is retained for manual cleanup (the wave-42 discipline).
@@ -100,7 +100,7 @@ func TestPromotePosterCandidateW53_PrePublishSubstitutionRefused(t *testing.T) {
 		return nil, fsutil.ErrPublishStagedVerify
 	}
 	t.Cleanup(func() { publishStagedBoundFn = prev })
-	outcome, err := promotePosterCandidateNoReplace(fs, candidate, dest)
+	outcome, err := promotePosterCandidateNoReplace(fs, candidate, dest, captureInstalledDestIdentity(fs, candidate))
 	require.Error(t, err)
 	require.ErrorIs(t, err, errStagedInputSubstituted)
 	require.Equal(t, promotePosterCandidateRetained, outcome, "the substitute is preserved byte-intact")
@@ -119,7 +119,7 @@ func TestPromotePosterCandidateW53_BoundPublishIdentityBreakRefused(t *testing.T
 		return nil, fsutil.ErrPublishStagedIdentityBreak
 	}
 	t.Cleanup(func() { publishStagedBoundFn = prev })
-	outcome, err := promotePosterCandidateNoReplace(fs, candidate, dest)
+	outcome, err := promotePosterCandidateNoReplace(fs, candidate, dest, captureInstalledDestIdentity(fs, candidate))
 	require.Error(t, err)
 	require.ErrorIs(t, err, errStagedInputSubstituted)
 	require.Equal(t, promotePosterCandidateRetained, outcome)
@@ -129,7 +129,7 @@ func TestPromotePosterCandidateW53_BothFailRefusesClosed(t *testing.T) {
 	// A non-existent candidate: captureInstalledDestIdentity (Lstat) AND the
 	// no-follow re-open both fail — the candidate is completely unprobeable.
 	fs := afero.NewMemMapFs()
-	outcome, err := promotePosterCandidateNoReplace(fs, "/missing-candidate", "/missing-dest")
+	outcome, err := promotePosterCandidateNoReplace(fs, "/missing-candidate", "/missing-dest", installedDestIdentity{})
 	require.Error(t, err)
 	require.ErrorIs(t, err, errCandidateProvenanceUnprobeable)
 	require.Equal(t, promotePosterCandidateRetained, outcome)
@@ -146,7 +146,7 @@ func TestPromotePosterCandidateW53_PlainFailureSurfacesError(t *testing.T) {
 		return nil, publishErr
 	}
 	t.Cleanup(func() { publishStagedBoundFn = prev })
-	outcome, err := promotePosterCandidateNoReplace(fs, candidate, dest)
+	outcome, err := promotePosterCandidateNoReplace(fs, candidate, dest, captureInstalledDestIdentity(fs, candidate))
 	require.Error(t, err)
 	require.ErrorIs(t, err, publishErr)
 	require.ErrorContains(t, err, "failed to finalize poster")
@@ -172,7 +172,7 @@ func TestPromotePosterCandidateW53_DegradedRecordedOnlyPostureRefused(t *testing
 	// recorded pathname — the candidate is preserved byte-intact, the
 	// destination untouched (the re-acquire bind also fails the re-open).
 	degraded := w53OpenFileFailFs{Fs: fs}
-	outcome, err := promotePosterCandidateNoReplace(degraded, candidate, dest)
+	outcome, err := promotePosterCandidateNoReplace(degraded, candidate, dest, captureInstalledDestIdentity(fs, candidate))
 	require.ErrorIs(t, err, errStagedInputSubstituted, "the degraded leg re-acquires or refuses — never publishes by name")
 	require.Equal(t, promotePosterCandidateRetained, outcome)
 	_, rerr := os.ReadFile(dest)
@@ -236,6 +236,84 @@ func TestDownloadPosterW53_PromoteSubstitutionRetainsCandidate(t *testing.T) {
 	require.True(t, os.IsNotExist(derr), "no byte ever flowed into the destination")
 }
 
+// TestDownloadPosterW53_PromoteBindSubstitutionRetainsSubstitute drives
+// downloadPoster's NON-overwrite promote Retained switch arm end-to-end
+// through the bindCandidateProvenanceFn seam: a foreign substitute is
+// planted onto the crop candidate name inside the crop→promote window and
+// the promote's pre-publish provenance bind refuses it typed
+// (errStagedInputSubstituted) → promotePosterCandidateRetained. Per the
+// arm's comments, downloadPoster surfaces the refusal in fullResult.Error,
+// clears LocalPath, reports Downloaded=false, retains the possibly-foreign
+// candidate name byte-intact for manual cleanup (the stagedRetained gate
+// keeps the deferred identity-bound scratch cleanup off the substitute),
+// still reaps the non-candidate full-source scratch, and never publishes a
+// byte onto the destination. No OverwriteExisting option is passed and the
+// destination is proven absent — the legacy no-replace promote path.
+func TestDownloadPosterW53_PromoteBindSubstitutionRetainsSubstitute(t *testing.T) {
+	server := covW1BPosterServer()
+	defer server.Close()
+
+	base := afero.NewOsFs()
+	destDir := t.TempDir()
+	movie := w51PosterMovie("W53-BSUB", server.URL+"/poster.jpg")
+	dest := w51PosterDest(t, NewDownloader(nil, base, w51PosterConfig(), nil), movie, destDir)
+	d := NewDownloader(server.Client(), base, w51PosterConfig(), nil)
+
+	var logs bytes.Buffer
+	restoreLog := logging.SetOutput(&logs)
+	defer restoreLog()
+
+	plant := []byte("w53 promote-window foreign substitute — planted post-crop, pre-bind")
+	planted := false
+	prev := bindCandidateProvenanceFn
+	real := bindCandidateProvenanceFn
+	bindCandidateProvenanceFn = func(fs afero.Fs, candidate string, producer installedDestIdentity) (stagedInstallProvenance, error) {
+		if strings.HasSuffix(candidate, ".crop.tmp") {
+			// A foreign writer rotated its bytes onto the candidate name after
+			// the crop produced it; the bind refuses typed instead of
+			// re-proving or publishing the substitute.
+			if werr := afero.WriteFile(fs, candidate, plant, 0o600); werr == nil {
+				planted = true
+			}
+			return stagedInstallProvenance{}, errStagedInputSubstituted
+		}
+		return real(fs, candidate, producer)
+	}
+	t.Cleanup(func() { bindCandidateProvenanceFn = prev })
+
+	result, err := d.downloadPoster(context.Background(), movie, destDir, nil)
+	require.Error(t, err)
+	require.ErrorIs(t, err, errStagedInputSubstituted)
+	require.ErrorIs(t, result.Error, errStagedInputSubstituted, "fullResult.Error carries the typed refusal")
+	require.False(t, result.Downloaded)
+	require.False(t, result.Replaced)
+	require.False(t, result.Skipped)
+	require.Empty(t, result.LocalPath)
+	require.Contains(t, logs.String(), "substitute preserved")
+
+	require.True(t, planted, "the seam planted the substitute at the promote-time bind")
+	_, derr := os.Lstat(dest)
+	require.True(t, os.IsNotExist(derr), "no byte ever flowed into the destination")
+
+	// The stagedRetained lifecycle, observable: the retained crop.tmp
+	// candidate carries the planted substitute byte-intact while the
+	// non-candidate full.tmp scratch still reaps under its own identity
+	// binding — only the possibly-foreign name is left for manual cleanup.
+	entries, rerr := os.ReadDir(destDir)
+	require.NoError(t, rerr)
+	var retained []string
+	for _, e := range entries {
+		require.NotContains(t, e.Name(), ".full.tmp", "the full-source scratch still reaps under its identity binding")
+		if strings.Contains(e.Name(), ".crop.tmp") {
+			retained = append(retained, e.Name())
+		}
+	}
+	require.Len(t, retained, 1, "exactly the possibly-foreign candidate name is retained")
+	got, gerr := os.ReadFile(filepath.Join(destDir, retained[0]))
+	require.NoError(t, gerr)
+	require.Equal(t, plant, got, "the substitute is preserved byte-intact (stagedRetained gated the deferred cleanup off it)")
+}
+
 // TestDownloadPosterW53_OverwriteBothFailRefusesClosed covers the overwrite
 // install path's both-fail refusal (media.go: the candidate is unprobeable at
 // bind time). Fail CLOSED: nothing published, the existing destination is
@@ -257,7 +335,7 @@ func TestDownloadPosterW53_OverwriteBothFailRefusesClosed(t *testing.T) {
 	defer restoreLog()
 
 	prev := bindCandidateProvenanceFn
-	bindCandidateProvenanceFn = func(_ afero.Fs, candidate string) (stagedInstallProvenance, error) {
+	bindCandidateProvenanceFn = func(_ afero.Fs, _ string, _ installedDestIdentity) (stagedInstallProvenance, error) {
 		return stagedInstallProvenance{}, errCandidateProvenanceUnprobeable
 	}
 	t.Cleanup(func() { bindCandidateProvenanceFn = prev })

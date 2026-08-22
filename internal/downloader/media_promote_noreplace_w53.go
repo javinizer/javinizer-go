@@ -72,12 +72,27 @@ const (
 // fails closed. The outcome tells the caller which scratch names to reap vs
 // retain and whether the download reports success or a typed refusal; the
 // error is non-nil exactly for the retained + plain-failure legs.
-func promotePosterCandidateNoReplace(fs afero.Fs, candidate, destPath string) (promotePosterCandidateOutcome, error) {
-	prov, provErr := bindCandidateProvenanceFn(fs, candidate)
+// Wave-66 (codex P2, PR#215 — bind the candidate to the PRODUCER'S identity):
+// the caller hands the crop/write producer's write-time identity record down
+// (downloadPoster's post-download / post-crop capture of the candidate) and
+// the bind authenticates its install-time Lstat AND the re-opened fd's fstat
+// against THAT record — a substitute rotated onto the candidate name between
+// the producer write and this promote's bind no longer authenticates against
+// itself; the refusal rides the same typed Retained leg.
+func promotePosterCandidateNoReplace(fs afero.Fs, candidate, destPath string, producer installedDestIdentity) (promotePosterCandidateOutcome, error) {
+	prov, provErr := bindCandidateProvenanceFn(fs, candidate, producer)
 	if provErr != nil {
-		// Finding 3: both the path identity capture and the no-follow re-open
-		// failed — the candidate is completely unprobeable. Fail closed.
-		logging.Warnf("downloadPoster: promote of %s onto %s refused — candidate %s could not be proven (path identity capture and no-follow re-open both failed); refusing to publish unauthenticated, destination untouched, candidate preserved for manual cleanup", candidate, destPath, candidate)
+		if errors.Is(provErr, errStagedInputSubstituted) {
+			// Wave-66: the candidate name provably stopped naming the
+			// producer-written object between the crop/write and this bind —
+			// same retained-substitute posture as the publish-time
+			// substitution refusal below, reached before any publish ran.
+			logging.Warnf("downloadPoster: promote of %s onto %s refused — candidate name %s no longer names the crop/write-produced object (foreign substitution between the crop/write and the promote-time bind); substitute preserved, destination untouched, manual cleanup advised", candidate, destPath, candidate)
+		} else {
+			// Finding 3: both the path identity capture and the no-follow
+			// re-open failed — the candidate is completely unprobeable. Fail closed.
+			logging.Warnf("downloadPoster: promote of %s onto %s refused — candidate %s could not be proven (path identity capture and no-follow re-open both failed); refusing to publish unauthenticated, destination untouched, candidate preserved for manual cleanup", candidate, destPath, candidate)
+		}
 		return promotePosterCandidateRetained, provErr
 	}
 	var rerr error

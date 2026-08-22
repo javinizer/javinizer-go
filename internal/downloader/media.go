@@ -117,11 +117,12 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 	// Wave-65 (codex P2, PR#215 finding F1): BOTH scratch defers are now
 	// identity-bound exactly like the wave-62 failed-install cleanup — the
 	// scratch FileInfo is captured at the write instant (fullPath right after
-	// the download; cropPath at the crop, or at the provenance bind's first
-	// no-follow Lstat in overwrite mode) and before removal the defer
-	// SameFile-probes the name still names that record; a foreign write
-	// rotated into the crop→cleanup window is preserved byte-intact for
-	// manual cleanup instead of being destroyed by a pathname Remove.
+	// the download; cropPath at the crop in BOTH modes — wave-66 deepened the
+	// at-crop capture into the crop producer's identity record, see the
+	// provenance bind below) and before removal the defer SameFile-probes the
+	// name still names that record; a foreign write rotated into the
+	// crop→cleanup window is preserved byte-intact for manual cleanup instead
+	// of being destroyed by a pathname Remove.
 	// stagedRetained's carve-outs still cover substitution / completed-publish
 	// detection (the candidate skip); the binding covers the non-retained
 	// scratch and the candidate on its plain-success/failure legs.
@@ -156,9 +157,11 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 	if geometryUsable && d.cropDownloadedPoster(fullPath, cropPath, bounds) {
 		candidate = cropPath
 		cropped = true
-		if !overwriteExisting {
-			cropIdentity = captureInstalledDestIdentity(d.fs, cropPath)
-		}
+		// Wave-66: the crop producer's write-time identity is captured AT the
+		// crop in BOTH modes — it is the producer record the install-time
+		// provenance bind authenticates against (and the scratch-defer
+		// binding), taken before ANY install-time lookup of the name.
+		cropIdentity = captureInstalledDestIdentity(d.fs, cropPath)
 	}
 	if !cropped && movie.Poster.ShouldCropPoster {
 		if err := imageutil.CropPosterFromCover(d.fs, fullPath, cropPath, d.config.MaxPosterHeight); err != nil {
@@ -170,9 +173,8 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 			return fullResult, fullResult.Error
 		}
 		candidate = cropPath
-		if !overwriteExisting {
-			cropIdentity = captureInstalledDestIdentity(d.fs, cropPath)
-		}
+		// Wave-66: same producer-record capture for the auto-crop leg.
+		cropIdentity = captureInstalledDestIdentity(d.fs, cropPath)
 	}
 
 	// Wave-47 (codex P2, PR#215 finding F1-media) as deepened by wave-48
@@ -197,12 +199,34 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 	// returns the typed errCandidateProvenanceUnprobeable refusal — fail CLOSED
 	// on either leg (never publish unauthenticated; nothing recorded or touched,
 	// candidate preserved for manual cleanup).
+	// Wave-66 (codex P2, PR#215 — bind the candidate to the PRODUCER'S
+	// identity): the candidate's producer record — the post-download capture
+	// of fullPath, or the post-crop capture of cropPath — rides into BOTH the
+	// overwrite-mode bind below and the non-overwrite promote's bind
+	// (promotePosterCandidateNoReplace). bindCandidateProvenance compares its
+	// install-time Lstat AND the re-opened fd's fstat against THAT record, so
+	// a substitute rotated onto the candidate name between the producer write
+	// and the bind no longer authenticates against itself: the bind refuses
+	// typed (errStagedInputSubstituted), the substitute is preserved
+	// byte-intact, and the install/refusal posture below is unchanged.
+	producerIdentity := fullIdentity
+	if candidate == cropPath {
+		producerIdentity = cropIdentity
+	}
 	var provenance stagedInstallProvenance
 	if overwriteExisting {
 		var provErr error
-		provenance, provErr = bindCandidateProvenanceFn(d.fs, candidate)
+		provenance, provErr = bindCandidateProvenanceFn(d.fs, candidate, producerIdentity)
 		if provErr != nil {
-			logging.Warnf("downloadPoster: install of %s refused — candidate %s could not be proven (path identity capture and no-follow re-open both failed); refusing to publish unauthenticated, destination untouched, candidate preserved for manual cleanup", destPath, candidate)
+			if errors.Is(provErr, errStagedInputSubstituted) {
+				// Wave-66: the name provably stopped naming the producer-written
+				// object between the crop/download and the bind — the same
+				// retained-substitute posture as the install-time substitution
+				// refusal below, reached before installOverwriting ever ran.
+				logging.Warnf("downloadPoster: install of %s refused — candidate name %s no longer names the crop/write-produced object (foreign substitution between the crop/write and the install-time bind); substitute preserved, destination untouched, manual cleanup advised", destPath, candidate)
+			} else {
+				logging.Warnf("downloadPoster: install of %s refused — candidate %s could not be proven (path identity capture and no-follow re-open both failed); refusing to publish unauthenticated, destination untouched, candidate preserved for manual cleanup", destPath, candidate)
+			}
 			stagedRetained = candidate
 			fullResult.Error = provErr
 			fullResult.Downloaded = false
@@ -210,13 +234,6 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 			fullResult.LocalPath = ""
 			fullResult.Duration = time.Since(startTime)
 			return fullResult, fullResult.Error
-		}
-		// Wave-65 (finding F1): the candidate's write-instant identity rides
-		// the bind's first no-follow Lstat (captured here, NOT at the crop
-		// site, so no extra Lstat precedes the bind the w47 substitution window
-		// replays against) and binds the matching scratch defer.
-		if candidate == cropPath {
-			cropIdentity = provenance.identity
 		}
 	}
 
@@ -290,8 +307,8 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 			fullResult.Duration = time.Since(startTime)
 			return fullResult, nil
 		}
-	}
-	if !overwriteExisting {
+	} else {
+		// overwriteExisting=false — the overwrite leg above terminated already.
 		// Wave-51 (codex P2 parity for the legacy promote): the non-overwrite
 		// promote must NEVER replace an occupied destination — 'existing
 		// artwork is never replaced outside overwrite mode' covers a racer that
@@ -314,7 +331,7 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 		// is refused (errStagedInputSubstituted) instead of being published
 		// unprovenanced — the legacy leg's last unprovenanced publish surface is
 		// closed. The both-fail refusal (finding 3) fails closed there too.
-		outcome, promoteErr := promotePosterCandidateNoReplace(d.fs, candidate, destPath)
+		outcome, promoteErr := promotePosterCandidateNoReplace(d.fs, candidate, destPath, producerIdentity)
 		switch outcome {
 		case promotePosterCandidateCollision:
 			// fullResult carries the FULL download's bookkeeping: reset it to
@@ -366,12 +383,12 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 			return fullResult, nil
 		}
 	}
-
-	fullResult.Downloaded = true
-	fullResult.Replaced = existed
-	d.finalizePosterResult(fullResult, destPath)
-	fullResult.Duration = time.Since(startTime)
-	return fullResult, nil
+	// Both mode legs above return from every switch arm (each switch has a
+	// default), so this if/else is a terminating statement: no fall-through
+	// tail follows. The pre-reshape tail duplicated the promote's succeeded
+	// arm (Downloaded / Replaced=existed / finalizePosterResult / return
+	// nil) but was unreachable — the switch returns on all five outcomes —
+	// and its five dead statements failed the 100% patch-coverage gate.
 }
 
 // removeScratchIfStillOurs is downloadPoster's wave-65 identity-bound scratch

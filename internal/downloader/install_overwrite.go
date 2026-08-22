@@ -817,6 +817,21 @@ func publishStagedInstall(fsys afero.Fs, stagedPath, destPath string, handle afe
 	})
 }
 
+// installedIdentityRecordsEqual is the wave-66 record-vs-record form of
+// identityInfoMatchesRecord (codex P2, PR#215 — bind the candidate to the
+// producer's identity): both sides are already-captured value snapshots
+// (shape-checked at capture time — known identities never describe a symlink
+// or non-regular object), so the comparison is dev/inode divergence when
+// BOTH records carry kernel identity, then size+mtime on every platform. A
+// one-sided kernel-identity absence degrades to the size+mtime legs, exactly
+// like the FileInfo form's silent-Sys fallback.
+func installedIdentityRecordsEqual(a, b installedDestIdentity) bool {
+	if a.hasDevIno && b.hasDevIno && (a.dev != b.dev || a.ino != b.ino) {
+		return false
+	}
+	return a.size == b.size && a.modTime.Equal(b.modTime)
+}
+
 // identityInfoMatchesRecord is the provenance comparator shared by
 // classifyStagedInput (name lookups) and bindStagedProvenanceHandle (the
 // re-opened fd's fstat): symlink/non-regular shapes, dev/inode divergence
@@ -926,8 +941,28 @@ var bindCandidateProvenanceFn = bindCandidateProvenance
 // when the path-based capture AND the no-follow re-open BOTH fail the name
 // is completely unprobeable — fail closed (typed refusal) instead of
 // degrading to an unauthenticated path-only publish.
-func bindCandidateProvenance(fsys afero.Fs, candidate string) (stagedInstallProvenance, error) {
+// Wave-66 (codex P2, PR#215 — bind the candidate to the PRODUCER'S identity):
+// the bind's own captures used to be the FIRST identity ever taken of the
+// candidate name and ran AT INSTALL TIME — a foreign substitute rotated onto
+// the candidate name between the producer's write and the bind then
+// authenticated against ITSELF (both the Lstat and the fstat read the
+// substitute, so the wave-54 Lstat-vs-fstat pair stays green). The caller
+// now hands the producer's own write-time identity record down
+// (downloadPoster's post-download / post-crop no-follow capture): the bind's
+// Lstat capture AND the re-opened fd's fstat must BOTH equal that record or
+// the bind refuses typed (errStagedInputSubstituted) — substitute preserved
+// byte-intact, nothing installed, the caller's install/refusal posture
+// unchanged. A zero/unknown producer record keeps the wave-53/54 legs
+// verbatim (degrade + both-fail closed) for legs with no producer to bind
+// against.
+func bindCandidateProvenance(fsys afero.Fs, candidate string, producer installedDestIdentity) (stagedInstallProvenance, error) {
 	provenance := stagedInstallProvenance{identity: captureInstalledDestIdentity(fsys, candidate)}
+	// Wave-66: the install-time Lstat must equal the producer's write-time
+	// record — a mismatch means the name was rotated onto a foreign substitute
+	// inside the producer-write→bind window; refuse BEFORE opening a handle.
+	if producer.known && provenance.identity.known && !installedIdentityRecordsEqual(provenance.identity, producer) {
+		return stagedInstallProvenance{}, fmt.Errorf("candidate %s no longer names the producer-written object at the install-time bind (Lstat ≠ producer record — foreign substitution between the producer write and the bind) — substitute preserved byte-intact, nothing installed: %w", candidate, errStagedInputSubstituted)
+	}
 	handle, oerr := restoreOpenReplacementSource(fsys, candidate)
 	if oerr != nil {
 		if !provenance.identity.known {
@@ -959,6 +994,14 @@ func bindCandidateProvenance(fsys afero.Fs, candidate string) (stagedInstallProv
 	if provenance.identity.known && !identityInfoMatchesRecord(info, provenance.identity) {
 		_ = handle.Close()
 		return stagedInstallProvenance{}, fmt.Errorf("candidate %s no longer names the Lstat-verified object at the no-follow open (fd fstat ≠ 1st snapshot; foreign substitution mid-window) — substitute preserved byte-intact, nothing installed: %w", candidate, errStagedInputSubstituted)
+	}
+	// Wave-66: the re-opened fd must ALSO equal the producer's write-time
+	// record — the binding leg when the Lstat capture was wedged, and the
+	// closure of the producer-write→bind window the wave-54 Lstat-vs-fstat
+	// pair alone cannot see (a substitute in place at BOTH captures).
+	if producer.known && !identityInfoMatchesRecord(info, producer) {
+		_ = handle.Close()
+		return stagedInstallProvenance{}, fmt.Errorf("candidate %s no longer names the producer-written object at the install-time bind (fd fstat ≠ producer record — foreign substitution between the producer write and the bind) — substitute preserved byte-intact, nothing installed: %w", candidate, errStagedInputSubstituted)
 	}
 	provenance.identity = installedIdentityFromFileInfo(info)
 	provenance.handle = handle

@@ -636,7 +636,7 @@ func TestBindCandidateProvenanceW48(t *testing.T) {
 		candidate := filepath.Join(dir, "poster.jpg.crop.tmp")
 		require.NoError(t, os.WriteFile(candidate, []byte("cropped candidate"), 0o644))
 
-		prov, err := bindCandidateProvenance(fs, candidate)
+		prov, err := bindCandidateProvenance(fs, candidate, installedDestIdentity{})
 		require.NoError(t, err)
 		require.True(t, prov.identity.known)
 		require.NotNil(t, prov.handle, "the candidate's fd rides into the install bound end to end")
@@ -650,7 +650,7 @@ func TestBindCandidateProvenanceW48(t *testing.T) {
 		fs := w48OpenFileFailFs{Fs: afero.NewMemMapFs(), err: errors.New("w48 candidate open wedge")}
 		require.NoError(t, afero.WriteFile(fs, "/candidate", []byte("cropped"), 0o644))
 
-		prov, err := bindCandidateProvenance(fs, "/candidate")
+		prov, err := bindCandidateProvenance(fs, "/candidate", installedDestIdentity{})
 		require.NoError(t, err, "a Lstat-known candidate with a failed re-open degrades, never fails closed")
 		require.Nil(t, prov.handle)
 		require.True(t, prov.identity.known, "the wave-47 post-write capture is still handed down")
@@ -661,7 +661,7 @@ func TestBindCandidateProvenanceW48(t *testing.T) {
 		fs := w48StatFailOpenFileFs{Fs: afero.NewMemMapFs()}
 		require.NoError(t, afero.WriteFile(fs, "/candidate", []byte("cropped"), 0o644))
 
-		prov, err := bindCandidateProvenance(fs, "/candidate")
+		prov, err := bindCandidateProvenance(fs, "/candidate", installedDestIdentity{})
 		require.NoError(t, err, "a Lstat-known candidate with a failed fstat degrades, never fails closed")
 		require.Nil(t, prov.handle)
 		require.True(t, prov.identity.known)
@@ -676,7 +676,7 @@ func TestBindCandidateProvenanceW48(t *testing.T) {
 		// No file at /candidate: captureInstalledDestIdentity (Lstat) returns
 		// not-exist (known=false) AND restoreOpenReplacementSource (the no-follow
 		// re-open) returns not-exist — both fail, so the candidate is unprobeable.
-		prov, err := bindCandidateProvenance(fs, "/candidate")
+		prov, err := bindCandidateProvenance(fs, "/candidate", installedDestIdentity{})
 		require.Error(t, err)
 		require.ErrorIs(t, err, errCandidateProvenanceUnprobeable)
 		require.False(t, prov.identity.known, "nothing verifiable is handed down on the both-fail refusal")
@@ -691,7 +691,7 @@ func TestBindCandidateProvenanceW48(t *testing.T) {
 		fs := w48StatFailOpenFileFs{Fs: afero.NewMemMapFs()}
 		// Absent on the underlying FS: capture cannot prove identity; the
 		// open succeeds through the fake but its Stat wedged.
-		prov, err := bindCandidateProvenance(fs, "/candidate-w57")
+		prov, err := bindCandidateProvenance(fs, "/candidate-w57", installedDestIdentity{})
 		require.ErrorIs(t, err, errCandidateProvenanceUnprobeable)
 		require.False(t, prov.identity.known)
 		require.Nil(t, prov.handle)
@@ -712,7 +712,7 @@ func TestBindCandidateProvenanceW48(t *testing.T) {
 		// and w48StatFailFile wedges the opened fd's Stat.
 		require.NoError(t, afero.WriteFile(fs, "/candidate-w57", []byte("cropped"), 0o644))
 
-		prov, err := bindCandidateProvenance(fs, "/candidate-w57")
+		prov, err := bindCandidateProvenance(fs, "/candidate-w57", installedDestIdentity{})
 		require.ErrorIs(t, err, errCandidateProvenanceUnprobeable)
 		require.False(t, prov.identity.known, "Lstat wedged → no path identity handed down")
 		require.Nil(t, prov.handle, "the wedged fd is closed on the refusal")
@@ -725,7 +725,7 @@ func TestBindCandidateProvenanceW48(t *testing.T) {
 	t.Run("fstat diverges from the Lstat snapshot refuses typed", func(t *testing.T) {
 		fs := w54SubstFs{Fs: afero.NewMemMapFs()}
 		require.NoError(t, afero.WriteFile(fs, "/candidate", []byte("cropped"), 0o644))
-		prov, err := bindCandidateProvenance(fs, "/candidate")
+		prov, err := bindCandidateProvenance(fs, "/candidate", installedDestIdentity{})
 		require.ErrorIs(t, err, errStagedInputSubstituted)
 		require.False(t, prov.identity.known, "nothing verifiable is handed down on the substitution refusal")
 		require.Nil(t, prov.handle)

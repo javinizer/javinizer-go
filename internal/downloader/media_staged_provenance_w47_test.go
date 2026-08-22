@@ -34,12 +34,12 @@ import (
 )
 
 // w47CropSwapFs interposes the crop/write→install window deterministically:
-// the cropped candidate name is lstat'd first by downloadPoster's provenance
-// capture (the crop writers hand back no handle — post-write lstat) and
-// again by installOverwriting's re-proof. The fireOn-th no-follow lookup of
-// the candidate name parks the genuine object aside ("*.hidden") and plants
-// foreign bytes at the name — exactly the directory-writer rotation finding
-// F1-media closes.
+// the cropped candidate name is lstat'd by downloadPoster's PRODUCER record
+// capture (wave-66: at the crop, in both modes), then by the install-time
+// provenance bind (wave-48), and again by installOverwriting's re-proof. The
+// fireOn-th no-follow lookup of the candidate name parks the genuine object
+// aside ("*.hidden") and plants foreign bytes at the name — exactly the
+// directory-writer rotation finding F1-media closes.
 type w47CropSwapFs struct {
 	afero.Fs
 	fireOn    int // which no-follow lookup of the candidate name replays the swap
@@ -83,6 +83,12 @@ func TestDownloadPosterW47_CandidateSwapBetweenCropAndInstallRefused(t *testing.
 	server := serveTwoToneSource(t)
 
 	base := afero.NewMemMapFs()
+	// fireOn 2 (wave-66 numbering: #1 = the producer-record capture at the
+	// crop, #2 = the install-time bind's Lstat) replays a substitution
+	// INSIDE the producer-write→bind window: the bind's Lstat reads the
+	// substitute, the wave-66 producer-record gate refuses typed before any
+	// handle is opened — pre-wave-66 the substitute authenticated against
+	// itself on this very leg.
 	fsW := &w47CropSwapFs{Fs: base, fireOn: 2, plant: []byte("w47 foreign candidate substitute — planted post-crop")}
 	movie := w42CropMovie("W47-CREATE", server.URL+"/cover.jpg")
 	dest := w42ResolvePosterDest(NewDownloader(nil, base, w42CropPosterConfig(), nil), movie)
@@ -178,7 +184,10 @@ func TestDownloadPosterW47_ReplacePathRefusesSubstitutedCandidate(t *testing.T) 
 
 	base := afero.NewMemMapFs()
 	preExisting := []byte("pre-existing poster bytes — never published-over")
-	fsW := &w47CropSwapFs{Fs: base, fireOn: 2, plant: []byte("w47 replace-window foreign substitute")}
+	// fireOn 3: wave-66 added the producer-record capture at the crop (#1),
+	// so the publish-adjacent lookup the replace-path compensation is asserted
+	// against is #2 = the bind's Lstat, #3 = installOverwriting's re-proof.
+	fsW := &w47CropSwapFs{Fs: base, fireOn: 3, plant: []byte("w47 replace-window foreign substitute")}
 	movie := w42CropMovie("W47-REPLACE", server.URL+"/cover.jpg")
 	dest := w42ResolvePosterDest(NewDownloader(nil, base, w42CropPosterConfig(), nil), movie)
 	require.NoError(t, base.MkdirAll(filepath.Dir(dest), 0o755))
