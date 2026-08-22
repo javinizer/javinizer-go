@@ -1,3 +1,5 @@
+//go:build !windows
+
 package downloader
 
 // POSTER-WRITE-HARDENING wave-64 (codex P2, PR#215) — captureReplacementBackupFacts's
