@@ -2,8 +2,11 @@ package history
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -246,6 +249,22 @@ func openVerifiedReplacementBackup(fs afero.Fs, backup, phase string, entry *mod
 		if opDev, opIno, opOK := restoreSourceIdentity(openedInfo); opOK && (curDev != opDev || curIno != opIno) {
 			_ = handle.Close()
 			return nil, nil, refuseReplacementBackupRemoval(backup, phase, "opened object differs from the Lstat object")
+		}
+	}
+	// Wave-63 (codex P2, PR#215 finding F2): size+mtime are forgeable — an
+	// owned backup replaced by same-size+same-mtime foreign bytes survived the
+	// gates above and the journal entry got consumed. Hash the opened handle
+	// and compare to the journaled digest; mismatch refuses (quarantine never
+	// starts, entry live, foreign preserved). An empty sha keeps wave-25.
+	if entry != nil && entry.BackupSHA256 != "" {
+		h := sha256.New()
+		if _, herr := io.Copy(h, handle); herr != nil {
+			_ = handle.Close()
+			return nil, nil, fmt.Errorf("hash backup %s before removal: %w", backup, herr)
+		}
+		if hex.EncodeToString(h.Sum(nil)) != entry.BackupSHA256 {
+			_ = handle.Close()
+			return nil, nil, refuseReplacementBackupRemoval(backup, phase, fmt.Sprintf("occupant sha256 mismatch — journaled %s, found %s", entry.BackupSHA256, hex.EncodeToString(h.Sum(nil))))
 		}
 	}
 	// Wave-26: the handle stays OPEN past the fstat — the quarantine move

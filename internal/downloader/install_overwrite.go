@@ -219,13 +219,23 @@ func copyBackupToDestPublish(fsys afero.Fs, backup, dest string, publish func(af
 		return rollbackCopyFacts{}, fmt.Errorf("stage rollback: %w", err)
 	}
 	buf := make([]byte, 256*1024)
-	if _, cerr := io.CopyBuffer(dstFile, src, buf); cerr != nil {
+	// Wave-63 (codex P2, PR#215 finding F1): size+mtime are forgeable, so a
+	// same-size+mtime substitute rode the wave-62 gate. Tee the stream through
+	// sha256 and compare to the armed digest; mismatch discards the staged
+	// copy (dest untouched, foreign preserved) and refuses ErrTakeAsideForeign
+	// before the publish. An unstamped capture keeps the wave-62 posture.
+	digest := sha256.New()
+	if _, cerr := io.CopyBuffer(dstFile, io.TeeReader(src, digest), buf); cerr != nil {
 		// The staged name (dest-adjacent .dlrstr.<ordinal>) is
 		// near-predictable: discard ONLY while it provably names the handle's
 		// inode — a substitute planted in the copy→remove window is preserved
 		// byte-intact (the wave-45 bound cleanup; it closes the handle).
 		fsutil.DiscardFailedExclusiveStaging(fsys, staged, dstFile)
 		return rollbackCopyFacts{}, fmt.Errorf("copy rollback: %w", cerr)
+	}
+	if armedFacts != nil && armedFacts.SHA256 != "" && hex.EncodeToString(digest.Sum(nil)) != armedFacts.SHA256 {
+		fsutil.DiscardFailedExclusiveStaging(fsys, staged, dstFile)
+		return rollbackCopyFacts{}, fmt.Errorf("rollback backup %s sha256 mismatch — armed %s, streamed %s; foreign bytes preserved, dest untouched: %w", backup, armedFacts.SHA256, hex.EncodeToString(digest.Sum(nil)), fsutil.ErrTakeAsideForeign)
 	}
 	// Re-apply the backup's ownership before the swap: a privileged restore of
 	// another account's backup must not leave the restored bytes owned by the
