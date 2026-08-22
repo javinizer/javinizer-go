@@ -74,7 +74,7 @@ func TestProbeCaseSensitiveW38_HandleStatFailureFailsClosed(t *testing.T) {
 	got, err := probeCaseSensitive(ops, t.TempDir())
 	require.ErrorIs(t, err, statErr)
 	require.False(t, got)
-	require.Equal(t, 1, removed, "the created probe is cleaned up on the stat-failure leg")
+	require.Zero(t, removed, "w58: unproven identity never pathname-unlinks — the O_EXCL claim may now be foreign")
 }
 
 // The normalization probe twin: failed handle Stat fails closed the same way.
@@ -102,7 +102,7 @@ func TestProbeNormalizationInsensitiveW38_HandleStatFailureFailsClosed(t *testin
 	got, err := probeNormalizationInsensitive(ops, t.TempDir())
 	require.ErrorIs(t, err, statErr)
 	require.False(t, got)
-	require.Equal(t, 1, removed)
+	require.Zero(t, removed, "w58: unproven identity never pathname-unlinks")
 }
 
 // withClosedW39 closes the real on-disk create behind a scripted probe

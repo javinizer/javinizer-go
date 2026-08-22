@@ -211,13 +211,17 @@ func TestProbeCaseSensitive_CoversOpenCloseAndCleanupFailures(t *testing.T) {
 	require.ErrorIs(t, err, closeErr)
 	require.False(t, got)
 
-	cleanupErr := errors.New("cleanup failed")
+	// Wave-58: a nil-identity claim (created==nil) is no longer unlinked at
+	// all, so a wedged remove is UNREACHABLE — the leg simply observes the
+	// verdict; the codex-directed posture never deletes an occupant it
+	// cannot prove is ours.
+	_ = errors.New("cleanup failed") // retained for the historical shape
 	ops = caseProbeOps{
 		openFile: func(string, int, os.FileMode) (caseProbeFile, error) { return w10ProbeFile{}, nil },
 		stat:     func(string) (os.FileInfo, error) { return nil, os.ErrNotExist },
-		remove:   func(string) error { return cleanupErr },
+		remove:   func(string) error { t.Fatal("unreachable: w58 never removes an unproven claim"); return nil },
 	}
 	got, err = probeCaseSensitive(ops, root)
-	require.ErrorIs(t, err, cleanupErr)
-	require.False(t, got)
+	require.NoError(t, err)
+	require.True(t, got, "the alternate was never found at the path — case-sensitive verdict stands")
 }

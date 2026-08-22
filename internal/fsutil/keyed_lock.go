@@ -585,9 +585,10 @@ const probeCleanupScratchSuffix = ".cleanup"
 // path is removed best-effort by pathname, exactly as before.
 func boundProbeCleanup(ops caseProbeOps, path string, created os.FileInfo) error {
 	if created == nil {
-		if err := ops.remove(path); err != nil && !os.IsNotExist(err) {
-			return err
-		}
+		// Codex P2 (wave-58): with no identity capture there is NOTHING to
+		// authenticate the name against — another writer may already own it;
+		// retain the pathname (the O_EXCL claim expires at process exit
+		// naturally, and no unlink of a possibly-foreign object ever runs).
 		return nil
 	}
 	cur, statErr := ops.stat(path)

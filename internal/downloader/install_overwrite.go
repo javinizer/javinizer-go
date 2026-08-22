@@ -514,6 +514,30 @@ func captureReplacementBackupFacts(fsys afero.Fs, backupPath string) (models.Rep
 	}
 	defer func() {
 		_ = f.Close()
+		// Codex P2 (wave-64): the deferred mtime restoreable must stay bound —
+		// another directory writer may have replaced the path while the open
+		// handle was active; on OsFs a planted symlink would chase the
+		// Chtimes onto unrelated bytes. Verify the CURRENT name still names
+		// the opened object (dev/ino via SameFile where exposed, size/mtime
+		// otherwise) before touching it; MemMapFs (read-mode close re-stamping)
+		// is exactly where we authored this leg, everything else keeps the
+		// no-mutation posture.
+		cur, lerr := lstatBackupCandidate(fsys, backupPath)
+		if lerr != nil {
+			return
+		}
+		if _, osfsOk := fsys.(*afero.OsFs); osfsOk {
+			// Real filesystem: the strict kernel-identity gate — MemMapFs has
+			// no inode model at all (every FileInfo there is a live view),
+			// so the same check false-negatives on it.
+			if !os.SameFile(cur, info) {
+				return
+			}
+		} else if cur.Name() != info.Name() || cur.Size() != info.Size() {
+			// MemMapFs has no symlink model and re-stamps ModTime on close —
+			// identity here rides the byte-stable pair (name + size).
+			return
+		}
 		_ = fsys.Chtimes(backupPath, mtime, mtime)
 	}()
 	h := sha256.New()

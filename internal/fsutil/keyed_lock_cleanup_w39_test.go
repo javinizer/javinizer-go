@@ -60,26 +60,24 @@ func TestBoundProbeCleanupW39_Legs(t *testing.T) {
 		return w38StatProbeFile{info: created}, nil
 	}
 
-	t.Run("nil identity: plain remove runs and succeeds", func(t *testing.T) {
+	t.Run("nil identity: nothing was provable so the name survives", func(t *testing.T) {
+		// Codex P2 (w58): with NO identity capture there is nothing to
+		// authenticate — the O_EXCL-derived claim may already have been
+		// swapped, so the cleanup never unlinks the pathname; the foreign
+		// occupant is preserved and the residual name's lease simply lapses.
 		removed := 0
 		ops := caseProbeOps{stat: unusedStat, rename: unusedRename, remove: func(name string) error {
 			removed++
-			require.Equal(t, path, name, "no identity channel — the just-created path is removed as-is")
 			return nil
 		}}
 		require.NoError(t, boundProbeCleanup(ops, path, nil))
-		require.Equal(t, 1, removed)
+		require.Zero(t, removed, "unproven claims are never pathname-unlinked")
 	})
 
-	t.Run("nil identity: remove ENOENT is tolerated", func(t *testing.T) {
-		ops := caseProbeOps{stat: unusedStat, rename: unusedRename, remove: func(string) error { return os.ErrNotExist }}
+	t.Run("nil identity: cleanup is a no-op when unproven", func(t *testing.T) {
+		// remove must never even be consulted — there is no provable claim.
+		ops := caseProbeOps{stat: unusedStat, rename: unusedRename, remove: func(string) error { t.Fatal("unused"); return nil }}
 		require.NoError(t, boundProbeCleanup(ops, path, nil))
-	})
-
-	t.Run("nil identity: remove error surfaces", func(t *testing.T) {
-		sentinel := errors.New("w39 remove wedged")
-		ops := caseProbeOps{stat: unusedStat, rename: unusedRename, remove: func(string) error { return sentinel }}
-		require.ErrorIs(t, boundProbeCleanup(ops, path, nil), sentinel)
 	})
 
 	t.Run("vanished create-path completes the cleanup itself", func(t *testing.T) {

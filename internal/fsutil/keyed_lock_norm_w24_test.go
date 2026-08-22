@@ -383,7 +383,10 @@ func TestProbeNormalizationInsensitiveW24_CloseErrorPropagates(t *testing.T) {
 	got, err := probeNormalizationInsensitive(ops, t.TempDir())
 	require.ErrorIs(t, err, closeErr)
 	require.False(t, got)
-	require.Equal(t, 1, removed, "cleanup still removes the created name when close fails")
+	// Wave-58: no cleanup ever runs for a claim whose identity was never
+	// captured (Close-after-failed-create drops it, Unlink always proves
+	// the inode first) — the nil-identity retain leg keeps it in place.
+	require.Zero(t, removed, "unproven identity never pathname-unlinks")
 }
 
 func TestProbeNormalizationInsensitiveW24_CleanupErrorPropagates(t *testing.T) {
