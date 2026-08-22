@@ -948,7 +948,8 @@ var bindCandidateProvenanceFn = bindCandidateProvenance
 // authenticated against ITSELF (both the Lstat and the fstat read the
 // substitute, so the wave-54 Lstat-vs-fstat pair stays green). The caller
 // now hands the producer's own write-time identity record down
-// (downloadPoster's post-download / post-crop no-follow capture): the bind's
+// (wave-67: downloadPoster's full-download record filed on the result, or
+// the crop producers' returned post-write FileInfo): the bind's
 // Lstat capture AND the re-opened fd's fstat must BOTH equal that record or
 // the bind refuses typed (errStagedInputSubstituted) — substitute preserved
 // byte-intact, nothing installed, the caller's install/refusal posture
@@ -1126,6 +1127,21 @@ func classifyStagedInput(fsys afero.Fs, stagedPath string, provenance installedD
 // (set-aside restore + journal retraction), the substitute preserved
 // byte-intact either way.
 func (d *Downloader) installOverwriting(ctx context.Context, stagedPath, destPath string, ledger downloadLedger, provenance ...stagedInstallProvenance) (bool, bool, error) {
+	return d.installOverwritingIdentity(ctx, stagedPath, destPath, ledger, nil, provenance...)
+}
+
+// installOverwritingIdentity is installOverwriting with the installer's own
+// POST-PUBLISH-VERIFIED destination identity handed back through installedOut
+// (wave-67, codex P2, PR#215 — producer-side provenance binding, mirroring
+// copyBackupToDestPublish's facts.restored shape): on a completed publish the
+// caller files THAT record as the download's producer identity — the real
+// OsFs legs carry fsutil.PublishStagedBoundInfo's SameFile-bound post-publish
+// destination stat, the virtual leg its documented post-publish capture — so
+// no consumer ever re-derives the mutable destination name after the
+// producer returned (the window in which a substitute authenticates against
+// itself). A nil installedOut keeps the legacy posture (callers that discard
+// the record); every non-publishing exit reports the unknown identity.
+func (d *Downloader) installOverwritingIdentity(ctx context.Context, stagedPath, destPath string, ledger downloadLedger, installedOut *installedDestIdentity, provenance ...stagedInstallProvenance) (bool, bool, error) {
 	var provenanceID installedDestIdentity
 	var boundHandle afero.File
 	if len(provenance) > 0 {
@@ -1224,7 +1240,8 @@ func (d *Downloader) installOverwriting(ctx context.Context, stagedPath, destPat
 				}
 			}
 			boundHandle = nil
-			_, pubErr = publishStagedInstall(d.fs, stagedPath, destPath, publishHandle, fsutil.PublishNoReplace)
+			var published os.FileInfo
+			published, pubErr = publishStagedInstall(d.fs, stagedPath, destPath, publishHandle, fsutil.PublishNoReplace)
 			// Wave-48: verify / post-publish identity-break refusals surface as
 			// the typed substitution refusal (staged name unproven — possibly
 			// foreign — preserved byte-intact); PublishCompleted-carrying
@@ -1232,6 +1249,16 @@ func (d *Downloader) installOverwriting(ctx context.Context, stagedPath, destPat
 			// wave-41 legs, as does the collision reclassification below.
 			if subErr := stagedPublishVerdict(pubErr); subErr != nil {
 				return false, false, subErr
+			}
+			if pubErr == nil && installedOut != nil {
+				// Wave-67: the create path files the producer record the same
+				// way the replace path does — fsutil's post-publish-VERIFIED
+				// destination stat on the real OsFs legs, the wave-31 virtual-leg
+				// post-publish capture where fsutil hands back nothing.
+				*installedOut = installedIdentityFromFileInfo(published)
+				if published == nil {
+					*installedOut = captureInstalledDestIdentity(d.fs, destPath)
+				}
 			}
 		} else {
 			pubErr = fsutil.PublishNoReplace(d.fs, stagedPath, destPath)
@@ -1488,6 +1515,11 @@ func (d *Downloader) installOverwriting(ctx context.Context, stagedPath, destPat
 	// against the destination right after it (above) — the rollback recheck
 	// never re-learns an occupant, so a foreign inode swapped in around the
 	// publish can never be appointed baseline.
+	if installedOut != nil {
+		// Wave-67: the replace path's wave-26/wave-31 verified baseline IS the
+		// producer record — the post-publish-VERIFIED destination object.
+		*installedOut = installedIdentity
+	}
 	if cErr := ledger.recorder.ConfirmReplacement(ctx, ledger.opID, destPath, backupPath); cErr != nil {
 		if !destStillHoldsInstalledObject(d.fs, destPath, installedIdentity) {
 			logging.Warnf("downloader: rollback restore of %s refused — destination no longer names the just-installed object after confirm failure (%v); foreign bytes kept, backup %s retained in place, journal entry stays armed", destPath, cErr, backupPath)

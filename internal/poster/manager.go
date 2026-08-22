@@ -152,7 +152,7 @@ func (pm *PosterManager) CropWithBounds(_ context.Context, jobID, posterID strin
 	// readers-during-replace never see a partial write, and a failed install
 	// restores the previous preview (no .tmp/.bak residue).
 	stagedPath := uniqueStagedSibling(croppedPath, "tmp")
-	if err := imageutil.CropPosterWithBounds(pm.fs, sourcePath, stagedPath, left, top, right, bottom, maxPosterHeight); err != nil {
+	if _, err := imageutil.CropPosterWithBounds(pm.fs, sourcePath, stagedPath, left, top, right, bottom, maxPosterHeight); err != nil {
 		if rmErr := pm.fs.Remove(stagedPath); rmErr != nil && !os.IsNotExist(rmErr) {
 			logging.Warnf("staged crop cleanup failed for %s: %v", stagedPath, rmErr)
 		}
@@ -345,7 +345,7 @@ func (pm *PosterManager) DownloadFromURL(ctx context.Context, jobID, posterID, r
 	}()
 
 	// Attempt automatic crop; fall back to a full-image copy on failure.
-	if err := imageutil.CropPosterFromCover(pm.fs, tempFullPath, tempCroppedPath, 0); err != nil {
+	if _, err := imageutil.CropPosterFromCover(pm.fs, tempFullPath, tempCroppedPath, 0); err != nil {
 		_ = pm.fs.Remove(tempCroppedPath)
 		if copyErr := copyFile(pm.fs, tempFullPath, tempCroppedPath); copyErr != nil {
 			_ = pm.fs.Remove(tempFullPath)

@@ -123,6 +123,11 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 	// name still names that record; a foreign write rotated into the
 	// crop→cleanup window is preserved byte-intact for manual cleanup instead
 	// of being destroyed by a pathname Remove.
+	// Wave-67 (codex P2, PR#215 — producer-returned records): those captures
+	// no longer run as caller-side lookups of the mutable names — the full
+	// download's record is the install's post-publish-VERIFIED identity filed
+	// on fullResult, and the crop records are the crop producers' own
+	// post-write FileInfo handed back with the result.
 	// stagedRetained's carve-outs still cover substitution / completed-publish
 	// detection (the candidate skip); the binding covers the non-retained
 	// scratch and the candidate on its plain-success/failure legs.
@@ -142,7 +147,14 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 		fullResult.Duration = time.Since(startTime)
 		return fullResult, err
 	}
-	fullIdentity = captureInstalledDestIdentity(d.fs, fullPath)
+	// Wave-67 (codex P2, PR#215): the full download's producer record rides ON
+	// its result — the install's post-publish-verified destination identity,
+	// captured before the producer returned. No caller-side re-lookup of the
+	// mutable fullPath: a swap between producer-return and such a capture used
+	// to have the probe authenticate the substitute. The completed-despite-
+	// error (wave-41) leg files no record — an unknown identity keeps the
+	// wave-53 fail-closed posture both here and at the bind below.
+	fullIdentity = fullResult.producerIdentity
 
 	cropPath := uniqueTempPath(destPath, "crop.tmp")
 	var cropIdentity installedDestIdentity
@@ -154,18 +166,25 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 
 	candidate := fullPath
 	cropped := false
-	if geometryUsable && d.cropDownloadedPoster(fullPath, cropPath, bounds) {
-		candidate = cropPath
-		cropped = true
-		// Wave-66: the crop producer's write-time identity is captured AT the
-		// crop in BOTH modes — it is the producer record the install-time
-		// provenance bind authenticates against (and the scratch-defer
-		// binding), taken before ANY install-time lookup of the name.
-		cropIdentity = captureInstalledDestIdentity(d.fs, cropPath)
+	if geometryUsable {
+		var cropOK bool
+		// Wave-67 (codex P2, PR#215): the crop producer hands its write leg's
+		// OWN post-write identity record back with its result — the record the
+		// install-time provenance bind authenticates against (and the
+		// scratch-defer binding), taken inside the producer before ANY
+		// install-time lookup of the name. A fallback (undecodable / aspect
+		// drift / empty rect) files no record and the name's wave-65 unknown
+		// posture (retain, never unlink on doubt) applies.
+		cropOK, cropIdentity = d.cropDownloadedPoster(fullPath, cropPath, bounds)
+		if cropOK {
+			candidate = cropPath
+			cropped = true
+		}
 	}
 	if !cropped && movie.Poster.ShouldCropPoster {
-		if err := imageutil.CropPosterFromCover(d.fs, fullPath, cropPath, d.config.MaxPosterHeight); err != nil {
-			fullResult.Error = fmt.Errorf("failed to crop poster: %w", err)
+		cropInfo, cropErr := imageutil.CropPosterFromCover(d.fs, fullPath, cropPath, d.config.MaxPosterHeight)
+		if cropErr != nil {
+			fullResult.Error = fmt.Errorf("failed to crop poster: %w", cropErr)
 			fullResult.Downloaded = false
 			fullResult.Replaced = false
 			fullResult.LocalPath = ""
@@ -173,8 +192,8 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 			return fullResult, fullResult.Error
 		}
 		candidate = cropPath
-		// Wave-66: same producer-record capture for the auto-crop leg.
-		cropIdentity = captureInstalledDestIdentity(d.fs, cropPath)
+		// Wave-67: same producer-returned record for the auto-crop leg.
+		cropIdentity = installedIdentityFromFileInfo(cropInfo)
 	}
 
 	// Wave-47 (codex P2, PR#215 finding F1-media) as deepened by wave-48
@@ -200,9 +219,10 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 	// on either leg (never publish unauthenticated; nothing recorded or touched,
 	// candidate preserved for manual cleanup).
 	// Wave-66 (codex P2, PR#215 — bind the candidate to the PRODUCER'S
-	// identity): the candidate's producer record — the post-download capture
-	// of fullPath, or the post-crop capture of cropPath — rides into BOTH the
-	// overwrite-mode bind below and the non-overwrite promote's bind
+	// identity): the candidate's producer record — wave-67's full-download
+	// record filed on the install's result, or the crop producers' returned
+	// post-write FileInfo — rides into BOTH the overwrite-mode bind below and
+	// the non-overwrite promote's bind
 	// (promotePosterCandidateNoReplace). bindCandidateProvenance compares its
 	// install-time Lstat AND the re-opened fd's fstat against THAT record, so
 	// a substitute rotated onto the candidate name between the producer write
@@ -427,11 +447,14 @@ func (d *Downloader) finalizePosterResult(result *DownloadResult, destPath strin
 // Returns false when the geometry does not apply to this image (undecodable,
 // aspect drift, empty rect); the caller then falls back to the pre-geometry
 // behavior with the temp file still in place.
-func (d *Downloader) cropDownloadedPoster(tempPath, dst string, bounds *models.CropBounds) bool {
+// Wave-67 (codex P2, PR#215): on success the producer's own post-write
+// identity record rides back with the bool — CropPosterWithBounds'
+// producer-side capture, never a caller-side re-lookup.
+func (d *Downloader) cropDownloadedPoster(tempPath, dst string, bounds *models.CropBounds) (bool, installedDestIdentity) {
 	w, h, derr := imageutil.ImageDimensions(d.fs, tempPath)
 	if derr != nil || w <= 0 || h <= 0 {
 		logging.Warnf("downloadPoster: cannot decode downloaded source for manual crop: %v", derr)
-		return false
+		return false, installedDestIdentity{}
 	}
 
 	// Aspect guard: the geometry was normalized against the review-time
@@ -442,7 +465,7 @@ func (d *Downloader) cropDownloadedPoster(tempPath, dst string, bounds *models.C
 		diff := math.Abs(got - bounds.SourceAspect)
 		if diff > 0.01*bounds.SourceAspect {
 			logging.Warnf("downloadPoster: manual crop aspect mismatch (crop %.4f, downloaded %.4f); falling back", bounds.SourceAspect, got)
-			return false
+			return false, installedDestIdentity{}
 		}
 	}
 
@@ -456,14 +479,15 @@ func (d *Downloader) cropDownloadedPoster(tempPath, dst string, bounds *models.C
 	bottom := int(math.Round((bounds.Y + bounds.Height) * fh))
 	if right <= left || bottom <= top {
 		logging.Warnf("downloadPoster: manual crop geometry collapses to empty rect; falling back")
-		return false
+		return false, installedDestIdentity{}
 	}
 
-	if err := imageutil.CropPosterWithBounds(d.fs, tempPath, dst, left, top, right, bottom, d.config.MaxPosterHeight); err != nil {
-		logging.Warnf("downloadPoster: manual crop failed: %v", err)
-		return false
+	cropInfo, cropErr := imageutil.CropPosterWithBounds(d.fs, tempPath, dst, left, top, right, bottom, d.config.MaxPosterHeight)
+	if cropErr != nil {
+		logging.Warnf("downloadPoster: manual crop failed: %v", cropErr)
+		return false, installedDestIdentity{}
 	}
-	return true
+	return true, installedIdentityFromFileInfo(cropInfo)
 }
 
 // downloadExtrafanart downloads screenshots to the extrafanart subdirectory.

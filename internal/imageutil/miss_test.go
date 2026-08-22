@@ -143,7 +143,7 @@ func TestCropPosterWithBounds_OutOfRange(t *testing.T) {
 	coverPath := filepath.Join(tempDir, "cover.jpg")
 	createTestImage(t, fs, coverPath, 200, 100, color.RGBA{R: 128, A: 255})
 
-	err := CropPosterWithBounds(fs, coverPath, filepath.Join(tempDir, "poster.jpg"), -1, 0, 100, 100, 500)
+	_, err := CropPosterWithBounds(fs, coverPath, filepath.Join(tempDir, "poster.jpg"), -1, 0, 100, 100, 500)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "out of range")
 }
@@ -156,14 +156,14 @@ func TestCropPosterWithBounds_InvalidBounds_MissTest(t *testing.T) {
 	coverPath := filepath.Join(tempDir, "cover.jpg")
 	createTestImage(t, fs, coverPath, 200, 100, color.RGBA{R: 128, A: 255})
 
-	err := CropPosterWithBounds(fs, coverPath, filepath.Join(tempDir, "poster.jpg"), 100, 0, 50, 100, 500)
+	_, err := CropPosterWithBounds(fs, coverPath, filepath.Join(tempDir, "poster.jpg"), 100, 0, 50, 100, 500)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid crop bounds")
 }
 
 func TestCropPosterWithBounds_FileNotFound(t *testing.T) {
 	fs := afero.NewMemMapFs()
-	err := CropPosterWithBounds(fs, "/nonexistent.jpg", "/poster.jpg", 0, 0, 100, 100, 500)
+	_, err := CropPosterWithBounds(fs, "/nonexistent.jpg", "/poster.jpg", 0, 0, 100, 100, 500)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to open")
 }
@@ -181,7 +181,7 @@ func TestCropPosterFromCover_LandscapeImage(t *testing.T) {
 	// Create a wide landscape image (typical JAV cover aspect ratio ~1.5)
 	createTestImage(t, fs, coverPath, 600, 400, color.RGBA{R: 100, G: 150, B: 200, A: 255})
 
-	err := CropPosterFromCover(fs, coverPath, posterPath, 500)
+	_, err := CropPosterFromCover(fs, coverPath, posterPath, 500)
 	require.NoError(t, err)
 
 	posterWidth, posterHeight := decodeTestImageDimensions(t, fs, posterPath)

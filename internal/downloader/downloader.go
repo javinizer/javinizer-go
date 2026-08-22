@@ -116,6 +116,17 @@ type DownloadResult struct {
 	Error      error
 	Type       MediaType
 	Duration   time.Duration
+	// producerIdentity is the wave-67 (codex P2, PR#215 — producer-side
+	// provenance binding) record the byte-install filed with its result: on a
+	// completed publish it carries the installer's POST-PUBLISH-VERIFIED
+	// destination identity (copyBackupToDestPublish's facts.restored shape),
+	// captured before the producer returned — downloadPoster's candidate bind
+	// and identity-bound scratch cleanup authenticate against THIS record,
+	// never a post-return re-lookup of the mutable name. Unexported: the
+	// record type is package-internal and only downloader legs consume it.
+	// Zero (unknown) on every non-publishing exit — consumers keep the
+	// wave-53 fail-closed posture there.
+	producerIdentity installedDestIdentity
 }
 
 // MediaType represents the type of media being downloaded

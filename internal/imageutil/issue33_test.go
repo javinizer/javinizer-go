@@ -53,7 +53,7 @@ func TestIssue33_MaxPosterHeight(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			posterPath := fmt.Sprintf("/poster_%d.jpg", tc.maxPosterHeight)
-			if err := CropPosterFromCover(fs, coverPath, posterPath, tc.maxPosterHeight); err != nil {
+			if _, err := CropPosterFromCover(fs, coverPath, posterPath, tc.maxPosterHeight); err != nil {
 				t.Fatalf("CropPosterFromCover: %v", err)
 			}
 			posterFile, err := fs.Open(posterPath)

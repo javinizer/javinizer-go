@@ -23,7 +23,7 @@ func TestCropPosterFromCover_PortraitResizeUncovered(t *testing.T) {
 	// Create a tall portrait image that will need resizing (height > MaxPosterHeight)
 	createTestImage(t, fs, coverPath, 400, 800, color.RGBA{R: 100, G: 150, B: 200, A: 255})
 
-	err := CropPosterFromCover(fs, coverPath, posterPath, 500)
+	_, err := CropPosterFromCover(fs, coverPath, posterPath, 500)
 	require.NoError(t, err)
 
 	posterWidth, posterHeight := decodeTestImageDimensions(t, fs, posterPath)
@@ -57,7 +57,7 @@ func TestCropPosterWithBounds_TopLeftCropUncovered(t *testing.T) {
 	require.NoError(t, f.Close())
 
 	// Crop the left (red) half
-	err = CropPosterWithBounds(fs, coverPath, posterPath, 0, 0, 100, 100, 500)
+	_, err = CropPosterWithBounds(fs, coverPath, posterPath, 0, 0, 100, 100, 500)
 	require.NoError(t, err)
 
 	outFile, err := fs.Open(posterPath)
@@ -82,7 +82,7 @@ func TestCropPosterFromCover_NarrowImageUncovered(t *testing.T) {
 	// Create a narrow tall image (wider than 2:3 aspect)
 	createTestImage(t, fs, coverPath, 300, 700, color.RGBA{R: 200, G: 100, B: 50, A: 255})
 
-	err := CropPosterFromCover(fs, coverPath, posterPath, 500)
+	_, err := CropPosterFromCover(fs, coverPath, posterPath, 500)
 	require.NoError(t, err)
 
 	_, posterHeight := decodeTestImageDimensions(t, fs, posterPath)
@@ -100,7 +100,7 @@ func TestCropPosterFromCover_SmallLandscapeUncovered(t *testing.T) {
 	// Small landscape that shouldn't need resize
 	createTestImage(t, fs, coverPath, 200, 100, color.RGBA{R: 128, G: 128, B: 128, A: 255})
 
-	err := CropPosterFromCover(fs, coverPath, posterPath, 500)
+	_, err := CropPosterFromCover(fs, coverPath, posterPath, 500)
 	require.NoError(t, err)
 
 	posterWidth, posterHeight := decodeTestImageDimensions(t, fs, posterPath)
@@ -119,7 +119,7 @@ func TestCropPosterWithBounds_BottomRightCropUncovered(t *testing.T) {
 	createTestImage(t, fs, coverPath, 200, 100, color.RGBA{R: 200, A: 255})
 
 	// Crop bottom-right quadrant
-	err := CropPosterWithBounds(fs, coverPath, posterPath, 100, 50, 200, 100, 500)
+	_, err := CropPosterWithBounds(fs, coverPath, posterPath, 100, 50, 200, 100, 500)
 	require.NoError(t, err)
 
 	outW, outH := decodeTestImageDimensions(t, fs, posterPath)

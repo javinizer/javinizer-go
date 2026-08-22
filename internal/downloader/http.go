@@ -207,8 +207,16 @@ func (d *Downloader) download(ctx context.Context, url, destPath string, mediaTy
 	// P3: the byte install runs through the overwrite discipline — per-dest
 	// lock, in-lock existence classification, ledger-armed skip+warn for
 	// unrecorded replacements, backup-aside + restore-on-failure.
+	// Wave-67 (codex P2, PR#215 — producer-side provenance binding): the
+	// install hands back its own post-publish-VERIFIED destination identity
+	// (the record it already proved at publish time — no extra filesystem
+	// work), and the completed legs file it on the result as the producer
+	// record; the completed-with-error (wave-41) leg never proved a published
+	// identity and files none (unknown → consumers keep the wave-53
+	// fail-closed posture).
 	ledger := resolveDownloadLedger(options)
-	skipped, replaced, instErr := d.installOverwriting(ctx, tempPath, destPath, ledger, provenance)
+	var installedID installedDestIdentity
+	skipped, replaced, instErr := d.installOverwritingIdentity(ctx, tempPath, destPath, ledger, &installedID, provenance)
 	if instErr != nil {
 		// Wave-45 (codex P2, PR#215 finding F1): the staged name provably
 		// stopped naming the validated download object — a directory writer
@@ -284,6 +292,7 @@ func (d *Downloader) download(ctx context.Context, url, destPath string, mediaTy
 	result.Size = written
 	result.Downloaded = true
 	result.Replaced = replaced
+	result.producerIdentity = installedID
 	result.Duration = time.Since(startTime)
 
 	return result, nil

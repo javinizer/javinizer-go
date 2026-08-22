@@ -137,7 +137,7 @@ func TestCropPosterFromCover(t *testing.T) {
 			createTestImage(t, fs, coverPath, tt.coverWidth, tt.coverHeight, testColor)
 
 			// Perform the crop
-			err := CropPosterFromCover(fs, coverPath, posterPath, 500)
+			_, err := CropPosterFromCover(fs, coverPath, posterPath, 500)
 			require.NoError(t, err, "CropPosterFromCover() should not error")
 
 			// Verify the poster was created
@@ -220,7 +220,7 @@ func TestCropPosterFromCover_ErrorCases(t *testing.T) {
 
 			coverPath, posterPath := tt.setupFunc(fs, tempDir)
 
-			err := CropPosterFromCover(fs, coverPath, posterPath, 500)
+			_, err := CropPosterFromCover(fs, coverPath, posterPath, 500)
 
 			assert.Error(t, err, "Should return error for invalid input")
 			assert.Contains(t, err.Error(), tt.expectedError,
@@ -262,7 +262,7 @@ func TestCropPosterWithBounds(t *testing.T) {
 	require.NoError(t, f.Close())
 
 	// Crop the top-right (green) quadrant.
-	err = CropPosterWithBounds(fs, coverPath, posterPath, 50, 0, 100, 50, 500)
+	_, err = CropPosterWithBounds(fs, coverPath, posterPath, 50, 0, 100, 50, 500)
 	require.NoError(t, err)
 
 	outFile, err := fs.Open(posterPath)
@@ -337,7 +337,7 @@ func TestCropPosterWithBounds_InvalidBounds(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := CropPosterWithBounds(fs, coverPath, posterPath, tt.left, tt.top, tt.right, tt.bot, 500)
+			_, err := CropPosterWithBounds(fs, coverPath, posterPath, tt.left, tt.top, tt.right, tt.bot, 500)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tt.err)
 		})
@@ -394,7 +394,7 @@ func TestCropPosterFromCover_InvalidDimensions(t *testing.T) {
 			// Create test image with specified dimensions
 			createTestImage(t, fs, coverPath, tt.width, tt.height, color.RGBA{R: 128, G: 128, B: 128, A: 255})
 
-			err := CropPosterFromCover(fs, coverPath, posterPath, 500)
+			_, err := CropPosterFromCover(fs, coverPath, posterPath, 500)
 
 			if tt.expectError {
 				assert.Error(t, err, tt.description)
@@ -471,7 +471,7 @@ func TestCropPosterFromCover_AspectRatioEdgeCases(t *testing.T) {
 
 			createTestImage(t, fs, coverPath, tt.width, tt.height, color.RGBA{R: 150, G: 150, B: 150, A: 255})
 
-			err := CropPosterFromCover(fs, coverPath, posterPath, 500)
+			_, err := CropPosterFromCover(fs, coverPath, posterPath, 500)
 			require.NoError(t, err, "CropPosterFromCover() should not error")
 
 			// Verify poster was created and has valid dimensions
@@ -535,7 +535,7 @@ func TestCropPosterFromCover_ResizeLogic(t *testing.T) {
 
 			createTestImage(t, fs, coverPath, tt.coverWidth, tt.coverHeight, color.RGBA{R: 200, G: 100, B: 100, A: 255})
 
-			err := CropPosterFromCover(fs, coverPath, posterPath, 500)
+			_, err := CropPosterFromCover(fs, coverPath, posterPath, 500)
 			require.NoError(t, err, "CropPosterFromCover() should not error")
 
 			posterWidth, posterHeight := decodeTestImageDimensions(t, fs, posterPath)
@@ -588,7 +588,7 @@ func BenchmarkCropLargeImage(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		err := CropPosterFromCover(fs, coverPath, posterPath, 500)
+		_, err := CropPosterFromCover(fs, coverPath, posterPath, 500)
 		if err != nil {
 			b.Fatalf("CropPosterFromCover() failed: %v", err)
 		}
@@ -622,7 +622,7 @@ func BenchmarkCropTypicalImage(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		err := CropPosterFromCover(fs, coverPath, posterPath, 500)
+		_, err := CropPosterFromCover(fs, coverPath, posterPath, 500)
 		if err != nil {
 			b.Fatalf("CropPosterFromCover() failed: %v", err)
 		}
@@ -673,7 +673,7 @@ func TestCropPosterFromCover_MalformedImages(t *testing.T) {
 			// Write embedded fixture to MemMapFs
 			writeTestFixture(t, fs, tt.fixture, coverPath)
 
-			err := CropPosterFromCover(fs, coverPath, posterPath, 500)
+			_, err := CropPosterFromCover(fs, coverPath, posterPath, 500)
 
 			assert.Error(t, err, "Should return error for malformed image")
 			assert.Contains(t, err.Error(), tt.expectedError,
@@ -731,7 +731,7 @@ func TestCropPosterFromCover_ResourceCleanup(t *testing.T) {
 			coverPath := tt.setupFunc(fs, tempDir)
 			posterPath := filepath.Join(tempDir, tt.name+"_poster.jpg")
 
-			err := CropPosterFromCover(fs, coverPath, posterPath, 500)
+			_, err := CropPosterFromCover(fs, coverPath, posterPath, 500)
 
 			assert.Error(t, err, "Should return error")
 			assert.Contains(t, err.Error(), tt.expectedError,
@@ -779,7 +779,7 @@ func TestCropPosterFromCover_PermissionErrors(t *testing.T) {
 
 			coverPath, posterPath := tt.setupFunc(tempDir)
 
-			err := CropPosterFromCover(fs, coverPath, posterPath, 500)
+			_, err := CropPosterFromCover(fs, coverPath, posterPath, 500)
 
 			assert.Error(t, err, "Should return error for permission/access issues")
 			assert.Contains(t, err.Error(), tt.expectedError,

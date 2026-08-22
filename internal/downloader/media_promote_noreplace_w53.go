@@ -74,7 +74,8 @@ const (
 // error is non-nil exactly for the retained + plain-failure legs.
 // Wave-66 (codex P2, PR#215 — bind the candidate to the PRODUCER'S identity):
 // the caller hands the crop/write producer's write-time identity record down
-// (downloadPoster's post-download / post-crop capture of the candidate) and
+// (wave-67: downloadPoster's full-download record filed on the result, or
+// the crop producers' returned post-write FileInfo) and
 // the bind authenticates its install-time Lstat AND the re-opened fd's fstat
 // against THAT record — a substitute rotated onto the candidate name between
 // the producer write and this promote's bind no longer authenticates against

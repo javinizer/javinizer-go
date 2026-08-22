@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image"
 	"image/jpeg"
+	"os"
 
 	_ "golang.org/x/image/webp" // Register WebP decoder
 	_ "image/png"               // Register PNG decoder
@@ -48,11 +49,16 @@ func ImageDimensions(fs afero.Fs, path string) (int, int, error) {
 //
 // Pass maxPosterHeight=0 to preserve the cropped source resolution (no resize).
 //
-// This ensures good results for both wide JAV covers and square promotional images
-func CropPosterFromCover(fs afero.Fs, coverPath, posterPath string, maxPosterHeight int) error {
+// # This ensures good results for both wide JAV covers and square promotional images
+//
+// On success the written poster's own FileInfo rides back with the result
+// (wave-67, codex P2, PR#215 — see cropAndWritePoster): the caller freezes
+// THAT producer record as the candidate's bind identity instead of
+// re-deriving the mutable name after the producer returned.
+func CropPosterFromCover(fs afero.Fs, coverPath, posterPath string, maxPosterHeight int) (os.FileInfo, error) {
 	img, width, height, err := decodePosterSource(fs, coverPath)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Calculate aspect ratio to determine crop strategy
@@ -98,18 +104,18 @@ func CropPosterFromCover(fs afero.Fs, coverPath, posterPath string, maxPosterHei
 // Bounds are in source-image pixels and must be within the image dimensions.
 // If maxPosterHeight > 0 and the cropped result exceeds it, the output is
 // downscaled preserving aspect ratio. Pass 0 to preserve the source resolution.
-func CropPosterWithBounds(fs afero.Fs, coverPath, posterPath string, left, top, right, bottom, maxPosterHeight int) error {
+func CropPosterWithBounds(fs afero.Fs, coverPath, posterPath string, left, top, right, bottom, maxPosterHeight int) (os.FileInfo, error) {
 	img, width, height, err := decodePosterSource(fs, coverPath)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	if left < 0 || top < 0 || right > width || bottom > height {
-		return fmt.Errorf("crop bounds out of range: left=%d top=%d right=%d bottom=%d image=%dx%d",
+		return nil, fmt.Errorf("crop bounds out of range: left=%d top=%d right=%d bottom=%d image=%dx%d",
 			left, top, right, bottom, width, height)
 	}
 	if left >= right || top >= bottom {
-		return fmt.Errorf("invalid crop bounds: left=%d top=%d right=%d bottom=%d",
+		return nil, fmt.Errorf("invalid crop bounds: left=%d top=%d right=%d bottom=%d",
 			left, top, right, bottom)
 	}
 
@@ -138,7 +144,18 @@ func decodePosterSource(fs afero.Fs, coverPath string) (image.Image, int, int, e
 	return img, width, height, nil
 }
 
-func cropAndWritePoster(fs afero.Fs, img image.Image, posterPath string, left, top, right, bottom, maxPosterHeight int) error {
+// cropAndWritePoster writes the cropped JPEG and hands back the WRITTEN
+// object's identity with its result (wave-67, codex P2, PR#215 — the
+// downloader's producer-side provenance bind): the identity is captured at
+// the earliest provable instant AFTER the bytes are durable AND the writable
+// handle is closed (afero mem handles re-stamp ModTime at close, so a
+// pre-close fstat would name a record no later no-follow lookup can match),
+// from INSIDE the producer, so no caller-side re-lookup of the mutable name
+// after the crop returned can authenticate a substitute rotated onto it in
+// between (the substituted-authenticates-itself window). A failed post-write
+// lookup fails the write leg closed — a producer that cannot prove its own
+// record hands nothing down (callers keep their refuse-closed posture).
+func cropAndWritePoster(fs afero.Fs, img image.Image, posterPath string, left, top, right, bottom, maxPosterHeight int) (os.FileInfo, error) {
 	cropRect := image.Rect(left, top, right, bottom)
 	croppedWidth := right - left
 	croppedHeight := bottom - top
@@ -168,14 +185,35 @@ func cropAndWritePoster(fs afero.Fs, img image.Image, posterPath string, left, t
 
 	posterFile, err := fs.Create(posterPath)
 	if err != nil {
-		return fmt.Errorf("failed to create poster file: %w", err)
+		return nil, fmt.Errorf("failed to create poster file: %w", err)
 	}
-	defer func() { _ = posterFile.Close() }()
 
 	opts := &jpeg.Options{Quality: 95}
 	if err := jpeg.Encode(posterFile, finalImage, opts); err != nil {
-		return fmt.Errorf("failed to encode poster image: %w", err)
+		_ = posterFile.Close()
+		return nil, fmt.Errorf("failed to encode poster image: %w", err)
 	}
 
-	return nil
+	// Close BEFORE the identity capture (see the function comment): the
+	// no-follow lookup mirrors lstatBackupCandidate — a Lstater filesystem
+	// reports the link object itself, everything else safely falls to Stat.
+	_ = posterFile.Close()
+	return lstatWrittenPoster(fs, posterPath)
+}
+
+// lstatWrittenPoster is the crop producers' write-leg identity seam
+// (wave-67): a no-follow post-write lookup of the just-written poster name,
+// folded through the producer so the record rides out with the result.
+func lstatWrittenPoster(fs afero.Fs, posterPath string) (os.FileInfo, error) {
+	var info os.FileInfo
+	var err error
+	if ls, ok := fs.(afero.Lstater); ok {
+		info, _, err = ls.LstatIfPossible(posterPath)
+	} else {
+		info, err = fs.Stat(posterPath)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to stat written poster file: %w", err)
+	}
+	return info, nil
 }
