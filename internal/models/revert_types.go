@@ -65,6 +65,15 @@ type ReplacementEntry struct {
 	// blobs serialize byte-identically.
 	BackupSize    int64 `json:"backup_size,omitempty"`
 	BackupModUnix int64 `json:"backup_mod_unix,omitempty"`
+	// BackupSHA256 (wave-63, codex P2 PR#215) is the hex sha256 of the set-aside
+	// backup bytes captured at arm time. BackupSize/BackupModUnix alone are
+	// forgeable (same length + a coerced unix-second mtime impersonates the
+	// owned set-aside); the sha256 binds the restore copy to the exact bytes
+	// (mismatch refuses before any byte reaches dest). An empty value (entries
+	// armed before this wave, or a capture failure) keeps the wave-25
+	// size+mtime+dev/ino posture. Re-arms copy the restored dest bytes (== the
+	// original) back to the backup name, so the arm-time sha256 stays valid.
+	BackupSHA256 string `json:"backup_sha256,omitempty"`
 }
 
 // ReplacementBackupFacts are the backup object's identity facts captured by
@@ -73,8 +82,9 @@ type ReplacementEntry struct {
 // recorded entry then reads as legacy and the removal gate falls back to the
 // pathname-only posture documented on the entry fields.
 type ReplacementBackupFacts struct {
-	Size    int64 // byte length of the set-aside backup file
-	ModUnix int64 // backup mtime in Unix seconds
+	Size    int64  // byte length of the set-aside backup file
+	ModUnix int64  // backup mtime in Unix seconds
+	SHA256  string // hex sha256 of the set-aside bytes (wave-63); empty when unstamped
 }
 
 // BackupFactsStamped reports whether an entry carries usable identity facts

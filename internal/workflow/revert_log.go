@@ -774,6 +774,7 @@ func (l *dbRevertLog) RecordReplacement(ctx context.Context, opID OperationID, r
 			DestSeq:       seq,
 			BackupSize:    facts.Size,
 			BackupModUnix: facts.ModUnix,
+			BackupSHA256:  facts.SHA256,
 		})
 		return gf, true, nil
 	})

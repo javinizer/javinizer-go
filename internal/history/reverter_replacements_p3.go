@@ -3,6 +3,7 @@ package history
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -1183,6 +1184,16 @@ func copyRestoreBytesPublish(fs afero.Fs, backup, dest string, publish func(afer
 	}
 	var publishedSum [32]byte
 	copy(publishedSum[:], digest.Sum(nil))
+	// Wave-63 (codex P2): the opened backup's sha256 must equal the journaled
+	// BackupSHA256 — size+mtime are forgeable. Mismatch refuses before the
+	// publish: staged copy discarded, dest untouched, entry live, foreign
+	// preserved. An unstamped entry keeps the wave-25 posture.
+	if entry != nil && entry.BackupSHA256 != "" {
+		if hex.EncodeToString(publishedSum[:]) != entry.BackupSHA256 {
+			fsutil.DiscardFailedExclusiveStaging(fs, staged, dstFile)
+			return restoredDestIdentity{}, refuseRestoreSource(backup, fmt.Sprintf("backup sha256 mismatch — journaled %s, streamed %s", entry.BackupSHA256, hex.EncodeToString(publishedSum[:])))
+		}
+	}
 	// Wave-8 codex P2 follow-up: hand the staged inode back to the backup's
 	// owner BEFORE the swap, mirroring the downloader's rollback restore
 	// (install_overwrite.go). A privileged history restore (or startup sweep —

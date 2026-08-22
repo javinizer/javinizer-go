@@ -490,7 +490,27 @@ func captureReplacementBackupFacts(fsys afero.Fs, backupPath string) (models.Rep
 	if info == nil {
 		return models.ReplacementBackupFacts{}, errors.New("filesystem returned no file information")
 	}
-	return models.ReplacementBackupFacts{Size: info.Size(), ModUnix: info.ModTime().Unix()}, nil
+	// Wave-63 (codex P2 PR#215): sha256 of the set-aside bytes binds the
+	// restore copy to the exact content (size+mtime are forgeable — same length
+	// + a coerced unix-second mtime impersonates the owned set-aside); a failed
+	// read fails the capture closed. mtime is captured by value and restored on
+	// close: MemMapFs re-stamps ModTime on an O_NOFOLLOW read's close (FileInfo
+	// is a live view), and the deferred close restores the pre-read mtime the
+	// downstream rollback/re-arm hands off — a no-op on OsFs.
+	mtime := info.ModTime()
+	f, err := restoreOpenReplacementSource(fsys, backupPath)
+	if err != nil {
+		return models.ReplacementBackupFacts{}, err
+	}
+	defer func() {
+		_ = f.Close()
+		_ = fsys.Chtimes(backupPath, mtime, mtime)
+	}()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return models.ReplacementBackupFacts{}, err
+	}
+	return models.ReplacementBackupFacts{Size: info.Size(), ModUnix: mtime.Unix(), SHA256: hex.EncodeToString(h.Sum(nil))}, nil
 }
 
 // installedDestIdentity binds a confirm-failure rollback to the exact object
