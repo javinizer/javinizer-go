@@ -14,6 +14,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -113,7 +114,16 @@ func TestW64_CaptureReplacementBackupFacts_OsFsSameFileMismatch(t *testing.T) {
 			return nil, err
 		}
 		if !swapped.Swap(true) {
-			_ = os.Rename(substitutePath, backupPath) // foreign writer swaps the name mid-read
+			// Foreign writer swaps the name mid-read: windows MoveFileW refuses
+			// replace, so drive it explicitly through remove+rename.
+			if runtime.GOOS == "windows" {
+				if rerr := os.Remove(backupPath); rerr != nil {
+					return nil, rerr
+				}
+			}
+			if rerr := os.Rename(substitutePath, backupPath); rerr != nil {
+				return nil, rerr
+			}
 		}
 		return f, nil
 	}

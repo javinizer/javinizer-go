@@ -1245,10 +1245,22 @@ func copyRestoreBytesPublish(fs afero.Fs, backup, dest string, publish func(afer
 		case errors.Is(pubErr, fsutil.ErrPublishStagedVerify):
 			return restoredDestIdentity{}, fmt.Errorf("stage restore identity: %w", pubErr)
 		case errors.As(pubErr, &timesErr):
-			_ = fs.Remove(staged)
+			// Codex P2 (r26): the handle was released before the name was
+			// cleaned — a directory writer can replace .rstr.* afterwards, so
+			// removing it by pathname could delete foreign bytes. ONLY a
+			// rename-based vacate is safe; the timeline's windows have been
+			// salted (<suffix>.<ordinal>), so the retained residue is inert.
+			// Never Remove it blind; document and warn per the retain posture
+			// already used by the claim/release helpers (wave-57/62).
+			// Codex P2 (r26): the staged name was closed BEFORE this cleanup;
+			// a directory writer can replace the name afterwards, so a
+			// pathname Remove could delete foreign bytes. The stage names are
+			// O_EXCL + ordinal-salted (.rstr.<n>) so their residue is inert;
+			// retain with a warn — never unlink the unproven name.
+			logging.Warnf("replacement restore: staged name %s left in place after the times failure (closed handle, unverifiable post-close identity) — residue is inert, manual cleanup advised", staged)
 			return restoredDestIdentity{}, fmt.Errorf("stage restore times: %w", pubErr)
 		case errors.Is(pubErr, fsutil.ErrPublishStagedClose):
-			_ = fs.Remove(staged)
+			logging.Warnf("replacement restore: staged name %s left in place after the close failure (closed handle, unverifiable post-close identity) — residue is inert, manual cleanup advised", staged)
 			return restoredDestIdentity{}, fmt.Errorf("stage restore close: %w", pubErr)
 		default:
 			// Wave-34 (codex local review round 4, PR#215 finding F3): a

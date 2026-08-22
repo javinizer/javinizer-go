@@ -44,9 +44,16 @@ func TestCopyRestoreBytes_ChtimesFailureW11(t *testing.T) {
 
 	entries, readErr := afero.ReadDir(base, "/out/W11-HISTORY-FAIL")
 	require.NoError(t, readErr)
+	// Wave-26 (codex P2, PR#215): with the handle CLOSED, the staged name is
+	// no longer provably ours — retaining it (never a pathname Remove) is
+	// codex's accepted posture, so the inert residue shows up by design.
+	found := false
 	for _, entry := range entries {
-		require.False(t, strings.Contains(entry.Name(), ".rstr."), "staged artifact remains: %s", entry.Name())
+		if strings.Contains(entry.Name(), ".rstr.") {
+			found = true
+		}
 	}
+	require.True(t, found, "the unproven staged name is RETAINED (never a pathname Remove of an occupant that may now be foreign)")
 }
 
 type covW11HistoryChtimesFailFs struct {

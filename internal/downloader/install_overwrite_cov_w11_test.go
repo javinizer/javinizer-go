@@ -44,9 +44,17 @@ func TestCopyBackupToDest_ChtimesFailureW11(t *testing.T) {
 
 	entries, readErr := afero.ReadDir(base, "/out/W11-DOWNLOADER-FAIL")
 	require.NoError(t, readErr)
+	// Wave-26 (codex P2, PR#215): the staged name stays because with the
+	// handle closed we can no longer prove it's ours; the artifact's residue
+	// is inert (ordinal-salted) and a later cleanup never unlink-chases a
+	// possibly-foreign occupant.
+	residue := 0
 	for _, entry := range entries {
-		require.False(t, strings.Contains(entry.Name(), ".dlrstr."), "staged artifact remains: %s", entry.Name())
+		if strings.Contains(entry.Name(), ".dlrstr.") {
+			residue++
+		}
 	}
+	require.Equal(t, 1, residue, "the unproven staged name is retained (never a pathname Remove of an occupant that may now be foreign)")
 }
 
 type covW11DownloaderChtimesFailFs struct {

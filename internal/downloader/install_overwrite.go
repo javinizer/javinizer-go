@@ -282,10 +282,14 @@ func copyBackupToDestPublish(fsys afero.Fs, backup, dest string, publish func(af
 			// handle already closed by the helper — wave-29 posture.
 			return rollbackCopyFacts{}, fmt.Errorf("stage rollback identity: %w", pubErr)
 		case errors.As(pubErr, &timesErr):
-			_ = fsys.Remove(staged)
+			// Codex P2 (r26 downloader twin): the handle was closed before
+			// this cleanup — pathname removal could delete foreign bytes post-
+			// swap. The staged name is ordinal-salted (.rstr.<n>) so residue
+			// is inert; retain with a warn, never unlink unproven.
+			logging.Warnf("downloader: rollback staged name %s left in place after the times failure (unproven identity) — residue inert", staged)
 			return rollbackCopyFacts{}, fmt.Errorf("stage rollback times: %w", pubErr)
 		case errors.Is(pubErr, fsutil.ErrPublishStagedClose):
-			_ = fsys.Remove(staged)
+			logging.Warnf("downloader: rollback staged name %s left in place after the close failure (unproven identity) — residue inert", staged)
 			return rollbackCopyFacts{}, fmt.Errorf("close rollback: %w", pubErr)
 		default:
 			// Wave-34 (codex local review round 4, PR#215 finding F3): a
