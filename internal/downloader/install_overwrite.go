@@ -1250,13 +1250,21 @@ func (d *Downloader) installOverwritingIdentity(ctx context.Context, stagedPath,
 			if subErr := stagedPublishVerdict(pubErr); subErr != nil {
 				return false, false, subErr
 			}
-			if pubErr == nil && installedOut != nil {
+			if installedOut != nil && (pubErr == nil || (fsutil.PublishCompleted(pubErr) && published != nil)) {
 				// Wave-67: the create path files the producer record the same
 				// way the replace path does — fsutil's post-publish-VERIFIED
 				// destination stat on the real OsFs legs, the wave-31 virtual-leg
 				// post-publish capture where fsutil hands back nothing.
-				*installedOut = installedIdentityFromFileInfo(published)
-				if published == nil {
+				// Wave-68 (codex P2, PR#215 F2): a completed publish carrying a
+				// VERIFIED non-nil identity (the ENOSYS-times-skipped leg —
+				// PublishStagedBoundInfo hands back the post-publish-verified
+				// destination stat alongside ErrPublishCompleted) files the
+				// record too, mirroring copyBackupToDestPublish's r15 / history's
+				// wave-61; a completed leg with NO verified identity keeps the
+				// caller's fail-closed posture (http.go refuses to certify it).
+				if published != nil {
+					*installedOut = installedIdentityFromFileInfo(published)
+				} else {
 					*installedOut = captureInstalledDestIdentity(d.fs, destPath)
 				}
 			}

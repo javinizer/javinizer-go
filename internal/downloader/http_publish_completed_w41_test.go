@@ -8,12 +8,21 @@ package downloader
 // (fsutil.ErrPublishNoReplaceStagedUnverified: it may now address a FOREIGN
 // occupant swapped on inside the link→cleanup window). download()'s install
 // error branch used to unlink tempPath wholesale (destroying foreign bytes)
-// and report the download as failed (dropping dest from CreatedPaths, so a
-// later revert left the new media behind). The branch now classifies on
-// fsutil.PublishCompleted FIRST: the completed class records exactly the
-// success leg's accounting (Downloaded, Replaced=false → CreatedPaths), skips
-// the staged removal, and warn-logs the retained name; every other error
-// keeps the pre-wave-41 failure leg.
+// and report the download as failed.
+//
+// Wave-68 (codex P2, PR#215 F2) deepened wave-41's posture: the completed
+// leg must CERTIFY the publish through a verified published identity (the
+// record the bound publish hands back alongside ErrPublishCompleted — waves
+// 61/62, the ENOSYS-times-skipped leg). When that identity is genuinely
+// unavailable (virtual-fs posture, or ErrPublishCompleted without a dest
+// info binding — published == nil) the publish completed but its provenance
+// CANNOT be certified, so a foreign temp replacement would ride
+// publish-as-poster against an unknown record (downstream skips the producer
+// gates). The leg now REFUSES to certify an unproven publish instead of
+// recording it as success: nothing certified (Downloaded=false, no
+// producerIdentity), tempPath preserved byte-intact (possibly foreign), the
+// completed error surfaces. The completed-WITH-identity success leg is pinned
+// by TestDownloadW68_PublishCompletedWithIdentityFilesProducerRecord.
 
 import (
 	"bytes"
@@ -75,11 +84,14 @@ func w41MediaServer(t *testing.T, payload []byte) *httptest.Server {
 	return server
 }
 
-// (a) The staged-unverified class: dest is recorded exactly like the
-// completed create (Downloaded, no Replaced → the CreatedPaths accounting in
-// Download), tempPath is NEVER removed, the foreign occupant at tempPath
-// survives byte-intact, and the retained-name posture is warn-logged.
-func TestDownloadW41_PublishCompletedStagedUnverifiedRecordsCreatedAndKeepsForeignOccupant(t *testing.T) {
+// (a) The staged-unverified class on a virtual filesystem (no verified
+// publish identity — published == nil): the completed publish is REFUSED —
+// Downloaded=false, no producerIdentity certified — tempPath is NEVER removed
+// (it may address a foreign occupant), the foreign occupant at tempPath
+// survives byte-intact, and the refusal is warn-logged. The destination WAS
+// published (the staged bytes landed) but cannot be certified without a
+// verified identity, so the completed error surfaces.
+func TestDownloadW41_PublishCompletedStagedUnverifiedRefusedAndKeepsForeignOccupant(t *testing.T) {
 	payload := []byte("w41-poster-bytes")
 	server := w41MediaServer(t, payload)
 
@@ -95,27 +107,27 @@ func TestDownloadW41_PublishCompletedStagedUnverifiedRecordsCreatedAndKeepsForei
 	defer restoreLog()
 
 	result, err := d.download(context.Background(), server.URL+"/poster.jpg", dest, MediaTypePoster, true)
-	require.NoError(t, err)
-	require.True(t, result.Downloaded, "the completed publish is a success, not a failure")
-	require.NoError(t, result.Error)
+	require.Error(t, err, "an unproven completed publish is refused, not certified as success")
+	require.ErrorIs(t, err, fsutil.ErrPublishCompleted, "the completed error surfaces verbatim")
+	require.False(t, result.Downloaded, "the unproven publish is NOT recorded as a completed download")
+	require.False(t, result.producerIdentity.known, "no producerIdentity is certified without a verified publish identity")
 	require.False(t, result.Skipped)
-	require.False(t, result.Replaced, "create-path completed publish keeps replaced=false → dest enters CreatedPaths")
-	require.Equal(t, dest, result.LocalPath)
-	require.Equal(t, int64(len(payload)), result.Size)
+	require.False(t, result.Replaced, "dest never enters CreatedPaths for an unproven publish")
 
-	require.Equal(t, payload, mustReadDownloaderW7(t, base, dest), "the destination verified present with the downloaded bytes")
+	require.Equal(t, payload, mustReadDownloaderW7(t, base, dest), "the destination was published (cannot be undone) — the refusal certifies nothing, it does not revert bytes")
 	require.NotEmpty(t, fsW.staged, "the seam must have observed the staged name")
 	_, statErr := base.Stat(fsW.staged)
-	require.NoError(t, statErr, "tempPath was NOT removed")
+	require.NoError(t, statErr, "tempPath was NOT removed — it may address a foreign occupant")
 	require.Equal(t, foreign, mustReadDownloaderW7(t, base, fsW.staged),
-		"the foreign occupant at tempPath survives byte-intact — pre-wave-41 it was unlinked")
-	require.Contains(t, logs.String(), "possibly foreign")
+		"the foreign occupant at tempPath survives byte-intact")
+	require.Contains(t, logs.String(), "refusing to certify")
 	require.Contains(t, logs.String(), "left in place")
 }
 
 // (b) The benign cleanup leg (plain ErrPublishCompleted with no unverified
-// sentinel): identical CreatedPaths accounting.
-func TestDownloadW41_PublishCompletedBenignRecordsCreated(t *testing.T) {
+// sentinel) on a virtual filesystem: identical refusal posture — no verified
+// identity, so the completed publish is refused, not certified.
+func TestDownloadW41_PublishCompletedBenignRefused(t *testing.T) {
 	payload := []byte("w41-cover-bytes")
 	server := w41MediaServer(t, payload)
 
@@ -127,13 +139,11 @@ func TestDownloadW41_PublishCompletedBenignRecordsCreated(t *testing.T) {
 	d := NewDownloader(server.Client(), fsW, &Config{}, nil)
 
 	result, err := d.download(context.Background(), server.URL+"/cover.jpg", dest, MediaTypeCover, true)
-	require.NoError(t, err)
-	require.True(t, result.Downloaded)
-	require.NoError(t, result.Error)
-	require.False(t, result.Replaced, "replaced=false → dest enters CreatedPaths exactly like (a)")
-	require.Equal(t, dest, result.LocalPath)
-	require.Equal(t, int64(len(payload)), result.Size)
-	require.Equal(t, payload, mustReadDownloaderW7(t, base, dest))
+	require.Error(t, err, "an unproven completed publish is refused")
+	require.ErrorIs(t, err, fsutil.ErrPublishCompleted)
+	require.False(t, result.Downloaded, "replaced=false → dest never enters CreatedPaths for an unproven publish")
+	require.False(t, result.producerIdentity.known)
+	require.Equal(t, payload, mustReadDownloaderW7(t, base, dest), "the destination was published — the refusal certifies nothing")
 }
 
 // (c) A plain install failure (nothing published, no ErrPublishCompleted)

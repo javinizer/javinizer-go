@@ -146,15 +146,22 @@ func decodePosterSource(fs afero.Fs, coverPath string) (image.Image, int, int, e
 
 // cropAndWritePoster writes the cropped JPEG and hands back the WRITTEN
 // object's identity with its result (wave-67, codex P2, PR#215 — the
-// downloader's producer-side provenance bind): the identity is captured at
-// the earliest provable instant AFTER the bytes are durable AND the writable
-// handle is closed (afero mem handles re-stamp ModTime at close, so a
-// pre-close fstat would name a record no later no-follow lookup can match),
-// from INSIDE the producer, so no caller-side re-lookup of the mutable name
-// after the crop returned can authenticate a substitute rotated onto it in
-// between (the substituted-authenticates-itself window). A failed post-write
-// lookup fails the write leg closed — a producer that cannot prove its own
-// record hands nothing down (callers keep their refuse-closed posture).
+// downloader's producer-side provenance bind): the identity is captured
+// FROM THE OPEN WRITE HANDLE before close (wave-68, codex P2, PR#215 F1
+// — the fstat names exactly the object we wrote, so a substitute rotated
+// onto the name inside the close→identity-capture window cannot
+// authenticate against itself downstream), from INSIDE the producer, so
+// no caller-side re-lookup of the mutable name after the crop returned can
+// authenticate a substitute rotated onto it in between. On a filesystem
+// whose FileInfo.Sys() carries kernel identity (the real OsFs, whose
+// close does not re-stamp ModTime) the pre-close fstat IS the binding
+// record; a legacy/virtual fs whose Sys() is nil (afero MemMapFs
+// re-stamps ModTime at close, so the pre-close ModTime would name a record
+// no later lookup can match) falls back to the post-close no-follow
+// lookup for the durable ModTime — the wave-67 posture preserved for the
+// no-identity leg only. A failed capture fails the write leg closed — a
+// producer that cannot prove its own record hands nothing down (callers
+// keep their refuse-closed posture).
 func cropAndWritePoster(fs afero.Fs, img image.Image, posterPath string, left, top, right, bottom, maxPosterHeight int) (os.FileInfo, error) {
 	cropRect := image.Rect(left, top, right, bottom)
 	croppedWidth := right - left
@@ -194,16 +201,43 @@ func cropAndWritePoster(fs afero.Fs, img image.Image, posterPath string, left, t
 		return nil, fmt.Errorf("failed to encode poster image: %w", err)
 	}
 
-	// Close BEFORE the identity capture (see the function comment): the
-	// no-follow lookup mirrors lstatBackupCandidate — a Lstater filesystem
-	// reports the link object itself, everything else safely falls to Stat.
+	// Capture the written object's identity FROM THE OPEN WRITE HANDLE before
+	// close (wave-68, codex P2, PR#215 F1): the fstat names exactly the object
+	// we wrote — a substitute rotated onto the name after close cannot
+	// authenticate against it downstream. See writtenPosterIdentity for the
+	// legacy/virtual-fs fallback (Sys() carries no identity).
+	preCloseInfo, statErr := posterFile.Stat()
 	_ = posterFile.Close()
+	if statErr != nil {
+		return nil, fmt.Errorf("failed to stat written poster file: %w", statErr)
+	}
+	return writtenPosterIdentity(fs, posterPath, preCloseInfo)
+}
+
+// writtenPosterIdentity selects the crop producer's write-leg identity record
+// (wave-68, codex P2, PR#215 F1): when the open handle's pre-close fstat
+// carries filesystem identity (FileInfo.Sys() non-nil — the real OsFs, whose
+// close does not re-stamp ModTime), it IS the binding record — a substitute
+// rotated onto the name after close cannot authenticate against it. A
+// legacy/virtual fs whose Sys() is nil (afero MemMapFs re-stamps ModTime at
+// close) falls back to the post-close no-follow lookup for the durable
+// ModTime (the wave-67 posture preserved for the no-identity leg only).
+func writtenPosterIdentity(fs afero.Fs, posterPath string, preCloseInfo os.FileInfo) (os.FileInfo, error) {
+	if preCloseInfo.Sys() != nil {
+		return preCloseInfo, nil
+	}
 	return lstatWrittenPoster(fs, posterPath)
 }
 
-// lstatWrittenPoster is the crop producers' write-leg identity seam
-// (wave-67): a no-follow post-write lookup of the just-written poster name,
-// folded through the producer so the record rides out with the result.
+// lstatWrittenPoster is the crop producers' write-leg identity seam for
+// legacy/virtual filesystems whose FileInfo.Sys() carries no kernel identity
+// (wave-67; wave-68, codex P2, PR#215 F1 narrowed it to this fallback): a
+// no-follow post-write lookup of the just-written poster name, folded
+// through the producer so the record rides out with the result. The real
+// OsFs leg captures the identity from the OPEN handle before close instead
+// (see writtenPosterIdentity) — its close does not re-stamp ModTime, so the
+// pre-close fstat names a record a later lookup can match and a substitute
+// rotated onto the name after close cannot authenticate against itself.
 func lstatWrittenPoster(fs afero.Fs, posterPath string) (os.FileInfo, error) {
 	var info os.FileInfo
 	var err error

@@ -211,9 +211,13 @@ func (d *Downloader) download(ctx context.Context, url, destPath string, mediaTy
 	// install hands back its own post-publish-VERIFIED destination identity
 	// (the record it already proved at publish time — no extra filesystem
 	// work), and the completed legs file it on the result as the producer
-	// record; the completed-with-error (wave-41) leg never proved a published
-	// identity and files none (unknown → consumers keep the wave-53
-	// fail-closed posture).
+	// record. Wave-68 (codex P2, PR#215 F2): the completed-with-error
+	// (wave-41) leg now files the verified identity too when the bound publish
+	// handed one back (waves 61/62 — the ENOSYS-times-skipped leg); when the
+	// identity is genuinely unavailable (virtual-fs posture, or
+	// ErrPublishCompleted without a dest info binding) the leg refuses to
+	// certify an unproven publish instead of filing an unknown record
+	// (consumers keep the wave-53 fail-closed posture).
 	ledger := resolveDownloadLedger(options)
 	var installedID installedDestIdentity
 	skipped, replaced, instErr := d.installOverwritingIdentity(ctx, tempPath, destPath, ledger, &installedID, provenance)
@@ -238,20 +242,36 @@ func (d *Downloader) download(ctx context.Context, url, destPath string, mediaTy
 		// not re-prove tempPath (fsutil.ErrPublishNoReplaceStagedUnverified: it
 		// may now address a FOREIGN occupant fsutil deliberately left
 		// byte-intact) or its unlink failed with the destination rollback
-		// failing too (wave-20). This is a completed download, never a failure:
-		// record it exactly like the success leg below (dest enters
+		// failing too (wave-20). NEVER remove tempPath — unlinking there could
+		// destroy foreign bytes; the retained staged name is warn-logged for
+		// manual cleanup, matching copyBackupToDestPublish's wave-34 posture.
+		// Wave-68 (codex P2, PR#215 F2): the completed-with-identity leg (waves
+		// 61/62 — the ENOSYS-times-skipped publish hands back the post-publish-
+		// verified destination identity) files THAT record on producerIdentity
+		// and records exactly the success leg's accounting (dest enters
 		// CreatedPaths through Downloaded && !Replaced, so a later revert
-		// leaves the new media behind) and NEVER remove tempPath — unlinking
-		// there could destroy foreign bytes. The retained staged name is
-		// warn-logged for manual cleanup, matching copyBackupToDestPublish's
-		// wave-34 posture. Every other error keeps the prior failure leg.
+		// leaves the new media behind). If the identity is genuinely
+		// unavailable (virtual-fs posture, or ErrPublishCompleted without a
+		// dest info binding) the publish completed but its provenance CANNOT
+		// be certified — a foreign temp replacement would then ride
+		// publish-as-poster against an unknown record (downstream skips the
+		// producer gates). Refuse instead of continuing, matching wave-53's
+		// fail-closed posture: nothing certified, tempPath preserved
+		// byte-intact (possibly foreign), the completed error surfaces.
 		if fsutil.PublishCompleted(instErr) {
-			logging.Warnf("downloader: install of %s completed despite the returned error (%v) — staged name %s could not be re-proven (possibly foreign) and is left in place; manual cleanup advised", destPath, instErr, tempPath)
-			result.Size = written
-			result.Downloaded = true
-			result.Replaced = replaced
+			if installedID.known {
+				logging.Warnf("downloader: install of %s completed despite the returned error (%v) — staged name %s could not be re-proven (possibly foreign) and is left in place; manual cleanup advised", destPath, instErr, tempPath)
+				result.producerIdentity = installedID
+				result.Size = written
+				result.Downloaded = true
+				result.Replaced = replaced
+				result.Duration = time.Since(startTime)
+				return result, nil
+			}
+			logging.Warnf("downloader: install of %s completed despite the returned error (%v) but the published identity is unavailable (virtual-fs posture or no dest info binding) — refusing to certify an unproven publish; staged name %s left in place (possibly foreign), manual cleanup advised", destPath, instErr, tempPath)
+			result.Error = instErr
 			result.Duration = time.Since(startTime)
-			return result, nil
+			return result, result.Error
 		}
 		// Codex P2 (PR#215 finding, wave-62): install failed WITHOUT any
 		// publish — tempPath still names the validated object, or a foreign
