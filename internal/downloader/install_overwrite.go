@@ -1458,6 +1458,29 @@ func (d *Downloader) installOverwritingIdentity(ctx context.Context, stagedPath,
 				}
 			} else if subErr := stagedPublishVerdict(pubErr); subErr != nil {
 				replaceErr = subErr
+			} else if fsutil.PublishCompleted(pubErr) && published != nil {
+				// Wave-68 (codex P2, PR#215 finding F1): a completed-carrying
+				// publish error WITH a verified non-nil identity (the
+				// ENOSYS-times-skipped leg on AIX/Solaris/illumos-shaped
+				// platforms — PublishStagedBoundInfo hands back the
+				// post-publish-verified destination stat alongside
+				// ErrPublishCompleted) means the publish SUCCEEDED: dest provably
+				// carries the staged bytes. Treat it exactly like the success leg —
+				// retain installedIdentityFromFileInfo(published) and continue
+				// through confirmation — mirroring the established
+				// copyBackupToDestPublish seam's r15 discipline (the create path's
+				// wave-68 F2 files the same record). Pre-fix this fell to the
+				// plain `replaceErr = pubErr` leg: the rollback then refused (dest
+				// occupied by the just-installed bytes), install was reported
+				// failed while the new bytes were already installed + the journal
+				// armed-unconfirmed, and reverts misfired later. The
+				// rollbackPublishStagedBoundInfoFn seam is NOT involved here (the
+				// replace path rides publishStagedBoundFn via publishStagedInstall);
+				// the pattern is the same, so the same completed-with-identity
+				// handling applies. A nil identity keeps the legacy discipline
+				// below (the completed-but-unproven virtual leg refuses to
+				// certify an unproven publish).
+				installedIdentity = installedIdentityFromFileInfo(published)
 			} else {
 				replaceErr = pubErr
 			}

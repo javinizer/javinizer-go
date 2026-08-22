@@ -33,6 +33,7 @@ import (
 	"image/jpeg"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 
@@ -115,7 +116,18 @@ func TestCropProducerW68_PreCloseFstatSurvivesPostCloseSubstitution(t *testing.T
 
 	producer := installedIdentityFromFileInfo(cropInfo)
 	require.True(t, producer.known)
-	require.True(t, producer.hasDevIno, "OsFs carries kernel identity through the open handle")
+	if runtime.GOOS == "windows" {
+		// F2 (windows posture): OsFs on windows hands back
+		// *syscall.Win32FileAttributeData from FileInfo.Sys() — non-nil, so the
+		// crop producer still takes the pre-close fstat leg (swapFs.swapped
+		// stays false above), but the struct carries no dev/inode. The size+mtime
+		// record is the MemMapFs-shaped fallback and still authenticates: the
+		// substitute planted below has a different size, so the bind's own Lstat
+		// reads it and refuses typed exactly like the posix leg.
+		require.False(t, producer.hasDevIno, "windows OsFs Sys() is *Win32FileAttributeData — no dev/inode; the size+mtime fallback binds instead")
+	} else {
+		require.True(t, producer.hasDevIno, "OsFs carries kernel identity through the open handle")
+	}
 
 	// The bind's Lstat is the first no-follow lookup — it fires the swap and
 	// reads the substitute; the producer record names the genuine object, so
@@ -177,4 +189,74 @@ func TestDownloadW68_PublishCompletedWithIdentityFilesProducerRecord(t *testing.
 		"the record names the landed destination object")
 	require.Equal(t, payload, mustReadDownloaderW7(t, base, dest))
 	require.Contains(t, logs.String(), "left in place", "the possibly-foreign staged name is warn-logged for manual cleanup")
+}
+
+// TestInstallOverwritingW68_ReplaceCompletedWithIdentityConverges (F1, codex
+// P2): the REPLACE install path's bound publish can return ErrPublishCompleted
+// PLUS a non-nil verified published identity (the ENOSYS-times-skipped leg
+// on AIX/Solaris/illumos-shaped platforms — PublishStagedBoundInfo hands back
+// the post-publish-verified destination stat). Pre-fix the replace branch's
+// publish-error arm treated that as a plain failure (replaceErr = pubErr):
+// the rollback then refused (dest occupied by the just-installed bytes),
+// install was reported failed while the new bytes were already installed +
+// the journal armed-unconfirmed, and reverts misfired later. The fix treats
+// PublishCompleted(pubErr) && published != nil like the success leg
+// (mirroring copyBackupToDestPublish's r15 / the create path's wave-68 F2):
+// retain installedIdentityFromFileInfo(published) and continue through
+// confirmation. The rollbackPublishStagedBoundInfoFn seam is NOT involved
+// (the replace path rides publishStagedBoundFn via publishStagedInstall); the
+// established seam's discipline is reused verbatim. The confirmed install
+// leaves the journaled backup armed for sweep/revert arbitration exactly
+// like the plain-success leg (the w48 replace posture).
+func TestInstallOverwritingW68_ReplaceCompletedWithIdentityConverges(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	old := []byte("old bytes on disk")
+	staged, dest := w25InstallFixture(t, fs, old)
+
+	// Wedge the install-path bound-publish seam (NOT the rollback seam) to
+	// replay the ENOSYS-times-skipped leg: the staged bytes land at dest (the
+	// successful publish consumed the staged name) and the call returns the
+	// dest's post-publish stat alongside an ErrPublishCompleted-carrying error.
+	prev := publishStagedBoundFn
+	publishStagedBoundFn = func(p fsutil.StagedPublish) (os.FileInfo, error) {
+		stagedBytes, rerr := afero.ReadFile(p.FS, p.Staged)
+		require.NoError(t, rerr, "the staged copy holds the new bytes at publish time")
+		require.NoError(t, afero.WriteFile(p.FS, p.Dest, stagedBytes, 0o644),
+			"the completed publish lands the staged bytes at dest")
+		_ = p.FS.Remove(p.Staged) // the successful publish consumed the staged name
+		if p.Handle != nil {
+			_ = p.Handle.Close()
+		}
+		info, lerr := lstatBackupCandidate(p.FS, p.Dest) // the verified published identity
+		require.NoError(t, lerr)
+		return w64FrozenFileInfo{FileInfo: info, size: info.Size(), modTime: info.ModTime()},
+			fmt.Errorf("staged times for %s never applied — no fd-scoped times primitive on this platform and the name-based fallback is refused; the destination carries the published bytes: %w", p.Dest, fsutil.ErrPublishCompleted)
+	}
+	t.Cleanup(func() { publishStagedBoundFn = prev })
+
+	// Provenance is the staged download's own identity (known; no dev/ino on
+	// MemMapFs — the virtual-fs posture). A retained handle is passed so the
+	// bound publish consumes it directly (the wave-48 retained-handle leg);
+	// the fake publish closes it like fsutil always does.
+	fh, err := fs.Open(staged)
+	require.NoError(t, err)
+	stagedInfo, serr := fh.Stat()
+	require.NoError(t, serr)
+	prov := stagedInstallProvenance{identity: installedIdentityFromFileInfo(stagedInfo), handle: fh}
+
+	recorder := &armedTestLedger{}
+	d := NewDownloader(nil, fs, &Config{}, nil).WithDestLocks(fsutil.NewKeyedLockRegistry())
+
+	var installedID installedDestIdentity
+	skipped, replaced, err := d.installOverwritingIdentity(context.Background(), staged, dest,
+		downloadLedger{opID: "w68-replace-completed", recorder: recorder}, &installedID, prov)
+	require.NoError(t, err, "the completed-with-identity publish is a success, not a failure")
+	require.False(t, skipped)
+	require.True(t, replaced, "the pre-existing dest was replaced")
+	require.True(t, installedID.known, "the verified published identity rides the result")
+	require.Equal(t, int64(len("new bytes from cdn")), installedID.size)
+	require.True(t, destStillHoldsInstalledObject(fs, dest, installedID),
+		"the record names the landed destination object")
+	require.Equal(t, "new bytes from cdn", string(mustReadDownloaderW7(t, fs, dest)))
+	require.Len(t, recorder.get(), 1, "the confirmed install leaves the journaled backup armed for sweep/revert arbitration")
 }
