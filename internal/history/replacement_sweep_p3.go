@@ -1044,7 +1044,7 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 	if claim.abandonIfRevoked("destination publish", backup, dest) {
 		return false
 	}
-	restoredID, rnErr := copyRestoreBytesNoReplaceIdentity(s.fs, backup, dest)
+	restoredID, rnErr := copyRestoreBytesNoReplaceIdentityFacts(s.fs, backup, dest, journaledEntryFacts(freshRow, backupSlash))
 	if rnErr != nil {
 		logging.Warnf("replacement sweep restore %s→%s: %v", backup, dest, rnErr)
 		return false

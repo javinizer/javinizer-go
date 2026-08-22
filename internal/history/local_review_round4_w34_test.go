@@ -417,7 +417,7 @@ func TestCopyRestoreBytesPublishW34_PublishCompletedKeepsStagedName(t *testing.T
 	restoreLog := logging.SetOutput(&logs)
 	defer restoreLog()
 
-	_, err := copyRestoreBytesPublish(base, backup, dest, stub, true)
+	_, err := copyRestoreBytesPublish(base, backup, dest, stub, true, nil)
 	require.Error(t, err)
 	require.ErrorContains(t, err, "swap staged restore")
 	require.ErrorIs(t, err, fsutil.ErrPublishCompleted)
@@ -449,7 +449,7 @@ func TestCopyRestoreBytesPublishW34_NonCompletedFailuresDropStagedCopy(t *testin
 			require.NoError(t, afero.WriteFile(base, backup, []byte("restore bytes"), 0o644))
 			stub := func(afero.Fs, string, string) error { return tc.pubErr }
 
-			_, err := copyRestoreBytesPublish(base, backup, dest, stub, true)
+			_, err := copyRestoreBytesPublish(base, backup, dest, stub, true, nil)
 			require.ErrorContains(t, err, "swap staged restore")
 			require.Empty(t, w34StagedNames(t, base, "/w34-p3c"),
 				"an unpublished staged copy is still dropped — only the completed class retains")

@@ -48,7 +48,7 @@ func TestRestoreW30_PlantedBetweenVerifyAndPublishRepublishesGenuine(t *testing.
 		}
 		return fsutil.ReplaceFile(fsys, src, dst)
 	}
-	_, err := copyRestoreBytesPublish(fs, backup, dest, wedge, false)
+	_, err := copyRestoreBytesPublish(fs, backup, dest, wedge, false, nil)
 	require.NoError(t, err, "the mismatch is recovered — the republish puts the genuine bytes over the plant")
 	require.Equal(t, 1, attacked)
 	got, rerr := os.ReadFile(dest)
@@ -82,7 +82,7 @@ func TestRestoreW30_PersistentPlantExhaustsTyped(t *testing.T) {
 		w30SwapPlant(t, src)
 		return fsutil.PublishNoReplace(fsys, src, dst)
 	}
-	_, err := copyRestoreBytesPublish(fs, backup, dest, wedge, true)
+	_, err := copyRestoreBytesPublish(fs, backup, dest, wedge, true, nil)
 	require.ErrorIs(t, err, fsutil.ErrPublishStagedForeignOccupant)
 	require.ErrorIs(t, err, fsutil.ErrPublishStagedIdentityBreak)
 	require.ErrorContains(t, err, "swap staged restore")

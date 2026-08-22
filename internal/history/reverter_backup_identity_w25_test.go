@@ -115,7 +115,11 @@ func TestRestoreReplacementJournalW25_MatchingFactsUnlinkAndConsume(t *testing.T
 
 // The finding's central case: the occupant does not match the journaled
 // arm-time identity (a directory writer swapped a foreign file onto the
-// backup name after the journal write). NO unlink, entry retained live.
+// backup name after the journal write). Wave-62 (finding F1) refuses the
+// copy BEFORE any bytes reach dest — the substituted backup never lands at
+// dest, the foreign occupant at the backup name is preserved byte-intact,
+// and the journal entry stays live (NOT restore-pending: the copy published
+// nothing, so no cleanup marker is warranted).
 func TestRestoreReplacementJournalW25_FactsMismatchRefusesUnlinkRetainsEntry(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	repo := newP3OpRepo()
@@ -123,17 +127,17 @@ func TestRestoreReplacementJournalW25_FactsMismatchRefusesUnlinkRetainsEntry(t *
 
 	_, err := NewReverter(fs, repo).restoreReplacementJournal(context.Background(), op)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "backup cleanup failed")
-	var refused *BackupRemovalRefusedError
-	require.ErrorAs(t, err, &refused, "the removal refusal rides the typed class")
+	require.ErrorIs(t, err, ErrRestoreSourceRefused, "the pre-copy gate refuses the substituted backup")
+	require.Contains(t, err.Error(), "failed to restore")
+	require.Contains(t, err.Error(), "occupant identity mismatch")
 
-	require.Equal(t, "foreign occupant bytes", string(mustRead2(t, fs, dest)),
-		"the copy leg itself is unchanged (gating binds the unlink)")
+	require.Equal(t, "new poster", string(mustRead2(t, fs, dest)),
+		"dest stays untouched — the substituted backup's bytes never landed")
 	require.Equal(t, "foreign occupant bytes", string(mustRead2(t, fs, backup)),
-		"the foreign occupant at the backup name was NOT deleted")
+		"the foreign occupant at the backup name was NOT deleted or copied")
 	entries := w25JournalEntries(t, repo, op.ID)
 	require.Len(t, entries, 1, "the journal entry stays live")
-	require.True(t, entries[0].RestorePending, "the cleanup marker retained the retry posture")
+	require.False(t, entries[0].RestorePending, "no copy ran — no cleanup marker is warranted")
 }
 
 // Legacy unstamped entries keep the pre-wave-25 pathname removal posture.
@@ -241,28 +245,33 @@ func TestSweepW25_CrashWindowRestoreMatchingFactsHeals(t *testing.T) {
 	require.Empty(t, w25JournalEntries(t, repo, op.ID))
 }
 
-// Sweeper crash-window restore against a mismatched occupant: the restore
-// copy runs (classification lives elsewhere), but the occupant is NOT
-// deleted and the entry is NOT consumed.
+// Sweeper crash-window restore against a mismatched occupant: wave-62
+// (finding F1) refuses the copy BEFORE any bytes reach the (missing)
+// destination — the substituted backup's bytes never land at dest, the
+// foreign occupant at the backup name is preserved, the entry stays armed
+// (no copy ran, so no restore-pending marker), and a later sweep retries
+// identically.
 func TestSweepW25_CrashWindowRestoreMismatchKeepsForeignBackup(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	repo := newP3OpRepo()
-	op, _, backup := w25SweepCrashOp(t, fs, repo, "W25G", []byte("foreign occupant"), "wrong")
+	op, dest, backup := w25SweepCrashOp(t, fs, repo, "W25G", []byte("foreign occupant"), "wrong")
 
 	healed, err := NewReplacementSweeper(fs, repo).Sweep(context.Background())
 	require.NoError(t, err)
 	require.Zero(t, healed, "the mismatched occupant is never consumed")
+	exists, _ := afero.Exists(fs, dest)
+	require.False(t, exists, "dest stays missing — the substituted backup's bytes never landed")
 	require.Equal(t, "foreign occupant", string(mustRead2(t, fs, backup)),
-		"the foreign occupant at the backup name was NOT deleted")
+		"the foreign occupant at the backup name was NOT deleted or copied")
 	entries := w25JournalEntries(t, repo, op.ID)
 	require.Len(t, entries, 1, "the entry stays live")
-	require.True(t, entries[0].RestorePending, "pending retry posture retained")
+	require.False(t, entries[0].RestorePending, "no copy ran — the entry stays armed, not pending")
 
-	// The pending retry (present destination + committed marker) refuses the
-	// unlink the same way and keeps the entry.
+	// A later sweep re-attempts the restore and refuses the same substituted
+	// occupant up front; the entry stays armed for sweep/revert arbitration.
 	healed, err = NewReplacementSweeper(fs, repo).Sweep(context.Background())
 	require.NoError(t, err)
-	require.Zero(t, healed, "the pending retry also refuses the foreign occupant")
+	require.Zero(t, healed, "the retry also refuses the foreign occupant before any copy")
 	require.Equal(t, "foreign occupant", string(mustRead2(t, fs, backup)))
 	require.Len(t, w25JournalEntries(t, repo, op.ID), 1)
 }

@@ -226,6 +226,52 @@ func TestInstallOverwritingW25_ConfirmRollbackRestoresWhenIdentityMatches(t *tes
 	require.Len(t, ledger.released, 1, "the journal entry was retracted after the clean rollback")
 }
 
+// Finding F2 (wave-62, codex P2, PR#215): a foreign file swapped onto the
+// BACKUP name between arm and the confirm-failure rollback used to be
+// streamed into the media directory — copyBackupToDestBound re-proved only
+// the CURRENT backup name, not the ORIGINALLY armed identity (captured
+// pre-RecordReplacement). The rollback now authenticates the opened backup
+// against the arm-time capture (dev/ino consistency + size/mtime) BEFORE any
+// bytes reach dest and refuses typed ErrTakeAsideForeign: whatever currently
+// sits at the backup name is preserved byte-intact and dest is left intact
+// (installed bytes kept, journal entry armed for sweep/revert arbitration).
+func TestInstallOverwritingW25_ConfirmRollbackBackupSubstitutedRefuses(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	old := []byte("old bytes on disk")
+	foreign := []byte("a foreign file swapped onto the backup name mid-window") // deliberately different length
+	staged, dest := w25InstallFixture(t, fs, old)
+	d := NewDownloader(nil, fs, &Config{}, nil).WithDestLocks(fsutil.NewKeyedLockRegistry())
+	ledger := &w25Ledger{confirmErr: errors.New("journal store wedged")}
+	ledger.confirmHook = func() {
+		// Swap the backup name's occupant between arm and the rollback
+		// copy — the armed identity still describes the original set-aside.
+		rec := ledger.firstRecord()
+		_ = fs.Remove(rec.backup)
+		_ = afero.WriteFile(fs, rec.backup, foreign, 0o644)
+	}
+
+	_, _, err := d.installOverwriting(context.Background(), staged, dest,
+		downloadLedger{opID: "w25-f2-sub", recorder: ledger})
+	require.Error(t, err)
+	require.ErrorIs(t, err, fsutil.ErrTakeAsideForeign,
+		"the substituted backup refuses the rollback copy typed")
+	require.Contains(t, err.Error(), "install-confirm failed")
+	require.Contains(t, err.Error(), "no longer names the armed set-aside")
+
+	got, rerr := afero.ReadFile(fs, dest)
+	require.NoError(t, rerr)
+	require.Equal(t, []byte("new bytes from cdn"), got,
+		"dest keeps the installed bytes — the substituted backup never landed")
+
+	rec := ledger.firstRecord()
+	backup, berr := afero.ReadFile(fs, rec.backup)
+	require.NoError(t, berr)
+	require.Equal(t, foreign, backup,
+		"the foreign occupant at the backup name is preserved byte-intact")
+	require.Empty(t, ledger.released, "the armed entry is never released after a refused rollback")
+	require.Zero(t, ledger.pendings)
+}
+
 // The dev/inode binding leg needs a real filesystem — MemMapFs exposes no
 // inode identity. The foreign swap below replaces the destination object
 // with a NEW inode of identical byte length and identical mtime, so ONLY the

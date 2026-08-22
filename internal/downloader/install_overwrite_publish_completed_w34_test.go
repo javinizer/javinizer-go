@@ -60,7 +60,7 @@ func TestCopyBackupToDestPublishW34_PublishCompletedKeepsStagedName(t *testing.T
 	restoreLog := logging.SetOutput(&logs)
 	defer restoreLog()
 
-	_, err := copyBackupToDestPublish(base, backup, dest, stub, true)
+	_, err := copyBackupToDestPublish(base, backup, dest, stub, true, nil)
 	require.Error(t, err)
 	require.ErrorContains(t, err, "swap rollback")
 	require.ErrorIs(t, err, fsutil.ErrPublishCompleted)
@@ -97,7 +97,7 @@ func TestCopyBackupToDestPublishW34_NonCompletedFailuresDropStagedCopy(t *testin
 			require.NoError(t, afero.WriteFile(base, backup, []byte("rollback bytes"), 0o644))
 			stub := func(afero.Fs, string, string) error { return tc.pubErr }
 
-			_, err := copyBackupToDestPublish(base, backup, dest, stub, true)
+			_, err := copyBackupToDestPublish(base, backup, dest, stub, true, nil)
 			require.ErrorContains(t, err, "swap rollback")
 			require.NotErrorIs(t, err, fsutil.ErrPublishCompleted)
 			require.Empty(t, w34RollbackStagedNames(t, base, "/w34-dlc"),

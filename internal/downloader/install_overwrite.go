@@ -111,8 +111,20 @@ type rollbackCopyFacts struct {
 // handed back (wave-31): the confirm-failure rollback revalidates the
 // destination against restored before releasing the backup, and binds the
 // backup removal to copied.
+// copyBackupToDestBoundFacts is copyBackupToDestBound with the ORIGINALLY
+// armed backup identity threaded in (wave-62, codex P2, PR#215 finding F2):
+// the confirm-failure rollback authenticates the opened backup against the
+// arm-time capture (dev/ino consistency + size/mtime) BEFORE any bytes reach
+// dest — a foreign file swapped onto the backup name mid-window refuses typed
+// ErrTakeAsideForeign, preserving whatever currently sits at the backup name
+// while leaving dest intact. A nil capture keeps the legacy posture.
+func copyBackupToDestBoundFacts(fsys afero.Fs, backup, dest string, armedFacts *models.ReplacementBackupFacts) (rollbackCopyFacts, error) {
+	return copyBackupToDestPublish(fsys, backup, dest, fsutil.ReplaceFile, false, armedFacts)
+}
+
+//nolint:unused // test-facing bound shape; the confirm-failure rollback rides the wave-62 facts variant (copyBackupToDestBoundFacts) which authenticates the opened backup against the originally armed identity before any bytes reach dest.
 func copyBackupToDestBound(fsys afero.Fs, backup, dest string) (rollbackCopyFacts, error) {
-	return copyBackupToDestPublish(fsys, backup, dest, fsutil.ReplaceFile, false)
+	return copyBackupToDestPublish(fsys, backup, dest, fsutil.ReplaceFile, false, nil)
 }
 
 // copyBackupToDestNoReplace is copyBackupToDest whose staged publish NEVER
@@ -121,11 +133,11 @@ func copyBackupToDestBound(fsys afero.Fs, backup, dest string) (rollbackCopyFact
 // object that claimed the name mid-window. A collision drops the staged copy
 // and returns the typed fsutil.ErrPublishCollision (see wave-15).
 func copyBackupToDestNoReplace(fsys afero.Fs, backup, dest string) error {
-	_, err := copyBackupToDestPublish(fsys, backup, dest, fsutil.PublishNoReplace, true)
+	_, err := copyBackupToDestPublish(fsys, backup, dest, fsutil.PublishNoReplace, true, nil)
 	return err
 }
 
-func copyBackupToDestPublish(fsys afero.Fs, backup, dest string, publish func(afero.Fs, string, string) error, noReplace bool) (rollbackCopyFacts, error) {
+func copyBackupToDestPublish(fsys afero.Fs, backup, dest string, publish func(afero.Fs, string, string) error, noReplace bool, armedFacts *models.ReplacementBackupFacts) (rollbackCopyFacts, error) {
 	// Validate the path before opening it: Stat/Open would follow a hostile
 	// backup symlink and copy its target into the media directory.
 	sourceInfo, err := lstatRestoreSource(fsys, backup)
@@ -173,6 +185,20 @@ func copyBackupToDestPublish(fsys afero.Fs, backup, dest string, publish func(af
 	if sourceDev, sourceIno, sourceOK := restoreSourceIdentity(sourceInfo); sourceOK {
 		if openedDev, openedIno, openedOK := restoreSourceIdentity(openedInfo); openedOK && (sourceDev != openedDev || sourceIno != openedIno) {
 			return rollbackCopyFacts{}, refuseRestoreSource(backup, "opened object differs from the Lstat object")
+		}
+	}
+	// Wave-62 (codex P2, PR#215 finding F2): authenticate the OPENED backup
+	// AGAINST the ORIGINALLY armed identity captured pre-RecordReplacement
+	// (the dev/ino consistency above + the arm-time size/mtime) BEFORE any
+	// bytes reach dest. copyBackupToDestBound re-proved only the CURRENT
+	// backup name, so a foreign file swapped onto the name mid-window was
+	// streamed into the media directory. The copy now refuses up front on a
+	// stamped-facts mismatch (typed ErrTakeAsideForeign — foreign bytes
+	// preserved): whatever currently sits at the backup name stays put and
+	// dest is left intact. A nil/unstamped capture keeps the legacy posture.
+	if armedFacts != nil && armedFacts.ModUnix != 0 {
+		if openedInfo.Size() != armedFacts.Size || openedInfo.ModTime().Unix() != armedFacts.ModUnix {
+			return rollbackCopyFacts{}, fmt.Errorf("rollback backup %s no longer names the armed set-aside (identity mismatch — armed %d bytes @ %d, found %d bytes @ %d); foreign bytes preserved, dest untouched: %w", backup, armedFacts.Size, armedFacts.ModUnix, openedInfo.Size(), openedInfo.ModTime().Unix(), fsutil.ErrTakeAsideForeign)
 		}
 	}
 	// Wave-31 (L2): the backup removal after this copy binds to the exact
@@ -1199,10 +1225,19 @@ func (d *Downloader) installOverwriting(ctx context.Context, stagedPath, destPat
 	// deleted in place of our set-aside. A capture failure rolls back exactly
 	// like a record failure: an armed entry whose ownership facts were never
 	// verifiable is not worth journaling.
+	// Wave-62 (codex P2, PR#215 finding F2): retain the arm-time backup
+	// identity captured pre-RecordReplacement so the confirm-failure
+	// rollback can authenticate the CURRENT backup occupant against the
+	// ORIGINAL capture (not just the current backup name) before any bytes
+	// reach dest. Stored alongside the in-memory install state, the same
+	// seam family staged provenance uses to thread the validated object's
+	// identity to the publish.
+	armedBackupFacts := models.ReplacementBackupFacts{}
 	var armErr error
 	if facts, factsErr := captureReplacementBackupFacts(d.fs, backupPath); factsErr != nil {
 		armErr = fmt.Errorf("capture backup identity facts: %w", factsErr)
 	} else {
+		armedBackupFacts = facts
 		armErr = ledger.recorder.RecordReplacement(ctx, ledger.opID, destPath, backupPath, facts)
 	}
 	if armErr != nil {
@@ -1357,9 +1392,9 @@ func (d *Downloader) installOverwriting(ctx context.Context, stagedPath, destPat
 			logging.Warnf("downloader: rollback restore of %s refused — destination no longer names the just-installed object after confirm failure (%v); foreign bytes kept, backup %s retained in place, journal entry stays armed", destPath, cErr, backupPath)
 			return false, true, fmt.Errorf("install-confirm failed: %w (rollback restore refused — destination no longer holds the installed object; foreign bytes preserved, backup retained at %s, journal entry stays armed)", cErr, backupPath)
 		}
-		copyFacts, rErr := copyBackupToDestBound(d.fs, backupPath, destPath)
+		copyFacts, rErr := copyBackupToDestBoundFacts(d.fs, backupPath, destPath, &armedBackupFacts)
 		if rErr != nil {
-			return false, true, fmt.Errorf("install-confirm failed: %w (AND rollback restore failed: %v — bytes remain at %s)", cErr, rErr, backupPath)
+			return false, true, fmt.Errorf("install-confirm failed: %w (AND rollback restore failed: %w — bytes remain at %s)", cErr, rErr, backupPath)
 		}
 		// Wave-31 (codex local round 1, PR#215 finding L1): the copy returned
 		// the destination's OWN post-publish object identity; the destination

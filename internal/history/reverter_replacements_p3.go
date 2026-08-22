@@ -344,6 +344,15 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 				if statErr != nil {
 					return fmt.Errorf("journaled backup %s for destination %s is unreadable: %w", e.Backup, dest, statErr)
 				}
+				// Wave-62 (codex P2, PR#215 finding F1): the entry's arm-time facts
+				// bind the copy's opened backup to the OWNED set-aside BEFORE any
+				// bytes reach dest. copyRestoreBytesIdentityFacts authenticates the
+				// opened backup against the wave-25-stamped facts (dev/ino + size/
+				// mtime) and refuses up front on a mismatch — dest untouched, entry
+				// live, foreign bytes preserved — instead of landing a substituted
+				// backup's bytes at dest and stopping only the cleanup. The same
+				// entryFacts pointer feeds the removal-side quarantine below.
+				entryFacts := e
 				// Wave-31: the identity the wave-31 recheck binds to is declared
 				// here so the armed leg's copy can fill it; the pending legs copy
 				// nothing (their dest was certified when the marker was written)
@@ -362,7 +371,7 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 				// backup path.)
 				if !restorePending {
 					var repErr error
-					restoredID, repErr = copyRestoreBytesIdentity(r.fs, e.Backup, dest)
+					restoredID, repErr = copyRestoreBytesIdentityFacts(r.fs, e.Backup, dest, &entryFacts)
 					if repErr != nil {
 						return fmt.Errorf("failed to restore %s → %s: %w", e.Backup, dest, repErr)
 					}
@@ -388,7 +397,6 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 				// streamed) — never to the backup pathname alone: a foreign file
 				// swapped onto the name must be retained, never deleted-then-
 				// consumed.
-				entryFacts := e
 				// Wave-32 (codex local review round 2, PR#215 finding R1): the
 				// wave-31 destination identity check above ran BEFORE the removal;
 				// a foreign swap or deletion landing between the two used to get
@@ -1026,8 +1034,10 @@ func copyRestoreBytes(fs afero.Fs, backup, dest string) error {
 // publish-time identity handed back (wave-31, codex local round 1, PR#215
 // finding L1): the caller revalidates that dest still names THAT object
 // before any backup deletion or journal consumption runs.
+//
+//nolint:unused // test-facing identity shape; production restore legs ride the wave-62 facts variant (copyRestoreBytesIdentityFacts) which authenticates the opened backup against the journaled arm-time facts before any bytes reach dest.
 func copyRestoreBytesIdentity(fs afero.Fs, backup, dest string) (restoredDestIdentity, error) {
-	return copyRestoreBytesPublish(fs, backup, dest, fsutil.ReplaceFile, false)
+	return copyRestoreBytesPublish(fs, backup, dest, fsutil.ReplaceFile, false, nil)
 }
 
 // copyRestoreBytesNoReplace is copyRestoreBytes whose staged publish NEVER
@@ -1056,11 +1066,32 @@ func copyRestoreBytesNoReplace(fs afero.Fs, backup, dest string) error {
 // restored object's publish-time identity handed back (wave-31): the sweep's
 // restore-and-consume leg revalidates dest against it before the backup
 // removals and journal consumptions below ever run.
-func copyRestoreBytesNoReplaceIdentity(fs afero.Fs, backup, dest string) (restoredDestIdentity, error) {
-	return copyRestoreBytesPublish(fs, backup, dest, fsutil.PublishNoReplace, true)
+// copyRestoreBytesNoReplaceIdentityFacts is copyRestoreBytesNoReplaceIdentity
+// with the journaled entry's arm-time facts threaded in (wave-62, finding F1):
+// the sweep's armed restore-and-consume leg authenticates the opened backup
+// against the wave-25-stamped facts BEFORE any bytes reach dest. See
+// copyRestoreBytesIdentityFacts for the refusal posture.
+func copyRestoreBytesNoReplaceIdentityFacts(fs afero.Fs, backup, dest string, entry *models.ReplacementEntry) (restoredDestIdentity, error) {
+	return copyRestoreBytesPublish(fs, backup, dest, fsutil.PublishNoReplace, true, entry)
 }
 
-func copyRestoreBytesPublish(fs afero.Fs, backup, dest string, publish func(afero.Fs, string, string) error, noReplace bool) (restoredDestIdentity, error) {
+func copyRestoreBytesNoReplaceIdentity(fs afero.Fs, backup, dest string) (restoredDestIdentity, error) {
+	return copyRestoreBytesPublish(fs, backup, dest, fsutil.PublishNoReplace, true, nil)
+}
+
+// copyRestoreBytesIdentityFacts is copyRestoreBytesIdentity with the
+// journaled entry's arm-time facts threaded in (wave-62, codex P2, PR#215
+// finding F1): the opened backup is authenticated AGAINST the wave-25-
+// stamped facts (dev/ino consistency + size/mtime) BEFORE any bytes reach
+// dest — a foreign file swapped onto the backup name after the journal
+// write used to land at dest (the removal-side quarantine refused only the
+// unlink). Mismatch refuses up front: dest untouched, entry live, foreign
+// bytes preserved. A nil entry keeps the legacy pathname posture.
+func copyRestoreBytesIdentityFacts(fs afero.Fs, backup, dest string, entry *models.ReplacementEntry) (restoredDestIdentity, error) {
+	return copyRestoreBytesPublish(fs, backup, dest, fsutil.ReplaceFile, false, entry)
+}
+
+func copyRestoreBytesPublish(fs afero.Fs, backup, dest string, publish func(afero.Fs, string, string) error, noReplace bool, entry *models.ReplacementEntry) (restoredDestIdentity, error) {
 	// Journal spellings may carry the legacy `/` form on Windows: every OS call
 	// built on dest below (the .rstr staging name -> mode fix-up Chmod,
 	// Chtimes, and ReplaceFile's native MoveFileEx on the swap) sees the
@@ -1107,6 +1138,21 @@ func copyRestoreBytesPublish(fs afero.Fs, backup, dest string, publish func(afer
 	if sourceDev, sourceIno, sourceOK := restoreSourceIdentity(sourceInfo); sourceOK {
 		if openedDev, openedIno, openedOK := restoreSourceIdentity(openedInfo); openedOK && (sourceDev != openedDev || sourceIno != openedIno) {
 			return restoredDestIdentity{}, refuseRestoreSource(backup, "opened object differs from the Lstat object")
+		}
+	}
+	// Wave-62 (codex P2, PR#215 finding F1): authenticate the OPENED backup
+	// AGAINST the journaled entry's arm-time facts (the dev/ino consistency
+	// above + the wave-25-stamped size/mtime) BEFORE any bytes reach dest.
+	// A foreign file swapped onto the backup name after the journal write used
+	// to land at dest — the removal-side quarantine refused only the unlink,
+	// so the substituted bytes already stood at dest and only cleanup was
+	// stopped. The copy now refuses up front on a stamped-facts mismatch: dest
+	// stays untouched, the entry stays live, and the foreign occupant at the
+	// backup name is preserved byte-intact. A nil or unstamped entry keeps the
+	// legacy pathname posture (the documented size/mtime residual remains).
+	if entry != nil && entry.BackupFactsStamped() {
+		if openedInfo.Size() != entry.BackupSize || openedInfo.ModTime().Unix() != entry.BackupModUnix {
+			return restoredDestIdentity{}, refuseRestoreSource(backup, fmt.Sprintf("occupant identity mismatch — journaled %d bytes @ %d, found %d bytes @ %d", entry.BackupSize, entry.BackupModUnix, openedInfo.Size(), openedInfo.ModTime().Unix()))
 		}
 	}
 
