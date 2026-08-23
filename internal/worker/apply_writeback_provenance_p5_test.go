@@ -119,3 +119,8 @@ func TestRecovery_MissingRowFallbackPreservesProvenance(t *testing.T) {
 	require.True(t, outcome.Panic)
 	assertFrozenApplyProvenance(t, store)
 }
+
+func TestUpsertWriteBackResultWithProvenance_LegacyUpdaterFallback(t *testing.T) {
+	legacy := &callbackOnlyUpdater{inner: resultstore.New(1, []string{"/f/legacy.mp4"})}
+	upsertWriteBackResultWithProvenance(legacy, "/f/legacy.mp4", &resultstore.MovieResult{Status: models.JobStatusFailed}, frozenApplyProvenance())
+}

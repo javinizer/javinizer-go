@@ -262,17 +262,28 @@ func TestPruneOpsForRestore_RemovesConsumedEntriesOnly(t *testing.T) {
 			{Destination: "/restore/a.jpg", Backup: "/restore/a.jpg.dlbak.a", Installed: true},
 			{Destination: "/restore/b.jpg", Backup: "/restore/b.jpg.dlbak.b", Installed: true},
 		}}),
+	}, {
+		ID: 78,
+		GeneratedFiles: models.MarshalLedgerJSON(models.GeneratedFilesJSON{Replacements: []models.ReplacementEntry{{
+			Destination: "/restore/c.jpg", Backup: "/restore/c.jpg.dlbak.c", Installed: true,
+		}}}),
 	}}
 	emptyProgress := &consumedPruneProgressTestError{consumed: map[uint]map[string]struct{}{}}
 	require.Equal(t, ops, pruneOpsForRestore(ops, emptyProgress))
 	hookErr := &consumedPruneProgressTestError{consumed: map[uint]map[string]struct{}{77: {"/restore/a.jpg.dlbak.a": {}}}}
 
 	restored := pruneOpsForRestore(ops, hookErr)
-	require.Len(t, restored, 1)
+	require.Len(t, restored, 2)
 	gf, err := models.ParseGeneratedFiles(restored[0].GeneratedFiles)
 	require.NoError(t, err)
 	require.Len(t, gf.Replacements, 1)
 	require.Equal(t, "/restore/b.jpg.dlbak.b", gf.Replacements[0].Backup)
+	gf, err = models.ParseGeneratedFiles(restored[1].GeneratedFiles)
+	require.NoError(t, err)
+	require.Len(t, gf.Replacements, 1)
+	require.Equal(t, "/restore/c.jpg.dlbak.c", gf.Replacements[0].Backup)
+	malformed := []models.BatchFileOperation{{ID: 77, GeneratedFiles: `{"replacements":`}}
+	require.Equal(t, malformed, pruneOpsForRestore(malformed, hookErr))
 }
 
 func TestJobRepository_DeleteOrganizedOlderThan_OperationLookupFailure(t *testing.T) {
@@ -301,6 +312,31 @@ func TestJobRepository_DeleteOrganizedOlderThan_OperationDeleteFailure(t *testin
 	err := repo.DeleteOrganizedOlderThan(context.Background(), time.Now().UTC().Add(-24*time.Hour))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "delete organized job operations")
+}
+
+func TestJobRepository_RestorePrunedRows_Empty(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewJobRepository(db)
+	require.NoError(t, repo.restorePrunedRows(context.Background(), nil, nil))
+}
+
+func TestJobRepository_RestorePrunedRows_CreateFailures(t *testing.T) {
+	t.Run("job row", func(t *testing.T) {
+		db := newDatabaseTestDB(t)
+		repo := NewJobRepository(db)
+		require.NoError(t, db.DB.Exec(`CREATE TRIGGER fail_restore_job BEFORE INSERT ON jobs
+		 BEGIN SELECT RAISE(ABORT, 'forced restore job failure'); END;`).Error)
+		err := repo.restorePrunedRows(context.Background(), []models.Job{{ID: "restore-job-failure"}}, nil)
+		require.Error(t, err)
+	})
+	t.Run("operation row", func(t *testing.T) {
+		db := newDatabaseTestDB(t)
+		repo := NewJobRepository(db)
+		require.NoError(t, db.DB.Exec(`CREATE TRIGGER fail_restore_operation BEFORE INSERT ON batch_file_operations
+		 BEGIN SELECT RAISE(ABORT, 'forced restore operation failure'); END;`).Error)
+		err := repo.restorePrunedRows(context.Background(), nil, []models.BatchFileOperation{{ID: 88, BatchJobID: "restore-op-failure"}})
+		require.Error(t, err)
+	})
 }
 
 func ptrTime(t time.Time) *time.Time {

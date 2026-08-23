@@ -176,3 +176,14 @@ func TestAtomicUpdateFileResultWithProvenance_IdentitySkipPublishesNothing(t *te
 	require.NoError(t, err)
 	assert.Equal(t, uint64(5), state.Results["/f/skip.mp4"].Revision, "mutations still advance the revision")
 }
+
+func TestUpsertFileResultWithProvenance_InitializesNilMap(t *testing.T) {
+	tracker := New(1, []string{"/f/upsert.mp4"}).(*ResultTracker)
+	tracker.Provenance = nil
+	prov := &ProvenanceData{FieldSources: map[string]string{"title": "frozen"}}
+	tracker.UpsertFileResultWithProvenance("/f/upsert.mp4", &MovieResult{Status: models.JobStatusFailed}, prov)
+
+	got := tracker.Provenance["/f/upsert.mp4"]
+	require.NotNil(t, got)
+	assert.Equal(t, "frozen", got.FieldSources["title"])
+}
