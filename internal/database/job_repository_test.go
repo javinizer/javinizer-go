@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -214,6 +215,35 @@ func TestJobRepository_DeleteOrganizedOlderThan_PruneHookRunsAfterCommit(t *test
 	require.Len(t, pruned, 1)
 	require.Equal(t, op.ID, pruned[0].ID)
 	require.Equal(t, op.GeneratedFiles, pruned[0].GeneratedFiles)
+}
+
+func TestJobRepository_DeleteOrganizedOlderThan_HookFailureRestoresRows(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	jobRepo := NewJobRepository(db)
+	opRepo := NewBatchFileOperationRepository(db)
+	organizedAt := time.Now().UTC().Add(-48 * time.Hour)
+	job := &models.Job{
+		ID: "organized-prune-hook-failure", Status: models.JobStatusOrganized,
+		StartedAt: organizedAt.Add(-time.Hour), OrganizedAt: &organizedAt,
+	}
+	require.NoError(t, jobRepo.Create(context.Background(), job))
+	op := &models.BatchFileOperation{
+		BatchJobID: job.ID, OriginalPath: "/hook-failure/source.mp4", NewPath: "/hook-failure/dest.mp4",
+		OperationType: models.OperationTypeUpdate,
+		GeneratedFiles: models.MarshalLedgerJSON(models.GeneratedFilesJSON{Replacements: []models.ReplacementEntry{{
+			Destination: "/hook-failure/poster.jpg", Backup: "/hook-failure/poster.jpg.dlbak.0123456789abcdef", Installed: true,
+		}}}),
+	}
+	require.NoError(t, opRepo.Create(context.Background(), op))
+	wantErr := errors.New("cleanup unavailable")
+	jobRepo.SetOrganizedJobPruneHook(func(context.Context, []models.BatchFileOperation) error { return wantErr })
+
+	err := jobRepo.DeleteOrganizedOlderThan(context.Background(), time.Now().UTC().Add(-24*time.Hour))
+	require.ErrorIs(t, err, wantErr)
+	_, err = jobRepo.FindByID(context.Background(), job.ID)
+	require.NoError(t, err, "failed cleanup must restore the job for retry")
+	_, err = opRepo.FindByID(context.Background(), op.ID)
+	require.NoError(t, err, "failed cleanup must restore the ledger ownership record")
 }
 
 func ptrTime(t time.Time) *time.Time {

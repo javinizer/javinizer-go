@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -88,11 +89,15 @@ func (r *JobRepository) Delete(ctx context.Context, id string) error {
 
 // DeleteOrganizedOlderThan removes organized jobs whose organized_at predates the given date.
 func (r *JobRepository) DeleteOrganizedOlderThan(ctx context.Context, date time.Time) error {
+	var prunedJobs []models.Job
 	var prunedOps []models.BatchFileOperation
 	err := r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		oldJobs := tx.Model(&models.Job{}).
 			Select("id").
 			Where("status = ? AND organized_at < ?", models.JobStatusOrganized, date)
+		if err := tx.Where("status = ? AND organized_at < ?", models.JobStatusOrganized, date).Find(&prunedJobs).Error; err != nil {
+			return wrapDBErr("find", "organized jobs", err)
+		}
 		if err := tx.Where("batch_job_id IN (?)", oldJobs).Find(&prunedOps).Error; err != nil {
 			return wrapDBErr("find", "organized job operations", err)
 		}
@@ -109,8 +114,31 @@ func (r *JobRepository) DeleteOrganizedOlderThan(ctx context.Context, date time.
 	}
 	if hook := r.organizedJobPruneHook(); hook != nil && len(prunedOps) > 0 {
 		if err := hook(ctx, prunedOps); err != nil {
-			return wrapDBErr("prune", "organized job backups", err)
+			restoreErr := r.restorePrunedRows(ctx, prunedJobs, prunedOps)
+			return errors.Join(wrapDBErr("prune", "organized job backups", err), restoreErr)
 		}
 	}
 	return nil
+}
+
+// restorePrunedRows keeps the job and ledger snapshots durable when the
+// post-commit filesystem cleanup cannot start or complete. The caller can
+// retry pruning later without losing the backup ownership records.
+func (r *JobRepository) restorePrunedRows(ctx context.Context, jobs []models.Job, ops []models.BatchFileOperation) error {
+	if len(jobs) == 0 && len(ops) == 0 {
+		return nil
+	}
+	return r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for i := range jobs {
+			if err := tx.Create(&jobs[i]).Error; err != nil {
+				return wrapDBErr("restore", fmt.Sprintf("organized job %s", jobs[i].ID), err)
+			}
+		}
+		for i := range ops {
+			if err := tx.Create(&ops[i]).Error; err != nil {
+				return wrapDBErr("restore", fmt.Sprintf("organized job operation %d", ops[i].ID), err)
+			}
+		}
+		return nil
+	})
 }

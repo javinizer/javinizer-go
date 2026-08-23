@@ -190,6 +190,18 @@ func TestSweep_RootsAndMarkers(t *testing.T) {
 func TestReplacementSweeper_PruneOperationBackups_RemovesOnlyUnreferenced(t *testing.T) {
 	ctx := context.Background()
 
+	markInstalled := func(t *testing.T, repo *p3OpRepo, op *models.BatchFileOperation, pendingKind string) {
+		t.Helper()
+		gf, err := models.ParseGeneratedFiles(op.GeneratedFiles)
+		require.NoError(t, err)
+		gf.Replacements[0].Installed = true
+		if pendingKind != "" {
+			gf.Replacements[0].SetRestorePending(pendingKind)
+		}
+		op.GeneratedFiles = models.MarshalLedgerJSON(gf)
+		require.NoError(t, repo.Update(context.Background(), op))
+	}
+
 	t.Run("removed operation releases its backup", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
 		repo := newP3OpRepo()
@@ -199,6 +211,7 @@ func TestReplacementSweeper_PruneOperationBackups_RemovesOnlyUnreferenced(t *tes
 		writeSweepFile(t, fs, dest, "current", time.Hour)
 		writeSweepFile(t, fs, backup, "old", time.Hour)
 		op := journalRow(t, repo, "job-pruned", "PRUNE-001", dest, backup, 1, models.RevertStatusApplied)
+		markInstalled(t, repo, op, "")
 		delete(repo.ops, op.ID)
 
 		err := NewReplacementSweeper(fs, repo).PruneOperationBackups(ctx, []models.BatchFileOperation{*op})
@@ -218,7 +231,9 @@ func TestReplacementSweeper_PruneOperationBackups_RemovesOnlyUnreferenced(t *tes
 		writeSweepFile(t, fs, dest, "current", time.Hour)
 		writeSweepFile(t, fs, backup, "old", time.Hour)
 		pruned := journalRow(t, repo, "job-pruned", "PRUNE-002", dest, backup, 1, models.RevertStatusApplied)
-		journalRow(t, repo, "job-live", "PRUNE-003", dest, backup, 2, models.RevertStatusApplied)
+		markInstalled(t, repo, pruned, "")
+		live := journalRow(t, repo, "job-live", "PRUNE-003", dest, backup, 2, models.RevertStatusApplied)
+		markInstalled(t, repo, live, "")
 		delete(repo.ops, pruned.ID)
 
 		err := NewReplacementSweeper(fs, repo).PruneOperationBackups(ctx, []models.BatchFileOperation{*pruned})
@@ -226,6 +241,43 @@ func TestReplacementSweeper_PruneOperationBackups_RemovesOnlyUnreferenced(t *tes
 		exists, statErr := afero.Exists(fs, backup)
 		require.NoError(t, statErr)
 		require.True(t, exists, "a backup with a remaining ledger reference must stay")
+	})
+
+	t.Run("unconfirmed install retains the backup", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		repo := newP3OpRepo()
+		dest := "/out/PRUNE-UNCONFIRMED/poster.jpg"
+		backup := dest + ".dlbak." + p3HexC
+		require.NoError(t, fs.MkdirAll("/out/PRUNE-UNCONFIRMED", 0o755))
+		writeSweepFile(t, fs, dest, "current", time.Hour)
+		writeSweepFile(t, fs, backup, "old", time.Hour)
+		op := journalRow(t, repo, "job-pruned", "PRUNE-004", dest, backup, 1, models.RevertStatusApplied)
+		delete(repo.ops, op.ID)
+
+		err := NewReplacementSweeper(fs, repo).PruneOperationBackups(ctx, []models.BatchFileOperation{*op})
+		require.NoError(t, err)
+		exists, statErr := afero.Exists(fs, backup)
+		require.NoError(t, statErr)
+		require.True(t, exists, "an unconfirmed install must retain recoverable bytes")
+	})
+
+	t.Run("rearm-refused ownership retains the occupant", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		repo := newP3OpRepo()
+		dest := "/out/PRUNE-REFUSED/poster.jpg"
+		backup := dest + ".dlbak." + p3HexA
+		require.NoError(t, fs.MkdirAll("/out/PRUNE-REFUSED", 0o755))
+		writeSweepFile(t, fs, dest, "current", time.Hour)
+		writeSweepFile(t, fs, backup, "foreign", time.Hour)
+		op := journalRow(t, repo, "job-pruned", "PRUNE-005", dest, backup, 1, models.RevertStatusApplied)
+		markInstalled(t, repo, op, models.RestorePendingKindRearmRefused)
+		delete(repo.ops, op.ID)
+
+		err := NewReplacementSweeper(fs, repo).PruneOperationBackups(ctx, []models.BatchFileOperation{*op})
+		require.NoError(t, err)
+		got, readErr := afero.ReadFile(fs, backup)
+		require.NoError(t, readErr)
+		require.Equal(t, "foreign", string(got))
 	})
 }
 

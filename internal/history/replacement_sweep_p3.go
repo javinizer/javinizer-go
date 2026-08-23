@@ -464,6 +464,10 @@ func (s *ReplacementSweeper) PruneOperationBackups(ctx context.Context, ops []mo
 				errs = append(errs, fmt.Errorf("operation %d has an incomplete replacement entry", ops[i].ID))
 				continue
 			}
+			if !entry.Installed || entry.PendingKind() == models.RestorePendingKindRearmRefused {
+				logging.Warnf("organized-job prune retained backup %s for operation %d: install is unconfirmed or backup ownership is refused", entry.Backup, ops[i].ID)
+				continue
+			}
 			if err := ctx.Err(); err != nil {
 				return errors.Join(append(errs, err)...)
 			}
