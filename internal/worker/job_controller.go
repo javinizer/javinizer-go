@@ -497,7 +497,6 @@ func (c *jobController) buildRescrapeInputs(wf workflow.WorkflowInterface, batch
 	tempDir := c.job.cfg.tempDir
 	histRepo := c.job.deps.HistoryRepo
 	c.job.mu.RUnlock()
-	snap := c.job.results.SnapshotData()
 
 	return rescrapePhaseInputs{
 		JobID:       c.job.ID,
@@ -505,8 +504,6 @@ func (c *jobController) buildRescrapeInputs(wf workflow.WorkflowInterface, batch
 		WF:          wf,
 		PosterGen:   pg,
 		HistoryRepo: histRepo,
-		Results:     snap.Results,
-		Provenance:  snap.Provenance,
 		// Commit leg wraps through the family lock (codex r20): the scrape's network section stays unlocked; CommitResult serializes with concurrent family edits on the process-wide registry.
 		ResultMap: &familyKeyedResultMap{
 			ResultMapAccessor: c.job.results,
