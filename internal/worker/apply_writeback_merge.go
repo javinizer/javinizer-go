@@ -125,10 +125,11 @@ func mergeLiveReviewEdits(baseline, phaseOut, live *models.Movie) *models.Movie 
 
 // mergeWriteBackProvenance merges per-file provenance for a write-back commit
 // (D5): live (phase-time edited) attribution wins the keys it covers; the
-// phase-frozen snapshot fills keys the user never touched. ScraperResults are
-// not merged here — their resolution is the envelope-wide rule (a rescrape
-// committed after phase start wins the live set outright, else the frozen
-// snapshot is kept), handled by the caller that owns both snapshots.
+// phase-frozen snapshot fills keys the user never touched. Raw ScraperResults
+// are one global set rather than per-key data: when a live set exists and
+// differs, it represents a post-phase rescrape and wins as a whole; otherwise
+// the frozen set is retained. Every returned slice/map is detached from the
+// result store so the atomic updater can publish it safely.
 func mergeWriteBackProvenance(frozen, live *resultstore.ProvenanceData) *resultstore.ProvenanceData {
 	switch {
 	case frozen == nil && live == nil:
@@ -141,6 +142,9 @@ func mergeWriteBackProvenance(frozen, live *resultstore.ProvenanceData) *results
 	out := frozen.Clone()
 	out.FieldSources = mergeSourceMap(frozen.FieldSources, live.FieldSources)
 	out.ActressSources = mergeSourceMap(frozen.ActressSources, live.ActressSources)
+	if live.ScraperResults != nil && !reflect.DeepEqual(frozen.ScraperResults, live.ScraperResults) {
+		out.ScraperResults = live.Clone().ScraperResults
+	}
 	return out
 }
 

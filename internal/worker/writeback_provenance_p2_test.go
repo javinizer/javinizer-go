@@ -39,6 +39,29 @@ func TestApplyWriteBack_MergesEditableSet_AdditionalFields(t *testing.T) {
 		assert.Equal(t, map[string]string{"A-ONE": "user"}, got.ActressSources)
 	})
 
+	t.Run("scraper_results_resolve_as_one_global_set", func(t *testing.T) {
+		frozen := &resultstore.ProvenanceData{
+			FieldSources:   map[string]string{"director": "scraper"},
+			ScraperResults: []*models.ScraperResult{{Source: "dmm", Title: "old"}},
+		}
+		liveSame := &resultstore.ProvenanceData{
+			FieldSources:   map[string]string{"title": "user"},
+			ScraperResults: []*models.ScraperResult{{Source: "dmm", Title: "old"}},
+		}
+		kept := mergeWriteBackProvenance(frozen, liveSame)
+		require.Len(t, kept.ScraperResults, 1)
+		assert.Equal(t, "old", kept.ScraperResults[0].Title, "unchanged raw set falls back to frozen")
+		assert.Equal(t, map[string]string{"director": "scraper", "title": "user"}, kept.FieldSources)
+
+		liveRescrape := &resultstore.ProvenanceData{
+			FieldSources:   map[string]string{"title": "rescrape"},
+			ScraperResults: []*models.ScraperResult{{Source: "r18dev", Title: "new"}},
+		}
+		updated := mergeWriteBackProvenance(frozen, liveRescrape)
+		require.Len(t, updated.ScraperResults, 1)
+		assert.Equal(t, "r18dev", updated.ScraperResults[0].Source, "changed live raw set wins globally")
+	})
+
 	t.Run("provenance_empty_maps_collapse_to_nil", func(t *testing.T) {
 		got := mergeWriteBackProvenance(&resultstore.ProvenanceData{}, &resultstore.ProvenanceData{})
 		require.NotNil(t, got)

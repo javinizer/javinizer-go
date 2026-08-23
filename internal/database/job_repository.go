@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/models"
+	"gorm.io/gorm"
 )
 
 // JobRepository persists and queries Job records via GORM, composing BaseRepository for common operations.
@@ -68,8 +69,17 @@ func (r *JobRepository) Delete(ctx context.Context, id string) error {
 
 // DeleteOrganizedOlderThan removes organized jobs whose organized_at predates the given date.
 func (r *JobRepository) DeleteOrganizedOlderThan(ctx context.Context, date time.Time) error {
-	if err := r.GetDB().WithContext(ctx).Where("status = ? AND organized_at < ?", models.JobStatusOrganized, date).Delete(&models.Job{}).Error; err != nil {
-		return wrapDBErr("delete", "organized jobs", err)
-	}
-	return nil
+	err := r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		oldJobs := tx.Model(&models.Job{}).
+			Select("id").
+			Where("status = ? AND organized_at < ?", models.JobStatusOrganized, date)
+		if err := tx.Where("batch_job_id IN (?)", oldJobs).Delete(&models.BatchFileOperation{}).Error; err != nil {
+			return wrapDBErr("delete", "organized job operations", err)
+		}
+		if err := tx.Where("status = ? AND organized_at < ?", models.JobStatusOrganized, date).Delete(&models.Job{}).Error; err != nil {
+			return wrapDBErr("delete", "organized jobs", err)
+		}
+		return nil
+	})
+	return err
 }

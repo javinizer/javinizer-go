@@ -110,6 +110,77 @@ func TestJobRepository_DeleteOrganizedOlderThan(t *testing.T) {
 	assert.Equal(t, "organized-recent", list[0].ID)
 }
 
+func TestJobRepository_DeleteOrganizedOlderThan_PrunesOperationsBeforeJobs(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	jobRepo := NewJobRepository(db)
+	opRepo := NewBatchFileOperationRepository(db)
+	now := time.Now().UTC()
+	oldAt := now.Add(-48 * time.Hour)
+
+	oldJob := &models.Job{
+		ID: "organized-with-ledger-old", Status: models.JobStatusOrganized,
+		StartedAt: oldAt.Add(-time.Hour), OrganizedAt: &oldAt,
+	}
+	recentAt := now.Add(-12 * time.Hour)
+	recentJob := &models.Job{
+		ID: "organized-with-ledger-recent", Status: models.JobStatusOrganized,
+		StartedAt: recentAt.Add(-time.Hour), OrganizedAt: &recentAt,
+	}
+	require.NoError(t, jobRepo.Create(context.Background(), oldJob))
+	require.NoError(t, jobRepo.Create(context.Background(), recentJob))
+
+	oldOp := &models.BatchFileOperation{
+		BatchJobID: oldJob.ID, OriginalPath: "/old/source.mp4", NewPath: "/old/dest.mp4",
+		OperationType: models.OperationTypeMove,
+	}
+	recentOp := &models.BatchFileOperation{
+		BatchJobID: recentJob.ID, OriginalPath: "/recent/source.mp4", NewPath: "/recent/dest.mp4",
+		OperationType: models.OperationTypeMove,
+	}
+	require.NoError(t, opRepo.Create(context.Background(), oldOp))
+	require.NoError(t, opRepo.Create(context.Background(), recentOp))
+
+	require.NoError(t, jobRepo.DeleteOrganizedOlderThan(context.Background(), now.Add(-24*time.Hour)))
+	_, err := jobRepo.FindByID(context.Background(), oldJob.ID)
+	require.Error(t, err)
+	_, err = opRepo.FindByID(context.Background(), oldOp.ID)
+	require.Error(t, err, "operation rows must be pruned with the old job")
+	_, err = jobRepo.FindByID(context.Background(), recentJob.ID)
+	require.NoError(t, err)
+	_, err = opRepo.FindByID(context.Background(), recentOp.ID)
+	require.NoError(t, err, "recent job ledger must remain")
+}
+
+func TestJobRepository_DeleteOrganizedOlderThan_JobDeleteFailureRollsBack(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	jobRepo := NewJobRepository(db)
+	opRepo := NewBatchFileOperationRepository(db)
+	organizedAt := time.Now().UTC().Add(-48 * time.Hour)
+	job := &models.Job{
+		ID: "organized-trigger-failure", Status: models.JobStatusOrganized,
+		StartedAt: organizedAt.Add(-time.Hour), OrganizedAt: &organizedAt,
+	}
+	require.NoError(t, jobRepo.Create(context.Background(), job))
+	op := &models.BatchFileOperation{
+		BatchJobID: job.ID, OriginalPath: "/trigger/source.mp4", NewPath: "/trigger/dest.mp4",
+		OperationType: models.OperationTypeMove,
+	}
+	require.NoError(t, opRepo.Create(context.Background(), op))
+	require.NoError(t, db.DB.Exec(
+		`CREATE TRIGGER fail_organized_job_delete BEFORE DELETE ON jobs
+		 WHEN OLD.id = 'organized-trigger-failure'
+		 BEGIN SELECT RAISE(ABORT, 'forced organized delete failure'); END;`,
+	).Error)
+
+	err := jobRepo.DeleteOrganizedOlderThan(context.Background(), time.Now().UTC().Add(-24*time.Hour))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "delete organized jobs")
+	_, err = jobRepo.FindByID(context.Background(), job.ID)
+	require.NoError(t, err, "transaction rolls the job delete back")
+	_, err = opRepo.FindByID(context.Background(), op.ID)
+	require.NoError(t, err, "transaction rolls the ops-first delete back")
+}
+
 func ptrTime(t time.Time) *time.Time {
 	return &t
 }

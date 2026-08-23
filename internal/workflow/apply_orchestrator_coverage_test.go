@@ -959,14 +959,15 @@ func TestApplyOrchImpl_Execute_RevertLogBeginError(t *testing.T) {
 		nfo:       &applyStubNFO{},
 		revertLog: rl,
 	}
-	// Should not panic when Begin fails
+	// A failed Begin is a hard precondition for a non-dry-run apply.
 	result, err := impl.Execute(context.Background(), ApplyCmd{
 		Movie:    &models.Movie{ID: "TEST-001", Title: "Test"},
 		Match:    defaultMatch(),
 		Organize: OrganizeOptions{Skip: true},
 	})
-	assert.NoError(t, err)
+	assert.Error(t, err)
 	require.NotNil(t, result)
+	assert.Equal(t, "revert_begin", result.FailedStep)
 }
 
 // ---------------------------------------------------------------------------

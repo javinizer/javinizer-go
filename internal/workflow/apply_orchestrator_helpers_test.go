@@ -27,15 +27,17 @@ func TestCompleteRevertLog_EmptyOpID_DoesNothing(t *testing.T) {
 func TestBeginRevertLog_NilRevertLog_ReturnsEmpty(t *testing.T) {
 	o := &applyOrchImpl{revertLog: nil}
 	cmd := ApplyCmd{Movie: &models.Movie{ID: "TEST-001"}}
-	opID := o.beginRevertLog(context.Background(), cmd)
+	opID, err := o.beginRevertLog(context.Background(), cmd)
+	assert.NoError(t, err)
 	assert.Equal(t, "", opID)
 }
 
-func TestBeginRevertLog_BeginFails_ReturnsEmptyAndLogs(t *testing.T) {
+func TestBeginRevertLog_BeginFails_ReturnsErrorAndLogs(t *testing.T) {
 	mock := &stubRevertLog{beginErr: errTestBegin}
 	o := &applyOrchImpl{revertLog: mock}
 	cmd := ApplyCmd{Movie: &models.Movie{ID: "TEST-001"}}
-	opID := o.beginRevertLog(context.Background(), cmd)
+	opID, err := o.beginRevertLog(context.Background(), cmd)
+	assert.ErrorIs(t, err, errTestBegin)
 	assert.Equal(t, "", opID)
 	assert.Equal(t, 1, mock.beginCalls, "Begin should be called once")
 }

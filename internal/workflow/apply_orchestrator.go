@@ -121,7 +121,14 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult
 	}
 
 	// Step 0: Begin revert log BEFORE any filesystem mutation.
-	opID := o.beginRevertLog(ctx, cmd)
+	opID, beginErr := o.beginRevertLog(ctx, cmd)
+	if beginErr != nil {
+		return &ApplyResult{
+			Movie:       cmd.Movie,
+			OperationID: opID,
+			FailedStep:  "revert_begin",
+		}, beginErr
+	}
 
 	movie := cmd.Movie
 	targetDir := cmd.DestPath
@@ -515,23 +522,27 @@ func replacementRecorder(rl RevertLog) downloader.ReplacementRecorder {
 	return rl
 }
 
-// Returns empty OperationID if revertLog is nil or Begin fails.
-func (o *applyOrchImpl) beginRevertLog(ctx context.Context, cmd ApplyCmd) OperationID {
+// Returns an empty OperationID with no error when revert logging is disabled.
+// A configured logger's failed Begin is fatal for destructive apply work: no
+// filesystem step may run without a committed inverse in the ledger.
+func (o *applyOrchImpl) beginRevertLog(ctx context.Context, cmd ApplyCmd) (OperationID, error) {
 	if o.revertLog == nil {
-		return ""
+		return "", nil
 	}
 	opID, beginErr := o.revertLog.Begin(ctx, cmd)
 	if beginErr != nil {
 		if cmd.DryRun {
+			// Dry-run performs no destructive filesystem work, so a ledger is
+			// not required to preview the pipeline.
 			resolveLogger(o.logger).Warnf("[workflow] RevertLog.Begin failed for %s: %v", cmd.Movie.ID, beginErr)
-		} else {
-			resolveLogger(o.logger).Errorf("[workflow] RevertLog.Begin failed for %s: %v — proceeding without revert safety", cmd.Movie.ID, beginErr)
+			return opID, nil
 		}
-		return opID // may be partial — still return it
+		resolveLogger(o.logger).Errorf("[workflow] RevertLog.Begin failed for %s: %v — aborting before destructive steps", cmd.Movie.ID, beginErr)
+		return opID, fmt.Errorf("revert log begin failed: %w", beginErr)
 	}
 	// snapshot is optional enrichment — failure doesn't block Apply.
 	o.revertLog.CaptureSnapshot(ctx, opID, cmd)
-	return opID
+	return opID, nil
 }
 
 // noOpApplyOrchestrator returns an error — Apply is not configured for ScrapeOnly workflows.

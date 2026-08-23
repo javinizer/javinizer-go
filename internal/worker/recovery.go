@@ -26,6 +26,7 @@ type recoveryContext struct {
 	fmi        models.FileMatchInfo
 	editLockFn func(movieIDs ...string) func() // optional: serializes write-back with review edits (codex r11; variadic per codex r42 total-order rule)
 	movie      *models.Movie                   // optional: prior scrape-phase Movie to preserve on apply panic (mirrors fix in interpretApplyResult's err branch)
+	provenance *resultstore.ProvenanceData     // frozen phase-entry attribution for apply write-back
 	// promoteWitnessFn reports an unresolved .promote- witness for the family
 	// (codex P2: panics never funnel through the interpret failure branch —
 	// this recovery write-back is the ONLY panic publication, so it must
@@ -109,7 +110,7 @@ func withFileRecovery(rc recoveryContext, outcome recoverableOutcome) func() {
 						current.StartedAt = rc.startTime
 						current.EndedAt = &now
 					}
-					return current, mergeWriteBackProvenance(nil, prov), nil
+					return current, mergeWriteBackProvenance(rc.provenance, prov), nil
 				})
 				if errUp != nil {
 					mr := &resultstore.MovieResult{
