@@ -512,21 +512,21 @@ func quarantineVerifiedBackup(fs afero.Fs, backup, phase string, handle afero.Fi
 		// nothing consumed, entry live, no move-back (nothing to move).
 		hold.moved = false
 		absoluteQuarantine, _ := filepath.Abs(quarantine)
-		return nil, fmt.Errorf("%w: %s (quarantine %s empty at the post-move re-verify)", errReplacementBackupQuarantineVanished, absoluteBackup, absoluteQuarantine)
+		return hold, fmt.Errorf("%w: %s (quarantine %s empty at the post-move re-verify)", errReplacementBackupQuarantineVanished, absoluteBackup, absoluteQuarantine)
 	case qerr != nil:
 		logging.Warnf("%s failed to re-verify quarantined backup %s (quarantine %s) before removal: %v — journal entry retained live", phase, absoluteBackup, quarantine, qerr)
-		return nil, hold.restoreOrJoin(qerr)
+		return hold, hold.restoreOrJoin(qerr)
 	}
 	if quarInfo == nil || quarInfo.Mode()&os.ModeSymlink != 0 || !quarInfo.Mode().IsRegular() {
-		return nil, hold.restoreOrJoin(refuseReplacementBackupRemoval(backup, phase, fmt.Sprintf("quarantined object at %s is not the verified regular file", quarantine)))
+		return hold, hold.restoreOrJoin(refuseReplacementBackupRemoval(backup, phase, fmt.Sprintf("quarantined object at %s is not the verified regular file", quarantine)))
 	}
 	if verDev, verIno, verOK := restoreSourceIdentity(verified); verOK {
 		if quarDev, quarIno, quarOK := restoreSourceIdentity(quarInfo); quarOK && (verDev != quarDev || verIno != quarIno) {
-			return nil, hold.restoreOrJoin(refuseReplacementBackupRemoval(backup, phase, fmt.Sprintf("quarantined object at %s is not the verified object (dev/inode mismatch) — foreign bytes preserved", quarantine)))
+			return hold, hold.restoreOrJoin(refuseReplacementBackupRemoval(backup, phase, fmt.Sprintf("quarantined object at %s is not the verified object (dev/inode mismatch) — foreign bytes preserved", quarantine)))
 		}
 	}
 	if quarInfo.Size() != verified.Size() || !quarInfo.ModTime().Equal(verified.ModTime()) {
-		return nil, hold.restoreOrJoin(refuseReplacementBackupRemoval(backup, phase, fmt.Sprintf("quarantined object at %s metadata differs from the verified object — foreign bytes preserved", quarantine)))
+		return hold, hold.restoreOrJoin(refuseReplacementBackupRemoval(backup, phase, fmt.Sprintf("quarantined object at %s metadata differs from the verified object — foreign bytes preserved", quarantine)))
 	}
 	hold.quar = quarInfo
 	return hold, nil

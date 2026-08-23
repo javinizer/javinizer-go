@@ -184,6 +184,25 @@ func quarantineReplacementBackupForRemoval(fs afero.Fs, backup, phase string, en
 		return &replacementBackupQuarantine{fs: fs, backup: backup, phase: phase, unlinked: true}, nil
 	}
 	defer func() { _ = handle.Close() }()
+	hold, err := quarantineVerifiedBackup(fs, backup, phase, handle, verified)
+	if err != nil {
+		return nil, err
+	}
+	return hold, nil
+}
+
+// quarantineReplacementBackupForPrune preserves a partially moved quarantine
+// hold for the prune path; generic sweep callers retain their established
+// nil-hold error contract.
+func quarantineReplacementBackupForPrune(fs afero.Fs, backup, phase string, entry *models.ReplacementEntry, copiedFrom os.FileInfo) (*replacementBackupQuarantine, error) {
+	handle, verified, err := openVerifiedReplacementBackup(fs, backup, phase, entry, copiedFrom)
+	if err != nil {
+		return nil, err
+	}
+	if handle == nil {
+		return &replacementBackupQuarantine{fs: fs, backup: backup, phase: phase, unlinked: true}, nil
+	}
+	defer func() { _ = handle.Close() }()
 	return quarantineVerifiedBackup(fs, backup, phase, handle, verified)
 }
 
@@ -526,7 +545,11 @@ pruneEntries:
 	if len(errs) == 0 {
 		return nil
 	}
-	if err := s.retractConsumedEntries(consumed, candidateIDs); err != nil {
+	retractCtx := ctx
+	if retractCtx.Err() != nil {
+		retractCtx = context.Background()
+	}
+	if err := s.retractConsumedEntries(retractCtx, consumed, candidateIDs); err != nil {
 		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
@@ -535,7 +558,7 @@ pruneEntries:
 // retractConsumedEntries removes already-consumed backup entries from every
 // candidate row, including another row that shared the same backup spelling.
 // The journal RMW is durable and serialized with ordinary journal writers.
-func (s *ReplacementSweeper) retractConsumedEntries(consumed map[uint]map[string]struct{}, candidateIDs map[uint]struct{}) error {
+func (s *ReplacementSweeper) retractConsumedEntries(parentCtx context.Context, consumed map[uint]map[string]struct{}, candidateIDs map[uint]struct{}) error {
 	if len(consumed) == 0 || len(candidateIDs) == 0 {
 		return nil
 	}
@@ -545,11 +568,18 @@ func (s *ReplacementSweeper) retractConsumedEntries(consumed map[uint]map[string
 			want[sweepSlash(backup)] = struct{}{}
 		}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	if parentCtx == nil {
+		parentCtx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parentCtx, 5*time.Second)
 	defer cancel()
 	var errs []error
 	for opID := range candidateIDs {
-		release := fsutil.SharedJournalLocks().Acquire(strconv.Itoa(int(opID)))
+		release, lockErr := acquireJournalLockWithin(ctx, strconv.Itoa(int(opID)))
+		if lockErr != nil {
+			errs = append(errs, fmt.Errorf("retract consumed entries lock for operation %d: %w", opID, lockErr))
+			continue
+		}
 		err := s.repo.UpdateJournalInTx(ctx, opID, func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
 			gf, err := models.ParseGeneratedFiles(current.GeneratedFiles)
 			if err != nil {
@@ -576,6 +606,21 @@ func (s *ReplacementSweeper) retractConsumedEntries(consumed map[uint]map[string
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// acquireJournalLockWithin bounds the wait for the process-local journal lock.
+// If the context expires, the eventual acquirer releases immediately without
+// touching the row.
+func acquireJournalLockWithin(ctx context.Context, key string) (func(), error) {
+	result := make(chan func(), 1)
+	go func() { result <- fsutil.SharedJournalLocks().Acquire(key) }()
+	select {
+	case release := <-result:
+		return release, nil
+	case <-ctx.Done():
+		go func() { (<-result)() }()
+		return nil, ctx.Err()
+	}
 }
 
 // pruneOperationBackup rechecks all live ledger rows while the destination
@@ -613,8 +658,11 @@ func (s *ReplacementSweeper) pruneOperationBackup(ctx context.Context, opID uint
 	if claim != nil && claim.abandonIfRevoked("prune backup quarantine", entry.Backup, entry.Destination) {
 		return false, fsutil.ErrReplacementBusy
 	}
-	hold, err := quarantineReplacementBackupForRemoval(s.fs, entry.Backup, "organized-job prune", &entry, nil)
+	hold, err := quarantineReplacementBackupForPrune(s.fs, entry.Backup, "organized-job prune", &entry, nil)
 	if err != nil {
+		if hold != nil && hold.moved {
+			return false, errors.Join(err, s.persistPruneQuarantine(opID, entry, hold.quarantine))
+		}
 		return false, errors.Join(err, s.markPruneRearmRefused(opID, entry))
 	}
 	if hold == nil || hold.unlinked {
@@ -624,7 +672,7 @@ func (s *ReplacementSweeper) pruneOperationBackup(ctx context.Context, opID uint
 		return false, s.joinPruneRestoreFailure(opID, entry, hold, err)
 	}
 	if claim != nil && claim.abandonIfRevoked("prune backup unlink", entry.Backup, entry.Destination) {
-		return false, s.joinPruneRestoreFailure(opID, entry, hold, fsutil.ErrReplacementBusy)
+		return false, errors.Join(fsutil.ErrReplacementBusy, s.persistPruneQuarantine(opID, entry, hold.quarantine))
 	}
 	if err := hold.removeVerified(); err != nil {
 		if hold.moved {

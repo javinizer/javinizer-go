@@ -61,11 +61,7 @@ func (r *JobRepository) Update(ctx context.Context, job *models.Job) error {
 	if job == nil {
 		return fmt.Errorf("update job: job must not be nil")
 	}
-	job.PruneVersion++
-	if err := r.GetDB().WithContext(ctx).Save(job).Error; err != nil {
-		return wrapDBErr("update", fmt.Sprintf("job %s", job.ID), err)
-	}
-	return nil
+	return r.saveVersioned(ctx, job, "update")
 }
 
 // Upsert inserts or replaces the given job record by primary key.
@@ -73,9 +69,32 @@ func (r *JobRepository) Upsert(ctx context.Context, job *models.Job) error {
 	if job == nil {
 		return fmt.Errorf("upsert job: job must not be nil")
 	}
-	job.PruneVersion++
-	if err := r.GetDB().WithContext(ctx).Save(job).Error; err != nil {
-		return wrapDBErr("upsert", fmt.Sprintf("job %s", job.ID), err)
+	return r.saveVersioned(ctx, job, "upsert")
+}
+
+// saveVersioned increments prune_version in the database before saving the
+// caller's fields. The first write acquires SQLite's writer lock, so stale
+// callers cannot reuse a version observed before a concurrent writer commit.
+func (r *JobRepository) saveVersioned(ctx context.Context, job *models.Job, operation string) error {
+	err := r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&models.Job{}).Where("id = ?", job.ID).
+			UpdateColumn("prune_version", gorm.Expr("prune_version + 1"))
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			job.PruneVersion = 0
+			return tx.Create(job).Error
+		}
+		var version uint64
+		if err := tx.Model(&models.Job{}).Where("id = ?", job.ID).Pluck("prune_version", &version).Error; err != nil {
+			return err
+		}
+		job.PruneVersion = version
+		return tx.Save(job).Error
+	})
+	if err != nil {
+		return wrapDBErr(operation, fmt.Sprintf("job %s", job.ID), err)
 	}
 	return nil
 }
@@ -135,36 +154,63 @@ func (r *JobRepository) DeleteOrganizedOlderThan(ctx context.Context, date time.
 		}
 	}
 
-	// Re-apply both job and operation UpdatedAt snapshots at deletion time.
-	// A concurrent revert/edit changes one of these versions and makes the
-	// eligible predicate empty, so cleanup never deletes a row it did not see.
-	jobPredicates := make([]string, 0, len(prunedJobs))
-	jobArgs := make([]any, 0, len(prunedJobs)*2)
-	for _, job := range prunedJobs {
-		jobPredicates = append(jobPredicates, "(id = ? AND prune_version = ?)")
-		jobArgs = append(jobArgs, job.ID, job.PruneVersion)
-	}
-	opPredicates := make([]string, 0, len(prunedOps))
-	opArgs := make([]any, 0, len(prunedOps)*2)
-	for _, op := range prunedOps {
-		opPredicates = append(opPredicates, "(id = ? AND updated_at = ?)")
-		opArgs = append(opArgs, op.ID, op.UpdatedAt)
-	}
 	return r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		jobWhere := "status = ? AND (" + strings.Join(jobPredicates, " OR ") + ")"
-		jobWhereArgs := append([]any{models.JobStatusOrganized}, jobArgs...)
-		eligibleJobs := tx.Model(&models.Job{}).Select("id").Where(jobWhere, jobWhereArgs...)
-		if len(opPredicates) > 0 {
-			opWhere := "(" + strings.Join(opPredicates, " OR ") + ") AND batch_job_id IN (?)"
-			if err := tx.Where(opWhere, append(opArgs, eligibleJobs)...).Delete(&models.BatchFileOperation{}).Error; err != nil {
-				return wrapDBErr("delete", "organized job operations", err)
+		for start := 0; start < len(prunedJobs); start += pruneDeleteBatchSize {
+			end := start + pruneDeleteBatchSize
+			if end > len(prunedJobs) {
+				end = len(prunedJobs)
 			}
-		}
-		if err := tx.Where("id IN (?) AND NOT EXISTS (SELECT 1 FROM batch_file_operations WHERE batch_job_id = jobs.id)", eligibleJobs).Delete(&models.Job{}).Error; err != nil {
-			return wrapDBErr("delete", "organized jobs", err)
+			jobChunk := prunedJobs[start:end]
+			jobIDs := make(map[string]struct{}, len(jobChunk))
+			for _, job := range jobChunk {
+				jobIDs[job.ID] = struct{}{}
+			}
+			opChunk := make([]models.BatchFileOperation, 0)
+			for _, op := range prunedOps {
+				if _, ok := jobIDs[op.BatchJobID]; ok {
+					opChunk = append(opChunk, op)
+				}
+			}
+			if err := deletePrunedJobChunk(tx, jobChunk, opChunk); err != nil {
+				return err
+			}
 		}
 		return nil
 	})
+}
+
+const pruneDeleteBatchSize = 200
+
+func deletePrunedJobChunk(tx *gorm.DB, jobs []models.Job, ops []models.BatchFileOperation) error {
+	jobPredicates := make([]string, 0, len(jobs))
+	jobArgs := make([]any, 0, len(jobs)*2)
+	for _, job := range jobs {
+		jobPredicates = append(jobPredicates, "(id = ? AND prune_version = ?)")
+		jobArgs = append(jobArgs, job.ID, job.PruneVersion)
+	}
+	jobWhere := "status = ? AND (" + strings.Join(jobPredicates, " OR ") + ")"
+	jobWhereArgs := append([]any{models.JobStatusOrganized}, jobArgs...)
+	eligibleJobs := tx.Model(&models.Job{}).Select("id").Where(jobWhere, jobWhereArgs...)
+	for start := 0; start < len(ops); start += pruneDeleteBatchSize {
+		end := start + pruneDeleteBatchSize
+		if end > len(ops) {
+			end = len(ops)
+		}
+		opPredicates := make([]string, 0, end-start)
+		opArgs := make([]any, 0, (end-start)*2)
+		for _, op := range ops[start:end] {
+			opPredicates = append(opPredicates, "(id = ? AND updated_at = ?)")
+			opArgs = append(opArgs, op.ID, op.UpdatedAt)
+		}
+		opWhere := "(" + strings.Join(opPredicates, " OR ") + ") AND batch_job_id IN (?)"
+		if err := tx.Where(opWhere, append(opArgs, eligibleJobs)...).Delete(&models.BatchFileOperation{}).Error; err != nil {
+			return wrapDBErr("delete", "organized job operations", err)
+		}
+	}
+	if err := tx.Where("id IN (?) AND NOT EXISTS (SELECT 1 FROM batch_file_operations WHERE batch_job_id = jobs.id)", eligibleJobs).Delete(&models.Job{}).Error; err != nil {
+		return wrapDBErr("delete", "organized jobs", err)
+	}
+	return nil
 }
 
 func hasReplacementLedger(ops []models.BatchFileOperation) bool {

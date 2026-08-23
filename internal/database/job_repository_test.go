@@ -3,12 +3,14 @@ package database
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func TestJobRepository_UpdateUpsert_Nil(t *testing.T) {
@@ -16,6 +18,40 @@ func TestJobRepository_UpdateUpsert_Nil(t *testing.T) {
 	repo := NewJobRepository(db)
 	require.Error(t, repo.Update(context.Background(), nil))
 	require.Error(t, repo.Upsert(context.Background(), nil))
+}
+
+func TestJobRepository_UpsertVersioned_PluckFailure(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewJobRepository(db)
+	job := &models.Job{ID: "versioned-pluck-failure", Status: models.JobStatusOrganized, Files: "[]", StartedAt: time.Now().UTC()}
+	require.NoError(t, repo.Create(context.Background(), job))
+	ctx, cancel := context.WithCancel(context.Background())
+	fired := false
+	const callbackName = "test:cancel_job_prune_pluck"
+	require.NoError(t, db.DB.Callback().Update().After("gorm:update").Register(callbackName, func(tx *gorm.DB) {
+		if !fired && tx.Statement != nil && tx.Statement.Schema != nil && tx.Statement.Schema.Table == "jobs" {
+			fired = true
+			cancel()
+		}
+	}))
+	defer func() { _ = db.DB.Callback().Update().Remove(callbackName) }()
+
+	loaded, err := repo.FindByID(context.Background(), job.ID)
+	require.NoError(t, err)
+	err = repo.Upsert(ctx, loaded)
+	require.Error(t, err)
+}
+
+func TestJobRepository_UpsertVersionedNewAndExisting(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewJobRepository(db)
+	job := &models.Job{ID: "versioned-upsert", Status: models.JobStatusOrganized, Files: "[]", StartedAt: time.Now().UTC()}
+	require.NoError(t, repo.Upsert(context.Background(), job))
+	require.Zero(t, job.PruneVersion)
+	loaded, err := repo.FindByID(context.Background(), job.ID)
+	require.NoError(t, err)
+	require.NoError(t, repo.Upsert(context.Background(), loaded))
+	require.Equal(t, uint64(1), loaded.PruneVersion)
 }
 
 func TestJobRepository_Create(t *testing.T) {
@@ -335,6 +371,20 @@ func TestJobRepository_DeleteOrganizedOlderThan_VersionFenceKeepsConcurrentMutat
 	gotOp, err := opRepo.FindByID(context.Background(), op.ID)
 	require.NoError(t, err, "a concurrently mutated operation must not be deleted")
 	require.Equal(t, "/fence/concurrent-dest", gotOp.NewPath)
+}
+
+func TestJobRepository_DeleteOrganizedOlderThan_BatchesLargeRetentionSet(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewJobRepository(db)
+	organizedAt := time.Now().UTC().Add(-48 * time.Hour)
+	for i := 0; i < 401; i++ {
+		job := &models.Job{ID: fmt.Sprintf("organized-batch-%03d", i), Status: models.JobStatusOrganized, StartedAt: organizedAt, OrganizedAt: &organizedAt}
+		require.NoError(t, repo.Create(context.Background(), job))
+	}
+	require.NoError(t, repo.DeleteOrganizedOlderThan(context.Background(), time.Now().UTC().Add(-24*time.Hour)))
+	jobs, err := repo.List(context.Background())
+	require.NoError(t, err)
+	require.Empty(t, jobs)
 }
 
 func ptrTime(t time.Time) *time.Time {
