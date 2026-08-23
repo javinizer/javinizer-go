@@ -58,6 +58,7 @@ func (r *JobRepository) Create(ctx context.Context, job *models.Job) error {
 
 // Update saves all fields of the given job record.
 func (r *JobRepository) Update(ctx context.Context, job *models.Job) error {
+	job.PruneVersion++
 	if err := r.GetDB().WithContext(ctx).Save(job).Error; err != nil {
 		return wrapDBErr("update", fmt.Sprintf("job %s", job.ID), err)
 	}
@@ -66,6 +67,7 @@ func (r *JobRepository) Update(ctx context.Context, job *models.Job) error {
 
 // Upsert inserts or replaces the given job record by primary key.
 func (r *JobRepository) Upsert(ctx context.Context, job *models.Job) error {
+	job.PruneVersion++
 	if err := r.GetDB().WithContext(ctx).Save(job).Error; err != nil {
 		return wrapDBErr("upsert", fmt.Sprintf("job %s", job.ID), err)
 	}
@@ -113,6 +115,9 @@ func (r *JobRepository) DeleteOrganizedOlderThan(ctx context.Context, date time.
 	if err != nil {
 		return err
 	}
+	if len(prunedJobs) == 0 {
+		return nil
+	}
 
 	hook := r.organizedJobPruneHook()
 	if hasReplacementLedger(prunedOps) && hook == nil {
@@ -124,15 +129,32 @@ func (r *JobRepository) DeleteOrganizedOlderThan(ctx context.Context, date time.
 		}
 	}
 
-	jobIDs := make([]string, 0, len(prunedJobs))
+	// Re-apply both job and operation UpdatedAt snapshots at deletion time.
+	// A concurrent revert/edit changes one of these versions and makes the
+	// eligible predicate empty, so cleanup never deletes a row it did not see.
+	jobPredicates := make([]string, 0, len(prunedJobs))
+	jobArgs := make([]any, 0, len(prunedJobs)*2)
 	for _, job := range prunedJobs {
-		jobIDs = append(jobIDs, job.ID)
+		jobPredicates = append(jobPredicates, "(id = ? AND prune_version = ?)")
+		jobArgs = append(jobArgs, job.ID, job.PruneVersion)
+	}
+	opPredicates := make([]string, 0, len(prunedOps))
+	opArgs := make([]any, 0, len(prunedOps)*2)
+	for _, op := range prunedOps {
+		opPredicates = append(opPredicates, "(id = ? AND updated_at = ?)")
+		opArgs = append(opArgs, op.ID, op.UpdatedAt)
 	}
 	return r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("batch_job_id IN ?", jobIDs).Delete(&models.BatchFileOperation{}).Error; err != nil {
-			return wrapDBErr("delete", "organized job operations", err)
+		jobWhere := "status = ? AND (" + strings.Join(jobPredicates, " OR ") + ")"
+		jobWhereArgs := append([]any{models.JobStatusOrganized}, jobArgs...)
+		eligibleJobs := tx.Model(&models.Job{}).Select("id").Where(jobWhere, jobWhereArgs...)
+		if len(opPredicates) > 0 {
+			opWhere := "(" + strings.Join(opPredicates, " OR ") + ") AND batch_job_id IN (?)"
+			if err := tx.Where(opWhere, append(opArgs, eligibleJobs)...).Delete(&models.BatchFileOperation{}).Error; err != nil {
+				return wrapDBErr("delete", "organized job operations", err)
+			}
 		}
-		if err := tx.Where("id IN ?", jobIDs).Delete(&models.Job{}).Error; err != nil {
+		if err := tx.Where("id IN (?)", eligibleJobs).Delete(&models.Job{}).Error; err != nil {
 			return wrapDBErr("delete", "organized jobs", err)
 		}
 		return nil
@@ -141,7 +163,11 @@ func (r *JobRepository) DeleteOrganizedOlderThan(ctx context.Context, date time.
 
 func hasReplacementLedger(ops []models.BatchFileOperation) bool {
 	for _, op := range ops {
-		if strings.Contains(op.GeneratedFiles, `"replacements"`) {
+		if strings.TrimSpace(op.GeneratedFiles) == "" {
+			continue
+		}
+		gf, err := models.ParseGeneratedFiles(op.GeneratedFiles)
+		if err != nil || len(gf.Replacements) > 0 {
 			return true
 		}
 	}

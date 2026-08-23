@@ -495,14 +495,20 @@ func (s *ReplacementSweeper) PruneOperationBackups(ctx context.Context, ops []mo
 				errs = append(errs, fmt.Errorf("claim destination %s: busy-marker provenance unavailable", entry.Destination))
 				continue
 			}
-			if err := ctx.Err(); err != nil {
+			claim, untrack := recordSweepBusyClaim(ctx, s.fs, entry.Destination, busyToken, busyRelease)
+			rawRelease := fsutil.SharedDestLocks().Acquire(entry.Destination)
+			if !claim.bindDestLock(rawRelease) {
+				rawRelease()
+				untrack()
+				claim.releaseAdmit()
 				busyRelease()
-				errs = append(errs, err)
-				return errors.Join(errs...)
+				errs = append(errs, fmt.Errorf("claim destination %s was revoked before cleanup", entry.Destination))
+				continue
 			}
-			release := fsutil.SharedDestLocks().Acquire(entry.Destination)
-			wasConsumed, pruneErr := s.pruneOperationBackup(ctx, entry, candidateIDs)
-			release()
+			wasConsumed, pruneErr := s.pruneOperationBackup(ctx, ops[i].ID, entry, candidateIDs, claim)
+			claim.releaseAdmit()
+			claim.releaseDestLock()
+			untrack()
 			busyRelease()
 			if wasConsumed {
 				markConsumed(ops[i].ID, entry.Backup)
@@ -570,7 +576,12 @@ func (s *ReplacementSweeper) retractConsumedEntries(consumed map[uint]map[string
 // pruneOperationBackup rechecks all live ledger rows while the destination
 // locks are held. Candidate rows are ignored because they are the rows this
 // pre-delete cleanup is about to retire; any other row keeps the backup alive.
-func (s *ReplacementSweeper) pruneOperationBackup(ctx context.Context, entry models.ReplacementEntry, candidateIDs map[uint]struct{}) (bool, error) {
+func (s *ReplacementSweeper) pruneOperationBackup(ctx context.Context, opID uint, entry models.ReplacementEntry, candidateIDs map[uint]struct{}, claim *sweepBusyMarkerClaim) (bool, error) {
+	defer func() {
+		if claim != nil {
+			claim.releaseAdmit()
+		}
+	}()
 	rows, err := s.repo.FindOperationsWithLedger(ctx)
 	if err != nil {
 		return false, fmt.Errorf("read live ledger: %w", err)
@@ -594,6 +605,9 @@ func (s *ReplacementSweeper) pruneOperationBackup(ctx context.Context, entry mod
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
+	if claim != nil && claim.abandonIfRevoked("prune backup quarantine", entry.Backup, entry.Destination) {
+		return false, fsutil.ErrReplacementBusy
+	}
 	hold, err := quarantineReplacementBackupForRemoval(s.fs, entry.Backup, "organized-job prune", &entry, nil)
 	if err != nil {
 		return false, err
@@ -602,12 +616,53 @@ func (s *ReplacementSweeper) pruneOperationBackup(ctx context.Context, entry mod
 		return true, nil
 	}
 	if err := ctx.Err(); err != nil {
-		return false, errors.Join(err, hold.restore())
+		return false, s.joinPruneRestoreFailure(opID, entry, hold, err)
+	}
+	if claim != nil && claim.abandonIfRevoked("prune backup unlink", entry.Backup, entry.Destination) {
+		return false, s.joinPruneRestoreFailure(opID, entry, hold, fsutil.ErrReplacementBusy)
 	}
 	if err := hold.removeVerified(); err != nil {
+		if hold.moved {
+			return false, errors.Join(err, s.persistPruneQuarantine(opID, entry, hold.quarantine))
+		}
 		return false, err
 	}
 	return true, nil
+}
+
+// joinPruneRestoreFailure retains a durable ledger pointer to the quarantine
+// name when compensation cannot restore the original backup name.
+func (s *ReplacementSweeper) joinPruneRestoreFailure(opID uint, entry models.ReplacementEntry, hold *replacementBackupQuarantine, cause error) error {
+	if restoreErr := hold.restore(); restoreErr != nil {
+		return errors.Join(cause, restoreErr, s.persistPruneQuarantine(opID, entry, hold.quarantine))
+	}
+	return cause
+}
+
+// persistPruneQuarantine moves the durable ledger pointer to the recoverable
+// quarantine object and marks cleanup pending so a later retry never treats a
+// missing original name as already consumed.
+func (s *ReplacementSweeper) persistPruneQuarantine(opID uint, original models.ReplacementEntry, quarantine string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	release := fsutil.SharedJournalLocks().Acquire(strconv.Itoa(int(opID)))
+	defer release()
+	err := s.repo.UpdateJournalInTx(ctx, opID, func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
+		gf, err := models.ParseGeneratedFiles(current.GeneratedFiles)
+		if err != nil {
+			return models.GeneratedFilesJSON{}, false, err
+		}
+		for i := range gf.Replacements {
+			if sweepSlash(gf.Replacements[i].Backup) != sweepSlash(original.Backup) || sweepSlash(gf.Replacements[i].Destination) != sweepSlash(original.Destination) {
+				continue
+			}
+			gf.Replacements[i].Backup = quarantine
+			gf.Replacements[i].SetRestorePending(models.RestorePendingKindClean)
+			return gf, true, nil
+		}
+		return gf, false, nil
+	})
+	return err
 }
 
 // rememberPendingRemoval records the in-process cleanup authorization with

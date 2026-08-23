@@ -296,8 +296,38 @@ func TestJobRepository_DeleteOrganizedOlderThan_ReplacementHookRequired(t *testi
 	err := repo.DeleteOrganizedOlderThan(context.Background(), time.Now().UTC().Add(-24*time.Hour))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "cleanup hook is not configured")
+	assert.True(t, hasReplacementLedger([]models.BatchFileOperation{{GeneratedFiles: `{"Replacements":[{"backup":"/x"}]}`}}))
+	assert.True(t, hasReplacementLedger([]models.BatchFileOperation{{GeneratedFiles: "not-json"}}))
 	_, err = repo.FindByID(context.Background(), job.ID)
 	require.NoError(t, err)
+}
+
+func TestJobRepository_DeleteOrganizedOlderThan_VersionFenceKeepsConcurrentMutation(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewJobRepository(db)
+	opRepo := NewBatchFileOperationRepository(db)
+	organizedAt := time.Now().UTC().Add(-48 * time.Hour)
+	job := &models.Job{ID: "organized-version-fence", Status: models.JobStatusOrganized, StartedAt: organizedAt, OrganizedAt: &organizedAt}
+	require.NoError(t, repo.Create(context.Background(), job))
+	op := &models.BatchFileOperation{BatchJobID: job.ID, OriginalPath: "/fence/source", NewPath: "/fence/dest", OperationType: models.OperationTypeMove}
+	require.NoError(t, opRepo.Create(context.Background(), op))
+	repo.SetOrganizedJobPruneHook(func(ctx context.Context, _ []models.BatchFileOperation) error {
+		currentJob, err := repo.FindByID(ctx, job.ID)
+		require.NoError(t, err)
+		currentJob.Progress = 0.5
+		require.NoError(t, repo.Update(ctx, currentJob))
+		currentOp, err := opRepo.FindByID(ctx, op.ID)
+		require.NoError(t, err)
+		currentOp.NewPath = "/fence/concurrent-dest"
+		return opRepo.Update(ctx, currentOp)
+	})
+
+	require.NoError(t, repo.DeleteOrganizedOlderThan(context.Background(), time.Now().UTC().Add(-24*time.Hour)))
+	_, err := repo.FindByID(context.Background(), job.ID)
+	require.NoError(t, err, "a concurrently mutated job must not be deleted")
+	gotOp, err := opRepo.FindByID(context.Background(), op.ID)
+	require.NoError(t, err, "a concurrently mutated operation must not be deleted")
+	require.Equal(t, "/fence/concurrent-dest", gotOp.NewPath)
 }
 
 func ptrTime(t time.Time) *time.Time {

@@ -438,6 +438,22 @@ func (r *cancelPruneLedgerRepo) FindOperationsWithLedger(ctx context.Context) ([
 	return rows, err
 }
 
+type revokeOnLedgerRepo struct {
+	*p3OpRepo
+	dest string
+}
+
+func (r *revokeOnLedgerRepo) FindOperationsWithLedger(ctx context.Context) ([]models.BatchFileOperation, error) {
+	rows, err := r.p3OpRepo.FindOperationsWithLedger(ctx)
+	key := sweepBusyClaims.resolver.Key(r.dest)
+	sweepBusyClaims.mu.Lock()
+	if claim := sweepBusyClaims.byDest[key]; claim != nil {
+		claim.revoke()
+	}
+	sweepBusyClaims.mu.Unlock()
+	return rows, err
+}
+
 func installedPruneCandidate(t *testing.T, repo *p3OpRepo, jobID, movieID, dest, backup string) *models.BatchFileOperation {
 	t.Helper()
 	op := journalRow(t, repo, jobID, movieID, dest, backup, 1, models.RevertStatusApplied)
@@ -502,14 +518,21 @@ func TestReplacementSweeper_PruneOperationBackups_ErrorBranches(t *testing.T) {
 
 type cancelOnPruneQuarantineFs struct {
 	afero.Fs
-	cancel context.CancelFunc
-	fired  bool
+	cancel     context.CancelFunc
+	fired      bool
+	plantPath  string
+	plantBytes []byte
 }
 
 func (f *cancelOnPruneQuarantineFs) Rename(oldname, newname string) error {
 	err := f.Fs.Rename(oldname, newname)
-	if err == nil && !f.fired && strings.Contains(newname, backupQuarantineSuffix) {
+	if err == nil && !f.fired && strings.Contains(newname, backupQuarantineSuffix) && !strings.Contains(oldname, backupQuarantineSuffix) {
 		f.fired = true
+		if f.plantPath != "" {
+			if werr := afero.WriteFile(f.Fs, f.plantPath, f.plantBytes, 0o644); werr != nil {
+				return werr
+			}
+		}
 		f.cancel()
 	}
 	return err
@@ -548,6 +571,37 @@ func TestReplacementSweeper_PruneOperationBackups_CancellationAfterQuarantine(t 
 	exists, statErr := afero.Exists(fs, backup)
 	require.NoError(t, statErr)
 	require.True(t, exists, "cancellation after quarantine must restore the backup name")
+}
+
+func TestReplacementSweeper_PruneOperationBackups_PersistsQuarantineAfterRestoreRefusal(t *testing.T) {
+	base := afero.NewMemMapFs()
+	ctx, cancel := context.WithCancel(context.Background())
+	dest := "/out/PRUNE-QUAR-PERSIST/poster.jpg"
+	backup := dest + ".dlbak." + p3HexA
+	fs := &cancelOnPruneQuarantineFs{Fs: base, cancel: cancel, plantPath: backup, plantBytes: []byte("foreign")}
+	require.NoError(t, fs.MkdirAll("/out/PRUNE-QUAR-PERSIST", 0o755))
+	require.NoError(t, afero.WriteFile(fs, dest, []byte("current"), 0o644))
+	require.NoError(t, afero.WriteFile(fs, backup, []byte("old"), 0o644))
+	repo := newP3OpRepo()
+	op := journalRow(t, repo, "job-quar-persist", "PRUNE-QUAR-PERSIST", dest, backup, 1, models.RevertStatusApplied)
+	gf, err := models.ParseGeneratedFiles(op.GeneratedFiles)
+	require.NoError(t, err)
+	gf.Replacements[0].Installed = true
+	op.GeneratedFiles = models.MarshalLedgerJSON(gf)
+	require.NoError(t, repo.Update(context.Background(), op))
+
+	err = NewReplacementSweeper(fs, repo).PruneOperationBackups(ctx, []models.BatchFileOperation{*op})
+	require.ErrorIs(t, err, context.Canceled)
+	row, findErr := repo.FindByID(context.Background(), op.ID)
+	require.NoError(t, findErr)
+	gf, parseErr := models.ParseGeneratedFiles(row.GeneratedFiles)
+	require.NoError(t, parseErr)
+	require.Len(t, gf.Replacements, 1)
+	require.True(t, gf.Replacements[0].RestorePending)
+	require.Contains(t, gf.Replacements[0].Backup, backupQuarantineSuffix)
+	foreign, readErr := afero.ReadFile(fs, backup)
+	require.NoError(t, readErr)
+	require.Equal(t, "foreign", string(foreign))
 }
 
 func TestReplacementSweeper_RetractConsumedEntries_Branches(t *testing.T) {
@@ -622,6 +676,82 @@ func TestReplacementSweeper_PruneOperationBackups_RetractionFailureSurfaces(t *t
 
 	err := NewReplacementSweeper(fs, repo).PruneOperationBackups(context.Background(), []models.BatchFileOperation{*op})
 	require.Contains(t, err.Error(), "retract consumed entries")
+}
+
+func TestJobRepository_PruneHookFilesystemIntegration(t *testing.T) {
+	db, err := database.New(&database.Config{Type: "sqlite", DSN: ":memory:", LogLevel: "silent"})
+	require.NoError(t, err)
+	defer db.Close()
+	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
+	repos := db.Repositories()
+	setter, ok := repos.JobRepo.(interface {
+		SetOrganizedJobPruneHook(func(context.Context, []models.BatchFileOperation) error)
+	})
+	require.True(t, ok)
+	fs := afero.NewMemMapFs()
+	sweeper := NewReplacementSweeper(fs, repos.BatchFileOpRepo)
+	setter.SetOrganizedJobPruneHook(sweeper.PruneOperationBackups)
+
+	organizedAt := time.Now().UTC().Add(-48 * time.Hour)
+	job := &models.Job{ID: "integration-prune-job", Status: models.JobStatusOrganized, StartedAt: organizedAt, OrganizedAt: &organizedAt}
+	require.NoError(t, repos.JobRepo.Create(context.Background(), job))
+	dest := "/out/INTEGRATION/poster.jpg"
+	backup := dest + ".dlbak." + p3HexA
+	require.NoError(t, fs.MkdirAll("/out/INTEGRATION", 0o755))
+	require.NoError(t, afero.WriteFile(fs, dest, []byte("current"), 0o644))
+	require.NoError(t, afero.WriteFile(fs, backup, []byte("old"), 0o644))
+	raw := models.MarshalLedgerJSON(models.GeneratedFilesJSON{Replacements: []models.ReplacementEntry{{Destination: dest, Backup: backup, Installed: true}}})
+	op := &models.BatchFileOperation{BatchJobID: job.ID, OriginalPath: "/src/integration.mkv", NewPath: dest, OperationType: models.OperationTypeUpdate, GeneratedFiles: raw}
+	require.NoError(t, repos.BatchFileOpRepo.Create(context.Background(), op))
+
+	require.NoError(t, repos.JobRepo.DeleteOrganizedOlderThan(context.Background(), time.Now().UTC().Add(-24*time.Hour)))
+	_, err = repos.JobRepo.FindByID(context.Background(), job.ID)
+	require.Error(t, err)
+	_, err = repos.BatchFileOpRepo.FindByID(context.Background(), op.ID)
+	require.Error(t, err)
+	exists, statErr := afero.Exists(fs, backup)
+	require.NoError(t, statErr)
+	require.False(t, exists, "the real repository hook must consume the final unreferenced backup")
+}
+
+func TestReplacementSweeper_PruneOperationBackups_RevokedBeforeQuarantine(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	base := newP3OpRepo()
+	dest := "/out/PRUNE-REVOKE/poster.jpg"
+	backup := dest + ".dlbak." + p3HexA
+	op := installedPruneCandidate(t, base, "job-revoke", "PRUNE-REVOKE", dest, backup)
+	repo := &revokeOnLedgerRepo{p3OpRepo: base, dest: dest}
+
+	err := NewReplacementSweeper(fs, repo).PruneOperationBackups(context.Background(), []models.BatchFileOperation{*op})
+	require.ErrorIs(t, err, fsutil.ErrReplacementBusy)
+}
+
+func TestReplacementSweeper_PruneOperationBackups_RevokedBeforeBind(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	repo := newP3OpRepo()
+	dest := "/out/PRUNE-REVOKE-BIND/poster.jpg"
+	backup := dest + ".dlbak." + p3HexA
+	op := installedPruneCandidate(t, repo, "job-revoke-bind", "PRUNE-REVOKE-BIND", dest, backup)
+	acquired := make(chan struct{})
+	prev := acquireReplacementBusyExFn
+	acquireReplacementBusyExFn = func(_ afero.Fs, _ string) (func(), string, error) {
+		close(acquired)
+		return func() {}, "token", nil
+	}
+	t.Cleanup(func() { acquireReplacementBusyExFn = prev })
+	lockRelease := fsutil.SharedDestLocks().Acquire(dest)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- NewReplacementSweeper(fs, repo).PruneOperationBackups(ctx, []models.BatchFileOperation{*op})
+	}()
+	<-acquired
+	cancel()
+	require.Eventually(t, func() bool { return reclaimAbandonedSweepBusyMarker(dest) }, time.Second, time.Millisecond)
+	lockRelease()
+	err := <-errCh
+	require.Contains(t, err.Error(), "revoked")
 }
 
 func mustRead2(t *testing.T, fs afero.Fs, path string) []byte {

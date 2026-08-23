@@ -40,6 +40,7 @@ func (s JobStatus) Value() (driver.Value, error) { return StringEnumValue(string
 // Job represents a background processing job persisted in the database.
 type Job struct {
 	ID                    string                      `json:"id" gorm:"primaryKey"`
+	PruneVersion          uint64                      `json:"-" gorm:"not null;default:0"`
 	Status                JobStatus                   `json:"status" gorm:"index"`
 	TotalFiles            int                         `json:"total_files"`
 	Completed             int                         `json:"completed"`
