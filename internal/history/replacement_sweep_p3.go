@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/fsutil"
@@ -438,35 +439,9 @@ func NewReplacementSweeper(fs afero.Fs, repo database.BatchFileOperationReposito
 	return &ReplacementSweeper{fs: fs, repo: repo, pendingRemovals: map[string]string{}}
 }
 
-// PruneOperationBackupsError reports a cleanup failure together with the
-// replacement entries already consumed before the failure. The database layer
-// uses that progress to restore only still-live ledger entries.
-type PruneOperationBackupsError struct {
-	err      error
-	consumed map[uint]map[string]struct{}
-}
-
-func (e *PruneOperationBackupsError) Error() string { return e.err.Error() }
-func (e *PruneOperationBackupsError) Unwrap() error { return e.err }
-
-// ConsumedBackups returns operation ID → raw backup spelling for entries that
-// were already absent or successfully removed before another entry failed.
-func (e *PruneOperationBackupsError) ConsumedBackups() map[uint]map[string]struct{} {
-	out := make(map[uint]map[string]struct{}, len(e.consumed))
-	for opID, backups := range e.consumed {
-		out[opID] = make(map[string]struct{}, len(backups))
-		for backup := range backups {
-			out[opID][backup] = struct{}{}
-		}
-	}
-	return out
-}
-
 // PruneOperationBackups removes replacement backups belonging to operation rows
-// that have just been pruned. The database deletion is already committed when
-// this hook runs; each destination claims the cross-process busy marker, then
-// takes the process-local lock and re-reads the live ledger before an
-// identity-bound unlink.
+// that are about to be pruned. The caller keeps those rows live until this hook
+// succeeds, so a crash or failed cleanup leaves durable ledger ownership.
 func (s *ReplacementSweeper) PruneOperationBackups(ctx context.Context, ops []models.BatchFileOperation) error {
 	if len(ops) == 0 {
 		return nil
@@ -475,6 +450,10 @@ func (s *ReplacementSweeper) PruneOperationBackups(ctx context.Context, ops []mo
 		return fmt.Errorf("prune operation backups: sweeper is not configured")
 	}
 
+	candidateIDs := make(map[uint]struct{}, len(ops))
+	for _, op := range ops {
+		candidateIDs[op.ID] = struct{}{}
+	}
 	var errs []error
 	consumed := make(map[uint]map[string]struct{})
 	markConsumed := func(opID uint, backup string) {
@@ -501,7 +480,7 @@ func (s *ReplacementSweeper) PruneOperationBackups(ctx context.Context, ops []mo
 			}
 			if err := ctx.Err(); err != nil {
 				errs = append(errs, err)
-				return &PruneOperationBackupsError{err: errors.Join(errs...), consumed: consumed}
+				return errors.Join(errs...)
 			}
 
 			busyRelease, busyToken, busyErr := acquireReplacementBusyExFn(s.fs, entry.Destination)
@@ -519,10 +498,10 @@ func (s *ReplacementSweeper) PruneOperationBackups(ctx context.Context, ops []mo
 			if err := ctx.Err(); err != nil {
 				busyRelease()
 				errs = append(errs, err)
-				return &PruneOperationBackupsError{err: errors.Join(errs...), consumed: consumed}
+				return errors.Join(errs...)
 			}
 			release := fsutil.SharedDestLocks().Acquire(entry.Destination)
-			wasConsumed, pruneErr := s.pruneOperationBackup(ctx, entry)
+			wasConsumed, pruneErr := s.pruneOperationBackup(ctx, entry, candidateIDs)
 			release()
 			busyRelease()
 			if wasConsumed {
@@ -536,19 +515,71 @@ func (s *ReplacementSweeper) PruneOperationBackups(ctx context.Context, ops []mo
 	if len(errs) == 0 {
 		return nil
 	}
-	return &PruneOperationBackupsError{err: errors.Join(errs...), consumed: consumed}
+	if err := s.retractConsumedEntries(consumed, candidateIDs); err != nil {
+		errs = append(errs, err)
+	}
+	return errors.Join(errs...)
+}
+
+// retractConsumedEntries removes already-consumed backup entries from every
+// candidate row, including another row that shared the same backup spelling.
+// The journal RMW is durable and serialized with ordinary journal writers.
+func (s *ReplacementSweeper) retractConsumedEntries(consumed map[uint]map[string]struct{}, candidateIDs map[uint]struct{}) error {
+	if len(consumed) == 0 || len(candidateIDs) == 0 {
+		return nil
+	}
+	want := make(map[string]struct{})
+	for _, backups := range consumed {
+		for backup := range backups {
+			want[sweepSlash(backup)] = struct{}{}
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	var errs []error
+	for opID := range candidateIDs {
+		release := fsutil.SharedJournalLocks().Acquire(strconv.Itoa(int(opID)))
+		err := s.repo.UpdateJournalInTx(ctx, opID, func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
+			gf, err := models.ParseGeneratedFiles(current.GeneratedFiles)
+			if err != nil {
+				return models.GeneratedFilesJSON{}, false, err
+			}
+			kept := gf.Replacements[:0]
+			for _, entry := range gf.Replacements {
+				if _, remove := want[sweepSlash(entry.Backup)]; !remove {
+					kept = append(kept, entry)
+				}
+			}
+			if len(kept) == len(gf.Replacements) {
+				return gf, false, nil
+			}
+			gf.Replacements = kept
+			return gf, true, nil
+		})
+		release()
+		if errors.Is(err, database.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			errs = append(errs, fmt.Errorf("retract consumed entries for operation %d: %w", opID, err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // pruneOperationBackup rechecks all live ledger rows while the destination
-// locks are held. A shared backup name is retained if any row still references
-// it; otherwise the normal identity-bound quarantine/unlink path consumes it.
-func (s *ReplacementSweeper) pruneOperationBackup(ctx context.Context, entry models.ReplacementEntry) (bool, error) {
+// locks are held. Candidate rows are ignored because they are the rows this
+// pre-delete cleanup is about to retire; any other row keeps the backup alive.
+func (s *ReplacementSweeper) pruneOperationBackup(ctx context.Context, entry models.ReplacementEntry, candidateIDs map[uint]struct{}) (bool, error) {
 	rows, err := s.repo.FindOperationsWithLedger(ctx)
 	if err != nil {
 		return false, fmt.Errorf("read live ledger: %w", err)
 	}
 	want := sweepSlash(entry.Backup)
 	for i := range rows {
+		if _, candidate := candidateIDs[rows[i].ID]; candidate {
+			continue
+		}
 		gf, parseErr := models.ParseGeneratedFiles(rows[i].GeneratedFiles)
 		if parseErr != nil {
 			return false, fmt.Errorf("cannot prove backup %s is unreferenced by operation %d: %w", entry.Backup, rows[i].ID, parseErr)

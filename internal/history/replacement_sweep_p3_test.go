@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/spf13/afero"
@@ -332,7 +333,6 @@ func TestReplacementSweeper_PruneOperationBackups_ReportsConsumedProgress(t *tes
 	}})
 	op := &models.BatchFileOperation{BatchJobID: "job-partial", MovieID: "PRUNE-PARTIAL", GeneratedFiles: raw, RevertStatus: models.RevertStatusApplied}
 	require.NoError(t, repo.Create(context.Background(), op))
-	delete(repo.ops, op.ID)
 
 	prev := acquireReplacementBusyExFn
 	acquireReplacementBusyExFn = func(fsys afero.Fs, dest string) (func(), string, error) {
@@ -344,12 +344,13 @@ func TestReplacementSweeper_PruneOperationBackups_ReportsConsumedProgress(t *tes
 	t.Cleanup(func() { acquireReplacementBusyExFn = prev })
 
 	err := NewReplacementSweeper(fs, repo).PruneOperationBackups(context.Background(), []models.BatchFileOperation{*op})
-	var pruneErr *PruneOperationBackupsError
-	require.ErrorAs(t, err, &pruneErr)
-	require.NotEmpty(t, pruneErr.Error())
-	consumed := pruneErr.ConsumedBackups()
-	require.Contains(t, consumed[op.ID], backupA)
-	require.NotContains(t, consumed[op.ID], backupB)
+	require.ErrorIs(t, err, fsutil.ErrReplacementBusy)
+	row, findErr := repo.FindByID(context.Background(), op.ID)
+	require.NoError(t, findErr)
+	gf, parseErr := models.ParseGeneratedFiles(row.GeneratedFiles)
+	require.NoError(t, parseErr)
+	require.Len(t, gf.Replacements, 1)
+	require.Equal(t, backupB, gf.Replacements[0].Backup, "partial cleanup retracts the consumed shared ledger entry")
 	existsA, statErr := afero.Exists(fs, backupA)
 	require.NoError(t, statErr)
 	require.False(t, existsA)
@@ -547,6 +548,80 @@ func TestReplacementSweeper_PruneOperationBackups_CancellationAfterQuarantine(t 
 	exists, statErr := afero.Exists(fs, backup)
 	require.NoError(t, statErr)
 	require.True(t, exists, "cancellation after quarantine must restore the backup name")
+}
+
+func TestReplacementSweeper_RetractConsumedEntries_Branches(t *testing.T) {
+	repo := newP3OpRepo()
+	destA := "/out/RETRACT/a.jpg"
+	backupA := destA + ".dlbak." + p3HexA
+	destB := "/out/RETRACT/b.jpg"
+	backupB := destB + ".dlbak." + p3HexB
+	opA := &models.BatchFileOperation{BatchJobID: "retract-a", GeneratedFiles: models.MarshalLedgerJSON(models.GeneratedFilesJSON{Replacements: []models.ReplacementEntry{
+		{Destination: destA, Backup: backupA, Installed: true},
+		{Destination: destB, Backup: backupB, Installed: true},
+	}})}
+	opB := &models.BatchFileOperation{BatchJobID: "retract-b", GeneratedFiles: models.MarshalLedgerJSON(models.GeneratedFilesJSON{Replacements: []models.ReplacementEntry{{
+		Destination: "/out/RETRACT/c.jpg", Backup: "/out/RETRACT/c.jpg.dlbak." + p3HexC, Installed: true,
+	}}})}
+	bad := &models.BatchFileOperation{BatchJobID: "retract-bad", GeneratedFiles: `{"replacements":broken`}
+	require.NoError(t, repo.Create(context.Background(), opA))
+	require.NoError(t, repo.Create(context.Background(), opB))
+	require.NoError(t, repo.Create(context.Background(), bad))
+	sweeper := NewReplacementSweeper(afero.NewMemMapFs(), repo)
+	require.NoError(t, sweeper.retractConsumedEntries(nil, map[uint]struct{}{opA.ID: {}}))
+
+	err := sweeper.retractConsumedEntries(
+		map[uint]map[string]struct{}{opA.ID: {backupA: {}}},
+		map[uint]struct{}{opA.ID: {}, opB.ID: {}, bad.ID: {}, 999: {}},
+	)
+	require.Error(t, err)
+	row, findErr := repo.FindByID(context.Background(), opA.ID)
+	require.NoError(t, findErr)
+	gf, parseErr := models.ParseGeneratedFiles(row.GeneratedFiles)
+	require.NoError(t, parseErr)
+	require.Len(t, gf.Replacements, 1)
+	require.Equal(t, backupB, gf.Replacements[0].Backup)
+}
+
+type retractErrorRepo struct {
+	*p3OpRepo
+	err error
+}
+
+func (r *retractErrorRepo) UpdateJournalInTx(context.Context, uint, database.JournalUpdateFn) error {
+	return r.err
+}
+
+func TestReplacementSweeper_PruneOperationBackups_RetractionFailureSurfaces(t *testing.T) {
+	base := newP3OpRepo()
+	destA := "/out/RETRACT-FAIL/a.jpg"
+	backupA := destA + ".dlbak." + p3HexA
+	destB := "/out/RETRACT-FAIL/b.jpg"
+	backupB := destB + ".dlbak." + p3HexB
+	fs := afero.NewMemMapFs()
+	require.NoError(t, fs.MkdirAll("/out/RETRACT-FAIL", 0o755))
+	writeSweepFile(t, fs, destA, "current-a", time.Hour)
+	writeSweepFile(t, fs, backupA, "old-a", time.Hour)
+	writeSweepFile(t, fs, destB, "current-b", time.Hour)
+	writeSweepFile(t, fs, backupB, "old-b", time.Hour)
+	raw := models.MarshalLedgerJSON(models.GeneratedFilesJSON{Replacements: []models.ReplacementEntry{
+		{Destination: destA, Backup: backupA, Installed: true},
+		{Destination: destB, Backup: backupB, Installed: true},
+	}})
+	op := &models.BatchFileOperation{BatchJobID: "retract-failure", GeneratedFiles: raw, RevertStatus: models.RevertStatusApplied}
+	require.NoError(t, base.Create(context.Background(), op))
+	repo := &retractErrorRepo{p3OpRepo: base, err: errors.New("journal retraction failed")}
+	prev := acquireReplacementBusyExFn
+	acquireReplacementBusyExFn = func(fsys afero.Fs, dest string) (func(), string, error) {
+		if dest == destB {
+			return nil, "", fsutil.ErrReplacementBusy
+		}
+		return fsutil.AcquireReplacementBusyEx(fsys, dest)
+	}
+	t.Cleanup(func() { acquireReplacementBusyExFn = prev })
+
+	err := NewReplacementSweeper(fs, repo).PruneOperationBackups(context.Background(), []models.BatchFileOperation{*op})
+	require.Contains(t, err.Error(), "retract consumed entries")
 }
 
 func mustRead2(t *testing.T, fs afero.Fs, path string) []byte {
