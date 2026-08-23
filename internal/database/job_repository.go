@@ -9,6 +9,7 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/models"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // JobRepository persists and queries Job records via GORM, composing BaseRepository for common operations.
@@ -16,7 +17,7 @@ type JobRepository struct {
 	*BaseRepository[models.Job, string]
 
 	pruneMu   sync.RWMutex
-	pruneHook OrganizedJobPruneHook
+	pruneHook func(context.Context, []models.BatchFileOperation) error
 }
 
 // NewJobRepository constructs a JobRepository ordered by started_at then id for deterministic pagination.
@@ -39,13 +40,13 @@ func NewJobRepository(db *DB) *JobRepository {
 // SetOrganizedJobPruneHook installs the post-commit cleanup invoked after
 // organized jobs and their operation rows are pruned. The hook is optional so
 // database-only callers can retain the repository's original behavior.
-func (r *JobRepository) SetOrganizedJobPruneHook(hook OrganizedJobPruneHook) {
+func (r *JobRepository) SetOrganizedJobPruneHook(hook func(context.Context, []models.BatchFileOperation) error) {
 	r.pruneMu.Lock()
 	r.pruneHook = hook
 	r.pruneMu.Unlock()
 }
 
-func (r *JobRepository) organizedJobPruneHook() OrganizedJobPruneHook {
+func (r *JobRepository) organizedJobPruneHook() func(context.Context, []models.BatchFileOperation) error {
 	r.pruneMu.RLock()
 	defer r.pruneMu.RUnlock()
 	return r.pruneHook
@@ -114,11 +115,54 @@ func (r *JobRepository) DeleteOrganizedOlderThan(ctx context.Context, date time.
 	}
 	if hook := r.organizedJobPruneHook(); hook != nil && len(prunedOps) > 0 {
 		if err := hook(ctx, prunedOps); err != nil {
-			restoreErr := r.restorePrunedRows(ctx, prunedJobs, prunedOps)
+			restoreOps := pruneOpsForRestore(prunedOps, err)
+			restoreCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			restoreErr := r.restorePrunedRows(restoreCtx, prunedJobs, restoreOps)
+			cancel()
 			return errors.Join(wrapDBErr("prune", "organized job backups", err), restoreErr)
 		}
 	}
 	return nil
+}
+
+// pruneOpsForRestore removes only entries that the cleanup hook confirms were
+// already consumed. This prevents a partial filesystem cleanup from restoring
+// a stale ledger reference to bytes that no longer exist.
+func pruneOpsForRestore(ops []models.BatchFileOperation, hookErr error) []models.BatchFileOperation {
+	type consumedProgress interface {
+		ConsumedBackups() map[uint]map[string]struct{}
+	}
+	var progress consumedProgress
+	if !errors.As(hookErr, &progress) {
+		return ops
+	}
+	consumed := progress.ConsumedBackups()
+	if len(consumed) == 0 {
+		return ops
+	}
+	restored := make([]models.BatchFileOperation, len(ops))
+	copy(restored, ops)
+	for i := range restored {
+		backups := consumed[restored[i].ID]
+		if len(backups) == 0 {
+			continue
+		}
+		gf, err := models.ParseGeneratedFiles(restored[i].GeneratedFiles)
+		if err != nil {
+			continue
+		}
+		kept := gf.Replacements[:0]
+		for _, entry := range gf.Replacements {
+			if _, removed := backups[entry.Backup]; !removed {
+				kept = append(kept, entry)
+			}
+		}
+		if len(kept) != len(gf.Replacements) {
+			gf.Replacements = kept
+			restored[i].GeneratedFiles = models.MarshalLedgerJSON(gf)
+		}
+	}
+	return restored
 }
 
 // restorePrunedRows keeps the job and ledger snapshots durable when the
@@ -130,12 +174,12 @@ func (r *JobRepository) restorePrunedRows(ctx context.Context, jobs []models.Job
 	}
 	return r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		for i := range jobs {
-			if err := tx.Create(&jobs[i]).Error; err != nil {
+			if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&jobs[i]).Error; err != nil {
 				return wrapDBErr("restore", fmt.Sprintf("organized job %s", jobs[i].ID), err)
 			}
 		}
 		for i := range ops {
-			if err := tx.Create(&ops[i]).Error; err != nil {
+			if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&ops[i]).Error; err != nil {
 				return wrapDBErr("restore", fmt.Sprintf("organized job operation %d", ops[i].ID), err)
 			}
 		}

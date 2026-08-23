@@ -125,7 +125,7 @@ func withFileRecovery(rc recoveryContext, outcome recoverableOutcome) func() {
 						mr.StartedAt = rc.startTime
 						mr.EndedAt = &now
 					}
-					rc.updater.UpdateFileResult(rc.filePath, mr)
+					upsertWriteBackResultWithProvenance(rc.updater, rc.filePath, mr, rc.provenance)
 				}
 			}
 

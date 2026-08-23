@@ -375,14 +375,14 @@ func interpretApplyResult(
 				return current, mergeWriteBackProvenance(inputs.Provenance[filePath], prov), nil
 			})
 			if errUp != nil {
-				inputs.Updater.UpdateFileResult(filePath, &resultstore.MovieResult{
+				upsertWriteBackResultWithProvenance(inputs.Updater, filePath, &resultstore.MovieResult{
 					FileMatchInfo: afc.Match,
 					Movie:         movie,
 					Status:        fileStatus,
 					Error:         errMsg,
 					StartedAt:     startTime,
 					EndedAt:       &now,
-				})
+				}, inputs.Provenance[filePath])
 			}
 		}
 

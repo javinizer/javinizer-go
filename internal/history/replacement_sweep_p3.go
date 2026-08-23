@@ -438,11 +438,35 @@ func NewReplacementSweeper(fs afero.Fs, repo database.BatchFileOperationReposito
 	return &ReplacementSweeper{fs: fs, repo: repo, pendingRemovals: map[string]string{}}
 }
 
+// PruneOperationBackupsError reports a cleanup failure together with the
+// replacement entries already consumed before the failure. The database layer
+// uses that progress to restore only still-live ledger entries.
+type PruneOperationBackupsError struct {
+	err      error
+	consumed map[uint]map[string]struct{}
+}
+
+func (e *PruneOperationBackupsError) Error() string { return e.err.Error() }
+func (e *PruneOperationBackupsError) Unwrap() error { return e.err }
+
+// ConsumedBackups returns operation ID → raw backup spelling for entries that
+// were already absent or successfully removed before another entry failed.
+func (e *PruneOperationBackupsError) ConsumedBackups() map[uint]map[string]struct{} {
+	out := make(map[uint]map[string]struct{}, len(e.consumed))
+	for opID, backups := range e.consumed {
+		out[opID] = make(map[string]struct{}, len(backups))
+		for backup := range backups {
+			out[opID][backup] = struct{}{}
+		}
+	}
+	return out
+}
+
 // PruneOperationBackups removes replacement backups belonging to operation rows
 // that have just been pruned. The database deletion is already committed when
-// this hook runs; each destination is then locked and the live ledger is
-// re-read before an identity-bound unlink, so a concurrently appended row
-// keeps its shared backup alive.
+// this hook runs; each destination claims the cross-process busy marker, then
+// takes the process-local lock and re-reads the live ledger before an
+// identity-bound unlink.
 func (s *ReplacementSweeper) PruneOperationBackups(ctx context.Context, ops []models.BatchFileOperation) error {
 	if len(ops) == 0 {
 		return nil
@@ -452,6 +476,13 @@ func (s *ReplacementSweeper) PruneOperationBackups(ctx context.Context, ops []mo
 	}
 
 	var errs []error
+	consumed := make(map[uint]map[string]struct{})
+	markConsumed := func(opID uint, backup string) {
+		if consumed[opID] == nil {
+			consumed[opID] = make(map[string]struct{})
+		}
+		consumed[opID][backup] = struct{}{}
+	}
 	for i := range ops {
 		gf, err := models.ParseGeneratedFiles(ops[i].GeneratedFiles)
 		if err != nil {
@@ -469,49 +500,83 @@ func (s *ReplacementSweeper) PruneOperationBackups(ctx context.Context, ops []mo
 				continue
 			}
 			if err := ctx.Err(); err != nil {
-				return errors.Join(append(errs, err)...)
+				errs = append(errs, err)
+				return &PruneOperationBackupsError{err: errors.Join(errs...), consumed: consumed}
 			}
 
+			busyRelease, busyToken, busyErr := acquireReplacementBusyExFn(s.fs, entry.Destination)
+			if busyErr != nil {
+				errs = append(errs, fmt.Errorf("claim destination %s: %w", entry.Destination, busyErr))
+				continue
+			}
+			if busyRelease == nil || busyToken == "" {
+				if busyRelease != nil {
+					busyRelease()
+				}
+				errs = append(errs, fmt.Errorf("claim destination %s: busy-marker provenance unavailable", entry.Destination))
+				continue
+			}
+			if err := ctx.Err(); err != nil {
+				busyRelease()
+				errs = append(errs, err)
+				return &PruneOperationBackupsError{err: errors.Join(errs...), consumed: consumed}
+			}
 			release := fsutil.SharedDestLocks().Acquire(entry.Destination)
-			err := s.pruneOperationBackup(ctx, entry)
+			wasConsumed, pruneErr := s.pruneOperationBackup(ctx, entry)
 			release()
-			if err != nil {
-				errs = append(errs, fmt.Errorf("operation %d backup %s: %w", ops[i].ID, entry.Backup, err))
+			busyRelease()
+			if wasConsumed {
+				markConsumed(ops[i].ID, entry.Backup)
+			}
+			if pruneErr != nil {
+				errs = append(errs, fmt.Errorf("operation %d backup %s: %w", ops[i].ID, entry.Backup, pruneErr))
 			}
 		}
 	}
-	return errors.Join(errs...)
+	if len(errs) == 0 {
+		return nil
+	}
+	return &PruneOperationBackupsError{err: errors.Join(errs...), consumed: consumed}
 }
 
 // pruneOperationBackup rechecks all live ledger rows while the destination
-// lock is held. A shared backup name is retained if any row still references
+// locks are held. A shared backup name is retained if any row still references
 // it; otherwise the normal identity-bound quarantine/unlink path consumes it.
-func (s *ReplacementSweeper) pruneOperationBackup(ctx context.Context, entry models.ReplacementEntry) error {
+func (s *ReplacementSweeper) pruneOperationBackup(ctx context.Context, entry models.ReplacementEntry) (bool, error) {
 	rows, err := s.repo.FindOperationsWithLedger(ctx)
 	if err != nil {
-		return fmt.Errorf("read live ledger: %w", err)
+		return false, fmt.Errorf("read live ledger: %w", err)
 	}
 	want := sweepSlash(entry.Backup)
 	for i := range rows {
 		gf, parseErr := models.ParseGeneratedFiles(rows[i].GeneratedFiles)
 		if parseErr != nil {
-			return fmt.Errorf("cannot prove backup %s is unreferenced by operation %d: %w", entry.Backup, rows[i].ID, parseErr)
+			return false, fmt.Errorf("cannot prove backup %s is unreferenced by operation %d: %w", entry.Backup, rows[i].ID, parseErr)
 		}
 		for _, live := range gf.Replacements {
 			if sweepSlash(live.Backup) == want {
-				return nil
+				return false, nil
 			}
 		}
 	}
 
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
 	hold, err := quarantineReplacementBackupForRemoval(s.fs, entry.Backup, "organized-job prune", &entry, nil)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if hold == nil || hold.unlinked {
-		return nil
+		return true, nil
 	}
-	return hold.removeVerified()
+	if err := ctx.Err(); err != nil {
+		return false, errors.Join(err, hold.restore())
+	}
+	if err := hold.removeVerified(); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // rememberPendingRemoval records the in-process cleanup authorization with

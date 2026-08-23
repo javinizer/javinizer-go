@@ -86,3 +86,36 @@ func TestApplyWriteBack_FrozenProvenanceSurvivesAllPaths(t *testing.T) {
 		assertFrozenApplyProvenance(t, store)
 	})
 }
+
+func TestApplyWriteBack_MissingRowFallbackPreservesProvenance(t *testing.T) {
+	store := resultstore.New(1, []string{"/f/p5.mp4"})
+	movie := &models.Movie{ID: "P5-MISSING", Title: "phase title"}
+	frozen := frozenApplyProvenance()
+	frozen.FieldSources["title"] = "user"
+	inputs := minimalApplyInputs(t, store, false)
+	inputs.Provenance = map[string]*resultstore.ProvenanceData{"/f/p5.mp4": frozen}
+
+	outcome := interpretApplyResult("/f/p5.mp4", movie, time.Now(), 0, inputs, ApplyPhaseConfig{}, context.Background(),
+		&ApplyFileContext{FilePath: "/f/p5.mp4", Match: models.FileMatchInfo{Path: "/f/p5.mp4", MovieID: movie.ID}}, nil, errors.New("apply failed before result creation"))
+	require.True(t, outcome.Failed)
+	assertFrozenApplyProvenance(t, store)
+}
+
+func TestRecovery_MissingRowFallbackPreservesProvenance(t *testing.T) {
+	store := resultstore.New(1, []string{"/f/p5.mp4"})
+	movie := &models.Movie{ID: "P5-RECOVERY-MISSING", Title: "phase title"}
+	frozen := frozenApplyProvenance()
+	frozen.FieldSources["title"] = "user"
+	outcome := &applyFileOutcome{}
+	rc := recoveryContext{
+		filePath: "/f/p5.mp4", fmi: models.FileMatchInfo{Path: "/f/p5.mp4", MovieID: movie.ID},
+		movie: movie, provenance: frozen, updater: store,
+	}
+	func() {
+		defer withFileRecovery(rc, outcome)()
+		panic("apply panic before result creation")
+	}()
+
+	require.True(t, outcome.Panic)
+	assertFrozenApplyProvenance(t, store)
+}

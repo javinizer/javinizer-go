@@ -22,6 +22,25 @@ type resultUpdater struct {
 func (ru *resultUpdater) UpdateFileResult(filePath string, result *MovieResult) {
 	ru.mu.Lock()
 	defer ru.mu.Unlock()
+	ru.updateFileResultLocked(filePath, result)
+}
+
+// UpsertFileResultWithProvenance publishes a result and its provenance under
+// one lock acquisition. It is the missing-row fallback for callers whose
+// normal atomic read-modify-write requires an existing result.
+func (ru *resultUpdater) UpsertFileResultWithProvenance(filePath string, result *MovieResult, prov *ProvenanceData) {
+	ru.mu.Lock()
+	defer ru.mu.Unlock()
+	ru.updateFileResultLocked(filePath, result)
+	if prov != nil {
+		if ru.Provenance == nil {
+			ru.Provenance = make(map[string]*ProvenanceData)
+		}
+		ru.Provenance[filePath] = prov.Clone()
+	}
+}
+
+func (ru *resultUpdater) updateFileResultLocked(filePath string, result *MovieResult) {
 	existing := ru.Results[filePath]
 	stateReindexFilePathLocked(ru.resultTrackerState, filePath, existing, result)
 	if existing != nil {
@@ -55,7 +74,7 @@ func (ru *resultUpdater) UpdateFileResult(filePath string, result *MovieResult) 
 	// For excluded files the Completed/Failed counters are deliberately not
 	// touched above, so the counter-based helper would compute progress from
 	// stale counters and could regress after a late terminal update. Trigger a
-	// full recalculation instead, which iterates actual results and skips
+	// full recalculation instead, which iterates the Results map and skips
 	// excluded paths. Non-excluded updates keep the fast counter path.
 	if ru.Excluded[filePath] {
 		stateRecalculateProgress(ru.resultTrackerState)

@@ -148,6 +148,22 @@ func mergeWriteBackProvenance(frozen, live *resultstore.ProvenanceData) *results
 	return out
 }
 
+// upsertWriteBackResultWithProvenance keeps missing-row fallbacks atomic when
+// the concrete result store supports the lock-held upsert seam. Test doubles
+// that only implement the older interface retain the safe two-call fallback.
+func upsertWriteBackResultWithProvenance(updater resultstore.ResultUpdater, filePath string, result *resultstore.MovieResult, prov *resultstore.ProvenanceData) {
+	if atomic, ok := updater.(interface {
+		UpsertFileResultWithProvenance(string, *resultstore.MovieResult, *resultstore.ProvenanceData)
+	}); ok {
+		atomic.UpsertFileResultWithProvenance(filePath, result, prov)
+		return
+	}
+	updater.UpdateFileResult(filePath, result)
+	if prov != nil {
+		updater.SetProvenance(filePath, prov)
+	}
+}
+
 func mergeSourceMap(frozen, live map[string]string) map[string]string {
 	if len(frozen) == 0 && len(live) == 0 {
 		return nil

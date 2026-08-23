@@ -128,19 +128,6 @@ type MovieTagRepositoryInterface interface {
 // The canonical definition lives in models to avoid import cycles (scraperutil → database → config).
 type ContentIDMappingRepositoryInterface = models.ContentIDMappingRepositoryInterface
 
-// OrganizedJobPruneHook runs after DeleteOrganizedOlderThan commits its
-// job-row and operation-row deletions. It receives the deleted operation
-// snapshots so a filesystem owner can clean only backups that have no live
-// ledger references left.
-type OrganizedJobPruneHook func(context.Context, []models.BatchFileOperation) error
-
-// OrganizedJobPruneHookSetter is an optional capability of the concrete job
-// repository. It stays separate from JobRepositoryInterface so lightweight
-// repository test doubles do not need filesystem cleanup behavior.
-type OrganizedJobPruneHookSetter interface {
-	SetOrganizedJobPruneHook(OrganizedJobPruneHook)
-}
-
 // JobRepositoryInterface defines the contract for job database operations
 type JobRepositoryInterface interface {
 	Create(ctx context.Context, job *models.Job) error

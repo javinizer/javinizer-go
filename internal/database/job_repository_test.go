@@ -246,6 +246,63 @@ func TestJobRepository_DeleteOrganizedOlderThan_HookFailureRestoresRows(t *testi
 	require.NoError(t, err, "failed cleanup must restore the ledger ownership record")
 }
 
+type consumedPruneProgressTestError struct {
+	consumed map[uint]map[string]struct{}
+}
+
+func (e *consumedPruneProgressTestError) Error() string { return "partial cleanup" }
+func (e *consumedPruneProgressTestError) ConsumedBackups() map[uint]map[string]struct{} {
+	return e.consumed
+}
+
+func TestPruneOpsForRestore_RemovesConsumedEntriesOnly(t *testing.T) {
+	ops := []models.BatchFileOperation{{
+		ID: 77,
+		GeneratedFiles: models.MarshalLedgerJSON(models.GeneratedFilesJSON{Replacements: []models.ReplacementEntry{
+			{Destination: "/restore/a.jpg", Backup: "/restore/a.jpg.dlbak.a", Installed: true},
+			{Destination: "/restore/b.jpg", Backup: "/restore/b.jpg.dlbak.b", Installed: true},
+		}}),
+	}}
+	emptyProgress := &consumedPruneProgressTestError{consumed: map[uint]map[string]struct{}{}}
+	require.Equal(t, ops, pruneOpsForRestore(ops, emptyProgress))
+	hookErr := &consumedPruneProgressTestError{consumed: map[uint]map[string]struct{}{77: {"/restore/a.jpg.dlbak.a": {}}}}
+
+	restored := pruneOpsForRestore(ops, hookErr)
+	require.Len(t, restored, 1)
+	gf, err := models.ParseGeneratedFiles(restored[0].GeneratedFiles)
+	require.NoError(t, err)
+	require.Len(t, gf.Replacements, 1)
+	require.Equal(t, "/restore/b.jpg.dlbak.b", gf.Replacements[0].Backup)
+}
+
+func TestJobRepository_DeleteOrganizedOlderThan_OperationLookupFailure(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewJobRepository(db)
+	require.NoError(t, db.DB.Exec("DROP TABLE batch_file_operations").Error)
+
+	err := repo.DeleteOrganizedOlderThan(context.Background(), time.Now().UTC())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "find organized job operations")
+}
+
+func TestJobRepository_DeleteOrganizedOlderThan_OperationDeleteFailure(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewJobRepository(db)
+	organizedAt := time.Now().UTC().Add(-48 * time.Hour)
+	job := &models.Job{ID: "organized-operation-delete-failure", Status: models.JobStatusOrganized, StartedAt: organizedAt, OrganizedAt: &organizedAt}
+	require.NoError(t, repo.Create(context.Background(), job))
+	opRepo := NewBatchFileOperationRepository(db)
+	require.NoError(t, opRepo.Create(context.Background(), &models.BatchFileOperation{BatchJobID: job.ID, OriginalPath: "/failure/source", NewPath: "/failure/dest", OperationType: models.OperationTypeMove}))
+	require.NoError(t, db.DB.Exec(
+		`CREATE TRIGGER fail_pruned_operation_delete BEFORE DELETE ON batch_file_operations
+		 BEGIN SELECT RAISE(ABORT, 'forced operation delete failure'); END;`,
+	).Error)
+
+	err := repo.DeleteOrganizedOlderThan(context.Background(), time.Now().UTC().Add(-24*time.Hour))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "delete organized job operations")
+}
+
 func ptrTime(t time.Time) *time.Time {
 	return &t
 }

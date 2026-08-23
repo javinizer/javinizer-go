@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
@@ -279,6 +280,138 @@ func TestReplacementSweeper_PruneOperationBackups_RemovesOnlyUnreferenced(t *tes
 		require.NoError(t, readErr)
 		require.Equal(t, "foreign", string(got))
 	})
+}
+
+func TestReplacementSweeper_PruneOperationBackups_BusyMarkerRetainsBackup(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	repo := newP3OpRepo()
+	dest := "/out/PRUNE-BUSY/poster.jpg"
+	backup := dest + ".dlbak." + p3HexA
+	require.NoError(t, fs.MkdirAll("/out/PRUNE-BUSY", 0o755))
+	writeSweepFile(t, fs, dest, "current", time.Hour)
+	writeSweepFile(t, fs, backup, "old", time.Hour)
+	op := journalRow(t, repo, "job-pruned", "PRUNE-BUSY", dest, backup, 1, models.RevertStatusApplied)
+	gf, err := models.ParseGeneratedFiles(op.GeneratedFiles)
+	require.NoError(t, err)
+	gf.Replacements[0].Installed = true
+	op.GeneratedFiles = models.MarshalLedgerJSON(gf)
+	require.NoError(t, repo.Update(context.Background(), op))
+	delete(repo.ops, op.ID)
+
+	prev := acquireReplacementBusyExFn
+	acquireReplacementBusyExFn = func(afero.Fs, string) (func(), string, error) {
+		return nil, "", fsutil.ErrReplacementBusy
+	}
+	t.Cleanup(func() { acquireReplacementBusyExFn = prev })
+
+	err = NewReplacementSweeper(fs, repo).PruneOperationBackups(context.Background(), []models.BatchFileOperation{*op})
+	require.ErrorIs(t, err, fsutil.ErrReplacementBusy)
+	exists, statErr := afero.Exists(fs, backup)
+	require.NoError(t, statErr)
+	require.True(t, exists, "a busy destination must retain its backup")
+}
+
+func TestReplacementSweeper_PruneOperationBackups_ReportsConsumedProgress(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	repo := newP3OpRepo()
+	destA := "/out/PRUNE-PARTIAL/a.jpg"
+	backupA := destA + ".dlbak." + p3HexA
+	destB := "/out/PRUNE-PARTIAL/b.jpg"
+	backupB := destB + ".dlbak." + p3HexB
+	require.NoError(t, fs.MkdirAll("/out/PRUNE-PARTIAL", 0o755))
+	writeSweepFile(t, fs, destA, "current-a", time.Hour)
+	writeSweepFile(t, fs, backupA, "old-a", time.Hour)
+	writeSweepFile(t, fs, destB, "current-b", time.Hour)
+	writeSweepFile(t, fs, backupB, "old-b", time.Hour)
+	raw := models.MarshalLedgerJSON(models.GeneratedFilesJSON{Replacements: []models.ReplacementEntry{
+		{Destination: destA, Backup: backupA, DestSeq: 1, Installed: true},
+		{Destination: destB, Backup: backupB, DestSeq: 2, Installed: true},
+	}})
+	op := &models.BatchFileOperation{BatchJobID: "job-partial", MovieID: "PRUNE-PARTIAL", GeneratedFiles: raw, RevertStatus: models.RevertStatusApplied}
+	require.NoError(t, repo.Create(context.Background(), op))
+	delete(repo.ops, op.ID)
+
+	prev := acquireReplacementBusyExFn
+	acquireReplacementBusyExFn = func(fsys afero.Fs, dest string) (func(), string, error) {
+		if dest == destB {
+			return nil, "", fsutil.ErrReplacementBusy
+		}
+		return fsutil.AcquireReplacementBusyEx(fsys, dest)
+	}
+	t.Cleanup(func() { acquireReplacementBusyExFn = prev })
+
+	err := NewReplacementSweeper(fs, repo).PruneOperationBackups(context.Background(), []models.BatchFileOperation{*op})
+	var pruneErr *PruneOperationBackupsError
+	require.ErrorAs(t, err, &pruneErr)
+	require.NotEmpty(t, pruneErr.Error())
+	consumed := pruneErr.ConsumedBackups()
+	require.Contains(t, consumed[op.ID], backupA)
+	require.NotContains(t, consumed[op.ID], backupB)
+	existsA, statErr := afero.Exists(fs, backupA)
+	require.NoError(t, statErr)
+	require.False(t, existsA)
+	existsB, statErr := afero.Exists(fs, backupB)
+	require.NoError(t, statErr)
+	require.True(t, existsB)
+}
+
+func TestReplacementSweeper_PruneOperationBackups_EarlyBranches(t *testing.T) {
+	repo := newP3OpRepo()
+	validRaw := models.MarshalLedgerJSON(models.GeneratedFilesJSON{Replacements: []models.ReplacementEntry{{
+		Destination: "/out/EARLY/poster.jpg", Backup: "/out/EARLY/poster.jpg.dlbak." + p3HexA, Installed: true,
+	}}})
+	valid := models.BatchFileOperation{ID: 1, GeneratedFiles: validRaw}
+
+	require.NoError(t, NewReplacementSweeper(afero.NewMemMapFs(), repo).PruneOperationBackups(context.Background(), nil))
+	var nilSweeper *ReplacementSweeper
+	require.Error(t, nilSweeper.PruneOperationBackups(context.Background(), []models.BatchFileOperation{valid}))
+	require.Error(t, (&ReplacementSweeper{}).PruneOperationBackups(context.Background(), []models.BatchFileOperation{valid}))
+	require.Error(t, NewReplacementSweeper(afero.NewMemMapFs(), repo).PruneOperationBackups(context.Background(), []models.BatchFileOperation{{ID: 2, GeneratedFiles: `{"replacements":`}}))
+	incomplete := models.MarshalLedgerJSON(models.GeneratedFilesJSON{Replacements: []models.ReplacementEntry{{Destination: "/out/EARLY/poster.jpg", Installed: true}}})
+	require.Error(t, NewReplacementSweeper(afero.NewMemMapFs(), repo).PruneOperationBackups(context.Background(), []models.BatchFileOperation{{ID: 3, GeneratedFiles: incomplete}}))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	require.Error(t, NewReplacementSweeper(afero.NewMemMapFs(), repo).PruneOperationBackups(ctx, []models.BatchFileOperation{valid}))
+}
+
+func TestReplacementSweeper_PruneOperationBackups_BusyTokenUnavailable(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	repo := newP3OpRepo()
+	op := journalRow(t, repo, "job-token", "PRUNE-TOKEN", "/out/PRUNE-TOKEN/poster.jpg", "/out/PRUNE-TOKEN/poster.jpg.dlbak."+p3HexA, 1, models.RevertStatusApplied)
+	gf, err := models.ParseGeneratedFiles(op.GeneratedFiles)
+	require.NoError(t, err)
+	gf.Replacements[0].Installed = true
+	op.GeneratedFiles = models.MarshalLedgerJSON(gf)
+	require.NoError(t, repo.Update(context.Background(), op))
+	delete(repo.ops, op.ID)
+	swapBusyAcquireProvenanceUnavailable(t)
+
+	err = NewReplacementSweeper(fs, repo).PruneOperationBackups(context.Background(), []models.BatchFileOperation{*op})
+	require.Contains(t, err.Error(), "provenance unavailable")
+}
+
+func TestReplacementSweeper_PruneOperationBackups_CancellationAfterBusyClaim(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	repo := newP3OpRepo()
+	op := journalRow(t, repo, "job-cancel", "PRUNE-CANCEL", "/out/PRUNE-CANCEL/poster.jpg", "/out/PRUNE-CANCEL/poster.jpg.dlbak."+p3HexA, 1, models.RevertStatusApplied)
+	gf, err := models.ParseGeneratedFiles(op.GeneratedFiles)
+	require.NoError(t, err)
+	gf.Replacements[0].Installed = true
+	op.GeneratedFiles = models.MarshalLedgerJSON(gf)
+	require.NoError(t, repo.Update(context.Background(), op))
+	delete(repo.ops, op.ID)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	prev := acquireReplacementBusyExFn
+	acquireReplacementBusyExFn = func(_ afero.Fs, _ string) (func(), string, error) {
+		cancel()
+		return func() {}, "token", nil
+	}
+	t.Cleanup(func() { acquireReplacementBusyExFn = prev })
+
+	err = NewReplacementSweeper(fs, repo).PruneOperationBackups(ctx, []models.BatchFileOperation{*op})
+	require.ErrorIs(t, err, context.Canceled)
 }
 
 func mustRead2(t *testing.T, fs afero.Fs, path string) []byte {
