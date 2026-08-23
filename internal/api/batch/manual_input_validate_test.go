@@ -44,14 +44,14 @@ func TestValidateManualURL_AcceptsPlainID(t *testing.T) {
 
 func TestValidateAndSanitizeManualInputs_RejectsOverlongValue(t *testing.T) {
 	raw := map[string]string{"/d/a.mp4": strings.Repeat("x", maxManualInputLen+1)}
-	_, err := validateAndSanitizeManualInputs(raw, []string{"/d/a.mp4"}, nil)
+	_, err := validateAndSanitizeManualInputs(raw, []string{"/d/a.mp4"}, nil, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "exceeds")
 }
 
 func TestValidateAndSanitizeManualInputs_RejectsMoreInputsThanFiles(t *testing.T) {
 	raw := map[string]string{"/d/a.mp4": "IPX-1", "/d/b.mp4": "IPX-2"}
-	_, err := validateAndSanitizeManualInputs(raw, []string{"/d/a.mp4"}, nil) // 2 inputs, 1 file
+	_, err := validateAndSanitizeManualInputs(raw, []string{"/d/a.mp4"}, nil, nil) // 2 inputs, 1 file
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "exceeds files count")
 }
@@ -81,7 +81,7 @@ func TestValidateAndSanitizeManualInputs_RejectsKeyNotInFiles(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := validateAndSanitizeManualInputs(tc.raw, tc.files, nil)
+			got, err := validateAndSanitizeManualInputs(tc.raw, tc.files, nil, nil)
 			if tc.wantErr {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), tc.contains)
@@ -100,7 +100,7 @@ func TestValidateAndSanitizeManualInputs_RejectsKeyNotInFiles(t *testing.T) {
 // Scheme="" so it took the plain-ID branch and bypassed the check.
 func TestValidateAndSanitizeManualInputs_TrimsBeforeURLValidation(t *testing.T) {
 	raw := map[string]string{"/d/a.mp4": "  https://no-handler.example.com/v/123  "}
-	got, err := validateAndSanitizeManualInputs(raw, []string{"/d/a.mp4"}, nil)
+	got, err := validateAndSanitizeManualInputs(raw, []string{"/d/a.mp4"}, nil, nil)
 	require.Error(t, err, "whitespace-padded unhandleable URL must be rejected after trim")
 	assert.Contains(t, err.Error(), "no enabled scraper can handle URL")
 	assert.Nil(t, got)
@@ -110,7 +110,7 @@ func TestValidateAndSanitizeManualInputs_TrimsBeforeURLValidation(t *testing.T) 
 // so the override map carries no no-op entries.
 func TestValidateAndSanitizeManualInputs_DropsEmptyAfterTrim(t *testing.T) {
 	raw := map[string]string{"/d/a.mp4": "   "}
-	got, err := validateAndSanitizeManualInputs(raw, []string{"/d/a.mp4"}, nil)
+	got, err := validateAndSanitizeManualInputs(raw, []string{"/d/a.mp4"}, nil, nil)
 	require.NoError(t, err)
 	_, present := got["/d/a.mp4"]
 	assert.False(t, present, "empty-after-trim entry should be dropped, not stored as \"\"")
@@ -134,10 +134,10 @@ func TestValidateAndSanitizeManualInputs_LengthCapIsRuneCount(t *testing.T) {
 	atCap := strings.Repeat("中", maxManualInputLen)     // exactly the cap → pass
 	overCap := strings.Repeat("中", maxManualInputLen+1) // one rune over → fail
 
-	if _, err := validateAndSanitizeManualInputs(map[string]string{"/d/a.mp4": atCap}, []string{"/d/a.mp4"}, nil); err != nil {
+	if _, err := validateAndSanitizeManualInputs(map[string]string{"/d/a.mp4": atCap}, []string{"/d/a.mp4"}, nil, nil); err != nil {
 		t.Fatalf("input at the rune cap should pass, got: %v", err)
 	}
-	_, err := validateAndSanitizeManualInputs(map[string]string{"/d/a.mp4": overCap}, []string{"/d/a.mp4"}, nil)
+	_, err := validateAndSanitizeManualInputs(map[string]string{"/d/a.mp4": overCap}, []string{"/d/a.mp4"}, nil, nil)
 	require.Error(t, err, "one rune over the cap should fail even though byte length >> cap")
 	assert.Contains(t, err.Error(), "exceeds")
 }

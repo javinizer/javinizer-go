@@ -148,13 +148,20 @@ export function createPosterCropController(deps: PosterCropControllerDeps) {
 		refreshPosterCropMetrics();
 	}
 
-	function handlePosterCropImageError() {
+	function getLegacyPosterCropSourceURL(sourceURL: string): string | null {
+		if (!sourceURL.includes('-full.jpg')) return null;
 		const currentMovie = deps.getCurrentMovie();
-		if (currentMovie && deps.getCropSourceURL().includes('-full.jpg')) {
-			const posterMovieId =
-				deps.getCurrentResult()?.movie?.id || deps.getCurrentResult()?.movie_id || currentMovie.id;
-			const fallbackURL = `/api/v1/temp/posters/${deps.getJobId()}/${posterMovieId}.jpg${sessionParam()}`;
-			deps.setCropSourceURL(`${fallbackURL}${fallbackURL.includes('?') ? '&' : '?'}v=${now()}`);
+		if (!currentMovie) return null;
+		const posterMovieId =
+			deps.getCurrentResult()?.movie?.id || deps.getCurrentResult()?.movie_id || currentMovie.id;
+		const fallbackURL = `/api/v1/temp/posters/${deps.getJobId()}/${posterMovieId}.jpg${sessionParam()}`;
+		return `${fallbackURL}${fallbackURL.includes('?') ? '&' : '?'}v=${now()}`;
+	}
+
+	function handlePosterCropImageError() {
+		const fallbackURL = getLegacyPosterCropSourceURL(deps.getCropSourceURL());
+		if (fallbackURL) {
+			deps.setCropSourceURL(fallbackURL);
 			return;
 		}
 
@@ -216,28 +223,46 @@ export function createPosterCropController(deps: PosterCropControllerDeps) {
 
 		if (deps.prepareCropAsset) {
 			const generation = cropAssetGeneration;
-			void deps
-				.prepareCropAsset(resolvedSourceURL)
-				.then((asset) => {
-					if (generation !== cropAssetGeneration) {
-						deps.releaseCropAsset?.(asset.displayURL);
-						return;
-					}
-					cropAssetIdentity = asset.identity;
-					cropAssetPreparing = false;
-					cropDisplayURL = asset.displayURL;
-					deps.setCropSourceURL(asset.displayURL);
-				})
-				.catch(() => {
-					if (generation !== cropAssetGeneration) return;
-					cropAssetPreparing = false;
-					cropAssetIdentity = null;
-					deps.setPosterCropLoadError(
-						'Unable to load the installed poster source for manual cropping',
-					);
-					deps.setCropMetrics(null);
-					deps.setCropBox(null);
-				});
+			const prepareCropAsset = deps.prepareCropAsset;
+			const installPreparedCropAsset = (asset: {
+				displayURL: string;
+				identity: PosterAssetIdentity;
+			}) => {
+				if (generation !== cropAssetGeneration) {
+					deps.releaseCropAsset?.(asset.displayURL);
+					return;
+				}
+				cropAssetIdentity = asset.identity;
+				cropAssetPreparing = false;
+				cropDisplayURL = asset.displayURL;
+				deps.setCropSourceURL(asset.displayURL);
+			};
+			const failPreparedCropAsset = () => {
+				if (generation !== cropAssetGeneration) return;
+				cropAssetPreparing = false;
+				cropAssetIdentity = null;
+				deps.setPosterCropLoadError(
+					'Unable to load the installed poster source for manual cropping',
+				);
+				deps.setCropMetrics(null);
+				deps.setCropBox(null);
+			};
+			const prepare = (sourceURLToPrepare: string, allowLegacyFallback: boolean) => {
+				void prepareCropAsset(sourceURLToPrepare)
+					.then(installPreparedCropAsset)
+					.catch(() => {
+						if (generation !== cropAssetGeneration) return;
+						const fallbackURL = allowLegacyFallback
+							? getLegacyPosterCropSourceURL(resolvedSourceURL)
+							: null;
+						if (fallbackURL) {
+							prepare(fallbackURL, false);
+							return;
+						}
+						failPreparedCropAsset();
+					});
+			};
+			prepare(resolvedSourceURL, true);
 		}
 	}
 

@@ -10,6 +10,7 @@ interface CallLog {
 	mutatePosterCropAsync: ReturnType<typeof vi.fn>;
 	setCropApplying: ReturnType<typeof vi.fn>;
 	setPosterCropLoadError: ReturnType<typeof vi.fn>;
+	setCropSourceURL: ReturnType<typeof vi.fn>;
 }
 
 function makeController(opts: {
@@ -22,6 +23,7 @@ function makeController(opts: {
 		sourceURL: string,
 	) => Promise<{ displayURL: string; identity: { revision: number; fingerprint: string } }>;
 	getCropAssetIdentity?: () => Promise<{ revision: number; fingerprint: string } | null>;
+	now?: () => number;
 }): { controller: ReturnType<typeof createPosterCropController>; log: CallLog } {
 	const movie: Movie = {
 		id: 'STARS-136',
@@ -45,6 +47,7 @@ function makeController(opts: {
 	};
 
 	const calls: string[] = [];
+	let cropSourceURL = '';
 	const applyPosterFromUrlAsync = vi.fn(async (_resultId: string, _url: string) => {
 		calls.push('persist');
 		if (opts.persistRejects) throw new Error('download failed');
@@ -58,6 +61,9 @@ function makeController(opts: {
 		calls.push(`applying:${applying}`);
 	});
 	const setPosterCropLoadError = vi.fn();
+	const setCropSourceURL = vi.fn((url: string) => {
+		cropSourceURL = url;
+	});
 
 	const noop = () => {};
 	const log: CallLog = {
@@ -66,6 +72,7 @@ function makeController(opts: {
 		mutatePosterCropAsync,
 		setCropApplying,
 		setPosterCropLoadError,
+		setCropSourceURL,
 	};
 
 	const controller = createPosterCropController({
@@ -76,8 +83,8 @@ function makeController(opts: {
 		getShowPosterCropModal: () => true,
 		setShowPosterCropModal: noop,
 		setPosterCropLoadError,
-		getCropSourceURL: () => '',
-		setCropSourceURL: noop,
+		getCropSourceURL: () => cropSourceURL,
+		setCropSourceURL,
 		getCropImageElement: () => null,
 		setCropImageElement: noop,
 		getCropMetrics: () => null,
@@ -95,6 +102,7 @@ function makeController(opts: {
 		applyPosterFromUrlAsync,
 		mutatePosterCropAsync,
 		setCropApplying,
+		now: opts.now,
 	});
 
 	return { controller, log };
@@ -230,6 +238,36 @@ describe('applyPosterCrop — persist edited URL before cropping (issue #37)', (
 		expect(log.applyPosterFromUrlAsync).not.toHaveBeenCalled();
 		expect(log.mutatePosterCropAsync).not.toHaveBeenCalled();
 		expect(log.setCropApplying).not.toHaveBeenCalled();
+	});
+});
+
+describe('openPosterCropModal — prepared legacy fallback', () => {
+	it('retries the legacy poster when the prepared full-size asset is absent', async () => {
+		let attempt = 0;
+		const identity = { revision: 3, fingerprint: 'b'.repeat(64) };
+		const prepareCropAsset = vi.fn(async (sourceURL: string) => {
+			attempt += 1;
+			if (attempt === 1) throw new Error('full-size poster is absent');
+			return { displayURL: 'blob:legacy-poster', identity };
+		});
+		const { controller, log } = makeController({
+			editedPosterUrl: 'https://dmm/poster.jpg',
+			serverPosterUrl: 'https://dmm/poster.jpg',
+			prepareCropAsset,
+			now: () => 12345,
+		});
+
+		controller.openPosterCropModal();
+		await new Promise<void>((resolve) => setTimeout(resolve, 0));
+		await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+		expect(prepareCropAsset).toHaveBeenCalledTimes(2);
+		expect(prepareCropAsset.mock.calls[0][0]).toContain('/STARS-136-full.jpg');
+		expect(prepareCropAsset.mock.calls[1][0]).toContain('/STARS-136.jpg');
+		expect(prepareCropAsset.mock.calls[1][0]).toContain('v=12345');
+		expect(log.setPosterCropLoadError).not.toHaveBeenCalledWith(
+			'Unable to load the installed poster source for manual cropping',
+		);
 	});
 });
 

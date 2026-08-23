@@ -78,7 +78,7 @@ func TestValidateAndSanitizeManualInputs_ConcurrentReadSafety(t *testing.T) {
 		"/b/SSIS-002.mp4":    "SSIS-002",
 	}
 
-	want, err := validateAndSanitizeManualInputs(rawInputs, files, nil)
+	want, err := validateAndSanitizeManualInputs(rawInputs, files, nil, nil)
 	require.NoError(t, err)
 	require.Len(t, want, 2)
 
@@ -89,7 +89,7 @@ func TestValidateAndSanitizeManualInputs_ConcurrentReadSafety(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for i := 0; i < 200; i++ {
-				got, gerr := validateAndSanitizeManualInputs(rawInputs, files, nil)
+				got, gerr := validateAndSanitizeManualInputs(rawInputs, files, nil, nil)
 				if gerr != nil {
 					t.Errorf("concurrent validate failed: %v", gerr)
 					return

@@ -45,7 +45,8 @@ func batchScrape(rt *core.APIRuntime) gin.HandlerFunc {
 
 		// Security: Validate all submitted files against directory security settings
 		deps := rt.Deps()
-		apiCfg := rt.GetAPIConfig()
+		snap := rt.Snapshot()
+		apiCfg := snap.APIConfig()
 		secCfg := apiCfg.SecurityConfig()
 		for _, filePath := range req.Files {
 			dir := filepath.Dir(filePath)
@@ -58,7 +59,7 @@ func batchScrape(rt *core.APIRuntime) gin.HandlerFunc {
 
 		// Sanitize + validate per-file manual inputs (scheme, CanHandleURL, length,
 		// count) before starting the job; the sanitized map is what reaches the scrape.
-		sanitizedManualInputs, err := validateAndSanitizeManualInputs(req.ManualInputs, req.Files, deps.GetScraperLister())
+		sanitizedManualInputs, err := validateAndSanitizeManualInputs(req.ManualInputs, req.Files, snap.Registry(), snap.Matcher())
 		if err != nil {
 			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
 			return

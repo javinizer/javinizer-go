@@ -77,6 +77,7 @@ func validateAndSanitizeManualInputs(
 	rawInputs map[string]string,
 	files []string,
 	registry matcher.URLScraperLister,
+	fileMatcher matcher.MatcherInterface,
 ) (map[string]string, error) {
 	if len(rawInputs) > len(files) {
 		return nil, fmt.Errorf("manual_inputs count (%d) exceeds files count (%d)", len(rawInputs), len(files))
@@ -105,7 +106,7 @@ func validateAndSanitizeManualInputs(
 		}
 		result[path] = sanitized
 	}
-	if err := validateManualInputIDCollisions(result, registry, files); err != nil {
+	if err := validateManualInputIDCollisions(result, registry, files, fileMatcher); err != nil {
 		return nil, err
 	}
 	return result, nil
@@ -116,12 +117,18 @@ func validateAndSanitizeManualInputs(
 // files can be silently grouped into one movie family and one scrape result
 // overwrites the other. Multipart siblings remain supported: callers submit
 // one override and sibling propagation applies it to the discovered parts.
-func validateManualInputIDCollisions(inputs map[string]string, registry matcher.URLScraperLister, files []string) error {
+// fileMatcher must be the request snapshot matcher so configured filename regexes
+// participate in the same collision fence as the scrape path.
+func validateManualInputIDCollisions(
+	inputs map[string]string,
+	registry matcher.URLScraperLister,
+	files []string,
+	fileMatcher matcher.MatcherInterface,
+) error {
 	if len(inputs) == 0 {
 		return nil
 	}
 
-	m, _ := matcher.NewMatcher(&matcher.Config{})
 	paths := append([]string(nil), files...)
 	sort.Strings(paths)
 
@@ -133,8 +140,10 @@ func validateManualInputIDCollisions(inputs map[string]string, registry matcher.
 	effectiveIDs := make(map[string]string, len(paths))
 	for _, path := range paths {
 		info := models.FileMatchInfo{Name: filepath.Base(path), Extension: filepath.Ext(path)}
-		if match := m.MatchFile(info); match != nil && strings.TrimSpace(match.ID) != "" {
-			originalIDs[path] = strings.ToLower(strings.TrimSpace(match.ID))
+		if fileMatcher != nil {
+			if match := fileMatcher.MatchFile(info); match != nil && strings.TrimSpace(match.ID) != "" {
+				originalIDs[path] = strings.ToLower(strings.TrimSpace(match.ID))
+			}
 		}
 
 		effectiveIDs[path] = originalIDs[path]
