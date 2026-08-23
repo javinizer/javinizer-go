@@ -3,9 +3,11 @@ package worker
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/javinizer/javinizer-go/internal/downloader"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/scrape"
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
@@ -112,6 +114,28 @@ func TestApplyPhase_Run_PreApplyFunc_Skips(t *testing.T) {
 
 	assert.True(t, preApplyCalled, "PreApplyFunc should be called")
 	assert.Equal(t, 0, wf.getApplyCalled(), "Workflow.Apply should NOT be called when PreApplyFunc returns error")
+}
+
+func TestApplyFile_PreApplySkipReleasesPrimedOwnerClaim(t *testing.T) {
+	const filePath = "/source/IPX-778.mp4"
+	wf := &stubApplyWorkflow{}
+	inputs := makeApplyInputs(wf)
+	inputs.Dedup = &sync.Map{}
+	downloader.PrimeDownloadOwners(inputs.Dedup, map[string]string{"ipx-778": filePath})
+	fileResult := &resultstore.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: filePath, MovieID: "IPX-778"},
+		Status:        models.JobStatusCompleted,
+		Movie:         &models.Movie{ID: "IPX-778"},
+	}
+
+	_ = applyFile(context.Background(), wf, filePath, fileResult, fileResult.Movie, inputs, ApplyPhaseConfig{
+		PreApplyFunc: func(_ context.Context, _ *ApplyFileContext) error {
+			return fmt.Errorf("skip this file")
+		},
+	})
+
+	_, stillClaimed := inputs.Dedup.Load("\x00poster-owner:ipx-778")
+	assert.False(t, stillClaimed, "an item skipped before poster work must release its owner claim")
 }
 
 func TestApplyPhase_Run_PreApplyFunc_ModifiesContext(t *testing.T) {

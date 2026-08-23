@@ -9,6 +9,7 @@ interface CallLog {
 	applyPosterFromUrlAsync: ReturnType<typeof vi.fn>;
 	mutatePosterCropAsync: ReturnType<typeof vi.fn>;
 	setCropApplying: ReturnType<typeof vi.fn>;
+	setPosterCropLoadError: ReturnType<typeof vi.fn>;
 }
 
 function makeController(opts: {
@@ -17,11 +18,15 @@ function makeController(opts: {
 	cropBox?: PosterCropBox | null;
 	maxPosterHeight?: number | null;
 	persistRejects?: boolean;
+	prepareCropAsset?: (
+		sourceURL: string,
+	) => Promise<{ displayURL: string; identity: { revision: number; fingerprint: string } }>;
+	getCropAssetIdentity?: () => Promise<{ revision: number; fingerprint: string } | null>;
 }): { controller: ReturnType<typeof createPosterCropController>; log: CallLog } {
 	const movie: Movie = {
 		id: 'STARS-136',
 		title: 'Test Movie',
-		poster_url: opts.editedPosterUrl ?? 'https://dmm/jacket-full.jpg'
+		poster_url: opts.editedPosterUrl ?? 'https://dmm/jacket-full.jpg',
 	};
 	const result: FileResult = {
 		result_id: 'res-1',
@@ -35,8 +40,8 @@ function makeController(opts: {
 		movie: {
 			id: 'STARS-136',
 			title: 'Test Movie',
-			poster_url: opts.serverPosterUrl ?? 'https://dmm/digital-poster.jpg'
-		}
+			poster_url: opts.serverPosterUrl ?? 'https://dmm/digital-poster.jpg',
+		},
 	};
 
 	const calls: string[] = [];
@@ -44,15 +49,24 @@ function makeController(opts: {
 		calls.push('persist');
 		if (opts.persistRejects) throw new Error('download failed');
 	});
-	const mutatePosterCropAsync = vi.fn(async (_jobId: string, _resultId: string, _crop: PosterCropBox, _max?: number) => {
-		calls.push('crop');
-	});
+	const mutatePosterCropAsync = vi.fn(
+		async (_jobId: string, _resultId: string, _crop: PosterCropBox, _max?: number) => {
+			calls.push('crop');
+		},
+	);
 	const setCropApplying = vi.fn((applying: boolean) => {
 		calls.push(`applying:${applying}`);
 	});
+	const setPosterCropLoadError = vi.fn();
 
 	const noop = () => {};
-	const log: CallLog = { calls, applyPosterFromUrlAsync, mutatePosterCropAsync, setCropApplying };
+	const log: CallLog = {
+		calls,
+		applyPosterFromUrlAsync,
+		mutatePosterCropAsync,
+		setCropApplying,
+		setPosterCropLoadError,
+	};
 
 	const controller = createPosterCropController({
 		getBrowser: () => true,
@@ -61,39 +75,97 @@ function makeController(opts: {
 		getCurrentResult: () => result,
 		getShowPosterCropModal: () => true,
 		setShowPosterCropModal: noop,
-		setPosterCropLoadError: noop,
+		setPosterCropLoadError,
 		getCropSourceURL: () => '',
 		setCropSourceURL: noop,
 		getCropImageElement: () => null,
 		setCropImageElement: noop,
 		getCropMetrics: () => null,
 		setCropMetrics: noop,
-		getCropBox: () => opts.cropBox === undefined ? { x: 0, y: 0, width: 100, height: 200 } : opts.cropBox,
+		getCropBox: () =>
+			opts.cropBox === undefined ? { x: 0, y: 0, width: 100, height: 200 } : opts.cropBox,
 		setCropBox: noop,
-		getMaxPosterHeight: () => opts.maxPosterHeight === undefined ? null : opts.maxPosterHeight,
+		getMaxPosterHeight: () => (opts.maxPosterHeight === undefined ? null : opts.maxPosterHeight),
 		setMaxPosterHeight: noop,
 		getCropDragState: (): PosterCropDragState | null => null,
 		setCropDragState: noop,
 		getPosterCropStates: () => new Map<string, PosterCropState>(),
+		getCropAssetIdentity: opts.getCropAssetIdentity,
+		prepareCropAsset: opts.prepareCropAsset,
 		applyPosterFromUrlAsync,
 		mutatePosterCropAsync,
-		setCropApplying
+		setCropApplying,
 	});
 
 	return { controller, log };
 }
 
+describe('applyPosterCrop — persisted identity binding', () => {
+	it('uses the identity captured from the displayed asset instead of probing on Apply', async () => {
+		const identity = { revision: 7, fingerprint: 'a'.repeat(64) };
+		const prepareCropAsset = vi.fn(async (sourceURL: string) => ({
+			displayURL: 'blob:poster',
+			identity,
+		}));
+		const getCropAssetIdentity = vi.fn(async () => {
+			throw new Error('submission-time probe must not run');
+		});
+		const { controller, log } = makeController({
+			editedPosterUrl: 'https://dmm/poster.jpg',
+			serverPosterUrl: 'https://dmm/poster.jpg',
+			prepareCropAsset,
+			getCropAssetIdentity,
+		});
+
+		controller.openPosterCropModal();
+		await Promise.resolve();
+		await Promise.resolve();
+		await controller.applyPosterCrop();
+
+		expect(prepareCropAsset).toHaveBeenCalled();
+		expect(getCropAssetIdentity).not.toHaveBeenCalled();
+		expect(log.mutatePosterCropAsync).toHaveBeenCalledWith(
+			'job-1',
+			'res-1',
+			expect.any(Object),
+			undefined,
+			identity,
+		);
+	});
+
+	it('surfaces a submission-time identity probe failure', async () => {
+		const setIdentity = vi.fn(async () => {
+			throw new Error('network down');
+		});
+		const { controller, log } = makeController({
+			editedPosterUrl: 'https://dmm/poster.jpg',
+			serverPosterUrl: 'https://dmm/poster.jpg',
+			getCropAssetIdentity: setIdentity,
+		});
+
+		await controller.applyPosterCrop();
+
+		expect(log.setPosterCropLoadError).toHaveBeenCalledWith(
+			'Unable to verify the installed poster source. Reopen the crop and try again.',
+		);
+		expect(log.mutatePosterCropAsync).not.toHaveBeenCalled();
+	});
+});
+
 describe('applyPosterCrop — persist edited URL before cropping (issue #37)', () => {
 	it('persists the edited poster URL before applying the crop when URL differs from server', async () => {
 		const { controller, log } = makeController({
 			editedPosterUrl: 'https://dmm/jacket-full.jpg',
-			serverPosterUrl: 'https://dmm/digital-poster.jpg'
+			serverPosterUrl: 'https://dmm/digital-poster.jpg',
 		});
 
 		await controller.applyPosterCrop();
 
 		// Persist was called with the edited URL, before the crop.
-		expect(log.applyPosterFromUrlAsync).toHaveBeenCalledWith('res-1', 'https://dmm/jacket-full.jpg');
+		expect(log.applyPosterFromUrlAsync).toHaveBeenCalledWith(
+			'res-1',
+			'https://dmm/jacket-full.jpg',
+		);
 		expect(log.mutatePosterCropAsync).toHaveBeenCalledTimes(1);
 		expect(log.calls).toEqual(['applying:true', 'persist', 'crop', 'applying:false']);
 	});
@@ -102,7 +174,7 @@ describe('applyPosterCrop — persist edited URL before cropping (issue #37)', (
 		const sameUrl = 'https://dmm/digital-poster.jpg';
 		const { controller, log } = makeController({
 			editedPosterUrl: sameUrl,
-			serverPosterUrl: sameUrl
+			serverPosterUrl: sameUrl,
 		});
 
 		await controller.applyPosterCrop();
@@ -116,7 +188,7 @@ describe('applyPosterCrop — persist edited URL before cropping (issue #37)', (
 		const { controller, log } = makeController({
 			editedPosterUrl: 'https://dmm/jacket-full.jpg',
 			serverPosterUrl: 'https://dmm/digital-poster.jpg',
-			persistRejects: true
+			persistRejects: true,
 		});
 
 		await controller.applyPosterCrop();
@@ -133,19 +205,24 @@ describe('applyPosterCrop — persist edited URL before cropping (issue #37)', (
 		const { controller, log } = makeController({
 			editedPosterUrl: sameUrl,
 			serverPosterUrl: sameUrl,
-			maxPosterHeight: 1200
+			maxPosterHeight: 1200,
 		});
 
 		await controller.applyPosterCrop();
 
-		expect(log.mutatePosterCropAsync).toHaveBeenCalledWith('job-1', 'res-1', expect.any(Object), 1200);
+		expect(log.mutatePosterCropAsync).toHaveBeenCalledWith(
+			'job-1',
+			'res-1',
+			expect.any(Object),
+			1200,
+		);
 	});
 
 	it('does nothing when there is no crop box', async () => {
 		const { controller, log } = makeController({
 			editedPosterUrl: 'https://dmm/jacket-full.jpg',
 			serverPosterUrl: 'https://dmm/digital-poster.jpg',
-			cropBox: null
+			cropBox: null,
 		});
 
 		await controller.applyPosterCrop();
@@ -223,7 +300,10 @@ describe('openPosterCropModal — crop source URL formation (poster rendering re
 		const url = setCropSourceURL.mock.calls[0][0] as string;
 		expect(url, 'crop source URL must be populated').toBeTruthy();
 		expect(url, 'crop source URL must include the session param').toContain('session=sid-abc');
-		expect((url.match(/\?/g) ?? []).length, `crop source URL must have at most one "?", got: ${url}`).toBeLessThanOrEqual(1);
+		expect(
+			(url.match(/\?/g) ?? []).length,
+			`crop source URL must have at most one "?", got: ${url}`,
+		).toBeLessThanOrEqual(1);
 	});
 
 	it('uses the correct separator when appending the cache-busting v= param to a session-tagged URL', () => {
@@ -237,7 +317,9 @@ describe('openPosterCropModal — crop source URL formation (poster rendering re
 		// be appended with '&' (not '?'), producing ?session=...&v=12345.
 		// A regression producing ?session=...?v=12345 (two '?') would fail
 		// both this assertion and the at-most-one-? assertion above.
-		expect(url, 'session + v params must be joined with &, not a duplicated ?').toMatch(/[?&]v=12345/);
+		expect(url, 'session + v params must be joined with &, not a duplicated ?').toMatch(
+			/[?&]v=12345/,
+		);
 	});
 });
 
@@ -314,9 +396,10 @@ describe('openPosterCropModal — canonical movie ID wins over stale result FK (
 
 		expect(setCropSourceURL).toHaveBeenCalledTimes(1);
 		const url = setCropSourceURL.mock.calls[0][0] as string;
-		expect(url, 'crop source URL must use the canonical movie.id (300MIUM-1360-full.jpg)').toContain(
-			'/api/v1/temp/posters/job-1/300MIUM-1360-full.jpg',
-		);
+		expect(
+			url,
+			'crop source URL must use the canonical movie.id (300MIUM-1360-full.jpg)',
+		).toContain('/api/v1/temp/posters/job-1/300MIUM-1360-full.jpg');
 		expect(url, 'crop source URL must NOT use the stale result.movie_id filename').not.toContain(
 			'/MIUM-1360-full.jpg',
 		);
@@ -395,11 +478,13 @@ describe('openPosterCropModal — persisted movie ID wins over unsaved edit over
 
 		expect(setCropSourceURL).toHaveBeenCalledTimes(1);
 		const url = setCropSourceURL.mock.calls[0][0] as string;
-		expect(url, 'crop source URL must use the persisted result.movie.id (300MIUM-1360-full.jpg)').toContain(
-			'/api/v1/temp/posters/job-1/300MIUM-1360-full.jpg',
-		);
-		expect(url, 'crop source URL must NOT use the unsaved currentMovie.id (EDITED-001-full.jpg)').not.toContain(
-			'/EDITED-001',
-		);
+		expect(
+			url,
+			'crop source URL must use the persisted result.movie.id (300MIUM-1360-full.jpg)',
+		).toContain('/api/v1/temp/posters/job-1/300MIUM-1360-full.jpg');
+		expect(
+			url,
+			'crop source URL must NOT use the unsaved currentMovie.id (EDITED-001-full.jpg)',
+		).not.toContain('/EDITED-001');
 	});
 });

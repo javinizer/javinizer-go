@@ -128,6 +128,47 @@ func (_c *MockEditableJob_ApplyFieldOverride_Call) RunAndReturn(run func(ctx con
 	return _c
 }
 
+func (_mock *MockEditableJob) ApplyFieldOverrideWithRevisions(ctx context.Context, resultID string, fieldKey string, source string) (*resultstore.MovieResult, *resultstore.ProvenanceData, map[string]uint64, error) {
+	ret := _mock.Called(ctx, resultID, fieldKey, source)
+	if len(ret) == 0 {
+		panic("no return value specified for ApplyFieldOverrideWithRevisions")
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, string) (*resultstore.MovieResult, *resultstore.ProvenanceData, map[string]uint64, error)); ok {
+		return returnFunc(ctx, resultID, fieldKey, source)
+	}
+	var r0 *resultstore.MovieResult
+	var r1 *resultstore.ProvenanceData
+	var r2 map[string]uint64
+	var r3 error
+	if ret.Get(0) != nil {
+		r0 = ret.Get(0).(*resultstore.MovieResult)
+	}
+	if ret.Get(1) != nil {
+		r1 = ret.Get(1).(*resultstore.ProvenanceData)
+	}
+	if ret.Get(2) != nil {
+		r2 = ret.Get(2).(map[string]uint64)
+	}
+	r3 = ret.Error(3)
+	return r0, r1, r2, r3
+}
+
+type MockEditableJob_ApplyFieldOverrideWithRevisions_Call struct{ *mock.Call }
+
+func (_e *MockEditableJob_Expecter) ApplyFieldOverrideWithRevisions(ctx any, resultID any, fieldKey any, source any) *MockEditableJob_ApplyFieldOverrideWithRevisions_Call {
+	return &MockEditableJob_ApplyFieldOverrideWithRevisions_Call{Call: _e.mock.On("ApplyFieldOverrideWithRevisions", ctx, resultID, fieldKey, source)}
+}
+
+func (_c *MockEditableJob_ApplyFieldOverrideWithRevisions_Call) Return(movieResult *resultstore.MovieResult, provenanceData *resultstore.ProvenanceData, revisions map[string]uint64, err error) *MockEditableJob_ApplyFieldOverrideWithRevisions_Call {
+	_c.Call.Return(movieResult, provenanceData, revisions, err)
+	return _c
+}
+
+func (_c *MockEditableJob_ApplyFieldOverrideWithRevisions_Call) RunAndReturn(run func(ctx context.Context, resultID string, fieldKey string, source string) (*resultstore.MovieResult, *resultstore.ProvenanceData, map[string]uint64, error)) *MockEditableJob_ApplyFieldOverrideWithRevisions_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ExcludeFile provides a mock function for the type MockEditableJob
 func (_mock *MockEditableJob) ExcludeFile(filePath string) {
 	_mock.Called(filePath)

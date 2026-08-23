@@ -160,6 +160,14 @@ func (w *familyKeyedResultMap) CommitResult(filePath string, result *resultstore
 // the new movie with stale attribution, and then have its commit overwritten
 // by the rescrape's provenance write.
 func (w *familyKeyedResultMap) CommitResultWithProvenance(filePath string, result *resultstore.MovieResult, expectedRevision uint64, prov *resultstore.ProvenanceData) error {
+	_, err := w.CommitResultWithProvenanceAndRevisions(filePath, result, expectedRevision, prov)
+	return err
+}
+
+// CommitResultWithProvenanceAndRevisions returns the family revision map while
+// the commit lock is still held, so a response cannot pair stale content with
+// a later concurrent edit's revisions.
+func (w *familyKeyedResultMap) CommitResultWithProvenanceAndRevisions(filePath string, result *resultstore.MovieResult, expectedRevision uint64, prov *resultstore.ProvenanceData) (map[string]uint64, error) {
 	release := w.registry.AcquireMany(w.commitKeys(filePath, result))
 	defer release()
 	// audit F1: re-probe witnesses UNDER the family key — a fence-exempt
@@ -184,15 +192,42 @@ func (w *familyKeyedResultMap) CommitResultWithProvenance(filePath string, resul
 			}
 			seen[strings.ToLower(pid)] = struct{}{}
 			if err := posterWitnessConflictCore(w.fs, w.tempDir, w.jobID, pid); err != nil {
-				return err
+				return nil, err
 			}
 		}
 	}
 	if err := w.ResultMapAccessor.CommitResult(filePath, result, expectedRevision); err != nil {
-		return err
+		return nil, err
 	}
 	if prov != nil && (prov.FieldSources != nil || prov.ActressSources != nil || prov.ScraperResults != nil) && w.updater != nil {
 		w.updater.SetProvenance(filePath, prov)
 	}
-	return nil
+	return familyRevisionSnapshotFromResultMap(w.ResultMapAccessor, filePath), nil
+}
+
+func familyRevisionSnapshotFromResultMap(rm resultstore.ResultMapAccessor, filePath string) map[string]uint64 {
+	if rm == nil {
+		return nil
+	}
+	targetID := strings.TrimSpace(rm.GetCurrentMovieID(filePath))
+	if targetID == "" {
+		return nil
+	}
+	snapshot := rm.SnapshotData()
+	revisions := make(map[string]uint64)
+	for _, result := range snapshot.Results {
+		if result == nil || result.ResultID == "" {
+			continue
+		}
+		canonicalID := ""
+		if result.Movie != nil {
+			canonicalID = strings.TrimSpace(result.Movie.ID)
+		}
+		aliasID := strings.TrimSpace(result.FileMatchInfo.MovieID)
+		if !strings.EqualFold(canonicalID, targetID) && !strings.EqualFold(aliasID, targetID) {
+			continue
+		}
+		revisions[result.ResultID] = result.Revision
+	}
+	return revisions
 }

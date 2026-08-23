@@ -130,6 +130,9 @@ type RescrapeResult struct {
 	// captured inside the commit's keyed section (audit F-R15-1): the CAS
 	// echo never reads off-key, so a racer's commit cannot be mishealed.
 	Revision *uint64
+	// Revisions is the family revision snapshot captured by the same keyed
+	// commit, preventing a release→lookup race in API responses.
+	Revisions map[string]uint64
 	// PosterRecovery is non-nil ONLY on a successful op that generated parked
 	// poster bytes: the trinity (backup pair, in-flight sentinel, commit token)
 	// is intentionally retained past return — the caller MUST invoke Finalize
@@ -228,6 +231,10 @@ type JobEditor interface {
 	// Serialized under the family key (the per-result overrideMu is retired).
 	// Returns the updated MovieResult and ProvenanceData (both clones).
 	ApplyFieldOverride(ctx context.Context, resultID, fieldKey, source string) (*resultstore.MovieResult, *resultstore.ProvenanceData, error)
+
+	// ApplyFieldOverrideWithRevisions also returns the family revision snapshot
+	// captured before the keyed operation releases its lock.
+	ApplyFieldOverrideWithRevisions(ctx context.Context, resultID, fieldKey, source string) (*resultstore.MovieResult, *resultstore.ProvenanceData, map[string]uint64, error)
 }
 
 // PhaseController provides phase execution and dependency-wiring operations
@@ -496,12 +503,17 @@ func (je *jobEditorImpl) editor() *PosterEditor {
 //	$cache:findData[$cache:index].Data.($prop.Name) = $prop.Value
 //	$cache:findData[$cache:index].Selected.($prop.Name) = $source
 func (je *jobEditorImpl) ApplyFieldOverride(ctx context.Context, resultID, fieldKey, source string) (*resultstore.MovieResult, *resultstore.ProvenanceData, error) {
+	result, prov, _, err := je.ApplyFieldOverrideWithRevisions(ctx, resultID, fieldKey, source)
+	return result, prov, err
+}
+
+func (je *jobEditorImpl) ApplyFieldOverrideWithRevisions(ctx context.Context, resultID, fieldKey, source string) (*resultstore.MovieResult, *resultstore.ProvenanceData, map[string]uint64, error) {
 	result, _, found := je.store.GetFileResultByResultID(resultID)
 	movieID := resultID
 	if found && result != nil && result.FileMatchInfo.MovieID != "" {
 		movieID = result.FileMatchInfo.MovieID
 	}
-	return je.editor().ApplyFieldOverride(ctx, resultID, movieID, fieldKey, source)
+	return je.editor().ApplyFieldOverrideWithRevisions(ctx, resultID, movieID, fieldKey, source)
 }
 
 // ExcludeMovieFamily excludes every part of the movie family as ONE admitted

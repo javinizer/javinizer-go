@@ -154,8 +154,8 @@ func TestWriteEditOpErrorClassification(t *testing.T) {
 func TestApplyBatchFieldOverrideValidationErrIs400(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	mockJob := workermocks.NewMockBatchJobInterface(t)
-	mockJob.EXPECT().ApplyFieldOverride(mock.Anything, "FO-1", "maker", "dmm").
-		Return(nil, nil, errors.New("no provenance available for maker"))
+	mockJob.EXPECT().ApplyFieldOverrideWithRevisions(mock.Anything, "FO-1", "maker", "dmm").
+		Return(nil, nil, nil, errors.New("no provenance available for maker"))
 
 	deps := createTestDeps(t, &config.Config{}, "")
 	deps.JobStore = &excludeEdgeStore{job: mockJob}

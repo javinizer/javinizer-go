@@ -78,19 +78,16 @@ func serveTempPoster(rt *core.APIRuntime) gin.HandlerFunc {
 			return
 		}
 
-		// Check if file exists and is accessible before serving
-		if _, err := os.Stat(posterPath); err != nil {
+		// Read once and serve those exact bytes. Hashing the path and then
+		// reopening it through c.File leaves a replacement window where the
+		// identity headers can describe a different poster than the response body.
+		body, err := os.ReadFile(posterPath)
+		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Not Found"})
 			return
 		}
-
-		// Serve the file (no cache headers for temp files as they're ephemeral).
-		// The identity is computed from the exact bytes the crop controller will
-		// measure, and is exposed on GET and HEAD alike.
-		if identity, ierr := assetidentity.Measure(afero.NewOsFs(), posterPath); ierr == nil {
-			assetidentity.SetHeaders(c.Writer, identity)
-		}
-		c.File(posterPath)
+		c.Header("Content-Type", "image/jpeg")
+		writeImageBody(c, body)
 	}
 }
 
@@ -277,6 +274,7 @@ func serveTempImage(rt *core.APIRuntime) gin.HandlerFunc {
 		}
 
 		if len(result.body) > 0 {
+			c.Header("Content-Type", result.contentType)
 			c.Header("Cache-Control", "private, max-age=300")
 			c.Header("X-Content-Type-Options", "nosniff")
 			writeImageBody(c, result.body)

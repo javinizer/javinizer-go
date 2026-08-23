@@ -97,7 +97,7 @@ func overrideBatchMovieField(rt *core.APIRuntime) gin.HandlerFunc {
 		}
 		defer release()
 
-		result, prov, err := job.ApplyFieldOverride(c.Request.Context(), resultID, req.Field, req.Source)
+		result, prov, revisions, err := job.ApplyFieldOverrideWithRevisions(c.Request.Context(), resultID, req.Field, req.Source)
 		if err != nil {
 			logging.Debugf("[FieldOverride] %s/%s field=%s source=%s: %v", jobID, resultID, req.Field, req.Source, err)
 			if mapBatchEditError(c, err) {
@@ -125,9 +125,9 @@ func overrideBatchMovieField(rt *core.APIRuntime) gin.HandlerFunc {
 			fieldSources = prov.FieldSources
 			actressSources = prov.ActressSources
 		}
-		// audit F-R8-3: ApplyFieldOverride's result was read INSIDE the family
-		// key post-commit — echoing it directly sidesteps the off-key echo race
-		// (a concurrent commit in the gap would misheal the CAS baseline).
+		// audit F-R8-3: the result, provenance, and family revisions were all
+		// captured INSIDE the same keyed operation — no release→lookup gap can
+		// pair response content at revision N with a racer's N+1 baseline.
 		var revEcho *uint64
 		if result != nil {
 			rv := result.Revision
@@ -138,7 +138,7 @@ func overrideBatchMovieField(rt *core.APIRuntime) gin.HandlerFunc {
 			FieldSources:   fieldSources,
 			ActressSources: actressSources,
 			Revision:       revEcho,
-			Revisions:      familyRevisions(job, resultID),
+			Revisions:      revisions,
 		})
 	}
 }

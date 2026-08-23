@@ -251,7 +251,7 @@ func TestPosterFromURL_PromoteFailureInsideKey(t *testing.T) {
 func TestFieldOverrideGeneric500(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	mockJob := workermocks.NewMockBatchJobInterface(t)
-	mockJob.EXPECT().ApplyFieldOverride(mock.Anything, "FO-9", "maker", "dmm").Return(nil, nil, errors.New("plain boom"))
+	mockJob.EXPECT().ApplyFieldOverrideWithRevisions(mock.Anything, "FO-9", "maker", "dmm").Return(nil, nil, nil, errors.New("plain boom"))
 	deps := createTestDeps(t, &config.Config{}, "")
 	deps.JobStore = &excludeEdgeStore{job: mockJob}
 	router := gin.New()

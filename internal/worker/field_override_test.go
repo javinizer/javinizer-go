@@ -51,6 +51,28 @@ func TestApplyFieldOverrideLocksContentIDKey(t *testing.T) {
 	}
 }
 
+func TestApplyFieldOverrideWithRevisionsCapturesFamilySnapshot(t *testing.T) {
+	store := resultstore.New(2, []string{"/f/a.mp4", "/f/b.mp4"})
+	movie, prov := overrideFixture()
+	movie.ID = "FO-REV"
+	store.UpdateFileResult("/f/a.mp4", &resultstore.MovieResult{
+		ResultID: "res-a", Status: models.JobStatusCompleted, Movie: movie.Clone(),
+		FileMatchInfo: models.FileMatchInfo{Path: "/f/a.mp4", MovieID: "FO-REV"},
+	})
+	store.UpdateFileResult("/f/b.mp4", &resultstore.MovieResult{
+		ResultID: "res-b", Status: models.JobStatusCompleted, Movie: movie.Clone(),
+		FileMatchInfo: models.FileMatchInfo{Path: "/f/b.mp4", MovieID: "FO-REV"},
+	})
+	store.SetProvenance("/f/a.mp4", prov)
+	store.SetProvenance("/f/b.mp4", prov)
+	pe := NewPosterEditor(store, store, nil)
+
+	_, _, revisions, err := pe.ApplyFieldOverrideWithRevisions(context.Background(), "res-a", "FO-REV", "maker", "dmm")
+	require.NoError(t, err)
+	assert.Equal(t, uint64(2), revisions["res-a"])
+	assert.Equal(t, uint64(1), revisions["res-b"])
+}
+
 func TestApplyFieldOverride_StringFields(t *testing.T) {
 	movie, prov := overrideFixture()
 	err := applyFieldOverride(movie, prov, "maker", "dmm")

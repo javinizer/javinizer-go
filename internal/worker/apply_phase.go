@@ -510,6 +510,13 @@ func applyFile(
 		DryRun:   cfg.DryRun,
 	}
 
+	// The deterministic owner claim is primed before fan-out, but poster work
+	// is not guaranteed to run for every item. Release it at the item boundary
+	// as a final safety net; the downloader's reservation path remains the
+	// fast-path release for normal poster completion.
+	ownerLogicalKey := strings.ToLower(strings.TrimSpace(movie.ID))
+	defer downloader.ReleaseDownloadOwnerClaim(inputs.Dedup, ownerLogicalKey, filePath)
+
 	rc := recoveryContext{
 		filePath: filePath,
 		// Preserve the existing FileMatchInfo (incl. IsMultiPart / PartNumber /

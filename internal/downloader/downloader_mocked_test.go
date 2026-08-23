@@ -364,7 +364,8 @@ func TestDownload_RefererHeader(t *testing.T) {
 			mockHTTP.EXPECT().
 				Do(mock.MatchedBy(func(req *http.Request) bool {
 					return req.URL.String() == tt.url &&
-						req.Header.Get("Referer") == tt.expectedReferer
+						req.Header.Get("Referer") == tt.expectedReferer &&
+						req.Header.Get("Accept") == imageAcceptHeader
 				})).
 				Return(&http.Response{
 					StatusCode: 200,

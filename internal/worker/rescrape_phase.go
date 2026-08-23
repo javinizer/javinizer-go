@@ -96,22 +96,31 @@ type provenanceLockedCommitter interface {
 	CommitResultWithProvenance(filePath string, result *resultstore.MovieResult, expectedRevision uint64, prov *resultstore.ProvenanceData) error
 }
 
+type provenanceRevisionLockedCommitter interface {
+	CommitResultWithProvenanceAndRevisions(filePath string, result *resultstore.MovieResult, expectedRevision uint64, prov *resultstore.ProvenanceData) (map[string]uint64, error)
+}
+
 type provenanceSetter interface {
 	SetProvenance(filePath string, prov *resultstore.ProvenanceData)
 }
 
-// commitResultWithProvenance commits the rescrape result and publishes its
-// provenance. On the production wrapper both happen inside the same keyed
-// section; a bare ResultMapAccessor (tests, legacy seams) falls back to an
-// unlocked commit+publish, matching the historical non-keyed behavior.
-func commitResultWithProvenance(rm resultstore.ResultMapAccessor, filePath string, result *resultstore.MovieResult, rev uint64, prov *resultstore.ProvenanceData) error {
+// commitResultWithProvenanceAndRevisions commits the rescrape result and
+// publishes its provenance, returning the family revisions captured at the
+// same commit boundary.
+func commitResultWithProvenanceAndRevisions(rm resultstore.ResultMapAccessor, filePath string, result *resultstore.MovieResult, rev uint64, prov *resultstore.ProvenanceData) (map[string]uint64, error) {
+	if pc, ok := rm.(provenanceRevisionLockedCommitter); ok {
+		return pc.CommitResultWithProvenanceAndRevisions(filePath, result, rev, prov)
+	}
 	if prov != nil {
 		if pc, ok := rm.(provenanceLockedCommitter); ok {
-			return pc.CommitResultWithProvenance(filePath, result, rev, prov)
+			if err := pc.CommitResultWithProvenance(filePath, result, rev, prov); err != nil {
+				return nil, err
+			}
+			return familyRevisionSnapshotFromResultMap(rm, filePath), nil
 		}
 	}
 	if err := rm.CommitResult(filePath, result, rev); err != nil {
-		return err
+		return nil, err
 	}
 	// Zero-value provenance carries no attribution — skip the write entirely
 	// (matches the retired controller tail's "any source non-nil" gate).
@@ -120,7 +129,7 @@ func commitResultWithProvenance(rm resultstore.ResultMapAccessor, filePath strin
 			ps.SetProvenance(filePath, prov)
 		}
 	}
-	return nil
+	return familyRevisionSnapshotFromResultMap(rm, filePath), nil
 }
 
 func (p *rescrapePhase) CompleteRescrape(inputs rescrapePhaseInputs, filePath string, result *resultstore.MovieResult, capturedRevision uint64, movieID string, oldMovieID string, prov *resultstore.ProvenanceData) (*RescrapeResult, error) {
@@ -142,7 +151,8 @@ func (p *rescrapePhase) CompleteRescrape(inputs rescrapePhaseInputs, filePath st
 	// models.RescrapeStatusConflict — no error is returned. Real system errors are propagated.
 	// Result + provenance commit as one keyed leg where the seam supports it
 	// (codex r36 P1) — see commitResultWithProvenance.
-	if commitErr := commitResultWithProvenance(inputs.ResultMap, filePath, result, capturedRevision, prov); commitErr != nil {
+	revisions, commitErr := commitResultWithProvenanceAndRevisions(inputs.ResultMap, filePath, result, capturedRevision, prov)
+	if commitErr != nil {
 		if strings.HasPrefix(commitErr.Error(), "conflict:") {
 			return &RescrapeResult{Status: models.RescrapeStatusConflict}, nil
 		}
@@ -180,7 +190,7 @@ func (p *rescrapePhase) CompleteRescrape(inputs rescrapePhaseInputs, filePath st
 		}
 	}
 
-	rescrapeResult := &RescrapeResult{OrphanedMovieIDs: orphanedIDs, Status: models.RescrapeStatusSuccess}
+	rescrapeResult := &RescrapeResult{OrphanedMovieIDs: orphanedIDs, Revisions: revisions, Status: models.RescrapeStatusSuccess}
 	// audit F-R15-1: carry the COMMITTED revision — the commit's update phase
 	// mutated result.Revision in the keyed section, so this echo reflects OUR
 	// landing, never whatever a racer did next.

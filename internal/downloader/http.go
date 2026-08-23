@@ -23,6 +23,8 @@ import (
 	"github.com/spf13/afero"
 )
 
+const imageAcceptHeader = "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"
+
 func (d *Downloader) download(ctx context.Context, url, destPath string, mediaType MediaType, options ...any) (finalResult *DownloadResult, finalErr error) {
 	startTime := time.Now()
 	overwriteExisting, dedup := resolveDownloadOptions(options)
@@ -106,6 +108,13 @@ func (d *Downloader) download(ctx context.Context, url, destPath string, mediaTy
 
 	if d.config.UserAgent != "" {
 		req.Header.Set("User-Agent", d.config.UserAgent)
+	}
+	switch mediaType {
+	case MediaTypeCover, MediaTypePoster, MediaTypeExtrafanart, MediaTypeActress:
+		// Keep apply-time image representation negotiation aligned with the
+		// review poster fetch. A content-negotiating host must return the same
+		// bytes for the later fingerprint comparison to be meaningful.
+		req.Header.Set("Accept", imageAcceptHeader)
 	}
 	if referer := resolveDownloadReferer(url); referer != "" {
 		req.Header.Set("Referer", referer)
@@ -574,6 +583,13 @@ func releaseDownloadOwnerClaim(dedup *sync.Map, logicalKey, ownerKey string) {
 	if current, exists := dedup.Load(key); exists && current == claim {
 		dedup.Delete(key)
 	}
+}
+
+// ReleaseDownloadOwnerClaim releases a primed poster owner when the complete
+// apply item exits before the poster reservation can do so (for example after
+// a pre-apply skip, organize failure, or recovered panic).
+func ReleaseDownloadOwnerClaim(dedup *sync.Map, logicalKey, ownerKey string) {
+	releaseDownloadOwnerClaim(dedup, logicalKey, ownerKey)
 }
 
 func uniqueTempPath(destPath, suffix string) string {

@@ -1279,6 +1279,32 @@ func (m *LockedMovieOps) ApplyFieldOverride(ctx context.Context, resultID, field
 	return updated, updatedProv, nil
 }
 
+// ApplyFieldOverrideWithRevisions performs the same locked override and
+// captures the family revision map before the keyed section is released.
+func (m *LockedMovieOps) ApplyFieldOverrideWithRevisions(ctx context.Context, resultID, fieldKey, source string) (*resultstore.MovieResult, *resultstore.ProvenanceData, map[string]uint64, error) {
+	result, prov, err := m.ApplyFieldOverride(ctx, resultID, fieldKey, source)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return result, prov, m.familyRevisionSnapshot(), nil
+}
+
+func (m *LockedMovieOps) familyRevisionSnapshot() map[string]uint64 {
+	paths := m.pe.lookup.FindFilePathsForMovieID(m.movieID)
+	if len(paths) == 0 {
+		return nil
+	}
+	revisions := make(map[string]uint64, len(paths))
+	for _, path := range paths {
+		result, err := m.pe.lookup.GetMovieResult(path)
+		if err != nil || result == nil || result.ResultID == "" {
+			continue
+		}
+		revisions[result.ResultID] = result.Revision
+	}
+	return revisions
+}
+
 // allExcludedTerminal reports whether the exclusion set covers EVERY known
 // result while the job is still cancellable (codex P5-A): the committed
 // envelope for such an exclusion must carry Cancelled atomically — a
@@ -1777,6 +1803,13 @@ func (pe *PosterEditor) ExcludeMovieFamily(ctx context.Context, movieID string) 
 // result between the caller's pre-lock resolution and the lock section;
 // re-resolution and re-acquisition under the CURRENT key converges.
 func (pe *PosterEditor) ApplyFieldOverride(ctx context.Context, resultID, movieID, fieldKey, source string) (*resultstore.MovieResult, *resultstore.ProvenanceData, error) {
+	out, prov, _, err := pe.ApplyFieldOverrideWithRevisions(ctx, resultID, movieID, fieldKey, source)
+	return out, prov, err
+}
+
+// ApplyFieldOverrideWithRevisions returns the override result and the family
+// revision snapshot captured while the same keyed section is still held.
+func (pe *PosterEditor) ApplyFieldOverrideWithRevisions(ctx context.Context, resultID, movieID, fieldKey, source string) (*resultstore.MovieResult, *resultstore.ProvenanceData, map[string]uint64, error) {
 	// codex r29: lock on the matcher alias AND the result's canonical Movie.ID
 	// where they differ — rescrape commits pair-lock on those identities, and
 	// a family-matched edit must collide with them.
@@ -1786,6 +1819,7 @@ func (pe *PosterEditor) ApplyFieldOverride(ctx context.Context, resultID, movieI
 	}
 	var out *resultstore.MovieResult
 	var prov *resultstore.ProvenanceData
+	var revisions map[string]uint64
 	var err error
 	for attempt := 0; attempt < 3; attempt++ {
 		keySet := []string{key}
@@ -1807,19 +1841,19 @@ func (pe *PosterEditor) ApplyFieldOverride(ctx context.Context, resultID, movieI
 		err = func(innerErr error) error { return innerErr }(func() error {
 			defer release()
 			var e error
-			out, prov, e = (&LockedMovieOps{pe: pe, movieID: key}).ApplyFieldOverride(ctx, resultID, fieldKey, source)
+			out, prov, revisions, e = (&LockedMovieOps{pe: pe, movieID: key}).ApplyFieldOverrideWithRevisions(ctx, resultID, fieldKey, source)
 			return e
 		}())
 		if !errors.Is(err, ErrFamilyRekeyed) {
-			return out, prov, err
+			return out, prov, revisions, err
 		}
 		if res, _, found := pe.lookup.GetFileResultByResultID(resultID); found && res != nil && res.FileMatchInfo.MovieID != "" {
 			key = res.FileMatchInfo.MovieID
 		} else {
-			return nil, nil, fmt.Errorf("%w: %s", ErrMovieFamilyEmpty, resultID)
+			return nil, nil, nil, fmt.Errorf("%w: %s", ErrMovieFamilyEmpty, resultID)
 		}
 	}
-	return nil, nil, fmt.Errorf("%w (retry budget exhausted): %s", ErrFamilyRekeyed, resultID)
+	return nil, nil, nil, fmt.Errorf("%w (retry budget exhausted): %s", ErrFamilyRekeyed, resultID)
 }
 
 // EditAdmissionConflictError marks identity-rejection edits (D17) — the API

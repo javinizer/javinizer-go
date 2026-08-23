@@ -117,32 +117,58 @@ func validateAndSanitizeManualInputs(
 // overwrites the other. Multipart siblings remain supported: callers submit
 // one override and sibling propagation applies it to the discovered parts.
 func validateManualInputIDCollisions(inputs map[string]string, registry matcher.URLScraperLister, files []string) error {
-	paths := make([]string, 0, len(inputs))
-	for path := range inputs {
-		paths = append(paths, path)
-	}
-	sort.Strings(paths)
-	if len(paths) == 0 {
+	if len(inputs) == 0 {
 		return nil
 	}
+
 	m, _ := matcher.NewMatcher(&matcher.Config{})
-	matchedIDs := make(map[string]string, len(files))
-	for _, path := range files {
+	paths := append([]string(nil), files...)
+	sort.Strings(paths)
+
+	// Compute both the filename-derived identity and the effective identity for
+	// every submitted path. The old check only compared a manual override with
+	// filename-derived IDs, so two unrelated files could both be manually
+	// assigned the same ID and bypass the collision fence.
+	originalIDs := make(map[string]string, len(paths))
+	effectiveIDs := make(map[string]string, len(paths))
+	for _, path := range paths {
 		info := models.FileMatchInfo{Name: filepath.Base(path), Extension: filepath.Ext(path)}
 		if match := m.MatchFile(info); match != nil && strings.TrimSpace(match.ID) != "" {
-			matchedIDs[path] = strings.ToLower(strings.TrimSpace(match.ID))
+			originalIDs[path] = strings.ToLower(strings.TrimSpace(match.ID))
+		}
+
+		effectiveIDs[path] = originalIDs[path]
+		if raw, overridden := inputs[path]; overridden {
+			parsed, err := matcher.ParseInput(raw, registry)
+			if err != nil || parsed == nil || strings.TrimSpace(parsed.ID) == "" {
+				continue
+			}
+			effectiveIDs[path] = strings.ToLower(strings.TrimSpace(parsed.ID))
 		}
 	}
-	for _, path := range paths {
-		parsed, err := matcher.ParseInput(inputs[path], registry)
-		if err != nil || parsed == nil || strings.TrimSpace(parsed.ID) == "" {
+
+	for i, path := range paths {
+		id := effectiveIDs[path]
+		if id == "" {
 			continue
 		}
-		id := strings.ToLower(strings.TrimSpace(parsed.ID))
-		for otherPath, existingID := range matchedIDs {
-			if otherPath != path && existingID == id {
-				return fmt.Errorf("manual input ID %q for %q collides with the submitted file %q", parsed.ID, path, otherPath)
+		_, pathOverridden := inputs[path]
+		for _, otherPath := range paths[i+1:] {
+			if effectiveIDs[otherPath] != id {
+				continue
 			}
+			_, otherOverridden := inputs[otherPath]
+			if !pathOverridden && !otherOverridden {
+				// Existing filename-only duplicates are allowed; multipart
+				// grouping handles those before this manual-input fence.
+				continue
+			}
+			// Multipart siblings may intentionally share an effective ID. They
+			// are recognizable because their original filename IDs agree.
+			if originalIDs[path] != "" && originalIDs[path] == originalIDs[otherPath] {
+				continue
+			}
+			return fmt.Errorf("manual input ID %q for %q collides with the submitted file %q", id, path, otherPath)
 		}
 	}
 	return nil

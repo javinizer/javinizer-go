@@ -1488,6 +1488,6 @@ func TestCommitResultWithProvenanceViaFamilyKeyedFixed(t *testing.T) {
 	current, _ := store.GetMovieResult("/f/a.mp4")
 	fkr := &familyKeyedResultMap{ResultMapAccessor: store, registry: newKeyedMutexRegistry()}
 	prov := &resultstore.ProvenanceData{FieldSources: map[string]string{"title": "test"}}
-	err := commitResultWithProvenance(fkr, "/f/a.mp4", result, current.Revision, prov)
+	_, err := commitResultWithProvenanceAndRevisions(fkr, "/f/a.mp4", result, current.Revision, prov)
 	assert.NoError(t, err)
 }
