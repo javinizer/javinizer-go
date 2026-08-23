@@ -128,39 +128,94 @@ func (_c *MockEditableJob_ApplyFieldOverride_Call) RunAndReturn(run func(ctx con
 	return _c
 }
 
+// ApplyFieldOverrideWithRevisions provides a mock function for the type MockEditableJob
 func (_mock *MockEditableJob) ApplyFieldOverrideWithRevisions(ctx context.Context, resultID string, fieldKey string, source string) (*resultstore.MovieResult, *resultstore.ProvenanceData, map[string]uint64, error) {
 	ret := _mock.Called(ctx, resultID, fieldKey, source)
+
 	if len(ret) == 0 {
 		panic("no return value specified for ApplyFieldOverrideWithRevisions")
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, string) (*resultstore.MovieResult, *resultstore.ProvenanceData, map[string]uint64, error)); ok {
-		return returnFunc(ctx, resultID, fieldKey, source)
-	}
+
 	var r0 *resultstore.MovieResult
 	var r1 *resultstore.ProvenanceData
 	var r2 map[string]uint64
 	var r3 error
-	if ret.Get(0) != nil {
-		r0 = ret.Get(0).(*resultstore.MovieResult)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, string) (*resultstore.MovieResult, *resultstore.ProvenanceData, map[string]uint64, error)); ok {
+		return returnFunc(ctx, resultID, fieldKey, source)
 	}
-	if ret.Get(1) != nil {
-		r1 = ret.Get(1).(*resultstore.ProvenanceData)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, string) *resultstore.MovieResult); ok {
+		r0 = returnFunc(ctx, resultID, fieldKey, source)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*resultstore.MovieResult)
+		}
 	}
-	if ret.Get(2) != nil {
-		r2 = ret.Get(2).(map[string]uint64)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string, string) *resultstore.ProvenanceData); ok {
+		r1 = returnFunc(ctx, resultID, fieldKey, source)
+	} else {
+		if ret.Get(1) != nil {
+			r1 = ret.Get(1).(*resultstore.ProvenanceData)
+		}
 	}
-	r3 = ret.Error(3)
+	if returnFunc, ok := ret.Get(2).(func(context.Context, string, string, string) map[string]uint64); ok {
+		r2 = returnFunc(ctx, resultID, fieldKey, source)
+	} else {
+		if ret.Get(2) != nil {
+			r2 = ret.Get(2).(map[string]uint64)
+		}
+	}
+	if returnFunc, ok := ret.Get(3).(func(context.Context, string, string, string) error); ok {
+		r3 = returnFunc(ctx, resultID, fieldKey, source)
+	} else {
+		r3 = ret.Error(3)
+	}
 	return r0, r1, r2, r3
 }
 
-type MockEditableJob_ApplyFieldOverrideWithRevisions_Call struct{ *mock.Call }
+// MockEditableJob_ApplyFieldOverrideWithRevisions_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ApplyFieldOverrideWithRevisions'
+type MockEditableJob_ApplyFieldOverrideWithRevisions_Call struct {
+	*mock.Call
+}
 
+// ApplyFieldOverrideWithRevisions is a helper method to define mock.On call
+//   - ctx context.Context
+//   - resultID string
+//   - fieldKey string
+//   - source string
 func (_e *MockEditableJob_Expecter) ApplyFieldOverrideWithRevisions(ctx any, resultID any, fieldKey any, source any) *MockEditableJob_ApplyFieldOverrideWithRevisions_Call {
 	return &MockEditableJob_ApplyFieldOverrideWithRevisions_Call{Call: _e.mock.On("ApplyFieldOverrideWithRevisions", ctx, resultID, fieldKey, source)}
 }
 
-func (_c *MockEditableJob_ApplyFieldOverrideWithRevisions_Call) Return(movieResult *resultstore.MovieResult, provenanceData *resultstore.ProvenanceData, revisions map[string]uint64, err error) *MockEditableJob_ApplyFieldOverrideWithRevisions_Call {
-	_c.Call.Return(movieResult, provenanceData, revisions, err)
+func (_c *MockEditableJob_ApplyFieldOverrideWithRevisions_Call) Run(run func(ctx context.Context, resultID string, fieldKey string, source string)) *MockEditableJob_ApplyFieldOverrideWithRevisions_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
+		var arg3 string
+		if args[3] != nil {
+			arg3 = args[3].(string)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+			arg3,
+		)
+	})
+	return _c
+}
+
+func (_c *MockEditableJob_ApplyFieldOverrideWithRevisions_Call) Return(movieResult *resultstore.MovieResult, provenanceData *resultstore.ProvenanceData, stringToUint64 map[string]uint64, err error) *MockEditableJob_ApplyFieldOverrideWithRevisions_Call {
+	_c.Call.Return(movieResult, provenanceData, stringToUint64, err)
 	return _c
 }
 
