@@ -127,6 +127,9 @@ func persistToDatabase(jobRepo database.JobRepositoryInterface, job *BatchJob) e
 		job.controller.SetPersistError(persistMsg)
 		return fmt.Errorf("persist job %s: %w", job.ID.String(), err)
 	}
+	job.mu.Lock()
+	job.pruneVersion = dbJob.PruneVersion
+	job.mu.Unlock()
 	job.controller.SetPersistError("")
 	return nil
 }

@@ -58,6 +58,9 @@ func (r *JobRepository) Create(ctx context.Context, job *models.Job) error {
 
 // Update saves all fields of the given job record.
 func (r *JobRepository) Update(ctx context.Context, job *models.Job) error {
+	if job == nil {
+		return fmt.Errorf("update job: job must not be nil")
+	}
 	job.PruneVersion++
 	if err := r.GetDB().WithContext(ctx).Save(job).Error; err != nil {
 		return wrapDBErr("update", fmt.Sprintf("job %s", job.ID), err)
@@ -67,6 +70,9 @@ func (r *JobRepository) Update(ctx context.Context, job *models.Job) error {
 
 // Upsert inserts or replaces the given job record by primary key.
 func (r *JobRepository) Upsert(ctx context.Context, job *models.Job) error {
+	if job == nil {
+		return fmt.Errorf("upsert job: job must not be nil")
+	}
 	job.PruneVersion++
 	if err := r.GetDB().WithContext(ctx).Save(job).Error; err != nil {
 		return wrapDBErr("upsert", fmt.Sprintf("job %s", job.ID), err)
@@ -154,7 +160,7 @@ func (r *JobRepository) DeleteOrganizedOlderThan(ctx context.Context, date time.
 				return wrapDBErr("delete", "organized job operations", err)
 			}
 		}
-		if err := tx.Where("id IN (?)", eligibleJobs).Delete(&models.Job{}).Error; err != nil {
+		if err := tx.Where("id IN (?) AND NOT EXISTS (SELECT 1 FROM batch_file_operations WHERE batch_job_id = jobs.id)", eligibleJobs).Delete(&models.Job{}).Error; err != nil {
 			return wrapDBErr("delete", "organized jobs", err)
 		}
 		return nil

@@ -260,7 +260,7 @@ func TestReplacementSweeper_PruneOperationBackups_RemovesOnlyUnreferenced(t *tes
 		delete(repo.ops, op.ID)
 
 		err := NewReplacementSweeper(fs, repo).PruneOperationBackups(ctx, []models.BatchFileOperation{*op})
-		require.NoError(t, err)
+		require.Contains(t, err.Error(), "install is unconfirmed")
 		exists, statErr := afero.Exists(fs, backup)
 		require.NoError(t, statErr)
 		require.True(t, exists, "an unconfirmed install must retain recoverable bytes")
@@ -279,7 +279,7 @@ func TestReplacementSweeper_PruneOperationBackups_RemovesOnlyUnreferenced(t *tes
 		delete(repo.ops, op.ID)
 
 		err := NewReplacementSweeper(fs, repo).PruneOperationBackups(ctx, []models.BatchFileOperation{*op})
-		require.NoError(t, err)
+		require.Contains(t, err.Error(), "ownership is rearm-refused")
 		got, readErr := afero.ReadFile(fs, backup)
 		require.NoError(t, readErr)
 		require.Equal(t, "foreign", string(got))
@@ -496,7 +496,7 @@ func TestReplacementSweeper_PruneOperationBackups_ErrorBranches(t *testing.T) {
 		repo := newP3OpRepo()
 		op := installedPruneCandidate(t, repo, "job-absent", "PRUNE-ABSENT", "/out/PRUNE-ABSENT/poster.jpg", "/out/PRUNE-ABSENT/poster.jpg.dlbak."+p3HexA)
 		err := NewReplacementSweeper(afero.NewMemMapFs(), repo).PruneOperationBackups(context.Background(), []models.BatchFileOperation{*op})
-		require.NoError(t, err)
+		require.Contains(t, err.Error(), "is absent during prune")
 	})
 
 	t.Run("unlink failure retains backup", func(t *testing.T) {

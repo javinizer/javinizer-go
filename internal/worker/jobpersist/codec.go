@@ -29,6 +29,7 @@ type JobResultsEnvelope struct {
 // IsDeleted, ResultIndex) that are not persisted in the database.
 type Snapshot struct {
 	ID                    string
+	PruneVersion          uint64
 	Status                models.JobStatus
 	TotalFiles            int
 	Completed             int
@@ -102,6 +103,7 @@ func Encode(snapshot Snapshot) (*models.Job, error) {
 
 	return &models.Job{
 		ID:                    snapshot.ID,
+		PruneVersion:          snapshot.PruneVersion,
 		Status:                snapshot.Status,
 		TotalFiles:            snapshot.TotalFiles,
 		Completed:             snapshot.Completed,
@@ -134,6 +136,7 @@ func Decode(dbJob *models.Job) (Snapshot, []error) {
 
 	snapshot := Snapshot{
 		ID:                    dbJob.ID,
+		PruneVersion:          dbJob.PruneVersion,
 		Status:                dbJob.Status,
 		TotalFiles:            dbJob.TotalFiles,
 		Completed:             dbJob.Completed,

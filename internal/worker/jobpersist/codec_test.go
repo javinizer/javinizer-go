@@ -20,6 +20,7 @@ func TestEncodeDecode_RoundTrip(t *testing.T) {
 
 	original := Snapshot{
 		ID:                    "round-trip-job",
+		PruneVersion:          7,
 		Status:                models.JobStatusCompleted,
 		TotalFiles:            3,
 		Completed:             2,
@@ -48,6 +49,7 @@ func TestEncodeDecode_RoundTrip(t *testing.T) {
 	assert.Empty(t, errs, "round-trip should produce no decode errors")
 
 	assert.Equal(t, original.ID, decoded.ID)
+	assert.Equal(t, original.PruneVersion, decoded.PruneVersion)
 	assert.Equal(t, original.Status, decoded.Status)
 	assert.Equal(t, original.TotalFiles, decoded.TotalFiles)
 	assert.Equal(t, original.Completed, decoded.Completed)

@@ -462,6 +462,7 @@ func (s *ReplacementSweeper) PruneOperationBackups(ctx context.Context, ops []mo
 		}
 		consumed[opID][backup] = struct{}{}
 	}
+pruneEntries:
 	for i := range ops {
 		gf, err := models.ParseGeneratedFiles(ops[i].GeneratedFiles)
 		if err != nil {
@@ -474,13 +475,17 @@ func (s *ReplacementSweeper) PruneOperationBackups(ctx context.Context, ops []mo
 				errs = append(errs, fmt.Errorf("operation %d has an incomplete replacement entry", ops[i].ID))
 				continue
 			}
-			if !entry.Installed || entry.PendingKind() == models.RestorePendingKindRearmRefused {
-				logging.Warnf("organized-job prune retained backup %s for operation %d: install is unconfirmed or backup ownership is refused", entry.Backup, ops[i].ID)
+			if !entry.Installed {
+				errs = append(errs, fmt.Errorf("operation %d backup %s: install is unconfirmed", ops[i].ID, entry.Backup))
+				continue
+			}
+			if entry.PendingKind() == models.RestorePendingKindRearmRefused {
+				errs = append(errs, fmt.Errorf("operation %d backup %s: ownership is rearm-refused", ops[i].ID, entry.Backup))
 				continue
 			}
 			if err := ctx.Err(); err != nil {
 				errs = append(errs, err)
-				return errors.Join(errs...)
+				break pruneEntries
 			}
 
 			busyRelease, busyToken, busyErr := acquireReplacementBusyExFn(s.fs, entry.Destination)
@@ -610,10 +615,10 @@ func (s *ReplacementSweeper) pruneOperationBackup(ctx context.Context, opID uint
 	}
 	hold, err := quarantineReplacementBackupForRemoval(s.fs, entry.Backup, "organized-job prune", &entry, nil)
 	if err != nil {
-		return false, err
+		return false, errors.Join(err, s.markPruneRearmRefused(opID, entry))
 	}
 	if hold == nil || hold.unlinked {
-		return true, nil
+		return false, errors.Join(fmt.Errorf("backup %s is absent during prune", entry.Backup), s.markPruneRearmRefused(opID, entry))
 	}
 	if err := ctx.Err(); err != nil {
 		return false, s.joinPruneRestoreFailure(opID, entry, hold, err)
@@ -637,6 +642,14 @@ func (s *ReplacementSweeper) joinPruneRestoreFailure(opID uint, entry models.Rep
 		return errors.Join(cause, restoreErr, s.persistPruneQuarantine(opID, entry, hold.quarantine))
 	}
 	return cause
+}
+
+// markPruneRearmRefused records that the original backup name is no longer
+// safe to path-operate during a later cleanup retry.
+func (s *ReplacementSweeper) markPruneRearmRefused(opID uint, entry models.ReplacementEntry) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return markReplacementEntryRestorePendingKind(ctx, s.repo, opID, sweepSlash(entry.Backup), models.RestorePendingKindRearmRefused)
 }
 
 // persistPruneQuarantine moves the durable ledger pointer to the recoverable

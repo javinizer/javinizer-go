@@ -111,7 +111,8 @@ type BatchJob struct {
 	results   resultstore.Store `json:"-"` // Result state: Results map, progress counters, files (sole result-state seam)
 
 	// Retained on BatchJob (not mutex-protected state groups)
-	StartedAt time.Time `json:"started_at"`
+	StartedAt    time.Time `json:"started_at"`
+	pruneVersion uint64
 
 	// Configuration — set from ApplyPhaseConfig at StartApply or from DB during reconstruction.
 	// External callers cannot mutate these; configuration flows through StartApply(ctx, ApplyPhaseConfig).
@@ -255,9 +256,10 @@ func (job *BatchJob) attachLifecycleCallback() {
 type batchJobSnapshot struct {
 	batchJobBase
 
-	results     map[string]*resultstore.MovieResult
-	provenance  map[string]*resultstore.ProvenanceData
-	resultIndex map[string]string // ResultID → FilePath
+	pruneVersion uint64
+	results      map[string]*resultstore.MovieResult
+	provenance   map[string]*resultstore.ProvenanceData
+	resultIndex  map[string]string // ResultID → FilePath
 }
 
 // snapshotFull reads result state via Store.SnapshotForStatus() (self-locking)
@@ -283,6 +285,7 @@ func (job *BatchJob) snapshotFull() batchJobSnapshot {
 	defer job.mu.RUnlock()
 
 	return batchJobSnapshot{
+		pruneVersion: job.pruneVersion,
 		batchJobBase: batchJobBase{
 			ID:                    job.ID,
 			Status:                lcSnap.Status,

@@ -11,6 +11,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestJobRepository_UpdateUpsert_Nil(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewJobRepository(db)
+	require.Error(t, repo.Update(context.Background(), nil))
+	require.Error(t, repo.Upsert(context.Background(), nil))
+}
+
 func TestJobRepository_Create(t *testing.T) {
 	db := newDatabaseTestDB(t)
 	repo := NewJobRepository(db)
