@@ -128,12 +128,20 @@ func (r *JobRepository) DeleteOrganizedOlderThan(ctx context.Context, date time.
 		if len(prunedJobs) == 0 {
 			return nil
 		}
-		jobIDs := make([]string, 0, len(prunedJobs))
-		for _, job := range prunedJobs {
-			jobIDs = append(jobIDs, job.ID)
-		}
-		if err := tx.Where("batch_job_id IN ?", jobIDs).Find(&prunedOps).Error; err != nil {
-			return wrapDBErr("find", "organized job operations", err)
+		for start := 0; start < len(prunedJobs); start += pruneDeleteBatchSize {
+			end := start + pruneDeleteBatchSize
+			if end > len(prunedJobs) {
+				end = len(prunedJobs)
+			}
+			jobIDs := make([]string, 0, end-start)
+			for _, job := range prunedJobs[start:end] {
+				jobIDs = append(jobIDs, job.ID)
+			}
+			var chunk []models.BatchFileOperation
+			if err := tx.Where("batch_job_id IN ?", jobIDs).Find(&chunk).Error; err != nil {
+				return wrapDBErr("find", "organized job operations", err)
+			}
+			prunedOps = append(prunedOps, chunk...)
 		}
 		return nil
 	})
@@ -144,6 +152,7 @@ func (r *JobRepository) DeleteOrganizedOlderThan(ctx context.Context, date time.
 		return nil
 	}
 
+	originalPrunedOps := append([]models.BatchFileOperation(nil), prunedOps...)
 	hook := r.organizedJobPruneHook()
 	if hasReplacementLedger(prunedOps) && hook == nil {
 		return fmt.Errorf("prune organized jobs: replacement cleanup hook is not configured")
@@ -151,6 +160,9 @@ func (r *JobRepository) DeleteOrganizedOlderThan(ctx context.Context, date time.
 	if hook != nil && len(prunedOps) > 0 {
 		if err := hook(ctx, prunedOps); err != nil {
 			return wrapDBErr("prune", "organized job backups", err)
+		}
+		if err := r.refreshConsumedPrunedOps(ctx, originalPrunedOps, &prunedOps); err != nil {
+			return wrapDBErr("prune", "refresh consumed operation versions", err)
 		}
 	}
 
@@ -177,6 +189,41 @@ func (r *JobRepository) DeleteOrganizedOlderThan(ctx context.Context, date time.
 		}
 		return nil
 	})
+}
+
+func (r *JobRepository) refreshConsumedPrunedOps(ctx context.Context, original []models.BatchFileOperation, current *[]models.BatchFileOperation) error {
+	if len(original) == 0 {
+		return nil
+	}
+	var live []models.BatchFileOperation
+	for start := 0; start < len(original); start += pruneDeleteBatchSize {
+		end := start + pruneDeleteBatchSize
+		if end > len(original) {
+			end = len(original)
+		}
+		ids := make([]uint, 0, end-start)
+		for _, op := range original[start:end] {
+			ids = append(ids, op.ID)
+		}
+		var chunk []models.BatchFileOperation
+		if err := r.GetDB().WithContext(ctx).Where("id IN ?", ids).Find(&chunk).Error; err != nil {
+			return err
+		}
+		live = append(live, chunk...)
+	}
+	byID := make(map[uint]models.BatchFileOperation, len(live))
+	for _, op := range live {
+		byID[op.ID] = op
+	}
+	for i := range *current {
+		if !hasReplacementLedger([]models.BatchFileOperation{original[i]}) {
+			continue
+		}
+		if liveOp, ok := byID[original[i].ID]; ok && !hasReplacementLedger([]models.BatchFileOperation{liveOp}) {
+			(*current)[i] = liveOp
+		}
+	}
+	return nil
 }
 
 const pruneDeleteBatchSize = 200

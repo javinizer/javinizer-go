@@ -217,7 +217,6 @@ func TestReplacementSweeper_PruneOperationBackups_RemovesOnlyUnreferenced(t *tes
 		writeSweepFile(t, fs, backup, "old", time.Hour)
 		op := journalRow(t, repo, "job-pruned", "PRUNE-001", dest, backup, 1, models.RevertStatusApplied)
 		markInstalled(t, repo, op, "")
-		delete(repo.ops, op.ID)
 
 		err := NewReplacementSweeper(fs, repo).PruneOperationBackups(ctx, []models.BatchFileOperation{*op})
 		require.NoError(t, err)
@@ -239,7 +238,6 @@ func TestReplacementSweeper_PruneOperationBackups_RemovesOnlyUnreferenced(t *tes
 		markInstalled(t, repo, pruned, "")
 		live := journalRow(t, repo, "job-live", "PRUNE-003", dest, backup, 2, models.RevertStatusApplied)
 		markInstalled(t, repo, live, "")
-		delete(repo.ops, pruned.ID)
 
 		err := NewReplacementSweeper(fs, repo).PruneOperationBackups(ctx, []models.BatchFileOperation{*pruned})
 		require.NoError(t, err)
@@ -284,6 +282,24 @@ func TestReplacementSweeper_PruneOperationBackups_RemovesOnlyUnreferenced(t *tes
 		require.NoError(t, readErr)
 		require.Equal(t, "foreign", string(got))
 	})
+}
+
+func TestReplacementSweeper_PruneOperationBackups_PendingMarkerFailureBlocksCleanup(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	repo := newP3OpRepo()
+	dest := "/out/PRUNE-PENDING-FAIL/poster.jpg"
+	backup := dest + ".dlbak." + p3HexA
+	require.NoError(t, fs.MkdirAll("/out/PRUNE-PENDING-FAIL", 0o755))
+	require.NoError(t, afero.WriteFile(fs, dest, []byte("current"), 0o644))
+	require.NoError(t, afero.WriteFile(fs, backup, []byte("old"), 0o644))
+	op := installedPruneCandidate(t, repo, "job-pending-fail", "PRUNE-PENDING-FAIL", dest, backup)
+	delete(repo.ops, op.ID)
+
+	err := NewReplacementSweeper(fs, repo).PruneOperationBackups(context.Background(), []models.BatchFileOperation{*op})
+	require.Contains(t, err.Error(), "owner row")
+	exists, statErr := afero.Exists(fs, backup)
+	require.NoError(t, statErr)
+	require.True(t, exists)
 }
 
 func TestReplacementSweeper_PruneOperationBackups_BusyMarkerRetainsBackup(t *testing.T) {
@@ -462,7 +478,6 @@ func installedPruneCandidate(t *testing.T, repo *p3OpRepo, jobID, movieID, dest,
 	gf.Replacements[0].Installed = true
 	op.GeneratedFiles = models.MarshalLedgerJSON(gf)
 	require.NoError(t, repo.Update(context.Background(), op))
-	delete(repo.ops, op.ID)
 	return op
 }
 
@@ -852,11 +867,16 @@ func TestReplacementSweeper_RetractConsumedEntries_Branches(t *testing.T) {
 
 type retractErrorRepo struct {
 	*p3OpRepo
-	err error
+	err   error
+	calls int
 }
 
-func (r *retractErrorRepo) UpdateJournalInTx(context.Context, uint, database.JournalUpdateFn) error {
-	return r.err
+func (r *retractErrorRepo) UpdateJournalInTx(ctx context.Context, id uint, fn database.JournalUpdateFn) error {
+	r.calls++
+	if r.calls > 1 {
+		return r.err
+	}
+	return r.p3OpRepo.UpdateJournalInTx(ctx, id, fn)
 }
 
 func TestReplacementSweeper_PruneOperationBackups_RetractionFailureSurfaces(t *testing.T) {

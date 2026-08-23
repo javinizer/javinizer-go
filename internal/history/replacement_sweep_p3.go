@@ -543,7 +543,7 @@ pruneEntries:
 		}
 	}
 	if len(errs) == 0 {
-		return nil
+		return s.retractConsumedEntries(context.Background(), consumed, candidateIDs)
 	}
 	retractCtx := ctx
 	if retractCtx.Err() != nil {
@@ -658,6 +658,9 @@ func (s *ReplacementSweeper) pruneOperationBackup(ctx context.Context, opID uint
 	if claim != nil && claim.abandonIfRevoked("prune backup quarantine", entry.Backup, entry.Destination) {
 		return false, fsutil.ErrReplacementBusy
 	}
+	if err := s.markPruneCleanupPending(opID, entry); err != nil {
+		return false, err
+	}
 	hold, err := quarantineReplacementBackupForPrune(s.fs, entry.Backup, "organized-job prune", &entry, nil)
 	if err != nil {
 		if hold != nil && hold.moved {
@@ -690,6 +693,14 @@ func (s *ReplacementSweeper) joinPruneRestoreFailure(opID uint, entry models.Rep
 		return errors.Join(cause, restoreErr, s.persistPruneQuarantine(opID, entry, hold.quarantine))
 	}
 	return cause
+}
+
+// markPruneCleanupPending durably records the two-phase cleanup intent
+// before any backup bytes move. A crash leaves a retryable pending entry.
+func (s *ReplacementSweeper) markPruneCleanupPending(opID uint, entry models.ReplacementEntry) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return markReplacementEntryRestorePendingKind(ctx, s.repo, opID, sweepSlash(entry.Backup), models.RestorePendingKindClean)
 }
 
 // markPruneRearmRefused records that the original backup name is no longer

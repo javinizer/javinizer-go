@@ -260,6 +260,24 @@ func TestJobRepository_DeleteOrganizedOlderThan_PruneHookRunsBeforeDelete(t *tes
 	require.Equal(t, op.GeneratedFiles, pruned[0].GeneratedFiles)
 }
 
+func TestJobRepository_DeleteOrganizedOlderThan_PruneHookRefreshFailureRetainsRows(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	jobRepo := NewJobRepository(db)
+	opRepo := NewBatchFileOperationRepository(db)
+	organizedAt := time.Now().UTC().Add(-48 * time.Hour)
+	job := &models.Job{ID: "organized-refresh-failure", Status: models.JobStatusOrganized, StartedAt: organizedAt, OrganizedAt: &organizedAt}
+	require.NoError(t, jobRepo.Create(context.Background(), job))
+	op := &models.BatchFileOperation{BatchJobID: job.ID, GeneratedFiles: models.MarshalLedgerJSON(models.GeneratedFilesJSON{Replacements: []models.ReplacementEntry{{Destination: "/refresh/dest", Backup: "/refresh/backup", Installed: true}}})}
+	require.NoError(t, opRepo.Create(context.Background(), op))
+	jobRepo.SetOrganizedJobPruneHook(func(context.Context, []models.BatchFileOperation) error {
+		return db.DB.Exec("DROP TABLE batch_file_operations").Error
+	})
+
+	err := jobRepo.DeleteOrganizedOlderThan(context.Background(), time.Now().UTC().Add(-24*time.Hour))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "refresh consumed operation versions")
+}
+
 func TestJobRepository_DeleteOrganizedOlderThan_HookFailureRestoresRows(t *testing.T) {
 	db := newDatabaseTestDB(t)
 	jobRepo := NewJobRepository(db)
@@ -317,6 +335,23 @@ func TestJobRepository_DeleteOrganizedOlderThan_OperationDeleteFailure(t *testin
 	err := repo.DeleteOrganizedOlderThan(context.Background(), time.Now().UTC().Add(-24*time.Hour))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "delete organized job operations")
+}
+
+func TestJobRepository_RefreshConsumedPrunedOps(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewJobRepository(db)
+	opRepo := NewBatchFileOperationRepository(db)
+	job := &models.Job{ID: "refresh-prune-job", Status: models.JobStatusOrganized, Files: "[]", StartedAt: time.Now().UTC(), OrganizedAt: ptrTime(time.Now().UTC().Add(-48 * time.Hour))}
+	require.NoError(t, repo.Create(context.Background(), job))
+	op := &models.BatchFileOperation{BatchJobID: job.ID, GeneratedFiles: models.MarshalLedgerJSON(models.GeneratedFilesJSON{Replacements: []models.ReplacementEntry{{Destination: "/refresh/dest", Backup: "/refresh/backup", Installed: true}}})}
+	require.NoError(t, opRepo.Create(context.Background(), op))
+	require.NoError(t, opRepo.UpdateJournalInTx(context.Background(), op.ID, func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
+		return models.GeneratedFilesJSON{}, true, nil
+	}))
+	current := []models.BatchFileOperation{*op}
+	require.NoError(t, repo.refreshConsumedPrunedOps(context.Background(), []models.BatchFileOperation{*op}, &current))
+	require.Equal(t, models.MarshalLedgerJSON(models.GeneratedFilesJSON{}), current[0].GeneratedFiles)
+	require.NoError(t, repo.refreshConsumedPrunedOps(context.Background(), nil, &current))
 }
 
 func TestJobRepository_DeleteOrganizedOlderThan_NoJobs(t *testing.T) {
