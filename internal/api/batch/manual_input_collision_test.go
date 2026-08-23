@@ -14,14 +14,18 @@ func TestValidateManualInputIDCollisionsCoverage(t *testing.T) {
 	})
 
 	t.Run("filename-only duplicate siblings are allowed", func(t *testing.T) {
+		fileMatcher, err := matcher.NewMatcher(&matcher.Config{})
+		require.NoError(t, err)
 		files := []string{"/a/IPX-535.mp4", "/b/IPX-535.mp4", "/c/OTHER-001.mp4"}
-		err := validateManualInputIDCollisions(map[string]string{"/c/OTHER-001.mp4": ""}, nil, files, nil)
+		err = validateManualInputIDCollisions(map[string]string{"/c/OTHER-001.mp4": ""}, nil, files, fileMatcher)
 		require.NoError(t, err)
 	})
 
 	t.Run("multipart siblings with one override are allowed", func(t *testing.T) {
+		fileMatcher, err := matcher.NewMatcher(&matcher.Config{})
+		require.NoError(t, err)
 		files := []string{"/a/IPX-535.mp4", "/b/IPX-535.mp4"}
-		err := validateManualInputIDCollisions(map[string]string{"/a/IPX-535.mp4": "IPX-535"}, nil, files, nil)
+		err = validateManualInputIDCollisions(map[string]string{"/a/IPX-535.mp4": "IPX-535"}, nil, files, fileMatcher)
 		require.NoError(t, err)
 	})
 
