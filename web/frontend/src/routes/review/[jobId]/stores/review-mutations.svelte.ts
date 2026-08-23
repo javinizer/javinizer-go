@@ -68,6 +68,7 @@ interface ReviewMutationsDeps {
 		resultId: string,
 		crop: PosterCropBox,
 		maxPosterHeight?: number,
+		identity?: { revision: number; fingerprint: string },
 	) => Promise<PosterCropResponse>;
 	batchExcludeMovies: (
 		jobId: string,
@@ -404,13 +405,15 @@ const ops = Array.from(latestByFamily.entries());
 			resultId,
 			crop,
 			maxPosterHeight,
+			identity,
 		}: {
 			jobId: string;
 			resultId: string;
 			crop: PosterCropBox;
 			maxPosterHeight?: number;
+			identity?: { revision: number; fingerprint: string };
 		}) => {
-			return deps.updateBatchMoviePosterCrop(mutationJobId, resultId, crop, maxPosterHeight);
+			return deps.updateBatchMoviePosterCrop(mutationJobId, resultId, crop, maxPosterHeight, identity);
 		},
 		onSuccess: (response: PosterCropResponse, { resultId }) => {
 			// Sync the server-echoed crop state into the visible job-result state
@@ -494,8 +497,14 @@ const ops = Array.from(latestByFamily.entries());
 		},
 	}));
 
-	async function applyPosterCropAsync(jobId: string, resultId: string, crop: PosterCropBox, maxPosterHeight?: number) {
-		await posterCropMutation.mutateAsync({ jobId, resultId, crop, maxPosterHeight });
+	async function applyPosterCropAsync(
+		jobId: string,
+		resultId: string,
+		crop: PosterCropBox,
+		maxPosterHeight?: number,
+		identity?: { revision: number; fingerprint: string },
+	) {
+		await posterCropMutation.mutateAsync({ jobId, resultId, crop, maxPosterHeight, identity });
 	}
 
 	const bulkExcludeMutation = createMutation(() => ({
@@ -627,6 +636,18 @@ const ops = Array.from(latestByFamily.entries());
 							// codex r24: advance the CAS baseline without a refetch.
 							...(data.revision !== undefined ? { revision: data.revision } : {}),
 						};
+					}
+				}
+				if (data.revisions && Object.keys(data.revisions).length > 0) {
+					const resultToPath = new Map(
+						Object.entries(updatedJob.results).map(([fp, r]) => [(r as FileResult).result_id, fp] as const),
+					);
+					for (const [rid, revision] of Object.entries(data.revisions)) {
+						const filePath = resultToPath.get(rid);
+						if (filePath) {
+							const r = updatedJob.results[filePath] as FileResult;
+							updatedJob.results[filePath] = { ...r, revision };
+						}
 					}
 				}
 				deps.skipJobSync();

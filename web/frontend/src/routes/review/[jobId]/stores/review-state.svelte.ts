@@ -36,6 +36,7 @@ import {
 } from '../logic/rescrape-controller';
 import {
 	createPosterCropController,
+	type PosterAssetIdentity,
 	type PosterCropDragState,
 } from '../logic/poster-crop-controller';
 import { createReviewPageController } from '../logic/review-page-controller';
@@ -559,12 +560,15 @@ export function createReviewState(pageStore: Page) {
 			apiClient.excludeBatchMovie(mutationJobId, resultId),
 		updateBatchMovie: (mutationJobId, resultId, movie, expectedResultRevision) =>
 			apiClient.updateBatchMovie(mutationJobId, resultId, movie, expectedResultRevision),
-		updateBatchMoviePosterCrop: (mutationJobId, resultId, crop, maxPosterHeight) =>
+		updateBatchMoviePosterCrop: (mutationJobId, resultId, crop, maxPosterHeight, identity) =>
 			apiClient.updateBatchMoviePosterCrop(mutationJobId, resultId, {
 				...crop,
 				// Omit max_poster_height when null OR undefined so a nullable crop
 				// height is never serialized as `max_poster_height: null`.
 				...(maxPosterHeight != null ? { max_poster_height: maxPosterHeight } : {}),
+				...(identity
+					? { expected_poster_revision: identity.revision, expected_poster_fingerprint: identity.fingerprint }
+					: {}),
 			}),
 		batchExcludeMovies: (mutationJobId, request) =>
 			apiClient.batchExcludeMovies(mutationJobId, request),
@@ -1066,9 +1070,23 @@ export function createReviewState(pageStore: Page) {
 			cropDragState = state;
 		},
 		getPosterCropStates: () => posterCropStates,
+		getCropAssetIdentity: async (): Promise<PosterAssetIdentity | null> => {
+			if (!cropSourceURL) return null;
+			const response = await fetch(cropSourceURL, {
+				method: "HEAD",
+				credentials: "same-origin",
+				headers: BaseClient.getSessionID() ? { "X-Session-ID": BaseClient.getSessionID()! } : {},
+			});
+			if (!response.ok) return null;
+			const rawRevision = response.headers.get("X-Poster-Revision");
+			const fingerprint = (response.headers.get("X-Poster-Fingerprint") ?? "").toLowerCase();
+			const revision = rawRevision === null ? Number.NaN : Number(rawRevision);
+			if (!Number.isSafeInteger(revision) || revision < 0 || !/^[0-9a-f]{64}$/.test(fingerprint)) return null;
+			return { revision, fingerprint };
+		},
 		applyPosterFromUrlAsync: (resultId, url) => mutations.applyPosterFromUrlAsync(resultId, url),
-		mutatePosterCropAsync: (mutationJobId, resultId, crop, maxPosterHeightArg) => {
-			return mutations.applyPosterCropAsync(mutationJobId, resultId, crop, maxPosterHeightArg);
+		mutatePosterCropAsync: (mutationJobId, resultId, crop, maxPosterHeightArg, identity) => {
+			return mutations.applyPosterCropAsync(mutationJobId, resultId, crop, maxPosterHeightArg, identity);
 		},
 		setCropApplying: (applying) => { cropApplying = applying; }
 	});

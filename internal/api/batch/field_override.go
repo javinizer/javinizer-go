@@ -138,6 +138,7 @@ func overrideBatchMovieField(rt *core.APIRuntime) gin.HandlerFunc {
 			FieldSources:   fieldSources,
 			ActressSources: actressSources,
 			Revision:       revEcho,
+			Revisions:      familyRevisions(job, resultID),
 		})
 	}
 }

@@ -12,6 +12,8 @@ export interface CropEcho {
 	original_poster_url?: string;
 	original_cropped_poster_url?: string;
 	original_should_crop_poster?: boolean | null;
+	poster_revision?: number;
+	poster_fingerprint?: string;
 }
 
 // applyCropEcho merges the server-echoed crop state into a movie — used for

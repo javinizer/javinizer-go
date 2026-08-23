@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/javinizer/javinizer-go/internal/assetidentity"
 	"github.com/javinizer/javinizer-go/internal/downloader"
 	httpclientiface "github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/javinizer/javinizer-go/internal/imageutil"
@@ -43,8 +44,10 @@ type cropResult struct {
 	SourceFull bool
 	// SourceWidth/SourceHeight are the pixel dimensions of the image the crop
 	// was measured against; zero when they could not be decoded.
-	SourceWidth  int
-	SourceHeight int
+	SourceWidth       int
+	SourceHeight      int
+	SourceRevision    uint64
+	SourceFingerprint string
 }
 
 // PosterManagerInterface defines the contract for poster operations.
@@ -132,6 +135,10 @@ func (pm *PosterManager) CropWithBounds(_ context.Context, jobID, posterID strin
 	if _, err := pm.fs.Stat(sourcePath); err != nil {
 		return nil, fmt.Errorf("source poster not found for manual crop: %w", err)
 	}
+	identity, err := assetidentity.Measure(pm.fs, sourcePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to measure source poster: %w", err)
+	}
 
 	croppedPath := filepath.Join(tempPosterDir, fmt.Sprintf("%s.jpg", posterID))
 
@@ -166,10 +173,12 @@ func (pm *PosterManager) CropWithBounds(_ context.Context, jobID, posterID strin
 	croppedURL := fmt.Sprintf("/api/v1/temp/posters/%s/%s.jpg?v=%d", url.PathEscape(jobID), url.PathEscape(posterID), time.Now().UnixMilli())
 
 	result := &cropResult{
-		CroppedPath: croppedPath,
-		FullPath:    sourcePath,
-		CroppedURL:  croppedURL,
-		SourceFull:  sourceIsFull,
+		CroppedPath:       croppedPath,
+		FullPath:          sourcePath,
+		CroppedURL:        croppedURL,
+		SourceFull:        sourceIsFull,
+		SourceRevision:    identity.Revision,
+		SourceFingerprint: identity.Fingerprint,
 	}
 	// Record the source dimensions; a decode failure leaves them zero and the
 	// caller treats the geometry as not applyable (pre-change behavior).
@@ -344,6 +353,11 @@ func (pm *PosterManager) DownloadFromURL(ctx context.Context, jobID, posterID, r
 		_ = pm.fs.Remove(cropParked)
 	}()
 
+	identity, err := assetidentity.Measure(pm.fs, tempFullPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to measure downloaded poster: %w", err)
+	}
+
 	// Attempt automatic crop; fall back to a full-image copy on failure.
 	if _, err := imageutil.CropPosterFromCover(pm.fs, tempFullPath, tempCroppedPath, 0); err != nil {
 		_ = pm.fs.Remove(tempCroppedPath)
@@ -357,9 +371,12 @@ func (pm *PosterManager) DownloadFromURL(ctx context.Context, jobID, posterID, r
 
 	success = true
 	return &cropResult{
-		CroppedPath: tempCroppedPath,
-		FullPath:    tempFullPath,
-		CroppedURL:  croppedURL,
+		CroppedPath:       tempCroppedPath,
+		FullPath:          tempFullPath,
+		CroppedURL:        croppedURL,
+		SourceFull:        true,
+		SourceRevision:    identity.Revision,
+		SourceFingerprint: identity.Fingerprint,
 	}, nil
 }
 

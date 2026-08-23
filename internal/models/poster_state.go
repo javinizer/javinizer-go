@@ -1,6 +1,9 @@
 package models
 
-import "math"
+import (
+	"encoding/hex"
+	"math"
+)
 
 // PosterState groups the seven poster/cropping fields extracted from Movie.
 // Embedded in Movie with gorm:"embedded" so column names are preserved (zero-migration).
@@ -54,6 +57,10 @@ type CropBounds struct {
 	// longer matches the downloaded image, so same-URL source swaps fall back
 	// to pre-change behavior instead of cropping the wrong image.
 	SourceAspect float64 `json:"source_aspect,omitempty"`
+	// SourceFingerprint binds the normalized geometry to the exact full-size
+	// bytes measured in the review UI. Empty is retained for legacy envelopes;
+	// non-empty values must be a canonical SHA-256 hex digest.
+	SourceFingerprint string `json:"source_fingerprint,omitempty"`
 }
 
 // Valid reports whether the normalized crop geometry is applyable: every
@@ -70,6 +77,14 @@ func (b CropBounds) Valid() bool {
 	// aspect is invalid — never "skip the guard" on corrupted geometry.
 	if b.SourceAspect < 0 || math.IsNaN(b.SourceAspect) || math.IsInf(b.SourceAspect, 0) {
 		return false
+	}
+	if b.SourceFingerprint != "" {
+		if len(b.SourceFingerprint) != 64 {
+			return false
+		}
+		if _, err := hex.DecodeString(b.SourceFingerprint); err != nil {
+			return false
+		}
 	}
 	const tol = 1e-9
 	return b.Width > 0 && b.Height > 0 && b.X+b.Width <= 1+tol && b.Y+b.Height <= 1+tol

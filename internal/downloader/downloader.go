@@ -57,6 +57,10 @@ type DownloadCmd struct {
 	DownloadExtrafanart    *bool // Optional override for config.DownloadExtrafanart; nil = use config
 	OverwriteExistingMedia bool
 	Dedup                  *sync.Map
+	// DedupOwnerKey/LogicalKey let apply prime a deterministic owner for
+	// shared poster destinations before fan-out workers start.
+	DedupOwnerKey   string
+	DedupLogicalKey string
 	// OperationID + Recorder arm the revert ledger for destructive overwrites
 	// (POSTER-WRITE-HARDENING P3): any replaced pre-existing byte pair is
 	// journaled (backup-aside + record BEFORE the swap). An unarmed overwrite
@@ -231,7 +235,7 @@ func (d *Downloader) Download(ctx context.Context, cmd DownloadCmd) (*DownloadOu
 		extrafanartEnabled = *cmd.DownloadExtrafanart
 	}
 
-	results, err := d.downloadAllWithExtrafanart(ctx, cmd.Movie, cmd.DestDir, cmd.Multipart, extrafanartEnabled, cmd.OverwriteExistingMedia, cmd.Dedup, downloadLedger{opID: cmd.OperationID, recorder: cmd.Recorder})
+	results, err := d.downloadAllWithExtrafanart(ctx, cmd.Movie, cmd.DestDir, cmd.Multipart, extrafanartEnabled, cmd.OverwriteExistingMedia, cmd.Dedup, downloadLedger{opID: cmd.OperationID, recorder: cmd.Recorder}, downloadOwnerOptions{logicalKey: cmd.DedupLogicalKey, ownerKey: cmd.DedupOwnerKey})
 	createdPaths := make([]string, 0, len(results))
 	downloadedPaths := make([]string, 0, len(results))
 	for _, r := range results {

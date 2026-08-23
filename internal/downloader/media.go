@@ -7,10 +7,12 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/afero"
 
+	"github.com/javinizer/javinizer-go/internal/assetidentity"
 	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/imageutil"
 	"github.com/javinizer/javinizer-go/internal/logging"
@@ -33,8 +35,10 @@ func (d *Downloader) downloadCover(ctx context.Context, movie *models.Movie, des
 func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, destDir string, multipart *MultipartInfo, options ...any) (finalResult *DownloadResult, finalErr error) {
 	startTime := time.Now()
 	overwriteExisting, dedup := resolveDownloadOptions(options)
+	owner := resolveDownloadOwnerOptions(options)
 	ledger := resolveDownloadLedger(options)
 	if !d.config.DownloadPoster {
+		releaseDownloadOwnerClaim(dedup, owner.logicalKey, owner.ownerKey)
 		return &DownloadResult{Type: MediaTypePoster, Downloaded: false}, nil
 	}
 
@@ -43,17 +47,24 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 		posterURL = movie.Poster.CoverURL
 	}
 	if posterURL == "" {
+		releaseDownloadOwnerClaim(dedup, owner.logicalKey, owner.ownerKey)
 		return &DownloadResult{Type: MediaTypePoster, Downloaded: false}, nil
 	}
 
 	tmplCtx := d.buildTemplateContext(movie, multipart)
 	destPath := d.pathResolver.ResolvePosterPath(movie, nil, true, tmplCtx, destDir)
+	if !overwriteExisting {
+		releaseDownloadOwnerClaim(dedup, owner.logicalKey, owner.ownerKey)
+	}
 
 	bounds := movie.Poster.PosterCropBounds
 	geometryUsable := bounds != nil && movie.Poster.PosterCropSourceFull && bounds.Valid()
 
 	if !geometryUsable && !movie.Poster.ShouldCropPoster {
-		return d.download(ctx, posterURL, destPath, MediaTypePoster, overwriteExisting, dedup, ledger)
+		if !overwriteExisting {
+			releaseDownloadOwnerClaim(dedup, owner.logicalKey, owner.ownerKey)
+		}
+		return d.download(ctx, posterURL, destPath, MediaTypePoster, overwriteExisting, dedup, ledger, owner)
 	}
 
 	result := &DownloadResult{
@@ -64,7 +75,7 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 	if overwriteExisting {
 		var skipped bool
 		var reservationErr error
-		reservation, skipped, reservationErr = acquireDownloadReservation(ctx, dedup, destPath)
+		reservation, skipped, reservationErr = acquireDownloadReservation(ctx, dedup, destPath, owner.logicalKey, owner.ownerKey)
 		if reservationErr != nil {
 			result.Error = reservationErr
 			result.Duration = time.Since(startTime)
@@ -456,6 +467,20 @@ func (d *Downloader) cropDownloadedPoster(tempPath, dst string, bounds *models.C
 		logging.Warnf("downloadPoster: cannot decode downloaded source for manual crop: %v", derr)
 		return false, installedDestIdentity{}
 	}
+	// P4 source identity guard: aspect alone cannot distinguish a same-sized
+	// image whose pixels were replaced at the same URL. Legacy envelopes have
+	// no fingerprint and retain the pre-P4 aspect-only floor.
+	if bounds.SourceFingerprint != "" {
+		identity, ierr := assetidentity.Measure(d.fs, tempPath)
+		if ierr != nil {
+			logging.Warnf("downloadPoster: cannot fingerprint downloaded source for manual crop: %v", ierr)
+			return false, installedDestIdentity{}
+		}
+		if !strings.EqualFold(identity.Fingerprint, bounds.SourceFingerprint) {
+			logging.Warnf("downloadPoster: manual crop fingerprint mismatch (crop %s, downloaded %s); falling back", bounds.SourceFingerprint, identity.Fingerprint)
+			return false, installedDestIdentity{}
+		}
+	}
 
 	// Aspect guard: the geometry was normalized against the review-time
 	// source; if the downloaded image no longer matches that aspect, the
@@ -629,7 +654,8 @@ func (d *Downloader) downloadAllWithExtrafanart(ctx context.Context, movie *mode
 		results = append(results, *coverResult)
 	}
 
-	posterResult, _ := d.downloadPoster(ctx, movie, destDir, multipart, overwriteExisting, dedup, resolveDownloadLedger(options))
+	owner := resolveDownloadOwnerOptions(options)
+	posterResult, _ := d.downloadPoster(ctx, movie, destDir, multipart, overwriteExisting, dedup, resolveDownloadLedger(options), owner)
 	if posterResult != nil {
 		if posterResult.Error != nil {
 			logging.Warnf("downloadAll: poster download failed for %s: %v", movie.ID, posterResult.Error)

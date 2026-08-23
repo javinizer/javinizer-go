@@ -159,6 +159,7 @@ func rescrapeBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 			FieldSources:   rr.FieldSources,
 			ActressSources: rr.ActressSources,
 			Revision:       rev,
+			Revisions:      familyRevisions(job, resultID),
 		})
 	}
 }

@@ -5,11 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/javinizer/javinizer-go/internal/downloader"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/panicutil"
@@ -107,9 +109,24 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 		})
 	}
 
+	// Apply workers are intentionally concurrent, so slice order alone cannot
+	// choose a shared-destination owner. Sort once and prime the downloader
+	// claims before any goroutine starts; the first file path owns each folded
+	// movie key, while failed owners still release the claim for retry.
+	sort.Slice(items, func(i, j int) bool { return items[i].filePath < items[j].filePath })
+	owners := make(map[string]string, len(items))
+	for _, item := range items {
+		key := strings.ToLower(strings.TrimSpace(item.movie.ID))
+		if key != "" {
+			if _, exists := owners[key]; !exists {
+				owners[key] = item.filePath
+			}
+		}
+	}
 	total := len(items)
 	var processed int64
 	inputs.Dedup = &sync.Map{}
+	downloader.PrimeDownloadOwners(inputs.Dedup, owners)
 	outcomes := fanout.BoundedFanOut(ctx, inputs.Concurrency.MaxWorkers, items,
 		func(egCtx context.Context, item applyItem) applyFileOutcome {
 			outcome := applyFile(egCtx, wf, item.filePath, item.fileResult, item.movie, inputs, cfg)
@@ -235,6 +252,8 @@ func buildApplyCmd(
 		DownloadExtrafanart:    cfg.DownloadExtrafanart,
 		OverwriteExistingMedia: cfg.OverwriteExistingMedia,
 		Dedup:                  inputs.Dedup,
+		DedupOwnerKey:          filePath,
+		DedupLogicalKey:        strings.ToLower(strings.TrimSpace(movie.ID)),
 		OperationMode:          cfg.OperationModeOverride,
 	}
 
@@ -256,6 +275,7 @@ func buildApplyCmd(
 		applyCmd.Movie = afc.Movie
 		applyCmd.Match = afc.Match
 		applyCmd.DestPath = afc.Destination
+		applyCmd.DedupLogicalKey = strings.ToLower(strings.TrimSpace(afc.Movie.ID))
 	}
 
 	return applyCmd, afc, true

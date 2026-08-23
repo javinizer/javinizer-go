@@ -4657,6 +4657,13 @@ const docTemplate = `{
                 "revision": {
                     "description": "Revision is the fresh post-commit revision of the rescraped result\n(D12) — clients advance their CAS baseline from it.",
                     "type": "integer"
+                },
+                "revisions": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer",
+                        "format": "int64"
+                    }
                 }
             }
         },
@@ -4918,6 +4925,14 @@ const docTemplate = `{
                 "revision": {
                     "description": "Revision is the revision AFTER the override commit (D12).",
                     "type": "integer"
+                },
+                "revisions": {
+                    "description": "Revisions carries fresh revisions for every affected family part.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer",
+                        "format": "int64"
+                    }
                 }
             }
         },
@@ -5796,6 +5811,13 @@ const docTemplate = `{
         "github_com_javinizer_javinizer-go_internal_api_contracts.PosterCropRequest": {
             "type": "object",
             "properties": {
+                "expected_poster_fingerprint": {
+                    "type": "string"
+                },
+                "expected_poster_revision": {
+                    "description": "ExpectedPosterRevision/Fingerprint bind the crop camera to the exact\ninstalled full-size bytes measured by the review client. Both are\noptional only for legacy clients; if either is supplied, both are\nrequired and validated.",
+                    "type": "integer"
+                },
                 "height": {
                     "type": "integer",
                     "minimum": 1
@@ -5842,6 +5864,13 @@ const docTemplate = `{
                     "description": "PosterCropSourceFull echoes whether the bounds were measured against the\nfull-size source. Clients must round-trip it with the bounds: the apply\ngate refuses geometry without it.",
                     "type": "boolean"
                 },
+                "poster_fingerprint": {
+                    "type": "string"
+                },
+                "poster_revision": {
+                    "description": "PosterRevision/Fingerprint identify the installed full-size bytes.",
+                    "type": "integer"
+                },
                 "revision": {
                     "description": "Revision is the revision AFTER the crop commit (D12).",
                     "type": "integer"
@@ -5876,6 +5905,13 @@ const docTemplate = `{
             "properties": {
                 "cropped_poster_url": {
                     "type": "string"
+                },
+                "poster_fingerprint": {
+                    "type": "string"
+                },
+                "poster_revision": {
+                    "description": "PosterRevision/Fingerprint identify the installed full-size bytes.",
+                    "type": "integer"
                 },
                 "poster_url": {
                     "type": "string"
@@ -7662,6 +7698,10 @@ const docTemplate = `{
                 "source_aspect": {
                     "description": "SourceAspect is the width/height ratio of the source image the crop was\nmeasured against. The apply phase refuses geometry whose aspect no\nlonger matches the downloaded image, so same-URL source swaps fall back\nto pre-change behavior instead of cropping the wrong image.",
                     "type": "number"
+                },
+                "source_fingerprint": {
+                    "description": "SourceFingerprint binds the normalized geometry to the exact full-size\nbytes measured in the review UI. Empty is retained for legacy envelopes;\nnon-empty values must be a canonical SHA-256 hex digest.",
+                    "type": "string"
                 },
                 "width": {
                     "type": "number"

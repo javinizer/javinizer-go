@@ -3,11 +3,14 @@ package batch
 import (
 	"fmt"
 	"net/url"
+	"path/filepath"
+	"sort"
 	"strings"
 	"unicode"
 	"unicode/utf8"
 
 	"github.com/javinizer/javinizer-go/internal/matcher"
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/scrape"
 )
 
@@ -102,5 +105,45 @@ func validateAndSanitizeManualInputs(
 		}
 		result[path] = sanitized
 	}
+	if err := validateManualInputIDCollisions(result, registry, files); err != nil {
+		return nil, err
+	}
 	return result, nil
+}
+
+// validateManualInputIDCollisions rejects two submitted overrides that resolve
+// to the same canonical scrape ID. Without this intake fence, two unrelated
+// files can be silently grouped into one movie family and one scrape result
+// overwrites the other. Multipart siblings remain supported: callers submit
+// one override and sibling propagation applies it to the discovered parts.
+func validateManualInputIDCollisions(inputs map[string]string, registry matcher.URLScraperLister, files []string) error {
+	paths := make([]string, 0, len(inputs))
+	for path := range inputs {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	if len(paths) == 0 {
+		return nil
+	}
+	m, _ := matcher.NewMatcher(&matcher.Config{})
+	matchedIDs := make(map[string]string, len(files))
+	for _, path := range files {
+		info := models.FileMatchInfo{Name: filepath.Base(path), Extension: filepath.Ext(path)}
+		if match := m.MatchFile(info); match != nil && strings.TrimSpace(match.ID) != "" {
+			matchedIDs[path] = strings.ToLower(strings.TrimSpace(match.ID))
+		}
+	}
+	for _, path := range paths {
+		parsed, err := matcher.ParseInput(inputs[path], registry)
+		if err != nil || parsed == nil || strings.TrimSpace(parsed.ID) == "" {
+			continue
+		}
+		id := strings.ToLower(strings.TrimSpace(parsed.ID))
+		for otherPath, existingID := range matchedIDs {
+			if otherPath != path && existingID == id {
+				return fmt.Errorf("manual input ID %q for %q collides with the submitted file %q", parsed.ID, path, otherPath)
+			}
+		}
+	}
+	return nil
 }

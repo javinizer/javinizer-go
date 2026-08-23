@@ -338,6 +338,11 @@ definitions:
           Revision is the fresh post-commit revision of the rescraped result
           (D12) — clients advance their CAS baseline from it.
         type: integer
+      revisions:
+        additionalProperties:
+          format: int64
+          type: integer
+        type: object
     type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.BatchScrapeRequest:
     properties:
@@ -535,6 +540,12 @@ definitions:
       revision:
         description: Revision is the revision AFTER the override commit (D12).
         type: integer
+      revisions:
+        additionalProperties:
+          format: int64
+          type: integer
+        description: Revisions carries fresh revisions for every affected family part.
+        type: object
     type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.FileInfo:
     properties:
@@ -1146,6 +1157,15 @@ definitions:
     type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.PosterCropRequest:
     properties:
+      expected_poster_fingerprint:
+        type: string
+      expected_poster_revision:
+        description: |-
+          ExpectedPosterRevision/Fingerprint bind the crop camera to the exact
+          installed full-size bytes measured by the review client. Both are
+          optional only for legacy clients; if either is supplied, both are
+          required and validated.
+        type: integer
       height:
         minimum: 1
         type: integer
@@ -1187,6 +1207,11 @@ definitions:
           full-size source. Clients must round-trip it with the bounds: the apply
           gate refuses geometry without it.
         type: boolean
+      poster_fingerprint:
+        type: string
+      poster_revision:
+        description: PosterRevision/Fingerprint identify the installed full-size bytes.
+        type: integer
       revision:
         description: Revision is the revision AFTER the crop commit (D12).
         type: integer
@@ -1216,6 +1241,11 @@ definitions:
     properties:
       cropped_poster_url:
         type: string
+      poster_fingerprint:
+        type: string
+      poster_revision:
+        description: PosterRevision/Fingerprint identify the installed full-size bytes.
+        type: integer
       poster_url:
         type: string
       revision:
@@ -2473,6 +2503,12 @@ definitions:
           longer matches the downloaded image, so same-URL source swaps fall back
           to pre-change behavior instead of cropping the wrong image.
         type: number
+      source_fingerprint:
+        description: |-
+          SourceFingerprint binds the normalized geometry to the exact full-size
+          bytes measured in the review UI. Empty is retained for legacy envelopes;
+          non-empty values must be a canonical SHA-256 hex digest.
+        type: string
       width:
         type: number
       x:

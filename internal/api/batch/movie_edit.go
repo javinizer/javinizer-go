@@ -14,6 +14,7 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/api/contracts"
 	"github.com/javinizer/javinizer-go/internal/api/core"
+	"github.com/javinizer/javinizer-go/internal/assetidentity"
 
 	"github.com/gin-gonic/gin"
 
@@ -82,6 +83,18 @@ func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 			return
 		}
 		movieID := result.FileMatchInfo.MovieID
+
+		// P4 write-time validation: a malformed persisted source fingerprint is
+		// not a harmless legacy omission. Reject it before the family transaction
+		// so the client can correct its crop payload.
+		if req.Movie != nil && req.Movie.PosterCropBounds != nil {
+			fingerprint := strings.ToLower(strings.TrimSpace(req.Movie.PosterCropBounds.SourceFingerprint))
+			if fingerprint != "" && !assetidentity.ValidFingerprint(fingerprint) {
+				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "poster_crop_bounds.source_fingerprint must be a 64-character SHA-256 hex digest"})
+				return
+			}
+			req.Movie.PosterCropBounds.SourceFingerprint = fingerprint
+		}
 
 		// Convert once and re-derive display_title so a title edit is reflected
 		// immediately in persisted state and any client that renders display_title
@@ -194,6 +207,8 @@ func updateBatchMoviePosterCrop(rt *core.APIRuntime) gin.HandlerFunc {
 		var echoRev *uint64
 		var echoFam map[string]uint64
 		var promoteErr error
+		var posterRevision *uint64
+		var posterFingerprint string
 		opErr := job.WithMovieEditLock(movieID, func(m *worker.LockedMovieOps) error {
 			// Re-resolve the result family INSIDE the key (codex r38): if a
 			// rekey moved the result to another movie between the handler's
@@ -211,6 +226,7 @@ func updateBatchMoviePosterCrop(rt *core.APIRuntime) gin.HandlerFunc {
 				cropErr = err
 				return nil //nolint:nilerr // captured to cropErr; mapped to 400 after lock release
 			}
+
 			// codex r51 P2/durability: the crop writes to a STAGED name and promotes
 			// over the canonical pair only AFTER the state commit lands — a crash
 			// mid-op leaves the canonical untouched (pre-commit) or a staged pair
@@ -220,6 +236,26 @@ func updateBatchMoviePosterCrop(rt *core.APIRuntime) gin.HandlerFunc {
 			fs := rt.Deps().GetFs()
 			tmpDir := snap.APIConfig().TempDir
 			dir := filepath.Join(tmpDir, "posters", jobID)
+
+			// P4: when a client supplies either camera token, require the complete
+			// pair and compare it with the installed full-size bytes before staging.
+			expectedRevision := req.ExpectedPosterRevision
+			expectedFingerprint := strings.ToLower(strings.TrimSpace(req.ExpectedPosterFingerprint))
+			if expectedRevision != nil || expectedFingerprint != "" {
+				if expectedRevision == nil || expectedFingerprint == "" || !assetidentity.ValidFingerprint(expectedFingerprint) {
+					cropErr = fmt.Errorf("expected_poster_revision and expected_poster_fingerprint must be supplied together; fingerprint must be a 64-character SHA-256 hex digest")
+					return nil //nolint:nilerr // captured for the 400 response
+				}
+				fullPath := filepath.Join(dir, posterID+"-full.jpg")
+				identity, ierr := assetidentity.Measure(fs, fullPath)
+				if ierr == nil {
+					if !assetidentity.Matches(identity, *expectedRevision, expectedFingerprint) {
+						return &worker.EditAdmissionConflictError{Message: "poster source identity changed while opening the crop; retry"}
+					}
+				} else if !os.IsNotExist(ierr) {
+					return &worker.EditAdmissionConflictError{Message: fmt.Sprintf("poster source identity unavailable: %v", ierr)}
+				}
+			}
 			stageID := nextPosterStageID(posterID, "crop")
 			for _, leg := range [][2]string{{posterID + "-full.jpg", stageID + "-full.jpg"}, {posterID + ".jpg", stageID + ".jpg"}} {
 				data, rerr := afero.ReadFile(fs, filepath.Join(dir, leg[0]))
@@ -246,6 +282,15 @@ func updateBatchMoviePosterCrop(rt *core.APIRuntime) gin.HandlerFunc {
 				return nil //nolint:nilerr // captured to cropErr; mapped to 400 after lock release
 			}
 			croppedURL = strings.Replace(cropResult.CroppedURL, url.PathEscape(stageID)+".jpg", url.PathEscape(posterID)+".jpg", 1)
+			if cropResult.SourceFingerprint != "" {
+				posterFingerprint = cropResult.SourceFingerprint
+				rv := cropResult.SourceRevision
+				posterRevision = &rv
+			}
+			if expectedRevision != nil && !assetidentity.Matches(assetidentity.AssetRevision{Revision: cropResult.SourceRevision, Fingerprint: cropResult.SourceFingerprint}, *expectedRevision, expectedFingerprint) {
+				cleanupStagedPosterPair(fs, tmpDir, jobID, stageID)
+				return &worker.EditAdmissionConflictError{Message: "poster source identity changed during the crop; retry"}
+			}
 			// Persist the manual crop geometry (normalized 0–1 fractions) next
 			// to the preview URL so the apply phase can reproduce the crop on
 			// the downloaded source image. Bounds are validated in integer
@@ -254,11 +299,12 @@ func updateBatchMoviePosterCrop(rt *core.APIRuntime) gin.HandlerFunc {
 			// fallback served as the source no applyable geometry exists.
 			if cropResult.SourceFull && cropResult.SourceWidth > 0 && cropResult.SourceHeight > 0 {
 				bounds = &models.CropBounds{
-					X:            float64(req.X) / float64(cropResult.SourceWidth),
-					Y:            float64(req.Y) / float64(cropResult.SourceHeight),
-					Width:        float64(req.Width) / float64(cropResult.SourceWidth),
-					Height:       float64(req.Height) / float64(cropResult.SourceHeight),
-					SourceAspect: float64(cropResult.SourceWidth) / float64(cropResult.SourceHeight),
+					X:                 float64(req.X) / float64(cropResult.SourceWidth),
+					Y:                 float64(req.Y) / float64(cropResult.SourceHeight),
+					Width:             float64(req.Width) / float64(cropResult.SourceWidth),
+					Height:            float64(req.Height) / float64(cropResult.SourceHeight),
+					SourceAspect:      float64(cropResult.SourceWidth) / float64(cropResult.SourceHeight),
+					SourceFingerprint: cropResult.SourceFingerprint,
 				}
 			}
 			// Durable witness BEFORE the commit — authorizes the reconciler to
@@ -327,7 +373,7 @@ func updateBatchMoviePosterCrop(rt *core.APIRuntime) gin.HandlerFunc {
 
 		// Echo the server-side baseline snapshot so the client Reset flow
 		// restores exactly what the server would (no client-side guessing).
-		resp := contracts.PosterCropResponse{CroppedPosterURL: croppedURL, PosterCropBounds: bounds, ShouldCropPoster: false, PosterCropSourceFull: bounds != nil, Revision: echoRev, Revisions: echoFam}
+		resp := contracts.PosterCropResponse{CroppedPosterURL: croppedURL, PosterCropBounds: bounds, ShouldCropPoster: false, PosterCropSourceFull: bounds != nil, Revision: echoRev, Revisions: echoFam, PosterRevision: posterRevision, PosterFingerprint: posterFingerprint}
 		if stored, _, found2 := lookupResultByResultID(job, resultID); found2 && stored.Movie != nil {
 			resp.OriginalPosterURL = stored.Movie.Poster.OriginalPosterURL
 			resp.OriginalCroppedPosterURL = stored.Movie.Poster.OriginalCroppedPosterURL
@@ -406,9 +452,15 @@ func updateBatchMoviePosterFromURL(rt *core.APIRuntime) gin.HandlerFunc {
 		var croppedURL string
 		var echoRev *uint64
 		var echoFam map[string]uint64
+		var posterRevision *uint64
+		var posterFingerprint string
 		posterResult, err := snap.PosterManager().DownloadFromURL(c.Request.Context(), jobID, stageID, req.URL, batchCfg.ScraperUserAgent, batchCfg.ScraperReferer)
 		if err != nil {
 			dlErr = err
+		} else if posterResult != nil && posterResult.SourceFingerprint != "" {
+			posterFingerprint = posterResult.SourceFingerprint
+			rv := posterResult.SourceRevision
+			posterRevision = &rv
 		}
 		var opErr error
 		if dlErr == nil {
@@ -495,10 +547,12 @@ func updateBatchMoviePosterFromURL(rt *core.APIRuntime) gin.HandlerFunc {
 		}
 
 		c.JSON(http.StatusOK, contracts.PosterFromURLResponse{
-			CroppedPosterURL: croppedURL,
-			PosterURL:        req.URL,
-			Revision:         echoRev,
-			Revisions:        echoFam,
+			CroppedPosterURL:  croppedURL,
+			PosterURL:         req.URL,
+			Revision:          echoRev,
+			Revisions:         echoFam,
+			PosterRevision:    posterRevision,
+			PosterFingerprint: posterFingerprint,
 		})
 	}
 }

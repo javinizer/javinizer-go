@@ -227,6 +227,8 @@ func TestNewServer_RouteParity(t *testing.T) {
 		"GET /api/v1/scrapers",
 		"GET /api/v1/temp/image",
 		"GET /api/v1/temp/posters/:jobId/:filename",
+		"HEAD /api/v1/temp/image",
+		"HEAD /api/v1/temp/posters/:jobId/:filename",
 		"GET /api/v1/tokens",
 		"GET /api/v1/r18dev/dump/status",
 		"GET /api/v1/r18dev/dump/search",

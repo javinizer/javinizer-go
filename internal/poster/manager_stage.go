@@ -151,12 +151,14 @@ type StagePosterRequest struct {
 // the canonical names. All identity is internal — a caller can never reach
 // the filesystem except through PromoteStagedPoster (fs-only).
 type StagedPoster struct {
-	jobID            string
-	stagedID         string
-	targetID         string
-	croppedURLStaged string
-	sourceWidth      int
-	sourceHeight     int
+	jobID             string
+	stagedID          string
+	targetID          string
+	croppedURLStaged  string
+	sourceWidth       int
+	sourceHeight      int
+	sourceRevision    uint64
+	sourceFingerprint string
 }
 
 // NewStagedPosterHandleForTest builds a handle directly — usable only from
@@ -191,12 +193,14 @@ func (pm *PosterManager) StagePosterDownload(ctx context.Context, req StagePoste
 		return nil, err
 	}
 	return &StagedPoster{
-		jobID:            req.JobID,
-		stagedID:         stagedID,
-		targetID:         req.PosterID,
-		croppedURLStaged: res.CroppedURL,
-		sourceWidth:      res.SourceWidth,
-		sourceHeight:     res.SourceHeight,
+		jobID:             req.JobID,
+		stagedID:          stagedID,
+		targetID:          req.PosterID,
+		croppedURLStaged:  res.CroppedURL,
+		sourceWidth:       res.SourceWidth,
+		sourceHeight:      res.SourceHeight,
+		sourceRevision:    res.SourceRevision,
+		sourceFingerprint: res.SourceFingerprint,
 	}, nil
 }
 
@@ -268,6 +272,8 @@ func (pm *PosterManager) PromoteStagedPoster(staged *StagedPoster) (*cropResult,
 			res.FullPath = l.finalPath
 			res.SourceWidth = staged.sourceWidth
 			res.SourceHeight = staged.sourceHeight
+			res.SourceRevision = staged.sourceRevision
+			res.SourceFingerprint = staged.sourceFingerprint
 		} else {
 			res.CroppedPath = l.finalPath
 		}

@@ -401,6 +401,8 @@ func (o *applyOrchImpl) stepDownload(ctx context.Context, cmd ApplyCmd, opID Ope
 		DownloadExtrafanart:    cmd.DownloadExtrafanart,
 		OverwriteExistingMedia: cmd.OverwriteExistingMedia,
 		Dedup:                  cmd.Dedup,
+		DedupOwnerKey:          cmd.DedupOwnerKey,
+		DedupLogicalKey:        cmd.DedupLogicalKey,
 		OperationID:            opID,
 		Recorder:               replacementRecorder(o.revertLog),
 	})

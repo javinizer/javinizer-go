@@ -22,6 +22,11 @@ export interface PosterCropDragState {
 	originY: number;
 }
 
+export interface PosterAssetIdentity {
+	revision: number;
+	fingerprint: string;
+}
+
 interface PosterCropControllerDeps {
 	getBrowser: () => boolean;
 	getJobId: () => string;
@@ -43,8 +48,9 @@ interface PosterCropControllerDeps {
 	getCropDragState: () => PosterCropDragState | null;
 	setCropDragState: (state: PosterCropDragState | null) => void;
 	getPosterCropStates: () => Map<string, PosterCropState>;
+	getCropAssetIdentity?: () => Promise<PosterAssetIdentity | null>;
 	applyPosterFromUrlAsync: (resultId: string, url: string) => Promise<void>;
-	mutatePosterCropAsync: (jobId: string, resultId: string, crop: PosterCropBox, maxPosterHeight?: number) => Promise<void>;
+	mutatePosterCropAsync: (jobId: string, resultId: string, crop: PosterCropBox, maxPosterHeight?: number, identity?: PosterAssetIdentity) => Promise<void>;
 	setCropApplying: (applying: boolean) => void;
 	now?: () => number;
 }
@@ -269,7 +275,15 @@ export function createPosterCropController(deps: PosterCropControllerDeps) {
 			}
 
 			const maxPosterHeight = deps.getMaxPosterHeight();
-			await deps.mutatePosterCropAsync(deps.getJobId(), currentResult.result_id, cropBoxVal, maxPosterHeight ?? undefined);
+			const identity = deps.getCropAssetIdentity ? await deps.getCropAssetIdentity() : null;
+			if (deps.getCropAssetIdentity && !identity) {
+				throw new Error("Unable to verify the installed poster source. Reopen the crop and try again.");
+			}
+			if (identity) {
+				await deps.mutatePosterCropAsync(deps.getJobId(), currentResult.result_id, cropBoxVal, maxPosterHeight ?? undefined, identity);
+			} else {
+				await deps.mutatePosterCropAsync(deps.getJobId(), currentResult.result_id, cropBoxVal, maxPosterHeight ?? undefined);
+			}
 		} catch {
 			// Errors are surfaced via toasts in the mutation handlers; abort the flow.
 		} finally {

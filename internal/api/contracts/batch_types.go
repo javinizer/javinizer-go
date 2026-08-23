@@ -187,7 +187,8 @@ type BatchRescrapeResponse struct {
 	ActressSources map[string]string `json:"actress_sources,omitempty"`
 	// Revision is the fresh post-commit revision of the rescraped result
 	// (D12) — clients advance their CAS baseline from it.
-	Revision *uint64 `json:"revision,omitempty"`
+	Revision  *uint64           `json:"revision,omitempty"`
+	Revisions map[string]uint64 `json:"revisions,omitempty"`
 }
 
 // BatchExcludeRequest represents a request to exclude multiple movies from a batch job

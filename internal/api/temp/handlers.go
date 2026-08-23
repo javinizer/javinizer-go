@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	_ "github.com/javinizer/javinizer-go/internal/api/contracts"
 	"github.com/javinizer/javinizer-go/internal/api/core"
+	"github.com/javinizer/javinizer-go/internal/assetidentity"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/javinizer/javinizer-go/internal/logging"
@@ -83,7 +84,12 @@ func serveTempPoster(rt *core.APIRuntime) gin.HandlerFunc {
 			return
 		}
 
-		// Serve the file (no cache headers for temp files as they're ephemeral)
+		// Serve the file (no cache headers for temp files as they're ephemeral).
+		// The identity is computed from the exact bytes the crop controller will
+		// measure, and is exposed on GET and HEAD alike.
+		if identity, ierr := assetidentity.Measure(afero.NewOsFs(), posterPath); ierr == nil {
+			assetidentity.SetHeaders(c.Writer, identity)
+		}
 		c.File(posterPath)
 	}
 }
@@ -180,12 +186,15 @@ func serveTempImage(rt *core.APIRuntime) gin.HandlerFunc {
 		file, contentType, remaining, state := get(fs, cacheDir, normalizedURL, ttl)
 		if state == CacheFresh {
 			defer func() { _ = file.Close() }()
+			body, rerr := io.ReadAll(file)
+			if rerr != nil {
+				c.AbortWithStatus(http.StatusBadGateway)
+				return
+			}
 			c.Header("Content-Type", contentType)
 			c.Header("Cache-Control", cacheControlForTTL(remaining))
 			c.Header("X-Content-Type-Options", "nosniff")
-			if _, err := io.Copy(c.Writer, file); err != nil {
-				c.AbortWithStatus(http.StatusBadGateway)
-			}
+			writeImageBody(c, body)
 			return
 		}
 
@@ -257,30 +266,47 @@ func serveTempImage(rt *core.APIRuntime) gin.HandlerFunc {
 				c.JSON(http.StatusBadGateway, gin.H{"error": "failed to open cached image"})
 				return
 			}
-			defer func() { _ = cachedFile.Close() }()
-			if _, err := io.Copy(c.Writer, cachedFile); err != nil {
+			body, rerr := io.ReadAll(cachedFile)
+			_ = cachedFile.Close()
+			if rerr != nil {
 				c.AbortWithStatus(http.StatusBadGateway)
+				return
 			}
+			writeImageBody(c, body)
 			return
 		}
 
 		if len(result.body) > 0 {
 			c.Header("Cache-Control", "private, max-age=300")
 			c.Header("X-Content-Type-Options", "nosniff")
-			c.Data(http.StatusOK, result.contentType, result.body)
+			writeImageBody(c, result.body)
 		}
 	}
 }
 
 func serveStaleFile(c *gin.Context, f afero.File, contentType string) bool {
-	c.Header("Content-Type", contentType)
-	c.Header("Cache-Control", "no-cache")
-	c.Header("X-Content-Type-Options", "nosniff")
-	if _, err := io.Copy(c.Writer, f); err != nil {
+	body, err := io.ReadAll(f)
+	if err != nil {
 		logging.Warnf("image cache: failed to serve stale entry: %v", err)
 		return false
 	}
+	c.Header("Content-Type", contentType)
+	c.Header("Cache-Control", "no-cache")
+	c.Header("X-Content-Type-Options", "nosniff")
+	writeImageBody(c, body)
 	return true
+}
+
+func writeImageBody(c *gin.Context, body []byte) {
+	assetidentity.SetHeaders(c.Writer, assetidentity.FromBytes(body))
+	if c.Request.Method == http.MethodHead {
+		c.Status(http.StatusOK)
+		return
+	}
+	c.Status(http.StatusOK)
+	if _, err := c.Writer.Write(body); err != nil {
+		c.AbortWithStatus(http.StatusBadGateway)
+	}
 }
 
 func serveTempImageUncached(c *gin.Context, tempCfg *core.TempNarrowConfig, downloadURL, rawURL string) {
@@ -330,9 +356,15 @@ func serveTempImageUncached(c *gin.Context, tempCfg *core.TempNarrowConfig, down
 	c.Header("Cache-Control", "private, max-age=300")
 	c.Header("X-Content-Type-Options", "nosniff")
 
-	if _, err := io.Copy(c.Writer, io.LimitReader(resp.Body, maxImageProxyResponseSize)); err != nil {
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxImageProxyResponseSize))
+	if len(body) > 0 {
+		// Preserve the historical partial-body behavior when the upstream
+		// Content-Length is wrong: io.Copy used to leave bytes in the recorder
+		// before reporting unexpected EOF.
+		writeImageBody(c, body)
+	}
+	if readErr != nil && len(body) == 0 {
 		c.AbortWithStatus(http.StatusBadGateway)
-		return
 	}
 }
 

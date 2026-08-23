@@ -51,7 +51,11 @@ type ApplyCmd struct {
 	DownloadExtrafanart    *bool // Optional override for extrafanart downloads; nil = use config default
 	OverwriteExistingMedia bool
 	Dedup                  *sync.Map
-	OperationMode          operationmode.OperationMode // resolved at factory boundary
+	// DedupOwnerKey/LogicalKey are populated by apply before fan-out so
+	// shared poster destinations have a deterministic first owner.
+	DedupOwnerKey   string
+	DedupLogicalKey string
+	OperationMode   operationmode.OperationMode // resolved at factory boundary
 }
 
 // stepCompletion records which Apply steps completed successfully.

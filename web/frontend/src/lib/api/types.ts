@@ -142,6 +142,8 @@ export interface PosterCropRequest {
 	width: number;
 	height: number;
 	max_poster_height?: number;
+	expected_poster_revision?: number;
+	expected_poster_fingerprint?: string;
 }
 
 // Normalized manual poster crop geometry (0–1 fractions of the
@@ -152,6 +154,7 @@ export interface CropBounds {
 	width: number;
 	height: number;
 	source_aspect?: number;
+	source_fingerprint?: string;
 }
 
 export interface PosterCropResponse {
@@ -166,6 +169,8 @@ export interface PosterCropResponse {
 	revision?: number;
 	/** Per-part post-commit revisions keyed by result_id (multipart-safe). */
 	revisions?: Record<string, number>;
+	poster_revision?: number;
+	poster_fingerprint?: string;
 }
 
 export interface PosterFromURLRequest {
@@ -179,6 +184,8 @@ export interface PosterFromURLResponse {
 	revision?: number;
 	/** Per-part post-commit revisions keyed by result_id (multipart-safe). */
 	revisions?: Record<string, number>;
+	poster_revision?: number;
+	poster_fingerprint?: string;
 }
 
 export interface ScraperRating {
@@ -263,6 +270,7 @@ export interface BatchRescrapeResponse {
 	actress_sources?: Record<string, string>;
 	/** Fresh post-commit result revision (CAS baseline). */
 	revision?: number;
+	revisions?: Record<string, number>;
 }
 
 export interface BulkRescrapeRequest {

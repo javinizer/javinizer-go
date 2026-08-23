@@ -119,6 +119,12 @@ type PosterCropRequest struct {
 	// MaxPosterHeight optional override for the max poster height (px). 0 = no cap.
 	// When omitted, the configured output.max_poster_height is used.
 	MaxPosterHeight *int `json:"max_poster_height,omitempty" binding:"omitempty,min=0"`
+	// ExpectedPosterRevision/Fingerprint bind the crop camera to the exact
+	// installed full-size bytes measured by the review client. Both are
+	// optional only for legacy clients; if either is supplied, both are
+	// required and validated.
+	ExpectedPosterRevision    *uint64 `json:"expected_poster_revision,omitempty"`
+	ExpectedPosterFingerprint string  `json:"expected_poster_fingerprint,omitempty"`
 }
 
 // PosterCropResponse returns the updated temp cropped poster URL plus the
@@ -147,6 +153,9 @@ type PosterCropResponse struct {
 	// Revisions carries EVERY family part's fresh revision keyed by
 	// result_id.
 	Revisions map[string]uint64 `json:"revisions,omitempty"`
+	// PosterRevision/Fingerprint identify the installed full-size bytes.
+	PosterRevision    *uint64 `json:"poster_revision,omitempty"`
+	PosterFingerprint string  `json:"poster_fingerprint,omitempty"`
 }
 
 // PosterFromURLRequest represents a request to download a poster from a URL.
@@ -163,6 +172,9 @@ type PosterFromURLResponse struct {
 	// Revisions carries EVERY family part's fresh revision keyed by
 	// result_id.
 	Revisions map[string]uint64 `json:"revisions,omitempty"`
+	// PosterRevision/Fingerprint identify the installed full-size bytes.
+	PosterRevision    *uint64 `json:"poster_revision,omitempty"`
+	PosterFingerprint string  `json:"poster_fingerprint,omitempty"`
 }
 
 // NFOComparisonRequest represents a request to compare NFO with scraped data
