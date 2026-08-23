@@ -182,13 +182,8 @@ type rescrapePhaseInputs struct {
 	// For ScrapeSingle — no job state access needed
 	// For CompleteRescrape — needs result map access + metadata
 	ResultMap resultstore.ResultMapAccessor
-	// Frozen phase-entry clones are retained for closeout arbitration and
-	// provenance-preserving write-backs. Rescrape commits still use ResultMap
-	// for their keyed live CAS; these snapshots make the phase boundary explicit.
-	Results    map[string]*resultstore.MovieResult
-	Provenance map[string]*resultstore.ProvenanceData
-	Lifecycle  PhaseLifecycle
-	persister  persister
+	Lifecycle PhaseLifecycle
+	persister persister
 
 	// additional dependencies for full rescrape sequence
 	HistoryRepo database.HistoryRepositoryInterface

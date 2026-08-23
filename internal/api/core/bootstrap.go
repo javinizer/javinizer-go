@@ -6,6 +6,7 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/commandutil"
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/eventlog"
 	"github.com/javinizer/javinizer-go/internal/history"
 	"github.com/javinizer/javinizer-go/internal/logging"
@@ -56,6 +57,10 @@ func bootstrapAPIDeps(cfg *config.Config, configFile string, auth commandutil.Au
 	fs := afero.NewOsFs()
 	jobStore := worker.NewJobStore(repos.JobRepo, repos.BatchFileOpRepo, repos.MovieRepo, cfg.System.TempDir, sharedEngine, fs, worker.WithActressRepo(repos.ActressRepo), worker.WithHistoryRepo(repos.HistoryRepo), worker.WithEditTransactor(coreDeps.DB))
 	eventEmitter := eventlog.NewEmitter(repos.EventRepo)
+	pruneSweeper := history.NewReplacementSweeper(fs, repos.BatchFileOpRepo)
+	if setter, ok := repos.JobRepo.(database.OrganizedJobPruneHookSetter); ok {
+		setter.SetOrganizedJobPruneHook(pruneSweeper.PruneOperationBackups)
+	}
 	reverter := history.NewReverter(fs, repos.BatchFileOpRepo)
 
 	apiDeps := &APIDeps{

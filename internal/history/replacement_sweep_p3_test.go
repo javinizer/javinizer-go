@@ -187,6 +187,48 @@ func TestSweep_RootsAndMarkers(t *testing.T) {
 	})
 }
 
+func TestReplacementSweeper_PruneOperationBackups_RemovesOnlyUnreferenced(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("removed operation releases its backup", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		repo := newP3OpRepo()
+		dest := "/out/PRUNE/poster.jpg"
+		backup := dest + ".dlbak." + p3HexA
+		require.NoError(t, fs.MkdirAll("/out/PRUNE", 0o755))
+		writeSweepFile(t, fs, dest, "current", time.Hour)
+		writeSweepFile(t, fs, backup, "old", time.Hour)
+		op := journalRow(t, repo, "job-pruned", "PRUNE-001", dest, backup, 1, models.RevertStatusApplied)
+		delete(repo.ops, op.ID)
+
+		err := NewReplacementSweeper(fs, repo).PruneOperationBackups(ctx, []models.BatchFileOperation{*op})
+		require.NoError(t, err)
+		exists, statErr := afero.Exists(fs, backup)
+		require.NoError(t, statErr)
+		require.False(t, exists, "an unreferenced pruned backup must be consumed")
+		require.Equal(t, "current", string(mustRead2(t, fs, dest)))
+	})
+
+	t.Run("shared backup remains owned", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		repo := newP3OpRepo()
+		dest := "/out/PRUNE-SHARED/poster.jpg"
+		backup := dest + ".dlbak." + p3HexB
+		require.NoError(t, fs.MkdirAll("/out/PRUNE-SHARED", 0o755))
+		writeSweepFile(t, fs, dest, "current", time.Hour)
+		writeSweepFile(t, fs, backup, "old", time.Hour)
+		pruned := journalRow(t, repo, "job-pruned", "PRUNE-002", dest, backup, 1, models.RevertStatusApplied)
+		journalRow(t, repo, "job-live", "PRUNE-003", dest, backup, 2, models.RevertStatusApplied)
+		delete(repo.ops, pruned.ID)
+
+		err := NewReplacementSweeper(fs, repo).PruneOperationBackups(ctx, []models.BatchFileOperation{*pruned})
+		require.NoError(t, err)
+		exists, statErr := afero.Exists(fs, backup)
+		require.NoError(t, statErr)
+		require.True(t, exists, "a backup with a remaining ledger reference must stay")
+	})
+}
+
 func mustRead2(t *testing.T, fs afero.Fs, path string) []byte {
 	t.Helper()
 	data, err := afero.ReadFile(fs, path)

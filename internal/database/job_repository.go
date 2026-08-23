@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -12,6 +13,9 @@ import (
 // JobRepository persists and queries Job records via GORM, composing BaseRepository for common operations.
 type JobRepository struct {
 	*BaseRepository[models.Job, string]
+
+	pruneMu   sync.RWMutex
+	pruneHook OrganizedJobPruneHook
 }
 
 // NewJobRepository constructs a JobRepository ordered by started_at then id for deterministic pagination.
@@ -29,6 +33,21 @@ func NewJobRepository(db *DB) *JobRepository {
 			WithNewEntity[models.Job, string](func() models.Job { return models.Job{} }),
 		),
 	}
+}
+
+// SetOrganizedJobPruneHook installs the post-commit cleanup invoked after
+// organized jobs and their operation rows are pruned. The hook is optional so
+// database-only callers can retain the repository's original behavior.
+func (r *JobRepository) SetOrganizedJobPruneHook(hook OrganizedJobPruneHook) {
+	r.pruneMu.Lock()
+	r.pruneHook = hook
+	r.pruneMu.Unlock()
+}
+
+func (r *JobRepository) organizedJobPruneHook() OrganizedJobPruneHook {
+	r.pruneMu.RLock()
+	defer r.pruneMu.RUnlock()
+	return r.pruneHook
 }
 
 // Create inserts a new job record, delegating to the base repository.
@@ -69,10 +88,14 @@ func (r *JobRepository) Delete(ctx context.Context, id string) error {
 
 // DeleteOrganizedOlderThan removes organized jobs whose organized_at predates the given date.
 func (r *JobRepository) DeleteOrganizedOlderThan(ctx context.Context, date time.Time) error {
+	var prunedOps []models.BatchFileOperation
 	err := r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		oldJobs := tx.Model(&models.Job{}).
 			Select("id").
 			Where("status = ? AND organized_at < ?", models.JobStatusOrganized, date)
+		if err := tx.Where("batch_job_id IN (?)", oldJobs).Find(&prunedOps).Error; err != nil {
+			return wrapDBErr("find", "organized job operations", err)
+		}
 		if err := tx.Where("batch_job_id IN (?)", oldJobs).Delete(&models.BatchFileOperation{}).Error; err != nil {
 			return wrapDBErr("delete", "organized job operations", err)
 		}
@@ -81,5 +104,13 @@ func (r *JobRepository) DeleteOrganizedOlderThan(ctx context.Context, date time.
 		}
 		return nil
 	})
-	return err
+	if err != nil {
+		return err
+	}
+	if hook := r.organizedJobPruneHook(); hook != nil && len(prunedOps) > 0 {
+		if err := hook(ctx, prunedOps); err != nil {
+			return wrapDBErr("prune", "organized job backups", err)
+		}
+	}
+	return nil
 }

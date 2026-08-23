@@ -438,6 +438,78 @@ func NewReplacementSweeper(fs afero.Fs, repo database.BatchFileOperationReposito
 	return &ReplacementSweeper{fs: fs, repo: repo, pendingRemovals: map[string]string{}}
 }
 
+// PruneOperationBackups removes replacement backups belonging to operation rows
+// that have just been pruned. The database deletion is already committed when
+// this hook runs; each destination is then locked and the live ledger is
+// re-read before an identity-bound unlink, so a concurrently appended row
+// keeps its shared backup alive.
+func (s *ReplacementSweeper) PruneOperationBackups(ctx context.Context, ops []models.BatchFileOperation) error {
+	if len(ops) == 0 {
+		return nil
+	}
+	if s == nil || s.fs == nil || s.repo == nil {
+		return fmt.Errorf("prune operation backups: sweeper is not configured")
+	}
+
+	var errs []error
+	for i := range ops {
+		gf, err := models.ParseGeneratedFiles(ops[i].GeneratedFiles)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("operation %d ledger parse: %w", ops[i].ID, err))
+			continue
+		}
+		for j := range gf.Replacements {
+			entry := gf.Replacements[j]
+			if strings.TrimSpace(entry.Backup) == "" || strings.TrimSpace(entry.Destination) == "" {
+				errs = append(errs, fmt.Errorf("operation %d has an incomplete replacement entry", ops[i].ID))
+				continue
+			}
+			if err := ctx.Err(); err != nil {
+				return errors.Join(append(errs, err)...)
+			}
+
+			release := fsutil.SharedDestLocks().Acquire(entry.Destination)
+			err := s.pruneOperationBackup(ctx, entry)
+			release()
+			if err != nil {
+				errs = append(errs, fmt.Errorf("operation %d backup %s: %w", ops[i].ID, entry.Backup, err))
+			}
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// pruneOperationBackup rechecks all live ledger rows while the destination
+// lock is held. A shared backup name is retained if any row still references
+// it; otherwise the normal identity-bound quarantine/unlink path consumes it.
+func (s *ReplacementSweeper) pruneOperationBackup(ctx context.Context, entry models.ReplacementEntry) error {
+	rows, err := s.repo.FindOperationsWithLedger(ctx)
+	if err != nil {
+		return fmt.Errorf("read live ledger: %w", err)
+	}
+	want := sweepSlash(entry.Backup)
+	for i := range rows {
+		gf, parseErr := models.ParseGeneratedFiles(rows[i].GeneratedFiles)
+		if parseErr != nil {
+			return fmt.Errorf("cannot prove backup %s is unreferenced by operation %d: %w", entry.Backup, rows[i].ID, parseErr)
+		}
+		for _, live := range gf.Replacements {
+			if sweepSlash(live.Backup) == want {
+				return nil
+			}
+		}
+	}
+
+	hold, err := quarantineReplacementBackupForRemoval(s.fs, entry.Backup, "organized-job prune", &entry, nil)
+	if err != nil {
+		return err
+	}
+	if hold == nil || hold.unlinked {
+		return nil
+	}
+	return hold.removeVerified()
+}
+
 // rememberPendingRemoval records the in-process cleanup authorization with
 // the legacy CLEAN kind (the backup name still holds the operation's own
 // bytes — e.g. its removal just failed).

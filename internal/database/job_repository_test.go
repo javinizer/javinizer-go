@@ -181,6 +181,41 @@ func TestJobRepository_DeleteOrganizedOlderThan_JobDeleteFailureRollsBack(t *tes
 	require.NoError(t, err, "transaction rolls the ops-first delete back")
 }
 
+func TestJobRepository_DeleteOrganizedOlderThan_PruneHookRunsAfterCommit(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	jobRepo := NewJobRepository(db)
+	opRepo := NewBatchFileOperationRepository(db)
+	organizedAt := time.Now().UTC().Add(-48 * time.Hour)
+	job := &models.Job{
+		ID: "organized-prune-hook", Status: models.JobStatusOrganized,
+		StartedAt: organizedAt.Add(-time.Hour), OrganizedAt: &organizedAt,
+	}
+	require.NoError(t, jobRepo.Create(context.Background(), job))
+	op := &models.BatchFileOperation{
+		BatchJobID: job.ID, OriginalPath: "/hook/source.mp4", NewPath: "/hook/dest.mp4",
+		OperationType: models.OperationTypeUpdate,
+		GeneratedFiles: models.MarshalLedgerJSON(models.GeneratedFilesJSON{Replacements: []models.ReplacementEntry{{
+			Destination: "/hook/poster.jpg", Backup: "/hook/poster.jpg.dlbak.0123456789abcdef",
+		}}}),
+	}
+	require.NoError(t, opRepo.Create(context.Background(), op))
+
+	var pruned []models.BatchFileOperation
+	jobRepo.SetOrganizedJobPruneHook(func(_ context.Context, ops []models.BatchFileOperation) error {
+		pruned = append(pruned, ops...)
+		_, jobErr := jobRepo.FindByID(context.Background(), job.ID)
+		require.Error(t, jobErr, "job row must be gone before cleanup starts")
+		_, opErr := opRepo.FindByID(context.Background(), op.ID)
+		require.Error(t, opErr, "operation row must be gone before cleanup starts")
+		return nil
+	})
+
+	require.NoError(t, jobRepo.DeleteOrganizedOlderThan(context.Background(), time.Now().UTC().Add(-24*time.Hour)))
+	require.Len(t, pruned, 1)
+	require.Equal(t, op.ID, pruned[0].ID)
+	require.Equal(t, op.GeneratedFiles, pruned[0].GeneratedFiles)
+}
+
 func ptrTime(t time.Time) *time.Time {
 	return &t
 }
