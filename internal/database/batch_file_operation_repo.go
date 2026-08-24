@@ -36,10 +36,16 @@ func NewBatchFileOperationRepository(db *DB) *BatchFileOperationRepository {
 
 // Create inserts a single batch file operation record.
 func (r *BatchFileOperationRepository) Create(ctx context.Context, op *models.BatchFileOperation) error {
-	if err := ensureJobWritable(r.GetDB().WithContext(ctx), op.BatchJobID); err != nil {
+	err := r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := ensureJobWritable(tx, op.BatchJobID); err != nil {
+			return err
+		}
+		return tx.Create(op).Error
+	})
+	if err != nil {
 		return wrapDBErr("create", fmt.Sprintf("batch file operation %d", op.ID), err)
 	}
-	return r.BaseRepository.Create(ctx, op)
+	return nil
 }
 
 // CreateBatch inserts multiple batch file operation records in a single transaction.
@@ -228,10 +234,13 @@ func (r *BatchFileOperationRepository) UpdateJournalInTx(ctx context.Context, id
 // completion writes go through UpdateNonJournalFields (wave-10 codex
 // follow-up).
 func (r *BatchFileOperationRepository) Update(ctx context.Context, op *models.BatchFileOperation) error {
-	if err := ensureJobWritable(r.GetDB().WithContext(ctx), op.BatchJobID); err != nil {
-		return wrapDBErr("update", fmt.Sprintf("batch file operation %d", op.ID), err)
-	}
-	if err := r.GetDB().WithContext(ctx).Save(op).Error; err != nil {
+	err := r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := ensureJobWritable(tx, op.BatchJobID); err != nil {
+			return err
+		}
+		return tx.Save(op).Error
+	})
+	if err != nil {
 		return wrapDBErr("update", fmt.Sprintf("batch file operation %d", op.ID), err)
 	}
 	return nil

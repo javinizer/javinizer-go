@@ -543,12 +543,11 @@ pruneEntries:
 		}
 	}
 	retractCtx := ctx
+	if retractCtx.Err() != nil {
+		retractCtx = context.WithoutCancel(retractCtx)
+	}
 	if len(errs) == 0 {
 		return s.retractConsumedEntries(retractCtx, consumed, candidateIDs)
-	}
-
-	if retractCtx.Err() != nil {
-		retractCtx = context.Background()
 	}
 	if err := s.retractConsumedEntries(retractCtx, consumed, candidateIDs); err != nil {
 		errs = append(errs, err)
@@ -2063,7 +2062,16 @@ func (s *ReplacementSweeper) retryPendingRemovalClaimed(ctx context.Context, row
 	if claim.abandonIfRevoked("clean pending backup quarantine removal", backup, dest) {
 		return false
 	}
-	hold, rmErr := quarantineReplacementBackupForRemoval(s.fs, backup, "replacement sweep", &durableEntry, backupInfo)
+	var hold *replacementBackupQuarantine
+	var rmErr error
+	if effectiveKind == models.RestorePendingKindPrune {
+		hold, rmErr = quarantineReplacementBackupForPrune(s.fs, backup, "replacement sweep", &durableEntry, backupInfo)
+	} else {
+		hold, rmErr = quarantineReplacementBackupForRemoval(s.fs, backup, "replacement sweep", &durableEntry, backupInfo)
+	}
+	if rmErr != nil && effectiveKind == models.RestorePendingKindPrune && hold != nil && hold.moved {
+		_ = s.persistPruneQuarantine(rowID, durableEntry, hold.quarantine)
+	}
 	if rmErr == nil && effectiveKind != models.RestorePendingKindPrune {
 		if _, derr := lstatRestoreSource(s.fs, dest); derr != nil {
 			if rerr := hold.restore(); rerr != nil {
@@ -2093,6 +2101,8 @@ func (s *ReplacementSweeper) retryPendingRemovalClaimed(ctx context.Context, row
 			s.rememberPendingRemoval(backupSlash)
 			return false
 		}
+	}
+	if rmErr == nil {
 		rmErr = hold.removeVerified()
 	}
 	if rmErr != nil {
