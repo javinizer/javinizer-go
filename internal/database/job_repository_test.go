@@ -260,24 +260,6 @@ func TestJobRepository_DeleteOrganizedOlderThan_PruneHookRunsBeforeDelete(t *tes
 	require.Equal(t, op.GeneratedFiles, pruned[0].GeneratedFiles)
 }
 
-func TestJobRepository_DeleteOrganizedOlderThan_PruneHookRefreshFailureRetainsRows(t *testing.T) {
-	db := newDatabaseTestDB(t)
-	jobRepo := NewJobRepository(db)
-	opRepo := NewBatchFileOperationRepository(db)
-	organizedAt := time.Now().UTC().Add(-48 * time.Hour)
-	job := &models.Job{ID: "organized-refresh-failure", Status: models.JobStatusOrganized, StartedAt: organizedAt, OrganizedAt: &organizedAt}
-	require.NoError(t, jobRepo.Create(context.Background(), job))
-	op := &models.BatchFileOperation{BatchJobID: job.ID, GeneratedFiles: models.MarshalLedgerJSON(models.GeneratedFilesJSON{Replacements: []models.ReplacementEntry{{Destination: "/refresh/dest", Backup: "/refresh/backup", Installed: true}}})}
-	require.NoError(t, opRepo.Create(context.Background(), op))
-	jobRepo.SetOrganizedJobPruneHook(func(context.Context, []models.BatchFileOperation) error {
-		return db.DB.Exec("DROP TABLE batch_file_operations").Error
-	})
-
-	err := jobRepo.DeleteOrganizedOlderThan(context.Background(), time.Now().UTC().Add(-24*time.Hour))
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "refresh consumed operation versions")
-}
-
 func TestJobRepository_DeleteOrganizedOlderThan_HookFailureRestoresRows(t *testing.T) {
 	db := newDatabaseTestDB(t)
 	jobRepo := NewJobRepository(db)
@@ -337,23 +319,6 @@ func TestJobRepository_DeleteOrganizedOlderThan_OperationDeleteFailure(t *testin
 	assert.Contains(t, err.Error(), "delete organized job operations")
 }
 
-func TestJobRepository_RefreshConsumedPrunedOps(t *testing.T) {
-	db := newDatabaseTestDB(t)
-	repo := NewJobRepository(db)
-	opRepo := NewBatchFileOperationRepository(db)
-	job := &models.Job{ID: "refresh-prune-job", Status: models.JobStatusOrganized, Files: "[]", StartedAt: time.Now().UTC(), OrganizedAt: ptrTime(time.Now().UTC().Add(-48 * time.Hour))}
-	require.NoError(t, repo.Create(context.Background(), job))
-	op := &models.BatchFileOperation{BatchJobID: job.ID, GeneratedFiles: models.MarshalLedgerJSON(models.GeneratedFilesJSON{Replacements: []models.ReplacementEntry{{Destination: "/refresh/dest", Backup: "/refresh/backup", Installed: true}}})}
-	require.NoError(t, opRepo.Create(context.Background(), op))
-	require.NoError(t, opRepo.UpdateJournalInTx(context.Background(), op.ID, func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
-		return models.GeneratedFilesJSON{}, true, nil
-	}))
-	current := []models.BatchFileOperation{*op}
-	require.NoError(t, repo.refreshConsumedPrunedOps(context.Background(), []models.BatchFileOperation{*op}, &current))
-	require.Equal(t, models.MarshalLedgerJSON(models.GeneratedFilesJSON{}), current[0].GeneratedFiles)
-	require.NoError(t, repo.refreshConsumedPrunedOps(context.Background(), nil, &current))
-}
-
 func TestJobRepository_DeleteOrganizedOlderThan_NoJobs(t *testing.T) {
 	db := newDatabaseTestDB(t)
 	require.NoError(t, NewJobRepository(db).DeleteOrganizedOlderThan(context.Background(), time.Now().UTC()))
@@ -393,19 +358,70 @@ func TestJobRepository_DeleteOrganizedOlderThan_VersionFenceKeepsConcurrentMutat
 		currentJob, err := repo.FindByID(ctx, job.ID)
 		require.NoError(t, err)
 		currentJob.Progress = 0.5
-		require.NoError(t, repo.Update(ctx, currentJob))
+		jobErr := repo.Update(ctx, currentJob)
+		require.ErrorIs(t, jobErr, ErrJobPruning)
 		currentOp, err := opRepo.FindByID(ctx, op.ID)
 		require.NoError(t, err)
 		currentOp.NewPath = "/fence/concurrent-dest"
-		return opRepo.Update(ctx, currentOp)
+		opErr := opRepo.Update(context.Background(), currentOp)
+		require.ErrorIs(t, opErr, ErrJobPruning)
+		createBatchErr := opRepo.CreateBatch(context.Background(), []*models.BatchFileOperation{{BatchJobID: job.ID, OriginalPath: "/fence/new", NewPath: "/fence/new-dest"}})
+		require.ErrorIs(t, createBatchErr, ErrJobPruning)
+		journalErr := opRepo.UpdateJournalInTx(context.Background(), op.ID, func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
+			return models.GeneratedFilesJSON{}, true, nil
+		})
+		require.ErrorIs(t, journalErr, ErrJobPruning)
+		revertErr := opRepo.UpdateRevertStatus(context.Background(), op.ID, models.RevertStatusReverted)
+		require.ErrorIs(t, revertErr, ErrJobPruning)
+		nonJournalErr := opRepo.UpdateNonJournalFields(context.Background(), currentOp)
+		require.ErrorIs(t, nonJournalErr, ErrJobPruning)
+		return errors.Join(jobErr, opErr, createBatchErr, journalErr, revertErr, nonJournalErr)
 	})
 
-	require.NoError(t, repo.DeleteOrganizedOlderThan(context.Background(), time.Now().UTC().Add(-24*time.Hour)))
-	_, err := repo.FindByID(context.Background(), job.ID)
-	require.NoError(t, err, "a concurrently mutated job must not be deleted")
-	gotOp, err := opRepo.FindByID(context.Background(), op.ID)
-	require.NoError(t, err, "a concurrently mutated operation must not be deleted")
-	require.Equal(t, "/fence/concurrent-dest", gotOp.NewPath)
+	err := repo.DeleteOrganizedOlderThan(context.Background(), time.Now().UTC().Add(-24*time.Hour))
+	require.ErrorIs(t, err, ErrJobPruning)
+	gotJob, findErr := repo.FindByID(context.Background(), job.ID)
+	require.NoError(t, findErr, "the fenced job must remain for retry")
+	require.Equal(t, pruningJobStatus, gotJob.Status)
+	gotOp, findErr := opRepo.FindByID(context.Background(), op.ID)
+	require.NoError(t, findErr, "the fenced operation must remain")
+	require.Equal(t, "/fence/dest", gotOp.NewPath)
+}
+
+func TestJobRepository_DeleteOrganizedOlderThan_ClaimedJobLookupFailure(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewJobRepository(db)
+	organizedAt := time.Now().UTC().Add(-48 * time.Hour)
+	require.NoError(t, repo.Create(context.Background(), &models.Job{ID: "organized-claim-query-failure", Status: models.JobStatusOrganized, StartedAt: organizedAt, OrganizedAt: &organizedAt}))
+	fired := false
+	const callbackName = "test:fail_prune_claim_query"
+	require.NoError(t, db.DB.Callback().Query().Before("gorm:query").Register(callbackName, func(tx *gorm.DB) {
+		if !fired && tx.Statement != nil && tx.Statement.Schema != nil && tx.Statement.Schema.Table == "jobs" {
+			fired = true
+			tx.AddError(errors.New("forced prune claim lookup failure"))
+		}
+	}))
+	t.Cleanup(func() { _ = db.DB.Callback().Query().Remove(callbackName) })
+
+	err := repo.DeleteOrganizedOlderThan(context.Background(), time.Now().UTC().Add(-24*time.Hour))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "find organized jobs")
+}
+
+func TestEnsureOperationWritable_PruneDiagnostics(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewJobRepository(db)
+	opRepo := NewBatchFileOperationRepository(db)
+	job := &models.Job{ID: "operation-fence-diagnostic", Status: models.JobStatusOrganized, StartedAt: time.Now(), OrganizedAt: ptrTime(time.Now().Add(-48 * time.Hour))}
+	require.NoError(t, repo.Create(context.Background(), job))
+	op := &models.BatchFileOperation{BatchJobID: job.ID, OriginalPath: "/diag/src", NewPath: "/diag/dest"}
+	require.NoError(t, opRepo.Create(context.Background(), op))
+	require.NoError(t, db.DB.Exec("UPDATE jobs SET status = ? WHERE id = ?", pruningJobStatus, job.ID).Error)
+	require.ErrorIs(t, ensureOperationWritable(db.DB, op.ID), ErrJobPruning)
+	require.NoError(t, db.DB.Exec("UPDATE jobs SET status = ? WHERE id = ?", models.JobStatusOrganized, job.ID).Error)
+	require.NoError(t, ensureOperationWritable(db.DB, 99999))
+	require.NoError(t, db.DB.Exec("DROP TABLE batch_file_operations").Error)
+	require.Error(t, ensureOperationWritable(db.DB, op.ID))
 }
 
 func TestJobRepository_DeleteOrganizedOlderThan_BatchesLargeRetentionSet(t *testing.T) {

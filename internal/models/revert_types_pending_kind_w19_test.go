@@ -23,6 +23,7 @@ func TestReplacementEntryPendingKindW19_NormalizationTable(t *testing.T) {
 		{"legacy pending (empty kind) defaults to clean", ReplacementEntry{RestorePending: true}, RestorePendingKindClean},
 		{"explicit clean stays clean", ReplacementEntry{RestorePending: true, RestorePendingKind: RestorePendingKindClean}, RestorePendingKindClean},
 		{"rearm-refused round-trips", ReplacementEntry{RestorePending: true, RestorePendingKind: RestorePendingKindRearmRefused}, RestorePendingKindRearmRefused},
+		{"prune round-trips", ReplacementEntry{RestorePending: true, RestorePendingKind: RestorePendingKindPrune}, RestorePendingKindPrune},
 		{
 			"unknown kinds conservatively read as rearm-refused",
 			ReplacementEntry{RestorePending: true, RestorePendingKind: "future-kind-from-a-newer-build"},
@@ -43,6 +44,20 @@ func TestReplacementEntrySetRestorePendingW19_MergeDiscipline(t *testing.T) {
 		require.True(t, e.RestorePending)
 		require.Equal(t, "", e.RestorePendingKind, "the clean kind stays unwritten (omitempty) for legacy blob parity")
 		require.Equal(t, RestorePendingKindClean, e.PendingKind())
+	})
+
+	t.Run("prune mark writes an explicit kind", func(t *testing.T) {
+		e := ReplacementEntry{}
+		require.True(t, e.SetRestorePending(RestorePendingKindPrune))
+		require.Equal(t, RestorePendingKindPrune, e.RestorePendingKind)
+		require.False(t, e.SetRestorePending(RestorePendingKindClean), "prune intent must not downgrade to restore-clean")
+
+		clean := ReplacementEntry{RestorePending: true}
+		require.True(t, clean.SetRestorePending(RestorePendingKindPrune), "prune cleanup upgrades a legacy clean marker")
+		require.Equal(t, RestorePendingKindPrune, clean.PendingKind())
+
+		refused := ReplacementEntry{RestorePending: true, RestorePendingKind: RestorePendingKindRearmRefused}
+		require.False(t, refused.SetRestorePending(RestorePendingKindPrune), "prune cannot reclaim a name already proven unowned")
 	})
 
 	t.Run("rearm-refused mark on a non-pending entry writes the kind", func(t *testing.T) {
@@ -86,6 +101,16 @@ func TestReplacementEntryPendingKindW19_PayloadShape(t *testing.T) {
 			"a pre-wave-19 pending entry carries no kind and defaults to clean")
 		require.Equal(t, legacy, MarshalLedgerJSON(gf),
 			"clean-kind entries never materialize the kind field — wave-18 blob parity")
+	})
+
+	t.Run("prune blob shape", func(t *testing.T) {
+		e := ReplacementEntry{Destination: "/d/poster.jpg", Backup: "/d/poster.jpg.dlbak.0123456789abcdef", DestSeq: 1}
+		require.True(t, e.SetRestorePending(RestorePendingKindPrune))
+		blob := MarshalLedgerJSON(GeneratedFilesJSON{Replacements: []ReplacementEntry{e}})
+		require.Contains(t, blob, `"restore_pending_kind":"prune"`)
+		parsed, err := ParseGeneratedFiles(blob)
+		require.NoError(t, err)
+		require.Equal(t, RestorePendingKindPrune, parsed.Replacements[0].PendingKind())
 	})
 
 	t.Run("rearm-refused blob shape", func(t *testing.T) {

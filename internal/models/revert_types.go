@@ -95,8 +95,8 @@ func (e ReplacementEntry) BackupFactsStamped() bool { return e.BackupModUnix != 
 
 // Restore-pending kinds carried by ReplacementEntry.RestorePendingKind. The
 // persistence contract keeps the clean kind UNWRITTEN ("") so wave-19 blobs
-// for the legacy path stay byte-identical to their wave-18 form; only the
-// rearm-refused kind ever materializes in JSON.
+// for the legacy path stay byte-identical to their wave-18 form; explicit
+// rearm-refused and prune intents materialize in JSON.
 const (
 	// RestorePendingKindClean certifies the destination bytes are in place
 	// while the journal-owned backup still holds this operation's own bytes,
@@ -110,6 +110,10 @@ const (
 	// pending retry consumes the journal entry without any backup-path
 	// operation.
 	RestorePendingKindRearmRefused = "rearm_refused"
+	// RestorePendingKindPrune records that the destination still contains the
+	// organized bytes and the backup is being removed because its operation is
+	// fenced for retention. It must never use restore-completion semantics.
+	RestorePendingKindPrune = "prune"
 )
 
 // PendingKind normalizes the entry's restore-pending kind. A non-pending
@@ -124,6 +128,8 @@ func (e ReplacementEntry) PendingKind() string {
 	switch e.RestorePendingKind {
 	case "", RestorePendingKindClean:
 		return RestorePendingKindClean
+	case RestorePendingKindPrune:
+		return RestorePendingKindPrune
 	default:
 		return RestorePendingKindRearmRefused
 	}
@@ -137,6 +143,16 @@ func (e ReplacementEntry) PendingKind() string {
 func (e *ReplacementEntry) SetRestorePending(kind string) bool {
 	if e.RestorePending {
 		if e.PendingKind() == kind {
+			return false
+		}
+		if kind == RestorePendingKindPrune {
+			if e.PendingKind() != RestorePendingKindClean {
+				return false
+			}
+			e.RestorePendingKind = RestorePendingKindPrune
+			return true
+		}
+		if e.PendingKind() == RestorePendingKindPrune {
 			return false
 		}
 		if kind != RestorePendingKindRearmRefused {

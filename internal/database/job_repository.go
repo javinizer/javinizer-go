@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -10,6 +11,23 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 	"gorm.io/gorm"
 )
+
+const pruningJobStatus models.JobStatus = "pruning"
+
+// ErrJobPruning reports that a mutation raced a durable organized-job prune claim.
+var ErrJobPruning = errors.New("organized job is being pruned")
+
+type pruneMaintenanceContextKey struct{}
+
+// WithPruneMaintenance authorizes the retention hook to mutate operation
+// journals while their owning jobs carry the durable pruning fence.
+func WithPruneMaintenance(ctx context.Context) context.Context {
+	return context.WithValue(ctx, pruneMaintenanceContextKey{}, true)
+}
+
+func pruneMaintenance(ctx context.Context) bool {
+	return ctx != nil && ctx.Value(pruneMaintenanceContextKey{}) == true
+}
 
 // JobRepository persists and queries Job records via GORM, composing BaseRepository for common operations.
 type JobRepository struct {
@@ -77,14 +95,22 @@ func (r *JobRepository) Upsert(ctx context.Context, job *models.Job) error {
 // callers cannot reuse a version observed before a concurrent writer commit.
 func (r *JobRepository) saveVersioned(ctx context.Context, job *models.Job, operation string) error {
 	err := r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		result := tx.Model(&models.Job{}).Where("id = ?", job.ID).
+		// The conditional increment is the first statement: either this writer
+		// wins the database writer lock before pruning claims the row, or the
+		// pruning fence is observed and the mutation is rejected.
+		result := tx.Model(&models.Job{}).Where("id = ? AND status <> ?", job.ID, pruningJobStatus).
 			UpdateColumn("prune_version", gorm.Expr("prune_version + 1"))
 		if result.Error != nil {
 			return result.Error
 		}
 		if result.RowsAffected == 0 {
-			job.PruneVersion = 0
-			return tx.Create(job).Error
+			var existing models.Job
+			statusResult := tx.Select("status").Where("id = ?", job.ID).First(&existing)
+			if errors.Is(statusResult.Error, gorm.ErrRecordNotFound) {
+				job.PruneVersion = 0
+				return tx.Create(job).Error
+			}
+			return ErrJobPruning
 		}
 		var version uint64
 		if err := tx.Model(&models.Job{}).Where("id = ?", job.ID).Pluck("prune_version", &version).Error; err != nil {
@@ -122,7 +148,15 @@ func (r *JobRepository) DeleteOrganizedOlderThan(ctx context.Context, date time.
 	var prunedJobs []models.Job
 	var prunedOps []models.BatchFileOperation
 	err := r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("status = ? AND organized_at < ?", models.JobStatusOrganized, date).Find(&prunedJobs).Error; err != nil {
+		// Claim is the first write. A concurrent job/operation writer either
+		// commits before this fence and is included in the fresh snapshot, or
+		// observes pruningJobStatus and is rejected until cleanup finishes.
+		if err := tx.Model(&models.Job{}).
+			Where("status = ? AND organized_at < ?", models.JobStatusOrganized, date).
+			Update("status", pruningJobStatus).Error; err != nil {
+			return wrapDBErr("claim", "organized jobs for pruning", err)
+		}
+		if err := tx.Where("status = ? AND organized_at < ?", pruningJobStatus, date).Find(&prunedJobs).Error; err != nil {
 			return wrapDBErr("find", "organized jobs", err)
 		}
 		if len(prunedJobs) == 0 {
@@ -152,17 +186,13 @@ func (r *JobRepository) DeleteOrganizedOlderThan(ctx context.Context, date time.
 		return nil
 	}
 
-	originalPrunedOps := append([]models.BatchFileOperation(nil), prunedOps...)
 	hook := r.organizedJobPruneHook()
 	if hasReplacementLedger(prunedOps) && hook == nil {
 		return fmt.Errorf("prune organized jobs: replacement cleanup hook is not configured")
 	}
 	if hook != nil && len(prunedOps) > 0 {
-		if err := hook(ctx, prunedOps); err != nil {
+		if err := hook(WithPruneMaintenance(ctx), prunedOps); err != nil {
 			return wrapDBErr("prune", "organized job backups", err)
-		}
-		if err := r.refreshConsumedPrunedOps(ctx, originalPrunedOps, &prunedOps); err != nil {
-			return wrapDBErr("prune", "refresh consumed operation versions", err)
 		}
 	}
 
@@ -173,17 +203,7 @@ func (r *JobRepository) DeleteOrganizedOlderThan(ctx context.Context, date time.
 				end = len(prunedJobs)
 			}
 			jobChunk := prunedJobs[start:end]
-			jobIDs := make(map[string]struct{}, len(jobChunk))
-			for _, job := range jobChunk {
-				jobIDs[job.ID] = struct{}{}
-			}
-			opChunk := make([]models.BatchFileOperation, 0)
-			for _, op := range prunedOps {
-				if _, ok := jobIDs[op.BatchJobID]; ok {
-					opChunk = append(opChunk, op)
-				}
-			}
-			if err := deletePrunedJobChunk(tx, jobChunk, opChunk); err != nil {
+			if err := deletePrunedJobChunk(tx, jobChunk); err != nil {
 				return err
 			}
 		}
@@ -191,44 +211,9 @@ func (r *JobRepository) DeleteOrganizedOlderThan(ctx context.Context, date time.
 	})
 }
 
-func (r *JobRepository) refreshConsumedPrunedOps(ctx context.Context, original []models.BatchFileOperation, current *[]models.BatchFileOperation) error {
-	if len(original) == 0 {
-		return nil
-	}
-	var live []models.BatchFileOperation
-	for start := 0; start < len(original); start += pruneDeleteBatchSize {
-		end := start + pruneDeleteBatchSize
-		if end > len(original) {
-			end = len(original)
-		}
-		ids := make([]uint, 0, end-start)
-		for _, op := range original[start:end] {
-			ids = append(ids, op.ID)
-		}
-		var chunk []models.BatchFileOperation
-		if err := r.GetDB().WithContext(ctx).Where("id IN ?", ids).Find(&chunk).Error; err != nil {
-			return err
-		}
-		live = append(live, chunk...)
-	}
-	byID := make(map[uint]models.BatchFileOperation, len(live))
-	for _, op := range live {
-		byID[op.ID] = op
-	}
-	for i := range *current {
-		if !hasReplacementLedger([]models.BatchFileOperation{original[i]}) {
-			continue
-		}
-		if liveOp, ok := byID[original[i].ID]; ok && !hasReplacementLedger([]models.BatchFileOperation{liveOp}) {
-			(*current)[i] = liveOp
-		}
-	}
-	return nil
-}
-
 const pruneDeleteBatchSize = 200
 
-func deletePrunedJobChunk(tx *gorm.DB, jobs []models.Job, ops []models.BatchFileOperation) error {
+func deletePrunedJobChunk(tx *gorm.DB, jobs []models.Job) error {
 	jobPredicates := make([]string, 0, len(jobs))
 	jobArgs := make([]any, 0, len(jobs)*2)
 	for _, job := range jobs {
@@ -236,23 +221,10 @@ func deletePrunedJobChunk(tx *gorm.DB, jobs []models.Job, ops []models.BatchFile
 		jobArgs = append(jobArgs, job.ID, job.PruneVersion)
 	}
 	jobWhere := "status = ? AND (" + strings.Join(jobPredicates, " OR ") + ")"
-	jobWhereArgs := append([]any{models.JobStatusOrganized}, jobArgs...)
+	jobWhereArgs := append([]any{pruningJobStatus}, jobArgs...)
 	eligibleJobs := tx.Model(&models.Job{}).Select("id").Where(jobWhere, jobWhereArgs...)
-	for start := 0; start < len(ops); start += pruneDeleteBatchSize {
-		end := start + pruneDeleteBatchSize
-		if end > len(ops) {
-			end = len(ops)
-		}
-		opPredicates := make([]string, 0, end-start)
-		opArgs := make([]any, 0, (end-start)*2)
-		for _, op := range ops[start:end] {
-			opPredicates = append(opPredicates, "(id = ? AND updated_at = ?)")
-			opArgs = append(opArgs, op.ID, op.UpdatedAt)
-		}
-		opWhere := "(" + strings.Join(opPredicates, " OR ") + ") AND batch_job_id IN (?)"
-		if err := tx.Where(opWhere, append(opArgs, eligibleJobs)...).Delete(&models.BatchFileOperation{}).Error; err != nil {
-			return wrapDBErr("delete", "organized job operations", err)
-		}
+	if err := tx.Where("batch_job_id IN (?)", eligibleJobs).Delete(&models.BatchFileOperation{}).Error; err != nil {
+		return wrapDBErr("delete", "organized job operations", err)
 	}
 	if err := tx.Where("id IN (?) AND NOT EXISTS (SELECT 1 FROM batch_file_operations WHERE batch_job_id = jobs.id)", eligibleJobs).Delete(&models.Job{}).Error; err != nil {
 		return wrapDBErr("delete", "organized jobs", err)

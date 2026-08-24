@@ -326,6 +326,10 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 				// name (a refusal left it foreign or absent), so any facts verdict
 				// against that name measures foreign bytes. Legacy-unstamped
 				// entries keep the same presence posture (documented residual).
+				if restorePending && pendingKind == models.RestorePendingKindPrune {
+					return fmt.Errorf("journaled prune-pending entry for destination %s is owned by retention cleanup", dest)
+				}
+
 				if restorePending && pendingKind == models.RestorePendingKindRearmRefused {
 					if destLstatErr != nil {
 						return fmt.Errorf("journaled rearm-refused pending entry for destination %s cannot be consumed: destination unreadable: %w", dest, destLstatErr)

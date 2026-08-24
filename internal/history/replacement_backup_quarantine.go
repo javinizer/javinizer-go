@@ -56,6 +56,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 
 	"github.com/spf13/afero"
 
@@ -68,6 +70,17 @@ import (
 // ownership grammar (replacement_backup_name), so sweeps never arbitrate a
 // transient (or wedged) quarantine file as a set-aside.
 const backupQuarantineSuffix = ".dlq."
+
+var backupQuarantineNamePattern = regexp.MustCompile(`\.dlq\.[0-9a-f]{32}$`)
+
+func isReplacementBackupQuarantineName(name string) bool {
+	return backupQuarantineNamePattern.MatchString(name)
+}
+
+func originalReplacementBackupFromQuarantine(path string) string {
+	suffix := backupQuarantineNamePattern.FindString(path)
+	return strings.TrimSuffix(path, suffix)
+}
 
 // backupQuarantineClaimTries bounds the unpredictable-name draw loop; every
 // collision or racing claimant costs one draw.

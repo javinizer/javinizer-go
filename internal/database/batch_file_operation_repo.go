@@ -36,6 +36,9 @@ func NewBatchFileOperationRepository(db *DB) *BatchFileOperationRepository {
 
 // Create inserts a single batch file operation record.
 func (r *BatchFileOperationRepository) Create(ctx context.Context, op *models.BatchFileOperation) error {
+	if err := ensureJobWritable(r.GetDB().WithContext(ctx), op.BatchJobID); err != nil {
+		return wrapDBErr("create", fmt.Sprintf("batch file operation %d", op.ID), err)
+	}
 	return r.BaseRepository.Create(ctx, op)
 }
 
@@ -43,6 +46,9 @@ func (r *BatchFileOperationRepository) Create(ctx context.Context, op *models.Ba
 func (r *BatchFileOperationRepository) CreateBatch(ctx context.Context, ops []*models.BatchFileOperation) error {
 	return r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		for _, op := range ops {
+			if err := ensureJobWritable(tx, op.BatchJobID); err != nil {
+				return err
+			}
 			if err := tx.Create(op).Error; err != nil {
 				return wrapDBErr("create", fmt.Sprintf("batch file operation %d", op.ID), err)
 			}
@@ -78,15 +84,24 @@ func (r *BatchFileOperationRepository) FindByBatchJobIDAndRevertStatus(ctx conte
 
 // UpdateRevertStatus sets the revert status of an operation, stamping reverted_at when the status is reverted.
 func (r *BatchFileOperationRepository) UpdateRevertStatus(ctx context.Context, id uint, status models.RevertStatusEnum) error {
+	now := time.Now().UTC()
 	updates := map[string]any{
 		"revert_status": status,
-		"updated_at":    time.Now().UTC(),
+		"updated_at":    now,
 	}
 	if status == models.RevertStatusReverted {
-		updates["reverted_at"] = time.Now().UTC()
+		updates["reverted_at"] = now
 	}
-	if err := r.GetDB().WithContext(ctx).Model(&models.BatchFileOperation{}).Where("id = ?", id).Updates(updates).Error; err != nil {
-		return wrapDBErr("update", fmt.Sprintf("batch file operation %d revert status", id), err)
+	db := r.GetDB().WithContext(ctx).Model(&models.BatchFileOperation{}).
+		Where("id = ? AND NOT EXISTS (SELECT 1 FROM jobs WHERE jobs.id = batch_file_operations.batch_job_id AND jobs.status = ?)", id, pruningJobStatus)
+	result := db.Updates(updates)
+	if result.Error != nil {
+		return wrapDBErr("update", fmt.Sprintf("batch file operation %d revert status", id), result.Error)
+	}
+	if result.RowsAffected == 0 {
+		if err := ensureOperationWritable(r.GetDB().WithContext(ctx), id); err != nil {
+			return wrapDBErr("update", fmt.Sprintf("batch file operation %d revert status", id), err)
+		}
 	}
 	return nil
 }
@@ -165,6 +180,10 @@ func (r *BatchFileOperationRepository) UpdateJournalInTx(ctx context.Context, id
 		}
 	}()
 
+	if err := ensureOperationWritableConn(ctx, conn, id, true); err != nil {
+		return err
+	}
+
 	var raw sql.NullString
 	var status models.RevertStatusEnum
 	scanErr := conn.QueryRowContext(ctx,
@@ -209,6 +228,9 @@ func (r *BatchFileOperationRepository) UpdateJournalInTx(ctx context.Context, id
 // completion writes go through UpdateNonJournalFields (wave-10 codex
 // follow-up).
 func (r *BatchFileOperationRepository) Update(ctx context.Context, op *models.BatchFileOperation) error {
+	if err := ensureJobWritable(r.GetDB().WithContext(ctx), op.BatchJobID); err != nil {
+		return wrapDBErr("update", fmt.Sprintf("batch file operation %d", op.ID), err)
+	}
 	if err := r.GetDB().WithContext(ctx).Save(op).Error; err != nil {
 		return wrapDBErr("update", fmt.Sprintf("batch file operation %d", op.ID), err)
 	}
@@ -280,6 +302,9 @@ func (r *BatchFileOperationRepository) UpdateNonJournalFields(ctx context.Contex
 			_, _ = conn.ExecContext(context.Background(), "ROLLBACK")
 		}
 	}()
+	if err := ensureOperationWritableConn(ctx, conn, op.ID, false); err != nil {
+		return wrapDBErr("update non-journal fields", label, err)
+	}
 
 	now := time.Now().UTC()
 	// (a) Non-status columns unconditionally — the wave-10 Save-parity set.

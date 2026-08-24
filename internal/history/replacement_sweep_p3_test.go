@@ -656,6 +656,7 @@ func TestReplacementSweeper_PruneOperationBackups_PersistsPartialPostMoveHold(t 
 	gf, parseErr := models.ParseGeneratedFiles(row.GeneratedFiles)
 	require.NoError(t, parseErr)
 	require.True(t, gf.Replacements[0].RestorePending)
+	require.Equal(t, models.RestorePendingKindPrune, gf.Replacements[0].PendingKind())
 	require.Contains(t, gf.Replacements[0].Backup, backupQuarantineSuffix)
 }
 
@@ -682,6 +683,7 @@ func TestReplacementSweeper_PruneOperationBackups_RevokedAfterQuarantinePersists
 	gf, parseErr := models.ParseGeneratedFiles(row.GeneratedFiles)
 	require.NoError(t, parseErr)
 	require.True(t, gf.Replacements[0].RestorePending)
+	require.Equal(t, models.RestorePendingKindPrune, gf.Replacements[0].PendingKind())
 	require.Contains(t, gf.Replacements[0].Backup, backupQuarantineSuffix)
 }
 
@@ -710,6 +712,7 @@ func TestReplacementSweeper_PruneOperationBackups_PersistsQuarantineAfterRestore
 	require.NoError(t, parseErr)
 	require.Len(t, gf.Replacements, 1)
 	require.True(t, gf.Replacements[0].RestorePending)
+	require.Equal(t, models.RestorePendingKindPrune, gf.Replacements[0].PendingKind())
 	require.Contains(t, gf.Replacements[0].Backup, backupQuarantineSuffix)
 	foreign, readErr := afero.ReadFile(fs, backup)
 	require.NoError(t, readErr)
@@ -813,6 +816,7 @@ func TestReplacementSweeper_PruneOperationBackups_PersistsAfterUnlinkRestoreFail
 	gf, parseErr := models.ParseGeneratedFiles(row.GeneratedFiles)
 	require.NoError(t, parseErr)
 	require.True(t, gf.Replacements[0].RestorePending)
+	require.Equal(t, models.RestorePendingKindPrune, gf.Replacements[0].PendingKind())
 	require.Contains(t, gf.Replacements[0].Backup, backupQuarantineSuffix)
 }
 
@@ -877,6 +881,243 @@ func (r *retractErrorRepo) UpdateJournalInTx(ctx context.Context, id uint, fn da
 		return r.err
 	}
 	return r.p3OpRepo.UpdateJournalInTx(ctx, id, fn)
+}
+
+func TestReplacementSweeper_PrunePendingRetryConsumesWithoutRestore(t *testing.T) {
+	base := afero.NewMemMapFs()
+	repo := newP3OpRepo()
+	dest := "/out/PRUNE-PENDING-RETRY/poster.jpg"
+	backup := dest + ".dlbak." + p3HexA
+	require.NoError(t, base.MkdirAll(filepath.Dir(dest), 0o755))
+	require.NoError(t, afero.WriteFile(base, dest, []byte("organized"), 0o644))
+	require.NoError(t, afero.WriteFile(base, backup, []byte("old"), 0o644))
+	op := installedPruneCandidate(t, repo, "job-prune-pending-retry", "PRUNE-PENDING-RETRY", dest, backup)
+	gf, err := models.ParseGeneratedFiles(op.GeneratedFiles)
+	require.NoError(t, err)
+	require.True(t, gf.Replacements[0].SetRestorePending(models.RestorePendingKindPrune))
+	op.GeneratedFiles = models.MarshalLedgerJSON(gf)
+	require.NoError(t, repo.Update(context.Background(), op))
+
+	healed, err := NewReplacementSweeper(base, repo).Sweep(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, 1, healed)
+	exists, statErr := afero.Exists(base, backup)
+	require.NoError(t, statErr)
+	require.False(t, exists)
+	require.Equal(t, "organized", string(mustRead2(t, base, dest)))
+	require.Empty(t, requireLedgerReplacements(t, repo, op.ID))
+}
+
+func TestReplacementSweeper_PrunePendingRetryConsumesAbsentBackup(t *testing.T) {
+	base := afero.NewMemMapFs()
+	repo := newP3OpRepo()
+	dest := "/out/PRUNE-PENDING-ABSENT/poster.jpg"
+	backup := dest + ".dlbak." + p3HexA
+	require.NoError(t, base.MkdirAll(filepath.Dir(dest), 0o755))
+	require.NoError(t, afero.WriteFile(base, dest, []byte("organized"), 0o644))
+	op := installedPruneCandidate(t, repo, "job-prune-pending-absent", "PRUNE-PENDING-ABSENT", dest, backup)
+	gf, err := models.ParseGeneratedFiles(op.GeneratedFiles)
+	require.NoError(t, err)
+	require.True(t, gf.Replacements[0].SetRestorePending(models.RestorePendingKindPrune))
+	op.GeneratedFiles = models.MarshalLedgerJSON(gf)
+	require.NoError(t, repo.Update(context.Background(), op))
+
+	healed, err := NewReplacementSweeper(base, repo).Sweep(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, 1, healed)
+	require.Empty(t, requireLedgerReplacements(t, repo, op.ID))
+}
+
+func TestReplacementSweeper_SweepRecoversPruneQuarantine(t *testing.T) {
+	base := afero.NewMemMapFs()
+	repo := newP3OpRepo()
+	dest := "/out/PRUNE-QUAR-CRASH/poster.jpg"
+	backup := dest + ".dlbak." + p3HexA
+	quarantine := backup + backupQuarantineSuffix + "0123456789abcdef0123456789abcdef"
+	require.NoError(t, base.MkdirAll(filepath.Dir(dest), 0o755))
+	require.NoError(t, afero.WriteFile(base, dest, []byte("organized"), 0o644))
+	require.NoError(t, afero.WriteFile(base, quarantine, []byte("old"), 0o644))
+	op := installedPruneCandidate(t, repo, "job-prune-quar-crash", "PRUNE-QUAR-CRASH", dest, backup)
+	gf, err := models.ParseGeneratedFiles(op.GeneratedFiles)
+	require.NoError(t, err)
+	require.True(t, gf.Replacements[0].SetRestorePending(models.RestorePendingKindPrune))
+	op.GeneratedFiles = models.MarshalLedgerJSON(gf)
+	require.NoError(t, repo.Update(context.Background(), op))
+
+	healed, err := NewReplacementSweeper(base, repo).Sweep(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, 1, healed)
+	exists, statErr := afero.Exists(base, quarantine)
+	require.NoError(t, statErr)
+	require.False(t, exists)
+	require.Empty(t, requireLedgerReplacements(t, repo, op.ID))
+}
+
+func TestReplacementSweeper_ConsumePrunePendingClaimBranches(t *testing.T) {
+	base := afero.NewMemMapFs()
+	idx := &replacementLedgerIndex{journaled: map[string]*models.BatchFileOperation{}}
+	entry := prunePendingLedgerEntry{dest: "/out/PRUNE-CLAIM/poster.jpg", backup: "/out/PRUNE-CLAIM/poster.jpg.dlbak." + p3HexA}
+	prev := acquireReplacementBusyExFn
+	t.Cleanup(func() { acquireReplacementBusyExFn = prev })
+
+	acquireReplacementBusyExFn = func(afero.Fs, string) (func(), string, error) {
+		return nil, "", fsutil.ErrReplacementBusy
+	}
+	require.Zero(t, NewReplacementSweeper(base, newP3OpRepo()).consumePrunePending(context.Background(), idx, entry))
+	acquireReplacementBusyExFn = func(afero.Fs, string) (func(), string, error) {
+		return nil, "", errors.New("busy lookup failed")
+	}
+	require.Zero(t, NewReplacementSweeper(base, newP3OpRepo()).consumePrunePending(context.Background(), idx, entry))
+	released := false
+	acquireReplacementBusyExFn = func(afero.Fs, string) (func(), string, error) {
+		return func() { released = true }, "", nil
+	}
+	require.Zero(t, NewReplacementSweeper(base, newP3OpRepo()).consumePrunePending(context.Background(), idx, entry))
+	require.True(t, released)
+	acquireReplacementBusyExFn = func(afero.Fs, string) (func(), string, error) { return func() {}, "token", nil }
+	require.Zero(t, NewReplacementSweeper(base, newP3OpRepo()).consumePrunePending(context.Background(), idx, entry))
+}
+
+func TestReplacementSweeper_ConsumePrunePendingBindRevoked(t *testing.T) {
+	base := afero.NewMemMapFs()
+	repo := newP3OpRepo()
+	dest := "/out/PRUNE-CLAIM-REVOKE/poster.jpg"
+	entry := prunePendingLedgerEntry{rowID: 1, dest: dest, backup: dest + ".dlbak." + p3HexA, backupSlash: sweepSlash(dest + ".dlbak." + p3HexA)}
+	prev := acquireReplacementBusyExFn
+	acquireReplacementBusyExFn = func(afero.Fs, string) (func(), string, error) { return func() {}, "token", nil }
+	t.Cleanup(func() { acquireReplacementBusyExFn = prev })
+	lockRelease := fsutil.SharedDestLocks().Acquire(dest)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	result := make(chan int, 1)
+	go func() {
+		result <- NewReplacementSweeper(base, repo).consumePrunePending(ctx, &replacementLedgerIndex{journaled: map[string]*models.BatchFileOperation{}}, entry)
+	}()
+	cancel()
+	require.Eventually(t, func() bool { return reclaimAbandonedSweepBusyMarker(dest) }, time.Second, time.Millisecond)
+	lockRelease()
+	require.Zero(t, <-result)
+}
+
+func TestReplacementSweeper_JournalEntryDestinationBranches(t *testing.T) {
+	require.Empty(t, journalEntryDestination(&models.BatchFileOperation{GeneratedFiles: `{"replacements":broken`}, "/x"))
+	require.Empty(t, journalEntryDestination(&models.BatchFileOperation{GeneratedFiles: models.MarshalLedgerJSON(models.GeneratedFilesJSON{Replacements: []models.ReplacementEntry{{Backup: "/other"}}})}, "/missing"))
+}
+
+func TestReplacementSweeper_PrunePendingRemovalFailureKeepsIntent(t *testing.T) {
+	base := afero.NewMemMapFs()
+	dest := "/out/PRUNE-PENDING-REMOVE/poster.jpg"
+	backup := dest + ".dlbak." + p3HexA
+	require.NoError(t, base.MkdirAll(filepath.Dir(dest), 0o755))
+	require.NoError(t, afero.WriteFile(base, dest, []byte("organized"), 0o644))
+	require.NoError(t, afero.WriteFile(base, backup, []byte("old"), 0o644))
+	repo := newP3OpRepo()
+	op := installedPruneCandidate(t, repo, "job-prune-remove-failure", "PRUNE-PENDING-REMOVE", dest, backup)
+	gf, err := models.ParseGeneratedFiles(op.GeneratedFiles)
+	require.NoError(t, err)
+	require.True(t, gf.Replacements[0].SetRestorePending(models.RestorePendingKindPrune))
+	op.GeneratedFiles = models.MarshalLedgerJSON(gf)
+	require.NoError(t, repo.Update(context.Background(), op))
+	fs := &w8RemoveFs{Fs: base, victim: backup, err: errors.New("prune unlink wedged"), fail: true}
+	require.False(t, NewReplacementSweeper(fs, repo).retryPendingRemoval(context.Background(), op.ID, backup, dest, sweepSlash(backup)))
+	row, err := repo.FindByID(context.Background(), op.ID)
+	require.NoError(t, err)
+	got, err := models.ParseGeneratedFiles(row.GeneratedFiles)
+	require.NoError(t, err)
+	require.Equal(t, models.RestorePendingKindPrune, got.Replacements[0].PendingKind())
+}
+
+func TestReplacementSweeper_PrunePendingConsumptionFailureKeepsIntent(t *testing.T) {
+	base := afero.NewMemMapFs()
+	dest := "/out/PRUNE-PENDING-CONSUME/poster.jpg"
+	backup := dest + ".dlbak." + p3HexA
+	require.NoError(t, base.MkdirAll(filepath.Dir(dest), 0o755))
+	require.NoError(t, afero.WriteFile(base, dest, []byte("organized"), 0o644))
+	require.NoError(t, afero.WriteFile(base, backup, []byte("old"), 0o644))
+	baseRepo := newP3OpRepo()
+	op := installedPruneCandidate(t, baseRepo, "job-prune-consume-failure", "PRUNE-PENDING-CONSUME", dest, backup)
+	gf, err := models.ParseGeneratedFiles(op.GeneratedFiles)
+	require.NoError(t, err)
+	require.True(t, gf.Replacements[0].SetRestorePending(models.RestorePendingKindPrune))
+	op.GeneratedFiles = models.MarshalLedgerJSON(gf)
+	require.NoError(t, baseRepo.Update(context.Background(), op))
+	repo := &w18TxFailRepo{p3OpRepo: baseRepo, fail: map[int]error{2: errors.New("prune consume wedged"), 3: errors.New("prune marker persist wedged")}}
+	require.False(t, NewReplacementSweeper(base, repo).retryPendingRemoval(context.Background(), op.ID, backup, dest, sweepSlash(backup)))
+	row, err := baseRepo.FindByID(context.Background(), op.ID)
+	require.NoError(t, err)
+	got, err := models.ParseGeneratedFiles(row.GeneratedFiles)
+	require.NoError(t, err)
+	require.Equal(t, models.RestorePendingKindPrune, got.Replacements[0].PendingKind())
+}
+
+func TestReplacementSweeper_PrunePendingAbsentConsumptionFailureKeepsIntent(t *testing.T) {
+	base := afero.NewMemMapFs()
+	dest := "/out/PRUNE-PENDING-ABSENT-FAIL/poster.jpg"
+	backup := dest + ".dlbak." + p3HexA
+	require.NoError(t, base.MkdirAll(filepath.Dir(dest), 0o755))
+	require.NoError(t, afero.WriteFile(base, dest, []byte("organized"), 0o644))
+	baseRepo := newP3OpRepo()
+	op := installedPruneCandidate(t, baseRepo, "job-prune-absent-failure", "PRUNE-PENDING-ABSENT-FAIL", dest, backup)
+	gf, err := models.ParseGeneratedFiles(op.GeneratedFiles)
+	require.NoError(t, err)
+	require.True(t, gf.Replacements[0].SetRestorePending(models.RestorePendingKindPrune))
+	op.GeneratedFiles = models.MarshalLedgerJSON(gf)
+	require.NoError(t, baseRepo.Update(context.Background(), op))
+	repo := &w18TxFailRepo{p3OpRepo: baseRepo, fail: map[int]error{2: errors.New("prune absent consume wedged")}}
+	require.False(t, NewReplacementSweeper(base, repo).retryPendingRemoval(context.Background(), op.ID, backup, dest, sweepSlash(backup)))
+}
+
+func TestReplacementSweeper_PrunePendingIndeterminateBackupKeepsIntent(t *testing.T) {
+	base := afero.NewMemMapFs()
+	dest := "/out/PRUNE-PENDING-IND/poster.jpg"
+	backup := dest + ".dlbak." + p3HexA
+	require.NoError(t, base.MkdirAll(filepath.Dir(dest), 0o755))
+	require.NoError(t, afero.WriteFile(base, dest, []byte("organized"), 0o644))
+	baseRepo := newP3OpRepo()
+	op := installedPruneCandidate(t, baseRepo, "job-prune-indeterminate", "PRUNE-PENDING-IND", dest, backup)
+	gf, err := models.ParseGeneratedFiles(op.GeneratedFiles)
+	require.NoError(t, err)
+	require.True(t, gf.Replacements[0].SetRestorePending(models.RestorePendingKindPrune))
+	op.GeneratedFiles = models.MarshalLedgerJSON(gf)
+	require.NoError(t, baseRepo.Update(context.Background(), op))
+	fs := &indeterminateStatFs{Fs: base, failPath: backup}
+	require.False(t, NewReplacementSweeper(fs, baseRepo).retryPendingRemoval(context.Background(), op.ID, backup, dest, sweepSlash(backup)))
+}
+
+func TestReplacementSweeper_PrunePendingAbsentRevocationKeepsIntent(t *testing.T) {
+	base := afero.NewMemMapFs()
+	repo := newP3OpRepo()
+	dest := "/out/PRUNE-PENDING-REVOKE/poster.jpg"
+	backup := dest + ".dlbak." + p3HexA
+	require.NoError(t, base.MkdirAll(filepath.Dir(dest), 0o755))
+	require.NoError(t, afero.WriteFile(base, dest, []byte("organized"), 0o644))
+	op := installedPruneCandidate(t, repo, "job-prune-revoke", "PRUNE-PENDING-REVOKE", dest, backup)
+	gf, err := models.ParseGeneratedFiles(op.GeneratedFiles)
+	require.NoError(t, err)
+	require.True(t, gf.Replacements[0].SetRestorePending(models.RestorePendingKindPrune))
+	op.GeneratedFiles = models.MarshalLedgerJSON(gf)
+	require.NoError(t, repo.Update(context.Background(), op))
+	claim, _, reclaim := w52LiveClaim(t, filepath.ToSlash(dest))
+	fs := &w52LstatStageFs{Fs: base, match: filepath.ToSlash(backup), stage: reclaim}
+	require.False(t, NewReplacementSweeper(fs, repo).retryPendingRemovalClaimed(context.Background(), op.ID, backup, dest, sweepSlash(backup), claim))
+}
+
+func TestReverter_PrunePendingIsNotRestoreComplete(t *testing.T) {
+	base := afero.NewMemMapFs()
+	repo := newP3OpRepo()
+	dest := "/out/PRUNE-REVERT/poster.jpg"
+	backup := dest + ".dlbak." + p3HexA
+	require.NoError(t, base.MkdirAll(filepath.Dir(dest), 0o755))
+	require.NoError(t, afero.WriteFile(base, dest, []byte("organized"), 0o644))
+	require.NoError(t, afero.WriteFile(base, backup, []byte("old"), 0o644))
+	op := installedPruneCandidate(t, repo, "job-prune-revert", "PRUNE-REVERT", dest, backup)
+	gf, err := models.ParseGeneratedFiles(op.GeneratedFiles)
+	require.NoError(t, err)
+	require.True(t, gf.Replacements[0].SetRestorePending(models.RestorePendingKindPrune))
+	op.GeneratedFiles = models.MarshalLedgerJSON(gf)
+	require.NoError(t, repo.Update(context.Background(), op))
+	_, err = NewReverter(base, repo).restoreReplacementJournal(context.Background(), op)
+	require.Contains(t, err.Error(), "prune-pending")
 }
 
 func TestReplacementSweeper_PruneOperationBackups_RetractionFailureSurfaces(t *testing.T) {
