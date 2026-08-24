@@ -1090,6 +1090,54 @@ func TestReplacementSweeper_PrunePendingPersistsPartialQuarantine(t *testing.T) 
 	require.Contains(t, got.Replacements[0].Backup, backupQuarantineSuffix)
 }
 
+// cancelSweepReadDirErrorFs cancels after the ledger index is built, then
+// makes the directory scan fail. That leaves the final prune-pending loop as
+// the next cancellation observation point.
+type cancelSweepReadDirErrorFs struct {
+	afero.Fs
+	dir    string
+	cancel context.CancelFunc
+	fired  bool
+}
+
+func (f *cancelSweepReadDirErrorFs) Open(name string) (afero.File, error) {
+	if !f.fired && filepath.Clean(name) == filepath.Clean(f.dir) {
+		f.fired = true
+		f.cancel()
+		return nil, errors.New("directory scan canceled")
+	}
+	return f.Fs.Open(name)
+}
+
+func TestReplacementSweeper_Sweep_PrunePendingCancellationBeforeRetry(t *testing.T) {
+	base := afero.NewMemMapFs()
+	dir := "/out/PRUNE-PENDING-CANCEL"
+	dest := dir + "/poster.jpg"
+	backup := dest + ".dlbak." + p3HexA
+	require.NoError(t, base.MkdirAll(dir, 0o755))
+	require.NoError(t, afero.WriteFile(base, dest, []byte("organized"), 0o644))
+	repo := newP3OpRepo()
+	op := installedPruneCandidate(t, repo, "job-prune-cancel", "PRUNE-PENDING-CANCEL", dest, backup)
+	gf, err := models.ParseGeneratedFiles(op.GeneratedFiles)
+	require.NoError(t, err)
+	require.True(t, gf.Replacements[0].SetRestorePending(models.RestorePendingKindPrune))
+	op.GeneratedFiles = models.MarshalLedgerJSON(gf)
+	require.NoError(t, repo.Update(context.Background(), op))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	fs := &cancelSweepReadDirErrorFs{Fs: base, dir: dir, cancel: cancel}
+	healed, err := NewReplacementSweeper(fs, repo).Sweep(ctx)
+	require.ErrorIs(t, err, context.Canceled)
+	require.Zero(t, healed)
+
+	row, findErr := repo.FindByID(context.Background(), op.ID)
+	require.NoError(t, findErr)
+	got, parseErr := models.ParseGeneratedFiles(row.GeneratedFiles)
+	require.NoError(t, parseErr)
+	require.True(t, got.Replacements[0].RestorePending, "cancellation must not consume the pending prune intent")
+	require.Equal(t, models.RestorePendingKindPrune, got.Replacements[0].PendingKind())
+}
+
 func TestReplacementSweeper_PrunePendingIndeterminateBackupKeepsIntent(t *testing.T) {
 	base := afero.NewMemMapFs()
 	dest := "/out/PRUNE-PENDING-IND/poster.jpg"

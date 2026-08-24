@@ -62,6 +62,9 @@ func bootstrapAPIDeps(cfg *config.Config, configFile string, auth commandutil.Au
 	}); ok {
 		setter.SetOrganizedJobPruneHook(pruneSweeper.PruneOperationBackups)
 	}
+	// The API server starts this configured sweep at the server boundary via
+	// rt.StartStartupSweep after bootstrap returns, keeping reconciliation
+	// asynchronous while still covering the API startup crash window.
 	reverter := history.NewReverter(fs, repos.BatchFileOpRepo)
 
 	apiDeps := &APIDeps{

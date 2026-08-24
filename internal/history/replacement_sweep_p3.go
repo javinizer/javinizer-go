@@ -1056,6 +1056,9 @@ func (s *ReplacementSweeper) Sweep(ctx context.Context) (int, error) {
 		if _, ok := idx.journaled[entry.backupSlash]; !ok {
 			continue
 		}
+		if err := ctx.Err(); err != nil {
+			return healed, err
+		}
 		healed += s.consumePrunePending(ctx, idx, entry)
 	}
 	return healed, nil
