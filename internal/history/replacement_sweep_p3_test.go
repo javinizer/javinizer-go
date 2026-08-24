@@ -1067,6 +1067,29 @@ func TestReplacementSweeper_PrunePendingAbsentConsumptionFailureKeepsIntent(t *t
 	require.False(t, NewReplacementSweeper(base, repo).retryPendingRemoval(context.Background(), op.ID, backup, dest, sweepSlash(backup)))
 }
 
+func TestReplacementSweeper_PrunePendingPersistsPartialQuarantine(t *testing.T) {
+	base := afero.NewMemMapFs()
+	dest := "/out/PRUNE-PENDING-DLQ/poster.jpg"
+	backup := dest + ".dlbak." + p3HexA
+	require.NoError(t, base.MkdirAll(filepath.Dir(dest), 0o755))
+	require.NoError(t, afero.WriteFile(base, dest, []byte("organized"), 0o644))
+	require.NoError(t, afero.WriteFile(base, backup, []byte("old"), 0o644))
+	repo := newP3OpRepo()
+	op := installedPruneCandidate(t, repo, "job-prune-dlq", "PRUNE-PENDING-DLQ", dest, backup)
+	gf, err := models.ParseGeneratedFiles(op.GeneratedFiles)
+	require.NoError(t, err)
+	require.True(t, gf.Replacements[0].SetRestorePending(models.RestorePendingKindPrune))
+	op.GeneratedFiles = models.MarshalLedgerJSON(gf)
+	require.NoError(t, repo.Update(context.Background(), op))
+	fs := &cancelOnPruneQuarantineFs{Fs: base, cancel: func() {}, plantPath: backup, plantBytes: []byte("foreign"), postMoveErr: errors.New("prune retry post-move wedge")}
+	require.False(t, NewReplacementSweeper(fs, repo).retryPendingRemoval(context.Background(), op.ID, backup, dest, sweepSlash(backup)))
+	row, err := repo.FindByID(context.Background(), op.ID)
+	require.NoError(t, err)
+	got, err := models.ParseGeneratedFiles(row.GeneratedFiles)
+	require.NoError(t, err)
+	require.Contains(t, got.Replacements[0].Backup, backupQuarantineSuffix)
+}
+
 func TestReplacementSweeper_PrunePendingIndeterminateBackupKeepsIntent(t *testing.T) {
 	base := afero.NewMemMapFs()
 	dest := "/out/PRUNE-PENDING-IND/poster.jpg"

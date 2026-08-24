@@ -707,10 +707,14 @@ func (s *ReplacementSweeper) markPruneCleanupPending(opID uint, entry models.Rep
 // quarantine object and marks cleanup pending so a later retry never treats a
 // missing original name as already consumed.
 func (s *ReplacementSweeper) persistPruneQuarantine(opID uint, original models.ReplacementEntry, quarantine string) error {
-	ctx, cancel := context.WithTimeout(database.WithPruneMaintenance(context.Background()), 30*time.Second)
-	defer cancel()
 	release := fsutil.SharedJournalLocks().Acquire(strconv.Itoa(int(opID)))
 	defer release()
+	return s.persistPruneQuarantineLocked(opID, original, quarantine)
+}
+
+func (s *ReplacementSweeper) persistPruneQuarantineLocked(opID uint, original models.ReplacementEntry, quarantine string) error {
+	ctx, cancel := context.WithTimeout(database.WithPruneMaintenance(context.Background()), 30*time.Second)
+	defer cancel()
 	err := s.repo.UpdateJournalInTx(ctx, opID, func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
 		gf, err := models.ParseGeneratedFiles(current.GeneratedFiles)
 		if err != nil {
@@ -2070,7 +2074,7 @@ func (s *ReplacementSweeper) retryPendingRemovalClaimed(ctx context.Context, row
 		hold, rmErr = quarantineReplacementBackupForRemoval(s.fs, backup, "replacement sweep", &durableEntry, backupInfo)
 	}
 	if rmErr != nil && effectiveKind == models.RestorePendingKindPrune && hold != nil && hold.moved {
-		_ = s.persistPruneQuarantine(rowID, durableEntry, hold.quarantine)
+		_ = s.persistPruneQuarantineLocked(rowID, durableEntry, hold.quarantine)
 	}
 	if rmErr == nil && effectiveKind != models.RestorePendingKindPrune {
 		if _, derr := lstatRestoreSource(s.fs, dest); derr != nil {

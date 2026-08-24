@@ -365,6 +365,8 @@ func TestJobRepository_DeleteOrganizedOlderThan_VersionFenceKeepsConcurrentMutat
 		currentOp.NewPath = "/fence/concurrent-dest"
 		opErr := opRepo.Update(context.Background(), currentOp)
 		require.ErrorIs(t, opErr, ErrJobPruning)
+		createErr := opRepo.Create(context.Background(), &models.BatchFileOperation{BatchJobID: job.ID, OriginalPath: "/fence/create", NewPath: "/fence/create-dest"})
+		require.ErrorIs(t, createErr, ErrJobPruning)
 		createBatchErr := opRepo.CreateBatch(context.Background(), []*models.BatchFileOperation{{BatchJobID: job.ID, OriginalPath: "/fence/new", NewPath: "/fence/new-dest"}})
 		require.ErrorIs(t, createBatchErr, ErrJobPruning)
 		journalErr := opRepo.UpdateJournalInTx(context.Background(), op.ID, func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
@@ -375,7 +377,7 @@ func TestJobRepository_DeleteOrganizedOlderThan_VersionFenceKeepsConcurrentMutat
 		require.ErrorIs(t, revertErr, ErrJobPruning)
 		nonJournalErr := opRepo.UpdateNonJournalFields(context.Background(), currentOp)
 		require.ErrorIs(t, nonJournalErr, ErrJobPruning)
-		return errors.Join(jobErr, opErr, createBatchErr, journalErr, revertErr, nonJournalErr)
+		return errors.Join(jobErr, opErr, createErr, createBatchErr, journalErr, revertErr, nonJournalErr)
 	})
 
 	err := repo.DeleteOrganizedOlderThan(context.Background(), time.Now().UTC().Add(-24*time.Hour))
@@ -422,6 +424,8 @@ func TestEnsureOperationWritable_PruneDiagnostics(t *testing.T) {
 	require.NoError(t, ensureOperationWritable(db.DB, 99999))
 	require.NoError(t, db.DB.Exec("DROP TABLE batch_file_operations").Error)
 	require.Error(t, ensureOperationWritable(db.DB, op.ID))
+	require.NoError(t, db.DB.Exec("DROP TABLE jobs").Error)
+	require.Error(t, ensureJobWritable(db.DB, job.ID))
 }
 
 func TestJobRepository_DeleteOrganizedOlderThan_BatchesLargeRetentionSet(t *testing.T) {
