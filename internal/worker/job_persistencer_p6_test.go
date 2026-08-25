@@ -88,7 +88,8 @@ type lowerAcceptedGenerationRepoP6 struct {
 	*mocks.MockJobRepositoryInterface
 }
 
-func (r *lowerAcceptedGenerationRepoP6) CommitEnvelope(_ context.Context, _ *models.Job, _ uint64) (uint64, error) {
+func (r *lowerAcceptedGenerationRepoP6) CommitEnvelope(_ context.Context, job *models.Job, _ uint64) (uint64, error) {
+	job.PruneVersion = 6
 	return 1, nil
 }
 
@@ -102,8 +103,10 @@ func TestPersistToDatabase_DoesNotLowerLiveGeneration(t *testing.T) {
 	require.NoError(t, persistToDatabase(repo, job))
 	job.mu.RLock()
 	generation := job.envelopeGeneration
+	pruneVersion := job.pruneVersion
 	job.mu.RUnlock()
 	require.Equal(t, uint64(5), generation)
+	require.Equal(t, uint64(6), pruneVersion)
 }
 
 func TestPersistToDatabase_InitialUpsertPublishesAcceptedGeneration(t *testing.T) {

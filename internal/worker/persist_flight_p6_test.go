@@ -114,6 +114,116 @@ func TestJobPersistFlight_CanceledWaiterDoesNotOwnFlight(t *testing.T) {
 	require.NoError(t, <-ownerDone)
 }
 
+// flightCancelContext lets tests deterministically cancel after a flight has
+// entered a Done-channel select rather than before its initial Err check.
+type flightCancelContext struct {
+	done  chan struct{}
+	ready chan struct{}
+	once  sync.Once
+}
+
+func newFlightCancelContext() *flightCancelContext {
+	return &flightCancelContext{done: make(chan struct{}), ready: make(chan struct{})}
+}
+
+func (c *flightCancelContext) Deadline() (time.Time, bool) { return time.Time{}, false }
+func (c *flightCancelContext) Done() <-chan struct{} {
+	c.once.Do(func() { close(c.ready) })
+	return c.done
+}
+func (c *flightCancelContext) Err() error {
+	select {
+	case <-c.done:
+		return context.Canceled
+	default:
+		return nil
+	}
+}
+func (c *flightCancelContext) Value(any) any { return nil }
+
+func TestJobPersistFlight_ValidationAndExclusiveBranches(t *testing.T) {
+	flight := newJobPersistFlight()
+	require.NoError(t, flight.do(nil, func() error { return nil }))
+	require.ErrorContains(t, flight.do(context.Background(), nil), "requires a callback")
+
+	flight.mu.Lock()
+	flight.exclusive = true
+	flight.exclusiveDone = nil
+	flight.exclusiveErr = nil
+	flight.mu.Unlock()
+	require.ErrorIs(t, flight.do(context.Background(), func() error { return nil }), ErrJobBusy)
+	flight.mu.Lock()
+	flight.exclusive = false
+	flight.mu.Unlock()
+
+	blocked := newJobPersistFlight()
+	blocked.mu.Lock()
+	blocked.exclusive = true
+	blocked.exclusiveDone = make(chan struct{})
+	blocked.mu.Unlock()
+	blockedCtx := newFlightCancelContext()
+	blockedDone := make(chan error, 1)
+	go func() { blockedDone <- blocked.do(blockedCtx, func() error { return nil }) }()
+	<-blockedCtx.ready
+	close(blockedCtx.done)
+	require.ErrorIs(t, <-blockedDone, context.Canceled)
+	blocked.mu.Lock()
+	blocked.exclusive = false
+	blocked.exclusiveDone = nil
+	blocked.mu.Unlock()
+
+	release, err := flight.acquireExclusive(nil)
+	require.NoError(t, err)
+	release()
+	flight.releaseExclusive() // no-op after the fence is already released
+
+	ctx := context.WithValue(context.Background(), struct{}{}, "cancel")
+	cancelCtx, cancel := context.WithCancel(ctx)
+	cancel()
+	_, err = flight.acquireExclusive(cancelCtx)
+	require.ErrorIs(t, err, context.Canceled)
+
+	idleFlight := newJobPersistFlight()
+	idleFlight.mu.Lock()
+	idleFlight.active = true
+	idleFlight.idle = make(chan struct{})
+	idleFlight.mu.Unlock()
+	idleCtx := newFlightCancelContext()
+	acquireDone := make(chan error, 1)
+	go func() {
+		_, acquireErr := idleFlight.acquireExclusive(idleCtx)
+		acquireDone <- acquireErr
+	}()
+	<-idleCtx.ready
+	close(idleCtx.done)
+	require.ErrorIs(t, <-acquireDone, context.Canceled)
+}
+
+func TestJobPersistFlight_CanceledPendingWaiter(t *testing.T) {
+	flight := newJobPersistFlight()
+	entered := make(chan struct{})
+	var enteredOnce sync.Once
+	release := make(chan struct{})
+	ownerDone := make(chan error, 1)
+	go func() {
+		ownerDone <- flight.do(context.Background(), func() error {
+			enteredOnce.Do(func() { close(entered) })
+			<-release
+			return nil
+		})
+	}()
+	<-entered
+
+	waitCtx := newFlightCancelContext()
+	waiterDone := make(chan error, 1)
+	go func() { waiterDone <- flight.do(waitCtx, func() error { return nil }) }()
+	<-waitCtx.ready
+	close(waitCtx.done)
+	require.ErrorIs(t, <-waiterDone, context.Canceled)
+	close(release)
+	require.NoError(t, <-ownerDone)
+}
+
 func TestJobPersistFlight_OverlappingRequestsUseFreshFollowUp(t *testing.T) {
 	flight := newJobPersistFlight()
 	var stateMu sync.Mutex

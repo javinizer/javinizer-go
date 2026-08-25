@@ -29,6 +29,16 @@ func TestJobStore_PersistFlightForInitializesDirectStore(t *testing.T) {
 	first := store.persistFlightFor(models.MustJobID("p6-flight-map"))
 	require.NotNil(t, first)
 	require.Same(t, first, store.persistFlightFor(models.MustJobID("p6-flight-map")))
+
+	job := &BatchJob{ID: models.MustJobID("p6-bind-map")}
+	bound := store.persistFlightForJob(job)
+	store.persistFlightsMu.Lock()
+	store.persistFlights = nil
+	store.persistFlightsMu.Unlock()
+	store.bindPersistFlight(job)
+	store.persistFlightsMu.Lock()
+	require.Same(t, bound, store.persistFlights[job.ID])
+	store.persistFlightsMu.Unlock()
 }
 
 func TestDeleteJob_ExistingExclusiveFlightReturnsBusy(t *testing.T) {

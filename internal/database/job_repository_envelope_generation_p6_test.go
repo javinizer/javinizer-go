@@ -177,6 +177,21 @@ func TestJobRepository_CommitEnvelope_SaveFailureDoesNotPublishGeneration(t *tes
 	require.Zero(t, loaded.EnvelopeGeneration)
 }
 
+func TestJobRepository_VersionedSaveMissingRowCreateFailure(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewJobRepository(db)
+	const callbackName = "test:versioned_save_create_failure"
+	require.NoError(t, db.DB.Callback().Create().Before("gorm:create").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement != nil && tx.Statement.Schema != nil && tx.Statement.Schema.Table == "jobs" {
+			_ = tx.AddError(context.Canceled)
+		}
+	}))
+	defer func() { _ = db.DB.Callback().Create().Remove(callbackName) }()
+
+	err := repo.Update(context.Background(), &models.Job{ID: "p6-versioned-save-create-failure", Status: models.JobStatusRunning})
+	require.ErrorIs(t, err, context.Canceled)
+}
+
 func TestJobRepository_CommitEnvelope_ErrorBranches(t *testing.T) {
 	t.Run("nil job", func(t *testing.T) {
 		db := newDatabaseTestDB(t)
