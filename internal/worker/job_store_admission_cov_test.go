@@ -161,8 +161,8 @@ func TestPersistJobSkipsTombstonedAndDeleted(t *testing.T) {
 	s := NewJobStore(jobRepo, nil, nil, "", nil, nil)
 	job := seedJobLifecycle(t, s, models.JobStatusCompleted, "")
 	s.tombstones.Mark(job.ID.String())
-	require.NoError(t, s.PersistJob(job))
+	require.ErrorIs(t, s.PersistJob(job), ErrJobGone)
 	s.tombstones.Unmark(job.ID.String())
 	job.lifecycle.SetDeleted(true)
-	require.NoError(t, s.PersistJob(job))
+	require.ErrorIs(t, s.PersistJob(job), ErrJobGone)
 }

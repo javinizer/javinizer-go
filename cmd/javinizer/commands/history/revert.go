@@ -77,6 +77,32 @@ func runPreRevertReplacementSweep(ctx context.Context, repo database.BatchFileOp
 	cancel()
 }
 
+// persistRevertedStatus makes the CLI status transition resilient to one
+// concurrent envelope commit advancing the row generation between the initial
+// job load and the revert completion.
+func persistRevertedStatus(ctx context.Context, repo database.JobRepositoryInterface, job *models.Job) error {
+	if err := repo.Update(ctx, job); err == nil {
+		return nil
+	} else if !errors.Is(err, database.ErrStaleEnvelopeGeneration) {
+		return err
+	}
+
+	latest, err := repo.FindByID(ctx, job.ID)
+	if err != nil {
+		return err
+	}
+	if latest == nil {
+		return database.ErrNotFound
+	}
+	latest.Status = job.Status
+	latest.RevertedAt = job.RevertedAt
+	if err := repo.Update(ctx, latest); err != nil {
+		return err
+	}
+	*job = *latest
+	return nil
+}
+
 // NewRevertCommand creates the revert subcommand for history.
 func NewRevertCommand() *cobra.Command {
 	revertCmd := &cobra.Command{
@@ -186,7 +212,7 @@ func runHistoryRevert(cmd *cobra.Command, args []string, configFile string) erro
 				now := time.Now()
 				job.Status = models.JobStatusReverted
 				job.RevertedAt = &now
-				if err := jobRepo.Update(ctx, job); err != nil {
+				if err := persistRevertedStatus(ctx, jobRepo, job); err != nil {
 					fmt.Printf("⚠️  Failed to update job status: %v\n", err)
 				}
 			}
@@ -217,7 +243,7 @@ func runHistoryRevert(cmd *cobra.Command, args []string, configFile string) erro
 			now := time.Now()
 			job.Status = models.JobStatusReverted
 			job.RevertedAt = &now
-			if err := jobRepo.Update(ctx, job); err != nil {
+			if err := persistRevertedStatus(ctx, jobRepo, job); err != nil {
 				fmt.Printf("⚠️  Failed to update job status: %v\n", err)
 			}
 		}

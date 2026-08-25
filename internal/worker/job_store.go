@@ -26,15 +26,17 @@ import (
 // Per P-8: temp dir cleanup is delegated to TempDirCleaner rather than
 // implemented directly on JobStore.
 type JobStore struct {
-	jobs            map[models.JobID]*BatchJob
-	jobRepo         database.JobRepositoryInterface
-	batchFileOpRepo database.BatchFileOperationRepositoryInterface
-	movieRepo       database.MovieRepositoryInterface
-	actressRepo     database.ActressRepositoryInterface
-	historyRepo     database.HistoryRepositoryInterface
-	persistence     JobPersistencer
-	envLocks        *keyedMutexRegistry // POSTER-WRITE-HARDENING D2: per-job envelope persist lock
-	movieLocks      *keyedMutexRegistry // POSTER-WRITE-HARDENING D15: process-wide family lock registry shared by every job
+	jobs             map[models.JobID]*BatchJob
+	jobRepo          database.JobRepositoryInterface
+	batchFileOpRepo  database.BatchFileOperationRepositoryInterface
+	movieRepo        database.MovieRepositoryInterface
+	actressRepo      database.ActressRepositoryInterface
+	historyRepo      database.HistoryRepositoryInterface
+	persistence      JobPersistencer
+	envLocks         *keyedMutexRegistry // POSTER-WRITE-HARDENING D2: per-job envelope persist lock
+	persistFlightsMu sync.Mutex
+	persistFlights   map[models.JobID]*jobPersistFlight
+	movieLocks       *keyedMutexRegistry // POSTER-WRITE-HARDENING D15: process-wide family lock registry shared by every job
 	// codex r38 P2: actress-row keys live on a DISJOINT registry — a movie
 	// rekeyed to a colliding ID like "actress:123" must never share a mutex
 	// with the actress-rename leg (same-registry re-lock deadlocks).
@@ -113,13 +115,14 @@ func WithHistoryRepo(r database.HistoryRepositoryInterface) JobStoreOption {
 // two separate functions.
 func NewInMemoryJobStore(opts ...JobStoreOption) *JobStore {
 	s := &JobStore{
-		jobs:         make(map[models.JobID]*BatchJob),
-		persistence:  noopJobPersistence{},
-		envLocks:     newKeyedMutexRegistry(),
-		movieLocks:   newKeyedMutexRegistry(),
-		actressLocks: newKeyedMutexRegistry(),
-		tombstones:   newTombstoneRegistry(0),
-		tempCleaner:  NewTempDirCleaner(nil, "", nil),
+		jobs:           make(map[models.JobID]*BatchJob),
+		persistence:    noopJobPersistence{},
+		envLocks:       newKeyedMutexRegistry(),
+		persistFlights: make(map[models.JobID]*jobPersistFlight),
+		movieLocks:     newKeyedMutexRegistry(),
+		actressLocks:   newKeyedMutexRegistry(),
+		tombstones:     newTombstoneRegistry(0),
+		tempCleaner:    NewTempDirCleaner(nil, "", nil),
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -150,6 +153,7 @@ func NewJobStore(jobRepo database.JobRepositoryInterface, batchFileOpRepo databa
 			jobRepo: jobRepo,
 		},
 		envLocks:       newKeyedMutexRegistry(),
+		persistFlights: make(map[models.JobID]*jobPersistFlight),
 		movieLocks:     newKeyedMutexRegistry(),
 		actressLocks:   newKeyedMutexRegistry(),
 		tombstones:     newTombstoneRegistry(0),
@@ -228,6 +232,7 @@ func (s *JobStore) loadFromDatabase() {
 		batchJob := s.reconstructBatchJob(&jobs[i])
 		if batchJob != nil {
 			s.tombstones.Unmark(batchJob.ID.String()) // live row wins (codex r36)
+			s.bindPersistFlight(batchJob)
 			s.jobs[batchJob.ID] = batchJob
 		}
 	}
@@ -270,9 +275,37 @@ func (s *JobStore) attachEditDeps(job *BatchJob) {
 		envelope: func(overrides map[string]*resultstore.MovieResult, provOverrides map[string]*resultstore.ProvenanceData, excluded map[string]bool) (*models.Job, error) {
 			return s.candidateEnvelope(job, overrides, provOverrides, excluded)
 		},
+		generationCommitted: func(generation uint64) {
+			job.mu.Lock()
+			if generation > job.envelopeGeneration {
+				job.envelopeGeneration = generation
+			}
+			job.mu.Unlock()
+		},
 		persistFn: func() error { return s.PersistJobByID(job.ID.String()) },
 		lifecycle: job.lifecycle,
 	})
+}
+
+// SyncEnvelopeGeneration updates an already-loaded live job after a repository
+// metadata mutation (for example, an API revert) advances the durable generation.
+// It never lowers an in-memory generation, so a concurrent accepted envelope
+// remains the stronger fence. The optional method is consumed by API handlers
+// without widening JobStoreInterface or legacy test doubles.
+func (s *JobStore) SyncEnvelopeGeneration(id string, generation uint64) bool {
+	s.mu.RLock()
+	job, ok := s.jobs[models.JobID(id)]
+	s.mu.RUnlock()
+	if !ok || job == nil {
+		return false
+	}
+	job.mu.Lock()
+	defer job.mu.Unlock()
+	if generation < job.envelopeGeneration {
+		return false
+	}
+	job.envelopeGeneration = generation
+	return true
 }
 
 // IsTombstoned reports whether the job was explicitly deleted recently.
@@ -552,8 +585,10 @@ func (s *JobStore) createJob(files []string, jobCfg ...*JobConfig) *BatchJob {
 	s.jobs[job.ID] = job
 	s.mu.Unlock()
 	// Clear any stale tombstone when an explicit-ID job is recreated
-	// (deleted-job-recreation window codex r36).
+	// (deleted-job-recreation window codex r36). Bind its own flight after
+	// replacing any sealed coordinator left by the deleted instance.
 	s.tombstones.Unmark(job.ID.String())
+	s.bindPersistFlight(job)
 	s.attachEditDeps(job)
 
 	if err := s.persistence.PersistJob(job); err != nil {
@@ -730,7 +765,27 @@ func (s *JobStore) DeleteJob(id string) error {
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
+	if job.admission.IsGone() || job.lifecycle.IsDeleted() {
+		release()
+		return fmt.Errorf("%w: %s", ErrJobGone, id)
+	}
 	defer release()
+
+	// Fence the per-job persistence flight before taking the envelope lock:
+	// active/coalesced persists drain first, and new requests cannot start
+	// while the row delete is being committed. Failed deletes reopen the
+	// flight; successful deletes leave the tombstone fence closed.
+	persistFlight := s.persistFlightForJob(job)
+	flightRelease, flightErr := persistFlight.acquireExclusive(context.Background())
+	if flightErr != nil {
+		return flightErr
+	}
+	keepFlightClosed := false
+	defer func() {
+		if !keepFlightClosed {
+			flightRelease()
+		}
+	}()
 
 	lcSnap := job.lifecycle.StatusSnapshot()
 	if lcSnap.IsDeleted {
@@ -747,6 +802,13 @@ func (s *JobStore) DeleteJob(id string) error {
 		return err
 	}
 	s.tombstones.Mark(id)
+	persistFlight.sealExclusive(ErrJobGone)
+	keepFlightClosed = true
+	// The tombstone is now the durable short-lived gone fence. Remove the
+	// ID-map entry to avoid retaining one sealed flight per deleted job; old
+	// BatchJob pointers retain their sealed instance flight, while recreated
+	// jobs bind a distinct coordinator.
+	s.resetPersistFlight(job.ID)
 	envRelease()
 
 	// Row is gone: fence the job, then remove + cancel + clean up.
@@ -776,6 +838,55 @@ func (s *JobStore) DeleteJob(id string) error {
 	return nil
 }
 
+// persistFlightFor returns the per-job persistence coordinator, lazily
+// initializing the map for direct test-constructed JobStores as well as the
+// normal constructors. The map lifetime follows the store lifetime.
+func (s *JobStore) persistFlightFor(id models.JobID) *jobPersistFlight {
+	s.persistFlightsMu.Lock()
+	defer s.persistFlightsMu.Unlock()
+	if s.persistFlights == nil {
+		s.persistFlights = make(map[models.JobID]*jobPersistFlight)
+	}
+	if flight := s.persistFlights[id]; flight != nil {
+		return flight
+	}
+	flight := newJobPersistFlight()
+	s.persistFlights[id] = flight
+	return flight
+}
+
+// persistFlightForJob returns the coordinator bound to this BatchJob instance.
+// The lazy fallback keeps direct test-constructed jobs safe; normal jobs receive
+// their own flight at construction. This identity binding prevents a deleted
+// pointer from joining a newly-created job that reuses the same ID.
+func (s *JobStore) persistFlightForJob(job *BatchJob) *jobPersistFlight {
+	job.mu.Lock()
+	defer job.mu.Unlock()
+	if job.persistFlight == nil {
+		job.persistFlight = s.persistFlightFor(job.ID)
+	}
+	return job.persistFlight
+}
+
+// bindPersistFlight makes the compatibility ID map point at the instance
+// flight. The BatchJob-owned pointer remains authoritative for persistence,
+// so resetting this map cannot make an old pointer join a recreated job.
+func (s *JobStore) bindPersistFlight(job *BatchJob) {
+	flight := s.persistFlightForJob(job)
+	s.persistFlightsMu.Lock()
+	if s.persistFlights == nil {
+		s.persistFlights = make(map[models.JobID]*jobPersistFlight)
+	}
+	s.persistFlights[job.ID] = flight
+	s.persistFlightsMu.Unlock()
+}
+
+func (s *JobStore) resetPersistFlight(id models.JobID) {
+	s.persistFlightsMu.Lock()
+	delete(s.persistFlights, id)
+	s.persistFlightsMu.Unlock()
+}
+
 // PersistJob saves a job to the database.
 // this is the public persistence method. The former PersistManagedJob
 // is removed because it type-asserted to *BatchJob internally — callers that hold
@@ -786,12 +897,16 @@ func (s *JobStore) DeleteJob(id string) error {
 // tombstoned/deleted job row refuses the upsert so an in-flight persist
 // racing DeleteJob cannot resurrect the row (D3).
 func (s *JobStore) PersistJob(job *BatchJob) error {
-	release := s.envLocks.Acquire(job.ID.String())
-	defer release()
-	if s.tombstones.Contains(job.ID.String()) || job.Lifecycle().IsDeleted() {
-		return nil // tombstoned: skip resurrecting upsert
-	}
-	return s.persistence.PersistJob(job)
+	return s.persistFlightForJob(job).do(context.Background(), func() error {
+		release := s.envLocks.Acquire(job.ID.String())
+		defer release()
+		if s.tombstones.Contains(job.ID.String()) || job.Lifecycle().IsDeleted() {
+			return fmt.Errorf("%w: %s", ErrJobGone, job.ID.String())
+		}
+		// The callback snapshots only after acquiring the existing envelope lock;
+		// a coalesced follow-up therefore sees the latest completed mutation.
+		return s.persistence.PersistJob(job)
+	})
 }
 
 // PersistJobByID persists a job by its ID.

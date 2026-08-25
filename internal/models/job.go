@@ -41,6 +41,7 @@ func (s JobStatus) Value() (driver.Value, error) { return StringEnumValue(string
 type Job struct {
 	ID                    string                      `json:"id" gorm:"primaryKey"`
 	PruneVersion          uint64                      `json:"-" gorm:"not null;default:0"`
+	EnvelopeGeneration    uint64                      `json:"-" gorm:"not null;default:0"`
 	Status                JobStatus                   `json:"status" gorm:"index"`
 	TotalFiles            int                         `json:"total_files"`
 	Completed             int                         `json:"completed"`

@@ -2,7 +2,10 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"reflect"
+	"time"
 
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/logging"
@@ -106,6 +109,35 @@ func (p *dbJobPersistence) UpsertJob(dbJob *models.Job) error {
 // persistToDatabase saves a BatchJob to the database via the job repository.
 // Encode (marshal) failures surface the same way as repository upsert
 // failures: typed error to the caller AND persisted onto persist_error state.
+func samePersistEnvelope(a, b *models.Job) bool {
+	if a == nil || b == nil || a.ID != b.ID {
+		return false
+	}
+	left := *a
+	right := *b
+	left.PruneVersion = 0
+	right.PruneVersion = 0
+	left.EnvelopeGeneration = 0
+	right.EnvelopeGeneration = 0
+	left.StartedAt = left.StartedAt.Round(0).UTC()
+	right.StartedAt = right.StartedAt.Round(0).UTC()
+	left.CompletedAt = normalizedPersistTime(left.CompletedAt)
+	right.CompletedAt = normalizedPersistTime(right.CompletedAt)
+	left.OrganizedAt = normalizedPersistTime(left.OrganizedAt)
+	right.OrganizedAt = normalizedPersistTime(right.OrganizedAt)
+	left.RevertedAt = normalizedPersistTime(left.RevertedAt)
+	right.RevertedAt = normalizedPersistTime(right.RevertedAt)
+	return reflect.DeepEqual(left, right)
+}
+
+func normalizedPersistTime(value *time.Time) *time.Time {
+	if value == nil {
+		return nil
+	}
+	normalized := value.Round(0).UTC()
+	return &normalized
+}
+
 func persistToDatabase(jobRepo database.JobRepositoryInterface, job *BatchJob) error {
 	if jobRepo == nil {
 		return nil
@@ -120,15 +152,75 @@ func persistToDatabase(jobRepo database.JobRepositoryInterface, job *BatchJob) e
 		return nil // deleted job — persist intentionally skipped
 	}
 
-	var persistMsg string
-	if err := jobRepo.Upsert(context.Background(), dbJob); err != nil {
-		logging.Warnf("Failed to upsert job %s in database: %v", job.ID.String(), err)
-		persistMsg = fmt.Sprintf("upsert failed: %v", err)
+	var (
+		persistMsg         string
+		persistErr         error
+		acceptedGeneration = dbJob.EnvelopeGeneration
+	)
+	commit := func(candidate *models.Job) (uint64, error) {
+		if committer, ok := jobRepo.(database.EnvelopeCommitter); ok {
+			return committer.CommitEnvelope(context.Background(), candidate, candidate.EnvelopeGeneration)
+		}
+		// Legacy/test repositories without the optional seam retain the old
+		// upsert behavior; production JobRepository implements EnvelopeCommitter.
+		return candidate.EnvelopeGeneration, jobRepo.Upsert(context.Background(), candidate)
+	}
+	if _, hasCommitter := jobRepo.(database.EnvelopeCommitter); hasCommitter && dbJob.EnvelopeGeneration == 0 {
+		// New jobs are registered through the historical create path before
+		// their first update-style envelope commit. Probe once so a missing row
+		// is initialized without allowing a deleted/reconstructed row to be
+		// recreated by CommitEnvelope.
+		_, findErr := jobRepo.FindByID(context.Background(), job.ID.String())
+		switch {
+		case database.IsNotFound(findErr):
+			persistErr = jobRepo.Upsert(context.Background(), dbJob)
+			if persistErr == nil {
+				acceptedGeneration = dbJob.EnvelopeGeneration
+			}
+		case findErr != nil:
+			persistErr = findErr
+		default:
+			acceptedGeneration, persistErr = commit(dbJob)
+		}
+	} else {
+		acceptedGeneration, persistErr = commit(dbJob)
+	}
+	if errors.Is(persistErr, database.ErrStaleEnvelopeGeneration) {
+		// Ordinary phase/recovery persists may retry once only when the durable
+		// envelope is unchanged and differs by fencing generation alone. A
+		// different durable candidate fails closed; transactional edit candidates
+		// never enter this function.
+		latest, findErr := jobRepo.FindByID(context.Background(), job.ID.String())
+		if findErr != nil {
+			persistErr = findErr
+		} else if latest == nil {
+			persistErr = database.ErrNotFound
+		} else if !samePersistEnvelope(dbJob, latest) {
+			// A different durable envelope means another writer accepted newer
+			// state. Replaying the old in-memory snapshot at the new generation
+			// would turn the CAS into an overwrite loophole; fail closed and let
+			// the caller reload/retry from the durable state.
+			persistErr = database.ErrStaleEnvelopeGeneration
+		} else {
+			// The durable row differs only by generation/prune fencing, so it is
+			// safe to commit that durable candidate once at its current base.
+			dbJob = latest
+			acceptedGeneration, persistErr = commit(dbJob)
+		}
+	}
+	if persistErr != nil {
+		logging.Warnf("Failed to persist job %s in database: %v", job.ID.String(), persistErr)
+		persistMsg = fmt.Sprintf("upsert failed: %v", persistErr)
 		job.controller.SetPersistError(persistMsg)
-		return fmt.Errorf("persist job %s: %w", job.ID.String(), err)
+		return fmt.Errorf("persist job %s: %w", job.ID.String(), persistErr)
 	}
 	job.mu.Lock()
-	job.pruneVersion = dbJob.PruneVersion
+	if dbJob.PruneVersion > job.pruneVersion {
+		job.pruneVersion = dbJob.PruneVersion
+	}
+	if acceptedGeneration > job.envelopeGeneration {
+		job.envelopeGeneration = acceptedGeneration
+	}
 	job.mu.Unlock()
 	job.controller.SetPersistError("")
 	return nil

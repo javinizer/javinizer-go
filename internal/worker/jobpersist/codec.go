@@ -30,6 +30,7 @@ type JobResultsEnvelope struct {
 type Snapshot struct {
 	ID                    string
 	PruneVersion          uint64
+	EnvelopeGeneration    uint64
 	Status                models.JobStatus
 	TotalFiles            int
 	Completed             int
@@ -104,6 +105,7 @@ func Encode(snapshot Snapshot) (*models.Job, error) {
 	return &models.Job{
 		ID:                    snapshot.ID,
 		PruneVersion:          snapshot.PruneVersion,
+		EnvelopeGeneration:    snapshot.EnvelopeGeneration,
 		Status:                snapshot.Status,
 		TotalFiles:            snapshot.TotalFiles,
 		Completed:             snapshot.Completed,
@@ -137,6 +139,7 @@ func Decode(dbJob *models.Job) (Snapshot, []error) {
 	snapshot := Snapshot{
 		ID:                    dbJob.ID,
 		PruneVersion:          dbJob.PruneVersion,
+		EnvelopeGeneration:    dbJob.EnvelopeGeneration,
 		Status:                dbJob.Status,
 		TotalFiles:            dbJob.TotalFiles,
 		Completed:             dbJob.Completed,

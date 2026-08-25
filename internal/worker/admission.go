@@ -158,7 +158,7 @@ func (b *admissionBarrier) EnterExclusiveWait() {
 func (b *admissionBarrier) PollExclusiveWait() (release func(), ok bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.shared > 0 || b.exclusive {
+	if b.shared > 0 || b.exclusive || b.gone.Load() {
 		return nil, false
 	}
 	if b.pendingExclusive == 0 {

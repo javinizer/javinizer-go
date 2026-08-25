@@ -13,6 +13,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/eventlog"
 	"github.com/javinizer/javinizer-go/internal/history"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/worker"
 )
 
 // buildRevertResponse constructs a contracts.RevertResultResponse from the revert result,
@@ -42,6 +43,43 @@ func buildRevertResponse(jobID string, jobStatus models.JobStatus, result *histo
 	}
 
 	return resp
+}
+
+// persistRevertedStatus makes the status transition resilient to one
+// concurrent envelope commit advancing the row generation between the initial
+// job load and the revert completion.
+func persistRevertedStatus(ctx context.Context, repo database.JobRepositoryInterface, job *models.Job) error {
+	if err := repo.Update(ctx, job); err == nil {
+		return nil
+	} else if !errors.Is(err, database.ErrStaleEnvelopeGeneration) {
+		return err
+	}
+
+	latest, err := repo.FindByID(ctx, job.ID)
+	if err != nil {
+		return err
+	}
+	if latest == nil {
+		return database.ErrNotFound
+	}
+	latest.Status = job.Status
+	latest.RevertedAt = job.RevertedAt
+	if err := repo.Update(ctx, latest); err != nil {
+		return err
+	}
+	*job = *latest
+	return nil
+}
+
+// syncLiveEnvelopeGeneration updates a concrete live JobStore when a
+// repository-level metadata mutation advances the durable generation.
+func syncLiveEnvelopeGeneration(store worker.JobStoreInterface, jobID string, generation uint64) {
+	syncer, ok := store.(interface {
+		SyncEnvelopeGeneration(string, uint64) bool
+	})
+	if ok {
+		syncer.SyncEnvelopeGeneration(jobID, generation)
+	}
 }
 
 // emitRevertEvent emits a best-effort revert event via the event emitter.
@@ -125,13 +163,14 @@ func revertBatch(deps JobDeps) gin.HandlerFunc {
 			now := time.Now()
 			job.Status = models.JobStatusReverted
 			job.RevertedAt = &now
-			if err := deps.JobRepo.Update(c.Request.Context(), job); err != nil {
+			if err := persistRevertedStatus(c.Request.Context(), deps.JobRepo, job); err != nil {
 				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: "Failed to persist reverted status"})
 				return
 			}
 			if batchJob, ok := deps.JobStore.GetJobForControl(jobID); ok {
 				batchJob.MarkReverted()
 			}
+			syncLiveEnvelopeGeneration(deps.JobStore, jobID, job.EnvelopeGeneration)
 			jobStatus = models.JobStatusReverted
 		} else if result.Failed == 0 {
 			jobStatus = models.JobStatusOrganized
@@ -217,13 +256,14 @@ func revertOperation(deps JobDeps) gin.HandlerFunc {
 			now := time.Now()
 			job.Status = models.JobStatusReverted
 			job.RevertedAt = &now
-			if err := deps.JobRepo.Update(c.Request.Context(), job); err != nil {
+			if err := persistRevertedStatus(c.Request.Context(), deps.JobRepo, job); err != nil {
 				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: "Failed to persist reverted status"})
 				return
 			}
 			if batchJob, ok := deps.JobStore.GetJobForControl(jobID); ok {
 				batchJob.MarkReverted()
 			}
+			syncLiveEnvelopeGeneration(deps.JobStore, jobID, job.EnvelopeGeneration)
 			jobStatus = models.JobStatusReverted
 		}
 

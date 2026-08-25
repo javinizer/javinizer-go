@@ -48,11 +48,13 @@ type PosterEditor struct {
 
 // posterEditEnv bundles the JobStore-provided edit environment.
 type posterEditEnv struct {
-	committer   *EditCommitter // nil ⇒ legacy publish-then-persist path
-	envelope    func(overrides map[string]*resultstore.MovieResult, provOverrides map[string]*resultstore.ProvenanceData, excluded map[string]bool) (*models.Job, error)
-	persistFn   func() error
-	lifecycle   *JobLifecycle
-	actressRepo database.ActressRepositoryInterface // legacy rename leg (fallback path)
+	committer *EditCommitter // nil ⇒ legacy publish-then-persist path
+	// generationCommitted updates the owning BatchJob after successful publication.
+	generationCommitted func(uint64)
+	envelope            func(overrides map[string]*resultstore.MovieResult, provOverrides map[string]*resultstore.ProvenanceData, excluded map[string]bool) (*models.Job, error)
+	persistFn           func() error
+	lifecycle           *JobLifecycle
+	actressRepo         database.ActressRepositoryInterface // legacy rename leg (fallback path)
 	// Selected per-job at attach time for poster-file rekey moves (codex r21):
 	// a family rekey rename must move the on-disk poster pair alongside the
 	// candidate publication.
@@ -245,6 +247,7 @@ func (m *LockedMovieOps) commitCandidate(ctx context.Context, candidates map[str
 	publish := func() error { return m.publishCandidates(candidates) }
 	if env != nil && env.committer != nil && env.envelope != nil {
 		plan := &EditCommitPlan{
+			EnvelopeGenerationCommitted: env.generationCommitted,
 			EnvelopeFn: func() (*models.Job, error) {
 				return env.envelope(candidates, provOverrides, nil)
 			},
@@ -1389,6 +1392,7 @@ func (m *LockedMovieOps) ExcludeFamily(ctx context.Context) error {
 		// publishing it to the live lifecycle; the real transition is the
 		// post-commit Cancel() below.
 		err := env.committer.Commit(ctx, &EditCommitPlan{
+			EnvelopeGenerationCommitted: env.generationCommitted,
 			EnvelopeFn: func() (*models.Job, error) {
 				// audit R4: capture the exclusion map INSIDE the envelope-locked
 				// closure — a concurrent exclusion commit on another family holds

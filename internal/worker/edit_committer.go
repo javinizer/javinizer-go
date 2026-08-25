@@ -50,6 +50,12 @@ type EditCommitPlan struct {
 	// nil row skips the envelope upsert leg gracefully.
 	EnvelopeFn func() (*models.Job, error)
 
+	// EnvelopeGenerationCommitted updates the owning BatchJob after the
+	// generation-aware envelope transaction accepts and publication succeeds.
+	// A failed publication leaves the in-memory generation stale, forcing a
+	// later persist to fail closed rather than overwrite the committed row.
+	EnvelopeGenerationCommitted func(uint64)
+
 	// Publish commits the candidate to in-memory state. Executed only AFTER
 	// the transaction commits — never inside it, never before it.
 	Publish func() error
@@ -124,6 +130,8 @@ func (c *EditCommitter) Commit(ctx context.Context, plan *EditCommitPlan) error 
 		defer release()
 	}
 
+	var acceptedGeneration uint64
+	generationCommitted := false
 	if err := c.tx.WithEditTx(ctx, func(u database.EditUnit) error {
 		// Renames FIRST inside the tx: the movie upserter's fill-merge reads
 		// renamed DB rows by ID/name back into the in-memory movie (edited
@@ -169,7 +177,17 @@ func (c *EditCommitter) Commit(ctx context.Context, plan *EditCommitPlan) error 
 				return fmt.Errorf("encode envelope: %w", err)
 			}
 			if row != nil {
-				if err := u.Jobs.Upsert(ctx, row); err != nil {
+				if committer, ok := u.Jobs.(database.EnvelopeCommitter); ok {
+					accepted, err := committer.CommitEnvelope(ctx, row, row.EnvelopeGeneration)
+					if err != nil {
+						return fmt.Errorf("persist job envelope: %w", err)
+					}
+					acceptedGeneration = accepted
+					generationCommitted = true
+					row.EnvelopeGeneration = accepted
+				} else if err := u.Jobs.Upsert(ctx, row); err != nil {
+					// Legacy/test repositories without the optional seam retain
+					// the pre-Phase-6 composite behavior.
 					return fmt.Errorf("persist job envelope: %w", err)
 				}
 			}
@@ -181,11 +199,13 @@ func (c *EditCommitter) Commit(ctx context.Context, plan *EditCommitPlan) error 
 	if plan.Publish != nil {
 		if err := plan.Publish(); err != nil {
 			// The DB committed but in-memory publication failed — an extreme
-			// edge (AtomicUpdate enforces invariants). The DB is authoritative;
-			// the next persist re-converges state. Surface it so the caller can
-			// respond 5xx and the client refetches.
+			// edge (AtomicUpdate enforces invariants). Leave the live generation
+			// unchanged so a later persist cannot overwrite the committed row.
 			return fmt.Errorf("publish committed edit: %w", err)
 		}
+	}
+	if generationCommitted && plan.EnvelopeGenerationCommitted != nil {
+		plan.EnvelopeGenerationCommitted(acceptedGeneration)
 	}
 	return nil
 }

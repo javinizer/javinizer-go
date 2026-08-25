@@ -111,8 +111,10 @@ type BatchJob struct {
 	results   resultstore.Store `json:"-"` // Result state: Results map, progress counters, files (sole result-state seam)
 
 	// Retained on BatchJob (not mutex-protected state groups)
-	StartedAt    time.Time `json:"started_at"`
-	pruneVersion uint64
+	StartedAt          time.Time `json:"started_at"`
+	pruneVersion       uint64
+	envelopeGeneration uint64
+	persistFlight      *jobPersistFlight `json:"-"`
 
 	// Configuration — set from ApplyPhaseConfig at StartApply or from DB during reconstruction.
 	// External callers cannot mutate these; configuration flows through StartApply(ctx, ApplyPhaseConfig).
@@ -161,6 +163,7 @@ func newBatchJob(files []string, jobCfg ...*JobConfig) *BatchJob {
 		},
 		results:             resultstore.New(len(files), files),
 		StartedAt:           time.Now(),
+		persistFlight:       newJobPersistFlight(),
 		batchJobEventSource: newBatchJobEventSource(),
 		rescrapePhase:       NewRescrapePhase(),
 		scrapePhase:         NewScrapePhase(),
@@ -256,10 +259,11 @@ func (job *BatchJob) attachLifecycleCallback() {
 type batchJobSnapshot struct {
 	batchJobBase
 
-	pruneVersion uint64
-	results      map[string]*resultstore.MovieResult
-	provenance   map[string]*resultstore.ProvenanceData
-	resultIndex  map[string]string // ResultID → FilePath
+	pruneVersion       uint64
+	envelopeGeneration uint64
+	results            map[string]*resultstore.MovieResult
+	provenance         map[string]*resultstore.ProvenanceData
+	resultIndex        map[string]string // ResultID → FilePath
 }
 
 // snapshotFull reads result state via Store.SnapshotForStatus() (self-locking)
@@ -285,7 +289,8 @@ func (job *BatchJob) snapshotFull() batchJobSnapshot {
 	defer job.mu.RUnlock()
 
 	return batchJobSnapshot{
-		pruneVersion: job.pruneVersion,
+		pruneVersion:       job.pruneVersion,
+		envelopeGeneration: job.envelopeGeneration,
 		batchJobBase: batchJobBase{
 			ID:                    job.ID,
 			Status:                lcSnap.Status,

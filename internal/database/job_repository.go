@@ -17,6 +17,10 @@ const pruningJobStatus models.JobStatus = "pruning"
 // ErrJobPruning reports that a mutation raced a durable organized-job prune claim.
 var ErrJobPruning = errors.New("organized job is being pruned")
 
+// ErrStaleEnvelopeGeneration reports that an envelope write was based on an
+// older (or otherwise invalid) durable generation.
+var ErrStaleEnvelopeGeneration = errors.New("stale envelope generation")
+
 type pruneMaintenanceContextKey struct{}
 
 // WithPruneMaintenance authorizes the retention hook to mutate operation
@@ -90,39 +94,153 @@ func (r *JobRepository) Upsert(ctx context.Context, job *models.Job) error {
 	return r.saveVersioned(ctx, job, "upsert")
 }
 
-// saveVersioned increments prune_version in the database before saving the
-// caller's fields. The first write acquires SQLite's writer lock, so stale
-// callers cannot reuse a version observed before a concurrent writer commit.
+// saveVersioned advances both durable fences before saving metadata fields.
+// The conditional first write acquires SQLite's writer lock, so a stale
+// whole-row caller cannot race a generation-aware envelope commit.
 func (r *JobRepository) saveVersioned(ctx context.Context, job *models.Job, operation string) error {
+	expectedGeneration := job.EnvelopeGeneration
+	var saved models.Job
+	var savedOK bool
 	err := r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// The conditional increment is the first statement: either this writer
 		// wins the database writer lock before pruning claims the row, or the
 		// pruning fence is observed and the mutation is rejected.
-		result := tx.Model(&models.Job{}).Where("id = ? AND status <> ?", job.ID, pruningJobStatus).
-			UpdateColumn("prune_version", gorm.Expr("prune_version + 1"))
+		result := tx.Model(&models.Job{}).
+			Where("id = ? AND status <> ? AND envelope_generation = ?", job.ID, pruningJobStatus, expectedGeneration).
+			Updates(map[string]any{
+				"prune_version":       gorm.Expr("prune_version + 1"),
+				"envelope_generation": gorm.Expr("envelope_generation + 1"),
+			})
 		if result.Error != nil {
 			return result.Error
 		}
 		if result.RowsAffected == 0 {
 			var existing models.Job
-			statusResult := tx.Select("status").Where("id = ?", job.ID).First(&existing)
-			if errors.Is(statusResult.Error, gorm.ErrRecordNotFound) {
-				job.PruneVersion = 0
-				return tx.Create(job).Error
+			statusResult := tx.Select("status, envelope_generation").Where("id = ?", job.ID).First(&existing)
+			switch {
+			case errors.Is(statusResult.Error, gorm.ErrRecordNotFound):
+				candidate := *job
+				candidate.PruneVersion = 0
+				if err := tx.Create(&candidate).Error; err != nil {
+					return err
+				}
+				saved = candidate
+				savedOK = true
+				return nil
+			case statusResult.Error != nil:
+				return statusResult.Error
+			case existing.Status == pruningJobStatus:
+				return ErrJobPruning
+			default:
+				return ErrStaleEnvelopeGeneration
 			}
-			return ErrJobPruning
 		}
-		var version uint64
-		if err := tx.Model(&models.Job{}).Where("id = ?", job.ID).Pluck("prune_version", &version).Error; err != nil {
+		var durable models.Job
+		if err := tx.Where("id = ?", job.ID).First(&durable).Error; err != nil {
 			return err
 		}
-		job.PruneVersion = version
-		return tx.Save(job).Error
+		// Legacy Update/Upsert may change metadata fields, but envelope columns
+		// are owned by CommitEnvelope and must come from the row we just fenced.
+		candidate := *job
+		preserveDurableEnvelopeColumns(&candidate, &durable)
+		candidate.PruneVersion = durable.PruneVersion
+		if err := tx.Save(&candidate).Error; err != nil {
+			return err
+		}
+		saved = candidate
+		savedOK = true
+		return nil
 	})
 	if err != nil {
 		return wrapDBErr(operation, fmt.Sprintf("job %s", job.ID), err)
 	}
+	if savedOK {
+		*job = saved
+	}
 	return nil
+}
+
+func preserveDurableEnvelopeColumns(candidate, durable *models.Job) {
+	candidate.EnvelopeGeneration = durable.EnvelopeGeneration
+	candidate.ApplyPlan = cloneStringPtr(durable.ApplyPlan)
+	candidate.Files = durable.Files
+	candidate.Results = durable.Results
+	candidate.Excluded = durable.Excluded
+	candidate.FileMatchInfo = durable.FileMatchInfo
+}
+
+func cloneStringPtr(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	return &copy
+}
+
+// CommitEnvelope compare-and-accepts a job envelope at the next durable
+// generation. The conditional generation update is the first transaction
+// write, acquiring SQLite's writer lock before the payload is saved; stale
+// callers therefore cannot overwrite a newer accepted envelope.
+func (r *JobRepository) CommitEnvelope(ctx context.Context, job *models.Job, expectedGeneration uint64) (uint64, error) {
+	if job == nil {
+		return 0, fmt.Errorf("commit envelope: job must not be nil")
+	}
+
+	var (
+		accepted      uint64
+		acceptedPrune uint64
+	)
+	// SQLite may report a transient table lock when two same-base commits
+	// race. Retry only that transient class; CAS/stale and context errors
+	// return immediately.
+	err := retryOnLocked(func() error {
+		return r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			result := tx.Model(&models.Job{}).
+				Where("id = ? AND status <> ? AND envelope_generation = ?", job.ID, pruningJobStatus, expectedGeneration).
+				UpdateColumn("envelope_generation", gorm.Expr("envelope_generation + 1"))
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected == 0 {
+				var existing models.Job
+				statusResult := tx.Select("status, envelope_generation").Where("id = ?", job.ID).First(&existing)
+				switch {
+				case errors.Is(statusResult.Error, gorm.ErrRecordNotFound):
+					return ErrNotFound
+				case statusResult.Error != nil:
+					return statusResult.Error
+				case existing.Status == pruningJobStatus:
+					return ErrJobPruning
+				default:
+					return ErrStaleEnvelopeGeneration
+				}
+			}
+
+			var current struct {
+				EnvelopeGeneration uint64
+				PruneVersion       uint64
+			}
+			if err := tx.Model(&models.Job{}).
+				Select("envelope_generation, prune_version").
+				Where("id = ?", job.ID).Scan(&current).Error; err != nil {
+				return err
+			}
+			accepted = current.EnvelopeGeneration
+			acceptedPrune = current.PruneVersion
+			// The caller's snapshot may predate a retention-fence increment; never
+			// let an envelope commit roll that independent fence backward.
+			candidate := *job
+			candidate.EnvelopeGeneration = accepted
+			candidate.PruneVersion = current.PruneVersion
+			return tx.Save(&candidate).Error
+		})
+	})
+	if err != nil {
+		return 0, wrapDBErr("commit envelope", fmt.Sprintf("job %s", job.ID), err)
+	}
+	job.EnvelopeGeneration = accepted
+	job.PruneVersion = acceptedPrune
+	return accepted, nil
 }
 
 // FindByID loads a job record by its primary key, delegating to the base repository.
