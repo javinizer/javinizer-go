@@ -45,30 +45,31 @@ func buildRevertResponse(jobID string, jobStatus models.JobStatus, result *histo
 	return resp
 }
 
-// persistRevertedStatus makes the status transition resilient to one
-// concurrent envelope commit advancing the row generation between the initial
-// job load and the revert completion.
+// persistRevertedStatus makes the status transition resilient to concurrent
+// envelope commits advancing the row generation between the initial job load
+// and the revert completion.
 func persistRevertedStatus(ctx context.Context, repo database.JobRepositoryInterface, job *models.Job) error {
-	if err := repo.Update(ctx, job); err == nil {
-		return nil
-	} else if !errors.Is(err, database.ErrStaleEnvelopeGeneration) {
-		return err
-	}
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := repo.Update(ctx, job); err == nil {
+			return nil
+		} else if !errors.Is(err, database.ErrStaleEnvelopeGeneration) {
+			return err
+		}
 
-	latest, err := repo.FindByID(ctx, job.ID)
-	if err != nil {
-		return err
+		latest, err := repo.FindByID(ctx, job.ID)
+		if err != nil {
+			return err
+		}
+		if latest == nil {
+			return database.ErrNotFound
+		}
+		latest.Status = job.Status
+		latest.RevertedAt = job.RevertedAt
+		*job = *latest
 	}
-	if latest == nil {
-		return database.ErrNotFound
-	}
-	latest.Status = job.Status
-	latest.RevertedAt = job.RevertedAt
-	if err := repo.Update(ctx, latest); err != nil {
-		return err
-	}
-	*job = *latest
-	return nil
 }
 
 // syncLiveEnvelopeGeneration updates a concrete live JobStore when a

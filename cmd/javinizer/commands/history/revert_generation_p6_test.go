@@ -13,16 +13,22 @@ import (
 
 type revertStatusRepoP6 struct {
 	database.JobRepositoryInterface
-	latest      *models.Job
-	firstErr    error
-	findErr     error
-	secondErr   error
-	returnNil   bool
-	updateCalls int
+	latest           *models.Job
+	firstErr         error
+	findErr          error
+	secondErr        error
+	staleUpdateCount int
+	returnNil        bool
+	cancelOnFind     context.CancelFunc
+	updateCalls      int
 }
 
 func (r *revertStatusRepoP6) Update(_ context.Context, job *models.Job) error {
 	r.updateCalls++
+	if r.staleUpdateCount > 0 {
+		r.staleUpdateCount--
+		return database.ErrStaleEnvelopeGeneration
+	}
 	switch r.updateCalls {
 	case 1:
 		if r.firstErr != nil {
@@ -40,6 +46,10 @@ func (r *revertStatusRepoP6) Update(_ context.Context, job *models.Job) error {
 }
 
 func (r *revertStatusRepoP6) FindByID(_ context.Context, _ string) (*models.Job, error) {
+	if r.cancelOnFind != nil {
+		r.cancelOnFind()
+		r.cancelOnFind = nil
+	}
 	if r.findErr != nil {
 		return nil, r.findErr
 	}
@@ -66,6 +76,40 @@ func TestPersistRevertedStatusRetriesStaleGeneration(t *testing.T) {
 	require.Equal(t, 2, repo.updateCalls)
 	require.Equal(t, models.JobStatusReverted, job.Status)
 	require.Equal(t, uint64(7), job.EnvelopeGeneration)
+	require.Equal(t, &revertedAt, repo.latest.RevertedAt)
+}
+
+func TestPersistRevertedStatusRetriesRepeatedStaleGenerations(t *testing.T) {
+	repo := &revertStatusRepoP6{
+		staleUpdateCount: 2,
+		latest: &models.Job{
+			ID:                 "p6-revert-repeated-stale",
+			Status:             models.JobStatusOrganized,
+			EnvelopeGeneration: 9,
+		},
+	}
+	job := &models.Job{ID: "p6-revert-repeated-stale", Status: models.JobStatusReverted, EnvelopeGeneration: 7}
+
+	require.NoError(t, persistRevertedStatus(context.Background(), repo, job))
+	require.Equal(t, 3, repo.updateCalls)
+	require.Equal(t, models.JobStatusReverted, job.Status)
+	require.Equal(t, uint64(9), job.EnvelopeGeneration)
+}
+
+func TestPersistRevertedStatusStopsWhenContextEnds(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	repo := &revertStatusRepoP6{
+		firstErr: database.ErrStaleEnvelopeGeneration,
+		latest: &models.Job{
+			ID:                 "p6-revert-context",
+			EnvelopeGeneration: 3,
+		},
+		cancelOnFind: cancel,
+	}
+
+	err := persistRevertedStatus(ctx, repo, &models.Job{ID: "p6-revert-context", Status: models.JobStatusReverted})
+	require.ErrorIs(t, err, context.Canceled)
+	require.Equal(t, 1, repo.updateCalls)
 }
 
 func TestPersistRevertedStatusBranches(t *testing.T) {
