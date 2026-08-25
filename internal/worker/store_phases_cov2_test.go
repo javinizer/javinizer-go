@@ -304,10 +304,11 @@ func TestDeleteJobPollPathOnGoneBarrier(t *testing.T) {
 	s := freshStore(t)
 	job := seedJobLifecycle(t, s, models.JobStatusCompleted, "")
 	job.admission.MarkGone()
-	// Head fast-fails are status-only; the loop's PollExclusiveWait claims the
-	// exclusive lease under the gone barrier.
-	require.NoError(t, s.DeleteJob(job.ID.String()))
-	assert.True(t, s.IsTombstoned(job.ID.String()))
+	// PollExclusiveWait may claim the lease after the barrier is gone; the
+	// post-lease recheck must return the typed gone outcome, not proceed to a
+	// second deletion.
+	require.ErrorIs(t, s.DeleteJob(job.ID.String()), ErrJobGone)
+	assert.False(t, s.IsTombstoned(job.ID.String()))
 }
 
 // Post-lease status recheck: a job flagged deleted before the exclusive grab

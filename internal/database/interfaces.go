@@ -139,6 +139,14 @@ type JobRepositoryInterface interface {
 	DeleteOrganizedOlderThan(ctx context.Context, date time.Time) error
 }
 
+// EnvelopeCommitter is the optional generation-aware persistence seam for job
+// envelope rows. It is separate from the broad repository interface so legacy
+// test doubles and read-only API consumers do not need to implement a write
+// protocol they never exercise. The concrete JobRepository always implements it.
+type EnvelopeCommitter interface {
+	CommitEnvelope(ctx context.Context, job *models.Job, expectedGeneration uint64) (uint64, error)
+}
+
 // BatchFileOperationRepositoryInterface defines the contract for batch file operation operations
 type BatchFileOperationRepositoryInterface interface {
 	Create(ctx context.Context, op *models.BatchFileOperation) error
