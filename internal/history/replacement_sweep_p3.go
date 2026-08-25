@@ -816,6 +816,10 @@ type replacementLedgerIndex struct {
 	dirs            map[string]bool                       // directories holding journaled destinations
 	refusedPendings []rearmRefusedLedgerEntry
 	prunePendings   []prunePendingLedgerEntry // wave-29: ledger-only rearm-refused pendings
+	// pruneQuarantineFailures records a visible quarantine whose cleanup was
+	// attempted but did not complete during this sweep. Its matching prune
+	// intent must not fall through to the absent-original journal-only leg.
+	pruneQuarantineFailures map[string]bool
 }
 
 // rearmRefusedLedgerEntry is one journaled restore-pending entry of the
@@ -854,8 +858,9 @@ func (s *ReplacementSweeper) index(ctx context.Context) (*replacementLedgerIndex
 	}
 	rows = append(rows, ledgerRows...)
 	idx := &replacementLedgerIndex{
-		journaled: map[string]*models.BatchFileOperation{},
-		dirs:      map[string]bool{},
+		journaled:               map[string]*models.BatchFileOperation{},
+		dirs:                    map[string]bool{},
+		pruneQuarantineFailures: make(map[string]bool),
 	}
 	// rows = FindOperationsWithReplacements + FindOperationsWithLedger — the
 	// two queries overlap (a journaled row satisfies both), so the
@@ -963,10 +968,18 @@ func (s *ReplacementSweeper) sweepPruneQuarantine(ctx context.Context, idx *repl
 	if !ok || journalEntryPendingKind(owner, sweepSlash(journalBackup)) != models.RestorePendingKindPrune {
 		return 0
 	}
-	return s.consumePrunePending(ctx, idx, prunePendingLedgerEntry{
+	backupSlash := sweepSlash(journalBackup)
+	healed := s.consumePrunePending(ctx, idx, prunePendingLedgerEntry{
 		rowID: owner.ID, backup: quarantine, journalBackup: journalBackup,
-		dest: journalEntryDestination(owner, sweepSlash(journalBackup)), backupSlash: sweepSlash(journalBackup),
+		dest: journalEntryDestination(owner, backupSlash), backupSlash: backupSlash,
 	})
+	if healed == 0 {
+		// Keep the durable intent paired with a visible quarantine. The
+		// journal-only fallback below must not mistake the absent original
+		// name for a completed unlink when this cleanup failed.
+		idx.pruneQuarantineFailures[backupSlash] = true
+	}
+	return healed
 }
 
 func journalEntryDestination(row *models.BatchFileOperation, backupSlash string) string {
@@ -1054,6 +1067,9 @@ func (s *ReplacementSweeper) Sweep(ctx context.Context) (int, error) {
 	// was not visible to the directory scan still converges journal-only.
 	for _, entry := range idx.prunePendings {
 		if _, ok := idx.journaled[entry.backupSlash]; !ok {
+			continue
+		}
+		if idx.pruneQuarantineFailures[entry.backupSlash] {
 			continue
 		}
 		if err := ctx.Err(); err != nil {
