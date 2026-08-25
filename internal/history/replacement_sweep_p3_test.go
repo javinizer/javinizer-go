@@ -953,6 +953,39 @@ func TestReplacementSweeper_SweepRecoversPruneQuarantine(t *testing.T) {
 	require.Empty(t, requireLedgerReplacements(t, repo, op.ID))
 }
 
+func TestReplacementSweeper_SweepPruneQuarantineRemovalFailureKeepsIntent(t *testing.T) {
+	base := afero.NewMemMapFs()
+	repo := newP3OpRepo()
+	dest := "/out/PRUNE-QUAR-FAIL/poster.jpg"
+	backup := dest + ".dlbak." + p3HexA
+	quarantine := backup + backupQuarantineSuffix + "0123456789abcdef0123456789abcdef"
+	require.NoError(t, base.MkdirAll(filepath.Dir(dest), 0o755))
+	require.NoError(t, afero.WriteFile(base, dest, []byte("organized"), 0o644))
+	require.NoError(t, afero.WriteFile(base, quarantine, []byte("old"), 0o644))
+	op := installedPruneCandidate(t, repo, "job-prune-quar-fail", "PRUNE-QUAR-FAIL", dest, backup)
+	gf, err := models.ParseGeneratedFiles(op.GeneratedFiles)
+	require.NoError(t, err)
+	require.True(t, gf.Replacements[0].SetRestorePending(models.RestorePendingKindPrune))
+	op.GeneratedFiles = models.MarshalLedgerJSON(gf)
+	require.NoError(t, repo.Update(context.Background(), op))
+
+	fs := &w8RemoveFs{Fs: base, victim: quarantine, err: errors.New("quarantine unlink wedged"), fail: true}
+	healed, err := NewReplacementSweeper(fs, repo).Sweep(context.Background())
+	require.NoError(t, err)
+	require.Zero(t, healed)
+	exists, statErr := afero.Exists(base, quarantine)
+	require.NoError(t, statErr)
+	require.True(t, exists)
+	row, findErr := repo.FindByID(context.Background(), op.ID)
+	require.NoError(t, findErr)
+	got, parseErr := models.ParseGeneratedFiles(row.GeneratedFiles)
+	require.NoError(t, parseErr)
+	require.Len(t, got.Replacements, 1)
+	require.True(t, got.Replacements[0].RestorePending)
+	require.Equal(t, models.RestorePendingKindPrune, got.Replacements[0].PendingKind())
+	require.Equal(t, backup, got.Replacements[0].Backup)
+}
+
 func TestReplacementSweeper_ConsumePrunePendingClaimBranches(t *testing.T) {
 	base := afero.NewMemMapFs()
 	idx := &replacementLedgerIndex{journaled: map[string]*models.BatchFileOperation{}}
