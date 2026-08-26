@@ -83,7 +83,7 @@ interface OrganizeControllerDeps {
 function isDefinitiveApplyLaunchRejection(error: unknown): boolean {
 	if (!error || typeof error !== 'object' || !('status' in error)) return false;
 	const status = error.status;
-	return typeof status === 'number' && status >= 400 && status < 500;
+	return status === 400 || status === 403 || status === 404;
 }
 
 function getOrganizeRequestOptions(operation: OrganizeOperation): {
@@ -140,6 +140,22 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 
 	function updateFileStatus(filePath: string, status: FileStatus) {
 		deps.getFileStatuses().set(filePath, status);
+	}
+
+	function hasApplyFileOutcome(job: BatchJobResponse): boolean {
+		const expectedPaths = new Set(deps.getExpectedOrganizeFilePaths());
+		for (const [filePath, result] of Object.entries(job.results ?? {})) {
+			if (
+				!job.excluded?.[filePath] &&
+				expectedPaths.has(filePath) &&
+				(result.status === 'failed' || result.status === 'cancelled')
+			) {
+				return true;
+			}
+		}
+		return Array.from(deps.getFileStatuses().values()).some(
+			(status) => status.status === 'failed' || status.status === 'success',
+		);
 	}
 
 	function reconcileTerminalResults(job: BatchJobResponse, includeCompleted = true) {
@@ -284,14 +300,14 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 				}
 
 				if (latestJob.status === 'failed' && applyOutcomeCurrent) {
-					reconcileTerminalResults(latestJob, false);
+					reconcileTerminalResults(latestJob, hasApplyFileOutcome(latestJob));
 					const action = deps.getIsUpdateMode() ? 'update' : 'organization';
 					finalizeOrganizeFailure(`The ${action} job failed.`);
 					return;
 				}
 
 				if (latestJob.status === 'cancelled' && applyOutcomeCurrent) {
-					reconcileTerminalResults(latestJob, false);
+					reconcileTerminalResults(latestJob, hasApplyFileOutcome(latestJob));
 					const action = deps.getIsUpdateMode() ? 'Update' : 'Organization';
 					finalizeOrganizeFailure(`${action} was cancelled.`);
 					return;
