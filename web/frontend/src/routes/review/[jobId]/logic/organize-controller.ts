@@ -217,7 +217,6 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 		requestPending: () => boolean = () => false,
 		preApplyGeneration?: number,
 		applyAlreadyStarted = false,
-		launchFailureConfirmed = false,
 	) {
 		const runToken = ++organizeRunToken;
 		const isActiveRun = () => runToken === organizeRunToken;
@@ -284,14 +283,14 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 					return;
 				}
 
-				if (latestJob.status === 'failed' && (applyPhaseReached || launchFailureConfirmed)) {
+				if (latestJob.status === 'failed' && applyPhaseReached) {
 					reconcileTerminalResults(latestJob, applyPhaseReached);
 					const action = deps.getIsUpdateMode() ? 'update' : 'organization';
 					finalizeOrganizeFailure(`The ${action} job failed.`);
 					return;
 				}
 
-				if (latestJob.status === 'cancelled' && (applyPhaseReached || launchFailureConfirmed)) {
+				if (latestJob.status === 'cancelled' && applyPhaseReached) {
 					reconcileTerminalResults(latestJob, applyPhaseReached);
 					const action = deps.getIsUpdateMode() ? 'Update' : 'Organization';
 					finalizeOrganizeFailure(`${action} was cancelled.`);
@@ -616,7 +615,6 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 			undefined,
 			recovery?.preApplyGeneration,
 			applyAlreadyStarted,
-			launchFailureConfirmed,
 		);
 	}
 

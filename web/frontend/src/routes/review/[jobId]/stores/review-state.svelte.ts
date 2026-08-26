@@ -1621,6 +1621,15 @@ export function createReviewState(getJobId: () => string) {
 			recovery.preApplyGeneration !== undefined &&
 			loadedJob.apply_generation !== undefined &&
 			loadedJob.apply_generation > recovery.preApplyGeneration;
+		const launchFailedBeforeStart =
+			!hasRecordedApplyOutcome &&
+			(loadedJob.status === 'failed' || loadedJob.status === 'cancelled') &&
+			recovery.preApplyGeneration !== undefined &&
+			loadedJob.apply_generation === recovery.preApplyGeneration;
+		if (launchFailedBeforeStart) {
+			clearApplyRecovery(loadedJob.id);
+			return;
+		}
 		const terminalRecoveryState =
 			loadedJob.status === 'organized' ||
 			loadedJob.status === 'failed' ||
