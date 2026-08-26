@@ -260,7 +260,9 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 						? activeApplyGeneration !== undefined
 							? latestJob.apply_generation >= activeApplyGeneration
 							: preApplyGeneration === undefined || latestJob.apply_generation > preApplyGeneration
-						: applyAlreadyStarted && preApplyGeneration === undefined;
+						: activeApplyGeneration === undefined &&
+							applyAlreadyStarted &&
+							preApplyGeneration === undefined;
 				if (generationAdvanced || (applyAlreadyStarted && generationIsCurrent)) {
 					applyTransitionObserved = true;
 					if (generationIsCurrent) {
