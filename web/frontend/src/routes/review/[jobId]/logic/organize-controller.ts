@@ -256,10 +256,11 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 					latestJob.apply_generation !== undefined &&
 					latestJob.apply_generation > preApplyGeneration;
 				const generationIsCurrent =
-					latestJob.apply_generation !== undefined &&
-					(activeApplyGeneration !== undefined
-						? latestJob.apply_generation >= activeApplyGeneration
-						: preApplyGeneration === undefined || latestJob.apply_generation > preApplyGeneration);
+					latestJob.apply_generation !== undefined
+						? activeApplyGeneration !== undefined
+							? latestJob.apply_generation >= activeApplyGeneration
+							: preApplyGeneration === undefined || latestJob.apply_generation > preApplyGeneration
+						: applyAlreadyStarted && preApplyGeneration === undefined;
 				if (generationAdvanced || (applyAlreadyStarted && generationIsCurrent)) {
 					applyTransitionObserved = true;
 					if (generationIsCurrent) {
