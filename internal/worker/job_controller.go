@@ -175,10 +175,6 @@ func (c *jobController) StartApply(ctx context.Context, cfg ApplyPhaseConfig) er
 		cancel()
 		return err // CAS loser: duplicate launch rejected up-front
 	}
-	if cfg.ApplyGenerationRef != nil {
-		lifecycleSnapshot := c.job.lifecycle.StatusSnapshot()
-		atomic.StoreUint64(cfg.ApplyGenerationRef, lifecycleSnapshot.ApplyGeneration)
-	}
 	entry, err := c.job.admission.BeginPhase(ctx)
 	if err != nil {
 		cancel()
@@ -203,6 +199,10 @@ func (c *jobController) StartApply(ctx context.Context, cfg ApplyPhaseConfig) er
 		return err
 	}
 	release := entry.Downgrade()
+	if cfg.ApplyGenerationRef != nil {
+		lifecycleSnapshot := c.job.lifecycle.StatusSnapshot()
+		atomic.StoreUint64(cfg.ApplyGenerationRef, lifecycleSnapshot.ApplyGeneration)
+	}
 
 	// Commit apply-phase config values ONLY after markStarted succeeds, so a
 	// losing concurrent StartApply cannot clobber the winner's values. Both

@@ -117,13 +117,13 @@ func resolveOrganizeApplyConfig(
 		}
 		emitter := deps.GetEventEmitter()
 		if afr.Err != nil && emitter != nil {
-			_ = emitter.EmitOrganizeEvent(ctx, "file_move", fmt.Sprintf("Organize failed for %s", afc.Movie.ID), models.SeverityError, map[string]any{"job_id": job.GetID(), "movie_id": afc.Movie.ID, "error": afr.Err.Error()})
+			_ = emitter.EmitOrganizeEvent(ctx, "file_move", fmt.Sprintf("Organize failed for %s", afc.Movie.ID), models.SeverityError, map[string]any{"job_id": job.GetID(), "movie_id": afc.Movie.ID, "error": afr.Err.Error(), "apply_generation": atomic.LoadUint64(applyGenerationRef)})
 		} else if emitter != nil {
 			var newPath string
 			if afr.Result != nil && afr.Result.OrganizeResult != nil {
 				newPath = afr.Result.OrganizeResult.NewPath
 			}
-			_ = emitter.EmitOrganizeEvent(ctx, "file_move", fmt.Sprintf("Organized %s", afc.Movie.ID), models.SeverityInfo, map[string]any{"job_id": job.GetID(), "movie_id": afc.Movie.ID, "file": afc.FilePath, "new_path": newPath})
+			_ = emitter.EmitOrganizeEvent(ctx, "file_move", fmt.Sprintf("Organized %s", afc.Movie.ID), models.SeverityInfo, map[string]any{"job_id": job.GetID(), "movie_id": afc.Movie.ID, "file": afc.FilePath, "new_path": newPath, "apply_generation": atomic.LoadUint64(applyGenerationRef)})
 		}
 	}
 
@@ -242,7 +242,7 @@ func resolveUpdateApplyConfig(
 		}
 		emitter := deps.GetEventEmitter()
 		if afr.Err != nil && emitter != nil {
-			_ = emitter.EmitOrganizeEvent(ctx, "nfo_gen", fmt.Sprintf("Update failed for %s", afc.Movie.ID), models.SeverityError, map[string]any{"job_id": job.GetID(), "movie_id": afc.Movie.ID, "error": afr.Err.Error()})
+			_ = emitter.EmitOrganizeEvent(ctx, "nfo_gen", fmt.Sprintf("Update failed for %s", afc.Movie.ID), models.SeverityError, map[string]any{"job_id": job.GetID(), "movie_id": afc.Movie.ID, "error": afr.Err.Error(), "apply_generation": atomic.LoadUint64(applyGenerationRef)})
 		}
 	}
 

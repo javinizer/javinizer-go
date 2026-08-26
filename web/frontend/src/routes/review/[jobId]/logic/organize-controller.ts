@@ -206,13 +206,14 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 		operationGeneration: number,
 		requestPending: () => boolean = () => false,
 		preApplyGeneration?: number,
+		applyAlreadyStarted = false,
 	) {
 		const runToken = ++organizeRunToken;
 		const isActiveRun = () => runToken === organizeRunToken;
 		clearOrganizePollTimer();
 		const startedAt = Date.now();
 		let lastPollError: string | null = null;
-		let applyTransitionObserved = preApplyGeneration === undefined;
+		let applyTransitionObserved = applyAlreadyStarted;
 
 		const pollOnce = async () => {
 			if (!isActiveRun()) return;
@@ -241,10 +242,10 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 				deps.setJob(latestJob, operationJobId, operationGeneration);
 				lastPollError = null;
 				const generationAdvanced =
-					preApplyGeneration === undefined ||
-					(latestJob.apply_generation !== undefined &&
-						latestJob.apply_generation > preApplyGeneration);
-				if (latestJob.status === 'running' || generationAdvanced) {
+					preApplyGeneration !== undefined &&
+					latestJob.apply_generation !== undefined &&
+					latestJob.apply_generation > preApplyGeneration;
+				if (generationAdvanced || applyAlreadyStarted) {
 					applyTransitionObserved = true;
 					if (latestJob.apply_generation !== undefined) {
 						activeApplyGeneration = latestJob.apply_generation;
@@ -257,8 +258,8 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 					latestJob.status === 'reverted';
 				if (terminalSuccess && !applyTransitionObserved) {
 					// A GET can race the POST and see the scrape-completed state. Do
-					// not report apply success until the server exposes the new apply
-					// generation or a running phase.
+					// not report apply success until the server exposes a new apply
+					// generation.
 				} else if (terminalSuccess) {
 					reconcileTerminalResults(latestJob);
 					const action = deps.getIsUpdateMode() ? 'Update' : 'Organization';
@@ -484,7 +485,7 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 			msg.job_id !== deps.getJobId() ||
 			deps.getOrganizeStatus() !== 'organizing' ||
 			(activeApplyGeneration !== undefined && msg.apply_generation !== activeApplyGeneration) ||
-			(activeApplyGeneration === undefined && !!msg.file_path)
+			(activeApplyGeneration === undefined && (!!msg.file_path || msg.status !== 'pending'))
 		) {
 			return;
 		}
@@ -575,7 +576,7 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 				deps.getFileStatuses().set(filePath, { status: 'failed', error: result.error });
 			}
 		}
-		startOrganizeCompletionPolling(operationJobId, operationGeneration);
+		startOrganizeCompletionPolling(operationJobId, operationGeneration, undefined, undefined, true);
 	}
 
 	return {

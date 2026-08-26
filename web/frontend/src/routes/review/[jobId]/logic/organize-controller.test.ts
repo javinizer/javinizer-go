@@ -51,6 +51,7 @@ function makeJob(status: string): BatchJobResponse {
 		destination: '/out',
 		results: {},
 		started_at: '2026-01-01T00:00:00Z',
+		apply_generation: 0,
 		update: false,
 	};
 }
@@ -128,10 +129,13 @@ describe('organize-controller pollOnce terminal-success branches', () => {
 	it.each([['completed'], ['organized'], ['reverted']])(
 		'finalizes organize when polled job status is %s',
 		async (status) => {
-			const { deps, calls } = makeDeps({ job: makeJob(status) });
+			const job = makeJob(status);
+			const { deps, calls } = makeDeps({ job });
 			const controller = createOrganizeController(deps);
 
-			await controller.organizeAll();
+			const organizeRequest = controller.organizeAll();
+			job.apply_generation = 1;
+			await organizeRequest;
 			// Allow the organizeBatchJob promise + the first pollOnce tick to run.
 			await vi.advanceTimersByTimeAsync(10);
 			// finalizeOrganizeSuccess schedules a completion timer (0ms in tests).
@@ -359,6 +363,7 @@ describe('organize-controller handleWebSocketMessage progress gating (NEW-1)', (
 		const controller = createOrganizeController(deps);
 
 		const organizeRequest = controller.organizeAll();
+		job.apply_generation = 1;
 		(job.results[failedPath] as FileResult).status = 'failed';
 		(job.results[failedPath] as FileResult).error = 'disk full';
 		await organizeRequest;

@@ -86,6 +86,19 @@ func TestPhaseEndPersistWarnsAreSwallowed(t *testing.T) {
 	}
 }
 
+func TestStartApplyPublishesGenerationRef(t *testing.T) {
+	job := newBatchJob(nil)
+	job.Controller().SetWorkflow(wfmocks.NewMockWorkflowInterface(t))
+	job.lifecycle.Status = models.JobStatusCompleted
+	var generation uint64
+
+	require.NoError(t, job.Controller().StartApply(context.Background(), ApplyPhaseConfig{
+		ApplyGenerationRef: &generation,
+	}))
+	assert.Equal(t, uint64(1), atomic.LoadUint64(&generation), "the callback reference must receive the claimed apply generation")
+	require.NoError(t, job.Controller().Wait())
+}
+
 // StartScrape must NOT launch when the phase-entry marker fails to persist
 // (D16 fail-closed); the terminal failure is retried durably.
 // codex r45 P2: a duplicate StartApply behind a held shared lease must
