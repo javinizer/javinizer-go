@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/logging"
@@ -173,6 +174,10 @@ func (c *jobController) StartApply(ctx context.Context, cfg ApplyPhaseConfig) er
 		}
 		cancel()
 		return err // CAS loser: duplicate launch rejected up-front
+	}
+	if cfg.ApplyGenerationRef != nil {
+		lifecycleSnapshot := c.job.lifecycle.StatusSnapshot()
+		atomic.StoreUint64(cfg.ApplyGenerationRef, lifecycleSnapshot.ApplyGeneration)
 	}
 	entry, err := c.job.admission.BeginPhase(ctx)
 	if err != nil {

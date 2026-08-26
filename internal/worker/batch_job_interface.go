@@ -707,7 +707,7 @@ type ApplyPhaseConfig struct {
 	OverwriteExistingMedia bool
 	DryRun                 bool     // Dry-run mode: preview without making changes
 	RetryFilePaths         []string // Apply only these previously failed result paths on retry
-	ApplyGeneration        uint64   // Generation allocated for this apply attempt
+	ApplyGenerationRef     *uint64  // Set to the actual lifecycle generation before apply starts
 
 	// Job-level config applied before apply starts
 	OperationModeOverride operationmode.OperationMode // resolved at factory boundary

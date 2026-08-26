@@ -43,7 +43,8 @@ func TestOrganizeBroadcasterUsesCapturedGeneration(t *testing.T) {
 	var got *websocket.ProgressMessage
 	job := &stubControlledJob{status: &worker.BatchJobStatus{}}
 	job.status.ApplyGeneration = 1
-	bcast := makeOrganizeFileStartBroadcaster(job, false, func(msg *websocket.ProgressMessage) { got = msg }, 2)
+	generation := uint64(2)
+	bcast := makeOrganizeFileStartBroadcaster(job, false, func(msg *websocket.ProgressMessage) { got = msg }, &generation)
 	job.status.ApplyGeneration = 3
 	bcast("/movies/movie.mp4")
 	require.NotNil(t, got)

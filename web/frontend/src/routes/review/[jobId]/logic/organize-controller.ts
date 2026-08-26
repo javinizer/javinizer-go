@@ -79,20 +79,6 @@ interface OrganizeControllerDeps {
 	redirectDelayMs?: number;
 }
 
-function responseApplyGeneration(response: unknown): number | undefined {
-	if (
-		response &&
-		typeof response === 'object' &&
-		'apply_generation' in response &&
-		typeof response.apply_generation === 'number' &&
-		Number.isSafeInteger(response.apply_generation) &&
-		response.apply_generation >= 0
-	) {
-		return response.apply_generation;
-	}
-	return undefined;
-}
-
 function getOrganizeRequestOptions(operation: OrganizeOperation): {
 	copyOnly: boolean;
 	linkMode?: 'hard' | 'soft';
@@ -254,13 +240,15 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 				}
 				deps.setJob(latestJob, operationJobId, operationGeneration);
 				lastPollError = null;
-				if (
-					latestJob.status === 'running' ||
-					(preApplyGeneration !== undefined &&
-						latestJob.apply_generation !== undefined &&
-						latestJob.apply_generation > preApplyGeneration)
-				) {
+				const generationAdvanced =
+					preApplyGeneration === undefined ||
+					(latestJob.apply_generation !== undefined &&
+						latestJob.apply_generation > preApplyGeneration);
+				if (latestJob.status === 'running' || generationAdvanced) {
 					applyTransitionObserved = true;
+					if (latestJob.apply_generation !== undefined) {
+						activeApplyGeneration = latestJob.apply_generation;
+					}
 				}
 
 				const terminalSuccess =
@@ -319,6 +307,7 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 	function prepareOrganizeRun(extraPaths: string[] = []) {
 		organizeRunToken += 1;
 		ignoreWebSocketMessages = false;
+		activeApplyGeneration = undefined;
 		deps.clearWebSocketMessages();
 		deps.setOrganizeStatus('organizing');
 		deps.setOrganizing(true);
@@ -364,7 +353,6 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 
 		const { copyOnly, linkMode } = getOrganizeRequestOptions(operation);
 		const preApplyGeneration = deps.getJob()?.apply_generation;
-		activeApplyGeneration = preApplyGeneration === undefined ? undefined : preApplyGeneration + 1;
 		prepareOrganizeRun(retryPaths);
 		const operationToken = organizeRunToken;
 		let requestPending = false;
@@ -396,10 +384,8 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 				() => requestPending,
 				preApplyGeneration,
 			);
-			const response = await request;
+			await request;
 			requestPending = false;
-			const returnedGeneration = responseApplyGeneration(response);
-			if (returnedGeneration !== undefined) activeApplyGeneration = returnedGeneration;
 
 			if (pollingRunToken !== organizeRunToken) return;
 			if (deps.isCurrentOperation && !deps.isCurrentOperation(operationJobId, operationGeneration))
@@ -425,7 +411,6 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 		const operationGeneration = deps.getRouteGeneration?.() ?? 0;
 		lastRecoveryFailedPaths = retryPaths;
 		const preApplyGeneration = deps.getJob()?.apply_generation;
-		activeApplyGeneration = preApplyGeneration === undefined ? undefined : preApplyGeneration + 1;
 		prepareOrganizeRun(retryPaths);
 		const operationToken = organizeRunToken;
 		let requestPending = false;
@@ -452,10 +437,8 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 				() => requestPending,
 				preApplyGeneration,
 			);
-			const response = await deps.api.updateBatchJob(operationJobId, request);
+			await deps.api.updateBatchJob(operationJobId, request);
 			requestPending = false;
-			const returnedGeneration = responseApplyGeneration(response);
-			if (returnedGeneration !== undefined) activeApplyGeneration = returnedGeneration;
 			if (pollingRunToken !== organizeRunToken) return;
 			if (deps.isCurrentOperation && !deps.isCurrentOperation(operationJobId, operationGeneration))
 				return;
@@ -500,7 +483,8 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 			ignoreWebSocketMessages ||
 			msg.job_id !== deps.getJobId() ||
 			deps.getOrganizeStatus() !== 'organizing' ||
-			(activeApplyGeneration !== undefined && msg.apply_generation !== activeApplyGeneration)
+			(activeApplyGeneration !== undefined && msg.apply_generation !== activeApplyGeneration) ||
+			(activeApplyGeneration === undefined && !!msg.file_path)
 		) {
 			return;
 		}

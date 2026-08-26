@@ -58,11 +58,7 @@ func prepareAndLaunchApply(
 		}
 	}()
 
-	response := gin.H{"message": successMessage}
-	if applyOpts.ApplyGeneration > 0 {
-		response["apply_generation"] = applyOpts.ApplyGeneration
-	}
-	c.JSON(http.StatusOK, response)
+	c.JSON(http.StatusOK, gin.H{"message": successMessage})
 }
 
 // organizeJob godoc
