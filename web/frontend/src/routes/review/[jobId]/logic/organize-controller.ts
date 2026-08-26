@@ -148,13 +148,18 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 			if (
 				!job.excluded?.[filePath] &&
 				expectedPaths.has(filePath) &&
-				(result.status === 'failed' || result.status === 'cancelled')
+				(result.status === 'failed' ||
+					result.status === 'cancelled' ||
+					(result.status === 'completed' && !!result.movie))
 			) {
 				return true;
 			}
 		}
-		return Array.from(deps.getFileStatuses().values()).some(
-			(status) => status.status === 'failed' || status.status === 'success',
+		return Array.from(deps.getFileStatuses().entries()).some(
+			([filePath, status]) =>
+				!job.excluded?.[filePath] &&
+				expectedPaths.has(filePath) &&
+				(status.status === 'failed' || status.status === 'success'),
 		);
 	}
 
