@@ -79,6 +79,20 @@ interface OrganizeControllerDeps {
 	redirectDelayMs?: number;
 }
 
+function responseApplyGeneration(response: unknown): number | undefined {
+	if (
+		response &&
+		typeof response === 'object' &&
+		'apply_generation' in response &&
+		typeof response.apply_generation === 'number' &&
+		Number.isSafeInteger(response.apply_generation) &&
+		response.apply_generation >= 0
+	) {
+		return response.apply_generation;
+	}
+	return undefined;
+}
+
 function getOrganizeRequestOptions(operation: OrganizeOperation): {
 	copyOnly: boolean;
 	linkMode?: 'hard' | 'soft';
@@ -382,8 +396,10 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 				() => requestPending,
 				preApplyGeneration,
 			);
-			await request;
+			const response = await request;
 			requestPending = false;
+			const returnedGeneration = responseApplyGeneration(response);
+			if (returnedGeneration !== undefined) activeApplyGeneration = returnedGeneration;
 
 			if (pollingRunToken !== organizeRunToken) return;
 			if (deps.isCurrentOperation && !deps.isCurrentOperation(operationJobId, operationGeneration))
@@ -436,8 +452,10 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 				() => requestPending,
 				preApplyGeneration,
 			);
-			await deps.api.updateBatchJob(operationJobId, request);
+			const response = await deps.api.updateBatchJob(operationJobId, request);
 			requestPending = false;
+			const returnedGeneration = responseApplyGeneration(response);
+			if (returnedGeneration !== undefined) activeApplyGeneration = returnedGeneration;
 			if (pollingRunToken !== organizeRunToken) return;
 			if (deps.isCurrentOperation && !deps.isCurrentOperation(operationJobId, operationGeneration))
 				return;
@@ -482,9 +500,7 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 			ignoreWebSocketMessages ||
 			msg.job_id !== deps.getJobId() ||
 			deps.getOrganizeStatus() !== 'organizing' ||
-			(activeApplyGeneration !== undefined &&
-				msg.apply_generation !== undefined &&
-				msg.apply_generation !== activeApplyGeneration)
+			(activeApplyGeneration !== undefined && msg.apply_generation !== activeApplyGeneration)
 		) {
 			return;
 		}

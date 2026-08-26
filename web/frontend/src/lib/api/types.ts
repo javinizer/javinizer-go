@@ -686,6 +686,7 @@ export interface OrganizeRequest {
 
 export interface OrganizeResponse {
 	message: string;
+	apply_generation?: number;
 }
 
 export interface OrganizePreviewRequest {

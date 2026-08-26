@@ -99,11 +99,13 @@ func resolveOrganizeApplyConfig(
 	applyOpts.RetryFilePaths = append([]string(nil), req.RetryFilePaths...)
 	applyOpts.OperationModeOverride = resolved.OperationMode
 	sink := newOrganizeBroadcastSink(snap.RT())
-	applyOpts.OnPhaseComplete = makeOrganizeCompleteBroadcaster(job, false /* isUpdate */, sink)
-	applyOpts.OnFileProgress = makeOrganizeProgressBroadcaster(job, false /* isUpdate */, sink)
-	applyOpts.OnFileOrganizeStart = makeOrganizeFileStartBroadcaster(job, false /* isUpdate */, sink)
-	applyOpts.OnFileOrganized = makeOrganizeFileOrganizedBroadcaster(job, false /* isUpdate */, sink)
-	applyOpts.OnFileFailed = makeOrganizeFileFailedBroadcaster(job, false /* isUpdate */, sink)
+	applyGeneration := nextApplyGeneration(job)
+	applyOpts.ApplyGeneration = applyGeneration
+	applyOpts.OnPhaseComplete = makeOrganizeCompleteBroadcaster(job, false /* isUpdate */, sink, applyGeneration)
+	applyOpts.OnFileProgress = makeOrganizeProgressBroadcaster(job, false /* isUpdate */, sink, applyGeneration)
+	applyOpts.OnFileOrganizeStart = makeOrganizeFileStartBroadcaster(job, false /* isUpdate */, sink, applyGeneration)
+	applyOpts.OnFileOrganized = makeOrganizeFileOrganizedBroadcaster(job, false /* isUpdate */, sink, applyGeneration)
+	applyOpts.OnFileFailed = makeOrganizeFileFailedBroadcaster(job, false /* isUpdate */, sink, applyGeneration)
 	applyOpts.PostApplyFunc = func(ctx context.Context, afc *worker.ApplyFileContext, afr *worker.ApplyFileResult) {
 		// Guard: never dereference a nil payload. If the apply context or
 		// result is missing required fields, skip emitting this secondary
@@ -224,11 +226,13 @@ func resolveUpdateApplyConfig(
 	}
 	applyOpts.RetryFilePaths = append([]string(nil), req.RetryFilePaths...)
 	sink := newOrganizeBroadcastSink(snap.RT())
-	applyOpts.OnPhaseComplete = makeOrganizeCompleteBroadcaster(job, true /* isUpdate */, sink)
-	applyOpts.OnFileProgress = makeOrganizeProgressBroadcaster(job, true /* isUpdate */, sink)
-	applyOpts.OnFileOrganizeStart = makeOrganizeFileStartBroadcaster(job, true /* isUpdate */, sink)
-	applyOpts.OnFileOrganized = makeOrganizeFileOrganizedBroadcaster(job, true /* isUpdate */, sink)
-	applyOpts.OnFileFailed = makeOrganizeFileFailedBroadcaster(job, true /* isUpdate */, sink)
+	applyGeneration := nextApplyGeneration(job)
+	applyOpts.ApplyGeneration = applyGeneration
+	applyOpts.OnPhaseComplete = makeOrganizeCompleteBroadcaster(job, true /* isUpdate */, sink, applyGeneration)
+	applyOpts.OnFileProgress = makeOrganizeProgressBroadcaster(job, true /* isUpdate */, sink, applyGeneration)
+	applyOpts.OnFileOrganizeStart = makeOrganizeFileStartBroadcaster(job, true /* isUpdate */, sink, applyGeneration)
+	applyOpts.OnFileOrganized = makeOrganizeFileOrganizedBroadcaster(job, true /* isUpdate */, sink, applyGeneration)
+	applyOpts.OnFileFailed = makeOrganizeFileFailedBroadcaster(job, true /* isUpdate */, sink, applyGeneration)
 	applyOpts.PostApplyFunc = func(ctx context.Context, afc *worker.ApplyFileContext, afr *worker.ApplyFileResult) {
 		// Guard: never dereference a nil payload; skip the secondary event so
 		// the original apply error is preserved.
@@ -261,7 +265,17 @@ func resolveUpdateApplyConfig(
 // A nil job (or nil status snapshot) leaves the fields zero (omitted on the
 // wire via omitempty), so older/tests paths that pass a stub returning nil are
 // unaffected.
-func stampJobCounts(msg *websocket.ProgressMessage, job worker.BatchJobInterface) *websocket.ProgressMessage {
+func nextApplyGeneration(job worker.BatchJobInterface) uint64 {
+	if job == nil {
+		return 0
+	}
+	if status := job.GetStatus(); status != nil {
+		return status.ApplyGeneration + 1
+	}
+	return 0
+}
+
+func stampJobCounts(msg *websocket.ProgressMessage, job worker.BatchJobInterface, generation ...uint64) *websocket.ProgressMessage {
 	if msg == nil || job == nil {
 		return msg
 	}
@@ -269,7 +283,11 @@ func stampJobCounts(msg *websocket.ProgressMessage, job worker.BatchJobInterface
 		msg.TotalFiles = status.TotalFiles
 		msg.Completed = status.Completed
 		msg.Failed = status.Failed
-		msg.ApplyGeneration = status.ApplyGeneration
+		if len(generation) > 0 {
+			msg.ApplyGeneration = generation[0]
+		} else {
+			msg.ApplyGeneration = status.ApplyGeneration
+		}
 	}
 	return msg
 }
@@ -288,7 +306,7 @@ func stampJobCounts(msg *websocket.ProgressMessage, job worker.BatchJobInterface
 // is unit-testable with a recording sink and the sibling factories share a
 // uniform sink-injected signature. The resolver supplies the production sink
 // via newOrganizeBroadcastSink(rt).
-func makeOrganizeCompleteBroadcaster(job worker.BatchJobInterface, isUpdate bool, sink progressSink) func(organized, failed int) {
+func makeOrganizeCompleteBroadcaster(job worker.BatchJobInterface, isUpdate bool, sink progressSink, generation ...uint64) func(organized, failed int) {
 	return func(organized, failed int) {
 		status := websocket.ProgressStatusOrganizeCompleted
 		action := "Organized"
@@ -303,7 +321,7 @@ func makeOrganizeCompleteBroadcaster(job worker.BatchJobInterface, isUpdate bool
 			Message:     fmt.Sprintf("%s %d files, %d failed", action, organized, failed),
 			MessageCode: "BATCH_COMPLETED",
 			MessageArgs: map[string]any{"count": organized, "failed": failed},
-		}, job))
+		}, job, generation...))
 	}
 }
 
@@ -313,7 +331,7 @@ func makeOrganizeCompleteBroadcaster(job worker.BatchJobInterface, isUpdate bool
 // map populates per file and OrganizeStatusCard renders live per-file rows.
 // Mirrors main's process_organize.go per-file success WS message. Takes an
 // injected sink so the closure is unit-testable with a recording sink.
-func makeOrganizeFileOrganizedBroadcaster(job worker.BatchJobInterface, isUpdate bool, sink progressSink) func(filePath string) {
+func makeOrganizeFileOrganizedBroadcaster(job worker.BatchJobInterface, isUpdate bool, sink progressSink, generation ...uint64) func(filePath string) {
 	status := websocket.ProgressStatus("organized")
 	if isUpdate {
 		status = websocket.ProgressStatus("updated")
@@ -324,7 +342,7 @@ func makeOrganizeFileOrganizedBroadcaster(job worker.BatchJobInterface, isUpdate
 			FilePath: filePath,
 			Status:   status,
 			Progress: 100,
-		}, job))
+		}, job, generation...))
 	}
 }
 
@@ -348,7 +366,7 @@ func makeOrganizeFileOrganizedBroadcaster(job worker.BatchJobInterface, isUpdate
 // authoritative job-level counts via stampJobCounts. Takes an injected sink so
 // the closure is unit-testable with a recording sink (mirrors the sibling
 // per-file broadcasters).
-func makeOrganizeFileStartBroadcaster(job worker.BatchJobInterface, isUpdate bool, sink progressSink) func(filePath string) {
+func makeOrganizeFileStartBroadcaster(job worker.BatchJobInterface, isUpdate bool, sink progressSink, generation ...uint64) func(filePath string) {
 	action := "Organizing"
 	if isUpdate {
 		action = "Updating"
@@ -360,7 +378,7 @@ func makeOrganizeFileStartBroadcaster(job worker.BatchJobInterface, isUpdate boo
 			Status:   websocket.ProgressStatusPending,
 			Progress: 0,
 			Message:  fmt.Sprintf("%s %s", action, filepath.Base(filePath)),
-		}, job))
+		}, job, generation...))
 	}
 }
 
@@ -370,7 +388,7 @@ func makeOrganizeFileStartBroadcaster(job worker.BatchJobInterface, isUpdate boo
 // OrganizeStatusCard can offer a "Retry Failed" path. Mirrors main's
 // process_organize.go per-file failure WS message. Takes an injected sink so
 // the closure is unit-testable with a recording sink.
-func makeOrganizeFileFailedBroadcaster(job worker.BatchJobInterface, _ bool, sink progressSink) func(filePath, errMsg string) {
+func makeOrganizeFileFailedBroadcaster(job worker.BatchJobInterface, _ bool, sink progressSink, generation ...uint64) func(filePath, errMsg string) {
 	return func(filePath, errMsg string) {
 		sink(stampJobCounts(&websocket.ProgressMessage{
 			JobID:    job.GetID(),
@@ -378,7 +396,7 @@ func makeOrganizeFileFailedBroadcaster(job worker.BatchJobInterface, _ bool, sin
 			Status:   websocket.ProgressStatus("failed"),
 			Progress: 100,
 			Error:    errMsg,
-		}, job))
+		}, job, generation...))
 	}
 }
 
@@ -528,7 +546,7 @@ type progressSink func(m *websocket.ProgressMessage)
 // human-readable action verb in the message text. The message construction is
 // delegated to buildOrganizeProgressMessage so the wire-format contract is
 // unit-testable without a live WebSocket hub.
-func makeOrganizeProgressBroadcaster(job worker.BatchJobInterface, isUpdate bool, sink progressSink) func(processed, total int) {
+func makeOrganizeProgressBroadcaster(job worker.BatchJobInterface, isUpdate bool, sink progressSink, generation ...uint64) func(processed, total int) {
 	var mu sync.Mutex
 	maxSent := 0
 	return func(processed, total int) {
@@ -546,7 +564,7 @@ func makeOrganizeProgressBroadcaster(job worker.BatchJobInterface, isUpdate bool
 			return
 		}
 		maxSent = processed
-		sink(stampJobCounts(msg, job))
+		sink(stampJobCounts(msg, job, generation...))
 		mu.Unlock()
 	}
 }

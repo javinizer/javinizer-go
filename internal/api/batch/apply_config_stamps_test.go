@@ -29,12 +29,25 @@ func TestStampJobCounts_FromGetStatus(t *testing.T) {
 	job.status.TotalFiles = 10
 	job.status.Completed = 3
 	job.status.Failed = 1
+	job.status.ApplyGeneration = 4
 
 	msg := stampJobCounts(&websocket.ProgressMessage{JobID: "stub-job"}, job)
 	require.NotNil(t, msg)
 	assert.Equal(t, 10, msg.TotalFiles, "TotalFiles must come from job.GetStatus()")
 	assert.Equal(t, 3, msg.Completed, "Completed must come from job.GetStatus()")
 	assert.Equal(t, 1, msg.Failed, "Failed must come from job.GetStatus()")
+	assert.Equal(t, uint64(4), msg.ApplyGeneration, "generation must come from job.GetStatus()")
+}
+
+func TestOrganizeBroadcasterUsesCapturedGeneration(t *testing.T) {
+	var got *websocket.ProgressMessage
+	job := &stubControlledJob{status: &worker.BatchJobStatus{}}
+	job.status.ApplyGeneration = 1
+	bcast := makeOrganizeFileStartBroadcaster(job, false, func(msg *websocket.ProgressMessage) { got = msg }, 2)
+	job.status.ApplyGeneration = 3
+	bcast("/movies/movie.mp4")
+	require.NotNil(t, got)
+	assert.Equal(t, uint64(2), got.ApplyGeneration, "delayed callbacks must retain their apply generation")
 }
 
 func TestStampJobCounts_NilSafe(t *testing.T) {

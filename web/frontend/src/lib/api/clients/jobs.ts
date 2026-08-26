@@ -172,12 +172,12 @@ export class JobClient extends BaseClient {
 		});
 	}
 
-	async updateBatchJob(jobId: string, request?: UpdateRequest): Promise<{ message: string }> {
+	async updateBatchJob(jobId: string, request?: UpdateRequest): Promise<OrganizeResponse> {
 		const options: RequestInit = { method: 'POST' };
 		if (request) {
 			options.body = JSON.stringify(request);
 		}
-		return this.request<{ message: string }>(`/api/v1/batch/${jobId}/update`, options);
+		return this.request<OrganizeResponse>(`/api/v1/batch/${jobId}/update`, options);
 	}
 
 	async previewOrganize(
