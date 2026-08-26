@@ -245,9 +245,13 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 					preApplyGeneration !== undefined &&
 					latestJob.apply_generation !== undefined &&
 					latestJob.apply_generation > preApplyGeneration;
-				if (generationAdvanced || applyAlreadyStarted) {
+				const generationIsCurrent =
+					latestJob.apply_generation !== undefined &&
+					(activeApplyGeneration === undefined ||
+						latestJob.apply_generation >= activeApplyGeneration);
+				if (generationAdvanced || (applyAlreadyStarted && generationIsCurrent)) {
 					applyTransitionObserved = true;
-					if (latestJob.apply_generation !== undefined) {
+					if (generationIsCurrent) {
 						activeApplyGeneration = latestJob.apply_generation;
 					}
 				}
@@ -256,7 +260,7 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 					latestJob.status === 'completed' ||
 					latestJob.status === 'organized' ||
 					latestJob.status === 'reverted';
-				if (terminalSuccess && !applyTransitionObserved) {
+				if (terminalSuccess && (!applyTransitionObserved || !generationIsCurrent)) {
 					// A GET can race the POST and see the scrape-completed state. Do
 					// not report apply success until the server exposes a new apply
 					// generation.

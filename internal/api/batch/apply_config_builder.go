@@ -117,13 +117,13 @@ func resolveOrganizeApplyConfig(
 		}
 		emitter := deps.GetEventEmitter()
 		if afr.Err != nil && emitter != nil {
-			_ = emitter.EmitOrganizeEvent(ctx, "file_move", fmt.Sprintf("Organize failed for %s", afc.Movie.ID), models.SeverityError, map[string]any{"job_id": job.GetID(), "movie_id": afc.Movie.ID, "error": afr.Err.Error(), "apply_generation": atomic.LoadUint64(applyGenerationRef)})
+			_ = emitter.EmitOrganizeEvent(ctx, "file_move", fmt.Sprintf("Organize failed for %s", afc.Movie.ID), models.SeverityError, map[string]any{"job_id": job.GetID(), "movie_id": afc.Movie.ID, "error": afr.Err.Error(), "apply_generation": loadApplyGeneration(applyGenerationRef)})
 		} else if emitter != nil {
 			var newPath string
 			if afr.Result != nil && afr.Result.OrganizeResult != nil {
 				newPath = afr.Result.OrganizeResult.NewPath
 			}
-			_ = emitter.EmitOrganizeEvent(ctx, "file_move", fmt.Sprintf("Organized %s", afc.Movie.ID), models.SeverityInfo, map[string]any{"job_id": job.GetID(), "movie_id": afc.Movie.ID, "file": afc.FilePath, "new_path": newPath, "apply_generation": atomic.LoadUint64(applyGenerationRef)})
+			_ = emitter.EmitOrganizeEvent(ctx, "file_move", fmt.Sprintf("Organized %s", afc.Movie.ID), models.SeverityInfo, map[string]any{"job_id": job.GetID(), "movie_id": afc.Movie.ID, "file": afc.FilePath, "new_path": newPath, "apply_generation": loadApplyGeneration(applyGenerationRef)})
 		}
 	}
 
@@ -242,7 +242,7 @@ func resolveUpdateApplyConfig(
 		}
 		emitter := deps.GetEventEmitter()
 		if afr.Err != nil && emitter != nil {
-			_ = emitter.EmitOrganizeEvent(ctx, "nfo_gen", fmt.Sprintf("Update failed for %s", afc.Movie.ID), models.SeverityError, map[string]any{"job_id": job.GetID(), "movie_id": afc.Movie.ID, "error": afr.Err.Error(), "apply_generation": atomic.LoadUint64(applyGenerationRef)})
+			_ = emitter.EmitOrganizeEvent(ctx, "nfo_gen", fmt.Sprintf("Update failed for %s", afc.Movie.ID), models.SeverityError, map[string]any{"job_id": job.GetID(), "movie_id": afc.Movie.ID, "error": afr.Err.Error(), "apply_generation": loadApplyGeneration(applyGenerationRef)})
 		}
 	}
 
@@ -266,13 +266,20 @@ func resolveUpdateApplyConfig(
 // A nil job (or nil status snapshot) leaves the fields zero (omitted on the
 // wire via omitempty), so older/tests paths that pass a stub returning nil are
 // unaffected.
+func loadApplyGeneration(generationRef *uint64) uint64 {
+	if generationRef == nil {
+		return 0
+	}
+	return atomic.LoadUint64(generationRef)
+}
+
 func stampJobCountsForApply(msg *websocket.ProgressMessage, job worker.BatchJobInterface, generationRef ...*uint64) *websocket.ProgressMessage {
 	msg = stampJobCounts(msg, job)
 	if msg == nil {
 		return nil
 	}
-	if len(generationRef) > 0 && generationRef[0] != nil {
-		msg.ApplyGeneration = atomic.LoadUint64(generationRef[0])
+	if len(generationRef) > 0 {
+		msg.ApplyGeneration = loadApplyGeneration(generationRef[0])
 	}
 	return msg
 }
