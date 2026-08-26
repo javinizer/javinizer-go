@@ -108,6 +108,7 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 
 	let organizePollTimer: ReturnType<typeof setTimeout> | null = null;
 	let organizeRunToken = 0;
+	let ignoreWebSocketMessages = false;
 	let organizeCompletionTimer: ReturnType<typeof setTimeout> | null = null;
 	let organizeRedirectTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -133,12 +134,27 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 		deps.getFileStatuses().set(filePath, status);
 	}
 
+	function reconcileTerminalResults(job: BatchJobResponse) {
+		const expectedPaths = new Set(deps.getExpectedOrganizeFilePaths());
+		for (const [filePath, result] of Object.entries(job.results ?? {})) {
+			if (job.excluded?.[filePath] || !result.movie || !expectedPaths.has(filePath)) continue;
+			if (result.status === 'failed') {
+				updateFileStatus(filePath, { status: 'failed', error: result.error });
+				deps.recordApplyFailure?.(filePath, result.error);
+			} else if (result.status === 'completed') {
+				updateFileStatus(filePath, { status: 'success' });
+				deps.recordApplySuccess?.(filePath);
+			}
+		}
+	}
+
 	function finalizeOrganizeSuccess(message?: string) {
 		if (deps.getOrganizeStatus() !== 'organizing' || organizeCompletionTimer !== null) {
 			return;
 		}
 
 		clearOrganizePollTimer();
+		ignoreWebSocketMessages = true;
 		deps.setOrganizeProgress(100);
 
 		organizeCompletionTimer = setTimeout(() => {
@@ -173,6 +189,7 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 	function finalizeOrganizeFailure(message: string) {
 		if (deps.getOrganizeStatus() !== 'organizing') return;
 
+		ignoreWebSocketMessages = true;
 		clearOrganizePollTimer();
 		clearOrganizeCompletionTimer();
 		deps.setOrganizeStatus('failed');
@@ -180,12 +197,17 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 		deps.toastError(message, 7000);
 	}
 
-	function startOrganizeCompletionPolling(operationJobId: string, operationGeneration: number) {
+	function startOrganizeCompletionPolling(
+		operationJobId: string,
+		operationGeneration: number,
+		requestPending: () => boolean = () => false,
+	) {
 		const runToken = ++organizeRunToken;
 		const isActiveRun = () => runToken === organizeRunToken;
 		clearOrganizePollTimer();
 		const startedAt = Date.now();
 		let lastPollError: string | null = null;
+		let deferredTerminalPolls = 0;
 
 		const pollOnce = async () => {
 			if (!isActiveRun()) return;
@@ -214,19 +236,16 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 				deps.setJob(latestJob, operationJobId, operationGeneration);
 				lastPollError = null;
 
-				if (
+				const terminalSuccess =
 					latestJob.status === 'completed' ||
 					latestJob.status === 'organized' ||
-					latestJob.status === 'reverted'
-				) {
-					// 'organized' and 'reverted' are terminal-success statuses set by the
-					// backend on successful organize/revert (see BatchJob.MarkOrganized /
-					// MarkReverted). The backend's real-time WebSocket broadcast of
-					// {status:'organization_completed'} is the primary completion
-					// signal — this poll branch is a fallback that must also recognize
-					// these statuses, or the UI polls forever after a successful
-					// organize (job never reaches 'completed' because MarkCompleted is
-					// guarded against transitioning FROM 'organized'/'reverted').
+					latestJob.status === 'reverted';
+				if (terminalSuccess && requestPending() && deferredTerminalPolls++ < 1) {
+					// The POST may have been accepted while its response is stalled.
+					// Defer one pre-response terminal snapshot so a GET racing the
+					// POST cannot mistake the pre-apply completed state for success.
+				} else if (terminalSuccess) {
+					reconcileTerminalResults(latestJob);
 					const action = deps.getIsUpdateMode() ? 'Update' : 'Organization';
 					finalizeOrganizeSuccess(`${action} completed successfully! Redirecting in 5 seconds...`);
 					return;
@@ -260,11 +279,19 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 			}, pollIntervalMs);
 		};
 
-		void pollOnce();
+		if (requestPending()) {
+			organizePollTimer = setTimeout(() => {
+				void pollOnce();
+			}, pollIntervalMs);
+		} else {
+			void pollOnce();
+		}
+		return runToken;
 	}
 
 	function prepareOrganizeRun(extraPaths: string[] = []) {
 		organizeRunToken += 1;
+		ignoreWebSocketMessages = false;
 		deps.clearWebSocketMessages();
 		deps.setOrganizeStatus('organizing');
 		deps.setOrganizing(true);
@@ -311,6 +338,8 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 		const { copyOnly, linkMode } = getOrganizeRequestOptions(operation);
 		prepareOrganizeRun(retryPaths);
 		const operationToken = organizeRunToken;
+		let requestPending = false;
+		let pollingRunToken = operationToken;
 
 		try {
 			if (deps.getEditedMovies().size > 0) {
@@ -321,7 +350,8 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 			if (deps.isCurrentOperation && !deps.isCurrentOperation(operationJobId, operationGeneration))
 				return;
 
-			await deps.api.organizeBatchJob(operationJobId, {
+			requestPending = true;
+			const request = deps.api.organizeBatchJob(operationJobId, {
 				destination: operationDestination,
 				copy_only: copyOnly,
 				link_mode: linkMode,
@@ -331,15 +361,24 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 				overrides,
 				retry_file_paths: retryPaths.length > 0 ? retryPaths : undefined,
 			});
+			pollingRunToken = startOrganizeCompletionPolling(
+				operationJobId,
+				operationGeneration,
+				() => requestPending,
+			);
+			await request;
+			requestPending = false;
 
-			if (operationToken !== organizeRunToken) return;
+			if (pollingRunToken !== organizeRunToken) return;
 			if (deps.isCurrentOperation && !deps.isCurrentOperation(operationJobId, operationGeneration))
 				return;
-			startOrganizeCompletionPolling(operationJobId, operationGeneration);
+			if (deps.getOrganizeStatus() !== 'organizing') return;
 		} catch (e) {
-			if (operationToken !== organizeRunToken) return;
+			requestPending = false;
+			if (pollingRunToken !== organizeRunToken) return;
 			if (deps.isCurrentOperation && !deps.isCurrentOperation(operationJobId, operationGeneration))
 				return;
+			if (ignoreWebSocketMessages || deps.getOrganizeStatus() !== 'organizing') return;
 			deps.clearApplyRecovery?.();
 			deps.setOrganizeStatus('failed');
 			deps.setOrganizing(false);
@@ -355,6 +394,8 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 		lastRecoveryFailedPaths = retryPaths;
 		prepareOrganizeRun(retryPaths);
 		const operationToken = organizeRunToken;
+		let requestPending = false;
+		let pollingRunToken = operationToken;
 
 		if (options) {
 			lastUpdateOptions = options;
@@ -368,17 +409,26 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 			if (deps.isCurrentOperation && !deps.isCurrentOperation(operationJobId, operationGeneration))
 				return;
 
+			requestPending = true;
 			const request =
 				retryPaths.length > 0 ? { ...options, retry_file_paths: retryPaths } : options;
+			pollingRunToken = startOrganizeCompletionPolling(
+				operationJobId,
+				operationGeneration,
+				() => requestPending,
+			);
 			await deps.api.updateBatchJob(operationJobId, request);
-			if (operationToken !== organizeRunToken) return;
+			requestPending = false;
+			if (pollingRunToken !== organizeRunToken) return;
 			if (deps.isCurrentOperation && !deps.isCurrentOperation(operationJobId, operationGeneration))
 				return;
-			startOrganizeCompletionPolling(operationJobId, operationGeneration);
+			if (deps.getOrganizeStatus() !== 'organizing') return;
 		} catch (e) {
-			if (operationToken !== organizeRunToken) return;
+			requestPending = false;
+			if (pollingRunToken !== organizeRunToken) return;
 			if (deps.isCurrentOperation && !deps.isCurrentOperation(operationJobId, operationGeneration))
 				return;
+			if (ignoreWebSocketMessages || deps.getOrganizeStatus() !== 'organizing') return;
 			deps.clearApplyRecovery?.();
 			deps.setOrganizeStatus('failed');
 			deps.setOrganizing(false);
@@ -408,16 +458,22 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 	}
 
 	function handleWebSocketMessage(msg: ProgressMessage | undefined) {
-		if (!msg || msg.job_id !== deps.getJobId() || deps.getOrganizeStatus() !== 'organizing') {
+		if (
+			!msg ||
+			ignoreWebSocketMessages ||
+			msg.job_id !== deps.getJobId() ||
+			deps.getOrganizeStatus() !== 'organizing'
+		) {
 			return;
 		}
 
-		// Drive the progress bar ONLY from the aggregate progress-stream messages,
-		// not from per-file messages. The aggregate 'pending' stream (no file_path,
-		// emitted by makeOrganizeProgressBroadcaster with a high-water mutex) carries
-		// incremental monotonic progress (0->100 across files); the terminal
-		// 'organization_completed'/'update_completed' messages carry 100. Per-file
-		// messages — 'organized'/'updated'/'failed' (terminal, for fileStatuses) AND
+		// Drive the progress bar ONLY from aggregate pending messages, not from
+		// per-file or terminal messages. REST polling is authoritative for terminal
+		// state, so delayed events from an older attempt cannot complete a retry. The
+		// aggregate 'pending' stream (no file_path, emitted by
+		// makeOrganizeProgressBroadcaster with a high-water mutex) carries incremental
+		// monotonic progress (0->100 across files). Per-file messages —
+		// 'organized'/'updated'/'failed' (terminal, for fileStatuses) AND
 		// the in-flight 'Organizing <file>' start message ('pending', Progress:0,
 		// WITH file_path, emitted by makeOrganizeFileStartBroadcaster) — must NOT
 		// drive the bar: the start message's Progress:0 would flicker the bar back
@@ -427,9 +483,7 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 			msg.progress !== undefined &&
 			msg.progress !== null &&
 			!msg.file_path &&
-			(msg.status === 'pending' ||
-				msg.status === 'organization_completed' ||
-				msg.status === 'update_completed')
+			msg.status === 'pending'
 		) {
 			deps.setOrganizeProgress(msg.progress);
 		}
@@ -442,29 +496,15 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 			deps.toastError(`Failed to ${action} ${fileName}: ${msg.error}`, 7000);
 		}
 
-		if (msg.status === 'error' && !msg.file_path) {
-			finalizeOrganizeFailure(msg.message || 'Operation failed');
-			return;
-		}
-
-		if (msg.status === 'cancelled' && !msg.file_path) {
-			const action = deps.getIsUpdateMode() ? 'Update' : 'Organization';
-			finalizeOrganizeFailure(`${action} was cancelled.`);
-			return;
-		}
-
 		if ((msg.status === 'organized' || msg.status === 'updated') && msg.file_path) {
 			updateFileStatus(msg.file_path, { status: 'success' });
 			deps.recordApplySuccess?.(msg.file_path);
-		}
-
-		if (msg.status === 'organization_completed' || msg.status === 'update_completed') {
-			finalizeOrganizeSuccess(msg.message);
 		}
 	}
 
 	function cleanup() {
 		organizeRunToken += 1;
+		ignoreWebSocketMessages = true;
 		clearOrganizePollTimer();
 		clearOrganizeCompletionTimer();
 	}
@@ -473,6 +513,7 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 		const operationJobId = deps.getJobId();
 		const operationGeneration = deps.getRouteGeneration?.() ?? 0;
 		const job = deps.getJob();
+		ignoreWebSocketMessages = false;
 		if (recovery) {
 			lastSkipNfo = recovery.skipNfo;
 			lastSkipDownload = recovery.skipDownload;

@@ -38,7 +38,9 @@
 
 	const s = createReviewState(() => $page.params.jobId as string);
 
-	let activeTab = $state<ReviewTabId>('movies');
+	const tabFromUrl = (url: URL): ReviewTabId =>
+		url.searchParams.get('tab') === 'failed' ? 'failed' : 'movies';
+	let activeTab = $state<ReviewTabId>(tabFromUrl($page.url));
 
 	const hasMovies = $derived(s.movieResults.length > 0);
 	const hasFailed = $derived(s.failedResults.length > 0);
@@ -69,7 +71,7 @@
 		const routeJobId = $page.params.jobId as string;
 		if (routeJobId === lastReviewJobId) return;
 		lastReviewJobId = routeJobId;
-		activeTab = $page.url.searchParams.get('tab') === 'failed' ? 'failed' : 'movies';
+		activeTab = tabFromUrl($page.url);
 		sourceRequestGeneration += 1;
 		sourceViewerLoading = false;
 		sourceViewerResults = [];

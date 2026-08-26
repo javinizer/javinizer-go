@@ -1,6 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createOrganizeController } from './organize-controller';
-import type { BatchJobResponse, Movie, ProgressMessage, UpdateRequest } from '$lib/api/types';
+import type {
+	BatchJobResponse,
+	FileResult,
+	Movie,
+	ProgressMessage,
+	UpdateRequest,
+} from '$lib/api/types';
 
 /**
  * Regression coverage for the infinite-poll bug fixed in commit cec74d43:
@@ -52,6 +58,8 @@ function makeJob(status: string): BatchJobResponse {
 function makeDeps(overrides: DepsOverrides = {}) {
 	const initialJob = overrides.job === undefined ? makeJob('organizing') : overrides.job;
 	let currentJob: BatchJobResponse | null = initialJob;
+	const fileStatuses = new Map<string, { status: string; error?: string }>();
+	let expectedOrganizeFilePaths: string[] = [];
 	const calls = {
 		setJob: [] as BatchJobResponse[],
 		setOrganizeStatus: [] as string[],
@@ -78,9 +86,11 @@ function makeDeps(overrides: DepsOverrides = {}) {
 		setOrganizeStatus: (status: string) => calls.setOrganizeStatus.push(status),
 		setOrganizing: () => {},
 		setOrganizeProgress: (p: number) => calls.setOrganizeProgress.push(p),
-		getFileStatuses: () => new Map<string, { status: string; error?: string }>(),
-		getExpectedOrganizeFilePaths: () => [] as string[],
-		setExpectedOrganizeFilePaths: () => {},
+		getFileStatuses: () => fileStatuses,
+		getExpectedOrganizeFilePaths: () => expectedOrganizeFilePaths,
+		setExpectedOrganizeFilePaths: (paths: string[]) => {
+			expectedOrganizeFilePaths = paths;
+		},
 		clearWebSocketMessages: () => {},
 		toastSuccess: (message: string) => calls.toastSuccess.push(message),
 		toastError: (message: string) => calls.toastError.push(message),
@@ -104,7 +114,7 @@ function makeDeps(overrides: DepsOverrides = {}) {
 		completionDelayMs: overrides.completionDelayMs ?? 0,
 		redirectDelayMs: overrides.redirectDelayMs ?? 0,
 	};
-	return { deps, calls };
+	return { deps, calls, fileStatuses };
 }
 
 describe('organize-controller pollOnce terminal-success branches', () => {
@@ -145,6 +155,29 @@ describe('organize-controller pollOnce terminal-success branches', () => {
 		expect(calls.setOrganizeStatus).not.toContain('completed');
 		expect(calls.toastSuccess).toHaveLength(0);
 
+		controller.cleanup();
+	});
+
+	it('polls to completion while the apply request is pending', async () => {
+		let resolvePost!: () => void;
+		const post = vi.fn(
+			() =>
+				new Promise<void>((resolve) => {
+					resolvePost = resolve;
+				}),
+		);
+		const { deps, calls } = makeDeps({
+			job: makeJob('organized'),
+			organizeBatchJob: post,
+		});
+		const controller = createOrganizeController(deps);
+
+		const organizeRequest = controller.organizeAll();
+		await vi.advanceTimersByTimeAsync(30);
+
+		expect(calls.setOrganizeStatus).toContain('completed');
+		resolvePost();
+		await organizeRequest;
 		controller.cleanup();
 	});
 });
@@ -228,7 +261,7 @@ describe('organize-controller handleWebSocketMessage progress gating (NEW-1)', (
 		controller.cleanup();
 	});
 
-	it('applies progress for the terminal organization_completed message', () => {
+	it('does not finalize from a terminal WebSocket message', () => {
 		const { deps, calls } = makeDeps();
 		const controller = createOrganizeController(deps);
 
@@ -241,8 +274,44 @@ describe('organize-controller handleWebSocketMessage progress gating (NEW-1)', (
 			message: 'Organized 4 files, 0 failed',
 		} satisfies ProgressMessage);
 
-		expect(calls.setOrganizeProgress).toContain(100);
+		expect(calls.setOrganizeStatus).not.toContain('completed');
+		expect(calls.setOrganizeProgress).toHaveLength(0);
 		controller.cleanup();
+	});
+
+	it('reconciles terminal failed results missed by WebSocket', async () => {
+		vi.useFakeTimers();
+		const failedPath = '/src/failed.mp4';
+		const job = makeJob('completed');
+		job.total_files = 1;
+		job.completed = 1;
+		job.failed = 0;
+		job.results[failedPath] = {
+			result_id: 'result-1',
+			file_path: failedPath,
+			movie_id: 'MOV-1',
+			status: 'completed',
+			movie: { id: 'MOV-1', title: 'Test Movie' },
+			started_at: '2026-01-01T00:00:00Z',
+			is_multi_part: false,
+			part_number: 0,
+			part_suffix: '',
+		} satisfies FileResult;
+		const { deps, calls, fileStatuses } = makeDeps({ job });
+		const controller = createOrganizeController(deps);
+
+		const organizeRequest = controller.organizeAll();
+		(job.results[failedPath] as FileResult).status = 'failed';
+		(job.results[failedPath] as FileResult).error = 'disk full';
+		await organizeRequest;
+		await vi.advanceTimersByTimeAsync(10);
+		await vi.advanceTimersByTimeAsync(5);
+
+		expect(fileStatuses.get(failedPath)).toEqual({ status: 'failed', error: 'disk full' });
+		expect(calls.setOrganizeStatus).toContain('completed');
+		expect(calls.toastSuccess).toHaveLength(0);
+		controller.cleanup();
+		vi.useRealTimers();
 	});
 
 	describe('update payloads', () => {
