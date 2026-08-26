@@ -248,6 +248,8 @@ definitions:
     type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.BatchJobResponse:
     properties:
+      apply_generation:
+        type: integer
       apply_plan:
         $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_applyplan.Plan'
       completed:
@@ -1099,6 +1101,10 @@ definitions:
         type: string
       overrides:
         $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ReviewApplyOverrides'
+      retry_file_paths:
+        items:
+          type: string
+        type: array
       skip_download:
         type: boolean
       skip_nfo:
@@ -1589,6 +1595,10 @@ definitions:
         - gap-fill
         - aggressive
         type: string
+      retry_file_paths:
+        items:
+          type: string
+        type: array
       scalar_strategy:
         enum:
         - prefer-scraper

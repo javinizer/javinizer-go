@@ -4533,6 +4533,9 @@ const docTemplate = `{
         "github_com_javinizer_javinizer-go_internal_api_contracts.BatchJobResponse": {
             "type": "object",
             "properties": {
+                "apply_generation": {
+                    "type": "integer"
+                },
                 "apply_plan": {
                     "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_applyplan.Plan"
                 },
@@ -5727,6 +5730,12 @@ const docTemplate = `{
                 "overrides": {
                     "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ReviewApplyOverrides"
                 },
+                "retry_file_paths": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "skip_download": {
                     "type": "boolean"
                 },
@@ -6402,6 +6411,12 @@ const docTemplate = `{
                         "gap-fill",
                         "aggressive"
                     ]
+                },
+                "retry_file_paths": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "scalar_strategy": {
                     "type": "string",
