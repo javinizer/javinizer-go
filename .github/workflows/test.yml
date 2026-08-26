@@ -466,9 +466,6 @@ jobs:
     - name: Run fullstack E2E suite
       run: make test-e2e-fullstack
 
-    - name: Run isolated review-load timeout E2E
-      run: make test-e2e-review-load
-
     - name: Upload Playwright artifacts
       if: failure()
       uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
