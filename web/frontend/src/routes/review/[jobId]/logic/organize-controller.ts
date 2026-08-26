@@ -13,6 +13,7 @@ export type OrganizeStatus = 'idle' | 'organizing' | 'completed' | 'failed';
 export interface ApplyRecoveryState {
 	jobId: string;
 	operation: 'organize' | 'update';
+	preApplyGeneration?: number;
 	destination: string;
 	skipNfo: boolean;
 	skipDownload: boolean;
@@ -79,6 +80,12 @@ interface OrganizeControllerDeps {
 	redirectDelayMs?: number;
 }
 
+function isDefinitiveApplyLaunchRejection(error: unknown): boolean {
+	if (!error || typeof error !== 'object' || !('status' in error)) return false;
+	const status = error.status;
+	return typeof status === 'number' && status >= 400 && status < 500;
+}
+
 function getOrganizeRequestOptions(operation: OrganizeOperation): {
 	copyOnly: boolean;
 	linkMode?: 'hard' | 'soft';
@@ -135,7 +142,7 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 		deps.getFileStatuses().set(filePath, status);
 	}
 
-	function reconcileTerminalResults(job: BatchJobResponse) {
+	function reconcileTerminalResults(job: BatchJobResponse, includeCompleted = true) {
 		const expectedPaths = new Set(deps.getExpectedOrganizeFilePaths());
 		for (const [filePath, result] of Object.entries(job.results ?? {})) {
 			if (job.excluded?.[filePath] || !result.movie || !expectedPaths.has(filePath)) continue;
@@ -143,6 +150,7 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 				updateFileStatus(filePath, { status: 'failed', error: result.error });
 				deps.recordApplyFailure?.(filePath, result.error);
 			} else if (
+				includeCompleted &&
 				result.status === 'completed' &&
 				deps.getFileStatuses().get(filePath)?.status !== 'failed'
 			) {
@@ -276,12 +284,14 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 				}
 
 				if (latestJob.status === 'failed' && applyOutcomeCurrent) {
+					reconcileTerminalResults(latestJob, false);
 					const action = deps.getIsUpdateMode() ? 'update' : 'organization';
 					finalizeOrganizeFailure(`The ${action} job failed.`);
 					return;
 				}
 
 				if (latestJob.status === 'cancelled' && applyOutcomeCurrent) {
+					reconcileTerminalResults(latestJob, false);
 					const action = deps.getIsUpdateMode() ? 'Update' : 'Organization';
 					finalizeOrganizeFailure(`${action} was cancelled.`);
 					return;
@@ -406,7 +416,7 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 			if (deps.isCurrentOperation && !deps.isCurrentOperation(operationJobId, operationGeneration))
 				return;
 			if (ignoreWebSocketMessages || deps.getOrganizeStatus() !== 'organizing') return;
-			deps.clearApplyRecovery?.();
+			if (isDefinitiveApplyLaunchRejection(e)) deps.clearApplyRecovery?.();
 			deps.setOrganizeStatus('failed');
 			deps.setOrganizing(false);
 			clearOrganizePollTimer();
@@ -458,7 +468,7 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 			if (deps.isCurrentOperation && !deps.isCurrentOperation(operationJobId, operationGeneration))
 				return;
 			if (ignoreWebSocketMessages || deps.getOrganizeStatus() !== 'organizing') return;
-			deps.clearApplyRecovery?.();
+			if (isDefinitiveApplyLaunchRejection(e)) deps.clearApplyRecovery?.();
 			deps.setOrganizeStatus('failed');
 			deps.setOrganizing(false);
 			clearOrganizePollTimer();

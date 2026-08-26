@@ -192,6 +192,10 @@ export function createReviewState(getJobId: () => string) {
 				typeof parsed.skipDownload !== 'boolean' ||
 				(parsed.operation === 'organize' &&
 					!organizeOperations.includes(parsed.organizeOperation as OrganizeOperation)) ||
+				(parsed.preApplyGeneration !== undefined &&
+					(typeof parsed.preApplyGeneration !== 'number' ||
+						!Number.isSafeInteger(parsed.preApplyGeneration) ||
+						parsed.preApplyGeneration < 0)) ||
 				(parsed.eligibleFilePaths !== undefined && !Array.isArray(parsed.eligibleFilePaths)) ||
 				(parsed.succeeded !== undefined && !Array.isArray(parsed.succeeded))
 			) {
@@ -210,6 +214,7 @@ export function createReviewState(getJobId: () => string) {
 			return {
 				jobId: parsed.jobId,
 				operation: parsed.operation,
+				preApplyGeneration: parsed.preApplyGeneration,
 				destination: typeof parsed.destination === 'string' ? parsed.destination : '',
 				skipNfo: parsed.skipNfo,
 				skipDownload: parsed.skipDownload,
@@ -1446,6 +1451,7 @@ export function createReviewState(getJobId: () => string) {
 		writeApplyRecovery({
 			jobId: targetJobId,
 			operation: 'organize',
+			preApplyGeneration: job?.apply_generation,
 			destination: destinationPath,
 			skipNfo: skipNfoArg,
 			skipDownload: skipDownloadArg,
@@ -1466,6 +1472,7 @@ export function createReviewState(getJobId: () => string) {
 		writeApplyRecovery({
 			jobId: targetJobId,
 			operation: 'update',
+			preApplyGeneration: job?.apply_generation,
 			destination: '',
 			skipNfo: false,
 			skipDownload: false,
@@ -1610,7 +1617,22 @@ export function createReviewState(getJobId: () => string) {
 		}
 		const hasRecordedApplyOutcome =
 			Object.keys(recovery.failed).length > 0 || recovery.succeeded.length > 0;
-		if (!isApplyInProgress(loadedJob) && !hasRecordedApplyOutcome) return;
+		const applyStartedAfterRecord =
+			recovery.preApplyGeneration !== undefined &&
+			loadedJob.apply_generation !== undefined &&
+			loadedJob.apply_generation > recovery.preApplyGeneration;
+		const terminalRecoveryState =
+			loadedJob.status === 'organized' ||
+			loadedJob.status === 'failed' ||
+			loadedJob.status === 'cancelled' ||
+			loadedJob.status === 'reverted';
+		const needsRecoveryPolling =
+			loadedJob.status === 'running' ||
+			terminalRecoveryState ||
+			(loadedJob.status === 'completed' && loadedJob.failed > 0) ||
+			hasRecordedApplyOutcome ||
+			applyStartedAfterRecord;
+		if (!needsRecoveryPolling && !isApplyInProgress(loadedJob)) return;
 		if (organizeStatus === 'idle' && !organizing) organizeController.resumePolling(recovery);
 	});
 

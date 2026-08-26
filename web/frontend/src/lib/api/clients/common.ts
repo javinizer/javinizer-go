@@ -48,12 +48,19 @@ function clearStoredSession(): void {
 export class ApiError extends Error {
 	code?: string;
 	params?: Record<string, unknown> | null;
+	status?: number;
 
-	constructor(message: string, code?: string, params?: Record<string, unknown> | null) {
+	constructor(
+		message: string,
+		code?: string,
+		params?: Record<string, unknown> | null,
+		status?: number,
+	) {
 		super(message);
 		this.name = 'ApiError';
 		this.code = code;
 		this.params = params;
+		this.status = status;
 	}
 }
 
@@ -105,7 +112,9 @@ function createRequestAbortControl(options?: RequestOptions): RequestAbortContro
 function isRequestAbortError(error: unknown): boolean {
 	return (
 		(error instanceof Error && error.name === 'AbortError') ||
-		(typeof DOMException !== 'undefined' && error instanceof DOMException && error.name === 'AbortError')
+		(typeof DOMException !== 'undefined' &&
+			error instanceof DOMException &&
+			error.name === 'AbortError')
 	);
 }
 
@@ -171,7 +180,12 @@ export class BaseClient {
 						error: `HTTP ${response.status}: ${response.statusText}`,
 					};
 				}
-				throw new ApiError(error.error || 'API request failed', error.code, error.params);
+				throw new ApiError(
+					error.error || 'API request failed',
+					error.code,
+					error.params,
+					response.status,
+				);
 			}
 
 			const text = await response.text();
