@@ -347,6 +347,9 @@ func (c *jobController) markStarted(expectedFrom models.JobStatus, phase JobPhas
 	c.job.lifecycle.CancelFunc = cancelFunc
 	c.job.lifecycle.Status = models.JobStatusRunning
 	c.job.lifecycle.currentPhase = string(phase)
+	if phase == JobPhaseApply {
+		c.job.lifecycle.applyGeneration++
+	}
 	c.job.lifecycle.CompletedAt = nil
 	c.job.lifecycle.OrganizedAt = nil
 	c.job.lifecycle.done = make(chan struct{})
@@ -355,9 +358,6 @@ func (c *jobController) markStarted(expectedFrom models.JobStatus, phase JobPhas
 	c.job.lifecycle.mu.Unlock()
 
 	c.job.mu.Lock()
-	if phase == JobPhaseApply {
-		c.job.applyGeneration++
-	}
 	c.job.StartedAt = time.Now()
 	c.job.mu.Unlock()
 

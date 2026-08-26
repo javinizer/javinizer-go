@@ -112,7 +112,6 @@ type BatchJob struct {
 
 	// Retained on BatchJob (not mutex-protected state groups)
 	StartedAt          time.Time `json:"started_at"`
-	applyGeneration    uint64    // Incremented for each apply launch; exposed in status to identify the active attempt.
 	pruneVersion       uint64
 	envelopeGeneration uint64
 	persistFlight      *jobPersistFlight `json:"-"`
@@ -314,7 +313,7 @@ func (job *BatchJob) snapshotFull() batchJobSnapshot {
 			PersistError:          job.persistError,
 			IsDeleted:             lcSnap.IsDeleted,
 			CurrentPhase:          lcSnap.CurrentPhase,
-			ApplyGeneration:       job.applyGeneration,
+			ApplyGeneration:       lcSnap.ApplyGeneration,
 		},
 		results:     resultSnap.Results,
 		provenance:  resultSnap.Provenance,

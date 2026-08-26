@@ -109,6 +109,7 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 	let organizePollTimer: ReturnType<typeof setTimeout> | null = null;
 	let organizeRunToken = 0;
 	let ignoreWebSocketMessages = false;
+	let activeApplyGeneration: number | undefined;
 	let organizeCompletionTimer: ReturnType<typeof setTimeout> | null = null;
 	let organizeRedirectTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -349,6 +350,7 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 
 		const { copyOnly, linkMode } = getOrganizeRequestOptions(operation);
 		const preApplyGeneration = deps.getJob()?.apply_generation;
+		activeApplyGeneration = preApplyGeneration === undefined ? undefined : preApplyGeneration + 1;
 		prepareOrganizeRun(retryPaths);
 		const operationToken = organizeRunToken;
 		let requestPending = false;
@@ -407,6 +409,7 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 		const operationGeneration = deps.getRouteGeneration?.() ?? 0;
 		lastRecoveryFailedPaths = retryPaths;
 		const preApplyGeneration = deps.getJob()?.apply_generation;
+		activeApplyGeneration = preApplyGeneration === undefined ? undefined : preApplyGeneration + 1;
 		prepareOrganizeRun(retryPaths);
 		const operationToken = organizeRunToken;
 		let requestPending = false;
@@ -478,7 +481,10 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 			!msg ||
 			ignoreWebSocketMessages ||
 			msg.job_id !== deps.getJobId() ||
-			deps.getOrganizeStatus() !== 'organizing'
+			deps.getOrganizeStatus() !== 'organizing' ||
+			(activeApplyGeneration !== undefined &&
+				msg.apply_generation !== undefined &&
+				msg.apply_generation !== activeApplyGeneration)
 		) {
 			return;
 		}
@@ -521,6 +527,7 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 	function cleanup() {
 		organizeRunToken += 1;
 		ignoreWebSocketMessages = true;
+		activeApplyGeneration = undefined;
 		clearOrganizePollTimer();
 		clearOrganizeCompletionTimer();
 	}
@@ -530,6 +537,7 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 		const operationGeneration = deps.getRouteGeneration?.() ?? 0;
 		const job = deps.getJob();
 		ignoreWebSocketMessages = false;
+		activeApplyGeneration = job?.apply_generation;
 		if (recovery) {
 			lastSkipNfo = recovery.skipNfo;
 			lastSkipDownload = recovery.skipDownload;

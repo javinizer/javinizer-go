@@ -39,6 +39,7 @@ func TestEncodeDecode_RoundTrip(t *testing.T) {
 		CompletedAt:           &completedAt,
 		OrganizedAt:           &organizedAt,
 		Update:                true,
+		ApplyGeneration:       7,
 	}
 
 	dbJob, err := Encode(original)
@@ -67,6 +68,7 @@ func TestEncodeDecode_RoundTrip(t *testing.T) {
 	assert.Equal(t, *original.OrganizedAt, *decoded.OrganizedAt)
 	assert.Nil(t, decoded.RevertedAt)
 	assert.Equal(t, original.Update, decoded.Update)
+	assert.Equal(t, original.ApplyGeneration, decoded.ApplyGeneration)
 	assert.True(t, decoded.Excluded["file3.mp4"])
 	assert.Equal(t, "ABC-001", decoded.Results["file1.mp4"].Movie.ID)
 	assert.Equal(t, "r18dev", decoded.Provenance["file1.mp4"].FieldSources["title"])

@@ -18,11 +18,12 @@ type JobLifecycle struct {
 	// Persisted on the job envelope at phase entry so a restart can tell an
 	// apply-phase Running job (still editable) from a scrape-phase one
 	// (not editable). "" when no phase is running (POSTER-WRITE-HARDENING D16).
-	currentPhase string
-	CompletedAt  *time.Time
-	OrganizedAt  *time.Time
-	RevertedAt   *time.Time
-	done         chan struct{}
+	currentPhase    string
+	applyGeneration uint64
+	CompletedAt     *time.Time
+	OrganizedAt     *time.Time
+	RevertedAt      *time.Time
+	done            chan struct{}
 	// phaseDone closes only when the phase goroutine fully RETURNS — after
 	// Run's deferred persistence, unlike done, which terminal Mark* calls close
 	// mid-Run. Wait() prefers phaseDone so callers join the phase (all DB
@@ -231,12 +232,13 @@ func (lc *JobLifecycle) MarkCompleted() {
 // needed for batch job status snapshots. BatchJob consumes
 // its own sub-manager interfaces instead of reaching into internals.
 type LifecycleSnapshot struct {
-	Status       models.JobStatus
-	CurrentPhase string
-	CompletedAt  *time.Time
-	OrganizedAt  *time.Time
-	RevertedAt   *time.Time
-	IsDeleted    bool
+	Status          models.JobStatus
+	CurrentPhase    string
+	ApplyGeneration uint64
+	CompletedAt     *time.Time
+	OrganizedAt     *time.Time
+	RevertedAt      *time.Time
+	IsDeleted       bool
 }
 
 // StatusSnapshot returns a point-in-time copy of the lifecycle fields needed
@@ -246,12 +248,13 @@ func (lc *JobLifecycle) StatusSnapshot() LifecycleSnapshot {
 	lc.mu.RLock()
 	defer lc.mu.RUnlock()
 	return LifecycleSnapshot{
-		Status:       lc.Status,
-		CurrentPhase: lc.currentPhase,
-		CompletedAt:  cloneTimePtr(lc.CompletedAt),
-		OrganizedAt:  cloneTimePtr(lc.OrganizedAt),
-		RevertedAt:   cloneTimePtr(lc.RevertedAt),
-		IsDeleted:    lc.deleted,
+		Status:          lc.Status,
+		CurrentPhase:    lc.currentPhase,
+		ApplyGeneration: lc.applyGeneration,
+		CompletedAt:     cloneTimePtr(lc.CompletedAt),
+		OrganizedAt:     cloneTimePtr(lc.OrganizedAt),
+		RevertedAt:      cloneTimePtr(lc.RevertedAt),
+		IsDeleted:       lc.deleted,
 	}
 }
 
@@ -259,12 +262,13 @@ func (lc *JobLifecycle) StatusSnapshot() LifecycleSnapshot {
 // The caller MUST be holding lifecycle.mu when calling this method.
 func (lc *JobLifecycle) statusSnapshotLocked() LifecycleSnapshot {
 	return LifecycleSnapshot{
-		Status:       lc.Status,
-		CurrentPhase: lc.currentPhase,
-		CompletedAt:  cloneTimePtr(lc.CompletedAt),
-		OrganizedAt:  cloneTimePtr(lc.OrganizedAt),
-		RevertedAt:   cloneTimePtr(lc.RevertedAt),
-		IsDeleted:    lc.deleted,
+		Status:          lc.Status,
+		CurrentPhase:    lc.currentPhase,
+		ApplyGeneration: lc.applyGeneration,
+		CompletedAt:     cloneTimePtr(lc.CompletedAt),
+		OrganizedAt:     cloneTimePtr(lc.OrganizedAt),
+		RevertedAt:      cloneTimePtr(lc.RevertedAt),
+		IsDeleted:       lc.deleted,
 	}
 }
 

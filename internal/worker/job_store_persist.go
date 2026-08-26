@@ -92,11 +92,12 @@ func (s *JobStore) reconstructBatchJob(dbJob *models.Job) *BatchJob {
 		StartedAt:          snapshot.StartedAt,
 		persistFlight:      newJobPersistFlight(),
 		lifecycle: &JobLifecycle{
-			Status:      snapshot.Status,
-			CompletedAt: snapshot.CompletedAt,
-			OrganizedAt: snapshot.OrganizedAt,
-			RevertedAt:  snapshot.RevertedAt,
-			done:        make(chan struct{}),
+			Status:          snapshot.Status,
+			applyGeneration: snapshot.ApplyGeneration,
+			CompletedAt:     snapshot.CompletedAt,
+			OrganizedAt:     snapshot.OrganizedAt,
+			RevertedAt:      snapshot.RevertedAt,
+			done:            make(chan struct{}),
 		},
 		results: tracker,
 		cfg: jobConfig{
@@ -301,6 +302,7 @@ func s_candidateEnvelope(job *BatchJob, overrides map[string]*resultstore.MovieR
 		OrganizedAt:           snapshot.OrganizedAt,
 		RevertedAt:            snapshot.RevertedAt,
 		Update:                snapshot.Update,
+		ApplyGeneration:       snapshot.ApplyGeneration,
 		CurrentPhase:          snapshot.CurrentPhase,
 	}
 

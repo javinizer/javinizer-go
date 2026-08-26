@@ -17,7 +17,8 @@ type ParsedJobResults struct {
 	// CurrentPhase is the durable phase marker stored on new-format envelopes
 	// ("" for legacy formats, which conservatively reads as busy on Running
 	// rows — POSTER-WRITE-HARDENING D16/R18-3).
-	CurrentPhase string
+	CurrentPhase    string
+	ApplyGeneration uint64
 }
 
 // ParseResultsJSON parses the Results JSON column from the database,
@@ -88,7 +89,7 @@ func parseEnvelopeFormat(raw []byte) (*ParsedJobResults, error) {
 	if envelope.Provenance == nil {
 		envelope.Provenance = make(map[string]*resultstore.ProvenanceData)
 	}
-	return &ParsedJobResults{Results: envelope.Domain, Provenance: envelope.Provenance, CurrentPhase: envelope.CurrentPhase}, nil
+	return &ParsedJobResults{Results: envelope.Domain, Provenance: envelope.Provenance, CurrentPhase: envelope.CurrentPhase, ApplyGeneration: envelope.ApplyGeneration}, nil
 }
 
 // parseLegacyFileResultFormat parses the legacy FileResult format with "data_type" key.

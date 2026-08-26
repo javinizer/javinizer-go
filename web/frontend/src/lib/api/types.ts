@@ -419,6 +419,7 @@ export interface ProgressMessage {
 	total_files?: number;
 	completed?: number;
 	failed?: number;
+	apply_generation?: number;
 }
 
 export interface Genre {

@@ -269,6 +269,7 @@ func stampJobCounts(msg *websocket.ProgressMessage, job worker.BatchJobInterface
 		msg.TotalFiles = status.TotalFiles
 		msg.Completed = status.Completed
 		msg.Failed = status.Failed
+		msg.ApplyGeneration = status.ApplyGeneration
 	}
 	return msg
 }

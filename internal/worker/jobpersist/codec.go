@@ -19,7 +19,8 @@ type JobResultsEnvelope struct {
 	Provenance map[string]*resultstore.ProvenanceData `json:"provenance,omitempty"`
 	// CurrentPhase mirrors JobLifecycle's phase marker at persist time
 	// (POSTER-WRITE-HARDENING D16): "" idle, "scrape"/"apply" while Running.
-	CurrentPhase string `json:"current_phase,omitempty"`
+	CurrentPhase    string `json:"current_phase,omitempty"`
+	ApplyGeneration uint64 `json:"apply_generation,omitempty"`
 }
 
 // Snapshot holds only fields representable in models.Job (the DB row). It is
@@ -51,7 +52,8 @@ type Snapshot struct {
 	RevertedAt            *time.Time
 	Update                bool
 	// CurrentPhase is the lifecycle phase marker durable on the envelope (D16).
-	CurrentPhase string
+	CurrentPhase    string
+	ApplyGeneration uint64
 }
 
 // MarshalFn is swappable for testing. Defaults to json.Marshal.
@@ -69,9 +71,10 @@ func Encode(snapshot Snapshot) (*models.Job, error) {
 	}
 
 	envelope := JobResultsEnvelope{
-		Domain:       snapshot.Results,
-		Provenance:   snapshot.Provenance,
-		CurrentPhase: snapshot.CurrentPhase,
+		Domain:          snapshot.Results,
+		Provenance:      snapshot.Provenance,
+		CurrentPhase:    snapshot.CurrentPhase,
+		ApplyGeneration: snapshot.ApplyGeneration,
 	}
 	resultsJSON, err := MarshalFn(envelope)
 	if err != nil {
@@ -189,6 +192,7 @@ func Decode(dbJob *models.Job) (Snapshot, []error) {
 			snapshot.Results = parsed.Results
 			snapshot.Provenance = parsed.Provenance
 			snapshot.CurrentPhase = parsed.CurrentPhase
+			snapshot.ApplyGeneration = parsed.ApplyGeneration
 		}
 	}
 
