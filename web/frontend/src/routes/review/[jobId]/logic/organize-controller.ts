@@ -141,7 +141,10 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 			if (result.status === 'failed') {
 				updateFileStatus(filePath, { status: 'failed', error: result.error });
 				deps.recordApplyFailure?.(filePath, result.error);
-			} else if (result.status === 'completed') {
+			} else if (
+				result.status === 'completed' &&
+				deps.getFileStatuses().get(filePath)?.status !== 'failed'
+			) {
 				updateFileStatus(filePath, { status: 'success' });
 				deps.recordApplySuccess?.(filePath);
 			}
@@ -201,13 +204,14 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 		operationJobId: string,
 		operationGeneration: number,
 		requestPending: () => boolean = () => false,
+		preApplyGeneration?: number,
 	) {
 		const runToken = ++organizeRunToken;
 		const isActiveRun = () => runToken === organizeRunToken;
 		clearOrganizePollTimer();
 		const startedAt = Date.now();
 		let lastPollError: string | null = null;
-		let deferredTerminalPolls = 0;
+		let applyTransitionObserved = preApplyGeneration === undefined;
 
 		const pollOnce = async () => {
 			if (!isActiveRun()) return;
@@ -235,15 +239,23 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 				}
 				deps.setJob(latestJob, operationJobId, operationGeneration);
 				lastPollError = null;
+				if (
+					latestJob.status === 'running' ||
+					(preApplyGeneration !== undefined &&
+						latestJob.apply_generation !== undefined &&
+						latestJob.apply_generation > preApplyGeneration)
+				) {
+					applyTransitionObserved = true;
+				}
 
 				const terminalSuccess =
 					latestJob.status === 'completed' ||
 					latestJob.status === 'organized' ||
 					latestJob.status === 'reverted';
-				if (terminalSuccess && requestPending() && deferredTerminalPolls++ < 1) {
-					// The POST may have been accepted while its response is stalled.
-					// Defer one pre-response terminal snapshot so a GET racing the
-					// POST cannot mistake the pre-apply completed state for success.
+				if (terminalSuccess && !applyTransitionObserved) {
+					// A GET can race the POST and see the scrape-completed state. Do
+					// not report apply success until the server exposes the new apply
+					// generation or a running phase.
 				} else if (terminalSuccess) {
 					reconcileTerminalResults(latestJob);
 					const action = deps.getIsUpdateMode() ? 'Update' : 'Organization';
@@ -336,6 +348,7 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 		lastRecoveryFailedPaths = retryPaths;
 
 		const { copyOnly, linkMode } = getOrganizeRequestOptions(operation);
+		const preApplyGeneration = deps.getJob()?.apply_generation;
 		prepareOrganizeRun(retryPaths);
 		const operationToken = organizeRunToken;
 		let requestPending = false;
@@ -365,6 +378,7 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 				operationJobId,
 				operationGeneration,
 				() => requestPending,
+				preApplyGeneration,
 			);
 			await request;
 			requestPending = false;
@@ -392,6 +406,7 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 		const operationJobId = deps.getJobId();
 		const operationGeneration = deps.getRouteGeneration?.() ?? 0;
 		lastRecoveryFailedPaths = retryPaths;
+		const preApplyGeneration = deps.getJob()?.apply_generation;
 		prepareOrganizeRun(retryPaths);
 		const operationToken = organizeRunToken;
 		let requestPending = false;
@@ -416,6 +431,7 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 				operationJobId,
 				operationGeneration,
 				() => requestPending,
+				preApplyGeneration,
 			);
 			await deps.api.updateBatchJob(operationJobId, request);
 			requestPending = false;

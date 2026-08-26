@@ -63,6 +63,7 @@ type batchJobBase struct {
 	ApplyPlan             *applyplan.Plan                 `json:"apply_plan,omitempty"`
 	PersistError          string                          `json:"persist_error,omitempty"`
 	CurrentPhase          string                          `json:"current_phase,omitempty"`
+	ApplyGeneration       uint64                          `json:"apply_generation"`
 	IsDeleted             bool                            `json:"is_deleted"`
 }
 

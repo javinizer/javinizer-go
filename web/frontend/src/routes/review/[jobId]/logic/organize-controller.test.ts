@@ -158,7 +158,7 @@ describe('organize-controller pollOnce terminal-success branches', () => {
 		controller.cleanup();
 	});
 
-	it('polls to completion while the apply request is pending', async () => {
+	it('does not accept a pre-apply terminal snapshot while the POST is pending', async () => {
 		let resolvePost!: () => void;
 		const post = vi.fn(
 			() =>
@@ -166,18 +166,76 @@ describe('organize-controller pollOnce terminal-success branches', () => {
 					resolvePost = resolve;
 				}),
 		);
-		const { deps, calls } = makeDeps({
-			job: makeJob('organized'),
-			organizeBatchJob: post,
-		});
+		const job = makeJob('completed');
+		job.apply_generation = 2;
+		const { deps, calls } = makeDeps({ job, organizeBatchJob: post });
 		const controller = createOrganizeController(deps);
 
 		const organizeRequest = controller.organizeAll();
 		await vi.advanceTimersByTimeAsync(30);
 
+		expect(calls.setOrganizeStatus).not.toContain('completed');
+		controller.cleanup();
+		resolvePost();
+		await organizeRequest;
+	});
+
+	it('polls to completion while the apply generation advances with a pending POST', async () => {
+		let resolvePost!: () => void;
+		const post = vi.fn(
+			() =>
+				new Promise<void>((resolve) => {
+					resolvePost = resolve;
+				}),
+		);
+		const job = makeJob('organized');
+		job.apply_generation = 2;
+		const { deps, calls } = makeDeps({
+			job,
+			organizeBatchJob: post,
+		});
+		const controller = createOrganizeController(deps);
+
+		const organizeRequest = controller.organizeAll();
+		job.apply_generation = 3;
+		await vi.advanceTimersByTimeAsync(30);
+
 		expect(calls.setOrganizeStatus).toContain('completed');
 		resolvePost();
 		await organizeRequest;
+		controller.cleanup();
+	});
+
+	it('preserves a recorded apply failure when the terminal row is still completed', async () => {
+		const failedPath = '/src/failed-writeback.mp4';
+		const job = makeJob('completed');
+		job.apply_generation = 1;
+		job.results[failedPath] = {
+			result_id: 'result-1',
+			file_path: failedPath,
+			movie_id: 'MOV-1',
+			status: 'completed',
+			movie: { id: 'MOV-1', title: 'Test Movie' },
+			started_at: '2026-01-01T00:00:00Z',
+			is_multi_part: false,
+			part_number: 0,
+			part_suffix: '',
+		} satisfies FileResult;
+		const { deps, calls, fileStatuses } = makeDeps({ job });
+		const controller = createOrganizeController(deps);
+
+		const organizeRequest = controller.organizeAll();
+		fileStatuses.set(failedPath, { status: 'failed', error: 'apply write-back skipped' });
+		job.apply_generation = 2;
+		await organizeRequest;
+		await vi.advanceTimersByTimeAsync(10);
+		await vi.advanceTimersByTimeAsync(5);
+
+		expect(fileStatuses.get(failedPath)).toEqual({
+			status: 'failed',
+			error: 'apply write-back skipped',
+		});
+		expect(calls.toastSuccess).toHaveLength(0);
 		controller.cleanup();
 	});
 });

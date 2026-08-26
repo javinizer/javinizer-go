@@ -355,6 +355,9 @@ func (c *jobController) markStarted(expectedFrom models.JobStatus, phase JobPhas
 	c.job.lifecycle.mu.Unlock()
 
 	c.job.mu.Lock()
+	if phase == JobPhaseApply {
+		c.job.applyGeneration++
+	}
 	c.job.StartedAt = time.Now()
 	c.job.mu.Unlock()
 

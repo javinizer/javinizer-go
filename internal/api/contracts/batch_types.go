@@ -132,6 +132,7 @@ type BatchJobResponse struct {
 	Results               map[string]*BatchFileResult `json:"results"`
 	StartedAt             string                      `json:"started_at"`
 	CompletedAt           *string                     `json:"completed_at,omitempty"`
+	ApplyGeneration       uint64                      `json:"apply_generation"`
 	OperationModeOverride operationmode.OperationMode `json:"operation_mode_override,omitempty"`
 	Update                bool                        `json:"update"`
 	PersistError          string                      `json:"persist_error,omitempty"`
@@ -152,6 +153,7 @@ type BatchJobResponseSlim struct {
 	Results               map[string]*BatchFileResultSlim `json:"results"`
 	StartedAt             string                          `json:"started_at"`
 	CompletedAt           *string                         `json:"completed_at,omitempty"`
+	ApplyGeneration       uint64                          `json:"apply_generation"`
 	OperationModeOverride operationmode.OperationMode     `json:"operation_mode_override,omitempty"`
 	Update                bool                            `json:"update"`
 	PersistError          string                          `json:"persist_error,omitempty"`

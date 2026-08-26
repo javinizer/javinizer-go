@@ -24,6 +24,7 @@ type batchJobBaseResponse struct {
 	StartedAt             string
 	CompletedAt           *string
 	OperationModeOverride operationmode.OperationMode
+	ApplyGeneration       uint64
 	Update                bool
 	PersistError          string
 	ApplyPlan             *applyplan.Plan
@@ -45,6 +46,7 @@ func toBaseResponse(job *worker.BatchJobStatus) batchJobBaseResponse {
 		StartedAt:             contracts.FormatTime(job.StartedAt),
 		CompletedAt:           contracts.FormatTimePtr(job.CompletedAt),
 		OperationModeOverride: job.OperationModeOverride,
+		ApplyGeneration:       job.ApplyGeneration,
 		Update:                job.Update,
 		PersistError:          job.PersistError,
 		ApplyPlan:             applyplan.Clone(job.ApplyPlan),
@@ -131,6 +133,7 @@ func buildBatchJobResponse(job *worker.BatchJobStatus) *contracts.BatchJobRespon
 		Results:               results,
 		StartedAt:             base.StartedAt,
 		CompletedAt:           base.CompletedAt,
+		ApplyGeneration:       base.ApplyGeneration,
 		OperationModeOverride: base.OperationModeOverride,
 		Update:                base.Update,
 		PersistError:          base.PersistError,
@@ -164,6 +167,7 @@ func buildBatchJobSlimResponse(job *worker.BatchJobStatus) *contracts.BatchJobRe
 		Results:               results,
 		StartedAt:             base.StartedAt,
 		CompletedAt:           base.CompletedAt,
+		ApplyGeneration:       base.ApplyGeneration,
 		OperationModeOverride: base.OperationModeOverride,
 		Update:                base.Update,
 		PersistError:          base.PersistError,

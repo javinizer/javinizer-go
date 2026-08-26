@@ -394,6 +394,7 @@ export interface BatchJobResponse {
 	files?: string[];
 	started_at: string;
 	completed_at?: string;
+	apply_generation?: number;
 	operation_mode_override?: string;
 	update: boolean;
 	persist_error?: string;
