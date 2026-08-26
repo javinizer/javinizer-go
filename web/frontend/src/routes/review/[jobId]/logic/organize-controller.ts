@@ -81,7 +81,9 @@ interface OrganizeControllerDeps {
 }
 
 function isDefinitiveApplyLaunchRejection(error: unknown): boolean {
-	if (!error || typeof error !== 'object' || !('status' in error)) return false;
+	if (!error || typeof error !== 'object') return false;
+	if ('code' in error && error.code === 'APPLY_NOT_STARTED') return true;
+	if (!('status' in error)) return false;
 	const status = error.status;
 	return status === 400 || status === 403 || status === 404;
 }
@@ -265,11 +267,6 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 					}
 				}
 				const applyPhaseReached = applyAlreadyStarted ? generationIsCurrent : generationAdvanced;
-				const launchFailureSettled =
-					!applyAlreadyStarted &&
-					!requestPending() &&
-					preApplyGeneration !== undefined &&
-					latestJob.apply_generation === preApplyGeneration;
 
 				const terminalSuccess =
 					latestJob.status === 'completed' ||
@@ -286,14 +283,14 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 					return;
 				}
 
-				if (latestJob.status === 'failed' && (applyPhaseReached || launchFailureSettled)) {
+				if (latestJob.status === 'failed' && applyPhaseReached) {
 					reconcileTerminalResults(latestJob, applyPhaseReached);
 					const action = deps.getIsUpdateMode() ? 'update' : 'organization';
 					finalizeOrganizeFailure(`The ${action} job failed.`);
 					return;
 				}
 
-				if (latestJob.status === 'cancelled' && (applyPhaseReached || launchFailureSettled)) {
+				if (latestJob.status === 'cancelled' && applyPhaseReached) {
 					reconcileTerminalResults(latestJob, applyPhaseReached);
 					const action = deps.getIsUpdateMode() ? 'Update' : 'Organization';
 					finalizeOrganizeFailure(`${action} was cancelled.`);

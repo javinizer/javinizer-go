@@ -20,7 +20,9 @@ import (
 )
 
 // prepareAndLaunchApply handles the common workflow for organize and update handlers:
-// get batch workflow → set WF on job → launch StartApply in a goroutine.
+// get batch workflow → set WF on job → launch StartApply and track its phase.
+// StartApply is invoked before the response so pre-phase launch failures are
+// definitive; the long-running phase is still joined in a tracked goroutine.
 // Per S-8: extracted to eliminate the 60% code duplication between organizeJob and updateBatchJob.
 func prepareAndLaunchApply(
 	c *gin.Context,
@@ -39,20 +41,24 @@ func prepareAndLaunchApply(
 	// Per DEEP-6: set WF on the job's deps before calling StartApply.
 	job.SetWorkflow(wf)
 
-	// Track before launching so teardown can join this goroutine (and with it
-	// the apply phase's deferred persistence) instead of inferring completion
-	// from job status.
+	// Track before launching so teardown can join the apply phase (including
+	// its deferred persistence). StartApply itself runs only the admission and
+	// phase-goroutine setup, then returns; the long-running work is joined below.
 	done := rt.TrackBackgroundTask()
+	if err := job.StartApply(rt.ServerCtx(), applyOpts); err != nil {
+		done()
+		logging.Errorf("BatchJob.StartApply failed: %v", err)
+		if perr := rt.Deps().GetJobStore().PersistJobByID(job.GetID()); perr != nil {
+			logging.Warnf("[Apply] envelope persist failed for job %s: %v", job.GetID(), perr)
+		}
+		c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{
+			Error: fmt.Sprintf("Failed to start apply: %v", err),
+			Code:  "APPLY_NOT_STARTED",
+		})
+		return
+	}
 	go func() {
 		defer done()
-		if err := job.StartApply(rt.ServerCtx(), applyOpts); err != nil {
-			logging.Errorf("BatchJob.StartApply failed: %v", err)
-			if perr := rt.Deps().GetJobStore().PersistJobByID(job.GetID()); perr != nil {
-				logging.Warnf("[Apply] envelope persist failed for job %s: %v", job.GetID(), perr)
-			}
-			return
-		}
-
 		if err := job.Wait(); err != nil {
 			logging.Warnf("job %s Wait() returned: %v", job.GetID(), err)
 		}
