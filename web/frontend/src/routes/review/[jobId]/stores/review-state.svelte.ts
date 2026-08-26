@@ -1608,7 +1608,9 @@ export function createReviewState(getJobId: () => string) {
 			organizeOperation = recovery.organizeOperation;
 			if (recovery.destination) destinationPath = recovery.destination;
 		}
-		if (!isApplyInProgress(loadedJob)) return;
+		const hasRecordedApplyOutcome =
+			Object.keys(recovery.failed).length > 0 || recovery.succeeded.length > 0;
+		if (!isApplyInProgress(loadedJob) && !hasRecordedApplyOutcome) return;
 		if (organizeStatus === 'idle' && !organizing) organizeController.resumePolling(recovery);
 	});
 

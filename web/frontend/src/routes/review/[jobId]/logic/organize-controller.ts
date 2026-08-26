@@ -256,6 +256,9 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 						activeApplyGeneration = latestJob.apply_generation;
 					}
 				}
+				const applyOutcomeCurrent = applyAlreadyStarted
+					? generationIsCurrent
+					: preApplyGeneration !== undefined && generationAdvanced;
 
 				const terminalSuccess =
 					latestJob.status === 'completed' ||
@@ -272,13 +275,13 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 					return;
 				}
 
-				if (latestJob.status === 'failed') {
+				if (latestJob.status === 'failed' && applyOutcomeCurrent) {
 					const action = deps.getIsUpdateMode() ? 'update' : 'organization';
 					finalizeOrganizeFailure(`The ${action} job failed.`);
 					return;
 				}
 
-				if (latestJob.status === 'cancelled') {
+				if (latestJob.status === 'cancelled' && applyOutcomeCurrent) {
 					const action = deps.getIsUpdateMode() ? 'Update' : 'Organization';
 					finalizeOrganizeFailure(`${action} was cancelled.`);
 					return;
