@@ -217,6 +217,7 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 		requestPending: () => boolean = () => false,
 		preApplyGeneration?: number,
 		applyAlreadyStarted = false,
+		launchFailureConfirmed = false,
 	) {
 		const runToken = ++organizeRunToken;
 		const isActiveRun = () => runToken === organizeRunToken;
@@ -283,14 +284,14 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 					return;
 				}
 
-				if (latestJob.status === 'failed' && applyPhaseReached) {
+				if (latestJob.status === 'failed' && (applyPhaseReached || launchFailureConfirmed)) {
 					reconcileTerminalResults(latestJob, applyPhaseReached);
 					const action = deps.getIsUpdateMode() ? 'update' : 'organization';
 					finalizeOrganizeFailure(`The ${action} job failed.`);
 					return;
 				}
 
-				if (latestJob.status === 'cancelled' && applyPhaseReached) {
+				if (latestJob.status === 'cancelled' && (applyPhaseReached || launchFailureConfirmed)) {
 					reconcileTerminalResults(latestJob, applyPhaseReached);
 					const action = deps.getIsUpdateMode() ? 'Update' : 'Organization';
 					finalizeOrganizeFailure(`${action} was cancelled.`);
@@ -566,6 +567,12 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 			job?.apply_generation === undefined ||
 			job.apply_generation > recovery.preApplyGeneration ||
 			!!hasRecordedApplyOutcome;
+		const launchFailureConfirmed =
+			!!recovery &&
+			!applyAlreadyStarted &&
+			(job?.status === 'failed' || job?.status === 'cancelled') &&
+			recovery.preApplyGeneration !== undefined &&
+			job?.apply_generation === recovery.preApplyGeneration;
 		if (recovery) {
 			lastSkipNfo = recovery.skipNfo;
 			lastSkipDownload = recovery.skipDownload;
@@ -609,6 +616,7 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 			undefined,
 			recovery?.preApplyGeneration,
 			applyAlreadyStarted,
+			launchFailureConfirmed,
 		);
 	}
 

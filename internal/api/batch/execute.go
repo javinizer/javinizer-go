@@ -46,12 +46,12 @@ func prepareAndLaunchApply(
 	// phase-goroutine setup, then returns; the long-running work is joined below.
 	done := rt.TrackBackgroundTask()
 	if err := job.StartApply(rt.ServerCtx(), applyOpts); err != nil {
-		done()
 		logging.Errorf("BatchJob.StartApply failed: %v", err)
 		if perr := rt.Deps().GetJobStore().PersistJobByID(job.GetID()); perr != nil {
 			logging.Warnf("[Apply] envelope persist failed for job %s: %v", job.GetID(), perr)
 		}
-		c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{
+		done()
+		c.AbortWithStatusJSON(http.StatusInternalServerError, contracts.ErrorResponse{
 			Error: fmt.Sprintf("Failed to start apply: %v", err),
 			Code:  "APPLY_NOT_STARTED",
 		})
