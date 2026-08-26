@@ -247,8 +247,9 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 					latestJob.apply_generation > preApplyGeneration;
 				const generationIsCurrent =
 					latestJob.apply_generation !== undefined &&
-					(activeApplyGeneration === undefined ||
-						latestJob.apply_generation >= activeApplyGeneration);
+					(activeApplyGeneration !== undefined
+						? latestJob.apply_generation >= activeApplyGeneration
+						: preApplyGeneration === undefined || latestJob.apply_generation > preApplyGeneration);
 				if (generationAdvanced || (applyAlreadyStarted && generationIsCurrent)) {
 					applyTransitionObserved = true;
 					if (generationIsCurrent) {
