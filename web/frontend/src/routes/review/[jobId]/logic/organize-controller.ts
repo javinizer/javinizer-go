@@ -265,7 +265,11 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 					}
 				}
 				const applyPhaseReached = applyAlreadyStarted ? generationIsCurrent : generationAdvanced;
-				const launchFailureSettled = !requestPending() && preApplyGeneration !== undefined;
+				const launchFailureSettled =
+					!applyAlreadyStarted &&
+					!requestPending() &&
+					preApplyGeneration !== undefined &&
+					latestJob.apply_generation === preApplyGeneration;
 
 				const terminalSuccess =
 					latestJob.status === 'completed' ||
