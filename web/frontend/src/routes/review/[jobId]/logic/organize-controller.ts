@@ -142,27 +142,6 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 		deps.getFileStatuses().set(filePath, status);
 	}
 
-	function hasApplyFileOutcome(job: BatchJobResponse): boolean {
-		const expectedPaths = new Set(deps.getExpectedOrganizeFilePaths());
-		for (const [filePath, result] of Object.entries(job.results ?? {})) {
-			if (
-				!job.excluded?.[filePath] &&
-				expectedPaths.has(filePath) &&
-				(result.status === 'failed' ||
-					result.status === 'cancelled' ||
-					(result.status === 'completed' && !!result.movie))
-			) {
-				return true;
-			}
-		}
-		return Array.from(deps.getFileStatuses().entries()).some(
-			([filePath, status]) =>
-				!job.excluded?.[filePath] &&
-				expectedPaths.has(filePath) &&
-				(status.status === 'failed' || status.status === 'success'),
-		);
-	}
-
 	function reconcileTerminalResults(job: BatchJobResponse, includeCompleted = true) {
 		const expectedPaths = new Set(deps.getExpectedOrganizeFilePaths());
 		for (const [filePath, result] of Object.entries(job.results ?? {})) {
@@ -285,9 +264,8 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 						activeApplyGeneration = latestJob.apply_generation;
 					}
 				}
-				const applyOutcomeCurrent = applyAlreadyStarted
-					? generationIsCurrent
-					: preApplyGeneration !== undefined && generationAdvanced;
+				const applyPhaseReached = applyAlreadyStarted ? generationIsCurrent : generationAdvanced;
+				const launchFailureSettled = !requestPending() && preApplyGeneration !== undefined;
 
 				const terminalSuccess =
 					latestJob.status === 'completed' ||
@@ -304,15 +282,15 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 					return;
 				}
 
-				if (latestJob.status === 'failed' && applyOutcomeCurrent) {
-					reconcileTerminalResults(latestJob, hasApplyFileOutcome(latestJob));
+				if (latestJob.status === 'failed' && (applyPhaseReached || launchFailureSettled)) {
+					reconcileTerminalResults(latestJob, applyPhaseReached);
 					const action = deps.getIsUpdateMode() ? 'update' : 'organization';
 					finalizeOrganizeFailure(`The ${action} job failed.`);
 					return;
 				}
 
-				if (latestJob.status === 'cancelled' && applyOutcomeCurrent) {
-					reconcileTerminalResults(latestJob, hasApplyFileOutcome(latestJob));
+				if (latestJob.status === 'cancelled' && (applyPhaseReached || launchFailureSettled)) {
+					reconcileTerminalResults(latestJob, applyPhaseReached);
 					const action = deps.getIsUpdateMode() ? 'Update' : 'Organization';
 					finalizeOrganizeFailure(`${action} was cancelled.`);
 					return;
@@ -578,6 +556,15 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 		const job = deps.getJob();
 		ignoreWebSocketMessages = false;
 		activeApplyGeneration = job?.apply_generation;
+		const hasRecordedApplyOutcome =
+			(recovery && Object.keys(recovery.failed).length > 0) ||
+			(recovery && recovery.succeeded.length > 0);
+		const applyAlreadyStarted =
+			!recovery ||
+			recovery.preApplyGeneration === undefined ||
+			job?.apply_generation === undefined ||
+			job.apply_generation > recovery.preApplyGeneration ||
+			!!hasRecordedApplyOutcome;
 		if (recovery) {
 			lastSkipNfo = recovery.skipNfo;
 			lastSkipDownload = recovery.skipDownload;
@@ -615,7 +602,13 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 				deps.getFileStatuses().set(filePath, { status: 'failed', error: result.error });
 			}
 		}
-		startOrganizeCompletionPolling(operationJobId, operationGeneration, undefined, undefined, true);
+		startOrganizeCompletionPolling(
+			operationJobId,
+			operationGeneration,
+			undefined,
+			recovery?.preApplyGeneration,
+			applyAlreadyStarted,
+		);
 	}
 
 	return {
