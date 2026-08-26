@@ -290,3 +290,19 @@ func TestResolveApplyConfigPlanAwareErrors(t *testing.T) {
 	_, err = resolveUpdateApplyConfig(snapshot, factory, &stubControlledJob{status: &worker.BatchJobStatus{}}, contracts.UpdateRequest{Overrides: &contracts.ReviewApplyOverrides{SkipDownload: boolPtr(true), OverwriteExistingMedia: boolPtr(true)}})
 	assert.Error(t, err)
 }
+
+func TestResolveUpdateApplyConfig_PropagatesRetryFilePaths(t *testing.T) {
+	factory := worker.NewBatchJobFactory(nil, nil, nil, nil, worker.BatchJobConfig{}, nil)
+	paths := []string{"C:/source/failed-one.mp4", "C:/source/failed-two.mp4"}
+
+	cfg, err := resolveUpdateApplyConfig(
+		core.NewSnapshotForTesting(core.NewAPIRuntime(nil), core.APIConfig{}),
+		factory,
+		&stubControlledJob{},
+		contracts.UpdateRequest{RetryFilePaths: paths},
+	)
+
+	require.NoError(t, err)
+	assert.Equal(t, paths, cfg.RetryFilePaths)
+	assert.NotSame(t, &paths[0], &cfg.RetryFilePaths[0], "builder should copy caller-owned retry paths")
+}

@@ -704,7 +704,8 @@ type ApplyPhaseConfig struct {
 	Download               bool  // Download media (poster, fanart, etc.)
 	DownloadExtrafanart    *bool // Optional override for extrafanart downloads; nil = use config default
 	OverwriteExistingMedia bool
-	DryRun                 bool // Dry-run mode: preview without making changes
+	DryRun                 bool     // Dry-run mode: preview without making changes
+	RetryFilePaths         []string // Apply only these previously failed result paths on retry
 
 	// Job-level config applied before apply starts
 	OperationModeOverride operationmode.OperationMode // resolved at factory boundary

@@ -35,7 +35,7 @@ import type {
 	FieldOverrideResponse,
 	ExistingNFOResponse,
 } from '../types';
-import { BaseClient } from './common';
+import { BaseClient, type RequestOptions } from './common';
 
 // JobClient handles batch job lifecycle: scrape, organize, update, rescrape, revert.
 export class JobClient extends BaseClient {
@@ -46,9 +46,13 @@ export class JobClient extends BaseClient {
 		});
 	}
 
-	async getBatchJob(jobId: string, includeData = false): Promise<BatchJobResponse> {
+	async getBatchJob(
+		jobId: string,
+		includeData = false,
+		options?: RequestOptions,
+	): Promise<BatchJobResponse> {
 		const params = includeData ? '?include_data=true' : '';
-		return this.request<BatchJobResponse>(`/api/v1/batch/${jobId}${params}`);
+		return this.request<BatchJobResponse>(`/api/v1/batch/${jobId}${params}`, options);
 	}
 
 	async cancelBatchJob(jobId: string): Promise<void> {

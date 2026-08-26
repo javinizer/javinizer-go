@@ -57,6 +57,62 @@ export class ApiError extends Error {
 	}
 }
 
+export const REQUEST_TIMEOUT_CODE = 'REQUEST_TIMEOUT';
+
+export interface RequestOptions extends RequestInit {
+	timeoutMs?: number;
+}
+
+interface RequestAbortControl {
+	signal?: AbortSignal;
+	timedOut: () => boolean;
+	cleanup: () => void;
+}
+
+function createRequestAbortControl(options?: RequestOptions): RequestAbortControl {
+	const timeoutMs = options?.timeoutMs;
+	const callerSignal = options?.signal;
+	if (!timeoutMs || !Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+		return { signal: callerSignal ?? undefined, timedOut: () => false, cleanup: () => undefined };
+	}
+
+	const controller = new AbortController();
+	let timedOut = false;
+	let timer: ReturnType<typeof setTimeout> | undefined;
+
+	const abortFromCaller = () => controller.abort(callerSignal?.reason);
+	if (callerSignal?.aborted) {
+		abortFromCaller();
+	} else {
+		callerSignal?.addEventListener('abort', abortFromCaller, { once: true });
+	}
+
+	timer = setTimeout(() => {
+		timedOut = true;
+		controller.abort();
+	}, timeoutMs);
+
+	return {
+		signal: controller.signal,
+		timedOut: () => timedOut,
+		cleanup: () => {
+			if (timer !== undefined) clearTimeout(timer);
+			callerSignal?.removeEventListener('abort', abortFromCaller);
+		},
+	};
+}
+
+function isRequestAbortError(error: unknown): boolean {
+	return (
+		(error instanceof Error && error.name === 'AbortError') ||
+		(typeof DOMException !== 'undefined' && error instanceof DOMException && error.name === 'AbortError')
+	);
+}
+
+function timeoutError(): ApiError {
+	return new ApiError('Request timed out', REQUEST_TIMEOUT_CODE);
+}
+
 // Base client provides the shared request method that all sub-clients use.
 export class BaseClient {
 	protected baseURL: string;
@@ -87,28 +143,46 @@ export class BaseClient {
 		this.baseURL = baseURL;
 	}
 
-	public async request<T>(endpoint: string, options?: RequestInit): Promise<T> {
+	public async request<T>(endpoint: string, options?: RequestOptions): Promise<T> {
 		const url = `${this.baseURL}${endpoint}`;
-		const response = await fetch(url, {
-			credentials: 'same-origin',
-			...options,
-			headers: {
-				'Content-Type': 'application/json',
-				...(BaseClient.getSessionID() ? { 'X-Session-ID': BaseClient.getSessionID()! } : {}),
-				...options?.headers,
-			},
-		});
+		const fetchOptions = options ? { ...options } : {};
+		delete fetchOptions.timeoutMs;
+		const abortControl = createRequestAbortControl(options);
 
-		if (!response.ok) {
-			const error: ErrorResponse = await response.json().catch(() => ({
-				error: `HTTP ${response.status}: ${response.statusText}`,
-			}));
-			throw new ApiError(error.error || 'API request failed', error.code, error.params);
+		try {
+			const response = await fetch(url, {
+				credentials: 'same-origin',
+				...fetchOptions,
+				...(abortControl.signal ? { signal: abortControl.signal } : {}),
+				headers: {
+					'Content-Type': 'application/json',
+					...(BaseClient.getSessionID() ? { 'X-Session-ID': BaseClient.getSessionID()! } : {}),
+					...fetchOptions.headers,
+				},
+			});
+
+			if (!response.ok) {
+				let error: ErrorResponse;
+				try {
+					error = await response.json();
+				} catch (cause) {
+					if (abortControl.timedOut() || isRequestAbortError(cause)) throw cause;
+					error = {
+						error: `HTTP ${response.status}: ${response.statusText}`,
+					};
+				}
+				throw new ApiError(error.error || 'API request failed', error.code, error.params);
+			}
+
+			const text = await response.text();
+			if (!text || !text.trim()) return undefined as T;
+			return JSON.parse(text) as T;
+		} catch (error) {
+			if (abortControl.timedOut()) throw timeoutError();
+			throw error;
+		} finally {
+			abortControl.cleanup();
 		}
-
-		const text = await response.text();
-		if (!text || !text.trim()) return undefined as T;
-		return JSON.parse(text) as T;
 	}
 }
 

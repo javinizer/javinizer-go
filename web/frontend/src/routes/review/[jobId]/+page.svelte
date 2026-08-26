@@ -36,10 +36,9 @@
 		Film
 	} from 'lucide-svelte';
 
-	const s = createReviewState($page);
+	const s = createReviewState(() => $page.params.jobId as string);
 
-	const initialTabParam = $page.url.searchParams.get('tab');
-	let activeTab = $state<ReviewTabId>(initialTabParam === 'failed' ? 'failed' : 'movies');
+	let activeTab = $state<ReviewTabId>('movies');
 
 	const hasMovies = $derived(s.movieResults.length > 0);
 	const hasFailed = $derived(s.failedResults.length > 0);
@@ -62,19 +61,39 @@
 
 	let sourceViewerLoading = $state(false);
 	let sourceViewerResults: ScraperResult[] = $state([]);
+	let sourceRequestGeneration = 0;
+	let lastReviewJobId = '';
 	let pendingOverrideField = $state<string | null>(null);
 
+	$effect(() => {
+		const routeJobId = $page.params.jobId as string;
+		if (routeJobId === lastReviewJobId) return;
+		lastReviewJobId = routeJobId;
+		activeTab = $page.url.searchParams.get('tab') === 'failed' ? 'failed' : 'movies';
+		sourceRequestGeneration += 1;
+		sourceViewerLoading = false;
+		sourceViewerResults = [];
+		pendingOverrideField = null;
+	});
+
 	async function loadSourcesForCurrent() {
-		if (!s.currentResult) return;
+		const result = s.currentResult;
+		if (!result) return;
+		const targetJobId = $page.params.jobId as string;
+		const targetResultId = result.result_id;
+		const requestGeneration = ++sourceRequestGeneration;
 		sourceViewerLoading = true;
 		try {
-			const resp = await s.loadSources(s.currentResult.result_id);
+			const resp = await s.loadSources(targetResultId);
+			if (requestGeneration !== sourceRequestGeneration) return;
+			if (targetJobId !== $page.params.jobId || targetResultId !== s.currentResult?.result_id) return;
 			sourceViewerResults = resp.results ?? [];
 		} catch (err) {
+			if (requestGeneration !== sourceRequestGeneration) return;
 			sourceViewerResults = [];
 			console.error('Failed to load sources', err);
 		} finally {
-			sourceViewerLoading = false;
+			if (requestGeneration === sourceRequestGeneration) sourceViewerLoading = false;
 		}
 	}
 
@@ -105,19 +124,28 @@
 			</div>
 		{:else if s.error}
 			<Card class="p-6">
-				<div class="text-center text-destructive">
+				<div role="alert" aria-labelledby="review-load-error-title" class="text-center text-destructive">
 					<CircleAlert class="h-12 w-12 mx-auto mb-4" />
-					<p class="font-semibold">{m.review_error_title()}</p>
+					<p id="review-load-error-title" class="font-semibold">{m.review_error_title()}</p>
 					<p class="text-sm">{s.error}</p>
-					<Button onclick={() => goto('/browse')} class="mt-4">
-						{#snippet children()}
-							<ChevronLeft class="h-4 w-4 mr-2" />
-							{m.review_back_to_browse()}
-						{/snippet}
-					</Button>
+					<div class="mt-4 flex justify-center gap-2">
+						<Button onclick={s.retryLoad}>{m.review_retry_load()}</Button>
+						<Button variant="outline" onclick={() => goto('/browse')}>
+							{#snippet children()}
+								<ChevronLeft class="h-4 w-4 mr-2" />
+								{m.review_back_to_browse()}
+							{/snippet}
+						</Button>
+					</div>
 				</div>
 			</Card>
 		{:else if s.job && !hasMovies && !hasFailed}
+			{#if s.refreshError}
+				<div role="status" aria-live="polite" class="flex items-center justify-between gap-4 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+					<span>{s.refreshError}</span>
+					<Button variant="outline" size="sm" onclick={s.retryLoad}>{m.review_retry_load()}</Button>
+				</div>
+			{/if}
 			<Card class="p-6">
 				<div class="text-center">
 					<p class="text-muted-foreground">{m.review_no_movies()}</p>
@@ -130,6 +158,12 @@
 				</div>
 			</Card>
 		{:else if s.job}
+			{#if s.refreshError}
+				<div role="status" aria-live="polite" class="flex items-center justify-between gap-4 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+					<span>{s.refreshError}</span>
+					<Button variant="outline" size="sm" onclick={s.retryLoad}>{m.review_retry_load()}</Button>
+				</div>
+			{/if}
 			<div class="border-b border-border">
 				<nav class="flex gap-1" aria-label={m.review_tabs_aria()}>
 					<button
@@ -219,8 +253,8 @@
 						onBulkExclude={s.bulkExcludeMovies}
 						onBulkRescrape={s.openBulkRescrapeModal}
 						onClose={() => goto('/browse')}
-						onUpdateAll={s.updateAll}
-						onOrganizeAll={s.organizeAll}
+						onUpdateAll={() => s.updateAll()}
+						onOrganizeAll={() => s.organizeAll()}
 						onSaveAll={s.saveAllEdits}
 						hasEdits={s.editedMovieCount > 0}
 						editCount={s.editedMovieCount}
@@ -233,7 +267,7 @@
 						fileStatuses={s.fileStatuses}
 						expectedOrganizeFilePaths={s.expectedOrganizeFilePaths}
 						isUpdateMode={s.isUpdateMode}
-						onRetryFailed={s.retryFailed}
+						onRetryFailed={() => s.retryFailed()}
 						onContinue={() => goto('/browse')}
 					/>
 
@@ -360,7 +394,7 @@
 									applyInvalid={s.applyInvalid}
 									movieResultsLength={s.movieResults.length}
 									onCancel={() => goto('/browse')}
-									onOrganizeAll={s.organizeAll}
+									onOrganizeAll={() => s.organizeAll()}
 								/>
 							{/if}
 						</div>

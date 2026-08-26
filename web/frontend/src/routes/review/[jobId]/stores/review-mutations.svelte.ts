@@ -33,7 +33,9 @@ import * as m from '$lib/paraglide/messages';
 interface ReviewMutationsDeps {
 	getJobId: () => string;
 	getJob: () => BatchJobResponse | null;
-	setJob: (job: BatchJobResponse) => void;
+	setJob: (job: BatchJobResponse, expectedJobId?: string, expectedGeneration?: number) => void;
+	isCurrentOperation?: (jobId: string, generation: number) => boolean;
+	getRouteGeneration: () => number;
 	skipJobSync: () => void;
 	clearEditStorage: () => void;
 	clearEditedMovies: () => void;
@@ -88,19 +90,33 @@ interface ReviewMutationsDeps {
 export function createReviewMutations(deps: ReviewMutationsDeps) {
 	const queryClient = deps.getQueryClient();
 
-	function invalidateJobQueries() {
+	function isCurrentJob(jobId: string, generation: number): boolean {
+		return deps.isCurrentOperation?.(jobId, generation) ?? true;
+	}
+
+	function invalidateJobQueries(jobId = deps.getJobId()) {
 		return Promise.all([
-			queryClient.invalidateQueries({ queryKey: ['batch-job', deps.getJobId()] }),
-			queryClient.invalidateQueries({ queryKey: ['batch-job-slim', deps.getJobId()] }),
+			queryClient.invalidateQueries({ queryKey: ['batch-job', jobId] }),
+			queryClient.invalidateQueries({ queryKey: ['batch-job-slim', jobId] }),
 			queryClient.invalidateQueries({ queryKey: ['actresses'] }),
 		]);
 	}
 
-	const posterFromUrlMutation = createMutation(() => ({
-		mutationFn: async ({ resultId, url }: { resultId: string; url: string }) => {
-			return deps.updateBatchMoviePosterFromURL(deps.getJobId(), resultId, { url });
+	const posterFromUrlMutation = createMutation<
+		{ data: PosterFromURLResponse; mutationJobId: string; generation: number },
+		Error,
+		{ resultId: string; url: string; jobId: string; generation: number }
+	>(() => ({
+		mutationFn: async ({ resultId, url, jobId: mutationJobId, generation: mutationGeneration }: { resultId: string; url: string; jobId: string; generation: number }) => {
+			return {
+				data: await deps.updateBatchMoviePosterFromURL(mutationJobId, resultId, { url }),
+				mutationJobId,
+				generation: mutationGeneration,
+			};
 		},
-		onSuccess: (data: PosterFromURLResponse, { resultId }) => {
+		onSuccess: (payload: { data: PosterFromURLResponse; mutationJobId: string; generation: number }, { resultId }) => {
+			const { data, mutationJobId, generation } = payload;
+			if (!isCurrentJob(mutationJobId, generation)) return;
 			const currentJob = deps.getJob();
 			if (currentJob) {
 				// The backend applies the new poster to every part of the movie —
@@ -158,7 +174,7 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 					}
 				}
 				deps.skipJobSync();
-				deps.setJob(updatedJob);
+				deps.setJob(updatedJob, mutationJobId, generation);
 
 				const editedMovies = deps.getEditedMovies();
 				for (const filePath of partPaths) {
@@ -177,28 +193,30 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 				});
 			}
 
-			void invalidateJobQueries();
+			void invalidateJobQueries(mutationJobId);
 		},
-		onError: (err: Error) => {
+		onError: (err: Error, variables: { jobId: string; generation: number }) => {
+			if (!isCurrentJob(variables.jobId, variables.generation)) return;
 			deps.toastError(m.review_poster_from_screenshot_failed({ error: err.message }));
 		},
 	}));
 
 	function applyPosterFromUrl(resultId: string, url: string) {
 		if (!deps.getJob() || posterFromUrlMutation.isPending) return;
-		posterFromUrlMutation.mutate({ resultId, url });
+		posterFromUrlMutation.mutate({ resultId, url, jobId: deps.getJobId(), generation: deps.getRouteGeneration() });
 	}
 
 	async function applyPosterFromUrlAsync(resultId: string, url: string) {
 		if (!deps.getJob()) return;
-		await posterFromUrlMutation.mutateAsync({ resultId, url });
+		await posterFromUrlMutation.mutateAsync({ resultId, url, jobId: deps.getJobId(), generation: deps.getRouteGeneration() });
 	}
 
-	const excludeMovieMutation = createMutation(() => ({
-		mutationFn: async ({ jobId: mutationJobId, resultId }: { jobId: string; resultId: string }) => {
+	const excludeMovieMutation = createMutation<unknown, Error, { jobId: string; resultId: string; generation: number }>(() => ({
+		mutationFn: async ({ jobId: mutationJobId, resultId, generation: mutationGeneration }: { jobId: string; resultId: string; generation: number }) => {
 			return deps.excludeBatchMovie(mutationJobId, resultId);
 		},
-		onSuccess: async (_data, { resultId }) => {
+		onSuccess: async (_data, { resultId, jobId: mutationJobId, generation }) => {
+			if (!isCurrentJob(mutationJobId, generation)) return;
 			const job = deps.getJob();
 			for (const [, r] of Object.entries(job?.results ?? {})) {
 				const fr = r as FileResult;
@@ -208,7 +226,7 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 				}
 			}
 			deps.toastSuccess(m.review_movie_excluded());
-			void invalidateJobQueries();
+			void invalidateJobQueries(mutationJobId);
 
 			const movieResultsLength = deps.getMovieResultsLength();
 			const postExcludeLength = movieResultsLength - 1;
@@ -222,13 +240,23 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 				deps.setCurrentMovieIndex(postExcludeLength - 1);
 			}
 		},
-		onError: (err: Error) => {
+		onError: (err: Error, variables: { jobId: string; generation: number }) => {
+			if (!isCurrentJob(variables.jobId, variables.generation)) return;
 			deps.toastError(m.review_exclude_movie_failed({ error: err.message }));
 		},
 	}));
 
-	const saveEditsMutation = createMutation(() => ({
-		mutationFn: async () => {
+	const saveEditsMutation = createMutation<
+		{
+			jobId: string;
+			generation: number;
+			rows: Array<{ key: string; status: string; paths: string[] }>;
+			preSaveServer: Map<string, Movie | undefined>;
+		},
+		Error,
+		{ jobId: string; generation: number }
+	>(() => ({
+		mutationFn: async ({ jobId: mutationJobId, generation: mutationGeneration }) => {
 			const job = deps.getJob();
 			// POSTER-WRITE-HARDENING D1/D14: the backend commits a whole-movie
 			// save transactionally for EVERY part of the family — fan out ONE
@@ -290,7 +318,7 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 				}
 				const isMultipart = Object.keys(partsRevisions).length > 1;
 				return deps.updateBatchMovie(
-					deps.getJobId(),
+					mutationJobId,
 					resultEntry.result_id,
 					movieToSave,
 					isMultipart ? partsRevisions : resultEntry.revision,
@@ -303,6 +331,8 @@ const ops = Array.from(latestByFamily.entries());
 			// (delete+set) on interleaved sibling edits, so positional indexing of
 			// familyPathsByKey would misalign them.
 			return {
+				jobId: mutationJobId,
+				generation: mutationGeneration,
 				rows: settled.map((s, i) => ({
 					key: ops[i]?.[0] ?? '',
 					status: s.status,
@@ -312,9 +342,14 @@ const ops = Array.from(latestByFamily.entries());
 			};
 		},
 		onSuccess: async (payload: {
+			jobId: string;
+			generation: number;
 			rows: Array<{ key: string; status: string; paths: string[] }>;
 			preSaveServer: Map<string, Movie | undefined>;
 		}) => {
+			const mutationJobId = payload.jobId;
+			const mutationGeneration = payload.generation;
+			if (!isCurrentJob(mutationJobId, mutationGeneration)) return;
 			const ops0 = payload.rows ?? [];
 			const preSaveServer = payload.preSaveServer;
 			const failed = ops0.filter((r) => r.status === 'rejected');
@@ -328,9 +363,10 @@ const ops = Array.from(latestByFamily.entries());
 			// codex P3-D: paused refetches keep dataUpdatedAt while reporting a
 			// prior success status. Gate on an ADVANCED dataUpdatedAt — only a
 			// completed fetch counts as refreshed.
-			const qk = ['batch-job', deps.getJobId()];
+			const qk = ['batch-job', mutationJobId];
 			const before = queryClient.getQueryState(qk)?.dataUpdatedAt ?? 0;
-			await invalidateJobQueries().catch(() => {});
+			await invalidateJobQueries(mutationJobId).catch(() => {});
+			if (!isCurrentJob(mutationJobId, mutationGeneration)) return;
 			const post = queryClient.getQueryState(qk);
 			const refreshed = (() => {
 				if (post?.status !== 'success') return false;
@@ -379,9 +415,9 @@ const ops = Array.from(latestByFamily.entries());
 				for (const [fp, mv] of deps.getEditedMovies()) remaining[fp] = mv;
 				try {
 					if (Object.keys(remaining).length > 0) {
-						sessionStorage.setItem(`javinizer.review.editedMovies.${deps.getJobId()}`, JSON.stringify(remaining));
+						sessionStorage.setItem(`javinizer.review.editedMovies.${mutationJobId}`, JSON.stringify(remaining));
 					} else {
-						sessionStorage.removeItem(`javinizer.review.editedMovies.${deps.getJobId()}`);
+						sessionStorage.removeItem(`javinizer.review.editedMovies.${mutationJobId}`);
 					}
 				} catch {
 					// storage full → fall back to clearEditStorage behavior
@@ -394,20 +430,34 @@ const ops = Array.from(latestByFamily.entries());
 				deps.clearEditStorage();
 			}
 		},
-		onError: (err: Error) => {
+		onError: (err: Error, variables: { jobId: string; generation: number }) => {
+			if (!isCurrentJob(variables.jobId, variables.generation)) return;
 			deps.toastError(m.review_save_edits_failed({ error: err.message }));
 		},
 	}));
 
-	const posterCropMutation = createMutation(() => ({
+	const posterCropMutation = createMutation<
+		PosterCropResponse,
+		Error,
+		{
+			jobId: string;
+			generation: number;
+			resultId: string;
+			crop: PosterCropBox;
+			maxPosterHeight?: number;
+			identity?: { revision: number; fingerprint: string };
+		}
+	>(() => ({
 		mutationFn: async ({
 			jobId: mutationJobId,
+			generation: mutationGeneration,
 			resultId,
 			crop,
 			maxPosterHeight,
 			identity,
 		}: {
 			jobId: string;
+			generation: number;
 			resultId: string;
 			crop: PosterCropBox;
 			maxPosterHeight?: number;
@@ -415,7 +465,8 @@ const ops = Array.from(latestByFamily.entries());
 		}) => {
 			return deps.updateBatchMoviePosterCrop(mutationJobId, resultId, crop, maxPosterHeight, identity);
 		},
-		onSuccess: (response: PosterCropResponse, { resultId }) => {
+		onSuccess: (response: PosterCropResponse, { resultId, jobId: mutationJobId, generation }) => {
+			if (!isCurrentJob(mutationJobId, generation)) return;
 			// Sync the server-echoed crop state into the visible job-result state
 			// and the pending editedMovies overlay, so a pre-organize saveAllEdits()
 			// cannot re-upload stale pre-crop intent (should_crop_poster=true) and
@@ -460,7 +511,7 @@ const ops = Array.from(latestByFamily.entries());
 					}
 				}
 				deps.skipJobSync();
-				deps.setJob(updatedJob);
+				deps.setJob(updatedJob, mutationJobId, generation);
 
 				const editedMovies = deps.getEditedMovies();
 				for (const filePath of partPaths) {
@@ -490,9 +541,10 @@ const ops = Array.from(latestByFamily.entries());
 			deps.toastSuccess(m.review_poster_crop_updated());
 			deps.setShowPosterCropModal(false);
 
-			void invalidateJobQueries();
+			void invalidateJobQueries(mutationJobId);
 		},
-		onError: (err: Error) => {
+		onError: (err: Error, variables: { jobId: string; generation: number }) => {
+			if (!isCurrentJob(variables.jobId, variables.generation)) return;
 			deps.toastError(err.message || m.review_poster_crop_failed());
 		},
 	}));
@@ -504,17 +556,18 @@ const ops = Array.from(latestByFamily.entries());
 		maxPosterHeight?: number,
 		identity?: { revision: number; fingerprint: string },
 	) {
-		await posterCropMutation.mutateAsync({ jobId, resultId, crop, maxPosterHeight, identity });
+		await posterCropMutation.mutateAsync({ jobId, generation: deps.getRouteGeneration(), resultId, crop, maxPosterHeight, identity });
 	}
 
-	const bulkExcludeMutation = createMutation(() => ({
-		mutationFn: async ({ resultIds }: { resultIds: string[] }) => {
-			return deps.batchExcludeMovies(deps.getJobId(), { result_ids: resultIds });
+	const bulkExcludeMutation = createMutation<BatchExcludeResponse, Error, { resultIds: string[]; jobId: string; generation: number }>(() => ({
+		mutationFn: async ({ resultIds, jobId: mutationJobId, generation: mutationGeneration }: { resultIds: string[]; jobId: string; generation: number }) => {
+			return deps.batchExcludeMovies(mutationJobId, { result_ids: resultIds });
 		},
-		onSuccess: (data) => {
+		onSuccess: (data, { jobId: mutationJobId, generation }) => {
+			if (!isCurrentJob(mutationJobId, generation)) return;
 			if (data.job) {
 				deps.skipJobSync();
-				deps.setJob(data.job);
+				deps.setJob(data.job, mutationJobId, generation);
 			}
 
 			deps.clearSelectedMovieIds();
@@ -529,28 +582,41 @@ const ops = Array.from(latestByFamily.entries());
 				);
 			}
 
-			void invalidateJobQueries();
+			void invalidateJobQueries(mutationJobId);
 		},
-		onError: (err: Error) => {
+		onError: (err: Error, variables: { jobId: string; generation: number }) => {
+			if (!isCurrentJob(variables.jobId, variables.generation)) return;
 			deps.toastError(m.review_exclude_movies_failed({ error: err.message }));
 		},
 	}));
 
-	const bulkRescrapeMutation = createMutation(() => ({
+	const bulkRescrapeMutation = createMutation<BulkRescrapeResponse, Error, {
+		jobId: string;
+		generation: number;
+		movieIds: string[];
+		selectedScrapers: string[];
+		preset?: string;
+		scalarStrategy?: string;
+		arrayStrategy?: string;
+	}>(() => ({
 		mutationFn: async ({
+			jobId: mutationJobId,
+			generation: mutationGeneration,
 			movieIds,
 			selectedScrapers,
 			preset,
 			scalarStrategy,
 			arrayStrategy,
 		}: {
+			jobId: string;
+			generation: number;
 			movieIds: string[];
 			selectedScrapers: string[];
 			preset?: string;
 			scalarStrategy?: string;
 			arrayStrategy?: string;
 		}) => {
-			return deps.bulkRescrapeMovies(deps.getJobId(), {
+			return deps.bulkRescrapeMovies(mutationJobId, {
 				movie_ids: movieIds,
 				selected_scrapers: selectedScrapers,
 				preset: preset as 'conservative' | 'gap-fill' | 'aggressive' | undefined,
@@ -564,10 +630,11 @@ const ops = Array.from(latestByFamily.entries());
 				array_strategy: arrayStrategy as 'merge' | 'replace' | undefined,
 			});
 		},
-		onSuccess: (data, { movieIds }) => {
+		onSuccess: (data, { movieIds, jobId: mutationJobId, generation }) => {
+			if (!isCurrentJob(mutationJobId, generation)) return;
 			if (data.job) {
 				deps.skipJobSync();
-				deps.setJob(data.job);
+				deps.setJob(data.job, mutationJobId, generation);
 			}
 
 			// Rescrape clears stored crop geometry server-side; mirror that into
@@ -596,9 +663,10 @@ const ops = Array.from(latestByFamily.entries());
 				deps.toastSuccess(m.review_rescraped_count({ count: data.succeeded }));
 			}
 
-			void invalidateJobQueries();
+			void invalidateJobQueries(mutationJobId);
 		},
-		onError: (err: Error) => {
+		onError: (err: Error, variables: { jobId: string; generation: number }) => {
+			if (!isCurrentJob(variables.jobId, variables.generation)) return;
 			deps.toastError(m.review_rescrape_movies_failed({ error: err.message }));
 		},
 	}));
@@ -606,19 +674,28 @@ const ops = Array.from(latestByFamily.entries());
 	// overlayFieldOverride is imported from ./overlay-field-override so it can be
 	// unit-tested independently (the .svelte.ts module can't export locals).
 
-	const fieldOverrideMutation = createMutation(() => ({
+	const fieldOverrideMutation = createMutation<
+		FieldOverrideResponse,
+		Error,
+		{ jobId: string; generation: number; resultId: string; field: string; source: string }
+	>(() => ({
 		mutationFn: async ({
+			jobId: mutationJobId,
+			generation: mutationGeneration,
 			resultId,
 			field,
 			source,
 		}: {
+			jobId: string;
+			generation: number;
 			resultId: string;
 			field: string;
 			source: string;
 		}) => {
-			return deps.overrideBatchMovieField(deps.getJobId(), resultId, { field, source });
+			return deps.overrideBatchMovieField(mutationJobId, resultId, { field, source });
 		},
-		onSuccess: (data: FieldOverrideResponse, { resultId, field, source }) => {
+		onSuccess: (data: FieldOverrideResponse, { resultId, field, source, jobId: mutationJobId, generation }) => {
+			if (!isCurrentJob(mutationJobId, generation)) return;
 			const currentJob = deps.getJob();
 			if (currentJob && data.movie) {
 				const updatedJob: BatchJobResponse = {
@@ -651,7 +728,7 @@ const ops = Array.from(latestByFamily.entries());
 					}
 				}
 				deps.skipJobSync();
-				deps.setJob(updatedJob);
+				deps.setJob(updatedJob, mutationJobId, generation);
 
 				// Overlay the overridden field onto any in-flight edit so a subsequent
 				// Save doesn't clobber the override (and unsaved edits to other fields survive).
@@ -666,16 +743,17 @@ const ops = Array.from(latestByFamily.entries());
 				}
 			}
 			deps.toastSuccess(m.review_field_replaced({ field, source }));
-			void invalidateJobQueries();
+			void invalidateJobQueries(mutationJobId);
 		},
-		onError: (err: Error) => {
+		onError: (err: Error, variables: { jobId: string; generation: number }) => {
+			if (!isCurrentJob(variables.jobId, variables.generation)) return;
 			deps.toastError(m.review_field_override_failed({ error: err.message }));
 			},
 	}));
 
 	async function applyFieldOverrideAsync(resultId: string, field: string, source: string) {
 		if (!deps.getJob()) return;
-		await fieldOverrideMutation.mutateAsync({ resultId, field, source });
+		await fieldOverrideMutation.mutateAsync({ jobId: deps.getJobId(), generation: deps.getRouteGeneration(), resultId, field, source });
 	}
 
 	return {

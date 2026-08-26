@@ -668,6 +668,7 @@ export interface UpdateRequest {
 	array_strategy?: 'merge' | 'replace';
 	skip_nfo?: boolean;
 	skip_download?: boolean;
+	retry_file_paths?: string[];
 }
 
 export interface OrganizeRequest {
@@ -678,6 +679,7 @@ export interface OrganizeRequest {
 	operation_mode?: OperationMode;
 	skip_nfo?: boolean;
 	skip_download?: boolean;
+	retry_file_paths?: string[];
 }
 
 export interface OrganizeResponse {

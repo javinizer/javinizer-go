@@ -7,10 +7,10 @@ import {
 	viewModeToUrlParam as sharedViewModeToUrlParam,
 	type ReviewViewMode,
 } from '$lib/utils/review-tab-sync';
-import type { Page } from '@sveltejs/kit';
 import { createQuery, useQueryClient } from '@tanstack/svelte-query';
 import { apiClient } from '$lib/api/client';
-import { BaseClient } from '$lib/api/clients/common';
+import { ApiError, BaseClient } from '$lib/api/clients/common';
+import { translateErrorCode } from '$lib/i18n/api-messages';
 import { createConfigQuery } from '$lib/query/queries';
 import type {
 	BatchJobResponse,
@@ -30,6 +30,7 @@ import { confirmDialog } from '$lib/stores/dialog.svelte';
 import { websocketStore } from '$lib/stores/websocket';
 import {
 	createOrganizeController,
+	type ApplyRecoveryState,
 	type FileStatus,
 	type OrganizeOperation,
 } from '../logic/organize-controller';
@@ -57,6 +58,8 @@ import { nextOrganizeProgress } from '$lib/utils/job-progress';
 import { createReviewMutations } from './review-mutations.svelte';
 import { buildMovieOverride } from './save-helpers';
 import { clearCropGeometry, siblingResultFilePaths } from './poster-crop-sync';
+import { getReviewDetailTimeoutMs } from '../review-config';
+import { deriveReviewLoadPhase, isAbortError } from './review-load-state';
 import * as m from '$lib/paraglide/messages';
 
 interface MovieGroup {
@@ -135,15 +138,129 @@ export function buildReviewApplyOverrides(
 	}
 	return overrides;
 }
-export function createReviewState(pageStore: Page) {
-	let jobId = $derived(pageStore.params.jobId as string);
+function formatReviewLoadError(error: unknown, fallback: string): string | null {
+	if (!error || isAbortError(error)) return null;
+	if (error instanceof ApiError) {
+		const detail = error.message.trim().slice(0, 240);
+		return translateErrorCode(error.code ?? '', error.params ?? null, detail || fallback);
+	}
+	return fallback;
+}
+
+export function isApplyInProgress(job: BatchJobResponse): boolean {
+	const activeFileCount = Object.keys(job.results ?? {}).filter(
+		(filePath) => !job.excluded?.[filePath],
+	).length;
+	return (
+		(job.status === 'running' &&
+			(job.update || (activeFileCount > 0 && job.completed + job.failed >= activeFileCount))) ||
+		(job.status === 'completed' && job.failed > 0)
+	);
+}
+
+export function createReviewState(getJobId: () => string) {
+	const teardownJobId = getJobId();
+	let jobId = $derived(getJobId());
+	let routeGeneration = 0;
+	let operationScope: { jobId: string; generation: number } | null = null;
+	const activeJobId = () => operationScope?.jobId ?? jobId;
+	const activeGeneration = () => operationScope?.generation ?? routeGeneration;
+
+	async function runForJob<T>(targetJobId: string, operation: () => Promise<T>): Promise<T> {
+		const previous = operationScope;
+		operationScope = { jobId: targetJobId, generation: routeGeneration };
+		try {
+			return await operation();
+		} finally {
+			operationScope = previous;
+		}
+	}
+
+	const applyRecoveryKey = (targetJobId: string) => `javinizer.review.applyRecovery.${targetJobId}`;
+
+	function readApplyRecovery(targetJobId: string): ApplyRecoveryState | null {
+		if (!browser) return null;
+		const raw = localStorage.getItem(applyRecoveryKey(targetJobId));
+		if (!raw) return null;
+		try {
+			const parsed = JSON.parse(raw) as Partial<ApplyRecoveryState>;
+			const organizeOperations: OrganizeOperation[] = ['move', 'copy', 'hardlink', 'softlink'];
+			if (
+				parsed.jobId !== targetJobId ||
+				(parsed.operation !== 'organize' && parsed.operation !== 'update') ||
+				typeof parsed.skipNfo !== 'boolean' ||
+				typeof parsed.skipDownload !== 'boolean' ||
+				(parsed.operation === 'organize' &&
+					!organizeOperations.includes(parsed.organizeOperation as OrganizeOperation)) ||
+				(parsed.eligibleFilePaths !== undefined && !Array.isArray(parsed.eligibleFilePaths)) ||
+				(parsed.succeeded !== undefined && !Array.isArray(parsed.succeeded))
+			) {
+				localStorage.removeItem(applyRecoveryKey(targetJobId));
+				return null;
+			}
+			const failed = parsed.failed && typeof parsed.failed === 'object' ? parsed.failed : {};
+			const eligibleFilePaths = Array.isArray(parsed.eligibleFilePaths)
+				? parsed.eligibleFilePaths.filter(
+						(filePath): filePath is string => typeof filePath === 'string',
+					)
+				: [];
+			const succeeded = Array.isArray(parsed.succeeded)
+				? parsed.succeeded.filter((filePath): filePath is string => typeof filePath === 'string')
+				: [];
+			return {
+				jobId: parsed.jobId,
+				operation: parsed.operation,
+				destination: typeof parsed.destination === 'string' ? parsed.destination : '',
+				skipNfo: parsed.skipNfo,
+				skipDownload: parsed.skipDownload,
+				organizeOperation: (parsed.organizeOperation as OrganizeOperation | undefined) ?? 'move',
+				overrides: parsed.overrides,
+				updateOptions: parsed.updateOptions,
+				failed: failed as Record<string, string>,
+				succeeded,
+				eligibleFilePaths,
+			};
+		} catch {
+			localStorage.removeItem(applyRecoveryKey(targetJobId));
+			return null;
+		}
+	}
+
+	function writeApplyRecovery(recovery: ApplyRecoveryState): void {
+		if (!browser) return;
+		try {
+			localStorage.setItem(applyRecoveryKey(recovery.jobId), JSON.stringify(recovery));
+		} catch {
+			// Recovery metadata is best effort; the active operation remains usable.
+		}
+	}
+
+	function clearApplyRecovery(targetJobId: string): void {
+		if (!browser) return;
+		localStorage.removeItem(applyRecoveryKey(targetJobId));
+	}
+
+	function getApplyEligibleFilePaths(batchJob: BatchJobResponse | null): string[] {
+		if (!batchJob) return [];
+		return Object.entries(batchJob.results ?? {})
+			.filter(
+				([filePath, result]) =>
+					!batchJob.excluded?.[filePath] && result.status === 'completed' && !!result.movie,
+			)
+			.map(([filePath]) => filePath);
+	}
 
 	const queryClient = useQueryClient();
 
 	const jobQuery = createQuery(() => ({
 		queryKey: ['batch-job', jobId],
-		queryFn: () => apiClient.getBatchJob(jobId, true),
+		queryFn: ({ signal }: { signal: AbortSignal }) =>
+			apiClient.getBatchJob(jobId, true, {
+				signal,
+				timeoutMs: getReviewDetailTimeoutMs(),
+			}),
 		placeholderData: (prev) => (prev?.id === jobId ? prev : undefined),
+		retry: false,
 	}));
 
 	let job = $state<BatchJobResponse | null>(null);
@@ -166,8 +283,20 @@ export function createReviewState(pageStore: Page) {
 		});
 	});
 
-	let loading = $derived(jobQuery.isPending || !job || job.id !== jobId);
-	let error = $derived(jobQuery.error?.message ?? null);
+	let hasUsableJob = $derived(job?.id === jobId);
+	let currentLoadError = $derived(formatReviewLoadError(jobQuery.error, m.review_load_error()));
+	let loadPhase = $derived(
+		deriveReviewLoadPhase({
+			hasUsableJob,
+			isPending: jobQuery.isPending,
+			isFetching: jobQuery.isFetching,
+			hasError: currentLoadError !== null,
+		}),
+	);
+	let loading = $derived(loadPhase === 'loading');
+	let error = $derived(loadPhase === 'error' ? currentLoadError : null);
+	let refreshLoadError = $derived(formatReviewLoadError(jobQuery.error, m.review_refresh_error()));
+	let refreshError = $derived(loadPhase === 'refresh-error' ? refreshLoadError : null);
 
 	const configQuery = createConfigQuery();
 	let config = $derived(configQuery.data ?? null);
@@ -534,10 +663,14 @@ export function createReviewState(pageStore: Page) {
 	);
 
 	const mutations = createReviewMutations({
-		getJobId: () => jobId,
+		getJobId: activeJobId,
+		isCurrentOperation: (candidateJobId, candidateGeneration) =>
+			candidateJobId === jobId && candidateGeneration === routeGeneration,
+		getRouteGeneration: () => activeGeneration(),
 		getJob: () => job,
-		setJob: (nextJob) => {
-			job = nextJob;
+		setJob: (nextJob, expectedJobId = nextJob.id, expectedGeneration = routeGeneration) => {
+			if (expectedJobId === jobId && expectedGeneration === routeGeneration && nextJob.id === jobId)
+				job = nextJob;
 		},
 		skipJobSync: () => {
 			skipJobSync = true;
@@ -697,6 +830,8 @@ export function createReviewState(pageStore: Page) {
 
 	async function bulkExcludeMovies() {
 		if (selectedMovieIds.size === 0) return;
+		const targetJobId = jobId;
+		const targetGeneration = routeGeneration;
 		const count = selectedMovieIds.size;
 		const confirmed = await confirmDialog(
 			m.review_exclude_movies_title(),
@@ -704,7 +839,10 @@ export function createReviewState(pageStore: Page) {
 			{ confirmLabel: m.review_exclude_label(), variant: 'danger' },
 		);
 		if (!confirmed) return;
+		if (jobId !== targetJobId || routeGeneration !== targetGeneration) return;
 		mutations.bulkExcludeMutation.mutate({
+			jobId: targetJobId,
+			generation: targetGeneration,
 			resultIds: filteredMovieGroups
 				.filter((g) => selectedMovieIds.has(g.movieId))
 				.flatMap((g) => g.results.map((r) => r.result_id)),
@@ -713,6 +851,8 @@ export function createReviewState(pageStore: Page) {
 
 	async function openBulkRescrapeModal() {
 		if (selectedMovieIds.size === 0) return;
+		const targetJobId = jobId;
+		const targetGeneration = routeGeneration;
 		if (availableScrapers.length === 0) {
 			try {
 				availableScrapers = await apiClient.getScrapers();
@@ -721,6 +861,7 @@ export function createReviewState(pageStore: Page) {
 				return;
 			}
 		}
+		if (jobId !== targetJobId || routeGeneration !== targetGeneration) return;
 		rescrapeMovieId = '';
 		bulkRescrapeMovieIds = Array.from(selectedMovieIds);
 		rescrapeSelectedScrapers = availableScrapers.filter((s) => s.enabled).map((s) => s.name);
@@ -744,32 +885,40 @@ export function createReviewState(pageStore: Page) {
 		bulkRescrapeProgress = bulkRescrapeMovieIds.map((id) => ({ movie_id: id, status: 'pending' }));
 		showRescrapeModal = false;
 
+		const targetJobId = jobId;
+		const targetGeneration = routeGeneration;
 		try {
-			const result = await mutations.bulkRescrapeMutation.mutateAsync({
-				movieIds: bulkRescrapeMovieIds,
-				selectedScrapers,
-				preset: rescrapePreset,
-				scalarStrategy: rescrapeScalarStrategy || undefined,
-				arrayStrategy: rescrapeArrayStrategy || undefined,
-			});
+			const result = await runForJob(targetJobId, () =>
+				mutations.bulkRescrapeMutation.mutateAsync({
+					jobId: targetJobId,
+					generation: targetGeneration,
+					movieIds: bulkRescrapeMovieIds,
+					selectedScrapers,
+					preset: rescrapePreset,
+					scalarStrategy: rescrapeScalarStrategy || undefined,
+					arrayStrategy: rescrapeArrayStrategy || undefined,
+				}),
+			);
 
+			if (jobId !== targetJobId || routeGeneration !== targetGeneration) return;
 			bulkRescrapeProgress = result.results.map((r) => ({
 				movie_id: r.movie_id,
 				status: r.status,
 				error: r.error,
 			}));
 
-			if (result.job) {
+			if (result.job && jobId === targetJobId) {
 				skipJobSync = true;
 				job = JSON.parse(JSON.stringify(result.job));
 			}
 
-			void queryClient.invalidateQueries({ queryKey: ['batch-job', jobId] });
+			void queryClient.invalidateQueries({ queryKey: ['batch-job', targetJobId] });
 		} catch (error) {
+			if (jobId !== targetJobId || routeGeneration !== targetGeneration) return;
 			const errorMessage = error instanceof Error ? error.message : String(error);
 			toastStore.error(m.review_bulk_rescrape_failed({ error: errorMessage }));
 		} finally {
-			bulkRescraping = false;
+			if (jobId === targetJobId && routeGeneration === targetGeneration) bulkRescraping = false;
 		}
 	}
 
@@ -946,15 +1095,20 @@ export function createReviewState(pageStore: Page) {
 	}
 
 	async function saveAllEdits() {
-		await mutations.saveEditsMutation.mutateAsync();
+		const targetJobId = activeJobId();
+		const targetGeneration = activeGeneration();
+		await runForJob(targetJobId, () =>
+			mutations.saveEditsMutation.mutateAsync({ jobId: targetJobId, generation: targetGeneration }),
+		);
 	}
 
 	const organizeController = createOrganizeController({
-		getJobId: () => jobId,
+		getJobId: activeJobId,
 		getIsUpdateMode: () => isUpdateMode,
 		getJob: () => job,
-		setJob: (nextJob) => {
-			job = nextJob;
+		setJob: (nextJob, expectedJobId = nextJob.id, expectedGeneration = routeGeneration) => {
+			if (expectedJobId === jobId && expectedGeneration === routeGeneration && nextJob.id === jobId)
+				job = nextJob;
 		},
 		getDestinationPath: () => destinationPath,
 		getOrganizeOperation: () => organizeOperation,
@@ -989,9 +1143,28 @@ export function createReviewState(pageStore: Page) {
 		toastSuccess: (message, duration) => toastStore.success(message, duration),
 		toastError: (message, duration) => toastStore.error(message, duration),
 		toastInfo: (message, duration) => toastStore.info(message, duration),
+		recordApplyFailure: (filePath, error) => {
+			const recovery = readApplyRecovery(jobId);
+			if (recovery) {
+				recovery.failed[filePath] = error ?? 'Operation failed';
+				writeApplyRecovery(recovery);
+			}
+		},
+		recordApplySuccess: (filePath) => {
+			const recovery = readApplyRecovery(jobId);
+			if (recovery) {
+				delete recovery.failed[filePath];
+				if (!recovery.succeeded.includes(filePath)) recovery.succeeded.push(filePath);
+				writeApplyRecovery(recovery);
+			}
+		},
+		clearApplyRecovery: () => clearApplyRecovery(jobId),
 		navigateBrowse: () => {
 			void goto('/browse');
 		},
+		isCurrentOperation: (candidateJobId, candidateGeneration) =>
+			candidateJobId === jobId && candidateGeneration === routeGeneration,
+		getRouteGeneration: () => activeGeneration(),
 		api: {
 			getBatchJob: (nextJobId) => apiClient.getBatchJob(nextJobId, true),
 			organizeBatchJob: (nextJobId, request) => apiClient.organizeBatchJob(nextJobId, request),
@@ -1000,11 +1173,15 @@ export function createReviewState(pageStore: Page) {
 	});
 
 	const rescrapeController = createRescrapeController({
-		getJobId: () => jobId,
+		getJobId: activeJobId,
+		isCurrentOperation: (candidateJobId, candidateGeneration) =>
+			candidateJobId === jobId && candidateGeneration === routeGeneration,
+		getRouteGeneration: () => activeGeneration(),
 		getCurrentResult: () => rescrapeTargetResult ?? currentResult,
 		getJob: () => job,
-		setJob: (nextJob) => {
-			job = nextJob;
+		setJob: (nextJob, expectedJobId = nextJob.id, expectedGeneration = routeGeneration) => {
+			if (expectedJobId === jobId && expectedGeneration === routeGeneration && nextJob.id === jobId)
+				job = nextJob;
 		},
 		getEditedMovies: () => editedMovies,
 		getAvailableScrapers: () => availableScrapers,
@@ -1054,7 +1231,10 @@ export function createReviewState(pageStore: Page) {
 
 	const posterCropController = createPosterCropController({
 		getBrowser: () => browser,
-		getJobId: () => jobId,
+		getJobId: activeJobId,
+		isCurrentOperation: (candidateJobId, candidateGeneration) =>
+			candidateJobId === jobId && candidateGeneration === routeGeneration,
+		getRouteGeneration: () => activeGeneration(),
 		getCurrentMovie: () => currentMovie,
 		getCurrentResult: () => currentResult,
 		getShowPosterCropModal: () => showPosterCropModal,
@@ -1158,7 +1338,11 @@ export function createReviewState(pageStore: Page) {
 			imageViewerTitle = title;
 		},
 		excludeMovie: (mutationJobId, resultId) => {
-			mutations.excludeMovieMutation.mutate({ jobId: mutationJobId, resultId });
+			mutations.excludeMovieMutation.mutate({
+				jobId: mutationJobId,
+				generation: activeGeneration(),
+				resultId,
+			});
 		},
 		api: {
 			getPreviewImageURL: (url) => apiClient.getPreviewImageURL(url),
@@ -1175,12 +1359,16 @@ export function createReviewState(pageStore: Page) {
 	}
 
 	function loadSources(resultId: string) {
-		return apiClient.getBatchMovieSources(jobId, resultId);
+		const targetJobId = jobId;
+		return apiClient.getBatchMovieSources(targetJobId, resultId);
 	}
 
-	function applyFieldOverride(field: string, source: string) {
+	async function applyFieldOverride(field: string, source: string) {
 		if (!currentResult) return;
-		return mutations.applyFieldOverrideAsync(currentResult.result_id, field, source);
+		const targetJobId = jobId;
+		await runForJob(targetJobId, () =>
+			mutations.applyFieldOverrideAsync(currentResult!.result_id, field, source),
+		);
 	}
 
 	async function openRescrapeModal(movieId: string) {
@@ -1195,6 +1383,8 @@ export function createReviewState(pageStore: Page) {
 	}
 
 	async function openRescrapeModalForFailed(result: FileResult) {
+		const targetJobId = jobId;
+		const targetGeneration = routeGeneration;
 		bulkRescrapeMovieIds = [];
 		if (availableScrapers.length === 0) {
 			try {
@@ -1204,6 +1394,7 @@ export function createReviewState(pageStore: Page) {
 				return;
 			}
 		}
+		if (jobId !== targetJobId || routeGeneration !== targetGeneration) return;
 		rescrapeTargetResult = result;
 		rescrapeMovieId = result.movie_id;
 		rescrapeResultId = result.result_id;
@@ -1223,7 +1414,8 @@ export function createReviewState(pageStore: Page) {
 	});
 
 	async function executeRescrape(mode?: { manualSearchMode: boolean; manualSearchInput: string }) {
-		await rescrapeController.executeRescrape(mode);
+		const targetJobId = jobId;
+		await runForJob(targetJobId, () => rescrapeController.executeRescrape(mode));
 	}
 
 	function buildReviewOverrides(): ReviewApplyOverrides {
@@ -1244,23 +1436,181 @@ export function createReviewState(pageStore: Page) {
 		);
 	}
 
-	async function organizeAll() {
-		await organizeController.organizeAll(skipNfo, skipDownload, buildReviewOverrides());
+	async function organizeAll(
+		skipNfoArg = skipNfo,
+		skipDownloadArg = skipDownload,
+		overridesArg = buildReviewOverrides(),
+		retryPaths: string[] = [],
+	) {
+		const targetJobId = jobId;
+		writeApplyRecovery({
+			jobId: targetJobId,
+			operation: 'organize',
+			destination: destinationPath,
+			skipNfo: skipNfoArg,
+			skipDownload: skipDownloadArg,
+			organizeOperation,
+			overrides: overridesArg,
+			failed: {},
+			succeeded: [],
+			eligibleFilePaths: Array.from(new Set([...getApplyEligibleFilePaths(job), ...retryPaths])),
+		});
+		await runForJob(targetJobId, () =>
+			organizeController.organizeAll(skipNfoArg, skipDownloadArg, overridesArg, retryPaths),
+		);
 	}
 
-	async function updateAll() {
-		const options: UpdateRequest = { overrides: buildReviewOverrides() };
-		await organizeController.updateAll(options);
+	async function updateAll(options?: UpdateRequest, retryPaths: string[] = []) {
+		const targetJobId = jobId;
+		const request: UpdateRequest = options ?? { overrides: buildReviewOverrides() };
+		writeApplyRecovery({
+			jobId: targetJobId,
+			operation: 'update',
+			destination: '',
+			skipNfo: false,
+			skipDownload: false,
+			organizeOperation: 'move',
+			updateOptions: request,
+			failed: {},
+			succeeded: [],
+			eligibleFilePaths: Array.from(new Set([...getApplyEligibleFilePaths(job), ...retryPaths])),
+		});
+		await runForJob(targetJobId, () => organizeController.updateAll(request, retryPaths));
 	}
 
 	async function retryFailed() {
-		await organizeController.retryFailed();
+		const targetJobId = jobId;
+		const recovery = readApplyRecovery(targetJobId);
+		const retryPaths = new Set(Object.keys(recovery?.failed ?? {}));
+		for (const [filePath, status] of fileStatuses) {
+			if (status.status === 'failed') retryPaths.add(filePath);
+		}
+		for (const [filePath, result] of Object.entries(job?.results ?? {})) {
+			if (result.status === 'failed' && result.movie) retryPaths.add(filePath);
+		}
+		const paths = Array.from(retryPaths);
+		if (recovery?.operation === 'update') {
+			await updateAll(recovery.updateOptions, paths);
+			return;
+		}
+		if (recovery?.operation === 'organize') {
+			await organizeAll(recovery.skipNfo, recovery.skipDownload, recovery.overrides, paths);
+			return;
+		}
+		await runForJob(targetJobId, () => organizeController.retryFailed());
 	}
 
 	let existingNfo = $state<ExistingNFOResponse | null>(null);
 	let nfoDifferences = $state<FieldDifference[] | undefined>(undefined);
 	let existingNfoTimer: ReturnType<typeof setTimeout> | undefined;
 	let existingNfoGen = 0;
+	let lastRouteJobId = teardownJobId;
+
+	$effect(() => {
+		const currentJobId = jobId;
+		if (lastRouteJobId === currentJobId) return;
+		lastRouteJobId = currentJobId;
+		routeGeneration += 1;
+		operationScope = null;
+		mutations.posterFromUrlMutation.reset();
+		mutations.posterCropMutation.reset();
+		mutations.excludeMovieMutation.reset();
+		mutations.bulkExcludeMutation.reset();
+		mutations.bulkRescrapeMutation.reset();
+		mutations.saveEditsMutation.reset();
+		mutations.fieldOverrideMutation.reset();
+		organizeController.cleanup();
+		posterCropController.cleanup();
+		if (existingNfoTimer) clearTimeout(existingNfoTimer);
+		existingNfoGen += 1;
+
+		untrack(() => {
+			skipJobSync = false;
+			job = null;
+			currentMovieIndex = 0;
+			selectedMovieIds.clear();
+			lastSelectedMovieId = null;
+			selectionMode = false;
+			completenessFilter.clear();
+			completenessFilter.add('incomplete');
+			completenessFilter.add('partial');
+			completenessFilter.add('complete');
+			organizing = false;
+			organizeOperation = 'move';
+			organizeProgress = 0;
+			organizeStatus = 'idle';
+			fileStatuses.clear();
+			expectedOrganizeFilePaths = [];
+			showDestinationBrowser = false;
+			tempDestinationPath = '';
+			showTrailerModal = false;
+			showImageViewer = false;
+			imageViewerImages = [];
+			imageViewerIndex = 0;
+			imageViewerTitle = undefined;
+			showAllSidebarScreenshots = false;
+			showFullSourcePath = false;
+			showImagePanelContent = true;
+			showAllPreviewScreenshots = false;
+			showPosterCropModal = false;
+			showSourceViewerModal = false;
+			showOutputPreviewModal = false;
+			showImageManagerModal = false;
+			posterCropLoadError = null;
+			cropSourceURL = '';
+			cropImageElement = null;
+			cropMetrics = null;
+			cropBox = null;
+			maxPosterHeight = null;
+			cropDragState = null;
+			cropApplying = false;
+			posterCropStates.clear();
+			availableScrapers = [];
+			showRescrapeModal = false;
+			rescrapeMovieId = '';
+			rescrapeResultId = '';
+			rescrapeSelectedScrapers = [];
+			rescrapingStates.clear();
+			manualSearchMode = false;
+			manualSearchInput = '';
+			rescrapeTargetResult = null;
+			rescrapePreset = undefined;
+			rescrapeScalarStrategy = 'prefer-nfo';
+			rescrapeArrayStrategy = 'merge';
+			bulkRescraping = false;
+			bulkRescrapeProgress = [];
+			bulkRescrapeMovieIds = [];
+			existingNfo = null;
+			nfoDifferences = undefined;
+		});
+
+		if (browser) {
+			const savedCrops = localStorage.getItem(posterCropStatesStorageKey);
+			if (savedCrops) {
+				try {
+					const parsed = JSON.parse(savedCrops) as Record<string, PosterCropState>;
+					untrack(() => {
+						for (const [key, value] of Object.entries(parsed)) posterCropStates.set(key, value);
+					});
+				} catch {
+					localStorage.removeItem(posterCropStatesStorageKey);
+				}
+			}
+		}
+	});
+
+	$effect(() => {
+		const loadedJob = job;
+		if (!loadedJob || loadedJob.id !== jobId) return;
+		const recovery = readApplyRecovery(loadedJob.id);
+		if (!recovery) return;
+		if (recovery.operation === 'organize') {
+			organizeOperation = recovery.organizeOperation;
+			if (recovery.destination) destinationPath = recovery.destination;
+		}
+		if (!isApplyInProgress(loadedJob)) return;
+		if (organizeStatus === 'idle' && !organizing) organizeController.resumePolling(recovery);
+	});
 
 	$effect(() => {
 		const jid = jobId;
@@ -1482,6 +1832,12 @@ export function createReviewState(pageStore: Page) {
 	});
 
 	onDestroy(() => {
+		const queryKey = ['batch-job', teardownJobId] as const;
+		void queryClient.cancelQueries({ queryKey, exact: true });
+		const cachedQuery = queryClient.getQueryCache().find({ queryKey, exact: true });
+		if (cachedQuery && cachedQuery.state.data === undefined) {
+			queryClient.removeQueries({ queryKey, exact: true });
+		}
 		organizeController.cleanup();
 		posterCropController.cleanup();
 	});
@@ -1495,6 +1851,12 @@ export function createReviewState(pageStore: Page) {
 		},
 		get error() {
 			return error;
+		},
+		get refreshError() {
+			return refreshError;
+		},
+		retryLoad() {
+			void jobQuery.refetch({ cancelRefetch: true });
 		},
 		get config() {
 			return config;

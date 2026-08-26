@@ -30,6 +30,8 @@ export interface PosterAssetIdentity {
 interface PosterCropControllerDeps {
 	getBrowser: () => boolean;
 	getJobId: () => string;
+	isCurrentOperation?: (jobId: string, generation: number) => boolean;
+	getRouteGeneration?: () => number;
 	getCurrentMovie: () => Movie | null;
 	getCurrentResult: () => FileResult | undefined;
 	getShowPosterCropModal: () => boolean;
@@ -349,6 +351,10 @@ export function createPosterCropController(deps: PosterCropControllerDeps) {
 		const cropBoxVal = deps.getCropBox();
 		if (!currentMovie || !currentResult || !cropBoxVal) return;
 
+		const operationJobId = deps.getJobId();
+		const operationGeneration = deps.getRouteGeneration?.() ?? 0;
+		const isCurrentOperation = () =>
+			!deps.isCurrentOperation || deps.isCurrentOperation(operationJobId, operationGeneration);
 		deps.setCropApplying(true);
 		try {
 			// If the poster URL was edited client-side (not yet persisted to the
@@ -364,6 +370,7 @@ export function createPosterCropController(deps: PosterCropControllerDeps) {
 				currentMovie.poster_url !== serverPosterUrl
 			) {
 				await deps.applyPosterFromUrlAsync(currentResult.result_id, currentMovie.poster_url);
+				if (!isCurrentOperation()) return;
 			}
 
 			const maxPosterHeight = deps.getMaxPosterHeight();
@@ -378,6 +385,7 @@ export function createPosterCropController(deps: PosterCropControllerDeps) {
 			} else if (deps.getCropAssetIdentity) {
 				try {
 					identity = await deps.getCropAssetIdentity();
+					if (!isCurrentOperation()) return;
 				} catch {
 					deps.setPosterCropLoadError(
 						'Unable to verify the installed poster source. Reopen the crop and try again.',
@@ -391,6 +399,7 @@ export function createPosterCropController(deps: PosterCropControllerDeps) {
 					return;
 				}
 			}
+			if (!isCurrentOperation()) return;
 			if (identity) {
 				await deps.mutatePosterCropAsync(
 					deps.getJobId(),
@@ -410,7 +419,7 @@ export function createPosterCropController(deps: PosterCropControllerDeps) {
 		} catch {
 			// Errors are surfaced via toasts in the mutation handlers; abort the flow.
 		} finally {
-			deps.setCropApplying(false);
+			if (isCurrentOperation()) deps.setCropApplying(false);
 		}
 	}
 

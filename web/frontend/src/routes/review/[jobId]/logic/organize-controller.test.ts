@@ -96,7 +96,8 @@ function makeDeps(overrides: DepsOverrides = {}) {
 				return currentJob ?? makeJob('organizing');
 			},
 			organizeBatchJob: overrides.organizeBatchJob ?? defaultOrganizeBatchJob,
-			updateBatchJob: overrides.updateBatchJob ?? (async (_jobId: string, _request?: UpdateRequest) => undefined),
+			updateBatchJob:
+				overrides.updateBatchJob ?? (async (_jobId: string, _request?: UpdateRequest) => undefined),
 		},
 		pollIntervalMs: 5,
 		pollTimeoutMs: 60_000,
@@ -148,7 +149,7 @@ describe('organize-controller pollOnce terminal-success branches', () => {
 	});
 });
 
-	describe('organize-controller handleWebSocketMessage progress gating (NEW-1)', () => {
+describe('organize-controller handleWebSocketMessage progress gating (NEW-1)', () => {
 	// Regression for NEW-1: per-file 'organized'/'updated'/'failed' messages
 	// carry progress:100 but must NOT drive the progress bar (they are for
 	// fileStatuses display). Only the AGGREGATE 'pending' (incremental, no
@@ -175,7 +176,7 @@ describe('organize-controller pollOnce terminal-success branches', () => {
 
 	// Regression for F-1 (iter-9): the verbose per-file 'Organizing <file>'
 	// start message is 'pending' with Progress:0 AND a file_path (emitted by
-		// makeOrganizeFileStartBroadcaster). It must NOT drive the bar — doing so
+	// makeOrganizeFileStartBroadcaster). It must NOT drive the bar — doing so
 	// flickers the bar back to 0% at the start of every file (defeating NEW-1 and
 	// the aggregate high-water broadcaster). The bar-drive filter gates on
 	// !file_path so only the aggregate (no FilePath) drives the bar.
@@ -258,6 +259,27 @@ describe('organize-controller pollOnce terminal-success branches', () => {
 			await controller.updateAll({ overwrite_existing_media: true });
 
 			expect(requests).toEqual([{ overwrite_existing_media: true }]);
+			controller.cleanup();
+		});
+
+		it('passes explicitly retried failed paths to the update API', async () => {
+			const requests: UpdateRequest[] = [];
+			const { deps } = makeDeps({
+				isUpdateMode: true,
+				updateBatchJob: async (_jobId, request) => {
+					if (request) requests.push(request);
+				},
+			});
+			const controller = createOrganizeController(deps);
+
+			await controller.updateAll({ overwrite_existing_media: true }, ['/src/failed.mp4']);
+
+			expect(requests).toEqual([
+				{
+					overwrite_existing_media: true,
+					retry_file_paths: ['/src/failed.mp4'],
+				},
+			]);
 			controller.cleanup();
 		});
 	});

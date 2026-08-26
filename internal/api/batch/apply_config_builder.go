@@ -96,6 +96,7 @@ func resolveOrganizeApplyConfig(
 	applyOpts.GenerateNFO = !skipNFO
 	applyOpts.ForceNFO = planAware && !skipNFO
 	applyOpts.Download = !skipDownload
+	applyOpts.RetryFilePaths = append([]string(nil), req.RetryFilePaths...)
 	applyOpts.OperationModeOverride = resolved.OperationMode
 	sink := newOrganizeBroadcastSink(snap.RT())
 	applyOpts.OnPhaseComplete = makeOrganizeCompleteBroadcaster(job, false /* isUpdate */, sink)
@@ -221,6 +222,7 @@ func resolveUpdateApplyConfig(
 		applyOpts.Download = !skipDownload
 		applyOpts.OverwriteExistingMedia = overwriteExistingMedia
 	}
+	applyOpts.RetryFilePaths = append([]string(nil), req.RetryFilePaths...)
 	sink := newOrganizeBroadcastSink(snap.RT())
 	applyOpts.OnPhaseComplete = makeOrganizeCompleteBroadcaster(job, true /* isUpdate */, sink)
 	applyOpts.OnFileProgress = makeOrganizeProgressBroadcaster(job, true /* isUpdate */, sink)

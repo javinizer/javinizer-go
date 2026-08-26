@@ -10,6 +10,20 @@ import type {
 export type OrganizeOperation = 'move' | 'copy' | 'hardlink' | 'softlink';
 export type OrganizeStatus = 'idle' | 'organizing' | 'completed' | 'failed';
 
+export interface ApplyRecoveryState {
+	jobId: string;
+	operation: 'organize' | 'update';
+	destination: string;
+	skipNfo: boolean;
+	skipDownload: boolean;
+	overrides?: ReviewApplyOverrides;
+	updateOptions?: UpdateRequest;
+	failed: Record<string, string>;
+	succeeded: string[];
+	organizeOperation: OrganizeOperation;
+	eligibleFilePaths: string[];
+}
+
 export interface FileStatus {
 	status: string;
 	error?: string;
@@ -19,7 +33,7 @@ interface OrganizeControllerDeps {
 	getJobId: () => string;
 	getIsUpdateMode: () => boolean;
 	getJob: () => BatchJobResponse | null;
-	setJob: (job: BatchJobResponse) => void;
+	setJob: (job: BatchJobResponse, expectedJobId?: string, expectedGeneration?: number) => void;
 	getDestinationPath: () => string;
 	getOrganizeOperation: () => OrganizeOperation;
 	getOperationMode: () => string;
@@ -36,7 +50,12 @@ interface OrganizeControllerDeps {
 	toastSuccess: (message: string, duration?: number) => void;
 	toastError: (message: string, duration?: number) => void;
 	toastInfo: (message: string, duration?: number) => void;
+	recordApplyFailure?: (filePath: string, error?: string) => void;
+	recordApplySuccess?: (filePath: string) => void;
+	clearApplyRecovery?: () => void;
 	navigateBrowse: () => void;
+	isCurrentOperation?: (jobId: string, generation: number) => boolean;
+	getRouteGeneration?: () => number;
 	api: {
 		getBatchJob: (jobId: string, includeData?: boolean) => Promise<BatchJobResponse>;
 		organizeBatchJob: (
@@ -49,6 +68,7 @@ interface OrganizeControllerDeps {
 				skip_nfo?: boolean;
 				skip_download?: boolean;
 				overrides?: ReviewApplyOverrides;
+				retry_file_paths?: string[];
 			},
 		) => Promise<unknown>;
 		updateBatchJob: (jobId: string, request?: UpdateRequest) => Promise<unknown>;
@@ -87,6 +107,7 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 	const redirectDelayMs = deps.redirectDelayMs ?? 5000;
 
 	let organizePollTimer: ReturnType<typeof setTimeout> | null = null;
+	let organizeRunToken = 0;
 	let organizeCompletionTimer: ReturnType<typeof setTimeout> | null = null;
 	let organizeRedirectTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -138,6 +159,7 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 				(s) => s.status === 'failed',
 			).length;
 			if (failures === 0) {
+				deps.clearApplyRecovery?.();
 				const action = deps.getIsUpdateMode() ? 'updated' : 'organized';
 				deps.toastSuccess(
 					message || `All files ${action} successfully! Redirecting in 5 seconds...`,
@@ -158,20 +180,38 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 		deps.toastError(message, 7000);
 	}
 
-	function startOrganizeCompletionPolling() {
+	function startOrganizeCompletionPolling(operationJobId: string, operationGeneration: number) {
+		const runToken = ++organizeRunToken;
+		const isActiveRun = () => runToken === organizeRunToken;
 		clearOrganizePollTimer();
 		const startedAt = Date.now();
 		let lastPollError: string | null = null;
 
 		const pollOnce = async () => {
+			if (!isActiveRun()) return;
+			if (
+				deps.isCurrentOperation &&
+				!deps.isCurrentOperation(operationJobId, operationGeneration)
+			) {
+				if (isActiveRun()) clearOrganizePollTimer();
+				return;
+			}
 			if (deps.getOrganizeStatus() !== 'organizing') {
 				clearOrganizePollTimer();
 				return;
 			}
 
 			try {
-				const latestJob = await deps.api.getBatchJob(deps.getJobId(), true);
-				deps.setJob(latestJob);
+				const latestJob = await deps.api.getBatchJob(operationJobId, true);
+				if (!isActiveRun()) return;
+				if (
+					deps.isCurrentOperation &&
+					!deps.isCurrentOperation(operationJobId, operationGeneration)
+				) {
+					if (isActiveRun()) clearOrganizePollTimer();
+					return;
+				}
+				deps.setJob(latestJob, operationJobId, operationGeneration);
 				lastPollError = null;
 
 				if (
@@ -214,6 +254,7 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 				return;
 			}
 
+			if (!isActiveRun()) return;
 			organizePollTimer = setTimeout(() => {
 				void pollOnce();
 			}, pollIntervalMs);
@@ -222,13 +263,16 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 		void pollOnce();
 	}
 
-	function prepareOrganizeRun() {
+	function prepareOrganizeRun(extraPaths: string[] = []) {
+		organizeRunToken += 1;
 		deps.clearWebSocketMessages();
 		deps.setOrganizeStatus('organizing');
 		deps.setOrganizing(true);
 		deps.setOrganizeProgress(0);
 		deps.getFileStatuses().clear();
-		deps.setExpectedOrganizeFilePaths(getOrganizeEligibleFilePaths(deps.getJob()));
+		const eligiblePaths = new Set(getOrganizeEligibleFilePaths(deps.getJob()));
+		for (const filePath of extraPaths) eligiblePaths.add(filePath);
+		deps.setExpectedOrganizeFilePaths(Array.from(eligiblePaths));
 		clearOrganizePollTimer();
 		clearOrganizeCompletionTimer();
 	}
@@ -237,11 +281,23 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 	let lastSkipNfo = false;
 	let lastSkipDownload = false;
 	let lastOrganizeOverrides: ReviewApplyOverrides | undefined;
+	let lastOrganizeOperation: OrganizeOperation = 'move';
+	let lastRecoveryFailedPaths: string[] = [];
 
-	async function organizeAll(skipNfo?: boolean, skipDownload?: boolean, overrides?: ReviewApplyOverrides) {
+	async function organizeAll(
+		skipNfo?: boolean,
+		skipDownload?: boolean,
+		overrides?: ReviewApplyOverrides,
+		retryPaths: string[] = [],
+	) {
+		const operationJobId = deps.getJobId();
+		const operationGeneration = deps.getRouteGeneration?.() ?? 0;
+		const operation = deps.getOrganizeOperation();
 		const effectiveMode = deps.getOperationMode();
+		const operationDestination = deps.getDestinationPath();
 		const needsDestination = effectiveMode === 'organize';
-		if (needsDestination && !deps.getDestinationPath().trim()) {
+		if (needsDestination && !operationDestination.trim()) {
+			deps.clearApplyRecovery?.();
 			deps.toastError('Please enter a destination path');
 			return;
 		}
@@ -249,27 +305,42 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 		lastSkipNfo = skipNfo ?? false;
 		lastSkipDownload = skipDownload ?? false;
 		lastOrganizeOverrides = overrides;
+		lastOrganizeOperation = operation;
+		lastRecoveryFailedPaths = retryPaths;
 
-		const { copyOnly, linkMode } = getOrganizeRequestOptions(deps.getOrganizeOperation());
-		prepareOrganizeRun();
+		const { copyOnly, linkMode } = getOrganizeRequestOptions(operation);
+		prepareOrganizeRun(retryPaths);
+		const operationToken = organizeRunToken;
 
 		try {
 			if (deps.getEditedMovies().size > 0) {
 				await deps.saveAllEdits();
 			}
 
-			await deps.api.organizeBatchJob(deps.getJobId(), {
-				destination: deps.getDestinationPath(),
+			if (operationToken !== organizeRunToken) return;
+			if (deps.isCurrentOperation && !deps.isCurrentOperation(operationJobId, operationGeneration))
+				return;
+
+			await deps.api.organizeBatchJob(operationJobId, {
+				destination: operationDestination,
 				copy_only: copyOnly,
 				link_mode: linkMode,
-				operation_mode: deps.getOperationMode() as OperationMode,
+				operation_mode: effectiveMode as OperationMode,
 				skip_nfo: skipNfo || false,
 				skip_download: skipDownload || false,
 				overrides,
+				retry_file_paths: retryPaths.length > 0 ? retryPaths : undefined,
 			});
 
-			startOrganizeCompletionPolling();
+			if (operationToken !== organizeRunToken) return;
+			if (deps.isCurrentOperation && !deps.isCurrentOperation(operationJobId, operationGeneration))
+				return;
+			startOrganizeCompletionPolling(operationJobId, operationGeneration);
 		} catch (e) {
+			if (operationToken !== organizeRunToken) return;
+			if (deps.isCurrentOperation && !deps.isCurrentOperation(operationJobId, operationGeneration))
+				return;
+			deps.clearApplyRecovery?.();
 			deps.setOrganizeStatus('failed');
 			deps.setOrganizing(false);
 			clearOrganizePollTimer();
@@ -278,8 +349,12 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 		}
 	}
 
-	async function updateAll(options?: UpdateRequest) {
-		prepareOrganizeRun();
+	async function updateAll(options?: UpdateRequest, retryPaths: string[] = []) {
+		const operationJobId = deps.getJobId();
+		const operationGeneration = deps.getRouteGeneration?.() ?? 0;
+		lastRecoveryFailedPaths = retryPaths;
+		prepareOrganizeRun(retryPaths);
+		const operationToken = organizeRunToken;
 
 		if (options) {
 			lastUpdateOptions = options;
@@ -290,9 +365,21 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 				await deps.saveAllEdits();
 			}
 
-			await deps.api.updateBatchJob(deps.getJobId(), options);
-			startOrganizeCompletionPolling();
+			if (deps.isCurrentOperation && !deps.isCurrentOperation(operationJobId, operationGeneration))
+				return;
+
+			const request =
+				retryPaths.length > 0 ? { ...options, retry_file_paths: retryPaths } : options;
+			await deps.api.updateBatchJob(operationJobId, request);
+			if (operationToken !== organizeRunToken) return;
+			if (deps.isCurrentOperation && !deps.isCurrentOperation(operationJobId, operationGeneration))
+				return;
+			startOrganizeCompletionPolling(operationJobId, operationGeneration);
 		} catch (e) {
+			if (operationToken !== organizeRunToken) return;
+			if (deps.isCurrentOperation && !deps.isCurrentOperation(operationJobId, operationGeneration))
+				return;
+			deps.clearApplyRecovery?.();
 			deps.setOrganizeStatus('failed');
 			deps.setOrganizing(false);
 			clearOrganizePollTimer();
@@ -309,10 +396,14 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 
 		deps.toastInfo(`Retrying ${failedCount} failed file${failedCount > 1 ? 's' : ''}...`);
 
+		const retryPaths = Array.from(deps.getFileStatuses().entries())
+			.filter(([, status]) => status.status === 'failed')
+			.map(([filePath]) => filePath);
+		const allRetryPaths = Array.from(new Set([...lastRecoveryFailedPaths, ...retryPaths]));
 		if (deps.getIsUpdateMode()) {
-			await updateAll(lastUpdateOptions);
+			await updateAll(lastUpdateOptions, allRetryPaths);
 		} else {
-			await organizeAll(lastSkipNfo, lastSkipDownload, lastOrganizeOverrides);
+			await organizeAll(lastSkipNfo, lastSkipDownload, lastOrganizeOverrides, allRetryPaths);
 		}
 	}
 
@@ -333,7 +424,8 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 		// to 0% at each file start (the iter-9 F-1 regression). Gate on !file_path
 		// so only the aggregate (no FilePath) drives the bar.
 		if (
-			(msg.progress !== undefined && msg.progress !== null) &&
+			msg.progress !== undefined &&
+			msg.progress !== null &&
 			!msg.file_path &&
 			(msg.status === 'pending' ||
 				msg.status === 'organization_completed' ||
@@ -344,6 +436,7 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 
 		if (msg.status === 'failed' && msg.file_path) {
 			updateFileStatus(msg.file_path, { status: 'failed', error: msg.error });
+			deps.recordApplyFailure?.(msg.file_path, msg.error);
 			const fileName = msg.file_path.split(/[\\/]/).pop();
 			const action = deps.getIsUpdateMode() ? 'update' : 'organize';
 			deps.toastError(`Failed to ${action} ${fileName}: ${msg.error}`, 7000);
@@ -362,6 +455,7 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 
 		if ((msg.status === 'organized' || msg.status === 'updated') && msg.file_path) {
 			updateFileStatus(msg.file_path, { status: 'success' });
+			deps.recordApplySuccess?.(msg.file_path);
 		}
 
 		if (msg.status === 'organization_completed' || msg.status === 'update_completed') {
@@ -370,8 +464,53 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 	}
 
 	function cleanup() {
+		organizeRunToken += 1;
 		clearOrganizePollTimer();
 		clearOrganizeCompletionTimer();
+	}
+
+	function resumePolling(recovery?: ApplyRecoveryState) {
+		const operationJobId = deps.getJobId();
+		const operationGeneration = deps.getRouteGeneration?.() ?? 0;
+		const job = deps.getJob();
+		if (recovery) {
+			lastSkipNfo = recovery.skipNfo;
+			lastSkipDownload = recovery.skipDownload;
+			lastOrganizeOverrides = recovery.overrides;
+			lastOrganizeOperation = recovery.organizeOperation;
+			lastRecoveryFailedPaths = Object.keys(recovery.failed);
+			for (const [filePath, result] of Object.entries(job?.results ?? {})) {
+				if (result.status === 'failed' && result.movie) lastRecoveryFailedPaths.push(filePath);
+			}
+			lastRecoveryFailedPaths = Array.from(new Set(lastRecoveryFailedPaths));
+			lastUpdateOptions = recovery.updateOptions;
+		}
+		deps.clearWebSocketMessages();
+		deps.setOrganizeStatus('organizing');
+		deps.setOrganizing(true);
+		// Scrape progress is normally 100 by the time apply starts. Apply progress
+		// begins at zero and is driven by fresh aggregate WebSocket messages.
+		deps.setOrganizeProgress(0);
+		deps.getFileStatuses().clear();
+		const eligiblePaths = new Set(getOrganizeEligibleFilePaths(job));
+		for (const filePath of recovery?.eligibleFilePaths ?? []) eligiblePaths.add(filePath);
+		deps.setExpectedOrganizeFilePaths(Array.from(eligiblePaths));
+		for (const filePath of recovery?.succeeded ?? []) {
+			deps.getFileStatuses().set(filePath, { status: 'success' });
+		}
+		for (const [filePath, error] of Object.entries(recovery?.failed ?? {})) {
+			deps.getFileStatuses().set(filePath, { status: 'failed', error });
+		}
+		for (const [filePath, result] of Object.entries(job?.results ?? {})) {
+			if (
+				result.status === 'failed' &&
+				eligiblePaths.has(filePath) &&
+				!recovery?.failed[filePath]
+			) {
+				deps.getFileStatuses().set(filePath, { status: 'failed', error: result.error });
+			}
+		}
+		startOrganizeCompletionPolling(operationJobId, operationGeneration);
 	}
 
 	return {
@@ -380,5 +519,6 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 		retryFailed,
 		handleWebSocketMessage,
 		cleanup,
+		resumePolling,
 	};
 }

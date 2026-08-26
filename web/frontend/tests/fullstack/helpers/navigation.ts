@@ -3,8 +3,10 @@
  * `page` fixture against the real SvelteKit frontend and waits for the
  * user-visible DOM the spec will then assert on.
  *
- * Helpers DO NOT call `page.route(...)`. Every API request the frontend
- * issues flows through Vite's proxy to the real Go backend.
+ * Helpers do not intercept API traffic. Dedicated review-load regression specs
+ * may use `page.route(...)` only for deterministic batch-detail failure and
+ * pre-header hold injection; successful API requests still flow through Vite's
+ * proxy to the real Go backend.
  */
 import type { Page } from '@playwright/test';
 

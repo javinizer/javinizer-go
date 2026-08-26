@@ -1,4 +1,4 @@
-import { BaseClient, AuthClient, SystemClient, getAPIBaseURL } from './clients/common';
+import { BaseClient, AuthClient, SystemClient, getAPIBaseURL, type RequestOptions } from './clients/common';
 import type { DesktopUpgradeRequest, DesktopUpgradeResponse } from './types';
 import { JobClient, FileClient, ScraperClient } from './clients/jobs';
 import { ActressClient } from './clients/actress';
@@ -128,8 +128,12 @@ class APIClient {
 	async batchScrape(request: Parameters<JobClient['batchScrape']>[0]) {
 		return this.jobs.batchScrape(request);
 	}
-	async getBatchJob(jobId: string, includeData?: boolean) {
-		return this.jobs.getBatchJob(jobId, includeData);
+	async getBatchJob(
+		jobId: string,
+		includeData?: boolean,
+		options?: RequestOptions,
+	) {
+		return this.jobs.getBatchJob(jobId, includeData, options);
 	}
 	async cancelBatchJob(jobId: string) {
 		return this.jobs.cancelBatchJob(jobId);

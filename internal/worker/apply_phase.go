@@ -93,9 +93,21 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 		fileResult *resultstore.MovieResult
 		movie      *models.Movie
 	}
+	retryPaths := make(map[string]struct{}, len(cfg.RetryFilePaths))
+	for _, filePath := range cfg.RetryFilePaths {
+		retryPaths[filePath] = struct{}{}
+	}
 	items := make([]applyItem, 0, len(inputs.Results))
 	for filePath, fileResult := range inputs.Results {
-		if fileResult.Status != models.JobStatusCompleted || fileResult.Movie == nil {
+		_, retryFailed := retryPaths[filePath]
+		if fileResult.Movie == nil {
+			continue
+		}
+		if len(retryPaths) > 0 {
+			if !retryFailed || (fileResult.Status != models.JobStatusFailed && fileResult.Status != models.JobStatusCompleted) {
+				continue
+			}
+		} else if fileResult.Status != models.JobStatusCompleted {
 			continue
 		}
 		if excludedSnapshot[filePath] {
@@ -446,6 +458,12 @@ func interpretApplyResult(
 						return current, prov, nil
 					}
 					current.Movie = mergeLiveReviewEdits(movie, result.Movie, current.Movie)
+					// A successful explicit retry must clear the prior apply failure so
+					// later retries and reloads do not keep treating this row as failed.
+					if current.Status == models.JobStatusFailed {
+						current.Status = models.JobStatusCompleted
+						current.Error = ""
+					}
 					return current, mergeWriteBackProvenance(inputs.Provenance[filePath], prov), nil
 				})
 				if err2 != nil {

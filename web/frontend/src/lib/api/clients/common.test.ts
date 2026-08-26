@@ -32,6 +32,145 @@ describe('getAPIBaseURL', () => {
 	});
 });
 
+describe('BaseClient.request lifecycle', () => {
+	const client = new BaseClient('http://api.test');
+	let fetchMock: ReturnType<typeof vi.fn>;
+
+	beforeEach(() => {
+		fetchMock = vi.fn();
+		vi.stubGlobal('fetch', fetchMock);
+		BaseClient.setSessionID(null);
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+		vi.unstubAllGlobals();
+		BaseClient.setSessionID(null);
+	});
+
+	function okResponse(body = '{"ok":true}') {
+		return { ok: true, text: vi.fn().mockResolvedValue(body) } as unknown as Response;
+	}
+
+	function abortError() {
+		return new DOMException('The operation was aborted.', 'AbortError');
+	}
+
+	it('forwards the caller signal and preserves desktop session request fields', async () => {
+		fetchMock.mockResolvedValue(okResponse());
+		BaseClient.setSessionID('session-123');
+		const controller = new AbortController();
+
+		await expect(client.request('/batch', { signal: controller.signal })).resolves.toEqual({ ok: true });
+
+		const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+		expect(init.credentials).toBe('same-origin');
+		expect(init.signal).toBe(controller.signal);
+		expect(init.headers).toEqual({
+			'Content-Type': 'application/json',
+			'X-Session-ID': 'session-123',
+		});
+	});
+
+	it('times out before response headers and classifies the error', async () => {
+		vi.useFakeTimers();
+		fetchMock.mockImplementation((_url: string, init: RequestInit) =>
+			new Promise((_resolve, reject) => {
+				init.signal?.addEventListener('abort', () => reject(abortError()), { once: true });
+			}),
+		);
+
+		const request = client.request('/slow', { timeoutMs: 10 });
+		const assertion = expect(request).rejects.toMatchObject({ name: 'ApiError', code: 'REQUEST_TIMEOUT' });
+		await vi.advanceTimersByTimeAsync(10);
+
+		await assertion;
+		expect(vi.getTimerCount()).toBe(0);
+	});
+
+	it('times out while the response body is stalled', async () => {
+		vi.useFakeTimers();
+		let rejectBody: ((reason: unknown) => void) | undefined;
+		fetchMock.mockImplementation((_url: string, init: RequestInit) => {
+			const body = new Promise<string>((_resolve, reject) => {
+				rejectBody = reject;
+				init.signal?.addEventListener('abort', () => reject(abortError()), { once: true });
+			});
+			return Promise.resolve({ ok: true, text: () => body } as unknown as Response);
+		});
+
+		const request = client.request('/body-stall', { timeoutMs: 10 });
+		const assertion = expect(request).rejects.toMatchObject({ code: 'REQUEST_TIMEOUT' });
+		await vi.advanceTimersByTimeAsync(10);
+		await assertion;
+		expect(rejectBody).toBeDefined();
+		expect(vi.getTimerCount()).toBe(0);
+	});
+
+	it('preserves caller cancellation and does not relabel it as a timeout', async () => {
+		vi.useFakeTimers();
+		fetchMock.mockImplementation((_url: string, init: RequestInit) =>
+			new Promise((_resolve, reject) => {
+				init.signal?.addEventListener('abort', () => reject(abortError()), { once: true });
+			}),
+		);
+		const controller = new AbortController();
+		const request = client.request('/cancel', { signal: controller.signal, timeoutMs: 50 });
+
+		controller.abort();
+		await expect(request).rejects.toMatchObject({ name: 'AbortError' });
+		await vi.advanceTimersByTimeAsync(50);
+		expect(vi.getTimerCount()).toBe(0);
+	});
+
+	it('preserves caller cancellation while reading a non-success response body', async () => {
+		vi.useFakeTimers();
+		const controller = new AbortController();
+		fetchMock.mockResolvedValue({
+			ok: false,
+			status: 500,
+			statusText: 'Server Error',
+			json: () => {
+				if (controller.signal.aborted) return Promise.reject(abortError());
+				return new Promise((_resolve, reject) => {
+					controller.signal.addEventListener('abort', () => reject(abortError()), { once: true });
+				});
+			},
+		} as unknown as Response);
+
+		const request = client.request('/error-body', { signal: controller.signal, timeoutMs: 50 });
+		controller.abort();
+		await expect(request).rejects.toMatchObject({ name: 'AbortError' });
+		await vi.advanceTimersByTimeAsync(50);
+		expect(vi.getTimerCount()).toBe(0);
+	});
+
+	it('classifies timeout before a later caller cancellation', async () => {
+		vi.useFakeTimers();
+		fetchMock.mockImplementation((_url: string, init: RequestInit) =>
+			new Promise((_resolve, reject) => {
+				init.signal?.addEventListener('abort', () => reject(abortError()), { once: true });
+			}),
+		);
+		const controller = new AbortController();
+		const request = client.request('/timeout-first', { signal: controller.signal, timeoutMs: 10 });
+		const assertion = expect(request).rejects.toMatchObject({ code: 'REQUEST_TIMEOUT' });
+
+		await vi.advanceTimersByTimeAsync(10);
+		controller.abort();
+		await assertion;
+		expect(vi.getTimerCount()).toBe(0);
+	});
+
+	it('clears the timeout after a successful response', async () => {
+		vi.useFakeTimers();
+		fetchMock.mockResolvedValue(okResponse());
+
+		await expect(client.request('/fast', { timeoutMs: 50 })).resolves.toEqual({ ok: true });
+		expect(vi.getTimerCount()).toBe(0);
+	});
+});
+
 describe('SystemClient.withSessionParam', () => {
 	const client = new SystemClient('');
 	let originalLocation: Location;

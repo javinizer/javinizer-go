@@ -1966,5 +1966,12 @@
   "settings_server_image_cache_max_size_label": "[ Ímägé Cäché Mäx Sïzé (MB) ]",
   "settings_server_image_cache_max_size_desc": "[ Dïsk quötä för thé prévïéw ïmägé cäché ïn mégäbytés. Öldést éntrïés äré évïctéd whén éxcéédéd. 0 dïsäblés thé lïmït. ]",
   "settings_server_image_cache_ttl_label": "[ Ímägé Cäché TTL (höurs) ]",
-  "settings_server_image_cache_ttl_desc": "[ Höw loñg cächéd prévéw ímägés rémäïñ frésh (höurs). Expiréd éntréés äré ré-fétchéd; stälé-ïf-érrör sërvés thém ïf thé ré-fétch fäïls. ]"
+  "settings_server_image_cache_ttl_desc": "[ Höw loñg cächéd prévéw ímägés rémäïñ frésh (höurs). Expiréd éntréés äré ré-fétchéd; stälé-ïf-érrör sërvés thém ïf thé ré-fétch fäïls. ]",
+  "review_error_title": "[ Ërrör ]",
+  "review_back_to_browse": "[ Bäçk tö Bröwsë ]",
+  "review_retry_load": "[ Rëtry lååd ]",
+  "review_loading_job": "[ Løådíñg bå†çh jøb... ]",
+  "review_load_error": "[ Üñåblë tø lååd þís rëvíëw. ]",
+  "review_load_timeout": "[ Løådíñg þís rëvíëw tøøk tøø løñg. Plëåsë try ågåíñ. ]",
+  "review_refresh_error": "[ Rëvíëw dåtå çöüld ñöt bë rëfrëshëd. Yöür çürrëñt dåtå ís still åvåílåblë. ]"
 }

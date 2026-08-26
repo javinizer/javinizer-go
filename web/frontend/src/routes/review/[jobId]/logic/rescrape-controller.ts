@@ -20,7 +20,9 @@ interface RescrapeControllerDeps {
 	getJobId: () => string;
 	getCurrentResult: () => FileResult | undefined;
 	getJob: () => BatchJobResponse | null;
-	setJob: (job: BatchJobResponse) => void;
+	setJob: (job: BatchJobResponse, expectedJobId?: string, expectedGeneration?: number) => void;
+	isCurrentOperation?: (jobId: string, generation: number) => boolean;
+	getRouteGeneration?: () => number;
 	getEditedMovies: () => Map<string, Movie>;
 	getAvailableScrapers: () => Scraper[];
 	setAvailableScrapers: (scrapers: Scraper[]) => void;
@@ -88,6 +90,8 @@ export function createRescrapeController(deps: RescrapeControllerDeps) {
 	}
 
 	async function openRescrapeModal(resultId: string) {
+		const targetJobId = deps.getJobId();
+		const targetGeneration = deps.getRouteGeneration?.() ?? 0;
 		if (deps.getAvailableScrapers().length === 0) {
 			try {
 				deps.setAvailableScrapers(await deps.api.getScrapers());
@@ -96,6 +100,7 @@ export function createRescrapeController(deps: RescrapeControllerDeps) {
 				return;
 			}
 		}
+		if (deps.isCurrentOperation && !deps.isCurrentOperation(targetJobId, targetGeneration)) return;
 
 		deps.setRescrapeResultId(resultId);
 		deps.setSelectedScrapers(
@@ -135,13 +140,15 @@ export function createRescrapeController(deps: RescrapeControllerDeps) {
 		}
 
 		const rescrapeResultId = deps.getRescrapeResultId();
+		const operationJobId = deps.getJobId();
+		const operationGeneration = deps.getRouteGeneration?.() ?? 0;
 		setRescrapingState(deps, rescrapeResultId, true);
 
 		try {
 			const scalarStrategy = deps.getRescrapeScalarStrategy();
 			const arrayStrategy = deps.getRescrapeArrayStrategy();
 
-			const response = await deps.api.rescrapeBatchMovie(deps.getJobId(), rescrapeResultId, {
+			const response = await deps.api.rescrapeBatchMovie(operationJobId, rescrapeResultId, {
 				force: true,
 				selected_scrapers: selectedScrapers,
 				manual_search_input: effectiveManualSearchMode
@@ -153,6 +160,8 @@ export function createRescrapeController(deps: RescrapeControllerDeps) {
 				array_strategy:
 					arrayStrategy === '' ? undefined : (arrayStrategy as Exclude<ArrayStrategy, ''>),
 			});
+
+			if (deps.isCurrentOperation && !deps.isCurrentOperation(operationJobId, operationGeneration)) return;
 
 			const updatedMovie = response.movie;
 			if (deps.getJob() && currentResult.file_path) {
@@ -169,7 +178,7 @@ export function createRescrapeController(deps: RescrapeControllerDeps) {
 					// the CAS baseline, or the next save reads back a 409 (codex r30).
 					...(response.revision !== undefined ? { revision: response.revision } : {}),
 				};
-				deps.setJob({ ...currentJob, results: newResults });
+				deps.setJob({ ...currentJob, results: newResults }, operationJobId, operationGeneration);
 			}
 
 			const editedMovies = deps.getEditedMovies();
@@ -184,12 +193,15 @@ export function createRescrapeController(deps: RescrapeControllerDeps) {
 			);
 			deps.setShowRescrapeModal(false);
 		} catch (error) {
+			if (deps.isCurrentOperation && !deps.isCurrentOperation(operationJobId, operationGeneration)) return;
 			const errorMessage = error instanceof Error ? error.message : JSON.stringify(error);
 			deps.toastError(
 				(effectiveManualSearchMode ? 'Manual search failed: ' : 'Rescrape failed: ') + errorMessage,
 			);
 		} finally {
-			setRescrapingState(deps, rescrapeResultId, false);
+			if (!deps.isCurrentOperation || deps.isCurrentOperation(operationJobId, operationGeneration)) {
+				setRescrapingState(deps, rescrapeResultId, false);
+			}
 		}
 	}
 

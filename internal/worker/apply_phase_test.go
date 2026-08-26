@@ -666,3 +666,48 @@ func TestApplyPhase_Run_CancellationMarksCancelled(t *testing.T) {
 	require.NotNil(t, r.Movie)
 	assert.Equal(t, "IPX-777", r.Movie.ID)
 }
+
+func TestApplyPhase_Run_RetriesExplicitFailedPath(t *testing.T) {
+	path := "/source/IPX-777.mp4"
+	wf := &stubApplyWorkflow{
+		applyResult: &workflow.ApplyResult{Movie: &models.Movie{ID: "IPX-777"}},
+	}
+	inputs := makeApplyInputs(wf)
+	inputs.Results[path] = &resultstore.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: path, MovieID: "IPX-777"},
+		Status:        models.JobStatusFailed,
+		Movie:         &models.Movie{ID: "IPX-777", Title: "Test Movie"},
+	}
+	inputs.Results["/source/IPX-888.mp4"] = &resultstore.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: "/source/IPX-888.mp4", MovieID: "IPX-888"},
+		Status:        models.JobStatusCompleted,
+		Movie:         &models.Movie{ID: "IPX-888", Title: "Already Applied"},
+	}
+	refreshedPath := "/source/IPX-999.mp4"
+	inputs.Results[refreshedPath] = &resultstore.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: refreshedPath, MovieID: "IPX-999"},
+		Status:        models.JobStatusCompleted, // failed row was refreshed before retry
+		Movie:         &models.Movie{ID: "IPX-999", Title: "Refreshed Movie"},
+	}
+	updater := inputs.Updater.(*stubUpdater)
+	updater.results[path] = &resultstore.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: path, MovieID: "IPX-777"},
+		Status:        models.JobStatusFailed,
+		Movie:         &models.Movie{ID: "IPX-777", Title: "Test Movie"},
+		Error:         "previous apply failed",
+	}
+
+	NewApplyPhase().Run(context.Background(), inputs, ApplyPhaseConfig{
+		OrganizeOptions: workflow.OrganizeOptions{MoveFiles: true},
+		MergeOptions:    workflow.MergeOptions{ForceOverwrite: true},
+		Destination:     "/output",
+		RetryFilePaths:  []string{path, refreshedPath},
+	})
+
+	assert.Equal(t, 2, wf.getApplyCalled(), "only explicitly selected paths must be retried")
+	assert.True(t, inputs.Lifecycle.(*stubLifecycle).organized, "a successful retry should mark the phase organized")
+	retried := updater.getResult(path)
+	require.NotNil(t, retried)
+	assert.Equal(t, models.JobStatusCompleted, retried.Status, "successful retry should clear the prior failed status")
+	assert.Empty(t, retried.Error, "successful retry should clear the prior failure")
+}

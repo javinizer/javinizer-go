@@ -4,7 +4,9 @@
  * Unlike the frontend-only config (playwright.frontend.config.ts, which
  * mocks all /api routes via
  * page.route), this config spawns REAL backend + frontend processes via
- * Playwright's `webServer` option. Every assertion exercises the real
+ * Playwright's `webServer` option. Successful API traffic remains real;
+ * dedicated review-load regressions may use page.route only for deterministic
+ * batch-detail failure and pre-header hold injection. Every assertion exercises the real
  * Hauptstrasse: browser → real SvelteKit frontend → real HTTP transport →
  * real Go API server → real worker pipeline → real result tracker → real
  * in-memory SQLite → real mock scraper at the scraper seam.
@@ -62,6 +64,7 @@ const STORAGE_PATH = resolve(CONFIG_DIR, 'tests', 'fullstack', '.auth', 'auth-st
 
 export default defineConfig({
 	testDir: './tests/fullstack',
+	testIgnore: ['**/review-load-timeout.spec.ts'],
 	timeout: 60_000,
 	expect: {
 		timeout: 15_000,
@@ -119,6 +122,10 @@ export default defineConfig({
 			port: FRONTEND_PORT,
 			timeout: 60_000,
 			reuseExistingServer: !process.env.CI,
+			env: {
+				...process.env,
+				VITE_REVIEW_DETAIL_TIMEOUT_MS: '',
+			},
 		},
 	],
 	projects: [
