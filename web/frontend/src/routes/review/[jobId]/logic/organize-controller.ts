@@ -85,7 +85,7 @@ function isDefinitiveApplyLaunchRejection(error: unknown): boolean {
 	if ('code' in error && error.code === 'APPLY_NOT_STARTED') return true;
 	if (!('status' in error)) return false;
 	const status = error.status;
-	return status === 400 || status === 403 || status === 404;
+	return status === 400 || status === 403 || status === 404 || status === 409;
 }
 
 function getOrganizeRequestOptions(operation: OrganizeOperation): {

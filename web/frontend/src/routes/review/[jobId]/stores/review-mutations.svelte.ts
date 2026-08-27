@@ -94,6 +94,34 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 		return deps.isCurrentOperation?.(jobId, generation) ?? true;
 	}
 
+	function removeStoredOverlayPaths(storageKey: string, paths: string[]) {
+		if (paths.length === 0 || typeof sessionStorage === 'undefined') return;
+
+		try {
+			const raw = sessionStorage.getItem(storageKey);
+			if (raw === null) return;
+			const parsed = JSON.parse(raw) as Record<string, unknown>;
+			if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return;
+
+			let changed = false;
+			for (const filePath of new Set(paths)) {
+				if (Object.prototype.hasOwnProperty.call(parsed, filePath)) {
+					delete parsed[filePath];
+					changed = true;
+				}
+			}
+			if (!changed) return;
+
+			if (Object.keys(parsed).length === 0) {
+				sessionStorage.removeItem(storageKey);
+			} else {
+				sessionStorage.setItem(storageKey, JSON.stringify(parsed));
+			}
+		} catch {
+			// Storage may be unavailable or malformed. Leave it intact for recovery.
+		}
+	}
+
 	function invalidateJobQueries(jobId = deps.getJobId()) {
 		return Promise.all([
 			queryClient.invalidateQueries({ queryKey: ['batch-job', jobId] }),
@@ -349,7 +377,6 @@ const ops = Array.from(latestByFamily.entries());
 		}) => {
 			const mutationJobId = payload.jobId;
 			const mutationGeneration = payload.generation;
-			if (!isCurrentJob(mutationJobId, mutationGeneration)) return;
 			const ops0 = payload.rows ?? [];
 			const preSaveServer = payload.preSaveServer;
 			const failed = ops0.filter((r) => r.status === 'rejected');
@@ -366,7 +393,17 @@ const ops = Array.from(latestByFamily.entries());
 			const qk = ['batch-job', mutationJobId];
 			const before = queryClient.getQueryState(qk)?.dataUpdatedAt ?? 0;
 			await invalidateJobQueries(mutationJobId).catch(() => {});
-			if (!isCurrentJob(mutationJobId, mutationGeneration)) return;
+			if (!isCurrentJob(mutationJobId, mutationGeneration)) {
+				// The mutation may finish after navigation. Reconcile only job-scoped
+				// storage for the old route; never mutate the new route's UI state.
+				const succeededPaths = succeeded.flatMap((row) => row.paths);
+				removeStoredOverlayPaths(`javinizer.review.editedMovies.${mutationJobId}`, succeededPaths);
+				removeStoredOverlayPaths(
+					`javinizer.review.posterPreviewOverrides.${mutationJobId}`,
+					succeededPaths,
+				);
+				return;
+			}
 			const post = queryClient.getQueryState(qk);
 			const refreshed = (() => {
 				if (post?.status !== 'success') return false;

@@ -33,6 +33,7 @@ interface DepsOverrides {
 	redirectDelayMs?: number;
 	organizeBatchJob?: typeof defaultOrganizeBatchJob;
 	updateBatchJob?: (jobId: string, request?: UpdateRequest) => Promise<void>;
+	clearApplyRecovery?: () => void;
 }
 
 const defaultOrganizeBatchJob = vi.fn().mockResolvedValue(undefined);
@@ -86,6 +87,7 @@ function makeDeps(overrides: DepsOverrides = {}) {
 		getOrganizeStatus: () => 'organizing' as const,
 		setOrganizeStatus: (status: string) => calls.setOrganizeStatus.push(status),
 		setOrganizing: () => {},
+		clearApplyRecovery: overrides.clearApplyRecovery ?? (() => {}),
 		setOrganizeProgress: (p: number) => calls.setOrganizeProgress.push(p),
 		getFileStatuses: () => fileStatuses,
 		getExpectedOrganizeFilePaths: () => expectedOrganizeFilePaths,
@@ -256,6 +258,21 @@ describe('organize-controller pollOnce terminal-success branches', () => {
 
 		expect(calls.setOrganizeStatus).not.toContain('completed');
 		expect(calls.toastSuccess).toHaveLength(0);
+		controller.cleanup();
+	});
+
+	it('clears recovery when launch is rejected with a 409 conflict', async () => {
+		const clearApplyRecovery = vi.fn();
+		const { deps, calls } = makeDeps({
+			clearApplyRecovery,
+			organizeBatchJob: vi.fn().mockRejectedValue({ status: 409 }),
+		});
+		const controller = createOrganizeController(deps);
+
+		await controller.organizeAll();
+
+		expect(clearApplyRecovery).toHaveBeenCalledOnce();
+		expect(calls.setOrganizeStatus).toContain('failed');
 		controller.cleanup();
 	});
 
