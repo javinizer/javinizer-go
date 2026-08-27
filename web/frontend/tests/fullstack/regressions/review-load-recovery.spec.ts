@@ -15,7 +15,6 @@ function batchDetailPattern(jobId: string): RegExp {
 	return new RegExp(`/api/v1/batch/${jobId.replaceAll('-', '\\-')}\\?include_data=true`);
 }
 
-
 async function createCompletedJob(request: APIRequestContext, movieId: string): Promise<string> {
 	const fileName = `${movieId}.mp4`;
 	await seedInputFiles([fileName]);
@@ -38,7 +37,11 @@ async function navigateClientSideToReview(page: Page, jobId: string): Promise<vo
 		document.body.append(link);
 		link.click();
 	}, `/review/${jobId}`);
-	await page.waitForURL(`**/review/${jobId}`);
+	// Client-side navigation is committed before the new route's data is
+	// necessarily settled. Waiting for the document `load` event can deadlock
+	// this regression because it intentionally holds the previous route's
+	// request until navigation has committed and teardown can abort it.
+	await page.waitForURL(`**/review/${jobId}`, { waitUntil: 'commit' });
 }
 
 test.describe('review load recovery', () => {

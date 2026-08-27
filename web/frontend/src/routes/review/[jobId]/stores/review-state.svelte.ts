@@ -261,6 +261,15 @@ export function createReviewState(getJobId: () => string) {
 
 	const queryClient = useQueryClient();
 
+	function cancelJobDetailQuery(targetJobId: string): void {
+		const queryKey = ['batch-job', targetJobId] as const;
+		void queryClient.cancelQueries({ queryKey, exact: true });
+		const cachedQuery = queryClient.getQueryCache().find({ queryKey, exact: true });
+		if (cachedQuery && cachedQuery.state.data === undefined) {
+			queryClient.removeQueries({ queryKey, exact: true });
+		}
+	}
+
 	const jobQuery = createQuery(() => ({
 		queryKey: ['batch-job', jobId],
 		queryFn: async ({ signal }: { signal: AbortSignal }) =>
@@ -1523,7 +1532,9 @@ export function createReviewState(getJobId: () => string) {
 	$effect(() => {
 		const currentJobId = jobId;
 		if (lastRouteJobId === currentJobId) return;
+		const previousJobId = lastRouteJobId;
 		lastRouteJobId = currentJobId;
+		if (previousJobId) cancelJobDetailQuery(previousJobId);
 		routeGeneration += 1;
 		operationScope = null;
 		mutations.posterFromUrlMutation.reset();
@@ -1877,12 +1888,7 @@ export function createReviewState(getJobId: () => string) {
 	});
 
 	onDestroy(() => {
-		const queryKey = ['batch-job', teardownJobId] as const;
-		void queryClient.cancelQueries({ queryKey, exact: true });
-		const cachedQuery = queryClient.getQueryCache().find({ queryKey, exact: true });
-		if (cachedQuery && cachedQuery.state.data === undefined) {
-			queryClient.removeQueries({ queryKey, exact: true });
-		}
+		cancelJobDetailQuery(teardownJobId);
 		organizeController.cleanup();
 		posterCropController.cleanup();
 	});
