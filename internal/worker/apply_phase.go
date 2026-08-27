@@ -199,13 +199,13 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 
 // countRemainingApplyFailures returns the failures that remain after this apply
 // attempt. The apply input is a frozen snapshot, so a subset retry must remove
-// only paths that succeeded in this attempt while retaining failures that were
-// not selected. This keeps a successful partial retry in Completed until every
-// non-excluded result is healthy.
+// only paths that succeeded in this attempt while retaining eligible failures
+// that were not selected. Scrape failures without a movie cannot produce an
+// apply outcome and must not keep a successful retry from reaching Organized.
 func countRemainingApplyFailures(inputs applyPhaseInputs, outcomes []applyFileOutcome) int64 {
 	failedPaths := make(map[string]struct{})
 	for filePath, result := range inputs.Results {
-		if result != nil && !inputs.Excluded[filePath] && result.Status == models.JobStatusFailed {
+		if result != nil && result.Movie != nil && !inputs.Excluded[filePath] && result.Status == models.JobStatusFailed {
 			failedPaths[filePath] = struct{}{}
 		}
 	}

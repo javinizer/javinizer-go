@@ -750,8 +750,9 @@ func TestApplyPhase_Run_RetriesExplicitFailedPath(t *testing.T) {
 func TestCountRemainingApplyFailures_TracksFailureAndPanicOutcomes(t *testing.T) {
 	inputs := applyPhaseInputs{
 		Results: map[string]*resultstore.MovieResult{
-			"/prior-failure":    {Status: models.JobStatusFailed},
-			"/excluded-failure": {Status: models.JobStatusFailed},
+			"/prior-failure":    {Status: models.JobStatusFailed, Movie: &models.Movie{ID: "prior"}},
+			"/scrape-failure":   {Status: models.JobStatusFailed}, // no Movie: ineligible for apply
+			"/excluded-failure": {Status: models.JobStatusFailed, Movie: &models.Movie{ID: "excluded"}},
 		},
 		Excluded: map[string]bool{"/excluded-failure": true},
 	}
@@ -761,5 +762,7 @@ func TestCountRemainingApplyFailures_TracksFailureAndPanicOutcomes(t *testing.T)
 		{FilePath: "/apply-panic", Panic: true},
 	}
 
+	// Scrape failures without a Movie are skipped by Run and must not remain in
+	// the retry closeout count.
 	assert.Equal(t, int64(2), countRemainingApplyFailures(inputs, outcomes))
 }
