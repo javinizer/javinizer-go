@@ -4,18 +4,36 @@ import {
 	buildReviewApplyOverrides,
 	hydrateReviewApplyControls,
 	shouldHydrateReviewApplyControls,
-	withCustomReviewMergeStrategy
+	withCustomReviewMergeStrategy,
+	shouldClearUnstartedApplyRecovery,
 } from './review-state.svelte';
 
 function makeJob(): BatchJobResponse {
 	return {
-		id: 'job-1', status: 'completed', total_files: 1, completed: 1, failed: 0,
-		operation_count: 0, reverted_count: 0, excluded: {}, progress: 100,
-		destination: '/legacy', results: {}, started_at: '2026-01-01T00:00:00Z', update: true,
+		id: 'job-1',
+		status: 'completed',
+		total_files: 1,
+		completed: 1,
+		failed: 0,
+		operation_count: 0,
+		reverted_count: 0,
+		excluded: {},
+		progress: 100,
+		destination: '/legacy',
+		results: {},
+		started_at: '2026-01-01T00:00:00Z',
+		update: true,
 		apply_plan: {
-			version: 1, video_operation: 'leave-in-place', nfo_output: 'write', media_policy: 'replace',
-			merge: { scalar_strategy: 'prefer-scraper', array_strategy: 'replace', source_preset: 'aggressive' }
-		}
+			version: 1,
+			video_operation: 'leave-in-place',
+			nfo_output: 'write',
+			media_policy: 'replace',
+			merge: {
+				scalar_strategy: 'prefer-scraper',
+				array_strategy: 'replace',
+				source_preset: 'aggressive',
+			},
+		},
 	};
 }
 
@@ -25,7 +43,9 @@ describe('Review apply state', () => {
 		expect(shouldHydrateReviewApplyControls(null, job, 'job-1')).toBe(true);
 		const controls = hydrateReviewApplyControls(job);
 		controls.skipNfo = true;
-		expect(shouldHydrateReviewApplyControls('job-1', { ...job, progress: 75 }, 'job-1')).toBe(false);
+		expect(shouldHydrateReviewApplyControls('job-1', { ...job, progress: 75 }, 'job-1')).toBe(
+			false,
+		);
 		expect(controls.skipNfo).toBe(true);
 	});
 
@@ -53,9 +73,16 @@ describe('Review apply state', () => {
 		controls.forceOverwrite = true;
 		const overrides = buildReviewApplyOverrides(controls, true, 'metadata-artwork');
 		expect(overrides).toEqual({
-			operation_mode: 'metadata-artwork', destination: '', skip_nfo: false, skip_download: false,
-			overwrite_existing_media: true, preset: 'aggressive', scalar_strategy: 'prefer-scraper',
-			array_strategy: 'replace', force_overwrite: true, preserve_nfo: false
+			operation_mode: 'metadata-artwork',
+			destination: '',
+			skip_nfo: false,
+			skip_download: false,
+			overwrite_existing_media: true,
+			preset: 'aggressive',
+			scalar_strategy: 'prefer-scraper',
+			array_strategy: 'replace',
+			force_overwrite: true,
+			preserve_nfo: false,
 		});
 	});
 
@@ -69,11 +96,19 @@ describe('Review apply state', () => {
 	});
 
 	it('maps organize controls without unsupported update-only fields', () => {
-		const controls = { ...hydrateReviewApplyControls(makeJob()), destinationPath: '/output', skipDownload: true, overwriteExistingMedia: false };
+		const controls = {
+			...hydrateReviewApplyControls(makeJob()),
+			destinationPath: '/output',
+			skipDownload: true,
+			overwriteExistingMedia: false,
+		};
 		const overrides = buildReviewApplyOverrides(controls, false, 'organize');
 		expect(overrides).toEqual({
-			operation_mode: 'organize', destination: '/output', skip_nfo: false,
-			skip_download: true, overwrite_existing_media: false
+			operation_mode: 'organize',
+			destination: '/output',
+			skip_nfo: false,
+			skip_download: true,
+			overwrite_existing_media: false,
 		});
 		expect(overrides).not.toHaveProperty('scalar_strategy');
 		expect(overrides).not.toHaveProperty('force_overwrite');
@@ -81,5 +116,13 @@ describe('Review apply state', () => {
 
 	it('rejects stale placeholder hydration for another route job', () => {
 		expect(shouldHydrateReviewApplyControls(null, makeJob(), 'job-2')).toBe(false);
+	});
+
+	it('preserves equal-generation recovery while a local apply is pending', () => {
+		const job = { ...makeJob(), failed: 1, apply_generation: 4 };
+		const recovery = { preApplyGeneration: 4, failed: {}, succeeded: [] };
+
+		expect(shouldClearUnstartedApplyRecovery(job, recovery, true)).toBe(false);
+		expect(shouldClearUnstartedApplyRecovery(job, recovery, false)).toBe(true);
 	});
 });

@@ -162,6 +162,24 @@ export function isApplyInProgress(job: BatchJobResponse): boolean {
 	);
 }
 
+export function shouldClearUnstartedApplyRecovery(
+	loadedJob: Pick<BatchJobResponse, 'status' | 'failed' | 'apply_generation'>,
+	recovery: Pick<ApplyRecoveryState, 'preApplyGeneration' | 'failed' | 'succeeded'>,
+	localApplyPending: boolean,
+): boolean {
+	if (localApplyPending) return false;
+	const hasRecordedApplyOutcome =
+		Object.keys(recovery.failed).length > 0 || recovery.succeeded.length > 0;
+	return (
+		!hasRecordedApplyOutcome &&
+		(loadedJob.status === 'failed' ||
+			loadedJob.status === 'cancelled' ||
+			(loadedJob.status === 'completed' && loadedJob.failed > 0)) &&
+		recovery.preApplyGeneration !== undefined &&
+		loadedJob.apply_generation === recovery.preApplyGeneration
+	);
+}
+
 export function createReviewState(getJobId: () => string) {
 	const teardownJobId = getJobId();
 	let jobId = $derived(getJobId());
@@ -1642,13 +1660,16 @@ export function createReviewState(getJobId: () => string) {
 		// The backend increments apply_generation atomically with the Running
 		// claim. Equal generations therefore prove this record never launched
 		// an apply, unless a per-file outcome was already persisted.
-		const launchFailedBeforeStart =
-			!hasRecordedApplyOutcome &&
-			(loadedJob.status === 'failed' ||
-				loadedJob.status === 'cancelled' ||
-				(loadedJob.status === 'completed' && loadedJob.failed > 0)) &&
-			recovery.preApplyGeneration !== undefined &&
-			loadedJob.apply_generation === recovery.preApplyGeneration;
+		// prepareOrganizeRun marks the local operation as organizing before
+		// saveAllEdits can refetch this still-pre-apply job. Preserve recovery
+		// metadata during that window; only a settled page may classify an equal
+		// generation as a launch failure.
+		const localApplyPending = organizing || organizeStatus === 'organizing';
+		const launchFailedBeforeStart = shouldClearUnstartedApplyRecovery(
+			loadedJob,
+			recovery,
+			localApplyPending,
+		);
 		if (launchFailedBeforeStart) {
 			clearApplyRecovery(loadedJob.id);
 			return;
