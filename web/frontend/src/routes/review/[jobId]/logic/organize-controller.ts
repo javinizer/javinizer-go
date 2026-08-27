@@ -158,6 +158,7 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 			) {
 				updateFileStatus(filePath, { status: 'success' });
 				deps.recordApplySuccess?.(filePath);
+				forgetRecoveryRetryPath(filePath);
 			}
 		}
 	}
@@ -349,6 +350,10 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 	let lastOrganizeOperation: OrganizeOperation = 'move';
 	let lastRecoveryFailedPaths: string[] = [];
 
+	function forgetRecoveryRetryPath(filePath: string) {
+		lastRecoveryFailedPaths = lastRecoveryFailedPaths.filter((path) => path !== filePath);
+	}
+
 	async function organizeAll(
 		skipNfo?: boolean,
 		skipDownload?: boolean,
@@ -371,7 +376,7 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 		lastSkipDownload = skipDownload ?? false;
 		lastOrganizeOverrides = overrides;
 		lastOrganizeOperation = operation;
-		lastRecoveryFailedPaths = retryPaths;
+		lastRecoveryFailedPaths = Array.from(new Set(retryPaths));
 
 		const { copyOnly, linkMode } = getOrganizeRequestOptions(operation);
 		const preApplyGeneration = deps.getJob()?.apply_generation;
@@ -431,7 +436,7 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 	async function updateAll(options?: UpdateRequest, retryPaths: string[] = []) {
 		const operationJobId = deps.getJobId();
 		const operationGeneration = deps.getRouteGeneration?.() ?? 0;
-		lastRecoveryFailedPaths = retryPaths;
+		lastRecoveryFailedPaths = Array.from(new Set(retryPaths));
 		const preApplyGeneration = deps.getJob()?.apply_generation;
 		prepareOrganizeRun(retryPaths);
 		const operationToken = organizeRunToken;
@@ -505,8 +510,8 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 			ignoreWebSocketMessages ||
 			msg.job_id !== deps.getJobId() ||
 			deps.getOrganizeStatus() !== 'organizing' ||
-			(activeApplyGeneration !== undefined && msg.apply_generation !== activeApplyGeneration) ||
-			(activeApplyGeneration === undefined && (!!msg.file_path || msg.status !== 'pending'))
+			activeApplyGeneration === undefined ||
+			msg.apply_generation !== activeApplyGeneration
 		) {
 			return;
 		}
@@ -543,6 +548,7 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 		if ((msg.status === 'organized' || msg.status === 'updated') && msg.file_path) {
 			updateFileStatus(msg.file_path, { status: 'success' });
 			deps.recordApplySuccess?.(msg.file_path);
+			forgetRecoveryRetryPath(msg.file_path);
 		}
 	}
 
@@ -569,12 +575,6 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 			job?.apply_generation === undefined ||
 			job.apply_generation > recovery.preApplyGeneration ||
 			!!hasRecordedApplyOutcome;
-		const launchFailureConfirmed =
-			!!recovery &&
-			!applyAlreadyStarted &&
-			(job?.status === 'failed' || job?.status === 'cancelled') &&
-			recovery.preApplyGeneration !== undefined &&
-			job?.apply_generation === recovery.preApplyGeneration;
 		if (recovery) {
 			lastSkipNfo = recovery.skipNfo;
 			lastSkipDownload = recovery.skipDownload;

@@ -119,6 +119,7 @@ func ListJobsUseCase(ctx context.Context, deps *core.APIDeps, input ListJobsInpu
 			CompletedAt:           contracts.FormatTimePtr(job.CompletedAt),
 			OperationModeOverride: job.OperationModeOverride,
 			Update:                job.Update,
+			ApplyGeneration:       persisted.ApplyGeneration,
 			ApplyPlan:             applyplan.Clone(persisted.ApplyPlan),
 		})
 	}

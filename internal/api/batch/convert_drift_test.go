@@ -187,6 +187,7 @@ func TestBatchJobBaseFieldsDriftGuard(t *testing.T) {
 		"OperationModeOverride",
 		"Update",
 		"PersistError",
+		"ApplyGeneration",
 		"IsDeleted",
 	}
 
@@ -206,6 +207,7 @@ func TestBatchJobBaseFieldsDriftGuard(t *testing.T) {
 		"OperationModeOverride": true,
 		"Update":                true,
 		"PersistError":          true,
+		"ApplyGeneration":       true,
 	}
 
 	// Fields on batchJobBase that are intentionally NOT exposed in API responses.

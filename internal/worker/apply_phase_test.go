@@ -689,6 +689,12 @@ func TestApplyPhase_Run_RetriesExplicitFailedPath(t *testing.T) {
 		Status:        models.JobStatusCompleted, // failed row was refreshed before retry
 		Movie:         &models.Movie{ID: "IPX-999", Title: "Refreshed Movie"},
 	}
+	remainingFailedPath := "/source/IPX-000.mp4"
+	inputs.Results[remainingFailedPath] = &resultstore.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: remainingFailedPath, MovieID: "IPX-000"},
+		Status:        models.JobStatusFailed,
+		Movie:         &models.Movie{ID: "IPX-000", Title: "Still Failed"},
+	}
 	updater := inputs.Updater.(*stubUpdater)
 	updater.results[path] = &resultstore.MovieResult{
 		FileMatchInfo: models.FileMatchInfo{Path: path, MovieID: "IPX-777"},
@@ -705,7 +711,8 @@ func TestApplyPhase_Run_RetriesExplicitFailedPath(t *testing.T) {
 	})
 
 	assert.Equal(t, 2, wf.getApplyCalled(), "only explicitly selected paths must be retried")
-	assert.True(t, inputs.Lifecycle.(*stubLifecycle).organized, "a successful retry should mark the phase organized")
+	assert.False(t, inputs.Lifecycle.(*stubLifecycle).organized, "a partial retry must not mark the phase organized while another failure remains")
+	assert.True(t, inputs.Lifecycle.(*stubLifecycle).completed, "a partial retry should remain completed until all failures are retried")
 	retried := updater.getResult(path)
 	require.NotNil(t, retried)
 	assert.Equal(t, models.JobStatusCompleted, retried.Status, "successful retry should clear the prior failed status")

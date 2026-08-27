@@ -59,7 +59,11 @@ import { createReviewMutations } from './review-mutations.svelte';
 import { buildMovieOverride } from './save-helpers';
 import { clearCropGeometry, siblingResultFilePaths } from './poster-crop-sync';
 import { getReviewDetailTimeoutMs } from '../review-config';
-import { deriveReviewLoadPhase, isAbortError } from './review-load-state';
+import {
+	deriveReviewLoadPhase,
+	isAbortError,
+	validateReviewJobResponse,
+} from './review-load-state';
 import * as m from '$lib/paraglide/messages';
 
 interface MovieGroup {
@@ -259,11 +263,14 @@ export function createReviewState(getJobId: () => string) {
 
 	const jobQuery = createQuery(() => ({
 		queryKey: ['batch-job', jobId],
-		queryFn: ({ signal }: { signal: AbortSignal }) =>
-			apiClient.getBatchJob(jobId, true, {
-				signal,
-				timeoutMs: getReviewDetailTimeoutMs(),
-			}),
+		queryFn: async ({ signal }: { signal: AbortSignal }) =>
+			validateReviewJobResponse(
+				await apiClient.getBatchJob(jobId, true, {
+					signal,
+					timeoutMs: getReviewDetailTimeoutMs(),
+				}),
+				jobId,
+			),
 		placeholderData: (prev) => (prev?.id === jobId ? prev : undefined),
 		retry: false,
 	}));
@@ -1626,7 +1633,9 @@ export function createReviewState(getJobId: () => string) {
 		// an apply, unless a per-file outcome was already persisted.
 		const launchFailedBeforeStart =
 			!hasRecordedApplyOutcome &&
-			(loadedJob.status === 'failed' || loadedJob.status === 'cancelled') &&
+			(loadedJob.status === 'failed' ||
+				loadedJob.status === 'cancelled' ||
+				(loadedJob.status === 'completed' && loadedJob.failed > 0)) &&
 			recovery.preApplyGeneration !== undefined &&
 			loadedJob.apply_generation === recovery.preApplyGeneration;
 		if (launchFailedBeforeStart) {

@@ -10,6 +10,8 @@ import (
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/mocks"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/worker/jobpersist"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -74,6 +76,32 @@ func TestListJobsUseCase_HappyPath(t *testing.T) {
 	assert.Equal(t, "job-2", out.Jobs[1].ID)
 	assert.Equal(t, int64(2), out.Jobs[1].OperationCount)
 	assert.Equal(t, int64(0), out.Jobs[1].RevertedCount)
+}
+
+func TestListJobsUseCase_MapsPersistedApplyGeneration(t *testing.T) {
+	jobRepo := mocks.NewMockJobRepositoryInterface(t)
+	opRepo := mocks.NewMockBatchFileOperationRepositoryInterface(t)
+	deps := newTestAPIDeps(t, jobRepo, opRepo)
+
+	persisted, err := jobpersist.Encode(jobpersist.Snapshot{
+		ID:              "job-generation",
+		Status:          models.JobStatusCompleted,
+		Files:           []string{},
+		Results:         map[string]*resultstore.MovieResult{},
+		Provenance:      map[string]*resultstore.ProvenanceData{},
+		Excluded:        map[string]bool{},
+		FileMatchInfo:   map[string]models.FileMatchInfo{},
+		ApplyGeneration: 9,
+	})
+	require.NoError(t, err)
+	jobRepo.On("List", mock.Anything).Return([]models.Job{*persisted}, nil)
+	opRepo.On("CountByBatchJobIDs", mock.Anything, []string{"job-generation"}).Return(map[string]int64{}, nil)
+	opRepo.On("CountRevertedByBatchJobIDs", mock.Anything, []string{"job-generation"}).Return(map[string]int64{}, nil)
+
+	out, err := ListJobsUseCase(context.Background(), deps, ListJobsInput{Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, out.Jobs, 1)
+	assert.Equal(t, uint64(9), out.Jobs[0].ApplyGeneration)
 }
 
 func TestListJobsUseCase_MalformedPersistedApplyPlanWarnsAndContinues(t *testing.T) {

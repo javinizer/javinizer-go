@@ -210,6 +210,43 @@ describe('organize-controller pollOnce terminal-success branches', () => {
 		controller.cleanup();
 	});
 
+	it('does not retry a path after a success event removes it from recovery', async () => {
+		const firstPath = '/src/already-succeeded.mp4';
+		const requests: Array<{ retry_file_paths?: string[] }> = [];
+		const job = makeJob('organizing');
+		const { deps, fileStatuses } = makeDeps({
+			job,
+			organizeBatchJob: vi.fn((_jobId, request) => {
+				requests.push(request);
+				return Promise.resolve();
+			}),
+		});
+		const controller = createOrganizeController(deps);
+
+		const firstRun = controller.organizeAll(false, false, undefined, [firstPath]);
+		job.apply_generation = 1;
+		await firstRun;
+		await vi.advanceTimersByTimeAsync(10);
+		controller.handleWebSocketMessage({
+			job_id: 'job-1',
+			file_index: 0,
+			file_path: firstPath,
+			status: 'organized',
+			progress: 100,
+			apply_generation: 1,
+			message: 'Organized',
+		} satisfies ProgressMessage);
+
+		const secondPath = '/src/still-failed.mp4';
+		fileStatuses.set(secondPath, { status: 'failed', error: 'retry me' });
+		await controller.retryFailed();
+
+		expect(requests).toHaveLength(2);
+		expect(requests[1].retry_file_paths).toEqual([secondPath]);
+		expect(requests[1].retry_file_paths).not.toContain(firstPath);
+		controller.cleanup();
+	});
+
 	it('preserves a recorded apply failure when the terminal row is still completed', async () => {
 		const failedPath = '/src/failed-writeback.mp4';
 		const job = makeJob('completed');
@@ -245,6 +282,9 @@ describe('organize-controller pollOnce terminal-success branches', () => {
 });
 
 describe('organize-controller handleWebSocketMessage progress gating (NEW-1)', () => {
+	beforeEach(() => vi.useFakeTimers());
+	afterEach(() => vi.useRealTimers());
+
 	// Regression for NEW-1: per-file 'organized'/'updated'/'failed' messages
 	// carry progress:100 but must NOT drive the progress bar (they are for
 	// fileStatuses display). Only the AGGREGATE 'pending' (incremental, no
@@ -252,9 +292,15 @@ describe('organize-controller handleWebSocketMessage progress gating (NEW-1)', (
 	// mutex) and terminal 'organization_completed'/'update_completed' drive the
 	// bar. Before the fix, every message with a progress field snapped the bar
 	// to 100 then oscillated as the next 'pending' arrived.
-	it('applies progress for an aggregate pending message (no file_path)', () => {
-		const { deps, calls } = makeDeps();
+	it('applies progress for an aggregate pending message after generation binding', async () => {
+		const job = makeJob('organizing');
+		const { deps, calls } = makeDeps({ job });
 		const controller = createOrganizeController(deps);
+
+		const request = controller.organizeAll();
+		job.apply_generation = 1;
+		await request;
+		await vi.advanceTimersByTimeAsync(10);
 
 		controller.handleWebSocketMessage({
 			job_id: 'job-1',
@@ -262,6 +308,7 @@ describe('organize-controller handleWebSocketMessage progress gating (NEW-1)', (
 			file_path: '',
 			status: 'pending',
 			progress: 42,
+			apply_generation: 1,
 			message: 'Organizing 1 of 4 files',
 		} satisfies ProgressMessage);
 
@@ -275,9 +322,14 @@ describe('organize-controller handleWebSocketMessage progress gating (NEW-1)', (
 	// flickers the bar back to 0% at the start of every file (defeating NEW-1 and
 	// the aggregate high-water broadcaster). The bar-drive filter gates on
 	// !file_path so only the aggregate (no FilePath) drives the bar.
-	it('does NOT apply progress for a per-file Organizing-start pending/0 (F-1)', () => {
-		const { deps, calls } = makeDeps();
+	it('does NOT apply progress for a per-file Organizing-start pending/0 (F-1)', async () => {
+		const job = makeJob('organizing');
+		const { deps, calls } = makeDeps({ job });
 		const controller = createOrganizeController(deps);
+		const request = controller.organizeAll();
+		job.apply_generation = 1;
+		await request;
+		await vi.advanceTimersByTimeAsync(10);
 
 		// First, advance the bar via an aggregate pending (no file_path).
 		controller.handleWebSocketMessage({
@@ -286,6 +338,7 @@ describe('organize-controller handleWebSocketMessage progress gating (NEW-1)', (
 			file_path: '',
 			status: 'pending',
 			progress: 25,
+			apply_generation: 1,
 			message: 'Organizing 1 of 4 files',
 		} satisfies ProgressMessage);
 		expect(calls.setOrganizeProgress).toContain(25);
@@ -298,10 +351,28 @@ describe('organize-controller handleWebSocketMessage progress gating (NEW-1)', (
 			file_path: '/src/b.mp4',
 			status: 'pending',
 			progress: 0,
+			apply_generation: 1,
 			message: 'Organizing b.mp4',
 		} satisfies ProgressMessage);
 
-		expect(calls.setOrganizeProgress).not.toContain(0);
+		expect(calls.setOrganizeProgress).toEqual([0, 25]);
+		controller.cleanup();
+	});
+
+	it('ignores aggregate progress until the apply generation is established', () => {
+		const { deps, calls } = makeDeps();
+		const controller = createOrganizeController(deps);
+
+		controller.handleWebSocketMessage({
+			job_id: 'job-1',
+			file_index: 0,
+			file_path: '',
+			status: 'pending',
+			progress: 100,
+			message: 'stale aggregate frame',
+		} satisfies ProgressMessage);
+
+		expect(calls.setOrganizeProgress).toHaveLength(0);
 		controller.cleanup();
 	});
 
