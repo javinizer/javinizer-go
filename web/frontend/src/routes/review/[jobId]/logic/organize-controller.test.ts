@@ -210,6 +210,55 @@ describe('organize-controller pollOnce terminal-success branches', () => {
 		controller.cleanup();
 	});
 
+	it('does not adopt a newer unrelated apply generation', async () => {
+		let resolvePost!: () => void;
+		const post = vi.fn(
+			() =>
+				new Promise<void>((resolve) => {
+					resolvePost = resolve;
+				}),
+		);
+		const job = makeJob('organized');
+		job.apply_generation = 2;
+		const { deps, calls } = makeDeps({ job, organizeBatchJob: post });
+		const controller = createOrganizeController(deps);
+
+		const organizeRequest = controller.organizeAll();
+		job.apply_generation = 4; // N+2 belongs to another operation.
+		await vi.advanceTimersByTimeAsync(30);
+
+		expect(calls.setOrganizeStatus).not.toContain('completed');
+		expect(calls.toastSuccess).toHaveLength(0);
+		controller.cleanup();
+		resolvePost();
+		await organizeRequest;
+	});
+
+	it('does not resume an unrelated newer apply generation', async () => {
+		const job = makeJob('organized');
+		job.apply_generation = 4; // Recovery was recorded at N=2; expected is N+1=3.
+		const { deps, calls } = makeDeps({ job });
+		const controller = createOrganizeController(deps);
+
+		controller.resumePolling({
+			jobId: 'job-1',
+			operation: 'organize',
+			preApplyGeneration: 2,
+			destination: '/out',
+			skipNfo: false,
+			skipDownload: false,
+			failed: {},
+			succeeded: [],
+			organizeOperation: 'move',
+			eligibleFilePaths: [],
+		});
+		await vi.advanceTimersByTimeAsync(10);
+
+		expect(calls.setOrganizeStatus).not.toContain('completed');
+		expect(calls.toastSuccess).toHaveLength(0);
+		controller.cleanup();
+	});
+
 	it('does not retry a path after a success event removes it from recovery', async () => {
 		const firstPath = '/src/already-succeeded.mp4';
 		const requests: Array<{ retry_file_paths?: string[] }> = [];

@@ -252,18 +252,22 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 				}
 				deps.setJob(latestJob, operationJobId, operationGeneration);
 				lastPollError = null;
+				const expectedApplyGeneration =
+					preApplyGeneration !== undefined ? preApplyGeneration + 1 : undefined;
+				// A request recorded at generation N owns only the next atomic claim,
+				// N+1. A newer generation may belong to another tab or API client and
+				// must never be adopted as this run's terminal result.
 				const generationAdvanced =
-					preApplyGeneration !== undefined &&
-					latestJob.apply_generation !== undefined &&
-					latestJob.apply_generation > preApplyGeneration;
+					expectedApplyGeneration !== undefined &&
+					latestJob.apply_generation === expectedApplyGeneration;
 				const generationIsCurrent =
-					latestJob.apply_generation !== undefined
-						? activeApplyGeneration !== undefined
-							? latestJob.apply_generation >= activeApplyGeneration
-							: preApplyGeneration === undefined || latestJob.apply_generation > preApplyGeneration
-						: activeApplyGeneration === undefined &&
-							applyAlreadyStarted &&
-							preApplyGeneration === undefined;
+					expectedApplyGeneration !== undefined
+						? latestJob.apply_generation === expectedApplyGeneration
+						: latestJob.apply_generation !== undefined
+							? activeApplyGeneration !== undefined
+								? latestJob.apply_generation === activeApplyGeneration
+								: applyAlreadyStarted
+							: activeApplyGeneration === undefined && applyAlreadyStarted;
 				if (generationAdvanced || (applyAlreadyStarted && generationIsCurrent)) {
 					applyTransitionObserved = true;
 					if (generationIsCurrent) {
@@ -569,11 +573,13 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 		const hasRecordedApplyOutcome =
 			(recovery && Object.keys(recovery.failed).length > 0) ||
 			(recovery && recovery.succeeded.length > 0);
+		const expectedApplyGeneration =
+			recovery?.preApplyGeneration !== undefined ? recovery.preApplyGeneration + 1 : undefined;
 		const applyAlreadyStarted =
 			!recovery ||
 			recovery.preApplyGeneration === undefined ||
 			job?.apply_generation === undefined ||
-			job.apply_generation > recovery.preApplyGeneration ||
+			(expectedApplyGeneration !== undefined && job.apply_generation === expectedApplyGeneration) ||
 			!!hasRecordedApplyOutcome;
 		if (recovery) {
 			lastSkipNfo = recovery.skipNfo;
