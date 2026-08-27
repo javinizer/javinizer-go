@@ -27,21 +27,25 @@ async function createCompletedJob(request: APIRequestContext, movieId: string): 
 }
 
 async function navigateClientSideToReview(page: Page, jobId: string): Promise<void> {
-	await page.evaluate((url) => {
-		const existing = document.querySelector('[data-review-test-nav]');
-		existing?.remove();
-		const link = document.createElement('a');
-		link.dataset.reviewTestNav = 'true';
-		link.href = url;
-		link.textContent = 'test review navigation';
-		document.body.append(link);
-		link.click();
-	}, `/review/${jobId}`);
+	// Register the URL waiter before clicking: under CI the click can commit the
+	// route before page.evaluate resolves, which would otherwise miss the event.
 	// Client-side navigation is committed before the new route's data is
 	// necessarily settled. Waiting for the document `load` event can deadlock
 	// this regression because it intentionally holds the previous route's
 	// request until navigation has committed and teardown can abort it.
-	await page.waitForURL(`**/review/${jobId}`, { waitUntil: 'commit' });
+	await Promise.all([
+		page.waitForURL(`**/review/${jobId}`, { waitUntil: 'commit' }),
+		page.evaluate((url) => {
+			const existing = document.querySelector('[data-review-test-nav]');
+			existing?.remove();
+			const link = document.createElement('a');
+			link.dataset.reviewTestNav = 'true';
+			link.href = url;
+			link.textContent = 'test review navigation';
+			document.body.append(link);
+			link.click();
+		}, `/review/${jobId}`),
+	]);
 }
 
 test.describe('review load recovery', () => {
