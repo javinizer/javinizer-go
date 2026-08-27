@@ -746,3 +746,20 @@ func TestApplyPhase_Run_RetriesExplicitFailedPath(t *testing.T) {
 	assert.Equal(t, models.JobStatusCompleted, retried.Status, "successful retry should clear the prior failed status")
 	assert.Empty(t, retried.Error, "successful retry should clear the prior failure")
 }
+
+func TestCountRemainingApplyFailures_TracksFailureAndPanicOutcomes(t *testing.T) {
+	inputs := applyPhaseInputs{
+		Results: map[string]*resultstore.MovieResult{
+			"/prior-failure":    {Status: models.JobStatusFailed},
+			"/excluded-failure": {Status: models.JobStatusFailed},
+		},
+		Excluded: map[string]bool{"/excluded-failure": true},
+	}
+	outcomes := []applyFileOutcome{
+		{FilePath: "/prior-failure", Success: true},
+		{FilePath: "/apply-failure", Failed: true},
+		{FilePath: "/apply-panic", Panic: true},
+	}
+
+	assert.Equal(t, int64(2), countRemainingApplyFailures(inputs, outcomes))
+}
