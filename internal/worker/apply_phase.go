@@ -170,7 +170,15 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 	trackApplyResults(inputs, outcomes, &organized, &failed)
 
 	orgCount := atomic.LoadInt64(&organized)
-	failCount := countRemainingApplyFailures(inputs, outcomes)
+	// A normal apply intentionally skips failures produced by the scrape phase;
+	// those rows have no eligible apply outcome and must not prevent successful
+	// files from reaching Organized. A subset retry, however, must retain any
+	// failed rows that were not selected, so it stays Completed until all
+	// remaining failures are retried.
+	failCount := atomic.LoadInt64(&failed)
+	if len(cfg.RetryFilePaths) > 0 {
+		failCount = countRemainingApplyFailures(inputs, outcomes)
+	}
 
 	// Broadcast the final organization_completed / update_completed WebSocket
 	// message BEFORE MarkOrganized / MarkCompleted so frontend clients

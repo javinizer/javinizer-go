@@ -456,6 +456,34 @@ func TestApplyPhase_Run_SkipsFailedResult(t *testing.T) {
 	assert.Equal(t, 0, wf.getApplyCalled(), "Workflow.Apply should NOT be called for failed results")
 }
 
+func TestApplyPhase_Run_OrganizesSuccessDespitePriorScrapeFailure(t *testing.T) {
+	wf := &stubApplyWorkflow{
+		applyResult: &workflow.ApplyResult{Movie: &models.Movie{ID: "GOOD-001"}},
+	}
+	inputs := makeApplyInputs(wf)
+	inputs.Results["/source/FAIL-002.mp4"] = &resultstore.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: "/source/FAIL-002.mp4", MovieID: "FAIL-002"},
+		Status:        models.JobStatusFailed,
+		// Scrape failures have no movie and are skipped by apply.
+	}
+	inputs.Results["/source/GOOD-001.mp4"] = &resultstore.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: "/source/GOOD-001.mp4", MovieID: "GOOD-001"},
+		Status:        models.JobStatusCompleted,
+		Movie:         &models.Movie{ID: "GOOD-001", Title: "Test Movie"},
+	}
+
+	NewApplyPhase().Run(context.Background(), inputs, ApplyPhaseConfig{
+		OrganizeOptions: workflow.OrganizeOptions{MoveFiles: true},
+		MergeOptions:    workflow.MergeOptions{ForceOverwrite: true},
+		Destination:     "/output",
+	})
+
+	lc := inputs.Lifecycle.(*stubLifecycle)
+	assert.True(t, lc.organized, "a successful apply must organize even when scrape left a failed row")
+	assert.False(t, lc.completed, "a skipped scrape failure must not downgrade the successful apply")
+	assert.Equal(t, 1, wf.getApplyCalled(), "only the successful scrape result should be applied")
+}
+
 func TestApplyPhase_Run_EmptyResults(t *testing.T) {
 	wf := &stubApplyWorkflow{
 		applyResult: &workflow.ApplyResult{Movie: &models.Movie{ID: "IPX-777"}},
