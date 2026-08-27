@@ -197,6 +197,21 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 	}
 }
 
+// retryWritebackClearedFailure confirms a successful retry actually cleared
+// the live result's failed status. The frozen apply input cannot prove that:
+// identity and promote-witness fences, or a write error, may skip write-back
+// while interpretApplyResult still reports the workflow success.
+func retryWritebackClearedFailure(inputs applyPhaseInputs, outcome applyFileOutcome) bool {
+	reader, ok := inputs.Updater.(interface {
+		GetMovieResult(string) (*resultstore.MovieResult, error)
+	})
+	if !ok {
+		return false
+	}
+	current, err := reader.GetMovieResult(outcome.FilePath)
+	return err == nil && current != nil && current.Status == models.JobStatusCompleted
+}
+
 // countRemainingApplyFailures returns the failures that remain after this apply
 // attempt. The apply input is a frozen snapshot, so a subset retry must remove
 // only paths that succeeded in this attempt while retaining eligible failures
@@ -210,7 +225,7 @@ func countRemainingApplyFailures(inputs applyPhaseInputs, outcomes []applyFileOu
 		}
 	}
 	for _, outcome := range outcomes {
-		if outcome.Success {
+		if outcome.Success && retryWritebackClearedFailure(inputs, outcome) {
 			delete(failedPaths, outcome.FilePath)
 		}
 		if outcome.Failed || outcome.Panic {
