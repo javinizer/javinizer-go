@@ -1909,7 +1909,7 @@ export function createReviewState(getJobId: () => string) {
 	});
 
 	onDestroy(() => {
-		cancelJobDetailQuery(teardownJobId);
+		cancelJobDetailQuery(lastRouteJobId);
 		organizeController.cleanup();
 		posterCropController.cleanup();
 	});
