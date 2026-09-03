@@ -62,6 +62,24 @@ func (r *JobRunner) SetRunOptions(scrapeCfg ScrapePhaseConfig, applyCfg ApplyPha
 	r.applyCfg = &applyCfg
 }
 
+// defaultApplyPhaseConfig is the fallback apply configuration used when no explicit
+// apply config is supplied. It deliberately does NOT authorize destination overwrite
+// (ForceUpdate=false) — see the multipart data-loss fix, issue #223.
+func defaultApplyPhaseConfig(destination string) ApplyPhaseConfig {
+	return ApplyPhaseConfig{
+		OrganizeOptions: workflow.OrganizeOptions{
+			MoveFiles:   true,
+			ForceUpdate: false,
+		},
+		MergeOptions: workflow.MergeOptions{
+			ForceOverwrite: true,
+		},
+		Destination: destination,
+		GenerateNFO: true,
+		Download:    true,
+	}
+}
+
 // Run executes the full scrape→apply pipeline sequentially.
 // It runs the scrape phase, checks for completed results, and if any exist,
 // runs the apply phase. Returns nil on success or an error describing
@@ -121,18 +139,7 @@ func (r *JobRunner) Run(ctx context.Context) error {
 		return nil
 	}
 
-	applyCfg := ApplyPhaseConfig{
-		OrganizeOptions: workflow.OrganizeOptions{
-			MoveFiles:   true,
-			ForceUpdate: true,
-		},
-		MergeOptions: workflow.MergeOptions{
-			ForceOverwrite: true,
-		},
-		Destination: status.Destination,
-		GenerateNFO: true,
-		Download:    true,
-	}
+	applyCfg := defaultApplyPhaseConfig(status.Destination)
 	if r.applyCfg != nil {
 		applyCfg = *r.applyCfg
 	}

@@ -308,6 +308,10 @@ type OrganizePlan struct {
 	executeStrategy OperationStrategy
 	LinkMode        LinkMode
 	moveFiles       bool // true = move (rename); false = copy/link — determines which branch strategy.Execute takes
+	// overwriteAuthorized is true when the caller explicitly authorized replacing an existing
+	// destination (cmd.ForceUpdate). When false, move execution refuses to replace a file that
+	// exists at the target even if it appeared after plan-time conflict checks (TOCTOU guard).
+	overwriteAuthorized bool
 }
 
 // Plan creates an organization plan without executing it
@@ -457,11 +461,24 @@ func (o *Organizer) handleSubtitles(plan *OrganizePlan, result *OrganizeResult, 
 			},
 		}
 
-		if _, err := o.fs.Stat(newPath); err == nil {
-			sr.Skipped = true
-		} else if err := fileOp(o.fs, subtitle.OriginalPath, newPath); err != nil {
+		// Parent directory locked alongside the subtitle path: consistent with all other
+		// destination-touching ops so nothing lands mid-sequence in a renamed directory.
+		err := withDestFileLocks([]string{plan.TargetDir, newPath}, func() error {
+			// pathExistsBestEffort also sees dangling symlink objects: a filesystem whose
+			// Stat follows links (no true Lstat) would otherwise let this op replace one.
+			exists, statErr := pathExistsBestEffort(o.fs, newPath)
+			if statErr != nil {
+				return fmt.Errorf("failed to check subtitle destination: %w", statErr)
+			}
+			if exists {
+				sr.Skipped = true
+				return nil
+			}
+			return fileOp(o.fs, subtitle.OriginalPath, newPath)
+		})
+		if err != nil {
 			sr.Error = fmt.Errorf("failed to handle subtitle: %w", err)
-		} else {
+		} else if !sr.Skipped {
 			sr.Moved = true
 		}
 

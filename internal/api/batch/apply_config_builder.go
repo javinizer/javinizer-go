@@ -87,7 +87,7 @@ func resolveOrganizeApplyConfig(
 		workflow.OrganizeOptions{
 			MoveFiles:       !req.CopyOnly,
 			LinkMode:        resolved.LinkMode,
-			ForceUpdate:     true,
+			ForceUpdate:     false,
 			ForceRenameFile: forceRenameFile,
 			Skip:            !effectiveMode.RequiresOrganize(),
 		},

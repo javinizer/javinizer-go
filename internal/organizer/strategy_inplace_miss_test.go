@@ -2,6 +2,7 @@ package organizer
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/matcher"
@@ -165,13 +166,16 @@ func TestInPlaceStrategy_Execute_SameFileCheck(t *testing.T) {
 	}
 
 	result, err := strategy.Execute(plan)
-	// MemMapFs doesn't support os.SameFile properly, so this will fail with
-	// "target directory already exists" — this is expected behavior for the test
-	// environment. On a real filesystem, os.SameFile would detect the same inode.
-	if err != nil {
-		assert.Contains(t, err.Error(), "target directory already exists")
-		assert.False(t, result.Moved)
-	}
+	// MemMapFs FileInfo.Sys() is nil, so os.SameFile never recognizes the alias and the
+	// dir-exists guard refuses deterministically. An unexpected nil error here would mean
+	// the guard silently regressed, so require it rather than tolerating it.
+	require.Error(t, err, "same-dir in-place plan must conflict on MemMapFs where os.SameFile cannot detect identity")
+	require.NotNil(t, result)
+	assert.Contains(t, err.Error(), "target directory already exists")
+	assert.False(t, result.Moved)
+	data, rerr := afero.ReadFile(fs, "/source/ABC-123/ABC-123.mp4")
+	require.NoError(t, rerr, "source must remain untouched after refusal")
+	assert.Equal(t, []byte("video"), data)
 }
 
 func TestInPlaceStrategy_Execute_RollbackOnFileRenameFailure(t *testing.T) {
@@ -198,16 +202,20 @@ func TestInPlaceStrategy_Execute_RollbackOnFileRenameFailure(t *testing.T) {
 	}
 
 	result, err := strategy.Execute(plan)
-	// The rename from currentFilePath to targetPath should fail
-	// since targetPath is a directory path without filename
-	// This triggers the rollback path
-	if err != nil {
-		assert.Contains(t, err.Error(), "failed to rename file")
-		// Verify the old directory was restored (rollback)
-		exists, _ := afero.Exists(fs, "/source/old-folder")
-		assert.True(t, exists, "Old directory should be restored after rollback")
-	}
-	_ = result
+	// The rename from currentFilePath to targetPath must fail since targetPath is a
+	// directory path without filename — an implementation returning success here would
+	// indicate the inner rename (and its refuse guard) never ran.
+	require.Error(t, err, "inner rename to an empty target filename must fail")
+	require.NotNil(t, result)
+	isRenameOrConflict := strings.Contains(err.Error(), "failed to rename file") || strings.Contains(err.Error(), "refusing to overwrite")
+	assert.True(t, isRenameOrConflict, "expected rename-or-conflict error, got: %v", err)
+	assert.False(t, result.Moved)
+	// Verify the old directory was restored (rollback)
+	exists, _ := afero.Exists(fs, "/source/old-folder")
+	assert.True(t, exists, "Old directory should be restored after rollback")
+	src, serr := afero.ReadFile(fs, "/source/old-folder/old-name.mp4")
+	require.NoError(t, serr, "source file must survive the rollback")
+	assert.Equal(t, []byte("video"), src)
 }
 
 func TestInPlaceStrategy_Execute_MkdirAllFails(t *testing.T) {
@@ -288,10 +296,10 @@ func TestInPlaceStrategy_Plan_InPlaceConflictWithForceUpdate(t *testing.T) {
 	plan, err := strategy.Plan(match, movie, "/dest", false)
 	require.NoError(t, err)
 	assert.True(t, plan.InPlace, "Should be InPlace for dedicated folder")
-	// Conflicts should include targetDir since it exists and is not same as oldDir
-	if len(plan.Conflicts) > 0 {
-		assert.Contains(t, plan.Conflicts, filepath.FromSlash("/source/ABC-123"))
-	}
+	// Conflicts MUST include targetDir since it exists and is not same as oldDir —
+	// requiring the entry unconditionally catches a conflict-detection regression that
+	// reports an empty list.
+	require.Contains(t, plan.Conflicts, filepath.FromSlash("/source/ABC-123"), "existing distinct targetDir must appear in plan conflicts")
 }
 
 func TestInPlaceStrategy_Execute_OldDirStatFailsOnSameFileCheck(t *testing.T) {

@@ -1,6 +1,7 @@
 package organizer
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -186,26 +187,27 @@ func (s *inPlaceStrategy) Plan(match models.FileMatchInfo, movie *models.Movie, 
 	}
 
 	return &OrganizePlan{
-		Match:              match,
-		Movie:              movie,
-		SourcePath:         match.Path,
-		TargetDir:          targetDir,
-		TargetFile:         pc.FileName,
-		TargetPath:         targetPath,
-		WillMove:           willMove,
-		Conflicts:          conflicts,
-		InPlace:            inPlace,
-		OldDir:             oldDir,
-		IsDedicated:        isDedicated,
-		SkipInPlaceReason:  skipInPlaceReason,
-		FolderName:         folderName,
-		SubfolderPath:      "",
-		BaseFileName:       resolveBaseFileName(s.config, s.templateEngine, movie, match),
-		PreserveSourcePath: false,
-		RenameFolder:       inPlace,
-		strategy:           strategyInPlace,
-		executeStrategy:    s,
-		moveFiles:          true,
+		Match:               match,
+		Movie:               movie,
+		SourcePath:          match.Path,
+		TargetDir:           targetDir,
+		TargetFile:          pc.FileName,
+		TargetPath:          targetPath,
+		WillMove:            willMove,
+		Conflicts:           conflicts,
+		InPlace:             inPlace,
+		OldDir:              oldDir,
+		IsDedicated:         isDedicated,
+		SkipInPlaceReason:   skipInPlaceReason,
+		FolderName:          folderName,
+		SubfolderPath:       "",
+		BaseFileName:        resolveBaseFileName(s.config, s.templateEngine, movie, match),
+		PreserveSourcePath:  false,
+		RenameFolder:        inPlace,
+		strategy:            strategyInPlace,
+		executeStrategy:     s,
+		moveFiles:           true,
+		overwriteAuthorized: forceUpdate,
 	}, nil
 }
 
@@ -220,67 +222,126 @@ func (s *inPlaceStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) {
 	}
 
 	if plan.InPlace {
-		info, err := s.fs.Stat(plan.OldDir)
-		if err != nil {
-			result.Error = fmt.Errorf("failed to stat old directory: %w", err)
-			return result, result.Error
-		}
-		if !info.IsDir() {
-			result.Error = fmt.Errorf("old path is not a directory: %s", plan.OldDir)
-			return result, result.Error
-		}
+		// The WHOLE directory sequence — stat, renames, inner file step, and any rollback —
+		// runs while holding BOTH the TargetDir and TargetPath locks, acquired up front in
+		// sorted-key order: a sibling worker locking only the child path can never write a
+		// file between the directory rename and the inner file step, so rollback can never
+		// displace a sibling's entry.
+		err := withDestFileLocks([]string{plan.TargetDir, plan.TargetPath}, func() error {
+			info, err := s.fs.Stat(plan.OldDir)
+			if err != nil {
+				return fmt.Errorf("failed to stat old directory: %w", err)
+			}
+			if !info.IsDir() {
+				return fmt.Errorf("old path is not a directory: %s", plan.OldDir)
+			}
 
-		if _, err := s.fs.Stat(plan.TargetDir); err == nil {
-			// NOTE: TOCTOU race — targetDir could be created between this Stat check and the
-			// Rename below. This is a known limitation mitigated by the Plan-phase conflict check,
-			// which validates exclusivity before Execute runs. A filesystem-level atomic rename
-			// would be required to fully eliminate this window.
-			oldInfo, oldErr := s.fs.Stat(plan.OldDir)
-			if oldErr == nil {
-				newInfo, newErr := s.fs.Stat(plan.TargetDir)
-				if newErr == nil && os.SameFile(oldInfo, newInfo) {
+			dirExists := false
+			if lst, ok := s.fs.(afero.Lstater); ok {
+				info, didLstat, statErr := lst.LstatIfPossible(plan.TargetDir)
+				switch {
+				case statErr == nil:
+					dirExists = true
+					// didLstat=false means info came from a link-following Stat: re-probe with
+					// readlink so a non-dangling symlink (possibly pointing at OldDir, which
+					// would pass the os.SameFile check below) is not treated as the real dir.
+					if info.Mode()&os.ModeSymlink != 0 || (!didLstat && symlinkObjectExists(s.fs, plan.TargetDir)) {
+						return fmt.Errorf("target directory is a symlink: %s", plan.TargetDir)
+					}
+				case !errors.Is(statErr, os.ErrNotExist):
+					return fmt.Errorf("failed to check target directory: %w", statErr)
+				case !didLstat && symlinkObjectExists(s.fs, plan.TargetDir):
+					// link-following Stat fallback would hide a dangling symlink object
+					return fmt.Errorf("target directory is a symlink: %s", plan.TargetDir)
+				}
+			} else if _, statErr := s.fs.Stat(plan.TargetDir); statErr == nil {
+				if symlinkObjectExists(s.fs, plan.TargetDir) {
+					return fmt.Errorf("target directory is a symlink: %s", plan.TargetDir)
+				}
+				dirExists = true
+			} else if !errors.Is(statErr, os.ErrNotExist) {
+				return fmt.Errorf("failed to check target directory: %w", statErr)
+			} else if symlinkObjectExists(s.fs, plan.TargetDir) {
+				return fmt.Errorf("target directory is a symlink: %s", plan.TargetDir)
+			}
+			if dirExists {
+				oldInfo, oldErr := s.fs.Stat(plan.OldDir)
+				if oldErr == nil {
+					newInfo, newErr := s.fs.Stat(plan.TargetDir)
+					if newErr == nil && os.SameFile(oldInfo, newInfo) {
+					} else {
+						return fmt.Errorf("target directory already exists: %s", plan.TargetDir)
+					}
 				} else {
-					result.Error = fmt.Errorf("target directory already exists: %s", plan.TargetDir)
-					return result, result.Error
+					return fmt.Errorf("target directory already exists: %s", plan.TargetDir)
 				}
-			} else {
-				result.Error = fmt.Errorf("target directory already exists: %s", plan.TargetDir)
-				return result, result.Error
 			}
-		}
 
-		if err := s.fs.Rename(plan.OldDir, plan.TargetDir); err != nil {
-			result.Error = fmt.Errorf("failed to rename directory: %w", err)
+			if err := s.fs.Rename(plan.OldDir, plan.TargetDir); err != nil {
+				return fmt.Errorf("failed to rename directory: %w", err)
+			}
+
+			result.InPlaceRenamed = true
+			result.OldDirectoryPath = plan.OldDir
+			result.NewDirectoryPath = plan.TargetDir
+
+			oldFileName := plan.Match.Name
+			if oldFileName == "" {
+				oldFileName = filepath.Base(plan.SourcePath)
+			}
+			currentFilePath := filepath.Join(plan.TargetDir, oldFileName)
+			if currentFilePath != plan.TargetPath {
+				// Both destination locks are already held (see above), so no sibling can slip a
+				// file into the renamed directory at plan.TargetPath between the directory
+				// rename and this inner step — refuse-then-rename with rollback is atomic.
+				if !plan.overwriteAuthorized {
+					lexicalSelf, sameIn, e2 := refuseExistingDestination(s.fs, currentFilePath, plan.TargetPath)
+					if e2 != nil {
+						if rb := s.fs.Rename(plan.TargetDir, plan.OldDir); rb != nil {
+							logging.Errorf("[in-place] Failed to rollback directory rename %s → %s: %v", plan.TargetDir, plan.OldDir, rb)
+						}
+						return e2
+					}
+					if lexicalSelf || sameIn {
+						return nil // inner target names the same file — nothing to rename
+					}
+				}
+				if err := s.fs.Rename(currentFilePath, plan.TargetPath); err != nil {
+					if rb := s.fs.Rename(plan.TargetDir, plan.OldDir); rb != nil {
+						logging.Errorf("[in-place] Failed to rollback directory rename %s → %s: %v", plan.TargetDir, plan.OldDir, rb)
+					}
+					return fmt.Errorf("failed to rename file after directory rename: %w", err)
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			result.Error = err
 			return result, result.Error
 		}
-
-		result.InPlaceRenamed = true
-		result.OldDirectoryPath = plan.OldDir
-		result.NewDirectoryPath = plan.TargetDir
-
-		oldFileName := plan.Match.Name
-		if oldFileName == "" {
-			oldFileName = filepath.Base(plan.SourcePath)
-		}
-		currentFilePath := filepath.Join(plan.TargetDir, oldFileName)
-		if currentFilePath != plan.TargetPath {
-			if err := s.fs.Rename(currentFilePath, plan.TargetPath); err != nil {
-				if rollbackErr := s.fs.Rename(plan.TargetDir, plan.OldDir); rollbackErr != nil {
-					logging.Errorf("[in-place] Failed to rollback directory rename %s → %s: %v", plan.TargetDir, plan.OldDir, rollbackErr)
-				}
-				result.Error = fmt.Errorf("failed to rename file after directory rename: %w", err)
-				return result, result.Error
-			}
-		}
-
 		result.Moved = true
+		return result, nil
 	} else {
-		if err := s.fs.MkdirAll(plan.TargetDir, config.DirPerm); err != nil {
-			result.Error = fmt.Errorf("failed to create directory: %w", err)
-			return result, result.Error
-		}
-
-		if err := fsutil.MoveFileFs(s.fs, plan.SourcePath, plan.TargetPath); err != nil {
+		// Lock the parent directory alongside the target path: an in-place directory
+		// rename elsewhere holds {TargetDir, TargetPath} for its whole sequence, and a
+		// bare TargetPath lock alone would let this move land inside a renamed (possibly
+		// about-to-rollback) directory. Sorted acquisition keeps every site cycle-free.
+		err := withDestFileLocks([]string{plan.TargetDir, plan.TargetPath}, func() error {
+			if !plan.overwriteAuthorized {
+				lexicalSelf, sameIn, err := refuseExistingDestination(s.fs, plan.SourcePath, plan.TargetPath)
+				if err != nil {
+					return err
+				}
+				if lexicalSelf || sameIn {
+					return nil
+				}
+			}
+			if err := s.fs.MkdirAll(plan.TargetDir, config.DirPerm); err != nil {
+				return fmt.Errorf("failed to create directory: %w", err)
+			}
+			return fsutil.MoveFileFs(s.fs, plan.SourcePath, plan.TargetPath)
+		})
+		if err != nil {
 			result.Error = fmt.Errorf("failed to move file: %w", err)
 			return result, result.Error
 		}

@@ -6,7 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
+	"sync"
 	"syscall"
 
 	"github.com/javinizer/javinizer-go/internal/config"
@@ -15,6 +17,171 @@ import (
 	"github.com/javinizer/javinizer-go/internal/template"
 	"github.com/spf13/afero"
 )
+
+// operationLocks serializes destination-touching operations per destination so a
+// concurrent batch worker cannot slip a file between the existence check and the move
+// (TOCTOU). Entries are ref-counted: a lock stays registered while any goroutine waits
+// on it and is removed only once the last reference drops, which is race-free (unlike
+// try-lock delete flows that can unlink an entry with a waiter or a replacement).
+// Known residual (centralized hardening tracked separately as #224): keys are
+// lexically cleaned only, so symlink/case aliases of one destination can acquire
+// different locks.
+type destFileLock struct {
+	mu   sync.Mutex
+	refs int
+}
+
+type destFileLocker struct {
+	mu    sync.Mutex
+	items map[string]*destFileLock
+}
+
+var operationLocks destFileLocker
+
+func withDestFileLock(path string, fn func() error) error {
+	key := filepath.Clean(path)
+	operationLocks.mu.Lock()
+	if operationLocks.items == nil {
+		operationLocks.items = make(map[string]*destFileLock)
+	}
+	l := operationLocks.items[key]
+	if l == nil {
+		l = &destFileLock{}
+		operationLocks.items[key] = l
+	}
+	l.refs++
+	operationLocks.mu.Unlock()
+
+	l.mu.Lock()
+	defer func() {
+		l.mu.Unlock()
+		operationLocks.mu.Lock()
+		l.refs--
+		if l.refs == 0 {
+			if operationLocks.items[key] == l {
+				delete(operationLocks.items, key)
+			}
+		}
+		operationLocks.mu.Unlock()
+	}()
+	return fn()
+}
+
+// withDestFileLocks acquires destination locks for multiple paths with respect to other
+// multi-acquisitions: keys are cleaned, deduplicated, and acquired in sorted order so
+// concurrent operations can never form a hold-and-wait cycle.
+func withDestFileLocks(paths []string, fn func() error) error {
+	seen := make(map[string]struct{}, len(paths))
+	keys := make([]string, 0, len(paths))
+	for _, p := range paths {
+		k := filepath.Clean(p)
+		if _, dup := seen[k]; dup {
+			continue
+		}
+		seen[k] = struct{}{}
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var run func(i int) error
+	run = func(i int) error {
+		if i == len(keys) {
+			return fn()
+		}
+		return withDestFileLock(keys[i], func() error { return run(i + 1) })
+	}
+	return run(0)
+}
+
+// refuseExistingDestination enforces no-clobber at execution time with lexical-self vs
+// hardlink-alias distinction: identical lexical paths (./file vs file) are identical=true —
+// operators must not touch the destination at all; a DIFFERENT path to the same inode
+// (hardlink alias) is sameInode=true and may no-op when its output type is satisfied.
+// A destination symlink object (even dangling) or an existing directory always conflicts;
+// so does a different file. Same-directory ENTRY aliases (path reaching the identical
+// directory entry through lexically distinct routes like symlinks in ancestors or case
+// folding on a case-insensitive FS) are identical=true so they're never removed.
+// Identity is evaluated with no-follow Lstat on both sides; the source's own symlink
+// status is Mint vital — a source symlink pointing at the destination's regular inode
+// is NOT an alias (it doesn't share that destination's name-bearing link).
+func refuseExistingDestination(fs afero.Fs, src, dst string) (identical, sameInode bool, err error) {
+	if filepath.Clean(src) == filepath.Clean(dst) {
+		return true, true, nil
+	}
+	var lstatDst, lstatSrc os.FileInfo
+	var dstErr, srcErr error
+	// dstLstat/srcLstat record whether the filesystem actually performed an Lstat.
+	// Symlink checks are trustworthy only when true; when false the values are Stat-based.
+	var dstLstat, srcLstat bool
+	if lst, ok := fs.(afero.Lstater); ok {
+		var didDst, didSrc bool
+		lstatDst, didDst, dstErr = lst.LstatIfPossible(dst)
+		lstatSrc, didSrc, srcErr = lst.LstatIfPossible(src)
+		dstLstat, srcLstat = didDst, didSrc
+	} else {
+		lstatDst, dstErr = fs.Stat(dst)
+		lstatSrc, srcErr = fs.Stat(src)
+	}
+	// A filesystem whose Stat follows links reports a DANGLING destination symlink as
+	// absent. Whenever the destination came from a following lookup (no Lstater, or
+	// LstatIfPossible reporting didLstat=false), probe ReadlinkIfPossible so an
+	// unauthorized operation never silently replaces a symlink object.
+	if dstErr != nil && errors.Is(dstErr, os.ErrNotExist) && !dstLstat && symlinkObjectExists(fs, dst) {
+		return false, false, fmt.Errorf("file already exists at destination (refusing to overwrite): %s", dst)
+	}
+	if dstErr == nil {
+		if dstLstat && lstatDst.Mode()&os.ModeSymlink != 0 {
+			return false, false, fmt.Errorf("file already exists at destination (refusing to overwrite): %s", dst)
+		}
+		if lstatDst.IsDir() {
+			return false, false, fmt.Errorf("file already exists at destination (refusing to overwrite): %s", dst)
+		}
+		if srcErr != nil || (srcLstat && lstatSrc.Mode()&os.ModeSymlink != 0) || !os.SameFile(lstatSrc, lstatDst) {
+			return false, false, fmt.Errorf("file already exists at destination (refusing to overwrite): %s", dst)
+		}
+		return false, true, nil
+	}
+	if !errors.Is(dstErr, os.ErrNotExist) {
+		return false, false, fmt.Errorf("failed to check destination: %w", dstErr)
+	}
+	return false, false, nil
+}
+
+// symlinkObjectExists probes path specifically for a symlink OBJECT (including dangling
+// ones) on filesystems whose Stat follows links — where a dangling symlink otherwise
+// masquerades as not-exists.
+func symlinkObjectExists(fs afero.Fs, path string) bool {
+	lr, ok := fs.(afero.LinkReader)
+	if !ok {
+		return false
+	}
+	_, err := lr.ReadlinkIfPossible(path)
+	return err == nil
+}
+
+// pathExistsBestEffort reports whether path names any directory entry — file, directory,
+// or symlink object (even dangling) — regardless of whether the filesystem supports a
+// true Lstat; a Stat-following lookup alone would miss a dangling symlink.
+func pathExistsBestEffort(fs afero.Fs, path string) (bool, error) {
+	if lst, ok := fs.(afero.Lstater); ok {
+		_, didLstat, err := lst.LstatIfPossible(path)
+		switch {
+		case err == nil:
+			return true, nil
+		case !errors.Is(err, os.ErrNotExist):
+			return false, err
+		case didLstat:
+			// true Lstat miss: genuinely absent — no fallback probe needed
+			return false, nil
+		}
+		// didLstat=false: fs fell back to a link-following Stat; a dangling symlink
+		// would hide here, so probe readlink below.
+	} else if _, err := fs.Stat(path); err == nil {
+		return true, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return false, err
+	}
+	return symlinkObjectExists(fs, path), nil
+}
 
 type organizeStrategy struct {
 	fs             afero.Fs
@@ -108,26 +275,27 @@ func (s *organizeStrategy) Plan(match models.FileMatchInfo, movie *models.Movie,
 	}
 
 	return &OrganizePlan{
-		Match:              match,
-		Movie:              movie,
-		SourcePath:         match.Path,
-		TargetDir:          targetDir,
-		TargetFile:         pc.FileName,
-		TargetPath:         targetPath,
-		WillMove:           willMove,
-		Conflicts:          conflicts,
-		InPlace:            false,
-		OldDir:             "",
-		IsDedicated:        false,
-		SkipInPlaceReason:  "organize mode - always move to destination",
-		FolderName:         folderName,
-		SubfolderPath:      subfolderPath,
-		BaseFileName:       resolveBaseFileName(s.config, s.templateEngine, movie, match),
-		PreserveSourcePath: false,
-		RenameFolder:       false,
-		strategy:           strategyOrganize,
-		executeStrategy:    s,
-		moveFiles:          true,
+		Match:               match,
+		Movie:               movie,
+		SourcePath:          match.Path,
+		TargetDir:           targetDir,
+		TargetFile:          pc.FileName,
+		TargetPath:          targetPath,
+		WillMove:            willMove,
+		Conflicts:           conflicts,
+		InPlace:             false,
+		OldDir:              "",
+		IsDedicated:         false,
+		SkipInPlaceReason:   "organize mode - always move to destination",
+		FolderName:          folderName,
+		SubfolderPath:       subfolderPath,
+		BaseFileName:        resolveBaseFileName(s.config, s.templateEngine, movie, match),
+		PreserveSourcePath:  false,
+		RenameFolder:        false,
+		strategy:            strategyOrganize,
+		executeStrategy:     s,
+		moveFiles:           true,
+		overwriteAuthorized: forceUpdate,
 	}, nil
 }
 
@@ -148,13 +316,27 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 
 	// Move path: moveFiles=true (default) — rename source to target
 	if plan.moveFiles {
-		if err := s.fs.MkdirAll(plan.TargetDir, config.DirPerm); err != nil {
-			result.Error = fmt.Errorf("failed to create directory: %w", err)
-			return result, result.Error
+		move := func() error {
+			if !plan.overwriteAuthorized {
+				identical, sameIn, err := refuseExistingDestination(s.fs, plan.SourcePath, plan.TargetPath)
+				if err != nil {
+					return err
+				}
+				if identical || sameIn {
+					return nil // same path or same file — nothing to move
+				}
+			}
+
+			if err := s.fs.MkdirAll(plan.TargetDir, config.DirPerm); err != nil {
+				return fmt.Errorf("failed to create directory: %w", err)
+			}
+
+			return fsutil.MoveFileFs(s.fs, plan.SourcePath, plan.TargetPath)
 		}
 
-		if err := fsutil.MoveFileFs(s.fs, plan.SourcePath, plan.TargetPath); err != nil {
-			result.Error = fmt.Errorf("failed to move file: %w", err)
+		err := withDestFileLocks([]string{plan.TargetDir, plan.TargetPath}, move)
+		if err != nil {
+			result.Error = err
 			return result, result.Error
 		}
 
@@ -175,62 +357,93 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 		return result, result.Error
 	}
 
-	// Create target directory
-	if err := s.fs.MkdirAll(plan.TargetDir, config.DirPerm); err != nil {
-		result.Error = fmt.Errorf("failed to create directory: %w", err)
-		return result, result.Error
-	}
-
-	// Remove existing target before creating link
-	if plan.LinkMode != LinkModeNone {
-		if err := s.fs.Remove(plan.TargetPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-			result.Error = fmt.Errorf("failed to prepare target path for link: %w", err)
-			return result, result.Error
-		}
-	}
-
-	switch plan.LinkMode {
-	case LinkModeHard:
-		if err := s.linker.hardlink(plan.SourcePath, plan.TargetPath); err != nil {
-			if errors.Is(err, syscall.EXDEV) {
-				result.Error = fmt.Errorf("failed to create hard link (source and destination must be on the same filesystem): %w", err)
-				return result, result.Error
-			}
-			if errors.Is(err, os.ErrPermission) {
-				result.Error = fmt.Errorf("failed to create hard link (permission denied): %w", err)
-				return result, result.Error
-			}
-			result.Error = fmt.Errorf("failed to create hard link: %w", err)
-			return result, result.Error
-		}
-	case LinkModeSoft:
-		linkTarget := plan.SourcePath
-		if !filepath.IsAbs(linkTarget) {
-			abs, err := filepath.Abs(linkTarget)
+	// Every destination-touching step runs under the destination lock: unauthorized
+	// paths guard inside it (a plain copy would otherwise overwrite a late-created file),
+	// and authorized Remove+link work must serialize against concurrent guarded calls.
+	// The parent directory is locked too: an in-place directory rename elsewhere holds
+	// {TargetDir, TargetPath} for its whole sequence, and a bare TargetPath lock alone
+	// would let this op land inside a renamed (possibly about-to-rollback) directory.
+	err := withDestFileLocks([]string{plan.TargetDir, plan.TargetPath}, func() error {
+		dstSameInode := false
+		dstLexicalSelf := false
+		// Always classify: lexical-self aliases must never be removed (any authorization
+		// mode), and unauthorized operations refuse any different-file destination.
+		{
+			self, sameIn, err := refuseExistingDestination(s.fs, plan.SourcePath, plan.TargetPath)
 			if err != nil {
-				result.Error = fmt.Errorf("failed to resolve source path for symlink: %w", err)
-				return result, result.Error
+				if !plan.overwriteAuthorized {
+					return err
+				}
+				// Authorized mode: classification failures are benign (overwrite intended).
+			} else {
+				dstLexicalSelf = self
+				dstSameInode = sameIn
 			}
-			linkTarget = abs
 		}
-		if err := s.linker.symlink(linkTarget, plan.TargetPath); err != nil {
-			if errors.Is(err, os.ErrPermission) && runtime.GOOS == "windows" {
-				result.Error = fmt.Errorf("failed to create soft link (Windows requires Developer Mode or elevated privileges for symlinks): %w", err)
-				return result, result.Error
+
+		if err := s.fs.MkdirAll(plan.TargetDir, config.DirPerm); err != nil {
+			return fmt.Errorf("failed to create directory: %w", err)
+		}
+
+		// Remove an existing target ONLY for an authorized replacement. Unauthorized
+		// paths never remove (their conversion output of choice must be won via
+		// refusal-and-fail). A lexical self-path is also never removed.
+		// Same-inode hardlinks under unauthorized mode are idempotent (returned early).
+		if plan.LinkMode != LinkModeNone && !dstLexicalSelf && plan.overwriteAuthorized {
+			if err := s.fs.Remove(plan.TargetPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("failed to prepare target path for link: %w", err)
 			}
-			if errors.Is(err, os.ErrPermission) {
-				result.Error = fmt.Errorf("failed to create soft link (permission denied): %w", err)
-				return result, result.Error
+		}
+
+		if dstLexicalSelf || (dstSameInode && !plan.overwriteAuthorized && plan.LinkMode == LinkModeHard) {
+			return nil // self-path or already-satisfied hardlink output — idempotent
+		}
+
+		switch plan.LinkMode {
+		case LinkModeHard:
+			if dstSameInode && !plan.overwriteAuthorized {
+				return nil
 			}
-			result.Error = fmt.Errorf("failed to create soft link: %w", err)
-			return result, result.Error
+			if err := s.linker.hardlink(plan.SourcePath, plan.TargetPath); err != nil {
+				if errors.Is(err, syscall.EXDEV) {
+					return fmt.Errorf("failed to create hard link (source and destination must be on the same filesystem): %w", err)
+				}
+				if errors.Is(err, os.ErrPermission) {
+					return fmt.Errorf("failed to create hard link (permission denied): %w", err)
+				}
+				return fmt.Errorf("failed to create hard link: %w", err)
+			}
+		case LinkModeSoft:
+			linkTarget := plan.SourcePath
+			if !filepath.IsAbs(linkTarget) {
+				abs, err := filepath.Abs(linkTarget)
+				if err != nil {
+					return fmt.Errorf("failed to resolve source path for symlink: %w", err)
+				}
+				linkTarget = abs
+			}
+			if err := s.linker.symlink(linkTarget, plan.TargetPath); err != nil {
+				if errors.Is(err, os.ErrPermission) && runtime.GOOS == "windows" {
+					return fmt.Errorf("failed to create soft link (Windows requires Developer Mode or elevated privileges for symlinks): %w", err)
+				}
+				if errors.Is(err, os.ErrPermission) {
+					return fmt.Errorf("failed to create soft link (permission denied): %w", err)
+				}
+				return fmt.Errorf("failed to create soft link: %w", err)
+			}
+		default:
+			if dstSameInode && !plan.overwriteAuthorized {
+				return nil
+			}
+			if err := s.linker.copyFile(s.fs, plan.SourcePath, plan.TargetPath); err != nil {
+				return fmt.Errorf("failed to copy file: %w", err)
+			}
 		}
-	default:
-		// LinkModeNone in copy path: use linker.CopyFile (replaces the manual io.Copy block)
-		if err := s.linker.copyFile(s.fs, plan.SourcePath, plan.TargetPath); err != nil {
-			result.Error = fmt.Errorf("failed to copy file: %w", err)
-			return result, result.Error
-		}
+		return nil
+	})
+	if err != nil {
+		result.Error = err
+		return result, result.Error
 	}
 
 	result.Moved = true

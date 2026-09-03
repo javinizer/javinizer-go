@@ -65,26 +65,27 @@ func (s *inPlaceNoRenameFolderStrategy) Plan(match models.FileMatchInfo, movie *
 	conflicts := checkTargetConflict(s.fs, match.Path, targetPath, forceUpdate, willMove)
 
 	return &OrganizePlan{
-		Match:              match,
-		Movie:              movie,
-		SourcePath:         match.Path,
-		TargetDir:          targetDir,
-		TargetFile:         pc.FileName,
-		TargetPath:         targetPath,
-		WillMove:           willMove,
-		Conflicts:          conflicts,
-		InPlace:            false,
-		OldDir:             "",
-		IsDedicated:        false,
-		SkipInPlaceReason:  "in-place-norenamefolder mode - file rename only",
-		FolderName:         "",
-		SubfolderPath:      "",
-		BaseFileName:       resolveBaseFileName(s.config, s.templateEngine, movie, match),
-		PreserveSourcePath: true,
-		RenameFolder:       false,
-		strategy:           strategyInPlaceNoRenameFolder,
-		executeStrategy:    s,
-		moveFiles:          true,
+		Match:               match,
+		Movie:               movie,
+		SourcePath:          match.Path,
+		TargetDir:           targetDir,
+		TargetFile:          pc.FileName,
+		TargetPath:          targetPath,
+		WillMove:            willMove,
+		Conflicts:           conflicts,
+		InPlace:             false,
+		OldDir:              "",
+		IsDedicated:         false,
+		SkipInPlaceReason:   "in-place-norenamefolder mode - file rename only",
+		FolderName:          "",
+		SubfolderPath:       "",
+		BaseFileName:        resolveBaseFileName(s.config, s.templateEngine, movie, match),
+		PreserveSourcePath:  true,
+		RenameFolder:        false,
+		strategy:            strategyInPlaceNoRenameFolder,
+		executeStrategy:     s,
+		moveFiles:           true,
+		overwriteAuthorized: forceUpdate,
 	}, nil
 }
 
@@ -98,7 +99,22 @@ func (s *inPlaceNoRenameFolderStrategy) Execute(plan *OrganizePlan) (*OrganizeRe
 		ShouldGenerateMetadata: true,
 	}
 
-	if err := fsutil.MoveFileFs(s.fs, plan.SourcePath, plan.TargetPath); err != nil {
+	// See strategy_inplace.go: the parent directory is locked alongside the target
+	// path so this move can never land inside a directory a concurrent in-place op is
+	// renaming (sorted acquisition keeps every site cycle-free).
+	err := withDestFileLocks([]string{plan.TargetDir, plan.TargetPath}, func() error {
+		if !plan.overwriteAuthorized {
+			lexicalSelf, sameIn, err := refuseExistingDestination(s.fs, plan.SourcePath, plan.TargetPath)
+			if err != nil {
+				return err
+			}
+			if lexicalSelf || sameIn {
+				return nil
+			}
+		}
+		return fsutil.MoveFileFs(s.fs, plan.SourcePath, plan.TargetPath)
+	})
+	if err != nil {
 		result.Error = fmt.Errorf("failed to rename file: %w", err)
 		return result, result.Error
 	}
