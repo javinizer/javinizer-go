@@ -61,6 +61,48 @@ func TestUpdateWordReplacement_PreservesModeWhenOmitted(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 }
 
+// PUT with an unknown mode is a 400 before any store call.
+func TestUpdateWordReplacement_RejectsUnknownMatchMode(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	mockRepo := mocks.NewMockWordReplacementRepositoryInterface(t)
+
+	deps := NewGenreDeps(database.ReplacementRepos{WordReplacementRepo: mockRepo}, database.TranslationRepos{})
+	router := gin.New()
+	router.PUT("/update", updateWordReplacement(deps, func() {}))
+
+	body, _ := json.Marshal(map[string]string{"original": "チ*ポ", "replacement": "new", "match_mode": "regex"})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest("PUT", "/update", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+// PUT with an explicit mode switches it (wildcard back to literal).
+func TestUpdateWordReplacement_ExplicitModeSwitch(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	stored := &models.WordReplacement{ID: 9, Original: "チ*ポ", Replacement: "x", MatchMode: models.MatchModeWildcard}
+	want := *stored
+	want.MatchMode = models.MatchModeLiteral
+
+	mockRepo := mocks.NewMockWordReplacementRepositoryInterface(t)
+	mockRepo.EXPECT().FindByOriginal(context.Background(), "チ*ポ").Return(stored, nil)
+	mockRepo.EXPECT().Upsert(context.Background(), &want).Return(nil)
+
+	deps := NewGenreDeps(database.ReplacementRepos{WordReplacementRepo: mockRepo}, database.TranslationRepos{})
+	router := gin.New()
+	router.PUT("/update", updateWordReplacement(deps, func() {}))
+
+	body, _ := json.Marshal(map[string]string{"original": "チ*ポ", "replacement": "x", "match_mode": "literal"})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest("PUT", "/update", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
 // Spec scenario "re-import updates mode only": same original+replacement with
 // a different mode must count as an update, not a skip.
 func TestImportWordReplacements_ModeOnlyChangeIsImported(t *testing.T) {

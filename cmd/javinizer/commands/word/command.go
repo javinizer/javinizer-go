@@ -107,11 +107,8 @@ func runWordList(cmd *cobra.Command, args []string, configFile string) error {
 	fmt.Println(strings.Repeat("-", 65))
 
 	for _, r := range replacements {
-		mode := r.MatchMode
-		if mode == "" {
-			mode = models.MatchModeLiteral
-		}
-		fmt.Printf("%-30s -> %-30s [%s]\n", r.Original, r.Replacement, mode)
+		// Schema guarantees match_mode is set (NOT NULL DEFAULT 'literal').
+		fmt.Printf("%-30s -> %-30s [%s]\n", r.Original, r.Replacement, r.MatchMode)
 	}
 
 	fmt.Printf("\nTotal: %d replacements\n", len(replacements))
@@ -288,15 +285,13 @@ func runWordImport(cmd *cobra.Command, args []string, configFile string) error {
 
 		existing, err := repo.FindByOriginal(context.Background(), r.Original)
 		if err == nil {
+			// Import-side normalization (missing JSON mode => literal);
+			// existing rows always carry a mode (schema default).
 			newMode := r.MatchMode
 			if newMode == "" {
 				newMode = models.MatchModeLiteral
 			}
-			existingMode := existing.MatchMode
-			if existingMode == "" {
-				existingMode = models.MatchModeLiteral
-			}
-			if existing.Replacement == r.Replacement && existingMode == newMode {
+			if existing.Replacement == r.Replacement && existing.MatchMode == newMode {
 				skipped++
 				continue
 			}

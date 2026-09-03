@@ -57,13 +57,9 @@ func compileWildcardPattern(pattern string) *regexp.Regexp {
 		}
 		b.WriteString(regexp.QuoteMeta(string(r)))
 	}
-	// Compile cannot fail: segments are QuoteMeta'd and the class is fixed;
-	// treat any error as non-wildcard rather than panicking.
-	re, err := regexp.Compile(b.String())
-	if err != nil {
-		return nil
-	}
-	return re
+	// MustCompile is safe: segments are QuoteMeta'd literals plus a fixed
+	// character class, so the generated pattern can never be invalid.
+	return regexp.MustCompile(b.String())
 }
 
 // buildWordReplacementSorted converts entries into a slice sorted longest-first

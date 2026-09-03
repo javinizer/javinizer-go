@@ -138,6 +138,11 @@ func updateWordReplacement(deps GenreDeps, invalidate invalidateCaches) gin.Hand
 			return
 		}
 
+		if !validateMatchModeParam(req.MatchMode) {
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "match_mode must be literal or wildcard"})
+			return
+		}
+
 		existing, err := deps.WordReplacementRepo.FindByOriginal(c.Request.Context(), req.Original)
 		if err != nil {
 			if !database.IsNotFound(err) {
@@ -147,11 +152,6 @@ func updateWordReplacement(deps GenreDeps, invalidate invalidateCaches) gin.Hand
 		}
 		if existing == nil {
 			c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "word replacement not found"})
-			return
-		}
-
-		if !validateMatchModeParam(req.MatchMode) {
-			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "match_mode must be literal or wildcard"})
 			return
 		}
 

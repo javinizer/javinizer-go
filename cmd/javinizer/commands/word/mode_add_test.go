@@ -12,6 +12,17 @@ import (
 	"github.com/javinizer/javinizer-go/internal/database"
 )
 
+// #228: word add rejects an empty original (zero-width patterns would be
+// pathological for wildcard mode).
+func TestWordAddMode_EmptyOriginalRejected(t *testing.T) {
+	configPath, _ := setupWordTestDB(t)
+	root := &cobra.Command{Use: "root"}
+	root.PersistentFlags().String("config", configPath, "config file")
+	root.AddCommand(word.NewCommand())
+	root.SetArgs([]string{"word", "add", "", "x", "--mode", "wildcard"})
+	require.Error(t, root.Execute())
+}
+
 // #228: word add --mode validation and listing indicator.
 func TestWordAddMode_WildcardPersistsAndLists(t *testing.T) {
 	configPath, dbPath := setupWordTestDB(t)

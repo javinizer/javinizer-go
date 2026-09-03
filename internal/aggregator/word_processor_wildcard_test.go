@@ -80,6 +80,9 @@ func TestApplyWordReplacement_WildcardMatrix(t *testing.T) {
 		{"no sentinel literal", "ワイルド", "W", "ワイルド", "W"},
 		{"no sentinel blocked by latin", "ワイルド", "W", "ワイルドx", "ワイルドx"},
 		{"no sentinel bounded in cjk", "ワイルド", "W", "彼女のワイルド時代", "彼女のW時代"},
+		// Leading-boundary reject: Latin char directly before the match blocks.
+		{"leading latin blocks", "?ポ", "Y", "x●ポ", "x●ポ"},
+		{"leading cjk boundary passes", "?ポ", "Y", "彼●ポ", "彼Y"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

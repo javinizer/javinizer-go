@@ -55,6 +55,16 @@ func TestWordReplacement_MatchMode_NormalizationAndValidation(t *testing.T) {
 	assert.Equal(t, models.MatchModeLiteral, byOrig["norm-cjk"])
 }
 
+// Upsert validates mode too (the Save path used by import).
+func TestWordReplacement_UpsertRejectsUnknownMode(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewWordReplacementRepository(db)
+	bad := &models.WordReplacement{Original: "upsert-bad", Replacement: "v", MatchMode: "regex"}
+	require.Error(t, repo.Upsert(context.Background(), bad))
+	_, err := repo.FindByOriginal(context.Background(), "upsert-bad")
+	require.True(t, IsNotFound(err))
+}
+
 // Spec scenario "migrate-existing-rows stay literal": rows written before the
 // column existed (simulated via raw SQL insert without match_mode) read back
 // with the DB-level default 'literal'.
