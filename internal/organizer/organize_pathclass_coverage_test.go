@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
 	"github.com/javinizer/javinizer-go/internal/testutil"
@@ -580,4 +581,94 @@ func TestOrganize_SubtitleStatFailure_Surfaced(t *testing.T) {
 	assert.Contains(t, result.Subtitles[0].Error.Error(), "failed to check subtitle destination")
 	assert.False(t, result.Subtitles[0].Moved)
 	assert.False(t, result.Subtitles[0].Skipped)
+}
+
+// Plan-time conflict: targetDir exists while OldDir stat fails → conflict recorded.
+func TestInPlaceStrategy_Plan_ConflictWhenOldDirStatFails(t *testing.T) {
+	mem := afero.NewMemMapFs()
+	injErr := errors.New("injected stat failure")
+	fs := failStatPathsFs{Fs: mem, fail: map[string]error{normKey("/source/old-name"): injErr}}
+	cfg := &Config{FolderFormat: "<ID>", FileFormat: "<ID>", RenameFile: true, OperationMode: operationmode.OperationModeInPlace}
+	m, _ := matcher.NewMatcher(&matcher.Config{})
+	strategy := newInPlaceStrategy(fs, cfg, m, nil)
+
+	require.NoError(t, afero.WriteFile(mem, "/source/old-name/ABC-123.mp4", []byte("video"), 0644))
+	require.NoError(t, mem.MkdirAll("/source/ABC-123", 0777)) // distinct existing target dir
+
+	match := models.FileMatchInfo{MovieID: "ABC-123", Path: "/source/old-name/ABC-123.mp4", Name: "ABC-123.mp4", Extension: ".mp4"}
+	movie := &models.Movie{ID: "ABC-123"}
+
+	plan, err := strategy.Plan(match, movie, "/dest", false)
+	require.NoError(t, err)
+	require.True(t, plan.InPlace, "dedicated folder must select in-place")
+	require.Contains(t, plan.Conflicts, filepath.FromSlash("/source/ABC-123"),
+		"an un-stat-able old dir with an existing target dir must still be a conflict")
+}
+
+// Execute-time: targetDir already exists; its follow-up Stat fails in the same-file
+// discrimination branch → treated as a conflict error, not a clobber.
+func TestInPlaceStrategy_Execute_TargetDirRestatFails(t *testing.T) {
+	mem := afero.NewMemMapFs()
+	injErr := errors.New("injected restat failure")
+	fs := &countedStatFailFs{Fs: failStatPathsFs{Fs: mem, fail: map[string]error{}}, target: "/new", failOnCall: 2, err: injErr}
+	cfg := &Config{OperationMode: operationmode.OperationModeInPlace, FolderFormat: "<ID>", FileFormat: "<ID>", RenameFile: true}
+	strategy := newInPlaceStrategy(fs, cfg, nil, nil)
+
+	require.NoError(t, afero.WriteFile(mem, "/old/v.mp4", []byte("v"), 0644))
+	require.NoError(t, mem.MkdirAll("/new", 0755))
+
+	_, err := strategy.Execute(mkInPlacePlan("/old", "/new"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "target directory already exists")
+}
+
+// countedStatFailFs fails the Nth call to a target Stat while other paths pass through.
+// It wraps an optional inner decorator so LstatIfPossible keeps delegating honestly.
+type countedStatFailFs struct {
+	afero.Fs
+	target     string
+	failOnCall int
+	n          int
+	err        error
+}
+
+func (f *countedStatFailFs) Stat(name string) (os.FileInfo, error) {
+	if normKey(name) == normKey(f.target) {
+		f.n++
+		if f.n == f.failOnCall {
+			return nil, f.err
+		}
+	}
+	return f.Fs.Stat(name)
+}
+
+// Inner-rename same-inode leg: currentFilePath and TargetPath lexically differ but reach
+// the same inode through a symlinked ancestor → refuse reports same-inode → no-op.
+func TestInPlaceStrategy_InnerTargetSameInodeThroughSymlink_IsNoOp(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation needs privileges on windows CI")
+	}
+	dir := t.TempDir()
+	base := afero.NewOsFs()
+	oldDir := filepath.Join(dir, "old")
+	newDir := filepath.Join(dir, "new")
+	alias := filepath.Join(dir, "alias")
+	require.NoError(t, os.MkdirAll(oldDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(oldDir, "v.mp4"), []byte("video"), 0644))
+	require.NoError(t, os.Symlink(newDir, alias)) // dangling until the rename lands
+
+	cfg := &Config{OperationMode: operationmode.OperationModeInPlace, FolderFormat: "<ID>", FileFormat: "<ID>", RenameFile: true}
+	strategy := newInPlaceStrategy(base, cfg, nil, nil)
+
+	plan := mkInPlacePlan(oldDir, newDir)
+	plan.TargetPath = filepath.Join(alias, "v.mp4") // same entry as newDir/v.mp4 via alias
+	result, err := strategy.Execute(plan)
+	require.NoError(t, err, "target path reaching the same inode through a symlink must be a no-op")
+	require.NotNil(t, result)
+	data, rerr := os.ReadFile(filepath.Join(newDir, "v.mp4"))
+	require.NoError(t, rerr)
+	assert.Equal(t, []byte("video"), data, "file content intact under the new dir")
+	link, lerr := os.Readlink(alias)
+	require.NoError(t, lerr)
+	assert.Equal(t, newDir, link, "alias symlink object must remain untouched")
 }
