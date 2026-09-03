@@ -266,13 +266,14 @@ func (s *inPlaceStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) {
 			}
 			if dirExists {
 				oldInfo, oldErr := s.fs.Stat(plan.OldDir)
+				sameDir := false
 				if oldErr == nil {
 					newInfo, newErr := s.fs.Stat(plan.TargetDir)
-					if newErr == nil && os.SameFile(oldInfo, newInfo) {
-					} else {
-						return fmt.Errorf("target directory already exists: %s", plan.TargetDir)
-					}
-				} else {
+					// Same directory reached through another name (alias/symlink): falling
+					// through is the no-op case — anything else is a real conflict.
+					sameDir = newErr == nil && os.SameFile(oldInfo, newInfo)
+				}
+				if !sameDir {
 					return fmt.Errorf("target directory already exists: %s", plan.TargetDir)
 				}
 			}

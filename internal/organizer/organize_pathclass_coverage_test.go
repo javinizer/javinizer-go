@@ -49,10 +49,13 @@ func (f plainStatFs) ReadlinkIfPossible(name string) (string, error) {
 	return "", os.ErrNotExist
 }
 
-// failStatPathsFs injects errors for chosen cleaned paths on both Stat and Lstat legs.
+// failStatPathsFs injects errors for chosen cleaned paths on Stat/Lstat legs;
+// failOpen (separate map) targets Open calls instead — keep them independent so a
+// Stat-failure setup does not break afero.ReadDir (which reaches into Open).
 type failStatPathsFs struct {
 	afero.Fs
-	fail map[string]error
+	fail     map[string]error
+	failOpen map[string]error
 }
 
 func (f failStatPathsFs) failFor(name string) (error, bool) {
@@ -77,6 +80,15 @@ func (f failStatPathsFs) LstatIfPossible(name string) (os.FileInfo, bool, error)
 	}
 	info, err := f.Fs.Stat(name)
 	return info, false, err
+}
+
+func (f failStatPathsFs) Open(name string) (afero.File, error) {
+	if f.failOpen != nil {
+		if err, ok := f.failOpen[normKey(name)]; ok {
+			return nil, err
+		}
+	}
+	return f.Fs.Open(name)
 }
 
 func (f failStatPathsFs) ReadlinkIfPossible(name string) (string, error) {
@@ -671,4 +683,19 @@ func TestInPlaceStrategy_InnerTargetSameInodeThroughSymlink_IsNoOp(t *testing.T)
 	link, lerr := os.Readlink(alias)
 	require.NoError(t, lerr)
 	assert.Equal(t, newDir, link, "alias symlink object must remain untouched")
+}
+
+// Plan-time propagation of a folder-dedication scan failure (matcher present).
+func TestInPlaceStrategy_Plan_DedicationScanErrorPropagates(t *testing.T) {
+	injErr := errors.New("injected readdir failure")
+	mem := afero.NewMemMapFs()
+	require.NoError(t, afero.WriteFile(mem, "/src/ABC-123/ABC-123.mp4", []byte("v"), 0644))
+	fs := failStatPathsFs{Fs: mem, failOpen: map[string]error{normKey("/src/ABC-123"): injErr}}
+	cfg := &Config{FolderFormat: "<ID>", FileFormat: "<ID>", RenameFile: true, OperationMode: operationmode.OperationModeInPlace}
+	m, _ := matcher.NewMatcher(&matcher.Config{})
+	strategy := newInPlaceStrategy(fs, cfg, m, nil)
+
+	match := models.FileMatchInfo{MovieID: "ABC-123", Path: "/src/ABC-123/ABC-123.mp4", Name: "ABC-123.mp4", Extension: ".mp4"}
+	_, err := strategy.Plan(match, &models.Movie{ID: "ABC-123"}, "/dest", false)
+	require.ErrorIs(t, err, injErr, "dedication scan failures must abort planning, not silently proceed")
 }
