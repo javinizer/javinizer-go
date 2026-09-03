@@ -24,13 +24,35 @@ func NewWordReplacementRepository(db *DB) *WordReplacementRepository {
 	}
 }
 
+// normalizeMatchMode validates and normalizes the entry's match mode:
+// empty normalizes to literal; unknown values are rejected. (#228)
+func normalizeMatchMode(replacement *models.WordReplacement) error {
+	if replacement.MatchMode == "" {
+		replacement.MatchMode = models.MatchModeLiteral
+		return nil
+	}
+	if !models.IsValidMatchMode(replacement.MatchMode) {
+		return fmt.Errorf("invalid match_mode %q", replacement.MatchMode)
+	}
+	return nil
+}
+
 // Create inserts a new word replacement record.
 func (r *WordReplacementRepository) Create(ctx context.Context, replacement *models.WordReplacement) error {
+	if err := normalizeMatchMode(replacement); err != nil {
+		return err
+	}
 	return r.BaseRepository.Create(ctx, replacement)
 }
 
 // Upsert inserts the word replacement or updates the existing record matched by its original text.
+// The stored mode is the (normalized) incoming mode: import-style callers that
+// omit a mode write literal; the API update path preserves-on-omit is handled
+// at the handler level, not here. (#228)
 func (r *WordReplacementRepository) Upsert(ctx context.Context, replacement *models.WordReplacement) error {
+	if err := normalizeMatchMode(replacement); err != nil {
+		return err
+	}
 	existing, err := r.FindByOriginal(ctx, replacement.Original)
 	if err != nil {
 		if !IsNotFound(err) {
@@ -78,6 +100,11 @@ func (r *WordReplacementRepository) Delete(ctx context.Context, original string)
 		return wrapDBErr("delete", fmt.Sprintf("word replacement %s", original), err)
 	}
 	return nil
+}
+
+// GetReplacementEntries returns all stored entries including their match mode. (#228)
+func (r *WordReplacementRepository) GetReplacementEntries(ctx context.Context) ([]models.WordReplacement, error) {
+	return r.List(ctx)
 }
 
 // GetReplacementMap returns a map of original text to replacement text for all stored entries.

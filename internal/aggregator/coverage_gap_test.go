@@ -762,6 +762,14 @@ func (m *mockWordLookupRepo) GetReplacementMap(_ context.Context) (map[string]st
 	return m.replacements, nil
 }
 
+func (m *mockWordLookupRepo) GetReplacementEntries(_ context.Context) ([]models.WordReplacement, error) {
+	entries := make([]models.WordReplacement, 0, len(m.replacements))
+	for orig, repl := range m.replacements {
+		entries = append(entries, models.WordReplacement{Original: orig, Replacement: repl})
+	}
+	return entries, nil
+}
+
 type mockAliasLookupRepo struct {
 	aliases map[string]string
 }

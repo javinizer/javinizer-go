@@ -1973,5 +1973,9 @@
   "review_loading_job": "[ Løådíñg bå†çh jøb... ]",
   "review_load_error": "[ Üñåblë tø lååd þís rëvíëw. ]",
   "review_load_timeout": "[ Løådíñg þís rëvíëw tøøk tøø løñg. Plëåsë try ågåíñ. ]",
-  "review_refresh_error": "[ Rëvíëw dåtå çöüld ñöt bë rëfrëshëd. Yöür çürrëñt dåtå ís still åvåílåblë. ]"
+  "review_refresh_error": "[ Rëvíëw dåtå çöüld ñöt bë rëfrëshëd. Yöür çürrëñt dåtå ís still åvåílåblë. ]",
+  "words_mode_label": "[ Måtçh möðë ]",
+  "words_mode_literal": "[ Éxåçt måtçh ]",
+  "words_mode_wildcard": "[ Çëñsör wïldçård (?) ]",
+  "words_mode_badge_wildcard": "[ wïldçård ]"
 }

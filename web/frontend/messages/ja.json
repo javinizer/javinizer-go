@@ -2630,5 +2630,9 @@
   "settings_server_image_cache_max_size_label": "画像キャッシュ最大サイズ（MB）",
   "settings_server_image_cache_max_size_desc": "プレビュー画像キャッシュのディスク割り当て量（MB）。超過時は最も古いエントリから削除されます。0 で無制限。",
   "settings_server_image_cache_ttl_label": "画像キャッシュTTL（時間）",
-  "settings_server_image_cache_ttl_desc": "キャッシュされたプレビュー画像が最新である期間（時間）。期限切れのエントリは再取得され、再取得が失敗した場合はstale-if-errorで提供されます。"
+  "settings_server_image_cache_ttl_desc": "キャッシュされたプレビュー画像が最新である期間（時間）。期限切れのエントリは再取得され、再取得が失敗した場合はstale-if-errorで提供されます。",
+  "words_mode_label": "マッチモード",
+  "words_mode_literal": "完全一致",
+  "words_mode_wildcard": "伏字ワイルドカード（?）",
+  "words_mode_badge_wildcard": "ワイルドカード"
 }

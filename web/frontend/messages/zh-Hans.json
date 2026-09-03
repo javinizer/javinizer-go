@@ -2630,5 +2630,9 @@
   "settings_server_image_cache_max_size_label": "图像缓存最大大小（MB）",
   "settings_server_image_cache_max_size_desc": "预览图像缓存的磁盘配额（MB）。超过限制时将逐出最旧的条目。0 表示无限制。",
   "settings_server_image_cache_ttl_label": "图像缓存TTL（小时）",
-  "settings_server_image_cache_ttl_desc": "缓存的预览图像保持新鲜的时间（小时）。过期的条目将重新获取；如果重新获取失败，则通过stale-if-error提供。"
+  "settings_server_image_cache_ttl_desc": "缓存的预览图像保持新鲜的时间（小时）。过期的条目将重新获取；如果重新获取失败，则通过stale-if-error提供。",
+  "words_mode_label": "匹配模式",
+  "words_mode_literal": "精确匹配",
+  "words_mode_wildcard": "屏蔽字通配符（?）",
+  "words_mode_badge_wildcard": "通配符"
 }

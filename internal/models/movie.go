@@ -215,8 +215,24 @@ type WordReplacement struct {
 	ID          uint      `json:"id" gorm:"primaryKey"`
 	Original    string    `json:"original" gorm:"uniqueIndex;not null"`
 	Replacement string    `json:"replacement" gorm:"not null"`
+	MatchMode   string    `json:"match_mode" gorm:"not null;default:literal"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// Word replacement match modes (issue #228).
+const (
+	// MatchModeLiteral is the default: the original text matches literally
+	// (token-bounded when it contains the censor character '*').
+	MatchModeLiteral = "literal"
+	// MatchModeWildcard enables the censor-glyph wildcard language: '?'
+	// (and fullwidth '？') match a run of one-or-more censor glyphs.
+	MatchModeWildcard = "wildcard"
+)
+
+// IsValidMatchMode reports whether mode is a known word-replacement match mode.
+func IsValidMatchMode(mode string) bool {
+	return mode == MatchModeLiteral || mode == MatchModeWildcard
 }
 
 // ActressAlias represents an alternate name mapping for an actress

@@ -23,6 +23,8 @@ type genreLookup interface {
 type wordLookup interface {
 	// GetReplacementMap returns all word replacement mappings from the store.
 	GetReplacementMap(ctx context.Context) (map[string]string, error)
+	// GetReplacementEntries returns all word replacement entries with modes. (#228)
+	GetReplacementEntries(ctx context.Context) ([]models.WordReplacement, error)
 }
 
 // AliasLookup provides the minimal actress-alias operations needed by

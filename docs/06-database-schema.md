@@ -154,6 +154,7 @@ User-defined word/phrase replacements applied during title/description normaliza
 | id | INTEGER | Primary key (autoincrement) |
 | original | TEXT | Original word; unique via `idx_word_replacements_original` |
 | replacement | TEXT | Replacement word |
+| match_mode | TEXT | `literal` (default) or `wildcard`; added in migration 000015. Wildcard entries treat `?`/`？` as a one-or-more censor-glyph run |
 | created_at | DATETIME | Record creation |
 | updated_at | DATETIME | Last update |
 

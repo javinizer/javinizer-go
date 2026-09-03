@@ -2630,5 +2630,9 @@
   "settings_server_image_cache_max_size_label": "Image Cache Max Size (MB)",
   "settings_server_image_cache_max_size_desc": "Disk quota for the preview image cache in megabytes. Oldest entries are evicted when exceeded. 0 disables the limit.",
   "settings_server_image_cache_ttl_label": "Image Cache TTL (hours)",
-  "settings_server_image_cache_ttl_desc": "How long cached preview images remain fresh (hours). Expired entries are re-fetched; stale-if-error serves them if the re-fetch fails."
+  "settings_server_image_cache_ttl_desc": "How long cached preview images remain fresh (hours). Expired entries are re-fetched; stale-if-error serves them if the re-fetch fails.",
+  "words_mode_label": "Match mode",
+  "words_mode_literal": "Exact match",
+  "words_mode_wildcard": "Censor wildcard (?)",
+  "words_mode_badge_wildcard": "wildcard"
 }

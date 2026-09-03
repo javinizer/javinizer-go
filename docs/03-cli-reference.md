@@ -685,12 +685,14 @@ javinizer token revoke jv_abc12345
 Manage word replacements for uncensoring metadata strings. Mirrors `genre` for word-level substitution applied during scraping.
 
 ```bash
-javinizer word add <original> <replacement>
+javinizer word add <original> <replacement> [--mode literal|wildcard]
 javinizer word list
 javinizer word remove <original>
 javinizer word export > words.json
 javinizer word import words.json
 ```
+
+With `--mode wildcard`, `?` (or fullwidth `？`) in the pattern matches a run of one or more censor glyphs (`*`, `＊`, `○`, `◯`, `〇`, `●`, `×`, `✕`, `✖`) — one entry covers all censor variants of a word (e.g. `javinizer word add "チ?ポ" "チンポ" --mode wildcard`). Everything else in the pattern matches literally (a wildcard entry without `?` matches as a whole token, NOT as a substring — flipping an entry literal→wildcard tightens matching). Imports accept `match_mode` per entry; unknown modes abort with an error.
 
 ---
 

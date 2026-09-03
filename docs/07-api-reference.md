@@ -347,6 +347,8 @@ Manage genre and word replacements applied during scraping.
 | `GET` | `/api/v1/words/replacements/export` | Export word replacements |
 | `POST` | `/api/v1/words/replacements/import` | Import word replacements |
 
+Word replacement create/update/import payloads accept an optional `match_mode` (`literal` default, `wildcard` enables `?`/`？` censor-glyph runs). Update (PUT) preserves the stored mode when the field is omitted; import updates an entry when replacement text OR mode differs.
+
 ### Tokens
 
 Manage API tokens for programmatic access.

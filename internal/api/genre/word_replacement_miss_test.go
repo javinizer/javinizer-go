@@ -233,7 +233,7 @@ func TestImportWordReplacements_Miss_CreateError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	mockRepo := mocks.NewMockWordReplacementRepositoryInterface(t)
 	mockRepo.EXPECT().FindByOriginal(context.Background(), "CENSORED").Return(nil, database.ErrNotFound)
-	mockRepo.EXPECT().Create(context.Background(), &models.WordReplacement{Original: "CENSORED", Replacement: "Uncensored"}).Return(errors.New("write fail"))
+	mockRepo.EXPECT().Create(context.Background(), &models.WordReplacement{Original: "CENSORED", Replacement: "Uncensored", MatchMode: models.MatchModeLiteral}).Return(errors.New("write fail"))
 
 	deps := NewGenreDeps(database.ReplacementRepos{WordReplacementRepo: mockRepo}, database.TranslationRepos{})
 	router := gin.New()
@@ -266,7 +266,7 @@ func TestImportWordReplacements_Miss_UpsertError(t *testing.T) {
 	mockRepo := mocks.NewMockWordReplacementRepositoryInterface(t)
 	mockRepo.EXPECT().FindByOriginal(context.Background(), "CENSORED").Return(
 		&models.WordReplacement{Original: "CENSORED", Replacement: "Old"}, nil)
-	mockRepo.EXPECT().Upsert(context.Background(), &models.WordReplacement{Original: "CENSORED", Replacement: "New"}).Return(errors.New("upsert fail"))
+	mockRepo.EXPECT().Upsert(context.Background(), &models.WordReplacement{Original: "CENSORED", Replacement: "New", MatchMode: models.MatchModeLiteral}).Return(errors.New("upsert fail"))
 
 	deps := NewGenreDeps(database.ReplacementRepos{WordReplacementRepo: mockRepo}, database.TranslationRepos{})
 	router := gin.New()

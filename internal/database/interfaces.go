@@ -235,6 +235,7 @@ type WordReplacementRepositoryInterface interface {
 	FindByOriginal(ctx context.Context, original string) (*models.WordReplacement, error)
 	FindByID(ctx context.Context, id uint) (*models.WordReplacement, error)
 	List(ctx context.Context) ([]models.WordReplacement, error)
+	GetReplacementEntries(ctx context.Context) ([]models.WordReplacement, error)
 	Delete(ctx context.Context, original string) error
 	DeleteByID(ctx context.Context, id uint) error
 	GetReplacementMap(ctx context.Context) (map[string]string, error)

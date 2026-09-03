@@ -18,11 +18,18 @@ const maxImportBodySize = 10 << 20
 type wordReplacementCreateRequest struct {
 	Original    string `json:"original"`
 	Replacement string `json:"replacement"`
+	MatchMode   string `json:"match_mode"`
 }
 
 type wordReplacementUpdateRequest struct {
 	Original    string `json:"original"`
 	Replacement string `json:"replacement"`
+	MatchMode   string `json:"match_mode"`
+}
+
+// validateMatchModeParam rejects unknown modes; empty means "not provided". (#228)
+func validateMatchModeParam(mode string) bool {
+	return mode == "" || models.IsValidMatchMode(mode)
 }
 
 type wordReplacementListResponse struct {
@@ -81,6 +88,13 @@ func createWordReplacement(deps GenreDeps, invalidate invalidateCaches) gin.Hand
 			return
 		}
 
+		// Validate mode BEFORE the create-when-exists short-circuit so an
+		// invalid mode is a 400 even when the entry already exists. (#228)
+		if !validateMatchModeParam(req.MatchMode) {
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "match_mode must be literal or wildcard"})
+			return
+		}
+
 		existing, err := deps.WordReplacementRepo.FindByOriginal(c.Request.Context(), req.Original)
 		if err != nil && !database.IsNotFound(err) {
 			core.RespondInternalError(c, err)
@@ -94,6 +108,7 @@ func createWordReplacement(deps GenreDeps, invalidate invalidateCaches) gin.Hand
 		replacement := &models.WordReplacement{
 			Original:    req.Original,
 			Replacement: req.Replacement,
+			MatchMode:   req.MatchMode,
 		}
 
 		if err := deps.WordReplacementRepo.Create(c.Request.Context(), replacement); err != nil {
@@ -135,7 +150,18 @@ func updateWordReplacement(deps GenreDeps, invalidate invalidateCaches) gin.Hand
 			return
 		}
 
+		if !validateMatchModeParam(req.MatchMode) {
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "match_mode must be literal or wildcard"})
+			return
+		}
+
 		existing.Replacement = req.Replacement
+		// Omitted mode preserves the stored mode (update-only text edits from
+		// clients that predate mode support must not silently reset wildcard
+		// entries to literal). (#228)
+		if req.MatchMode != "" {
+			existing.MatchMode = req.MatchMode
+		}
 
 		if err := deps.WordReplacementRepo.Upsert(c.Request.Context(), existing); err != nil {
 			core.RespondInternalError(c, err)
@@ -245,6 +271,15 @@ func importWordReplacements(deps GenreDeps, invalidate invalidateCaches) gin.Han
 				continue
 			}
 
+			if !validateMatchModeParam(item.MatchMode) {
+				errorsCount++
+				continue
+			}
+			mode := item.MatchMode
+			if mode == "" {
+				mode = models.MatchModeLiteral
+			}
+
 			if !req.IncludeDefaults && database.IsDefaultWordReplacement(orig) {
 				skipped++
 				continue
@@ -262,14 +297,16 @@ func importWordReplacements(deps GenreDeps, invalidate invalidateCaches) gin.Han
 				replacement := &models.WordReplacement{
 					Original:    orig,
 					Replacement: repl,
+					MatchMode:   mode,
 				}
 				if err := deps.WordReplacementRepo.Create(c.Request.Context(), replacement); err != nil {
 					errorsCount++
 					continue
 				}
 				changed = true
-			} else if existing.Replacement != repl {
+			} else if existing.Replacement != repl || existing.MatchMode != mode {
 				existing.Replacement = repl
+				existing.MatchMode = mode
 				if err := deps.WordReplacementRepo.Upsert(c.Request.Context(), existing); err != nil {
 					errorsCount++
 					continue

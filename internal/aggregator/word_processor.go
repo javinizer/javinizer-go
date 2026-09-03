@@ -2,6 +2,7 @@ package aggregator
 
 import (
 	"context"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -11,21 +12,74 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 )
 
-// buildWordReplacementSorted converts a cache map into a slice of pairs sorted
-// longest-first (then lexicographically) so that longer patterns are replaced
-// before shorter ones, avoiding partial matches.
-func buildWordReplacementSorted(cache map[string]string) []struct{ orig, repl string } {
-	pairs := make([]struct{ orig, repl string }, 0, len(cache))
-	for orig, repl := range cache {
-		pairs = append(pairs, struct{ orig, repl string }{orig, repl})
+// wordReplacementEntry is one cached replacement: literal entries match
+// exactly as pre-#228 (substring, or token-bounded when the pattern contains
+// '*'); wildcard entries compile a censor-glyph-run matcher (wildcardRe).
+type wordReplacementEntry struct {
+	orig       string
+	repl       string
+	wildcardRe *regexp.Regexp
+}
+
+// censorGlyphClass is the fixed censor glyph set matched by the wildcard
+// sentinel '?' (and its fullwidth twin). (#228)
+const censorGlyphClass = "*＊○◯〇●×✕✖"
+
+// wildcardSentinels are the runes that act as censor-run wildcards in a
+// wildcard-mode pattern.
+const wildcardSentinels = "?？"
+
+// compileWildcardPattern builds the matcher for a wildcard-mode pattern.
+// Sentinels collapse runs ("??" == "?") and match GREEDILY one-or-more glyphs
+// from censorGlyphClass; every other rune is literal. A wildcard entry without
+// a sentinel degenerates to an exact literal pattern (bounded), which callers
+// treat as documented no-surprise behavior.
+func compileWildcardPattern(pattern string) *regexp.Regexp {
+	if pattern == "" {
+		// An empty pattern would compile to a zero-width regex whose empty
+		// match never advances the replace loop. Never compile it. (#228)
+		return nil
 	}
-	sort.Slice(pairs, func(i, j int) bool {
-		if len(pairs[i].orig) != len(pairs[j].orig) {
-			return len(pairs[i].orig) > len(pairs[j].orig)
+	var b strings.Builder
+	for i := 0; i < len(pattern); {
+		r, size := utf8.DecodeRuneInString(pattern[i:])
+		i += size
+		if strings.ContainsRune(wildcardSentinels, r) {
+			for i < len(pattern) {
+				nr, ns := utf8.DecodeRuneInString(pattern[i:])
+				if !strings.ContainsRune(wildcardSentinels, nr) {
+					break
+				}
+				i += ns
+			}
+			b.WriteString("[" + regexp.QuoteMeta(censorGlyphClass) + "]+")
+			continue
 		}
-		return pairs[i].orig < pairs[j].orig
+		b.WriteString(regexp.QuoteMeta(string(r)))
+	}
+	// Compile cannot fail: segments are QuoteMeta'd and the class is fixed;
+	// treat any error as non-wildcard rather than panicking.
+	re, err := regexp.Compile(b.String())
+	if err != nil {
+		return nil
+	}
+	return re
+}
+
+// buildWordReplacementSorted converts entries into a slice sorted longest-first
+// (then lexicographically) so that longer patterns are replaced before shorter
+// ones, avoiding partial matches. Ordering applies across modes: a longer
+// literal pattern wins over a shorter wildcard one.
+func buildWordReplacementSorted(entries []wordReplacementEntry) []wordReplacementEntry {
+	sorted := make([]wordReplacementEntry, len(entries))
+	copy(sorted, entries)
+	sort.Slice(sorted, func(i, j int) bool {
+		if len(sorted[i].orig) != len(sorted[j].orig) {
+			return len(sorted[i].orig) > len(sorted[j].orig)
+		}
+		return sorted[i].orig < sorted[j].orig
 	})
-	return pairs
+	return sorted
 }
 
 // WordProcessorInterface defines the contract for word replacement.
@@ -51,8 +105,8 @@ type wordProcessorInterface interface {
 type wordProcessor struct {
 	cfg    *MetadataConfig
 	repo   wordLookup
-	cache  map[string]string
-	sorted []struct{ orig, repl string } // Pre-sorted longest-first
+	cache  map[string]string      // orig -> repl, kept for introspection/debug
+	sorted []wordReplacementEntry // Pre-sorted longest-first
 	mu     sync.RWMutex
 }
 
@@ -79,20 +133,23 @@ func NewWordProcessor(cfg *MetadataConfig, repo wordLookup) *wordProcessor {
 
 // Apply replaces occurrences of known words in the input text.
 //
-// Two matching strategies, dispatched by whether the pattern contains the
-// censor character '*':
+// Three matching strategies, dispatched by entry mode and pattern shape:
 //
-//   - Patterns WITH '*' (censored-word tokens, e.g. "F***"): matched as a whole
+//   - Wildcard entries (match_mode=wildcard): matched via a compiled
+//     censor-glyph-run pattern — '?'/'？' match one-or-more glyphs of the
+//     censor class, everything else is literal; token-bounded with the
+//     longest-or-nothing boundary policy (see replaceWildcardBounded, #228).
+//   - Literal patterns WITH '*' (censored-word tokens, e.g. "F***"): matched as a whole
 //     token using replaceTokenBounded. The match must be bounded on both sides
 //     by string start/end or a char that cannot extend a censored token — i.e.
 //     anything other than '*' or a Latin-script character (#106 keeps "F***" from
 //     firing inside "F****d"; #227 narrows letter-extension to the Latin script
 //     so CJK letters count as boundaries and embedded patterns like "チ*ポ"
 //     match inside unsegmented Japanese titles).
-//   - Patterns WITHOUT '*' (e.g. the "[Recommended For Smartphones] " prefix
-//     strip): matched as a plain substring via strings.ReplaceAll, preserving
-//     the original behavior for patterns that are genuinely meant to match
-//     as substrings.
+//   - Literal patterns WITHOUT '*' (e.g. the "[Recommended For Smartphones] "
+//     prefix strip): matched as a plain substring via strings.ReplaceAll,
+//     preserving the original behavior for patterns that are genuinely meant
+//     to match as substrings.
 func (wp *wordProcessor) Apply(text string) string {
 	if wp == nil || wp.cfg == nil || !wp.cfg.WordReplacement.Enabled {
 		return text
@@ -112,14 +169,56 @@ func (wp *wordProcessor) Apply(text string) string {
 
 	result := text
 	for _, p := range sorted {
-		if strings.ContainsRune(p.orig, '*') {
+		switch {
+		case p.wildcardRe != nil:
+			result = replaceWildcardBounded(result, p.wildcardRe, p.repl)
+		case strings.ContainsRune(p.orig, '*'):
 			result = replaceTokenBounded(result, p.orig, p.repl)
-		} else if strings.Contains(result, p.orig) {
+		case strings.Contains(result, p.orig):
 			result = strings.ReplaceAll(result, p.orig, p.repl)
 		}
 	}
 
 	return result
+}
+
+// replaceWildcardBounded replaces matches of a compiled wildcard pattern with
+// repl, applying the same whole-token boundary rule as replaceTokenBounded
+// with a LONGEST-OR-NOTHING policy: the boundary is inspected once at the
+// maximal match extent the regexp produced (RE2 greedy give-back only shortens
+// a class run to satisfy following literal segments, never to satisfy the
+// boundary). A rejected candidate is skipped past, never retried shorter —
+// this blocks partial-censored-token replacements (see design D3, #228).
+func replaceWildcardBounded(text string, re *regexp.Regexp, repl string) string {
+	if !re.MatchString(text) {
+		return text
+	}
+	var b strings.Builder
+	b.Grow(len(text))
+	i := 0
+	for {
+		loc := re.FindStringIndex(text[i:])
+		if loc == nil {
+			b.WriteString(text[i:])
+			break
+		}
+		start := i + loc[0]
+		end := i + loc[1]
+		if start > 0 && !isCensorBoundary(boundaryRuneBefore(text, start)) {
+			b.WriteString(text[i:end])
+			i = end
+			continue
+		}
+		if end < len(text) && !isCensorBoundary(boundaryRuneAfter(text, end)) {
+			b.WriteString(text[i:end])
+			i = end
+			continue
+		}
+		b.WriteString(text[i:start])
+		b.WriteString(repl)
+		i = end
+	}
+	return b.String()
 }
 
 // replaceTokenBounded replaces every non-overlapping occurrence of orig in text
@@ -241,11 +340,24 @@ func (wp *wordProcessor) loadCache(ctx context.Context) {
 		return
 	}
 
-	replacementMap, err := wp.repo.GetReplacementMap(ctx)
+	rows, err := wp.repo.GetReplacementEntries(ctx)
 	if err == nil {
+		cache := make(map[string]string, len(rows))
+		entries := make([]wordReplacementEntry, 0, len(rows))
+		for _, row := range rows {
+			if row.Original == "" {
+				continue // defensive: empty patterns can never be useful
+			}
+			cache[row.Original] = row.Replacement
+			entry := wordReplacementEntry{orig: row.Original, repl: row.Replacement}
+			if row.MatchMode == models.MatchModeWildcard {
+				entry.wildcardRe = compileWildcardPattern(row.Original)
+			}
+			entries = append(entries, entry)
+		}
 		wp.mu.Lock()
-		wp.cache = replacementMap
-		wp.sorted = buildWordReplacementSorted(replacementMap)
+		wp.cache = cache
+		wp.sorted = buildWordReplacementSorted(entries)
 		wp.mu.Unlock()
 	}
 }

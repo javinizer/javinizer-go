@@ -2630,5 +2630,9 @@
   "settings_server_image_cache_max_size_label": "圖像快取最大大小（MB）",
   "settings_server_image_cache_max_size_desc": "預覽圖像快取的磁碟配額（MB）。超過限制時將逐出最舊的項目。0 表示無限制。",
   "settings_server_image_cache_ttl_label": "圖像快取TTL（小時）",
-  "settings_server_image_cache_ttl_desc": "快取的預覽圖像保持新鮮的時間（小時）。過期的項目將重新獲取；如果重新獲取失敗，則通過stale-if-error提供。"
+  "settings_server_image_cache_ttl_desc": "快取的預覽圖像保持新鮮的時間（小時）。過期的項目將重新獲取；如果重新獲取失敗，則通過stale-if-error提供。",
+  "words_mode_label": "匹配模式",
+  "words_mode_literal": "精確匹配",
+  "words_mode_wildcard": "遮蔽字萬用字元（?）",
+  "words_mode_badge_wildcard": "萬用字元"
 }

@@ -55,6 +55,33 @@ func newWordProcessorWithCache(cfg *MetadataConfig, repo wordLookup, cache map[s
 		cfg:    cfg,
 		repo:   repo,
 		cache:  copied,
-		sorted: buildWordReplacementSorted(copied),
+		sorted: buildWordReplacementSorted(literalEntries(copied)),
+	}
+}
+
+// literalEntries converts a plain map into literal-mode entries (#228 helper
+// kept separate so wildcard tests can build mixed caches).
+func literalEntries(cache map[string]string) []wordReplacementEntry {
+	entries := make([]wordReplacementEntry, 0, len(cache))
+	for orig, repl := range cache {
+		entries = append(entries, wordReplacementEntry{orig: orig, repl: repl})
+	}
+	return entries
+}
+
+// newWordProcessorWithEntries creates a wordProcessor from explicit entries,
+// for wildcard-mode tests.
+func newWordProcessorWithEntries(cfg *MetadataConfig, entries []wordReplacementEntry) *wordProcessor {
+	if cfg == nil {
+		return nil
+	}
+	cache := make(map[string]string, len(entries))
+	for _, e := range entries {
+		cache[e.orig] = e.repl
+	}
+	return &wordProcessor{
+		cfg:    cfg,
+		sorted: buildWordReplacementSorted(entries),
+		cache:  cache,
 	}
 }

@@ -31,7 +31,10 @@ func TestMigrations_EnvelopeGenerationColumnUpDown(t *testing.T) {
 	require.Greater(t, latest, int64(0))
 	assert.Contains(t, jobColumnNames(t, sqlDB), "envelope_generation")
 
-	_, err = provider.DownTo(ctx, latest-1)
+	// Down to one version below the envelope migration (000014). Migrations
+	// may be appended after envelope_generation (e.g. 000015), so target the
+	// version explicitly instead of DownTo(latest-1).
+	_, err = provider.DownTo(ctx, 13)
 	require.NoError(t, err)
 	assert.NotContains(t, jobColumnNames(t, sqlDB), "envelope_generation")
 

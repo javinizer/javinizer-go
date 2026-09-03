@@ -44,6 +44,7 @@
 
 	let newOriginal = $state('');
 	let newReplacement = $state('');
+	let newMatchMode = $state<'literal' | 'wildcard'>('literal');
 	let searchQuery = $state('');
 	let sortDirection = $state<'asc' | 'desc'>('asc');
 	let importFile = $state<HTMLInputElement | null>(null);
@@ -69,13 +70,15 @@
 	let editingId = $state<number | null>(null);
 	let editOriginal = $state('');
 	let editReplacement = $state('');
+	let editMatchMode = $state<'literal' | 'wildcard'>('literal');
 
 	const addMutation = createMutation(() => ({
-		mutationFn: ({ original, replacement }: { original: string; replacement: string }) =>
-			apiClient.createWordReplacement({ original, replacement }),
+		mutationFn: ({ original, replacement, match_mode }: { original: string; replacement: string; match_mode: 'literal' | 'wildcard' }) =>
+			apiClient.createWordReplacement({ original, replacement, match_mode }),
 		onSuccess: (_data, { original, replacement }) => {
 			newOriginal = '';
 			newReplacement = '';
+			newMatchMode = 'literal';
 			toastStore.success(m.words_added({ original, replacement }), 3000);
 			void queryClient.invalidateQueries({ queryKey: ['word-replacements'] });
 		},
@@ -124,7 +127,7 @@
 	}));
 
 	const importMutation = createMutation(() => ({
-		mutationFn: (payload: { replacements: { original: string; replacement: string }[]; includeDefaults: boolean }) =>
+		mutationFn: (payload: { replacements: { original: string; replacement: string; match_mode?: 'literal' | 'wildcard' }[]; includeDefaults: boolean }) =>
 			apiClient.importWordReplacements(payload),
 		onSuccess: (res: ImportResponse) => {
 			toastStore.success(m.words_import_complete({ imported: res.imported, skipped: res.skipped, errors: res.errors }), 5000);
@@ -142,7 +145,7 @@
 			toastStore.error(m.words_both_fields_required(), 4000);
 			return;
 		}
-		addMutation.mutate({ original, replacement });
+		addMutation.mutate({ original, replacement, match_mode: newMatchMode });
 	}
 
 	function handleDelete(id: number) {
@@ -153,6 +156,7 @@
 		editingId = rep.id;
 		editOriginal = rep.original;
 		editReplacement = rep.replacement;
+		editMatchMode = rep.match_mode === 'wildcard' ? 'wildcard' : 'literal';
 	}
 
 	function cancelEdit() {
@@ -167,7 +171,7 @@
 			toastStore.error(m.words_both_fields_required_edit(), 4000);
 			return;
 		}
-		updateMutation.mutate({ original: rep.original, replacement: r });
+		updateMutation.mutate({ original: rep.original, replacement: r, match_mode: editMatchMode });
 	}
 
 	function toggleSort() {
@@ -213,9 +217,15 @@
 			const parsed: WordReplacement[] = JSON.parse(text);
 			if (!Array.isArray(parsed)) throw new Error(m.words_expected_json_array());
 
+			// Forward match_mode verbatim so wildcard entries round-trip and
+			// typo'd values surface as per-item import errors server-side. (#228)
 			const replacements = parsed
 				.filter(r => r.original && r.original.trim())
-				.map(r => ({ original: r.original.trim(), replacement: (r.replacement || '').trim() }));
+				.map(r => ({
+					original: r.original.trim(),
+					replacement: (r.replacement || '').trim(),
+					...(r.match_mode ? { match_mode: String(r.match_mode) as 'literal' | 'wildcard' } : {}),
+				}));
 
 			if (replacements.length === 0) {
 				toastStore.error(m.words_no_valid_in_file(), 4000);
@@ -329,6 +339,17 @@
 								class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
 							/>
 						</div>
+						<div class="w-full sm:w-auto sm:min-w-[12rem]">
+							<label for="word-match-mode" class="block text-xs font-medium text-muted-foreground mb-1">{m.words_mode_label()}</label>
+							<select
+								id="word-match-mode"
+								bind:value={newMatchMode}
+								class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+							>
+								<option value="literal">{m.words_mode_literal()}</option>
+								<option value="wildcard">{m.words_mode_wildcard()}</option>
+							</select>
+						</div>
 						<div class="flex items-end">
 							<Button
 								type="button"
@@ -427,6 +448,14 @@
 														onkeydown={handleEditKeydown}
 														class="w-full rounded border border-input bg-background px-2 py-1 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-ring"
 													/>
+													<select
+														bind:value={editMatchMode}
+														aria-label={m.words_mode_label()}
+														class="w-full rounded border border-input bg-background px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+													>
+														<option value="literal">{m.words_mode_literal()}</option>
+														<option value="wildcard">{m.words_mode_wildcard()}</option>
+													</select>
 													<div class="flex gap-1">
 														<button
 															type="button"
@@ -458,6 +487,9 @@
 												</div>
 												<div class="py-2.5 px-4 font-mono text-sm whitespace-nowrap overflow-hidden text-ellipsis max-w-[200px]" title={rep.replacement}>
 													{rep.replacement}
+													{#if rep.match_mode === 'wildcard'}
+														<span class="ml-1 inline-flex items-center rounded border border-primary/40 bg-primary/10 px-1 py-0.5 text-[10px] font-sans text-primary">{m.words_mode_badge_wildcard()}</span>
+													{/if}
 												</div>
 												<div class="py-2.5 px-4 flex items-center justify-center gap-0.5">
 													<button

@@ -471,10 +471,13 @@ export interface GenreAddRequest {
 	genre: string;
 }
 
+export type WordMatchMode = 'literal' | 'wildcard';
+
 export interface WordReplacement {
 	id: number;
 	original: string;
 	replacement: string;
+	match_mode?: WordMatchMode;
 	created_at: string;
 	updated_at: string;
 }
@@ -490,11 +493,13 @@ export interface WordReplacementListResponse {
 export interface WordReplacementCreateRequest {
 	original: string;
 	replacement: string;
+	match_mode?: WordMatchMode;
 }
 
 export interface WordReplacementUpdateRequest {
 	original: string;
 	replacement: string;
+	match_mode?: WordMatchMode;
 }
 
 export interface Movie {
@@ -1413,7 +1418,7 @@ export interface GenreReplacementsImportRequest {
 }
 
 export interface WordReplacementsImportRequest {
-	replacements: { original: string; replacement: string }[];
+	replacements: { original: string; replacement: string; match_mode?: WordMatchMode }[];
 	includeDefaults?: boolean;
 }
 
