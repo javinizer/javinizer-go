@@ -36,6 +36,7 @@ import {
 	soleResult,
 	DEFAULT_INPUT_DIR,
 	DEFAULT_OUTPUT_DIR,
+	seedInputFiles,
 } from '../helpers';
 
 test.describe('Organize: real apply phase creates destination + subfolder on disk', () => {
@@ -74,6 +75,11 @@ test.describe('Organize: real apply phase creates destination + subfolder on dis
 	}) => {
 		await loginAgainstRealBackend(request);
 
+		// Test isolation: the shared canonical GOOD-001 fixture can already have been
+		// moved out of the input directory by the previous test's (unawaited) organize.
+		// Re-seed this test's input before driving its real apply phase.
+		await seedInputFiles(['GOOD-001.mp4']);
+
 		const job_id = await submitScrape(request, { files: [`${DEFAULT_INPUT_DIR}/GOOD-001.mp4`] });
 		await waitForJobCompletion(request, job_id);
 
@@ -90,8 +96,17 @@ test.describe('Organize: real apply phase creates destination + subfolder on dis
 		await waitForJobCompletion(request, job_id, { timeoutMs: 30_000 });
 
 		// The destination directory must exist + contain a subfolder named
-		// after the movie ID (the FolderFormat template = "<ID>").
-		expect(existsSync(destination), 'destination directory must exist after organize').toBeTruthy();
+		// after the movie ID (the FolderFormat template = "<ID>"). The job's
+		// completed status observed by waitForJobCompletion can be the STALE
+		// terminal state from the scrape phase (the apply phase reuses the job),
+		// so poll the durable signal rather than reading the filesystem in the
+		// instant the waiter returns.
+		await expect
+			.poll(() => existsSync(destination), {
+				message: 'destination directory must appear while the apply phase runs',
+				timeout: 30_000,
+			})
+			.toBeTruthy();
 		const entries = readdirSync(destination);
 		expect(entries, 'destination must contain a per-movie subfolder').toContain('GOOD-001');
 
