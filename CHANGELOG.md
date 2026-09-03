@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Honor the global rename_file setting for the "rename in place" video operation: web batch/apply with rename_file=false now renames only the (dedicated) folder and preserves video file names, instead of silently forcing a file rename. Note: rename_file=false + rename in place + a mixed-ID (non-dedicated) folder is now a no-op by design (#226)
+- Word-replacement entries containing `*` (the censor character) now match when embedded in Japanese/other non-Latin text: only `*` and Latin-script letters extend a censored token; non-Latin letters (kana, kanji, Cyrillic, …) now count as boundaries. Deliberate behavior flip: a Latin censored token directly abutting CJK letters now replaces (e.g. `F***ドラマ` → `Fuckドラマ`); the #106 over-extension guard (`F***` not firing inside `F****d`) is unchanged (#227)
 
 ## [v1.5.1] - 2026-08-12
 

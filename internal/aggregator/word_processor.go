@@ -84,10 +84,11 @@ func NewWordProcessor(cfg *MetadataConfig, repo wordLookup) *wordProcessor {
 //
 //   - Patterns WITH '*' (censored-word tokens, e.g. "F***"): matched as a whole
 //     token using replaceTokenBounded. The match must be bounded on both sides
-//     by string start/end or a char that is neither a letter nor '*'. This
-//     prevents a short censored token from matching as a substring inside a
-//     longer, unlisted censored token — e.g. "F***" no longer fires inside
-//     "F****d" (which would yield "Fuck*d"). Issue #106.
+//     by string start/end or a char that cannot extend a censored token — i.e.
+//     anything other than '*' or a Latin-script character (#106 keeps "F***" from
+//     firing inside "F****d"; #227 narrows letter-extension to the Latin script
+//     so CJK letters count as boundaries and embedded patterns like "チ*ポ"
+//     match inside unsegmented Japanese titles).
 //   - Patterns WITHOUT '*' (e.g. the "[Recommended For Smartphones] " prefix
 //     strip): matched as a plain substring via strings.ReplaceAll, preserving
 //     the original behavior for patterns that are genuinely meant to match
@@ -123,11 +124,12 @@ func (wp *wordProcessor) Apply(text string) string {
 
 // replaceTokenBounded replaces every non-overlapping occurrence of orig in text
 // with repl, but only when the match is bounded on both sides by string
-// start/end or a character that is neither a Unicode letter nor '*'. This is
-// the "whole censored token" rule: '*' is the censor character, so a run like
-// "F***" is a complete censored word only if the char after it is not a letter
+// start/end or a boundary character per isCensorBoundary. This is the "whole
+// censored token" rule: '*' is the censor character, so a run like "F***" is a
+// complete censored word only if the char after it is not a Latin-script character
 // (which would extend the word) and not '*' (which would mean it's actually a
-// longer censored token, e.g. "F****d").
+// longer censored token, e.g. "F****d"). CJK letters can never be part of a
+// Latin censored token, so they act as boundaries (#227).
 //
 // The boundary chars are INSPECTED but not consumed, so two censored tokens
 // separated by a single space ("F*** S***e") both match — the space serves as
@@ -165,10 +167,13 @@ func replaceTokenBounded(text, orig, repl string) string {
 }
 
 // isCensorBoundary reports whether r may act as a boundary for a censored-word
-// token: any char that is NOT a Unicode letter and NOT '*'. Digits, spaces,
-// punctuation, and symbols all qualify; letters and '*' extend the token.
+// token: any char that cannot extend the token — i.e. anything other than '*'
+// or a Latin-script character (the unicode.Latin table is script-based and
+// also contains Roman numerals in category Nl — immaterial here). Digits,
+// spaces, punctuation, symbols, and CJK or other non-Latin letters all qualify
+// (#227); '*' and Latin-script characters extend the token (#106).
 func isCensorBoundary(r rune) bool {
-	return r != '*' && !unicode.IsLetter(r)
+	return r != '*' && !unicode.In(r, unicode.Latin)
 }
 
 // boundaryRuneBefore decodes the full rune immediately preceding byte index

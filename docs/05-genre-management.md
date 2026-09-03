@@ -32,7 +32,7 @@ metadata:
 
 Both default to `true`, so replacement is active out of the box. Disable `enabled` to bypass replacement entirely without deleting your mappings.
 
-> **Note:** Genre replacement is distinct from word replacement. Word replacements (`metadata.word_replacement`, disabled by default) do substring search-and-replace across all text fields **and each genre token**, and run *before* genre replacement — see the [`word` command](./03-cli-reference.md#word) and [Metadata Management Defaults](./02-configuration.md#metadata-management-defaults). See [How It Works](#how-it-works) for the full pipeline.
+> **Note:** Genre replacement is distinct from word replacement. Word replacements (`metadata.word_replacement`, disabled by default) replace text across all text fields **and each genre token**, and run *before* genre replacement. Entries without `*` match as plain substrings; entries containing `*` (the censor character) match as whole tokens — a candidate match is rejected when immediately preceded or followed by `*` or a Latin-script letter (#106/#227) — see the [`word` command](./03-cli-reference.md#word) and [Metadata Management Defaults](./02-configuration.md#metadata-management-defaults). See [How It Works](#how-it-works) for the full pipeline.
 
 ## Commands
 
@@ -156,7 +156,7 @@ An empty array (`[]`) is rejected with an error; invalid JSON fails with `failed
 Scraper → Original Genres → Apply Word Replacements → Apply Genre Replacements → Apply Ignore Filter → Final Genres
 ```
 
-- **Word replacements** (optional, `metadata.word_replacement`) normalize substrings in each token first.
+- **Word replacements** (optional, `metadata.word_replacement`) normalize each token first (substring for plain entries, whole-token for `*` entries — see above).
 - **Genre replacements** then map the resulting token via an exact, case-sensitive lookup.
 - **Ignore filter** (`metadata.ignore_genres`) drops matching tokens last.
 

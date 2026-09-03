@@ -145,11 +145,14 @@ func TestApplyWordReplacements_CensoredTokenInTitle(t *testing.T) {
 // full UTF-8 runes (not single bytes) when classifying the char adjacent to a
 // censored token. This matters for r18dev titles, which can be Japanese.
 //
-// A censored token directly abutting a multibyte rune (Japanese katakana/kanji,
-// or full-width punctuation like 「」) must be classified by the actual rune:
-// a Japanese letter extends the word (blocks the match), while a Japanese
-// punctuation char is a boundary (allows the match). The old byte-level read
-// misclassified lead/continuation bytes and got these wrong.
+// Since #227, only '*' and Latin-script letters extend a censored token; a
+// Japanese letter is a boundary, so a censored English word directly abutting
+// one DOES replace (e.g. "F***ドラマ" -> "Fuckドラマ": the title contains the
+// complete censored word, and the katakana can never be part of it). The old
+// behavior ("a Japanese letter extends the word") is the bug #227 fixes. This
+// case is also the rune-decode guard: a byte-level read of the lead byte of a
+// multibyte rune (e.g. ド = 0xE3...) would misclassify it as a Latin-script
+// letter and wrongly block the replacement.
 func TestApplyWordReplacement_MultibyteBoundary(t *testing.T) {
 	cfg := &config.Config{
 		Metadata: config.MetadataConfig{
@@ -161,8 +164,8 @@ func TestApplyWordReplacement_MultibyteBoundary(t *testing.T) {
 	})
 
 	// Censored token followed directly by a Japanese letter (no separator):
-	// ド is a letter and extends the word, so F*** must NOT fire.
-	assert.Equal(t, "F***ドラマ", wp.Apply("F***ドラマ"))
+	// since #227 the katakana is a boundary, so F*** fires.
+	assert.Equal(t, "Fuckドラマ", wp.Apply("F***ドラマ"))
 	// With a separator it replaces.
 	assert.Equal(t, "Fuck ドラマ", wp.Apply("F*** ドラマ"))
 	// Japanese full-width brackets 「」 are punctuation (boundaries), so the
