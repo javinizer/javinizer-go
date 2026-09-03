@@ -1977,5 +1977,6 @@
   "words_mode_label": "[ Måtçh möðë ]",
   "words_mode_literal": "[ Éxåçt måtçh ]",
   "words_mode_wildcard": "[ Çëñsör wïldçård (?) ]",
-  "words_mode_badge_wildcard": "[ wïldçård ]"
+  "words_mode_badge_wildcard": "[ wïldçård ]",
+  "browse_plan_rename_in_place_desc_files_off": "[ Rëñåmë ëlïgïblë ðëðïçåtëð fölðërs wïthöüt çhåñgïñg thëír pårëñt löçåtïöñ; vídëö fïlë ñåmës ärë képt (rëñåmë fïlës ïs öff). ]"
 }

@@ -2634,5 +2634,6 @@
   "words_mode_label": "マッチモード",
   "words_mode_literal": "完全一致",
   "words_mode_wildcard": "伏字ワイルドカード（?）",
-  "words_mode_badge_wildcard": "ワイルドカード"
+  "words_mode_badge_wildcard": "ワイルドカード",
+  "browse_plan_rename_in_place_desc_files_off": "対象の専用フォルダのみを、親の場所を変えずにリネームします（ファイル名のリネームはオフ）。"
 }

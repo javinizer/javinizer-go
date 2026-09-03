@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The "Rename in place" operation description in the Browse apply-plan selector now reflects the rename_file setting: with rename files off, the copy no longer claims videos are renamed (#229)
+
 ### Added
 
 - Wildcard match mode for word replacements: per-entry `match_mode` (`literal` default / `wildcard`) across DB (migration 000015), CLI (`word add --mode`), REST, and the /words page. In wildcard mode, `?`/`？` match a run of one-or-more censor glyphs (`*`, `＊`, `○`, `◯`, `〇`, `●`, `×`, `✕`, `✖`), so one entry uncensors every censor variant of a word (#228)

@@ -3,16 +3,18 @@
 	import { FolderOutput, FolderPen, FilePenLine, ShieldCheck, FileText } from 'lucide-svelte';
 	import type { VideoOperation } from '$lib/api/types';
 
-	let { value = $bindable<VideoOperation | null>(), errorId }: { value: VideoOperation | null; errorId?: string } = $props();
+	let { value = $bindable<VideoOperation | null>(), errorId, renameFile }: { value: VideoOperation | null; errorId?: string; renameFile?: boolean } = $props();
 	let describedBy = $derived(errorId ? `video-operation-help ${errorId}` : 'video-operation-help');
 	let radios: HTMLInputElement[] = $state([]);
-	const options = [
+	// #229: the rename-in-place description reflects the rename_file setting —
+	// with rename_file=false only the (dedicated) folder is renamed.
+	const options = $derived([
 		{ value: 'organize' as const, label: m.browse_plan_organize(), description: m.browse_plan_organize_desc(), icon: FolderOutput },
-		{ value: 'rename-in-place' as const, label: m.browse_plan_rename_in_place(), description: m.browse_plan_rename_in_place_desc(), icon: FolderPen },
+		{ value: 'rename-in-place' as const, label: m.browse_plan_rename_in_place(), description: renameFile === false ? m.browse_plan_rename_in_place_desc_files_off() : m.browse_plan_rename_in_place_desc(), icon: FolderPen },
 		{ value: 'rename-file' as const, label: m.browse_plan_rename_file(), description: m.browse_plan_rename_file_desc(), icon: FilePenLine },
 		{ value: 'leave-in-place' as const, label: m.browse_plan_leave_in_place(), description: m.browse_plan_leave_in_place_desc(), icon: ShieldCheck },
 		{ value: 'metadata-artwork' as const, label: m.browse_plan_metadata_artwork(), description: m.browse_plan_metadata_artwork_desc(), icon: FileText }
-	];
+	]);
 
 	function handleKeydown(event: KeyboardEvent, index: number) {
 		let next = index;

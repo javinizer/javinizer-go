@@ -2634,5 +2634,6 @@
   "words_mode_label": "匹配模式",
   "words_mode_literal": "精确匹配",
   "words_mode_wildcard": "屏蔽字通配符（?）",
-  "words_mode_badge_wildcard": "通配符"
+  "words_mode_badge_wildcard": "通配符",
+  "browse_plan_rename_in_place_desc_files_off": "仅重命名符合条件的专用文件夹，不改变所在位置；保留视频文件名（已关闭重命名文件）。"
 }

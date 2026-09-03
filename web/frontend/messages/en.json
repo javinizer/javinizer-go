@@ -2634,5 +2634,6 @@
   "words_mode_label": "Match mode",
   "words_mode_literal": "Exact match",
   "words_mode_wildcard": "Censor wildcard (?)",
-  "words_mode_badge_wildcard": "wildcard"
+  "words_mode_badge_wildcard": "wildcard",
+  "browse_plan_rename_in_place_desc_files_off": "Rename eligible dedicated folders without changing their parent location; video file names are kept (rename files is off)."
 }

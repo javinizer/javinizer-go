@@ -2634,5 +2634,6 @@
   "words_mode_label": "匹配模式",
   "words_mode_literal": "精確匹配",
   "words_mode_wildcard": "遮蔽字萬用字元（?）",
-  "words_mode_badge_wildcard": "萬用字元"
+  "words_mode_badge_wildcard": "萬用字元",
+  "browse_plan_rename_in_place_desc_files_off": "僅重新命名符合條件的專用資料夾，不改變所在位置；保留影片檔名（已關閉重新命名檔案）。"
 }

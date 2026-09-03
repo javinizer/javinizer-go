@@ -749,7 +749,7 @@
 						<span class="mt-2 hidden w-px flex-1 bg-border sm:block"></span>
 					</div>
 					<div class="min-w-0">
-						<VideoOperationSelector bind:value={selectedVideoOperation} errorId={planErrors.length > 0 ? 'apply-plan-errors' : undefined} />
+						<VideoOperationSelector bind:value={selectedVideoOperation} errorId={planErrors.length > 0 ? 'apply-plan-errors' : undefined} renameFile={config?.output?.rename_file} />
 					</div>
 				</div>
 

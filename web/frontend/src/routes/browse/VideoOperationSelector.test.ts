@@ -26,6 +26,19 @@ describe('VideoOperationSelector', () => {
 		expect(getByText('✓')).toBeTruthy();
 	});
 
+	it('describes rename-in-place accurately per the rename_file setting (#229)', () => {
+		const on = render(VideoOperationSelector, { value: null, renameFile: true });
+		expect(on.getByText('Rename videos and eligible dedicated folders without changing their parent location.')).toBeTruthy();
+		on.unmount();
+		const off = render(VideoOperationSelector, { value: null, renameFile: false });
+		expect(off.getByText(/dedicated folders without changing their parent location; video file names are kept/)).toBeTruthy();
+		off.unmount();
+		// Unknown config (undefined) keeps the default (files-renamed) copy.
+		const def = render(VideoOperationSelector, { value: null });
+		expect(def.getByText(/Rename videos and eligible dedicated folders/)).toBeTruthy();
+		def.unmount();
+	});
+
 	it('associates dynamic validation with the radio group', () => {
 		const { getByRole } = render(VideoOperationSelector, { value: null, errorId: 'apply-plan-errors' });
 		expect(getByRole('group', { name: 'Video file operation' }).getAttribute('aria-describedby')).toBe('video-operation-help apply-plan-errors');
