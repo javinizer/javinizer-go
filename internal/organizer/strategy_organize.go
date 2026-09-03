@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -401,9 +400,6 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 
 		switch plan.LinkMode {
 		case LinkModeHard:
-			if dstSameInode && !plan.overwriteAuthorized {
-				return nil
-			}
 			if err := s.linker.hardlink(plan.SourcePath, plan.TargetPath); err != nil {
 				if errors.Is(err, syscall.EXDEV) {
 					return fmt.Errorf("failed to create hard link (source and destination must be on the same filesystem): %w", err)
@@ -423,11 +419,8 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 				linkTarget = abs
 			}
 			if err := s.linker.symlink(linkTarget, plan.TargetPath); err != nil {
-				if errors.Is(err, os.ErrPermission) && runtime.GOOS == "windows" {
-					return fmt.Errorf("failed to create soft link (Windows requires Developer Mode or elevated privileges for symlinks): %w", err)
-				}
 				if errors.Is(err, os.ErrPermission) {
-					return fmt.Errorf("failed to create soft link (permission denied): %w", err)
+					return fmt.Errorf("failed to create soft link%s: %w", softLinkPermDeniedHint, err)
 				}
 				return fmt.Errorf("failed to create soft link: %w", err)
 			}
