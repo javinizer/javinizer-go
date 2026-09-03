@@ -18,6 +18,12 @@ import (
 
 // forceStatFallbackFs wraps an fs so Lstater reports didLstat=false — exercising the
 // Stat-following fallback legs (readlink probes) even when the inner fs supports links.
+// normKey normalizes path comparisons across separators so injected failures match
+// both literal "/a/b" plans and filepath.Join-produced paths on every OS.
+func normKey(p string) string {
+	return filepath.ToSlash(filepath.Clean(p))
+}
+
 type forceStatFallbackFs struct{ afero.Fs }
 
 func (f forceStatFallbackFs) LstatIfPossible(name string) (os.FileInfo, bool, error) {
@@ -48,15 +54,20 @@ type failStatPathsFs struct {
 	fail map[string]error
 }
 
+func (f failStatPathsFs) failFor(name string) (error, bool) {
+	err, ok := f.fail[normKey(name)]
+	return err, ok
+}
+
 func (f failStatPathsFs) Stat(name string) (os.FileInfo, error) {
-	if err, ok := f.fail[filepath.Clean(name)]; ok {
+	if err, ok := f.failFor(name); ok {
 		return nil, err
 	}
 	return f.Fs.Stat(name)
 }
 
 func (f failStatPathsFs) LstatIfPossible(name string) (os.FileInfo, bool, error) {
-	if err, ok := f.fail[filepath.Clean(name)]; ok {
+	if err, ok := f.failFor(name); ok {
 		return nil, true, err
 	}
 	if lst, ok := f.Fs.(afero.Lstater); ok {
@@ -84,7 +95,7 @@ type statCountFs struct {
 }
 
 func (f *statCountFs) Stat(name string) (os.FileInfo, error) {
-	if filepath.Clean(name) == f.target {
+	if normKey(name) == normKey(f.target) {
 		f.n++
 		if f.n == f.failOn {
 			return nil, errors.New("injected transient stat failure")
@@ -118,7 +129,7 @@ type failRemovePathFs struct {
 }
 
 func (f failRemovePathFs) Remove(name string) error {
-	if filepath.Clean(name) == f.target {
+	if normKey(name) == normKey(f.target) {
 		return errors.New("injected remove failure")
 	}
 	return f.Fs.Remove(name)
@@ -187,7 +198,7 @@ func TestPathExistsBestEffort_Legs(t *testing.T) {
 		assert.False(t, ok)
 	})
 	t.Run("lstater non-NotExist error surfaces", func(t *testing.T) {
-		bad := failStatPathsFs{Fs: mem, fail: map[string]error{"/boom.txt": permErr}}
+		bad := failStatPathsFs{Fs: mem, fail: map[string]error{normKey("/boom.txt"): permErr}}
 		ok, err := pathExistsBestEffort(bad, "/boom.txt")
 		require.ErrorIs(t, err, permErr)
 		assert.False(t, ok)
@@ -317,7 +328,7 @@ func TestInPlaceStrategy_TargetDirCheckErrors_Surface(t *testing.T) {
 	t.Run("lstater non-NotExist error", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
 		require.NoError(t, afero.WriteFile(fs, "/old/v.mp4", []byte("v"), 0644))
-		bad := failStatPathsFs{Fs: fs, fail: map[string]error{"/new": permErr}}
+		bad := failStatPathsFs{Fs: fs, fail: map[string]error{normKey("/new"): permErr}}
 		strategy := newInPlaceStrategy(bad, cfg, nil, nil)
 		_, err := strategy.Execute(mkInPlacePlan("/old", "/new"))
 		require.Error(t, err)
@@ -359,12 +370,12 @@ func TestInPlaceStrategy_RollbackAlsoFails_RefusalStillReturned(t *testing.T) {
 	plan.Match = models.FileMatchInfo{Path: "/old/ABC-777.mp4", Name: "ABC-777.mp4"}
 
 	hook.after = func(_, newPath string) {
-		if newPath == "/new" {
+		if normKey(newPath) == "/new" {
 			_ = afero.WriteFile(base, "/new/ABC-777-renamed.mp4", []byte("rival"), 0644)
 		}
 	}
 	hook.failPair = func(oldPath, newPath string) bool {
-		return oldPath == "/new" && newPath == "/old" // rollback fails
+		return normKey(oldPath) == "/new" && normKey(newPath) == "/old" // rollback fails
 	}
 
 	_, err := strategy.Execute(plan)
@@ -387,9 +398,9 @@ func TestInPlaceStrategy_InnerRenameFails_WithAndWithoutRollbackFailure(t *testi
 		plan.Match = models.FileMatchInfo{Path: "/old/ABC-777.mp4", Name: "ABC-777.mp4"}
 		hook.failPair = func(oldPath, newPath string) bool {
 			switch {
-			case oldPath == "/new/ABC-777.mp4" && newPath == "/new/ABC-777-renamed.mp4":
+			case normKey(oldPath) == "/new/ABC-777.mp4" && normKey(newPath) == "/new/ABC-777-renamed.mp4":
 				return true // inner rename fails
-			case rollbackAlsoFails && oldPath == "/new" && newPath == "/old":
+			case rollbackAlsoFails && normKey(oldPath) == "/new" && normKey(newPath) == "/old":
 				return true
 			}
 			return false
@@ -543,7 +554,7 @@ func TestOrganizeStrategy_LinkMode_SoftRelativeSourceResolutionFailure(t *testin
 func TestOrganize_SubtitleStatFailure_Surfaced(t *testing.T) {
 	mem := afero.NewMemMapFs()
 	permErr := errors.New("permission denied")
-	fs := failStatPathsFs{Fs: mem, fail: map[string]error{"/dest/IPX-535/IPX-535.srt": permErr}}
+	fs := failStatPathsFs{Fs: mem, fail: map[string]error{normKey("/dest/IPX-535/IPX-535.srt"): permErr}}
 	cfg := &Config{
 		FolderFormat:       "<ID>",
 		FileFormat:         "<ID>",
