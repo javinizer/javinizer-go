@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Honor the global rename_file setting for the "rename in place" video operation: web batch/apply with rename_file=false now renames only the (dedicated) folder and preserves video file names, instead of silently forcing a file rename. Note: rename_file=false + rename in place + a mixed-ID (non-dedicated) folder is now a no-op by design (#226)
+
 ## [v1.5.1] - 2026-08-12
 
 ### Added

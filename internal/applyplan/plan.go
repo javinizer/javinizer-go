@@ -127,8 +127,13 @@ type Projection struct {
 	SkipNFO                bool
 	SkipDownload           bool
 	OverwriteExistingMedia bool
-	ForceRenameFile        bool
-	ForceNFO               bool
+	// ForceRenameFile renames video files even when the global rename_file
+	// setting is disabled. Only VideoOperationRenameFile sets it: renaming the
+	// file is the definition of that operation. VideoOperationRenameInPlace
+	// deliberately does not force — it honors rename_file (folder-only rename
+	// when disabled), fixing the silent override reported in #226.
+	ForceRenameFile bool
+	ForceNFO        bool
 }
 
 // Default .
@@ -269,7 +274,9 @@ func Validate(plan *Plan) error {
 	return nil
 }
 
-// Project .
+// Project projects a plan into execution knobs. ForceRenameFile is set only
+// for VideoOperationRenameFile; all other operations respect the resolved
+// rename_file configuration.
 func Project(plan *Plan) (Projection, error) {
 	normalized, err := Normalize(plan)
 	if err != nil {
@@ -287,7 +294,6 @@ func Project(plan *Plan) (Projection, error) {
 		projection.OperationMode = operationmode.OperationModeOrganize
 	case VideoOperationRenameInPlace:
 		projection.OperationMode = operationmode.OperationModeInPlace
-		projection.ForceRenameFile = true
 	case VideoOperationRenameFile:
 		projection.OperationMode = operationmode.OperationModeInPlaceNoRenameFolder
 		projection.ForceRenameFile = true

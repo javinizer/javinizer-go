@@ -19,7 +19,7 @@ func TestNormalizeAndProject(t *testing.T) {
 		forceName bool
 	}{
 		{"organize", Default(VideoOperationOrganize, "/dest"), false, operationmode.OperationModeOrganize, "/dest", false},
-		{"rename in place", Default(VideoOperationRenameInPlace, "/stale"), false, operationmode.OperationModeInPlace, "", true},
+		{"rename in place", Default(VideoOperationRenameInPlace, "/stale"), false, operationmode.OperationModeInPlace, "", false},
 		{"rename file", Default(VideoOperationRenameFile, "/stale"), false, operationmode.OperationModeInPlaceNoRenameFolder, "", true},
 		{"leave in place", Default(VideoOperationLeaveInPlace, "/stale"), true, operationmode.OperationModeMetadataArtwork, "", false},
 		{"metadata artwork", Default(VideoOperationMetadataArtwork, "/stale"), false, operationmode.OperationModeMetadataArtwork, "", false},

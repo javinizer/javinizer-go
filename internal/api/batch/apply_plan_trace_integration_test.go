@@ -47,7 +47,7 @@ func TestApplyPlanTrace_RequestPersistenceAndEffectiveConfig(t *testing.T) {
 		wantForceName bool
 	}{
 		{"organize", applyplan.VideoOperationOrganize, false, operationmode.OperationModeOrganize, false, false},
-		{"rename in place", applyplan.VideoOperationRenameInPlace, false, operationmode.OperationModeInPlace, false, true},
+		{"rename in place", applyplan.VideoOperationRenameInPlace, false, operationmode.OperationModeInPlace, false, false},
 		{"rename file", applyplan.VideoOperationRenameFile, false, operationmode.OperationModeInPlaceNoRenameFolder, false, true},
 		{"leave in place", applyplan.VideoOperationLeaveInPlace, true, operationmode.OperationModeMetadataArtwork, true, false},
 	}
