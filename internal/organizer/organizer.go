@@ -461,20 +461,22 @@ func (o *Organizer) handleSubtitles(plan *OrganizePlan, result *OrganizeResult, 
 			},
 		}
 
-		// Parent directory locked alongside the subtitle path: consistent with all other
-		// destination-touching ops so nothing lands mid-sequence in a renamed directory.
-		err := withDestFileLocks([]string{plan.TargetDir, newPath}, func() error {
-			// pathExistsBestEffort also sees dangling symlink objects: a filesystem whose
-			// Stat follows links (no true Lstat) would otherwise let this op replace one.
-			exists, statErr := pathExistsBestEffort(o.fs, newPath)
-			if statErr != nil {
-				return fmt.Errorf("failed to check subtitle destination: %w", statErr)
-			}
-			if exists {
-				sr.Skipped = true
-				return nil
-			}
-			return fileOp(o.fs, subtitle.OriginalPath, newPath)
+		// Shared parent-directory lock + per-subtitle file lock: child writes stay
+		// parallel per file, but a directory rename elsewhere drains us before moving.
+		err := withDestDirSharedLock(plan.TargetDir, func() error {
+			return withDestFileLock(newPath, func() error {
+				// pathExistsBestEffort also sees dangling symlink objects: a filesystem whose
+				// Stat follows links (no true Lstat) would otherwise let this op replace one.
+				exists, statErr := pathExistsBestEffort(o.fs, newPath)
+				if statErr != nil {
+					return fmt.Errorf("failed to check subtitle destination: %w", statErr)
+				}
+				if exists {
+					sr.Skipped = true
+					return nil
+				}
+				return fileOp(o.fs, subtitle.OriginalPath, newPath)
+			})
 		})
 		if err != nil {
 			sr.Error = fmt.Errorf("failed to handle subtitle: %w", err)

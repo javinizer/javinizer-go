@@ -99,20 +99,23 @@ func (s *inPlaceNoRenameFolderStrategy) Execute(plan *OrganizePlan) (*OrganizeRe
 		ShouldGenerateMetadata: true,
 	}
 
-	// See strategy_inplace.go: the parent directory is locked alongside the target
-	// path so this move can never land inside a directory a concurrent in-place op is
-	// renaming (sorted acquisition keeps every site cycle-free).
-	err := withDestFileLocks([]string{plan.TargetDir, plan.TargetPath}, func() error {
-		if !plan.overwriteAuthorized {
-			lexicalSelf, sameIn, err := refuseExistingDestination(s.fs, plan.SourcePath, plan.TargetPath)
-			if err != nil {
-				return err
+	// Shared parent-directory lock + target-file lock (dir before file): an in-place
+	// rename elsewhere drains shared holders before moving the directory, so this move
+	// never lands inside a renamed (possibly about-to-rollback) directory — while
+	// concurrent copies into the same directory stay parallel.
+	err := withDestDirSharedLock(plan.TargetDir, func() error {
+		return withDestFileLock(plan.TargetPath, func() error {
+			if !plan.overwriteAuthorized {
+				lexicalSelf, sameIn, err := refuseExistingDestination(s.fs, plan.SourcePath, plan.TargetPath)
+				if err != nil {
+					return err
+				}
+				if lexicalSelf || sameIn {
+					return nil
+				}
 			}
-			if lexicalSelf || sameIn {
-				return nil
-			}
-		}
-		return fsutil.MoveFileFs(s.fs, plan.SourcePath, plan.TargetPath)
+			return fsutil.MoveFileFs(s.fs, plan.SourcePath, plan.TargetPath)
+		})
 	})
 	if err != nil {
 		result.Error = fmt.Errorf("failed to rename file: %w", err)

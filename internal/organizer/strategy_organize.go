@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -66,29 +65,69 @@ func withDestFileLock(path string, fn func() error) error {
 	return fn()
 }
 
-// withDestFileLocks acquires destination locks for multiple paths with respect to other
-// multi-acquisitions: keys are cleaned, deduplicated, and acquired in sorted order so
-// concurrent operations can never form a hold-and-wait cycle.
-func withDestFileLocks(paths []string, fn func() error) error {
-	seen := make(map[string]struct{}, len(paths))
-	keys := make([]string, 0, len(paths))
-	for _, p := range paths {
-		k := filepath.Clean(p)
-		if _, dup := seen[k]; dup {
-			continue
-		}
-		seen[k] = struct{}{}
-		keys = append(keys, k)
+// dirOperationLocks coordinate directory-scope operations: a directory RENAME
+// (in-place organize) takes the exclusive lock, while any child-file operation inside
+// that directory takes the shared lock. Shared locks let unrelated copies into one
+// directory proceed concurrently; a rename (or its rollback) waits until all child
+// writes have drained, so it can never drag a freshly landed file to a path its owner
+// no longer expects. Entries are ref-counted exactly like operationLocks.
+type destDirLock struct {
+	mu   sync.RWMutex
+	refs int
+}
+
+type destDirLocker struct {
+	mu    sync.Mutex
+	items map[string]*destDirLock
+}
+
+var dirOperationLocks destDirLocker
+
+func withDestDirLock(dir string, exclusive bool, fn func() error) error {
+	key := filepath.Clean(dir)
+	dirOperationLocks.mu.Lock()
+	if dirOperationLocks.items == nil {
+		dirOperationLocks.items = make(map[string]*destDirLock)
 	}
-	sort.Strings(keys)
-	var run func(i int) error
-	run = func(i int) error {
-		if i == len(keys) {
-			return fn()
-		}
-		return withDestFileLock(keys[i], func() error { return run(i + 1) })
+	l := dirOperationLocks.items[key]
+	if l == nil {
+		l = &destDirLock{}
+		dirOperationLocks.items[key] = l
 	}
-	return run(0)
+	l.refs++
+	dirOperationLocks.mu.Unlock()
+
+	if exclusive {
+		l.mu.Lock()
+	} else {
+		l.mu.RLock()
+	}
+	defer func() {
+		if exclusive {
+			l.mu.Unlock()
+		} else {
+			l.mu.RUnlock()
+		}
+		dirOperationLocks.mu.Lock()
+		l.refs--
+		if l.refs == 0 && dirOperationLocks.items[key] == l {
+			delete(dirOperationLocks.items, key)
+		}
+		dirOperationLocks.mu.Unlock()
+	}()
+	return fn()
+}
+
+// withDestDirExclusiveLock serializes a directory-rename operation against every
+// child write already inside that directory and vice versa.
+func withDestDirExclusiveLock(dir string, fn func() error) error {
+	return withDestDirLock(dir, true, fn)
+}
+
+// withDestDirSharedLock lets independent child writes into one directory run in
+// parallel while excluding a concurrent rename of the directory itself.
+func withDestDirSharedLock(dir string, fn func() error) error {
+	return withDestDirLock(dir, false, fn)
 }
 
 // refuseExistingDestination enforces no-clobber at execution time with lexical-self vs
@@ -333,7 +372,12 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 			return fsutil.MoveFileFs(s.fs, plan.SourcePath, plan.TargetPath)
 		}
 
-		err := withDestFileLocks([]string{plan.TargetDir, plan.TargetPath}, move)
+		// Shared dir lock: concurrent organizes into one directory proceed in parallel
+		// (only the per-file lock serializes same-file collisions), while an in-place
+		// directory rename elsewhere drains us before it may move the directory.
+		err := withDestDirSharedLock(plan.TargetDir, func() error {
+			return withDestFileLock(plan.TargetPath, move)
+		})
 		if err != nil {
 			result.Error = err
 			return result, result.Error
@@ -359,80 +403,81 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 	// Every destination-touching step runs under the destination lock: unauthorized
 	// paths guard inside it (a plain copy would otherwise overwrite a late-created file),
 	// and authorized Remove+link work must serialize against concurrent guarded calls.
-	// The parent directory is locked too: an in-place directory rename elsewhere holds
-	// {TargetDir, TargetPath} for its whole sequence, and a bare TargetPath lock alone
-	// would let this op land inside a renamed (possibly about-to-rollback) directory.
-	err := withDestFileLocks([]string{plan.TargetDir, plan.TargetPath}, func() error {
-		dstSameInode := false
-		dstLexicalSelf := false
-		// Always classify: lexical-self aliases must never be removed (any authorization
-		// mode), and unauthorized operations refuse any different-file destination.
-		{
-			self, sameIn, err := refuseExistingDestination(s.fs, plan.SourcePath, plan.TargetPath)
-			if err != nil {
-				if !plan.overwriteAuthorized {
-					return err
-				}
-				// Authorized mode: classification failures are benign (overwrite intended).
-			} else {
-				dstLexicalSelf = self
-				dstSameInode = sameIn
-			}
-		}
-
-		if err := s.fs.MkdirAll(plan.TargetDir, config.DirPerm); err != nil {
-			return fmt.Errorf("failed to create directory: %w", err)
-		}
-
-		// Remove an existing target ONLY for an authorized replacement. Unauthorized
-		// paths never remove (their conversion output of choice must be won via
-		// refusal-and-fail). A lexical self-path is also never removed.
-		// Same-inode hardlinks under unauthorized mode are idempotent (returned early).
-		if plan.LinkMode != LinkModeNone && !dstLexicalSelf && plan.overwriteAuthorized {
-			if err := s.fs.Remove(plan.TargetPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-				return fmt.Errorf("failed to prepare target path for link: %w", err)
-			}
-		}
-
-		if dstLexicalSelf || (dstSameInode && !plan.overwriteAuthorized && plan.LinkMode == LinkModeHard) {
-			return nil // self-path or already-satisfied hardlink output — idempotent
-		}
-
-		switch plan.LinkMode {
-		case LinkModeHard:
-			if err := s.linker.hardlink(plan.SourcePath, plan.TargetPath); err != nil {
-				if errors.Is(err, syscall.EXDEV) {
-					return fmt.Errorf("failed to create hard link (source and destination must be on the same filesystem): %w", err)
-				}
-				if errors.Is(err, os.ErrPermission) {
-					return fmt.Errorf("failed to create hard link (permission denied): %w", err)
-				}
-				return fmt.Errorf("failed to create hard link: %w", err)
-			}
-		case LinkModeSoft:
-			linkTarget := plan.SourcePath
-			if !filepath.IsAbs(linkTarget) {
-				abs, err := filepath.Abs(linkTarget)
+	// The shared parent-directory lock keeps concurrent copies into the same directory
+	// parallel while an in-place directory rename (exclusive holder) drains us first.
+	err := withDestDirSharedLock(plan.TargetDir, func() error {
+		return withDestFileLock(plan.TargetPath, func() error {
+			dstSameInode := false
+			dstLexicalSelf := false
+			// Always classify: lexical-self aliases must never be removed (any authorization
+			// mode), and unauthorized operations refuse any different-file destination.
+			{
+				self, sameIn, err := refuseExistingDestination(s.fs, plan.SourcePath, plan.TargetPath)
 				if err != nil {
-					return fmt.Errorf("failed to resolve source path for symlink: %w", err)
+					if !plan.overwriteAuthorized {
+						return err
+					}
+					// Authorized mode: classification failures are benign (overwrite intended).
+				} else {
+					dstLexicalSelf = self
+					dstSameInode = sameIn
 				}
-				linkTarget = abs
 			}
-			if err := s.linker.symlink(linkTarget, plan.TargetPath); err != nil {
-				if errors.Is(err, os.ErrPermission) {
-					return fmt.Errorf("failed to create soft link%s: %w", softLinkPermDeniedHint, err)
+
+			if err := s.fs.MkdirAll(plan.TargetDir, config.DirPerm); err != nil {
+				return fmt.Errorf("failed to create directory: %w", err)
+			}
+
+			// Remove an existing target ONLY for an authorized replacement. Unauthorized
+			// paths never remove (their conversion output of choice must be won via
+			// refusal-and-fail). A lexical self-path is also never removed.
+			// Same-inode hardlinks under unauthorized mode are idempotent (returned early).
+			if plan.LinkMode != LinkModeNone && !dstLexicalSelf && plan.overwriteAuthorized {
+				if err := s.fs.Remove(plan.TargetPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+					return fmt.Errorf("failed to prepare target path for link: %w", err)
 				}
-				return fmt.Errorf("failed to create soft link: %w", err)
 			}
-		default:
-			if dstSameInode && !plan.overwriteAuthorized {
-				return nil
+
+			if dstLexicalSelf || (dstSameInode && !plan.overwriteAuthorized && plan.LinkMode == LinkModeHard) {
+				return nil // self-path or already-satisfied hardlink output — idempotent
 			}
-			if err := s.linker.copyFile(s.fs, plan.SourcePath, plan.TargetPath); err != nil {
-				return fmt.Errorf("failed to copy file: %w", err)
+
+			switch plan.LinkMode {
+			case LinkModeHard:
+				if err := s.linker.hardlink(plan.SourcePath, plan.TargetPath); err != nil {
+					if errors.Is(err, syscall.EXDEV) {
+						return fmt.Errorf("failed to create hard link (source and destination must be on the same filesystem): %w", err)
+					}
+					if errors.Is(err, os.ErrPermission) {
+						return fmt.Errorf("failed to create hard link (permission denied): %w", err)
+					}
+					return fmt.Errorf("failed to create hard link: %w", err)
+				}
+			case LinkModeSoft:
+				linkTarget := plan.SourcePath
+				if !filepath.IsAbs(linkTarget) {
+					abs, err := filepath.Abs(linkTarget)
+					if err != nil {
+						return fmt.Errorf("failed to resolve source path for symlink: %w", err)
+					}
+					linkTarget = abs
+				}
+				if err := s.linker.symlink(linkTarget, plan.TargetPath); err != nil {
+					if errors.Is(err, os.ErrPermission) {
+						return fmt.Errorf("failed to create soft link%s: %w", softLinkPermDeniedHint, err)
+					}
+					return fmt.Errorf("failed to create soft link: %w", err)
+				}
+			default:
+				if dstSameInode && !plan.overwriteAuthorized {
+					return nil
+				}
+				if err := s.linker.copyFile(s.fs, plan.SourcePath, plan.TargetPath); err != nil {
+					return fmt.Errorf("failed to copy file: %w", err)
+				}
 			}
-		}
-		return nil
+			return nil
+		})
 	})
 	if err != nil {
 		result.Error = err

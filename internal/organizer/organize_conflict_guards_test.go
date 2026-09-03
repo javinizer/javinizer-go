@@ -105,3 +105,85 @@ func TestLockRegistry_WaiterQueuedSerialized(t *testing.T) {
 	}
 	assert.Equal(t, 4, count, "every queued waiter must be served exactly once")
 }
+
+// Exclusive directory locks exclude concurrent shared child writes and vice versa:
+// a rename-in-progress must never drag a freshly landed file away (and a landed file
+// must never be followed by a rollback into the wrong directory).
+func TestDirOperationLocks_ExclusiveExcludesShared(t *testing.T) {
+	held := make(chan struct{})
+	release := make(chan struct{})
+	exclusiveDone := make(chan struct{})
+	go func() {
+		defer close(exclusiveDone)
+		_ = withDestDirExclusiveLock("/target-dir", func() error {
+			close(held)
+			<-release
+			return nil
+		})
+	}()
+	<-held
+
+	sharedEntered := make(chan struct{})
+	go func() {
+		defer close(sharedEntered)
+		_ = withDestDirSharedLock("/target-dir", func() error { return nil })
+	}()
+
+	select {
+	case <-sharedEntered:
+		t.Fatal("shared child lock entered while the exclusive directory rename was held")
+	case <-time.After(100 * time.Millisecond): // scheduling grace; blocking is the assertion
+	}
+	close(release)
+	<-exclusiveDone
+	select {
+	case <-sharedEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("shared child lock never entered after the exclusive holder released")
+	}
+}
+
+func TestDirOperationLocks_SharedChildrenRunInParallel(t *testing.T) {
+	var inFlight atomic.Int32
+	var maxSeen atomic.Int32
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			_ = withDestDirSharedLock("/target-dir", func() error {
+				cur := inFlight.Add(1)
+				for {
+					m := maxSeen.Load()
+					if cur <= m || maxSeen.CompareAndSwap(m, cur) {
+						break
+					}
+				}
+				time.Sleep(2 * time.Millisecond)
+				inFlight.Add(-1)
+				return nil
+			})
+		}()
+	}
+	close(start)
+	wg.Wait()
+	assert.Greater(t, maxSeen.Load(), int32(1), "shared directory locks must permit concurrent child writes (batch copy throughput)")
+}
+
+func TestDirOperationLocks_EvictsIdleEntries(t *testing.T) {
+	var wg sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			_ = withDestDirSharedLock(fmt.Sprintf("/evictable-%d", n), func() error { return nil })
+		}(i)
+	}
+	wg.Wait()
+	dirOperationLocks.mu.Lock()
+	size := len(dirOperationLocks.items)
+	dirOperationLocks.mu.Unlock()
+	assert.Equal(t, 0, size, "directory lock entries must be evicted when unused")
+}
