@@ -42,7 +42,7 @@ func TestLidPin_AuthorizedMeCopyOntoSymlinkRefused(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Dir(dst), 0o755))
 	require.NoError(t, os.Symlink(foreign, dst))
 
-	strategy := newOrganizeStrategy(fs, &Config{FolderFormat: "<ID>", FileFormat: "<ID>", RenameFile: true}, nil, &MemLinker{})
+	strategy := newOrganizeStrategy(plainStatFs{Fs: fs}, &Config{FolderFormat: "<ID>", FileFormat: "<ID>", RenameFile: true}, nil, &MemLinker{})
 	plan := &OrganizePlan{
 		Match:      models.FileMatchInfo{Path: src, Name: "V.mp4", Extension: ".mp4", MovieID: "V"},
 		SourcePath: src,
