@@ -318,10 +318,7 @@ func (s *inPlaceStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) {
 						innerOp = func(fs afero.Fs, a, b string) error { return fs.Rename(a, b) }
 					}
 					if err := innerOp(s.fs, currentFilePath, plan.TargetPath); err != nil {
-						if rb := s.fs.Rename(plan.TargetDir, plan.OldDir); rb != nil {
-							logging.Errorf("[in-place] Failed to rollback directory rename %s → %s: %v", plan.TargetDir, plan.OldDir, rb)
-						}
-						return fmt.Errorf("failed to rename file after directory rename: %w", mapNoReplaceRefusal(err, plan.TargetPath))
+						return s.finishInPlaceInnerRename(plan, err)
 					}
 				}
 				return nil
@@ -370,4 +367,16 @@ func (s *inPlaceStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) {
 	}
 
 	return result, nil
+}
+
+// finishInPlaceInnerRename is only invoked on an inner-op failure (call site
+// guarantees err != nil), so branches reach every classification.
+func (s *inPlaceStrategy) finishInPlaceInnerRename(plan *OrganizePlan, err error) error {
+	if fsutil.PublishCompleted(err) {
+		return fmt.Errorf("in-place inner rename published to %s but finished ambiguously (directory left at %s): %w", plan.TargetPath, plan.TargetDir, err)
+	}
+	if rb := s.fs.Rename(plan.TargetDir, plan.OldDir); rb != nil {
+		logging.Errorf("[in-place] Failed to rollback directory rename %s → %s: %v", plan.TargetDir, plan.OldDir, rb)
+	}
+	return fmt.Errorf("failed to rename file after directory rename: %w", mapNoReplaceRefusal(err, plan.TargetPath))
 }

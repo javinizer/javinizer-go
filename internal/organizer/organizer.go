@@ -477,11 +477,14 @@ func (o *Organizer) handleSubtitles(plan *OrganizePlan, result *OrganizeResult, 
 				}
 				err := fileOp(o.fs, subtitle.OriginalPath, newPath)
 				if err != nil && fsutil.PublishCompleted(err) {
-					// Post-publish cleanup refusal (#224 P2): bytes ARE at the
-					// destination; the refusal is about the source cleanup, not
-					// the publication. Deliver — never report it as a skip.
-					sr.Moved = true
-					return nil
+					// Post-publish cleanup refusal (#224 codex P2): bytes at the
+					// destination AND the source retained — an ambiguous delivery,
+					// NOT a clean move. Recording Moved here would let revert
+					// journaling (workflow/revert_log.go MoveBack, executed by
+					// history/reverter.go) overwrite the retained source's newer
+					// contents with a stale copy. Record the ambiguity as an
+					// error slot: never Moved, never Skipped.
+					return fmt.Errorf("subtitle published but source cleanup refused — both copies retained (%w)", err)
 				}
 				if err != nil && fsutil.PublishRefusal(err) {
 					// #224: subtitle destinations accept the publish-refusal classes

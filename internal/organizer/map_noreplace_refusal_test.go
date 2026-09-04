@@ -83,11 +83,14 @@ func TestHandleSubtitles_PublishRefusalMapsToSkip(t *testing.T) {
 				// A genuine failure surfaces, no skip, no move.
 				assert.Contains(t, result.Subtitles[0].Error.Error(), "failed to handle subtitle")
 			} else if name == "completed" {
-				// Post-publish: bytes delivered; source left in place by the
-				// composite — count a move, NOT a skip (#224 P2).
-				assert.True(t, result.Subtitles[0].Moved)
+				// Post-publish ambiguity: bytes delivered BUT the source was
+				// retained — recording a clean move would let revert journaling
+				// (MoveBack of new→original) overwrite the retained source's
+				// newer contents. It must surface as an error slot (#224 codex P2).
+				assert.False(t, result.Subtitles[0].Moved)
 				assert.False(t, result.Subtitles[0].Skipped)
-				assert.Nil(t, result.Subtitles[0].Error)
+				require.Error(t, result.Subtitles[0].Error)
+				assert.Contains(t, result.Subtitles[0].Error.Error(), "both copies retained")
 			} else {
 				assert.True(t, result.Subtitles[0].Skipped)
 				assert.False(t, sr.Moved)
