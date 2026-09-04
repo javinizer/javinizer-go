@@ -3,6 +3,7 @@ package organizer
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/spf13/afero"
@@ -29,6 +30,16 @@ func TestMapNoReplaceRefusal(t *testing.T) {
 
 	plain := errors.New("io failure")
 	assert.ErrorIs(t, mapNoReplaceRefusal(plain, "/dst/x.mp4"), plain)
+
+	// Completed-first: a post-publish cleanup refusal never lands on the
+	// refusal labels even when it transitively carries them.
+	completed := fmt.Errorf("%w: cleanup: %w", fsutil.ErrPublishCompleted, fmt.Errorf("vacate: %w", fsutil.ErrPublishNoReplaceUnsupported))
+	done := mapNoReplaceRefusal(completed, "/dst/x.mp4")
+	require.Error(t, done)
+	// The completed case yields its OWN classification line as the message;
+	// preserved refusal classes may appear inside the joined diagnostics.
+	assert.True(t, strings.HasPrefix(done.Error(), "published to destination but source cleanup refused"))
+	assert.NotContains(t, done.Error(), "refusing to overwrite")
 }
 
 // Subtitle refusal→skip: occupancy AND unsupported-volume publish refusals map
@@ -38,6 +49,7 @@ func TestHandleSubtitles_PublishRefusalMapsToSkip(t *testing.T) {
 		"collision":   fmt.Errorf("publish: %w", fsutil.ErrPublishCollision),
 		"unsupported": fmt.Errorf("publish: %w", fsutil.ErrPublishNoReplaceUnsupported),
 		"realfailure": errors.New("disk read died"),
+		"completed":   fmt.Errorf("%w: cleanup: %w", fsutil.ErrPublishCompleted, fsutil.ErrPublishCollision),
 	} {
 		t.Run(name, func(t *testing.T) {
 			fs := afero.NewMemMapFs()
@@ -70,6 +82,12 @@ func TestHandleSubtitles_PublishRefusalMapsToSkip(t *testing.T) {
 			if name == "realfailure" {
 				// A genuine failure surfaces, no skip, no move.
 				assert.Contains(t, result.Subtitles[0].Error.Error(), "failed to handle subtitle")
+			} else if name == "completed" {
+				// Post-publish: bytes delivered; source left in place by the
+				// composite — count a move, NOT a skip (#224 P2).
+				assert.True(t, result.Subtitles[0].Moved)
+				assert.False(t, result.Subtitles[0].Skipped)
+				assert.Nil(t, result.Subtitles[0].Error)
 			} else {
 				assert.True(t, result.Subtitles[0].Skipped)
 				assert.False(t, sr.Moved)

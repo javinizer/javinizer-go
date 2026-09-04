@@ -476,6 +476,13 @@ func (o *Organizer) handleSubtitles(plan *OrganizePlan, result *OrganizeResult, 
 					return nil
 				}
 				err := fileOp(o.fs, subtitle.OriginalPath, newPath)
+				if err != nil && fsutil.PublishCompleted(err) {
+					// Post-publish cleanup refusal (#224 P2): bytes ARE at the
+					// destination; the refusal is about the source cleanup, not
+					// the publication. Deliver — never report it as a skip.
+					sr.Moved = true
+					return nil
+				}
 				if err != nil && fsutil.PublishRefusal(err) {
 					// #224: subtitle destinations accept the publish-refusal classes
 					// as a skip — occupancy (a foreign subtitle won the name inside

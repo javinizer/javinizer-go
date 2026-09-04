@@ -185,6 +185,9 @@ func TestMoveFileNoReplace_EXDEV_SourceSwapRefusesCleanup(t *testing.T) {
 	err := MoveFileNoReplace(fs, src, dst)
 	require.Error(t, err, "source-swap must surface as an ambiguous failure")
 	assert.Contains(t, err.Error(), "source cleanup refused")
+	// #224 P2: the post-publish ambiguity is marked ErrPublishCompleted so
+	// callers never mis-map it as a pre-publish refusal.
+	assert.True(t, PublishCompleted(err))
 
 	content, rerr := os.ReadFile(dst)
 	require.NoError(t, rerr)

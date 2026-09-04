@@ -110,7 +110,10 @@ func MoveFileNoReplace(fs afero.Fs, src, dst string) error {
 	if rmErr := UnlinkVerified(fs, src, srcPre); rmErr != nil {
 		// dst was published; src could not be proven the pre-move object —
 		// keep BOTH (a swapped source is foreign) and surface the ambiguity.
-		return fmt.Errorf("no-replace move: published to %s but source cleanup refused (%w) — source preserved", dst, rmErr)
+		// The wrap JOINS ErrPublishCompleted (publish already landed — callers
+		// must never classify this as a pre-publish refusal) with the typed
+		// cleanup error so diagnostics survive without either class lying.
+		return fmt.Errorf("%w: no-replace move: published to %s but source cleanup refused (%w) — source preserved", ErrPublishCompleted, dst, rmErr)
 	}
 	return nil
 }

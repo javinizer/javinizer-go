@@ -195,6 +195,12 @@ func refuseExistingDestination(fs afero.Fs, src, dst string) (identical, sameIno
 // never as a content conflict.
 func mapNoReplaceRefusal(err error, dst string) error {
 	switch {
+	// Completed-first (#224 P2): a cleanup-refusal error carries publish
+	// refusal classes transitively (collision/unsupported inside rmErr); it
+	// must NEVER be reported as a pre-publish refusal — the destination was
+	// already published and the source is preserved.
+	case fsutil.PublishCompleted(err):
+		return fmt.Errorf("published to destination but source cleanup refused (both files preserved): %s: %w", dst, err)
 	case errors.Is(err, fsutil.ErrPublishNoReplaceUnsupported):
 		return fmt.Errorf("destination volume cannot express an atomic no-clobber write (no-replace unsupported): %s: %w", dst, err)
 	case errors.Is(err, fsutil.ErrPublishCollision):
