@@ -1,6 +1,6 @@
 package models
 
-// OrchestrationState groups the five orchestration-metadata fields shared across
+// OrchestrationState groups the orchestration-metadata fields shared across
 // MovieResult consumers. These fields are NEVER set by the scraper itself —
 // only by orchestration steps: DisplayTitle and Persist by the workflow's
 // scrapeOrchestrator; Poster generation by the worker's scrape phase;
@@ -18,6 +18,10 @@ type OrchestrationState struct {
 	Persisted           bool    `json:"persisted,omitempty"`             // true if the scraped movie was persisted to the database
 	PosterError         *string `json:"poster_error,omitempty"`          // non-nil if poster generation failed
 	TranslationWarning  *string `json:"translation_warning,omitempty"`   // non-nil if translation produced a partial result
+	// TranslationWarningCode is the machine-readable classification of
+	// TranslationWarning ("rate_limited", "degraded", ...); a plain string so
+	// Clone()'s value copy covers it and legacy persisted results simply lack it.
+	TranslationWarningCode string `json:"translation_warning_code,omitempty"`
 }
 
 // Clone returns a deep copy of the OrchestrationState.

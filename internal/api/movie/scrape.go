@@ -103,7 +103,7 @@ func scrapeMovie(deps MovieDeps) gin.HandlerFunc {
 				defer cancel()
 			}
 		}
-		result, _, err := wf.Scrape(scrapeCtx, cmd)
+		result, meta, err := wf.Scrape(scrapeCtx, cmd)
 		if scrapeCtx.Err() != nil {
 			if deps.HistoryRepo != nil && !errors.Is(scrapeCtx.Err(), context.Canceled) {
 				auditCtx, auditCancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -195,11 +195,18 @@ func scrapeMovie(deps MovieDeps) gin.HandlerFunc {
 			sourcesUsed = 0
 		}
 
-		c.JSON(http.StatusOK, contracts.ScrapeResponse{
+		resp := contracts.ScrapeResponse{
 			Cached:      cached,
 			Movie:       contracts.MovieViewFromModel(result.Movie),
 			SourcesUsed: sourcesUsed,
-		})
+		}
+		if meta != nil {
+			if meta.TranslationWarning != nil {
+				resp.TranslationWarning = *meta.TranslationWarning
+			}
+			resp.TranslationWarningCode = meta.TranslationWarningCode
+		}
+		c.JSON(http.StatusOK, resp)
 	}
 }
 

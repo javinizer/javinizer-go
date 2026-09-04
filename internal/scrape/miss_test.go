@@ -17,7 +17,7 @@ func TestTranslationAdapter_Translate_WithNilMovie_Miss(t *testing.T) {
 		enabled:  true,
 		provider: "test",
 	}
-	warning, translated, _ := adapter.Translate(context.Background(), nil)
+	warning, _, translated, _ := adapter.Translate(context.Background(), nil)
 	assert.Empty(t, warning)
 	assert.False(t, translated, "adapter returns translated=false when movie is nil")
 }
@@ -27,7 +27,7 @@ func TestTranslationAdapter_Translate_WithNilMovie_Miss(t *testing.T) {
 func TestApplyTranslation_TranslatorReturnsWarning_Miss(t *testing.T) {
 	warningTranslator := &stubWarningTranslatorMiss{warning: "partial failure"}
 	movie := &models.Movie{ID: "WARN-001"}
-	warning, _ := applyTranslation(context.Background(), movie, warningTranslator)
+	warning, _, _ := applyTranslation(context.Background(), movie, warningTranslator)
 	assert.Equal(t, "partial failure", warning)
 }
 
@@ -36,7 +36,7 @@ func TestApplyTranslation_TranslatorReturnsWarning_Miss(t *testing.T) {
 func TestApplyTranslation_TranslatorReturnsEmpty_Miss(t *testing.T) {
 	emptyTranslator := &stubWarningTranslatorMiss{warning: ""}
 	movie := &models.Movie{ID: "EMPTY-001"}
-	warning, _ := applyTranslation(context.Background(), movie, emptyTranslator)
+	warning, _, _ := applyTranslation(context.Background(), movie, emptyTranslator)
 	assert.Empty(t, warning)
 }
 
@@ -152,6 +152,6 @@ type stubWarningTranslatorMiss struct {
 	warning string
 }
 
-func (s *stubWarningTranslatorMiss) Translate(_ context.Context, _ *models.Movie) (string, bool, *translation.TranslationOutput) {
-	return s.warning, true, nil
+func (s *stubWarningTranslatorMiss) Translate(_ context.Context, _ *models.Movie) (string, string, bool, *translation.TranslationOutput) {
+	return s.warning, "", true, nil
 }

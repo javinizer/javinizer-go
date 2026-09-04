@@ -19,6 +19,9 @@ import type {
 	Scraper,
 	RescrapeRequest,
 	ScrapeRequest,
+	ScrapeResponse,
+	ScrapeMovieResult,
+	TranslationWarningCode,
 	BatchRescrapeRequest,
 	BatchRescrapeResponse,
 	PosterCropRequest,
@@ -263,28 +266,36 @@ export class ScraperClient extends BaseClient {
 		}));
 	}
 
-	async rescrapeMovie(id: string, req: RescrapeRequest): Promise<Movie> {
-		const response = await this.request<{ movie: Movie }>(`/api/v1/movies/${id}/rescrape`, {
+	async rescrapeMovie(id: string, req: RescrapeRequest): Promise<ScrapeMovieResult> {
+		const response = await this.request<{ movie: Movie; translation_warning?: string; translation_warning_code?: TranslationWarningCode }>(`/api/v1/movies/${id}/rescrape`, {
 			method: 'POST',
 			body: JSON.stringify(req),
 		});
-		return response.movie;
+		return {
+			movie: response.movie,
+			translation_warning: response.translation_warning,
+			translation_warning_code: response.translation_warning_code,
+		};
 	}
 
 	async scrapeMovie(
 		input: string,
 		options?: { force?: boolean; selected_scrapers?: string[] },
-	): Promise<Movie> {
+	): Promise<ScrapeMovieResult> {
 		const request: ScrapeRequest = {
 			id: input,
 			force: options?.force,
 			selected_scrapers: options?.selected_scrapers,
 		};
-		const response = await this.request<{ movie: Movie }>('/api/v1/scrape', {
+		const response = await this.request<ScrapeResponse>('/api/v1/scrape', {
 			method: 'POST',
 			body: JSON.stringify(request),
 		});
-		return response.movie;
+		return {
+			movie: response.movie,
+			translation_warning: response.translation_warning,
+			translation_warning_code: response.translation_warning_code,
+		};
 	}
 
 	async getMovie(id: string): Promise<Movie> {

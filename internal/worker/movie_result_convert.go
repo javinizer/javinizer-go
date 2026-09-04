@@ -48,7 +48,7 @@ func scrapeResultToMovieResult(fmi models.FileMatchInfo, result *scrape.ScrapeRe
 	}
 	if meta != nil {
 		// Struct copy from OrchestrationMeta's embedded OrchestrationState.
-		// A single assignment replaces the five individual field copies.
+		// A single assignment replaces the individual field copies.
 		// NeedsPersistence is intentionally excluded — it's a transient
 		// workflow-internal signal that is cleared during persistence.
 		mr.OrchestrationState = meta.OrchestrationState

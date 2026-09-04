@@ -1,6 +1,10 @@
 package translation
 
-import "github.com/javinizer/javinizer-go/internal/models"
+import (
+	"strings"
+
+	"github.com/javinizer/javinizer-go/internal/models"
+)
 
 // Config is the translation bridge config used by the translation package.
 type Config struct {
@@ -51,6 +55,18 @@ type googleConfig struct {
 	Mode    models.GoogleMode
 	BaseURL string
 	APIKey  string
+}
+
+// EffectiveGoogleMode resolves the configured Google mode, applying the
+// empty-defaults-to-free rule. It is the single source of truth shared by the
+// Google provider dispatch, warning classification messages, and structured
+// log fields, so labeling never misreports the mode when it is unset.
+func (c Config) EffectiveGoogleMode() models.GoogleMode {
+	mode := models.GoogleMode(strings.ToLower(strings.TrimSpace(string(c.Google.Mode))))
+	if mode == "" {
+		mode = models.GoogleModeFree
+	}
+	return mode
 }
 
 // openAICompatibleConfig holds settings for OpenAI-compatible endpoints.

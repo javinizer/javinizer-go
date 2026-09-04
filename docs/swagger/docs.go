@@ -4512,6 +4512,14 @@ const docTemplate = `{
                 },
                 "status": {
                     "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.JobStatus"
+                },
+                "translation_warning": {
+                    "description": "TranslationWarning is populated when metadata translation partially failed\nor degraded; empty when translation fully succeeded.",
+                    "type": "string"
+                },
+                "translation_warning_code": {
+                    "description": "TranslationWarningCode is the machine-readable classification of\nTranslationWarning (rate_limited, unavailable, degraded, ...).",
+                    "type": "string"
                 }
             }
         },
@@ -5191,6 +5199,14 @@ const docTemplate = `{
                         "type": "integer",
                         "format": "int64"
                     }
+                },
+                "translation_warning": {
+                    "description": "TranslationWarning is populated on scrape-like flows (rescrape) when\nmetadata translation partially failed or degraded.",
+                    "type": "string"
+                },
+                "translation_warning_code": {
+                    "description": "TranslationWarningCode is the machine-readable classification of\nTranslationWarning (rate_limited, unauthorized, forbidden, request_error,\nservice_error, unavailable, degraded, unknown).",
+                    "type": "string"
                 }
             }
         },
@@ -6248,6 +6264,14 @@ const docTemplate = `{
                 "sources_used": {
                     "type": "integer",
                     "example": 2
+                },
+                "translation_warning": {
+                    "description": "TranslationWarning is populated when metadata translation partially failed\nor degraded (kept-original fields). Empty when translation fully succeeded.",
+                    "type": "string"
+                },
+                "translation_warning_code": {
+                    "description": "TranslationWarningCode is the machine-readable classification of\nTranslationWarning (rate_limited, unauthorized, forbidden, request_error,\nservice_error, unavailable, degraded, unknown).",
+                    "type": "string"
                 }
             }
         },

@@ -4,6 +4,7 @@
 	import { calculateCompleteness } from '$lib/utils/completeness';
 	import CompletenessDial from '$lib/components/CompletenessDial.svelte';
 	import CompletenessBreakdownTooltip from './CompletenessBreakdownTooltip.svelte';
+	import TranslationWarningBadge from '$lib/components/TranslationWarningBadge.svelte';
 	import * as m from '$lib/paraglide/messages';
 
 	interface MovieGroup {
@@ -51,6 +52,12 @@
 
 	const completeness = $derived(
 		movie ? calculateCompleteness(movie, completenessConfig) : null
+	);
+
+	// Mid-run-capable badge: the Slim payload carries the code only, so this keys
+	// off translation_warning_code and works without the raw warning string.
+	const translationWarning = $derived(
+		movieGroup.results.find((r) => r.translation_warning_code || r.translation_warning)
 	);
 
 	let dialHovered = $state(false);
@@ -115,11 +122,22 @@
 			{movieGroup.movieId}
 		</span>
 
-		{#if isEdited}
-			<span class="absolute top-2 left-2 text-orange-600 dark:text-orange-400 bg-orange-100 dark:bg-orange-900/40 text-xs font-medium px-1.5 py-0.5 rounded-full flex items-center gap-1">
-				<CircleAlert class="h-3 w-3" />
-				{m.review_modified()}
-			</span>
+		{#if isEdited || translationWarning}
+			<div class="absolute top-2 left-2 flex flex-col items-start gap-1">
+				{#if isEdited}
+					<span class="text-orange-600 dark:text-orange-400 bg-orange-100 dark:bg-orange-900/40 text-xs font-medium px-1.5 py-0.5 rounded-full flex items-center gap-1">
+						<CircleAlert class="h-3 w-3" />
+						{m.review_modified()}
+					</span>
+				{/if}
+				{#if translationWarning}
+					<TranslationWarningBadge
+						compact
+						code={translationWarning.translation_warning_code}
+						warning={translationWarning.translation_warning}
+					/>
+				{/if}
+			</div>
 		{/if}
 
 		{#if completeness}

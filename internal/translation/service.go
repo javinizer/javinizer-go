@@ -151,7 +151,7 @@ func ApplyPlan(scraped *models.Movie, plan TranslationPlan, results TranslationR
 		key := fieldKey(field)
 		translated, ok := results[key]
 		if !ok || strings.TrimSpace(translated) == "" {
-			logging.Debugf("Translation: empty result for %s (original=%q), falling back to original", key, field.Text)
+			logging.Debugf("Translation: empty result for %s (text length=%d), falling back to original", key, len(field.Text))
 			warnings = append(warnings, fmt.Sprintf("%s: empty translation, kept original", key))
 			translated = field.Text
 		}
@@ -259,26 +259,28 @@ type translationState struct {
 
 // TranslateMovie translates selected movie metadata fields from source to target language.
 // It returns a TranslationOutput carrying the translated record and genre/actress
-// translation data, rather than mutating *models.Movie in-place.
-func (s *Service) TranslateMovie(ctx context.Context, scraped *models.Movie, settingsHash string) (*TranslationOutput, string, error) {
+// translation data, rather than mutating *models.Movie in-place. Alongside the
+// free-form warning string it returns the machine-readable warning code
+// (empty when translation fully succeeded or the request context was canceled).
+func (s *Service) TranslateMovie(ctx context.Context, scraped *models.Movie, settingsHash string) (*TranslationOutput, string, TranslationWarningCode, error) {
 	if s == nil {
-		return nil, "", fmt.Errorf("translation: TranslateMovie called on nil Service")
+		return nil, "", "", fmt.Errorf("translation: TranslateMovie called on nil Service")
 	}
 	if scraped == nil || !s.cfg.Enabled {
-		return (*TranslationOutput)(nil), "", nil
+		return (*TranslationOutput)(nil), "", "", nil
 	}
 
 	targetLang := normalizeLanguage(s.cfg.TargetLanguage)
 	sourceLang := normalizeLanguage(s.cfg.SourceLanguage)
 	if targetLang == "" {
-		return (*TranslationOutput)(nil), "", fmt.Errorf("target language is required")
+		return (*TranslationOutput)(nil), "", "", fmt.Errorf("target language is required")
 	}
 	if sourceLang == "" {
 		sourceLang = sourceLangAuto
 	}
 
 	if sourceLang != sourceLangAuto && sourceLang == targetLang {
-		return (*TranslationOutput)(nil), "", nil
+		return (*TranslationOutput)(nil), "", "", nil
 	}
 
 	sourceLabel := "translation:" + normalizeProvider(s.cfg.Provider)
@@ -292,7 +294,7 @@ func (s *Service) TranslateMovie(ctx context.Context, scraped *models.Movie, set
 	plan := s.BuildTranslationPlan(scraped, targetLang, sourceLang, sourceLabel)
 
 	if len(plan.Fields) == 0 {
-		return &TranslationOutput{}, "", nil
+		return &TranslationOutput{}, "", "", nil
 	}
 
 	// Dispatch batch translation
@@ -301,15 +303,27 @@ func (s *Service) TranslateMovie(ctx context.Context, scraped *models.Movie, set
 		texts = append(texts, f.Text)
 	}
 
+	provider := normalizeProvider(s.cfg.Provider)
+	mode := s.ProviderMode()
+
 	translatedTexts, err := s.translateTexts(ctx, sourceLang, targetLang, texts)
 	if err != nil {
-		logging.Debugf("Translation: translateTexts failed: %v", err)
-		warning := sanitizeTranslationWarning(normalizeProvider(s.cfg.Provider), err)
-		return nil, warning, err
+		logging.Debugf("Translation: translateTexts failed (provider=%s, texts=%d)", provider, len(texts))
+		code, message := classifyTranslationWarning(ctx, provider, mode, err)
+		if code == "" {
+			// Suppressed: user-initiated cancellation attaches no per-file warning.
+			return nil, "", "", err
+		}
+		return nil, message, code, err
 	}
 	if len(translatedTexts) != len(plan.Fields) {
 		logging.Debugf("Translation: count mismatch - got %d, expected %d", len(translatedTexts), len(plan.Fields))
-		return nil, "", fmt.Errorf("translation provider returned %d items for %d inputs", len(translatedTexts), len(plan.Fields))
+		countErr := fmt.Errorf("translation provider returned %d items for %d inputs", len(translatedTexts), len(plan.Fields))
+		code, message := classifyTranslationWarning(ctx, provider, mode, countErr)
+		if code == "" {
+			return nil, "", "", countErr
+		}
+		return nil, message, code, countErr
 	}
 
 	// Build result map and apply
@@ -322,43 +336,33 @@ func (s *Service) TranslateMovie(ctx context.Context, scraped *models.Movie, set
 	warningDetail := ApplyPlan(scraped, plan, results, translatedRecord, state)
 
 	var warning string
-	if warningDetail != "" {
-		warning = fmt.Sprintf("Translation (%s): %s", normalizeProvider(s.cfg.Provider), warningDetail)
-		logging.Warnf("Translation: %s", warning)
+	var warningCode TranslationWarningCode
+	if warningDetail != "" && !errors.Is(ctx.Err(), context.Canceled) {
+		warning = fmt.Sprintf("Translation (%s): %s", providerWarningLabel(provider, mode), warningDetail)
+		warningCode = TranslationWarningDegraded
 	}
 
 	return &TranslationOutput{
 		Movie:               translatedRecord,
 		GenreTranslations:   state.genreTranslations,
 		ActressTranslations: state.actressTranslations,
-	}, warning, nil
+	}, warning, warningCode, nil
+}
+
+// ProviderMode returns the effective sub-mode of the configured provider, used
+// to label warning messages and structured log fields. It replicates the
+// provider's own defaulting rule so labeling never misreports an unset mode;
+// currently only Google has a mode (free/paid), so it returns "" for every
+// other provider.
+func (s *Service) ProviderMode() string {
+	if s == nil || normalizeProvider(s.cfg.Provider) != "google" {
+		return ""
+	}
+	return string(s.cfg.EffectiveGoogleMode())
 }
 
 func normalizeProvider(provider string) string {
 	return strings.ToLower(strings.TrimSpace(provider))
-}
-
-func sanitizeTranslationWarning(provider string, err error) string {
-	var te *translationError
-	if errors.As(err, &te) && te.Kind == TranslationErrorHTTPStatus {
-		logging.Warnf("Translation (%s): HTTP %d error", provider, te.StatusCode)
-		switch {
-		case te.StatusCode == 429:
-			return "Translation failed: rate limited, try again later"
-		case te.StatusCode == 401:
-			return "Translation failed: unauthorized, check API key"
-		case te.StatusCode == 403:
-			return "Translation failed: access denied, check API key"
-		case te.StatusCode >= 500:
-			return "Translation failed: external service error"
-		case te.StatusCode >= 400:
-			return "Translation failed: request error"
-		}
-	}
-	if errors.As(err, &te) {
-		return "Translation failed: service unavailable"
-	}
-	return "Translation failed: internal error"
 }
 
 func normalizeLanguage(language string) string {
@@ -444,7 +448,7 @@ func (s *Service) translateWithProvider(ctx context.Context, provider Translator
 
 		if attempt < maxTranslationRetries {
 			if isRetryableError(err, result) {
-				logging.Debugf("Translation: attempt %d/%d failed (%v), retrying...", attempt, maxTranslationRetries, err)
+				logging.Debugf("Translation: attempt %d/%d failed (%s), retrying...", attempt, maxTranslationRetries, safeErrorDetail(err))
 				expBackoff := float64(time.Millisecond) * 100 * math.Pow(2, float64(attempt-1))
 				if expBackoff > float64(2*time.Second) {
 					expBackoff = float64(2 * time.Second)
@@ -458,14 +462,14 @@ func (s *Service) translateWithProvider(ctx context.Context, provider Translator
 				case <-time.After(sleep):
 				}
 			} else {
-				logging.Debugf("Translation: attempt %d/%d failed with non-retryable error (%v), giving up", attempt, maxTranslationRetries, err)
+				logging.Debugf("Translation: attempt %d/%d failed with non-retryable error (%s), giving up", attempt, maxTranslationRetries, safeErrorDetail(err))
 				break
 			}
 		}
 	}
 
 	if lastResult != nil && lastResult.RawLLM != "" {
-		logging.Debugf("Translation: all %d attempts failed. Last LLM output (length=%d):\n%s", maxTranslationRetries, len(lastResult.RawLLM), lastResult.RawLLM)
+		logging.Debugf("Translation: all %d attempts failed (last LLM output length=%d)", maxTranslationRetries, len(lastResult.RawLLM))
 	}
 
 	if lastErr != nil {

@@ -97,7 +97,7 @@ func (p *DeepLProvider) Translate(ctx context.Context, sourceLang, targetLang st
 	if err != nil {
 		// Wrap raw transport errors so the request URL/headers (which carry the
 		// API key) are not leaked through logs/errors.
-		logging.Debugf("deepl translation request failed: %v", err)
+		logging.Debugf("deepl translation request failed (texts=%d)", len(texts))
 		return nil, &translationError{Kind: TranslationErrorProvider, Message: "deepl translation request failed"}
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -119,7 +119,8 @@ func (p *DeepLProvider) Translate(ctx context.Context, sourceLang, targetLang st
 
 	var decoded deepLTranslateResponse
 	if err := json.Unmarshal(respBody, &decoded); err != nil {
-		return nil, fmt.Errorf("failed to decode deepl response: %w", err)
+		logging.Debugf("deepl translation response decode failed (body length=%d)", len(respBody))
+		return nil, &translationError{Kind: TranslationErrorParse, Message: "failed to decode deepl response"}
 	}
 
 	result := make([]string, 0, len(decoded.Translations))

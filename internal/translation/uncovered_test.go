@@ -14,33 +14,33 @@ import (
 
 func TestService_NilReceiver_Uncovered(t *testing.T) {
 	var s *Service
-	_, _, err := s.TranslateMovie(context.Background(), &models.Movie{}, "")
+	_, _, _, err := s.TranslateMovie(context.Background(), &models.Movie{}, "")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "nil Service")
 }
 
 func TestService_TranslateMovie_Disabled_Uncovered(t *testing.T) {
 	s := New(Config{Enabled: false})
-	_, _, err := s.TranslateMovie(context.Background(), &models.Movie{Title: "test"}, "")
+	_, _, _, err := s.TranslateMovie(context.Background(), &models.Movie{Title: "test"}, "")
 	require.NoError(t, err)
 }
 
 func TestService_TranslateMovie_NilMovie_Uncovered(t *testing.T) {
 	s := New(Config{Enabled: true})
-	_, _, err := s.TranslateMovie(context.Background(), nil, "")
+	_, _, _, err := s.TranslateMovie(context.Background(), nil, "")
 	require.NoError(t, err)
 }
 
 func TestService_TranslateMovie_NoTargetLanguage_Uncovered(t *testing.T) {
 	s := New(Config{Enabled: true, TargetLanguage: ""})
-	_, _, err := s.TranslateMovie(context.Background(), &models.Movie{Title: "test"}, "")
+	_, _, _, err := s.TranslateMovie(context.Background(), &models.Movie{Title: "test"}, "")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "target language")
 }
 
 func TestService_TranslateMovie_SameSourceTarget_Uncovered(t *testing.T) {
 	s := New(Config{Enabled: true, SourceLanguage: "en", TargetLanguage: "en"})
-	_, _, err := s.TranslateMovie(context.Background(), &models.Movie{Title: "test"}, "")
+	_, _, _, err := s.TranslateMovie(context.Background(), &models.Movie{Title: "test"}, "")
 	require.NoError(t, err)
 }
 
@@ -51,7 +51,7 @@ func TestService_TranslateMovie_NoFieldsEnabled_Uncovered(t *testing.T) {
 		TargetLanguage: "en",
 		Fields:         fieldsConfig{},
 	})
-	out, warning, err := s.TranslateMovie(context.Background(), &models.Movie{Title: "テスト"}, "")
+	out, warning, _, err := s.TranslateMovie(context.Background(), &models.Movie{Title: "テスト"}, "")
 	require.NoError(t, err)
 	require.NotNil(t, out)
 	assert.Empty(t, warning)
@@ -69,46 +69,33 @@ func TestNormalizeLanguage_Uncovered(t *testing.T) {
 	assert.Equal(t, "", normalizeLanguage("  "))
 }
 
-func TestSanitizeTranslationWarning_Uncovered(t *testing.T) {
-	t.Run("rate limited", func(t *testing.T) {
-		err := &translationError{Kind: TranslationErrorHTTPStatus, StatusCode: 429}
-		msg := sanitizeTranslationWarning("test", err)
-		assert.Contains(t, msg, "rate limited")
+func TestWarningStatusCode_Uncovered(t *testing.T) {
+	t.Run("nil error", func(t *testing.T) {
+		_, ok := WarningStatusCode(context.Background(), nil)
+		assert.False(t, ok)
 	})
 
-	t.Run("unauthorized", func(t *testing.T) {
-		err := &translationError{Kind: TranslationErrorHTTPStatus, StatusCode: 401}
-		msg := sanitizeTranslationWarning("test", err)
-		assert.Contains(t, msg, "unauthorized")
+	t.Run("typed HTTP status", func(t *testing.T) {
+		status, ok := WarningStatusCode(context.Background(), &translationError{Kind: TranslationErrorHTTPStatus, StatusCode: 429})
+		assert.True(t, ok)
+		assert.Equal(t, 429, status)
 	})
 
-	t.Run("access denied", func(t *testing.T) {
-		err := &translationError{Kind: TranslationErrorHTTPStatus, StatusCode: 403}
-		msg := sanitizeTranslationWarning("test", err)
-		assert.Contains(t, msg, "access denied")
+	t.Run("typed non-HTTP error", func(t *testing.T) {
+		_, ok := WarningStatusCode(context.Background(), &translationError{Kind: TranslationErrorProvider, Message: "failed"})
+		assert.False(t, ok)
 	})
 
-	t.Run("server error", func(t *testing.T) {
-		err := &translationError{Kind: TranslationErrorHTTPStatus, StatusCode: 500}
-		msg := sanitizeTranslationWarning("test", err)
-		assert.Contains(t, msg, "external service error")
+	t.Run("untyped error", func(t *testing.T) {
+		_, ok := WarningStatusCode(context.Background(), errors.New("generic"))
+		assert.False(t, ok)
 	})
 
-	t.Run("bad request", func(t *testing.T) {
-		err := &translationError{Kind: TranslationErrorHTTPStatus, StatusCode: 400}
-		msg := sanitizeTranslationWarning("test", err)
-		assert.Contains(t, msg, "request error")
-	})
-
-	t.Run("non-HTTP translation error", func(t *testing.T) {
-		err := &translationError{Kind: TranslationErrorProvider, Message: "something failed"}
-		msg := sanitizeTranslationWarning("test", err)
-		assert.Contains(t, msg, "service unavailable")
-	})
-
-	t.Run("non-translation error", func(t *testing.T) {
-		msg := sanitizeTranslationWarning("test", errors.New("generic"))
-		assert.Contains(t, msg, "internal error")
+	t.Run("done context never yields a status", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		_, ok := WarningStatusCode(ctx, &translationError{Kind: TranslationErrorHTTPStatus, StatusCode: 429})
+		assert.False(t, ok)
 	})
 }
 

@@ -48,7 +48,6 @@ type openAIChatCallOptions struct {
 	headers   map[string]string
 	request   openAIChatRequest
 	textCount int
-	logInput  bool
 	logTiming bool
 }
 
@@ -106,10 +105,10 @@ func buildLLMTranslationResult(content string, textCount int) (*translationResul
 func decodeOpenAIChatTranslation(provider string, respBody []byte, textCount int) (*translationResult, error) {
 	var decoded openAIChatResponse
 	if err := json.Unmarshal(respBody, &decoded); err != nil {
-		return nil, fmt.Errorf("failed to decode %s response: %w", provider, err)
+		return nil, &translationError{Kind: TranslationErrorParse, Message: fmt.Sprintf("failed to decode %s response", provider)}
 	}
 	if len(decoded.Choices) == 0 {
-		return nil, fmt.Errorf("%s response contained no choices", provider)
+		return nil, &translationError{Kind: TranslationErrorParse, Message: fmt.Sprintf("%s response contained no choices", provider)}
 	}
 
 	return buildLLMTranslationResult(extractContentString(decoded.Choices[0].Message.Content), textCount)
@@ -125,13 +124,16 @@ func executeLLMChatTranslation(ctx context.Context, httpClient httpclient.HTTPCl
 		return nil, err
 	}
 
-	logging.Debugf("Translation (%s): POST %s model=%s texts=%d", providerName, req.URL, model, textCount)
-	logging.Debugf("Translation (%s): system prompt: %s", providerName, systemPrompt)
+	logging.Debugf("Translation (%s): POST chat completion model=%s texts=%d", providerName, model, textCount)
 
 	start := time.Now()
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("%s request failed after %v: %w", providerName, time.Since(start), err)
+		logging.Debugf("Translation (%s): request failed after %v", providerName, time.Since(start))
+		return nil, &translationError{
+			Kind:    TranslationErrorProvider,
+			Message: fmt.Sprintf("%s translation request failed", providerName),
+		}
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -140,14 +142,16 @@ func executeLLMChatTranslation(ctx context.Context, httpClient httpclient.HTTPCl
 		return nil, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		// Status-only message: do not embed the provider response body, which can
+		// contain diagnostics or echo the source text.
 		return nil, &translationError{
 			Kind:       TranslationErrorHTTPStatus,
 			StatusCode: resp.StatusCode,
-			Message:    fmt.Sprintf("%s translation failed with status %d: %s", providerName, resp.StatusCode, string(respBody)),
+			Message:    fmt.Sprintf("%s translation failed with status %d", providerName, resp.StatusCode),
 		}
 	}
 
-	logging.Debugf("Translation (%s): response: %s", providerName, string(respBody))
+	logging.Debugf("Translation (%s): response received (body length=%d)", providerName, len(respBody))
 	return adapter.DecodeResponse(providerName, respBody, textCount)
 }
 
@@ -161,11 +165,7 @@ func executeOpenAIChatTranslation(ctx context.Context, httpClient httpclient.HTT
 	}
 
 	url := opts.baseURL + opts.endpoint
-	logging.Debugf("Translation (%s): POST %s model=%s texts=%d", opts.provider, url, opts.model, opts.textCount)
-	logging.Debugf("Translation (%s): system prompt: %s", opts.provider, opts.request.Messages[0].Content)
-	if opts.logInput && len(opts.request.Messages) > 1 {
-		logging.Debugf("Translation (%s): input: %s", opts.provider, opts.request.Messages[1].Content)
-	}
+	logging.Debugf("Translation (%s): POST chat completion (legacy) model=%s texts=%d", opts.provider, opts.model, opts.textCount)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
@@ -185,9 +185,12 @@ func executeOpenAIChatTranslation(ctx context.Context, httpClient httpclient.HTT
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		if opts.logTiming {
-			return nil, fmt.Errorf("%s request failed after %v: %w", opts.provider, time.Since(start), err)
+			logging.Debugf("Translation (%s): request failed after %v", opts.provider, time.Since(start))
 		}
-		return nil, err
+		return nil, &translationError{
+			Kind:    TranslationErrorProvider,
+			Message: fmt.Sprintf("%s translation request failed", opts.provider),
+		}
 	}
 	if opts.logTiming {
 		logging.Debugf("Translation (%s): response received in %v (status %d)", opts.provider, time.Since(start), resp.StatusCode)
@@ -199,14 +202,16 @@ func executeOpenAIChatTranslation(ctx context.Context, httpClient httpclient.HTT
 		return nil, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		// Status-only message: do not embed the provider response body, which can
+		// contain diagnostics or echo the source text.
 		return nil, &translationError{
 			Kind:       TranslationErrorHTTPStatus,
 			StatusCode: resp.StatusCode,
-			Message:    fmt.Sprintf("%s translation failed with status %d: %s", opts.provider, resp.StatusCode, string(respBody)),
+			Message:    fmt.Sprintf("%s translation failed with status %d", opts.provider, resp.StatusCode),
 		}
 	}
 
-	logging.Debugf("Translation (%s): response: %s", opts.provider, string(respBody))
+	logging.Debugf("Translation (%s): response received (body length=%d)", opts.provider, len(respBody))
 	return decodeOpenAIChatTranslation(opts.provider, respBody, opts.textCount)
 }
 

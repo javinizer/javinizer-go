@@ -103,7 +103,7 @@ func TestLookupActress_FirstNameOnly_NoLookup(t *testing.T) {
 
 func TestTranslateWithContext_NilMovie(t *testing.T) {
 	ts := &translationService{provider: "test"}
-	warning, _ := ts.translateWithContext(context.Background(), nil)
+	warning, _, _ := ts.translateWithContext(context.Background(), nil)
 	assert.Empty(t, warning)
 }
 
@@ -111,7 +111,7 @@ func TestTranslateWithContext_NilMovie(t *testing.T) {
 
 func TestTranslationAdapter_Translate_NilMovie(t *testing.T) {
 	adapter := &translationAdapter{svc: &translationService{provider: "test"}, enabled: true}
-	warning, translated, _ := adapter.Translate(context.Background(), nil)
+	warning, _, translated, _ := adapter.Translate(context.Background(), nil)
 	assert.Empty(t, warning)
 	assert.False(t, translated)
 }
@@ -120,8 +120,9 @@ func TestTranslationAdapter_Translate_NilMovie(t *testing.T) {
 
 func TestNoOpTranslator_Translate(t *testing.T) {
 	var tr noOpTranslator
-	warning, translated, _ := tr.Translate(context.Background(), &models.Movie{})
+	warning, code, translated, _ := tr.Translate(context.Background(), &models.Movie{})
 	assert.Empty(t, warning)
+	assert.Empty(t, code)
 	assert.False(t, translated)
 }
 

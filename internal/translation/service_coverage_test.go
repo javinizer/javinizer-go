@@ -37,7 +37,7 @@ func TestTranslateMovie_WithAllFields(t *testing.T) {
 		Actresses: []models.Actress{{JapaneseName: "女優1"}},
 	}
 
-	out, _, err := svc.TranslateMovie(context.Background(), movie, "hash123")
+	out, _, _, err := svc.TranslateMovie(context.Background(), movie, "hash123")
 	require.NoError(t, err)
 	require.NotNil(t, out)
 	assert.Equal(t, "translated title", movie.Title)
@@ -51,7 +51,7 @@ func TestTranslateMovie_ApplyToPrimaryEnabled(t *testing.T) {
 	}, &coverageMockProvider{name: "deepl", result: &translationResult{Texts: []string{"translated"}}})
 
 	movie := &models.Movie{Title: "original"}
-	out, _, err := svc.TranslateMovie(context.Background(), movie, "")
+	out, _, _, err := svc.TranslateMovie(context.Background(), movie, "")
 	require.NoError(t, err)
 	require.NotNil(t, out)
 	assert.Equal(t, "translated", movie.Title)
@@ -64,7 +64,7 @@ func TestTranslateMovie_CountMismatch(t *testing.T) {
 	}, &coverageMockProvider{name: "deepl", result: &translationResult{Texts: []string{"a", "b"}}})
 
 	movie := &models.Movie{Title: "only one"}
-	_, _, err := svc.TranslateMovie(context.Background(), movie, "")
+	_, _, _, err := svc.TranslateMovie(context.Background(), movie, "")
 	assert.Error(t, err)
 }
 
@@ -240,7 +240,7 @@ func (m *coverageMockProvider) Translate(_ context.Context, _, _ string, _ []str
 
 func TestTranslateMovie_UnsupportedProvider(t *testing.T) {
 	svc := New(Config{Enabled: true, Provider: "nonexistent", TargetLanguage: "en", Fields: fieldsConfig{Title: true}})
-	_, _, err := svc.TranslateMovie(context.Background(), &models.Movie{Title: "hello"}, "")
+	_, _, _, err := svc.TranslateMovie(context.Background(), &models.Movie{Title: "hello"}, "")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "unsupported")
 }

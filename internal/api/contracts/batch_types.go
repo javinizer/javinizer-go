@@ -80,20 +80,26 @@ type BatchScrapeResponse struct {
 // BatchFileResult represents a per-file result in a batch job response.
 // Flattened from FileMatchInfo to match the frontend FileResult contract.
 type BatchFileResult struct {
-	ResultID       string            `json:"result_id"` // Stable UUID — survives movie_id changes
-	FilePath       string            `json:"file_path"`
-	MovieID        string            `json:"movie_id"`
-	IsMultiPart    bool              `json:"is_multi_part"`
-	PartNumber     int               `json:"part_number"`
-	PartSuffix     string            `json:"part_suffix"`
-	Status         models.JobStatus  `json:"status"`
-	Error          string            `json:"error,omitempty"`
-	ErrorCode      string            `json:"error_code,omitempty"`
-	FieldSources   map[string]string `json:"field_sources,omitempty"`
-	ActressSources map[string]string `json:"actress_sources,omitempty"`
-	Movie          *MovieView        `json:"movie,omitempty"`
-	StartedAt      string            `json:"started_at"`
-	EndedAt        *string           `json:"ended_at,omitempty"`
+	ResultID    string           `json:"result_id"` // Stable UUID — survives movie_id changes
+	FilePath    string           `json:"file_path"`
+	MovieID     string           `json:"movie_id"`
+	IsMultiPart bool             `json:"is_multi_part"`
+	PartNumber  int              `json:"part_number"`
+	PartSuffix  string           `json:"part_suffix"`
+	Status      models.JobStatus `json:"status"`
+	Error       string           `json:"error,omitempty"`
+	ErrorCode   string           `json:"error_code,omitempty"`
+	// TranslationWarning is populated when metadata translation partially failed
+	// or degraded; empty when translation fully succeeded.
+	TranslationWarning string `json:"translation_warning,omitempty"`
+	// TranslationWarningCode is the machine-readable classification of
+	// TranslationWarning (rate_limited, unavailable, degraded, ...).
+	TranslationWarningCode string            `json:"translation_warning_code,omitempty"`
+	FieldSources           map[string]string `json:"field_sources,omitempty"`
+	ActressSources         map[string]string `json:"actress_sources,omitempty"`
+	Movie                  *MovieView        `json:"movie,omitempty"`
+	StartedAt              string            `json:"started_at"`
+	EndedAt                *string           `json:"ended_at,omitempty"`
 	// Revision: server-managed update counter used as the CAS baseline for
 	// PATCH expected_result_revision (POSTER-WRITE-HARDENING D12).
 	Revision uint64 `json:"revision"`
@@ -101,19 +107,23 @@ type BatchFileResult struct {
 
 // BatchFileResultSlim is a lightweight per-file result without movie data.
 type BatchFileResultSlim struct {
-	ResultID       string            `json:"result_id"` // Stable UUID — survives movie_id changes
-	FilePath       string            `json:"file_path"`
-	MovieID        string            `json:"movie_id"`
-	IsMultiPart    bool              `json:"is_multi_part"`
-	PartNumber     int               `json:"part_number"`
-	PartSuffix     string            `json:"part_suffix"`
-	Status         models.JobStatus  `json:"status"`
-	Error          string            `json:"error,omitempty"`
-	ErrorCode      string            `json:"error_code,omitempty"`
-	FieldSources   map[string]string `json:"field_sources,omitempty"`
-	ActressSources map[string]string `json:"actress_sources,omitempty"`
-	StartedAt      string            `json:"started_at"`
-	EndedAt        *string           `json:"ended_at,omitempty"`
+	ResultID    string           `json:"result_id"` // Stable UUID — survives movie_id changes
+	FilePath    string           `json:"file_path"`
+	MovieID     string           `json:"movie_id"`
+	IsMultiPart bool             `json:"is_multi_part"`
+	PartNumber  int              `json:"part_number"`
+	PartSuffix  string           `json:"part_suffix"`
+	Status      models.JobStatus `json:"status"`
+	Error       string           `json:"error,omitempty"`
+	ErrorCode   string           `json:"error_code,omitempty"`
+	// TranslationWarningCode is exposed on the slim payload (without the raw
+	// warning string) so the UI can badge mid-run with localized copy; the full
+	// BatchFileResult carries both fields.
+	TranslationWarningCode string            `json:"translation_warning_code,omitempty"`
+	FieldSources           map[string]string `json:"field_sources,omitempty"`
+	ActressSources         map[string]string `json:"actress_sources,omitempty"`
+	StartedAt              string            `json:"started_at"`
+	EndedAt                *string           `json:"ended_at,omitempty"`
 }
 
 // BatchJobResponse represents a batch job status

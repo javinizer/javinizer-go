@@ -211,7 +211,7 @@ func TestTranslateMovie_EarlyReturns(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			output, _, err := tt.service.TranslateMovie(context.Background(), tt.movie, "")
+			output, _, _, err := tt.service.TranslateMovie(context.Background(), tt.movie, "")
 			if tt.wantErr {
 				require.Error(t, err)
 				assert.Nil(t, output)
@@ -267,7 +267,7 @@ func TestTranslateMovie_ApplyToPrimary(t *testing.T) {
 			NewAnthropicProvider(cfg, httpClient),
 		)
 		movie := &models.Movie{Title: "テスト"}
-		output, _, err := s.TranslateMovie(context.Background(), movie, "")
+		output, _, _, err := s.TranslateMovie(context.Background(), movie, "")
 
 		require.NoError(t, err)
 		require.NotNil(t, output)
@@ -317,7 +317,7 @@ func TestTranslateMovie_ApplyToPrimary(t *testing.T) {
 		)
 		movie := &models.Movie{Title: "テスト"}
 		originalTitle := movie.Title
-		output, _, err := s.TranslateMovie(context.Background(), movie, "")
+		output, _, _, err := s.TranslateMovie(context.Background(), movie, "")
 
 		require.NoError(t, err)
 		require.NotNil(t, output)
@@ -361,12 +361,12 @@ func TestTranslateTexts_ConnectionFailure(t *testing.T) {
 		_, err := s.translateTexts(context.Background(), "ja", "en", []string{"test"})
 
 		require.Error(t, err)
-		// Verify it's a connection-related error (not HTTP status error)
-		errMsg := err.Error()
-		assert.True(t, strings.Contains(errMsg, "connection refused") ||
-			strings.Contains(errMsg, "dial tcp") ||
-			strings.Contains(errMsg, "connection reset"),
-			"expected connection error, got: %v", errMsg)
+		// Raw transport errors are wrapped as a typed translationError (Kind=provider)
+		// so request URLs/credentials are not leaked; connection detail stays in
+		// debug logs only, so assert the kind instead.
+		var te *translationError
+		assert.True(t, errors.As(err, &te) && te.Kind == TranslationErrorProvider,
+			"expected provider translationError, got: %v", err)
 	})
 
 	t.Run("deepl connection refused", func(t *testing.T) {
@@ -974,7 +974,8 @@ func TestTranslateWithOpenAI(t *testing.T) {
 		_, err := s.translateTexts(context.Background(), "ja", "en", []string{"test"})
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "openai translation failed")
-		assert.Contains(t, err.Error(), "Invalid API key")
+		assert.NotContains(t, err.Error(), "Invalid API key",
+			"HTTP-status errors must not embed the provider response body")
 		// Verify auth header format
 		assert.Equal(t, "Bearer test-key", capturedAuthHeader)
 	})
@@ -1790,7 +1791,7 @@ func TestTranslateMovie_FullFlow(t *testing.T) {
 
 			originalTitle := movieCopy.Title
 
-			result, _, err := s.TranslateMovie(context.Background(), movieCopy, "")
+			result, _, _, err := s.TranslateMovie(context.Background(), movieCopy, "")
 
 			if tt.wantErr {
 				assert.Error(t, err)
@@ -1938,7 +1939,7 @@ func TestTranslateMovie_TranslationCountMismatch(t *testing.T) {
 				movie.Director = "Test Director"
 			}
 
-			_, _, err := s.TranslateMovie(context.Background(), movie, "")
+			_, _, _, err := s.TranslateMovie(context.Background(), movie, "")
 
 			if tt.wantErr {
 				assert.Error(t, err)
@@ -2145,44 +2146,44 @@ func TestTranslateWithOpenAI_MalformedResponses(t *testing.T) {
 
 func TestTranslateWithOpenAI_HTTPErrorResponses(t *testing.T) {
 	tests := []struct {
-		name         string
-		statusCode   int
-		body         string
-		wantErr      bool
-		errContains  string
-		bodyContains string
+		name           string
+		statusCode     int
+		body           string
+		wantErr        bool
+		errContains    string
+		bodyNotContain string
 	}{
 		{
-			name:         "returns_error_for_401_unauthorized",
-			statusCode:   http.StatusUnauthorized,
-			body:         "Invalid API key",
-			wantErr:      true,
-			errContains:  "openai translation failed",
-			bodyContains: "Invalid API key",
+			name:           "returns_error_for_401_unauthorized",
+			statusCode:     http.StatusUnauthorized,
+			body:           "Invalid API key",
+			wantErr:        true,
+			errContains:    "openai translation failed",
+			bodyNotContain: "Invalid API key",
 		},
 		{
-			name:         "returns_error_for_429_rate_limit",
-			statusCode:   http.StatusTooManyRequests,
-			body:         "Rate limit exceeded",
-			wantErr:      true,
-			errContains:  "openai translation failed",
-			bodyContains: "Rate limit exceeded",
+			name:           "returns_error_for_429_rate_limit",
+			statusCode:     http.StatusTooManyRequests,
+			body:           "Rate limit exceeded",
+			wantErr:        true,
+			errContains:    "openai translation failed",
+			bodyNotContain: "Rate limit exceeded",
 		},
 		{
-			name:         "returns_error_for_500_internal_server_error",
-			statusCode:   http.StatusInternalServerError,
-			body:         "Internal server error",
-			wantErr:      true,
-			errContains:  "openai translation failed",
-			bodyContains: "Internal server error",
+			name:           "returns_error_for_500_internal_server_error",
+			statusCode:     http.StatusInternalServerError,
+			body:           "Internal server error",
+			wantErr:        true,
+			errContains:    "openai translation failed",
+			bodyNotContain: "Internal server error",
 		},
 		{
-			name:         "returns_error_for_503_service_unavailable",
-			statusCode:   http.StatusServiceUnavailable,
-			body:         "Service temporarily unavailable",
-			wantErr:      true,
-			errContains:  "openai translation failed",
-			bodyContains: "Service temporarily unavailable",
+			name:           "returns_error_for_503_service_unavailable",
+			statusCode:     http.StatusServiceUnavailable,
+			body:           "Service temporarily unavailable",
+			wantErr:        true,
+			errContains:    "openai translation failed",
+			bodyNotContain: "Service temporarily unavailable",
 		},
 	}
 
@@ -2218,8 +2219,9 @@ func TestTranslateWithOpenAI_HTTPErrorResponses(t *testing.T) {
 			if tt.errContains != "" {
 				assert.Contains(t, err.Error(), tt.errContains)
 			}
-			if tt.bodyContains != "" {
-				assert.Contains(t, err.Error(), tt.bodyContains)
+			if tt.bodyNotContain != "" {
+				assert.NotContains(t, err.Error(), tt.bodyNotContain,
+					"HTTP-status errors must not embed the provider response body")
 			}
 		})
 	}
@@ -2277,14 +2279,12 @@ func TestTranslateMovie_ContextCancellation(t *testing.T) {
 		}()
 
 		movie := &models.Movie{Title: "テスト"}
-		_, _, err := s.TranslateMovie(ctx, movie, "")
+		_, warning, code, err := s.TranslateMovie(ctx, movie, "")
 
 		close(done) // Unblock the server handler
 		require.Error(t, err)
-		assert.True(t, errors.Is(err, context.Canceled) ||
-			strings.Contains(err.Error(), "canceled") ||
-			strings.Contains(err.Error(), "context"),
-			"expected context cancellation error, got: %v", err)
+		assert.Empty(t, warning, "user-initiated cancellation attaches no per-file warning")
+		assert.Empty(t, string(code), "user-initiated cancellation suppresses the warning code")
 	})
 
 	t.Run("deadline_exceeded", func(t *testing.T) {
@@ -2329,13 +2329,13 @@ func TestTranslateMovie_ContextCancellation(t *testing.T) {
 		defer cancel()
 
 		movie := &models.Movie{Title: "テスト"}
-		_, _, err := s.TranslateMovie(ctx, movie, "")
+		_, warning, code, err := s.TranslateMovie(ctx, movie, "")
 
 		close(done) // Unblock the server handler
 		require.Error(t, err)
-		assert.True(t, errors.Is(err, context.DeadlineExceeded) ||
-			strings.Contains(err.Error(), "deadline exceeded"),
-			"expected deadline exceeded error, got: %v", err)
+		assert.Equal(t, TranslationWarningUnavailable, code)
+		assert.Contains(t, warning, "translation timed out")
+		assert.NotContains(t, warning, "deadline exceeded", "warning must not contain the Go sentinel")
 	})
 }
 
@@ -3346,7 +3346,7 @@ func TestService_TranslateMovie_StoresHash(t *testing.T) {
 		NewGoogleProvider(*cfg, httpClient),
 		NewAnthropicProvider(*cfg, httpClient),
 	)
-	translation, _, err := service.TranslateMovie(context.Background(), movie, "abc123def456")
+	translation, _, _, err := service.TranslateMovie(context.Background(), movie, "abc123def456")
 
 	require.NoError(t, err)
 	require.NotNil(t, translation)
@@ -3354,97 +3354,163 @@ func TestService_TranslateMovie_StoresHash(t *testing.T) {
 	assert.Equal(t, "abc123def456", translation.Movie.SettingsHash, "hash should be stored in translation")
 }
 
-func TestSanitizeTranslationWarning(t *testing.T) {
+func TestClassifyTranslationWarning(t *testing.T) {
+	deadlineCtx, deadlineCancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer deadlineCancel()
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
 	tests := []struct {
-		name         string
-		provider     string
-		err          error
-		wantContains string
+		name            string
+		ctx             context.Context
+		provider        string
+		mode            string
+		err             error
+		wantCode        TranslationWarningCode
+		wantContains    []string
+		wantNotContains []string
 	}{
 		{
-			name:         "HTTP 429",
+			name:         "HTTP 429 google free",
 			provider:     "google",
+			mode:         "free",
 			err:          &translationError{Kind: TranslationErrorHTTPStatus, StatusCode: 429, Message: "too many requests"},
-			wantContains: "rate limited",
+			wantCode:     TranslationWarningRateLimited,
+			wantContains: []string{"rate limited", "Google Translate (free)", "retry later", "paid mode"},
+		},
+		{
+			name:         "HTTP 429 google paid",
+			provider:     "google",
+			mode:         "paid",
+			err:          &translationError{Kind: TranslationErrorHTTPStatus, StatusCode: 429},
+			wantCode:     TranslationWarningRateLimited,
+			wantContains: []string{"rate limited", "Google Translate (paid)"},
 		},
 		{
 			name:         "HTTP 401",
 			provider:     "deepl",
-			err:          &translationError{Kind: TranslationErrorHTTPStatus, StatusCode: 401, Message: "unauthorized"},
-			wantContains: "unauthorized",
+			err:          &translationError{Kind: TranslationErrorHTTPStatus, StatusCode: 401},
+			wantCode:     TranslationWarningUnauthorized,
+			wantContains: []string{"unauthorized", "check API key"},
 		},
 		{
 			name:         "HTTP 403",
 			provider:     "deepl",
-			err:          &translationError{Kind: TranslationErrorHTTPStatus, StatusCode: 403, Message: "forbidden"},
-			wantContains: "access denied",
+			err:          &translationError{Kind: TranslationErrorHTTPStatus, StatusCode: 403},
+			wantCode:     TranslationWarningForbidden,
+			wantContains: []string{"access denied", "check API key"},
 		},
 		{
 			name:         "HTTP 500",
 			provider:     "google",
-			err:          &translationError{Kind: TranslationErrorHTTPStatus, StatusCode: 500, Message: "internal"},
-			wantContains: "external service error",
+			err:          &translationError{Kind: TranslationErrorHTTPStatus, StatusCode: 500},
+			wantCode:     TranslationWarningServiceError,
+			wantContains: []string{"external service error"},
 		},
 		{
 			name:         "HTTP 502",
 			provider:     "anthropic",
-			err:          &translationError{Kind: TranslationErrorHTTPStatus, StatusCode: 502, Message: "bad gateway"},
-			wantContains: "external service error",
+			err:          &translationError{Kind: TranslationErrorHTTPStatus, StatusCode: 502},
+			wantCode:     TranslationWarningServiceError,
+			wantContains: []string{"external service error"},
 		},
 		{
 			name:         "HTTP 400",
 			provider:     "google",
-			err:          &translationError{Kind: TranslationErrorHTTPStatus, StatusCode: 400, Message: "bad request"},
-			wantContains: "request error",
+			err:          &translationError{Kind: TranslationErrorHTTPStatus, StatusCode: 400},
+			wantCode:     TranslationWarningRequestError,
+			wantContains: []string{"request error"},
 		},
 		{
 			name:         "HTTP 422",
 			provider:     "deepl",
-			err:          &translationError{Kind: TranslationErrorHTTPStatus, StatusCode: 422, Message: "unprocessable"},
-			wantContains: "request error",
+			err:          &translationError{Kind: TranslationErrorHTTPStatus, StatusCode: 422},
+			wantCode:     TranslationWarningRequestError,
+			wantContains: []string{"request error"},
 		},
 		{
-			name:         "parse error",
-			provider:     "google",
-			err:          &translationError{Kind: TranslationErrorParse, Message: "bad json"},
-			wantContains: "service unavailable",
+			name:            "parse error",
+			provider:        "google",
+			mode:            "free",
+			err:             &translationError{Kind: TranslationErrorParse, Message: "bad json"},
+			wantCode:        TranslationWarningUnavailable,
+			wantContains:    []string{"unavailable"},
+			wantNotContains: []string{"rate limited", "retry later"},
 		},
 		{
-			name:         "count mismatch",
+			name:         "typed count mismatch",
 			provider:     "google",
 			err:          &translationError{Kind: TranslationErrorCountMismatch, Message: "3 vs 5"},
-			wantContains: "service unavailable",
+			wantCode:     TranslationWarningUnavailable,
+			wantContains: []string{"unavailable"},
 		},
 		{
 			name:         "provider error",
 			provider:     "google",
 			err:          &translationError{Kind: TranslationErrorProvider, Message: "failed after 3 attempts"},
-			wantContains: "service unavailable",
+			wantCode:     TranslationWarningUnavailable,
+			wantContains: []string{"unavailable"},
 		},
 		{
-			name:         "plain error",
+			name:         "untyped residual error",
 			provider:     "google",
-			err:          fmt.Errorf("connection refused"),
-			wantContains: "internal error",
+			err:          fmt.Errorf("translation provider returned %d items for %d inputs", 2, 3),
+			wantCode:     TranslationWarningUnknown,
+			wantContains: []string{"internal error"},
 		},
 		{
 			name:         "wrapped translationError",
 			provider:     "google",
-			err:          fmt.Errorf("wrapper: %w", &translationError{Kind: TranslationErrorHTTPStatus, StatusCode: 429, Message: "rate limited"}),
-			wantContains: "rate limited",
+			err:          fmt.Errorf("wrapper: %w", &translationError{Kind: TranslationErrorHTTPStatus, StatusCode: 429}),
+			wantCode:     TranslationWarningRateLimited,
+			wantContains: []string{"rate limited"},
 		},
 		{
-			name:         "HTTP status 0 falls through",
+			name:         "HTTP status kind with status 0 falls through to typed mapping",
 			provider:     "google",
-			err:          &translationError{Kind: TranslationErrorHTTPStatus, StatusCode: 0, Message: "unknown"},
-			wantContains: "Translation failed",
+			err:          &translationError{Kind: TranslationErrorHTTPStatus, StatusCode: 0},
+			wantCode:     TranslationWarningUnavailable,
+			wantContains: []string{"unavailable"},
+		},
+		{
+			name:            "deadline exceeded after provider discards ctx cause",
+			ctx:             deadlineCtx,
+			provider:        "google",
+			mode:            "free",
+			err:             &translationError{Kind: TranslationErrorProvider, Message: "google free translation request failed"},
+			wantCode:        TranslationWarningUnavailable,
+			wantContains:    []string{"translation timed out"},
+			wantNotContains: []string{"context deadline exceeded"},
+		},
+		{
+			name:         "context canceled is suppressed",
+			ctx:          canceledCtx,
+			provider:     "google",
+			err:          &translationError{Kind: TranslationErrorHTTPStatus, StatusCode: 429},
+			wantCode:     "",
+			wantContains: []string{},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := sanitizeTranslationWarning(tt.provider, tt.err)
-			assert.Contains(t, got, tt.wantContains)
+			ctx := tt.ctx
+			if ctx == nil {
+				ctx = context.Background()
+			}
+			code, message := classifyTranslationWarning(ctx, tt.provider, tt.mode, tt.err)
+			assert.Equal(t, tt.wantCode, code)
+			if tt.wantCode == "" {
+				assert.Empty(t, message)
+				return
+			}
+			assert.NotEmpty(t, message)
+			for _, want := range tt.wantContains {
+				assert.Contains(t, message, want)
+			}
+			for _, notWant := range tt.wantNotContains {
+				assert.NotContains(t, message, notWant)
+			}
 		})
 	}
 }
@@ -3482,7 +3548,7 @@ func TestTranslateMovie_ReturnsWarningOnEmptyFields(t *testing.T) {
 	movie := &models.Movie{
 		Title: "テストタイトル",
 	}
-	translation, warning, err := s.TranslateMovie(context.Background(), movie, "")
+	translation, warning, _, err := s.TranslateMovie(context.Background(), movie, "")
 	require.NoError(t, err)
 	require.NotNil(t, translation)
 	require.NotNil(t, translation.Movie)
@@ -3520,9 +3586,11 @@ func TestTranslateMovie_ReturnsWarningOnProviderError(t *testing.T) {
 		NewAnthropicProvider(cfg, httpClient),
 	)
 	movie := &models.Movie{Title: "テスト"}
-	_, warning, err := s.TranslateMovie(context.Background(), movie, "")
+	_, warning, code, err := s.TranslateMovie(context.Background(), movie, "")
 	require.Error(t, err)
+	assert.Equal(t, TranslationWarningRateLimited, code)
 	assert.Contains(t, warning, "rate limited")
+	assert.Contains(t, warning, "Google Translate (free)")
 }
 
 func TestTranslationError_Error(t *testing.T) {
@@ -3587,7 +3655,7 @@ func TestTranslateMovie_EmptyTranslationWarning(t *testing.T) {
 		NewAnthropicProvider(cfg, httpClient),
 	)
 	movie := &models.Movie{Title: "テスト"}
-	translation, warning, err := s.TranslateMovie(context.Background(), movie, "")
+	translation, warning, _, err := s.TranslateMovie(context.Background(), movie, "")
 	require.NoError(t, err)
 	require.NotNil(t, translation)
 	require.NotNil(t, translation.Movie)
@@ -3630,7 +3698,7 @@ func TestTranslateMovie_CountMismatchWarning(t *testing.T) {
 		NewAnthropicProvider(cfg, httpClient),
 	)
 	movie := &models.Movie{Title: "テスト", Description: "説明"}
-	_, warning, err := s.TranslateMovie(context.Background(), movie, "")
+	_, warning, _, err := s.TranslateMovie(context.Background(), movie, "")
 	require.Error(t, err)
 	assert.NotEmpty(t, warning, "count mismatch produces a sanitized warning")
 }
@@ -3685,7 +3753,7 @@ func TestTranslateMovie_GenreTranslationData(t *testing.T) {
 		},
 	}
 
-	output, _, err := s.TranslateMovie(context.Background(), movie, "")
+	output, _, _, err := s.TranslateMovie(context.Background(), movie, "")
 	require.NoError(t, err)
 	require.NotNil(t, output)
 
@@ -3748,7 +3816,7 @@ func TestTranslateMovie_ActressTranslationData(t *testing.T) {
 		},
 	}
 
-	output, _, err := s.TranslateMovie(context.Background(), movie, "")
+	output, _, _, err := s.TranslateMovie(context.Background(), movie, "")
 	require.NoError(t, err)
 	require.NotNil(t, output)
 
@@ -3812,7 +3880,7 @@ func TestTranslateMovie_ActressTranslationData_JapaneseName(t *testing.T) {
 		},
 	}
 
-	output, _, err := s.TranslateMovie(context.Background(), movie, "")
+	output, _, _, err := s.TranslateMovie(context.Background(), movie, "")
 	require.NoError(t, err)
 	require.NotNil(t, output)
 
@@ -3898,7 +3966,7 @@ func TestTranslateMovie_GenreAndActressTranslationData_ApplyToPrimary(t *testing
 		},
 	}
 
-	output, _, err := s.TranslateMovie(context.Background(), movie, "")
+	output, _, _, err := s.TranslateMovie(context.Background(), movie, "")
 	require.NoError(t, err)
 	require.NotNil(t, output)
 
@@ -3950,7 +4018,9 @@ func TestProviderAcceptsHTTPClientInterface(t *testing.T) {
 		_, err := provider.Translate(context.Background(), "ja", "en", []string{"test"})
 		require.Error(t, err)
 		assert.True(t, mock.called, "mock HTTPClient should have been called")
-		assert.Contains(t, err.Error(), "injected mock called")
+		var te *translationError
+		assert.True(t, errors.As(err, &te) && te.Kind == TranslationErrorProvider,
+			"expected provider translationError, got: %v", err)
 	})
 
 	t.Run("DeepLProvider accepts HTTPClient interface", func(t *testing.T) {
@@ -4016,7 +4086,9 @@ func TestProviderAcceptsHTTPClientInterface(t *testing.T) {
 		_, err := provider.Translate(context.Background(), "ja", "en", []string{"test"})
 		require.Error(t, err)
 		assert.True(t, mock.called, "mock HTTPClient should have been called")
-		assert.Contains(t, err.Error(), "injected mock called")
+		var te *translationError
+		assert.True(t, errors.As(err, &te) && te.Kind == TranslationErrorProvider,
+			"expected provider translationError, got: %v", err)
 	})
 
 	t.Run("OpenAICompatibleProvider accepts HTTPClient interface", func(t *testing.T) {
@@ -4036,6 +4108,8 @@ func TestProviderAcceptsHTTPClientInterface(t *testing.T) {
 		_, err := provider.Translate(context.Background(), "ja", "en", []string{"test"})
 		require.Error(t, err)
 		assert.True(t, mock.called, "mock HTTPClient should have been called")
-		assert.Contains(t, err.Error(), "injected mock called")
+		var te *translationError
+		assert.True(t, errors.As(err, &te) && te.Kind == TranslationErrorProvider,
+			"expected provider translationError, got: %v", err)
 	})
 }

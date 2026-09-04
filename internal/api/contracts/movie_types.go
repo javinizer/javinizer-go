@@ -19,6 +19,13 @@ type ScrapeResponse struct {
 	Movie       *MovieView `json:"movie"`
 	SourcesUsed int        `json:"sources_used,omitempty" example:"2"`
 	Errors      []string   `json:"errors,omitempty"`
+	// TranslationWarning is populated when metadata translation partially failed
+	// or degraded (kept-original fields). Empty when translation fully succeeded.
+	TranslationWarning string `json:"translation_warning,omitempty"`
+	// TranslationWarningCode is the machine-readable classification of
+	// TranslationWarning (rate_limited, unauthorized, forbidden, request_error,
+	// service_error, unavailable, degraded, unknown).
+	TranslationWarningCode string `json:"translation_warning_code,omitempty"`
 }
 
 // MovieResponse represents a movie response
@@ -26,6 +33,13 @@ type MovieResponse struct {
 	Movie      *MovieView            `json:"movie"`
 	Provenance map[string]DataSource `json:"provenance,omitempty"`  // Field-level data source tracking
 	MergeStats *MergeStatistics      `json:"merge_stats,omitempty"` // Merge statistics when NFO merging occurred
+	// TranslationWarning is populated on scrape-like flows (rescrape) when
+	// metadata translation partially failed or degraded.
+	TranslationWarning string `json:"translation_warning,omitempty"`
+	// TranslationWarningCode is the machine-readable classification of
+	// TranslationWarning (rate_limited, unauthorized, forbidden, request_error,
+	// service_error, unavailable, degraded, unknown).
+	TranslationWarningCode string `json:"translation_warning_code,omitempty"`
 	// Revision is the fresh post-commit result revision (POSTER-WRITE-HARDENING D12).
 	Revision *uint64 `json:"revision,omitempty"`
 	// Revisions carries EVERY family part's fresh revision keyed by

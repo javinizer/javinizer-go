@@ -128,7 +128,6 @@ func (p *OpenAICompatibleProvider) Translate(ctx context.Context, sourceLang, ta
 			headers:   headers,
 			request:   request,
 			textCount: len(texts),
-			logInput:  true,
 			logTiming: true,
 		})
 		if err == nil {
@@ -140,7 +139,7 @@ func (p *OpenAICompatibleProvider) Translate(ctx context.Context, sourceLang, ta
 			return nil, err
 		}
 
-		logging.Debugf("Translation (openai-compatible): thinking strategy %q failed (%v), trying fallback", strategy, err)
+		logging.Debugf("Translation (openai-compatible): thinking strategy %q failed, trying fallback", strategy)
 	}
 
 	return nil, lastErr

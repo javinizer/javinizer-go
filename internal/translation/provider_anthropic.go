@@ -97,10 +97,10 @@ func (a *anthropicChatAdapter) DecodeResponse(providerName string, respBody []by
 		} `json:"content"`
 	}
 	if err := json.Unmarshal(respBody, &decoded); err != nil {
-		return nil, fmt.Errorf("failed to decode %s response: %w", providerName, err)
+		return nil, &translationError{Kind: TranslationErrorParse, Message: fmt.Sprintf("failed to decode %s response", providerName)}
 	}
 	if len(decoded.Content) == 0 {
-		return nil, fmt.Errorf("%s response contained no content blocks", providerName)
+		return nil, &translationError{Kind: TranslationErrorParse, Message: fmt.Sprintf("%s response contained no content blocks", providerName)}
 	}
 	return buildLLMTranslationResult(strings.TrimSpace(decoded.Content[0].Text), textCount)
 }

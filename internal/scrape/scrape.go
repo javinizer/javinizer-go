@@ -103,9 +103,10 @@ type ScrapeResult struct {
 	// Internal enrichment signals — read by the workflow orchestrator and propagated
 	// to OrchestrationMeta. Downstream consumers (MovieResult, API) should read from
 	// OrchestrationMeta, not from these fields directly.
-	TranslationWarning string                         `json:"translation_warning,omitempty"` // set by applyTranslation when partial translation occurs
-	TranslationOutput  *translation.TranslationOutput `json:"-"`                             // genre/actress translation data for persistence
-	NeedsPersistence   bool                           `json:"needs_persistence,omitempty"`   // set by tryCache when cached result needs re-persistence
+	TranslationWarning     string                         `json:"translation_warning,omitempty"`      // set by applyTranslation when partial translation occurs
+	TranslationWarningCode string                         `json:"translation_warning_code,omitempty"` // machine-readable classification of TranslationWarning
+	TranslationOutput      *translation.TranslationOutput `json:"-"`                                  // genre/actress translation data for persistence
+	NeedsPersistence       bool                           `json:"needs_persistence,omitempty"`        // set by tryCache when cached result needs re-persistence
 
 	StartedAt time.Time
 	EndedAt   time.Time
@@ -306,23 +307,25 @@ func postProcessScraped(ctx context.Context, scraped *models.Movie, results []*m
 	}
 
 	var translationWarning string
+	var translationWarningCode string
 	var translationOutput *translation.TranslationOutput
 	if cfg.TranslationEnabled {
-		translationWarning, translationOutput = applyTranslation(ctx, scraped, translator)
+		translationWarning, translationWarningCode, translationOutput = applyTranslation(ctx, scraped, translator)
 	}
 
 	now := time.Now()
 	result := &ScrapeResult{
-		Movie:              scraped,
-		ScraperResults:     results,
-		FieldSources:       fieldSources,
-		ActressSources:     actressSources,
-		TranslationWarning: translationWarning,
-		TranslationOutput:  translationOutput,
-		Message:            cmd.ParseWarning,
-		Status:             StatusCompleted,
-		StartedAt:          startTime,
-		EndedAt:            now,
+		Movie:                  scraped,
+		ScraperResults:         results,
+		FieldSources:           fieldSources,
+		ActressSources:         actressSources,
+		TranslationWarning:     translationWarning,
+		TranslationWarningCode: translationWarningCode,
+		TranslationOutput:      translationOutput,
+		Message:                cmd.ParseWarning,
+		Status:                 StatusCompleted,
+		StartedAt:              startTime,
+		EndedAt:                now,
 	}
 
 	return result, nil

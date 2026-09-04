@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sirupsen/logrus"
+
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/timeout"
@@ -13,15 +15,16 @@ import (
 )
 
 // applyTranslation applies metadata translation using the Translator interface.
-// Returns a warning string if translation partially failed, or empty string on success.
+// Returns a warning string and its machine-readable code if translation partially
+// failed, or empty strings on success.
 // This is a standalone function — it does not belong to the Aggregator, which is a
 // pure merge operation. Translation is an orthogonal concern invoked after aggregation.
-func applyTranslation(ctx context.Context, scraped *models.Movie, translator Translator) (string, *translation.TranslationOutput) {
+func applyTranslation(ctx context.Context, scraped *models.Movie, translator Translator) (string, string, *translation.TranslationOutput) {
 	if scraped == nil || translator == nil {
-		return "", nil
+		return "", "", nil
 	}
-	warning, _, output := translator.Translate(ctx, scraped)
-	return warning, output
+	warning, code, _, output := translator.Translate(ctx, scraped)
+	return warning, code, output
 }
 
 // translationService wraps a pre-constructed translation.Service to avoid
@@ -55,9 +58,9 @@ func newTranslationService(provider string, sourceLanguage string, targetLanguag
 // context deadline, mirroring main's ApplyConfiguredTranslation which wrapped
 // TranslateMovie in context.WithTimeout(TimeoutSeconds||60). A value <= 0
 // defaults to 60s; the caller's ctx is always respected as the parent.
-func (ts *translationService) translateWithContext(ctx context.Context, scraped *models.Movie) (string, *translation.TranslationOutput) {
+func (ts *translationService) translateWithContext(ctx context.Context, scraped *models.Movie) (string, string, *translation.TranslationOutput) {
 	if scraped == nil {
-		return "", nil
+		return "", "", nil
 	}
 
 	resolved := timeout.FromConfig("metadata.translation.timeout_seconds", ts.timeoutSeconds, 60*time.Second)
@@ -66,18 +69,14 @@ func (ts *translationService) translateWithContext(ctx context.Context, scraped 
 	transCtx, cancel := context.WithTimeout(ctx, resolved.Duration)
 	defer cancel()
 
-	output, warning, err := ts.service.TranslateMovie(transCtx, scraped, ts.settingsHash)
+	output, warning, code, err := ts.service.TranslateMovie(transCtx, scraped, ts.settingsHash)
 	if err != nil {
-		id := scraped.ID
-		if id == "" {
-			id = scraped.ContentID
-		}
-		logging.Warnf("[%s] Metadata translation failed: %v", id, err)
-		return warning, nil
+		ts.logTranslationWarning(transCtx, scraped, code, err)
+		return warning, string(code), nil
 	}
 	if output == nil || output.Movie == nil {
 		logging.Debugf("Translation: returned nil record (no fields to translate or source==target)")
-		return "", nil
+		return "", "", nil
 	}
 
 	translatedRecord := output.Movie
@@ -90,7 +89,42 @@ func (ts *translationService) translateWithContext(ctx context.Context, scraped 
 	)
 
 	logging.Debugf("Translation: movie now has %d translation(s)", len(scraped.Translations))
-	return warning, output
+	if code != "" {
+		ts.logTranslationWarning(transCtx, scraped, code, nil)
+	}
+	return warning, string(code), output
+}
+
+// logTranslationWarning is the single per-movie warning emission point for
+// translation failures and degradations, covering both the live-scrape and
+// cache-hit paths (both call applyTranslation). It logs via WithFields with a
+// structured field set; status_code is attached only when the classification
+// came from an HTTP status. Context-canceled operations are suppressed per the
+// translation-warning-display spec, while non-translation errors (e.g.
+// misconfiguration) keep the legacy unstructured Warn for visibility.
+func (ts *translationService) logTranslationWarning(ctx context.Context, scraped *models.Movie, code translation.TranslationWarningCode, err error) {
+	id := scraped.ID
+	if id == "" {
+		id = scraped.ContentID
+	}
+	if code == "" {
+		if err != nil && ctx.Err() == nil {
+			logging.Warnf("[%s] Metadata translation failed: %v", id, err)
+		}
+		return
+	}
+	fields := logrus.Fields{
+		"provider":     ts.provider,
+		"mode":         ts.service.ProviderMode(),
+		"source_lang":  ts.sourceLanguage,
+		"target_lang":  ts.targetLanguage,
+		"warning_code": string(code),
+		"movie_id":     id,
+	}
+	if status, ok := translation.WarningStatusCode(ctx, err); ok {
+		fields["status_code"] = status
+	}
+	logging.WithFields(fields).Warn("Metadata translation warning")
 }
 
 // newTranslationHTTPClient creates the shared HTTP client for translation providers.

@@ -235,6 +235,16 @@ definitions:
         type: string
       status:
         $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.JobStatus'
+      translation_warning:
+        description: |-
+          TranslationWarning is populated when metadata translation partially failed
+          or degraded; empty when translation fully succeeded.
+        type: string
+      translation_warning_code:
+        description: |-
+          TranslationWarningCode is the machine-readable classification of
+          TranslationWarning (rate_limited, unavailable, degraded, ...).
+        type: string
     type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.BatchJobListResponse:
     properties:
@@ -728,6 +738,17 @@ definitions:
           Revisions carries EVERY family part's fresh revision keyed by
           result_id (multipart-safe CAS baselines, codex r26).
         type: object
+      translation_warning:
+        description: |-
+          TranslationWarning is populated on scrape-like flows (rescrape) when
+          metadata translation partially failed or degraded.
+        type: string
+      translation_warning_code:
+        description: |-
+          TranslationWarningCode is the machine-readable classification of
+          TranslationWarning (rate_limited, unauthorized, forbidden, request_error,
+          service_error, unavailable, degraded, unknown).
+        type: string
     type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.MovieTranslationView:
     properties:
@@ -1474,6 +1495,17 @@ definitions:
       sources_used:
         example: 2
         type: integer
+      translation_warning:
+        description: |-
+          TranslationWarning is populated when metadata translation partially failed
+          or degraded (kept-original fields). Empty when translation fully succeeded.
+        type: string
+      translation_warning_code:
+        description: |-
+          TranslationWarningCode is the machine-readable classification of
+          TranslationWarning (rate_limited, unauthorized, forbidden, request_error,
+          service_error, unavailable, degraded, unknown).
+        type: string
     type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.ScraperInfo:
     properties:

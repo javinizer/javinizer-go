@@ -329,7 +329,7 @@ func TestTranslateMovie_EmptyTranslationFallsBack(t *testing.T) {
 	}, provider)
 
 	movie := &models.Movie{Title: "テスト"}
-	out, warning, err := svc.TranslateMovie(context.Background(), movie, "hash123")
+	out, warning, _, err := svc.TranslateMovie(context.Background(), movie, "hash123")
 	require.NoError(t, err)
 	require.NotNil(t, out)
 	assert.Contains(t, warning, "empty translation")
@@ -358,7 +358,7 @@ func TestTranslateMovie_CountMismatch_MissTest(t *testing.T) {
 	}, provider)
 
 	movie := &models.Movie{Title: "テスト", Maker: "メーカー"}
-	_, _, err := svc.TranslateMovie(context.Background(), movie, "hash123")
+	_, _, _, err := svc.TranslateMovie(context.Background(), movie, "hash123")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "returned 1 items for 2 inputs")
 }

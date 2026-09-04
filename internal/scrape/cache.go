@@ -32,6 +32,7 @@ func (s *Scraper) tryCache(ctx context.Context, cmd ScrapeCmd, actressRepo datab
 
 	needsPersistence := false
 	translationWarning := ""
+	translationWarningCode := ""
 	var translationOutput *translation.TranslationOutput
 	if s.cfg != nil && s.cfg.TranslationEnabled {
 		currentHash := s.cfg.TranslationSettingsHash
@@ -45,10 +46,10 @@ func (s *Scraper) tryCache(ctx context.Context, cmd ScrapeCmd, actressRepo datab
 		}
 		if !hasValidTranslation {
 			logging.Infof("[scrape] Translation settings changed, re-translating cached result for %s", cmd.MovieID)
-			warn, transOutput := applyTranslation(ctx, cached, s.translator)
+			warn, code, transOutput := applyTranslation(ctx, cached, s.translator)
 			if warn != "" {
 				translationWarning = warn
-				logging.Warnf("[scrape] Partial translation warning for cached %s: %s", cmd.MovieID, warn)
+				translationWarningCode = code
 			}
 			translationOutput = transOutput
 			needsPersistence = true
@@ -67,16 +68,17 @@ func (s *Scraper) tryCache(ctx context.Context, cmd ScrapeCmd, actressRepo datab
 
 	now := time.Now()
 	return &ScrapeResult{
-		Movie:              scrapedToReturn,
-		FieldSources:       fieldSources,
-		ActressSources:     actressSources,
-		ScraperResults:     []*models.ScraperResult{ScraperResultFromCachedMovie(cached)},
-		Cached:             true,
-		TranslationWarning: translationWarning,
-		TranslationOutput:  translationOutput,
-		Status:             StatusCompleted,
-		NeedsPersistence:   needsPersistence,
-		StartedAt:          startTime,
-		EndedAt:            now,
+		Movie:                  scrapedToReturn,
+		FieldSources:           fieldSources,
+		ActressSources:         actressSources,
+		ScraperResults:         []*models.ScraperResult{ScraperResultFromCachedMovie(cached)},
+		Cached:                 true,
+		TranslationWarning:     translationWarning,
+		TranslationWarningCode: translationWarningCode,
+		TranslationOutput:      translationOutput,
+		Status:                 StatusCompleted,
+		NeedsPersistence:       needsPersistence,
+		StartedAt:              startTime,
+		EndedAt:                now,
 	}
 }

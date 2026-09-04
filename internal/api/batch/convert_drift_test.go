@@ -30,9 +30,11 @@ func TestMovieResultToBatchFileResultDriftGuard(t *testing.T) {
 		"Revision":      "internal versioning counter, not exposed to API consumers",
 		"FileMatchInfo": "flattened into BatchFileResult top-level fields (FilePath, MovieID, IsMultiPart, PartNumber, PartSuffix)",
 		// OrchestrationState is embedded — its sub-fields are checked separately below.
-		// The OrchestrationState itself (DisplayTitleApplied, PosterGenerated, Persisted,
-		// PosterError, TranslationWarning) is internal orchestration metadata not exposed
-		// in the API response.
+		// DisplayTitleApplied, PosterGenerated, Persisted, and PosterError are internal
+		// orchestration metadata not exposed in the API response. TranslationWarning and
+		// TranslationWarningCode ARE exposed (translation-warning-display change): the
+		// full BatchFileResult carries both and BatchFileResultSlim carries the code only,
+		// pinned by the translation_warning_fields_exposed subtest below.
 	}
 
 	// Fields intentionally omitted from the slim variant (in addition to full unmapped).
@@ -151,6 +153,23 @@ func TestMovieResultToBatchFileResultDriftGuard(t *testing.T) {
 				t.Errorf("BatchFileResultSlim has field %q that doesn't exist in BatchFileResult. "+
 					"Slim should be a strict subset of full.", field)
 			}
+		}
+	})
+
+	// Pin the translation-warning-display exposure: the blanket
+	// isOrchestrationStateField skip above would let these silently drift.
+	t.Run("translation_warning_fields_exposed", func(t *testing.T) {
+		if !bfrFieldNames["TranslationWarning"] {
+			t.Errorf("BatchFileResult must expose TranslationWarning (translation-warning-display)")
+		}
+		if !bfrFieldNames["TranslationWarningCode"] {
+			t.Errorf("BatchFileResult must expose TranslationWarningCode (translation-warning-display)")
+		}
+		if !bfrSlimFieldNames["TranslationWarningCode"] {
+			t.Errorf("BatchFileResultSlim must expose TranslationWarningCode (code-only slim badge)")
+		}
+		if bfrSlimFieldNames["TranslationWarning"] {
+			t.Errorf("BatchFileResultSlim must NOT expose TranslationWarning (slim payload is code-only)")
 		}
 	})
 }

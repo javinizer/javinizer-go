@@ -62,7 +62,7 @@ func rescrapeMovie(deps MovieDeps) gin.HandlerFunc {
 				defer cancel()
 			}
 		}
-		result, _, err := wf.Scrape(scrapeCtx, cmd)
+		result, meta, err := wf.Scrape(scrapeCtx, cmd)
 		if scrapeCtx.Err() != nil {
 			c.JSON(http.StatusGatewayTimeout, contracts.ErrorResponse{Error: "scrape timed out"})
 			return
@@ -88,6 +88,13 @@ func rescrapeMovie(deps MovieDeps) gin.HandlerFunc {
 			_ = deps.PosterGen.GeneratePoster(c.Request.Context(), models.SentinelJobID().String(), result.Movie)
 		}
 
-		c.JSON(http.StatusOK, contracts.MovieResponse{Movie: contracts.MovieViewFromModel(result.Movie)})
+		resp := contracts.MovieResponse{Movie: contracts.MovieViewFromModel(result.Movie)}
+		if meta != nil {
+			if meta.TranslationWarning != nil {
+				resp.TranslationWarning = *meta.TranslationWarning
+			}
+			resp.TranslationWarningCode = meta.TranslationWarningCode
+		}
+		c.JSON(http.StatusOK, resp)
 	}
 }

@@ -57,12 +57,7 @@ func (p *GoogleProvider) Translate(ctx context.Context, sourceLang, targetLang s
 	httpClient := p.httpClient
 	cfg := p.cfg
 
-	mode := models.GoogleMode(strings.ToLower(strings.TrimSpace(string(cfg.Google.Mode))))
-	if mode == "" {
-		mode = models.GoogleModeFree
-	}
-
-	if mode == models.GoogleModePaid {
+	if cfg.EffectiveGoogleMode() == models.GoogleModePaid {
 		return translateWithGooglePaid(ctx, httpClient, cfg, sourceLang, targetLang, texts)
 	}
 	return translateWithGoogleFree(ctx, httpClient, cfg, sourceLang, targetLang, texts)
@@ -108,7 +103,7 @@ func translateWithGooglePaid(ctx context.Context, httpClient httpclient.HTTPClie
 	if err != nil {
 		// Wrap raw transport errors as a typed provider error so the request URL
 		// (which carries the API key in paid mode) is not leaked through logs/errors.
-		logging.Debugf("google paid translation request failed: %v", err)
+		logging.Debugf("google paid translation request failed (texts=%d)", len(texts))
 		return nil, &translationError{
 			Kind:    TranslationErrorProvider,
 			Message: "google paid translation request failed",
@@ -136,7 +131,8 @@ func translateWithGooglePaid(ctx context.Context, httpClient httpclient.HTTPClie
 
 	var decoded googlePaidTranslateResponse
 	if err := json.Unmarshal(respBody, &decoded); err != nil {
-		return nil, fmt.Errorf("failed to decode google paid response: %w", err)
+		logging.Debugf("google paid translation response decode failed (body length=%d)", len(respBody))
+		return nil, &translationError{Kind: TranslationErrorParse, Message: "failed to decode google paid response"}
 	}
 
 	result := make([]string, 0, len(decoded.Data.Translations))
@@ -252,7 +248,7 @@ func performGoogleFreeTranslation(ctx context.Context, httpClient httpclient.HTT
 	if err != nil {
 		// Wrap raw transport errors so the request URL (which carries the q= text)
 		// is not leaked through logs/errors.
-		logging.Debugf("google free translation request failed: %v", err)
+		logging.Debugf("google free translation request failed (text length=%d)", len(text))
 		return googleFreeResult{err: &translationError{Kind: TranslationErrorProvider, Message: "google free translation request failed"}}
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -285,16 +281,16 @@ func performGoogleFreeTranslation(ctx context.Context, httpClient httpclient.HTT
 func parseGoogleFreeResponse(payload []byte) (string, error) {
 	var decoded any
 	if err := json.Unmarshal(payload, &decoded); err != nil {
-		return "", fmt.Errorf("failed to decode google free response: %w", err)
+		return "", &translationError{Kind: TranslationErrorParse, Message: "failed to decode google free response"}
 	}
 
 	root, ok := decoded.([]any)
 	if !ok || len(root) == 0 {
-		return "", fmt.Errorf("unexpected google free response shape")
+		return "", &translationError{Kind: TranslationErrorParse, Message: "unexpected google free response shape"}
 	}
 	segments, ok := root[0].([]any)
 	if !ok {
-		return "", fmt.Errorf("unexpected google free translation payload")
+		return "", &translationError{Kind: TranslationErrorParse, Message: "unexpected google free translation payload"}
 	}
 
 	parts := make([]string, 0, len(segments))
@@ -311,7 +307,7 @@ func parseGoogleFreeResponse(payload []byte) (string, error) {
 	}
 
 	if len(parts) == 0 {
-		return "", fmt.Errorf("google free translation returned empty text")
+		return "", &translationError{Kind: TranslationErrorParse, Message: "google free translation returned empty text"}
 	}
 
 	return strings.Join(parts, ""), nil

@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -61,7 +63,7 @@ func TestApplyTranslation_Success(t *testing.T) {
 	}
 
 	translator := helperToTranslator(translationCfg)
-	warning, _ := applyTranslation(context.Background(), movie, translator)
+	warning, _, _ := applyTranslation(context.Background(), movie, translator)
 	assert.Empty(t, warning)
 	assert.Len(t, movie.Translations, 1)
 
@@ -97,27 +99,86 @@ func TestApplyTranslation_FailureReturnsWarning(t *testing.T) {
 	}
 
 	translator := helperToTranslator(translationCfg)
-	warning, _ := applyTranslation(context.Background(), movie, translator)
+	warning, _, _ := applyTranslation(context.Background(), movie, translator)
 	assert.NotEmpty(t, warning)
 	assert.Equal(t, "Original Title", movie.Title)
 }
 
+// TestApplyTranslation_DegradedEmitsSingleStructuredWarn proves the degraded
+// path (partial per-field failure with no provider error) surfaces the
+// degraded code and emits exactly one structured Warn WITHOUT a status_code
+// field, via the production translateWithContext emission point.
+func TestApplyTranslation_DegradedEmitsSingleStructuredWarn(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		response := map[string]any{
+			"choices": []map[string]any{
+				{
+					"message": map[string]any{
+						"content": `["   "]`,
+					},
+				},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		require.NoError(t, json.NewEncoder(w).Encode(response))
+	}))
+	defer ts.Close()
+
+	logPath := filepath.Join(t.TempDir(), "apply-translation-test.log")
+	require.NoError(t, logging.InitLogger(&logging.Config{Level: "debug", Format: "json", Output: logPath}))
+	t.Cleanup(func() { logging.CloseLogger() })
+
+	translationCfg := &config.TranslationConfig{
+		Enabled:        true,
+		Provider:       "openai",
+		SourceLanguage: "ja",
+		TargetLanguage: "en",
+		ApplyToPrimary: true,
+		OpenAI: config.OpenAITranslationConfig{
+			BaseURL: ts.URL,
+			APIKey:  "k",
+			Model:   "m",
+		},
+		Fields: config.TranslationFieldsConfig{Title: true},
+	}
+
+	movie := &models.Movie{
+		ID:    "DEG-001",
+		Title: "タイトル",
+	}
+
+	translator := helperToTranslator(translationCfg)
+	warning, code, _ := applyTranslation(context.Background(), movie, translator)
+	assert.Equal(t, "degraded", code)
+	assert.Contains(t, warning, "empty translation")
+
+	entries := warningLogEntries(t, logPath, "DEG-001")
+	require.Len(t, entries, 1, "degraded movie emits exactly one structured Warn")
+	entry := entries[0]
+	assert.Equal(t, "degraded", entry["warning_code"])
+	assert.Equal(t, "openai", entry["provider"])
+	assert.Equal(t, "ja", entry["source_lang"])
+	assert.Equal(t, "en", entry["target_lang"])
+	_, hasStatus := entry["status_code"]
+	assert.False(t, hasStatus, "degraded classification attaches no status_code")
+}
+
 func TestApplyTranslation_NilMovie(t *testing.T) {
 	translator := &translationAdapter{svc: nil, enabled: true, provider: "test"}
-	warning, _ := applyTranslation(context.Background(), nil, translator)
+	warning, _, _ := applyTranslation(context.Background(), nil, translator)
 	assert.Empty(t, warning)
 }
 
 func TestApplyTranslation_NilTranslator(t *testing.T) {
 	movie := &models.Movie{Title: "test"}
-	warning, _ := applyTranslation(context.Background(), movie, nil)
+	warning, _, _ := applyTranslation(context.Background(), movie, nil)
 	assert.Empty(t, warning)
 }
 
 func TestApplyTranslation_NoOpTranslator(t *testing.T) {
 	movie := &models.Movie{Title: "test"}
 	translator := noOpTranslator{}
-	warning, _ := applyTranslation(context.Background(), movie, translator)
+	warning, _, _ := applyTranslation(context.Background(), movie, translator)
 	assert.Empty(t, warning)
 }
 
@@ -148,7 +209,7 @@ func TestApplyTranslation_WarningOnProviderError(t *testing.T) {
 	}
 
 	translator := helperToTranslator(translationCfg)
-	warning, _ := applyTranslation(context.Background(), movie, translator)
+	warning, _, _ := applyTranslation(context.Background(), movie, translator)
 	assert.Contains(t, warning, "rate limited")
 	assert.Equal(t, "Original Title", movie.Title)
 }
@@ -185,7 +246,7 @@ func TestApplyTranslation_WarningOnEmptyResult(t *testing.T) {
 	}
 
 	translator := helperToTranslator(translationCfg)
-	warning, _ := applyTranslation(context.Background(), movie, translator)
+	warning, _, _ := applyTranslation(context.Background(), movie, translator)
 	assert.Contains(t, warning, "title: empty translation, kept original")
 	assert.Equal(t, "Original Title", movie.Title)
 }

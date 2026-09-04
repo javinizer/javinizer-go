@@ -27,19 +27,20 @@ type Config struct {
 // test adapters return canned results.
 type Translator interface {
 	// Translate applies metadata translation to the given movie in-place.
-	// Returns a warning string if translation partially failed, or empty string on success.
+	// Returns a warning string if translation partially failed, or empty string on success,
+	// plus the machine-readable warning code (empty on success or user-initiated cancellation).
 	// The translated bool indicates whether any translation was attempted.
 	// The *translation.TranslationOutput carries genre/actress translation data for
 	// persistence; nil when translation was not performed or produced no output.
-	Translate(ctx context.Context, movie *models.Movie) (warning string, translated bool, output *translation.TranslationOutput)
+	Translate(ctx context.Context, movie *models.Movie) (warning string, code string, translated bool, output *translation.TranslationOutput)
 }
 
 // noOpTranslator is returned when translation is disabled. It satisfies the Translator
 // interface without doing any work, so the Scraper never needs a nil check.
 type noOpTranslator struct{}
 
-func (noOpTranslator) Translate(_ context.Context, _ *models.Movie) (string, bool, *translation.TranslationOutput) {
-	return "", false, nil
+func (noOpTranslator) Translate(_ context.Context, _ *models.Movie) (string, string, bool, *translation.TranslationOutput) {
+	return "", "", false, nil
 }
 
 // NewTranslatorFromApp constructs a Translator from *config.TranslationConfig.
@@ -87,12 +88,12 @@ type translationAdapter struct {
 	provider string
 }
 
-func (a *translationAdapter) Translate(ctx context.Context, movie *models.Movie) (string, bool, *translation.TranslationOutput) {
+func (a *translationAdapter) Translate(ctx context.Context, movie *models.Movie) (string, string, bool, *translation.TranslationOutput) {
 	if movie == nil {
-		return "", false, nil
+		return "", "", false, nil
 	}
-	warning, output := a.svc.translateWithContext(ctx, movie)
-	return warning, true, output
+	warning, code, output := a.svc.translateWithContext(ctx, movie)
+	return warning, code, true, output
 }
 
 // ConfigFromAppConfig extracts Scrape-relevant fields from the application config.

@@ -4,6 +4,7 @@
 	import Card from '$lib/components/ui/Card.svelte';
 	import MovieEditor from '$lib/components/MovieEditor.svelte';
 	import NfoDiffSummary from './NfoDiffSummary.svelte';
+	import TranslationWarningBadge from '$lib/components/TranslationWarningBadge.svelte';
 	import { createFavoriteGenresQuery } from '$lib/query/queries';
 	import { createMutation, useQueryClient } from '@tanstack/svelte-query';
 	import { apiClient } from '$lib/api/client';
@@ -118,6 +119,11 @@
 				</div>
 			</div>
 		</div>
+
+		<TranslationWarningBadge
+			code={currentResult.translation_warning_code}
+			warning={currentResult.translation_warning}
+		/>
 
 		<MovieEditor
 			movie={currentMovie}
