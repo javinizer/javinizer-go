@@ -231,15 +231,18 @@ func refuseExistingDestination(fs afero.Fs, src, dst string) (identical, sameIno
 // conflict the classifier reports, while a volume that cannot express an
 // atomic no-replace publish surfaces as a DISTINCT infrastructure refusal —
 // never as a content conflict.
-// destMaybeLstat probes dst with no-follow where possible; wrappings lacking
-// an afero.Lstater fall back on the plain Stat so nothing classifies a live
-// symlink as absent blindly.
-func destMaybeLstat(fs afero.Fs, dst string) (os.FileInfo, error) {
+// destMaybeLstat probes dst without ever following links where the fs can,
+// and says whether the probing was truly no-follow. When didLstat=false the
+// info came from a link-following Stat (wrapping non-Lister or Listers whose
+// deferred Lstat gave up), so a caller CANNOT tell a live symlink from a
+// regular file from info alone — it must probe via readlink separately.
+func destMaybeLstat(fs afero.Fs, dst string) (os.FileInfo, bool, error) {
 	if lst, ok := fs.(afero.Lstater); ok {
-		info, _, err := lst.LstatIfPossible(dst)
-		return info, err
+		info, did, lerr := lst.LstatIfPossible(dst)
+		return info, !did, lerr
 	}
-	return fs.Stat(dst)
+	info, err := fs.Stat(dst)
+	return info, true, err
 }
 
 func mapNoReplaceRefusal(err error, dst string) error {
@@ -603,9 +606,17 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 				// authorization (#224 codex P1). dstLexicalSelf never reaches here
 				// (refused at classification).
 				if plan.overwriteAuthorized && !dstLexicalSelf {
-					linfo, lerr := destMaybeLstat(s.fs, plan.TargetPath)
-					if lerr == nil && linfo != nil && !linfo.Mode().IsRegular() {
-						return fmt.Errorf("destination is not a regular file (cannot authorize-over): %s", plan.TargetPath)
+					linfo, followed, lerr := destMaybeLstat(s.fs, plan.TargetPath)
+					if lerr == nil && linfo != nil {
+						// A link-following Stat on no-Lstat wrappers reads through a live
+						// link as a regular file (now flagged by "followed"); check the
+						// object via readlink before treating it as replaceable (codex r6).
+						if followed && symlinkObjectExists(s.fs, plan.TargetPath) {
+							return fmt.Errorf("destination is not a regular file (cannot authorize-over): %s", plan.TargetPath)
+						}
+						if !linfo.Mode().IsRegular() {
+							return fmt.Errorf("destination is not a regular file (cannot authorize-over): %s", plan.TargetPath)
+						}
 					}
 				}
 				if err := s.linker.copyFile(s.fs, plan.SourcePath, plan.TargetPath); err != nil {

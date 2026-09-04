@@ -22,8 +22,9 @@ func TestLidPin_DestMaybeLstat_WrappedPlane(t *testing.T) {
 	fp := filepath.Join(dir, "x.mp4")
 	require.NoError(t, os.WriteFile(fp, []byte("v"), 0o644))
 	wrapped := plainLstatFs{Fs: fs}
-	info, err := destMaybeLstat(wrapped, fp)
+	info, followed, err := destMaybeLstat(wrapped, fp)
 	require.NoError(t, err)
+	_ = followed
 	assert.False(t, info.IsDir())
 }
 
