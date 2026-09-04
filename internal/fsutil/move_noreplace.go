@@ -204,8 +204,16 @@ func discardStagedAfterFailedPublish(fs afero.Fs, staged string, identity os.Fil
 	if errors.Is(pubErr, ErrPublishStagedVerify) || PublishCompleted(pubErr) {
 		return
 	}
-	// UnlinkFailed means the staged object could not be re-proven (already
-	// consumed by the publish, or swapped out and re-planted) — both spell
-	//	// "do nothing", and keep the codex-reviewed keep-both postcondition.
-	_ = UnlinkVerified(fs, staged, identity)
+	if identity == nil {
+		return // identity could not be shown — keep both
+	}
+	// Staged names are ours by construction (O_EXCL created); no vacate is
+	// needed, and UnlinkVerified would need the no-replace publish these
+	// volumes can't express (codex P1: on exFAT that leaked full-size staged
+	// copies per attempt). Prove identity in place, remove directly.
+	cur, lerr := asideLstat(fs, staged)
+	if lerr != nil || !asideSameObject(cur, identity) {
+		return // already consumed by the publish or substituted: keep both
+	}
+	_ = fs.Remove(staged)
 }

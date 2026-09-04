@@ -35,7 +35,10 @@ const (
 var cachedUmask atomic.Int32
 
 func init() {
-	cachedUmask.Store(0)
+	// Capture the process's inherited umask up front (probe-and-restore is
+	// thread-unsafe; init runs before anything else). StoreUmask from config
+	// overrides this at startup when a setting is applied.
+	cachedUmask.Store(int32(currentProcessUmask()))
 }
 
 // StoreUmask caches the provided umask value for later use.
