@@ -38,8 +38,8 @@ func TestOrganize_DanglingSymlink_Conflicts(t *testing.T) {
 	// The plan-rendering is the bare path; the refusal sentence is execute-lane only.
 	require.Error(t, err)
 	require.Nil(t, result)
-	// validation wraps plan conflicts as bare paths
-	assert.Contains(t, err.Error(), filepath.ToSlash(dst))
+	// validation wraps plan conflicts as bare paths (OS-native separators)
+	assert.Contains(t, filepath.ToSlash(err.Error()), filepath.ToSlash(dst))
 
 	// The symlink entry remains; source is intact.
 	info, err := os.Lstat(dst)
