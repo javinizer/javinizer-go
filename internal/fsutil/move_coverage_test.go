@@ -58,7 +58,7 @@ func TestMoveFileFs_SourceNotFoundMemMap(t *testing.T) {
 
 // --- crossDeviceMoveFs coverage ---
 
-func TestCrossDeviceMoveFs_SourceRemoveFailure_CleansUpDest(t *testing.T) {
+func TestCrossDeviceMoveFs_SourceRemoveFailure_KeepsBoth(t *testing.T) {
 	// Use a filesystem where copy succeeds but Remove fails.
 	// We simulate this with a custom Fs wrapper.
 	memFs := afero.NewMemMapFs()
@@ -69,9 +69,31 @@ func TestCrossDeviceMoveFs_SourceRemoveFailure_CleansUpDest(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to remove source")
 
-	// Destination should be cleaned up
-	_, statErr := memFs.Stat("/dst.txt")
-	assert.True(t, os.IsNotExist(statErr), "dest should be removed after source remove failure")
+	// #224: keep-both postcondition — the published destination bytes and the
+	// unremovable source BOTH survive; nothing is deleted out from under a
+	// failure (the old behavior removed dst, quietly destroying the copy).
+	dstContent, statErr := afero.ReadFile(memFs, "/dst.txt")
+	assert.NoError(t, statErr, "dest must be kept after source remove failure")
+	assert.Equal(t, "data", string(dstContent))
+	_, srcErr := memFs.Stat("/src.txt")
+	assert.NoError(t, srcErr, "source must survive when its removal failed")
+}
+
+func TestCrossDeviceMoveFs_CopyFailureKeepsForeignDest(t *testing.T) {
+	// #224: on copy-leg failure the destination is NEVER deleted — the old
+	// implementation removed dst (an entry this operation never wrote), which
+	// deleted pre-existing foreign content.
+	memFs := afero.NewMemMapFs()
+	require.NoError(t, afero.WriteFile(memFs, "/dst.txt", []byte("foreign"), 0644))
+
+	fs := &openFailFs{Fs: memFs, failOn: "/src.txt"}
+	err := crossDeviceMoveFs(fs, "/src.txt", "/dst.txt")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to copy file across devices")
+
+	dstContent, statErr := afero.ReadFile(memFs, "/dst.txt")
+	assert.NoError(t, statErr)
+	assert.Equal(t, "foreign", string(dstContent), "foreign destination must survive a failed move")
 }
 
 // removeFailFs wraps afero.Fs and fails on Remove for a specific path.
@@ -85,6 +107,19 @@ func (r *removeFailFs) Remove(name string) error {
 		return fmt.Errorf("simulated remove failure")
 	}
 	return r.Fs.Remove(name)
+}
+
+// openFailFs wraps afero.Fs and fails on Open for a specific path.
+type openFailFs struct {
+	afero.Fs
+	failOn string
+}
+
+func (o *openFailFs) Open(name string) (afero.File, error) {
+	if name == o.failOn {
+		return nil, fmt.Errorf("simulated open failure")
+	}
+	return o.Fs.Open(name)
 }
 
 // --- AferoRemoveAll coverage ---

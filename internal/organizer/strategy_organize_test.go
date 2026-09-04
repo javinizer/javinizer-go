@@ -336,7 +336,8 @@ func TestOrganizeStrategy_Execute_RenameError(t *testing.T) {
 
 	result, err := strategy.Execute(plan)
 	assert.Error(t, err, "Should fail when source file does not exist for rename")
-	assert.Contains(t, err.Error(), "failed to move file")
+	// #224: an absent source surfaces via the composite's probe error.
+	assert.Contains(t, err.Error(), "no-replace: probe source")
 	assert.False(t, result.Moved)
 }
 

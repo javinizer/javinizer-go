@@ -400,7 +400,7 @@ func (o *Organizer) execute(plan *OrganizePlan) (*OrganizeResult, error) {
 	}
 
 	if o.config.MoveSubtitles {
-		o.handleSubtitles(plan, strategyResult, fsutil.MoveFileFs)
+		o.handleSubtitles(plan, strategyResult, fsutil.MoveFileNoReplace)
 	}
 
 	return strategyResult, nil
@@ -475,7 +475,18 @@ func (o *Organizer) handleSubtitles(plan *OrganizePlan, result *OrganizeResult, 
 					sr.Skipped = true
 					return nil
 				}
-				return fileOp(o.fs, subtitle.OriginalPath, newPath)
+				err := fileOp(o.fs, subtitle.OriginalPath, newPath)
+				if err != nil && fsutil.PublishRefusal(err) {
+					// #224: subtitle destinations accept the publish-refusal classes
+					// as a skip — occupancy (a foreign subtitle won the name inside
+					// the check→publish window: same outcome as the pre-check) and
+					// no-replace-unsupported volumes (the subtitle is simply not
+					// delivered; nothing was installed that could have overwritten
+					// the foreign bytes).
+					sr.Skipped = true
+					return nil
+				}
+				return err
 			})
 		})
 		if err != nil {
@@ -556,9 +567,9 @@ func (o *Organizer) Organize(ctx context.Context, cmd OrganizeCmd) (*OrganizeRes
 
 	// Subtitle handling is centralized here — applies to both move and copy/link paths.
 	if cmd.MoveFiles && o.config.MoveSubtitles {
-		o.handleSubtitles(plan, strategyResult, fsutil.MoveFileFs)
+		o.handleSubtitles(plan, strategyResult, fsutil.MoveFileNoReplace)
 	} else if !cmd.MoveFiles && o.config.MoveSubtitles {
-		o.handleSubtitles(plan, strategyResult, fsutil.CopyFileFs)
+		o.handleSubtitles(plan, strategyResult, fsutil.CopyFileNoReplace)
 	}
 
 	return strategyResult, nil

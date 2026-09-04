@@ -3,9 +3,7 @@ package fsutil
 import (
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/spf13/afero"
@@ -48,12 +46,16 @@ func MoveFileFs(fs afero.Fs, src, dst string) error {
 
 func crossDeviceMoveFs(fs afero.Fs, src, dst string) error {
 	if err := copyFileDataFs(fs, src, dst); err != nil {
-		_ = fs.Remove(dst) // clean up partial destination file
+		// The copy leg never writes to dst directly (staging only), so there is
+		// NOTHING of ours at dst to "clean up": removing it could delete a
+		// pre-existing foreign file (#224). Keep both, surface the failure.
 		return fmt.Errorf("failed to copy file across devices: %w", err)
 	}
 
 	if err := fs.Remove(src); err != nil {
-		_ = fs.Remove(dst)
+		// dst was fully published via the bound replace; the source remove is
+		// the only failed step — keep BOTH objects rather than deleting the
+		// published destination, and surface the ambiguity (#224).
 		return fmt.Errorf("failed to remove source after cross-device copy: %w", err)
 	}
 
@@ -67,30 +69,38 @@ func copyFileDataFs(fs afero.Fs, src, dst string) error {
 	}
 	defer func() { _ = srcFile.Close() }()
 
-	// Write to a temp file in the same directory as dst so the final rename
-	// is same-filesystem and atomic. On any failure the temp file is removed
-	// and dst is never left in a partial or truncated state.
-	tmp := filepath.Join(filepath.Dir(dst),
-		fmt.Sprintf(".%s.tmp-%d-%d", filepath.Base(dst), time.Now().UnixNano(), os.Getpid()))
-
-	dstFile, err := fs.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, config.FilePerm)
-	if err != nil {
-		return fmt.Errorf("failed to create destination: %w", err)
+	// Stage dest-adjacent with O_EXCL (a predictable O_TRUNC name could
+	// truncate a racing peer's staged bytes), stream through the open handle,
+	// and publish through the bound discipline — a substitute planted on the
+	// staged name is never published nor unbound-removed (#224). Publish keeps
+	// REPLACE semantics (authorized overwrite); no-clobber uses the separate
+	// NoReplace composites.
+	staged, handle, sErr := CreateExclusiveStagingFile(fs, dst, ".mvstg", noreplaceOrdinal.Add(1), config.FilePerm)
+	if sErr != nil {
+		return fmt.Errorf("failed to create destination: %w", sErr)
 	}
 
-	if _, err := io.Copy(dstFile, srcFile); err != nil {
-		_ = dstFile.Close()
-		_ = fs.Remove(tmp)
+	if _, err := io.Copy(handle, srcFile); err != nil {
+		DiscardFailedExclusiveStaging(fs, staged, handle)
 		return fmt.Errorf("failed to copy data: %w", err)
 	}
 
-	if err := dstFile.Close(); err != nil {
-		_ = fs.Remove(tmp)
-		return fmt.Errorf("failed to close destination: %w", err)
+	p := StagedPublish{
+		FS:      fs,
+		Publish: ReplaceFile,
+		Staged:  staged,
+		Handle:  handle,
+		Dest:    dst,
+		Suffix:  ".mvstg",
+		NextOrdinal: func() uint64 {
+			return noreplaceOrdinal.Add(1)
+		},
 	}
-
-	if err := fs.Rename(tmp, dst); err != nil {
-		_ = fs.Remove(tmp)
+	if err := PublishStagedBound(p); err != nil {
+		// Same discard discipline as the no-replace composites: the old
+		// implementation removed its temp on failure; keep that cleanliness
+		// without ever deleting a possibly-foreign staged name.
+		discardStagedAfterFailedPublish(fs, staged, err)
 		return fmt.Errorf("failed to rename temp file to destination: %w", err)
 	}
 

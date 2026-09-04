@@ -278,6 +278,10 @@ func TestOrganizeStrategy_Execute_CopyFileError(t *testing.T) {
 		moveFiles:  false,
 		LinkMode:   LinkModeNone,
 		Conflicts:  []string{},
+		// #224: unauthorized copies route through fsutil.CopyFileNoReplace
+		// (no linker involvement); the linker's copy error seam lives on the
+		// authorized leg, so this seam test authorizes explicitly.
+		overwriteAuthorized: true,
 	}
 
 	result, err := strategy.Execute(plan)

@@ -214,6 +214,20 @@ video_file.avi
 
 ## Organization Issues
 
+### "destination volume cannot express an atomic no-clobber write"
+
+**Problem**: Organize/move jobs fail per-file with this error when the destination volume cannot express an atomic no-replace publish — e.g. non-Linux POSIX volumes without hard links (exFAT on macOS is the typical case).
+
+**Why**: Unauthorized organize writes are fail-closed: the alternative is a non-atomic publish that could overwrite a foreign file inside a race window — exactly what the #224 hardening rules out. Nothing was moved or deleted when this surfaces.
+
+**Solutions**:
+
+- Move the library destination onto a volume with atomic no-replace publish support (native Linux/Windows, or full POSIX volumes with hard links), or
+- run the organize in **force-update** mode deliberately for that library (authorized replace paths are unchanged), or
+- treat the affected files as conflicts and re-run after migrating the destination.
+
+
+
 ### "File already exists"
 
 **Problem**: Target file conflicts with existing file

@@ -130,7 +130,11 @@ func withDestDirSharedLock(dir string, fn func() error) error {
 	return withDestDirLock(dir, false, fn)
 }
 
-// refuseExistingDestination enforces no-clobber at execution time with lexical-self vs
+// refuseExistingDestination classifies destination state at execution time with lexical-self vs
+// #224: this remains the CLASSIFICATION authority (no-op/conflict kinds); the
+// no-clobber guarantee itself is carried syscall-atomically by the fsutil
+// no-replace composites on every unauthorized terminal leg — a foreign writer
+// landing after this classification is refused at publish, not overwritten.
 // hardlink-alias distinction: identical lexical paths (./file vs file) are identical=true —
 // operators must not touch the destination at all; a DIFFERENT path to the same inode
 // (hardlink alias) is sameInode=true and may no-op when its output type is satisfied.
@@ -182,6 +186,22 @@ func refuseExistingDestination(fs afero.Fs, src, dst string) (identical, sameIno
 		return false, false, fmt.Errorf("failed to check destination: %w", dstErr)
 	}
 	return false, false, nil
+}
+
+// mapNoReplaceRefusal translates the fsutil no-replace failure classes into the
+// organizer's existing failure vocabulary (#224): occupancy becomes the same
+// conflict the classifier reports, while a volume that cannot express an
+// atomic no-replace publish surfaces as a DISTINCT infrastructure refusal —
+// never as a content conflict.
+func mapNoReplaceRefusal(err error, dst string) error {
+	switch {
+	case errors.Is(err, fsutil.ErrPublishNoReplaceUnsupported):
+		return fmt.Errorf("destination volume cannot express an atomic no-clobber write (no-replace unsupported): %s: %w", dst, err)
+	case errors.Is(err, fsutil.ErrPublishCollision):
+		return fmt.Errorf("file already exists at destination (refusing to overwrite): %s", dst)
+	default:
+		return err
+	}
 }
 
 // symlinkObjectExists probes path specifically for a symlink OBJECT (including dangling
@@ -369,6 +389,15 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 				return fmt.Errorf("failed to create directory: %w", err)
 			}
 
+			if !plan.overwriteAuthorized {
+				// #224: the atomic no-replace composite — a foreign writer
+				// claiming the name after classification conflicts atomically
+				// instead of being replaced by the rename inside the window.
+				if err := fsutil.MoveFileNoReplace(s.fs, plan.SourcePath, plan.TargetPath); err != nil {
+					return mapNoReplaceRefusal(err, plan.TargetPath)
+				}
+				return nil
+			}
 			return fsutil.MoveFileFs(s.fs, plan.SourcePath, plan.TargetPath)
 		}
 
@@ -470,6 +499,13 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 				}
 			default:
 				if dstSameInode && !plan.overwriteAuthorized {
+					return nil
+				}
+				if !plan.overwriteAuthorized {
+					// #224: copy leg is atomically no-clobbering too.
+					if err := fsutil.CopyFileNoReplace(s.fs, plan.SourcePath, plan.TargetPath); err != nil {
+						return mapNoReplaceRefusal(fmt.Errorf("failed to copy file: %w", err), plan.TargetPath)
+					}
 					return nil
 				}
 				if err := s.linker.copyFile(s.fs, plan.SourcePath, plan.TargetPath); err != nil {

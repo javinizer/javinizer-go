@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Organize file writes are atomically no-clobbering: unauthorized moves/copies publish through the fsutil no-replace composites (renameat2 / hard-link-tiered / MoveFileEx per OS), so a foreign writer claiming a destination mid-run conflicts atomically instead of being overwritten; cross-device copy failures no longer remove foreign destination bytes, and sources are cleaned up only via identity-verified removal. On volumes that cannot express an atomic no-replace publish (e.g. exFAT under macOS), unauthorized organizes now fail closed with a dedicated "cannot express an atomic no-clobber write" error instead of succeeding non-atomically (#224 partial — phases C/D/E remain open)
 - The "Rename in place" operation description in the Browse apply-plan selector now reflects the rename_file setting: with rename files off, the copy no longer claims videos are renamed (#229)
 
 ### Added

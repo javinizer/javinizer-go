@@ -114,6 +114,12 @@ func (s *inPlaceNoRenameFolderStrategy) Execute(plan *OrganizePlan) (*OrganizeRe
 					return nil
 				}
 			}
+			if !plan.overwriteAuthorized {
+				if err := fsutil.MoveFileNoReplace(s.fs, plan.SourcePath, plan.TargetPath); err != nil {
+					return mapNoReplaceRefusal(err, plan.TargetPath)
+				}
+				return nil
+			}
 			return fsutil.MoveFileFs(s.fs, plan.SourcePath, plan.TargetPath)
 		})
 	})

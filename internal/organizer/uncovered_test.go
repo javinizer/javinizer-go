@@ -256,7 +256,12 @@ func TestOrganizeStrategy_Execute_CopyPath(t *testing.T) {
 	result, err := strategy.Execute(plan)
 	require.NoError(t, err)
 	assert.True(t, result.Moved)
-	assert.True(t, ml.copyCalled)
+	// #224: unauthorized copy legs run through fsutil.CopyFileNoReplace, not
+	// the linker; the destination still materializes with the right bytes.
+	assert.False(t, ml.copyCalled)
+	content, rerr := afero.ReadFile(fs, "/dest/ABC-123/ABC-123.mp4")
+	require.NoError(t, rerr)
+	assert.Equal(t, "video", string(content))
 }
 
 func TestOrganizeStrategy_Execute_InvalidLinkMode(t *testing.T) {
