@@ -49,3 +49,37 @@ func swapFileAfterNPublishCalls(t *testing.T, n int, path string, content []byte
 	t.Cleanup(func() { publishNoReplaceLink = prev })
 	return true
 }
+
+// hookNoReplacePlantSeamsLater invokes plant() immediately BEFORE the n-th
+// publish-link seam call.
+func hookNoReplacePlantSeamsLater(t *testing.T, n int, plant func()) bool {
+	t.Helper()
+	calls := 0
+	prev := publishNoReplaceLink
+	publishNoReplaceLink = func(s, d string) (err error) {
+		calls++
+		if calls == n {
+			plant()
+		}
+		return prev(s, d)
+	}
+	t.Cleanup(func() { publishNoReplaceLink = prev })
+	return true
+}
+
+// hookNoReplacePlantSeamsFirstCall runs action() during the FIRST
+// publish-link seam call, then restores.
+func hookNoReplacePlantSeamsFirstCall(t *testing.T, action func()) bool {
+	t.Helper()
+	calls := 0
+	prev := publishNoReplaceLink
+	publishNoReplaceLink = func(s, d string) (err error) {
+		if calls == 0 {
+			calls++
+			action()
+		}
+		return prev(s, d)
+	}
+	t.Cleanup(func() { publishNoReplaceLink = prev })
+	return true
+}

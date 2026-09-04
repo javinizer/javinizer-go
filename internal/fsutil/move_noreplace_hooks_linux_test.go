@@ -74,3 +74,53 @@ func swapFileAfterNPublishCalls(t *testing.T, n int, path string, content []byte
 	})
 	return true
 }
+
+// hookNoReplacePlantSeamsLater invokes plant() immediately BEFORE the n-th
+// total publish-seam call (counting across both seams).
+func hookNoReplacePlantSeamsLater(t *testing.T, n int, plant func()) bool {
+	t.Helper()
+	calls := 0
+	prevK := renameNoReplaceKernel
+	prevL := publishNoReplaceLink
+	wrap := func(prev func(string, string) error) func(string, string) error {
+		return func(s, d string) error {
+			calls++
+			if calls == n {
+				plant()
+			}
+			return prev(s, d)
+		}
+	}
+	renameNoReplaceKernel = wrap(prevK)
+	publishNoReplaceLink = wrap(prevL)
+	t.Cleanup(func() {
+		renameNoReplaceKernel = prevK
+		publishNoReplaceLink = prevL
+	})
+	return true
+}
+
+// hookNoReplacePlantSeamsFirstCall runs action() during the FIRST publish-seam
+// call (before it binds anything), then restores.
+func hookNoReplacePlantSeamsFirstCall(t *testing.T, action func()) bool {
+	t.Helper()
+	calls := 0
+	prevK := renameNoReplaceKernel
+	prevL := publishNoReplaceLink
+	wrap := func(prev func(string, string) error) func(string, string) error {
+		return func(s, d string) error {
+			if calls == 0 {
+				calls++
+				action()
+			}
+			return prev(s, d)
+		}
+	}
+	renameNoReplaceKernel = wrap(prevK)
+	publishNoReplaceLink = wrap(prevL)
+	t.Cleanup(func() {
+		renameNoReplaceKernel = prevK
+		publishNoReplaceLink = prevL
+	})
+	return true
+}

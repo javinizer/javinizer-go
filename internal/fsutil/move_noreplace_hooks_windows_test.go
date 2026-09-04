@@ -9,3 +9,7 @@ import "testing"
 func hookNoReplacePlantSeams(_ *testing.T, _ func()) bool                     { return false }
 func forceNoReplaceEXDEV(_ *testing.T, _ int) bool                            { return false }
 func swapFileAfterNPublishCalls(_ *testing.T, _ int, _ string, _ []byte) bool { return false }
+
+func hookNoReplacePlantSeamsLater(_ *testing.T, _ int, _ func()) bool { return false }
+
+func hookNoReplacePlantSeamsFirstCall(_ *testing.T, _ func()) bool { return false }

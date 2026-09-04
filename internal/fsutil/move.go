@@ -86,15 +86,13 @@ func copyFileDataFs(fs afero.Fs, src, dst string) error {
 	}
 
 	p := StagedPublish{
-		FS:      fs,
-		Publish: ReplaceFile,
-		Staged:  staged,
-		Handle:  handle,
-		Dest:    dst,
-		Suffix:  ".mvstg",
-		NextOrdinal: func() uint64 {
-			return noreplaceOrdinal.Add(1)
-		},
+		FS:          fs,
+		Publish:     ReplaceFile,
+		Staged:      staged,
+		Handle:      handle,
+		Dest:        dst,
+		Suffix:      ".mvstg",
+		NextOrdinal: nextNoReplaceOrdinal,
 	}
 	if err := PublishStagedBound(p); err != nil {
 		// Same discard discipline as the no-replace composites: the old

@@ -8,6 +8,8 @@ import (
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/javinizer/javinizer-go/internal/models"
 )
 
 // #224 tasks 2.6: an occupied-by-foreign destination on the REAL filesystem
@@ -49,4 +51,41 @@ func TestOrganizeStrategy_AtomicNoClobber_ForeignPlantWins(t *testing.T) {
 	content, rerr = os.ReadFile(src)
 	require.NoError(t, rerr)
 	assert.Equal(t, "ours", string(content), "our source byte-preserved")
+}
+
+// Authorized leg parity: a dedicated-folder in-place rename under
+// overwriteAuthorized keeps the plain inner rename (the unauthorized window
+// is covered by the no-replace leg; this proves the leg flip is reachable).
+func TestInPlaceStrategy_AuthorizedInnerRenameUsesPlainRename(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	require.NoError(t, fs.MkdirAll("/source/mixed", 0777))
+	require.NoError(t, afero.WriteFile(fs, "/source/mixed/ABC-123.mp4", []byte("video"), 0644))
+	// Occupy the inner target so ONLY the replace-capable (authorized) inner
+	// rename can succeed.
+	require.NoError(t, afero.WriteFile(fs, "/source/mixed/ABC-123-KEEP.mp4", []byte("prior"), 0644))
+
+	cfg := &Config{FileFormat: "<ID>", FolderFormat: "<ID>", RenameFile: true}
+	strategy := newInPlaceStrategy(fs, cfg, nil, nil)
+
+	// TargetFile DIFFERS from the sitting name so the inner rename leg runs.
+	plan := &OrganizePlan{
+		SourcePath:          "/source/mixed/ABC-123.mp4",
+		TargetDir:           "/source/ABC-123",
+		TargetPath:          "/source/ABC-123/ABC-123-new.mp4",
+		TargetFile:          "ABC-123-new.mp4",
+		OldDir:              "/source/mixed",
+		WillMove:            true,
+		InPlace:             true,
+		IsDedicated:         true,
+		Match:               models.FileMatchInfo{MovieID: "ABC-123", Path: "/source/mixed/ABC-123.mp4", Name: "ABC-123.mp4", Extension: ".mp4"},
+		overwriteAuthorized: true,
+		Conflicts:           []string{},
+	}
+
+	result, err := strategy.Execute(plan)
+	require.NoError(t, err)
+	assert.True(t, result.Moved)
+	content, rerr := afero.ReadFile(fs, "/source/ABC-123/ABC-123-new.mp4")
+	require.NoError(t, rerr)
+	assert.Equal(t, "video", string(content))
 }

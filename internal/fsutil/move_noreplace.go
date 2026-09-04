@@ -28,6 +28,9 @@ import (
 // no-replace composites (exclusive staging retries ordinals inside).
 var noreplaceOrdinal atomic.Uint64
 
+// nextNoReplaceOrdinal hands out the next ordinal for staging-name generation.
+func nextNoReplaceOrdinal() uint64 { return noreplaceOrdinal.Add(1) }
+
 // classifyNoreplaceDestination runs the adoption/classification pre-check:
 // PublishNoReplace carries NO adoption semantics (every occupied dst refuses),
 // while organize keeps #225's no-op rules — lexical self, and same-inode
@@ -142,16 +145,14 @@ func CopyFileNoReplace(fs afero.Fs, src, dst string) error {
 	}
 
 	p := StagedPublish{
-		FS:        fs,
-		Publish:   func(fsys afero.Fs, s, d string) error { return PublishNoReplace(fsys, s, d) },
-		NoReplace: true,
-		Staged:    staged,
-		Handle:    handle,
-		Dest:      dst,
-		Suffix:    ".nrstg",
-		NextOrdinal: func() uint64 {
-			return noreplaceOrdinal.Add(1)
-		},
+		FS:          fs,
+		Publish:     func(fsys afero.Fs, s, d string) error { return PublishNoReplace(fsys, s, d) },
+		NoReplace:   true,
+		Staged:      staged,
+		Handle:      handle,
+		Dest:        dst,
+		Suffix:      ".nrstg",
+		NextOrdinal: nextNoReplaceOrdinal,
 	}
 	if err := PublishStagedBound(p); err != nil {
 		discardStagedAfterFailedPublish(fs, staged, err)
