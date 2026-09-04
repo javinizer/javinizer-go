@@ -205,15 +205,35 @@ func discardStagedAfterFailedPublish(fs afero.Fs, staged string, identity os.Fil
 		return
 	}
 	if identity == nil {
-		return // identity could not be shown — keep both
+		return // identity unknowable — keep both, never unbound-remove
 	}
-	// Staged names are ours by construction (O_EXCL created); no vacate is
-	// needed, and UnlinkVerified would need the no-replace publish these
-	// volumes can't express (codex P1: on exFAT that leaked full-size staged
-	// copies per attempt). Prove identity in place, remove directly.
-	cur, lerr := asideLstat(fs, staged)
-	if lerr != nil || !asideSameObject(cur, identity) {
-		return // already consumed by the publish or substituted: keep both
+	// Removal must be bound to the verified staged INODE, never the name:
+	// a directory writer who renames the staged name away and plants a
+	// substitute would otherwise get ITS file deleted between our proof and
+	// the unlink. Vacate via a plain rename (no no-replace primitive needed —
+	// this works on exFAT too, codex r4), then re-prove the vacated object
+	// matches the staged identity; any mismatch or move-away restores the
+	// occupancy without deleting anything.
+	vac, claimInfo, claimErr := claimTakeAsideVacName(fs, staged)
+	if claimErr != nil {
+		return // could not claim a vacated sibling; keep both
 	}
-	_ = fs.Remove(staged)
+	if relErr := releaseTakeAsideVacClaim(fs, vac, claimInfo); relErr != nil {
+		return
+	}
+	if err := fs.Rename(staged, vac); err != nil {
+		return // staged already gone or foreign-won window — keep both
+	}
+	vacInfo, lerr := asideLstat(fs, vac)
+	if lerr != nil || !asideSameObject(vacInfo, identity) {
+		// The object renamed into vac is NOT the verified staged copy — a plant
+		// won the rename window. Restore occupancy: put it back on the staged
+		// name (best-effort) and delete nothing.
+		// A failed restore keeps both names live; the caller's error still
+		// propagates the publish outcome. `rb` is informational only.
+		rb := fs.Rename(vac, staged)
+		_ = rb
+		return
+	}
+	_ = fs.Remove(vac)
 }
