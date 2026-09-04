@@ -249,8 +249,9 @@ func processBulkRescrapeMovie(ctx context.Context, movieID string, job worker.Ba
 	}
 
 	return &contracts.BulkRescrapeMovieResult{
-		MovieID: movieID,
-		Status:  models.RescrapeStatusSuccess,
-		Movie:   contracts.MovieViewFromModel(result.Movie),
+		MovieID:                movieID,
+		Status:                 models.RescrapeStatusSuccess,
+		Movie:                  contracts.MovieViewFromModel(result.Movie),
+		TranslationWarningCode: result.TranslationWarningCode,
 	}, result.PosterRecovery
 }

@@ -13,9 +13,9 @@ import { translationWarningMessage } from '$lib/utils/translation-warning';
 const locales = ['en', 'en-XA', 'ja', 'zh-Hans', 'zh-Hant'] as const;
 
 describe('translation_warning_* localized messages across all locales', () => {
-	it('translation_warning_rate_limited names provider+mode and remediation in every locale', () => {
+	it('translation_warning_rate_limited is provider-neutral fallback copy in every locale', () => {
 		expect(translation_warning_rate_limited({}, { locale: 'en' })).toBe(
-			'Translation was rate limited (Google Translate free tier). Retry later, switch translation provider, or configure paid mode with an API key in Settings.'
+			'Translation was rate limited by the translation provider. Retry later, switch translation provider, or configure paid mode with an API key in Settings.'
 		);
 		for (const locale of locales) {
 			const msg = translation_warning_rate_limited({}, { locale });
@@ -39,10 +39,22 @@ describe('translation_warning_* localized messages across all locales', () => {
 
 describe('translationWarningMessage code mapping', () => {
 	it('known codes render localized copy', () => {
-		expect(translationWarningMessage('rate_limited', 'raw')).toBe(
+		expect(translationWarningMessage('degraded', 'raw')).toBe(translation_warning_degraded());
+	});
+
+	it('rate_limited prefers the raw backend string (names provider+mode) when present', () => {
+		expect(
+			translationWarningMessage('rate_limited', 'Translation (openai): rate limited - retry later')
+		).toBe('Translation (openai): rate limited - retry later');
+	});
+
+	it('rate_limited falls back to the localized key on slim (code-only) payloads', () => {
+		expect(translationWarningMessage('rate_limited', undefined)).toBe(
 			translation_warning_rate_limited()
 		);
-		expect(translationWarningMessage('degraded', 'raw')).toBe(translation_warning_degraded());
+		expect(translationWarningMessage('rate_limited', '   ')).toBe(
+			translation_warning_rate_limited()
+		);
 	});
 
 	it('unknown code falls back to the raw warning string', () => {

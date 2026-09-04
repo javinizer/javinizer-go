@@ -325,6 +325,8 @@ export interface BulkRescrapeMovieResult {
 	status: 'success' | 'failed';
 	error?: string;
 	movie?: Movie;
+	/** Machine-readable translation warning classification (omitted when clean). */
+	translation_warning_code?: TranslationWarningCode;
 }
 
 export interface BulkRescrapeResponse {

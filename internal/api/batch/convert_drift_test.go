@@ -172,6 +172,19 @@ func TestMovieResultToBatchFileResultDriftGuard(t *testing.T) {
 			t.Errorf("BatchFileResultSlim must NOT expose TranslationWarning (slim payload is code-only)")
 		}
 	})
+
+	// The bulk-rescrape per-movie contract surfaces the same code so the review
+	// UI can badge translation degradations after a bulk rescrape.
+	t.Run("bulk_rescrape_result_exposes_translation_warning_code", func(t *testing.T) {
+		f, ok := reflect.TypeOf(contracts.BulkRescrapeMovieResult{}).FieldByName("TranslationWarningCode")
+		if !ok {
+			t.Errorf("BulkRescrapeMovieResult must expose TranslationWarningCode (bulk rescrape badge)")
+			return
+		}
+		if tag := f.Tag.Get("json"); tag != "translation_warning_code,omitempty" {
+			t.Errorf("BulkRescrapeMovieResult.TranslationWarningCode json tag = %q, want translation_warning_code,omitempty", tag)
+		}
+	})
 }
 
 // TestBatchJobBaseFieldsDriftGuard ensures that every field on worker.batchJobBase

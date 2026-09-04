@@ -1798,7 +1798,7 @@
   "toast_dismiss": "[ Dísmíss ]",
   "translation_warning_degraded": "[ Šömë fíëlds çöüld ñöt bë tråñslåtëd; örígíñål tëxt wås këpt för thösë fíëlds. ]",
   "translation_warning_forbidden": "[ Tråñslåtíöñ åççëss wås dëñíëd. Çhëçk thë prövídër API këy åñd åççöüñt përmíssíöñs. ]",
-  "translation_warning_rate_limited": "[ Tråñslåtíöñ wås råtë límítëd (Gööglë Tråñslåtë frëë tíër). Rëtry låtër, swítçh tråñslåtíöñ prövídër, ör çöñfígürë páíd mödë wíth åñ API këy íñ Šëttíñgs. ]",
+  "translation_warning_rate_limited": "[ Tråñslåtíöñ wås råtë límítëd by thë tråñslåtíöñ prövídër. Rëtry låtër, swítçh tråñslåtíöñ prövídër, ör çöñfígürë páíd mödë wíth åñ API këy íñ Šëttíñgs. ]",
   "translation_warning_request_error": "[ Tråñslåtíöñ rëqüëst fåílëd: thë prövídër rëjëçtëd thë rëqüëst. Çhëçk prövídër sëttíñgs. ]",
   "translation_warning_service_error": "[ Tråñslåtíöñ prövídër rëtürñëd å sërvër ërrör. Rëtry låtër. ]",
   "translation_warning_unauthorized": "[ Tråñslåtíöñ wås rëjëçtëd ås üñåüthörízëd. Çhëçk thë prövídër API këy íñ Šëttíñgs. ]",

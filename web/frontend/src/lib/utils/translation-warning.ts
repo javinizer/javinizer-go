@@ -3,9 +3,11 @@ import type { TranslationWarningCode } from '$lib/api/types';
 
 /**
  * Resolve a translation warning code + raw warning pair to display text.
- * Known codes render localized copy from the paraglide catalogs; `unknown`,
- * unrecognized, or missing codes fall back to the raw `translation_warning`
- * string (per the translation-warning-display spec).
+ * For `rate_limited` the raw backend string wins when present — it names the
+ * actual provider+mode; the localized key is provider-neutral fallback for
+ * slim (code-only) payloads. Other known codes render localized copy from the
+ * paraglide catalogs; `unknown`, unrecognized, or missing codes fall back to
+ * the raw `translation_warning` string.
  *
  * Returns null when neither a known code nor a raw string is available
  * (e.g. a Slim payload carrying code `unknown`), so callers can hide the UI.
@@ -14,6 +16,9 @@ export function translationWarningMessage(
 	code: TranslationWarningCode | string | undefined,
 	raw: string | undefined
 ): string | null {
+	if (code === 'rate_limited' && raw && raw.trim() !== '') {
+		return raw;
+	}
 	switch (code) {
 		case 'rate_limited':
 			return m.translation_warning_rate_limited();
@@ -36,15 +41,4 @@ export function translationWarningMessage(
 		return raw;
 	}
 	return null;
-}
-
-/**
- * True when a mid-run badge can render from the code alone (Slim payload):
- * a known non-`unknown` code, or any code accompanied by the raw string.
- */
-export function hasTranslationWarning(
-	code: TranslationWarningCode | string | undefined,
-	raw: string | undefined
-): boolean {
-	return translationWarningMessage(code, raw) !== null;
 }

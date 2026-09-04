@@ -119,14 +119,17 @@ type RescrapeCmd struct {
 // RescrapeResult is everything the caller gets back from the rescrape seam.
 // Contains only data the API layer needs for response translation.
 type RescrapeResult struct {
-	Movie            *models.Movie           // Data struct — acceptable per RESEARCH §Architecture Patterns — Pattern 1 note
-	FieldSources     map[string]string       // Per-field scraper attribution
-	ActressSources   map[string]string       // Per-actress scraper attribution
-	ScraperResults   []*models.ScraperResult // Raw per-scraper results, retained in-memory for the review source viewer
-	Status           models.RescrapeStatus   // success, failed, gone, conflict
-	Error            string                  // Human-readable error for "failed" status
-	OrphanedMovieIDs []string                // IDs that became orphaned during rescrape cleanup
-	FilePath         string                  // File path that was rescraped (for provenance propagation)
+	Movie          *models.Movie           // Data struct — acceptable per RESEARCH §Architecture Patterns — Pattern 1 note
+	FieldSources   map[string]string       // Per-field scraper attribution
+	ActressSources map[string]string       // Per-actress scraper attribution
+	ScraperResults []*models.ScraperResult // Raw per-scraper results, retained in-memory for the review source viewer
+	Status         models.RescrapeStatus   // success, failed, gone, conflict
+	Error          string                  // Human-readable error for "failed" status
+	// TranslationWarningCode is the machine-readable classification of a
+	// partial translation failure during the rescrape (empty when clean).
+	TranslationWarningCode string
+	OrphanedMovieIDs       []string // IDs that became orphaned during rescrape cleanup
+	FilePath               string   // File path that was rescraped (for provenance propagation)
 	// Revision is the post-commit landing revision of the saved result,
 	// captured inside the commit's keyed section (audit F-R15-1): the CAS
 	// echo never reads off-key, so a racer's commit cannot be mishealed.

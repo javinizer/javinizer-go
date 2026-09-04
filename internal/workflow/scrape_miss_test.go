@@ -132,9 +132,10 @@ func TestScrapeOrchImpl_Miss_PosterGenMovedToPhase(t *testing.T) {
 func TestScrapeOrchImpl_Miss_TranslationWarning(t *testing.T) {
 	mockScraper := &mockScraperScrape{
 		result: &scrape.ScrapeResult{
-			Movie:              &models.Movie{ID: "TRANS-001"},
-			Status:             testStatusCompleted,
-			TranslationWarning: "partial translation",
+			Movie:                  &models.Movie{ID: "TRANS-001"},
+			Status:                 testStatusCompleted,
+			TranslationWarning:     "partial translation",
+			TranslationWarningCode: "degraded",
 		},
 	}
 
@@ -145,6 +146,7 @@ func TestScrapeOrchImpl_Miss_TranslationWarning(t *testing.T) {
 	require.NotNil(t, result)
 	assert.NotNil(t, meta.TranslationWarning)
 	assert.Equal(t, "partial translation", *meta.TranslationWarning)
+	assert.Equal(t, "degraded", meta.TranslationWarningCode)
 }
 
 // --- scrapeOrchImpl: NeedsPersistence propagated and cleared ---

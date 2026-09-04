@@ -237,6 +237,9 @@ type BulkRescrapeMovieResult struct {
 	Status  models.RescrapeStatus `json:"status" example:"success"`
 	Error   string                `json:"error,omitempty" example:"Movie not found in job"`
 	Movie   *MovieView            `json:"movie,omitempty"`
+	// TranslationWarningCode is the machine-readable classification when
+	// metadata translation partially failed during this movie's rescrape.
+	TranslationWarningCode string `json:"translation_warning_code,omitempty"`
 }
 
 // BulkRescrapeResponse represents the result of a bulk rescrape operation

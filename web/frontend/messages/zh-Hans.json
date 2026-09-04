@@ -2461,7 +2461,7 @@
   "toast_dismiss": "关闭",
   "translation_warning_degraded": "部分字段无法翻译；这些字段已保留原文。",
   "translation_warning_forbidden": "翻译访问被拒绝。请检查服务商 API 密钥和账户权限。",
-  "translation_warning_rate_limited": "翻译被速率限制（Google 翻译免费模式）。请稍后重试、更换翻译服务商，或在设置中配置付费模式和 API 密钥。",
+  "translation_warning_rate_limited": "翻译被翻译服务商速率限制。请稍后重试、更换翻译服务商，或在设置中配置付费模式和 API 密钥。",
   "translation_warning_request_error": "翻译请求失败：服务商拒绝了请求。请检查服务商设置。",
   "translation_warning_service_error": "翻译服务商返回服务器错误。请稍后重试。",
   "translation_warning_unauthorized": "翻译因未授权被拒绝。请在设置中检查服务商 API 密钥。",

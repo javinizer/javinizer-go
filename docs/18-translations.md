@@ -369,14 +369,13 @@ rather than by page context. Two families exist:
 
 Rules specific to the `translation_warning_*` keys:
 
-- **Rate-limit copy names the provider + mode and gives remediation.** The
-  realistic HTTP 429 source is Google Translate's free tier
-  (`translate.googleapis.com/translate_a/single`, which rate-limits and
-  bot-blocks flagged IPs aggressively), so `translation_warning_rate_limited`
-  names "Google Translate (free tier)" and lists the remediation steps: retry
-  later, switch translation provider, or configure paid mode with an API key
-  under Settings. Preserve that cause → remedy structure when translating, and
-  keep provider/product names as proper nouns per the glossary.
+- **Rate-limit display prefers the backend's raw warning when present** —
+  it names the actual provider + mode (e.g. "Google Translate (free)") and
+  remediation. The localized `translation_warning_rate_limited` key is
+  therefore provider-neutral fallback copy, rendered only on slim (code-only)
+  payloads where the raw string is absent. Preserve its cause → remedy
+  structure (rate limited → retry later, switch translation provider, or
+  configure paid mode with an API key under Settings) when translating.
 - Say plainly that affected fields kept their **original** text (these are
   non-fatal, keep-original degradations — English copy does this).
 - Slim polling payloads carry only the code, so the copy must stand on its own

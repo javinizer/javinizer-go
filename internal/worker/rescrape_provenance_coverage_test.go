@@ -46,3 +46,17 @@ func TestCommitResultWithProvenanceReturnsFamilySnapshot(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, map[string]uint64{"res-a": 1}, revisions)
 }
+
+func TestReplaceRescrapeResultPropagatesTranslationWarningCode(t *testing.T) {
+	outcome := &RescrapeResult{Status: models.RescrapeStatusSuccess}
+	mr := &resultstore.MovieResult{
+		Movie:              &models.Movie{ID: "MV-1"},
+		OrchestrationState: models.OrchestrationState{TranslationWarningCode: "degraded"},
+	}
+
+	replaceRescrapeResult(outcome, "/f/mv1.mp4", mr, nil)
+
+	require.Equal(t, "degraded", outcome.TranslationWarningCode)
+	require.Equal(t, "/f/mv1.mp4", outcome.FilePath)
+	require.Equal(t, mr.Movie, outcome.Movie)
+}

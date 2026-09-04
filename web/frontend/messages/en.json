@@ -2459,7 +2459,7 @@
   "toast_dismiss": "Dismiss",
   "translation_warning_degraded": "Some fields could not be translated; original text was kept for those fields.",
   "translation_warning_forbidden": "Translation access was denied. Check the provider API key and account permissions.",
-  "translation_warning_rate_limited": "Translation was rate limited (Google Translate free tier). Retry later, switch translation provider, or configure paid mode with an API key in Settings.",
+  "translation_warning_rate_limited": "Translation was rate limited by the translation provider. Retry later, switch translation provider, or configure paid mode with an API key in Settings.",
   "translation_warning_request_error": "Translation request failed: the provider rejected the request. Check provider settings.",
   "translation_warning_service_error": "Translation provider returned a server error. Retry later.",
   "translation_warning_unauthorized": "Translation was rejected as unauthorized. Check the provider API key in Settings.",

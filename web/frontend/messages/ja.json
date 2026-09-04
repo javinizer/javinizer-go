@@ -2461,7 +2461,7 @@
   "toast_dismiss": "閉じる",
   "translation_warning_degraded": "一部のフィールドを翻訳できませんでした。それらのフィールドは原文が保持されています。",
   "translation_warning_forbidden": "翻訳アクセスが拒否されました。プロバイダーのAPIキーとアカウント権限を確認してください。",
-  "translation_warning_rate_limited": "翻訳がレート制限されました（Google 翻訳 無料モード）。時間をおいて再試行するか、翻訳プロバイダーを変更するか、設定で有料モードとAPIキーを構成してください。",
+  "translation_warning_rate_limited": "翻訳プロバイダーにレート制限されました。時間をおいて再試行するか、翻訳プロバイダーを変更するか、設定で有料モードとAPIキーを構成してください。",
   "translation_warning_request_error": "翻訳リクエストに失敗しました。プロバイダーがリクエストを拒否しました。プロバイダー設定を確認してください。",
   "translation_warning_service_error": "翻訳プロバイダーがサーバーエラーを返しました。時間をおいて再試行してください。",
   "translation_warning_unauthorized": "翻訳が未認可として拒否されました。設定でプロバイダーのAPIキーを確認してください。",

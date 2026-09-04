@@ -33,27 +33,9 @@ func (s *stubWarningTranslatorCacheTest) Translate(_ context.Context, _ *models.
 	return s.warning, s.code, true, nil
 }
 
-// TestTryCache_RetranslationSettingsChangePropagatesTranslationWarning is a
-// regression test for the "field dropped on rebuild/fallback path" pattern.
-//
-// Bug (commit fixing this): internal/scrape/cache.go's tryCache computed
-// `warn := applyTranslation(ctx, cached, s.translator)` on the
-// "translation settings changed → re-translate the cached movie" branch,
-// logged it, then DISCARDED it — the returned *ScrapeResult had an empty
-// TranslationWarning even though applyTranslation had produced a non-empty
-// warning. The happy-path postProcessScraped (scrape.go:242) DID set
-// TranslationWarning on its ScrapeResult, but cache.go did not. Same pattern
-// as commits 83fba0c5 / d9106a96 / 42d89e65 / 6249de64 / 6ed5d0e5 — a fresh
-// struct (ScrapeResult) built on a "fallback / cache-hit / alternate" path
-// dropped a field main's happy path populated.
-//
-// Downstream consumer: workflow/scrape_orchestrator.go:91-93 reads
-// result.TranslationWarning and copies it into meta.TranslationWarning;
-// worker/movie_result.go stamps mr.OrchestrationState = meta.OrchestrationState;
-// api/batch/convert.go surfaces it as `translation_warning` and
-// `translation_warning_code` on the full API response (code-only on slim).
-// So a cache-hit with re-translated settings previously surfaced an empty
-// warning even when the re-translation was partial.
+// TestTryCache_RetranslationSettingsChangePropagatesTranslationWarning proves
+// the stale-hash cache-hit re-translation branch surfaces the warning (and code)
+// on the rebuilt ScrapeResult instead of discarding it.
 func TestTryCache_RetranslationSettingsChangePropagatesTranslationWarning(t *testing.T) {
 	// Build the scraper with translation ENABLED, but with settings that
 	// differ from what the cached movie was translated under → forces the
@@ -118,9 +100,7 @@ func TestTryCache_RetranslationSettingsChangePropagatesTranslationWarning(t *tes
 		"re-translation branch should have run and set either NeedsPersistence or TranslationWarning")
 	assert.True(t, result.NeedsPersistence, "re-translated cache hit must set NeedsPersistence for re-persistence")
 	assert.Equal(t, expectedWarning, result.TranslationWarning,
-		"cache-hit re-translation must surface applyTranslation's warning on ScrapeResult.TranslationWarning — "+
-			"the field was computed and logged but discarded before this fix (same dropped-on-fallback-path "+
-			"pattern as 83fba0c5 / 42d89e65 / 6ed5d0e5)")
+		"cache-hit re-translation must surface applyTranslation's warning on ScrapeResult.TranslationWarning")
 	assert.Equal(t, "degraded", result.TranslationWarningCode,
 		"cache-hit re-translation must surface the machine-readable warning code alongside the string")
 }

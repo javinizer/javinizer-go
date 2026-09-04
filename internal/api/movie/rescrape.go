@@ -89,12 +89,10 @@ func rescrapeMovie(deps MovieDeps) gin.HandlerFunc {
 		}
 
 		resp := contracts.MovieResponse{Movie: contracts.MovieViewFromModel(result.Movie)}
-		if meta != nil {
-			if meta.TranslationWarning != nil {
-				resp.TranslationWarning = *meta.TranslationWarning
-			}
-			resp.TranslationWarningCode = meta.TranslationWarningCode
+		if meta.TranslationWarning != nil {
+			resp.TranslationWarning = *meta.TranslationWarning
 		}
+		resp.TranslationWarningCode = meta.TranslationWarningCode
 		c.JSON(http.StatusOK, resp)
 	}
 }

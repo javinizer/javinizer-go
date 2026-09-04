@@ -34,7 +34,7 @@ func (w *deadlineCapturingWorkflow) Scrape(ctx context.Context, cmd scrape.Scrap
 		<-ctx.Done()
 		return &scrape.ScrapeResult{Status: scrape.StatusFailed, Message: ctx.Err().Error()}, nil, nil
 	}
-	return &scrape.ScrapeResult{Status: scrape.StatusCompleted, Movie: &models.Movie{ID: cmd.MovieID}}, nil, nil
+	return &scrape.ScrapeResult{Status: scrape.StatusCompleted, Movie: &models.Movie{ID: cmd.MovieID}}, &workflow.OrchestrationMeta{}, nil
 }
 
 func (w *deadlineCapturingWorkflow) Apply(ctx context.Context, cmd workflow.ApplyCmd) (*workflow.ApplyResult, error) {

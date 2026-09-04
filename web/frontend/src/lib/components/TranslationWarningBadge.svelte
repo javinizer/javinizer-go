@@ -6,7 +6,7 @@
 	interface Props {
 		/** Machine-readable warning code from the backend (present on Slim payloads too). */
 		code?: TranslationWarningCode | string;
-		/** Raw warning string (full results only); fallback display for unknown/missing codes. */
+		/** Raw warning string (full results only); preferred for rate_limited, fallback for unknown/missing codes. */
 		warning?: string;
 		/**
 		 * Compact renders an icon-only chip (grid cards / mid-run badges keyed off

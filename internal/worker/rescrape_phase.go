@@ -461,9 +461,10 @@ func withRescrapeStatus(lc rescrapeLifecycle, fn func(scope *rescrapeGenScope) (
 	return outcome, nil
 }
 
-// replaceRescrapeResult attaches provenance metadata and file path to the
-// rescrape outcome. Separated from the status-transition logic so that
-// withRescrapeStatus stays focused on cleanup/rollback.
+// replaceRescrapeResult attaches provenance metadata, the translation warning
+// code, and file path to the rescrape outcome. Separated from the
+// status-transition logic so that withRescrapeStatus stays focused on
+// cleanup/rollback.
 func replaceRescrapeResult(outcome *RescrapeResult, filePath string, movieResult *resultstore.MovieResult, prov *resultstore.ProvenanceData) {
 	if prov != nil {
 		outcome.Movie = movieResult.Movie
@@ -474,6 +475,7 @@ func replaceRescrapeResult(outcome *RescrapeResult, filePath string, movieResult
 		outcome.Movie = movieResult.Movie
 	}
 	outcome.FilePath = filePath
+	outcome.TranslationWarningCode = movieResult.TranslationWarningCode
 }
 
 // Rescrape performs the full rescrape lifecycle: file lookup, scrape,

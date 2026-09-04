@@ -316,16 +316,6 @@ func (s *Service) TranslateMovie(ctx context.Context, scraped *models.Movie, set
 		}
 		return nil, message, code, err
 	}
-	if len(translatedTexts) != len(plan.Fields) {
-		logging.Debugf("Translation: count mismatch - got %d, expected %d", len(translatedTexts), len(plan.Fields))
-		countErr := fmt.Errorf("translation provider returned %d items for %d inputs", len(translatedTexts), len(plan.Fields))
-		code, message := classifyTranslationWarning(ctx, provider, mode, countErr)
-		if code == "" {
-			return nil, "", "", countErr
-		}
-		return nil, message, code, countErr
-	}
-
 	// Build result map and apply
 	results := make(TranslationResultMap, len(plan.Fields))
 	for i, f := range plan.Fields {

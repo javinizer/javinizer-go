@@ -200,12 +200,10 @@ func scrapeMovie(deps MovieDeps) gin.HandlerFunc {
 			Movie:       contracts.MovieViewFromModel(result.Movie),
 			SourcesUsed: sourcesUsed,
 		}
-		if meta != nil {
-			if meta.TranslationWarning != nil {
-				resp.TranslationWarning = *meta.TranslationWarning
-			}
-			resp.TranslationWarningCode = meta.TranslationWarningCode
+		if meta.TranslationWarning != nil {
+			resp.TranslationWarning = *meta.TranslationWarning
 		}
+		resp.TranslationWarningCode = meta.TranslationWarningCode
 		c.JSON(http.StatusOK, resp)
 	}
 }
