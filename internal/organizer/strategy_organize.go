@@ -607,10 +607,13 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 				// (refused at classification).
 				if plan.overwriteAuthorized && !dstLexicalSelf {
 					linfo, followed, lerr := destMaybeLstat(s.fs, plan.TargetPath)
-					if lerr == nil && linfo != nil {
+					if lerr != nil && !errors.Is(lerr, os.ErrNotExist) {
+						return fmt.Errorf("failed to inspect target before copy: %w", lerr)
+					}
+					if linfo != nil {
 						// A link-following Stat on no-Lstat wrappers reads through a live
-						// link as a regular file (now flagged by "followed"); check the
-						// object via readlink before treating it as replaceable (codex r6).
+						// symlink as a regular file; when "followed" we probe via readlink,
+						// and non-regular detectors just refuse.
 						if followed && symlinkObjectExists(s.fs, plan.TargetPath) {
 							return fmt.Errorf("destination is not a regular file (cannot authorize-over): %s", plan.TargetPath)
 						}
