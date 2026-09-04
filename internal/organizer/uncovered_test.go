@@ -250,7 +250,7 @@ func TestOrganizeStrategy_Execute_CopyPath(t *testing.T) {
 		WillMove:   true,
 		moveFiles:  false,
 		LinkMode:   LinkModeNone,
-		Conflicts:  []string{},
+		Conflicts:  []PlanConflict{},
 	}
 
 	result, err := strategy.Execute(plan)
@@ -280,7 +280,7 @@ func TestOrganizeStrategy_Execute_InvalidLinkMode(t *testing.T) {
 		WillMove:   true,
 		moveFiles:  false,
 		LinkMode:   LinkMode("invalid"), // invalid
-		Conflicts:  []string{},
+		Conflicts:  []PlanConflict{},
 	}
 
 	result, err := strategy.Execute(plan)
@@ -303,7 +303,7 @@ func TestOrganizeStrategy_Execute_CopyPathWithConflicts(t *testing.T) {
 		WillMove:   true,
 		moveFiles:  false,
 		LinkMode:   LinkModeNone,
-		Conflicts:  []string{"/dest/ABC-123/ABC-123.mp4"},
+		Conflicts:  []PlanConflict{{Path: "/dest/ABC-123/ABC-123.mp4", Kind: ConflictFile}},
 	}
 
 	result, err := strategy.Execute(plan)

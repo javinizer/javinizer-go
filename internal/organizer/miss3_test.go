@@ -292,7 +292,7 @@ func TestOrganizeStrategy_Execute_SoftLinkRelativeSource(t *testing.T) {
 		WillMove:   true,
 		moveFiles:  false,
 		LinkMode:   LinkModeSoft,
-		Conflicts:  []string{},
+		Conflicts:  []PlanConflict{},
 	}
 
 	_, _ = strategy.Execute(plan)
@@ -316,7 +316,7 @@ func TestOrganizeStrategy_Execute_SoftLinkSuccess(t *testing.T) {
 		WillMove:   true,
 		moveFiles:  false,
 		LinkMode:   LinkModeSoft,
-		Conflicts:  []string{},
+		Conflicts:  []PlanConflict{},
 	}
 
 	result, err := strategy.Execute(plan)
@@ -343,7 +343,7 @@ func TestOrganizeStrategy_Execute_HardLinkSuccess(t *testing.T) {
 		WillMove:   true,
 		moveFiles:  false,
 		LinkMode:   LinkModeHard,
-		Conflicts:  []string{},
+		Conflicts:  []PlanConflict{},
 	}
 
 	result, err := strategy.Execute(plan)
@@ -370,7 +370,7 @@ func TestOrganizeStrategy_Execute_LinkModeTargetNotExist(t *testing.T) {
 		WillMove:   true,
 		moveFiles:  false,
 		LinkMode:   LinkModeHard,
-		Conflicts:  []string{},
+		Conflicts:  []PlanConflict{},
 	}
 
 	result, err := strategy.Execute(plan)

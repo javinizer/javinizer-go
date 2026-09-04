@@ -105,7 +105,15 @@ func (s *inPlaceNoRenameFolderStrategy) Execute(plan *OrganizePlan) (*OrganizeRe
 	// concurrent copies into the same directory stay parallel.
 	err := withDestDirSharedLock(plan.TargetDir, func() error {
 		return withDestFileLock(plan.TargetPath, func() error {
-			if !plan.overwriteAuthorized {
+			if plan.overwriteAuthorized {
+				identical, sameIn, err := refuseIfUnsuppressibleAuthorizedDestination(s.fs, plan.SourcePath, plan.TargetPath)
+				if err != nil {
+					return err
+				}
+				if identical || sameIn {
+					return nil
+				}
+			} else {
 				lexicalSelf, sameIn, err := refuseExistingDestination(s.fs, plan.SourcePath, plan.TargetPath)
 				if err != nil {
 					return err

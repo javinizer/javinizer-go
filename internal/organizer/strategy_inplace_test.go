@@ -203,7 +203,7 @@ func TestInPlaceStrategy_Execute(t *testing.T) {
 		WillMove:   true,
 		InPlace:    true,
 		OldDir:     "/source/old-folder",
-		Conflicts:  []string{},
+		Conflicts:  []PlanConflict{},
 	}
 
 	result, err := strategy.Execute(plan)
@@ -236,7 +236,7 @@ func TestInPlaceStrategy_Execute_RenameFile(t *testing.T) {
 		WillMove:   true,
 		InPlace:    true,
 		OldDir:     "/source/old-folder",
-		Conflicts:  []string{},
+		Conflicts:  []PlanConflict{},
 	}
 
 	result, err := strategy.Execute(plan)
@@ -264,7 +264,7 @@ func TestInPlaceStrategy_Execute_NoRenameNeeded(t *testing.T) {
 		WillMove:   true,
 		InPlace:    true,
 		OldDir:     "/source/old-folder",
-		Conflicts:  []string{},
+		Conflicts:  []PlanConflict{},
 	}
 
 	result, err := strategy.Execute(plan)
@@ -363,7 +363,7 @@ func TestInPlaceStrategy_Execute_DirRenameError(t *testing.T) {
 		WillMove:   true,
 		InPlace:    true,
 		OldDir:     "/source/nonexistent-dir",
-		Conflicts:  []string{},
+		Conflicts:  []PlanConflict{},
 	}
 
 	result, err := strategy.Execute(plan)
@@ -389,7 +389,7 @@ func TestInPlaceStrategy_Execute_FileRenameAfterDirRename(t *testing.T) {
 		WillMove:   true,
 		InPlace:    true,
 		OldDir:     "/source/old-folder",
-		Conflicts:  []string{},
+		Conflicts:  []PlanConflict{},
 		Match: models.FileMatchInfo{
 			Path: "/source/old-folder/old-name.mp4", Name: "old-name.mp4", Extension: ".mp4",
 		},
@@ -430,7 +430,7 @@ func TestInPlaceStrategy_Execute_MoveToOrganizeFolder(t *testing.T) {
 		WillMove:   true,
 		InPlace:    false,
 		OldDir:     "",
-		Conflicts:  []string{},
+		Conflicts:  []PlanConflict{},
 		Match: models.FileMatchInfo{
 			Path: "/source/folder/ABC-123.mp4", Name: "ABC-123.mp4", Extension: ".mp4",
 		},

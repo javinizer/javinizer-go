@@ -82,7 +82,7 @@ func TestOrganizer_Copy_ErrorPaths(t *testing.T) {
 			TargetDir:  filepath.Dir(sourceFile),
 			TargetFile: "ipx-535.mp4",
 			WillMove:   false,
-			Conflicts:  []string{},
+			Conflicts:  []PlanConflict{},
 		}
 
 		// Copy should succeed but not actually copy
@@ -132,7 +132,7 @@ func TestOrganizer_Copy_ErrorPaths(t *testing.T) {
 			TargetFile: "target.mp4",
 			TargetPath: filepath.Join(tmpDir, "copy-target", "target.mp4"),
 			WillMove:   true,
-			Conflicts:  []string{},
+			Conflicts:  []PlanConflict{},
 		}
 
 		strategy := newOrganizeStrategy(afero.NewOsFs(), cfg, nil, OSLinker{})

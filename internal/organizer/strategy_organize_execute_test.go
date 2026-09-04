@@ -172,7 +172,7 @@ func TestOrganizeStrategy_Execute_LinkModes(t *testing.T) {
 			WillMove:   true,
 			moveFiles:  false,
 			LinkMode:   LinkModeSoft,
-			Conflicts:  []string{"target already exists"},
+			Conflicts:  []PlanConflict{{Path: "target already exists", Kind: ConflictFile}},
 		}
 		_, err := strategy.Execute(plan)
 		assert.Error(t, err)

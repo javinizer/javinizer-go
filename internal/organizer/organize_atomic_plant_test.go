@@ -38,7 +38,7 @@ func TestOrganizeStrategy_AtomicNoClobber_ForeignPlantWins(t *testing.T) {
 		TargetFile: "ABC-123.mp4",
 		WillMove:   true,
 		moveFiles:  true,
-		Conflicts:  []string{},
+		Conflicts:  []PlanConflict{},
 	}
 
 	_, err := strategy.Execute(plan)
@@ -79,7 +79,7 @@ func TestInPlaceStrategy_AuthorizedInnerRenameUsesPlainRename(t *testing.T) {
 		IsDedicated:         true,
 		Match:               models.FileMatchInfo{MovieID: "ABC-123", Path: "/source/mixed/ABC-123.mp4", Name: "ABC-123.mp4", Extension: ".mp4"},
 		overwriteAuthorized: true,
-		Conflicts:           []string{},
+		Conflicts:           []PlanConflict{},
 	}
 
 	result, err := strategy.Execute(plan)

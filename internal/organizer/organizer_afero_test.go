@@ -268,7 +268,7 @@ func TestOrganizerWithAfero_ValidatePlan(t *testing.T) {
 			TargetDir:  "/movies//IPX-123",
 			TargetFile: "file.mp4",
 			TargetPath: "/movies//IPX-123/file.mp4",
-			Conflicts:  []string{},
+			Conflicts:  []PlanConflict{},
 		}
 
 		issues := org.validatePlan(plan)
@@ -289,7 +289,7 @@ func TestOrganizerWithAfero_ValidatePlan(t *testing.T) {
 			TargetFile: filepath.Base(samePath),
 			TargetPath: samePath,
 			WillMove:   true,
-			Conflicts:  []string{},
+			Conflicts:  []PlanConflict{},
 		}
 
 		issues := org.validatePlan(plan)
@@ -311,7 +311,7 @@ func TestOrganizerWithAfero_ValidatePlan(t *testing.T) {
 			TargetDir:  "",
 			TargetFile: "file.mp4",
 			TargetPath: "file.mp4",
-			Conflicts:  []string{},
+			Conflicts:  []PlanConflict{},
 		}
 
 		issues := org.validatePlan(plan)

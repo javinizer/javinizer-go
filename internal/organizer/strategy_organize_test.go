@@ -154,7 +154,7 @@ func TestOrganizeStrategy_Plan_ConflictDetection(t *testing.T) {
 	assert.NotEmpty(t, plan.Conflicts, "Should detect existing target file as conflict")
 	var conflictFound bool
 	for _, c := range plan.Conflicts {
-		if filepath.ToSlash(c) == "/dest/ABC-123/ABC-123.mp4" {
+		if filepath.ToSlash(c.Path) == "/dest/ABC-123/ABC-123.mp4" {
 			conflictFound = true
 			break
 		}
@@ -179,7 +179,7 @@ func TestOrganizeStrategy_Execute(t *testing.T) {
 		TargetFile: "ABC-123.mp4",
 		TargetPath: "/dest/ABC-123/ABC-123.mp4",
 		WillMove:   true,
-		Conflicts:  []string{},
+		Conflicts:  []PlanConflict{},
 		moveFiles:  true,
 	}
 
@@ -309,7 +309,7 @@ func TestOrganizeStrategy_Execute_MkdirError(t *testing.T) {
 		TargetFile: "ABC-123.mp4",
 		TargetPath: "/dest/ABC-123/ABC-123.mp4",
 		WillMove:   true,
-		Conflicts:  []string{},
+		Conflicts:  []PlanConflict{},
 		moveFiles:  true,
 	}
 
@@ -330,7 +330,7 @@ func TestOrganizeStrategy_Execute_RenameError(t *testing.T) {
 		TargetFile: "ABC-123.mp4",
 		TargetPath: "/dest/ABC-123/ABC-123.mp4",
 		WillMove:   true,
-		Conflicts:  []string{},
+		Conflicts:  []PlanConflict{},
 		moveFiles:  true,
 	}
 
@@ -424,7 +424,7 @@ func TestOrganizeStrategy_Execute_ConflictsDetected(t *testing.T) {
 		TargetPath: "/dest/ABC-123.mp4",
 		TargetDir:  "/dest",
 		WillMove:   true,
-		Conflicts:  []string{"/dest/ABC-123.mp4"},
+		Conflicts:  []PlanConflict{{Path: "/dest/ABC-123.mp4", Kind: ConflictFile}},
 		moveFiles:  false,
 		LinkMode:   LinkModeSoft,
 	}

@@ -108,7 +108,7 @@ func TestMetadataArtworkStrategy_Execute_NoMove(t *testing.T) {
 		TargetFile: "ABC-123.mp4",
 		TargetPath: "/source/ABC-123.mp4",
 		WillMove:   false,
-		Conflicts:  []string{},
+		Conflicts:  []PlanConflict{},
 	}
 
 	result, err := strategy.Execute(plan)

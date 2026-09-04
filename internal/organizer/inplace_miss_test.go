@@ -152,7 +152,7 @@ func TestInPlaceMiss_Plan_InPlaceConflictWithMissingOldDir(t *testing.T) {
 	assert.True(t, plan.InPlace, "Should be InPlace for dedicated folder")
 	// The old dir exists and the target dir also exists — should have conflict
 	if len(plan.Conflicts) > 0 {
-		assert.Contains(t, plan.Conflicts, filepath.FromSlash("/source/ABC-123"))
+		assert.Contains(t, plan.Conflicts, PlanConflict{Path: filepath.FromSlash("/source/ABC-123"), Kind: ConflictDirectory})
 	}
 }
 
@@ -258,8 +258,9 @@ func TestInPlaceMiss_Execute_NoFileRenameNeeded(t *testing.T) {
 	assert.False(t, dirExists)
 }
 
-// Lines 159-161: inPlace with forceUpdate — no conflict check for existing targetDir
-func TestInPlaceMiss_Plan_InPlaceForceUpdateSkipsConflict(t *testing.T) {
+// Lines 159-161: inPlace with forceUpdate — target-dir occupancy is STILL a conflict
+// (directories can never be authorized-over, regardless of force).
+func TestInPlaceMiss_Plan_InPlaceForceUpdateConflictsWithForeignDir(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	cfg := &Config{
 		FolderFormat: "<ID>",
@@ -271,7 +272,8 @@ func TestInPlaceMiss_Plan_InPlaceForceUpdateSkipsConflict(t *testing.T) {
 
 	_ = fs.MkdirAll("/source/old-name", 0777)
 	_ = afero.WriteFile(fs, "/source/old-name/ABC-123.mp4", []byte("video"), 0644)
-	// Also create the target directory — with forceUpdate it shouldn't be a conflict
+	// Also create the target directory — a distinct foreign dir. With force
+	// updates, directory kinds still are conflicts (never authorized).
 	_ = fs.MkdirAll("/source/ABC-123", 0777)
 
 	match := models.FileMatchInfo{
@@ -283,8 +285,9 @@ func TestInPlaceMiss_Plan_InPlaceForceUpdateSkipsConflict(t *testing.T) {
 	plan, err := strategy.Plan(match, movie, "/dest", true) // forceUpdate=true
 	require.NoError(t, err)
 	assert.True(t, plan.InPlace)
-	// With forceUpdate, the conflict check for existing targetDir is skipped
-	// (the `inPlace && !forceUpdate` condition is false)
+	// The forceUpdate gate was removed in #224: directory-kind conflicts are
+	// never suppressed, even under authorization.
+	require.Contains(t, plan.Conflicts, PlanConflict{Path: filepath.FromSlash("/source/ABC-123"), Kind: ConflictDirectory})
 }
 
 // Execute: directory rename error (ReadOnlyFs)

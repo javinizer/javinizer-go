@@ -613,7 +613,7 @@ func TestInPlaceStrategy_Plan_ConflictWhenOldDirStatFails(t *testing.T) {
 	plan, err := strategy.Plan(match, movie, "/dest", false)
 	require.NoError(t, err)
 	require.True(t, plan.InPlace, "dedicated folder must select in-place")
-	require.Contains(t, plan.Conflicts, filepath.FromSlash("/source/ABC-123"),
+	require.Contains(t, plan.Conflicts, PlanConflict{Path: filepath.FromSlash("/source/ABC-123"), Kind: ConflictDirectory},
 		"an un-stat-able old dir with an existing target dir must still be a conflict")
 }
 

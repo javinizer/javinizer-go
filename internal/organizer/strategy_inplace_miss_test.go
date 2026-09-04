@@ -299,7 +299,7 @@ func TestInPlaceStrategy_Plan_InPlaceConflictWithForceUpdate(t *testing.T) {
 	// Conflicts MUST include targetDir since it exists and is not same as oldDir —
 	// requiring the entry unconditionally catches a conflict-detection regression that
 	// reports an empty list.
-	require.Contains(t, plan.Conflicts, filepath.FromSlash("/source/ABC-123"), "existing distinct targetDir must appear in plan conflicts")
+	require.Contains(t, plan.Conflicts, PlanConflict{Path: filepath.FromSlash("/source/ABC-123"), Kind: ConflictDirectory}, "existing distinct targetDir must appear in plan conflicts (directory kind)")
 }
 
 func TestInPlaceStrategy_Execute_OldDirStatFailsOnSameFileCheck(t *testing.T) {

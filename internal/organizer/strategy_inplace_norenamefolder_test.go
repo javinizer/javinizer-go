@@ -136,7 +136,7 @@ func TestInPlaceNoRenameFolderStrategy_Execute_FileRename(t *testing.T) {
 		TargetFile: "new-name.mp4",
 		TargetPath: "/source/folder/new-name.mp4",
 		WillMove:   true,
-		Conflicts:  []string{},
+		Conflicts:  []PlanConflict{},
 	}
 
 	result, err := strategy.Execute(plan)
@@ -177,7 +177,7 @@ func TestInPlaceNoRenameFolderStrategy_Execute_Subtitles(t *testing.T) {
 		TargetFile: "ABC-123 Test Movie.mp4",
 		TargetPath: "/source/folder/ABC-123 Test Movie.mp4",
 		WillMove:   true,
-		Conflicts:  []string{},
+		Conflicts:  []PlanConflict{},
 		strategy:   strategyInPlaceNoRenameFolder,
 	}
 
@@ -213,7 +213,7 @@ func TestInPlaceNoRenameFolderStrategy_Execute_NoDirRename(t *testing.T) {
 		WillMove:   true,
 		InPlace:    false,
 		OldDir:     "",
-		Conflicts:  []string{},
+		Conflicts:  []PlanConflict{},
 	}
 
 	result, err := strategy.Execute(plan)

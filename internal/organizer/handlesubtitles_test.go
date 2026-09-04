@@ -218,7 +218,7 @@ func TestExecute_DelegatesToPlanExecuteStrategy(t *testing.T) {
 		TargetFile:      "ABC-123.mp4",
 		TargetPath:      "/dest/ABC-123/ABC-123.mp4",
 		WillMove:        true,
-		Conflicts:       []string{},
+		Conflicts:       []PlanConflict{},
 		executeStrategy: strategy,
 	}
 
@@ -245,7 +245,7 @@ func TestExecute_UsesHandleSubtitlesForPlanPath(t *testing.T) {
 		TargetFile: "ABC-123.mp4",
 		TargetPath: "/source/ABC-123.mp4",
 		WillMove:   false,
-		Conflicts:  []string{},
+		Conflicts:  []PlanConflict{},
 	}
 
 	_ = fs.MkdirAll("/source", 0777)

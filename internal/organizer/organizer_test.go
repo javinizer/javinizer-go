@@ -550,7 +550,7 @@ func TestOrganizer_Organize_Conflicts(t *testing.T) {
 		TargetDir:  filepath.Join(tmpDir, "dest"),
 		TargetFile: "IPX-535.mp4",
 		WillMove:   true,
-		Conflicts:  []string{"target already exists"},
+		Conflicts:  []PlanConflict{{Path: "target already exists", Kind: ConflictFile}},
 	}
 
 	plan.LinkMode = LinkModeNone
@@ -708,7 +708,7 @@ func TestValidatePlan(t *testing.T) {
 			TargetFile: "target.mp4",
 			TargetPath: filepath.Join(tmpDir, "target", "target.mp4"),
 			WillMove:   true,
-			Conflicts:  []string{},
+			Conflicts:  []PlanConflict{},
 		}
 
 		issues := org.validatePlan(plan)
@@ -788,7 +788,7 @@ func TestValidatePlan(t *testing.T) {
 			TargetPath: filepath.Join(tmpDir, "target.mp4"),
 			TargetDir:  tmpDir,
 			TargetFile: "target.mp4",
-			Conflicts:  []string{"target exists"},
+			Conflicts:  []PlanConflict{{Path: "target exists", Kind: ConflictFile}},
 		}
 
 		issues := org.validatePlan(plan)
@@ -885,7 +885,7 @@ func TestOrganizer_Organize_CopyMode_SourceDoesNotExist(t *testing.T) {
 		TargetFile: "IPX-535.mp4",
 		TargetPath: filepath.Join(tmpDir, "target", "IPX-535.mp4"),
 		WillMove:   true,
-		Conflicts:  []string{},
+		Conflicts:  []PlanConflict{},
 		Movie:      movie,
 	}
 
@@ -974,7 +974,7 @@ func TestOrganizer_Execute_InPlaceRename_DirectoryAlreadyExists(t *testing.T) {
 		TargetFile: "IPX-535.mp4",
 		TargetPath: filepath.Join(targetDir, "IPX-535.mp4"),
 		WillMove:   true,
-		Conflicts:  []string{},
+		Conflicts:  []PlanConflict{},
 		InPlace:    true,
 		OldDir:     sourceDir,
 		Movie:      movie,

@@ -34,9 +34,12 @@ func TestOrganize_DanglingSymlink_Conflicts(t *testing.T) {
 	result, err := org.Organize(context.Background(), OrganizeCmd{
 		Match: match, Movie: movie, DestDir: filepath.Join(dir, "out"), MoveFiles: true,
 	})
+	// A plan-visible KindSymlink conflict fails BEFORE execute (no result).
+	// The plan-rendering is the bare path; the refusal sentence is execute-lane only.
 	require.Error(t, err)
-	require.NotNil(t, result)
-	assert.Contains(t, result.Error.Error(), "refusing to overwrite")
+	require.Nil(t, result)
+	// validation wraps plan conflicts as bare paths
+	assert.Contains(t, err.Error(), filepath.ToSlash(dst))
 
 	// The symlink entry remains; source is intact.
 	info, err := os.Lstat(dst)

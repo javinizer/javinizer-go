@@ -131,7 +131,7 @@ func (s *inPlaceStrategy) Plan(match models.FileMatchInfo, movie *models.Movie, 
 			if folderName == "" {
 				folderName = template.SanitizeFolderPath(match.MovieID)
 				if folderName == "" {
-					folderName = "unknown"
+					folderName = folderFallbackUnknown
 				}
 			}
 		}
@@ -175,13 +175,15 @@ func (s *inPlaceStrategy) Plan(match models.FileMatchInfo, movie *models.Movie, 
 	}
 
 	conflicts := checkTargetConflict(s.fs, match.Path, targetPath, forceUpdate, willMove)
-	if inPlace && !forceUpdate {
+	if inPlace {
+		// Target-dir occupation is a directory conflict unconditionally — force
+		// update must never swap a foreign folder even if it is empty. #224.
 		if stat, err := s.fs.Stat(targetDir); err == nil {
 			oldStat, oldErr := s.fs.Stat(oldDir)
 			if oldErr != nil {
-				conflicts = append(conflicts, targetDir)
+				conflicts = append(conflicts, PlanConflict{Path: targetDir, Kind: ConflictDirectory})
 			} else if !os.SameFile(oldStat, stat) {
-				conflicts = append(conflicts, targetDir)
+				conflicts = append(conflicts, PlanConflict{Path: targetDir, Kind: ConflictDirectory})
 			}
 		}
 	}
@@ -297,12 +299,24 @@ func (s *inPlaceStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) {
 					// Both destination locks are already held (see above), so no sibling can slip a
 					// file into the renamed directory at plan.TargetPath between the directory
 					// rename and this inner step — refuse-then-rename with rollback is atomic.
-					if !plan.overwriteAuthorized {
+					rb := func() {
+						if rerr := s.fs.Rename(plan.TargetDir, plan.OldDir); rerr != nil {
+							logging.Errorf("[in-place] Failed to rollback directory rename %s → %s: %v", plan.TargetDir, plan.OldDir, rerr)
+						}
+					}
+					if plan.overwriteAuthorized {
+						identical, sameIn, lerr := refuseIfUnsuppressibleAuthorizedDestination(s.fs, currentFilePath, plan.TargetPath)
+						if lerr != nil {
+							rb()
+							return lerr
+						}
+						if identical || sameIn {
+							return nil
+						}
+					} else {
 						lexicalSelf, sameIn, e2 := refuseExistingDestination(s.fs, currentFilePath, plan.TargetPath)
 						if e2 != nil {
-							if rb := s.fs.Rename(plan.TargetDir, plan.OldDir); rb != nil {
-								logging.Errorf("[in-place] Failed to rollback directory rename %s → %s: %v", plan.TargetDir, plan.OldDir, rb)
-							}
+							rb()
 							return e2
 						}
 						if lexicalSelf || sameIn {
@@ -337,7 +351,15 @@ func (s *inPlaceStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) {
 		// about-to-rollback) directory.
 		err := withDestDirSharedLock(plan.TargetDir, func() error {
 			return withDestFileLock(plan.TargetPath, func() error {
-				if !plan.overwriteAuthorized {
+				if plan.overwriteAuthorized {
+					identical, sameIn, err := refuseIfUnsuppressibleAuthorizedDestination(s.fs, plan.SourcePath, plan.TargetPath)
+					if err != nil {
+						return err
+					}
+					if identical || sameIn {
+						return nil
+					}
+				} else {
 					lexicalSelf, sameIn, err := refuseExistingDestination(s.fs, plan.SourcePath, plan.TargetPath)
 					if err != nil {
 						return err

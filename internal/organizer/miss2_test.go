@@ -142,7 +142,7 @@ func TestOrganizeStrategy_Execute_HardLinkEXDEV(t *testing.T) {
 		WillMove:   true,
 		moveFiles:  false,
 		LinkMode:   LinkModeHard,
-		Conflicts:  []string{},
+		Conflicts:  []PlanConflict{},
 	}
 
 	result, err := strategy.Execute(plan)
@@ -169,7 +169,7 @@ func TestOrganizeStrategy_Execute_HardLinkPermission(t *testing.T) {
 		WillMove:   true,
 		moveFiles:  false,
 		LinkMode:   LinkModeHard,
-		Conflicts:  []string{},
+		Conflicts:  []PlanConflict{},
 	}
 
 	result, err := strategy.Execute(plan)
@@ -196,7 +196,7 @@ func TestOrganizeStrategy_Execute_SoftLinkPermission(t *testing.T) {
 		WillMove:   true,
 		moveFiles:  false,
 		LinkMode:   LinkModeSoft,
-		Conflicts:  []string{},
+		Conflicts:  []PlanConflict{},
 	}
 
 	result, err := strategy.Execute(plan)
@@ -223,7 +223,7 @@ func TestOrganizeStrategy_Execute_SoftLinkGenericError(t *testing.T) {
 		WillMove:   true,
 		moveFiles:  false,
 		LinkMode:   LinkModeSoft,
-		Conflicts:  []string{},
+		Conflicts:  []PlanConflict{},
 	}
 
 	result, err := strategy.Execute(plan)
@@ -250,7 +250,7 @@ func TestOrganizeStrategy_Execute_HardLinkGenericError(t *testing.T) {
 		WillMove:   true,
 		moveFiles:  false,
 		LinkMode:   LinkModeHard,
-		Conflicts:  []string{},
+		Conflicts:  []PlanConflict{},
 	}
 
 	result, err := strategy.Execute(plan)
@@ -277,7 +277,7 @@ func TestOrganizeStrategy_Execute_CopyFileError(t *testing.T) {
 		WillMove:   true,
 		moveFiles:  false,
 		LinkMode:   LinkModeNone,
-		Conflicts:  []string{},
+		Conflicts:  []PlanConflict{},
 		// #224: unauthorized copies route through fsutil.CopyFileNoReplace
 		// (no linker involvement); the linker's copy error seam lives on the
 		// authorized leg, so this seam test authorizes explicitly.
@@ -311,7 +311,7 @@ func TestOrganizeStrategy_Execute_RemoveTargetFails(t *testing.T) {
 		WillMove:   true,
 		moveFiles:  false,
 		LinkMode:   LinkModeSoft,
-		Conflicts:  []string{},
+		Conflicts:  []PlanConflict{},
 	}
 
 	// The Remove on a read-only file in MemMapFs may or may not error
@@ -335,7 +335,7 @@ func TestOrganizeStrategy_Execute_CopyPathMkdirFails(t *testing.T) {
 		WillMove:   true,
 		moveFiles:  false,
 		LinkMode:   LinkModeNone,
-		Conflicts:  []string{},
+		Conflicts:  []PlanConflict{},
 	}
 
 	result, err := strategy.Execute(plan)
@@ -360,7 +360,7 @@ func TestOrganizeStrategy_Execute_MovePathMkdirFails(t *testing.T) {
 		WillMove:   true,
 		moveFiles:  true,
 		LinkMode:   LinkModeNone,
-		Conflicts:  []string{},
+		Conflicts:  []PlanConflict{},
 	}
 
 	result, err := strategy.Execute(plan)

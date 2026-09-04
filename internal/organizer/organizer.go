@@ -118,20 +118,55 @@ func applyTitleTruncation(engine template.EngineInterface, ctx *template.Context
 	}
 }
 
-func checkTargetConflict(fs afero.Fs, sourcePath, targetPath string, forceUpdate, willMove bool) []string {
-	conflicts := make([]string, 0)
-	if forceUpdate || !willMove {
+// checkTargetConflict classifies the destination with no-follow Lstat so
+// dangling symlinks are seen (they vanish under a following Stat). Force
+// update suppresses ONLY ConflictFile — directories and symlinks are always
+// recorded. Idempotency: lexical self and same-inode aliases are not
+// conflicts.
+func checkTargetConflict(fs afero.Fs, sourcePath, targetPath string, forceUpdate, willMove bool) []PlanConflict {
+	conflicts := make([]PlanConflict, 0)
+	if !willMove {
 		return conflicts
 	}
-	stat, err := fs.Stat(targetPath)
-	if err != nil {
+	var target os.FileInfo
+	var targetErr error
+	if lst, ok := fs.(afero.Lstater); ok {
+		if info, did, e := lst.LstatIfPossible(targetPath); e == nil && did {
+			target, targetErr = info, nil
+		} else {
+			target, targetErr = fs.Stat(targetPath)
+			// n.b.: when no true Lstat happened and the target is a dangling
+			// symlink this Stat misreads it as missing; symlinkObjectExists
+			// (below, available in-package) closes that hole.
+		}
+	} else {
+		target, targetErr = fs.Stat(targetPath)
+	}
+	if targetErr != nil {
+		// Dangling-symlink destination: Stat misses it but the object exists. A
+		// symlink is never authorizable-over, so this kind is unconditional (#224).
+		if symlinkObjectExists(fs, targetPath) {
+			conflicts = append(conflicts, PlanConflict{Path: targetPath, Kind: ConflictSymlink})
+		}
 		return conflicts
 	}
+	// A live symlink object at the destination is never renamed-over safely.
+	if target.Mode()&os.ModeSymlink != 0 {
+		conflicts = append(conflicts, PlanConflict{Path: targetPath, Kind: ConflictSymlink})
+		return conflicts
+	}
+	if target.IsDir() {
+		conflicts = append(conflicts, PlanConflict{Path: targetPath, Kind: ConflictDirectory})
+		return conflicts
+	}
+	// Same-inode alias of the source is not a conflict (idempotent no-op).
 	sourceStat, sourceErr := fs.Stat(sourcePath)
-	if sourceErr == nil && os.SameFile(sourceStat, stat) {
+	if sourceErr == nil && os.SameFile(sourceStat, target) {
 		return conflicts
 	}
-	conflicts = append(conflicts, targetPath)
+	if !forceUpdate {
+		conflicts = append(conflicts, PlanConflict{Path: targetPath, Kind: ConflictFile})
+	}
 	return conflicts
 }
 
@@ -183,7 +218,7 @@ func buildPlanContext(cfg *Config, engine template.EngineInterface, movie *model
 	if folderName == "" {
 		folderName = template.SanitizeFolderPath(match.MovieID)
 		if folderName == "" {
-			folderName = "unknown"
+			folderName = folderFallbackUnknown
 		}
 	}
 
@@ -290,7 +325,7 @@ type OrganizePlan struct {
 	TargetFile        string
 	TargetPath        string
 	WillMove          bool
-	Conflicts         []string
+	Conflicts         []PlanConflict
 	InPlace           bool
 	OldDir            string
 	IsDedicated       bool
@@ -379,7 +414,7 @@ func (o *Organizer) execute(plan *OrganizePlan) (*OrganizeResult, error) {
 	}
 
 	if len(plan.Conflicts) > 0 {
-		result.Error = fmt.Errorf("conflicts detected: %s", strings.Join(plan.Conflicts, "; "))
+		result.Error = fmt.Errorf("conflicts detected: %s", joinPlanConflictPaths(plan.Conflicts))
 		return result, result.Error
 	}
 
@@ -550,7 +585,7 @@ func (o *Organizer) Organize(ctx context.Context, cmd OrganizeCmd) (*OrganizeRes
 
 	// Check for conflicts before executing
 	if len(plan.Conflicts) > 0 {
-		return nil, fmt.Errorf("conflicts detected: %s", strings.Join(plan.Conflicts, "; "))
+		return nil, fmt.Errorf("conflicts detected: %s", joinPlanConflictPaths(plan.Conflicts))
 	}
 
 	// Dry-run: return early with planned result (no filesystem changes).
@@ -590,7 +625,9 @@ func (o *Organizer) validatePlan(plan *OrganizePlan) []string {
 	issues := make([]string, 0)
 
 	// Check for conflicts
-	issues = append(issues, plan.Conflicts...)
+	for _, c := range plan.Conflicts {
+		issues = append(issues, c.String()) // String() = bare path
+	}
 
 	// Check source exists
 	if _, err := o.fs.Stat(plan.SourcePath); os.IsNotExist(err) {
