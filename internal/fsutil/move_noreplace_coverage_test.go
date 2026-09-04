@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/spf13/afero"
+
+	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -172,17 +174,23 @@ func TestCoverCopyNoReplace_PublishFailureDiscardsStaging(t *testing.T) {
 	// pre-seeding dst before Delete? Simplest coverage: directly exercise
 	// discardStagedAfterFailedPublish semantics.
 	require.NoError(t, afero.WriteFile(fs, "/out/a.mp4.nrstg.0", []byte("staged"), 0644))
-	discardStagedAfterFailedPublish(fs, "/out/a.mp4.nrstg.0", fsutil_cropErr("discarded"))
+	info0, statErr0 := fs.Stat("/out/a.mp4.nrstg.0")
+	require.NoError(t, statErr0)
+	discardStagedAfterFailedPublish(fs, "/out/a.mp4.nrstg.0", info0, fsutil_cropErr("discarded"))
 	_, err := fs.Stat("/out/a.mp4.nrstg.0")
 	assert.True(t, os.IsNotExist(err), "staged discarded on ordinary failure")
 
 	require.NoError(t, afero.WriteFile(fs, "/out/a.mp4.nrstg.1", []byte("staged"), 0644))
-	discardStagedAfterFailedPublish(fs, "/out/a.mp4.nrstg.1", cropVerifyErr())
+	info1, statErr1 := fs.Stat("/out/a.mp4.nrstg.1")
+	require.NoError(t, statErr1)
+	discardStagedAfterFailedPublish(fs, "/out/a.mp4.nrstg.1", info1, cropVerifyErr())
 	_, err = fs.Stat("/out/a.mp4.nrstg.1")
 	assert.NoError(t, err, "ErrPublishStagedVerify keeps the name in place")
 
 	require.NoError(t, afero.WriteFile(fs, "/out/a.mp4.nrstg.2", []byte("staged"), 0644))
-	discardStagedAfterFailedPublish(fs, "/out/a.mp4.nrstg.2", cropCompletedErr())
+	info2, statErr2 := fs.Stat("/out/a.mp4.nrstg.2")
+	require.NoError(t, statErr2)
+	discardStagedAfterFailedPublish(fs, "/out/a.mp4.nrstg.2", info2, cropCompletedErr())
 	_, err = fs.Stat("/out/a.mp4.nrstg.2")
 	assert.NoError(t, err, "ErrPublishCompleted-carrying keeps the name in place")
 }
@@ -200,7 +208,7 @@ type renameFailFs struct {
 }
 
 func (r *renameFailFs) Rename(oldname, newname string) error {
-	if strings.HasPrefix(filepath.Clean(newname), filepath.Clean(r.failRenameDst)) {
+	if filepath.Clean(newname) == filepath.Clean(r.failRenameDst) {
 		return errors.New("simulated publish rename failure")
 	}
 	return r.Fs.Rename(oldname, newname)
@@ -288,4 +296,42 @@ func TestCoverMoveNoReplace_EXDEVCopyPublishRefusal(t *testing.T) {
 	assert.Equal(t, "foreign", string(content))
 	content, _ = os.ReadFile(src)
 	assert.Equal(t, "x", string(content), "source preserved after copy refusal")
+}
+
+// #224 codex P1: staging honors the configured umask — chmod-reasserted staging
+// must not widen published permissions beyond FilePerm &^ umask.
+func TestStagingFileMode_HonorsCachedUmask(t *testing.T) {
+	prev := config.UmaskValue()
+	config.StoreUmask(0o002)
+	t.Cleanup(func() { config.StoreUmask(prev) })
+
+	fs := afero.NewMemMapFs()
+	seedSrc(t, fs)
+	require.NoError(t, CopyFileNoReplace(fs, "/in/a.mp4", "/out/a.mp4"))
+	info, err := fs.Stat("/out/a.mp4")
+	require.NoError(t, err)
+	// MemMapFs doesn't apply umask at all, so whatever stagingFileMode() decided
+	// is the truth being published.
+	assert.Equal(t, config.FilePerm&^os.FileMode(0o002), info.Mode().Perm())
+}
+
+// #224 codex P2: the discard binds by identity — a substitute planted at the
+// staged name after our staging is never unlinked.
+func TestDiscardBound_PlantSubstitutePreserved(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	require.NoError(t, fs.MkdirAll("/out", 0777))
+	staged := "/out/a.mp4.nrstg.9"
+	require.NoError(t, afero.WriteFile(fs, staged, []byte("staged-content"), 0644))
+	info, err := fs.Stat(staged)
+	require.NoError(t, err)
+
+	// Substitute the staged name with a foreign object (different identity).
+	require.NoError(t, fs.Remove(staged))
+	require.NoError(t, afero.WriteFile(fs, staged, []byte("foreign"), 0644))
+
+	discardStagedAfterFailedPublish(fs, staged, info, fsutil_cropErr("publish failed"))
+
+	content, rerr := afero.ReadFile(fs, staged)
+	require.NoError(t, rerr)
+	assert.Equal(t, "foreign", string(content), "foreign substitute must be preserved, never unlinked")
 }

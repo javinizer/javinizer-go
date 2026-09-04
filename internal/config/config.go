@@ -43,6 +43,14 @@ func StoreUmask(mask int) {
 	cachedUmask.Store(int32(mask))
 }
 
+// UmaskValue returns the cached process umask bits (0 when unset). The value
+// is used to re-derive the mode an OpenFile-style create would have inherited
+// from the kernel — exclusive staging asserts exact modes through Chmod, which
+// bypasses the umask, so parity requires masking explicitly (#224 codex P1).
+func UmaskValue() int {
+	return int(cachedUmask.Load())
+}
+
 // ValidateHTTPBaseURL checks that raw is a valid HTTP or HTTPS URL.
 // An empty string is accepted (the field is optional).
 func ValidateHTTPBaseURL(path, raw string) error {

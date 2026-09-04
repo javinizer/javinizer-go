@@ -24,6 +24,16 @@ import (
 // both are PublishRefusal() subclasses. On every refusal/ambiguous failure,
 // src AND dst are both preserved byte-intact.
 
+// stagingFileMode restores the pre-#224 mode semantics for staging writes:
+// the legacy OpenFile path let the kernel apply the process umask,
+// CreateExclusiveStagingFile deliberately Chmods the exact requested mode
+// instead. Without re-masking, organized files would land wider than the
+// configured umask permits (codex P1). With no cached umask this degenerates
+// to config.FilePerm unchanged.
+func stagingFileMode() os.FileMode {
+	return config.FilePerm &^ os.FileMode(config.UmaskValue())
+}
+
 // noreplaceOrdinal is the process-local staging-name nonce for the
 // no-replace composites (exclusive staging retries ordinals inside).
 var noreplaceOrdinal atomic.Uint64
@@ -138,7 +148,7 @@ func CopyFileNoReplace(fs afero.Fs, src, dst string) error {
 	}
 	defer func() { _ = srcFile.Close() }()
 
-	staged, handle, err := CreateExclusiveStagingFile(fs, dst, ".nrstg", noreplaceOrdinal.Add(1), config.FilePerm)
+	staged, handle, err := CreateExclusiveStagingFile(fs, dst, ".nrstg", noreplaceOrdinal.Add(1), stagingFileMode())
 	if err != nil {
 		return fmt.Errorf("no-replace copy: exclusive staging for %s: %w", dst, err)
 	}
@@ -146,6 +156,8 @@ func CopyFileNoReplace(fs afero.Fs, src, dst string) error {
 		DiscardFailedExclusiveStaging(fs, staged, handle)
 		return fmt.Errorf("no-replace copy: stream into staging for %s: %w", dst, err)
 	}
+
+	stagedIdentity := stagingIdentity(handle)
 
 	p := StagedPublish{
 		FS:          fs,
@@ -158,21 +170,42 @@ func CopyFileNoReplace(fs afero.Fs, src, dst string) error {
 		NextOrdinal: nextNoReplaceOrdinal,
 	}
 	if err := PublishStagedBound(p); err != nil {
-		discardStagedAfterFailedPublish(fs, staged, err)
+		discardStagedAfterFailedPublish(fs, staged, stagedIdentity, err)
 		return fmt.Errorf("no-replace copy: publish %s: %w", dst, err)
 	}
 	return nil
 }
 
+// stagingIdentity captures the staged object's identity while its handle is
+// pinned (identity-bearing opens), so post-failure cleanup can re-prove the
+// name before unlinking (see discardStagedAfterFailedPublish).
+func stagingIdentity(fh afero.File) os.FileInfo {
+	if fh == nil {
+		return nil
+	}
+	info, err := fh.Stat()
+	if err != nil {
+		return nil
+	}
+	return info
+}
+
 // discardStagedAfterFailedPublish removes the staged copy after a failed
-// bound publish. Per PublishStagedBound's contract, every class except the
-// pre-publish verify failure and the ErrPublishCompleted-carrying classes has
-// the staged name either still provably ours or already consumed — removing it
-// is safe. The forbidden classes keep the name in place deliberately
-// (identity-unproven staged names may address a foreign object).
-func discardStagedAfterFailedPublish(fs afero.Fs, staged string, err error) {
-	if errors.Is(err, ErrPublishStagedVerify) || PublishCompleted(err) {
+// bound publish. The staged name is ordinal-shaped and attacker-observable;
+// a racer can substitute a foreign file within remove windows, so the removal
+// is executed via UnlinkVerified bound to the identity captured at staging
+// time (#224 codex finding) — a foreign substitute is never unlinked.
+//
+// It is skipped for classes where the contract deliberately retains the
+// staged name: ErrPublishStagedVerify (name unproven from the start) and any
+// ErrPublishCompleted-carrying class (the name was left in place and may
+// already address a foreign object).
+func discardStagedAfterFailedPublish(fs afero.Fs, staged string, identity os.FileInfo, pubErr error) {
+	if errors.Is(pubErr, ErrPublishStagedVerify) || PublishCompleted(pubErr) {
 		return
 	}
-	_ = fs.Remove(staged)
+	// UnlinkFailed means the staged object could not be re-proven (already
+	// consumed by the publish, or swapped out and re-planted) — both spell
+	//	// "do nothing", and keep the codex-reviewed keep-both postcondition.
+	_ = UnlinkVerified(fs, staged, identity)
 }

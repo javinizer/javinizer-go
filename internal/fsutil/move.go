@@ -75,7 +75,7 @@ func copyFileDataFs(fs afero.Fs, src, dst string) error {
 	// staged name is never published nor unbound-removed (#224). Publish keeps
 	// REPLACE semantics (authorized overwrite); no-clobber uses the separate
 	// NoReplace composites.
-	staged, handle, sErr := CreateExclusiveStagingFile(fs, dst, ".mvstg", noreplaceOrdinal.Add(1), config.FilePerm)
+	staged, handle, sErr := CreateExclusiveStagingFile(fs, dst, ".mvstg", noreplaceOrdinal.Add(1), stagingFileMode())
 	if sErr != nil {
 		return fmt.Errorf("failed to create destination: %w", sErr)
 	}
@@ -84,6 +84,8 @@ func copyFileDataFs(fs afero.Fs, src, dst string) error {
 		DiscardFailedExclusiveStaging(fs, staged, handle)
 		return fmt.Errorf("failed to copy data: %w", err)
 	}
+
+	stagedIdentity := stagingIdentity(handle)
 
 	p := StagedPublish{
 		FS:          fs,
@@ -98,7 +100,7 @@ func copyFileDataFs(fs afero.Fs, src, dst string) error {
 		// Same discard discipline as the no-replace composites: the old
 		// implementation removed its temp on failure; keep that cleanliness
 		// without ever deleting a possibly-foreign staged name.
-		discardStagedAfterFailedPublish(fs, staged, err)
+		discardStagedAfterFailedPublish(fs, staged, stagedIdentity, err)
 		return fmt.Errorf("failed to rename temp file to destination: %w", err)
 	}
 
