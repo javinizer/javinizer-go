@@ -189,7 +189,13 @@ func classifyExistingDestination(fs afero.Fs, src, dst string) destinationClassi
 		return destinationClassification{Conflict: &PlanConflict{Path: dst, Kind: ConflictSymlink}}
 	}
 	if dstErr == nil {
-		if dstLstat && lstatDst.Mode()&os.ModeSymlink != 0 {
+		if lstatDst.Mode()&os.ModeSymlink != 0 {
+			return destinationClassification{Conflict: &PlanConflict{Path: dst, Kind: ConflictSymlink}}
+		}
+		// A following Stat succeeded but never truly lstat'd the object — a
+		// VMSyed/fs boundary could misreport a live symlink as a plain file.
+		// Probe for one when no true Lstat happened (#224 codex P2).
+		if !dstLstat && symlinkObjectExists(fs, dst) {
 			return destinationClassification{Conflict: &PlanConflict{Path: dst, Kind: ConflictSymlink}}
 		}
 		if lstatDst.IsDir() {
@@ -225,6 +231,17 @@ func refuseExistingDestination(fs afero.Fs, src, dst string) (identical, sameIno
 // conflict the classifier reports, while a volume that cannot express an
 // atomic no-replace publish surfaces as a DISTINCT infrastructure refusal —
 // never as a content conflict.
+// destMaybeLstat probes dst with no-follow where possible; wrappings lacking
+// an afero.Lstater fall back on the plain Stat so nothing classifies a live
+// symlink as absent blindly.
+func destMaybeLstat(fs afero.Fs, dst string) (os.FileInfo, error) {
+	if lst, ok := fs.(afero.Lstater); ok {
+		info, _, err := lst.LstatIfPossible(dst)
+		return info, err
+	}
+	return fs.Stat(dst)
+}
+
 func mapNoReplaceRefusal(err error, dst string) error {
 	switch {
 	// Completed-first (#224 P2): a cleanup-refusal error carries publish
@@ -580,6 +597,16 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 						return mapNoReplaceRefusal(fmt.Errorf("failed to copy file: %w", err), plan.TargetPath)
 					}
 					return nil
+				}
+				// Authorized copy lane: the regular-file gate is also needed here —
+				// a symlink/directory destination must refuse regardless of
+				// authorization (#224 codex P1). dstLexicalSelf never reaches here
+				// (refused at classification).
+				if plan.overwriteAuthorized && !dstLexicalSelf {
+					linfo, lerr := destMaybeLstat(s.fs, plan.TargetPath)
+					if lerr == nil && linfo != nil && !linfo.Mode().IsRegular() {
+						return fmt.Errorf("destination is not a regular file (cannot authorize-over): %s", plan.TargetPath)
+					}
 				}
 				if err := s.linker.copyFile(s.fs, plan.SourcePath, plan.TargetPath); err != nil {
 					return fmt.Errorf("failed to copy file: %w", err)

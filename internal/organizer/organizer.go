@@ -150,8 +150,10 @@ func checkTargetConflict(fs afero.Fs, sourcePath, targetPath string, forceUpdate
 		}
 		return conflicts
 	}
-	// A live symlink object at the destination is never renamed-over safely.
-	if target.Mode()&os.ModeSymlink != 0 {
+	// A live symlink object at the destination is never renamed-over safely —
+	// a fallback Stat returns didLstat=false only when no Lstat was performed,
+	// so confirm via readlink before declaring it a regular file.
+	if target.Mode()&os.ModeSymlink != 0 || symlinkObjectExists(fs, targetPath) {
 		conflicts = append(conflicts, PlanConflict{Path: targetPath, Kind: ConflictSymlink})
 		return conflicts
 	}

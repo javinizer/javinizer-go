@@ -178,7 +178,11 @@ func (s *inPlaceStrategy) Plan(match models.FileMatchInfo, movie *models.Movie, 
 	if inPlace {
 		// Target-dir occupation is a directory conflict unconditionally — force
 		// update must never swap a foreign folder even if it is empty. #224.
-		if stat, err := s.fs.Stat(targetDir); err == nil {
+		// Symlink occupant (live or dangling): refuse as well (never silently
+		// treat the link's target as the real directory — plan/execute agree).
+		if symlinkObjectExists(s.fs, targetDir) {
+			conflicts = append(conflicts, PlanConflict{Path: targetDir, Kind: ConflictSymlink})
+		} else if stat, err := s.fs.Stat(targetDir); err == nil {
 			oldStat, oldErr := s.fs.Stat(oldDir)
 			if oldErr != nil {
 				conflicts = append(conflicts, PlanConflict{Path: targetDir, Kind: ConflictDirectory})
