@@ -65,7 +65,8 @@ func TestCodexR5_AuthorizedCopyOntoSymlinkRefused(t *testing.T) {
 	// Refusal is via the plan-surface bare-path rendering (per design: typed
 	// conflicts don't paint the kind onto plan-conflict messages).
 	assert.Contains(t, err.Error(), "conflicts detected")
-	assert.Contains(t, err.Error(), filepath.ToSlash(dst))
+	sl := filepath.ToSlash
+	assert.Contains(t, sl(err.Error()), sl(dst))
 	info, lerr := os.Lstat(dst)
 	require.NoError(t, lerr)
 	assert.NotZero(t, info.Mode()&os.ModeSymlink, "the symlink object must not be rehearsed or removed")
