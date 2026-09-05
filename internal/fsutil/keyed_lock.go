@@ -873,7 +873,12 @@ func (r *KeyedLockRegistry) AcquireShared(key string) func() {
 // ".." components but never drops a trailing non-dot segment.
 const dirLockTierSuffix = "\x00dir"
 
-func dirTierKey(dir string) string { return dir + dirLockTierSuffix }
+// dirTierKey normalizes BEFORE appending the suffix: with the marker already
+// attached, filepath.Clean sees it as a new trailing component and can no
+// longer strip a trailing separator or terminal "."/".." — '/dst' and
+// '/dst/' would derive distinct keys and stop contending. normalizeDestPath
+// (not bare filepath.Clean) so the separator policy matches the file tier.
+func dirTierKey(dir string) string { return normalizeDestPath(dir) + dirLockTierSuffix }
 
 // AcquireDirExclusive is the directory tier's writer hold (a directory
 // rename/install draining child writes): same keyspace as Acquire, but
