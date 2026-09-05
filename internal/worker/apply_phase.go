@@ -14,6 +14,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/downloader"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/organizer"
 	"github.com/javinizer/javinizer-go/internal/panicutil"
 	"github.com/javinizer/javinizer-go/internal/progress"
 	"github.com/javinizer/javinizer-go/internal/worker/fanout"
@@ -26,11 +27,230 @@ type ApplyPhase interface {
 	Run(ctx context.Context, inputs applyPhaseInputs, cfg ApplyPhaseConfig)
 }
 
+// applyBudgetFloor is the minimum per-file apply budget granted at worker
+// task start when the item's own PreApply hook already consumed (or, by
+// ignoring its context, overshot) the whole WorkerTimeout (codex P2, PR
+// #241 F5). Zero is the one duration that is never negative — the derived
+// deadline lands exactly AT the task start instead of in its past (no time
+// travel) — and context.WithDeadline against a non-future deadline cancels
+// SYNCHRONOUSLY, so the workflow receives an essentially-expired-but-
+// consistent context: DeadlineExceeded from the moment the task context
+// exists, letting the organizer's entry recheck return before any
+// filesystem work. The file's own hook having burned the grant satisfies
+// F4 (no second full timeout) without a clock comparison at the worker.
+const applyBudgetFloor = time.Duration(0)
+
 type applyPhase struct{}
 
 // NewApplyPhase returns the default ApplyPhase implementation.
 func NewApplyPhase() ApplyPhase {
 	return &applyPhase{}
+}
+
+// applyItem is one file selected for this apply iteration.
+type applyItem struct {
+	filePath   string
+	fileResult *resultstore.MovieResult
+	movie      *models.Movie
+}
+
+// preparedApplyFile is the per-item command material the apply phase builds
+// ONCE per item, in sorted order, before worker fan-out (#240 finding A):
+// the duplicate preflight's owner priming derives from the same commands the
+// workers later execute, so PreApply-hook mutations reach both, and every
+// hook still runs exactly once per file. baseline is the phase-entry movie
+// clone (codex r51), frozen before the hook could mutate the live pointer.
+type preparedApplyFile struct {
+	cmd      workflow.ApplyCmd
+	afc      *ApplyFileContext
+	baseline *models.Movie
+	execute  bool
+	// hookElapsed is the item's OWN preparation spend — the PreApply hook
+	// plus command build, measured on the phase goroutine (codex P2, PR
+	// #241 F5). The preparation loop is SEQUENTIAL over the batch and
+	// fan-out starts only after every item is prepared+primed, so an
+	// absolute deadline stamped here would silently charge every SIBLING's
+	// hook (and the priming pass, and fan-out queue time) against THIS
+	// file's budget: in a large batch or behind a slow later hook, an
+	// early healthy item could reach wf.Apply with an already-expired
+	// context although its own work fits WorkerTimeout. The worker instead
+	// starts the budget clock at ITS task start and debits only this
+	// own-work spend (F4 still holds: a hook burning the whole timeout
+	// never earns a second full grant — the remainder clamps to
+	// applyBudgetFloor).
+	hookElapsed time.Duration
+	// primingElapsed is the item's OWN duplicate-priming spend — the
+	// PlanDuplicatePriming call, measured on the phase goroutine during the
+	// sequential priming pass (codex P2, PR #241 F1). The priming pass runs
+	// BEFORE fan-out on the phase goroutine, so without this debit a slow
+	// priming call consumed real per-file budget invisibly: hookElapsed
+	// alone under-charged and apply silently re-granted whatever priming
+	// burned. The worker debits hookElapsed+primingElapsed from the budget
+	// it starts at ITS task start; sibling priming spends stay invisible
+	// exactly like sibling preparation (only the file's OWN priming is
+	// charged).
+	primingElapsed time.Duration
+	// hookOutcome is non-nil when the priming-time PreApply hook panicked
+	// (codex r2 P2), the priming-time planning pass panicked (codex P2, PR
+	// #241 F3), or planning exhausted the file's own priming budget (codex
+	// P2, PR #241 F1): the prepare/priming pass recovered, wrote back, and
+	// broadcast the failure already, so the item's worker replays this
+	// outcome instead of re-executing — the once-per-file hook contract
+	// holds and the batch counts exactly one recorded failure for the file.
+	hookOutcome *applyFileOutcome
+	// stationary marks a primed item whose plan moves nothing (WillMove=false
+	// — a resident already sitting at its destination, codex P1, PR #241):
+	// its priming PARKED the canonical key as a PENDING claim terminal-gated
+	// on this item's own worker (codex P2, PR #241 F1), so observing movers
+	// block until it validates. The apply phase schedules these items FIRST
+	// in fan-out order (sorted order preserved within each class) so a
+	// single-worker run validates the resident before any mover can wait on
+	// its key instead of deadlocking behind a mover sorted ahead of it.
+	stationary bool
+}
+
+// primeDuplicateClaims runs the batch's ONE planning pass when the workflow
+// exposes the read-only planning seam: each prepared item's organize target
+// registers against the run's duplicate tracker in sorted order,
+// pre-assigning every canonical key's winner (and its ordered standbys,
+// codex P2, PR #241 F1) before any apply worker starts (#240 finding A).
+// Items whose PreApply hook declined execution (or panicked into a recorded
+// failure), whose plan fails or exhausts the file's own priming budget
+// (codex P2, PR #241 F1), or whose source already vanished register nothing
+// (codex r2 P2 — extended to stationary residents by codex P2, PR #241 F1:
+// an unverified resident would otherwise park a born-settled ghost claim) —
+// their workers skip execution or fail with the identical plan error, so
+// priming can never claim a file that cannot run. Without
+// the seam (or on a nil workflow) the tracker stays unprimed, preserving
+// first-come observation for single-file callers.
+func primeDuplicateClaims(ctx context.Context, wf workflow.WorkflowInterface, tracker *organizer.DuplicateTracker, items []applyItem, prepared map[string]*preparedApplyFile, inputs applyPhaseInputs, cfg ApplyPhaseConfig) {
+	planner, ok := wf.(workflow.DuplicatePrimingPlanner)
+	if !ok {
+		return
+	}
+	primings := make([]organizer.DuplicatePriming, 0, len(items))
+	for _, item := range items {
+		p := prepared[item.filePath]
+		if !p.execute {
+			continue
+		}
+		// codex P2 (PR #241 F1): the planning call is bounded by the file's
+		// OWN remaining budget — WorkerTimeout debited by its own hook spend.
+		// The priming pass is SEQUENTIAL on the phase goroutine, so an
+		// unbounded call behind the raw batch context could stall every
+		// later file's priming AND fan-out; the per-file context cancels at
+		// its own deadline without touching the batch context. The measured
+		// spend (primingElapsed) is then charged to the same budget at the
+		// worker's task start. A file whose hook already burned the whole
+		// grant primes under applyBudgetFloor: the zero-duration context is
+		// already expired at construction, a ctx-aware planner returns
+		// immediately, and the file records the timeout instead of priming.
+		primeCtx := ctx
+		var primeBudget time.Duration
+		var primeCancel context.CancelFunc
+		if timeout := inputs.Concurrency.WorkerTimeout; timeout > 0 {
+			primeBudget = timeout - p.hookElapsed
+			if primeBudget < applyBudgetFloor {
+				primeBudget = applyBudgetFloor
+			}
+			primeCtx, primeCancel = context.WithTimeout(ctx, primeBudget)
+		}
+		primingStart := time.Now()
+		priming, recorded, err := planPrimingRecovered(ctx, primeCtx, planner, item, p.cmd, inputs, cfg, primeBudget)
+		p.primingElapsed = time.Since(primingStart)
+		if primeCancel != nil {
+			primeCancel()
+		}
+		if recorded != nil {
+			// codex P2 (PR #241 F3 panics, F1 timeouts): the planning failure
+			// was already recovered, written back, and broadcast per file —
+			// the worker replays the recorded outcome (planning never runs
+			// twice) while the batch continues with every other item.
+			p.execute = false
+			p.hookOutcome = recorded
+			continue
+		}
+		if err != nil {
+			logging.Warnf("[Apply] duplicate preflight planning skipped %s: %v", item.filePath, err)
+			continue
+		}
+		// codex P2 (PR #241 F1): mirror PrimeBatch's park condition so the
+		// fan-out's residents-first ordering covers exactly the primings that
+		// left a pending parked claim behind.
+		p.stationary = !priming.WillMove && priming.TargetPath != ""
+		primings = append(primings, priming)
+	}
+	tracker.PrimeBatch(primings)
+}
+
+// planPrimingRecovered runs ONE item's priming-plan call under the apply
+// phase's per-file recovery boundary (codex P2, PR #241 F3) and per-file
+// budget boundary (codex P2, PR #241 F1).
+// PlanDuplicatePriming runs the organizer's whole planning pipeline on the
+// phase's MAIN goroutine, so an unrecovered panic would escape
+// withFileRecovery (which exists only inside the fanned-out workers) and
+// sink the whole job. A recovered panic is written back and broadcast with
+// the identical semantics as a preparation or execution panic — that file
+// fails with the recorded panic message and the batch continues — and the
+// returned outcome is what the item's worker replays.
+//
+// F1: primeCtx carries the file's OWN remaining budget (primeBudget =
+// WorkerTimeout − hookElapsed, clamped at applyBudgetFloor; zero primeBudget
+// means unbounded when no WorkerTimeout is configured). Its deadline firing
+// while the BATCH context is still alive is this file's priming budget
+// exhausting: planning is abandoned, the file skips priming, and the SAME
+// recorded-failure shape is published (write-back + broadcast + replayed
+// outcome), minus the panic flag — a timeout is a recoverable per-file
+// failure, never a panic. A batch-level cancellation or deadline surfaces
+// through batchCtx instead and keeps the ordinary log-and-continue skip —
+// it is never mislabeled as a per-file priming timeout.
+func planPrimingRecovered(batchCtx, primeCtx context.Context, planner workflow.DuplicatePrimingPlanner, item applyItem, cmd workflow.ApplyCmd, inputs applyPhaseInputs, cfg ApplyPhaseConfig, primeBudget time.Duration) (priming organizer.DuplicatePriming, recorded *applyFileOutcome, err error) {
+	outcome := applyFileOutcome{FilePath: item.filePath, MovieID: item.movie.ID, DryRun: cfg.DryRun}
+	// Mirror prepareApplyItem's recoveryContext assembly field-for-field: the
+	// recorded failure is indistinguishable from a worker-side panic.
+	rc := recoveryContext{
+		filePath:         item.filePath,
+		fmi:              item.fileResult.FileMatchInfo,
+		movie:            item.fileResult.Movie,
+		provenance:       inputs.Provenance[item.filePath],
+		updater:          inputs.Updater,
+		broadcast:        broadcastFailure(inputs.Broadcaster, inputs.JobID, item.movie.ID, jobEventPhaseApply, "Apply"),
+		startTime:        time.Now(),
+		editLockFn:       inputs.EditLockFn,
+		promoteWitnessFn: inputs.PromoteWitnessFn,
+	}
+	// Post-recovery bookkeeping is deferred FIRST so it runs AFTER the
+	// recovery func below (LIFO) — recover() only bites when called directly
+	// by a deferred function, exactly like prepareApplyItem's dual-defers.
+	defer func() {
+		if outcome.Panic || outcome.Failed {
+			recorded = &outcome
+		}
+	}()
+	defer withFileRecovery(rc, &outcome)()
+	priming, err = planner.PlanDuplicatePriming(primeCtx, cmd)
+	if err != nil && primeBudget > 0 && errors.Is(primeCtx.Err(), context.DeadlineExceeded) && batchCtx.Err() == nil {
+		// The file's own priming budget fired mid-plan with the batch still
+		// alive: skip priming and record the recoverable failure through the
+		// same publication path a panic would take (minus the panic flag).
+		recordPrimingTimeout(rc, &outcome, primeBudget)
+	}
+	return priming, nil, err
+}
+
+// recordPrimingTimeout publishes a per-file priming budget exhaustion through
+// the IDENTICAL write-back + broadcast path a recovered planning panic takes
+// (codex P2, PR #241 F1 — publishRecoveryFailure is the panic recovery's
+// publication half), then marks the replayed outcome as a plain recoverable
+// failure: Panic stays false (nothing panicked — no panic audit), Failed is
+// set so the batch counts exactly one failure and the row stays retryable,
+// and the batch continues with every other file.
+func recordPrimingTimeout(rc recoveryContext, outcome *applyFileOutcome, primeBudget time.Duration) {
+	msg := fmt.Sprintf("duplicate preflight planning timed out after %v", primeBudget)
+	logging.Warnf("[Apply] %s (%s skips priming; the batch continues)", msg, rc.filePath)
+	publishRecoveryFailure(rc, msg)
+	outcome.Failed = true
+	outcome.ErrorMsg = msg
 }
 
 // applyFileOutcome captures the result of applying a single file.
@@ -88,11 +308,6 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 	// exclusion) during apply go through the live tracker via inputs.Updater
 	// but do not affect which files this apply iteration processes. This
 	// prevents concurrent-modification bugs during iteration.
-	type applyItem struct {
-		filePath   string
-		fileResult *resultstore.MovieResult
-		movie      *models.Movie
-	}
 	retryPaths := make(map[string]struct{}, len(cfg.RetryFilePaths))
 	for _, filePath := range cfg.RetryFilePaths {
 		retryPaths[filePath] = struct{}{}
@@ -139,9 +354,50 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 	var processed int64
 	inputs.Dedup = &sync.Map{}
 	downloader.PrimeDownloadOwners(inputs.Dedup, owners)
+	// One intra-batch duplicate preflight registry per apply run (#224 phase
+	// E): every file's plan registers its proven-equal canonical destination
+	// key so same-batch target collisions surface as plan conflicts — or, when
+	// overwrite is authorized, as persisted per-file warnings. Dry runs
+	// construct the non-probing variant so key derivation never writes probe
+	// artifacts (#240 finding B).
+	cfg.OrganizeOptions.DuplicateTracker = organizer.NewDuplicateTracker(cfg.DryRun)
+	// Prepare every item's ApplyCmd ONCE, in sorted order, before fan-out
+	// (#240 finding A): priming and execution share identical commands, and
+	// PreApply hooks keep their once-per-file contract. Each build runs under
+	// its own per-file execution boundary (codex r2 P2) — a hook blocking on
+	// the raw batch context could otherwise stall the entire priming pass,
+	// and a panicking hook could abort it.
+	prepared := make(map[string]*preparedApplyFile, len(items))
+	for _, item := range items {
+		prepared[item.filePath] = prepareApplyItem(ctx, item, inputs, cfg)
+	}
+	primeDuplicateClaims(ctx, wf, cfg.OrganizeOptions.DuplicateTracker, items, prepared, inputs, cfg)
+	// codex P2 (PR #241 F1): primed stationary residents own PENDING parked
+	// claims terminal-gated on their own workers, so an observing mover
+	// blocks until its resident validates. Parallel workers absorb that
+	// wait; a MaxWorkers=1 run with a mover sorted AHEAD of its resident
+	// would deadlock on the still-pending key, so stationary items lead the
+	// fan-out (stable within each class — mover-vs-mover sorted ownership
+	// from priming is untouched, and multi-worker outcomes are unchanged:
+	// residents simply finish validating sooner). Items without a primed
+	// parked claim keep their sorted place.
+	if len(items) > 1 {
+		ordered := make([]applyItem, 0, len(items))
+		for _, item := range items {
+			if prepared[item.filePath].stationary {
+				ordered = append(ordered, item)
+			}
+		}
+		for _, item := range items {
+			if !prepared[item.filePath].stationary {
+				ordered = append(ordered, item)
+			}
+		}
+		items = ordered
+	}
 	outcomes := fanout.BoundedFanOut(ctx, inputs.Concurrency.MaxWorkers, items,
 		func(egCtx context.Context, item applyItem) applyFileOutcome {
-			outcome := applyFile(egCtx, wf, item.filePath, item.fileResult, item.movie, inputs, cfg)
+			outcome := applyFile(egCtx, wf, item.filePath, item.fileResult, item.movie, prepared[item.filePath], inputs, cfg)
 			// Report per-file progress so the frontend bar advances 0→100 across
 			// files instead of jumping straight to 100 on OnPhaseComplete. A file
 			// counts as processed whether it succeeded or failed — the bar tracks
@@ -235,6 +491,68 @@ func countRemainingApplyFailures(inputs applyPhaseInputs, outcomes []applyFileOu
 	return int64(len(failedPaths))
 }
 
+// prepareApplyItem builds one sorted item's ApplyCmd ahead of fan-out,
+// wrapping the priming-time build — PreApply hook included — in the SAME
+// per-file execution boundary applyFile enforces around its worker body
+// (codex r2 P2): a per-file WorkerTimeout context, so a hook blocking past
+// its budget unblocks instead of stalling the whole batch priming pass
+// behind an untamed batch context; and withFileRecovery, so a panicking
+// hook records THIS file's failure and the run continues instead of
+// aborting every remaining file. A recovered panic yields execute=false
+// plus a pre-recorded failure outcome the item's worker replays unchanged
+// (the hook never runs twice).
+//
+// codex P2 (PR #241 F4+F5): the hook spends from the per-file budget here,
+// and the item's OWN preparation spend is recorded as hookElapsed; applyFile
+// later debits exactly that — plus primingElapsed, the file's own priming
+// spend (codex P2, PR #241 F1) — from the budget it starts at ITS task
+// start. Hook + priming + apply stay bounded by ONE WorkerTimeout — no
+// fresh full re-grant — while sibling preparation and priming, and fan-out
+// queue time never consume THIS file's budget anymore (the preparation and
+// priming loops are sequential, fan-out starts only after ALL items are
+// prepared+primed).
+func prepareApplyItem(ctx context.Context, item applyItem, inputs applyPhaseInputs, cfg ApplyPhaseConfig) (prepared *preparedApplyFile) {
+	prepared = &preparedApplyFile{baseline: item.movie.Clone()}
+	if timeout := inputs.Concurrency.WorkerTimeout; timeout > 0 {
+		// The hook's own budget is still the full WorkerTimeout measured from
+		// THIS item's preparation start — only the accounting handed to the
+		// worker changed (hookElapsed), not the hook-facing boundary.
+		hookCtx, hookCancel := context.WithTimeout(ctx, timeout)
+		defer hookCancel()
+		ctx = hookCtx
+	}
+
+	outcome := applyFileOutcome{FilePath: item.filePath, MovieID: item.movie.ID, DryRun: cfg.DryRun}
+	// Mirror applyFile's recoveryContext assembly field-for-field; the
+	// poster-claim release stays at the worker boundary (fan-out per-item).
+	rc := recoveryContext{
+		filePath:         item.filePath,
+		fmi:              item.fileResult.FileMatchInfo,
+		movie:            item.fileResult.Movie,
+		provenance:       inputs.Provenance[item.filePath],
+		updater:          inputs.Updater,
+		broadcast:        broadcastFailure(inputs.Broadcaster, inputs.JobID, item.movie.ID, jobEventPhaseApply, "Apply"),
+		startTime:        time.Now(),
+		editLockFn:       inputs.EditLockFn,
+		promoteWitnessFn: inputs.PromoteWitnessFn,
+	}
+	// Post-recovery bookkeeping is deferred FIRST so it runs AFTER the
+	// recovery func below (LIFO) — recover() only bites when called directly
+	// by a deferred function, exactly like applyFile's defer site.
+	defer func() {
+		if outcome.Panic {
+			prepared.execute = false
+			prepared.hookOutcome = &outcome
+		}
+	}()
+	defer withFileRecovery(rc, &outcome)()
+
+	prepareStart := time.Now()
+	prepared.cmd, prepared.afc, prepared.execute = buildApplyCmd(item.filePath, item.movie, item.fileResult, inputs, cfg, ctx)
+	prepared.hookElapsed = time.Since(prepareStart)
+	return prepared
+}
+
 // buildApplyCmd constructs the workflow.ApplyCmd for a single file apply.
 // It resolves the destination path, builds the command, and runs the
 // PreApply hook if configured (which may mutate the ApplyFileContext and
@@ -274,7 +592,7 @@ func buildApplyCmd(
 	fileResult *resultstore.MovieResult,
 	inputs applyPhaseInputs,
 	cfg ApplyPhaseConfig,
-	taskCtx context.Context,
+	ctx context.Context,
 ) (workflow.ApplyCmd, *ApplyFileContext, bool) {
 	sourceDir := filepath.Dir(filePath)
 	match := fileResult.FileMatchInfo
@@ -326,7 +644,7 @@ func buildApplyCmd(
 	}
 
 	if cfg.PreApplyFunc != nil {
-		if err := cfg.PreApplyFunc(taskCtx, afc); err != nil {
+		if err := cfg.PreApplyFunc(ctx, afc); err != nil {
 			logging.Warnf("PreApply hook skipped %s: %v", filePath, err)
 			return applyCmd, afc, false // false = skip execution
 		}
@@ -540,14 +858,17 @@ func interpretApplyResult(
 	return outcome
 }
 
-// applyFile handles the per-file apply logic: build ApplyCmd, execute workflow.Apply,
-// interpret result. Error handling, panic recovery, and result tracking are performed here.
+// applyFile handles the per-file apply logic: consume the prepared ApplyCmd,
+// execute workflow.Apply, interpret result. Error handling, panic recovery,
+// and result tracking are performed here. The command itself was built once
+// per item, in sorted order, before fan-out (#240 finding A).
 func applyFile(
 	egCtx context.Context,
 	wf workflow.WorkflowInterface,
 	filePath string,
 	fileResult *resultstore.MovieResult,
 	movie *models.Movie,
+	prepared *preparedApplyFile,
 	inputs applyPhaseInputs,
 	cfg ApplyPhaseConfig,
 ) (outcome applyFileOutcome) {
@@ -581,6 +902,16 @@ func applyFile(
 	ownerLogicalKey := strings.ToLower(strings.TrimSpace(movie.ID))
 	defer downloader.ReleaseDownloadOwnerClaim(inputs.Dedup, ownerLogicalKey, filePath)
 
+	// codex P2 (PR #241) recover-path close-out: a primed duplicate owner
+	// whose worker exits WITHOUT reaching the organizer's own settle/release
+	// (panic in an earlier pipeline step, cancellation at Organize's entry,
+	// or the recovered-panic replay below) must not hold its canonical key
+	// open — waiting claimants promote instead of deadlocking behind a dead
+	// owner. Settled claims are final and untouched, so every normally-
+	// completed Organize is a no-op here. Runs during unwind (after the
+	// recovery defer below) and on ordinary return alike.
+	defer cfg.OrganizeOptions.DuplicateTracker.ReleaseAbandonedBy(prepared.cmd.Match.Path)
+
 	rc := recoveryContext{
 		filePath: filePath,
 		// Preserve the existing FileMatchInfo (incl. IsMultiPart / PartNumber /
@@ -603,21 +934,40 @@ func applyFile(
 	taskCtx := egCtx
 	var taskCancel context.CancelFunc
 	if applyTimeout > 0 {
-		taskCtx, taskCancel = context.WithTimeout(egCtx, applyTimeout)
+		// codex P2 (PR #241 F5): the budget clock starts at THIS worker
+		// task's start — sibling preparation and priming, and fan-out queue
+		// time are all invisible — debited only by the file's OWN
+		// preparation spend (F4: hook + apply stay inside ONE WorkerTimeout;
+		// a hook that burned it buys no second full grant for apply).
+		// codex P2 (PR #241 F1): the file's OWN priming spend joins the
+		// debit — priming ran under the same per-file budget, so apply sees
+		// hook + priming + apply bounded by ONE WorkerTimeout, with sibling
+		// priming still invisible. Because an uncooperative hook (or a
+		// ctx-ignoring planner) can overshoot its deadline, the raw
+		// remainder can go negative — a deadline BEFORE task start, i.e.
+		// time travel — so it clamps at applyBudgetFloor: never negative,
+		// and the zero duration cancels the derived context synchronously
+		// (see the constant's contract).
+		remaining := applyTimeout - (prepared.hookElapsed + prepared.primingElapsed)
+		if remaining < applyBudgetFloor {
+			remaining = applyBudgetFloor
+		}
+		taskCtx, taskCancel = context.WithDeadline(egCtx, startTime.Add(remaining))
 		defer taskCancel()
 	}
 
-	// codex r51 P2c: freeze the phase-entry baseline BEFORE the workflow
-	// sees the pointer — stepDisplayTitle & friends mutate cmd.Movie/afc.Movie
-	// (= the same movie), and a mutated "baseline" misclassifies merges as
-	// concurrent review edits, restoring stale fields over the computed ones.
-	frozenBaseline := movie.Clone()
-
-	// Step 1: Build the ApplyCmd.
-	applyCmd, afc, shouldExecute := buildApplyCmd(filePath, movie, fileResult, inputs, cfg, taskCtx)
-	if !shouldExecute {
+	// Step 1: Consume the prepared ApplyCmd (built pre-fan-out with the
+	// phase-entry baseline frozen before any hook mutation, codex r51 P2c).
+	// codex r2 P2: a hook panic during priming was already recovered,
+	// recorded, and broadcast there — replay the pre-recorded failure
+	// outcome instead of re-executing (once-per-file hook contract).
+	if prepared.hookOutcome != nil {
+		return *prepared.hookOutcome
+	}
+	if !prepared.execute {
 		return outcome
 	}
+	applyCmd, afc := prepared.cmd, prepared.afc
 
 	// Step 2: Execute the workflow.Apply.
 	reporter := makeProgressReporter(inputs.Broadcaster, inputs.JobID, movie.ID, jobEventPhaseApply)
@@ -630,7 +980,7 @@ func applyFile(
 
 	// Step 3: Interpret the result against the FROZEN baseline (workflow
 	// permutations may have rewritten fields on the live pointer mid-apply).
-	return interpretApplyResult(filePath, frozenBaseline, startTime, applyTimeout, inputs, cfg, taskCtx, afc, result, applyErr)
+	return interpretApplyResult(filePath, prepared.baseline, startTime, applyTimeout, inputs, cfg, taskCtx, afc, result, applyErr)
 }
 
 // trackApplyResults processes collected applyFileOutcomes: increments counters

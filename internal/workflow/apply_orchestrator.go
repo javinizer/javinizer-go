@@ -19,6 +19,10 @@ import (
 // Unexported — only the composition root (Workflow) uses it.
 type applyOrchestrator interface {
 	Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult, error)
+	// planDuplicatePriming runs ONLY the organize step's planning half
+	// (read-only) so the apply phase can prime each sorted batch item's
+	// duplicate claim before worker fan-out (#240 finding A).
+	planDuplicatePriming(ctx context.Context, cmd ApplyCmd) (organizer.DuplicatePriming, error)
 }
 
 // applyOrchImpl owns the 6-step Apply sequence: revert begin, organize, merge, DisplayTitle,
@@ -87,13 +91,22 @@ type onStepFailResult struct {
 // executeSteps iterates through steps with progress reporting and revert-log
 // completion on failure. If a step fails, onStepFail is called to produce the
 // partial ApplyResult and wrapped error. Returns nil on success (all steps passed).
+//
+// skipDownstream, when non-nil, is evaluated before EVERY step; once it returns
+// true the loop stops WITHOUT failing — the duplicate-ownership gate uses this
+// to halt the entire downstream output pipeline (merge/title/download/NFO) as
+// one boundary decision instead of per-step checks.
 func (o *applyOrchImpl) executeSteps(
 	ctx context.Context,
 	steps []applyStep,
 	completed *stepCompletion,
 	onStepFail func(stepName string, failMsg string, stepErr error, stepsSoFar stepCompletion) onStepFailResult,
+	skipDownstream func() bool,
 ) (*ApplyResult, error) {
 	for _, s := range steps {
+		if skipDownstream != nil && skipDownstream() {
+			break
+		}
 		if s.progressMsg != "" {
 			progress.FromContext(ctx).Report(s.progressStep, s.progressPct, s.progressMsg)
 		}
@@ -153,8 +166,20 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult
 	// the file) are recorded for revert. Passing nil here would blank
 	// NewPath and leave a moved file non-revertable (regression vs main,
 	// which persisted NewPath inline within OrganizeTask.Execute).
+	// codex PR #241 batch-2 F1/F2: an organize-step failure that produced NO
+	// OrganizeResult is a pre-publication terminal by construction — plan
+	// errors, validation/conflict rejections (incl. unauthorized intra-batch
+	// duplicates), and context aborts all return (nil, err) from Organize
+	// before any execute — and a strategy failure marked
+	// OrganizeResult.PrePublication published nothing either. The Begin row
+	// already exists, so the marker flows to CompleteFailed and the returned
+	// result: the row finalizes completed-noop (nothing to unwind) instead of
+	// lingering failed-with-empty-NewPath — whose "" anchor the reverter
+	// probes as anchor_missing forever, holding the batch off fully-reverted —
+	// or worse, journaling a shared intent path a promoted claimant publishes.
 	onStepFail := func(stepName string, failMsg string, stepErr error, stepsSoFar stepCompletion) onStepFailResult {
-		o.completeRevertLogWithState(ctx, opID, state)
+		prePub := stepName == "organize" && (state.organizeResult == nil || state.organizeResult.PrePublication)
+		o.completeRevertLogWithState(ctx, opID, state, prePub)
 		return onStepFailResult{
 			result: &ApplyResult{
 				OrganizeResult: state.organizeResult,
@@ -166,6 +191,7 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult
 				OperationID:    opID,
 				Steps:          stepsSoFar,
 				FailedStep:     stepName,
+				PrePublication: prePub,
 			},
 			err: fmt.Errorf("%s failed: %w", failMsg, stepErr),
 		}
@@ -232,7 +258,24 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult
 		stepNFO,
 	}
 
-	failResult, failErr := o.executeSteps(ctx, pipelineSteps, &steps, onStepFail)
+	// codex P1 (PR #241): duplicate-ownership gate at the step-loop boundary.
+	// An authorized intra-batch duplicate (ForceUpdate) SKIPPED its move, and
+	// its OrganizeResult.FolderPath/NewPath name the WINNER's shared
+	// destination for display only. Running merge/download/NFO from here would
+	// aim those writes at the winner's folder while the winner's own pipeline
+	// produces the same artifacts — both workers concurrently writing/
+	// truncating ONE NFO (or media shared by different logical IDs) — and
+	// would journal those shared generated paths onto the loser's revert row,
+	// so reverting the loser would DELETE the winner's artifacts. Once the
+	// organize step lands DuplicateSkipped, EVERY remaining output step is
+	// skipped: only the destination owner produces and journals ancillary
+	// outputs. The duplicate warning surface is untouched — it rides back on
+	// OrganizeResult.Warnings.
+	dupGate := func() bool {
+		return state.organizeResult != nil && state.organizeResult.DuplicateSkipped
+	}
+
+	failResult, failErr := o.executeSteps(ctx, pipelineSteps, &steps, onStepFail, dupGate)
 	if failResult != nil {
 		return failResult, failErr
 	}
@@ -267,11 +310,43 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult
 	}, nil
 }
 
-// stepOrganize executes the organize step: move/link files to destination.
-func (o *applyOrchImpl) stepOrganize(ctx context.Context, cmd ApplyCmd, state *applyPipelineState, steps *stepCompletion) error {
-	organizeCmd := organizer.OrganizeCmd{
+// planDuplicatePriming computes the organize plan for cmd WITHOUT executing
+// it, mirroring stepOrganize's command assembly. Plans that cannot register
+// a claim — organize skipped, plan error, or an organizer lacking the
+// read-only planning seam — yield no priming; the item's worker then skips
+// execution or fails with the identical plan error.
+//
+// codex r2 P2: a claim is returned ONLY for a plan that proves executable at
+// priming time — PrimeBatch never releases a failed owner on its own, so a
+// claimant whose source already vanished would otherwise own the canonical
+// key for the whole run and block (or, under ForceUpdate, ghost-skip) every
+// valid later claimant. The priming seam therefore pairs the read-only
+// planner with PlanSourceExists; a claimant failing the existence check
+// registers nothing and the next valid sorted claimant takes the key. A
+// source vanishing AFTER priming is covered by the tracker's release on
+// organize failure (see Organizer.Organize).
+//
+// codex P2 (PR #241 F1): the existence check covers STATIONARY residents
+// too — an unverified WillMove=false plan would otherwise park a born-
+// settled ghost claim on its canonical key, rejecting (or authorized-
+// skipping) every mover of the run behind a destination nothing fills.
+// Verified-before-parking is the primary defense; the resident's own
+// Organize failure releasing its parked claim covers the residual
+// priming→worker vanish window.
+func (o *applyOrchImpl) planDuplicatePriming(ctx context.Context, cmd ApplyCmd) (organizer.DuplicatePriming, error) {
+	if cmd.Organize.Skip {
+		return organizer.DuplicatePriming{}, nil
+	}
+	planner, ok := o.organizer.(interface {
+		PlanOrganize(context.Context, organizer.OrganizeCmd) (*organizer.OrganizePlan, error)
+		PlanSourceExists(*organizer.OrganizePlan) bool
+	})
+	if !ok {
+		return organizer.DuplicatePriming{}, nil
+	}
+	plan, err := planner.PlanOrganize(ctx, organizer.OrganizeCmd{
 		Match:           cmd.Match,
-		Movie:           state.movie,
+		Movie:           cmd.Movie,
 		DestDir:         cmd.DestPath,
 		ForceUpdate:     cmd.Organize.ForceUpdate,
 		MoveFiles:       cmd.Organize.MoveFiles,
@@ -279,6 +354,33 @@ func (o *applyOrchImpl) stepOrganize(ctx context.Context, cmd ApplyCmd, state *a
 		DryRun:          cmd.DryRun,
 		OperationMode:   cmd.OperationMode,
 		ForceRenameFile: cmd.Organize.ForceRenameFile,
+	})
+	if err != nil {
+		return organizer.DuplicatePriming{}, err
+	}
+	if plan.TargetPath != "" && !planner.PlanSourceExists(plan) {
+		return organizer.DuplicatePriming{}, nil
+	}
+	return organizer.DuplicatePriming{
+		SourcePath: plan.SourcePath,
+		TargetPath: plan.TargetPath,
+		WillMove:   plan.WillMove,
+	}, nil
+}
+
+// stepOrganize executes the organize step: move/link files to destination.
+func (o *applyOrchImpl) stepOrganize(ctx context.Context, cmd ApplyCmd, state *applyPipelineState, steps *stepCompletion) error {
+	organizeCmd := organizer.OrganizeCmd{
+		Match:            cmd.Match,
+		Movie:            state.movie,
+		DestDir:          cmd.DestPath,
+		ForceUpdate:      cmd.Organize.ForceUpdate,
+		MoveFiles:        cmd.Organize.MoveFiles,
+		LinkMode:         cmd.Organize.LinkMode,
+		DryRun:           cmd.DryRun,
+		OperationMode:    cmd.OperationMode,
+		ForceRenameFile:  cmd.Organize.ForceRenameFile,
+		DuplicateTracker: cmd.Organize.DuplicateTracker,
 	}
 	var organizeErr error
 	state.organizeResult, organizeErr = o.organizer.Organize(ctx, organizeCmd)
@@ -491,7 +593,7 @@ type applyPipelineState struct {
 // marked RevertStatusFailed but retains NewPath, allowing revert to locate the
 // moved file. Per CONTEXT.md: called on error paths to prevent orphaned
 // RevertStatusApplied records while keeping revert actionable.
-func (o *applyOrchImpl) completeRevertLogWithState(ctx context.Context, opID OperationID, state *applyPipelineState) {
+func (o *applyOrchImpl) completeRevertLogWithState(ctx context.Context, opID OperationID, state *applyPipelineState, prePublication bool) {
 	if o.revertLog != nil && opID != "" {
 		partial := &ApplyResult{
 			OrganizeResult: state.organizeResult,
@@ -502,6 +604,7 @@ func (o *applyOrchImpl) completeRevertLogWithState(ctx context.Context, opID Ope
 			Merged:         state.merged,
 			OperationID:    opID,
 			Steps:          stepCompletion{},
+			PrePublication: prePublication,
 		}
 		if completeErr := o.revertLog.CompleteFailed(ctx, opID, partial); completeErr != nil {
 			resolveLogger(o.logger).Warnf("[workflow] RevertLog.CompleteFailed error for %s: %v", opID, completeErr)
@@ -554,4 +657,8 @@ var _ applyOrchestrator = (*noOpApplyOrchestrator)(nil)
 
 func (noOpApplyOrchestrator) Execute(_ context.Context, _ ApplyCmd) (*ApplyResult, error) {
 	return nil, fmt.Errorf("apply not configured")
+}
+
+func (noOpApplyOrchestrator) planDuplicatePriming(context.Context, ApplyCmd) (organizer.DuplicatePriming, error) {
+	return organizer.DuplicatePriming{}, nil
 }

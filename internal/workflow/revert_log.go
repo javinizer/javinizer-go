@@ -326,7 +326,13 @@ func buildGeneratedFilesJSON(logger logging.Logger, nfoPath string, subtitleMove
 	if len(subtitleMoves) > 0 {
 		moveBackList := make([]models.FileMove, 0, len(subtitleMoves))
 		for _, sr := range subtitleMoves {
-			if sr.Moved && sr.OriginalPath != "" && sr.NewPath != "" {
+			switch {
+			// #224 phase E mode distinction: a copy-installed subtitle retains
+			// its source, so the revert artifact is the installed copy (delete
+			// it); only a move-installed subtitle moves back.
+			case sr.Copied && sr.NewPath != "":
+				gf.Delete = append(gf.Delete, sr.NewPath)
+			case sr.Moved && sr.OriginalPath != "" && sr.NewPath != "":
 				moveBackList = append(moveBackList, models.FileMove{OriginalPath: sr.OriginalPath, NewPath: sr.NewPath})
 			}
 		}
@@ -543,6 +549,33 @@ func (l *dbRevertLog) CaptureSnapshot(ctx context.Context, opID OperationID, cmd
 	}
 }
 
+// noopJournal reports whether result's apply mutated NOTHING on the
+// filesystem, so its row must journal no target fields and finalize
+// completed-noop (codex P1/P2 PR #241 + batch-2 F1/F2):
+//   - authorized intra-batch duplicate skips (OrganizeResult.DuplicateSkipped)
+//     — NewPath names the batch winner's shared destination for display only;
+//   - pre-publication organize terminals (ApplyResult.PrePublication for plan
+//     rejections/context aborts — the organizer returns no result on those
+//     legs — or OrganizeResult.PrePublication for strategy failures before any
+//     publish) — the destination never received this file's bytes, and the
+//     intent path may again be a shared destination a promoted claimant later
+//     publishes.
+//
+// Journaling target fields from such results arms this row's revert against
+// another claimant's published bytes (moving/deleting them onto this row's
+// source); finalizing them failed-with-empty-NewPath leaves the reverter
+// probing a "" anchor (anchor_missing) forever, blocking fully-reverted.
+func noopJournal(result *ApplyResult) bool {
+	if result == nil {
+		return false
+	}
+	if result.PrePublication {
+		return true
+	}
+	org := result.OrganizeResult
+	return org != nil && (org.DuplicateSkipped || org.PrePublication)
+}
+
 // ctx is accepted for future use when repository methods support context propagation
 func (l *dbRevertLog) Complete(ctx context.Context, opID OperationID, result *ApplyResult) error {
 	if opID == "" {
@@ -586,17 +619,37 @@ func (l *dbRevertLog) Complete(ctx context.Context, opID OperationID, result *Ap
 	var newPath string
 	var inPlaceRenamed bool
 	var subtitles []models.SubtitleMove
-	if result.OrganizeResult != nil {
-		newPath = result.OrganizeResult.NewPath
-		inPlaceRenamed = result.OrganizeResult.InPlaceRenamed
-		for _, sr := range result.OrganizeResult.Subtitles {
-			if sr.Moved {
+	// codex P1 (PR #241): an authorized intra-batch duplicate skip is a true
+	// NO-OP for journal purposes — its OrganizeResult.NewPath names the
+	// WINNER's shared destination for display only. Persisting it would make
+	// the history reverter arm the winner's video as the loser's primary moved
+	// file (moving the winner's bytes onto the loser's path if that source was
+	// later removed). The winner's own operation row stays the sole subject.
+	// codex batch-2 F1/F2: pre-publication failure terminals obey the same
+	// rule — the destination was never published by this operation.
+	if org := result.OrganizeResult; org != nil && !noopJournal(result) {
+		newPath = org.NewPath
+		inPlaceRenamed = org.InPlaceRenamed
+		for _, sr := range org.Subtitles {
+			if sr.Moved || sr.Copied {
 				subtitles = append(subtitles, sr.SubtitleMove)
 			}
 		}
-		if result.OrganizeResult.FolderPath != "" && sourceDir == "" {
-			sourceDir = result.OrganizeResult.OldDirectoryPath
+		if org.FolderPath != "" && sourceDir == "" {
+			sourceDir = org.OldDirectoryPath
 		}
+	}
+
+	// codex P1 (PR #241): a skipped duplicate generates NOTHING — its apply
+	// short-circuits before merge/download/NFO — but the STRICT journal no-op
+	// is enforced here too: any generated path paired with a DuplicateSkipped
+	// result names the WINNER's shared artifact, and journaling it onto the
+	// loser's row would arm a loser revert to DELETE the winner's files. The
+	// same strict gate covers pre-publication terminals (batch-2 F1/F2): no
+	// subtitle/extras/NFO finger of the failed row may name a shared path.
+	nfoPath, foundNFOPath, downloadPaths := result.NFOPath, result.FoundNFOPath, result.DownloadPaths
+	if noopJournal(result) {
+		nfoPath, foundNFOPath, downloadPaths = "", "", nil
 	}
 
 	// Wave-9 (codex review 4960250562 follow-up): the journal read-modify-write
@@ -606,20 +659,32 @@ func (l *dbRevertLog) Complete(ctx context.Context, opID OperationID, result *Ap
 	// itself (UpdateNonJournalFields below) no longer writes generated_files at
 	// all, so an append/consume committed after this tx commit survives.
 	folderRoot := ""
-	if result.OrganizeResult != nil {
-		folderRoot = result.OrganizeResult.FolderPath
+	if org := result.OrganizeResult; org != nil && !noopJournal(result) {
+		folderRoot = org.FolderPath
 	}
 	mergedJournal, err := l.mergeJournalInTx(ctx, recordID, opID, "Complete",
-		buildGeneratedFilesJSON(resolveLogger(l.logger), result.NFOPath, subtitles, result.DownloadPaths), folderRoot)
+		buildGeneratedFilesJSON(resolveLogger(l.logger), nfoPath, subtitles, downloadPaths), folderRoot)
 	if err != nil {
 		return err
 	}
 
-	if result.FoundNFOPath != "" {
-		preRecord.NFOPath = result.FoundNFOPath
+	if foundNFOPath != "" {
+		preRecord.NFOPath = foundNFOPath
 	}
-	if result.NFOPath != "" && preRecord.NFOPath == "" {
-		preRecord.NFOPath = result.NFOPath
+	if nfoPath != "" && preRecord.NFOPath == "" {
+		preRecord.NFOPath = nfoPath
+	}
+
+	// codex P2 (PR #241 F2): finalize the authorized duplicate skip. The row
+	// journaled nothing and named no NewPath, so leaving it RevertStatusApplied
+	// makes the reverter probe checkAnchor("") → anchor_missing on every batch
+	// revert attempt and the batch can never report fully reverted. The apply
+	// SUCCEEDED as a true no-op — the row is completed-noop, excluded from
+	// revert selection exactly like a reverted row. Batch-2 F1/F2 extend the
+	// identical terminal to pre-publication organize failures: nothing was
+	// mutated, so nothing is unwindable.
+	if noopJournal(result) {
+		preRecord.RevertStatus = models.RevertStatusNoOp
 	}
 
 	updatePostOrganize(preRecord, newPath, inPlaceRenamed, sourceDir, mergedJournal)
@@ -673,17 +738,33 @@ func (l *dbRevertLog) CompleteFailed(ctx context.Context, opID OperationID, resu
 	var newPath string
 	var inPlaceRenamed bool
 	var subtitles []models.SubtitleMove
-	if result.OrganizeResult != nil {
-		newPath = result.OrganizeResult.NewPath
-		inPlaceRenamed = result.OrganizeResult.InPlaceRenamed
-		for _, sr := range result.OrganizeResult.Subtitles {
-			if sr.Moved {
+	// codex P1 (PR #241): same duplicate-skip no-op journal rule as Complete —
+	// a skipped duplicate persists NO primary-move NewPath even when a later
+	// pipeline step fails, so reverting the failed loser row can never rename
+	// the winner's video. Batch-2 F1 adds the PRE-PUBLICATION terminal: a
+	// strategy execute failure before any publish (the released-claim class —
+	// e.g. ForceUpdate with a vanished source) journals NO target fields
+	// either, so reverting the failed owner is a pure no-op that can never
+	// drag a promoted claimant's published bytes onto the owner's source.
+	if org := result.OrganizeResult; org != nil && !noopJournal(result) {
+		newPath = org.NewPath
+		inPlaceRenamed = org.InPlaceRenamed
+		for _, sr := range org.Subtitles {
+			if sr.Moved || sr.Copied {
 				subtitles = append(subtitles, sr.SubtitleMove)
 			}
 		}
-		if result.OrganizeResult.FolderPath != "" && sourceDir == "" {
-			sourceDir = result.OrganizeResult.OldDirectoryPath
+		if org.FolderPath != "" && sourceDir == "" {
+			sourceDir = org.OldDirectoryPath
 		}
+	}
+	// codex P1 (PR #241): same generated-artifact gate as Complete — a skipped
+	// duplicate owns no NFO/download paths; a populated one would be the
+	// winner's shared artifact, never safe to journal onto the loser's row.
+	// Batch-2 F1/F2: pre-publication terminals own none either.
+	nfoPath, foundNFOPath, downloadPaths := result.NFOPath, result.FoundNFOPath, result.DownloadPaths
+	if noopJournal(result) {
+		nfoPath, foundNFOPath, downloadPaths = "", "", nil
 	}
 	// Wave-9 (codex review 4960250562 follow-up): same journal-transaction
 	// routing as Complete — the merge must see the FRESH row, not the stale
@@ -692,23 +773,38 @@ func (l *dbRevertLog) CompleteFailed(ctx context.Context, opID OperationID, resu
 	// is no longer clobbered by the re-persist (UpdateJournalInTx owns that
 	// column exclusively).
 	mergedJournal, err := l.mergeJournalInTx(ctx, recordID, opID, "CompleteFailed",
-		buildGeneratedFilesJSON(resolveLogger(l.logger), result.NFOPath, subtitles, result.DownloadPaths), "")
+		buildGeneratedFilesJSON(resolveLogger(l.logger), nfoPath, subtitles, downloadPaths), "")
 	if err != nil {
 		return err
 	}
 
-	if result.FoundNFOPath != "" {
-		preRecord.NFOPath = result.FoundNFOPath
+	if foundNFOPath != "" {
+		preRecord.NFOPath = foundNFOPath
 	}
-	if result.NFOPath != "" && preRecord.NFOPath == "" {
-		preRecord.NFOPath = result.NFOPath
+	if nfoPath != "" && preRecord.NFOPath == "" {
+		preRecord.NFOPath = nfoPath
 	}
 	updatePostOrganize(preRecord, newPath, inPlaceRenamed, sourceDir, mergedJournal)
+	// codex P2 (PR #241 F2): a skipped duplicate that failed a LATER pipeline
+	// step still mutated nothing — it owns no NewPath and journaled no
+	// artifacts — so it finalizes as completed-noop exactly like Complete's
+	// DuplicateSkipped path instead of lingering as an unanchored failed row
+	// the reverter would probe at "" forever. Batch-2 F1/F2: plan rejections
+	// (validation/conflict — incl. rejected intra-batch duplicates) and
+	// pre-publish strategy failures join the identical terminal on the same
+	// nothing-mutated ground. A PARTIAL publish (fsutil.PublishCompleted) is
+	// flatly excluded: its failure landed bytes at the destination, so the
+	// record stays failed AND keeps pointing at the shared path (revertable).
 	preRecord.RevertStatus = models.RevertStatusFailed
+	if noopJournal(result) {
+		preRecord.RevertStatus = models.RevertStatusNoOp
+	}
 	if err := l.persistNonJournalColumns(ctx, opID, preRecord); err != nil {
 		return fmt.Errorf("revert log CompleteFailed: update failed record for %s: %w", opID, err)
 	}
-	resolveLogger(l.logger).Warnf("[revert-log] Apply failed for %s after filesystem mutation — record kept revertable (NewPath=%q)", opID, newPath)
+	if preRecord.RevertStatus == models.RevertStatusFailed {
+		resolveLogger(l.logger).Warnf("[revert-log] Apply failed for %s after filesystem mutation — record kept revertable (NewPath=%q)", opID, newPath)
+	}
 	return nil
 }
 

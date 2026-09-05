@@ -249,6 +249,10 @@ type OrganizeCmd struct {
 	// config still carries the global default. Empty = use config mode.
 	OperationMode   operationmode.OperationMode
 	ForceRenameFile bool
+	// DuplicateTracker shares intra-batch duplicate-destination preflight
+	// across the plans of one batch run (#224 phase E). Nil disables
+	// detection (single-file callers have no batch to collide with).
+	DuplicateTracker *DuplicateTracker
 }
 
 // OrganizerInterface is the single-method seam for file organization.
@@ -287,20 +291,52 @@ func NewOrganizer(fs afero.Fs, cfg *Config, engine template.EngineInterface, m m
 
 // OrganizeResult represents the result of organizing a file
 type OrganizeResult struct {
-	OriginalPath           string
-	NewPath                string
-	FolderPath             string
-	FileName               string
-	Moved                  bool
-	Error                  error
-	Subtitles              []subtitleResult
-	InPlaceRenamed         bool   // Whether an in-place directory rename occurred
+	OriginalPath string
+	NewPath      string
+	FolderPath   string
+	FileName     string
+	Moved        bool
+	Error        error
+	// Warnings carries non-fatal per-file advisories an authorized run must
+	// not silently drop (#224 phase E): authorized intra-batch duplicates land
+	// here so the worker history rows and the API eventlog can persist them.
+	Warnings []string
+	// DuplicateSkipped is true when an authorized intra-batch duplicate was
+	// demoted to a warning and execution skipped (codex P1, PR #241): nothing
+	// moved for this file, so NewPath names the winner's SHARED destination
+	// for display/history only. Revert journaling treats the result as a true
+	// no-op — NO primary-move record is persisted for it, leaving the winner's
+	// operation row the sole revert subject of the shared bytes (a revert of
+	// the skipped loser must never rename the winner's video).
+	DuplicateSkipped bool
+	// PrePublication marks a strategy-execute failure whose error proves the
+	// destination never received this file's bytes (codex PR #241 batch-2 F1):
+	// every organize publish composite carries fsutil.PublishCompleted on its
+	// post-publish leg, so an execute error WITHOUT that class failed
+	// pre-publication — nothing the destination could hold belongs to this
+	// file. The result's NewPath/FolderPath name the INTENDED target only;
+	// under duplicate ownership that may be a SHARED destination a promoted
+	// claimant later publishes, so revert journaling must ignore all target
+	// fields and finalize the row completed-noop exactly like a
+	// DuplicateSkipped result — reverting the failed owner must never treat
+	// another claimant's published bytes as this owner's moved primary.
+	// In-place directory-rename failures are marked on the identical rule
+	// when nothing SURVIVED on disk (no rename happened, or its rollback
+	// landed); only a surviving rename (rollback refused) stays journaled —
+	// that mutation is publication-equivalent and its claim settles (codex
+	// P1, PR #241).
+	PrePublication         bool
+	Subtitles              []SubtitleResult
+	InPlaceRenamed         bool   // Whether an in-place directory rename SURVIVES on disk (rename happened and was never rolled back)
 	OldDirectoryPath       string // Original directory path (for updating subsequent file paths)
 	NewDirectoryPath       string // New directory path after in-place rename
 	ShouldGenerateMetadata bool   // Whether NFO/media should be generated for this result
 }
 
-type subtitleResult struct {
+// SubtitleResult records the outcome for one matched subtitle file: planned
+// (dry run), skipped (skip-on-exists), error, or installed — with the mode
+// distinction carried on the embedded SubtitleMove (Moved vs Copied, #224 E).
+type SubtitleResult struct {
 	models.SubtitleMove
 	Skipped bool
 	Planned bool
@@ -422,7 +458,7 @@ func (o *Organizer) execute(plan *OrganizePlan) (*OrganizeResult, error) {
 
 	if !plan.WillMove {
 		result.ShouldGenerateMetadata = true
-		o.handleSubtitles(plan, result, nil)
+		o.handleSubtitles(plan, result, subtitleInstall{})
 		return result, nil
 	}
 
@@ -437,7 +473,7 @@ func (o *Organizer) execute(plan *OrganizePlan) (*OrganizeResult, error) {
 	}
 
 	if o.config.MoveSubtitles {
-		o.handleSubtitles(plan, strategyResult, fsutil.MoveFileNoReplace)
+		o.handleSubtitles(plan, strategyResult, subtitleMoveInstall)
 	}
 
 	return strategyResult, nil
@@ -464,13 +500,28 @@ func (o *Organizer) subtitleFileInfo(plan *OrganizePlan) models.FileMatchInfo {
 	return fileInfoForSubtitles
 }
 
-func (o *Organizer) handleSubtitles(plan *OrganizePlan, result *OrganizeResult, fileOp func(afero.Fs, string, string) error) {
+// subtitleInstall selects how handleSubtitles delivers subtitle files. A nil
+// op plans only (no filesystem changes); a non-nil op installs through one of
+// the fsutil no-replace composites, and copied records the mode distinction in
+// results (#224 phase E): a copy install retains the source (revert deletes
+// the installed copy), a move install does not (revert moves it back).
+type subtitleInstall struct {
+	op     func(afero.Fs, string, string) error
+	copied bool
+}
+
+var (
+	subtitleMoveInstall = subtitleInstall{op: fsutil.MoveFileNoReplace}
+	subtitleCopyInstall = subtitleInstall{op: fsutil.CopyFileNoReplace, copied: true}
+)
+
+func (o *Organizer) handleSubtitles(plan *OrganizePlan, result *OrganizeResult, install subtitleInstall) {
 	subtitles := o.subtitleHandler.FindSubtitles(o.subtitleFileInfo(plan))
 	if len(subtitles) == 0 {
 		return
 	}
 
-	subtitleResults := make([]subtitleResult, len(subtitles))
+	subtitleResults := make([]SubtitleResult, len(subtitles))
 	for i, subtitle := range subtitles {
 		videoNameWithoutExt := strings.TrimSuffix(plan.TargetFile, filepath.Ext(plan.TargetFile))
 		newSubtitleName := o.subtitleHandler.generateSubtitleFileName(
@@ -480,8 +531,8 @@ func (o *Organizer) handleSubtitles(plan *OrganizePlan, result *OrganizeResult, 
 		)
 		newPath := filepath.Join(plan.TargetDir, newSubtitleName)
 
-		if fileOp == nil {
-			subtitleResults[i] = subtitleResult{
+		if install.op == nil {
+			subtitleResults[i] = SubtitleResult{
 				SubtitleMove: models.SubtitleMove{
 					OriginalPath: subtitle.OriginalPath,
 					NewPath:      newPath,
@@ -491,7 +542,7 @@ func (o *Organizer) handleSubtitles(plan *OrganizePlan, result *OrganizeResult, 
 			continue
 		}
 
-		sr := subtitleResult{
+		sr := SubtitleResult{
 			SubtitleMove: models.SubtitleMove{
 				OriginalPath: subtitle.OriginalPath,
 				NewPath:      newPath,
@@ -512,7 +563,7 @@ func (o *Organizer) handleSubtitles(plan *OrganizePlan, result *OrganizeResult, 
 					sr.Skipped = true
 					return nil
 				}
-				err := fileOp(o.fs, subtitle.OriginalPath, newPath)
+				err := install.op(o.fs, subtitle.OriginalPath, newPath)
 				if err != nil && fsutil.PublishCompleted(err) {
 					// Post-publish cleanup refusal (#224 codex P2): bytes at the
 					// destination AND the source retained — an ambiguous delivery,
@@ -539,12 +590,60 @@ func (o *Organizer) handleSubtitles(plan *OrganizePlan, result *OrganizeResult, 
 		if err != nil {
 			sr.Error = fmt.Errorf("failed to handle subtitle: %w", err)
 		} else if !sr.Skipped {
-			sr.Moved = true
+			if install.copied {
+				sr.Copied = true
+			} else {
+				sr.Moved = true
+			}
 		}
 
 		subtitleResults[i] = sr
 	}
 	result.Subtitles = subtitleResults
+}
+
+// withForceRename returns the planner that honors a per-command force-rename
+// request: when the config disables RenameFile but the command demands it,
+// planning runs against a clone with RenameFile enabled. Shared by Organize
+// and PlanOrganize so primed claims and executed plans always derive from the
+// identical planner selection (#240 finding A).
+func (o *Organizer) withForceRename(forceRename bool) *Organizer {
+	if forceRename && o.config != nil && !o.config.RenameFile {
+		clone := *o
+		cfg := *o.config
+		cfg.RenameFile = true
+		clone.config = &cfg
+		return &clone
+	}
+	return o
+}
+
+// PlanOrganize computes cmd's organization plan WITHOUT validating,
+// registering duplicate preflight, or executing anything — the read-only
+// planning seam the apply phase calls exactly once per sorted batch item
+// before worker fan-out, to prime deterministic duplicate ownership (#240
+// finding A). Planner selection is shared with Organize, so a primed claim
+// always matches the plan the item's worker later computes.
+func (o *Organizer) PlanOrganize(ctx context.Context, cmd OrganizeCmd) (*OrganizePlan, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+	return o.withForceRename(cmd.ForceRenameFile).plan(cmd.Match, cmd.Movie, cmd.DestDir, cmd.ForceUpdate, cmd.OperationMode)
+}
+
+// PlanSourceExists reports whether plan's source file is still present on
+// the organizer's filesystem (codex r2 P2): the duplicate priming leg MUST
+// NOT claim a canonical key for a plan that cannot execute — a primed owner
+// whose source already vanished at priming time would hold the key for the
+// whole run, blocking every valid later claimant. Read-only: one Stat
+// against the same fs Organize validates and executes on. Non-missing Stat
+// errors leave the claim decision to the later validation/execution pass,
+// mirroring validatePlan's IsNotExist-only rule.
+func (o *Organizer) PlanSourceExists(plan *OrganizePlan) bool {
+	_, err := o.fs.Stat(plan.SourcePath)
+	return !os.IsNotExist(err)
 }
 
 // Organize is the single-method seam that plans, validates, and executes
@@ -558,21 +657,74 @@ func (o *Organizer) Organize(ctx context.Context, cmd OrganizeCmd) (*OrganizeRes
 	default:
 	}
 
-	planner := o
-	if cmd.ForceRenameFile && o.config != nil && !o.config.RenameFile {
-		clone := *o
-		cfg := *o.config
-		cfg.RenameFile = true
-		clone.config = &cfg
-		planner = &clone
-	}
-	plan, err := planner.plan(cmd.Match, cmd.Movie, cmd.DestDir, cmd.ForceUpdate, cmd.OperationMode)
+	plan, err := o.withForceRename(cmd.ForceRenameFile).plan(cmd.Match, cmd.Movie, cmd.DestDir, cmd.ForceUpdate, cmd.OperationMode)
 	if err != nil {
 		return nil, err
 	}
 
+	// codex P2 (PR #241): claim close-out on panic — an owner panicking
+	// ANYWHERE after planning (mid-observe, mid-execute, subtitle install)
+	// must release its canonical key so waiting claimants promote instead of
+	// deadlocking behind a dead owner. The re-panic preserves the worker
+	// boundary's withFileRecovery per-file failure semantics; the claim
+	// release itself is the tracker's failure terminal (no-op for losers and
+	// on owner-check mismatch).
+	defer func() {
+		if r := recover(); r != nil {
+			cmd.DuplicateTracker.release(plan)
+			panic(r)
+		}
+	}()
+
+	// Intra-batch duplicate preflight (#224 phase E): plan-only grouping by
+	// proven-equal canonical destination keys. Unauthorized duplicates join
+	// plan.Conflicts and short-circuit through the identical failure pipeline;
+	// authorized duplicates return as persisted per-file warnings and skip
+	// execution — only the primed winner's bytes land (#240 finding A).
+	dupWarnings, dupSkip := applyDuplicatePreflight(ctx, plan, cmd.DuplicateTracker, cmd.ForceUpdate)
+
+	// codex P2 (PR #241 F2) promotion/execute boundary recheck: the preflight
+	// wait honors the caller's context, so a deadline or batch cancel can land
+	// AFTER this plan claimed or was promoted onto its key. Recheck before ANY
+	// further filesystem work (validation reads included): an aborted owner
+	// returns the context error — matching the entry guard's outcome — and
+	// releases its key so the next claimant promotes instead of blocking
+	// behind a corpse. Non-owners release nothing, so cancelled waiters pass
+	// through harmlessly.
+	if err := ctx.Err(); err != nil {
+		cmd.DuplicateTracker.release(plan)
+		return nil, err
+	}
+
+	// codex P2 (PR #241 F1): a stationary resident's no-op execute cannot
+	// surface its ghost — ForceUpdate skips validatePlan entirely, and even a
+	// normal-mode no-op short-circuits nothing it can fail — so a parked
+	// claim whose source vanished in the priming→worker gap releases HERE in
+	// both modes, never settling the key and skipping every gated mover into
+	// an empty destination. validatePlan's IsNotExist-only rule below already
+	// excludes the same class when validation runs; this check is the
+	// force-mode mirror at exactly one Stat.
+	if !plan.WillMove && plan.TargetPath != "" {
+		if _, err := o.fs.Stat(plan.SourcePath); os.IsNotExist(err) {
+			cmd.DuplicateTracker.release(plan)
+			return nil, fmt.Errorf("organization validation failed: [source file does not exist: %s]", plan.SourcePath)
+		}
+	}
+
 	if !cmd.ForceUpdate {
 		if issues := o.validatePlan(plan); len(issues) > 0 {
+			// codex r2 P2: a plan the run's duplicate tracker primed as owner
+			// must not keep its canonical key when it cannot execute — most
+			// acutely the winner whose source vanished between priming and
+			// apply. Releasing lets the next valid claimant's observe fall
+			// through instead of dying on the stale owner's claim. Losers
+			// (whose validation failure lists their ConflictDuplicate) release
+			// nothing — release matches only the recorded owner. A STATIONARY
+			// resident failing here (its source vanished in the priming→worker
+			// gap) likewise releases its own parked claim (codex P2, PR #241
+			// F1), so the ghost key frees/promotes instead of sealing the
+			// destination for the rest of the run.
+			cmd.DuplicateTracker.release(plan)
 			return nil, fmt.Errorf("organization validation failed: %v", issues)
 		}
 	}
@@ -587,17 +739,44 @@ func (o *Organizer) Organize(ctx context.Context, cmd OrganizeCmd) (*OrganizeRes
 
 	// Check for conflicts before executing
 	if len(plan.Conflicts) > 0 {
+		// codex r2 P2: same release rule on the conflict terminal (reached
+		// under ForceUpdate, which skips validatePlan) — an inexecutable
+		// primed owner frees its key for the next valid claimant. A loser's
+		// ConflictDuplicate never matches the owner key, so this is a no-op
+		// for every duplicate-skipped plan.
+		cmd.DuplicateTracker.release(plan)
 		return nil, fmt.Errorf("conflicts detected: %s", joinPlanConflictPaths(plan.Conflicts))
 	}
 
 	// Dry-run: return early with planned result (no filesystem changes).
+	// The owner still settles its claim (codex P2, PR #241): the dry-run
+	// outcome is terminal, and waiting claimants must resolve now.
 	if cmd.DryRun {
+		cmd.DuplicateTracker.settle(plan)
 		return &OrganizeResult{
 			OriginalPath:           plan.SourcePath,
 			NewPath:                plan.TargetPath,
 			FolderPath:             plan.TargetDir,
 			FileName:               plan.TargetFile,
 			Moved:                  false,
+			Warnings:               dupWarnings,
+			ShouldGenerateMetadata: true,
+		}, nil
+	}
+
+	// Authorized intra-batch duplicate (#240 finding A): demoted to a
+	// persisted warning above, it must NOT execute — pre-priming both sources
+	// raced onto the same destination with lock order deciding the surviving
+	// bytes. Skipping guarantees only the deterministic winner publishes.
+	if dupSkip {
+		return &OrganizeResult{
+			OriginalPath:           plan.SourcePath,
+			NewPath:                plan.TargetPath,
+			FolderPath:             plan.TargetDir,
+			FileName:               plan.TargetFile,
+			Moved:                  false,
+			Warnings:               dupWarnings,
+			DuplicateSkipped:       true,
 			ShouldGenerateMetadata: true,
 		}, nil
 	}
@@ -609,14 +788,68 @@ func (o *Organizer) Organize(ctx context.Context, cmd OrganizeCmd) (*OrganizeRes
 
 	strategyResult, err := strategy.Execute(plan)
 	if err != nil {
+		if fsutil.PublishCompleted(err) {
+			// codex P1 (PR #241): PARTIAL publish — the cross-device move's
+			// publish leg landed this owner's bytes at the destination and
+			// only the source cleanup refused (the typed ErrPublishCompleted
+			// class every fsutil move composite carries on that leg). The
+			// destination is therefore the owner's terminal outcome, exactly
+			// like a clean move: SETTLE the claim (never release). Releasing
+			// would promote a waiting claimant onto an occupied destination —
+			// under ForceUpdate that claimant would overwrite the published
+			// bytes and the failed owner's revert row would then aim the
+			// winner's bytes at the old owner's source path. Settling keeps
+			// the waiter's duplicate verdict unchanged (conflict /
+			// authorized-skip) and the shared destination byte-owned by the
+			// row that actually published it.
+			cmd.DuplicateTracker.settle(plan)
+			return strategyResult, err
+		}
+		// codex r2 P2: PRE-publication failure (the disappeared-source
+		// failure surfaces HERE under ForceUpdate, validation skipped, and
+		// every refusal/ambiguity that left the destination untouched): the
+		// primed owner's claim is released on the identical rule so the
+		// next valid claimant can still land its bytes on the destination.
+		// codex P1 (PR #241): in-place plans are MUTATION-aware instead of
+		// blanket-exempt — the strategy's rollback seams report honestly
+		// whether a directory rename SURVIVED on disk (InPlaceRenamed stands
+		// only when the rename was never rolled back). An in-place failure
+		// with nothing surviving (source dir vanished post-priming, or an
+		// inner-rename refusal whose rollback landed) is exactly the
+		// pre-publication class: journal no target fields, release the claim
+		// — a promoted claimant's renamed directory is never this failed
+		// row's revert subject. A SURVIVING rename (rollback refused) is
+		// publication-equivalent for claim purposes — the destination name
+		// physically changed to this owner's target — so the claim SETTLES,
+		// never releases: a waiting claimant keeps its duplicate verdict
+		// instead of publishing into the directory the failed owner still
+		// owns, and the settled row's journal names where the bytes actually
+		// went (the strategy re-points NewPath/FileName at the surviving
+		// location), making its revert an exact-inverse unwind.
+		if plan.InPlace && strategyResult != nil && strategyResult.InPlaceRenamed {
+			cmd.DuplicateTracker.settle(plan)
+			return strategyResult, err
+		}
+		if strategyResult != nil {
+			strategyResult.PrePublication = true
+		}
+		cmd.DuplicateTracker.release(plan)
 		return strategyResult, err
 	}
+	strategyResult.Warnings = append(strategyResult.Warnings, dupWarnings...)
+
+	// Terminal success for the duplicate tracker (codex P2, PR #241): the
+	// claim stays owned, so already-waiting claimants wake to their unchanged
+	// duplicate verdict instead of blocking behind this owner's subtitle work.
+	cmd.DuplicateTracker.settle(plan)
 
 	// Subtitle handling is centralized here — applies to both move and copy/link paths.
+	// Authorization never reaches subtitle destinations: both entry points
+	// install strictly skip-on-exists through the no-replace composites.
 	if cmd.MoveFiles && o.config.MoveSubtitles {
-		o.handleSubtitles(plan, strategyResult, fsutil.MoveFileNoReplace)
+		o.handleSubtitles(plan, strategyResult, subtitleMoveInstall)
 	} else if !cmd.MoveFiles && o.config.MoveSubtitles {
-		o.handleSubtitles(plan, strategyResult, fsutil.CopyFileNoReplace)
+		o.handleSubtitles(plan, strategyResult, subtitleCopyInstall)
 	}
 
 	return strategyResult, nil

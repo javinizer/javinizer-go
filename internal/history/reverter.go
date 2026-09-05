@@ -62,8 +62,6 @@ type RevertFileResult struct {
 var (
 	// ErrBatchAlreadyReverted is returned when a batch or operation is already reverted.
 	ErrBatchAlreadyReverted = errors.New("batch already reverted")
-	// ErrCopyModeNotRevertible is returned when attempting to revert a copy/hardlink/symlink operation.
-	ErrCopyModeNotRevertible = errors.New("copy-mode operations cannot be reverted")
 	// ErrNoOperationsFound is returned when no operations exist for the given batch.
 	ErrNoOperationsFound = errors.New("no operations found for batch")
 
@@ -250,7 +248,7 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 	}
 
 	// P3: replay the replacement journal BEFORE the anchor check AND before
-	// the copy-mode rejection (codex P3 R2-1/R6-in-2): a deleted primary
+	// any operation-type leg (codex P3 R2-1/R6-in-2): a deleted primary
 	// anchor must not strand independently recoverable overwritten media —
 	// least of all for copy-mode operations whose only forward-recoverable
 	// state IS the journal. Restored destinations are structurally excluded
@@ -261,6 +259,9 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 		logging.Warnf("Replacement journal restore refused/failed for op %d: %v", op.ID, rejErr)
 		return rejectedRevert(op, rejErr).withRetryable(rejErr), nil
 	}
+	if len(restored) > 0 {
+		logging.Debugf("Reverted %d journaled replacement(s) for op %d ahead of the %s leg", len(restored), op.ID, op.OperationType)
+	}
 
 	// Journal replay may have refreshed a stale caller snapshot. Re-check the
 	// status before touching the primary path so a request that entered just
@@ -269,22 +270,27 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 		return result, err
 	}
 
-	if result, err := r.checkAnchor(ctx, op); result != nil || err != nil {
-		return result, err
-	}
-
-	if op.OperationType != models.OperationTypeMove && op.OperationType != models.OperationTypeUpdate {
-		msg := ErrCopyModeNotRevertible.Error()
-		if len(restored) > 0 {
-			msg += fmt.Sprintf(" (%d journaled replacement(s) restored first)", len(restored))
-		}
-		return failRevert(ctx, r.batchFileOpRepo, op, models.RevertReasonUnexpectedPathState, msg), nil
-	}
-
 	isUpdate := op.OperationType == models.OperationTypeUpdate
-	if isUpdate {
+
+	// codex P2 (PR #241 F1): anchor semantics apply ONLY to the legs that
+	// address the primary — the move-back (installed primary returns to the
+	// source tree) and update rows (OriginalPath is where artifacts are
+	// regenerated). Copy/hardlink/symlink rows never gave up their primary:
+	// the installed destination is the user's own copy, so its absence
+	// (user deleted it after organizing) must NOT anchor-gate the
+	// GeneratedFiles cleanup — gating here orphaned every journaled copied
+	// subtitle/NFO/download behind an anchor_missing skip. Those rows run
+	// cleanup independently of the primary anchor below.
+	if op.OperationType == models.OperationTypeMove || isUpdate {
+		if result, err := r.checkAnchor(ctx, op); result != nil || err != nil {
+			return result, err
+		}
+	}
+
+	switch op.OperationType {
+	case models.OperationTypeUpdate:
 		r.fsReverter.cleanupGeneratedFiles(op, filepath.Dir(filepath.Dir(op.OriginalPath)))
-	} else {
+	case models.OperationTypeMove:
 		if result, err := r.fsReverter.revertPrimaryFile(ctx, op); result != nil || err != nil {
 			return result, err
 		}
@@ -293,6 +299,24 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 		if !op.InPlaceRenamed {
 			r.fsReverter.cleanupEmptyDir(filepath.Dir(op.NewPath), destRoot)
 		}
+	case models.OperationTypeCopy, models.OperationTypeHardlink, models.OperationTypeSymlink:
+		// codex P2 (PR #241 F2): copy/link ops never gave up their source —
+		// the forward install was non-destructive — so there is no primary
+		// move-back to perform (the retired blanket rejection here also
+		// stranded their journals). Their generated-files ledger DOES carry
+		// Delete entries whose ONLY consumer is cleanupGeneratedFiles below:
+		// the NFO, the downloads, and COPIED subtitles (workflow/revert_log.go
+		// journals a copy-installed subtitle into Delete precisely because
+		// its source survives — reverting deletes the installed copy, never
+		// the source). Deleting exactly those artifacts is the complete,
+		// correct, non-destructive inverse: sources stay, the installed
+		// primary stays (it is the user's copy), and the move leg above
+		// keeps its full move-back semantics untouched. The leg is
+		// deliberately anchorless (codex P2, PR #241 F1): a user-deleted
+		// installed primary skips nothing — this cleanup still runs.
+		r.fsReverter.cleanupGeneratedFiles(op, filepath.Dir(filepath.Dir(op.NewPath)))
+	default:
+		return failRevert(ctx, r.batchFileOpRepo, op, models.RevertReasonUnexpectedPathState, fmt.Sprintf("unknown operation type %q cannot be reverted", op.OperationType)), nil
 	}
 
 	nfoWarning, failedResult := r.fsReverter.restoreNFO(ctx, op, isUpdate)
@@ -315,16 +339,27 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 	if nfoWarning != "" {
 		result.Error = nfoWarning
 	}
-	if isUpdate {
+	switch {
+	case isUpdate:
 		logging.Infof("Reverted update operation %d: movie=%s at %s", op.ID, op.MovieID, op.OriginalPath)
-	} else {
+	case op.OperationType == models.OperationTypeMove:
 		logging.Infof("Reverted operation %d: movie=%s moved from %s back to %s", op.ID, op.MovieID, op.NewPath, op.OriginalPath)
+	default:
+		logging.Infof("Reverted copy-mode operation %d: movie=%s deleted generated artifacts under %s (sources and installed primary retained)", op.ID, op.MovieID, op.NewPath)
 	}
 	return result, nil
 }
 
 func (r *Reverter) guardDoubleRevert(ctx context.Context, op *models.BatchFileOperation) (*RevertFileResult, error) {
 	if op.RevertStatus == models.RevertStatusReverted {
+		return nil, ErrBatchAlreadyReverted
+	}
+
+	// codex P2 (PR #241 F2): a completed-noop row (authorized duplicate skip)
+	// is terminal with nothing to unwind — it must never reach the primary
+	// legs (its NewPath is empty by construction), so it rejects like an
+	// already-reverted row instead of probing a "" anchor forever.
+	if op.RevertStatus == models.RevertStatusNoOp {
 		return nil, ErrBatchAlreadyReverted
 	}
 
@@ -537,10 +572,23 @@ func cleanupEmptyDirFS(fs afero.Fs, dirPath string, stopAt string) {
 }
 
 // cleanupGeneratedFilesFS processes the GeneratedFiles JSON on a BatchFileOperation:
-// deletes files in the Delete list and moves back files in the MoveBack list.
+// deletes files in the Delete list and executes the MoveBack list.
 // After deleting files, it removes empty parent directories left behind,
 // stopping at stopAt boundary to prevent removing shared ancestor directories.
 // Best-effort: missing files are skipped (os.IsNotExist), errors don't fail the revert.
+//
+// MoveBack semantics are mode-gated (codex P1, PR #241): a rename-back is only
+// ever valid for MOVE-mode rows, whose move-installed subtitles genuinely left
+// their source tree. Rows of every other operation type (copy, hardlink,
+// symlink, update) retained their originals — the forward install there was
+// non-destructively copy-based — so a MoveBack entry on such rows can only be a
+// LEGACY journal (pre-#224 phase E journaled every installed subtitle as
+// MoveBack regardless of mode; today's format expresses the same install as a
+// plain Delete of the new path, see buildGeneratedFilesJSON). Renaming the
+// installed path over the original on POSIX would REPLACE that retained
+// original, destroying any edits the user made to it after the copy. Those
+// legacy entries therefore execute with the modern delete-only semantic:
+// remove the installed copy at NewPath, never touch OriginalPath.
 func cleanupGeneratedFilesFS(fs afero.Fs, op *models.BatchFileOperation, stopAt string) {
 	if op.GeneratedFiles == "" {
 		return
@@ -561,9 +609,17 @@ func cleanupGeneratedFilesFS(fs afero.Fs, op *models.BatchFileOperation, stopAt 
 		}
 		dirsToCheck[filepath.Dir(path)] = true
 	}
-	// Move back files in the MoveBack array (best-effort)
+	// Execute the MoveBack array (best-effort): rename-back for move-mode rows
+	// only; delete-the-installed-copy for every other mode's legacy entries
+	// (rename-over must NEVER run against a retained original — see the
+	// function doc above).
+	moveMode := op.OperationType == models.OperationTypeMove
 	for _, fm := range gf.MoveBack {
-		if err := fs.Rename(fm.NewPath, fm.OriginalPath); err != nil {
+		if !moveMode {
+			if err := fs.Remove(fm.NewPath); err != nil && !os.IsNotExist(err) {
+				logging.Debugf("cleanupGeneratedFiles: failed to delete copy-installed artifact %s (original at %s retained): %v", fm.NewPath, fm.OriginalPath, err)
+			}
+		} else if err := fs.Rename(fm.NewPath, fm.OriginalPath); err != nil {
 			logging.Debugf("cleanupGeneratedFiles: failed to move back %s → %s: %v", fm.NewPath, fm.OriginalPath, err)
 		}
 		dirsToCheck[filepath.Dir(fm.NewPath)] = true
@@ -751,22 +807,33 @@ func (r *Reverter) RevertBatch(ctx context.Context, batchJobID string) (*RevertB
 		return nil, ErrNoOperationsFound
 	}
 
-	// Filter to processable operations (applied + failed)
+	// Filter to processable operations (applied + failed). Completed-noop rows
+	// (authorized duplicate skips, codex P2 PR #241 F2) are terminal with
+	// nothing to unwind: like reverted rows they never enter the selection,
+	// but they are NOT already-reverted work — an all-noop batch completes
+	// trivially success-shaped (never anchor_missing-skipped), letting the job
+	// report fully reverted.
 	var processable []models.BatchFileOperation
 	revertedCount := 0
+	noopCount := 0
 	for i := range ops {
 		switch ops[i].RevertStatus {
 		case models.RevertStatusReverted:
 			revertedCount++
+		case models.RevertStatusNoOp:
+			noopCount++
 		case models.RevertStatusApplied, models.RevertStatusFailed:
 			processable = append(processable, ops[i])
 		}
 	}
 
-	// If no processable ops, determine which error to return
+	// If no processable ops, determine which result/error to return
 	if len(processable) == 0 {
 		if revertedCount > 0 {
 			return nil, ErrBatchAlreadyReverted
+		}
+		if noopCount > 0 {
+			return &RevertBatchResult{}, nil
 		}
 		return nil, ErrNoOperationsFound
 	}
@@ -827,14 +894,28 @@ func (r *Reverter) RevertScrape(ctx context.Context, batchJobID string, movieID 
 
 	// Filter to matching movieID AND processable status
 	var matching []models.BatchFileOperation
+	noopMatching := 0
 	for i := range ops {
-		if ops[i].MovieID == movieID &&
-			(ops[i].RevertStatus == models.RevertStatusApplied || ops[i].RevertStatus == models.RevertStatusFailed) {
+		if ops[i].MovieID != movieID {
+			continue
+		}
+		// codex P2 (PR #241 F2): a completed-noop row (authorized duplicate
+		// skip mutated nothing) is terminal — it never enters the revert
+		// selection, and a movie whose ONLY rows are noop completes trivially
+		// success-shaped so the batch's fully-reverted accounting can close.
+		if ops[i].RevertStatus == models.RevertStatusNoOp {
+			noopMatching++
+			continue
+		}
+		if ops[i].RevertStatus == models.RevertStatusApplied || ops[i].RevertStatus == models.RevertStatusFailed {
 			matching = append(matching, ops[i])
 		}
 	}
 
 	if len(matching) == 0 {
+		if noopMatching > 0 {
+			return &RevertBatchResult{}, nil
+		}
 		return nil, fmt.Errorf("no processable operations found for movie %s in batch %s", movieID, batchJobID)
 	}
 

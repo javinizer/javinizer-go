@@ -125,3 +125,45 @@ func TestApplyProgressHelpers_NilAndGenerationPaths(t *testing.T) {
 	assert.Equal(t, "organize failed", got.Error)
 	assert.Equal(t, uint64(13), got.ApplyGeneration)
 }
+
+// TestResolveApplyConfig_PostApplyEmitsDuplicateWarningAudit pins the #224
+// phase E audit lane: authorized intra-batch duplicates surface on the
+// per-file result as warnings, and each warning becomes its own SeverityWarn
+// organize event through the existing eventlog.
+func TestResolveApplyConfig_PostApplyEmitsDuplicateWarningAudit(t *testing.T) {
+	emitter := &applyConfigEventEmitter{}
+	rt := core.NewAPIRuntime(&core.APIDeps{EventEmitter: emitter})
+	snapshot := core.NewSnapshotForTesting(rt, core.APIConfig{})
+	factory := worker.NewBatchJobFactory(nil, nil, nil, nil, worker.BatchJobConfig{}, nil)
+	job := &stubControlledJob{}
+
+	organize, err := resolveOrganizeApplyConfig(snapshot, factory, job, contracts.OrganizeRequest{
+		OperationMode: string(operationmode.OperationModeInPlace),
+	})
+	require.NoError(t, err)
+	require.NotNil(t, organize.PostApplyFunc)
+	*organize.ApplyGenerationRef = 3
+
+	organize.PostApplyFunc(context.Background(), &worker.ApplyFileContext{
+		FilePath: "/source/movie.mp4",
+		Movie:    &models.Movie{ID: "MOV-9"},
+	}, &worker.ApplyFileResult{Result: &workflow.ApplyResult{
+		OrganizeResult: &organizer.OrganizeResult{
+			NewPath: "/dest/movie.mp4",
+			Warnings: []string{
+				"duplicate destination within batch: /dest/movie.mp4 already claimed by /source/other.mp4 (overwrite authorized)",
+			},
+		},
+	}})
+
+	require.Len(t, emitter.calls, 2)
+	assert.Equal(t, models.SeverityInfo, emitter.calls[0].severity)
+	warn := emitter.calls[1]
+	assert.Equal(t, "file_move", warn.source)
+	assert.Equal(t, models.SeverityWarn, warn.severity)
+	assert.Contains(t, warn.message, "duplicate destination within batch")
+	assert.Equal(t, "MOV-9", warn.context["movie_id"])
+	assert.Equal(t, "/dest/movie.mp4", warn.context["new_path"])
+	assert.Contains(t, warn.context["warning"], "already claimed by /source/other.mp4")
+	assert.Equal(t, uint64(3), warn.context["apply_generation"])
+}

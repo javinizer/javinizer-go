@@ -303,10 +303,26 @@ func (s *inPlaceStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) {
 					// Both destination locks are already held (see above), so no sibling can slip a
 					// file into the renamed directory at plan.TargetPath between the directory
 					// rename and this inner step — refuse-then-rename with rollback is atomic.
+					// codex P1 (PR #241): the rollback's OUTCOME decides the failure's
+					// journal shape, so rb reports it through the result: a landed
+					// rollback means NOTHING survived on disk — the journal-bearing
+					// in-place fields clear so the organizer can treat the leg exactly
+					// like a pre-publication failure (completed-noop, claim released);
+					// a REFUSED rollback leaves the directory rename standing, so the
+					// rename marker stands and NewPath/FileName re-name where the
+					// file's bytes ACTUALLY are — the OLD name inside the renamed
+					// directory — keeping the settle+journal of the surviving
+					// mutation an exact-inverse revert target.
 					rb := func() {
 						if rerr := s.fs.Rename(plan.TargetDir, plan.OldDir); rerr != nil {
 							logging.Errorf("[in-place] Failed to rollback directory rename %s → %s: %v", plan.TargetDir, plan.OldDir, rerr)
+							result.NewPath = filepath.Join(plan.TargetDir, oldFileName)
+							result.FileName = oldFileName
+							return
 						}
+						result.InPlaceRenamed = false
+						result.OldDirectoryPath = ""
+						result.NewDirectoryPath = ""
 					}
 					if plan.overwriteAuthorized {
 						identical, sameIn, lerr := refuseIfUnsuppressibleAuthorizedDestination(s.fs, currentFilePath, plan.TargetPath)
@@ -336,7 +352,7 @@ func (s *inPlaceStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) {
 						innerOp = func(fs afero.Fs, a, b string) error { return fs.Rename(a, b) }
 					}
 					if err := innerOp(s.fs, currentFilePath, plan.TargetPath); err != nil {
-						return s.finishInPlaceInnerRename(plan, err)
+						return s.finishInPlaceInnerRename(plan, result, err)
 					}
 				}
 				return nil
@@ -396,13 +412,30 @@ func (s *inPlaceStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) {
 }
 
 // finishInPlaceInnerRename is only invoked on an inner-op failure (call site
-// guarantees err != nil), so branches reach every classification.
-func (s *inPlaceStrategy) finishInPlaceInnerRename(plan *OrganizePlan, err error) error {
+// guarantees err != nil), so branches reach every classification. codex P1
+// (PR #241): a rollback here shapes the failed result exactly like the rb
+// seam above — a landed rollback clears every journal-bearing in-place field
+// (nothing survived on disk: the organizer releases the claim and finalizes
+// the leg pre-publication noop), while a REFUSED rollback keeps the rename
+// marker standing and re-points NewPath/FileName at where the file actually
+// sits (its OLD name inside the renamed directory), the settle+journal
+// target that reverts exactly this surviving mutation.
+func (s *inPlaceStrategy) finishInPlaceInnerRename(plan *OrganizePlan, result *OrganizeResult, err error) error {
 	if fsutil.PublishCompleted(err) {
 		return fmt.Errorf("in-place inner rename published to %s but finished ambiguously (directory left at %s): %w", plan.TargetPath, plan.TargetDir, err)
 	}
 	if rb := s.fs.Rename(plan.TargetDir, plan.OldDir); rb != nil {
 		logging.Errorf("[in-place] Failed to rollback directory rename %s → %s: %v", plan.TargetDir, plan.OldDir, rb)
+		oldFileName := plan.Match.Name
+		if oldFileName == "" {
+			oldFileName = filepath.Base(plan.SourcePath)
+		}
+		result.NewPath = filepath.Join(plan.TargetDir, oldFileName)
+		result.FileName = oldFileName
+		return fmt.Errorf("failed to rename file after directory rename (directory rename survived — rollback refused): %w", mapNoReplaceRefusal(err, plan.TargetPath))
 	}
+	result.InPlaceRenamed = false
+	result.OldDirectoryPath = ""
+	result.NewDirectoryPath = ""
 	return fmt.Errorf("failed to rename file after directory rename: %w", mapNoReplaceRefusal(err, plan.TargetPath))
 }

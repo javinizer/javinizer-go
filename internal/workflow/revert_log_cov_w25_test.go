@@ -68,6 +68,9 @@ func (f *w25FailNonJournalRepo) CountByBatchJobIDs(context.Context, []string) (m
 func (f *w25FailNonJournalRepo) CountRevertedByBatchJobIDs(context.Context, []string) (map[string]int64, error) {
 	return nil, nil
 }
+func (f *w25FailNonJournalRepo) CountNoOpByBatchJobIDs(context.Context, []string) (map[string]int64, error) {
+	return nil, nil
+}
 func (f *w25FailNonJournalRepo) FindOperationsByDestination(ctx context.Context, d string) ([]models.BatchFileOperation, error) {
 	return f.repo.FindOperationsByDestination(ctx, d)
 }

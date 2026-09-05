@@ -435,6 +435,9 @@ export interface BatchJobResponse {
 	failed: number;
 	operation_count: number;
 	reverted_count: number;
+	// Terminal completed-noop rows (authorized duplicate skips; codex P2,
+	// PR #241 F2) — non-revertible; revertible = operation_count − reverted_count − noop_count.
+	noop_count: number;
 	excluded: Record<string, boolean>;
 	progress: number;
 	destination: string;
@@ -1313,6 +1316,9 @@ export interface JobListItem {
 	failed: number;
 	operation_count: number;
 	reverted_count: number;
+	// Omitted when zero (server-side omitempty). Terminal + non-revertible —
+	// see BatchJobResponse.noop_count.
+	noop_count?: number;
 	progress: number;
 	destination: string;
 	started_at: string;

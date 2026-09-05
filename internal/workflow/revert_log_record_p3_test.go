@@ -365,6 +365,9 @@ func (f *failUpdateBFORepo) CountByBatchJobIDs(context.Context, []string) (map[s
 func (f *failUpdateBFORepo) CountRevertedByBatchJobIDs(context.Context, []string) (map[string]int64, error) {
 	return nil, nil
 }
+func (f *failUpdateBFORepo) CountNoOpByBatchJobIDs(context.Context, []string) (map[string]int64, error) {
+	return nil, nil
+}
 func (f *failUpdateBFORepo) FindOperationsByDestination(ctx context.Context, d string) ([]models.BatchFileOperation, error) {
 	return f.repo.FindOperationsByDestination(ctx, d)
 }
@@ -621,6 +624,9 @@ func (f *failFindBFORepo) CountByBatchJobIDs(context.Context, []string) (map[str
 	return nil, nil
 }
 func (f *failFindBFORepo) CountRevertedByBatchJobIDs(context.Context, []string) (map[string]int64, error) {
+	return nil, nil
+}
+func (f *failFindBFORepo) CountNoOpByBatchJobIDs(context.Context, []string) (map[string]int64, error) {
 	return nil, nil
 }
 func (f *failFindBFORepo) FindOperationsByDestination(ctx context.Context, d string) ([]models.BatchFileOperation, error) {

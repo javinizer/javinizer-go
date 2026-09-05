@@ -214,7 +214,9 @@ func TestCleanupGeneratedFilesFS_MoveBack(t *testing.T) {
 	}
 	gfJSON, _ := json.Marshal(gf)
 
+	// MoveBack rename-back is a MOVE-mode semantic (codex P1, PR #241).
 	op := &models.BatchFileOperation{
+		OperationType:  models.OperationTypeMove,
 		GeneratedFiles: string(gfJSON),
 	}
 	cleanupGeneratedFilesFS(fs, op, "/dst")
@@ -315,7 +317,8 @@ func TestCleanupGeneratedFilesFS_LogsRemoveAndMoveBackErrors(t *testing.T) {
 	gfJSON, err := json.Marshal(gf)
 	require.NoError(t, err)
 
-	op := &models.BatchFileOperation{GeneratedFiles: string(gfJSON)}
+	// Move-mode row: the rename leg is exercised (and wedged) only there.
+	op := &models.BatchFileOperation{OperationType: models.OperationTypeMove, GeneratedFiles: string(gfJSON)}
 	cleanupGeneratedFilesFS(fs, op, "/dst")
 
 	_, err = fs.Stat("/dst/delete.err")
@@ -1013,31 +1016,77 @@ func TestGuardDoubleRevert_UnexpectedStatus(t *testing.T) {
 	assert.Contains(t, err.Error(), "unexpected revert status")
 }
 
-func TestGuardDoubleRevert_CopyModeNotRevertible(t *testing.T) {
+// codex P2 (PR #241 F2): copy-mode ops are no longer rejected —
+// their journaled generated-file Delete entries (NFO, downloads, copied
+// subtitles) are the revert's exact non-destructive inverse, and
+// cleanupGeneratedFiles is their only consumer. The unit-level pin: a copy
+// op with a live anchor reverts successfully, deleting journaled artifacts
+// while retaining BOTH the copied primary and the untouched source (no
+// move-back leg ever runs for a copy). The batch-level E2E lives in
+// reverter_copymode_subtitle_w241_test.go.
+func TestRevertFile_CopyModeDeletesJournaledArtifacts(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	mockRepo := mocks.NewMockBatchFileOperationRepositoryInterface(t)
-	mockRepo.On("UpdateRevertStatus", mock.Anything, uint(600), models.RevertStatusFailed).Return(nil)
+	mockRepo.On("UpdateRevertStatus", mock.Anything, uint(600), models.RevertStatusReverted).Return(nil)
 	r := NewReverter(fs, mockRepo)
 
-	// P3: the copy-mode rejection now happens INSIDE revertFile, after the
-	// replacement-journal replay — the guard helper itself is status-only.
-	// Anchor (copy-mode: NewPath) present so the flow reaches the type gate.
 	require.NoError(t, fs.MkdirAll("/dst/T600", 0o755))
-	require.NoError(t, afero.WriteFile(fs, "/dst/T600/T600.mkv", []byte("video"), 0o644))
+	require.NoError(t, afero.WriteFile(fs, "/dst/T600/T600.mkv", []byte("copied-video"), 0o644))
+	require.NoError(t, afero.WriteFile(fs, "/dst/T600/T600.srt", []byte("copied-sub"), 0o644))
+	require.NoError(t, fs.MkdirAll("/src", 0o755))
+	require.NoError(t, afero.WriteFile(fs, "/src/T600.srt", []byte("source-sub"), 0o644))
 	op := &models.BatchFileOperation{
 		ID:            600,
 		RevertStatus:  models.RevertStatusApplied,
 		OperationType: models.OperationTypeCopy,
 		NewPath:       "/dst/T600/T600.mkv",
 		OriginalPath:  "/src/T600.mkv",
+		GeneratedFiles: models.MarshalLedgerJSON(models.GeneratedFilesJSON{
+			Delete: []string{"/dst/T600/T600.srt"},
+		}),
 	}
 	mockRepo.On("FindByID", mock.Anything, uint(600)).Return(op, nil)
 	result, err := r.revertFile(context.Background(), op)
 	require.NoError(t, err)
 	assert.NotNil(t, result)
+	assert.Equal(t, models.RevertOutcomeReverted, result.Outcome)
+
+	_, statErr := fs.Stat("/dst/T600/T600.srt")
+	assert.True(t, os.IsNotExist(statErr), "the journaled copied subtitle is deleted")
+	content, readErr := afero.ReadFile(fs, "/dst/T600/T600.mkv")
+	require.NoError(t, readErr)
+	assert.Equal(t, []byte("copied-video"), content, "the copied primary stays — copy-mode revert never moves back or unlinks it")
+	source, readErr := afero.ReadFile(fs, "/src/T600.srt")
+	require.NoError(t, readErr)
+	assert.Equal(t, []byte("source-sub"), source, "the source subtitle is untouched")
+	mockRepo.AssertExpectations(t)
+}
+
+// codex P2 (PR #241 F2): only copy/hardlink/symlink gained the cleanup leg —
+// a genuinely UNKNOWN operation type still fails closed rather than guessing
+// at a (possibly destructive) inverse.
+func TestRevertFile_UnknownOperationTypeStillRejected(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	mockRepo := mocks.NewMockBatchFileOperationRepositoryInterface(t)
+	mockRepo.On("UpdateRevertStatus", mock.Anything, uint(601), models.RevertStatusFailed).Return(nil)
+	r := NewReverter(fs, mockRepo)
+
+	require.NoError(t, fs.MkdirAll("/dst/T601", 0o755))
+	require.NoError(t, afero.WriteFile(fs, "/dst/T601/T601.mkv", []byte("video"), 0o644))
+	op := &models.BatchFileOperation{
+		ID:            601,
+		RevertStatus:  models.RevertStatusApplied,
+		OperationType: models.OperationTypeEnum("warp"),
+		NewPath:       "/dst/T601/T601.mkv",
+		OriginalPath:  "/src/T601.mkv",
+	}
+	mockRepo.On("FindByID", mock.Anything, uint(601)).Return(op, nil)
+	result, err := r.revertFile(context.Background(), op)
+	require.NoError(t, err)
+	assert.NotNil(t, result)
 	assert.Equal(t, models.RevertOutcomeFailed, result.Outcome)
 	assert.Equal(t, models.RevertReasonUnexpectedPathState, result.Reason)
-	assert.Contains(t, result.Error, "cannot be reverted")
+	assert.Contains(t, result.Error, "unknown operation type")
 	mockRepo.AssertExpectations(t)
 }
 

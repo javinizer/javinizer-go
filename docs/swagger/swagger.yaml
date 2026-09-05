@@ -280,6 +280,12 @@ definitions:
         type: array
       id:
         type: string
+      noop_count:
+        description: |-
+          NoopCount: terminal completed-noop rows (authorized duplicate skips —
+          codex P2, PR #241 F2). Non-revertible; revertible = operation_count −
+          reverted_count − noop_count.
+        type: integer
       operation_count:
         type: integer
       operation_mode_override:
@@ -669,6 +675,13 @@ definitions:
       id:
         example: 550e8400-e29b-41d4-a716-446655440000
         type: string
+      noop_count:
+        description: |-
+          NoopCount: terminal completed-noop rows (authorized duplicate skips —
+          codex P2, PR #241 F2). Non-revertible; subtract alongside reverted_count
+          when deriving how many operations can still be reverted.
+        example: 1
+        type: integer
       operation_count:
         example: 10
         type: integer
@@ -2852,6 +2865,7 @@ definitions:
     - applied
     - reverted
     - failed
+    - noop
     type: string
     x-enum-comments:
       RevertStatusApplied: Renamed from "pending" — D-01
@@ -2859,10 +2873,12 @@ definitions:
     - Renamed from "pending" — D-01
     - ""
     - ""
+    - ""
     x-enum-varnames:
     - RevertStatusApplied
     - RevertStatusReverted
     - RevertStatusFailed
+    - RevertStatusNoOp
   github_com_javinizer_javinizer-go_internal_models.ScraperChoice:
     properties:
       label:

@@ -21,6 +21,12 @@ type OrganizeOptions struct {
 	LinkMode        organizer.LinkMode // resolved at factory boundary, not inside orchestrator
 	ForceUpdate     bool
 	ForceRenameFile bool
+	// DuplicateTracker carries the batch run's intra-batch duplicate
+	// preflight registry into every file's plan (#224 phase E). The apply
+	// phase allocates one per run (non-probing for dry runs, #240 finding B),
+	// primes it in sorted order before fan-out (#240 finding A); nil disables
+	// detection.
+	DuplicateTracker *organizer.DuplicateTracker
 }
 
 // MergeOptions controls the NFO merge step within Apply.
@@ -93,6 +99,17 @@ type ApplyResult struct {
 	// "nfo_generation"). Empty on success. callers can identify
 	// which step failed without parsing error strings.
 	FailedStep string
+	// PrePublication is true when the apply failed before the organize step
+	// published ANY filesystem mutation (codex PR #241 batch-2 F1/F2): plan
+	// rejections (validation/conflict — including unauthorized intra-batch
+	// duplicate conflicts), context aborts, and pre-publish strategy failures
+	// all terminate with the destination untouched. Revert journaling
+	// (RevertLog.CompleteFailed) treats such results exactly like authorized
+	// duplicate skips — no target fields journaled, row finalized
+	// completed-noop — because their intent paths may name a SHARED batch
+	// destination a promoted claimant later publishes, and a revert armed
+	// with those paths would drag the claimant's bytes onto this source.
+	PrePublication bool
 }
 
 // PreviewCmd is the command struct that crosses the Preview seam (ADR-0004).
@@ -124,6 +141,17 @@ type PreviewResult struct {
 	TrailerPath     string
 	SourcePath      string
 	OperationMode   operationmode.OperationMode
+}
+
+// DuplicatePrimingPlanner is the OPTIONAL workflow capability the apply
+// phase discovers by type assertion to pre-assign deterministic intra-batch
+// duplicate owners (#240 finding A): for each sorted batch item the phase
+// calls PlanDuplicatePriming exactly once BEFORE worker fan-out and primes
+// the run's duplicate tracker with the returned claims in that sorted order.
+// Workflows that do not implement it keep first-come duplicate observation
+// (single-item or otherwise unprimed runs only).
+type DuplicatePrimingPlanner interface {
+	PlanDuplicatePriming(ctx context.Context, cmd ApplyCmd) (organizer.DuplicatePriming, error)
 }
 
 // WorkflowInterface exposes the high-level scrape, apply, preview, compare, and scan workflows.

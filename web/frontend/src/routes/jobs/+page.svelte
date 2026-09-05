@@ -28,6 +28,7 @@
 	import RevertConfirmationModal from '$lib/components/RevertConfirmationModal.svelte';
 	import { apiClient } from '$lib/api/client';
 	import { toastStore } from '$lib/stores/toast';
+	import { getRevertibleOperationCount } from '$lib/utils/revertible';
 	import { createBatchJobsQuery, createConfigQuery } from '$lib/query/queries';
 	import type { BatchJobResponse, FileResult } from '$lib/api/types';
 
@@ -197,8 +198,10 @@
 		revertModalOpen = true;
 	}
 
+	// codex P2 (PR #241 F2): terminal noop rows are non-revertible — the
+	// shared helper subtracts them alongside reverted rows.
 	function getRevertableCount(job: BatchJobResponse): number {
-		return job.operation_count - (job.reverted_count ?? 0);
+		return getRevertibleOperationCount(job);
 	}
 
 	function handleRevertConfirm(): Promise<void> {

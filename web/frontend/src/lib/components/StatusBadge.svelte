@@ -1,9 +1,9 @@
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages';
-	import { CheckCircle2, CircleX, Undo2, LoaderCircle, AlertTriangle } from 'lucide-svelte';
+	import { CheckCircle2, CircleSlash, CircleX, Undo2, LoaderCircle, AlertTriangle } from 'lucide-svelte';
 
 	interface Props {
-		status: 'success' | 'failed' | 'reverted' | 'running' | 'organized' | 'cancelled' | 'partially-reverted';
+		status: 'success' | 'failed' | 'reverted' | 'running' | 'organized' | 'cancelled' | 'partially-reverted' | 'noop';
 		size?: 'sm' | 'default';
 	}
 
@@ -54,6 +54,15 @@
 					bgClass: 'bg-gray-500/10 dark:bg-gray-500/10',
 					textClass: 'text-gray-400 dark:text-gray-400',
 					label: m.status_cancelled()
+				};
+			// Terminal completed-noop (authorized duplicate skip — codex P2,
+			// PR #241 F2): nothing mutated, nothing to revert.
+			case 'noop':
+				return {
+					icon: CircleSlash,
+					bgClass: 'bg-gray-500/10 dark:bg-gray-500/10',
+					textClass: 'text-gray-400 dark:text-gray-400',
+					label: m.status_noop()
 				};
 			case 'partially-reverted':
 				return {

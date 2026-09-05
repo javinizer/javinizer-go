@@ -61,6 +61,8 @@ func TestListJobsUseCase_HappyPath(t *testing.T) {
 		Return(map[string]int64{"job-1": 4, "job-2": 2}, nil)
 	opRepo.On("CountRevertedByBatchJobIDs", mock.Anything, []string{"job-1", "job-2"}).
 		Return(map[string]int64{"job-1": 1, "job-2": 0}, nil)
+	opRepo.On("CountNoOpByBatchJobIDs", mock.Anything, []string{"job-1", "job-2"}).
+		Return(map[string]int64{"job-1": 2}, nil)
 
 	out, err := ListJobsUseCase(context.Background(), deps, ListJobsInput{Limit: 2, Offset: 0})
 	require.NoError(t, err)
@@ -71,11 +73,13 @@ func TestListJobsUseCase_HappyPath(t *testing.T) {
 	assert.Equal(t, "job-1", out.Jobs[0].ID)
 	assert.Equal(t, int64(4), out.Jobs[0].OperationCount, "operation count from batch fetch")
 	assert.Equal(t, int64(1), out.Jobs[0].RevertedCount, "reverted count from batch fetch")
+	assert.Equal(t, int64(2), out.Jobs[0].NoopCount, "noop (terminal, non-revertible) count from batch fetch")
 	assert.Equal(t, contracts.FormatTime(now), out.Jobs[0].StartedAt)
 
 	assert.Equal(t, "job-2", out.Jobs[1].ID)
 	assert.Equal(t, int64(2), out.Jobs[1].OperationCount)
 	assert.Equal(t, int64(0), out.Jobs[1].RevertedCount)
+	assert.Equal(t, int64(0), out.Jobs[1].NoopCount, "missing job IDs read as zero noop counts")
 }
 
 func TestListJobsUseCase_MapsPersistedApplyGeneration(t *testing.T) {
@@ -97,6 +101,7 @@ func TestListJobsUseCase_MapsPersistedApplyGeneration(t *testing.T) {
 	jobRepo.On("List", mock.Anything).Return([]models.Job{*persisted}, nil)
 	opRepo.On("CountByBatchJobIDs", mock.Anything, []string{"job-generation"}).Return(map[string]int64{}, nil)
 	opRepo.On("CountRevertedByBatchJobIDs", mock.Anything, []string{"job-generation"}).Return(map[string]int64{}, nil)
+	opRepo.On("CountNoOpByBatchJobIDs", mock.Anything, []string{"job-generation"}).Return(map[string]int64{}, nil)
 
 	out, err := ListJobsUseCase(context.Background(), deps, ListJobsInput{Limit: 10})
 	require.NoError(t, err)
@@ -112,6 +117,7 @@ func TestListJobsUseCase_MalformedPersistedApplyPlanWarnsAndContinues(t *testing
 	jobRepo.On("List", mock.Anything).Return([]models.Job{{ID: "bad-plan", ApplyPlan: &rawPlan}}, nil)
 	opRepo.On("CountByBatchJobIDs", mock.Anything, []string{"bad-plan"}).Return(map[string]int64{}, nil)
 	opRepo.On("CountRevertedByBatchJobIDs", mock.Anything, []string{"bad-plan"}).Return(map[string]int64{}, nil)
+	opRepo.On("CountNoOpByBatchJobIDs", mock.Anything, []string{"bad-plan"}).Return(map[string]int64{}, nil)
 
 	out, err := ListJobsUseCase(context.Background(), deps, ListJobsInput{Limit: 10})
 	require.NoError(t, err)
@@ -195,4 +201,24 @@ func TestListJobsUseCase_RevertedCountError_Propagates(t *testing.T) {
 	require.Error(t, err)
 	assert.Nil(t, out)
 	assert.Contains(t, err.Error(), "failed to retrieve revert counts")
+}
+
+func TestListJobsUseCase_NoopCountError_Propagates(t *testing.T) {
+	jobRepo := mocks.NewMockJobRepositoryInterface(t)
+	opRepo := mocks.NewMockBatchFileOperationRepositoryInterface(t)
+	deps := newTestAPIDeps(t, jobRepo, opRepo)
+
+	jobs := []models.Job{sampleJob("job-1", time.Now())}
+	jobRepo.On("List", mock.Anything).Return(jobs, nil)
+	opRepo.On("CountByBatchJobIDs", mock.Anything, []string{"job-1"}).
+		Return(map[string]int64{"job-1": 2}, nil)
+	opRepo.On("CountRevertedByBatchJobIDs", mock.Anything, []string{"job-1"}).
+		Return(map[string]int64{}, nil)
+	opRepo.On("CountNoOpByBatchJobIDs", mock.Anything, []string{"job-1"}).
+		Return(nil, assert.AnError)
+
+	out, err := ListJobsUseCase(context.Background(), deps, ListJobsInput{Limit: 10})
+	require.Error(t, err)
+	assert.Nil(t, out)
+	assert.Contains(t, err.Error(), "failed to retrieve noop counts")
 }

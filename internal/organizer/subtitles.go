@@ -5,8 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/javinizer/javinizer-go/internal/config"
-	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/spf13/afero"
@@ -139,46 +137,6 @@ func (sh *subtitleHandler) FindSubtitles(videoFile models.FileMatchInfo) []subti
 	}
 
 	return matches
-}
-
-// MoveSubtitles moves subtitle files to the target directory with the video file
-func (sh *subtitleHandler) MoveSubtitles(subtitles []subtitleMatch, targetDir, videoFileName string, dryRun bool) error {
-	if len(subtitles) == 0 {
-		return nil
-	}
-
-	// Create target directory if it doesn't exist
-	if !dryRun {
-		if err := sh.fs.MkdirAll(targetDir, config.DirPerm); err != nil {
-			return fmt.Errorf("failed to create target directory: %w", err)
-		}
-	}
-
-	videoNameWithoutExt := strings.TrimSuffix(videoFileName, filepath.Ext(videoFileName))
-
-	for _, subtitle := range subtitles {
-		// Generate new subtitle filename
-		newFileName := sh.generateSubtitleFileName(videoNameWithoutExt, subtitle.Language, subtitle.Extension)
-		newPath := filepath.Join(targetDir, newFileName)
-
-		if dryRun {
-			logging.Debugf("Would move subtitle: %s -> %s", subtitle.OriginalPath, newPath)
-			continue
-		}
-
-		if _, err := sh.fs.Stat(newPath); err == nil {
-			logging.Infof("Subtitle already exists, skipping: %s", newPath)
-			continue
-		}
-
-		if err := fsutil.MoveFileFs(sh.fs, subtitle.OriginalPath, newPath); err != nil {
-			return fmt.Errorf("failed to move subtitle %s to %s: %w", subtitle.OriginalPath, newPath, err)
-		}
-
-		logging.Infof("Moved subtitle: %s -> %s", subtitle.OriginalPath, newPath)
-	}
-
-	return nil
 }
 
 // isSubtitleFile checks if a filename has a subtitle extension

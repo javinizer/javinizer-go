@@ -163,6 +163,10 @@ func (m *mockBatchFileOpRepo) CountRevertedByBatchJobIDs(ctx context.Context, jo
 	return nil, nil
 }
 
+func (m *mockBatchFileOpRepo) CountNoOpByBatchJobIDs(ctx context.Context, jobIDs []string) (map[string]int64, error) {
+	return nil, nil
+}
+
 func TestReverter_SkipRevertDeep2(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	repo := newMockBatchFileOpRepo()
@@ -183,10 +187,6 @@ func TestReverter_SkipRevertDeep2(t *testing.T) {
 
 func TestErrBatchAlreadyRevertedDeep2(t *testing.T) {
 	assert.EqualError(t, ErrBatchAlreadyReverted, "batch already reverted")
-}
-
-func TestErrCopyModeNotRevertibleDeep2(t *testing.T) {
-	assert.EqualError(t, ErrCopyModeNotRevertible, "copy-mode operations cannot be reverted")
 }
 
 func TestErrNoOperationsFoundDeep2(t *testing.T) {

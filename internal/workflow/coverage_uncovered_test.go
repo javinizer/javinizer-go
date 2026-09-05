@@ -846,7 +846,7 @@ func TestCompleteRevertLog_CompleteError(t *testing.T) {
 
 	// Should not panic even when Complete returns an error
 	assert.NotPanics(t, func() {
-		impl.completeRevertLogWithState(context.Background(), "op-1", &applyPipelineState{})
+		impl.completeRevertLogWithState(context.Background(), "op-1", &applyPipelineState{}, false)
 	})
 }
 
@@ -857,7 +857,7 @@ func TestCompleteRevertLog_NilRevertLog(t *testing.T) {
 
 	// Should not panic with nil revertLog
 	assert.NotPanics(t, func() {
-		impl.completeRevertLogWithState(context.Background(), "op-1", &applyPipelineState{})
+		impl.completeRevertLogWithState(context.Background(), "op-1", &applyPipelineState{}, false)
 	})
 }
 
@@ -868,7 +868,7 @@ func TestCompleteRevertLog_EmptyOpID(t *testing.T) {
 
 	// Should not panic with empty opID
 	assert.NotPanics(t, func() {
-		impl.completeRevertLogWithState(context.Background(), "", &applyPipelineState{})
+		impl.completeRevertLogWithState(context.Background(), "", &applyPipelineState{}, false)
 	})
 }
 
@@ -1460,4 +1460,39 @@ func TestCompareOrchImpl_Construction(t *testing.T) {
 	assert.Equal(t, orch.fs, orch.fs)
 	assert.Equal(t, orch.merger, orch.merger)
 	assert.Equal(t, orch.scraper, orch.scraper)
+}
+
+func TestBuildGeneratedFilesJSON_SubtitleCopiedGoesToDelete(t *testing.T) {
+	// #224 phase E mode distinction: a copy-installed subtitle retains its
+	// source, so the revert artifact is the installed copy (Delete), never a
+	// MoveBack that would clobber the retained source.
+	subtitles := []models.SubtitleMove{
+		{OriginalPath: "/source/sub1.srt", NewPath: "/dest/sub1.srt", Copied: true},
+	}
+	result := buildGeneratedFilesJSON(logging.GlobalLogger(), "", subtitles, nil)
+	require.NotEmpty(t, result)
+	gf, err := models.ParseGeneratedFiles(result)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"/dest/sub1.srt"}, gf.Delete)
+	assert.Empty(t, gf.MoveBack)
+}
+
+func TestBuildGeneratedFilesJSON_SubtitleCopiedEmptyNewPath(t *testing.T) {
+	subtitles := []models.SubtitleMove{{OriginalPath: "/source/sub1.srt", NewPath: "", Copied: true}}
+	result := buildGeneratedFilesJSON(logging.GlobalLogger(), "", subtitles, nil)
+	assert.Empty(t, result, "copied subtitle without a destination has no revert artifact")
+}
+
+func TestBuildGeneratedFilesJSON_SubtitleCopiedAndMovedMix(t *testing.T) {
+	subtitles := []models.SubtitleMove{
+		{OriginalPath: "/source/m.srt", NewPath: "/dest/m.srt", Moved: true},
+		{OriginalPath: "/source/c.srt", NewPath: "/dest/c.srt", Copied: true},
+	}
+	result := buildGeneratedFilesJSON(logging.GlobalLogger(), "", subtitles, nil)
+	require.NotEmpty(t, result)
+	gf, err := models.ParseGeneratedFiles(result)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"/dest/c.srt"}, gf.Delete)
+	require.Len(t, gf.MoveBack, 1)
+	assert.Equal(t, models.FileMove{OriginalPath: "/source/m.srt", NewPath: "/dest/m.srt"}, gf.MoveBack[0])
 }

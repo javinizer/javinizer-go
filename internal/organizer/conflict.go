@@ -27,6 +27,14 @@ const (
 	// file path — never authorizable-over (replacement would destroy the link
 	// target's metadata chain).
 	ConflictSymlink
+	// ConflictDuplicate is an intra-batch destination collision detected at
+	// plan time (#224 phase E): an earlier file of the same batch already
+	// claimed the proven-equal canonical target key. It is reserved from the
+	// destination-occupation kinds (no object exists at the destination yet —
+	// the collision is between planned outcomes) and flows through the same
+	// plan-conflict pipeline; overwrite authorization demotes it to a persisted
+	// per-file warning + audit event instead of silently suppressing it.
+	ConflictDuplicate
 )
 
 // PlanConflict is a destination occupation recorded on a plan.
@@ -49,6 +57,7 @@ const (
 	kindNameFile      = "file"
 	kindNameDirectory = "directory"
 	kindNameSymlink   = "symlink"
+	kindNameDuplicate = "duplicate"
 	kindNameUnknown   = folderFallbackUnknown
 )
 
@@ -62,6 +71,8 @@ func (c PlanConflict) kindName() string {
 		return kindNameDirectory
 	case ConflictSymlink:
 		return kindNameSymlink
+	case ConflictDuplicate:
+		return kindNameDuplicate
 	default:
 		return kindNameUnknown
 	}

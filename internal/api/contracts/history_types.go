@@ -11,12 +11,16 @@ type JobListItem struct {
 	Failed         int              `json:"failed" example:"1"`
 	OperationCount int64            `json:"operation_count" example:"10"`
 	RevertedCount  int64            `json:"reverted_count,omitempty" example:"7"`
-	Progress       float64          `json:"progress" example:"0.9"`
-	Destination    string           `json:"destination" example:"/path/to/output"`
-	StartedAt      string           `json:"started_at" example:"2026-04-12T10:00:00Z"`
-	CompletedAt    *string          `json:"completed_at,omitempty" example:"2026-04-12T10:05:00Z"`
-	OrganizedAt    *string          `json:"organized_at,omitempty" example:"2026-04-12T10:05:00Z"`
-	RevertedAt     *string          `json:"reverted_at,omitempty" example:"2026-04-12T11:00:00Z"`
+	// NoopCount: terminal completed-noop rows (authorized duplicate skips —
+	// codex P2, PR #241 F2). Non-revertible; subtract alongside reverted_count
+	// when deriving how many operations can still be reverted.
+	NoopCount   int64   `json:"noop_count,omitempty" example:"1"`
+	Progress    float64 `json:"progress" example:"0.9"`
+	Destination string  `json:"destination" example:"/path/to/output"`
+	StartedAt   string  `json:"started_at" example:"2026-04-12T10:00:00Z"`
+	CompletedAt *string `json:"completed_at,omitempty" example:"2026-04-12T10:05:00Z"`
+	OrganizedAt *string `json:"organized_at,omitempty" example:"2026-04-12T10:05:00Z"`
+	RevertedAt  *string `json:"reverted_at,omitempty" example:"2026-04-12T11:00:00Z"`
 }
 
 // JobListResponse is the response for listing jobs

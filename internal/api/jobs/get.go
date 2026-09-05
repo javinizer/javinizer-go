@@ -43,6 +43,7 @@ func getJob(deps JobDeps) gin.HandlerFunc {
 			Failed:         job.Failed,
 			OperationCount: result.OpCount,
 			RevertedCount:  result.RevertedCount,
+			NoopCount:      result.NoopCount,
 			Progress:       job.Progress,
 			Destination:    job.Destination,
 			StartedAt:      job.StartedAt.Format(time.RFC3339),

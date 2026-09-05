@@ -4574,6 +4574,10 @@ const docTemplate = `{
                 "id": {
                     "type": "string"
                 },
+                "noop_count": {
+                    "description": "NoopCount: terminal completed-noop rows (authorized duplicate skips —\ncodex P2, PR #241 F2). Non-revertible; revertible = operation_count −\nreverted_count − noop_count.",
+                    "type": "integer"
+                },
                 "operation_count": {
                     "type": "integer"
                 },
@@ -5096,6 +5100,11 @@ const docTemplate = `{
                 "id": {
                     "type": "string",
                     "example": "550e8400-e29b-41d4-a716-446655440000"
+                },
+                "noop_count": {
+                    "description": "NoopCount: terminal completed-noop rows (authorized duplicate skips —\ncodex P2, PR #241 F2). Non-revertible; subtract alongside reverted_count\nwhen deriving how many operations can still be reverted.",
+                    "type": "integer",
+                    "example": 1
                 },
                 "operation_count": {
                     "type": "integer",
@@ -8143,7 +8152,8 @@ const docTemplate = `{
             "enum": [
                 "applied",
                 "reverted",
-                "failed"
+                "failed",
+                "noop"
             ],
             "x-enum-comments": {
                 "RevertStatusApplied": "Renamed from \"pending\" — D-01"
@@ -8151,12 +8161,14 @@ const docTemplate = `{
             "x-enum-descriptions": [
                 "Renamed from \"pending\" — D-01",
                 "",
+                "",
                 ""
             ],
             "x-enum-varnames": [
                 "RevertStatusApplied",
                 "RevertStatusReverted",
-                "RevertStatusFailed"
+                "RevertStatusFailed",
+                "RevertStatusNoOp"
             ]
         },
         "github_com_javinizer_javinizer-go_internal_models.ScraperChoice": {

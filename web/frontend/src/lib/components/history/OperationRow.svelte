@@ -1,6 +1,6 @@
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages';
-	import { CircleCheckBig, CircleX, Undo2, LoaderCircle } from 'lucide-svelte';
+	import { CircleCheckBig, CircleSlash, CircleX, Undo2, LoaderCircle } from 'lucide-svelte';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import type { OperationItem } from '$lib/api/types';
@@ -19,12 +19,17 @@
 	const opState = $derived.by(() => {
 		const rs = operation.revert_status.toLowerCase();
 		if (rs === 'reverted') return 'reverted';
+		// codex P2 (PR #241 F2): completed-noop rows (authorized duplicate
+		// skips) are terminal and non-revertible — classifying them as
+		// 'success' leaked a revert action that no-ops server-side.
+		if (rs === 'noop') return 'noop';
 		if (rs === 'failed') return 'failed';
 		return 'success';
 	});
 
-	const statusBadge = $derived.by<'success' | 'failed' | 'reverted'>(() => {
+	const statusBadge = $derived.by<'success' | 'failed' | 'reverted' | 'noop'>(() => {
 		if (opState === 'reverted') return 'reverted';
+		if (opState === 'noop') return 'noop';
 		if (opState === 'failed') return 'failed';
 		return 'success';
 	});
@@ -60,6 +65,8 @@
 		<div class="flex items-center gap-2">
 			{#if opState === 'success'}
 				<CircleCheckBig class="h-4 w-4 text-green-500" />
+			{:else if opState === 'noop'}
+				<CircleSlash class="h-4 w-4 text-muted-foreground" />
 			{:else if opState === 'reverted'}
 				<Undo2 class="h-4 w-4 text-yellow-500" />
 			{:else}
@@ -86,6 +93,11 @@
 					{m.history_revert_file()}
 				</Button>
 			{/if}
+		{:else if opState === 'noop'}
+			<Button variant="ghost" size="sm" disabled>
+				<CircleSlash class="h-4 w-4 mr-1" />
+				{m.history_nothing_to_revert()}
+			</Button>
 		{:else if opState === 'reverted'}
 			<Button variant="ghost" size="sm" disabled>
 				<Undo2 class="h-4 w-4 mr-1" />
