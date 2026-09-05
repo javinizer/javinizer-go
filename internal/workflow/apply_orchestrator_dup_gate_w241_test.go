@@ -329,6 +329,18 @@ func (d *e2ePosterDownloader) Download(_ context.Context, cmd downloader.Downloa
 	return &downloader.DownloadOutcome{CreatedPaths: []string{target}}, nil
 }
 
+// slashNormalizeW241Paths slash-normalizes a collected path slice so
+// separator-native entries — the revert ledger's Roots mix DestPath verbatim
+// ("/dest") with the join-derived organizer leaf ("\\dest\\shared" on
+// Windows) — compare cleanly against POSIX literals.
+func slashNormalizeW241Paths(paths []string) []string {
+	out := make([]string, len(paths))
+	for i, p := range paths {
+		out[i] = filepath.ToSlash(p)
+	}
+	return out
+}
+
 // TestApply_ForceUpdateDuplicateOnlyOwnerProduces_EndToEnd is the codex P1
 // regression end to end: two ForceUpdate claimants prime ONE shared
 // destination; the primed winner moves, the loser is demoted to
@@ -457,13 +469,13 @@ func TestApply_ForceUpdateDuplicateOnlyOwnerProduces_EndToEnd(t *testing.T) {
 	winnerLedger, err := models.ParseGeneratedFiles(winnerRow.GeneratedFiles)
 	require.NoError(t, err)
 	assert.Contains(t, winnerLedger.Delete, nfoPath, "the winner journals its own NFO")
-	assert.Contains(t, winnerLedger.Roots, "/dest/shared")
+	assert.Contains(t, slashNormalizeW241Paths(winnerLedger.Roots), filepath.ToSlash("/dest/shared"))
 	assert.Empty(t, loserRow.NewPath, "the loser journals no primary move")
 	loserLedger, err := models.ParseGeneratedFiles(loserRow.GeneratedFiles)
 	require.NoError(t, err)
 	assert.Empty(t, loserLedger.Delete, "the loser journals NO generated-file deletes — reverting it deletes nothing")
 	assert.Empty(t, loserLedger.MoveBack)
-	assert.NotContains(t, loserLedger.Roots, "/dest/shared")
+	assert.NotContains(t, slashNormalizeW241Paths(loserLedger.Roots), filepath.ToSlash("/dest/shared"))
 
 	// (b) Loser revert after success deletes NOTHING of the winner's.
 	reverter := history.NewReverter(cfs, repo)
