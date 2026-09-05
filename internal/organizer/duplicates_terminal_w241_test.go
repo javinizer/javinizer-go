@@ -121,14 +121,16 @@ func TestDuplicateTracker_TerminalWaiting(t *testing.T) {
 
 // panicOnceDestFs panics on the FIRST MkdirAll under /dest — a deterministic
 // mid-execute owner panic (#241 P2): the organizer's deferred close-out must
-// release the canonical key (waiters promote) and re-panic.
+// release the canonical key (waiters promote) and re-panic. The match is
+// separator-agnostic: produced paths arrive native-spelled ("\dest\..." from
+// filepath.Join on Windows), so the trap compares the slash-normalized form.
 type panicOnceDestFs struct {
 	afero.Fs
 	armed *atomic.Bool
 }
 
 func (p *panicOnceDestFs) MkdirAll(path string, perm os.FileMode) error {
-	if strings.HasPrefix(path, "/dest") && p.armed.CompareAndSwap(true, false) {
+	if strings.HasPrefix(filepath.ToSlash(path), "/dest") && p.armed.CompareAndSwap(true, false) {
 		panic("mkdir boom")
 	}
 	return p.Fs.MkdirAll(path, perm)
@@ -193,7 +195,7 @@ func TestOrganize_OwnerPanicReleasesWaiters(t *testing.T) {
 			require.NoError(t, outB.err, "the promoted waiter's organize succeeds — no deadlock behind the dead owner")
 			assert.True(t, outB.res.Moved)
 			assert.Empty(t, outB.res.Warnings)
-			content, err := afero.ReadFile(baseFS, target)
+			content, err := afero.ReadFile(baseFS, filepath.FromSlash(target))
 			require.NoError(t, err)
 			assert.Equal(t, []byte("b-bytes"), content, "the promoted claimant landed its bytes")
 			loserSrc, err := afero.ReadFile(baseFS, "/in/A.mkv")
@@ -263,7 +265,7 @@ func TestOrganize_WinnerSuccessLoserStillConflicts(t *testing.T) {
 		assert.False(t, outB.res.Moved)
 		assert.True(t, outB.res.DuplicateSkipped)
 		require.Len(t, outB.res.Warnings, 1)
-		content, readErr := afero.ReadFile(fs, target)
+		content, readErr := afero.ReadFile(fs, filepath.FromSlash(target))
 		require.NoError(t, readErr)
 		assert.Equal(t, []byte("a-bytes"), content, "only the winner's bytes land")
 	})

@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"testing"
 
 	"github.com/spf13/afero"
@@ -180,13 +181,16 @@ func TestRevertLog_DuplicateSkipLoser_RevertLeavesWinnerUntouched(t *testing.T) 
 	require.NoError(t, err)
 	require.True(t, resL.DuplicateSkipped)
 	require.False(t, resL.Moved)
-	require.Equal(t, w241Target, resL.NewPath, "visible winner/skip semantics: NewPath still names the shared destination")
+	// Separator-agnostic compare: produced paths arrive native-spelled on
+	// Windows ("\dest\shared\shared.mkv") while w241Target pins the POSIX form.
+	require.Equal(t, w241Target, filepath.ToSlash(resL.NewPath), "visible winner/skip semantics: NewPath still names the shared destination")
 
 	opW := w241Begin(t, rl, "ABC-100", "/in/A.mkv")
 	opL := w241Begin(t, rl, "ABC-200", "/in/B.mkv")
 	require.NoError(t, rl.Complete(ctx, opW, &ApplyResult{Movie: &models.Movie{ID: "ABC-100"}, OrganizeResult: resW}))
 	require.NoError(t, rl.Complete(ctx, opL, &ApplyResult{Movie: &models.Movie{ID: "ABC-200"}, OrganizeResult: resL}))
-	require.Equal(t, w241Target, w241Row(t, repo, opW).NewPath)
+	// The winner's row journals the produced (native-spelled) NewPath verbatim.
+	require.Equal(t, w241Target, filepath.ToSlash(w241Row(t, repo, opW).NewPath))
 	require.Empty(t, w241Row(t, repo, opL).NewPath, "codex P1 (PR #241): the skipped loser has no primary-move revert record")
 
 	reverter := history.NewReverter(fs, repo)
@@ -200,7 +204,7 @@ func TestRevertLog_DuplicateSkipLoser_RevertLeavesWinnerUntouched(t *testing.T) 
 	require.Len(t, rb.Outcomes, 1)
 	assert.NotEqual(t, models.RevertOutcomeReverted, rb.Outcomes[0].Outcome,
 		"the loser revert must never treat the winner's video as movable (anchor-missing skip on real filesystems, destination-conflict refusal on memfs roots)")
-	winnerBytes, err := afero.ReadFile(fs, w241Target)
+	winnerBytes, err := afero.ReadFile(fs, filepath.FromSlash(w241Target))
 	require.NoError(t, err)
 	assert.Equal(t, []byte("a-bytes"), winnerBytes, "loser revert left the winner's video untouched")
 	loserSrc, err := afero.ReadFile(fs, "/in/B.mkv")
@@ -215,7 +219,7 @@ func TestRevertLog_DuplicateSkipLoser_RevertLeavesWinnerUntouched(t *testing.T) 
 	restored, err := afero.ReadFile(fs, "/in/A.mkv")
 	require.NoError(t, err)
 	assert.Equal(t, []byte("a-bytes"), restored, "winner revert moved its video back")
-	exists, err := afero.Exists(fs, w241Target)
+	exists, err := afero.Exists(fs, filepath.FromSlash(w241Target))
 	require.NoError(t, err)
 	assert.False(t, exists, "the shared destination is vacated by the winner's revert only")
 }
