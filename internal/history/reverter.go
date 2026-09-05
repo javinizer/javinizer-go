@@ -270,11 +270,23 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 		return result, err
 	}
 
-	if result, err := r.checkAnchor(ctx, op); result != nil || err != nil {
-		return result, err
+	isUpdate := op.OperationType == models.OperationTypeUpdate
+
+	// codex P2 (PR #241 F1): anchor semantics apply ONLY to the legs that
+	// address the primary — the move-back (installed primary returns to the
+	// source tree) and update rows (OriginalPath is where artifacts are
+	// regenerated). Copy/hardlink/symlink rows never gave up their primary:
+	// the installed destination is the user's own copy, so its absence
+	// (user deleted it after organizing) must NOT anchor-gate the
+	// GeneratedFiles cleanup — gating here orphaned every journaled copied
+	// subtitle/NFO/download behind an anchor_missing skip. Those rows run
+	// cleanup independently of the primary anchor below.
+	if op.OperationType == models.OperationTypeMove || isUpdate {
+		if result, err := r.checkAnchor(ctx, op); result != nil || err != nil {
+			return result, err
+		}
 	}
 
-	isUpdate := op.OperationType == models.OperationTypeUpdate
 	switch op.OperationType {
 	case models.OperationTypeUpdate:
 		r.fsReverter.cleanupGeneratedFiles(op, filepath.Dir(filepath.Dir(op.OriginalPath)))
@@ -299,7 +311,9 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 		// the source). Deleting exactly those artifacts is the complete,
 		// correct, non-destructive inverse: sources stay, the installed
 		// primary stays (it is the user's copy), and the move leg above
-		// keeps its full move-back semantics untouched.
+		// keeps its full move-back semantics untouched. The leg is
+		// deliberately anchorless (codex P2, PR #241 F1): a user-deleted
+		// installed primary skips nothing — this cleanup still runs.
 		r.fsReverter.cleanupGeneratedFiles(op, filepath.Dir(filepath.Dir(op.NewPath)))
 	default:
 		return failRevert(ctx, r.batchFileOpRepo, op, models.RevertReasonUnexpectedPathState, fmt.Sprintf("unknown operation type %q cannot be reverted", op.OperationType)), nil

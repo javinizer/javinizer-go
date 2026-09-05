@@ -163,6 +163,10 @@ func (m *mockBatchFileOpRepo) CountRevertedByBatchJobIDs(ctx context.Context, jo
 	return nil, nil
 }
 
+func (m *mockBatchFileOpRepo) CountNoOpByBatchJobIDs(ctx context.Context, jobIDs []string) (map[string]int64, error) {
+	return nil, nil
+}
+
 func TestReverter_SkipRevertDeep2(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	repo := newMockBatchFileOpRepo()

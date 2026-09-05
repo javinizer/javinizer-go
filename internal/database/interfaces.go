@@ -163,6 +163,10 @@ type BatchFileOperationRepositoryInterface interface {
 	CountByBatchJobIDs(ctx context.Context, jobIDs []string) (map[string]int64, error)
 	// CountRevertedByBatchJobIDs returns a map of jobID→reverted count for all given job IDs.
 	CountRevertedByBatchJobIDs(ctx context.Context, jobIDs []string) (map[string]int64, error)
+	// CountNoOpByBatchJobIDs returns a map of jobID→noop count for all given job IDs (codex P2,
+	// PR #241 F2): completed-noop rows are terminal and non-revertible, so list endpoints
+	// expose them separately for revertible-count math (operation_count − reverted − noop).
+	CountNoOpByBatchJobIDs(ctx context.Context, jobIDs []string) (map[string]int64, error)
 	// FindOperationsByDestination returns every operation whose generated-files ledger
 	// holds a replacement journal entry for destination — SQL LIKE pre-filter plus
 	// exact in-process filter (POSTER-WRITE-HARDENING P3 revert-ledger read path).

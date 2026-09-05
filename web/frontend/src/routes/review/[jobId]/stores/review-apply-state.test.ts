@@ -17,6 +17,7 @@ function makeJob(): BatchJobResponse {
 		failed: 0,
 		operation_count: 0,
 		reverted_count: 0,
+		noop_count: 0,
 		excluded: {},
 		progress: 100,
 		destination: '/legacy',

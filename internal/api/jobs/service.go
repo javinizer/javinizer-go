@@ -52,6 +52,10 @@ type JobWithStats struct {
 	Job           models.Job
 	OpCount       int64
 	RevertedCount int64
+	// NoopCount counts terminal completed-noop rows (codex P2, PR #241 F2):
+	// non-revertible by definition, so consumers subtract it alongside
+	// RevertedCount when computing how many operations can still revert.
+	NoopCount int64
 }
 
 // GetJobWithStats returns a single job with its operation and revert counts.
@@ -71,10 +75,16 @@ func (d JobDeps) GetJobWithStats(ctx context.Context, jobID string) (*JobWithSta
 		return nil, err
 	}
 
+	noopCounts, err := d.BatchFileOpRepo.CountNoOpByBatchJobIDs(ctx, []string{job.ID})
+	if err != nil {
+		return nil, err
+	}
+
 	return &JobWithStats{
 		Job:           *job,
 		OpCount:       opCount,
 		RevertedCount: revertedCount,
+		NoopCount:     noopCounts[job.ID],
 	}, nil
 }
 
@@ -91,7 +101,7 @@ func (d JobDeps) ListJobsWithStats(ctx context.Context) ([]JobWithStats, error) 
 		jobIDs = append(jobIDs, job.ID)
 	}
 
-	var opCounts, revertedCounts map[string]int64
+	var opCounts, revertedCounts, noopCounts map[string]int64
 	if len(jobIDs) > 0 {
 		opCounts, err = d.BatchFileOpRepo.CountByBatchJobIDs(ctx, jobIDs)
 		if err != nil {
@@ -101,9 +111,14 @@ func (d JobDeps) ListJobsWithStats(ctx context.Context) ([]JobWithStats, error) 
 		if err != nil {
 			return nil, err
 		}
+		noopCounts, err = d.BatchFileOpRepo.CountNoOpByBatchJobIDs(ctx, jobIDs)
+		if err != nil {
+			return nil, err
+		}
 	} else {
 		opCounts = make(map[string]int64)
 		revertedCounts = make(map[string]int64)
+		noopCounts = make(map[string]int64)
 	}
 
 	results := make([]JobWithStats, len(jobs))
@@ -112,6 +127,7 @@ func (d JobDeps) ListJobsWithStats(ctx context.Context) ([]JobWithStats, error) 
 			Job:           job,
 			OpCount:       opCounts[job.ID],
 			RevertedCount: revertedCounts[job.ID],
+			NoopCount:     noopCounts[job.ID],
 		}
 	}
 

@@ -423,6 +423,32 @@ func (r *BatchFileOperationRepository) CountRevertedByBatchJobIDs(ctx context.Co
 	return m, nil
 }
 
+// CountNoOpByBatchJobIDs returns a map of jobID→noop count for all given job IDs.
+// Completed-noop rows (authorized duplicate skips; codex P2, PR #241 F2) are
+// terminal and non-revertible — they are counted separately so revertible
+// totals can exclude them exactly like reverted rows.
+func (r *BatchFileOperationRepository) CountNoOpByBatchJobIDs(ctx context.Context, jobIDs []string) (map[string]int64, error) {
+	if len(jobIDs) == 0 {
+		return map[string]int64{}, nil
+	}
+	var results []countByBatchJobIDsResult
+	err := r.GetDB().WithContext(ctx).
+		Model(&models.BatchFileOperation{}).
+		Select("batch_job_id, count(*) as cnt").
+		Where("batch_job_id IN ?", jobIDs).
+		Where("revert_status = ?", models.RevertStatusNoOp).
+		Group("batch_job_id").
+		Find(&results).Error
+	if err != nil {
+		return nil, wrapDBErr("count_noop_by_batch_job_ids", "batch file operations", err)
+	}
+	m := make(map[string]int64, len(results))
+	for _, r := range results {
+		m[r.BatchJobID] = r.Count
+	}
+	return m, nil
+}
+
 // destinationLikePattern builds the SQL LIKE prefilter pattern matching a
 // destination as it appears inside the persisted text columns (ESCAPE '\').
 // R5-1: destinations live inside JSON, whose encoder escapes `\` (and

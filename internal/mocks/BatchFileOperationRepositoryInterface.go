@@ -245,6 +245,74 @@ func (_c *MockBatchFileOperationRepositoryInterface_CountByBatchJobIDs_Call) Run
 	return _c
 }
 
+// CountNoOpByBatchJobIDs provides a mock function for the type MockBatchFileOperationRepositoryInterface
+func (_mock *MockBatchFileOperationRepositoryInterface) CountNoOpByBatchJobIDs(ctx context.Context, jobIDs []string) (map[string]int64, error) {
+	ret := _mock.Called(ctx, jobIDs)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CountNoOpByBatchJobIDs")
+	}
+
+	var r0 map[string]int64
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, []string) (map[string]int64, error)); ok {
+		return returnFunc(ctx, jobIDs)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, []string) map[string]int64); ok {
+		r0 = returnFunc(ctx, jobIDs)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[string]int64)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, []string) error); ok {
+		r1 = returnFunc(ctx, jobIDs)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockBatchFileOperationRepositoryInterface_CountNoOpByBatchJobIDs_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CountNoOpByBatchJobIDs'
+type MockBatchFileOperationRepositoryInterface_CountNoOpByBatchJobIDs_Call struct {
+	*mock.Call
+}
+
+// CountNoOpByBatchJobIDs is a helper method to define mock.On call
+//   - ctx context.Context
+//   - jobIDs []string
+func (_e *MockBatchFileOperationRepositoryInterface_Expecter) CountNoOpByBatchJobIDs(ctx any, jobIDs any) *MockBatchFileOperationRepositoryInterface_CountNoOpByBatchJobIDs_Call {
+	return &MockBatchFileOperationRepositoryInterface_CountNoOpByBatchJobIDs_Call{Call: _e.mock.On("CountNoOpByBatchJobIDs", ctx, jobIDs)}
+}
+
+func (_c *MockBatchFileOperationRepositoryInterface_CountNoOpByBatchJobIDs_Call) Run(run func(ctx context.Context, jobIDs []string)) *MockBatchFileOperationRepositoryInterface_CountNoOpByBatchJobIDs_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 []string
+		if args[1] != nil {
+			arg1 = args[1].([]string)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockBatchFileOperationRepositoryInterface_CountNoOpByBatchJobIDs_Call) Return(stringToInt64 map[string]int64, err error) *MockBatchFileOperationRepositoryInterface_CountNoOpByBatchJobIDs_Call {
+	_c.Call.Return(stringToInt64, err)
+	return _c
+}
+
+func (_c *MockBatchFileOperationRepositoryInterface_CountNoOpByBatchJobIDs_Call) RunAndReturn(run func(ctx context.Context, jobIDs []string) (map[string]int64, error)) *MockBatchFileOperationRepositoryInterface_CountNoOpByBatchJobIDs_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CountRevertedByBatchJobIDs provides a mock function for the type MockBatchFileOperationRepositoryInterface
 func (_mock *MockBatchFileOperationRepositoryInterface) CountRevertedByBatchJobIDs(ctx context.Context, jobIDs []string) (map[string]int64, error) {
 	ret := _mock.Called(ctx, jobIDs)

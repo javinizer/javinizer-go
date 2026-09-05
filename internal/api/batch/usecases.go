@@ -64,6 +64,7 @@ func ListJobsUseCase(ctx context.Context, deps *core.APIDeps, input ListJobsInpu
 
 	var opCounts map[string]int64
 	var revertedCounts map[string]int64
+	var noopCounts map[string]int64
 
 	if len(jobIDs) > 0 {
 		opCounts, err = deps.GetBatchFileOpRepo().CountByBatchJobIDs(ctx, jobIDs)
@@ -76,9 +77,15 @@ func ListJobsUseCase(ctx context.Context, deps *core.APIDeps, input ListJobsInpu
 			logging.Errorf("Failed to count reverted operations: %v", err)
 			return nil, fmt.Errorf("failed to retrieve revert counts")
 		}
+		noopCounts, err = deps.GetBatchFileOpRepo().CountNoOpByBatchJobIDs(ctx, jobIDs)
+		if err != nil {
+			logging.Errorf("Failed to count noop operations: %v", err)
+			return nil, fmt.Errorf("failed to retrieve noop counts")
+		}
 	} else {
 		opCounts = make(map[string]int64)
 		revertedCounts = make(map[string]int64)
+		noopCounts = make(map[string]int64)
 	}
 
 	response := contracts.BatchJobListResponse{
@@ -110,6 +117,7 @@ func ListJobsUseCase(ctx context.Context, deps *core.APIDeps, input ListJobsInpu
 			Failed:                job.Failed,
 			OperationCount:        opCounts[job.ID],
 			RevertedCount:         revertedCounts[job.ID],
+			NoopCount:             noopCounts[job.ID],
 			Excluded:              nil, // Deferred — use GET /batch/{id} for excluded details
 			Progress:              job.Progress,
 			Destination:           job.Destination,

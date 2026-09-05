@@ -128,13 +128,17 @@ type BatchFileResultSlim struct {
 
 // BatchJobResponse represents a batch job status
 type BatchJobResponse struct {
-	ID                    string                      `json:"id"`
-	Status                models.JobStatus            `json:"status"`
-	TotalFiles            int                         `json:"total_files"`
-	Completed             int                         `json:"completed"`
-	Failed                int                         `json:"failed"`
-	OperationCount        int64                       `json:"operation_count"`
-	RevertedCount         int64                       `json:"reverted_count"`
+	ID             string           `json:"id"`
+	Status         models.JobStatus `json:"status"`
+	TotalFiles     int              `json:"total_files"`
+	Completed      int              `json:"completed"`
+	Failed         int              `json:"failed"`
+	OperationCount int64            `json:"operation_count"`
+	RevertedCount  int64            `json:"reverted_count"`
+	// NoopCount: terminal completed-noop rows (authorized duplicate skips —
+	// codex P2, PR #241 F2). Non-revertible; revertible = operation_count −
+	// reverted_count − noop_count.
+	NoopCount             int64                       `json:"noop_count"`
 	Excluded              map[string]bool             `json:"excluded"`
 	Progress              float64                     `json:"progress"`
 	Destination           string                      `json:"destination"`
