@@ -301,6 +301,13 @@ export interface BatchRescrapeResponse {
 	movie: Movie;
 	field_sources?: Record<string, string>;
 	actress_sources?: Record<string, string>;
+	/**
+	 * Translation warning fields produced by THIS rescrape; omitted when the
+	 * rescrape was translation-clean (this endpoint emits no progress
+	 * broadcast, so absence means clear, not "unknown").
+	 */
+	translation_warning?: string;
+	translation_warning_code?: TranslationWarningCode;
 	/** Fresh post-commit result revision (CAS baseline). */
 	revision?: number;
 	revisions?: Record<string, number>;

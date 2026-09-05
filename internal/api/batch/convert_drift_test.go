@@ -185,6 +185,25 @@ func TestMovieResultToBatchFileResultDriftGuard(t *testing.T) {
 			t.Errorf("BulkRescrapeMovieResult.TranslationWarningCode json tag = %q, want translation_warning_code,omitempty", tag)
 		}
 	})
+
+	// The single-result rescrape response carries BOTH fields so the review UI
+	// can replace (or, when omitted, clear) the stale per-result warning without
+	// a refetch — this endpoint issues no progress broadcast.
+	t.Run("single_rescrape_response_exposes_translation_warning_fields", func(t *testing.T) {
+		respType := reflect.TypeOf(contracts.BatchRescrapeResponse{})
+		wf, ok := respType.FieldByName("TranslationWarning")
+		if !ok {
+			t.Errorf("BatchRescrapeResponse must expose TranslationWarning (single rescrape warning replace/clear)")
+		} else if tag := wf.Tag.Get("json"); tag != "translation_warning,omitempty" {
+			t.Errorf("BatchRescrapeResponse.TranslationWarning json tag = %q, want translation_warning,omitempty", tag)
+		}
+		cf, ok := respType.FieldByName("TranslationWarningCode")
+		if !ok {
+			t.Errorf("BatchRescrapeResponse must expose TranslationWarningCode (single rescrape warning replace/clear)")
+		} else if tag := cf.Tag.Get("json"); tag != "translation_warning_code,omitempty" {
+			t.Errorf("BatchRescrapeResponse.TranslationWarningCode json tag = %q, want translation_warning_code,omitempty", tag)
+		}
+	})
 }
 
 // TestBatchJobBaseFieldsDriftGuard ensures that every field on worker.batchJobBase

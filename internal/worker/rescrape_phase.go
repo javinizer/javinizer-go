@@ -462,7 +462,7 @@ func withRescrapeStatus(lc rescrapeLifecycle, fn func(scope *rescrapeGenScope) (
 }
 
 // replaceRescrapeResult attaches provenance metadata, the translation warning
-// code, and file path to the rescrape outcome. Separated from the
+// fields, and file path to the rescrape outcome. Separated from the
 // status-transition logic so that withRescrapeStatus stays focused on
 // cleanup/rollback.
 func replaceRescrapeResult(outcome *RescrapeResult, filePath string, movieResult *resultstore.MovieResult, prov *resultstore.ProvenanceData) {
@@ -475,6 +475,9 @@ func replaceRescrapeResult(outcome *RescrapeResult, filePath string, movieResult
 		outcome.Movie = movieResult.Movie
 	}
 	outcome.FilePath = filePath
+	if movieResult.TranslationWarning != nil {
+		outcome.TranslationWarning = *movieResult.TranslationWarning
+	}
 	outcome.TranslationWarningCode = movieResult.TranslationWarningCode
 }
 

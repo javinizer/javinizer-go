@@ -155,11 +155,13 @@ func rescrapeBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 		// inside the keyed section — no re-acquisition needed, no racer echo.
 		rev := rr.Revision
 		c.JSON(http.StatusOK, contracts.BatchRescrapeResponse{
-			Movie:          contracts.MovieViewFromModel(rr.Movie),
-			FieldSources:   rr.FieldSources,
-			ActressSources: rr.ActressSources,
-			Revision:       rev,
-			Revisions:      rr.Revisions,
+			Movie:                  contracts.MovieViewFromModel(rr.Movie),
+			FieldSources:           rr.FieldSources,
+			ActressSources:         rr.ActressSources,
+			TranslationWarning:     rr.TranslationWarning,
+			TranslationWarningCode: rr.TranslationWarningCode,
+			Revision:               rev,
+			Revisions:              rr.Revisions,
 		})
 	}
 }

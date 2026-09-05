@@ -174,6 +174,12 @@ export function createRescrapeController(deps: RescrapeControllerDeps) {
 					movie: updatedMovie,
 					field_sources: response.field_sources ?? newResults[filePath]?.field_sources,
 					actress_sources: response.actress_sources ?? newResults[filePath]?.actress_sources,
+					// The single-result rescrape endpoint issues no progress broadcast,
+					// so the response is the only carrier: a warning produced by this
+					// rescrape must REPLACE any prior one, and a clean rescrape (fields
+					// omitted) must CLEAR the stale warning from an earlier attempt.
+					translation_warning: response.translation_warning,
+					translation_warning_code: response.translation_warning_code,
 					// the refetched movie landed a new server revision — advance
 					// the CAS baseline, or the next save reads back a 409 (codex r30).
 					...(response.revision !== undefined ? { revision: response.revision } : {}),

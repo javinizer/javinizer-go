@@ -139,7 +139,12 @@ func executeLLMChatTranslation(ctx context.Context, httpClient httpclient.HTTPCl
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxTranslationResponseSize))
 	if err != nil {
-		return nil, err
+		// Typed provider error (message only, raw cause dropped): truncated or
+		// failed response bodies classify as unavailable, not unknown.
+		return nil, &translationError{
+			Kind:    TranslationErrorProvider,
+			Message: fmt.Sprintf("%s translation response body read failed", providerName),
+		}
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		// Status-only message: do not embed the provider response body, which can
@@ -199,7 +204,12 @@ func executeOpenAIChatTranslation(ctx context.Context, httpClient httpclient.HTT
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxTranslationResponseSize))
 	if err != nil {
-		return nil, err
+		// Typed provider error (message only, raw cause dropped): truncated or
+		// failed response bodies classify as unavailable, not unknown.
+		return nil, &translationError{
+			Kind:    TranslationErrorProvider,
+			Message: fmt.Sprintf("%s translation response body read failed", opts.provider),
+		}
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		// Status-only message: do not embed the provider response body, which can

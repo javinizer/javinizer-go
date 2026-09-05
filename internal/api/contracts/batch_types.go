@@ -197,6 +197,12 @@ type BatchRescrapeResponse struct {
 	Movie          *MovieView        `json:"movie"`
 	FieldSources   map[string]string `json:"field_sources,omitempty"`
 	ActressSources map[string]string `json:"actress_sources,omitempty"`
+	// TranslationWarning is populated when metadata translation partially failed
+	// or degraded during this rescrape (kept-original fields); empty when clean.
+	TranslationWarning string `json:"translation_warning,omitempty"`
+	// TranslationWarningCode is the machine-readable classification of
+	// TranslationWarning (rate_limited, unavailable, degraded, ...).
+	TranslationWarningCode string `json:"translation_warning_code,omitempty"`
 	// Revision is the fresh post-commit revision of the rescraped result
 	// (D12) — clients advance their CAS baseline from it.
 	Revision  *uint64           `json:"revision,omitempty"`

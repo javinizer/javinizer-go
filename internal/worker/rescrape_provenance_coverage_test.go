@@ -49,13 +49,18 @@ func TestCommitResultWithProvenanceReturnsFamilySnapshot(t *testing.T) {
 
 func TestReplaceRescrapeResultPropagatesTranslationWarningCode(t *testing.T) {
 	outcome := &RescrapeResult{Status: models.RescrapeStatusSuccess}
+	warning := "Translation (test): provider unavailable or unusable response"
 	mr := &resultstore.MovieResult{
-		Movie:              &models.Movie{ID: "MV-1"},
-		OrchestrationState: models.OrchestrationState{TranslationWarningCode: "degraded"},
+		Movie: &models.Movie{ID: "MV-1"},
+		OrchestrationState: models.OrchestrationState{
+			TranslationWarning:     &warning,
+			TranslationWarningCode: "degraded",
+		},
 	}
 
 	replaceRescrapeResult(outcome, "/f/mv1.mp4", mr, nil)
 
+	require.Equal(t, warning, outcome.TranslationWarning)
 	require.Equal(t, "degraded", outcome.TranslationWarningCode)
 	require.Equal(t, "/f/mv1.mp4", outcome.FilePath)
 	require.Equal(t, mr.Movie, outcome.Movie)

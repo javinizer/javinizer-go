@@ -158,6 +158,46 @@ func TestLogHygiene_LLMTransportFailureSharedAndLegacyPipelines(t *testing.T) {
 	})
 }
 
+// TestLogHygiene_LLMBodyReadFailures pins truncated/undelivered response
+// bodies on both LLM executor pipelines: they classify as unavailable (never
+// the unknown fallback) and neither the typed error nor the logs carry the
+// raw transport dump.
+func TestLogHygiene_LLMBodyReadFailures(t *testing.T) {
+	logPath := initHygieneLogger(t)
+	const sourceText = "SECRET_BODYREAD_TEXT_5qz"
+
+	t.Run("shared pipeline", func(t *testing.T) {
+		cfg := Config{
+			Enabled: true, Provider: "openai", SourceLanguage: "ja", TargetLanguage: "en",
+			Fields: fieldsConfig{Title: true},
+			OpenAI: openAIConfig{BaseURL: "http://provider.invalid/v1", APIKey: "k", Model: "m"},
+		}
+		s := New(cfg, NewOpenAIProvider(cfg, errBodyReadClient{}))
+		_, _, code, err := s.TranslateMovie(context.Background(), &models.Movie{Title: sourceText}, "")
+		require.Error(t, err)
+		assert.Equal(t, TranslationWarningUnavailable, code,
+			"shared-pipeline body read failures are typed provider errors -> unavailable")
+		assertHygiene(t, logPath, err.Error(), sourceText, bodyReadFailureDump, "SECRET_KEY")
+	})
+
+	t.Run("legacy pipeline", func(t *testing.T) {
+		cfg := Config{
+			Enabled: true, Provider: "openai-compatible", SourceLanguage: "ja", TargetLanguage: "en",
+			Fields: fieldsConfig{Title: true},
+			OpenAICompatible: openAICompatibleConfig{
+				BaseURL: "http://provider.invalid/v1",
+				Model:   "m",
+			},
+		}
+		s := New(cfg, NewOpenAICompatibleProvider(cfg, errBodyReadClient{}))
+		_, _, code, err := s.TranslateMovie(context.Background(), &models.Movie{Title: sourceText}, "")
+		require.Error(t, err)
+		assert.Equal(t, TranslationWarningUnavailable, code,
+			"legacy-pipeline body read failures are typed provider errors -> unavailable")
+		assertHygiene(t, logPath, err.Error(), sourceText, bodyReadFailureDump, "SECRET_KEY")
+	})
+}
+
 // TestLogHygiene_ServiceCallSites pins the service-layer scrubbing: the
 // empty-result degraded debug and the all-attempts-failed LLM debug log fixed
 // strings plus safe scalars only.

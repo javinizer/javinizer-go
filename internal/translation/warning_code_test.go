@@ -178,6 +178,91 @@ func TestProviderDecodeFailures_TypedParseErrors(t *testing.T) {
 	})
 }
 
+// errBodyReadClient is an HTTPClient whose 200 responses fail mid-body,
+// standing in for a truncated provider response (connection reset, abrupt EOF).
+type errBodyReadClient struct{}
+
+// bodyReadFailureDump is the raw transport dump embedded in the simulated read
+// error. Tests assert it never leaks onto typed errors, warning messages, or logs.
+const bodyReadFailureDump = "BODY_DUMP_SECRET_7xk"
+
+func (errBodyReadClient) Do(_ *http.Request) (*http.Response, error) {
+	return &http.Response{
+		Status:     "200 OK",
+		StatusCode: http.StatusOK,
+		Header:     make(http.Header),
+		Body:       &failingReadCloser{},
+	}, nil
+}
+
+type failingReadCloser struct{}
+
+func (*failingReadCloser) Read([]byte) (int, error) {
+	return 0, errors.New("read tcp: connection reset by peer; dump=" + bodyReadFailureDump + " url=http://leaked.invalid/endpoint?key=SECRET_KEY")
+}
+
+func (*failingReadCloser) Close() error { return nil }
+
+// TestLLMBodyReadFailure_ClassifiesUnavailable pins the classification of HTTP
+// response body read failures across all three LLM executor paths (shared
+// openai/anthropic pipeline and the legacy openai-compatible executor):
+// truncated/failed bodies are typed provider errors that classify as
+// unavailable (never the unknown fallback), and neither the typed error nor
+// the classified message carries the raw transport dump or any URL.
+func TestLLMBodyReadFailure_ClassifiesUnavailable(t *testing.T) {
+	tests := []struct {
+		name     string
+		provider TranslatorProvider
+		label    string
+	}{
+		{
+			name: "openai (shared pipeline)",
+			provider: NewOpenAIProvider(
+				Config{OpenAI: openAIConfig{BaseURL: "http://provider.invalid/v1", APIKey: "k", Model: "m"}},
+				errBodyReadClient{}),
+			label: "openai",
+		},
+		{
+			name: "anthropic (shared pipeline)",
+			provider: NewAnthropicProvider(
+				Config{Anthropic: anthropicConfig{BaseURL: "http://provider.invalid", APIKey: "k", Model: "m"}},
+				errBodyReadClient{}),
+			label: "anthropic",
+		},
+		{
+			name: "openai-compatible (legacy pipeline)",
+			provider: NewOpenAICompatibleProvider(
+				Config{OpenAICompatible: openAICompatibleConfig{BaseURL: "http://provider.invalid/v1", Model: "m"}},
+				errBodyReadClient{}),
+			label: "openai-compatible",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := tt.provider.Translate(context.Background(), "ja", "en", []string{"タイトル"})
+			require.Error(t, err)
+
+			var te *translationError
+			require.True(t, errors.As(err, &te),
+				"body read failures must be typed translationError, got %T: %v", err, err)
+			assert.Equal(t, TranslationErrorProvider, te.Kind)
+
+			code, message := classifyTranslationWarning(context.Background(), tt.provider.Name(), "", err)
+			assert.Equal(t, TranslationWarningUnavailable, code,
+				"body read failures classify as unavailable, not unknown")
+			assert.Contains(t, message, "provider unavailable or unusable response")
+			assert.Contains(t, message, tt.label)
+
+			for _, surface := range []string{err.Error(), message} {
+				assert.NotContains(t, surface, bodyReadFailureDump, "raw transport dump must not leak")
+				assert.NotContains(t, surface, "http://", "no URLs on typed errors/warnings")
+				assert.NotContains(t, surface, "SECRET_KEY")
+			}
+		})
+	}
+}
+
 // TestTranslateMovie_GoogleFreeUndecodablePayloadIsUnavailable covers the spec
 // scenario: an undecodable google-free payload is typed TranslationErrorParse
 // and classifies as unavailable (never unknown).

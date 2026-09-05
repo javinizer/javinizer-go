@@ -125,6 +125,9 @@ type RescrapeResult struct {
 	ScraperResults []*models.ScraperResult // Raw per-scraper results, retained in-memory for the review source viewer
 	Status         models.RescrapeStatus   // success, failed, gone, conflict
 	Error          string                  // Human-readable error for "failed" status
+	// TranslationWarning is the human-readable description of a partial
+	// translation failure during the rescrape (empty when clean).
+	TranslationWarning string
 	// TranslationWarningCode is the machine-readable classification of a
 	// partial translation failure during the rescrape (empty when clean).
 	TranslationWarningCode string
