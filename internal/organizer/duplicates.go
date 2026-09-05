@@ -32,6 +32,16 @@ type duplicateClaim struct {
 // duplicate verdict stands (codex P1, PR #241). done closes exactly once at
 // the terminal transition; success and settled are only meaningful under mu.
 //
+// A claim may also be a PARKED resident (codex P1, PR #241): a batch input
+// already sitting at its computed destination (WillMove=false) owns its
+// canonical key in a pre-settled parked state — registered at priming with
+// settled=true, success=true, and done already closed. No bytes ever move
+// for it (its own execute is a guaranteed no-op), so the claim is born at
+// its terminal success: moving claimants resolve INSTANTLY (never block),
+// and the parked claim never settles or releases again (settle, release,
+// ReleaseAbandonedBy, and failEntryLocked all skip settled entries), so
+// ForceUpdate can never promote a mover onto the resident's bytes.
+//
 // Promotion order (codex P2, PR #241 F1): the ordered STANDBY queue — every
 // primed claimant beyond the owner, retained in priming (= sorted) order —
 // always wins, WHETHER OR NOT its members have started observing, so an
@@ -52,7 +62,10 @@ type claimEntry struct {
 // DuplicatePriming is one batch file's plan-time destination claim, computed
 // by the apply phase's pre-fan-out planning pass and registered in sorted
 // order so each canonical key's owner is pre-assigned before any apply worker
-// starts (#240 finding A).
+// starts (#240 finding A). WillMove=false marks a STATIONARY resident (codex
+// P1, PR #241): the file already sits at its computed destination, so the
+// priming parks the canonical key — a non-moving owner whose claim is born
+// settled-successfully-parked (see PrimeBatch).
 type DuplicatePriming struct {
 	SourcePath string
 	TargetPath string
@@ -78,7 +91,14 @@ type DuplicatePriming struct {
 // Identical batches therefore reject and move identical files, and under
 // ForceUpdate only the primed winner's bytes can land — the loser demotes to
 // a warning and skips execution instead of racing the winner onto one
-// destination.
+// destination. Stationary batch inputs join the OWNERSHIP discipline too
+// (codex P1, PR #241): every WillMove=false priming parks its canonical key
+// at priming time (pre-settled, done already closed), so a mover computing
+// the resident's destination takes the resident-claimed duplicate verdict —
+// unauthorized: the ordinary conflict pipeline; authorized: the warning +
+// skip — instead of becoming the key's sole claimant and REPLACING the
+// resident's bytes under authorization, whose ordinary destination-occupation
+// conflict ForceUpdate suppresses.
 //
 // Claims are TERMINAL-GATED (codex P2, PR #241): observe on a key owned by
 // another source waits for the owner's terminal outcome rather than
@@ -124,8 +144,19 @@ func NewDuplicateTracker(nonProbing bool) *DuplicateTracker {
 // every later primed claimant of the same key is retained as an ordered
 // standby (codex P2, PR #241 F1): primings arrive in sorted order, so the
 // standby queue IS the sorted fallback order an owner failure promotes from.
-// WillMove=false and empty-target primings register nothing, mirroring
-// observe's guard.
+// Empty-target primings register nothing, mirroring observe's guard.
+//
+// Stationary residents register FIRST (codex P1, PR #241): each WillMove=false
+// priming owns its canonical key as a pre-settled parked claim — settled and
+// success already true, done already closed — because its terminal outcome
+// needs no execution: the resident's bytes ARE the destination bytes and its
+// own organize moves nothing. Parking ahead of EVERY mover (not just the ones
+// sorting later) keeps ownership independent of priming order: a sorted-earlier
+// mover lands as the parked key's inert standby (parked claims never fail, so
+// no promotion fires out of them) instead of owning the key, and its observe
+// resolves instantly to the resident-claimed duplicate verdict. Claims stay
+// batch-scoped — the tracker is constructed per run — so a fresh run's
+// resident parks its key anew and never conflicts with itself across runs.
 func (t *DuplicateTracker) PrimeBatch(primings []DuplicatePriming) {
 	if t == nil {
 		return
@@ -136,6 +167,33 @@ func (t *DuplicateTracker) PrimeBatch(primings []DuplicatePriming) {
 		return
 	}
 	t.primed = true
+	// Pass 1 — stationary residents (codex P1, PR #241): park each canonical
+	// key before any mover can claim it, regardless of sorted position.
+	for _, p := range primings {
+		if p.WillMove || p.TargetPath == "" {
+			continue
+		}
+		key := t.keyLocked(p.TargetPath)
+		if entry, ok := t.claims[key]; ok {
+			// A second resident parked on the same key (two spellings of one
+			// destination on an alias-folding volume) retires to the parked
+			// entry's inert standby list on the identical dedupe rule as mover
+			// claimants; re-primings of the parked owner itself stay no-ops.
+			if filepath.Clean(p.SourcePath) != filepath.Clean(entry.claim.source) && !containsClaimant(entry.standby, p.SourcePath) {
+				entry.standby = append(entry.standby, p.SourcePath)
+			}
+			continue
+		}
+		entry := &claimEntry{
+			claim:   duplicateClaim{source: p.SourcePath, target: p.TargetPath},
+			done:    make(chan struct{}),
+			settled: true,
+			success: true,
+		}
+		close(entry.done) // born terminal: a mover never blocks behind a resident
+		t.claims[key] = entry
+	}
+	// Pass 2 — moving claimants, sorted order as before (#240 finding A).
 	for _, p := range primings {
 		if !p.WillMove || p.TargetPath == "" {
 			continue
@@ -147,6 +205,9 @@ func (t *DuplicateTracker) PrimeBatch(primings []DuplicatePriming) {
 			// an owner failing before the other workers reach observe otherwise
 			// deletes the claim and the survivors re-register by scheduler
 			// timing. Re-primings of the owner itself stay claim-nothing no-ops.
+			// Against a settled parked resident the slot is inert by
+			// construction: parked claims never fail, so the standby never
+			// promotes.
 			if filepath.Clean(p.SourcePath) != filepath.Clean(entry.claim.source) && !containsClaimant(entry.standby, p.SourcePath) {
 				entry.standby = append(entry.standby, p.SourcePath)
 			}
@@ -213,11 +274,19 @@ func (t *DuplicateTracker) keyLocked(target string) string {
 // bytes land. An unclaimed key registers first-come — covering primed owners
 // claiming their own key, plans that diverged from the priming pass, and
 // unprimed single-file trackers. Plans that move nothing (WillMove=false)
-// are never registered: their target is the already-occupied source
-// location, and the destination-occupation conflict checks own that class.
-// Re-observing the same source file is idempotent so retried or re-planned
-// files never self-conflict — including a waiter that wakes to find itself
-// promoted.
+// still register nothing AT OBSERVE: the resident's own claim arrives only
+// from priming (codex P1, PR #241), so its worker always falls through as
+// no-duplicate — a resident never conflicts against its own destination —
+// and unprimed single-file flows keep the destination-occupation conflict
+// checks as that class's sole owner, batch scoping guaranteeing no claim
+// survives a run boundary. What changes for MOVING observers is the other
+// side of the resident contract: a parked claim presents exactly like any
+// settled-successful owner, so a mover computing the resident's destination
+// takes the unchanged duplicate verdict (unauthorized: ordinary duplicate
+// conflict; authorized: demoted warning + skip) instead of being promoted
+// onto occupied bytes by ForceUpdate. Re-observing the same source file is
+// idempotent so retried or re-planned files never self-conflict — including
+// a waiter that wakes to find itself promoted.
 //
 // The wait honors the claimant's context (codex P2, PR #241 F2): a deadline
 // or batch cancel landing mid-wait makes the observer LEAVE the claim
@@ -418,7 +487,11 @@ func (t *DuplicateTracker) failEntryLocked(key string, entry *claimEntry) {
 // warning instead: authorization may demote it, never hide it, so the caller
 // persists the warning and emits the audit event. skip=true on the authorized
 // path is the #240 finding A contract: the duplicate NEVER executes its move,
-// so only the primed winner's bytes can land on a claimed destination.
+// so only the primed winner's bytes can land on a claimed destination. The
+// claimed destination may also be a PARKED resident's (codex P1, PR #241):
+// the identical verdicts then protect bytes already parked — unauthorized,
+// the ordinary conflict pipeline; authorized, the skip leaves the resident's
+// bytes intact (the warning persists exactly as for mover-owned keys).
 func applyDuplicatePreflight(ctx context.Context, plan *OrganizePlan, tracker *DuplicateTracker, overwriteAuthorized bool) (warnings []string, skip bool) {
 	prior, dup := tracker.observe(ctx, plan)
 	if !dup {

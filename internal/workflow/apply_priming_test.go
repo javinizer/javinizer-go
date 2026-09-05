@@ -138,7 +138,7 @@ func TestApplyOrch_PlanDuplicatePriming(t *testing.T) {
 		assert.Equal(t, organizer.DuplicatePriming{
 			SourcePath: "/in/A.mkv", TargetPath: "/in/A.mkv", WillMove: false,
 		}, prim)
-		assert.Equal(t, 0, org.existsCalls, "WillMove=false primings register nothing, so existence is irrelevant")
+		assert.Equal(t, 0, org.existsCalls, "the source-existence gate is mover-only; a resident parks its key unconditionally (codex P1, PR #241)")
 
 		org = &primingStubOrganizer{plan: &organizer.OrganizePlan{
 			SourcePath: "/in/A.mkv", TargetPath: "", WillMove: true,

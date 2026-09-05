@@ -585,15 +585,25 @@ func TestDuplicateTracker_PrimeBatchOncePerRun(t *testing.T) {
 		tracker.PrimeBatch([]DuplicatePriming{{SourcePath: "/in/A.mkv", TargetPath: "/dest/lib/x.mkv", WillMove: true}})
 	})
 
-	t.Run("non-moving and empty-target primings register nothing", func(t *testing.T) {
+	t.Run("empty-target primings register nothing while non-moving primings park", func(t *testing.T) {
 		forceCasePosture(t, true)
 		tracker := NewDuplicateTracker(false)
 		tracker.PrimeBatch([]DuplicatePriming{
 			{SourcePath: "/in/A.mkv", TargetPath: "/in/A.mkv", WillMove: false},
 			{SourcePath: "/in/B.mkv", TargetPath: "", WillMove: true},
 		})
-		_, dup := tracker.observe(context.Background(), dupPlanFor("/in/C.mkv", "/in/A.mkv"))
-		assert.False(t, dup, "WillMove=false primings stay owned by destination-occupation checks")
+		// codex P1 (PR #241): the stationary resident parked its key — a mover
+		// computing the same destination takes the resident-claimed verdict
+		// instead of owning the key outright.
+		prior, dup := tracker.observe(context.Background(), dupPlanFor("/in/C.mkv", "/in/A.mkv"))
+		require.True(t, dup, "a parked resident owns its destination for the run")
+		assert.Equal(t, "/in/A.mkv", prior.source)
+		// The resident itself never conflicts with its own destination.
+		_, dup = tracker.observe(context.Background(), &OrganizePlan{SourcePath: "/in/A.mkv", TargetPath: "/in/A.mkv", WillMove: false})
+		assert.False(t, dup)
+		// The empty-target priming claimed nothing, so B still falls through.
+		_, dup = tracker.observe(context.Background(), dupPlanFor("/in/B.mkv", "/dest/lib/free.mkv"))
+		assert.False(t, dup)
 	})
 
 	t.Run("duplicate primings within one batch keep the sorted-first owner", func(t *testing.T) {
