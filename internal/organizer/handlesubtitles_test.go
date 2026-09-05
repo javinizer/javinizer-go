@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
 	"github.com/spf13/afero"
@@ -36,7 +35,7 @@ func TestHandleSubtitles_NilFileOp_SetsPlannedTrue(t *testing.T) {
 	}
 
 	result := &OrganizeResult{}
-	org.handleSubtitles(plan, result, nil)
+	org.handleSubtitles(plan, result, subtitleInstall{})
 
 	require.Len(t, result.Subtitles, 1)
 	assert.True(t, result.Subtitles[0].Planned, "Planned should be true when fileOp is nil")
@@ -45,7 +44,7 @@ func TestHandleSubtitles_NilFileOp_SetsPlannedTrue(t *testing.T) {
 	assert.Equal(t, filepath.ToSlash("/dest/ABC-123/ABC-123.srt"), filepath.ToSlash(result.Subtitles[0].NewPath))
 }
 
-func TestHandleSubtitles_MoveFileOp_SetsMovedTrue(t *testing.T) {
+func TestHandleSubtitles_MoveInstall_SetsMovedTrue(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	cfg := &Config{
 		MoveSubtitles:      true,
@@ -68,14 +67,15 @@ func TestHandleSubtitles_MoveFileOp_SetsMovedTrue(t *testing.T) {
 	}
 
 	result := &OrganizeResult{}
-	org.handleSubtitles(plan, result, fsutil.MoveFileFs)
+	org.handleSubtitles(plan, result, subtitleMoveInstall)
 
 	require.Len(t, result.Subtitles, 1)
-	assert.True(t, result.Subtitles[0].Moved, "Moved should be true after MoveFileFs succeeds")
+	assert.True(t, result.Subtitles[0].Moved, "Moved should be true after a move install")
+	assert.False(t, result.Subtitles[0].Copied, "Copied should be false for a move install")
 	assert.False(t, result.Subtitles[0].Planned, "Planned should be false when fileOp is provided")
 }
 
-func TestHandleSubtitles_CopyFileOp_SetsMovedTrue(t *testing.T) {
+func TestHandleSubtitles_CopyInstall_SetsCopiedTrue(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	cfg := &Config{
 		MoveSubtitles:      true,
@@ -98,10 +98,11 @@ func TestHandleSubtitles_CopyFileOp_SetsMovedTrue(t *testing.T) {
 	}
 
 	result := &OrganizeResult{}
-	org.handleSubtitles(plan, result, fsutil.CopyFileFs)
+	org.handleSubtitles(plan, result, subtitleCopyInstall)
 
 	require.Len(t, result.Subtitles, 1)
-	assert.True(t, result.Subtitles[0].Moved, "Moved should be true after CopyFileFs succeeds")
+	assert.True(t, result.Subtitles[0].Copied, "Copied should be true after a copy install")
+	assert.False(t, result.Subtitles[0].Moved, "Moved should be false for a copy install (#224 E mode distinction)")
 
 	exists, _ := afero.Exists(fs, "/source/ABC-123.srt")
 	assert.True(t, exists, "Source subtitle should still exist after copy")
@@ -131,7 +132,7 @@ func TestHandleSubtitles_SkipsWhenTargetExists(t *testing.T) {
 	}
 
 	result := &OrganizeResult{}
-	org.handleSubtitles(plan, result, fsutil.MoveFileFs)
+	org.handleSubtitles(plan, result, subtitleMoveInstall)
 
 	require.Len(t, result.Subtitles, 1)
 	assert.True(t, result.Subtitles[0].Skipped, "Skipped should be true when target already exists")
@@ -159,7 +160,7 @@ func TestHandleSubtitles_NoSubtitles_NoResults(t *testing.T) {
 	}
 
 	result := &OrganizeResult{}
-	org.handleSubtitles(plan, result, nil)
+	org.handleSubtitles(plan, result, subtitleInstall{})
 
 	assert.Len(t, result.Subtitles, 0, "No subtitles found should produce no results")
 }
@@ -190,7 +191,7 @@ func TestHandleSubtitles_FileOpError_SetsError(t *testing.T) {
 	}
 
 	result := &OrganizeResult{}
-	org.handleSubtitles(plan, result, failingOp)
+	org.handleSubtitles(plan, result, subtitleInstall{op: failingOp})
 
 	require.Len(t, result.Subtitles, 1)
 	assert.Error(t, result.Subtitles[0].Error, "Error should be set when fileOp fails")
@@ -289,5 +290,6 @@ func TestOrganize_UsesHandleSubtitlesForCopyPath(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, result.Moved)
 	require.Len(t, result.Subtitles, 1, "Copy path via Organize should copy subtitles via handleSubtitles")
-	assert.True(t, result.Subtitles[0].Moved, "Subtitle should be copied (Moved=true)")
+	assert.True(t, result.Subtitles[0].Copied, "Subtitle via copy entry point records Copied (#224 E mode distinction)")
+	assert.False(t, result.Subtitles[0].Moved, "Copied subtitles are not moves")
 }

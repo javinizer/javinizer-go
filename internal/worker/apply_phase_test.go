@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/organizer"
 	"github.com/javinizer/javinizer-go/internal/scrape"
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/javinizer/javinizer-go/internal/workflow"
@@ -777,4 +778,48 @@ func TestCountRemainingApplyFailures_TracksLiveWritebackAndOutcomes(t *testing.T
 	// Only the live Completed row is cleared. A workflow success whose write-back
 	// was skipped must remain retryable, while nil-movie scrape failures stay out.
 	assert.Equal(t, int64(3), countRemainingApplyFailures(inputs, outcomes))
+}
+
+// TestApplyPhase_Run_SharesOneDuplicateTrackerAcrossFiles pins the #224 phase
+// E wiring: the apply phase allocates ONE intra-batch duplicate preflight
+// registry per run and threads it through every file's ApplyCmd.
+func TestApplyPhase_Run_SharesOneDuplicateTrackerAcrossFiles(t *testing.T) {
+	wf := &captureApplyWorkflow{}
+	wf.applyResult = &workflow.ApplyResult{Movie: &models.Movie{ID: "IPX-777"}}
+	inputs := makeApplyInputs(wf)
+	inputs.Concurrency = concurrencyConfig{MaxWorkers: 4, WorkerTimeout: 0}
+	for _, p := range []string{"/source/IPX-777-a.mp4", "/source/IPX-777-b.mp4"} {
+		inputs.Results[p] = &resultstore.MovieResult{
+			FileMatchInfo: models.FileMatchInfo{Path: p, MovieID: "IPX-777"},
+			Status:        models.JobStatusCompleted,
+			Movie:         &models.Movie{ID: "IPX-777", Title: "Test Movie"},
+		}
+	}
+
+	NewApplyPhase().Run(context.Background(), inputs, ApplyPhaseConfig{
+		OrganizeOptions: workflow.OrganizeOptions{MoveFiles: true},
+		MergeOptions:    workflow.MergeOptions{ForceOverwrite: true},
+		Destination:     "/output",
+	})
+
+	cmds := wf.commands()
+	require.Len(t, cmds, 2)
+	require.NotNil(t, cmds[0].Organize.DuplicateTracker)
+	assert.Same(t, cmds[0].Organize.DuplicateTracker, cmds[1].Organize.DuplicateTracker,
+		"one tracker per apply run, shared by every file")
+}
+
+func TestOrganizeMetadataIncludesWarnings(t *testing.T) {
+	result := &workflow.ApplyResult{
+		OrganizeResult: &organizer.OrganizeResult{
+			NewPath:  "/dest/lib/ABC-123.mkv",
+			Warnings: []string{"duplicate destination within batch: /dest/lib/ABC-123.mkv already claimed by /in/A.mkv (overwrite authorized)"},
+		},
+	}
+	meta := organizeMetadata("organize", result)
+	assert.Contains(t, meta, "warnings")
+	assert.Contains(t, meta, "duplicate destination within batch")
+
+	plain := organizeMetadata("organize", &workflow.ApplyResult{OrganizeResult: &organizer.OrganizeResult{NewPath: "/dest/lib/ABC-123.mkv"}})
+	assert.NotContains(t, plain, "warnings", "no warnings key without warning payload")
 }

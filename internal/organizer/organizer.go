@@ -249,6 +249,10 @@ type OrganizeCmd struct {
 	// config still carries the global default. Empty = use config mode.
 	OperationMode   operationmode.OperationMode
 	ForceRenameFile bool
+	// DuplicateTracker shares intra-batch duplicate-destination preflight
+	// across the plans of one batch run (#224 phase E). Nil disables
+	// detection (single-file callers have no batch to collide with).
+	DuplicateTracker *DuplicateTracker
 }
 
 // OrganizerInterface is the single-method seam for file organization.
@@ -287,20 +291,27 @@ func NewOrganizer(fs afero.Fs, cfg *Config, engine template.EngineInterface, m m
 
 // OrganizeResult represents the result of organizing a file
 type OrganizeResult struct {
-	OriginalPath           string
-	NewPath                string
-	FolderPath             string
-	FileName               string
-	Moved                  bool
-	Error                  error
-	Subtitles              []subtitleResult
+	OriginalPath string
+	NewPath      string
+	FolderPath   string
+	FileName     string
+	Moved        bool
+	Error        error
+	// Warnings carries non-fatal per-file advisories an authorized run must
+	// not silently drop (#224 phase E): authorized intra-batch duplicates land
+	// here so the worker history rows and the API eventlog can persist them.
+	Warnings               []string
+	Subtitles              []SubtitleResult
 	InPlaceRenamed         bool   // Whether an in-place directory rename occurred
 	OldDirectoryPath       string // Original directory path (for updating subsequent file paths)
 	NewDirectoryPath       string // New directory path after in-place rename
 	ShouldGenerateMetadata bool   // Whether NFO/media should be generated for this result
 }
 
-type subtitleResult struct {
+// SubtitleResult records the outcome for one matched subtitle file: planned
+// (dry run), skipped (skip-on-exists), error, or installed — with the mode
+// distinction carried on the embedded SubtitleMove (Moved vs Copied, #224 E).
+type SubtitleResult struct {
 	models.SubtitleMove
 	Skipped bool
 	Planned bool
@@ -422,7 +433,7 @@ func (o *Organizer) execute(plan *OrganizePlan) (*OrganizeResult, error) {
 
 	if !plan.WillMove {
 		result.ShouldGenerateMetadata = true
-		o.handleSubtitles(plan, result, nil)
+		o.handleSubtitles(plan, result, subtitleInstall{})
 		return result, nil
 	}
 
@@ -437,7 +448,7 @@ func (o *Organizer) execute(plan *OrganizePlan) (*OrganizeResult, error) {
 	}
 
 	if o.config.MoveSubtitles {
-		o.handleSubtitles(plan, strategyResult, fsutil.MoveFileNoReplace)
+		o.handleSubtitles(plan, strategyResult, subtitleMoveInstall)
 	}
 
 	return strategyResult, nil
@@ -464,13 +475,28 @@ func (o *Organizer) subtitleFileInfo(plan *OrganizePlan) models.FileMatchInfo {
 	return fileInfoForSubtitles
 }
 
-func (o *Organizer) handleSubtitles(plan *OrganizePlan, result *OrganizeResult, fileOp func(afero.Fs, string, string) error) {
+// subtitleInstall selects how handleSubtitles delivers subtitle files. A nil
+// op plans only (no filesystem changes); a non-nil op installs through one of
+// the fsutil no-replace composites, and copied records the mode distinction in
+// results (#224 phase E): a copy install retains the source (revert deletes
+// the installed copy), a move install does not (revert moves it back).
+type subtitleInstall struct {
+	op     func(afero.Fs, string, string) error
+	copied bool
+}
+
+var (
+	subtitleMoveInstall = subtitleInstall{op: fsutil.MoveFileNoReplace}
+	subtitleCopyInstall = subtitleInstall{op: fsutil.CopyFileNoReplace, copied: true}
+)
+
+func (o *Organizer) handleSubtitles(plan *OrganizePlan, result *OrganizeResult, install subtitleInstall) {
 	subtitles := o.subtitleHandler.FindSubtitles(o.subtitleFileInfo(plan))
 	if len(subtitles) == 0 {
 		return
 	}
 
-	subtitleResults := make([]subtitleResult, len(subtitles))
+	subtitleResults := make([]SubtitleResult, len(subtitles))
 	for i, subtitle := range subtitles {
 		videoNameWithoutExt := strings.TrimSuffix(plan.TargetFile, filepath.Ext(plan.TargetFile))
 		newSubtitleName := o.subtitleHandler.generateSubtitleFileName(
@@ -480,8 +506,8 @@ func (o *Organizer) handleSubtitles(plan *OrganizePlan, result *OrganizeResult, 
 		)
 		newPath := filepath.Join(plan.TargetDir, newSubtitleName)
 
-		if fileOp == nil {
-			subtitleResults[i] = subtitleResult{
+		if install.op == nil {
+			subtitleResults[i] = SubtitleResult{
 				SubtitleMove: models.SubtitleMove{
 					OriginalPath: subtitle.OriginalPath,
 					NewPath:      newPath,
@@ -491,7 +517,7 @@ func (o *Organizer) handleSubtitles(plan *OrganizePlan, result *OrganizeResult, 
 			continue
 		}
 
-		sr := subtitleResult{
+		sr := SubtitleResult{
 			SubtitleMove: models.SubtitleMove{
 				OriginalPath: subtitle.OriginalPath,
 				NewPath:      newPath,
@@ -512,7 +538,7 @@ func (o *Organizer) handleSubtitles(plan *OrganizePlan, result *OrganizeResult, 
 					sr.Skipped = true
 					return nil
 				}
-				err := fileOp(o.fs, subtitle.OriginalPath, newPath)
+				err := install.op(o.fs, subtitle.OriginalPath, newPath)
 				if err != nil && fsutil.PublishCompleted(err) {
 					// Post-publish cleanup refusal (#224 codex P2): bytes at the
 					// destination AND the source retained — an ambiguous delivery,
@@ -539,7 +565,11 @@ func (o *Organizer) handleSubtitles(plan *OrganizePlan, result *OrganizeResult, 
 		if err != nil {
 			sr.Error = fmt.Errorf("failed to handle subtitle: %w", err)
 		} else if !sr.Skipped {
-			sr.Moved = true
+			if install.copied {
+				sr.Copied = true
+			} else {
+				sr.Moved = true
+			}
 		}
 
 		subtitleResults[i] = sr
@@ -571,6 +601,12 @@ func (o *Organizer) Organize(ctx context.Context, cmd OrganizeCmd) (*OrganizeRes
 		return nil, err
 	}
 
+	// Intra-batch duplicate preflight (#224 phase E): plan-only grouping by
+	// proven-equal canonical destination keys. Unauthorized duplicates join
+	// plan.Conflicts and short-circuit through the identical failure pipeline;
+	// authorized duplicates return as persisted per-file warnings.
+	dupWarnings := applyDuplicatePreflight(plan, cmd.DuplicateTracker, cmd.ForceUpdate)
+
 	if !cmd.ForceUpdate {
 		if issues := o.validatePlan(plan); len(issues) > 0 {
 			return nil, fmt.Errorf("organization validation failed: %v", issues)
@@ -598,6 +634,7 @@ func (o *Organizer) Organize(ctx context.Context, cmd OrganizeCmd) (*OrganizeRes
 			FolderPath:             plan.TargetDir,
 			FileName:               plan.TargetFile,
 			Moved:                  false,
+			Warnings:               dupWarnings,
 			ShouldGenerateMetadata: true,
 		}, nil
 	}
@@ -611,12 +648,15 @@ func (o *Organizer) Organize(ctx context.Context, cmd OrganizeCmd) (*OrganizeRes
 	if err != nil {
 		return strategyResult, err
 	}
+	strategyResult.Warnings = append(strategyResult.Warnings, dupWarnings...)
 
 	// Subtitle handling is centralized here — applies to both move and copy/link paths.
+	// Authorization never reaches subtitle destinations: both entry points
+	// install strictly skip-on-exists through the no-replace composites.
 	if cmd.MoveFiles && o.config.MoveSubtitles {
-		o.handleSubtitles(plan, strategyResult, fsutil.MoveFileNoReplace)
+		o.handleSubtitles(plan, strategyResult, subtitleMoveInstall)
 	} else if !cmd.MoveFiles && o.config.MoveSubtitles {
-		o.handleSubtitles(plan, strategyResult, fsutil.CopyFileNoReplace)
+		o.handleSubtitles(plan, strategyResult, subtitleCopyInstall)
 	}
 
 	return strategyResult, nil

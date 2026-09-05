@@ -124,6 +124,14 @@ func resolveOrganizeApplyConfig(
 				newPath = afr.Result.OrganizeResult.NewPath
 			}
 			_ = emitter.EmitOrganizeEvent(ctx, "file_move", fmt.Sprintf("Organized %s", afc.Movie.ID), models.SeverityInfo, map[string]any{"job_id": job.GetID(), "movie_id": afc.Movie.ID, "file": afc.FilePath, "new_path": newPath, "apply_generation": loadApplyGeneration(applyGenerationRef)})
+			// #224 phase E: authorized intra-batch duplicates are demoted from
+			// conflicts to per-file warnings; each warning gets its own audit
+			// event via the existing eventlog.
+			if afr.Result != nil && afr.Result.OrganizeResult != nil {
+				for _, warning := range afr.Result.OrganizeResult.Warnings {
+					_ = emitter.EmitOrganizeEvent(ctx, "file_move", fmt.Sprintf("Organize warning for %s: %s", afc.Movie.ID, warning), models.SeverityWarn, map[string]any{"job_id": job.GetID(), "movie_id": afc.Movie.ID, "file": afc.FilePath, "new_path": newPath, "warning": warning, "apply_generation": loadApplyGeneration(applyGenerationRef)})
+				}
+			}
 		}
 	}
 
