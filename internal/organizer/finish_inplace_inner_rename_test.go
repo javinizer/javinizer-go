@@ -146,4 +146,54 @@ func TestFinishInPlaceInnerRename_RollbackRefused_RenameSurvives(t *testing.T) {
 	assert.Equal(t, "old.mkv", result.FileName)
 }
 
+// TestFinishInPlaceInnerRename_RollbackRefused_EmptyMatchName_UsesSourceBase
+// pins the one remaining branch of the rollback-refused arm NOT covered by the
+// non-empty-name pin above: when plan.Match.Name is EMPTY the surviving file
+// is re-named from filepath.Base(plan.SourcePath). Before this pin,
+// strategy_inplace.go's `oldFileName == ""` fallback block was only reachable
+// from raced end-to-end organize flows (which file eats the one-shot refusal,
+// whether the matcher populated Match.Name), so full-suite patch coverage
+// flickered PASSED/FAILED on identical code (codecov: 1 miss + 1 partial at
+// lines 430-432). Direct invocation drives the exact production function, so
+// the fallback block reads count >= 1 on every run of every shape.
+func TestFinishInPlaceInnerRename_RollbackRefused_EmptyMatchName_UsesSourceBase(t *testing.T) {
+	base := afero.NewMemMapFs()
+	require.NoError(t, base.MkdirAll(filepath.FromSlash("/new"), 0o755))
+	require.NoError(t, afero.WriteFile(base, filepath.FromSlash("/new/original.mkv"), []byte("v"), 0o644))
+	poison := &rollbackRefusedFs{Fs: base, old: "/new", new: "/old"}
+
+	strategy := &inPlaceStrategy{fs: poison}
+	src := filepath.FromSlash("/old/original.mkv")
+	plan := &OrganizePlan{
+		SourcePath: src,
+		TargetDir:  filepath.FromSlash("/new"),
+		OldDir:     filepath.FromSlash("/old"),
+		TargetPath: filepath.FromSlash("/new/x.mp4"),
+		TargetFile: "x.mp4",
+		// Match left zero-valued: Name == "" exercises the SourcePath fallback.
+	}
+	result := &OrganizeResult{
+		NewPath:          filepath.FromSlash("/new/x.mp4"),
+		FileName:         "x.mp4",
+		InPlaceRenamed:   true,
+		OldDirectoryPath: filepath.FromSlash("/old"),
+		NewDirectoryPath: filepath.FromSlash("/new"),
+	}
+
+	collision := fmt.Errorf("%w", fsutil.ErrPublishCollision)
+	err := strategy.finishInPlaceInnerRename(plan, result, collision)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "survived")
+	assert.True(t, poison.fired.Load(), "the rollback rename was attempted and refused")
+
+	// The empty-Name fallback names the survivor by its SOURCE basename inside
+	// the renamed directory — exactly where the bytes sit on disk.
+	assert.Equal(t, "/new/original.mkv", filepath.ToSlash(result.NewPath))
+	assert.Equal(t, "original.mkv", result.FileName)
+	assert.True(t, result.InPlaceRenamed, "the surviving rename marker stands")
+
+	exists, _ := afero.Exists(base, filepath.FromSlash("/new/original.mkv"))
+	assert.True(t, exists)
+}
+
 var _ = errors.New
