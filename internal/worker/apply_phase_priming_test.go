@@ -419,7 +419,11 @@ func TestApplyPhase_Run_SingleDeadlineAcrossPrepareAndApply(t *testing.T) {
 			"ONE absolute deadline spans hook + apply — no fresh double-grant for %s", p)
 		assert.WithinDuration(t, runStart.Add(perFile), hookDeadline, time.Second,
 			"the single deadline is measured once, from the file's preparation")
-		assert.Less(t, time.Until(applyDeadline), perFile,
-			"by apply time the hook has already spent part of the shared budget")
+		// Pin the shared deadline identity (assert.Equal above), not a
+		// budget delta: on coarse clocks (~15.6ms Windows ticks) prepare and
+		// apply can derive from the same rounded instant, so the remaining
+		// budget may equal the full grant — it must just never EXCEED it.
+		assert.LessOrEqual(t, time.Until(applyDeadline), perFile,
+			"the shared budget never exceeds one per-file grant for %s", p)
 	}
 }
