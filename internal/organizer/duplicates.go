@@ -170,12 +170,19 @@ func containsClaimant(queue []string, source string) bool {
 }
 
 // removeClaimant drops src from a claim queue (waiters or standby), keeping
-// the relative order of every remaining claimant. Comparisons clean both
-// spellings; callers pass an already-cleaned src.
+// the relative order of every remaining claimant. Identity clean-compares
+// BOTH spellings: queues retain the priming/observation spelling verbatim
+// and standby promotion hands its raw priming spelling straight through, so
+// a one-sided clean silently misses wherever Clean is not identity
+// (Windows turns "/in/B.mkv" into `\in\B.mkv`) — the promoted claimant
+// lingers as its own waiter, its later failure re-promotes the terminated
+// corpse as owner, and every later observer parks on the never-closing
+// done. Cleaning src here keeps eviction correct for every caller.
 func removeClaimant(queue []string, src string) []string {
+	cleaned := filepath.Clean(src)
 	kept := queue[:0]
 	for _, s := range queue {
-		if filepath.Clean(s) != src {
+		if filepath.Clean(s) != cleaned {
 			kept = append(kept, s)
 		}
 	}

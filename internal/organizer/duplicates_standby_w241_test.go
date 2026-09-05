@@ -108,6 +108,54 @@ func TestDuplicateTracker_StandbyPromotion(t *testing.T) {
 		assert.Equal(t, "/in/B.mkv", prior.source, "the settled chain keeps the deterministic verdict")
 	})
 
+	t.Run("standby promotion evicts the promoted claimant's waiter slot across spellings", func(t *testing.T) {
+		forceCasePosture(t, true)
+		tracker := NewDuplicateTracker(false)
+		// The standby claimant is primed with a NON-CANONICAL spelling. Every
+		// other tracker identity decision clean-compares both spellings; on
+		// Windows Clean("/in/B.mkv") is `\in\B.mkv`, so a one-sided clean in
+		// the promotion path misses there — interior redundant separators
+		// surface the identical divergence on every platform.
+		tracker.PrimeBatch([]DuplicatePriming{
+			{SourcePath: "/in/A.mkv", TargetPath: key, WillMove: true},
+			{SourcePath: "/in//B.mkv", TargetPath: key, WillMove: true},
+		})
+		_, dup := tracker.observe(bg, dupPlanFor("/in/A.mkv", key))
+		require.False(t, dup)
+
+		// B observes (canonical spelling) while A still owns mid-flight: it
+		// parks as a waiter while still holding its standby slot.
+		bDone := make(chan bool, 1)
+		go func() {
+			_, dup := tracker.observe(bg, dupPlanFor("/in/B.mkv", key))
+			bDone <- dup
+		}()
+		waitForWaiter(t, tracker, key, "/in/B.mkv")
+
+		tracker.release(dupPlanFor("/in/A.mkv", key))
+		require.False(t, <-bDone, "the promoted standby's observation falls through as owner")
+		owner, standby, waiters, present := claimQueueState(t, tracker, key)
+		require.True(t, present)
+		assert.Equal(t, "/in//B.mkv", owner, "promotion keeps the primed claim spelling")
+		assert.Empty(t, standby)
+		assert.Empty(t, waiters,
+			"the promoted claimant vacates its own waiter slot — a stale slot re-promotes the corpse")
+
+		// The promoted owner's terminal failure frees the key outright: with
+		// its waiter slot evicted at promotion nobody is left to (re-)promote,
+		// so no never-closing done can park every later observer.
+		tracker.release(dupPlanFor("/in/B.mkv", key))
+		_, _, _, present = claimQueueState(t, tracker, key)
+		assert.False(t, present,
+			"no corpse re-promotion: the failed owner's key frees outright")
+
+		ctxC, cancelC := context.WithCancel(bg)
+		defer cancelC()
+		_, dup = tracker.observe(ctxC, dupPlanFor("/in/C.mkv", key))
+		assert.False(t, dup, "a later claimant registers first-come on the freed key")
+		settleClaim(tracker, "/in/C.mkv", key)
+	})
+
 	t.Run("ad-hoc waiter never outraces the unstarted primed standby", func(t *testing.T) {
 		forceCasePosture(t, true)
 		tracker := NewDuplicateTracker(false)
