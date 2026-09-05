@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -203,4 +204,103 @@ func TestApplyPhase_Run_DuplicatePreflightProbePolicy(t *testing.T) {
 		assert.Equal(t, 1, cc, "live runs keep one case probe per root per process")
 		assert.Equal(t, 1, nc, "live runs keep one normalization probe per root per process")
 	})
+}
+
+// TestApplyPhase_Run_PrimingHookRespectsPerFileTimeout pins codex r2 P2: the
+// priming-time PreApply invocation runs under the SAME per-file execution
+// boundary as the worker path — a hook blocking on ctx deadline burns only
+// its own WorkerTimeout budget; the rest of the batch prepares and applies
+// normally instead of stalling behind the raw batch context.
+func TestApplyPhase_Run_PrimingHookRespectsPerFileTimeout(t *testing.T) {
+	const blocked, good = "/source/a-blocked.mp4", "/source/b-good.mp4"
+	const perFile = 150 * time.Millisecond
+
+	wf := &stubApplyWorkflow{applyResult: &workflow.ApplyResult{Movie: &models.Movie{ID: "M-100"}}}
+	inputs := makeApplyInputs(wf)
+	inputs.Concurrency = concurrencyConfig{MaxWorkers: 2, WorkerTimeout: perFile}
+	for _, p := range []string{blocked, good} {
+		inputs.Results[p] = &resultstore.MovieResult{
+			FileMatchInfo: models.FileMatchInfo{Path: p, MovieID: "M-100"},
+			Status:        models.JobStatusCompleted,
+			Movie:         &models.Movie{ID: "M-100"},
+		}
+	}
+
+	start := time.Now()
+	var hookDeadline time.Time
+	var hookHasDeadline bool
+	var organized, failed int
+	NewApplyPhase().Run(context.Background(), inputs, ApplyPhaseConfig{
+		OrganizeOptions: workflow.OrganizeOptions{MoveFiles: true},
+		Destination:     "/output",
+		PreApplyFunc: func(ctx context.Context, afc *ApplyFileContext) error {
+			if afc.FilePath != blocked {
+				return nil
+			}
+			hookDeadline, hookHasDeadline = ctx.Deadline()
+			<-ctx.Done() // blocks ONLY until the per-file budget expires
+			return ctx.Err()
+		},
+		OnPhaseComplete: func(o, f int) { organized, failed = o, f },
+	})
+	elapsed := time.Since(start)
+
+	require.True(t, hookHasDeadline, "the priming hook receives a per-file WorkerTimeout context, not the raw batch context")
+	assert.WithinDuration(t, start.Add(perFile), hookDeadline, 100*time.Millisecond,
+		"the hook context deadline is the per-file budget, measured from file preparation")
+	assert.Less(t, elapsed, 5*time.Second,
+		"the whole batch is bounded by the blocked hook's per-file budget — the batch context never leaks in")
+	require.Equal(t, 1, wf.getApplyCalled(), "other files apply unaffected")
+	assert.Equal(t, good, wf.getLastCmd().Match.Path)
+	assert.Equal(t, 1, organized)
+	assert.Equal(t, 0, failed, "a hook declining execution (here: past its budget) skips the file, mirroring the hook-error contract")
+	assert.True(t, inputs.Lifecycle.(*stubLifecycle).organized)
+}
+
+// TestApplyPhase_Run_PrimingHookPanicRecordsPerFileFailure pins codex r2 P2:
+// a panicking priming-time PreApply hook is recovered under withFileRecovery
+// semantics — the failure is written back and broadcast, the batch
+// continues, and the file counts as exactly one failed outcome instead of
+// aborting every remaining file.
+func TestApplyPhase_Run_PrimingHookPanicRecordsPerFileFailure(t *testing.T) {
+	const panics, good = "/source/a-panics.mp4", "/source/b-good.mp4"
+
+	wf := &stubApplyWorkflow{applyResult: &workflow.ApplyResult{Movie: &models.Movie{ID: "M-100"}}}
+	inputs := makeApplyInputs(wf)
+	inputs.Concurrency = concurrencyConfig{MaxWorkers: 2, WorkerTimeout: 0}
+	for _, p := range []string{panics, good} {
+		inputs.Results[p] = &resultstore.MovieResult{
+			FileMatchInfo: models.FileMatchInfo{Path: p, MovieID: "M-100"},
+			Status:        models.JobStatusCompleted,
+			Movie:         &models.Movie{ID: "M-100"},
+		}
+	}
+
+	hookCalls := 0
+	var organized, failed int
+	NewApplyPhase().Run(context.Background(), inputs, ApplyPhaseConfig{
+		OrganizeOptions: workflow.OrganizeOptions{MoveFiles: true},
+		Destination:     "/output",
+		PreApplyFunc: func(_ context.Context, afc *ApplyFileContext) error {
+			hookCalls++
+			if afc.FilePath == panics {
+				panic("priming hook boom")
+			}
+			return nil
+		},
+		OnPhaseComplete: func(o, f int) { organized, failed = o, f },
+	})
+
+	assert.Equal(t, 2, hookCalls, "every hook still runs exactly once per file — the panic skips only its own file")
+	require.Equal(t, 1, wf.getApplyCalled(), "the batch continues and the healthy file applies")
+	assert.Equal(t, good, wf.getLastCmd().Match.Path)
+	assert.Equal(t, 1, organized, "the healthy file's success is unaffected by the panicked sibling")
+	assert.Equal(t, 1, failed, "the panicking hook records exactly one per-file failure")
+
+	row := inputs.Updater.(*stubUpdater).getResult(panics)
+	require.NotNil(t, row, "recovery writes the failure back, mirroring the worker panic path")
+	assert.Equal(t, models.JobStatusFailed, row.Status)
+	assert.Contains(t, row.Error, "priming hook boom")
+	assert.False(t, inputs.Lifecycle.(*stubLifecycle).organized, "a recorded failure keeps the job out of Organized")
+	assert.True(t, inputs.Lifecycle.(*stubLifecycle).completed)
 }

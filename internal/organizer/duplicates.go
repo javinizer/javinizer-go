@@ -71,7 +71,8 @@ func NewDuplicateTracker(nonProbing bool) *DuplicateTracker {
 // PrimeBatch pre-assigns each canonical key's winner from the run's sorted
 // plan-time claims (#240 finding A). It MUST be called exactly once per run,
 // before any worker observes — a run plans once, so later calls are ignored.
-// The first registered claim per key owns it for the whole run;
+// The first registered claim per key owns it for the whole run UNLESS the
+// owner's plan later proves inexecutable and releases it (codex r2 P2);
 // WillMove=false and empty-target primings register nothing, mirroring
 // observe's guard.
 func (t *DuplicateTracker) PrimeBatch(primings []DuplicatePriming) {
@@ -135,6 +136,26 @@ func (t *DuplicateTracker) observe(plan *OrganizePlan) (duplicateClaim, bool) {
 		return duplicateClaim{}, false
 	}
 	return prior, true
+}
+
+// release drops an OWNED claim whose plan proved inexecutable mid-apply
+// (codex r2 P2): claims live for the whole run — the tracker never times
+// them out — so a primed winner whose source vanished between priming and
+// apply, or whose validation/execution failed for any reason, must
+// explicitly release the canonical key before observe can fall through to a
+// later valid claimant. Only the recorded owner releases its key (losers
+// and foreign sources release nothing), and plans that register nothing
+// (WillMove=false, empty target — observe's guard) release nothing.
+func (t *DuplicateTracker) release(plan *OrganizePlan) {
+	if t == nil || plan == nil || !plan.WillMove || plan.TargetPath == "" {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	key := t.keyLocked(plan.TargetPath)
+	if prior, ok := t.claims[key]; ok && filepath.Clean(prior.source) == filepath.Clean(plan.SourcePath) {
+		delete(t.claims, key)
+	}
 }
 
 // applyDuplicatePreflight registers the freshly computed plan against the

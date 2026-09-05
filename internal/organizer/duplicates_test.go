@@ -2,7 +2,9 @@ package organizer
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -44,6 +46,15 @@ func resetProbeCaches(t *testing.T) {
 func dupPlanFor(src, target string) *OrganizePlan {
 	return &OrganizePlan{SourcePath: src, TargetPath: target, WillMove: true}
 }
+
+// statFaultFs fails every Stat with a non-IsNotExist error, exercising the
+// indeterminate-error branch of PlanSourceExists.
+type statFaultFs struct {
+	afero.Fs
+	err error
+}
+
+func (f *statFaultFs) Stat(string) (os.FileInfo, error) { return nil, f.err }
 
 func TestDuplicateTracker_Grouping(t *testing.T) {
 	t.Run("identical target distinct sources", func(t *testing.T) {
@@ -738,5 +749,183 @@ func TestOrganizer_PlanOrganize(t *testing.T) {
 		})
 		require.NoError(t, err)
 		assert.Equal(t, "/source/old.mkv", filepath.ToSlash(plan.TargetPath), "without the override the planner keeps the source name")
+	})
+}
+
+// TestDuplicateTracker_Release pins the codex r2 P2 guard semantics: an
+// OWNED claim frees its key when the owning plan proves inexecutable, while
+// losers, foreign sources, and register-nothing plans release nothing.
+func TestDuplicateTracker_Release(t *testing.T) {
+	t.Run("nil tracker, nil plan, and register-nothing plans release nothing", func(t *testing.T) {
+		forceCasePosture(t, true)
+		var nilTracker *DuplicateTracker
+		nilTracker.release(dupPlanFor("/in/A.mkv", "/dest/lib/x.mkv"))
+		nilTracker.release(nil)
+
+		tracker := NewDuplicateTracker(false)
+		tracker.observe(dupPlanFor("/in/A.mkv", "/dest/lib/x.mkv"))
+		tracker.observe(dupPlanFor("/in/C.mkv", "/dest/lib/y.mkv"))
+		tracker.release(nil)
+		tracker.release(&OrganizePlan{SourcePath: "/in/A.mkv", TargetPath: "/in/A.mkv", WillMove: false})
+		tracker.release(&OrganizePlan{SourcePath: "/in/C.mkv", TargetPath: "", WillMove: true})
+		_, dup := tracker.observe(dupPlanFor("/in/B.mkv", "/dest/lib/x.mkv"))
+		assert.True(t, dup, "untouched key still owned by A")
+		_, dup = tracker.observe(dupPlanFor("/in/D.mkv", "/dest/lib/y.mkv"))
+		assert.True(t, dup, "untouched key still owned by C")
+	})
+
+	t.Run("only the recorded owner frees the key", func(t *testing.T) {
+		forceCasePosture(t, true)
+		tracker := NewDuplicateTracker(false)
+		tracker.PrimeBatch([]DuplicatePriming{
+			{SourcePath: "/in/A.mkv", TargetPath: "/dest/lib/x.mkv", WillMove: true},
+			{SourcePath: "/in/B.mkv", TargetPath: "/dest/lib/x.mkv", WillMove: true},
+		})
+		tracker.release(dupPlanFor("/in/B.mkv", "/dest/lib/x.mkv"))
+		_, dup := tracker.observe(dupPlanFor("/in/D.mkv", "/dest/lib/x.mkv"))
+		assert.True(t, dup, "a loser's release must not free the owner's key")
+		tracker.release(dupPlanFor("/in/A.mkv", "/dest/lib/x.mkv#unclaimed"))
+		_, dup = tracker.observe(dupPlanFor("/in/E.mkv", "/dest/lib/z.mkv"))
+		assert.False(t, dup)
+
+		tracker.release(dupPlanFor("/in/A.mkv", "/dest/lib/x.mkv"))
+		_, dup = tracker.observe(dupPlanFor("/in/B.mkv", "/dest/lib/x.mkv"))
+		assert.False(t, dup, "owner release lets the next claimant register the freed key")
+		_, dup = tracker.observe(dupPlanFor("/in/A.mkv", "/dest/lib/x.mkv"))
+		assert.True(t, dup, "the freed key re-registers to its new claimant")
+	})
+}
+
+// TestOrganize_PrimedStaleWinnerReleasesClaim is the codex r2 P2
+// stale-source winner scenario end to end: the sorted-first claimant's
+// source disappears BETWEEN priming and apply, so its primed claim must be
+// released when its plan fails — the later valid claimant then falls
+// through and lands the destination instead of dying on the stale owner's
+// key. Determinism (sorted priming order) and PrimeBatch idempotence are
+// unchanged; the disappeared-source case is handled explicitly.
+func TestOrganize_PrimedStaleWinnerReleasesClaim(t *testing.T) {
+	forceCasePosture(t, true)
+	const target = "/dest/ABC-123/ABC-123.mkv"
+
+	primedStaleFixture := func(t *testing.T) (*Organizer, afero.Fs, *DuplicateTracker) {
+		org, fs := dupBatchFixture(t)
+		tracker := NewDuplicateTracker(false)
+		tracker.PrimeBatch([]DuplicatePriming{
+			{SourcePath: "/in/A.mkv", TargetPath: target, WillMove: true}, // sorted first: /in/A.mkv < /in/B.mkv
+			{SourcePath: "/in/B.mkv", TargetPath: target, WillMove: true},
+		})
+		require.NoError(t, fs.Remove("/in/A.mkv"), "the winner's source vanishes between priming and apply")
+		return org, fs, tracker
+	}
+	assertExactlyOneVideoFromB := func(t *testing.T, fs afero.Fs) {
+		content, err := afero.ReadFile(fs, target)
+		require.NoError(t, err)
+		assert.Equal(t, []byte("b-bytes"), content, "the valid claimant's bytes reach the destination")
+		var videos []string
+		require.NoError(t, afero.Walk(fs, "/dest", func(path string, info os.FileInfo, err error) error {
+			if err == nil && !info.IsDir() && strings.HasSuffix(path, ".mkv") {
+				videos = append(videos, path)
+			}
+			return nil
+		}))
+		assert.Equal(t, []string{target}, videos, "destination ends with exactly one video, from the valid claimant")
+	}
+
+	t.Run("normal mode: the valid claimant proceeds to move", func(t *testing.T) {
+		org, fs, tracker := primedStaleFixture(t)
+		_, err := org.Organize(context.Background(), dupBatchCmd(
+			models.FileMatchInfo{MovieID: "ABC-123", Path: "/in/A.mkv", Name: "A.mkv", Extension: ".mkv"}, tracker, false, false))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "source file does not exist", "the stale winner fails validation and releases")
+
+		resultB, err := org.Organize(context.Background(), dupBatchCmd(
+			models.FileMatchInfo{MovieID: "ABC-123", Path: "/in/B.mkv", Name: "B.mkv", Extension: ".mkv"}, tracker, false, false))
+		require.NoError(t, err, "no duplicate-conflict false positive against the released stale claim")
+		assert.True(t, resultB.Moved)
+		assert.Empty(t, resultB.Warnings, "the new owner is no duplicate of the vanished claimant")
+		assertExactlyOneVideoFromB(t, fs)
+	})
+
+	t.Run("force mode: no winner-skip-yet-success inconsistency", func(t *testing.T) {
+		org, fs, tracker := primedStaleFixture(t)
+		_, err := org.Organize(context.Background(), dupBatchCmd(
+			models.FileMatchInfo{MovieID: "ABC-123", Path: "/in/A.mkv", Name: "A.mkv", Extension: ".mkv"}, tracker, true, false))
+		require.Error(t, err, "ForceUpdate skips validation, so the disappeared source fails at execute — and releases")
+
+		resultB, err := org.Organize(context.Background(), dupBatchCmd(
+			models.FileMatchInfo{MovieID: "ABC-123", Path: "/in/B.mkv", Name: "B.mkv", Extension: ".mkv"}, tracker, true, false))
+		require.NoError(t, err)
+		assert.True(t, resultB.Moved, "the valid claimant actually moves — never a skipped 'success'")
+		assert.Empty(t, resultB.Warnings, "the new owner earns success with no duplicate warning")
+		assertExactlyOneVideoFromB(t, fs)
+	})
+}
+
+// TestOrganize_ConflictBranchReleasesStaleOwner covers the release on the
+// conflict terminal (reached under ForceUpdate, which skips validatePlan):
+// an inexecutable primed owner frees its key there too, and only there —
+// a loser's ConflictDuplicate never matches the owner key.
+func TestOrganize_ConflictBranchReleasesStaleOwner(t *testing.T) {
+	forceCasePosture(t, true)
+	const target = "/dest/ABC-123/ABC-123.mkv"
+
+	t.Run("force + directory conflict frees the owner's key", func(t *testing.T) {
+		org, fs := dupBatchFixture(t)
+		tracker := NewDuplicateTracker(false)
+		tracker.PrimeBatch([]DuplicatePriming{
+			{SourcePath: "/in/A.mkv", TargetPath: target, WillMove: true},
+		})
+		// A directory occupies what must be a file path: ForceUpdate
+		// suppresses only ConflictFile, so the plan short-circuits at the
+		// conflict terminal with ConflictDirectory.
+		require.NoError(t, fs.MkdirAll(target, 0755))
+		_, err := org.Organize(context.Background(), dupBatchCmd(
+			models.FileMatchInfo{MovieID: "ABC-123", Path: "/in/A.mkv", Name: "A.mkv", Extension: ".mkv"}, tracker, true, false))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "conflicts detected")
+		_, dup := tracker.observe(dupPlanFor("/in/B.mkv", target))
+		assert.False(t, dup, "the conflict-failed owner released; the next claimant falls through")
+	})
+
+	t.Run("a loser's duplicate conflict never releases the owner's key", func(t *testing.T) {
+		org, fs := dupBatchFixture(t)
+		tracker := NewDuplicateTracker(false)
+		tracker.PrimeBatch([]DuplicatePriming{
+			{SourcePath: "/in/A.mkv", TargetPath: target, WillMove: true},
+			{SourcePath: "/in/B.mkv", TargetPath: target, WillMove: true},
+		})
+		_, err := org.Organize(context.Background(), dupBatchCmd(
+			models.FileMatchInfo{MovieID: "ABC-123", Path: "/in/B.mkv", Name: "B.mkv", Extension: ".mkv"}, tracker, false, false))
+		require.Error(t, err, "the unauthorized loser fails through the identical conflict pipeline")
+		assert.Contains(t, err.Error(), target)
+		_, dup := tracker.observe(dupPlanFor("/in/B.mkv", target))
+		require.True(t, dup, "the owner keeps its key through the loser's failure")
+		srcContent, readErr := afero.ReadFile(fs, "/in/B.mkv")
+		require.NoError(t, readErr)
+		assert.Equal(t, []byte("b-bytes"), srcContent, "the losing duplicate's source is untouched")
+	})
+}
+
+// TestOrganizer_PlanSourceExists pins the codex r2 P2 priming guard's
+// filesystem check: only a genuinely missing source withholds the claim;
+// indeterminate Stat errors leave the decision to validation/execution.
+func TestOrganizer_PlanSourceExists(t *testing.T) {
+	t.Run("present source claims", func(t *testing.T) {
+		org, _ := dupBatchFixture(t)
+		assert.True(t, org.PlanSourceExists(dupPlanFor("/in/A.mkv", "/dest/lib/x.mkv")))
+	})
+
+	t.Run("vanished source withholds the claim", func(t *testing.T) {
+		org, _ := dupBatchFixture(t)
+		assert.False(t, org.PlanSourceExists(dupPlanFor("/in/gone.mkv", "/dest/lib/x.mkv")))
+	})
+
+	t.Run("non-missing Stat errors still claim", func(t *testing.T) {
+		// A momentary IO fault is NOT IsNotExist — mirroring validatePlan's
+		// rule, the claim decision defers to validation/execution.
+		org, _ := dupBatchFixture(t)
+		faulty := &statFaultFs{Fs: afero.NewMemMapFs(), err: errors.New("transient io fault")}
+		org = NewOrganizer(faulty, org.config, nil, nil)
+		assert.True(t, org.PlanSourceExists(dupPlanFor("/in/A.mkv", "/dest/lib/x.mkv")))
 	})
 }

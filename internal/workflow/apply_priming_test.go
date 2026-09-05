@@ -13,11 +13,14 @@ import (
 )
 
 // primingStubOrganizer implements organizer.OrganizerInterface plus the
-// read-only PlanOrganize seam the workflow's planning leg asserts on.
+// read-only priming seam (PlanOrganize + PlanSourceExists) the workflow's
+// planning leg asserts on (codex r2 P2).
 type primingStubOrganizer struct {
-	plan    *organizer.OrganizePlan
-	planErr error
-	gotCmd  organizer.OrganizeCmd
+	plan        *organizer.OrganizePlan
+	planErr     error
+	sourceGone  bool // PlanSourceExists reports false (source vanished)
+	existsCalls int
+	gotCmd      organizer.OrganizeCmd
 }
 
 func (p *primingStubOrganizer) Organize(context.Context, organizer.OrganizeCmd) (*organizer.OrganizeResult, error) {
@@ -27,6 +30,11 @@ func (p *primingStubOrganizer) Organize(context.Context, organizer.OrganizeCmd) 
 func (p *primingStubOrganizer) PlanOrganize(_ context.Context, cmd organizer.OrganizeCmd) (*organizer.OrganizePlan, error) {
 	p.gotCmd = cmd
 	return p.plan, p.planErr
+}
+
+func (p *primingStubOrganizer) PlanSourceExists(*organizer.OrganizePlan) bool {
+	p.existsCalls++
+	return !p.sourceGone
 }
 
 // recordingPrimingOrch is an applyOrchestrator fake recording priming calls.
@@ -106,6 +114,39 @@ func TestApplyOrch_PlanDuplicatePriming(t *testing.T) {
 		assert.True(t, org.gotCmd.ForceRenameFile)
 		assert.Equal(t, organizer.LinkModeHard, org.gotCmd.LinkMode)
 		assert.Nil(t, org.gotCmd.DuplicateTracker, "planning must not observe against the run's tracker")
+		assert.Equal(t, 1, org.existsCalls, "a movable plan with a non-empty target is existence-checked before claiming")
+	})
+
+	t.Run("a claimant whose source vanished at priming registers no claim", func(t *testing.T) {
+		org := &primingStubOrganizer{
+			plan:       &organizer.OrganizePlan{SourcePath: "/in/A.mkv", TargetPath: "/dest/ABC-123/ABC-123.mkv", WillMove: true},
+			sourceGone: true,
+		}
+		prim, err := newOrch(org).planDuplicatePriming(ctx, cmd)
+		assert.NoError(t, err, "a vanished source is not a planning error — the worker fails with the identical plan/validation error later")
+		assert.Equal(t, organizer.DuplicatePriming{}, prim,
+			"codex r2 P2: an inexecutable plan must never own the canonical key at priming time")
+		assert.Equal(t, 1, org.existsCalls)
+	})
+
+	t.Run("non-moving and empty-target plans never reach the existence check", func(t *testing.T) {
+		org := &primingStubOrganizer{plan: &organizer.OrganizePlan{
+			SourcePath: "/in/A.mkv", TargetPath: "/in/A.mkv", WillMove: false,
+		}}
+		prim, err := newOrch(org).planDuplicatePriming(ctx, cmd)
+		require.NoError(t, err)
+		assert.Equal(t, organizer.DuplicatePriming{
+			SourcePath: "/in/A.mkv", TargetPath: "/in/A.mkv", WillMove: false,
+		}, prim)
+		assert.Equal(t, 0, org.existsCalls, "WillMove=false primings register nothing, so existence is irrelevant")
+
+		org = &primingStubOrganizer{plan: &organizer.OrganizePlan{
+			SourcePath: "/in/A.mkv", TargetPath: "", WillMove: true,
+		}}
+		prim, err = newOrch(org).planDuplicatePriming(ctx, cmd)
+		require.NoError(t, err)
+		assert.Equal(t, "", prim.TargetPath)
+		assert.Equal(t, 0, org.existsCalls, "empty-target primings register nothing, so existence is irrelevant")
 	})
 }
 

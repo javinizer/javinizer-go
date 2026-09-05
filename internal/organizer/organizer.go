@@ -608,6 +608,19 @@ func (o *Organizer) PlanOrganize(ctx context.Context, cmd OrganizeCmd) (*Organiz
 	return o.withForceRename(cmd.ForceRenameFile).plan(cmd.Match, cmd.Movie, cmd.DestDir, cmd.ForceUpdate, cmd.OperationMode)
 }
 
+// PlanSourceExists reports whether plan's source file is still present on
+// the organizer's filesystem (codex r2 P2): the duplicate priming leg MUST
+// NOT claim a canonical key for a plan that cannot execute — a primed owner
+// whose source already vanished at priming time would hold the key for the
+// whole run, blocking every valid later claimant. Read-only: one Stat
+// against the same fs Organize validates and executes on. Non-missing Stat
+// errors leave the claim decision to the later validation/execution pass,
+// mirroring validatePlan's IsNotExist-only rule.
+func (o *Organizer) PlanSourceExists(plan *OrganizePlan) bool {
+	_, err := o.fs.Stat(plan.SourcePath)
+	return !os.IsNotExist(err)
+}
+
 // Organize is the single-method seam that plans, validates, and executes
 // file organization in one call. Per Phase 48: Plan/ValidatePlan/Execute
 // are internal implementation details — callers use Organize instead of a
@@ -633,6 +646,14 @@ func (o *Organizer) Organize(ctx context.Context, cmd OrganizeCmd) (*OrganizeRes
 
 	if !cmd.ForceUpdate {
 		if issues := o.validatePlan(plan); len(issues) > 0 {
+			// codex r2 P2: a plan the run's duplicate tracker primed as owner
+			// must not keep its canonical key when it cannot execute — most
+			// acutely the winner whose source vanished between priming and
+			// apply. Releasing lets the next valid claimant's observe fall
+			// through instead of dying on the stale owner's claim. Losers
+			// (whose validation failure lists their ConflictDuplicate) release
+			// nothing — release matches only the recorded owner.
+			cmd.DuplicateTracker.release(plan)
 			return nil, fmt.Errorf("organization validation failed: %v", issues)
 		}
 	}
@@ -647,6 +668,12 @@ func (o *Organizer) Organize(ctx context.Context, cmd OrganizeCmd) (*OrganizeRes
 
 	// Check for conflicts before executing
 	if len(plan.Conflicts) > 0 {
+		// codex r2 P2: same release rule on the conflict terminal (reached
+		// under ForceUpdate, which skips validatePlan) — an inexecutable
+		// primed owner frees its key for the next valid claimant. A loser's
+		// ConflictDuplicate never matches the owner key, so this is a no-op
+		// for every duplicate-skipped plan.
+		cmd.DuplicateTracker.release(plan)
 		return nil, fmt.Errorf("conflicts detected: %s", joinPlanConflictPaths(plan.Conflicts))
 	}
 
@@ -686,6 +713,11 @@ func (o *Organizer) Organize(ctx context.Context, cmd OrganizeCmd) (*OrganizeRes
 
 	strategyResult, err := strategy.Execute(plan)
 	if err != nil {
+		// codex r2 P2: the disappeared-source failure surfaces HERE under
+		// ForceUpdate (validation is skipped): the primed owner's claim is
+		// released on the identical rule so the next valid claimant can
+		// still land its bytes on the destination.
+		cmd.DuplicateTracker.release(plan)
 		return strategyResult, err
 	}
 	strategyResult.Warnings = append(strategyResult.Warnings, dupWarnings...)

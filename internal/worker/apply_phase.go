@@ -52,17 +52,25 @@ type preparedApplyFile struct {
 	afc      *ApplyFileContext
 	baseline *models.Movie
 	execute  bool
+	// hookOutcome is non-nil when the priming-time PreApply hook panicked
+	// (codex r2 P2): the prepare pass recovered, wrote back, and broadcast
+	// the failure already, so the item's worker replays this outcome instead
+	// of re-executing — the once-per-file hook contract holds and the batch
+	// counts exactly one recorded failure for the file.
+	hookOutcome *applyFileOutcome
 }
 
 // primeDuplicateClaims runs the batch's ONE planning pass when the workflow
 // exposes the read-only planning seam: each prepared item's organize target
 // registers against the run's duplicate tracker in sorted order,
 // pre-assigning every canonical key's winner before any apply worker starts
-// (#240 finding A). Items whose PreApply hook declined execution or whose
-// plan fails register nothing — their workers skip execution or fail with
-// the identical plan error, so priming can never claim a file that cannot
-// run. Without the seam (or on a nil workflow) the tracker stays unprimed,
-// preserving first-come observation for single-file callers.
+// (#240 finding A). Items whose PreApply hook declined execution (or
+// panicked into a recorded failure), whose plan fails, or whose source
+// already vanished register nothing (codex r2 P2) — their workers skip
+// execution or fail with the identical plan error, so priming can never
+// claim a file that cannot run. Without the seam (or on a nil workflow) the
+// tracker stays unprimed, preserving first-come observation for single-file
+// callers.
 func primeDuplicateClaims(ctx context.Context, wf workflow.WorkflowInterface, tracker *organizer.DuplicateTracker, items []applyItem, prepared map[string]*preparedApplyFile) {
 	planner, ok := wf.(workflow.DuplicatePrimingPlanner)
 	if !ok {
@@ -194,12 +202,13 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 	cfg.OrganizeOptions.DuplicateTracker = organizer.NewDuplicateTracker(cfg.DryRun)
 	// Prepare every item's ApplyCmd ONCE, in sorted order, before fan-out
 	// (#240 finding A): priming and execution share identical commands, and
-	// PreApply hooks keep their once-per-file contract.
+	// PreApply hooks keep their once-per-file contract. Each build runs under
+	// its own per-file execution boundary (codex r2 P2) — a hook blocking on
+	// the raw batch context could otherwise stall the entire priming pass,
+	// and a panicking hook could abort it.
 	prepared := make(map[string]*preparedApplyFile, len(items))
 	for _, item := range items {
-		baseline := item.movie.Clone()
-		applyCmd, afc, shouldExecute := buildApplyCmd(item.filePath, item.movie, item.fileResult, inputs, cfg, ctx)
-		prepared[item.filePath] = &preparedApplyFile{cmd: applyCmd, afc: afc, baseline: baseline, execute: shouldExecute}
+		prepared[item.filePath] = prepareApplyItem(ctx, item, inputs, cfg)
 	}
 	primeDuplicateClaims(ctx, wf, cfg.OrganizeOptions.DuplicateTracker, items, prepared)
 	outcomes := fanout.BoundedFanOut(ctx, inputs.Concurrency.MaxWorkers, items,
@@ -296,6 +305,53 @@ func countRemainingApplyFailures(inputs applyPhaseInputs, outcomes []applyFileOu
 		}
 	}
 	return int64(len(failedPaths))
+}
+
+// prepareApplyItem builds one sorted item's ApplyCmd ahead of fan-out,
+// wrapping the priming-time build — PreApply hook included — in the SAME
+// per-file execution boundary applyFile enforces around its worker body
+// (codex r2 P2): a per-file WorkerTimeout context, so a hook blocking past
+// its budget unblocks instead of stalling the whole batch priming pass
+// behind an untamed batch context; and withFileRecovery, so a panicking
+// hook records THIS file's failure and the run continues instead of
+// aborting every remaining file. A recovered panic yields execute=false
+// plus a pre-recorded failure outcome the item's worker replays unchanged
+// (the hook never runs twice).
+func prepareApplyItem(ctx context.Context, item applyItem, inputs applyPhaseInputs, cfg ApplyPhaseConfig) (prepared *preparedApplyFile) {
+	prepared = &preparedApplyFile{baseline: item.movie.Clone()}
+	if timeout := inputs.Concurrency.WorkerTimeout; timeout > 0 {
+		hookCtx, hookCancel := context.WithTimeout(ctx, timeout)
+		defer hookCancel()
+		ctx = hookCtx
+	}
+
+	outcome := applyFileOutcome{FilePath: item.filePath, MovieID: item.movie.ID, DryRun: cfg.DryRun}
+	// Mirror applyFile's recoveryContext assembly field-for-field; the
+	// poster-claim release stays at the worker boundary (fan-out per-item).
+	rc := recoveryContext{
+		filePath:         item.filePath,
+		fmi:              item.fileResult.FileMatchInfo,
+		movie:            item.fileResult.Movie,
+		provenance:       inputs.Provenance[item.filePath],
+		updater:          inputs.Updater,
+		broadcast:        broadcastFailure(inputs.Broadcaster, inputs.JobID, item.movie.ID, jobEventPhaseApply, "Apply"),
+		startTime:        time.Now(),
+		editLockFn:       inputs.EditLockFn,
+		promoteWitnessFn: inputs.PromoteWitnessFn,
+	}
+	// Post-recovery bookkeeping is deferred FIRST so it runs AFTER the
+	// recovery func below (LIFO) — recover() only bites when called directly
+	// by a deferred function, exactly like applyFile's defer site.
+	defer func() {
+		if outcome.Panic {
+			prepared.execute = false
+			prepared.hookOutcome = &outcome
+		}
+	}()
+	defer withFileRecovery(rc, &outcome)()
+
+	prepared.cmd, prepared.afc, prepared.execute = buildApplyCmd(item.filePath, item.movie, item.fileResult, inputs, cfg, ctx)
+	return prepared
 }
 
 // buildApplyCmd constructs the workflow.ApplyCmd for a single file apply.
@@ -675,6 +731,12 @@ func applyFile(
 
 	// Step 1: Consume the prepared ApplyCmd (built pre-fan-out with the
 	// phase-entry baseline frozen before any hook mutation, codex r51 P2c).
+	// codex r2 P2: a hook panic during priming was already recovered,
+	// recorded, and broadcast there — replay the pre-recorded failure
+	// outcome instead of re-executing (once-per-file hook contract).
+	if prepared.hookOutcome != nil {
+		return *prepared.hookOutcome
+	}
 	if !prepared.execute {
 		return outcome
 	}

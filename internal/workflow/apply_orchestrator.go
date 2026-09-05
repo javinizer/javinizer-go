@@ -276,12 +276,23 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult
 // a claim — organize skipped, plan error, or an organizer lacking the
 // read-only planning seam — yield no priming; the item's worker then skips
 // execution or fails with the identical plan error.
+//
+// codex r2 P2: a claim is returned ONLY for a plan that proves executable at
+// priming time — PrimeBatch never releases a failed owner on its own, so a
+// claimant whose source already vanished would otherwise own the canonical
+// key for the whole run and block (or, under ForceUpdate, ghost-skip) every
+// valid later claimant. The priming seam therefore pairs the read-only
+// planner with PlanSourceExists; a claimant failing the existence check
+// registers nothing and the next valid sorted claimant takes the key. A
+// source vanishing AFTER priming is covered by the tracker's release on
+// organize failure (see Organizer.Organize).
 func (o *applyOrchImpl) planDuplicatePriming(ctx context.Context, cmd ApplyCmd) (organizer.DuplicatePriming, error) {
 	if cmd.Organize.Skip {
 		return organizer.DuplicatePriming{}, nil
 	}
 	planner, ok := o.organizer.(interface {
 		PlanOrganize(context.Context, organizer.OrganizeCmd) (*organizer.OrganizePlan, error)
+		PlanSourceExists(*organizer.OrganizePlan) bool
 	})
 	if !ok {
 		return organizer.DuplicatePriming{}, nil
@@ -299,6 +310,9 @@ func (o *applyOrchImpl) planDuplicatePriming(ctx context.Context, cmd ApplyCmd) 
 	})
 	if err != nil {
 		return organizer.DuplicatePriming{}, err
+	}
+	if plan.WillMove && plan.TargetPath != "" && !planner.PlanSourceExists(plan) {
+		return organizer.DuplicatePriming{}, nil
 	}
 	return organizer.DuplicatePriming{
 		SourcePath: plan.SourcePath,
