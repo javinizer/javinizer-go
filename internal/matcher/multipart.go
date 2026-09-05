@@ -11,6 +11,7 @@ var (
 	reNumericPart = regexp.MustCompile(`(?i)(?:^|[-_.\s])(?:(pt|part))[-_.\s]?(\d{1,2})(?:$|[-_.\s])`)
 	// Matches plain numbers: -1, -2, _3, .1, etc. (common multi-part pattern)
 	rePlainNumber = regexp.MustCompile(`^[-_.\s]?(\d{1,2})$`)
+	reDiscPart    = regexp.MustCompile(`(?i)(?:^|[-_.\s])(cd|disc|disk)[-_.\s]?(\d{1,2})(?:$|[-_.\s])`)
 	// Strict letter-only remainder: optional sep + [a-z] + optional sep
 	reLetterOnlyRemainder = regexp.MustCompile(`(?i)^\s*[-_.\s]?([a-z])\s*$`)
 	reLetterWithTrailing  = regexp.MustCompile(`(?i)^\s*[-_.\s]?([a-z])[-_.\s]+\[?(?:\d{3,}|\d[a-z0-9]*[a-z][a-z0-9]*)\]?[a-z0-9]*(?:[-_.\s]+\[?[a-z0-9]+\]?)*\s*$`)
@@ -21,7 +22,7 @@ var (
 
 // Pattern type constants for multipart detection
 const (
-	// PatternExplicit indicates explicit multipart patterns (pt1, part2, -1, -2)
+	// PatternExplicit indicates explicit multipart patterns (pt1, part2, -1, -2, cd1, disc1, disk1)
 	// These are always considered multipart without directory context validation.
 	PatternExplicit = "explicit"
 	// PatternLetter indicates ambiguous single-letter patterns (A, B, C)
@@ -76,7 +77,15 @@ func DetectPartSuffix(nameWithoutExt, id string) (int, string, string, string) {
 		}
 	}
 
-	// 3) Letter parts: single trailing letter (A/B/C/...) optionally separated by dash/underscore/space
+	if m := reDiscPart.FindStringSubmatch(trimmed); len(m) == 3 {
+		token := strings.ToLower(m[1])
+		numStr := m[2]
+		if n, err := strconv.Atoi(numStr); err == nil && n > 0 {
+			return n, "-" + token + numStr, PatternExplicit, ""
+		}
+	}
+
+	// 4) Letter parts: single trailing letter (A/B/C/...) optionally separated by dash/underscore/space
 	// Only accept when the remainder is just that letter (plus optional separators) - AMBIGUOUS
 	// These need directory context validation to confirm multipart status.
 	if m := reLetterOnlyRemainder.FindStringSubmatch(trimmed); len(m) == 2 {
@@ -85,7 +94,7 @@ func DetectPartSuffix(nameWithoutExt, id string) (int, string, string, string) {
 		}
 	}
 
-	// 4) Letter + digit-first trailing content (e.g. a-4k, b-1080p, a-4k-60). The part
+	// 5) Letter + digit-first trailing content (e.g. a-4k, b-1080p, a-4k-60). The part
 	// identity is the letter; the trailing content is a resolution/quality tag. Checked
 	// BEFORE the trailing-number pattern so a numeric quality component (e.g. -60 fps
 	// shorthand in "a-4k-60") is not consumed as a trailing part number.
@@ -95,7 +104,7 @@ func DetectPartSuffix(nameWithoutExt, id string) (int, string, string, string) {
 		}
 	}
 
-	// 5) Trailing number after separator at end of remainder: -un-javgg.net-1, _site.name-2
+	// 6) Trailing number after separator at end of remainder: -un-javgg.net-1, _site.name-2
 	// This handles filenames where site tags or other noise sits between the ID and the part number.
 	// The separator (- or _) + digits at the very end suggests a part number, but it's not
 	// as unambiguous as a clean remainder-only match (step 2), so directory validation is required.

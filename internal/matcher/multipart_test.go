@@ -24,6 +24,22 @@ func TestDetectPartSuffix(t *testing.T) {
 		{"PRED-151-1", "PRED-151", 1, "-1", PatternExplicit},
 		{"PRED-151-2", "PRED-151", 2, "-2", PatternExplicit},
 
+		// Disc parts: cd/disc/disk + 1-2 digits - EXPLICIT
+		{"ABC-123-CD1", "ABC-123", 1, "-cd1", PatternExplicit},
+		{"ABC-123-cd2", "ABC-123", 2, "-cd2", PatternExplicit},
+		{"ABC-123-CD3", "ABC-123", 3, "-cd3", PatternExplicit},
+		{"ABC-123-CD4", "ABC-123", 4, "-cd4", PatternExplicit},
+		{"ABC-123-CD5", "ABC-123", 5, "-cd5", PatternExplicit},
+		{"ABC-123-CD6", "ABC-123", 6, "-cd6", PatternExplicit},
+		{"ABC-123-CD7", "ABC-123", 7, "-cd7", PatternExplicit},
+		{"IPX-535_CD2", "IPX-535", 2, "-cd2", PatternExplicit},
+		{"IPX-535.disc2", "IPX-535", 2, "-disc2", PatternExplicit},
+		{"IPX-535-disk3", "IPX-535", 3, "-disk3", PatternExplicit},
+		{"IPX-535 CD1", "IPX-535", 1, "-cd1", PatternExplicit},
+		{"IPX-535-cd1-4k", "IPX-535", 1, "-cd1", PatternExplicit},
+		{"IPX-535-disc-1", "IPX-535", 1, "-disc1", PatternExplicit},
+		{"IPX-535-cd12", "IPX-535", 12, "-cd12", PatternExplicit},
+
 		// Ambiguous letter patterns - need directory context validation
 		{"MDB-087A", "MDB-087", 1, "-A", PatternLetter},
 		{"MDB-087-b", "MDB-087", 2, "-B", PatternLetter},
@@ -52,6 +68,15 @@ func TestDetectPartSuffix(t *testing.T) {
 		{"IPX-535-4k", "IPX-535", 0, "", PatternNone},
 		{"IPX-535-1080p", "IPX-535", 0, "", PatternNone},
 		{"IPX-535-FHD", "IPX-535", 0, "", PatternNone},
+		{"IPX-535-cd", "IPX-535", 0, "", PatternNone},
+		{"IPX-535-cdx", "IPX-535", 0, "", PatternNone},
+		{"IPX-535-disc", "IPX-535", 0, "", PatternNone},
+		{"IPX-535-cdk1", "IPX-535", 0, "", PatternNone},
+		{"IPX-535-discz", "IPX-535", 0, "", PatternNone},
+		{"IPX-535-cd1x", "IPX-535", 0, "", PatternNone},
+		{"IPX-535-hdcd1", "IPX-535", 0, "", PatternNone},
+		{"IPX-535-cd0", "IPX-535", 0, "", PatternNone},
+		{"IPX-535-cd100", "IPX-535", 0, "", PatternNone},
 	}
 
 	for _, tt := range tests {

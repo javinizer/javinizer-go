@@ -549,7 +549,7 @@ file_matching:
 **regex_pattern**: Custom regex pattern for extracting JAV IDs. The default pattern matches:
 - Standard IDs: `IPX-535`, `SSIS-123`
 - With suffixes: `IPX-535Z`, `SSIS-123E`
-- Multi-part: `IPX-535-pt1`, `IPX-535-cd2`
+- Multi-part: `IPX-535-pt1`, `IPX-535-cd2`, `IPX-535-disc1`, `IPX-535-disk1`
 - Special formats: `T28-123`
 
 ### Custom Regex Examples

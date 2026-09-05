@@ -89,6 +89,7 @@ func TestMatcher_MatchFile(t *testing.T) {
 		// Edge cases
 		{"No match", "random_movie.mp4", "", 0, false, false},
 		{"Only numbers", "12345.mp4", "", 0, false, false},
+		{"Bare cd suffix no ID", "-cd1.mp4", "", 0, false, false},
 		{"Invalid format", "ABC_123.mp4", "", 0, false, false},
 		// Note: Generic patterns may match, but will fail during DMM search (acceptable behavior)
 		{"Generic scene001 matched", "scene001.mp4", "SCENE001", 0, false, true}, // Matcher is lenient, DMM search will filter
@@ -1276,12 +1277,27 @@ func TestMatcher_PartSuffixEdgeCases(t *testing.T) {
 		{"Dot plain number", "IPX-535.1.mp4", "IPX-535", 1, "-1", true, PatternExplicit},
 		{"Dot letter", "IPX-535.A.mp4", "IPX-535", 1, "-A", false, PatternLetter},
 
+		// Disc patterns: cd/disc/disk + digits - explicit, multipart immediately
+		{"Disc cd1", "IPX-535-cd1.mp4", "IPX-535", 1, "-cd1", true, PatternExplicit},
+		{"Disc CD2 uppercase", "IPX-535-CD2.mp4", "IPX-535", 2, "-cd2", true, PatternExplicit},
+		{"Disc underscore cd2", "IPX-535_cd2.mp4", "IPX-535", 2, "-cd2", true, PatternExplicit},
+		{"Disc dot disc2", "IPX-535.disc2.mp4", "IPX-535", 2, "-disc2", true, PatternExplicit},
+		{"Disc disk3", "IPX-535-disk3.mp4", "IPX-535", 3, "-disk3", true, PatternExplicit},
+		{"Disc cd1 quality tag", "IPX-535-cd1-4k.mp4", "IPX-535", 1, "-cd1", true, PatternExplicit},
+
 		// ── False negatives: should NOT be detected as multipart ──────────
 		{"Resolution 1080p", "IPX-535-1080p.mp4", "IPX-535", 0, "", false, PatternNone},
 		{"Resolution 720p", "IPX-535-720p.mp4", "IPX-535", 0, "", false, PatternNone},
 		{"Dot resolution 1080p", "IPX-535.1080p.mp4", "IPX-535", 0, "", false, PatternNone},
 		{"Version v2", "IPX-535-v2.mp4", "IPX-535", 0, "", false, PatternNone},
-		{"cd1 not separator+digit", "IPX-535-cd1.mp4", "IPX-535", 0, "", false, PatternNone},
+		{"cd no digits", "IPX-535-cd.mp4", "IPX-535", 0, "", false, PatternNone},
+		{"cdx not a disc", "IPX-535-cdx.mp4", "IPX-535", 0, "", false, PatternNone},
+		{"disc no digits", "IPX-535-disc.mp4", "IPX-535", 0, "", false, PatternNone},
+		{"cdk1 not a disc", "IPX-535-cdk1.mp4", "IPX-535", 0, "", false, PatternNone},
+		{"discz not a disc", "IPX-535-discz.mp4", "IPX-535", 0, "", false, PatternNone},
+		{"cd1x digit embedded in longer token", "IPX-535-cd1x.mp4", "IPX-535", 0, "", false, PatternNone},
+		{"cd100 exceeds 2-digit limit", "IPX-535-cd100.mp4", "IPX-535", 0, "", false, PatternNone},
+		{"cd0 not valid", "IPX-535-cd0.mp4", "IPX-535", 0, "", false, PatternNone},
 		{"Year 2020 (4 digits)", "IPX-535-2020.mp4", "IPX-535", 0, "", false, PatternNone},
 		{"Dot year 2024 (4 digits)", "IPX-535.2024.mp4", "IPX-535", 0, "", false, PatternNone},
 		{"pt0 not valid", "IPX-535-pt0.mp4", "IPX-535", 0, "", false, PatternNone},
