@@ -3,7 +3,7 @@ package organizer
 import (
 	"context"
 	"errors"
-	"fmt"
+	"path/filepath"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -384,21 +384,21 @@ func TestSubtitleHandler_FindSubtitles_SkipsDirectories(t *testing.T) {
 	tmpDir := t.TempDir()
 	fs := afero.NewOsFs()
 
-	sourceDir := fmt.Sprintf("%s/src", tmpDir)
+	sourceDir := filepath.Join(tmpDir, "src")
 	require.NoError(t, fs.MkdirAll(sourceDir, 0755))
-	require.NoError(t, afero.WriteFile(fs, fmt.Sprintf("%s/ABC-123.srt", sourceDir), []byte("sub"), 0644))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(sourceDir, "ABC-123.srt"), []byte("sub"), 0644))
 	// Create a directory that looks like a subtitle file
-	require.NoError(t, fs.MkdirAll(fmt.Sprintf("%s/ABC-123.eng.srt", sourceDir), 0755))
+	require.NoError(t, fs.MkdirAll(filepath.Join(sourceDir, "ABC-123.eng.srt"), 0755))
 
 	sh := newSubtitleHandler(fs, []string{".srt", ".ass"})
 
 	subtitles := sh.FindSubtitles(models.FileMatchInfo{
-		Path:      fmt.Sprintf("%s/ABC-123.mp4", sourceDir),
+		Path:      filepath.Join(sourceDir, "ABC-123.mp4"),
 		Name:      "ABC-123.mp4",
 		Extension: ".mp4",
 	})
 	require.Len(t, subtitles, 1, "subtitle-looking directory entries must not match")
-	assert.Equal(t, fmt.Sprintf("%s/ABC-123.srt", sourceDir), subtitles[0].OriginalPath)
+	assert.Equal(t, filepath.Join(sourceDir, "ABC-123.srt"), subtitles[0].OriginalPath)
 }
 
 // --- extractLanguageCode: remaining != "" ---
