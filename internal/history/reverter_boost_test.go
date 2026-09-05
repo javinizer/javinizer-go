@@ -214,7 +214,9 @@ func TestCleanupGeneratedFilesFS_MoveBack(t *testing.T) {
 	}
 	gfJSON, _ := json.Marshal(gf)
 
+	// MoveBack rename-back is a MOVE-mode semantic (codex P1, PR #241).
 	op := &models.BatchFileOperation{
+		OperationType:  models.OperationTypeMove,
 		GeneratedFiles: string(gfJSON),
 	}
 	cleanupGeneratedFilesFS(fs, op, "/dst")
@@ -315,7 +317,8 @@ func TestCleanupGeneratedFilesFS_LogsRemoveAndMoveBackErrors(t *testing.T) {
 	gfJSON, err := json.Marshal(gf)
 	require.NoError(t, err)
 
-	op := &models.BatchFileOperation{GeneratedFiles: string(gfJSON)}
+	// Move-mode row: the rename leg is exercised (and wedged) only there.
+	op := &models.BatchFileOperation{OperationType: models.OperationTypeMove, GeneratedFiles: string(gfJSON)}
 	cleanupGeneratedFilesFS(fs, op, "/dst")
 
 	_, err = fs.Stat("/dst/delete.err")

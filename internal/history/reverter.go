@@ -550,10 +550,23 @@ func cleanupEmptyDirFS(fs afero.Fs, dirPath string, stopAt string) {
 }
 
 // cleanupGeneratedFilesFS processes the GeneratedFiles JSON on a BatchFileOperation:
-// deletes files in the Delete list and moves back files in the MoveBack list.
+// deletes files in the Delete list and executes the MoveBack list.
 // After deleting files, it removes empty parent directories left behind,
 // stopping at stopAt boundary to prevent removing shared ancestor directories.
 // Best-effort: missing files are skipped (os.IsNotExist), errors don't fail the revert.
+//
+// MoveBack semantics are mode-gated (codex P1, PR #241): a rename-back is only
+// ever valid for MOVE-mode rows, whose move-installed subtitles genuinely left
+// their source tree. Rows of every other operation type (copy, hardlink,
+// symlink, update) retained their originals — the forward install there was
+// non-destructively copy-based — so a MoveBack entry on such rows can only be a
+// LEGACY journal (pre-#224 phase E journaled every installed subtitle as
+// MoveBack regardless of mode; today's format expresses the same install as a
+// plain Delete of the new path, see buildGeneratedFilesJSON). Renaming the
+// installed path over the original on POSIX would REPLACE that retained
+// original, destroying any edits the user made to it after the copy. Those
+// legacy entries therefore execute with the modern delete-only semantic:
+// remove the installed copy at NewPath, never touch OriginalPath.
 func cleanupGeneratedFilesFS(fs afero.Fs, op *models.BatchFileOperation, stopAt string) {
 	if op.GeneratedFiles == "" {
 		return
@@ -574,9 +587,17 @@ func cleanupGeneratedFilesFS(fs afero.Fs, op *models.BatchFileOperation, stopAt 
 		}
 		dirsToCheck[filepath.Dir(path)] = true
 	}
-	// Move back files in the MoveBack array (best-effort)
+	// Execute the MoveBack array (best-effort): rename-back for move-mode rows
+	// only; delete-the-installed-copy for every other mode's legacy entries
+	// (rename-over must NEVER run against a retained original — see the
+	// function doc above).
+	moveMode := op.OperationType == models.OperationTypeMove
 	for _, fm := range gf.MoveBack {
-		if err := fs.Rename(fm.NewPath, fm.OriginalPath); err != nil {
+		if !moveMode {
+			if err := fs.Remove(fm.NewPath); err != nil && !os.IsNotExist(err) {
+				logging.Debugf("cleanupGeneratedFiles: failed to delete copy-installed artifact %s (original at %s retained): %v", fm.NewPath, fm.OriginalPath, err)
+			}
+		} else if err := fs.Rename(fm.NewPath, fm.OriginalPath); err != nil {
 			logging.Debugf("cleanupGeneratedFiles: failed to move back %s → %s: %v", fm.NewPath, fm.OriginalPath, err)
 		}
 		dirsToCheck[filepath.Dir(fm.NewPath)] = true
