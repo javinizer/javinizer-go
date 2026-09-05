@@ -355,6 +355,16 @@ definitions:
           format: int64
           type: integer
         type: object
+      translation_warning:
+        description: |-
+          TranslationWarning is populated when metadata translation partially failed
+          or degraded during this rescrape (kept-original fields); empty when clean.
+        type: string
+      translation_warning_code:
+        description: |-
+          TranslationWarningCode is the machine-readable classification of
+          TranslationWarning (rate_limited, unavailable, degraded, ...).
+        type: string
     type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.BatchScrapeRequest:
     properties:

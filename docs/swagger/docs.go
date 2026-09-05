@@ -4675,6 +4675,14 @@ const docTemplate = `{
                         "type": "integer",
                         "format": "int64"
                     }
+                },
+                "translation_warning": {
+                    "description": "TranslationWarning is populated when metadata translation partially failed\nor degraded during this rescrape (kept-original fields); empty when clean.",
+                    "type": "string"
+                },
+                "translation_warning_code": {
+                    "description": "TranslationWarningCode is the machine-readable classification of\nTranslationWarning (rate_limited, unavailable, degraded, ...).",
+                    "type": "string"
                 }
             }
         },
