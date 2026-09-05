@@ -98,10 +98,10 @@ func TestDuplicateTracker_Grouping(t *testing.T) {
 	t.Run("identical target distinct sources", func(t *testing.T) {
 		forceCasePosture(t, true)
 		tracker := NewDuplicateTracker(false)
-		_, dup := tracker.observe(dupPlanFor("/in/A.mkv", "/dest/lib/x.mkv"))
+		_, dup := tracker.observe(context.Background(), dupPlanFor("/in/A.mkv", "/dest/lib/x.mkv"))
 		assert.False(t, dup, "first claim registers cleanly")
 		settleClaim(tracker, "/in/A.mkv", "/dest/lib/x.mkv")
-		prior, dup := tracker.observe(dupPlanFor("/in/B.mkv", "/dest/lib/x.mkv"))
+		prior, dup := tracker.observe(context.Background(), dupPlanFor("/in/B.mkv", "/dest/lib/x.mkv"))
 		require.True(t, dup)
 		assert.Equal(t, "/in/A.mkv", prior.source)
 	})
@@ -109,9 +109,9 @@ func TestDuplicateTracker_Grouping(t *testing.T) {
 	t.Run("casefold variants group when root proven insensitive", func(t *testing.T) {
 		forceCasePosture(t, false)
 		tracker := NewDuplicateTracker(false)
-		tracker.observe(dupPlanFor("/in/A.mkv", "/dest/lib/Movie.mkv"))
+		tracker.observe(context.Background(), dupPlanFor("/in/A.mkv", "/dest/lib/Movie.mkv"))
 		settleClaim(tracker, "/in/A.mkv", "/dest/lib/Movie.mkv")
-		prior, dup := tracker.observe(dupPlanFor("/in/B.mkv", "/dest/lib/movie.mkv"))
+		prior, dup := tracker.observe(context.Background(), dupPlanFor("/in/B.mkv", "/dest/lib/movie.mkv"))
 		require.True(t, dup, "case variants of one name are proven-equal on insensitive roots")
 		assert.Equal(t, "/in/A.mkv", prior.source)
 	})
@@ -119,43 +119,43 @@ func TestDuplicateTracker_Grouping(t *testing.T) {
 	t.Run("case variants stay distinct when root proven sensitive", func(t *testing.T) {
 		forceCasePosture(t, true)
 		tracker := NewDuplicateTracker(false)
-		tracker.observe(dupPlanFor("/in/A.mkv", "/dest/lib/Movie.mkv"))
-		_, dup := tracker.observe(dupPlanFor("/in/B.mkv", "/dest/lib/movie.mkv"))
+		tracker.observe(context.Background(), dupPlanFor("/in/A.mkv", "/dest/lib/Movie.mkv"))
+		_, dup := tracker.observe(context.Background(), dupPlanFor("/in/B.mkv", "/dest/lib/movie.mkv"))
 		assert.False(t, dup, "never proven equal, so byte-distinct names keep distinct keys")
 	})
 
 	t.Run("lexical spelling variants of one path group", func(t *testing.T) {
 		forceCasePosture(t, true)
 		tracker := NewDuplicateTracker(false)
-		tracker.observe(dupPlanFor("/in/A.mkv", "/dest/lib/x.mkv"))
+		tracker.observe(context.Background(), dupPlanFor("/in/A.mkv", "/dest/lib/x.mkv"))
 		settleClaim(tracker, "/in/A.mkv", "/dest/lib/x.mkv")
-		_, dup := tracker.observe(dupPlanFor("/in/B.mkv", "/dest/lib/./x.mkv"))
+		_, dup := tracker.observe(context.Background(), dupPlanFor("/in/B.mkv", "/dest/lib/./x.mkv"))
 		assert.True(t, dup, "cleaned spellings of one destination are the same canonical key")
 	})
 
 	t.Run("multipart suffixes stay distinct", func(t *testing.T) {
 		forceCasePosture(t, false)
 		tracker := NewDuplicateTracker(false)
-		tracker.observe(dupPlanFor("/in/m-cd1.mkv", "/dest/lib/m-cd1.mkv"))
-		_, dup := tracker.observe(dupPlanFor("/in/m-cd2.mkv", "/dest/lib/m-cd2.mkv"))
+		tracker.observe(context.Background(), dupPlanFor("/in/m-cd1.mkv", "/dest/lib/m-cd1.mkv"))
+		_, dup := tracker.observe(context.Background(), dupPlanFor("/in/m-cd2.mkv", "/dest/lib/m-cd2.mkv"))
 		assert.False(t, dup, "cdN part suffixes name distinct destinations")
 	})
 
 	t.Run("same source re-observe is idempotent", func(t *testing.T) {
 		forceCasePosture(t, true)
 		tracker := NewDuplicateTracker(false)
-		tracker.observe(dupPlanFor("/in/A.mkv", "/dest/lib/x.mkv"))
-		_, dup := tracker.observe(dupPlanFor("/in/A.mkv", "/dest/lib/x.mkv"))
+		tracker.observe(context.Background(), dupPlanFor("/in/A.mkv", "/dest/lib/x.mkv"))
+		_, dup := tracker.observe(context.Background(), dupPlanFor("/in/A.mkv", "/dest/lib/x.mkv"))
 		assert.False(t, dup, "retries and dry-run re-plans of one file never self-conflict")
 	})
 
 	t.Run("third duplicate reports the first claim", func(t *testing.T) {
 		forceCasePosture(t, true)
 		tracker := NewDuplicateTracker(false)
-		tracker.observe(dupPlanFor("/in/A.mkv", "/dest/lib/x.mkv"))
+		tracker.observe(context.Background(), dupPlanFor("/in/A.mkv", "/dest/lib/x.mkv"))
 		settleClaim(tracker, "/in/A.mkv", "/dest/lib/x.mkv")
-		tracker.observe(dupPlanFor("/in/B.mkv", "/dest/lib/x.mkv"))
-		prior, dup := tracker.observe(dupPlanFor("/in/C.mkv", "/dest/lib/x.mkv"))
+		tracker.observe(context.Background(), dupPlanFor("/in/B.mkv", "/dest/lib/x.mkv"))
+		prior, dup := tracker.observe(context.Background(), dupPlanFor("/in/C.mkv", "/dest/lib/x.mkv"))
 		require.True(t, dup)
 		assert.Equal(t, "/in/A.mkv", prior.source, "first claim wins — mirrors first-publish-wins at execute")
 	})
@@ -164,21 +164,21 @@ func TestDuplicateTracker_Grouping(t *testing.T) {
 		forceCasePosture(t, true)
 		tracker := NewDuplicateTracker(false)
 		still := &OrganizePlan{SourcePath: "/in/A.mkv", TargetPath: "/in/A.mkv", WillMove: false}
-		_, dup := tracker.observe(still)
+		_, dup := tracker.observe(context.Background(), still)
 		assert.False(t, dup)
-		_, dup = tracker.observe(dupPlanFor("/in/B.mkv", "/in/A.mkv"))
+		_, dup = tracker.observe(context.Background(), dupPlanFor("/in/B.mkv", "/in/A.mkv"))
 		assert.False(t, dup, "WillMove=false targets are owned by destination-occupation checks")
 	})
 
 	t.Run("empty and nil plans are never registered", func(t *testing.T) {
 		forceCasePosture(t, true)
 		var nilTracker *DuplicateTracker
-		_, dup := nilTracker.observe(dupPlanFor("/in/A.mkv", "/dest/lib/x.mkv"))
+		_, dup := nilTracker.observe(context.Background(), dupPlanFor("/in/A.mkv", "/dest/lib/x.mkv"))
 		assert.False(t, dup, "nil tracker disables detection")
 		tracker := NewDuplicateTracker(false)
-		_, dup = tracker.observe(nil)
+		_, dup = tracker.observe(context.Background(), nil)
 		assert.False(t, dup)
-		_, dup = tracker.observe(dupPlanFor("/in/A.mkv", ""))
+		_, dup = tracker.observe(context.Background(), dupPlanFor("/in/A.mkv", ""))
 		assert.False(t, dup)
 	})
 
@@ -187,10 +187,10 @@ func TestDuplicateTracker_Grouping(t *testing.T) {
 		tracker := NewDuplicateTracker(false)
 		// No PrimeBatch at all: the first observer owns the key (single-file
 		// and unprimed callers), deterministic batches never take this leg.
-		_, dup := tracker.observe(dupPlanFor("/in/B.mkv", "/dest/lib/x.mkv"))
+		_, dup := tracker.observe(context.Background(), dupPlanFor("/in/B.mkv", "/dest/lib/x.mkv"))
 		assert.False(t, dup)
 		settleClaim(tracker, "/in/B.mkv", "/dest/lib/x.mkv")
-		prior, dup := tracker.observe(dupPlanFor("/in/A.mkv", "/dest/lib/x.mkv"))
+		prior, dup := tracker.observe(context.Background(), dupPlanFor("/in/A.mkv", "/dest/lib/x.mkv"))
 		require.True(t, dup)
 		assert.Equal(t, "/in/B.mkv", prior.source, "unprimed = first-come, documenting the legacy fallback")
 	})
@@ -207,7 +207,7 @@ func TestDuplicateTracker_Grouping(t *testing.T) {
 				defer wg.Done()
 				key := fmt.Sprintf("/dest/lib/movie-%d.mkv", i%8)
 				plan := dupPlanFor(fmt.Sprintf("/in/src-%d.mkv", i), key)
-				_, dup := tracker.observe(plan)
+				_, dup := tracker.observe(context.Background(), plan)
 				if !dup {
 					mu.Lock()
 					claimsPerKey[key]++
@@ -228,12 +228,12 @@ func TestDuplicateTracker_Grouping(t *testing.T) {
 func TestApplyDuplicatePreflight(t *testing.T) {
 	forceCasePosture(t, true)
 	tracker := NewDuplicateTracker(false)
-	tracker.observe(dupPlanFor("/in/A.mkv", "/dest/lib/x.mkv"))
+	tracker.observe(context.Background(), dupPlanFor("/in/A.mkv", "/dest/lib/x.mkv"))
 	settleClaim(tracker, "/in/A.mkv", "/dest/lib/x.mkv")
 
 	t.Run("unauthorized duplicate joins plan conflicts", func(t *testing.T) {
 		plan := dupPlanFor("/in/B.mkv", "/dest/lib/x.mkv")
-		warnings, skip := applyDuplicatePreflight(plan, tracker, false)
+		warnings, skip := applyDuplicatePreflight(context.Background(), plan, tracker, false)
 		assert.Nil(t, warnings)
 		assert.False(t, skip)
 		require.Len(t, plan.Conflicts, 1)
@@ -244,7 +244,7 @@ func TestApplyDuplicatePreflight(t *testing.T) {
 
 	t.Run("authorized duplicate demotes to warning and skips execution", func(t *testing.T) {
 		plan := dupPlanFor("/in/C.mkv", "/dest/lib/x.mkv")
-		warnings, skip := applyDuplicatePreflight(plan, tracker, true)
+		warnings, skip := applyDuplicatePreflight(context.Background(), plan, tracker, true)
 		assert.Empty(t, plan.Conflicts, "authorization demotes the duplicate out of the conflict pipeline")
 		require.Len(t, warnings, 1)
 		assert.Contains(t, warnings[0], "/dest/lib/x.mkv")
@@ -255,10 +255,10 @@ func TestApplyDuplicatePreflight(t *testing.T) {
 
 	t.Run("no duplicate yields nothing", func(t *testing.T) {
 		plan := dupPlanFor("/in/D.mkv", "/dest/lib/y.mkv")
-		warnings, skip := applyDuplicatePreflight(plan, tracker, false)
+		warnings, skip := applyDuplicatePreflight(context.Background(), plan, tracker, false)
 		assert.Nil(t, warnings)
 		assert.False(t, skip)
-		warnings, skip = applyDuplicatePreflight(plan, nil, false)
+		warnings, skip = applyDuplicatePreflight(context.Background(), plan, nil, false)
 		assert.Nil(t, warnings, "nil tracker disables detection")
 		assert.False(t, skip)
 		assert.Empty(t, plan.Conflicts)
@@ -432,7 +432,7 @@ func TestDuplicateTracker_PrimingDeterministicOwnership(t *testing.T) {
 			wg.Add(1)
 			go func(src string) {
 				defer wg.Done()
-				prior, dup := tracker.observe(dupPlanFor(src, "/dest/lib/x.mkv"))
+				prior, dup := tracker.observe(context.Background(), dupPlanFor(src, "/dest/lib/x.mkv"))
 				outcomes <- outcome{src: src, prior: prior, dup: dup}
 			}(src)
 		}
@@ -455,7 +455,7 @@ func TestDuplicateTracker_PrimingDeterministicOwnership(t *testing.T) {
 		}
 		// The settled winner keeps its key: even a fresh spelling of a loser
 		// observes the same owner.
-		prior, dup := tracker.observe(dupPlanFor("/in/B.mkv#retry", "/dest/lib/x.mkv"))
+		prior, dup := tracker.observe(context.Background(), dupPlanFor("/in/B.mkv#retry", "/dest/lib/x.mkv"))
 		require.True(t, dup)
 		assert.Equal(t, "/in/A.mkv", prior.source)
 	}
@@ -487,7 +487,7 @@ func TestDuplicateTracker_PrimingDeterministicOwnership(t *testing.T) {
 			go func(src string) {
 				defer wg.Done()
 				<-gates[src]
-				prior, dup := tracker.observe(dupPlanFor(src, "/dest/lib/x.mkv"))
+				prior, dup := tracker.observe(context.Background(), dupPlanFor(src, "/dest/lib/x.mkv"))
 				results <- outcome{src: src, prior: prior, dup: dup}
 			}(src)
 		}
@@ -535,7 +535,7 @@ func TestDuplicateTracker_PrimingDeterministicOwnership(t *testing.T) {
 				src := fmt.Sprintf("/in/src-%02d.mkv", i)
 				key := fmt.Sprintf("/dest/lib/movie-%d.mkv", i%8)
 				plan := dupPlanFor(src, key)
-				_, dup := tracker.observe(plan)
+				_, dup := tracker.observe(context.Background(), plan)
 				if !dup {
 					mu.Lock()
 					winners[key] = append(winners[key], src)
@@ -573,10 +573,10 @@ func TestDuplicateTracker_PrimeBatchOncePerRun(t *testing.T) {
 			{SourcePath: "/in/C.mkv", TargetPath: "/dest/lib/y.mkv", WillMove: true},
 		})
 		settleClaim(tracker, "/in/A.mkv", "/dest/lib/x.mkv")
-		prior, dup := tracker.observe(dupPlanFor("/in/B.mkv", "/dest/lib/x.mkv"))
+		prior, dup := tracker.observe(context.Background(), dupPlanFor("/in/B.mkv", "/dest/lib/x.mkv"))
 		require.True(t, dup)
 		assert.Equal(t, "/in/A.mkv", prior.source, "the first batch's owner survives the ignored re-prime")
-		_, dup = tracker.observe(dupPlanFor("/in/D.mkv", "/dest/lib/y.mkv"))
+		_, dup = tracker.observe(context.Background(), dupPlanFor("/in/D.mkv", "/dest/lib/y.mkv"))
 		assert.False(t, dup, "the ignored batch never registered /dest/lib/y.mkv")
 	})
 
@@ -592,7 +592,7 @@ func TestDuplicateTracker_PrimeBatchOncePerRun(t *testing.T) {
 			{SourcePath: "/in/A.mkv", TargetPath: "/in/A.mkv", WillMove: false},
 			{SourcePath: "/in/B.mkv", TargetPath: "", WillMove: true},
 		})
-		_, dup := tracker.observe(dupPlanFor("/in/C.mkv", "/in/A.mkv"))
+		_, dup := tracker.observe(context.Background(), dupPlanFor("/in/C.mkv", "/in/A.mkv"))
 		assert.False(t, dup, "WillMove=false primings stay owned by destination-occupation checks")
 	})
 
@@ -604,7 +604,7 @@ func TestDuplicateTracker_PrimeBatchOncePerRun(t *testing.T) {
 			{SourcePath: "/in/A-reshuffled.mkv", TargetPath: "/dest/lib/./x.mkv", WillMove: true},
 		})
 		settleClaim(tracker, "/in/A.mkv", "/dest/lib/x.mkv")
-		prior, dup := tracker.observe(dupPlanFor("/in/B.mkv", "/dest/lib/x.mkv"))
+		prior, dup := tracker.observe(context.Background(), dupPlanFor("/in/B.mkv", "/dest/lib/x.mkv"))
 		require.True(t, dup)
 		assert.Equal(t, "/in/A.mkv", prior.source, "same-key re-registration inside one batch keeps the first sorted claim")
 	})
@@ -637,14 +637,14 @@ func TestDuplicateTracker_NonProbingDryRun(t *testing.T) {
 		dir := t.TempDir()
 		tracker := NewDuplicateTracker(true)
 		target := filepath.Join(dir, "Movie.mkv")
-		_, dup := tracker.observe(dupPlanFor("/in/A.mkv", target))
+		_, dup := tracker.observe(context.Background(), dupPlanFor("/in/A.mkv", target))
 		assert.False(t, dup)
 		settleClaim(tracker, "/in/A.mkv", target)
-		_, dup = tracker.observe(dupPlanFor("/in/B.mkv", target))
+		_, dup = tracker.observe(context.Background(), dupPlanFor("/in/B.mkv", target))
 		require.True(t, dup, "identical spellings group under every posture")
 		// The uncached fallback preserves case distinctions rather than
 		// aliasing byte-distinct names on a guess.
-		_, dup = tracker.observe(dupPlanFor("/in/C.mkv", filepath.Join(dir, "movie.mkv")))
+		_, dup = tracker.observe(context.Background(), dupPlanFor("/in/C.mkv", filepath.Join(dir, "movie.mkv")))
 		assert.False(t, dup, "uncached dry-run roots keep case variants distinct (conservative)")
 		assert.Equal(t, 0, *caseCalls, "case probe never ran")
 		assert.Equal(t, 0, *normCalls, "normalization probe never ran")
@@ -661,9 +661,9 @@ func TestDuplicateTracker_NonProbingDryRun(t *testing.T) {
 		require.Equal(t, 1, *normCalls)
 		tracker := NewDuplicateTracker(true)
 		target := filepath.Join(dir, "Movie.mkv")
-		tracker.observe(dupPlanFor("/in/A.mkv", target))
+		tracker.observe(context.Background(), dupPlanFor("/in/A.mkv", target))
 		settleClaim(tracker, "/in/A.mkv", target)
-		_, dup := tracker.observe(dupPlanFor("/in/B.mkv", filepath.Join(dir, "movie.mkv")))
+		_, dup := tracker.observe(context.Background(), dupPlanFor("/in/B.mkv", filepath.Join(dir, "movie.mkv")))
 		require.True(t, dup, "cached-insensitive postures fold case variants without new probes")
 		assert.Equal(t, 1, *caseCalls, "no new case probe during non-probing derivation")
 		assert.Equal(t, 1, *normCalls, "no new normalization probe during non-probing derivation")
@@ -674,9 +674,9 @@ func TestDuplicateTracker_NonProbingDryRun(t *testing.T) {
 		dir := t.TempDir()
 		tracker := NewDuplicateTracker(false) // live policy
 		target := filepath.Join(dir, "Movie.mkv")
-		tracker.observe(dupPlanFor("/in/A.mkv", target))
+		tracker.observe(context.Background(), dupPlanFor("/in/A.mkv", target))
 		settleClaim(tracker, "/in/A.mkv", target)
-		_, dup := tracker.observe(dupPlanFor("/in/B.mkv", filepath.Join(dir, "movie.mkv")))
+		_, dup := tracker.observe(context.Background(), dupPlanFor("/in/B.mkv", filepath.Join(dir, "movie.mkv")))
 		require.True(t, dup, "live runs probe and fold case variants")
 		assert.Equal(t, 1, *caseCalls, "one case probe per root per process")
 		assert.Equal(t, 1, *normCalls, "one normalization probe per root per process")
@@ -876,16 +876,16 @@ func TestDuplicateTracker_Release(t *testing.T) {
 		nilTracker.release(nil)
 
 		tracker := NewDuplicateTracker(false)
-		tracker.observe(dupPlanFor("/in/A.mkv", "/dest/lib/x.mkv"))
-		tracker.observe(dupPlanFor("/in/C.mkv", "/dest/lib/y.mkv"))
+		tracker.observe(context.Background(), dupPlanFor("/in/A.mkv", "/dest/lib/x.mkv"))
+		tracker.observe(context.Background(), dupPlanFor("/in/C.mkv", "/dest/lib/y.mkv"))
 		tracker.release(nil)
 		tracker.release(&OrganizePlan{SourcePath: "/in/A.mkv", TargetPath: "/in/A.mkv", WillMove: false})
 		tracker.release(&OrganizePlan{SourcePath: "/in/C.mkv", TargetPath: "", WillMove: true})
 		settleClaim(tracker, "/in/A.mkv", "/dest/lib/x.mkv")
 		settleClaim(tracker, "/in/C.mkv", "/dest/lib/y.mkv")
-		_, dup := tracker.observe(dupPlanFor("/in/B.mkv", "/dest/lib/x.mkv"))
+		_, dup := tracker.observe(context.Background(), dupPlanFor("/in/B.mkv", "/dest/lib/x.mkv"))
 		assert.True(t, dup, "untouched key still owned by A")
-		_, dup = tracker.observe(dupPlanFor("/in/D.mkv", "/dest/lib/y.mkv"))
+		_, dup = tracker.observe(context.Background(), dupPlanFor("/in/D.mkv", "/dest/lib/y.mkv"))
 		assert.True(t, dup, "untouched key still owned by C")
 	})
 
@@ -897,21 +897,21 @@ func TestDuplicateTracker_Release(t *testing.T) {
 			{SourcePath: "/in/B.mkv", TargetPath: "/dest/lib/x.mkv", WillMove: true},
 		})
 		tracker.release(dupPlanFor("/in/B.mkv", "/dest/lib/x.mkv"))
-		_, dup := tracker.observe(dupPlanFor("/in/A.mkv", "/dest/lib/x.mkv"))
+		_, dup := tracker.observe(context.Background(), dupPlanFor("/in/A.mkv", "/dest/lib/x.mkv"))
 		assert.False(t, dup, "the owner's own observation is idempotent")
 		settleClaim(tracker, "/in/A.mkv", "/dest/lib/x.mkv")
-		prior, dup := tracker.observe(dupPlanFor("/in/D.mkv", "/dest/lib/x.mkv"))
+		prior, dup := tracker.observe(context.Background(), dupPlanFor("/in/D.mkv", "/dest/lib/x.mkv"))
 		require.True(t, dup, "a loser's release must not free the owner's key")
 		assert.Equal(t, "/in/A.mkv", prior.source)
 		tracker.release(dupPlanFor("/in/A.mkv", "/dest/lib/x.mkv#unclaimed"))
-		_, dup = tracker.observe(dupPlanFor("/in/E.mkv", "/dest/lib/z.mkv"))
+		_, dup = tracker.observe(context.Background(), dupPlanFor("/in/E.mkv", "/dest/lib/z.mkv"))
 		assert.False(t, dup)
 		settleClaim(tracker, "/in/E.mkv", "/dest/lib/z.mkv")
 
 		// #241 P2: releasing an already-SETTLED claim is a no-op — the
 		// winner's terminal outcome is final.
 		tracker.release(dupPlanFor("/in/A.mkv", "/dest/lib/x.mkv"))
-		prior, dup = tracker.observe(dupPlanFor("/in/F.mkv", "/dest/lib/x.mkv"))
+		prior, dup = tracker.observe(context.Background(), dupPlanFor("/in/F.mkv", "/dest/lib/x.mkv"))
 		require.True(t, dup, "releasing a settled winner changes nothing")
 		assert.Equal(t, "/in/A.mkv", prior.source)
 	})
@@ -923,13 +923,13 @@ func TestDuplicateTracker_Release(t *testing.T) {
 			{SourcePath: "/in/A.mkv", TargetPath: "/dest/lib/x.mkv", WillMove: true},
 			{SourcePath: "/in/B.mkv", TargetPath: "/dest/lib/x.mkv", WillMove: true},
 		})
-		_, dup := tracker.observe(dupPlanFor("/in/A.mkv", "/dest/lib/x.mkv"))
+		_, dup := tracker.observe(context.Background(), dupPlanFor("/in/A.mkv", "/dest/lib/x.mkv"))
 		assert.False(t, dup)
 		tracker.release(dupPlanFor("/in/A.mkv", "/dest/lib/x.mkv"))
-		_, dup = tracker.observe(dupPlanFor("/in/B.mkv", "/dest/lib/x.mkv"))
+		_, dup = tracker.observe(context.Background(), dupPlanFor("/in/B.mkv", "/dest/lib/x.mkv"))
 		assert.False(t, dup, "owner release lets the next claimant register the freed key")
 		settleClaim(tracker, "/in/B.mkv", "/dest/lib/x.mkv")
-		prior, dup := tracker.observe(dupPlanFor("/in/A.mkv", "/dest/lib/x.mkv"))
+		prior, dup := tracker.observe(context.Background(), dupPlanFor("/in/A.mkv", "/dest/lib/x.mkv"))
 		require.True(t, dup, "the freed key re-registers to its new claimant")
 		assert.Equal(t, "/in/B.mkv", prior.source)
 	})
@@ -942,7 +942,7 @@ func TestDuplicateTracker_Release(t *testing.T) {
 			{SourcePath: "/in/B.mkv", TargetPath: "/dest/lib/x.mkv", WillMove: true},
 			{SourcePath: "/in/C.mkv", TargetPath: "/dest/lib/x.mkv", WillMove: true},
 		})
-		_, dup := tracker.observe(dupPlanFor("/in/A.mkv", "/dest/lib/x.mkv"))
+		_, dup := tracker.observe(context.Background(), dupPlanFor("/in/A.mkv", "/dest/lib/x.mkv"))
 		assert.False(t, dup)
 		type outcome struct {
 			src   string
@@ -952,7 +952,7 @@ func TestDuplicateTracker_Release(t *testing.T) {
 		results := make(chan outcome, 2)
 		for _, src := range []string{"/in/B.mkv", "/in/C.mkv"} {
 			go func(src string) {
-				prior, dup := tracker.observe(dupPlanFor(src, "/dest/lib/x.mkv"))
+				prior, dup := tracker.observe(context.Background(), dupPlanFor(src, "/dest/lib/x.mkv"))
 				results <- outcome{src: src, prior: prior, dup: dup}
 			}(src)
 		}
@@ -1096,7 +1096,7 @@ func TestOrganize_ConflictBranchReleasesStaleOwner(t *testing.T) {
 			models.FileMatchInfo{MovieID: "ABC-123", Path: "/in/A.mkv", Name: "A.mkv", Extension: ".mkv"}, tracker, true, false))
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "conflicts detected")
-		_, dup := tracker.observe(dupPlanFor("/in/B.mkv", target))
+		_, dup := tracker.observe(context.Background(), dupPlanFor("/in/B.mkv", target))
 		assert.False(t, dup, "the conflict-failed owner released; the next claimant falls through")
 	})
 
@@ -1117,7 +1117,7 @@ func TestOrganize_ConflictBranchReleasesStaleOwner(t *testing.T) {
 			models.FileMatchInfo{MovieID: "ABC-123", Path: "/in/B.mkv", Name: "B.mkv", Extension: ".mkv"}, tracker, false, false))
 		require.Error(t, err, "the unauthorized loser fails through the identical conflict pipeline")
 		assert.Contains(t, filepath.ToSlash(err.Error()), target)
-		_, dup := tracker.observe(dupPlanFor("/in/B.mkv", target))
+		_, dup := tracker.observe(context.Background(), dupPlanFor("/in/B.mkv", target))
 		require.True(t, dup, "the owner keeps its key through the loser's failure")
 		srcContent, readErr := afero.ReadFile(fs, "/in/B.mkv")
 		require.NoError(t, readErr)

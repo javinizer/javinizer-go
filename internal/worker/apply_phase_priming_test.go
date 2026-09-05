@@ -25,12 +25,14 @@ import (
 type primingStubWorkflow struct {
 	stubApplyWorkflow
 	planErrOn map[string]bool
+	planPanic map[string]bool
 
-	mu         sync.Mutex
-	primeCalls []string
-	applyCmds  []workflow.ApplyCmd
-	earlyApply []string
-	total      int
+	mu             sync.Mutex
+	primeCalls     []string
+	applyCmds      []workflow.ApplyCmd
+	earlyApply     []string
+	applyDeadlines map[string]time.Time
+	total          int
 }
 
 func (s *primingStubWorkflow) PlanDuplicatePriming(_ context.Context, cmd workflow.ApplyCmd) (organizer.DuplicatePriming, error) {
@@ -38,6 +40,9 @@ func (s *primingStubWorkflow) PlanDuplicatePriming(_ context.Context, cmd workfl
 	defer s.mu.Unlock()
 	src := cmd.Match.Path
 	s.primeCalls = append(s.primeCalls, src)
+	if s.planPanic[src] {
+		panic("priming plan boom for " + src)
+	}
 	if s.planErrOn[src] {
 		return organizer.DuplicatePriming{}, fmt.Errorf("plan boom for %s", src)
 	}
@@ -54,8 +59,21 @@ func (s *primingStubWorkflow) Apply(ctx context.Context, cmd workflow.ApplyCmd) 
 		s.earlyApply = append(s.earlyApply, cmd.Match.Path)
 	}
 	s.applyCmds = append(s.applyCmds, cmd)
+	if deadline, ok := ctx.Deadline(); ok {
+		if s.applyDeadlines == nil {
+			s.applyDeadlines = make(map[string]time.Time)
+		}
+		s.applyDeadlines[cmd.Match.Path] = deadline
+	}
 	s.mu.Unlock()
 	return s.stubApplyWorkflow.Apply(ctx, cmd)
+}
+
+func (s *primingStubWorkflow) applyDeadlineFor(path string) (time.Time, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	deadline, ok := s.applyDeadlines[path]
+	return deadline, ok
 }
 
 func (s *primingStubWorkflow) snapshot() (primeCalls []string, applyCmds []workflow.ApplyCmd, early []string) {
@@ -303,4 +321,105 @@ func TestApplyPhase_Run_PrimingHookPanicRecordsPerFileFailure(t *testing.T) {
 	assert.Contains(t, row.Error, "priming hook boom")
 	assert.False(t, inputs.Lifecycle.(*stubLifecycle).organized, "a recorded failure keeps the job out of Organized")
 	assert.True(t, inputs.Lifecycle.(*stubLifecycle).completed)
+}
+
+// TestApplyPhase_Run_PrimingPlanPanicRecordsPerFileFailure pins codex P2 (PR
+// #241, F3): a panic INSIDE PlanDuplicatePriming escapes on the phase's main
+// goroutine, where no worker-side withFileRecovery exists — without a
+// per-file boundary it would sink the whole job. The planning call runs under
+// the same recovery semantics as preparation/execution: the panicking file
+// records exactly one failure with the panic message and the batch applies
+// every other file.
+func TestApplyPhase_Run_PrimingPlanPanicRecordsPerFileFailure(t *testing.T) {
+	const panics, goodB, goodC = "/source/a-panics.mp4", "/source/b-good.mp4", "/source/c-good.mp4"
+
+	wf := &primingStubWorkflow{total: 3, planPanic: map[string]bool{panics: true}}
+	wf.applyResult = &workflow.ApplyResult{Movie: &models.Movie{ID: "M-100"}}
+	inputs := makeApplyInputs(wf)
+	inputs.Concurrency = concurrencyConfig{MaxWorkers: 2, WorkerTimeout: 0}
+	for _, p := range []string{panics, goodB, goodC} {
+		inputs.Results[p] = &resultstore.MovieResult{
+			FileMatchInfo: models.FileMatchInfo{Path: p, MovieID: "M-100"},
+			Status:        models.JobStatusCompleted,
+			Movie:         &models.Movie{ID: "M-100"},
+		}
+	}
+
+	var organized, failed int
+	NewApplyPhase().Run(context.Background(), inputs, ApplyPhaseConfig{
+		OrganizeOptions: workflow.OrganizeOptions{MoveFiles: true},
+		Destination:     "/output",
+		OnPhaseComplete: func(o, f int) { organized, failed = o, f },
+	})
+
+	primeCalls, applyCmds, _ := wf.snapshot()
+	assert.Equal(t, []string{panics, goodB, goodC}, primeCalls,
+		"planning keeps going past the panic — every item is attempted exactly once")
+	appliedPaths := make([]string, 0, len(applyCmds))
+	for _, cmd := range applyCmds {
+		appliedPaths = append(appliedPaths, cmd.Match.Path)
+	}
+	assert.ElementsMatch(t, []string{goodB, goodC}, appliedPaths,
+		"the panicking file is never applied; the batch applies every other file")
+	assert.Equal(t, 2, organized)
+	assert.Equal(t, 1, failed, "the planning panic records exactly one per-file failure")
+
+	row := inputs.Updater.(*stubUpdater).getResult(panics)
+	require.NotNil(t, row, "recovery writes the planning panic back, mirroring the worker panic path")
+	assert.Equal(t, models.JobStatusFailed, row.Status)
+	assert.Contains(t, row.Error, "priming plan boom")
+	assert.NotContains(t, row.Error, "hook", "the panic is attributed to planning, not to the hook")
+
+	lc := inputs.Lifecycle.(*stubLifecycle)
+	assert.False(t, lc.failed, "the phase main body survives: no job-sinking panic")
+	assert.False(t, lc.organized, "a recorded failure keeps the job out of Organized")
+	assert.True(t, lc.completed)
+}
+
+// TestApplyPhase_Run_SingleDeadlineAcrossPrepareAndApply pins codex P2 (PR
+// #241, F4): one absolute per-file deadline spans the PreApply hook during
+// preparation AND the worker's apply execution — the worker derives its task
+// context from the SAME timestamp instead of re-granting a fresh full
+// WorkerTimeout (~2x the configured limit).
+func TestApplyPhase_Run_SingleDeadlineAcrossPrepareAndApply(t *testing.T) {
+	const perFile = 30 * time.Second
+	files := []string{"/source/a-one.mp4", "/source/b-two.mp4"}
+
+	wf := &primingStubWorkflow{total: len(files)}
+	wf.applyResult = &workflow.ApplyResult{Movie: &models.Movie{ID: "M-100"}}
+	inputs := makeApplyInputs(wf)
+	inputs.Concurrency = concurrencyConfig{MaxWorkers: len(files), WorkerTimeout: perFile}
+	for _, p := range files {
+		inputs.Results[p] = &resultstore.MovieResult{
+			FileMatchInfo: models.FileMatchInfo{Path: p, MovieID: "M-100"},
+			Status:        models.JobStatusCompleted,
+			Movie:         &models.Movie{ID: "M-100"},
+		}
+	}
+
+	hookDeadlines := make(map[string]time.Time, len(files))
+	runStart := time.Now()
+	NewApplyPhase().Run(context.Background(), inputs, ApplyPhaseConfig{
+		OrganizeOptions: workflow.OrganizeOptions{MoveFiles: true},
+		Destination:     "/output",
+		PreApplyFunc: func(ctx context.Context, afc *ApplyFileContext) error {
+			deadline, ok := ctx.Deadline()
+			require.True(t, ok, "the priming hook receives the per-file deadline context")
+			hookDeadlines[afc.FilePath] = deadline
+			return nil
+		},
+	})
+
+	require.Len(t, hookDeadlines, len(files))
+	for _, p := range files {
+		hookDeadline := hookDeadlines[p]
+		applyDeadline, ok := wf.applyDeadlineFor(p)
+		require.True(t, ok, "the worker's apply context carries a deadline")
+		assert.Equal(t, hookDeadline, applyDeadline,
+			"ONE absolute deadline spans hook + apply — no fresh double-grant for %s", p)
+		assert.WithinDuration(t, runStart.Add(perFile), hookDeadline, time.Second,
+			"the single deadline is measured once, from the file's preparation")
+		assert.Less(t, time.Until(applyDeadline), perFile,
+			"by apply time the hook has already spent part of the shared budget")
+	}
 }

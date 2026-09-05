@@ -664,7 +664,20 @@ func (o *Organizer) Organize(ctx context.Context, cmd OrganizeCmd) (*OrganizeRes
 	// plan.Conflicts and short-circuit through the identical failure pipeline;
 	// authorized duplicates return as persisted per-file warnings and skip
 	// execution — only the primed winner's bytes land (#240 finding A).
-	dupWarnings, dupSkip := applyDuplicatePreflight(plan, cmd.DuplicateTracker, cmd.ForceUpdate)
+	dupWarnings, dupSkip := applyDuplicatePreflight(ctx, plan, cmd.DuplicateTracker, cmd.ForceUpdate)
+
+	// codex P2 (PR #241 F2) promotion/execute boundary recheck: the preflight
+	// wait honors the caller's context, so a deadline or batch cancel can land
+	// AFTER this plan claimed or was promoted onto its key. Recheck before ANY
+	// further filesystem work (validation reads included): an aborted owner
+	// returns the context error — matching the entry guard's outcome — and
+	// releases its key so the next claimant promotes instead of blocking
+	// behind a corpse. Non-owners release nothing, so cancelled waiters pass
+	// through harmlessly.
+	if err := ctx.Err(); err != nil {
+		cmd.DuplicateTracker.release(plan)
+		return nil, err
+	}
 
 	if !cmd.ForceUpdate {
 		if issues := o.validatePlan(plan); len(issues) > 0 {

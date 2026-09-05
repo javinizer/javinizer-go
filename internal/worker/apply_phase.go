@@ -52,8 +52,15 @@ type preparedApplyFile struct {
 	afc      *ApplyFileContext
 	baseline *models.Movie
 	execute  bool
+	// deadline is the per-file WorkerTimeout budget as ONE absolute timestamp
+	// (codex P2, PR #241 F4): preparation (the PreApply hook), duplicate-claim
+	// waiting, and execution all spend from the same clock instead of the
+	// worker re-granting a fresh full timeout after priming-preparation burned
+	// part of it. Zero when no WorkerTimeout is configured.
+	deadline time.Time
 	// hookOutcome is non-nil when the priming-time PreApply hook panicked
-	// (codex r2 P2): the prepare pass recovered, wrote back, and broadcast
+	// (codex r2 P2) or the priming-time planning pass panicked (codex P2, PR
+	// #241 F3): the prepare/priming pass recovered, wrote back, and broadcast
 	// the failure already, so the item's worker replays this outcome instead
 	// of re-executing — the once-per-file hook contract holds and the batch
 	// counts exactly one recorded failure for the file.
@@ -63,15 +70,15 @@ type preparedApplyFile struct {
 // primeDuplicateClaims runs the batch's ONE planning pass when the workflow
 // exposes the read-only planning seam: each prepared item's organize target
 // registers against the run's duplicate tracker in sorted order,
-// pre-assigning every canonical key's winner before any apply worker starts
-// (#240 finding A). Items whose PreApply hook declined execution (or
-// panicked into a recorded failure), whose plan fails, or whose source
-// already vanished register nothing (codex r2 P2) — their workers skip
-// execution or fail with the identical plan error, so priming can never
-// claim a file that cannot run. Without the seam (or on a nil workflow) the
-// tracker stays unprimed, preserving first-come observation for single-file
-// callers.
-func primeDuplicateClaims(ctx context.Context, wf workflow.WorkflowInterface, tracker *organizer.DuplicateTracker, items []applyItem, prepared map[string]*preparedApplyFile) {
+// pre-assigning every canonical key's winner (and its ordered standbys,
+// codex P2, PR #241 F1) before any apply worker starts (#240 finding A).
+// Items whose PreApply hook declined execution (or panicked into a recorded
+// failure), whose plan fails, or whose source already vanished register
+// nothing (codex r2 P2) — their workers skip execution or fail with the
+// identical plan error, so priming can never claim a file that cannot run.
+// Without the seam (or on a nil workflow) the tracker stays unprimed,
+// preserving first-come observation for single-file callers.
+func primeDuplicateClaims(ctx context.Context, wf workflow.WorkflowInterface, tracker *organizer.DuplicateTracker, items []applyItem, prepared map[string]*preparedApplyFile, inputs applyPhaseInputs, cfg ApplyPhaseConfig) {
 	planner, ok := wf.(workflow.DuplicatePrimingPlanner)
 	if !ok {
 		return
@@ -82,7 +89,16 @@ func primeDuplicateClaims(ctx context.Context, wf workflow.WorkflowInterface, tr
 		if !p.execute {
 			continue
 		}
-		priming, err := planner.PlanDuplicatePriming(ctx, p.cmd)
+		priming, panicOutcome, err := planPrimingRecovered(ctx, planner, item, p.cmd, inputs, cfg)
+		if panicOutcome != nil {
+			// codex P2 (PR #241 F3): the planning panic was already recovered,
+			// written back, and broadcast per file — the worker replays the
+			// recorded failure (planning never runs twice) while the batch
+			// continues with every other item.
+			p.execute = false
+			p.hookOutcome = panicOutcome
+			continue
+		}
 		if err != nil {
 			logging.Warnf("[Apply] duplicate preflight planning skipped %s: %v", item.filePath, err)
 			continue
@@ -90,6 +106,43 @@ func primeDuplicateClaims(ctx context.Context, wf workflow.WorkflowInterface, tr
 		primings = append(primings, priming)
 	}
 	tracker.PrimeBatch(primings)
+}
+
+// planPrimingRecovered runs ONE item's priming-plan call under the apply
+// phase's per-file recovery boundary (codex P2, PR #241 F3).
+// PlanDuplicatePriming runs the organizer's whole planning pipeline on the
+// phase's MAIN goroutine, so an unrecovered panic would escape
+// withFileRecovery (which exists only inside the fanned-out workers) and
+// sink the whole job. A recovered panic is written back and broadcast with
+// the identical semantics as a preparation or execution panic — that file
+// fails with the recorded panic message and the batch continues — and the
+// returned outcome is what the item's worker replays.
+func planPrimingRecovered(ctx context.Context, planner workflow.DuplicatePrimingPlanner, item applyItem, cmd workflow.ApplyCmd, inputs applyPhaseInputs, cfg ApplyPhaseConfig) (priming organizer.DuplicatePriming, panicOutcome *applyFileOutcome, err error) {
+	outcome := applyFileOutcome{FilePath: item.filePath, MovieID: item.movie.ID, DryRun: cfg.DryRun}
+	// Mirror prepareApplyItem's recoveryContext assembly field-for-field: the
+	// recorded failure is indistinguishable from a worker-side panic.
+	rc := recoveryContext{
+		filePath:         item.filePath,
+		fmi:              item.fileResult.FileMatchInfo,
+		movie:            item.fileResult.Movie,
+		provenance:       inputs.Provenance[item.filePath],
+		updater:          inputs.Updater,
+		broadcast:        broadcastFailure(inputs.Broadcaster, inputs.JobID, item.movie.ID, jobEventPhaseApply, "Apply"),
+		startTime:        time.Now(),
+		editLockFn:       inputs.EditLockFn,
+		promoteWitnessFn: inputs.PromoteWitnessFn,
+	}
+	// Post-recovery bookkeeping is deferred FIRST so it runs AFTER the
+	// recovery func below (LIFO) — recover() only bites when called directly
+	// by a deferred function, exactly like prepareApplyItem's dual-defers.
+	defer func() {
+		if outcome.Panic {
+			panicOutcome = &outcome
+		}
+	}()
+	defer withFileRecovery(rc, &outcome)()
+	priming, err = planner.PlanDuplicatePriming(ctx, cmd)
+	return priming, nil, err
 }
 
 // applyFileOutcome captures the result of applying a single file.
@@ -210,7 +263,7 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 	for _, item := range items {
 		prepared[item.filePath] = prepareApplyItem(ctx, item, inputs, cfg)
 	}
-	primeDuplicateClaims(ctx, wf, cfg.OrganizeOptions.DuplicateTracker, items, prepared)
+	primeDuplicateClaims(ctx, wf, cfg.OrganizeOptions.DuplicateTracker, items, prepared, inputs, cfg)
 	outcomes := fanout.BoundedFanOut(ctx, inputs.Concurrency.MaxWorkers, items,
 		func(egCtx context.Context, item applyItem) applyFileOutcome {
 			outcome := applyFile(egCtx, wf, item.filePath, item.fileResult, item.movie, prepared[item.filePath], inputs, cfg)
@@ -317,10 +370,17 @@ func countRemainingApplyFailures(inputs applyPhaseInputs, outcomes []applyFileOu
 // aborting every remaining file. A recovered panic yields execute=false
 // plus a pre-recorded failure outcome the item's worker replays unchanged
 // (the hook never runs twice).
+//
+// codex P2 (PR #241 F4): the budget is computed ONCE as an absolute
+// deadline and carried on the prepared item. The hook spends from it here
+// and applyFile derives its task context from the SAME timestamp, so
+// preparation + claim-waiting + execution share a single per-file budget
+// instead of the worker silently doubling it with a fresh full timeout.
 func prepareApplyItem(ctx context.Context, item applyItem, inputs applyPhaseInputs, cfg ApplyPhaseConfig) (prepared *preparedApplyFile) {
 	prepared = &preparedApplyFile{baseline: item.movie.Clone()}
 	if timeout := inputs.Concurrency.WorkerTimeout; timeout > 0 {
-		hookCtx, hookCancel := context.WithTimeout(ctx, timeout)
+		prepared.deadline = time.Now().Add(timeout)
+		hookCtx, hookCancel := context.WithDeadline(ctx, prepared.deadline)
 		defer hookCancel()
 		ctx = hookCtx
 	}
@@ -734,8 +794,13 @@ func applyFile(
 	applyTimeout := inputs.Concurrency.WorkerTimeout
 	taskCtx := egCtx
 	var taskCancel context.CancelFunc
-	if applyTimeout > 0 {
-		taskCtx, taskCancel = context.WithTimeout(egCtx, applyTimeout)
+	if !prepared.deadline.IsZero() {
+		// codex P2 (PR #241 F4): derive the task context from the ONE
+		// absolute per-file deadline computed at preparation — the hook
+		// already spent part of this budget, and duplicate-claim waiting
+		// plus execution spend the remainder. A fresh WithTimeout here would
+		// silently grant ~2x the configured per-file limit.
+		taskCtx, taskCancel = context.WithDeadline(egCtx, prepared.deadline)
 		defer taskCancel()
 	}
 

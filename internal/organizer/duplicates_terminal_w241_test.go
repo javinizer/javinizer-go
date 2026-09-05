@@ -28,7 +28,7 @@ func TestDuplicateTracker_TerminalWaiting(t *testing.T) {
 			{SourcePath: "/in/A.mkv", TargetPath: "/dest/lib/x.mkv", WillMove: true},
 			{SourcePath: "/in/B.mkv", TargetPath: "/dest/lib/x.mkv", WillMove: true},
 		})
-		_, dup := tracker.observe(dupPlanFor("/in/A.mkv", "/dest/lib/x.mkv"))
+		_, dup := tracker.observe(context.Background(), dupPlanFor("/in/A.mkv", "/dest/lib/x.mkv"))
 		require.False(t, dup)
 
 		type outcome struct {
@@ -37,7 +37,7 @@ func TestDuplicateTracker_TerminalWaiting(t *testing.T) {
 		}
 		results := make(chan outcome, 1)
 		go func() {
-			prior, dup := tracker.observe(dupPlanFor("/in/B.mkv", "/dest/lib/x.mkv"))
+			prior, dup := tracker.observe(context.Background(), dupPlanFor("/in/B.mkv", "/dest/lib/x.mkv"))
 			results <- outcome{prior, dup}
 		}()
 		waitForWaiter(t, tracker, "/dest/lib/x.mkv", "/in/B.mkv")
@@ -65,13 +65,13 @@ func TestDuplicateTracker_TerminalWaiting(t *testing.T) {
 		tracker.settle(dupPlanFor("/in/A.mkv", ""))
 		tracker.settle(dupPlanFor("/in/B.mkv", "/dest/lib/x.mkv"))
 
-		_, dup := tracker.observe(dupPlanFor("/in/A.mkv", "/dest/lib/x.mkv"))
+		_, dup := tracker.observe(context.Background(), dupPlanFor("/in/A.mkv", "/dest/lib/x.mkv"))
 		require.False(t, dup)
 		tracker.settle(dupPlanFor("/in/B.mkv", "/dest/lib/x.mkv"))
 		settleClaim(tracker, "/in/A.mkv", "/dest/lib/x.mkv")
 		settleClaim(tracker, "/in/A.mkv", "/dest/lib/x.mkv")
 
-		prior, dup := tracker.observe(dupPlanFor("/in/C.mkv", "/dest/lib/x.mkv"))
+		prior, dup := tracker.observe(context.Background(), dupPlanFor("/in/C.mkv", "/dest/lib/x.mkv"))
 		require.True(t, dup, "the settled owner keeps its key through every tolerated no-op settle")
 		assert.Equal(t, "/in/A.mkv", prior.source)
 	})
@@ -87,7 +87,7 @@ func TestDuplicateTracker_TerminalWaiting(t *testing.T) {
 			{SourcePath: "/in/A.mkv", TargetPath: "/dest/lib/x.mkv", WillMove: true},
 			{SourcePath: "/in/B.mkv", TargetPath: "/dest/lib/x.mkv", WillMove: true},
 		})
-		_, dup := tracker.observe(dupPlanFor("/in/A.mkv", "/dest/lib/x.mkv"))
+		_, dup := tracker.observe(context.Background(), dupPlanFor("/in/A.mkv", "/dest/lib/x.mkv"))
 		require.False(t, dup)
 		tracker.ReleaseAbandonedBy("/in/foreign.mkv")
 
@@ -97,7 +97,7 @@ func TestDuplicateTracker_TerminalWaiting(t *testing.T) {
 		}
 		results := make(chan outcome, 1)
 		go func() {
-			prior, dup := tracker.observe(dupPlanFor("/in/B.mkv", "/dest/lib/x.mkv"))
+			prior, dup := tracker.observe(context.Background(), dupPlanFor("/in/B.mkv", "/dest/lib/x.mkv"))
 			results <- outcome{prior, dup}
 		}()
 		waitForWaiter(t, tracker, "/dest/lib/x.mkv", "/in/B.mkv")
@@ -113,7 +113,7 @@ func TestDuplicateTracker_TerminalWaiting(t *testing.T) {
 
 		settleClaim(tracker, "/in/B.mkv", "/dest/lib/x.mkv")
 		tracker.ReleaseAbandonedBy("/in/B.mkv")
-		prior, dup := tracker.observe(dupPlanFor("/in/C.mkv", "/dest/lib/x.mkv"))
+		prior, dup := tracker.observe(context.Background(), dupPlanFor("/in/C.mkv", "/dest/lib/x.mkv"))
 		require.True(t, dup, "a settled claim is final — the abandon safety net never touches it")
 		assert.Equal(t, "/in/B.mkv", prior.source)
 	})
