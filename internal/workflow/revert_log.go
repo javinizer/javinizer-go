@@ -611,6 +611,16 @@ func (l *dbRevertLog) Complete(ctx context.Context, opID OperationID, result *Ap
 		}
 	}
 
+	// codex P1 (PR #241): a skipped duplicate generates NOTHING — its apply
+	// short-circuits before merge/download/NFO — but the STRICT journal no-op
+	// is enforced here too: any generated path paired with a DuplicateSkipped
+	// result names the WINNER's shared artifact, and journaling it onto the
+	// loser's row would arm a loser revert to DELETE the winner's files.
+	nfoPath, foundNFOPath, downloadPaths := result.NFOPath, result.FoundNFOPath, result.DownloadPaths
+	if org := result.OrganizeResult; org != nil && org.DuplicateSkipped {
+		nfoPath, foundNFOPath, downloadPaths = "", "", nil
+	}
+
 	// Wave-9 (codex review 4960250562 follow-up): the journal read-modify-write
 	// runs inside the row transaction against the FRESH row — merging into the
 	// preRecord snapshot here let a concurrent append/consume be overwritten by
@@ -622,16 +632,16 @@ func (l *dbRevertLog) Complete(ctx context.Context, opID OperationID, result *Ap
 		folderRoot = org.FolderPath
 	}
 	mergedJournal, err := l.mergeJournalInTx(ctx, recordID, opID, "Complete",
-		buildGeneratedFilesJSON(resolveLogger(l.logger), result.NFOPath, subtitles, result.DownloadPaths), folderRoot)
+		buildGeneratedFilesJSON(resolveLogger(l.logger), nfoPath, subtitles, downloadPaths), folderRoot)
 	if err != nil {
 		return err
 	}
 
-	if result.FoundNFOPath != "" {
-		preRecord.NFOPath = result.FoundNFOPath
+	if foundNFOPath != "" {
+		preRecord.NFOPath = foundNFOPath
 	}
-	if result.NFOPath != "" && preRecord.NFOPath == "" {
-		preRecord.NFOPath = result.NFOPath
+	if nfoPath != "" && preRecord.NFOPath == "" {
+		preRecord.NFOPath = nfoPath
 	}
 
 	updatePostOrganize(preRecord, newPath, inPlaceRenamed, sourceDir, mergedJournal)
@@ -701,6 +711,13 @@ func (l *dbRevertLog) CompleteFailed(ctx context.Context, opID OperationID, resu
 			sourceDir = org.OldDirectoryPath
 		}
 	}
+	// codex P1 (PR #241): same generated-artifact gate as Complete — a skipped
+	// duplicate owns no NFO/download paths; a populated one would be the
+	// winner's shared artifact, never safe to journal onto the loser's row.
+	nfoPath, foundNFOPath, downloadPaths := result.NFOPath, result.FoundNFOPath, result.DownloadPaths
+	if org := result.OrganizeResult; org != nil && org.DuplicateSkipped {
+		nfoPath, foundNFOPath, downloadPaths = "", "", nil
+	}
 	// Wave-9 (codex review 4960250562 follow-up): same journal-transaction
 	// routing as Complete — the merge must see the FRESH row, not the stale
 	// preRecord snapshot. Wave-10: the follow-up column update below excludes
@@ -708,16 +725,16 @@ func (l *dbRevertLog) CompleteFailed(ctx context.Context, opID OperationID, resu
 	// is no longer clobbered by the re-persist (UpdateJournalInTx owns that
 	// column exclusively).
 	mergedJournal, err := l.mergeJournalInTx(ctx, recordID, opID, "CompleteFailed",
-		buildGeneratedFilesJSON(resolveLogger(l.logger), result.NFOPath, subtitles, result.DownloadPaths), "")
+		buildGeneratedFilesJSON(resolveLogger(l.logger), nfoPath, subtitles, downloadPaths), "")
 	if err != nil {
 		return err
 	}
 
-	if result.FoundNFOPath != "" {
-		preRecord.NFOPath = result.FoundNFOPath
+	if foundNFOPath != "" {
+		preRecord.NFOPath = foundNFOPath
 	}
-	if result.NFOPath != "" && preRecord.NFOPath == "" {
-		preRecord.NFOPath = result.NFOPath
+	if nfoPath != "" && preRecord.NFOPath == "" {
+		preRecord.NFOPath = nfoPath
 	}
 	updatePostOrganize(preRecord, newPath, inPlaceRenamed, sourceDir, mergedJournal)
 	preRecord.RevertStatus = models.RevertStatusFailed

@@ -79,10 +79,16 @@ func TestRevertLog_Complete_DuplicateSkipped_JournalsNoPrimaryMove(t *testing.T)
 		},
 	}))
 
+	// The stale-pipeline shape on purpose: NFOPath/DownloadPaths/FoundNFOPath
+	// populated ALONGSIDE DuplicateSkipped. Post-fix the apply pipeline never
+	// produces such a result (the loser short-circuits before any output
+	// step), and the completion legs re-enforce the no-op so even a stale
+	// caller cannot arm a loser revert against the winner's artifacts.
 	opL := w241Begin(t, rl, "ABC-200", "/in/B.mkv")
 	require.NoError(t, rl.Complete(ctx, opL, &ApplyResult{
-		Movie:   &models.Movie{ID: "ABC-200"},
-		NFOPath: "/dest/shared/ABC-200.nfo",
+		Movie:        &models.Movie{ID: "ABC-200"},
+		NFOPath:      "/dest/shared/ABC-200.nfo",
+		FoundNFOPath: "/dest/shared/existing.nfo",
 		OrganizeResult: &organizer.OrganizeResult{
 			OriginalPath:     "/in/B.mkv",
 			NewPath:          w241Target,
@@ -125,18 +131,19 @@ func TestRevertLog_Complete_DuplicateSkipped_JournalsNoPrimaryMove(t *testing.T)
 		row := tc.row
 		assert.Empty(t, row.NewPath, "%s: the skipped duplicate journals NO primary-move record (#241 P1)", tc.name)
 		assert.False(t, row.InPlaceRenamed, "%s: no in-place payload either", tc.name)
+		assert.Empty(t, row.NFOPath, "%s: the skipped duplicate journals NO NFO column either — it names the winner's artifact", tc.name)
 	}
 	assert.Equal(t, models.RevertStatusApplied, rowL.RevertStatus)
 	ledgerL, err := models.ParseGeneratedFiles(rowL.GeneratedFiles)
 	require.NoError(t, err)
 	assert.Empty(t, ledgerL.MoveBack, "the loser row carries no winner subtitle/asset move-backs")
 	assert.NotContains(t, ledgerL.Roots, "/dest/shared", "the winner's folder is never seeded from the skipped duplicate's completion")
-	assert.Contains(t, ledgerL.Delete, "/dest/shared/ABC-200.nfo", "the loser's own generated artifacts still journal")
+	assert.Empty(t, ledgerL.Delete, "the skipped duplicate journals NO generated-file deletes — those paths are the winner's artifacts (#241 P1)")
 
 	assert.Equal(t, models.RevertStatusFailed, rowF.RevertStatus, "the failed-skipped row keeps its failure status")
 	ledgerF, err := models.ParseGeneratedFiles(rowF.GeneratedFiles)
 	require.NoError(t, err)
-	assert.Contains(t, ledgerF.Delete, "/dest/shared/poster.jpg", "download artifacts of the failed op still journal")
+	assert.Empty(t, ledgerF.Delete, "failed-or-not, a skipped duplicate never journals shared generated artifacts (#241 P1)")
 }
 
 // TestRevertLog_DuplicateSkipLoser_RevertLeavesWinnerUntouched is the #241 P1

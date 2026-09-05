@@ -91,13 +91,22 @@ type onStepFailResult struct {
 // executeSteps iterates through steps with progress reporting and revert-log
 // completion on failure. If a step fails, onStepFail is called to produce the
 // partial ApplyResult and wrapped error. Returns nil on success (all steps passed).
+//
+// skipDownstream, when non-nil, is evaluated before EVERY step; once it returns
+// true the loop stops WITHOUT failing — the duplicate-ownership gate uses this
+// to halt the entire downstream output pipeline (merge/title/download/NFO) as
+// one boundary decision instead of per-step checks.
 func (o *applyOrchImpl) executeSteps(
 	ctx context.Context,
 	steps []applyStep,
 	completed *stepCompletion,
 	onStepFail func(stepName string, failMsg string, stepErr error, stepsSoFar stepCompletion) onStepFailResult,
+	skipDownstream func() bool,
 ) (*ApplyResult, error) {
 	for _, s := range steps {
+		if skipDownstream != nil && skipDownstream() {
+			break
+		}
 		if s.progressMsg != "" {
 			progress.FromContext(ctx).Report(s.progressStep, s.progressPct, s.progressMsg)
 		}
@@ -236,7 +245,24 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult
 		stepNFO,
 	}
 
-	failResult, failErr := o.executeSteps(ctx, pipelineSteps, &steps, onStepFail)
+	// codex P1 (PR #241): duplicate-ownership gate at the step-loop boundary.
+	// An authorized intra-batch duplicate (ForceUpdate) SKIPPED its move, and
+	// its OrganizeResult.FolderPath/NewPath name the WINNER's shared
+	// destination for display only. Running merge/download/NFO from here would
+	// aim those writes at the winner's folder while the winner's own pipeline
+	// produces the same artifacts — both workers concurrently writing/
+	// truncating ONE NFO (or media shared by different logical IDs) — and
+	// would journal those shared generated paths onto the loser's revert row,
+	// so reverting the loser would DELETE the winner's artifacts. Once the
+	// organize step lands DuplicateSkipped, EVERY remaining output step is
+	// skipped: only the destination owner produces and journals ancillary
+	// outputs. The duplicate warning surface is untouched — it rides back on
+	// OrganizeResult.Warnings.
+	dupGate := func() bool {
+		return state.organizeResult != nil && state.organizeResult.DuplicateSkipped
+	}
+
+	failResult, failErr := o.executeSteps(ctx, pipelineSteps, &steps, onStepFail, dupGate)
 	if failResult != nil {
 		return failResult, failErr
 	}
