@@ -99,6 +99,17 @@ type ApplyResult struct {
 	// "nfo_generation"). Empty on success. callers can identify
 	// which step failed without parsing error strings.
 	FailedStep string
+	// PrePublication is true when the apply failed before the organize step
+	// published ANY filesystem mutation (codex PR #241 batch-2 F1/F2): plan
+	// rejections (validation/conflict — including unauthorized intra-batch
+	// duplicate conflicts), context aborts, and pre-publish strategy failures
+	// all terminate with the destination untouched. Revert journaling
+	// (RevertLog.CompleteFailed) treats such results exactly like authorized
+	// duplicate skips — no target fields journaled, row finalized
+	// completed-noop — because their intent paths may name a SHARED batch
+	// destination a promoted claimant later publishes, and a revert armed
+	// with those paths would drag the claimant's bytes onto this source.
+	PrePublication bool
 }
 
 // PreviewCmd is the command struct that crosses the Preview seam (ADR-0004).

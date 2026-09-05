@@ -549,6 +549,33 @@ func (l *dbRevertLog) CaptureSnapshot(ctx context.Context, opID OperationID, cmd
 	}
 }
 
+// noopJournal reports whether result's apply mutated NOTHING on the
+// filesystem, so its row must journal no target fields and finalize
+// completed-noop (codex P1/P2 PR #241 + batch-2 F1/F2):
+//   - authorized intra-batch duplicate skips (OrganizeResult.DuplicateSkipped)
+//     — NewPath names the batch winner's shared destination for display only;
+//   - pre-publication organize terminals (ApplyResult.PrePublication for plan
+//     rejections/context aborts — the organizer returns no result on those
+//     legs — or OrganizeResult.PrePublication for strategy failures before any
+//     publish) — the destination never received this file's bytes, and the
+//     intent path may again be a shared destination a promoted claimant later
+//     publishes.
+//
+// Journaling target fields from such results arms this row's revert against
+// another claimant's published bytes (moving/deleting them onto this row's
+// source); finalizing them failed-with-empty-NewPath leaves the reverter
+// probing a "" anchor (anchor_missing) forever, blocking fully-reverted.
+func noopJournal(result *ApplyResult) bool {
+	if result == nil {
+		return false
+	}
+	if result.PrePublication {
+		return true
+	}
+	org := result.OrganizeResult
+	return org != nil && (org.DuplicateSkipped || org.PrePublication)
+}
+
 // ctx is accepted for future use when repository methods support context propagation
 func (l *dbRevertLog) Complete(ctx context.Context, opID OperationID, result *ApplyResult) error {
 	if opID == "" {
@@ -598,7 +625,9 @@ func (l *dbRevertLog) Complete(ctx context.Context, opID OperationID, result *Ap
 	// the history reverter arm the winner's video as the loser's primary moved
 	// file (moving the winner's bytes onto the loser's path if that source was
 	// later removed). The winner's own operation row stays the sole subject.
-	if org := result.OrganizeResult; org != nil && !org.DuplicateSkipped {
+	// codex batch-2 F1/F2: pre-publication failure terminals obey the same
+	// rule — the destination was never published by this operation.
+	if org := result.OrganizeResult; org != nil && !noopJournal(result) {
 		newPath = org.NewPath
 		inPlaceRenamed = org.InPlaceRenamed
 		for _, sr := range org.Subtitles {
@@ -615,9 +644,11 @@ func (l *dbRevertLog) Complete(ctx context.Context, opID OperationID, result *Ap
 	// short-circuits before merge/download/NFO — but the STRICT journal no-op
 	// is enforced here too: any generated path paired with a DuplicateSkipped
 	// result names the WINNER's shared artifact, and journaling it onto the
-	// loser's row would arm a loser revert to DELETE the winner's files.
+	// loser's row would arm a loser revert to DELETE the winner's files. The
+	// same strict gate covers pre-publication terminals (batch-2 F1/F2): no
+	// subtitle/extras/NFO finger of the failed row may name a shared path.
 	nfoPath, foundNFOPath, downloadPaths := result.NFOPath, result.FoundNFOPath, result.DownloadPaths
-	if org := result.OrganizeResult; org != nil && org.DuplicateSkipped {
+	if noopJournal(result) {
 		nfoPath, foundNFOPath, downloadPaths = "", "", nil
 	}
 
@@ -628,7 +659,7 @@ func (l *dbRevertLog) Complete(ctx context.Context, opID OperationID, result *Ap
 	// itself (UpdateNonJournalFields below) no longer writes generated_files at
 	// all, so an append/consume committed after this tx commit survives.
 	folderRoot := ""
-	if org := result.OrganizeResult; org != nil && !org.DuplicateSkipped {
+	if org := result.OrganizeResult; org != nil && !noopJournal(result) {
 		folderRoot = org.FolderPath
 	}
 	mergedJournal, err := l.mergeJournalInTx(ctx, recordID, opID, "Complete",
@@ -649,8 +680,10 @@ func (l *dbRevertLog) Complete(ctx context.Context, opID OperationID, result *Ap
 	// makes the reverter probe checkAnchor("") → anchor_missing on every batch
 	// revert attempt and the batch can never report fully reverted. The apply
 	// SUCCEEDED as a true no-op — the row is completed-noop, excluded from
-	// revert selection exactly like a reverted row.
-	if org := result.OrganizeResult; org != nil && org.DuplicateSkipped {
+	// revert selection exactly like a reverted row. Batch-2 F1/F2 extend the
+	// identical terminal to pre-publication organize failures: nothing was
+	// mutated, so nothing is unwindable.
+	if noopJournal(result) {
 		preRecord.RevertStatus = models.RevertStatusNoOp
 	}
 
@@ -708,8 +741,12 @@ func (l *dbRevertLog) CompleteFailed(ctx context.Context, opID OperationID, resu
 	// codex P1 (PR #241): same duplicate-skip no-op journal rule as Complete —
 	// a skipped duplicate persists NO primary-move NewPath even when a later
 	// pipeline step fails, so reverting the failed loser row can never rename
-	// the winner's video.
-	if org := result.OrganizeResult; org != nil && !org.DuplicateSkipped {
+	// the winner's video. Batch-2 F1 adds the PRE-PUBLICATION terminal: a
+	// strategy execute failure before any publish (the released-claim class —
+	// e.g. ForceUpdate with a vanished source) journals NO target fields
+	// either, so reverting the failed owner is a pure no-op that can never
+	// drag a promoted claimant's published bytes onto the owner's source.
+	if org := result.OrganizeResult; org != nil && !noopJournal(result) {
 		newPath = org.NewPath
 		inPlaceRenamed = org.InPlaceRenamed
 		for _, sr := range org.Subtitles {
@@ -724,8 +761,9 @@ func (l *dbRevertLog) CompleteFailed(ctx context.Context, opID OperationID, resu
 	// codex P1 (PR #241): same generated-artifact gate as Complete — a skipped
 	// duplicate owns no NFO/download paths; a populated one would be the
 	// winner's shared artifact, never safe to journal onto the loser's row.
+	// Batch-2 F1/F2: pre-publication terminals own none either.
 	nfoPath, foundNFOPath, downloadPaths := result.NFOPath, result.FoundNFOPath, result.DownloadPaths
-	if org := result.OrganizeResult; org != nil && org.DuplicateSkipped {
+	if noopJournal(result) {
 		nfoPath, foundNFOPath, downloadPaths = "", "", nil
 	}
 	// Wave-9 (codex review 4960250562 follow-up): same journal-transaction
@@ -751,9 +789,14 @@ func (l *dbRevertLog) CompleteFailed(ctx context.Context, opID OperationID, resu
 	// step still mutated nothing — it owns no NewPath and journaled no
 	// artifacts — so it finalizes as completed-noop exactly like Complete's
 	// DuplicateSkipped path instead of lingering as an unanchored failed row
-	// the reverter would probe at "" forever.
+	// the reverter would probe at "" forever. Batch-2 F1/F2: plan rejections
+	// (validation/conflict — incl. rejected intra-batch duplicates) and
+	// pre-publish strategy failures join the identical terminal on the same
+	// nothing-mutated ground. A PARTIAL publish (fsutil.PublishCompleted) is
+	// flatly excluded: its failure landed bytes at the destination, so the
+	// record stays failed AND keeps pointing at the shared path (revertable).
 	preRecord.RevertStatus = models.RevertStatusFailed
-	if org := result.OrganizeResult; org != nil && org.DuplicateSkipped {
+	if noopJournal(result) {
 		preRecord.RevertStatus = models.RevertStatusNoOp
 	}
 	if err := l.persistNonJournalColumns(ctx, opID, preRecord); err != nil {

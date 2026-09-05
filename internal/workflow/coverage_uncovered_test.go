@@ -846,7 +846,7 @@ func TestCompleteRevertLog_CompleteError(t *testing.T) {
 
 	// Should not panic even when Complete returns an error
 	assert.NotPanics(t, func() {
-		impl.completeRevertLogWithState(context.Background(), "op-1", &applyPipelineState{})
+		impl.completeRevertLogWithState(context.Background(), "op-1", &applyPipelineState{}, false)
 	})
 }
 
@@ -857,7 +857,7 @@ func TestCompleteRevertLog_NilRevertLog(t *testing.T) {
 
 	// Should not panic with nil revertLog
 	assert.NotPanics(t, func() {
-		impl.completeRevertLogWithState(context.Background(), "op-1", &applyPipelineState{})
+		impl.completeRevertLogWithState(context.Background(), "op-1", &applyPipelineState{}, false)
 	})
 }
 
@@ -868,7 +868,7 @@ func TestCompleteRevertLog_EmptyOpID(t *testing.T) {
 
 	// Should not panic with empty opID
 	assert.NotPanics(t, func() {
-		impl.completeRevertLogWithState(context.Background(), "", &applyPipelineState{})
+		impl.completeRevertLogWithState(context.Background(), "", &applyPipelineState{}, false)
 	})
 }
 

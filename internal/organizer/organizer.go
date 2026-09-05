@@ -308,7 +308,22 @@ type OrganizeResult struct {
 	// no-op — NO primary-move record is persisted for it, leaving the winner's
 	// operation row the sole revert subject of the shared bytes (a revert of
 	// the skipped loser must never rename the winner's video).
-	DuplicateSkipped       bool
+	DuplicateSkipped bool
+	// PrePublication marks a strategy-execute failure whose error proves the
+	// destination never received this file's bytes (codex PR #241 batch-2 F1):
+	// every organize publish composite carries fsutil.PublishCompleted on its
+	// post-publish leg, so an execute error WITHOUT that class failed
+	// pre-publication — nothing the destination could hold belongs to this
+	// file. The result's NewPath/FolderPath name the INTENDED target only;
+	// under duplicate ownership that may be a SHARED destination a promoted
+	// claimant later publishes, so revert journaling must ignore all target
+	// fields and finalize the row completed-noop exactly like a
+	// DuplicateSkipped result — reverting the failed owner must never treat
+	// another claimant's published bytes as this owner's moved primary.
+	// In-place directory-rename plans are never marked: their inner-rename
+	// failure can leave the directory renamed after a refused rollback, and
+	// that partial state must stay revertable.
+	PrePublication         bool
 	Subtitles              []SubtitleResult
 	InPlaceRenamed         bool   // Whether an in-place directory rename occurred
 	OldDirectoryPath       string // Original directory path (for updating subsequent file paths)
@@ -793,6 +808,13 @@ func (o *Organizer) Organize(ctx context.Context, cmd OrganizeCmd) (*OrganizeRes
 		// every refusal/ambiguity that left the destination untouched): the
 		// primed owner's claim is released on the identical rule so the
 		// next valid claimant can still land its bytes on the destination.
+		// codex PR #241 batch-2 F1: mark the released result pre-publication
+		// so revert journaling keeps NO target fields from it (see the field
+		// doc) — in-place directory-rename plans alone stay journaled, their
+		// dir rename may have survived a refused rollback.
+		if strategyResult != nil && !plan.InPlace {
+			strategyResult.PrePublication = true
+		}
 		cmd.DuplicateTracker.release(plan)
 		return strategyResult, err
 	}

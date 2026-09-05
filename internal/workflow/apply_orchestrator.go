@@ -166,8 +166,20 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult
 	// the file) are recorded for revert. Passing nil here would blank
 	// NewPath and leave a moved file non-revertable (regression vs main,
 	// which persisted NewPath inline within OrganizeTask.Execute).
+	// codex PR #241 batch-2 F1/F2: an organize-step failure that produced NO
+	// OrganizeResult is a pre-publication terminal by construction — plan
+	// errors, validation/conflict rejections (incl. unauthorized intra-batch
+	// duplicates), and context aborts all return (nil, err) from Organize
+	// before any execute — and a strategy failure marked
+	// OrganizeResult.PrePublication published nothing either. The Begin row
+	// already exists, so the marker flows to CompleteFailed and the returned
+	// result: the row finalizes completed-noop (nothing to unwind) instead of
+	// lingering failed-with-empty-NewPath — whose "" anchor the reverter
+	// probes as anchor_missing forever, holding the batch off fully-reverted —
+	// or worse, journaling a shared intent path a promoted claimant publishes.
 	onStepFail := func(stepName string, failMsg string, stepErr error, stepsSoFar stepCompletion) onStepFailResult {
-		o.completeRevertLogWithState(ctx, opID, state)
+		prePub := stepName == "organize" && (state.organizeResult == nil || state.organizeResult.PrePublication)
+		o.completeRevertLogWithState(ctx, opID, state, prePub)
 		return onStepFailResult{
 			result: &ApplyResult{
 				OrganizeResult: state.organizeResult,
@@ -179,6 +191,7 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult
 				OperationID:    opID,
 				Steps:          stepsSoFar,
 				FailedStep:     stepName,
+				PrePublication: prePub,
 			},
 			err: fmt.Errorf("%s failed: %w", failMsg, stepErr),
 		}
@@ -580,7 +593,7 @@ type applyPipelineState struct {
 // marked RevertStatusFailed but retains NewPath, allowing revert to locate the
 // moved file. Per CONTEXT.md: called on error paths to prevent orphaned
 // RevertStatusApplied records while keeping revert actionable.
-func (o *applyOrchImpl) completeRevertLogWithState(ctx context.Context, opID OperationID, state *applyPipelineState) {
+func (o *applyOrchImpl) completeRevertLogWithState(ctx context.Context, opID OperationID, state *applyPipelineState, prePublication bool) {
 	if o.revertLog != nil && opID != "" {
 		partial := &ApplyResult{
 			OrganizeResult: state.organizeResult,
@@ -591,6 +604,7 @@ func (o *applyOrchImpl) completeRevertLogWithState(ctx context.Context, opID Ope
 			Merged:         state.merged,
 			OperationID:    opID,
 			Steps:          stepCompletion{},
+			PrePublication: prePublication,
 		}
 		if completeErr := o.revertLog.CompleteFailed(ctx, opID, partial); completeErr != nil {
 			resolveLogger(o.logger).Warnf("[workflow] RevertLog.CompleteFailed error for %s: %v", opID, completeErr)

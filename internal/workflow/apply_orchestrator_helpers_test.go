@@ -11,7 +11,7 @@ import (
 func TestCompleteRevertLog_NilRevertLog_DoesNothing(t *testing.T) {
 	o := &applyOrchImpl{revertLog: nil}
 	assert.NotPanics(t, func() {
-		o.completeRevertLogWithState(context.Background(), "op-123", &applyPipelineState{})
+		o.completeRevertLogWithState(context.Background(), "op-123", &applyPipelineState{}, false)
 	})
 }
 
@@ -19,7 +19,7 @@ func TestCompleteRevertLog_EmptyOpID_DoesNothing(t *testing.T) {
 	mock := &stubRevertLog{}
 	o := &applyOrchImpl{revertLog: mock}
 	assert.NotPanics(t, func() {
-		o.completeRevertLogWithState(context.Background(), "", &applyPipelineState{})
+		o.completeRevertLogWithState(context.Background(), "", &applyPipelineState{}, false)
 	})
 	assert.Empty(t, mock.completeCalls, "Complete should not be called with empty opID")
 }
