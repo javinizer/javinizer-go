@@ -320,12 +320,14 @@ type OrganizeResult struct {
 	// fields and finalize the row completed-noop exactly like a
 	// DuplicateSkipped result — reverting the failed owner must never treat
 	// another claimant's published bytes as this owner's moved primary.
-	// In-place directory-rename plans are never marked: their inner-rename
-	// failure can leave the directory renamed after a refused rollback, and
-	// that partial state must stay revertable.
+	// In-place directory-rename failures are marked on the identical rule
+	// when nothing SURVIVED on disk (no rename happened, or its rollback
+	// landed); only a surviving rename (rollback refused) stays journaled —
+	// that mutation is publication-equivalent and its claim settles (codex
+	// P1, PR #241).
 	PrePublication         bool
 	Subtitles              []SubtitleResult
-	InPlaceRenamed         bool   // Whether an in-place directory rename occurred
+	InPlaceRenamed         bool   // Whether an in-place directory rename SURVIVES on disk (rename happened and was never rolled back)
 	OldDirectoryPath       string // Original directory path (for updating subsequent file paths)
 	NewDirectoryPath       string // New directory path after in-place rename
 	ShouldGenerateMetadata bool   // Whether NFO/media should be generated for this result
@@ -808,11 +810,27 @@ func (o *Organizer) Organize(ctx context.Context, cmd OrganizeCmd) (*OrganizeRes
 		// every refusal/ambiguity that left the destination untouched): the
 		// primed owner's claim is released on the identical rule so the
 		// next valid claimant can still land its bytes on the destination.
-		// codex PR #241 batch-2 F1: mark the released result pre-publication
-		// so revert journaling keeps NO target fields from it (see the field
-		// doc) — in-place directory-rename plans alone stay journaled, their
-		// dir rename may have survived a refused rollback.
-		if strategyResult != nil && !plan.InPlace {
+		// codex P1 (PR #241): in-place plans are MUTATION-aware instead of
+		// blanket-exempt — the strategy's rollback seams report honestly
+		// whether a directory rename SURVIVED on disk (InPlaceRenamed stands
+		// only when the rename was never rolled back). An in-place failure
+		// with nothing surviving (source dir vanished post-priming, or an
+		// inner-rename refusal whose rollback landed) is exactly the
+		// pre-publication class: journal no target fields, release the claim
+		// — a promoted claimant's renamed directory is never this failed
+		// row's revert subject. A SURVIVING rename (rollback refused) is
+		// publication-equivalent for claim purposes — the destination name
+		// physically changed to this owner's target — so the claim SETTLES,
+		// never releases: a waiting claimant keeps its duplicate verdict
+		// instead of publishing into the directory the failed owner still
+		// owns, and the settled row's journal names where the bytes actually
+		// went (the strategy re-points NewPath/FileName at the surviving
+		// location), making its revert an exact-inverse unwind.
+		if plan.InPlace && strategyResult != nil && strategyResult.InPlaceRenamed {
+			cmd.DuplicateTracker.settle(plan)
+			return strategyResult, err
+		}
+		if strategyResult != nil {
 			strategyResult.PrePublication = true
 		}
 		cmd.DuplicateTracker.release(plan)
