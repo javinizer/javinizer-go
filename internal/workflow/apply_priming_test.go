@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -204,8 +205,8 @@ func TestApplyOrch_PlanDuplicatePriming_RealOrganizerResidentGate(t *testing.T) 
 	require.NoError(t, afero.WriteFile(fs, "/dest/ABC-123/ABC-123.mkv", []byte("resident-bytes"), 0o644))
 	prim, err = impl.planDuplicatePriming(context.Background(), cmd)
 	require.NoError(t, err)
-	assert.Equal(t, "/dest/ABC-123/ABC-123.mkv", prim.SourcePath)
-	assert.Equal(t, "/dest/ABC-123/ABC-123.mkv", prim.TargetPath)
+	assert.Equal(t, "/dest/ABC-123/ABC-123.mkv", filepath.ToSlash(prim.SourcePath))
+	assert.Equal(t, "/dest/ABC-123/ABC-123.mkv", filepath.ToSlash(prim.TargetPath))
 	assert.False(t, prim.WillMove, "a verified stationary input keeps its resident priming")
 }
 
