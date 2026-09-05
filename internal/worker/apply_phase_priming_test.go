@@ -12,9 +12,11 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/operationmode"
 	"github.com/javinizer/javinizer-go/internal/organizer"
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/javinizer/javinizer-go/internal/workflow"
+	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -32,6 +34,8 @@ type primingStubWorkflow struct {
 	applyCmds      []workflow.ApplyCmd
 	earlyApply     []string
 	applyDeadlines map[string]time.Time
+	applyStarts    map[string]time.Time
+	applyEntryErrs map[string]error
 	total          int
 }
 
@@ -59,6 +63,14 @@ func (s *primingStubWorkflow) Apply(ctx context.Context, cmd workflow.ApplyCmd) 
 		s.earlyApply = append(s.earlyApply, cmd.Match.Path)
 	}
 	s.applyCmds = append(s.applyCmds, cmd)
+	if s.applyStarts == nil {
+		s.applyStarts = make(map[string]time.Time)
+	}
+	s.applyStarts[cmd.Match.Path] = time.Now()
+	if s.applyEntryErrs == nil {
+		s.applyEntryErrs = make(map[string]error)
+	}
+	s.applyEntryErrs[cmd.Match.Path] = ctx.Err()
 	if deadline, ok := ctx.Deadline(); ok {
 		if s.applyDeadlines == nil {
 			s.applyDeadlines = make(map[string]time.Time)
@@ -74,6 +86,16 @@ func (s *primingStubWorkflow) applyDeadlineFor(path string) (time.Time, bool) {
 	defer s.mu.Unlock()
 	deadline, ok := s.applyDeadlines[path]
 	return deadline, ok
+}
+
+// applyObservationsFor returns the task-context state the Apply entry
+// observed for one file: dispatch start, ctx error at entry (nil while the
+// budget is live), and the ctx deadline.
+func (s *primingStubWorkflow) applyObservationsFor(path string) (start time.Time, entryErr error, deadline time.Time, hasDeadline bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	deadline, hasDeadline = s.applyDeadlines[path]
+	return s.applyStarts[path], s.applyEntryErrs[path], deadline, hasDeadline
 }
 
 func (s *primingStubWorkflow) snapshot() (primeCalls []string, applyCmds []workflow.ApplyCmd, early []string) {
@@ -376,14 +398,29 @@ func TestApplyPhase_Run_PrimingPlanPanicRecordsPerFileFailure(t *testing.T) {
 	assert.True(t, lc.completed)
 }
 
-// TestApplyPhase_Run_SingleDeadlineAcrossPrepareAndApply pins codex P2 (PR
-// #241, F4): one absolute per-file deadline spans the PreApply hook during
-// preparation AND the worker's apply execution — the worker derives its task
-// context from the SAME timestamp instead of re-granting a fresh full
-// WorkerTimeout (~2x the configured limit).
-func TestApplyPhase_Run_SingleDeadlineAcrossPrepareAndApply(t *testing.T) {
-	const perFile = 30 * time.Second
-	files := []string{"/source/a-one.mp4", "/source/b-two.mp4"}
+// TestApplyPhase_Run_PerFileBudgetChargedToOwnHookOnly pins codex P2 (PR
+// #241, F5) — the fix for the F4 single-absolute-deadline overcharge: the
+// per-file WorkerTimeout clock starts when the file's OWN worker task
+// starts, debited ONLY by that file's own PreApply-hook spend. The
+// sequential pre-fan-out preparation loop (sibling hooks, the priming pass,
+// queue time) is invisible to every file's budget, so an early healthy item
+// can never reach wf.Apply with a context expired by its siblings; and the
+// file's own hook still counts against its own total (F4 — no fresh full
+// re-grant for apply).
+func TestApplyPhase_Run_PerFileBudgetChargedToOwnHookOnly(t *testing.T) {
+	const perFile = 1200 * time.Millisecond
+	const early, slowB, slowC = "/source/a-early.mp4", "/source/b-slow.mp4", "/source/c-slower.mp4"
+	files := []string{early, slowB, slowC}
+	// Prepared sequentially AFTER the early item, the two slow sibling hooks
+	// burn 2x700ms > perFile of WALL CLOCK before fan-out: a prepare-time
+	// absolute deadline (the F4 form) would hand the early file an already
+	// expired apply context although its own work (instant hook + apply)
+	// fits WorkerTimeout with room to spare. Each slow hook stays under its
+	// OWN perFile budget, so every file still executes.
+	hookDelay := map[string]time.Duration{
+		slowB: 700 * time.Millisecond,
+		slowC: 700 * time.Millisecond,
+	}
 
 	wf := &primingStubWorkflow{total: len(files)}
 	wf.applyResult = &workflow.ApplyResult{Movie: &models.Movie{ID: "M-100"}}
@@ -393,37 +430,164 @@ func TestApplyPhase_Run_SingleDeadlineAcrossPrepareAndApply(t *testing.T) {
 		inputs.Results[p] = &resultstore.MovieResult{
 			FileMatchInfo: models.FileMatchInfo{Path: p, MovieID: "M-100"},
 			Status:        models.JobStatusCompleted,
-			Movie:         &models.Movie{ID: "M-100"},
+			Movie:         &models.Movie{ID: "M-100", Title: "Shared Destination"},
 		}
 	}
 
-	hookDeadlines := make(map[string]time.Time, len(files))
-	runStart := time.Now()
+	type hookSpan struct {
+		start    time.Time
+		deadline time.Time
+		elapsed  time.Duration
+	}
+	// The preparation loop is sequential on the phase goroutine, so these
+	// writes strictly precede fan-out (and the reads after Run returns).
+	hookSpans := make(map[string]*hookSpan, len(files))
+	var organized, failed int
 	NewApplyPhase().Run(context.Background(), inputs, ApplyPhaseConfig{
 		OrganizeOptions: workflow.OrganizeOptions{MoveFiles: true},
 		Destination:     "/output",
 		PreApplyFunc: func(ctx context.Context, afc *ApplyFileContext) error {
-			deadline, ok := ctx.Deadline()
-			require.True(t, ok, "the priming hook receives the per-file deadline context")
-			hookDeadlines[afc.FilePath] = deadline
+			span := &hookSpan{}
+			span.start = time.Now()
+			span.deadline, _ = ctx.Deadline()
+			hookSpans[afc.FilePath] = span
+			if d := hookDelay[afc.FilePath]; d > 0 {
+				time.Sleep(d) // a genuinely slow hook, well inside its OWN budget
+			}
+			span.elapsed = time.Since(span.start)
 			return nil
 		},
+		OnPhaseComplete: func(o, f int) { organized, failed = o, f },
 	})
 
-	require.Len(t, hookDeadlines, len(files))
+	require.Equal(t, len(files), wf.getApplyCalled(), "no item is dropped by budget bookkeeping")
+	assert.Equal(t, len(files), organized)
+	assert.Equal(t, 0, failed)
+	const tol = 350 * time.Millisecond // interval slack >> Windows ~15.6ms tick
 	for _, p := range files {
-		hookDeadline := hookDeadlines[p]
-		applyDeadline, ok := wf.applyDeadlineFor(p)
-		require.True(t, ok, "the worker's apply context carries a deadline")
-		assert.Equal(t, hookDeadline, applyDeadline,
-			"ONE absolute deadline spans hook + apply — no fresh double-grant for %s", p)
-		assert.WithinDuration(t, runStart.Add(perFile), hookDeadline, time.Second,
-			"the single deadline is measured once, from the file's preparation")
-		// Pin the shared deadline identity (assert.Equal above), not a
-		// budget delta: on coarse clocks (~15.6ms Windows ticks) prepare and
-		// apply can derive from the same rounded instant, so the remaining
-		// budget may equal the full grant — it must just never EXCEED it.
-		assert.LessOrEqual(t, time.Until(applyDeadline), perFile,
-			"the shared budget never exceeds one per-file grant for %s", p)
+		span := hookSpans[p]
+		require.NotNil(t, span, "the hook ran exactly once for %s", p)
+		// The hook side is unchanged: full WorkerTimeout measured from THIS
+		// item's own preparation start (never the batch start, never a
+		// sibling's clock).
+		assert.WithinDuration(t, span.start.Add(perFile), span.deadline, tol,
+			"%s: the hook keeps the full per-file budget from its own preparation", p)
+
+		applyStart, entryErr, applyDeadline, hasDeadline := wf.applyObservationsFor(p)
+		require.True(t, hasDeadline, "%s: the worker's apply context carries a deadline", p)
+		// (a) Sibling preprocessing is invisible: the EARLY item — prepared
+		// before its siblings burned 1.4s of wall clock, ahead of fan-out —
+		// reaches Apply with a LIVE context (the F4 absolute deadline would
+		// have handed it context.DeadlineExceeded at entry).
+		assert.NoError(t, entryErr,
+			"%s: sibling preparation must not expire this file's own budget", p)
+		// (c) Exact arithmetic: applyDeadline − taskStart == WorkerTimeout −
+		// hookElapsed. The test's span.elapsed and applyStart observe the
+		// same hook call and (within microseconds) the same task start the
+		// worker measured, so the pin is an interval check, not a strict
+		// clock equality (Windows-safe).
+		expectedDeadline := applyStart.Add(perFile - span.elapsed)
+		assert.WithinDuration(t, expectedDeadline, applyDeadline, tol,
+			"%s: apply deadline = own task start + WorkerTimeout − own hook elapsed", p)
 	}
+}
+
+// floorRecordingWorkflow routes Apply through a REAL organizer on an afero
+// filesystem (same wiring as the #241 dup-waiter tests) while recording the
+// task context's entry state, so the F5 floor test can pin the observable
+// contract: an essentially-expired context at Apply entry and zero
+// filesystem mutation behind it. Single-file fixtures only: no mutex.
+type floorRecordingWorkflow struct {
+	organizerBackedWorkflow
+	calls       int
+	startedAt   time.Time
+	deadline    time.Time
+	hasDeadline bool
+	entryErr    error
+}
+
+func (w *floorRecordingWorkflow) Apply(ctx context.Context, cmd workflow.ApplyCmd) (*workflow.ApplyResult, error) {
+	w.calls++
+	w.startedAt = time.Now()
+	w.entryErr = ctx.Err()
+	w.deadline, w.hasDeadline = ctx.Deadline()
+	return w.organizerBackedWorkflow.Apply(ctx, cmd)
+}
+
+// TestApplyPhase_Run_HookBurningFullBudgetYieldsFloorApplyContext pins the
+// F5 floor (codex P2, PR #241): a file whose own PreApply hook already
+// consumed — here OVERSHOT by pointedly ignoring its context — the whole
+// WorkerTimeout gets an apply budget clamped at applyBudgetFloor. The floor
+// keeps the derived duration non-negative (never a deadline before the
+// task's own start), so WithDeadline cancels synchronously at construction:
+// the workflow observes context.DeadlineExceeded from its first instruction,
+// the real organizer returns before ANY filesystem mutation, and — honoring
+// F4 — no second full timeout materializes for apply.
+func TestApplyPhase_Run_HookBurningFullBudgetYieldsFloorApplyContext(t *testing.T) {
+	const perFile = 200 * time.Millisecond
+	const src = "/in/A.mkv"
+
+	fsys := afero.NewMemMapFs()
+	require.NoError(t, fsys.MkdirAll("/in", 0o755))
+	require.NoError(t, afero.WriteFile(fsys, src, []byte("a-bytes"), 0o644))
+	org := organizer.NewOrganizer(fsys, &organizer.Config{
+		FolderFormat:  "<ID>",
+		FileFormat:    "<ID>",
+		RenameFile:    true,
+		OperationMode: operationmode.OperationModeOrganize,
+	}, nil, nil)
+	wf := &floorRecordingWorkflow{organizerBackedWorkflow: organizerBackedWorkflow{fs: fsys, org: org}}
+
+	inputs := makeApplyInputs(wf)
+	inputs.Concurrency = concurrencyConfig{MaxWorkers: 1, WorkerTimeout: perFile}
+	inputs.Results[src] = &resultstore.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: src, Name: "A.mkv", Extension: ".mkv", MovieID: "ABC-123"},
+		Status:        models.JobStatusCompleted,
+		Movie:         &models.Movie{ID: "ABC-123", Title: "Floor Case"},
+	}
+
+	var organized, failed int
+	NewApplyPhase().Run(context.Background(), inputs, ApplyPhaseConfig{
+		OrganizeOptions: workflow.OrganizeOptions{MoveFiles: true},
+		Destination:     "/dest",
+		PreApplyFunc: func(_ context.Context, _ *ApplyFileContext) error {
+			// Deliberately NOT ctx-aware: the hook overshoots its own budget
+			// (perFile) by ~2.75x (>> Windows ~15.6ms tick either side) —
+			// the concrete shape of "hook consumed most of the timeout" (F4).
+			time.Sleep(550 * time.Millisecond)
+			return nil
+		},
+		OnPhaseComplete: func(o, f int) { organized, failed = o, f },
+	})
+
+	require.Equal(t, 1, wf.calls, "apply still runs once — the budget clamps, it never vetoes")
+	// Expired at start BY CONSTRUCTION: the zero-remaining WithDeadline
+	// cancels synchronously, so the ctx error predates any workflow work.
+	assert.ErrorIs(t, wf.entryErr, context.DeadlineExceeded,
+		"a hook burning the full budget leaves an essentially-expired apply context")
+	require.True(t, wf.hasDeadline)
+	// The floor IS the task start: deadline ≈ startedAt + applyBudgetFloor —
+	// never earlier (no time travel), never a fresh full grant.
+	assert.WithinDuration(t, wf.startedAt.Add(applyBudgetFloor), wf.deadline, 100*time.Millisecond,
+		"the floored deadline is exactly the task start — non-negative duration, no second grant")
+
+	// The apply failed THROUGH the deadline, and no filesystem mutation
+	// happened behind it: the organizer's entry ctx recheck returned before
+	// planning or moving anything.
+	row := inputs.Updater.(*stubUpdater).getResult(src)
+	require.NotNil(t, row, "the deadline failure is written back")
+	assert.Equal(t, models.JobStatusFailed, row.Status)
+	assert.Contains(t, row.Error, "timed out")
+	content, err := afero.ReadFile(fsys, src)
+	require.NoError(t, err, "the source file is untouched")
+	assert.Equal(t, []byte("a-bytes"), content)
+	exists, existsErr := afero.Exists(fsys, "/dest/ABC-123/ABC-123.mkv")
+	require.NoError(t, existsErr)
+	assert.False(t, exists, "no organized output was produced behind the floored context")
+
+	assert.Equal(t, 0, organized)
+	assert.Equal(t, 1, failed)
+	lc := inputs.Lifecycle.(*stubLifecycle)
+	assert.False(t, lc.organized)
+	assert.True(t, lc.completed)
 }

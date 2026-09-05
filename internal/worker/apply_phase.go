@@ -27,6 +27,19 @@ type ApplyPhase interface {
 	Run(ctx context.Context, inputs applyPhaseInputs, cfg ApplyPhaseConfig)
 }
 
+// applyBudgetFloor is the minimum per-file apply budget granted at worker
+// task start when the item's own PreApply hook already consumed (or, by
+// ignoring its context, overshot) the whole WorkerTimeout (codex P2, PR
+// #241 F5). Zero is the one duration that is never negative — the derived
+// deadline lands exactly AT the task start instead of in its past (no time
+// travel) — and context.WithDeadline against a non-future deadline cancels
+// SYNCHRONOUSLY, so the workflow receives an essentially-expired-but-
+// consistent context: DeadlineExceeded from the moment the task context
+// exists, letting the organizer's entry recheck return before any
+// filesystem work. The file's own hook having burned the grant satisfies
+// F4 (no second full timeout) without a clock comparison at the worker.
+const applyBudgetFloor = time.Duration(0)
+
 type applyPhase struct{}
 
 // NewApplyPhase returns the default ApplyPhase implementation.
@@ -52,12 +65,20 @@ type preparedApplyFile struct {
 	afc      *ApplyFileContext
 	baseline *models.Movie
 	execute  bool
-	// deadline is the per-file WorkerTimeout budget as ONE absolute timestamp
-	// (codex P2, PR #241 F4): preparation (the PreApply hook), duplicate-claim
-	// waiting, and execution all spend from the same clock instead of the
-	// worker re-granting a fresh full timeout after priming-preparation burned
-	// part of it. Zero when no WorkerTimeout is configured.
-	deadline time.Time
+	// hookElapsed is the item's OWN preparation spend — the PreApply hook
+	// plus command build, measured on the phase goroutine (codex P2, PR
+	// #241 F5). The preparation loop is SEQUENTIAL over the batch and
+	// fan-out starts only after every item is prepared+primed, so an
+	// absolute deadline stamped here would silently charge every SIBLING's
+	// hook (and the priming pass, and fan-out queue time) against THIS
+	// file's budget: in a large batch or behind a slow later hook, an
+	// early healthy item could reach wf.Apply with an already-expired
+	// context although its own work fits WorkerTimeout. The worker instead
+	// starts the budget clock at ITS task start and debits only this
+	// own-work spend (F4 still holds: a hook burning the whole timeout
+	// never earns a second full grant — the remainder clamps to
+	// applyBudgetFloor).
+	hookElapsed time.Duration
 	// hookOutcome is non-nil when the priming-time PreApply hook panicked
 	// (codex r2 P2) or the priming-time planning pass panicked (codex P2, PR
 	// #241 F3): the prepare/priming pass recovered, wrote back, and broadcast
@@ -371,16 +392,20 @@ func countRemainingApplyFailures(inputs applyPhaseInputs, outcomes []applyFileOu
 // plus a pre-recorded failure outcome the item's worker replays unchanged
 // (the hook never runs twice).
 //
-// codex P2 (PR #241 F4): the budget is computed ONCE as an absolute
-// deadline and carried on the prepared item. The hook spends from it here
-// and applyFile derives its task context from the SAME timestamp, so
-// preparation + claim-waiting + execution share a single per-file budget
-// instead of the worker silently doubling it with a fresh full timeout.
+// codex P2 (PR #241 F4+F5): the hook spends from the per-file budget here,
+// and the item's OWN preparation spend is recorded as hookElapsed; applyFile
+// later debits exactly that from the budget it starts at ITS task start.
+// Hook + apply stay bounded by ONE WorkerTimeout — no fresh full re-grant —
+// while sibling preparation, the priming pass, and fan-out queue time never
+// consume THIS file's budget anymore (the preparation loop is sequential,
+// fan-out starts only after ALL items are prepared+primed).
 func prepareApplyItem(ctx context.Context, item applyItem, inputs applyPhaseInputs, cfg ApplyPhaseConfig) (prepared *preparedApplyFile) {
 	prepared = &preparedApplyFile{baseline: item.movie.Clone()}
 	if timeout := inputs.Concurrency.WorkerTimeout; timeout > 0 {
-		prepared.deadline = time.Now().Add(timeout)
-		hookCtx, hookCancel := context.WithDeadline(ctx, prepared.deadline)
+		// The hook's own budget is still the full WorkerTimeout measured from
+		// THIS item's preparation start — only the accounting handed to the
+		// worker changed (hookElapsed), not the hook-facing boundary.
+		hookCtx, hookCancel := context.WithTimeout(ctx, timeout)
 		defer hookCancel()
 		ctx = hookCtx
 	}
@@ -410,7 +435,9 @@ func prepareApplyItem(ctx context.Context, item applyItem, inputs applyPhaseInpu
 	}()
 	defer withFileRecovery(rc, &outcome)()
 
+	prepareStart := time.Now()
 	prepared.cmd, prepared.afc, prepared.execute = buildApplyCmd(item.filePath, item.movie, item.fileResult, inputs, cfg, ctx)
+	prepared.hookElapsed = time.Since(prepareStart)
 	return prepared
 }
 
@@ -794,13 +821,22 @@ func applyFile(
 	applyTimeout := inputs.Concurrency.WorkerTimeout
 	taskCtx := egCtx
 	var taskCancel context.CancelFunc
-	if !prepared.deadline.IsZero() {
-		// codex P2 (PR #241 F4): derive the task context from the ONE
-		// absolute per-file deadline computed at preparation — the hook
-		// already spent part of this budget, and duplicate-claim waiting
-		// plus execution spend the remainder. A fresh WithTimeout here would
-		// silently grant ~2x the configured per-file limit.
-		taskCtx, taskCancel = context.WithDeadline(egCtx, prepared.deadline)
+	if applyTimeout > 0 {
+		// codex P2 (PR #241 F5): the budget clock starts at THIS worker
+		// task's start — sibling preparation, the priming pass, and fan-out
+		// queue time are all invisible — debited only by the file's OWN
+		// preparation spend (F4: hook + apply stay inside ONE WorkerTimeout;
+		// a hook that burned it buys no second full grant for apply).
+		// Because an uncooperative hook can overshoot its deadline, the raw
+		// remainder can go negative — a deadline BEFORE task start, i.e.
+		// time travel — so it clamps at applyBudgetFloor: never negative,
+		// and the zero duration cancels the derived context synchronously
+		// (see the constant's contract).
+		remaining := applyTimeout - prepared.hookElapsed
+		if remaining < applyBudgetFloor {
+			remaining = applyBudgetFloor
+		}
+		taskCtx, taskCancel = context.WithDeadline(egCtx, startTime.Add(remaining))
 		defer taskCancel()
 	}
 
