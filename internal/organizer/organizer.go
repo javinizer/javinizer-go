@@ -577,6 +577,37 @@ func (o *Organizer) handleSubtitles(plan *OrganizePlan, result *OrganizeResult, 
 	result.Subtitles = subtitleResults
 }
 
+// withForceRename returns the planner that honors a per-command force-rename
+// request: when the config disables RenameFile but the command demands it,
+// planning runs against a clone with RenameFile enabled. Shared by Organize
+// and PlanOrganize so primed claims and executed plans always derive from the
+// identical planner selection (#240 finding A).
+func (o *Organizer) withForceRename(forceRename bool) *Organizer {
+	if forceRename && o.config != nil && !o.config.RenameFile {
+		clone := *o
+		cfg := *o.config
+		cfg.RenameFile = true
+		clone.config = &cfg
+		return &clone
+	}
+	return o
+}
+
+// PlanOrganize computes cmd's organization plan WITHOUT validating,
+// registering duplicate preflight, or executing anything — the read-only
+// planning seam the apply phase calls exactly once per sorted batch item
+// before worker fan-out, to prime deterministic duplicate ownership (#240
+// finding A). Planner selection is shared with Organize, so a primed claim
+// always matches the plan the item's worker later computes.
+func (o *Organizer) PlanOrganize(ctx context.Context, cmd OrganizeCmd) (*OrganizePlan, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+	return o.withForceRename(cmd.ForceRenameFile).plan(cmd.Match, cmd.Movie, cmd.DestDir, cmd.ForceUpdate, cmd.OperationMode)
+}
+
 // Organize is the single-method seam that plans, validates, and executes
 // file organization in one call. Per Phase 48: Plan/ValidatePlan/Execute
 // are internal implementation details — callers use Organize instead of a
@@ -588,15 +619,7 @@ func (o *Organizer) Organize(ctx context.Context, cmd OrganizeCmd) (*OrganizeRes
 	default:
 	}
 
-	planner := o
-	if cmd.ForceRenameFile && o.config != nil && !o.config.RenameFile {
-		clone := *o
-		cfg := *o.config
-		cfg.RenameFile = true
-		clone.config = &cfg
-		planner = &clone
-	}
-	plan, err := planner.plan(cmd.Match, cmd.Movie, cmd.DestDir, cmd.ForceUpdate, cmd.OperationMode)
+	plan, err := o.withForceRename(cmd.ForceRenameFile).plan(cmd.Match, cmd.Movie, cmd.DestDir, cmd.ForceUpdate, cmd.OperationMode)
 	if err != nil {
 		return nil, err
 	}
@@ -604,8 +627,9 @@ func (o *Organizer) Organize(ctx context.Context, cmd OrganizeCmd) (*OrganizeRes
 	// Intra-batch duplicate preflight (#224 phase E): plan-only grouping by
 	// proven-equal canonical destination keys. Unauthorized duplicates join
 	// plan.Conflicts and short-circuit through the identical failure pipeline;
-	// authorized duplicates return as persisted per-file warnings.
-	dupWarnings := applyDuplicatePreflight(plan, cmd.DuplicateTracker, cmd.ForceUpdate)
+	// authorized duplicates return as persisted per-file warnings and skip
+	// execution — only the primed winner's bytes land (#240 finding A).
+	dupWarnings, dupSkip := applyDuplicatePreflight(plan, cmd.DuplicateTracker, cmd.ForceUpdate)
 
 	if !cmd.ForceUpdate {
 		if issues := o.validatePlan(plan); len(issues) > 0 {
@@ -628,6 +652,22 @@ func (o *Organizer) Organize(ctx context.Context, cmd OrganizeCmd) (*OrganizeRes
 
 	// Dry-run: return early with planned result (no filesystem changes).
 	if cmd.DryRun {
+		return &OrganizeResult{
+			OriginalPath:           plan.SourcePath,
+			NewPath:                plan.TargetPath,
+			FolderPath:             plan.TargetDir,
+			FileName:               plan.TargetFile,
+			Moved:                  false,
+			Warnings:               dupWarnings,
+			ShouldGenerateMetadata: true,
+		}, nil
+	}
+
+	// Authorized intra-batch duplicate (#240 finding A): demoted to a
+	// persisted warning above, it must NOT execute — pre-priming both sources
+	// raced onto the same destination with lock order deciding the surviving
+	// bytes. Skipping guarantees only the deterministic winner publishes.
+	if dupSkip {
 		return &OrganizeResult{
 			OriginalPath:           plan.SourcePath,
 			NewPath:                plan.TargetPath,

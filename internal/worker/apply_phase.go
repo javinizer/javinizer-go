@@ -34,6 +34,56 @@ func NewApplyPhase() ApplyPhase {
 	return &applyPhase{}
 }
 
+// applyItem is one file selected for this apply iteration.
+type applyItem struct {
+	filePath   string
+	fileResult *resultstore.MovieResult
+	movie      *models.Movie
+}
+
+// preparedApplyFile is the per-item command material the apply phase builds
+// ONCE per item, in sorted order, before worker fan-out (#240 finding A):
+// the duplicate preflight's owner priming derives from the same commands the
+// workers later execute, so PreApply-hook mutations reach both, and every
+// hook still runs exactly once per file. baseline is the phase-entry movie
+// clone (codex r51), frozen before the hook could mutate the live pointer.
+type preparedApplyFile struct {
+	cmd      workflow.ApplyCmd
+	afc      *ApplyFileContext
+	baseline *models.Movie
+	execute  bool
+}
+
+// primeDuplicateClaims runs the batch's ONE planning pass when the workflow
+// exposes the read-only planning seam: each prepared item's organize target
+// registers against the run's duplicate tracker in sorted order,
+// pre-assigning every canonical key's winner before any apply worker starts
+// (#240 finding A). Items whose PreApply hook declined execution or whose
+// plan fails register nothing — their workers skip execution or fail with
+// the identical plan error, so priming can never claim a file that cannot
+// run. Without the seam (or on a nil workflow) the tracker stays unprimed,
+// preserving first-come observation for single-file callers.
+func primeDuplicateClaims(ctx context.Context, wf workflow.WorkflowInterface, tracker *organizer.DuplicateTracker, items []applyItem, prepared map[string]*preparedApplyFile) {
+	planner, ok := wf.(workflow.DuplicatePrimingPlanner)
+	if !ok {
+		return
+	}
+	primings := make([]organizer.DuplicatePriming, 0, len(items))
+	for _, item := range items {
+		p := prepared[item.filePath]
+		if !p.execute {
+			continue
+		}
+		priming, err := planner.PlanDuplicatePriming(ctx, p.cmd)
+		if err != nil {
+			logging.Warnf("[Apply] duplicate preflight planning skipped %s: %v", item.filePath, err)
+			continue
+		}
+		primings = append(primings, priming)
+	}
+	tracker.PrimeBatch(primings)
+}
+
 // applyFileOutcome captures the result of applying a single file.
 // Collected by the errgroup goroutine, then aggregated by trackApplyResults.
 type applyFileOutcome struct {
@@ -89,11 +139,6 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 	// exclusion) during apply go through the live tracker via inputs.Updater
 	// but do not affect which files this apply iteration processes. This
 	// prevents concurrent-modification bugs during iteration.
-	type applyItem struct {
-		filePath   string
-		fileResult *resultstore.MovieResult
-		movie      *models.Movie
-	}
 	retryPaths := make(map[string]struct{}, len(cfg.RetryFilePaths))
 	for _, filePath := range cfg.RetryFilePaths {
 		retryPaths[filePath] = struct{}{}
@@ -143,11 +188,23 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 	// One intra-batch duplicate preflight registry per apply run (#224 phase
 	// E): every file's plan registers its proven-equal canonical destination
 	// key so same-batch target collisions surface as plan conflicts — or, when
-	// overwrite is authorized, as persisted per-file warnings.
-	cfg.OrganizeOptions.DuplicateTracker = organizer.NewDuplicateTracker()
+	// overwrite is authorized, as persisted per-file warnings. Dry runs
+	// construct the non-probing variant so key derivation never writes probe
+	// artifacts (#240 finding B).
+	cfg.OrganizeOptions.DuplicateTracker = organizer.NewDuplicateTracker(cfg.DryRun)
+	// Prepare every item's ApplyCmd ONCE, in sorted order, before fan-out
+	// (#240 finding A): priming and execution share identical commands, and
+	// PreApply hooks keep their once-per-file contract.
+	prepared := make(map[string]*preparedApplyFile, len(items))
+	for _, item := range items {
+		baseline := item.movie.Clone()
+		applyCmd, afc, shouldExecute := buildApplyCmd(item.filePath, item.movie, item.fileResult, inputs, cfg, ctx)
+		prepared[item.filePath] = &preparedApplyFile{cmd: applyCmd, afc: afc, baseline: baseline, execute: shouldExecute}
+	}
+	primeDuplicateClaims(ctx, wf, cfg.OrganizeOptions.DuplicateTracker, items, prepared)
 	outcomes := fanout.BoundedFanOut(ctx, inputs.Concurrency.MaxWorkers, items,
 		func(egCtx context.Context, item applyItem) applyFileOutcome {
-			outcome := applyFile(egCtx, wf, item.filePath, item.fileResult, item.movie, inputs, cfg)
+			outcome := applyFile(egCtx, wf, item.filePath, item.fileResult, item.movie, prepared[item.filePath], inputs, cfg)
 			// Report per-file progress so the frontend bar advances 0→100 across
 			// files instead of jumping straight to 100 on OnPhaseComplete. A file
 			// counts as processed whether it succeeded or failed — the bar tracks
@@ -280,7 +337,7 @@ func buildApplyCmd(
 	fileResult *resultstore.MovieResult,
 	inputs applyPhaseInputs,
 	cfg ApplyPhaseConfig,
-	taskCtx context.Context,
+	ctx context.Context,
 ) (workflow.ApplyCmd, *ApplyFileContext, bool) {
 	sourceDir := filepath.Dir(filePath)
 	match := fileResult.FileMatchInfo
@@ -332,7 +389,7 @@ func buildApplyCmd(
 	}
 
 	if cfg.PreApplyFunc != nil {
-		if err := cfg.PreApplyFunc(taskCtx, afc); err != nil {
+		if err := cfg.PreApplyFunc(ctx, afc); err != nil {
 			logging.Warnf("PreApply hook skipped %s: %v", filePath, err)
 			return applyCmd, afc, false // false = skip execution
 		}
@@ -546,14 +603,17 @@ func interpretApplyResult(
 	return outcome
 }
 
-// applyFile handles the per-file apply logic: build ApplyCmd, execute workflow.Apply,
-// interpret result. Error handling, panic recovery, and result tracking are performed here.
+// applyFile handles the per-file apply logic: consume the prepared ApplyCmd,
+// execute workflow.Apply, interpret result. Error handling, panic recovery,
+// and result tracking are performed here. The command itself was built once
+// per item, in sorted order, before fan-out (#240 finding A).
 func applyFile(
 	egCtx context.Context,
 	wf workflow.WorkflowInterface,
 	filePath string,
 	fileResult *resultstore.MovieResult,
 	movie *models.Movie,
+	prepared *preparedApplyFile,
 	inputs applyPhaseInputs,
 	cfg ApplyPhaseConfig,
 ) (outcome applyFileOutcome) {
@@ -613,17 +673,12 @@ func applyFile(
 		defer taskCancel()
 	}
 
-	// codex r51 P2c: freeze the phase-entry baseline BEFORE the workflow
-	// sees the pointer — stepDisplayTitle & friends mutate cmd.Movie/afc.Movie
-	// (= the same movie), and a mutated "baseline" misclassifies merges as
-	// concurrent review edits, restoring stale fields over the computed ones.
-	frozenBaseline := movie.Clone()
-
-	// Step 1: Build the ApplyCmd.
-	applyCmd, afc, shouldExecute := buildApplyCmd(filePath, movie, fileResult, inputs, cfg, taskCtx)
-	if !shouldExecute {
+	// Step 1: Consume the prepared ApplyCmd (built pre-fan-out with the
+	// phase-entry baseline frozen before any hook mutation, codex r51 P2c).
+	if !prepared.execute {
 		return outcome
 	}
+	applyCmd, afc := prepared.cmd, prepared.afc
 
 	// Step 2: Execute the workflow.Apply.
 	reporter := makeProgressReporter(inputs.Broadcaster, inputs.JobID, movie.ID, jobEventPhaseApply)
@@ -636,7 +691,7 @@ func applyFile(
 
 	// Step 3: Interpret the result against the FROZEN baseline (workflow
 	// permutations may have rewritten fields on the live pointer mid-apply).
-	return interpretApplyResult(filePath, frozenBaseline, startTime, applyTimeout, inputs, cfg, taskCtx, afc, result, applyErr)
+	return interpretApplyResult(filePath, prepared.baseline, startTime, applyTimeout, inputs, cfg, taskCtx, afc, result, applyErr)
 }
 
 // trackApplyResults processes collected applyFileOutcomes: increments counters

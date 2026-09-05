@@ -299,6 +299,66 @@ func (r *DestKeyResolver) Key(p string) string {
 	return posture.key(p)
 }
 
+// KeyNonProbing derives p's canonical key WITHOUT writing to the filesystem
+// (#240 finding B — dry runs perform zero probe writes). Posture resolution:
+//  1. this resolver's frozen per-root posture, as with Key;
+//  2. the process-wide definitive probe caches — when BOTH legs are cached
+//     the posture is exactly what Key would probe, so it freezes into the
+//     resolver like a first Key derivation;
+//  3. any UNKNOWN leg falls back to the conservative distinction-preserving
+//     posture (case-sensitive, normalization-sensitive) — the same
+//     fail-closed posture a probe ERROR yields, and, like a probe error, a
+//     fallback is undecidable rather than a posture, so it is NEVER frozen:
+//     a later derivation with definitive cache knowledge (or Key itself)
+//     resolves the root's true posture.
+//
+// The cost on an uncached root is only that case/normalization variants do
+// not group until a definitive posture exists; the probe root itself is
+// selected stat-only by destinationProbeRoot, so nothing is created, renamed,
+// or removed.
+func (r *DestKeyResolver) KeyNonProbing(p string) string {
+	root := destinationProbeRoot(p)
+	if posture, ok := r.postures[root]; ok {
+		return posture.key(p)
+	}
+	caseSensitive, caseDefinitive := cachedCaseSensitivity(root)
+	normInsensitive, normDefinitive := cachedNormalizationInsensitivity(root)
+	posture := destKeyPosture{caseSensitive: caseSensitive, normInsensitive: normInsensitive}
+	if caseDefinitive && normDefinitive {
+		r.postures[root] = posture
+	}
+	return posture.key(p)
+}
+
+// cachedCaseSensitivity reads the process cache's case posture for root
+// WITHOUT probing: an uncached (or merely in-flight) root yields the
+// conservative case-SENSITIVE fallback with definitive=false — the same
+// fail-closed outcome a probe error produces, likewise never publishable.
+// root arrives already cleaned (destinationProbeRoot), matching the cache
+// keys IsCaseSensitiveRoot writes under.
+func cachedCaseSensitivity(root string) (sensitive, definitive bool) {
+	caseSensitivityCacheMu.Lock()
+	defer caseSensitivityCacheMu.Unlock()
+	result, ok := caseSensitivityCache[root]
+	if !ok {
+		return true, false
+	}
+	return result, true
+}
+
+// cachedNormalizationInsensitivity mirrors cachedCaseSensitivity for the
+// normalization leg: uncached roots fall back to normalization-SENSITIVE
+// (distinctions preserved) with definitive=false.
+func cachedNormalizationInsensitivity(root string) (insensitive, definitive bool) {
+	normalizationCacheMu.Lock()
+	defer normalizationCacheMu.Unlock()
+	result, ok := normalizationCache[root]
+	if !ok {
+		return false, false
+	}
+	return result, true
+}
+
 // NormalizationProbe is the process-wide Unicode-normalization probe seam,
 // mirroring CaseSensitiveProbe. A probe error is undecidable, so
 // IsNormalizationInsensitiveRoot keeps normalization distinctions for that
