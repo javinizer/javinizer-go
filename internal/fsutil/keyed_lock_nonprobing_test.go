@@ -45,27 +45,52 @@ func TestDestKeyResolver_KeyNonProbing(t *testing.T) {
 		assert.Equal(t, 0, *normCalls, "no normalization probe")
 	})
 
-	t.Run("fallback postures are never frozen into the resolver", func(t *testing.T) {
+	t.Run("fallback postures freeze per resolver — mid-pass definitive caches never flip a pass", func(t *testing.T) {
+		// codex P2 (PR #241 finding F2) pin: the first key on a fresh
+		// resolver resolves root X by FALLBACK; definitive caches injected
+		// externally mid-pass (as another live operation's probes would) must
+		// NOT flip the second key of the same root — while a NEW resolver
+		// (the next pass) sees the definitive fold.
 		caseCalls, normCalls := countingProbeSeams(t, false, true)
 		dir := t.TempDir()
 		r := NewDestKeyResolver()
-		before := r.KeyNonProbing(filepath.Join(dir, "Movie.mkv"))
-		require.Equal(t, 0, *caseCalls)
+		upper := r.KeyNonProbing(filepath.Join(dir, "Movie.mkv"))
+		lower := r.KeyNonProbing(filepath.Join(dir, "movie.mkv"))
+		assert.NotEqual(t, upper, lower, "an uncached root falls back to the conservative posture")
+		require.Equal(t, 0, *caseCalls, "fallback derivation probes nothing")
+		require.Equal(t, 0, *normCalls)
 
-		// Both legs acquire definitive cached postures (as an earlier live
-		// probe would have published); the same resolver must re-derive from
-		// the cache instead of clinging to the fallback.
+		// Mid-pass: both legs become definitive in the process caches (the
+		// stubs would fold EVERYTHING). The fallback is frozen per resolver…
 		IsCaseSensitiveRoot(dir)
 		IsNormalizationInsensitiveRoot(dir)
 		require.Equal(t, 1, *caseCalls)
 		require.Equal(t, 1, *normCalls)
 
-		foldedUpper := r.Key(filepath.Join(dir, "Movie.mkv"))
-		foldedLower := r.Key(filepath.Join(dir, "movie.mkv"))
-		assert.Equal(t, 1, *caseCalls, "Key reuses definitive caches without re-probing")
+		assert.Equal(t, upper, r.KeyNonProbing(filepath.Join(dir, "Movie.mkv")),
+			"the frozen fallback decides the whole pass")
+		assert.NotEqual(t,
+			r.KeyNonProbing(filepath.Join(dir, "Movie.mkv")),
+			r.KeyNonProbing(filepath.Join(dir, "movie.mkv")),
+			"the mid-pass definitive cache must NOT flip this pass's fold behavior")
+		assert.Equal(t, upper, r.Key(filepath.Join(dir, "Movie.mkv")),
+			"even Key reuses the pass's frozen posture — one resolver, one decision")
+
+		// …and the freeze never poisons the process-wide caches: the
+		// definitive outcome above came from REAL probes (counters prove the
+		// fallback published nothing), so a fresh resolver — the next pass —
+		// resolves the true posture without probing again.
+		r2 := NewDestKeyResolver()
+		assert.Equal(t,
+			r2.KeyNonProbing(filepath.Join(dir, "Movie.mkv")),
+			r2.KeyNonProbing(filepath.Join(dir, "movie.mkv")),
+			"a fresh resolver sees the definitive fold")
+		assert.Equal(t,
+			r2.KeyNonProbing(filepath.Join(dir, "caf\u00e9.mkv")),
+			r2.KeyNonProbing(filepath.Join(dir, "cafe\u0301.mkv")),
+			"a fresh resolver sees the definitive normalization fold")
+		assert.Equal(t, 1, *caseCalls, "the process cache carries the definitive outcome — no re-probe")
 		assert.Equal(t, 1, *normCalls)
-		assert.Equal(t, foldedUpper, foldedLower, "post-fill derivation folds case variants again")
-		assert.NotEqual(t, before, foldedUpper, "the fallback posture was not frozen")
 	})
 
 	t.Run("fully cached roots derive the definitive posture with zero probes and freeze it", func(t *testing.T) {
@@ -109,13 +134,21 @@ func TestDestKeyResolver_KeyNonProbing(t *testing.T) {
 			"the unknown normalization leg conservatively keeps NFD/NFC distinct")
 		assert.Equal(t, 0, *normCalls, "the unknown leg is never probed")
 
-		// Partially-known derivations freeze nothing: once the missing leg is
-		// cached definitively, Key re-derives the true full posture.
+		// codex P2 (PR #241 F2): the PARTIAL posture freezes too — the
+		// missing leg becoming definitive mid-pass cannot re-derive this
+		// pass's frozen overlay…
 		IsNormalizationInsensitiveRoot(dir)
 		require.Equal(t, 1, *normCalls)
-		assert.Equal(t,
+		assert.NotEqual(t,
 			r.Key(filepath.Join(dir, "caf\u00e9.mkv")),
 			r.Key(filepath.Join(dir, "cafe\u0301.mkv")),
-			"post-fill derivation folds normalization variants — no frozen partial posture")
+			"the pass's frozen partial posture never re-derives mid-pass")
+		// …while a fresh resolver (the next pass) folds with full definitive
+		// knowledge.
+		r2 := NewDestKeyResolver()
+		assert.Equal(t,
+			r2.KeyNonProbing(filepath.Join(dir, "caf\u00e9.mkv")),
+			r2.KeyNonProbing(filepath.Join(dir, "cafe\u0301.mkv")),
+			"the next pass folds normalization variants with full definitive knowledge")
 	})
 }

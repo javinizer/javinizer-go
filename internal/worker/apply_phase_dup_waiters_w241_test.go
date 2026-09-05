@@ -79,8 +79,9 @@ func (w *organizerBackedWorkflow) ScanAndMatch(context.Context, workflow.ScanAnd
 }
 
 // PlanDuplicatePriming mirrors applyOrchImpl.planDuplicatePriming: the
-// read-only plan plus the source-existence gate, so a claimant whose source
-// is gone at priming time registers nothing.
+// read-only plan plus the source-existence gate, so a claimant — mover or
+// stationary resident alike (codex P2, PR #241 F1) — whose source is gone
+// at priming time registers nothing.
 func (w *organizerBackedWorkflow) PlanDuplicatePriming(ctx context.Context, cmd workflow.ApplyCmd) (organizer.DuplicatePriming, error) {
 	if cmd.Organize.Skip {
 		return organizer.DuplicatePriming{}, nil
@@ -89,7 +90,7 @@ func (w *organizerBackedWorkflow) PlanDuplicatePriming(ctx context.Context, cmd 
 	if err != nil {
 		return organizer.DuplicatePriming{}, err
 	}
-	if plan.WillMove && plan.TargetPath != "" && !w.org.PlanSourceExists(plan) {
+	if plan.TargetPath != "" && !w.org.PlanSourceExists(plan) {
 		return organizer.DuplicatePriming{}, nil
 	}
 	return organizer.DuplicatePriming{

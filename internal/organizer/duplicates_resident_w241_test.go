@@ -28,6 +28,7 @@ func parkedEntry(t *testing.T, tracker *DuplicateTracker, target string) *claimE
 	require.True(t, ok, "no claim registered for %s", target)
 	require.True(t, entry.settled, "a resident's claim is born settled")
 	require.True(t, entry.success, "a resident parks settled-successfully")
+	require.True(t, entry.parked, "a born-settled resident claim carries the parked discriminant (codex P2, PR #241 F1)")
 	select {
 	case <-entry.done:
 	default:

@@ -35,12 +35,20 @@ type duplicateClaim struct {
 // A claim may also be a PARKED resident (codex P1, PR #241): a batch input
 // already sitting at its computed destination (WillMove=false) owns its
 // canonical key in a pre-settled parked state — registered at priming with
-// settled=true, success=true, and done already closed. No bytes ever move
-// for it (its own execute is a guaranteed no-op), so the claim is born at
-// its terminal success: moving claimants resolve INSTANTLY (never block),
-// and the parked claim never settles or releases again (settle, release,
-// ReleaseAbandonedBy, and failEntryLocked all skip settled entries), so
-// ForceUpdate can never promote a mover onto the resident's bytes.
+// settled=true, success=true, parked=true, and done already closed. No
+// bytes ever move for it (its own execute is a guaranteed no-op), so the
+// claim is born at its terminal success: moving claimants resolve
+// INSTANTLY (never block), and the parked claim is terminal against every
+// close-out but ONE (codex P2, PR #241 F1): settle is a no-op on an
+// already-settled entry, ReleaseAbandonedBy and every foreign or MOVING
+// close-out skip settled entries, but the RESIDENT'S OWN failure — its
+// WillMove=false plan reaching an Organize error leg after its source
+// vanished between the pre-park verification and validation — releases the
+// parked claim through release exactly like a failed mover owner, so the
+// key never becomes a permanent ghost that rejects (or authorized-skips)
+// every later mover while nothing ever fills the destination. While the
+// resident stands behind its claim, ForceUpdate can still never promote a
+// mover onto the resident's bytes.
 //
 // Promotion order (codex P2, PR #241 F1): the ordered STANDBY queue — every
 // primed claimant beyond the owner, retained in priming (= sorted) order —
@@ -57,6 +65,12 @@ type claimEntry struct {
 	done    chan struct{} // closed once, at the terminal transition
 	settled bool          // owner reached its terminal outcome
 	success bool          // terminal outcome kept the key
+	// parked marks a claim BORN terminal at priming for a stationary resident
+	// (codex P1, PR #241): done closed at birth, settled-success from the
+	// start. It discriminates the ONE releasable settled class (codex P2, PR
+	// #241 F1 — the resident's own failure, see release) and exempts
+	// failEntryLocked from re-closing an already-closed done.
+	parked bool
 }
 
 // DuplicatePriming is one batch file's plan-time destination claim, computed
@@ -152,11 +166,20 @@ func NewDuplicateTracker(nonProbing bool) *DuplicateTracker {
 // needs no execution: the resident's bytes ARE the destination bytes and its
 // own organize moves nothing. Parking ahead of EVERY mover (not just the ones
 // sorting later) keeps ownership independent of priming order: a sorted-earlier
-// mover lands as the parked key's inert standby (parked claims never fail, so
-// no promotion fires out of them) instead of owning the key, and its observe
-// resolves instantly to the resident-claimed duplicate verdict. Claims stay
-// batch-scoped — the tracker is constructed per run — so a fresh run's
-// resident parks its key anew and never conflicts with itself across runs.
+// mover lands as the parked key's inert standby (a parked claim fails only on
+// the resident's own error, so no failure promotion fires out of a live
+// resident) instead of owning the key, and its observe resolves instantly to
+// the resident-claimed duplicate verdict. Claims stay batch-scoped — the
+// tracker is constructed per run — so a fresh run's resident parks its key
+// anew and never conflicts with itself across runs.
+//
+// Born-settled does NOT mean born-permanent (codex P2, PR #241 F1): the
+// priming gate verifies every resident's source before parking it, and a
+// resident that still fails (its source vanishing in the priming→worker gap)
+// releases its own parked claim through the identical terminal-failure
+// machinery as a mover owner — the sorted-next standby promotes, or the
+// drained key frees outright — so a ghost resident never seals its
+// destination for the rest of the run.
 func (t *DuplicateTracker) PrimeBatch(primings []DuplicatePriming) {
 	if t == nil {
 		return
@@ -189,6 +212,7 @@ func (t *DuplicateTracker) PrimeBatch(primings []DuplicatePriming) {
 			done:    make(chan struct{}),
 			settled: true,
 			success: true,
+			parked:  true,
 		}
 		close(entry.done) // born terminal: a mover never blocks behind a resident
 		t.claims[key] = entry
@@ -205,9 +229,10 @@ func (t *DuplicateTracker) PrimeBatch(primings []DuplicatePriming) {
 			// an owner failing before the other workers reach observe otherwise
 			// deletes the claim and the survivors re-register by scheduler
 			// timing. Re-primings of the owner itself stay claim-nothing no-ops.
-			// Against a settled parked resident the slot is inert by
-			// construction: parked claims never fail, so the standby never
-			// promotes.
+			// Against a settled parked resident the slot is inert while the
+			// resident stands: parked claims fail only on the resident's own
+			// error (codex P2, PR #241 F1), so the standby promotes solely
+			// into a released ghost's key.
 			if filepath.Clean(p.SourcePath) != filepath.Clean(entry.claim.source) && !containsClaimant(entry.standby, p.SourcePath) {
 				entry.standby = append(entry.standby, p.SourcePath)
 			}
@@ -371,10 +396,14 @@ func (t *DuplicateTracker) cancelWaiterLocked(key, src string) {
 
 // settle marks the plan's OWNED claim terminal-success: the owner published
 // (or dry-run-planned) its destination, so every waiting claimant's
-// duplicate verdict is now final. Non-owner, unregistered, register-nothing,
-// and already-settled calls are no-ops.
+// duplicate verdict is now final. Non-owner, unregistered, and
+// already-settled calls are no-ops. A WillMove=false (register-nothing) plan
+// settles only an OPEN claim it owns — reachable solely as a resident
+// promoted out of a released parked claim (codex P2, PR #241 F1): the
+// ordinary resident's parked claim is already settled at birth, so its
+// success leg stays the no-op it always was.
 func (t *DuplicateTracker) settle(plan *OrganizePlan) {
-	if t == nil || plan == nil || !plan.WillMove || plan.TargetPath == "" {
+	if t == nil || plan == nil || plan.TargetPath == "" {
 		return
 	}
 	t.mu.Lock()
@@ -398,19 +427,35 @@ func (t *DuplicateTracker) settle(plan *OrganizePlan) {
 // claimants: with none registered, the key frees outright so the next
 // observe falls through; with waiters registered, the sorted-first one is
 // PROMOTED to owner so ITS organize proceeds (codex P2, PR #241). Only the
-// recorded owner of an UNSETTLED claim releases its key — losers, foreign
-// sources, register-nothing plans, and claims already settled (success or
-// failure) release nothing.
+// recorded owner releases its key — losers, foreign sources, and claims
+// already settled (success or failure) release nothing — with ONE settled
+// exception (codex P2, PR #241 F1): a PARKED resident's OWN failure. Its
+// WillMove=false plan reaching an Organize error leg means the source
+// vanished between the pre-park verification and validation, so the
+// born-settled claim is a GHOST: failing it promotes the sorted-next
+// standby (or frees the drained key) exactly like a failed mover owner,
+// instead of rejecting (or authorized-skipping) every later mover behind a
+// destination nothing will ever fill. Mover-settled claims, and a MOVING
+// plan spelling the resident's path, stay final. A WillMove=false plan
+// owning an UNSETTLED claim is reachable solely as a promoted resident —
+// its own failure in turn releases and hands onward identically.
 func (t *DuplicateTracker) release(plan *OrganizePlan) {
-	if t == nil || plan == nil || !plan.WillMove || plan.TargetPath == "" {
+	if t == nil || plan == nil || plan.TargetPath == "" {
 		return
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	key := t.keyLocked(plan.TargetPath)
 	entry, ok := t.claims[key]
-	if !ok || entry.settled || filepath.Clean(entry.claim.source) != filepath.Clean(plan.SourcePath) {
+	if !ok || filepath.Clean(entry.claim.source) != filepath.Clean(plan.SourcePath) {
 		return
+	}
+	if entry.settled {
+		// codex P2 (PR #241 F1): the one releasable settled claim — the
+		// parked resident released by its OWN WillMove=false failure.
+		if !entry.parked || plan.WillMove {
+			return
+		}
 	}
 	t.failEntryLocked(key, entry)
 }
@@ -456,7 +501,9 @@ func (t *DuplicateTracker) ReleaseAbandonedBy(source string) {
 func (t *DuplicateTracker) failEntryLocked(key string, entry *claimEntry) {
 	entry.settled = true
 	entry.success = false
-	close(entry.done)
+	if !entry.parked {
+		close(entry.done) // a parked claim's done already closed at birth
+	}
 	if len(entry.standby) > 0 {
 		next := entry.standby[0]
 		t.claims[key] = &claimEntry{

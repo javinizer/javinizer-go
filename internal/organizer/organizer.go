@@ -687,7 +687,11 @@ func (o *Organizer) Organize(ctx context.Context, cmd OrganizeCmd) (*OrganizeRes
 			// apply. Releasing lets the next valid claimant's observe fall
 			// through instead of dying on the stale owner's claim. Losers
 			// (whose validation failure lists their ConflictDuplicate) release
-			// nothing — release matches only the recorded owner.
+			// nothing — release matches only the recorded owner. A STATIONARY
+			// resident failing here (its source vanished in the priming→worker
+			// gap) likewise releases its own parked claim (codex P2, PR #241
+			// F1), so the ghost key frees/promotes instead of sealing the
+			// destination for the rest of the run.
 			cmd.DuplicateTracker.release(plan)
 			return nil, fmt.Errorf("organization validation failed: %v", issues)
 		}

@@ -312,6 +312,14 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult
 // registers nothing and the next valid sorted claimant takes the key. A
 // source vanishing AFTER priming is covered by the tracker's release on
 // organize failure (see Organizer.Organize).
+//
+// codex P2 (PR #241 F1): the existence check covers STATIONARY residents
+// too — an unverified WillMove=false plan would otherwise park a born-
+// settled ghost claim on its canonical key, rejecting (or authorized-
+// skipping) every mover of the run behind a destination nothing fills.
+// Verified-before-parking is the primary defense; the resident's own
+// Organize failure releasing its parked claim covers the residual
+// priming→worker vanish window.
 func (o *applyOrchImpl) planDuplicatePriming(ctx context.Context, cmd ApplyCmd) (organizer.DuplicatePriming, error) {
 	if cmd.Organize.Skip {
 		return organizer.DuplicatePriming{}, nil
@@ -337,7 +345,7 @@ func (o *applyOrchImpl) planDuplicatePriming(ctx context.Context, cmd ApplyCmd) 
 	if err != nil {
 		return organizer.DuplicatePriming{}, err
 	}
-	if plan.WillMove && plan.TargetPath != "" && !planner.PlanSourceExists(plan) {
+	if plan.TargetPath != "" && !planner.PlanSourceExists(plan) {
 		return organizer.DuplicatePriming{}, nil
 	}
 	return organizer.DuplicatePriming{

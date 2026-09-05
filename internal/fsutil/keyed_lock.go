@@ -302,31 +302,38 @@ func (r *DestKeyResolver) Key(p string) string {
 // KeyNonProbing derives p's canonical key WITHOUT writing to the filesystem
 // (#240 finding B — dry runs perform zero probe writes). Posture resolution:
 //  1. this resolver's frozen per-root posture, as with Key;
-//  2. the process-wide definitive probe caches — when BOTH legs are cached
-//     the posture is exactly what Key would probe, so it freezes into the
-//     resolver like a first Key derivation;
-//  3. any UNKNOWN leg falls back to the conservative distinction-preserving
-//     posture (case-sensitive, normalization-sensitive) — the same
-//     fail-closed posture a probe ERROR yields, and, like a probe error, a
-//     fallback is undecidable rather than a posture, so it is NEVER frozen:
-//     a later derivation with definitive cache knowledge (or Key itself)
-//     resolves the root's true posture.
+//  2. otherwise each leg comes from the process-wide DEFINITIVE probe caches
+//     where cached, overlaid on the conservative distinction-preserving
+//     fallback (case-sensitive, normalization-sensitive) — the same
+//     fail-closed posture a probe ERROR yields;
+//  3. the decision — definitive, partially cached, or pure fallback — then
+//     FREEZES into this resolver for the pass's lifetime (codex P2, PR #241
+//     finding F2): one grouping pass must derive every key of a root from
+//     ONE posture, so definitive caches another live operation's probes
+//     populate MID-PASS can never flip fold behavior half-way through a pass
+//     and split one destination's spellings across two buckets. The freeze
+//     stays resolver-local: a fallback is still undecidable rather than a
+//     posture, so it is NEVER published to the process-wide caches (the
+//     wave-25 contract holds — only definitive outcomes publish), and the
+//     next pass's fresh resolver resolves the root's true posture once
+//     definitive knowledge exists.
 //
 // The cost on an uncached root is only that case/normalization variants do
-// not group until a definitive posture exists; the probe root itself is
-// selected stat-only by destinationProbeRoot, so nothing is created, renamed,
-// or removed.
+// not group within that one pass; the probe root itself is selected
+// stat-only by destinationProbeRoot, so nothing is created, renamed, or
+// removed.
 func (r *DestKeyResolver) KeyNonProbing(p string) string {
 	root := destinationProbeRoot(p)
 	if posture, ok := r.postures[root]; ok {
 		return posture.key(p)
 	}
-	caseSensitive, caseDefinitive := cachedCaseSensitivity(root)
-	normInsensitive, normDefinitive := cachedNormalizationInsensitivity(root)
+	caseSensitive, _ := cachedCaseSensitivity(root)
+	normInsensitive, _ := cachedNormalizationInsensitivity(root)
 	posture := destKeyPosture{caseSensitive: caseSensitive, normInsensitive: normInsensitive}
-	if caseDefinitive && normDefinitive {
-		r.postures[root] = posture
-	}
+	// codex P2 (PR #241 F2): freeze the decision per resolver even when it
+	// fell back — process-wide caches receive nothing until a definitive
+	// probe publishes into them.
+	r.postures[root] = posture
 	return posture.key(p)
 }
 

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/operationmode"
 	"github.com/javinizer/javinizer-go/internal/organizer"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
@@ -129,25 +130,83 @@ func TestApplyOrch_PlanDuplicatePriming(t *testing.T) {
 		assert.Equal(t, 1, org.existsCalls)
 	})
 
-	t.Run("non-moving and empty-target plans never reach the existence check", func(t *testing.T) {
+	t.Run("residents are existence-checked pre-park (codex P2, PR #241 F1)", func(t *testing.T) {
+		// A VERIFIED resident parks normally — the F1 gate keeps stationary
+		// claims exactly as they were when the source is present.
 		org := &primingStubOrganizer{plan: &organizer.OrganizePlan{
-			SourcePath: "/in/A.mkv", TargetPath: "/in/A.mkv", WillMove: false,
+			SourcePath: "/dest/ABC-123/ABC-123.mkv", TargetPath: "/dest/ABC-123/ABC-123.mkv", WillMove: false,
 		}}
 		prim, err := newOrch(org).planDuplicatePriming(ctx, cmd)
 		require.NoError(t, err)
 		assert.Equal(t, organizer.DuplicatePriming{
-			SourcePath: "/in/A.mkv", TargetPath: "/in/A.mkv", WillMove: false,
+			SourcePath: "/dest/ABC-123/ABC-123.mkv", TargetPath: "/dest/ABC-123/ABC-123.mkv", WillMove: false,
 		}, prim)
-		assert.Equal(t, 0, org.existsCalls, "the source-existence gate is mover-only; a resident parks its key unconditionally (codex P1, PR #241)")
+		assert.Equal(t, 1, org.existsCalls, "the source-existence gate covers residents too")
 
-		org = &primingStubOrganizer{plan: &organizer.OrganizePlan{
+		// An unverifiable resident never parks: its born-settled ghost claim
+		// would otherwise seal the key for the whole run (codex P2, PR #241
+		// F1) — the residual priming→worker vanish window is covered by the
+		// resident's own failure releasing its parked claim.
+		gone := &primingStubOrganizer{
+			plan:       &organizer.OrganizePlan{SourcePath: "/dest/ABC-123/ABC-123.mkv", TargetPath: "/dest/ABC-123/ABC-123.mkv", WillMove: false},
+			sourceGone: true,
+		}
+		prim, err = newOrch(gone).planDuplicatePriming(ctx, cmd)
+		require.NoError(t, err)
+		assert.Equal(t, organizer.DuplicatePriming{}, prim,
+			"a resident whose source vanished at priming never parks a ghost claim")
+		assert.Equal(t, 1, gone.existsCalls)
+	})
+
+	t.Run("empty-target plans never reach the existence check", func(t *testing.T) {
+		org := &primingStubOrganizer{plan: &organizer.OrganizePlan{
 			SourcePath: "/in/A.mkv", TargetPath: "", WillMove: true,
 		}}
-		prim, err = newOrch(org).planDuplicatePriming(ctx, cmd)
+		prim, err := newOrch(org).planDuplicatePriming(ctx, cmd)
 		require.NoError(t, err)
 		assert.Equal(t, "", prim.TargetPath)
 		assert.Equal(t, 0, org.existsCalls, "empty-target primings register nothing, so existence is irrelevant")
 	})
+}
+
+// TestApplyOrch_PlanDuplicatePriming_RealOrganizerResidentGate pins codex P2
+// (PR #241 F1) end to end over the REAL organizer: the priming gate verifies
+// a stationary resident's source BEFORE its key is parked — a resident
+// already gone at priming registers nothing (no born-settled ghost claim),
+// while a present resident parks its ordinary WillMove=false claim.
+func TestApplyOrch_PlanDuplicatePriming_RealOrganizerResidentGate(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	org := organizer.NewOrganizer(fs, &organizer.Config{
+		FolderFormat:  "<ID>",
+		FileFormat:    "<ID>",
+		RenameFile:    true,
+		OperationMode: operationmode.OperationModeOrganize,
+	}, nil, nil)
+	require.NoError(t, fs.MkdirAll("/dest/ABC-123", 0o755))
+	impl := newApplyOrchestrator(fs, org, nil, nil, nil, ApplyConfig{}, nil, nil, nil, nil)
+	cmd := ApplyCmd{
+		Movie:    &models.Movie{ID: "ABC-123"},
+		Match:    models.FileMatchInfo{MovieID: "ABC-123", Path: "/dest/ABC-123/ABC-123.mkv", Name: "ABC-123.mkv", Extension: ".mkv"},
+		DestPath: "/dest",
+		Organize: OrganizeOptions{MoveFiles: true},
+	}
+
+	// Resident ABSENT at priming: no priming — the ghost can never park (the
+	// residual priming→worker vanish window is covered by the resident's own
+	// failure releasing its parked claim).
+	prim, err := impl.planDuplicatePriming(context.Background(), cmd)
+	require.NoError(t, err)
+	assert.Equal(t, organizer.DuplicatePriming{}, prim,
+		"an unverifiable resident must never park a born-settled ghost claim")
+
+	// Resident PRESENT at priming: parks its stationary claim exactly as
+	// before (codex P1 behavior unchanged for verified residents).
+	require.NoError(t, afero.WriteFile(fs, "/dest/ABC-123/ABC-123.mkv", []byte("resident-bytes"), 0o644))
+	prim, err = impl.planDuplicatePriming(context.Background(), cmd)
+	require.NoError(t, err)
+	assert.Equal(t, "/dest/ABC-123/ABC-123.mkv", prim.SourcePath)
+	assert.Equal(t, "/dest/ABC-123/ABC-123.mkv", prim.TargetPath)
+	assert.False(t, prim.WillMove, "a verified stationary input keeps its resident priming")
 }
 
 // TestWorkflow_PlanDuplicatePriming_Delegates pins the Workflow composition

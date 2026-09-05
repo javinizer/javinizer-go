@@ -108,8 +108,10 @@ type preparedApplyFile struct {
 // Items whose PreApply hook declined execution (or panicked into a recorded
 // failure), whose plan fails or exhausts the file's own priming budget
 // (codex P2, PR #241 F1), or whose source already vanished register nothing
-// (codex r2 P2) — their workers skip execution or fail with the identical
-// plan error, so priming can never claim a file that cannot run. Without
+// (codex r2 P2 — extended to stationary residents by codex P2, PR #241 F1:
+// an unverified resident would otherwise park a born-settled ghost claim) —
+// their workers skip execution or fail with the identical plan error, so
+// priming can never claim a file that cannot run. Without
 // the seam (or on a nil workflow) the tracker stays unprimed, preserving
 // first-come observation for single-file callers.
 func primeDuplicateClaims(ctx context.Context, wf workflow.WorkflowInterface, tracker *organizer.DuplicateTracker, items []applyItem, prepared map[string]*preparedApplyFile, inputs applyPhaseInputs, cfg ApplyPhaseConfig) {
