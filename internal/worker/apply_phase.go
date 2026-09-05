@@ -79,12 +79,24 @@ type preparedApplyFile struct {
 	// never earns a second full grant — the remainder clamps to
 	// applyBudgetFloor).
 	hookElapsed time.Duration
+	// primingElapsed is the item's OWN duplicate-priming spend — the
+	// PlanDuplicatePriming call, measured on the phase goroutine during the
+	// sequential priming pass (codex P2, PR #241 F1). The priming pass runs
+	// BEFORE fan-out on the phase goroutine, so without this debit a slow
+	// priming call consumed real per-file budget invisibly: hookElapsed
+	// alone under-charged and apply silently re-granted whatever priming
+	// burned. The worker debits hookElapsed+primingElapsed from the budget
+	// it starts at ITS task start; sibling priming spends stay invisible
+	// exactly like sibling preparation (only the file's OWN priming is
+	// charged).
+	primingElapsed time.Duration
 	// hookOutcome is non-nil when the priming-time PreApply hook panicked
-	// (codex r2 P2) or the priming-time planning pass panicked (codex P2, PR
-	// #241 F3): the prepare/priming pass recovered, wrote back, and broadcast
-	// the failure already, so the item's worker replays this outcome instead
-	// of re-executing — the once-per-file hook contract holds and the batch
-	// counts exactly one recorded failure for the file.
+	// (codex r2 P2), the priming-time planning pass panicked (codex P2, PR
+	// #241 F3), or planning exhausted the file's own priming budget (codex
+	// P2, PR #241 F1): the prepare/priming pass recovered, wrote back, and
+	// broadcast the failure already, so the item's worker replays this
+	// outcome instead of re-executing — the once-per-file hook contract
+	// holds and the batch counts exactly one recorded failure for the file.
 	hookOutcome *applyFileOutcome
 }
 
@@ -94,11 +106,12 @@ type preparedApplyFile struct {
 // pre-assigning every canonical key's winner (and its ordered standbys,
 // codex P2, PR #241 F1) before any apply worker starts (#240 finding A).
 // Items whose PreApply hook declined execution (or panicked into a recorded
-// failure), whose plan fails, or whose source already vanished register
-// nothing (codex r2 P2) — their workers skip execution or fail with the
-// identical plan error, so priming can never claim a file that cannot run.
-// Without the seam (or on a nil workflow) the tracker stays unprimed,
-// preserving first-come observation for single-file callers.
+// failure), whose plan fails or exhausts the file's own priming budget
+// (codex P2, PR #241 F1), or whose source already vanished register nothing
+// (codex r2 P2) — their workers skip execution or fail with the identical
+// plan error, so priming can never claim a file that cannot run. Without
+// the seam (or on a nil workflow) the tracker stays unprimed, preserving
+// first-come observation for single-file callers.
 func primeDuplicateClaims(ctx context.Context, wf workflow.WorkflowInterface, tracker *organizer.DuplicateTracker, items []applyItem, prepared map[string]*preparedApplyFile, inputs applyPhaseInputs, cfg ApplyPhaseConfig) {
 	planner, ok := wf.(workflow.DuplicatePrimingPlanner)
 	if !ok {
@@ -110,14 +123,40 @@ func primeDuplicateClaims(ctx context.Context, wf workflow.WorkflowInterface, tr
 		if !p.execute {
 			continue
 		}
-		priming, panicOutcome, err := planPrimingRecovered(ctx, planner, item, p.cmd, inputs, cfg)
-		if panicOutcome != nil {
-			// codex P2 (PR #241 F3): the planning panic was already recovered,
-			// written back, and broadcast per file — the worker replays the
-			// recorded failure (planning never runs twice) while the batch
-			// continues with every other item.
+		// codex P2 (PR #241 F1): the planning call is bounded by the file's
+		// OWN remaining budget — WorkerTimeout debited by its own hook spend.
+		// The priming pass is SEQUENTIAL on the phase goroutine, so an
+		// unbounded call behind the raw batch context could stall every
+		// later file's priming AND fan-out; the per-file context cancels at
+		// its own deadline without touching the batch context. The measured
+		// spend (primingElapsed) is then charged to the same budget at the
+		// worker's task start. A file whose hook already burned the whole
+		// grant primes under applyBudgetFloor: the zero-duration context is
+		// already expired at construction, a ctx-aware planner returns
+		// immediately, and the file records the timeout instead of priming.
+		primeCtx := ctx
+		var primeBudget time.Duration
+		var primeCancel context.CancelFunc
+		if timeout := inputs.Concurrency.WorkerTimeout; timeout > 0 {
+			primeBudget = timeout - p.hookElapsed
+			if primeBudget < applyBudgetFloor {
+				primeBudget = applyBudgetFloor
+			}
+			primeCtx, primeCancel = context.WithTimeout(ctx, primeBudget)
+		}
+		primingStart := time.Now()
+		priming, recorded, err := planPrimingRecovered(ctx, primeCtx, planner, item, p.cmd, inputs, cfg, primeBudget)
+		p.primingElapsed = time.Since(primingStart)
+		if primeCancel != nil {
+			primeCancel()
+		}
+		if recorded != nil {
+			// codex P2 (PR #241 F3 panics, F1 timeouts): the planning failure
+			// was already recovered, written back, and broadcast per file —
+			// the worker replays the recorded outcome (planning never runs
+			// twice) while the batch continues with every other item.
 			p.execute = false
-			p.hookOutcome = panicOutcome
+			p.hookOutcome = recorded
 			continue
 		}
 		if err != nil {
@@ -130,7 +169,8 @@ func primeDuplicateClaims(ctx context.Context, wf workflow.WorkflowInterface, tr
 }
 
 // planPrimingRecovered runs ONE item's priming-plan call under the apply
-// phase's per-file recovery boundary (codex P2, PR #241 F3).
+// phase's per-file recovery boundary (codex P2, PR #241 F3) and per-file
+// budget boundary (codex P2, PR #241 F1).
 // PlanDuplicatePriming runs the organizer's whole planning pipeline on the
 // phase's MAIN goroutine, so an unrecovered panic would escape
 // withFileRecovery (which exists only inside the fanned-out workers) and
@@ -138,7 +178,18 @@ func primeDuplicateClaims(ctx context.Context, wf workflow.WorkflowInterface, tr
 // the identical semantics as a preparation or execution panic — that file
 // fails with the recorded panic message and the batch continues — and the
 // returned outcome is what the item's worker replays.
-func planPrimingRecovered(ctx context.Context, planner workflow.DuplicatePrimingPlanner, item applyItem, cmd workflow.ApplyCmd, inputs applyPhaseInputs, cfg ApplyPhaseConfig) (priming organizer.DuplicatePriming, panicOutcome *applyFileOutcome, err error) {
+//
+// F1: primeCtx carries the file's OWN remaining budget (primeBudget =
+// WorkerTimeout − hookElapsed, clamped at applyBudgetFloor; zero primeBudget
+// means unbounded when no WorkerTimeout is configured). Its deadline firing
+// while the BATCH context is still alive is this file's priming budget
+// exhausting: planning is abandoned, the file skips priming, and the SAME
+// recorded-failure shape is published (write-back + broadcast + replayed
+// outcome), minus the panic flag — a timeout is a recoverable per-file
+// failure, never a panic. A batch-level cancellation or deadline surfaces
+// through batchCtx instead and keeps the ordinary log-and-continue skip —
+// it is never mislabeled as a per-file priming timeout.
+func planPrimingRecovered(batchCtx, primeCtx context.Context, planner workflow.DuplicatePrimingPlanner, item applyItem, cmd workflow.ApplyCmd, inputs applyPhaseInputs, cfg ApplyPhaseConfig, primeBudget time.Duration) (priming organizer.DuplicatePriming, recorded *applyFileOutcome, err error) {
 	outcome := applyFileOutcome{FilePath: item.filePath, MovieID: item.movie.ID, DryRun: cfg.DryRun}
 	// Mirror prepareApplyItem's recoveryContext assembly field-for-field: the
 	// recorded failure is indistinguishable from a worker-side panic.
@@ -157,13 +208,34 @@ func planPrimingRecovered(ctx context.Context, planner workflow.DuplicatePriming
 	// recovery func below (LIFO) — recover() only bites when called directly
 	// by a deferred function, exactly like prepareApplyItem's dual-defers.
 	defer func() {
-		if outcome.Panic {
-			panicOutcome = &outcome
+		if outcome.Panic || outcome.Failed {
+			recorded = &outcome
 		}
 	}()
 	defer withFileRecovery(rc, &outcome)()
-	priming, err = planner.PlanDuplicatePriming(ctx, cmd)
+	priming, err = planner.PlanDuplicatePriming(primeCtx, cmd)
+	if err != nil && primeBudget > 0 && errors.Is(primeCtx.Err(), context.DeadlineExceeded) && batchCtx.Err() == nil {
+		// The file's own priming budget fired mid-plan with the batch still
+		// alive: skip priming and record the recoverable failure through the
+		// same publication path a panic would take (minus the panic flag).
+		recordPrimingTimeout(rc, &outcome, primeBudget)
+	}
 	return priming, nil, err
+}
+
+// recordPrimingTimeout publishes a per-file priming budget exhaustion through
+// the IDENTICAL write-back + broadcast path a recovered planning panic takes
+// (codex P2, PR #241 F1 — publishRecoveryFailure is the panic recovery's
+// publication half), then marks the replayed outcome as a plain recoverable
+// failure: Panic stays false (nothing panicked — no panic audit), Failed is
+// set so the batch counts exactly one failure and the row stays retryable,
+// and the batch continues with every other file.
+func recordPrimingTimeout(rc recoveryContext, outcome *applyFileOutcome, primeBudget time.Duration) {
+	msg := fmt.Sprintf("duplicate preflight planning timed out after %v", primeBudget)
+	logging.Warnf("[Apply] %s (%s skips priming; the batch continues)", msg, rc.filePath)
+	publishRecoveryFailure(rc, msg)
+	outcome.Failed = true
+	outcome.ErrorMsg = msg
 }
 
 // applyFileOutcome captures the result of applying a single file.
@@ -394,11 +466,13 @@ func countRemainingApplyFailures(inputs applyPhaseInputs, outcomes []applyFileOu
 //
 // codex P2 (PR #241 F4+F5): the hook spends from the per-file budget here,
 // and the item's OWN preparation spend is recorded as hookElapsed; applyFile
-// later debits exactly that from the budget it starts at ITS task start.
-// Hook + apply stay bounded by ONE WorkerTimeout — no fresh full re-grant —
-// while sibling preparation, the priming pass, and fan-out queue time never
-// consume THIS file's budget anymore (the preparation loop is sequential,
-// fan-out starts only after ALL items are prepared+primed).
+// later debits exactly that — plus primingElapsed, the file's own priming
+// spend (codex P2, PR #241 F1) — from the budget it starts at ITS task
+// start. Hook + priming + apply stay bounded by ONE WorkerTimeout — no
+// fresh full re-grant — while sibling preparation and priming, and fan-out
+// queue time never consume THIS file's budget anymore (the preparation and
+// priming loops are sequential, fan-out starts only after ALL items are
+// prepared+primed).
 func prepareApplyItem(ctx context.Context, item applyItem, inputs applyPhaseInputs, cfg ApplyPhaseConfig) (prepared *preparedApplyFile) {
 	prepared = &preparedApplyFile{baseline: item.movie.Clone()}
 	if timeout := inputs.Concurrency.WorkerTimeout; timeout > 0 {
@@ -823,16 +897,20 @@ func applyFile(
 	var taskCancel context.CancelFunc
 	if applyTimeout > 0 {
 		// codex P2 (PR #241 F5): the budget clock starts at THIS worker
-		// task's start — sibling preparation, the priming pass, and fan-out
-		// queue time are all invisible — debited only by the file's OWN
+		// task's start — sibling preparation and priming, and fan-out queue
+		// time are all invisible — debited only by the file's OWN
 		// preparation spend (F4: hook + apply stay inside ONE WorkerTimeout;
 		// a hook that burned it buys no second full grant for apply).
-		// Because an uncooperative hook can overshoot its deadline, the raw
+		// codex P2 (PR #241 F1): the file's OWN priming spend joins the
+		// debit — priming ran under the same per-file budget, so apply sees
+		// hook + priming + apply bounded by ONE WorkerTimeout, with sibling
+		// priming still invisible. Because an uncooperative hook (or a
+		// ctx-ignoring planner) can overshoot its deadline, the raw
 		// remainder can go negative — a deadline BEFORE task start, i.e.
 		// time travel — so it clamps at applyBudgetFloor: never negative,
 		// and the zero duration cancels the derived context synchronously
 		// (see the constant's contract).
-		remaining := applyTimeout - prepared.hookElapsed
+		remaining := applyTimeout - (prepared.hookElapsed + prepared.primingElapsed)
 		if remaining < applyBudgetFloor {
 			remaining = applyBudgetFloor
 		}

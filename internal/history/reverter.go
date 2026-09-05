@@ -62,8 +62,6 @@ type RevertFileResult struct {
 var (
 	// ErrBatchAlreadyReverted is returned when a batch or operation is already reverted.
 	ErrBatchAlreadyReverted = errors.New("batch already reverted")
-	// ErrCopyModeNotRevertible is returned when attempting to revert a copy/hardlink/symlink operation.
-	ErrCopyModeNotRevertible = errors.New("copy-mode operations cannot be reverted")
 	// ErrNoOperationsFound is returned when no operations exist for the given batch.
 	ErrNoOperationsFound = errors.New("no operations found for batch")
 
@@ -250,7 +248,7 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 	}
 
 	// P3: replay the replacement journal BEFORE the anchor check AND before
-	// the copy-mode rejection (codex P3 R2-1/R6-in-2): a deleted primary
+	// any operation-type leg (codex P3 R2-1/R6-in-2): a deleted primary
 	// anchor must not strand independently recoverable overwritten media —
 	// least of all for copy-mode operations whose only forward-recoverable
 	// state IS the journal. Restored destinations are structurally excluded
@@ -260,6 +258,9 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 	if rejErr != nil {
 		logging.Warnf("Replacement journal restore refused/failed for op %d: %v", op.ID, rejErr)
 		return rejectedRevert(op, rejErr).withRetryable(rejErr), nil
+	}
+	if len(restored) > 0 {
+		logging.Debugf("Reverted %d journaled replacement(s) for op %d ahead of the %s leg", len(restored), op.ID, op.OperationType)
 	}
 
 	// Journal replay may have refreshed a stale caller snapshot. Re-check the
@@ -273,18 +274,11 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 		return result, err
 	}
 
-	if op.OperationType != models.OperationTypeMove && op.OperationType != models.OperationTypeUpdate {
-		msg := ErrCopyModeNotRevertible.Error()
-		if len(restored) > 0 {
-			msg += fmt.Sprintf(" (%d journaled replacement(s) restored first)", len(restored))
-		}
-		return failRevert(ctx, r.batchFileOpRepo, op, models.RevertReasonUnexpectedPathState, msg), nil
-	}
-
 	isUpdate := op.OperationType == models.OperationTypeUpdate
-	if isUpdate {
+	switch op.OperationType {
+	case models.OperationTypeUpdate:
 		r.fsReverter.cleanupGeneratedFiles(op, filepath.Dir(filepath.Dir(op.OriginalPath)))
-	} else {
+	case models.OperationTypeMove:
 		if result, err := r.fsReverter.revertPrimaryFile(ctx, op); result != nil || err != nil {
 			return result, err
 		}
@@ -293,6 +287,22 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 		if !op.InPlaceRenamed {
 			r.fsReverter.cleanupEmptyDir(filepath.Dir(op.NewPath), destRoot)
 		}
+	case models.OperationTypeCopy, models.OperationTypeHardlink, models.OperationTypeSymlink:
+		// codex P2 (PR #241 F2): copy/link ops never gave up their source —
+		// the forward install was non-destructive — so there is no primary
+		// move-back to perform (the retired blanket rejection here also
+		// stranded their journals). Their generated-files ledger DOES carry
+		// Delete entries whose ONLY consumer is cleanupGeneratedFiles below:
+		// the NFO, the downloads, and COPIED subtitles (workflow/revert_log.go
+		// journals a copy-installed subtitle into Delete precisely because
+		// its source survives — reverting deletes the installed copy, never
+		// the source). Deleting exactly those artifacts is the complete,
+		// correct, non-destructive inverse: sources stay, the installed
+		// primary stays (it is the user's copy), and the move leg above
+		// keeps its full move-back semantics untouched.
+		r.fsReverter.cleanupGeneratedFiles(op, filepath.Dir(filepath.Dir(op.NewPath)))
+	default:
+		return failRevert(ctx, r.batchFileOpRepo, op, models.RevertReasonUnexpectedPathState, fmt.Sprintf("unknown operation type %q cannot be reverted", op.OperationType)), nil
 	}
 
 	nfoWarning, failedResult := r.fsReverter.restoreNFO(ctx, op, isUpdate)
@@ -315,10 +325,13 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 	if nfoWarning != "" {
 		result.Error = nfoWarning
 	}
-	if isUpdate {
+	switch {
+	case isUpdate:
 		logging.Infof("Reverted update operation %d: movie=%s at %s", op.ID, op.MovieID, op.OriginalPath)
-	} else {
+	case op.OperationType == models.OperationTypeMove:
 		logging.Infof("Reverted operation %d: movie=%s moved from %s back to %s", op.ID, op.MovieID, op.NewPath, op.OriginalPath)
+	default:
+		logging.Infof("Reverted copy-mode operation %d: movie=%s deleted generated artifacts under %s (sources and installed primary retained)", op.ID, op.MovieID, op.NewPath)
 	}
 	return result, nil
 }

@@ -185,10 +185,6 @@ func TestErrBatchAlreadyRevertedDeep2(t *testing.T) {
 	assert.EqualError(t, ErrBatchAlreadyReverted, "batch already reverted")
 }
 
-func TestErrCopyModeNotRevertibleDeep2(t *testing.T) {
-	assert.EqualError(t, ErrCopyModeNotRevertible, "copy-mode operations cannot be reverted")
-}
-
 func TestErrNoOperationsFoundDeep2(t *testing.T) {
 	assert.EqualError(t, ErrNoOperationsFound, "no operations found for batch")
 }

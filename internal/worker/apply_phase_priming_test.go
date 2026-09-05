@@ -23,14 +23,24 @@ import (
 
 // primingStubWorkflow extends stubApplyWorkflow with the optional
 // workflow.DuplicatePrimingPlanner seam, recording priming attempts in call
-// order and any Apply dispatched before every priming completed.
+// order and any Apply dispatched before every priming completed. planBlock
+// models a ctx-AWARE slow planner (unblocks only when its ctx is done) and
+// planDelay a ctx-IGNORANT one (burns wall clock past any deadline); both
+// record the priming ctx's deadline and their own elapsed spend so tests can
+// pin the per-file priming budget boundary and its charging (codex P2, PR
+// #241 F1).
 type primingStubWorkflow struct {
 	stubApplyWorkflow
 	planErrOn map[string]bool
 	planPanic map[string]bool
+	planBlock map[string]bool
+	planDelay map[string]time.Duration
 
 	mu             sync.Mutex
 	primeCalls     []string
+	primeDeadline  map[string]time.Time
+	primeStart     map[string]time.Time
+	primeElapsed   map[string]time.Duration
 	applyCmds      []workflow.ApplyCmd
 	earlyApply     []string
 	applyDeadlines map[string]time.Time
@@ -39,15 +49,46 @@ type primingStubWorkflow struct {
 	total          int
 }
 
-func (s *primingStubWorkflow) PlanDuplicatePriming(_ context.Context, cmd workflow.ApplyCmd) (organizer.DuplicatePriming, error) {
+func (s *primingStubWorkflow) PlanDuplicatePriming(ctx context.Context, cmd workflow.ApplyCmd) (organizer.DuplicatePriming, error) {
+	start := time.Now()
+	deadline, _ := ctx.Deadline()
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	src := cmd.Match.Path
 	s.primeCalls = append(s.primeCalls, src)
-	if s.planPanic[src] {
+	if s.primeStart == nil {
+		s.primeStart = make(map[string]time.Time)
+		s.primeDeadline = make(map[string]time.Time)
+		s.primeElapsed = make(map[string]time.Duration)
+	}
+	s.primeStart[src] = start
+	s.primeDeadline[src] = deadline
+	block := s.planBlock[src]
+	delay := s.planDelay[src]
+	s.mu.Unlock()
+
+	if block {
+		// A ctx-aware slow planner: unblocks exactly when ITS priming ctx is
+		// done (the per-file budget firing, or the batch ctx canceling).
+		<-ctx.Done()
+		s.mu.Lock()
+		s.primeElapsed[src] = time.Since(start)
+		s.mu.Unlock()
+		return organizer.DuplicatePriming{}, ctx.Err()
+	}
+	if delay > 0 {
+		// A ctx-IGNORANT slow planner: burns wall clock past its deadline.
+		time.Sleep(delay)
+	}
+
+	s.mu.Lock()
+	s.primeElapsed[src] = time.Since(start)
+	panics := s.planPanic[src]
+	errs := s.planErrOn[src]
+	s.mu.Unlock()
+	if panics {
 		panic("priming plan boom for " + src)
 	}
-	if s.planErrOn[src] {
+	if errs {
 		return organizer.DuplicatePriming{}, fmt.Errorf("plan boom for %s", src)
 	}
 	return organizer.DuplicatePriming{
@@ -55,6 +96,15 @@ func (s *primingStubWorkflow) PlanDuplicatePriming(_ context.Context, cmd workfl
 		TargetPath: filepath.Join(cmd.DestPath, strings.ToLower(cmd.Match.MovieID)+".mkv"),
 		WillMove:   true,
 	}, nil
+}
+
+// primingObservation returns the priming-ctx state one plan call observed:
+// its own start, the ctx deadline it was handed, and its measured spend.
+func (s *primingStubWorkflow) primingObservation(path string) (start time.Time, deadline time.Time, elapsed time.Duration, ok bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	start, ok = s.primeStart[path]
+	return start, s.primeDeadline[path], s.primeElapsed[path], ok
 }
 
 func (s *primingStubWorkflow) Apply(ctx context.Context, cmd workflow.ApplyCmd) (*workflow.ApplyResult, error) {
@@ -590,4 +640,175 @@ func TestApplyPhase_Run_HookBurningFullBudgetYieldsFloorApplyContext(t *testing.
 	lc := inputs.Lifecycle.(*stubLifecycle)
 	assert.False(t, lc.organized)
 	assert.True(t, lc.completed)
+}
+
+// TestApplyPhase_Run_PrimingTimeoutRecordsRecoverableFailure pins codex P2
+// (PR #241, F1): the priming call runs under the file's OWN remaining budget
+// on a per-file context — never the raw batch context — so a ctx-aware slow
+// planner unblocks when ITS priming deadline fires, leaving the batch alive.
+// The file skips priming, records exactly ONE recoverable failure (mirroring
+// the panic-recovery outcome shape minus the panic flag: written back as
+// Failed with the timeout message, broadcast as StepFailed, replayed by its
+// worker instead of re-executing), and the batch primes/applies the rest.
+func TestApplyPhase_Run_PrimingTimeoutRecordsRecoverableFailure(t *testing.T) {
+	const slow, good = "/source/a-slow-prime.mp4", "/source/b-good.mp4"
+	const perFile = 300 * time.Millisecond
+
+	wf := &primingStubWorkflow{total: 2, planBlock: map[string]bool{slow: true}}
+	wf.applyResult = &workflow.ApplyResult{Movie: &models.Movie{ID: "M-100"}}
+	inputs := makeApplyInputs(wf)
+	inputs.Concurrency = concurrencyConfig{MaxWorkers: 2, WorkerTimeout: perFile}
+	for _, p := range []string{slow, good} {
+		inputs.Results[p] = &resultstore.MovieResult{
+			FileMatchInfo: models.FileMatchInfo{Path: p, MovieID: "M-100"},
+			Status:        models.JobStatusCompleted,
+			Movie:         &models.Movie{ID: "M-100"},
+		}
+	}
+
+	var organized, failed int
+	start := time.Now()
+	NewApplyPhase().Run(context.Background(), inputs, ApplyPhaseConfig{
+		OrganizeOptions: workflow.OrganizeOptions{MoveFiles: true},
+		Destination:     "/output",
+		OnPhaseComplete: func(o, f int) { organized, failed = o, f },
+	})
+	elapsed := time.Since(start)
+
+	primeCalls, applyCmds, _ := wf.snapshot()
+	assert.Equal(t, []string{slow, good}, primeCalls,
+		"every item's priming is still attempted exactly once, in sorted order")
+	require.Len(t, applyCmds, 1)
+	assert.Equal(t, good, applyCmds[0].Match.Path,
+		"the timed-out file is never executed; the healthy file applies normally")
+	assert.Less(t, elapsed, 5*time.Second,
+		"the priming ctx canceled at its own deadline — the batch never stalled behind the raw batch context")
+
+	// The priming deadline is the file's OWN remaining budget (its hook was
+	// instant, so ≈ the full WorkerTimeout) measured from ITS priming start —
+	// an interval pin, not a strict clock Less (Windows-safe).
+	primeStart, primeDeadline, _, ok := wf.primingObservation(slow)
+	require.True(t, ok, "the slow file's priming ran")
+	assert.WithinDuration(t, primeStart.Add(perFile), primeDeadline, 250*time.Millisecond,
+		"priming ran under a per-file ctx bounded by the file's own WorkerTimeout share")
+
+	assert.Equal(t, 1, organized, "the healthy file's success is unaffected by the priming-timeout sibling")
+	assert.Equal(t, 1, failed, "the priming timeout records exactly one per-file failure")
+
+	row := inputs.Updater.(*stubUpdater).getResult(slow)
+	require.NotNil(t, row, "the recoverable failure is written back, mirroring the planning-panic path")
+	assert.Equal(t, models.JobStatusFailed, row.Status)
+	assert.Contains(t, row.Error, "duplicate preflight planning timed out",
+		"the failure is a recoverable priming timeout, not a panic")
+	assert.NotContains(t, row.Error, "panic")
+
+	broadcaster := inputs.Broadcaster.(*stubBroadcaster)
+	foundFailureBroadcast := false
+	for _, evt := range broadcaster.events {
+		if evt.Step == StepFailed && evt.MovieID == "M-100" && strings.Contains(evt.Message, "planning timed out") {
+			foundFailureBroadcast = true
+		}
+	}
+	assert.True(t, foundFailureBroadcast,
+		"the timeout is broadcast exactly like a recovered planning panic")
+
+	lc := inputs.Lifecycle.(*stubLifecycle)
+	assert.False(t, lc.failed, "the phase main body survives: no job-sinking failure")
+	assert.False(t, lc.organized, "a recorded failure keeps the job out of Organized")
+	assert.True(t, lc.completed)
+}
+
+// TestApplyPhase_Run_PrimingSpendChargedToOwnBudget pins codex P2 (PR #241,
+// F1) charging: the file's OWN priming spend is measured alongside
+// hookElapsed and debited from the budget the worker starts at ITS task
+// start — applyDeadline == taskStart + WorkerTimeout − hookElapsed −
+// primingElapsed — so hook + priming + apply stay bounded by ONE
+// WorkerTimeout with no silent re-grant for whatever priming burned.
+func TestApplyPhase_Run_PrimingSpendChargedToOwnBudget(t *testing.T) {
+	const solo = "/source/solo.mp4"
+	const perFile = 1500 * time.Millisecond
+
+	wf := &primingStubWorkflow{total: 1, planDelay: map[string]time.Duration{solo: 350 * time.Millisecond}}
+	wf.applyResult = &workflow.ApplyResult{Movie: &models.Movie{ID: "M-100"}}
+	inputs := makeApplyInputs(wf)
+	inputs.Concurrency = concurrencyConfig{MaxWorkers: 1, WorkerTimeout: perFile}
+	inputs.Results[solo] = &resultstore.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: solo, MovieID: "M-100"},
+		Status:        models.JobStatusCompleted,
+		Movie:         &models.Movie{ID: "M-100"},
+	}
+
+	// The preparation loop is sequential on the phase goroutine, so this
+	// write strictly precedes fan-out (and the reads after Run returns).
+	var hookStart time.Time
+	var hookElapsed time.Duration
+	var organized, failed int
+	NewApplyPhase().Run(context.Background(), inputs, ApplyPhaseConfig{
+		OrganizeOptions: workflow.OrganizeOptions{MoveFiles: true},
+		Destination:     "/output",
+		PreApplyFunc: func(_ context.Context, afc *ApplyFileContext) error {
+			hookStart = time.Now()
+			time.Sleep(250 * time.Millisecond) // a genuinely slow hook, well inside its own budget
+			hookElapsed = time.Since(hookStart)
+			return nil
+		},
+		OnPhaseComplete: func(o, f int) { organized, failed = o, f },
+	})
+
+	require.NotZero(t, hookStart, "the hook ran exactly once")
+	_, _, primeElapsed, ok := wf.primingObservation(solo)
+	require.True(t, ok, "the file's priming ran")
+	assert.GreaterOrEqual(t, primeElapsed, 300*time.Millisecond,
+		"the priming spend is measured, not dropped (the planner burned 350ms)")
+
+	applyStart, entryErr, applyDeadline, hasDeadline := wf.applyObservationsFor(solo)
+	require.True(t, hasDeadline, "the worker's apply context carries a deadline")
+	assert.NoError(t, entryErr,
+		"hook+priming (~600ms) fit the budget with room — apply enters with a live context")
+	// Exact arithmetic pin, interval-style: applyDeadline ≈ taskStart +
+	// WorkerTimeout − hookElapsed − primingElapsed. Stub spans observe the
+	// same hook/priming calls (the worker's own measurements additionally
+	// include microseconds of command-build overhead, absorbed by the
+	// tolerance — no strict-Less clock pins, Windows-safe).
+	expectedDeadline := applyStart.Add(perFile - hookElapsed - primeElapsed)
+	assert.WithinDuration(t, expectedDeadline, applyDeadline, 350*time.Millisecond,
+		"apply deadline = own task start + WorkerTimeout − own hook elapsed − own priming elapsed")
+	assert.Equal(t, 1, organized)
+	assert.Equal(t, 0, failed)
+}
+
+// TestApplyPhase_Run_CtxIgnoringPrimingOvershootClampsAtFloor pins the F1
+// endpoint of the charging contract: a ctx-IGNORANT planner cannot be
+// preempted — but its overshoot is still measured and charged, so the
+// remainder clamps at applyBudgetFloor and the apply context is
+// essentially-expired from construction (the SAME shape F5 pins for a hook
+// overshoot). The priming itself was lawful and still registers; only the
+// apply budget is exhausted.
+func TestApplyPhase_Run_CtxIgnoringPrimingOvershootClampsAtFloor(t *testing.T) {
+	const solo = "/source/solo.mp4"
+	const perFile = 250 * time.Millisecond
+
+	wf := &primingStubWorkflow{total: 1, planDelay: map[string]time.Duration{solo: 550 * time.Millisecond}}
+	wf.applyResult = &workflow.ApplyResult{Movie: &models.Movie{ID: "M-100"}}
+	inputs := makeApplyInputs(wf)
+	inputs.Concurrency = concurrencyConfig{MaxWorkers: 1, WorkerTimeout: perFile}
+	inputs.Results[solo] = &resultstore.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: solo, MovieID: "M-100"},
+		Status:        models.JobStatusCompleted,
+		Movie:         &models.Movie{ID: "M-100"},
+	}
+
+	NewApplyPhase().Run(context.Background(), inputs, ApplyPhaseConfig{
+		OrganizeOptions: workflow.OrganizeOptions{MoveFiles: true},
+		Destination:     "/output",
+	})
+
+	primeCalls, _, _ := wf.snapshot()
+	assert.Equal(t, []string{solo}, primeCalls, "the lawful priming still completes and registers")
+	applyStart, entryErr, applyDeadline, hasDeadline := wf.applyObservationsFor(solo)
+	require.True(t, hasDeadline)
+	assert.ErrorIs(t, entryErr, context.DeadlineExceeded,
+		"hook+priming overshoot the whole budget — the floored apply context is expired from construction")
+	assert.WithinDuration(t, applyStart.Add(applyBudgetFloor), applyDeadline, 250*time.Millisecond,
+		"the floored deadline is exactly the task start — clamped, never time-travel")
 }

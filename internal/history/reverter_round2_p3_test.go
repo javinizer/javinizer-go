@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"testing"
 	"time"
 
@@ -16,10 +17,14 @@ import (
 )
 
 // codex P3 R2-1: copy-mode (move_files=false, the default) applies journal
-// media overwrites exactly like moves — the revert must replay that journal
-// BEFORE the legacy copy-mode rejection, so those users can never end up
-// with unrevertable artwork.
-func TestRevert_CopyMode_RestoresJournalBeforeModeRejection(t *testing.T) {
+// media overwrites exactly like moves — the revert replays that journal
+// BEFORE any operation-type leg, so those users can never end up with
+// unrevertable artwork. codex P2 (PR #241 F2): the copy-mode rejection that
+// used to follow is gone — the revert continues into the non-destructive
+// cleanup leg, consuming the journal's generated-file Delete entries
+// (copied subtitles here), keeping the copied primary, and marking the row
+// reverted.
+func TestRevert_CopyMode_RestoresJournalThenCleansGeneratedArtifacts(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	repo := newP3OpRepo()
 	ctx := context.Background()
@@ -27,13 +32,17 @@ func TestRevert_CopyMode_RestoresJournalBeforeModeRejection(t *testing.T) {
 	dest := "/dst/CPY-001/poster.jpg"
 	backup := dest + ".dlbak.0123456789abcdef"
 	newPath := "/dst/CPY-001/CPY-001.mkv"
+	copiedSub := "/dst/CPY-001/CPY-001.srt"
 	require.NoError(t, fs.MkdirAll("/dst/CPY-001", config.DirPerm))
 	require.NoError(t, afero.WriteFile(fs, newPath, []byte("copied-video"), config.FilePerm))
+	require.NoError(t, afero.WriteFile(fs, copiedSub, []byte("copied-subtitle"), config.FilePerm))
 	require.NoError(t, afero.WriteFile(fs, dest, []byte("new-poster"), config.FilePerm))
 	require.NoError(t, afero.WriteFile(fs, backup, []byte("original-poster"), config.FilePerm))
 
-	raw, err := jsonMarshalLedger(t, dest, backup)
-	require.NoError(t, err)
+	raw := models.MarshalLedgerJSON(models.GeneratedFilesJSON{
+		Replacements: []models.ReplacementEntry{{Destination: dest, Backup: backup, DestSeq: 1}},
+		Delete:       []string{copiedSub},
+	})
 	op := &models.BatchFileOperation{
 		BatchJobID: "job-1", MovieID: "CPY-001", OriginalPath: "/src/CPY-001.mkv", NewPath: newPath,
 		OperationType: models.OperationTypeCopy, GeneratedFiles: raw,
@@ -44,14 +53,18 @@ func TestRevert_CopyMode_RestoresJournalBeforeModeRejection(t *testing.T) {
 	r := NewReverter(fs, repo)
 	res, err := r.RevertBatch(ctx, "job-1")
 	require.NoError(t, err)
-	require.Equal(t, 1, res.Failed, "copy-mode remains non-revertible at the row level")
-	require.Contains(t, res.Outcomes[0].Error, "restored first",
-		"the rejection names the journal replay")
+	require.Equal(t, 1, res.Succeeded, "copy-mode ops revert via the non-destructive cleanup leg (PR #241 F2)")
+	require.Equal(t, models.RevertOutcomeReverted, res.Outcomes[0].Outcome)
 
 	require.Equal(t, "original-poster", string(mustRead2(t, fs, dest)),
-		"overwritten artwork restored despite the copy-mode rejection")
+		"overwritten artwork restored before the cleanup leg")
+	_, statErr := fs.Stat(copiedSub)
+	require.True(t, os.IsNotExist(statErr), "the journaled copied-subtitle Delete entry is consumed")
+	require.Equal(t, "copied-video", string(mustRead2(t, fs, newPath)),
+		"the copied primary is retained — copy-mode revert never moves back or unlinks it")
 	row, err := repo.FindByID(ctx, op.ID)
 	require.NoError(t, err)
+	require.Equal(t, models.RevertStatusReverted, row.RevertStatus)
 	gf, err := models.ParseGeneratedFiles(row.GeneratedFiles)
 	require.NoError(t, err)
 	require.Empty(t, gf.Replacements, "journal consumed — sweeper retains nothing")
@@ -136,14 +149,6 @@ func (m *failingUpdateRepo) UpdateJournalInTx(ctx context.Context, id uint, fn d
 		return m.updateErr
 	}
 	return m.p3OpRepo.UpdateJournalInTx(ctx, id, fn)
-}
-
-func jsonMarshalLedger(t *testing.T, dest, backup string) (string, error) {
-	t.Helper()
-	raw, err := json.Marshal(models.GeneratedFilesJSON{Replacements: []models.ReplacementEntry{
-		{Destination: dest, Backup: backup, DestSeq: 1},
-	}})
-	return string(raw), err
 }
 
 func backdate(t *testing.T, fs afero.Fs, path string) {
