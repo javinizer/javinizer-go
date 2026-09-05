@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sync"
 	"syscall"
 
 	"github.com/javinizer/javinizer-go/internal/config"
@@ -15,118 +14,40 @@ import (
 	"github.com/spf13/afero"
 )
 
-// operationLocks serializes destination-touching operations per destination so a
-// concurrent batch worker cannot slip a file between the existence check and the move
-// (TOCTOU). Entries are ref-counted: a lock stays registered while any goroutine waits
-// on it and is removed only once the last reference drops, which is race-free (unlike
-// try-lock delete flows that can unlink an entry with a waiter or a replacement).
-// Known residual (centralized hardening tracked separately as #224): keys are
-// lexically cleaned only, so symlink/case aliases of one destination can acquire
-// different locks.
-type destFileLock struct {
-	mu   sync.Mutex
-	refs int
-}
-
-type destFileLocker struct {
-	mu    sync.Mutex
-	items map[string]*destFileLock
-}
-
-var operationLocks destFileLocker
-
+// Destination locking is unified on ONE process-wide registry,
+// fsutil.SharedDestLocks (#224 phase D): every organizer-reachable terminal
+// operation — file moves/copies/links, subtitle installs, MkdirAll directory
+// creation, and in-place directory renames — serializes per destination with
+// the downloader's install paths and the history reverter, not just with
+// other organizer legs. The registry folds key case/separator spelling and
+// refcounts entries to zero-GC; locks remain an intra-process ordering aid —
+// the atomic no-replace publish syscalls stay the cross-process safety net.
+// File destinations ride the shared file tier; the directory tier is
+// key-namespaced inside the same registry (fsutil dirLockTierSuffix), so the
+// universal holding pattern — ancestor DIRECTORY before descendant FILE — can
+// never re-acquire a key the goroutine already holds, even for degenerate
+// plans whose cleaned TargetPath equals TargetDir (sync.RWMutex has no
+// re-entrancy).
 func withDestFileLock(path string, fn func() error) error {
-	key := filepath.Clean(path)
-	operationLocks.mu.Lock()
-	if operationLocks.items == nil {
-		operationLocks.items = make(map[string]*destFileLock)
-	}
-	l := operationLocks.items[key]
-	if l == nil {
-		l = &destFileLock{}
-		operationLocks.items[key] = l
-	}
-	l.refs++
-	operationLocks.mu.Unlock()
-
-	l.mu.Lock()
-	defer func() {
-		l.mu.Unlock()
-		operationLocks.mu.Lock()
-		l.refs--
-		if l.refs == 0 {
-			if operationLocks.items[key] == l {
-				delete(operationLocks.items, key)
-			}
-		}
-		operationLocks.mu.Unlock()
-	}()
-	return fn()
-}
-
-// dirOperationLocks coordinate directory-scope operations: a directory RENAME
-// (in-place organize) takes the exclusive lock, while any child-file operation inside
-// that directory takes the shared lock. Shared locks let unrelated copies into one
-// directory proceed concurrently; a rename (or its rollback) waits until all child
-// writes have drained, so it can never drag a freshly landed file to a path its owner
-// no longer expects. Entries are ref-counted exactly like operationLocks.
-type destDirLock struct {
-	mu   sync.RWMutex
-	refs int
-}
-
-type destDirLocker struct {
-	mu    sync.Mutex
-	items map[string]*destDirLock
-}
-
-var dirOperationLocks destDirLocker
-
-func withDestDirLock(dir string, exclusive bool, fn func() error) error {
-	key := filepath.Clean(dir)
-	dirOperationLocks.mu.Lock()
-	if dirOperationLocks.items == nil {
-		dirOperationLocks.items = make(map[string]*destDirLock)
-	}
-	l := dirOperationLocks.items[key]
-	if l == nil {
-		l = &destDirLock{}
-		dirOperationLocks.items[key] = l
-	}
-	l.refs++
-	dirOperationLocks.mu.Unlock()
-
-	if exclusive {
-		l.mu.Lock()
-	} else {
-		l.mu.RLock()
-	}
-	defer func() {
-		if exclusive {
-			l.mu.Unlock()
-		} else {
-			l.mu.RUnlock()
-		}
-		dirOperationLocks.mu.Lock()
-		l.refs--
-		if l.refs == 0 && dirOperationLocks.items[key] == l {
-			delete(dirOperationLocks.items, key)
-		}
-		dirOperationLocks.mu.Unlock()
-	}()
+	release := fsutil.SharedDestLocks().Acquire(path)
+	defer release()
 	return fn()
 }
 
 // withDestDirExclusiveLock serializes a directory-rename operation against every
 // child write already inside that directory and vice versa.
 func withDestDirExclusiveLock(dir string, fn func() error) error {
-	return withDestDirLock(dir, true, fn)
+	release := fsutil.SharedDestLocks().AcquireDirExclusive(dir)
+	defer release()
+	return fn()
 }
 
 // withDestDirSharedLock lets independent child writes into one directory run in
 // parallel while excluding a concurrent rename of the directory itself.
 func withDestDirSharedLock(dir string, fn func() error) error {
-	return withDestDirLock(dir, false, fn)
+	release := fsutil.SharedDestLocks().AcquireDirShared(dir)
+	defer release()
+	return fn()
 }
 
 // refuseExistingDestination classifies destination state at execution time with lexical-self vs

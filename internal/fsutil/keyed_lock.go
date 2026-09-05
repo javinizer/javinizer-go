@@ -32,7 +32,7 @@ type KeyedLockRegistry struct {
 }
 
 type keyedLock struct {
-	mu   sync.Mutex
+	mu   sync.RWMutex
 	refs int
 }
 
@@ -833,6 +833,63 @@ func (r *KeyedLockRegistry) AcquireMany(keys []string) func() {
 	}
 }
 
+// AcquireShared blocks until the key is held in shared (read) mode and
+// returns a release function. Concurrent shared holds overlap; an exclusive
+// Acquire excludes them. A goroutine holding a shared (or exclusive) hold
+// must NEVER acquire the same folded key again: sync.RWMutex has no
+// re-entrancy, and writer preference deadlocks even read-read recursion once
+// a writer queues. The release function MUST be called exactly once.
+func (r *KeyedLockRegistry) AcquireShared(key string) func() {
+	folded := foldKeyedLock(key)
+	r.mu.Lock()
+	kl, ok := r.locks[folded]
+	if !ok {
+		kl = &keyedLock{}
+		r.locks[folded] = kl
+	}
+	kl.refs++
+	r.mu.Unlock()
+
+	kl.mu.RLock()
+
+	return func() {
+		kl.mu.RUnlock()
+		r.mu.Lock()
+		kl.refs--
+		if kl.refs == 0 {
+			delete(r.locks, folded)
+		}
+		r.mu.Unlock()
+	}
+}
+
+// dirLockTierSuffix namespaces the DIRECTORY tier inside one registry. A NUL
+// byte can never appear in a real destination path (POSIX and Windows reject
+// it in name components), so a directory-tier key never aliases a file-tier
+// key of the same cleaned spelling: nesting an ancestor-directory hold with a
+// descendant — or degenerately SAME-named — file hold on one goroutine stays
+// deadlock-free without re-entrant mutexes. The marker is a SUFFIX because
+// filepath.Clean inside foldKeyedLock can cancel leading segments against
+// ".." components but never drops a trailing non-dot segment.
+const dirLockTierSuffix = "\x00dir"
+
+func dirTierKey(dir string) string { return dir + dirLockTierSuffix }
+
+// AcquireDirExclusive is the directory tier's writer hold (a directory
+// rename/install draining child writes): same keyspace as Acquire, but
+// namespaced so it contends only with other directory-tier holds of the same
+// spelling.
+func (r *KeyedLockRegistry) AcquireDirExclusive(dir string) func() {
+	return r.Acquire(dirTierKey(dir))
+}
+
+// AcquireDirShared is the directory tier's reader hold (child writes into the
+// directory): concurrent shared holds overlap, and a queued AcquireDirExclusive
+// drains them by sync.RWMutex writer preference.
+func (r *KeyedLockRegistry) AcquireDirShared(dir string) func() {
+	return r.AcquireShared(dirTierKey(dir))
+}
+
 // sharedJournalLocks serializes read-modify-write mutation of one journal
 // ROW across the workflow recorder, the reverter's consumption, and the
 // sweeper (codex P3 R15-1): a sweeper updating a row snapshot from an
@@ -843,9 +900,12 @@ var sharedJournalLocks = NewKeyedLockRegistry()
 func SharedJournalLocks() *KeyedLockRegistry { return sharedJournalLocks }
 
 // sharedDestLocks is the process-wide destination lock registry shared by
-// the downloader's overwrite discipline and the history reverter's restore
-// path (POSTER-WRITE-HARDENING P3 D8).
+// the downloader's overwrite discipline, the history reverter's restore
+// path, and every organizer terminal operation (#224 phase D).
 var sharedDestLocks = NewKeyedLockRegistry()
 
 // SharedDestLocks returns the process-wide per-destination lock registry.
+// One registry, two namespaced tiers: file destinations via Acquire/
+// AcquireShared, directory destinations via AcquireDirShared/
+// AcquireDirExclusive (see dirLockTierSuffix for why the tiers cannot alias).
 func SharedDestLocks() *KeyedLockRegistry { return sharedDestLocks }

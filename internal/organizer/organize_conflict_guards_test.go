@@ -47,7 +47,10 @@ func TestOrganize_Subtitle_LateExistingSkipped(t *testing.T) {
 	assert.Equal(t, []byte("subtitle-existing"), data, "existing subtitle preserved")
 }
 
-func TestLockRegistry_BoundedUnderChurn(t *testing.T) {
+// Boundedness/GC of the underlying registry is pinned white-box in
+// internal/fsutil (keyed_lock_shared_test.go); these churn cases pin that the
+// organizer wrappers ride it without wedging.
+func TestLockRegistry_ChurnThroughSharedRegistry(t *testing.T) {
 	var wg sync.WaitGroup
 	for i := 0; i < 50; i++ {
 		wg.Add(1)
@@ -60,10 +63,16 @@ func TestLockRegistry_BoundedUnderChurn(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
-	operationLocks.mu.Lock()
-	size := len(operationLocks.items)
-	operationLocks.mu.Unlock()
-	assert.Equal(t, 0, size, "unused entries must be evicted when last waiter releases")
+	done := make(chan struct{})
+	go func() {
+		_ = withDestFileLock("/dst-1", func() error { return nil })
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("a churned destination key must be handed out again once traffic drains")
+	}
 }
 
 // Verifies a lock mutually excludes simultaneous waiters: the in-flight counter must
@@ -172,7 +181,7 @@ func TestDirOperationLocks_SharedChildrenRunInParallel(t *testing.T) {
 	assert.Greater(t, maxSeen.Load(), int32(1), "shared directory locks must permit concurrent child writes (batch copy throughput)")
 }
 
-func TestDirOperationLocks_EvictsIdleEntries(t *testing.T) {
+func TestDirOperationLocks_DrainedSharedChurnAdmitsExclusive(t *testing.T) {
 	var wg sync.WaitGroup
 	for i := 0; i < 4; i++ {
 		wg.Add(1)
@@ -182,8 +191,14 @@ func TestDirOperationLocks_EvictsIdleEntries(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
-	dirOperationLocks.mu.Lock()
-	size := len(dirOperationLocks.items)
-	dirOperationLocks.mu.Unlock()
-	assert.Equal(t, 0, size, "directory lock entries must be evicted when unused")
+	done := make(chan struct{})
+	go func() {
+		_ = withDestDirExclusiveLock("/evictable-1", func() error { return nil })
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("exclusive directory lock starved after shared child traffic drained")
+	}
 }
