@@ -33,7 +33,7 @@ func claimOwner(t *testing.T, tracker *DuplicateTracker, target string) (string,
 // TestDuplicateTracker_GhostResidentRelease pins codex P2 (PR #241 F1) at the
 // tracker boundary: a parked resident whose OWN worker fails (its source
 // vanished between the pre-park verification and validation) releases its
-// born-settled claim through the identical terminal-failure machinery as a
+// PENDING parked claim through the identical terminal-failure machinery as a
 // mover owner — sorted-next standby promotes, or the drained key frees — so
 // the destination is never sealed behind a ghost for the rest of the run.
 func TestDuplicateTracker_GhostResidentRelease(t *testing.T) {
@@ -46,12 +46,24 @@ func TestDuplicateTracker_GhostResidentRelease(t *testing.T) {
 		})
 		parkedEntry(t, tracker, "/dest/lib/x.mkv")
 
-		// Foreign and non-owner close-outs still release nothing — the one
-		// releasable settled class is the resident's OWN failure.
+		// Foreign and non-owner close-outs still release nothing — a stranger's
+		// WillMove=false release spares the PENDING parked claim.
 		tracker.release(residentPlan("/in/stranger.mkv"))
-		prior, dup := tracker.observe(context.Background(), dupPlanFor("/in/D.mkv", "/dest/lib/x.mkv"))
-		require.True(t, dup, "a stranger's WillMove=false release spares the parked claim")
-		assert.Equal(t, "/dest/lib/x.mkv", prior.source)
+		parkedEntry(t, tracker, "/dest/lib/x.mkv")
+
+		// An unrelated mover gates on the resident's OWN terminal outcome: it
+		// blocks while the resident still stands and is carried forward as a
+		// waiter across the failure promotion below.
+		type outcome struct {
+			prior duplicateClaim
+			dup   bool
+		}
+		moverDOut := make(chan outcome, 1)
+		go func() {
+			prior, dup := tracker.observe(context.Background(), dupPlanFor("/in/D.mkv", "/dest/lib/x.mkv"))
+			moverDOut <- outcome{prior, dup}
+		}()
+		waitForWaiter(t, tracker, "/dest/lib/x.mkv", "/in/D.mkv")
 
 		tracker.release(residentPlan("/dest/lib/x.mkv"))
 
@@ -59,10 +71,16 @@ func TestDuplicateTracker_GhostResidentRelease(t *testing.T) {
 		owner, ok := claimOwner(t, tracker, "/dest/lib/x.mkv")
 		require.True(t, ok)
 		assert.Equal(t, "/in/B.mkv", owner, "the standby mover promotes onto the released ghost key")
-		_, dup = tracker.observe(context.Background(), moverPrimingPlan())
+		_, dup := tracker.observe(context.Background(), moverPrimingPlan())
 		assert.False(t, dup, "the promoted mover falls through as owner — it moves")
 		settleClaim(tracker, "/in/B.mkv", "/dest/lib/x.mkv")
-		prior, dup = tracker.observe(context.Background(), dupPlanFor("/in/E.mkv", "/dest/lib/x.mkv"))
+
+		// The blocked waiter wakes to the NEW owner's verdict, never the ghost's.
+		resD := <-moverDOut
+		require.True(t, resD.dup)
+		assert.Equal(t, "/in/B.mkv", resD.prior.source)
+
+		prior, dup := tracker.observe(context.Background(), dupPlanFor("/in/E.mkv", "/dest/lib/x.mkv"))
 		require.True(t, dup, "later movers dup against the promoted owner, not the ghost")
 		assert.Equal(t, "/in/B.mkv", prior.source)
 	})
@@ -239,7 +257,7 @@ func TestOrganize_GhostResident_MoverProceeds(t *testing.T) {
 		resA, err := org.Organize(context.Background(), dupBatchCmd(residentMatch(), tracker, false, false))
 		require.NoError(t, err)
 		assert.False(t, resA.Moved)
-		parkedEntry(t, tracker, residentTarget)
+		settledParkedEntry(t, tracker, residentTarget)
 
 		// The mover still takes the resident-claimed duplicate verdict…
 		_, err = org.Organize(context.Background(), dupBatchCmd(moverMatch(), tracker, false, false))

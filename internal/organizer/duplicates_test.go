@@ -594,7 +594,11 @@ func TestDuplicateTracker_PrimeBatchOncePerRun(t *testing.T) {
 		})
 		// codex P1 (PR #241): the stationary resident parked its key — a mover
 		// computing the same destination takes the resident-claimed verdict
-		// instead of owning the key outright.
+		// instead of owning the key outright. codex P2 (PR #241 F1): the parked
+		// claim is PENDING until the resident's own worker settles it, so the
+		// grouping assertion below sets the resident's terminal success first
+		// (the blocking gate itself is pinned in duplicates_resident_w241).
+		tracker.settle(&OrganizePlan{SourcePath: "/in/A.mkv", TargetPath: "/in/A.mkv", WillMove: false})
 		prior, dup := tracker.observe(context.Background(), dupPlanFor("/in/C.mkv", "/in/A.mkv"))
 		require.True(t, dup, "a parked resident owns its destination for the run")
 		assert.Equal(t, "/in/A.mkv", prior.source)

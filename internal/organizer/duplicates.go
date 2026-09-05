@@ -34,21 +34,28 @@ type duplicateClaim struct {
 //
 // A claim may also be a PARKED resident (codex P1, PR #241): a batch input
 // already sitting at its computed destination (WillMove=false) owns its
-// canonical key in a pre-settled parked state — registered at priming with
-// settled=true, success=true, parked=true, and done already closed. No
-// bytes ever move for it (its own execute is a guaranteed no-op), so the
-// claim is born at its terminal success: moving claimants resolve
-// INSTANTLY (never block), and the parked claim is terminal against every
-// close-out but ONE (codex P2, PR #241 F1): settle is a no-op on an
-// already-settled entry, ReleaseAbandonedBy and every foreign or MOVING
-// close-out skip settled entries, but the RESIDENT'S OWN failure — its
-// WillMove=false plan reaching an Organize error leg after its source
-// vanished between the pre-park verification and validation — releases the
-// parked claim through release exactly like a failed mover owner, so the
-// key never becomes a permanent ghost that rejects (or authorized-skips)
-// every later mover while nothing ever fills the destination. While the
-// resident stands behind its claim, ForceUpdate can still never promote a
-// mover onto the resident's bytes.
+// canonical key in the parked state — registered at priming with parked=true
+// but NOT yet terminal (codex P2, PR #241 F1): a born-settled parked claim
+// let a mover worker racing AHEAD of the resident's own worker verdict
+// duplicate/skip instantly and finish, so a resident that then failed
+// validation (its source vanished between the pre-park verification and
+// validation) could only promote standby entries — the finished mover never
+// re-ran and the destination could stay empty. The parked claim therefore
+// enters the ordinary terminal-gated lifecycle: it is PENDING until the
+// resident's own worker reaches its terminal outcome, so observe on a
+// pending parked key BLOCKS (honoring ctx) exactly like any mid-flight
+// owner. Resident success → settle: waiters wake to the unchanged duplicate
+// verdict; resident failure → release: the sorted waiter/ordered standby
+// promotes and EXECUTES. Deadlock-freedom holds through the same machinery
+// as mover owners: the resident's worker settles/releases on every Organize
+// leg, the recovery boundary's ReleaseAbandonedBy frees a pending parked
+// claim whose owner worker died (parked claims are no longer pre-settled,
+// so the settled-skip no longer shields them), and a resident whose worker
+// never starts leaves only ctx-cancellable waiters. The apply phase also
+// schedules primed stationary residents FIRST in its fan-out, so a
+// MaxWorkers=1 run validates the resident before any mover can block on
+// its key. While the resident stands behind its claim, ForceUpdate can
+// still never promote a mover onto the resident's bytes.
 //
 // Promotion order (codex P2, PR #241 F1): the ordered STANDBY queue — every
 // primed claimant beyond the owner, retained in priming (= sorted) order —
@@ -65,11 +72,11 @@ type claimEntry struct {
 	done    chan struct{} // closed once, at the terminal transition
 	settled bool          // owner reached its terminal outcome
 	success bool          // terminal outcome kept the key
-	// parked marks a claim BORN terminal at priming for a stationary resident
-	// (codex P1, PR #241): done closed at birth, settled-success from the
-	// start. It discriminates the ONE releasable settled class (codex P2, PR
-	// #241 F1 — the resident's own failure, see release) and exempts
-	// failEntryLocked from re-closing an already-closed done.
+	// parked marks a claim created at priming for a stationary resident
+	// (codex P1, PR #241). It is only a provenance marker now (codex P2, PR
+	// #241 F1): the claim is born PENDING — done open, unsettled — and rides
+	// the ordinary terminal-gated lifecycle, so nothing in the close-out
+	// paths discriminates on it.
 	parked bool
 }
 
@@ -78,8 +85,8 @@ type claimEntry struct {
 // order so each canonical key's owner is pre-assigned before any apply worker
 // starts (#240 finding A). WillMove=false marks a STATIONARY resident (codex
 // P1, PR #241): the file already sits at its computed destination, so the
-// priming parks the canonical key — a non-moving owner whose claim is born
-// settled-successfully-parked (see PrimeBatch).
+// priming parks the canonical key — a non-moving owner whose claim is
+// terminal-gated on the resident's own worker outcome (see PrimeBatch).
 type DuplicatePriming struct {
 	SourcePath string
 	TargetPath string
@@ -107,12 +114,12 @@ type DuplicatePriming struct {
 // a warning and skips execution instead of racing the winner onto one
 // destination. Stationary batch inputs join the OWNERSHIP discipline too
 // (codex P1, PR #241): every WillMove=false priming parks its canonical key
-// at priming time (pre-settled, done already closed), so a mover computing
-// the resident's destination takes the resident-claimed duplicate verdict —
-// unauthorized: the ordinary conflict pipeline; authorized: the warning +
-// skip — instead of becoming the key's sole claimant and REPLACING the
-// resident's bytes under authorization, whose ordinary destination-occupation
-// conflict ForceUpdate suppresses.
+// at priming time (pending until the resident's own worker terminates, codex
+// P2, PR #241 F1), so a mover computing the resident's destination takes the
+// resident-claimed duplicate verdict — unauthorized: the ordinary conflict
+// pipeline; authorized: the warning + skip — instead of becoming the key's
+// sole claimant and REPLACING the resident's bytes under authorization, whose
+// ordinary destination-occupation conflict ForceUpdate suppresses.
 //
 // Claims are TERMINAL-GATED (codex P2, PR #241): observe on a key owned by
 // another source waits for the owner's terminal outcome rather than
@@ -161,25 +168,27 @@ func NewDuplicateTracker(nonProbing bool) *DuplicateTracker {
 // Empty-target primings register nothing, mirroring observe's guard.
 //
 // Stationary residents register FIRST (codex P1, PR #241): each WillMove=false
-// priming owns its canonical key as a pre-settled parked claim — settled and
-// success already true, done already closed — because its terminal outcome
-// needs no execution: the resident's bytes ARE the destination bytes and its
-// own organize moves nothing. Parking ahead of EVERY mover (not just the ones
-// sorting later) keeps ownership independent of priming order: a sorted-earlier
-// mover lands as the parked key's inert standby (a parked claim fails only on
-// the resident's own error, so no failure promotion fires out of a live
-// resident) instead of owning the key, and its observe resolves instantly to
-// the resident-claimed duplicate verdict. Claims stay batch-scoped — the
-// tracker is constructed per run — so a fresh run's resident parks its key
-// anew and never conflicts with itself across runs.
+// priming owns its canonical key as a PENDING parked claim (codex P2, PR #241
+// F1) — parked but unsettled, done open — because the resident's terminal
+// outcome is only known once its OWN worker validates and (no-op) executes:
+// parking ahead of EVERY mover (not just the ones sorting later) keeps
+// ownership independent of priming order, and a sorted-earlier mover lands as
+// the parked key's standby whose observe blocks until the resident's worker
+// settles (duplicate verdict, unchanged) or releases (promotion — the mover
+// executes). Claims stay batch-scoped — the tracker is constructed per run —
+// so a fresh run's resident parks its key anew and never conflicts with
+// itself across runs.
 //
-// Born-settled does NOT mean born-permanent (codex P2, PR #241 F1): the
-// priming gate verifies every resident's source before parking it, and a
-// resident that still fails (its source vanishing in the priming→worker gap)
-// releases its own parked claim through the identical terminal-failure
-// machinery as a mover owner — the sorted-next standby promotes, or the
-// drained key frees outright — so a ghost resident never seals its
-// destination for the rest of the run.
+// Parked does NOT mean permanent (codex P2, PR #241 F1): the priming gate
+// verifies every resident's source before parking it, and a resident that
+// still fails (its source vanishing in the priming→worker gap) releases its
+// own parked claim through the identical terminal-failure machinery as a
+// mover owner — the sorted-next standby promotes, or the drained key frees
+// outright — so a ghost resident never seals its destination for the rest of
+// the run. With the moved bytes never at risk a resident's claim cannot land
+// before the resident's own validation: single-worker fan-outs schedule
+// primed residents FIRST (worker/apply_phase), so a mover sorted ahead of
+// its resident never deadlocks on the still-pending parked key.
 func (t *DuplicateTracker) PrimeBatch(primings []DuplicatePriming) {
 	if t == nil {
 		return
@@ -207,15 +216,14 @@ func (t *DuplicateTracker) PrimeBatch(primings []DuplicatePriming) {
 			}
 			continue
 		}
-		entry := &claimEntry{
-			claim:   duplicateClaim{source: p.SourcePath, target: p.TargetPath},
-			done:    make(chan struct{}),
-			settled: true,
-			success: true,
-			parked:  true,
+		// codex P2 (PR #241 F1): born PENDING, not terminal — the resident's
+		// own worker still owes its validation outcome, and observing movers
+		// gate on it instead of finishing early behind a possible ghost.
+		t.claims[key] = &claimEntry{
+			claim:  duplicateClaim{source: p.SourcePath, target: p.TargetPath},
+			done:   make(chan struct{}),
+			parked: true,
 		}
-		close(entry.done) // born terminal: a mover never blocks behind a resident
-		t.claims[key] = entry
 	}
 	// Pass 2 — moving claimants, sorted order as before (#240 finding A).
 	for _, p := range primings {
@@ -229,10 +237,9 @@ func (t *DuplicateTracker) PrimeBatch(primings []DuplicatePriming) {
 			// an owner failing before the other workers reach observe otherwise
 			// deletes the claim and the survivors re-register by scheduler
 			// timing. Re-primings of the owner itself stay claim-nothing no-ops.
-			// Against a settled parked resident the slot is inert while the
-			// resident stands: parked claims fail only on the resident's own
-			// error (codex P2, PR #241 F1), so the standby promotes solely
-			// into a released ghost's key.
+			// Against a parked resident the slot is inert while the resident
+			// stands: its observe blocks until the resident's own terminal
+			// outcome, and it promotes solely into a released ghost's key.
 			if filepath.Clean(p.SourcePath) != filepath.Clean(entry.claim.source) && !containsClaimant(entry.standby, p.SourcePath) {
 				entry.standby = append(entry.standby, p.SourcePath)
 			}
@@ -305,13 +312,14 @@ func (t *DuplicateTracker) keyLocked(target string) string {
 // and unprimed single-file flows keep the destination-occupation conflict
 // checks as that class's sole owner, batch scoping guaranteeing no claim
 // survives a run boundary. What changes for MOVING observers is the other
-// side of the resident contract: a parked claim presents exactly like any
-// settled-successful owner, so a mover computing the resident's destination
-// takes the unchanged duplicate verdict (unauthorized: ordinary duplicate
-// conflict; authorized: demoted warning + skip) instead of being promoted
-// onto occupied bytes by ForceUpdate. Re-observing the same source file is
-// idempotent so retried or re-planned files never self-conflict — including
-// a waiter that wakes to find itself promoted.
+// side of the resident contract: a PENDING parked claim presents exactly
+// like any mid-flight owner (codex P2, PR #241 F1), so a mover computing
+// the resident's destination waits out the resident's own validation and
+// then takes the unchanged duplicate verdict (unauthorized: ordinary
+// duplicate conflict; authorized: demoted warning + skip) — or promotes onto
+// the freed key and executes when the resident's claim released. Re-observing
+// the same source file is idempotent so retried or re-planned files never
+// self-conflict — including a waiter that wakes to find itself promoted.
 //
 // The wait honors the claimant's context (codex P2, PR #241 F2): a deadline
 // or batch cancel landing mid-wait makes the observer LEAVE the claim
@@ -398,10 +406,10 @@ func (t *DuplicateTracker) cancelWaiterLocked(key, src string) {
 // (or dry-run-planned) its destination, so every waiting claimant's
 // duplicate verdict is now final. Non-owner, unregistered, and
 // already-settled calls are no-ops. A WillMove=false (register-nothing) plan
-// settles only an OPEN claim it owns — reachable solely as a resident
-// promoted out of a released parked claim (codex P2, PR #241 F1): the
-// ordinary resident's parked claim is already settled at birth, so its
-// success leg stays the no-op it always was.
+// settles the OPEN claim it owns: for an ordinary parked resident this is
+// the terminal transition the pending lifecycle gates on (codex P2, PR #241
+// F1) — the resident's own successful no-op validation/execution unblocks
+// every mover waiting on its key with the duplicate verdict.
 func (t *DuplicateTracker) settle(plan *OrganizePlan) {
 	if t == nil || plan == nil || plan.TargetPath == "" {
 		return
@@ -428,17 +436,16 @@ func (t *DuplicateTracker) settle(plan *OrganizePlan) {
 // observe falls through; with waiters registered, the sorted-first one is
 // PROMOTED to owner so ITS organize proceeds (codex P2, PR #241). Only the
 // recorded owner releases its key — losers, foreign sources, and claims
-// already settled (success or failure) release nothing — with ONE settled
-// exception (codex P2, PR #241 F1): a PARKED resident's OWN failure. Its
-// WillMove=false plan reaching an Organize error leg means the source
-// vanished between the pre-park verification and validation, so the
-// born-settled claim is a GHOST: failing it promotes the sorted-next
-// standby (or frees the drained key) exactly like a failed mover owner,
+// already settled (success or failure) release nothing. A PARKED resident's
+// OWN failure rides the identical path (codex P2, PR #241 F1): the parked
+// claim is pending until the resident's own worker terminates, so its
+// WillMove=false plan reaching an Organize error leg (source vanished
+// between the pre-park verification and validation) is just another owner
+// failure — the sorted-next standby promotes (or the drained key frees)
 // instead of rejecting (or authorized-skipping) every later mover behind a
-// destination nothing will ever fill. Mover-settled claims, and a MOVING
-// plan spelling the resident's path, stay final. A WillMove=false plan
-// owning an UNSETTLED claim is reachable solely as a promoted resident —
-// its own failure in turn releases and hands onward identically.
+// destination nothing will ever fill. A MOVING plan spelling the resident's
+// path still releases nothing: it matches no owned claim while the resident
+// stands, and settled claims are final.
 func (t *DuplicateTracker) release(plan *OrganizePlan) {
 	if t == nil || plan == nil || plan.TargetPath == "" {
 		return
@@ -447,15 +454,8 @@ func (t *DuplicateTracker) release(plan *OrganizePlan) {
 	defer t.mu.Unlock()
 	key := t.keyLocked(plan.TargetPath)
 	entry, ok := t.claims[key]
-	if !ok || filepath.Clean(entry.claim.source) != filepath.Clean(plan.SourcePath) {
+	if !ok || entry.settled || filepath.Clean(entry.claim.source) != filepath.Clean(plan.SourcePath) {
 		return
-	}
-	if entry.settled {
-		// codex P2 (PR #241 F1): the one releasable settled claim — the
-		// parked resident released by its OWN WillMove=false failure.
-		if !entry.parked || plan.WillMove {
-			return
-		}
 	}
 	t.failEntryLocked(key, entry)
 }
@@ -466,7 +466,9 @@ func (t *DuplicateTracker) release(plan *OrganizePlan) {
 // must not hold the canonical key open — waiting claimants promote instead
 // of deadlocking behind a dead owner. It is the apply phase's recovery-
 // boundary safety net; settled claims are final and untouched, so runs in
-// which the owner settled normally are no-ops. The abandoned source also
+// which the owner settled normally are no-ops. Pending PARKED claims are not
+// settled (codex P2, PR #241 F1), so a resident whose worker died (or
+// panicked before Organize) is freed here exactly like a dead mover owner. The abandoned source also
 // leaves every open claim's STANDBY and waiter queues (codex P2, PR #241 F1):
 // a dead claimant still listed as a fallback would otherwise be promoted
 // later and hold the key with nobody left to close it out.
@@ -498,12 +500,15 @@ func (t *DuplicateTracker) ReleaseAbandonedBy(source string) {
 // claimants out of both queues, so a promoted entry never inherits a corpse.
 // Only with the standby drained does the sorted-first blocked waiter take
 // the key, carrying the remaining waiters forward.
+//
+// done closes unconditionally: every caller (release, ReleaseAbandonedBy)
+// reaches failEntryLocked only on NOT-yet-settled entries — mover owners
+// and pending parked residents alike (codex P2, PR #241 F1) — so this is
+// always the entry's single terminal transition and no double-close exists.
 func (t *DuplicateTracker) failEntryLocked(key string, entry *claimEntry) {
 	entry.settled = true
 	entry.success = false
-	if !entry.parked {
-		close(entry.done) // a parked claim's done already closed at birth
-	}
+	close(entry.done)
 	if len(entry.standby) > 0 {
 		next := entry.standby[0]
 		t.claims[key] = &claimEntry{
@@ -538,7 +543,9 @@ func (t *DuplicateTracker) failEntryLocked(key string, entry *claimEntry) {
 // claimed destination may also be a PARKED resident's (codex P1, PR #241):
 // the identical verdicts then protect bytes already parked — unauthorized,
 // the ordinary conflict pipeline; authorized, the skip leaves the resident's
-// bytes intact (the warning persists exactly as for mover-owned keys).
+// bytes intact (the warning persists exactly as for mover-owned keys). The
+// verdict arrives once the resident's own worker reached its terminal outcome
+// (codex P2, PR #241 F1) — observe waits out the pending parked claim.
 func applyDuplicatePreflight(ctx context.Context, plan *OrganizePlan, tracker *DuplicateTracker, overwriteAuthorized bool) (warnings []string, skip bool) {
 	prior, dup := tracker.observe(ctx, plan)
 	if !dup {

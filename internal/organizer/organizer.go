@@ -679,6 +679,21 @@ func (o *Organizer) Organize(ctx context.Context, cmd OrganizeCmd) (*OrganizeRes
 		return nil, err
 	}
 
+	// codex P2 (PR #241 F1): a stationary resident's no-op execute cannot
+	// surface its ghost — ForceUpdate skips validatePlan entirely, and even a
+	// normal-mode no-op short-circuits nothing it can fail — so a parked
+	// claim whose source vanished in the priming→worker gap releases HERE in
+	// both modes, never settling the key and skipping every gated mover into
+	// an empty destination. validatePlan's IsNotExist-only rule below already
+	// excludes the same class when validation runs; this check is the
+	// force-mode mirror at exactly one Stat.
+	if !plan.WillMove && plan.TargetPath != "" {
+		if _, err := o.fs.Stat(plan.SourcePath); os.IsNotExist(err) {
+			cmd.DuplicateTracker.release(plan)
+			return nil, fmt.Errorf("organization validation failed: [source file does not exist: %s]", plan.SourcePath)
+		}
+	}
+
 	if !cmd.ForceUpdate {
 		if issues := o.validatePlan(plan); len(issues) > 0 {
 			// codex r2 P2: a plan the run's duplicate tracker primed as owner

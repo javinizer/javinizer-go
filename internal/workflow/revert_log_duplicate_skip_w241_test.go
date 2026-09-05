@@ -133,14 +133,17 @@ func TestRevertLog_Complete_DuplicateSkipped_JournalsNoPrimaryMove(t *testing.T)
 		assert.False(t, row.InPlaceRenamed, "%s: no in-place payload either", tc.name)
 		assert.Empty(t, row.NFOPath, "%s: the skipped duplicate journals NO NFO column either — it names the winner's artifact", tc.name)
 	}
-	assert.Equal(t, models.RevertStatusApplied, rowL.RevertStatus)
+	// codex P2 (PR #241 F2): the skipped row FINALIZES as completed-noop —
+	// applied-with-empty-NewPath left the reverter probing anchor "" forever.
+	assert.Equal(t, models.RevertStatusNoOp, rowL.RevertStatus)
 	ledgerL, err := models.ParseGeneratedFiles(rowL.GeneratedFiles)
 	require.NoError(t, err)
 	assert.Empty(t, ledgerL.MoveBack, "the loser row carries no winner subtitle/asset move-backs")
 	assert.NotContains(t, ledgerL.Roots, "/dest/shared", "the winner's folder is never seeded from the skipped duplicate's completion")
 	assert.Empty(t, ledgerL.Delete, "the skipped duplicate journals NO generated-file deletes — those paths are the winner's artifacts (#241 P1)")
 
-	assert.Equal(t, models.RevertStatusFailed, rowF.RevertStatus, "the failed-skipped row keeps its failure status")
+	assert.Equal(t, models.RevertStatusNoOp, rowF.RevertStatus,
+		"codex P2 (PR #241 F2): a failed-skipped row still mutated nothing — it finalizes as noop, not unanchored-failed")
 	ledgerF, err := models.ParseGeneratedFiles(rowF.GeneratedFiles)
 	require.NoError(t, err)
 	assert.Empty(t, ledgerF.Delete, "failed-or-not, a skipped duplicate never journals shared generated artifacts (#241 P1)")
@@ -202,15 +205,17 @@ func TestRevertLog_DuplicateSkipLoser_RevertLeavesWinnerUntouched(t *testing.T) 
 
 	reverter := history.NewReverter(fs, repo)
 
-	// Revert the LOSER: the winner's moved video must be left exactly where
-	// the batch put it — the pre-fix journal armed the winner's bytes as the
-	// loser's primary moved file, so this revert could drag a-bytes onto
-	// /in/B.mkv (or fail against the retained loser source).
+	// The loser's row finalized as completed-noop (codex P2, PR #241 F2).
+	assert.Equal(t, models.RevertStatusNoOp, w241Row(t, repo, opL).RevertStatus)
+
+	// Revert the LOSER: trivially success-shaped with nothing to unwind — no
+	// anchor_missing skip, no outcome at all — and the winner's moved video
+	// stays exactly where the batch put it (the pre-fix journal armed the
+	// winner's bytes as the loser's primary moved file).
 	rb, err := reverter.RevertScrape(ctx, "job-w241", "ABC-200")
 	require.NoError(t, err)
-	require.Len(t, rb.Outcomes, 1)
-	assert.NotEqual(t, models.RevertOutcomeReverted, rb.Outcomes[0].Outcome,
-		"the loser revert must never treat the winner's video as movable (anchor-missing skip on real filesystems, destination-conflict refusal on memfs roots)")
+	assert.Empty(t, rb.Outcomes, "a completed-noop row is never a revert subject")
+	assert.Zero(t, rb.Total)
 	winnerBytes, err := afero.ReadFile(fs, filepath.FromSlash(w241Target))
 	require.NoError(t, err)
 	assert.Equal(t, []byte("a-bytes"), winnerBytes, "loser revert left the winner's video untouched")

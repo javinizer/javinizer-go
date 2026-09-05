@@ -31,6 +31,10 @@ type organizerBackedWorkflow struct {
 	fs                afero.Fs
 	vanishBeforeApply map[string]bool
 	panicBeforeApply  map[string]bool
+	// sleepBeforeApply delays one file's worker apply leg (codex P2, PR #241
+	// F1 resident-gating tests): with workers ≥ 2 a mover reaches the
+	// resident's pending parked claim WHILE the resident still validates.
+	sleepBeforeApply map[string]time.Duration
 }
 
 func (w *organizerBackedWorkflow) Scrape(context.Context, scrape.ScrapeCmd) (*scrape.ScrapeResult, *workflow.OrchestrationMeta, error) {
@@ -53,6 +57,9 @@ func (w *organizerBackedWorkflow) organizeCmd(cmd workflow.ApplyCmd) organizer.O
 }
 
 func (w *organizerBackedWorkflow) Apply(ctx context.Context, cmd workflow.ApplyCmd) (*workflow.ApplyResult, error) {
+	if d := w.sleepBeforeApply[cmd.Match.Path]; d > 0 {
+		time.Sleep(d)
+	}
 	if w.panicBeforeApply[cmd.Match.Path] {
 		panic("owner apply boom")
 	}

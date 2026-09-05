@@ -98,6 +98,15 @@ type preparedApplyFile struct {
 	// outcome instead of re-executing — the once-per-file hook contract
 	// holds and the batch counts exactly one recorded failure for the file.
 	hookOutcome *applyFileOutcome
+	// stationary marks a primed item whose plan moves nothing (WillMove=false
+	// — a resident already sitting at its destination, codex P1, PR #241):
+	// its priming PARKED the canonical key as a PENDING claim terminal-gated
+	// on this item's own worker (codex P2, PR #241 F1), so observing movers
+	// block until it validates. The apply phase schedules these items FIRST
+	// in fan-out order (sorted order preserved within each class) so a
+	// single-worker run validates the resident before any mover can wait on
+	// its key instead of deadlocking behind a mover sorted ahead of it.
+	stationary bool
 }
 
 // primeDuplicateClaims runs the batch's ONE planning pass when the workflow
@@ -165,6 +174,10 @@ func primeDuplicateClaims(ctx context.Context, wf workflow.WorkflowInterface, tr
 			logging.Warnf("[Apply] duplicate preflight planning skipped %s: %v", item.filePath, err)
 			continue
 		}
+		// codex P2 (PR #241 F1): mirror PrimeBatch's park condition so the
+		// fan-out's residents-first ordering covers exactly the primings that
+		// left a pending parked claim behind.
+		p.stationary = !priming.WillMove && priming.TargetPath != ""
 		primings = append(primings, priming)
 	}
 	tracker.PrimeBatch(primings)
@@ -359,6 +372,29 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 		prepared[item.filePath] = prepareApplyItem(ctx, item, inputs, cfg)
 	}
 	primeDuplicateClaims(ctx, wf, cfg.OrganizeOptions.DuplicateTracker, items, prepared, inputs, cfg)
+	// codex P2 (PR #241 F1): primed stationary residents own PENDING parked
+	// claims terminal-gated on their own workers, so an observing mover
+	// blocks until its resident validates. Parallel workers absorb that
+	// wait; a MaxWorkers=1 run with a mover sorted AHEAD of its resident
+	// would deadlock on the still-pending key, so stationary items lead the
+	// fan-out (stable within each class — mover-vs-mover sorted ownership
+	// from priming is untouched, and multi-worker outcomes are unchanged:
+	// residents simply finish validating sooner). Items without a primed
+	// parked claim keep their sorted place.
+	if len(items) > 1 {
+		ordered := make([]applyItem, 0, len(items))
+		for _, item := range items {
+			if prepared[item.filePath].stationary {
+				ordered = append(ordered, item)
+			}
+		}
+		for _, item := range items {
+			if !prepared[item.filePath].stationary {
+				ordered = append(ordered, item)
+			}
+		}
+		items = ordered
+	}
 	outcomes := fanout.BoundedFanOut(ctx, inputs.Concurrency.MaxWorkers, items,
 		func(egCtx context.Context, item applyItem) applyFileOutcome {
 			outcome := applyFile(egCtx, wf, item.filePath, item.fileResult, item.movie, prepared[item.filePath], inputs, cfg)

@@ -126,17 +126,20 @@ func TestRevertLog_PartialPublishOwner_RevertDragsNoForeignBytes(t *testing.T) {
 	rowA := w241Row(t, repo, opA)
 	require.Equal(t, w241Target, filepath.ToSlash(rowA.NewPath))
 	require.Equal(t, models.RevertStatusFailed, rowA.RevertStatus)
-	require.Empty(t, w241Row(t, repo, opB).NewPath, "the authorized-skip waiter journals no primary-move record")
+	rowB := w241Row(t, repo, opB)
+	require.Empty(t, rowB.NewPath, "the authorized-skip waiter journals no primary-move record")
+	require.Equal(t, models.RevertStatusNoOp, rowB.RevertStatus,
+		"codex P2 (PR #241 F2): the skip finalizes completed-noop, never reverting against an empty anchor")
 
 	reverter := history.NewReverter(poison, repo)
 
-	// 1) Reverting the WAITER: no primary-move record, its retained source
-	// conflicts the move-back — nothing moves anywhere.
+	// 1) Reverting the WAITER: its completed-noop row (codex P2, PR #241 F2)
+	// never enters revert selection — nothing moves anywhere, no outcome, and
+	// no anchor "" probe.
 	rb, err := reverter.RevertScrape(ctx, "job-w241", "ABC-200")
 	require.NoError(t, err)
-	require.Len(t, rb.Outcomes, 1)
-	assert.NotEqual(t, models.RevertOutcomeReverted, rb.Outcomes[0].Outcome,
-		"the waiter's revert must never treat the shared destination as movable")
+	assert.Empty(t, rb.Outcomes, "the waiter's revert must never treat the shared destination as movable")
+	assert.Zero(t, rb.Total)
 	targetBytes, err := afero.ReadFile(base, filepath.FromSlash(w241Target))
 	require.NoError(t, err)
 	assert.Equal(t, []byte("a-bytes"), targetBytes, "the shared destination still holds the OWNER's published bytes")

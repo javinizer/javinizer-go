@@ -644,6 +644,16 @@ func (l *dbRevertLog) Complete(ctx context.Context, opID OperationID, result *Ap
 		preRecord.NFOPath = nfoPath
 	}
 
+	// codex P2 (PR #241 F2): finalize the authorized duplicate skip. The row
+	// journaled nothing and named no NewPath, so leaving it RevertStatusApplied
+	// makes the reverter probe checkAnchor("") → anchor_missing on every batch
+	// revert attempt and the batch can never report fully reverted. The apply
+	// SUCCEEDED as a true no-op — the row is completed-noop, excluded from
+	// revert selection exactly like a reverted row.
+	if org := result.OrganizeResult; org != nil && org.DuplicateSkipped {
+		preRecord.RevertStatus = models.RevertStatusNoOp
+	}
+
 	updatePostOrganize(preRecord, newPath, inPlaceRenamed, sourceDir, mergedJournal)
 	if err := l.persistNonJournalColumns(ctx, opID, preRecord); err != nil {
 		return fmt.Errorf("revert log Complete: update post-apply record for %s: %w", opID, err)
@@ -737,11 +747,21 @@ func (l *dbRevertLog) CompleteFailed(ctx context.Context, opID OperationID, resu
 		preRecord.NFOPath = nfoPath
 	}
 	updatePostOrganize(preRecord, newPath, inPlaceRenamed, sourceDir, mergedJournal)
+	// codex P2 (PR #241 F2): a skipped duplicate that failed a LATER pipeline
+	// step still mutated nothing — it owns no NewPath and journaled no
+	// artifacts — so it finalizes as completed-noop exactly like Complete's
+	// DuplicateSkipped path instead of lingering as an unanchored failed row
+	// the reverter would probe at "" forever.
 	preRecord.RevertStatus = models.RevertStatusFailed
+	if org := result.OrganizeResult; org != nil && org.DuplicateSkipped {
+		preRecord.RevertStatus = models.RevertStatusNoOp
+	}
 	if err := l.persistNonJournalColumns(ctx, opID, preRecord); err != nil {
 		return fmt.Errorf("revert log CompleteFailed: update failed record for %s: %w", opID, err)
 	}
-	resolveLogger(l.logger).Warnf("[revert-log] Apply failed for %s after filesystem mutation — record kept revertable (NewPath=%q)", opID, newPath)
+	if preRecord.RevertStatus == models.RevertStatusFailed {
+		resolveLogger(l.logger).Warnf("[revert-log] Apply failed for %s after filesystem mutation — record kept revertable (NewPath=%q)", opID, newPath)
+	}
 	return nil
 }
 

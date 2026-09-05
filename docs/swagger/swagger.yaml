@@ -2852,6 +2852,7 @@ definitions:
     - applied
     - reverted
     - failed
+    - noop
     type: string
     x-enum-comments:
       RevertStatusApplied: Renamed from "pending" — D-01
@@ -2859,10 +2860,12 @@ definitions:
     - Renamed from "pending" — D-01
     - ""
     - ""
+    - ""
     x-enum-varnames:
     - RevertStatusApplied
     - RevertStatusReverted
     - RevertStatusFailed
+    - RevertStatusNoOp
   github_com_javinizer_javinizer-go_internal_models.ScraperChoice:
     properties:
       label:

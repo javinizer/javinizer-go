@@ -8143,7 +8143,8 @@ const docTemplate = `{
             "enum": [
                 "applied",
                 "reverted",
-                "failed"
+                "failed",
+                "noop"
             ],
             "x-enum-comments": {
                 "RevertStatusApplied": "Renamed from \"pending\" — D-01"
@@ -8151,12 +8152,14 @@ const docTemplate = `{
             "x-enum-descriptions": [
                 "Renamed from \"pending\" — D-01",
                 "",
+                "",
                 ""
             ],
             "x-enum-varnames": [
                 "RevertStatusApplied",
                 "RevertStatusReverted",
-                "RevertStatusFailed"
+                "RevertStatusFailed",
+                "RevertStatusNoOp"
             ]
         },
         "github_com_javinizer_javinizer-go_internal_models.ScraperChoice": {

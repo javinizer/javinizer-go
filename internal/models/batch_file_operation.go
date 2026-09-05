@@ -45,6 +45,16 @@ const (
 	RevertStatusApplied  RevertStatusEnum = "applied" // Renamed from "pending" — D-01
 	RevertStatusReverted RevertStatusEnum = "reverted"
 	RevertStatusFailed   RevertStatusEnum = "failed"
+	// RevertStatusNoOp is the completed-noop terminal state (codex P2, PR
+	// #241 F2): the operation's apply succeeded but mutated NOTHING on the
+	// filesystem — an authorized intra-batch duplicate skip (organizer's
+	// DuplicateSkipped) whose OrganizeResult.NewPath names the batch winner's
+	// shared destination for display only. Marking the row noop instead of
+	// leaving it applied-with-empty-NewPath keeps the reverter from probing
+	// a "" anchor forever (anchor_missing) and lets the batch report fully
+	// reverted once its real rows unwind; nothing-to-revert rows are excluded
+	// from revert selection exactly like reverted rows.
+	RevertStatusNoOp RevertStatusEnum = "noop"
 )
 
 func (e RevertStatusEnum) String() string { return string(e) }

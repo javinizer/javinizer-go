@@ -16,24 +16,41 @@ import (
 	"github.com/javinizer/javinizer-go/internal/operationmode"
 )
 
-// parkedEntry asserts the canonical key of target is owned by a pre-settled
-// parked resident (codex P1, PR #241) and returns its (immutable-after-
-// settle) entry: settled-success, done already closed — a moving claimant
-// must never block behind a resident's claim.
+// parkedEntry asserts the canonical key of target is owned by a PENDING
+// parked resident (codex P1, PR #241; pending-parked lifecycle from codex P2,
+// PR #241 F1) and returns its entry: parked, not yet settled, done still
+// open — a moving claimant GATES on the resident's own terminal outcome
+// instead of resolving instantly behind a possible ghost claim.
 func parkedEntry(t *testing.T, tracker *DuplicateTracker, target string) *claimEntry {
 	t.Helper()
 	tracker.mu.Lock()
 	defer tracker.mu.Unlock()
 	entry, ok := tracker.claims[tracker.keyLocked(target)]
 	require.True(t, ok, "no claim registered for %s", target)
-	require.True(t, entry.settled, "a resident's claim is born settled")
-	require.True(t, entry.success, "a resident parks settled-successfully")
-	require.True(t, entry.parked, "a born-settled resident claim carries the parked discriminant (codex P2, PR #241 F1)")
+	require.False(t, entry.settled, "a resident's claim is born PENDING — its own worker owes the terminal outcome")
+	require.True(t, entry.parked, "a resident's primed claim carries the parked discriminant (codex P2, PR #241 F1)")
 	select {
 	case <-entry.done:
+		t.Fatalf("a pending parked claim keeps done open — movers gate on the resident's own terminal outcome")
 	default:
-		t.Fatalf("a parked resident claim closes done at priming — movers must resolve instantly")
 	}
+	return entry
+}
+
+// settledParkedEntry asserts the canonical key of target is a TERMINAL
+// settled-success parked claim — the resident's own worker completed and the
+// gate resolved to the duplicate verdict for every later mover (codex P2, PR
+// #241 F1).
+func settledParkedEntry(t *testing.T, tracker *DuplicateTracker, target string) *claimEntry {
+	t.Helper()
+	tracker.mu.Lock()
+	defer tracker.mu.Unlock()
+	entry, ok := tracker.claims[tracker.keyLocked(target)]
+	require.True(t, ok, "no claim registered for %s", target)
+	require.True(t, entry.settled, "a validated resident's parked claim is settled-success")
+	require.True(t, entry.success)
+	require.True(t, entry.parked)
+	<-entry.done
 	return entry
 }
 
@@ -65,36 +82,68 @@ func TestDuplicateTracker_ResidentParking(t *testing.T) {
 			})
 			assert.False(t, dup, "the resident reports a normal no-op, never a conflict")
 
-			// The primed mover takes the resident-claimed duplicate verdict,
-			// instantly (the parked claim is terminal).
-			prior, dup := tracker.observe(context.Background(), moverPrimingPlan())
-			require.True(t, dup)
-			assert.Equal(t, "/dest/lib/x.mkv", prior.source)
+			// The primed mover GATES on the resident's own terminal outcome
+			// (codex P2, PR #241 F1): it blocks on the pending parked claim and
+			// resolves to the resident-claimed duplicate verdict only once the
+			// resident settles.
+			type outcome struct {
+				prior duplicateClaim
+				dup   bool
+			}
+			moverOut := make(chan outcome, 2)
+			go func() {
+				prior, dup := tracker.observe(context.Background(), moverPrimingPlan())
+				moverOut <- outcome{prior, dup}
+			}()
+			go func() {
+				prior, dup := tracker.observe(context.Background(), dupPlanFor("/in/D.mkv", "/dest/lib/x.mkv"))
+				moverOut <- outcome{prior, dup}
+			}()
+			waitForWaiter(t, tracker, "/dest/lib/x.mkv", "/in/D.mkv")
+			select {
+			case o := <-moverOut:
+				t.Fatalf("a mover resolved (dup=%v) before the resident's own terminal outcome", o.dup)
+			default:
+			}
 
-			// An unprimed mover on the same key loses identically.
-			prior, dup = tracker.observe(context.Background(), dupPlanFor("/in/D.mkv", "/dest/lib/x.mkv"))
-			require.True(t, dup)
-			assert.Equal(t, "/dest/lib/x.mkv", prior.source)
+			// The resident's own success settles the parked claim; both movers
+			// (primed standby and unprimed waiter) wake to the unchanged
+			// resident-claimed duplicate verdict.
+			tracker.settle(&OrganizePlan{SourcePath: "/dest/lib/x.mkv", TargetPath: "/dest/lib/x.mkv", WillMove: false})
+			for i := 0; i < 2; i++ {
+				o := <-moverOut
+				require.True(t, o.dup, "a validated resident's parked claim rejects every mover")
+				assert.Equal(t, "/dest/lib/x.mkv", o.prior.source)
+			}
 		}
 	})
 
-	t.Run("parked claims are terminal and never release or re-settle", func(t *testing.T) {
+	t.Run("a pending parked claim settles once; every later close-out is final", func(t *testing.T) {
 		forceCasePosture(t, true)
 		tracker := NewDuplicateTracker(false)
 		tracker.PrimeBatch([]DuplicatePriming{residentPriming, moverPriming})
 		parkedEntry(t, tracker, "/dest/lib/x.mkv")
 
-		// Every terminal close-out aimed at the resident — even through a
-		// WillMove=true plan spelling that passes the register-nothing
-		// guards — is a no-op against the settled parked claim.
-		stillSpelling := &OrganizePlan{SourcePath: "/dest/lib/x.mkv", TargetPath: "/dest/lib/x.mkv", WillMove: true}
-		tracker.release(stillSpelling)
-		tracker.settle(stillSpelling)
+		// Pending phase (codex P2, PR #241 F1): FOREIGN close-outs spare the
+		// pending parked claim — only the resident's own worker outcome (or the
+		// recovery boundary see ReleaseAbandonedBy) terminates it.
+		tracker.release(residentPlan("/in/stranger.mkv"))
+		tracker.ReleaseAbandonedBy("/in/stranger.mkv")
+		parkedEntry(t, tracker, "/dest/lib/x.mkv")
+
+		// The resident's own success settles the gate exactly once.
+		tracker.settle(residentPlan("/dest/lib/x.mkv"))
+		tracker.settle(residentPlan("/dest/lib/x.mkv")) // idempotent repetition
+		settledParkedEntry(t, tracker, "/dest/lib/x.mkv")
+
+		// Settled is final: every terminal close-out aimed at the claim — the
+		// resident's own release, both abandon scrubs — is a no-op now.
+		tracker.release(residentPlan("/dest/lib/x.mkv"))
 		tracker.ReleaseAbandonedBy("/dest/lib/x.mkv")
 		tracker.ReleaseAbandonedBy("/in/B.mkv") // the mover's inert standby scrubs too
 
 		prior, dup := tracker.observe(context.Background(), moverPrimingPlan())
-		require.True(t, dup, "the parked key survives every close-out attempt — resident bytes stay claimed")
+		require.True(t, dup, "the settled parked key survives every close-out — resident bytes stay claimed")
 		assert.Equal(t, "/dest/lib/x.mkv", prior.source)
 	})
 
@@ -109,12 +158,25 @@ func TestDuplicateTracker_ResidentParking(t *testing.T) {
 		entry := parkedEntry(t, tracker, "/dest/lib/x.mkv")
 		tracker.mu.Lock()
 		assert.Equal(t, []string{"/dest/lib/X.mkv"}, entry.standby,
-			"the second spelling of the resident retires inertly; parked claims never promote it")
+			"the second spelling of the resident retires inertly; a LIVE parked claim never promotes it")
 		tracker.mu.Unlock()
 
-		prior, dup := tracker.observe(context.Background(), dupPlanFor("/in/B.mkv", "/dest/lib/x.mkv"))
-		require.True(t, dup)
-		assert.Equal(t, "/dest/lib/x.mkv", prior.source, "the first sorted resident owns the folded key")
+		// The mover gates on the FIRST resident's terminal outcome; its
+		// success settles the pending parked claim and the verdict lands.
+		type outcome struct {
+			prior duplicateClaim
+			dup   bool
+		}
+		moverOut := make(chan outcome, 1)
+		go func() {
+			prior, dup := tracker.observe(context.Background(), dupPlanFor("/in/B.mkv", "/dest/lib/x.mkv"))
+			moverOut <- outcome{prior, dup}
+		}()
+		waitForWaiter(t, tracker, "/dest/lib/x.mkv", "/in/B.mkv")
+		tracker.settle(residentPlan("/dest/lib/x.mkv"))
+		res := <-moverOut
+		require.True(t, res.dup)
+		assert.Equal(t, "/dest/lib/x.mkv", res.prior.source, "the first sorted resident owns the folded key")
 	})
 
 	t.Run("empty-target resident primings register nothing", func(t *testing.T) {
@@ -128,10 +190,11 @@ func TestDuplicateTracker_ResidentParking(t *testing.T) {
 		tracker.mu.Unlock()
 	})
 
-	t.Run("concurrent movers all resolve instantly against a parked resident", func(t *testing.T) {
+	t.Run("concurrent movers all resolve to the duplicate verdict once the parked resident settles", func(t *testing.T) {
 		forceCasePosture(t, true)
 		tracker := NewDuplicateTracker(false)
 		tracker.PrimeBatch([]DuplicatePriming{residentPriming})
+		parkedEntry(t, tracker, "/dest/lib/x.mkv")
 		var wg sync.WaitGroup
 		dups := make(chan bool, 16)
 		for i := 0; i < 16; i++ {
@@ -143,10 +206,14 @@ func TestDuplicateTracker_ResidentParking(t *testing.T) {
 				dups <- dup
 			}(i)
 		}
+		// Every mover is blocked on the still-pending parked claim before the
+		// resident's own worker reports — then all resolve identically.
+		waitForWaiter(t, tracker, "/dest/lib/x.mkv", "/in/mover-15.mkv")
+		tracker.settle(residentPlan("/dest/lib/x.mkv"))
 		wg.Wait()
 		close(dups)
 		for dup := range dups {
-			assert.True(t, dup, "every mover resolves to the duplicate verdict — none block and none win")
+			assert.True(t, dup, "every mover resolves to the duplicate verdict behind the validated resident")
 		}
 	})
 
@@ -188,6 +255,11 @@ func TestApplyDuplicatePreflight_ResidentOwner(t *testing.T) {
 		{SourcePath: "/in/B.mkv", TargetPath: target, WillMove: true}, // mover primed FIRST
 		{SourcePath: target, TargetPath: target, WillMove: false},     // resident still owns
 	})
+	// codex P2 (PR #241 F1): the verdicts below are the RESIDENT-TERMINAL
+	// shape — set the pending parked claim's success inline (the resident's
+	// own worker completed) so the preflight boundary's verdict shape is
+	// pinned without re-pinning the blocking gate itself.
+	tracker.settle(&OrganizePlan{SourcePath: target, TargetPath: target, WillMove: false})
 
 	t.Run("unauthorized mover joins the ordinary duplicate conflict", func(t *testing.T) {
 		plan := dupPlanFor("/in/B.mkv", target)
@@ -286,19 +358,32 @@ func TestOrganize_ResidentVsMover(t *testing.T) {
 		tracker := NewDuplicateTracker(false)
 		primeResidentFirst(tracker)
 
-		// The mover organizes FIRST (arrival order must not matter)…
-		resB, err := org.Organize(context.Background(), dupBatchCmd(moverMatch(), tracker, true, false))
+		// The mover's worker starts FIRST (arrival order must not matter):
+		// codex P2 (PR #241 F1) gates it on the resident's own terminal
+		// outcome, so run it on a goroutine while the resident's worker
+		// validates — the resident's success then resolves the mover's wait
+		// to the authorized-skip verdict.
+		type moverOutcome struct {
+			res *OrganizeResult
+			err error
+		}
+		moverDone := make(chan moverOutcome, 1)
+		go func() {
+			res, err := org.Organize(context.Background(), dupBatchCmd(moverMatch(), tracker, true, false))
+			moverDone <- moverOutcome{res, err}
+		}()
+		waitForWaiter(t, tracker, residentTarget, "/in/B.mkv")
+		resA, err := org.Organize(context.Background(), dupBatchCmd(residentMatch(), tracker, true, false))
+		require.NoError(t, err)
+		assert.False(t, resA.Moved)
+		outB := <-moverDone
+		resB, err := outB.res, outB.err
 		require.NoError(t, err, "authorization demotes the duplicate to a warning, never a failure")
 		require.NotNil(t, resB)
 		assert.True(t, resB.DuplicateSkipped, "the mover skips execution against the parked resident")
 		assert.False(t, resB.Moved)
 		require.Len(t, resB.Warnings, 1)
 		assert.Contains(t, resB.Warnings[0], "overwrite authorized")
-
-		// …and the resident then reports its ordinary no-op.
-		resA, err := org.Organize(context.Background(), dupBatchCmd(residentMatch(), tracker, true, false))
-		require.NoError(t, err)
-		assert.False(t, resA.Moved)
 
 		content, readErr := afero.ReadFile(fs, filepath.FromSlash(residentTarget))
 		require.NoError(t, readErr)

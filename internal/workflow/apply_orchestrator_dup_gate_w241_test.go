@@ -477,13 +477,17 @@ func TestApply_ForceUpdateDuplicateOnlyOwnerProduces_EndToEnd(t *testing.T) {
 	assert.Empty(t, loserLedger.MoveBack)
 	assert.NotContains(t, slashNormalizeW241Paths(loserLedger.Roots), filepath.ToSlash("/dest/shared"))
 
-	// (b) Loser revert after success deletes NOTHING of the winner's.
+	// codex P2 (PR #241 F2): the loser's strict no-op row FINALIZED as
+	// completed-noop instead of lingering applied-with-empty-NewPath.
+	assert.Equal(t, models.RevertStatusNoOp, loserRow.RevertStatus)
+
+	// (b) Loser revert after success deletes NOTHING of the winner's — the
+	// completed-noop row is excluded from revert selection entirely.
 	reverter := history.NewReverter(cfs, repo)
 	rb, err := reverter.RevertScrape(ctx, "job-w241", "ABC-200")
 	require.NoError(t, err)
-	require.Len(t, rb.Outcomes, 1)
-	assert.NotEqual(t, models.RevertOutcomeReverted, rb.Outcomes[0].Outcome,
-		"a strict no-op row is never a revert subject")
+	assert.Empty(t, rb.Outcomes, "a strict no-op row is never a revert subject")
+	assert.Zero(t, rb.Total)
 	for _, kept := range []string{nfoPath, "/dest/shared/poster.jpg", w241Target} {
 		_, statErr := cfs.Stat(filepath.FromSlash(kept))
 		assert.NoError(t, statErr, "loser revert left the winner's artifact in place: %s", kept)
