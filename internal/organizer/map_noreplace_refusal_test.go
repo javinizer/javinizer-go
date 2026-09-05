@@ -75,7 +75,7 @@ func TestHandleSubtitles_PublishRefusalMapsToSkip(t *testing.T) {
 			}
 			result := &OrganizeResult{}
 
-			o.handleSubtitles(plan, result, func(afero.Fs, string, string) error { return ferr })
+			o.handleSubtitles(plan, result, subtitleInstall{op: func(afero.Fs, string, string) error { return ferr }})
 
 			require.Len(t, result.Subtitles, 1)
 			sr := result.Subtitles[0].SubtitleMove

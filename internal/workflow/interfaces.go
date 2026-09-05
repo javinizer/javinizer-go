@@ -21,6 +21,10 @@ type OrganizeOptions struct {
 	LinkMode        organizer.LinkMode // resolved at factory boundary, not inside orchestrator
 	ForceUpdate     bool
 	ForceRenameFile bool
+	// DuplicateTracker carries the batch run's intra-batch duplicate
+	// preflight registry into every file's plan (#224 phase E). The apply
+	// phase allocates one per run; nil disables detection.
+	DuplicateTracker *organizer.DuplicateTracker
 }
 
 // MergeOptions controls the NFO merge step within Apply.

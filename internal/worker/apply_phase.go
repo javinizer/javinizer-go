@@ -14,6 +14,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/downloader"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/organizer"
 	"github.com/javinizer/javinizer-go/internal/panicutil"
 	"github.com/javinizer/javinizer-go/internal/progress"
 	"github.com/javinizer/javinizer-go/internal/worker/fanout"
@@ -139,6 +140,11 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 	var processed int64
 	inputs.Dedup = &sync.Map{}
 	downloader.PrimeDownloadOwners(inputs.Dedup, owners)
+	// One intra-batch duplicate preflight registry per apply run (#224 phase
+	// E): every file's plan registers its proven-equal canonical destination
+	// key so same-batch target collisions surface as plan conflicts — or, when
+	// overwrite is authorized, as persisted per-file warnings.
+	cfg.OrganizeOptions.DuplicateTracker = organizer.NewDuplicateTracker()
 	outcomes := fanout.BoundedFanOut(ctx, inputs.Concurrency.MaxWorkers, items,
 		func(egCtx context.Context, item applyItem) applyFileOutcome {
 			outcome := applyFile(egCtx, wf, item.filePath, item.fileResult, item.movie, inputs, cfg)

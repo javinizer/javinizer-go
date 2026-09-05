@@ -11,6 +11,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/mocks"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/organizer"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
@@ -312,4 +313,76 @@ func TestW9CompleteThenCompleteFailedKeepsFailedStatus(t *testing.T) {
 	require.Equal(t, "/dst/flip/poster.jpg", gf.Replacements[0].Destination)
 	require.Contains(t, gf.Roots, "/dst/flip", "the completed root survives")
 	require.Contains(t, gf.Delete, "/dst/flip/final.nfo", "the latest payload merges against the fresh row")
+}
+
+// TestW9CompleteJournalsCopiedSubtitlesAsDelete pins the #224 phase E
+// copy/move distinction at the Complete journal boundary: copy-installed
+// subtitles join Delete (their source was retained), move-installed join
+// MoveBack, skipped/planned entries journal nothing.
+func TestW9CompleteJournalsCopiedSubtitlesAsDelete(t *testing.T) {
+	repo := mocks.NewMockBatchFileOperationRepositoryInterface(t)
+	log := NewDBRevertLog(repo, nil, "job-w9", nil, nil, nil, nil)
+
+	var txPersisted string
+	repo.On("FindByID", mock.Anything, uint(11)).Return(&models.BatchFileOperation{
+		ID: 11, BatchJobID: "job-w9", MovieID: "W9-011",
+		RevertStatus: models.RevertStatusApplied,
+	}, nil)
+	runFnMock(repo, 11, &models.BatchFileOperation{ID: 11, RevertStatus: models.RevertStatusApplied}, &txPersisted)
+	repo.On("UpdateNonJournalFields", mock.Anything, mock.AnythingOfType("*models.BatchFileOperation")).Return(nil)
+
+	err := log.Complete(context.Background(), "11", &ApplyResult{
+		Movie: &models.Movie{ID: "W9-011"},
+		OrganizeResult: &organizer.OrganizeResult{
+			NewPath:    "/dst/w9-011.mp4",
+			FolderPath: "/dst/lib",
+			Subtitles: []organizer.SubtitleResult{
+				{SubtitleMove: models.SubtitleMove{OriginalPath: "/src/m.srt", NewPath: "/dst/lib/m.srt", Moved: true}},
+				{SubtitleMove: models.SubtitleMove{OriginalPath: "/src/c.srt", NewPath: "/dst/lib/c.srt", Copied: true}},
+				{SubtitleMove: models.SubtitleMove{OriginalPath: "/src/s.srt", NewPath: "/dst/lib/s.srt"}, Skipped: true},
+				{SubtitleMove: models.SubtitleMove{OriginalPath: "/src/p.srt", NewPath: "/dst/lib/p.srt"}, Planned: true},
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	gf, perr := models.ParseGeneratedFiles(txPersisted)
+	require.NoError(t, perr)
+	assert.Equal(t, []string{"/dst/lib/c.srt"}, gf.Delete)
+	require.Len(t, gf.MoveBack, 1)
+	assert.Equal(t, models.FileMove{OriginalPath: "/src/m.srt", NewPath: "/dst/lib/m.srt"}, gf.MoveBack[0])
+}
+
+// TestW9CompleteFailedJournalsCopiedSubtitlesAsDelete is the CompleteFailed
+// twin of the #224 phase E journal boundary.
+func TestW9CompleteFailedJournalsCopiedSubtitlesAsDelete(t *testing.T) {
+	repo := mocks.NewMockBatchFileOperationRepositoryInterface(t)
+	log := NewDBRevertLog(repo, nil, "job-w9", nil, nil, nil, nil)
+
+	var txPersisted string
+	var saved models.BatchFileOperation
+	repo.On("FindByID", mock.Anything, uint(12)).Return(&models.BatchFileOperation{
+		ID: 12, BatchJobID: "job-w9", MovieID: "W9-012",
+		RevertStatus: models.RevertStatusApplied,
+	}, nil)
+	runFnMock(repo, 12, &models.BatchFileOperation{ID: 12, RevertStatus: models.RevertStatusApplied}, &txPersisted)
+	repo.On("UpdateNonJournalFields", mock.Anything, mock.AnythingOfType("*models.BatchFileOperation")).
+		Run(func(args mock.Arguments) { saved = *args.Get(1).(*models.BatchFileOperation) }).Return(nil)
+
+	err := log.CompleteFailed(context.Background(), "12", &ApplyResult{
+		Movie: &models.Movie{ID: "W9-012"},
+		OrganizeResult: &organizer.OrganizeResult{
+			NewPath: "/dst/w9-012.mp4",
+			Subtitles: []organizer.SubtitleResult{
+				{SubtitleMove: models.SubtitleMove{OriginalPath: "/src/c.srt", NewPath: "/dst/lib/c.srt", Copied: true}},
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	gf, perr := models.ParseGeneratedFiles(txPersisted)
+	require.NoError(t, perr)
+	assert.Equal(t, []string{"/dst/lib/c.srt"}, gf.Delete)
+	assert.Empty(t, gf.MoveBack)
+	assert.Equal(t, models.RevertStatusFailed, saved.RevertStatus)
 }

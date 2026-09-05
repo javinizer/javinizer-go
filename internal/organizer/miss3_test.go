@@ -378,16 +378,14 @@ func TestOrganizeStrategy_Execute_LinkModeTargetNotExist(t *testing.T) {
 	assert.True(t, result.Moved)
 }
 
-// --- subtitles: MoveSubtitles with directory entries ---
+// --- subtitles: FindSubtitles with directory entries ---
 
-func TestSubtitleHandler_MoveSubtitles_SkipsDirectories(t *testing.T) {
+func TestSubtitleHandler_FindSubtitles_SkipsDirectories(t *testing.T) {
 	tmpDir := t.TempDir()
 	fs := afero.NewOsFs()
 
 	sourceDir := fmt.Sprintf("%s/src", tmpDir)
-	targetDir := fmt.Sprintf("%s/dest", tmpDir)
 	require.NoError(t, fs.MkdirAll(sourceDir, 0755))
-	require.NoError(t, fs.MkdirAll(targetDir, 0755))
 	require.NoError(t, afero.WriteFile(fs, fmt.Sprintf("%s/ABC-123.srt", sourceDir), []byte("sub"), 0644))
 	// Create a directory that looks like a subtitle file
 	require.NoError(t, fs.MkdirAll(fmt.Sprintf("%s/ABC-123.eng.srt", sourceDir), 0755))
@@ -395,12 +393,12 @@ func TestSubtitleHandler_MoveSubtitles_SkipsDirectories(t *testing.T) {
 	sh := newSubtitleHandler(fs, []string{".srt", ".ass"})
 
 	subtitles := sh.FindSubtitles(models.FileMatchInfo{
-		Path:      sourceDir,
+		Path:      fmt.Sprintf("%s/ABC-123.mp4", sourceDir),
 		Name:      "ABC-123.mp4",
 		Extension: ".mp4",
 	})
-	err := sh.MoveSubtitles(subtitles, targetDir, "ABC-123", false)
-	require.NoError(t, err)
+	require.Len(t, subtitles, 1, "subtitle-looking directory entries must not match")
+	assert.Equal(t, fmt.Sprintf("%s/ABC-123.srt", sourceDir), subtitles[0].OriginalPath)
 }
 
 // --- extractLanguageCode: remaining != "" ---

@@ -326,7 +326,13 @@ func buildGeneratedFilesJSON(logger logging.Logger, nfoPath string, subtitleMove
 	if len(subtitleMoves) > 0 {
 		moveBackList := make([]models.FileMove, 0, len(subtitleMoves))
 		for _, sr := range subtitleMoves {
-			if sr.Moved && sr.OriginalPath != "" && sr.NewPath != "" {
+			switch {
+			// #224 phase E mode distinction: a copy-installed subtitle retains
+			// its source, so the revert artifact is the installed copy (delete
+			// it); only a move-installed subtitle moves back.
+			case sr.Copied && sr.NewPath != "":
+				gf.Delete = append(gf.Delete, sr.NewPath)
+			case sr.Moved && sr.OriginalPath != "" && sr.NewPath != "":
 				moveBackList = append(moveBackList, models.FileMove{OriginalPath: sr.OriginalPath, NewPath: sr.NewPath})
 			}
 		}
@@ -590,7 +596,7 @@ func (l *dbRevertLog) Complete(ctx context.Context, opID OperationID, result *Ap
 		newPath = result.OrganizeResult.NewPath
 		inPlaceRenamed = result.OrganizeResult.InPlaceRenamed
 		for _, sr := range result.OrganizeResult.Subtitles {
-			if sr.Moved {
+			if sr.Moved || sr.Copied {
 				subtitles = append(subtitles, sr.SubtitleMove)
 			}
 		}
@@ -677,7 +683,7 @@ func (l *dbRevertLog) CompleteFailed(ctx context.Context, opID OperationID, resu
 		newPath = result.OrganizeResult.NewPath
 		inPlaceRenamed = result.OrganizeResult.InPlaceRenamed
 		for _, sr := range result.OrganizeResult.Subtitles {
-			if sr.Moved {
+			if sr.Moved || sr.Copied {
 				subtitles = append(subtitles, sr.SubtitleMove)
 			}
 		}
