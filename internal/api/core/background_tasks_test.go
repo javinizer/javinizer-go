@@ -21,15 +21,30 @@ func TestAPIRuntime_BackgroundTaskTracking(t *testing.T) {
 		rt.EnsureRuntime()
 		done := rt.TrackBackgroundTask()
 
-		const settleAfter = 150 * time.Millisecond
+		release := make(chan struct{})
 		go func() {
-			time.Sleep(settleAfter)
+			<-release
 			done()
 		}()
 
-		start := time.Now()
-		assert.True(t, rt.WaitBackgroundTasks(5*time.Second))
-		assert.GreaterOrEqual(t, time.Since(start), settleAfter)
+		settled := make(chan bool, 1)
+		go func() {
+			settled <- rt.WaitBackgroundTasks(5 * time.Second)
+		}()
+
+		select {
+		case ok := <-settled:
+			t.Fatalf("wait returned %v while the tracked task was still held", ok)
+		case <-time.After(100 * time.Millisecond):
+		}
+
+		close(release)
+		select {
+		case ok := <-settled:
+			assert.True(t, ok)
+		case <-time.After(5 * time.Second):
+			t.Fatal("wait did not return after the tracked task released")
+		}
 	})
 
 	t.Run("timeout reports false while task is still tracked", func(t *testing.T) {

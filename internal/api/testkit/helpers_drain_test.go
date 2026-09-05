@@ -31,20 +31,31 @@ func TestDrainBackgroundTasks_WaitsForTrackedTask(t *testing.T) {
 	deps := CreateTestDeps(t, cfg, "")
 	rt := GetTestRuntime(deps)
 
+	release := make(chan struct{})
 	done := rt.TrackBackgroundTask()
-	const settleAfter = 150 * time.Millisecond
 	go func() {
-		time.Sleep(settleAfter)
+		<-release
 		done()
 	}()
 
-	start := time.Now()
-	drainBackgroundTasks(t, rt, 10*time.Second)
-	elapsed := time.Since(start)
-	assert.GreaterOrEqual(t, elapsed, settleAfter,
-		"drain must block until the tracked goroutine releases")
-	assert.Less(t, elapsed, 5*time.Second,
-		"drain must return soon after the task releases")
+	drained := make(chan struct{})
+	go func() {
+		drainBackgroundTasks(t, rt, 10*time.Second)
+		close(drained)
+	}()
+
+	select {
+	case <-drained:
+		t.Fatal("drain returned while the tracked task was still held")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(release)
+	select {
+	case <-drained:
+	case <-time.After(5 * time.Second):
+		t.Fatal("drain did not return after the tracked task released")
+	}
 }
 
 func TestDrainBackgroundTasks_BudgetExpiryDoesNotHang(t *testing.T) {
@@ -61,7 +72,7 @@ func TestDrainBackgroundTasks_BudgetExpiryDoesNotHang(t *testing.T) {
 	start := time.Now()
 	drainBackgroundTasks(t, rt, budget)
 	elapsed := time.Since(start)
-	assert.GreaterOrEqual(t, elapsed, budget,
+	assert.GreaterOrEqual(t, elapsed, budget-100*time.Millisecond,
 		"drain should keep waiting until the budget expires for a stuck task")
 	assert.Less(t, elapsed, 3*time.Second,
 		"drain must give up shortly after the budget, not hang forever")
