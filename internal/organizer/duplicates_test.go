@@ -321,7 +321,7 @@ func TestOrganize_LiveDuplicatePreflight(t *testing.T) {
 			models.FileMatchInfo{MovieID: "ABC-123", Path: "/in/B.mkv", Name: "B.mkv", Extension: ".mkv"}, tracker, false, false))
 		require.Error(t, err)
 		assert.True(t, strings.HasPrefix(err.Error(), "organization validation failed: ["), err.Error())
-		assert.Contains(t, err.Error(), "/dest/ABC-123/ABC-123.mkv")
+		assert.Contains(t, filepath.ToSlash(err.Error()), "/dest/ABC-123/ABC-123.mkv")
 		content, readErr := afero.ReadFile(fs, "/in/B.mkv")
 		require.NoError(t, readErr)
 		assert.Equal(t, []byte("b-bytes"), content, "the losing duplicate's source is untouched")
@@ -824,7 +824,7 @@ func TestOrganize_PrimedStaleWinnerReleasesClaim(t *testing.T) {
 		var videos []string
 		require.NoError(t, afero.Walk(fs, "/dest", func(path string, info os.FileInfo, err error) error {
 			if err == nil && !info.IsDir() && strings.HasSuffix(path, ".mkv") {
-				videos = append(videos, path)
+				videos = append(videos, filepath.ToSlash(path))
 			}
 			return nil
 		}))
@@ -897,7 +897,7 @@ func TestOrganize_ConflictBranchReleasesStaleOwner(t *testing.T) {
 		_, err := org.Organize(context.Background(), dupBatchCmd(
 			models.FileMatchInfo{MovieID: "ABC-123", Path: "/in/B.mkv", Name: "B.mkv", Extension: ".mkv"}, tracker, false, false))
 		require.Error(t, err, "the unauthorized loser fails through the identical conflict pipeline")
-		assert.Contains(t, err.Error(), target)
+		assert.Contains(t, filepath.ToSlash(err.Error()), target)
 		_, dup := tracker.observe(dupPlanFor("/in/B.mkv", target))
 		require.True(t, dup, "the owner keeps its key through the loser's failure")
 		srcContent, readErr := afero.ReadFile(fs, "/in/B.mkv")
