@@ -22,10 +22,14 @@ type duplicateClaim struct {
 // conflicting against a snapshot — the owner's terminal outcome then
 // arbitrates. success=true (owner published / dry-run-planned) keeps the
 // key: waiters wake to the unchanged duplicate verdict. success=false
-// (owner released: validation/execute failure, vanished source, recovered
-// panic) frees the key: the sorted-first waiter is promoted to owner and
-// ITS observe falls through to organize. done closes exactly once at the
-// terminal transition; success and settled are only meaningful under mu.
+// (owner released: validation failure, vanished source, recovered panic,
+// and every execute failure whose destination was never touched) frees the
+// key: the sorted-first waiter is promoted to owner and ITS observe falls
+// through to organize. A partial-publish execute failure instead lands on
+// the success=true side — the destination already carries the owner's bytes
+// (the fsutil.PublishCompleted class), so the claim settles and the waiter's
+// duplicate verdict stands (codex P1, PR #241). done closes exactly once at
+// the terminal transition; success and settled are only meaningful under mu.
 type claimEntry struct {
 	claim   duplicateClaim
 	waiters []string      // sources blocked in observe, sorted on promotion
@@ -68,7 +72,9 @@ type DuplicatePriming struct {
 // (owner failure/release) promotes the sorted-first waiter to owner so a
 // valid later claimant organizes instead of the destination ending empty
 // purely by scheduling. The owner goroutine's every exit leg closes out its
-// claim (organizer error legs release, success legs settle, panics release
+// claim (organizer error legs release — except a PARTIAL-publish execute
+// failure, which settles because the destination already carries the
+// owner's bytes (codex P1, PR #241) — success legs settle, panics release
 // and re-panic, and the apply phase's recovery boundary abandons anything
 // left open), so waiters can never deadlock behind a dead owner.
 //

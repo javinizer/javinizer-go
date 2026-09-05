@@ -739,10 +739,28 @@ func (o *Organizer) Organize(ctx context.Context, cmd OrganizeCmd) (*OrganizeRes
 
 	strategyResult, err := strategy.Execute(plan)
 	if err != nil {
-		// codex r2 P2: the disappeared-source failure surfaces HERE under
-		// ForceUpdate (validation is skipped): the primed owner's claim is
-		// released on the identical rule so the next valid claimant can
-		// still land its bytes on the destination.
+		if fsutil.PublishCompleted(err) {
+			// codex P1 (PR #241): PARTIAL publish — the cross-device move's
+			// publish leg landed this owner's bytes at the destination and
+			// only the source cleanup refused (the typed ErrPublishCompleted
+			// class every fsutil move composite carries on that leg). The
+			// destination is therefore the owner's terminal outcome, exactly
+			// like a clean move: SETTLE the claim (never release). Releasing
+			// would promote a waiting claimant onto an occupied destination —
+			// under ForceUpdate that claimant would overwrite the published
+			// bytes and the failed owner's revert row would then aim the
+			// winner's bytes at the old owner's source path. Settling keeps
+			// the waiter's duplicate verdict unchanged (conflict /
+			// authorized-skip) and the shared destination byte-owned by the
+			// row that actually published it.
+			cmd.DuplicateTracker.settle(plan)
+			return strategyResult, err
+		}
+		// codex r2 P2: PRE-publication failure (the disappeared-source
+		// failure surfaces HERE under ForceUpdate, validation skipped, and
+		// every refusal/ambiguity that left the destination untouched): the
+		// primed owner's claim is released on the identical rule so the
+		// next valid claimant can still land its bytes on the destination.
 		cmd.DuplicateTracker.release(plan)
 		return strategyResult, err
 	}

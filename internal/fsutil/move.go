@@ -55,8 +55,13 @@ func crossDeviceMoveFs(fs afero.Fs, src, dst string) error {
 	if err := fs.Remove(src); err != nil {
 		// dst was fully published via the bound replace; the source remove is
 		// the only failed step — keep BOTH objects rather than deleting the
-		// published destination, and surface the ambiguity (#224).
-		return fmt.Errorf("failed to remove source after cross-device copy: %w", err)
+		// published destination, and surface the ambiguity (#224). The typed
+		// ErrPublishCompleted marker rides along (PR #241 codex P1): the
+		// destination already carries THIS operation's bytes, so compensation
+		// and duplicate-claim classifiers must never read this failure as a
+		// pre-publish no-op — the same sentinel the no-replace lineage wraps
+		// on its cleanup-refusal leg (move_noreplace.go).
+		return fmt.Errorf("%w: failed to remove source after cross-device copy: %w", ErrPublishCompleted, err)
 	}
 
 	return nil
