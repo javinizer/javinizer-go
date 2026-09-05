@@ -52,7 +52,14 @@ func TestApplyFileBaselineFreezeAgainstWorkflowMutation(t *testing.T) {
 	movie := &models.Movie{ID: "BZ-1", DisplayTitle: "orig"}
 	stored, gErr := store.GetMovieResult("/f/a.mp4")
 	require.NoError(t, gErr)
-	outcome := applyFile(context.Background(), wfm, "/f/a.mp4", stored, movie, inputs, ApplyPhaseConfig{})
+	// Mirror the production pre-fan-out preparation: baseline frozen first,
+	// then the command built once.
+	baseline := movie.Clone()
+	cfg := ApplyPhaseConfig{}
+	cmd, afc, shouldExecute := buildApplyCmd("/f/a.mp4", movie, stored, inputs, cfg, context.Background())
+	require.True(t, shouldExecute)
+	outcome := applyFile(context.Background(), wfm, "/f/a.mp4", stored, movie,
+		&preparedApplyFile{cmd: cmd, afc: afc, baseline: baseline, execute: shouldExecute}, inputs, cfg)
 	_ = outcome
 	final, err := store.GetMovieResult("/f/a.mp4")
 	require.NoError(t, err)

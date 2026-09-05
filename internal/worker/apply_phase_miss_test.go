@@ -128,11 +128,15 @@ func TestApplyFile_PreApplySkipReleasesPrimedOwnerClaim(t *testing.T) {
 		Movie:         &models.Movie{ID: "IPX-778"},
 	}
 
-	_ = applyFile(context.Background(), wf, filePath, fileResult, fileResult.Movie, inputs, ApplyPhaseConfig{
+	cfg := ApplyPhaseConfig{
 		PreApplyFunc: func(_ context.Context, _ *ApplyFileContext) error {
 			return fmt.Errorf("skip this file")
 		},
-	})
+	}
+	cmd, afc, shouldExecute := buildApplyCmd(filePath, fileResult.Movie, fileResult, inputs, cfg, context.Background())
+	require.False(t, shouldExecute, "the hook declined the item during pre-fan-out preparation")
+	_ = applyFile(context.Background(), wf, filePath, fileResult, fileResult.Movie,
+		&preparedApplyFile{cmd: cmd, afc: afc, baseline: fileResult.Movie.Clone(), execute: shouldExecute}, inputs, cfg)
 
 	_, stillClaimed := inputs.Dedup.Load("\x00poster-owner:ipx-778")
 	assert.False(t, stillClaimed, "an item skipped before poster work must release its owner claim")

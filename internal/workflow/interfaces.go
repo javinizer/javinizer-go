@@ -23,7 +23,9 @@ type OrganizeOptions struct {
 	ForceRenameFile bool
 	// DuplicateTracker carries the batch run's intra-batch duplicate
 	// preflight registry into every file's plan (#224 phase E). The apply
-	// phase allocates one per run; nil disables detection.
+	// phase allocates one per run (non-probing for dry runs, #240 finding B),
+	// primes it in sorted order before fan-out (#240 finding A); nil disables
+	// detection.
 	DuplicateTracker *organizer.DuplicateTracker
 }
 
@@ -128,6 +130,17 @@ type PreviewResult struct {
 	TrailerPath     string
 	SourcePath      string
 	OperationMode   operationmode.OperationMode
+}
+
+// DuplicatePrimingPlanner is the OPTIONAL workflow capability the apply
+// phase discovers by type assertion to pre-assign deterministic intra-batch
+// duplicate owners (#240 finding A): for each sorted batch item the phase
+// calls PlanDuplicatePriming exactly once BEFORE worker fan-out and primes
+// the run's duplicate tracker with the returned claims in that sorted order.
+// Workflows that do not implement it keep first-come duplicate observation
+// (single-item or otherwise unprimed runs only).
+type DuplicatePrimingPlanner interface {
+	PlanDuplicatePriming(ctx context.Context, cmd ApplyCmd) (organizer.DuplicatePriming, error)
 }
 
 // WorkflowInterface exposes the high-level scrape, apply, preview, compare, and scan workflows.

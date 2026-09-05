@@ -19,6 +19,10 @@ import (
 // Unexported — only the composition root (Workflow) uses it.
 type applyOrchestrator interface {
 	Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult, error)
+	// planDuplicatePriming runs ONLY the organize step's planning half
+	// (read-only) so the apply phase can prime each sorted batch item's
+	// duplicate claim before worker fan-out (#240 finding A).
+	planDuplicatePriming(ctx context.Context, cmd ApplyCmd) (organizer.DuplicatePriming, error)
 }
 
 // applyOrchImpl owns the 6-step Apply sequence: revert begin, organize, merge, DisplayTitle,
@@ -264,6 +268,42 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult
 		Merged:         state.merged,
 		OperationID:    opID,
 		Steps:          steps,
+	}, nil
+}
+
+// planDuplicatePriming computes the organize plan for cmd WITHOUT executing
+// it, mirroring stepOrganize's command assembly. Plans that cannot register
+// a claim — organize skipped, plan error, or an organizer lacking the
+// read-only planning seam — yield no priming; the item's worker then skips
+// execution or fails with the identical plan error.
+func (o *applyOrchImpl) planDuplicatePriming(ctx context.Context, cmd ApplyCmd) (organizer.DuplicatePriming, error) {
+	if cmd.Organize.Skip {
+		return organizer.DuplicatePriming{}, nil
+	}
+	planner, ok := o.organizer.(interface {
+		PlanOrganize(context.Context, organizer.OrganizeCmd) (*organizer.OrganizePlan, error)
+	})
+	if !ok {
+		return organizer.DuplicatePriming{}, nil
+	}
+	plan, err := planner.PlanOrganize(ctx, organizer.OrganizeCmd{
+		Match:           cmd.Match,
+		Movie:           cmd.Movie,
+		DestDir:         cmd.DestPath,
+		ForceUpdate:     cmd.Organize.ForceUpdate,
+		MoveFiles:       cmd.Organize.MoveFiles,
+		LinkMode:        cmd.Organize.LinkMode,
+		DryRun:          cmd.DryRun,
+		OperationMode:   cmd.OperationMode,
+		ForceRenameFile: cmd.Organize.ForceRenameFile,
+	})
+	if err != nil {
+		return organizer.DuplicatePriming{}, err
+	}
+	return organizer.DuplicatePriming{
+		SourcePath: plan.SourcePath,
+		TargetPath: plan.TargetPath,
+		WillMove:   plan.WillMove,
 	}, nil
 }
 
@@ -555,4 +595,8 @@ var _ applyOrchestrator = (*noOpApplyOrchestrator)(nil)
 
 func (noOpApplyOrchestrator) Execute(_ context.Context, _ ApplyCmd) (*ApplyResult, error) {
 	return nil, fmt.Errorf("apply not configured")
+}
+
+func (noOpApplyOrchestrator) planDuplicatePriming(context.Context, ApplyCmd) (organizer.DuplicatePriming, error) {
+	return organizer.DuplicatePriming{}, nil
 }

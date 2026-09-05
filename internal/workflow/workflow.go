@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 
+	"github.com/javinizer/javinizer-go/internal/organizer"
 	"github.com/javinizer/javinizer-go/internal/scrape"
 )
 
@@ -29,6 +30,15 @@ func (w *Workflow) Scrape(ctx context.Context, cmd scrape.ScrapeCmd) (*scrape.Sc
 func (w *Workflow) Apply(ctx context.Context, cmd ApplyCmd) (*ApplyResult, error) {
 	return w.apply.Execute(ctx, cmd)
 }
+
+// PlanDuplicatePriming delegates to the apply orchestrator's read-only
+// organizing-plan leg so the apply phase can pre-assign deterministic
+// duplicate winners before fan-out (#240 finding A).
+func (w *Workflow) PlanDuplicatePriming(ctx context.Context, cmd ApplyCmd) (organizer.DuplicatePriming, error) {
+	return w.apply.planDuplicatePriming(ctx, cmd)
+}
+
+var _ DuplicatePrimingPlanner = (*Workflow)(nil)
 
 // Compare delegates to the internal compareOrchestrator which owns the compare pipeline:
 // parse NFO, scrape fresh, merge.
