@@ -703,6 +703,16 @@ func applyFile(
 	ownerLogicalKey := strings.ToLower(strings.TrimSpace(movie.ID))
 	defer downloader.ReleaseDownloadOwnerClaim(inputs.Dedup, ownerLogicalKey, filePath)
 
+	// codex P2 (PR #241) recover-path close-out: a primed duplicate owner
+	// whose worker exits WITHOUT reaching the organizer's own settle/release
+	// (panic in an earlier pipeline step, cancellation at Organize's entry,
+	// or the recovered-panic replay below) must not hold its canonical key
+	// open — waiting claimants promote instead of deadlocking behind a dead
+	// owner. Settled claims are final and untouched, so every normally-
+	// completed Organize is a no-op here. Runs during unwind (after the
+	// recovery defer below) and on ordinary return alike.
+	defer cfg.OrganizeOptions.DuplicateTracker.ReleaseAbandonedBy(prepared.cmd.Match.Path)
+
 	rc := recoveryContext{
 		filePath: filePath,
 		// Preserve the existing FileMatchInfo (incl. IsMultiPart / PartNumber /

@@ -592,16 +592,22 @@ func (l *dbRevertLog) Complete(ctx context.Context, opID OperationID, result *Ap
 	var newPath string
 	var inPlaceRenamed bool
 	var subtitles []models.SubtitleMove
-	if result.OrganizeResult != nil {
-		newPath = result.OrganizeResult.NewPath
-		inPlaceRenamed = result.OrganizeResult.InPlaceRenamed
-		for _, sr := range result.OrganizeResult.Subtitles {
+	// codex P1 (PR #241): an authorized intra-batch duplicate skip is a true
+	// NO-OP for journal purposes — its OrganizeResult.NewPath names the
+	// WINNER's shared destination for display only. Persisting it would make
+	// the history reverter arm the winner's video as the loser's primary moved
+	// file (moving the winner's bytes onto the loser's path if that source was
+	// later removed). The winner's own operation row stays the sole subject.
+	if org := result.OrganizeResult; org != nil && !org.DuplicateSkipped {
+		newPath = org.NewPath
+		inPlaceRenamed = org.InPlaceRenamed
+		for _, sr := range org.Subtitles {
 			if sr.Moved || sr.Copied {
 				subtitles = append(subtitles, sr.SubtitleMove)
 			}
 		}
-		if result.OrganizeResult.FolderPath != "" && sourceDir == "" {
-			sourceDir = result.OrganizeResult.OldDirectoryPath
+		if org.FolderPath != "" && sourceDir == "" {
+			sourceDir = org.OldDirectoryPath
 		}
 	}
 
@@ -612,8 +618,8 @@ func (l *dbRevertLog) Complete(ctx context.Context, opID OperationID, result *Ap
 	// itself (UpdateNonJournalFields below) no longer writes generated_files at
 	// all, so an append/consume committed after this tx commit survives.
 	folderRoot := ""
-	if result.OrganizeResult != nil {
-		folderRoot = result.OrganizeResult.FolderPath
+	if org := result.OrganizeResult; org != nil && !org.DuplicateSkipped {
+		folderRoot = org.FolderPath
 	}
 	mergedJournal, err := l.mergeJournalInTx(ctx, recordID, opID, "Complete",
 		buildGeneratedFilesJSON(resolveLogger(l.logger), result.NFOPath, subtitles, result.DownloadPaths), folderRoot)
@@ -679,16 +685,20 @@ func (l *dbRevertLog) CompleteFailed(ctx context.Context, opID OperationID, resu
 	var newPath string
 	var inPlaceRenamed bool
 	var subtitles []models.SubtitleMove
-	if result.OrganizeResult != nil {
-		newPath = result.OrganizeResult.NewPath
-		inPlaceRenamed = result.OrganizeResult.InPlaceRenamed
-		for _, sr := range result.OrganizeResult.Subtitles {
+	// codex P1 (PR #241): same duplicate-skip no-op journal rule as Complete —
+	// a skipped duplicate persists NO primary-move NewPath even when a later
+	// pipeline step fails, so reverting the failed loser row can never rename
+	// the winner's video.
+	if org := result.OrganizeResult; org != nil && !org.DuplicateSkipped {
+		newPath = org.NewPath
+		inPlaceRenamed = org.InPlaceRenamed
+		for _, sr := range org.Subtitles {
 			if sr.Moved || sr.Copied {
 				subtitles = append(subtitles, sr.SubtitleMove)
 			}
 		}
-		if result.OrganizeResult.FolderPath != "" && sourceDir == "" {
-			sourceDir = result.OrganizeResult.OldDirectoryPath
+		if org.FolderPath != "" && sourceDir == "" {
+			sourceDir = org.OldDirectoryPath
 		}
 	}
 	// Wave-9 (codex review 4960250562 follow-up): same journal-transaction

@@ -300,7 +300,15 @@ type OrganizeResult struct {
 	// Warnings carries non-fatal per-file advisories an authorized run must
 	// not silently drop (#224 phase E): authorized intra-batch duplicates land
 	// here so the worker history rows and the API eventlog can persist them.
-	Warnings               []string
+	Warnings []string
+	// DuplicateSkipped is true when an authorized intra-batch duplicate was
+	// demoted to a warning and execution skipped (codex P1, PR #241): nothing
+	// moved for this file, so NewPath names the winner's SHARED destination
+	// for display/history only. Revert journaling treats the result as a true
+	// no-op — NO primary-move record is persisted for it, leaving the winner's
+	// operation row the sole revert subject of the shared bytes (a revert of
+	// the skipped loser must never rename the winner's video).
+	DuplicateSkipped       bool
 	Subtitles              []SubtitleResult
 	InPlaceRenamed         bool   // Whether an in-place directory rename occurred
 	OldDirectoryPath       string // Original directory path (for updating subsequent file paths)
@@ -637,6 +645,20 @@ func (o *Organizer) Organize(ctx context.Context, cmd OrganizeCmd) (*OrganizeRes
 		return nil, err
 	}
 
+	// codex P2 (PR #241): claim close-out on panic — an owner panicking
+	// ANYWHERE after planning (mid-observe, mid-execute, subtitle install)
+	// must release its canonical key so waiting claimants promote instead of
+	// deadlocking behind a dead owner. The re-panic preserves the worker
+	// boundary's withFileRecovery per-file failure semantics; the claim
+	// release itself is the tracker's failure terminal (no-op for losers and
+	// on owner-check mismatch).
+	defer func() {
+		if r := recover(); r != nil {
+			cmd.DuplicateTracker.release(plan)
+			panic(r)
+		}
+	}()
+
 	// Intra-batch duplicate preflight (#224 phase E): plan-only grouping by
 	// proven-equal canonical destination keys. Unauthorized duplicates join
 	// plan.Conflicts and short-circuit through the identical failure pipeline;
@@ -678,7 +700,10 @@ func (o *Organizer) Organize(ctx context.Context, cmd OrganizeCmd) (*OrganizeRes
 	}
 
 	// Dry-run: return early with planned result (no filesystem changes).
+	// The owner still settles its claim (codex P2, PR #241): the dry-run
+	// outcome is terminal, and waiting claimants must resolve now.
 	if cmd.DryRun {
+		cmd.DuplicateTracker.settle(plan)
 		return &OrganizeResult{
 			OriginalPath:           plan.SourcePath,
 			NewPath:                plan.TargetPath,
@@ -702,6 +727,7 @@ func (o *Organizer) Organize(ctx context.Context, cmd OrganizeCmd) (*OrganizeRes
 			FileName:               plan.TargetFile,
 			Moved:                  false,
 			Warnings:               dupWarnings,
+			DuplicateSkipped:       true,
 			ShouldGenerateMetadata: true,
 		}, nil
 	}
@@ -721,6 +747,11 @@ func (o *Organizer) Organize(ctx context.Context, cmd OrganizeCmd) (*OrganizeRes
 		return strategyResult, err
 	}
 	strategyResult.Warnings = append(strategyResult.Warnings, dupWarnings...)
+
+	// Terminal success for the duplicate tracker (codex P2, PR #241): the
+	// claim stays owned, so already-waiting claimants wake to their unchanged
+	// duplicate verdict instead of blocking behind this owner's subtitle work.
+	cmd.DuplicateTracker.settle(plan)
 
 	// Subtitle handling is centralized here — applies to both move and copy/link paths.
 	// Authorization never reaches subtitle destinations: both entry points
