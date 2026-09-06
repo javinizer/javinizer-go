@@ -51,6 +51,23 @@ type JobStore struct {
 	tempCleaner       *TempDirCleaner // Per P-8: owns CleanupStaleTempDirs and StartStaleTempCleanup
 	tempCleanerOnce   sync.Once       // Guards tempCleaner lazy-init against concurrent RLock callers
 
+	// skipStartupRecovery (WithSkipStartupRecovery) suppresses the server-boot
+	// recovery sweep at NewJobStore time: no rekey-witness reconciliation, no
+	// job reconstruction, no orphan recovery. One-shot CLI processes use this
+	// so a CLI run against a database a LIVE server may own never reconciles
+	// or marks that server's in-flight jobs failed.
+	skipStartupRecovery bool
+
+	// initialPersistErrFn (WithInitialPersistErrorReporter) observes the
+	// create-time jobs-row persist failure that createJob otherwise only LOGS.
+	// The store keeps its best-effort swallow-and-continue semantics (the API
+	// path: in-flight jobs must not die on a transient persist failure — a
+	// later persist self-heals and persist_error rides the job status
+	// payload); one-shot CLI runtimes register the hook to convert the failure
+	// into a batch STARTUP error instead of advertising an unqueryable batch
+	// id (#248 codex P2).
+	initialPersistErrFn func(err error)
+
 	// reconstructionDeps are infrastructure dependencies that reconstructed jobs
 	// (loaded from DB on startup) need for apply/rescrape phases. They are set
 	// after JobStore construction via SetReconstructionDeps, once the
@@ -100,6 +117,33 @@ func WithActressRepo(r database.ActressRepositoryInterface) JobStoreOption {
 func WithHistoryRepo(r database.HistoryRepositoryInterface) JobStoreOption {
 	return func(s *JobStore) {
 		s.historyRepo = r
+	}
+}
+
+// WithSkipStartupRecovery suppresses the server-boot recovery sweep at
+// NewJobStore time: rekey-witness reconciliation, loadFromDatabase (job
+// reconstruction), and recoverOrphanedJobs are all skipped. These steps exist
+// so an API server restart reconciles jobs orphaned by the PREVIOUS process —
+// but a one-shot CLI process sharing the database with a LIVE server must not
+// reconstruct its rows (reconstruction clears missing temp posters the live
+// process may still reference) or mark its running jobs failed. Jobs created
+// after construction still persist normally via the store's JobPersistencer.
+func WithSkipStartupRecovery() JobStoreOption {
+	return func(s *JobStore) {
+		s.skipStartupRecovery = true
+	}
+}
+
+// WithInitialPersistErrorReporter registers fn to receive the error when the
+// create-time jobs-row persist inside createJob fails. The failure keeps its
+// existing in-flight handling regardless (the job is constructed, registered,
+// and returned; the error is logged) — fn is purely an observation seam for
+// one-shot callers (the CLI batch runtime, #248 codex P2) that must turn a
+// missing audit row into a startup failure instead of advertising an
+// unqueryable `history list --batch <id>` pointer. Unset means no report.
+func WithInitialPersistErrorReporter(fn func(err error)) JobStoreOption {
+	return func(s *JobStore) {
+		s.initialPersistErrFn = fn
 	}
 }
 
@@ -176,13 +220,18 @@ func NewJobStore(jobRepo database.JobRepositoryInterface, batchFileOpRepo databa
 	// at the new ID. The periodic stale-cleanup goroutine is not started by
 	// the production bootstrap, so this must not ride on
 	// StartStaleTempCleanup.
-	if n, err := s.tempCleaner.ReconcileRekeyWitnesses(context.Background()); err != nil {
-		logging.Warnf("rekey witness reconciliation failed at startup: %v", err)
-	} else if n > 0 {
-		logging.Infof("reversed %d orphaned poster rekey relocation(s) at startup", n)
-	}
+	// Both steps are skipped for one-shot CLI stores (WithSkipStartupRecovery):
+	// there is no previous CLI process to recover from, and either step could
+	// interfere with a live API server owning the same database.
+	if !s.skipStartupRecovery {
+		if n, err := s.tempCleaner.ReconcileRekeyWitnesses(context.Background()); err != nil {
+			logging.Warnf("rekey witness reconciliation failed at startup: %v", err)
+		} else if n > 0 {
+			logging.Infof("reversed %d orphaned poster rekey relocation(s) at startup", n)
+		}
 
-	s.loadFromDatabase()
+		s.loadFromDatabase()
+	}
 
 	return s
 }
@@ -593,6 +642,9 @@ func (s *JobStore) createJob(files []string, jobCfg ...*JobConfig) *BatchJob {
 
 	if err := s.persistence.PersistJob(job); err != nil {
 		logging.Warnf("Failed to persist new job %s: %v", job.ID.String(), err)
+		if s.initialPersistErrFn != nil {
+			s.initialPersistErrFn(err)
+		}
 	}
 
 	return job

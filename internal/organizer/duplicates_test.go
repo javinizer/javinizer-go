@@ -342,8 +342,9 @@ func TestOrganize_DryRunAuthorizedDuplicate_WarnsPersistably(t *testing.T) {
 	tracker := NewDuplicateTracker(true) // dry runs construct the non-probing variant
 
 	cmdA := dupBatchCmd(models.FileMatchInfo{MovieID: "ABC-123", Path: "/in/A.mkv", Name: "A.mkv", Extension: ".mkv"}, tracker, true, true)
-	_, err := org.Organize(context.Background(), cmdA)
+	resultA, err := org.Organize(context.Background(), cmdA)
 	require.NoError(t, err)
+	require.False(t, resultA.DuplicateSkipped, "the primed winner is never the skip — dry-run counts reuse live arithmetic")
 
 	cmdB := dupBatchCmd(models.FileMatchInfo{MovieID: "ABC-123", Path: "/in/B.mkv", Name: "B.mkv", Extension: ".mkv"}, tracker, true, true)
 	resultB, err := org.Organize(context.Background(), cmdB)
@@ -351,6 +352,14 @@ func TestOrganize_DryRunAuthorizedDuplicate_WarnsPersistably(t *testing.T) {
 	require.Len(t, resultB.Warnings, 1)
 	assert.Contains(t, resultB.Warnings[0], "duplicate destination within batch")
 	assert.Contains(t, resultB.Warnings[0], "/in/A.mkv")
+	// #248 codex P2: the dry-run skip result mirrors the live leg byte for
+	// byte — nothing moved, the warning carried, and the DuplicateSkipped
+	// marker present so CLI/API summary accounting reads dry runs with the
+	// live arithmetic (pre-fix the marker was missing and the loser silently
+	// counted as would-be-organized).
+	assert.True(t, resultB.DuplicateSkipped, "dry-run authorized skip carries the no-op marker exactly like the live leg")
+	assert.False(t, resultB.Moved)
+	assert.True(t, resultB.ShouldGenerateMetadata, "the skip keeps the live leg's metadata marker")
 }
 
 func TestOrganize_LiveDuplicatePreflight(t *testing.T) {

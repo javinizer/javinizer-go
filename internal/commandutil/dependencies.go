@@ -413,6 +413,22 @@ func (d *CoreDeps) ReplaceR18DevDumpCloser(newCloser io.Closer) io.Closer {
 type bootstrapResult struct {
 	*CoreDeps
 	*workflow.WorkflowComponents
+	// workflowFactory is the cached factory all Workflow accessors mint from.
+	// Held so batch commands can build a per-job workflow whose apply-phase
+	// revert ledger is bound to a concrete batch job ID (Workflow above is the
+	// bootstrap-time "" instance used for scan/match).
+	workflowFactory *workflow.WorkflowFactory
+}
+
+// NewJobWorkflow constructs a full Workflow whose apply-phase revert ledger is
+// bound to jobID, so batch_file_operations rows land under the caller's batch
+// job rather than the bootstrap-time "" placeholder. The factory's cached
+// sub-graph is shared with Workflow; only the per-job revert log differs.
+func (b *bootstrapResult) NewJobWorkflow(jobID string) (workflow.WorkflowInterface, error) {
+	if b.workflowFactory == nil {
+		return nil, fmt.Errorf("commandutil: workflow factory unavailable — cannot construct per-job workflow for %q", jobID)
+	}
+	return b.workflowFactory.NewWorkflow(jobID)
 }
 
 // bootstrapMode selects which workflow construction path the factory uses.
@@ -454,12 +470,16 @@ func bootstrapWorkflow(cfg *config.Config, mode bootstrapMode) (*bootstrapResult
 		return nil, err
 	}
 
-	return &bootstrapResult{CoreDeps: deps, WorkflowComponents: &workflow.WorkflowComponents{
-		Workflow:  wf,
-		Matcher:   factory.Matcher(),
-		Scanner:   factory.Scanner(),
-		PosterGen: factory.PosterGen(),
-	}}, nil
+	return &bootstrapResult{
+		CoreDeps: deps,
+		WorkflowComponents: &workflow.WorkflowComponents{
+			Workflow:  wf,
+			Matcher:   factory.Matcher(),
+			Scanner:   factory.Scanner(),
+			PosterGen: factory.PosterGen(),
+		},
+		workflowFactory: factory,
+	}, nil
 }
 
 // Bootstrap initializes the full dependency stack from a config:

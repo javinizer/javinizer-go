@@ -73,6 +73,17 @@ type BatchJobFactoryInterface interface {
 	// Use this for CLI/TUI usage where persistence is not needed.
 	CreateStandaloneJob(files []string, opts BatchJobOptions) StandaloneJob
 
+	// CreatePersistentStandaloneJob creates a StandaloneJob registered on the
+	// factory's JobStore: the job row is written at creation and phase state
+	// persists through the store's JobPersistencer, so batch history (jobs row,
+	// batch_file_operations via the per-job workflow, history and events rows)
+	// is durable exactly like an API batch. Keeps the standalone lifecycle
+	// (SetRunOptions/Run with keep-open event broadcaster) for CLI usage.
+	// Falls back to CreateStandaloneJob (no persistence) when the factory's
+	// jobStore is nil — callers passing NewInMemoryJobStore get store
+	// registration with the no-op persistence that store carries.
+	CreatePersistentStandaloneJob(files []string, opts BatchJobOptions) StandaloneJob
+
 	// NewScrapeConfig builds a ScrapePhaseConfig with the factory's defaults filled in.
 	// Callers only provide the narrow per-call parameters.
 	NewScrapeConfig(selectedScrapers []string, strict bool, force bool) ScrapePhaseConfig
@@ -143,6 +154,21 @@ func (f *batchJobFactory) CreateStandaloneJob(files []string, opts BatchJobOptio
 	jobCfg := f.buildJobConfig(opts)
 	memStore := NewInMemoryJobStore()
 	job := memStore.CreateJobBatch(files, jobCfg)
+	return newStandaloneJobFromBatchJob(job)
+}
+
+// CreatePersistentStandaloneJob creates a StandaloneJob routed through the
+// factory's JobStore. Per NEW-2 this still uses JobStore.createJob as the
+// single construction path — the only difference from CreateJob is the
+// returned seam: the standalone adapter (JobRunner + broadcaster lifecycle)
+// CLI callers drive synchronously. When the factory has no JobStore, the
+// in-memory fallback keeps TUI/test callers working unchanged (no jobs row).
+func (f *batchJobFactory) CreatePersistentStandaloneJob(files []string, opts BatchJobOptions) StandaloneJob {
+	store, ok := f.jobStore.(*JobStore)
+	if !ok || store == nil {
+		return f.CreateStandaloneJob(files, opts)
+	}
+	job := store.CreateJobBatch(files, f.buildJobConfig(opts))
 	return newStandaloneJobFromBatchJob(job)
 }
 

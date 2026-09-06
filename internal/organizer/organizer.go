@@ -751,6 +751,11 @@ func (o *Organizer) Organize(ctx context.Context, cmd OrganizeCmd) (*OrganizeRes
 	// Dry-run: return early with planned result (no filesystem changes).
 	// The owner still settles its claim (codex P2, PR #241): the dry-run
 	// outcome is terminal, and waiting claimants must resolve now.
+	// DuplicateSkipped rides the result exactly like the live skip leg below
+	// (#248 codex P2): a dry run moves no bytes either, so an authorized
+	// intra-batch duplicate is a skip in BOTH modes — downstream summary/
+	// skip accounting keys off this marker and must see the dry-run truth,
+	// never "would organize" counts that silently include the loser.
 	if cmd.DryRun {
 		cmd.DuplicateTracker.settle(plan)
 		return &OrganizeResult{
@@ -760,6 +765,7 @@ func (o *Organizer) Organize(ctx context.Context, cmd OrganizeCmd) (*OrganizeRes
 			FileName:               plan.TargetFile,
 			Moved:                  false,
 			Warnings:               dupWarnings,
+			DuplicateSkipped:       dupSkip,
 			ShouldGenerateMetadata: true,
 		}, nil
 	}

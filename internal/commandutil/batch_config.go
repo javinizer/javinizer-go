@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/operationmode"
 	"github.com/javinizer/javinizer-go/internal/organizer"
 	"github.com/javinizer/javinizer-go/internal/worker"
 	"github.com/javinizer/javinizer-go/internal/workflow"
@@ -37,6 +38,29 @@ type CLIApplyOptions struct {
 	MergeOptions           workflow.MergeOptions
 }
 
+// persistedJobMode maps the CLI's update/organize toggle onto the persisted
+// job identity fields, mirroring the API job-creation mapping in
+// StartScrapeUseCase (internal/api/batch/usecases.go): the update flow's
+// leave-in-place operation projects to update=true + operation_mode=
+// metadata-artwork (applyplan.Project and the frontend's projectLegacyPlan
+// agree on that pairing, and resolveUpdateApplyConfig runs with
+// OrganizeOptions.Skip=true). Without this the CLI persisted update batches
+// as update=false + empty mode, and API/history consumers read them as
+// organize (#248 codex P2, F1).
+//
+// Organize runs (skipOrganize=false) keep an EMPTY mode override: the CLI
+// resolves seam strings without an operation-mode input, so stamping the
+// default ("organize") would additionally feed the organizer's per-command
+// strategy override and rewrite the user's configured operation mode — while
+// every consumer already infers organize from update=false + empty mode.
+func persistedJobMode(skipOrganize bool) (update *bool, mode operationmode.OperationMode) {
+	u := skipOrganize
+	if skipOrganize {
+		return &u, operationmode.OperationModeMetadataArtwork
+	}
+	return &u, ""
+}
+
 // ToApplyPhaseConfig converts CLIApplyOptions to a worker.ApplyPhaseConfig.
 func (o CLIApplyOptions) ToApplyPhaseConfig() worker.ApplyPhaseConfig {
 	// The --extrafanart flag is a force-enable: only emit a non-nil override
@@ -49,6 +73,10 @@ func (o CLIApplyOptions) ToApplyPhaseConfig() worker.ApplyPhaseConfig {
 		t := true
 		downloadExtrafanart = &t
 	}
+	// Persisted job identity (#248 codex P2, F1): committed onto the job by
+	// jobController.StartApply and mirrored at job creation (newCLIBatchRuntime)
+	// so a CLI update batch's jobs row classifies as update, not organize.
+	updateMode, modeOverride := persistedJobMode(o.SkipOrganize)
 	return worker.ApplyPhaseConfig{
 		OrganizeOptions: workflow.OrganizeOptions{
 			Skip:        o.SkipOrganize,
@@ -63,5 +91,7 @@ func (o CLIApplyOptions) ToApplyPhaseConfig() worker.ApplyPhaseConfig {
 		Download:               o.Download,
 		DownloadExtrafanart:    downloadExtrafanart,
 		OverwriteExistingMedia: o.OverwriteExistingMedia,
+		Update:                 updateMode,
+		OperationModeOverride:  modeOverride,
 	}
 }
