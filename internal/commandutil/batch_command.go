@@ -5,8 +5,12 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"path/filepath"
+	"sync"
+	"sync/atomic"
 
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/eventlog"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/worker"
@@ -38,6 +42,9 @@ func (p *defaultBatchCommandPresenter) OnHeader(w io.Writer, opts BatchCommandOp
 	fmt.Fprintf(w, "Source: %s\n", opts.SourcePath)
 	fmt.Fprintf(w, "Destination: %s\n", opts.Destination)
 	fmt.Fprintf(w, "Mode: %s\n", map[bool]string{true: "DRY RUN", false: "LIVE"}[opts.DryRun])
+	if opts.BatchJobID != "" {
+		fmt.Fprintf(w, "Batch Job: %s\n", opts.BatchJobID)
+	}
 	if opts.OperationLabel != "" {
 		fmt.Fprintf(w, "Operation: %s\n", opts.OperationLabel)
 	}
@@ -119,6 +126,12 @@ type BatchCommandOptions struct {
 	// Resolved seam strings (caller must resolve before calling)
 	Resolved *workflow.ResolvedSeamStrings
 
+	// BatchJobID is populated by RunBatchCommand before presentation: it
+	// identifies the persisted batch (audit rows, jobs row) so
+	// `javinizer history list --batch <id>` can drill into the run.
+	// Callers must leave it empty.
+	BatchJobID string
+
 	// Header label printed at the start (e.g., "Javinizer Sort" or "Javinizer Update")
 	CommandLabel string
 	// Operation label for the header (e.g., "COPY", "MOVE", "HARDLINK")
@@ -151,6 +164,10 @@ type BatchCommandResult struct {
 	Movies       map[string]*models.Movie
 	SuccessCount int
 	FailedCount  int
+	// SkippedDuplicates counts files whose apply succeeded as an authorized
+	// intra-batch duplicate skip (no bytes moved). Reported separately so the
+	// console summary tells the same truth as the persisted audit rows.
+	SkippedDuplicates int
 }
 
 // RunBatchCommand executes the shared scaffold: config load → prepare → bootstrap →
@@ -182,6 +199,14 @@ func RunBatchCommand(ctx context.Context, w io.Writer, opts BatchCommandOptions)
 	if _, err := config.Prepare(cfg); err != nil {
 		return fmt.Errorf("invalid configuration: %w", err)
 	}
+
+	// Pre-generate the batch job ID up front (mirrors the API organize
+	// usecase): it binds the per-job workflow's revert ledger, the persisted
+	// jobs row, and every history/eventlog audit row to ONE identity.
+	// Previously the CLI ran with no persisted identity, so
+	// batch_file_operations rows landed under "" and no history/event rows
+	// were written at all (#244).
+	opts.BatchJobID = models.NewJobID().String()
 
 	bs, err := Bootstrap(cfg)
 	if err != nil {
@@ -238,15 +263,12 @@ func RunBatchCommand(ctx context.Context, w io.Writer, opts BatchCommandOptions)
 	// Per NEW-1: the factory owns infrastructure deps (WF, Matcher, PosterGen, BatchCfg)
 	// so the CLI only provides per-call varying fields.
 	batchCfg := BatchJobConfigFromAppConfig(cfg)
-	factory := worker.NewBatchJobFactory(
-		nil, // no JobStore — CLI doesn't need persistence
-		bs.Workflow,
-		bs.Matcher,
-		bs.PosterGen,
-		batchCfg,
-		nil, // no emitter for CLI
-	)
-	job := factory.CreateStandaloneJob(filePaths, worker.BatchJobOptions{})
+	rt, err := newCLIBatchRuntimeFn(bs, cfg, opts, batchCfg, filePaths)
+	if err != nil {
+		return fmt.Errorf("failed to create batch job runtime: %w", err)
+	}
+	job := rt.job
+	factory := rt.factory
 
 	// Validate the resolved seam strings before dereferencing them below; a
 	// missing resolution step would otherwise panic when building applyOpts.
@@ -278,10 +300,14 @@ func RunBatchCommand(ctx context.Context, w io.Writer, opts BatchCommandOptions)
 	// reads PartSuffix/PartNumber/IsMultiPart back out of the per-file result
 	// when planning organize destinations.
 	scrapeCfg.FileMatchInfo = matchInfo
-	job.SetRunOptions(
-		scrapeCfg,
-		applyOpts.ToApplyPhaseConfig(),
-	)
+	applyCfg := applyOpts.ToApplyPhaseConfig()
+	// Audit hook (#244): persist per-file organize events (incl. authorized
+	// duplicate-skip warnings) to the eventlog and print skip warnings to the
+	// console, keeping CLI output in sync with the persisted audit truth.
+	skipCount := &atomic.Int64{}
+	printMu := &sync.Mutex{}
+	applyCfg.PostApplyFunc = cliBatchPostApply(rt.emitter, w, opts.BatchJobID, opts.DryRun, skipCount, printMu)
+	job.SetRunOptions(scrapeCfg, applyCfg)
 
 	// Subscribe to events for progress printing
 	subscriber := job.Subscribe()
@@ -297,7 +323,11 @@ func RunBatchCommand(ctx context.Context, w io.Writer, opts BatchCommandOptions)
 		defer close(doneReading)
 		for event := range subscriber.Events() {
 			if event.Message != "" {
+				// Serialize with PostApplyFunc warning prints (worker goroutines)
+				// so console lines never interleave mid-line.
+				printMu.Lock()
 				eventHandler(w, event)
+				printMu.Unlock()
 			}
 		}
 	}()
@@ -331,13 +361,14 @@ func RunBatchCommand(ctx context.Context, w io.Writer, opts BatchCommandOptions)
 	}
 
 	batchResult := BatchCommandResult{
-		ScanResult:   scanResult,
-		FilePaths:    filePaths,
-		MatchedCount: matchedCount,
-		UniqueIDs:    uniqueIDs,
-		Movies:       movies,
-		SuccessCount: successCount,
-		FailedCount:  failedCount,
+		ScanResult:        scanResult,
+		FilePaths:         filePaths,
+		MatchedCount:      matchedCount,
+		UniqueIDs:         uniqueIDs,
+		Movies:            movies,
+		SuccessCount:      successCount,
+		FailedCount:       failedCount,
+		SkippedDuplicates: int(skipCount.Load()),
 	}
 
 	// Print summary — backward-compatible: if SummaryPrinter is set, use it;
@@ -349,6 +380,99 @@ func RunBatchCommand(ctx context.Context, w io.Writer, opts BatchCommandOptions)
 	}
 
 	return nil
+}
+
+// cliBatchRuntime bundles the per-run batch infrastructure for sort/update:
+// the DB-backed job store (jobs row + phase envelope persists), the eventlog
+// emitter (audit entries), the shared BatchJobFactory seam, and the runnable
+// job itself.
+type cliBatchRuntime struct {
+	job     worker.StandaloneJob
+	factory worker.BatchJobFactoryInterface
+	emitter eventlog.EventEmitter
+}
+
+// newCLIBatchRuntimeFn is the seam RunBatchCommand uses to build the batch
+// runtime; tests replace it to exercise the runtime-construction error branch.
+var newCLIBatchRuntimeFn = newCLIBatchRuntime
+
+// newCLIBatchRuntime constructs the CLI batch runtime with API-parity audit
+// persistence (#244): a real JobStore over the app database (startup recovery
+// skipped — a one-shot CLI process must not reconcile jobs a live server may
+// own), the eventlog emitter, a per-job workflow whose revert ledger binds
+// the pre-generated batch job ID, and the runnable job built through the
+// shared factory seam.
+func newCLIBatchRuntime(bs *bootstrapResult, cfg *config.Config, opts BatchCommandOptions, batchCfg worker.BatchJobConfig, filePaths []string) (*cliBatchRuntime, error) {
+	jobWF, err := bs.NewJobWorkflow(opts.BatchJobID)
+	if err != nil {
+		return nil, err
+	}
+	repos := bs.DB.Repositories()
+	storeOpts := []worker.JobStoreOption{
+		worker.WithHistoryRepo(repos.HistoryRepo),
+		worker.WithSkipStartupRecovery(),
+	}
+	if opts.DryRun {
+		// A dry run previews work: no jobs row and no envelope persists (the
+		// apply ledger already skips dry run) — while history rows still land
+		// with their dry_run flag so previews remain visible in the audit.
+		storeOpts = append(storeOpts, worker.WithPersistence(worker.NewNoopJobPersistence()))
+	}
+	jobStore := worker.NewJobStore(repos.JobRepo, repos.BatchFileOpRepo, repos.MovieRepo, cfg.System.TempDir, nil, nil, storeOpts...)
+	emitter := eventlog.NewEmitter(repos.EventRepo)
+	factory := worker.NewBatchJobFactory(jobStore, jobWF, bs.Matcher, bs.PosterGen, batchCfg, emitter)
+	job := factory.CreatePersistentStandaloneJob(filePaths, worker.BatchJobOptions{
+		ID:          opts.BatchJobID,
+		Destination: opts.Destination,
+		WF:          jobWF,
+	})
+	return &cliBatchRuntime{job: job, factory: factory, emitter: emitter}, nil
+}
+
+// cliBatchPostApply returns the apply-phase per-file hook for CLI batches. It
+// mirrors the API organize resolver's audit emission
+// (internal/api/batch/apply_config_builder.go): both flows persist an
+// "Organized"/"Organize failed" event plus one warning event per
+// OrganizeResult.Warnings entry — authorized duplicate skips land there and
+// were previously invisible from the CLI because no emitter existed (#244).
+// Warning text is also printed to the console so CLI output tells the same
+// truth as the persisted audit rows. Event emission is skipped for dry runs:
+// previews are not operations.
+func cliBatchPostApply(emitter eventlog.EventEmitter, w io.Writer, jobID string, dryRun bool, skipCount *atomic.Int64, printMu *sync.Mutex) func(context.Context, *worker.ApplyFileContext, *worker.ApplyFileResult) {
+	return func(ctx context.Context, afc *worker.ApplyFileContext, afr *worker.ApplyFileResult) {
+		// Guard matches the API resolver: never deref a nil payload; the hook
+		// must not mask the original apply outcome with a panic.
+		if afc == nil || afc.Movie == nil || afr == nil {
+			return
+		}
+		if dryRun {
+			return
+		}
+		if afr.Err != nil {
+			_ = emitter.EmitOrganizeEvent(ctx, "file_move", fmt.Sprintf("Organize failed for %s", afc.Movie.ID), models.SeverityError, map[string]any{"job_id": jobID, "movie_id": afc.Movie.ID, "error": afr.Err.Error()})
+			return
+		}
+		var newPath string
+		var warnings []string
+		if afr.Result != nil && afr.Result.OrganizeResult != nil {
+			newPath = afr.Result.OrganizeResult.NewPath
+			warnings = afr.Result.OrganizeResult.Warnings
+			if afr.Result.OrganizeResult.DuplicateSkipped {
+				skipCount.Add(1)
+			}
+		}
+		_ = emitter.EmitOrganizeEvent(ctx, "file_move", fmt.Sprintf("Organized %s", afc.Movie.ID), models.SeverityInfo, map[string]any{"job_id": jobID, "movie_id": afc.Movie.ID, "file": afc.FilePath, "new_path": newPath})
+		for _, warning := range warnings {
+			_ = emitter.EmitOrganizeEvent(ctx, "file_move", fmt.Sprintf("Organize warning for %s: %s", afc.Movie.ID, warning), models.SeverityWarn, map[string]any{"job_id": jobID, "movie_id": afc.Movie.ID, "file": afc.FilePath, "new_path": newPath, "warning": warning})
+		}
+		if len(warnings) > 0 {
+			printMu.Lock()
+			defer printMu.Unlock()
+			for _, warning := range warnings {
+				fmt.Fprintf(w, "   ⚠️  %s: %s\n", filepath.Base(afc.FilePath), warning)
+			}
+		}
+	}
 }
 
 // defaultEventHandler prints ❌ for failures and ✅ for completions.
@@ -388,6 +512,12 @@ func defaultSummaryPrinter(w io.Writer, opts BatchCommandOptions, result BatchCo
 	}
 	if !opts.SkipOrganize {
 		fmt.Fprintf(w, "Files organized: %s\n", map[bool]string{true: fmt.Sprintf("%d (dry-run)", successCount), false: fmt.Sprintf("%d", successCount)}[opts.DryRun])
+	}
+	if result.SkippedDuplicates > 0 {
+		// An authorized intra-batch duplicate applies as a successful skip —
+		// the console says so explicitly instead of counting the file as
+		// organized, matching its persisted noop audit row (#244).
+		fmt.Fprintf(w, "Skipped (authorized duplicates): %d\n", result.SkippedDuplicates)
 	}
 	if opts.ModeLine != "" {
 		fmt.Fprintf(w, "Mode: %s\n", opts.ModeLine)

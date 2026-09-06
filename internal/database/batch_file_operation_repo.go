@@ -35,31 +35,50 @@ func NewBatchFileOperationRepository(db *DB) *BatchFileOperationRepository {
 }
 
 // Create inserts a single batch file operation record.
+//
+// The prune-fence check runs BEFORE the autocommit insert, not inside a
+// deferred transaction around it: under WAL a read-then-write transaction
+// upgrade dies with SQLITE_BUSY_SNAPSHOT (surfaced as "database is locked")
+// when a concurrent apply worker commits between the read and the write —
+// the pool busy timeout does not cover snapshot conflicts. The bare INSERT
+// acquires the writer lock directly, so concurrent per-worker Begin calls
+// (each apply-file goroutine opens its operation row before any filesystem
+// mutation) wait on the busy timeout instead of deadlocking; retryOnLocked
+// additionally rides out any residual transient locked error (same seam as
+// JobRepository.CommitEnvelope).
 func (r *BatchFileOperationRepository) Create(ctx context.Context, op *models.BatchFileOperation) error {
-	err := r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := ensureJobWritable(tx, op.BatchJobID); err != nil {
-			return err
-		}
-		return tx.Create(op).Error
+	label := fmt.Sprintf("batch file operation %d", op.ID)
+	if err := ensureJobWritable(r.GetDB().WithContext(ctx), op.BatchJobID); err != nil {
+		return wrapDBErr("create", label, err)
+	}
+	err := retryOnLocked(func() error {
+		return r.GetDB().WithContext(ctx).Create(op).Error
 	})
 	if err != nil {
-		return wrapDBErr("create", fmt.Sprintf("batch file operation %d", op.ID), err)
+		return wrapDBErr("create", label, err)
 	}
 	return nil
 }
 
 // CreateBatch inserts multiple batch file operation records in a single transaction.
+// Same fence placement as Create: checks run before the write-only transaction
+// (no reads inside, so the upgrade-to-write cannot hit SQLITE_BUSY_SNAPSHOT),
+// with retryOnLocked absorbing residual transient lock errors.
 func (r *BatchFileOperationRepository) CreateBatch(ctx context.Context, ops []*models.BatchFileOperation) error {
-	return r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		for _, op := range ops {
-			if err := ensureJobWritable(tx, op.BatchJobID); err != nil {
-				return err
-			}
-			if err := tx.Create(op).Error; err != nil {
-				return wrapDBErr("create", fmt.Sprintf("batch file operation %d", op.ID), err)
-			}
+	for _, op := range ops {
+		if err := ensureJobWritable(r.GetDB().WithContext(ctx), op.BatchJobID); err != nil {
+			return wrapDBErr("create", fmt.Sprintf("batch file operation %d", op.ID), err)
 		}
-		return nil
+	}
+	return retryOnLocked(func() error {
+		return r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			for _, op := range ops {
+				if err := tx.Create(op).Error; err != nil {
+					return wrapDBErr("create", fmt.Sprintf("batch file operation %d", op.ID), err)
+				}
+			}
+			return nil
+		})
 	})
 }
 
@@ -234,14 +253,16 @@ func (r *BatchFileOperationRepository) UpdateJournalInTx(ctx context.Context, id
 // completion writes go through UpdateNonJournalFields (wave-10 codex
 // follow-up).
 func (r *BatchFileOperationRepository) Update(ctx context.Context, op *models.BatchFileOperation) error {
-	err := r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := ensureJobWritable(tx, op.BatchJobID); err != nil {
-			return err
-		}
-		return tx.Save(op).Error
+	label := fmt.Sprintf("batch file operation %d", op.ID)
+	// Fence outside the (read-then-write) deferred transaction — see Create.
+	if err := ensureJobWritable(r.GetDB().WithContext(ctx), op.BatchJobID); err != nil {
+		return wrapDBErr("update", label, err)
+	}
+	err := retryOnLocked(func() error {
+		return r.GetDB().WithContext(ctx).Save(op).Error
 	})
 	if err != nil {
-		return wrapDBErr("update", fmt.Sprintf("batch file operation %d", op.ID), err)
+		return wrapDBErr("update", label, err)
 	}
 	return nil
 }

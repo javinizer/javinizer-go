@@ -51,6 +51,13 @@ type JobStore struct {
 	tempCleaner       *TempDirCleaner // Per P-8: owns CleanupStaleTempDirs and StartStaleTempCleanup
 	tempCleanerOnce   sync.Once       // Guards tempCleaner lazy-init against concurrent RLock callers
 
+	// skipStartupRecovery (WithSkipStartupRecovery) suppresses the server-boot
+	// recovery sweep at NewJobStore time: no rekey-witness reconciliation, no
+	// job reconstruction, no orphan recovery. One-shot CLI processes use this
+	// so a CLI run against a database a LIVE server may own never reconciles
+	// or marks that server's in-flight jobs failed.
+	skipStartupRecovery bool
+
 	// reconstructionDeps are infrastructure dependencies that reconstructed jobs
 	// (loaded from DB on startup) need for apply/rescrape phases. They are set
 	// after JobStore construction via SetReconstructionDeps, once the
@@ -100,6 +107,20 @@ func WithActressRepo(r database.ActressRepositoryInterface) JobStoreOption {
 func WithHistoryRepo(r database.HistoryRepositoryInterface) JobStoreOption {
 	return func(s *JobStore) {
 		s.historyRepo = r
+	}
+}
+
+// WithSkipStartupRecovery suppresses the server-boot recovery sweep at
+// NewJobStore time: rekey-witness reconciliation, loadFromDatabase (job
+// reconstruction), and recoverOrphanedJobs are all skipped. These steps exist
+// so an API server restart reconciles jobs orphaned by the PREVIOUS process —
+// but a one-shot CLI process sharing the database with a LIVE server must not
+// reconstruct its rows (reconstruction clears missing temp posters the live
+// process may still reference) or mark its running jobs failed. Jobs created
+// after construction still persist normally via the store's JobPersistencer.
+func WithSkipStartupRecovery() JobStoreOption {
+	return func(s *JobStore) {
+		s.skipStartupRecovery = true
 	}
 }
 
@@ -176,13 +197,18 @@ func NewJobStore(jobRepo database.JobRepositoryInterface, batchFileOpRepo databa
 	// at the new ID. The periodic stale-cleanup goroutine is not started by
 	// the production bootstrap, so this must not ride on
 	// StartStaleTempCleanup.
-	if n, err := s.tempCleaner.ReconcileRekeyWitnesses(context.Background()); err != nil {
-		logging.Warnf("rekey witness reconciliation failed at startup: %v", err)
-	} else if n > 0 {
-		logging.Infof("reversed %d orphaned poster rekey relocation(s) at startup", n)
-	}
+	// Both steps are skipped for one-shot CLI stores (WithSkipStartupRecovery):
+	// there is no previous CLI process to recover from, and either step could
+	// interfere with a live API server owning the same database.
+	if !s.skipStartupRecovery {
+		if n, err := s.tempCleaner.ReconcileRekeyWitnesses(context.Background()); err != nil {
+			logging.Warnf("rekey witness reconciliation failed at startup: %v", err)
+		} else if n > 0 {
+			logging.Infof("reversed %d orphaned poster rekey relocation(s) at startup", n)
+		}
 
-	s.loadFromDatabase()
+		s.loadFromDatabase()
+	}
 
 	return s
 }
