@@ -14,6 +14,17 @@ import (
 	"github.com/spf13/afero"
 )
 
+// authorizedOverwriteWarning renders the force-overwrite audit crumb: an
+// overwrite-authorized organize move/copy leg replaced a bytes-bearing
+// destination. Composition follows the authorized-duplicate warning
+// (duplicates.go) so the whole OrganizeResult.Warnings pipeline carries it
+// verbatim — the CLI prints it per-file next to the dup warnings, the
+// eventlog persists one organize warn entry, and the worker's history writer
+// folds it into the organize history metadata.
+func authorizedOverwriteWarning(targetPath string) string {
+	return fmt.Sprintf("overwrite authorized: replaced existing destination %s", targetPath)
+}
+
 // Destination locking is unified on ONE process-wide registry,
 // fsutil.SharedDestLocks (#224 phase D): every organizer-reachable terminal
 // operation — file moves/copies/links, subtitle installs, MkdirAll directory
@@ -304,7 +315,7 @@ func (s *organizeStrategy) Plan(match models.FileMatchInfo, movie *models.Movie,
 
 	willMove := filepath.ToSlash(match.Path) != filepath.ToSlash(targetPath)
 
-	conflicts := checkTargetConflict(s.fs, match.Path, targetPath, forceUpdate, willMove)
+	conflicts, suppressedOccupant := classifyTargetConflicts(s.fs, match.Path, targetPath, forceUpdate, willMove)
 	// Target dir exists as a regular FILE today — nothing can be created under
 	// it, and organizing must surface this as a directory conflict through
 	// plan conflicts (not a deep MkdirAll failure) (#224 task 3.3).
@@ -341,6 +352,10 @@ func (s *organizeStrategy) Plan(match models.FileMatchInfo, movie *models.Movie,
 		executeStrategy:     s,
 		moveFiles:           true,
 		overwriteAuthorized: forceUpdate,
+		// Force-overwrite audit crumb: the authorization suppressed a
+		// bytes-bearing occupant at plan time — an executing authorized leg
+		// must surface the replacement, not hide it.
+		forceOverwriteOccupiedDest: suppressedOccupant != nil,
 	}, nil
 }
 
@@ -361,6 +376,11 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 
 	// Move path: moveFiles=true (default) — rename source to target
 	if plan.moveFiles {
+		// overwroteOccupiedDest records that THIS execution replaced a
+		// plan-time bytes-bearing destination the authorization suppressed:
+		// the no-op (identical / same-inode) and refused lanes never set it,
+		// and a failed publish discards it by returning before the warning.
+		overwroteOccupiedDest := false
 		move := func() error {
 			if plan.overwriteAuthorized {
 				// Authorized: still classify (#224 Phase C) — symlink/dir dests
@@ -373,6 +393,7 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 				if identical || sameIn {
 					return nil
 				}
+				overwroteOccupiedDest = plan.forceOverwriteOccupiedDest
 			} else {
 				identical, sameIn, err := refuseExistingDestination(s.fs, plan.SourcePath, plan.TargetPath)
 				if err != nil {
@@ -411,6 +432,11 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 		}
 
 		result.Moved = true
+		// Force-overwrite audit crumb: the replace actually landed — keep the
+		// resident bytes' replacement visible to every audit consumer.
+		if overwroteOccupiedDest {
+			result.Warnings = append(result.Warnings, authorizedOverwriteWarning(plan.TargetPath))
+		}
 		return result, nil
 	}
 
@@ -427,6 +453,11 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 		return result, result.Error
 	}
 
+	// overwroteOccupiedDest records that THIS execution replaced a plan-time
+	// bytes-bearing destination the authorization suppressed (same audit
+	// contract as the move lane): no-op and refused lanes never set it, and a
+	// failed copy discards it by returning before the warning.
+	overwroteOccupiedDest := false
 	// Every destination-touching step runs under the destination lock: unauthorized
 	// paths guard inside it (a plain copy would otherwise overwrite a late-created file),
 	// and authorized Remove+link work must serialize against concurrent guarded calls.
@@ -546,6 +577,9 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 				if err := s.linker.copyFile(s.fs, plan.SourcePath, plan.TargetPath); err != nil {
 					return fmt.Errorf("failed to copy file: %w", err)
 				}
+				// Authorized copy leg actually delivered: the plan-time
+				// occupant's resident bytes were replaced.
+				overwroteOccupiedDest = plan.forceOverwriteOccupiedDest
 			}
 			return nil
 		})
@@ -556,6 +590,11 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 	}
 
 	result.Moved = true
+	// Force-overwrite audit crumb: the replace actually landed — keep the
+	// resident bytes' replacement visible to every audit consumer.
+	if overwroteOccupiedDest {
+		result.Warnings = append(result.Warnings, authorizedOverwriteWarning(plan.TargetPath))
+	}
 	result.ShouldGenerateMetadata = true
 
 	return result, nil
