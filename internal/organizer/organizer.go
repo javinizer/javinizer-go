@@ -123,23 +123,15 @@ func applyTitleTruncation(engine template.EngineInterface, ctx *template.Context
 // update suppresses ONLY ConflictFile — directories and symlinks are always
 // recorded. Idempotency: lexical self and same-inode aliases are not
 // conflicts.
+//
+// n.b.: plan-time classification is NOT the force-overwrite audit crumb's
+// evidence — crumb semantics key on EXECUTE-time occupancy (the execute
+// leg's own classification), so a post-plan occupant swap can neither forge
+// nor hide a replacement.
 func checkTargetConflict(fs afero.Fs, sourcePath, targetPath string, forceUpdate, willMove bool) []PlanConflict {
-	conflicts, _ := classifyTargetConflicts(fs, sourcePath, targetPath, forceUpdate, willMove)
-	return conflicts
-}
-
-// classifyTargetConflicts is checkTargetConflict plus the force-overwrite
-// audit signal (force-overwrite audit crumb): suppressedOccupant reports the
-// bytes-bearing regular file an overwrite authorization FILTERED OUT of the
-// conflict list — ConflictFile is the only authorizable kind, and the
-// suppressed lane is exactly where an authorized move/copy execute leg would
-// REPLACE resident bytes. nil when the destination was absent, a
-// lexical-self/same-inode no-op, an unsuppressible kind (directory,
-// symlink), or no authorization was in play.
-func classifyTargetConflicts(fs afero.Fs, sourcePath, targetPath string, forceUpdate, willMove bool) (conflicts []PlanConflict, suppressedOccupant *PlanConflict) {
-	conflicts = make([]PlanConflict, 0)
+	conflicts := make([]PlanConflict, 0)
 	if !willMove {
-		return conflicts, nil
+		return conflicts
 	}
 	var target os.FileInfo
 	var targetErr error
@@ -161,32 +153,28 @@ func classifyTargetConflicts(fs afero.Fs, sourcePath, targetPath string, forceUp
 		if symlinkObjectExists(fs, targetPath) {
 			conflicts = append(conflicts, PlanConflict{Path: targetPath, Kind: ConflictSymlink})
 		}
-		return conflicts, nil
+		return conflicts
 	}
 	// A live symlink object at the destination is never renamed-over safely —
 	// a fallback Stat returns didLstat=false only when no Lstat was performed,
 	// so confirm via readlink before declaring it a regular file.
 	if target.Mode()&os.ModeSymlink != 0 || symlinkObjectExists(fs, targetPath) {
 		conflicts = append(conflicts, PlanConflict{Path: targetPath, Kind: ConflictSymlink})
-		return conflicts, nil
+		return conflicts
 	}
 	if target.IsDir() {
 		conflicts = append(conflicts, PlanConflict{Path: targetPath, Kind: ConflictDirectory})
-		return conflicts, nil
+		return conflicts
 	}
 	// Same-inode alias of the source is not a conflict (idempotent no-op).
 	sourceStat, sourceErr := fs.Stat(sourcePath)
 	if sourceErr == nil && os.SameFile(sourceStat, target) {
-		return conflicts, nil
+		return conflicts
 	}
 	if !forceUpdate {
 		conflicts = append(conflicts, PlanConflict{Path: targetPath, Kind: ConflictFile})
-		return conflicts, nil
 	}
-	// Authorization suppressed the occupation conflict: the destination held
-	// resident bytes at plan/check time, so the authorized execute leg
-	// REPLACES an existing file — surface the audit evidence.
-	return conflicts, &PlanConflict{Path: targetPath, Kind: ConflictFile}
+	return conflicts
 }
 
 type planContext struct {
@@ -402,17 +390,6 @@ type OrganizePlan struct {
 	// destination (cmd.ForceUpdate). When false, move execution refuses to replace a file that
 	// exists at the target even if it appeared after plan-time conflict checks (TOCTOU guard).
 	overwriteAuthorized bool
-	// forceOverwriteOccupiedDest is plan-time audit evidence for the
-	// force-overwrite audit crumb: true when destination classification found
-	// the target already occupied by a bytes-bearing regular file whose
-	// ConflictFile was SUPPRESSED by the overwrite authorization — the
-	// authorized move/copy execute leg will REPLACE resident bytes, so the
-	// strategy appends the "overwrite authorized: replaced existing
-	// destination" warning to its result instead of silently dropping the
-	// replaced occupant. Absent destinations, lexical-self/same-inode
-	// no-ops, unsuppressible occupants (directory/symlink), subtitle
-	// installs, and unauthorized runs never set it.
-	forceOverwriteOccupiedDest bool
 }
 
 // Plan creates an organization plan without executing it

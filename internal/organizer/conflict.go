@@ -84,23 +84,34 @@ func logDestRefusal(c PlanConflict) {
 	logging.Warnf("[organizer] destination conflict (%s) cannot be authorized-over: %s", c.kindName(), c.Path)
 }
 
-// refuseIfUnsuppressibleAuthorizedDestination is the authorized-execute
-// leg gate (task 2.3): symlink and directory destinations refuse with a new
-// sentence (authorized overlays deliberately report a different class); regular-file
-// destinations are suppressed per authorization. self/same-inode → no-op per D2.
-func refuseIfUnsuppressibleAuthorizedDestination(fs afero.Fs, src, dst string) (identical, sameInode bool, err error) {
+// classifyAuthorizedDestination is the authorized-execute leg gate (task
+// 2.3's refuseIfUnsuppressibleAuthorizedDestination, unified) used by every
+// authorized lane: symlink and directory destinations refuse with a sentence
+// (authorized overlays deliberately report a different class; regular-file
+// destinations are suppressed per authorization; self/same-inode → no-op per
+// D2) — one classifyExistingDestination call, identical refusal rules — plus
+// the force-overwrite audit crumb's EXECUTE-TIME occupancy evidence:
+// occupiedFile reports whether the classification just saw a bytes-bearing
+// regular file the authorization suppressed (a FILE conflict). Keying the
+// crumb to the execute-side state answers both TOCTOU failure classes of
+// plan-time evidence: an occupant vacated post-plan must NOT crumb (nothing
+// is replaced), and an occupant planted post-plan MUST crumb (its resident
+// bytes are about to be replaced).
+func classifyAuthorizedDestination(fs afero.Fs, src, dst string) (identical, sameInode, occupiedFile bool, err error) {
 	c := classifyExistingDestination(fs, src, dst)
 	if c.Err != nil {
-		return false, false, c.Err
+		return false, false, false, c.Err
 	}
 	if c.Conflict == nil {
-		return c.Identical, c.SameInode, nil
+		return c.Identical, c.SameInode, false, nil
 	}
 	if c.Conflict.Kind == ConflictFile {
-		return c.Identical, c.SameInode, nil // suppressed by authorization
+		// Suppressed by authorization: resident bytes sit at the destination
+		// RIGHT NOW — the authorized execute leg replaces them.
+		return c.Identical, c.SameInode, true, nil
 	}
 	logDestRefusal(*c.Conflict)
-	return false, false, fmt.Errorf("cannot authorize-over a %s destination (refusing to replace): %s", c.Conflict.kindName(), c.Conflict.Path)
+	return false, false, false, fmt.Errorf("cannot authorize-over a %s destination (refusing to replace): %s", c.Conflict.kindName(), c.Conflict.Path)
 }
 
 // distinctConflictRenders returns each conflict's rendered form exactly once,

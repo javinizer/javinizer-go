@@ -21,6 +21,7 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/organizer"
 	"github.com/javinizer/javinizer-go/internal/workflow"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -225,4 +226,79 @@ func TestRunBatchCommand_ForceDuplicateOntoOccupied_NoDoubleWarn(t *testing.T) {
 			"every organize success row carries exactly one warning: %s", h.Metadata)
 	}
 	assert.Equal(t, 2, organizeSuccesses, "winner + skipped loser rows")
+}
+
+// TestRunBatchCommand_ForceHardlinkOntoOccupiedDest_PersistsAuditCrumb pins
+// the P3 link lane through the full CLI seam: `sort -f --hardlink` onto a
+// destination already holding resident bytes must surface the same overwrite
+// crumb on every audit surface — an authorized LINK install replaces resident
+// bytes at the destination exactly like a move/copy leg.
+func TestRunBatchCommand_ForceHardlinkOntoOccupiedDest_PersistsAuditCrumb(t *testing.T) {
+	configPath, src, dest, dbPath := setupSingleFileBatch(t, "GOOD-705")
+
+	targetPath := filepath.Join(dest, "GOOD-705", "GOOD-705.mp4")
+	require.NoError(t, os.MkdirAll(filepath.Dir(targetPath), 0o700))
+	require.NoError(t, os.WriteFile(targetPath, []byte("resident bytes"), 0o600))
+
+	var buf bytes.Buffer
+	err := RunBatchCommand(context.Background(), &buf, BatchCommandOptions{
+		ConfigFile:        configPath,
+		SourcePath:        src,
+		Destination:       dest,
+		Recursive:         true,
+		MoveFiles:         false,
+		ForceUpdate:       true,
+		GenerateNFO:       true,
+		CommandLabel:      "Javinizer Sort",
+		ActionVerb:        "Processing files",
+		CompletionMessage: "Sort complete!",
+		Resolved:          &workflow.ResolvedSeamStrings{LinkMode: organizer.LinkModeHard},
+	})
+	require.NoError(t, err)
+	out := buf.String()
+	batchID := batchIDFromOutput(t, out)
+
+	// Console: exactly one per-file warning — the link-install overwrite crumb.
+	assert.Contains(t, out, "⚠️", "the overwrite warning must print to the console\n%s", out)
+	assert.Contains(t, out, forceCrumbPrefix, "crumb text must survive to the console\n%s", out)
+	assert.Contains(t, out, targetPath, "the crumb names the replaced destination\n%s", out)
+	assert.Len(t, warningLines(out), 1, "exactly one warning line — the link lane does not double-warn\n%s", out)
+
+	// Journal evidence: the destination now aliases the source (link install
+	// replaced the resident entry); a hardlink retains its source.
+	content, readErr := os.ReadFile(targetPath)
+	require.NoError(t, readErr)
+	assert.Equal(t, "fake video", string(content), "resident bytes were replaced by the link install")
+	srcInfo, statErr := os.Stat(filepath.Join(src, "GOOD-705.mp4"))
+	require.NoError(t, statErr, "a hardlink retains its source")
+	dstInfo, statErr := os.Stat(targetPath)
+	require.NoError(t, statErr)
+	assert.True(t, os.SameFile(srcInfo, dstInfo), "destination aliases the source's inode after install")
+
+	ctx := context.Background()
+	db := openAssertionDB(t, dbPath)
+	repos := db.Repositories()
+
+	// Eventlog: one organize/warn audit entry with the crumb.
+	events, err := repos.EventRepo.FindFiltered(ctx, database.EventFilter{
+		EventType: models.EventCategoryOrganize,
+		Severity:  models.SeverityWarn,
+	}, 50, 0)
+	require.NoError(t, err)
+	require.Len(t, events, 1, "exactly one warn event — the link-install crumb")
+	assert.Contains(t, events[0].Message, forceCrumbPrefix)
+	assert.Contains(t, events[0].Message, targetPath)
+
+	// History: the organize row's warnings metadata carries the crumb.
+	rows, err := repos.HistoryRepo.FindByBatchJobID(ctx, batchID)
+	require.NoError(t, err)
+	crumbRows := 0
+	for _, h := range rows {
+		if h.Operation == models.HistoryOpOrganize && h.Status == models.HistoryStatusSuccess && h.Metadata != "" {
+			if strings.Contains(h.Metadata, forceCrumbPrefix) {
+				crumbRows++
+			}
+		}
+	}
+	assert.Equal(t, 1, crumbRows, "the organize history row carries the crumb in its warnings metadata")
 }

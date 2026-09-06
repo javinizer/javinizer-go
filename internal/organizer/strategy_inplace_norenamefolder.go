@@ -99,6 +99,12 @@ func (s *inPlaceNoRenameFolderStrategy) Execute(plan *OrganizePlan) (*OrganizeRe
 		ShouldGenerateMetadata: true,
 	}
 
+	// overwroteOccupiedDest records that THIS execution replaced a
+	// bytes-bearing destination the authorization suppressed — keyed to
+	// EXECUTE-TIME occupancy (its own classification under the held locks):
+	// no-op and refused lanes never set it, and a failed publish discards it
+	// by returning before the warning.
+	overwroteOccupiedDest := false
 	// Shared parent-directory lock + target-file lock (dir before file): an in-place
 	// rename elsewhere drains shared holders before moving the directory, so this move
 	// never lands inside a renamed (possibly about-to-rollback) directory — while
@@ -106,13 +112,14 @@ func (s *inPlaceNoRenameFolderStrategy) Execute(plan *OrganizePlan) (*OrganizeRe
 	err := withDestDirSharedLock(plan.TargetDir, func() error {
 		return withDestFileLock(plan.TargetPath, func() error {
 			if plan.overwriteAuthorized {
-				identical, sameIn, err := refuseIfUnsuppressibleAuthorizedDestination(s.fs, plan.SourcePath, plan.TargetPath)
+				identical, sameIn, occupiedFile, err := classifyAuthorizedDestination(s.fs, plan.SourcePath, plan.TargetPath)
 				if err != nil {
 					return err
 				}
 				if identical || sameIn {
 					return nil
 				}
+				overwroteOccupiedDest = occupiedFile
 			} else {
 				lexicalSelf, sameIn, err := refuseExistingDestination(s.fs, plan.SourcePath, plan.TargetPath)
 				if err != nil {
@@ -137,6 +144,10 @@ func (s *inPlaceNoRenameFolderStrategy) Execute(plan *OrganizePlan) (*OrganizeRe
 	}
 
 	result.Moved = true
+	// Force-overwrite audit crumb: the replace actually landed.
+	if overwroteOccupiedDest {
+		result.Warnings = append(result.Warnings, authorizedOverwriteWarning(plan.TargetPath))
+	}
 
 	return result, nil
 }

@@ -228,6 +228,16 @@ func (s *inPlaceStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) {
 	}
 
 	if plan.InPlace {
+		// innerFileReplacedOccupant is the force-overwrite audit crumb's
+		// EXECUTE-TIME evidence for the inner file rename below: the
+		// authorized classification (taken under the held locks) saw a
+		// bytes-bearing foreign occupant at the new file name, so the rename
+		// replaces its resident bytes. No-op (identical / same-inode) and
+		// refused lanes never set it; a failed inner rename discards it
+		// through the rollback/error legs. The pure DIRECTORY rename
+		// deliberately never crumbs: its target was proven absent-or-self-alias
+		// before the rename, so it replaces nothing foreign.
+		innerFileReplacedOccupant := false
 		// The WHOLE directory sequence — stat, renames, inner file step, and any rollback —
 		// runs while holding the EXCLUSIVE TargetDir lock plus the inner TargetPath file
 		// lock, acquired up front (dir before file): a sibling worker holding only the
@@ -286,6 +296,11 @@ func (s *inPlaceStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) {
 					}
 				}
 
+				// Force-overwrite audit crumb stays silent HERE by construction
+				// (non-obvious intent): the target directory was just proven absent
+				// or a self-alias, so this rename replaces NO foreign bytes — it only
+				// changes a directory NAME. Only the inner FILE rename below can
+				// replace resident bytes, and it carries the crumb.
 				if err := s.fs.Rename(plan.OldDir, plan.TargetDir); err != nil {
 					return fmt.Errorf("failed to rename directory: %w", err)
 				}
@@ -325,7 +340,7 @@ func (s *inPlaceStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) {
 						result.NewDirectoryPath = ""
 					}
 					if plan.overwriteAuthorized {
-						identical, sameIn, lerr := refuseIfUnsuppressibleAuthorizedDestination(s.fs, currentFilePath, plan.TargetPath)
+						identical, sameIn, occupiedFile, lerr := classifyAuthorizedDestination(s.fs, currentFilePath, plan.TargetPath)
 						if lerr != nil {
 							rb()
 							return lerr
@@ -333,6 +348,7 @@ func (s *inPlaceStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) {
 						if identical || sameIn {
 							return nil
 						}
+						innerFileReplacedOccupant = occupiedFile
 					} else {
 						lexicalSelf, sameIn, e2 := refuseExistingDestination(s.fs, currentFilePath, plan.TargetPath)
 						if e2 != nil {
@@ -354,6 +370,9 @@ func (s *inPlaceStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) {
 					if err := innerOp(s.fs, currentFilePath, plan.TargetPath); err != nil {
 						return s.finishInPlaceInnerRename(plan, result, err)
 					}
+					if innerFileReplacedOccupant {
+						result.Warnings = append(result.Warnings, authorizedOverwriteWarning(plan.TargetPath))
+					}
 				}
 				return nil
 			})
@@ -365,6 +384,12 @@ func (s *inPlaceStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) {
 		result.Moved = true
 		return result, nil
 	} else {
+		// overwroteOccupiedDest records that THIS execution replaced a
+		// bytes-bearing destination the authorization suppressed — keyed to
+		// EXECUTE-TIME occupancy (its own classification under the held locks):
+		// no-op and refused lanes never set it, and a failed publish discards
+		// it by returning before the warning.
+		overwroteOccupiedDest := false
 		// Shared parent-directory lock + target-file lock (dir before file): an in-place
 		// directory rename elsewhere drains shared holders before it may move the
 		// directory, so this move can never land inside a renamed (possibly
@@ -372,13 +397,14 @@ func (s *inPlaceStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) {
 		err := withDestDirSharedLock(plan.TargetDir, func() error {
 			return withDestFileLock(plan.TargetPath, func() error {
 				if plan.overwriteAuthorized {
-					identical, sameIn, err := refuseIfUnsuppressibleAuthorizedDestination(s.fs, plan.SourcePath, plan.TargetPath)
+					identical, sameIn, occupiedFile, err := classifyAuthorizedDestination(s.fs, plan.SourcePath, plan.TargetPath)
 					if err != nil {
 						return err
 					}
 					if identical || sameIn {
 						return nil
 					}
+					overwroteOccupiedDest = occupiedFile
 				} else {
 					lexicalSelf, sameIn, err := refuseExistingDestination(s.fs, plan.SourcePath, plan.TargetPath)
 					if err != nil {
@@ -406,6 +432,10 @@ func (s *inPlaceStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) {
 		}
 
 		result.Moved = true
+		// Force-overwrite audit crumb: the replace actually landed.
+		if overwroteOccupiedDest {
+			result.Warnings = append(result.Warnings, authorizedOverwriteWarning(plan.TargetPath))
+		}
 	}
 
 	return result, nil

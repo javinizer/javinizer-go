@@ -15,12 +15,16 @@ import (
 )
 
 // authorizedOverwriteWarning renders the force-overwrite audit crumb: an
-// overwrite-authorized organize move/copy leg replaced a bytes-bearing
-// destination. Composition follows the authorized-duplicate warning
-// (duplicates.go) so the whole OrganizeResult.Warnings pipeline carries it
-// verbatim — the CLI prints it per-file next to the dup warnings, the
-// eventlog persists one organize warn entry, and the worker's history writer
-// folds it into the organize history metadata.
+// overwrite-authorized terminal leg replaced a bytes-bearing destination.
+// Wired lanes (all keyed to EXECUTE-TIME occupancy): organize move, organize
+// copy, organize link install (Remove+link replaces resident bytes at the
+// destination), the in-place strategy's inner file rename and non-rename
+// file move, and the in-place-norenamefolder file rename. Composition
+// follows the authorized-duplicate warning (duplicates.go) so the whole
+// OrganizeResult.Warnings pipeline carries it verbatim — the CLI prints it
+// per-file next to the dup warnings, the eventlog persists one organize warn
+// entry, and the worker's history writer folds it into the organize history
+// metadata.
 func authorizedOverwriteWarning(targetPath string) string {
 	return fmt.Sprintf("overwrite authorized: replaced existing destination %s", targetPath)
 }
@@ -315,7 +319,7 @@ func (s *organizeStrategy) Plan(match models.FileMatchInfo, movie *models.Movie,
 
 	willMove := filepath.ToSlash(match.Path) != filepath.ToSlash(targetPath)
 
-	conflicts, suppressedOccupant := classifyTargetConflicts(s.fs, match.Path, targetPath, forceUpdate, willMove)
+	conflicts := checkTargetConflict(s.fs, match.Path, targetPath, forceUpdate, willMove)
 	// Target dir exists as a regular FILE today — nothing can be created under
 	// it, and organizing must surface this as a directory conflict through
 	// plan conflicts (not a deep MkdirAll failure) (#224 task 3.3).
@@ -352,10 +356,6 @@ func (s *organizeStrategy) Plan(match models.FileMatchInfo, movie *models.Movie,
 		executeStrategy:     s,
 		moveFiles:           true,
 		overwriteAuthorized: forceUpdate,
-		// Force-overwrite audit crumb: the authorization suppressed a
-		// bytes-bearing occupant at plan time — an executing authorized leg
-		// must surface the replacement, not hide it.
-		forceOverwriteOccupiedDest: suppressedOccupant != nil,
 	}, nil
 }
 
@@ -377,23 +377,26 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 	// Move path: moveFiles=true (default) — rename source to target
 	if plan.moveFiles {
 		// overwroteOccupiedDest records that THIS execution replaced a
-		// plan-time bytes-bearing destination the authorization suppressed:
-		// the no-op (identical / same-inode) and refused lanes never set it,
-		// and a failed publish discards it by returning before the warning.
+		// bytes-bearing destination the authorization suppressed, keyed to
+		// EXECUTE-TIME occupancy (its own classification, taken under the
+		// destination locks): an occupant vacated post-plan never crumbs,
+		// an occupant planted post-plan always does. The no-op (identical /
+		// same-inode) and refused lanes never set it, and a failed publish
+		// discards it by returning before the warning.
 		overwroteOccupiedDest := false
 		move := func() error {
 			if plan.overwriteAuthorized {
 				// Authorized: still classify (#224 Phase C) — symlink/dir dests
 				// refuse regardless of authorization; file dests replace; self
 				// and same-inode stay no-ops even here.
-				identical, sameIn, err := refuseIfUnsuppressibleAuthorizedDestination(s.fs, plan.SourcePath, plan.TargetPath)
+				identical, sameIn, occupiedFile, err := classifyAuthorizedDestination(s.fs, plan.SourcePath, plan.TargetPath)
 				if err != nil {
 					return err
 				}
 				if identical || sameIn {
 					return nil
 				}
-				overwroteOccupiedDest = plan.forceOverwriteOccupiedDest
+				overwroteOccupiedDest = occupiedFile
 			} else {
 				identical, sameIn, err := refuseExistingDestination(s.fs, plan.SourcePath, plan.TargetPath)
 				if err != nil {
@@ -453,10 +456,11 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 		return result, result.Error
 	}
 
-	// overwroteOccupiedDest records that THIS execution replaced a plan-time
+	// overwroteOccupiedDest records that THIS execution replaced a
 	// bytes-bearing destination the authorization suppressed (same audit
-	// contract as the move lane): no-op and refused lanes never set it, and a
-	// failed copy discards it by returning before the warning.
+	// contract as the move lane — keyed to EXECUTE-TIME occupancy taken under
+	// the destination locks): no-op and refused lanes never set it, and a
+	// failed install discards it by returning before the warning.
 	overwroteOccupiedDest := false
 	// Every destination-touching step runs under the destination lock: unauthorized
 	// paths guard inside it (a plain copy would otherwise overwrite a late-created file),
@@ -489,6 +493,7 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 			// Remove an existing target ONLY for an authorized replacement of a
 			// REGULAR FILE — symlinks, directories, and everything else at the
 			// destination are always refused (#224). Gated on IsRegular.
+			linkInstallOccupant := false
 			if plan.LinkMode != LinkModeNone && !dstLexicalSelf && plan.overwriteAuthorized {
 				var linfo os.FileInfo
 				var lerr error
@@ -507,6 +512,13 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 					// installing the link output (#224 hole 1).
 					return fmt.Errorf("destination is not a regular file (cannot authorize-over): %s", plan.TargetPath)
 				}
+				// Force-overwrite audit crumb (link lane): an authorized link
+				// install REPLACES resident bytes AT THE DESTINATION — the
+				// Remove below discards a foreign occupant's entry (plus its
+				// bytes when it held the last link). Execute-time occupancy
+				// keys the crumb: object present + NOT a lexical-self + NOT a
+				// same-inode alias (removing an alias name destroys nothing).
+				linkInstallOccupant = lerr == nil && !dstSameInode
 				if err := s.fs.Remove(plan.TargetPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 					return fmt.Errorf("failed to prepare target path for link: %w", err)
 				}
@@ -527,6 +539,9 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 					}
 					return fmt.Errorf("failed to create hard link: %w", err)
 				}
+				// Authorized link install delivered: a foreign occupant's bytes
+				// were replaced at the destination.
+				overwroteOccupiedDest = linkInstallOccupant
 			case LinkModeSoft:
 				linkTarget := plan.SourcePath
 				if !filepath.IsAbs(linkTarget) {
@@ -542,6 +557,8 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 					}
 					return fmt.Errorf("failed to create soft link: %w", err)
 				}
+				// Same audit contract as the hard-link leg above.
+				overwroteOccupiedDest = linkInstallOccupant
 			default:
 				if dstSameInode && !plan.overwriteAuthorized {
 					return nil
@@ -557,6 +574,7 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 				// a symlink/directory destination must refuse regardless of
 				// authorization (#224 codex P1). dstLexicalSelf never reaches here
 				// (refused at classification).
+				copyOccupant := false
 				if plan.overwriteAuthorized && !dstLexicalSelf {
 					linfo, followed, lerr := destMaybeLstat(s.fs, plan.TargetPath)
 					if lerr != nil && !errors.Is(lerr, os.ErrNotExist) {
@@ -572,14 +590,19 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 						if !linfo.Mode().IsRegular() {
 							return fmt.Errorf("destination is not a regular file (cannot authorize-over): %s", plan.TargetPath)
 						}
+						// Force-overwrite audit crumb (copy lane): execute-time
+						// occupancy inside the regular-file gate — an object is
+						// present that is NOT lexical-self and NOT a same-inode
+						// alias, so this copy replaces FOREIGN resident bytes.
+						copyOccupant = !dstSameInode
 					}
 				}
 				if err := s.linker.copyFile(s.fs, plan.SourcePath, plan.TargetPath); err != nil {
 					return fmt.Errorf("failed to copy file: %w", err)
 				}
-				// Authorized copy leg actually delivered: the plan-time
-				// occupant's resident bytes were replaced.
-				overwroteOccupiedDest = plan.forceOverwriteOccupiedDest
+				// Authorized copy leg actually delivered: the occupant's resident
+				// bytes were replaced.
+				overwroteOccupiedDest = copyOccupant
 			}
 			return nil
 		})
