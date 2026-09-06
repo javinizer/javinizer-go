@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/eventlog"
@@ -423,10 +424,18 @@ func newCLIBatchRuntime(bs *bootstrapResult, cfg *config.Config, opts BatchComma
 	jobStore := worker.NewJobStore(repos.JobRepo, repos.BatchFileOpRepo, repos.MovieRepo, cfg.System.TempDir, nil, nil, storeOpts...)
 	emitter := eventlog.NewEmitter(repos.EventRepo)
 	factory := worker.NewBatchJobFactory(jobStore, jobWF, bs.Matcher, bs.PosterGen, batchCfg, emitter)
+	// Persisted job identity at creation (#248 codex P2, F1): mirror the API
+	// StartScrapeUseCase wiring so a CLI update batch's jobs row classifies as
+	// update (update=true + metadata-artwork) instead of organize. StartApply
+	// re-commits the same mapping from ApplyPhaseConfig — persistedJobMode is
+	// the single mapping source.
+	persistUpdate, persistMode := persistedJobMode(opts.SkipOrganize)
 	job := factory.CreatePersistentStandaloneJob(filePaths, worker.BatchJobOptions{
-		ID:          opts.BatchJobID,
-		Destination: opts.Destination,
-		WF:          jobWF,
+		ID:                    opts.BatchJobID,
+		Destination:           opts.Destination,
+		OperationModeOverride: persistMode,
+		Update:                persistUpdate,
+		WF:                    jobWF,
 	})
 	return &cliBatchRuntime{job: job, factory: factory, emitter: emitter}, nil
 }
@@ -446,8 +455,18 @@ func newCLIBatchRuntime(bs *bootstrapResult, cfg *config.Config, opts BatchComma
 // Warning text is also printed to the console so CLI output tells the same
 // truth as the persisted audit rows. Event emission is skipped for dry runs:
 // previews are not operations.
+//
+// Audit emission is deliberately DETACHED from the per-file task ctx
+// (#248 codex P2, F2): when apply exhausts WorkerTimeout, interpretApplyResult
+// invokes this hook with the task ctx ALREADY canceled, and the eventlog
+// emitter drops events on a canceled ctx (eventlog.emit checks ctx.Err()) —
+// the timeout failure previously never landed in the CLI eventlog, while the
+// worker's history writer still recorded it because it audits with a fresh
+// bounded ctx (worker/history_writer.go historyAuditContext). Mirror that
+// pattern here, and log loudly if emission STILL fails instead of discarding
+// the error.
 func cliBatchPostApply(emitter eventlog.EventEmitter, w io.Writer, jobID string, dryRun, updateMode bool, skipCount *atomic.Int64, printMu *sync.Mutex) func(context.Context, *worker.ApplyFileContext, *worker.ApplyFileResult) {
-	return func(ctx context.Context, afc *worker.ApplyFileContext, afr *worker.ApplyFileResult) {
+	return func(_ context.Context, afc *worker.ApplyFileContext, afr *worker.ApplyFileResult) {
 		// Guard matches the API resolver: never deref a nil payload; the hook
 		// must not mask the original apply outcome with a panic.
 		if afc == nil || afc.Movie == nil || afr == nil {
@@ -455,6 +474,13 @@ func cliBatchPostApply(emitter eventlog.EventEmitter, w io.Writer, jobID string,
 		}
 		if dryRun {
 			return
+		}
+		auditCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		emit := func(source, message string, severity models.EventSeverity, eventCtx map[string]any) {
+			if err := emitter.EmitOrganizeEvent(auditCtx, source, message, severity, eventCtx); err != nil {
+				logging.Warnf("[cli batch %s] eventlog audit emission failed (source=%s, severity=%s, message=%q): %v", jobID, source, severity, message, err)
+			}
 		}
 		// Event taxonomy by operation mode (see the doc comment): file_move
 		// organize vocabulary vs nfo_gen update vocabulary.
@@ -469,7 +495,7 @@ func cliBatchPostApply(emitter eventlog.EventEmitter, w io.Writer, jobID string,
 			warningVerb = "Update warning"
 		}
 		if afr.Err != nil {
-			_ = emitter.EmitOrganizeEvent(ctx, source, fmt.Sprintf("%s for %s", failureVerb, afc.Movie.ID), models.SeverityError, map[string]any{"job_id": jobID, "movie_id": afc.Movie.ID, "error": afr.Err.Error()})
+			emit(source, fmt.Sprintf("%s for %s", failureVerb, afc.Movie.ID), models.SeverityError, map[string]any{"job_id": jobID, "movie_id": afc.Movie.ID, "error": afr.Err.Error()})
 			return
 		}
 		var newPath string
@@ -485,13 +511,13 @@ func cliBatchPostApply(emitter eventlog.EventEmitter, w io.Writer, jobID string,
 		if !updateMode {
 			eventCtx["new_path"] = newPath
 		}
-		_ = emitter.EmitOrganizeEvent(ctx, source, fmt.Sprintf("%s %s", successVerb, afc.Movie.ID), models.SeverityInfo, eventCtx)
+		emit(source, fmt.Sprintf("%s %s", successVerb, afc.Movie.ID), models.SeverityInfo, eventCtx)
 		for _, warning := range warnings {
 			warnCtx := map[string]any{"job_id": jobID, "movie_id": afc.Movie.ID, "file": afc.FilePath, "warning": warning}
 			if !updateMode {
 				warnCtx["new_path"] = newPath
 			}
-			_ = emitter.EmitOrganizeEvent(ctx, source, fmt.Sprintf("%s for %s: %s", warningVerb, afc.Movie.ID, warning), models.SeverityWarn, warnCtx)
+			emit(source, fmt.Sprintf("%s for %s: %s", warningVerb, afc.Movie.ID, warning), models.SeverityWarn, warnCtx)
 		}
 		if len(warnings) > 0 {
 			printMu.Lock()
