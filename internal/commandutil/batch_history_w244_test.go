@@ -120,6 +120,30 @@ func TestRunBatchCommand_DuplicateSkip_PersistsAuditRows(t *testing.T) {
 	assert.Contains(t, out, "duplicate destination within batch", "warning text must survive to the console\n%s", out)
 	assert.Contains(t, out, "Skipped (authorized duplicates): 1", "summary must count the skip\n%s", out)
 
+	// #248 codex P2 (F2): the visible counts must match the real file
+	// movement — ONE winner moved, the authorized duplicate loser stayed put.
+	// Completed-minus-skips keeps "Metadata found" intact (both files scraped)
+	// while organize/NFO totals count only files whose bytes landed.
+	assert.Contains(t, out, "Organized 1 file(s)", "organize headline counts only real moves\n%s", out)
+	assert.Contains(t, out, "Metadata found: 2", "metadata-found counts both scraped files\n%s", out)
+	assert.Contains(t, out, "NFOs generated: 1", "NFO totals exclude the skipped duplicate\n%s", out)
+	assert.Contains(t, out, "Files organized: 1", "summary organized total excludes the skipped duplicate\n%s", out)
+	countVideos := func(root string) int {
+		t.Helper()
+		count := 0
+		walkErr := filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
+			if err == nil && !info.IsDir() && filepath.Ext(p) == ".mp4" {
+				count++
+			}
+			return err
+		})
+		require.NoError(t, walkErr)
+		return count
+	}
+	assert.Equal(t, 1, countVideos(dest), "exactly one winner's bytes landed at the destination")
+	assert.FileExists(t, filepath.Join(dest, "GOOD-700", "GOOD-700.mp4"))
+	assert.Equal(t, 1, countVideos(src), "the authorized duplicate loser never moved")
+
 	ctx := context.Background()
 	db := openAssertionDB(t, dbPath)
 	repos := db.Repositories()
@@ -302,6 +326,63 @@ func TestDefaultSummaryPrinter_SkippedDuplicatesLine(t *testing.T) {
 	assert.NotContains(t, buf.String(), "Skipped (authorized duplicates)")
 }
 
+// TestDefaultSummaryPrinter_SkipAdjustedOrganizeTotals pins #248 codex P2
+// (F2): organize/output success totals are completed MINUS skipped duplicates
+// (subtraction at this summary aggregation site only), while metadata-found
+// counting stays intact.
+func TestDefaultSummaryPrinter_SkipAdjustedOrganizeTotals(t *testing.T) {
+	newResult := func(skips int) BatchCommandResult {
+		return BatchCommandResult{
+			ScanResult:        &workflow.ScanAndMatchResult{},
+			SuccessCount:      2,
+			SkippedDuplicates: skips,
+		}
+	}
+
+	// Live sort: 2 completed, 1 authorized skip → exactly 1 file actually moved.
+	var buf bytes.Buffer
+	defaultSummaryPrinter(&buf, BatchCommandOptions{GenerateNFO: true}, newResult(1))
+	out := buf.String()
+	assert.Contains(t, out, "Organized 1 file(s)", "completed minus skips")
+	assert.Contains(t, out, "Metadata found: 2", "metadata-found keeps counting every completed file")
+	assert.Contains(t, out, "NFOs generated: 1")
+	assert.Contains(t, out, "Files organized: 1")
+
+	// Dry run inherits the same subtraction discipline.
+	buf.Reset()
+	defaultSummaryPrinter(&buf, BatchCommandOptions{DryRun: true, GenerateNFO: true}, newResult(1))
+	out = buf.String()
+	assert.Contains(t, out, "Would organize 1 file(s)")
+	assert.Contains(t, out, "NFOs generated: 1 (dry-run)")
+	assert.Contains(t, out, "Files organized: 1 (dry-run)")
+
+	// A pathological skip surplus clamps at zero rather than printing a
+	// negative count.
+	buf.Reset()
+	defaultSummaryPrinter(&buf, BatchCommandOptions{GenerateNFO: true}, BatchCommandResult{
+		ScanResult:        &workflow.ScanAndMatchResult{},
+		SuccessCount:      1,
+		SkippedDuplicates: 2,
+	})
+	out = buf.String()
+	assert.Contains(t, out, "Organized 0 file(s)")
+	assert.Contains(t, out, "Files organized: 0")
+
+	// Update-mode lines are driven by len(Movies) and stay untouched; the skip
+	// line still reports truthfully if a skip somehow occurred.
+	buf.Reset()
+	defaultSummaryPrinter(&buf, BatchCommandOptions{SkipOrganize: true}, BatchCommandResult{
+		ScanResult:        &workflow.ScanAndMatchResult{},
+		SuccessCount:      2,
+		SkippedDuplicates: 1,
+		FailedCount:       0,
+		Movies:            map[string]*models.Movie{"GOOD-700": {}},
+	})
+	out = buf.String()
+	assert.Contains(t, out, "Updated: 1, Failed: 0")
+	assert.Contains(t, out, "Skipped (authorized duplicates): 1")
+}
+
 // ---------------------------------------------------------------------------
 // cliBatchPostApply unit pins
 // ---------------------------------------------------------------------------
@@ -312,24 +393,24 @@ type recordingEmitter struct {
 	events []models.Event
 }
 
-func (e *recordingEmitter) record(sev models.EventSeverity, message string, ctx map[string]any) {
+func (e *recordingEmitter) record(source string, sev models.EventSeverity, message string, ctx map[string]any) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.events = append(e.events, models.Event{EventType: models.EventCategoryOrganize, Severity: sev, Message: message})
+	e.events = append(e.events, models.Event{EventType: models.EventCategoryOrganize, Source: source, Severity: sev, Message: message})
 }
 
 func (e *recordingEmitter) EmitScraperEvent(_ context.Context, source string, message string, severity models.EventSeverity, eventCtx map[string]any) error {
-	e.record(severity, message, eventCtx)
+	e.record(source, severity, message, eventCtx)
 	return nil
 }
 
 func (e *recordingEmitter) EmitOrganizeEvent(_ context.Context, source string, message string, severity models.EventSeverity, eventCtx map[string]any) error {
-	e.record(severity, message, eventCtx)
+	e.record(source, severity, message, eventCtx)
 	return nil
 }
 
 func (e *recordingEmitter) EmitSystemEvent(_ context.Context, source string, message string, severity models.EventSeverity, eventCtx map[string]any) error {
-	e.record(severity, message, eventCtx)
+	e.record(source, severity, message, eventCtx)
 	return nil
 }
 
@@ -352,7 +433,7 @@ func TestCliBatchPostApply_SuccessWithDuplicateSkipWarning(t *testing.T) {
 		skipCount = &atomic.Int64{}
 		printMu   = &sync.Mutex{}
 	)
-	hook := cliBatchPostApply(emitter, &buf, "job-1", false, skipCount, printMu)
+	hook := cliBatchPostApply(emitter, &buf, "job-1", false, false, skipCount, printMu)
 
 	hook(context.Background(),
 		&worker.ApplyFileContext{FilePath: filepath.Join("src", "GOOD-700.mp4"), Movie: &models.Movie{ID: "GOOD-700"}},
@@ -368,7 +449,10 @@ func TestCliBatchPostApply_SuccessWithDuplicateSkipWarning(t *testing.T) {
 	events := emitter.snapshot()
 	require.Len(t, events, 2, "info event + warning event")
 	assert.Equal(t, models.SeverityInfo, events[0].Severity)
+	assert.Equal(t, "file_move", events[0].Source, "organize mode keeps the file_move taxonomy")
+	assert.Equal(t, "Organized GOOD-700", events[0].Message)
 	assert.Equal(t, models.SeverityWarn, events[1].Severity)
+	assert.Equal(t, "file_move", events[1].Source)
 	assert.Contains(t, events[1].Message, "duplicate destination within batch")
 	assert.Equal(t, int64(1), skipCount.Load(), "skip counted for the summary")
 	assert.Contains(t, buf.String(), "⚠️")
@@ -381,7 +465,7 @@ func TestCliBatchPostApply_ApplyError_EmitsErrorEvent(t *testing.T) {
 		buf       bytes.Buffer
 		skipCount = &atomic.Int64{}
 	)
-	hook := cliBatchPostApply(emitter, &buf, "job-1", false, skipCount, &sync.Mutex{})
+	hook := cliBatchPostApply(emitter, &buf, "job-1", false, false, skipCount, &sync.Mutex{})
 
 	hook(context.Background(),
 		&worker.ApplyFileContext{FilePath: "x", Movie: &models.Movie{ID: "GOOD-700"}},
@@ -391,6 +475,7 @@ func TestCliBatchPostApply_ApplyError_EmitsErrorEvent(t *testing.T) {
 	events := emitter.snapshot()
 	require.Len(t, events, 1)
 	assert.Equal(t, models.SeverityError, events[0].Severity)
+	assert.Equal(t, "file_move", events[0].Source)
 	assert.Contains(t, events[0].Message, "Organize failed for GOOD-700")
 	assert.Empty(t, buf.String(), "failures surface via the event handler, not warning prints")
 }
@@ -401,7 +486,7 @@ func TestCliBatchPostApply_DryRunEmitsNothing(t *testing.T) {
 		buf       bytes.Buffer
 		skipCount = &atomic.Int64{}
 	)
-	hook := cliBatchPostApply(emitter, &buf, "job-1", true, skipCount, &sync.Mutex{})
+	hook := cliBatchPostApply(emitter, &buf, "job-1", true, false, skipCount, &sync.Mutex{})
 
 	hook(context.Background(),
 		&worker.ApplyFileContext{FilePath: "x", Movie: &models.Movie{ID: "GOOD-700"}},
@@ -416,7 +501,7 @@ func TestCliBatchPostApply_DryRunEmitsNothing(t *testing.T) {
 }
 
 func TestCliBatchPostApply_NilPayloads(t *testing.T) {
-	hook := cliBatchPostApply(&recordingEmitter{}, &bytes.Buffer{}, "job-1", false, &atomic.Int64{}, &sync.Mutex{})
+	hook := cliBatchPostApply(&recordingEmitter{}, &bytes.Buffer{}, "job-1", false, false, &atomic.Int64{}, &sync.Mutex{})
 	movie := &models.Movie{ID: "GOOD-700"}
 	afc := &worker.ApplyFileContext{FilePath: "x", Movie: movie}
 	afr := &worker.ApplyFileResult{}
@@ -427,9 +512,72 @@ func TestCliBatchPostApply_NilPayloads(t *testing.T) {
 
 	// Success with NO OrganizeResult (result nil) still emits the info event.
 	emitter := &recordingEmitter{}
-	hook = cliBatchPostApply(emitter, &bytes.Buffer{}, "job-1", false, &atomic.Int64{}, &sync.Mutex{})
+	hook = cliBatchPostApply(emitter, &bytes.Buffer{}, "job-1", false, false, &atomic.Int64{}, &sync.Mutex{})
 	hook(context.Background(), afc, &worker.ApplyFileResult{})
 	events := emitter.snapshot()
 	require.Len(t, events, 1)
 	assert.Equal(t, models.SeverityInfo, events[0].Severity)
+}
+
+// ---------------------------------------------------------------------------
+// Update-mode event taxonomy pins (#248 codex P2, F3): javinizer update runs
+// (SkipOrganize) must speak the API update resolver's nfo_gen vocabulary and
+// emit NO file_move success events — an in-place metadata refresh is not a
+// file move.
+// ---------------------------------------------------------------------------
+
+// updateModeEvents runs the hook in update mode against the given result and
+// returns the recorded events.
+func updateModeEvents(t *testing.T, emitter *recordingEmitter, afr *worker.ApplyFileResult) []models.Event {
+	t.Helper()
+	var buf bytes.Buffer
+	hook := cliBatchPostApply(emitter, &buf, "job-1", false, true, &atomic.Int64{}, &sync.Mutex{})
+	hook(context.Background(),
+		&worker.ApplyFileContext{FilePath: filepath.Join("src", "GOOD-700.mp4"), Movie: &models.Movie{ID: "GOOD-700"}},
+		afr,
+	)
+	return emitter.snapshot()
+}
+
+// assertNoFileMoveEvents fails when any recorded event uses the organize-mode
+// file_move source.
+func assertNoFileMoveEvents(t *testing.T, events []models.Event) {
+	t.Helper()
+	for _, ev := range events {
+		assert.NotEqual(t, "file_move", ev.Source, "update mode must never emit file_move events: %q", ev.Message)
+	}
+}
+
+func TestCliBatchPostApply_UpdateMode_Success_NfoGenTaxonomy(t *testing.T) {
+	emitter := &recordingEmitter{}
+	events := updateModeEvents(t, emitter, &worker.ApplyFileResult{Result: &workflow.ApplyResult{}})
+	require.Len(t, events, 1)
+	assert.Equal(t, models.SeverityInfo, events[0].Severity)
+	assert.Equal(t, "nfo_gen", events[0].Source, "update-mode success rides the API update path's nfo_gen taxonomy")
+	assert.Equal(t, "Updated GOOD-700", events[0].Message)
+	assertNoFileMoveEvents(t, events)
+}
+
+func TestCliBatchPostApply_UpdateMode_SuccessWithWarning(t *testing.T) {
+	emitter := &recordingEmitter{}
+	events := updateModeEvents(t, emitter, &worker.ApplyFileResult{Result: &workflow.ApplyResult{
+		OrganizeResult: &organizer.OrganizeResult{Warnings: []string{"nfo merged partial"}},
+	}})
+	require.Len(t, events, 2)
+	assert.Equal(t, "nfo_gen", events[0].Source)
+	assert.Equal(t, "Updated GOOD-700", events[0].Message)
+	assert.Equal(t, models.SeverityWarn, events[1].Severity)
+	assert.Equal(t, "nfo_gen", events[1].Source)
+	assert.Equal(t, "Update warning for GOOD-700: nfo merged partial", events[1].Message)
+	assertNoFileMoveEvents(t, events)
+}
+
+func TestCliBatchPostApply_UpdateMode_ApplyError(t *testing.T) {
+	emitter := &recordingEmitter{}
+	events := updateModeEvents(t, emitter, &worker.ApplyFileResult{Err: fmt.Errorf("read only")})
+	require.Len(t, events, 1)
+	assert.Equal(t, models.SeverityError, events[0].Severity)
+	assert.Equal(t, "nfo_gen", events[0].Source, "update-mode failure parity with the API update resolver")
+	assert.Equal(t, "Update failed for GOOD-700", events[0].Message)
+	assertNoFileMoveEvents(t, events)
 }

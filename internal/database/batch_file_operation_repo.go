@@ -34,48 +34,118 @@ func NewBatchFileOperationRepository(db *DB) *BatchFileOperationRepository {
 	}
 }
 
+// createInsertSQL is the write-atomic prune fence shared by Create and
+// CreateBatch (PR #248 codex P1). The jobs-status probe rides INSIDE the
+// INSERT ... SELECT's WHERE NOT EXISTS instead of running as a pre-check, so
+// SQLite evaluates the retention claim while holding the statement's write
+// lock and the sweep-flip-vs-create window collapses to zero: the retention
+// claim (DeleteOrganizedOlderThan's status flip + snapshot, committed inside
+// one transaction) either landed BEFORE this statement starts — the probe
+// sees the pruning status, no row is returned, and the caller gets
+// ErrJobPruning — or it must wait out the write lock this statement holds,
+// in which case its post-claim snapshot necessarily observes the committed
+// operation row. The previous pre-check shape let a sweep claim+snapshot
+// commit BETWEEN the check and the insert: the orphaned row was never
+// cleanup-backup-snapshotted, then got pruned while its apply had already
+// proceeded with mutations — filesystem changes with NO durable revert
+// ledger. A missing jobs row (or empty BatchJobID) keeps the pre-existing
+// allow semantics: the probe's inner SELECT finds no pruning row.
+//
+// The statement mirrors the GORM Create it replaces: RETURNING id hands the
+// autoincrement back to the caller, and zero returned rows mean the probe
+// suppressed the insert (the ONLY suppression cause — the statement-time
+// outcome is authoritative; a post-hoc advisory SELECT could race the sweep's
+// follow-up DELETE and misclassify).
+const createInsertSQL = `INSERT INTO batch_file_operations
+	(batch_job_id, movie_id, original_path, new_path, operation_type, nfo_snapshot, nfo_path, generated_files, revert_status, reverted_at, in_place_renamed, original_dir_path, created_at, updated_at)
+SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+WHERE NOT EXISTS (SELECT 1 FROM jobs WHERE jobs.id = ? AND jobs.status = ?)
+RETURNING id`
+
+// createInsertArgs normalizes op into createInsertSQL's bound argument list,
+// preserving the observable GORM Create contract: zero-valued fields carrying
+// `default:` tags bind the schema defaults ('move', 'applied'), and
+// created_at/updated_at stamp now when unset. The normalization assigns back
+// to op exactly like GORM's create callbacks did (callers read op.ID and the
+// stamped timestamps after Create); the tail re-binds BatchJobID plus the
+// pruning fence status for the WHERE NOT EXISTS probe.
+func createInsertArgs(op *models.BatchFileOperation, now time.Time) []any {
+	if op.OperationType == "" {
+		op.OperationType = models.OperationTypeMove
+	}
+	if op.RevertStatus == "" {
+		op.RevertStatus = models.RevertStatusApplied
+	}
+	if op.CreatedAt.IsZero() {
+		op.CreatedAt = now
+	}
+	if op.UpdatedAt.IsZero() {
+		op.UpdatedAt = now
+	}
+	return []any{
+		op.BatchJobID, op.MovieID, op.OriginalPath, op.NewPath, op.OperationType,
+		op.NFOSnapshot, op.NFOPath, op.GeneratedFiles, op.RevertStatus, op.RevertedAt,
+		op.InPlaceRenamed, op.OriginalDirPath, op.CreatedAt, op.UpdatedAt,
+		op.BatchJobID, pruningJobStatus,
+	}
+}
+
 // Create inserts a single batch file operation record.
 //
-// The prune-fence check runs BEFORE the autocommit insert, not inside a
-// deferred transaction around it: under WAL a read-then-write transaction
-// upgrade dies with SQLITE_BUSY_SNAPSHOT (surfaced as "database is locked")
-// when a concurrent apply worker commits between the read and the write —
-// the pool busy timeout does not cover snapshot conflicts. The bare INSERT
-// acquires the writer lock directly, so concurrent per-worker Begin calls
-// (each apply-file goroutine opens its operation row before any filesystem
-// mutation) wait on the busy timeout instead of deadlocking; retryOnLocked
-// additionally rides out any residual transient locked error (same seam as
-// JobRepository.CommitEnvelope).
+// The fence is the single-statement atomic probe of createInsertSQL: no
+// read-then-write transaction upgrade exists, so the WAL SQLITE_BUSY_SNAPSHOT
+// hazard this repository previously documented for a transaction-wrapped
+// check-then-insert cannot arise — the bare statement acquires the writer
+// lock directly, concurrent per-worker Begin calls (each apply-file goroutine
+// opens its operation row before any filesystem mutation) wait on the busy
+// timeout instead of deadlocking, and retryOnLocked rides out any residual
+// transient locked error (same seam as JobRepository.CommitEnvelope).
 func (r *BatchFileOperationRepository) Create(ctx context.Context, op *models.BatchFileOperation) error {
 	label := fmt.Sprintf("batch file operation %d", op.ID)
-	if err := ensureJobWritable(r.GetDB().WithContext(ctx), op.BatchJobID); err != nil {
-		return wrapDBErr("create", label, err)
-	}
+	var ids []uint
 	err := retryOnLocked(func() error {
-		return r.GetDB().WithContext(ctx).Create(op).Error
+		ids = ids[:0]
+		return r.GetDB().WithContext(ctx).Raw(createInsertSQL, createInsertArgs(op, time.Now().UTC())...).Scan(&ids).Error
 	})
 	if err != nil {
 		return wrapDBErr("create", label, err)
 	}
+	if len(ids) == 0 {
+		// Zero returned rows ⟺ the probe suppressed the insert: the owning
+		// job's retention claim is committed.
+		return wrapDBErr("create", label, ErrJobPruning)
+	}
+	op.ID = ids[0]
 	return nil
 }
 
 // CreateBatch inserts multiple batch file operation records in a single transaction.
-// Same fence placement as Create: checks run before the write-only transaction
-// (no reads inside, so the upgrade-to-write cannot hit SQLITE_BUSY_SNAPSHOT),
-// with retryOnLocked absorbing residual transient lock errors.
+// Same atomic fence as Create — each statement re-evaluates the pruning probe
+// under the write lock the transaction holds from its first insert onward, so
+// a retention claim can never commit between a probe and its insert, nor
+// between statements of the batch. The transaction stays write-only, so the
+// deferred BEGIN cannot hit the read-then-write SQLITE_BUSY_SNAPSHOT upgrade
+// hazard; a fenced op rolls the whole batch back (the pre-existing
+// all-or-nothing contract), with retryOnLocked absorbing residual transient
+// lock errors.
 func (r *BatchFileOperationRepository) CreateBatch(ctx context.Context, ops []*models.BatchFileOperation) error {
-	for _, op := range ops {
-		if err := ensureJobWritable(r.GetDB().WithContext(ctx), op.BatchJobID); err != nil {
-			return wrapDBErr("create", fmt.Sprintf("batch file operation %d", op.ID), err)
-		}
+	if len(ops) == 0 {
+		return nil
 	}
 	return retryOnLocked(func() error {
 		return r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 			for _, op := range ops {
-				if err := tx.Create(op).Error; err != nil {
-					return wrapDBErr("create", fmt.Sprintf("batch file operation %d", op.ID), err)
+				label := fmt.Sprintf("batch file operation %d", op.ID)
+				var ids []uint
+				if err := tx.Raw(createInsertSQL, createInsertArgs(op, time.Now().UTC())...).Scan(&ids).Error; err != nil {
+					return wrapDBErr("create", label, err)
 				}
+				if len(ids) == 0 {
+					// Fenced mid-batch: roll back the whole batch — a partially
+					// journaled batch would corrupt revert bookkeeping.
+					return wrapDBErr("create", label, ErrJobPruning)
+				}
+				op.ID = ids[0]
 			}
 			return nil
 		})

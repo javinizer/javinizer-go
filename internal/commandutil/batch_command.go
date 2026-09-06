@@ -301,12 +301,14 @@ func RunBatchCommand(ctx context.Context, w io.Writer, opts BatchCommandOptions)
 	// when planning organize destinations.
 	scrapeCfg.FileMatchInfo = matchInfo
 	applyCfg := applyOpts.ToApplyPhaseConfig()
-	// Audit hook (#244): persist per-file organize events (incl. authorized
-	// duplicate-skip warnings) to the eventlog and print skip warnings to the
-	// console, keeping CLI output in sync with the persisted audit truth.
+	// Audit hook (#244): persist per-file organize/update events (incl.
+	// authorized duplicate-skip warnings) to the eventlog and print skip
+	// warnings to the console, keeping CLI output in sync with the persisted
+	// audit truth. opts.SkipOrganize selects the update-mode event taxonomy
+	// (#248 codex P2, F3).
 	skipCount := &atomic.Int64{}
 	printMu := &sync.Mutex{}
-	applyCfg.PostApplyFunc = cliBatchPostApply(rt.emitter, w, opts.BatchJobID, opts.DryRun, skipCount, printMu)
+	applyCfg.PostApplyFunc = cliBatchPostApply(rt.emitter, w, opts.BatchJobID, opts.DryRun, opts.SkipOrganize, skipCount, printMu)
 	job.SetRunOptions(scrapeCfg, applyCfg)
 
 	// Subscribe to events for progress printing
@@ -430,15 +432,21 @@ func newCLIBatchRuntime(bs *bootstrapResult, cfg *config.Config, opts BatchComma
 }
 
 // cliBatchPostApply returns the apply-phase per-file hook for CLI batches. It
-// mirrors the API organize resolver's audit emission
-// (internal/api/batch/apply_config_builder.go): both flows persist an
-// "Organized"/"Organize failed" event plus one warning event per
-// OrganizeResult.Warnings entry — authorized duplicate skips land there and
-// were previously invisible from the CLI because no emitter existed (#244).
+// mirrors the API resolvers' audit emission
+// (internal/api/batch/apply_config_builder.go): organize flows persist an
+// "Organized"/"Organize failed" event (source file_move) plus one warning
+// event per OrganizeResult.Warnings entry — authorized duplicate skips land
+// there and were previously invisible from the CLI because no emitter
+// existed (#244). updateMode (javinizer update: files stay in place) takes
+// the API update resolver's taxonomy instead (#248 codex P2, F3): the
+// nfo_gen source with "Updated"/"Update failed" vocabulary, and NO file_move
+// events — an in-place metadata refresh is not a file move, and the previous
+// file_move/"Organized <id>" success event carried an empty new_path that
+// misrepresented the audit trail.
 // Warning text is also printed to the console so CLI output tells the same
 // truth as the persisted audit rows. Event emission is skipped for dry runs:
 // previews are not operations.
-func cliBatchPostApply(emitter eventlog.EventEmitter, w io.Writer, jobID string, dryRun bool, skipCount *atomic.Int64, printMu *sync.Mutex) func(context.Context, *worker.ApplyFileContext, *worker.ApplyFileResult) {
+func cliBatchPostApply(emitter eventlog.EventEmitter, w io.Writer, jobID string, dryRun, updateMode bool, skipCount *atomic.Int64, printMu *sync.Mutex) func(context.Context, *worker.ApplyFileContext, *worker.ApplyFileResult) {
 	return func(ctx context.Context, afc *worker.ApplyFileContext, afr *worker.ApplyFileResult) {
 		// Guard matches the API resolver: never deref a nil payload; the hook
 		// must not mask the original apply outcome with a panic.
@@ -448,8 +456,20 @@ func cliBatchPostApply(emitter eventlog.EventEmitter, w io.Writer, jobID string,
 		if dryRun {
 			return
 		}
+		// Event taxonomy by operation mode (see the doc comment): file_move
+		// organize vocabulary vs nfo_gen update vocabulary.
+		source := "file_move"
+		failureVerb := "Organize failed"
+		successVerb := "Organized"
+		warningVerb := "Organize warning"
+		if updateMode {
+			source = "nfo_gen"
+			failureVerb = "Update failed"
+			successVerb = "Updated"
+			warningVerb = "Update warning"
+		}
 		if afr.Err != nil {
-			_ = emitter.EmitOrganizeEvent(ctx, "file_move", fmt.Sprintf("Organize failed for %s", afc.Movie.ID), models.SeverityError, map[string]any{"job_id": jobID, "movie_id": afc.Movie.ID, "error": afr.Err.Error()})
+			_ = emitter.EmitOrganizeEvent(ctx, source, fmt.Sprintf("%s for %s", failureVerb, afc.Movie.ID), models.SeverityError, map[string]any{"job_id": jobID, "movie_id": afc.Movie.ID, "error": afr.Err.Error()})
 			return
 		}
 		var newPath string
@@ -461,9 +481,17 @@ func cliBatchPostApply(emitter eventlog.EventEmitter, w io.Writer, jobID string,
 				skipCount.Add(1)
 			}
 		}
-		_ = emitter.EmitOrganizeEvent(ctx, "file_move", fmt.Sprintf("Organized %s", afc.Movie.ID), models.SeverityInfo, map[string]any{"job_id": jobID, "movie_id": afc.Movie.ID, "file": afc.FilePath, "new_path": newPath})
+		eventCtx := map[string]any{"job_id": jobID, "movie_id": afc.Movie.ID, "file": afc.FilePath}
+		if !updateMode {
+			eventCtx["new_path"] = newPath
+		}
+		_ = emitter.EmitOrganizeEvent(ctx, source, fmt.Sprintf("%s %s", successVerb, afc.Movie.ID), models.SeverityInfo, eventCtx)
 		for _, warning := range warnings {
-			_ = emitter.EmitOrganizeEvent(ctx, "file_move", fmt.Sprintf("Organize warning for %s: %s", afc.Movie.ID, warning), models.SeverityWarn, map[string]any{"job_id": jobID, "movie_id": afc.Movie.ID, "file": afc.FilePath, "new_path": newPath, "warning": warning})
+			warnCtx := map[string]any{"job_id": jobID, "movie_id": afc.Movie.ID, "file": afc.FilePath, "warning": warning}
+			if !updateMode {
+				warnCtx["new_path"] = newPath
+			}
+			_ = emitter.EmitOrganizeEvent(ctx, source, fmt.Sprintf("%s for %s: %s", warningVerb, afc.Movie.ID, warning), models.SeverityWarn, warnCtx)
 		}
 		if len(warnings) > 0 {
 			printMu.Lock()
@@ -489,6 +517,20 @@ func defaultEventHandler(w io.Writer, event worker.JobEvent) {
 // defaultSummaryPrinter prints the standard summary for a batch command.
 func defaultSummaryPrinter(w io.Writer, opts BatchCommandOptions, result BatchCommandResult) {
 	successCount := result.SuccessCount
+	// PR #248 codex P2 (F2): a completed authorized duplicate skip lands
+	// JobStatusCompleted but moves NO bytes (the loser's row finalizes
+	// completed-noop), so organize/NFO success totals must exclude skips —
+	// completed minus SkippedDuplicates. Subtraction lives ONLY here at the
+	// summary aggregation site: "Metadata found" keeps counting every
+	// completed file (the loser WAS scraped and matched), while organize/output
+	// claims match the real file movement (1 winner moved must never read
+	// "Organized 2 file(s)"). Skips are organize-mode only, so the update-mode
+	// lines (driven by len(Movies) above and this subtraction being zero when
+	// no skips occurred) are unchanged.
+	organizedCount := successCount - result.SkippedDuplicates
+	if organizedCount < 0 {
+		organizedCount = 0
+	}
 
 	if opts.SkipOrganize {
 		// Update-style summary
@@ -496,9 +538,9 @@ func defaultSummaryPrinter(w io.Writer, opts BatchCommandOptions, result BatchCo
 	} else {
 		// Sort-style summary
 		if opts.DryRun {
-			fmt.Fprintf(w, "\n   Would organize %d file(s)\n", successCount)
+			fmt.Fprintf(w, "\n   Would organize %d file(s)\n", organizedCount)
 		} else {
-			fmt.Fprintf(w, "\n   Organized %d file(s)\n", successCount)
+			fmt.Fprintf(w, "\n   Organized %d file(s)\n", organizedCount)
 		}
 	}
 
@@ -508,10 +550,10 @@ func defaultSummaryPrinter(w io.Writer, opts BatchCommandOptions, result BatchCo
 	fmt.Fprintf(w, "IDs matched: %d\n", result.MatchedCount)
 	fmt.Fprintf(w, "Metadata found: %d\n", successCount)
 	if opts.GenerateNFO {
-		fmt.Fprintf(w, "NFOs generated: %s\n", map[bool]string{true: fmt.Sprintf("%d (dry-run)", successCount), false: fmt.Sprintf("%d", successCount)}[opts.DryRun])
+		fmt.Fprintf(w, "NFOs generated: %s\n", map[bool]string{true: fmt.Sprintf("%d (dry-run)", organizedCount), false: fmt.Sprintf("%d", organizedCount)}[opts.DryRun])
 	}
 	if !opts.SkipOrganize {
-		fmt.Fprintf(w, "Files organized: %s\n", map[bool]string{true: fmt.Sprintf("%d (dry-run)", successCount), false: fmt.Sprintf("%d", successCount)}[opts.DryRun])
+		fmt.Fprintf(w, "Files organized: %s\n", map[bool]string{true: fmt.Sprintf("%d (dry-run)", organizedCount), false: fmt.Sprintf("%d", organizedCount)}[opts.DryRun])
 	}
 	if result.SkippedDuplicates > 0 {
 		// An authorized intra-batch duplicate applies as a successful skip —
