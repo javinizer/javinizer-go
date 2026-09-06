@@ -100,10 +100,10 @@ func (s *inPlaceNoRenameFolderStrategy) Execute(plan *OrganizePlan) (*OrganizeRe
 	}
 
 	// overwroteOccupiedDest records that THIS execution replaced a
-	// bytes-bearing destination the authorization suppressed — keyed to
-	// EXECUTE-TIME occupancy (its own classification under the held locks):
-	// no-op and refused lanes never set it, and a failed publish discards it
-	// by returning before the warning.
+	// bytes-bearing destination the authorization suppressed — keyed to the
+	// PUBLISH-BOUND replacement signal of the move's own publish (PR #249
+	// codex P2): no-op and refused lanes never set it, and a failed publish
+	// discards it by returning before the warning.
 	overwroteOccupiedDest := false
 	// Shared parent-directory lock + target-file lock (dir before file): an in-place
 	// rename elsewhere drains shared holders before moving the directory, so this move
@@ -112,14 +112,13 @@ func (s *inPlaceNoRenameFolderStrategy) Execute(plan *OrganizePlan) (*OrganizeRe
 	err := withDestDirSharedLock(plan.TargetDir, func() error {
 		return withDestFileLock(plan.TargetPath, func() error {
 			if plan.overwriteAuthorized {
-				identical, sameIn, occupiedFile, err := classifyAuthorizedDestination(s.fs, plan.SourcePath, plan.TargetPath)
+				identical, sameIn, err := classifyAuthorizedDestination(s.fs, plan.SourcePath, plan.TargetPath)
 				if err != nil {
 					return err
 				}
 				if identical || sameIn {
 					return nil
 				}
-				overwroteOccupiedDest = occupiedFile
 			} else {
 				lexicalSelf, sameIn, err := refuseExistingDestination(s.fs, plan.SourcePath, plan.TargetPath)
 				if err != nil {
@@ -135,7 +134,14 @@ func (s *inPlaceNoRenameFolderStrategy) Execute(plan *OrganizePlan) (*OrganizeRe
 				}
 				return nil
 			}
-			return fsutil.MoveFileFs(s.fs, plan.SourcePath, plan.TargetPath)
+			// Publish-bound crumb: the move's own publish reports whether
+			// resident bytes were displaced AT the publish instant.
+			replaced, mErr := fsutil.MoveFileFsDestReplaced(s.fs, plan.SourcePath, plan.TargetPath)
+			if mErr != nil {
+				return mErr
+			}
+			overwroteOccupiedDest = replaced
+			return nil
 		})
 	})
 	if err != nil {

@@ -16,10 +16,14 @@ import (
 
 // authorizedOverwriteWarning renders the force-overwrite audit crumb: an
 // overwrite-authorized terminal leg replaced a bytes-bearing destination.
-// Wired lanes (all keyed to EXECUTE-TIME occupancy): organize move, organize
-// copy, organize link install (Remove+link replaces resident bytes at the
-// destination), the in-place strategy's inner file rename and non-rename
-// file move, and the in-place-norenamefolder file rename. Composition
+// Wired lanes (all keyed to PUBLISH-BOUND occupancy evidence — the publish's
+// own bound replacement signal (organize/in-place moves, organize copy,
+// inner rename via the fsutil DestReplaced verbs, PR #249 codex P2) or the
+// occupancy proven at adjacency with the destructive Remove for the link
+// install lane — never to plan-time or classify-time state): organize move,
+// organize copy, organize link install (Remove+link replaces resident bytes
+// at the destination), the in-place strategy's inner file rename and
+// non-rename file move, and the in-place-norenamefolder file rename. Composition
 // follows the authorized-duplicate warning (duplicates.go) so the whole
 // OrganizeResult.Warnings pipeline carries it verbatim — the CLI prints it
 // per-file next to the dup warnings, the eventlog persists one organize warn
@@ -378,25 +382,28 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 	if plan.moveFiles {
 		// overwroteOccupiedDest records that THIS execution replaced a
 		// bytes-bearing destination the authorization suppressed, keyed to
-		// EXECUTE-TIME occupancy (its own classification, taken under the
-		// destination locks): an occupant vacated post-plan never crumbs,
-		// an occupant planted post-plan always does. The no-op (identical /
-		// same-inode) and refused lanes never set it, and a failed publish
-		// discards it by returning before the warning.
+		// the PUBLISH-BOUND replacement signal of the move's own publish
+		// (PR #249 codex P2): an occupant vacated before the publish never
+		// crumbs, an occupant planted before the publish always does — even
+		// inside the classify → publish window under held (process-local)
+		// locks. The no-op (identical / same-inode) and refused lanes never
+		// set it, and a failed publish discards it by returning before the
+		// warning.
 		overwroteOccupiedDest := false
 		move := func() error {
 			if plan.overwriteAuthorized {
 				// Authorized: still classify (#224 Phase C) — symlink/dir dests
 				// refuse regardless of authorization; file dests replace; self
-				// and same-inode stay no-ops even here.
-				identical, sameIn, occupiedFile, err := classifyAuthorizedDestination(s.fs, plan.SourcePath, plan.TargetPath)
+				// and same-inode stay no-ops even here. The classification
+				// carries NO crumb evidence anymore: the publish's own bound
+				// replacement signal keys it below.
+				identical, sameIn, err := classifyAuthorizedDestination(s.fs, plan.SourcePath, plan.TargetPath)
 				if err != nil {
 					return err
 				}
 				if identical || sameIn {
 					return nil
 				}
-				overwroteOccupiedDest = occupiedFile
 			} else {
 				identical, sameIn, err := refuseExistingDestination(s.fs, plan.SourcePath, plan.TargetPath)
 				if err != nil {
@@ -420,7 +427,18 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 				}
 				return nil
 			}
-			return fsutil.MoveFileFs(s.fs, plan.SourcePath, plan.TargetPath)
+			// Publish-bound crumb: the move's own publish reports whether an
+			// occupied destination not aliasing the source was displaced AT the
+			// publish instant — the same-device leg probes at rename adjacency,
+			// the cross-device fallback inherits the staged publish's bound
+			// signal — so a foreign plant/vacate after the classification above
+			// can neither forge nor hide it.
+			replaced, mErr := fsutil.MoveFileFsDestReplaced(s.fs, plan.SourcePath, plan.TargetPath)
+			if mErr != nil {
+				return mErr
+			}
+			overwroteOccupiedDest = replaced
+			return nil
 		}
 
 		// Shared dir lock: concurrent organizes into one directory proceed in parallel
@@ -458,8 +476,10 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 
 	// overwroteOccupiedDest records that THIS execution replaced a
 	// bytes-bearing destination the authorization suppressed (same audit
-	// contract as the move lane — keyed to EXECUTE-TIME occupancy taken under
-	// the destination locks): no-op and refused lanes never set it, and a
+	// contract as the move lane): the copy lane keys it to the publish-bound
+	// replacement signal of its own staged publish (PR #249 codex P2), the
+	// link lane to occupancy proven at adjacency with its Remove+install —
+	// never to plan-time state. No-op and refused lanes never set it, and a
 	// failed install discards it by returning before the warning.
 	overwroteOccupiedDest := false
 	// Every destination-touching step runs under the destination lock: unauthorized
@@ -515,13 +535,20 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 				// Force-overwrite audit crumb (link lane): an authorized link
 				// install REPLACES resident bytes AT THE DESTINATION — the
 				// Remove below discards a foreign occupant's entry (plus its
-				// bytes when it held the last link). Execute-time occupancy
-				// keys the crumb: object present + NOT a lexical-self + NOT a
-				// same-inode alias (removing an alias name destroys nothing).
-				linkInstallOccupant = lerr == nil && !dstSameInode
-				if err := s.fs.Remove(plan.TargetPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-					return fmt.Errorf("failed to prepare target path for link: %w", err)
+				// bytes when it held the last link). The crumb keys on the
+				// REMOVE'S OWN OUTCOME — the destructive publish itself (PR #249
+				// codex P2, same publish-bound discipline as the copy/move
+				// lanes): nil means THIS lane physically unlinked a resident
+				// entry; a tolerated NotExist means the name was already vacant
+				// (nothing displaced — no crumb even though the probe above saw
+				// an occupant), and a plant inside the probe → Remove window
+				// that got unlinked always crumbs. Same-inode alias entries
+				// (removing one destroys nothing) stay excluded.
+				rmErr := s.fs.Remove(plan.TargetPath)
+				if rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
+					return fmt.Errorf("failed to prepare target path for link: %w", rmErr)
 				}
+				linkInstallOccupant = rmErr == nil && !dstSameInode
 			}
 
 			if dstLexicalSelf || (dstSameInode && !plan.overwriteAuthorized && plan.LinkMode == LinkModeHard) {
@@ -573,8 +600,12 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 				// Authorized copy lane: the regular-file gate is also needed here —
 				// a symlink/directory destination must refuse regardless of
 				// authorization (#224 codex P1). dstLexicalSelf never reaches here
-				// (refused at classification).
-				copyOccupant := false
+				// (refused at classification). The gate remains a REFUSAL policy
+				// only: the crumb evidence left classify-time probing for the
+				// publish-bound signal below (PR #249 codex P2) — the staged copy
+				// can stream for arbitrary length between this classification and
+				// the publish, so any occupancy answer captured here can be raced
+				// stale by a foreign plant/vacate (a false or suppressed crumb).
 				if plan.overwriteAuthorized && !dstLexicalSelf {
 					linfo, followed, lerr := destMaybeLstat(s.fs, plan.TargetPath)
 					if lerr != nil && !errors.Is(lerr, os.ErrNotExist) {
@@ -590,19 +621,17 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 						if !linfo.Mode().IsRegular() {
 							return fmt.Errorf("destination is not a regular file (cannot authorize-over): %s", plan.TargetPath)
 						}
-						// Force-overwrite audit crumb (copy lane): execute-time
-						// occupancy inside the regular-file gate — an object is
-						// present that is NOT lexical-self and NOT a same-inode
-						// alias, so this copy replaces FOREIGN resident bytes.
-						copyOccupant = !dstSameInode
 					}
 				}
-				if err := s.linker.copyFile(s.fs, plan.SourcePath, plan.TargetPath); err != nil {
-					return fmt.Errorf("failed to copy file: %w", err)
+				destReplaced, cerr := s.linker.copyFile(s.fs, plan.SourcePath, plan.TargetPath)
+				if cerr != nil {
+					return fmt.Errorf("failed to copy file: %w", cerr)
 				}
-				// Authorized copy leg actually delivered: the occupant's resident
-				// bytes were replaced.
-				overwroteOccupiedDest = copyOccupant
+				// Authorized copy leg delivered: the staged publish reports —
+				// bound to the replace-rename itself, alias-excluded against the
+				// source it streamed — whether resident bytes were displaced at
+				// the publish instant (crumb == PHYSICAL occupancy).
+				overwroteOccupiedDest = destReplaced
 			}
 			return nil
 		})

@@ -89,29 +89,25 @@ func logDestRefusal(c PlanConflict) {
 // authorized lane: symlink and directory destinations refuse with a sentence
 // (authorized overlays deliberately report a different class; regular-file
 // destinations are suppressed per authorization; self/same-inode → no-op per
-// D2) — one classifyExistingDestination call, identical refusal rules — plus
-// the force-overwrite audit crumb's EXECUTE-TIME occupancy evidence:
-// occupiedFile reports whether the classification just saw a bytes-bearing
-// regular file the authorization suppressed (a FILE conflict). Keying the
-// crumb to the execute-side state answers both TOCTOU failure classes of
-// plan-time evidence: an occupant vacated post-plan must NOT crumb (nothing
-// is replaced), and an occupant planted post-plan MUST crumb (its resident
-// bytes are about to be replaced).
-func classifyAuthorizedDestination(fs afero.Fs, src, dst string) (identical, sameInode, occupiedFile bool, err error) {
+// D2) — one classifyExistingDestination call, identical refusal rules.
+// The force-overwrite audit crumb no longer takes ANY evidence from this
+// classification (PR #249 codex P2): a regular-file occupation seen here can
+// be raced stale before the publish (the copy lane stages the whole stream
+// between classify and publish), so every authorized lane keys the crumb to
+// the PUBLISH-BOUND replacement signal returned by the fsutil publish verbs
+// (MoveFileFsDestReplaced / CopyFileFsDestReplaced / RenameDestReplaced).
+func classifyAuthorizedDestination(fs afero.Fs, src, dst string) (identical, sameInode bool, err error) {
 	c := classifyExistingDestination(fs, src, dst)
 	if c.Err != nil {
-		return false, false, false, c.Err
+		return false, false, c.Err
 	}
-	if c.Conflict == nil {
-		return c.Identical, c.SameInode, false, nil
-	}
-	if c.Conflict.Kind == ConflictFile {
-		// Suppressed by authorization: resident bytes sit at the destination
-		// RIGHT NOW — the authorized execute leg replaces them.
-		return c.Identical, c.SameInode, true, nil
+	if c.Conflict == nil || c.Conflict.Kind == ConflictFile {
+		// A regular-file occupation is suppressed by authorization — the
+		// publish reports whether resident bytes were ACTUALLY displaced.
+		return c.Identical, c.SameInode, nil
 	}
 	logDestRefusal(*c.Conflict)
-	return false, false, false, fmt.Errorf("cannot authorize-over a %s destination (refusing to replace): %s", c.Conflict.kindName(), c.Conflict.Path)
+	return false, false, fmt.Errorf("cannot authorize-over a %s destination (refusing to replace): %s", c.Conflict.kindName(), c.Conflict.Path)
 }
 
 // distinctConflictRenders returns each conflict's rendered form exactly once,

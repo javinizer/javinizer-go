@@ -155,9 +155,9 @@ type errLinker struct {
 	copyErr error
 }
 
-func (l errLinker) hardlink(_, _ string) error             { return l.hardErr }
-func (l errLinker) symlink(_, _ string) error              { return l.softErr }
-func (l errLinker) copyFile(_ afero.Fs, _, _ string) error { return l.copyErr }
+func (l errLinker) hardlink(_, _ string) error                     { return l.hardErr }
+func (l errLinker) symlink(_, _ string) error                      { return l.softErr }
+func (l errLinker) copyFile(_ afero.Fs, _, _ string) (bool, error) { return false, l.copyErr }
 
 // --- refuseExistingDestination: dangling-symlink probe under Stat fallback -----------
 
