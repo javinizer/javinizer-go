@@ -628,18 +628,23 @@ func replacementRecorder(rl RevertLog) downloader.ReplacementRecorder {
 // Returns an empty OperationID with no error when revert logging is disabled.
 // A configured logger's failed Begin is fatal for destructive apply work: no
 // filesystem step may run without a committed inverse in the ledger.
+//
+// #245: dry-run never starts journal writing at all — a dry-run plan mutates
+// nothing, so Begin's pre-record would sit in the real revert ledger as an
+// 'applied' phantom row for a planned-but-unexecuted organize. Returning the
+// empty OperationID rides the existing downstream guards instead of needing
+// dry-run branches there: Complete and completeRevertLogWithState are gated
+// on opID != "", no database row exists for CaptureSnapshot to fetch, and the
+// downloader's seedRoot/RecordReplacement lanes are unreachable with output
+// steps disabled. dbRevertLog's Complete/CompleteFailed additionally treat an
+// empty or unparsable OperationID as a nil-error no-op, so a skipped Begin
+// can never make a later completion throw.
 func (o *applyOrchImpl) beginRevertLog(ctx context.Context, cmd ApplyCmd) (OperationID, error) {
-	if o.revertLog == nil {
+	if o.revertLog == nil || cmd.DryRun {
 		return "", nil
 	}
 	opID, beginErr := o.revertLog.Begin(ctx, cmd)
 	if beginErr != nil {
-		if cmd.DryRun {
-			// Dry-run performs no destructive filesystem work, so a ledger is
-			// not required to preview the pipeline.
-			resolveLogger(o.logger).Warnf("[workflow] RevertLog.Begin failed for %s: %v", cmd.Movie.ID, beginErr)
-			return opID, nil
-		}
 		resolveLogger(o.logger).Errorf("[workflow] RevertLog.Begin failed for %s: %v — aborting before destructive steps", cmd.Movie.ID, beginErr)
 		return opID, fmt.Errorf("revert log begin failed: %w", beginErr)
 	}

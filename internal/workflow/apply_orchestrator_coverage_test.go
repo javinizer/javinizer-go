@@ -971,10 +971,10 @@ func TestApplyOrchImpl_Execute_RevertLogBeginError(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// applyOrchImpl.Execute — revertLog begin error (dry run)
+// applyOrchImpl.Execute — dry-run never touches the revert journal (#245)
 // ---------------------------------------------------------------------------
 
-func TestApplyOrchImpl_Execute_RevertLogBeginError_DryRun(t *testing.T) {
+func TestApplyOrchImpl_Execute_DryRunSkipsRevertJournal(t *testing.T) {
 	rl := &recordingRevertLog{beginErr: errors.New("begin failed")}
 	impl := &applyOrchImpl{
 		fs:        afero.NewMemMapFs(),
@@ -989,6 +989,35 @@ func TestApplyOrchImpl_Execute_RevertLogBeginError_DryRun(t *testing.T) {
 	})
 	assert.NoError(t, err)
 	require.NotNil(t, result)
+	// #245: dry-run starts NO journal writes — Begin is skipped outright (a
+	// begin failure is moot: no ledger is needed to preview) and the empty
+	// OperationID keeps Complete from running, leaving zero phantom rows.
+	assert.Zero(t, rl.beginCalls, "dry-run must skip RevertLog.Begin")
+	assert.Zero(t, rl.completeCalls, "dry-run must skip RevertLog.Complete")
+	assert.Empty(t, result.OperationID)
+}
+
+// A dry-run step failure rides completeRevertLogWithState with the skipped-Begin
+// empty OperationID: completion must no-op rather than throw (#245).
+func TestApplyOrchImpl_Execute_DryRunFailureSkipsCompleteFailed(t *testing.T) {
+	rl := &recordingRevertLog{}
+	impl := &applyOrchImpl{
+		fs:        afero.NewMemMapFs(),
+		organizer: &stubOrganizer{err: errors.New("organize boom")},
+		nfo:       &applyStubNFO{},
+		revertLog: rl,
+	}
+	result, err := impl.Execute(context.Background(), ApplyCmd{
+		Movie:    &models.Movie{ID: "TEST-001", Title: "Test"},
+		Match:    defaultMatch(),
+		Organize: OrganizeOptions{MoveFiles: true},
+		DryRun:   true,
+	})
+	require.Error(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, "organize", result.FailedStep)
+	assert.Zero(t, rl.beginCalls)
+	assert.Zero(t, rl.completeCalls, "CompleteFailed must no-op when Begin was skipped")
 }
 
 // ---------------------------------------------------------------------------
