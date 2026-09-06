@@ -38,11 +38,38 @@ func seedOrganizedJob(t *testing.T, db *DB, jobID string) *JobRepository {
 	return jobRepo
 }
 
+// countOpsForJob returns the number of COMMITTED operation rows for jobID.
+//
+// Busy-timeout conformance: the fixture connection already carries prod's
+// busy handling — newDatabaseTestDB goes through New, and normalizeSQLiteDSN
+// appends the same _busy_timeout=5000 to the shared-cache memory DSN that
+// file DSNs get. Shared-cache TABLE locks are the one conflict class SQLite
+// never routes through the busy handler: a reader/writer racing a held table
+// write lock gets SQLITE_LOCKED ("database table is locked") INSTANTLY, so
+// busy_timeout has nothing to wait on (Windows scheduling surfaces this
+// readily; Linux rarely). Every prod writer absorbs exactly this class via
+// retryOnLocked/isLocked; this helper, whose polling callers race the race
+// hammer's creators, mirrors that seam with a deadline-bounded retry instead
+// of treating a legal blocked observation as fatal. Any non-lock failure
+// (schema bugs, real corruption) still aborts the test immediately.
 func countOpsForJob(t *testing.T, db *DB, jobID string) int64 {
 	t.Helper()
-	var count int64
-	require.NoError(t, db.DB.Model(&models.BatchFileOperation{}).Where("batch_job_id = ?", jobID).Count(&count).Error)
-	return count
+	const lockRetryDeadline = 15 * time.Second
+	deadline := time.Now().Add(lockRetryDeadline)
+	var lastErr error
+	for attempts := 0; ; attempts++ {
+		var count int64
+		err := db.DB.Model(&models.BatchFileOperation{}).Where("batch_job_id = ?", jobID).Count(&count).Error
+		if err == nil {
+			return count
+		}
+		require.True(t, isLocked(err), "count batch_file_operations for %s: %v", jobID, err)
+		lastErr = err
+		if time.Now().After(deadline) {
+			t.Fatalf("batch_file_operations count stayed table-locked past %s (%d attempts): %v", lockRetryDeadline, attempts+1, lastErr)
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
 }
 
 // TestBFOW248_Create_PruningJobRejectedStatically pins the base fence: with
@@ -69,12 +96,16 @@ func TestBFOW248_Create_PruningJobRejectedStatically(t *testing.T) {
 
 // TestBFOW248_Create_ProbeRunsUnderWriteLock is the force-ordered zero-window
 // probe: hold the SQLite write lock on a second connection, start Create for
-// a LIVE job (it must block — its single statement needs the writer lock and
-// cannot complete early), then commit the retention claim from the lock
-// holder. The released Create statement evaluates its WHERE NOT EXISTS probe
-// against the now-committed pruning status — under the old pre-check shape
-// the check had already read "live" and the insert would have landed on the
-// pruned job.
+// a LIVE job (its single statement needs the writer lock, so it cannot insert
+// early), then commit the retention claim from the lock holder. The blocked
+// competitor is observed portably: on Linux/macOS the statement waits on the
+// busy timeout, while Windows shared-cache table locks bypass the busy
+// handler and fail it fast with the SQLITE_BUSY/SQLITE_LOCKED class (the
+// retryOnLocked budget then expires before release) — both legal blocked
+// observations, since nothing was committed. The released (or re-issued)
+// Create statement evaluates its WHERE NOT EXISTS probe against the
+// now-committed pruning status — under the old pre-check shape the check had
+// already read "live" and the insert would have landed on the pruned job.
 func TestBFOW248_Create_ProbeRunsUnderWriteLock(t *testing.T) {
 	db := newDatabaseTestDB(t)
 	repo := NewBatchFileOperationRepository(db)
@@ -101,11 +132,17 @@ func TestBFOW248_Create_ProbeRunsUnderWriteLock(t *testing.T) {
 		done <- repo.Create(ctx, &models.BatchFileOperation{BatchJobID: "w248-race", OriginalPath: "/race/src.mp4", NewPath: "/race/dst.mp4"})
 	}()
 
-	// The create must NOT complete while the writer lock is held: it is gated
-	// on the lock from its first (only) statement — including the probe.
+	// The create must NOT insert while the writer lock is held: it is gated on
+	// the lock from its first (only) statement — including the probe. A legal
+	// blocked observation is either "still waiting after 250ms" or an
+	// SQLITE_BUSY/SQLITE_LOCKED-class error (a write that committed nothing);
+	// illegal is any non-lock outcome during the held window — success would
+	// be the both-committed interleave this probe exists to kill.
+	blockedEarly := false
 	select {
 	case earlyErr := <-done:
-		t.Fatalf("Create returned while the writer lock was held — the probe is not inside the write path: %v", earlyErr)
+		require.True(t, isLocked(earlyErr), "Create returned a non-lock outcome while the writer lock was held — the probe is not inside the write path: %v", earlyErr)
+		blockedEarly = true
 	case <-time.After(250 * time.Millisecond):
 	}
 
@@ -117,8 +154,16 @@ func TestBFOW248_Create_ProbeRunsUnderWriteLock(t *testing.T) {
 	require.NoError(t, err)
 	committed = true
 
-	createErr := <-done
-	require.ErrorIs(t, createErr, ErrJobPruning, "the probe must observe the claim committed while it waited for the lock")
+	if blockedEarly {
+		// The fast-failed competitor committed nothing; pin the same fence
+		// directly: a create issued now evaluates its probe against the
+		// committed claim and must be rejected.
+		err = repo.Create(ctx, &models.BatchFileOperation{BatchJobID: "w248-race", OriginalPath: "/race/after.mp4", NewPath: "/race/dst.mp4"})
+		require.ErrorIs(t, err, ErrJobPruning, "a create evaluated after the committed claim must be fenced")
+	} else {
+		createErr := <-done
+		require.ErrorIs(t, createErr, ErrJobPruning, "the probe must observe the claim committed while it waited for the lock")
+	}
 	assert.Zero(t, countOpsForJob(t, db, "w248-race"))
 }
 
@@ -240,10 +285,14 @@ func TestBFOW248_CreateBatch_DefaultsParity(t *testing.T) {
 // TestBFOW248_Create_RaceSweepClosesWindow is the race-gate hammer: creators
 // loop against a job while the retention sweep claims it. Invariants:
 //
-//   - no create reports anything but success or ErrJobPruning;
+//   - no create reports anything but success, ErrJobPruning, or an exhausted
+//     transient-lock retry (a legal blocked observation on the Windows
+//     fail-fast table-lock path — nothing was committed, so it can never
+//     orphan a row; anything else is the illegal class);
 //   - once the claim is committed (observable inside the cleanup hook), EVERY
-//     subsequent create/batch is refused — there is no late-but-successful
-//     insert that would orphan a ledger row;
+//     subsequent create/batch is refused — proven deterministically by direct
+//     main-thread probes rather than worker timing, so no late-but-successful
+//     insert can orphan a ledger row;
 //   - every row created successfully pre-claim appears in the sweep snapshot
 //     and is deleted by the sweep (zero rows survive).
 func TestBFOW248_Create_RaceSweepClosesWindow(t *testing.T) {
@@ -255,6 +304,7 @@ func TestBFOW248_Create_RaceSweepClosesWindow(t *testing.T) {
 	successIDs := map[uint]bool{}
 	snapshotIDs := map[uint]bool{}
 	rejections := 0
+	lockBlocked := 0
 	var unexpectedErrs []error
 
 	claimCommitted := make(chan struct{})
@@ -283,13 +333,20 @@ func TestBFOW248_Create_RaceSweepClosesWindow(t *testing.T) {
 				}
 				err := repo.Create(context.Background(), op)
 				if err != nil {
-					// The ONLY admissible rejection is the prune fence; the
-					// first rejection ends this worker's loop. Assertions run
-					// on the main goroutine after wg.Wait.
+					// The first terminal error ends this worker's loop; assertions
+					// run on the main goroutine after wg.Wait. Legal terminal
+					// outcomes: the prune fence, or an exhausted transient-lock
+					// retry (Windows shared-cache table locks fail fast with no
+					// busy-handler cover, so a contended create can burn its
+					// retryOnLocked budget — a blocked write that committed
+					// nothing). Any other error is the illegal class.
 					mu.Lock()
-					if errors.Is(err, ErrJobPruning) {
+					switch {
+					case errors.Is(err, ErrJobPruning):
 						rejections++
-					} else {
+					case isLocked(err):
+						lockBlocked++
+					default:
 						unexpectedErrs = append(unexpectedErrs, err)
 					}
 					mu.Unlock()
@@ -360,8 +417,19 @@ func TestBFOW248_Create_RaceSweepClosesWindow(t *testing.T) {
 	require.ErrorIs(t, err, ErrJobPruning, "create-batch after the committed claim must be fenced")
 
 	wg.Wait()
-	assert.Empty(t, unexpectedErrs, "the prune fence is the ONLY admissible create rejection: %v", unexpectedErrs)
-	assert.Equal(t, 4, rejections, "every creator eventually hit the fence")
+	mu.Lock()
+	assert.Empty(t, unexpectedErrs, "only the prune fence or an exhausted transient-table-lock retry may refuse a create: %v", unexpectedErrs)
+	fenceHits := rejections
+	blockedWrites := lockBlocked
+	mu.Unlock()
+	// Seat-level breadth is calibrated, not loose: every creator exits on
+	// exactly one legal terminal observation, and the fence is proved
+	// deterministically by the five direct probes above — the both-committed
+	// interleave this test exists to kill cannot hide behind a blocked write,
+	// because a blocked write committed nothing while snapshot disjointness
+	// and the zero-survivor assert below run over only COMMITTED state.
+	assert.Equal(t, 4, fenceHits+blockedWrites, "every creator exits on exactly one terminal observation")
+	assert.Greater(t, fenceHits, 0, "at least one creator observed the fence directly")
 
 	close(releaseHook)
 	require.NoError(t, <-sweepDone)
