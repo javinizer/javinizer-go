@@ -103,13 +103,32 @@ func refuseIfUnsuppressibleAuthorizedDestination(fs afero.Fs, src, dst string) (
 	return false, false, fmt.Errorf("cannot authorize-over a %s destination (refusing to replace): %s", c.Conflict.kindName(), c.Conflict.Path)
 }
 
-// joinPlanConflictPaths joins conflict paths with "; " matching today's plan
-// rendering (bare paths, in order). PlanConflict.String() renders a bare
-// path; conflict semantics live in Kind.
-func joinPlanConflictPaths(cs []PlanConflict) string {
-	paths := make([]string, 0, len(cs))
+// distinctConflictRenders returns each conflict's rendered form exactly once,
+// first occurrence kept, zero/all/one surviving untouched. #246: an
+// unauthorized intra-batch duplicate of an on-disk-OCCUPIED destination
+// records TWO conflicts whose bare-path renders are identical (the
+// destination-occupation PlanConflict plus the appended ConflictDuplicate),
+// and composing both into the failure message printed the destination twice.
+// Semantics of every distinct conflict stay on the Kind list — only the
+// message render dedupes, so a genuinely twice-relevant destination still
+// blocks through plan.Conflicts exactly as before.
+func distinctConflictRenders(cs []PlanConflict) []string {
+	seen := make(map[string]struct{}, len(cs))
+	out := make([]string, 0, len(cs))
 	for _, c := range cs {
-		paths = append(paths, c.String())
+		s := c.String()
+		if _, dup := seen[s]; dup {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
 	}
-	return strings.Join(paths, "; ")
+	return out
+}
+
+// joinPlanConflictPaths joins conflict paths with "; " matching today's plan
+// rendering (bare paths, in order, deduplicated per #246). PlanConflict.String()
+// renders a bare path; conflict semantics live in Kind.
+func joinPlanConflictPaths(cs []PlanConflict) string {
+	return strings.Join(distinctConflictRenders(cs), "; ")
 }

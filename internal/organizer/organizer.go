@@ -859,10 +859,11 @@ func (o *Organizer) Organize(ctx context.Context, cmd OrganizeCmd) (*OrganizeRes
 func (o *Organizer) validatePlan(plan *OrganizePlan) []string {
 	issues := make([]string, 0)
 
-	// Check for conflicts
-	for _, c := range plan.Conflicts {
-		issues = append(issues, c.String()) // String() = bare path
-	}
+	// Check for conflicts — #246: a duplicated occupied destination surfaces
+	// its path ONCE (occupation conflict + ConflictDuplicate render the same
+	// bare path); distinctConflictRenders dedupes only the render, never the
+	// underlying conflict list the execution gate reads.
+	issues = append(issues, distinctConflictRenders(plan.Conflicts)...)
 
 	// Check source exists
 	if _, err := o.fs.Stat(plan.SourcePath); os.IsNotExist(err) {
