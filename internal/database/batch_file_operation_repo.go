@@ -314,25 +314,91 @@ func (r *BatchFileOperationRepository) UpdateJournalInTx(ctx context.Context, id
 	return wrapDBErr("update journal", label, commitErr)
 }
 
+// updateSQL is the write-atomic prune fence for Update (PR #248 codex P2),
+// binding the SAME claim probe createInsertSQL rides INSIDE the statement the
+// row write executes under. The replaced shape was probe-then-Save: the
+// ensureJobWritable status read ran as a separate statement, so a retention
+// claim (DeleteOrganizedOlderThan's status flip + snapshot, committed inside
+// one transaction) landing BETWEEN probe and Save was invisible — GORM Save's
+// UPDATE then affected zero rows and its INSERT fallback RESURRECTED the
+// operation row after the sweep had already snapshotted, cleanup-backed-up,
+// and deleted it (an orphaned ledger row: SQLite FK enforcement is off per
+// the repository DSN, so nothing rejected the dangling batch_job_id), or
+// claimed success for a row the already-snapshotted sweep deleted a moment
+// later. With the probe inside the WHERE, the claim either committed before
+// this statement starts — NOT EXISTS observes pruningJobStatus, zero rows are
+// affected, and the caller is classified below — or it must wait out the
+// write lock this statement holds, in which case its post-claim snapshot
+// necessarily observes the committed update. The GORM Save insert fallback
+// stays OUT of this path entirely: zero affected rows is an explicit
+// decision, never an implicit re-create.
+//
+// The statement mirrors the GORM Save update it replaces: every non-key
+// column binds the caller's struct field verbatim (Save writes zero values
+// too), updated_at stamps like Save's AutoUpdateTime, and the job probe binds
+// the op's (to-be-persisted) BatchJobID exactly like the pre-fix probe did.
+const updateSQL = `UPDATE batch_file_operations SET
+	batch_job_id = ?, movie_id = ?, original_path = ?, new_path = ?, operation_type = ?, nfo_snapshot = ?, nfo_path = ?, generated_files = ?, revert_status = ?, reverted_at = ?, in_place_renamed = ?, original_dir_path = ?, created_at = ?, updated_at = ?
+WHERE id = ? AND NOT EXISTS (SELECT 1 FROM jobs WHERE jobs.id = ? AND jobs.status = ?)`
+
+// updateArgs normalizes op into updateSQL's bound argument list, preserving
+// the observable GORM Save contract: every persisted column binds as carried
+// and updated_at stamps now, assigned back to op exactly like Save's
+// AutoUpdateTime callback did (callers read op.UpdatedAt after Update). The
+// tail re-binds the primary key, BatchJobID, and the pruning fence status for
+// the WHERE NOT EXISTS probe.
+func updateArgs(op *models.BatchFileOperation, now time.Time) []any {
+	op.UpdatedAt = now
+	return []any{
+		op.BatchJobID, op.MovieID, op.OriginalPath, op.NewPath, op.OperationType,
+		op.NFOSnapshot, op.NFOPath, op.GeneratedFiles, op.RevertStatus, op.RevertedAt,
+		op.InPlaceRenamed, op.OriginalDirPath, op.CreatedAt, op.UpdatedAt,
+		op.ID, op.BatchJobID, pruningJobStatus,
+	}
+}
+
 // Update saves all fields of the given batch file operation record.
 //
-// Callers carrying a generated-files journal MUST NOT use this: a full Save
+// Callers carrying a generated-files journal MUST NOT use this: a full save
 // rewrites generated_files with whatever snapshot the caller hydrated, so any
 // journal mutation committed after that snapshot is clobbered/resurrected.
 // The journal column is owned exclusively by UpdateJournalInTx; non-journal
 // completion writes go through UpdateNonJournalFields (wave-10 codex
 // follow-up).
+//
+// The prune fence is the single-statement atomic probe of updateSQL (same
+// shape as createInsertSQL — see Create), so no read-then-write window exists
+// and retryOnLocked rides out residual transient locked errors. Zero affected
+// rows is classified AFTER the statement, on committed state: ErrJobPruning
+// when the owning job's retention claim is observable (the probe suppressed
+// the write), otherwise ErrNotFound (UpdateJournalInTx parity) for a
+// genuinely missing operation row — ensureJobWritable's empty/missing-job
+// allow semantics pass through, so an orphaned row can never ride the
+// pre-fix Save insert fallback back into existence.
 func (r *BatchFileOperationRepository) Update(ctx context.Context, op *models.BatchFileOperation) error {
 	label := fmt.Sprintf("batch file operation %d", op.ID)
-	// Fence outside the (read-then-write) deferred transaction — see Create.
-	if err := ensureJobWritable(r.GetDB().WithContext(ctx), op.BatchJobID); err != nil {
-		return wrapDBErr("update", label, err)
-	}
+	var rowsAffected int64
 	err := retryOnLocked(func() error {
-		return r.GetDB().WithContext(ctx).Save(op).Error
+		result := r.GetDB().WithContext(ctx).Exec(updateSQL, updateArgs(op, time.Now().UTC())...)
+		if result.Error != nil {
+			return result.Error
+		}
+		rowsAffected = result.RowsAffected
+		return nil
 	})
 	if err != nil {
 		return wrapDBErr("update", label, err)
+	}
+	if rowsAffected == 0 {
+		// Fenced vs gone: the UPDATE's WHERE NOT EXISTS is the race-free
+		// fence; this re-probe only names the cause. A committed retention
+		// claim dominates (ErrJobPruning); a genuinely missing row keeps the
+		// UpdateJournalInTx missing-row contract (ErrNotFound) instead of the
+		// pre-fix Save fallback's resurrection insert.
+		if fenceErr := ensureJobWritable(r.GetDB().WithContext(ctx), op.BatchJobID); fenceErr != nil {
+			return wrapDBErr("update", label, fenceErr)
+		}
+		return wrapDBErr("update", label, ErrNotFound)
 	}
 	return nil
 }
