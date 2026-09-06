@@ -82,7 +82,7 @@ func TestForceOverwriteAudit_MoveLeg(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, result.Moved, "the authorized move executed")
 		require.Len(t, result.Warnings, 1, "exactly one audit crumb — the resident bytes' replacement")
-		assert.Equal(t, authorizedOverwriteWarning(dst), result.Warnings[0])
+		assert.Equal(t, authorizedOverwriteWarning(dst), filepath.ToSlash(result.Warnings[0]))
 		assert.Contains(t, filepath.ToSlash(result.Warnings[0]),
 			"overwrite authorized: replaced existing destination /dest/ABC-123/ABC-123.mkv")
 
@@ -139,7 +139,7 @@ func TestForceOverwriteAudit_CopyLeg(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, result.Moved, "the authorized copy executed")
 		require.Len(t, result.Warnings, 1, "exactly one audit crumb")
-		assert.Equal(t, authorizedOverwriteWarning(dst), result.Warnings[0])
+		assert.Equal(t, authorizedOverwriteWarning(dst), filepath.ToSlash(result.Warnings[0]))
 
 		content, readErr := afero.ReadFile(fs, dst)
 		require.NoError(t, readErr)
@@ -235,7 +235,7 @@ func TestForceOverwriteAudit_DuplicateSkip_NoDoubleWarn(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Len(t, winner.Warnings, 1)
-	assert.Equal(t, authorizedOverwriteWarning(dst), winner.Warnings[0],
+	assert.Equal(t, authorizedOverwriteWarning(dst), filepath.ToSlash(winner.Warnings[0]),
 		"the winner replaced the pre-seeded occupant")
 	assert.True(t, winner.Moved)
 	assert.False(t, winner.DuplicateSkipped)
@@ -338,7 +338,7 @@ func TestForceOverwriteAudit_TOCTOU_OccupiedOnlyAtExecute(t *testing.T) {
 		require.True(t, result.Moved)
 		require.Len(t, result.Warnings, 1,
 			"the execute leg replaced resident bytes the plan never saw — the crumb must fire")
-		assert.Equal(t, authorizedOverwriteWarning(dst), result.Warnings[0])
+		assert.Equal(t, authorizedOverwriteWarning(dst), filepath.ToSlash(result.Warnings[0]))
 
 		content, readErr := afero.ReadFile(fs, dst)
 		require.NoError(t, readErr)
@@ -356,7 +356,7 @@ func TestForceOverwriteAudit_TOCTOU_OccupiedOnlyAtExecute(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, result.Moved)
 		require.Len(t, result.Warnings, 1)
-		assert.Equal(t, authorizedOverwriteWarning(dst), result.Warnings[0])
+		assert.Equal(t, authorizedOverwriteWarning(dst), filepath.ToSlash(result.Warnings[0]))
 
 		content, readErr := afero.ReadFile(fs, dst)
 		require.NoError(t, readErr)
@@ -434,7 +434,7 @@ func TestForceOverwriteAudit_TOCTOU_FusedWedge(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, result.Moved)
 		require.Len(t, result.Warnings, 1, "the execute-time classification saw the wedged-in occupant")
-		assert.Equal(t, authorizedOverwriteWarning(dst), result.Warnings[0])
+		assert.Equal(t, authorizedOverwriteWarning(dst), filepath.ToSlash(result.Warnings[0]))
 		assert.GreaterOrEqual(t, wedge.probes, 2, "the wedge really fired between plan and execute")
 		content, readErr := afero.ReadFile(base, dst)
 		require.NoError(t, readErr)
@@ -455,7 +455,7 @@ func TestForceOverwriteAudit_TOCTOU_FusedWedge(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, result.Moved)
 		require.Len(t, result.Warnings, 1)
-		assert.Equal(t, authorizedOverwriteWarning(dst), result.Warnings[0])
+		assert.Equal(t, authorizedOverwriteWarning(dst), filepath.ToSlash(result.Warnings[0]))
 	})
 
 	t.Run("move: occupant vacated inside the plan-execute window stays silent", func(t *testing.T) {
@@ -524,7 +524,7 @@ func TestForceOverwriteAudit_BatchDup_TOCTOUInterplay(t *testing.T) {
 		require.True(t, winner.Moved)
 		require.Len(t, winner.Warnings, 1,
 			"plan-time evidence (pre-fix) missed this replacement entirely — execute-time keying catches it")
-		assert.Equal(t, authorizedOverwriteWarning(dst), winner.Warnings[0])
+		assert.Equal(t, authorizedOverwriteWarning(dst), filepath.ToSlash(winner.Warnings[0]))
 
 		loser, err := org.Organize(context.Background(), batchCmd("/in/B.mkv", tracker))
 		require.NoError(t, err)
@@ -610,7 +610,7 @@ func TestForceOverwriteAudit_LinkInstallLanes(t *testing.T) {
 		require.True(t, result.Moved)
 		require.Len(t, result.Warnings, 1,
 			"an authorized link install REPLACES resident bytes at the destination — the crumb must fire")
-		assert.Equal(t, authorizedOverwriteWarning(dst), result.Warnings[0])
+		assert.Equal(t, authorizedOverwriteWarning(dst), filepath.ToSlash(result.Warnings[0]))
 		require.Len(t, ml.Links, 1)
 		assert.Equal(t, "hard", ml.Links[0].Kind)
 		assert.Equal(t, dst, ml.Links[0].NewName)
@@ -630,7 +630,7 @@ func TestForceOverwriteAudit_LinkInstallLanes(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, result.Moved)
 		require.Len(t, result.Warnings, 1)
-		assert.Equal(t, authorizedOverwriteWarning(dst), result.Warnings[0])
+		assert.Equal(t, authorizedOverwriteWarning(dst), filepath.ToSlash(result.Warnings[0]))
 		require.Len(t, ml.Links, 1)
 		assert.Equal(t, "soft", ml.Links[0].Kind)
 	})
@@ -742,8 +742,8 @@ func TestForceOverwriteAudit_InPlaceLanes(t *testing.T) {
 		require.True(t, result.InPlaceRenamed)
 		require.Len(t, result.Warnings, 1,
 			"the authorized inner rename replaced the foreign occupant's resident bytes")
-		assert.Equal(t, authorizedOverwriteWarning(filepath.FromSlash("/pool/shared/ABC-100 vidfile.mkv")),
-			filepath.FromSlash(result.Warnings[0]))
+		assert.Equal(t, authorizedOverwriteWarning("/pool/shared/ABC-100 vidfile.mkv"),
+			filepath.ToSlash(result.Warnings[0]))
 		content, readErr := afero.ReadFile(fs, "/pool/shared/ABC-100 vidfile.mkv")
 		require.NoError(t, readErr)
 		assert.Equal(t, []byte("a-bytes"), content, "the plant's bytes were replaced")
@@ -787,8 +787,8 @@ func TestForceOverwriteAudit_InPlaceLanes(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, result.Moved)
 		require.Len(t, result.Warnings, 1)
-		assert.Equal(t, authorizedOverwriteWarning(filepath.FromSlash("/pool/mixed/ABC-100 vidfile.mkv")),
-			filepath.FromSlash(result.Warnings[0]))
+		assert.Equal(t, authorizedOverwriteWarning("/pool/mixed/ABC-100 vidfile.mkv"),
+			filepath.ToSlash(result.Warnings[0]))
 		content, readErr := afero.ReadFile(fs, "/pool/mixed/ABC-100 vidfile.mkv")
 		require.NoError(t, readErr)
 		assert.Equal(t, []byte("a-bytes"), content)
@@ -832,7 +832,7 @@ func TestForceOverwriteAudit_InPlaceNoRenameFolderLane(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, result.Moved)
 		require.Len(t, result.Warnings, 1)
-		assert.Equal(t, authorizedOverwriteWarning("/pool/ABC-100 vidfile.mkv"), result.Warnings[0])
+		assert.Equal(t, authorizedOverwriteWarning("/pool/ABC-100 vidfile.mkv"), filepath.ToSlash(result.Warnings[0]))
 		content, readErr := afero.ReadFile(fs, "/pool/ABC-100 vidfile.mkv")
 		require.NoError(t, readErr)
 		assert.Equal(t, []byte("a-bytes"), content, "the plant's bytes were replaced")
