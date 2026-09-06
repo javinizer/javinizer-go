@@ -480,7 +480,12 @@ func TestCliBatchPostApply_ApplyError_EmitsErrorEvent(t *testing.T) {
 	assert.Empty(t, buf.String(), "failures surface via the event handler, not warning prints")
 }
 
-func TestCliBatchPostApply_DryRunEmitsNothing(t *testing.T) {
+// TestCliBatchPostApply_DryRunCountsSkipsAndWarnsWithoutAuditing pins the
+// #248 codex P2 dry-run leg: a preview persists NOTHING (no eventlog audit)
+// but must still account the authorized duplicate skip and print its warning
+// — pre-fix both vanished behind the dry-run gate, so a dry-run summary
+// silently counted the loser as organized and never showed the warning.
+func TestCliBatchPostApply_DryRunCountsSkipsAndWarnsWithoutAuditing(t *testing.T) {
 	var (
 		emitter   = &recordingEmitter{}
 		buf       bytes.Buffer
@@ -489,15 +494,17 @@ func TestCliBatchPostApply_DryRunEmitsNothing(t *testing.T) {
 	hook := cliBatchPostApply(emitter, &buf, "job-1", true, false, skipCount, &sync.Mutex{})
 
 	hook(context.Background(),
-		&worker.ApplyFileContext{FilePath: "x", Movie: &models.Movie{ID: "GOOD-700"}},
+		&worker.ApplyFileContext{FilePath: filepath.Join("src", "GOOD-700.mp4"), Movie: &models.Movie{ID: "GOOD-700"}},
 		&worker.ApplyFileResult{Result: &workflow.ApplyResult{OrganizeResult: &organizer.OrganizeResult{
 			Warnings:         []string{"w"},
 			DuplicateSkipped: true,
 		}}},
 	)
 
-	assert.Empty(t, emitter.snapshot())
-	assert.Empty(t, buf.String())
+	assert.Empty(t, emitter.snapshot(), "previews are not operations — no eventlog audit in dry-run")
+	assert.Equal(t, int64(1), skipCount.Load(), "the dry-run skip counts identically to live")
+	assert.Contains(t, buf.String(), "⚠️")
+	assert.Contains(t, buf.String(), "w", "the dry-run warning prints to the console identically to live")
 }
 
 func TestCliBatchPostApply_NilPayloads(t *testing.T) {

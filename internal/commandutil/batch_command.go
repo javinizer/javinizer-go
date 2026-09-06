@@ -453,8 +453,14 @@ func newCLIBatchRuntime(bs *bootstrapResult, cfg *config.Config, opts BatchComma
 // file_move/"Organized <id>" success event carried an empty new_path that
 // misrepresented the audit trail.
 // Warning text is also printed to the console so CLI output tells the same
-// truth as the persisted audit rows. Event emission is skipped for dry runs:
-// previews are not operations.
+// truth as the persisted audit rows. Skip accounting + that console warning
+// surface run for DRY RUNS identically to live (#248 codex P2 dry-run leg):
+// the organizer's dry-run skip result carries DuplicateSkipped exactly like
+// the live leg, so the summary's organized totals reuse the live arithmetic
+// (completed minus SkippedDuplicates) and the authorized duplicate warning is
+// the ONLY place a preview tells the operator a file would be skipped —
+// previews persist nothing, but they must SAY it. Eventlog emission stays
+// skipped for dry runs: previews are not operations.
 //
 // Audit emission is deliberately DETACHED from the per-file task ctx
 // (#248 codex P2, F2): when apply exhausts WorkerTimeout, interpretApplyResult
@@ -471,6 +477,25 @@ func cliBatchPostApply(emitter eventlog.EventEmitter, w io.Writer, jobID string,
 		// must not mask the original apply outcome with a panic.
 		if afc == nil || afc.Movie == nil || afr == nil {
 			return
+		}
+		// Skip accounting + warning print run before the dry-run gate (see
+		// the doc comment); a failed apply keeps failures' single surface —
+		// no warning double-print on the error path.
+		var warnings []string
+		if afr.Err == nil && afr.Result != nil && afr.Result.OrganizeResult != nil {
+			warnings = afr.Result.OrganizeResult.Warnings
+			if afr.Result.OrganizeResult.DuplicateSkipped {
+				skipCount.Add(1)
+			}
+		}
+		if len(warnings) > 0 {
+			// Serialize with the event-handler prints (worker goroutines) so
+			// console lines never interleave mid-line.
+			printMu.Lock()
+			for _, warning := range warnings {
+				fmt.Fprintf(w, "   ⚠️  %s: %s\n", filepath.Base(afc.FilePath), warning)
+			}
+			printMu.Unlock()
 		}
 		if dryRun {
 			return
@@ -499,13 +524,8 @@ func cliBatchPostApply(emitter eventlog.EventEmitter, w io.Writer, jobID string,
 			return
 		}
 		var newPath string
-		var warnings []string
 		if afr.Result != nil && afr.Result.OrganizeResult != nil {
 			newPath = afr.Result.OrganizeResult.NewPath
-			warnings = afr.Result.OrganizeResult.Warnings
-			if afr.Result.OrganizeResult.DuplicateSkipped {
-				skipCount.Add(1)
-			}
 		}
 		eventCtx := map[string]any{"job_id": jobID, "movie_id": afc.Movie.ID, "file": afc.FilePath}
 		if !updateMode {
@@ -518,13 +538,6 @@ func cliBatchPostApply(emitter eventlog.EventEmitter, w io.Writer, jobID string,
 				warnCtx["new_path"] = newPath
 			}
 			emit(source, fmt.Sprintf("%s for %s: %s", warningVerb, afc.Movie.ID, warning), models.SeverityWarn, warnCtx)
-		}
-		if len(warnings) > 0 {
-			printMu.Lock()
-			defer printMu.Unlock()
-			for _, warning := range warnings {
-				fmt.Fprintf(w, "   ⚠️  %s: %s\n", filepath.Base(afc.FilePath), warning)
-			}
 		}
 	}
 }
