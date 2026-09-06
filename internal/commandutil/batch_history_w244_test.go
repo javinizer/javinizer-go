@@ -206,6 +206,11 @@ func TestRunBatchCommand_DuplicateSkip_PersistsAuditRows(t *testing.T) {
 // semantics: dry runs write NO revert-ledger rows (a preview never moves the
 // bytes a revert would target), no jobs row, and no eventlog entries — while
 // history rows still land with their dry_run flag so previews stay auditable.
+// Console side (#248 codex P2): because no jobs row persists, the header must
+// NOT print a queryable-looking "Batch Job: <id>" token (`history list --batch
+// <id>` would answer 'batch job not found'); it labels the run a preview.
+// The run identity for the ledger assertions below is read back from the
+// dry-run history rows' batch_job_id, not from the console.
 func TestRunBatchCommand_DryRun_WritesNoOperationalRows(t *testing.T) {
 	configPath, src, dest, dbPath := setupDuplicateBatch(t)
 
@@ -225,7 +230,13 @@ func TestRunBatchCommand_DryRun_WritesNoOperationalRows(t *testing.T) {
 	})
 	require.NoError(t, err)
 	out := buf.String()
-	batchID := batchIDFromOutput(t, out) // a preview still names its run identity
+
+	// Truthful rendering (#248 codex P2): the console advertises NO queryable
+	// batch identity for a preview — nothing here parses as `history list
+	// --batch <id>` input, and the header says why there is no audit ID.
+	assert.NotContains(t, out, "Batch Job:", "a preview must not print a queryable audit ID\n%s", out)
+	assert.Contains(t, out, "Preview (not persisted; no audit ID)",
+		"the dry-run header states the run is not persisted\n%s", out)
 
 	ctx := context.Background()
 	db := openAssertionDB(t, dbPath)
@@ -234,10 +245,6 @@ func TestRunBatchCommand_DryRun_WritesNoOperationalRows(t *testing.T) {
 	jobs, err := repos.JobRepo.List(ctx)
 	require.NoError(t, err)
 	assert.Empty(t, jobs, "dry run persists no jobs row")
-
-	opCount, err := repos.BatchFileOpRepo.CountByBatchJobID(ctx, batchID)
-	require.NoError(t, err)
-	assert.Zero(t, opCount, "dry run writes no batch_file_operations rows (revert ledger)")
 
 	eventCount, err := repos.EventRepo.Count(ctx)
 	require.NoError(t, err)
@@ -249,9 +256,20 @@ func TestRunBatchCommand_DryRun_WritesNoOperationalRows(t *testing.T) {
 	rows, err := repos.HistoryRepo.FindByOperation(ctx, models.HistoryOpOrganize, 50)
 	require.NoError(t, err)
 	require.NotEmpty(t, rows)
+	var batchID string
 	for _, h := range rows {
 		assert.True(t, h.DryRun, "organize history from a preview must carry the dry_run flag")
+		if h.BatchJobID != nil && *h.BatchJobID != "" {
+			batchID = *h.BatchJobID
+		}
 	}
+	require.NotEmpty(t, batchID, "dry-run history rows still bind the run identity internally")
+
+	// The preview's run identity must have NO revert-ledger rows under it —
+	// read back from the history rows since the console no longer names it.
+	opCount, err := repos.BatchFileOpRepo.CountByBatchJobID(ctx, batchID)
+	require.NoError(t, err)
+	assert.Zero(t, opCount, "dry run writes no batch_file_operations rows (revert ledger)")
 }
 
 // TestRunBatchCommand_RuntimeConstructionError covers the error branch where
@@ -307,6 +325,37 @@ func TestDefaultPresenter_HeaderPrintsBatchJobID(t *testing.T) {
 	buf.Reset()
 	p.OnHeader(&buf, BatchCommandOptions{CommandLabel: "Javinizer Sort"})
 	assert.NotContains(t, buf.String(), "Batch Job:")
+}
+
+// TestDefaultPresenter_HeaderDryRunPrintsNoQueryableID pins the #248 codex P2
+// truthful-rendering leg on the presenter directly: a dry run persists no
+// jobs row, so the header must not print a queryable-looking 'Batch Job: <id>'
+// (history list --batch <id> answers 'batch job not found'); it labels the
+// run a preview instead. Live runs keep printing the persisted identity.
+func TestDefaultPresenter_HeaderDryRunPrintsNoQueryableID(t *testing.T) {
+	var buf bytes.Buffer
+	p := &defaultBatchCommandPresenter{}
+	p.OnHeader(&buf, BatchCommandOptions{
+		CommandLabel: "Javinizer Sort",
+		SourcePath:   "src",
+		Destination:  "dest",
+		DryRun:       true,
+		BatchJobID:   "job-123",
+	})
+	out := buf.String()
+	assert.NotContains(t, out, "Batch Job:", "a preview prints no queryable audit ID\n%s", out)
+	assert.Contains(t, out, "Preview (not persisted; no audit ID)")
+	assert.NotContains(t, out, "job-123", "the unqueryable id must not leak into the header\n%s", out)
+
+	// Live regression: the persisted batch identity still prints verbatim.
+	buf.Reset()
+	p.OnHeader(&buf, BatchCommandOptions{
+		CommandLabel: "Javinizer Sort",
+		SourcePath:   "src",
+		Destination:  "dest",
+		BatchJobID:   "job-123",
+	})
+	assert.Contains(t, buf.String(), "Batch Job: job-123")
 }
 
 // TestDefaultSummaryPrinter_SkippedDuplicatesLine pins the summary truth:

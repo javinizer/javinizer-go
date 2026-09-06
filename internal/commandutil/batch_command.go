@@ -44,7 +44,18 @@ func (p *defaultBatchCommandPresenter) OnHeader(w io.Writer, opts BatchCommandOp
 	fmt.Fprintf(w, "Destination: %s\n", opts.Destination)
 	fmt.Fprintf(w, "Mode: %s\n", map[bool]string{true: "DRY RUN", false: "LIVE"}[opts.DryRun])
 	if opts.BatchJobID != "" {
-		fmt.Fprintf(w, "Batch Job: %s\n", opts.BatchJobID)
+		if opts.DryRun {
+			// Truthful rendering (#248 codex P2): a dry run intentionally
+			// persists no jobs row (NoopJobPersistence — #245's invariant
+			// stands), so the pre-generated id is NOT queryable:
+			// `history list --batch <id>` 404s with 'batch job not found'.
+			// Print a preview label instead of a queryable-looking audit
+			// ID; dry-run history rows stay reachable via plain
+			// `history list` under its Dry Run marker.
+			fmt.Fprintln(w, "Preview (not persisted; no audit ID)")
+		} else {
+			fmt.Fprintf(w, "Batch Job: %s\n", opts.BatchJobID)
+		}
 	}
 	if opts.OperationLabel != "" {
 		fmt.Fprintf(w, "Operation: %s\n", opts.OperationLabel)
@@ -127,9 +138,11 @@ type BatchCommandOptions struct {
 	// Resolved seam strings (caller must resolve before calling)
 	Resolved *workflow.ResolvedSeamStrings
 
-	// BatchJobID is populated by RunBatchCommand before presentation: it
-	// identifies the persisted batch (audit rows, jobs row) so
-	// `javinizer history list --batch <id>` can drill into the run.
+	// BatchJobID is populated by RunBatchCommand before presentation. A
+	// live run's id identifies the persisted batch (audit rows, jobs row)
+	// so `javinizer history list --batch <id>` can drill into the run; a
+	// dry run persists no jobs row, so the presenter prints a
+	// non-queryable preview label instead of the id (#248 codex P2).
 	// Callers must leave it empty.
 	BatchJobID string
 
