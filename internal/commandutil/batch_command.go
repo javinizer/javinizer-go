@@ -207,13 +207,22 @@ func RunBatchCommand(ctx context.Context, w io.Writer, opts BatchCommandOptions)
 		return nil
 	}
 
-	// Extract file paths with matched IDs
+	// Extract file paths with matched IDs, keeping the per-file match metadata.
+	// ScanAndMatch derives IsMultiPart / PartNumber / PartSuffix from the
+	// directory listing; the scrape + apply phases plan part-suffixed targets
+	// (<PARTSUFFIX> / multipart NFO + media layout) from FileMatchInfo, so the
+	// map must reach the job below — discarding it collapses every part of a
+	// multi-part file onto the same destination. Mirrors the API organize
+	// usecase, which seeds ScrapePhaseConfig.FileMatchInfo from
+	// discoverSiblingPartsWithMetadata (internal/api/batch/usecases.go).
 	filePaths := make([]string, 0)
 	uniqueIDs := make(map[string]bool)
+	matchInfo := make(map[string]models.FileMatchInfo, len(scanResult.Files))
 	for _, fmi := range scanResult.Files {
 		if fmi.MovieID != "" {
 			filePaths = append(filePaths, fmi.Path)
 			uniqueIDs[fmi.MovieID] = true
+			matchInfo[fmi.Path] = fmi
 		}
 	}
 	if len(filePaths) == 0 {
@@ -263,8 +272,14 @@ func RunBatchCommand(ctx context.Context, w io.Writer, opts BatchCommandOptions)
 			ArrayStrategy:  opts.Resolved.ArrayStrategy,
 		},
 	}
+	scrapeCfg := factory.NewScrapeConfig(opts.ScraperPriority, false, opts.ForceRefresh)
+	// Carry the scan/match metadata into the job: StartScrape seeds the
+	// result store from ScrapePhaseConfig.FileMatchInfo, and buildApplyCmd
+	// reads PartSuffix/PartNumber/IsMultiPart back out of the per-file result
+	// when planning organize destinations.
+	scrapeCfg.FileMatchInfo = matchInfo
 	job.SetRunOptions(
-		factory.NewScrapeConfig(opts.ScraperPriority, false, opts.ForceRefresh),
+		scrapeCfg,
 		applyOpts.ToApplyPhaseConfig(),
 	)
 

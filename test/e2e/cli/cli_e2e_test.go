@@ -243,6 +243,109 @@ func TestCLI_Sort_Multipart(t *testing.T) {
 	assert.Contains(t, string(nfo), "E2E Movie MULTI-001", "NFO carries scraped title\n%s", nfo)
 }
 
+// writePartSuffixConfig mirrors writeConfig but uses file_format
+// "<ID><PARTSUFFIX>" and leaves the custom regex off (regex_enabled: false) so
+// the built-in matcher + cd-suffix detection own the match — the exact shape
+// of the reported bug's library (GOOD-701-cd1/2/3 planned onto the same
+// destination).
+func writePartSuffixConfig(t *testing.T, dir string) string {
+	t.Helper()
+	cfg := `config_version: 3
+
+file_matching:
+    extensions:
+        - .mp4
+        - .mkv
+    regex_enabled: false
+
+output:
+    folder_format: "<ID>"
+    subfolder_format: []
+    file_format: "<ID><PARTSUFFIX>"
+    rename_file: true
+    download_cover: false
+    download_poster: false
+    download_extrafanart: false
+    download_trailer: false
+    download_actress: false
+    download_timeout: 5
+
+metadata:
+    nfo:
+        feature:
+            enabled: true
+        format:
+            filename_template: <ID><PARTSUFFIX>.nfo
+
+database:
+    type: sqlite
+    dsn: ` + filepath.Join(dir, "javinizer.db") + `
+    log_level: silent
+
+logging:
+    level: error
+`
+	p := filepath.Join(dir, "config.yaml")
+	require.NoError(t, os.WriteFile(p, []byte(cfg), 0o600))
+	return p
+}
+
+// TestCLI_Sort_Multipart_PartSuffixTargets pins the fix for the CLI
+// part-suffix drop (fix/cli-part-suffix-drop): RunBatchCommand must carry the
+// ScanAndMatch per-file metadata (IsMultiPart / PartNumber / PartSuffix) into
+// the batch job so the apply phase plans <PARTSUFFIX>-suffixed destinations.
+// Pre-fix, all of GOOD-701-cd1/2/3 planned onto dest/GOOD-701/GOOD-701.mp4 —
+// cd1 applied, cd2/cd3 conflicted as "organization validation failed".
+//
+// Both legs are asserted:
+//   - dry-run: zero "Apply failed" conflicts, "Would organize 3 file(s)",
+//     and nothing is moved or created;
+//   - live: all three parts land at distinct GOOD-701-cdN targets.
+func TestCLI_Sort_Multipart_PartSuffixTargets(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := writePartSuffixConfig(t, dir)
+	src := filepath.Join(dir, "lib")
+	dest := filepath.Join(dir, "dest")
+	require.NoError(t, os.MkdirAll(src, 0o700))
+	require.NoError(t, os.MkdirAll(dest, 0o700))
+	for _, part := range []string{"cd1", "cd2", "cd3"} {
+		writeFile(t, filepath.Join(src, "GOOD-701-"+part+".mp4"))
+	}
+
+	t.Run("dry-run plans distinct targets", func(t *testing.T) {
+		out, code := run(t, cfgPath, "sort", "--dry-run", "--move", src, "--dest", dest)
+		require.Equal(t, 0, code, "dry-run sort exited %d\n%s", code, out)
+		assert.NotContains(t, out, "Apply failed",
+			"no part may conflict on the planned destination\n%s", out)
+		assert.Contains(t, out, "Would organize 3 file(s)",
+			"all three -cdN parts must plan\n%s", out)
+		for _, part := range []string{"cd1", "cd2", "cd3"} {
+			assert.FileExists(t, filepath.Join(src, "GOOD-701-"+part+".mp4"),
+				"dry-run must not move sources\n%s", out)
+		}
+		entries, err := os.ReadDir(dest)
+		require.NoError(t, err)
+		assert.Empty(t, entries, "dry-run must not create organized output\n%s", out)
+	})
+
+	t.Run("live moves to part-suffixed targets", func(t *testing.T) {
+		out, code := run(t, cfgPath, "sort", "--move", src, "--dest", dest)
+		require.Equal(t, 0, code, "live sort exited %d\n%s", code, out)
+		assert.Contains(t, out, "Sort complete!")
+		assert.NotContains(t, out, "Apply failed", "no part may conflict on apply\n%s", out)
+		assert.Contains(t, out, "Organized 3 file(s)",
+			"all three -cdN parts must apply\n%s", out)
+		for _, part := range []string{"cd1", "cd2", "cd3"} {
+			assert.FileExists(t,
+				filepath.Join(dest, "GOOD-701", "GOOD-701-"+part+".mp4"),
+				"part %s must land at its part-suffixed target\n%s", part, out)
+		}
+		entries, err := os.ReadDir(src)
+		require.NoError(t, err)
+		assert.Empty(t, entries, "--move consumed the sources\n%s", out)
+	})
+}
+
 // TestCLI_DryRun confirms --dry-run previews the operation without moving
 // files or writing an NFO. Guards against a regression where dry-run silently
 // mutates the filesystem.
