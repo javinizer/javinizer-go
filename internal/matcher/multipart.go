@@ -77,6 +77,7 @@ func DetectPartSuffix(nameWithoutExt, id string) (int, string, string, string) {
 		}
 	}
 
+	// 3) Disc parts: cd/disc/disk + 1-2 digits - EXPLICIT
 	if m := reDiscPart.FindStringSubmatch(trimmed); len(m) == 3 {
 		token := strings.ToLower(m[1])
 		numStr := m[2]

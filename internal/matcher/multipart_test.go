@@ -39,6 +39,8 @@ func TestDetectPartSuffix(t *testing.T) {
 		{"IPX-535-cd1-4k", "IPX-535", 1, "-cd1", PatternExplicit},
 		{"IPX-535-disc-1", "IPX-535", 1, "-disc1", PatternExplicit},
 		{"IPX-535-cd12", "IPX-535", 12, "-cd12", PatternExplicit},
+		{"IPX-535cd1", "IPX-535", 1, "-cd1", PatternExplicit},
+		{"IPX-535CD2", "IPX-535", 2, "-cd2", PatternExplicit},
 
 		// Ambiguous letter patterns - need directory context validation
 		{"MDB-087A", "MDB-087", 1, "-A", PatternLetter},
