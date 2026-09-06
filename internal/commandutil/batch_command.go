@@ -3,6 +3,7 @@ package commandutil
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -25,6 +26,16 @@ import (
 // render the IDENTICAL line so `history list --batch <id>` can never be
 // pointed at an id that would answer 'batch job not found'.
 const noAuditIDLine = "Preview (not persisted; no audit ID)"
+
+// ErrJobPersistenceFailed marks failure of the initial jobs-row persist that
+// binds a live batch's audit identity (#248 codex P2). The store itself keeps
+// best-effort swallow-and-log semantics for the API path (in-flight jobs must
+// not die on a transient persist failure — a later persist self-heals and
+// persist_error rides the job status payload), but a one-shot CLI batch turns
+// the failure into a batch STARTUP error: RunBatchCommand returns non-nil,
+// the console lands on the NOT-persisted audit line, and no unqueryable
+// `history list --batch <id>` pointer is advertised. Match via errors.Is.
+var ErrJobPersistenceFailed = errors.New("batch job audit persistence failed")
 
 // BatchCommandPresenter abstracts CLI presentation for batch commands.
 // Per W-5: extracted from RunBatchCommand so that the orchestration logic is
@@ -328,6 +339,19 @@ func RunBatchCommand(ctx context.Context, w io.Writer, opts BatchCommandOptions)
 	batchCfg := BatchJobConfigFromAppConfig(cfg)
 	rt, err := newCLIBatchRuntimeFn(bs, cfg, opts, batchCfg, filePaths)
 	if err != nil {
+		if errors.Is(err, ErrJobPersistenceFailed) {
+			// #248 codex P2: the initial jobs-row persist failed, so the
+			// pre-generated BatchJobID names NOTHING durable — land on the
+			// NOT-persisted branch (never advertise the unqueryable id) and
+			// say setup failed instead of printing a normal per-file summary.
+			// Live runs only print the audit line: a dry run persists nothing
+			// BY DESIGN (NoopJobPersistence) and the header already carried
+			// the preview label.
+			if !opts.DryRun {
+				presenter.OnAuditID(w, opts, false)
+			}
+			fmt.Fprintf(w, "\n❌ Batch setup failed: %v\n", err)
+		}
 		return fmt.Errorf("failed to create batch job runtime: %w", err)
 	}
 	job := rt.job
@@ -483,9 +507,16 @@ func newCLIBatchRuntime(bs *bootstrapResult, cfg *config.Config, opts BatchComma
 		return nil, err
 	}
 	repos := bs.DB.Repositories()
+	// #248 codex P2: observe the create-time jobs-row persist failure the
+	// store otherwise only LOGS (its best-effort semantics stand for the API
+	// path — in-flight jobs must not die on a transient persist failure), so
+	// the post-create check below converts it into an ErrJobPersistenceFailed
+	// startup error rather than advertising an unqueryable batch id.
+	var initialPersistErr error
 	storeOpts := []worker.JobStoreOption{
 		worker.WithHistoryRepo(repos.HistoryRepo),
 		worker.WithSkipStartupRecovery(),
+		worker.WithInitialPersistErrorReporter(func(err error) { initialPersistErr = err }),
 	}
 	if opts.DryRun {
 		// A dry run previews work: no jobs row and no envelope persists (the
@@ -509,6 +540,14 @@ func newCLIBatchRuntime(bs *bootstrapResult, cfg *config.Config, opts BatchComma
 		Update:                persistUpdate,
 		WF:                    jobWF,
 	})
+	// #248 codex P2: fail startup on the initial jobs-row persist failure —
+	// pre-fix, the store only logged it while OnAuditID(..., true) advertised
+	// the never-persisted id and the batch pressed into phases whose audit
+	// trail could never land. A dry run's NoopJobPersistence never fails, so
+	// previews keep their not-persisted-BY-DESIGN handling.
+	if initialPersistErr != nil {
+		return nil, fmt.Errorf("%w: %w", ErrJobPersistenceFailed, initialPersistErr)
+	}
 	return &cliBatchRuntime{job: job, factory: factory, emitter: emitter}, nil
 }
 

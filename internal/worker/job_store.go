@@ -58,6 +58,16 @@ type JobStore struct {
 	// or marks that server's in-flight jobs failed.
 	skipStartupRecovery bool
 
+	// initialPersistErrFn (WithInitialPersistErrorReporter) observes the
+	// create-time jobs-row persist failure that createJob otherwise only LOGS.
+	// The store keeps its best-effort swallow-and-continue semantics (the API
+	// path: in-flight jobs must not die on a transient persist failure — a
+	// later persist self-heals and persist_error rides the job status
+	// payload); one-shot CLI runtimes register the hook to convert the failure
+	// into a batch STARTUP error instead of advertising an unqueryable batch
+	// id (#248 codex P2).
+	initialPersistErrFn func(err error)
+
 	// reconstructionDeps are infrastructure dependencies that reconstructed jobs
 	// (loaded from DB on startup) need for apply/rescrape phases. They are set
 	// after JobStore construction via SetReconstructionDeps, once the
@@ -121,6 +131,19 @@ func WithHistoryRepo(r database.HistoryRepositoryInterface) JobStoreOption {
 func WithSkipStartupRecovery() JobStoreOption {
 	return func(s *JobStore) {
 		s.skipStartupRecovery = true
+	}
+}
+
+// WithInitialPersistErrorReporter registers fn to receive the error when the
+// create-time jobs-row persist inside createJob fails. The failure keeps its
+// existing in-flight handling regardless (the job is constructed, registered,
+// and returned; the error is logged) — fn is purely an observation seam for
+// one-shot callers (the CLI batch runtime, #248 codex P2) that must turn a
+// missing audit row into a startup failure instead of advertising an
+// unqueryable `history list --batch <id>` pointer. Unset means no report.
+func WithInitialPersistErrorReporter(fn func(err error)) JobStoreOption {
+	return func(s *JobStore) {
+		s.initialPersistErrFn = fn
 	}
 }
 
@@ -619,6 +642,9 @@ func (s *JobStore) createJob(files []string, jobCfg ...*JobConfig) *BatchJob {
 
 	if err := s.persistence.PersistJob(job); err != nil {
 		logging.Warnf("Failed to persist new job %s: %v", job.ID.String(), err)
+		if s.initialPersistErrFn != nil {
+			s.initialPersistErrFn(err)
+		}
 	}
 
 	return job
