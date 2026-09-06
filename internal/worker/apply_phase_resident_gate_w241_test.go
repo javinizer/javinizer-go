@@ -4,7 +4,6 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
@@ -61,20 +60,27 @@ func w241ResidentPhaseFixture(t *testing.T, wf *organizerBackedWorkflow, maxWork
 }
 
 // TestApplyPhase_ResidentGate_ValidResidentKeepsItsBytes pins the F1
-// resident-valid half end to end: with the resident deliberately SLOWER than
-// the mover (multi-worker: the mover reaches observe while the resident
-// still validates; single-worker: residents-first scheduling validates the
-// resident before the mover starts), the mover's duplicate outcome resolves
-// only AFTER the resident's own terminal success — the resident's bytes stay
-// put and the mover duplicates (normal mode: conflict failure; force mode:
-// warning + skip) identically at every worker count.
+// resident-valid half end to end: the mover's apply leg rendezvous-waits on
+// the resident's leg RETURNING (its parked claim settled terminal-success
+// inside Organize — multi-worker the blocked mover resumes against an
+// already-settled claim; single-worker residents-first scheduling has the
+// resident validate before the mover starts), so the mover's duplicate
+// outcome resolves only AFTER the resident's own terminal success — the
+// resident's bytes stay put and the mover duplicates (normal mode: conflict
+// failure; force mode: warning + skip) identically at every worker count.
+// No sleep margin: the verdict the rendezvous meets is terminal-equivalent
+// to the mid-validation blocked-observe verdict by claim construction, and
+// sleeping could never order the mover's plan against the resident's fs
+// state anyway (windows-ci flake fix, #248).
 func TestApplyPhase_ResidentGate_ValidResidentKeepsItsBytes(t *testing.T) {
 	for _, maxWorkers := range []int{1, 2} {
 		for _, force := range []bool{false, true} {
 			t.Run(workerForceName(maxWorkers, force), func(t *testing.T) {
 				wf := &organizerBackedWorkflow{}
 				inputs, cfg, fs, _, residentPath, failed := w241ResidentPhaseFixture(t, wf, maxWorkers, force)
-				wf.sleepBeforeApply = map[string]time.Duration{residentPath: 200 * time.Millisecond}
+				residentReturned := make(chan struct{})
+				wf.applyReturnSignal = map[string]chan struct{}{residentPath: residentReturned}
+				wf.waitForApplyReturn = map[string]chan struct{}{"/in/B.mkv": residentReturned}
 
 				runW241PhaseWithDeadline(t, inputs, cfg)
 
@@ -107,6 +113,23 @@ func TestApplyPhase_ResidentGate_ValidResidentKeepsItsBytes(t *testing.T) {
 // onto the released key, and lands its bytes. Identical at every worker
 // count and in both authorization modes (the resident path sorts AFTER the
 // mover, additionally pinning the residents-first single-worker scheduling).
+//
+// Choreography is rendezvous-based (windows-ci flake fix, #248): the mover's
+// leg waits on the resident's leg RETURNING — vanish, ghost-gate release, and
+// standby promotion all complete inside it — so the mover plans against the
+// destination's POST-release truth. Without the rendezvous nothing ordered
+// the resident's vanish against the mover's plan: a concurrent mover could
+// plan while the destination was still occupied and carry a stale plan-time
+// occupation conflict (normal mode only — ForceUpdate suppresses it,
+// single-worker schedules the resident first) past its own promotion into a
+// fatal "organization validation failed" — the destination left EMPTY behind
+// a promoted mover is exactly the failure this test asserts against, so the
+// plan/execute legs must be deterministic, not sleep-margined. The promotion
+// machinery itself stays fully exercised: priming parks the pending ghost
+// claim with the mover as ordered standby, the ghost release promotes it,
+// and only a released parked claim lets the mover's bytes land (a
+// born-settled claim still verdicts duplicate and fails the destination
+// read below; a never-released one trips the deadline runner).
 func TestApplyPhase_GhostResidentGate_MoverLandsBytes(t *testing.T) {
 	for _, maxWorkers := range []int{1, 2} {
 		for _, force := range []bool{false, true} {
@@ -114,6 +137,9 @@ func TestApplyPhase_GhostResidentGate_MoverLandsBytes(t *testing.T) {
 				wf := &organizerBackedWorkflow{}
 				inputs, cfg, fs, _, residentPath, failed := w241ResidentPhaseFixture(t, wf, maxWorkers, force)
 				wf.vanishBeforeApply = map[string]bool{residentPath: true}
+				residentReturned := make(chan struct{})
+				wf.applyReturnSignal = map[string]chan struct{}{residentPath: residentReturned}
+				wf.waitForApplyReturn = map[string]chan struct{}{"/in/B.mkv": residentReturned}
 
 				runW241PhaseWithDeadline(t, inputs, cfg)
 

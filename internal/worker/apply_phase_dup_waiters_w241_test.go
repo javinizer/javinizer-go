@@ -31,10 +31,23 @@ type organizerBackedWorkflow struct {
 	fs                afero.Fs
 	vanishBeforeApply map[string]bool
 	panicBeforeApply  map[string]bool
-	// sleepBeforeApply delays one file's worker apply leg (codex P2, PR #241
-	// F1 resident-gating tests): with workers ≥ 2 a mover reaches the
-	// resident's pending parked claim WHILE the resident still validates.
-	sleepBeforeApply map[string]time.Duration
+	// Rendezvous seams (windows-ci flake fix, #248): the resident-gate tests
+	// must RELATE the sibling workers' apply legs without sleep margins.
+	// applyReturnSignal[path] closes when path's apply leg RETURNS — i.e.
+	// after vanish/validation and the tracker's settle-or-release all
+	// completed inside its Organize call — while waitForApplyReturn[path]
+	// blocks path's leg at ENTRY until the channel closes. Scheduling order
+	// alone cannot do this: on a coarse-timer loaded runner a concurrent
+	// mover can run its whole plan-before-observe while the resident's leg
+	// still waits to START, planning against a destination the resident's
+	// vanish has not cleared yet — the stale plan-time occupation conflict
+	// then survives the ghost release and fails the promoted mover in normal
+	// mode (the exact CI failure shape: destination left EMPTY after both
+	// legs). The rendezvous also preserves the single-worker deadlock pin:
+	// if residents-first fan-out ordering ever regressed, the blocked leg
+	// deadlocks and the deadline runner fires.
+	applyReturnSignal  map[string]chan struct{}
+	waitForApplyReturn map[string]chan struct{}
 }
 
 func (w *organizerBackedWorkflow) Scrape(context.Context, scrape.ScrapeCmd) (*scrape.ScrapeResult, *workflow.OrchestrationMeta, error) {
@@ -57,8 +70,11 @@ func (w *organizerBackedWorkflow) organizeCmd(cmd workflow.ApplyCmd) organizer.O
 }
 
 func (w *organizerBackedWorkflow) Apply(ctx context.Context, cmd workflow.ApplyCmd) (*workflow.ApplyResult, error) {
-	if d := w.sleepBeforeApply[cmd.Match.Path]; d > 0 {
-		time.Sleep(d)
+	if ch := w.waitForApplyReturn[cmd.Match.Path]; ch != nil {
+		<-ch
+	}
+	if ch := w.applyReturnSignal[cmd.Match.Path]; ch != nil {
+		defer close(ch)
 	}
 	if w.panicBeforeApply[cmd.Match.Path] {
 		panic("owner apply boom")
