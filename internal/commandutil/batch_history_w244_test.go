@@ -308,9 +308,14 @@ func TestNewCLIBatchRuntime_NilWorkflowFactory(t *testing.T) {
 	assert.Contains(t, err.Error(), "workflow factory unavailable")
 }
 
-// TestDefaultPresenter_HeaderPrintsBatchJobID pins the presenter surface the
-// e2e suite parses: the run's persisted batch identity is printed once.
-func TestDefaultPresenter_HeaderPrintsBatchJobID(t *testing.T) {
+// TestDefaultPresenter_HeaderDefersAuditID pins the #248 codex P2 (R2)
+// restructure: at header time (pre-scan) the persistence state is UNKNOWN —
+// a live jobs row only exists once the runtime is constructed post-scan, and
+// the scan early-exit legs never persist one — so the header renders NO
+// batch identity in any mode. OnAuditID owns the identity line: the live id
+// prints strictly post-persist, early exits get the no-audit sentence, and
+// the unqueryable id never leaks.
+func TestDefaultPresenter_HeaderDefersAuditID(t *testing.T) {
 	var buf bytes.Buffer
 	p := &defaultBatchCommandPresenter{}
 	p.OnHeader(&buf, BatchCommandOptions{
@@ -319,19 +324,38 @@ func TestDefaultPresenter_HeaderPrintsBatchJobID(t *testing.T) {
 		Destination:  "dest",
 		BatchJobID:   "job-123",
 	})
+	out := buf.String()
+	assert.NotContains(t, out, "Batch Job:", "live header defers the identity to post-persist\n%s", out)
+	assert.NotContains(t, out, "job-123", "the not-yet-persisted id must not leak from the pre-scan header\n%s", out)
+
+	// Post-persist (live): the queryable identity prints verbatim — the
+	// console surface the e2e suite parses.
+	buf.Reset()
+	p.OnAuditID(&buf, BatchCommandOptions{BatchJobID: "job-123"}, true)
 	assert.Contains(t, buf.String(), "Batch Job: job-123")
 
-	// Empty id (tests that never reach the batch stage) prints nothing.
+	// Early-exit (nothing persisted): the no-audit sentence, never the id.
 	buf.Reset()
-	p.OnHeader(&buf, BatchCommandOptions{CommandLabel: "Javinizer Sort"})
+	p.OnAuditID(&buf, BatchCommandOptions{BatchJobID: "job-123"}, false)
+	out = buf.String()
+	assert.NotContains(t, out, "Batch Job:")
+	assert.Contains(t, out, "Preview (not persisted; no audit ID)")
+	assert.NotContains(t, out, "job-123")
+
+	// Degenerate guard: persisted claimed with no id available still prints
+	// no empty 'Batch Job: ' token.
+	buf.Reset()
+	p.OnAuditID(&buf, BatchCommandOptions{}, true)
 	assert.NotContains(t, buf.String(), "Batch Job:")
+	assert.Contains(t, buf.String(), "Preview (not persisted; no audit ID)")
 }
 
 // TestDefaultPresenter_HeaderDryRunPrintsNoQueryableID pins the #248 codex P2
 // truthful-rendering leg on the presenter directly: a dry run persists no
 // jobs row, so the header must not print a queryable-looking 'Batch Job: <id>'
 // (history list --batch <id> answers 'batch job not found'); it labels the
-// run a preview instead. Live runs keep printing the persisted identity.
+// run a preview instead. Live runs keep printing the persisted identity —
+// deferred to OnAuditID after the jobs row exists (#248 codex P2, R2).
 func TestDefaultPresenter_HeaderDryRunPrintsNoQueryableID(t *testing.T) {
 	var buf bytes.Buffer
 	p := &defaultBatchCommandPresenter{}
@@ -347,7 +371,9 @@ func TestDefaultPresenter_HeaderDryRunPrintsNoQueryableID(t *testing.T) {
 	assert.Contains(t, out, "Preview (not persisted; no audit ID)")
 	assert.NotContains(t, out, "job-123", "the unqueryable id must not leak into the header\n%s", out)
 
-	// Live regression: the persisted batch identity still prints verbatim.
+	// Live flow (#248 codex P2, R2): the pre-scan header prints NO identity
+	// (persistence state unknown), and the persisted batch identity prints
+	// verbatim post-persist via OnAuditID.
 	buf.Reset()
 	p.OnHeader(&buf, BatchCommandOptions{
 		CommandLabel: "Javinizer Sort",
@@ -355,6 +381,9 @@ func TestDefaultPresenter_HeaderDryRunPrintsNoQueryableID(t *testing.T) {
 		Destination:  "dest",
 		BatchJobID:   "job-123",
 	})
+	assert.NotContains(t, buf.String(), "Batch Job:", "live header carries no identity pre-scan\n%s", buf.String())
+	buf.Reset()
+	p.OnAuditID(&buf, BatchCommandOptions{BatchJobID: "job-123"}, true)
 	assert.Contains(t, buf.String(), "Batch Job: job-123")
 }
 

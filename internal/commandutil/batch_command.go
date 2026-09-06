@@ -18,13 +18,31 @@ import (
 	"github.com/javinizer/javinizer-go/internal/workflow"
 )
 
+// noAuditIDLine is the single console sentence for runs with NO persisted
+// jobs row (#248 codex P2, R2): dry runs (a preview persists no queryable
+// batch identity) and live runs that exit during scan (zero files / zero
+// matched IDs) before the runtime ever persists a jobs row. Both branches
+// render the IDENTICAL line so `history list --batch <id>` can never be
+// pointed at an id that would answer 'batch job not found'.
+const noAuditIDLine = "Preview (not persisted; no audit ID)"
+
 // BatchCommandPresenter abstracts CLI presentation for batch commands.
 // Per W-5: extracted from RunBatchCommand so that the orchestration logic is
 // decoupled from presentation. Default presenter prints to stdout;
 // tests can use a silent presenter.
 type BatchCommandPresenter interface {
 	// OnHeader prints the command header (source, destination, mode, etc.).
+	// The header renders NO audit identity: at header time (pre-scan) whether
+	// a jobs row will exist is still unknown (#248 codex P2, R2) —
+	// OnAuditID owns every audit-identity sentence.
 	OnHeader(w io.Writer, opts BatchCommandOptions)
+	// OnAuditID prints the run's audit-trail identity line, called only once
+	// the persistence truth is known (#248 codex P2, R2): persisted=true
+	// renders the queryable batch id for live runs, strictly AFTER the
+	// runtime persisted the jobs row; persisted=false renders the 'no audit
+	// trail' sentence for runs that exit before anything was persisted (live
+	// early-exit during scan), identical to the dry-run header preview label.
+	OnAuditID(w io.Writer, opts BatchCommandOptions, persisted bool)
 	// OnScanStart prints the scan-started message.
 	OnScanStart(w io.Writer)
 	// OnNoFiles prints the no-files-found message.
@@ -43,19 +61,19 @@ func (p *defaultBatchCommandPresenter) OnHeader(w io.Writer, opts BatchCommandOp
 	fmt.Fprintf(w, "Source: %s\n", opts.SourcePath)
 	fmt.Fprintf(w, "Destination: %s\n", opts.Destination)
 	fmt.Fprintf(w, "Mode: %s\n", map[bool]string{true: "DRY RUN", false: "LIVE"}[opts.DryRun])
-	if opts.BatchJobID != "" {
-		if opts.DryRun {
-			// Truthful rendering (#248 codex P2): a dry run intentionally
-			// persists no jobs row (NoopJobPersistence — #245's invariant
-			// stands), so the pre-generated id is NOT queryable:
-			// `history list --batch <id>` 404s with 'batch job not found'.
-			// Print a preview label instead of a queryable-looking audit
-			// ID; dry-run history rows stay reachable via plain
-			// `history list` under its Dry Run marker.
-			fmt.Fprintln(w, "Preview (not persisted; no audit ID)")
-		} else {
-			fmt.Fprintf(w, "Batch Job: %s\n", opts.BatchJobID)
-		}
+	if opts.BatchJobID != "" && opts.DryRun {
+		// Truthful rendering (#248 codex P2): a dry run intentionally
+		// persists no jobs row (NoopJobPersistence — #245's invariant
+		// stands), so the pre-generated id is NOT queryable:
+		// `history list --batch <id>` 404s with 'batch job not found'.
+		// Print a preview label instead of a queryable-looking audit
+		// ID; dry-run history rows stay reachable via plain
+		// `history list` under its Dry Run marker.
+		// A LIVE header prints no identity at all (#248 codex P2, R2):
+		// whether a jobs row will exist is only known once the runtime is
+		// constructed post-scan (the early-exit scan legs persist nothing),
+		// so the identity line defers to OnAuditID.
+		fmt.Fprintln(w, noAuditIDLine)
 	}
 	if opts.OperationLabel != "" {
 		fmt.Fprintf(w, "Operation: %s\n", opts.OperationLabel)
@@ -64,6 +82,19 @@ func (p *defaultBatchCommandPresenter) OnHeader(w io.Writer, opts BatchCommandOp
 		fmt.Fprintf(w, "Generate NFO: %v\n", opts.GenerateNFO)
 	}
 	fmt.Fprintf(w, "Download Media: %v\n\n", opts.DownloadMedia)
+}
+
+// OnAuditID renders the audit identity once persistence is known (see the
+// interface contract): live runs get the queryable id strictly post-persist;
+// every unpersisted branch (live scan early-exit) gets the identical
+// dry-run no-audit sentence, so no console output ever names a batch id
+// whose jobs row does not exist.
+func (p *defaultBatchCommandPresenter) OnAuditID(w io.Writer, opts BatchCommandOptions, persisted bool) {
+	if persisted && opts.BatchJobID != "" {
+		fmt.Fprintf(w, "Batch Job: %s\n", opts.BatchJobID)
+		return
+	}
+	fmt.Fprintln(w, noAuditIDLine)
 }
 
 func (p *defaultBatchCommandPresenter) OnScanStart(w io.Writer) {
@@ -88,6 +119,9 @@ type SilentBatchCommandPresenter struct{}
 
 // OnHeader implements BatchCommandPresenter.OnHeader as a no-op.
 func (p *SilentBatchCommandPresenter) OnHeader(_ io.Writer, _ BatchCommandOptions) {}
+
+// OnAuditID implements BatchCommandPresenter.OnAuditID as a no-op.
+func (p *SilentBatchCommandPresenter) OnAuditID(_ io.Writer, _ BatchCommandOptions, _ bool) {}
 
 // OnScanStart implements BatchCommandPresenter.OnScanStart as a no-op.
 func (p *SilentBatchCommandPresenter) OnScanStart(_ io.Writer) {}
@@ -140,10 +174,11 @@ type BatchCommandOptions struct {
 
 	// BatchJobID is populated by RunBatchCommand before presentation. A
 	// live run's id identifies the persisted batch (audit rows, jobs row)
-	// so `javinizer history list --batch <id>` can drill into the run; a
-	// dry run persists no jobs row, so the presenter prints a
-	// non-queryable preview label instead of the id (#248 codex P2).
-	// Callers must leave it empty.
+	// so `javinizer history list --batch <id>` can drill into the run —
+	// printed via OnAuditID strictly AFTER the runtime persisted the jobs
+	// row; dry runs and live scan early-exits persist nothing, so the
+	// presenter renders the non-queryable no-audit sentence instead of the
+	// id (#248 codex P2, R2). Callers must leave it empty.
 	BatchJobID string
 
 	// Header label printed at the start (e.g., "Javinizer Sort" or "Javinizer Update")
@@ -243,6 +278,14 @@ func RunBatchCommand(ctx context.Context, w io.Writer, opts BatchCommandOptions)
 
 	if len(scanResult.Files) == 0 {
 		presenter.OnNoFiles(w)
+		// Live early-exit (#248 codex P2, R2): the runtime is never
+		// constructed and NO jobs row exists, so offer no queryable batch id
+		// (the pre-scan header printed none) — print the identical no-audit
+		// sentence dry runs use. Dry runs already labelled the preview in
+		// the header; do not repeat it.
+		if !opts.DryRun {
+			presenter.OnAuditID(w, opts, false)
+		}
 		return nil
 	}
 
@@ -265,6 +308,12 @@ func RunBatchCommand(ctx context.Context, w io.Writer, opts BatchCommandOptions)
 		}
 	}
 	if len(filePaths) == 0 {
+		// Same live early-exit leg: scan found video files but no matched
+		// IDs, nothing was persisted — no queryable audit id is offered
+		// (#248 codex P2, R2).
+		if !opts.DryRun {
+			presenter.OnAuditID(w, opts, false)
+		}
 		return nil
 	}
 
@@ -283,6 +332,16 @@ func RunBatchCommand(ctx context.Context, w io.Writer, opts BatchCommandOptions)
 	}
 	job := rt.job
 	factory := rt.factory
+
+	// Print the queryable batch identity ONLY post-persist (#248 codex P2,
+	// R2): CreatePersistentStandaloneJob writes the jobs row at creation,
+	// so from here on `history list --batch <id>` resolves — printing it
+	// any earlier named an id the scan early-exit legs never persisted.
+	// Dry runs persist nothing (NoopJobPersistence) and keep the header's
+	// preview label instead.
+	if !opts.DryRun {
+		presenter.OnAuditID(w, opts, true)
+	}
 
 	// Validate the resolved seam strings before dereferencing them below; a
 	// missing resolution step would otherwise panic when building applyOpts.
