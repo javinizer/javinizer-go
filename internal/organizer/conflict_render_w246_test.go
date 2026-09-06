@@ -2,6 +2,7 @@ package organizer
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -19,6 +20,11 @@ import (
 // dedupes at composition level; every conflict's semantics stay unchanged.
 
 const w246Dest = "/dest/ABC-123/ABC-123.mkv"
+
+// w246Slash slash-normalizes produced paths/messages so assertions against the
+// "/dest/..." literals stay separator-portable: on Windows the planner's
+// filepath.Join renders the destination with '\'.
+func w246Slash(s string) string { return filepath.ToSlash(s) }
 
 func TestDistinctConflictRenders_DedupesIdenticalPaths(t *testing.T) {
 	t.Run("identical renders collapse once, order stable", func(t *testing.T) {
@@ -73,8 +79,8 @@ func TestOrganize_UnauthorizedDuplicateConflictRendersDestinationOnce(t *testing
 	_, dupErr := org.Organize(context.Background(), dupBatchCmd(
 		models.FileMatchInfo{MovieID: "ABC-123", Path: "/in/B.mkv", Name: "B.mkv", Extension: ".mkv"}, tracker, false, true))
 	require.Error(t, dupErr)
-	assert.Equal(t, "organization validation failed: ["+w246Dest+"]", dupErr.Error())
-	assert.Equal(t, 1, strings.Count(dupErr.Error(), w246Dest))
+	assert.Equal(t, "organization validation failed: ["+w246Dest+"]", w246Slash(dupErr.Error()))
+	assert.Equal(t, 1, strings.Count(w246Slash(dupErr.Error()), w246Dest))
 }
 
 // Pin the occupied-dest conflict render: exact full message, destination once.
@@ -87,8 +93,8 @@ func TestOrganize_OccupiedDestinationConflictRendersDestinationOnce(t *testing.T
 	_, occErr := org.Organize(context.Background(), dupBatchCmd(
 		models.FileMatchInfo{MovieID: "ABC-123", Path: "/in/B.mkv", Name: "B.mkv", Extension: ".mkv"}, NewDuplicateTracker(true), false, true))
 	require.Error(t, occErr)
-	assert.Equal(t, "organization validation failed: ["+w246Dest+"]", occErr.Error())
-	assert.Equal(t, 1, strings.Count(occErr.Error(), w246Dest))
+	assert.Equal(t, "organization validation failed: ["+w246Dest+"]", w246Slash(occErr.Error()))
+	assert.Equal(t, 1, strings.Count(w246Slash(occErr.Error()), w246Dest))
 }
 
 // The #246 reproduction: destination occupied on disk AND batch-claimed. The
@@ -112,7 +118,7 @@ func TestOrganize_DuplicateOfOccupiedDestinationRendersDestinationOnce(t *testin
 	_, combErr := org.Organize(context.Background(), dupBatchCmd(
 		models.FileMatchInfo{MovieID: "ABC-123", Path: "/in/B.mkv", Name: "B.mkv", Extension: ".mkv"}, tracker, false, true))
 	require.Error(t, combErr)
-	assert.Equal(t, "organization validation failed: ["+w246Dest+"]", combErr.Error())
-	assert.Equal(t, 1, strings.Count(combErr.Error(), w246Dest),
+	assert.Equal(t, "organization validation failed: ["+w246Dest+"]", w246Slash(combErr.Error()))
+	assert.Equal(t, 1, strings.Count(w246Slash(combErr.Error()), w246Dest),
 		"occupation + duplicate conflicts render the destination once")
 }
