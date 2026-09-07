@@ -123,6 +123,11 @@ func applyTitleTruncation(engine template.EngineInterface, ctx *template.Context
 // update suppresses ONLY ConflictFile — directories and symlinks are always
 // recorded. Idempotency: lexical self and same-inode aliases are not
 // conflicts.
+//
+// n.b.: plan-time classification is NOT the force-overwrite audit crumb's
+// evidence — crumb semantics key on EXECUTE-time occupancy (the execute
+// leg's own classification), so a post-plan occupant swap can neither forge
+// nor hide a replacement.
 func checkTargetConflict(fs afero.Fs, sourcePath, targetPath string, forceUpdate, willMove bool) []PlanConflict {
 	conflicts := make([]PlanConflict, 0)
 	if !willMove {

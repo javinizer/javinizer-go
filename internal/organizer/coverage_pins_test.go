@@ -30,7 +30,7 @@ func TestCoverPin_RefusalErrPropagation(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	_ = fs.MkdirAll("/dest", 0o755)
 	wrapped := statFails{fs}
-	_, _, err := refuseIfUnsuppressibleAuthorizedDestination(wrapped, "/src/a.mp4", "/dest/fail-me.mp4")
+	_, _, err := classifyAuthorizedDestination(wrapped, "/src/a.mp4", "/dest/fail-me.mp4")
 	assert.Error(t, err)
 }
 

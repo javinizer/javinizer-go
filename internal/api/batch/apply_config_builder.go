@@ -1,7 +1,6 @@
 package batch
 
 import (
-	"context"
 	"fmt"
 	"path/filepath"
 	"sync"
@@ -11,7 +10,6 @@ import (
 	"github.com/javinizer/javinizer-go/internal/api/core"
 	"github.com/javinizer/javinizer-go/internal/applyplan"
 	"github.com/javinizer/javinizer-go/internal/logging"
-	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
 	"github.com/javinizer/javinizer-go/internal/websocket"
 	"github.com/javinizer/javinizer-go/internal/worker"
@@ -107,33 +105,7 @@ func resolveOrganizeApplyConfig(
 	applyOpts.OnFileOrganizeStart = makeOrganizeFileStartBroadcaster(job, false /* isUpdate */, sink, applyGenerationRef)
 	applyOpts.OnFileOrganized = makeOrganizeFileOrganizedBroadcaster(job, false /* isUpdate */, sink, applyGenerationRef)
 	applyOpts.OnFileFailed = makeOrganizeFileFailedBroadcaster(job, false /* isUpdate */, sink, applyGenerationRef)
-	applyOpts.PostApplyFunc = func(ctx context.Context, afc *worker.ApplyFileContext, afr *worker.ApplyFileResult) {
-		// Guard: never dereference a nil payload. If the apply context or
-		// result is missing required fields, skip emitting this secondary
-		// event so the original apply error is preserved instead of being
-		// masked by a nil-panic here.
-		if afc == nil || afc.Movie == nil || afr == nil {
-			return
-		}
-		emitter := deps.GetEventEmitter()
-		if afr.Err != nil && emitter != nil {
-			_ = emitter.EmitOrganizeEvent(ctx, "file_move", fmt.Sprintf("Organize failed for %s", afc.Movie.ID), models.SeverityError, map[string]any{"job_id": job.GetID(), "movie_id": afc.Movie.ID, "error": afr.Err.Error(), "apply_generation": loadApplyGeneration(applyGenerationRef)})
-		} else if emitter != nil {
-			var newPath string
-			if afr.Result != nil && afr.Result.OrganizeResult != nil {
-				newPath = afr.Result.OrganizeResult.NewPath
-			}
-			_ = emitter.EmitOrganizeEvent(ctx, "file_move", fmt.Sprintf("Organized %s", afc.Movie.ID), models.SeverityInfo, map[string]any{"job_id": job.GetID(), "movie_id": afc.Movie.ID, "file": afc.FilePath, "new_path": newPath, "apply_generation": loadApplyGeneration(applyGenerationRef)})
-			// #224 phase E: authorized intra-batch duplicates are demoted from
-			// conflicts to per-file warnings; each warning gets its own audit
-			// event via the existing eventlog.
-			if afr.Result != nil && afr.Result.OrganizeResult != nil {
-				for _, warning := range afr.Result.OrganizeResult.Warnings {
-					_ = emitter.EmitOrganizeEvent(ctx, "file_move", fmt.Sprintf("Organize warning for %s: %s", afc.Movie.ID, warning), models.SeverityWarn, map[string]any{"job_id": job.GetID(), "movie_id": afc.Movie.ID, "file": afc.FilePath, "new_path": newPath, "warning": warning, "apply_generation": loadApplyGeneration(applyGenerationRef)})
-				}
-			}
-		}
-	}
+	applyOpts.PostApplyFunc = makeOrganizePostApplyAuditHook(deps, job, applyGenerationRef)
 
 	return applyOpts, nil
 }
@@ -242,17 +214,7 @@ func resolveUpdateApplyConfig(
 	applyOpts.OnFileOrganizeStart = makeOrganizeFileStartBroadcaster(job, true /* isUpdate */, sink, applyGenerationRef)
 	applyOpts.OnFileOrganized = makeOrganizeFileOrganizedBroadcaster(job, true /* isUpdate */, sink, applyGenerationRef)
 	applyOpts.OnFileFailed = makeOrganizeFileFailedBroadcaster(job, true /* isUpdate */, sink, applyGenerationRef)
-	applyOpts.PostApplyFunc = func(ctx context.Context, afc *worker.ApplyFileContext, afr *worker.ApplyFileResult) {
-		// Guard: never dereference a nil payload; skip the secondary event so
-		// the original apply error is preserved.
-		if afc == nil || afc.Movie == nil || afr == nil {
-			return
-		}
-		emitter := deps.GetEventEmitter()
-		if afr.Err != nil && emitter != nil {
-			_ = emitter.EmitOrganizeEvent(ctx, "nfo_gen", fmt.Sprintf("Update failed for %s", afc.Movie.ID), models.SeverityError, map[string]any{"job_id": job.GetID(), "movie_id": afc.Movie.ID, "error": afr.Err.Error(), "apply_generation": loadApplyGeneration(applyGenerationRef)})
-		}
-	}
+	applyOpts.PostApplyFunc = makeUpdatePostApplyAuditHook(deps, job, applyGenerationRef)
 
 	return applyOpts, nil
 }

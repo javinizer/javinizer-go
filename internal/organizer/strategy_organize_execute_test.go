@@ -19,6 +19,7 @@ type mockLinker struct {
 	hardlinkCalled bool
 	symlinkCalled  bool
 	copyCalled     bool
+	copyReplaced   bool
 }
 
 func (m *mockLinker) symlink(oldname, newname string) error {
@@ -31,9 +32,9 @@ func (m *mockLinker) hardlink(oldname, newname string) error {
 	return m.hardlinkErr
 }
 
-func (m *mockLinker) copyFile(fs afero.Fs, src, dst string) error {
+func (m *mockLinker) copyFile(fs afero.Fs, src, dst string) (bool, error) {
 	m.copyCalled = true
-	return m.copyErr
+	return m.copyReplaced, m.copyErr
 }
 
 func TestOrganizeStrategy_Execute_MoveFiles(t *testing.T) {

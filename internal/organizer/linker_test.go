@@ -42,8 +42,9 @@ func TestMemLinker_CopyFile(t *testing.T) {
 	require.NoError(t, afero.WriteFile(fs, "/src.txt", []byte("hello"), 0644))
 
 	m := &MemLinker{}
-	err := m.copyFile(fs, "/src.txt", "/dst.txt")
+	replaced, err := m.copyFile(fs, "/src.txt", "/dst.txt")
 	require.NoError(t, err)
+	assert.False(t, replaced, "a vacant destination publishes into absence — no replacement")
 
 	content, err := afero.ReadFile(fs, "/dst.txt")
 	require.NoError(t, err)

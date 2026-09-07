@@ -87,7 +87,7 @@ func TestCrossDeviceMoveFs(t *testing.T) {
 	err := afero.WriteFile(fs, "/source.txt", []byte("cross device fs"), 0644)
 	assert.NoError(t, err)
 
-	err = crossDeviceMoveFs(fs, "/source.txt", "/dest.txt")
+	_, err = crossDeviceMoveFsDestReplaced(fs, "/source.txt", "/dest.txt")
 	assert.NoError(t, err)
 
 	content, err := afero.ReadFile(fs, "/dest.txt")
@@ -105,7 +105,7 @@ func TestCrossDeviceMoveFs_SourceRemoveFailure(t *testing.T) {
 	assert.NoError(t, err)
 
 	readonlyFs := afero.NewReadOnlyFs(fs)
-	err = crossDeviceMoveFs(readonlyFs, "/source.txt", "/dest.txt")
+	_, err = crossDeviceMoveFsDestReplaced(readonlyFs, "/source.txt", "/dest.txt")
 	assert.Error(t, err)
 }
 
@@ -115,7 +115,7 @@ func TestCopyFileDataFs_BasicMemMap(t *testing.T) {
 	err := afero.WriteFile(fs, "/source.txt", []byte("memmap copy"), 0644)
 	assert.NoError(t, err)
 
-	err = copyFileDataFs(fs, "/source.txt", "/dest.txt")
+	_, err = copyFileDataFsDestReplaced(fs, "/source.txt", "/dest.txt")
 	assert.NoError(t, err)
 
 	content, err := afero.ReadFile(fs, "/dest.txt")
@@ -126,7 +126,7 @@ func TestCopyFileDataFs_BasicMemMap(t *testing.T) {
 func TestCopyFileDataFs_SourceNotFound(t *testing.T) {
 	fs := afero.NewMemMapFs()
 
-	err := copyFileDataFs(fs, "/nonexistent.txt", "/dest.txt")
+	_, err := copyFileDataFsDestReplaced(fs, "/nonexistent.txt", "/dest.txt")
 	assert.Error(t, err)
 }
 
@@ -187,7 +187,7 @@ func TestCopyFileDataFs_MidCopyFailureLeavesNoPartialDst(t *testing.T) {
 
 	// Source read fails after 64 bytes, mid-copy.
 	fs := &failingReadFs{Fs: memFs, failPath: src, limit: 64}
-	err := copyFileDataFs(fs, src, dst)
+	_, err := copyFileDataFsDestReplaced(fs, src, dst)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to copy data")
 
@@ -236,7 +236,8 @@ func TestCopyFileDataFs_HappyPathContentEquality(t *testing.T) {
 	content := bytes.Repeat([]byte("copy-me-"), 64) // 512 bytes
 	require.NoError(t, afero.WriteFile(fs, "/src.txt", content, 0644))
 
-	require.NoError(t, copyFileDataFs(fs, "/src.txt", "/dst.txt"))
+	_, errCopy := copyFileDataFsDestReplaced(fs, "/src.txt", "/dst.txt")
+	require.NoError(t, errCopy)
 
 	got, err := afero.ReadFile(fs, "/dst.txt")
 	require.NoError(t, err)

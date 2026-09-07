@@ -3,6 +3,7 @@ package fsutil
 import (
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 
 	"github.com/javinizer/javinizer-go/internal/config"
@@ -11,45 +12,150 @@ import (
 
 // CopyFileFs copies a file within the afero filesystem, creating destination directories as needed.
 func CopyFileFs(fs afero.Fs, src, dst string) error {
+	_, err := CopyFileFsDestReplaced(fs, src, dst)
+	return err
+}
+
+// CopyFileFsDestReplaced is CopyFileFs extended with the PUBLISH-BOUND
+// replacement signal (PR #249 codex P2): destReplaced reports whether the
+// staged replace-publish actually displaced an OCCUPIED destination whose
+// object does not alias the source's own inode — an alias entry (hardlink
+// twin of the source) names no foreign bytes, so displacing it is deliberately
+// NOT a replacement. The evidence is captured at syscall adjacency with the
+// publish rename ITSELF (the CopyFile publish identity machinery is the #234
+// bound staged publish): the copy lane stages the full source stream between
+// any caller classification and the publish, so classify-time occupancy
+// answers could be raced stale by a foreign plant/vacate anywhere in that
+// window (a false or suppressed force-overwrite audit crumb). A probe whose
+// lookup fails answers "no replacement" — no confirmation, no claim.
+func CopyFileFsDestReplaced(fs afero.Fs, src, dst string) (destReplaced bool, err error) {
 	if err := fs.MkdirAll(filepath.Dir(dst), config.DirPerm); err != nil {
-		return fmt.Errorf("failed to create destination directory: %w", err)
+		return false, fmt.Errorf("failed to create destination directory: %w", err)
 	}
 
 	if filepath.Clean(src) == filepath.Clean(dst) {
-		return nil
+		return false, nil
 	}
 
-	return copyFileDataFs(fs, src, dst)
+	return copyFileDataFsDestReplaced(fs, src, dst)
 }
 
 // MoveFileFs moves a file within the afero filesystem, falling back to copy-and-remove across devices.
 func MoveFileFs(fs afero.Fs, src, dst string) error {
+	_, err := MoveFileFsDestReplaced(fs, src, dst)
+	return err
+}
+
+// MoveFileFsDestReplaced is MoveFileFs extended with the same publish-bound
+// replacement signal as CopyFileFsDestReplaced (PR #249 codex P2). The
+// same-device leg probes one syscall ahead of the inline rename (a rename
+// publishes THE object src names — including a symlink object itself — so the
+// source identity rides the same no-follow probe, never a chased Stat); the
+// cross-device fallback inherits the staged publish's bound signal instead —
+// and on the fallback's ErrPublishCompleted leg (publish landed, source
+// cleanup refused) the bound signal rides ALONGSIDE the error, so callers
+// keying an audit crumb on it never lose the displacement evidence with the
+// partial publish.
+func MoveFileFsDestReplaced(fs afero.Fs, src, dst string) (destReplaced bool, err error) {
 	if err := fs.MkdirAll(filepath.Dir(dst), config.DirPerm); err != nil {
-		return fmt.Errorf("failed to create destination directory: %w", err)
+		return false, fmt.Errorf("failed to create destination directory: %w", err)
 	}
 
 	if filepath.Clean(src) == filepath.Clean(dst) {
-		return nil
+		return false, nil
 	}
 
-	err := fs.Rename(src, dst)
+	// Probe-adjacency adjudication (PR #249 codex P2 — the rename-atomicity
+	// thread): the occupancy probe runs ONE syscall ahead of the rename it
+	// audits, and NO construction available through this Fs abstraction closes
+	// that window:
+	//   - POSIX rename(2) replaces ATOMICALLY but SILENTLY — it reports nothing
+	//     about the displaced occupant, so no post-hoc kernel answer exists;
+	//   - Linux renameat2 offers RENAME_NOREPLACE (an atomic REFUSAL, already
+	//     the no-replace primitive in publish_noreplace_linux.go) and
+	//     RENAME_EXCHANGE — the only kernel-exact displacement detector (the
+	//     old occupant lands on src after the swap) — but it is Linux-only
+	//     (Darwin's renamex_np(RENAME_SWAP) is a separate island x/sys exposes
+	//     no wrapper for, the BSDs have no exchange primitive, Windows
+	//     MoveFileEx has none at all), unreachable through afero's Fs.Rename
+	//     for wrapper filesystems, and it leaves FOREIGN BYTES on the source
+	//     name until a second syscall removes them — a new window in which the
+	//     operator's source path addresses foreign content, which this
+	//     lineage's keep-both invariants (#224) forbid;
+	//   - a hardlink-snapshot dance (link(2) the occupant aside, rename,
+	//     compare) keeps the SAME two-syscall adjacency window as the probe,
+	//     requires hardlink support rename-only volumes (exFAT) lack, and
+	//     plants a visible extra entry in the destination directory — strictly
+	//     worse on every axis;
+	// so the publish-adjacent no-follow probe with alias exclusion IS the
+	// accuracy ceiling. Identity of the LANDED object needs no reverify on
+	// this leg: rename(2) moves the source dentry itself, so a successful
+	// rename leaves dst naming exactly the object src named at the rename
+	// instant, kernel-guaranteed (unlike the staged legs, whose publish
+	// re-resolves a substitutable staged NAME and which therefore re-verify in
+	// PublishStagedBound). The window's cost is crumb accuracy only, never
+	// publish atomicity: an occupant planted between probe and rename is
+	// displaced WITHOUT a crumb, an occupant vacated there crumbs with nothing
+	// displaced — both residual directions are pinned by test
+	// (move_destreplaced_adjacency_w249_test.go).
+	srcInfo := publishProbeIdentity(fs, src)
+	occupied := publishDisplacesForeign(fs, dst, srcInfo)
+	err = fs.Rename(src, dst)
 	if err == nil {
-		return nil
+		return occupied, nil
 	}
 
 	if !isCrossDeviceError(err) {
-		return fmt.Errorf("failed to move file: %w", err)
+		return false, fmt.Errorf("failed to move file: %w", err)
 	}
 
-	return crossDeviceMoveFs(fs, src, dst)
+	return crossDeviceMoveFsDestReplaced(fs, src, dst)
 }
 
-func crossDeviceMoveFs(fs afero.Fs, src, dst string) error {
-	if err := copyFileDataFs(fs, src, dst); err != nil {
+// publishProbeIdentity records a path's OBJECT identity for a publish probe's
+// alias exclusion, no-follow wherever the filesystem exposes the distinction
+// (the same asideLstat discipline the bound take-aside flow uses). Any lookup
+// failure — transient or absence — answers nil, and the exclusion is simply
+// not applied (confirm-or-silent, never guess).
+func publishProbeIdentity(fs afero.Fs, name string) os.FileInfo {
+	info, _ := asideLstat(fs, name)
+	return info
+}
+
+// publishDisplacesForeign reports — probed at syscall adjacency with the
+// caller's replace-publish — whether dst names an object that publish would
+// displace that is NOT an alias of the source's own object (publishDisplaces
+// == PHYSICAL occupancy at the publish instant, minus same-inode aliases,
+// whose removal destroys no foreign bytes). A failed/absent probe answers
+// false: the crumb never fires on unconfirmed evidence.
+func publishDisplacesForeign(fs afero.Fs, dst string, srcInfo os.FileInfo) bool {
+	info := publishProbeIdentity(fs, dst)
+	if info == nil {
+		return false
+	}
+	if srcInfo != nil && os.SameFile(info, srcInfo) {
+		return false
+	}
+	return true
+}
+
+// crossDeviceMoveFsDestReplaced is the cross-device fallback's publish-bound
+// twin (the plain error-only surface is MoveFileFs's).
+func crossDeviceMoveFsDestReplaced(fs afero.Fs, src, dst string) (bool, error) {
+	replaced, err := copyFileDataFsDestReplaced(fs, src, dst)
+	if err != nil {
 		// The copy leg never writes to dst directly (staging only), so there is
 		// NOTHING of ours at dst to "clean up": removing it could delete a
 		// pre-existing foreign file (#224). Keep both, surface the failure.
-		return fmt.Errorf("failed to copy file across devices: %w", err)
+		//
+		// Union the displacement evidence with the failure (PR #249 codex
+		// follow-up, F3): a staged-publish leg that LANDED and displaced a
+		// resident before a post-publish identity break / retry exhaustion
+		// already destroyed foreign bytes — that destruction is a fact no
+		// post-publish error path may erase. Genuinely replacement-free legs
+		// (pre-publish verify/close/stream refusals) answer false exactly as
+		// before, because no successful publish leg ever displaced anything.
+		return replaced, fmt.Errorf("failed to copy file across devices: %w", err)
 	}
 
 	if err := fs.Remove(src); err != nil {
@@ -60,19 +166,35 @@ func crossDeviceMoveFs(fs afero.Fs, src, dst string) error {
 		// destination already carries THIS operation's bytes, so compensation
 		// and duplicate-claim classifiers must never read this failure as a
 		// pre-publish no-op — the same sentinel the no-replace lineage wraps
-		// on its cleanup-refusal leg (move_noreplace.go).
-		return fmt.Errorf("%w: failed to remove source after cross-device copy: %w", ErrPublishCompleted, err)
+		// on its cleanup-refusal leg (move_noreplace.go). PR #249 codex P2
+		// follow-up: the publish's DISPLACED-OCCUPANCY evidence survives this
+		// failure — the staged publish already landed (PublishStagedBound's
+		// union keeps a proven displacement across any retry legs), so the
+		// bound `replaced` answer returns WITH the error instead of being
+		// dropped: a partial publish that displaced resident bytes keeps its
+		// audit evidence on the FAILED result, and only genuinely replacement-
+		// free legs answer false.
+		return replaced, fmt.Errorf("%w: failed to remove source after cross-device copy: %w", ErrPublishCompleted, err)
 	}
 
-	return nil
+	return replaced, nil
 }
 
-func copyFileDataFs(fs afero.Fs, src, dst string) error {
+// copyFileDataFsDestReplaced is the staging core of CopyFileFsDestReplaced:
+// the displacement evidence is captured by the publish closure ITSELF (bound
+// to the bound staged publish), never by any earlier classification.
+func copyFileDataFsDestReplaced(fs afero.Fs, src, dst string) (bool, error) {
 	srcFile, err := fs.Open(src)
 	if err != nil {
-		return fmt.Errorf("failed to open source: %w", err)
+		return false, fmt.Errorf("failed to open source: %w", err)
 	}
 	defer func() { _ = srcFile.Close() }()
+
+	// The open handle's own stat is the source identity for the publish
+	// probe's alias exclusion — bound to the very bytes being staged below,
+	// even if a foreign writer swaps the src NAME mid-stream (the staged
+	// content is whatever this descriptor reads).
+	srcInfo, _ := srcFile.Stat()
 
 	// Stage dest-adjacent with O_EXCL (a predictable O_TRUNC name could
 	// truncate a racing peer's staged bytes), stream through the open handle,
@@ -82,19 +204,35 @@ func copyFileDataFs(fs afero.Fs, src, dst string) error {
 	// NoReplace composites.
 	staged, handle, sErr := CreateExclusiveStagingFile(fs, dst, ".mvstg", noreplaceOrdinal.Add(1), stagingFileMode())
 	if sErr != nil {
-		return fmt.Errorf("failed to create destination: %w", sErr)
+		return false, fmt.Errorf("failed to create destination: %w", sErr)
 	}
 
 	if _, err := io.Copy(handle, srcFile); err != nil {
 		DiscardFailedExclusiveStaging(fs, staged, handle)
-		return fmt.Errorf("failed to copy data: %w", err)
+		return false, fmt.Errorf("failed to copy data: %w", err)
 	}
 
 	stagedIdentity := stagingIdentity(handle)
 
+	// displacedOccupant is the publish-bound audit signal (PR #249 codex P2):
+	// the occupancy probe runs ONE SYSCALL ahead of the replace-publish in the
+	// closure below, alias-excluded against the staged bytes' own source inode
+	// — a signal that stays TRUE to physical occupancy at the publish instant
+	// no matter how long the staging stream above took.
+	displacedOccupant := false
 	p := StagedPublish{
-		FS:          fs,
-		Publish:     ReplaceFile,
+		FS: fs,
+		Publish: func(pfs afero.Fs, stagedName, dest string) error {
+			occupied := publishDisplacesForeign(pfs, dest, srcInfo)
+			pubErr := ReplaceFile(pfs, stagedName, dest)
+			// Union over successful attempts: a proven-substitution retry may
+			// legitimately republish into absence, and ANY successful publish
+			// that displaced resident bytes keeps its disclosure.
+			if pubErr == nil && occupied {
+				displacedOccupant = true
+			}
+			return pubErr
+		},
 		Staged:      staged,
 		Handle:      handle,
 		Dest:        dst,
@@ -106,8 +244,18 @@ func copyFileDataFs(fs afero.Fs, src, dst string) error {
 		// implementation removed its temp on failure; keep that cleanliness
 		// without ever deleting a possibly-foreign staged name.
 		discardStagedAfterFailedPublish(fs, staged, stagedIdentity, err)
-		return fmt.Errorf("failed to rename temp file to destination: %w", err)
+		// Union the displacement evidence with post-publish failures (PR #249
+		// codex follow-up, F3): displacedOccupant is set ONLY by a publish leg
+		// that returned success one syscall after observing a foreign occupant
+		// — so a true answer here proves a successful publish displaced resident
+		// bytes AT SOME ATTEMPT before the post-publish identity break /
+		// republish-budget exhaustion surfaced this error. That destruction is
+		// permanent (error or not), so the audit evidence must ride the FAILED
+		// result instead of being dropped — the ErrPublishCompleted partial-
+		// publish lineage's discipline (the pre-build code answered false on
+		// EVERY error leg, erasing a proven displacement).
+		return displacedOccupant, fmt.Errorf("failed to rename temp file to destination: %w", err)
 	}
 
-	return nil
+	return displacedOccupant, nil
 }
