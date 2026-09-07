@@ -986,7 +986,12 @@ func applyFile(
 
 	var result *workflow.ApplyResult
 	var applyErr error
-	if fileResult.ErrorCode == downloader.PosterRecropRequiredCode && cfg.Download && !cfg.DryRun {
+	// Gate on actual poster work (codex P2): the marker only matters when this
+	// apply will fetch a poster. Mirrors downloadPoster's own early return —
+	// a removed/absent source URL or disabled poster download can't verify a
+	// crop, so organize/NFO-only retries must pass through.
+	posterWillFetch := prepared.baseline.Poster.PosterURL != "" || prepared.baseline.Poster.CoverURL != ""
+	if fileResult.ErrorCode == downloader.PosterRecropRequiredCode && cfg.Download && !cfg.DryRun && posterWillFetch {
 		refusal := &downloader.PosterRecropRequiredError{Reason: downloader.SourceIdentityUnavailable}
 		if bounds := prepared.baseline.Poster.PosterCropBounds; bounds != nil {
 			refusal.Bounds = *bounds
