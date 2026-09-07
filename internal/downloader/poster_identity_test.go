@@ -422,3 +422,16 @@ func TestDownloadPoster_ManualCropIdentity(t *testing.T) {
 		})
 	}
 }
+
+func TestDownloadPoster_BoundedVerification(t *testing.T) {
+	prev := maxPosterVerifyBytes
+	maxPosterVerifyBytes = 64
+	t.Cleanup(func() { maxPosterVerifyBytes = prev })
+	a := p4JPEG(color.RGBA{R: 20, A: 255})
+	server, hits := identityServer(t, a)
+	fs := afero.NewMemMapFs()
+	bounds := &models.CropBounds{Width: .4, Height: 1, SourceAspect: 1000.0 / 600, SourceFingerprint: assetidentity.FromBytes(a).Fingerprint}
+	result, err := newGeometryDownloader(fs).downloadPoster(context.Background(), geometryMovie(server.URL, bounds, false), t.TempDir(), nil)
+	requireIdentityRefusal(t, result, err, SourceIdentityUnavailable, bounds)
+	require.Equal(t, int32(1), hits.Load())
+}

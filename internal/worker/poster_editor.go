@@ -733,7 +733,7 @@ func (m *LockedMovieOps) UpdatePosterCrop(croppedURL string, bounds *models.Crop
 		movie.Poster.PosterCropBounds = bounds
 		movie.Poster.PosterCropSourceFull = sourceFull
 	})
-	if resolvesPosterRecrop(bounds, sourceFull) {
+	if resolvesPosterRecrop(croppedURL, bounds, sourceFull) {
 		for _, candidate := range candidates {
 			clearPosterRecrop(candidate)
 		}
@@ -758,6 +758,12 @@ func (m *LockedMovieOps) UpdatePosterFromURL(ctx context.Context, posterURL stri
 		movie.Poster.ShouldCropPoster = false
 		clearPosterCropGeometry(movie) // new source: stored geometry is stale
 	})
+	// Source replacement clears all crop intent, so a pending recrop block is
+	// discharged — otherwise the marker would short-circuit every later apply
+	// even though no geometry remains to verify.
+	for _, candidate := range candidates {
+		clearPosterRecrop(candidate)
+	}
 	if len(candidates) == 0 {
 		return fmt.Errorf("%w: %s", ErrMovieFamilyEmpty, m.movieID)
 	}
@@ -1709,7 +1715,7 @@ func (pe *PosterEditor) UpdateMovieFamilyWithEcho(ctx context.Context, movieID, 
 				}
 			}
 		}
-		m.resolveRecrop = !opts.CarryCropGeometry && movie != nil && resolvesPosterRecrop(movie.Poster.PosterCropBounds, movie.Poster.PosterCropSourceFull)
+		m.resolveRecrop = !opts.CarryCropGeometry && movie != nil && resolvesPosterRecrop(movie.Poster.CroppedPosterURL, movie.Poster.PosterCropBounds, movie.Poster.PosterCropSourceFull)
 		if opts.CarryCropGeometry && movie != nil && movie.Poster.PosterCropBounds == nil {
 			// Revalidate the omitted-bounds carry INSIDE the locked section
 			// (R29/D1): read the CURRENT stored geometry from the target

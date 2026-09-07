@@ -7,8 +7,16 @@ import (
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 )
 
-func resolvesPosterRecrop(bounds *models.CropBounds, sourceFull bool) bool {
-	return bounds == nil || (sourceFull && bounds.Valid() && bounds.SourceFingerprint != "" && assetidentity.ValidFingerprint(bounds.SourceFingerprint))
+// resolvesPosterRecrop reports whether an update discharges a pending recrop
+// block: a measured crop bound to the full source (verifiable fingerprint), or
+// an explicit removal (no bounds AND no new cropped URL). An unmeasured
+// preview-only crop commits no source-bound geometry, so it must NOT clear the
+// block — the next apply would otherwise silently install the uncropped source.
+func resolvesPosterRecrop(croppedURL string, bounds *models.CropBounds, sourceFull bool) bool {
+	if bounds == nil {
+		return croppedURL == ""
+	}
+	return sourceFull && bounds.Valid() && bounds.SourceFingerprint != "" && assetidentity.ValidFingerprint(bounds.SourceFingerprint)
 }
 
 func samePosterCropIntent(attempted, live *models.Movie) bool {

@@ -234,3 +234,30 @@ func TestPosterRecropWritebackPersistence(t *testing.T) {
 	require.Equal(t, result.ErrorCode, restoredResult.ErrorCode)
 	require.Equal(t, result.Movie.Poster, restoredResult.Movie.Poster)
 }
+
+func TestPosterRecropUnmeasuredPreviewCropKeepsBlock(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "movie.mp4")
+	job := newBatchJob([]string{path})
+	movie := &models.Movie{ID: "CROP-1", Poster: models.PosterState{PosterURL: "https://example.test/a.jpg", PosterCropSourceFull: true, PosterCropBounds: &models.CropBounds{Width: .4, Height: 1}}}
+	job.results.UpdateFileResult(path, &resultstore.MovieResult{Movie: movie, ErrorCode: downloader.PosterRecropRequiredCode, Error: "rejected", Status: models.JobStatusFailed, FileMatchInfo: models.FileMatchInfo{Path: path, MovieID: movie.ID}})
+	pe := NewPosterEditor(job.results, job.results, nil)
+	require.NoError(t, pe.UpdatePosterCrop(movie.ID, "preview-cropped.jpg", nil, false))
+	current, err := job.results.GetMovieResult(path)
+	require.NoError(t, err)
+	require.Equal(t, downloader.PosterRecropRequiredCode, current.ErrorCode, "unmeasured preview-only crop must not discharge the recrop block")
+	require.Equal(t, "preview-cropped.jpg", current.Movie.Poster.CroppedPosterURL)
+	require.Nil(t, current.Movie.Poster.PosterCropBounds, "endpoint clears geometry; the block rides on the ErrorCode marker")
+}
+
+func TestPosterRecropSourceReplacementClearsBlock(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "movie.mp4")
+	job := newBatchJob([]string{path})
+	movie := &models.Movie{ID: "CROP-1", Poster: models.PosterState{PosterURL: "https://example.test/a.jpg", PosterCropSourceFull: true, PosterCropBounds: &models.CropBounds{Width: .4, Height: 1}}}
+	job.results.UpdateFileResult(path, &resultstore.MovieResult{Movie: movie, ErrorCode: downloader.PosterRecropRequiredCode, Error: "rejected", Status: models.JobStatusFailed, FileMatchInfo: models.FileMatchInfo{Path: path, MovieID: movie.ID}})
+	pe := NewPosterEditor(job.results, job.results, nil)
+	require.NoError(t, pe.UpdatePosterFromURL(context.Background(), movie.ID, "https://example.test/b.jpg", ""))
+	current, err := job.results.GetMovieResult(path)
+	require.NoError(t, err)
+	require.Empty(t, current.ErrorCode, "replacing the poster source must clear the recrop block")
+	require.Nil(t, current.Movie.Poster.PosterCropBounds, "new source invalidates stored geometry")
+}
