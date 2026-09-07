@@ -49,6 +49,11 @@ func authorizedOverwriteWarning(targetPath string) string {
 // production crumb keying, never a stubbed one.
 var moveFileDestReplaced = fsutil.MoveFileFsDestReplaced
 
+// filepathAbsFn is a seam for the soft-link source-absolutization error branch
+// in executeLinkPath (organizer tests swap it to inject the Getwd/failure
+// shape deterministically).
+var filepathAbsFn = filepath.Abs
+
 // foldMovePublishCrumb is the move lanes' unified retained-crumb predicate
 // (PR #249 codex P2 follow-up) — the three strategies' duplicated
 // replace-then-key-the-crumb gates collapse into this one fold: the
@@ -74,33 +79,23 @@ func foldMovePublishCrumb(crumb *bool, replaced bool) {
 	*crumb = *crumb || replaced
 }
 
-// linkInstallOccupantIsAlias is the link-install crumb's alias-vs-foreign
-// exclusion, keyed to the LstatIfPossible taken IMMEDIATELY pre-Remove (PR
-// #249 codex follow-up — F1), never to the lane-head classification: the
-// probe → Remove window is the accepted probe window (the copy/move lanes'
-// one-syscall probe-adjacency ceiling), and any swap inside it is captured
-// by binding the exclusion to the pre-Remove observation instead of the
-// classification captured before MkdirAll and the refusal gates ran.
+// linkInstallOccupantIsAlias compares identity SNAPSHOTS that must both be
+// captured BEFORE the destination Remove: the pre-Remove occupant probe
+// (linfo at the site) and the source snapshot captured by the caller at the
+// same adjacency point. With both sides frozen pre-Remove, a process that
+// swaps SourcePath AFTER the Remove cannot rewrite the answer — the
+// helper's own read happens after vs in contract order, i.e. the earlier
+// F1 fix keyed the OCCUPANT side pre-Remove but the SOURCE side was still
+// read post-Remove; this helper now takes both reads as snapshots (PR #249
+// codex follow-up).
 //
-// occupant == nil (the pre-Remove probe saw the name vacant — the Remove
-// tolerated a NotExist) or a failed source lookup answers false: only a
-// POSITIVELY-PROVEN same-inode equality excludes. A source SYMLINK object
-// never shares the destination's name-bearing link
-// (classifyExistingDestination's rule), so a symlink source is never an
-// alias of a regular inode occupant — matching device/inode there is the
-// symlink's own lookup, not the resident's.
-func linkInstallOccupantIsAlias(fs afero.Fs, src string, occupant os.FileInfo) bool {
-	if occupant == nil {
-		return false
-	}
-	var srcInfo os.FileInfo
-	var err error
-	if lst, ok := fs.(afero.Lstater); ok {
-		srcInfo, _, err = lst.LstatIfPossible(src)
-	} else {
-		srcInfo, err = fs.Stat(src)
-	}
-	if err != nil || srcInfo == nil {
+// nil on either side (the name was vacant at its probe — the Remove then
+// tolerated NotExist on that side) or a source that is itself a symlink
+// object answers false: only POSITIVELY-PROVEN same-inode equality is an
+// alias. A symlink source never shares the destination's name-bearing link,
+// so it is never an alias of a regular occupant.
+func linkInstallOccupantIsSnapshotAlias(srcInfo, occupant os.FileInfo) bool {
+	if occupant == nil || srcInfo == nil {
 		return false
 	}
 	if srcInfo.Mode()&os.ModeSymlink != 0 {
@@ -636,22 +631,23 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 				// (nothing displaced — no crumb even though the probe above saw
 				// an occupant), and a plant inside the probe → Remove window
 				// that got unlinked always crumbs.
+				// Source identity snapshot taken pre-Remove (PR #249 codex
+				// follow-up): both sides of the alias exclusion must freeze
+				// before the point of destruction — otherwise a source swap
+				// landing between Remove and the helper's read would flip the
+				// verdict. Failures/nil fall through to NOT-an-alias cautiously
+				// (never suppresses a foreign-bytes crumb).
+				var srcSnapshot os.FileInfo
+				if lst, ok := s.fs.(afero.Lstater); ok {
+					srcSnapshot, _, _ = lst.LstatIfPossible(plan.SourcePath)
+				} else {
+					srcSnapshot, _ = s.fs.Stat(plan.SourcePath)
+				}
 				rmErr := s.fs.Remove(plan.TargetPath)
 				if rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
 					return fmt.Errorf("failed to prepare target path for link: %w", rmErr)
 				}
-				// Alias-vs-foreign exclusion bound to the PRE-REMOVE probe (PR
-				// #249 codex follow-up — F1): the lane-head classification
-				// (dstSameInode) can be raced stale across the MkdirAll and the
-				// refusal gate above — a lane-head alias can be swapped for a
-				// FOREIGN plant (its destruction must crumb) and a lane-head
-				// foreign occupant likewise swapped for a source alias (whose
-				// unlink destroys no foreign bytes and must stay silent). Only
-				// positively-proven same-inode equality between the pre-Remove
-				// LstatIfPossible occupant and the source excludes; the
-				// probe → Remove swap window is the accepted probe window
-				// (identical to the copy/move lanes' probe-adjacency ceiling).
-				linkInstallOccupant := rmErr == nil && !linkInstallOccupantIsAlias(s.fs, plan.SourcePath, linfo)
+				linkInstallOccupant := rmErr == nil && !linkInstallOccupantIsSnapshotAlias(srcSnapshot, linfo)
 				// The crumb binds AT THE DESTRUCTION — not at a later install
 				// success (PR #249 codex follow-up — F2): the authorized Remove
 				// above already displaced/destroyed the resident bytes, so even a
@@ -685,7 +681,7 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 			case LinkModeSoft:
 				linkTarget := plan.SourcePath
 				if !filepath.IsAbs(linkTarget) {
-					abs, err := filepath.Abs(linkTarget)
+					abs, err := filepathAbsFn(linkTarget)
 					if err != nil {
 						return fmt.Errorf("failed to resolve source path for symlink: %w", err)
 					}
