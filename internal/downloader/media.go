@@ -1,9 +1,11 @@
 package downloader
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"image"
 	"math"
 	"os"
 	"path/filepath"
@@ -34,6 +36,13 @@ func (d *Downloader) downloadCover(ctx context.Context, movie *models.Movie, des
 
 func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, destDir string, multipart *MultipartInfo, options ...any) (finalResult *DownloadResult, finalErr error) {
 	startTime := time.Now()
+	defer func() {
+		var refusal *PosterRecropRequiredError
+		if errors.As(finalErr, &refusal) {
+			logging.Warnf("downloadPoster: code=%s reason=%s", PosterRecropRequiredCode, refusal.Reason)
+			finalResult.Duration = time.Since(startTime)
+		}
+	}()
 	overwriteExisting, dedup := resolveDownloadOptions(options)
 	owner := resolveDownloadOwnerOptions(options)
 	ledger := resolveDownloadLedger(options)
@@ -58,9 +67,10 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 	}
 
 	bounds := movie.Poster.PosterCropBounds
-	geometryUsable := bounds != nil && movie.Poster.PosterCropSourceFull && bounds.Valid()
+	manualIntent := bounds != nil && movie.Poster.PosterCropSourceFull
+	geometryUsable := manualIntent && bounds.Valid()
 
-	if !geometryUsable && !movie.Poster.ShouldCropPoster {
+	if !manualIntent && !movie.Poster.ShouldCropPoster {
 		if !overwriteExisting {
 			releaseDownloadOwnerClaim(dedup, owner.logicalKey, owner.ownerKey)
 		}
@@ -111,6 +121,20 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 		result.Size = info.Size()
 		result.Duration = time.Since(startTime)
 		return result, nil
+	}
+
+	if manualIntent {
+		var reason PosterRecropReason
+		switch {
+		case bounds.SourceFingerprint == "":
+			reason = SourceFingerprintMissing
+		case !assetidentity.ValidFingerprint(bounds.SourceFingerprint):
+			reason = SourceFingerprintInvalid
+		}
+		if reason != "" {
+			result.Error = &PosterRecropRequiredError{Reason: reason, Bounds: *bounds}
+			return result, result.Error
+		}
 	}
 
 	// One GET feeds every poster-producing path below — manual crop, promote,
@@ -166,6 +190,23 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 	// error (wave-41) leg files no record — an unknown identity keeps the
 	// wave-53 fail-closed posture both here and at the bind below.
 	fullIdentity = fullResult.producerIdentity
+	var verifiedSource []byte
+	if manualIntent {
+		verifiedSource, err = afero.ReadFile(d.fs, fullPath)
+		var refusal *PosterRecropRequiredError
+		if err != nil {
+			refusal = &PosterRecropRequiredError{Reason: SourceIdentityUnavailable, Bounds: *bounds, Cause: fmt.Errorf("measure downloaded poster: %w", err)}
+		} else if !strings.EqualFold(assetidentity.FromBytes(verifiedSource).Fingerprint, bounds.SourceFingerprint) {
+			refusal = &PosterRecropRequiredError{Reason: SourceFingerprintMismatch, Bounds: *bounds}
+		}
+		if refusal != nil {
+			fullResult.Error = refusal
+			fullResult.Downloaded = false
+			fullResult.Replaced = false
+			fullResult.Size = 0
+			return fullResult, refusal
+		}
+	}
 
 	cropPath := uniqueTempPath(destPath, "crop.tmp")
 	var cropIdentity installedDestIdentity
@@ -186,7 +227,7 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 		// install-time lookup of the name. A fallback (undecodable / aspect
 		// drift / empty rect) files no record and the name's wave-65 unknown
 		// posture (retain, never unlink on doubt) applies.
-		cropOK, cropIdentity = d.cropDownloadedPoster(fullPath, cropPath, bounds)
+		cropOK, cropIdentity = d.cropDownloadedPoster(verifiedSource, cropPath, bounds)
 		if cropOK {
 			candidate = cropPath
 			cropped = true
@@ -461,25 +502,12 @@ func (d *Downloader) finalizePosterResult(result *DownloadResult, destPath strin
 // Wave-67 (codex P2, PR#215): on success the producer's own post-write
 // identity record rides back with the bool — CropPosterWithBounds'
 // producer-side capture, never a caller-side re-lookup.
-func (d *Downloader) cropDownloadedPoster(tempPath, dst string, bounds *models.CropBounds) (bool, installedDestIdentity) {
-	w, h, derr := imageutil.ImageDimensions(d.fs, tempPath)
+func (d *Downloader) cropDownloadedPoster(source []byte, dst string, bounds *models.CropBounds) (bool, installedDestIdentity) {
+	cfg, _, derr := image.DecodeConfig(bytes.NewReader(source))
+	w, h := cfg.Width, cfg.Height
 	if derr != nil || w <= 0 || h <= 0 {
 		logging.Warnf("downloadPoster: cannot decode downloaded source for manual crop: %v", derr)
 		return false, installedDestIdentity{}
-	}
-	// P4 source identity guard: aspect alone cannot distinguish a same-sized
-	// image whose pixels were replaced at the same URL. Legacy envelopes have
-	// no fingerprint and retain the pre-P4 aspect-only floor.
-	if bounds.SourceFingerprint != "" {
-		identity, ierr := assetidentity.Measure(d.fs, tempPath)
-		if ierr != nil {
-			logging.Warnf("downloadPoster: cannot fingerprint downloaded source for manual crop: %v", ierr)
-			return false, installedDestIdentity{}
-		}
-		if !strings.EqualFold(identity.Fingerprint, bounds.SourceFingerprint) {
-			logging.Warnf("downloadPoster: manual crop fingerprint mismatch (crop %s, downloaded %s); falling back", bounds.SourceFingerprint, identity.Fingerprint)
-			return false, installedDestIdentity{}
-		}
 	}
 
 	// Aspect guard: the geometry was normalized against the review-time
@@ -507,7 +535,7 @@ func (d *Downloader) cropDownloadedPoster(tempPath, dst string, bounds *models.C
 		return false, installedDestIdentity{}
 	}
 
-	cropInfo, cropErr := imageutil.CropPosterWithBounds(d.fs, tempPath, dst, left, top, right, bottom, d.config.MaxPosterHeight)
+	cropInfo, cropErr := imageutil.CropPosterWithBoundsReader(d.fs, bytes.NewReader(source), dst, left, top, right, bottom, d.config.MaxPosterHeight)
 	if cropErr != nil {
 		logging.Warnf("downloadPoster: manual crop failed: %v", cropErr)
 		return false, installedDestIdentity{}
@@ -707,6 +735,9 @@ func (d *Downloader) downloadAllWithExtrafanart(ctx context.Context, movie *mode
 		results = append(results, actresses...)
 	}
 
+	if posterResult != nil && errors.Is(posterResult.Error, ErrPosterRecropRequired) {
+		return results, fmt.Errorf("download poster: %w", posterResult.Error)
+	}
 	if criticalAttempted > 0 && criticalSucceeded == 0 {
 		return results, &DownloadPartialError{Attempted: criticalAttempted, Succeeded: criticalSucceeded}
 	}

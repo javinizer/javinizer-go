@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/afero"
 
 	"github.com/javinizer/javinizer-go/internal/database"
+	"github.com/javinizer/javinizer-go/internal/downloader"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/worker/fscase"
@@ -167,8 +168,9 @@ func (pe *PosterEditor) identityKeysFor(movieID string) []string {
 // held key so any pre-lock resolution (resultID→movieID) is revalidated — a
 // stale pre-lock read can never skip a concurrent rescrape rekey or crop.
 type LockedMovieOps struct {
-	pe      *PosterEditor
-	movieID string
+	pe            *PosterEditor
+	movieID       string
+	resolveRecrop bool
 }
 
 // MovieID returns the family key these ops are locked on.
@@ -731,6 +733,11 @@ func (m *LockedMovieOps) UpdatePosterCrop(croppedURL string, bounds *models.Crop
 		movie.Poster.PosterCropBounds = bounds
 		movie.Poster.PosterCropSourceFull = sourceFull
 	})
+	if resolvesPosterRecrop(bounds, sourceFull) {
+		for _, candidate := range candidates {
+			clearPosterRecrop(candidate)
+		}
+	}
 	if len(candidates) == 0 {
 		return fmt.Errorf("%w: %s", ErrMovieFamilyEmpty, m.movieID)
 	}
@@ -832,7 +839,9 @@ func (m *LockedMovieOps) UpdateMovieFamily(ctx context.Context, movie *models.Mo
 		curShouldCrop = cur.Movie.Poster.ShouldCropPoster
 		break
 	}
-	sanitizePosterCropGeometry(movie, have, curPosterURL, curCoverURL, curShouldCrop)
+	if !m.resolveRecrop || movie.Poster.PosterCropBounds == nil {
+		sanitizePosterCropGeometry(movie, have, curPosterURL, curCoverURL, curShouldCrop)
+	}
 
 	candidates := m.mutateCandidates(filePaths, func(mv *models.Movie) {})
 	if len(candidates) == 0 {
@@ -898,6 +907,12 @@ func (m *LockedMovieOps) UpdateMovieFamily(ctx context.Context, movie *models.Mo
 	// place inside the tx, and both the envelope encode and the post-commit
 	// publish must see those normalized IDs (stale-ID anti-resurrection).
 	for _, cand := range candidates {
+		if m.resolveRecrop {
+			clearPosterRecrop(cand)
+		} else if cand.ErrorCode == downloader.PosterRecropRequiredCode {
+			movie.Poster.PosterCropBounds = cand.Movie.Poster.Clone().PosterCropBounds
+			movie.Poster.PosterCropSourceFull = cand.Movie.Poster.PosterCropSourceFull
+		}
 		cand.Movie = movie
 		retainMovieAlias(cand, movie.ID)
 	}
@@ -1694,6 +1709,7 @@ func (pe *PosterEditor) UpdateMovieFamilyWithEcho(ctx context.Context, movieID, 
 				}
 			}
 		}
+		m.resolveRecrop = !opts.CarryCropGeometry && movie != nil && resolvesPosterRecrop(movie.Poster.PosterCropBounds, movie.Poster.PosterCropSourceFull)
 		if opts.CarryCropGeometry && movie != nil && movie.Poster.PosterCropBounds == nil {
 			// Revalidate the omitted-bounds carry INSIDE the locked section
 			// (R29/D1): read the CURRENT stored geometry from the target

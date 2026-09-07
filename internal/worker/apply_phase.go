@@ -688,6 +688,10 @@ func interpretApplyResult(
 
 	if applyErr != nil {
 		errMsg := applyErr.Error()
+		errorCode := ""
+		if errors.Is(applyErr, downloader.ErrPosterRecropRequired) {
+			errorCode = downloader.PosterRecropRequiredCode
+		}
 		if errors.Is(applyErr, context.DeadlineExceeded) {
 			errMsg = fmt.Sprintf("apply timed out after %v", applyTimeout)
 		}
@@ -746,6 +750,9 @@ func interpretApplyResult(
 				current.Movie = mergeLiveReviewEdits(movie, movie, current.Movie)
 				current.Status = fileStatus
 				current.Error = errMsg
+				if errorCode != "" && samePosterCropIntent(movie, current.Movie) {
+					current.ErrorCode = errorCode
+				}
 				current.StartedAt = startTime
 				current.EndedAt = &now
 				return current, mergeWriteBackProvenance(inputs.Provenance[filePath], prov), nil
@@ -756,6 +763,7 @@ func interpretApplyResult(
 					Movie:         movie,
 					Status:        fileStatus,
 					Error:         errMsg,
+					ErrorCode:     errorCode,
 					StartedAt:     startTime,
 					EndedAt:       &now,
 				}, inputs.Provenance[filePath])
@@ -976,7 +984,17 @@ func applyFile(
 	// progress.FromContext. Use taskCtx, not the parent egCtx.
 	taskCtx = progress.WithReporter(taskCtx, reporter)
 
-	result, applyErr := wf.Apply(taskCtx, applyCmd)
+	var result *workflow.ApplyResult
+	var applyErr error
+	if fileResult.ErrorCode == downloader.PosterRecropRequiredCode {
+		refusal := &downloader.PosterRecropRequiredError{Reason: downloader.SourceIdentityUnavailable}
+		if bounds := prepared.baseline.Poster.PosterCropBounds; bounds != nil {
+			refusal.Bounds = *bounds
+		}
+		applyErr = refusal
+	} else {
+		result, applyErr = wf.Apply(taskCtx, applyCmd)
+	}
 
 	// Step 3: Interpret the result against the FROZEN baseline (workflow
 	// permutations may have rewritten fields on the live pointer mid-apply).

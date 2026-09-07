@@ -2,17 +2,17 @@ package downloader
 
 import (
 	"bytes"
+	"context"
 	"image"
 	"image/color"
 	"image/draw"
 	"image/jpeg"
-	"net/http"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/assetidentity"
 	"github.com/javinizer/javinizer-go/internal/models"
-	"github.com/javinizer/javinizer-go/internal/organizer"
 	"github.com/spf13/afero"
+	"github.com/stretchr/testify/require"
 )
 
 func p4JPEG(c color.RGBA) []byte {
@@ -23,30 +23,18 @@ func p4JPEG(c color.RGBA) []byte {
 	return buf.Bytes()
 }
 
-func TestDownloadPosterFingerprintMismatchFallsBack(t *testing.T) {
-	fs := afero.NewMemMapFs()
-	cfg := &Config{DownloadPoster: true, MaxPosterHeight: 0, MediaFormatConfig: organizer.MediaFormatConfig{PosterFormat: "<ID>-poster.jpg"}}
-	d := NewDownloader(http.DefaultClient, fs, cfg, nil)
+func TestDownloadPosterFingerprintMismatchRequiresRecrop(t *testing.T) {
 	original := p4JPEG(color.RGBA{R: 20, G: 20, B: 20, A: 255})
 	replacement := p4JPEG(color.RGBA{R: 220, G: 220, B: 220, A: 255})
-	full := "/tmp/source-full.jpg"
-	crop := "/tmp/cropped.jpg"
-	if err := afero.WriteFile(fs, full, original, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	bounds := &models.CropBounds{
-		X: 0, Y: 0, Width: 0.4, Height: 1, SourceAspect: 1000.0 / 600.0,
-		SourceFingerprint: assetidentity.FromBytes(original).Fingerprint,
-	}
-	ok, _ := d.cropDownloadedPoster(full, crop, bounds)
-	if !ok {
-		t.Fatal("same-content source should accept manual geometry")
-	}
-	if err := afero.WriteFile(fs, full, replacement, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	ok, _ = d.cropDownloadedPoster(full, crop, bounds)
-	if ok {
-		t.Fatal("same-aspect different-content source must reject stale manual geometry")
+	for _, source := range [][]byte{original, replacement} {
+		server, _ := identityServer(t, source)
+		bounds := &models.CropBounds{Width: .4, Height: 1, SourceAspect: 1000.0 / 600, SourceFingerprint: assetidentity.FromBytes(original).Fingerprint}
+		result, err := newGeometryDownloader(afero.NewMemMapFs()).downloadPoster(context.Background(), geometryMovie(server.URL, bounds, false), t.TempDir(), nil)
+		if bytes.Equal(source, original) {
+			require.NoError(t, err)
+			require.True(t, result.Downloaded)
+		} else {
+			requireIdentityRefusal(t, result, err, SourceFingerprintMismatch, bounds)
+		}
 	}
 }
