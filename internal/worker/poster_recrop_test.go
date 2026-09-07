@@ -284,3 +284,19 @@ func TestPosterRecropSkipDownloadRetryProceeds(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, downloader.PosterRecropRequiredCode, after.ErrorCode, "marker persists — stale crop intent remains until a fresh measured crop or removal")
 }
+
+func TestPosterRecropDryRunRetryProceeds(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "movie.mp4")
+	store := resultstore.New(1, []string{path})
+	movie := &models.Movie{ID: "CROP-1"}
+	stored := &resultstore.MovieResult{Movie: movie, ErrorCode: downloader.PosterRecropRequiredCode, Status: models.JobStatusFailed, FileMatchInfo: models.FileMatchInfo{Path: path, MovieID: movie.ID}}
+	store.UpdateFileResult(path, stored)
+	inputs := minimalApplyInputs(t, store, true)
+	wf := &stubApplyWorkflow{applyResult: &workflow.ApplyResult{Movie: movie}}
+	cfg := ApplyPhaseConfig{Download: true, DryRun: true}
+	cmd, afc, execute := buildApplyCmd(path, movie, stored, inputs, cfg, context.Background())
+	require.True(t, execute)
+	outcome := applyFile(context.Background(), wf, path, stored, movie, &preparedApplyFile{cmd: cmd, afc: afc, baseline: movie.Clone(), execute: execute}, inputs, cfg)
+	require.False(t, outcome.Failed, "dry-run retry must not be blocked by the recrop marker")
+	require.Equal(t, 1, wf.getApplyCalled())
+}
