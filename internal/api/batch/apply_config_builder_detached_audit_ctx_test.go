@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/javinizer/javinizer-go/internal/api/contracts"
 	"github.com/javinizer/javinizer-go/internal/api/core"
@@ -170,6 +171,80 @@ func TestPostApplyAuditEmitFailure_WarnLoggedNotFatal(t *testing.T) {
 		}})
 	})
 	assert.Equal(t, int64(1), emitter.attempts.Load(), "the emit was attempted and its failure absorbed")
+}
+
+// deadlineCapturingEmitter records the deadline carried by the ctx on every
+// emit, so tests can assert that all audit events of ONE PostApplyFunc
+// invocation ride a single shared budget (PR #249 codex P2) instead of each
+// event re-scoping its own 5s ctx.
+type deadlineCapturingEmitter struct {
+	deadlines []time.Time
+}
+
+func (e *deadlineCapturingEmitter) EmitScraperEvent(context.Context, string, string, models.EventSeverity, map[string]any) error {
+	return nil
+}
+
+func (e *deadlineCapturingEmitter) EmitOrganizeEvent(ctx context.Context, source, message string, severity models.EventSeverity, eventContext map[string]any) error {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return fmt.Errorf("event emitter: caller context carries no deadline")
+	}
+	e.deadlines = append(e.deadlines, deadline)
+	return nil
+}
+
+func (e *deadlineCapturingEmitter) EmitSystemEvent(context.Context, string, string, models.EventSeverity, map[string]any) error {
+	return nil
+}
+
+func (e *deadlineCapturingEmitter) Stats() (emitted, failed int64) {
+	return int64(len(e.deadlines)), 0
+}
+
+var _ eventlog.EventEmitter = (*deadlineCapturingEmitter)(nil)
+
+// TestPostApplyAuditCtx_SharedDeadlineAcrossWarnings pins the P2 fix: ONE
+// detached bounded ctx per PostApplyFunc invocation, reused across the
+// success event and every warning event. A success lane carrying W>2
+// warnings must present the SAME deadline to the emitter on all 1+W events —
+// a regression back to per-event ctx scoping would create a distinct
+// deadline per event (and re-open the (1+W)×5s worst-case worker delay after
+// an apply timeout).
+func TestPostApplyAuditCtx_SharedDeadlineAcrossWarnings(t *testing.T) {
+	emitter := &deadlineCapturingEmitter{}
+	rt := core.NewAPIRuntime(&core.APIDeps{EventEmitter: emitter})
+	snapshot := core.NewSnapshotForTesting(rt, core.APIConfig{})
+	factory := worker.NewBatchJobFactory(nil, nil, nil, nil, worker.BatchJobConfig{}, nil)
+	job := &stubControlledJob{}
+
+	organize, err := resolveOrganizeApplyConfig(snapshot, factory, job, contracts.OrganizeRequest{
+		OperationMode: string(operationmode.OperationModeInPlace),
+	})
+	require.NoError(t, err)
+
+	warnings := []string{
+		"force-overwrite: existing destination bytes were destroyed",
+		"duplicate destination within batch: /dest/movie.mp4 already claimed (overwrite authorized)",
+		"partial publish: earlier legs completed before failure",
+	}
+
+	start := time.Now()
+	organize.PostApplyFunc(context.Background(), &worker.ApplyFileContext{
+		FilePath: "/source/movie.mp4",
+		Movie:    &models.Movie{ID: "MOV-48"},
+	}, &worker.ApplyFileResult{Result: &workflow.ApplyResult{
+		OrganizeResult: &organizer.OrganizeResult{NewPath: "/dest/movie.mp4", Warnings: warnings},
+	}})
+
+	require.Len(t, emitter.deadlines, 1+len(warnings), "success event + one event per warning")
+	for i, deadline := range emitter.deadlines[1:] {
+		assert.True(t, deadline.Equal(emitter.deadlines[0]),
+			"event %d deadline %v must be identical to the shared deadline %v", i+1, deadline, emitter.deadlines[0])
+	}
+	// Sanity: the shared budget is the 5s detached budget, not unbounded.
+	assert.False(t, emitter.deadlines[0].Before(start.Add(4*time.Second)), "deadline must be at the ~5s budget, not sooner")
+	assert.False(t, emitter.deadlines[0].After(start.Add(6*time.Second)), "deadline must be bounded (~5s), not unbounded")
 }
 
 // TestPostApplyDetachedAuditCtx_Update pins the update resolver's nfo_gen

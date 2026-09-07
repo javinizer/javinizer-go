@@ -121,7 +121,16 @@ func resolveOrganizeApplyConfig(
 		if emitter == nil {
 			return
 		}
-		emit := postApplyAuditEmit(emitter, job.GetID())
+		// One detached bounded ctx per PostApplyFunc invocation, REUSED
+		// across the success/failure event + every warning event (PR #249
+		// codex P2): scoping a fresh 5s ctx PER EVENT would let an organize
+		// result with W warnings sit (1+W)×5s worst-case on a worker
+		// goroutine after an apply timeout. Mirror the CLI hook
+		// (cliBatchPostApply) and the worker history writer: budget once per
+		// file, aggregate all of the file's audit rows under it.
+		auditCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		emit := postApplyAuditEmit(auditCtx, emitter, job.GetID())
 		if afr.Err != nil {
 			// PR #249 codex follow-up (F4): the failed lane's result still
 			// carries the displacement crumbs — the link lane binds the
@@ -277,7 +286,12 @@ func resolveUpdateApplyConfig(
 		}
 		emitter := deps.GetEventEmitter()
 		if afr.Err != nil && emitter != nil {
-			postApplyAuditEmit(emitter, job.GetID())("nfo_gen", fmt.Sprintf("Update failed for %s", afc.Movie.ID), models.SeverityError, map[string]any{"job_id": job.GetID(), "movie_id": afc.Movie.ID, "error": afr.Err.Error(), "apply_generation": loadApplyGeneration(applyGenerationRef)})
+			// Same one-ctx-per-invocation shape as the organize lane (update
+			// currently emits a single event, but keep the pattern uniform so
+			// a future per-warning lane inherits the aggregated budget).
+			auditCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			postApplyAuditEmit(auditCtx, emitter, job.GetID())("nfo_gen", fmt.Sprintf("Update failed for %s", afc.Movie.ID), models.SeverityError, map[string]any{"job_id": job.GetID(), "movie_id": afc.Movie.ID, "error": afr.Err.Error(), "apply_generation": loadApplyGeneration(applyGenerationRef)})
 		}
 	}
 
@@ -308,27 +322,29 @@ func loadApplyGeneration(generationRef *uint64) uint64 {
 	return atomic.LoadUint64(generationRef)
 }
 
-// postApplyAuditEmit returns an emit closure that forwards one organize audit
-// event to the shared eventlog on a DETACHED, bounded context, mirroring the
-// worker's historyAuditContext pattern (worker/history_writer.go) and the CLI
-// hook (commandutil/batch_command.go cliBatchPostApply).
+// postApplyAuditEmit returns an emit closure that forwards organize audit
+// events to the shared eventlog on the caller-supplied DETACHED, bounded
+// auditCtx. The caller (a PostApplyFunc invocation) allocates that ctx ONCE
+// and reuses it across the file's success/failure event plus every warning
+// event, so a result with W warnings costs ONE 5s budget worst-case, not
+// (1+W) — the same aggregation shape as the worker's history writer
+// (worker/history_writer.go historyAuditContext) and the CLI hook
+// (commandutil/batch_command.go cliBatchPostApply).
 //
 // Detachment is required: the apply phase invokes PostApplyFunc via
 // interpretApplyResult with the per-file task ctx, which is ALREADY expired
 // when apply exhausts WorkerTimeout, and eventlog.emit drops events on a
-// canceled ctx (emitter.go checks ctx.Err()). Routing the passed ctx through
-// here meant a timed-out apply lost its failure/warning audit rows entirely,
-// while the worker's history writer still recorded the outcome because it
-// audits with a fresh bounded ctx. A 5s background-timeout context keeps the
-// audit write bounded without blocking the apply pipeline.
+// canceled ctx (emitter.go checks ctx.Err()). Routing the passed task ctx
+// through here meant a timed-out apply lost its failure/warning audit rows
+// entirely, while the worker's history writer still recorded the outcome
+// because it audits with a fresh bounded ctx. A 5s background-timeout context
+// keeps the audit writes bounded without blocking the apply pipeline.
 //
 // Emission failures are Warn-logged, not silently discarded (mirroring the
 // CLI hook), so a persist-level outage surfaces in the logs instead of
 // vanishing.
-func postApplyAuditEmit(emitter eventlog.EventEmitter, jobID string) func(source, message string, severity models.EventSeverity, eventCtx map[string]any) {
+func postApplyAuditEmit(auditCtx context.Context, emitter eventlog.EventEmitter, jobID string) func(source, message string, severity models.EventSeverity, eventCtx map[string]any) {
 	return func(source, message string, severity models.EventSeverity, eventCtx map[string]any) {
-		auditCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
 		if err := emitter.EmitOrganizeEvent(auditCtx, source, message, severity, eventCtx); err != nil {
 			logging.Warnf("[api batch %s] eventlog audit emission failed (source=%s, severity=%s, message=%q): %v", jobID, source, severity, message, err)
 		}
