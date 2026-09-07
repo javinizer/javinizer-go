@@ -986,7 +986,7 @@ func applyFile(
 
 	var result *workflow.ApplyResult
 	var applyErr error
-	if fileResult.ErrorCode == downloader.PosterRecropRequiredCode {
+	if fileResult.ErrorCode == downloader.PosterRecropRequiredCode && cfg.Download {
 		refusal := &downloader.PosterRecropRequiredError{Reason: downloader.SourceIdentityUnavailable}
 		if bounds := prepared.baseline.Poster.PosterCropBounds; bounds != nil {
 			refusal.Bounds = *bounds
