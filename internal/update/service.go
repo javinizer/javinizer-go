@@ -315,9 +315,25 @@ func (s *Service) BackgroundCheck(ctx context.Context) {
 }
 
 // StartBackgroundCheck starts a background goroutine for periodic checks.
-func (s *Service) StartBackgroundCheck(ctx context.Context, interval time.Duration) {
+//
+// It returns a done channel that is closed once the goroutine has fully exited
+// — ticker stopped and any in-flight BackgroundCheck returned. Callers request
+// shutdown by cancelling ctx, then join with <-done; after done closes the
+// goroutine performs no further state-store writes, so resources the store
+// depends on (e.g. its on-disk directory) can be torn down without racing an
+// outstanding write. A disabled service starts no goroutine and returns an
+// already-closed channel so a join never blocks.
+//
+// REGRESSION NOTE: the join guarantee relies on BackgroundCheck being invoked
+// synchronously in the ticker case below — close(done) fires only after an
+// in-flight check returns. If BackgroundCheck is ever dispatched as its own
+// goroutine, the done channel would close while a check is still writing and
+// the join contract breaks.
+func (s *Service) StartBackgroundCheck(ctx context.Context, interval time.Duration) <-chan struct{} {
+	done := make(chan struct{})
 	if !s.enabled {
-		return
+		close(done)
+		return done
 	}
 
 	// Normalize non-positive intervals before creating the ticker, otherwise
@@ -328,6 +344,10 @@ func (s *Service) StartBackgroundCheck(ctx context.Context, interval time.Durati
 	}
 
 	go func() {
+		// Deferred FIRST so it runs LAST: done closes after the recover
+		// below (and after any in-flight BackgroundCheck) has completed, so
+		// even a panicking check can never leave a joiner blocked forever.
+		defer close(done)
 		defer func() {
 			if r := recover(); r != nil {
 				err := panicutil.FormatRecover(r)
@@ -343,10 +363,14 @@ func (s *Service) StartBackgroundCheck(ctx context.Context, interval time.Durati
 				logging.Info("Background update check stopped")
 				return
 			case <-ticker.C:
+				// Synchronous by design: the goroutine cannot select ctx.Done()
+				// and exit while a check is in flight, so close(done) only
+				// fires after the check's state-store writes have finished.
 				s.BackgroundCheck(ctx)
 			}
 		}
 	}()
+	return done
 }
 
 // IsUpdateAvailable checks if an update is available without modifying state.

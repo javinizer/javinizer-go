@@ -179,6 +179,13 @@ func TestShutdownDeps(t *testing.T) {
 		}, "shutdownDeps should not panic when runtime is nil")
 	})
 
+	t.Run("no-op when runtime state is nil", func(t *testing.T) {
+		rt := NewAPIRuntime(&APIDeps{})
+		assert.NotPanics(t, func() {
+			shutdownDeps(rt)
+		}, "shutdownDeps should not panic when runtime state is nil")
+	})
+
 	t.Run("calls runtime shutdown", func(t *testing.T) {
 		rs := NewRuntimeState()
 		_ = rs.ResetWebSocketHub()

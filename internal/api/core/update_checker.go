@@ -13,8 +13,10 @@ import (
 //
 // Both the periodic ticker (StartBackgroundCheck) and the one-shot cache-warming
 // check (BackgroundCheck) are bound to rt.ServerCtx(), which rt.Shutdown()
-// cancels — so background work stops cleanly on server shutdown rather than
-// leaking past process lifetime.
+// cancels; Shutdown then joins the ticker goroutine via the done channel stashed
+// on rt.updateCheckerDone — so background work stops cleanly on server shutdown
+// rather than leaking past process lifetime or racing teardown of the on-disk
+// state cache.
 //
 // opts allows tests to inject a stub Checker (no real network) and a temp-dir
 // StatePath (no real filesystem writes); production callers pass a zero-value
@@ -46,6 +48,9 @@ func startUpdateChecker(rt *APIRuntime, cfg *config.Config, opts update.ServiceO
 	svc.BackgroundCheck(ctx)
 
 	// Periodic ticker; stops when ctx (rt.ServerCtx) is cancelled on shutdown.
-	svc.StartBackgroundCheck(ctx, svc.Interval())
+	// The returned done channel is stashed on the runtime so APIRuntime.Shutdown
+	// can join the goroutine — it is confirmed exited, and done touching the
+	// on-disk state cache, before teardown completes.
+	rt.updateCheckerDone = svc.StartBackgroundCheck(ctx, svc.Interval())
 	logging.Infof("Background update checker started (interval: %s)", svc.Interval())
 }

@@ -162,6 +162,15 @@ type APIRuntime struct {
 	serverCtx     context.Context
 	serverCancel  context.CancelFunc
 
+	// updateCheckerDone is the join handle for the background update-check
+	// goroutine started by startUpdateChecker: closed when that goroutine
+	// has fully exited (ticker stopped, in-flight check returned). Written
+	// once during bootstrap, before the server serves, and joined by
+	// Shutdown after cancelling serverCtx, so teardown cannot race the
+	// update checker's final state-store write. Nil when version checks
+	// are disabled (startUpdateChecker returned early).
+	updateCheckerDone <-chan struct{}
+
 	// startupSweep is configured during bootstrap and started by the API server
 	// after bootstrap has returned. Once makes the startup repair one-shot even
 	// if a caller constructs the router more than once for the same runtime.
@@ -676,20 +685,6 @@ func (r *APIRuntime) SetConfig(cfg *config.Config) {
 	defer r.reloadMu.Unlock()
 	r.deps.CoreDeps.SetConfig(cfg)
 	r.invalidateFactoriesLocked(cfg)
-}
-
-// shutdownDeps gracefully shuts down runtime resources in APIRuntime.
-//
-//nolint:unused // used by same-package tests
-func shutdownDeps(rt *APIRuntime) {
-	if rt == nil {
-		return
-	}
-	rs := rt.GetRuntime()
-	if rs == nil {
-		return
-	}
-	rs.Shutdown()
 }
 
 // ---------------------------------------------------------------------------

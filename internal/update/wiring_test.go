@@ -120,10 +120,15 @@ func TestService_StartBackgroundCheck_StubTickerFiresOnInterval(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	svc.StartBackgroundCheck(ctx, 30*time.Millisecond)
+	done := svc.StartBackgroundCheck(ctx, 30*time.Millisecond)
 
 	require.Eventually(t, func() bool { return chk.callsCount() >= 3 }, 2*time.Second, 10*time.Millisecond,
 		"background ticker must fire multiple times on interval")
+
+	// Join before return so goleak sees the goroutine deterministically exited
+	// and t.TempDir cleanup cannot race an in-flight state write.
+	cancel()
+	<-done
 }
 
 // TestService_StartBackgroundCheck_StubStopsOnCancel covers AC (c): after the
@@ -136,21 +141,17 @@ func TestService_StartBackgroundCheck_StubStopsOnCancel(t *testing.T) {
 
 	// A longer interval widens the gap between ticks so a tick is less likely
 	// to be in-flight exactly when cancel() runs.
-	svc.StartBackgroundCheck(ctx, 50*time.Millisecond)
+	done := svc.StartBackgroundCheck(ctx, 50*time.Millisecond)
 
 	require.Eventually(t, func() bool { return chk.callsCount() >= 2 }, 2*time.Second, 10*time.Millisecond,
 		"ticker must fire before cancellation")
 
 	cancel()
 
-	// A tick that was already in-flight when cancel() was called may finish
-	// before the goroutine observes ctx.Done() and exits, so it can bump the
-	// call count once after cancellation. Wait long enough for any in-flight
-	// check to complete and the goroutine to wind down, then record the count
-	// and assert no further calls arrive. The generous stabilization window
-	// keeps the test stable on slow Windows runners with unpredictable
-	// scheduling latency.
-	time.Sleep(150 * time.Millisecond)
+	// Join the goroutine: <-done returns only after any tick that was in-flight
+	// when cancel() ran has finished and bumped the call count, so the count
+	// recorded here is final — no stabilization sleep needed.
+	<-done
 	callsAfterCancel := chk.callsCount()
 
 	time.Sleep(300 * time.Millisecond)
@@ -166,9 +167,13 @@ func TestService_StartBackgroundCheck_StubDisabledNoCalls(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	svc.StartBackgroundCheck(ctx, 20*time.Millisecond)
+	done := svc.StartBackgroundCheck(ctx, 20*time.Millisecond)
 
 	time.Sleep(120 * time.Millisecond)
 	assert.Equal(t, 0, chk.callsCount(),
 		"disabled service must not start the background checker")
+
+	// A disabled service returns an already-closed done channel; the join must
+	// not block (otherwise this test hangs until the go test timeout).
+	<-done
 }
