@@ -34,6 +34,17 @@ func (r *APIRuntime) Shutdown() {
 	if r.serverCancel != nil {
 		r.serverCancel()
 	}
+	// Join the background update checker (when it was started) so its goroutine
+	// is confirmed exited — and done writing to the on-disk state cache —
+	// before teardown completes. Nil-safe: startUpdateChecker leaves the field
+	// nil when version checks are disabled, and receiving from a nil channel
+	// would block forever. No timeout on the join (tasks.md 3.3): after
+	// serverCancel the in-flight BackgroundCheck aborts promptly via ctx, and
+	// the check self-bounds (30s ctx timeout; 10s GitHub HTTP client timeout),
+	// so the join cannot stall indefinitely.
+	if r.updateCheckerDone != nil {
+		<-r.updateCheckerDone
+	}
 }
 
 // TrackBackgroundTask delegates to the runtime state — implemented there to
