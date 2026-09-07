@@ -435,3 +435,26 @@ func TestDownloadPoster_BoundedVerification(t *testing.T) {
 	requireIdentityRefusal(t, result, err, SourceIdentityUnavailable, bounds)
 	require.Equal(t, int32(1), hits.Load())
 }
+
+type identityStatErrFS struct {
+	afero.Fs
+	statErr error
+}
+
+func (f *identityStatErrFS) Stat(name string) (os.FileInfo, error) {
+	info, err := f.Fs.Stat(name)
+	if f.statErr != nil && err == nil && strings.HasSuffix(name, ".full.tmp") {
+		return nil, f.statErr
+	}
+	return info, err
+}
+
+func TestDownloadPoster_StatFailureRefusal(t *testing.T) {
+	a := p4JPEG(color.RGBA{R: 20, A: 255})
+	server, hits := identityServer(t, a)
+	fs := &identityStatErrFS{Fs: afero.NewMemMapFs(), statErr: errors.New("stat refused")}
+	bounds := &models.CropBounds{Width: .4, Height: 1, SourceAspect: 1000.0 / 600, SourceFingerprint: assetidentity.FromBytes(a).Fingerprint}
+	result, err := newGeometryDownloader(fs).downloadPoster(context.Background(), geometryMovie(server.URL, bounds, false), t.TempDir(), nil)
+	requireIdentityRefusal(t, result, err, SourceIdentityUnavailable, bounds)
+	require.Equal(t, int32(1), hits.Load())
+}
