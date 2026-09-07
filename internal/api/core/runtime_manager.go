@@ -687,20 +687,6 @@ func (r *APIRuntime) SetConfig(cfg *config.Config) {
 	r.invalidateFactoriesLocked(cfg)
 }
 
-// shutdownDeps gracefully shuts down runtime resources in APIRuntime.
-//
-//nolint:unused // used by same-package tests
-func shutdownDeps(rt *APIRuntime) {
-	if rt == nil {
-		return
-	}
-	rs := rt.GetRuntime()
-	if rs == nil {
-		return
-	}
-	rs.Shutdown()
-}
-
 // ---------------------------------------------------------------------------
 // Legacy compatibility — these package-level functions delegate to APIRuntime.
 // They exist so that callers that only have *APIDeps can still perform
