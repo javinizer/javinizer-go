@@ -143,7 +143,7 @@ func TestPosterRecropConcurrentNewCrop(t *testing.T) {
 func TestPosterRecropMissingBoundsStillBlocksRetry(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "movie.mp4")
 	store := resultstore.New(1, []string{path})
-	movie := &models.Movie{ID: "CROP-1"}
+	movie := &models.Movie{ID: "CROP-1", Poster: models.PosterState{PosterURL: "https://example.test/a.jpg"}}
 	stored := &resultstore.MovieResult{Movie: movie, ErrorCode: downloader.PosterRecropRequiredCode, Status: models.JobStatusFailed, FileMatchInfo: models.FileMatchInfo{Path: path, MovieID: movie.ID}}
 	store.UpdateFileResult(path, stored)
 	inputs := minimalApplyInputs(t, store, true)
@@ -157,6 +157,25 @@ func TestPosterRecropMissingBoundsStillBlocksRetry(t *testing.T) {
 	after, err := store.GetMovieResult(path)
 	require.NoError(t, err)
 	require.Equal(t, downloader.PosterRecropRequiredCode, after.ErrorCode)
+}
+
+func TestPosterRecropMarkerPassesWhenNoPosterURL(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "movie.mp4")
+	store := resultstore.New(1, []string{path})
+	movie := &models.Movie{ID: "CROP-1"}
+	stored := &resultstore.MovieResult{Movie: movie, ErrorCode: downloader.PosterRecropRequiredCode, Status: models.JobStatusFailed, FileMatchInfo: models.FileMatchInfo{Path: path, MovieID: movie.ID}}
+	store.UpdateFileResult(path, stored)
+	inputs := minimalApplyInputs(t, store, true)
+	wf := &stubApplyWorkflow{applyResult: &workflow.ApplyResult{Movie: movie}}
+	cfg := ApplyPhaseConfig{Download: true}
+	cmd, afc, execute := buildApplyCmd(path, movie, stored, inputs, cfg, context.Background())
+	require.True(t, execute)
+	outcome := applyFile(context.Background(), wf, path, stored, movie, &preparedApplyFile{cmd: cmd, afc: afc, baseline: movie.Clone(), execute: execute}, inputs, cfg)
+	require.False(t, outcome.Failed, "with no poster source URL the apply has no poster to verify — other media must not be blocked")
+	require.Equal(t, 1, wf.getApplyCalled())
+	after, err := store.GetMovieResult(path)
+	require.NoError(t, err)
+	require.Equal(t, downloader.PosterRecropRequiredCode, after.ErrorCode, "marker persists for the next poster-capable apply")
 }
 
 func TestPosterRecropIntentComparison(t *testing.T) {
