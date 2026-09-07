@@ -1715,7 +1715,9 @@ func (pe *PosterEditor) UpdateMovieFamilyWithEcho(ctx context.Context, movieID, 
 				}
 			}
 		}
-		m.resolveRecrop = !opts.CarryCropGeometry && movie != nil && resolvesPosterRecrop(movie.Poster.CroppedPosterURL, movie.Poster.PosterCropBounds, movie.Poster.PosterCropSourceFull)
+		// Family-save explicit-null is a removal regardless of any restored
+		// baseline cropped URL (resetPoster restores the original's preview).
+		m.resolveRecrop = !opts.CarryCropGeometry && movie != nil && resolvesPosterRecrop("", movie.Poster.PosterCropBounds, movie.Poster.PosterCropSourceFull)
 		if opts.CarryCropGeometry && movie != nil && movie.Poster.PosterCropBounds == nil {
 			// Revalidate the omitted-bounds carry INSIDE the locked section
 			// (R29/D1): read the CURRENT stored geometry from the target
