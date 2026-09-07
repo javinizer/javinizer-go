@@ -99,6 +99,14 @@ func (s *inPlaceNoRenameFolderStrategy) Execute(plan *OrganizePlan) (*OrganizeRe
 		ShouldGenerateMetadata: true,
 	}
 
+	// overwroteOccupiedDest records that THIS execution replaced a
+	// bytes-bearing destination the authorization suppressed — keyed to the
+	// PUBLISH-BOUND replacement signal of the move's own publish (PR #249
+	// codex P2): no-op and refused lanes never set it, and a
+	// replacement-free failure answers false exactly like them — while a
+	// failed publish that STILL displaced resident bytes keeps the crumb ON
+	// the FAILED result (see foldMovePublishCrumb).
+	overwroteOccupiedDest := false
 	// Shared parent-directory lock + target-file lock (dir before file): an in-place
 	// rename elsewhere drains shared holders before moving the directory, so this move
 	// never lands inside a renamed (possibly about-to-rollback) directory — while
@@ -106,7 +114,7 @@ func (s *inPlaceNoRenameFolderStrategy) Execute(plan *OrganizePlan) (*OrganizeRe
 	err := withDestDirSharedLock(plan.TargetDir, func() error {
 		return withDestFileLock(plan.TargetPath, func() error {
 			if plan.overwriteAuthorized {
-				identical, sameIn, err := refuseIfUnsuppressibleAuthorizedDestination(s.fs, plan.SourcePath, plan.TargetPath)
+				identical, sameIn, err := classifyAuthorizedDestination(s.fs, plan.SourcePath, plan.TargetPath)
 				if err != nil {
 					return err
 				}
@@ -128,15 +136,36 @@ func (s *inPlaceNoRenameFolderStrategy) Execute(plan *OrganizePlan) (*OrganizeRe
 				}
 				return nil
 			}
-			return fsutil.MoveFileFs(s.fs, plan.SourcePath, plan.TargetPath)
+			// Publish-bound crumb: the move's own publish reports whether
+			// resident bytes were displaced AT the publish instant; the
+			// retained crumb folds on the displacement answer ALONE, failure
+			// included (see foldMovePublishCrumb).
+			replaced, mErr := moveFileDestReplaced(s.fs, plan.SourcePath, plan.TargetPath)
+			foldMovePublishCrumb(&overwroteOccupiedDest, replaced)
+			if mErr != nil {
+				return mErr
+			}
+			return nil
 		})
 	})
 	if err != nil {
 		result.Error = fmt.Errorf("failed to rename file: %w", err)
+		// A failed publish that displaced resident bytes keeps its crumb on
+		// the FAILED result (every failed-with-displacement class — see
+		// foldMovePublishCrumb); Moved stays false, so the failure
+		// journals ONCE as the failed-and-retained row, never
+		// double-journaled as a clean replace.
+		if overwroteOccupiedDest {
+			result.Warnings = append(result.Warnings, authorizedOverwriteWarning(plan.TargetPath))
+		}
 		return result, result.Error
 	}
 
 	result.Moved = true
+	// Force-overwrite audit crumb: the replace actually landed.
+	if overwroteOccupiedDest {
+		result.Warnings = append(result.Warnings, authorizedOverwriteWarning(plan.TargetPath))
+	}
 
 	return result, nil
 }

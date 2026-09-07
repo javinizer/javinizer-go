@@ -65,7 +65,7 @@ func TestCrossDeviceMoveFs_SourceRemoveFailure_KeepsBoth(t *testing.T) {
 	require.NoError(t, afero.WriteFile(memFs, "/src.txt", []byte("data"), 0644))
 
 	fs := &removeFailFs{Fs: memFs, failOn: "/src.txt"}
-	err := crossDeviceMoveFs(fs, "/src.txt", "/dst.txt")
+	_, err := crossDeviceMoveFsDestReplaced(fs, "/src.txt", "/dst.txt")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to remove source")
 
@@ -87,7 +87,7 @@ func TestCrossDeviceMoveFs_CopyFailureKeepsForeignDest(t *testing.T) {
 	require.NoError(t, afero.WriteFile(memFs, "/dst.txt", []byte("foreign"), 0644))
 
 	fs := &openFailFs{Fs: memFs, failOn: "/src.txt"}
-	err := crossDeviceMoveFs(fs, "/src.txt", "/dst.txt")
+	_, err := crossDeviceMoveFsDestReplaced(fs, "/src.txt", "/dst.txt")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to copy file across devices")
 

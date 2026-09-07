@@ -96,7 +96,7 @@ func TestCopyFileDataFs_Basic(t *testing.T) {
 	}
 
 	dstPath := filepath.Join(tmpDir, "destination.txt")
-	if err := copyFileDataFs(fs, srcPath, dstPath); err != nil {
+	if _, err := copyFileDataFsDestReplaced(fs, srcPath, dstPath); err != nil {
 		t.Fatalf("copyFileDataFs failed: %v", err)
 	}
 
@@ -117,7 +117,7 @@ func TestCrossDeviceMoveFs_Success(t *testing.T) {
 	}
 
 	dstPath := filepath.Join(tmpDir, "destination.txt")
-	if err := crossDeviceMoveFs(fs, srcPath, dstPath); err != nil {
+	if _, err := crossDeviceMoveFsDestReplaced(fs, srcPath, dstPath); err != nil {
 		t.Fatalf("crossDeviceMoveFs failed: %v", err)
 	}
 
@@ -134,13 +134,13 @@ func TestCrossDeviceMoveFs_Success(t *testing.T) {
 func TestCrossDeviceMoveFs_SourceRemovalFails(t *testing.T) {
 	fs := afero.NewReadOnlyFs(afero.NewMemMapFs())
 
-	err := crossDeviceMoveFs(fs, "/tmp/source.txt", "/tmp/destination.txt")
+	_, err := crossDeviceMoveFsDestReplaced(fs, "/tmp/source.txt", "/tmp/destination.txt")
 	assert.Error(t, err)
 }
 
 func TestCrossDeviceMoveFs_CopyFails(t *testing.T) {
 	fs := afero.NewMemMapFs()
-	err := crossDeviceMoveFs(fs, "/nonexistent/source.txt", "/tmp/destination.txt")
+	_, err := crossDeviceMoveFsDestReplaced(fs, "/nonexistent/source.txt", "/tmp/destination.txt")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to copy file across devices")
 }

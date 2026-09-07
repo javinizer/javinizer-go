@@ -228,6 +228,17 @@ func (s *inPlaceStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) {
 	}
 
 	if plan.InPlace {
+		// innerFileReplacedOccupant is the force-overwrite audit crumb's
+		// PUBLISH-BOUND evidence for the inner file rename below (PR #249
+		// codex P2): the authorized rename publish reports AT the publish
+		// instant whether a bytes-bearing foreign occupant at the new file
+		// name was displaced, so a post-classify plant/vacate can neither
+		// forge nor hide the crumb. No-op (identical / same-inode) and
+		// refused lanes never set it; a failed inner rename discards it
+		// through the rollback/error legs. The pure DIRECTORY rename
+		// deliberately never crumbs: its target was proven absent-or-self-alias
+		// before the rename, so it replaces nothing foreign.
+		innerFileReplacedOccupant := false
 		// The WHOLE directory sequence — stat, renames, inner file step, and any rollback —
 		// runs while holding the EXCLUSIVE TargetDir lock plus the inner TargetPath file
 		// lock, acquired up front (dir before file): a sibling worker holding only the
@@ -286,6 +297,11 @@ func (s *inPlaceStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) {
 					}
 				}
 
+				// Force-overwrite audit crumb stays silent HERE by construction
+				// (non-obvious intent): the target directory was just proven absent
+				// or a self-alias, so this rename replaces NO foreign bytes — it only
+				// changes a directory NAME. Only the inner FILE rename below can
+				// replace resident bytes, and it carries the crumb.
 				if err := s.fs.Rename(plan.OldDir, plan.TargetDir); err != nil {
 					return fmt.Errorf("failed to rename directory: %w", err)
 				}
@@ -325,7 +341,7 @@ func (s *inPlaceStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) {
 						result.NewDirectoryPath = ""
 					}
 					if plan.overwriteAuthorized {
-						identical, sameIn, lerr := refuseIfUnsuppressibleAuthorizedDestination(s.fs, currentFilePath, plan.TargetPath)
+						identical, sameIn, lerr := classifyAuthorizedDestination(s.fs, currentFilePath, plan.TargetPath)
 						if lerr != nil {
 							rb()
 							return lerr
@@ -349,10 +365,21 @@ func (s *inPlaceStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) {
 					// directory rename back exactly as before.
 					innerOp := fsutil.PublishNoReplace
 					if plan.overwriteAuthorized {
-						innerOp = func(fs afero.Fs, a, b string) error { return fs.Rename(a, b) }
+						// Publish-bound crumb (PR #249 codex P2): the inline rename
+						// publish itself reports — one syscall ahead of it — whether
+						// resident bytes were displaced; classify-time occupancy
+						// could go stale inside the classify → rename window.
+						innerOp = func(fs afero.Fs, a, b string) error {
+							replaced, err := fsutil.RenameDestReplaced(fs, a, b)
+							innerFileReplacedOccupant = err == nil && replaced
+							return err
+						}
 					}
 					if err := innerOp(s.fs, currentFilePath, plan.TargetPath); err != nil {
 						return s.finishInPlaceInnerRename(plan, result, err)
+					}
+					if innerFileReplacedOccupant {
+						result.Warnings = append(result.Warnings, authorizedOverwriteWarning(plan.TargetPath))
 					}
 				}
 				return nil
@@ -365,6 +392,14 @@ func (s *inPlaceStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) {
 		result.Moved = true
 		return result, nil
 	} else {
+		// overwroteOccupiedDest records that THIS execution replaced a
+		// bytes-bearing destination the authorization suppressed — keyed to
+		// the PUBLISH-BOUND replacement signal of the move's own publish
+		// (PR #249 codex P2): no-op and refused lanes never set it, and a
+		// replacement-free failure answers false exactly like them — while a
+		// failed publish that STILL displaced resident bytes keeps the crumb
+		// ON the FAILED result (see foldMovePublishCrumb).
+		overwroteOccupiedDest := false
 		// Shared parent-directory lock + target-file lock (dir before file): an in-place
 		// directory rename elsewhere drains shared holders before it may move the
 		// directory, so this move can never land inside a renamed (possibly
@@ -372,7 +407,7 @@ func (s *inPlaceStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) {
 		err := withDestDirSharedLock(plan.TargetDir, func() error {
 			return withDestFileLock(plan.TargetPath, func() error {
 				if plan.overwriteAuthorized {
-					identical, sameIn, err := refuseIfUnsuppressibleAuthorizedDestination(s.fs, plan.SourcePath, plan.TargetPath)
+					identical, sameIn, err := classifyAuthorizedDestination(s.fs, plan.SourcePath, plan.TargetPath)
 					if err != nil {
 						return err
 					}
@@ -397,15 +432,36 @@ func (s *inPlaceStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) {
 					}
 					return nil
 				}
-				return fsutil.MoveFileFs(s.fs, plan.SourcePath, plan.TargetPath)
+				// Publish-bound crumb: the move's own publish reports whether
+				// resident bytes were displaced AT the publish instant; the
+				// retained crumb folds on the displacement answer ALONE, failure
+				// included (see foldMovePublishCrumb).
+				replaced, mErr := moveFileDestReplaced(s.fs, plan.SourcePath, plan.TargetPath)
+				foldMovePublishCrumb(&overwroteOccupiedDest, replaced)
+				if mErr != nil {
+					return mErr
+				}
+				return nil
 			})
 		})
 		if err != nil {
 			result.Error = fmt.Errorf("failed to move file: %w", err)
+			// A failed publish that displaced resident bytes keeps its crumb on
+			// the FAILED result (every failed-with-displacement class — see
+			// foldMovePublishCrumb); Moved stays false, so the failure
+			// journals ONCE as the failed-and-retained row, never
+			// double-journaled as a clean replace.
+			if overwroteOccupiedDest {
+				result.Warnings = append(result.Warnings, authorizedOverwriteWarning(plan.TargetPath))
+			}
 			return result, result.Error
 		}
 
 		result.Moved = true
+		// Force-overwrite audit crumb: the replace actually landed.
+		if overwroteOccupiedDest {
+			result.Warnings = append(result.Warnings, authorizedOverwriteWarning(plan.TargetPath))
+		}
 	}
 
 	return result, nil

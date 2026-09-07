@@ -582,6 +582,14 @@ func newCLIBatchRuntime(bs *bootstrapResult, cfg *config.Config, opts BatchComma
 // bounded ctx (worker/history_writer.go historyAuditContext). Mirror that
 // pattern here, and log loudly if emission STILL fails instead of discarding
 // the error.
+//
+// Cancellation is NOT a failure (PR #249 codex P2, canceled-error lane): the
+// worker classifies a canceled apply as Cancelled, not failed
+// (worker/apply_phase.go interpretApplyResult), so the failure event is
+// suppressed when errors.Is(err, context.Canceled) — mirroring
+// auditOrganizeFailure's canceled skip (worker/history_writer.go) and the API
+// resolvers' PostApplyFunc. Buffered warning events still emit on the canceled
+// lane: they are truthful evidence of work done before cancellation landed.
 func cliBatchPostApply(emitter eventlog.EventEmitter, w io.Writer, jobID string, dryRun, updateMode bool, skipCount *atomic.Int64, printMu *sync.Mutex) func(context.Context, *worker.ApplyFileContext, *worker.ApplyFileResult) {
 	return func(_ context.Context, afc *worker.ApplyFileContext, afr *worker.ApplyFileResult) {
 		// Guard matches the API resolver: never deref a nil payload; the hook
@@ -589,13 +597,21 @@ func cliBatchPostApply(emitter eventlog.EventEmitter, w io.Writer, jobID string,
 		if afc == nil || afc.Movie == nil || afr == nil {
 			return
 		}
-		// Skip accounting + warning print run before the dry-run gate (see
-		// the doc comment); a failed apply keeps failures' single surface —
-		// no warning double-print on the error path.
+		// Warning collection + console print run for BOTH outcomes before the
+		// dry-run gate (see the doc comment): a failed lane's result still
+		// carries the displacement crumbs — the link lane binds the
+		// force-overwrite crumb at the destruction (PR #249 codex follow-up
+		// F2), and the failed OrganizeResult flows through the publish-
+		// completed partial lineage — so the crumb must surface on Err!=nil
+		// lanes too (F4): console print here, per-warning eventlog entries on
+		// the failure branch below, and the worker history metadata (the
+		// failure row's organizeMetadata reads the same Warnings slice). Only
+		// skip ACCOUNTING stays success-gated — a failed lane never claimed a
+		// duplicate skip.
 		var warnings []string
-		if afr.Err == nil && afr.Result != nil && afr.Result.OrganizeResult != nil {
+		if afr.Result != nil && afr.Result.OrganizeResult != nil {
 			warnings = afr.Result.OrganizeResult.Warnings
-			if afr.Result.OrganizeResult.DuplicateSkipped {
+			if afr.Err == nil && afr.Result.OrganizeResult.DuplicateSkipped {
 				skipCount.Add(1)
 			}
 		}
@@ -631,7 +647,25 @@ func cliBatchPostApply(emitter eventlog.EventEmitter, w io.Writer, jobID string,
 			warningVerb = "Update warning"
 		}
 		if afr.Err != nil {
-			emit(source, fmt.Sprintf("%s for %s", failureVerb, afc.Movie.ID), models.SeverityError, map[string]any{"job_id": jobID, "movie_id": afc.Movie.ID, "error": afr.Err.Error()})
+			// Suppress the failure event on cancellation (see the doc
+			// comment) — the canceled check must run BEFORE the failure emit;
+			// the per-warning events below still land because the crumbs are
+			// truthful evidence regardless of whether the apply was completed,
+			// failed, or canceled.
+			if !errors.Is(afr.Err, context.Canceled) {
+				failCtx := map[string]any{"job_id": jobID, "movie_id": afc.Movie.ID, "error": afr.Err.Error()}
+				if len(warnings) > 0 {
+					// The failed lane's crumbs ride the failure event's context
+					// too — the eventlog consumer sees the displacement disclosure
+					// without having to correlate the warning events that follow.
+					failCtx["warnings"] = warnings
+				}
+				emit(source, fmt.Sprintf("%s for %s", failureVerb, afc.Movie.ID), models.SeverityError, failCtx)
+			}
+			for _, warning := range warnings {
+				warnCtx := map[string]any{"job_id": jobID, "movie_id": afc.Movie.ID, "file": afc.FilePath, "warning": warning, "error": afr.Err.Error()}
+				emit(source, fmt.Sprintf("%s for %s: %s", warningVerb, afc.Movie.ID, warning), models.SeverityWarn, warnCtx)
+			}
 			return
 		}
 		var newPath string

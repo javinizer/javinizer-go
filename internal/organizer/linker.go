@@ -16,7 +16,12 @@ type linker interface {
 	// hardlink creates a hard link from oldname to newname.
 	hardlink(oldname, newname string) error
 	// copyFile copies the file content from src to dst using the provided fs.
-	copyFile(fs afero.Fs, src, dst string) error
+	// destReplaced reports — bound to the staged replace-publish itself, not
+	// to any earlier classification (PR #249 codex P2) — whether the publish
+	// displaced an occupied destination whose object does NOT alias the
+	// source's own inode, so the authorized overwrite audit crumb keys on
+	// publish-time PHYSICAL occupancy.
+	copyFile(fs afero.Fs, src, dst string) (destReplaced bool, err error)
 }
 
 // OSLinker wraps real OS link operations for production use.
@@ -24,8 +29,8 @@ type OSLinker struct{}
 
 func (OSLinker) symlink(oldname, newname string) error  { return os.Symlink(oldname, newname) }
 func (OSLinker) hardlink(oldname, newname string) error { return os.Link(oldname, newname) }
-func (OSLinker) copyFile(fs afero.Fs, src, dst string) error {
-	return fsutil.CopyFileFs(fs, src, dst)
+func (OSLinker) copyFile(fs afero.Fs, src, dst string) (bool, error) {
+	return fsutil.CopyFileFsDestReplaced(fs, src, dst)
 }
 
 // linkRecord records a link operation for test assertions.
@@ -52,6 +57,6 @@ func (m *MemLinker) hardlink(oldname, newname string) error {
 	return nil
 }
 
-func (m *MemLinker) copyFile(fs afero.Fs, src, dst string) error {
-	return fsutil.CopyFileFs(fs, src, dst)
+func (m *MemLinker) copyFile(fs afero.Fs, src, dst string) (bool, error) {
+	return fsutil.CopyFileFsDestReplaced(fs, src, dst)
 }

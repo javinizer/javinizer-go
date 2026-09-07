@@ -218,7 +218,7 @@ func TestCoverMoveFsCopyFileData_PublishFailureDiscards(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	seedSrc(t, fs)
 	wrapped := &renameFailFs{Fs: fs, failRenameDst: "/out/a.mp4"}
-	err := copyFileDataFs(wrapped, "/in/a.mp4", "/out/a.mp4")
+	_, err := copyFileDataFsDestReplaced(wrapped, "/in/a.mp4", "/out/a.mp4")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to rename temp file to destination")
 	entries, derr := afero.ReadDir(fs, "/out")

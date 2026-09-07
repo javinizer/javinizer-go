@@ -84,20 +84,27 @@ func logDestRefusal(c PlanConflict) {
 	logging.Warnf("[organizer] destination conflict (%s) cannot be authorized-over: %s", c.kindName(), c.Path)
 }
 
-// refuseIfUnsuppressibleAuthorizedDestination is the authorized-execute
-// leg gate (task 2.3): symlink and directory destinations refuse with a new
-// sentence (authorized overlays deliberately report a different class); regular-file
-// destinations are suppressed per authorization. self/same-inode → no-op per D2.
-func refuseIfUnsuppressibleAuthorizedDestination(fs afero.Fs, src, dst string) (identical, sameInode bool, err error) {
+// classifyAuthorizedDestination is the authorized-execute leg gate (task
+// 2.3's refuseIfUnsuppressibleAuthorizedDestination, unified) used by every
+// authorized lane: symlink and directory destinations refuse with a sentence
+// (authorized overlays deliberately report a different class; regular-file
+// destinations are suppressed per authorization; self/same-inode → no-op per
+// D2) — one classifyExistingDestination call, identical refusal rules.
+// The force-overwrite audit crumb no longer takes ANY evidence from this
+// classification (PR #249 codex P2): a regular-file occupation seen here can
+// be raced stale before the publish (the copy lane stages the whole stream
+// between classify and publish), so every authorized lane keys the crumb to
+// the PUBLISH-BOUND replacement signal returned by the fsutil publish verbs
+// (MoveFileFsDestReplaced / CopyFileFsDestReplaced / RenameDestReplaced).
+func classifyAuthorizedDestination(fs afero.Fs, src, dst string) (identical, sameInode bool, err error) {
 	c := classifyExistingDestination(fs, src, dst)
 	if c.Err != nil {
 		return false, false, c.Err
 	}
-	if c.Conflict == nil {
+	if c.Conflict == nil || c.Conflict.Kind == ConflictFile {
+		// A regular-file occupation is suppressed by authorization — the
+		// publish reports whether resident bytes were ACTUALLY displaced.
 		return c.Identical, c.SameInode, nil
-	}
-	if c.Conflict.Kind == ConflictFile {
-		return c.Identical, c.SameInode, nil // suppressed by authorization
 	}
 	logDestRefusal(*c.Conflict)
 	return false, false, fmt.Errorf("cannot authorize-over a %s destination (refusing to replace): %s", c.Conflict.kindName(), c.Conflict.Path)
