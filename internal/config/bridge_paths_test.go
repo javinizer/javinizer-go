@@ -293,6 +293,12 @@ func extractBridgeFunctions(rootDir string) ([]bridgeFunc, error) {
 
 	err := filepath.Walk(internalDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
+			// Transient staging artifacts (e.g. batch poster temp files) may
+			// vanish between the directory listing and the stat on Windows —
+			// skip vanishing entries instead of failing the whole scan.
+			if os.IsNotExist(err) {
+				return nil
+			}
 			return err
 		}
 		if info.IsDir() || !strings.HasSuffix(path, ".go") {
