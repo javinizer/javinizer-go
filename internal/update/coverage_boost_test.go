@@ -253,10 +253,12 @@ func TestService_StartBgCheck_Cancel(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	svc.StartBackgroundCheck(ctx, 50*time.Millisecond)
+	done := svc.StartBackgroundCheck(ctx, 50*time.Millisecond)
 	time.Sleep(120 * time.Millisecond)
 	cancel()
-	time.Sleep(50 * time.Millisecond)
+	// Join before returning: t.TempDir cleanup must not race the ticker
+	// goroutine's state-store writes (Windows unlinkat flake).
+	<-done
 }
 
 func TestCompareVersions_LegacyComparison(t *testing.T) {

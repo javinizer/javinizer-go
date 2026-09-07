@@ -202,10 +202,15 @@ func TestService_StartBackgroundCheck(t *testing.T) {
 	defer cancel()
 
 	// Start background check
-	service.StartBackgroundCheck(ctx, 1*time.Second)
+	done := service.StartBackgroundCheck(ctx, 1*time.Second)
 
 	// Wait a bit to let it run
 	time.Sleep(1500 * time.Millisecond)
+
+	// Join the ticker before returning so t.TempDir cleanup cannot race a
+	// final state-store write by the still-running goroutine.
+	cancel()
+	<-done
 
 	// Verify state was updated (or at least tried)
 	state, _ := store.LoadState()
@@ -231,13 +236,18 @@ func TestService_StartBackgroundCheck_Disabled(t *testing.T) {
 	defer cancel()
 
 	// Start background check on disabled service - should not run
-	service.StartBackgroundCheck(ctx, 1*time.Second)
+	done := service.StartBackgroundCheck(ctx, 1*time.Second)
 
 	// Wait and verify state was not modified
 	time.Sleep(1500 * time.Millisecond)
 
 	state, _ := store.LoadState()
 	assert.Nil(t, state, "Disabled service should not modify state")
+
+	// A disabled service starts no goroutine; its done channel is already
+	// closed, so a join returns immediately (an unclosed channel would hang
+	// here until the test timeout).
+	<-done
 }
 
 func TestService_ShouldCheck(t *testing.T) {
