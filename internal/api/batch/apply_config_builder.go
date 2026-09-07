@@ -2,6 +2,7 @@ package batch
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sync"
@@ -146,11 +147,26 @@ func resolveOrganizeApplyConfig(
 				warnings = afr.Result.OrganizeResult.Warnings
 				newPath = afr.Result.OrganizeResult.NewPath
 			}
-			failCtx := map[string]any{"job_id": job.GetID(), "movie_id": afc.Movie.ID, "error": afr.Err.Error(), "apply_generation": loadApplyGeneration(applyGenerationRef)}
-			if len(warnings) > 0 {
-				failCtx["warnings"] = warnings
+			// PR #249 codex P2 (canceled-error lane): context.Canceled is
+			// checked BEFORE any failure emit. The worker classifies a canceled
+			// apply as Cancelled, NOT failed (apply_phase.go interpretApplyResult:
+			// fileStatus = models.JobStatusCancelled and OnFileFailed is
+			// deliberately NOT invoked), so a SeverityError "Organize failed"
+			// row for a canceled file would mislabel the audit trail — consumers
+			// correlate failed events with erasable/retriable files. Skip it;
+			// mirrors auditOrganizeFailure's canceled skip
+			// (worker/history_writer.go) and the CLI hook (cliBatchPostApply).
+			// The buffered warning events STILL emit: they are truthful evidence
+			// (resident bytes destroyed, partial publish) recorded before the
+			// cancellation landed, and the success-history row the worker writes
+			// for a canceled partial move reads the same Warnings slice.
+			if !errors.Is(afr.Err, context.Canceled) {
+				failCtx := map[string]any{"job_id": job.GetID(), "movie_id": afc.Movie.ID, "error": afr.Err.Error(), "apply_generation": loadApplyGeneration(applyGenerationRef)}
+				if len(warnings) > 0 {
+					failCtx["warnings"] = warnings
+				}
+				emit("file_move", fmt.Sprintf("Organize failed for %s", afc.Movie.ID), models.SeverityError, failCtx)
 			}
-			emit("file_move", fmt.Sprintf("Organize failed for %s", afc.Movie.ID), models.SeverityError, failCtx)
 			for _, warning := range warnings {
 				emit("file_move", fmt.Sprintf("Organize warning for %s: %s", afc.Movie.ID, warning), models.SeverityWarn, map[string]any{"job_id": job.GetID(), "movie_id": afc.Movie.ID, "file": afc.FilePath, "new_path": newPath, "warning": warning, "error": afr.Err.Error(), "apply_generation": loadApplyGeneration(applyGenerationRef)})
 			}
@@ -285,10 +301,15 @@ func resolveUpdateApplyConfig(
 			return
 		}
 		emitter := deps.GetEventEmitter()
-		if afr.Err != nil && emitter != nil {
-			// Same one-ctx-per-invocation shape as the organize lane (update
-			// currently emits a single event, but keep the pattern uniform so
-			// a future per-warning lane inherits the aggregated budget).
+		if afr.Err != nil && emitter != nil && !errors.Is(afr.Err, context.Canceled) {
+			// canceled check BEFORE the failure emit (PR #249 codex P2,
+			// canceled-error lane): the worker records canceled files as
+			// Cancelled, not failed, so a SeverityError "Update failed" row
+			// would mislabel the audit trail — mirror the organize lane above
+			// and the CLI hook. Same one-ctx-per-invocation shape as the
+			// organize lane (update currently emits a single event, but keep
+			// the pattern uniform so a future per-warning lane inherits the
+			// aggregated budget).
 			auditCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			postApplyAuditEmit(auditCtx, emitter, job.GetID())("nfo_gen", fmt.Sprintf("Update failed for %s", afc.Movie.ID), models.SeverityError, map[string]any{"job_id": job.GetID(), "movie_id": afc.Movie.ID, "error": afr.Err.Error(), "apply_generation": loadApplyGeneration(applyGenerationRef)})
