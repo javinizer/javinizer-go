@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -27,6 +28,19 @@ import (
 // an unbounded same-URL-replacement body. 512 MiB exceeds any sane poster.
 // Var (not const) so tests can shrink the bound without writing big files.
 var maxPosterVerifyBytes int64 = 512 << 20
+
+// readVerificationBound reads r up to maxPosterVerifyBytes+1 bytes, enforcing
+// the verification limit *during* the read (not via a beforehand pathname
+// Stat, which a scratch-substitution writer could invalidate between checks).
+// len(out) > maxPosterVerifyBytes marks an over-limit body.
+func readVerificationBound(r io.Reader) ([]byte, error) {
+	lr := &io.LimitedReader{R: r, N: maxPosterVerifyBytes + 1}
+	data, err := io.ReadAll(lr)
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
+}
 
 func (d *Downloader) downloadCover(ctx context.Context, movie *models.Movie, destDir string, multipart *MultipartInfo, options ...any) (*DownloadResult, error) {
 	overwriteExisting, dedup := resolveDownloadOptions(options)
@@ -204,18 +218,20 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 		// a fingerprint mismatch. The Stat gate preserves the single-snapshot
 		// guarantee (one bounded ReadFile whose bytes are both measured and
 		// cropped) without ever materializing an unbounded body.
-		info, statErr := d.fs.Stat(fullPath)
+		verifier, openErr := d.fs.Open(fullPath)
 		var refusal *PosterRecropRequiredError
 		switch {
-		case statErr != nil:
-			refusal = &PosterRecropRequiredError{Reason: SourceIdentityUnavailable, Bounds: *bounds, Cause: fmt.Errorf("measure downloaded poster: %w", statErr)}
-		case info.Size() > maxPosterVerifyBytes:
-			refusal = &PosterRecropRequiredError{Reason: SourceIdentityUnavailable, Bounds: *bounds, Cause: fmt.Errorf("downloaded poster %s exceeds %d-byte verification bound", fullPath, maxPosterVerifyBytes)}
+		case openErr != nil:
+			refusal = &PosterRecropRequiredError{Reason: SourceIdentityUnavailable, Bounds: *bounds, Cause: fmt.Errorf("measure downloaded poster: %w", openErr)}
 		default:
-			verifiedSource, err = afero.ReadFile(d.fs, fullPath)
-			if err != nil {
+			verifiedSource, err = readVerificationBound(verifier)
+			_ = verifier.Close()
+			switch {
+			case err != nil:
 				refusal = &PosterRecropRequiredError{Reason: SourceIdentityUnavailable, Bounds: *bounds, Cause: fmt.Errorf("measure downloaded poster: %w", err)}
-			} else if !strings.EqualFold(assetidentity.FromBytes(verifiedSource).Fingerprint, bounds.SourceFingerprint) {
+			case int64(len(verifiedSource)) > maxPosterVerifyBytes:
+				refusal = &PosterRecropRequiredError{Reason: SourceIdentityUnavailable, Bounds: *bounds, Cause: fmt.Errorf("downloaded poster %s exceeds the %d-byte verification bound", fullPath, maxPosterVerifyBytes)}
+			case !strings.EqualFold(assetidentity.FromBytes(verifiedSource).Fingerprint, bounds.SourceFingerprint):
 				refusal = &PosterRecropRequiredError{Reason: SourceFingerprintMismatch, Bounds: *bounds}
 			}
 		}

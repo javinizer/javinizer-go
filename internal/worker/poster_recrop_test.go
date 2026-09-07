@@ -17,7 +17,7 @@ import (
 )
 
 func TestPosterRecropRetryAndResolution(t *testing.T) {
-	for _, action := range []string{"unchanged", "omitted", "omitted source change", "fresh", "fresh source change", "remove", "crop endpoint", "remove endpoint", "unmeasured"} {
+	for _, action := range []string{"unchanged", "omitted", "omitted source change", "fresh", "fresh source change", "remove", "reset baseline url", "crop endpoint", "remove endpoint", "unmeasured"} {
 		t.Run(action, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "movie.mp4")
 			job := newBatchJob([]string{path})
@@ -45,6 +45,10 @@ func TestPosterRecropRetryAndResolution(t *testing.T) {
 			case "remove":
 				edit.Poster.PosterCropBounds = nil
 				resolved = true
+			case "reset baseline url":
+				edit.Poster.PosterCropBounds = nil
+				edit.Poster.CroppedPosterURL = "baseline-crop.jpg"
+				resolved = true
 			case "crop endpoint":
 				require.NoError(t, pe.UpdatePosterCrop(movie.ID, "preview.jpg", fresh, true))
 				resolved = true
@@ -62,7 +66,7 @@ func TestPosterRecropRetryAndResolution(t *testing.T) {
 			if resolved {
 				require.Empty(t, current.ErrorCode)
 				require.Empty(t, current.Error)
-				if action == "remove" || action == "remove endpoint" {
+				if action == "remove" || action == "reset baseline url" || action == "remove endpoint" {
 					require.Nil(t, current.Movie.Poster.PosterCropBounds)
 				} else {
 					require.Equal(t, fresh, current.Movie.Poster.PosterCropBounds)
