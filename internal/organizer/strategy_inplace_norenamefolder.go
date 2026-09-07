@@ -102,8 +102,10 @@ func (s *inPlaceNoRenameFolderStrategy) Execute(plan *OrganizePlan) (*OrganizeRe
 	// overwroteOccupiedDest records that THIS execution replaced a
 	// bytes-bearing destination the authorization suppressed — keyed to the
 	// PUBLISH-BOUND replacement signal of the move's own publish (PR #249
-	// codex P2): no-op and refused lanes never set it, and a failed publish
-	// discards it by returning before the warning.
+	// codex P2): no-op and refused lanes never set it, and a
+	// replacement-free failure answers false exactly like them — while a
+	// failed publish that STILL displaced resident bytes keeps the crumb ON
+	// the FAILED result (see foldMovePublishCrumb).
 	overwroteOccupiedDest := false
 	// Shared parent-directory lock + target-file lock (dir before file): an in-place
 	// rename elsewhere drains shared holders before moving the directory, so this move
@@ -135,28 +137,24 @@ func (s *inPlaceNoRenameFolderStrategy) Execute(plan *OrganizePlan) (*OrganizeRe
 				return nil
 			}
 			// Publish-bound crumb: the move's own publish reports whether
-			// resident bytes were displaced AT the publish instant.
-			replaced, mErr := fsutil.MoveFileFsDestReplaced(s.fs, plan.SourcePath, plan.TargetPath)
+			// resident bytes were displaced AT the publish instant; the
+			// retained crumb folds on the displacement answer ALONE, failure
+			// included (see foldMovePublishCrumb).
+			replaced, mErr := moveFileDestReplaced(s.fs, plan.SourcePath, plan.TargetPath)
+			foldMovePublishCrumb(&overwroteOccupiedDest, replaced)
 			if mErr != nil {
-				// Partial-publish ambiguity (PR #249 codex P2 follow-up — F1): the
-				// ErrPublishCompleted leg means the cross-device publish LANDED —
-				// fsutil carries its displaced-occupancy answer through the error,
-				// so the audit crumb survives onto the FAILED result below instead
-				// of being dropped with it.
-				if fsutil.PublishCompleted(mErr) && replaced {
-					overwroteOccupiedDest = true
-				}
 				return mErr
 			}
-			overwroteOccupiedDest = replaced
 			return nil
 		})
 	})
 	if err != nil {
 		result.Error = fmt.Errorf("failed to rename file: %w", err)
-		// Publish-completed failures keep their crumb on the FAILED result;
-		// Moved stays false, so the partial publish journals ONCE as the
-		// failed-and-retained row, never double-journaled as a clean replace.
+		// A failed publish that displaced resident bytes keeps its crumb on
+		// the FAILED result (every failed-with-displacement class — see
+		// foldMovePublishCrumb); Moved stays false, so the failure
+		// journals ONCE as the failed-and-retained row, never
+		// double-journaled as a clean replace.
 		if overwroteOccupiedDest {
 			result.Warnings = append(result.Warnings, authorizedOverwriteWarning(plan.TargetPath))
 		}

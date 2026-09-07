@@ -33,6 +33,47 @@ func authorizedOverwriteWarning(targetPath string) string {
 	return fmt.Sprintf("overwrite authorized: replaced existing destination %s", targetPath)
 }
 
+// moveFileDestReplaced is the test seam over fsutil.MoveFileFsDestReplaced
+// for the AUTHORIZED move lanes (the same discipline as fsutil's
+// publishStagedBoundDestLstat / publishStagedBoundRestream seams): the
+// failed-with-displacement post-publish classes (ErrPublishStagedIdentityBreak
+// / ErrPublishStagedExhausted) are producible only on the bound staged
+// publish's REAL-*afero.OsFs leg (fsutil's osStagingHandle gate), while the
+// EXDEV routing a move into that leg can only be wedged through a VIRTUAL
+// wrapper fs — the two gates are mutually exclusive at the afero layer, so no
+// fs-level wedge replays the shape. Tests replay fsutil's documented
+// (replaced == displacement-unioned, err) tuple contract at this call edge
+// instead; fsutil pins the real production of every such tuple itself
+// (move_destreplaced_union_w249b_test.go lineage). The predicate under test
+// stays OUTSIDE the seam — foldMovePublishCrumb — so the replay exercises the
+// production crumb keying, never a stubbed one.
+var moveFileDestReplaced = fsutil.MoveFileFsDestReplaced
+
+// foldMovePublishCrumb is the move lanes' unified retained-crumb predicate
+// (PR #249 codex P2 follow-up) — the three strategies' duplicated
+// replace-then-key-the-crumb gates collapse into this one fold: the
+// force-overwrite crumb keys on the displacement answer ALONE, SUCCESS and
+// FAILURE alike. fsutil unions its displaced-occupancy evidence onto EVERY
+// failed-with-displacement error shape it returns: the ErrPublishCompleted
+// partial publish (source cleanup refused after the publish landed) AND the
+// post-publish identity family (ErrPublishStagedIdentityBreak /
+// ErrPublishStagedExhausted, which DELIBERATELY never wrap
+// ErrPublishCompleted — the destination name is not provably this operation's
+// own object, so the compensation/claim axis keeps its distinct non-settling
+// posture in fsutil's pending-kind lineage and in executeFile's
+// PublishCompleted classification; that axis keys on the error CLASS, this
+// crumb on the destruction FACT). Any gate riding fsutil.PublishCompleted
+// (the pre-fix predicate) dropped the identity-break/exhaustion shapes' crumb
+// off the FAILED result and silently re-opened the hidden-overwrite class
+// PR #249 closed. A confirmed replacement-free answer — every pre-publish
+// refusal and every nothing-landed failure — is always replaced == false, so
+// an unconfirmed displacement never crumbs. The fold UNIONS (||): a crumb an
+// earlier destructive step bound (the link lane's Remove-bound lineage) can
+// never be unbound by a later clean answer.
+func foldMovePublishCrumb(crumb *bool, replaced bool) {
+	*crumb = *crumb || replaced
+}
+
 // linkInstallOccupantIsAlias is the link-install crumb's alias-vs-foreign
 // exclusion, keyed to the LstatIfPossible taken IMMEDIATELY pre-Remove (PR
 // #249 codex follow-up — F1), never to the lane-head classification: the
@@ -422,8 +463,11 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 		// crumbs, an occupant planted before the publish always does — even
 		// inside the classify → publish window under held (process-local)
 		// locks. The no-op (identical / same-inode) and refused lanes never
-		// set it, and a failed publish discards it by returning before the
-		// warning.
+		// set it; a replacement-free failure answers false exactly like
+		// them, while a failed publish that STILL displaced resident bytes
+		// (publish-completed ambiguity; the post-publish identity break /
+		// republish-exhaustion family) keeps the crumb ON the FAILED result
+		// — see foldMovePublishCrumb.
 		overwroteOccupiedDest := false
 		move := func() error {
 			if plan.overwriteAuthorized {
@@ -467,24 +511,15 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 			// publish instant — the same-device leg probes at rename adjacency,
 			// the cross-device fallback inherits the staged publish's bound
 			// signal — so a foreign plant/vacate after the classification above
-			// can neither forge nor hide it.
-			replaced, mErr := fsutil.MoveFileFsDestReplaced(s.fs, plan.SourcePath, plan.TargetPath)
+			// can neither forge nor hide it. The retained crumb folds on the
+			// displacement answer ALONE, failure included (see
+			// foldMovePublishCrumb): a failed publish that still displaced
+			// resident bytes keeps its crumb on the FAILED result below.
+			replaced, mErr := moveFileDestReplaced(s.fs, plan.SourcePath, plan.TargetPath)
+			foldMovePublishCrumb(&overwroteOccupiedDest, replaced)
 			if mErr != nil {
-				// Partial-publish ambiguity (PR #249 codex P2 follow-up — F1): the
-				// typed ErrPublishCompleted leg means the cross-device publish
-				// LANDED and only the source cleanup refused; fsutil carries its
-				// displaced-occupancy answer through that result, so the audit crumb
-				// must not be dropped with the error — Apply journals the
-				// publish-completed ambiguity as an event nonetheless, and its
-				// replacement evidence rides the FAILED result below. Every other
-				// failure leg discarded nothing because nothing landed (fsutil
-				// answers replaced=false there).
-				if fsutil.PublishCompleted(mErr) && replaced {
-					overwroteOccupiedDest = true
-				}
 				return mErr
 			}
-			overwroteOccupiedDest = replaced
 			return nil
 		}
 
@@ -496,13 +531,15 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 		})
 		if err != nil {
 			result.Error = err
-			// The publish-completed failure keeps its crumb: the destination
-			// really carries this operation's bytes — displaced resident bytes
-			// included — so the audit warning rides the FAILED result's Warnings
-			// for the console/history/eventlog consumers. Moved stays false (the
-			// source is retained): this is never journaled as a clean
-			// move/replace — the revert ledger keeps its single partial-publish
-			// row (CompleteFailed), not a completed-operation row alongside it.
+			// A failed publish that displaced resident bytes keeps its crumb in
+			// EVERY failed-with-displacement class (publish-completed ambiguity;
+			// the post-publish identity break / republish-exhaustion family —
+			// see foldMovePublishCrumb): the resident's bytes were destroyed
+			// by a publish that LANDED, so the audit warning rides the FAILED
+			// result's Warnings for the console/history/eventlog consumers.
+			// Moved stays false (the source is retained): this is never
+			// journaled as a clean move/replace — the revert ledger keeps its
+			// single failed row, not a completed-operation row alongside it.
 			if overwroteOccupiedDest {
 				result.Warnings = append(result.Warnings, authorizedOverwriteWarning(plan.TargetPath))
 			}
