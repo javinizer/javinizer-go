@@ -147,7 +147,15 @@ func crossDeviceMoveFsDestReplaced(fs afero.Fs, src, dst string) (bool, error) {
 		// The copy leg never writes to dst directly (staging only), so there is
 		// NOTHING of ours at dst to "clean up": removing it could delete a
 		// pre-existing foreign file (#224). Keep both, surface the failure.
-		return false, fmt.Errorf("failed to copy file across devices: %w", err)
+		//
+		// Union the displacement evidence with the failure (PR #249 codex
+		// follow-up, F3): a staged-publish leg that LANDED and displaced a
+		// resident before a post-publish identity break / retry exhaustion
+		// already destroyed foreign bytes — that destruction is a fact no
+		// post-publish error path may erase. Genuinely replacement-free legs
+		// (pre-publish verify/close/stream refusals) answer false exactly as
+		// before, because no successful publish leg ever displaced anything.
+		return replaced, fmt.Errorf("failed to copy file across devices: %w", err)
 	}
 
 	if err := fs.Remove(src); err != nil {
@@ -236,7 +244,17 @@ func copyFileDataFsDestReplaced(fs afero.Fs, src, dst string) (bool, error) {
 		// implementation removed its temp on failure; keep that cleanliness
 		// without ever deleting a possibly-foreign staged name.
 		discardStagedAfterFailedPublish(fs, staged, stagedIdentity, err)
-		return false, fmt.Errorf("failed to rename temp file to destination: %w", err)
+		// Union the displacement evidence with post-publish failures (PR #249
+		// codex follow-up, F3): displacedOccupant is set ONLY by a publish leg
+		// that returned success one syscall after observing a foreign occupant
+		// — so a true answer here proves a successful publish displaced resident
+		// bytes AT SOME ATTEMPT before the post-publish identity break /
+		// republish-budget exhaustion surfaced this error. That destruction is
+		// permanent (error or not), so the audit evidence must ride the FAILED
+		// result instead of being dropped — the ErrPublishCompleted partial-
+		// publish lineage's discipline (the pre-build code answered false on
+		// EVERY error leg, erasing a proven displacement).
+		return displacedOccupant, fmt.Errorf("failed to rename temp file to destination: %w", err)
 	}
 
 	return displacedOccupant, nil

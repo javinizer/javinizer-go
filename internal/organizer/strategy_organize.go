@@ -33,6 +33,41 @@ func authorizedOverwriteWarning(targetPath string) string {
 	return fmt.Sprintf("overwrite authorized: replaced existing destination %s", targetPath)
 }
 
+// linkInstallOccupantIsAlias is the link-install crumb's alias-vs-foreign
+// exclusion, keyed to the LstatIfPossible taken IMMEDIATELY pre-Remove (PR
+// #249 codex follow-up — F1), never to the lane-head classification: the
+// probe → Remove window is the accepted probe window (the copy/move lanes'
+// one-syscall probe-adjacency ceiling), and any swap inside it is captured
+// by binding the exclusion to the pre-Remove observation instead of the
+// classification captured before MkdirAll and the refusal gates ran.
+//
+// occupant == nil (the pre-Remove probe saw the name vacant — the Remove
+// tolerated a NotExist) or a failed source lookup answers false: only a
+// POSITIVELY-PROVEN same-inode equality excludes. A source SYMLINK object
+// never shares the destination's name-bearing link
+// (classifyExistingDestination's rule), so a symlink source is never an
+// alias of a regular inode occupant — matching device/inode there is the
+// symlink's own lookup, not the resident's.
+func linkInstallOccupantIsAlias(fs afero.Fs, src string, occupant os.FileInfo) bool {
+	if occupant == nil {
+		return false
+	}
+	var srcInfo os.FileInfo
+	var err error
+	if lst, ok := fs.(afero.Lstater); ok {
+		srcInfo, _, err = lst.LstatIfPossible(src)
+	} else {
+		srcInfo, err = fs.Stat(src)
+	}
+	if err != nil || srcInfo == nil {
+		return false
+	}
+	if srcInfo.Mode()&os.ModeSymlink != 0 {
+		return false
+	}
+	return os.SameFile(srcInfo, occupant)
+}
+
 // Destination locking is unified on ONE process-wide registry,
 // fsutil.SharedDestLocks (#224 phase D): every organizer-reachable terminal
 // operation — file moves/copies/links, subtitle installs, MkdirAll directory
@@ -535,7 +570,6 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 			// Remove an existing target ONLY for an authorized replacement of a
 			// REGULAR FILE — symlinks, directories, and everything else at the
 			// destination are always refused (#224). Gated on IsRegular.
-			linkInstallOccupant := false
 			if plan.LinkMode != LinkModeNone && !dstLexicalSelf && plan.overwriteAuthorized {
 				var linfo os.FileInfo
 				var lerr error
@@ -564,13 +598,33 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 				// entry; a tolerated NotExist means the name was already vacant
 				// (nothing displaced — no crumb even though the probe above saw
 				// an occupant), and a plant inside the probe → Remove window
-				// that got unlinked always crumbs. Same-inode alias entries
-				// (removing one destroys nothing) stay excluded.
+				// that got unlinked always crumbs.
 				rmErr := s.fs.Remove(plan.TargetPath)
 				if rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
 					return fmt.Errorf("failed to prepare target path for link: %w", rmErr)
 				}
-				linkInstallOccupant = rmErr == nil && !dstSameInode
+				// Alias-vs-foreign exclusion bound to the PRE-REMOVE probe (PR
+				// #249 codex follow-up — F1): the lane-head classification
+				// (dstSameInode) can be raced stale across the MkdirAll and the
+				// refusal gate above — a lane-head alias can be swapped for a
+				// FOREIGN plant (its destruction must crumb) and a lane-head
+				// foreign occupant likewise swapped for a source alias (whose
+				// unlink destroys no foreign bytes and must stay silent). Only
+				// positively-proven same-inode equality between the pre-Remove
+				// LstatIfPossible occupant and the source excludes; the
+				// probe → Remove swap window is the accepted probe window
+				// (identical to the copy/move lanes' probe-adjacency ceiling).
+				linkInstallOccupant := rmErr == nil && !linkInstallOccupantIsAlias(s.fs, plan.SourcePath, linfo)
+				// The crumb binds AT THE DESTRUCTION — not at a later install
+				// success (PR #249 codex follow-up — F2): the authorized Remove
+				// above already displaced/destroyed the resident bytes, so even a
+				// link install that then FAILS (hardlink EXDEV, softlink refusal)
+				// leaves the resident gone forever, and the audit must disclose
+				// that on the FAILED result — the same partial-publish lineage
+				// discipline as fsutil.MoveFileFsDestReplaced's ErrPublishCompleted
+				// leg, where the displacement evidence rides the failed result
+				// instead of dying with the error.
+				overwroteOccupiedDest = linkInstallOccupant
 			}
 
 			if dstLexicalSelf || (dstSameInode && !plan.overwriteAuthorized && plan.LinkMode == LinkModeHard) {
@@ -589,8 +643,8 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 					return fmt.Errorf("failed to create hard link: %w", err)
 				}
 				// Authorized link install delivered: a foreign occupant's bytes
-				// were replaced at the destination.
-				overwroteOccupiedDest = linkInstallOccupant
+				// were replaced at the destination (crumb bound at the Remove
+				// above — F2 binds it at the destruction, not at this success).
 			case LinkModeSoft:
 				linkTarget := plan.SourcePath
 				if !filepath.IsAbs(linkTarget) {
@@ -606,8 +660,8 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 					}
 					return fmt.Errorf("failed to create soft link: %w", err)
 				}
-				// Same audit contract as the hard-link leg above.
-				overwroteOccupiedDest = linkInstallOccupant
+				// Same audit contract as the hard-link leg above (crumb bound at
+				// the Remove).
 			default:
 				if dstSameInode && !plan.overwriteAuthorized {
 					return nil
@@ -647,6 +701,14 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 				}
 				destReplaced, cerr := s.linker.copyFile(s.fs, plan.SourcePath, plan.TargetPath)
 				if cerr != nil {
+					// Unioned displacement evidence (fsutil F3) survives the
+					// copy-lane failure too: a staged publish that displaced
+					// resident bytes but failed post-publish keeps its crumb on the
+					// FAILED result — the same destruction-bound discipline as the
+					// link lane's Remove-bound crumb (F2).
+					if destReplaced {
+						overwroteOccupiedDest = true
+					}
 					return fmt.Errorf("failed to copy file: %w", cerr)
 				}
 				// Authorized copy leg delivered: the staged publish reports —
@@ -660,6 +722,15 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 	})
 	if err != nil {
 		result.Error = err
+		// The crumb binds at the destruction, not the install success (F2):
+		// an authorized Remove displaced the resident even when the link
+		// install then refused — the failed result still carries the
+		// displacement disclosure for the console/eventlog/history consumers
+		// (cliBatchPostApply + the API PostApplyFunc read Warnings on Err!=nil
+		// lanes too — F4).
+		if overwroteOccupiedDest {
+			result.Warnings = append(result.Warnings, authorizedOverwriteWarning(plan.TargetPath))
+		}
 		return result, result.Error
 	}
 

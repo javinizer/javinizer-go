@@ -117,7 +117,28 @@ func resolveOrganizeApplyConfig(
 		}
 		emitter := deps.GetEventEmitter()
 		if afr.Err != nil && emitter != nil {
-			_ = emitter.EmitOrganizeEvent(ctx, "file_move", fmt.Sprintf("Organize failed for %s", afc.Movie.ID), models.SeverityError, map[string]any{"job_id": job.GetID(), "movie_id": afc.Movie.ID, "error": afr.Err.Error(), "apply_generation": loadApplyGeneration(applyGenerationRef)})
+			// PR #249 codex follow-up (F4): the failed lane's result still
+			// carries the displacement crumbs — the link lane binds the
+			// force-overwrite crumb at the destruction (F2) and the partial-
+			// publish/cross-device legs union their evidence into the failed
+			// result (F3) — so the failure event itself carries the warnings,
+			// and each warning additionally gets its own audit entry exactly
+			// like the success lane below. Consumers must not have to
+			// distinguish outcomes to see that resident bytes were destroyed.
+			var warnings []string
+			var newPath string
+			if afr.Result != nil && afr.Result.OrganizeResult != nil {
+				warnings = afr.Result.OrganizeResult.Warnings
+				newPath = afr.Result.OrganizeResult.NewPath
+			}
+			failCtx := map[string]any{"job_id": job.GetID(), "movie_id": afc.Movie.ID, "error": afr.Err.Error(), "apply_generation": loadApplyGeneration(applyGenerationRef)}
+			if len(warnings) > 0 {
+				failCtx["warnings"] = warnings
+			}
+			_ = emitter.EmitOrganizeEvent(ctx, "file_move", fmt.Sprintf("Organize failed for %s", afc.Movie.ID), models.SeverityError, failCtx)
+			for _, warning := range warnings {
+				_ = emitter.EmitOrganizeEvent(ctx, "file_move", fmt.Sprintf("Organize warning for %s: %s", afc.Movie.ID, warning), models.SeverityWarn, map[string]any{"job_id": job.GetID(), "movie_id": afc.Movie.ID, "file": afc.FilePath, "new_path": newPath, "warning": warning, "error": afr.Err.Error(), "apply_generation": loadApplyGeneration(applyGenerationRef)})
+			}
 		} else if emitter != nil {
 			var newPath string
 			if afr.Result != nil && afr.Result.OrganizeResult != nil {
