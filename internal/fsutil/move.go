@@ -51,7 +51,11 @@ func MoveFileFs(fs afero.Fs, src, dst string) error {
 // same-device leg probes one syscall ahead of the inline rename (a rename
 // publishes THE object src names — including a symlink object itself — so the
 // source identity rides the same no-follow probe, never a chased Stat); the
-// cross-device fallback inherits the staged publish's bound signal instead.
+// cross-device fallback inherits the staged publish's bound signal instead —
+// and on the fallback's ErrPublishCompleted leg (publish landed, source
+// cleanup refused) the bound signal rides ALONGSIDE the error, so callers
+// keying an audit crumb on it never lose the displacement evidence with the
+// partial publish.
 func MoveFileFsDestReplaced(fs afero.Fs, src, dst string) (destReplaced bool, err error) {
 	if err := fs.MkdirAll(filepath.Dir(dst), config.DirPerm); err != nil {
 		return false, fmt.Errorf("failed to create destination directory: %w", err)
@@ -61,6 +65,39 @@ func MoveFileFsDestReplaced(fs afero.Fs, src, dst string) (destReplaced bool, er
 		return false, nil
 	}
 
+	// Probe-adjacency adjudication (PR #249 codex P2 — the rename-atomicity
+	// thread): the occupancy probe runs ONE syscall ahead of the rename it
+	// audits, and NO construction available through this Fs abstraction closes
+	// that window:
+	//   - POSIX rename(2) replaces ATOMICALLY but SILENTLY — it reports nothing
+	//     about the displaced occupant, so no post-hoc kernel answer exists;
+	//   - Linux renameat2 offers RENAME_NOREPLACE (an atomic REFUSAL, already
+	//     the no-replace primitive in publish_noreplace_linux.go) and
+	//     RENAME_EXCHANGE — the only kernel-exact displacement detector (the
+	//     old occupant lands on src after the swap) — but it is Linux-only
+	//     (Darwin's renamex_np(RENAME_SWAP) is a separate island x/sys exposes
+	//     no wrapper for, the BSDs have no exchange primitive, Windows
+	//     MoveFileEx has none at all), unreachable through afero's Fs.Rename
+	//     for wrapper filesystems, and it leaves FOREIGN BYTES on the source
+	//     name until a second syscall removes them — a new window in which the
+	//     operator's source path addresses foreign content, which this
+	//     lineage's keep-both invariants (#224) forbid;
+	//   - a hardlink-snapshot dance (link(2) the occupant aside, rename,
+	//     compare) keeps the SAME two-syscall adjacency window as the probe,
+	//     requires hardlink support rename-only volumes (exFAT) lack, and
+	//     plants a visible extra entry in the destination directory — strictly
+	//     worse on every axis;
+	// so the publish-adjacent no-follow probe with alias exclusion IS the
+	// accuracy ceiling. Identity of the LANDED object needs no reverify on
+	// this leg: rename(2) moves the source dentry itself, so a successful
+	// rename leaves dst naming exactly the object src named at the rename
+	// instant, kernel-guaranteed (unlike the staged legs, whose publish
+	// re-resolves a substitutable staged NAME and which therefore re-verify in
+	// PublishStagedBound). The window's cost is crumb accuracy only, never
+	// publish atomicity: an occupant planted between probe and rename is
+	// displaced WITHOUT a crumb, an occupant vacated there crumbs with nothing
+	// displaced — both residual directions are pinned by test
+	// (move_destreplaced_adjacency_w249_test.go).
 	srcInfo := publishProbeIdentity(fs, src)
 	occupied := publishDisplacesForeign(fs, dst, srcInfo)
 	err = fs.Rename(src, dst)
@@ -121,8 +158,15 @@ func crossDeviceMoveFsDestReplaced(fs afero.Fs, src, dst string) (bool, error) {
 		// destination already carries THIS operation's bytes, so compensation
 		// and duplicate-claim classifiers must never read this failure as a
 		// pre-publish no-op — the same sentinel the no-replace lineage wraps
-		// on its cleanup-refusal leg (move_noreplace.go).
-		return false, fmt.Errorf("%w: failed to remove source after cross-device copy: %w", ErrPublishCompleted, err)
+		// on its cleanup-refusal leg (move_noreplace.go). PR #249 codex P2
+		// follow-up: the publish's DISPLACED-OCCUPANCY evidence survives this
+		// failure — the staged publish already landed (PublishStagedBound's
+		// union keeps a proven displacement across any retry legs), so the
+		// bound `replaced` answer returns WITH the error instead of being
+		// dropped: a partial publish that displaced resident bytes keeps its
+		// audit evidence on the FAILED result, and only genuinely replacement-
+		// free legs answer false.
+		return replaced, fmt.Errorf("%w: failed to remove source after cross-device copy: %w", ErrPublishCompleted, err)
 	}
 
 	return replaced, nil

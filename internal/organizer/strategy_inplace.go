@@ -434,6 +434,14 @@ func (s *inPlaceStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) {
 				// resident bytes were displaced AT the publish instant.
 				replaced, mErr := fsutil.MoveFileFsDestReplaced(s.fs, plan.SourcePath, plan.TargetPath)
 				if mErr != nil {
+					// Partial-publish ambiguity (PR #249 codex P2 follow-up — F1):
+					// the ErrPublishCompleted leg means the cross-device publish
+					// LANDED — fsutil carries its displaced-occupancy answer through
+					// the error, so the audit crumb survives onto the FAILED result
+					// below instead of being dropped with it.
+					if fsutil.PublishCompleted(mErr) && replaced {
+						overwroteOccupiedDest = true
+					}
 					return mErr
 				}
 				overwroteOccupiedDest = replaced
@@ -442,6 +450,12 @@ func (s *inPlaceStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) {
 		})
 		if err != nil {
 			result.Error = fmt.Errorf("failed to move file: %w", err)
+			// Publish-completed failures keep their crumb on the FAILED result;
+			// Moved stays false, so the partial publish journals ONCE as the
+			// failed-and-retained row, never double-journaled as a clean replace.
+			if overwroteOccupiedDest {
+				result.Warnings = append(result.Warnings, authorizedOverwriteWarning(plan.TargetPath))
+			}
 			return result, result.Error
 		}
 

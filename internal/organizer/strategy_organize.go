@@ -435,6 +435,18 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 			// can neither forge nor hide it.
 			replaced, mErr := fsutil.MoveFileFsDestReplaced(s.fs, plan.SourcePath, plan.TargetPath)
 			if mErr != nil {
+				// Partial-publish ambiguity (PR #249 codex P2 follow-up — F1): the
+				// typed ErrPublishCompleted leg means the cross-device publish
+				// LANDED and only the source cleanup refused; fsutil carries its
+				// displaced-occupancy answer through that result, so the audit crumb
+				// must not be dropped with the error — Apply journals the
+				// publish-completed ambiguity as an event nonetheless, and its
+				// replacement evidence rides the FAILED result below. Every other
+				// failure leg discarded nothing because nothing landed (fsutil
+				// answers replaced=false there).
+				if fsutil.PublishCompleted(mErr) && replaced {
+					overwroteOccupiedDest = true
+				}
 				return mErr
 			}
 			overwroteOccupiedDest = replaced
@@ -449,6 +461,16 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 		})
 		if err != nil {
 			result.Error = err
+			// The publish-completed failure keeps its crumb: the destination
+			// really carries this operation's bytes — displaced resident bytes
+			// included — so the audit warning rides the FAILED result's Warnings
+			// for the console/history/eventlog consumers. Moved stays false (the
+			// source is retained): this is never journaled as a clean
+			// move/replace — the revert ledger keeps its single partial-publish
+			// row (CompleteFailed), not a completed-operation row alongside it.
+			if overwroteOccupiedDest {
+				result.Warnings = append(result.Warnings, authorizedOverwriteWarning(plan.TargetPath))
+			}
 			return result, result.Error
 		}
 

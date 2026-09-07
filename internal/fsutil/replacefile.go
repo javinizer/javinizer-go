@@ -20,6 +20,11 @@ var ErrReplaceUnsupported = errors.New("replace existing destination unsupported
 // an occupied destination that does not alias the source's own object (PR
 // #249 codex P2). The rename itself carries the source object's identity, so
 // the alias exclusion probes the source path no-follow here at call time.
+// The probe → rename window is the adjudicated accuracy ceiling — no portable
+// kernel primitive reports displacement AT the rename instant; see the
+// adjudication bound on MoveFileFsDestReplaced (move.go), whose residual
+// semantics this verb shares and whose pins cover both legs
+// (move_destreplaced_adjacency_w249_test.go).
 func RenameDestReplaced(fs afero.Fs, src, dst string) (destReplaced bool, err error) {
 	srcInfo := publishProbeIdentity(fs, src)
 	occupied := publishDisplacesForeign(fs, dst, srcInfo)
