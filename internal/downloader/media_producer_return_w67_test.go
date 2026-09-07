@@ -34,6 +34,7 @@ import (
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 
+	"github.com/javinizer/javinizer-go/internal/assetidentity"
 	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -86,10 +87,10 @@ func (f *w67FullSwapFs) LstatIfPossible(name string) (os.FileInfo, bool, error) 
 // on the aspect guard and downloadPoster falls back to installing the FULL
 // download — the leg whose producer record must come from http.download's
 // verified publish, never a post-return re-lookup of fullPath.
-func w67FallbackMovie(id, url string) *models.Movie {
+func w67FallbackMovie(t *testing.T, id, url string) *models.Movie {
 	return &models.Movie{ID: id, Poster: models.PosterState{
 		PosterURL:            url,
-		PosterCropBounds:     &models.CropBounds{X: 0, Y: 0, Width: 0.5, Height: 1, SourceAspect: 0.5},
+		PosterCropBounds:     &models.CropBounds{X: 0, Y: 0, Width: 0.5, Height: 1, SourceAspect: 0.5, SourceFingerprint: assetidentity.FromBytes(twoToneSourceBytes(t)).Fingerprint},
 		PosterCropSourceFull: true,
 	}}
 }
@@ -100,19 +101,20 @@ func w67FallbackMovie(id, url string) *models.Movie {
 // destination is never stored, and the refusal is warn-logged.
 func TestDownloadPosterW67_FullCandidateSwapBetweenProducerAndBindRefused(t *testing.T) {
 	server := serveTwoToneSource(t)
+	root := t.TempDir()
 
 	base := afero.NewMemMapFs()
 	plant := []byte("w67 foreign substitute — planted post-producer-record, pre-bind")
 	fsW := &w67FullSwapFs{Fs: base, fireOn: 4, plant: plant}
-	movie := w67FallbackMovie("W67-FULL", server.URL+"/cover.jpg")
-	dest := w42ResolvePosterDest(NewDownloader(nil, base, w42CropPosterConfig(), nil), movie)
+	movie := w67FallbackMovie(t, "W67-FULL", server.URL+"/cover.jpg")
+	dest := filepath.Join(root, filepath.Base(w42ResolvePosterDest(NewDownloader(nil, base, w42CropPosterConfig(), nil), movie)))
 	d := NewDownloader(server.Client(), fsW, w42CropPosterConfig(), nil)
 
 	var logs bytes.Buffer
 	restoreLog := logging.SetOutput(&logs)
 	defer restoreLog()
 
-	result, err := d.downloadPoster(context.Background(), movie, "/output", nil, true)
+	result, err := d.downloadPoster(context.Background(), movie, root, nil, true)
 	require.Error(t, err)
 	require.ErrorIs(t, err, errStagedInputSubstituted)
 	require.ErrorIs(t, result.Error, errStagedInputSubstituted)
@@ -152,13 +154,14 @@ func TestDownloadPosterW67_FullCandidateSwapBetweenProducerAndBindRefused(t *tes
 // the scratch reaping exact (both temp names gone).
 func TestDownloadPosterW67_FullCandidateProducerRecordInstallsNormal(t *testing.T) {
 	server := serveTwoToneSource(t)
+	root := t.TempDir()
 
 	base := afero.NewMemMapFs()
-	movie := w67FallbackMovie("W67-NORMAL", server.URL+"/cover.jpg")
-	dest := w42ResolvePosterDest(NewDownloader(nil, base, w42CropPosterConfig(), nil), movie)
+	movie := w67FallbackMovie(t, "W67-NORMAL", server.URL+"/cover.jpg")
+	dest := filepath.Join(root, filepath.Base(w42ResolvePosterDest(NewDownloader(nil, base, w42CropPosterConfig(), nil), movie)))
 	d := NewDownloader(server.Client(), base, w42CropPosterConfig(), nil)
 
-	result, err := d.downloadPoster(context.Background(), movie, "/output", nil, true)
+	result, err := d.downloadPoster(context.Background(), movie, root, nil, true)
 	require.NoError(t, err)
 	require.True(t, result.Downloaded)
 	require.False(t, result.Replaced)
@@ -229,7 +232,7 @@ func TestInstallOverwritingIdentityW67_VerifiedIdentityRidesOut(t *testing.T) {
 
 	t.Run("virtual leg — the MemMapFs post-publish capture", func(t *testing.T) {
 		mfs := afero.NewMemMapFs()
-		staged, dest, prov := w48StageMem(t, mfs, "/w67mem", "w67-genuine-mem")
+		staged, dest, prov := w48StageMem(t, mfs, t.TempDir(), "w67-genuine-mem")
 		d := NewDownloader(nil, mfs, &Config{}, nil).WithDestLocks(fsutil.NewKeyedLockRegistry())
 
 		var out installedDestIdentity
@@ -250,15 +253,16 @@ func TestDownloadW67_ProducerIdentityFiledOnResult(t *testing.T) {
 
 	t.Run("MemMapFs — virtual-leg verified capture", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
+		dest := filepath.Join(t.TempDir(), "poster.jpg")
 		d := NewDownloader(server.Client(), fs, w42CropPosterConfig(), nil)
 
-		result, err := d.download(context.Background(), server.URL+"/cover.jpg", "/out/poster.jpg", MediaTypePoster, true)
+		result, err := d.download(context.Background(), server.URL+"/cover.jpg", dest, MediaTypePoster, true)
 		require.NoError(t, err)
 		require.True(t, result.Downloaded)
 		require.True(t, result.producerIdentity.known,
 			"the verified publish's identity rides the result")
 		require.False(t, result.producerIdentity.hasDevIno)
-		require.True(t, destStillHoldsInstalledObject(fs, "/out/poster.jpg", result.producerIdentity))
+		require.True(t, destStillHoldsInstalledObject(fs, dest, result.producerIdentity))
 	})
 
 	t.Run("OsFs — bound publish's SameFile-proven identity", func(t *testing.T) {

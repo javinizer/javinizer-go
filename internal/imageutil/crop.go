@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image"
 	"image/jpeg"
+	"io"
 	"os"
 
 	_ "golang.org/x/image/webp" // Register WebP decoder
@@ -105,10 +106,21 @@ func CropPosterFromCover(fs afero.Fs, coverPath, posterPath string, maxPosterHei
 // If maxPosterHeight > 0 and the cropped result exceeds it, the output is
 // downscaled preserving aspect ratio. Pass 0 to preserve the source resolution.
 func CropPosterWithBounds(fs afero.Fs, coverPath, posterPath string, left, top, right, bottom, maxPosterHeight int) (os.FileInfo, error) {
-	img, width, height, err := decodePosterSource(fs, coverPath)
+	file, err := fs.Open(coverPath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to open cover image: %w", err)
 	}
+	defer func() { _ = file.Close() }()
+	return CropPosterWithBoundsReader(fs, file, posterPath, left, top, right, bottom, maxPosterHeight)
+}
+
+// CropPosterWithBoundsReader consumes a caller-bound snapshot without reopening a mutable source path.
+func CropPosterWithBoundsReader(fs afero.Fs, source io.Reader, posterPath string, left, top, right, bottom, maxPosterHeight int) (os.FileInfo, error) {
+	img, _, err := image.Decode(source)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode cover image: %w", err)
+	}
+	width, height := img.Bounds().Dx(), img.Bounds().Dy()
 
 	if left < 0 || top < 0 || right > width || bottom > height {
 		return nil, fmt.Errorf("crop bounds out of range: left=%d top=%d right=%d bottom=%d image=%dx%d",
