@@ -356,3 +356,62 @@ func TestPosterRecropNonOverwriteRetryProceeds(t *testing.T) {
 	require.False(t, outcome.Failed, "non-overwrite retry must not fabricate a recrop failure — downloader would reuse the existing file untouched")
 	require.Equal(t, 1, wf.getApplyCalled())
 }
+
+func TestPosterRecropVerifySuccessClearsMarkerAtFileResult(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "movie.mp4")
+	movie := &models.Movie{ID: "CROP-1", Poster: models.PosterState{
+		PosterURL: "https://example.test/poster.jpg",
+		CoverURL:  "https://example.test/cover.jpg",
+	}}
+	store := resultstore.New(1, []string{path})
+	store.UpdateFileResult(path, &resultstore.MovieResult{
+		Movie: movie, ErrorCode: downloader.PosterRecropRequiredCode,
+		Status:        models.JobStatusCompleted,
+		FileMatchInfo: models.FileMatchInfo{Path: path, MovieID: movie.ID},
+	})
+	stored, err := store.GetMovieResult(path)
+	require.NoError(t, err)
+	inputs := minimalApplyInputs(t, store, true)
+	inputs.PosterDisabled = false
+	applyResult := &workflow.ApplyResult{Movie: stored.Movie}
+	applyResult.Steps.Downloaded = true
+	applyResult.Steps.PosterVerified = true
+	wf := &stubApplyWorkflow{applyResult: applyResult}
+	cfg := ApplyPhaseConfig{Download: true, OverwriteExistingMedia: false, DryRun: false}
+	cmd, afc, execute := buildApplyCmd(path, stored.Movie, stored, inputs, cfg, context.Background())
+	require.True(t, execute)
+	outcome := applyFile(context.Background(), wf, path, stored, stored.Movie,
+		&preparedApplyFile{cmd: cmd, afc: afc, baseline: stored.Movie.Clone(), execute: execute}, inputs, cfg)
+	require.False(t, outcome.Failed)
+	require.Equal(t, 1, wf.getApplyCalled())
+	after, err := store.GetMovieResult(path)
+	require.NoError(t, err)
+	require.Empty(t, after.ErrorCode)
+}
+
+func TestPosterRecropVerifyPartialFailureClearsMarker(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "movie.mp4")
+	movie := &models.Movie{ID: "CROP-1", Poster: models.PosterState{
+		PosterURL: "https://example.test/poster.jpg",
+		CoverURL:  "https://example.test/cover.jpg",
+	}}
+	store := resultstore.New(1, []string{path})
+	store.UpdateFileResult(path, &resultstore.MovieResult{
+		Movie: movie, ErrorCode: downloader.PosterRecropRequiredCode,
+		Status:        models.JobStatusFailed,
+		FileMatchInfo: models.FileMatchInfo{Path: path, MovieID: movie.ID},
+	})
+	stored, err := store.GetMovieResult(path)
+	require.NoError(t, err)
+	inputs := minimalApplyInputs(t, store, true)
+	result := &workflow.ApplyResult{Movie: stored.Movie}
+	result.Steps.Downloaded = true
+	result.Steps.PosterVerified = true
+	afc := &ApplyFileContext{FilePath: path, Match: stored.FileMatchInfo, MovieResult: stored}
+	outcome := interpretApplyResult(path, stored.Movie, time.Now(), time.Minute, inputs, ApplyPhaseConfig{},
+		context.Background(), afc, result, fmt.Errorf("nfo gen failed"))
+	require.True(t, outcome.Failed)
+	after, err := store.GetMovieResult(path)
+	require.NoError(t, err)
+	require.Empty(t, after.ErrorCode)
+}
