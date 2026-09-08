@@ -770,6 +770,17 @@ func interpretApplyResult(
 						current.ErrorCode = errorCode
 					}
 				}
+
+				// codex r9 P2b: a PARTIAL failure whose poster leg verified must not keep
+				// refusing later overwrite retries as still-unverified. Only clear when
+				// this apply actually installed a fingerprint-matched poster this run
+				// (Steps.PosterVerified), and only when the new failure is a different
+				// failure class (not a fresh recrop refusal from this same download).
+				if result != nil && result.Steps.PosterVerified &&
+					errorCode != downloader.PosterRecropRequiredCode &&
+					current.ErrorCode == downloader.PosterRecropRequiredCode {
+					current.ErrorCode = ""
+				}
 				current.StartedAt = startTime
 				current.EndedAt = &now
 				return current, mergeWriteBackProvenance(inputs.Provenance[filePath], prov), nil
