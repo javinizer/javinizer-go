@@ -83,7 +83,7 @@ func TestPosterRecropRetryAndResolution(t *testing.T) {
 			wf := &stubApplyWorkflow{applyResult: &workflow.ApplyResult{Movie: restored.Movie}}
 			inputs := minimalApplyInputs(t, job.results, true)
 			inputs.WF = wf
-			cfg := ApplyPhaseConfig{Download: true}
+			cfg := ApplyPhaseConfig{Download: true, OverwriteExistingMedia: true}
 			cmd, afc, execute := buildApplyCmd(path, restored.Movie, restored, inputs, cfg, context.Background())
 			require.True(t, execute)
 			result := applyFile(context.Background(), wf, path, restored, restored.Movie, &preparedApplyFile{cmd: cmd, afc: afc, baseline: restored.Movie.Clone(), execute: execute}, inputs, cfg)
@@ -148,7 +148,7 @@ func TestPosterRecropMissingBoundsStillBlocksRetry(t *testing.T) {
 	store.UpdateFileResult(path, stored)
 	inputs := minimalApplyInputs(t, store, true)
 	wf := &stubApplyWorkflow{}
-	cfg := ApplyPhaseConfig{Download: true}
+	cfg := ApplyPhaseConfig{Download: true, OverwriteExistingMedia: true}
 	cmd, afc, execute := buildApplyCmd(path, movie, stored, inputs, cfg, context.Background())
 	require.True(t, execute)
 	outcome := applyFile(context.Background(), wf, path, stored, movie, &preparedApplyFile{cmd: cmd, afc: afc, baseline: movie.Clone(), execute: execute}, inputs, cfg)
@@ -339,4 +339,20 @@ func TestPosterRecropExplicitRemovalSurvivesOldApply(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, after.ErrorCode, "explicit removal lands after the stale failure — older apply must not resurrect the marker")
 	require.Nil(t, after.Movie.Poster.PosterCropBounds)
+}
+
+func TestPosterRecropNonOverwriteRetryProceeds(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "movie.mp4")
+	store := resultstore.New(1, []string{path})
+	movie := &models.Movie{ID: "CROP-1", Poster: models.PosterState{PosterURL: "https://example.test/a.jpg"}}
+	stored := &resultstore.MovieResult{Movie: movie, ErrorCode: downloader.PosterRecropRequiredCode, Status: models.JobStatusFailed, FileMatchInfo: models.FileMatchInfo{Path: path, MovieID: movie.ID}}
+	store.UpdateFileResult(path, stored)
+	inputs := minimalApplyInputs(t, store, true)
+	wf := &stubApplyWorkflow{applyResult: &workflow.ApplyResult{Movie: movie}}
+	cfg := ApplyPhaseConfig{Download: true, OverwriteExistingMedia: false}
+	cmd, afc, execute := buildApplyCmd(path, movie, stored, inputs, cfg, context.Background())
+	require.True(t, execute)
+	outcome := applyFile(context.Background(), wf, path, stored, movie, &preparedApplyFile{cmd: cmd, afc: afc, baseline: movie.Clone(), execute: execute}, inputs, cfg)
+	require.False(t, outcome.Failed, "non-overwrite retry must not fabricate a recrop failure — downloader would reuse the existing file untouched")
+	require.Equal(t, 1, wf.getApplyCalled())
 }

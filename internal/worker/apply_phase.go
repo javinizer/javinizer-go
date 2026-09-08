@@ -1008,7 +1008,7 @@ func applyFile(
 	// a removed/absent source URL or disabled poster download can't verify a
 	// crop, so organize/NFO-only retries must pass through.
 	posterWillFetch := (prepared.baseline.Poster.PosterURL != "" || prepared.baseline.Poster.CoverURL != "") && !inputs.PosterDisabled
-	if fileResult.ErrorCode == downloader.PosterRecropRequiredCode && cfg.Download && !cfg.DryRun && posterWillFetch {
+	if fileResult.ErrorCode == downloader.PosterRecropRequiredCode && cfg.Download && !cfg.DryRun && cfg.OverwriteExistingMedia && posterWillFetch {
 		refusal := &downloader.PosterRecropRequiredError{Reason: downloader.SourceIdentityUnavailable}
 		if bounds := prepared.baseline.Poster.PosterCropBounds; bounds != nil {
 			refusal.Bounds = *bounds
