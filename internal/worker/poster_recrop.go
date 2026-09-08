@@ -1,6 +1,8 @@
 package worker
 
 import (
+	"strings"
+
 	"github.com/javinizer/javinizer-go/internal/assetidentity"
 	"github.com/javinizer/javinizer-go/internal/downloader"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -41,6 +43,13 @@ func samePosterCropIntent(attempted, live *models.Movie) bool {
 func clearPosterRecrop(result *resultstore.MovieResult) {
 	if result.ErrorCode == downloader.PosterRecropRequiredCode {
 		result.ErrorCode = ""
-		result.Error = ""
+		// codex r10 P2: blank the message only when it still describes the
+		// recrop refusal. A newer unrelated apply failure (e.g. NFO) may have
+		// replaced result.Error while leaving the marker-code behind — keeping
+		// that text preserves the explanation for the Failed status the row
+		// still carries and avoids publishing a failure with no reason.
+		if strings.HasPrefix(result.Error, "poster requires a fresh crop:") {
+			result.Error = ""
+		}
 	}
 }
