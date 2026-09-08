@@ -25,9 +25,12 @@ import (
 
 // maxPosterVerifyBytes bounds the identity-verification snapshot: the download
 // path caps nothing, so manual-crop verification streams must not materialize
-// an unbounded same-URL-replacement body. 512 MiB exceeds any sane poster.
+// an unbounded same-URL-replacement body. 64 MiB covers any sane poster
+// (full-res 8 K scans stay well under this) while capping a same-URL
+// substitution at ~64 MiB per worker — under default concurrency the worst-
+// case verification footprint is bounded by ~5×64 MiB instead of ~2.5 GiB.
 // Var (not const) so tests can shrink the bound without writing big files.
-var maxPosterVerifyBytes int64 = 512 << 20
+var maxPosterVerifyBytes int64 = 64 << 20
 
 // readVerificationBound reads r up to maxPosterVerifyBytes+1 bytes, enforcing
 // the verification limit *during* the read (not via a beforehand pathname
