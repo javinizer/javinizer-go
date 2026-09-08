@@ -774,9 +774,13 @@ func interpretApplyResult(
 				// codex r9 P2b: a PARTIAL failure whose poster leg verified must not keep
 				// refusing later overwrite retries as still-unverified. Only clear when
 				// this apply actually installed a fingerprint-matched poster this run
-				// (Steps.PosterVerified), and only when the new failure is a different
-				// failure class (not a fresh recrop refusal from this same download).
-				if result != nil && result.Steps.PosterVerified &&
+				// (Steps.PosterVerified), the row actually carries crop bounds to
+				// discharge (r10 P1: a legacy preview-only crop leaves nil bounds, and
+				// a fresh install against nil bounds ran NO fingerprint verification
+				// — marker must persist), and the new failure is a different failure
+				// class (not a fresh recrop refusal from this same download).
+				hasCropToDischarge := current.Movie != nil && current.Movie.Poster.PosterCropBounds != nil
+				if result != nil && result.Steps.PosterVerified && hasCropToDischarge &&
 					errorCode != downloader.PosterRecropRequiredCode &&
 					current.ErrorCode == downloader.PosterRecropRequiredCode {
 					current.ErrorCode = ""
@@ -871,7 +875,12 @@ func interpretApplyResult(
 					// discharged. Skip-download, dry-run, no-poster-URL, and
 					// overwrite-refused retries all leave PosterVerified=false, so the
 					// stale-geometry gate still fires for a later poster-capable retry.
-					if current.ErrorCode == downloader.PosterRecropRequiredCode && result != nil && result.Steps.PosterVerified {
+					// codex r10 P1: legacy preview-only crops leave nil bounds. A fresh
+					// install against nil bounds ran NO fingerprint verification, so a
+					// marker gated only on PosterVerified would let a stale recrop
+					// block evaporate without ever discharging. Require non-nil bounds.
+					hasCropToDischarge := current.Movie != nil && current.Movie.Poster.PosterCropBounds != nil
+					if current.ErrorCode == downloader.PosterRecropRequiredCode && hasCropToDischarge && result != nil && result.Steps.PosterVerified {
 						current.ErrorCode = ""
 					}
 					return current, mergeWriteBackProvenance(inputs.Provenance[filePath], prov), nil

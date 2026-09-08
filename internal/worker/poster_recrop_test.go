@@ -22,7 +22,7 @@ func TestPosterRecropRetryAndResolution(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "movie.mp4")
 			job := newBatchJob([]string{path})
 			movie := &models.Movie{ID: "CROP-1", Poster: models.PosterState{PosterURL: "https://example.test/a.jpg", PosterCropSourceFull: true, PosterCropBounds: &models.CropBounds{Width: .4, Height: 1}}}
-			job.results.UpdateFileResult(path, &resultstore.MovieResult{Movie: movie, ErrorCode: downloader.PosterRecropRequiredCode, Error: "rejected", Status: models.JobStatusFailed, FileMatchInfo: models.FileMatchInfo{Path: path, MovieID: movie.ID}})
+			job.results.UpdateFileResult(path, &resultstore.MovieResult{Movie: movie, ErrorCode: downloader.PosterRecropRequiredCode, Error: "poster requires a fresh crop: source identity unavailable", Status: models.JobStatusFailed, FileMatchInfo: models.FileMatchInfo{Path: path, MovieID: movie.ID}})
 			pe := NewPosterEditor(job.results, job.results, nil)
 			fresh := &models.CropBounds{Width: .5, Height: 1, SourceFingerprint: assetidentity.FromBytes([]byte("fresh source")).Fingerprint}
 			edit := movie.Clone()
@@ -262,7 +262,7 @@ func TestPosterRecropUnmeasuredPreviewCropKeepsBlock(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "movie.mp4")
 	job := newBatchJob([]string{path})
 	movie := &models.Movie{ID: "CROP-1", Poster: models.PosterState{PosterURL: "https://example.test/a.jpg", PosterCropSourceFull: true, PosterCropBounds: &models.CropBounds{Width: .4, Height: 1}}}
-	job.results.UpdateFileResult(path, &resultstore.MovieResult{Movie: movie, ErrorCode: downloader.PosterRecropRequiredCode, Error: "rejected", Status: models.JobStatusFailed, FileMatchInfo: models.FileMatchInfo{Path: path, MovieID: movie.ID}})
+	job.results.UpdateFileResult(path, &resultstore.MovieResult{Movie: movie, ErrorCode: downloader.PosterRecropRequiredCode, Error: "poster requires a fresh crop: source identity unavailable", Status: models.JobStatusFailed, FileMatchInfo: models.FileMatchInfo{Path: path, MovieID: movie.ID}})
 	pe := NewPosterEditor(job.results, job.results, nil)
 	require.NoError(t, pe.UpdatePosterCrop(movie.ID, "preview-cropped.jpg", nil, false))
 	current, err := job.results.GetMovieResult(path)
@@ -276,7 +276,7 @@ func TestPosterRecropSourceReplacementClearsBlock(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "movie.mp4")
 	job := newBatchJob([]string{path})
 	movie := &models.Movie{ID: "CROP-1", Poster: models.PosterState{PosterURL: "https://example.test/a.jpg", PosterCropSourceFull: true, PosterCropBounds: &models.CropBounds{Width: .4, Height: 1}}}
-	job.results.UpdateFileResult(path, &resultstore.MovieResult{Movie: movie, ErrorCode: downloader.PosterRecropRequiredCode, Error: "rejected", Status: models.JobStatusFailed, FileMatchInfo: models.FileMatchInfo{Path: path, MovieID: movie.ID}})
+	job.results.UpdateFileResult(path, &resultstore.MovieResult{Movie: movie, ErrorCode: downloader.PosterRecropRequiredCode, Error: "poster requires a fresh crop: source identity unavailable", Status: models.JobStatusFailed, FileMatchInfo: models.FileMatchInfo{Path: path, MovieID: movie.ID}})
 	pe := NewPosterEditor(job.results, job.results, nil)
 	require.NoError(t, pe.UpdatePosterFromURL(context.Background(), movie.ID, "https://example.test/b.jpg", ""))
 	current, err := job.results.GetMovieResult(path)
@@ -324,7 +324,7 @@ func TestPosterRecropExplicitRemovalSurvivesOldApply(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "movie.mp4")
 	job := newBatchJob([]string{path})
 	movie := &models.Movie{ID: "CROP-1", Poster: models.PosterState{PosterURL: "https://example.test/a.jpg", PosterCropSourceFull: true, PosterCropBounds: &models.CropBounds{Width: .4, Height: 1}}}
-	stale := &resultstore.MovieResult{Movie: movie, ErrorCode: downloader.PosterRecropRequiredCode, Error: "rejected", Status: models.JobStatusFailed, FileMatchInfo: models.FileMatchInfo{Path: path, MovieID: movie.ID}}
+	stale := &resultstore.MovieResult{Movie: movie, ErrorCode: downloader.PosterRecropRequiredCode, Error: "poster requires a fresh crop: source identity unavailable", Status: models.JobStatusFailed, FileMatchInfo: models.FileMatchInfo{Path: path, MovieID: movie.ID}}
 	job.results.UpdateFileResult(path, stale)
 	pe := NewPosterEditor(job.results, job.results, nil)
 	require.NoError(t, pe.UpdatePosterCrop(movie.ID, "", nil, false))
@@ -362,6 +362,11 @@ func TestPosterRecropVerifySuccessClearsMarkerAtFileResult(t *testing.T) {
 	movie := &models.Movie{ID: "CROP-1", Poster: models.PosterState{
 		PosterURL: "https://example.test/poster.jpg",
 		CoverURL:  "https://example.test/cover.jpg",
+		// codex r10 P1: a recrop marker is only dischargeable when stored bounds
+		// exist — the nil-bounds legacy-preview state must NOT be cleared by a
+		// bare fresh install. Seed bounds to represent the verified-geometry case.
+		PosterCropBounds:     &models.CropBounds{Width: .5, Height: 1, SourceFingerprint: assetidentity.FromBytes([]byte("verified source")).Fingerprint},
+		PosterCropSourceFull: true,
 	}}
 	store := resultstore.New(1, []string{path})
 	store.UpdateFileResult(path, &resultstore.MovieResult{
@@ -394,6 +399,11 @@ func TestPosterRecropVerifyPartialFailureClearsMarker(t *testing.T) {
 	movie := &models.Movie{ID: "CROP-1", Poster: models.PosterState{
 		PosterURL: "https://example.test/poster.jpg",
 		CoverURL:  "https://example.test/cover.jpg",
+		// codex r10 P1: same F1 invariant as the success leg — without stored
+		// bounds, a non-overwrite retry's install ran no fingerprint verification,
+		// so the marker must survive regardless of the apply result's partial state.
+		PosterCropBounds:     &models.CropBounds{Width: .5, Height: 1, SourceFingerprint: assetidentity.FromBytes([]byte("verified source")).Fingerprint},
+		PosterCropSourceFull: true,
 	}}
 	store := resultstore.New(1, []string{path})
 	store.UpdateFileResult(path, &resultstore.MovieResult{
