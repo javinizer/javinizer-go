@@ -750,8 +750,25 @@ func interpretApplyResult(
 				current.Movie = mergeLiveReviewEdits(movie, movie, current.Movie)
 				current.Status = fileStatus
 				current.Error = errMsg
-				if errorCode != "" && samePosterCropIntent(movie, current.Movie) {
-					current.ErrorCode = errorCode
+				if errorCode != "" && samePosterCropIntent(movie, current.Movie) &&
+					// codex r7 P2: never resurrect a marker whose slot an interim edit
+					// (removal/override) deliberately cleared — in an unmeasured-crop
+					// state the bounds are nil on both sides, so intent alone cannot
+					// distinguish stale from fresh. Only stamp when the row still
+					// carries the mark the apply saw.
+					(afc.MovieResult == nil || current.ErrorCode == afc.MovieResult.ErrorCode) {
+					// codex r7 P2: never resurrect a marker whose slot an interim
+					// edit (removal/override) deliberately cleared — in an
+					// unmeasured-crop state the bounds are nil on both sides, so
+					// intent alone cannot distinguish stale from fresh. Only
+					// stamp when the row still carries the mark the apply saw.
+					baselineCode := ""
+					if afc.MovieResult != nil {
+						baselineCode = afc.MovieResult.ErrorCode
+					}
+					if current.ErrorCode == baselineCode {
+						current.ErrorCode = errorCode
+					}
 				}
 				current.StartedAt = startTime
 				current.EndedAt = &now
@@ -990,7 +1007,7 @@ func applyFile(
 	// apply will fetch a poster. Mirrors downloadPoster's own early return —
 	// a removed/absent source URL or disabled poster download can't verify a
 	// crop, so organize/NFO-only retries must pass through.
-	posterWillFetch := prepared.baseline.Poster.PosterURL != "" || prepared.baseline.Poster.CoverURL != ""
+	posterWillFetch := (prepared.baseline.Poster.PosterURL != "" || prepared.baseline.Poster.CoverURL != "") && !inputs.PosterDisabled
 	if fileResult.ErrorCode == downloader.PosterRecropRequiredCode && cfg.Download && !cfg.DryRun && posterWillFetch {
 		refusal := &downloader.PosterRecropRequiredError{Reason: downloader.SourceIdentityUnavailable}
 		if bounds := prepared.baseline.Poster.PosterCropBounds; bounds != nil {

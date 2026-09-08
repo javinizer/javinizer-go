@@ -37,6 +37,7 @@ type BatchJobConfig struct {
 	RequestTimeout  time.Duration // cfg.Scrapers.RequestTimeoutSeconds → overall scrape operation timeout
 	ScraperPriority []string      // cfg.Scrapers.Priority → selected scrapers
 	NFOEnabled      bool          // cfg.Metadata.NFO.Feature.Enabled → NFO generation toggle
+	PosterDisabled  bool          // derived from !cfg.Output.Download.DownloadPoster; marker gate skips blocking when set
 }
 
 // batchJobBase holds the 19 shared snapshot fields common to both BatchJobStatus
