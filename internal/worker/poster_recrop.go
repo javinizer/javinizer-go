@@ -24,10 +24,18 @@ func samePosterCropIntent(attempted, live *models.Movie) bool {
 		return false
 	}
 	a, b := attempted.Poster.PosterCropBounds, live.Poster.PosterCropBounds
-	if a == nil || b == nil {
-		return a == nil && b == nil
+	if a != nil && b != nil {
+		return attempted.Poster.PosterCropSourceFull == live.Poster.PosterCropSourceFull && *a == *b
 	}
-	return attempted.Poster.PosterCropSourceFull == live.Poster.PosterCropSourceFull && *a == *b
+	if a != nil || b != nil {
+		return false
+	}
+	// codex r6 P2: both bounds nil is ambiguous between "unmeasured preview
+	// crop awaiting resolution" and "explicit removal committed mid-apply".
+	// Distinguish by the cropped-pointer the removal clears while the preview
+	// state keeps — otherwise a racing older failure resurrects the marker
+	// over a deliberate removal.
+	return attempted.Poster.CroppedPosterURL == live.Poster.CroppedPosterURL
 }
 
 func clearPosterRecrop(result *resultstore.MovieResult) {

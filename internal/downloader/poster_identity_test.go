@@ -445,3 +445,29 @@ func TestDownloadPoster_StatFailureRefusal(t *testing.T) {
 	requireIdentityRefusal(t, result, err, SourceIdentityUnavailable, bounds)
 	require.Equal(t, int32(1), hits.Load())
 }
+
+func TestDownloadPoster_AutoCropConsumesVerifiedSnapshot(t *testing.T) {
+	a := p4JPEG(color.RGBA{R: 20, A: 255})
+	b := p4JPEG(color.RGBA{R: 220, G: 220, B: 220, A: 255})
+	root := t.TempDir()
+	base := afero.NewMemMapFs()
+	swapped := false
+	fs := &identityReadFS{Fs: base, afterRead: func(name string) error {
+		swapped = true
+		return afero.WriteFile(base, name, b, 0600)
+	}}
+	server, hits := identityServer(t, a)
+	bounds := &models.CropBounds{Width: .4, Height: 1, SourceAspect: 1000.0 / 600, SourceFingerprint: assetidentity.FromBytes(a).Fingerprint}
+	movie := geometryMovie(server.URL, bounds, true)
+	movie.Poster.ShouldCropPoster = true
+	movie.Poster.PosterCropBounds = &models.CropBounds{X: .95, Y: .95, Width: .2, Height: .2, SourceAspect: 1000.0 / 600, SourceFingerprint: assetidentity.FromBytes(a).Fingerprint} // degenerate rect forces auto-crop fallback
+	result, err := newGeometryDownloader(fs).downloadPoster(context.Background(), movie, root, nil)
+	require.NoError(t, err)
+	require.True(t, swapped, "harness must inject the post-verification swap")
+	require.True(t, result.Downloaded)
+	img, width, height := decodeResultPoster(t, base, result.LocalPath)
+	require.Equal(t, 473, width, "right-side crop of A's 1000px source")
+	require.Equal(t, 600, height)
+	require.Less(t, sampleLuma(img, .5, .5), 40.0, "auto-crop must consume A's verified bytes, not the substituted B")
+	require.Equal(t, int32(1), hits.Load())
+}

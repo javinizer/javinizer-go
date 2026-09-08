@@ -1266,6 +1266,15 @@ func (m *LockedMovieOps) ApplyFieldOverride(ctx context.Context, resultID, field
 	cand := result.Clone()
 	cand.Movie = movie
 	retainMovieAlias(cand, movie.ID)
+	// codex r6 P1: a field override that swaps the effective poster source or
+	// flips crop intent invalidates the pending recrop marker — otherwise every
+	// later poster-capable apply refuses to run even though the override
+	// itself already replaced whatever geometry the marker guarded.
+	overrideChangedSource := effectivePosterSourceOf(movie.Poster.PosterURL, movie.Poster.CoverURL) != effectivePosterSourceOf(result.Movie.Poster.PosterURL, result.Movie.Poster.CoverURL)
+	overrideChangedIntent := movie.Poster.ShouldCropPoster != result.Movie.Poster.ShouldCropPoster
+	if overrideChangedSource || overrideChangedIntent {
+		clearPosterRecrop(cand)
+	}
 	// Predict the publication revision (codex r16): the envelope already
 	// encoded by commit time would otherwise store revision N while
 	// publication bumps memory to N+1 — after restart, conflict state

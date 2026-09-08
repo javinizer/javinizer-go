@@ -319,3 +319,24 @@ func TestPosterRecropDryRunRetryProceeds(t *testing.T) {
 	require.False(t, outcome.Failed, "dry-run retry must not be blocked by the recrop marker")
 	require.Equal(t, 1, wf.getApplyCalled())
 }
+
+func TestPosterRecropExplicitRemovalSurvivesOldApply(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "movie.mp4")
+	job := newBatchJob([]string{path})
+	movie := &models.Movie{ID: "CROP-1", Poster: models.PosterState{PosterURL: "https://example.test/a.jpg", PosterCropSourceFull: true, PosterCropBounds: &models.CropBounds{Width: .4, Height: 1}}}
+	stale := &resultstore.MovieResult{Movie: movie, ErrorCode: downloader.PosterRecropRequiredCode, Error: "rejected", Status: models.JobStatusFailed, FileMatchInfo: models.FileMatchInfo{Path: path, MovieID: movie.ID}}
+	job.results.UpdateFileResult(path, stale)
+	pe := NewPosterEditor(job.results, job.results, nil)
+	require.NoError(t, pe.UpdatePosterCrop(movie.ID, "", nil, false))
+	inputs := minimalApplyInputs(t, job.results, true)
+	cfg := ApplyPhaseConfig{}
+	refusal := &downloader.PosterRecropRequiredError{Reason: downloader.SourceFingerprintMissing, Bounds: *movie.Poster.PosterCropBounds}
+	before, err := job.results.GetMovieResult(path)
+	require.NoError(t, err)
+	outcome := interpretApplyResult(path, movie, time.Now(), time.Minute, inputs, cfg, context.Background(), &ApplyFileContext{FilePath: path, Match: before.FileMatchInfo, MovieResult: before}, nil, refusal)
+	require.True(t, outcome.Failed)
+	after, err := job.results.GetMovieResult(path)
+	require.NoError(t, err)
+	require.Empty(t, after.ErrorCode, "explicit removal lands after the stale failure — older apply must not resurrect the marker")
+	require.Nil(t, after.Movie.Poster.PosterCropBounds)
+}
