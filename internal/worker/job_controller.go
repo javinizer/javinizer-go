@@ -492,6 +492,7 @@ func (c *jobController) buildApplyInputs(wf workflow.WorkflowInterface, batchCfg
 		PromoteWitnessFn: c.job.posterEditor.hasUnresolvedPromoteWitness,
 		Concurrency:      newConcurrencyConfig(batchCfg.MaxWorkers, batchCfg.WorkerTimeout, batchCfg.RequestTimeout, 1, defaultWorkerTimeout),
 		NFOEnabled:       batchCfg.NFOEnabled,
+		PosterDisabled:   batchCfg.PosterDisabled,
 		WF:               wf,
 		Results:          snap.Results,
 		Provenance:       snap.Provenance,
