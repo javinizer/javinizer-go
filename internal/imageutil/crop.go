@@ -61,6 +61,27 @@ func CropPosterFromCover(fs afero.Fs, coverPath, posterPath string, maxPosterHei
 	if err != nil {
 		return nil, err
 	}
+	return cropPosterToBounds(fs, img, width, height, posterPath, maxPosterHeight)
+}
+
+// CropPosterFromCoverReader crops from a caller-bound source snapshot (e.g. the
+// bytes whose fingerprint was just verified) rather than reopening a mutable
+// path — a scratch substitution after verification must never feed the crop.
+func CropPosterFromCoverReader(fs afero.Fs, source io.Reader, posterPath string, maxPosterHeight int) (os.FileInfo, error) {
+	img, _, err := image.Decode(source)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode cover image: %w", err)
+	}
+	width, height := img.Bounds().Dx(), img.Bounds().Dy()
+	if width <= 0 || height <= 0 {
+		return nil, fmt.Errorf("invalid image dimensions: %dx%d", width, height)
+	}
+	return cropPosterToBounds(fs, img, width, height, posterPath, maxPosterHeight)
+}
+
+// cropPosterToBounds applies the auto-crop geometry rules (right-side for
+// landscape, centered 2:3 otherwise) and writes the result.
+func cropPosterToBounds(fs afero.Fs, img image.Image, width, height int, posterPath string, maxPosterHeight int) (os.FileInfo, error) {
 
 	// Calculate aspect ratio to determine crop strategy
 	aspectRatio := float64(width) / float64(height)

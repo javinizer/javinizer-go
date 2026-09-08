@@ -270,7 +270,16 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 		}
 	}
 	if !cropped && movie.Poster.ShouldCropPoster {
-		cropInfo, cropErr := imageutil.CropPosterFromCover(d.fs, fullPath, cropPath, d.config.MaxPosterHeight)
+		// Auto-crop after manual verification must consume the verified byte
+		// snapshot — a scratch substitution between verify and crop must never
+		// reach the published output (codex P2 poster_recrop fallback).
+		var cropInfo os.FileInfo
+		var cropErr error
+		if verifiedSource != nil {
+			cropInfo, cropErr = imageutil.CropPosterFromCoverReader(d.fs, bytes.NewReader(verifiedSource), cropPath, d.config.MaxPosterHeight)
+		} else {
+			cropInfo, cropErr = imageutil.CropPosterFromCover(d.fs, fullPath, cropPath, d.config.MaxPosterHeight)
+		}
 		if cropErr != nil {
 			fullResult.Error = fmt.Errorf("failed to crop poster: %w", cropErr)
 			fullResult.Downloaded = false
