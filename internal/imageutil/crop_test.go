@@ -5,6 +5,7 @@ package imageutil
 // Reference: Architecture Decision 8 (concurrent testing with -race flag)
 
 import (
+	"bytes"
 	"embed"
 	"image"
 	"image/color"
@@ -793,4 +794,18 @@ func TestCropPosterFromCover_PermissionErrors(t *testing.T) {
 	// permission errors appropriately. Future refactoring to use afero.Fs
 	// would enable more comprehensive permission error simulation.
 	t.Log("Permission error handling: Filesystem access errors properly returned")
+}
+
+// codex r6 P1 (PR#251): the reader leg's decode-failure and zero-dimension
+// guards — the verified snapshot stays byte-identical when a mid-crop swap
+// lands on a stale scratch path.
+func TestCropPosterFromCoverReaderFailures(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	outPath := filepath.Join(t.TempDir(), "out.jpg")
+	if _, err := CropPosterFromCoverReader(fs, bytes.NewReader([]byte("not an image")), outPath, 0); err == nil {
+		t.Fatal("decoder garbage must fail")
+	}
+	if _, err := CropPosterFromCoverReader(fs, bytes.NewReader(nil), outPath, 0); err == nil {
+		t.Fatal("nil reader must fail")
+	}
 }
