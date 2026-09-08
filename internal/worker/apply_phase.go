@@ -853,15 +853,14 @@ func interpretApplyResult(
 						current.Status = models.JobStatusCompleted
 						current.Error = ""
 					}
-					// codex r9 P2: clear the marker only when this retry actually
-					// fetched + verified a poster. Skip-download, dry-run, no-URL,
-					// and overwrite-refused retries never reach the download step, so
-					// result.Steps.Downloaded stays false and the marker must persist
-					// — a later poster-capable retry still needs the geometry gate.
-					// When Downloaded=true, the downloader's manualIntent verification
-					// re-fingerprinted the body before cropping, so the marker's
-					// "unverified geometry" premise no longer holds.
-					if current.ErrorCode == downloader.PosterRecropRequiredCode && result != nil && result.Steps.Downloaded {
+					// codex r9 P2: clear the marker only when this retry fetched AND
+					// installed a poster after the download step's verification — Steps.
+					// Downloaded alone also fires on cover/trailer-only or dedup-skipped
+					// runs, which would unsafely clear a recrop refusal that nothing
+					// discharged. Skip-download, dry-run, no-poster-URL, and
+					// overwrite-refused retries all leave PosterVerified=false, so the
+					// stale-geometry gate still fires for a later poster-capable retry.
+					if current.ErrorCode == downloader.PosterRecropRequiredCode && result != nil && result.Steps.PosterVerified {
 						current.ErrorCode = ""
 					}
 					return current, mergeWriteBackProvenance(inputs.Provenance[filePath], prov), nil

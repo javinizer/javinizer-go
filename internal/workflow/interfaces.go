@@ -79,6 +79,14 @@ type stepCompletion struct {
 	DisplayTitle bool // display title applied to movie
 	Downloaded   bool // media download (poster, fanart) completed
 	NFOGenerated bool // NFO file generation completed
+	// PosterVerified flags that downloadAll's poster leg fetched + installed a
+	// byte-identical, fingerprint-matched destination this apply — including
+	// manualIntent recrop verification when scraper-supplied bounds existed.
+	// The worker's apply-phase success leg uses it (instead of Downloaded)
+	// to decide whether clearing poster_recrop_required is safe: skip-download
+	// retries, cover/trailer-only runs, and dedup-skips all leave Downloaded
+	// possibly true without ever running the poster pipeline for this row.
+	PosterVerified bool
 }
 
 // ApplyResult is everything the caller gets back from the Apply seam.
