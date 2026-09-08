@@ -40,15 +40,25 @@ func samePosterCropIntent(attempted, live *models.Movie) bool {
 	return attempted.Poster.CroppedPosterURL == live.Poster.CroppedPosterURL
 }
 
+// RecropRefusalPrefix is the refusal (direct) error prefix stamped onto the
+// ErrorCode path by InterpretPosterRecropError. Centralized so callers and the
+// clearing helper check against one constant.
+//
+// codex r11 P2: production recrop messages reach Error via mid-layer wrappers
+// ("download failed: apply poster: poster requires a fresh crop: ..."), so a
+// HasPrefix gate would miss them. Containment recognizes the wrapped form;
+// the earlier "preserve unrelated failures" worry lands naturally under the
+// ErrorCode==PosterRecropRequiredCode guard (matrix only enters here when the
+// marker path is being resolved).
+const RecropRefusalPrefix = "poster requires a fresh crop:"
+
 func clearPosterRecrop(result *resultstore.MovieResult) {
 	if result.ErrorCode == downloader.PosterRecropRequiredCode {
 		result.ErrorCode = ""
-		// codex r10 P2: blank the message only when it still describes the
-		// recrop refusal. A newer unrelated apply failure (e.g. NFO) may have
-		// replaced result.Error while leaving the marker-code behind — keeping
-		// that text preserves the explanation for the Failed status the row
-		// still carries and avoids publishing a failure with no reason.
-		if strings.HasPrefix(result.Error, "poster requires a fresh crop:") {
+		// codex r11 P2: recrop refusal text preserved verbatim on Error is the
+		// sentinel; containment tolerates wrappers applied between the producer
+		// (interpretApplyResult) and this helper's callers.
+		if strings.Contains(result.Error, RecropRefusalPrefix) {
 			result.Error = ""
 		}
 	}
