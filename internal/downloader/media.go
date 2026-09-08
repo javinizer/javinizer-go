@@ -1,9 +1,12 @@
 package downloader
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"image"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -20,6 +23,28 @@ import (
 	"github.com/javinizer/javinizer-go/internal/template"
 )
 
+// maxPosterVerifyBytes bounds the identity-verification snapshot: the download
+// path caps nothing, so manual-crop verification streams must not materialize
+// an unbounded same-URL-replacement body. 64 MiB covers any sane poster
+// (full-res 8 K scans stay well under this) while capping a same-URL
+// substitution at ~64 MiB per worker — under default concurrency the worst-
+// case verification footprint is bounded by ~5×64 MiB instead of ~2.5 GiB.
+// Var (not const) so tests can shrink the bound without writing big files.
+var maxPosterVerifyBytes int64 = 64 << 20
+
+// readVerificationBound reads r up to maxPosterVerifyBytes+1 bytes, enforcing
+// the verification limit *during* the read (not via a beforehand pathname
+// Stat, which a scratch-substitution writer could invalidate between checks).
+// len(out) > maxPosterVerifyBytes marks an over-limit body.
+func readVerificationBound(r io.Reader) ([]byte, error) {
+	lr := &io.LimitedReader{R: r, N: maxPosterVerifyBytes + 1}
+	data, err := io.ReadAll(lr)
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
 func (d *Downloader) downloadCover(ctx context.Context, movie *models.Movie, destDir string, multipart *MultipartInfo, options ...any) (*DownloadResult, error) {
 	overwriteExisting, dedup := resolveDownloadOptions(options)
 	if !d.config.DownloadCover || movie.Poster.CoverURL == "" {
@@ -34,6 +59,13 @@ func (d *Downloader) downloadCover(ctx context.Context, movie *models.Movie, des
 
 func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, destDir string, multipart *MultipartInfo, options ...any) (finalResult *DownloadResult, finalErr error) {
 	startTime := time.Now()
+	defer func() {
+		var refusal *PosterRecropRequiredError
+		if errors.As(finalErr, &refusal) {
+			logging.Warnf("downloadPoster: code=%s reason=%s", PosterRecropRequiredCode, refusal.Reason)
+			finalResult.Duration = time.Since(startTime)
+		}
+	}()
 	overwriteExisting, dedup := resolveDownloadOptions(options)
 	owner := resolveDownloadOwnerOptions(options)
 	ledger := resolveDownloadLedger(options)
@@ -58,9 +90,10 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 	}
 
 	bounds := movie.Poster.PosterCropBounds
-	geometryUsable := bounds != nil && movie.Poster.PosterCropSourceFull && bounds.Valid()
+	manualIntent := bounds != nil && movie.Poster.PosterCropSourceFull
+	geometryUsable := manualIntent && bounds.Valid()
 
-	if !geometryUsable && !movie.Poster.ShouldCropPoster {
+	if !manualIntent && !movie.Poster.ShouldCropPoster {
 		if !overwriteExisting {
 			releaseDownloadOwnerClaim(dedup, owner.logicalKey, owner.ownerKey)
 		}
@@ -111,6 +144,20 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 		result.Size = info.Size()
 		result.Duration = time.Since(startTime)
 		return result, nil
+	}
+
+	if manualIntent {
+		var reason PosterRecropReason
+		switch {
+		case bounds.SourceFingerprint == "":
+			reason = SourceFingerprintMissing
+		case !assetidentity.ValidFingerprint(bounds.SourceFingerprint):
+			reason = SourceFingerprintInvalid
+		}
+		if reason != "" {
+			result.Error = &PosterRecropRequiredError{Reason: reason, Bounds: *bounds}
+			return result, result.Error
+		}
 	}
 
 	// One GET feeds every poster-producing path below — manual crop, promote,
@@ -166,6 +213,39 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 	// error (wave-41) leg files no record — an unknown identity keeps the
 	// wave-53 fail-closed posture both here and at the bind below.
 	fullIdentity = fullResult.producerIdentity
+	var verifiedSource []byte
+	if manualIntent {
+		// Bound the verification allocation (codex P1-boundedness): the HTTP
+		// download has no response-size cap, so a same-URL substitution could
+		// otherwise force a multi-gigabyte in-memory snapshot merely to discover
+		// a fingerprint mismatch. The Stat gate preserves the single-snapshot
+		// guarantee (one bounded ReadFile whose bytes are both measured and
+		// cropped) without ever materializing an unbounded body.
+		verifier, openErr := d.fs.Open(fullPath)
+		var refusal *PosterRecropRequiredError
+		switch {
+		case openErr != nil:
+			refusal = &PosterRecropRequiredError{Reason: SourceIdentityUnavailable, Bounds: *bounds, Cause: fmt.Errorf("measure downloaded poster: %w", openErr)}
+		default:
+			verifiedSource, err = readVerificationBound(verifier)
+			_ = verifier.Close()
+			switch {
+			case err != nil:
+				refusal = &PosterRecropRequiredError{Reason: SourceIdentityUnavailable, Bounds: *bounds, Cause: fmt.Errorf("measure downloaded poster: %w", err)}
+			case int64(len(verifiedSource)) > maxPosterVerifyBytes:
+				refusal = &PosterRecropRequiredError{Reason: SourceIdentityUnavailable, Bounds: *bounds, Cause: fmt.Errorf("downloaded poster %s exceeds the %d-byte verification bound", fullPath, maxPosterVerifyBytes)}
+			case !strings.EqualFold(assetidentity.FromBytes(verifiedSource).Fingerprint, bounds.SourceFingerprint):
+				refusal = &PosterRecropRequiredError{Reason: SourceFingerprintMismatch, Bounds: *bounds}
+			}
+		}
+		if refusal != nil {
+			fullResult.Error = refusal
+			fullResult.Downloaded = false
+			fullResult.Replaced = false
+			fullResult.Size = 0
+			return fullResult, refusal
+		}
+	}
 
 	cropPath := uniqueTempPath(destPath, "crop.tmp")
 	var cropIdentity installedDestIdentity
@@ -186,14 +266,23 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 		// install-time lookup of the name. A fallback (undecodable / aspect
 		// drift / empty rect) files no record and the name's wave-65 unknown
 		// posture (retain, never unlink on doubt) applies.
-		cropOK, cropIdentity = d.cropDownloadedPoster(fullPath, cropPath, bounds)
+		cropOK, cropIdentity = d.cropDownloadedPoster(verifiedSource, cropPath, bounds)
 		if cropOK {
 			candidate = cropPath
 			cropped = true
 		}
 	}
 	if !cropped && movie.Poster.ShouldCropPoster {
-		cropInfo, cropErr := imageutil.CropPosterFromCover(d.fs, fullPath, cropPath, d.config.MaxPosterHeight)
+		// Auto-crop after manual verification must consume the verified byte
+		// snapshot — a scratch substitution between verify and crop must never
+		// reach the published output (codex P2 poster_recrop fallback).
+		var cropInfo os.FileInfo
+		var cropErr error
+		if verifiedSource != nil {
+			cropInfo, cropErr = imageutil.CropPosterFromCoverReader(d.fs, bytes.NewReader(verifiedSource), cropPath, d.config.MaxPosterHeight)
+		} else {
+			cropInfo, cropErr = imageutil.CropPosterFromCover(d.fs, fullPath, cropPath, d.config.MaxPosterHeight)
+		}
 		if cropErr != nil {
 			fullResult.Error = fmt.Errorf("failed to crop poster: %w", cropErr)
 			fullResult.Downloaded = false
@@ -461,25 +550,12 @@ func (d *Downloader) finalizePosterResult(result *DownloadResult, destPath strin
 // Wave-67 (codex P2, PR#215): on success the producer's own post-write
 // identity record rides back with the bool — CropPosterWithBounds'
 // producer-side capture, never a caller-side re-lookup.
-func (d *Downloader) cropDownloadedPoster(tempPath, dst string, bounds *models.CropBounds) (bool, installedDestIdentity) {
-	w, h, derr := imageutil.ImageDimensions(d.fs, tempPath)
+func (d *Downloader) cropDownloadedPoster(source []byte, dst string, bounds *models.CropBounds) (bool, installedDestIdentity) {
+	cfg, _, derr := image.DecodeConfig(bytes.NewReader(source))
+	w, h := cfg.Width, cfg.Height
 	if derr != nil || w <= 0 || h <= 0 {
 		logging.Warnf("downloadPoster: cannot decode downloaded source for manual crop: %v", derr)
 		return false, installedDestIdentity{}
-	}
-	// P4 source identity guard: aspect alone cannot distinguish a same-sized
-	// image whose pixels were replaced at the same URL. Legacy envelopes have
-	// no fingerprint and retain the pre-P4 aspect-only floor.
-	if bounds.SourceFingerprint != "" {
-		identity, ierr := assetidentity.Measure(d.fs, tempPath)
-		if ierr != nil {
-			logging.Warnf("downloadPoster: cannot fingerprint downloaded source for manual crop: %v", ierr)
-			return false, installedDestIdentity{}
-		}
-		if !strings.EqualFold(identity.Fingerprint, bounds.SourceFingerprint) {
-			logging.Warnf("downloadPoster: manual crop fingerprint mismatch (crop %s, downloaded %s); falling back", bounds.SourceFingerprint, identity.Fingerprint)
-			return false, installedDestIdentity{}
-		}
 	}
 
 	// Aspect guard: the geometry was normalized against the review-time
@@ -507,7 +583,7 @@ func (d *Downloader) cropDownloadedPoster(tempPath, dst string, bounds *models.C
 		return false, installedDestIdentity{}
 	}
 
-	cropInfo, cropErr := imageutil.CropPosterWithBounds(d.fs, tempPath, dst, left, top, right, bottom, d.config.MaxPosterHeight)
+	cropInfo, cropErr := imageutil.CropPosterWithBoundsReader(d.fs, bytes.NewReader(source), dst, left, top, right, bottom, d.config.MaxPosterHeight)
 	if cropErr != nil {
 		logging.Warnf("downloadPoster: manual crop failed: %v", cropErr)
 		return false, installedDestIdentity{}
@@ -707,6 +783,9 @@ func (d *Downloader) downloadAllWithExtrafanart(ctx context.Context, movie *mode
 		results = append(results, actresses...)
 	}
 
+	if posterResult != nil && errors.Is(posterResult.Error, ErrPosterRecropRequired) {
+		return results, fmt.Errorf("download poster: %w", posterResult.Error)
+	}
 	if criticalAttempted > 0 && criticalSucceeded == 0 {
 		return results, &DownloadPartialError{Attempted: criticalAttempted, Succeeded: criticalSucceeded}
 	}

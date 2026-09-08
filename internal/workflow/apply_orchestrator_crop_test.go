@@ -1,14 +1,17 @@
 package workflow
 
 import (
+	"bytes"
 	"context"
 	"image"
 	"image/color"
 	"image/jpeg"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 
+	"github.com/javinizer/javinizer-go/internal/assetidentity"
 	"github.com/javinizer/javinizer-go/internal/downloader"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/nfo"
@@ -54,9 +57,12 @@ func TestApplyExecute_ManualCropGeometryReachesDisk(t *testing.T) {
 			}
 		}
 	}
+	root := t.TempDir()
+	var source bytes.Buffer
+	require.NoError(t, jpeg.Encode(&source, src, &jpeg.Options{Quality: 95}))
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/jpeg")
-		_ = jpeg.Encode(w, src, &jpeg.Options{Quality: 95})
+		_, _ = w.Write(source.Bytes())
 	}))
 	t.Cleanup(srv.Close)
 
@@ -72,7 +78,7 @@ func TestApplyExecute_ManualCropGeometryReachesDisk(t *testing.T) {
 	movie := &models.Movie{ID: "ABF-346", ContentID: "abf00346", Title: "Integrated Crop"}
 	movie.Poster.PosterURL = srv.URL + "/cover.jpg"
 	movie.Poster.ShouldCropPoster = true // scraper intent: auto-crop (white)
-	movie.Poster.PosterCropBounds = &models.CropBounds{X: 0, Y: 0, Width: 0.4, Height: 1.0, SourceAspect: 1000.0 / 600.0}
+	movie.Poster.PosterCropBounds = &models.CropBounds{X: 0, Y: 0, Width: 0.4, Height: 1.0, SourceAspect: 1000.0 / 600.0, SourceFingerprint: assetidentity.FromBytes(source.Bytes()).Fingerprint}
 	movie.Poster.PosterCropSourceFull = true
 
 	orch := &applyOrchImpl{
@@ -84,14 +90,14 @@ func TestApplyExecute_ManualCropGeometryReachesDisk(t *testing.T) {
 	}
 	result, err := orch.Execute(context.Background(), ApplyCmd{
 		Movie:    movie,
-		Match:    models.FileMatchInfo{Path: "/src/ABF-346.mp4"},
-		DestPath: "/dest",
+		Match:    models.FileMatchInfo{Path: filepath.Join(root, "source", "ABF-346.mp4")},
+		DestPath: root,
 		Download: true,
 	})
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
-	f, err := fs.Open("/dest/ABF-346-poster.jpg")
+	f, err := fs.Open(filepath.Join(root, "ABF-346-poster.jpg"))
 	require.NoError(t, err, "poster must land in the destination dir")
 	defer func() { _ = f.Close() }()
 	img, err := jpeg.Decode(f)
@@ -138,29 +144,23 @@ func TestApplyMergeBoundary_SourceUnchangedKeepsGeometry(t *testing.T) {
 func TestApplyMergeBoundary_EdgeCases(t *testing.T) {
 	t.Parallel()
 
-	carryPosterCropAcrossMerge(nil, "https://cdn/p.jpg", cropBoundsFixture(), true) // no panic
+	carryPosterCropAcrossMerge(nil, cropBoundsFixture(), true) // no panic
 
 	// No pre-merge geometry: merged movie gains nothing.
 	merged := &models.Movie{}
 	merged.Poster.PosterURL = "https://cdn/p.jpg"
-	carryPosterCropAcrossMerge(merged, "", nil, false)
+	carryPosterCropAcrossMerge(merged, nil, false)
 	assert.Nil(t, merged.Poster.PosterCropBounds)
 	assert.False(t, merged.Poster.PosterCropSourceFull)
 
-	// Geometry without a poster source is meaningless: never carried.
+	// Retain full-source intent so a merge-provided URL cannot bypass identity verification.
 	merged2 := &models.Movie{}
-	carryPosterCropAcrossMerge(merged2, "", cropBoundsFixture(), true)
-	assert.Nil(t, merged2.Poster.PosterCropBounds)
+	carryPosterCropAcrossMerge(merged2, cropBoundsFixture(), true)
+	assert.Equal(t, cropBoundsFixture(), merged2.Poster.PosterCropBounds)
 
-	assert.Equal(t, "", effectivePosterSource(nil))
-	withCover := &models.Movie{}
-	withCover.Poster.CoverURL = "https://cdn/c.jpg"
-	assert.Equal(t, "https://cdn/c.jpg", effectivePosterSource(withCover))
 }
 
-// A merge that changes the effective poster source clears the geometry so a
-// crop measured against the old image is never applied to the new one.
-func TestApplyMergeBoundary_SourceChangedClearsGeometry(t *testing.T) {
+func TestApplyMergeBoundary_SourceChangedRetainsIdentityGate(t *testing.T) {
 	pre := &models.Movie{ID: "IPX-535"}
 	pre.Poster.PosterURL = "https://cdn/old.jpg"
 	pre.Poster.PosterCropBounds = cropBoundsFixture()
@@ -173,13 +173,11 @@ func TestApplyMergeBoundary_SourceChangedClearsGeometry(t *testing.T) {
 	state := &applyPipelineState{movie: pre}
 
 	require.NoError(t, orch.stepMerge(ApplyCmd{}, state, &stepCompletion{}))
-	assert.Nil(t, state.movie.Poster.PosterCropBounds)
-	assert.False(t, state.movie.Poster.PosterCropSourceFull)
+	assert.Equal(t, pre.Poster.PosterCropBounds, state.movie.Poster.PosterCropBounds)
+	assert.True(t, state.movie.Poster.PosterCropSourceFull)
 }
 
-// CoverURL is the fallback poster source: changing it while PosterURL is
-// empty is also a source change.
-func TestApplyMergeBoundary_CoverChangedClearsGeometry(t *testing.T) {
+func TestApplyMergeBoundary_CoverChangedRetainsIdentityGate(t *testing.T) {
 	pre := &models.Movie{ID: "IPX-535"}
 	pre.Poster.CoverURL = "https://cdn/old-cover.jpg"
 	pre.Poster.PosterCropBounds = cropBoundsFixture()
@@ -192,7 +190,7 @@ func TestApplyMergeBoundary_CoverChangedClearsGeometry(t *testing.T) {
 	state := &applyPipelineState{movie: pre}
 
 	require.NoError(t, orch.stepMerge(ApplyCmd{}, state, &stepCompletion{}))
-	assert.Nil(t, state.movie.Poster.PosterCropBounds, "cover source change must clear geometry")
+	assert.Equal(t, pre.Poster.PosterCropBounds, state.movie.Poster.PosterCropBounds)
 }
 
 // Legacy (non-full-source) geometry is never applied — it does not survive

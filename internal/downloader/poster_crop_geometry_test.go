@@ -1,6 +1,7 @@
 package downloader
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"image"
@@ -9,10 +10,12 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
 
+	"github.com/javinizer/javinizer-go/internal/assetidentity"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/organizer"
 	"github.com/spf13/afero"
@@ -24,7 +27,7 @@ import (
 // auto-crop (CropPosterFromCover) takes the right ~47%% of a landscape cover,
 // so a manual LEFT crop producing black pixels proves the persisted geometry
 // beat the scraper default.
-func serveTwoToneSource(t *testing.T) *httptest.Server {
+func twoToneSourceBytes(t *testing.T) []byte {
 	t.Helper()
 	img := image.NewRGBA(image.Rect(0, 0, 1000, 600))
 	for y := 0; y < 600; y++ {
@@ -36,12 +39,15 @@ func serveTwoToneSource(t *testing.T) *httptest.Server {
 			}
 		}
 	}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "image/jpeg")
-		_ = jpeg.Encode(w, img, &jpeg.Options{Quality: 95})
-	}))
-	t.Cleanup(srv.Close)
-	return srv
+	var source bytes.Buffer
+	require.NoError(t, jpeg.Encode(&source, img, &jpeg.Options{Quality: 95}))
+	return source.Bytes()
+}
+
+func serveTwoToneSource(t *testing.T) *httptest.Server {
+	t.Helper()
+	server, _ := identityServer(t, twoToneSourceBytes(t))
+	return server
 }
 
 func newGeometryDownloader(fs afero.Fs) *Downloader {
@@ -106,6 +112,7 @@ var errTestRenameFail = errors.New("rename blocked")
 // Download failure with otherwise-applyable geometry: the error propagates
 // and nothing is left behind. Exactly one request is made.
 func TestDownloadPoster_GeometryDownloadFailurePropagates(t *testing.T) {
+	destDir := t.TempDir()
 	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		hits.Add(1)
@@ -114,14 +121,14 @@ func TestDownloadPoster_GeometryDownloadFailurePropagates(t *testing.T) {
 	t.Cleanup(srv.Close)
 	fs := afero.NewMemMapFs()
 	movie := geometryMovie(srv.URL+"/cover.jpg", &models.CropBounds{
-		X: 0, Y: 0, Width: 0.4, Height: 1.0, SourceAspect: 1000.0 / 600.0,
+		X: 0, Y: 0, Width: 0.4, Height: 1.0, SourceAspect: 1000.0 / 600.0, SourceFingerprint: strings.Repeat("a", 64),
 	}, true)
 
-	result, err := newGeometryDownloader(fs).downloadPoster(context.Background(), movie, "/dest", nil)
+	result, err := newGeometryDownloader(fs).downloadPoster(context.Background(), movie, destDir, nil)
 	require.Error(t, err)
 	require.False(t, result.Downloaded)
 	assert.Equal(t, int32(1), hits.Load())
-	leftover, _ := afero.ReadDir(fs, "/dest")
+	leftover, _ := afero.ReadDir(fs, destDir)
 	assert.Empty(t, leftover, "no temp or dest file may survive a failed download")
 }
 
@@ -129,6 +136,7 @@ func TestDownloadPoster_GeometryDownloadFailurePropagates(t *testing.T) {
 // crop itself fails, and with scraper auto-crop intent the auto-crop attempt
 // fails identically — pre-change behavior for a broken source image.
 func TestDownloadPoster_GeometryCropFailureFallsToAutoCropError(t *testing.T) {
+	destDir := t.TempDir()
 	srv := serveTwoToneSource(t)
 	resp, err := http.Get(srv.URL)
 	require.NoError(t, err)
@@ -147,9 +155,9 @@ func TestDownloadPoster_GeometryCropFailureFallsToAutoCropError(t *testing.T) {
 
 	fs := afero.NewMemMapFs()
 	movie := geometryMovie(ts2.URL+"/cover.jpg", &models.CropBounds{
-		X: 0, Y: 0, Width: 0.4, Height: 1.0, SourceAspect: 1000.0 / 600.0,
+		X: 0, Y: 0, Width: 0.4, Height: 1.0, SourceAspect: 1000.0 / 600.0, SourceFingerprint: assetidentity.FromBytes(trunc).Fingerprint,
 	}, true)
-	result, err := newGeometryDownloader(fs).downloadPoster(context.Background(), movie, "/dest", nil)
+	result, err := newGeometryDownloader(fs).downloadPoster(context.Background(), movie, destDir, nil)
 	assert.Error(t, err, "broken source fails exactly like the pre-change auto-crop path")
 	require.False(t, result.Downloaded)
 	assert.Equal(t, int32(1), hits.Load())
@@ -158,13 +166,14 @@ func TestDownloadPoster_GeometryCropFailureFallsToAutoCropError(t *testing.T) {
 // Geometry that rounds to an empty pixel rect falls back cleanly to the
 // scraper auto-crop.
 func TestDownloadPoster_DegenerateRectFallsBack(t *testing.T) {
+	destDir := t.TempDir()
 	server := serveTwoToneSource(t)
 	fs := afero.NewMemMapFs()
 	movie := geometryMovie(server.URL+"/cover.jpg", &models.CropBounds{
-		X: 0.5, Y: 0.5, Width: 0.0001, Height: 0.0001, SourceAspect: 1000.0 / 600.0,
+		X: 0.5, Y: 0.5, Width: 0.0001, Height: 0.0001, SourceAspect: 1000.0 / 600.0, SourceFingerprint: assetidentity.FromBytes(twoToneSourceBytes(t)).Fingerprint,
 	}, true)
 
-	result, err := newGeometryDownloader(fs).downloadPoster(context.Background(), movie, "/dest", nil)
+	result, err := newGeometryDownloader(fs).downloadPoster(context.Background(), movie, destDir, nil)
 	require.NoError(t, err)
 	require.True(t, result.Downloaded)
 	img, w, _ := decodeResultPoster(t, fs, result.LocalPath)
@@ -175,6 +184,7 @@ func TestDownloadPoster_DegenerateRectFallsBack(t *testing.T) {
 // Rename failure on the direct-promote fallback: clean error, no dangling
 // temp path in the result.
 func TestDownloadPoster_PromoteFailureIsCleanError(t *testing.T) {
+	destDir := t.TempDir()
 	fs := renameFailFs{afero.NewMemMapFs()}
 	// Undecodable payload: the geometry path bails to the direct-promote fallback.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -187,10 +197,10 @@ func TestDownloadPoster_PromoteFailureIsCleanError(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 	movie := geometryMovie(srv.URL+"/poster.jpg", &models.CropBounds{
-		X: 0, Y: 0, Width: 0.4, Height: 1, SourceAspect: 1000.0 / 600.0,
+		X: 0, Y: 0, Width: 0.4, Height: 1, SourceAspect: 1000.0 / 600.0, SourceFingerprint: assetidentity.FromBytes([]byte("definitely not jpeg")).Fingerprint,
 	}, false)
 
-	result, err := newGeometryDownloader(fs).downloadPoster(context.Background(), movie, "/dest", nil)
+	result, err := newGeometryDownloader(fs).downloadPoster(context.Background(), movie, destDir, nil)
 	require.Error(t, err)
 	assert.False(t, result.Downloaded)
 	assert.Empty(t, result.LocalPath, "removed temp path must never leak into the result")
@@ -202,17 +212,18 @@ func TestDownloadPoster_PromoteFailureIsCleanError(t *testing.T) {
 // deleted on revert, and the pre-existing poster would be gone). In-place
 // artwork refresh is follow-up work requiring overwrite tracking.
 func TestDownloadPoster_ExistingDestKeptWithGeometry(t *testing.T) {
+	destDir := t.TempDir()
 	server := serveTwoToneSource(t)
 	fs := afero.NewMemMapFs()
-	require.NoError(t, afero.WriteFile(fs, "/dest/IPX-535-poster.jpg", []byte("old artwork"), 0o644))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(destDir, "IPX-535-poster.jpg"), []byte("old artwork"), 0o644))
 	movie := geometryMovie(server.URL+"/cover.jpg", &models.CropBounds{
-		X: 0, Y: 0, Width: 0.4, Height: 1.0, SourceAspect: 1000.0 / 600.0,
+		X: 0, Y: 0, Width: 0.4, Height: 1.0, SourceAspect: 1000.0 / 600.0, SourceFingerprint: assetidentity.FromBytes(twoToneSourceBytes(t)).Fingerprint,
 	}, true)
 
-	result, err := newGeometryDownloader(fs).downloadPoster(context.Background(), movie, "/dest", nil)
+	result, err := newGeometryDownloader(fs).downloadPoster(context.Background(), movie, destDir, nil)
 	require.NoError(t, err)
 	assert.False(t, result.Downloaded, "existing poster must be kept even with pending geometry")
-	content, err := afero.ReadFile(fs, "/dest/IPX-535-poster.jpg")
+	content, err := afero.ReadFile(fs, filepath.Join(destDir, "IPX-535-poster.jpg"))
 	require.NoError(t, err)
 	assert.Equal(t, []byte("old artwork"), content)
 }
@@ -220,15 +231,16 @@ func TestDownloadPoster_ExistingDestKeptWithGeometry(t *testing.T) {
 // Existing destination without pending geometry keeps pre-change behavior:
 // the existing file is left untouched.
 func TestDownloadPoster_ExistingDestKeptWithoutGeometry(t *testing.T) {
+	destDir := t.TempDir()
 	server := serveTwoToneSource(t)
 	fs := afero.NewMemMapFs()
-	require.NoError(t, afero.WriteFile(fs, "/dest/IPX-535-poster.jpg", []byte("old artwork"), 0o644))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(destDir, "IPX-535-poster.jpg"), []byte("old artwork"), 0o644))
 	movie := geometryMovie(server.URL+"/cover.jpg", nil, true)
 
-	result, err := newGeometryDownloader(fs).downloadPoster(context.Background(), movie, "/dest", nil)
+	result, err := newGeometryDownloader(fs).downloadPoster(context.Background(), movie, destDir, nil)
 	require.NoError(t, err)
 	assert.False(t, result.Downloaded, "no geometry: existing poster must be kept")
-	content, err := afero.ReadFile(fs, "/dest/IPX-535-poster.jpg")
+	content, err := afero.ReadFile(fs, filepath.Join(destDir, "IPX-535-poster.jpg"))
 	require.NoError(t, err)
 	assert.Equal(t, []byte("old artwork"), content)
 }
@@ -236,30 +248,33 @@ func TestDownloadPoster_ExistingDestKeptWithoutGeometry(t *testing.T) {
 // finalizePosterResult clears the location fields when the promoted file
 // cannot be stat'd, and points at the file with its size when it can.
 func TestFinalizePosterResult_StatFailClearsLocation(t *testing.T) {
+	destDir := t.TempDir()
 	d := newGeometryDownloader(afero.NewMemMapFs())
-	result := &DownloadResult{Downloaded: true, LocalPath: "/dest/X-poster.jpg.full.tmp", Size: 99}
-	d.finalizePosterResult(result, "/dest/X-poster.jpg")
+	result := &DownloadResult{Downloaded: true, LocalPath: filepath.Join(destDir, "X-poster.jpg.full.tmp"), Size: 99}
+	d.finalizePosterResult(result, filepath.Join(destDir, "X-poster.jpg"))
 	assert.Empty(t, result.LocalPath, "missing destination must clear the temp path")
 	assert.Zero(t, result.Size)
 }
 
 func TestFinalizePosterResult_StatSuccessSetsLocation(t *testing.T) {
+	destDir := t.TempDir()
 	fs := afero.NewMemMapFs()
-	require.NoError(t, afero.WriteFile(fs, "/dest/X-poster.jpg", []byte("img"), 0o644))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(destDir, "X-poster.jpg"), []byte("img"), 0o644))
 	d := newGeometryDownloader(fs)
 	result := &DownloadResult{Downloaded: true}
-	d.finalizePosterResult(result, "/dest/X-poster.jpg")
-	assert.Equal(t, "/dest/X-poster.jpg", result.LocalPath)
+	d.finalizePosterResult(result, filepath.Join(destDir, "X-poster.jpg"))
+	assert.Equal(t, filepath.Join(destDir, "X-poster.jpg"), result.LocalPath)
 	assert.Equal(t, int64(3), result.Size)
 }
 func TestDownloadPoster_ManualGeometryApplied(t *testing.T) {
+	destDir := t.TempDir()
 	server := serveTwoToneSource(t)
 	fs := afero.NewMemMapFs()
 	movie := geometryMovie(server.URL+"/cover.jpg", &models.CropBounds{
-		X: 0, Y: 0, Width: 0.4, Height: 1.0, SourceAspect: 1000.0 / 600.0,
+		X: 0, Y: 0, Width: 0.4, Height: 1.0, SourceAspect: 1000.0 / 600.0, SourceFingerprint: assetidentity.FromBytes(twoToneSourceBytes(t)).Fingerprint,
 	}, true)
 
-	result, err := newGeometryDownloader(fs).downloadPoster(context.Background(), movie, "/dest", nil)
+	result, err := newGeometryDownloader(fs).downloadPoster(context.Background(), movie, destDir, nil)
 	require.NoError(t, err)
 	require.True(t, result.Downloaded)
 
@@ -273,13 +288,14 @@ func TestDownloadPoster_ManualGeometryApplied(t *testing.T) {
 // Invalid geometry never fails organize: with should_crop_poster=true the
 // scraper auto-crop still runs.
 func TestDownloadPoster_InvalidGeometryFallsBackToAutoCrop(t *testing.T) {
+	destDir := t.TempDir()
 	server := serveTwoToneSource(t)
 	fs := afero.NewMemMapFs()
 	movie := geometryMovie(server.URL+"/cover.jpg", &models.CropBounds{
-		X: 0, Y: 0, Width: 1.5, Height: 1.0, SourceAspect: 1000.0 / 600.0,
+		X: 0, Y: 0, Width: 1.5, Height: 1.0, SourceAspect: 1000.0 / 600.0, SourceFingerprint: assetidentity.FromBytes(twoToneSourceBytes(t)).Fingerprint,
 	}, true)
 
-	result, err := newGeometryDownloader(fs).downloadPoster(context.Background(), movie, "/dest", nil)
+	result, err := newGeometryDownloader(fs).downloadPoster(context.Background(), movie, destDir, nil)
 	require.NoError(t, err)
 	require.True(t, result.Downloaded)
 
@@ -291,13 +307,14 @@ func TestDownloadPoster_InvalidGeometryFallsBackToAutoCrop(t *testing.T) {
 // With should_crop_poster=false the pre-geometry direct-download success path
 // is preserved even when geometry is present but invalid.
 func TestDownloadPoster_InvalidGeometryKeepsDirectDownloadSuccess(t *testing.T) {
+	destDir := t.TempDir()
 	server := serveTwoToneSource(t)
 	fs := afero.NewMemMapFs()
 	movie := geometryMovie(server.URL+"/cover.jpg", &models.CropBounds{
-		X: 0, Y: 0, Width: 0, Height: 0, SourceAspect: 1000.0 / 600.0,
+		X: 0, Y: 0, Width: 0, Height: 0, SourceAspect: 1000.0 / 600.0, SourceFingerprint: assetidentity.FromBytes(twoToneSourceBytes(t)).Fingerprint,
 	}, false)
 
-	result, err := newGeometryDownloader(fs).downloadPoster(context.Background(), movie, "/dest", nil)
+	result, err := newGeometryDownloader(fs).downloadPoster(context.Background(), movie, destDir, nil)
 	require.NoError(t, err)
 	require.True(t, result.Downloaded)
 
@@ -310,6 +327,7 @@ func TestDownloadPoster_InvalidGeometryKeepsDirectDownloadSuccess(t *testing.T) 
 // stale (different image behind the same URL): refuse it and fall back —
 // reusing the one download already made (single-use URLs must not be re-GET).
 func TestDownloadPoster_AspectMismatchFallsBack(t *testing.T) {
+	destDir := t.TempDir()
 	var hits atomic.Int32
 	img := image.NewRGBA(image.Rect(0, 0, 1000, 600))
 	for y := 0; y < 600; y++ {
@@ -317,18 +335,20 @@ func TestDownloadPoster_AspectMismatchFallsBack(t *testing.T) {
 			img.Set(x, y, color.White)
 		}
 	}
+	var source bytes.Buffer
+	require.NoError(t, jpeg.Encode(&source, img, &jpeg.Options{Quality: 95}))
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
 		w.Header().Set("Content-Type", "image/jpeg")
-		_ = jpeg.Encode(w, img, &jpeg.Options{Quality: 95})
+		_, _ = w.Write(source.Bytes())
 	}))
 	t.Cleanup(srv.Close)
 	fs := afero.NewMemMapFs()
 	movie := geometryMovie(srv.URL+"/cover.jpg", &models.CropBounds{
-		X: 0, Y: 0, Width: 0.4, Height: 1.0, SourceAspect: 378.0 / 529.0,
+		X: 0, Y: 0, Width: 0.4, Height: 1.0, SourceAspect: 378.0 / 529.0, SourceFingerprint: assetidentity.FromBytes(source.Bytes()).Fingerprint,
 	}, true)
 
-	result, err := newGeometryDownloader(fs).downloadPoster(context.Background(), movie, "/dest", nil)
+	result, err := newGeometryDownloader(fs).downloadPoster(context.Background(), movie, destDir, nil)
 	require.NoError(t, err)
 	require.True(t, result.Downloaded)
 
@@ -340,6 +360,7 @@ func TestDownloadPoster_AspectMismatchFallsBack(t *testing.T) {
 // An undecodable download with should_crop_poster=false keeps today's
 // direct-download success — a previously successful organize must not newly fail.
 func TestDownloadPoster_UndecodableKeepsDirectDownloadSuccess(t *testing.T) {
+	destDir := t.TempDir()
 	raw := []byte("not an image at all")
 	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -353,10 +374,10 @@ func TestDownloadPoster_UndecodableKeepsDirectDownloadSuccess(t *testing.T) {
 	t.Cleanup(srv.Close)
 	fs := afero.NewMemMapFs()
 	movie := geometryMovie(srv.URL+"/poster.jpg", &models.CropBounds{
-		X: 0, Y: 0, Width: 0.4, Height: 1.0, SourceAspect: 0.5,
+		X: 0, Y: 0, Width: 0.4, Height: 1.0, SourceAspect: 0.5, SourceFingerprint: assetidentity.FromBytes(raw).Fingerprint,
 	}, false)
 
-	result, err := newGeometryDownloader(fs).downloadPoster(context.Background(), movie, "/dest", nil)
+	result, err := newGeometryDownloader(fs).downloadPoster(context.Background(), movie, destDir, nil)
 	require.NoError(t, err)
 	require.True(t, result.Downloaded)
 
@@ -369,14 +390,15 @@ func TestDownloadPoster_UndecodableKeepsDirectDownloadSuccess(t *testing.T) {
 // Geometry flagged as measured against the legacy already-cropped preview is
 // never applied — pre-geometry behavior exactly.
 func TestDownloadPoster_NonFullSourceGeometryIgnored(t *testing.T) {
+	destDir := t.TempDir()
 	server := serveTwoToneSource(t)
 	fs := afero.NewMemMapFs()
 	movie := geometryMovie(server.URL+"/cover.jpg", &models.CropBounds{
-		X: 0, Y: 0, Width: 0.4, Height: 1.0, SourceAspect: 1000.0 / 600.0,
+		X: 0, Y: 0, Width: 0.4, Height: 1.0, SourceAspect: 1000.0 / 600.0, SourceFingerprint: assetidentity.FromBytes(twoToneSourceBytes(t)).Fingerprint,
 	}, true)
 	movie.Poster.PosterCropSourceFull = false
 
-	result, err := newGeometryDownloader(fs).downloadPoster(context.Background(), movie, "/dest", nil)
+	result, err := newGeometryDownloader(fs).downloadPoster(context.Background(), movie, destDir, nil)
 	require.NoError(t, err)
 	require.True(t, result.Downloaded)
 

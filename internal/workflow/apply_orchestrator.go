@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/javinizer/javinizer-go/internal/database"
@@ -405,7 +406,6 @@ func (o *applyOrchImpl) stepMerge(cmd ApplyCmd, state *applyPipelineState, steps
 	// Capture the manual review-page crop geometry before the merge: the
 	// merger rebuilds a fresh Movie and does not know about the runtime-only
 	// geometry, so carry/clear is decided here at the apply boundary.
-	preSource := effectivePosterSource(state.movie)
 	var preBounds *models.CropBounds
 	var preFull bool
 	if state.movie != nil {
@@ -420,35 +420,20 @@ func (o *applyOrchImpl) stepMerge(cmd ApplyCmd, state *applyPipelineState, steps
 		ArrayStrategy:  cmd.Merge.ArrayStrategy,
 	})
 	state.movie = mergeRes.Movie
-	carryPosterCropAcrossMerge(state.movie, preSource, preBounds, preFull)
+	carryPosterCropAcrossMerge(state.movie, preBounds, preFull)
 	state.merged = mergeRes.Merged
 	state.foundNFOPath = mergeRes.FoundNFOPath
 	steps.Merged = true
 	return nil
 }
 
-// effectivePosterSource mirrors the downloader's poster source selection:
-// PosterURL when present, otherwise CoverURL.
-func effectivePosterSource(m *models.Movie) string {
-	if m == nil {
-		return ""
-	}
-	if m.Poster.PosterURL != "" {
-		return m.Poster.PosterURL
-	}
-	return m.Poster.CoverURL
-}
-
-// carryPosterCropAcrossMerge retains manual crop geometry across the
-// pre-organize merge only when the merge left the effective poster source
-// unchanged; any source change (or absent/non-full-source geometry) clears
-// it so a stale crop can never be applied to a different image. Runs at the
-// apply boundary only — the generic NFO merger never sees the field.
-func carryPosterCropAcrossMerge(merged *models.Movie, preSource string, preBounds *models.CropBounds, preFull bool) {
+// Full-source intent must reach the downloader even if NFO merge changes the URL;
+// dropping it here would bypass byte verification and silently publish a fallback.
+func carryPosterCropAcrossMerge(merged *models.Movie, preBounds *models.CropBounds, preFull bool) {
 	if merged == nil {
 		return
 	}
-	if preBounds != nil && preFull && preSource != "" && effectivePosterSource(merged) == preSource {
+	if preBounds != nil && preFull {
 		b := *preBounds
 		merged.Poster.PosterCropBounds = &b
 		merged.Poster.PosterCropSourceFull = true
@@ -516,15 +501,27 @@ func (o *applyOrchImpl) stepDownload(ctx context.Context, cmd ApplyCmd, opID Ope
 		Recorder:               replacementRecorder(o.revertLog),
 	})
 	if dlErr != nil {
-		resolveLogger(o.logger).Warnf("[workflow] Download failed for %s: %v (continuing to NFO generation)", state.movie.ID, dlErr)
 		if outcome != nil {
 			state.downloadPaths = outcome.CreatedPaths
 		}
 		steps.Downloaded = false
+		if errors.Is(dlErr, downloader.ErrPosterRecropRequired) {
+			return fmt.Errorf("apply poster: %w", dlErr)
+		}
+		resolveLogger(o.logger).Warnf("[workflow] Download failed for %s: %v (continuing to NFO generation)", state.movie.ID, dlErr)
 		return nil
 	}
 	state.downloadPaths = outcome.CreatedPaths
 	steps.Downloaded = true
+	// codex r9 P1: worker-side marker clearing keys off Steps.PosterVerified,
+	// not Downloaded — a cover/trailer-only or dedup-skipped apply must NOT be
+	// treated as proof that the recrop verification passed.
+	for _, r := range outcome.Results {
+		if r.Type == downloader.MediaTypePoster && r.Downloaded && !r.Skipped && r.Error == nil {
+			steps.PosterVerified = true
+			break
+		}
+	}
 	return nil
 }
 
