@@ -513,6 +513,15 @@ func (o *applyOrchImpl) stepDownload(ctx context.Context, cmd ApplyCmd, opID Ope
 	}
 	state.downloadPaths = outcome.CreatedPaths
 	steps.Downloaded = true
+	// codex r9 P1: worker-side marker clearing keys off Steps.PosterVerified,
+	// not Downloaded — a cover/trailer-only or dedup-skipped apply must NOT be
+	// treated as proof that the recrop verification passed.
+	for _, r := range outcome.Results {
+		if r.Type == downloader.MediaTypePoster && r.Downloaded && !r.Skipped && r.Error == nil {
+			steps.PosterVerified = true
+			break
+		}
+	}
 	return nil
 }
 
