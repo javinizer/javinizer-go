@@ -19,6 +19,7 @@ func BatchJobConfigFromAppConfig(cfg *config.Config) worker.BatchJobConfig {
 		RequestTimeout:  time.Duration(cfg.Scrapers.RequestTimeoutSeconds) * time.Second,
 		ScraperPriority: cfg.Scrapers.Priority,
 		NFOEnabled:      cfg.Metadata.NFO.Feature.Enabled,
+		PosterDisabled:  !cfg.Output.Download.DownloadPoster,
 	}
 }
 

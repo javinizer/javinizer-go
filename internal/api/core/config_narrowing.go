@@ -35,6 +35,7 @@ type APIConfig struct {
 	ProxyConfig         models.ProxyConfig        // cfg.Scrapers.Proxy — whole struct for proxy test/validation
 	FlareSolverrConfig  models.FlareSolverrConfig // cfg.Scrapers.FlareSolverr — whole struct for proxy test/validation
 	DownloadProxyConfig models.ProxyConfig        // cfg.Output.Download.DownloadProxy — download-proxy profiles surfaced as download_proxy.profile choices
+	DownloadPoster      bool                      // cfg.Output.Download.DownloadPoster — governs whether apply downloads posters
 
 	// Metadata
 	NFOEnabled          bool                     // cfg.Metadata.NFO.Feature.Enabled
@@ -93,6 +94,7 @@ type BatchNarrowConfig struct {
 	RequestTimeout     time.Duration // overall scrape operation timeout
 	ScraperPriority    []string      // scraper source ordering
 	NFOEnabled         bool          // whether NFO generation is active
+	DownloadPoster     bool          // whether poster media downloads are active
 	ScraperUserAgent   string        // user-agent for poster downloads
 	ScraperReferer     string        // referer for poster downloads
 	ScanTimeoutSeconds int           // timeout for file discovery
@@ -149,6 +151,7 @@ func (c APIConfig) BatchConfig() *BatchNarrowConfig {
 		RequestTimeout:     c.RequestTimeout,
 		ScraperPriority:    c.ScraperPriority,
 		NFOEnabled:         c.NFOEnabled,
+		DownloadPoster:     c.DownloadPoster,
 		ScraperUserAgent:   c.ScraperUserAgent,
 		ScraperReferer:     c.ScraperReferer,
 		ScanTimeoutSeconds: c.ScanTimeoutSeconds,
@@ -207,6 +210,7 @@ func (c APIConfig) MatcherConfig() *MatcherNarrowConfig {
 // cfg.Output.GetOperationMode(), cfg.Output.Operation.AllowRevert,
 // cfg.Output.MediaFormat.MaxPosterHeight,
 // cfg.Output.Download, cfg.Output.Download.DownloadProxy,
+// cfg.Output.Download.DownloadPoster,
 // cfg.Performance.MaxWorkers, cfg.Performance.WorkerTimeout,
 // cfg.Scrapers.RequestTimeoutSeconds,
 // cfg.Matching.RegexEnabled, cfg.Matching.RegexPattern,
@@ -237,6 +241,7 @@ func ConfigFromAppConfig(cfg *config.Config) APIConfig {
 		ProxyConfig:         cfg.Scrapers.Proxy,
 		FlareSolverrConfig:  cfg.Scrapers.FlareSolverr,
 		DownloadProxyConfig: cfg.Output.Download.DownloadProxy,
+		DownloadPoster:      cfg.Output.Download.DownloadPoster,
 		NFOEnabled:          cfg.Metadata.NFO.Feature.Enabled,
 		NFOFilenameTemplate: cfg.Metadata.NFO.Format.FilenameTemplate,
 		NFOPerFile:          cfg.Metadata.NFO.Feature.PerFile,

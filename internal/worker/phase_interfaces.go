@@ -143,7 +143,10 @@ type applyPhaseInputs struct {
 	PromoteWitnessFn func(posterID string) bool
 	Concurrency      concurrencyConfig
 	NFOEnabled       bool
-	WF               workflow.WorkflowInterface
+	// PosterDisabled mirrors output.download.download_poster=false.
+	// The marker gate must never block when poster output is off.
+	PosterDisabled bool
+	WF             workflow.WorkflowInterface
 
 	// Current state snapshot (frozen at construction, not live)
 	Results     map[string]*resultstore.MovieResult

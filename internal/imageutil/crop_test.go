@@ -5,10 +5,12 @@ package imageutil
 // Reference: Architecture Decision 8 (concurrent testing with -race flag)
 
 import (
+	"bytes"
 	"embed"
 	"image"
 	"image/color"
 	"image/jpeg"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -793,4 +795,33 @@ func TestCropPosterFromCover_PermissionErrors(t *testing.T) {
 	// permission errors appropriately. Future refactoring to use afero.Fs
 	// would enable more comprehensive permission error simulation.
 	t.Log("Permission error handling: Filesystem access errors properly returned")
+}
+
+// zeroDimDecoder registers a format that decodes to a zero-sized image so the
+// zero-dimension guard in CropPosterFromCoverReader is reachable.
+type zeroDimImage struct{}
+
+func (zeroDimImage) ColorModel() color.Model { return color.RGBAModel }
+func (zeroDimImage) Bounds() image.Rectangle { return image.Rectangle{} }
+func (zeroDimImage) At(x, y int) color.Color { return color.RGBA{} }
+
+func init() {
+	image.RegisterFormat("jvzerodim", "JVZERO", func(r io.Reader) (image.Image, error) { return zeroDimImage{}, nil }, nil)
+}
+
+// codex r6 P1 (PR#251): the reader leg's decode-failure and zero-dimension
+// guards — the verified snapshot stays byte-identical when a mid-crop swap
+// lands on a stale scratch path.
+func TestCropPosterFromCoverReaderFailures(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	outPath := filepath.Join(t.TempDir(), "out.jpg")
+	if _, err := CropPosterFromCoverReader(fs, bytes.NewReader([]byte("not an image")), outPath, 0); err == nil {
+		t.Fatal("decoder garbage must fail")
+	}
+	if _, err := CropPosterFromCoverReader(fs, bytes.NewReader(nil), outPath, 0); err == nil {
+		t.Fatal("nil reader must fail")
+	}
+	if _, err := CropPosterFromCoverReader(fs, bytes.NewReader([]byte("JVZEROpayload")), outPath, 0); err == nil {
+		t.Fatal("zero-dimension decode must fail")
+	}
 }

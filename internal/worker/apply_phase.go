@@ -688,6 +688,10 @@ func interpretApplyResult(
 
 	if applyErr != nil {
 		errMsg := applyErr.Error()
+		errorCode := ""
+		if errors.Is(applyErr, downloader.ErrPosterRecropRequired) {
+			errorCode = downloader.PosterRecropRequiredCode
+		}
 		if errors.Is(applyErr, context.DeadlineExceeded) {
 			errMsg = fmt.Sprintf("apply timed out after %v", applyTimeout)
 		}
@@ -746,6 +750,41 @@ func interpretApplyResult(
 				current.Movie = mergeLiveReviewEdits(movie, movie, current.Movie)
 				current.Status = fileStatus
 				current.Error = errMsg
+				if errorCode != "" && samePosterCropIntent(movie, current.Movie) &&
+					// codex r7 P2: never resurrect a marker whose slot an interim edit
+					// (removal/override) deliberately cleared — in an unmeasured-crop
+					// state the bounds are nil on both sides, so intent alone cannot
+					// distinguish stale from fresh. Only stamp when the row still
+					// carries the mark the apply saw.
+					(afc.MovieResult == nil || current.ErrorCode == afc.MovieResult.ErrorCode) {
+					// codex r7 P2: never resurrect a marker whose slot an interim
+					// edit (removal/override) deliberately cleared — in an
+					// unmeasured-crop state the bounds are nil on both sides, so
+					// intent alone cannot distinguish stale from fresh. Only
+					// stamp when the row still carries the mark the apply saw.
+					baselineCode := ""
+					if afc.MovieResult != nil {
+						baselineCode = afc.MovieResult.ErrorCode
+					}
+					if current.ErrorCode == baselineCode {
+						current.ErrorCode = errorCode
+					}
+				}
+
+				// codex r9 P2b: a PARTIAL failure whose poster leg verified must not keep
+				// refusing later overwrite retries as still-unverified. Only clear when
+				// this apply actually installed a fingerprint-matched poster this run
+				// (Steps.PosterVerified), the row actually carries crop bounds to
+				// discharge (r10 P1: a legacy preview-only crop leaves nil bounds, and
+				// a fresh install against nil bounds ran NO fingerprint verification
+				// — marker must persist), and the new failure is a different failure
+				// class (not a fresh recrop refusal from this same download).
+				hasCropToDischarge := current.Movie != nil && current.Movie.Poster.PosterCropBounds != nil
+				if result != nil && result.Steps.PosterVerified && hasCropToDischarge &&
+					errorCode != downloader.PosterRecropRequiredCode &&
+					current.ErrorCode == downloader.PosterRecropRequiredCode {
+					current.ErrorCode = ""
+				}
 				current.StartedAt = startTime
 				current.EndedAt = &now
 				return current, mergeWriteBackProvenance(inputs.Provenance[filePath], prov), nil
@@ -756,6 +795,7 @@ func interpretApplyResult(
 					Movie:         movie,
 					Status:        fileStatus,
 					Error:         errMsg,
+					ErrorCode:     errorCode,
 					StartedAt:     startTime,
 					EndedAt:       &now,
 				}, inputs.Provenance[filePath])
@@ -827,6 +867,21 @@ func interpretApplyResult(
 					if current.Status == models.JobStatusFailed {
 						current.Status = models.JobStatusCompleted
 						current.Error = ""
+					}
+					// codex r9 P2: clear the marker only when this retry fetched AND
+					// installed a poster after the download step's verification — Steps.
+					// Downloaded alone also fires on cover/trailer-only or dedup-skipped
+					// runs, which would unsafely clear a recrop refusal that nothing
+					// discharged. Skip-download, dry-run, no-poster-URL, and
+					// overwrite-refused retries all leave PosterVerified=false, so the
+					// stale-geometry gate still fires for a later poster-capable retry.
+					// codex r10 P1: legacy preview-only crops leave nil bounds. A fresh
+					// install against nil bounds ran NO fingerprint verification, so a
+					// marker gated only on PosterVerified would let a stale recrop
+					// block evaporate without ever discharging. Require non-nil bounds.
+					hasCropToDischarge := current.Movie != nil && current.Movie.Poster.PosterCropBounds != nil
+					if current.ErrorCode == downloader.PosterRecropRequiredCode && hasCropToDischarge && result != nil && result.Steps.PosterVerified {
+						current.ErrorCode = ""
 					}
 					return current, mergeWriteBackProvenance(inputs.Provenance[filePath], prov), nil
 				})
@@ -976,7 +1031,26 @@ func applyFile(
 	// progress.FromContext. Use taskCtx, not the parent egCtx.
 	taskCtx = progress.WithReporter(taskCtx, reporter)
 
-	result, applyErr := wf.Apply(taskCtx, applyCmd)
+	var result *workflow.ApplyResult
+	var applyErr error
+	// Gate on actual poster work (codex P2): the marker only matters when this
+	// apply will fetch a poster. Mirrors downloadPoster's own early return —
+	// a removed/absent source URL or disabled poster download can't verify a
+	// crop, so organize/NFO-only retries must pass through.
+	posterWillFetch := (prepared.baseline.Poster.PosterURL != "" || prepared.baseline.Poster.CoverURL != "") && !inputs.PosterDisabled
+	// codex r9 P1: the marker gate exists to refuse unverified geometry at download;
+	// organizing a stuck row should still go through, so offload blocking to the
+	// Workflow's poster step — it refuses to re-run a failed download the same
+	// way a fresh row would.
+	if fileResult.ErrorCode == downloader.PosterRecropRequiredCode && cfg.Download && !cfg.DryRun && cfg.OverwriteExistingMedia && posterWillFetch {
+		refusal := &downloader.PosterRecropRequiredError{Reason: downloader.SourceIdentityUnavailable}
+		if bounds := prepared.baseline.Poster.PosterCropBounds; bounds != nil {
+			refusal.Bounds = *bounds
+		}
+		applyErr = refusal
+	} else {
+		result, applyErr = wf.Apply(taskCtx, applyCmd)
+	}
 
 	// Step 3: Interpret the result against the FROZEN baseline (workflow
 	// permutations may have rewritten fields on the live pointer mid-apply).

@@ -2,6 +2,7 @@ package downloader
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -247,7 +248,7 @@ func (d *Downloader) Download(ctx context.Context, cmd DownloadCmd) (*DownloadOu
 		}
 	}
 	if err != nil {
-		if _, partial := err.(*DownloadPartialError); partial {
+		if _, partial := err.(*DownloadPartialError); partial || errors.Is(err, ErrPosterRecropRequired) {
 			return &DownloadOutcome{
 				Results:         results,
 				DownloadedPaths: downloadedPaths,

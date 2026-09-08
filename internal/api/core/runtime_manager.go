@@ -424,7 +424,7 @@ func (s *RuntimeSnapshot) BatchJobFactory() worker.BatchJobFactoryInterface {
 		return nil
 	}
 	matcherIface := s.Matcher()
-	workerBatchCfg := worker.BatchJobConfig{MaxWorkers: batchCfg.MaxWorkers, WorkerTimeout: batchCfg.WorkerTimeout, RequestTimeout: batchCfg.RequestTimeout, ScraperPriority: batchCfg.ScraperPriority, NFOEnabled: batchCfg.NFOEnabled}
+	workerBatchCfg := worker.BatchJobConfig{MaxWorkers: batchCfg.MaxWorkers, WorkerTimeout: batchCfg.WorkerTimeout, RequestTimeout: batchCfg.RequestTimeout, ScraperPriority: batchCfg.ScraperPriority, NFOEnabled: batchCfg.NFOEnabled, PosterDisabled: !batchCfg.DownloadPoster}
 	return worker.NewBatchJobFactory(
 		r.deps.JobStore,
 		nil, // WF is per-job (BatchWorkflow), not shared across all jobs
@@ -560,7 +560,7 @@ func (r *APIRuntime) buildBatchJobFactory() any {
 	}
 
 	matcher := r.NewMatcher()
-	workerBatchCfg := worker.BatchJobConfig{MaxWorkers: batchCfg.MaxWorkers, WorkerTimeout: batchCfg.WorkerTimeout, RequestTimeout: batchCfg.RequestTimeout, ScraperPriority: batchCfg.ScraperPriority, NFOEnabled: batchCfg.NFOEnabled}
+	workerBatchCfg := worker.BatchJobConfig{MaxWorkers: batchCfg.MaxWorkers, WorkerTimeout: batchCfg.WorkerTimeout, RequestTimeout: batchCfg.RequestTimeout, ScraperPriority: batchCfg.ScraperPriority, NFOEnabled: batchCfg.NFOEnabled, PosterDisabled: !batchCfg.DownloadPoster}
 
 	// Re-hydrate reconstructed jobs with infrastructure deps (matcher, posterGen,
 	// batchCfg) that were not available at JobStore construction time. This
