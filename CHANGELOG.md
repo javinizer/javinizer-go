@@ -22,6 +22,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Honor the global rename_file setting for the "rename in place" video operation: web batch/apply with rename_file=false now renames only the (dedicated) folder and preserves video file names, instead of silently forcing a file rename. Note: rename_file=false + rename in place + a mixed-ID (non-dedicated) folder is now a no-op by design (#226)
 - Word-replacement entries containing `*` (the censor character) now match when embedded in Japanese/other non-Latin text: only `*` and Latin-script letters extend a censored token; non-Latin letters (kana, kanji, Cyrillic, …) now count as boundaries. Deliberate behavior flip: a Latin censored token directly abutting CJK letters now replaces (e.g. `F***ドラマ` → `Fuckドラマ`); the #106 over-extension guard (`F***` not firing inside `F****d`) is unchanged (#227)
 
+## [v1.5.2] - 2026-09-08
+
+### Added
+
+- Detect cd/disc/disk multipart suffixes (closes #224 phase matcher) (#242)
+- Per-destination lock registry unification for organizer (#239)
+- Dry-run duplicate preflight + subtitle modes (#241)
+- Audit crumb for force-overwrite of occupied destinations (#249)
+- Persist batch skip warnings to history (#248)
+- Require proven source identity for manual poster crops (#251)
+- Expose typed warning codes to API and UI (#236)
+- Wildcard match mode for word replacements (#228)
+- Recover review loads and apply state (#222)
+
+### Fixed
+
+- Codex review iteration on crop-identity enforcement: bounded poster verify body (64 MiB), poster-verified marker clear semantics, wrapped recrop refusal recognition (#251 rounds 1–11)
+- Carry multipart part-suffix into sort planning (#243)
+- Refuse silent overwrite of same-named multipart destinations (#225)
+- Atomic no-clobber terminal ops via fsutil composites (#234)
+- Kind-typed organize conflicts; authorization applies to files only (#235)
+- Joinable background-check shutdown (Windows TempDir race) (#250)
+- Skip revert journaling in dry-run and dedupe duplicate-path message (#247)
+- Match censored-token word replacements in CJK text (#231)
+- Honor rename_file=false for rename-in-place operation (#230)
+- Reflect rename_file setting in rename-in-place description (#233)
+- Image crop/reader zero-dimension guard coverage
+- Windows CI tolerance for transient bridge path walk entries
+
+### Changed
+
+- Resolved stepDownload's PosterVerified flag from aggregate Downloaded to per-media-type verification (#251 round 9)
+
 ## [v1.5.1] - 2026-08-12
 
 ### Added
