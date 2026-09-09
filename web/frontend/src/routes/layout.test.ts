@@ -184,7 +184,7 @@ it('renders server-authenticated navigation immediately without a blank or loadi
 	});	it('restores an in-flight job indicator on SSR-bootstrapped reload', async () => {
 		const bgJob = await import('$lib/stores/background-job.svelte');
 		apiClient.listOrganizedJobs.mockResolvedValue({
-			jobs: [{ id: 'job-run-1', status: 'running' }],
+			jobs: [{ id: 'job-run-1', status: 'running', current_phase: 'scrape' }],
 		} as unknown as Awaited<ReturnType<typeof apiClient.listOrganizedJobs>>);
 
 		render(Layout, { data: { authStatus: authenticatedStatus() } });
@@ -217,6 +217,31 @@ it('renders server-authenticated navigation immediately without a blank or loadi
 
 		await waitFor(() => expect(apiClient.listOrganizedJobs).toHaveBeenCalledTimes(1));
 		expect(bgJob.restoreJob).not.toHaveBeenCalled();
+	});
+
+	it('does not restore an apply-phase job (organize running is not a scrape)', async () => {
+		const bgJob = await import('$lib/stores/background-job.svelte');
+		apiClient.getAuthStatus.mockResolvedValue(authenticatedStatus());
+		apiClient.listOrganizedJobs.mockResolvedValue({
+			jobs: [{ id: 'job-apply-1', status: 'running', current_phase: 'apply' }],
+		} as unknown as Awaited<ReturnType<typeof apiClient.listOrganizedJobs>>);
+
+		render(Layout);
+
+		await waitFor(() => expect(apiClient.listOrganizedJobs).toHaveBeenCalledTimes(1));
+		expect(bgJob.restoreJob).not.toHaveBeenCalled();
+	});
+
+	it('restores when current_phase is absent (legacy backend)', async () => {
+		const bgJob = await import('$lib/stores/background-job.svelte');
+		apiClient.getAuthStatus.mockResolvedValue(authenticatedStatus());
+		apiClient.listOrganizedJobs.mockResolvedValue({
+			jobs: [{ id: 'job-legacy-1', status: 'running' }],
+		} as unknown as Awaited<ReturnType<typeof apiClient.listOrganizedJobs>>);
+
+		render(Layout);
+
+		await waitFor(() => expect(bgJob.restoreJob).toHaveBeenCalledWith('job-legacy-1'));
 	});
 
 	it('does not restore a completed job returned despite the running filter', async () => {

@@ -104,7 +104,14 @@
 		try {
 			const result = await apiClient.listOrganizedJobs({ status: 'running', limit: 1 });
 			if (!authAuthenticated) return;
-			const running = result?.jobs?.find((j) => j.status === 'running');
+			// Restore only scrape-phase jobs: an apply (organize) job also sits in
+			// 'running' but isn't the scrape progress the indicator/modal renders
+			// (codex P2, PR #253). current_phase is absent for legacy/idle rows —
+			// when the field is missing entirely the restore stays scrape-eligible
+			// so older backends keep the pre-fix behavior.
+			const running = result?.jobs?.find(
+				(j) => j.status === 'running' && (j.current_phase === undefined || j.current_phase === '' || j.current_phase === 'scrape'),
+			);
 			if (running && !getBackgroundJobState().jobId) {
 				restoreJob(running.id);
 			}

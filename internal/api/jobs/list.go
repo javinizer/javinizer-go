@@ -8,6 +8,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 
 	contracts "github.com/javinizer/javinizer-go/internal/api/contracts"
+	"github.com/javinizer/javinizer-go/internal/worker/jobpersist"
 )
 
 // listJobs godoc
@@ -51,6 +52,16 @@ func listJobs(deps JobDeps) gin.HandlerFunc {
 				Progress:       job.Progress,
 				Destination:    job.Destination,
 				StartedAt:      job.StartedAt.Format(time.RFC3339),
+			}
+
+			// For running jobs, decode the results envelope for the durable phase
+			// marker: status alone cannot distinguish an in-flight scrape from an
+			// apply (organize) phase, which transitions the job back to running
+			// with JobPhaseApply (codex P2, PR #253). Envelope decode failure leaves
+			// the phase empty — callers treat that as non-scrape.
+			if job.Status == models.JobStatusRunning {
+				snapshot, _ := jobpersist.Decode(&job)
+				item.CurrentPhase = snapshot.CurrentPhase
 			}
 
 			if job.CompletedAt != nil {

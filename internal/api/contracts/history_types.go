@@ -21,6 +21,12 @@ type JobListItem struct {
 	CompletedAt *string `json:"completed_at,omitempty" example:"2026-04-12T10:05:00Z"`
 	OrganizedAt *string `json:"organized_at,omitempty" example:"2026-04-12T10:05:00Z"`
 	RevertedAt  *string `json:"reverted_at,omitempty" example:"2026-04-12T11:00:00Z"`
+	// CurrentPhase is the lifecycle phase marker persisted on the results
+	// envelope (jobpersist D16): "scrape" or "apply" while running. Exposed so
+	// consumers distinguishing in-flight work (e.g., the web layout restoring
+	// the progress popup after a reload) can select scrape-phase jobs only;
+	// an apply-phase job shares status "running" but is an organize action.
+	CurrentPhase string `json:"current_phase,omitempty" example:"scrape"`
 }
 
 // JobListResponse is the response for listing jobs
