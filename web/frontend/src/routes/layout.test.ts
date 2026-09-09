@@ -13,6 +13,7 @@ vi.mock('$lib/api/client', () => ({
 		updateSecurityConfig: vi.fn(),
 		getScrapers: vi.fn(),
 		getCurrentWorkingDirectory: vi.fn(),
+		listOrganizedJobs: vi.fn(),
 		request: vi.fn(),
 	},
 }));
@@ -21,11 +22,16 @@ vi.mock('$lib/stores/websocket', () => ({
 	websocketStore: { connect: vi.fn(), disconnect: vi.fn() },
 }));
 
+// Mutable holder so tests can simulate a job being tracked midway through
+// the restore HTTP call (vi.hoisted: factory-safe for the hoisted vi.mock).
+const bgJobMock = vi.hoisted(() => ({ jobId: null as string | null }));
+
 vi.mock('$lib/stores/background-job.svelte', () => ({
-	getBackgroundJobState: () => ({ jobId: null, showModal: false }),
+	getBackgroundJobState: () => ({ jobId: bgJobMock.jobId, showModal: false }),
 	reopenModal: vi.fn(),
 	dismiss: vi.fn(),
 	closeModal: vi.fn(),
+	restoreJob: vi.fn(),
 }));
 
 vi.mock('$lib/stores/theme.svelte', () => ({
@@ -37,6 +43,8 @@ vi.mock('$lib/query/queries', () => ({
 	createVersionStatusQuery: () => ({ data: null }),
 }));
 vi.mock('$lib/components/UpdateIndicator.svelte', () => ({ default: () => {} }));
+vi.mock('$lib/components/BackgroundJobIndicator.svelte', () => ({ default: () => {} }));
+vi.mock('$lib/components/ProgressModal.svelte', () => ({ default: () => {} }));
 
 import { toastStore } from '$lib/stores/toast';
 
@@ -145,6 +153,11 @@ beforeEach(() => {
 	localStorage.clear();
 	apiClient.getAuthStatus.mockReset();
 	apiClient.getAuthStatus.mockResolvedValue(uninitializedStatus());
+	apiClient.listOrganizedJobs.mockReset();
+	apiClient.listOrganizedJobs.mockResolvedValue(
+		{ jobs: [] } as unknown as Awaited<ReturnType<typeof apiClient.listOrganizedJobs>>,
+	);
+	bgJobMock.jobId = null;
 	apiClient.getScrapers.mockResolvedValue(scrapersResponse());
 	apiClient.getConfig.mockResolvedValue(freshConfig());
 	apiClient.getCurrentWorkingDirectory.mockResolvedValue({ path: '' });
@@ -168,7 +181,102 @@ it('renders server-authenticated navigation immediately without a blank or loadi
 		expect(getByText('admin · Logout')).toBeTruthy();
 		expect(queryByText('Checking authentication...')).toBeNull();
 		expect(websocket.websocketStore.connect).toHaveBeenCalledTimes(1);
-	});	it('shows no loading message for fast checks and reveals one only after 500ms', async () => {
+	});	it('restores an in-flight job indicator on SSR-bootstrapped reload', async () => {
+		const bgJob = await import('$lib/stores/background-job.svelte');
+		apiClient.listOrganizedJobs.mockResolvedValue({
+			jobs: [{ id: 'job-run-1', status: 'running' }],
+		} as unknown as Awaited<ReturnType<typeof apiClient.listOrganizedJobs>>);
+
+		render(Layout, { data: { authStatus: authenticatedStatus() } });
+
+		await waitFor(() => expect(apiClient.listOrganizedJobs).toHaveBeenCalledTimes(1));
+		expect(apiClient.listOrganizedJobs).toHaveBeenCalledWith({ status: 'running', limit: 1 });
+		expect(bgJob.restoreJob).toHaveBeenCalledWith('job-run-1');
+	});
+
+	it('restores an in-flight job indicator after the auth fetch path', async () => {
+		const bgJob = await import('$lib/stores/background-job.svelte');
+		apiClient.getAuthStatus.mockResolvedValue(authenticatedStatus());
+		apiClient.listOrganizedJobs.mockResolvedValue({
+			jobs: [{ id: 'job-run-2', status: 'running' }],
+		} as unknown as Awaited<ReturnType<typeof apiClient.listOrganizedJobs>>);
+
+		render(Layout);
+
+		await waitFor(() => expect(bgJob.restoreJob).toHaveBeenCalledWith('job-run-2'));
+	});
+
+	it('does not restore when no job is running', async () => {
+		const bgJob = await import('$lib/stores/background-job.svelte');
+		apiClient.getAuthStatus.mockResolvedValue(authenticatedStatus());
+		apiClient.listOrganizedJobs.mockResolvedValue(
+			{ jobs: [] } as unknown as Awaited<ReturnType<typeof apiClient.listOrganizedJobs>>,
+		);
+
+		render(Layout);
+
+		await waitFor(() => expect(apiClient.listOrganizedJobs).toHaveBeenCalledTimes(1));
+		expect(bgJob.restoreJob).not.toHaveBeenCalled();
+	});
+
+	it('does not restore a completed job returned despite the running filter', async () => {
+		const bgJob = await import('$lib/stores/background-job.svelte');
+		apiClient.getAuthStatus.mockResolvedValue(authenticatedStatus());
+		apiClient.listOrganizedJobs.mockResolvedValue({
+			jobs: [{ id: 'job-done-1', status: 'completed' }],
+		} as unknown as Awaited<ReturnType<typeof apiClient.listOrganizedJobs>>);
+
+		render(Layout);
+
+		await waitFor(() => expect(apiClient.listOrganizedJobs).toHaveBeenCalledTimes(1));
+		expect(bgJob.restoreJob).not.toHaveBeenCalled();
+	});
+
+	it('does not clobber a job started while the restore call was in flight', async () => {
+		const bgJob = await import('$lib/stores/background-job.svelte');
+		apiClient.getAuthStatus.mockResolvedValue(authenticatedStatus());
+		// Simulate the user starting a new scrape after restore was triggered
+		// but before the listOrganizedJobs response lands.
+		apiClient.listOrganizedJobs.mockImplementation(async () => {
+			bgJobMock.jobId = 'job-manual';
+			return { jobs: [{ id: 'job-run-3', status: 'running' }] } as unknown as Awaited<
+				ReturnType<typeof apiClient.listOrganizedJobs>
+			>;
+		});
+
+		render(Layout);
+
+		await waitFor(() => expect(apiClient.listOrganizedJobs).toHaveBeenCalledTimes(1));
+		await waitFor(() => expect(bgJobMock.jobId).toBe('job-manual'));
+		expect(bgJob.restoreJob).not.toHaveBeenCalled();
+	});
+
+	it('silently ignores restore API failures and renders normally', async () => {
+		const bgJob = await import('$lib/stores/background-job.svelte');
+		apiClient.getAuthStatus.mockResolvedValue(authenticatedStatus());
+		apiClient.listOrganizedJobs.mockRejectedValue(new Error('jobs api down'));
+
+		const { getByText } = render(Layout);
+
+		await waitFor(() => expect(apiClient.listOrganizedJobs).toHaveBeenCalledTimes(1));
+		expect(bgJob.restoreJob).not.toHaveBeenCalled();
+		await waitFor(() => expect(getByText('Scrape')).toBeTruthy());
+	});
+
+	it('does not call the jobs API when unauthenticated', async () => {
+		apiClient.getAuthStatus.mockResolvedValue(
+			{ initialized: true, authenticated: false, username: null } as unknown as Awaited<
+				ReturnType<typeof apiClient.getAuthStatus>
+			>,
+		);
+
+		render(Layout);
+
+		await waitFor(() => expect(apiClient.getAuthStatus).toHaveBeenCalledTimes(1));
+		expect(apiClient.listOrganizedJobs).not.toHaveBeenCalled();
+	});
+
+	it('shows no loading message for fast checks and reveals one only after 500ms', async () => {
 		vi.useFakeTimers();
 		try {
 			apiClient.getAuthStatus.mockReturnValue(new Promise(() => {}));
