@@ -24,7 +24,11 @@ func listJobs(deps JobDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		statusFilter := c.Query("status")
 
-		results, err := deps.ListJobsWithStats(c.Request.Context())
+		// Route the status filter down to SQL — restore probes hit
+		// /api/v1/jobs?status=running on every authenticated page load, and
+		// filtering in memory made each probe read the full job history
+		// (codex P2, PR #253).
+		results, err := deps.ListJobsWithStatsByStatus(c.Request.Context(), statusFilter)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: "Failed to retrieve jobs"})
 			return
