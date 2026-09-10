@@ -580,6 +580,36 @@ func TestNoClobberProbeSustainedCacheDriftExitsIndeterminate(t *testing.T) {
 	require.ErrorIs(t, err, ErrNoClobberProbeUnstable)
 	require.Zero(t, calls, "stale-identity hits never reach the physical probe")
 }
+
+// TestNoClobberProbeCollisionAdvancesPastSelectedOrdinal: the creation skip
+// scan may land far above the requested ordinal; a sibling collision on that
+// NAME must advance the shared nonce beyond it or every retry round selects
+// and recollides on the same blocked name (codex P2, PR #255).
+func TestNoClobberProbeCollisionAdvancesPastSelectedOrdinal(t *testing.T) {
+	dir := t.TempDir()
+	base := noreplaceOrdinal.Load()
+	// Occupy SOURCE ordinals base+1..base+3 so the skip scan selects base+4,
+	// and occupy base+4's sibling so the collision fires on THAT name.
+	for i := uint64(1); i <= 3; i++ {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, ".nrprobe."+strconv.FormatUint(base+i, 16)), []byte("held"), 0o600))
+	}
+	blocked := filepath.Join(dir, ".nrprobe."+strconv.FormatUint(base+4, 16)+".published")
+	require.NoError(t, os.WriteFile(blocked, []byte("held"), 0o600))
+	collision := fmt.Errorf("occupied sibling: %w", ErrPublishCollision)
+	calls := 0
+	stubNoClobberProbe(t, func(fs afero.Fs, src, dst string) error {
+		calls++
+		if dst == blocked {
+			return collision
+		}
+		return PublishNoReplace(fs, src, dst)
+	})
+	require.NoError(t, ProbeNoClobberPublish(afero.NewOsFs(), dir))
+	require.Equal(t, 2, calls, "retry must skip the burnt ordinal instead of recreating base+4")
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	require.Len(t, entries, 4, "planted files retained; probe pairs cleaned")
+}
 func TestNoClobberProbeCopyRefusesBeforeOpeningSource(t *testing.T) {
 	dir := t.TempDir()
 	src, dst := filepath.Join(dir, "source"), filepath.Join(dir, "out", "movie.mp4")

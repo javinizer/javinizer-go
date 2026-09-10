@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/spf13/afero"
@@ -169,24 +171,40 @@ const noClobberProbeMaxAttempts = 3
 func runNoClobberProbe(fs afero.Fs, dir string) (bool, error) {
 	var lastErr error
 	for attempt := 0; attempt < noClobberProbeMaxAttempts; attempt++ {
-		conclusive, collision, err := runNoClobberProbeAttempt(fs, dir)
+		conclusive, collision, selected, err := runNoClobberProbeAttempt(fs, dir)
 		if !collision {
 			return conclusive, err
+		}
+		// The occupied sibling pinned the ACTUALLY selected ordinal;
+		// retrying from the merely-requested start would recreate and
+		// recollide on the same blocked name every round (codex P2, PR #255).
+		if selected != 0 {
+			advanceNoReplaceOrdinalBeyond(selected)
 		}
 		lastErr = err
 	}
 	return false, fmt.Errorf("no-clobber preflight in %s: synthetic probe names still occupied after %d attempts (indeterminate): %w", dir, noClobberProbeMaxAttempts, lastErr)
 }
 
-func runNoClobberProbeAttempt(fs afero.Fs, dir string) (bool, bool, error) {
+func runNoClobberProbeAttempt(fs afero.Fs, dir string) (bool, bool, uint64, error) {
 	src, handle, err := createNoClobberProbe(fs, filepath.Join(dir, ".nrprobe"), "", nextNoReplaceOrdinal(), 0o600)
 	if err != nil {
-		return false, false, fmt.Errorf("create no-clobber probe in %s: %w", dir, err)
+		return false, false, 0, fmt.Errorf("create no-clobber probe in %s: %w", dir, err)
+	}
+	// The skip scan may have landed above the requested start; report that
+	// ordinal so a sibling collision can fast-forward the shared nonce
+	// beyond it instead of recreating and recolliding the same name
+	// (codex P2, PR #255).
+	var selected uint64
+	if dot := strings.LastIndexByte(src, '.'); dot >= 0 {
+		if parsed, perr := strconv.ParseUint(src[dot+1:], 16, 64); perr == nil {
+			selected = parsed
+		}
 	}
 	defer func() { _ = handle.Close() }()
 	created, err := handle.Stat()
 	if err != nil {
-		return false, false, fmt.Errorf("capture no-clobber probe identity %s (retained): %w", src, err)
+		return false, false, selected, fmt.Errorf("capture no-clobber probe identity %s (retained): %w", src, err)
 	}
 	dst := src + ".published"
 	verdict := publishNoClobberProbe(fs, src, dst)
@@ -209,11 +227,11 @@ func runNoClobberProbeAttempt(fs afero.Fs, dir string) (bool, bool, error) {
 			// Only the SYNTHETIC sibling was occupied — the verdict says nothing
 			// about the volume. Report the pair-collision so the caller retries
 			// with a fresh ordinal pair; the occupied sibling stays untouched.
-			return false, true, fmt.Errorf("no-clobber preflight in %s: %w", dir, verdict)
+			return false, true, selected, fmt.Errorf("no-clobber preflight in %s: %w", dir, verdict)
 		}
-		return conclusive, false, fmt.Errorf("no-clobber preflight in %s: %w", dir, verdict)
+		return conclusive, false, selected, fmt.Errorf("no-clobber preflight in %s: %w", dir, verdict)
 	}
-	return true, false, nil
+	return true, false, selected, nil
 }
 
 // unlinkNoClobberProbe is the primitive-less volume's NO-VACATE cleanup.

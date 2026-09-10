@@ -470,6 +470,16 @@ func TestJobRepository_ListByStatus(t *testing.T) {
 	empty, err := repo.ListByStatus(context.Background(), "cancelled", 0)
 	require.NoError(t, err)
 	assert.Empty(t, empty)
+
+	// empty status = limit-only bounded query without a filter (codex P2,
+	// PR #255)
+	limited, err := repo.ListByStatus(context.Background(), "", 1)
+	require.NoError(t, err)
+	require.Len(t, limited, 1)
+
+	all, err := repo.ListByStatus(context.Background(), "", 0)
+	require.NoError(t, err)
+	assert.Len(t, all, 2)
 }
 
 // TestJobRepository_ListByStatus_Limit bounds the SQL query itself: the

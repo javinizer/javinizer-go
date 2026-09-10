@@ -261,9 +261,13 @@ func (r *JobRepository) List(ctx context.Context) ([]models.Job, error) {
 func (r *JobRepository) ListByStatus(ctx context.Context, status string, limit int) ([]models.Job, error) {
 	var jobs []models.Job
 	query := r.GetDB().WithContext(ctx).
-		Model(&models.Job{}).
-		Where("status = ?", status).
-		Order("started_at DESC, id DESC") // matches NewJobRepository's default order
+		Model(&models.Job{})
+	if status != "" {
+		// An empty status is a LIMIT-only query (?limit=1): bound the fetch
+		// without filtering rows (codex P2, PR #255).
+		query = query.Where("status = ?", status)
+	}
+	query = query.Order("started_at DESC, id DESC") // matches NewJobRepository's default order
 	if limit > 0 {
 		query = query.Limit(limit)
 	}

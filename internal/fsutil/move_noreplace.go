@@ -41,6 +41,22 @@ var noreplaceOrdinal atomic.Uint64
 // nextNoReplaceOrdinal hands out the next ordinal for staging-name generation.
 func nextNoReplaceOrdinal() uint64 { return noreplaceOrdinal.Add(1) }
 
+// advanceNoReplaceOrdinalBeyond fast-forwards the shared nonce past an
+// ordinal a probe collision already burned: the creation skip scan resumes
+// from nextNoReplaceOrdinal, and without this the probe retry would select
+// and collide on the same blocked name every round (codex P2, PR #255).
+func advanceNoReplaceOrdinalBeyond(v uint64) {
+	for {
+		cur := noreplaceOrdinal.Load()
+		if cur >= v {
+			return
+		}
+		if noreplaceOrdinal.CompareAndSwap(cur, v) {
+			return
+		}
+	}
+}
+
 // classifyNoreplaceDestination runs the adoption/classification pre-check:
 // PublishNoReplace carries NO adoption semantics (every occupied dst refuses),
 // while organize keeps #225's no-op rules — lexical self, and same-inode

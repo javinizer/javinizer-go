@@ -128,6 +128,16 @@ func (d JobDeps) ListJobsWithStatsByStatus(ctx context.Context, status string, l
 				}
 			}
 		}
+	} else if limit > 0 {
+		// ?limit without a status: bound the SQL query itself as well — the
+		// documented contract is a query bound, and fetching the full job
+		// history before truncating would still scale with table size
+		// (codex P2, PR #255).
+		if repo, ok := d.JobRepo.(jobStatusLister); ok {
+			jobs, err = repo.ListByStatus(ctx, "", limit)
+		} else {
+			jobs, err = d.JobRepo.List(ctx)
+		}
 	} else {
 		jobs, err = d.JobRepo.List(ctx)
 	}

@@ -333,6 +333,51 @@ func TestListJobsWithStatsByStatusAndPhase_FallbackListErr(t *testing.T) {
 	require.Contains(t, err.Error(), "legacy list fail")
 }
 
+// TestListJobs_SQLBoundedLimitOnlyPath: ?limit without a status must grade
+// into ListByStatus("", limit) so the SQL query itself is bounded, keeping
+// full-history materialization off the wire even when no status/phase
+// predicate applies (codex P2, PR #255).
+func TestListJobs_SQLBoundedLimitOnlyPath(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	deps, db := setupJobsTestDeps(t)
+	defer func() { _ = db.Close() }()
+	seedStatusMixedJobs(t, deps)
+	seedPhaseApplyJob(t, deps)
+
+	router := gin.New()
+	router.GET("/api/v1/jobs", listJobs(newTestJobDeps(deps)))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/jobs?limit=1", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp contracts.JobListResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Len(t, resp.Jobs, 1)
+	// newest first: the apply fixture is started in the future
+	assert.Equal(t, "run-apply-1", resp.Jobs[0].ID)
+}
+
+// TestListJobsWithStatsByStatus_LimitWithoutStatusFallback: legacy doubles
+// without the seam still honor limit-only caps via in-memory truncation.
+func TestListJobsWithStatsByStatus_LimitOnlyFallback(t *testing.T) {
+	deps, db := setupJobsTestDeps(t)
+	defer func() { _ = db.Close() }()
+	seedStatusMixedJobs(t, deps)
+
+	svc := newTestJobDeps(deps)
+	svc.JobRepo = legacyRepo{svc.JobRepo}
+
+	limited, err := svc.ListJobsWithStatsByStatus(context.Background(), "", 1)
+	require.NoError(t, err)
+	require.Len(t, limited, 1)
+
+	unbounded, err := svc.ListJobsWithStatsByStatus(context.Background(), "", 0)
+	require.NoError(t, err)
+	assert.Len(t, unbounded, 3)
+}
+
 // TestListJobs_HandlerPhaseSQLFilterErr500: handler surfaces a failing phase
 // seam as 500 when the phase param is present.
 func TestListJobs_HandlerPhaseSQLFilterErr500(t *testing.T) {
