@@ -528,6 +528,33 @@ func TestJobRepository_ListByStatusAndPhase(t *testing.T) {
 	assert.Len(t, noPhase, 3)
 }
 
+// TestJobRepository_ListByStatusAndPhase_ResilientRows: empty or malformed
+// results blobs historically decoded fine via jobpersist.Decode and must not
+// now abort the phase-filtered query with "malformed JSON" — they keep the
+// missing-marker behavior (codex P2, PR #255). The status predicate is also
+// skipped for phase-only lookups so behavior matches the in-memory fallback.
+func TestJobRepository_ListByStatusAndPhase_ResilientRows(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewJobRepository(db)
+	ctx := context.Background()
+	now := time.Now()
+
+	empty := &models.Job{ID: "jobs-lbp-empty", Status: models.JobStatusRunning, Files: "[]", Results: "", Excluded: "{}", FileMatchInfo: "{}", StartedAt: now}
+	corrupt := &models.Job{ID: "jobs-lbp-corrupt", Status: models.JobStatusRunning, Files: "[]", Results: "not-json{", Excluded: "{}", FileMatchInfo: "{}", StartedAt: now.Add(-time.Minute)}
+	orgScrape := &models.Job{ID: "jobs-lbp-org2", Status: models.JobStatusOrganized, Files: "[]", Results: `{"domain":{},"current_phase":"scrape"}`, Excluded: "{}", FileMatchInfo: "{}", StartedAt: now.Add(time.Minute)}
+	for _, job := range []*models.Job{empty, corrupt, orgScrape} {
+		require.NoError(t, repo.Create(ctx, job))
+	}
+
+	got, err := repo.ListByStatusAndPhase(ctx, "running", "scrape", 0)
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+
+	cross, err := repo.ListByStatusAndPhase(ctx, "", "scrape", 0)
+	require.NoError(t, err)
+	require.Len(t, cross, 3)
+}
+
 // TestJobRepository_ListByStatusAndPhase_Error hits the SQL error branch by
 // canceling the context before the query runs.
 func TestJobRepository_ListByStatusAndPhase_Error(t *testing.T) {

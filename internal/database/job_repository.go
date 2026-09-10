@@ -286,10 +286,16 @@ func (r *JobRepository) ListByStatus(ctx context.Context, status string, limit i
 func (r *JobRepository) ListByStatusAndPhase(ctx context.Context, status, phase string, limit int) ([]models.Job, error) {
 	var jobs []models.Job
 	query := r.GetDB().WithContext(ctx).
-		Model(&models.Job{}).
-		Where("status = ?", status)
+		Model(&models.Job{})
+	if status != "" {
+		query = query.Where("status = ?", status)
+	}
 	if phase != "" {
-		query = query.Where("COALESCE(json_extract(results, '$.current_phase'), '') IN ('', ?)", phase)
+		// json_extract raises "malformed JSON" on empty/corrupt results that
+		// jobpersist.Decode historically tolerated, so guard with json_valid:
+		// unreadable rows keep the missing-marker behavior and stay
+		// scrape-eligible (codex P2, PR #255).
+		query = query.Where("COALESCE(CASE WHEN json_valid(results) THEN json_extract(results, '$.current_phase') END, '') IN ('', ?)", phase)
 	}
 	query = query.Order("started_at DESC, id DESC") // matches ListByStatus's default order
 	if limit > 0 {
