@@ -190,7 +190,7 @@ it('renders server-authenticated navigation immediately without a blank or loadi
 		render(Layout, { data: { authStatus: authenticatedStatus() } });
 
 		await waitFor(() => expect(apiClient.listOrganizedJobs).toHaveBeenCalledTimes(1));
-		expect(apiClient.listOrganizedJobs).toHaveBeenCalledWith({ status: 'running', limit: 10 });
+		expect(apiClient.listOrganizedJobs).toHaveBeenCalledWith({ status: 'running' });
 		expect(bgJob.restoreJob).toHaveBeenCalledWith('job-run-1');
 	});
 
@@ -256,9 +256,9 @@ it('renders server-authenticated navigation immediately without a blank or loadi
 
 		render(Layout);
 
-		// base branch used limit: 1 and would only ever see the apply row
+		// no row cap: any limit would let newest-first SQL discard the scrape row
 		await waitFor(() =>
-			expect(apiClient.listOrganizedJobs).toHaveBeenCalledWith({ status: 'running', limit: 10 }),
+			expect(apiClient.listOrganizedJobs).toHaveBeenCalledWith({ status: 'running' }),
 		);
 		await waitFor(() => expect(bgJob.restoreJob).toHaveBeenCalledWith('job-scrape-old'));
 	});
