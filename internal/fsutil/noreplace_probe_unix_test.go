@@ -323,7 +323,7 @@ func TestNoClobberProbeWaiterSharesIndeterminate(t *testing.T) {
 	dir := t.TempDir()
 	stubNoClobberDirID(t, func(string) string { return "w" })
 	key := dir + "|w"
-	flight := &noClobberFlight{done: make(chan struct{}), err: syscall.EIO}
+	flight := &noClobberFlight{done: make(chan struct{}), err: syscall.EIO, id: "w"}
 	noClobberCacheMu.Lock()
 	noClobberInflight[key] = flight
 	noClobberCacheMu.Unlock()
@@ -527,7 +527,8 @@ func TestNoClobberProbeWaiterRevalidatesOnWake(t *testing.T) {
 		calls++
 		return PublishNoReplace(fs, src, dst)
 	})
-	flight := &noClobberFlight{done: make(chan struct{}), err: fmt.Errorf("%w: %w", ErrPublishNoReplaceUnsupported, syscall.EPERM)}
+	// The flight's verdict was produced under identity A.
+	flight := &noClobberFlight{done: make(chan struct{}), err: fmt.Errorf("%w: %w", ErrPublishNoReplaceUnsupported, syscall.EPERM), id: "A"}
 	noClobberCacheMu.Lock()
 	noClobberInflight[dir+"|A"] = flight
 	noClobberCacheMu.Unlock()

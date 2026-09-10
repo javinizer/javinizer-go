@@ -41,9 +41,14 @@ var (
 // possibly-foreign capability answer (codex P2, PR #255).
 var ErrNoClobberProbeUnstable = errors.New("no-clobber probe: destination identity unstable across samples")
 
+// noClobberFlight shares one probe round with concurrent callers. id binds
+// err to the directory identity that produced it: a waiter whose wake-time
+// sample disagrees must NOT consume the answer — the verdict belongs to a
+// filesystem that may no longer be mounted (codex P2, PR #255).
 type noClobberFlight struct {
 	done chan struct{}
 	err  error
+	id   string
 }
 
 // ProbeNoClobberPublish refuses an incapable destination before a staging
@@ -100,10 +105,11 @@ func ProbeNoClobberPublish(fs afero.Fs, dstDir string) error {
 		if flight, ok := noClobberInflight[cacheKey]; ok {
 			noClobberCacheMu.Unlock()
 			<-flight.done
-			// Same return-time revalidation for verdicts completed by a peer:
-			// a mid-wait filesystem change invalidates the key this caller
-			// joined under.
-			if noClobberProbeDirID(key) == sampledID {
+			// The shared verdict must be certified against the identity that
+			// PRODUCED it, not this caller's join sample: A->B->A pinball would
+			// otherwise let an A-sampled waiter consume B's answer
+			// (codex P2, PR #255).
+			if flight.id == noClobberProbeDirID(key) {
 				return flight.err
 			}
 			continue
@@ -142,6 +148,10 @@ func ProbeNoClobberPublish(fs afero.Fs, dstDir string) error {
 		}
 		delete(noClobberInflight, flightKey)
 		flight.err = verdict
+		// The stabilized sample that produced the verdict; wake-time
+		// revalidation compares the live identity against this, so a round
+		// that drifted A->B cannot serve B's answer to a caller on A again.
+		flight.id = sampledID
 		close(flight.done)
 		noClobberCacheMu.Unlock()
 		return verdict
