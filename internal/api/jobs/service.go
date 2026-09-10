@@ -90,7 +90,7 @@ func (d JobDeps) GetJobWithStats(ctx context.Context, jobID string) (*JobWithSta
 
 // ListJobsWithStats returns all jobs with their operation and revert counts.
 func (d JobDeps) ListJobsWithStats(ctx context.Context) ([]JobWithStats, error) {
-	return d.ListJobsWithStatsByStatus(ctx, "")
+	return d.ListJobsWithStatsByStatus(ctx, "", 0)
 }
 
 // jobStatusLister is the narrow optional seam for status-filtered job
@@ -98,7 +98,7 @@ func (d JobDeps) ListJobsWithStats(ctx context.Context) ([]JobWithStats, error) 
 // in-memory fallback below; the concrete JobRepository implements this and
 // pushes the filter down to SQL.
 type jobStatusLister interface {
-	ListByStatus(ctx context.Context, status string) ([]models.Job, error)
+	ListByStatus(ctx context.Context, status string, limit int) ([]models.Job, error)
 }
 
 // ListJobsWithStatsByStatus is ListJobsWithStats filtered by job status in SQL
@@ -106,12 +106,15 @@ type jobStatusLister interface {
 // the web layout's reload-restore probe that fires on every authenticated page
 // load) can then skip hydrating the full job history (codex P2, PR #253).
 // An empty status preserves the prior unfiltered behavior.
-func (d JobDeps) ListJobsWithStatsByStatus(ctx context.Context, status string) ([]JobWithStats, error) {
+// A positive limit additionally bounds the query: the restore probe sends
+// limit=1, so a page load with many running jobs must not fetch, decode, and
+// aggregate every row (codex P2, PR #255).
+func (d JobDeps) ListJobsWithStatsByStatus(ctx context.Context, status string, limit int) ([]JobWithStats, error) {
 	var jobs []models.Job
 	var err error
 	if status != "" {
 		if repo, ok := d.JobRepo.(jobStatusLister); ok {
-			jobs, err = repo.ListByStatus(ctx, status)
+			jobs, err = repo.ListByStatus(ctx, status, limit)
 		} else {
 			all, listErr := d.JobRepo.List(ctx)
 			if listErr != nil {
@@ -129,6 +132,13 @@ func (d JobDeps) ListJobsWithStatsByStatus(ctx context.Context, status string) (
 	}
 	if err != nil {
 		return nil, err
+	}
+	// Legacy test doubles (and any repo not exposing the narrow seam) filter in
+	// memory, so bound them the same way the SQL LIMIT bounds the repository —
+	// the aggregate-count queries below must only run for the returned slice
+	// (codex P2, PR #255).
+	if limit > 0 && len(jobs) > limit {
+		jobs = jobs[:limit]
 	}
 
 	// Batch-fetch operation and revert counts in 2 queries instead of 2N.

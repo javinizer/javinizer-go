@@ -45,7 +45,7 @@ type legacyRepo struct {
 // SQL-filter error branch.
 type sqlErrRepo struct{ legacyRepo }
 
-func (sqlErrRepo) ListByStatus(context.Context, string) ([]models.Job, error) {
+func (sqlErrRepo) ListByStatus(context.Context, string, int) ([]models.Job, error) {
 	return nil, errors.New("sql boom")
 }
 
@@ -96,11 +96,11 @@ func TestListJobsWithStatsByStatus_FallbackPath(t *testing.T) {
 	svc := newTestJobDeps(deps)
 	svc.JobRepo = legacyRepo{svc.JobRepo}
 
-	running, err := svc.ListJobsWithStatsByStatus(context.Background(), "running")
+	running, err := svc.ListJobsWithStatsByStatus(context.Background(), "running", 0)
 	require.NoError(t, err)
 	require.Len(t, running, 2)
 
-	all, err := svc.ListJobsWithStatsByStatus(context.Background(), "")
+	all, err := svc.ListJobsWithStatsByStatus(context.Background(), "", 0)
 	require.NoError(t, err)
 	assert.Len(t, all, 3)
 }
@@ -113,7 +113,7 @@ func TestListJobsWithStatsByStatus_SQLFilterErr(t *testing.T) {
 
 	svc := newTestJobDeps(deps)
 	svc.JobRepo = sqlErrRepo{}
-	_, err := svc.ListJobsWithStatsByStatus(context.Background(), "running")
+	_, err := svc.ListJobsWithStatsByStatus(context.Background(), "running", 0)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "sql boom")
 }
@@ -165,4 +165,36 @@ func TestListJobs_FallbackListErr500(t *testing.T) {
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	require.Equal(t, http.StatusInternalServerError, w.Code)
+}
+
+// TestListJobs_HandlerHonorsLimit: the restore probe requests limit=1 — the
+// endpoint must bound the SQL fetch instead of decoding/aggregating every
+// running row (codex P2, PR #255), and invalid values fall back to the
+// unbounded default.
+func TestListJobs_HandlerHonorsLimit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	deps, db := setupJobsTestDeps(t)
+	defer func() { _ = db.Close() }()
+	seedStatusMixedJobs(t, deps)
+
+	router := gin.New()
+	router.GET("/api/v1/jobs", listJobs(newTestJobDeps(deps)))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/jobs?status=running&limit=1", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp contracts.JobListResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Len(t, resp.Jobs, 1)
+	assert.Equal(t, models.JobStatusRunning, resp.Jobs[0].Status)
+
+	bogus := httptest.NewRequest(http.MethodGet, "/api/v1/jobs?status=running&limit=bogus", nil)
+	bogusW := httptest.NewRecorder()
+	router.ServeHTTP(bogusW, bogus)
+	require.Equal(t, http.StatusOK, bogusW.Code)
+	var bogusResp contracts.JobListResponse
+	require.NoError(t, json.Unmarshal(bogusW.Body.Bytes(), &bogusResp))
+	assert.Len(t, bogusResp.Jobs, 2)
 }

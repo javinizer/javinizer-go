@@ -35,7 +35,6 @@ func TestNoClobberProbeVerdicts(t *testing.T) {
 		{"enosys", fmt.Errorf("%w: %w", ErrPublishNoReplaceUnsupported, syscall.ENOSYS), true},
 		{"eopnotsupp", fmt.Errorf("%w: %w", ErrPublishNoReplaceUnsupported, syscall.EOPNOTSUPP), true},
 		{"enotsup", fmt.Errorf("%w: %w", ErrPublishNoReplaceUnsupported, syscall.ENOTSUP), true},
-		{"collision", ErrPublishCollision, false},
 		{"io", syscall.EIO, false},
 		{"access", syscall.EACCES, false},
 		{"untyped capability", syscall.EPERM, false},
@@ -68,6 +67,8 @@ func TestNoClobberProbeVerdicts(t *testing.T) {
 			}
 			want := 1
 			if !tc.conclusive {
+				// Indeterminate verdicts are never cached, so the re-probe
+				// statement above paid for another full attempt.
 				want = 2
 			}
 			require.Equal(t, want, calls)
@@ -238,6 +239,47 @@ func TestNoClobberProbeSymlinkSubstitution(t *testing.T) {
 	info, err := os.Lstat(source)
 	require.NoError(t, err)
 	require.NotZero(t, info.Mode()&os.ModeSymlink)
+}
+
+// TestNoClobberProbeCollisionRetry: a collision on the synthetic sibling is
+// probe-name noise, not a verdict — the loop swaps in a fresh ordinal pair
+// (codex P2, PR #255).
+func TestNoClobberProbeCollisionRetry(t *testing.T) {
+	dir := t.TempDir()
+	calls := 0
+	stubNoClobberProbe(t, func(fs afero.Fs, src, dst string) error {
+		calls++
+		if calls == 1 {
+			return fmt.Errorf("planted sibling: %w", ErrPublishCollision)
+		}
+		return PublishNoReplace(fs, src, dst)
+	})
+	require.NoError(t, ProbeNoClobberPublish(afero.NewOsFs(), dir))
+	require.Equal(t, 2, calls)
+	// verdict is conclusive and cached: a second probe pays nothing
+	require.NoError(t, ProbeNoClobberPublish(afero.NewOsFs(), dir))
+	require.Equal(t, 2, calls)
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	require.Empty(t, entries)
+}
+
+// TestNoClobberProbeCollisionExhausted: persistent pair collisions fail as
+// indeterminate (never cached) after noClobberProbeMaxAttempts.
+func TestNoClobberProbeCollisionExhausted(t *testing.T) {
+	dir := t.TempDir()
+	calls := 0
+	stubNoClobberProbe(t, func(afero.Fs, string, string) error {
+		calls++
+		return fmt.Errorf("planted sibling: %w", ErrPublishCollision)
+	})
+	err := ProbeNoClobberPublish(afero.NewOsFs(), dir)
+	require.ErrorIs(t, err, ErrPublishCollision)
+	require.Contains(t, err.Error(), "still occupied")
+	require.Equal(t, noClobberProbeMaxAttempts, calls)
+	// uncached: re-probing pays full attempts again
+	_ = ProbeNoClobberPublish(afero.NewOsFs(), dir)
+	require.Equal(t, 2*noClobberProbeMaxAttempts, calls)
 }
 
 func TestNoClobberProbeSingleFlightAndDirectoryCount(t *testing.T) {

@@ -255,14 +255,19 @@ func (r *JobRepository) List(ctx context.Context) ([]models.Job, error) {
 
 // ListByStatus returns jobs whose status equals the filter, ordered by the
 // base repository's default order. Used by status-filtered API lookups so a
-// "running?" probe doesn't hydrate the full history table.
-func (r *JobRepository) ListByStatus(ctx context.Context, status string) ([]models.Job, error) {
+// "running?" probe doesn't hydrate the full history table. A positive limit
+// bounds the SQL query itself (the reload-restore probe sends limit=1;
+// codex P2, PR #255); limit <= 0 keeps the unbounded behavior.
+func (r *JobRepository) ListByStatus(ctx context.Context, status string, limit int) ([]models.Job, error) {
 	var jobs []models.Job
-	err := r.GetDB().WithContext(ctx).
+	query := r.GetDB().WithContext(ctx).
 		Model(&models.Job{}).
 		Where("status = ?", status).
-		Order("started_at DESC, id DESC"). // matches NewJobRepository's default order
-		Find(&jobs).Error
+		Order("started_at DESC, id DESC") // matches NewJobRepository's default order
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+	err := query.Find(&jobs).Error
 	if err != nil {
 		return nil, wrapDBErr("list", "jobs by status", err)
 	}

@@ -77,15 +77,34 @@ func ProbeNoClobberPublish(fs afero.Fs, dstDir string) error {
 	return verdict
 }
 
+// noClobberProbeMaxAttempts bounds probe-pair retries after a collision on
+// the SYNTHETIC destination sibling: an interrupted prior probe or retained
+// cleanup residue can hold ".published" — the retry swaps in a fresh ordinal
+// pair instead of failing the first organize on an otherwise capable volume
+// (codex P2, PR #255). The occupied sibling is never displaced or unlinked.
+const noClobberProbeMaxAttempts = 3
+
 func runNoClobberProbe(fs afero.Fs, dir string) (bool, error) {
+	var lastErr error
+	for attempt := 0; attempt < noClobberProbeMaxAttempts; attempt++ {
+		conclusive, collision, err := runNoClobberProbeAttempt(fs, dir)
+		if !collision {
+			return conclusive, err
+		}
+		lastErr = err
+	}
+	return false, fmt.Errorf("no-clobber preflight in %s: synthetic probe names still occupied after %d attempts (indeterminate): %w", dir, noClobberProbeMaxAttempts, lastErr)
+}
+
+func runNoClobberProbeAttempt(fs afero.Fs, dir string) (bool, bool, error) {
 	src, handle, err := createNoClobberProbe(fs, filepath.Join(dir, ".nrprobe"), "", nextNoReplaceOrdinal(), 0o600)
 	if err != nil {
-		return false, fmt.Errorf("create no-clobber probe in %s: %w", dir, err)
+		return false, false, fmt.Errorf("create no-clobber probe in %s: %w", dir, err)
 	}
 	defer func() { _ = handle.Close() }()
 	created, err := handle.Stat()
 	if err != nil {
-		return false, fmt.Errorf("capture no-clobber probe identity %s (retained): %w", src, err)
+		return false, false, fmt.Errorf("capture no-clobber probe identity %s (retained): %w", src, err)
 	}
 	dst := src + ".published"
 	verdict := publishNoClobberProbe(fs, src, dst)
@@ -104,9 +123,15 @@ func runNoClobberProbe(fs afero.Fs, dir string) (bool, error) {
 		logging.Warnf("no-clobber probe cleanup retained %s / %s: %v", src, dst, cleanupErr)
 	}
 	if verdict != nil {
-		return conclusive, fmt.Errorf("no-clobber preflight in %s: %w", dir, verdict)
+		if errors.Is(verdict, ErrPublishCollision) {
+			// Only the SYNTHETIC sibling was occupied — the verdict says nothing
+			// about the volume. Report the pair-collision so the caller retries
+			// with a fresh ordinal pair; the occupied sibling stays untouched.
+			return false, true, fmt.Errorf("no-clobber preflight in %s: %w", dir, verdict)
+		}
+		return conclusive, false, fmt.Errorf("no-clobber preflight in %s: %w", dir, verdict)
 	}
-	return true, nil
+	return true, false, nil
 }
 
 // unlinkNoClobberProbe is the primitive-less volume's NO-VACATE cleanup.
