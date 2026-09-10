@@ -228,6 +228,31 @@ video_file.avi
 
 
 
+### Unraid user shares (shfs): no-clobber preflight refuses
+
+An Unraid user-share destination such as `/mnt/user/Movies` may support neither
+`renameat2(RENAME_NOREPLACE)` nor hard links. A typical refusal reports
+`renameat2: invalid argument (EINVAL)` and `link: operation not permitted (EPERM)`.
+EPERM can also reflect hard-link protection policy, not just filesystem limitations.
+
+Javinizer probes the destination directory before streaming direct copies or
+cross-device moves, refusing unsupported destinations before any `.nrstg` payload
+is created. Same-volume moves still use their existing atomic publish directly.
+Conclusive probe results are cached per directory for the process lifetime;
+transient failures are retried on a later file. Restart after changing mounts or
+hard-link policy. Every final file publish still enforces atomic no-clobber.
+
+**Remedy**: bind-mount a native disk path, for example
+`/mnt/disk1/Movies:/storage` (generally `/mnt/diskN/...`), rather than an Unraid
+user-share path. Alternatively, organize into native-filesystem local staging,
+then use an external sync tool with your intended destination conflict policy.
+There is no non-atomic fallback for unauthorized writes.
+
+If probe cleanup cannot prove ownership or unlink safely, a warning identifies
+the retained zero-byte `.nrprobe.*` file. Cleanup failure does not change the
+capability verdict. Inspect retained files before manually removing them; a
+foreign substitution must not be treated as disposable probe residue.
+
 ### "File already exists"
 
 **Problem**: Target file conflicts with existing file

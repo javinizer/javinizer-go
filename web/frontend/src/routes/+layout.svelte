@@ -35,6 +35,7 @@
 	let authLoading = $state(!initialAuthStatus);
 	let showAuthLoading = $state(false);
 	let authLoadingTimer: number | undefined;
+	let restoreRetryTimer: number | undefined;
 	let authSubmitting = $state(false);
 	let authUnavailable = $state(false);
 	let authInitialized = $state(initialAuthStatus?.initialized ?? false);
@@ -100,9 +101,17 @@
 	// reappears without reopening the modal. Guards: skip on refresh when a job
 	// is already tracked (a scrape may have started while the HTTP call was in
 	// flight) and never restore after logout (authAuthenticated flipped false).
-	async function maybeRestoreRunningJob() {
+	async function maybeRestoreRunningJob(retry = true) {
+		let restored = false;
 		try {
-			const result = await apiClient.listOrganizedJobs({ status: 'running', limit: 1 });
+			// Phase predicate and row cap both live server-side: the
+			// repository filters running jobs by the durable current_phase
+			// marker in SQL before LIMIT 1 applies, so the probe returns the
+			// newest scrape job without fetching/decoding every running row
+			// even with many concurrent apply-phase jobs (codex P2, PR #255).
+			// The client-side phase check below stays as a legacy-backend
+			// guard — older servers ignore the param and return any running job.
+			const result = await apiClient.listOrganizedJobs({ status: 'running', phase: 'scrape', limit: 1 });
 			if (!authAuthenticated) return;
 			// Restore only scrape-phase jobs: an apply (organize) job also sits in
 			// 'running' but isn't the scrape progress the indicator/modal renders
@@ -114,9 +123,27 @@
 			);
 			if (running && !getBackgroundJobState().jobId) {
 				restoreJob(running.id);
+				restored = true;
 			}
 		} catch {
-			// Restore failure is non-critical — never surface it to the user.
+			// Restore failure is non-critical — never surface it to the user —
+			// but a transient lookup failure (temporary 500/network blip) takes
+			// the same one-shot reconcile below, otherwise an SSR-authenticated
+			// reload loses the indicator for the whole session (codex P2,
+			// PR #255 round 3).
+		}
+		if (!restored && retry && authAuthenticated) {
+			// A scrape job is persisted synchronously as 'pending' and flips to
+			// 'running' only when its background goroutine starts; a reload
+			// inside that window finds nothing and would lose the indicator for
+			// the entire scrape (issue #256). Reconcile exactly once instead of
+			// tracking dead-pending rows (a job whose runner never started must
+			// NOT be restored). The retry timer is component-scoped so unmount
+			// cancels it.
+			restoreRetryTimer = window.setTimeout(() => {
+				restoreRetryTimer = undefined;
+				void maybeRestoreRunningJob(false);
+			}, 1500);
 		}
 	}
 
@@ -185,6 +212,7 @@
 
 	onDestroy(() => {
 		if (authLoadingTimer !== undefined) window.clearTimeout(authLoadingTimer);
+		if (restoreRetryTimer !== undefined) window.clearTimeout(restoreRetryTimer);
 		getThemeStore().destroyTheme();
 		websocketStore.disconnect();
 	});

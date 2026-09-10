@@ -457,19 +457,132 @@ func TestJobRepository_ListByStatus(t *testing.T) {
 	require.NoError(t, repo.Create(context.Background(), running))
 	require.NoError(t, repo.Create(context.Background(), organized))
 
-	runningJobs, err := repo.ListByStatus(context.Background(), "running")
+	runningJobs, err := repo.ListByStatus(context.Background(), "running", 0)
 	require.NoError(t, err)
 	require.Len(t, runningJobs, 1)
 	assert.Equal(t, "jobs-lbs-run", runningJobs[0].ID)
 
-	organizedJobs, err := repo.ListByStatus(context.Background(), "organized")
+	organizedJobs, err := repo.ListByStatus(context.Background(), "organized", 0)
 	require.NoError(t, err)
 	require.Len(t, organizedJobs, 1)
 	assert.Equal(t, "jobs-lbs-org", organizedJobs[0].ID)
 
-	empty, err := repo.ListByStatus(context.Background(), "cancelled")
+	empty, err := repo.ListByStatus(context.Background(), "cancelled", 0)
 	require.NoError(t, err)
 	assert.Empty(t, empty)
+
+	// empty status = limit-only bounded query without a filter (codex P2,
+	// PR #255)
+	limited, err := repo.ListByStatus(context.Background(), "", 1)
+	require.NoError(t, err)
+	require.Len(t, limited, 1)
+
+	all, err := repo.ListByStatus(context.Background(), "", 0)
+	require.NoError(t, err)
+	assert.Len(t, all, 2)
+}
+
+// TestJobRepository_ListByStatus_Limit bounds the SQL query itself: the
+// reload-restore probe asks for one row even when several jobs match (codex
+// P2, PR #255).
+func TestJobRepository_ListByStatus_Limit(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewJobRepository(db)
+
+	for _, id := range []string{"jobs-lbs-lim-1", "jobs-lbs-lim-2"} {
+		require.NoError(t, repo.Create(context.Background(), &models.Job{ID: id, Status: models.JobStatusRunning, Files: "[]", Results: "{}", Excluded: "{}", FileMatchInfo: "{}"}))
+	}
+
+	limited, err := repo.ListByStatus(context.Background(), "running", 1)
+	require.NoError(t, err)
+	require.Len(t, limited, 1)
+
+	unbounded, err := repo.ListByStatus(context.Background(), "running", 0)
+	require.NoError(t, err)
+	assert.Len(t, unbounded, 2)
+}
+
+// TestJobRepository_ListByStatusAndPhase pushes the phase predicate down to
+// SQL: a newer running apply-phase job must NOT hide an older scrape job when
+// limit=1 is applied (the frontend's reload-restore probe relies on this —
+// codex P2, PR #255).
+func TestJobRepository_ListByStatusAndPhase(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewJobRepository(db)
+	ctx := context.Background()
+	now := time.Now()
+
+	apply := &models.Job{ID: "jobs-lbp-apply", Status: models.JobStatusRunning, Files: "[]", Results: `{"domain":{},"current_phase":"apply"}`, Excluded: "{}", FileMatchInfo: "{}", StartedAt: now} // newest — must be excluded by the SQL phase filter
+	scrape := &models.Job{ID: "jobs-lbp-scrape", Status: models.JobStatusRunning, Files: "[]", Results: `{"domain":{},"current_phase":"scrape"}`, Excluded: "{}", FileMatchInfo: "{}", StartedAt: now.Add(-time.Minute)}
+	legacy := &models.Job{ID: "jobs-lbp-legacy", Status: models.JobStatusRunning, Files: "[]", Results: `{"domain":{}}`, Excluded: "{}", FileMatchInfo: "{}", StartedAt: now.Add(-2 * time.Minute)} // no marker — stays scrape-eligible
+	// organized jobs never match the status predicate even when their
+	// envelope would satisfy the phase filter
+	orgScrape := &models.Job{ID: "jobs-lbp-org", Status: models.JobStatusOrganized, Files: "[]", Results: `{"domain":{},"current_phase":"scrape"}`, Excluded: "{}", FileMatchInfo: "{}", StartedAt: now.Add(time.Minute)}
+	for _, job := range []*models.Job{apply, scrape, legacy, orgScrape} {
+		require.NoError(t, repo.Create(ctx, job))
+	}
+
+	limited, err := repo.ListByStatusAndPhase(ctx, "running", "scrape", 1)
+	require.NoError(t, err)
+	require.Len(t, limited, 1)
+	assert.Equal(t, "jobs-lbp-scrape", limited[0].ID)
+
+	unbounded, err := repo.ListByStatusAndPhase(ctx, "running", "scrape", 0)
+	require.NoError(t, err)
+	require.Len(t, unbounded, 2)
+	assert.Equal(t, "jobs-lbp-scrape", unbounded[0].ID)
+	assert.Equal(t, "jobs-lbp-legacy", unbounded[1].ID)
+
+	noPhase, err := repo.ListByStatusAndPhase(ctx, "running", "", 0)
+	require.NoError(t, err)
+	assert.Len(t, noPhase, 3)
+}
+
+// TestJobRepository_ListByStatusAndPhase_ResilientRows: empty or malformed
+// results blobs historically decoded fine via jobpersist.Decode and must not
+// now abort the phase-filtered query with "malformed JSON" — they keep the
+// missing-marker behavior (codex P2, PR #255). The status predicate is also
+// skipped for phase-only lookups so behavior matches the in-memory fallback.
+func TestJobRepository_ListByStatusAndPhase_ResilientRows(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewJobRepository(db)
+	ctx := context.Background()
+	now := time.Now()
+
+	empty := &models.Job{ID: "jobs-lbp-empty", Status: models.JobStatusRunning, Files: "[]", Results: "", Excluded: "{}", FileMatchInfo: "{}", StartedAt: now}
+	corrupt := &models.Job{ID: "jobs-lbp-corrupt", Status: models.JobStatusRunning, Files: "[]", Results: "not-json{", Excluded: "{}", FileMatchInfo: "{}", StartedAt: now.Add(-time.Minute)}
+	orgScrape := &models.Job{ID: "jobs-lbp-org2", Status: models.JobStatusOrganized, Files: "[]", Results: `{"domain":{},"current_phase":"scrape"}`, Excluded: "{}", FileMatchInfo: "{}", StartedAt: now.Add(time.Minute)}
+	for _, job := range []*models.Job{empty, corrupt, orgScrape} {
+		require.NoError(t, repo.Create(ctx, job))
+	}
+
+	got, err := repo.ListByStatusAndPhase(ctx, "running", "scrape", 0)
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+
+	cross, err := repo.ListByStatusAndPhase(ctx, "", "scrape", 0)
+	require.NoError(t, err)
+	require.Len(t, cross, 3)
+
+	// A non-scrape phase matches only exact markers — phase-less legacy rows
+	// must NOT displace real apply jobs under a row cap (codex P2, PR #255).
+	applyOnly, err := repo.ListByStatusAndPhase(ctx, "", "apply", 0)
+	require.NoError(t, err)
+	assert.Empty(t, applyOnly)
+}
+
+// TestJobRepository_ListByStatusAndPhase_Error hits the SQL error branch by
+// canceling the context before the query runs.
+func TestJobRepository_ListByStatusAndPhase_Error(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewJobRepository(db)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := repo.ListByStatusAndPhase(ctx, "running", "scrape", 0)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "jobs by status and phase")
 }
 
 // TestJobRepository_ListByStatus_Error hits the SQL error branch by
@@ -481,7 +594,7 @@ func TestJobRepository_ListByStatus_Error(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := repo.ListByStatus(ctx, "running")
+	_, err := repo.ListByStatus(ctx, "running", 0)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "jobs by status")
 }

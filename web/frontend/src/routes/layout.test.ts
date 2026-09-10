@@ -190,7 +190,7 @@ it('renders server-authenticated navigation immediately without a blank or loadi
 		render(Layout, { data: { authStatus: authenticatedStatus() } });
 
 		await waitFor(() => expect(apiClient.listOrganizedJobs).toHaveBeenCalledTimes(1));
-		expect(apiClient.listOrganizedJobs).toHaveBeenCalledWith({ status: 'running', limit: 1 });
+		expect(apiClient.listOrganizedJobs).toHaveBeenCalledWith({ status: 'running', phase: 'scrape', limit: 1 });
 		expect(bgJob.restoreJob).toHaveBeenCalledWith('job-run-1');
 	});
 
@@ -242,6 +242,69 @@ it('renders server-authenticated navigation immediately without a blank or loadi
 		render(Layout);
 
 		await waitFor(() => expect(bgJob.restoreJob).toHaveBeenCalledWith('job-legacy-1'));
+	});
+
+	it('restores the scrape row even when a newer apply job heads the running list (codex P2)', async () => {
+		const bgJob = await import('$lib/stores/background-job.svelte');
+		apiClient.getAuthStatus.mockResolvedValue(authenticatedStatus());
+		apiClient.listOrganizedJobs.mockResolvedValue({
+			jobs: [
+				{ id: 'job-apply-new', status: 'running', current_phase: 'apply' },
+				{ id: 'job-scrape-old', status: 'running', current_phase: 'scrape' },
+			],
+		} as unknown as Awaited<ReturnType<typeof apiClient.listOrganizedJobs>>);
+
+		render(Layout);
+
+		// no row cap: any limit would let newest-first SQL discard the scrape row
+		await waitFor(() =>
+			expect(apiClient.listOrganizedJobs).toHaveBeenCalledWith({ status: 'running', phase: 'scrape', limit: 1 }),
+		);
+		await waitFor(() => expect(bgJob.restoreJob).toHaveBeenCalledWith('job-scrape-old'));
+	});
+
+	it('reconciles once when the probe races the pending-to-running flip (issue #256)', async () => {
+		const bgJob = await import('$lib/stores/background-job.svelte');
+		apiClient.getAuthStatus.mockResolvedValue(authenticatedStatus());
+		apiClient.listOrganizedJobs
+			.mockResolvedValueOnce(
+				{ jobs: [] } as unknown as Awaited<ReturnType<typeof apiClient.listOrganizedJobs>>,
+			)
+			.mockResolvedValueOnce({
+				jobs: [{ id: 'job-flip-1', status: 'running', current_phase: 'scrape' }],
+			} as unknown as Awaited<ReturnType<typeof apiClient.listOrganizedJobs>>);
+
+		render(Layout);
+
+		await waitFor(() => expect(apiClient.listOrganizedJobs).toHaveBeenCalledTimes(1));
+		expect(bgJob.restoreJob).not.toHaveBeenCalled();
+
+		await waitFor(() => expect(bgJob.restoreJob).toHaveBeenCalledWith('job-flip-1'), {
+			timeout: 3000,
+		});
+		// The reconcile is one-shot: nothing probes a third time.
+		await new Promise((resolve) => setTimeout(resolve, 1600));
+		expect(apiClient.listOrganizedJobs).toHaveBeenCalledTimes(2);
+	});
+
+	it('re-probes once after a transient restore lookup failure (codex P2)', async () => {
+		const bgJob = await import('$lib/stores/background-job.svelte');
+		apiClient.getAuthStatus.mockResolvedValue(authenticatedStatus());
+		apiClient.listOrganizedJobs
+			.mockRejectedValueOnce(new Error('temporary 500'))
+			.mockResolvedValueOnce({
+				jobs: [{ id: 'job-flip-2', status: 'running', current_phase: 'scrape' }],
+			} as unknown as Awaited<ReturnType<typeof apiClient.listOrganizedJobs>>);
+
+		render(Layout);
+
+		await waitFor(() => expect(apiClient.listOrganizedJobs).toHaveBeenCalledTimes(1));
+		expect(bgJob.restoreJob).not.toHaveBeenCalled();
+
+		// the failed probe schedules the bounded retry, and the retry restores
+		await waitFor(() => expect(bgJob.restoreJob).toHaveBeenCalledWith('job-flip-2'), {
+			timeout: 3000,
+		});
 	});
 
 	it('does not restore a completed job returned despite the running filter', async () => {

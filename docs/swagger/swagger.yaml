@@ -5459,6 +5459,15 @@ paths:
         in: query
         name: status
         type: string
+      - description: Filter by durable phase marker (scrape, apply); empty matches
+          all phases
+        in: query
+        name: phase
+        type: string
+      - description: Maximum number of jobs to return (0 = unbounded)
+        in: query
+        name: limit
+        type: integer
       produces:
       - application/json
       responses:
