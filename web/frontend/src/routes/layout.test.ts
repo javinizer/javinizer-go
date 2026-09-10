@@ -257,7 +257,9 @@ it('renders server-authenticated navigation immediately without a blank or loadi
 		render(Layout);
 
 		// base branch used limit: 1 and would only ever see the apply row
-		expect(apiClient.listOrganizedJobs).toHaveBeenCalledWith({ status: 'running', limit: 10 });
+		await waitFor(() =>
+			expect(apiClient.listOrganizedJobs).toHaveBeenCalledWith({ status: 'running', limit: 10 }),
+		);
 		await waitFor(() => expect(bgJob.restoreJob).toHaveBeenCalledWith('job-scrape-old'));
 	});
 
