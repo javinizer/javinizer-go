@@ -320,18 +320,74 @@ func TestNoClobberProbeSingleFlightAndDirectoryCount(t *testing.T) {
 
 func TestNoClobberProbeWaiterSharesIndeterminate(t *testing.T) {
 	dir := t.TempDir()
+	stubNoClobberDirID(t, func(string) string { return "w" })
+	key := dir + "|w"
 	flight := &noClobberFlight{done: make(chan struct{}), err: syscall.EIO}
 	noClobberCacheMu.Lock()
-	noClobberInflight[dir] = flight
+	noClobberInflight[key] = flight
 	noClobberCacheMu.Unlock()
 	close(flight.done)
 	require.ErrorIs(t, ProbeNoClobberPublish(afero.NewOsFs(), dir), syscall.EIO)
 	noClobberCacheMu.Lock()
-	delete(noClobberInflight, dir)
-	_, cached := noClobberCache[dir]
+	delete(noClobberInflight, key)
+	_, cached := noClobberCache[key]
 	noClobberCacheMu.Unlock()
 	require.False(t, cached)
 	require.NoError(t, ProbeNoClobberPublish(afero.NewOsFs(), dir))
+}
+
+func stubNoClobberDirID(t *testing.T, fn func(string) string) {
+	t.Helper()
+	prev := noClobberProbeDirID
+	noClobberProbeDirID = fn
+	t.Cleanup(func() { noClobberProbeDirID = prev })
+}
+
+// TestNoClobberProbeCacheInvalidatesOnDirectoryIdentityChange: a
+// remount/retarget under the same absolute path changes the identity in the
+// cache key, so a conclusive verdict from the old filesystem is re-probed
+// against the new one instead of being served forever (codex P2, PR #255).
+func TestNoClobberProbeCacheInvalidatesOnDirectoryIdentityChange(t *testing.T) {
+	dir := t.TempDir()
+	mount := "mountA"
+	stubNoClobberDirID(t, func(string) string { return mount })
+	refusal := fmt.Errorf("%w: %w", ErrPublishNoReplaceUnsupported, syscall.EPERM)
+	calls := 0
+	stubNoClobberProbe(t, func(fs afero.Fs, src, dst string) error {
+		calls++
+		if mount == "mountA" {
+			return refusal
+		}
+		return PublishNoReplace(fs, src, dst)
+	})
+	require.ErrorIs(t, ProbeNoClobberPublish(afero.NewOsFs(), dir), refusal)
+	require.ErrorIs(t, ProbeNoClobberPublish(afero.NewOsFs(), dir), refusal)
+	require.Equal(t, 1, calls, "conclusive verdict caches within one filesystem identity")
+
+	mount = "mountB"
+	require.NoError(t, ProbeNoClobberPublish(afero.NewOsFs(), dir), "identity change invalidates the cached refusal")
+	require.Equal(t, 2, calls, "new identity pays for a fresh probe")
+	require.NoError(t, ProbeNoClobberPublish(afero.NewOsFs(), dir))
+	require.Equal(t, 2, calls)
+}
+
+// TestNoClobberProbeDirectoryIdentityDegradation: identity lookup failures
+// degrade to path-only caching instead of blocking, and the real identity
+// helper handles both missing paths and live directories.
+func TestNoClobberProbeDirectoryIdentityDegradation(t *testing.T) {
+	stubNoClobberDirID(t, func(string) string { return "" })
+	dir := t.TempDir()
+	calls := 0
+	stubNoClobberProbe(t, func(fs afero.Fs, src, dst string) error {
+		calls++
+		return PublishNoReplace(fs, src, dst)
+	})
+	require.NoError(t, ProbeNoClobberPublish(afero.NewOsFs(), dir))
+	require.NoError(t, ProbeNoClobberPublish(afero.NewOsFs(), dir))
+	require.Equal(t, 1, calls)
+
+	require.Empty(t, noClobberDirIdentity(filepath.Join(t.TempDir(), "missing")))
+	require.NotEmpty(t, noClobberDirIdentity(t.TempDir()))
 }
 
 func TestNoClobberProbeCopyRefusesBeforeOpeningSource(t *testing.T) {

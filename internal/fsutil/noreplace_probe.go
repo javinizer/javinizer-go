@@ -27,9 +27,10 @@ var (
 		rename:   probeRenameNoReplace,
 		remove:   os.Remove,
 	}
-	noClobberCacheMu  sync.Mutex
-	noClobberCache    = make(map[string]error)
-	noClobberInflight = make(map[string]*noClobberFlight)
+	noClobberProbeDirID = noClobberDirIdentity
+	noClobberCacheMu    sync.Mutex
+	noClobberCache      = make(map[string]error)
+	noClobberInflight   = make(map[string]*noClobberFlight)
 )
 
 type noClobberFlight struct {
@@ -40,9 +41,13 @@ type noClobberFlight struct {
 // ProbeNoClobberPublish refuses an incapable destination before a staging
 // stream starts. Only conclusive outcomes live in the process cache; transient
 // failures are shared with current waiters but the next caller re-probes.
-// Keys are absolute cleaned directory paths, deliberately not mount identities.
-// No caller lock is acquired and no cache mutex is held across filesystem IO.
-// A positive verdict is advisory: every file still uses the real final publish.
+// Keys pair the absolute cleaned directory path with the directory's hosting
+// filesystem identity (dev:ino): an unmount/remount or symlink retarget at
+// the same absolute path produces a different key, so a stale verdict can
+// never reject copies a new filesystem supports or skip its preflight
+// (codex P2, PR #255). No caller lock is acquired and no cache mutex is held
+// across filesystem IO. A positive verdict is advisory: every file still
+// uses the real final publish.
 func ProbeNoClobberPublish(fs afero.Fs, dstDir string) error {
 	if _, ok := fs.(*afero.OsFs); !ok || noClobberProbePlatform == "windows" {
 		return nil
@@ -51,26 +56,35 @@ func ProbeNoClobberPublish(fs afero.Fs, dstDir string) error {
 	if err != nil {
 		return fmt.Errorf("resolve no-clobber probe directory: %w", err)
 	}
+	// The cache key additionally pins the hosting-filesystem identity, while
+	// the probe itself still runs against the real directory path.
+	cacheKey := key
+	if id := noClobberProbeDirID(key); id != "" {
+		// Identity failures (already-vanished directory, non-Stat_t source)
+		// degrade to pre-keying path-only caching rather than blocking the
+		// probe entirely.
+		cacheKey += "|" + id
+	}
 	noClobberCacheMu.Lock()
-	if verdict, ok := noClobberCache[key]; ok {
+	if verdict, ok := noClobberCache[cacheKey]; ok {
 		noClobberCacheMu.Unlock()
 		return verdict
 	}
-	if flight, ok := noClobberInflight[key]; ok {
+	if flight, ok := noClobberInflight[cacheKey]; ok {
 		noClobberCacheMu.Unlock()
 		<-flight.done
 		return flight.err
 	}
 	flight := &noClobberFlight{done: make(chan struct{})}
-	noClobberInflight[key] = flight
+	noClobberInflight[cacheKey] = flight
 	noClobberCacheMu.Unlock()
 
 	conclusive, verdict := runNoClobberProbe(fs, key)
 	noClobberCacheMu.Lock()
 	if conclusive {
-		noClobberCache[key] = verdict
+		noClobberCache[cacheKey] = verdict
 	}
-	delete(noClobberInflight, key)
+	delete(noClobberInflight, cacheKey)
 	flight.err = verdict
 	close(flight.done)
 	noClobberCacheMu.Unlock()
