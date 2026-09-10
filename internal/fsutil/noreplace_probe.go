@@ -53,11 +53,13 @@ type noClobberFlight struct {
 // filesystem identity (dev:ino): an unmount/remount or symlink retarget at
 // the same absolute path produces a different key, so a stale verdict can
 // never reject copies a new filesystem supports or skip its preflight. The
-// identity is sampled before AND after the capability run; a verdict whose
-// two samples disagree describes the wrong filesystem and is re-probed
-// rather than returned or cached (codex P2, PR #255). No caller lock is acquired and no cache mutex is held
-// across filesystem IO. A positive verdict is advisory: every file still
-// uses the real final publish.
+// identity is sampled before AND after the capability run, and again when a
+// cached or peer-shared verdict is returned; a verdict whose two samples
+// disagree describes the wrong filesystem and is re-probed rather than
+// returned or cached. Iteration is attempt-bounded (codex P2, PR #255).
+// No caller lock is acquired and no cache mutex is held across filesystem
+// IO. A positive verdict is advisory: every file still uses the real final
+// publish.
 func ProbeNoClobberPublish(fs afero.Fs, dstDir string) error {
 	if _, ok := fs.(*afero.OsFs); !ok || noClobberProbePlatform == "windows" {
 		return nil
@@ -66,79 +68,85 @@ func ProbeNoClobberPublish(fs afero.Fs, dstDir string) error {
 	if err != nil {
 		return fmt.Errorf("resolve no-clobber probe directory: %w", err)
 	}
-	// The cache key additionally pins the hosting-filesystem identity, while
-	// the probe itself still runs against the real directory path.
-	sampledID := noClobberProbeDirID(key)
-	cacheKey := key
-	if sampledID != "" {
-		// Identity failures (already-vanished directory, non-Stat_t source)
-		// degrade to pre-keying path-only caching rather than blocking the
-		// probe entirely.
-		cacheKey += "|" + sampledID
-	}
-	noClobberCacheMu.Lock()
-	if verdict, ok := noClobberCache[cacheKey]; ok {
-		noClobberCacheMu.Unlock()
-		// A cache hit keys the verdict to the identity sampled above, but the
-		// sampling-to-return window admits a remount/retarget: serving the
-		// result would hand the PREVIOUS filesystem's answer to the new one
-		// (codex P2, PR #255). Drift restarts the lookup against a freshly
-		// sampled identity.
-		if noClobberProbeDirID(key) == sampledID {
-			return verdict
+	// Every verdict — cached, shared through a peer flight, or freshly
+	// probed — is certified against the directory identity sampled when it
+	// was produced. A mount/symlink flip between sampling and consumption
+	// means the answer describes the OTHER filesystem and must restart the
+	// round under the re-sampled identity. Iteration shares the physical
+	// probe budget: sustained flapping (real remounts or alternating failed
+	// identity reads) exits indeterminate instead of recursing into the
+	// goroutine stack (codex P2, PR #255).
+	for round := 0; round < noClobberProbeMaxAttempts; round++ {
+		sampledID := noClobberProbeDirID(key)
+		cacheKey := key
+		if sampledID != "" {
+			// Identity failures (already-vanished directory, non-Stat_t
+			// source) degrade to path-only caching rather than blocking the
+			// probe entirely.
+			cacheKey += "|" + sampledID
 		}
-		return ProbeNoClobberPublish(fs, key)
-	}
-	if flight, ok := noClobberInflight[cacheKey]; ok {
-		noClobberCacheMu.Unlock()
-		<-flight.done
-		// Same return-time revalidation for verdicts completed by a peer: a
-		// mid-wait filesystem change invalidates the key this caller joined
-		// under (codex P2, PR #255).
-		if noClobberProbeDirID(key) == sampledID {
-			return flight.err
-		}
-		return ProbeNoClobberPublish(fs, key)
-	}
-	flight := &noClobberFlight{done: make(chan struct{})}
-	// The flight stays registered under the key sampled BEFORE any drift
-	// retry — re-validation may move cacheKey to another identity mid-round,
-	// and cleanup must still drop the registration waiter keys reference.
-	flightKey := cacheKey
-	noClobberInflight[flightKey] = flight
-	noClobberCacheMu.Unlock()
 
-	// A verdict is only trusted when the identity sampled before the probe
-	// still holds afterwards: a mid-probe mount/symlink swap means the
-	// result describes the OTHER filesystem, so it is neither returned nor
-	// cached. The round re-samples and retries, and perpetual flapping
-	// exhausts the attempt budget as indeterminate (codex P2, PR #255).
-	conclusive, verdict := false, error(nil)
-	for attempt := 0; attempt < noClobberProbeMaxAttempts; attempt++ {
-		c, v := runNoClobberProbe(fs, key)
-		afterID := noClobberProbeDirID(key)
-		if afterID == sampledID {
-			conclusive, verdict = c, v
-			break
+		noClobberCacheMu.Lock()
+		if verdict, ok := noClobberCache[cacheKey]; ok {
+			noClobberCacheMu.Unlock()
+			// Validate that the hit still describes the live filesystem: a
+			// remount/retarget between the sample above and this lookup would
+			// serve the previous mount's answer to the new one.
+			if noClobberProbeDirID(key) == sampledID {
+				return verdict
+			}
+			continue
 		}
-		sampledID = afterID
-		cacheKey = key
-		if afterID != "" {
-			cacheKey += "|" + afterID
+		if flight, ok := noClobberInflight[cacheKey]; ok {
+			noClobberCacheMu.Unlock()
+			<-flight.done
+			// Same return-time revalidation for verdicts completed by a peer:
+			// a mid-wait filesystem change invalidates the key this caller
+			// joined under.
+			if noClobberProbeDirID(key) == sampledID {
+				return flight.err
+			}
+			continue
 		}
-		verdict = fmt.Errorf("no-clobber preflight in %s: %w", key, ErrNoClobberProbeUnstable)
+		flight := &noClobberFlight{done: make(chan struct{})}
+		// The flight stays registered under the key sampled BEFORE any drift
+		// retry — the probe rounds below may move cacheKey to another
+		// identity, and cleanup must still drop the registration key.
+		flightKey := cacheKey
+		noClobberInflight[flightKey] = flight
+		noClobberCacheMu.Unlock()
+
+		// A freshly computed verdict is only trusted when the identity
+		// sampled before the probe still holds afterwards; each mid-probe
+		// drift re-keys and retries within the shared attempt budget.
+		conclusive, verdict := false, error(nil)
+		for attempt := 0; attempt < noClobberProbeMaxAttempts; attempt++ {
+			c, v := runNoClobberProbe(fs, key)
+			afterID := noClobberProbeDirID(key)
+			if afterID == sampledID {
+				conclusive, verdict = c, v
+				break
+			}
+			sampledID = afterID
+			cacheKey = key
+			if afterID != "" {
+				cacheKey += "|" + afterID
+			}
+			verdict = fmt.Errorf("no-clobber preflight in %s: %w", key, ErrNoClobberProbeUnstable)
+		}
+		noClobberCacheMu.Lock()
+		if conclusive {
+			// The stabilized post-drift identity owns the verdict key;
+			// waiters resolve through the original registration key.
+			noClobberCache[cacheKey] = verdict
+		}
+		delete(noClobberInflight, flightKey)
+		flight.err = verdict
+		close(flight.done)
+		noClobberCacheMu.Unlock()
+		return verdict
 	}
-	noClobberCacheMu.Lock()
-	if conclusive {
-		// The stabilized post-drift identity owns the verdict key; waiters
-		// still resolve through the original registration key below.
-		noClobberCache[cacheKey] = verdict
-	}
-	delete(noClobberInflight, flightKey)
-	flight.err = verdict
-	close(flight.done)
-	noClobberCacheMu.Unlock()
-	return verdict
+	return fmt.Errorf("no-clobber preflight in %s: %w", key, ErrNoClobberProbeUnstable)
 }
 
 // noClobberProbeMaxAttempts bounds probe-pair retries after a collision on

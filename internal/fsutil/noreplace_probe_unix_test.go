@@ -545,6 +545,40 @@ func TestNoClobberProbeWaiterRevalidatesOnWake(t *testing.T) {
 	require.NoError(t, ProbeNoClobberPublish(afero.NewOsFs(), dir))
 	require.Equal(t, 1, calls, "B's verdict is cached")
 }
+
+// TestNoClobberProbeSustainedCacheDriftExitsIndeterminate: every
+// sample/revalidation pair disagreeing across the bounded round loop must
+// terminate with ErrNoClobberProbeUnstable — iteratively, without running a
+// physical probe and without recursion (codex P2, PR #255).
+func TestNoClobberProbeSustainedCacheDriftExitsIndeterminate(t *testing.T) {
+	dir := t.TempDir()
+	sample := 0
+	stubNoClobberDirID(t, func(string) string {
+		sample++
+		// A,B / B,C / C,D: each round's sample differs from its revalidation,
+		// so cached verdicts are never usable.
+		return string(rune('A' + sample/2))
+	})
+	refusal := fmt.Errorf("%w: %w", ErrPublishNoReplaceUnsupported, syscall.EPERM)
+	noClobberCacheMu.Lock()
+	for _, id := range []string{"A", "B", "C"} {
+		noClobberCache[dir+"|"+id] = refusal
+	}
+	noClobberCacheMu.Unlock()
+	t.Cleanup(func() {
+		noClobberCacheMu.Lock()
+		for _, id := range []string{"A", "B", "C"} {
+			delete(noClobberCache, dir+"|"+id)
+		}
+		noClobberCacheMu.Unlock()
+	})
+	calls := 0
+	stubNoClobberProbe(t, func(afero.Fs, string, string) error { calls++; return nil })
+
+	err := ProbeNoClobberPublish(afero.NewOsFs(), dir)
+	require.ErrorIs(t, err, ErrNoClobberProbeUnstable)
+	require.Zero(t, calls, "stale-identity hits never reach the physical probe")
+}
 func TestNoClobberProbeCopyRefusesBeforeOpeningSource(t *testing.T) {
 	dir := t.TempDir()
 	src, dst := filepath.Join(dir, "source"), filepath.Join(dir, "out", "movie.mp4")
