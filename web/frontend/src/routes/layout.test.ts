@@ -268,6 +268,26 @@ it('renders server-authenticated navigation immediately without a blank or loadi
 		expect(apiClient.listOrganizedJobs).toHaveBeenCalledTimes(2);
 	});
 
+	it('re-probes once after a transient restore lookup failure (codex P2)', async () => {
+		const bgJob = await import('$lib/stores/background-job.svelte');
+		apiClient.getAuthStatus.mockResolvedValue(authenticatedStatus());
+		apiClient.listOrganizedJobs
+			.mockRejectedValueOnce(new Error('temporary 500'))
+			.mockResolvedValueOnce({
+				jobs: [{ id: 'job-flip-2', status: 'running', current_phase: 'scrape' }],
+			} as unknown as Awaited<ReturnType<typeof apiClient.listOrganizedJobs>>);
+
+		render(Layout);
+
+		await waitFor(() => expect(apiClient.listOrganizedJobs).toHaveBeenCalledTimes(1));
+		expect(bgJob.restoreJob).not.toHaveBeenCalled();
+
+		// the failed probe schedules the bounded retry, and the retry restores
+		await waitFor(() => expect(bgJob.restoreJob).toHaveBeenCalledWith('job-flip-2'), {
+			timeout: 3000,
+		});
+	});
+
 	it('does not restore a completed job returned despite the running filter', async () => {
 		const bgJob = await import('$lib/stores/background-job.svelte');
 		apiClient.getAuthStatus.mockResolvedValue(authenticatedStatus());

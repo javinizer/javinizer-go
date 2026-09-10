@@ -102,6 +102,7 @@
 	// is already tracked (a scrape may have started while the HTTP call was in
 	// flight) and never restore after logout (authAuthenticated flipped false).
 	async function maybeRestoreRunningJob(retry = true) {
+		let restored = false;
 		try {
 			const result = await apiClient.listOrganizedJobs({ status: 'running', limit: 1 });
 			if (!authAuthenticated) return;
@@ -115,21 +116,27 @@
 			);
 			if (running && !getBackgroundJobState().jobId) {
 				restoreJob(running.id);
-			} else if (!running && retry) {
-				// A scrape job is persisted synchronously as 'pending' and flips
-				// to 'running' only when its background goroutine starts; a
-				// reload inside that window finds nothing and would lose the
-				// indicator for the entire scrape (issue #256). Reconcile exactly
-				// once instead of tracking dead-pending rows (a job whose runner
-				// never started must NOT be restored). The retry timer is
-				// component-scoped so unmount cancels it.
-				restoreRetryTimer = window.setTimeout(() => {
-					restoreRetryTimer = undefined;
-					void maybeRestoreRunningJob(false);
-				}, 1500);
+				restored = true;
 			}
 		} catch {
-			// Restore failure is non-critical — never surface it to the user.
+			// Restore failure is non-critical — never surface it to the user —
+			// but a transient lookup failure (temporary 500/network blip) takes
+			// the same one-shot reconcile below, otherwise an SSR-authenticated
+			// reload loses the indicator for the whole session (codex P2,
+			// PR #255 round 3).
+		}
+		if (!restored && retry && authAuthenticated) {
+			// A scrape job is persisted synchronously as 'pending' and flips to
+			// 'running' only when its background goroutine starts; a reload
+			// inside that window finds nothing and would lose the indicator for
+			// the entire scrape (issue #256). Reconcile exactly once instead of
+			// tracking dead-pending rows (a job whose runner never started must
+			// NOT be restored). The retry timer is component-scoped so unmount
+			// cancels it.
+			restoreRetryTimer = window.setTimeout(() => {
+				restoreRetryTimer = undefined;
+				void maybeRestoreRunningJob(false);
+			}, 1500);
 		}
 	}
 
