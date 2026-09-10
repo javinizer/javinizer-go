@@ -1325,6 +1325,11 @@ export interface JobListItem {
 	completed_at?: string;
 	organized_at?: string;
 	reverted_at?: string;
+	// Lifecycle phase marker from the persisted results envelope ("" for
+	// legacy/idle jobs). "scrape" | "apply" while running — lets consumers
+	// tell an in-flight scrape apart from an organize/apply job, which shares
+	// the "running" status (codex P2, PR #253).
+	current_phase?: string;
 }
 
 export interface JobListResponse {

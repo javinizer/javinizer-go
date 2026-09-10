@@ -8,6 +8,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 
 	contracts "github.com/javinizer/javinizer-go/internal/api/contracts"
+	"github.com/javinizer/javinizer-go/internal/worker/jobpersist"
 )
 
 // listJobs godoc
@@ -23,7 +24,11 @@ func listJobs(deps JobDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		statusFilter := c.Query("status")
 
-		results, err := deps.ListJobsWithStats(c.Request.Context())
+		// Route the status filter down to SQL — restore probes hit
+		// /api/v1/jobs?status=running on every authenticated page load, and
+		// filtering in memory made each probe read the full job history
+		// (codex P2, PR #253).
+		results, err := deps.ListJobsWithStatsByStatus(c.Request.Context(), statusFilter)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: "Failed to retrieve jobs"})
 			return
@@ -51,6 +56,16 @@ func listJobs(deps JobDeps) gin.HandlerFunc {
 				Progress:       job.Progress,
 				Destination:    job.Destination,
 				StartedAt:      job.StartedAt.Format(time.RFC3339),
+			}
+
+			// For running jobs, decode the results envelope for the durable phase
+			// marker: status alone cannot distinguish an in-flight scrape from an
+			// apply (organize) phase, which transitions the job back to running
+			// with JobPhaseApply (codex P2, PR #253). Envelope decode failure leaves
+			// the phase empty — callers treat that as non-scrape.
+			if job.Status == models.JobStatusRunning {
+				snapshot, _ := jobpersist.Decode(&job)
+				item.CurrentPhase = snapshot.CurrentPhase
 			}
 
 			if job.CompletedAt != nil {

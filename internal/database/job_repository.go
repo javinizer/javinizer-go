@@ -253,6 +253,22 @@ func (r *JobRepository) List(ctx context.Context) ([]models.Job, error) {
 	return r.ListAll(ctx)
 }
 
+// ListByStatus returns jobs whose status equals the filter, ordered by the
+// base repository's default order. Used by status-filtered API lookups so a
+// "running?" probe doesn't hydrate the full history table.
+func (r *JobRepository) ListByStatus(ctx context.Context, status string) ([]models.Job, error) {
+	var jobs []models.Job
+	err := r.GetDB().WithContext(ctx).
+		Model(&models.Job{}).
+		Where("status = ?", status).
+		Order("started_at DESC, id DESC"). // matches NewJobRepository's default order
+		Find(&jobs).Error
+	if err != nil {
+		return nil, wrapDBErr("list", "jobs by status", err)
+	}
+	return jobs, nil
+}
+
 // Delete removes the job record with the given primary key, delegating to the base repository.
 func (r *JobRepository) Delete(ctx context.Context, id string) error {
 	return r.BaseRepository.Delete(ctx, id)

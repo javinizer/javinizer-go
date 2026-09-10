@@ -90,7 +90,43 @@ func (d JobDeps) GetJobWithStats(ctx context.Context, jobID string) (*JobWithSta
 
 // ListJobsWithStats returns all jobs with their operation and revert counts.
 func (d JobDeps) ListJobsWithStats(ctx context.Context) ([]JobWithStats, error) {
-	jobs, err := d.JobRepo.List(ctx)
+	return d.ListJobsWithStatsByStatus(ctx, "")
+}
+
+// jobStatusLister is the narrow optional seam for status-filtered job
+// listings, used by ListJobsWithStatsByStatus. Legacy test doubles see the
+// in-memory fallback below; the concrete JobRepository implements this and
+// pushes the filter down to SQL.
+type jobStatusLister interface {
+	ListByStatus(ctx context.Context, status string) ([]models.Job, error)
+}
+
+// ListJobsWithStatsByStatus is ListJobsWithStats filtered by job status in SQL
+// when a non-empty filter is provided. Callers asking for status=running (e.g.
+// the web layout's reload-restore probe that fires on every authenticated page
+// load) can then skip hydrating the full job history (codex P2, PR #253).
+// An empty status preserves the prior unfiltered behavior.
+func (d JobDeps) ListJobsWithStatsByStatus(ctx context.Context, status string) ([]JobWithStats, error) {
+	var jobs []models.Job
+	var err error
+	if status != "" {
+		if repo, ok := d.JobRepo.(jobStatusLister); ok {
+			jobs, err = repo.ListByStatus(ctx, status)
+		} else {
+			all, listErr := d.JobRepo.List(ctx)
+			if listErr != nil {
+				return nil, listErr
+			}
+			jobs = make([]models.Job, 0, len(all))
+			for _, job := range all {
+				if string(job.Status) == status {
+					jobs = append(jobs, job)
+				}
+			}
+		}
+	} else {
+		jobs, err = d.JobRepo.List(ctx)
+	}
 	if err != nil {
 		return nil, err
 	}
