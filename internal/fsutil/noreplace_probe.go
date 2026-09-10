@@ -59,12 +59,13 @@ func ProbeNoClobberPublish(fs afero.Fs, dstDir string) error {
 	}
 	// The cache key additionally pins the hosting-filesystem identity, while
 	// the probe itself still runs against the real directory path.
+	sampledID := noClobberProbeDirID(key)
 	cacheKey := key
-	if id := noClobberProbeDirID(key); id != "" {
+	if sampledID != "" {
 		// Identity failures (already-vanished directory, non-Stat_t source)
 		// degrade to pre-keying path-only caching rather than blocking the
 		// probe entirely.
-		cacheKey += "|" + id
+		cacheKey += "|" + sampledID
 	}
 	noClobberCacheMu.Lock()
 	if verdict, ok := noClobberCache[cacheKey]; ok {
@@ -81,6 +82,13 @@ func ProbeNoClobberPublish(fs afero.Fs, dstDir string) error {
 	noClobberCacheMu.Unlock()
 
 	conclusive, verdict := runNoClobberProbe(fs, key)
+	if conclusive && noClobberProbeDirID(key) != sampledID {
+		// The hosting filesystem changed mid-probe (mount/symlink swap): this
+		// verdict describes the OTHER filesystem, so caching it under the
+		// sampled identity would poison A-after-B-after-A sequences
+		// (codex P2, PR #255). Report it, but let the next caller re-probe.
+		conclusive = false
+	}
 	noClobberCacheMu.Lock()
 	if conclusive {
 		noClobberCache[cacheKey] = verdict

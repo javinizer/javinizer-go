@@ -295,6 +295,13 @@ func TestListJobsWithStatsByStatusAndPhase_FallbackPath(t *testing.T) {
 	limited, err := svc.ListJobsWithStatsByStatusAndPhase(context.Background(), "running", "scrape", 1)
 	require.NoError(t, err)
 	assert.Len(t, limited, 1)
+
+	// Exact-match rule for non-scrape phases: run-apply-1 alone qualifies;
+	// the two legacy/scrape fixture rows are excluded.
+	applyOnly, err := svc.ListJobsWithStatsByStatusAndPhase(context.Background(), "running", "apply", 0)
+	require.NoError(t, err)
+	require.Len(t, applyOnly, 1)
+	assert.Equal(t, "run-apply-1", applyOnly[0].Job.ID)
 }
 
 // TestListJobsWithStatsByStatusAndPhase_SQLFilterErr: a failing phase seam

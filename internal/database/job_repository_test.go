@@ -553,6 +553,12 @@ func TestJobRepository_ListByStatusAndPhase_ResilientRows(t *testing.T) {
 	cross, err := repo.ListByStatusAndPhase(ctx, "", "scrape", 0)
 	require.NoError(t, err)
 	require.Len(t, cross, 3)
+
+	// A non-scrape phase matches only exact markers — phase-less legacy rows
+	// must NOT displace real apply jobs under a row cap (codex P2, PR #255).
+	applyOnly, err := repo.ListByStatusAndPhase(ctx, "", "apply", 0)
+	require.NoError(t, err)
+	assert.Empty(t, applyOnly)
 }
 
 // TestJobRepository_ListByStatusAndPhase_Error hits the SQL error branch by

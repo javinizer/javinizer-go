@@ -414,6 +414,33 @@ func TestNoClobberDirIdentityDegradedInputs(t *testing.T) {
 	require.Empty(t, noClobberDirIdentity(t.TempDir()))
 }
 
+// TestNoClobberProbeIdentityDriftForbidsCaching: an identity sample taken
+// before the probe that differs after proves the verdict belongs to another
+// filesystem — it must never be cached under the sampled key, and the next
+// call re-probes (codex P2, PR #255).
+func TestNoClobberProbeIdentityDriftForbidsCaching(t *testing.T) {
+	dir := t.TempDir()
+	ids := []string{"A", "B", "B", "B"}
+	idx := 0
+	stubNoClobberDirID(t, func(string) string {
+		v := ids[idx]
+		if idx < len(ids)-1 {
+			idx++
+		}
+		return v
+	})
+	calls := 0
+	stubNoClobberProbe(t, func(fs afero.Fs, src, dst string) error {
+		calls++
+		return PublishNoReplace(fs, src, dst)
+	})
+	require.NoError(t, ProbeNoClobberPublish(afero.NewOsFs(), dir))
+	require.NoError(t, ProbeNoClobberPublish(afero.NewOsFs(), dir))
+	require.Equal(t, 2, calls, "drifted verdict skipped the cache; steady identity re-probed and cached")
+	require.NoError(t, ProbeNoClobberPublish(afero.NewOsFs(), dir))
+	require.Equal(t, 2, calls)
+}
+
 func TestNoClobberProbeCopyRefusesBeforeOpeningSource(t *testing.T) {
 	dir := t.TempDir()
 	src, dst := filepath.Join(dir, "source"), filepath.Join(dir, "out", "movie.mp4")

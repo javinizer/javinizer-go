@@ -183,7 +183,9 @@ func (d JobDeps) ListJobsWithStatsByStatusAndPhase(ctx context.Context, status, 
 	for _, stat := range stats {
 		job := stat.Job
 		snapshot, _ := jobpersist.Decode(&job)
-		if snapshot.CurrentPhase == "" || snapshot.CurrentPhase == phase {
+		// Mirror the SQL predicate: a missing marker is only scrape-eligible
+		// legacy evidence; other phases must match exactly (codex P2, PR #255).
+		if snapshot.CurrentPhase == phase || (phase == "scrape" && snapshot.CurrentPhase == "") {
 			matched = append(matched, stat)
 		}
 	}

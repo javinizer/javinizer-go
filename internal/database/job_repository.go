@@ -292,10 +292,16 @@ func (r *JobRepository) ListByStatusAndPhase(ctx context.Context, status, phase 
 	}
 	if phase != "" {
 		// json_extract raises "malformed JSON" on empty/corrupt results that
-		// jobpersist.Decode historically tolerated, so guard with json_valid:
-		// unreadable rows keep the missing-marker behavior and stay
-		// scrape-eligible (codex P2, PR #255).
-		query = query.Where("COALESCE(CASE WHEN json_valid(results) THEN json_extract(results, '$.current_phase') END, '') IN ('', ?)", phase)
+		// jobpersist.Decode historically tolerated, so guard with json_valid
+		// (codex P2, PR #255). Missing markers count ONLY for the legacy
+		// scrape restore path — an exact match for any other phase, otherwise
+		// phase-less rows would displace real apply jobs under limit=1
+		// (codex P2, PR #255).
+		if phase == "scrape" {
+			query = query.Where("COALESCE(CASE WHEN json_valid(results) THEN json_extract(results, '$.current_phase') END, '') IN ('', ?)", phase)
+		} else {
+			query = query.Where("COALESCE(CASE WHEN json_valid(results) THEN json_extract(results, '$.current_phase') END, '') = ?", phase)
+		}
 	}
 	query = query.Order("started_at DESC, id DESC") // matches ListByStatus's default order
 	if limit > 0 {
