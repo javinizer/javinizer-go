@@ -441,6 +441,33 @@ func TestNoClobberProbeIdentityDriftForbidsCaching(t *testing.T) {
 	require.Equal(t, 2, calls)
 }
 
+// TestNoClobberProbePerpetualIdentityFlapReturnsIndeterminate: identities
+// that disagree on every sampling window must not surface any physical
+// probe verdict to CopyFileNoReplace — each drifted result describes the
+// other filesystem, so after the retry budget the caller gets an
+// indeterminate unstable-identity error and nothing is cached
+// (codex P2, PR #255). The flap alternates between a real identity and the
+// empty degradation marker, covering both cache-key arms mid-round.
+func TestNoClobberProbePerpetualIdentityFlapReturnsIndeterminate(t *testing.T) {
+	dir := t.TempDir()
+	idx := 0
+	stubNoClobberDirID(t, func(string) string {
+		idx++
+		if idx%2 == 0 {
+			return "A"
+		}
+		return ""
+	})
+	calls := 0
+	stubNoClobberProbe(t, func(fs afero.Fs, src, dst string) error {
+		calls++
+		return PublishNoReplace(fs, src, dst)
+	})
+	require.ErrorIs(t, ProbeNoClobberPublish(afero.NewOsFs(), dir), ErrNoClobberProbeUnstable)
+	require.Equal(t, noClobberProbeMaxAttempts, calls, "every round is fully re-probed while identities flap")
+	require.ErrorIs(t, ProbeNoClobberPublish(afero.NewOsFs(), dir), ErrNoClobberProbeUnstable)
+	require.Equal(t, 2*noClobberProbeMaxAttempts, calls, "unstable rounds are never cached")
+}
 func TestNoClobberProbeCopyRefusesBeforeOpeningSource(t *testing.T) {
 	dir := t.TempDir()
 	src, dst := filepath.Join(dir, "source"), filepath.Join(dir, "out", "movie.mp4")
