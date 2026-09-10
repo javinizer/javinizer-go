@@ -11,7 +11,7 @@
 	import { apiClient } from '$lib/api/client';
 	import { BaseClient } from '$lib/api/clients/common';
 	import { websocketStore } from '$lib/stores/websocket';
-	import { getBackgroundJobState, reopenModal, dismiss, closeModal } from '$lib/stores/background-job.svelte';
+	import { getBackgroundJobState, reopenModal, dismiss, closeModal, restoreJob } from '$lib/stores/background-job.svelte';
 	import { getQueryClient } from '$lib/query/client';
 	import { getThemeStore } from '$lib/stores/theme.svelte';
 	import SetupWizard from '$lib/components/setup/SetupWizard.svelte';
@@ -79,6 +79,9 @@
 			if (!loginUsername && authUsername) {
 				loginUsername = authUsername;
 			}
+			if (status.authenticated && !getBackgroundJobState().jobId) {
+				void maybeRestoreRunningJob();
+			}
 		} catch (error) {
 			authUnavailable = true;
 			authAuthenticated = false;
@@ -89,6 +92,31 @@
 			showAuthLoading = false;
 			if (authLoadingTimer !== undefined) window.clearTimeout(authLoadingTimer);
 			syncWebSocketAuthState();
+		}
+	}
+
+	// maybeRestoreRunningJob re-tracks an in-flight job after a full page load
+	// (in-memory background-job state is lost) so the bottom-right indicator
+	// reappears without reopening the modal. Guards: skip on refresh when a job
+	// is already tracked (a scrape may have started while the HTTP call was in
+	// flight) and never restore after logout (authAuthenticated flipped false).
+	async function maybeRestoreRunningJob() {
+		try {
+			const result = await apiClient.listOrganizedJobs({ status: 'running', limit: 1 });
+			if (!authAuthenticated) return;
+			// Restore only scrape-phase jobs: an apply (organize) job also sits in
+			// 'running' but isn't the scrape progress the indicator/modal renders
+			// (codex P2, PR #253). current_phase is absent for legacy/idle rows —
+			// when the field is missing entirely the restore stays scrape-eligible
+			// so older backends keep the pre-fix behavior.
+			const running = result?.jobs?.find(
+				(j) => j.status === 'running' && (j.current_phase === undefined || j.current_phase === '' || j.current_phase === 'scrape'),
+			);
+			if (running && !getBackgroundJobState().jobId) {
+				restoreJob(running.id);
+			}
+		} catch {
+			// Restore failure is non-critical — never surface it to the user.
 		}
 	}
 
@@ -138,8 +166,16 @@
 		// login/setup screens are localized. Reconciliation with the configured
 		// ui.language happens after the config loads (see configQuery effect).
 		void bootstrapLocale();
-		if (initialAuthStatus) syncWebSocketAuthState();
-		else void refreshAuthStatus();
+		if (initialAuthStatus) {
+			syncWebSocketAuthState();
+			// SSR/injected auth state skips refreshAuthStatus, so the restore
+			// hook inside it would never fire — trigger it here as well.
+			if (initialAuthStatus.authenticated && !getBackgroundJobState().jobId) {
+				void maybeRestoreRunningJob();
+			}
+		} else {
+			void refreshAuthStatus();
+		}
 	});
 
 	// Reconcile the interface locale with the configured ui.language once the

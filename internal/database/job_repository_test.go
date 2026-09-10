@@ -445,3 +445,43 @@ func TestJobRepository_DeleteOrganizedOlderThan_BatchesLargeRetentionSet(t *test
 func ptrTime(t time.Time) *time.Time {
 	return &t
 }
+
+// TestJobRepository_ListByStatus hits the filtered SQL path so the web layout's
+// restore probe doesn't hydrate full job history (codex P2, PR #253).
+func TestJobRepository_ListByStatus(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewJobRepository(db)
+
+	running := &models.Job{ID: "jobs-lbs-run", Status: models.JobStatusRunning, Files: "[]", Results: "{}", Excluded: "{}", FileMatchInfo: "{}", StartedAt: time.Now()}
+	organized := &models.Job{ID: "jobs-lbs-org", Status: models.JobStatusOrganized, Files: "[]", Results: "{}", Excluded: "{}", FileMatchInfo: "{}"}
+	require.NoError(t, repo.Create(context.Background(), running))
+	require.NoError(t, repo.Create(context.Background(), organized))
+
+	runningJobs, err := repo.ListByStatus(context.Background(), "running")
+	require.NoError(t, err)
+	require.Len(t, runningJobs, 1)
+	assert.Equal(t, "jobs-lbs-run", runningJobs[0].ID)
+
+	organizedJobs, err := repo.ListByStatus(context.Background(), "organized")
+	require.NoError(t, err)
+	require.Len(t, organizedJobs, 1)
+	assert.Equal(t, "jobs-lbs-org", organizedJobs[0].ID)
+
+	empty, err := repo.ListByStatus(context.Background(), "cancelled")
+	require.NoError(t, err)
+	assert.Empty(t, empty)
+}
+
+// TestJobRepository_ListByStatus_Error hits the SQL error branch by
+// canceling the context before the query runs.
+func TestJobRepository_ListByStatus_Error(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewJobRepository(db)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := repo.ListByStatus(ctx, "running")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "jobs by status")
+}
