@@ -35,6 +35,7 @@
 	let authLoading = $state(!initialAuthStatus);
 	let showAuthLoading = $state(false);
 	let authLoadingTimer: number | undefined;
+	let restoreRetryTimer: number | undefined;
 	let authSubmitting = $state(false);
 	let authUnavailable = $state(false);
 	let authInitialized = $state(initialAuthStatus?.initialized ?? false);
@@ -100,7 +101,7 @@
 	// reappears without reopening the modal. Guards: skip on refresh when a job
 	// is already tracked (a scrape may have started while the HTTP call was in
 	// flight) and never restore after logout (authAuthenticated flipped false).
-	async function maybeRestoreRunningJob() {
+	async function maybeRestoreRunningJob(retry = true) {
 		try {
 			const result = await apiClient.listOrganizedJobs({ status: 'running', limit: 1 });
 			if (!authAuthenticated) return;
@@ -114,6 +115,18 @@
 			);
 			if (running && !getBackgroundJobState().jobId) {
 				restoreJob(running.id);
+			} else if (!running && retry) {
+				// A scrape job is persisted synchronously as 'pending' and flips
+				// to 'running' only when its background goroutine starts; a
+				// reload inside that window finds nothing and would lose the
+				// indicator for the entire scrape (issue #256). Reconcile exactly
+				// once instead of tracking dead-pending rows (a job whose runner
+				// never started must NOT be restored). The retry timer is
+				// component-scoped so unmount cancels it.
+				restoreRetryTimer = window.setTimeout(() => {
+					restoreRetryTimer = undefined;
+					void maybeRestoreRunningJob(false);
+				}, 1500);
 			}
 		} catch {
 			// Restore failure is non-critical — never surface it to the user.
@@ -185,6 +198,7 @@
 
 	onDestroy(() => {
 		if (authLoadingTimer !== undefined) window.clearTimeout(authLoadingTimer);
+		if (restoreRetryTimer !== undefined) window.clearTimeout(restoreRetryTimer);
 		getThemeStore().destroyTheme();
 		websocketStore.disconnect();
 	});

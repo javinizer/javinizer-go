@@ -244,6 +244,30 @@ it('renders server-authenticated navigation immediately without a blank or loadi
 		await waitFor(() => expect(bgJob.restoreJob).toHaveBeenCalledWith('job-legacy-1'));
 	});
 
+	it('reconciles once when the probe races the pending-to-running flip (issue #256)', async () => {
+		const bgJob = await import('$lib/stores/background-job.svelte');
+		apiClient.getAuthStatus.mockResolvedValue(authenticatedStatus());
+		apiClient.listOrganizedJobs
+			.mockResolvedValueOnce(
+				{ jobs: [] } as unknown as Awaited<ReturnType<typeof apiClient.listOrganizedJobs>>,
+			)
+			.mockResolvedValueOnce({
+				jobs: [{ id: 'job-flip-1', status: 'running', current_phase: 'scrape' }],
+			} as unknown as Awaited<ReturnType<typeof apiClient.listOrganizedJobs>>);
+
+		render(Layout);
+
+		await waitFor(() => expect(apiClient.listOrganizedJobs).toHaveBeenCalledTimes(1));
+		expect(bgJob.restoreJob).not.toHaveBeenCalled();
+
+		await waitFor(() => expect(bgJob.restoreJob).toHaveBeenCalledWith('job-flip-1'), {
+			timeout: 3000,
+		});
+		// The reconcile is one-shot: nothing probes a third time.
+		await new Promise((resolve) => setTimeout(resolve, 1600));
+		expect(apiClient.listOrganizedJobs).toHaveBeenCalledTimes(2);
+	});
+
 	it('does not restore a completed job returned despite the running filter', async () => {
 		const bgJob = await import('$lib/stores/background-job.svelte');
 		apiClient.getAuthStatus.mockResolvedValue(authenticatedStatus());
