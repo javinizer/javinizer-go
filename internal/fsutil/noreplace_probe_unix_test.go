@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
@@ -388,6 +389,29 @@ func TestNoClobberProbeDirectoryIdentityDegradation(t *testing.T) {
 
 	require.Empty(t, noClobberDirIdentity(filepath.Join(t.TempDir(), "missing")))
 	require.NotEmpty(t, noClobberDirIdentity(t.TempDir()))
+}
+
+type probeNonStatTInfo struct{}
+
+func (probeNonStatTInfo) Name() string       { return "fake" }
+func (probeNonStatTInfo) Size() int64        { return 0 }
+func (probeNonStatTInfo) Mode() os.FileMode  { return os.ModeDir }
+func (probeNonStatTInfo) ModTime() time.Time { return time.Now() }
+func (probeNonStatTInfo) IsDir() bool        { return true }
+func (probeNonStatTInfo) Sys() any           { return struct{}{} }
+
+// TestNoClobberDirIdentityDegradedInputs: identity lookup fails closed when
+// the stat errors or the platform reports a non-Stat_t identity source,
+// degrading callers to path-only cache keys instead of blocking probes.
+func TestNoClobberDirIdentityDegradedInputs(t *testing.T) {
+	prev := noClobberProbeStat
+	t.Cleanup(func() { noClobberProbeStat = prev })
+
+	noClobberProbeStat = func(string) (os.FileInfo, error) { return nil, syscall.EIO }
+	require.Empty(t, noClobberDirIdentity(t.TempDir()))
+
+	noClobberProbeStat = func(string) (os.FileInfo, error) { return probeNonStatTInfo{}, nil }
+	require.Empty(t, noClobberDirIdentity(t.TempDir()))
 }
 
 func TestNoClobberProbeCopyRefusesBeforeOpeningSource(t *testing.T) {

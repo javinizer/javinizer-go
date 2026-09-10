@@ -4,7 +4,6 @@ package fsutil
 
 import (
 	"fmt"
-	"os"
 	"syscall"
 )
 
@@ -15,7 +14,7 @@ import (
 // PR #255). Empty string signals "identity unknown" and the caller degrades
 // to path-only caching.
 func noClobberDirIdentity(path string) string {
-	info, err := os.Stat(path)
+	info, err := noClobberProbeStat(path)
 	if err != nil {
 		return ""
 	}

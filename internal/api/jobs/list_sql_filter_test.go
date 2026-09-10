@@ -310,6 +310,22 @@ func TestListJobsWithStatsByStatusAndPhase_SQLFilterErr(t *testing.T) {
 	require.Contains(t, err.Error(), "phase sql boom")
 }
 
+// TestListJobsWithStatsByStatusAndPhase_FallbackListErr: with no phase seam
+// on the repo, the fallback's unbounded status listing error propagates.
+func TestListJobsWithStatsByStatusAndPhase_FallbackListErr(t *testing.T) {
+	deps, db := setupJobsTestDeps(t)
+	defer func() { _ = db.Close() }()
+
+	mockRepo := mocks.NewMockJobRepositoryInterface(t)
+	mockRepo.EXPECT().List(mockpkg.Anything).Return(nil, errors.New("legacy list fail"))
+
+	svc := newTestJobDeps(deps)
+	svc.JobRepo = mockRepo
+	_, err := svc.ListJobsWithStatsByStatusAndPhase(context.Background(), "running", "scrape", 1)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "legacy list fail")
+}
+
 // TestListJobs_HandlerPhaseSQLFilterErr500: handler surfaces a failing phase
 // seam as 500 when the phase param is present.
 func TestListJobs_HandlerPhaseSQLFilterErr500(t *testing.T) {

@@ -28,6 +28,7 @@ var (
 		remove:   os.Remove,
 	}
 	noClobberProbeDirID = noClobberDirIdentity
+	noClobberProbeStat  = os.Stat
 	noClobberCacheMu    sync.Mutex
 	noClobberCache      = make(map[string]error)
 	noClobberInflight   = make(map[string]*noClobberFlight)
