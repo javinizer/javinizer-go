@@ -18,6 +18,7 @@ import (
 // @Tags jobs
 // @Produce json
 // @Param status query string false "Filter by job status (organized, reverted, completed, etc.)"
+// @Param phase query string false "Filter by durable phase marker (scrape, apply); empty matches all phases"
 // @Param limit query int false "Maximum number of jobs to return (0 = unbounded)"
 // @Success 200 {object} contracts.JobListResponse
 // @Failure 500 {object} contracts.ErrorResponse
@@ -25,6 +26,7 @@ import (
 func listJobs(deps JobDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		statusFilter := c.Query("status")
+		phaseFilter := c.Query("phase")
 		limit := 0
 		if raw := c.Query("limit"); raw != "" {
 			if parsed, parseErr := strconv.Atoi(raw); parseErr == nil && parsed > 0 {
@@ -32,11 +34,13 @@ func listJobs(deps JobDeps) gin.HandlerFunc {
 			}
 		}
 
-		// Route the status filter down to SQL — restore probes hit
-		// /api/v1/jobs?status=running on every authenticated page load, and
-		// filtering in memory made each probe read the full job history
-		// (codex P2, PR #253).
-		results, err := deps.ListJobsWithStatsByStatus(c.Request.Context(), statusFilter, limit)
+		// Route both filters down to SQL — restore probes hit
+		// /api/v1/jobs?status=running&phase=scrape&limit=1 on every
+		// authenticated page load; filtering in memory made each probe read
+		// the full job history (codex P2, PR #253), and a row cap applied
+		// before the phase predicate could hide older scrape jobs behind
+		// newer apply-phase rows (codex P2, PR #255).
+		results, err := deps.ListJobsWithStatsByStatusAndPhase(c.Request.Context(), statusFilter, phaseFilter, limit)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: "Failed to retrieve jobs"})
 			return

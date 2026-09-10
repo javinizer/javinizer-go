@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	mockpkg "github.com/stretchr/testify/mock"
@@ -214,4 +215,115 @@ func TestListJobsWithStatsByStatus_FallbackLimit(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, limited, 1)
 	assert.Equal(t, models.JobStatusRunning, limited[0].Job.Status)
+}
+
+// seedPhaseApplyJob adds a running apply-phase job whose StartedAt is NEWER
+// than the scrape fixture so an unfiltered LIMIT 1 would return it — proving
+// the phase predicate lives in SQL, ahead of the row cap (codex P2, PR #255).
+func seedPhaseApplyJob(t *testing.T, deps *core.APIDeps) {
+	t.Helper()
+	apply := &models.Job{ID: "run-apply-1", Status: models.JobStatusRunning, Progress: 0.9, Files: "[]", Excluded: "{}", Results: `{"domain":{},"current_phase":"apply"}`, FileMatchInfo: "{}", StartedAt: time.Now().Add(time.Hour)}
+	require.NoError(t, deps.Repos.JobRepo.Create(context.Background(), apply))
+}
+
+// phaseErrRepo exposes the phase seam but errors, exercising the SQL-filter
+// error branch of ListJobsWithStatsByStatusAndPhase.
+type phaseErrRepo struct{ legacyRepo }
+
+func (phaseErrRepo) ListByStatusAndPhase(context.Context, string, string, int) ([]models.Job, error) {
+	return nil, errors.New("phase sql boom")
+}
+
+// TestListJobs_SQLFilteredPhasePath: status+phase+limit all reach SQL — the
+// apply-phase job is newer than the scrape job yet LIMIT 1 still returns the
+// scrape row.
+func TestListJobs_SQLFilteredPhasePath(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	deps, db := setupJobsTestDeps(t)
+	defer func() { _ = db.Close() }()
+	seedStatusMixedJobs(t, deps)
+	seedPhaseApplyJob(t, deps)
+
+	router := gin.New()
+	router.GET("/api/v1/jobs", listJobs(newTestJobDeps(deps)))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/jobs?status=running&phase=scrape&limit=1", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp contracts.JobListResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Len(t, resp.Jobs, 1)
+	// run-apply-1 is the NEWEST running job yet must lose to any scrape-
+	// eligible row; both fixtures carry zero StartedAt, so the id-DESC
+	// tie-break makes run-legacy-1 the deterministic winner.
+	assert.Equal(t, "run-legacy-1", resp.Jobs[0].ID)
+	assert.NotEqual(t, "run-apply-1", resp.Jobs[0].ID)
+
+	unbounded := httptest.NewRequest(http.MethodGet, "/api/v1/jobs?status=running&phase=scrape", nil)
+	unboundedW := httptest.NewRecorder()
+	router.ServeHTTP(unboundedW, unbounded)
+	require.Equal(t, http.StatusOK, unboundedW.Code)
+	var ub contracts.JobListResponse
+	require.NoError(t, json.Unmarshal(unboundedW.Body.Bytes(), &ub))
+	require.Len(t, ub.Jobs, 2)
+	for _, item := range ub.Jobs {
+		assert.NotEqual(t, "run-apply-1", item.ID)
+	}
+}
+
+// TestListJobsWithStatsByStatusAndPhase_FallbackPath: repos without the
+// phase seam decode the envelope in memory over the unbounded status-filtered
+// set, then cap — apply-phase rows are excluded without hiding scrape rows.
+func TestListJobsWithStatsByStatusAndPhase_FallbackPath(t *testing.T) {
+	deps, db := setupJobsTestDeps(t)
+	defer func() { _ = db.Close() }()
+	seedStatusMixedJobs(t, deps)
+	seedPhaseApplyJob(t, deps)
+
+	svc := newTestJobDeps(deps)
+	svc.JobRepo = legacyRepo{svc.JobRepo}
+
+	unbounded, err := svc.ListJobsWithStatsByStatusAndPhase(context.Background(), "running", "scrape", 0)
+	require.NoError(t, err)
+	require.Len(t, unbounded, 2)
+	for _, stat := range unbounded {
+		assert.NotEqual(t, "run-apply-1", stat.Job.ID)
+	}
+
+	limited, err := svc.ListJobsWithStatsByStatusAndPhase(context.Background(), "running", "scrape", 1)
+	require.NoError(t, err)
+	assert.Len(t, limited, 1)
+}
+
+// TestListJobsWithStatsByStatusAndPhase_SQLFilterErr: a failing phase seam
+// propagates its error instead of falling back silently.
+func TestListJobsWithStatsByStatusAndPhase_SQLFilterErr(t *testing.T) {
+	deps, db := setupJobsTestDeps(t)
+	defer func() { _ = db.Close() }()
+
+	svc := newTestJobDeps(deps)
+	svc.JobRepo = phaseErrRepo{}
+	_, err := svc.ListJobsWithStatsByStatusAndPhase(context.Background(), "running", "scrape", 1)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "phase sql boom")
+}
+
+// TestListJobs_HandlerPhaseSQLFilterErr500: handler surfaces a failing phase
+// seam as 500 when the phase param is present.
+func TestListJobs_HandlerPhaseSQLFilterErr500(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	deps, db := setupJobsTestDeps(t)
+	defer func() { _ = db.Close() }()
+
+	svc := newTestJobDeps(deps)
+	svc.JobRepo = phaseErrRepo{}
+	router := gin.New()
+	router.GET("/api/v1/jobs", listJobs(svc))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/jobs?status=running&phase=scrape&limit=1", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusInternalServerError, w.Code)
 }

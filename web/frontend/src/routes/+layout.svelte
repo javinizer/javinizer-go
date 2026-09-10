@@ -104,12 +104,14 @@
 	async function maybeRestoreRunningJob(retry = true) {
 		let restored = false;
 		try {
-			// No limit: phase selection happens client-side after the SQL
-			// status filter, so any row cap could hide an older scrape behind
-			// newer apply-phase rows (codex P2, PR #255). Running-job volume is
-			// bounded by worker concurrency in practice, so the unbounded but
-			// status-filtered probe stays cheap.
-			const result = await apiClient.listOrganizedJobs({ status: 'running' });
+			// Phase predicate and row cap both live server-side: the
+			// repository filters running jobs by the durable current_phase
+			// marker in SQL before LIMIT 1 applies, so the probe returns the
+			// newest scrape job without fetching/decoding every running row
+			// even with many concurrent apply-phase jobs (codex P2, PR #255).
+			// The client-side phase check below stays as a legacy-backend
+			// guard — older servers ignore the param and return any running job.
+			const result = await apiClient.listOrganizedJobs({ status: 'running', phase: 'scrape', limit: 1 });
 			if (!authAuthenticated) return;
 			// Restore only scrape-phase jobs: an apply (organize) job also sits in
 			// 'running' but isn't the scrape progress the indicator/modal renders

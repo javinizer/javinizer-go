@@ -492,6 +492,56 @@ func TestJobRepository_ListByStatus_Limit(t *testing.T) {
 	assert.Len(t, unbounded, 2)
 }
 
+// TestJobRepository_ListByStatusAndPhase pushes the phase predicate down to
+// SQL: a newer running apply-phase job must NOT hide an older scrape job when
+// limit=1 is applied (the frontend's reload-restore probe relies on this —
+// codex P2, PR #255).
+func TestJobRepository_ListByStatusAndPhase(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewJobRepository(db)
+	ctx := context.Background()
+	now := time.Now()
+
+	apply := &models.Job{ID: "jobs-lbp-apply", Status: models.JobStatusRunning, Files: "[]", Results: `{"domain":{},"current_phase":"apply"}`, Excluded: "{}", FileMatchInfo: "{}", StartedAt: now} // newest — must be excluded by the SQL phase filter
+	scrape := &models.Job{ID: "jobs-lbp-scrape", Status: models.JobStatusRunning, Files: "[]", Results: `{"domain":{},"current_phase":"scrape"}`, Excluded: "{}", FileMatchInfo: "{}", StartedAt: now.Add(-time.Minute)}
+	legacy := &models.Job{ID: "jobs-lbp-legacy", Status: models.JobStatusRunning, Files: "[]", Results: `{"domain":{}}`, Excluded: "{}", FileMatchInfo: "{}", StartedAt: now.Add(-2 * time.Minute)} // no marker — stays scrape-eligible
+	// organized jobs never match the status predicate even when their
+	// envelope would satisfy the phase filter
+	orgScrape := &models.Job{ID: "jobs-lbp-org", Status: models.JobStatusOrganized, Files: "[]", Results: `{"domain":{},"current_phase":"scrape"}`, Excluded: "{}", FileMatchInfo: "{}", StartedAt: now.Add(time.Minute)}
+	for _, job := range []*models.Job{apply, scrape, legacy, orgScrape} {
+		require.NoError(t, repo.Create(ctx, job))
+	}
+
+	limited, err := repo.ListByStatusAndPhase(ctx, "running", "scrape", 1)
+	require.NoError(t, err)
+	require.Len(t, limited, 1)
+	assert.Equal(t, "jobs-lbp-scrape", limited[0].ID)
+
+	unbounded, err := repo.ListByStatusAndPhase(ctx, "running", "scrape", 0)
+	require.NoError(t, err)
+	require.Len(t, unbounded, 2)
+	assert.Equal(t, "jobs-lbp-scrape", unbounded[0].ID)
+	assert.Equal(t, "jobs-lbp-legacy", unbounded[1].ID)
+
+	noPhase, err := repo.ListByStatusAndPhase(ctx, "running", "", 0)
+	require.NoError(t, err)
+	assert.Len(t, noPhase, 3)
+}
+
+// TestJobRepository_ListByStatusAndPhase_Error hits the SQL error branch by
+// canceling the context before the query runs.
+func TestJobRepository_ListByStatusAndPhase_Error(t *testing.T) {
+	db := newDatabaseTestDB(t)
+	repo := NewJobRepository(db)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := repo.ListByStatusAndPhase(ctx, "running", "scrape", 0)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "jobs by status and phase")
+}
+
 // TestJobRepository_ListByStatus_Error hits the SQL error branch by
 // canceling the context before the query runs.
 func TestJobRepository_ListByStatus_Error(t *testing.T) {

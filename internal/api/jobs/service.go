@@ -8,6 +8,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/history"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/worker"
+	"github.com/javinizer/javinizer-go/internal/worker/jobpersist"
 )
 
 // JobDeps holds the dependencies that job API handlers need.
@@ -140,7 +141,62 @@ func (d JobDeps) ListJobsWithStatsByStatus(ctx context.Context, status string, l
 	if limit > 0 && len(jobs) > limit {
 		jobs = jobs[:limit]
 	}
+	return d.attachJobCounts(ctx, jobs)
+}
 
+// jobStatusPhaseLister is the narrow optional seam for status+phase-filtered
+// job listings, used by ListJobsWithStatsByStatusAndPhase. The concrete
+// JobRepository implements this and pushes both predicates down to SQL;
+// legacy test doubles hit the in-memory envelope-decode fallback below.
+type jobStatusPhaseLister interface {
+	ListByStatusAndPhase(ctx context.Context, status, phase string, limit int) ([]models.Job, error)
+}
+
+// ListJobsWithStatsByStatusAndPhase is ListJobsWithStatsByStatus with the
+// durable phase marker included in the SQL predicate. The restore probe asks
+// for status=running, phase=scrape, limit=1: pushing the phase into the
+// repository means the row cap can no longer hide an older scrape behind
+// newer apply-phase rows, while bounded jobs/aggregate fetches resume
+// (codex P2, PR #255). Rows missing the marker stay eligible (scrape-
+// eligible legacy rule). An empty phase degrades to the status-only variant.
+func (d JobDeps) ListJobsWithStatsByStatusAndPhase(ctx context.Context, status, phase string, limit int) ([]JobWithStats, error) {
+	if phase == "" {
+		return d.ListJobsWithStatsByStatus(ctx, status, limit)
+	}
+	if repo, ok := d.JobRepo.(jobStatusPhaseLister); ok {
+		jobs, err := repo.ListByStatusAndPhase(ctx, status, phase, limit)
+		if err != nil {
+			return nil, err
+		}
+		// No defensive re-cap here: the seam contract bounds the SQL query
+		// itself, matching ListByStatus.
+		return d.attachJobCounts(ctx, jobs)
+	}
+	// Legacy doubles without the seam decode the envelope in memory; the
+	// status-filtered set is fetched unbounded first so a row cap applied
+	// before filtering cannot hide scrape rows behind apply-phase rows.
+	stats, err := d.ListJobsWithStatsByStatus(ctx, status, 0)
+	if err != nil {
+		return nil, err
+	}
+	matched := make([]JobWithStats, 0, len(stats))
+	for _, stat := range stats {
+		job := stat.Job
+		snapshot, _ := jobpersist.Decode(&job)
+		if snapshot.CurrentPhase == "" || snapshot.CurrentPhase == phase {
+			matched = append(matched, stat)
+		}
+	}
+	if limit > 0 && len(matched) > limit {
+		matched = matched[:limit]
+	}
+	return matched, nil
+}
+
+// attachJobCounts batch-fetches operation/revert/noop counts for the given
+// jobs in 3 queries total instead of 2 per job, pairing each job with its
+// counts.
+func (d JobDeps) attachJobCounts(ctx context.Context, jobs []models.Job) ([]JobWithStats, error) {
 	// Batch-fetch operation and revert counts in 2 queries instead of 2N.
 	jobIDs := make([]string, 0, len(jobs))
 	for _, job := range jobs {
@@ -149,6 +205,7 @@ func (d JobDeps) ListJobsWithStatsByStatus(ctx context.Context, status string, l
 
 	var opCounts, revertedCounts, noopCounts map[string]int64
 	if len(jobIDs) > 0 {
+		var err error
 		opCounts, err = d.BatchFileOpRepo.CountByBatchJobIDs(ctx, jobIDs)
 		if err != nil {
 			return nil, err
