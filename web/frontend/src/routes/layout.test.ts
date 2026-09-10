@@ -190,7 +190,7 @@ it('renders server-authenticated navigation immediately without a blank or loadi
 		render(Layout, { data: { authStatus: authenticatedStatus() } });
 
 		await waitFor(() => expect(apiClient.listOrganizedJobs).toHaveBeenCalledTimes(1));
-		expect(apiClient.listOrganizedJobs).toHaveBeenCalledWith({ status: 'running', limit: 1 });
+		expect(apiClient.listOrganizedJobs).toHaveBeenCalledWith({ status: 'running', limit: 10 });
 		expect(bgJob.restoreJob).toHaveBeenCalledWith('job-run-1');
 	});
 
@@ -242,6 +242,23 @@ it('renders server-authenticated navigation immediately without a blank or loadi
 		render(Layout);
 
 		await waitFor(() => expect(bgJob.restoreJob).toHaveBeenCalledWith('job-legacy-1'));
+	});
+
+	it('restores the scrape row even when a newer apply job heads the running list (codex P2)', async () => {
+		const bgJob = await import('$lib/stores/background-job.svelte');
+		apiClient.getAuthStatus.mockResolvedValue(authenticatedStatus());
+		apiClient.listOrganizedJobs.mockResolvedValue({
+			jobs: [
+				{ id: 'job-apply-new', status: 'running', current_phase: 'apply' },
+				{ id: 'job-scrape-old', status: 'running', current_phase: 'scrape' },
+			],
+		} as unknown as Awaited<ReturnType<typeof apiClient.listOrganizedJobs>>);
+
+		render(Layout);
+
+		// base branch used limit: 1 and would only ever see the apply row
+		expect(apiClient.listOrganizedJobs).toHaveBeenCalledWith({ status: 'running', limit: 10 });
+		await waitFor(() => expect(bgJob.restoreJob).toHaveBeenCalledWith('job-scrape-old'));
 	});
 
 	it('reconciles once when the probe races the pending-to-running flip (issue #256)', async () => {
