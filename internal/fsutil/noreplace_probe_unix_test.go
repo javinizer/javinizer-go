@@ -468,6 +468,83 @@ func TestNoClobberProbePerpetualIdentityFlapReturnsIndeterminate(t *testing.T) {
 	require.ErrorIs(t, ProbeNoClobberPublish(afero.NewOsFs(), dir), ErrNoClobberProbeUnstable)
 	require.Equal(t, 2*noClobberProbeMaxAttempts, calls, "unstable rounds are never cached")
 }
+
+// TestNoClobberProbeCachedVerdictRevalidatedAtReturn: a remount between the
+// identity sample and the cache hit must not serve the previous
+// filesystem's verdict — the lookup restarts against the new identity and
+// probes for the live mount (codex P2, PR #255).
+func TestNoClobberProbeCachedVerdictRevalidatedAtReturn(t *testing.T) {
+	dir := t.TempDir()
+	ids := []string{"A", "A", "A", "B", "B", "B", "B"}
+	idx := 0
+	stubNoClobberDirID(t, func(string) string {
+		v := ids[idx]
+		if idx < len(ids)-1 {
+			idx++
+		}
+		return v
+	})
+	refusal := fmt.Errorf("%w: %w", ErrPublishNoReplaceUnsupported, syscall.EPERM)
+	calls := 0
+	stubNoClobberProbe(t, func(fs afero.Fs, src, dst string) error {
+		calls++
+		if calls == 1 {
+			return refusal // the old filesystem's verdict: incapable
+		}
+		return PublishNoReplace(fs, src, dst)
+	})
+	// Round one: A's verdict (refusal) is cached under A.
+	require.ErrorIs(t, ProbeNoClobberPublish(afero.NewOsFs(), dir), refusal)
+	require.Equal(t, 1, calls)
+	// Round two: identity drifted to B by return time — the stale A verdict
+	// must be discarded and the live mount probed (new filesystem: capable).
+	// Without revalidation this call would incorrectly serve A's refusal.
+	require.NoError(t, ProbeNoClobberPublish(afero.NewOsFs(), dir))
+	require.Equal(t, 2, calls)
+	require.NoError(t, ProbeNoClobberPublish(afero.NewOsFs(), dir))
+	require.Equal(t, 2, calls, "B's verdict is cached")
+}
+
+// TestNoClobberProbeWaiterRevalidatesOnWake: a waiter that joined a flight
+// keyed under one identity must not reuse the completed verdict when the
+// filesystem identity changed while it waited — it re-enters the whole
+// lookup against the new identity and probes (codex P2, PR #255).
+// Deterministic via a pre-completed flight and a scripted identity stub.
+func TestNoClobberProbeWaiterRevalidatesOnWake(t *testing.T) {
+	dir := t.TempDir()
+	// Sequence: first sample is A (joining the pre-armed A-flight), every
+	// later sample is B — the wake-time revalidation sees the drift.
+	seq := 0
+	stubNoClobberDirID(t, func(string) string {
+		seq++
+		if seq == 1 {
+			return "A"
+		}
+		return "B"
+	})
+	calls := 0
+	stubNoClobberProbe(t, func(fs afero.Fs, src, dst string) error {
+		calls++
+		return PublishNoReplace(fs, src, dst)
+	})
+	flight := &noClobberFlight{done: make(chan struct{}), err: fmt.Errorf("%w: %w", ErrPublishNoReplaceUnsupported, syscall.EPERM)}
+	noClobberCacheMu.Lock()
+	noClobberInflight[dir+"|A"] = flight
+	noClobberCacheMu.Unlock()
+	t.Cleanup(func() {
+		noClobberCacheMu.Lock()
+		delete(noClobberInflight, dir+"|A")
+		noClobberCacheMu.Unlock()
+	})
+	close(flight.done) // simulate the flight completing while this caller waited
+
+	// Without wake-time revalidation the waiter would return the flight's
+	// refusal. Instead it notices the drift, re-probes under B and succeeds.
+	require.NoError(t, ProbeNoClobberPublish(afero.NewOsFs(), dir))
+	require.Equal(t, 1, calls)
+	require.NoError(t, ProbeNoClobberPublish(afero.NewOsFs(), dir))
+	require.Equal(t, 1, calls, "B's verdict is cached")
+}
 func TestNoClobberProbeCopyRefusesBeforeOpeningSource(t *testing.T) {
 	dir := t.TempDir()
 	src, dst := filepath.Join(dir, "source"), filepath.Join(dir, "out", "movie.mp4")

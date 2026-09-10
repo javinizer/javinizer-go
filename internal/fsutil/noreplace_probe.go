@@ -79,12 +79,26 @@ func ProbeNoClobberPublish(fs afero.Fs, dstDir string) error {
 	noClobberCacheMu.Lock()
 	if verdict, ok := noClobberCache[cacheKey]; ok {
 		noClobberCacheMu.Unlock()
-		return verdict
+		// A cache hit keys the verdict to the identity sampled above, but the
+		// sampling-to-return window admits a remount/retarget: serving the
+		// result would hand the PREVIOUS filesystem's answer to the new one
+		// (codex P2, PR #255). Drift restarts the lookup against a freshly
+		// sampled identity.
+		if noClobberProbeDirID(key) == sampledID {
+			return verdict
+		}
+		return ProbeNoClobberPublish(fs, key)
 	}
 	if flight, ok := noClobberInflight[cacheKey]; ok {
 		noClobberCacheMu.Unlock()
 		<-flight.done
-		return flight.err
+		// Same return-time revalidation for verdicts completed by a peer: a
+		// mid-wait filesystem change invalidates the key this caller joined
+		// under (codex P2, PR #255).
+		if noClobberProbeDirID(key) == sampledID {
+			return flight.err
+		}
+		return ProbeNoClobberPublish(fs, key)
 	}
 	flight := &noClobberFlight{done: make(chan struct{})}
 	// The flight stays registered under the key sampled BEFORE any drift
