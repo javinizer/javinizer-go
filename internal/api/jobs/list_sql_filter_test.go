@@ -198,3 +198,20 @@ func TestListJobs_HandlerHonorsLimit(t *testing.T) {
 	require.NoError(t, json.Unmarshal(bogusW.Body.Bytes(), &bogusResp))
 	assert.Len(t, bogusResp.Jobs, 2)
 }
+
+// TestListJobsWithStatsByStatus_FallbackLimit: legacy repos (no seam) must be
+// bounded after in-memory filtering, so envelope decode and aggregate counts
+// only run for the requested rows (codex P2, PR #255).
+func TestListJobsWithStatsByStatus_FallbackLimit(t *testing.T) {
+	deps, db := setupJobsTestDeps(t)
+	defer func() { _ = db.Close() }()
+	seedStatusMixedJobs(t, deps)
+
+	svc := newTestJobDeps(deps)
+	svc.JobRepo = legacyRepo{svc.JobRepo}
+
+	limited, err := svc.ListJobsWithStatsByStatus(context.Background(), "running", 1)
+	require.NoError(t, err)
+	require.Len(t, limited, 1)
+	assert.Equal(t, models.JobStatusRunning, limited[0].Job.Status)
+}
