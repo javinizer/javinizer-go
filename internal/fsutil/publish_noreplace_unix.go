@@ -3,10 +3,8 @@
 package fsutil
 
 import (
-	"errors"
 	"fmt"
 	"os"
-	"syscall"
 
 	"github.com/spf13/afero"
 )
@@ -111,21 +109,6 @@ var (
 	}
 )
 
-// linkUnsupportedClass reports whether a link(2) failure means the
-// FILESYSTEM cannot express hard links at all (FAT/exFAT-class volumes
-// answer EPERM on Linux, ENOTSUP/EPERM on Darwin), as opposed to a
-// publish-specific refusal. ENOTSUP aliases EOPNOTSUPP on Linux, so both
-// are listed for the Darwin spelling. Only these classes justify the
-// wave-17 unsupported refusal: any other failure (EACCES, EIO, EMLINK,
-// a missing staged source, ...) keeps the pre-existing degrade into the
-// classified rename leg, refusing nothing the old behavior accepted.
-func linkUnsupportedClass(err error) bool {
-	return errors.Is(err, syscall.EPERM) ||
-		errors.Is(err, syscall.ENOSYS) ||
-		errors.Is(err, syscall.EOPNOTSUPP) ||
-		errors.Is(err, syscall.ENOTSUP)
-}
-
 // publishNoReplaceFallback publishes via hard link: link(2) fails EEXIST
 // atomically when dst is occupied, giving POSIX filesystems without a
 // renameat2 wrapper the same no-replace semantics — the destination link and
@@ -169,7 +152,7 @@ func publishNoReplaceFallback(src, dst string) error {
 			return publishCollision(dst)
 		}
 		if linkUnsupportedClass(err) {
-			return fmt.Errorf("no-replace publish %s -> %s: %w: %w", src, dst, ErrPublishNoReplaceUnsupported, err)
+			return fmt.Errorf("no-replace publish %s -> %s: %w; link(2): %w — volume may lack hard-link support (FUSE/shfs-class) or EPERM may reflect protected_hardlinks policy; organize to a native-filesystem path (Unraid: bind-mount /mnt/diskN/...), or local staging plus external sync", src, dst, ErrPublishNoReplaceUnsupported, err)
 		}
 		return fmt.Errorf("no-replace publish %s -> %s: %w: %w", src, dst, ErrPublishNoReplaceLinkFailed, err)
 	}

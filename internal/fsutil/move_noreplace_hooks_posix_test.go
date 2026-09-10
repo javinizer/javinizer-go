@@ -4,6 +4,8 @@ package fsutil
 
 import (
 	"os"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 )
@@ -38,6 +40,9 @@ func swapFileAfterNPublishCalls(t *testing.T, n int, path string, content []byte
 	calls := 0
 	prev := publishNoReplaceLink
 	publishNoReplaceLink = func(s, d string) (err error) {
+		if strings.HasPrefix(filepath.Base(s), ".nrprobe.") {
+			return prev(s, d)
+		}
 		calls++
 		if calls == n {
 			if werr := os.WriteFile(path, content, 0o644); werr != nil {

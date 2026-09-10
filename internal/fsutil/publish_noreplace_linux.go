@@ -32,7 +32,13 @@ func publishNoReplaceOSFS(src, dst string) error {
 	case errors.Is(err, syscall.EEXIST):
 		return publishCollision(dst)
 	case errors.Is(err, syscall.ENOSYS), errors.Is(err, syscall.EINVAL), errors.Is(err, syscall.EOPNOTSUPP):
-		return publishNoReplaceFallback(src, dst)
+		fallbackErr := publishNoReplaceFallback(src, dst)
+		if fallbackErr != nil {
+			// The discarded rename errno is TEXT ONLY. Wrapping EINVAL would
+			// let isCrossDeviceError reroute an unsupported refusal into a copy.
+			return fmt.Errorf("renameat2(RENAME_NOREPLACE): %v; %w", err, fallbackErr)
+		}
+		return nil
 	default:
 		return fmt.Errorf("no-replace renameat2 %s -> %s: %w", src, dst, err)
 	}

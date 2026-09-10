@@ -142,6 +142,10 @@ func CopyFileNoReplace(fs afero.Fs, src, dst string) error {
 		return fmt.Errorf("no-replace copy: create destination directory: %w", err)
 	}
 
+	if err := ProbeNoClobberPublish(fs, filepath.Dir(dst)); err != nil {
+		return err
+	}
+
 	srcFile, err := fs.Open(src)
 	if err != nil {
 		return fmt.Errorf("no-replace copy: open source %s: %w", src, err)
