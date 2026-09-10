@@ -2914,6 +2914,18 @@ const docTemplate = `{
                         "description": "Filter by job status (organized, reverted, completed, etc.)",
                         "name": "status",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by durable phase marker (scrape, apply); empty matches all phases",
+                        "name": "phase",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Maximum number of jobs to return (0 = unbounded)",
+                        "name": "limit",
+                        "in": "query"
                     }
                 ],
                 "responses": {

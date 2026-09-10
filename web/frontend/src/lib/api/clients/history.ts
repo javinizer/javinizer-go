@@ -51,11 +51,13 @@ export class HistoryClient extends BaseClient {
 export class JobsClient extends BaseClient {
 	async listOrganizedJobs(params?: {
 		status?: string;
+		phase?: string;
 		limit?: number;
 		offset?: number;
 	}): Promise<JobListResponse> {
 		const queryParams = new URLSearchParams();
 		if (params?.status) queryParams.set('status', params.status);
+		if (params?.phase) queryParams.set('phase', params.phase);
 		if (params?.limit) queryParams.set('limit', params.limit.toString());
 		if (params?.offset) queryParams.set('offset', params.offset.toString());
 		const query = queryParams.toString() ? `?${queryParams}` : '';

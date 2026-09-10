@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"syscall"
 
 	"github.com/spf13/afero"
 )
@@ -121,6 +122,17 @@ var ErrPublishNoReplaceRollbackUnverified = errors.New("no-replace publish rollb
 // name as OWNED (the pending retry reaps it), exactly like the wave-20
 // completed-despite-error leg.
 var ErrPublishNoReplaceStagedUnverified = errors.New("no-replace publish staged source could not be re-proven after linking")
+
+// linkUnsupportedClass is shared by publication and its preflight. Only
+// capability-class failures justify a conclusive unsupported verdict; access,
+// IO, and other transient failures remain indeterminate. EPERM can mean an
+// incapable filesystem or hard-link policy, as the refusal diagnostic states.
+func linkUnsupportedClass(err error) bool {
+	return errors.Is(err, syscall.EPERM) ||
+		errors.Is(err, syscall.ENOSYS) ||
+		errors.Is(err, syscall.EOPNOTSUPP) ||
+		errors.Is(err, syscall.ENOTSUP)
+}
 
 // publishCollision wraps the destination name in the collision class.
 func publishCollision(dst string) error {
