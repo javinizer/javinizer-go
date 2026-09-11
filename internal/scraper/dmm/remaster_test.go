@@ -122,11 +122,14 @@ func TestBindResolvedCID(t *testing.T) {
 func TestResolveRemasterContentID_SingleCandidate(t *testing.T) {
 	s, repo := newRemasterTestScraper(t)
 	rt := &remasterRoundTripper{serve: func(u string) (int, string) {
-		if strings.Contains(u, "/search/=") {
+		switch {
+		case strings.Contains(u, "/search/="):
 			return 200, `<html><body>` +
 				`<a href="/digital/videoa/-/detail/=/cid=1rct00156h/">remaster</a>` +
 				`<a href="/digital/videoa/-/detail/=/cid=1rct00156/">base original</a>` +
 				`</body></html>`
+		case strings.Contains(u, "cid=1rct00156h"):
+			return 200, `<html><body><table><tr><td>品番：</td><td>RCT-156-HD</td></tr></table></body></html>`
 		}
 		return 404, ""
 	}}
@@ -135,7 +138,7 @@ func TestResolveRemasterContentID_SingleCandidate(t *testing.T) {
 	cid, err := s.ResolveContentIDCtx(context.Background(), "RCT-156H")
 	require.NoError(t, err)
 	assert.Equal(t, "1rct00156h", cid)
-	assert.Equal(t, 0, rt.detailN, "single candidate must skip page verification")
+	assert.Greater(t, rt.detailN, 0, "singleton candidates are display-verified too")
 
 	cached, err := repo.FindBySearchID(context.TODO(), "RCT-156H")
 	require.NoError(t, err)
@@ -145,8 +148,11 @@ func TestResolveRemasterContentID_SingleCandidate(t *testing.T) {
 func TestResolveRemasterContentID_RentalOnlyDiscovery(t *testing.T) {
 	s, _ := newRemasterTestScraper(t)
 	rt := &remasterRoundTripper{serve: func(u string) (int, string) {
-		if strings.Contains(u, "/search/=") {
+		switch {
+		case strings.Contains(u, "/search/="):
 			return 200, `<html><body><a href="/rental/ppr/-/detail/=/cid=1rct00156hr/">rental</a></body></html>`
+		case strings.Contains(u, "cid=1rct00156hr"):
+			return 200, `<html><body><table><tr><td>品番：</td><td>RCT-156-HD</td></tr></table></body></html>`
 		}
 		return 404, ""
 	}}

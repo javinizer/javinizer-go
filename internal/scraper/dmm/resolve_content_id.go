@@ -39,7 +39,7 @@ func (s *scraper) resolveContentIDCtx(ctx context.Context, id string) (string, e
 
 	foldedMarker, series, isContentID := classifyRemasterQuery(id)
 	if isContentID {
-		cid := compactQueryID(id)
+		cid := strings.ToLower(strings.TrimSpace(id))
 		s.cacheContentID(ctx, normalizedID, cid)
 		return cid, nil
 	}

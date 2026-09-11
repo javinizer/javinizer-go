@@ -104,7 +104,10 @@ var remasterMarkerTailRgx = regexp.MustCompile(`(?i)^(.*\d)(hd|ai|h)$`)
 // from the core id, and the folded marker (hd -> h) is re-appended to every
 // candidate after zero-padding and DMM prefixing.
 func ContentIDCandidatesWithMarker(id string) []string {
-	m := remasterMarkerTailRgx.FindStringSubmatch(strings.TrimSpace(id))
+	// Normalize display separators first: advertised spellings (RCT-156-HD,
+	// DV-818-AI, RCT-156 HD) place a separator between number and marker.
+	compacted := strings.NewReplacer("-", "", "_", "", " ", "").Replace(strings.TrimSpace(id))
+	m := remasterMarkerTailRgx.FindStringSubmatch(compacted)
 	if m == nil {
 		return ContentIDCandidates(id)
 	}

@@ -239,22 +239,18 @@ func (s *scraper) resolveRemasterContentID(ctx context.Context, id, normalizedID
 		}
 	}
 
-	switch len(order) {
-	case 0:
+	if len(order) == 0 {
 		return "", models.NewScraperNotFoundError("DMM", "no matching marker content-id found in DMM search results")
-	case 1:
-		resolved := byClean[order[0]].contentID
-		s.cacheContentID(ctx, normalizedID, resolved)
-		return resolved, nil
 	}
 
-	// Ambiguous: verify per candidate via product-page display IDs.
+	// Every search-derived candidate — singleton or ambiguous — is verified
+	// against product-page display IDs: admission is number-free by design, so
+	// only the page's display ID proves the requested release.
 	target := foldMarkerSuffix(compactQueryID(id))
 	var verified []string
 	for _, clean := range order {
 		c := byClean[clean]
-		status := s.verifyCandidateDisplayID(ctx, target, c.urls)
-		if status == displayVerified {
+		if s.verifyCandidateDisplayID(ctx, target, c.urls) == displayVerified {
 			verified = append(verified, clean)
 		}
 	}
@@ -263,7 +259,7 @@ func (s *scraper) resolveRemasterContentID(ctx context.Context, id, normalizedID
 		s.cacheContentID(ctx, normalizedID, resolved)
 		return resolved, nil
 	}
-	return "", models.NewScraperNotFoundError("DMM", fmt.Sprintf("ambiguous remaster resolution for %s (%d verified of %d distinct candidates)", id, len(verified), len(order)))
+	return "", models.NewScraperNotFoundError("DMM", fmt.Sprintf("remaster resolution for %s could not verify a unique candidate (%d verified of %d distinct)", id, len(verified), len(order)))
 }
 
 func (s *scraper) cacheContentID(ctx context.Context, searchID, contentID string) {

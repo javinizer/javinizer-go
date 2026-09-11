@@ -1,6 +1,7 @@
 package r18devdump
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -29,6 +30,15 @@ func TestContentIDCandidatesWithMarker(t *testing.T) {
 	cands = ContentIDCandidatesWithMarker("RCT-156HD")
 	assert.NotEmpty(t, cands)
 	assert.Equal(t, ContentIDCandidatesWithMarker("RCT-156H"), cands)
+
+	// Separator-bearing display spellings split and expand correctly.
+	for _, in := range []string{"RCT-156-HD", "RCT-156 HD", "DV-818-AI"} {
+		cands = ContentIDCandidatesWithMarker(in)
+		assert.NotEmpty(t, cands, in)
+		for _, c := range cands {
+			assert.True(t, strings.HasSuffix(c, "h") || strings.HasSuffix(c, "ai"), "%s -> %s keeps marker", in, c)
+		}
+	}
 
 	// Marker-free input delegates to base behavior.
 	assert.Equal(t, ContentIDCandidates("RCT-156"), ContentIDCandidatesWithMarker("RCT-156"))

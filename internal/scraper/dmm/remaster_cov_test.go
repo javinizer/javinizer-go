@@ -94,6 +94,40 @@ func (st *statusRT) RoundTrip(req *http.Request) (*http.Response, error) {
 	}, nil
 }
 
+// A lone same-series candidate with the wrong number must not be accepted:
+// display verification proves the release before it is cached.
+func TestResolveRemaster_SingletonWrongNumberRejected(t *testing.T) {
+	s, repo := newRemasterTestScraper(t)
+	rt := &remasterRoundTripper{serve: func(u string) (int, string) {
+		switch {
+		case strings.Contains(u, "/search/="):
+			return 200, `<html><body><a href="/mono/dvd/-/detail/=/cid=dv00123ai/">other remaster</a></body></html>`
+		case strings.Contains(u, "cid=dv00123ai"):
+			return 200, `<html><body><table><tr><td>品番：</td><td>DV-123AI</td></tr></table></body></html>`
+		}
+		return 404, ""
+	}}
+	s.client.SetTransport(rt)
+	_, err := s.ResolveContentIDCtx(context.Background(), "DV-818AI")
+	require.Error(t, err)
+	_, cerr := repo.FindBySearchID(context.TODO(), "DV-818AI")
+	require.Error(t, cerr, "rejected resolution must not be cached")
+}
+
+// PPV-style h_ content IDs keep their underscore through the bypass.
+func TestResolveContentID_BypassPreservesHPrefix(t *testing.T) {
+	s, repo := newRemasterTestScraper(t)
+	rt := &remasterRoundTripper{serve: func(u string) (int, string) { return 404, "" }}
+	s.client.SetTransport(rt)
+	cid, err := s.ResolveContentIDCtx(context.Background(), "h_1472smkcx003")
+	require.NoError(t, err)
+	assert.Equal(t, "h_1472smkcx003", cid)
+	assert.Equal(t, 0, rt.searchN)
+	cached, err := repo.FindBySearchID(context.TODO(), "H_1472SMKCX003")
+	require.NoError(t, err)
+	assert.Equal(t, "h_1472smkcx003", cached.ContentID)
+}
+
 func TestResolveRemaster_NoMarkerCandidates(t *testing.T) {
 	s, _ := newRemasterTestScraper(t)
 	rt := &remasterRoundTripper{serve: func(u string) (int, string) {
@@ -113,11 +147,14 @@ func TestResolveRemaster_NoMarkerCandidates(t *testing.T) {
 func TestResolveRemaster_DedupPrefersPrefixedVerbatim(t *testing.T) {
 	s, repo := newRemasterTestScraper(t)
 	rt := &remasterRoundTripper{serve: func(u string) (int, string) {
-		if strings.Contains(u, "/search/=") {
+		switch {
+		case strings.Contains(u, "/search/="):
 			return 200, `<html><body>` +
 				`<a href="/digital/videoa/-/detail/=/cid=rct00156h/">digital, no digit</a>` +
 				`<a href="/mono/dvd/-/detail/=/cid=1rct00156h/">mono, catalog digit</a>` +
 				`</body></html>`
+		case strings.Contains(u, "cid=1rct00156h"):
+			return 200, `<html><body><table><tr><td>品番：</td><td>RCT-156-HD</td></tr></table></body></html>`
 		}
 		return 404, ""
 	}}
@@ -135,8 +172,11 @@ func TestResolveRemaster_CacheWriteFailureIgnored(t *testing.T) {
 	s, _ := newRemasterTestScraper(t)
 	s.contentIDRepo = &failingCIDRepo{}
 	rt := &remasterRoundTripper{serve: func(u string) (int, string) {
-		if strings.Contains(u, "/search/=") {
+		switch {
+		case strings.Contains(u, "/search/="):
 			return 200, `<html><body><a href="/digital/videoa/-/detail/=/cid=1rct00156h/">remaster</a></body></html>`
+		case strings.Contains(u, "cid=1rct00156h"):
+			return 200, `<html><body><table><tr><td>品番：</td><td>RCT-156-HD</td></tr></table></body></html>`
 		}
 		return 404, ""
 	}}
@@ -180,13 +220,13 @@ func TestResolveRemaster_DisagreeingPagesUnverifiable(t *testing.T) {
 			return 200, `<html><body>` +
 				`<a href="/mono/dvd/-/detail/=/cid=abc00999h/">A-dvd</a>` +
 				`<a href="/digital/videoa/-/detail/=/cid=abc00999h/">A-digital</a>` +
-				`<a href="/digital/videoa/-/detail/=/cid=2abc00999h/">B</a>` +
+				`<a href="/digital/videoa/-/detail/=/cid=abc01234h/">B</a>` +
 				`</body></html>`
 		case strings.Contains(u, "cid=abc00999h") && strings.Contains(u, "/mono/"):
 			return 200, `<html><body><table><tr><td>品番：</td><td>ABC-111-HD</td></tr></table></body></html>`
 		case strings.Contains(u, "cid=abc00999h"):
 			return 200, `<html><body><table><tr><td>品番：</td><td>ABC-222-HD</td></tr></table></body></html>`
-		case strings.Contains(u, "cid=2abc00999h"):
+		case strings.Contains(u, "cid=abc01234h"):
 			return 200, `<html><body><table><tr><td>品番：</td><td>ABC-999-HD</td></tr></table></body></html>`
 		}
 		return 404, ""
@@ -194,7 +234,7 @@ func TestResolveRemaster_DisagreeingPagesUnverifiable(t *testing.T) {
 	s.client.SetTransport(rt)
 	cid, err := s.ResolveContentIDCtx(context.Background(), "ABC-999H")
 	require.NoError(t, err)
-	assert.Equal(t, "2abc00999h", cid, "unverifiable cid must not compete; verified cid wins")
+	assert.Equal(t, "abc01234h", cid, "unverifiable cid must not compete; verified cid wins")
 }
 
 func TestVerifyCandidateDisplayID_EdgeInputs(t *testing.T) {
