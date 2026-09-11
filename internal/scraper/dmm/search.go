@@ -272,13 +272,10 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 
 	foldedMarker, _, isCID := classifyRemasterQuery(id)
 	res, err := s.parseHTMLWithOptions(ctx, doc, url, foldedMarker != "")
-	if err != nil {
-		return nil, err
-	}
-	if foldedMarker != "" && !isCID {
+	if err == nil && foldedMarker != "" && !isCID {
 		res.ID = canonicalRemasterDisplayID(id)
 	}
-	return res, nil
+	return res, err
 }
 
 func (s *scraper) ScrapeURL(ctx context.Context, url string) (*models.ScraperResult, error) {
