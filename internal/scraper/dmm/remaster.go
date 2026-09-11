@@ -37,7 +37,7 @@ func classifyRemasterQuery(id string) (foldedMarker string, series string, isCon
 	// A hyphenated/spaced input is a display ID, not a raw content ID: it must
 	// keep the resolver path (catalog-prefix search, padding, server-mediated
 	// number mapping). Only separator-free compact forms count as content IDs.
-	hasSeparator := strings.ContainsAny(lowerRaw, "-_ ")
+	hasSeparator := strings.ContainsAny(lowerRaw, "-_. ")
 	isContentID = hPrefixCIDShapeRegex.MatchString(lowerRaw) ||
 		(!hasSeparator && remasterCIDShapeRegex.MatchString(compact))
 	m := remasterTailRegex.FindStringSubmatch(compact)
