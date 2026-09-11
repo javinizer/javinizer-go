@@ -12,10 +12,15 @@ import (
 )
 
 func TestRemaster_ClassifyAndFold(t *testing.T) {
-	assert.Equal(t, "h", classifyRemaster("RCT-156H"))
-	assert.Equal(t, "h", classifyRemaster("RCT-156-HD"))
-	assert.Equal(t, "ai", classifyRemaster("DV-818AI"))
-	assert.Equal(t, "", classifyRemaster("RCT-156"))
+	m, _ := classifyRemaster("RCT-156H")
+	assert.Equal(t, "h", m)
+	m, _ = classifyRemaster("RCT-156-HD")
+	assert.Equal(t, "h", m)
+	m, s := classifyRemaster("DV-818AI")
+	assert.Equal(t, "ai", m)
+	assert.Equal(t, "dv", s)
+	m, _ = classifyRemaster("RCT-156")
+	assert.Equal(t, "", m)
 
 	assert.Equal(t, "rct156h", foldDisplay("RCT-156-HD"))
 	assert.Equal(t, "dv818ai", foldDisplay("DV-818AI"))

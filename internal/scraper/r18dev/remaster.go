@@ -10,6 +10,7 @@ import (
 
 var (
 	r18RemasterTailRegex = regexp.MustCompile(`^(\d{0,2})([a-z]{2,6})(\d{3,5})(hd|ai|h)$`)
+	r18CIDAnchoredRegex  = regexp.MustCompile(`^(\d{0,2})([a-z]{2,6})(\d{3,5})([a-z]{0,3})$`)
 	nonAlnumR18Regex     = regexp.MustCompile(`[^a-z0-9]+`)
 )
 
@@ -19,18 +20,27 @@ func r18CompactID(id string) string {
 
 // classifyRemaster mirrors the DMM scraper's classification for marker-bearing
 // queries: the folded marker is "h" for H/HD and "ai" for AI spellings.
-func classifyRemaster(id string) string {
+func classifyRemaster(id string) (foldedMarker string, series string) {
 	m := r18RemasterTailRegex.FindStringSubmatch(r18CompactID(id))
 	if m == nil {
-		return ""
+		return "", ""
 	}
-	switch m[4] {
-	case "hd", "h":
-		return "h"
-	case "ai":
-		return "ai"
+	series = m[2]
+	if m[4] == "ai" {
+		return "ai", series
 	}
-	return ""
+	return "h", series
+}
+
+// cidMatchesMarker reports whether a content id carries the folded marker AND
+// belongs to the requested series. The number is server-owned; the series is
+// not — stale or unrelated marker-bearing records must not qualify.
+func cidMatchesMarker(contentID, foldedMarker, series string) bool {
+	if !cidCarriesMarker(contentID, foldedMarker) {
+		return false
+	}
+	m := r18CIDAnchoredRegex.FindStringSubmatch(r18CompactID(contentID))
+	return m != nil && m[2] == series
 }
 
 // foldDisplay normalizes a display/stored DVD ID for marker comparison:
@@ -73,7 +83,7 @@ func remasterDisplaySpellings(id string) []string {
 // queries: the response's dvd_id must fold-equal the query, or its content_id
 // must carry the folded marker. Number equality is intentionally NOT required
 // — the server owns the number (e.g. DV-818AI -> dv00899ai).
-func markerVariationAccept(body []byte, queryID, foldedMarker string) bool {
+func markerVariationAccept(body []byte, queryID, foldedMarker, series string) bool {
 	var data contentIDLookupResponse
 	if err := json.Unmarshal(body, &data); err != nil {
 		return false
@@ -81,18 +91,18 @@ func markerVariationAccept(body []byte, queryID, foldedMarker string) bool {
 	if data.DVDID != "" && foldDisplay(data.DVDID) == foldDisplay(queryID) {
 		return true
 	}
-	return cidCarriesMarker(data.ContentID, foldedMarker)
+	return cidMatchesMarker(data.ContentID, foldedMarker, series)
 }
 
 // guardRemasterResult applies the marker guard to a fully parsed result:
 // marker-bearing queries only accept results whose content id carries the
 // folded marker (verification of the number is server-owned).
 func guardRemasterResult(id string, res *models.ScraperResult) (*models.ScraperResult, error) {
-	foldedMarker := classifyRemaster(id)
+	foldedMarker, series := classifyRemaster(id)
 	if foldedMarker == "" || res == nil {
 		return res, nil
 	}
-	if cidCarriesMarker(res.ContentID, foldedMarker) {
+	if cidMatchesMarker(res.ContentID, foldedMarker, series) {
 		return res, nil
 	}
 	return nil, models.NewScraperNotFoundError("R18.dev", "response does not carry the requested remaster identity")

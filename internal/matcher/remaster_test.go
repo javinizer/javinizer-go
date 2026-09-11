@@ -134,6 +134,51 @@ func TestMatchString_RemasterParity(t *testing.T) {
 	assert.Equal(t, "", m.MatchString("oreco183a"))
 }
 
+func TestRemasterHelpersAndDemotionSkips(t *testing.T) {
+	assert.Equal(t, "zzz", remainderAfterID("zzz", "abc"))
+	assert.Equal(t, "-2", remainderAfterID("RCT-156-2", "RCT-156"))
+
+	mk := func(name, id string, part int, pattern, marker string) MatchResult {
+		return MatchResult{File: models.FileMatchInfo{Path: "/v/" + name}, ID: id, PartNumber: part, MultipartPattern: pattern, RemasterMarker: marker}
+	}
+	out := ValidateMultipartInDirectory([]MatchResult{
+		mk("ABC-123A.mkv", "ABC-123", 1, PatternLetter, ""),
+		mk("ABC-123B.mkv", "ABC-123", 2, PatternLetter, ""),
+		mk("ABC-123H-pt1.mkv", "ABC-123H", 1, PatternExplicit, "H"),
+		mk("ABC-123H-badspan.mkv", "ABC-123", 0, "", "H"),
+	})
+	assert.Equal(t, "ABC-123H", out[2].ID, "H marker with existing parts is never demoted")
+	assert.Equal(t, 1, out[2].PartNumber)
+	assert.Equal(t, "H", out[3].RemasterMarker, "defensive: marker without trailing-H ID is not demoted")
+}
+
+func TestValidateMultipart_ScopedDemotionRollback(t *testing.T) {
+	mk := func(path, id string, part int, pattern, marker string, multi bool) MatchResult {
+		return MatchResult{File: models.FileMatchInfo{Path: path}, ID: id, PartNumber: part, MultipartPattern: pattern, RemasterMarker: marker, IsMultiPart: multi}
+	}
+	in := []MatchResult{
+		mk("/a/ABC-123A.mkv", "ABC-123", 1, PatternLetter, "", false),
+		mk("/a/ABC-123B.mkv", "ABC-123", 2, PatternLetter, "", false),
+		mk("/a/ABC-123H.mkv", "ABC-123H", 0, "", "H", false),
+		mk("/a/ABC-123-pt8.mkv", "ABC-123", 8, PatternExplicit, "", true),
+		mk("/a/XYZ-123A.mkv", "XYZ-123", 1, PatternLetter, "", false),
+		mk("/a/XYZ-123B.mkv", "XYZ-123", 2, PatternLetter, "", false),
+		mk("/a/XYZ-123H.mkv", "XYZ-123H", 0, "", "H", false),
+	}
+	out := ValidateMultipartInDirectory(in)
+	assert.Equal(t, "ABC-123H", out[2].ID, "failed group's H restores remaster")
+	assert.Equal(t, "H", out[2].RemasterMarker)
+	assert.Equal(t, "XYZ-123", out[6].ID, "healthy group's demotion survives")
+	assert.Equal(t, 8, out[6].PartNumber)
+	assert.True(t, out[6].IsMultiPart)
+	assert.Equal(t, "", out[6].RemasterMarker)
+	assert.True(t, out[4].IsMultiPart)
+	assert.True(t, out[5].IsMultiPart)
+	assert.True(t, out[0].IsMultiPart, "failed group's bare letters revalidate without H")
+	assert.True(t, out[1].IsMultiPart)
+	assert.True(t, out[3].IsMultiPart)
+}
+
 func TestValidateMultipart_RemasterDemotion(t *testing.T) {
 	mk := func(name, id string, part int, pattern, trailing, marker string) MatchResult {
 		return MatchResult{

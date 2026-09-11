@@ -31,7 +31,12 @@ func compactQueryID(id string) string {
 func classifyRemasterQuery(id string) (foldedMarker string, series string, isContentID bool) {
 	compact := compactQueryID(id)
 	lowerRaw := strings.ToLower(strings.TrimSpace(id))
-	isContentID = remasterCIDShapeRegex.MatchString(compact) || hPrefixCIDShapeRegex.MatchString(lowerRaw)
+	// A hyphenated/spaced input is a display ID, not a raw content ID: it must
+	// keep the resolver path (catalog-prefix search, padding, server-mediated
+	// number mapping). Only separator-free compact forms count as content IDs.
+	hasSeparator := strings.ContainsAny(lowerRaw, "-_ ")
+	isContentID = hPrefixCIDShapeRegex.MatchString(lowerRaw) ||
+		(!hasSeparator && remasterCIDShapeRegex.MatchString(compact))
 	m := remasterTailRegex.FindStringSubmatch(compact)
 	if m == nil {
 		return "", "", isContentID
@@ -200,9 +205,6 @@ func (s *scraper) resolveRemasterContentID(ctx context.Context, id, normalizedID
 	byClean := map[string]*aggCand{}
 
 	for _, query := range queries {
-		if err := ctx.Err(); err != nil {
-			return "", fmt.Errorf("DMM: remaster resolution cancelled: %w", err)
-		}
 		searchURLFormatted := fmt.Sprintf(searchURL, query)
 		logging.Debugf("DMM: remaster resolution query variation: %s", query)
 
@@ -220,10 +222,11 @@ func (s *scraper) resolveRemasterContentID(ctx context.Context, id, normalizedID
 			return "", models.NewScraperStatusError("DMM", resp.StatusCode(), fmt.Sprintf("DMM search returned status code %d", resp.StatusCode()))
 		}
 		doc, err := goquery.NewDocumentFromReader(strings.NewReader(resp.String()))
-		if err != nil {
-			continue
+		var pageCands []remasterCandidate
+		if err == nil {
+			pageCands = extractRemasterContentIDCandidates(doc, series, foldedMarker)
 		}
-		for _, c := range extractRemasterContentIDCandidates(doc, series, foldedMarker) {
+		for _, c := range pageCands {
 			if existing, ok := byClean[c.cleanID]; ok {
 				existing.urls = append(existing.urls, c.urls...)
 				if len(c.contentID) > len(existing.contentID) {
@@ -288,25 +291,18 @@ func (s *scraper) verifyCandidateDisplayID(ctx context.Context, foldedTarget str
 		if u == "" || !strings.Contains(u, "www.dmm.co.jp") {
 			continue
 		}
-		if err := ctx.Err(); err != nil {
-			break
-		}
 		if err := s.rateLimiter.Wait(ctx); err != nil {
-			continue
+			break
 		}
 		resp, err := s.client.R().SetContext(ctx).Get(u)
 		if err != nil || resp.StatusCode() != 200 {
 			continue
 		}
-		doc, err := goquery.NewDocumentFromReader(strings.NewReader(resp.String()))
-		if err != nil {
-			continue
+		if doc, err := goquery.NewDocumentFromReader(strings.NewReader(resp.String())); err == nil {
+			if display := extractDisplayID(doc); display != "" {
+				identities[display] = struct{}{}
+			}
 		}
-		display := extractDisplayID(doc)
-		if display == "" {
-			continue
-		}
-		identities[display] = struct{}{}
 	}
 	if len(identities) == 1 {
 		for k := range identities {

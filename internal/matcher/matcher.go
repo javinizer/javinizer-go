@@ -8,6 +8,16 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 )
 
+type dirIDKey struct {
+	dir string
+	id  string
+}
+
+type demotion struct {
+	idx int
+	key dirIDKey
+}
+
 // Matcher identifies JAV IDs from filenames
 type Matcher struct {
 	config         *Config
@@ -252,21 +262,24 @@ func ValidateMultipartInDirectory(results []MatchResult) []MatchResult {
 	validateMultipartGroups(validated)
 
 	if len(demoted) > 0 {
-		rollback := false
-		for _, idx := range demoted {
-			if !validated[idx].IsMultiPart {
-				rollback = true
-				break
+		failedGroups := make(map[dirIDKey]bool)
+		for _, d := range demoted {
+			if !validated[d.idx].IsMultiPart {
+				failedGroups[d.key] = true
 			}
 		}
-		if rollback {
-			validated = make([]MatchResult, len(results))
-			copy(validated, results)
+		if len(failedGroups) > 0 {
+			for i := range validated {
+				if failedGroups[dirIDKey{dir: filepath.Dir(validated[i].File.Path), id: validated[i].ID}] {
+					validated[i] = results[i]
+				}
+			}
 			validateMultipartGroups(validated)
-			return validated
 		}
-		for _, idx := range demoted {
-			validated[idx].RemasterMarker = ""
+		for _, d := range demoted {
+			if validated[d.idx].IsMultiPart {
+				validated[d.idx].RemasterMarker = ""
+			}
 		}
 	}
 
@@ -278,8 +291,8 @@ func ValidateMultipartInDirectory(results []MatchResult) []MatchResult {
 // carry the exact base ID with distinct bare-letter patterns. Returns the
 // indices that were demoted; callers must treat demotion as provisional and
 // roll everything back if a demoted result fails validation.
-func applyRemasterDemotions(validated []MatchResult) []int {
-	var demoted []int
+func applyRemasterDemotions(validated []MatchResult) []demotion {
+	var demoted []demotion
 	for i, r := range validated {
 		if r.RemasterMarker != "H" {
 			continue
@@ -312,17 +325,13 @@ func applyRemasterDemotions(validated []MatchResult) []int {
 		validated[i].PartNumber = 8
 		validated[i].PartSuffix = "-H"
 		validated[i].MultipartPattern = PatternLetter
-		demoted = append(demoted, i)
+		demoted = append(demoted, demotion{idx: i, key: dirIDKey{dir: dir, id: baseID}})
 	}
 	return demoted
 }
 
 func validateMultipartGroups(validated []MatchResult) {
 	// Group by (directory, movieID)
-	type dirIDKey struct {
-		dir string
-		id  string
-	}
 	groups := make(map[dirIDKey][]int)
 
 	for i, r := range validated {

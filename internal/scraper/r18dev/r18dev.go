@@ -340,7 +340,7 @@ func (r *r18ContentIDResolver) ResolveURL(ctx context.Context, id string) (strin
 		normalizeIDWithoutStripping(id),
 		normalizeID(id),
 	}
-	foldedMarker := classifyRemaster(id)
+	foldedMarker, markerSeries := classifyRemaster(id)
 	if foldedMarker != "" {
 		idVariations = append(idVariations, remasterDisplaySpellings(id)...)
 	}
@@ -397,7 +397,7 @@ func (r *r18ContentIDResolver) ResolveURL(ctx context.Context, id string) (strin
 					if returnedDVDID == "" && fuzzyContentIDURL == "" {
 						fuzzyOK := contentIDCoreMatch(lookupData.ContentID, idVariation)
 						if foldedMarker != "" {
-							fuzzyOK = cidCarriesMarker(lookupData.ContentID, foldedMarker)
+							fuzzyOK = cidMatchesMarker(lookupData.ContentID, foldedMarker, markerSeries)
 						}
 						if fuzzyOK {
 							fuzzyContentIDURL = fmt.Sprintf("%s/videos/vod/movies/detail/-/combined=%s/json", baseURL, lookupData.ContentID)
@@ -937,7 +937,7 @@ func stripDMMPrefix(id string) string {
 // r18.dev returning a 200 for a different movie that happens to share a prefix slot, so the
 // result does not depend solely on global prefix-table ordering.
 func (s *scraper) resolveByContentIDVariations(ctx context.Context, id string) (string, error) {
-	foldedMarker := classifyRemaster(id)
+	foldedMarker, markerSeries := classifyRemaster(id)
 	variations := r18devdump.ContentIDCandidates(id)
 	if foldedMarker != "" {
 		variations = r18devdump.ContentIDCandidatesWithMarker(id)
@@ -971,7 +971,7 @@ func (s *scraper) resolveByContentIDVariations(ctx context.Context, id string) (
 			if !strings.Contains(contentType, "text/html") {
 				matched := variationCoreMatches(resp.Body(), normalizedDVDID)
 				if foldedMarker != "" {
-					matched = markerVariationAccept(resp.Body(), id, foldedMarker)
+					matched = markerVariationAccept(resp.Body(), id, foldedMarker, markerSeries)
 				}
 				if matched {
 					logging.Debugf("R18: ✓ Content-id variation %s resolved for %s", variation, id)

@@ -74,6 +74,8 @@ func TestRemasterClassification(t *testing.T) {
 		{"RCT-156", "", "", false},
 		{"IPX-535", "", "", false},
 		{"oreco183", "", "", false},
+		{"ABC-1234H", "h", "abc", false},
+		{"AbC-1234-Ai", "ai", "abc", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.id, func(t *testing.T) {

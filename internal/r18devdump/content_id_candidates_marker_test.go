@@ -25,6 +25,11 @@ func TestContentIDCandidatesWithMarker(t *testing.T) {
 	cands = ContentIDCandidatesWithMarker("1RCT00156H")
 	assert.Equal(t, "1rct00156h", cands[0])
 
+	// HD marker folds to h.
+	cands = ContentIDCandidatesWithMarker("RCT-156HD")
+	assert.NotEmpty(t, cands)
+	assert.Equal(t, ContentIDCandidatesWithMarker("RCT-156H"), cands)
+
 	// Marker-free input delegates to base behavior.
 	assert.Equal(t, ContentIDCandidates("RCT-156"), ContentIDCandidatesWithMarker("RCT-156"))
 }
