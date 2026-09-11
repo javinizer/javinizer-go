@@ -6,9 +6,8 @@ import (
 )
 
 var (
-	reRemasterRemainder  = regexp.MustCompile(`(?i)^[-_.\s]?(HD|AI|H)$`)
-	contentIDShapeRegex  = regexp.MustCompile(`(?i)^((?:\d{1,5}[A-Za-z]{2,6}\d{3,5}[A-Za-z]{0,3}|[A-Za-z]{2,6}\d{4,5}[A-Za-z]{0,3}))([-_.\s].+)?$`)
-	contentIDExtStripReg = regexp.MustCompile(`(?i)\.[A-Za-z0-9]{2,5}$`)
+	reRemasterRemainder = regexp.MustCompile(`(?i)^[-_.\s]?(HD|AI|H)$`)
+	contentIDShapeRegex = regexp.MustCompile(`(?i)^((?:\d{1,5}[A-Za-z]{2,6}\d{3,5}[A-Za-z]{0,3}|[A-Za-z]{2,6}\d{4,5}[A-Za-z]{0,3}))([-_.\s].+)?$`)
 )
 
 func remainderAfterID(name, id string) string {
@@ -39,12 +38,11 @@ func foldRemasterMarker(spelling string) string {
 // contentIDPrefixMatch extracts a content-id prefix from a stem, returning the
 // captured id text and the post-id remainder (which may carry part suffixes).
 func contentIDPrefixMatch(s string) (idText string, remainder string) {
-	t := contentIDExtStripReg.ReplaceAllString(s, "")
-	m := contentIDShapeRegex.FindStringSubmatch(t)
+	m := contentIDShapeRegex.FindStringSubmatch(s)
 	if m == nil {
 		return "", ""
 	}
-	return m[1], strings.TrimSpace(t[len(m[1]):])
+	return m[1], strings.TrimSpace(s[len(m[1]):])
 }
 
 func matchContentIDShape(s string) string {

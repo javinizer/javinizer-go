@@ -9,7 +9,7 @@ import (
 )
 
 var (
-	r18RemasterTailRegex = regexp.MustCompile(`^(\d{0,2})([a-z]{2,6})(\d{3,5})(hd|ai|h)$`)
+	r18RemasterTailRegex = regexp.MustCompile(`^(\d{0,5})([a-z]{2,6})(\d{3,5})(hd|ai|h)$`)
 	r18CIDAnchoredRegex  = regexp.MustCompile(`^(\d{0,5})([a-z]{2,6})(\d{3,5})([a-z]{0,3})$`)
 	nonAlnumR18Regex     = regexp.MustCompile(`[^a-z0-9]+`)
 )
@@ -79,14 +79,25 @@ func remasterDisplaySpellings(id string) []string {
 	return []string{m[2] + "-" + m[3] + "-" + displayMarker}
 }
 
-// markerVariationAccept validates a combined= response body for marker
-// queries: the response's dvd_id must fold-equal the query, or its content_id
-// must carry the folded marker. Number equality is intentionally NOT required
-// — the server owns the number (e.g. DV-818AI -> dv00899ai).
+func cidMatchesRemasterQuery(contentID, queryID, marker, series string) bool {
+	if !cidMatchesMarker(contentID, marker, series) {
+		return false
+	}
+	if isRawRemasterContentIDQuery(queryID) {
+		query := r18CIDAnchoredRegex.FindStringSubmatch(r18CompactID(queryID))
+		candidate := r18CIDAnchoredRegex.FindStringSubmatch(r18CompactID(contentID))
+		return query != nil && candidate != nil && query[4] == candidate[4]
+	}
+	return true
+}
+
 func markerVariationAccept(body []byte, queryID, foldedMarker, series string) bool {
 	var data contentIDLookupResponse
 	if err := json.Unmarshal(body, &data); err != nil {
 		return false
+	}
+	if isRawRemasterContentIDQuery(queryID) {
+		return cidMatchesRemasterQuery(data.ContentID, queryID, foldedMarker, series)
 	}
 	if data.DVDID != "" {
 		return foldDisplay(data.DVDID) == foldDisplay(queryID)
@@ -102,7 +113,7 @@ func guardRemasterResult(id string, res *models.ScraperResult) (*models.ScraperR
 	if foldedMarker == "" || res == nil {
 		return res, nil
 	}
-	if !cidMatchesMarker(res.ContentID, foldedMarker, series) {
+	if !cidMatchesRemasterQuery(res.ContentID, id, foldedMarker, series) {
 		return nil, models.NewScraperNotFoundError("R18.dev", "response does not carry the requested remaster identity")
 	}
 	if !isRawRemasterContentIDQuery(id) {

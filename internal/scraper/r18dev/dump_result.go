@@ -319,6 +319,9 @@ func (s *scraper) searchFromDump(ctx context.Context, id string) (*models.Scrape
 		// prefix order never picks, and a gappy list ([c0, c2]) would skip the
 		// intermediate candidate the resolver tries over the wire first.
 		all := r18devdump.ContentIDCandidates(id)
+		if marker, _ := classifyRemaster(id); marker != "" {
+			all = r18devdump.ContentIDCandidatesWithMarker(id)
+		}
 		trusted := len(all) >= len(candidates)
 		if trusted {
 			for i, c := range candidates {

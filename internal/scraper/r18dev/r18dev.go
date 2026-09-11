@@ -375,6 +375,9 @@ func (r *r18ContentIDResolver) ResolveURL(ctx context.Context, id string) (strin
 			if !strings.Contains(contentType, "text/html") {
 				var lookupData contentIDLookupResponse
 				if err := json.Unmarshal(resp.Body(), &lookupData); err == nil && lookupData.ContentID != "" {
+					if foldedMarker != "" && !cidMatchesRemasterQuery(lookupData.ContentID, id, foldedMarker, markerSeries) {
+						continue
+					}
 					returnedDVDID := normalizeDVDID(lookupData.DVDID)
 					if foldedMarker != "" && lookupData.DVDID != "" && foldDisplay(lookupData.DVDID) == foldDisplay(id) {
 						// Marker-carrying display identity match (H/HD-folded) — trust it.
@@ -397,7 +400,7 @@ func (r *r18ContentIDResolver) ResolveURL(ctx context.Context, id string) (strin
 					if returnedDVDID == "" && fuzzyContentIDURL == "" {
 						fuzzyOK := contentIDCoreMatch(lookupData.ContentID, idVariation)
 						if foldedMarker != "" {
-							fuzzyOK = cidMatchesMarker(lookupData.ContentID, foldedMarker, markerSeries)
+							fuzzyOK = cidMatchesRemasterQuery(lookupData.ContentID, id, foldedMarker, markerSeries)
 						}
 						if fuzzyOK {
 							fuzzyContentIDURL = fmt.Sprintf("%s/videos/vod/movies/detail/-/combined=%s/json", baseURL, lookupData.ContentID)
@@ -469,11 +472,7 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		candidateURL := fmt.Sprintf(apiURL, candidate.ContentID)
 		logging.Debugf("R18: Fetching dump-resolved candidate URL for %s: %s", id, candidateURL)
 		if res, fetchErr := s.fetchAndParseCandidate(ctx, candidateURL, candidate.ContentID, id); fetchErr == nil && res != nil {
-			if _, guardErr := guardRemasterResult(id, res); guardErr != nil {
-				logging.Debugf("R18: dump-resolved candidate %s rejected by marker guard for %s", candidate.ContentID, id)
-				continue
-			}
-			return res, nil
+			return guardRemasterResult(id, res)
 		} else if fetchErr != nil {
 			logging.Debugf("R18: dump-resolved candidate %s failed for %s: %v", candidateURL, id, fetchErr)
 		}
