@@ -139,7 +139,7 @@ func (s *Store) MatchByDisplayID(ctx context.Context, id string) ([]models.DumpM
 	// set is the exact input first, then the expanded candidates, deduped —
 	// order within the result follows probe order.
 	exactID := strings.ToLower(strings.TrimSpace(id))
-	compacted := strings.NewReplacer("-", "", "_", "", " ", "").Replace(strings.TrimSpace(id))
+	compacted := strings.NewReplacer("-", "", "_", "", ".", "", " ", "").Replace(strings.TrimSpace(id))
 	candidates := ContentIDCandidates(id)
 	if remasterMarkerTailRgx.MatchString(compacted) {
 		candidates = ContentIDCandidatesWithMarker(id)
