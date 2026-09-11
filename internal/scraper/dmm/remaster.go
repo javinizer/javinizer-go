@@ -16,10 +16,10 @@ var (
 	// Unambiguous content-id shapes only: a channel prefix or a five-digit
 	// zero-padded number. Separator-free four-digit display ids (ABP1234) are
 	// ambiguous and must stay on the resolver path.
-	remasterCIDShapeRegex   = regexp.MustCompile(`^(?:\d{1,5}(?:t28|[a-z]{1,6})\d{3,5}[a-z]{0,3}|(?:t28|[a-z]{1,6})\d{5}[a-z]{0,3})$`)
+	remasterCIDShapeRegex   = regexp.MustCompile(`^(?:\d+(?:t28|[a-z]{1,6})\d{3,5}[a-z]{0,3}|(?:t28|[a-z]{1,6})\d{5}[a-z]{0,3})$`)
 	underscoreCIDShapeRegex = regexp.MustCompile(`^[hn]_\d+[a-z]+\d+[a-z]{0,2}$`)
-	remasterTailRegex       = regexp.MustCompile(`^(\d{0,5})((?:t28|[a-z]{1,6}))(\d{2,5})(hd|ai|h)$`)
-	anchoredMarkerCIDReg    = regexp.MustCompile(`^(\d{0,2})((?:t28|[a-z]{1,6}))(\d{3,5})([a-z]{1,3})$`)
+	remasterTailRegex       = regexp.MustCompile(`^(\d*)((?:t28|[a-z]{1,6}))(\d{2,5})(hd|ai|h)$`)
+	anchoredMarkerCIDReg    = regexp.MustCompile(`^(\d*)((?:t28|[a-z]{1,6}))(\d{3,5})([a-z]{1,3})$`)
 	nonAlnumRegex           = regexp.MustCompile(`[^a-z0-9]+`)
 )
 

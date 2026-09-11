@@ -16,6 +16,9 @@ func TestTaggedRawContentIDs(t *testing.T) {
 	}{
 		{"[site]1rct00156h.mkv", "1RCT00156H", 0},
 		{"9t28123h.mkv", "9T28123H", 0},
+		{"5750360vrg00123h.mkv", "5750360VRG00123H", 0},
+		{"[site]5755360vrpg00123hd-pt2.mkv", "5755360VRPG00123HD", 2},
+		{"5750360vrg00123ai.mkv", "5750360VRG00123AI", 0},
 		{"44a00123h.mkv", "44A00123H", 0},
 		{"a00123h.mkv", "A00123H", 0},
 		{"[site]44a00123hd-pt2.mkv", "44A00123HD", 2},
