@@ -33,7 +33,8 @@ func TestRemaster_VerifyRateLimitWaitFailure(t *testing.T) {
 	require.NoError(t, s.rateLimiter.Wait(context.Background()))
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	st := s.verifyCandidateDisplayID(ctx, "rct156h", []string{"https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=1rct00156h/"})
+	st, err := s.verifyCandidateDisplayID(ctx, "rct156h", []string{"https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=1rct00156h/"})
+	assert.ErrorIs(t, err, context.Canceled)
 	assert.Equal(t, displayUnverifiable, st)
 }
 
@@ -45,7 +46,7 @@ func TestExtractRemaster_RawEmptySkipped(t *testing.T) {
 		`<a href="/digital/videoa/-/detail/=/cid=1rct00156h/">wanted</a>` +
 		`</body></html>`))
 	require.NoError(t, err)
-	cands := extractRemasterContentIDCandidates(doc, "rct", "h")
+	cands := extractRemasterContentIDCandidates(doc, "rct", "h", "")
 	require.Len(t, cands, 1)
 	assert.Equal(t, "1rct00156h", cands[0].contentID)
 }

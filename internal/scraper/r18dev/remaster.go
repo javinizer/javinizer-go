@@ -9,7 +9,7 @@ import (
 )
 
 var (
-	r18RemasterTailRegex = regexp.MustCompile(`^(\d*)((?:t28|[a-z]+))(\d{2,5})(hd|ai|h)$`)
+	r18RemasterTailRegex = regexp.MustCompile(`^(\d*)((?:t28|[a-z]+))(\d{2,5})([ez]?)(hd|ai|h)$`)
 	r18CIDAnchoredRegex  = regexp.MustCompile(`^(\d*)((?:t28|[a-z]+))(\d{3,5})([a-z]{0,3})$`)
 	r18PrefixedCIDRegex  = regexp.MustCompile(`^[hn]_\d+(?:t28|[a-z]+)\d{3,5}[a-z]{0,3}$`)
 	nonAlnumR18Regex     = regexp.MustCompile(`[^a-z0-9]+`)
@@ -35,7 +35,7 @@ func classifyRemaster(id string) (foldedMarker string, series string) {
 		return "", ""
 	}
 	series = m[2]
-	if m[4] == "ai" {
+	if m[5] == "ai" {
 		return "ai", series
 	}
 	return "h", series
@@ -57,7 +57,7 @@ func cidMatchesMarker(contentID, foldedMarker, series string) bool {
 func foldDisplay(s string) string {
 	n := r18CompactID(s)
 	if m := r18RemasterTailRegex.FindStringSubmatch(n); m != nil && m[1] == "" {
-		n = m[2] + strings.TrimLeft(m[3], "0") + m[4]
+		n = m[2] + strings.TrimLeft(m[3], "0") + m[4] + m[5]
 	}
 	if strings.HasSuffix(n, "hd") {
 		return n[:len(n)-2] + "h"
@@ -85,10 +85,10 @@ func remasterDisplaySpellings(id string) []string {
 		return nil
 	}
 	displayMarker := "hd"
-	if m[4] == "ai" {
+	if m[5] == "ai" {
 		displayMarker = "ai"
 	}
-	return []string{m[2] + "-" + m[3] + "-" + displayMarker}
+	return []string{m[2] + "-" + m[3] + m[4] + "-" + displayMarker}
 }
 
 func cidMatchesRemasterQuery(contentID, queryID, marker, series string) bool {
@@ -154,8 +154,8 @@ func canonicalRemasterDisplayID(id string) string {
 		return strings.ToUpper(id)
 	}
 	marker := "H"
-	if m[4] == "ai" {
+	if m[5] == "ai" {
 		marker = "AI"
 	}
-	return strings.ToUpper(m[2]) + "-" + m[3] + marker
+	return strings.ToUpper(m[2]) + "-" + m[3] + strings.ToUpper(m[4]) + marker
 }

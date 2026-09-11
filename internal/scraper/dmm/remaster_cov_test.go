@@ -21,7 +21,7 @@ func TestRemasterSearchSpellings_NilForUnparseable(t *testing.T) {
 }
 
 func TestExtractRemasterContentIDCandidates_Forms(t *testing.T) {
-	assert.Empty(t, extractRemasterContentIDCandidates(nil, "rct", "h"))
+	assert.Empty(t, extractRemasterContentIDCandidates(nil, "rct", "h", ""))
 
 	doc, derr := goquery.NewDocumentFromReader(strings.NewReader(`<html><body>` +
 		`<a>no href</a>` +
@@ -34,7 +34,7 @@ func TestExtractRemasterContentIDCandidates_Forms(t *testing.T) {
 		`<a href="/digital/videoa/-/detail/=/cid=x/">no regex match</a>` +
 		`</body></html>`))
 	require.NoError(t, derr)
-	cands := extractRemasterContentIDCandidates(doc, "rct", "h")
+	cands := extractRemasterContentIDCandidates(doc, "rct", "h", "")
 	require.Len(t, cands, 3)
 	for _, c := range cands {
 		assert.Equal(t, "1rct00156h", c.contentID)
@@ -299,40 +299,44 @@ func TestResolveRemaster_PaddedQueryVerifies(t *testing.T) {
 }
 
 func TestParseDisplayIdentity_Branches(t *testing.T) {
-	s, d, m, ok := parseDisplayIdentity("rct00156h")
+	s, d, _, m, ok := parseDisplayIdentity("rct00156h")
 	assert.True(t, ok)
 	assert.Equal(t, "rct", s)
 	assert.Equal(t, "156", d)
 	assert.Equal(t, "h", m)
-	_, _, m2, ok2 := parseDisplayIdentity("dv00899ai")
+	_, _, _, m2, ok2 := parseDisplayIdentity("dv00899ai")
 	assert.True(t, ok2)
 	assert.Equal(t, "ai", m2)
-	_, _, m3, _ := parseDisplayIdentity("rct156hd")
+	_, _, _, m3, _ := parseDisplayIdentity("rct156hd")
 	assert.Equal(t, "h", m3)
-	_, _, _, ok4 := parseDisplayIdentity("garbage")
+	_, _, _, _, ok4 := parseDisplayIdentity("garbage")
 	assert.False(t, ok4)
 }
 
 func TestVerifyCandidateDisplayID_EdgeInputs(t *testing.T) {
 	s, _ := newRemasterTestScraper(t)
 
-	st := s.verifyCandidateDisplayID(context.Background(), "rct156h", []string{"", "https://example.com/x"})
+	st, err := s.verifyCandidateDisplayID(context.Background(), "rct156h", []string{"", "https://example.com/x"})
+	require.NoError(t, err)
 	assert.Equal(t, displayUnverifiable, st)
 
 	s2, _ := newRemasterTestScraper(t)
 	s2.client.SetTransport(&errTransport{})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	st = s2.verifyCandidateDisplayID(ctx, "rct156h", []string{"https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=1rct00156h/"})
+	st, err = s2.verifyCandidateDisplayID(ctx, "rct156h", []string{"https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=1rct00156h/"})
+	assert.ErrorIs(t, err, context.Canceled)
 	assert.Equal(t, displayUnverifiable, st)
 
 	s3, _ := newRemasterTestScraper(t)
 	s3.client.SetTransport(&errTransport{})
-	st = s3.verifyCandidateDisplayID(context.Background(), "rct156h", []string{"https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=1rct00156h/"})
+	st, err = s3.verifyCandidateDisplayID(context.Background(), "rct156h", []string{"https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=1rct00156h/"})
+	require.NoError(t, err)
 	assert.Equal(t, displayUnverifiable, st)
 
 	s4, _ := newRemasterTestScraper(t)
 	s4.client.SetTransport(statusTransport(404))
-	st = s4.verifyCandidateDisplayID(context.Background(), "rct156h", []string{"https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=1rct00156h/"})
+	st, err = s4.verifyCandidateDisplayID(context.Background(), "rct156h", []string{"https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=1rct00156h/"})
+	require.NoError(t, err)
 	assert.Equal(t, displayUnverifiable, st)
 }

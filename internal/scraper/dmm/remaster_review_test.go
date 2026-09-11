@@ -13,7 +13,7 @@ import (
 func TestRemasterWidePrefixContentID(t *testing.T) {
 	for _, cid := range []string{"118abc00123h", "1234abc00123hd", "12345abc00123ai"} {
 		t.Run(cid, func(t *testing.T) {
-			marker, series, raw := classifyRemasterQuery(cid)
+			marker, series, _, raw := classifyRemasterQuery(cid)
 			require.NotEmpty(t, marker)
 			assert.Equal(t, "abc", series)
 			require.True(t, raw)
@@ -59,7 +59,8 @@ func TestRemasterBrowserCandidateVerification(t *testing.T) {
 				}
 				return `<table><tr><td>品番：</td><td>` + tc.display + `</td></tr></table>`, nil
 			}
-			got := s.verifyCandidateDisplayID(context.Background(), "rct156h", []string{"https://video.dmm.co.jp/av/content/?id=1rct00156h"})
+			got, err := s.verifyCandidateDisplayID(context.Background(), "rct156h", []string{"https://video.dmm.co.jp/av/content/?id=1rct00156h"})
+			require.NoError(t, err)
 			assert.Equal(t, tc.want, got)
 			assert.Equal(t, 1, calls)
 		})

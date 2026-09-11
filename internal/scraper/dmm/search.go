@@ -43,7 +43,7 @@ func (s *scraper) getURLCtx(ctx context.Context, id string) (string, error) {
 		return "", fmt.Errorf("movie not found on DMM: %w", err)
 	}
 
-	boundMarker, _, rawQuery := classifyRemasterQuery(id)
+	boundMarker, _, _, rawQuery := classifyRemasterQuery(id)
 	baseID := normalizeID(contentID)
 
 	searchQueries := []string{
@@ -275,7 +275,7 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		}
 	}
 
-	foldedMarker, _, isCID := classifyRemasterQuery(id)
+	foldedMarker, _, _, isCID := classifyRemasterQuery(id)
 	res, err := s.parseHTMLWithOptions(ctx, doc, url, foldedMarker != "")
 	if err == nil && foldedMarker != "" && !isCID {
 		res.ID = canonicalRemasterDisplayID(id)

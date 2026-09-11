@@ -12,7 +12,7 @@ import (
 func TestT28RemasterSearch(t *testing.T) {
 	for _, q := range []string{"T28-123-HD", "T28-123H", "9t28123h"} {
 		t.Run(q, func(t *testing.T) {
-			marker, series, _ := classifyRemasterQuery(q)
+			marker, series, _, _ := classifyRemasterQuery(q)
 			assert.Equal(t, "h", marker)
 			assert.Equal(t, "t28", series)
 			s, _ := newRemasterTestScraper(t)

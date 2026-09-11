@@ -30,8 +30,8 @@ func (s *scraper) resolveContentIDCtx(ctx context.Context, id string) (string, e
 	}
 
 	normalizedID := strings.ToUpper(id)
-	foldedMarker, series, isContentID := classifyRemasterQuery(id)
-	if cached, err := s.contentIDRepo.FindBySearchID(ctx, normalizedID); err == nil && cachedRemasterIdentityMatches(id, cached.ContentID, foldedMarker, series, isContentID) {
+	foldedMarker, series, catalogSuffix, isContentID := classifyRemasterQuery(id)
+	if cached, err := s.contentIDRepo.FindBySearchID(ctx, normalizedID); err == nil && cachedRemasterIdentityMatches(id, cached.ContentID, foldedMarker, series, catalogSuffix, isContentID) {
 		logging.Debugf("DMM: Found cached content-id for %s: %s", id, cached.ContentID)
 		return cached.ContentID, nil
 	}
@@ -44,7 +44,7 @@ func (s *scraper) resolveContentIDCtx(ctx context.Context, id string) (string, e
 		return cid, nil
 	}
 	if foldedMarker != "" {
-		return s.resolveRemasterContentID(ctx, id, normalizedID, foldedMarker, series)
+		return s.resolveRemasterContentID(ctx, id, normalizedID, foldedMarker, series, catalogSuffix)
 	}
 
 	contentID := normalizeContentID(id)

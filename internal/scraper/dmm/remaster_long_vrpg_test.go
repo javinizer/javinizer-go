@@ -12,7 +12,7 @@ import (
 func TestLongPrefixVRPGRemasterSearch(t *testing.T) {
 	for _, q := range []string{"VRPG-123-HD", "VRPG-123H", "5755360vrpg00123h"} {
 		t.Run(q, func(t *testing.T) {
-			marker, series, _ := classifyRemasterQuery(q)
+			marker, series, _, _ := classifyRemasterQuery(q)
 			assert.Equal(t, "h", marker)
 			assert.Equal(t, "vrpg", series)
 			s, _ := newRemasterTestScraper(t)

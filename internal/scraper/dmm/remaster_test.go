@@ -60,6 +60,8 @@ func TestCanonicalRemasterDisplayID(t *testing.T) {
 	assert.Equal(t, "RCT-156H", canonicalRemasterDisplayID("rct-156h"))
 	assert.Equal(t, "PLAIN", canonicalRemasterDisplayID("plain"))
 	assert.Equal(t, "IPX-535", canonicalRemasterDisplayID("IPX-535"))
+	assert.Equal(t, "IPX-535ZH", canonicalRemasterDisplayID("IPX-535Z-HD"))
+	assert.Equal(t, "IPX-535ZH", canonicalRemasterDisplayID("IPX-535ZH"))
 }
 
 func TestRemasterClassification(t *testing.T) {
@@ -87,10 +89,13 @@ func TestRemasterClassification(t *testing.T) {
 		{"oreco183", "", "", false},
 		{"ABC-1234H", "h", "abc", false},
 		{"AbC-1234-Ai", "ai", "abc", false},
+		{"IPX-535Z-HD", "h", "ipx", false},
+		{"IPX-535ZH", "h", "ipx", false},
+		{"1ipx00535zh", "h", "ipx", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.id, func(t *testing.T) {
-			m, series, isCID := classifyRemasterQuery(tc.id)
+			m, series, _, isCID := classifyRemasterQuery(tc.id)
 			assert.Equal(t, tc.marker, m, "marker")
 			assert.Equal(t, tc.series, series, "series")
 			assert.Equal(t, tc.contentID, isCID, "isContentID")

@@ -12,7 +12,7 @@ import (
 func TestDottedRemasterDisplayResolution(t *testing.T) {
 	for _, query := range []string{"RCT.00156.HD", "RCT.156.HD", "RCT.00156H"} {
 		t.Run(query, func(t *testing.T) {
-			marker, series, raw := classifyRemasterQuery(query)
+			marker, series, _, raw := classifyRemasterQuery(query)
 			assert.Equal(t, "h", marker)
 			assert.Equal(t, "rct", series)
 			assert.False(t, raw)
@@ -39,6 +39,6 @@ func TestDottedRemasterDisplayResolution(t *testing.T) {
 			assert.Equal(t, cid, result.ContentID)
 		})
 	}
-	_, _, raw := classifyRemasterQuery("1rct00156hd")
+	_, _, _, raw := classifyRemasterQuery("1rct00156hd")
 	assert.True(t, raw)
 }

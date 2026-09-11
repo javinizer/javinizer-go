@@ -8,7 +8,7 @@ import (
 
 func TestLongRawIdentity(t *testing.T) {
 	for _, id := range []string{"5750360vrg00123h", "5755360vrpg00123hd", "5750360vrg00123ai"} {
-		marker, _, raw := classifyRemasterQuery(id)
+		marker, _, _, raw := classifyRemasterQuery(id)
 		require.NotEmpty(t, marker)
 		assert.True(t, raw)
 		s, _ := newRemasterTestScraper(t)

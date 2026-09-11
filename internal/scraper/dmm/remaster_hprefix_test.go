@@ -19,7 +19,7 @@ func TestHPrefixRemasterSearchPreservesLiteralCID(t *testing.T) {
 		{"n_600abc00123ai", "ai"},
 	} {
 		t.Run(tc.cid, func(t *testing.T) {
-			marker, series, raw := classifyRemasterQuery(tc.cid)
+			marker, series, _, raw := classifyRemasterQuery(tc.cid)
 			assert.Equal(t, tc.marker, marker)
 			assert.Equal(t, "abc", series)
 			assert.True(t, raw)
@@ -45,7 +45,7 @@ func TestHPrefixRemasterSearchPreservesLiteralCID(t *testing.T) {
 			}
 		})
 	}
-	marker, _, raw := classifyRemasterQuery("h_003abc00123")
+	marker, _, _, raw := classifyRemasterQuery("h_003abc00123")
 	assert.Empty(t, marker)
 	assert.True(t, raw)
 }

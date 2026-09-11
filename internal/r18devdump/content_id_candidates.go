@@ -114,7 +114,7 @@ func contentIDCandidates(id string, markerAware bool) []string {
 
 var t28RemasterBaseRegex = regexp.MustCompile(`(?i)^t28(\d{2,5})$`)
 
-var remasterMarkerTailRgx = regexp.MustCompile(`(?i)^(.*\d)(hd|ai|h)$`)
+var remasterMarkerTailRgx = regexp.MustCompile(`(?i)^(.*\d)([ez]?)(hd|ai|h)$`)
 
 // ContentIDCandidatesWithMarker is ContentIDCandidates for marker-bearing
 // inputs: the trailing H/HD/AI marker is split off, base candidates are built
@@ -132,7 +132,8 @@ func ContentIDCandidatesWithMarker(id string) []string {
 	if m == nil {
 		return ContentIDCandidates(id)
 	}
-	marker := strings.ToLower(m[2])
+	marker := strings.ToLower(m[3])
+	suffix := strings.ToLower(m[2])
 	// Only display spellings fold HD to H; separator evidence in the original
 	// input forces display semantics even when the compacted shape looks like
 	// a zero-padded content id (RCT-00156-HD vs raw rct00156hd).
@@ -146,7 +147,7 @@ func ContentIDCandidatesWithMarker(id string) []string {
 		out = append(out, raw)
 	}
 	for _, c := range base {
-		candidate := c + marker
+		candidate := c + suffix + marker
 		if len(out) == 0 || candidate != out[0] {
 			out = append(out, candidate)
 		}

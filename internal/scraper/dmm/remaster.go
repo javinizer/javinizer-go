@@ -18,12 +18,12 @@ var (
 	// ambiguous and must stay on the resolver path.
 	remasterCIDShapeRegex   = regexp.MustCompile(`^(?:\d+(?:t28|[a-z]+)\d{3,5}[a-z]{0,3}|(?:t28|[a-z]+)\d{5}[a-z]{0,3})$`)
 	underscoreCIDShapeRegex = regexp.MustCompile(`^[hn]_\d+[a-z]+\d+[a-z]{0,2}$`)
-	remasterTailRegex       = regexp.MustCompile(`^(\d*)((?:t28|[a-z]+))(\d{2,5})(hd|ai|h)$`)
+	remasterTailRegex       = regexp.MustCompile(`^(\d*)((?:t28|[a-z]+))(\d{2,5})([ez]?)(hd|ai|h)$`)
 	anchoredMarkerCIDReg    = regexp.MustCompile(`^(\d*)((?:t28|[a-z]+))(\d{3,5})([a-z]{1,3})$`)
 	nonAlnumRegex           = regexp.MustCompile(`[^a-z0-9]+`)
 )
 
-func cachedRemasterIdentityMatches(id, cid, marker, series string, raw bool) bool {
+func cachedRemasterIdentityMatches(id, cid, marker, series, suffix string, raw bool) bool {
 	if marker == "" {
 		return true
 	}
@@ -31,8 +31,8 @@ func cachedRemasterIdentityMatches(id, cid, marker, series string, raw bool) boo
 		return strings.EqualFold(strings.TrimSpace(id), strings.TrimSpace(cid))
 	}
 	clean := cleanPrefixRegex.ReplaceAllString(strings.ToLower(cid), "$1")
-	cachedSeries, cachedMarker, ok := parseAnchoredMarkerCID(clean)
-	return ok && cachedSeries == series && cachedMarker == marker
+	cachedSeries, cachedMarker, cachedSuffix, ok := parseAnchoredMarkerCID(clean)
+	return ok && cachedSeries == series && cachedMarker == marker && cachedSuffix == suffix
 }
 
 func compactQueryID(id string) string {
@@ -44,7 +44,7 @@ func compactQueryID(id string) string {
 // classifyRemasterQuery reports whether an input ID carries an AI/HD remaster
 // marker and whether it is content-id-shaped. The returned foldedMarker is "h"
 // for both H and HD spellings and "ai" for AI; series is the letter sequence.
-func classifyRemasterQuery(id string) (foldedMarker string, series string, isContentID bool) {
+func classifyRemasterQuery(id string) (foldedMarker, series, catalogSuffix string, isContentID bool) {
 	compact := compactQueryID(id)
 	lowerRaw := strings.ToLower(strings.TrimSpace(id))
 	// A hyphenated/spaced input is a display ID, not a raw content ID: it must
@@ -58,16 +58,17 @@ func classifyRemasterQuery(id string) (foldedMarker string, series string, isCon
 	}
 	m := remasterTailRegex.FindStringSubmatch(compact)
 	if m == nil {
-		return "", "", isContentID
+		return "", "", "", isContentID
 	}
 	series = m[2]
-	switch m[4] {
+	catalogSuffix = m[4]
+	switch m[5] {
 	case "hd", "h":
 		foldedMarker = "h"
 	case "ai":
 		foldedMarker = "ai"
 	}
-	return foldedMarker, series, isContentID
+	return foldedMarker, series, catalogSuffix, isContentID
 }
 
 func foldMarkerSuffix(s string) string {
@@ -86,10 +87,10 @@ func canonicalRemasterDisplayID(id string) string {
 		return strings.ToUpper(id)
 	}
 	marker := "H"
-	if m[4] == "ai" {
+	if m[5] == "ai" {
 		marker = "AI"
 	}
-	return strings.ToUpper(m[2]) + "-" + m[3] + marker
+	return strings.ToUpper(m[2]) + "-" + m[3] + strings.ToUpper(m[4]) + marker
 }
 
 // stripRentalSuffixMarkerAware extends stripRentalSuffix: in addition to the
@@ -137,11 +138,12 @@ func remasterSearchSpellings(id string) []string {
 	if m == nil {
 		return nil
 	}
-	series, number, spelling := m[2], m[3], m[4]
+	series, number, suffix, spelling := m[2], m[3], m[4], m[5]
 	padded := number
 	if len(padded) < 5 {
 		padded = strings.Repeat("0", 5-len(padded)) + padded
 	}
+	paddedSuffix := padded + suffix
 	displayMarker := "hd"
 	if spelling == "ai" {
 		displayMarker = "ai"
@@ -151,28 +153,38 @@ func remasterSearchSpellings(id string) []string {
 		short = "ai"
 	}
 	return []string{
-		series + "-" + number + "-" + displayMarker,
-		series + number + displayMarker,
-		series + padded + displayMarker,
-		series + "-" + padded + "-" + displayMarker,
-		series + number + short,
-		series + padded + short,
+		series + "-" + number + suffix + "-" + displayMarker,
+		series + number + suffix + displayMarker,
+		series + paddedSuffix + displayMarker,
+		series + "-" + paddedSuffix + "-" + displayMarker,
+		series + number + suffix + short,
+		series + paddedSuffix + short,
 	}
 }
 
-// parseAnchoredMarkerCID parses a prefix-cleaned content id into series and
-// folded trailing marker. Returns ok=false for malformed ids.
-func parseAnchoredMarkerCID(clean string) (series string, folded string, ok bool) {
+// parseAnchoredMarkerCID parses a prefix-cleaned content id into series,
+// folded trailing marker and optional E/Z catalog suffix. Returns ok=false for
+// malformed ids or unrecognized suffix letters.
+func parseAnchoredMarkerCID(clean string) (series string, folded string, suffix string, ok bool) {
 	m := anchoredMarkerCIDReg.FindStringSubmatch(clean)
 	if m == nil {
-		return "", "", false
+		return "", "", "", false
 	}
-	mk := m[4]
-	switch mk {
-	case "hd", "h":
-		mk = "h"
+	tail := m[4]
+	switch {
+	case strings.HasSuffix(tail, "ai"):
+		suffix, folded = strings.TrimSuffix(tail, "ai"), "ai"
+	case strings.HasSuffix(tail, "hd"):
+		suffix, folded = strings.TrimSuffix(tail, "hd"), "h"
+	case strings.HasSuffix(tail, "h"):
+		suffix, folded = strings.TrimSuffix(tail, "h"), "h"
+	default:
+		return "", "", "", false
 	}
-	return m[2], mk, true
+	if suffix != "" && suffix != "e" && suffix != "z" {
+		return "", "", "", false
+	}
+	return m[2], folded, suffix, true
 }
 
 // extractRemasterContentIDCandidates scans a DMM search document for anchors
@@ -187,7 +199,7 @@ type remasterCandidate struct {
 	length    int
 }
 
-func extractRemasterContentIDCandidates(doc *goquery.Document, wantSeries, wantFoldedMarker string) []remasterCandidate {
+func extractRemasterContentIDCandidates(doc *goquery.Document, wantSeries, wantFoldedMarker, wantSuffix string) []remasterCandidate {
 	var out []remasterCandidate
 	if doc == nil {
 		return out
@@ -213,8 +225,8 @@ func extractRemasterContentIDCandidates(doc *goquery.Document, wantSeries, wantF
 		rawCID = stripRentalSuffixMarkerAware(rawCID)
 		norm := strings.ToLower(strings.ReplaceAll(rawCID, "-", ""))
 		clean := cleanPrefixRegex.ReplaceAllString(norm, "$1")
-		series, folded, ok := parseAnchoredMarkerCID(clean)
-		if !ok || series != wantSeries || folded != wantFoldedMarker {
+		series, folded, suffix, ok := parseAnchoredMarkerCID(clean)
+		if !ok || series != wantSeries || folded != wantFoldedMarker || suffix != wantSuffix {
 			return
 		}
 		fullURL := ""
@@ -232,7 +244,7 @@ func extractRemasterContentIDCandidates(doc *goquery.Document, wantSeries, wantF
 // accumulate candidates across ALL query variations, dedupe by cleaned cid,
 // accept a single distinct cid directly, and verify ambiguous cases via
 // product-page display IDs.
-func (s *scraper) resolveRemasterContentID(ctx context.Context, id, normalizedID, foldedMarker, series string) (string, error) {
+func (s *scraper) resolveRemasterContentID(ctx context.Context, id, normalizedID, foldedMarker, series, catalogSuffix string) (string, error) {
 	queries := uniqueNonEmptyStrings(append(buildResolveContentIDSearchQueries(id, normalizeContentID(id)), remasterSearchSpellings(id)...))
 
 	type aggCand struct {
@@ -263,7 +275,7 @@ func (s *scraper) resolveRemasterContentID(ctx context.Context, id, normalizedID
 		doc, err := goquery.NewDocumentFromReader(strings.NewReader(resp.String()))
 		var pageCands []remasterCandidate
 		if err == nil {
-			pageCands = extractRemasterContentIDCandidates(doc, series, foldedMarker)
+			pageCands = extractRemasterContentIDCandidates(doc, series, foldedMarker, catalogSuffix)
 		}
 		for _, c := range pageCands {
 			if existing, ok := byClean[c.cleanID]; ok {
@@ -293,7 +305,11 @@ func (s *scraper) resolveRemasterContentID(ctx context.Context, id, normalizedID
 	var verified []string
 	for _, clean := range order {
 		c := byClean[clean]
-		if s.verifyCandidateDisplayID(ctx, target, c.urls) == displayVerified {
+		status, err := s.verifyCandidateDisplayID(ctx, target, c.urls)
+		if err != nil {
+			return "", fmt.Errorf("DMM: remaster display verification for %s: %w", id, err)
+		}
+		if status == displayVerified {
 			verified = append(verified, clean)
 		}
 	}
@@ -327,46 +343,55 @@ const (
 	displayUnverifiable
 )
 
-var displayIdentityRegex = regexp.MustCompile(`^((?:t28|[a-z]+))0*(\d+)(hd|ai|h)$`)
+var displayIdentityRegex = regexp.MustCompile(`^((?:t28|[a-z]+))0*(\d+)([ez]?)(hd|ai|h)$`)
 
 // parseDisplayIdentity splits a folded display identity into series, numeric
-// value and folded marker so padded spellings (rct00156h) match what product
-// pages show (rct156h).
-func parseDisplayIdentity(s string) (string, string, string, bool) {
+// value, optional E/Z catalog suffix and folded marker so padded spellings
+// (rct00156h) match what product pages show (rct156h).
+func parseDisplayIdentity(s string) (string, string, string, string, bool) {
 	m := displayIdentityRegex.FindStringSubmatch(s)
 	if m == nil {
-		return "", "", "", false
+		return "", "", "", "", false
 	}
-	marker := m[3]
+	marker := m[4]
 	if marker == "hd" {
 		marker = "h"
 	}
-	return m[1], m[2], marker, true
+	return m[1], m[2], m[3], marker, true
 }
 
 // verifyCandidateDisplayID fetches every eligible product page for a candidate
 // and combines the parseable display identities: zero parseable => unverified,
 // multiple distinct => unverifiable, exactly one => verified iff it equals the
 // folded target identity.
-func (s *scraper) verifyCandidateDisplayID(ctx context.Context, foldedTarget string, urls []string) displayStatus {
+func (s *scraper) verifyCandidateDisplayID(ctx context.Context, foldedTarget string, urls []string) (displayStatus, error) {
 	identities := map[string]struct{}{}
 	for _, u := range urls {
 		if u == "" || (!strings.HasPrefix(u, "https://www.dmm.co.jp/") && !strings.HasPrefix(u, "https://video.dmm.co.jp/")) {
 			continue
 		}
 		if err := s.rateLimiter.Wait(ctx); err != nil {
-			break
+			return displayUnverifiable, err
 		}
 		var body string
 		if strings.HasPrefix(u, "https://video.dmm.co.jp/") && s.useBrowser {
 			var err error
 			body, err = s.fetchBrowserPage(ctx, u)
 			if err != nil {
+				if ctx.Err() != nil {
+					return displayUnverifiable, ctx.Err()
+				}
 				continue
 			}
 		} else {
 			resp, err := s.client.R().SetContext(ctx).Get(u)
-			if err != nil || resp.StatusCode() != 200 {
+			if err != nil {
+				if ctx.Err() != nil {
+					return displayUnverifiable, ctx.Err()
+				}
+				continue
+			}
+			if resp.StatusCode() != 200 {
 				continue
 			}
 			body = resp.String()
@@ -378,16 +403,16 @@ func (s *scraper) verifyCandidateDisplayID(ctx context.Context, foldedTarget str
 		}
 	}
 	if len(identities) == 1 {
-		ts, td, tm, tok := parseDisplayIdentity(foldedTarget)
+		ts, td, tsuf, tm, tok := parseDisplayIdentity(foldedTarget)
 		for k := range identities {
-			ds, dd, dm, dok := parseDisplayIdentity(k)
-			if tok && dok && ds == ts && dd == td && dm == tm {
-				return displayVerified
+			ds, dd, dsuf, dm, dok := parseDisplayIdentity(k)
+			if tok && dok && ds == ts && dd == td && dsuf == tsuf && dm == tm {
+				return displayVerified, nil
 			}
 		}
-		return displayRejected
+		return displayRejected, nil
 	}
-	return displayUnverifiable
+	return displayUnverifiable, nil
 }
 
 // extractDisplayID reads the display DVD ID (品番) from a DMM product page's
