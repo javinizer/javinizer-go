@@ -11,7 +11,7 @@ var contentIDFullRegex = regexp.MustCompile(`^(\d*)([a-z]+)(\d+)(.*)$`)
 
 // zeroPaddedCIDRegex matches prefixless digital content ids with a five-digit
 // zero-padded number (rct00156hd-class).
-var zeroPaddedCIDRegex = regexp.MustCompile(`^(?:t28|[a-z]{1,6})\d{5}[a-z]{0,3}$`)
+var zeroPaddedCIDRegex = regexp.MustCompile(`^(?:t28|[a-z]+)\d{5}[a-z]{0,3}$`)
 
 // underscoreContentIDRegex recognizes PPV-style content_ids (h_086mesu00103),
 // which SplitSeriesAndNumber cannot decompose because of the underscore.

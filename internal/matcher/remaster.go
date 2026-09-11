@@ -6,10 +6,10 @@ import (
 )
 
 var (
-	fusedRemasterRegex     = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(t28|[a-z]{1,6})(\d{3})(hd|ai|h)(?:$|[-_.\s])`)
-	separatedRemasterRegex = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(t28|[a-z]{1,6})[._\s]+(\d{2,5})[-._\s]?(hd|ai|h)(?:$|[-_.\s])`)
+	fusedRemasterRegex     = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(t28|[a-z]+)(\d{3})(hd|ai|h)(?:$|[-_.\s])`)
+	separatedRemasterRegex = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(t28|[a-z]+)[._\s]+(\d{2,5})[-._\s]?(hd|ai|h)(?:$|[-_.\s])`)
 	reRemasterRemainder    = regexp.MustCompile(`(?i)^[-_.\s]?(HD|AI|H)(?:$|[-_.\s])`)
-	contentIDShapeRegex    = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])((?:\d+(?:t28|[A-Za-z]{1,6})\d{3,5}[A-Za-z]{0,3}|(?:t28|[A-Za-z]{1,6})\d{4,5}[A-Za-z]{0,3}))([-_.\s].+)?$`)
+	contentIDShapeRegex    = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])((?:\d+(?:t28|[A-Za-z]+)\d{3,5}[A-Za-z]{0,3}|(?:t28|[A-Za-z]+)\d{4,5}[A-Za-z]{0,3}))([-_.\s].+)?$`)
 )
 
 func builtinStartsInsideContentID(s string, pattern *regexp.Regexp) bool {

@@ -11,7 +11,7 @@ import (
 )
 
 func TestPrefixlessRawRemasterDumpParity(t *testing.T) {
-	for _, id := range []string{"rct00156hd", "rct00156h", "dv00818ai", "t2800123hd", "a00123hd"} {
+	for _, id := range []string{"rct00156hd", "rct00156h", "dv00818ai", "t2800123hd", "a00123hd", "abeauty00123hd"} {
 		t.Run(id, func(t *testing.T) {
 			candidates := r18devdump.ContentIDCandidatesWithMarker(id)
 			require.NotEmpty(t, candidates)

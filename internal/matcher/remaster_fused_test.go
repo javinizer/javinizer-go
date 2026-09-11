@@ -14,6 +14,9 @@ func TestFusedThreeDigitRemaster(t *testing.T) {
 		part             int
 	}{
 		{"RCT156H.mkv", "RCT-156H", "H", 0},
+		{"ABEAUTY-123-HD.mkv", "ABEAUTY-123H", "HD", 0},
+		{"ABEAUTY.123.AI-pt2.mkv", "ABEAUTY-123AI", "AI", 2},
+		{"ABEAUTY123HD.mkv", "ABEAUTY-123H", "HD", 0},
 		{"A123H.mkv", "A-123H", "H", 0},
 		{"A-123-HD.mkv", "A-123H", "HD", 0},
 		{"A.123.HD.mkv", "A-123H", "HD", 0},

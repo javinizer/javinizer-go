@@ -9,7 +9,7 @@ import (
 )
 
 func TestPaddedRemasterFullDumpLookup(t *testing.T) {
-	path := seedDump(t, "1rct00156h\tRCT-156-HD\ndv00818ai\tDV-818-AI\nabc00001h\tABC-001-HD\n9t28123h\tT28-123-HD")
+	path := seedDump(t, "1rct00156h\tRCT-156-HD\ndv00818ai\tDV-818-AI\nabc00001h\tABC-001-HD\n9t28123h\tT28-123-HD\n5125abeauty00123h\tABEAUTY-123-HD")
 	store, err := Open(path)
 	require.NoError(t, err)
 	defer store.Close()
@@ -23,6 +23,8 @@ func TestPaddedRemasterFullDumpLookup(t *testing.T) {
 		{"DV-00818AI", "dv00818ai"},
 		{"ABC-00001H", "abc00001h"},
 		{"T28-00123H", "9t28123h"},
+		{"ABEAUTY.00123.HD", "5125abeauty00123h"},
+		{"ABEAUTY-123H", "5125abeauty00123h"},
 	} {
 		t.Run(tc.query, func(t *testing.T) {
 			movie, err := store.LookupMovie(context.Background(), tc.query)

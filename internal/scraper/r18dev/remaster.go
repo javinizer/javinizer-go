@@ -9,9 +9,9 @@ import (
 )
 
 var (
-	r18RemasterTailRegex = regexp.MustCompile(`^(\d*)((?:t28|[a-z]{1,6}))(\d{2,5})(hd|ai|h)$`)
-	r18CIDAnchoredRegex  = regexp.MustCompile(`^(\d*)((?:t28|[a-z]{1,6}))(\d{3,5})([a-z]{0,3})$`)
-	r18PrefixedCIDRegex  = regexp.MustCompile(`^[hn]_\d+(?:t28|[a-z]{1,6})\d{3,5}[a-z]{0,3}$`)
+	r18RemasterTailRegex = regexp.MustCompile(`^(\d*)((?:t28|[a-z]+))(\d{2,5})(hd|ai|h)$`)
+	r18CIDAnchoredRegex  = regexp.MustCompile(`^(\d*)((?:t28|[a-z]+))(\d{3,5})([a-z]{0,3})$`)
+	r18PrefixedCIDRegex  = regexp.MustCompile(`^[hn]_\d+(?:t28|[a-z]+)\d{3,5}[a-z]{0,3}$`)
 	nonAlnumR18Regex     = regexp.MustCompile(`[^a-z0-9]+`)
 )
 
@@ -146,7 +146,7 @@ func isRawRemasterContentIDQuery(id string) bool {
 	return rawRemasterCIDShapeRegex.MatchString(s)
 }
 
-var rawRemasterCIDShapeRegex = regexp.MustCompile(`^(?:\d+(?:t28|[a-z]{1,6})\d{3,5}[a-z]{0,3}|(?:t28|[a-z]{1,6})\d{5}[a-z]{0,3})$`)
+var rawRemasterCIDShapeRegex = regexp.MustCompile(`^(?:\d+(?:t28|[a-z]+)\d{3,5}[a-z]{0,3}|(?:t28|[a-z]+)\d{5}[a-z]{0,3})$`)
 
 func canonicalRemasterDisplayID(id string) string {
 	m := r18RemasterTailRegex.FindStringSubmatch(r18RemasterCore(id))
