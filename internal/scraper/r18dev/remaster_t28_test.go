@@ -14,7 +14,7 @@ import (
 func TestT28RemasterSearch(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		if strings.Contains(r.URL.Path, "dvd_id=") || strings.Contains(r.URL.Path, "combined=9t28123h") {
+		if strings.Contains(r.URL.Path, "combined=9t28123h") {
 			_, _ = w.Write([]byte(`{"content_id":"9t28123h","dvd_id":"T28-123-HD","title_en":"Remaster"}`))
 			return
 		}

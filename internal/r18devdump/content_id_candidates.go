@@ -11,7 +11,7 @@ var contentIDFullRegex = regexp.MustCompile(`^(\d*)([a-z]+)(\d+)(.*)$`)
 
 // zeroPaddedCIDRegex matches prefixless digital content ids with a five-digit
 // zero-padded number (rct00156hd-class).
-var zeroPaddedCIDRegex = regexp.MustCompile(`^[a-z]{2,6}\d{5}[a-z]{0,3}$`)
+var zeroPaddedCIDRegex = regexp.MustCompile(`^(?:t28|[a-z]{2,6})\d{5}[a-z]{0,3}$`)
 
 // underscoreContentIDRegex recognizes PPV-style content_ids (h_086mesu00103),
 // which SplitSeriesAndNumber cannot decompose because of the underscore.
@@ -24,6 +24,10 @@ var underscoreContentIDRegex = regexp.MustCompile(`^[a-z]_\d+[a-z]+\d+`)
 // Uses the ContentIDPrefixLookup table built from r18.dev database dumps to find
 // known prefixes per series. Falls back to common prefixes if the series is unknown.
 func ContentIDCandidates(id string) []string {
+	return contentIDCandidates(id, false)
+}
+
+func contentIDCandidates(id string, markerAware bool) []string {
 	// Identity candidate: the input itself in content-id form. It leads for
 	// content-id-shaped input (leading numeric prefix or zero-padded 5-digit
 	// number, e.g. "118ipx00535", "lulu00441") so exact content_id queries
@@ -47,6 +51,11 @@ func ContentIDCandidates(id string) []string {
 		return nil
 	}
 
+	if markerAware {
+		if m := t28RemasterBaseRegex.FindStringSubmatch(direct); m != nil {
+			series, numStr = "t28", m[1]
+		}
+	}
 	series = strings.ToLower(series)
 	num, err := strconv.Atoi(numStr)
 	if err != nil {
@@ -58,7 +67,9 @@ func ContentIDCandidates(id string) []string {
 
 	// Look up known prefixes for this series from the r18.dev database dump
 	var prefixes []string
-	if lookup, ok := ContentIDPrefixLookup[series]; ok {
+	if markerAware && series == "t28" {
+		prefixes = []string{"9", "", "1"}
+	} else if lookup, ok := ContentIDPrefixLookup[series]; ok {
 		prefixes = lookup
 	} else {
 		// Fallback: try common prefixes for unknown series
@@ -101,6 +112,8 @@ func ContentIDCandidates(id string) []string {
 	return variations
 }
 
+var t28RemasterBaseRegex = regexp.MustCompile(`(?i)^t28(\d{3,5})$`)
+
 var remasterMarkerTailRgx = regexp.MustCompile(`(?i)^(.*\d)(hd|ai|h)$`)
 
 // ContentIDCandidatesWithMarker is ContentIDCandidates for marker-bearing
@@ -127,7 +140,7 @@ func ContentIDCandidatesWithMarker(id string) []string {
 	if marker == "hd" && (hasSeparator || (!looksLikeContentID(strings.ToLower(compacted)) && !zeroPaddedCIDRegex.MatchString(strings.ToLower(compacted)))) {
 		marker = "h"
 	}
-	base := ContentIDCandidates(m[1])
+	base := contentIDCandidates(m[1], true)
 	out := make([]string, 0, len(base))
 	for _, c := range base {
 		out = append(out, c+marker)

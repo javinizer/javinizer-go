@@ -8,7 +8,7 @@ import (
 var (
 	fusedRemasterRegex  = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])([a-z]{2,6})(\d{3})(hd|ai|h)(?:$|[-_.\s])`)
 	reRemasterRemainder = regexp.MustCompile(`(?i)^[-_.\s]?(HD|AI|H)(?:$|[-_.\s])`)
-	contentIDShapeRegex = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])((?:\d{1,5}[A-Za-z]{2,6}\d{3,5}[A-Za-z]{0,3}|[A-Za-z]{2,6}\d{4,5}[A-Za-z]{0,3}))([-_.\s].+)?$`)
+	contentIDShapeRegex = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])((?:\d{1,5}(?:t28|[A-Za-z]{2,6})\d{3,5}[A-Za-z]{0,3}|(?:t28|[A-Za-z]{2,6})\d{4,5}[A-Za-z]{0,3}))([-_.\s].+)?$`)
 )
 
 func builtinStartsInsideContentID(s string, pattern *regexp.Regexp) bool {

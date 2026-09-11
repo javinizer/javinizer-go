@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
@@ -254,7 +255,11 @@ func (s *scraper) resolveRemasterContentID(ctx context.Context, id, normalizedID
 		}
 		for _, c := range pageCands {
 			if existing, ok := byClean[c.cleanID]; ok {
-				existing.urls = append(existing.urls, c.urls...)
+				for _, u := range c.urls {
+					if !slices.Contains(existing.urls, u) {
+						existing.urls = append(existing.urls, u)
+					}
+				}
 				if len(c.contentID) > len(existing.contentID) {
 					existing.contentID = c.contentID
 				}
