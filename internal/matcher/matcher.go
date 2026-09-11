@@ -151,9 +151,15 @@ func (m *Matcher) matchWithRegex(file models.FileMatchInfo, filename string, pat
 	result.ID = strings.ToUpper(id)
 
 	if matchType == "builtin" {
-		if spelling := remasterMarkerSpelling(remainderAfterID(filename, id)); spelling != "" {
+		if spelling, suffix := splitRemasterMarker(remainderAfterID(filename, id)); spelling != "" {
 			result.ID += foldRemasterMarker(spelling)
 			result.RemasterMarker = spelling
+			num, partSuffix, patternType, trailingPrefix := DetectPartSuffix(suffix, "")
+			result.PartNumber = num
+			result.PartSuffix = partSuffix
+			result.MultipartPattern = patternType
+			result.TrailingPrefix = trailingPrefix
+			result.IsMultiPart = patternType == PatternExplicit
 			return result
 		}
 	}

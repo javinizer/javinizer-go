@@ -114,7 +114,7 @@ func ContentIDCandidatesWithMarker(id string) []string {
 	}
 	// Normalize display separators first: advertised spellings (RCT-156-HD,
 	// DV-818-AI, RCT-156 HD) place a separator between number and marker.
-	compacted := strings.NewReplacer("-", "", "_", "", " ", "").Replace(strings.TrimSpace(id))
+	compacted := strings.NewReplacer("-", "", "_", "", ".", "", " ", "").Replace(strings.TrimSpace(id))
 	m := remasterMarkerTailRgx.FindStringSubmatch(compacted)
 	if m == nil {
 		return ContentIDCandidates(id)
@@ -123,7 +123,7 @@ func ContentIDCandidatesWithMarker(id string) []string {
 	// Only display spellings fold HD to H; separator evidence in the original
 	// input forces display semantics even when the compacted shape looks like
 	// a zero-padded content id (RCT-00156-HD vs raw rct00156hd).
-	hasSeparator := strings.ContainsAny(id, "-_ ")
+	hasSeparator := strings.ContainsAny(id, "-_. ")
 	if marker == "hd" && (hasSeparator || (!looksLikeContentID(strings.ToLower(compacted)) && !zeroPaddedCIDRegex.MatchString(strings.ToLower(compacted)))) {
 		marker = "h"
 	}

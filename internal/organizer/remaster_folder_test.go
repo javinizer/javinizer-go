@@ -14,6 +14,8 @@ func TestRemasterSeparatedFilenameDedicatedFolder(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	require.NoError(t, fs.MkdirAll("/source", 0755))
 	require.NoError(t, afero.WriteFile(fs, "/source/RCT-156-HD.mkv", nil, 0644))
+	require.NoError(t, afero.WriteFile(fs, "/source/RCT-156-HD-pt2.mkv", nil, 0644))
+	require.NoError(t, afero.WriteFile(fs, "/source/RCT-156-HD-1080p.mkv", nil, 0644))
 	m, err := matcher.NewMatcher(&matcher.Config{})
 	require.NoError(t, err)
 	strategy := newInPlaceStrategy(fs, &Config{}, m, nil)

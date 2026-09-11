@@ -64,23 +64,23 @@ func TestMatchFile_ContentIDPartSuffixes(t *testing.T) {
 	assert.Equal(t, "1RCT00156H", m.MatchString("1rct00156h-pt2"))
 }
 
-func TestMatchFile_RemasterPartsBindToBase(t *testing.T) {
+func TestMatchFile_RemasterPartsPreserveRelease(t *testing.T) {
 	m, err := NewMatcher(&Config{})
 	require.NoError(t, err)
 
 	got := matchOne(t, m, "RCT-156-HD-2.mkv")
 	require.NotNil(t, got)
-	assert.Equal(t, "RCT-156", got.ID)
+	assert.Equal(t, "RCT-156H", got.ID)
 	assert.Equal(t, 2, got.PartNumber)
-	assert.Equal(t, PatternTrailing, got.MultipartPattern)
-	assert.Equal(t, "", got.RemasterMarker)
+	assert.Equal(t, PatternExplicit, got.MultipartPattern)
+	assert.Equal(t, "HD", got.RemasterMarker)
 
 	got = matchOne(t, m, "RCT-156H-pt2.mkv")
 	require.NotNil(t, got)
-	assert.Equal(t, "RCT-156", got.ID)
+	assert.Equal(t, "RCT-156H", got.ID)
 	assert.Equal(t, 2, got.PartNumber)
 	assert.Equal(t, PatternExplicit, got.MultipartPattern)
-	assert.Equal(t, "", got.RemasterMarker)
+	assert.Equal(t, "H", got.RemasterMarker)
 
 	got = matchOne(t, m, "pt2-RCT-156-HD.mkv")
 	require.NotNil(t, got)
@@ -170,7 +170,7 @@ func TestMatchString_RemasterParity(t *testing.T) {
 	assert.Equal(t, "DV-818AI", m.MatchString("DV-818AI"))
 	assert.Equal(t, "1RCT00156H", m.MatchString("1rct00156h.mkv"))
 	assert.Equal(t, "1RCT00156H", m.MatchString("1rct00156h"))
-	assert.Equal(t, "RCT-156", m.MatchString("RCT-156-HD-2"))
+	assert.Equal(t, "RCT-156H", m.MatchString("RCT-156-HD-2"))
 	assert.Equal(t, "", m.MatchString("oreco183a"))
 }
 

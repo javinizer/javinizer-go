@@ -14,6 +14,9 @@ func TestHPrefixRemasterSearchPreservesLiteralCID(t *testing.T) {
 		{"h_003abc00123h", "h"},
 		{"h_003abc00123hd", "h"},
 		{"h_003abc00123ai", "ai"},
+		{"n_600abc00123h", "h"},
+		{"n_600abc00123hd", "h"},
+		{"n_600abc00123ai", "ai"},
 	} {
 		t.Run(tc.cid, func(t *testing.T) {
 			marker, series, raw := classifyRemasterQuery(tc.cid)
@@ -35,6 +38,7 @@ func TestHPrefixRemasterSearchPreservesLiteralCID(t *testing.T) {
 			result, err := s.Search(context.Background(), tc.cid)
 			require.NoError(t, err)
 			assert.Equal(t, tc.cid, result.ContentID)
+			assert.NotEmpty(t, result.ID)
 			assert.Contains(t, result.SourceURL, "cid="+tc.cid)
 			for _, hit := range rt.hits {
 				assert.NotContains(t, hit, "cid=1abc00999h")

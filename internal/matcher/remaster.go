@@ -6,7 +6,7 @@ import (
 )
 
 var (
-	reRemasterRemainder = regexp.MustCompile(`(?i)^[-_.\s]?(HD|AI|H)$`)
+	reRemasterRemainder = regexp.MustCompile(`(?i)^[-_.\s]?(HD|AI|H)(?:$|[-_.\s])`)
 	contentIDShapeRegex = regexp.MustCompile(`(?i)^((?:\d{1,5}[A-Za-z]{2,6}\d{3,5}[A-Za-z]{0,3}|[A-Za-z]{2,6}\d{4,5}[A-Za-z]{0,3}))([-_.\s].+)?$`)
 )
 
@@ -20,12 +20,18 @@ func remainderAfterID(name, id string) string {
 	return strings.TrimSpace(name[idx+len(id):])
 }
 
-func remasterMarkerSpelling(remainder string) string {
-	m := reRemasterRemainder.FindStringSubmatch(strings.TrimSpace(remainder))
-	if len(m) != 2 {
-		return ""
+func splitRemasterMarker(remainder string) (string, string) {
+	remainder = strings.TrimSpace(remainder)
+	m := reRemasterRemainder.FindStringSubmatchIndex(remainder)
+	if m == nil {
+		return "", remainder
 	}
-	return strings.ToUpper(m[1])
+	return strings.ToUpper(remainder[m[2]:m[3]]), remainder[m[3]:]
+}
+
+func remasterMarkerSpelling(remainder string) string {
+	spelling, _ := splitRemasterMarker(remainder)
+	return spelling
 }
 
 func foldRemasterMarker(spelling string) string {

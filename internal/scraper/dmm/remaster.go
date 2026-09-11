@@ -15,11 +15,11 @@ var (
 	// Unambiguous content-id shapes only: a channel prefix or a five-digit
 	// zero-padded number. Separator-free four-digit display ids (ABP1234) are
 	// ambiguous and must stay on the resolver path.
-	remasterCIDShapeRegex = regexp.MustCompile(`^(?:\d{1,5}[a-z]{2,6}\d{3,5}[a-z]{0,3}|[a-z]{2,6}\d{5}[a-z]{0,3})$`)
-	hPrefixCIDShapeRegex  = regexp.MustCompile(`^h_\d+[a-z]+\d+[a-z]{0,2}$`)
-	remasterTailRegex     = regexp.MustCompile(`^(\d{0,5})([a-z]{2,6})(\d{3,5})(hd|ai|h)$`)
-	anchoredMarkerCIDReg  = regexp.MustCompile(`^(\d{0,2})([a-z]{2,6})(\d{3,5})([a-z]{1,3})$`)
-	nonAlnumRegex         = regexp.MustCompile(`[^a-z0-9]+`)
+	remasterCIDShapeRegex   = regexp.MustCompile(`^(?:\d{1,5}[a-z]{2,6}\d{3,5}[a-z]{0,3}|[a-z]{2,6}\d{5}[a-z]{0,3})$`)
+	underscoreCIDShapeRegex = regexp.MustCompile(`^[hn]_\d+[a-z]+\d+[a-z]{0,2}$`)
+	remasterTailRegex       = regexp.MustCompile(`^(\d{0,5})([a-z]{2,6})(\d{3,5})(hd|ai|h)$`)
+	anchoredMarkerCIDReg    = regexp.MustCompile(`^(\d{0,2})([a-z]{2,6})(\d{3,5})([a-z]{1,3})$`)
+	nonAlnumRegex           = regexp.MustCompile(`[^a-z0-9]+`)
 )
 
 func compactQueryID(id string) string {
@@ -38,9 +38,9 @@ func classifyRemasterQuery(id string) (foldedMarker string, series string, isCon
 	// keep the resolver path (catalog-prefix search, padding, server-mediated
 	// number mapping). Only separator-free compact forms count as content IDs.
 	hasSeparator := strings.ContainsAny(lowerRaw, "-_. ")
-	isContentID = hPrefixCIDShapeRegex.MatchString(lowerRaw) ||
+	isContentID = underscoreCIDShapeRegex.MatchString(lowerRaw) ||
 		(!hasSeparator && remasterCIDShapeRegex.MatchString(compact))
-	if hPrefixCIDShapeRegex.MatchString(lowerRaw) {
+	if underscoreCIDShapeRegex.MatchString(lowerRaw) {
 		compact = cleanPrefixRegex.ReplaceAllString(lowerRaw, "$1")
 	}
 	m := remasterTailRegex.FindStringSubmatch(compact)

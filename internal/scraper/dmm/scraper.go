@@ -32,7 +32,7 @@ var (
 	normalizeIDRegex        = regexp.MustCompile(`^([a-z]+)(\d+)(.*)$`)
 	normalizeContentIDRegex = regexp.MustCompile(`^([a-z]+)(\d+)(.*)$`)
 	contentIDUnpadRegex     = regexp.MustCompile(`^([a-z]+)0*(\d+.*)$`)
-	cleanPrefixRegex        = regexp.MustCompile(`^(?:\d+|h_\d+)?([a-z]+\d+.*)$`)
+	cleanPrefixRegex        = regexp.MustCompile(`^(?:\d+|[hn]_\d+)?([a-z]+\d+.*)$`)
 	actressIDRegex          = regexp.MustCompile(`[?&]actress=(\d+)`)
 	actressArticleIDRegex   = regexp.MustCompile(`/article=actress/id=(\d+)`)
 	actressParenRegex       = regexp.MustCompile(`\(.*\)|（.*）`)
