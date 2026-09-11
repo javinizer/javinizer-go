@@ -102,8 +102,33 @@ func guardRemasterResult(id string, res *models.ScraperResult) (*models.ScraperR
 	if foldedMarker == "" || res == nil {
 		return res, nil
 	}
-	if cidMatchesMarker(res.ContentID, foldedMarker, series) {
-		return res, nil
+	if !cidMatchesMarker(res.ContentID, foldedMarker, series) {
+		return nil, models.NewScraperNotFoundError("R18.dev", "response does not carry the requested remaster identity")
 	}
-	return nil, models.NewScraperNotFoundError("R18.dev", "response does not carry the requested remaster identity")
+	if !isRawRemasterContentIDQuery(id) {
+		res.ID = canonicalRemasterDisplayID(id)
+	}
+	return res, nil
+}
+
+func isRawRemasterContentIDQuery(id string) bool {
+	s := strings.ToLower(strings.TrimSpace(id))
+	if strings.ContainsAny(s, "-_ ") {
+		return false
+	}
+	return rawRemasterCIDShapeRegex.MatchString(s)
+}
+
+var rawRemasterCIDShapeRegex = regexp.MustCompile(`^(?:\d{1,5}[a-z]{2,6}\d{3,5}[a-z]{0,3}|[a-z]{2,6}\d{5}[a-z]{0,3})$`)
+
+func canonicalRemasterDisplayID(id string) string {
+	m := r18RemasterTailRegex.FindStringSubmatch(r18CompactID(id))
+	if m == nil {
+		return strings.ToUpper(id)
+	}
+	marker := "H"
+	if m[4] == "ai" {
+		marker = "AI"
+	}
+	return strings.ToUpper(m[2]) + "-" + m[3] + marker
 }
