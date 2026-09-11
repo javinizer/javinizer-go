@@ -595,6 +595,10 @@ var dumpMarkerTailRegex = regexp.MustCompile(`^([A-Z]{1,6}[0-9]{2,5})(H|AI)$`)
 // display-spelling form (…156HD) so dump rows recorded as "RCT-156-HD" hit.
 func dumpNormKeys(id string) []string {
 	n := normalizeDVDID(id)
+	compacted := strings.NewReplacer(".", "", "_", "").Replace(n)
+	if dumpPaddedMarkerRegex.MatchString(compacted) {
+		n = compacted
+	}
 	if n == "" {
 		return nil
 	}

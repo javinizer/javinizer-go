@@ -15,6 +15,10 @@ func TestPaddedRemasterFullDumpLookup(t *testing.T) {
 	defer store.Close()
 	for _, tc := range []struct{ query, cid string }{
 		{"RCT-00156-HD", "1rct00156h"},
+		{"RCT.156.HD", "1rct00156h"},
+		{"RCT.00156.HD", "1rct00156h"},
+		{"RCT_00156_HD", "1rct00156h"},
+		{"DV.00818.AI", "dv00818ai"},
 		{"RCT-00156H", "1rct00156h"},
 		{"DV-00818AI", "dv00818ai"},
 		{"ABC-00001H", "abc00001h"},
@@ -28,4 +32,5 @@ func TestPaddedRemasterFullDumpLookup(t *testing.T) {
 	}
 	assert.Contains(t, dumpNormKeys("ABC-00000-HD"), "ABC000HD")
 	assert.Equal(t, []string{"RCT00156"}, dumpNormKeys("RCT-00156"))
+	assert.Equal(t, []string{"RCT.00156"}, dumpNormKeys("RCT.00156"))
 }

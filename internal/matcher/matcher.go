@@ -111,7 +111,7 @@ func (m *Matcher) MatchFile(file models.FileMatchInfo) *MatchResult {
 	}
 
 	// Fall back to built-in pattern
-	if result := m.matchWithRegex(file, nameWithoutExt, m.builtinPattern, "builtin"); result != nil {
+	if result := m.matchWithRegex(file, nameWithoutExt, m.builtinPattern, "builtin"); result != nil && !builtinStartsInsideContentID(nameWithoutExt, m.builtinPattern) {
 		return result
 	}
 
@@ -232,7 +232,7 @@ func (m *Matcher) MatchString(s string) string {
 
 	// Try built-in pattern
 	matches := m.builtinPattern.FindStringSubmatch(s)
-	if len(matches) > 1 {
+	if len(matches) > 1 && !builtinStartsInsideContentID(s, m.builtinPattern) {
 		id := strings.ToUpper(matches[1])
 		if spelling := remasterMarkerSpelling(remainderAfterID(s, matches[1])); spelling != "" {
 			return id + foldRemasterMarker(spelling)

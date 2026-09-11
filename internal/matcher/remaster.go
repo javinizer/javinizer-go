@@ -8,8 +8,17 @@ import (
 var (
 	fusedRemasterRegex  = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])([a-z]{2,6})(\d{3})(hd|ai|h)(?:$|[-_.\s])`)
 	reRemasterRemainder = regexp.MustCompile(`(?i)^[-_.\s]?(HD|AI|H)(?:$|[-_.\s])`)
-	contentIDShapeRegex = regexp.MustCompile(`(?i)^((?:\d{1,5}[A-Za-z]{2,6}\d{3,5}[A-Za-z]{0,3}|[A-Za-z]{2,6}\d{4,5}[A-Za-z]{0,3}))([-_.\s].+)?$`)
+	contentIDShapeRegex = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])((?:\d{1,5}[A-Za-z]{2,6}\d{3,5}[A-Za-z]{0,3}|[A-Za-z]{2,6}\d{4,5}[A-Za-z]{0,3}))([-_.\s].+)?$`)
 )
+
+func builtinStartsInsideContentID(s string, pattern *regexp.Regexp) bool {
+	raw := contentIDShapeRegex.FindStringSubmatchIndex(s)
+	if raw == nil {
+		return false
+	}
+	match := pattern.FindStringSubmatchIndex(s)
+	return len(match) > 3 && match[2] > raw[2] && match[2] < raw[3]
+}
 
 func normalizeFusedRemasterFilename(name string) string {
 	m := fusedRemasterRegex.FindStringSubmatchIndex(name)
@@ -53,11 +62,11 @@ func foldRemasterMarker(spelling string) string {
 // contentIDPrefixMatch extracts a content-id prefix from a stem, returning the
 // captured id text and the post-id remainder (which may carry part suffixes).
 func contentIDPrefixMatch(s string) (idText string, remainder string) {
-	m := contentIDShapeRegex.FindStringSubmatch(s)
+	m := contentIDShapeRegex.FindStringSubmatchIndex(s)
 	if m == nil {
 		return "", ""
 	}
-	return m[1], strings.TrimSpace(s[len(m[1]):])
+	return s[m[2]:m[3]], strings.TrimSpace(s[m[3]:])
 }
 
 func matchContentIDShape(s string) string {
