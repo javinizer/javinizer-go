@@ -94,6 +94,33 @@ func TestStore_RestMasterFoldedKeys(t *testing.T) {
 	}
 }
 
+// The marker-aware candidate fallback in MatchByDisplayID must fire when the
+// dvd_id_norm pass misses (dump row with NULL dvd_id) and still surface the
+// marker content id.
+func TestStore_MatchByDisplayIDMarkerCandidateFallback(t *testing.T) {
+	path := seedDump(t, "1rct00156h	\\N")
+
+	store, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+
+	matches, err := store.MatchByDisplayID(context.Background(), "RCT-156H")
+	if err != nil {
+		t.Fatalf("MatchByDisplayID err=%v", err)
+	}
+	got := false
+	for _, m := range matches {
+		if m.ContentID == "1rct00156h" {
+			got = true
+		}
+	}
+	if !got {
+		t.Fatalf("matches = %+v, want a 1rct00156h candidate", matches)
+	}
+}
+
 func TestImportAndLookup(t *testing.T) {
 	path := seedDump(t, "118ipx00535\tIPX-535\n118abw00001\t\\N\nh_086mesu00103\tMESU-103")
 
