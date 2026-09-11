@@ -66,7 +66,11 @@ export function createProxyStore(deps: ProxyStoreDeps): ProxyStore {
 	function canSaveProfile(profileName: string): boolean {
 		const result = profileTestResults[profileName];
 		const currentProfile = deps.getConfig()?.scrapers?.proxy?.profiles?.[profileName];
-		return isTestValid(result, currentProfile, TEST_VALIDITY_MS);
+		return (
+			isTestValid(result, currentProfile, TEST_VALIDITY_MS) &&
+			canSaveGlobalProxy() &&
+			!!verificationTokens['global']
+		);
 	}
 
 	function canSaveGlobalProxy(): boolean {
@@ -260,7 +264,7 @@ export function createProxyStore(deps: ProxyStoreDeps): ProxyStore {
 	async function saveProxyProfile(profileName: string): Promise<void> {
 		const config = deps.getConfig();
 		if (!config?.scrapers?.proxy?.profiles?.[profileName]) return;
-		if (savingProfile[profileName]) return;
+		if (savingProfile[profileName] || !canSaveProfile(profileName)) return;
 
 		savingProfile[profileName] = true;
 		deps.setError(null);
@@ -269,7 +273,7 @@ export function createProxyStore(deps: ProxyStoreDeps): ProxyStore {
 		try {
 			await apiClient.request('/api/v1/config', {
 				method: 'PUT',
-				body: JSON.stringify(config),
+				body: JSON.stringify({ ...config, proxy_verification_tokens: verificationTokens }),
 			});
 			toastStore.success(m.settings_proxy_profile_saved({ name: profileName }), 4000);
 		} catch (e) {
@@ -301,23 +305,12 @@ export function createProxyStore(deps: ProxyStoreDeps): ProxyStore {
 
 			const result = await apiClient.testProxy({
 				mode: 'direct',
-				proxy: shouldAlsoValidateGlobalProxy
-					? {
-							enabled: true,
-							profile: defaultProfileName,
-							profiles: config?.scrapers?.proxy?.profiles ?? {},
-						}
-					: {
-							enabled: true,
-							profile: '',
-							profiles: {
-								[profileName]: {
-									url: profile.url,
-									username: profile.username ?? '',
-									password: profile.password ?? '',
-								},
-							},
-						},
+				proxy: {
+					enabled: true,
+					default_profile: defaultProfileName,
+					profile: profileName,
+					profiles: config?.scrapers?.proxy?.profiles ?? {},
+				},
 			});
 
 			profileTestResults[profileName] = {
@@ -343,12 +336,6 @@ export function createProxyStore(deps: ProxyStoreDeps): ProxyStore {
 					delete next['global'];
 					verificationTokens = next;
 				}
-			} else if (
-				result.success &&
-				result.verification_token &&
-				(config?.scrapers?.proxy?.enabled ?? false)
-			) {
-				verificationTokens['global'] = result.verification_token;
 			}
 
 			if (result.success) {
