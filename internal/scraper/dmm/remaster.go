@@ -100,7 +100,12 @@ func stripRentalSuffixMarkerAware(cid string) string {
 // bindResolvedCID reports whether a URL-extracted cid may stand in for the
 // resolved cid on marker paths: exact equality, or equality up to DMM
 // catalog-digit prefix stripping with the marker suffix intact.
-func bindResolvedCID(urlCID, resolved string) bool {
+func bindResolvedCID(urlCID, resolved string, exact bool) bool {
+	if exact {
+		a := stripRentalSuffixMarkerAware(strings.ToLower(strings.TrimSpace(urlCID)))
+		b := stripRentalSuffixMarkerAware(strings.ToLower(strings.TrimSpace(resolved)))
+		return a == b
+	}
 	a := stripRentalSuffixMarkerAware(compactQueryID(urlCID))
 	b := compactQueryID(resolved)
 	if a == b {

@@ -106,6 +106,10 @@ func (m *Matcher) MatchFile(file models.FileMatchInfo) *MatchResult {
 		}
 	}
 
+	if normalized := normalizeFusedRemasterFilename(nameWithoutExt); normalized != "" {
+		nameWithoutExt = normalized
+	}
+
 	// Fall back to built-in pattern
 	if result := m.matchWithRegex(file, nameWithoutExt, m.builtinPattern, "builtin"); result != nil {
 		return result
@@ -220,6 +224,10 @@ func (m *Matcher) MatchString(s string) string {
 				return strings.ToUpper(id)
 			}
 		}
+	}
+
+	if normalized := normalizeFusedRemasterFilename(s); normalized != "" {
+		s = normalized
 	}
 
 	// Try built-in pattern

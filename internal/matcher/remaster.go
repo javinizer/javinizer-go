@@ -6,9 +6,18 @@ import (
 )
 
 var (
+	fusedRemasterRegex  = regexp.MustCompile(`(?i)^([a-z]{2,6})(\d{3})((?:hd|ai|h)(?:[-_.\s].*)?)$`)
 	reRemasterRemainder = regexp.MustCompile(`(?i)^[-_.\s]?(HD|AI|H)(?:$|[-_.\s])`)
 	contentIDShapeRegex = regexp.MustCompile(`(?i)^((?:\d{1,5}[A-Za-z]{2,6}\d{3,5}[A-Za-z]{0,3}|[A-Za-z]{2,6}\d{4,5}[A-Za-z]{0,3}))([-_.\s].+)?$`)
 )
+
+func normalizeFusedRemasterFilename(name string) string {
+	m := fusedRemasterRegex.FindStringSubmatch(name)
+	if m == nil {
+		return ""
+	}
+	return m[1] + "-" + m[2] + m[3]
+}
 
 func remainderAfterID(name, id string) string {
 	lowerName := strings.ToLower(name)

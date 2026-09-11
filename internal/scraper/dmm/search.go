@@ -43,6 +43,7 @@ func (s *scraper) getURLCtx(ctx context.Context, id string) (string, error) {
 		return "", fmt.Errorf("movie not found on DMM: %w", err)
 	}
 
+	boundMarker, _, rawQuery := classifyRemasterQuery(id)
 	baseID := normalizeID(contentID)
 
 	searchQueries := []string{
@@ -112,7 +113,11 @@ func (s *scraper) getURLCtx(ctx context.Context, id string) (string, error) {
 
 		candidates := s.extractCandidateURLs(doc, contentID)
 		logging.Debugf("DMM: Found %d candidates from search query '%s'", len(candidates), searchQuery)
-		allCandidates = append(allCandidates, candidates...)
+		for _, candidate := range candidates {
+			if boundMarker == "" || bindResolvedCID(candidate.contentID, contentID, rawQuery) {
+				allCandidates = append(allCandidates, candidate)
+			}
+		}
 	}
 
 	if len(allCandidates) == 0 {
@@ -124,10 +129,10 @@ func (s *scraper) getURLCtx(ctx context.Context, id string) (string, error) {
 		allCandidates = append(allCandidates, directCandidates...)
 	}
 
-	if boundMarker, _, _ := classifyRemasterQuery(id); boundMarker != "" {
+	if boundMarker != "" {
 		boundCandidates := make([]urlCandidate, 0, len(allCandidates))
 		for _, c := range allCandidates {
-			if bindResolvedCID(c.contentID, contentID) {
+			if bindResolvedCID(c.contentID, contentID, rawQuery) {
 				boundCandidates = append(boundCandidates, c)
 			}
 		}

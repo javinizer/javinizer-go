@@ -458,7 +458,9 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 	// per-candidate fallthrough so a stale dump row never dead-ends the scrape.
 	result, dumpCandidates := s.searchFromDump(ctx, id)
 	if result != nil {
-		return guardRemasterResult(id, result)
+		if guarded, err := guardRemasterResult(id, result); err == nil {
+			return guarded, nil
+		}
 	}
 
 	// If the context was cancelled (e.g. user hit Ctrl+C) during the dump

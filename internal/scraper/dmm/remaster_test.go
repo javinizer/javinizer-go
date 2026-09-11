@@ -126,7 +126,7 @@ func TestBindResolvedCID(t *testing.T) {
 		{"2rct00156h", "1rct00156h", true},
 	}
 	for _, tc := range cases {
-		assert.Equal(t, tc.want, bindResolvedCID(tc.urlCID, tc.resolved), "%s vs %s", tc.urlCID, tc.resolved)
+		assert.Equal(t, tc.want, bindResolvedCID(tc.urlCID, tc.resolved, false), "%s vs %s", tc.urlCID, tc.resolved)
 	}
 }
 
