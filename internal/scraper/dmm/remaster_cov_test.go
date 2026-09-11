@@ -280,6 +280,39 @@ func TestResolveRemaster_DisagreeingPagesUnverifiable(t *testing.T) {
 	assert.Equal(t, "abc01234h", cid, "unverifiable cid must not compete; verified cid wins")
 }
 
+// Padded display spellings must verify against unpadded product pages.
+func TestResolveRemaster_PaddedQueryVerifies(t *testing.T) {
+	s, _ := newRemasterTestScraper(t)
+	rt := &remasterRoundTripper{serve: func(u string) (int, string) {
+		if strings.Contains(u, "/search/=") {
+			return 200, `<html><body><a href="/digital/videoa/-/detail/=/cid=1rct00156h/">remaster</a></body></html>`
+		}
+		if strings.Contains(u, "cid=1rct00156h") {
+			return 200, `<html><body><table><tr><td>品番：</td><td>RCT-156-HD</td></tr></table></body></html>`
+		}
+		return 404, ""
+	}}
+	s.client.SetTransport(rt)
+	cid, err := s.ResolveContentIDCtx(context.Background(), "RCT-00156-HD")
+	require.NoError(t, err)
+	assert.Equal(t, "1rct00156h", cid)
+}
+
+func TestParseDisplayIdentity_Branches(t *testing.T) {
+	s, d, m, ok := parseDisplayIdentity("rct00156h")
+	assert.True(t, ok)
+	assert.Equal(t, "rct", s)
+	assert.Equal(t, "156", d)
+	assert.Equal(t, "h", m)
+	_, _, m2, ok2 := parseDisplayIdentity("dv00899ai")
+	assert.True(t, ok2)
+	assert.Equal(t, "ai", m2)
+	_, _, m3, _ := parseDisplayIdentity("rct156hd")
+	assert.Equal(t, "h", m3)
+	_, _, _, ok4 := parseDisplayIdentity("garbage")
+	assert.False(t, ok4)
+}
+
 func TestVerifyCandidateDisplayID_EdgeInputs(t *testing.T) {
 	s, _ := newRemasterTestScraper(t)
 

@@ -116,10 +116,11 @@ func ContentIDCandidatesWithMarker(id string) []string {
 		return ContentIDCandidates(id)
 	}
 	marker := strings.ToLower(m[2])
-	// Only display spellings fold HD to H; raw content ids (channel-prefixed
-	// or zero-padded digital form) keep the server's exact marker since h and
-	// hd can be distinct products.
-	if marker == "hd" && !looksLikeContentID(strings.ToLower(compacted)) && !zeroPaddedCIDRegex.MatchString(strings.ToLower(compacted)) {
+	// Only display spellings fold HD to H; separator evidence in the original
+	// input forces display semantics even when the compacted shape looks like
+	// a zero-padded content id (RCT-00156-HD vs raw rct00156hd).
+	hasSeparator := strings.ContainsAny(id, "-_ ")
+	if marker == "hd" && (hasSeparator || (!looksLikeContentID(strings.ToLower(compacted)) && !zeroPaddedCIDRegex.MatchString(strings.ToLower(compacted)))) {
 		marker = "h"
 	}
 	base := ContentIDCandidates(m[1])

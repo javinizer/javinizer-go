@@ -47,6 +47,11 @@ func TestContentIDCandidatesWithMarker(t *testing.T) {
 	cands = ContentIDCandidatesWithMarker("rct00156hd")
 	require.Contains(t, cands, "rct00156hd")
 
+	// Separated padded display spellings fold hd->h despite looking padded.
+	for _, c := range ContentIDCandidatesWithMarker("RCT-00156-HD") {
+		assert.False(t, strings.HasSuffix(c, "hd"), "%q must probe h, not hd", c)
+	}
+
 	// Marker-free input delegates to base behavior.
 	assert.Equal(t, ContentIDCandidates("RCT-156"), ContentIDCandidatesWithMarker("RCT-156"))
 }

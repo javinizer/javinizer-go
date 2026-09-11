@@ -13,6 +13,20 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 )
 
+func TestIsRawRemasterContentIDQuery(t *testing.T) {
+	assert.True(t, isRawRemasterContentIDQuery("1rct00156h"))
+	assert.True(t, isRawRemasterContentIDQuery("lulu00441ai"))
+	assert.False(t, isRawRemasterContentIDQuery("RCT-156H"))
+	assert.False(t, isRawRemasterContentIDQuery("RCT 156 HD"))
+	assert.False(t, isRawRemasterContentIDQuery("oreco183h"))
+}
+
+func TestCanonicalRemasterDisplayIDR18(t *testing.T) {
+	assert.Equal(t, "DV-818AI", canonicalRemasterDisplayID("DV-818AI"))
+	assert.Equal(t, "RCT-156H", canonicalRemasterDisplayID("RCT-156-HD"))
+	assert.Equal(t, "PLAIN", canonicalRemasterDisplayID("plain"))
+}
+
 func TestRemasterHelpers(t *testing.T) {
 	assert.False(t, cidCarriesMarker("dv00899ai", ""))
 	assert.False(t, cidCarriesMarker("", "h"))

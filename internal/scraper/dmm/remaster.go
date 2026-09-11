@@ -295,6 +295,23 @@ const (
 	displayUnverifiable
 )
 
+var displayIdentityRegex = regexp.MustCompile(`^([a-z]{2,6})0*(\d+)(hd|ai|h)$`)
+
+// parseDisplayIdentity splits a folded display identity into series, numeric
+// value and folded marker so padded spellings (rct00156h) match what product
+// pages show (rct156h).
+func parseDisplayIdentity(s string) (string, string, string, bool) {
+	m := displayIdentityRegex.FindStringSubmatch(s)
+	if m == nil {
+		return "", "", "", false
+	}
+	marker := m[3]
+	if marker == "hd" {
+		marker = "h"
+	}
+	return m[1], m[2], marker, true
+}
+
 // verifyCandidateDisplayID fetches every eligible product page for a candidate
 // and combines the parseable display identities: zero parseable => unverified,
 // multiple distinct => unverifiable, exactly one => verified iff it equals the
@@ -319,8 +336,10 @@ func (s *scraper) verifyCandidateDisplayID(ctx context.Context, foldedTarget str
 		}
 	}
 	if len(identities) == 1 {
+		ts, td, tm, tok := parseDisplayIdentity(foldedTarget)
 		for k := range identities {
-			if k == foldedTarget {
+			ds, dd, dm, dok := parseDisplayIdentity(k)
+			if tok && dok && ds == ts && dd == td && dm == tm {
 				return displayVerified
 			}
 		}
