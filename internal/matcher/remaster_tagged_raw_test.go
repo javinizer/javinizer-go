@@ -34,6 +34,10 @@ func TestTaggedRawContentIDs(t *testing.T) {
 		{"[site]1rct00156h-1080p.mkv", "1RCT00156H", 0},
 		{"[site]h_003abc00123hd-pt2.mkv", "H_003ABC00123HD", 2},
 		{"[site]n_600abc00123ai.mkv", "N_600ABC00123AI", 0},
+		{"[site]1rct00156h[4K].mkv", "1RCT00156H", 0},
+		{"1rct00156h(4K).mkv", "1RCT00156H", 0},
+		{"[site]dv00899ai[1080p].mkv", "DV00899AI", 0},
+		{"[site]1rct00156h[4K]-pt2.mkv", "1RCT00156H", 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := matchOne(t, m, tc.name)
