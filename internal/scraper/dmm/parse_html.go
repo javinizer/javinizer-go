@@ -60,8 +60,12 @@ func (s *scraper) extractIdentifiers(result *models.ScraperResult, sourceURL str
 			cid = strings.ToLower(strings.ReplaceAll(cid, "-", ""))
 			result.ContentID = cid
 			result.ID = normalizeID(cid)
-			if marker, series, _, _ := classifyRemasterQuery(cid); marker != "" && series == "t28" {
-				result.ID = canonicalRemasterDisplayID(cleanPrefixRegex.ReplaceAllString(cid, "$1"))
+			if marker, series, _, _ := classifyRemasterQuery(cid); marker != "" {
+				if series == "t28" {
+					result.ID = canonicalRemasterDisplayID(cleanPrefixRegex.ReplaceAllString(cid, "$1"))
+				} else if strings.HasSuffix(result.ID, "HD") {
+					result.ID = result.ID[:len(result.ID)-2] + "H"
+				}
 			}
 			return
 		}

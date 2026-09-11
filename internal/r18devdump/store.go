@@ -586,9 +586,9 @@ func normalizeDVDID(id string) string {
 	return id
 }
 
-var dumpPaddedMarkerRegex = regexp.MustCompile(`^((?:T28|[A-Z]+))([0-9]{2,5})(HD|H|AI)$`)
+var dumpPaddedMarkerRegex = regexp.MustCompile(`^((?:T28|[A-Z]+))([0-9]+)(HD|H|AI)$`)
 
-var dumpMarkerTailRegex = regexp.MustCompile(`^((?:T28|[A-Z]+)[0-9]{2,5})(H|AI)$`)
+var dumpMarkerTailRegex = regexp.MustCompile(`^((?:T28|[A-Z]+)[0-9]+)(H|AI)$`)
 
 // dumpNormKeys returns all dvd_id_norm variants to probe for a query id: the
 // direct normalization plus, for canonical remaster ids (…156H), the stored
