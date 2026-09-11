@@ -11,7 +11,7 @@ var contentIDFullRegex = regexp.MustCompile(`^(\d*)([a-z]+)(\d+)(.*)$`)
 
 // zeroPaddedCIDRegex matches prefixless digital content ids with a five-digit
 // zero-padded number (rct00156hd-class).
-var zeroPaddedCIDRegex = regexp.MustCompile(`^(?:t28|[a-z]{2,6})\d{5}[a-z]{0,3}$`)
+var zeroPaddedCIDRegex = regexp.MustCompile(`^(?:t28|[a-z]{1,6})\d{5}[a-z]{0,3}$`)
 
 // underscoreContentIDRegex recognizes PPV-style content_ids (h_086mesu00103),
 // which SplitSeriesAndNumber cannot decompose because of the underscore.
@@ -141,9 +141,15 @@ func ContentIDCandidatesWithMarker(id string) []string {
 		marker = "h"
 	}
 	base := contentIDCandidates(m[1], true)
-	out := make([]string, 0, len(base))
+	out := make([]string, 0, len(base)+1)
+	if !hasSeparator && zeroPaddedCIDRegex.MatchString(raw) {
+		out = append(out, raw)
+	}
 	for _, c := range base {
-		out = append(out, c+marker)
+		candidate := c + marker
+		if len(out) == 0 || candidate != out[0] {
+			out = append(out, candidate)
+		}
 	}
 	return out
 }
