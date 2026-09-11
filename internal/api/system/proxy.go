@@ -66,10 +66,12 @@ func testProxy(rt *core.APIRuntime) gin.HandlerFunc {
 			return
 		}
 
+		apiCfg := rt.GetAPIConfig()
+		preserveRedactedProxyProfiles(apiCfg.ProxyConfig.Profiles, req.Proxy.Profiles)
+
 		var result ProxyTestResult
 		switch req.Mode {
 		case "direct":
-			apiCfg := rt.GetAPIConfig()
 			proxyProfile := resolveProxyTestProfile(apiCfg.ProxyConfig, req.Proxy)
 
 			if !req.Proxy.Enabled || strings.TrimSpace(proxyProfile.URL) == "" {
@@ -83,7 +85,6 @@ func testProxy(rt *core.APIRuntime) gin.HandlerFunc {
 				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "flaresolverr.enabled=true and flaresolverr.url are required for flaresolverr test"})
 				return
 			}
-			apiCfg := rt.GetAPIConfig()
 			proxyProfile := resolveProxyTestProfile(apiCfg.ProxyConfig, req.Proxy)
 
 			result = TestFlareSolverr(targetURL, req.FlareSolverr, proxyProfile)

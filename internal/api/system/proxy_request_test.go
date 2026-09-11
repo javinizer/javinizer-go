@@ -2,6 +2,7 @@ package system
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"net"
 	"net/http"
@@ -37,6 +38,77 @@ func TestResolveProxyTestProfile(t *testing.T) {
 		{"disabled draft", models.ProxyConfig{Profile: "main", Profiles: map[string]models.ProxyProfile{"main": draft}}, models.ProxyProfile{}},
 	} {
 		t.Run(tc.name, func(t *testing.T) { require.Equal(t, tc.want, *resolveProxyTestProfile(persisted, tc.request)) })
+	}
+}
+
+func TestProxy_RedactedRequestCredentials(t *testing.T) {
+	t.Cleanup(ssrf.SetLookupIPForTest(func(string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("8.8.8.8")}, nil
+	}))
+	for _, tc := range []struct {
+		name      string
+		requested models.ProxyProfile
+		expected  models.ProxyProfile
+	}{
+		{"both redacted", models.ProxyProfile{Username: models.RedactedValue, Password: models.RedactedValue}, models.ProxyProfile{Username: "saved-user", Password: "saved-password"}},
+		{"new username", models.ProxyProfile{Username: "new-user", Password: models.RedactedValue}, models.ProxyProfile{Username: "new-user", Password: "saved-password"}},
+		{"new password", models.ProxyProfile{Username: models.RedactedValue, Password: "new-password"}, models.ProxyProfile{Username: "saved-user", Password: "new-password"}},
+		{"cleared credentials", models.ProxyProfile{}, models.ProxyProfile{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				wantAuth := ""
+				if tc.expected.Username != "" || tc.expected.Password != "" {
+					wantAuth = "Basic " + base64.StdEncoding.EncodeToString([]byte(tc.expected.Username+":"+tc.expected.Password))
+				}
+				if r.Header.Get("Proxy-Authorization") != wantAuth {
+					w.WriteHeader(http.StatusProxyAuthRequired)
+					return
+				}
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer proxy.Close()
+			cfg := config.DefaultConfig(nil, nil)
+			cfg.Scrapers.Proxy = models.ProxyConfig{Enabled: true, DefaultProfile: "main", Profiles: map[string]models.ProxyProfile{
+				"main":   {URL: "http://old-proxy:8080", Username: "saved-user", Password: "saved-password"},
+				"backup": {URL: "http://backup:8080", Username: "backup-user", Password: "backup-password"},
+			}}
+			before, err := json.Marshal(cfg.Scrapers.Proxy)
+			require.NoError(t, err)
+			tokens := core.NewTokenStore()
+			deps := newTestDeps(cfg, func(d *core.APIDeps) { d.TokenStore = tokens })
+			rt := testkit.GetTestRuntime(deps)
+			router := gin.New()
+			router.POST("/proxy/test", testProxy(rt))
+			requested := tc.requested
+			requested.URL = proxy.URL
+			requestProxy := models.ProxyConfig{Enabled: true, Profile: "main", Profiles: map[string]models.ProxyProfile{
+				"main":   requested,
+				"backup": {URL: "http://backup:8080", Username: models.RedactedValue, Password: models.RedactedValue},
+			}}
+			body, err := json.Marshal(contracts.ProxyTestRequest{Mode: "direct", TargetURL: "http://example.com/proxy-probe", Proxy: requestProxy})
+			require.NoError(t, err)
+			req := httptest.NewRequest(http.MethodPost, "/proxy/test", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+			var response contracts.ProxyTestResponse
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+			require.True(t, response.Success, response.Message)
+			expected := tc.expected
+			expected.URL = proxy.URL
+			requestProxy.Profile = ""
+			requestProxy.DefaultProfile = "main"
+			requestProxy.Profiles["main"] = expected
+			requestProxy.Profiles["backup"] = cfg.Scrapers.Proxy.Profiles["backup"]
+			hash, err := core.HashProxyConfig(requestProxy)
+			require.NoError(t, err)
+			require.True(t, tokens.Validate(response.VerificationToken, "global", hash))
+			after, err := json.Marshal(rt.GetAPIConfig().ProxyConfig)
+			require.NoError(t, err)
+			require.JSONEq(t, string(before), string(after))
+		})
 	}
 }
 
