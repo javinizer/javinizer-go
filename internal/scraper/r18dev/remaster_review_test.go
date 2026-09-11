@@ -51,6 +51,18 @@ func TestRemasterFinalFetchRejectsChangedDisplay(t *testing.T) {
 	assert.Nil(t, result)
 }
 
+func TestRemasterDumpCandidateRejectsBaseCIDWithMatchingDisplay(t *testing.T) {
+	dump := &stubDumpLookup{
+		matches: []models.DumpMatch{{ContentID: "1rct00156", DVDID: "RCT-156"}},
+	}
+	transport := &candidateAPITransport{body: `{"content_id":"1rct00156","dvd_id":"RCT-156-HD","title_en":"Mislabeled base release"}`}
+	s := newCandidateScraper(dump, transport)
+
+	result, err := s.Search(context.Background(), "RCT-156H")
+	require.Error(t, err)
+	assert.Nil(t, result)
+}
+
 func TestRemasterDumpRejectsConflictingDisplay(t *testing.T) {
 	dump := &stubDumpLookup{lookupMovieResult: &models.DumpMovie{ContentID: "1rct00999h", DVDID: "RCT-999-HD"}}
 	s, _ := newScraperWithBlockedHTTP(t, dump)
