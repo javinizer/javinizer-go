@@ -40,6 +40,9 @@ func classifyRemasterQuery(id string) (foldedMarker string, series string, isCon
 	hasSeparator := strings.ContainsAny(lowerRaw, "-_. ")
 	isContentID = hPrefixCIDShapeRegex.MatchString(lowerRaw) ||
 		(!hasSeparator && remasterCIDShapeRegex.MatchString(compact))
+	if hPrefixCIDShapeRegex.MatchString(lowerRaw) {
+		compact = cleanPrefixRegex.ReplaceAllString(lowerRaw, "$1")
+	}
 	m := remasterTailRegex.FindStringSubmatch(compact)
 	if m == nil {
 		return "", "", isContentID
