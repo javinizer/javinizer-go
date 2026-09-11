@@ -26,6 +26,7 @@ type MatchResult struct {
 	MultipartPattern string // Pattern type: "explicit", "letter", "trailing", or "" (see PatternExplicit, PatternLetter, PatternTrailing, PatternNone)
 	TrailingPrefix   string // For PatternTrailing: noise portion before the part number (e.g., "-un-javgg.net")
 	strippedSuffix   string // E/Z catalog suffix stripped from the ID at match time; restored by ValidateMultipartInDirectory if the part does not confirm
+	RemasterMarker   string // "H", "HD", or "AI" when the extracted ID carries a remaster marker; "" otherwise
 }
 
 // NewMatcher creates a new file matcher
@@ -96,7 +97,14 @@ func (m *Matcher) MatchFile(file models.FileMatchInfo) *MatchResult {
 	}
 
 	// Fall back to built-in pattern
-	return m.matchWithRegex(file, nameWithoutExt, m.builtinPattern, "builtin")
+	if result := m.matchWithRegex(file, nameWithoutExt, m.builtinPattern, "builtin"); result != nil {
+		return result
+	}
+
+	if id := matchContentIDShape(nameWithoutExt); id != "" {
+		return &MatchResult{File: file, ID: id, MatchedBy: "contentid"}
+	}
+	return nil
 }
 
 // matchWithRegex attempts to match a filename with a specific regex pattern
@@ -122,6 +130,14 @@ func (m *Matcher) matchWithRegex(file models.FileMatchInfo, filename string, pat
 
 	// First capture group is the ID.
 	result.ID = strings.ToUpper(id)
+
+	if matchType == "builtin" {
+		if spelling := remasterMarkerSpelling(remainderAfterID(filename, id)); spelling != "" {
+			result.ID += foldRemasterMarker(spelling)
+			result.RemasterMarker = spelling
+			return result
+		}
+	}
 
 	// The built-in ID pattern optionally consumes a trailing E or Z as a catalog
 	// suffix (e.g. IPX-535Z). When that letter immediately precedes a digit-first
@@ -179,6 +195,9 @@ func (m *Matcher) MatchString(s string) string {
 	matches := m.builtinPattern.FindStringSubmatch(s)
 	if len(matches) > 1 {
 		id := strings.ToUpper(matches[1])
+		if spelling := remasterMarkerSpelling(remainderAfterID(s, matches[1])); spelling != "" {
+			return id + foldRemasterMarker(spelling)
+		}
 		// Apply the same E/Z catalog-suffix stripping as matchWithRegex so MatchString
 		// stays consistent with MatchFile for downstream re-match callers (e.g. the
 		// scrape phase re-deriving a movie ID from a filename). A bare E/Z without a
@@ -193,7 +212,7 @@ func (m *Matcher) MatchString(s string) string {
 		return id
 	}
 
-	return ""
+	return matchContentIDShape(s)
 }
 
 // ValidateMultipartInDirectory validates ambiguous multipart patterns
@@ -229,6 +248,76 @@ func ValidateMultipartInDirectory(results []MatchResult) []MatchResult {
 	validated := make([]MatchResult, len(results))
 	copy(validated, results)
 
+	demoted := applyRemasterDemotions(validated)
+	validateMultipartGroups(validated)
+
+	if len(demoted) > 0 {
+		rollback := false
+		for _, idx := range demoted {
+			if !validated[idx].IsMultiPart {
+				rollback = true
+				break
+			}
+		}
+		if rollback {
+			validated = make([]MatchResult, len(results))
+			copy(validated, results)
+			validateMultipartGroups(validated)
+			return validated
+		}
+		for _, idx := range demoted {
+			validated[idx].RemasterMarker = ""
+		}
+	}
+
+	return validated
+}
+
+// applyRemasterDemotions tentatively rewrites bare-H remaster matches as
+// multipart part 8 of the base ID when at least two same-directory siblings
+// carry the exact base ID with distinct bare-letter patterns. Returns the
+// indices that were demoted; callers must treat demotion as provisional and
+// roll everything back if a demoted result fails validation.
+func applyRemasterDemotions(validated []MatchResult) []int {
+	var demoted []int
+	for i, r := range validated {
+		if r.RemasterMarker != "H" {
+			continue
+		}
+		if r.PartNumber != 0 || r.MultipartPattern != "" {
+			continue
+		}
+		baseID := strings.TrimSuffix(r.ID, "H")
+		if baseID == r.ID {
+			continue
+		}
+		dir := filepath.Dir(r.File.Path)
+		siblingParts := make(map[int]struct{})
+		for j, sib := range validated {
+			if j == i {
+				continue
+			}
+			if sib.ID != baseID || sib.MultipartPattern != PatternLetter || sib.TrailingPrefix != "" {
+				continue
+			}
+			if filepath.Dir(sib.File.Path) != dir {
+				continue
+			}
+			siblingParts[sib.PartNumber] = struct{}{}
+		}
+		if len(siblingParts) < 2 {
+			continue
+		}
+		validated[i].ID = baseID
+		validated[i].PartNumber = 8
+		validated[i].PartSuffix = "-H"
+		validated[i].MultipartPattern = PatternLetter
+		demoted = append(demoted, i)
+	}
+	return demoted
+}
+
+func validateMultipartGroups(validated []MatchResult) {
 	// Group by (directory, movieID)
 	type dirIDKey struct {
 		dir string
@@ -351,6 +440,4 @@ func ValidateMultipartInDirectory(results []MatchResult) []MatchResult {
 			validated[i].PartSuffix = ""
 		}
 	}
-
-	return validated
 }

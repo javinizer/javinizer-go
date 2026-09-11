@@ -340,6 +340,10 @@ func (r *r18ContentIDResolver) ResolveURL(ctx context.Context, id string) (strin
 		normalizeIDWithoutStripping(id),
 		normalizeID(id),
 	}
+	foldedMarker := classifyRemaster(id)
+	if foldedMarker != "" {
+		idVariations = append(idVariations, remasterDisplaySpellings(id)...)
+	}
 
 	// Remove duplicates
 	seen := make(map[string]bool)
@@ -372,6 +376,12 @@ func (r *r18ContentIDResolver) ResolveURL(ctx context.Context, id string) (strin
 				var lookupData contentIDLookupResponse
 				if err := json.Unmarshal(resp.Body(), &lookupData); err == nil && lookupData.ContentID != "" {
 					returnedDVDID := normalizeDVDID(lookupData.DVDID)
+					if foldedMarker != "" && lookupData.DVDID != "" && foldDisplay(lookupData.DVDID) == foldDisplay(id) {
+						// Marker-carrying display identity match (H/HD-folded) — trust it.
+						contentID := lookupData.ContentID
+						logging.Debugf("R18: ✓ Resolved marker query %s (display %s) to content-id: %s", id, lookupData.DVDID, contentID)
+						return fmt.Sprintf("%s/videos/vod/movies/detail/-/combined=%s/json", baseURL, contentID), true
+					}
 					if returnedDVDID == idVariation {
 						// Exact dvd_id match — trust it immediately.
 						contentID := lookupData.ContentID
@@ -382,9 +392,17 @@ func (r *r18ContentIDResolver) ResolveURL(ctx context.Context, id string) (strin
 					// query. Record it as a fallback but keep trying variations —
 					// the content-id variation lookup below prefers canonical
 					// prefixes and avoids mislabeled duplicate dvd_id entries.
-					if returnedDVDID == "" && fuzzyContentIDURL == "" && contentIDCoreMatch(lookupData.ContentID, idVariation) {
-						fuzzyContentIDURL = fmt.Sprintf("%s/videos/vod/movies/detail/-/combined=%s/json", baseURL, lookupData.ContentID)
-						logging.Debugf("R18: Recorded fuzzy content-id %s for %s (null dvd_id); deferring to variation lookup", lookupData.ContentID, idVariation)
+					// Marker queries instead require the content_id to carry the
+					// marker (number equality is server-owned).
+					if returnedDVDID == "" && fuzzyContentIDURL == "" {
+						fuzzyOK := contentIDCoreMatch(lookupData.ContentID, idVariation)
+						if foldedMarker != "" {
+							fuzzyOK = cidCarriesMarker(lookupData.ContentID, foldedMarker)
+						}
+						if fuzzyOK {
+							fuzzyContentIDURL = fmt.Sprintf("%s/videos/vod/movies/detail/-/combined=%s/json", baseURL, lookupData.ContentID)
+							logging.Debugf("R18: Recorded fuzzy content-id %s for %s (null dvd_id); deferring to variation lookup", lookupData.ContentID, idVariation)
+						}
 					}
 				}
 			}
@@ -437,7 +455,7 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 	// per-candidate fallthrough so a stale dump row never dead-ends the scrape.
 	result, dumpCandidates := s.searchFromDump(ctx, id)
 	if result != nil {
-		return result, nil
+		return guardRemasterResult(id, result)
 	}
 
 	// If the context was cancelled (e.g. user hit Ctrl+C) during the dump
@@ -451,6 +469,10 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		candidateURL := fmt.Sprintf(apiURL, candidate.ContentID)
 		logging.Debugf("R18: Fetching dump-resolved candidate URL for %s: %s", id, candidateURL)
 		if res, fetchErr := s.fetchAndParseCandidate(ctx, candidateURL, candidate.ContentID); fetchErr == nil && res != nil {
+			if _, guardErr := guardRemasterResult(id, res); guardErr != nil {
+				logging.Debugf("R18: dump-resolved candidate %s rejected by marker guard for %s", candidate.ContentID, id)
+				continue
+			}
 			return res, nil
 		} else if fetchErr != nil {
 			logging.Debugf("R18: dump-resolved candidate %s failed for %s: %v", candidateURL, id, fetchErr)
@@ -473,7 +495,11 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		logging.Debugf("R18: Using normalized ID URL (no content-id found): %s", finalURL)
 	}
 
-	return s.fetchAndParseCombined(ctx, finalURL)
+	res, err := s.fetchAndParseCombined(ctx, finalURL)
+	if err != nil {
+		return nil, err
+	}
+	return guardRemasterResult(id, res)
 }
 
 // fetchAndParseCandidate fetches a dump-resolved candidate URL and validates
@@ -911,7 +937,11 @@ func stripDMMPrefix(id string) string {
 // r18.dev returning a 200 for a different movie that happens to share a prefix slot, so the
 // result does not depend solely on global prefix-table ordering.
 func (s *scraper) resolveByContentIDVariations(ctx context.Context, id string) (string, error) {
+	foldedMarker := classifyRemaster(id)
 	variations := r18devdump.ContentIDCandidates(id)
+	if foldedMarker != "" {
+		variations = r18devdump.ContentIDCandidatesWithMarker(id)
+	}
 	if len(variations) == 0 {
 		return "", nil
 	}
@@ -939,7 +969,11 @@ func (s *scraper) resolveByContentIDVariations(ctx context.Context, id string) (
 		if resp.StatusCode() == 200 {
 			contentType := resp.Header().Get("Content-Type")
 			if !strings.Contains(contentType, "text/html") {
-				if variationCoreMatches(resp.Body(), normalizedDVDID) {
+				matched := variationCoreMatches(resp.Body(), normalizedDVDID)
+				if foldedMarker != "" {
+					matched = markerVariationAccept(resp.Body(), id, foldedMarker)
+				}
+				if matched {
 					logging.Debugf("R18: ✓ Content-id variation %s resolved for %s", variation, id)
 					return u, nil
 				}

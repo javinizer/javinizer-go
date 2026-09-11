@@ -24,6 +24,13 @@ var (
 )
 
 func (s *scraper) parseHTML(ctx context.Context, doc *goquery.Document, sourceURL string) (*models.ScraperResult, error) {
+	return s.parseHTMLWithOptions(ctx, doc, sourceURL, false)
+}
+
+// parseHTMLWithOptions is parseHTML plus marker-path identity control: when
+// verbatimContentID is true the server-stated content id (catalog digit
+// intact) is persisted instead of the prefix-cleaned form.
+func (s *scraper) parseHTMLWithOptions(ctx context.Context, doc *goquery.Document, sourceURL string, verbatimContentID bool) (*models.ScraperResult, error) {
 	result := &models.ScraperResult{
 		Source:    s.Name(),
 		SourceURL: sourceURL,
@@ -37,7 +44,7 @@ func (s *scraper) parseHTML(ctx context.Context, doc *goquery.Document, sourceUR
 	}
 
 	// 4-step pipeline
-	s.extractIdentifiers(result, sourceURL)
+	s.extractIdentifiers(result, sourceURL, verbatimContentID)
 	s.extractTextualMetadata(result, doc, isNewSite, jsonldMetadata)
 	s.extractStructuredData(ctx, result, doc, sourceURL, isNewSite, jsonldMetadata)
 	s.extractMediaFields(ctx, result, doc, sourceURL, isNewSite, jsonldMetadata)
@@ -46,8 +53,15 @@ func (s *scraper) parseHTML(ctx context.Context, doc *goquery.Document, sourceUR
 }
 
 // extractIdentifiers populates ContentID and ID from the source URL.
-func (s *scraper) extractIdentifiers(result *models.ScraperResult, sourceURL string) {
+func (s *scraper) extractIdentifiers(result *models.ScraperResult, sourceURL string, verbatim bool) {
 	if cid := extractContentIDFromURL(sourceURL); cid != "" {
+		if verbatim {
+			cid = stripRentalSuffixMarkerAware(cid)
+			cid = strings.ToLower(strings.ReplaceAll(cid, "-", ""))
+			result.ContentID = cid
+			result.ID = normalizeID(cid)
+			return
+		}
 		// Always strip rental 'r' suffix from content IDs regardless of URL path.
 		// DMM uses 'r' suffix for rental content IDs across all URL types, not just /rental/ pages.
 		cid = stripRentalSuffix(cid)

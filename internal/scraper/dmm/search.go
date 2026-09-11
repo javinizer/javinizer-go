@@ -124,6 +124,16 @@ func (s *scraper) getURLCtx(ctx context.Context, id string) (string, error) {
 		allCandidates = append(allCandidates, directCandidates...)
 	}
 
+	if boundMarker, _, _ := classifyRemasterQuery(id); boundMarker != "" {
+		boundCandidates := make([]urlCandidate, 0, len(allCandidates))
+		for _, c := range allCandidates {
+			if bindResolvedCID(c.contentID, contentID) {
+				boundCandidates = append(boundCandidates, c)
+			}
+		}
+		allCandidates = boundCandidates
+	}
+
 	if len(allCandidates) == 0 {
 		return "", fmt.Errorf("no scrapable URL found for movie on DMM")
 	}
@@ -260,7 +270,8 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		}
 	}
 
-	return s.parseHTML(ctx, doc, url)
+	foldedMarker, _, _ := classifyRemasterQuery(id)
+	return s.parseHTMLWithOptions(ctx, doc, url, foldedMarker != "")
 }
 
 func (s *scraper) ScrapeURL(ctx context.Context, url string) (*models.ScraperResult, error) {

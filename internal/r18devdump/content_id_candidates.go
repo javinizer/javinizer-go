@@ -97,6 +97,29 @@ func ContentIDCandidates(id string) []string {
 	return variations
 }
 
+var remasterMarkerTailRgx = regexp.MustCompile(`(?i)^(.*\d)(hd|ai|h)$`)
+
+// ContentIDCandidatesWithMarker is ContentIDCandidates for marker-bearing
+// inputs: the trailing H/HD/AI marker is split off, base candidates are built
+// from the core id, and the folded marker (hd -> h) is re-appended to every
+// candidate after zero-padding and DMM prefixing.
+func ContentIDCandidatesWithMarker(id string) []string {
+	m := remasterMarkerTailRgx.FindStringSubmatch(strings.TrimSpace(id))
+	if m == nil {
+		return ContentIDCandidates(id)
+	}
+	marker := strings.ToLower(m[2])
+	if marker == "hd" {
+		marker = "h"
+	}
+	base := ContentIDCandidates(m[1])
+	out := make([]string, 0, len(base))
+	for _, c := range base {
+		out = append(out, c+marker)
+	}
+	return out
+}
+
 // looksLikeContentID reports whether a normalized input already looks like a
 // content_id rather than a display dvd_id: the PPV letter_digits underscore
 // form (h_086mesu00103), or a leading numeric DMM prefix (118ipx00535,

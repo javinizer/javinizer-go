@@ -37,6 +37,16 @@ func (s *scraper) resolveContentIDCtx(ctx context.Context, id string) (string, e
 
 	logging.Debugf("DMM: Content-id not cached for %s, attempting to resolve via search", id)
 
+	foldedMarker, series, isContentID := classifyRemasterQuery(id)
+	if isContentID {
+		cid := compactQueryID(id)
+		s.cacheContentID(ctx, normalizedID, cid)
+		return cid, nil
+	}
+	if foldedMarker != "" {
+		return s.resolveRemasterContentID(ctx, id, normalizedID, foldedMarker, series)
+	}
+
 	contentID := normalizeContentID(id)
 	searchQuery := strings.ToLower(strings.ReplaceAll(id, "-", ""))
 	cleanSearchID := normalizedContentIDWithoutPadding(contentID)
