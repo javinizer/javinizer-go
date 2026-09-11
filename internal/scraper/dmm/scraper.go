@@ -1,6 +1,7 @@
 package dmm
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"os"
@@ -46,6 +47,7 @@ type scraper struct {
 	enabled       bool
 	scrapeActress bool
 	useBrowser    bool
+	browserFetch  func(context.Context, string) (string, error)
 	browserConfig models.BrowserConfig
 	contentIDRepo models.ContentIDMappingRepositoryInterface
 	proxyProfile  *models.ProxyProfile

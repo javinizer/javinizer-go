@@ -468,7 +468,7 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 	for _, candidate := range dumpCandidates {
 		candidateURL := fmt.Sprintf(apiURL, candidate.ContentID)
 		logging.Debugf("R18: Fetching dump-resolved candidate URL for %s: %s", id, candidateURL)
-		if res, fetchErr := s.fetchAndParseCandidate(ctx, candidateURL, candidate.ContentID); fetchErr == nil && res != nil {
+		if res, fetchErr := s.fetchAndParseCandidate(ctx, candidateURL, candidate.ContentID, id); fetchErr == nil && res != nil {
 			if _, guardErr := guardRemasterResult(id, res); guardErr != nil {
 				logging.Debugf("R18: dump-resolved candidate %s rejected by marker guard for %s", candidate.ContentID, id)
 				continue
@@ -495,7 +495,7 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		logging.Debugf("R18: Using normalized ID URL (no content-id found): %s", finalURL)
 	}
 
-	res, err := s.fetchAndParseCombined(ctx, finalURL)
+	res, err := s.fetchAndParseCombined(ctx, finalURL, id)
 	if err != nil {
 		return nil, err
 	}
@@ -507,8 +507,8 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 // answer a stale dump row with a 200 carrying a different movie (or an empty
 // payload); treat those as failures so the next candidate or the HTTP resolver
 // takes over, mirroring the resolver's core-match safeguard.
-func (s *scraper) fetchAndParseCandidate(ctx context.Context, url, wantContentID string) (*models.ScraperResult, error) {
-	res, err := s.fetchAndParseCombined(ctx, url)
+func (s *scraper) fetchAndParseCandidate(ctx context.Context, url, wantContentID, queryID string) (*models.ScraperResult, error) {
+	res, err := s.fetchAndParseCombined(ctx, url, queryID)
 	if err != nil {
 		return nil, err
 	}
@@ -525,7 +525,7 @@ func (s *scraper) fetchAndParseCandidate(ctx context.Context, url, wantContentID
 // fetchAndParseCombined fetches the combined-detail JSON for url and parses it
 // into a ScraperResult. Non-200 status codes, HTML payloads, and malformed
 // JSON all surface as errors so callers can fail over to the next candidate.
-func (s *scraper) fetchAndParseCombined(ctx context.Context, url string) (*models.ScraperResult, error) {
+func (s *scraper) fetchAndParseCombined(ctx context.Context, url, queryID string) (*models.ScraperResult, error) {
 	resp, err := s.doRequestWithRetryCtx(ctx, url)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch data from R18.dev: %w", err)
@@ -551,6 +551,10 @@ func (s *scraper) fetchAndParseCombined(ctx context.Context, url string) (*model
 			bodyPreview = bodyPreview[:200]
 		}
 		return nil, fmt.Errorf("failed to parse R18.dev response (preview: %s): %w", bodyPreview, err)
+	}
+
+	if marker, series := classifyRemaster(queryID); marker != "" && !isRawRemasterContentIDQuery(queryID) && !markerVariationAccept(resp.Body(), queryID, marker, series) {
+		return nil, models.NewScraperNotFoundError("R18.dev", "response conflicts with the requested remaster identity")
 	}
 
 	return s.parseResponse(ctx, &data, url)

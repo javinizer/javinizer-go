@@ -237,7 +237,7 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 	if strings.Contains(url, "video.dmm.co.jp") && s.useBrowser {
 		logging.Debug("DMM: Using browser mode for video.dmm.co.jp page")
 
-		bodyHTML, err := fetchWithBrowser(ctx, url, s.browserConfig.Timeout, s.proxyProfile, s.getEnvLookup(), s.getFs())
+		bodyHTML, err := s.fetchBrowserPage(ctx, url)
 		if err != nil {
 			return nil, fmt.Errorf("browser fetch failed: %w", err)
 		}
@@ -288,7 +288,7 @@ func (s *scraper) ScrapeURL(ctx context.Context, url string) (*models.ScraperRes
 	if strings.Contains(url, "video.dmm.co.jp") && s.useBrowser {
 		logging.Debug("DMM ScrapeURL: Using browser mode for video.dmm.co.jp page")
 
-		bodyHTML, err := fetchWithBrowser(ctx, url, s.browserConfig.Timeout, s.proxyProfile, s.getEnvLookup(), s.getFs())
+		bodyHTML, err := s.fetchBrowserPage(ctx, url)
 		if err != nil {
 			return nil, models.NewScraperStatusError("DMM", 0, fmt.Sprintf("browser fetch failed: %v", err))
 		}

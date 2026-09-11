@@ -17,7 +17,7 @@ var (
 	// ambiguous and must stay on the resolver path.
 	remasterCIDShapeRegex = regexp.MustCompile(`^(?:\d{1,5}[a-z]{2,6}\d{3,5}[a-z]{0,3}|[a-z]{2,6}\d{5}[a-z]{0,3})$`)
 	hPrefixCIDShapeRegex  = regexp.MustCompile(`^h_\d+[a-z]+\d+[a-z]{0,2}$`)
-	remasterTailRegex     = regexp.MustCompile(`^(\d{0,2})([a-z]{2,6})(\d{3,5})(hd|ai|h)$`)
+	remasterTailRegex     = regexp.MustCompile(`^(\d{0,5})([a-z]{2,6})(\d{3,5})(hd|ai|h)$`)
 	anchoredMarkerCIDReg  = regexp.MustCompile(`^(\d{0,2})([a-z]{2,6})(\d{3,5})([a-z]{1,3})$`)
 	nonAlnumRegex         = regexp.MustCompile(`[^a-z0-9]+`)
 )
@@ -287,6 +287,13 @@ func (s *scraper) cacheContentID(ctx context.Context, searchID, contentID string
 	}
 }
 
+func (s *scraper) fetchBrowserPage(ctx context.Context, url string) (string, error) {
+	if s.browserFetch != nil {
+		return s.browserFetch(ctx, url)
+	}
+	return fetchWithBrowser(ctx, url, s.browserConfig.Timeout, s.proxyProfile, s.getEnvLookup(), s.getFs())
+}
+
 type displayStatus int
 
 const (
@@ -319,17 +326,27 @@ func parseDisplayIdentity(s string) (string, string, string, bool) {
 func (s *scraper) verifyCandidateDisplayID(ctx context.Context, foldedTarget string, urls []string) displayStatus {
 	identities := map[string]struct{}{}
 	for _, u := range urls {
-		if u == "" || !strings.Contains(u, "www.dmm.co.jp") {
+		if u == "" || (!strings.HasPrefix(u, "https://www.dmm.co.jp/") && !strings.HasPrefix(u, "https://video.dmm.co.jp/")) {
 			continue
 		}
 		if err := s.rateLimiter.Wait(ctx); err != nil {
 			break
 		}
-		resp, err := s.client.R().SetContext(ctx).Get(u)
-		if err != nil || resp.StatusCode() != 200 {
-			continue
+		var body string
+		if strings.HasPrefix(u, "https://video.dmm.co.jp/") && s.useBrowser {
+			var err error
+			body, err = s.fetchBrowserPage(ctx, u)
+			if err != nil {
+				continue
+			}
+		} else {
+			resp, err := s.client.R().SetContext(ctx).Get(u)
+			if err != nil || resp.StatusCode() != 200 {
+				continue
+			}
+			body = resp.String()
 		}
-		if doc, err := goquery.NewDocumentFromReader(strings.NewReader(resp.String())); err == nil {
+		if doc, err := goquery.NewDocumentFromReader(strings.NewReader(body)); err == nil {
 			if display := extractDisplayID(doc); display != "" {
 				identities[display] = struct{}{}
 			}
