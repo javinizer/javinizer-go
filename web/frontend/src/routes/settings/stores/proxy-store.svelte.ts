@@ -309,7 +309,7 @@ export function createProxyStore(deps: ProxyStoreDeps): ProxyStore {
 						}
 					: {
 							enabled: true,
-							profile: '',
+							profile: profileName,
 							profiles: {
 								[profileName]: {
 									url: profile.url,

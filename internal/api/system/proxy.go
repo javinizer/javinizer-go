@@ -70,9 +70,7 @@ func testProxy(rt *core.APIRuntime) gin.HandlerFunc {
 		switch req.Mode {
 		case "direct":
 			apiCfg := rt.GetAPIConfig()
-			globalProxy := &apiCfg.ProxyConfig
-			scraperProxy := &req.Proxy
-			proxyProfile := models.ResolveScraperProxy(*globalProxy, scraperProxy)
+			proxyProfile := resolveProxyTestProfile(apiCfg.ProxyConfig, req.Proxy)
 
 			if !req.Proxy.Enabled || strings.TrimSpace(proxyProfile.URL) == "" {
 				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "proxy.enabled=true and proxy profile with url are required for direct proxy test"})
@@ -86,9 +84,7 @@ func testProxy(rt *core.APIRuntime) gin.HandlerFunc {
 				return
 			}
 			apiCfg := rt.GetAPIConfig()
-			globalProxy := &apiCfg.ProxyConfig
-			scraperProxy := &req.Proxy
-			proxyProfile := models.ResolveScraperProxy(*globalProxy, scraperProxy)
+			proxyProfile := resolveProxyTestProfile(apiCfg.ProxyConfig, req.Proxy)
 
 			result = TestFlareSolverr(targetURL, req.FlareSolverr, proxyProfile)
 
@@ -153,6 +149,20 @@ func testProxy(rt *core.APIRuntime) gin.HandlerFunc {
 			TokenExpiresAt:    result.TokenExpiresAt,
 		})
 	}
+}
+
+func resolveProxyTestProfile(persisted, requested models.ProxyConfig) *models.ProxyProfile {
+	if requested.Profiles != nil {
+		if requested.Profile != "" {
+			requested.DefaultProfile = requested.Profile
+		}
+		return models.ResolveGlobalProxy(requested)
+	}
+	persisted.Enabled = requested.Enabled
+	if requested.DefaultProfile != "" {
+		persisted.DefaultProfile = requested.DefaultProfile
+	}
+	return models.ResolveScraperProxy(persisted, &requested)
 }
 
 // TestDirectProxy tests direct proxy connectivity to a target URL.
