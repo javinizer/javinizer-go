@@ -54,6 +54,7 @@ func TestProxy_RedactedRequestCredentials(t *testing.T) {
 		{"new username", models.ProxyProfile{Username: "new-user", Password: models.RedactedValue}, models.ProxyProfile{Username: "new-user", Password: "saved-password"}},
 		{"new password", models.ProxyProfile{Username: models.RedactedValue, Password: "new-password"}, models.ProxyProfile{Username: "saved-user", Password: "new-password"}},
 		{"cleared credentials", models.ProxyProfile{}, models.ProxyProfile{}},
+		{"inherited credentials", models.ProxyProfile{Username: models.RedactedValue, Password: models.RedactedValue}, models.ProxyProfile{Username: "saved-user", Password: "saved-password"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -86,6 +87,11 @@ func TestProxy_RedactedRequestCredentials(t *testing.T) {
 				"main":   requested,
 				"backup": {URL: "http://backup:8080", Username: models.RedactedValue, Password: models.RedactedValue},
 			}}
+			if tc.name == "inherited credentials" {
+				requestProxy.Profile = "backup"
+				requestProxy.DefaultProfile = "main"
+				requestProxy.Profiles["backup"] = models.ProxyProfile{URL: proxy.URL}
+			}
 			body, err := json.Marshal(contracts.ProxyTestRequest{Mode: "direct", TargetURL: "http://example.com/proxy-probe", Proxy: requestProxy})
 			require.NoError(t, err)
 			req := httptest.NewRequest(http.MethodPost, "/proxy/test", bytes.NewReader(body))
@@ -102,9 +108,15 @@ func TestProxy_RedactedRequestCredentials(t *testing.T) {
 			requestProxy.DefaultProfile = "main"
 			requestProxy.Profiles["main"] = expected
 			requestProxy.Profiles["backup"] = cfg.Scrapers.Proxy.Profiles["backup"]
+			if tc.name == "inherited credentials" {
+				requestProxy.Profiles["backup"] = models.ProxyProfile{URL: proxy.URL}
+			}
 			hash, err := core.HashProxyConfig(requestProxy)
 			require.NoError(t, err)
 			require.True(t, tokens.Validate(response.VerificationToken, "global", hash))
+			saveCfg := cfg.Clone()
+			saveCfg.Scrapers.Proxy = requestProxy
+			require.NoError(t, validateProxySaveConfig(deps, saveCfg, map[string]string{"global": response.VerificationToken}))
 			after, err := json.Marshal(rt.GetAPIConfig().ProxyConfig)
 			require.NoError(t, err)
 			require.JSONEq(t, string(before), string(after))
@@ -161,6 +173,9 @@ func TestProxy_RequestProfiles(t *testing.T) {
 			hash, err := core.HashProxyConfig(requestProxy)
 			require.NoError(t, err)
 			require.True(t, tokens.Validate(response.VerificationToken, "global", hash))
+			saveCfg := cfg.Clone()
+			saveCfg.Scrapers.Proxy = requestProxy
+			require.NoError(t, validateProxySaveConfig(deps, saveCfg, map[string]string{"global": response.VerificationToken}))
 			after, err := json.Marshal(rt.GetAPIConfig().ProxyConfig)
 			require.NoError(t, err)
 			require.JSONEq(t, string(before), string(after))

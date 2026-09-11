@@ -3,11 +3,12 @@ import { createProxyStore } from './proxy-store.svelte';
 import { apiClient } from '$lib/api/client';
 import type { Config } from '$lib/api/types';
 
-vi.mock('$lib/api/client', () => ({ apiClient: { testProxy: vi.fn() } }));
+vi.mock('$lib/api/client', () => ({ apiClient: { testProxy: vi.fn(), request: vi.fn() } }));
 vi.mock('$lib/stores/toast', () => ({ toastStore: { success: vi.fn(), error: vi.fn() } }));
 
 describe('unsaved proxy profile tests', () => {
 	it.each(['main', 'backup'])('tests the selected %s profile and enables saving', async (name) => {
+		vi.mocked(apiClient.request).mockClear();
 		const profiles = {
 			main: { url: 'http://127.0.0.1:7890', username: '', password: '' },
 			backup: { url: 'http://127.0.0.1:7891', username: '', password: '' },
@@ -40,10 +41,20 @@ describe('unsaved proxy profile tests', () => {
 			proxy: {
 				enabled: true,
 				profile: name,
-				profiles: name === 'main' ? profiles : { backup: profiles.backup },
+				default_profile: 'main',
+				profiles,
 			},
 		});
-		expect(store.canSaveProfile(name)).toBe(true);
+		expect(store.canSaveProfile(name)).toBe(name === 'main');
+		await store.saveProxyProfile(name);
+		if (name === 'main') {
+			expect(apiClient.request).toHaveBeenLastCalledWith('/api/v1/config', {
+				method: 'PUT',
+				body: JSON.stringify({ ...config, proxy_verification_tokens: { global: 'verified' } }),
+			});
+		} else {
+			expect(apiClient.request).not.toHaveBeenCalled();
+		}
 		expect(store.verificationTokens['global']).toBe(name === 'main' ? 'verified' : undefined);
 		if (name === 'main') {
 			const globalResult = store.globalProxyTestResult;
@@ -60,6 +71,13 @@ describe('unsaved proxy profile tests', () => {
 			expect(store.canSaveProfile('backup')).toBe(true);
 			expect(store.verificationTokens['global']).toBe('verified');
 			expect(store.globalProxyTestResult).toEqual(globalResult);
+			await store.saveProxyProfile('backup');
+			expect(apiClient.request).toHaveBeenLastCalledWith('/api/v1/config', {
+				method: 'PUT',
+				body: JSON.stringify({ ...config, proxy_verification_tokens: { global: 'verified' } }),
+			});
+			store.setProxyProfileField('main', 'password', 'changed');
+			expect(store.canSaveProfile('backup')).toBe(false);
 		}
 	});
 });

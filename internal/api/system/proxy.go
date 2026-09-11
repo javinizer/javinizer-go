@@ -109,8 +109,8 @@ func testProxy(rt *core.APIRuntime) gin.HandlerFunc {
 					normalized := req.Proxy
 					if normalized.DefaultProfile == "" && normalized.Profile != "" {
 						normalized.DefaultProfile = normalized.Profile
-						normalized.Profile = ""
 					}
+					normalized.Profile = ""
 					configHash, hashErr = core.HashProxyConfig(normalized)
 				} else {
 					configHash, hashErr = core.HashProxyConfig(req.FlareSolverr)
@@ -154,10 +154,10 @@ func testProxy(rt *core.APIRuntime) gin.HandlerFunc {
 
 func resolveProxyTestProfile(persisted, requested models.ProxyConfig) *models.ProxyProfile {
 	if requested.Profiles != nil {
-		if requested.Profile != "" {
+		if requested.DefaultProfile == "" {
 			requested.DefaultProfile = requested.Profile
 		}
-		return models.ResolveGlobalProxy(requested)
+		return models.ResolveScraperProxy(requested, &requested)
 	}
 	persisted.Enabled = requested.Enabled
 	if requested.DefaultProfile != "" {
