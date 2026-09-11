@@ -60,6 +60,9 @@ func (s *scraper) extractIdentifiers(result *models.ScraperResult, sourceURL str
 			cid = strings.ToLower(strings.ReplaceAll(cid, "-", ""))
 			result.ContentID = cid
 			result.ID = normalizeID(cid)
+			if marker, series, _ := classifyRemasterQuery(cid); marker != "" && series == "t28" {
+				result.ID = canonicalRemasterDisplayID(cleanPrefixRegex.ReplaceAllString(cid, "$1"))
+			}
 			return
 		}
 		// Always strip rental 'r' suffix from content IDs regardless of URL path.
