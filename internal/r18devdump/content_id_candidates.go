@@ -112,7 +112,7 @@ func contentIDCandidates(id string, markerAware bool) []string {
 	return variations
 }
 
-var t28RemasterBaseRegex = regexp.MustCompile(`(?i)^t28(\d{3,5})$`)
+var t28RemasterBaseRegex = regexp.MustCompile(`(?i)^t28(\d{2,5})$`)
 
 var remasterMarkerTailRgx = regexp.MustCompile(`(?i)^(.*\d)(hd|ai|h)$`)
 

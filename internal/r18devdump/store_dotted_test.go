@@ -10,6 +10,7 @@ import (
 
 func TestT28MarkerCandidateIdentity(t *testing.T) {
 	assert.Contains(t, ContentIDCandidatesWithMarker("T28-123-HD"), "9t28123h")
+	assert.Contains(t, ContentIDCandidatesWithMarker("T28-12-HD"), "9t28012h")
 	assert.Contains(t, ContentIDCandidatesWithMarker("t2800123hd"), "t2800123hd")
 	assert.NotContains(t, ContentIDCandidatesWithMarker("t2800123hd"), "t2800123h")
 }
