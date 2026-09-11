@@ -107,6 +107,27 @@ func TestMatchFile_ContentIDTier2(t *testing.T) {
 	assert.Nil(t, matchOne(t, m, "oreco183a.mkv"))
 }
 
+func TestMatchFile_ContentIDTier2_WidenedPrefixes(t *testing.T) {
+	m, err := NewMatcher(&Config{})
+	require.NoError(t, err)
+
+	cases := []struct {
+		name   string
+		wantID string
+	}{
+		{"118ipx00535.mkv", "118IPX00535"},
+		{"lulu00441.mkv", "LULU00441"},
+		{"5342abc00123h.mkv", "5342ABC00123H"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := matchOne(t, m, tc.name)
+			require.NotNil(t, got, tc.name)
+			assert.Equal(t, tc.wantID, got.ID)
+		})
+	}
+}
+
 func TestMatchFile_Tier2NeverPreemptsTier1(t *testing.T) {
 	m, err := NewMatcher(&Config{})
 	require.NoError(t, err)

@@ -54,6 +54,14 @@ func newRemasterTestScraper(t *testing.T) (*scraper, *database.ContentIDMappingR
 	return s, repo
 }
 
+func TestCanonicalRemasterDisplayID(t *testing.T) {
+	assert.Equal(t, "DV-818AI", canonicalRemasterDisplayID("DV-818AI"))
+	assert.Equal(t, "RCT-156H", canonicalRemasterDisplayID("RCT-156-HD"))
+	assert.Equal(t, "RCT-156H", canonicalRemasterDisplayID("rct-156h"))
+	assert.Equal(t, "PLAIN", canonicalRemasterDisplayID("plain"))
+	assert.Equal(t, "IPX-535", canonicalRemasterDisplayID("IPX-535"))
+}
+
 func TestRemasterClassification(t *testing.T) {
 	cases := []struct {
 		id        string

@@ -7,7 +7,7 @@ import (
 
 var (
 	reRemasterRemainder  = regexp.MustCompile(`(?i)^[-_.\s]?(HD|AI|H)$`)
-	contentIDShapeRegex  = regexp.MustCompile(`(?i)^(?:\d{1,2}[A-Za-z]{2,6}\d{3,5}[A-Za-z]{0,3}|[A-Za-z]{2,6}\d{4,5}[A-Za-z]{1,3})$`)
+	contentIDShapeRegex  = regexp.MustCompile(`(?i)^(?:\d{1,5}[A-Za-z]{2,6}\d{3,5}[A-Za-z]{0,3}|[A-Za-z]{2,6}\d{4,5}[A-Za-z]{0,3})$`)
 	contentIDExtStripReg = regexp.MustCompile(`(?i)\.[A-Za-z0-9]{2,5}$`)
 )
 

@@ -41,6 +41,49 @@ func TestExtractRemasterContentIDCandidates_Forms(t *testing.T) {
 	}
 }
 
+// Search with a verified remaster carries the canonical display identity from
+// the query, not an ID reconstructed from the server-owned content id.
+func TestSearch_RemasterKeepsVerifiedDisplayID(t *testing.T) {
+	s, _ := newRemasterTestScraper(t)
+	rt := &remasterRoundTripper{serve: func(u string) (int, string) {
+		switch {
+		case strings.Contains(u, "/search/="):
+			return 200, `<html><body><a href="/digital/videoa/-/detail/=/cid=dv00899ai/">remaster</a></body></html>`
+		case strings.Contains(u, "cid=dv00899ai"):
+			return 200, `<html><body><h1 id="title" class="item">AI Remaster</h1>` +
+				`<table><tr><td>品番：</td><td>DV-818AI</td></tr></table></body></html>`
+		}
+		return 404, ""
+	}}
+	s.client.SetTransport(rt)
+	res, err := s.Search(context.Background(), "DV-818AI")
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	assert.Equal(t, "DV-818AI", res.ID, "verified display identity wins over cid-derived ID")
+	assert.Equal(t, "dv00899ai", res.ContentID, "content id stays verbatim from the server")
+}
+
+func TestSearch_DisplayIDPreserved_FusedAndSeparated(t *testing.T) {
+	for _, q := range []string{"RCT-156H", "RCT-156-HD"} {
+		s, _ := newRemasterTestScraper(t)
+		rt := &remasterRoundTripper{serve: func(u string) (int, string) {
+			switch {
+			case strings.Contains(u, "/search/="):
+				return 200, `<html><body><a href="/digital/videoa/-/detail/=/cid=1rct00156h/">remaster</a></body></html>`
+			case strings.Contains(u, "cid=1rct00156h"):
+				return 200, `<html><body><h1 id="title" class="item">R</h1>` +
+					`<table><tr><td>品番：</td><td>RCT-156-HD</td></tr></table></body></html>`
+			}
+			return 404, ""
+		}}
+		s.client.SetTransport(rt)
+		res, err := s.Search(context.Background(), q)
+		require.NoError(t, err, q)
+		assert.Equal(t, "RCT-156H", res.ID, q)
+		assert.Equal(t, "1rct00156h", res.ContentID, q)
+	}
+}
+
 func TestResolveRemaster_QueryErrorPaths(t *testing.T) {
 	t.Run("transport error", func(t *testing.T) {
 		s, _ := newRemasterTestScraper(t)

@@ -12,7 +12,7 @@ import (
 )
 
 var (
-	remasterCIDShapeRegex = regexp.MustCompile(`^(?:\d{1,2}[a-z]{2,6}\d{3,5}[a-z]{0,3}|[a-z]{2,6}\d{4,5}[a-z]{1,3})$`)
+	remasterCIDShapeRegex = regexp.MustCompile(`^(?:\d{1,5}[a-z]{2,6}\d{3,5}[a-z]{0,3}|[a-z]{2,6}\d{4,5}[a-z]{0,3})$`)
 	hPrefixCIDShapeRegex  = regexp.MustCompile(`^h_\d+[a-z]+\d+[a-z]{0,2}$`)
 	remasterTailRegex     = regexp.MustCompile(`^(\d{0,2})([a-z]{2,6})(\d{3,5})(hd|ai|h)$`)
 	anchoredMarkerCIDReg  = regexp.MustCompile(`^(\d{0,2})([a-z]{2,6})(\d{3,5})([a-z]{1,3})$`)
@@ -56,6 +56,21 @@ func foldMarkerSuffix(s string) string {
 		return s[:len(s)-2] + "h"
 	}
 	return s
+}
+
+// canonicalRemasterDisplayID renders the query's display identity in canonical
+// form (series-number + folded marker), e.g. "DV-818AI" -> "DV-818AI",
+// "RCT-156-HD" -> "RCT-156H".
+func canonicalRemasterDisplayID(id string) string {
+	m := remasterTailRegex.FindStringSubmatch(compactQueryID(id))
+	if m == nil {
+		return strings.ToUpper(id)
+	}
+	marker := "H"
+	if m[4] == "ai" {
+		marker = "AI"
+	}
+	return strings.ToUpper(m[2]) + "-" + m[3] + marker
 }
 
 // stripRentalSuffixMarkerAware extends stripRentalSuffix: in addition to the

@@ -30,6 +30,14 @@ func TestRemasterHelpers(t *testing.T) {
 	guarded, gerr := guardRemasterResult("RCT-156H", &models.ScraperResult{ContentID: "dv00899h", ID: "DV-899H"})
 	assert.Error(t, gerr, "foreign marker identity must fail the result guard")
 	assert.Nil(t, guarded)
+
+	guarded, gerr = guardRemasterResult("ABC-123H", &models.ScraperResult{ContentID: "118abc00123h", ID: "ABC-123H"})
+	assert.NoError(t, gerr, "three-digit catalog prefixes must pass the guard")
+	require.NotNil(t, guarded)
+
+	guarded, gerr = guardRemasterResult("ABC-123H", &models.ScraperResult{ContentID: "118abc00123", ID: "ABC-123"})
+	assert.Error(t, gerr, "wide-prefix base release must still fail a marker query")
+	assert.Nil(t, guarded)
 }
 
 // Fuzzy path with a marker-carrying content id: the recording gate accepts,

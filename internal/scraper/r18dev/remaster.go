@@ -10,7 +10,7 @@ import (
 
 var (
 	r18RemasterTailRegex = regexp.MustCompile(`^(\d{0,2})([a-z]{2,6})(\d{3,5})(hd|ai|h)$`)
-	r18CIDAnchoredRegex  = regexp.MustCompile(`^(\d{0,2})([a-z]{2,6})(\d{3,5})([a-z]{0,3})$`)
+	r18CIDAnchoredRegex  = regexp.MustCompile(`^(\d{0,5})([a-z]{2,6})(\d{3,5})([a-z]{0,3})$`)
 	nonAlnumR18Regex     = regexp.MustCompile(`[^a-z0-9]+`)
 )
 
