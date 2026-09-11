@@ -11,8 +11,17 @@ import (
 var (
 	r18RemasterTailRegex = regexp.MustCompile(`^(\d{0,5})([a-z]{2,6})(\d{3,5})(hd|ai|h)$`)
 	r18CIDAnchoredRegex  = regexp.MustCompile(`^(\d{0,5})([a-z]{2,6})(\d{3,5})([a-z]{0,3})$`)
+	r18PrefixedCIDRegex  = regexp.MustCompile(`^[hn]_\d{1,5}[a-z]{2,6}\d{3,5}[a-z]{0,3}$`)
 	nonAlnumR18Regex     = regexp.MustCompile(`[^a-z0-9]+`)
 )
+
+func r18RemasterCore(id string) string {
+	s := strings.ToLower(strings.TrimSpace(id))
+	if r18PrefixedCIDRegex.MatchString(s) {
+		s = s[2:]
+	}
+	return r18CompactID(s)
+}
 
 func r18CompactID(id string) string {
 	return nonAlnumR18Regex.ReplaceAllString(strings.ToLower(strings.TrimSpace(id)), "")
@@ -21,7 +30,7 @@ func r18CompactID(id string) string {
 // classifyRemaster mirrors the DMM scraper's classification for marker-bearing
 // queries: the folded marker is "h" for H/HD and "ai" for AI spellings.
 func classifyRemaster(id string) (foldedMarker string, series string) {
-	m := r18RemasterTailRegex.FindStringSubmatch(r18CompactID(id))
+	m := r18RemasterTailRegex.FindStringSubmatch(r18RemasterCore(id))
 	if m == nil {
 		return "", ""
 	}
@@ -39,7 +48,7 @@ func cidMatchesMarker(contentID, foldedMarker, series string) bool {
 	if !cidCarriesMarker(contentID, foldedMarker) {
 		return false
 	}
-	m := r18CIDAnchoredRegex.FindStringSubmatch(r18CompactID(contentID))
+	m := r18CIDAnchoredRegex.FindStringSubmatch(r18RemasterCore(contentID))
 	return m != nil && m[2] == series
 }
 
@@ -68,7 +77,7 @@ func cidCarriesMarker(contentID, foldedMarker string) bool {
 // remasterDisplaySpellings adds the hyphenated display forms r18 stores as
 // dvd_id for remasters (rct-156-hd, dv-818-ai).
 func remasterDisplaySpellings(id string) []string {
-	m := r18RemasterTailRegex.FindStringSubmatch(r18CompactID(id))
+	m := r18RemasterTailRegex.FindStringSubmatch(r18RemasterCore(id))
 	if m == nil {
 		return nil
 	}
@@ -84,9 +93,7 @@ func cidMatchesRemasterQuery(contentID, queryID, marker, series string) bool {
 		return false
 	}
 	if isRawRemasterContentIDQuery(queryID) {
-		query := r18CIDAnchoredRegex.FindStringSubmatch(r18CompactID(queryID))
-		candidate := r18CIDAnchoredRegex.FindStringSubmatch(r18CompactID(contentID))
-		return query != nil && candidate != nil && query[4] == candidate[4]
+		return strings.EqualFold(strings.TrimSpace(contentID), strings.TrimSpace(queryID))
 	}
 	return true
 }
@@ -124,6 +131,9 @@ func guardRemasterResult(id string, res *models.ScraperResult) (*models.ScraperR
 
 func isRawRemasterContentIDQuery(id string) bool {
 	s := strings.ToLower(strings.TrimSpace(id))
+	if r18PrefixedCIDRegex.MatchString(s) {
+		return true
+	}
 	if strings.ContainsAny(s, "-_ ") {
 		return false
 	}
@@ -133,7 +143,7 @@ func isRawRemasterContentIDQuery(id string) bool {
 var rawRemasterCIDShapeRegex = regexp.MustCompile(`^(?:\d{1,5}[a-z]{2,6}\d{3,5}[a-z]{0,3}|[a-z]{2,6}\d{5}[a-z]{0,3})$`)
 
 func canonicalRemasterDisplayID(id string) string {
-	m := r18RemasterTailRegex.FindStringSubmatch(r18CompactID(id))
+	m := r18RemasterTailRegex.FindStringSubmatch(r18RemasterCore(id))
 	if m == nil {
 		return strings.ToUpper(id)
 	}
