@@ -343,12 +343,6 @@ export function createProxyStore(deps: ProxyStoreDeps): ProxyStore {
 					delete next['global'];
 					verificationTokens = next;
 				}
-			} else if (
-				result.success &&
-				result.verification_token &&
-				(config?.scrapers?.proxy?.enabled ?? false)
-			) {
-				verificationTokens['global'] = result.verification_token;
 			}
 
 			if (result.success) {

@@ -44,5 +44,22 @@ describe('unsaved proxy profile tests', () => {
 			},
 		});
 		expect(store.canSaveProfile(name)).toBe(true);
+		expect(store.verificationTokens['global']).toBe(name === 'main' ? 'verified' : undefined);
+		if (name === 'main') {
+			const globalResult = store.globalProxyTestResult;
+			vi.mocked(apiClient.testProxy).mockResolvedValueOnce({
+				success: true,
+				mode: 'direct',
+				target_url: 'http://example.com',
+				status_code: 200,
+				duration_ms: 1,
+				message: 'ok',
+				verification_token: 'partial-profile-token',
+			});
+			await store.runNamedProxyProfileTest('backup');
+			expect(store.canSaveProfile('backup')).toBe(true);
+			expect(store.verificationTokens['global']).toBe('verified');
+			expect(store.globalProxyTestResult).toEqual(globalResult);
+		}
 	});
 });
