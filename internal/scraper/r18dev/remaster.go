@@ -56,6 +56,9 @@ func cidMatchesMarker(contentID, foldedMarker, series string) bool {
 // lowercase, alnum-only, trailing "hd" folded to "h".
 func foldDisplay(s string) string {
 	n := r18CompactID(s)
+	if m := r18RemasterTailRegex.FindStringSubmatch(n); m != nil && m[1] == "" {
+		n = m[2] + strings.TrimLeft(m[3], "0") + m[4]
+	}
 	if strings.HasSuffix(n, "hd") {
 		return n[:len(n)-2] + "h"
 	}

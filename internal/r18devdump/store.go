@@ -586,6 +586,8 @@ func normalizeDVDID(id string) string {
 	return id
 }
 
+var dumpPaddedMarkerRegex = regexp.MustCompile(`^([A-Z]{1,6})([0-9]{2,5})(HD|H|AI)$`)
+
 var dumpMarkerTailRegex = regexp.MustCompile(`^([A-Z]{1,6}[0-9]{2,5})(H|AI)$`)
 
 // dumpNormKeys returns all dvd_id_norm variants to probe for a query id: the
@@ -597,12 +599,26 @@ func dumpNormKeys(id string) []string {
 		return nil
 	}
 	keys := []string{n}
-	if m := dumpMarkerTailRegex.FindStringSubmatch(n); m != nil {
-		if m[2] == "H" {
-			keys = append(keys, m[1]+"HD")
+	if m := dumpPaddedMarkerRegex.FindStringSubmatch(n); m != nil {
+		number := strings.TrimLeft(m[2], "0")
+		if number == "" {
+			number = "0"
 		}
-		// AI is already the stored form in both spellings (DV-818AI /
-		// DV-818-AI normalize to the same key), so nothing to add.
+		for _, digits := range []string{number, strings.Repeat("0", max(0, 3-len(number))) + number} {
+			key := m[1] + digits + m[3]
+			if key != n && key != keys[len(keys)-1] {
+				keys = append(keys, key)
+			}
+		}
+	}
+	for _, key := range append([]string(nil), keys...) {
+		if m := dumpMarkerTailRegex.FindStringSubmatch(key); m != nil {
+			if m[2] == "H" {
+				keys = append(keys, m[1]+"HD")
+			}
+			// AI is already the stored form in both spellings (DV-818AI /
+			// DV-818-AI normalize to the same key), so nothing to add.
+		}
 	}
 	return keys
 }
