@@ -23,6 +23,18 @@ var (
 	nonAlnumRegex           = regexp.MustCompile(`[^a-z0-9]+`)
 )
 
+func cachedRemasterIdentityMatches(id, cid, marker, series string, raw bool) bool {
+	if marker == "" {
+		return true
+	}
+	if raw {
+		return strings.EqualFold(strings.TrimSpace(id), strings.TrimSpace(cid))
+	}
+	clean := cleanPrefixRegex.ReplaceAllString(strings.ToLower(cid), "$1")
+	cachedSeries, cachedMarker, ok := parseAnchoredMarkerCID(clean)
+	return ok && cachedSeries == series && cachedMarker == marker
+}
+
 func compactQueryID(id string) string {
 	s := strings.ToLower(strings.TrimSpace(id))
 	s = strings.NewReplacer("-", "", "_", "", ".", "", " ", "").Replace(s)

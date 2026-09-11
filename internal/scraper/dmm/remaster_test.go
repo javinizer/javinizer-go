@@ -237,7 +237,7 @@ func TestResolveContentID_BypassCachesVerbatimAndSkipsSearch(t *testing.T) {
 
 }
 
-func TestResolveContentID_BypassCacheConflictWins(t *testing.T) {
+func TestResolveContentID_BypassRejectsCacheConflict(t *testing.T) {
 	s, repo := newRemasterTestScraper(t)
 	require.NoError(t, repo.Create(context.Background(), &models.ContentIDMapping{SearchID: "1RCT00156H", ContentID: "zzzz999", Source: "dmm"}))
 	rt := &remasterRoundTripper{serve: func(u string) (int, string) { return 404, "" }}
@@ -245,7 +245,8 @@ func TestResolveContentID_BypassCacheConflictWins(t *testing.T) {
 
 	cid, err := s.ResolveContentIDCtx(context.Background(), "1RCT00156H")
 	require.NoError(t, err)
-	assert.Equal(t, "zzzz999", cid, "cached mapping (even conflicting) wins before bypass")
+	assert.Equal(t, "1rct00156h", cid)
+	assert.Empty(t, rt.hits)
 }
 
 func TestResolveContentID_BaseQueryShortestWins_Preserved(t *testing.T) {
