@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestContentIDCandidatesWithMarker(t *testing.T) {
@@ -39,6 +40,12 @@ func TestContentIDCandidatesWithMarker(t *testing.T) {
 			assert.True(t, strings.HasSuffix(c, "h") || strings.HasSuffix(c, "ai"), "%s -> %s keeps marker", in, c)
 		}
 	}
+
+	// Raw content ids preserve the exact marker; display spellings fold hd->h.
+	cands = ContentIDCandidatesWithMarker("1rct00156hd")
+	require.Contains(t, cands, "1rct00156hd")
+	cands = ContentIDCandidatesWithMarker("rct00156hd")
+	require.Contains(t, cands, "rct00156hd")
 
 	// Marker-free input delegates to base behavior.
 	assert.Equal(t, ContentIDCandidates("RCT-156"), ContentIDCandidatesWithMarker("RCT-156"))

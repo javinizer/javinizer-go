@@ -111,8 +111,17 @@ func (m *Matcher) MatchFile(file models.FileMatchInfo) *MatchResult {
 		return result
 	}
 
-	if id := matchContentIDShape(nameWithoutExt); id != "" {
-		return &MatchResult{File: file, ID: id, MatchedBy: "contentid"}
+	if idText, remainder := contentIDPrefixMatch(nameWithoutExt); idText != "" {
+		result := &MatchResult{File: file, ID: strings.ToUpper(idText), MatchedBy: "contentid"}
+		if remainder != "" {
+			num, suffix, patternType, trailingPrefix := DetectPartSuffix(nameWithoutExt, idText)
+			result.PartNumber = num
+			result.PartSuffix = suffix
+			result.MultipartPattern = patternType
+			result.TrailingPrefix = trailingPrefix
+			result.IsMultiPart = patternType == PatternExplicit
+		}
+		return result
 	}
 	return nil
 }

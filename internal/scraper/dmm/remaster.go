@@ -12,7 +12,10 @@ import (
 )
 
 var (
-	remasterCIDShapeRegex = regexp.MustCompile(`^(?:\d{1,5}[a-z]{2,6}\d{3,5}[a-z]{0,3}|[a-z]{2,6}\d{4,5}[a-z]{0,3})$`)
+	// Unambiguous content-id shapes only: a channel prefix or a five-digit
+	// zero-padded number. Separator-free four-digit display ids (ABP1234) are
+	// ambiguous and must stay on the resolver path.
+	remasterCIDShapeRegex = regexp.MustCompile(`^(?:\d{1,5}[a-z]{2,6}\d{3,5}[a-z]{0,3}|[a-z]{2,6}\d{5}[a-z]{0,3})$`)
 	hPrefixCIDShapeRegex  = regexp.MustCompile(`^h_\d+[a-z]+\d+[a-z]{0,2}$`)
 	remasterTailRegex     = regexp.MustCompile(`^(\d{0,2})([a-z]{2,6})(\d{3,5})(hd|ai|h)$`)
 	anchoredMarkerCIDReg  = regexp.MustCompile(`^(\d{0,2})([a-z]{2,6})(\d{3,5})([a-z]{1,3})$`)

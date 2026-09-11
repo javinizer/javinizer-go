@@ -45,6 +45,25 @@ func TestMatchFile_RemasterMarkers(t *testing.T) {
 	}
 }
 
+func TestMatchFile_ContentIDPartSuffixes(t *testing.T) {
+	m, err := NewMatcher(&Config{})
+	require.NoError(t, err)
+
+	got := matchOne(t, m, "1rct00156h-pt2.mkv")
+	require.NotNil(t, got)
+	assert.Equal(t, "1RCT00156H", got.ID)
+	assert.Equal(t, 2, got.PartNumber)
+	assert.Equal(t, PatternExplicit, got.MultipartPattern)
+
+	got = matchOne(t, m, "53dv899-2.mkv")
+	require.NotNil(t, got)
+	assert.Equal(t, "53DV899", got.ID)
+	assert.Equal(t, 2, got.PartNumber)
+	assert.Equal(t, PatternExplicit, got.MultipartPattern)
+
+	assert.Equal(t, "1RCT00156H", m.MatchString("1rct00156h-pt2"))
+}
+
 func TestMatchFile_RemasterPartsBindToBase(t *testing.T) {
 	m, err := NewMatcher(&Config{})
 	require.NoError(t, err)
