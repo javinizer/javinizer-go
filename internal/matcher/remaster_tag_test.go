@@ -31,6 +31,10 @@ func TestRemasterTrailingTags(t *testing.T) {
 		{"RCT-156 HDrip 1080p.mkv", "RCT-156", "", PatternNone, 0},
 		{"RCT-156HDTV.mkv", "RCT-156", "", PatternNone, 0},
 		{"h_003abc00123hd.pt2.mkv", "H_003ABC00123HD", "", PatternExplicit, 2},
+		{"IPX535ZH.mkv", "IPX-535ZH", "H", PatternNone, 0},
+		{"IPX.535Z.HD.mkv", "IPX-535ZH", "HD", PatternNone, 0},
+		{"ABC-1-HD.mkv", "ABC-1H", "HD", PatternNone, 0},
+		{"ABC-123456-HD.mkv", "ABC-123456H", "HD", PatternNone, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := matchOne(t, m, tc.name)
