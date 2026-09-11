@@ -40,6 +40,60 @@ func seedDump(t *testing.T, rows string) string {
 	return path
 }
 
+func TestStore_RestMasterFoldedKeys(t *testing.T) {
+	path := seedDump(t, "1rct00156h\tRCT-156-HD\ndv00899ai\tDV-818-AI")
+
+	store, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+
+	cid, err := store.LookupByDVDID(ctx, "RCT-156H")
+	if err != nil || cid != "1rct00156h" {
+		t.Errorf("LookupByDVDID(RCT-156H) = %q,%v, want 1rct00156h,nil", cid, err)
+	}
+	cid, err = store.LookupByDVDID(ctx, "DV-818AI")
+	if err != nil || cid != "dv00899ai" {
+		t.Errorf("LookupByDVDID(DV-818AI) = %q,%v, want dv00899ai,nil", cid, err)
+	}
+	cid, err = store.LookupByDVDID(ctx, "RCT-156-HD")
+	if err != nil || cid != "1rct00156h" {
+		t.Errorf("LookupByDVDID(RCT-156-HD) = %q,%v, want 1rct00156h,nil", cid, err)
+	}
+	if mv, err := store.LookupMovie(ctx, "RCT-156H"); err != nil || mv == nil {
+		t.Errorf("LookupMovie(RCT-156H) err=%v (want hit)", err)
+	}
+
+	matches, err := store.MatchByDisplayID(ctx, "RCT-156H")
+	if err != nil || len(matches) == 0 {
+		t.Fatalf("MatchByDisplayID(RCT-156H) err=%v matches=%d", err, len(matches))
+	}
+	cidFound := false
+	for _, m := range matches {
+		if m.ContentID == "1rct00156h" {
+			cidFound = true
+		}
+	}
+	if !cidFound {
+		t.Errorf("MatchByDisplayID(RCT-156H) missing marker candidate 1rct00156h: %+v", matches)
+	}
+	matches, err = store.MatchByDisplayID(ctx, "DV-818AI")
+	if err != nil || len(matches) == 0 {
+		t.Fatalf("MatchByDisplayID(DV-818AI) err=%v matches=%d", err, len(matches))
+	}
+	found := false
+	for _, m := range matches {
+		if m.ContentID == "dv00899ai" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("MatchByDisplayID(DV-818AI) missing dv00899ai: %+v", matches)
+	}
+}
+
 func TestImportAndLookup(t *testing.T) {
 	path := seedDump(t, "118ipx00535\tIPX-535\n118abw00001\t\\N\nh_086mesu00103\tMESU-103")
 
