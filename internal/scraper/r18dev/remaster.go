@@ -103,13 +103,16 @@ func markerVariationAccept(body []byte, queryID, foldedMarker, series string) bo
 	if err := json.Unmarshal(body, &data); err != nil {
 		return false
 	}
+	if !cidMatchesRemasterQuery(data.ContentID, queryID, foldedMarker, series) {
+		return false
+	}
 	if isRawRemasterContentIDQuery(queryID) {
-		return cidMatchesRemasterQuery(data.ContentID, queryID, foldedMarker, series)
+		return true
 	}
 	if data.DVDID != "" {
 		return foldDisplay(data.DVDID) == foldDisplay(queryID)
 	}
-	return cidMatchesMarker(data.ContentID, foldedMarker, series)
+	return true
 }
 
 // guardRemasterResult applies the marker guard to a fully parsed result:

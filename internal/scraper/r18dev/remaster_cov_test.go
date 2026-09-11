@@ -33,7 +33,7 @@ func TestRemasterHelpers(t *testing.T) {
 	assert.Nil(t, remasterDisplaySpellings("RCT-156"))
 
 	assert.False(t, markerVariationAccept([]byte("not json"), "RCT-156H", "h", "rct"))
-	assert.True(t, markerVariationAccept([]byte(`{"content_id":"1rct00156","dvd_id":"RCT-156-HD"}`), "RCT-156H", "h", "rct"))
+	assert.False(t, markerVariationAccept([]byte(`{"content_id":"1rct00156","dvd_id":"RCT-156-HD"}`), "RCT-156H", "h", "rct"))
 	assert.True(t, markerVariationAccept([]byte(`{"content_id":"dv00899ai","dvd_id":null}`), "DV-818AI", "ai", "dv"))
 	assert.False(t, markerVariationAccept([]byte(`{"content_id":"1rct00156","dvd_id":"RCT-156"}`), "RCT-156H", "h", "rct"))
 	assert.False(t, markerVariationAccept([]byte(`{"content_id":"dv00899h","dvd_id":null}`), "RCT-156H", "h", "rct"), "stale foreign marker cid must be rejected by series")

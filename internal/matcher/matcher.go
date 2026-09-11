@@ -199,6 +199,12 @@ func (m *Matcher) matchWithRegex(file models.FileMatchInfo, filename string, pat
 
 // MatchString is a helper to extract ID from a string directly
 func (m *Matcher) MatchString(s string) string {
+	s = filepath.Base(s)
+	ext := filepath.Ext(s)
+	switch strings.ToLower(ext) {
+	case ".mp4", ".mkv", ".avi", ".wmv", ".flv", ".mov", ".m4v", ".webm", ".mpg", ".mpeg", ".m2ts", ".ts":
+		s = strings.TrimSuffix(s, ext)
+	}
 	// Try custom regex first
 	if m.config.RegexEnabled && m.regexPattern != nil {
 		matches := m.regexPattern.FindStringSubmatch(s)
