@@ -361,10 +361,18 @@ func TestParseHTMLVerbatim_MarkerUsesPageDisplayID(t *testing.T) {
 		"marker mismatch":    `<tr><td>品番：</td><td>DV-818H</td></tr>`,
 		"foreign series row": `<tr><td>品番：</td><td>RCT-156H</td></tr>`,
 		"cid-only row":       `<tr><td>商品番号：</td><td>dv00899ai</td></tr>`,
+		"cid-only th row":    `<tr><th>商品番号</th><td>dv00899ai</td></tr>`,
+		"empty th row":       `<tr><th></th><td>DV-818AI</td></tr>`,
+		"th row no value":    `<tr><th>品番</th></tr>`,
 	}
 	for name, rows := range unusable {
 		res, err := s.parseHTMLWithOptions(context.Background(), page(rows), url, true)
 		require.NoError(t, err, name)
 		assert.Equal(t, "DV-899AI", res.ID, name+": unusable 品番 keeps the derived identity")
 	}
+
+	thPage := page(`<tr><th>品番</th><td>DV-818AI</td></tr>`)
+	res, err = s.parseHTMLWithOptions(context.Background(), thPage, url, true)
+	require.NoError(t, err)
+	assert.Equal(t, "DV-818AI", res.ID, "th-labeled rows carry the value in the first td")
 }

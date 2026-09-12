@@ -417,18 +417,26 @@ func (s *scraper) verifyCandidateDisplayID(ctx context.Context, foldedTarget str
 
 // extractDisplayID reads the display DVD ID (品番) from a DMM product page's
 // information table. The CID-like 商品番号 field is never used for verification.
+// Labels may be legacy <td> cells or header <th> cells; th-labeled rows carry
+// the value in the first td, td-labeled rows in the second.
 func extractDisplayID(doc *goquery.Document) string {
 	var out string
 	doc.Find("tr").EachWithBreak(func(i int, sel *goquery.Selection) bool {
-		label := strings.TrimSpace(sel.Find("td").First().Text())
+		th := strings.TrimSpace(sel.Find("th").First().Text())
+		label := th
+		if label == "" {
+			label = strings.TrimSpace(sel.Find("td").First().Text())
+		}
 		if strings.Contains(label, "商品番号") || !strings.Contains(label, "品番") {
 			return true
 		}
 		cells := sel.Find("td")
-		if cells.Length() < 2 {
-			return true
+		var value string
+		if th != "" {
+			value = cells.First().Text()
+		} else if cells.Length() >= 2 {
+			value = cells.Eq(1).Text()
 		}
-		value := strings.TrimSpace(cells.Eq(1).Text())
 		norm := nonAlnumRegex.ReplaceAllString(strings.ToLower(value), "")
 		if norm == "" {
 			return true
