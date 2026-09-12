@@ -63,6 +63,11 @@ func (s *scraper) extractIdentifiers(result *models.ScraperResult, doc *goquery.
 			if marker, series, catalogSuffix, _ := classifyRemasterQuery(cid); marker != "" {
 				if series == "t28" {
 					result.ID = canonicalRemasterDisplayID(cleanPrefixRegex.ReplaceAllString(cid, "$1"))
+				} else if marker == "ai" {
+					// AI release CIDs do not encode the display number (dv00899ai maps
+					// to DV-818AI), so the CID-derived spelling would sort the title
+					// under the wrong release; only the page 品番 may publish the identity.
+					result.ID = ""
 				} else if strings.HasSuffix(result.ID, "HD") {
 					result.ID = result.ID[:len(result.ID)-2] + "H"
 				}

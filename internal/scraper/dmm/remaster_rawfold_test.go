@@ -14,7 +14,7 @@ func TestExtractIdentifiers_RawMarkerFold(t *testing.T) {
 	}{
 		{"1rct00156hd", "RCT-156H"},
 		{"1ipx00535zhd", "IPX-535ZH"},
-		{"1dv00818ai", "DV-818AI"},
+		{"1dv00818ai", ""},
 		{"1ipx00535", "IPX-535"},
 		{"1t28000123hd", "T28-000123H"},
 	} {

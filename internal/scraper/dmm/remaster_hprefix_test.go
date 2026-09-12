@@ -41,7 +41,11 @@ func TestHPrefixRemasterSearchPreservesLiteralCID(t *testing.T) {
 			result, err := s.Search(context.Background(), tc.cid)
 			require.NoError(t, err)
 			assert.Equal(t, tc.cid, result.ContentID)
-			assert.NotEmpty(t, result.ID)
+			if tc.marker == "ai" {
+				assert.Empty(t, result.ID, "AI cids do not encode the display number; identity requires the page 品番")
+			} else {
+				assert.NotEmpty(t, result.ID)
+			}
 			assert.Contains(t, result.SourceURL, "cid="+tc.cid)
 			for _, hit := range rt.hits {
 				assert.NotContains(t, hit, "cid=1abc00999h")

@@ -377,7 +377,7 @@ func TestParseHTMLVerbatim_MarkerUsesPageDisplayID(t *testing.T) {
 	for name, rows := range unusable {
 		res, err := s.parseHTMLWithOptions(context.Background(), page(rows), url, true)
 		require.NoError(t, err, name)
-		assert.Equal(t, "DV-899AI", res.ID, name+": unusable 品番 keeps the derived identity")
+		assert.Equal(t, "", res.ID, name+": unusable 品番 leaves the identity unset, AI CIDs do not encode the display number")
 	}
 
 	thPage := page(`<tr><th>品番</th><td>DV-818AI</td></tr>`)
