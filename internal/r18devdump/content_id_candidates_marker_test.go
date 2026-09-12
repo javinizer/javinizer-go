@@ -32,6 +32,14 @@ func TestContentIDCandidatesWithMarker(t *testing.T) {
 	assert.NotEmpty(t, cands)
 	assert.Equal(t, ContentIDCandidatesWithMarker("RCT-156H"), cands)
 
+	// Narrow T28 release numbers split as series t28, not series t.
+	cands = ContentIDCandidatesWithMarker("T28-1H")
+	assert.Contains(t, cands, "9t2800001h")
+	assert.Contains(t, cands, "9t28001h")
+	for _, c := range cands {
+		assert.NotContains(t, c, "t00281h", "%s must not split as series t", c)
+	}
+
 	// Separator-bearing display spellings split and expand correctly.
 	for _, in := range []string{"RCT-156-HD", "RCT-156 HD", "DV-818-AI"} {
 		cands = ContentIDCandidatesWithMarker(in)
