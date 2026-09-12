@@ -95,10 +95,23 @@ func cidMatchesRemasterQuery(contentID, queryID, marker, series string) bool {
 	if !cidMatchesMarker(contentID, marker, series) {
 		return false
 	}
+	if cidRemasterSuffix(contentID) != cidRemasterSuffix(queryID) {
+		return false
+	}
 	if isRawRemasterContentIDQuery(queryID) {
 		return strings.EqualFold(strings.TrimSpace(contentID), strings.TrimSpace(queryID))
 	}
 	return true
+}
+
+// cidRemasterSuffix extracts the E/Z catalog suffix from an id; empty when the
+// id is not a remaster shape or carries no suffix.
+func cidRemasterSuffix(id string) string {
+	m := r18RemasterTailRegex.FindStringSubmatch(r18RemasterCore(id))
+	if m == nil {
+		return ""
+	}
+	return m[4]
 }
 
 func markerVariationAccept(body []byte, queryID, foldedMarker, series string) bool {
