@@ -12,6 +12,8 @@ var (
 	remasterCodecTailRegex = regexp.MustCompile(`(?i)^[-_.\s]?26[45](?:\D|$)`)
 	contentIDShapeRegex    = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])((?:\d+(?:t28|[A-Za-z]+)\d+[A-Za-z]{0,3}|(?:t28|[A-Za-z]+)\d{4,5}[A-Za-z]{0,3}))([-_.\s[\]()].+)?$`)
 	trailingCatalogIDRegex = regexp.MustCompile(`(?i)(?:[a-z]{2,6}-\d{3,5}\b|t28-\d{1,5}\b|[hn]_\d+[a-z]+\d+|\b[a-z]+\d{4,5}[a-z]{0,3}\b)`)
+	resolutionTokenRegex   = regexp.MustCompile(`(?i)^\d{3,4}x\d{3,4}$`)
+	framerateTokenRegex    = regexp.MustCompile(`(?i)^\d{3,4}[pi](?:\d{2,3})?$`)
 )
 
 func builtinStartsInsideContentID(s string, pattern *regexp.Regexp) bool {
@@ -78,7 +80,11 @@ func contentIDPrefixMatch(s string) (idText string, remainder string) {
 	if m == nil {
 		return "", ""
 	}
-	return s[m[2]:m[3]], strings.TrimSpace(s[m[3]:])
+	idText = s[m[2]:m[3]]
+	if isResolutionToken(idText) {
+		return "", ""
+	}
+	return idText, strings.TrimSpace(s[m[3]:])
 }
 
 func matchContentIDShape(s string) string {
@@ -87,4 +93,8 @@ func matchContentIDShape(s string) string {
 		return ""
 	}
 	return strings.ToUpper(idText)
+}
+
+func isResolutionToken(idText string) bool {
+	return resolutionTokenRegex.MatchString(idText) || framerateTokenRegex.MatchString(idText)
 }
