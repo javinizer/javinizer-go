@@ -93,7 +93,7 @@ func TestMatchFile_CodecTokensAreNotMarkers(t *testing.T) {
 	m, err := NewMatcher(&Config{})
 	require.NoError(t, err)
 
-	for _, name := range []string{"IPX-535-H.264.mkv", "IPX-535 H.265.mkv", "IPX-535-H-264.mkv", "IPX-535-HD.265.mkv"} {
+	for _, name := range []string{"IPX-535-H.264.mkv", "IPX-535 H.265.mkv", "IPX-535-H.266.mkv", "IPX-535-HD.263.mkv", "IPX-535-H-264.mkv", "IPX-535-HD.265.mkv"} {
 		t.Run(name, func(t *testing.T) {
 			got := matchOne(t, m, name)
 			require.NotNil(t, got)

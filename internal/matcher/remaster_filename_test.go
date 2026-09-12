@@ -29,6 +29,9 @@ func TestMatchFile_LeadingQualityLabelsDoNotPreemptCatalogID(t *testing.T) {
 	for _, tc := range []struct{ input, want string }{
 		{"FHD 1080 HD IPX-535.mkv", "IPX-535"},
 		{"JAV 1080HD IPX-535.mkv", "IPX-535"},
+		{"FHD 1080 HD ABC-12.mkv", "ABC-12"},
+		{"FHD 1080 HD ABC-123456.mkv", "ABC-123456"},
+		{"FHD 1080 HD FC2-PPV-123456.mkv", "PPV-123456"},
 		{"RCT 156 HD.mkv", "RCT-156H"},
 		{"IPX 535 HD.mkv", "IPX-535H"},
 		{"RCT 156 HD part-2.mkv", "RCT-156H"},

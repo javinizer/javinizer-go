@@ -9,9 +9,10 @@ var (
 	fusedRemasterRegex      = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(t28|[a-z]+)((?:\d{1,3}|\d{6}))([ez]?)(hd|ai|h)(?:$|[-_.\s[\]()])`)
 	separatedRemasterRegex  = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(t28|[a-z]+)[._\s]+(\d{1,6})([ez]?)?[-._\s]?(hd|ai|h)(?:$|[-_.\s[\]()])`)
 	reRemasterRemainder     = regexp.MustCompile(`(?i)^[-_.\s]?(HD|AI|H)(?:$|[-_.\s[\]()])`)
-	remasterCodecTailRegex  = regexp.MustCompile(`(?i)^[-_.\s]?26[45](?:\D|$)`)
+	remasterCodecTailRegex  = regexp.MustCompile(`(?i)^[-_.\s]?\d{3}(?:\D|$)`)
 	contentIDShapeRegex     = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])((?:\d+(?:t28|[A-Za-z]+)\d+[A-Za-z]{0,3}|(?:t28|[A-Za-z]+)\d{4,5}[A-Za-z]{0,3}))(?:[-_.\s[\]()](.*)$|$)`)
-	trailingCatalogIDRegex  = regexp.MustCompile(`(?i)(?:[a-z]{2,6}-\d{3,5}\b|t28-\d{1,5}\b|[hn]_\d+[a-z]+\d+|\b[a-z]+\d{4,5}[a-z]{0,3}\b|\b\d+[a-z]{2,}\d+[a-z]{0,3}\b)`)
+	trailingCatalogIDRegex  = regexp.MustCompile(`(?i)(?:[a-z]{2,6}-\d{1,}\b|t28-\d{1,}\b|[hn]_\d+[a-z]+\d+|\b[a-z]+\d{4,5}[a-z]{0,3}\b|\b\d+[a-z]{2,}\d+[a-z]{0,3}\b)`)
+	remasterPartLabelRegex  = regexp.MustCompile(`(?i)\b(?:part|pt|disc|vol|cd)-?\d{1,2}\b`)
 	resolutionTokenRegex    = regexp.MustCompile(`(?i)^\d{3,4}x\d{3,4}$`)
 	framerateTokenRegex     = regexp.MustCompile(`(?i)^\d{3,4}[pi](?:\d{2,3})?$`)
 	remasterMarkerTailRegex = regexp.MustCompile(`(?i)(?:ez)?(?:hd|ai|h)$`)
@@ -36,7 +37,10 @@ func normalizeFusedRemasterFilename(name string) string {
 	if m == nil {
 		return ""
 	}
-	if trailingCatalogIDRegex.MatchString(name[m[1]:]) {
+	// Part labels (part-2, pt 3) are not catalog ids and must not suppress
+	// the fused normalization.
+	remainder := remasterPartLabelRegex.ReplaceAllString(name[m[1]:], "")
+	if trailingCatalogIDRegex.MatchString(remainder) {
 		return ""
 	}
 	return name[:m[3]] + "-" + name[m[4]:]
