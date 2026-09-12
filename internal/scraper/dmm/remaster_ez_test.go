@@ -28,6 +28,17 @@ func TestRentalRemasterClassification(t *testing.T) {
 
 	marker, _, _, _ = classifyRemasterQuery("1rct00156h")
 	assert.Equal(t, "h", marker)
+
+	marker, series, _, isCID = classifyRemasterQuery("h_003abc00123hdr")
+	assert.Equal(t, "h", marker)
+	assert.Equal(t, "abc", series)
+	assert.True(t, isCID)
+
+	marker, _, _, isCID = classifyRemasterQuery("n_600abc00123air")
+	assert.Equal(t, "ai", marker)
+	assert.True(t, isCID)
+	assert.Equal(t, "h_003abc00123hd", stripRentalSuffixMarkerAware("h_003abc00123hdr"))
+	assert.Equal(t, "n_600abc00123ai", stripRentalSuffixMarkerAware("n_600abc00123air"))
 }
 
 func TestParseDisplayIdentityCatalogSuffix(t *testing.T) {
