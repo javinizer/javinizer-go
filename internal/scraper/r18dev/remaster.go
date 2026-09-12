@@ -17,18 +17,21 @@ var (
 
 func r18RemasterCore(id string) string {
 	s := strings.ToLower(strings.TrimSpace(id))
+	s = stripRentalSuffixMarkerAware(s)
 	if r18PrefixedCIDRegex.MatchString(s) {
 		s = s[2:]
 	}
-	return r18CompactID(stripRentalSuffixMarkerAware(s))
+	return r18CompactID(s)
 }
 
 // stripRentalSuffixMarkerAware removes a DMM rental 'r' suffix from a content
 // id: a digit-preceded terminal 'r' always strips (118abp00420r ->
 // 118abp00420), and a terminal 'r' whose remainder is a valid marker-bearing
 // content id also strips (1rct00156hr -> 1rct00156h, dv00899air ->
-// dv00899ai). r18.dev stores no rental content ids, so rental-suffixed
-// queries must resolve against the stripped base identity.
+// dv00899ai, h_003abc00123hdr -> h_003abc00123hd). Underscore-prefixed forms
+// drop the [hn]_ prefix before the marker-base test, mirroring classification.
+// r18.dev stores no rental content ids, so rental-suffixed queries must
+// resolve against the stripped base identity.
 func stripRentalSuffixMarkerAware(id string) string {
 	s := strings.ToLower(strings.TrimSpace(id))
 	if len(s) < 2 || !strings.HasSuffix(s, "r") {
@@ -38,7 +41,11 @@ func stripRentalSuffixMarkerAware(id string) string {
 	if last := base[len(base)-1]; last >= '0' && last <= '9' {
 		return base
 	}
-	if r18RemasterTailRegex.FindStringSubmatch(r18CompactID(base)) != nil {
+	core := base
+	if r18PrefixedCIDRegex.MatchString(core) {
+		core = core[2:]
+	}
+	if r18RemasterTailRegex.FindStringSubmatch(r18CompactID(core)) != nil {
 		return base
 	}
 	return s
