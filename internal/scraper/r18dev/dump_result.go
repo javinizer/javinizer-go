@@ -29,7 +29,7 @@ func atoiSafe(s string) int {
 // placeholder filtering) is skipped — the dump's stored URLs are used directly.
 func (s *scraper) resultFromDump(d *models.DumpMovie) *models.ScraperResult {
 	movieID := d.DVDID
-	if movieID == "" && d.ContentID != "" {
+	if movieID == "" && d.ContentID != "" && !cidCarriesRemasterMarker(d.ContentID) {
 		movieID = contentIDToID(d.ContentID)
 	}
 

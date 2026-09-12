@@ -52,7 +52,7 @@ func TestRemasterHelpers(t *testing.T) {
 	guarded, gerr = guardRemasterResult("dv00899ai", &models.ScraperResult{ContentID: "dv00899ai", ID: "DV-899AI"})
 	assert.NoError(t, gerr)
 	require.NotNil(t, guarded)
-	assert.Equal(t, "", guarded.ID, "cid-echo display must not be published: dv00899ai maps to DV-818-AI, not DV-899AI")
+	assert.Equal(t, "DV-899AI", guarded.ID, "a server-provided display equal to the cid echo is preserved; provenance is decided in resolveIDs, not by value")
 
 	guarded, gerr = guardRemasterResult("dv00899ai", &models.ScraperResult{ContentID: "dv00899ai", ID: "DV-818-AI"})
 	assert.NoError(t, gerr)
@@ -60,6 +60,11 @@ func TestRemasterHelpers(t *testing.T) {
 	assert.Equal(t, "DV-818AI", guarded.ID, "server-provided display ID is canonicalized")
 
 	guarded, gerr = guardRemasterResult("ABC-123H", &models.ScraperResult{ContentID: "118abc00123", ID: "ABC-123"})
+
+	assert.Equal(t, "", resolveIDs(&r18Response{ContentID: "dv00899ai"}), "null dvd_id with a marker cid leaves the ID unset: cid numbers are slot numbers")
+	assert.Equal(t, "", resolveIDs(&r18Response{ContentID: "1abc00123h"}), "marker cids never synthesize an echo")
+	assert.Equal(t, "ABW-013", resolveIDs(&r18Response{ContentID: "118abw00013"}), "marker-free cids keep the derived echo")
+	assert.Equal(t, "DV-818AI", resolveIDs(&r18Response{ContentID: "dv00899ai", DVDID: "DV-818AI"}), "an explicit dvd_id always wins")
 	assert.Error(t, gerr, "wide-prefix base release must still fail a marker query")
 	assert.Nil(t, guarded)
 }

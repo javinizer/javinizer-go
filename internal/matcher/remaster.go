@@ -6,23 +6,26 @@ import (
 )
 
 var (
-	fusedRemasterRegex     = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(t28|[a-z]+)((?:\d{1,3}|\d{6}))([ez]?)(hd|ai|h)(?:$|[-_.\s[\]()])`)
-	separatedRemasterRegex = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(t28|[a-z]+)[._\s]+(\d{1,6})([ez]?)?[-._\s]?(hd|ai|h)(?:$|[-_.\s[\]()])`)
-	reRemasterRemainder    = regexp.MustCompile(`(?i)^[-_.\s]?(HD|AI|H)(?:$|[-_.\s[\]()])`)
-	remasterCodecTailRegex = regexp.MustCompile(`(?i)^[-_.\s]?26[45](?:\D|$)`)
-	contentIDShapeRegex    = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])((?:\d+(?:t28|[A-Za-z]+)\d+[A-Za-z]{0,3}|(?:t28|[A-Za-z]+)\d{4,5}[A-Za-z]{0,3}))(?:[-_.\s[\]()](.*)$|$)`)
-	trailingCatalogIDRegex = regexp.MustCompile(`(?i)(?:[a-z]{2,6}-\d{3,5}\b|t28-\d{1,5}\b|[hn]_\d+[a-z]+\d+|\b[a-z]+\d{4,5}[a-z]{0,3}\b|\b\d+[a-z]{2,}\d+[a-z]{0,3}\b)`)
-	resolutionTokenRegex   = regexp.MustCompile(`(?i)^\d{3,4}x\d{3,4}$`)
-	framerateTokenRegex    = regexp.MustCompile(`(?i)^\d{3,4}[pi](?:\d{2,3})?$`)
+	fusedRemasterRegex      = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(t28|[a-z]+)((?:\d{1,3}|\d{6}))([ez]?)(hd|ai|h)(?:$|[-_.\s[\]()])`)
+	separatedRemasterRegex  = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(t28|[a-z]+)[._\s]+(\d{1,6})([ez]?)?[-._\s]?(hd|ai|h)(?:$|[-_.\s[\]()])`)
+	reRemasterRemainder     = regexp.MustCompile(`(?i)^[-_.\s]?(HD|AI|H)(?:$|[-_.\s[\]()])`)
+	remasterCodecTailRegex  = regexp.MustCompile(`(?i)^[-_.\s]?26[45](?:\D|$)`)
+	contentIDShapeRegex     = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])((?:\d+(?:t28|[A-Za-z]+)\d+[A-Za-z]{0,3}|(?:t28|[A-Za-z]+)\d{4,5}[A-Za-z]{0,3}))(?:[-_.\s[\]()](.*)$|$)`)
+	trailingCatalogIDRegex  = regexp.MustCompile(`(?i)(?:[a-z]{2,6}-\d{3,5}\b|t28-\d{1,5}\b|[hn]_\d+[a-z]+\d+|\b[a-z]+\d{4,5}[a-z]{0,3}\b|\b\d+[a-z]{2,}\d+[a-z]{0,3}\b)`)
+	resolutionTokenRegex    = regexp.MustCompile(`(?i)^\d{3,4}x\d{3,4}$`)
+	framerateTokenRegex     = regexp.MustCompile(`(?i)^\d{3,4}[pi](?:\d{2,3})?$`)
+	remasterMarkerTailRegex = regexp.MustCompile(`(?i)(?:ez)?(?:hd|ai|h)$`)
+	rawTokenRegex           = regexp.MustCompile(`[A-Za-z0-9]+`)
+	strongRawTokenRegex     = regexp.MustCompile(`(?i)^(?:\d+(?:t28|[A-Za-z]+)\d+[A-Za-z]{0,3}|(?:t28|[A-Za-z]+)\d{4,5}[ez]?(?:hd|ai|h))$`)
 )
 
 func builtinStartsInsideContentID(s string, pattern *regexp.Regexp) bool {
-	raw := contentIDShapeRegex.FindStringSubmatchIndex(s)
-	if raw == nil {
+	start, end, ok := contentIDCandidate(s)
+	if !ok {
 		return false
 	}
 	match := pattern.FindStringSubmatchIndex(s)
-	return len(match) > 3 && match[2] > raw[2] && match[2] < raw[3]
+	return len(match) > 3 && match[2] > start && match[2] < end
 }
 
 func normalizeFusedRemasterFilename(name string) string {
@@ -78,16 +81,38 @@ func foldRemasterMarker(spelling string) string {
 
 // contentIDPrefixMatch extracts a content-id prefix from a stem, returning the
 // captured id text and the post-id remainder (which may carry part suffixes).
-func contentIDPrefixMatch(s string) (idText string, remainder string) {
+// contentIDCandidate locates the raw content id the name should resolve to.
+// The leftmost shape match wins unless it is a weak prefixless form without a
+// marker tail (a word plus a year, e.g. birthday2024), in which case a
+// numeric-prefixed or marker-bearing raw id later in the name outranks it.
+func contentIDCandidate(s string) (start, end int, ok bool) {
 	m := contentIDShapeRegex.FindStringSubmatchIndex(s)
 	if m == nil {
+		return 0, 0, false
+	}
+	id := s[m[2]:m[3]]
+	if isResolutionToken(id) {
+		return 0, 0, false
+	}
+	if remasterMarkerTailRegex.MatchString(id) {
+		return m[2], m[3], true
+	}
+	for _, loc := range rawTokenRegex.FindAllStringIndex(s, -1) {
+		token := s[loc[0]:loc[1]]
+		if !strongRawTokenRegex.MatchString(token) || isResolutionToken(token) {
+			continue
+		}
+		return loc[0], loc[1], true
+	}
+	return m[2], m[3], true
+}
+
+func contentIDPrefixMatch(s string) (idText string, remainder string) {
+	start, end, ok := contentIDCandidate(s)
+	if !ok {
 		return "", ""
 	}
-	idText = s[m[2]:m[3]]
-	if isResolutionToken(idText) {
-		return "", ""
-	}
-	return idText, strings.TrimSpace(s[m[3]:])
+	return s[start:end], strings.TrimSpace(s[end:])
 }
 
 func matchContentIDShape(s string) string {

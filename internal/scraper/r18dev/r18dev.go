@@ -601,13 +601,25 @@ func (s *scraper) parseResponse(ctx context.Context, data *r18Response, sourceUR
 	return result, nil
 }
 
-// resolveIDs determines the movie ID from DVDID or ContentID.
+// resolveIDs determines the movie ID from DVDID or ContentID. A marker-bearing
+// content id with a null dvd_id stays unset: r18.dev cid numbers are slot
+// numbers, not display numbers (dv00899ai is DV-818-AI), so the synthesized
+// echo would sort the title under the wrong release.
 func resolveIDs(data *r18Response) string {
-	movieID := data.DVDID
-	if movieID == "" && data.ContentID != "" {
-		movieID = contentIDToID(data.ContentID)
+	if data.DVDID != "" {
+		return data.DVDID
 	}
-	return movieID
+	if data.ContentID == "" || cidCarriesRemasterMarker(data.ContentID) {
+		return ""
+	}
+	return contentIDToID(data.ContentID)
+}
+
+// cidCarriesRemasterMarker reports whether the content id itself ends in a
+// remaster marker (h/hd/ai, with optional e/z).
+func cidCarriesRemasterMarker(cid string) bool {
+	_, _, _, marker, ok := r18ParseRemasterTail(cid)
+	return ok && marker != ""
 }
 
 // resolveLocalizedStrings populates title, description, director, maker, label, and series

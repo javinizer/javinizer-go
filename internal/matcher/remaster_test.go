@@ -46,6 +46,23 @@ func TestMatchFile_RemasterMarkers(t *testing.T) {
 	}
 }
 
+func TestMatchFile_YearWordYieldsToStrongerRawID(t *testing.T) {
+	m, err := NewMatcher(&Config{})
+	require.NoError(t, err)
+
+	got := matchOne(t, m, "birthday2024 1rct00156h.mkv")
+	require.NotNil(t, got)
+	assert.Equal(t, "1RCT00156H", got.ID, "a word+year prefixless shape must not outrank a later numeric-prefixed raw id")
+
+	got = matchOne(t, m, "documentary2024 dv00899ai.mkv")
+	require.NotNil(t, got)
+	assert.Equal(t, "DV00899AI", got.ID, "a word+year prefixless shape must not outrank a later marker-bearing raw id")
+
+	got = matchOne(t, m, "birthday2024 1920x1080 1rct00156h.mkv")
+	require.NotNil(t, got)
+	assert.Equal(t, "1RCT00156H", got.ID, "resolution-shaped tokens are skipped during the stronger-candidate scan")
+}
+
 func TestMatchFile_QualityPrefixBeforeRawID(t *testing.T) {
 	m, err := NewMatcher(&Config{})
 	require.NoError(t, err)
