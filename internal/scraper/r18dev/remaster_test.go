@@ -60,6 +60,7 @@ func TestRemaster_RentalRawCIDResolvesMarkerRelease(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	assert.Equal(t, "dv00899ai", result.ContentID)
+	assert.Equal(t, "", result.ID, "null dvd_id must not synthesize a display number")
 	assert.False(t, baseFetched, "rental marker query must never resolve the base release")
 }
 

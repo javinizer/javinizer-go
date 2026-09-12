@@ -44,7 +44,7 @@ func TestWideUnderscoreRawCID(t *testing.T) {
 	marker, series := classifyRemaster("h_003abc123456hd")
 	assert.Equal(t, "h", marker)
 	assert.Equal(t, "abc", series)
-	res := &models.ScraperResult{ID: "ABC-123456HD", ContentID: "h_003abc123456hd"}
+	res := &models.ScraperResult{ID: "ABC-123456-HD", ContentID: "h_003abc123456hd"}
 	out, err := guardRemasterResult("h_003abc123456hd", res)
 	require.NoError(t, err)
 	assert.Equal(t, "ABC-123456H", out.ID)

@@ -202,7 +202,12 @@ func markerVariationAccept(body []byte, queryID, foldedMarker, series string) bo
 
 // guardRemasterResult applies the marker guard to a fully parsed result:
 // marker-bearing queries only accept results whose content id carries the
-// folded marker (verification of the number is server-owned).
+// folded marker (verification of the number is server-owned). Raw queries
+// additionally must not publish a synthesized catalog number: when res.ID is
+// the cid-derived echo resolveIDs produced for a null dvd_id response, it is
+// blanked — r18.dev cid numbers are slot numbers, not display numbers
+// (dv00899ai is DV-818-AI) — while genuinely server-provided displays are
+// canonicalized.
 func guardRemasterResult(id string, res *models.ScraperResult) (*models.ScraperResult, error) {
 	foldedMarker, series := classifyRemaster(id)
 	if foldedMarker == "" || res == nil {
@@ -213,8 +218,10 @@ func guardRemasterResult(id string, res *models.ScraperResult) (*models.ScraperR
 	}
 	if !isRawRemasterContentIDQuery(id) {
 		res.ID = canonicalRemasterDisplayID(id)
-	} else {
+	} else if res.ID != "" && !strings.EqualFold(res.ID, contentIDToID(res.ContentID)) {
 		res.ID = canonicalRemasterDisplayID(res.ID)
+	} else {
+		res.ID = ""
 	}
 	return res, nil
 }

@@ -49,6 +49,16 @@ func TestRemasterHelpers(t *testing.T) {
 	assert.NoError(t, gerr, "three-digit catalog prefixes must pass the guard")
 	require.NotNil(t, guarded)
 
+	guarded, gerr = guardRemasterResult("dv00899ai", &models.ScraperResult{ContentID: "dv00899ai", ID: "DV-899AI"})
+	assert.NoError(t, gerr)
+	require.NotNil(t, guarded)
+	assert.Equal(t, "", guarded.ID, "cid-echo display must not be published: dv00899ai maps to DV-818-AI, not DV-899AI")
+
+	guarded, gerr = guardRemasterResult("dv00899ai", &models.ScraperResult{ContentID: "dv00899ai", ID: "DV-818-AI"})
+	assert.NoError(t, gerr)
+	require.NotNil(t, guarded)
+	assert.Equal(t, "DV-818AI", guarded.ID, "server-provided display ID is canonicalized")
+
 	guarded, gerr = guardRemasterResult("ABC-123H", &models.ScraperResult{ContentID: "118abc00123", ID: "ABC-123"})
 	assert.Error(t, gerr, "wide-prefix base release must still fail a marker query")
 	assert.Nil(t, guarded)
