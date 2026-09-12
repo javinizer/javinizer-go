@@ -11,6 +11,48 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestRemaster_RentalSuffixNormalized(t *testing.T) {
+	assert.Equal(t, "dv00899ai", stripRentalSuffixMarkerAware("dv00899air"))
+	assert.Equal(t, "1rct00156h", stripRentalSuffixMarkerAware("1rct00156hr"))
+	assert.Equal(t, "118abp00420", stripRentalSuffixMarkerAware("118abp00420r"))
+	assert.Equal(t, "ipx00535", stripRentalSuffixMarkerAware("ipx00535r"))
+	assert.Equal(t, "ipx00535", stripRentalSuffixMarkerAware("ipx00535"))
+	assert.Equal(t, "dv00899ar", stripRentalSuffixMarkerAware("dv00899ar"), "unrecognized tail is preserved")
+	assert.Equal(t, "dv-818ai", stripRentalSuffixMarkerAware("DV-818AI"), "display ids without rental suffix are untouched")
+
+	m, series := classifyRemaster("dv00899air")
+	assert.Equal(t, "ai", m)
+	assert.Equal(t, "dv", series)
+	m, series = classifyRemaster("1rct00156hr")
+	assert.Equal(t, "h", m)
+	assert.Equal(t, "rct", series)
+}
+
+func TestRemaster_RentalRawCIDResolvesMarkerRelease(t *testing.T) {
+	var baseFetched bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		path := r.URL.Path
+		if strings.Contains(path, "combined=1dv00899") && !strings.Contains(path, "combined=1dv00899ai") {
+			baseFetched = true
+		}
+		if strings.Contains(path, "combined=dv00899ai") {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"content_id": "dv00899ai", "dvd_id": null, "title_en": "AI Remaster"}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	s := newR18TestScraper(server, true, "en")
+	result, err := s.Search(context.Background(), "dv00899air")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, "dv00899ai", result.ContentID)
+	assert.False(t, baseFetched, "rental marker query must never resolve the base release")
+}
+
 func TestRemaster_ClassifyAndFold(t *testing.T) {
 	m, _ := classifyRemaster("RCT-156H")
 	assert.Equal(t, "h", m)

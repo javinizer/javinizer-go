@@ -340,3 +340,31 @@ func TestParseHTMLVerbatim_PersistsFullCID(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "rct00156h", res.ContentID, "marker-free parsing keeps prefix-cleaned identity")
 }
+
+func TestParseHTMLVerbatim_MarkerUsesPageDisplayID(t *testing.T) {
+	s := &scraper{settings: models.ScraperSettings{Enabled: true}}
+
+	page := func(rows string) *goquery.Document {
+		doc, err := goquery.NewDocumentFromReader(strings.NewReader(`<html><body><h1 id="title" class="item">T</h1><table>` + rows + `</table></body></html>`))
+		require.NoError(t, err)
+		return doc
+	}
+	url := "https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=dv00899ai/"
+
+	res, err := s.parseHTMLWithOptions(context.Background(), page(`<tr><td>品番：</td><td>DV-818AI</td></tr>`), url, true)
+	require.NoError(t, err)
+	assert.Equal(t, "dv00899ai", res.ContentID)
+	assert.Equal(t, "DV-818AI", res.ID, "remaster numbers are server-owned: the page 品番 outranks the CID-derived spelling")
+
+	unusable := map[string]string{
+		"markerless row":     `<tr><td>品番：</td><td>DV-818</td></tr>`,
+		"marker mismatch":    `<tr><td>品番：</td><td>DV-818H</td></tr>`,
+		"foreign series row": `<tr><td>品番：</td><td>RCT-156H</td></tr>`,
+		"cid-only row":       `<tr><td>商品番号：</td><td>dv00899ai</td></tr>`,
+	}
+	for name, rows := range unusable {
+		res, err := s.parseHTMLWithOptions(context.Background(), page(rows), url, true)
+		require.NoError(t, err, name)
+		assert.Equal(t, "DV-899AI", res.ID, name+": unusable 品番 keeps the derived identity")
+	}
+}

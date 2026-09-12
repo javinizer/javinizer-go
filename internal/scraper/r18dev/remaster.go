@@ -20,7 +20,28 @@ func r18RemasterCore(id string) string {
 	if r18PrefixedCIDRegex.MatchString(s) {
 		s = s[2:]
 	}
-	return r18CompactID(s)
+	return r18CompactID(stripRentalSuffixMarkerAware(s))
+}
+
+// stripRentalSuffixMarkerAware removes a DMM rental 'r' suffix from a content
+// id: a digit-preceded terminal 'r' always strips (118abp00420r ->
+// 118abp00420), and a terminal 'r' whose remainder is a valid marker-bearing
+// content id also strips (1rct00156hr -> 1rct00156h, dv00899air ->
+// dv00899ai). r18.dev stores no rental content ids, so rental-suffixed
+// queries must resolve against the stripped base identity.
+func stripRentalSuffixMarkerAware(id string) string {
+	s := strings.ToLower(strings.TrimSpace(id))
+	if len(s) < 2 || !strings.HasSuffix(s, "r") {
+		return s
+	}
+	base := s[:len(s)-1]
+	if last := base[len(base)-1]; last >= '0' && last <= '9' {
+		return base
+	}
+	if r18RemasterTailRegex.FindStringSubmatch(r18CompactID(base)) != nil {
+		return base
+	}
+	return s
 }
 
 func r18CompactID(id string) string {

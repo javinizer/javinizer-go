@@ -438,3 +438,31 @@ func extractDisplayID(doc *goquery.Document) string {
 	})
 	return out
 }
+
+// pageRemasterDisplayID returns the canonical display ID from the page's 品番
+// row when it is marker-bearing and matches the query's series and folded
+// marker. Remaster content-id numbers are server-owned (dv00899ai displays as
+// DV-818AI), so the page value outranks the CID-derived spelling; markerless
+// rows, foreign series and mismatched markers are ignored so a derived AI
+// identity never collapses onto the base release.
+func pageRemasterDisplayID(doc *goquery.Document, series, foldedMarker string) string {
+	if doc == nil {
+		return ""
+	}
+	display := extractDisplayID(doc)
+	if display == "" {
+		return ""
+	}
+	m := remasterTailRegex.FindStringSubmatch(display)
+	if m == nil || m[2] != series {
+		return ""
+	}
+	pageMarker := m[5]
+	if pageMarker == "hd" {
+		pageMarker = "h"
+	}
+	if pageMarker != foldedMarker {
+		return ""
+	}
+	return canonicalRemasterDisplayID(display)
+}

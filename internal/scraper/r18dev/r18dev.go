@@ -451,6 +451,11 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		return nil, fmt.Errorf("R18.dev scraper is disabled")
 	}
 
+	// DMM rental content ids (e.g. dv00899air, 1rct00156hr) never exist on
+	// r18.dev: normalize to the base identity before the dump lookup,
+	// classification, candidate generation and raw-identity comparisons.
+	id = stripRentalSuffixMarkerAware(id)
+
 	// Dump fast path: on a dvd_id hit the dump returns a complete
 	// ScraperResult with no r18.dev API call at all; on a norm miss it may
 	// resolve content_id candidates locally, in which case each candidate URL

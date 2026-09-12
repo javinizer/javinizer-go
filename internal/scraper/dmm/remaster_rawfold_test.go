@@ -19,7 +19,7 @@ func TestExtractIdentifiers_RawMarkerFold(t *testing.T) {
 		{"1t28000123hd", "T28-000123H"},
 	} {
 		res := &models.ScraperResult{}
-		s.extractIdentifiers(res, "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid="+tc.cid+"/", true)
+		s.extractIdentifiers(res, nil, "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid="+tc.cid+"/", true)
 		assert.Equal(t, tc.cid, res.ContentID, tc.cid)
 		assert.Equal(t, tc.wantID, res.ID, tc.cid)
 	}

@@ -44,7 +44,7 @@ func (s *scraper) parseHTMLWithOptions(ctx context.Context, doc *goquery.Documen
 	}
 
 	// 4-step pipeline
-	s.extractIdentifiers(result, sourceURL, verbatimContentID)
+	s.extractIdentifiers(result, doc, sourceURL, verbatimContentID)
 	s.extractTextualMetadata(result, doc, isNewSite, jsonldMetadata)
 	s.extractStructuredData(ctx, result, doc, sourceURL, isNewSite, jsonldMetadata)
 	s.extractMediaFields(ctx, result, doc, sourceURL, isNewSite, jsonldMetadata)
@@ -53,7 +53,7 @@ func (s *scraper) parseHTMLWithOptions(ctx context.Context, doc *goquery.Documen
 }
 
 // extractIdentifiers populates ContentID and ID from the source URL.
-func (s *scraper) extractIdentifiers(result *models.ScraperResult, sourceURL string, verbatim bool) {
+func (s *scraper) extractIdentifiers(result *models.ScraperResult, doc *goquery.Document, sourceURL string, verbatim bool) {
 	if cid := extractContentIDFromURL(sourceURL); cid != "" {
 		if verbatim {
 			cid = stripRentalSuffixMarkerAware(cid)
@@ -65,6 +65,9 @@ func (s *scraper) extractIdentifiers(result *models.ScraperResult, sourceURL str
 					result.ID = canonicalRemasterDisplayID(cleanPrefixRegex.ReplaceAllString(cid, "$1"))
 				} else if strings.HasSuffix(result.ID, "HD") {
 					result.ID = result.ID[:len(result.ID)-2] + "H"
+				}
+				if pageID := pageRemasterDisplayID(doc, series, marker); pageID != "" {
+					result.ID = pageID
 				}
 			}
 			return
