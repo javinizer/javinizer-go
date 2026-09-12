@@ -20,6 +20,8 @@ var (
 	underscoreCIDShapeRegex = regexp.MustCompile(`^[hn]_\d+[a-z]+\d+(?:[ez]?(?:hd|ai|h)|[a-z]{0,2})$`)
 	remasterTailRegex       = regexp.MustCompile(`^(\d*)((?:t28|[a-z]+))(\d+)([ez]?)(hd|ai|h)$`)
 	anchoredMarkerCIDReg    = regexp.MustCompile(`^(\d*)((?:t28|[a-z]+))(\d+)([a-z]{1,3})$`)
+	seriesSegmentRegex      = regexp.MustCompile(`^\d*(?:t28|[a-z]+)$`)
+	seriesPinnedTailRegex   = regexp.MustCompile(`^(\d+)([ez]?)(hd|ai|h)$`)
 	nonAlnumRegex           = regexp.MustCompile(`[^a-z0-9]+`)
 )
 
@@ -41,6 +43,40 @@ func compactQueryID(id string) string {
 	return s
 }
 
+// separatorSeriesTail splits a separator-bearing display ID into its series
+// segment and marker-bearing remainder. Separators pin the series boundary
+// that compaction erases: "T-28123-HD" is series t number 28123, not the
+// series t28 number 123 the compact form decodes to.
+func separatorSeriesTail(lower string) (seg, rest string, ok bool) {
+	if !strings.ContainsAny(lower, "-_. ") {
+		return "", "", false
+	}
+	parts := strings.FieldsFunc(lower, func(r rune) bool {
+		return r == '-' || r == '_' || r == '.' || r == ' '
+	})
+	if len(parts) < 2 || !seriesSegmentRegex.MatchString(parts[0]) {
+		return "", "", false
+	}
+	return parts[0], strings.Join(parts[1:], ""), true
+}
+
+// parseRemasterTail parses a marker-bearing display ID into series, number,
+// E/Z suffix and marker spelling. Separator-bearing IDs take the segment
+// boundary as the series identity before the T28-aware compact regex applies;
+// separator-free forms use the compact regex directly.
+func parseRemasterTail(lower, compact string) (series, number, ez, marker string, ok bool) {
+	if seg, rest, okSep := separatorSeriesTail(lower); okSep {
+		if m := seriesPinnedTailRegex.FindStringSubmatch(rest); m != nil {
+			return seg, m[1], m[2], m[3], true
+		}
+	}
+	m := remasterTailRegex.FindStringSubmatch(compact)
+	if m == nil {
+		return "", "", "", "", false
+	}
+	return m[2], m[3], m[4], m[5], true
+}
+
 // classifyRemasterQuery reports whether an input ID carries an AI/HD remaster
 // marker and whether it is content-id-shaped. The returned foldedMarker is "h"
 // for both H and HD spellings and "ai" for AI; series is the letter sequence.
@@ -56,13 +92,11 @@ func classifyRemasterQuery(id string) (foldedMarker, series, catalogSuffix strin
 	if underscoreCIDShapeRegex.MatchString(lowerRaw) {
 		compact = cleanPrefixRegex.ReplaceAllString(lowerRaw, "$1")
 	}
-	m := remasterTailRegex.FindStringSubmatch(compact)
-	if m == nil {
+	series, _, catalogSuffix, markerSpelling, tailOK := parseRemasterTail(lowerRaw, compact)
+	if !tailOK {
 		return "", "", "", isContentID
 	}
-	series = m[2]
-	catalogSuffix = m[4]
-	switch m[5] {
+	switch markerSpelling {
 	case "hd", "h":
 		foldedMarker = "h"
 	case "ai":
@@ -82,15 +116,15 @@ func foldMarkerSuffix(s string) string {
 // form (series-number + folded marker), e.g. "DV-818AI" -> "DV-818AI",
 // "RCT-156-HD" -> "RCT-156H".
 func canonicalRemasterDisplayID(id string) string {
-	m := remasterTailRegex.FindStringSubmatch(compactQueryID(id))
-	if m == nil {
+	series, number, ez, spelling, ok := parseRemasterTail(strings.ToLower(strings.TrimSpace(id)), compactQueryID(id))
+	if !ok {
 		return strings.ToUpper(id)
 	}
 	marker := "H"
-	if m[5] == "ai" {
+	if spelling == "ai" {
 		marker = "AI"
 	}
-	return strings.ToUpper(m[2]) + "-" + m[3] + strings.ToUpper(m[4]) + marker
+	return strings.ToUpper(series) + "-" + number + strings.ToUpper(ez) + marker
 }
 
 // stripRentalSuffixMarkerAware extends stripRentalSuffix: in addition to the
@@ -133,12 +167,10 @@ func bindResolvedCID(urlCID, resolved string, exact bool) bool {
 // remasterSearchSpellings adds marker-aware display forms to the search query
 // set (e.g. rct-156-hd, rct156hd for an H-marker query).
 func remasterSearchSpellings(id string) []string {
-	compact := compactQueryID(id)
-	m := remasterTailRegex.FindStringSubmatch(compact)
-	if m == nil {
+	series, number, suffix, spelling, ok := parseRemasterTail(strings.ToLower(strings.TrimSpace(id)), compactQueryID(id))
+	if !ok {
 		return nil
 	}
-	series, number, suffix, spelling := m[2], m[3], m[4], m[5]
 	padded := number
 	if len(padded) < 5 {
 		padded = strings.Repeat("0", 5-len(padded)) + padded

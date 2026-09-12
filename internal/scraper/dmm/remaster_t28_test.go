@@ -9,6 +9,26 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestTSeriesSeparatorIdentity(t *testing.T) {
+	for _, q := range []string{"T-28123-HD", "T-28123H"} {
+		t.Run(q, func(t *testing.T) {
+			marker, series, _, _ := classifyRemasterQuery(q)
+			assert.Equal(t, "h", marker)
+			assert.Equal(t, "t", series)
+		})
+	}
+	assert.Equal(t, "T-28123H", canonicalRemasterDisplayID("T-28123-HD"))
+	assert.Equal(t, "T28-123H", canonicalRemasterDisplayID("T28-123-HD"))
+	assert.True(t, containsString(remasterSearchSpellings("T-28123-HD"), "t-28123-hd"))
+	for _, s := range remasterSearchSpellings("T-28123-HD") {
+		assert.NotContains(t, s, "t28-123")
+	}
+	t.Run("invalid series segment falls back", func(t *testing.T) {
+		marker, _, _, _ := classifyRemasterQuery("12345-HD")
+		assert.Equal(t, "", marker)
+	})
+}
+
 func TestT28RemasterSearch(t *testing.T) {
 	for _, q := range []string{"T28-123-HD", "T28-123H", "9t28123h"} {
 		t.Run(q, func(t *testing.T) {

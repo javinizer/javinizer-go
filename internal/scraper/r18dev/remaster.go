@@ -9,19 +9,61 @@ import (
 )
 
 var (
-	r18RemasterTailRegex = regexp.MustCompile(`^(\d*)((?:t28|[a-z]+))(\d+)([ez]?)(hd|ai|h)$`)
-	r18CIDAnchoredRegex  = regexp.MustCompile(`^(\d*)((?:t28|[a-z]+))(\d+)([a-z]{0,3})$`)
-	r18PrefixedCIDRegex  = regexp.MustCompile(`^[hn]_\d+(?:t28|[a-z]+)\d+[a-z]{0,3}$`)
-	nonAlnumR18Regex     = regexp.MustCompile(`[^a-z0-9]+`)
+	r18RemasterTailRegex     = regexp.MustCompile(`^(\d*)((?:t28|[a-z]+))(\d+)([ez]?)(hd|ai|h)$`)
+	r18CIDAnchoredRegex      = regexp.MustCompile(`^(\d*)((?:t28|[a-z]+))(\d+)([a-z]{0,3})$`)
+	r18PrefixedCIDRegex      = regexp.MustCompile(`^[hn]_\d+(?:t28|[a-z]+)\d+[a-z]{0,3}$`)
+	r18SeriesSegmentRegex    = regexp.MustCompile(`^\d*(?:t28|[a-z]+)$`)
+	r18SeriesPinnedTailRegex = regexp.MustCompile(`^(\d+)([ez]?)(hd|ai|h)$`)
+	nonAlnumR18Regex         = regexp.MustCompile(`[^a-z0-9]+`)
 )
 
 func r18RemasterCore(id string) string {
+	return r18CompactID(r18RemasterStem(id))
+}
+
+// r18RemasterStem lowercases, strips a rental suffix and the h_/n_ channel
+// prefix, but keeps separators so the series boundary stays visible.
+func r18RemasterStem(id string) string {
 	s := strings.ToLower(strings.TrimSpace(id))
 	s = stripRentalSuffixMarkerAware(s)
 	if r18PrefixedCIDRegex.MatchString(s) {
 		s = s[2:]
 	}
-	return r18CompactID(s)
+	return s
+}
+
+// r18SeparatorSeriesTail splits a separator-bearing display ID into its series
+// segment and marker-bearing remainder, pinning the series boundary that
+// compaction erases ("T-28123-HD" is series t, not series t28).
+func r18SeparatorSeriesTail(lower string) (seg, rest string, ok bool) {
+	if !strings.ContainsAny(lower, "-_. ") {
+		return "", "", false
+	}
+	parts := strings.FieldsFunc(lower, func(r rune) bool {
+		return r == '-' || r == '_' || r == '.' || r == ' '
+	})
+	if len(parts) < 2 || !r18SeriesSegmentRegex.MatchString(parts[0]) {
+		return "", "", false
+	}
+	return parts[0], strings.Join(parts[1:], ""), true
+}
+
+// r18ParseRemasterTail parses a marker-bearing display ID into series, number,
+// E/Z suffix and marker spelling. Separator-bearing IDs take the segment
+// boundary as the series identity before the T28-aware compact regex applies;
+// separator-free forms use the compact regex directly.
+func r18ParseRemasterTail(id string) (series, number, ez, marker string, ok bool) {
+	stem := r18RemasterStem(id)
+	if seg, rest, okSep := r18SeparatorSeriesTail(stem); okSep {
+		if m := r18SeriesPinnedTailRegex.FindStringSubmatch(rest); m != nil {
+			return seg, m[1], m[2], m[3], true
+		}
+	}
+	m := r18RemasterTailRegex.FindStringSubmatch(r18CompactID(stem))
+	if m == nil {
+		return "", "", "", "", false
+	}
+	return m[2], m[3], m[4], m[5], true
 }
 
 // stripRentalSuffixMarkerAware removes a DMM rental 'r' suffix from a content
@@ -58,12 +100,11 @@ func r18CompactID(id string) string {
 // classifyRemaster mirrors the DMM scraper's classification for marker-bearing
 // queries: the folded marker is "h" for H/HD and "ai" for AI spellings.
 func classifyRemaster(id string) (foldedMarker string, series string) {
-	m := r18RemasterTailRegex.FindStringSubmatch(r18RemasterCore(id))
-	if m == nil {
+	series, _, _, marker, ok := r18ParseRemasterTail(id)
+	if !ok {
 		return "", ""
 	}
-	series = m[2]
-	if m[5] == "ai" {
+	if marker == "ai" {
 		return "ai", series
 	}
 	return "h", series
@@ -108,15 +149,15 @@ func cidCarriesMarker(contentID, foldedMarker string) bool {
 // remasterDisplaySpellings adds the hyphenated display forms r18 stores as
 // dvd_id for remasters (rct-156-hd, dv-818-ai).
 func remasterDisplaySpellings(id string) []string {
-	m := r18RemasterTailRegex.FindStringSubmatch(r18RemasterCore(id))
-	if m == nil {
+	series, number, suffix, marker, ok := r18ParseRemasterTail(id)
+	if !ok {
 		return nil
 	}
 	displayMarker := "hd"
-	if m[5] == "ai" {
+	if marker == "ai" {
 		displayMarker = "ai"
 	}
-	return []string{m[2] + "-" + m[3] + m[4] + "-" + displayMarker}
+	return []string{series + "-" + number + suffix + "-" + displayMarker}
 }
 
 func cidMatchesRemasterQuery(contentID, queryID, marker, series string) bool {
@@ -135,11 +176,11 @@ func cidMatchesRemasterQuery(contentID, queryID, marker, series string) bool {
 // cidRemasterSuffix extracts the E/Z catalog suffix from an id; empty when the
 // id is not a remaster shape or carries no suffix.
 func cidRemasterSuffix(id string) string {
-	m := r18RemasterTailRegex.FindStringSubmatch(r18RemasterCore(id))
-	if m == nil {
+	_, _, ez, _, ok := r18ParseRemasterTail(id)
+	if !ok {
 		return ""
 	}
-	return m[4]
+	return ez
 }
 
 func markerVariationAccept(body []byte, queryID, foldedMarker, series string) bool {

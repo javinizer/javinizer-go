@@ -11,6 +11,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestTSeriesSeparatorIdentity(t *testing.T) {
+	for _, q := range []string{"T-28123-HD", "T-28123H"} {
+		marker, series := classifyRemaster(q)
+		assert.Equal(t, "h", marker)
+		assert.Equal(t, "t", series)
+	}
+	assert.Equal(t, []string{"t-28123-hd"}, remasterDisplaySpellings("T-28123-HD"))
+	assert.Equal(t, []string{"t28-123-hd"}, remasterDisplaySpellings("T28-123-HD"))
+	marker, series := classifyRemaster("12345-HD")
+	assert.Equal(t, "", marker)
+	assert.Equal(t, "", series)
+}
+
 func TestT28RemasterSearch(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
