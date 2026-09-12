@@ -12,9 +12,12 @@ import (
 func TestHPrefixRemasterSearchPreservesLiteralCID(t *testing.T) {
 	for _, tc := range []struct{ cid, marker string }{
 		{"h_003abc00123h", "h"},
+		{"h_003abc00123zhd", "h"},
+		{"h_003abc00123eai", "ai"},
 		{"h_003abc00123hd", "h"},
 		{"h_003abc00123ai", "ai"},
 		{"n_600abc00123h", "h"},
+		{"n_600abc00123eai", "ai"},
 		{"n_600abc00123hd", "h"},
 		{"n_600abc00123ai", "ai"},
 	} {

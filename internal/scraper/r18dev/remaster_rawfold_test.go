@@ -20,6 +20,11 @@ func TestGuardRemasterResult_RawFold(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "ABC-123456H", outWide.ID)
 
+	separated := &models.ScraperResult{ID: "RCT-156-HD", ContentID: "1rct00156h"}
+	outSeparated, err := guardRemasterResult("1rct00156h", separated)
+	require.NoError(t, err)
+	assert.Equal(t, "RCT-156H", outSeparated.ID)
+
 	assert.True(t, cidMatchesMarker("1abc123456h", "h", "abc"))
 	assert.True(t, cidMatchesMarker("436abc123456h", "h", "abc"))
 	assert.False(t, cidMatchesMarker("1abc123456h", "h", "xyz"))

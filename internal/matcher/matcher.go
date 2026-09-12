@@ -65,7 +65,7 @@ func NewMatcher(cfg *Config) (*Matcher, error) {
 	//   4. No-hyphen format: word boundary + 3-6 letters + 3-4 digits + word boundary
 	//      (prevents partial matches like "PPV1234" from "FC2PPV123456")
 	//   5. Hyphen format: letters + hyphen + digits (standard JAV)
-	builtinPattern := `(?i)((?:[hn]_\d+[a-z]+\d+(?:hd|ai|h)?)|(?:\b\d{6}[-_]\d{2,3}-(?:1PON|10MU|CARIB)\b)|(?:\b[A-Za-z]{1,2}\d{3,5}\b)|(?:\b[A-Za-z]{3,6}\d{3,4}\b)|(?:(?:[A-Za-z]+|T28)-\d+(?:[ZE])?))`
+	builtinPattern := `(?i)((?:[hn]_\d+[a-z]+\d+(?:[ez]?(?:hd|ai|h))?)|(?:\b\d{6}[-_]\d{2,3}-(?:1PON|10MU|CARIB)\b)|(?:\b[A-Za-z]{1,2}\d{3,5}\b)|(?:\b[A-Za-z]{3,6}\d{3,4}\b)|(?:(?:[A-Za-z]+|T28)-\d+(?:[ZE])?))`
 	m.builtinPattern = regexp.MustCompile(builtinPattern)
 
 	// Compile custom regex if enabled

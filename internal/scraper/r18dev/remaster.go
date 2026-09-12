@@ -131,8 +131,8 @@ func guardRemasterResult(id string, res *models.ScraperResult) (*models.ScraperR
 	}
 	if !isRawRemasterContentIDQuery(id) {
 		res.ID = canonicalRemasterDisplayID(id)
-	} else if strings.HasSuffix(res.ID, "HD") {
-		res.ID = res.ID[:len(res.ID)-2] + "H"
+	} else {
+		res.ID = canonicalRemasterDisplayID(res.ID)
 	}
 	return res, nil
 }
