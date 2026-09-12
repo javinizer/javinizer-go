@@ -107,9 +107,6 @@ func stripRentalSuffixMarkerAware(cid string) string {
 		if anchoredMarkerCIDReg.MatchString(cleaned) {
 			return base
 		}
-		if underscoreCIDShapeRegex.MatchString(base) {
-			return base
-		}
 	}
 	return cid
 }
