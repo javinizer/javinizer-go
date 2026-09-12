@@ -19,7 +19,7 @@ var (
 	remasterCIDShapeRegex   = regexp.MustCompile(`^(?:\d+(?:t28|[a-z]+)\d{3,5}[a-z]{0,3}|(?:t28|[a-z]+)\d{5}[a-z]{0,3})$`)
 	underscoreCIDShapeRegex = regexp.MustCompile(`^[hn]_\d+[a-z]+\d+[a-z]{0,2}$`)
 	remasterTailRegex       = regexp.MustCompile(`^(\d*)((?:t28|[a-z]+))(\d+)([ez]?)(hd|ai|h)$`)
-	anchoredMarkerCIDReg    = regexp.MustCompile(`^(\d*)((?:t28|[a-z]+))(\d{3,5})([a-z]{1,3})$`)
+	anchoredMarkerCIDReg    = regexp.MustCompile(`^(\d*)((?:t28|[a-z]+))(\d+)([a-z]{1,3})$`)
 	nonAlnumRegex           = regexp.MustCompile(`[^a-z0-9]+`)
 )
 
