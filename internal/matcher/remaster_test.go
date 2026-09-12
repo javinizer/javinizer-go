@@ -46,6 +46,23 @@ func TestMatchFile_RemasterMarkers(t *testing.T) {
 	}
 }
 
+func TestMatchFile_AIMarkerBeforeCodecTag(t *testing.T) {
+	m, err := NewMatcher(&Config{})
+	require.NoError(t, err)
+
+	for _, tc := range []struct{ name, wantID, wantMarker string }{
+		{"DV-818-AI.264.mkv", "DV-818AI", "AI"},
+		{"DV-818AI.265.mkv", "DV-818AI", "AI"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := matchOne(t, m, tc.name)
+			require.NotNil(t, got)
+			assert.Equal(t, tc.wantID, got.ID)
+			assert.Equal(t, tc.wantMarker, got.RemasterMarker)
+		})
+	}
+}
+
 func TestMatchFile_CodecTokensAreNotMarkers(t *testing.T) {
 	m, err := NewMatcher(&Config{})
 	require.NoError(t, err)
@@ -147,6 +164,9 @@ func TestMatchFile_ContentIDTier2(t *testing.T) {
 		{"53dv899.mkv", "53DV899"},
 		{"dv00899ai.mkv", "DV00899AI"},
 		{"ABC1234A.mkv", "ABC1234A"},
+		{"[1rct00156h].mkv", "1RCT00156H"},
+		{"(1rct00156h).mkv", "1RCT00156H"},
+		{"[dv00899ai].mkv", "DV00899AI"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
