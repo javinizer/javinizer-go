@@ -39,7 +39,7 @@ func (s *scraper) resolveContentIDCtx(ctx context.Context, id string) (string, e
 	logging.Debugf("DMM: Content-id not cached for %s, attempting to resolve via search", id)
 
 	if isContentID {
-		cid := strings.ToLower(strings.TrimSpace(id))
+		cid := stripRentalSuffixMarkerAware(strings.ToLower(strings.TrimSpace(id)))
 		s.cacheContentID(ctx, normalizedID, cid)
 		return cid, nil
 	}

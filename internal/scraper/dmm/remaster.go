@@ -45,7 +45,7 @@ func compactQueryID(id string) string {
 // marker and whether it is content-id-shaped. The returned foldedMarker is "h"
 // for both H and HD spellings and "ai" for AI; series is the letter sequence.
 func classifyRemasterQuery(id string) (foldedMarker, series, catalogSuffix string, isContentID bool) {
-	compact := compactQueryID(id)
+	compact := stripRentalSuffixMarkerAware(compactQueryID(id))
 	lowerRaw := strings.ToLower(strings.TrimSpace(id))
 	// A hyphenated/spaced input is a display ID, not a raw content ID: it must
 	// keep the resolver path (catalog-prefix search, padding, server-mediated

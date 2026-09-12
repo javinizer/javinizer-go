@@ -11,6 +11,25 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestRentalRemasterClassification(t *testing.T) {
+	marker, series, _, isCID := classifyRemasterQuery("1rct00156hr")
+	assert.Equal(t, "h", marker)
+	assert.Equal(t, "rct", series)
+	assert.True(t, isCID)
+
+	marker, series, _, isCID = classifyRemasterQuery("1rct00156hdr")
+	assert.Equal(t, "h", marker)
+	assert.Equal(t, "rct", series)
+	assert.True(t, isCID)
+
+	marker, _, _, isCID = classifyRemasterQuery("dv00899air")
+	assert.Equal(t, "ai", marker)
+	assert.True(t, isCID)
+
+	marker, _, _, _ = classifyRemasterQuery("1rct00156h")
+	assert.Equal(t, "h", marker)
+}
+
 func TestParseDisplayIdentityCatalogSuffix(t *testing.T) {
 	series, num, suffix, marker, ok := parseDisplayIdentity("ipx535zh")
 	require.True(t, ok)
