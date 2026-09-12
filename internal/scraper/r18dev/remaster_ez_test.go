@@ -33,6 +33,12 @@ func TestRemaster_NullDVDIDSuffixGuard(t *testing.T) {
 	}
 }
 
+func TestCidRemasterSuffixShapes(t *testing.T) {
+	assert.Equal(t, "", cidRemasterSuffix("ABC-123"), "non-remaster shape has no suffix")
+	assert.Equal(t, "z", cidRemasterSuffix("IPX-535ZH"))
+	assert.Equal(t, "", cidRemasterSuffix("IPX-535H"), "remaster shape without E/Z has empty suffix")
+}
+
 func TestGuardRemasterResult_SuffixMismatchRejected(t *testing.T) {
 	res := &models.ScraperResult{ID: "IPX-535Z-HD", ContentID: "1ipx00535h"}
 	_, err := guardRemasterResult("IPX-535ZH", res)
