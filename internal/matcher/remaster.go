@@ -31,6 +31,7 @@ func builtinStartsInsideContentID(s string, pattern *regexp.Regexp) bool {
 
 func normalizeFusedRemasterFilename(name string) string {
 	m := fusedRemasterRegex.FindStringSubmatchIndex(name)
+	fused := m != nil
 	if m == nil {
 		m = separatedRemasterRegex.FindStringSubmatchIndex(name)
 	}
@@ -42,6 +43,12 @@ func normalizeFusedRemasterFilename(name string) string {
 	remainder := remasterPartLabelRegex.ReplaceAllString(name[m[1]:], "")
 	if trailingCatalogIDRegex.MatchString(remainder) {
 		return ""
+	}
+	// A prefix-free compact t28 tail with a three-digit number reads as the
+	// T-series release T-28123H (catalog-prefixed or separator-pinned forms
+	// stay T28-123).
+	if fused && strings.EqualFold(name[m[2]:m[3]], "t28") && m[5]-m[4] == 3 {
+		return name[:m[2]] + "t-28" + name[m[4]:]
 	}
 	return name[:m[3]] + "-" + name[m[4]:]
 }

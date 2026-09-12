@@ -62,7 +62,7 @@ func (s *scraper) extractIdentifiers(result *models.ScraperResult, doc *goquery.
 			result.ID = normalizeID(cid)
 			if marker, series, catalogSuffix, _ := classifyRemasterQuery(cid); marker != "" {
 				if series == t28Series {
-					result.ID = canonicalRemasterDisplayID(cleanPrefixRegex.ReplaceAllString(cid, "$1"))
+					result.ID = t28CidDisplayID(cid)
 				} else if marker == "ai" {
 					// AI release CIDs do not encode the display number (dv00899ai maps
 					// to DV-818AI), so the CID-derived spelling would sort the title

@@ -100,7 +100,16 @@ func parseRemasterTail(lower, compact string) (series, number, ez, marker string
 	if m == nil {
 		return "", "", "", "", false
 	}
-	return m[2], m[3], m[4], m[5], true
+	series, number = m[2], m[3]
+	// A prefix-free compact t28 tail with a three-digit number reads as the
+	// T-series release T-28123H — but only when the input was genuinely
+	// separator-free: separator-bearing display forms pin the series boundary
+	// (T28-123-HD stays T28-123), and underscore cids pass a prefix-stripped
+	// compact whose maker digits still own the catalog prefix.
+	if lower == compact && m[1] == "" && series == t28Series && len(number) == 3 {
+		series, number = "t", "28"+number
+	}
+	return series, number, m[4], m[5], true
 }
 
 // classifyRemasterQuery reports whether an input ID carries an AI/HD remaster
@@ -151,6 +160,23 @@ func canonicalRemasterDisplayID(id string) string {
 		marker = "AI"
 	}
 	return strings.ToUpper(series) + "-" + number + strings.ToUpper(ez) + marker
+}
+
+// t28CidDisplayID renders the display identity of a t28-series content id.
+// A catalog-prefixed cid (9t28123h, h_003t28123h) is T28-123H; a bare
+// three-digit tail (t28123h) reads as the T-series release T-28123H, matching
+// the anchoredSeriesMatches disambiguation.
+func t28CidDisplayID(cid string) string {
+	norm := strings.ToLower(strings.ReplaceAll(cid, "-", ""))
+	norm = underscorePrefixRegex.ReplaceAllString(norm, "")
+	m := anchoredMarkerCIDReg.FindStringSubmatch(norm)
+	if m == nil || m[2] != t28Series || len(m[3]) != 3 {
+		return canonicalRemasterDisplayID(cleanPrefixRegex.ReplaceAllString(strings.ToLower(cid), "$1"))
+	}
+	if m[1] == "" {
+		return canonicalRemasterDisplayID("t-28" + m[3] + m[4])
+	}
+	return canonicalRemasterDisplayID("t28-" + m[3] + m[4])
 }
 
 // stripRentalSuffixMarkerAware extends stripRentalSuffix: in addition to the
@@ -527,5 +553,12 @@ func pageRemasterDisplayID(doc *goquery.Document, series, foldedMarker, catalogS
 	if m[5] != foldedMarker {
 		return ""
 	}
-	return canonicalRemasterDisplayID(display)
+	// Render from the verified split rather than re-parsing: the compacted
+	// display of T28-123-HD is indistinguishable from the bare cid t28123h,
+	// and re-parsing would re-run the prefix-free T-series rewrite.
+	markerSpelling := "H"
+	if m[5] == "ai" {
+		markerSpelling = "AI"
+	}
+	return strings.ToUpper(m[2] + "-" + m[3] + m[4] + markerSpelling)
 }

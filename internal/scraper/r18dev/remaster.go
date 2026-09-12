@@ -63,7 +63,11 @@ func r18ParseRemasterTail(id string) (series, number, ez, marker string, ok bool
 	if m == nil {
 		return "", "", "", "", false
 	}
-	return m[2], m[3], m[4], m[5], true
+	series, number = m[2], m[3]
+	if m[1] == "" && series == t28Series && len(number) == 3 {
+		series, number = "t", "28"+number
+	}
+	return series, number, m[4], m[5], true
 }
 
 // stripRentalSuffixMarkerAware removes a DMM rental 'r' suffix from a content
