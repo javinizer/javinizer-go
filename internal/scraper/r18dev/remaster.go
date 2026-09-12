@@ -239,14 +239,19 @@ func isRawRemasterContentIDQuery(id string) bool {
 
 var rawRemasterCIDShapeRegex = regexp.MustCompile(`^(?:\d+(?:t28|[a-z]+)\d+[a-z]{0,3}|(?:t28|[a-z]+)\d{5}[a-z]{0,3})$`)
 
+// canonicalRemasterDisplayID renders the query's display identity in canonical
+// form (series-number + folded marker), e.g. "DV-818AI" -> "DV-818AI",
+// "RCT-156-HD" -> "RCT-156H". Separator-bearing IDs use the segment boundary
+// as the series identity, so "T-28123-HD" canonicalizes to "T-28123H", not the
+// unrelated series-t28 spelling the compact form decodes to.
 func canonicalRemasterDisplayID(id string) string {
-	m := r18RemasterTailRegex.FindStringSubmatch(r18RemasterCore(id))
-	if m == nil {
+	series, number, ez, marker, ok := r18ParseRemasterTail(id)
+	if !ok {
 		return strings.ToUpper(id)
 	}
-	marker := "H"
-	if m[5] == "ai" {
-		marker = "AI"
+	display := "H"
+	if marker == "ai" {
+		display = "AI"
 	}
-	return strings.ToUpper(m[2]) + "-" + m[3] + strings.ToUpper(m[4]) + marker
+	return strings.ToUpper(series) + "-" + number + strings.ToUpper(ez) + display
 }

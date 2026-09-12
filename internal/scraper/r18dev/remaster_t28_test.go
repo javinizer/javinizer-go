@@ -19,6 +19,8 @@ func TestTSeriesSeparatorIdentity(t *testing.T) {
 	}
 	assert.Equal(t, []string{"t-28123-hd"}, remasterDisplaySpellings("T-28123-HD"))
 	assert.Equal(t, []string{"t28-123-hd"}, remasterDisplaySpellings("T28-123-HD"))
+	assert.Equal(t, "T-28123H", canonicalRemasterDisplayID("T-28123-HD"), "canonicalization must keep the separator-pinned series identity")
+	assert.Equal(t, "T28-123H", canonicalRemasterDisplayID("T28-123-HD"))
 	marker, series := classifyRemaster("12345-HD")
 	assert.Equal(t, "", marker)
 	assert.Equal(t, "", series)

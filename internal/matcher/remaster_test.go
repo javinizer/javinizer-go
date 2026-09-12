@@ -46,6 +46,15 @@ func TestMatchFile_RemasterMarkers(t *testing.T) {
 	}
 }
 
+func TestMatchFile_QualityPrefixBeforeRawID(t *testing.T) {
+	m, err := NewMatcher(&Config{})
+	require.NoError(t, err)
+
+	got := matchOne(t, m, "FHD 1080 HD 1rct00156h.mkv")
+	require.NotNil(t, got)
+	assert.Equal(t, "1RCT00156H", got.ID, "a trailing raw content ID outranks the leading quality label")
+}
+
 func TestMatchFile_AIMarkerBeforeCodecTag(t *testing.T) {
 	m, err := NewMatcher(&Config{})
 	require.NoError(t, err)
