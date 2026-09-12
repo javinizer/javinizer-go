@@ -11,7 +11,7 @@ import (
 var (
 	r18RemasterTailRegex = regexp.MustCompile(`^(\d*)((?:t28|[a-z]+))(\d+)([ez]?)(hd|ai|h)$`)
 	r18CIDAnchoredRegex  = regexp.MustCompile(`^(\d*)((?:t28|[a-z]+))(\d+)([a-z]{0,3})$`)
-	r18PrefixedCIDRegex  = regexp.MustCompile(`^[hn]_\d+(?:t28|[a-z]+)\d{3,5}[a-z]{0,3}$`)
+	r18PrefixedCIDRegex  = regexp.MustCompile(`^[hn]_\d+(?:t28|[a-z]+)\d+[a-z]{0,3}$`)
 	nonAlnumR18Regex     = regexp.MustCompile(`[^a-z0-9]+`)
 )
 

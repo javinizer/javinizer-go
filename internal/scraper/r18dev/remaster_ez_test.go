@@ -39,6 +39,17 @@ func TestCidRemasterSuffixShapes(t *testing.T) {
 	assert.Equal(t, "", cidRemasterSuffix("IPX-535H"), "remaster shape without E/Z has empty suffix")
 }
 
+func TestWideUnderscoreRawCID(t *testing.T) {
+	assert.True(t, isRawRemasterContentIDQuery("h_003abc123456hd"))
+	marker, series := classifyRemaster("h_003abc123456hd")
+	assert.Equal(t, "h", marker)
+	assert.Equal(t, "abc", series)
+	res := &models.ScraperResult{ID: "ABC-123456HD", ContentID: "h_003abc123456hd"}
+	out, err := guardRemasterResult("h_003abc123456hd", res)
+	require.NoError(t, err)
+	assert.Equal(t, "ABC-123456H", out.ID)
+}
+
 func TestWideRawContentIDIdentity(t *testing.T) {
 	assert.True(t, isRawRemasterContentIDQuery("1abc123456h"), "wide numeric-prefixed cid is a raw query")
 	assert.True(t, isRawRemasterContentIDQuery("1abc12h"))
