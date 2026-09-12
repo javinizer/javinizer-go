@@ -22,3 +22,22 @@ func TestMatchStringRemasterFilename(t *testing.T) {
 		t.Run(tc.input, func(t *testing.T) { assert.Equal(t, tc.want, m.MatchString(tc.input)) })
 	}
 }
+
+func TestMatchFile_LeadingQualityLabelsDoNotPreemptCatalogID(t *testing.T) {
+	m, err := NewMatcher(&Config{})
+	require.NoError(t, err)
+	for _, tc := range []struct{ input, want string }{
+		{"FHD 1080 HD IPX-535.mkv", "IPX-535"},
+		{"JAV 1080HD IPX-535.mkv", "IPX-535"},
+		{"RCT 156 HD.mkv", "RCT-156H"},
+		{"IPX 535 HD.mkv", "IPX-535H"},
+		{"RCT 156 HD part-2.mkv", "RCT-156H"},
+	} {
+		t.Run(tc.input, func(t *testing.T) {
+			assert.Equal(t, tc.want, m.MatchString(tc.input))
+			got := matchOne(t, m, tc.input)
+			require.NotNil(t, got)
+			assert.Equal(t, tc.want, got.ID)
+		})
+	}
+}
