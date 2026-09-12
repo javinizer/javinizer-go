@@ -32,6 +32,7 @@ func TestMatchFile_RemasterMarkers(t *testing.T) {
 		{"DV-818AI.mkv", "DV-818AI", "AI"},
 		{"DV-818-AI.mkv", "DV-818AI", "AI"},
 		{"IPX-535Z-HD.mkv", "IPX-535ZH", "HD"},
+		{"IPX-535-H.mkv", "IPX-535H", "H"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -41,6 +42,41 @@ func TestMatchFile_RemasterMarkers(t *testing.T) {
 			assert.Equal(t, tc.wantMarker, got.RemasterMarker)
 			assert.Equal(t, 0, got.PartNumber)
 			assert.Equal(t, "", got.MultipartPattern)
+		})
+	}
+}
+
+func TestMatchFile_CodecTokensAreNotMarkers(t *testing.T) {
+	m, err := NewMatcher(&Config{})
+	require.NoError(t, err)
+
+	for _, name := range []string{"IPX-535-H.264.mkv", "IPX-535 H.265.mkv", "IPX-535-H-264.mkv", "IPX-535-HD.265.mkv"} {
+		t.Run(name, func(t *testing.T) {
+			got := matchOne(t, m, name)
+			require.NotNil(t, got)
+			assert.Equal(t, "IPX-535", got.ID)
+			assert.Empty(t, got.RemasterMarker)
+			assert.Equal(t, "IPX-535", m.MatchString(name))
+		})
+	}
+}
+
+func TestMatchFile_AltRemasterNumberWidths(t *testing.T) {
+	m, err := NewMatcher(&Config{})
+	require.NoError(t, err)
+
+	cases := []struct{ name, wantID, wantMarker string }{
+		{"ABC1H.mkv", "ABC-1H", "H"},
+		{"ABC.1.HD.mkv", "ABC-1H", "HD"},
+		{"ABC.123456.HD.mkv", "ABC-123456H", "HD"},
+		{"ABC123456H.mkv", "ABC-123456H", "H"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := matchOne(t, m, tc.name)
+			require.NotNil(t, got)
+			assert.Equal(t, tc.wantID, got.ID)
+			assert.Equal(t, tc.wantMarker, got.RemasterMarker)
 		})
 	}
 }

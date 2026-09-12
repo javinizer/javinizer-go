@@ -6,9 +6,10 @@ import (
 )
 
 var (
-	fusedRemasterRegex     = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(t28|[a-z]+)(\d{2,3})([ez]?)(hd|ai|h)(?:$|[-_.\s[\]()])`)
-	separatedRemasterRegex = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(t28|[a-z]+)[._\s]+(\d{2,5})([ez]?)?[-._\s]?(hd|ai|h)(?:$|[-_.\s[\]()])`)
+	fusedRemasterRegex     = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(t28|[a-z]+)((?:\d{1,3}|\d{6}))([ez]?)(hd|ai|h)(?:$|[-_.\s[\]()])`)
+	separatedRemasterRegex = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(t28|[a-z]+)[._\s]+(\d{1,6})([ez]?)?[-._\s]?(hd|ai|h)(?:$|[-_.\s[\]()])`)
 	reRemasterRemainder    = regexp.MustCompile(`(?i)^[-_.\s]?(HD|AI|H)(?:$|[-_.\s[\]()])`)
+	remasterCodecTailRegex = regexp.MustCompile(`(?i)^[-_.\s]?26[45](?:\D|$)`)
 	contentIDShapeRegex    = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])((?:\d+(?:t28|[A-Za-z]+)\d+[A-Za-z]{0,3}|(?:t28|[A-Za-z]+)\d{4,5}[A-Za-z]{0,3}))([-_.\s[\]()].+)?$`)
 )
 
@@ -46,6 +47,9 @@ func splitRemasterMarker(remainder string) (string, string) {
 	remainder = strings.TrimSpace(remainder)
 	m := reRemasterRemainder.FindStringSubmatchIndex(remainder)
 	if m == nil {
+		return "", remainder
+	}
+	if remasterCodecTailRegex.MatchString(remainder[m[3]:]) {
 		return "", remainder
 	}
 	return strings.ToUpper(remainder[m[2]:m[3]]), remainder[m[3]:]
