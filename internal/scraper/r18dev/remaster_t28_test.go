@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -44,4 +45,14 @@ func TestT28RemasterSearch(t *testing.T) {
 		assert.Equal(t, "T28-123H", result.ID)
 	}
 	assert.False(t, markerVariationAccept([]byte(`{"content_id":"9t28123","dvd_id":"T28-123-HD"}`), "T28-123H", "h", "t28"))
+
+	assert.True(t, cidMatchesMarker("t28123h", "h", "t"), "t28123h is T-28123H: the prefix-free three-digit tail reads as series t")
+	assert.False(t, cidMatchesMarker("9t28123h", "h", "t"), "a catalog-prefixed t28 cid is the T28 series")
+	assert.True(t, cidMatchesMarker("9t28123h", "h", "t28"))
+	assert.False(t, cidMatchesMarker("t28123h", "h", "t28"), "the prefix-free five-digit reading belongs to series t")
+	assert.True(t, cidMatchesMarker("1t28000123hd", "h", "t28"), "longer number tails stay series t28")
+
+	out, err := guardRemasterResult("T-28123-HD", &models.ScraperResult{ContentID: "t28123h"})
+	require.NoError(t, err)
+	assert.Equal(t, "T-28123H", out.ID, "a T-28123-HD query accepts its t28123h cid on the guard path")
 }

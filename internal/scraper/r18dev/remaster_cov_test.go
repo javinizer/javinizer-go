@@ -59,6 +59,19 @@ func TestRemasterHelpers(t *testing.T) {
 	require.NotNil(t, guarded)
 	assert.Equal(t, "DV-818AI", guarded.ID, "server-provided display ID is canonicalized")
 
+	guarded, gerr = guardRemasterResult("1ipx00535zh", &models.ScraperResult{ContentID: "1ipx00535zh", ID: "IPX-535-HD"})
+	assert.NoError(t, gerr)
+	require.NotNil(t, guarded)
+	assert.Equal(t, "", guarded.ID, "an explicit dvd_id conflicting with the cid E/Z identity stays unset")
+
+	guarded, gerr = guardRemasterResult("dv00899ai", &models.ScraperResult{ContentID: "dv00899ai", ID: "DV-899H"})
+	assert.NoError(t, gerr)
+	assert.Equal(t, "", guarded.ID, "a mismatched marker on the explicit dvd_id stays unset")
+
+	guarded, gerr = guardRemasterResult("dv00899ai", &models.ScraperResult{ContentID: "dv00899ai", ID: "unparseable"})
+	assert.NoError(t, gerr)
+	assert.Equal(t, "", guarded.ID, "an unparseable explicit display cannot be verified and stays unset")
+
 	guarded, gerr = guardRemasterResult("ABC-123H", &models.ScraperResult{ContentID: "118abc00123", ID: "ABC-123"})
 
 	assert.Equal(t, "", resolveIDs(&r18Response{ContentID: "dv00899ai"}), "null dvd_id with a marker cid leaves the ID unset: cid numbers are slot numbers")

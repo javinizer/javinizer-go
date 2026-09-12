@@ -23,6 +23,7 @@ var (
 	seriesSegmentRegex      = regexp.MustCompile(`^\d*(?:t28|[a-z]+)$`)
 	seriesPinnedTailRegex   = regexp.MustCompile(`^(\d+)([ez]?)(hd|ai|h)$`)
 	nonAlnumRegex           = regexp.MustCompile(`[^a-z0-9]+`)
+	underscorePrefixRegex   = regexp.MustCompile(`^[hn]_`)
 )
 
 func cachedRemasterIdentityMatches(id, cid, marker, series, suffix string, raw bool) bool {
@@ -33,8 +34,33 @@ func cachedRemasterIdentityMatches(id, cid, marker, series, suffix string, raw b
 		return strings.EqualFold(strings.TrimSpace(id), strings.TrimSpace(cid))
 	}
 	clean := cleanPrefixRegex.ReplaceAllString(strings.ToLower(cid), "$1")
-	cachedSeries, cachedMarker, cachedSuffix, ok := parseAnchoredMarkerCID(clean)
-	return ok && cachedSeries == series && cachedMarker == marker && cachedSuffix == suffix
+	cachedMarker, cachedSuffix, ok := parseAnchoredMarkerCID(clean)
+	return ok && anchoredSeriesMatches(cid, series) && cachedMarker == marker && cachedSuffix == suffix
+}
+
+// anchoredSeriesMatches reports whether the raw cid's anchored series matches
+// the query's series, resolving the t28/t ambiguity. The catalog prefix is
+// decisive: a prefix-free three-digit tail reads as series t with the
+// five-digit number 28123 (t28123h is T-28123H), while catalog-prefixed or
+// longer tails stay series t28 (9t28123h is T28-123H).
+const t28Series = "t28"
+
+func anchoredSeriesMatches(rawCID, wantSeries string) bool {
+	norm := strings.ToLower(strings.ReplaceAll(rawCID, "-", ""))
+	norm = underscorePrefixRegex.ReplaceAllString(norm, "")
+	m := anchoredMarkerCIDReg.FindStringSubmatch(norm)
+	if m == nil {
+		return false
+	}
+	prefix, cidSeries, number := m[1], m[2], m[3]
+	switch wantSeries {
+	case "t":
+		return cidSeries == "t" || (prefix == "" && cidSeries == t28Series && len(number) == 3)
+	case t28Series:
+		return cidSeries == t28Series && (prefix != "" || len(number) != 3)
+	default:
+		return cidSeries == wantSeries
+	}
 }
 
 func compactQueryID(id string) string {
@@ -197,10 +223,10 @@ func remasterSearchSpellings(id string) []string {
 // parseAnchoredMarkerCID parses a prefix-cleaned content id into series,
 // folded trailing marker and optional E/Z catalog suffix. Returns ok=false for
 // malformed ids or unrecognized suffix letters.
-func parseAnchoredMarkerCID(clean string) (series string, folded string, suffix string, ok bool) {
+func parseAnchoredMarkerCID(clean string) (folded string, suffix string, ok bool) {
 	m := anchoredMarkerCIDReg.FindStringSubmatch(clean)
 	if m == nil {
-		return "", "", "", false
+		return "", "", false
 	}
 	tail := m[4]
 	switch {
@@ -211,12 +237,12 @@ func parseAnchoredMarkerCID(clean string) (series string, folded string, suffix 
 	case strings.HasSuffix(tail, "h"):
 		suffix, folded = strings.TrimSuffix(tail, "h"), "h"
 	default:
-		return "", "", "", false
+		return "", "", false
 	}
 	if suffix != "" && suffix != "e" && suffix != "z" {
-		return "", "", "", false
+		return "", "", false
 	}
-	return m[2], folded, suffix, true
+	return folded, suffix, true
 }
 
 // extractRemasterContentIDCandidates scans a DMM search document for anchors
@@ -257,8 +283,8 @@ func extractRemasterContentIDCandidates(doc *goquery.Document, wantSeries, wantF
 		rawCID = stripRentalSuffixMarkerAware(rawCID)
 		norm := strings.ToLower(strings.ReplaceAll(rawCID, "-", ""))
 		clean := cleanPrefixRegex.ReplaceAllString(norm, "$1")
-		series, folded, suffix, ok := parseAnchoredMarkerCID(clean)
-		if !ok || series != wantSeries || folded != wantFoldedMarker || suffix != wantSuffix {
+		folded, suffix, ok := parseAnchoredMarkerCID(clean)
+		if !ok || !anchoredSeriesMatches(norm, wantSeries) || folded != wantFoldedMarker || suffix != wantSuffix {
 			return
 		}
 		fullURL := ""

@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/PuerkitoBio/goquery"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -52,4 +54,28 @@ func TestT28RemasterSearch(t *testing.T) {
 		})
 	}
 	assert.Equal(t, "T-28123", normalizeID("t28123"))
+}
+
+func TestExtractRemasterCandidates_SeparatorPinnedTSeries(t *testing.T) {
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(
+		`<html><body><a href="/mono/dvd/-/detail/=/cid=t28123h/">hit</a></body></html>`))
+	require.NoError(t, err)
+
+	cands := extractRemasterContentIDCandidates(doc, "t", "h", "")
+	require.Len(t, cands, 1, "t28123h matches a separator-pinned T-28123-HD query")
+	assert.Equal(t, "t28123h", cands[0].contentID)
+
+	cands = extractRemasterContentIDCandidates(doc, "t28", "h", "")
+	assert.Empty(t, cands, "the prefix-free five-digit reading belongs to series t, not t28")
+
+	doc2, err := goquery.NewDocumentFromReader(strings.NewReader(
+		`<html><body><a href="/mono/dvd/-/detail/=/cid=9t28123h/">hit</a></body></html>`))
+	require.NoError(t, err)
+	cands = extractRemasterContentIDCandidates(doc2, "t28", "h", "")
+	require.Len(t, cands, 1, "the catalog-prefixed cid is the T28 series")
+
+	assert.True(t, cachedRemasterIdentityMatches("x", "t28123h", "h", "t", "", false))
+	assert.False(t, cachedRemasterIdentityMatches("x", "t28123h", "h", "t28", "", false))
+	assert.True(t, cachedRemasterIdentityMatches("x", "9t28123h", "h", "t28", "", false))
+	assert.False(t, anchoredSeriesMatches("t28123", "t"), "marker-free cids never match a series")
 }

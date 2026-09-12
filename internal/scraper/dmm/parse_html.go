@@ -61,7 +61,7 @@ func (s *scraper) extractIdentifiers(result *models.ScraperResult, doc *goquery.
 			result.ContentID = cid
 			result.ID = normalizeID(cid)
 			if marker, series, catalogSuffix, _ := classifyRemasterQuery(cid); marker != "" {
-				if series == "t28" {
+				if series == t28Series {
 					result.ID = canonicalRemasterDisplayID(cleanPrefixRegex.ReplaceAllString(cid, "$1"))
 				} else if marker == "ai" {
 					// AI release CIDs do not encode the display number (dv00899ai maps

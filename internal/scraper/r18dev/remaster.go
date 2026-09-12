@@ -118,7 +118,28 @@ func cidMatchesMarker(contentID, foldedMarker, series string) bool {
 		return false
 	}
 	m := r18CIDAnchoredRegex.FindStringSubmatch(r18RemasterCore(contentID))
-	return m != nil && m[2] == series
+	if m == nil {
+		return false
+	}
+	return anchoredSeriesMatches(m[1], m[2], m[3], series)
+}
+
+const t28Series = "t28"
+
+// anchoredSeriesMatches resolves the t28/t ambiguity in the anchored cid
+// split. A separator-pinned series-t query also matches a prefix-free
+// three-digit t28 tail — the convention reads t28123 as series t with the
+// five-digit number 28123 (T-28123H) — while catalog-prefixed or longer
+// number tails stay series t28 (9t28123h is T28-123H).
+func anchoredSeriesMatches(prefix, cidSeries, number, wantSeries string) bool {
+	switch wantSeries {
+	case "t":
+		return cidSeries == "t" || (prefix == "" && cidSeries == "t28" && len(number) == 3)
+	case t28Series:
+		return cidSeries == t28Series && (prefix != "" || len(number) != 3)
+	default:
+		return cidSeries == wantSeries
+	}
 }
 
 // foldDisplay normalizes a display/stored DVD ID for marker comparison:
@@ -217,8 +238,10 @@ func guardRemasterResult(id string, res *models.ScraperResult) (*models.ScraperR
 	}
 	if !isRawRemasterContentIDQuery(id) {
 		res.ID = canonicalRemasterDisplayID(id)
-	} else if res.ID != "" {
+	} else if res.ID != "" && rawDisplayMatchesCID(res.ContentID, res.ID) {
 		res.ID = canonicalRemasterDisplayID(res.ID)
+	} else {
+		res.ID = ""
 	}
 	return res, nil
 }
@@ -235,6 +258,27 @@ func isRawRemasterContentIDQuery(id string) bool {
 }
 
 var rawRemasterCIDShapeRegex = regexp.MustCompile(`^(?:\d+(?:t28|[a-z]+)\d+[a-z]{0,3}|(?:t28|[a-z]+)\d{5}[a-z]{0,3})$`)
+
+// rawDisplayMatchesCID reports whether a server-provided display ID agrees
+// with the content id's nonnumeric identity (series, E/Z suffix, folded
+// marker). The number is server-owned and may legitimately diverge, but a
+// conflicting variant spelling would silently collapse catalog variants, so
+// unverifiable or conflicting displays leave the ID unset.
+func rawDisplayMatchesCID(cid, display string) bool {
+	cSeries, _, cEz, cMarker, cOk := r18ParseRemasterTail(cid)
+	dSeries, _, dEz, dMarker, dOk := r18ParseRemasterTail(display)
+	if !cOk || !dOk {
+		return false
+	}
+	return cSeries == dSeries && cEz == dEz && foldMarkerSpelling(cMarker) == foldMarkerSpelling(dMarker)
+}
+
+func foldMarkerSpelling(marker string) string {
+	if marker == "hd" {
+		return "h"
+	}
+	return marker
+}
 
 // canonicalRemasterDisplayID renders the query's display identity in canonical
 // form (series-number + folded marker), e.g. "DV-818AI" -> "DV-818AI",
