@@ -483,9 +483,10 @@ func extractDisplayID(doc *goquery.Document) string {
 // row when it is marker-bearing and matches the query's series and folded
 // marker. Remaster content-id numbers are server-owned (dv00899ai displays as
 // DV-818AI), so the page value outranks the CID-derived spelling; markerless
-// rows, foreign series and mismatched markers are ignored so a derived AI
-// identity never collapses onto the base release.
-func pageRemasterDisplayID(doc *goquery.Document, series, foldedMarker string) string {
+// rows, foreign series, mismatched markers and mismatched E/Z catalog
+// suffixes are ignored so a derived identity never loses its edition suffix
+// or collapses onto the base release.
+func pageRemasterDisplayID(doc *goquery.Document, series, foldedMarker, catalogSuffix string) string {
 	if doc == nil {
 		return ""
 	}
@@ -494,7 +495,7 @@ func pageRemasterDisplayID(doc *goquery.Document, series, foldedMarker string) s
 		return ""
 	}
 	m := remasterTailRegex.FindStringSubmatch(display)
-	if m == nil || m[2] != series {
+	if m == nil || m[2] != series || m[4] != catalogSuffix {
 		return ""
 	}
 	if m[5] != foldedMarker {

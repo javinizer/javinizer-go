@@ -311,6 +311,15 @@ func TestGetURL_MarkerFreeBypassUnbound(t *testing.T) {
 	assert.Contains(t, url, "cid=53dv899")
 }
 
+func TestPageRemasterDisplayID_RequiresSuffixMatch(t *testing.T) {
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(
+		`<html><body><table><tr><td>品番：</td><td>IPX-535-H</td></tr></table></body></html>`))
+	require.NoError(t, err)
+
+	assert.Equal(t, "IPX-535H", pageRemasterDisplayID(doc, "ipx", "h", ""))
+	assert.Equal(t, "", pageRemasterDisplayID(doc, "ipx", "h", "e"), "page display missing the query's E/Z suffix must not be trusted")
+}
+
 func TestExtractDisplayID(t *testing.T) {
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(
 		`<html><body><table>` +
