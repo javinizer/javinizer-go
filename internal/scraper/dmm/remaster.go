@@ -457,11 +457,7 @@ func pageRemasterDisplayID(doc *goquery.Document, series, foldedMarker string) s
 	if m == nil || m[2] != series {
 		return ""
 	}
-	pageMarker := m[5]
-	if pageMarker == "hd" {
-		pageMarker = "h"
-	}
-	if pageMarker != foldedMarker {
+	if m[5] != foldedMarker {
 		return ""
 	}
 	return canonicalRemasterDisplayID(display)
