@@ -52,3 +52,19 @@ func TestHPrefixRemasterSearchPreservesLiteralCID(t *testing.T) {
 	assert.Empty(t, marker)
 	assert.True(t, raw)
 }
+
+func TestWideNumericPrefixedRawCID(t *testing.T) {
+	for _, tc := range []struct{ cid, series, suffix string }{
+		{"1abc123456h", "abc", ""},
+		{"1abc123456zhd", "abc", "z"},
+		{"2ipx00535zh", "ipx", "z"},
+	} {
+		t.Run(tc.cid, func(t *testing.T) {
+			marker, series, suffix, raw := classifyRemasterQuery(tc.cid)
+			assert.Equal(t, "h", marker)
+			assert.Equal(t, tc.series, series)
+			assert.Equal(t, tc.suffix, suffix)
+			assert.True(t, raw, "wide numeric-prefixed cid must stay on the raw path")
+		})
+	}
+}

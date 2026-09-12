@@ -39,6 +39,14 @@ func TestCidRemasterSuffixShapes(t *testing.T) {
 	assert.Equal(t, "", cidRemasterSuffix("IPX-535H"), "remaster shape without E/Z has empty suffix")
 }
 
+func TestWideRawContentIDIdentity(t *testing.T) {
+	assert.True(t, isRawRemasterContentIDQuery("1abc123456h"), "wide numeric-prefixed cid is a raw query")
+	assert.True(t, isRawRemasterContentIDQuery("1abc12h"))
+	if !markerVariationAccept([]byte(`{"content_id": "1abc123456h", "dvd_id": "ABC-123456-HD"}`), "1abc123456h", "h", "abc") {
+		t.Fatal("exact raw content id with wide number must be accepted")
+	}
+}
+
 func TestGuardRemasterResult_SuffixMismatchRejected(t *testing.T) {
 	res := &models.ScraperResult{ID: "IPX-535Z-HD", ContentID: "1ipx00535h"}
 	_, err := guardRemasterResult("IPX-535ZH", res)

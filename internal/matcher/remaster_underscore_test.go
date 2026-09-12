@@ -11,7 +11,7 @@ import (
 func TestUnderscoreRawRemasterMarkers(t *testing.T) {
 	m, err := NewMatcher(&Config{})
 	require.NoError(t, err)
-	for _, id := range []string{"h_003abc00123hd", "h_003abc00123zhd", "h_003abc00123eai", "h_003abc00123h", "h_003abc00123ai", "n_600abc00123eai", "n_600abc00123hd", "h_003abc00123"} {
+	for _, id := range []string{"h_003abc00123hd", "h_003abc00123zhd", "h_003abc00123eai", "h_003abc00123z", "h_003abc00123h", "h_003abc00123ai", "n_600abc00123eai", "n_600abc00123z", "n_600abc00123hd", "h_003abc00123"} {
 		for _, suffix := range []string{"", ".pt2"} {
 			t.Run(id+suffix, func(t *testing.T) {
 				name := id + suffix + ".mkv"

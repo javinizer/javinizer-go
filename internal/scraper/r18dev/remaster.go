@@ -161,7 +161,7 @@ func isRawRemasterContentIDQuery(id string) bool {
 	return rawRemasterCIDShapeRegex.MatchString(s)
 }
 
-var rawRemasterCIDShapeRegex = regexp.MustCompile(`^(?:\d+(?:t28|[a-z]+)\d{3,5}[a-z]{0,3}|(?:t28|[a-z]+)\d{5}[a-z]{0,3})$`)
+var rawRemasterCIDShapeRegex = regexp.MustCompile(`^(?:\d+(?:t28|[a-z]+)\d+[a-z]{0,3}|(?:t28|[a-z]+)\d{5}[a-z]{0,3})$`)
 
 func canonicalRemasterDisplayID(id string) string {
 	m := r18RemasterTailRegex.FindStringSubmatch(r18RemasterCore(id))
