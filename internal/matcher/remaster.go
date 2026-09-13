@@ -102,11 +102,22 @@ func contentIDCandidate(s string) (start, end int, ok bool) {
 		return 0, 0, false
 	}
 	id := s[m[2]:m[3]]
-	if isResolutionToken(id) {
-		return 0, 0, false
-	}
 	if remasterMarkerTailRegex.MatchString(id) {
 		return m[2], m[3], true
+	}
+	if isResolutionToken(id) {
+		// The leftmost shape hit is a resolution token (1080p60, 1920x1080);
+		// it never becomes the candidate, but a strong raw id later in the
+		// name (e.g. 1080p60 1rct00156h.mkv) still wins, as with the weak
+		// standalone-token case. Without one, there is no candidate.
+		for _, loc := range rawTokenRegex.FindAllStringIndex(s, -1) {
+			token := s[loc[0]:loc[1]]
+			if !strongRawTokenRegex.MatchString(token) || isResolutionToken(token) {
+				continue
+			}
+			return loc[0], loc[1], true
+		}
+		return 0, 0, false
 	}
 	for _, loc := range rawTokenRegex.FindAllStringIndex(s, -1) {
 		token := s[loc[0]:loc[1]]
