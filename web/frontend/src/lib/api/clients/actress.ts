@@ -10,6 +10,10 @@ import type {
 	ActressesImportRequest,
 	ImportResponse,
 	ActressAliasGroup,
+	CandidateListResponse,
+	CreditCollision,
+	CollisionResolveRequest,
+	CollisionResolution,
 } from '../types';
 import { BaseClient } from './common';
 
@@ -72,6 +76,56 @@ export class ActressClient extends BaseClient {
 		return this.request<ImportResponse>('/api/v1/actresses/import', {
 			method: 'POST',
 			body: JSON.stringify(request),
+		});
+	}
+
+	async listCandidates(limit = 50, offset = 0): Promise<CandidateListResponse> {
+		const query = new URLSearchParams({ limit: limit.toString(), offset: offset.toString() });
+		return this.request<CandidateListResponse>(`/api/v1/actresses/candidates?${query}`);
+	}
+
+	async promoteCandidate(
+		id: number,
+		request: Partial<ActressUpsertRequest> = {},
+	): Promise<Actress> {
+		return this.request<Actress>(`/api/v1/actresses/candidates/${id}/promote`, {
+			method: 'POST',
+			body: JSON.stringify(request),
+		});
+	}
+
+	async listCollisions(movieId: string): Promise<{ collisions: CreditCollision[] }> {
+		const query = new URLSearchParams({ movie_id: movieId });
+		return this.request<{ collisions: CreditCollision[] }>(
+			`/api/v1/actresses/collisions?${query}`,
+		);
+	}
+
+	async resolveCollision(id: number, request: CollisionResolveRequest): Promise<{ resolved: boolean; remaining_open: number }> {
+		return this.request<{ resolved: boolean; remaining_open: number }>(
+			`/api/v1/actresses/collisions/${id}/resolve`,
+			{
+				method: 'POST',
+				body: JSON.stringify(request),
+			},
+		);
+	}
+
+	async updateCreditOverride(
+		creditId: number,
+		overrideName: string,
+		userOverride: boolean,
+	): Promise<void> {
+		await this.request(`/api/v1/actresses/credits/${creditId}/override`, {
+			method: 'POST',
+			body: JSON.stringify({ override_name: overrideName, user_override: userOverride }),
+		});
+	}
+
+	async suppressCredit(creditId: number, suppressed: boolean): Promise<void> {
+		await this.request(`/api/v1/actresses/credits/${creditId}/suppress`, {
+			method: 'POST',
+			body: JSON.stringify({ suppressed }),
 		});
 	}
 

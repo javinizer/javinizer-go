@@ -610,7 +610,7 @@ func TestScrape_ActressEnrichment(t *testing.T) {
 	actressRepo := database.NewActressRepository(f.db)
 	err := actressRepo.Create(context.Background(), &models.Actress{
 		DMMID: 100, JapaneseName: "Test Actress", FirstName: "Test", LastName: "Actress",
-		ThumbURL: "https://example.com/thumb.jpg",
+		ThumbURL: "https://example.com/thumb.jpg", Verified: true,
 	})
 	require.NoError(t, err)
 

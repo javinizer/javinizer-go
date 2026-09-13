@@ -11,6 +11,7 @@
 	
 	import MovieNavigationCard from './components/MovieNavigationCard.svelte';
 	import MovieMetadataCard from './components/MovieMetadataCard.svelte';
+	import CollisionPanel from './components/CollisionPanel.svelte';
 	import OrganizeStatusCard from './components/OrganizeStatusCard.svelte';
 	import OutputPreviewModal from './components/OutputPreviewModal.svelte';
 	import VideoModal from '$lib/components/VideoModal.svelte';
@@ -357,6 +358,10 @@
 								onUpdateCurrentMovie={s.updateCurrentMovie}
 							nfoDifferences={s.nfoDifferences}
 							/>
+
+							{#if s.currentMovie?.content_id}
+								<CollisionPanel movieContentId={s.currentMovie.content_id} />
+							{/if}
 
 							<Card class="p-6">
 								<ActressEditor

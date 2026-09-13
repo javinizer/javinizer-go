@@ -82,9 +82,22 @@ type Movie struct {
 	OriginalFileName string      `json:"original_filename"`
 
 	// Relationships
-	Actresses   []Actress `json:"actresses" gorm:"many2many:movie_actresses;foreignKey:ContentID;joinForeignKey:MovieContentID;References:ID;joinReferences:ActressID"`
-	Genres      []Genre   `json:"genres" gorm:"many2many:movie_genres;foreignKey:ContentID;joinForeignKey:MovieContentID;References:ID;joinReferences:GenreID"`
-	Screenshots []string  `json:"screenshot_urls" gorm:"serializer:json"`
+	Actresses []Actress     `json:"actresses" gorm:"many2many:movie_actresses;foreignKey:ContentID;joinForeignKey:MovieContentID;References:ID;joinReferences:ActressID"`
+	Credits   []MovieCredit `json:"credits" gorm:"-"`
+
+	RenderDirty      bool  `json:"render_dirty" gorm:"default:false"`
+	RenderGeneration int64 `json:"render_generation"`
+
+	// CreditPolicy carries the collision policy (block|auto_keep|auto_alias) for
+	// the persisting scrape job. Not persisted — consumed by the upserter.
+	CreditPolicy string `json:"-" gorm:"-"`
+	// TrustedCollisionSources lists scraper sources eligible for auto_alias.
+	TrustedCollisionSources []string `json:"-" gorm:"-"`
+	// SkipCreditReconcile marks a cache-hit re-persist: existing credits stay untouched.
+	SkipCreditReconcile bool `json:"-" gorm:"-"`
+
+	Genres      []Genre  `json:"genres" gorm:"many2many:movie_genres;foreignKey:ContentID;joinForeignKey:MovieContentID;References:ID;joinReferences:GenreID"`
+	Screenshots []string `json:"screenshot_urls" gorm:"serializer:json"`
 
 	// Translations
 	Translations []MovieTranslation `json:"translations" gorm:"foreignKey:MovieID;references:ContentID"`
@@ -123,6 +136,9 @@ type Actress struct {
 	JapaneseName string `json:"japanese_name" gorm:"index"`
 	ThumbURL     string `json:"thumb_url"`
 	Aliases      string `json:"aliases"` // Pipe-separated
+	Verified     bool   `json:"verified"`
+	Origin       string `json:"origin"`
+	NameKey      string `json:"name_key" gorm:"index"`
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`

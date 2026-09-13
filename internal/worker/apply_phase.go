@@ -312,10 +312,48 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 	for _, filePath := range cfg.RetryFilePaths {
 		retryPaths[filePath] = struct{}{}
 	}
+	blockedCollisions := map[string]bool{}
+	if inputs.CollisionRepo != nil {
+		movieIDs := make([]string, 0, len(inputs.Results))
+		seen := make(map[string]bool, len(inputs.Results))
+		for _, fileResult := range inputs.Results {
+			if fileResult.Movie == nil || fileResult.Movie.ContentID == "" || seen[fileResult.Movie.ContentID] {
+				continue
+			}
+			seen[fileResult.Movie.ContentID] = true
+			movieIDs = append(movieIDs, fileResult.Movie.ContentID)
+		}
+		counts, err := inputs.CollisionRepo.CountOpenByMovieBatch(ctx, movieIDs)
+		if err != nil {
+			logging.Errorf("[Apply] collision gate lookup failed; failing closed for this run: %v", err)
+			for filePath, fileResult := range inputs.Results {
+				if fileResult.Movie != nil && fileResult.Movie.ContentID != "" {
+					logging.Infof("[Apply] Collision gate unavailable: skipping %s (movie %s)", filePath, fileResult.Movie.ContentID)
+					blockedCollisions[fileResult.Movie.ContentID] = true
+				}
+				_ = filePath
+			}
+		} else {
+			for id, count := range counts {
+				if count > 0 {
+					blockedCollisions[id] = true
+				}
+			}
+		}
+		for _, fileResult := range inputs.Results {
+			if fileResult.Movie != nil && blockedCollisions[fileResult.Movie.ContentID] {
+				logging.Infof("[Apply] Collision gate: skipping movie %s (open collisions)", fileResult.Movie.ContentID)
+			}
+		}
+	}
+
 	items := make([]applyItem, 0, len(inputs.Results))
 	for filePath, fileResult := range inputs.Results {
 		_, retryFailed := retryPaths[filePath]
 		if fileResult.Movie == nil {
+			continue
+		}
+		if fileResult.Movie != nil && blockedCollisions[fileResult.Movie.ContentID] {
 			continue
 		}
 		if len(retryPaths) > 0 {

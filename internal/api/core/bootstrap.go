@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/javinizer/javinizer-go/internal/commandutil"
 	"github.com/javinizer/javinizer-go/internal/config"
@@ -47,6 +48,14 @@ func bootstrapAPIDeps(cfg *config.Config, configFile string, auth commandutil.Au
 
 	repos := coreDeps.DB.Repositories()
 
+	if retention := cfg.Metadata.ActressDatabase.CandidateRetentionDays; retention > 0 {
+		if pruned, err := repos.ActressRepo.DeleteStaleCandidates(context.Background(), time.Now().AddDate(0, 0, -retention)); err != nil {
+			logging.Warnf("candidate GC failed: %v", err)
+		} else if pruned > 0 {
+			logging.Infof("candidate GC pruned %d stale candidate identities", pruned)
+		}
+	}
+
 	sharedEngine := template.NewEngine()
 	// Initialize ONE filesystem and thread it through the DI seam (JobStore,
 	// Reverter, APIDeps.Fs) so there is a single afero.Fs default instead of
@@ -54,7 +63,7 @@ func bootstrapAPIDeps(cfg *config.Config, configFile string, auth commandutil.Au
 	// OsFs, and APIDeps.Fs was left unset). GetFs() falls back to OsFs when
 	// nil, so this is behavior-preserving for existing callers.
 	fs := afero.NewOsFs()
-	jobStore := worker.NewJobStore(repos.JobRepo, repos.BatchFileOpRepo, repos.MovieRepo, cfg.System.TempDir, sharedEngine, fs, worker.WithActressRepo(repos.ActressRepo), worker.WithHistoryRepo(repos.HistoryRepo), worker.WithEditTransactor(coreDeps.DB))
+	jobStore := worker.NewJobStore(repos.JobRepo, repos.BatchFileOpRepo, repos.MovieRepo, cfg.System.TempDir, sharedEngine, fs, worker.WithActressRepo(repos.ActressRepo), worker.WithHistoryRepo(repos.HistoryRepo), worker.WithEditTransactor(coreDeps.DB), worker.WithCollisionRepo(repos.CreditCollisionRepo))
 	eventEmitter := eventlog.NewEmitter(repos.EventRepo)
 	pruneSweeper := history.NewReplacementSweeper(fs, repos.BatchFileOpRepo)
 	if setter, ok := repos.JobRepo.(interface {

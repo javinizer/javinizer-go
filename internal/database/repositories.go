@@ -10,6 +10,9 @@ type ContentRepos struct {
 	ActressAliasRepo     ActressAliasRepositoryInterface
 	ContentIDMappingRepo ContentIDMappingRepositoryInterface
 	MovieTagRepo         MovieTagRepositoryInterface
+	MovieCreditRepo      MovieCreditRepositoryInterface
+	CreditCollisionRepo  CreditCollisionRepositoryInterface
+	DB                   *DB
 }
 
 // HistoryRepos groups repositories for job and file-operation tracking.
@@ -65,6 +68,9 @@ func (db *DB) Repositories() Repositories {
 			ActressAliasRepo:     NewActressAliasRepository(db),
 			ContentIDMappingRepo: NewContentIDMappingRepository(db),
 			MovieTagRepo:         NewMovieTagRepository(db),
+			MovieCreditRepo:      NewMovieCreditRepository(db),
+			CreditCollisionRepo:  NewCreditCollisionRepository(db),
+			DB:                   db,
 		},
 		HistoryRepos: HistoryRepos{
 			HistoryRepo:     NewHistoryRepository(db),
