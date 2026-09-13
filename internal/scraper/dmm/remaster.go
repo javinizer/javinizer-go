@@ -21,6 +21,7 @@ var (
 	remasterTailRegex       = regexp.MustCompile(`^(\d*)((?:t28|[a-z]+))(\d+)([ez]?)(hd|ai|h)$`)
 	anchoredMarkerCIDReg    = regexp.MustCompile(`^(\d*)((?:t28|[a-z]+))(\d+)([a-z]{1,3})$`)
 	seriesSegmentRegex      = regexp.MustCompile(`^\d*(?:t28|[a-z]+)$`)
+	separatorRunRegex       = regexp.MustCompile(`[-_.\s]+`)
 	seriesPinnedTailRegex   = regexp.MustCompile(`^(\d+)([ez]?)(hd|ai|h)$`)
 	nonAlnumRegex           = regexp.MustCompile(`[^a-z0-9]+`)
 	underscorePrefixRegex   = regexp.MustCompile(`^[hn]_`)
@@ -138,13 +139,6 @@ func classifyRemasterQuery(id string) (foldedMarker, series, catalogSuffix strin
 		foldedMarker = "ai"
 	}
 	return foldedMarker, series, catalogSuffix, isContentID
-}
-
-func foldMarkerSuffix(s string) string {
-	if strings.HasSuffix(s, "hd") {
-		return s[:len(s)-2] + "h"
-	}
-	return s
 }
 
 // canonicalRemasterDisplayID renders the query's display identity in canonical
@@ -385,7 +379,7 @@ func (s *scraper) resolveRemasterContentID(ctx context.Context, id, normalizedID
 	// Every search-derived candidate — singleton or ambiguous — is verified
 	// against product-page display IDs: admission is number-free by design, so
 	// only the page's display ID proves the requested release.
-	target := foldMarkerSuffix(compactQueryID(id))
+	target := id
 	var verified []string
 	for _, clean := range order {
 		c := byClean[clean]
@@ -427,28 +421,11 @@ const (
 	displayUnverifiable
 )
 
-var displayIdentityRegex = regexp.MustCompile(`^((?:t28|[a-z]+))0*(\d+)([ez]?)(hd|ai|h)$`)
-
-// parseDisplayIdentity splits a folded display identity into series, numeric
-// value, optional E/Z catalog suffix and folded marker so padded spellings
-// (rct00156h) match what product pages show (rct156h).
-func parseDisplayIdentity(s string) (string, string, string, string, bool) {
-	m := displayIdentityRegex.FindStringSubmatch(s)
-	if m == nil {
-		return "", "", "", "", false
-	}
-	marker := m[4]
-	if marker == "hd" {
-		marker = "h"
-	}
-	return m[1], m[2], m[3], marker, true
-}
-
 // verifyCandidateDisplayID fetches every eligible product page for a candidate
 // and combines the parseable display identities: zero parseable => unverified,
-// multiple distinct => unverifiable, exactly one => verified iff it equals the
-// folded target identity.
-func (s *scraper) verifyCandidateDisplayID(ctx context.Context, foldedTarget string, urls []string) (displayStatus, error) {
+// multiple distinct => unverifiable, exactly one => verified iff its pinned
+// identity equals the query's pinned identity.
+func (s *scraper) verifyCandidateDisplayID(ctx context.Context, id string, urls []string) (displayStatus, error) {
 	identities := map[string]struct{}{}
 	for _, u := range urls {
 		if u == "" || (!strings.HasPrefix(u, "https://www.dmm.co.jp/") && !strings.HasPrefix(u, "https://video.dmm.co.jp/")) {
@@ -487,9 +464,9 @@ func (s *scraper) verifyCandidateDisplayID(ctx context.Context, foldedTarget str
 		}
 	}
 	if len(identities) == 1 {
-		ts, td, tsuf, tm, tok := parseDisplayIdentity(foldedTarget)
+		ts, td, tsuf, tm, tok := displayIdentityTuple(id)
 		for k := range identities {
-			ds, dd, dsuf, dm, dok := parseDisplayIdentity(k)
+			ds, dd, dsuf, dm, dok := displayIdentityTuple(k)
 			if tok && dok && ds == ts && dd == td && dsuf == tsuf && dm == tm {
 				return displayVerified, nil
 			}
@@ -521,14 +498,54 @@ func extractDisplayID(doc *goquery.Document) string {
 		} else if cells.Length() >= 2 {
 			value = cells.Eq(1).Text()
 		}
-		norm := nonAlnumRegex.ReplaceAllString(strings.ToLower(value), "")
+		lower := strings.ToLower(value)
+		norm := nonAlnumRegex.ReplaceAllString(lower, "")
 		if norm == "" {
 			return true
 		}
-		out = foldMarkerSuffix(norm)
+		// Keep the separator form: the series boundary it pins is the only
+		// thing distinguishing T-28123-HD from T28-123-HD once compacted.
+		out = displaySeparatorForm(lower)
 		return false
 	})
 	return out
+}
+
+// displaySeparatorForm canonicalizes a page display's separators: lowercased,
+// trimmed, with separator runs collapsed to a single hyphen. The series
+// boundary stays pinned (T-28123-HD and T-28123 HD both render t-28123-hd)
+// while separator-free values pass through unchanged.
+func displaySeparatorForm(lower string) string {
+	trimmed := strings.Trim(lower, "-_. ")
+	return separatorRunRegex.ReplaceAllString(trimmed, "-")
+}
+
+// trimDisplayZeros strips leading zeros the way the display identity regex
+// does, so padded page spellings (0156) equal query spellings (156).
+func trimDisplayZeros(number string) string {
+	trimmed := strings.TrimLeft(number, "0")
+	if trimmed == "" {
+		return "0"
+	}
+	return trimmed
+}
+
+// displayIdentityTuple derives the separator-pinned identity (series, numeric
+// value, catalog suffix, folded marker) of a display string. Separator-bearing
+// forms pin the series boundary (T-28123-HD is t/28123, T28-123-HD is
+// t28/123); compact forms decode through the tail regex with the prefix-free
+// T-series disambiguation. The compact form of T-28123-HD and T28-123-HD is
+// identical, so verification compares pinned tuples, never compacted strings.
+func displayIdentityTuple(display string) (series, value, suffix, marker string, ok bool) {
+	lower := strings.ToLower(strings.TrimSpace(display))
+	series, value, suffix, marker, ok = parseRemasterTail(lower, compactQueryID(display))
+	if !ok {
+		return "", "", "", "", false
+	}
+	if marker == "hd" {
+		marker = "h"
+	}
+	return series, trimDisplayZeros(value), suffix, marker, true
 }
 
 // pageRemasterDisplayID returns the canonical display ID from the page's 品番
@@ -546,26 +563,19 @@ func pageRemasterDisplayID(doc *goquery.Document, series, foldedMarker, catalogS
 	if display == "" {
 		return ""
 	}
-	m := remasterTailRegex.FindStringSubmatch(display)
-	if m == nil || m[4] != catalogSuffix || m[5] != foldedMarker {
+	// The page value arrives separator-pinned, so its identity keeps the
+	// boundary that separates T-28123H from T28-123H; a separator-free page
+	// value decodes with the same prefix-free disambiguation the query parser
+	// applies.
+	pSeries, number, ez, marker, ok := displayIdentityTuple(display)
+	if !ok || pSeries != series || ez != catalogSuffix || marker != foldedMarker {
 		return ""
 	}
-	// The compacted page value of T-28123-AI is indistinguishable from
-	// T28-123-AI. For a T-series query apply the same prefix-free
-	// disambiguation the query parser used instead of rejecting the page
-	// identity outright.
-	if m[2] != series && series == "t" && m[2] == "t28" && len(m[3]) == 3 {
-		m[2], m[3] = "t", "28"+m[3]
-	}
-	if m[2] != series {
-		return ""
-	}
-	// Render from the verified split rather than re-parsing: the compacted
-	// display of T28-123-HD is indistinguishable from the bare cid t28123h,
-	// and re-parsing would re-run the prefix-free T-series rewrite.
+	// Render from the verified split rather than re-parsing the compact form,
+	// which cannot distinguish T-28123H from T28-123H.
 	markerSpelling := "H"
-	if m[5] == "ai" {
+	if marker == "ai" {
 		markerSpelling = "AI"
 	}
-	return strings.ToUpper(m[2] + "-" + m[3] + m[4] + markerSpelling)
+	return strings.ToUpper(pSeries + "-" + number + ez + markerSpelling)
 }

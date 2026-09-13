@@ -26,10 +26,12 @@ func TestRemasterMarkerResolutionAndQualityLabels(t *testing.T) {
 		{"IPX-535-H264.mkv", "IPX-535"},
 		// Leading quality labels suppress in favor of the trailing catalog id,
 		// for every grammar the matcher accepts (separated, one-letter series,
-		// long hyphenated series).
+		// long hyphenated series, separated T28).
 		{"FHD 1080 HD ABC.123.HD.mkv", "ABC-123H"},
 		{"FHD 1080 HD A-123-HD.mkv", "A-123H"},
 		{"FHD 1080 HD ABEAUTY-123-HD.mkv", "ABEAUTY-123H"},
+		{"FHD 1080 HD T28.123.HD.mkv", "T28-123H"},
+		{"FHD 1080 HD T28 123 HD.mkv", "T28-123H"},
 		{"1080p IPX-535-H-720p.mkv", "IPX-535H"},
 		// Plain forms are unchanged.
 		{"ABC.123.HD.mkv", "ABC-123H"},

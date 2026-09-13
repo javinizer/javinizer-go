@@ -60,5 +60,5 @@ func TestExtractDisplayID_DisplayBranches(t *testing.T) {
 		`<tr><td>品番：</td><td>DV-818AI</td></tr>` +
 		`</table></body></html>`))
 	require.NoError(t, err)
-	assert.Equal(t, "dv818ai", extractDisplayID(doc))
+	assert.Equal(t, "dv-818ai", extractDisplayID(doc))
 }

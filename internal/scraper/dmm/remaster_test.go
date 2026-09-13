@@ -327,7 +327,7 @@ func TestExtractDisplayID(t *testing.T) {
 			`<tr><td>品番：</td><td>RCT-156-HD</td></tr>` +
 			`</table></body></html>`))
 	require.NoError(t, err)
-	assert.Equal(t, "rct156h", extractDisplayID(doc))
+	assert.Equal(t, "rct-156-hd", extractDisplayID(doc))
 
 	doc2, err := goquery.NewDocumentFromReader(strings.NewReader(
 		`<html><body><table><tr><td>商品番号：</td><td>1rct00156h</td></tr></table></body></html>`))

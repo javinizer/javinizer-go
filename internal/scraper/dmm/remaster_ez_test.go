@@ -41,19 +41,19 @@ func TestRentalRemasterClassification(t *testing.T) {
 	assert.Equal(t, "n_600abc00123ai", stripRentalSuffixMarkerAware("n_600abc00123air"))
 }
 
-func TestParseDisplayIdentityCatalogSuffix(t *testing.T) {
-	series, num, suffix, marker, ok := parseDisplayIdentity("ipx535zh")
+func TestDisplayIdentityTupleCatalogSuffix(t *testing.T) {
+	series, num, suffix, marker, ok := displayIdentityTuple("ipx535zh")
 	require.True(t, ok)
 	assert.Equal(t, "ipx", series)
 	assert.Equal(t, "535", num)
 	assert.Equal(t, "z", suffix)
 	assert.Equal(t, "h", marker)
 
-	_, _, suffix, _, ok = parseDisplayIdentity("ipx535h")
+	_, _, suffix, _, ok = displayIdentityTuple("ipx535h")
 	require.True(t, ok)
 	assert.Empty(t, suffix)
 
-	_, _, _, _, ok = parseDisplayIdentity("ipx535dh")
+	_, _, _, _, ok = displayIdentityTuple("ipx535dh")
 	assert.False(t, ok)
 }
 
