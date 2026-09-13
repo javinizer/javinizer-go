@@ -547,10 +547,17 @@ func pageRemasterDisplayID(doc *goquery.Document, series, foldedMarker, catalogS
 		return ""
 	}
 	m := remasterTailRegex.FindStringSubmatch(display)
-	if m == nil || m[2] != series || m[4] != catalogSuffix {
+	if m == nil || m[4] != catalogSuffix || m[5] != foldedMarker {
 		return ""
 	}
-	if m[5] != foldedMarker {
+	// The compacted page value of T-28123-AI is indistinguishable from
+	// T28-123-AI. For a T-series query apply the same prefix-free
+	// disambiguation the query parser used instead of rejecting the page
+	// identity outright.
+	if m[2] != series && series == "t" && m[2] == "t28" && len(m[3]) == 3 {
+		m[2], m[3] = "t", "28"+m[3]
+	}
+	if m[2] != series {
 		return ""
 	}
 	// Render from the verified split rather than re-parsing: the compacted
