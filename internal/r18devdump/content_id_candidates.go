@@ -9,6 +9,10 @@ import (
 
 var contentIDFullRegex = regexp.MustCompile(`^(\d*)([a-z]+)(\d+)(.*)$`)
 
+// zeroPaddedCIDRegex matches prefixless digital content ids with a five-digit
+// zero-padded number (rct00156hd-class).
+var zeroPaddedCIDRegex = regexp.MustCompile(`^(?:t28|[a-z]+)\d{5}[a-z]{0,3}$`)
+
 // underscoreContentIDRegex recognizes PPV-style content_ids (h_086mesu00103),
 // which SplitSeriesAndNumber cannot decompose because of the underscore.
 var underscoreContentIDRegex = regexp.MustCompile(`^[a-z]_\d+[a-z]+\d+`)
@@ -20,6 +24,10 @@ var underscoreContentIDRegex = regexp.MustCompile(`^[a-z]_\d+[a-z]+\d+`)
 // Uses the ContentIDPrefixLookup table built from r18.dev database dumps to find
 // known prefixes per series. Falls back to common prefixes if the series is unknown.
 func ContentIDCandidates(id string) []string {
+	return contentIDCandidates(id, false)
+}
+
+func contentIDCandidates(id string, markerAware bool) []string {
 	// Identity candidate: the input itself in content-id form. It leads for
 	// content-id-shaped input (leading numeric prefix or zero-padded 5-digit
 	// number, e.g. "118ipx00535", "lulu00441") so exact content_id queries
@@ -43,6 +51,11 @@ func ContentIDCandidates(id string) []string {
 		return nil
 	}
 
+	if markerAware {
+		if m := t28RemasterBaseRegex.FindStringSubmatch(direct); m != nil {
+			series, numStr = "t28", m[1]
+		}
+	}
 	series = strings.ToLower(series)
 	num, err := strconv.Atoi(numStr)
 	if err != nil {
@@ -54,7 +67,9 @@ func ContentIDCandidates(id string) []string {
 
 	// Look up known prefixes for this series from the r18.dev database dump
 	var prefixes []string
-	if lookup, ok := ContentIDPrefixLookup[series]; ok {
+	if markerAware && series == "t28" {
+		prefixes = []string{"9", "", "1"}
+	} else if lookup, ok := ContentIDPrefixLookup[series]; ok {
 		prefixes = lookup
 	} else {
 		// Fallback: try common prefixes for unknown series
@@ -95,6 +110,49 @@ func ContentIDCandidates(id string) []string {
 	}
 
 	return variations
+}
+
+var t28RemasterBaseRegex = regexp.MustCompile(`(?i)^t28(\d+)$`)
+
+var remasterMarkerTailRgx = regexp.MustCompile(`(?i)^(.*\d)([ez]?)(hd|ai|h)$`)
+
+// ContentIDCandidatesWithMarker is ContentIDCandidates for marker-bearing
+// inputs: the trailing H/HD/AI marker is split off, base candidates are built
+// from the core id, and the folded marker (hd -> h) is re-appended to every
+// candidate after zero-padding and DMM prefixing.
+func ContentIDCandidatesWithMarker(id string) []string {
+	raw := strings.ToLower(strings.TrimSpace(id))
+	if parts := remasterMarkerTailRgx.FindStringSubmatch(raw); parts != nil && underscoreContentIDRegex.FindString(parts[1]) == parts[1] {
+		return []string{raw}
+	}
+	// Normalize display separators first: advertised spellings (RCT-156-HD,
+	// DV-818-AI, RCT-156 HD) place a separator between number and marker.
+	compacted := strings.NewReplacer("-", "", "_", "", ".", "", " ", "").Replace(strings.TrimSpace(id))
+	m := remasterMarkerTailRgx.FindStringSubmatch(compacted)
+	if m == nil {
+		return ContentIDCandidates(id)
+	}
+	marker := strings.ToLower(m[3])
+	suffix := strings.ToLower(m[2])
+	// Only display spellings fold HD to H; separator evidence in the original
+	// input forces display semantics even when the compacted shape looks like
+	// a zero-padded content id (RCT-00156-HD vs raw rct00156hd).
+	hasSeparator := strings.ContainsAny(id, "-_. ")
+	if marker == "hd" && (hasSeparator || (!looksLikeContentID(strings.ToLower(compacted)) && !zeroPaddedCIDRegex.MatchString(strings.ToLower(compacted)))) {
+		marker = "h"
+	}
+	base := contentIDCandidates(m[1], true)
+	out := make([]string, 0, len(base)+1)
+	if !hasSeparator && zeroPaddedCIDRegex.MatchString(raw) {
+		out = append(out, raw)
+	}
+	for _, c := range base {
+		candidate := c + suffix + marker
+		if len(out) == 0 || candidate != out[0] {
+			out = append(out, candidate)
+		}
+	}
+	return out
 }
 
 // looksLikeContentID reports whether a normalized input already looks like a

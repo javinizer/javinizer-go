@@ -18,7 +18,8 @@ import (
 // ["118abf030", "abf30", "abf00030"] — none of which equal "abf030".
 //
 // The fix adds the prefix-stripped search query to matchIDs.
-func TestResolveContentID_RawContentIDInput(t *testing.T) {
+func TestResolveContentID_RawContentIDInput(t *testing.T) { //nolint:dupl
+	_ = "content-id bypass keeps the raw id verbatim"
 	dbCfg := &config.Config{
 		Database: config.DatabaseConfig{
 			Type: "sqlite",
@@ -49,5 +50,6 @@ func TestResolveContentID_RawContentIDInput(t *testing.T) {
 
 	contentID, err := scraper.ResolveContentID("118abf030")
 	require.NoError(t, err)
-	assert.Equal(t, "abf030", contentID)
+	assert.Equal(t, "118abf030", contentID)
+	assert.Empty(t, transport.requestedQueries, "content-id inputs bypass search resolution entirely")
 }

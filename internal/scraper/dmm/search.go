@@ -43,6 +43,7 @@ func (s *scraper) getURLCtx(ctx context.Context, id string) (string, error) {
 		return "", fmt.Errorf("movie not found on DMM: %w", err)
 	}
 
+	boundMarker, _, _, rawQuery := classifyRemasterQuery(id)
 	baseID := normalizeID(contentID)
 
 	searchQueries := []string{
@@ -112,7 +113,11 @@ func (s *scraper) getURLCtx(ctx context.Context, id string) (string, error) {
 
 		candidates := s.extractCandidateURLs(doc, contentID)
 		logging.Debugf("DMM: Found %d candidates from search query '%s'", len(candidates), searchQuery)
-		allCandidates = append(allCandidates, candidates...)
+		for _, candidate := range candidates {
+			if boundMarker == "" || bindResolvedCID(candidate.contentID, contentID, rawQuery) {
+				allCandidates = append(allCandidates, candidate)
+			}
+		}
 	}
 
 	if len(allCandidates) == 0 {
@@ -122,6 +127,16 @@ func (s *scraper) getURLCtx(ctx context.Context, id string) (string, error) {
 		logging.Debugf("DMM: Best search candidate has low priority, trying direct URLs for %s", contentID)
 		directCandidates := s.tryDirectURLs(ctx, contentID)
 		allCandidates = append(allCandidates, directCandidates...)
+	}
+
+	if boundMarker != "" {
+		boundCandidates := make([]urlCandidate, 0, len(allCandidates))
+		for _, c := range allCandidates {
+			if bindResolvedCID(c.contentID, contentID, rawQuery) {
+				boundCandidates = append(boundCandidates, c)
+			}
+		}
+		allCandidates = boundCandidates
 	}
 
 	if len(allCandidates) == 0 {
@@ -227,7 +242,7 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 	if strings.Contains(url, "video.dmm.co.jp") && s.useBrowser {
 		logging.Debug("DMM: Using browser mode for video.dmm.co.jp page")
 
-		bodyHTML, err := fetchWithBrowser(ctx, url, s.browserConfig.Timeout, s.proxyProfile, s.getEnvLookup(), s.getFs())
+		bodyHTML, err := s.fetchBrowserPage(ctx, url)
 		if err != nil {
 			return nil, fmt.Errorf("browser fetch failed: %w", err)
 		}
@@ -260,7 +275,12 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		}
 	}
 
-	return s.parseHTML(ctx, doc, url)
+	foldedMarker, _, _, isCID := classifyRemasterQuery(id)
+	res, err := s.parseHTMLWithOptions(ctx, doc, url, foldedMarker != "")
+	if err == nil && foldedMarker != "" && !isCID {
+		res.ID = canonicalRemasterDisplayID(id)
+	}
+	return res, err
 }
 
 func (s *scraper) ScrapeURL(ctx context.Context, url string) (*models.ScraperResult, error) {
@@ -273,7 +293,7 @@ func (s *scraper) ScrapeURL(ctx context.Context, url string) (*models.ScraperRes
 	if strings.Contains(url, "video.dmm.co.jp") && s.useBrowser {
 		logging.Debug("DMM ScrapeURL: Using browser mode for video.dmm.co.jp page")
 
-		bodyHTML, err := fetchWithBrowser(ctx, url, s.browserConfig.Timeout, s.proxyProfile, s.getEnvLookup(), s.getFs())
+		bodyHTML, err := s.fetchBrowserPage(ctx, url)
 		if err != nil {
 			return nil, models.NewScraperStatusError("DMM", 0, fmt.Sprintf("browser fetch failed: %v", err))
 		}
