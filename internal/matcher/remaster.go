@@ -11,9 +11,10 @@ var (
 	reRemasterRemainder     = regexp.MustCompile(`(?i)^[-_.\s]?(HD|AI|H)(?:$|[-_.\s[\]()])`)
 	remasterCodecTailRegex  = regexp.MustCompile(`(?i)^[-_.\s]?\d{3}(?:\D|$)`)
 	contentIDShapeRegex     = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])((?:\d+(?:t28|[A-Za-z]+)\d+[A-Za-z]{0,3}|(?:t28|[A-Za-z]+)\d{4,5}[A-Za-z]{0,3}))(?:[-_.\s[\]()](.*)$|$)`)
-	trailingCatalogIDRegex  = regexp.MustCompile(`(?i)(?:[a-z]{2,6}-\d{1,}\b|t28-\d{1,}\b|[hn]_\d+[a-z]+\d+|\b[a-z]+\d{4,5}[a-z]{0,3}\b|\b\d+[a-z]{2,}\d+[a-z]{0,3}\b)`)
+	trailingCatalogIDRegex  = regexp.MustCompile(`(?i)(?:[a-z]{1,}-\d{1,}\b|t28-\d{1,}\b|[hn]_\d+[a-z]+\d+|\b[a-z]+\d{4,5}[a-z]{0,3}\b|\b\d+[a-z]{2,}\d+[a-z]{0,3}\b|\b[a-z]{1,8}[-._\s]\d{1,6}(?:[-._\s]?(?:hd|ai|h))?\b)`)
 	remasterPartLabelRegex  = regexp.MustCompile(`(?i)\b(?:part|pt|disc|vol|cd)-?\d{1,2}\b`)
 	resolutionTokenRegex    = regexp.MustCompile(`(?i)^\d{3,4}x\d{3,4}$`)
+	resolutionTailRegex     = regexp.MustCompile(`(?i)^[-_.\s]?(?:\d{3,4}[pi]|\d{3,4}x\d{3,4})(?:\D|$)`)
 	framerateTokenRegex     = regexp.MustCompile(`(?i)^\d{3,4}[pi](?:\d{2,3})?$`)
 	remasterMarkerTailRegex = regexp.MustCompile(`(?i)(?:ez)?(?:hd|ai|h)$`)
 	rawTokenRegex           = regexp.MustCompile(`[A-Za-z0-9]+`)
@@ -42,7 +43,7 @@ func normalizeFusedRemasterFilename(name string) string {
 	// the fused normalization.
 	remainder := remasterPartLabelRegex.ReplaceAllString(name[m[1]:], "")
 	if trailingCatalogIDRegex.MatchString(remainder) {
-		return ""
+		return normalizeFusedRemasterFilename(name[m[1]:])
 	}
 	// A prefix-free compact t28 tail with a three-digit number reads as the
 	// T-series release T-28123H (catalog-prefixed or separator-pinned forms
@@ -71,8 +72,9 @@ func splitRemasterMarker(remainder string) (string, string) {
 	}
 	marker := strings.ToUpper(remainder[m[2]:m[3]])
 	// H/HD before codec digits stays ambiguous (H.264-class), but AI is an
-	// explicit release marker and must survive a following codec tag.
-	if marker != "AI" && remasterCodecTailRegex.MatchString(remainder[m[3]:]) {
+	// explicit release marker and must survive a following codec tag, and a
+	// resolution tag (720p, 1080i) is not a codec spelling.
+	if marker != "AI" && remasterCodecTailRegex.MatchString(remainder[m[3]:]) && !resolutionTailRegex.MatchString(remainder[m[3]:]) {
 		return "", remainder
 	}
 	return marker, remainder[m[3]:]
