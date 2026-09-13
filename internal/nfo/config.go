@@ -64,6 +64,7 @@ type Config struct {
 	// Actress rendering options for <ACTORS>/<ACTRESSES> template tags.
 	GroupUnknownActressName string // Replacement when group_actress is enabled and the actress list is empty or unknown (default: "@Unknown")
 	ActressDelimiter        string // Delimiter between actress names when no DELIM= modifier is present (default: ", ")
+	UseCreditedName         bool   // Render the credit's credited name instead of the identity canonical name (default: false)
 }
 
 // ConfigFromAppConfig converts application config to NFO generator config.

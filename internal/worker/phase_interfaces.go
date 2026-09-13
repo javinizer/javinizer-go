@@ -155,7 +155,12 @@ type applyPhaseInputs struct {
 	Destination string
 	Update      bool // Update mode (in-place, no file organization)
 
-	HistoryRepo     database.HistoryRepositoryInterface
+	HistoryRepo database.HistoryRepositoryInterface
+
+	// CollisionRepo gates organize on unresolved scrape-vs-truth collisions.
+	// nil (tests, scan-only) disables the gate.
+	CollisionRepo database.CreditCollisionRepositoryInterface
+
 	OperationMode   string
 	OrganizeSkipped bool
 	Dedup           *sync.Map

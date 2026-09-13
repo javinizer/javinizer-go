@@ -64,6 +64,8 @@
 //	cfg.Metadata                             → aggregator
 //	cfg.Metadata.ActressDatabase.ConvertAlias → aggregator
 //	cfg.Metadata.ActressDatabase.Enabled    → aggregator, scrape
+//	cfg.Metadata.ActressDatabase.CollisionPolicy         → scrape
+//	cfg.Metadata.ActressDatabase.TrustedCollisionSources → scrape
 //	cfg.Metadata.GenreReplacement.AutoAdd   → aggregator
 //	cfg.Metadata.GenreReplacement.Enabled   → aggregator
 //	cfg.Metadata.IgnoreGenres                → aggregator

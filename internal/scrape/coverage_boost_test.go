@@ -184,7 +184,7 @@ func TestEnrichActressesFromDB_DMMIDLookupError(t *testing.T) {
 
 func TestEnrichActressesFromDB_MultipleActresses(t *testing.T) {
 	repo := &mockActressRepoForUncovered{
-		findByDMMIDVal: &models.Actress{ThumbURL: "thumb.jpg"},
+		findByDMMIDVal: &models.Actress{ThumbURL: "thumb.jpg", Verified: true},
 	}
 	movie := &models.Movie{Actresses: []models.Actress{
 		{DMMID: 1},

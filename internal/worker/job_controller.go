@@ -500,6 +500,7 @@ func (c *jobController) buildApplyInputs(wf workflow.WorkflowInterface, batchCfg
 		Destination:      cfg.Destination,
 		Update:           upd,
 		HistoryRepo:      histRepo,
+		CollisionRepo:    c.job.deps.CollisionRepo,
 		OperationMode:    opMode,
 		OrganizeSkipped:  cfg.OrganizeOptions.Skip,
 		Broadcaster:      broadcaster,

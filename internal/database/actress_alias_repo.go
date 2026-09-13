@@ -2,8 +2,11 @@ package database
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
+
+	"gorm.io/gorm"
 
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -47,6 +50,31 @@ func (r *ActressAliasRepository) Upsert(ctx context.Context, alias *models.Actre
 	alias.CreatedAt = existing.CreatedAt
 	if err := r.GetDB().WithContext(ctx).Save(alias).Error; err != nil {
 		return wrapDBErr("update", fmt.Sprintf("actress alias %s", alias.AliasName), err)
+	}
+	return nil
+}
+
+// UpsertTx upserts an alias within the given transaction.
+func (r *ActressAliasRepository) UpsertTx(tx *gorm.DB, alias *models.ActressAlias) error {
+	var existing models.ActressAlias
+	err := tx.First(&existing, "alias_name = ?", alias.AliasName).Error
+	if err == nil {
+		alias.ID = existing.ID
+		alias.CreatedAt = existing.CreatedAt
+		if err := tx.Model(&existing).Updates(map[string]interface{}{
+			colCanonicalName: alias.CanonicalName,
+			colUpdatedAt:     alias.UpdatedAt,
+		}).Error; err != nil {
+			return wrapDBErr("update", fmt.Sprintf("actress alias %s", alias.AliasName), err)
+		}
+		alias.ID = existing.ID
+		return nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return wrapDBErr("find", fmt.Sprintf("actress alias %s", alias.AliasName), err)
+	}
+	if err := tx.Create(alias).Error; err != nil {
+		return wrapDBErr("create", fmt.Sprintf("actress alias %s", alias.AliasName), err)
 	}
 	return nil
 }

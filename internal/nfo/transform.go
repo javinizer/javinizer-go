@@ -54,7 +54,7 @@ type nfoInput struct {
 func (g *Generator) transformMovieForNFO(ctx context.Context, movie *models.Movie, videoFilePath, partSuffix string, partNumber int, isMultiPart bool, tags []string) (nfoInput, error) {
 	title := g.resolveTitle(movie)
 	genres := g.resolveGenres(movie)
-	actors := g.buildActors(movie.Actresses)
+	actors := g.buildActorsForMovie(movie)
 	releaseDate, year := g.resolveReleaseDate(movie)
 	rating := g.resolveRating(movie)
 	thumbs := g.resolvePosterThumbs(movie)
@@ -269,6 +269,82 @@ func (g *Generator) resolveCredits() string {
 		return ""
 	}
 	return strings.Join(g.config.Credits, ", ")
+}
+
+func (g *Generator) buildActorsForMovie(movie *models.Movie) []actor {
+	if len(movie.Credits) > 0 && g.creditAwareActors() {
+		return g.buildActorsFromCredits(movie.Credits)
+	}
+	return g.buildActors(movie.Actresses)
+}
+
+func (g *Generator) creditAwareActors() bool {
+	return g.config != nil
+}
+
+// resolveCreditDisplayName resolves the D8 precedence chain:
+// override_name > credited_name (when use_credited_name and not forced-canonical) > identity canonical.
+func (g *Generator) resolveCreditDisplayName(credit models.MovieCredit) string {
+	if credit.UserOverride && strings.TrimSpace(credit.OverrideName) != "" {
+		return strings.TrimSpace(credit.OverrideName)
+	}
+	actress := credit.Actress
+	if !credit.DisplayForceCanonical && g.config.UseCreditedName && strings.TrimSpace(credit.CreditedName) != "" {
+		return strings.TrimSpace(credit.CreditedName)
+	}
+	if actress != nil && !actress.Verified && strings.TrimSpace(credit.CreditedName) != "" {
+		return strings.TrimSpace(credit.CreditedName)
+	}
+	if actress != nil {
+		return g.formatActressName(*actress)
+	}
+	if strings.TrimSpace(credit.CreditedName) != "" {
+		return strings.TrimSpace(credit.CreditedName)
+	}
+	return ""
+}
+
+// buildActorsFromCredits renders actors from credit records, preserving cast order.
+func (g *Generator) buildActorsFromCredits(credits []models.MovieCredit) []actor {
+	if len(credits) == 0 {
+		return nil
+	}
+	actors := make([]actor, 0, len(credits))
+	seen := make(map[string]struct{}, len(credits))
+	for i := range credits {
+		credit := credits[i]
+		if credit.Suppressed {
+			continue
+		}
+		name := g.resolveCreditDisplayName(credit)
+		if strings.TrimSpace(name) == "" {
+			continue
+		}
+		nameKey := normalizeActressNameForDedup(name)
+		if nameKey != "" {
+			if _, exists := seen[nameKey]; exists {
+				continue
+			}
+			seen[nameKey] = struct{}{}
+		}
+		act := actor{
+			Name:  name,
+			Order: len(actors),
+		}
+		if g.config.AddGenericRole {
+			act.Role = "Actress"
+		}
+		actress := credit.Actress
+		if g.config.AltNameRole && actress != nil && actress.JapaneseName != "" &&
+			models.NormalizeActressNameKey(actress.JapaneseName) != normalizeActressNameForDedup(name) {
+			act.Role = actress.JapaneseName
+		}
+		if actress != nil && actress.ThumbURL != "" {
+			act.Thumb = actress.ThumbURL
+		}
+		actors = append(actors, act)
+	}
+	return actors
 }
 
 // buildActors formats actresses and deduplicates by DMMID or name.

@@ -306,6 +306,11 @@ func postProcessScraped(ctx context.Context, scraped *models.Movie, results []*m
 		}
 	}
 
+	if cfg.ScrapeActress {
+		BuildCreditsFromScrape(scraped, actressSources, results)
+		AttachCreditPolicy(scraped, cfg)
+	}
+
 	var translationWarning string
 	var translationWarningCode string
 	var translationOutput *translation.TranslationOutput

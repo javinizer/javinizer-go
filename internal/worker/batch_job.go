@@ -37,6 +37,7 @@ type BatchJobDeps struct {
 	MovieRepo       database.MovieRepositoryInterface              // Movie persistence for batch editing
 	ActressRepo     database.ActressRepositoryInterface            // Actress persistence for explicit review-page edits
 	HistoryRepo     database.HistoryRepositoryInterface            // History repository
+	CollisionRepo   database.CreditCollisionRepositoryInterface    // Collision gate for organize
 	Emitter         eventlog.EventEmitter                          // Event emission for audit trail
 	PersistFn       func() error                                   // Callback to persist job state to database; phases log-and-continue on error, phase starts fail closed on marker-persist error
 	Logger          logging.Logger                                 // Structured logger seam; defaults to GlobalLogger() when nil

@@ -280,9 +280,12 @@ func (p *PriorityConfig) decodeFromMap(raw map[string]any) error {
 
 // ActressDatabaseConfig holds actress image database configuration
 type ActressDatabaseConfig struct {
-	Enabled      bool `yaml:"enabled" json:"enabled"`             // Enable actress image lookup from database
-	AutoAdd      bool `yaml:"auto_add" json:"auto_add"`           // Automatically add new actresses to database
-	ConvertAlias bool `yaml:"convert_alias" json:"convert_alias"` // Convert actress names using alias database
+	Enabled                 bool     `yaml:"enabled" json:"enabled"`                                     // Enable actress image lookup from database
+	AutoAdd                 bool     `yaml:"auto_add" json:"auto_add"`                                   // Automatically add new actresses to database
+	ConvertAlias            bool     `yaml:"convert_alias" json:"convert_alias"`                         // Convert actress names using alias database
+	CollisionPolicy         string   `yaml:"collision_policy" json:"collision_policy"`                   // Scrape-vs-identity collision policy: block (default) | auto_keep | auto_alias
+	TrustedCollisionSources []string `yaml:"trusted_collision_sources" json:"trusted_collision_sources"` // Scrapers eligible for auto_alias
+	CandidateRetentionDays  int      `yaml:"candidate_retention_days" json:"candidate_retention_days"`   // GC age for creditless candidates (default 30)
 }
 
 // GenreReplacementConfig holds genre replacement/normalization configuration
