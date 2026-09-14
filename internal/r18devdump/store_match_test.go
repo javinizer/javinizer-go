@@ -66,6 +66,39 @@ func TestMatchByDisplayID_CandidateExpansionOrderedMultiMatch(t *testing.T) {
 	assert.Equal(t, "", matches[0].DVDID)
 }
 
+func TestT28PinnedDVDNormCollisionSelectsMatchingRows(t *testing.T) {
+	fixture := "t28123h\tT-28123-HD\t\\N\t\\N\n" +
+		"9t28123h\tT28-123-HD\t\\N\t\\N"
+	store, err := Open(seedDumpFullCols(t, fixture))
+	require.NoError(t, err)
+	defer store.Close()
+
+	for _, tc := range []struct {
+		query, contentID, dvdID string
+	}{
+		{"T-28123-HD", "t28123h", "T-28123-HD"},
+		{"T28-123-HD", "9t28123h", "T28-123-HD"},
+	} {
+		t.Run(tc.query, func(t *testing.T) {
+			matches, err := store.MatchByDisplayID(context.Background(), tc.query)
+			require.NoError(t, err)
+			require.Len(t, matches, 1)
+			assert.Equal(t, tc.contentID, matches[0].ContentID)
+			assert.Equal(t, tc.dvdID, matches[0].DVDID)
+
+			contentID, err := store.LookupByDVDID(context.Background(), tc.query)
+			require.NoError(t, err)
+			assert.Equal(t, tc.contentID, contentID)
+
+			movie, err := store.LookupMovie(context.Background(), tc.query)
+			require.NoError(t, err)
+			require.NotNil(t, movie)
+			assert.Equal(t, tc.contentID, movie.ContentID)
+			assert.Equal(t, tc.dvdID, movie.DVDID)
+		})
+	}
+}
+
 func TestMatchByDisplayID_DirectContentIDInputExpandsToo(t *testing.T) {
 	store, err := Open(seedDumpFullCols(t, matchFixture))
 	require.NoError(t, err)
@@ -143,6 +176,14 @@ func (c *faultyConn) QueryContext(_ context.Context, query string, _ []driver.Na
 	if strings.Contains(query, "IN (") {
 		return &faultyRows{mode: c.mode}, nil
 	}
+	if strings.Contains(query, "dvd_id_norm = ?") {
+		switch c.mode {
+		case "normBadcols":
+			return &faultyRows{mode: "badcols"}, nil
+		case "normFailingErr":
+			return &faultyRows{mode: "failingErr"}, nil
+		}
+	}
 	return &faultyRows{mode: "empty"}, nil
 }
 
@@ -159,6 +200,21 @@ func newFaultyStore(t *testing.T, mode string) *Store {
 	return &Store{db: db, path: ":faulty:"}
 }
 
+func TestSelectDVDRow_ScanError(t *testing.T) {
+	s := newFaultyStore(t, "normBadcols")
+	defer func() { _ = s.Close() }()
+	_, err := s.LookupByDVDID(context.Background(), "IPX-535")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "scan")
+}
+
+func TestSelectDVDRow_RowsErr(t *testing.T) {
+	s := newFaultyStore(t, "normFailingErr")
+	defer func() { _ = s.Close() }()
+	_, err := s.LookupByDVDID(context.Background(), "IPX-535")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "simulated iteration failure")
+}
 func TestMatchByDisplayID_CandidateScanError(t *testing.T) {
 	s := newFaultyStore(t, "badcols")
 	defer func() { _ = s.Close() }()

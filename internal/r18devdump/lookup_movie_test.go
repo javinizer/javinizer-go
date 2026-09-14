@@ -137,6 +137,30 @@ func TestLookupMovie_Miss(t *testing.T) {
 	}
 }
 
+func TestLookupMovie_CoreQueryErrorAfterSelection(t *testing.T) {
+	path := importFullDump(t)
+	corruptor, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatalf("open corruptor: %v", err)
+	}
+	if _, err := corruptor.Exec("ALTER TABLE videos RENAME COLUMN title_en TO title_missing"); err != nil {
+		corruptor.Close()
+		t.Fatalf("rename title column: %v", err)
+	}
+	if err := corruptor.Close(); err != nil {
+		t.Fatalf("close corruptor: %v", err)
+	}
+
+	store, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+	_, err = store.LookupMovie(context.Background(), "ABW-013")
+	if err == nil || !strings.Contains(err.Error(), "dump lookup movie") {
+		t.Fatalf("LookupMovie error = %v, want core query error", err)
+	}
+}
 func TestLookupMovie_NilStoreSafe(t *testing.T) {
 	var s *Store
 	_, err := s.LookupMovie(context.Background(), "ABW-013")

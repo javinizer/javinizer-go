@@ -628,6 +628,15 @@ func TestMatcher_MatchFile_CustomRegexEmptyCapture(t *testing.T) {
 	assert.Nil(t, result, "custom regex with empty capture group must yield no match (falls back to builtin, which also misses '123')")
 }
 
+func TestMatcher_MatchFile_CustomRegexNonParticipatingCapture(t *testing.T) {
+	cfg := &Config{RegexEnabled: true, RegexPattern: `(?:foo|(ABC-\d+))`}
+	m, err := NewMatcher(cfg)
+	require.NoError(t, err)
+
+	result := m.MatchFile(models.FileMatchInfo{Name: "foo.mp4", Extension: ".mp4"})
+	assert.Nil(t, result)
+}
+
 func TestMatcher_EZ_CatalogSuffix_MatchStringConsistent(t *testing.T) {
 	// MatchString must apply the same E/Z stripping as MatchFile for built-in matches
 	// so downstream re-match (e.g. scrape_phase buildScrapeCmd) stays consistent.
@@ -740,7 +749,7 @@ func TestMatcher_PartSuffixVariations(t *testing.T) {
 		{"Dot letter A", "IPX-535.A.mp4", "IPX-535", 1, false, PatternLetter},
 
 		// Trailing-number patterns - ambiguous, require directory validation
-		{"Trailing HD-1", "IPX-535-HD-1.mp4", "IPX-535", 1, false, PatternTrailing},
+		{"Remaster HD-1", "IPX-535-HD-1.mp4", "IPX-535H", 1, true, PatternExplicit},
 		{"Trailing site tag", "SGKI-071-un-javgg.net-1.mp4", "SGKI-071", 1, false, PatternTrailing},
 	}
 
@@ -1265,11 +1274,11 @@ func TestMatcher_PartSuffixEdgeCases(t *testing.T) {
 		{"ID with E suffix IPX-535E (correct: E is part of ID)", "IPX-535E.mp4", "IPX-535E", 0, "", false, PatternNone},
 
 		// ── Trailing-number pattern edge cases ────────────────────────────
-		{"Trailing with noise", "IPX-535-HD-1.mp4", "IPX-535", 1, "-1", false, PatternTrailing},
+		{"Trailing with noise", "IPX-535-WEB-1.mp4", "IPX-535", 1, "-1", false, PatternTrailing},
 		{"Trailing with site tag", "SGKI-071-un-javgg.net-1.mp4", "SGKI-071", 1, "-1", false, PatternTrailing},
 		{"Trailing with dot separator", "IPX-535.javdb.1.mp4", "IPX-535", 1, "-1", false, PatternTrailing},
 		{"Trailing single digit", "IPX-535-uncen-1.mp4", "IPX-535", 1, "-1", false, PatternTrailing},
-		{"Trailing double digit", "IPX-535-HD-12.mp4", "IPX-535", 12, "-12", false, PatternTrailing},
+		{"Trailing double digit", "IPX-535-WEB-12.mp4", "IPX-535", 12, "-12", false, PatternTrailing},
 
 		// ── Dot separator edge cases ──────────────────────────────────────
 		{"Dot pt1", "IPX-535.pt1.mp4", "IPX-535", 1, "-pt1", true, PatternExplicit},
@@ -2631,8 +2640,8 @@ func TestValidateMultipartInDirectory_LetterGroupOverlappingTrailingEndToEnd(t *
 	files := []models.FileMatchInfo{
 		{Name: "IPX-535a-4k.mp4", Extension: ".mp4", Path: "/media/JAV/IPX-535a-4k.mp4"},
 		{Name: "IPX-535b-4k.mp4", Extension: ".mp4", Path: "/media/JAV/IPX-535b-4k.mp4"},
-		{Name: "IPX-535-HD-1.mp4", Extension: ".mp4", Path: "/media/JAV/IPX-535-HD-1.mp4"},
-		{Name: "IPX-535-HD-2.mp4", Extension: ".mp4", Path: "/media/JAV/IPX-535-HD-2.mp4"},
+		{Name: "IPX-535-WEB-1.mp4", Extension: ".mp4", Path: "/media/JAV/IPX-535-WEB-1.mp4"},
+		{Name: "IPX-535-WEB-2.mp4", Extension: ".mp4", Path: "/media/JAV/IPX-535-WEB-2.mp4"},
 	}
 
 	results := matcher.Match(files)
@@ -3134,7 +3143,7 @@ func TestValidateMultipartInDirectory_TrailingLetterNoCrossValidation(t *testing
 	}
 
 	files := []models.FileMatchInfo{
-		{Name: "IPX-535-HD-1.mp4", Extension: ".mp4", Path: "/videos/IPX-535-HD-1.mp4"},
+		{Name: "IPX-535-WEB-1.mp4", Extension: ".mp4", Path: "/videos/IPX-535-WEB-1.mp4"},
 		{Name: "IPX-535-B.mp4", Extension: ".mp4", Path: "/videos/IPX-535-B.mp4"},
 	}
 

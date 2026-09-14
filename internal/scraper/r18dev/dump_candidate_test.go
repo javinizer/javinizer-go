@@ -349,7 +349,7 @@ func TestFetchAndParseCombined_TransportError(t *testing.T) {
 	s.client.SetTransport(roundTripperFunc(func(req *http.Request) (*http.Response, error) {
 		return nil, nil
 	}))
-	_, err := s.fetchAndParseCombined(context.Background(), "https://example.invalid/x")
+	_, err := s.fetchAndParseCombined(context.Background(), "https://example.invalid/x", "")
 	require.Error(t, err)
 }
 
