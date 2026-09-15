@@ -81,8 +81,8 @@ func resolveRescrapeMergeOptions(req *contracts.BatchRescrapeRequest) (workflow.
 func writeErrorResponse(c *gin.Context, status int, isGone bool, errMsg string) {
 	if isGone {
 		c.JSON(status, gin.H{
-			"error":   errMsg,
-			"skipped": true,
+			errorResponseKey: errMsg,
+			"skipped":        true,
 		})
 		return
 	}

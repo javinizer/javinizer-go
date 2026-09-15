@@ -8,9 +8,10 @@ import (
 
 // Sentinel errors returned by the database repository layer.
 var (
-	ErrNotFound      = errors.New("record not found")
-	ErrInvalidLookup = errors.New("invalid lookup key")
-	ErrDuplicateKey  = errors.New("duplicate key")
+	ErrNotFound         = errors.New("record not found")
+	ErrInvalidLookup    = errors.New("invalid lookup key")
+	ErrDuplicateKey     = errors.New("duplicate key")
+	ErrCollisionNotOpen = errors.New("collision is not open")
 )
 
 // IsNotFound reports whether err indicates a record-not-found condition.

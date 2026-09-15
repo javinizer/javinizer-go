@@ -25,7 +25,7 @@ type VideoInfo struct {
 	SampleRate    int    // Audio sample rate (e.g., 48000, 44100)
 
 	// Container
-	Container string // "mp4", "mkv", "avi", etc.
+	Container string // mp4Format, "mkv", "avi", etc.
 }
 
 // Analyze extracts metadata from a video file using the proberRegistry
@@ -81,7 +81,7 @@ func detectContainer(header []byte) string {
 	if len(header) >= 8 {
 		// Check for ftyp box (byte 4-7)
 		if header[4] == 'f' && header[5] == 't' && header[6] == 'y' && header[7] == 'p' {
-			return "mp4"
+			return mp4Format
 		}
 	}
 

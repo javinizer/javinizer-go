@@ -182,7 +182,7 @@ func (r *BatchFileOperationRepository) UpdateRevertStatus(ctx context.Context, i
 	now := time.Now().UTC()
 	updates := map[string]any{
 		"revert_status": status,
-		"updated_at":    now,
+		colUpdatedAt:    now,
 	}
 	if status == models.RevertStatusReverted {
 		updates["reverted_at"] = now

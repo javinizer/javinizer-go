@@ -64,7 +64,7 @@ func prepareAndLaunchApply(
 		}
 	}()
 
-	c.JSON(http.StatusOK, gin.H{"message": successMessage})
+	c.JSON(http.StatusOK, gin.H{messageResponseKey: successMessage})
 }
 
 // organizeJob godoc
@@ -100,7 +100,7 @@ func organizeJob(rt *core.APIRuntime) gin.HandlerFunc {
 
 		factory := snap.BatchJobFactory()
 		if factory == nil {
-			c.JSON(http.StatusServiceUnavailable, contracts.ErrorResponse{Error: "batch job factory unavailable — workflow factory not ready; retry the request"})
+			c.JSON(http.StatusServiceUnavailable, contracts.ErrorResponse{Error: factoryUnavailableMessage})
 			return
 		}
 		applyOpts, resolveErr := resolveOrganizeApplyConfig(snap, factory, job, req)
@@ -141,12 +141,12 @@ func updateBatchJob(rt *core.APIRuntime) gin.HandlerFunc {
 
 		job, ok := deps.GetJobStore().GetBatchJob(jobID)
 		if !ok {
-			c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "Job not found"})
+			c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: jobNotFoundMessage})
 			return
 		}
 
 		if job.GetJobStatus() == models.JobStatusRunning {
-			c.JSON(http.StatusConflict, gin.H{"error": "job is already running"})
+			c.JSON(http.StatusConflict, gin.H{errorResponseKey: "job is already running"})
 			return
 		}
 
@@ -181,7 +181,7 @@ func updateBatchJob(rt *core.APIRuntime) gin.HandlerFunc {
 		snap := rt.Snapshot()
 		factory := snap.BatchJobFactory()
 		if factory == nil {
-			c.JSON(http.StatusServiceUnavailable, contracts.ErrorResponse{Error: "batch job factory unavailable — workflow factory not ready; retry the request"})
+			c.JSON(http.StatusServiceUnavailable, contracts.ErrorResponse{Error: factoryUnavailableMessage})
 			return
 		}
 		applyOpts, err := resolveUpdateApplyConfig(snap, factory, job, req)
@@ -338,7 +338,7 @@ func (e *previewResolveError) Write(c *gin.Context) {
 func ResolvePreviewData(deps *core.APIDeps, jobID string, resultID string, req contracts.OrganizePreviewRequest) (*models.Movie, []models.FileMatchInfo, *previewResolveError) {
 	job, ok := deps.GetJobStore().GetBatchJob(jobID)
 	if !ok {
-		return nil, nil, &previewResolveError{Status: http.StatusNotFound, Err: "Job not found"}
+		return nil, nil, &previewResolveError{Status: http.StatusNotFound, Err: jobNotFoundMessage}
 	}
 
 	// Resolve the result by resultID to get the movieID for multi-part lookup

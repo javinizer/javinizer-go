@@ -147,6 +147,7 @@ type applyPhaseInputs struct {
 	// The marker gate must never block when poster output is off.
 	PosterDisabled bool
 	WF             workflow.WorkflowInterface
+	MovieRepo      database.MovieRepositoryInterface
 
 	// Current state snapshot (frozen at construction, not live)
 	Results     map[string]*resultstore.MovieResult
@@ -155,7 +156,12 @@ type applyPhaseInputs struct {
 	Destination string
 	Update      bool // Update mode (in-place, no file organization)
 
-	HistoryRepo     database.HistoryRepositoryInterface
+	HistoryRepo database.HistoryRepositoryInterface
+
+	// CollisionRepo gates organize on unresolved scrape-vs-truth collisions.
+	// nil (tests, scan-only) disables the gate.
+	CollisionRepo database.CreditCollisionRepositoryInterface
+
 	OperationMode   string
 	OrganizeSkipped bool
 	Dedup           *sync.Map

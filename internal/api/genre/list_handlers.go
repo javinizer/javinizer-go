@@ -40,7 +40,7 @@ type genreAddRequest struct {
 func listIgnoredGenres(deps GenreDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if deps.ConfigStore == nil {
-			c.JSON(http.StatusServiceUnavailable, contracts.ErrorResponse{Error: "genre config store is not configured"})
+			c.JSON(http.StatusServiceUnavailable, contracts.ErrorResponse{Error: genreStoreUnavailableMessage})
 			return
 		}
 		genres, err := deps.ConfigStore.GetIgnoreGenres(c.Request.Context())
@@ -67,7 +67,7 @@ func listIgnoredGenres(deps GenreDeps) gin.HandlerFunc {
 func replaceIgnoredGenres(deps GenreDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if deps.ConfigStore == nil {
-			c.JSON(http.StatusServiceUnavailable, contracts.ErrorResponse{Error: "genre config store is not configured"})
+			c.JSON(http.StatusServiceUnavailable, contracts.ErrorResponse{Error: genreStoreUnavailableMessage})
 			return
 		}
 		var req genreListUpdateRequest
@@ -100,7 +100,7 @@ func replaceIgnoredGenres(deps GenreDeps) gin.HandlerFunc {
 func addIgnoredGenre(deps GenreDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if deps.ConfigStore == nil {
-			c.JSON(http.StatusServiceUnavailable, contracts.ErrorResponse{Error: "genre config store is not configured"})
+			c.JSON(http.StatusServiceUnavailable, contracts.ErrorResponse{Error: genreStoreUnavailableMessage})
 			return
 		}
 		var req genreAddRequest
@@ -141,7 +141,7 @@ func addIgnoredGenre(deps GenreDeps) gin.HandlerFunc {
 func deleteIgnoredGenre(deps GenreDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if deps.ConfigStore == nil {
-			c.JSON(http.StatusServiceUnavailable, contracts.ErrorResponse{Error: "genre config store is not configured"})
+			c.JSON(http.StatusServiceUnavailable, contracts.ErrorResponse{Error: genreStoreUnavailableMessage})
 			return
 		}
 		genre := strings.TrimSpace(c.Query("genre"))
@@ -174,7 +174,7 @@ func deleteIgnoredGenre(deps GenreDeps) gin.HandlerFunc {
 func listFavoriteGenres(deps GenreDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if deps.ConfigStore == nil {
-			c.JSON(http.StatusServiceUnavailable, contracts.ErrorResponse{Error: "genre config store is not configured"})
+			c.JSON(http.StatusServiceUnavailable, contracts.ErrorResponse{Error: genreStoreUnavailableMessage})
 			return
 		}
 		genres, err := deps.ConfigStore.GetFavoriteGenres(c.Request.Context())
@@ -201,7 +201,7 @@ func listFavoriteGenres(deps GenreDeps) gin.HandlerFunc {
 func replaceFavoriteGenres(deps GenreDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if deps.ConfigStore == nil {
-			c.JSON(http.StatusServiceUnavailable, contracts.ErrorResponse{Error: "genre config store is not configured"})
+			c.JSON(http.StatusServiceUnavailable, contracts.ErrorResponse{Error: genreStoreUnavailableMessage})
 			return
 		}
 		var req genreListUpdateRequest
@@ -234,7 +234,7 @@ func replaceFavoriteGenres(deps GenreDeps) gin.HandlerFunc {
 func addFavoriteGenre(deps GenreDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if deps.ConfigStore == nil {
-			c.JSON(http.StatusServiceUnavailable, contracts.ErrorResponse{Error: "genre config store is not configured"})
+			c.JSON(http.StatusServiceUnavailable, contracts.ErrorResponse{Error: genreStoreUnavailableMessage})
 			return
 		}
 		var req genreAddRequest
@@ -275,7 +275,7 @@ func addFavoriteGenre(deps GenreDeps) gin.HandlerFunc {
 func deleteFavoriteGenre(deps GenreDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if deps.ConfigStore == nil {
-			c.JSON(http.StatusServiceUnavailable, contracts.ErrorResponse{Error: "genre config store is not configured"})
+			c.JSON(http.StatusServiceUnavailable, contracts.ErrorResponse{Error: genreStoreUnavailableMessage})
 			return
 		}
 		genre := strings.TrimSpace(c.Query("genre"))

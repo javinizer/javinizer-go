@@ -73,6 +73,19 @@ setupTest(
 		const loginJson = await loginResp.json();
 		expect(loginJson.authenticated).toBeTruthy();
 
+		for (const actress of [
+			{ dmm_id: 1, first_name: 'Test', last_name: 'Actor' },
+			{ dmm_id: 2, first_name: 'Asahi', last_name: 'Serina', japanese_name: '朝日芹奈' },
+		]) {
+			const actressResp = await request.post('/api/v1/actresses', { data: actress });
+			expect(
+				actressResp.ok(),
+				`e2e actress fixture failed: ${actressResp.status()} ${await actressResp.text()}`,
+			).toBeTruthy();
+			const actressJson = await actressResp.json();
+			expect(actressJson.verified, 'e2e actress fixture must be verified').toBeTruthy();
+		}
+
 		const setCookieHeader = loginResp.headers()['set-cookie'] ?? '';
 		const cookies = parseSetCookieHeader(
 			setCookieHeader,

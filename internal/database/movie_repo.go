@@ -69,6 +69,11 @@ func (r *MovieRepository) FindByID(ctx context.Context, id string) (*models.Movi
 		}
 		return nil, wrapDBErr("find", fmt.Sprintf("movie by id %s", id), err)
 	}
+	credits, err := NewMovieCreditRepository(r.GetDB()).ListByMovie(ctx, movie.ContentID)
+	if err != nil {
+		return nil, err
+	}
+	movie.Credits = credits
 	return &movie, nil
 }
 
@@ -101,6 +106,13 @@ func (r *MovieRepository) Delete(ctx context.Context, id string) error {
 
 		if movie.ContentID == "" {
 			return nil
+		}
+
+		if err := deleteCreditReassignmentsTx(tx, "movie_content_id = ?", "movie "+movie.ContentID, movie.ContentID); err != nil {
+			return err
+		}
+		if err := deleteCreditRecordsTx(tx, "movie_content_id = ?", "movie_content_id = ?", movie.ContentID, "movie "+movie.ContentID); err != nil {
+			return err
 		}
 
 		stub := &models.Movie{ContentID: movie.ContentID}

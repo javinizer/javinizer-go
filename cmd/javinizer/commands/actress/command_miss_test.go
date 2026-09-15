@@ -602,7 +602,75 @@ func (errorWriterForActress) Write(p []byte) (n int, err error) {
 	return 0, fmt.Errorf("write error")
 }
 
+func TestRunActressImport_PromotesDMMlessCandidate(t *testing.T) {
+	configPath, _ := setupMissTestDB(t)
+	cfg, err := config.Load(configPath)
+	require.NoError(t, err)
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
+	require.NoError(t, err)
+	repo := database.NewActressRepository(db)
+	candidate := &models.Actress{
+		FirstName: "Candidate",
+		LastName:  "Only",
+		Origin:    database.ActressOriginScrape,
+		NameKey:   models.NormalizeActressNameKey("Only Candidate"),
+	}
+	require.NoError(t, repo.Create(context.Background(), candidate))
+	require.NoError(t, db.Close())
+
+	tmpDir := t.TempDir()
+	importPath := filepath.Join(tmpDir, "candidate.json")
+	require.NoError(t, os.WriteFile(importPath, []byte(`[{"id":0,"first_name":"Candidate","last_name":"Only","dmm_id":0}]`), 0644))
+
+	rootCmd := &cobra.Command{Use: "root"}
+	rootCmd.PersistentFlags().String("config", configPath, "config file")
+	rootCmd.AddCommand(NewCommand())
+	rootCmd.SetArgs([]string{"actress", "import", importPath})
+	buf := new(bytes.Buffer)
+	rootCmd.SetOut(buf)
+	require.NoError(t, rootCmd.Execute())
+	assert.Contains(t, buf.String(), "Imported: 1")
+
+	cfg, err = config.Load(configPath)
+	require.NoError(t, err)
+	db, err = database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+	stored, err := database.NewActressRepository(db).FindByID(context.Background(), candidate.ID)
+	require.NoError(t, err)
+	assert.True(t, stored.Verified)
+	assert.Equal(t, database.ActressOriginImport, stored.Origin)
+}
+
 // --- runActressImport with actress having no JapaneseName and ID=0 (line 257-290) ---
+
+func TestImportActressRecords_LookupError(t *testing.T) {
+	db, err := database.New(&database.Config{Type: "sqlite", DSN: ":memory:", LogLevel: "silent"})
+	require.NoError(t, err)
+	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
+	repo := database.NewActressRepository(db)
+	require.NoError(t, db.Close())
+
+	imported, skipped, errorsCount := importActressRecords(context.Background(), repo, []models.Actress{{ID: 1, FirstName: "Broken"}})
+	assert.Zero(t, imported)
+	assert.Zero(t, skipped)
+	assert.Equal(t, 1, errorsCount)
+}
+
+func TestImportActressRecords_MatchesExistingID(t *testing.T) {
+	db, err := database.New(&database.Config{Type: "sqlite", DSN: ":memory:", LogLevel: "silent"})
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
+	repo := database.NewActressRepository(db)
+	existing := &models.Actress{ID: 1, DMMID: 111, FirstName: "Old", JapaneseName: "old"}
+	require.NoError(t, repo.Create(context.Background(), existing))
+
+	imported, skipped, errorsCount := importActressRecords(context.Background(), repo, []models.Actress{{ID: 1, DMMID: 222, FirstName: "New", JapaneseName: "new"}})
+	assert.Equal(t, 1, imported)
+	assert.Zero(t, skipped)
+	assert.Zero(t, errorsCount)
+}
 
 func TestRunActressImport_NoJapaneseNameNoID(t *testing.T) {
 	configPath, _ := setupMissTestDB(t)

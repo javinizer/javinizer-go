@@ -28,7 +28,7 @@ func mapBatchEditError(c *gin.Context, err error) bool {
 	case errors.Is(err, worker.ErrJobNotFound):
 		// Legacy response wording parity (pre-hardening handlers wrote the
 		// constant "Job not found" — UI affixes + tests key off it).
-		c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "Job not found"})
+		c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: jobNotFoundMessage})
 	case errors.Is(err, worker.ErrMovieFamilyEmpty):
 		c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: err.Error()})
 	case errors.Is(err, worker.ErrEditNotAdmitted),

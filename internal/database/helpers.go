@@ -57,9 +57,10 @@ func raceRetryCreate(tx *gorm.DB, entity any, findExisting func(tx *gorm.DB) err
 // preparedMovie holds the results of business-logic preparation before GORM persistence.
 // It carries the genre/actress ID-resolution state needed by persistTranslations.
 type preparedMovie struct {
-	movie               *models.Movie
-	genreTranslations   []models.GenreTranslationData
-	actressTranslations []models.ActressTranslationData
+	movie                 *models.Movie
+	genreTranslations     []models.GenreTranslationData
+	actressTranslations   []models.ActressTranslationData
+	actressTranslationIDs map[int]uint
 }
 
 // prepareMovieForUpsert resolves genre and actress IDs from the database after associations
@@ -175,10 +176,17 @@ func persistTranslations(tx *gorm.DB, db *DB, pm *preparedMovie, translations []
 	if len(pm.actressTranslations) > 0 {
 		actressTranslationRepo := newActressTranslationRepository(db)
 		for _, at := range pm.actressTranslations {
-			if at.ActressIndex < 0 || at.ActressIndex >= len(movie.Actresses) {
+			var actressID uint
+			var ok bool
+			if pm.actressTranslationIDs != nil {
+				actressID, ok = pm.actressTranslationIDs[at.ActressIndex]
+			} else if at.ActressIndex >= 0 && at.ActressIndex < len(movie.Actresses) {
+				actressID = movie.Actresses[at.ActressIndex].ID
+				ok = true
+			}
+			if !ok {
 				continue
 			}
-			actressID := movie.Actresses[at.ActressIndex].ID
 			if actressID == 0 {
 				logging.Debugf("Translation: skipping actress translation for index %d — actress ID not resolved", at.ActressIndex)
 				continue
@@ -202,6 +210,10 @@ func persistTranslations(tx *gorm.DB, db *DB, pm *preparedMovie, translations []
 }
 
 func upsertMovieCore(tx *gorm.DB, db *DB, movie *models.Movie, translations []models.MovieTranslation, genreTranslations []models.GenreTranslationData, actressTranslations []models.ActressTranslationData) error {
+	return upsertMovieCoreWithActressTranslationIDs(tx, db, movie, translations, genreTranslations, actressTranslations, nil)
+}
+
+func upsertMovieCoreWithActressTranslationIDs(tx *gorm.DB, db *DB, movie *models.Movie, translations []models.MovieTranslation, genreTranslations []models.GenreTranslationData, actressTranslations []models.ActressTranslationData, actressTranslationIDs map[int]uint) error {
 	// Step 1: GORM upsert the movie record (without associations)
 	if err := tx.Omit("Actresses", "Genres", "Translations").Save(movie).Error; err != nil {
 		return err
@@ -220,6 +232,7 @@ func upsertMovieCore(tx *gorm.DB, db *DB, movie *models.Movie, translations []mo
 	if err != nil {
 		return err
 	}
+	pm.actressTranslationIDs = actressTranslationIDs
 
 	// Step 4: Persist translations (movie, genre, actress)
 	return persistTranslations(tx, db, pm, translations)

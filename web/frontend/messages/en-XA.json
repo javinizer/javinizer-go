@@ -1361,6 +1361,8 @@
   "settings_nfo_alt_name_role_desc": "[ Üsë åçtrëss åltërñåtë ñåmës íñ <rölë> fíëld ]",
   "settings_nfo_alt_name_role_label": "[ Üsë åltërñåtë ñåmë för rölë ]",
   "settings_nfo_basic_subsection": "[ Båsíç ÑFÖ Öptíöñs ]",
+  "settings_nfo_credited_name_desc": "[ Üsë ëåçh mövíë's çrëdítëd åçtrëss ñåmë íñstëåd öf thë çåñöñíçål dåtåbåšë ñåmë ]",
+  "settings_nfo_credited_name_label": "[ Üsë çrëdítëd ñåmë ]",
   "settings_nfo_credits_desc": "[ Çrëdíts tö íñçlüdë íñ ÑFÖ (çömmå-sëpåråtëd) ]",
   "settings_nfo_credits_label": "[ Çrëdíts ]",
   "settings_nfo_credits_placeholder": "[ Dírëçtör Ñåmë, Štüdíö Ñåmë ]",

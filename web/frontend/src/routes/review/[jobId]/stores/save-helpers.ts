@@ -1,4 +1,26 @@
-import type { Movie } from '$lib/api/types';
+import type { BatchJobResponse, Movie } from '$lib/api/types';
+
+export function mergePersistedMovieIntoBatchJob(
+	job: BatchJobResponse,
+	lookupKeys: readonly string[],
+	persistedMovie: Movie,
+): BatchJobResponse {
+	const normalizedKeys = new Set(lookupKeys.map((key) => key.trim().toLowerCase()).filter(Boolean));
+	for (const result of Object.values(job.results ?? {})) {
+		const resultKeys = [
+			result.movie_id,
+			result.movie?.id,
+			result.movie?.code,
+			result.movie?.content_id,
+		];
+		if (
+			resultKeys.some((key) => key !== undefined && normalizedKeys.has(key.trim().toLowerCase()))
+		) {
+			result.movie = JSON.parse(JSON.stringify(persistedMovie)) as Movie;
+		}
+	}
+	return job;
+}
 
 export function buildMovieToSave(movie: Movie): Movie {
 	return { ...movie };

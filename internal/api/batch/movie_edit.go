@@ -215,7 +215,7 @@ func excludeBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 
 		logging.Infof("Movie %s (%d file(s)) excluded from batch job %s", movieID, len(filePaths), jobID)
 
-		c.JSON(http.StatusOK, gin.H{"message": "Movie excluded from organization"})
+		c.JSON(http.StatusOK, gin.H{messageResponseKey: "Movie excluded from organization"})
 	}
 }
 

@@ -610,6 +610,33 @@ func TestImportActresses(t *testing.T) {
 	assert.Equal(t, 0, summary.Errors)
 }
 
+func TestImportActresses_PromotesDMMlessCandidate(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	repo := newMockActressRepo()
+	candidate := &models.Actress{
+		FirstName: "Candidate",
+		LastName:  "Only",
+		Origin:    database.ActressOriginScrape,
+		NameKey:   models.NormalizeActressNameKey("Only Candidate"),
+	}
+	require.NoError(t, repo.Create(context.Background(), candidate))
+
+	router := gin.New()
+	router.POST("/actresses/import", importActresses(ActressDeps{ContentRepos: database.ContentRepos{ActressRepo: repo}}))
+	body := bytes.NewBufferString(`{"actresses":[{"first_name":"Candidate","last_name":"Only"}]}`)
+	req := httptest.NewRequest("POST", "/actresses/import", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	stored, err := repo.FindByID(context.Background(), candidate.ID)
+	require.NoError(t, err)
+	assert.True(t, stored.Verified)
+	assert.Equal(t, database.ActressOriginImport, stored.Origin)
+}
+
 func TestImportActresses_InvalidJSON(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

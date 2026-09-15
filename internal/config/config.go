@@ -436,7 +436,7 @@ func ValidateConfig(cfg *Config) error {
 	referer := strings.TrimSpace(cfg.Scrapers.Referer)
 	if referer == "" {
 		// Backward compatibility with old configs that omitted referer.
-		referer = "https://www.dmm.co.jp/"
+		referer = dmmBaseURL
 	}
 	u, err := url.Parse(referer)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {

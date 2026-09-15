@@ -515,6 +515,7 @@ func newCLIBatchRuntime(bs *bootstrapResult, cfg *config.Config, opts BatchComma
 	var initialPersistErr error
 	storeOpts := []worker.JobStoreOption{
 		worker.WithHistoryRepo(repos.HistoryRepo),
+		worker.WithCollisionRepo(repos.CreditCollisionRepo),
 		worker.WithSkipStartupRecovery(),
 		worker.WithInitialPersistErrorReporter(func(err error) { initialPersistErr = err }),
 	}
@@ -653,7 +654,7 @@ func cliBatchPostApply(emitter eventlog.EventEmitter, w io.Writer, jobID string,
 			// truthful evidence regardless of whether the apply was completed,
 			// failed, or canceled.
 			if !errors.Is(afr.Err, context.Canceled) {
-				failCtx := map[string]any{"job_id": jobID, "movie_id": afc.Movie.ID, "error": afr.Err.Error()}
+				failCtx := map[string]any{jobIDKey: jobID, movieIDKey: afc.Movie.ID, "error": afr.Err.Error()}
 				if len(warnings) > 0 {
 					// The failed lane's crumbs ride the failure event's context
 					// too — the eventlog consumer sees the displacement disclosure
@@ -663,7 +664,7 @@ func cliBatchPostApply(emitter eventlog.EventEmitter, w io.Writer, jobID string,
 				emit(source, fmt.Sprintf("%s for %s", failureVerb, afc.Movie.ID), models.SeverityError, failCtx)
 			}
 			for _, warning := range warnings {
-				warnCtx := map[string]any{"job_id": jobID, "movie_id": afc.Movie.ID, "file": afc.FilePath, "warning": warning, "error": afr.Err.Error()}
+				warnCtx := map[string]any{jobIDKey: jobID, movieIDKey: afc.Movie.ID, "file": afc.FilePath, "warning": warning, "error": afr.Err.Error()}
 				emit(source, fmt.Sprintf("%s for %s: %s", warningVerb, afc.Movie.ID, warning), models.SeverityWarn, warnCtx)
 			}
 			return
@@ -672,13 +673,13 @@ func cliBatchPostApply(emitter eventlog.EventEmitter, w io.Writer, jobID string,
 		if afr.Result != nil && afr.Result.OrganizeResult != nil {
 			newPath = afr.Result.OrganizeResult.NewPath
 		}
-		eventCtx := map[string]any{"job_id": jobID, "movie_id": afc.Movie.ID, "file": afc.FilePath}
+		eventCtx := map[string]any{jobIDKey: jobID, movieIDKey: afc.Movie.ID, "file": afc.FilePath}
 		if !updateMode {
 			eventCtx["new_path"] = newPath
 		}
 		emit(source, fmt.Sprintf("%s %s", successVerb, afc.Movie.ID), models.SeverityInfo, eventCtx)
 		for _, warning := range warnings {
-			warnCtx := map[string]any{"job_id": jobID, "movie_id": afc.Movie.ID, "file": afc.FilePath, "warning": warning}
+			warnCtx := map[string]any{jobIDKey: jobID, movieIDKey: afc.Movie.ID, "file": afc.FilePath, "warning": warning}
 			if !updateMode {
 				warnCtx["new_path"] = newPath
 			}

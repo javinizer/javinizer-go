@@ -19,7 +19,7 @@ func writeActressMergeError(c *gin.Context, err error) {
 		errors.Is(err, database.ErrActressMergeInvalidDecision):
 		c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
 	case database.IsNotFound(err):
-		c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "actress not found"})
+		c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: actressNotFoundMessage})
 	case errors.Is(err, database.ErrActressMergeUniqueConstraint):
 		c.JSON(http.StatusConflict, contracts.ErrorResponse{Error: err.Error()})
 	default:

@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import type { Movie } from '$lib/api/types';
-import { buildMovieToSave, buildMovieOverride, rebaseOverlayOntoMovie } from './save-helpers';
+import type { BatchJobResponse, Movie } from '$lib/api/types';
+import {
+	buildMovieToSave,
+	buildMovieOverride,
+	mergePersistedMovieIntoBatchJob,
+	rebaseOverlayOntoMovie,
+} from './save-helpers';
 
 function makeMovie(overrides: Partial<Movie> = {}): Movie {
 	return {
@@ -32,6 +37,30 @@ describe('buildMovieToSave / buildMovieOverride', () => {
 	});
 });
 
+describe('mergePersistedMovieIntoBatchJob', () => {
+	it('replaces every matching family result with independent persisted movies', () => {
+		const stale = makeMovie({ id: 'MOV-1', actresses: [{ id: 1 }] });
+		const otherMovie = makeMovie({ id: 'MOV-2' });
+		const job = {
+			results: {
+				first: { movie_id: 'mov-1', movie: stale },
+				second: { movie_id: 'MOV-1', movie: makeMovie({ id: 'MOV-1' }) },
+				other: { movie_id: 'MOV-2', movie: otherMovie },
+			},
+		} as unknown as BatchJobResponse;
+		const persisted = makeMovie({ id: 'MOV-1', actresses: [{ id: 2 }] });
+
+		const refreshed = mergePersistedMovieIntoBatchJob(job, [' MOV-1 '], persisted);
+
+		expect(refreshed).toBe(job);
+		expect(job.results.first.movie?.actresses?.[0].id).toBe(2);
+		expect(job.results.second.movie?.actresses?.[0].id).toBe(2);
+		expect(job.results.first.movie).not.toBe(job.results.second.movie);
+		expect(job.results.other.movie).toBe(otherMovie);
+		expect(job.results.other.movie?.id).toBe('MOV-2');
+	});
+});
+
 describe('rebaseOverlayOntoMovie (codex P1)', () => {
 	it('untouched fields follow the fresh server value', () => {
 		const baseline = makeMovie();
@@ -51,9 +80,18 @@ describe('rebaseOverlayOntoMovie (codex P1)', () => {
 	});
 
 	it('array/nested user edits survive; untouched nested fields follow fresh', () => {
-		const baseline = makeMovie({ actresses: [{ first_name: 'A' }] as never, poster_url: 'https://orig/p.jpg' });
-		const overlay = makeMovie({ actresses: [{ first_name: 'B' }] as never, poster_url: 'https://orig/p.jpg' });
-		const fresh = makeMovie({ actresses: [{ first_name: 'A' }] as never, poster_url: 'https://server/p.jpg' });
+		const baseline = makeMovie({
+			actresses: [{ first_name: 'A' }] as never,
+			poster_url: 'https://orig/p.jpg',
+		});
+		const overlay = makeMovie({
+			actresses: [{ first_name: 'B' }] as never,
+			poster_url: 'https://orig/p.jpg',
+		});
+		const fresh = makeMovie({
+			actresses: [{ first_name: 'A' }] as never,
+			poster_url: 'https://server/p.jpg',
+		});
 		const out = rebaseOverlayOntoMovie(baseline, overlay, fresh);
 		expect((out.actresses as Array<{ first_name: string }>)[0].first_name).toBe('B');
 		expect(out.poster_url).toBe('https://server/p.jpg');

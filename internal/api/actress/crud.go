@@ -190,7 +190,7 @@ func getActress(deps ActressDeps) gin.HandlerFunc {
 		actress, err := deps.ActressRepo.FindByID(c.Request.Context(), id)
 		if err != nil {
 			if database.IsNotFound(err) {
-				c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "actress not found"})
+				c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: actressNotFoundMessage})
 				return
 			}
 			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
@@ -277,7 +277,7 @@ func updateActress(deps ActressDeps) gin.HandlerFunc {
 		existing, err := deps.ActressRepo.FindByID(c.Request.Context(), id)
 		if err != nil {
 			if database.IsNotFound(err) {
-				c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "actress not found"})
+				c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: actressNotFoundMessage})
 				return
 			}
 			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
@@ -347,7 +347,7 @@ func deleteActress(deps ActressDeps) gin.HandlerFunc {
 		existing, err := deps.ActressRepo.FindByID(c.Request.Context(), id)
 		if err != nil {
 			if database.IsNotFound(err) {
-				c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "actress not found"})
+				c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: actressNotFoundMessage})
 				return
 			}
 			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
@@ -431,6 +431,16 @@ func exportActresses(deps ActressDeps) gin.HandlerFunc {
 	}
 }
 
+func sameImportedActress(existing, incoming *models.Actress) bool {
+	return existing != nil && incoming != nil &&
+		existing.DMMID == incoming.DMMID &&
+		existing.FirstName == incoming.FirstName &&
+		existing.LastName == incoming.LastName &&
+		existing.JapaneseName == incoming.JapaneseName &&
+		existing.ThumbURL == incoming.ThumbURL &&
+		existing.Aliases == incoming.Aliases
+}
+
 func importActresses(deps ActressDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 10<<20)
@@ -461,46 +471,30 @@ func importActresses(deps ActressDeps) gin.HandlerFunc {
 				continue
 			}
 
+			incoming := &models.Actress{
+				DMMID:        item.DMMID,
+				FirstName:    firstName,
+				LastName:     lastName,
+				JapaneseName: japaneseName,
+				ThumbURL:     thumbURL,
+				Aliases:      aliases,
+			}
 			existing, err := repo.FindByJapaneseNameAndDMMID(c.Request.Context(), japaneseName, item.DMMID)
 			if err != nil && !database.IsNotFound(err) && !errors.Is(err, database.ErrInvalidLookup) {
 				errorsCount++
 				continue
 			}
+			unchanged := existing != nil && sameImportedActress(existing, incoming)
 
-			if existing == nil {
-				actress := &models.Actress{
-					DMMID:        item.DMMID,
-					FirstName:    firstName,
-					LastName:     lastName,
-					JapaneseName: japaneseName,
-					ThumbURL:     thumbURL,
-					Aliases:      aliases,
-				}
-				if err := repo.Create(c.Request.Context(), actress); err != nil {
-					errorsCount++
-					continue
-				}
-				imported++
+			if err := repo.ImportUpsert(c.Request.Context(), incoming); err != nil {
+				errorsCount++
+				continue
+			}
+			if unchanged && existing.Verified &&
+				(existing.Origin == database.ActressOriginUser || existing.Origin == database.ActressOriginImport) {
+				skipped++
 			} else {
-				changed := existing.FirstName != firstName ||
-					existing.LastName != lastName ||
-					existing.ThumbURL != thumbURL ||
-					existing.Aliases != aliases
-
-				if changed {
-					existing.FirstName = firstName
-					existing.LastName = lastName
-					existing.ThumbURL = thumbURL
-					existing.Aliases = aliases
-
-					if err := repo.Update(c.Request.Context(), existing); err != nil {
-						errorsCount++
-						continue
-					}
-					imported++
-				} else {
-					skipped++
-				}
+				imported++
 			}
 		}
 

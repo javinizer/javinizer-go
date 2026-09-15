@@ -2024,6 +2024,8 @@
   "settings_nfo_alt_name_role_desc": "在 <role> 字段中使用女优的备用名称",
   "settings_nfo_alt_name_role_label": "角色使用备用名称",
   "settings_nfo_basic_subsection": "基本 NFO 选项",
+  "settings_nfo_credited_name_desc": "使用每部影片的演职员姓名，而不是数据库中的规范姓名",
+  "settings_nfo_credited_name_label": "使用演职员姓名",
   "settings_nfo_credits_desc": "要包含在 NFO 中的演职人员（逗号分隔）",
   "settings_nfo_credits_label": "演职人员",
   "settings_nfo_credits_placeholder": "导演名，厂商名",

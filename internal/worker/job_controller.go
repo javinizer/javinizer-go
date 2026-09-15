@@ -481,6 +481,7 @@ func (c *jobController) buildApplyInputs(wf workflow.WorkflowInterface, batchCfg
 	upd := c.job.cfg.update
 	opMode := string(c.job.cfg.operationMode)
 	histRepo := c.job.deps.HistoryRepo
+	movieRepo := c.job.deps.MovieRepo
 	c.job.mu.RUnlock()
 	if opMode == "" {
 		opMode = "organize"
@@ -500,6 +501,8 @@ func (c *jobController) buildApplyInputs(wf workflow.WorkflowInterface, batchCfg
 		Destination:      cfg.Destination,
 		Update:           upd,
 		HistoryRepo:      histRepo,
+		MovieRepo:        movieRepo,
+		CollisionRepo:    c.job.deps.CollisionRepo,
 		OperationMode:    opMode,
 		OrganizeSkipped:  cfg.OrganizeOptions.Skip,
 		Broadcaster:      broadcaster,

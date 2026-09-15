@@ -34,10 +34,10 @@ func revertCheck(deps JobDeps) gin.HandlerFunc {
 		job, err := deps.JobRepo.FindByID(c.Request.Context(), jobID)
 		if err != nil {
 			if database.IsNotFound(err) {
-				c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "Job not found", Code: "JOB_NOT_FOUND", Params: map[string]any{"job_id": jobID}})
+				c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: jobNotFoundMessage, Code: jobNotFoundCode, Params: map[string]any{jobIDKey: jobID}})
 				return
 			}
-			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: "Failed to retrieve job"})
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: retrieveJobErrorMessage})
 			return
 		}
 

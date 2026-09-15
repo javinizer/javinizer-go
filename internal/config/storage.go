@@ -82,7 +82,7 @@ var staticScraperKeys = map[string]bool{
 	"referer":                 true,
 	"timeout_seconds":         true,
 	"request_timeout_seconds": true,
-	"priority":                true,
+	priorityKey:               true,
 	"flaresolverr":            true,
 	"scrape_actress":          true,
 	"browser":                 true,

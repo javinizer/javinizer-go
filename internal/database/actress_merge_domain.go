@@ -15,14 +15,14 @@ var (
 )
 
 // mergeFieldDecision validates and normalizes a merge field decision.
-// Returns "target" or "source" based on the decision string.
 // Empty/whitespace or "target" returns "target", "source" returns "source".
+// Empty/whitespace or "target" returns "target", colSource returns colSource.
 func mergeFieldDecision(decision string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(decision)) {
 	case "", "target":
 		return "target", nil
-	case "source":
-		return "source", nil
+	case colSource:
+		return colSource, nil
 	default:
 		return "", fmt.Errorf("%w: %s", ErrActressMergeInvalidDecision, decision)
 	}
@@ -33,10 +33,10 @@ func mergeFieldDecision(decision string) (string, error) {
 func normalizeMergeResolutions(resolutions map[string]string) (map[string]string, error) {
 	normalized := make(map[string]string)
 	allowed := map[string]bool{
-		"dmm_id":        true,
-		"first_name":    true,
-		"last_name":     true,
-		"japanese_name": true,
+		colDMMID:        true,
+		colFirstName:    true,
+		colLastName:     true,
+		colJapaneseName: true,
 		"thumb_url":     true,
 	}
 
@@ -77,16 +77,16 @@ func buildActressMergeConflicts(target, source *models.Actress) []ActressMergeCo
 	conflicts := make([]ActressMergeConflict, 0)
 
 	if target.DMMID > 0 && source.DMMID > 0 && target.DMMID != source.DMMID {
-		conflicts = appendConflict(conflicts, "dmm_id", target.DMMID, source.DMMID)
+		conflicts = appendConflict(conflicts, colDMMID, target.DMMID, source.DMMID)
 	}
 	if nonEmptyString(target.FirstName) && nonEmptyString(source.FirstName) && target.FirstName != source.FirstName {
-		conflicts = appendConflict(conflicts, "first_name", target.FirstName, source.FirstName)
+		conflicts = appendConflict(conflicts, colFirstName, target.FirstName, source.FirstName)
 	}
 	if nonEmptyString(target.LastName) && nonEmptyString(source.LastName) && target.LastName != source.LastName {
-		conflicts = appendConflict(conflicts, "last_name", target.LastName, source.LastName)
+		conflicts = appendConflict(conflicts, colLastName, target.LastName, source.LastName)
 	}
 	if nonEmptyString(target.JapaneseName) && nonEmptyString(source.JapaneseName) && target.JapaneseName != source.JapaneseName {
-		conflicts = appendConflict(conflicts, "japanese_name", target.JapaneseName, source.JapaneseName)
+		conflicts = appendConflict(conflicts, colJapaneseName, target.JapaneseName, source.JapaneseName)
 	}
 	if nonEmptyString(target.ThumbURL) && nonEmptyString(source.ThumbURL) && target.ThumbURL != source.ThumbURL {
 		conflicts = appendConflict(conflicts, "thumb_url", target.ThumbURL, source.ThumbURL)
@@ -235,7 +235,7 @@ func mergeActressValues(target, source *models.Actress, resolutions map[string]s
 		return decision, nil
 	}
 
-	decision, err := getDecision("dmm_id")
+	decision, err := getDecision(colDMMID)
 	if err != nil {
 		return models.Actress{}, err
 	}
@@ -243,12 +243,12 @@ func mergeActressValues(target, source *models.Actress, resolutions map[string]s
 	case target.DMMID == 0 && source.DMMID > 0:
 		merged.DMMID = source.DMMID
 	case target.DMMID > 0 && source.DMMID > 0 && target.DMMID != source.DMMID:
-		if decision == "source" {
+		if decision == colSource {
 			merged.DMMID = source.DMMID
 		}
 	}
 
-	decision, err = getDecision("first_name")
+	decision, err = getDecision(colFirstName)
 	if err != nil {
 		return models.Actress{}, err
 	}
@@ -256,12 +256,12 @@ func mergeActressValues(target, source *models.Actress, resolutions map[string]s
 	case !nonEmptyString(target.FirstName) && nonEmptyString(source.FirstName):
 		merged.FirstName = strings.TrimSpace(source.FirstName)
 	case nonEmptyString(target.FirstName) && nonEmptyString(source.FirstName) && target.FirstName != source.FirstName:
-		if decision == "source" {
+		if decision == colSource {
 			merged.FirstName = strings.TrimSpace(source.FirstName)
 		}
 	}
 
-	decision, err = getDecision("last_name")
+	decision, err = getDecision(colLastName)
 	if err != nil {
 		return models.Actress{}, err
 	}
@@ -269,12 +269,12 @@ func mergeActressValues(target, source *models.Actress, resolutions map[string]s
 	case !nonEmptyString(target.LastName) && nonEmptyString(source.LastName):
 		merged.LastName = strings.TrimSpace(source.LastName)
 	case nonEmptyString(target.LastName) && nonEmptyString(source.LastName) && target.LastName != source.LastName:
-		if decision == "source" {
+		if decision == colSource {
 			merged.LastName = strings.TrimSpace(source.LastName)
 		}
 	}
 
-	decision, err = getDecision("japanese_name")
+	decision, err = getDecision(colJapaneseName)
 	if err != nil {
 		return models.Actress{}, err
 	}
@@ -282,7 +282,7 @@ func mergeActressValues(target, source *models.Actress, resolutions map[string]s
 	case !nonEmptyString(target.JapaneseName) && nonEmptyString(source.JapaneseName):
 		merged.JapaneseName = strings.TrimSpace(source.JapaneseName)
 	case nonEmptyString(target.JapaneseName) && nonEmptyString(source.JapaneseName) && target.JapaneseName != source.JapaneseName:
-		if decision == "source" {
+		if decision == colSource {
 			merged.JapaneseName = strings.TrimSpace(source.JapaneseName)
 		}
 	}
@@ -295,7 +295,7 @@ func mergeActressValues(target, source *models.Actress, resolutions map[string]s
 	case !nonEmptyString(target.ThumbURL) && nonEmptyString(source.ThumbURL):
 		merged.ThumbURL = strings.TrimSpace(source.ThumbURL)
 	case nonEmptyString(target.ThumbURL) && nonEmptyString(source.ThumbURL) && target.ThumbURL != source.ThumbURL:
-		if decision == "source" {
+		if decision == colSource {
 			merged.ThumbURL = strings.TrimSpace(source.ThumbURL)
 		}
 	}

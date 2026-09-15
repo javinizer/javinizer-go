@@ -40,6 +40,11 @@ func (u *MovieUpserter) UpsertWithTranslations(ctx context.Context, movie *model
 	copy(savedGenres, movie.Genres)
 	savedContentID := movie.ContentID
 	savedCreatedAt := movie.CreatedAt
+	var savedCredits []models.MovieCredit
+	if movie.Credits != nil {
+		savedCredits = make([]models.MovieCredit, len(movie.Credits))
+		copy(savedCredits, movie.Credits)
+	}
 	err := retryOnLocked(func() error {
 		movie.Translations = make([]models.MovieTranslation, len(savedTranslations))
 		copy(movie.Translations, savedTranslations)
@@ -49,6 +54,15 @@ func (u *MovieUpserter) UpsertWithTranslations(ctx context.Context, movie *model
 		copy(movie.Genres, savedGenres)
 		movie.ContentID = savedContentID
 		movie.CreatedAt = savedCreatedAt
+		if savedCredits != nil {
+			movie.Credits = make([]models.MovieCredit, len(savedCredits))
+			copy(movie.Credits, savedCredits)
+			for i := range movie.Credits {
+				movie.Credits[i].ID = 0
+			}
+		} else {
+			movie.Credits = nil
+		}
 		return u.repo.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 			// Step 1: Resolve ContentID
 			if err := u.resolveContentID(tx, movie); err != nil {
@@ -64,9 +78,6 @@ func (u *MovieUpserter) UpsertWithTranslations(ctx context.Context, movie *model
 				if err := u.insertOrHandleDuplicateTx(tx, movie, &result); err != nil {
 					return err
 				}
-				if result != nil {
-					return nil // duplicate-key path already loaded result
-				}
 			}
 
 			// Step 3: Upsert genres (ensure genre records exist before association)
@@ -74,14 +85,28 @@ func (u *MovieUpserter) UpsertWithTranslations(ctx context.Context, movie *model
 				return err
 			}
 
-			// Step 4: Upsert actresses (ensure actress records exist before association)
-			if err := u.upsertActressesTx(tx, movie); err != nil {
+			// Step 4: Upsert actresses — credit pipeline when credits are present,
+			// legacy ensure-exist path otherwise.
+			if movie.Credits != nil {
+				if err := u.persistCreditsTx(tx, movie); err != nil {
+					return err
+				}
+			} else if err := u.upsertActressesTx(tx, movie); err != nil {
 				return err
 			}
 
 			// Step 5: Upsert translations (core movie record + translations)
-			if err := u.upsertTranslationsTx(tx, movie, savedTranslations, genreTranslations, actressTranslations); err != nil {
+			var actressTranslationIDs map[int]uint
+			if !movie.SkipCreditReconcile {
+				actressTranslationIDs = actressTranslationIDsForCredits(savedActresses, movie.Credits)
+			}
+			if err := u.upsertTranslationsTx(tx, movie, savedTranslations, genreTranslations, actressTranslations, actressTranslationIDs); err != nil {
 				return err
+			}
+			if movie.Credits == nil {
+				if err := u.reconcileLegacyActressEditsTx(tx, movie); err != nil {
+					return err
+				}
 			}
 
 			// Step 6: Reload with associations
@@ -89,6 +114,7 @@ func (u *MovieUpserter) UpsertWithTranslations(ctx context.Context, movie *model
 			if err := tx.Preload("Actresses").Preload("Genres").Preload("Translations", func(db *gorm.DB) *gorm.DB { return db.Order("language ASC") }).First(&loaded, "content_id = ?", movie.ContentID).Error; err != nil {
 				return wrapDBErr("reload", fmt.Sprintf("movie %s", movie.ContentID), err)
 			}
+			loadCreditsIntoTx(tx, &loaded)
 			result = &loaded
 			return nil
 		})
@@ -98,6 +124,17 @@ func (u *MovieUpserter) UpsertWithTranslations(ctx context.Context, movie *model
 
 // resolveContentID ensures the movie has a ContentID set. If empty, it derives
 // one from the movie ID. Returns an error if neither ContentID nor ID is set.
+
+func loadCreditsIntoTx(tx *gorm.DB, m *models.Movie) {
+	if m == nil {
+		return
+	}
+	var credits []models.MovieCredit
+	if err := tx.Preload("Actress").Where("movie_content_id = ?", m.ContentID).Order("order_index ASC, id ASC").Find(&credits).Error; err == nil {
+		m.Credits = credits
+	}
+}
+
 func (u *MovieUpserter) resolveContentID(_ *gorm.DB, movie *models.Movie) error {
 	if strings.TrimSpace(movie.ContentID) == "" {
 		if strings.TrimSpace(movie.ID) == "" {
@@ -191,14 +228,81 @@ func (u *MovieUpserter) upsertActressesTx(tx *gorm.DB, movie *models.Movie) erro
 	return nil
 }
 
+func (u *MovieUpserter) reconcileLegacyActressEditsTx(tx *gorm.DB, movie *models.Movie) error {
+	creditRepo := NewMovieCreditRepository(u.repo.GetDB())
+	existing, err := creditRepo.ListByMovieTx(tx, movie.ContentID)
+	if err != nil {
+		return err
+	}
+	existingByActress := make(map[uint]models.MovieCredit, len(existing))
+	for _, credit := range existing {
+		existingByActress[credit.ActressID] = credit
+	}
+	incoming := make(map[uint]bool, len(movie.Actresses))
+	for i := range movie.Actresses {
+		actress := &movie.Actresses[i]
+		incoming[actress.ID] = true
+		if credit, ok := existingByActress[actress.ID]; ok {
+			if credit.Suppressed {
+				if err := setCreditSuppressedTx(tx, credit.ID, false); err != nil {
+					return err
+				}
+			}
+			continue
+		}
+		credit := &models.MovieCredit{
+			MovieContentID:       movie.ContentID,
+			ActressID:            actress.ID,
+			CreditedName:         actress.FullName(),
+			CreditedJapaneseName: actress.JapaneseName,
+			ReportedThumbURL:     actress.ThumbURL,
+			Origin:               string(models.CreditOriginUser),
+			OrderIndex:           i,
+			OrderPinned:          true,
+		}
+		if err := creditRepo.UpsertTx(tx, credit); err != nil {
+			return err
+		}
+		if err := tx.Exec(
+			"UPDATE movies SET render_dirty = 1, render_generation = render_generation + 1, updated_at = CURRENT_TIMESTAMP WHERE content_id = ?",
+			movie.ContentID,
+		).Error; err != nil {
+			return err
+		}
+	}
+	for _, credit := range existing {
+		if !incoming[credit.ActressID] && !credit.Suppressed {
+			if err := setCreditSuppressedTx(tx, credit.ID, true); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // upsertTranslationsTx saves the core movie record (without translation slice)
 // and persists all translations (movie, genre, actress).
-func (u *MovieUpserter) upsertTranslationsTx(tx *gorm.DB, movie *models.Movie, translations []models.MovieTranslation, genreTranslations []models.GenreTranslationData, actressTranslations []models.ActressTranslationData) error {
+func (u *MovieUpserter) upsertTranslationsTx(tx *gorm.DB, movie *models.Movie, translations []models.MovieTranslation, genreTranslations []models.GenreTranslationData, actressTranslations []models.ActressTranslationData, actressTranslationIDs map[int]uint) error {
 	movie.Translations = nil
-	if err := upsertMovieCore(tx, u.repo.GetDB(), movie, translations, genreTranslations, actressTranslations); err != nil {
+	if err := upsertMovieCoreWithActressTranslationIDs(tx, u.repo.GetDB(), movie, translations, genreTranslations, actressTranslations, actressTranslationIDs); err != nil {
 		return wrapDBErr("save", fmt.Sprintf("movie %s", movie.ContentID), err)
 	}
 	return nil
+}
+
+func actressTranslationIDsForCredits(actresses []models.Actress, credits []models.MovieCredit) map[int]uint {
+	limit := len(actresses)
+	if len(credits) < limit {
+		limit = len(credits)
+	}
+	if limit == 0 {
+		return nil
+	}
+	ids := make(map[int]uint, limit)
+	for i := 0; i < limit; i++ {
+		ids[i] = credits[i].ActressID
+	}
+	return ids
 }
 
 func (u *MovieUpserter) saveMovieWithAssociations(tx *gorm.DB, movie *models.Movie) error {
@@ -307,6 +411,10 @@ func (u *MovieUpserter) resolveActressGroup(tx *gorm.DB, actresses []models.Actr
 			}
 			actresses[g.index] = existing
 		} else {
+			if g.act.Origin == "" {
+				g.act.Verified = true
+				g.act.Origin = ActressOriginUser
+			}
 			// A missing ID-keyed entry (idGroup) references a stale/deleted primary
 			// key; create a genuinely new record with an auto-assigned id instead of
 			// re-inserting with the stale PK (which could resurrect the row or merge
@@ -446,5 +554,306 @@ func (u *MovieUpserter) ensureActressesExistTx(tx *gorm.DB, actresses []models.A
 		}
 	}
 
+	return nil
+}
+
+func (u *MovieUpserter) persistCreditsTx(tx *gorm.DB, movie *models.Movie) error {
+	if movie.SkipCreditReconcile {
+		return nil
+	}
+	policy := NormalizeCollisionPolicy(movie.CreditPolicy)
+	trusted := make(map[string]bool, len(movie.TrustedCollisionSources))
+	for _, s := range movie.TrustedCollisionSources {
+		trusted[strings.TrimSpace(s)] = true
+	}
+	creditRepo := &MovieCreditRepository{BaseRepository: NewBaseRepository[models.MovieCredit, uint](
+		u.repo.GetDB(), "movie credit",
+		movieCreditLabel,
+	)}
+	collisionRepo := &CreditCollisionRepository{BaseRepository: NewBaseRepository[models.CreditCollision, uint](
+		u.repo.GetDB(), "credit collision",
+		creditCollisionLabel,
+	)}
+	aliasRepo := NewActressAliasRepository(u.repo.GetDB())
+
+	existing, err := creditRepo.ListByMovieTx(tx, movie.ContentID)
+	if err != nil {
+		return err
+	}
+	openCollisions, err := collisionRepo.ListOpenByMovieTx(tx, movie.ContentID)
+	if err != nil {
+		return err
+	}
+	reassignments, err := loadCreditReassignmentsTx(tx, movie.ContentID)
+	if err != nil {
+		return err
+	}
+	existingByActress := make(map[uint]models.MovieCredit, len(existing))
+	for _, ex := range existing {
+		existingByActress[ex.ActressID] = ex
+	}
+
+	seen := make(map[uint]bool, len(movie.Credits))
+	order := 0
+	for i := range movie.Credits {
+		credit := &movie.Credits[i]
+		credit.MovieContentID = movie.ContentID
+		if ex, ok := existingByActress[credit.ActressID]; ok && ex.OrderPinned {
+			credit.OrderIndex = ex.OrderIndex
+		} else {
+			credit.OrderIndex = order
+		}
+		order++
+
+		scraped := credit.Scraped
+		if scraped.JapaneseName == "" && scraped.FirstName == "" && scraped.LastName == "" && scraped.DMMID == 0 {
+			if credit.Actress != nil {
+				scraped = *credit.Actress
+			} else {
+				scraped = models.Actress{
+					DMMID:        resolvedDMMIDFromCredit(credit),
+					FirstName:    scrapedFirstName(credit),
+					LastName:     scrapedLastName(credit),
+					JapaneseName: credit.CreditedJapaneseName,
+				}
+			}
+		}
+
+		resolved, outcome, err := ResolveActressIdentityTx(tx, &scraped)
+		if err != nil {
+			return err
+		}
+		sourceActressID := resolved.ID
+		if targetActressID, ok := reassignments[sourceActressID]; ok && targetActressID != sourceActressID {
+			var target models.Actress
+			if err := tx.Where("id = ? AND verified = ?", targetActressID, true).First(&target).Error; err != nil {
+				return err
+			}
+			resolved = &target
+			outcome = ResolutionMatched
+		}
+		credit.ActressID = resolved.ID
+		if ex, ok := existingByActress[credit.ActressID]; ok && ex.OrderPinned {
+			credit.OrderIndex = ex.OrderIndex
+		}
+		if err := creditRepo.UpsertTx(tx, credit); err != nil {
+			return err
+		}
+		seen[resolved.ID] = true
+
+		if credit.Suppressed {
+			continue
+		}
+
+		identityReported := ""
+		if outcome == ResolutionAmbiguous {
+			identityReported = scraped.FullName()
+		}
+		if err := collisionRepo.resolveSupersededOpenTx(tx, credit.ID, models.CreditFieldIdentityLink, identityReported); err != nil {
+			return err
+		}
+		if outcome == ResolutionAmbiguous {
+			collision := &models.CreditCollision{
+				CreditID:       credit.ID,
+				MovieContentID: movie.ContentID,
+				Field:          models.CreditFieldIdentityLink,
+				ReportedValue:  scraped.FullName(),
+				CanonicalValue: resolved.FullName(),
+			}
+			if err := collisionRepo.RecordTx(tx, collision, credit.Source); err != nil {
+				return err
+			}
+			continue
+		}
+
+		if resolved.Verified {
+			if err := u.recordFieldCollisionsTx(tx, collisionRepo, aliasRepo, credit, resolved, policy, trusted); err != nil {
+				return err
+			}
+		}
+	}
+
+	for _, ex := range existing {
+		if seen[ex.ActressID] {
+			continue
+		}
+		if ex.EffectiveOrigin() == string(models.CreditOriginUser) || ex.UserOverride || ex.Suppressed || ex.LegacyInferred {
+			continue
+		}
+		pinned := false
+		for _, oc := range openCollisions {
+			if oc.CreditID == ex.ID {
+				pinned = true
+				break
+			}
+		}
+		if pinned {
+			continue
+		}
+		if err := collisionRepo.CloseByCreditTx(tx, ex.ID, models.CollisionResolutionByRemoval); err != nil {
+			return err
+		}
+		if err := tx.Exec("DELETE FROM credit_collisions WHERE credit_id = ?", ex.ID).Error; err != nil {
+			return wrapDBErr("delete collisions", fmt.Sprintf("credit %d", ex.ID), err)
+		}
+		if err := creditRepo.DeleteTx(tx, movie.ContentID, ex.ActressID); err != nil {
+			return err
+		}
+	}
+
+	surviving, err := creditRepo.ListByMovieTx(tx, movie.ContentID)
+	if err != nil {
+		return err
+	}
+	projections := make([]models.Actress, 0, len(surviving))
+	for _, credit := range surviving {
+		if credit.Suppressed || credit.Actress == nil || !credit.Actress.Verified {
+			continue
+		}
+		projections = append(projections, *credit.Actress)
+	}
+	movie.Actresses = projections
+	if len(projections) > 0 {
+		if err := u.ensureActressesExistTx(tx, projections); err != nil {
+			return err
+		}
+	}
+	if err := tx.Model(movie).Association("Actresses").Replace(movie.Actresses); err != nil {
+		return err
+	}
+	return nil
+}
+
+func scrapedFirstName(credit *models.MovieCredit) string {
+	parts := strings.SplitN(strings.TrimSpace(credit.CreditedName), " ", 2)
+	if len(parts) == 2 {
+		return strings.TrimSpace(parts[1])
+	}
+	return strings.TrimSpace(credit.CreditedName)
+}
+
+func scrapedLastName(credit *models.MovieCredit) string {
+	parts := strings.SplitN(strings.TrimSpace(credit.CreditedName), " ", 2)
+	if len(parts) == 2 {
+		return strings.TrimSpace(parts[0])
+	}
+	return ""
+}
+
+func resolvedDMMIDFromCredit(credit *models.MovieCredit) int {
+	return credit.Scraped.DMMID
+}
+
+func aliasMatchesCanonicalTx(tx *gorm.DB, aliasName string, resolved *models.Actress) (bool, error) {
+	var aliases []models.ActressAlias
+	if err := tx.Where("alias_name = ?", aliasName).Find(&aliases).Error; err != nil {
+		return false, wrapDBErr("find", fmt.Sprintf("actress alias %s", aliasName), err)
+	}
+	canonicalNames := []string{
+		resolved.FullName(),
+		resolved.JapaneseName,
+		resolved.LastName + " " + resolved.FirstName,
+		resolved.FirstName + " " + resolved.LastName,
+	}
+	for _, alias := range aliases {
+		aliasKey := models.NormalizeActressNameKey(alias.CanonicalName)
+		for _, canonical := range canonicalNames {
+			canonicalKey := models.NormalizeActressNameKey(canonical)
+			if aliasKey != "" && canonicalKey != "" && aliasKey == canonicalKey {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
+func (u *MovieUpserter) recordFieldCollisionsTx(tx *gorm.DB, collisionRepo *CreditCollisionRepository, aliasRepo *ActressAliasRepository, credit *models.MovieCredit, resolved *models.Actress, policy CollisionPolicy, trusted map[string]bool) error {
+	type fieldConflict struct {
+		field     string
+		reported  string
+		canonical string
+	}
+	conflicts := make([]fieldConflict, 0, 2)
+	reportedName := credit.CreditedName
+	if reportedName == "" {
+		reportedName = credit.CreditedJapaneseName
+	}
+	if reportedName == "" {
+		reportedName = credit.Scraped.FullName()
+	}
+	reportedNameKey := models.NormalizeActressNameKey(reportedName)
+	canonicalName := resolved.FullName()
+	canonicalNameMatches := false
+	for _, canonical := range []string{canonicalName, resolved.JapaneseName} {
+		canonicalKey := models.NormalizeActressNameKey(canonical)
+		if reportedNameKey != "" && canonicalKey != "" && reportedNameKey == canonicalKey {
+			canonicalNameMatches = true
+			break
+		}
+	}
+	aliasNameMatches := false
+	if reportedNameKey != "" && !canonicalNameMatches {
+		var err error
+		aliasNameMatches, err = aliasMatchesCanonicalTx(tx, reportedName, resolved)
+		if err != nil {
+			return err
+		}
+	}
+	if reportedNameKey != "" && !canonicalNameMatches && !aliasNameMatches {
+		conflicts = append(conflicts, fieldConflict{field: models.CreditFieldCreditedName, reported: reportedName, canonical: canonicalName})
+	}
+	reportedThumb := credit.ReportedThumbURL
+	if reportedThumb == "" {
+		reportedThumb = credit.Scraped.ThumbURL
+	}
+	if strings.TrimSpace(reportedThumb) != "" && strings.TrimSpace(resolved.ThumbURL) != "" &&
+		reportedThumb != resolved.ThumbURL {
+		conflicts = append(conflicts, fieldConflict{field: models.CreditFieldReportedThumb, reported: reportedThumb, canonical: resolved.ThumbURL})
+	}
+
+	active := make(map[string]string, len(conflicts))
+	for _, conflict := range conflicts {
+		active[conflict.field] = conflict.reported
+	}
+	for _, field := range []string{models.CreditFieldCreditedName, models.CreditFieldReportedThumb} {
+		if err := collisionRepo.resolveSupersededOpenTx(tx, credit.ID, field, active[field]); err != nil {
+			return err
+		}
+	}
+
+	for _, c := range conflicts {
+		collision := &models.CreditCollision{
+			CreditID:       credit.ID,
+			MovieContentID: credit.MovieContentID,
+			Field:          c.field,
+			ReportedValue:  c.reported,
+			CanonicalValue: c.canonical,
+		}
+		if err := collisionRepo.RecordTx(tx, collision, credit.Source); err != nil {
+			return err
+		}
+		if collision.Status != models.CollisionStatusOpen {
+			continue
+		}
+		decision := ApplyFieldCollisionPolicy(policy, collision, credit.Source, trusted)
+		if !decision.AutoResolved {
+			continue
+		}
+		if err := collisionRepo.ResolveTx(tx, collision.ID, decision.Resolution); err != nil {
+			return err
+		}
+		if decision.Resolution == models.CollisionResolutionAutoKeep || decision.Resolution == models.CollisionResolutionAutoAlias {
+			if err := tx.Model(&models.MovieCredit{}).Where("id = ?", credit.ID).
+				Update("display_force_canonical", true).Error; err != nil {
+				return err
+			}
+		}
+		if decision.CreateAlias && c.field == models.CreditFieldCreditedName {
+			alias := &models.ActressAlias{AliasName: c.reported, CanonicalName: c.canonical}
+			if err := aliasRepo.UpsertTx(tx, alias); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }

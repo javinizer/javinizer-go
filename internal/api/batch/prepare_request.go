@@ -73,13 +73,13 @@ func prepareBatchRequest(snap *core.RuntimeSnapshot, c *gin.Context, opts ...pre
 	// Fetch job from store.
 	job, ok := snap.RT().Deps().GetJobStore().GetBatchJob(jobID)
 	if !ok {
-		c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "Job not found", Code: "JOB_NOT_FOUND", Params: map[string]any{"job_id": jobID}})
+		c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: jobNotFoundMessage, Code: jobNotFoundCode, Params: map[string]any{jobIDKey: jobID}})
 		return nil, fmt.Errorf("job not found: %s", jobID)
 	}
 
 	// Status check: reject if job is already running (unless skipped).
 	if !cfg.skipRunningCheck && job.GetJobStatus() == models.JobStatusRunning {
-		c.JSON(http.StatusConflict, gin.H{"error": "job is already running"})
+		c.JSON(http.StatusConflict, gin.H{errorResponseKey: "job is already running"})
 		return nil, fmt.Errorf("job %s is already running", jobID)
 	}
 

@@ -18,7 +18,7 @@ func newMP4Prober() *mp4Prober {
 
 // Name returns the prober identifier
 func (p *mp4Prober) Name() string {
-	return "mp4"
+	return mp4Format
 }
 
 // canProbe checks if this prober can handle the file based on header
@@ -38,7 +38,7 @@ func (p *mp4Prober) Probe(_ context.Context, f FileReader) (*VideoInfo, error) {
 // analyzeMP4 extracts metadata from MP4/MOV files
 func analyzeMP4(f FileReader) (*VideoInfo, error) {
 	info := &VideoInfo{
-		Container: "mp4",
+		Container: mp4Format,
 	}
 
 	// Parse MP4 file

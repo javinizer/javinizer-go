@@ -640,11 +640,11 @@ func rewriteTempPosterURL(rawURL, jobID, oldID, newID string) string {
 	if i := strings.Index(rawURL, "?"); i >= 0 {
 		path, suffix = rawURL[:i], rawURL[i:]
 	}
-	oldSegment := "/" + url.PathEscape(jobID) + "/" + url.PathEscape(oldID) + ".jpg"
+	oldSegment := "/" + url.PathEscape(jobID) + "/" + url.PathEscape(oldID) + jpgExtension
 	if !strings.HasSuffix(path, oldSegment) {
 		return rawURL
 	}
-	return path[:len(path)-len(oldSegment)] + "/" + url.PathEscape(jobID) + "/" + url.PathEscape(newID) + ".jpg" + suffix
+	return path[:len(path)-len(oldSegment)] + "/" + url.PathEscape(jobID) + "/" + url.PathEscape(newID) + jpgExtension + suffix
 }
 
 // evictStalePosterPair removes the installed preview pair for a source that
@@ -664,7 +664,7 @@ func (m *LockedMovieOps) evictStalePosterPair(posterID, wpath string) {
 	// codex cloud P2 (@rrHy): a failed leg remove keeps the witness — swept
 	// post-commit records orphan it if written over the remaining files.
 	failed := false
-	for _, name := range []string{posterID + "-full.jpg", posterID + ".jpg"} {
+	for _, name := range []string{posterID + fullImageSuffix, posterID + jpgExtension} {
 		if err := env.fs.Remove(filepath.Join(dir, name)); err != nil && !errors.Is(err, afero.ErrFileNotFound) {
 			failed = true
 			logging.Warnf("stale poster evict %s: %v (witness kept for startup)", name, err)
@@ -1020,7 +1020,7 @@ func (m *LockedMovieOps) UpdateMovieFamily(ctx context.Context, movie *models.Mo
 				}
 				rekeyWitnessPath = witnessPath
 				failedErr := error(nil)
-				for _, suffix := range []string{"-full.jpg", ".jpg"} {
+				for _, suffix := range []string{fullImageSuffix, jpgExtension} {
 					src := filepath.Join(dir, canonicalOldPosterID+suffix)
 					dst := filepath.Join(dir, newID+suffix)
 					if _, err := env.fs.Stat(src); err != nil {

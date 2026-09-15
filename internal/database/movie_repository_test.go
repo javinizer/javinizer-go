@@ -639,20 +639,9 @@ func TestMovieRepository_EnsureActressesExist(t *testing.T) {
 		_, err = repo.Upsert(context.TODO(), movie2)
 		require.NoError(t, err)
 
-		// Verify actress data was merged
 		actressRepo := NewActressRepository(db)
-		actresses, err := actressRepo.List(context.TODO(), 100, 0)
+		foundActress, err := actressRepo.FindByDMMID(context.TODO(), 55555)
 		require.NoError(t, err)
-
-		var foundActress *models.Actress
-		for i := range actresses {
-			if actresses[i].DMMID == 55555 {
-				foundActress = &actresses[i]
-				break
-			}
-		}
-
-		require.NotNil(t, foundActress, "Should find actress with DMMID 55555")
 		assert.Equal(t, "http://example.com/thumb.jpg", foundActress.ThumbURL)
 		assert.Equal(t, "Test", foundActress.FirstName)
 		assert.Equal(t, "Actress", foundActress.LastName)
