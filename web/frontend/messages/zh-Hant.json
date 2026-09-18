@@ -2024,6 +2024,8 @@
   "settings_nfo_alt_name_role_desc": "在 <role> 欄位使用女優別名",
   "settings_nfo_alt_name_role_label": "為角色使用別名",
   "settings_nfo_basic_subsection": "基本 NFO 選項",
+  "settings_nfo_credited_name_desc": "使用每部影片的演職員姓名，而不是資料庫中的規範姓名",
+  "settings_nfo_credited_name_label": "使用演職員姓名",
   "settings_nfo_credits_desc": "NFO 中要包含的製作人員（以逗號分隔）",
   "settings_nfo_credits_label": "製作人員",
   "settings_nfo_credits_placeholder": "導演名稱、工作室名稱",

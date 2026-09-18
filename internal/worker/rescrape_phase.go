@@ -76,10 +76,10 @@ func (p *rescrapePhase) ScrapeSingle(ctx context.Context, inputs rescrapePhaseIn
 		result, meta, err := wf.Scrape(scrapeCtx, cmd)
 		if scrapeCtx.Err() != nil && err == nil {
 			if result == nil {
-				result = &scrape.ScrapeResult{Status: scrape.StatusFailed, Message: "scrape timed out"}
+				result = &scrape.ScrapeResult{Status: scrape.StatusFailed, Message: scrapeTimeoutMessage}
 			} else {
 				result.Status = scrape.StatusFailed
-				result.Message = "scrape timed out"
+				result.Message = scrapeTimeoutMessage
 			}
 			err = scrapeCtx.Err()
 		}
@@ -306,7 +306,7 @@ func closeoutRescrapePosterBytes(inputs rescrapePhaseInputs, scope *rescrapeGenS
 			// match OUR generation output — whatever else sits at the name is
 			// a sibling's, never ours to delete.
 			pdir := filepath.Join(inputs.TempDir, "posters", inputs.JobID.String())
-			for _, sfx := range []string{"-full.jpg", ".jpg"} {
+			for _, sfx := range []string{fullImageSuffix, jpgExtension} {
 				base := mv.ID + sfx
 				want, ok := scope.genSHA[base]
 				if !ok {
@@ -644,8 +644,8 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 			// PRE-EXISTING (fail closed), never absent.
 			if movieResult.Movie != nil && inputs.Fs != nil && inputs.TempDir != "" {
 				pdir := filepath.Join(inputs.TempDir, "posters", inputs.JobID.String())
-				fullPath := filepath.Join(pdir, movieResult.Movie.ID+"-full.jpg")
-				cropPath := filepath.Join(pdir, movieResult.Movie.ID+".jpg")
+				fullPath := filepath.Join(pdir, movieResult.Movie.ID+fullImageSuffix)
+				cropPath := filepath.Join(pdir, movieResult.Movie.ID+jpgExtension)
 				_, fe := inputs.Fs.Stat(fullPath)
 				_, ce := inputs.Fs.Stat(cropPath)
 				if fe == nil || ce == nil ||
@@ -710,7 +710,7 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 			if movieResult.PosterGenerated && movieResult.Movie != nil && inputs.Fs != nil && inputs.TempDir != "" {
 				pdir2 := filepath.Join(inputs.TempDir, "posters", inputs.JobID.String())
 				scope.genSHA = map[string]string{}
-				for _, lp := range []string{filepath.Join(pdir2, movieResult.Movie.ID+"-full.jpg"), filepath.Join(pdir2, movieResult.Movie.ID+".jpg")} {
+				for _, lp := range []string{filepath.Join(pdir2, movieResult.Movie.ID+fullImageSuffix), filepath.Join(pdir2, movieResult.Movie.ID+jpgExtension)} {
 					if data, rerr := afero.ReadFile(inputs.Fs, lp); rerr == nil {
 						scope.genSHA[filepath.Base(lp)] = shaContentHex(data)
 						continue

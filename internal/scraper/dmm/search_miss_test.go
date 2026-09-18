@@ -378,10 +378,12 @@ func TestScrapeURL_BrowserModeVideoDMM(t *testing.T) {
 		settings:      models.ScraperSettings{Enabled: true},
 	}
 
-	// This will attempt browser fetch for video.dmm.co.jp, which will fail
-	// since Chrome isn't available. We verify it doesn't panic.
-	_, err := s.ScrapeURL(context.Background(), "https://video.dmm.co.jp/av/content/?id=test123")
-	require.Error(t, err)
+	// Cancellation makes the browser path deterministic whether or not Chrome is
+	// installed on the test host, while still proving the command fails cleanly.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := s.ScrapeURL(ctx, "https://video.dmm.co.jp/av/content/?id=test123")
+	require.ErrorContains(t, err, context.Canceled.Error())
 }
 
 // --- ScrapeURL: rate limit error ---

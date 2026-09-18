@@ -850,11 +850,11 @@ func TestActressAliasRepository_Upsert_Uncovered(t *testing.T) {
 		require.NoError(t, repo.Create(context.TODO(), alias))
 
 		updated := &models.ActressAlias{AliasName: "ExistingAlias", CanonicalName: "New"}
-		require.NoError(t, repo.Upsert(context.TODO(), updated))
+		require.ErrorIs(t, repo.Upsert(context.TODO(), updated), ErrActressAliasOwnershipConflict)
 
 		found, err := repo.FindByAliasName(context.TODO(), "ExistingAlias")
 		require.NoError(t, err)
-		assert.Equal(t, "New", found.CanonicalName)
+		assert.Equal(t, "Old", found.CanonicalName)
 	})
 }
 
@@ -900,7 +900,7 @@ func TestActressAliasRepository_GetAliasMap_Uncovered(t *testing.T) {
 
 	aliasMap, err := repo.GetAliasMap(context.TODO())
 	require.NoError(t, err)
-	assert.Equal(t, "MapCanon", aliasMap["MapAlias"])
+	assert.Equal(t, "MapCanon", aliasMap["mapalias"])
 }
 
 // --- base_repository.go uncovered ---

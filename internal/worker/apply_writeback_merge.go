@@ -1,8 +1,13 @@
 package worker
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"reflect"
 	"strings"
+
+	"github.com/javinizer/javinizer-go/internal/database"
 
 	"github.com/javinizer/javinizer-go/internal/logging"
 
@@ -121,6 +126,51 @@ func mergeLiveReviewEdits(baseline, phaseOut, live *models.Movie) *models.Movie 
 		out.Screenshots = append([]string(nil), live.Screenshots...)
 	}
 	return out
+}
+
+func mergeApplyWritebackMovie(reviewBaseline, authoritativeBaseline, phaseOut, live *models.Movie, snapshot, current *resultstore.MovieResult, authoritative bool) *models.Movie {
+	if reviewBaseline == nil {
+		reviewBaseline = authoritativeBaseline
+	}
+	out := mergeLiveReviewEdits(reviewBaseline, phaseOut, live)
+	if !authoritative || snapshot == nil || current == nil || snapshot.Revision != current.Revision || authoritativeBaseline == nil {
+		return out
+	}
+	fresh := authoritativeBaseline.Clone()
+	out.Actresses = fresh.Actresses
+	out.Credits = fresh.Credits
+	return out
+}
+
+var errApplyPublicationFence = errors.New("apply publication fence failed")
+
+func withApplyPublicationFence(ctx context.Context, inputs applyPhaseInputs, movie *models.Movie, afc *ApplyFileContext, publish func() error) error {
+	fencer, ok := inputs.MovieRepo.(database.ApplyPublicationFencer)
+	if !ok || movie == nil || strings.TrimSpace(movie.ContentID) == "" {
+		return publish()
+	}
+	generation := movie.RenderGeneration
+	if afc != nil {
+		generation = afc.PublicationGeneration
+	}
+	err := fencer.WithApplyPublicationFence(ctx, movie.ContentID, generation, func(_ *models.Movie) error {
+		return publish()
+	})
+	if errors.Is(err, database.ErrApplyPublicationStale) {
+		filePath := movie.ID
+		if afc != nil && afc.FilePath != "" {
+			filePath = afc.FilePath
+		}
+		logging.Warnf("[Apply] skipping write-back for %s — persisted generation changed during apply", filePath)
+		return nil
+	}
+	if errors.Is(err, database.ErrNotFound) && (afc == nil || !afc.PersistedMovie) {
+		return publish()
+	}
+	if err != nil {
+		return fmt.Errorf("%w: %w", errApplyPublicationFence, err)
+	}
+	return nil
 }
 
 // mergeWriteBackProvenance merges per-file provenance for a write-back commit

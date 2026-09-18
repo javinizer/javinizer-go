@@ -2022,6 +2022,8 @@
   "settings_nfo_alt_name_role_desc": "Use actress alternate names in <role> field",
   "settings_nfo_alt_name_role_label": "Use alternate name for role",
   "settings_nfo_basic_subsection": "Basic NFO Options",
+  "settings_nfo_credited_name_desc": "Use each movie's credited actress name instead of the canonical database name",
+  "settings_nfo_credited_name_label": "Use credited name",
   "settings_nfo_credits_desc": "Credits to include in NFO (comma-separated)",
   "settings_nfo_credits_label": "Credits",
   "settings_nfo_credits_placeholder": "Director Name, Studio Name",

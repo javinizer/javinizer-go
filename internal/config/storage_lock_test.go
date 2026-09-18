@@ -195,3 +195,70 @@ func TestReleaseConfigFileLock_TokenMismatchNoRemove(t *testing.T) {
 	_, err := os.Stat(lockPath)
 	assert.NoError(t, err)
 }
+
+func TestAcquireConfigFileLock_RetriesAccessDeniedAfterContention(t *testing.T) {
+	withRetryEnabled(t)
+
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	unlock, err := acquireConfigFileLock(path)
+	require.NoError(t, err)
+
+	var calls int32
+	previousOpen := osOpenFileFunc
+	osOpenFileFunc = func(name string, flag int, perm os.FileMode) (*os.File, error) {
+		switch atomic.AddInt32(&calls, 1) {
+		case 1:
+			unlock()
+			return nil, &os.PathError{Op: "open", Path: name, Err: os.ErrExist}
+		case 2:
+			return nil, &os.PathError{Op: "open", Path: name, Err: os.ErrPermission}
+		default:
+			return previousOpen(name, flag, perm)
+		}
+	}
+	t.Cleanup(func() { osOpenFileFunc = previousOpen })
+
+	unlock2, err := acquireConfigFileLock(path)
+	require.NoError(t, err)
+	unlock2()
+	assert.Equal(t, int32(3), atomic.LoadInt32(&calls))
+}
+
+func TestAcquireConfigFileLock_DoesNotRetryInitialAccessDenied(t *testing.T) {
+	withRetryEnabled(t)
+
+	var calls int32
+	previousOpen := osOpenFileFunc
+	osOpenFileFunc = func(name string, _ int, _ os.FileMode) (*os.File, error) {
+		atomic.AddInt32(&calls, 1)
+		return nil, &os.PathError{Op: "open", Path: name, Err: os.ErrPermission}
+	}
+	t.Cleanup(func() { osOpenFileFunc = previousOpen })
+
+	_, err := acquireConfigFileLock(filepath.Join(t.TempDir(), "config.yaml"))
+	require.ErrorIs(t, err, os.ErrPermission)
+	assert.Equal(t, int32(1), atomic.LoadInt32(&calls), "an unproven permission failure must not be retried")
+}
+
+func TestAcquireConfigFileLock_ReturnsPersistentAccessDenied(t *testing.T) {
+	withRetryEnabled(t)
+
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	unlock, err := acquireConfigFileLock(path)
+	require.NoError(t, err)
+	defer unlock()
+
+	var calls int32
+	previousOpen := osOpenFileFunc
+	osOpenFileFunc = func(name string, _ int, _ os.FileMode) (*os.File, error) {
+		if atomic.AddInt32(&calls, 1) == 1 {
+			return nil, &os.PathError{Op: "open", Path: name, Err: os.ErrExist}
+		}
+		return nil, &os.PathError{Op: "open", Path: name, Err: os.ErrPermission}
+	}
+	t.Cleanup(func() { osOpenFileFunc = previousOpen })
+
+	_, err = acquireConfigFileLock(path)
+	require.ErrorIs(t, err, os.ErrPermission)
+	assert.Equal(t, int32(1+lockRetryAttempts), atomic.LoadInt32(&calls), "persistent access denial must be returned after bounded retries")
+}

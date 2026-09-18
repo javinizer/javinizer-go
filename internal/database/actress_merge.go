@@ -9,13 +9,12 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/models"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 // MergeResolution values select which side of an actress merge a field conflict resolves to.
 const (
 	MergeResolutionTarget = "target"
-	MergeResolutionSource = "source"
+	MergeResolutionSource = colSource
 	resolutionTarget      = "target"
 )
 
@@ -57,13 +56,14 @@ type ActressMergeResult struct {
 // and alias candidates. It is produced by PlanMerge and consumed by ExecuteMerge,
 // separating the "what to merge" decision from the "how to execute" side effect.
 type MergePlan struct {
-	TargetID           uint
-	SourceID           uint
-	Merged             models.Actress
-	CanonicalName      string
-	AliasesAdded       int
-	SourceAliasUpserts []string
-	ConflictsResolved  int
+	TargetID              uint
+	SourceID              uint
+	OriginalCanonicalName string
+	Merged                models.Actress
+	CanonicalName         string
+	AliasesAdded          int
+	SourceAliasUpserts    []string
+	ConflictsResolved     int
 }
 
 // actressMerger handles actress merge operations, extracted from ActressRepository
@@ -75,6 +75,22 @@ type actressMerger struct {
 // moveMovieAssociations moves movie associations from source actress to target actress.
 // Returns count of updated movies. Uses the provided transaction.
 func moveMovieAssociations(tx *gorm.DB, sourceID, targetID uint) (int, error) {
+	// A legacy row whose movie key is NULL or missing cannot project onto a
+	// movie, and the inner join below cannot transfer it. Remove it
+	// transactionally before deleting the source identity.
+	if err := tx.Exec(`
+DELETE FROM movie_actresses
+WHERE actress_id = ?
+  AND (
+      movie_content_id IS NULL
+      OR NOT EXISTS (
+          SELECT 1 FROM movies m
+          WHERE m.content_id = movie_actresses.movie_content_id
+      )
+  )`, sourceID).Error; err != nil {
+		return 0, err
+	}
+
 	// Use the join table to find only movies that reference the source actress,
 	// avoiding a full-table scan that loads every movie into memory.
 	var movieContentIDs []string
@@ -135,11 +151,103 @@ func moveMovieAssociations(tx *gorm.DB, sourceID, targetID uint) (int, error) {
 	return updatedMovies, nil
 }
 
-// upsertActressAliases creates or updates actress alias records.
-// Uses ON CONFLICT to handle duplicates. Uses the provided transaction.
+func removeLegacyActressAssociationTx(tx *gorm.DB, movieContentID string, actressID uint) error {
+	return tx.Exec(
+		"DELETE FROM movie_actresses WHERE movie_content_id = ? AND actress_id = ?",
+		movieContentID, actressID,
+	).Error
+}
+
+func moveCredits(tx *gorm.DB, sourceID, targetID uint) error {
+	var sourceCredits []models.MovieCredit
+	if err := tx.Where("actress_id = ?", sourceID).Find(&sourceCredits).Error; err != nil {
+		return err
+	}
+	for i := range sourceCredits {
+		sc := &sourceCredits[i]
+		var targetCredit models.MovieCredit
+		err := tx.Model(&models.MovieCredit{}).
+			Where("movie_content_id = ? AND actress_id = ?", sc.MovieContentID, targetID).
+			First(&targetCredit).Error
+		if err == nil {
+			updates := map[string]interface{}{colUpdatedAt: time.Now().UTC()}
+			if sc.UserOverride && !targetCredit.UserOverride {
+				updates["override_name"] = sc.OverrideName
+				updates["user_override"] = true
+			}
+			if sc.Suppressed && !targetCredit.Suppressed {
+				updates["suppressed"] = true
+			}
+			if sc.Origin == string(models.CreditOriginUser) && targetCredit.Origin != string(models.CreditOriginUser) {
+				updates["origin"] = string(models.CreditOriginUser)
+			}
+			if sc.DisplayForceCanonical && !targetCredit.DisplayForceCanonical {
+				updates["display_force_canonical"] = true
+			}
+			if sc.OrderPinned && !targetCredit.OrderPinned {
+				updates["order_index"] = sc.OrderIndex
+				updates["order_pinned"] = true
+			}
+			if len(updates) > 1 {
+				if err := tx.Model(&models.MovieCredit{}).Where("id = ?", targetCredit.ID).Updates(updates).Error; err != nil {
+					return err
+				}
+			}
+			if sc.Suppressed || targetCredit.Suppressed {
+				if err := removeLegacyActressAssociationTx(tx, sc.MovieContentID, targetID); err != nil {
+					return err
+				}
+			}
+			if err := transferCollisionsTx(tx, sc.ID, targetCredit.ID); err != nil {
+				return err
+			}
+			if err := tx.Where("id = ?", sc.ID).Delete(&models.MovieCredit{}).Error; err != nil {
+				return err
+			}
+		} else if errors.Is(err, gorm.ErrRecordNotFound) {
+			if err := tx.Model(&models.MovieCredit{}).Where("id = ?", sc.ID).Updates(map[string]interface{}{
+				"actress_id": targetID,
+				colUpdatedAt: time.Now().UTC(),
+			}).Error; err != nil {
+				return err
+			}
+			if sc.Suppressed {
+				if err := removeLegacyActressAssociationTx(tx, sc.MovieContentID, targetID); err != nil {
+					return err
+				}
+			}
+		} else {
+			return err
+		}
+	}
+
+	var sourceTranslations []models.ActressTranslation
+	if err := tx.Where("actress_id = ?", sourceID).Find(&sourceTranslations).Error; err != nil {
+		return err
+	}
+	for _, st := range sourceTranslations {
+		var targetTranslation models.ActressTranslation
+		err := tx.Where("actress_id = ? AND language = ?", targetID, st.Language).First(&targetTranslation).Error
+		if err == nil {
+			if err := tx.Delete(&st).Error; err != nil {
+				return err
+			}
+		} else if errors.Is(err, gorm.ErrRecordNotFound) {
+			if err := tx.Model(&models.ActressTranslation{}).Where("id = ?", st.ID).Update("actress_id", targetID).Error; err != nil {
+				return err
+			}
+		} else {
+			return err
+		}
+	}
+	return nil
+}
+
+// upsertActressAliases creates or updates actress alias records through the
+// normalized ownership guard. Uses the provided transaction.
 func upsertActressAliases(tx *gorm.DB, aliases []string, canonicalName string) error {
 	canonicalName = strings.TrimSpace(canonicalName)
-	canonicalKey := strings.ToLower(canonicalName)
+	canonicalKey := models.NormalizeActressNameKey(canonicalName)
 	if canonicalName == "" {
 		return nil
 	}
@@ -147,7 +255,7 @@ func upsertActressAliases(tx *gorm.DB, aliases []string, canonicalName string) e
 	seen := make(map[string]bool)
 	for _, alias := range aliases {
 		alias = strings.TrimSpace(alias)
-		key := strings.ToLower(alias)
+		key := models.NormalizeActressNameKey(alias)
 		if alias == "" || key == canonicalKey || seen[key] {
 			continue
 		}
@@ -157,10 +265,7 @@ func upsertActressAliases(tx *gorm.DB, aliases []string, canonicalName string) e
 			AliasName:     alias,
 			CanonicalName: canonicalName,
 		}
-		if err := tx.Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "alias_name"}},
-			DoUpdates: clause.AssignmentColumns([]string{"canonical_name", "updated_at"}),
-		}).Create(&entry).Error; err != nil {
+		if err := claimNormalizedActressAliasTx(tx, &entry); err != nil {
 			return err
 		}
 	}
@@ -251,16 +356,17 @@ func (m *actressMerger) PlanMerge(ctx context.Context, targetID, sourceID uint, 
 		sourceCandidates,
 		canonicalName,
 	)
-	sourceAliasUpserts := sourceAliasesForUpsert(sourceCandidates, canonicalName)
+	sourceAliasUpserts := sourceAliasesForUpsert(splitAliasList(preview.Source.Aliases), canonicalName)
 
 	return &MergePlan{
-		TargetID:           targetID,
-		SourceID:           sourceID,
-		Merged:             merged,
-		CanonicalName:      canonicalName,
-		AliasesAdded:       aliasesAdded,
-		SourceAliasUpserts: sourceAliasUpserts,
-		ConflictsResolved:  len(preview.Conflicts),
+		TargetID:              targetID,
+		SourceID:              sourceID,
+		OriginalCanonicalName: canonicalActressName(&preview.Target),
+		Merged:                merged,
+		CanonicalName:         canonicalName,
+		AliasesAdded:          aliasesAdded,
+		SourceAliasUpserts:    sourceAliasUpserts,
+		ConflictsResolved:     len(preview.Conflicts),
 	}, nil
 }
 
@@ -274,6 +380,14 @@ func (m *actressMerger) ExecuteMerge(ctx context.Context, plan *MergePlan, db *D
 
 	updatedMovies := 0
 	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		contentIDs, err := movieContentIDsForActressesTx(tx, targetID, sourceID)
+		if err != nil {
+			return err
+		}
+		before, err := captureMovieRenderSnapshotsTx(tx, contentIDs)
+		if err != nil {
+			return err
+		}
 		if merged.DMMID > 0 {
 			var existing models.Actress
 			checkErr := tx.Where("dmm_id = ? AND id NOT IN ?", merged.DMMID, []uint{targetID, sourceID}).First(&existing).Error
@@ -285,46 +399,77 @@ func (m *actressMerger) ExecuteMerge(ctx context.Context, plan *MergePlan, db *D
 			}
 		}
 
-		// Load source to check whether DMMID swap is needed
-		source, err := m.repo.FindByID(ctx, sourceID)
-		if err != nil {
-			return err
+		var source, previousTarget models.Actress
+		if err := tx.First(&source, sourceID).Error; err != nil {
+			return wrapDBErr("load", fmt.Sprintf("merge source actress %d", sourceID), err)
 		}
+		if err := tx.First(&previousTarget, targetID).Error; err != nil {
+			return wrapDBErr("load", fmt.Sprintf("merge target actress %d", targetID), err)
+		}
+		merged.Verified = previousTarget.Verified || source.Verified
+		if source.Verified && !previousTarget.Verified {
+			merged.Origin = source.Origin
+		}
+		merged.AmbiguityQuarantined = !merged.Verified && (previousTarget.AmbiguityQuarantined || source.AmbiguityQuarantined)
 		if merged.DMMID > 0 && merged.DMMID == source.DMMID {
-			target, err := m.repo.FindByID(ctx, targetID)
-			if err != nil {
-				return err
-			}
-			if target.DMMID != source.DMMID {
+			if previousTarget.DMMID != source.DMMID {
 				tempDMMID := -int(sourceID)
-				if tempDMMID == 0 {
-					tempDMMID = -1
-				}
-				if err := tx.Model(&models.Actress{}).Where("id = ?", sourceID).Update("dmm_id", tempDMMID).Error; err != nil {
+				if err := tx.Model(&models.Actress{}).Where("id = ?", sourceID).Update(colDMMID, tempDMMID).Error; err != nil {
 					return wrapDBErr("update", fmt.Sprintf("merge actress %d temp dmm_id", sourceID), err)
 				}
 			}
 		}
 
 		if err := tx.Model(&models.Actress{}).Where("id = ?", targetID).Updates(map[string]any{
-			"dmm_id":        merged.DMMID,
-			"first_name":    merged.FirstName,
-			"last_name":     merged.LastName,
-			"japanese_name": merged.JapaneseName,
-			"thumb_url":     merged.ThumbURL,
-			"aliases":       merged.Aliases,
-			"updated_at":    time.Now().UTC(),
+			colDMMID:                merged.DMMID,
+			colFirstName:            merged.FirstName,
+			colLastName:             merged.LastName,
+			colJapaneseName:         merged.JapaneseName,
+			"thumb_url":             merged.ThumbURL,
+			"aliases":               merged.Aliases,
+			colVerified:             merged.Verified,
+			colOrigin:               merged.Origin,
+			colAmbiguityQuarantined: merged.AmbiguityQuarantined,
+			colUpdatedAt:            time.Now().UTC(),
 		}).Error; err != nil {
 			if errors.Is(err, gorm.ErrDuplicatedKey) {
 				return ErrActressMergeUniqueConstraint
 			}
 			return wrapDBErr("update", fmt.Sprintf("merge actress %d", targetID), err)
 		}
+		if err := transitionActressCanonicalNamesForMergeTx(tx, targetID, sourceID, &previousTarget); err != nil {
+			return wrapDBErr("merge", fmt.Sprintf("stored aliases from actress %d", targetID), err)
+		}
+		if err := transitionActressCanonicalNamesForMergeTx(tx, targetID, sourceID, &source); err != nil {
+			return wrapDBErr("merge", fmt.Sprintf("stored aliases from actress %d", sourceID), err)
+		}
 
 		var moveErr error
 		updatedMovies, moveErr = moveMovieAssociations(tx, sourceID, targetID)
 		if moveErr != nil {
 			return wrapDBErr("merge", fmt.Sprintf("actress movie associations from %d to %d", sourceID, targetID), moveErr)
+		}
+
+		if err := moveCredits(tx, sourceID, targetID); err != nil {
+			return wrapDBErr("merge", fmt.Sprintf("movie credits from %d to %d", sourceID, targetID), err)
+		}
+
+		if merged.Verified {
+			if err := resolveCandidateIdentityCollisionsTx(tx, targetID); err != nil {
+				return err
+			}
+		}
+		if err := reconcileActressCollisionsTx(tx, targetID); err != nil {
+			return err
+		}
+		if merged.Verified {
+			if err := restoreActressProjectionTx(tx, targetID); err != nil {
+				return err
+			}
+		}
+
+		if err := moveCreditReassignmentsTx(tx, sourceID, targetID); err != nil {
+			return wrapDBErr("merge", fmt.Sprintf("credit reassignments from %d to %d", sourceID, targetID), err)
 		}
 
 		if err := upsertActressAliases(tx, plan.SourceAliasUpserts, plan.CanonicalName); err != nil {
@@ -335,7 +480,7 @@ func (m *actressMerger) ExecuteMerge(ctx context.Context, plan *MergePlan, db *D
 			return wrapDBErr("delete", fmt.Sprintf("merge source actress %d", sourceID), err)
 		}
 
-		return nil
+		return invalidateChangedMovieRenderInputsTx(tx, before, contentIDs)
 	})
 	if err != nil {
 		return nil, err

@@ -2024,6 +2024,8 @@
   "settings_nfo_alt_name_role_desc": "<role> フィールドに女優の別名を使用",
   "settings_nfo_alt_name_role_label": "役割に別名を使用",
   "settings_nfo_basic_subsection": "基本 NFO オプション",
+  "settings_nfo_credited_name_desc": "女優データベースの正規名の代わりに作品ごとのクレジット名を使用",
+  "settings_nfo_credited_name_label": "クレジット名を使用",
   "settings_nfo_credits_desc": "NFO に含めるクレジット (コンマ区切り)",
   "settings_nfo_credits_label": "クレジット",
   "settings_nfo_credits_placeholder": "監督名, スタジオ名",

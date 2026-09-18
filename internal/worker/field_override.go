@@ -134,6 +134,7 @@ func applyFieldOverride(movie *models.Movie, prov *resultstore.ProvenanceData, f
 		movie.Actresses = actressesFromScraperInfo(result.Actresses)
 		setFieldSource("actresses")
 		rebuildActressSources(prov, movie.Actresses, source)
+		scrape.BuildCreditsFromScrape(movie, prov.ActressSources, prov.ScraperResults)
 	case "genres":
 		movie.Genres = genresFromScraperStrings(result.Genres)
 		setFieldSource("genres")

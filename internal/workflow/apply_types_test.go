@@ -11,16 +11,14 @@ import (
 )
 
 func TestApplyCmd_HasOrganizeField(t *testing.T) {
-	cmd := ApplyCmd{}
-	fieldType := reflect.TypeOf(cmd).Field(4) // Organize is the 5th field
-	assert.Equal(t, "Organize", fieldType.Name)
+	fieldType, ok := reflect.TypeOf(ApplyCmd{}).FieldByName("Organize")
+	assert.True(t, ok)
 	assert.Equal(t, "OrganizeOptions", fieldType.Type.Name())
 }
 
 func TestApplyCmd_HasMergeField(t *testing.T) {
-	cmd := ApplyCmd{}
-	fieldType := reflect.TypeOf(cmd).Field(5) // Merge is the 6th field
-	assert.Equal(t, "Merge", fieldType.Name)
+	fieldType, ok := reflect.TypeOf(ApplyCmd{}).FieldByName("Merge")
+	assert.True(t, ok)
 	assert.Equal(t, "MergeOptions", fieldType.Type.Name())
 }
 

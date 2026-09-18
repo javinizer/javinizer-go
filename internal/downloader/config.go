@@ -35,6 +35,7 @@ type Config struct {
 	// Actor name formatting (from NFO config, resolved by bridge)
 	ActorJapaneseNames  bool
 	ActorFirstNameOrder bool
+	UseCreditedName     bool
 	ActressDelimiter    string                    // Delimiter between actress names when no DELIM= modifier is present (default: ", ")
 	UnknownActressMode  models.UnknownActressMode // "skip" or "fallback" — controls how unknown actresses are handled
 	UnknownActressText  string                    // Display text for unknown actresses when mode is "fallback"
@@ -52,7 +53,7 @@ type Config struct {
 // cfg.Output.Download.DownloadCover, cfg.Output.Download.DownloadPoster,
 // cfg.Output.Download.DownloadExtrafanart, cfg.Output.Download.DownloadTrailer, cfg.Output.Download.DownloadActress,
 // cfg.Output.Download.DownloadTimeout, cfg.Scrapers.UserAgent,
-// cfg.Metadata.NFO.Format.ActressLanguageJA,
+// cfg.Metadata.NFO.Feature.UseCreditedName, cfg.Metadata.NFO.Format.ActressLanguageJA,
 // cfg.Metadata.NFO.Format.UnknownActressMode, cfg.Metadata.NFO.Format.UnknownActressText,
 // cfg.Output.MediaFormat.MaxPosterHeight
 // (Fields FirstNameOrder, GroupActress, GroupActressName are read via nameCfg — see NFONameConfigFromAppConfig)
@@ -89,6 +90,7 @@ func ConfigFromAppConfig(cfg *config.Config, nameCfg nfo.NFONameConfig) *Config 
 		UserAgent:           cfg.Scrapers.UserAgent,
 		ActorJapaneseNames:  cfg.Metadata.NFO.Format.ActressLanguageJA,
 		ActorFirstNameOrder: nameCfg.FirstNameOrder,
+		UseCreditedName:     cfg.Metadata.NFO.Feature.UseCreditedName,
 		ActressDelimiter:    nameCfg.ActressDelimiter,
 		UnknownActressMode:  cfg.Metadata.NFO.Format.UnknownActressMode,
 		UnknownActressText:  cfg.Metadata.NFO.Format.UnknownActressText,

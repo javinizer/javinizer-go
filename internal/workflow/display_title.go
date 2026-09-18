@@ -25,7 +25,10 @@ func ApplyDisplayTitleFromSource(ctx context.Context, scraped *models.Movie, tit
 		return
 	}
 	if displayTitleTmpl != "" {
-		displayCtx := template.NewContextFromMovie(scraped)
+		displayCtx := template.NewContextFromMovieWithOptions(scraped, template.ContextOptions{
+			RenderCredits:   true,
+			UseCreditedName: nameCfg.UseCreditedName,
+		})
 		displayCtx.Title = titleSource.Title
 		if titleSource.OriginalTitle != "" {
 			displayCtx.OriginalTitle = titleSource.OriginalTitle

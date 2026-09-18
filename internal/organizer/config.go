@@ -26,6 +26,7 @@ type Config struct {
 	AllowRevert       bool
 	FirstNameOrder    bool // true = FirstName LastName, false = LastName FirstName
 	ActressLanguageJA bool // true = prefer JapaneseName over First/Last for <ACTORS>/<ACTRESS> (mirrors nfo.actress_language_ja)
+	UseCreditedName   bool
 
 	// MediaFormatConfig controls media filename templates and actress grouping.
 	// Embedded so downstream code can access fields directly (e.g. cfg.PosterFormat)
@@ -49,7 +50,8 @@ type Config struct {
 // cfg.Output.MediaFormat.PosterFormat, cfg.Output.MediaFormat.FanartFormat, cfg.Output.MediaFormat.TrailerFormat,
 // cfg.Output.MediaFormat.ScreenshotFormat, cfg.Output.MediaFormat.ScreenshotFolder, cfg.Output.MediaFormat.ScreenshotPadding,
 // cfg.Output.MediaFormat.ActressFolder, cfg.Output.MediaFormat.ActressFormat,
-// cfg.Output.Operation.MoveSubtitles, cfg.Output.Operation.SubtitleExtensions
+// cfg.Output.Operation.MoveSubtitles, cfg.Output.Operation.SubtitleExtensions,
+// cfg.Metadata.NFO.Feature.UseCreditedName
 // (Fields FirstNameOrder, GroupActress, GroupActressName are read via nameCfg — see NFONameConfigFromAppConfig)
 func ConfigFromAppConfig(cfg *config.Config, nameCfg nfo.NFONameConfig) *Config {
 	if cfg == nil {
@@ -66,6 +68,7 @@ func ConfigFromAppConfig(cfg *config.Config, nameCfg nfo.NFONameConfig) *Config 
 		RenameFile:        cfg.Output.Operation.RenameFile,
 		AllowRevert:       cfg.Output.Operation.AllowRevert,
 		FirstNameOrder:    nameCfg.FirstNameOrder,
+		UseCreditedName:   cfg.Metadata.NFO.Feature.UseCreditedName,
 		ActressLanguageJA: nameCfg.ActressLanguageJA,
 		MediaFormatConfig: MediaFormatConfig{
 			PosterFormat:            cfg.Output.MediaFormat.PosterFormat,

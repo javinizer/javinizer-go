@@ -9,8 +9,11 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/javinizer/javinizer-go/internal/api/contracts"
+	"github.com/javinizer/javinizer-go/internal/api/core"
 	"github.com/javinizer/javinizer-go/internal/api/testkit"
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -26,12 +29,23 @@ func newDisplayTitlePreviewConfig(tmpl string) *config.Config {
 	}
 }
 
+func addDisplayPreviewResult(deps *core.APIDeps) string {
+	job := deps.GetJobStore().CreateJobBatch([]string{"preview.mp4"})
+	setJobResult(job, "preview.mp4", &resultstore.MovieResult{
+		ResultID:      "ABC-001",
+		FileMatchInfo: models.FileMatchInfo{MovieID: "MKMP-094"},
+		Movie:         &models.Movie{ID: "MKMP-094", ContentID: "MKMP-094", Title: "Stored"},
+	})
+	return job.GetID()
+}
+
 func TestPreviewDisplayTitle_RendersTemplate(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	initTestWebSocket(t)
 
 	deps := createTestDeps(t, newDisplayTitlePreviewConfig("[<ID>] <TITLE>"), "")
 	batchDeps := testkit.GetTestRuntime(deps)
+	jobID := addDisplayPreviewResult(deps)
 
 	router := gin.New()
 	router.POST("/api/v1/batch/:id/results/:resultId/display-title-preview", previewDisplayTitle(batchDeps))
@@ -39,7 +53,7 @@ func TestPreviewDisplayTitle_RendersTemplate(t *testing.T) {
 	body, _ := json.Marshal(contracts.DisplayTitlePreviewRequest{
 		Movie: &contracts.MovieView{ID: "MKMP-094", Title: "Ayaka Tomoda"},
 	})
-	req := httptest.NewRequest("POST", "/api/v1/batch/test-id/results/ABC-001/display-title-preview", bytes.NewReader(body))
+	req := httptest.NewRequest("POST", "/api/v1/batch/"+jobID+"/results/ABC-001/display-title-preview", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
@@ -56,6 +70,7 @@ func TestPreviewDisplayTitle_EmptyTemplateFallsBackToTitle(t *testing.T) {
 
 	deps := createTestDeps(t, newDisplayTitlePreviewConfig(""), "")
 	batchDeps := testkit.GetTestRuntime(deps)
+	jobID := addDisplayPreviewResult(deps)
 
 	router := gin.New()
 	router.POST("/api/v1/batch/:id/results/:resultId/display-title-preview", previewDisplayTitle(batchDeps))
@@ -63,7 +78,7 @@ func TestPreviewDisplayTitle_EmptyTemplateFallsBackToTitle(t *testing.T) {
 	body, _ := json.Marshal(contracts.DisplayTitlePreviewRequest{
 		Movie: &contracts.MovieView{ID: "MKMP-094", Title: "Ayaka Tomoda"},
 	})
-	req := httptest.NewRequest("POST", "/api/v1/batch/test-id/results/ABC-001/display-title-preview", bytes.NewReader(body))
+	req := httptest.NewRequest("POST", "/api/v1/batch/"+jobID+"/results/ABC-001/display-title-preview", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
@@ -119,6 +134,7 @@ func TestPreviewDisplayTitle_FactoryUnavailable(t *testing.T) {
 
 	deps := createTestDeps(t, cfg, "")
 	batchDeps := testkit.GetTestRuntime(deps)
+	jobID := addDisplayPreviewResult(deps)
 
 	router := gin.New()
 	router.POST("/api/v1/batch/:id/results/:resultId/display-title-preview", previewDisplayTitle(batchDeps))
@@ -126,7 +142,7 @@ func TestPreviewDisplayTitle_FactoryUnavailable(t *testing.T) {
 	body, _ := json.Marshal(contracts.DisplayTitlePreviewRequest{
 		Movie: &contracts.MovieView{ID: "MKMP-094", Title: "Ayaka Tomoda"},
 	})
-	req := httptest.NewRequest("POST", "/api/v1/batch/test-id/results/ABC-001/display-title-preview", bytes.NewReader(body))
+	req := httptest.NewRequest("POST", "/api/v1/batch/"+jobID+"/results/ABC-001/display-title-preview", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)

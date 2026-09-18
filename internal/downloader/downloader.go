@@ -181,7 +181,7 @@ func (d *Downloader) WithDestLocks(reg *fsutil.KeyedLockRegistry) *Downloader {
 // The context includes GroupActress, GroupActressName, FirstNameOrder, and
 // multipart info so that the MediaPathResolver can execute templates correctly.
 func (d *Downloader) buildTemplateContext(movie *models.Movie, multipart *MultipartInfo) *template.Context {
-	ctx := template.NewContextFromMovie(movie)
+	ctx := template.NewContextFromMovieWithOptions(movie, template.ContextOptions{FirstNameOrder: d.actorFirstNameOrder, RenderCredits: true, UseCreditedName: d.config.UseCreditedName})
 	ctx.Index = 0
 	ctx.GroupActress = d.config.GroupActress
 	ctx.GroupActressMin = d.config.GroupActressMin
@@ -205,7 +205,7 @@ func (d *Downloader) generateActressFilename(movie *models.Movie, actressName st
 		return ""
 	}
 
-	ctx := template.NewContextFromMovie(movie)
+	ctx := template.NewContextFromMovieWithOptions(movie, template.ContextOptions{FirstNameOrder: d.actorFirstNameOrder, RenderCredits: true, UseCreditedName: d.config.UseCreditedName})
 	ctx.ActressName = actressName
 	ctx.GroupActress = d.config.GroupActress
 	ctx.GroupActressMin = d.config.GroupActressMin

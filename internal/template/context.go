@@ -102,7 +102,9 @@ type ContextOptions struct {
 	// FirstNameOrder controls actress name order in the Actresses list.
 	// When true, names use FirstName LastName order (e.g., "Yui Hatano").
 	// When false (default), names use LastName FirstName order (e.g., "Hatano Yui").
-	FirstNameOrder bool
+	FirstNameOrder  bool
+	RenderCredits   bool
+	UseCreditedName bool
 }
 
 // NewContextFromMovie creates a template context from a Movie model.
@@ -143,7 +145,26 @@ func NewContextFromMovieWithOptions(movie *models.Movie, opts ContextOptions) *C
 	}
 
 	// Build actress list using config-aware name formatting
-	if len(movie.Actresses) > 0 {
+	if opts.RenderCredits && len(movie.Credits) > 0 {
+		for _, credit := range movie.Credits {
+			if credit.Suppressed || credit.Actress == nil || !credit.Actress.Verified {
+				continue
+			}
+			actress := *credit.Actress
+			canonical := models.FormatActressName(actress, models.FormatActressNameOptions{FirstNameOrder: opts.FirstNameOrder})
+			name := credit.RenderName(opts.UseCreditedName, canonical)
+			detail := ActressDetail{FirstName: actress.FirstName, LastName: actress.LastName, JapaneseName: actress.JapaneseName}
+			if name != canonical {
+				detail = ActressDetail{FirstName: name}
+			}
+			ctx.Actresses = append(ctx.Actresses, name)
+			ctx.ActressDetails = append(ctx.ActressDetails, detail)
+		}
+		if len(ctx.ActressDetails) > 0 {
+			ctx.FirstName = ctx.ActressDetails[0].FirstName
+			ctx.LastName = ctx.ActressDetails[0].LastName
+		}
+	} else if len(movie.Actresses) > 0 {
 		ctx.Actresses = make([]string, 0, len(movie.Actresses))
 		ctx.ActressDetails = make([]ActressDetail, 0, len(movie.Actresses))
 		for _, actress := range movie.Actresses {

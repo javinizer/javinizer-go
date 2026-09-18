@@ -18,6 +18,7 @@ package cli_e2e
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -25,6 +26,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/javinizer/javinizer-go/internal/database"
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -263,6 +266,7 @@ output:
     subfolder_format: []
     file_format: "<ID><PARTSUFFIX>"
     rename_file: true
+    allow_revert: true
     download_cover: false
     download_poster: false
     download_extrafanart: false
@@ -343,7 +347,81 @@ func TestCLI_Sort_Multipart_PartSuffixTargets(t *testing.T) {
 		entries, err := os.ReadDir(src)
 		require.NoError(t, err)
 		assert.Empty(t, entries, "--move consumed the sources\n%s", out)
+
+		batchID := ""
+		for _, line := range strings.Split(out, "\n") {
+			if strings.HasPrefix(line, "Batch Job: ") {
+				batchID = strings.TrimSpace(strings.TrimPrefix(line, "Batch Job: "))
+			}
+		}
+		require.NotEmpty(t, batchID)
+		db, err := database.New(&database.Config{Type: "sqlite", DSN: filepath.Join(dir, "javinizer.db"), LogLevel: "silent"})
+		require.NoError(t, err)
+		ops, err := database.NewBatchFileOperationRepository(db).FindByBatchJobID(context.Background(), batchID)
+		require.NoError(t, err)
+		require.NoError(t, db.Close())
+		require.Len(t, ops, 3)
+		nfoOwners := 0
+		for _, op := range ops {
+			generated, parseErr := models.ParseGeneratedFiles(op.GeneratedFiles)
+			require.NoError(t, parseErr)
+			for _, path := range generated.Delete {
+				if path == filepath.Join(dest, "GOOD-701", "GOOD-701.nfo") {
+					nfoOwners++
+				}
+			}
+		}
+		require.Equal(t, 1, nfoOwners)
+
+		revertOut, revertCode := run(t, cfgPath, "history", "revert", batchID)
+		require.Equal(t, 0, revertCode, "revert exited %d\n%s", revertCode, revertOut)
+		assert.NoFileExists(t, filepath.Join(dest, "GOOD-701", "GOOD-701.nfo"))
+		for _, part := range []string{"cd1", "cd2", "cd3"} {
+			assert.FileExists(t, filepath.Join(src, "GOOD-701-"+part+".mp4"))
+		}
 	})
+}
+
+func TestCLI_Sort_Multipart_SharedArtifactSingleWorker(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := writePartSuffixConfig(t, dir)
+	cfg, err := os.ReadFile(cfgPath)
+	require.NoError(t, err)
+	cfg = append(cfg, []byte("\nperformance:\n    max_workers: 1\n    worker_timeout: 300\n    buffer_size: 100\n    update_interval: 100\n")...)
+	require.NoError(t, os.WriteFile(cfgPath, cfg, 0o600))
+	src := filepath.Join(dir, "lib")
+	dest := filepath.Join(dir, "dest")
+	require.NoError(t, os.MkdirAll(src, 0o700))
+	require.NoError(t, os.MkdirAll(dest, 0o700))
+	for _, part := range []string{"cd1", "cd2", "cd3"} {
+		writeFile(t, filepath.Join(src, "GOOD-703-"+part+".mp4"))
+	}
+
+	out, code := run(t, cfgPath, "sort", "--move", src, "--dest", dest)
+	require.Equal(t, 0, code, "single-worker sort exited %d\n%s", code, out)
+	assert.Contains(t, out, "Organized 3 file(s)")
+	assert.NotContains(t, out, "Apply failed")
+	for _, part := range []string{"cd1", "cd2", "cd3"} {
+		assert.FileExists(t, filepath.Join(dest, "GOOD-703", "GOOD-703-"+part+".mp4"))
+	}
+	assert.FileExists(t, filepath.Join(dest, "GOOD-703", "GOOD-703.nfo"))
+}
+
+func TestCLI_Sort_ApplyFailureIsTerminal(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := writeConfig(t, dir)
+	src := filepath.Join(dir, "src")
+	dest := filepath.Join(dir, "dest")
+	require.NoError(t, os.MkdirAll(src, 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(dest, "GOOD-702"), 0o700))
+	writeFile(t, filepath.Join(src, "GOOD-702.mp4"))
+	writeFile(t, filepath.Join(dest, "GOOD-702", "GOOD-702.mp4"))
+
+	out, code := run(t, cfgPath, "sort", "--move", src, "--dest", dest)
+	require.NotEqual(t, 0, code, "apply conflict must be terminal\n%s", out)
+	assert.Contains(t, out, "Apply failed")
+	assert.NotContains(t, out, "Sort complete!")
+	assert.FileExists(t, filepath.Join(src, "GOOD-702.mp4"))
 }
 
 // TestCLI_DryRun confirms --dry-run previews the operation without moving

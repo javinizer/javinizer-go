@@ -14,7 +14,7 @@ func normalizeActressSort(sortBy, sortOrder string) (string, string, error) {
 	}
 
 	switch sortBy {
-	case "id", "dmm_id", "japanese_name", "first_name", "last_name", "created_at", "updated_at":
+	case "id", colDMMID, colJapaneseName, colFirstName, colLastName, "created_at", colUpdatedAt:
 		return sortBy, sortOrder, nil
 	case "name", "":
 		return "name", sortOrder, nil
@@ -29,17 +29,17 @@ func actressOrderClauses(sortBy, sortOrder string) []string {
 	switch sortBy {
 	case "id":
 		return []string{"id " + sortOrder}
-	case "dmm_id":
+	case colDMMID:
 		return []string{"dmm_id " + sortOrder, "id " + sortOrder}
-	case "japanese_name":
+	case colJapaneseName:
 		return []string{"japanese_name " + sortOrder, "id " + sortOrder}
-	case "first_name":
+	case colFirstName:
 		return []string{"first_name " + sortOrder, "last_name " + sortOrder, "id " + sortOrder}
-	case "last_name":
+	case colLastName:
 		return []string{"last_name " + sortOrder, "first_name " + sortOrder, "id " + sortOrder}
 	case "created_at":
 		return []string{"created_at " + sortOrder, "id " + sortOrder}
-	case "updated_at":
+	case colUpdatedAt:
 		return []string{"updated_at " + sortOrder, "id " + sortOrder}
 	default:
 		return []string{"last_name " + sortOrder, "first_name " + sortOrder, "japanese_name " + sortOrder, "id " + sortOrder}

@@ -157,6 +157,16 @@
 					config.metadata.nfo.alt_name_role = val;
 				}}
 			/>
+
+			<FormToggle
+				label={m.settings_nfo_credited_name_label()}
+				description={m.settings_nfo_credited_name_desc()}
+				checked={config.metadata.nfo?.use_credited_name ?? false}
+				onchange={(val) => {
+					if (!config.metadata.nfo) config.metadata.nfo = {};
+					config.metadata.nfo.use_credited_name = val;
+				}}
+			/>
 		</fieldset>
 	</SettingsSubsection>
 

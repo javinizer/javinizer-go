@@ -98,6 +98,20 @@ func (r *RevertFileResult) withRetryable(cause error) *RevertFileResult {
 	return r
 }
 
+func replacementJournalContainsDestination(op *models.BatchFileOperation, destination string) bool {
+	gf, err := models.ParseGeneratedFiles(op.GeneratedFiles)
+	if err != nil {
+		return false
+	}
+	want := filepath.Clean(destination)
+	for _, entry := range gf.Replacements {
+		if filepath.Clean(entry.Destination) == want {
+			return true
+		}
+	}
+	return false
+}
+
 // restoreReplacementJournal replays an operation's replacement journal in
 // true reverse destination-sequence order (per destination, highest DestSeq
 // first — the sequence is assigned inside the downloader's destination lock,
@@ -129,7 +143,13 @@ func (r *RevertFileResult) withRetryable(cause error) *RevertFileResult {
 // and maps to the clean kind. An entry left armed against an unproven name
 // must never be reachable from here: foreign occupants corrupt restores,
 // and absent names wedge the retry's source stat forever.
+//
+//nolint:unused // retained as the direct all-destinations test seam
 func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.BatchFileOperation) (map[string]bool, error) {
+	return r.restoreReplacementJournalWhere(ctx, op, nil)
+}
+
+func (r *Reverter) restoreReplacementJournalWhere(ctx context.Context, op *models.BatchFileOperation, include func(string) bool) (map[string]bool, error) {
 	restored := map[string]bool{}
 	gf, err := models.ParseGeneratedFiles(op.GeneratedFiles)
 	if err != nil {
@@ -149,6 +169,15 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 	// never depended on translating a literal `\\`; Windows legacy journals
 	// retain cross-form matching.
 	byDest, destSpelling, destOrder := groupReplacementEntries(gf.Replacements)
+	if include != nil {
+		filtered := destOrder[:0]
+		for _, key := range destOrder {
+			if include(destSpelling[key]) {
+				filtered = append(filtered, key)
+			}
+		}
+		destOrder = filtered
+	}
 
 	// codex P3 R20-1: phase-split preflight from restore. Preflight iterates
 	// byDest WITHOUT locks so rejected ops halt BEFORE any bytes move — a
@@ -305,8 +334,17 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 				// Lstat-success object — symlink included — is PRESENT; only a
 				// genuine Lstat ENOENT is missing; every other Lstat error stays
 				// conservatively present.
-				_, destLstatErr := lstatRestoreSource(r.fs, dest)
+				destInfo, destLstatErr := lstatRestoreSource(r.fs, dest)
 				destMissingBeforeRestore := errors.Is(destLstatErr, afero.ErrFileNotFound)
+				if !restorePending && !destMissingBeforeRestore && e.InstalledSHA256 != "" {
+					matches, verifyErr := installedDestinationMatches(r.fs, dest, destInfo, e)
+					if verifyErr != nil {
+						return fmt.Errorf("verify installed replacement destination %s: %w", dest, verifyErr)
+					}
+					if !matches {
+						return fmt.Errorf("replacement destination %s no longer contains this operation's installed output; foreign bytes preserved", dest)
+					}
+				}
 
 				// Wave-19 (codex P2): a rearm-refused pending entry's backup name
 				// is UNOWNED — a refused no-replace re-arm left it foreign-
@@ -570,6 +608,36 @@ func (r *Reverter) restoreReplacementJournal(ctx context.Context, op *models.Bat
 		return restored, fmt.Errorf("replacement destination %s is wedged by an in-flight sweep mutation: %w", wedgedDest, fsutil.ErrReplacementBusy)
 	}
 	return restored, nil
+}
+
+func installedDestinationMatches(fs afero.Fs, path string, info os.FileInfo, entry models.ReplacementEntry) (bool, error) {
+	var sum [sha256.Size]byte
+	if info != nil && info.Mode()&os.ModeSymlink != 0 {
+		lr, ok := fs.(afero.LinkReader)
+		if !ok {
+			return false, fmt.Errorf("filesystem cannot read symlink")
+		}
+		target, err := lr.ReadlinkIfPossible(path)
+		if err != nil {
+			return false, err
+		}
+		sum = sha256.Sum256([]byte(target))
+		return int64(len(target)) == entry.InstalledSize && hex.EncodeToString(sum[:]) == entry.InstalledSHA256, nil
+	}
+	f, err := fs.Open(path)
+	if err != nil {
+		return false, err
+	}
+	h := sha256.New()
+	_, copyErr := io.Copy(h, f)
+	closeErr := f.Close()
+	if copyErr != nil {
+		return false, copyErr
+	}
+	if closeErr != nil {
+		return false, closeErr
+	}
+	return info != nil && info.Size() == entry.InstalledSize && hex.EncodeToString(h.Sum(nil)) == entry.InstalledSHA256, nil
 }
 
 // groupReplacementEntries buckets one invocation's replacement journal by

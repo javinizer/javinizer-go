@@ -368,7 +368,7 @@ func validateConfigExcludingTranslationCredentials(cfg *Config) error {
 
 	referer := strings.TrimSpace(cfg.Scrapers.Referer)
 	if referer == "" {
-		referer = "https://www.dmm.co.jp/"
+		referer = dmmBaseURL
 	}
 	u, err := url.Parse(referer)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {

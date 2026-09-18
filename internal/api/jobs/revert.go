@@ -95,7 +95,7 @@ func emitRevertEvent(ctx context.Context, emitter eventlog.EventEmitter, message
 	} else if result.Failed > 0 {
 		sev = models.SeverityError
 	}
-	fields := map[string]any{"job_id": jobID, "succeeded": result.Succeeded, "skipped": result.Skipped, "failed": result.Failed}
+	fields := map[string]any{jobIDKey: jobID, "succeeded": result.Succeeded, "skipped": result.Skipped, "failed": result.Failed}
 	for k, v := range extraFields {
 		fields[k] = v
 	}
@@ -129,10 +129,10 @@ func revertBatch(deps JobDeps) gin.HandlerFunc {
 		job, err := deps.JobRepo.FindByID(c.Request.Context(), jobID)
 		if err != nil {
 			if database.IsNotFound(err) {
-				c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "Job not found", Code: "JOB_NOT_FOUND", Params: map[string]any{"job_id": jobID}})
+				c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: jobNotFoundMessage, Code: jobNotFoundCode, Params: map[string]any{jobIDKey: jobID}})
 				return
 			}
-			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: "Failed to retrieve job"})
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: retrieveJobErrorMessage})
 			return
 		}
 
@@ -212,10 +212,10 @@ func revertOperation(deps JobDeps) gin.HandlerFunc {
 		job, err := deps.JobRepo.FindByID(c.Request.Context(), jobID)
 		if err != nil {
 			if database.IsNotFound(err) {
-				c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "Job not found", Code: "JOB_NOT_FOUND", Params: map[string]any{"job_id": jobID}})
+				c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: jobNotFoundMessage, Code: jobNotFoundCode, Params: map[string]any{jobIDKey: jobID}})
 				return
 			}
-			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: "Failed to retrieve job"})
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: retrieveJobErrorMessage})
 			return
 		}
 

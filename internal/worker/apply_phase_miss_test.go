@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -797,3 +798,81 @@ func TestApplyPhase_Run_ErrGroupWaitError(t *testing.T) {
 
 // Verify that errors.Is works correctly with DeadlineExceeded
 var _ error = context.DeadlineExceeded
+
+type sharedClaimApplyWorkflow struct {
+	stubApplyWorkflow
+	path string
+}
+
+func (w *sharedClaimApplyWorkflow) Apply(ctx context.Context, cmd workflow.ApplyCmd) (*workflow.ApplyResult, error) {
+	w.mu.Lock()
+	w.applyCalled++
+	w.mu.Unlock()
+	claim, err := cmd.ArtifactCoordinator.Claim(ctx, w.path, "same", cmd.ArtifactOwnerKey)
+	if err != nil {
+		return nil, err
+	}
+	if claim.OwnsPublication() {
+		cmd.ArtifactCoordinator.Complete(claim, workflow.SharedArtifactPublished)
+	}
+	return &workflow.ApplyResult{Movie: cmd.Movie}, nil
+}
+
+func TestApplyPhase_PreApplySkipRetiresSharedArtifactContender(t *testing.T) {
+	const first, second = "/source/a-part.mp4", "/source/b-part.mp4"
+	wf := &sharedClaimApplyWorkflow{path: "/output/MOVIE/movie.nfo"}
+	inputs := makeApplyInputs(wf)
+	inputs.Concurrency.MaxWorkers = 1
+	for _, path := range []string{first, second} {
+		inputs.Results[path] = &resultstore.MovieResult{
+			FileMatchInfo: models.FileMatchInfo{Path: path, MovieID: "MOVIE"},
+			Status:        models.JobStatusCompleted,
+			Movie:         &models.Movie{ID: "MOVIE", ContentID: "MOVIE"},
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	NewApplyPhase().Run(ctx, inputs, ApplyPhaseConfig{
+		Destination: "/output",
+		PreApplyFunc: func(_ context.Context, afc *ApplyFileContext) error {
+			if afc.FilePath == first {
+				return errors.New("skip first part")
+			}
+			return nil
+		},
+	})
+	require.NoError(t, ctx.Err(), "lower-ranked part must not wait on a retired skipped contender")
+	require.Equal(t, 1, wf.getApplyCalled(), "exactly the non-skipped claimant applies")
+}
+
+type coordinatorCaptureWorkflow struct {
+	stubApplyWorkflow
+	coordinators sync.Map
+}
+
+func (w *coordinatorCaptureWorkflow) Apply(_ context.Context, cmd workflow.ApplyCmd) (*workflow.ApplyResult, error) {
+	w.coordinators.Store(cmd.Movie.ContentID, cmd.ArtifactCoordinator)
+	w.mu.Lock()
+	w.applyCalled++
+	w.mu.Unlock()
+	return &workflow.ApplyResult{Movie: cmd.Movie}, nil
+}
+
+func TestApplyPhase_SharedArtifactCoordinatorsAreMovieScoped(t *testing.T) {
+	wf := &coordinatorCaptureWorkflow{}
+	inputs := makeApplyInputs(wf)
+	for i, id := range []string{"MOVIE-A", "MOVIE-B"} {
+		path := fmt.Sprintf("/source/%d.mp4", i)
+		inputs.Results[path] = &resultstore.MovieResult{
+			FileMatchInfo: models.FileMatchInfo{Path: path, MovieID: id},
+			Status:        models.JobStatusCompleted,
+			Movie:         &models.Movie{ID: id, ContentID: id},
+		}
+	}
+	NewApplyPhase().Run(context.Background(), inputs, ApplyPhaseConfig{Destination: "/output"})
+	a, ok := wf.coordinators.Load("MOVIE-A")
+	require.True(t, ok)
+	b, ok := wf.coordinators.Load("MOVIE-B")
+	require.True(t, ok)
+	require.NotSame(t, a, b, "unrelated movies must never wait behind each other's artifacts")
+}

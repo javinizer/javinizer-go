@@ -115,6 +115,10 @@ definitions:
         type: string
       last_name:
         type: string
+      name_key:
+        type: string
+      origin:
+        type: string
       thumb_url:
         type: string
       translations:
@@ -123,6 +127,8 @@ definitions:
         type: array
       updated_at:
         type: string
+      verified:
+        type: boolean
     type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.AuthCredentialsRequest:
     properties:
@@ -822,6 +828,8 @@ definitions:
         items:
           $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ActressView'
         type: array
+      cast_version:
+        type: string
       code:
         description: Canonical JAV code (e.g., "IPX-535"). Renamed from content_id.
         example: IPX-535
@@ -1781,12 +1789,24 @@ definitions:
       auto_add:
         description: Automatically add new actresses to database
         type: boolean
+      candidate_retention_days:
+        description: GC age for creditless candidates (default 30)
+        type: integer
+      collision_policy:
+        description: 'Scrape-vs-identity collision policy: block (default) | auto_keep
+          | auto_alias'
+        type: string
       convert_alias:
         description: Convert actress names using alias database
         type: boolean
       enabled:
         description: Enable actress image lookup from database
         type: boolean
+      trusted_collision_sources:
+        description: Scrapers eligible for auto_alias
+        items:
+          type: string
+        type: array
     type: object
   github_com_javinizer_javinizer-go_internal_config.AnthropicTranslationConfig:
     properties:
@@ -1993,6 +2013,9 @@ definitions:
         type: boolean
       per_file:
         description: Create separate NFO for each multi-part file
+        type: boolean
+      use_credited_name:
+        description: Render credited names instead of canonical identity names
         type: boolean
     type: object
   github_com_javinizer_javinizer-go_internal_config.NFOFormatConfig:
@@ -2488,6 +2511,10 @@ definitions:
         type: string
       last_name:
         type: string
+      name_key:
+        type: string
+      origin:
+        type: string
       thumb_url:
         type: string
       translations:
@@ -2499,6 +2526,8 @@ definitions:
         type: array
       updated_at:
         type: string
+      verified:
+        type: boolean
     type: object
   github_com_javinizer_javinizer-go_internal_models.ActressInfo:
     properties:
@@ -3059,6 +3088,10 @@ definitions:
         type: string
       last_name:
         type: string
+      name_key:
+        type: string
+      origin:
+        type: string
       thumb_url:
         type: string
       translations:
@@ -3070,6 +3103,8 @@ definitions:
         type: array
       updated_at:
         type: string
+      verified:
+        type: boolean
     type: object
   internal_api_actress.actressesResponse:
     properties:
@@ -3094,6 +3129,59 @@ definitions:
         items:
           type: string
         type: array
+    type: object
+  internal_api_actress.candidateListResponse:
+    properties:
+      candidates:
+        items:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress'
+        type: array
+      total:
+        type: integer
+    type: object
+  internal_api_actress.collisionListResponse:
+    properties:
+      collisions:
+        items:
+          $ref: '#/definitions/internal_api_actress.collisionResponse'
+        type: array
+    type: object
+  internal_api_actress.collisionResponse:
+    properties:
+      allowed_resolutions:
+        items:
+          type: string
+        type: array
+      canonical_value:
+        type: string
+      created_at:
+        type: string
+      credit_id:
+        type: integer
+      current_actress_id:
+        type: integer
+      field:
+        type: string
+      id:
+        type: integer
+      last_seen_at:
+        type: string
+      movie_content_id:
+        type: string
+      occurrences:
+        type: integer
+      reported_value:
+        type: string
+      resolution:
+        type: string
+      sources_seen:
+        type: string
+      status:
+        type: string
+      updated_at:
+        type: string
+      user_pinned:
+        type: boolean
     type: object
   internal_api_desktop.upgradeRequest:
     properties:
@@ -3720,6 +3808,260 @@ paths:
       summary: Get actress alias group
       tags:
       - actress
+  /api/v1/actresses/candidates:
+    get:
+      description: Returns quarantined identities created by scrape resolution misses.
+      parameters:
+      - default: 50
+        description: Max results
+        in: query
+        name: limit
+        type: integer
+      - default: 0
+        description: Skip results
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_api_actress.candidateListResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+      summary: List candidate identities
+      tags:
+      - actresses
+  /api/v1/actresses/candidates/{id}/promote:
+    post:
+      consumes:
+      - application/json
+      description: Confirms canonical fields and marks the candidate verified and
+        user-owned.
+      parameters:
+      - description: Candidate ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Canonical fields (empty = keep scraped values)
+        in: body
+        name: request
+        schema:
+          properties:
+            first_name:
+              type: string
+            japanese_name:
+              type: string
+            last_name:
+              type: string
+            thumb_url:
+              type: string
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+      summary: Promote a candidate identity
+      tags:
+      - actresses
+  /api/v1/actresses/collisions:
+    get:
+      description: Returns open scrape-vs-identity collisions for a movie.
+      parameters:
+      - description: Movie content ID
+        in: query
+        name: movie_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_api_actress.collisionListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+      summary: List open collisions
+      tags:
+      - actresses
+  /api/v1/actresses/collisions/{id}/resolve:
+    post:
+      consumes:
+      - application/json
+      description: Applies one of keep_identity, adopt_canonical, adopt_alias, or
+        reassign atomically.
+      parameters:
+      - description: Collision ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Resolution outcome
+        in: body
+        name: request
+        required: true
+        schema:
+          properties:
+            resolution:
+              type: string
+            target_actress_id:
+              type: integer
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            properties:
+              remaining_open:
+                type: integer
+              resolved:
+                type: boolean
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+      summary: Resolve a collision
+      tags:
+      - actresses
+  /api/v1/actresses/credits/{id}/override:
+    post:
+      consumes:
+      - application/json
+      description: Overrides one movie's displayed actress name without mutating the
+        shared identity.
+      parameters:
+      - description: Credit ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Override payload
+        in: body
+        name: request
+        required: true
+        schema:
+          properties:
+            override_name:
+              type: string
+            user_override:
+              type: boolean
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            properties:
+              ok:
+                type: boolean
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+      summary: Set a credit display override
+      tags:
+      - actresses
+  /api/v1/actresses/credits/{id}/suppress:
+    post:
+      consumes:
+      - application/json
+      description: Marks a credit user-removed so later scrapes cannot resurrect it.
+      parameters:
+      - description: Credit ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Suppression state
+        in: body
+        name: request
+        required: true
+        schema:
+          properties:
+            suppressed:
+              type: boolean
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            properties:
+              ok:
+                type: boolean
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+      summary: Suppress a credit
+      tags:
+      - actresses
   /api/v1/actresses/merge:
     post:
       consumes:
