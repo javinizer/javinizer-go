@@ -152,9 +152,9 @@ func NewContextFromMovieWithOptions(movie *models.Movie, opts ContextOptions) *C
 			}
 			actress := *credit.Actress
 			canonical := models.FormatActressName(actress, models.FormatActressNameOptions{FirstNameOrder: opts.FirstNameOrder})
-			name := credit.RenderName(opts.UseCreditedName, canonical)
+			name, selected := credit.RenderNameWithSelection(opts.UseCreditedName, canonical)
 			detail := ActressDetail{FirstName: actress.FirstName, LastName: actress.LastName, JapaneseName: actress.JapaneseName}
-			if name != canonical {
+			if selected {
 				detail = ActressDetail{FirstName: name}
 			}
 			ctx.Actresses = append(ctx.Actresses, name)
