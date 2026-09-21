@@ -162,6 +162,10 @@ func candidateEvidenceKeys(candidate *models.Actress) map[string]struct{} {
 }
 
 func findCandidateByNameEvidenceTx(tx *gorm.DB, incoming *models.Actress) (*models.Actress, error) {
+	return findCandidateByNameEvidence(tx, incoming, false)
+}
+
+func findCandidateByNameEvidence(tx *gorm.DB, incoming *models.Actress, allowQuarantined bool) (*models.Actress, error) {
 	incomingKeys := candidateEvidenceKeys(incoming)
 	if len(incomingKeys) == 0 {
 		return nil, gorm.ErrRecordNotFound
@@ -200,7 +204,7 @@ func findCandidateByNameEvidenceTx(tx *gorm.DB, incoming *models.Actress) (*mode
 	}
 	if len(matches) == 1 {
 		for _, match := range matches {
-			if match.AmbiguityQuarantined {
+			if match.AmbiguityQuarantined && !allowQuarantined {
 				return nil, fmt.Errorf("candidate name evidence matches a durably quarantined identity: %w", ErrActressCandidateAmbiguous)
 			}
 			return &match, nil
@@ -249,7 +253,7 @@ func resolveAmbiguousCandidateTx(tx *gorm.DB, scraped *models.Actress, nameKey s
 	if nameKey == "" {
 		return nil, fmt.Errorf("resolve actress identity: ambiguous match with empty name key")
 	}
-	candidate, err := findCandidateByNameEvidenceTx(tx, scraped)
+	candidate, err := findCandidateByNameEvidence(tx, scraped, true)
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, wrapDBErr("resolve candidate", nameKey, err)
 	}
@@ -300,9 +304,37 @@ func quarantinePositiveDMMNameMatchTx(tx *gorm.DB, scraped *models.Actress) (*mo
 	return candidate, ResolutionAmbiguous, nil
 }
 
-// ResolveActressIdentityTx resolves a scraped actress against existing
-// identities, linking to a verified match or a quarantined candidate.
-func ResolveActressIdentityTx(tx *gorm.DB, scraped *models.Actress) (*models.Actress, ResolutionOutcome, error) {
+// ResolveActressIdentityTx is the standalone resolution boundary. It finalizes
+// candidate quarantine exactly once and rolls all identity mutations back when
+// finalization fails.
+func ResolveActressIdentityTx(tx *gorm.DB, scraped *models.Actress) (resolved *models.Actress, outcome ResolutionOutcome, err error) {
+	err = retryOnLocked(func() error {
+		return tx.Transaction(func(scoped *gorm.DB) error {
+			var exactCandidate bool
+			resolved, outcome, err = resolveActressIdentityDeferredTx(scoped, scraped, &exactCandidate)
+			if err != nil {
+				return err
+			}
+			if err := recomputeActressCandidateQuarantineTx(scoped); err != nil {
+				return err
+			}
+			if resolved != nil {
+				if err := scoped.First(resolved, resolved.ID).Error; err != nil {
+					return wrapDBErr("reload resolved actress", fmt.Sprintf("actress %d", resolved.ID), err)
+				}
+				if exactCandidate && resolved.AmbiguityQuarantined {
+					outcome = ResolutionAmbiguous
+				}
+			}
+			return nil
+		})
+	})
+	return resolved, outcome, err
+}
+
+// resolveActressIdentityDeferredTx does not maintain candidate quarantine.
+// Its outer transaction owner must finalize the projection once before commit.
+func resolveActressIdentityDeferredTx(tx *gorm.DB, scraped *models.Actress, exactCandidate *bool) (*models.Actress, ResolutionOutcome, error) {
 	if scraped == nil {
 		return nil, ResolutionMatched, fmt.Errorf("resolve actress identity: scraped actress must not be nil")
 	}
@@ -313,10 +345,13 @@ func ResolveActressIdentityTx(tx *gorm.DB, scraped *models.Actress) (*models.Act
 			return nil, ResolutionMatched, wrapDBErr("resolve dmm", fmt.Sprintf("dmm %d", scraped.DMMID), err)
 		}
 		if found != nil {
-			// Exact positive-DMM evidence is the identity boundary. Name-based
-			// quarantine only governs name-only resolution and must not downgrade
-			// an exact candidate hit to ambiguity.
 			if !found.Verified {
+				if exactCandidate != nil {
+					*exactCandidate = true
+				}
+				if found.AmbiguityQuarantined {
+					return found, ResolutionAmbiguous, nil
+				}
 				return found, ResolutionCandidateLinked, nil
 			}
 			return found, ResolutionMatched, nil

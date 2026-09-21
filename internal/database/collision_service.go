@@ -235,7 +235,7 @@ func (s *CollisionService) resolveTx(tx *gorm.DB, collisionID uint, resolution s
 			return 0, err
 		}
 	case models.CollisionResolutionReassign:
-		if err := reassignCreditTx(tx, creditPtr, targetActressID); err != nil {
+		if err := reassignCreditDeferredTx(tx, creditPtr, targetActressID); err != nil {
 			return 0, err
 		}
 	}
@@ -257,6 +257,9 @@ func (s *CollisionService) resolveTx(tx *gorm.DB, collisionID uint, resolution s
 		Where("movie_content_id = ? AND status = ?", collision.MovieContentID, models.CollisionStatusOpen).
 		Count(&remainingCount).Error; err != nil {
 		return 0, wrapDBErr("count", fmt.Sprintf("open collisions for movie %s", collision.MovieContentID), err)
+	}
+	if err := recomputeActressCandidateQuarantineTx(tx); err != nil {
+		return 0, err
 	}
 	return int(remainingCount), nil
 }
@@ -326,11 +329,16 @@ func (s *CollisionService) SetCreditSuppressed(ctx context.Context, creditID uin
 		if err != nil {
 			return err
 		}
-		return mutateMovieRenderInputsTx(tx, []string{contentID}, func() error { return setCreditSuppressedTx(tx, creditID, suppressed) })
+		return mutateMovieRenderInputsTx(tx, []string{contentID}, func() error {
+			if err := setCreditSuppressedDeferredTx(tx, creditID, suppressed); err != nil {
+				return err
+			}
+			return recomputeActressCandidateQuarantineTx(tx)
+		})
 	})
 }
 
-func setCreditSuppressedTx(tx *gorm.DB, creditID uint, suppressed bool) error {
+func setCreditSuppressedDeferredTx(tx *gorm.DB, creditID uint, suppressed bool) error {
 	var credit models.MovieCredit
 	if err := tx.Preload("Actress").Where("id = ?", creditID).First(&credit).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -486,7 +494,7 @@ func restoreSuppressedCreditCollisionsTx(tx *gorm.DB, credit *models.MovieCredit
 			ReportedValue:  current.reported,
 			CanonicalValue: current.canonical,
 		}
-		if err := collisionRepo.RecordTx(tx, collision, credit.Source); err != nil {
+		if err := collisionRepo.recordDeferredTx(tx, collision, credit.Source); err != nil {
 			return err
 		}
 	}
@@ -628,7 +636,7 @@ func transitionActressCanonicalNamesForMergeTx(tx *gorm.DB, targetActressID, sou
 		if _, unchanged := currentKeys[key]; unchanged {
 			continue
 		}
-		if err := retargetProvenCanonicalAliasesTx(tx, sourceActressID, targetActressID, oldName, newCanonical, previousKeys); err != nil {
+		if err := retargetProvenCanonicalAliasesDeferredTx(tx, sourceActressID, targetActressID, oldName, newCanonical, previousKeys); err != nil {
 			return wrapDBErr("retarget", fmt.Sprintf("actress aliases for %d", actressID), err)
 		}
 		existing, err := normalizedActressAliasesTx(tx, oldName)
@@ -687,7 +695,7 @@ func reassignLegacyActressTx(tx *gorm.DB, movieContentID string, sourceActressID
 	).Error
 }
 
-func reassignCreditTx(tx *gorm.DB, credit *models.MovieCredit, targetActressID uint) error {
+func reassignCreditDeferredTx(tx *gorm.DB, credit *models.MovieCredit, targetActressID uint) error {
 	var target models.Actress
 	if err := tx.Where("id = ? AND verified = ?", targetActressID, true).First(&target).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -751,6 +759,12 @@ func reassignCreditTx(tx *gorm.DB, credit *models.MovieCredit, targetActressID u
 		return err
 	}
 	return nil
+}
+
+func reassignCreditTx(tx *gorm.DB, credit *models.MovieCredit, targetActressID uint) error {
+	return runCandidateQuarantineMutationTx(tx, func(scoped *gorm.DB) error {
+		return reassignCreditDeferredTx(scoped, credit, targetActressID)
+	})
 }
 
 func transferCollisionsTx(tx *gorm.DB, fromCreditID, toCreditID uint) error {

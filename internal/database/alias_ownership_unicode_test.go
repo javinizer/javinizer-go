@@ -290,7 +290,7 @@ func TestMergeCanonicalRetargetUsesExplicitSourceAndLeavesOtherIdentityUntouched
 
 func TestRetargetProvenCanonicalAliasesRejectsUnprovenOwner(t *testing.T) {
 	db := newCreditTestDB(t)
-	err := retargetProvenCanonicalAliasesTx(db.DB, 0, 0, "Owner A", "Owner B", map[string]struct{}{})
+	err := retargetProvenCanonicalAliasesDeferredTx(db.DB, 0, 0, "Owner A", "Owner B", map[string]struct{}{})
 	require.ErrorIs(t, err, ErrActressAliasOwnershipConflict)
 }
 
@@ -301,7 +301,7 @@ func TestCanonicalRetargetIdentityProofFailureContracts(t *testing.T) {
 		require.NoError(t, db.Create(&owner).Error)
 		require.NoError(t, db.Create(&models.ActressAlias{AliasName: "Old Alias", CanonicalName: owner.JapaneseName}).Error)
 		injectDatabaseCallbackError(t, db, "query", "actresses", 1)
-		err := retargetProvenCanonicalAliasesTx(db.DB, owner.ID, owner.ID, owner.JapaneseName, "New Owner", map[string]struct{}{models.NormalizeActressNameKey(owner.JapaneseName): {}})
+		err := retargetProvenCanonicalAliasesDeferredTx(db.DB, owner.ID, owner.ID, owner.JapaneseName, "New Owner", map[string]struct{}{models.NormalizeActressNameKey(owner.JapaneseName): {}})
 		require.ErrorContains(t, err, "verify unique actress alias owner")
 	})
 
@@ -420,7 +420,7 @@ func TestCandidateNameKeyBackfillFailureContracts(t *testing.T) {
 		name, trigger string
 		candidates    []models.Actress
 	}{
-		{"clear", "CREATE TRIGGER fail_candidate_key_clear BEFORE UPDATE OF name_key ON actresses WHEN NEW.name_key IS NULL BEGIN SELECT RAISE(ABORT, 'clear'); END", []models.Actress{{JapaneseName: "Clear", NameKey: "clear", Origin: ActressOriginScrape}}},
+		{"clear", "CREATE TRIGGER fail_candidate_key_clear BEFORE UPDATE OF name_key ON actresses WHEN NEW.name_key IS NULL BEGIN SELECT RAISE(ABORT, 'clear'); END", []models.Actress{{DMMID: 41901, JapaneseName: "Clear", NameKey: "clear", Origin: ActressOriginScrape}}},
 		{"rekey", "CREATE TRIGGER fail_candidate_key_rekey BEFORE UPDATE OF name_key ON actresses WHEN NEW.name_key IS NOT NULL BEGIN SELECT RAISE(ABORT, 'rekey'); END", []models.Actress{{JapaneseName: "Ｒｅｋｅｙ", NameKey: "legacy-rekey", Origin: ActressOriginScrape}}},
 		{"quarantine", "CREATE TRIGGER fail_candidate_key_quarantine BEFORE UPDATE OF ambiguity_quarantined ON actresses BEGIN SELECT RAISE(ABORT, 'quarantine'); END", []models.Actress{{JapaneseName: "が", NameKey: "が", Origin: ActressOriginScrape}, {JapaneseName: "か\u3099", NameKey: "か\u3099", Origin: ActressOriginScrape}}},
 	} {

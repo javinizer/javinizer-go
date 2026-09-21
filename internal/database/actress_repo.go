@@ -41,7 +41,12 @@ func (r *ActressRepository) Create(ctx context.Context, actress *models.Actress)
 		actress.Verified = true
 		actress.Origin = ActressOriginUser
 	}
-	return r.BaseRepository.Create(ctx, actress)
+	return r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(actress).Error; err != nil {
+			return wrapDBErr("create", fmt.Sprintf("actress %s", actress.FullName()), err)
+		}
+		return recomputeActressCandidateQuarantineTx(tx)
+	})
 }
 
 // Update saves all fields of the given actress record.
@@ -50,10 +55,12 @@ func (r *ActressRepository) Update(ctx context.Context, actress *models.Actress)
 		return wrapDBErr("update", "nil actress", ErrInvalidLookup)
 	}
 	if actress.ID == 0 {
-		if err := r.GetDB().WithContext(ctx).Save(actress).Error; err != nil {
-			return wrapDBErr("update", fmt.Sprintf("actress %s", actress.JapaneseName), err)
-		}
-		return nil
+		return r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			if err := tx.Save(actress).Error; err != nil {
+				return wrapDBErr("update", fmt.Sprintf("actress %s", actress.JapaneseName), err)
+			}
+			return recomputeActressCandidateQuarantineTx(tx)
+		})
 	}
 	return r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		contentIDs, err := movieContentIDsForActressesTx(tx, actress.ID)
@@ -89,6 +96,9 @@ func (r *ActressRepository) Update(ctx context.Context, actress *models.Actress)
 			if err := reconcileActressCollisionsTx(tx, actress.ID); err != nil {
 				return err
 			}
+		}
+		if err := recomputeActressCandidateQuarantineTx(tx); err != nil {
+			return err
 		}
 		return invalidateChangedMovieRenderInputsTx(tx, before, contentIDs)
 	})
@@ -131,6 +141,9 @@ func (r *ActressRepository) RenameNameFields(ctx context.Context, id uint, first
 		if err := reconcileActressCollisionsTx(tx, id); err != nil {
 			return err
 		}
+		if err := recomputeActressCandidateQuarantineTx(tx); err != nil {
+			return err
+		}
 		return invalidateChangedMovieRenderInputsTx(tx, before, contentIDs)
 	})
 }
@@ -154,7 +167,7 @@ func (r *ActressRepository) Delete(ctx context.Context, id uint) error {
 		if err := deleteCreditReassignmentsTx(tx, "source_actress_id = ? OR target_actress_id = ?", fmt.Sprintf("actress %d", id), id, id); err != nil {
 			return err
 		}
-		if err := deleteCreditRecordsTx(tx, "credit_id IN (SELECT id FROM movie_credits WHERE actress_id = ?)", "actress_id = ?", id, fmt.Sprintf("actress %d", id)); err != nil {
+		if err := deleteCreditRecordsDeferredTx(tx, "credit_id IN (SELECT id FROM movie_credits WHERE actress_id = ?)", "actress_id = ?", id, fmt.Sprintf("actress %d", id)); err != nil {
 			return err
 		}
 		if err := tx.Exec("DELETE FROM movie_actresses WHERE actress_id = ?", id).Error; err != nil {
@@ -165,6 +178,9 @@ func (r *ActressRepository) Delete(ctx context.Context, id uint) error {
 		}
 		if err := tx.Delete(&models.Actress{}, id).Error; err != nil {
 			return wrapDBErr("delete", fmt.Sprintf("actress %d", id), err)
+		}
+		if err := recomputeActressCandidateQuarantineTx(tx); err != nil {
+			return err
 		}
 		return invalidateChangedMovieRenderInputsTx(tx, before, contentIDs)
 	})
@@ -534,7 +550,10 @@ func promoteCandidateTx(tx *gorm.DB, id uint, firstName, lastName, japaneseName,
 	if err := resolveCandidateIdentityCollisionsTx(tx, id); err != nil {
 		return err
 	}
-	return restoreActressProjectionTx(tx, id)
+	if err := restoreActressProjectionTx(tx, id); err != nil {
+		return err
+	}
+	return recomputeActressCandidateQuarantineTx(tx)
 }
 
 // SetUserOwned marks an identity as user-owned so curated imports cannot
@@ -573,7 +592,10 @@ func (r *ActressRepository) UpdateCanonicalFields(ctx context.Context, id uint, 
 			if err := reconcileActressCollisionsTx(tx, id); err != nil {
 				return err
 			}
-			return restoreActressProjectionTx(tx, id)
+			if err := restoreActressProjectionTx(tx, id); err != nil {
+				return err
+			}
+			return recomputeActressCandidateQuarantineTx(tx)
 		})
 	})
 }
@@ -595,7 +617,7 @@ func (r *ActressRepository) ImportUpsert(ctx context.Context, incoming *models.A
 			if err := tx.Create(incoming).Error; err != nil {
 				return wrapDBErr("create", fmt.Sprintf("imported actress %s", incoming.FullName()), err)
 			}
-			return nil
+			return recomputeActressCandidateQuarantineTx(tx)
 		})
 	}
 	incoming.ID = existing.ID
@@ -632,16 +654,18 @@ func (r *ActressRepository) ImportUpsert(ctx context.Context, incoming *models.A
 		if err := tx.Save(incoming).Error; err != nil {
 			return wrapDBErr("save", fmt.Sprintf("imported actress %s", incoming.FullName()), err)
 		}
-		if !promotingCandidate {
-			return invalidateChangedMovieRenderInputsTx(tx, before, contentIDs)
+		if promotingCandidate {
+			if err := transitionActressCanonicalNamesTx(tx, incoming.ID, &previousIdentity); err != nil {
+				return err
+			}
+			if err := resolveCandidateIdentityCollisionsTx(tx, incoming.ID); err != nil {
+				return err
+			}
+			if err := restoreActressProjectionTx(tx, incoming.ID); err != nil {
+				return err
+			}
 		}
-		if err := transitionActressCanonicalNamesTx(tx, incoming.ID, &previousIdentity); err != nil {
-			return err
-		}
-		if err := resolveCandidateIdentityCollisionsTx(tx, incoming.ID); err != nil {
-			return err
-		}
-		if err := restoreActressProjectionTx(tx, incoming.ID); err != nil {
+		if err := recomputeActressCandidateQuarantineTx(tx); err != nil {
 			return err
 		}
 		return invalidateChangedMovieRenderInputsTx(tx, before, contentIDs)
@@ -808,7 +832,7 @@ WHERE id = ?
 			}
 			pruned += res.RowsAffected
 		}
-		return nil
+		return recomputeActressCandidateQuarantineTx(tx)
 	})
 	if err != nil {
 		return 0, err

@@ -48,7 +48,7 @@ func TestCandidateMergePreservesAmbiguityUntilVerifiedIdentitySurvives(t *testin
 			require.True(t, survivor.AmbiguityQuarantined)
 			resolved, outcome, err := ResolveActressIdentityTx(db.DB, &models.Actress{DMMID: 88101, FirstName: "Same", LastName: "Person"})
 			require.NoError(t, err)
-			require.Equal(t, ResolutionCandidateLinked, outcome)
+			require.Equal(t, ResolutionAmbiguous, outcome)
 			require.Equal(t, targetID, resolved.ID)
 
 			persisted, err := movies.FindByContentID(ctx, movie.ContentID)

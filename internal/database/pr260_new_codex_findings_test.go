@@ -49,6 +49,12 @@ func TestPositiveDMMScrapesDoNotClaimVerifiedDMMlessIdentityAcrossRestart(t *tes
 	same, err := NewMovieRepository(db).Upsert(ctx, sameMovie)
 	require.NoError(t, err)
 	require.Equal(t, firstActressID, same.Credits[0].ActressID)
+	openCounts, err = NewCreditCollisionRepository(db).CountOpenByMovieBatch(ctx, []string{same.ContentID})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, openCounts[same.ContentID])
+	require.ErrorIs(t, NewMovieRepository(db).WithApplyArtifactPublicationFence(ctx, same.ContentID, same.RenderGeneration, func(*models.Movie) error { return nil }), ErrApplyArtifactPublicationBlocked)
+	require.NoError(t, db.Close())
+	db = open()
 
 	secondMovie := creditMovie("DMM-CLAIM-2", []models.MovieCredit{{
 		CreditedName: "Same Person",
@@ -69,11 +75,11 @@ func TestPositiveDMMScrapesDoNotClaimVerifiedDMMlessIdentityAcrossRestart(t *tes
 	require.Equal(t, firstActressID, repeated.Credits[0].ActressID)
 	openCounts, err = NewCreditCollisionRepository(db).CountOpenByMovieBatch(ctx, []string{same.ContentID, repeated.ContentID})
 	require.NoError(t, err)
-	require.Zero(t, openCounts[same.ContentID])
-	require.Zero(t, openCounts[repeated.ContentID])
+	require.EqualValues(t, 1, openCounts[same.ContentID])
+	require.EqualValues(t, 1, openCounts[repeated.ContentID])
 	require.Empty(t, same.Actresses)
 	require.Empty(t, repeated.Actresses)
-	require.NoError(t, NewMovieRepository(db).WithApplyArtifactPublicationFence(ctx, repeated.ContentID, repeated.RenderGeneration, func(*models.Movie) error { return nil }))
+	require.ErrorIs(t, NewMovieRepository(db).WithApplyArtifactPublicationFence(ctx, repeated.ContentID, repeated.RenderGeneration, func(*models.Movie) error { return nil }), ErrApplyArtifactPublicationBlocked)
 
 	require.NoError(t, NewActressRepository(db).PromoteCandidate(ctx, firstActressID, "Resolved", "Person", "", ""))
 	openCounts, err = NewCreditCollisionRepository(db).CountOpenByMovieBatch(ctx, []string{same.ContentID, repeated.ContentID})

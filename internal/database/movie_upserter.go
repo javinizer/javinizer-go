@@ -229,17 +229,28 @@ func (u *MovieUpserter) UpsertWithTranslations(ctx context.Context, movie *model
 			if err := tx.Preload("Actresses").Preload("Genres").Preload("Translations", func(db *gorm.DB) *gorm.DB { return db.Order("language ASC") }).First(&loaded, "content_id = ?", movie.ContentID).Error; err != nil {
 				return wrapDBErr("reload", fmt.Sprintf("movie %s", movie.ContentID), err)
 			}
-			credits, err := NewMovieCreditRepository(u.repo.GetDB()).ListByMovieTx(tx, loaded.ContentID)
-			if err != nil {
-				return err
-			}
-			loaded.Credits = credits
 			if err := invalidateChangedMovieRenderInputsTx(tx, beforeRender, []string{movie.ContentID}); err != nil {
 				return err
 			}
 			if err := tx.Model(&models.Movie{}).Select("render_dirty", "render_generation").Where("content_id = ?", movie.ContentID).First(&loaded).Error; err != nil {
 				return wrapDBErr("reload render state", fmt.Sprintf("movie %s", movie.ContentID), err)
 			}
+			if err := recomputeActressCandidateQuarantineTx(tx); err != nil {
+				return err
+			}
+			// Alias mutations from later credits can make an earlier exact-DMM
+			// candidate ambiguous only in the final global derivation. Reconcile
+			// that authoritative state last so no per-credit supersession can
+			// close the newly required evidence. The quarantine bit is already
+			// true, so recording the collision needs no second global pass.
+			if err := u.reconcileFinalCandidateCollisionsTx(tx, movie.ContentID); err != nil {
+				return err
+			}
+			credits, err := NewMovieCreditRepository(u.repo.GetDB()).ListByMovieTx(tx, loaded.ContentID)
+			if err != nil {
+				return err
+			}
+			loaded.Credits = credits
 			result = &loaded
 			return nil
 		})
@@ -359,7 +370,7 @@ func (u *MovieUpserter) reconcileLegacyActressEditsTx(tx *gorm.DB, movie *models
 		incoming[actress.ID] = true
 		if credit, ok := existingByActress[actress.ID]; ok {
 			if credit.Suppressed {
-				if err := setCreditSuppressedTx(tx, credit.ID, false); err != nil {
+				if err := setCreditSuppressedDeferredTx(tx, credit.ID, false); err != nil {
 					return err
 				}
 			}
@@ -375,13 +386,13 @@ func (u *MovieUpserter) reconcileLegacyActressEditsTx(tx *gorm.DB, movie *models
 			OrderIndex:           i,
 			OrderPinned:          true,
 		}
-		if err := creditRepo.UpsertTx(tx, credit); err != nil {
+		if err := creditRepo.upsertDeferredTx(tx, credit); err != nil {
 			return err
 		}
 	}
 	for _, credit := range existing {
 		if !incoming[credit.ActressID] && !credit.Suppressed {
-			if err := setCreditSuppressedTx(tx, credit.ID, true); err != nil {
+			if err := setCreditSuppressedDeferredTx(tx, credit.ID, true); err != nil {
 				return err
 			}
 		}
@@ -683,7 +694,6 @@ func (u *MovieUpserter) persistCreditsTx(tx *gorm.DB, movie *models.Movie) error
 		u.repo.GetDB(), "credit collision",
 		creditCollisionLabel,
 	)}
-	aliasRepo := NewActressAliasRepository(u.repo.GetDB())
 
 	existing, err := creditRepo.ListByMovieTx(tx, movie.ContentID)
 	if err != nil {
@@ -728,7 +738,7 @@ func (u *MovieUpserter) persistCreditsTx(tx *gorm.DB, movie *models.Movie) error
 			}
 		}
 
-		resolved, outcome, err := ResolveActressIdentityTx(tx, &scraped)
+		resolved, outcome, err := resolveActressIdentityDeferredTx(tx, &scraped, nil)
 		if err != nil {
 			return err
 		}
@@ -745,7 +755,7 @@ func (u *MovieUpserter) persistCreditsTx(tx *gorm.DB, movie *models.Movie) error
 		if ex, ok := existingByActress[credit.ActressID]; ok && ex.OrderPinned {
 			credit.OrderIndex = ex.OrderIndex
 		}
-		if err := creditRepo.UpsertTx(tx, credit); err != nil {
+		if err := creditRepo.upsertDeferredTx(tx, credit); err != nil {
 			return err
 		}
 		seen[resolved.ID] = true
@@ -758,7 +768,7 @@ func (u *MovieUpserter) persistCreditsTx(tx *gorm.DB, movie *models.Movie) error
 		if outcome == ResolutionAmbiguous {
 			identityReported = scraped.FullName()
 		}
-		if err := collisionRepo.resolveSupersededOpenTx(tx, credit.ID, models.CreditFieldIdentityLink, identityReported); err != nil {
+		if err := collisionRepo.resolveSupersededOpenDeferredTx(tx, credit.ID, models.CreditFieldIdentityLink, identityReported); err != nil {
 			return err
 		}
 		if outcome == ResolutionAmbiguous {
@@ -769,14 +779,14 @@ func (u *MovieUpserter) persistCreditsTx(tx *gorm.DB, movie *models.Movie) error
 				ReportedValue:  scraped.FullName(),
 				CanonicalValue: resolved.FullName(),
 			}
-			if err := collisionRepo.RecordTx(tx, collision, credit.Source); err != nil {
+			if err := collisionRepo.recordDeferredTx(tx, collision, credit.Source); err != nil {
 				return err
 			}
 			continue
 		}
 
 		if resolved.Verified {
-			if err := u.recordFieldCollisionsTx(tx, collisionRepo, aliasRepo, credit, resolved, policy, trusted); err != nil {
+			if err := u.recordFieldCollisionsTx(tx, collisionRepo, credit, resolved, policy, trusted); err != nil {
 				return err
 			}
 		}
@@ -799,13 +809,13 @@ func (u *MovieUpserter) persistCreditsTx(tx *gorm.DB, movie *models.Movie) error
 		if pinned {
 			continue
 		}
-		if err := collisionRepo.CloseByCreditTx(tx, ex.ID, models.CollisionResolutionByRemoval); err != nil {
+		if err := collisionRepo.closeByCreditDeferredTx(tx, ex.ID, models.CollisionResolutionByRemoval); err != nil {
 			return err
 		}
 		if err := tx.Exec("DELETE FROM credit_collisions WHERE credit_id = ?", ex.ID).Error; err != nil {
 			return wrapDBErr("delete collisions", fmt.Sprintf("credit %d", ex.ID), err)
 		}
-		if err := creditRepo.DeleteTx(tx, movie.ContentID, ex.ActressID); err != nil {
+		if err := creditRepo.deleteDeferredTx(tx, movie.ContentID, ex.ActressID); err != nil {
 			return err
 		}
 	}
@@ -888,7 +898,70 @@ func aliasMatchesCanonicalTx(tx *gorm.DB, aliasName string, resolved *models.Act
 	return matched, nil
 }
 
-func (u *MovieUpserter) recordFieldCollisionsTx(tx *gorm.DB, collisionRepo *CreditCollisionRepository, aliasRepo *ActressAliasRepository, credit *models.MovieCredit, resolved *models.Actress, policy CollisionPolicy, trusted map[string]bool) error {
+// reconcileFinalCandidateCollisionsTx reloads only this movie's durable active
+// credits and their linked candidates after all alias mutations. It closes the
+// late-ambiguity gap without scanning the actress catalog or recomputing global
+// quarantine per credit.
+func (u *MovieUpserter) reconcileFinalCandidateCollisionsTx(tx *gorm.DB, movieContentID string) error {
+	var credits []models.MovieCredit
+	if err := tx.Model(&models.MovieCredit{}).
+		Select("movie_credits.*").
+		Joins("JOIN actresses ON actresses.id = movie_credits.actress_id").
+		Where("movie_credits.movie_content_id = ? AND movie_credits.suppressed = ? AND actresses.verified = ? AND actresses.ambiguity_quarantined = ?", movieContentID, false, false, true).
+		Order("movie_credits.id ASC").
+		Find(&credits).Error; err != nil {
+		return wrapDBErr("list", fmt.Sprintf("quarantined candidate credits for movie %s", movieContentID), err)
+	}
+	if len(credits) == 0 {
+		return nil
+	}
+
+	candidateIDs := make([]uint, 0, len(credits))
+	seen := make(map[uint]struct{}, len(credits))
+	for i := range credits {
+		if _, ok := seen[credits[i].ActressID]; !ok {
+			seen[credits[i].ActressID] = struct{}{}
+			candidateIDs = append(candidateIDs, credits[i].ActressID)
+		}
+	}
+	var candidates []models.Actress
+	if err := tx.Where("id IN ? AND verified = ? AND ambiguity_quarantined = ?", candidateIDs, false, true).Find(&candidates).Error; err != nil {
+		return wrapDBErr("list", fmt.Sprintf("quarantined candidates for movie %s", movieContentID), err)
+	}
+	candidateByID := make(map[uint]models.Actress, len(candidates))
+	for i := range candidates {
+		candidateByID[candidates[i].ID] = candidates[i]
+	}
+
+	collisionRepo := NewCreditCollisionRepository(u.repo.GetDB())
+	for i := range credits {
+		candidate := candidateByID[credits[i].ActressID]
+		// Identity-link evidence describes the exact-DMM candidate chosen by
+		// resolution, not a potentially different display credit. This also
+		// reuses evidence recorded earlier when the candidate was already
+		// quarantined at resolution time.
+		reported := candidate.FullName()
+		if strings.TrimSpace(reported) == "" {
+			reported = strings.TrimSpace(credits[i].CreditedName)
+			if reported == "" {
+				reported = strings.TrimSpace(credits[i].CreditedJapaneseName)
+			}
+		}
+		collision := &models.CreditCollision{
+			CreditID:       credits[i].ID,
+			MovieContentID: movieContentID,
+			Field:          models.CreditFieldIdentityLink,
+			ReportedValue:  reported,
+			CanonicalValue: candidate.FullName(),
+		}
+		if err := collisionRepo.recordDeferredTx(tx, collision, credits[i].Source); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (u *MovieUpserter) recordFieldCollisionsTx(tx *gorm.DB, collisionRepo *CreditCollisionRepository, credit *models.MovieCredit, resolved *models.Actress, policy CollisionPolicy, trusted map[string]bool) error {
 	type fieldConflict struct {
 		field     string
 		reported  string
@@ -930,7 +1003,7 @@ func (u *MovieUpserter) recordFieldCollisionsTx(tx *gorm.DB, collisionRepo *Cred
 		active[conflict.field] = conflict.reported
 	}
 	for _, field := range []string{models.CreditFieldCreditedName, models.CreditFieldReportedThumb} {
-		if err := collisionRepo.resolveSupersededOpenTx(tx, credit.ID, field, active[field]); err != nil {
+		if err := collisionRepo.resolveSupersededOpenDeferredTx(tx, credit.ID, field, active[field]); err != nil {
 			return err
 		}
 	}
@@ -943,7 +1016,7 @@ func (u *MovieUpserter) recordFieldCollisionsTx(tx *gorm.DB, collisionRepo *Cred
 			ReportedValue:  c.reported,
 			CanonicalValue: c.canonical,
 		}
-		if err := collisionRepo.RecordTx(tx, collision, credit.Source); err != nil {
+		if err := collisionRepo.recordDeferredTx(tx, collision, credit.Source); err != nil {
 			return err
 		}
 		if collision.Status != models.CollisionStatusOpen {
@@ -953,7 +1026,7 @@ func (u *MovieUpserter) recordFieldCollisionsTx(tx *gorm.DB, collisionRepo *Cred
 		if !decision.AutoResolved {
 			continue
 		}
-		if err := collisionRepo.ResolveTx(tx, collision.ID, decision.Resolution); err != nil {
+		if err := collisionRepo.resolveWithResolutionDeferredTx(tx, collision.ID, decision.Resolution); err != nil {
 			return err
 		}
 		if err := applyCollisionFieldEffectTx(tx, credit.ID, c.field, decision.Resolution); err != nil {
@@ -961,7 +1034,7 @@ func (u *MovieUpserter) recordFieldCollisionsTx(tx *gorm.DB, collisionRepo *Cred
 		}
 		if decision.CreateAlias && c.field == models.CreditFieldCreditedName {
 			alias := &models.ActressAlias{AliasName: c.reported, CanonicalName: c.canonical}
-			if err := aliasRepo.UpsertTx(tx, alias); err != nil {
+			if err := claimNormalizedActressAliasTx(tx, alias); err != nil {
 				return err
 			}
 		}

@@ -280,7 +280,7 @@ func TestStructuralCollisionAndWrapperFailures(t *testing.T) {
 	})
 	t.Run("suppression missing and read failure", func(t *testing.T) {
 		db := newCreditTestDB(t)
-		require.ErrorIs(t, setCreditSuppressedTx(db.DB, 999, true), ErrNotFound)
+		require.ErrorIs(t, setCreditSuppressedDeferredTx(db.DB, 999, true), ErrNotFound)
 		db, service, credit, _ := collisionFixture(t)
 		require.NoError(t, service.SetCreditSuppressed(t.Context(), credit.ID, true))
 		injectDatabaseCallbackError(t, db, "query", "credit_collisions", 1)
@@ -353,7 +353,7 @@ func TestStructuralResidualFaultBranches(t *testing.T) {
 	t.Run("suppression credit read", func(t *testing.T) {
 		db := newCreditTestDB(t)
 		require.NoError(t, db.Close())
-		require.Error(t, setCreditSuppressedTx(db.DB, 1, true))
+		require.Error(t, setCreditSuppressedDeferredTx(db.DB, 1, true))
 	})
 	t.Run("suppression collision restore read", func(t *testing.T) {
 		db, service, credit, _ := collisionFixture(t)

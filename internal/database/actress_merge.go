@@ -479,7 +479,9 @@ func (m *actressMerger) ExecuteMerge(ctx context.Context, plan *MergePlan, db *D
 		if err := tx.Delete(&models.Actress{}, sourceID).Error; err != nil {
 			return wrapDBErr("delete", fmt.Sprintf("merge source actress %d", sourceID), err)
 		}
-
+		if err := recomputeActressCandidateQuarantineTx(tx); err != nil {
+			return err
+		}
 		return invalidateChangedMovieRenderInputsTx(tx, before, contentIDs)
 	})
 	if err != nil {

@@ -159,17 +159,17 @@ func TestRecordFieldCollisionsTxBranches(t *testing.T) {
 	require.NoError(t, db.Create(&actress).Error)
 	credit := models.MovieCredit{MovieContentID: movie.ContentID, ActressID: actress.ID, Scraped: models.Actress{LastName: "Real", FirstName: "Name", ThumbURL: "real.jpg"}}
 	require.NoError(t, db.Create(&credit).Error)
-	collisions, aliases := creditCoverageRepos(db)
-	require.NoError(t, u.recordFieldCollisionsTx(db.DB, collisions, aliases, &credit, &actress, CollisionPolicyBlock, nil))
+	collisions, _ := creditCoverageRepos(db)
+	require.NoError(t, u.recordFieldCollisionsTx(db.DB, collisions, &credit, &actress, CollisionPolicyBlock, nil))
 
 	credit.CreditedName = "Different Name"
 	credit.ReportedThumbURL = "different.jpg"
-	require.NoError(t, u.recordFieldCollisionsTx(db.DB, collisions, aliases, &credit, &actress, CollisionPolicyBlock, nil))
+	require.NoError(t, u.recordFieldCollisionsTx(db.DB, collisions, &credit, &actress, CollisionPolicyBlock, nil))
 	var existing models.CreditCollision
 	require.NoError(t, db.First(&existing, "credit_id = ? AND field = ?", credit.ID, models.CreditFieldCreditedName).Error)
 	existing.Status = models.CollisionStatusResolved
 	require.NoError(t, db.Save(&existing).Error)
-	require.NoError(t, u.recordFieldCollisionsTx(db.DB, collisions, aliases, &credit, &actress, CollisionPolicyAutoKeep, nil))
+	require.NoError(t, u.recordFieldCollisionsTx(db.DB, collisions, &credit, &actress, CollisionPolicyAutoKeep, nil))
 }
 
 func TestRecordFieldCollisionsHonorsAcceptedAlias(t *testing.T) {
@@ -200,9 +200,9 @@ func TestRecordFieldCollisionsAliasLookupError(t *testing.T) {
 	require.NoError(t, db.Create(&actress).Error)
 	credit := models.MovieCredit{MovieContentID: movie.ContentID, ActressID: actress.ID, CreditedName: "Different Name"}
 	require.NoError(t, db.Create(&credit).Error)
-	collisions, aliases := creditCoverageRepos(db)
+	collisions, _ := creditCoverageRepos(db)
 	injectDatabaseCallbackError(t, db, "query", "actress_aliases", 1)
-	require.Error(t, u.recordFieldCollisionsTx(db.DB, collisions, aliases, &credit, &actress, CollisionPolicyBlock, nil))
+	require.Error(t, u.recordFieldCollisionsTx(db.DB, collisions, &credit, &actress, CollisionPolicyBlock, nil))
 }
 
 func TestRecordFieldCollisionsMatchesCanonicalJapaneseName(t *testing.T) {
@@ -223,8 +223,8 @@ func TestRecordFieldCollisionsMatchesCanonicalJapaneseName(t *testing.T) {
 		CreditedJapaneseName: "山田さくら",
 	}
 	require.NoError(t, db.Create(&credit).Error)
-	collisions, aliases := creditCoverageRepos(db)
-	require.NoError(t, u.recordFieldCollisionsTx(db.DB, collisions, aliases, &credit, &actress, CollisionPolicyBlock, nil))
+	collisions, _ := creditCoverageRepos(db)
+	require.NoError(t, u.recordFieldCollisionsTx(db.DB, collisions, &credit, &actress, CollisionPolicyBlock, nil))
 	open, err := collisions.ListOpenByMovie(t.Context(), movie.ContentID)
 	require.NoError(t, err)
 	require.Empty(t, open)
@@ -238,11 +238,11 @@ func TestRecordFieldCollisionsRetiresSuperseded(t *testing.T) {
 	require.NoError(t, db.Create(&actress).Error)
 	credit := models.MovieCredit{MovieContentID: movie.ContentID, ActressID: actress.ID, CreditedName: "Reported A", ReportedThumbURL: "reported.jpg"}
 	require.NoError(t, db.Create(&credit).Error)
-	collisions, aliases := creditCoverageRepos(db)
-	require.NoError(t, u.recordFieldCollisionsTx(db.DB, collisions, aliases, &credit, &actress, CollisionPolicyBlock, nil))
+	collisions, _ := creditCoverageRepos(db)
+	require.NoError(t, u.recordFieldCollisionsTx(db.DB, collisions, &credit, &actress, CollisionPolicyBlock, nil))
 
 	credit.CreditedName = "Reported B"
-	require.NoError(t, u.recordFieldCollisionsTx(db.DB, collisions, aliases, &credit, &actress, CollisionPolicyBlock, nil))
+	require.NoError(t, u.recordFieldCollisionsTx(db.DB, collisions, &credit, &actress, CollisionPolicyBlock, nil))
 	open, err := collisions.ListOpenByMovie(t.Context(), movie.ContentID)
 	require.NoError(t, err)
 	require.Len(t, open, 2)
@@ -254,7 +254,7 @@ func TestRecordFieldCollisionsRetiresSuperseded(t *testing.T) {
 
 	credit.CreditedName = actress.FullName()
 	credit.ReportedThumbURL = actress.ThumbURL
-	require.NoError(t, u.recordFieldCollisionsTx(db.DB, collisions, aliases, &credit, &actress, CollisionPolicyBlock, nil))
+	require.NoError(t, u.recordFieldCollisionsTx(db.DB, collisions, &credit, &actress, CollisionPolicyBlock, nil))
 	open, err = collisions.ListOpenByMovie(t.Context(), movie.ContentID)
 	require.NoError(t, err)
 	require.Empty(t, open)
@@ -264,7 +264,7 @@ func TestResolveSupersededOpenPreservesPinned(t *testing.T) {
 	db, service, credit, collision := collisionFixture(t)
 	collision.UserPinned = true
 	require.NoError(t, db.Save(&collision).Error)
-	require.NoError(t, service.Collisions.resolveSupersededOpenTx(db.DB, credit.ID, collision.Field, ""))
+	require.NoError(t, service.Collisions.resolveSupersededOpenDeferredTx(db.DB, credit.ID, collision.Field, ""))
 	require.NoError(t, db.First(&collision, collision.ID).Error)
 	require.Equal(t, models.CollisionStatusOpen, collision.Status)
 }
@@ -272,7 +272,7 @@ func TestResolveSupersededOpenPreservesPinned(t *testing.T) {
 func TestResolveSupersededOpenError(t *testing.T) {
 	db, service, credit, collision := collisionFixture(t)
 	injectDatabaseCallbackError(t, db, "update", "credit_collisions", 1)
-	err := service.Collisions.resolveSupersededOpenTx(db.DB, credit.ID, collision.Field, "new")
+	err := service.Collisions.resolveSupersededOpenDeferredTx(db.DB, credit.ID, collision.Field, "new")
 	require.Error(t, err)
 }
 
@@ -384,7 +384,7 @@ func TestRecordFieldCollisionsTxErrors(t *testing.T) {
 			require.NoError(t, db.Create(&actress).Error)
 			credit := models.MovieCredit{MovieContentID: movie.ContentID, ActressID: actress.ID, CreditedName: "Wrong Name", Source: "trusted"}
 			require.NoError(t, db.Create(&credit).Error)
-			collisions, aliases := creditCoverageRepos(db)
+			collisions, _ := creditCoverageRepos(db)
 			callbackName := "coverage:field-error:" + tc.name
 			updates := 0
 			inject := func(tx *gorm.DB) {
@@ -403,7 +403,7 @@ func TestRecordFieldCollisionsTxErrors(t *testing.T) {
 				require.NoError(t, db.Callback().Update().Before("gorm:update").Register(callbackName, inject))
 				defer func() { _ = db.Callback().Update().Remove(callbackName) }()
 			}
-			err := u.recordFieldCollisionsTx(db.DB, collisions, aliases, &credit, &actress, tc.policy, tc.trusted)
+			err := u.recordFieldCollisionsTx(db.DB, collisions, &credit, &actress, tc.policy, tc.trusted)
 			require.Error(t, err)
 		})
 	}

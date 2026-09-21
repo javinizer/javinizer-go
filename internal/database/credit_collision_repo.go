@@ -33,10 +33,9 @@ func NewCreditCollisionRepository(db *DB) *CreditCollisionRepository {
 	}
 }
 
-// RecordTx records a collision within the given transaction, deduplicating
-// onto an existing row for the same credit/field/reported-value triple by
-// incrementing its occurrence count and merging sources.
-func (r *CreditCollisionRepository) RecordTx(tx *gorm.DB, collision *models.CreditCollision, source string) error {
+// recordDeferredTx mutates collision evidence without maintaining candidate
+// quarantine. Its outer transaction owner must finalize once before commit.
+func (r *CreditCollisionRepository) recordDeferredTx(tx *gorm.DB, collision *models.CreditCollision, source string) error {
 	var existing models.CreditCollision
 	err := tx.First(&existing,
 		"credit_id = ? AND field = ? AND reported_value = ?",
@@ -80,7 +79,14 @@ func (r *CreditCollisionRepository) RecordTx(tx *gorm.DB, collision *models.Cred
 	return nil
 }
 
-func (r *CreditCollisionRepository) resolveSupersededOpenTx(tx *gorm.DB, creditID uint, field, reportedValue string) error {
+// RecordTx atomically records collision evidence and finalizes quarantine.
+func (r *CreditCollisionRepository) RecordTx(tx *gorm.DB, collision *models.CreditCollision, source string) error {
+	return runCandidateQuarantineMutationTx(tx, func(scoped *gorm.DB) error {
+		return r.recordDeferredTx(scoped, collision, source)
+	})
+}
+
+func (r *CreditCollisionRepository) resolveSupersededOpenDeferredTx(tx *gorm.DB, creditID uint, field, reportedValue string) error {
 	query := tx.Model(&models.CreditCollision{}).
 		Where("credit_id = ? AND field = ? AND status = ? AND user_pinned = ?", creditID, field, models.CollisionStatusOpen, false)
 	if reportedValue != "" {
@@ -154,23 +160,29 @@ func (r *CreditCollisionRepository) Resolve(ctx context.Context, collisionID uin
 		colResolution: resolution,
 		colUpdatedAt:  time.Now().UTC(),
 	}
-	if err := r.GetDB().WithContext(ctx).Model(&models.CreditCollision{}).Where("id = ?", collisionID).Updates(updates).Error; err != nil {
+	return runCandidateQuarantineMutationTx(r.GetDB().WithContext(ctx), func(tx *gorm.DB) error {
+		return r.resolveDeferredTx(tx, collisionID, updates)
+	})
+}
+
+func (r *CreditCollisionRepository) resolveWithResolutionDeferredTx(tx *gorm.DB, collisionID uint, resolution string) error {
+	updates := map[string]interface{}{colStatus: models.CollisionStatusResolved, colResolution: resolution, colUpdatedAt: time.Now().UTC()}
+	return r.resolveDeferredTx(tx, collisionID, updates)
+}
+
+func (r *CreditCollisionRepository) resolveDeferredTx(tx *gorm.DB, collisionID uint, updates map[string]interface{}) error {
+	if err := tx.Model(&models.CreditCollision{}).Where("id = ?", collisionID).Updates(updates).Error; err != nil {
 		return wrapDBErr("resolve", fmt.Sprintf("collision %d", collisionID), err)
 	}
 	return nil
 }
 
-// ResolveTx is the transaction-scoped form of Resolve.
+// ResolveTx atomically resolves a collision and finalizes quarantine.
 func (r *CreditCollisionRepository) ResolveTx(tx *gorm.DB, collisionID uint, resolution string) error {
-	updates := map[string]interface{}{
-		colStatus:     models.CollisionStatusResolved,
-		colResolution: resolution,
-		colUpdatedAt:  time.Now().UTC(),
-	}
-	if err := tx.Model(&models.CreditCollision{}).Where("id = ?", collisionID).Updates(updates).Error; err != nil {
-		return wrapDBErr("resolve", fmt.Sprintf("collision %d", collisionID), err)
-	}
-	return nil
+	updates := map[string]interface{}{colStatus: models.CollisionStatusResolved, colResolution: resolution, colUpdatedAt: time.Now().UTC()}
+	return runCandidateQuarantineMutationTx(tx, func(scoped *gorm.DB) error {
+		return r.resolveDeferredTx(scoped, collisionID, updates)
+	})
 }
 
 // Reopen re-opens a resolved collision and marks it user-pinned so
@@ -182,38 +194,58 @@ func (r *CreditCollisionRepository) Reopen(ctx context.Context, collisionID uint
 		"user_pinned": true,
 		colUpdatedAt:  time.Now().UTC(),
 	}
-	if err := r.GetDB().WithContext(ctx).Model(&models.CreditCollision{}).Where("id = ?", collisionID).Updates(updates).Error; err != nil {
-		return wrapDBErr("reopen", fmt.Sprintf("collision %d", collisionID), err)
-	}
-	return nil
+	return runCandidateQuarantineMutationTx(r.GetDB().WithContext(ctx), func(tx *gorm.DB) error {
+		if err := tx.Model(&models.CreditCollision{}).Where("id = ?", collisionID).Updates(updates).Error; err != nil {
+			return wrapDBErr("reopen", fmt.Sprintf("collision %d", collisionID), err)
+		}
+		return nil
+	})
 }
 
-// TransferTx moves all collisions from one credit to another.
-func (r *CreditCollisionRepository) TransferTx(tx *gorm.DB, fromCreditID, toCreditID uint, toMovieContentID string) error {
-	return tx.Model(&models.CreditCollision{}).
+func (r *CreditCollisionRepository) transferDeferredTx(tx *gorm.DB, fromCreditID, toCreditID uint, toMovieContentID string) error {
+	if err := tx.Model(&models.CreditCollision{}).
 		Where("credit_id = ?", fromCreditID).
 		Updates(map[string]interface{}{
 			"credit_id":        toCreditID,
 			"movie_content_id": toMovieContentID,
 			colUpdatedAt:       time.Now().UTC(),
-		}).Error
+		}).Error; err != nil {
+		return err
+	}
+	return nil
 }
 
-// CloseByCreditTx closes open collisions attached to a credit.
-func (r *CreditCollisionRepository) CloseByCreditTx(tx *gorm.DB, creditID uint, resolution string) error {
-	return tx.Model(&models.CreditCollision{}).
+// TransferTx atomically moves collisions and finalizes quarantine.
+func (r *CreditCollisionRepository) TransferTx(tx *gorm.DB, fromCreditID, toCreditID uint, toMovieContentID string) error {
+	return runCandidateQuarantineMutationTx(tx, func(scoped *gorm.DB) error {
+		return r.transferDeferredTx(scoped, fromCreditID, toCreditID, toMovieContentID)
+	})
+}
+
+func (r *CreditCollisionRepository) closeByCreditDeferredTx(tx *gorm.DB, creditID uint, resolution string) error {
+	if err := tx.Model(&models.CreditCollision{}).
 		Where("credit_id = ? AND status = ?", creditID, models.CollisionStatusOpen).
 		Updates(map[string]interface{}{
 			colStatus:     models.CollisionStatusResolved,
 			colResolution: resolution,
 			colUpdatedAt:  time.Now().UTC(),
-		}).Error
+		}).Error; err != nil {
+		return err
+	}
+	return nil
+}
+
+// CloseByCreditTx atomically closes collisions and finalizes quarantine.
+func (r *CreditCollisionRepository) CloseByCreditTx(tx *gorm.DB, creditID uint, resolution string) error {
+	return runCandidateQuarantineMutationTx(tx, func(scoped *gorm.DB) error {
+		return r.closeByCreditDeferredTx(scoped, creditID, resolution)
+	})
 }
 
 // CloseByCredit closes open collisions attached to a credit.
 func (r *CreditCollisionRepository) CloseByCredit(ctx context.Context, creditID uint, resolution string) error {
-	return r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		return r.CloseByCreditTx(tx, creditID, resolution)
+	return runCandidateQuarantineMutationTx(r.GetDB().WithContext(ctx), func(tx *gorm.DB) error {
+		return r.closeByCreditDeferredTx(tx, creditID, resolution)
 	})
 }
 

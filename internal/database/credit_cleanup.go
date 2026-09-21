@@ -8,7 +8,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 )
 
-func deleteCreditRecordsTx(tx *gorm.DB, collisionWhere, creditWhere string, value any, label string) error {
+func deleteCreditRecordsDeferredTx(tx *gorm.DB, collisionWhere, creditWhere string, value any, label string) error {
 	if err := tx.Where(collisionWhere, value).Delete(&models.CreditCollision{}).Error; err != nil {
 		return wrapDBErr("delete", fmt.Sprintf("credit collisions for %s", label), err)
 	}

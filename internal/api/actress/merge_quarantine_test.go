@@ -77,7 +77,7 @@ func TestRegisteredMergeRetainsCandidateAmbiguityAcrossRestartAndRetries(t *test
 	movies = database.NewMovieRepository(db)
 	resolved, outcome, err := database.ResolveActressIdentityTx(db.DB, &models.Actress{DMMID: 88201, FirstName: "Alpha", LastName: "Reported"})
 	require.NoError(t, err)
-	require.Equal(t, database.ResolutionCandidateLinked, outcome)
+	require.Equal(t, database.ResolutionAmbiguous, outcome)
 	require.Equal(t, candidateID, resolved.ID)
 
 	same, err := movies.Upsert(ctx, movieInput("merge-api-same"))
@@ -87,12 +87,12 @@ func TestRegisteredMergeRetainsCandidateAmbiguityAcrossRestartAndRetries(t *test
 	for _, movie := range []*models.Movie{same, other} {
 		require.Empty(t, movie.Actresses)
 		require.Equal(t, candidateID, movie.Credits[0].ActressID)
-		require.NoError(t, movies.WithApplyArtifactPublicationFence(ctx, movie.ContentID, movie.RenderGeneration, func(*models.Movie) error { return nil }))
+		require.ErrorIs(t, movies.WithApplyArtifactPublicationFence(ctx, movie.ContentID, movie.RenderGeneration, func(*models.Movie) error { return nil }), database.ErrApplyArtifactPublicationBlocked)
 	}
 	counts, err := database.NewCreditCollisionRepository(db).CountOpenByMovieBatch(ctx, []string{same.ContentID, other.ContentID})
 	require.NoError(t, err)
-	require.Zero(t, counts[same.ContentID])
-	require.Zero(t, counts[other.ContentID])
+	require.EqualValues(t, 1, counts[same.ContentID])
+	require.EqualValues(t, 1, counts[other.ContentID])
 
 	beforeMerge := map[string]int64{same.ContentID: same.RenderGeneration, other.ContentID: other.RenderGeneration}
 	res = postRegisteredMerge(t, database.NewActressRepository(db), canonical.ID, candidateID, nil)

@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -61,14 +62,17 @@ func TestPR260ResidualRestoreNewCollisionInsertRollsBack(t *testing.T) {
 }
 
 func TestPR260ResidualArtifactCancellationAfterCollisionCheck(t *testing.T) {
-	db := setupBaseRepoTestDB(t)
+	db, err := New(&Config{Type: "sqlite", DSN: filepath.Join(t.TempDir(), "cancellation.db"), LogLevel: "silent"})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
 	seedArtifactPublicationMovie(t, db, "residual-cancel", 5, true)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	const hook = "pr260_residual_cancel_after_count"
 	checks := 0
 	require.NoError(t, db.Callback().Query().After("gorm:query").Register(hook, func(tx *gorm.DB) {
-		if tx.Statement.Table != "credit_collisions" || tx.Error != nil {
+		if tx.Statement.Table != "credit_collisions" {
 			return
 		}
 		checks++
@@ -78,7 +82,7 @@ func TestPR260ResidualArtifactCancellationAfterCollisionCheck(t *testing.T) {
 	}))
 	t.Cleanup(func() { db.Callback().Query().Remove(hook) })
 	called := false
-	err := NewMovieRepository(db).WithApplyArtifactPublicationFence(ctx, "residual-cancel", 5, func(*models.Movie) error { called = true; return nil })
+	err = NewMovieRepository(db).WithApplyArtifactPublicationFence(ctx, "residual-cancel", 5, func(*models.Movie) error { called = true; return nil })
 	require.ErrorIs(t, err, context.Canceled)
 	require.Equal(t, 2, checks)
 	require.False(t, called)

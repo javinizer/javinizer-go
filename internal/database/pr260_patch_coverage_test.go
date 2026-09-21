@@ -153,7 +153,7 @@ func TestPR260MovieCreditUpsertRaceRecovery(t *testing.T) {
 			return
 		}
 		injected = true
-		require.NoError(t, db.DB.Exec("INSERT INTO movie_credits (movie_content_id, actress_id, credited_name, created_at, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)", incoming.MovieContentID, incoming.ActressID, "winner").Error)
+		require.NoError(t, tx.Exec("INSERT INTO movie_credits (movie_content_id, actress_id, credited_name, created_at, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)", incoming.MovieContentID, incoming.ActressID, "winner").Error)
 		_ = tx.AddError(gorm.ErrDuplicatedKey)
 	}))
 	t.Cleanup(func() { _ = db.DB.Callback().Create().Remove(name) })
@@ -180,11 +180,11 @@ func TestPR260CandidateRaceRecovery(t *testing.T) {
 					return
 				}
 				fired = true
-				require.NoError(t, db.DB.Exec(tc.insert, tc.args...).Error)
+				require.NoError(t, tx.Exec(tc.insert, tc.args...).Error)
 				_ = tx.AddError(gorm.ErrDuplicatedKey)
 			}))
 			t.Cleanup(func() { _ = db.DB.Callback().Create().Remove(name) })
-			found, err := createCandidateTx(db.DB, &tc.scraped, actressNameKey(&tc.scraped))
+			found, err := createCandidateTx(db.DB.Session(&gorm.Session{SkipDefaultTransaction: true}), &tc.scraped, actressNameKey(&tc.scraped))
 			require.NoError(t, err)
 			require.NotZero(t, found.ID)
 		})

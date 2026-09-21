@@ -52,8 +52,12 @@ func TestApplyArtifactPublicationFence_OpenCollisionBlocksCallback(t *testing.T)
 	db := setupBaseRepoTestDB(t)
 	const contentID = "artifact-collision"
 	seedArtifactPublicationMovie(t, db, contentID, 3, true)
+	actress := models.Actress{FirstName: "Artifact", Verified: true}
+	require.NoError(t, db.Create(&actress).Error)
+	credit := models.MovieCredit{MovieContentID: contentID, ActressID: actress.ID}
+	require.NoError(t, db.Create(&credit).Error)
 	require.NoError(t, db.Create(&models.CreditCollision{
-		CreditID:       1,
+		CreditID:       credit.ID,
 		MovieContentID: contentID,
 		Field:          models.CreditFieldCreditedName,
 		Status:         models.CollisionStatusOpen,

@@ -62,7 +62,7 @@ func TestCandidateResolutionUnionsKeyedAndKeylessRepresentations(t *testing.T) {
 		require.ErrorIs(t, err, gorm.ErrRecordNotFound)
 	})
 
-	t.Run("exact positive DMM keeps precedence", func(t *testing.T) {
+	t.Run("exact positive DMM fails closed on live candidate component ambiguity", func(t *testing.T) {
 		db := newCreditTestDB(t)
 		dmmless := models.Actress{JapaneseName: "Same Name", Origin: ActressOriginScrape, NameKey: models.NormalizeActressNameKey("Same Name")}
 		exact := models.Actress{DMMID: 91003, JapaneseName: "Ｓａｍｅ　Ｎａｍｅ", Origin: ActressOriginScrape}
@@ -71,8 +71,9 @@ func TestCandidateResolutionUnionsKeyedAndKeylessRepresentations(t *testing.T) {
 
 		resolved, outcome, err := ResolveActressIdentityTx(db.DB, &models.Actress{DMMID: exact.DMMID, JapaneseName: "Different Evidence"})
 		require.NoError(t, err)
-		require.Equal(t, ResolutionCandidateLinked, outcome)
+		require.Equal(t, ResolutionAmbiguous, outcome)
 		require.Equal(t, exact.ID, resolved.ID)
+		require.True(t, resolved.AmbiguityQuarantined)
 	})
 }
 

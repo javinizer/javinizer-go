@@ -81,7 +81,7 @@ func normalizedAliasesForCanonicalTx(tx *gorm.DB, canonicalName string) ([]model
 	return aliases, nil
 }
 
-func retargetProvenCanonicalAliasesTx(tx *gorm.DB, sourceActressID, targetActressID uint, oldCanonicalName, newCanonicalName string, provenOwnerKeys map[string]struct{}) error {
+func retargetProvenCanonicalAliasesDeferredTx(tx *gorm.DB, sourceActressID, targetActressID uint, oldCanonicalName, newCanonicalName string, provenOwnerKeys map[string]struct{}) error {
 	oldKey := models.NormalizeActressNameKey(oldCanonicalName)
 	if _, proven := provenOwnerKeys[oldKey]; sourceActressID == 0 || targetActressID == 0 || oldKey == "" || !proven {
 		return fmt.Errorf("retarget actress aliases from %q: %w", oldCanonicalName, ErrActressAliasOwnershipConflict)
@@ -115,11 +115,14 @@ func retargetProvenCanonicalAliasesTx(tx *gorm.DB, sourceActressID, targetActres
 	for i := range aliases {
 		ids[i] = aliases[i].ID
 	}
-	return tx.Model(&models.ActressAlias{}).Where("id IN ?", ids).Updates(map[string]interface{}{
+	if err := tx.Model(&models.ActressAlias{}).Where("id IN ?", ids).Updates(map[string]interface{}{
 		colCanonicalName:     newCanonicalName,
 		"canonical_name_key": models.NormalizeActressNameKey(newCanonicalName),
 		colUpdatedAt:         time.Now().UTC(),
-	}).Error
+	}).Error; err != nil {
+		return err
+	}
+	return nil
 }
 
 // claimNormalizedActressAliasTx is the ordinary create/accept mode. Existing
@@ -167,160 +170,243 @@ func backfillActressAliasNameKeys(ctx context.Context, db *gorm.DB) error {
 	})
 }
 
-// backfillActressCandidateNameKeys upgrades persisted candidate keys after a
-// normalization algorithm change. Equivalent legacy candidates are preserved,
-// quarantined, and left keyless so lookup can detect and reject the ambiguity.
+// backfillActressCandidateNameKeys derives candidate keys and quarantine from live evidence.
 func backfillActressCandidateNameKeys(ctx context.Context, db *gorm.DB) error {
-	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var candidates []models.Actress
-		if err := tx.Where("verified = ?", false).Order("id").Find(&candidates).Error; err != nil {
-			return wrapDBErr("list", "actress candidates for normalized-key backfill", err)
-		}
+	return db.WithContext(ctx).Transaction(recomputeActressCandidateQuarantineTx)
+}
 
-		groups := make(map[string][]int)
-		for i := range candidates {
-			for key := range candidateEvidenceKeys(&candidates[i]) {
-				groups[key] = append(groups[key], i)
-			}
-		}
+// recomputeActressCandidateQuarantineTx derives the candidate quarantine bit
+// from current candidate components, live identity-link evidence, and verified
+// DMM-less canonical/curated-alias representations. It must be called with the
+// caller's transaction; it only writes rows whose derived state changed.
+func recomputeActressCandidateQuarantineTx(tx *gorm.DB) error {
+	var candidates []models.Actress
+	if err := tx.Where("verified = ?", false).Order("id").Find(&candidates).Error; err != nil {
+		return wrapDBErr("list", "actress candidates for normalized-key backfill", err)
+	}
 
-		// Build connected components only among DMM-less candidates. Positive
-		// DMM IDs are hard identity boundaries and are never connected to a
-		// component that has evidence for another positive ID.
-		parent := make([]int, len(candidates))
-		for i := range parent {
-			parent[i] = i
+	var collisionCandidateIDs []uint
+	if err := tx.Model(&models.CreditCollision{}).
+		Distinct("movie_credits.actress_id").
+		Joins("JOIN movie_credits ON movie_credits.id = credit_collisions.credit_id AND movie_credits.movie_content_id = credit_collisions.movie_content_id").
+		Where("credit_collisions.field = ? AND credit_collisions.status = ? AND movie_credits.suppressed = ?", models.CreditFieldIdentityLink, models.CollisionStatusOpen, false).
+		Pluck("movie_credits.actress_id", &collisionCandidateIDs).Error; err != nil {
+		return wrapDBErr("list", "live identity-link candidate collisions", err)
+	}
+	var verified []models.Actress
+	if err := tx.Where("verified = ?", true).Order("id").Find(&verified).Error; err != nil {
+		return wrapDBErr("list", "verified actresses for candidate backfill", err)
+	}
+	var aliases []models.ActressAlias
+	if err := tx.Order("id").Find(&aliases).Error; err != nil {
+		return wrapDBErr("list", "actress aliases for candidate backfill", err)
+	}
+	groups := make(map[string][]int)
+	for i := range candidates {
+		for key := range candidateEvidenceKeys(&candidates[i]) {
+			groups[key] = append(groups[key], i)
 		}
-		var find func(int) int
-		find = func(i int) int {
-			if parent[i] != i {
-				parent[i] = find(parent[i])
+	}
+	parent := make([]int, len(candidates))
+	for i := range parent {
+		parent[i] = i
+	}
+	var find func(int) int
+	find = func(i int) int {
+		if parent[i] != i {
+			parent[i] = find(parent[i])
+		}
+		return parent[i]
+	}
+	union := func(a, b int) {
+		ra, rb := find(a), find(b)
+		if ra != rb {
+			parent[rb] = ra
+		}
+	}
+	for _, group := range groups {
+		first := -1
+		for _, index := range group {
+			if candidates[index].DMMID > 0 {
+				continue
 			}
-			return parent[i]
-		}
-		union := func(a, b int) {
-			ra, rb := find(a), find(b)
-			if ra != rb {
-				parent[rb] = ra
+			if first < 0 {
+				first = index
+			} else {
+				union(first, index)
 			}
 		}
-		for _, group := range groups {
-			first := -1
-			for _, index := range group {
-				if candidates[index].DMMID > 0 {
-					continue
-				}
-				if first < 0 {
-					first = index
-				} else {
-					union(first, index)
-				}
-			}
-		}
+	}
 
-		zeroMembers := make(map[int][]int)
-		adjacentPositive := make(map[int]map[int][]int)
-		for i := range candidates {
-			if candidates[i].DMMID <= 0 {
-				root := find(i)
-				zeroMembers[root] = append(zeroMembers[root], i)
+	ambiguous := make(map[uint]struct{})
+	zeroMembers := make(map[int][]int)
+	adjacentPositive := make(map[int]map[int][]int)
+	for i := range candidates {
+		if candidates[i].DMMID <= 0 {
+			zeroMembers[find(i)] = append(zeroMembers[find(i)], i)
+		}
+	}
+	for _, group := range groups {
+		roots := make(map[int]struct{})
+		positives := make([]int, 0)
+		for _, index := range group {
+			if candidates[index].DMMID <= 0 {
+				roots[find(index)] = struct{}{}
+			} else {
+				positives = append(positives, index)
 			}
 		}
-		for _, group := range groups {
-			roots := make(map[int]struct{})
-			positives := make([]int, 0)
-			for _, index := range group {
-				if candidates[index].DMMID <= 0 {
-					roots[find(index)] = struct{}{}
-				} else {
-					positives = append(positives, index)
-				}
+		for root := range roots {
+			if adjacentPositive[root] == nil {
+				adjacentPositive[root] = make(map[int][]int)
 			}
-			for root := range roots {
-				if adjacentPositive[root] == nil {
-					adjacentPositive[root] = make(map[int][]int)
-				}
-				for _, index := range positives {
-					dmm := candidates[index].DMMID
-					adjacentPositive[root][dmm] = append(adjacentPositive[root][dmm], index)
-				}
+			for _, index := range positives {
+				adjacentPositive[root][candidates[index].DMMID] = append(adjacentPositive[root][candidates[index].DMMID], index)
 			}
 		}
-
-		ambiguous := make(map[uint]struct{})
-		for root, members := range zeroMembers {
-			positiveIDs := adjacentPositive[root]
-			if len(members) > 1 || len(positiveIDs) > 0 {
-				for _, index := range members {
+	}
+	for root, members := range zeroMembers {
+		positiveIDs := adjacentPositive[root]
+		if len(members) > 1 || len(positiveIDs) > 0 {
+			for _, index := range members {
+				ambiguous[candidates[index].ID] = struct{}{}
+			}
+		}
+		if len(positiveIDs) == 1 {
+			for _, indexes := range positiveIDs {
+				for _, index := range indexes {
 					ambiguous[candidates[index].ID] = struct{}{}
 				}
 			}
-			if len(positiveIDs) == 1 {
-				for _, indexes := range positiveIDs {
-					for _, index := range indexes {
-						ambiguous[candidates[index].ID] = struct{}{}
-					}
+		}
+	}
+	for _, group := range groups {
+		byDMM := make(map[int][]int)
+		for _, index := range group {
+			if candidates[index].DMMID > 0 {
+				byDMM[candidates[index].DMMID] = append(byDMM[candidates[index].DMMID], index)
+			}
+		}
+		for _, indexes := range byDMM {
+			if len(indexes) > 1 {
+				for _, index := range indexes {
+					ambiguous[candidates[index].ID] = struct{}{}
 				}
 			}
 		}
-		// Legacy duplicate rows carrying the SAME positive DMM remain one
-		// ambiguous identity; migration 19's partial unique index prevents new
-		// duplicates. Distinct positive IDs are deliberately never marked.
-		for _, group := range groups {
-			byDMM := make(map[int][]int)
-			for _, index := range group {
-				if candidates[index].DMMID > 0 {
-					byDMM[candidates[index].DMMID] = append(byDMM[candidates[index].DMMID], index)
-				}
-			}
-			for _, indexes := range byDMM {
-				if len(indexes) > 1 {
-					for _, index := range indexes {
-						ambiguous[candidates[index].ID] = struct{}{}
-					}
-				}
-			}
-		}
+	}
+	for _, id := range collisionCandidateIDs {
+		ambiguous[id] = struct{}{}
+	}
 
-		keyedIDs := make([]uint, 0, len(candidates))
-		for i := range candidates {
-			if candidates[i].NameKey != "" {
-				keyedIDs = append(keyedIDs, candidates[i].ID)
+	verifiedDMMlessByKey := make(map[string]struct{})
+	verifiedCanonicalKeys := make(map[string]struct{})
+	for i := range verified {
+		if verified[i].DMMID > 0 {
+			continue
+		}
+		for key := range canonicalActressRepresentationKeys(&verified[i]) {
+			verifiedDMMlessByKey[key] = struct{}{}
+			verifiedCanonicalKeys[key] = struct{}{}
+		}
+	}
+	for i := range aliases {
+		if _, owned := verifiedCanonicalKeys[models.NormalizeActressNameKey(aliases[i].CanonicalName)]; owned {
+			if key := models.NormalizeActressNameKey(aliases[i].AliasName); key != "" {
+				verifiedDMMlessByKey[key] = struct{}{}
 			}
 		}
-		if len(keyedIDs) > 0 {
-			if err := tx.Model(&models.Actress{}).Where("id IN ?", keyedIDs).UpdateColumn("name_key", nil).Error; err != nil {
-				return wrapDBErr("clear", "legacy actress candidate normalized keys", err)
+	}
+	for i := range candidates {
+		if candidates[i].DMMID <= 0 {
+			continue
+		}
+		for key := range candidateEvidenceKeys(&candidates[i]) {
+			if _, conflict := verifiedDMMlessByKey[key]; conflict {
+				ambiguous[candidates[i].ID] = struct{}{}
+				break
 			}
 		}
+	}
 
-		for i := range candidates {
-			candidate := &candidates[i]
-			if _, conflict := ambiguous[candidate.ID]; conflict {
-				if err := tx.Model(&models.Actress{}).Where("id = ?", candidate.ID).UpdateColumn(colAmbiguityQuarantined, true).Error; err != nil {
-					return wrapDBErr("quarantine", fmt.Sprintf("actress candidate %d normalized representations", candidate.ID), err)
-				}
-				continue
+	quarantine, unquarantine, clearKeys := make([]uint, 0), make([]uint, 0), make([]uint, 0)
+	keyUpdates := make(map[uint]string)
+	for i := range candidates {
+		candidate := &candidates[i]
+		_, desiredQuarantine := ambiguous[candidate.ID]
+		desiredKey := ""
+		if !desiredQuarantine && candidate.DMMID <= 0 {
+			desiredKey = actressNameKey(candidate)
+		}
+		if candidate.AmbiguityQuarantined != desiredQuarantine {
+			if desiredQuarantine {
+				quarantine = append(quarantine, candidate.ID)
+			} else {
+				unquarantine = append(unquarantine, candidate.ID)
 			}
-			// Rows quarantined by an older name-only backfill must be repaired
-			// when the DMM-compatible partition no longer considers them
-			// ambiguous. Positive-DMM candidates remain intentionally keyless.
-			if candidate.AmbiguityQuarantined {
-				if err := tx.Model(&models.Actress{}).Where("id = ?", candidate.ID).UpdateColumn(colAmbiguityQuarantined, false).Error; err != nil {
-					return wrapDBErr("unquarantine", fmt.Sprintf("actress candidate %d normalized representations", candidate.ID), err)
-				}
+		}
+		if candidate.NameKey == desiredKey {
+			continue
+		}
+		if desiredKey == "" {
+			clearKeys = append(clearKeys, candidate.ID)
+		} else {
+			keyUpdates[candidate.ID] = desiredKey
+		}
+	}
+	updateIDs := func(ids []uint, column string, value interface{}, operation, label string) error {
+		for start := 0; start < len(ids); start += 300 {
+			end := start + 300
+			if end > len(ids) {
+				end = len(ids)
 			}
-			if candidate.DMMID > 0 {
-				continue
-			}
-			if key := actressNameKey(candidate); key != "" {
-				if err := tx.Model(&models.Actress{}).Where("id = ?", candidate.ID).UpdateColumn("name_key", key).Error; err != nil {
-					return wrapDBErr("backfill", fmt.Sprintf("actress candidate %d normalized key", candidate.ID), err)
-				}
+			if err := tx.Model(&models.Actress{}).Where("id IN ?", ids[start:end]).UpdateColumn(column, value).Error; err != nil {
+				return wrapDBErr(operation, label, err)
 			}
 		}
 		return nil
-	})
+	}
+	if err := updateIDs(quarantine, colAmbiguityQuarantined, true, "quarantine", "actress candidate derived ambiguity"); err != nil {
+		return err
+	}
+	if err := updateIDs(unquarantine, colAmbiguityQuarantined, false, "unquarantine", "actress candidate derived ambiguity"); err != nil {
+		return err
+	}
+	if err := updateIDs(clearKeys, "name_key", nil, "clear", "legacy actress candidate normalized keys"); err != nil {
+		return err
+	}
+	keyIDs := make([]uint, 0, len(keyUpdates))
+	for id := range keyUpdates {
+		keyIDs = append(keyIDs, id)
+	}
+	sort.Slice(keyIDs, func(i, j int) bool { return keyIDs[i] < keyIDs[j] })
+	for start := 0; start < len(keyIDs); start += 300 {
+		end := start + 300
+		if end > len(keyIDs) {
+			end = len(keyIDs)
+		}
+		ids := keyIDs[start:end]
+		var statement strings.Builder
+		statement.WriteString("UPDATE actresses SET name_key = CASE id")
+		args := make([]interface{}, 0, len(ids)*3)
+		for _, id := range ids {
+			statement.WriteString(" WHEN ? THEN ?")
+			args = append(args, id, keyUpdates[id])
+		}
+		statement.WriteString(" END WHERE id IN (")
+		for i, id := range ids {
+			if i > 0 {
+				statement.WriteByte(',')
+			}
+			statement.WriteByte('?')
+			args = append(args, id)
+		}
+		statement.WriteByte(')')
+		if err := tx.Exec(statement.String(), args...).Error; err != nil {
+			return wrapDBErr("backfill", "actress candidate normalized keys", err)
+		}
+	}
+	return nil
 }
 
 // NewActressAliasRepository constructs an ActressAliasRepository backed by
@@ -337,7 +423,7 @@ func NewActressAliasRepository(db *DB) *ActressAliasRepository {
 
 // Create claims a normalized alias without replacing another owner.
 func (r *ActressAliasRepository) Create(ctx context.Context, alias *models.ActressAlias) error {
-	return r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return runCandidateQuarantineMutationTx(r.GetDB().WithContext(ctx), func(tx *gorm.DB) error {
 		return claimNormalizedActressAliasTx(tx, alias)
 	})
 }
@@ -345,14 +431,16 @@ func (r *ActressAliasRepository) Create(ctx context.Context, alias *models.Actre
 // Upsert inserts the alias when new or updates the existing alias record
 // keyed by alias name.
 func (r *ActressAliasRepository) Upsert(ctx context.Context, alias *models.ActressAlias) error {
-	return r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return runCandidateQuarantineMutationTx(r.GetDB().WithContext(ctx), func(tx *gorm.DB) error {
 		return claimNormalizedActressAliasTx(tx, alias)
 	})
 }
 
 // UpsertTx upserts an alias within the given transaction.
 func (r *ActressAliasRepository) UpsertTx(tx *gorm.DB, alias *models.ActressAlias) error {
-	return claimNormalizedActressAliasTx(tx, alias)
+	return runCandidateQuarantineMutationTx(tx, func(scoped *gorm.DB) error {
+		return claimNormalizedActressAliasTx(scoped, alias)
+	})
 }
 
 // FindByAliasName loads the alias record with the given normalized alias name.
@@ -397,7 +485,7 @@ func (r *ActressAliasRepository) Delete(ctx context.Context, aliasName string) e
 		if err := tx.Delete(&models.ActressAlias{}, ids).Error; err != nil {
 			return wrapDBErr("delete", fmt.Sprintf("actress alias %s", aliasName), err)
 		}
-		return nil
+		return recomputeActressCandidateQuarantineTx(tx)
 	})
 }
 

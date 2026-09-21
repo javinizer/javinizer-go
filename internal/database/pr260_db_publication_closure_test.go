@@ -124,7 +124,11 @@ func TestPR260PublicationAdmissionGuards(t *testing.T) {
 	require.ErrorIs(t, err, ErrApplyPublicationStale)
 	require.False(t, called)
 	require.False(t, loadArtifactPublicationMovie(t, db, "guard").RenderDirty)
-	require.NoError(t, db.Create(&models.CreditCollision{MovieContentID: "guard", Status: models.CollisionStatusOpen, Field: models.CreditFieldCreditedName}).Error)
+	actress := models.Actress{FirstName: "Guard", Verified: true}
+	require.NoError(t, db.Create(&actress).Error)
+	credit := models.MovieCredit{MovieContentID: "guard", ActressID: actress.ID}
+	require.NoError(t, db.Create(&credit).Error)
+	require.NoError(t, db.Create(&models.CreditCollision{CreditID: credit.ID, MovieContentID: "guard", Status: models.CollisionStatusOpen, Field: models.CreditFieldCreditedName}).Error)
 	err = repo.WithApplyArtifactPublicationFence(context.Background(), "guard", 7, func(*models.Movie) error { called = true; return nil })
 	require.ErrorIs(t, err, ErrApplyArtifactPublicationBlocked)
 	require.False(t, called)

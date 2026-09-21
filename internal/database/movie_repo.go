@@ -131,7 +131,7 @@ func (r *MovieRepository) WithApplyPublicationFence(ctx context.Context, content
 	})
 }
 
-// ErrApplyArtifactPublicationBlocked indicates an open collision prevents artifact publication.
+// ErrApplyArtifactPublicationBlocked indicates unresolved credit identity evidence prevents artifact publication.
 var ErrApplyArtifactPublicationBlocked = errors.New("apply artifact publication blocked by open collision")
 
 // WithApplyArtifactPublicationFence admits and finalizes publication in short
@@ -162,12 +162,8 @@ func (r *MovieRepository) WithApplyArtifactPublicationFence(ctx context.Context,
 		if movie.RenderGeneration != expectedGeneration {
 			return fmt.Errorf("%w: movie %s expected %d, found %d", ErrApplyPublicationStale, contentID, expectedGeneration, movie.RenderGeneration)
 		}
-		var openCollisions int64
-		if err := tx.WithContext(ctx).Model(&models.CreditCollision{}).Where("movie_content_id = ? AND status = ?", contentID, models.CollisionStatusOpen).Count(&openCollisions).Error; err != nil {
-			return wrapDBErr("count", fmt.Sprintf("open collisions for movie %s", contentID), err)
-		}
-		if openCollisions != 0 {
-			return fmt.Errorf("%w: movie %s", ErrApplyArtifactPublicationBlocked, contentID)
+		if err := rejectBlockedArtifactPublicationTx(ctx, tx, contentID); err != nil {
+			return err
 		}
 		if err := ctx.Err(); err != nil {
 			return err
@@ -196,14 +192,8 @@ func (r *MovieRepository) WithApplyArtifactPublicationFence(ctx context.Context,
 		if movie.RenderGeneration != expectedGeneration {
 			return fmt.Errorf("%w: movie %s expected %d, found %d", ErrApplyPublicationStale, contentID, expectedGeneration, movie.RenderGeneration)
 		}
-		var openCollisions int64
-		if err := tx.WithContext(ctx).Model(&models.CreditCollision{}).
-			Where("movie_content_id = ? AND status = ?", contentID, models.CollisionStatusOpen).
-			Count(&openCollisions).Error; err != nil {
-			return wrapDBErr("count", fmt.Sprintf("open collisions for movie %s", contentID), err)
-		}
-		if openCollisions != 0 {
-			return fmt.Errorf("%w: movie %s", ErrApplyArtifactPublicationBlocked, contentID)
+		if err := rejectBlockedArtifactPublicationTx(ctx, tx, contentID); err != nil {
+			return err
 		}
 		if err := ctx.Err(); err != nil {
 			return err
@@ -221,6 +211,51 @@ func (r *MovieRepository) WithApplyArtifactPublicationFence(ctx context.Context,
 	})
 }
 
+func rejectBlockedArtifactPublicationTx(ctx context.Context, tx *gorm.DB, contentID string) error {
+	// A collision gates only while its credit is live on this movie. The
+	// collision movie_content_id is historical evidence and may be stale after
+	// a credit is moved, detached, or suppressed.
+	var collisionRow models.CreditCollision
+	collisionQuery := tx.WithContext(ctx).Model(&models.CreditCollision{}).
+		Select("credit_collisions.id").
+		Joins("JOIN movie_credits mc ON mc.id = credit_collisions.credit_id").
+		Where("mc.movie_content_id = ? AND mc.suppressed = ? AND credit_collisions.status = ?", contentID, false, models.CollisionStatusOpen).
+		Limit(1).
+		Take(&collisionRow)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if collisionQuery.Error != nil && !errors.Is(collisionQuery.Error, gorm.ErrRecordNotFound) {
+		return wrapDBErr("check", fmt.Sprintf("open collisions for movie %s", contentID), collisionQuery.Error)
+	}
+	if collisionQuery.Error == nil {
+		return fmt.Errorf("%w: movie %s: open collision", ErrApplyArtifactPublicationBlocked, contentID)
+	}
+
+	// Defense in depth for legacy, corrupt, or intermediate states where the
+	// derived candidate bit survived without its collision ledger row. The
+	// movie-content index bounds the lookup; this is one existence probe, not a
+	// per-credit catalog scan. Explicitly suppressed credits do not gate.
+	type existence struct{ One int }
+	var row existence
+	query := tx.WithContext(ctx).Model(&models.MovieCredit{}).
+		Select("1 AS one").
+		Joins("JOIN actresses ON actresses.id = movie_credits.actress_id").
+		Where("movie_credits.movie_content_id = ? AND movie_credits.suppressed = ? AND actresses.verified = ? AND actresses.ambiguity_quarantined = ?", contentID, false, false, true).
+		Limit(1).
+		Scan(&row)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if query.Error != nil {
+		return wrapDBErr("check", fmt.Sprintf("quarantined candidate credits for movie %s", contentID), query.Error)
+	}
+	if query.RowsAffected != 0 {
+		return fmt.Errorf("%w: movie %s: quarantined candidate credit", ErrApplyArtifactPublicationBlocked, contentID)
+	}
+	return nil
+}
+
 func (r *MovieRepository) admitArtifactPublication(ctx context.Context, contentID string, expectedGeneration int64) error {
 	return r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		movie, err := r.lockAndLoadArtifactPublicationMovie(ctx, tx, contentID)
@@ -230,14 +265,8 @@ func (r *MovieRepository) admitArtifactPublication(ctx context.Context, contentI
 		if movie.RenderGeneration != expectedGeneration {
 			return fmt.Errorf("%w: movie %s expected %d, found %d", ErrApplyPublicationStale, contentID, expectedGeneration, movie.RenderGeneration)
 		}
-		var openCollisions int64
-		if err := tx.WithContext(ctx).Model(&models.CreditCollision{}).
-			Where("movie_content_id = ? AND status = ?", contentID, models.CollisionStatusOpen).
-			Count(&openCollisions).Error; err != nil {
-			return wrapDBErr("count", fmt.Sprintf("open collisions for movie %s", contentID), err)
-		}
-		if openCollisions != 0 {
-			return fmt.Errorf("%w: movie %s", ErrApplyArtifactPublicationBlocked, contentID)
+		if err := rejectBlockedArtifactPublicationTx(ctx, tx, contentID); err != nil {
+			return err
 		}
 		if movie.RenderDirty {
 			return nil
@@ -319,7 +348,7 @@ func (r *MovieRepository) Delete(ctx context.Context, id string) error {
 		if err := deleteCreditReassignmentsTx(tx, "movie_content_id = ?", "movie "+movie.ContentID, movie.ContentID); err != nil {
 			return err
 		}
-		if err := deleteCreditRecordsTx(tx, "movie_content_id = ?", "movie_content_id = ?", movie.ContentID, "movie "+movie.ContentID); err != nil {
+		if err := deleteCreditRecordsDeferredTx(tx, "movie_content_id = ?", "movie_content_id = ?", movie.ContentID, "movie "+movie.ContentID); err != nil {
 			return err
 		}
 
@@ -342,7 +371,7 @@ func (r *MovieRepository) Delete(ctx context.Context, id string) error {
 		if err := tx.Delete(&models.Movie{}, "content_id = ?", movie.ContentID).Error; err != nil {
 			return wrapDBErr("delete", fmt.Sprintf("movie %s", movie.ContentID), err)
 		}
-		return nil
+		return recomputeActressCandidateQuarantineTx(tx)
 	})
 }
 

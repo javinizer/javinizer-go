@@ -27,13 +27,13 @@ func TestDeleteCreditRecordsTxErrors(t *testing.T) {
 	t.Run("collision", func(t *testing.T) {
 		db := newCreditTestDB(t)
 		injectDatabaseCallbackError(t, db, "delete", "credit_collisions", 1)
-		err := deleteCreditRecordsTx(db.DB, "movie_content_id = ?", "movie_content_id = ?", "movie", "movie movie")
+		err := deleteCreditRecordsDeferredTx(db.DB, "movie_content_id = ?", "movie_content_id = ?", "movie", "movie movie")
 		require.ErrorContains(t, err, "credit collisions")
 	})
 	t.Run("credit", func(t *testing.T) {
 		db := newCreditTestDB(t)
 		injectDatabaseCallbackError(t, db, "delete", "movie_credits", 1)
-		err := deleteCreditRecordsTx(db.DB, "movie_content_id = ?", "movie_content_id = ?", "movie", "movie movie")
+		err := deleteCreditRecordsDeferredTx(db.DB, "movie_content_id = ?", "movie_content_id = ?", "movie", "movie movie")
 		require.ErrorContains(t, err, "movie credits")
 	})
 }

@@ -86,9 +86,9 @@ func (r *MovieCreditRepository) FindByMovieAndActress(ctx context.Context, movie
 	return &credit, nil
 }
 
-// UpsertTx upserts a credit within the given transaction, adopting user
-// carried fields on collision per the D12 rules.
-func (r *MovieCreditRepository) UpsertTx(tx *gorm.DB, credit *models.MovieCredit) error {
+// upsertDeferredTx mutates a credit without maintaining candidate quarantine.
+// Its outer transaction owner must finalize the projection once before commit.
+func (r *MovieCreditRepository) upsertDeferredTx(tx *gorm.DB, credit *models.MovieCredit) error {
 	var existing models.MovieCredit
 	err := tx.First(&existing, "movie_content_id = ? AND actress_id = ?", credit.MovieContentID, credit.ActressID).Error
 	if err == nil {
@@ -123,8 +123,14 @@ func (r *MovieCreditRepository) UpsertTx(tx *gorm.DB, credit *models.MovieCredit
 	})
 }
 
-// DeleteTx deletes a credit by its movie/actress pair.
-func (r *MovieCreditRepository) DeleteTx(tx *gorm.DB, movieContentID string, actressID uint) error {
+// UpsertTx atomically upserts a credit and finalizes candidate quarantine.
+func (r *MovieCreditRepository) UpsertTx(tx *gorm.DB, credit *models.MovieCredit) error {
+	return runCandidateQuarantineMutationTx(tx, func(scoped *gorm.DB) error {
+		return r.upsertDeferredTx(scoped, credit)
+	})
+}
+
+func (r *MovieCreditRepository) deleteDeferredTx(tx *gorm.DB, movieContentID string, actressID uint) error {
 	if err := tx.Where("movie_content_id = ? AND actress_id = ?", movieContentID, actressID).
 		Delete(&models.MovieCredit{}).Error; err != nil {
 		return wrapDBErr("delete", fmt.Sprintf("movie credit %s/%d", movieContentID, actressID), err)
@@ -132,12 +138,25 @@ func (r *MovieCreditRepository) DeleteTx(tx *gorm.DB, movieContentID string, act
 	return nil
 }
 
-// DeleteByIDTx deletes a credit by its primary key within the given transaction.
-func (r *MovieCreditRepository) DeleteByIDTx(tx *gorm.DB, id uint) error {
+// DeleteTx atomically deletes a credit and finalizes candidate quarantine.
+func (r *MovieCreditRepository) DeleteTx(tx *gorm.DB, movieContentID string, actressID uint) error {
+	return runCandidateQuarantineMutationTx(tx, func(scoped *gorm.DB) error {
+		return r.deleteDeferredTx(scoped, movieContentID, actressID)
+	})
+}
+
+func (r *MovieCreditRepository) deleteByIDDeferredTx(tx *gorm.DB, id uint) error {
 	if err := tx.Delete(&models.MovieCredit{}, id).Error; err != nil {
 		return wrapDBErr("delete", fmt.Sprintf("movie credit %d", id), err)
 	}
 	return nil
+}
+
+// DeleteByIDTx atomically deletes a credit and finalizes candidate quarantine.
+func (r *MovieCreditRepository) DeleteByIDTx(tx *gorm.DB, id uint) error {
+	return runCandidateQuarantineMutationTx(tx, func(scoped *gorm.DB) error {
+		return r.deleteByIDDeferredTx(scoped, id)
+	})
 }
 
 // UpdateOverride sets a per-movie display override on a credit and marks it user-owned.
@@ -147,7 +166,12 @@ func (r *MovieCreditRepository) mutateCreditRenderInputs(ctx context.Context, cr
 		if err != nil {
 			return err
 		}
-		return mutateMovieRenderInputsTx(tx, []string{contentID}, func() error { return mutate(tx) })
+		return mutateMovieRenderInputsTx(tx, []string{contentID}, func() error {
+			if err := mutate(tx); err != nil {
+				return err
+			}
+			return recomputeActressCandidateQuarantineTx(tx)
+		})
 	})
 }
 
