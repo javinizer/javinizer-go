@@ -31,7 +31,7 @@ func TestCreditMergeMovesMembershipAndTranslations(t *testing.T) {
 			if overlap {
 				require.NoError(t, db.Create(&models.ActressTranslation{ActressID: target.ID, Language: "en", FirstName: "Target Translation"}).Error)
 			}
-			require.NoError(t, db.Transaction(func(tx *gorm.DB) error { return moveCredits(tx, source.ActressID, target.ID) }))
+			require.NoError(t, db.Transaction(func(tx *gorm.DB) error { return moveCredits(tx, source.ActressID, target.ID, "Original Truth") }))
 			var credits []models.MovieCredit
 			require.NoError(t, db.Where("movie_content_id = ?", source.MovieContentID).Find(&credits).Error)
 			require.Len(t, credits, 1)

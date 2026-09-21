@@ -13,6 +13,7 @@ var (
 	ErrDuplicateKey              = errors.New("duplicate key")
 	ErrCollisionNotOpen          = errors.New("collision is not open")
 	ErrActressCandidateAmbiguous = errors.New("normalized actress candidate has conflicting identities")
+	ErrCandidateAlreadyVerified  = errors.New("identity is already verified")
 )
 
 // IsNotFound reports whether err indicates a record-not-found condition.

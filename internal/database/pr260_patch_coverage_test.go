@@ -608,12 +608,12 @@ func TestPR260MoveCreditsErrors(t *testing.T) {
 	t.Run("source credits query", func(t *testing.T) {
 		db := newCreditTestDB(t)
 		injectDatabaseCallbackError(t, db, "query", "movie_credits", 1)
-		require.Error(t, moveCredits(db.DB, 1, 2))
+		require.Error(t, moveCredits(db.DB, 1, 2, ""))
 	})
 	t.Run("destination lookup", func(t *testing.T) {
 		db, _, source, _ := collisionFixture(t)
 		injectDatabaseCallbackError(t, db, "query", "movie_credits", 2)
-		require.Error(t, moveCredits(db.DB, source.ActressID, source.ActressID+1))
+		require.Error(t, moveCredits(db.DB, source.ActressID, source.ActressID+1, ""))
 	})
 	t.Run("destination update", func(t *testing.T) {
 		db, _, source, _ := collisionFixture(t)
@@ -623,7 +623,7 @@ func TestPR260MoveCreditsErrors(t *testing.T) {
 		source.UserOverride = true
 		require.NoError(t, db.Save(&source).Error)
 		injectDatabaseCallbackError(t, db, "update", "movie_credits", 1)
-		require.Error(t, moveCredits(db.DB, source.ActressID, target.ID))
+		require.Error(t, moveCredits(db.DB, source.ActressID, target.ID, ""))
 	})
 	t.Run("collision transfer", func(t *testing.T) {
 		db, _, source, _ := collisionFixture(t)
@@ -631,7 +631,7 @@ func TestPR260MoveCreditsErrors(t *testing.T) {
 		require.NoError(t, db.Create(&target).Error)
 		require.NoError(t, db.Create(&models.MovieCredit{MovieContentID: source.MovieContentID, ActressID: target.ID}).Error)
 		injectDatabaseCallbackError(t, db, "query", "credit_collisions", 1)
-		require.Error(t, moveCredits(db.DB, source.ActressID, target.ID))
+		require.Error(t, moveCredits(db.DB, source.ActressID, target.ID, ""))
 	})
 	t.Run("source credit delete", func(t *testing.T) {
 		db, _, source, _ := collisionFixture(t)
@@ -639,17 +639,17 @@ func TestPR260MoveCreditsErrors(t *testing.T) {
 		require.NoError(t, db.Create(&target).Error)
 		require.NoError(t, db.Create(&models.MovieCredit{MovieContentID: source.MovieContentID, ActressID: target.ID}).Error)
 		injectDatabaseCallbackError(t, db, "delete", "movie_credits", 1)
-		require.Error(t, moveCredits(db.DB, source.ActressID, target.ID))
+		require.Error(t, moveCredits(db.DB, source.ActressID, target.ID, ""))
 	})
 	t.Run("credit move", func(t *testing.T) {
 		db, _, source, _ := collisionFixture(t)
 		injectDatabaseCallbackError(t, db, "update", "movie_credits", 1)
-		require.Error(t, moveCredits(db.DB, source.ActressID, source.ActressID+1))
+		require.Error(t, moveCredits(db.DB, source.ActressID, source.ActressID+1, ""))
 	})
 	t.Run("source translations query", func(t *testing.T) {
 		db := newCreditTestDB(t)
 		injectDatabaseCallbackError(t, db, "query", "actress_translations", 1)
-		require.Error(t, moveCredits(db.DB, 1, 2))
+		require.Error(t, moveCredits(db.DB, 1, 2, ""))
 	})
 	for _, operation := range []string{"delete", "update"} {
 		t.Run("translation "+operation, func(t *testing.T) {
@@ -663,9 +663,46 @@ func TestPR260MoveCreditsErrors(t *testing.T) {
 				require.NoError(t, db.Create(&models.ActressTranslation{ActressID: target.ID, Language: "en"}).Error)
 			}
 			injectDatabaseCallbackError(t, db, operation, "actress_translations", 1)
-			require.Error(t, moveCredits(db.DB, source.ID, target.ID))
+			require.Error(t, moveCredits(db.DB, source.ID, target.ID, ""))
 		})
 	}
+	t.Run("stale target translation delete", func(t *testing.T) {
+		db := newCreditTestDB(t)
+		source := models.Actress{FirstName: "Source"}
+		target := models.Actress{FirstName: "Target"}
+		require.NoError(t, db.Create(&source).Error)
+		require.NoError(t, db.Create(&target).Error)
+		translation := models.ActressTranslation{ActressID: target.ID, Language: "en", SourceName: "Old Name"}
+		require.NoError(t, db.Create(&translation).Error)
+		injectDatabaseCallbackError(t, db, "delete", "actress_translations", 1)
+		err := db.Transaction(func(tx *gorm.DB) error {
+			return moveCredits(tx, source.ID, target.ID, "Final Name")
+		})
+		require.Error(t, err)
+		require.NoError(t, db.First(&translation, translation.ID).Error)
+		require.Equal(t, target.ID, translation.ActressID)
+	})
+	t.Run("source move after stale target delete rolls back", func(t *testing.T) {
+		db := newCreditTestDB(t)
+		source := models.Actress{FirstName: "Source"}
+		target := models.Actress{FirstName: "Target"}
+		require.NoError(t, db.Create(&source).Error)
+		require.NoError(t, db.Create(&target).Error)
+		staleTarget := models.ActressTranslation{ActressID: target.ID, Language: "en", SourceName: "Old Name"}
+		freshSource := models.ActressTranslation{ActressID: source.ID, Language: "en", SourceName: "Final Name"}
+		require.NoError(t, db.Create(&staleTarget).Error)
+		require.NoError(t, db.Create(&freshSource).Error)
+		injectDatabaseCallbackError(t, db, "update", "actress_translations", 1)
+		err := db.Transaction(func(tx *gorm.DB) error {
+			return moveCredits(tx, source.ID, target.ID, "Final Name")
+		})
+		require.Error(t, err)
+		var rows []models.ActressTranslation
+		require.NoError(t, db.Order("id").Find(&rows).Error)
+		require.Len(t, rows, 2)
+		require.Equal(t, target.ID, rows[0].ActressID)
+		require.Equal(t, source.ID, rows[1].ActressID)
+	})
 	t.Run("target translation lookup", func(t *testing.T) {
 		db := newCreditTestDB(t)
 		source := models.Actress{FirstName: "Source"}
@@ -674,7 +711,7 @@ func TestPR260MoveCreditsErrors(t *testing.T) {
 		require.NoError(t, db.Create(&target).Error)
 		require.NoError(t, db.Create(&models.ActressTranslation{ActressID: source.ID, Language: "en"}).Error)
 		injectDatabaseCallbackError(t, db, "query", "actress_translations", 2)
-		require.Error(t, moveCredits(db.DB, source.ID, target.ID))
+		require.Error(t, moveCredits(db.DB, source.ID, target.ID, ""))
 	})
 }
 

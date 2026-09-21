@@ -516,13 +516,15 @@ func (r *ActressRepository) CountCandidates(ctx context.Context) (int64, error) 
 // PromoteCandidate marks a quarantined candidate as a verified user-owned
 // identity with the user-confirmed canonical fields.
 func (r *ActressRepository) PromoteCandidate(ctx context.Context, id uint, firstName, lastName, japaneseName, thumbURL string) error {
-	return r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		contentIDs, err := movieContentIDsForActressesTx(tx, id)
-		if err != nil {
-			return err
-		}
-		return mutateMovieRenderInputsTx(tx, contentIDs, func() error {
-			return promoteCandidateTx(tx, id, firstName, lastName, japaneseName, thumbURL)
+	return retryOnLocked(func() error {
+		return r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			contentIDs, err := movieContentIDsForActressesTx(tx, id)
+			if err != nil {
+				return err
+			}
+			return mutateMovieRenderInputsTx(tx, contentIDs, func() error {
+				return promoteCandidateTx(tx, id, firstName, lastName, japaneseName, thumbURL)
+			})
 		})
 	})
 }
@@ -541,8 +543,12 @@ func promoteCandidateTx(tx *gorm.DB, id uint, firstName, lastName, japaneseName,
 	if err := tx.First(&candidate, id).Error; err != nil {
 		return wrapDBErr("promote", fmt.Sprintf("candidate %d", id), err)
 	}
-	if err := tx.Model(&models.Actress{}).Where("id = ?", id).Updates(updates).Error; err != nil {
-		return wrapDBErr("promote", fmt.Sprintf("candidate %d", id), err)
+	result := tx.Model(&models.Actress{}).Where("id = ? AND verified = ?", id, false).Updates(updates)
+	if result.Error != nil {
+		return wrapDBErr("promote", fmt.Sprintf("candidate %d", id), result.Error)
+	}
+	if result.RowsAffected != 1 {
+		return ErrCandidateAlreadyVerified
 	}
 	if err := transitionActressCanonicalNamesTx(tx, id, &candidate); err != nil {
 		return wrapDBErr("promote", fmt.Sprintf("aliases for candidate %d", id), err)
@@ -868,6 +874,10 @@ func (r *ActressRepository) catalogQuery(ctx context.Context) *gorm.DB {
 	return r.GetDB().WithContext(ctx).Where("verified = ?", true)
 }
 
+func actressTranslationIsFresh(sourceName, canonicalKey string) bool {
+	return strings.TrimSpace(sourceName) == "" || models.NormalizeActressNameKey(sourceName) == canonicalKey
+}
+
 // FreshTranslationsByActress returns translations whose source name still
 // matches the current canonical name, omitting stale rows.
 func (r *ActressRepository) FreshTranslationsByActress(ctx context.Context, actressID uint) ([]models.ActressTranslation, error) {
@@ -883,7 +893,7 @@ func (r *ActressRepository) FreshTranslationsByActress(ctx context.Context, actr
 	canonical := models.NormalizeActressNameKey(actress.FullName())
 	fresh := make([]models.ActressTranslation, 0, len(translations))
 	for _, t := range translations {
-		if models.NormalizeActressNameKey(t.SourceName) != canonical && strings.TrimSpace(t.SourceName) != "" {
+		if !actressTranslationIsFresh(t.SourceName, canonical) {
 			logging.Debugf("stale actress translation %d (source %q != canonical %q) — flagged for re-translation", t.ID, t.SourceName, actress.FullName())
 			continue
 		}

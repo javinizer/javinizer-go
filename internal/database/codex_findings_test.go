@@ -250,7 +250,7 @@ func TestMoveCreditsReturnsSuppressedAssociationDeleteError(t *testing.T) {
 	require.NoError(t, db.Create(&sourceCredit).Error)
 	require.NoError(t, db.DB.Exec("DROP TABLE movie_actresses").Error)
 
-	require.Error(t, moveCredits(db.DB, source.ID, target.ID))
+	require.Error(t, moveCredits(db.DB, source.ID, target.ID, ""))
 }
 
 func TestActressMergeRemovesSuppressedLegacyAssociationWithoutDuplicateCredit(t *testing.T) {
@@ -302,7 +302,7 @@ func TestMoveCreditsReturnsSuppressedAssociationDeleteErrorWithoutDuplicateCredi
 	require.NoError(t, db.Create(&sourceCredit).Error)
 	require.NoError(t, db.DB.Exec("DROP TABLE movie_actresses").Error)
 
-	require.Error(t, moveCredits(db.DB, source.ID, target.ID))
+	require.Error(t, moveCredits(db.DB, source.ID, target.ID, ""))
 }
 
 func TestActressMergeReturnsSourceLookupError(t *testing.T) {

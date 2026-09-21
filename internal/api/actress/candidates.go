@@ -117,6 +117,10 @@ func PromoteCandidate(deps ActressDeps) gin.HandlerFunc {
 			thumb = existing.ThumbURL
 		}
 		if err := deps.ActressRepo.PromoteCandidate(c.Request.Context(), uint(id), first, last, jp, thumb); err != nil {
+			if errors.Is(err, database.ErrCandidateAlreadyVerified) {
+				c.JSON(http.StatusConflict, contracts.ErrorResponse{Error: err.Error()})
+				return
+			}
 			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
