@@ -213,23 +213,35 @@ func sourceAliasesForUpsert(sourceCandidates []string, canonicalName string) []s
 	return upserts
 }
 
+type mergeResolution uint8
+
+const (
+	mergeResolutionTarget mergeResolution = iota + 1
+	mergeResolutionSource
+)
+
 type mergeDecisions struct {
-	sourceFields map[string]struct{}
+	fields map[string]mergeResolution
 }
 
 func mergeDecisionsFromNormalized(resolutions map[string]string) mergeDecisions {
-	decisions := mergeDecisions{sourceFields: make(map[string]struct{})}
+	decisions := mergeDecisions{fields: make(map[string]mergeResolution, len(resolutions))}
 	for field, decision := range resolutions {
 		if decision == colSource {
-			decisions.sourceFields[field] = struct{}{}
+			decisions.fields[field] = mergeResolutionSource
+		} else {
+			decisions.fields[field] = mergeResolutionTarget
 		}
 	}
 	return decisions
 }
 
 func (d mergeDecisions) sourceWins(field string) bool {
-	_, ok := d.sourceFields[field]
-	return ok
+	return d.fields[field] == mergeResolutionSource
+}
+
+func (d mergeDecisions) targetWins(field string) bool {
+	return d.fields[field] == mergeResolutionTarget
 }
 
 //nolint:unused // mergeActressValues validates raw resolutions before merging source into target.
@@ -255,48 +267,43 @@ func mergeActressValuesResolved(target, source *models.Actress, decisions mergeD
 	merged.AmbiguityQuarantined = !merged.Verified && (target.AmbiguityQuarantined || source.AmbiguityQuarantined)
 
 	switch {
+	case decisions.sourceWins(colDMMID):
+		merged.DMMID = source.DMMID
+	case decisions.targetWins(colDMMID):
 	case target.DMMID == 0 && source.DMMID > 0:
 		merged.DMMID = source.DMMID
-	case target.DMMID > 0 && source.DMMID > 0 && target.DMMID != source.DMMID:
-		if decisions.sourceWins(colDMMID) {
-			merged.DMMID = source.DMMID
-		}
 	}
 
 	switch {
+	case decisions.sourceWins(colFirstName):
+		merged.FirstName = strings.TrimSpace(source.FirstName)
+	case decisions.targetWins(colFirstName):
 	case !nonEmptyString(target.FirstName) && nonEmptyString(source.FirstName):
 		merged.FirstName = strings.TrimSpace(source.FirstName)
-	case nonEmptyString(target.FirstName) && nonEmptyString(source.FirstName) && target.FirstName != source.FirstName:
-		if decisions.sourceWins(colFirstName) {
-			merged.FirstName = strings.TrimSpace(source.FirstName)
-		}
 	}
 
 	switch {
+	case decisions.sourceWins(colLastName):
+		merged.LastName = strings.TrimSpace(source.LastName)
+	case decisions.targetWins(colLastName):
 	case !nonEmptyString(target.LastName) && nonEmptyString(source.LastName):
 		merged.LastName = strings.TrimSpace(source.LastName)
-	case nonEmptyString(target.LastName) && nonEmptyString(source.LastName) && target.LastName != source.LastName:
-		if decisions.sourceWins(colLastName) {
-			merged.LastName = strings.TrimSpace(source.LastName)
-		}
 	}
 
 	switch {
+	case decisions.sourceWins(colJapaneseName):
+		merged.JapaneseName = strings.TrimSpace(source.JapaneseName)
+	case decisions.targetWins(colJapaneseName):
 	case !nonEmptyString(target.JapaneseName) && nonEmptyString(source.JapaneseName):
 		merged.JapaneseName = strings.TrimSpace(source.JapaneseName)
-	case nonEmptyString(target.JapaneseName) && nonEmptyString(source.JapaneseName) && target.JapaneseName != source.JapaneseName:
-		if decisions.sourceWins(colJapaneseName) {
-			merged.JapaneseName = strings.TrimSpace(source.JapaneseName)
-		}
 	}
 
 	switch {
+	case decisions.sourceWins("thumb_url"):
+		merged.ThumbURL = strings.TrimSpace(source.ThumbURL)
+	case decisions.targetWins("thumb_url"):
 	case !nonEmptyString(target.ThumbURL) && nonEmptyString(source.ThumbURL):
 		merged.ThumbURL = strings.TrimSpace(source.ThumbURL)
-	case nonEmptyString(target.ThumbURL) && nonEmptyString(source.ThumbURL) && target.ThumbURL != source.ThumbURL:
-		if decisions.sourceWins("thumb_url") {
-			merged.ThumbURL = strings.TrimSpace(source.ThumbURL)
-		}
 	}
 
 	return merged

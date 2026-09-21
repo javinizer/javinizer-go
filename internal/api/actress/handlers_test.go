@@ -926,6 +926,48 @@ func TestActressMergePreviewAndApply(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, getSourceW.Code)
 }
 
+func TestActressMergeAcceptsOmittedAndEmptyResolutions(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body func(uint, uint) map[string]any
+	}{
+		{
+			name: "omitted",
+			body: func(targetID, sourceID uint) map[string]any {
+				return map[string]any{"target_id": targetID, "source_id": sourceID}
+			},
+		},
+		{
+			name: "empty",
+			body: func(targetID, sourceID uint) map[string]any {
+				return map[string]any{"target_id": targetID, "source_id": sourceID, "resolutions": map[string]string{}}
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := newMockActressRepo()
+			target := &models.Actress{FirstName: "Target"}
+			source := &models.Actress{FirstName: "Source"}
+			require.NoError(t, repo.Create(t.Context(), target))
+			require.NoError(t, repo.Create(t.Context(), source))
+			router := gin.New()
+			router.POST("/actresses/merge", mergeActresses(ActressDeps{ContentRepos: database.ContentRepos{ActressRepo: repo}}))
+			body, err := json.Marshal(tc.body(target.ID, source.ID))
+			require.NoError(t, err)
+			req := httptest.NewRequest(http.MethodPost, "/actresses/merge", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			response := httptest.NewRecorder()
+
+			router.ServeHTTP(response, req)
+
+			require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+			var merged contracts.ActressMergeResponse
+			require.NoError(t, json.Unmarshal(response.Body.Bytes(), &merged))
+			require.Equal(t, "Target", merged.MergedActress.FirstName)
+		})
+	}
+}
+
 func TestActressMergeValidationAndNotFound(t *testing.T) {
 	mockRepo := newMockActressRepo()
 	target := &models.Actress{

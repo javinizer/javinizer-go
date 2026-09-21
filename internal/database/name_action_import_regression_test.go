@@ -581,7 +581,7 @@ func TestMergeAliasAmbiguityRollsBackBeforeSourceDeletion(t *testing.T) {
 	db := newCreditTestDB(t)
 	repo := NewActressRepository(db)
 	target := models.Actress{DMMID: 91996, JapaneseName: "Merge Target", Verified: true, Origin: ActressOriginUser}
-	source := models.Actress{DMMID: 91997, JapaneseName: "Merge Source", Verified: true, Origin: ActressOriginUser}
+	source := models.Actress{DMMID: 91997, JapaneseName: "Merge Source", Aliases: "BLOCKED ALIAS", Verified: true, Origin: ActressOriginUser}
 	require.NoError(t, db.Create(&target).Error)
 	require.NoError(t, db.Create(&source).Error)
 	for _, alias := range []models.ActressAlias{
@@ -590,15 +590,9 @@ func TestMergeAliasAmbiguityRollsBackBeforeSourceDeletion(t *testing.T) {
 	} {
 		require.NoError(t, db.Create(&alias).Error)
 	}
-	plan := &MergePlan{
-		TargetID:              target.ID,
-		SourceID:              source.ID,
-		OriginalCanonicalName: target.JapaneseName,
-		Merged:                target,
-		CanonicalName:         target.JapaneseName,
-		SourceAliasUpserts:    []string{"BLOCKED ALIAS"},
-	}
-	_, err := repo.merger.ExecuteMerge(t.Context(), plan, db)
+	plan, err := repo.merger.PlanMerge(t.Context(), target.ID, source.ID, nil)
+	require.NoError(t, err)
+	_, err = repo.merger.ExecuteMerge(t.Context(), plan, db)
 	require.ErrorIs(t, err, ErrActressAliasAmbiguous)
 	require.NoError(t, db.First(&models.Actress{}, source.ID).Error)
 	var aliases []models.ActressAlias

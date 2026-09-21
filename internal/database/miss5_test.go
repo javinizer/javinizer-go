@@ -576,8 +576,8 @@ func TestMiss5_PlanMerge_WithCustomResolutions(t *testing.T) {
 	}
 	plan, err := actressRepo.merger.PlanMerge(context.TODO(), target.ID, source.ID, resolutions)
 	require.NoError(t, err)
-	assert.Equal(t, 20212, plan.Merged.DMMID)
-	assert.Equal(t, "SrcFirst", plan.Merged.FirstName)
+	assert.True(t, plan.decisions.sourceWins("dmm_id"))
+	assert.True(t, plan.decisions.sourceWins("first_name"))
 }
 
 // =====================================================================
