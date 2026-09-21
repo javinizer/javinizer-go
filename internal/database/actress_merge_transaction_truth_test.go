@@ -456,6 +456,29 @@ func TestExecuteMergeRecomputesFromCurrentTarget(t *testing.T) {
 	require.Equal(t, "Target Promoted", translations[0].SourceName)
 }
 
+func TestExecuteMergeRejectsCanceledContextBeforeTransaction(t *testing.T) {
+	db := newCreditTestDB(t)
+	repo := NewActressRepository(db)
+	target := models.Actress{FirstName: "Target", LastName: "Name"}
+	source := models.Actress{FirstName: "Source", LastName: "Name"}
+	require.NoError(t, db.Create(&target).Error)
+	require.NoError(t, db.Create(&source).Error)
+	plan, err := repo.merger.PlanMerge(t.Context(), target.ID, source.ID, nil)
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	result, err := repo.merger.ExecuteMerge(ctx, plan, db)
+	require.ErrorIs(t, err, context.Canceled)
+	require.Nil(t, result)
+
+	var actresses []models.Actress
+	require.NoError(t, db.Order("id").Find(&actresses).Error)
+	require.Len(t, actresses, 2)
+	require.Equal(t, target.ID, actresses[0].ID)
+	require.Equal(t, source.ID, actresses[1].ID)
+}
+
 func TestExecuteMergeRecomputesExplicitSourceDecisions(t *testing.T) {
 	db := newCreditTestDB(t)
 	repo := NewActressRepository(db)
