@@ -227,7 +227,7 @@ func TestBatchMovieSaveRejectsExplicitStaleCastAfterCanonicalAdoption(t *testing
 
 	movie := models.Movie{ContentID: "PR260-STALE-ADOPT", ID: "PR260-STALE-ADOPT", Title: "Before"}
 	require.NoError(t, db.DB.Create(&movie).Error)
-	source := models.Actress{FirstName: "Old", LastName: "Identity", Verified: false, Origin: "scrape"}
+	source := models.Actress{FirstName: "Old", LastName: "Identity", Verified: true, Origin: "user"}
 	require.NoError(t, db.DB.Create(&source).Error)
 	credit := models.MovieCredit{MovieContentID: movie.ContentID, ActressID: source.ID, CreditedName: "Adopted Canonical", Origin: string(models.CreditOriginScrape)}
 	require.NoError(t, db.DB.Create(&credit).Error)

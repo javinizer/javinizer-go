@@ -143,36 +143,60 @@ func getBatchJobFull(deps *core.APIDeps, c *gin.Context, jobID string) {
 }
 
 func refreshBatchJobMovies(c *gin.Context, deps *core.APIDeps, job *worker.BatchJobStatus) error {
-	if deps == nil || deps.Repos.MovieRepo == nil || job == nil {
+	if deps == nil || deps.Repos.MovieProjectionRepo == nil || job == nil {
 		return nil
 	}
+	contentIDs := make([]string, 0, len(job.Results))
+	fallbackIDs := make([]string, 0, len(job.Results)*2)
+	for _, result := range job.Results {
+		if result == nil || result.Movie == nil {
+			continue
+		}
+		contentIDs = append(contentIDs, result.Movie.ContentID)
+		fallbackIDs = append(fallbackIDs, result.Movie.ID, result.FileMatchInfo.MovieID)
+	}
+	projection, err := deps.Repos.MovieProjectionRepo.FindAuthoritativeProjections(c.Request.Context(), contentIDs, fallbackIDs)
+	if err != nil {
+		return err
+	}
+	type refreshedResult struct {
+		filePath string
+		result   *resultstore.MovieResult
+	}
+	refreshed := make([]refreshedResult, 0, len(job.Results))
 	for filePath, result := range job.Results {
 		if result == nil || result.Movie == nil {
 			continue
 		}
-		current, err := findAuthoritativeMovie(c.Request.Context(), deps.Repos.MovieRepo, result.Movie, result.FileMatchInfo.MovieID)
-		if err != nil {
-			return err
-		}
+		current := findAuthoritativeMovieProjection(projection, result.Movie, result.FileMatchInfo.MovieID)
 		if current == nil {
 			continue
 		}
-		live, ok := deps.GetJobStore().GetBatchJob(string(job.ID))
-		if !ok {
-			return fmt.Errorf("job %s vanished during authoritative movie refresh", job.ID)
-		}
-		marker, ok := live.(interface{ MarkPersistedMovie(string, string, uint64) })
-		if !ok {
-			return fmt.Errorf("job %s cannot record authoritative movie refresh", job.ID)
-		}
-		marker.MarkPersistedMovie(filePath, result.ResultID, result.Revision)
 		copyResult := *result
-		copyMovie := *result.Movie
-		copyMovie.Actresses = append([]models.Actress(nil), current.Actresses...)
-		copyMovie.Credits = append([]models.MovieCredit(nil), current.Credits...)
-		copyMovie.UpdatedAt = current.UpdatedAt
-		copyResult.Movie = &copyMovie
-		job.Results[filePath] = &copyResult
+		copyMovie := result.Movie.Clone()
+		authority := current.Clone()
+		copyMovie.Actresses = authority.Actresses
+		copyMovie.Credits = authority.Credits
+		copyMovie.UpdatedAt = authority.UpdatedAt
+		copyResult.Movie = copyMovie
+		refreshed = append(refreshed, refreshedResult{filePath: filePath, result: &copyResult})
+	}
+	if len(refreshed) == 0 {
+		return nil
+	}
+	live, ok := deps.GetJobStore().GetBatchJob(string(job.ID))
+	if !ok {
+		return fmt.Errorf("job %s vanished during authoritative movie refresh", job.ID)
+	}
+	marker, ok := live.(interface{ MarkPersistedMovie(string, string, uint64) })
+	if !ok {
+		return fmt.Errorf("job %s cannot record authoritative movie refresh", job.ID)
+	}
+	for _, item := range refreshed {
+		marker.MarkPersistedMovie(item.filePath, item.result.ResultID, item.result.Revision)
+	}
+	for _, item := range refreshed {
+		job.Results[item.filePath] = item.result
 	}
 	return nil
 }

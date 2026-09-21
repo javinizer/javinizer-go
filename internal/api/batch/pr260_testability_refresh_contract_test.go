@@ -54,6 +54,7 @@ func TestPR260RefreshNegativeInterfaceContractsDoNotPublishSnapshot(t *testing.T
 			realRepo := deps.Repos.MovieRepo
 			if tc.nilRead {
 				deps.Repos.MovieRepo = nilMovieReadRepo{realRepo}
+				deps.Repos.MovieProjectionRepo = nil
 			}
 			if tc.markerless {
 				deps.JobStore = markerlessJobStore{deps.JobStore}

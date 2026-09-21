@@ -6,6 +6,7 @@ package database
 // rather than the full Repositories bag.
 type ContentRepos struct {
 	MovieRepo            MovieRepositoryInterface
+	MovieProjectionRepo  MovieProjectionRepositoryInterface
 	ActressRepo          ActressRepositoryInterface
 	ActressAliasRepo     ActressAliasRepositoryInterface
 	ContentIDMappingRepo ContentIDMappingRepositoryInterface
@@ -64,6 +65,7 @@ func (db *DB) Repositories() Repositories {
 	return Repositories{
 		ContentRepos: ContentRepos{
 			MovieRepo:            NewMovieRepository(db),
+			MovieProjectionRepo:  NewMovieRepository(db),
 			ActressRepo:          NewActressRepository(db),
 			ActressAliasRepo:     NewActressAliasRepository(db),
 			ContentIDMappingRepo: NewContentIDMappingRepository(db),

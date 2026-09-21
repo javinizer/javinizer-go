@@ -11,6 +11,27 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 )
 
+func findAuthoritativeMovieProjection(projection *database.AuthoritativeMovieProjection, snapshot *models.Movie, matcherAlias string) *models.Movie {
+	if projection == nil || snapshot == nil {
+		return nil
+	}
+	if contentID := strings.TrimSpace(snapshot.ContentID); contentID != "" {
+		if movie := projection.ByContentID[contentID]; movie != nil {
+			return movie
+		}
+	}
+	if canonicalID := strings.TrimSpace(snapshot.ID); canonicalID != "" {
+		if movie := projection.ByCanonicalID[canonicalID]; movie != nil && strings.TrimSpace(movie.ID) == canonicalID {
+			return movie
+		}
+	}
+	alias := strings.TrimSpace(matcherAlias)
+	if alias == "" || alias == strings.TrimSpace(snapshot.ID) {
+		return nil
+	}
+	return projection.ByCanonicalID[alias]
+}
+
 func findAuthoritativeMovie(ctx context.Context, repo database.MovieRepositoryInterface, snapshot *models.Movie, matcherAlias string) (*models.Movie, error) {
 	if repo == nil || snapshot == nil {
 		return nil, nil

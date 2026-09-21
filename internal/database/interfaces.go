@@ -9,7 +9,18 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 )
 
-// MovieRepositoryInterface defines the contract for movie database operations
+// AuthoritativeMovieProjection indexes the narrow movie/credit API projection.
+type AuthoritativeMovieProjection struct {
+	ByContentID   map[string]*models.Movie
+	ByCanonicalID map[string]*models.Movie
+}
+
+// MovieProjectionRepositoryInterface batches authoritative API movie projections.
+type MovieProjectionRepositoryInterface interface {
+	FindAuthoritativeProjections(ctx context.Context, contentIDs, canonicalIDs []string) (*AuthoritativeMovieProjection, error)
+}
+
+// MovieRepositoryInterface defines the contract for movie database operations.
 type MovieRepositoryInterface interface {
 	Create(ctx context.Context, movie *models.Movie) error
 	Update(ctx context.Context, movie *models.Movie) error
