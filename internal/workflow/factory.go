@@ -311,6 +311,7 @@ func buildOrchestratorConfigs(cfg *config.Config, dcs domainConfigs, fs afero.Fs
 		DisplayTitle:                cfg.Metadata.NFO.Format.DisplayTitle,
 		OpMode:                      cfg.Output.GetOperationMode(),
 		MaxPathLength:               cfg.Output.Template.MaxPathLength,
+		UseCreditedName:             cfg.Metadata.NFO.Feature.UseCreditedName,
 		Downloads: downloadToggles{
 			Poster:      cfg.Output.Download.DownloadPoster,
 			Cover:       cfg.Output.Download.DownloadCover,

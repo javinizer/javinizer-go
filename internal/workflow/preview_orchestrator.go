@@ -178,7 +178,11 @@ func (o *previewOrchImpl) resolveMediaPaths(
 
 	// Build a template context with GroupActress/GroupActressName set so that
 	// preview paths match the actual output (e.g., @Group folder naming).
-	previewTmplCtx := template.NewContextFromMovie(movie)
+	previewTmplCtx := template.NewContextFromMovieWithOptions(movie, template.ContextOptions{
+		FirstNameOrder:  o.previewCfg.PathCfg.FirstNameOrder,
+		RenderCredits:   true,
+		UseCreditedName: o.previewCfg.UseCreditedName,
+	})
 	previewTmplCtx.GroupActress = o.previewCfg.PathCfg.GroupActress
 	previewTmplCtx.GroupActressMin = o.previewCfg.PathCfg.GroupActressMin
 	previewTmplCtx.GroupActressName = o.previewCfg.PathCfg.GroupActressName
