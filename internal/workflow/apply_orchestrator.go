@@ -591,9 +591,13 @@ func (o *applyOrchImpl) stepNFO(ctx context.Context, cmd ApplyCmd, state *applyP
 
 	var movieTags []string
 	if o.tagRepo != nil {
-		tags, tagErr := o.tagRepo.GetTagsForMovie(ctx, state.movie.ID)
+		movieID := state.movie.ContentID
+		if movieID == "" {
+			movieID = state.movie.ID
+		}
+		tags, tagErr := o.tagRepo.GetTagsForMovie(ctx, movieID)
 		if tagErr != nil {
-			resolveLogger(o.logger).Warnf("[workflow] Failed to load tags for %s: %v", state.movie.ID, tagErr)
+			resolveLogger(o.logger).Warnf("[workflow] Failed to load tags for %s: %v", movieID, tagErr)
 		} else {
 			movieTags = tags
 		}
