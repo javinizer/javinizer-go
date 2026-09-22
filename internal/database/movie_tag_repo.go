@@ -68,6 +68,12 @@ func resolveMovieTagKey(tx *gorm.DB, supplied string) (movieTagKey, error) {
 		CASE
 			WHEN m.id IS NOT NULL AND m.id <> '' AND m.id <> m.content_id
 				AND NOT EXISTS (SELECT 1 FROM movies collision WHERE collision.content_id = m.id)
+				AND 1 = (
+					SELECT COUNT(*) FROM movies owner
+					WHERE owner.id = m.id
+						AND owner.id IS NOT NULL AND owner.id <> ''
+						AND owner.content_id IS NOT NULL AND owner.content_id <> ''
+				)
 			THEN m.id ELSE ''
 		END AS legacy,
 		CASE WHEN m.content_id = ? THEN 0 ELSE 1 END AS precedence

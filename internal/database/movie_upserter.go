@@ -1210,7 +1210,7 @@ func (u *MovieUpserter) recordFieldCollisionsTx(tx *gorm.DB, collisionRepo *Cred
 		if err := collisionRepo.recordDeferredTx(tx, collision, credit.Source); err != nil {
 			return err
 		}
-		if collision.Status != models.CollisionStatusOpen {
+		if collision.Status != models.CollisionStatusOpen && collision.Resolution != models.CollisionResolutionAutoKeep {
 			continue
 		}
 		decision := ApplyFieldCollisionPolicy(policy, collision, credit.Source, trusted)
