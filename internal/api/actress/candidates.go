@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -95,33 +96,47 @@ func PromoteCandidate(deps ActressDeps) gin.HandlerFunc {
 		}
 		existing, err := deps.ActressRepo.FindByID(c.Request.Context(), uint(id))
 		if err != nil {
-			c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "candidate not found"})
+			if database.IsNotFound(err) {
+				c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "candidate not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 		if existing.Verified {
 			c.JSON(http.StatusConflict, contracts.ErrorResponse{Error: "identity is already verified"})
 			return
 		}
-		first, last, jp := req.FirstName, req.LastName, req.JapaneseName
+		first := strings.TrimSpace(req.FirstName)
+		last := strings.TrimSpace(req.LastName)
+		jp := strings.TrimSpace(req.JapaneseName)
+		thumb := strings.TrimSpace(req.ThumbURL)
 		if first == "" {
-			first = existing.FirstName
+			first = strings.TrimSpace(existing.FirstName)
 		}
 		if last == "" {
-			last = existing.LastName
+			last = strings.TrimSpace(existing.LastName)
 		}
 		if jp == "" {
-			jp = existing.JapaneseName
+			jp = strings.TrimSpace(existing.JapaneseName)
 		}
-		thumb := req.ThumbURL
 		if thumb == "" {
-			thumb = existing.ThumbURL
+			thumb = strings.TrimSpace(existing.ThumbURL)
+		}
+		resolved := actressRequest{FirstName: first, LastName: last, JapaneseName: jp, ThumbURL: thumb}
+		if err := validateActressRequest(&resolved); err != nil {
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
+			return
 		}
 		if err := deps.ActressRepo.PromoteCandidate(c.Request.Context(), uint(id), first, last, jp, thumb); err != nil {
-			if errors.Is(err, database.ErrCandidateAlreadyVerified) {
+			switch {
+			case errors.Is(err, database.ErrInvalidLookup):
+				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
+			case errors.Is(err, database.ErrCandidateAlreadyVerified):
 				c.JSON(http.StatusConflict, contracts.ErrorResponse{Error: err.Error()})
-				return
+			default:
+				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 			}
-			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 		updated, err := deps.ActressRepo.FindByID(c.Request.Context(), uint(id))

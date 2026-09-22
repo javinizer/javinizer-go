@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -526,6 +527,13 @@ func (r *ActressRepository) CountCandidates(ctx context.Context) (int64, error) 
 // PromoteCandidate marks a quarantined candidate as a verified user-owned
 // identity with the user-confirmed canonical fields.
 func (r *ActressRepository) PromoteCandidate(ctx context.Context, id uint, firstName, lastName, japaneseName, thumbURL string) error {
+	firstName = strings.TrimSpace(firstName)
+	lastName = strings.TrimSpace(lastName)
+	japaneseName = strings.TrimSpace(japaneseName)
+	thumbURL = strings.TrimSpace(thumbURL)
+	if firstName == "" && japaneseName == "" {
+		return wrapDBErr("promote", fmt.Sprintf("candidate %d: either first_name or japanese_name is required", id), ErrInvalidLookup)
+	}
 	return retryOnLocked(func() error {
 		return r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 			contentIDs, err := movieContentIDsForActressesTx(tx, id)
