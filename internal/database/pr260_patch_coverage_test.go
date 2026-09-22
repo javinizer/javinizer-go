@@ -727,6 +727,16 @@ func TestPR260ExecuteMergeLateErrors(t *testing.T) {
 	}
 }
 
+func TestPR260DeferredDMMQueryError(t *testing.T) {
+	db := newCreditTestDB(t)
+	injectDatabaseCallbackError(t, db, "query", "actresses", 1)
+
+	resolved, outcome, err := resolveActressIdentityDeferredTx(db.DB, &models.Actress{DMMID: 777000}, nil)
+	require.Nil(t, resolved)
+	require.Equal(t, ResolutionMatched, outcome)
+	require.ErrorContains(t, err, "resolve dmm")
+}
+
 func TestPR260DuplicateRecoveryReloadErrors(t *testing.T) {
 	t.Run("candidate", func(t *testing.T) {
 		db := newCreditTestDB(t)
