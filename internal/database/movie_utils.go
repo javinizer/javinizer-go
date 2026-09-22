@@ -16,13 +16,17 @@ func filterIdentifiableActresses(actresses []models.Actress) []models.Actress {
 
 	filtered := make([]models.Actress, 0, len(actresses))
 	for _, actress := range actresses {
-		if actress.DMMID != 0 ||
-			strings.TrimSpace(actress.JapaneseName) != "" ||
-			strings.TrimSpace(actress.FirstName) != "" ||
-			strings.TrimSpace(actress.LastName) != "" {
+		if actressHasPersistableIdentity(actress) {
 			filtered = append(filtered, actress)
 		}
 	}
 
 	return filtered
+}
+
+func actressHasPersistableIdentity(actress models.Actress) bool {
+	return actress.DMMID != 0 ||
+		strings.TrimSpace(actress.JapaneseName) != "" ||
+		strings.TrimSpace(actress.FirstName) != "" ||
+		strings.TrimSpace(actress.LastName) != ""
 }

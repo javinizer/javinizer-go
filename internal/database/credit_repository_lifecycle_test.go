@@ -468,9 +468,6 @@ func TestIdentityCatalogOwnershipAndImports(t *testing.T) {
 	count, err := r.CountCandidates(ctx)
 	require.NoError(t, err)
 	require.Zero(t, count)
-	translations, err := r.FreshTranslationsByActress(ctx, a.ID)
-	require.NoError(t, err)
-	require.Empty(t, translations)
 }
 
 func TestIdentityCatalogCancellationErrors(t *testing.T) {
@@ -494,7 +491,5 @@ func TestIdentityCatalogCancellationErrors(t *testing.T) {
 	require.Error(t, r.ImportUpsert(ctx, &models.Actress{DMMID: 1}))
 	require.Error(t, r.ImportUpsert(ctx, &models.Actress{FirstName: "x"}))
 	_, err = r.DeleteStaleCandidates(ctx, time.Now())
-	require.Error(t, err)
-	_, err = r.FreshTranslationsByActress(ctx, credit.ActressID)
 	require.Error(t, err)
 }

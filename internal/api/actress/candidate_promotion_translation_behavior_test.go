@@ -172,3 +172,35 @@ func TestMergeTargetCanonicalDoesNotExposeSourceTranslation(t *testing.T) {
 	require.NoError(t, db.Model(&models.ActressTranslation{}).Count(&rows).Error)
 	require.Zero(t, rows)
 }
+
+func TestCanonicalEditAPIInvalidatesProviderTranslationBeforePublicRead(t *testing.T) {
+	db, err := database.New(&database.Config{Type: "sqlite", DSN: ":memory:", LogLevel: "silent"})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	require.NoError(t, db.RunMigrationsOnStartup(t.Context()))
+	repos := db.Repositories()
+	actress := models.Actress{FirstName: "Before", LastName: "Person", Verified: true, Origin: database.ActressOriginUser}
+	require.NoError(t, db.Create(&actress).Error)
+	require.NoError(t, db.Create(&models.ActressTranslation{ActressID: actress.ID, Language: "en", DisplayName: "Before EN", SourceName: "translation:openai"}).Error)
+
+	router := gin.New()
+	RegisterRoutes(router.Group("/api/v1"), NewActressDeps(repos.ContentRepos, repos.TranslationRepos))
+	body := bytes.NewBufferString(`{"first_name":"After","last_name":"Person","japanese_name":"","dmm_id":0,"thumb_url":"","aliases":""}`)
+	update := httptest.NewRequest(http.MethodPut, "/api/v1/actresses/"+itoa(actress.ID), body)
+	update.Header.Set("Content-Type", "application/json")
+	updated := httptest.NewRecorder()
+	router.ServeHTTP(updated, update)
+	require.Equal(t, http.StatusOK, updated.Code, updated.Body.String())
+
+	get := httptest.NewRequest(http.MethodGet, "/api/v1/actresses/"+itoa(actress.ID)+"?include_translations=en", nil)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, get)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	var returned models.Actress
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &returned))
+	require.Equal(t, "After", returned.FirstName)
+	require.Empty(t, returned.Translations)
+	var count int64
+	require.NoError(t, db.Model(&models.ActressTranslation{}).Where("actress_id = ?", actress.ID).Count(&count).Error)
+	require.Zero(t, count)
+}

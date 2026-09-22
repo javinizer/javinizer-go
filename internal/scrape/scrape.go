@@ -306,8 +306,10 @@ func postProcessScraped(ctx context.Context, scraped *models.Movie, results []*m
 		}
 	}
 
-	if cfg.ScrapeActress {
+	if scraped.Credits == nil && len(scraped.Actresses) > 0 && scrapeResultsContainActresses(results) {
 		BuildCreditsFromScrape(scraped, actressSources, results)
+	}
+	if scraped.Credits != nil {
 		AttachCreditPolicy(scraped, cfg)
 	}
 
@@ -405,6 +407,15 @@ func (s *Scraper) Scrape(ctx context.Context, cmd ScrapeCmd) (*ScrapeResult, err
 
 	progress.FromContext(ctx).Report(progress.ProgressStepScrape, 1.0, "Completed")
 	return result, nil
+}
+
+func scrapeResultsContainActresses(results []*models.ScraperResult) bool {
+	for _, result := range results {
+		if result != nil && len(result.Actresses) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func failedResult(movieID string, message string, failureKind models.ScraperErrorKind, startTime time.Time) *ScrapeResult {

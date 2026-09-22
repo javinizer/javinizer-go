@@ -241,6 +241,15 @@ func (s *CollisionService) resolveTx(tx *gorm.DB, collisionID uint, resolution s
 	}
 
 	if resolution == models.CollisionResolutionAdoptCanonical {
+		var currentIdentity models.Actress
+		if err := tx.First(&currentIdentity, credit.ActressID).Error; err != nil {
+			return 0, wrapDBErr("load", fmt.Sprintf("actress %d after canonical adoption", credit.ActressID), err)
+		}
+		if actressCanonicalNameChanged(previousIdentity, currentIdentity.FirstName, currentIdentity.LastName, currentIdentity.JapaneseName) {
+			if err := deleteActressTranslationsTx(tx, credit.ActressID); err != nil {
+				return 0, err
+			}
+		}
 		if err := transitionActressCanonicalNamesTx(tx, credit.ActressID, previousIdentity); err != nil {
 			return 0, err
 		}

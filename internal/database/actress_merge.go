@@ -150,7 +150,22 @@ func removeLegacyActressAssociationTx(tx *gorm.DB, movieContentID string, actres
 	).Error
 }
 
-func moveCredits(tx *gorm.DB, sourceID, targetID uint, mergedCanonicalName string) error {
+func actressCanonicalTranslationKey(actress *models.Actress) string {
+	if actress == nil {
+		return ""
+	}
+	parts := []string{
+		models.NormalizeActressNameKey(actress.FirstName),
+		models.NormalizeActressNameKey(actress.LastName),
+		models.NormalizeActressNameKey(actress.JapaneseName),
+	}
+	if parts[0] == "" && parts[1] == "" && parts[2] == "" {
+		return ""
+	}
+	return strings.Join(parts, "\x00")
+}
+
+func moveCredits(tx *gorm.DB, sourceID, targetID uint, targetCanonicalName, sourceCanonicalName, mergedCanonicalName string) error {
 	var sourceCredits []models.MovieCredit
 	if err := tx.Where("actress_id = ?", sourceID).Find(&sourceCredits).Error; err != nil {
 		return err
@@ -213,38 +228,74 @@ func moveCredits(tx *gorm.DB, sourceID, targetID uint, mergedCanonicalName strin
 		}
 	}
 
-	var sourceTranslations []models.ActressTranslation
-	if err := tx.Where("actress_id = ?", sourceID).Find(&sourceTranslations).Error; err != nil {
-		return err
+	return reconcileMergedActressTranslationsTx(tx, targetID, sourceID, targetCanonicalName, sourceCanonicalName, mergedCanonicalName)
+}
+
+func deleteActressTranslationsTx(tx *gorm.DB, actressID uint) error {
+	if err := tx.Where("actress_id = ?", actressID).Delete(&models.ActressTranslation{}).Error; err != nil {
+		return wrapDBErr("delete", fmt.Sprintf("translations for actress %d", actressID), err)
 	}
-	var targetTranslations []models.ActressTranslation
-	if err := tx.Where("actress_id = ?", targetID).Find(&targetTranslations).Error; err != nil {
-		return err
-	}
-	mergedCanonicalKey := models.NormalizeActressNameKey(mergedCanonicalName)
-	freshTargetLanguages := make(map[string]struct{}, len(targetTranslations))
-	for i := range targetTranslations {
-		targetTranslation := &targetTranslations[i]
-		if actressTranslationIsFresh(targetTranslation.SourceName, mergedCanonicalKey) {
-			freshTargetLanguages[targetTranslation.Language] = struct{}{}
-			continue
+	return nil
+}
+
+func reconcileMergedActressTranslationsTx(tx *gorm.DB, targetID, sourceID uint, targetCanonicalName, sourceCanonicalName, mergedCanonicalName string) error {
+	targetKey := targetCanonicalName
+	sourceKey := sourceCanonicalName
+	mergedKey := mergedCanonicalName
+	keepTarget := mergedKey != "" && mergedKey == targetKey
+	keepSource := mergedKey != "" && mergedKey == sourceKey
+
+	if !keepTarget && !keepSource {
+		if err := deleteActressTranslationsTx(tx, targetID); err != nil {
+			return err
 		}
-		if err := tx.Delete(targetTranslation).Error; err != nil {
+		return deleteActressTranslationsTx(tx, sourceID)
+	}
+	if !keepTarget {
+		if err := deleteActressTranslationsTx(tx, targetID); err != nil {
 			return err
 		}
 	}
+	if !keepSource {
+		return deleteActressTranslationsTx(tx, sourceID)
+	}
+
+	var targetTranslations []models.ActressTranslation
+	if keepTarget {
+		if err := tx.Where("actress_id = ?", targetID).Find(&targetTranslations).Error; err != nil {
+			return wrapDBErr("find", fmt.Sprintf("translation languages for actress %d", targetID), err)
+		}
+	}
+	targetLanguages := make(map[string]struct{}, len(targetTranslations))
+	for i := range targetTranslations {
+		normalized := normalizeActressTranslationLanguage(targetTranslations[i].Language)
+		targetLanguages[normalized] = struct{}{}
+		if targetTranslations[i].Language != normalized {
+			if err := tx.Model(&targetTranslations[i]).Update("language", normalized).Error; err != nil {
+				return wrapDBErr("update", actressTranslationEntityID(targetID, normalized), err)
+			}
+		}
+	}
+	var sourceTranslations []models.ActressTranslation
+	if err := tx.Where("actress_id = ?", sourceID).Find(&sourceTranslations).Error; err != nil {
+		return wrapDBErr("find", fmt.Sprintf("translation languages for actress %d", sourceID), err)
+	}
 	for i := range sourceTranslations {
-		sourceTranslation := &sourceTranslations[i]
-		_, targetTakesPrecedence := freshTargetLanguages[sourceTranslation.Language]
-		if !actressTranslationIsFresh(sourceTranslation.SourceName, mergedCanonicalKey) || targetTakesPrecedence {
-			if err := tx.Delete(sourceTranslation).Error; err != nil {
-				return err
+		normalized := normalizeActressTranslationLanguage(sourceTranslations[i].Language)
+		if _, overlaps := targetLanguages[normalized]; overlaps {
+			if err := tx.Delete(&sourceTranslations[i]).Error; err != nil {
+				return wrapDBErr("delete", fmt.Sprintf("overlapping translations for actress %d", sourceID), err)
 			}
 			continue
 		}
-		if err := tx.Model(&models.ActressTranslation{}).Where("id = ?", sourceTranslation.ID).Update("actress_id", targetID).Error; err != nil {
-			return err
+		if sourceTranslations[i].Language != normalized {
+			if err := tx.Model(&sourceTranslations[i]).Update("language", normalized).Error; err != nil {
+				return wrapDBErr("update", actressTranslationEntityID(sourceID, normalized), err)
+			}
 		}
+	}
+	if err := tx.Model(&models.ActressTranslation{}).Where("actress_id = ?", sourceID).Update("actress_id", targetID).Error; err != nil {
+		return wrapDBErr("move", fmt.Sprintf("translations from actress %d to %d", sourceID, targetID), err)
 	}
 	return nil
 }
@@ -439,7 +490,7 @@ func (m *actressMerger) ExecuteMerge(ctx context.Context, plan *MergePlan, db *D
 				return wrapDBErr("merge", fmt.Sprintf("actress movie associations from %d to %d", sourceID, targetID), moveErr)
 			}
 
-			if err := moveCredits(tx, sourceID, targetID, merged.FullName()); err != nil {
+			if err := moveCredits(tx, sourceID, targetID, actressCanonicalTranslationKey(&previousTarget), actressCanonicalTranslationKey(&source), actressCanonicalTranslationKey(&merged)); err != nil {
 				return wrapDBErr("merge", fmt.Sprintf("movie credits from %d to %d", sourceID, targetID), err)
 			}
 

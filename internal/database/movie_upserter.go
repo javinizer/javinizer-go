@@ -138,11 +138,13 @@ func (u *MovieUpserter) Upsert(ctx context.Context, movie *models.Movie) (*model
 // UpsertWithTranslations inserts or updates a movie along with genre and actress translations.
 func (u *MovieUpserter) UpsertWithTranslations(ctx context.Context, movie *models.Movie, genreTranslations []models.GenreTranslationData, actressTranslations []models.ActressTranslationData) (*models.Movie, error) {
 	var result *models.Movie
-	movie.Actresses = filterIdentifiableActresses(movie.Actresses)
+	callerActresses := make([]models.Actress, len(movie.Actresses))
+	copy(callerActresses, movie.Actresses)
+	savedActresses := filterIdentifiableActresses(callerActresses)
+	movie.Actresses = make([]models.Actress, len(savedActresses))
+	copy(movie.Actresses, savedActresses)
 	savedTranslations := make([]models.MovieTranslation, len(movie.Translations))
 	copy(savedTranslations, movie.Translations)
-	savedActresses := make([]models.Actress, len(movie.Actresses))
-	copy(savedActresses, movie.Actresses)
 	savedGenres := make([]models.Genre, len(movie.Genres))
 	copy(savedGenres, movie.Genres)
 	savedContentID := movie.ContentID
@@ -212,8 +214,16 @@ func (u *MovieUpserter) UpsertWithTranslations(ctx context.Context, movie *model
 
 			// Step 5: Upsert translations (core movie record + translations)
 			var actressTranslationIDs map[int]uint
-			if !movie.SkipCreditReconcile {
-				actressTranslationIDs = actressTranslationIDsForCredits(savedActresses, movie.Credits)
+			if movie.Credits != nil && !movie.SkipCreditReconcile {
+				actressTranslationIDs, err = actressTranslationIDsByIdentityTx(tx, callerActresses, movie.Credits)
+				if err != nil {
+					return err
+				}
+				if actressTranslationIDs == nil {
+					actressTranslationIDs = make(map[int]uint)
+				}
+			} else {
+				actressTranslationIDs = actressTranslationIDsByPersistenceOrder(callerActresses, movie.Actresses)
 			}
 			if err := u.upsertTranslationsTx(tx, movie, savedTranslations, genreTranslations, actressTranslations, actressTranslationIDs); err != nil {
 				return err
@@ -410,19 +420,184 @@ func (u *MovieUpserter) upsertTranslationsTx(tx *gorm.DB, movie *models.Movie, t
 	return nil
 }
 
-func actressTranslationIDsForCredits(actresses []models.Actress, credits []models.MovieCredit) map[int]uint {
-	limit := len(actresses)
-	if len(credits) < limit {
-		limit = len(credits)
+func actressTranslationIDsByPersistenceOrder(caller, persisted []models.Actress) map[int]uint {
+	mapped := make(map[int]uint)
+	persistedIndex := 0
+	for callerIndex := range caller {
+		if !actressHasPersistableIdentity(caller[callerIndex]) {
+			continue
+		}
+		if persistedIndex < len(persisted) && persisted[persistedIndex].ID != 0 {
+			mapped[callerIndex] = persisted[persistedIndex].ID
+		}
+		persistedIndex++
 	}
-	if limit == 0 {
-		return nil
+	return mapped
+}
+
+type actressTranslationEvidence struct {
+	authority int
+	ids       map[uint]struct{}
+	dmmIDs    map[int]struct{}
+	names     map[string]struct{}
+}
+
+func actressTranslationIDsByIdentityTx(tx *gorm.DB, actresses []models.Actress, credits []models.MovieCredit) (map[int]uint, error) {
+	if len(actresses) == 0 || len(credits) == 0 {
+		return nil, nil
 	}
-	ids := make(map[int]uint, limit)
-	for i := 0; i < limit; i++ {
-		ids[i] = credits[i].ActressID
+	ids := make([]uint, 0, len(credits))
+	seenIDs := make(map[uint]struct{}, len(credits))
+	for _, credit := range credits {
+		if credit.ActressID == 0 {
+			continue
+		}
+		if _, ok := seenIDs[credit.ActressID]; !ok {
+			seenIDs[credit.ActressID] = struct{}{}
+			ids = append(ids, credit.ActressID)
+		}
 	}
-	return ids
+	var resolved []models.Actress
+	if len(ids) > 0 {
+		if err := tx.Where("id IN ?", ids).Find(&resolved).Error; err != nil {
+			return nil, wrapDBErr("reload", "resolved credit actresses for translations", err)
+		}
+	}
+	resolvedByID := make(map[uint]models.Actress, len(resolved))
+	for _, actress := range resolved {
+		resolvedByID[actress.ID] = actress
+	}
+	evidence := make([]actressTranslationEvidence, len(credits))
+	for i := range credits {
+		evidence[i] = authoritativeActressTranslationEvidence(credits[i], resolvedByID)
+	}
+	topCredits := make([][]int, len(actresses))
+	for i := range actresses {
+		best := 0
+		for j := range evidence {
+			score := actressTranslationEvidenceScore(actresses[i], evidence[j])
+			if score > best {
+				best, topCredits[i] = score, []int{j}
+			} else if score > 0 && score == best {
+				topCredits[i] = append(topCredits[i], j)
+			}
+		}
+	}
+	creditOwners := make(map[int][]int)
+	for actressIndex, candidates := range topCredits {
+		if len(candidates) == 1 {
+			creditOwners[candidates[0]] = append(creditOwners[candidates[0]], actressIndex)
+		}
+	}
+	resolvedOwners := make(map[uint][]int)
+	for creditIndex, owners := range creditOwners {
+		if len(owners) == 1 && credits[creditIndex].ActressID != 0 {
+			resolvedOwners[credits[creditIndex].ActressID] = append(resolvedOwners[credits[creditIndex].ActressID], owners[0])
+		}
+	}
+	mapped := make(map[int]uint)
+	for actressID, owners := range resolvedOwners {
+		if len(owners) == 1 {
+			mapped[owners[0]] = actressID
+		}
+	}
+	if len(mapped) == 0 {
+		return nil, nil
+	}
+	return mapped, nil
+}
+
+func authoritativeActressTranslationEvidence(credit models.MovieCredit, resolvedByID map[uint]models.Actress) actressTranslationEvidence {
+	if actressHasIdentityEvidence(credit.Scraped) {
+		return actressTranslationEvidenceFromActress(4, credit.Scraped)
+	}
+	creditedNames := keySetFromNames(credit.CreditedName, credit.CreditedJapaneseName)
+	if len(creditedNames) > 0 {
+		return actressTranslationEvidence{authority: 3, names: creditedNames}
+	}
+	if credit.Actress != nil && actressHasIdentityEvidence(*credit.Actress) {
+		return actressTranslationEvidenceFromActress(2, *credit.Actress)
+	}
+	if resolved, ok := resolvedByID[credit.ActressID]; ok {
+		return actressTranslationEvidenceFromActress(1, resolved)
+	}
+	return actressTranslationEvidence{}
+}
+
+func actressTranslationEvidenceFromActress(authority int, actress models.Actress) actressTranslationEvidence {
+	evidence := actressTranslationEvidence{authority: authority, names: actressIdentityNameKeys(actress)}
+	if actress.ID != 0 {
+		evidence.ids = map[uint]struct{}{actress.ID: {}}
+	}
+	if actress.DMMID != 0 {
+		evidence.dmmIDs = map[int]struct{}{actress.DMMID: {}}
+	}
+	return evidence
+}
+
+func actressHasIdentityEvidence(actress models.Actress) bool {
+	return actress.ID != 0 || actress.DMMID != 0 || len(actressIdentityNameKeys(actress)) > 0
+}
+
+func actressTranslationEvidenceScore(aggregate models.Actress, evidence actressTranslationEvidence) int {
+	if evidence.authority == 0 || len(evidence.ids) > 1 || len(evidence.dmmIDs) > 1 {
+		return 0
+	}
+	if aggregate.ID != 0 && len(evidence.ids) > 0 {
+		if _, ok := evidence.ids[aggregate.ID]; !ok {
+			return 0
+		}
+	}
+	if aggregate.DMMID != 0 && len(evidence.dmmIDs) > 0 {
+		if _, ok := evidence.dmmIDs[aggregate.DMMID]; !ok {
+			return 0
+		}
+	}
+	strength := 0
+	if aggregate.ID != 0 {
+		if _, ok := evidence.ids[aggregate.ID]; ok {
+			strength = 3
+		}
+	}
+	if strength < 2 && aggregate.DMMID != 0 {
+		if _, ok := evidence.dmmIDs[aggregate.DMMID]; ok {
+			strength = 2
+		}
+	}
+	if strength < 1 && keySetsOverlap(actressIdentityNameKeys(aggregate), evidence.names) {
+		strength = 1
+	}
+	if strength == 0 {
+		return 0
+	}
+	return strength
+}
+
+func keySetFromNames(names ...string) map[string]struct{} {
+	keys := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		if normalized := models.NormalizeActressNameKey(name); normalized != "" {
+			keys[normalized] = struct{}{}
+		}
+	}
+	return keys
+}
+
+func keySetsOverlap(a, b map[string]struct{}) bool {
+	for key := range a {
+		if _, ok := b[key]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func actressIdentityNameKeys(actress models.Actress) map[string]struct{} {
+	return keySetFromNames(
+		actress.JapaneseName,
+		strings.TrimSpace(actress.FirstName+" "+actress.LastName),
+		strings.TrimSpace(actress.LastName+" "+actress.FirstName),
+	)
 }
 
 func (u *MovieUpserter) saveMovieWithAssociations(tx *gorm.DB, movie *models.Movie) error {
@@ -498,6 +673,10 @@ func (u *MovieUpserter) mergeActressData(existing *models.Actress, new models.Ac
 		existing.LastName = new.LastName
 		needsUpdate = true
 	}
+	if new.JapaneseName != "" && existing.JapaneseName == "" {
+		existing.JapaneseName = new.JapaneseName
+		needsUpdate = true
+	}
 
 	return needsUpdate
 }
@@ -513,6 +692,16 @@ type actressGroupEntry struct {
 // It returns the found actress and whether a match was found.
 type actressLookupFunc func(tx *gorm.DB, act *models.Actress) (models.Actress, bool, error)
 
+func saveMergedActressTx(tx *gorm.DB, previous, merged *models.Actress) error {
+	if err := tx.Save(merged).Error; err != nil {
+		return err
+	}
+	if actressCanonicalNameChanged(previous, merged.FirstName, merged.LastName, merged.JapaneseName) {
+		return deleteActressTranslationsTx(tx, merged.ID)
+	}
+	return nil
+}
+
 // resolveActressGroup resolves a group of actresses that share the same primary lookup
 // strategy. For each actress in the group, it checks if an existing record is found
 // via the lookup function. If found, it merges data and saves; if not, it creates a new
@@ -524,8 +713,9 @@ func (u *MovieUpserter) resolveActressGroup(tx *gorm.DB, actresses []models.Actr
 			return err
 		}
 		if found {
+			previous := existing
 			if u.mergeActressData(&existing, *g.act) {
-				if err := tx.Save(&existing).Error; err != nil {
+				if err := saveMergedActressTx(tx, &previous, &existing); err != nil {
 					return err
 				}
 			}
@@ -545,8 +735,9 @@ func (u *MovieUpserter) resolveActressGroup(tx *gorm.DB, actresses []models.Actr
 				if !ok {
 					return findErr
 				}
+				previous := found
 				if u.mergeActressData(&found, *g.act) {
-					if err := tx.Save(&found).Error; err != nil {
+					if err := saveMergedActressTx(tx, &previous, &found); err != nil {
 						return err
 					}
 				}

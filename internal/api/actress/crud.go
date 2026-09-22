@@ -142,7 +142,7 @@ func listActresses(deps ActressDeps) gin.HandlerFunc {
 			}
 		}
 
-		includeLang := strings.TrimSpace(c.Query("include_translations"))
+		includeLang := strings.ToLower(strings.TrimSpace(c.Query("include_translations")))
 		if includeLang != "" {
 			actressIDs := make([]uint, len(actresses))
 			for i, a := range actresses {
@@ -197,7 +197,7 @@ func getActress(deps ActressDeps) gin.HandlerFunc {
 			return
 		}
 
-		includeLang := strings.TrimSpace(c.Query("include_translations"))
+		includeLang := strings.ToLower(strings.TrimSpace(c.Query("include_translations")))
 		if includeLang != "" {
 			t, findErr := deps.safeFindTranslationByActress(c.Request.Context(), actress.ID, includeLang)
 			if findErr != nil {

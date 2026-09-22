@@ -4,12 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"gorm.io/gorm"
 
-	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 )
 
@@ -33,6 +31,10 @@ func NewActressRepository(db *DB) *ActressRepository {
 	}
 	repo.merger = &actressMerger{repo: repo}
 	return repo
+}
+
+func actressCanonicalNameChanged(previous *models.Actress, firstName, lastName, japaneseName string) bool {
+	return previous == nil || previous.FirstName != firstName || previous.LastName != lastName || previous.JapaneseName != japaneseName
 }
 
 // Create inserts a new actress record.
@@ -75,10 +77,8 @@ func (r *ActressRepository) Update(ctx context.Context, actress *models.Actress)
 		if err := tx.First(&current, actress.ID).Error; err != nil {
 			return wrapDBErr("update", fmt.Sprintf("actress %d", actress.ID), err)
 		}
-		identityChanged := current.FirstName != actress.FirstName ||
-			current.LastName != actress.LastName ||
-			current.JapaneseName != actress.JapaneseName ||
-			current.ThumbURL != actress.ThumbURL
+		canonicalChanged := actressCanonicalNameChanged(&current, actress.FirstName, actress.LastName, actress.JapaneseName)
+		identityChanged := canonicalChanged || current.ThumbURL != actress.ThumbURL
 		catalogChanged := identityChanged || current.DMMID != actress.DMMID ||
 			current.Aliases != actress.Aliases || current.Verified != actress.Verified ||
 			current.Origin != actress.Origin || current.NameKey != actress.NameKey
@@ -88,6 +88,11 @@ func (r *ActressRepository) Update(ctx context.Context, actress *models.Actress)
 		}
 		if err := tx.Save(actress).Error; err != nil {
 			return wrapDBErr("update", fmt.Sprintf("actress %s", actress.JapaneseName), err)
+		}
+		if canonicalChanged {
+			if err := deleteActressTranslationsTx(tx, actress.ID); err != nil {
+				return err
+			}
 		}
 		if identityChanged {
 			if err := transitionActressCanonicalNamesTx(tx, actress.ID, &current); err != nil {
@@ -134,6 +139,11 @@ func (r *ActressRepository) RenameNameFields(ctx context.Context, id uint, first
 		}
 		if err := tx.Model(&models.Actress{}).Where("id = ?", id).Updates(updates).Error; err != nil {
 			return wrapDBErr("rename", fmt.Sprintf("actress %d", id), err)
+		}
+		if actressCanonicalNameChanged(&current, firstName, lastName, japaneseName) {
+			if err := deleteActressTranslationsTx(tx, id); err != nil {
+				return err
+			}
 		}
 		if err := transitionActressCanonicalNamesTx(tx, id, &current); err != nil {
 			return err
@@ -550,6 +560,11 @@ func promoteCandidateTx(tx *gorm.DB, id uint, firstName, lastName, japaneseName,
 	if result.RowsAffected != 1 {
 		return ErrCandidateAlreadyVerified
 	}
+	if actressCanonicalNameChanged(&candidate, firstName, lastName, japaneseName) {
+		if err := deleteActressTranslationsTx(tx, id); err != nil {
+			return err
+		}
+	}
 	if err := transitionActressCanonicalNamesTx(tx, id, &candidate); err != nil {
 		return wrapDBErr("promote", fmt.Sprintf("aliases for candidate %d", id), err)
 	}
@@ -591,6 +606,11 @@ func (r *ActressRepository) UpdateCanonicalFields(ctx context.Context, id uint, 
 			}
 			if err := tx.Model(&models.Actress{}).Where("id = ?", id).Updates(updates).Error; err != nil {
 				return wrapDBErr("update canonical", fmt.Sprintf("actress %d", id), err)
+			}
+			if actressCanonicalNameChanged(&current, firstName, lastName, japaneseName) {
+				if err := deleteActressTranslationsTx(tx, id); err != nil {
+					return err
+				}
 			}
 			if err := transitionActressCanonicalNamesTx(tx, id, &current); err != nil {
 				return err
@@ -659,6 +679,11 @@ func (r *ActressRepository) ImportUpsert(ctx context.Context, incoming *models.A
 		}
 		if err := tx.Save(incoming).Error; err != nil {
 			return wrapDBErr("save", fmt.Sprintf("imported actress %s", incoming.FullName()), err)
+		}
+		if actressCanonicalNameChanged(&previousIdentity, incoming.FirstName, incoming.LastName, incoming.JapaneseName) {
+			if err := deleteActressTranslationsTx(tx, incoming.ID); err != nil {
+				return err
+			}
 		}
 		if promotingCandidate {
 			if err := transitionActressCanonicalNamesTx(tx, incoming.ID, &previousIdentity); err != nil {
@@ -874,30 +899,8 @@ func (r *ActressRepository) catalogQuery(ctx context.Context) *gorm.DB {
 	return r.GetDB().WithContext(ctx).Where("verified = ?", true)
 }
 
-func actressTranslationIsFresh(sourceName, canonicalKey string) bool {
-	return strings.TrimSpace(sourceName) == "" || models.NormalizeActressNameKey(sourceName) == canonicalKey
-}
-
 // FreshTranslationsByActress returns translations whose source name still
 // matches the current canonical name, omitting stale rows.
 func (r *ActressRepository) FreshTranslationsByActress(ctx context.Context, actressID uint) ([]models.ActressTranslation, error) {
-	var actress models.Actress
-	if err := r.GetDB().WithContext(ctx).First(&actress, actressID).Error; err != nil {
-		return nil, wrapDBErr("find", fmt.Sprintf("actress %d", actressID), err)
-	}
-	translationRepo := newActressTranslationRepository(r.GetDB())
-	translations, err := translationRepo.FindAllByActress(ctx, actressID)
-	if err != nil {
-		return nil, err
-	}
-	canonical := models.NormalizeActressNameKey(actress.FullName())
-	fresh := make([]models.ActressTranslation, 0, len(translations))
-	for _, t := range translations {
-		if !actressTranslationIsFresh(t.SourceName, canonical) {
-			logging.Debugf("stale actress translation %d (source %q != canonical %q) — flagged for re-translation", t.ID, t.SourceName, actress.FullName())
-			continue
-		}
-		fresh = append(fresh, t)
-	}
-	return fresh, nil
+	return newActressTranslationRepository(r.GetDB()).FindAllByActress(ctx, actressID)
 }

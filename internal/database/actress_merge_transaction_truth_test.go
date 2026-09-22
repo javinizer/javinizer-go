@@ -192,8 +192,7 @@ func TestExecuteMergeRetriesWholeTransactionAfterWALSnapshotConflict(t *testing.
 			require.Equal(t, target.ID, credit.ActressID)
 			var translations []models.ActressTranslation
 			require.NoError(t, db.Where("actress_id = ?", target.ID).Find(&translations).Error)
-			require.Len(t, translations, 1)
-			require.Equal(t, tc.translationSource, translations[0].SourceName)
+			require.Empty(t, translations, "the concurrent canonical mutation invalidates its prior translations")
 			var aliasRows []models.ActressAlias
 			require.NoError(t, db.Order("id").Find(&aliasRows).Error)
 			require.NotEmpty(t, aliasRows)

@@ -76,7 +76,8 @@ func TestEnrichActressesSkipsCandidatePatchBranch(t *testing.T) {
 
 func TestPostProcessScrapedBuildsCreditsPatchBranch(t *testing.T) {
 	movie := &models.Movie{ID: "PATCH-1", Actresses: []models.Actress{{FirstName: "Actor"}}}
-	result, err := postProcessScraped(t.Context(), movie, nil, nil, &Config{ScrapeActress: true, CollisionPolicy: "block"}, nil, nil, ScrapeCmd{MovieID: "PATCH-1"}, time.Now())
+	results := []*models.ScraperResult{{Source: "test", Actresses: []models.ActressInfo{{FirstName: "Actor"}}}}
+	result, err := postProcessScraped(t.Context(), movie, results, nil, &Config{ScrapeActress: true, CollisionPolicy: "block"}, nil, nil, ScrapeCmd{MovieID: "PATCH-1"}, time.Now())
 	assert.NoError(t, err)
 	assert.Len(t, result.Movie.Credits, 1)
 	assert.Equal(t, "block", result.Movie.CreditPolicy)
