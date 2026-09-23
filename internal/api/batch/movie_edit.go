@@ -11,6 +11,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/api/core"
 	"github.com/javinizer/javinizer-go/internal/assetidentity"
 	"github.com/javinizer/javinizer-go/internal/logging"
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/worker"
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 )
@@ -47,6 +48,22 @@ func lookupResultByResultID(job worker.BatchJobInterface, resultID string) (*res
 // @Failure 410 {object} contracts.ErrorResponse "job deleted"
 // @Failure 500 {object} contracts.ErrorResponse "transactional save failed; all writes rolled back"
 // @Router /api/v1/batch/{id}/results/{resultId} [patch]
+func shouldPreserveCachedActresses(payload, baseline *models.Movie) bool {
+	if payload == nil || payload.Actresses == nil {
+		return payload != nil
+	}
+	if baseline == nil || len(payload.Actresses) != len(baseline.Actresses) {
+		return false
+	}
+	for i := range payload.Actresses {
+		a, b := payload.Actresses[i], baseline.Actresses[i]
+		if a.ID != b.ID || a.DMMID != b.DMMID || a.FirstName != b.FirstName || a.LastName != b.LastName || a.JapaneseName != b.JapaneseName || a.ThumbURL != b.ThumbURL || a.Aliases != b.Aliases || a.NameKey != b.NameKey {
+			return false
+		}
+	}
+	return true
+}
+
 func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		deps := rt.Deps()
@@ -96,6 +113,15 @@ func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 		// canonical no-template/error degradation (display_title.go).
 		movie := contracts.MovieViewToModel(req.Movie)
 		movie.DisplayTitle = movie.Title
+		preserveCachedActresses := shouldPreserveCachedActresses(movie, result.Movie)
+		if !preserveCachedActresses && (strings.TrimSpace(req.Movie.CastVersion) == "" || (req.ExpectedResultRevision == nil && len(req.ExpectedResultRevisions) == 0)) {
+			c.JSON(http.StatusConflict, contracts.ErrorResponse{Error: "explicit cast changes require an authoritative cast version and result revision; refresh the batch and retry"})
+			return
+		}
+		var actressEditGuard *worker.ActressEditGuard
+		if !preserveCachedActresses {
+			actressEditGuard = &worker.ActressEditGuard{ExpectedCastVersion: req.Movie.CastVersion}
+		}
 
 		// poster_crop_bounds PATCH semantics: an omitted key preserves the
 		// stored geometry (legacy clients and unrelated edits must not silently
@@ -121,7 +147,7 @@ func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 		// Dual-key-locked family commit (D1): identity-changing PATCHes hold
 		// old+new keys atomically; the omitted-bounds carry re-reads stored
 		// geometry INSIDE the keys (never the handler's pre-lock read).
-		opRev, opFam, opErr := job.UpdateMovieFamilyWithEcho(c.Request.Context(), movieID, resultID, movie, worker.FamilySaveOptions{CarryCropGeometry: !req.PosterCropBoundsFieldPresent, ExpectedResultRevision: req.ExpectedResultRevision, ExpectedResultRevisions: req.ExpectedResultRevisions})
+		opRev, opFam, opErr := job.UpdateMovieFamilyWithEcho(c.Request.Context(), movieID, resultID, movie, worker.FamilySaveOptions{CarryCropGeometry: !req.PosterCropBoundsFieldPresent, ExpectedResultRevision: req.ExpectedResultRevision, ExpectedResultRevisions: req.ExpectedResultRevisions, PreserveCachedActresses: preserveCachedActresses, ActressEditGuard: actressEditGuard})
 		if opErr != nil {
 			logging.Errorf("Failed to update movie family %s: %v", movieID, opErr)
 			writeEditOpError(c, fmt.Errorf("failed to update movie: %w", opErr))
@@ -166,7 +192,12 @@ func previewDisplayTitle(rt *core.APIRuntime) gin.HandlerFunc {
 			return
 		}
 
-		rendered := factory.RenderDisplayTitle(c.Request.Context(), contracts.MovieViewToModel(req.Movie))
+		movie, resolveErr := authoritativePreviewMovie(c.Request.Context(), rt.Deps(), c.Param("id"), c.Param("resultId"), req.Movie)
+		if resolveErr != nil {
+			resolveErr.Write(c)
+			return
+		}
+		rendered := factory.RenderDisplayTitle(c.Request.Context(), movie)
 		c.JSON(http.StatusOK, contracts.DisplayTitlePreviewResponse{DisplayTitle: rendered})
 	}
 }
@@ -215,7 +246,7 @@ func excludeBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 
 		logging.Infof("Movie %s (%d file(s)) excluded from batch job %s", movieID, len(filePaths), jobID)
 
-		c.JSON(http.StatusOK, gin.H{"message": "Movie excluded from organization"})
+		c.JSON(http.StatusOK, gin.H{messageResponseKey: "Movie excluded from organization"})
 	}
 }
 

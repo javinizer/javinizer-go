@@ -96,7 +96,7 @@ func normalize(cfg *Config) bool {
 	}
 
 	if strings.TrimSpace(cfg.Scrapers.Referer) == "" {
-		cfg.Scrapers.Referer = "https://www.dmm.co.jp/"
+		cfg.Scrapers.Referer = dmmBaseURL
 		changed = true
 	}
 

@@ -208,7 +208,7 @@ func parseStsdAudio(data []byte) (codec string, channels, sampleRate uint16) {
 
 func analyzeMP4Fallback(f FileReader) (*VideoInfo, error) {
 	info := &VideoInfo{
-		Container: "mp4",
+		Container: mp4Format,
 	}
 
 	var fileSize int64

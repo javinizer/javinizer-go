@@ -33,6 +33,11 @@ type ReplacementEntry struct {
 	// entry with a missing destination instead means someone deleted the
 	// media afterwards, and restoring it would resurrect deleted artwork.
 	Installed bool `json:"installed,omitempty"`
+	// Installed facts bind history replay to the output this operation landed.
+	// A later foreign substitution is refused rather than overwritten.
+	InstalledSize    int64  `json:"installed_size,omitempty"`
+	InstalledModUnix int64  `json:"installed_mod_unix,omitempty"`
+	InstalledSHA256  string `json:"installed_sha256,omitempty"`
 	// RestorePending marks a history/sweep restore whose destination bytes are
 	// in place but whose backup cleanup could not yet complete. It is separate
 	// from Installed so downloader crash-window semantics remain unchanged.

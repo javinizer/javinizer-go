@@ -52,14 +52,13 @@ func TestMiss3_ActressAliasUpsert_UpdatePath(t *testing.T) {
 	err := repo.Upsert(context.TODO(), alias)
 	require.NoError(t, err)
 
-	// Upsert same alias — should update
 	alias2 := &models.ActressAlias{AliasName: "UpdateAlias", CanonicalName: "Updated"}
 	err = repo.Upsert(context.TODO(), alias2)
-	require.NoError(t, err)
+	require.ErrorIs(t, err, ErrActressAliasOwnershipConflict)
 
 	found, err := repo.FindByAliasName(context.TODO(), "UpdateAlias")
 	require.NoError(t, err)
-	assert.Equal(t, "Updated", found.CanonicalName)
+	assert.Equal(t, "Original", found.CanonicalName)
 }
 
 func TestMiss3_ActressAliasList(t *testing.T) {
@@ -95,8 +94,8 @@ func TestMiss3_ActressAliasGetAliasMap(t *testing.T) {
 
 	m, err := repo.GetAliasMap(context.TODO())
 	require.NoError(t, err)
-	assert.Equal(t, "CanonX", m["AliasX"])
-	assert.Equal(t, "CanonY", m["AliasY"])
+	assert.Equal(t, "CanonX", m["aliasx"])
+	assert.Equal(t, "CanonY", m["aliasy"])
 }
 
 // =====================================================================

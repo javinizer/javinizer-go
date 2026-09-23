@@ -195,7 +195,7 @@ func TestOutputConfigUnmarshalJSON_FlatSubStructErrors(t *testing.T) {
 // object (no Feature/Format/Extra nesting), matching the frontend NFOConfig.
 func TestNFOConfigMarshalJSON_Flat(t *testing.T) {
 	n := NFOConfig{
-		Feature: NFOFeatureConfig{Enabled: true, PerFile: false, IncludeFanart: true, IncludeTrailer: false, IncludeStreamDetails: true, IncludeOriginalPath: false, ActressAsTag: true, AddGenericRole: false, AltNameRole: true},
+		Feature: NFOFeatureConfig{Enabled: true, PerFile: false, IncludeFanart: true, IncludeTrailer: false, IncludeStreamDetails: true, IncludeOriginalPath: false, ActressAsTag: true, AddGenericRole: false, AltNameRole: true, UseCreditedName: true},
 		Format:  NFOFormatConfig{DisplayTitle: "<TITLE>", FilenameTemplate: "<ID>.nfo", FirstNameOrder: true, ActressLanguageJA: false, RatingSource: "r18dev", Tagline: "tl", UnknownActressMode: "skip", UnknownActressText: "Unknown"},
 		Extra:   NFOExtraConfig{Tag: []string{"a", "b"}, Credits: []string{"c"}},
 	}
@@ -208,9 +208,12 @@ func TestNFOConfigMarshalJSON_Flat(t *testing.T) {
 	}
 	var m map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal(b, &m))
-	for _, key := range []string{"enabled", "first_name_order", "unknown_actress_mode", "tag", "credits", "include_fanart", "actress_as_tag", "alt_name_role", "display_title", "filename_template"} {
+	for _, key := range []string{"enabled", "first_name_order", "unknown_actress_mode", "tag", "credits", "include_fanart", "actress_as_tag", "alt_name_role", "use_credited_name", "display_title", "filename_template"} {
 		assert.Contains(t, m, key, "flat JSON missing key %q", key)
 	}
+	var credited bool
+	require.NoError(t, json.Unmarshal(m["use_credited_name"], &credited))
+	assert.True(t, credited)
 	var en bool
 	require.NoError(t, json.Unmarshal(m["enabled"], &en))
 	assert.True(t, en)
@@ -231,7 +234,7 @@ func TestNFOConfigMarshalJSON_Flat(t *testing.T) {
 // TestNFOConfigUnmarshalJSON_Flat verifies the flat JSON shape round-trips
 // back into the grouped sub-struct fields.
 func TestNFOConfigUnmarshalJSON_Flat(t *testing.T) {
-	raw := `{"enabled":true,"per_file":false,"include_fanart":true,"include_trailer":false,"include_stream_details":true,"include_originalpath":false,"actress_as_tag":true,"add_generic_role":false,"alt_name_role":true,"display_title":"<TITLE>","filename_template":"<ID>.nfo","first_name_order":true,"actress_language_ja":false,"rating_source":"r18dev","tagline":"tl","unknown_actress_mode":"skip","unknown_actress_text":"Unknown","tag":["a","b"],"credits":["c"]}`
+	raw := `{"enabled":true,"per_file":false,"include_fanart":true,"include_trailer":false,"include_stream_details":true,"include_originalpath":false,"actress_as_tag":true,"add_generic_role":false,"alt_name_role":true,"use_credited_name":true,"display_title":"<TITLE>","filename_template":"<ID>.nfo","first_name_order":true,"actress_language_ja":false,"rating_source":"r18dev","tagline":"tl","unknown_actress_mode":"skip","unknown_actress_text":"Unknown","tag":["a","b"],"credits":["c"]}`
 	var n NFOConfig
 	require.NoError(t, json.Unmarshal([]byte(raw), &n))
 
@@ -241,6 +244,7 @@ func TestNFOConfigUnmarshalJSON_Flat(t *testing.T) {
 	assert.True(t, n.Feature.IncludeStreamDetails)
 	assert.True(t, n.Feature.ActressAsTag)
 	assert.True(t, n.Feature.AltNameRole)
+	assert.True(t, n.Feature.UseCreditedName)
 	assert.Equal(t, "<TITLE>", n.Format.DisplayTitle)
 	assert.Equal(t, "<ID>.nfo", n.Format.FilenameTemplate)
 	assert.True(t, n.Format.FirstNameOrder)
@@ -269,7 +273,7 @@ func TestNFOConfigUnmarshalJSON_NestedLegacy(t *testing.T) {
 // TestNFOConfigJSON_RoundTrip verifies marshal→unmarshal preserves all fields.
 func TestNFOConfigJSON_RoundTrip(t *testing.T) {
 	original := NFOConfig{
-		Feature: NFOFeatureConfig{Enabled: true, PerFile: true, IncludeFanart: false, IncludeTrailer: true, IncludeStreamDetails: true, IncludeOriginalPath: true, ActressAsTag: false, AddGenericRole: true, AltNameRole: false},
+		Feature: NFOFeatureConfig{Enabled: true, PerFile: true, IncludeFanart: false, IncludeTrailer: true, IncludeStreamDetails: true, IncludeOriginalPath: true, ActressAsTag: false, AddGenericRole: true, AltNameRole: false, UseCreditedName: true},
 		Format:  NFOFormatConfig{DisplayTitle: "<TITLE>", FilenameTemplate: "<ID>.nfo", FirstNameOrder: false, ActressLanguageJA: true, RatingSource: "dmm", Tagline: "", UnknownActressMode: "fallback", UnknownActressText: "Unknown Actress"},
 		Extra:   NFOExtraConfig{Tag: []string{"tag1", "tag2"}, Credits: []string{"dir", "studio"}},
 	}

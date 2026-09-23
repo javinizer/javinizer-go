@@ -145,17 +145,27 @@ type applyPhaseInputs struct {
 	NFOEnabled       bool
 	// PosterDisabled mirrors output.download.download_poster=false.
 	// The marker gate must never block when poster output is off.
-	PosterDisabled bool
-	WF             workflow.WorkflowInterface
+	PosterDisabled   bool
+	WF               workflow.WorkflowInterface
+	MovieRepo        database.MovieRepositoryInterface
+	PublicationFence database.ApplyPublicationFencer
 
 	// Current state snapshot (frozen at construction, not live)
-	Results     map[string]*resultstore.MovieResult
-	Provenance  map[string]*resultstore.ProvenanceData
-	Excluded    map[string]bool
-	Destination string
-	Update      bool // Update mode (in-place, no file organization)
+	Results         map[string]*resultstore.MovieResult
+	ReviewBaselines map[string]*models.Movie
+	// PersistedMovies is populated by successful pre-apply repository refresh.
+	PersistedMovies map[string]bool
+	Provenance      map[string]*resultstore.ProvenanceData
+	Excluded        map[string]bool
+	Destination     string
+	Update          bool // Update mode (in-place, no file organization)
 
-	HistoryRepo     database.HistoryRepositoryInterface
+	HistoryRepo database.HistoryRepositoryInterface
+
+	// CollisionRepo gates organize on unresolved scrape-vs-truth collisions.
+	// nil (tests, scan-only) disables the gate.
+	CollisionRepo database.CreditCollisionRepositoryInterface
+
 	OperationMode   string
 	OrganizeSkipped bool
 	Dedup           *sync.Map

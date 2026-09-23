@@ -151,6 +151,7 @@ metadata:
     actress_as_tag: true
     add_generic_role: true
     alt_name_role: true
+    use_credited_name: true
     include_originalpath: true
     include_stream_details: true
     include_fanart: true
@@ -184,6 +185,7 @@ metadata:
 	assert.True(t, nfo.Feature.ActressAsTag)
 	assert.True(t, nfo.Feature.AddGenericRole)
 	assert.True(t, nfo.Feature.AltNameRole)
+	assert.True(t, nfo.Feature.UseCreditedName)
 	assert.True(t, nfo.Feature.IncludeOriginalPath)
 	assert.True(t, nfo.Feature.IncludeStreamDetails)
 	assert.True(t, nfo.Feature.IncludeFanart)

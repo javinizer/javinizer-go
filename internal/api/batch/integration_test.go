@@ -277,16 +277,23 @@ func TestResolveOrganizeApplyConfig_OnFileProgressBroadcastsToHub(t *testing.T) 
 	rt := core.NewAPIRuntime(nil) // nil deps: in-place resolution never dereferences deps
 	rt.Runtime = core.NewRuntimeState()
 	hub := rt.Runtime.ResetWebSocketHub() // starts a running hub
+	connections, err := newTestWSConn()
+	require.NoError(t, err)
+	t.Cleanup(connections.Close)
+	serverConn, clientConn := connections.serverConn, connections.clientConn
+	var writePumpDone <-chan struct{}
 	t.Cleanup(func() {
 		rt.Runtime.Shutdown()
+		if writePumpDone != nil {
+			select {
+			case <-writePumpDone:
+			case <-time.After(2 * time.Second):
+				t.Error("timeout waiting for websocket WritePump shutdown")
+			}
+		}
 	})
-	serverConn, clientConn, srv := newTestWSConn(t)
-	t.Cleanup(func() {
-		_ = clientConn.Close()
-		_ = serverConn.Close()
-		srv.Close()
-	})
-	registerClientOnHub(t, hub, serverConn, clientConn)
+	writePumpDone, err = registerClientOnHub(hub, serverConn, clientConn)
+	require.NoError(t, err)
 
 	factory := worker.NewBatchJobFactory(nil, nil, nil, nil, worker.BatchJobConfig{}, nil)
 	applyOpts, err := resolveOrganizeApplyConfig(core.NewSnapshotForTesting(rt, core.APIConfig{}), factory, &stubControlledJob{}, contracts.OrganizeRequest{
@@ -298,9 +305,10 @@ func TestResolveOrganizeApplyConfig_OnFileProgressBroadcastsToHub(t *testing.T) 
 	// Drive the resolved hook: 3 of 5 files → 60% pending.
 	applyOpts.OnFileProgress(3, 5)
 
-	// The client must receive the broadcast progress message.
+	// The client must receive the broadcast progress message. Skip any probe
+	// retry already queued before registration acknowledgement was observed.
 	require.NoError(t, clientConn.SetReadDeadline(time.Now().Add(2*time.Second)))
-	_, data, err := clientConn.ReadMessage()
+	data, err := readUntilMessage(clientConn, "stub-job")
 	require.NoError(t, err, "client must receive the OnFileProgress broadcast (a no-op sink would time out here)")
 	var msg websocket.ProgressMessage
 	require.NoError(t, json.Unmarshal(data, &msg))
@@ -324,16 +332,23 @@ func TestResolveUpdateApplyConfig_OnFileProgressBroadcastsToHub(t *testing.T) {
 	rt := core.NewAPIRuntime(nil) // nil deps: update resolution never dereferences deps for the hook
 	rt.Runtime = core.NewRuntimeState()
 	hub := rt.Runtime.ResetWebSocketHub() // starts a running hub
+	connections, err := newTestWSConn()
+	require.NoError(t, err)
+	t.Cleanup(connections.Close)
+	serverConn, clientConn := connections.serverConn, connections.clientConn
+	var writePumpDone <-chan struct{}
 	t.Cleanup(func() {
 		rt.Runtime.Shutdown()
+		if writePumpDone != nil {
+			select {
+			case <-writePumpDone:
+			case <-time.After(2 * time.Second):
+				t.Error("timeout waiting for websocket WritePump shutdown")
+			}
+		}
 	})
-	serverConn, clientConn, srv := newTestWSConn(t)
-	t.Cleanup(func() {
-		_ = clientConn.Close()
-		_ = serverConn.Close()
-		srv.Close()
-	})
-	registerClientOnHub(t, hub, serverConn, clientConn)
+	writePumpDone, err = registerClientOnHub(hub, serverConn, clientConn)
+	require.NoError(t, err)
 
 	factory := worker.NewBatchJobFactory(nil, nil, nil, nil, worker.BatchJobConfig{}, nil)
 	applyOpts, err := resolveUpdateApplyConfig(core.NewSnapshotForTesting(rt, core.APIConfig{}), factory, &stubControlledJob{}, contracts.UpdateRequest{})
@@ -343,9 +358,10 @@ func TestResolveUpdateApplyConfig_OnFileProgressBroadcastsToHub(t *testing.T) {
 	// Drive the resolved hook: 2 of 5 files → 40% pending.
 	applyOpts.OnFileProgress(2, 5)
 
-	// The client must receive the broadcast progress message.
+	// The client must receive the broadcast progress message. Skip any probe
+	// retry already queued before registration acknowledgement was observed.
 	require.NoError(t, clientConn.SetReadDeadline(time.Now().Add(2*time.Second)))
-	_, data, err := clientConn.ReadMessage()
+	data, err := readUntilMessage(clientConn, "stub-job")
 	require.NoError(t, err, "client must receive the update-path OnFileProgress broadcast (a no-op sink would time out here)")
 	var msg websocket.ProgressMessage
 	require.NoError(t, json.Unmarshal(data, &msg))

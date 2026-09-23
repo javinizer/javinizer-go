@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/javinizer/javinizer-go/internal/database"
 	"io"
 	"path/filepath"
 	"sync"
@@ -217,13 +218,14 @@ type BatchCommandOptions struct {
 
 // BatchCommandResult holds the results from a batch command run.
 type BatchCommandResult struct {
-	ScanResult   *workflow.ScanAndMatchResult
-	FilePaths    []string
-	MatchedCount int
-	UniqueIDs    map[string]bool
-	Movies       map[string]*models.Movie
-	SuccessCount int
-	FailedCount  int
+	ScanResult       *workflow.ScanAndMatchResult
+	FilePaths        []string
+	MatchedCount     int
+	UniqueIDs        map[string]bool
+	Movies           map[string]*models.Movie
+	SuccessCount     int
+	FailedCount      int
+	ApplyFailedCount int
 	// SkippedDuplicates counts files whose apply succeeded as an authorized
 	// intra-batch duplicate skip (no bytes moved). Reported separately so the
 	// console summary tells the same truth as the persisted audit rows.
@@ -398,6 +400,10 @@ func RunBatchCommand(ctx context.Context, w io.Writer, opts BatchCommandOptions)
 	// when planning organize destinations.
 	scrapeCfg.FileMatchInfo = matchInfo
 	applyCfg := applyOpts.ToApplyPhaseConfig()
+	applyFailureCount := &atomic.Int64{}
+	applyCfg.OnPhaseComplete = func(_, failed int) {
+		applyFailureCount.Store(int64(failed))
+	}
 	// Audit hook (#244): persist per-file organize/update events (incl.
 	// authorized duplicate-skip warnings) to the eventlog and print skip
 	// warnings to the console, keeping CLI output in sync with the persisted
@@ -459,6 +465,10 @@ func RunBatchCommand(ctx context.Context, w io.Writer, opts BatchCommandOptions)
 		failedCount = 0
 	}
 
+	terminalApplyFailures := int(applyFailureCount.Load())
+	if opts.DryRun {
+		terminalApplyFailures = 0
+	}
 	batchResult := BatchCommandResult{
 		ScanResult:        scanResult,
 		FilePaths:         filePaths,
@@ -467,6 +477,7 @@ func RunBatchCommand(ctx context.Context, w io.Writer, opts BatchCommandOptions)
 		Movies:            movies,
 		SuccessCount:      successCount,
 		FailedCount:       failedCount,
+		ApplyFailedCount:  terminalApplyFailures,
 		SkippedDuplicates: int(skipCount.Load()),
 	}
 
@@ -478,6 +489,9 @@ func RunBatchCommand(ctx context.Context, w io.Writer, opts BatchCommandOptions)
 		presenter.OnSummary(w, opts, batchResult)
 	}
 
+	if batchResult.ApplyFailedCount > 0 {
+		return fmt.Errorf("apply failed for %d file(s)", batchResult.ApplyFailedCount)
+	}
 	return nil
 }
 
@@ -515,6 +529,7 @@ func newCLIBatchRuntime(bs *bootstrapResult, cfg *config.Config, opts BatchComma
 	var initialPersistErr error
 	storeOpts := []worker.JobStoreOption{
 		worker.WithHistoryRepo(repos.HistoryRepo),
+		worker.WithCollisionRepo(repos.CreditCollisionRepo),
 		worker.WithSkipStartupRecovery(),
 		worker.WithInitialPersistErrorReporter(func(err error) { initialPersistErr = err }),
 	}
@@ -526,7 +541,8 @@ func newCLIBatchRuntime(bs *bootstrapResult, cfg *config.Config, opts BatchComma
 	}
 	jobStore := worker.NewJobStore(repos.JobRepo, repos.BatchFileOpRepo, repos.MovieRepo, cfg.System.TempDir, nil, nil, storeOpts...)
 	emitter := eventlog.NewEmitter(repos.EventRepo)
-	factory := worker.NewBatchJobFactory(jobStore, jobWF, bs.Matcher, bs.PosterGen, batchCfg, emitter)
+	publicationFence, _ := repos.MovieRepo.(database.ApplyPublicationFencer)
+	factory := worker.NewBatchJobFactory(jobStore, jobWF, bs.Matcher, bs.PosterGen, batchCfg, emitter, publicationFence)
 	// Persisted job identity at creation (#248 codex P2, F1): mirror the API
 	// StartScrapeUseCase wiring so a CLI update batch's jobs row classifies as
 	// update (update=true + metadata-artwork) instead of organize. StartApply
@@ -653,7 +669,7 @@ func cliBatchPostApply(emitter eventlog.EventEmitter, w io.Writer, jobID string,
 			// truthful evidence regardless of whether the apply was completed,
 			// failed, or canceled.
 			if !errors.Is(afr.Err, context.Canceled) {
-				failCtx := map[string]any{"job_id": jobID, "movie_id": afc.Movie.ID, "error": afr.Err.Error()}
+				failCtx := map[string]any{jobIDKey: jobID, movieIDKey: afc.Movie.ID, "error": afr.Err.Error()}
 				if len(warnings) > 0 {
 					// The failed lane's crumbs ride the failure event's context
 					// too — the eventlog consumer sees the displacement disclosure
@@ -663,7 +679,7 @@ func cliBatchPostApply(emitter eventlog.EventEmitter, w io.Writer, jobID string,
 				emit(source, fmt.Sprintf("%s for %s", failureVerb, afc.Movie.ID), models.SeverityError, failCtx)
 			}
 			for _, warning := range warnings {
-				warnCtx := map[string]any{"job_id": jobID, "movie_id": afc.Movie.ID, "file": afc.FilePath, "warning": warning, "error": afr.Err.Error()}
+				warnCtx := map[string]any{jobIDKey: jobID, movieIDKey: afc.Movie.ID, "file": afc.FilePath, "warning": warning, "error": afr.Err.Error()}
 				emit(source, fmt.Sprintf("%s for %s: %s", warningVerb, afc.Movie.ID, warning), models.SeverityWarn, warnCtx)
 			}
 			return
@@ -672,13 +688,13 @@ func cliBatchPostApply(emitter eventlog.EventEmitter, w io.Writer, jobID string,
 		if afr.Result != nil && afr.Result.OrganizeResult != nil {
 			newPath = afr.Result.OrganizeResult.NewPath
 		}
-		eventCtx := map[string]any{"job_id": jobID, "movie_id": afc.Movie.ID, "file": afc.FilePath}
+		eventCtx := map[string]any{jobIDKey: jobID, movieIDKey: afc.Movie.ID, "file": afc.FilePath}
 		if !updateMode {
 			eventCtx["new_path"] = newPath
 		}
 		emit(source, fmt.Sprintf("%s %s", successVerb, afc.Movie.ID), models.SeverityInfo, eventCtx)
 		for _, warning := range warnings {
-			warnCtx := map[string]any{"job_id": jobID, "movie_id": afc.Movie.ID, "file": afc.FilePath, "warning": warning}
+			warnCtx := map[string]any{jobIDKey: jobID, movieIDKey: afc.Movie.ID, "file": afc.FilePath, "warning": warning}
 			if !updateMode {
 				warnCtx["new_path"] = newPath
 			}
@@ -749,7 +765,9 @@ func defaultSummaryPrinter(w io.Writer, opts BatchCommandOptions, result BatchCo
 		fmt.Fprintf(w, "Mode: %s\n", opts.ModeLine)
 	}
 
-	if opts.DryRun {
+	if result.ApplyFailedCount > 0 {
+		fmt.Fprintf(w, "\n❌ Apply failed for %d file(s)\n", result.ApplyFailedCount)
+	} else if opts.DryRun {
 		fmt.Fprintln(w, "\n💡 Run without --dry-run to apply changes")
 	} else {
 		completion := opts.CompletionMessage

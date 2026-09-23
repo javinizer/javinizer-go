@@ -556,6 +556,7 @@ export interface WordReplacementUpdateRequest {
 export interface Movie {
 	id: string;
 	code?: string;
+	content_id?: string;
 	title: string;
 	display_title?: string;
 	original_title?: string;
@@ -571,6 +572,7 @@ export interface Movie {
 	rating_votes?: number;
 	genres?: Genre[];
 	actresses?: Actress[];
+	cast_version?: string;
 	cover_url?: string;
 	poster_url?: string;
 	cropped_poster_url?: string;
@@ -615,7 +617,68 @@ export interface Actress {
 	japanese_name?: string;
 	thumb_url?: string;
 	aliases?: string;
+	verified?: boolean;
+	origin?: string;
+	name_key?: string;
 }
+
+export type CreditOrigin = 'scrape' | 'user';
+
+export interface MovieCredit {
+	id?: number;
+	movie_content_id?: string;
+	actress_id?: number;
+	credited_name?: string;
+	credited_japanese_name?: string;
+	reported_thumb_url?: string;
+	source?: string;
+	origin?: string;
+	order_index?: number;
+	order_pinned?: boolean;
+	override_name?: string;
+	user_override?: boolean;
+	suppressed?: boolean;
+	legacy_inferred?: boolean;
+	display_force_canonical?: boolean;
+	actress?: Actress;
+	created_at?: string;
+	updated_at?: string;
+}
+
+export type CollisionField = 'credited_name' | 'reported_thumb_url' | 'identity_link';
+
+export type CollisionResolution = 'keep_identity' | 'adopt_canonical' | 'adopt_alias' | 'reassign';
+
+export interface CreditCollision {
+	id: number;
+	credit_id: number;
+	movie_content_id: string;
+	field: CollisionField;
+	reported_value: string;
+	canonical_value: string;
+	status: 'open' | 'resolved';
+	resolution?: string;
+	occurrences: number;
+	current_actress_id: number;
+	sources_seen?: string;
+	user_pinned?: boolean;
+	last_seen_at?: string;
+	created_at?: string;
+	updated_at?: string;
+	allowed_resolutions: CollisionResolution[];
+}
+
+export interface CandidateListResponse {
+	candidates: Actress[];
+	total: number;
+}
+
+export interface CollisionResolveRequest {
+	resolution: CollisionResolution;
+	target_actress_id?: number;
+}
+
+export type CollisionPolicy = 'block' | 'auto_keep' | 'auto_alias';
 
 export interface ActressListParams {
 	limit?: number;
@@ -640,6 +703,13 @@ export interface ActressUpsertRequest {
 	japanese_name?: string;
 	thumb_url?: string;
 	aliases?: string;
+}
+
+export interface CandidatePromotionRequest {
+	first_name?: string;
+	last_name?: string;
+	japanese_name?: string;
+	thumb_url?: string;
 }
 
 export type ActressMergeResolution = 'target' | 'source';
@@ -991,6 +1061,7 @@ export interface NFOConfig {
 	actress_as_tag?: boolean;
 	add_generic_role?: boolean;
 	alt_name_role?: boolean;
+	use_credited_name?: boolean;
 	include_originalpath?: boolean;
 	include_stream_details?: boolean;
 	include_fanart?: boolean;

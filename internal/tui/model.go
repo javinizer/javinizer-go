@@ -477,7 +477,7 @@ func New(cfg TUIModelConfig) *Model {
 	// Japanese when a ja catalog exists (and falls back to English otherwise).
 	// Failures never block startup.
 	var prefs []string
-	if pref := strings.TrimSpace(cfg.Language); pref != "" && !strings.EqualFold(pref, "auto") {
+	if pref := strings.TrimSpace(cfg.Language); pref != "" && !strings.EqualFold(pref, autoSettingValue) {
 		prefs = []string{pref}
 	} else {
 		prefs = localization.DetectOSLocale()
@@ -789,7 +789,7 @@ func (m *Model) applyLanguageCycle(delta int) tea.Cmd {
 // tag becomes a single-element preference list; "auto"/empty resolves the OS
 // locale preference list so the localizer can fall back through it.
 func resolveLanguagePreferences(lang string) []string {
-	if pref := strings.TrimSpace(lang); pref != "" && !strings.EqualFold(pref, "auto") {
+	if pref := strings.TrimSpace(lang); pref != "" && !strings.EqualFold(pref, autoSettingValue) {
 		return []string{pref}
 	}
 	return localization.DetectOSLocale()

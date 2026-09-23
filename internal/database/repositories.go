@@ -6,10 +6,14 @@ package database
 // rather than the full Repositories bag.
 type ContentRepos struct {
 	MovieRepo            MovieRepositoryInterface
+	MovieProjectionRepo  MovieProjectionRepositoryInterface
 	ActressRepo          ActressRepositoryInterface
 	ActressAliasRepo     ActressAliasRepositoryInterface
 	ContentIDMappingRepo ContentIDMappingRepositoryInterface
 	MovieTagRepo         MovieTagRepositoryInterface
+	MovieCreditRepo      MovieCreditRepositoryInterface
+	CreditCollisionRepo  CreditCollisionRepositoryInterface
+	DB                   *DB
 }
 
 // HistoryRepos groups repositories for job and file-operation tracking.
@@ -61,10 +65,14 @@ func (db *DB) Repositories() Repositories {
 	return Repositories{
 		ContentRepos: ContentRepos{
 			MovieRepo:            NewMovieRepository(db),
+			MovieProjectionRepo:  NewMovieRepository(db),
 			ActressRepo:          NewActressRepository(db),
 			ActressAliasRepo:     NewActressAliasRepository(db),
 			ContentIDMappingRepo: NewContentIDMappingRepository(db),
 			MovieTagRepo:         NewMovieTagRepository(db),
+			MovieCreditRepo:      NewMovieCreditRepository(db),
+			CreditCollisionRepo:  NewCreditCollisionRepository(db),
+			DB:                   db,
 		},
 		HistoryRepos: HistoryRepos{
 			HistoryRepo:     NewHistoryRepository(db),

@@ -33,6 +33,12 @@ func authorizedOverwriteWarning(targetPath string) string {
 	return fmt.Sprintf("overwrite authorized: replaced existing destination %s", targetPath)
 }
 
+// AuthorizedOverwriteWarning exposes the canonical audit message to staged
+// publishers that journal and vacate the destination before organizer execute.
+func AuthorizedOverwriteWarning(targetPath string) string {
+	return authorizedOverwriteWarning(targetPath)
+}
+
 // moveFileDestReplaced is the test seam over fsutil.MoveFileFsDestReplaced
 // for the AUTHORIZED move lanes (the same discipline as fsutil's
 // publishStagedBoundDestLstat / publishStagedBoundRestream seams): the

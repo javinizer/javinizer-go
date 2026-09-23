@@ -50,14 +50,14 @@ func authBypassed(auth commandutil.AuthProvider) bool {
 func resolveAuth(c *gin.Context, rt *core.APIRuntime) (deps *core.APIDeps, handled bool) {
 	if rt == nil {
 		c.AbortWithStatusJSON(http.StatusServiceUnavailable, contracts.ErrorResponse{
-			Error: "authentication is unavailable",
+			Error: authUnavailableMessage,
 		})
 		return nil, true
 	}
 	deps = rt.Deps()
 	if deps == nil || deps.Auth == nil {
 		c.AbortWithStatusJSON(http.StatusServiceUnavailable, contracts.ErrorResponse{
-			Error: "authentication is unavailable",
+			Error: authUnavailableMessage,
 		})
 		return nil, true
 	}
@@ -85,7 +85,7 @@ func requireAuthenticated(rt *core.APIRuntime) gin.HandlerFunc {
 
 		if !deps.Auth.IsInitialized() {
 			c.AbortWithStatusJSON(http.StatusServiceUnavailable, contracts.ErrorResponse{
-				Error: "authentication is not initialized",
+				Error: authUninitializedMessage,
 			})
 			return
 		}
@@ -93,8 +93,8 @@ func requireAuthenticated(rt *core.APIRuntime) gin.HandlerFunc {
 		sessionID := sessionIDFromRequest(c)
 		if sessionID == "" {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, contracts.ErrorResponse{
-				Error: "authentication required",
-				Code:  "AUTH_UNAUTHORIZED",
+				Error: authRequiredMessage,
+				Code:  authUnauthorizedCode,
 			})
 			return
 		}
@@ -103,14 +103,14 @@ func requireAuthenticated(rt *core.APIRuntime) gin.HandlerFunc {
 		if err != nil {
 			if errors.Is(err, ErrAuthNotInitialized) {
 				c.AbortWithStatusJSON(http.StatusServiceUnavailable, contracts.ErrorResponse{
-					Error: "authentication is not initialized",
+					Error: authUninitializedMessage,
 				})
 				return
 			}
 			clearSessionCookie(c, securityConfig(rt))
 			c.AbortWithStatusJSON(http.StatusUnauthorized, contracts.ErrorResponse{
-				Error: "authentication required",
-				Code:  "AUTH_UNAUTHORIZED",
+				Error: authRequiredMessage,
+				Code:  authUnauthorizedCode,
 			})
 			return
 		}
@@ -129,7 +129,7 @@ func requireTokenOrSession(rt *core.APIRuntime) gin.HandlerFunc {
 
 		if !deps.Auth.IsInitialized() {
 			c.AbortWithStatusJSON(http.StatusServiceUnavailable, contracts.ErrorResponse{
-				Error: "authentication is not initialized",
+				Error: authUninitializedMessage,
 			})
 			return
 		}
@@ -143,7 +143,7 @@ func requireTokenOrSession(rt *core.APIRuntime) gin.HandlerFunc {
 			if !strings.HasPrefix(rawToken, token.TokenPrefix) {
 				c.AbortWithStatusJSON(http.StatusUnauthorized, contracts.ErrorResponse{
 					Error: "invalid or revoked token",
-					Code:  "AUTH_UNAUTHORIZED",
+					Code:  authUnauthorizedCode,
 				})
 				return
 			}
@@ -153,7 +153,7 @@ func requireTokenOrSession(rt *core.APIRuntime) gin.HandlerFunc {
 			if err != nil {
 				c.AbortWithStatusJSON(http.StatusUnauthorized, contracts.ErrorResponse{
 					Error: "invalid or revoked token",
-					Code:  "AUTH_UNAUTHORIZED",
+					Code:  authUnauthorizedCode,
 				})
 				return
 			}
@@ -172,8 +172,8 @@ func requireTokenOrSession(rt *core.APIRuntime) gin.HandlerFunc {
 		sessionID := sessionIDFromRequest(c)
 		if sessionID == "" {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, contracts.ErrorResponse{
-				Error: "authentication required",
-				Code:  "AUTH_UNAUTHORIZED",
+				Error: authRequiredMessage,
+				Code:  authUnauthorizedCode,
 			})
 			return
 		}
@@ -182,14 +182,14 @@ func requireTokenOrSession(rt *core.APIRuntime) gin.HandlerFunc {
 		if err != nil {
 			if errors.Is(err, ErrAuthNotInitialized) {
 				c.AbortWithStatusJSON(http.StatusServiceUnavailable, contracts.ErrorResponse{
-					Error: "authentication is not initialized",
+					Error: authUninitializedMessage,
 				})
 				return
 			}
 			clearSessionCookie(c, securityConfig(rt))
 			c.AbortWithStatusJSON(http.StatusUnauthorized, contracts.ErrorResponse{
-				Error: "authentication required",
-				Code:  "AUTH_UNAUTHORIZED",
+				Error: authRequiredMessage,
+				Code:  authUnauthorizedCode,
 			})
 			return
 		}

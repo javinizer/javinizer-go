@@ -50,7 +50,7 @@ const DefaultPersistentSessionTTL = 30 * 24 * time.Hour
 
 // Sentinel errors returned by the auth manager.
 var (
-	ErrAuthNotInitialized = errors.New("authentication is not initialized")
+	ErrAuthNotInitialized = errors.New(authUninitializedMessage)
 	ErrAuthAlreadySet     = errors.New("authentication is already initialized")
 	ErrInvalidCredentials = errors.New("invalid username or password")
 	ErrInvalidSession     = errors.New("invalid or expired session")

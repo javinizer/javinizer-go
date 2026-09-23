@@ -154,16 +154,15 @@ func TestActressMergeMiss_UpsertActressAliases_DuplicateAlias(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Insert same alias for different canonical — should update
+	// An ordinary merge alias claim cannot steal a different owner.
 	err = db.DB.Transaction(func(tx *gorm.DB) error {
 		return upsertActressAliases(tx, []string{"dup-alias"}, "Canonical2")
 	})
-	require.NoError(t, err)
+	require.ErrorIs(t, err, ErrActressAliasOwnershipConflict)
 
-	// Should be updated to Canonical2
 	var alias models.ActressAlias
 	db.DB.Where("alias_name = ?", "dup-alias").First(&alias)
-	assert.Equal(t, "Canonical2", alias.CanonicalName)
+	assert.Equal(t, "Canonical1", alias.CanonicalName)
 }
 
 // --- Merge: full integration with DMMID unique constraint check ---

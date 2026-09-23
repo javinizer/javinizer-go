@@ -182,6 +182,375 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/actresses/candidates": {
+            "get": {
+                "description": "Returns quarantined identities created by scrape resolution misses.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "actresses"
+                ],
+                "summary": "List candidate identities",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "default": 50,
+                        "description": "Max results",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 0,
+                        "description": "Skip results",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_actress.candidateListResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/actresses/candidates/{id}/promote": {
+            "post": {
+                "description": "Confirms canonical fields and marks the candidate verified and user-owned. Omitted fields keep scraped values; present empty fields clear them. The resolved first_name or japanese_name must remain non-empty, and a present non-empty thumb_url must use HTTP or HTTPS.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "actresses"
+                ],
+                "summary": "Promote a candidate identity",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Candidate ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Canonical fields (omitted = keep scraped value, present empty = clear)",
+                        "name": "request",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_actress.CandidatePromotionRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/actresses/collisions": {
+            "get": {
+                "description": "Returns open scrape-vs-identity collisions for a movie.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "actresses"
+                ],
+                "summary": "List open collisions",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Movie content ID",
+                        "name": "movie_id",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_actress.collisionListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/actresses/collisions/{id}/resolve": {
+            "post": {
+                "description": "Applies one of keep_identity, adopt_canonical, adopt_alias, or reassign atomically.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "actresses"
+                ],
+                "summary": "Resolve a collision",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Collision ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Resolution outcome",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "resolution": {
+                                    "type": "string"
+                                },
+                                "target_actress_id": {
+                                    "type": "integer"
+                                }
+                            }
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "remaining_open": {
+                                    "type": "integer"
+                                },
+                                "resolved": {
+                                    "type": "boolean"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/actresses/credits/{id}/override": {
+            "post": {
+                "description": "Overrides one movie's displayed actress name without mutating the shared identity.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "actresses"
+                ],
+                "summary": "Set a credit display override",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Credit ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Override payload",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "override_name": {
+                                    "type": "string"
+                                },
+                                "user_override": {
+                                    "type": "boolean"
+                                }
+                            }
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "ok": {
+                                    "type": "boolean"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/actresses/credits/{id}/suppress": {
+            "post": {
+                "description": "Marks a credit user-removed so later scrapes cannot resurrect it.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "actresses"
+                ],
+                "summary": "Suppress a credit",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Credit ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Suppression state",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "suppressed": {
+                                    "type": "boolean"
+                                }
+                            }
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "ok": {
+                                    "type": "boolean"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/actresses/merge": {
             "post": {
                 "description": "Merge a source actress into a target actress with field-level target/source resolutions.",
@@ -4351,6 +4720,12 @@ const docTemplate = `{
                 "last_name": {
                     "type": "string"
                 },
+                "name_key": {
+                    "type": "string"
+                },
+                "origin": {
+                    "type": "string"
+                },
                 "thumb_url": {
                     "type": "string"
                 },
@@ -4362,6 +4737,9 @@ const docTemplate = `{
                 },
                 "updated_at": {
                     "type": "string"
+                },
+                "verified": {
+                    "type": "boolean"
                 }
             }
         },
@@ -5300,6 +5678,9 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ActressView"
                     }
+                },
+                "cast_version": {
+                    "type": "string"
                 },
                 "code": {
                     "description": "Canonical JAV code (e.g., \"IPX-535\"). Renamed from content_id.",
@@ -6638,6 +7019,14 @@ const docTemplate = `{
                     "description": "Automatically add new actresses to database",
                     "type": "boolean"
                 },
+                "candidate_retention_days": {
+                    "description": "GC age for creditless candidates (default 30)",
+                    "type": "integer"
+                },
+                "collision_policy": {
+                    "description": "Scrape-vs-identity collision policy: block (default) | auto_keep | auto_alias",
+                    "type": "string"
+                },
                 "convert_alias": {
                     "description": "Convert actress names using alias database",
                     "type": "boolean"
@@ -6645,6 +7034,13 @@ const docTemplate = `{
                 "enabled": {
                     "description": "Enable actress image lookup from database",
                     "type": "boolean"
+                },
+                "trusted_collision_sources": {
+                    "description": "Scrapers eligible for auto_alias",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 }
             }
         },
@@ -6966,6 +7362,10 @@ const docTemplate = `{
                 },
                 "per_file": {
                     "description": "Create separate NFO for each multi-part file",
+                    "type": "boolean"
+                },
+                "use_credited_name": {
+                    "description": "Render credited names instead of canonical identity names",
                     "type": "boolean"
                 }
             }
@@ -7647,6 +8047,12 @@ const docTemplate = `{
                 "last_name": {
                     "type": "string"
                 },
+                "name_key": {
+                    "type": "string"
+                },
+                "origin": {
+                    "type": "string"
+                },
                 "thumb_url": {
                     "type": "string"
                 },
@@ -7659,6 +8065,9 @@ const docTemplate = `{
                 },
                 "updated_at": {
                     "type": "string"
+                },
+                "verified": {
+                    "type": "boolean"
                 }
             }
         },
@@ -8381,6 +8790,23 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_api_actress.CandidatePromotionRequest": {
+            "type": "object",
+            "properties": {
+                "first_name": {
+                    "type": "string"
+                },
+                "japanese_name": {
+                    "type": "string"
+                },
+                "last_name": {
+                    "type": "string"
+                },
+                "thumb_url": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_api_actress.actressRequest": {
             "type": "object",
             "properties": {
@@ -8430,6 +8856,12 @@ const docTemplate = `{
                 "last_name": {
                     "type": "string"
                 },
+                "name_key": {
+                    "type": "string"
+                },
+                "origin": {
+                    "type": "string"
+                },
                 "thumb_url": {
                     "type": "string"
                 },
@@ -8442,6 +8874,9 @@ const docTemplate = `{
                 },
                 "updated_at": {
                     "type": "string"
+                },
+                "verified": {
+                    "type": "boolean"
                 }
             }
         },
@@ -8479,6 +8914,87 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                }
+            }
+        },
+        "internal_api_actress.candidateListResponse": {
+            "type": "object",
+            "properties": {
+                "candidates": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress"
+                    }
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "internal_api_actress.collisionListResponse": {
+            "type": "object",
+            "properties": {
+                "collisions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_api_actress.collisionResponse"
+                    }
+                }
+            }
+        },
+        "internal_api_actress.collisionResponse": {
+            "type": "object",
+            "properties": {
+                "allowed_resolutions": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "canonical_value": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "credit_id": {
+                    "type": "integer"
+                },
+                "current_actress_id": {
+                    "type": "integer"
+                },
+                "field": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "last_seen_at": {
+                    "type": "string"
+                },
+                "movie_content_id": {
+                    "type": "string"
+                },
+                "occurrences": {
+                    "type": "integer"
+                },
+                "reported_value": {
+                    "type": "string"
+                },
+                "resolution": {
+                    "type": "string"
+                },
+                "sources_seen": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user_pinned": {
+                    "type": "boolean"
                 }
             }
         },

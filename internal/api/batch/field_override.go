@@ -32,7 +32,7 @@ func getBatchMovieSources(rt *core.APIRuntime) gin.HandlerFunc {
 
 		job, ok := deps.GetJobStore().GetBatchJob(jobID)
 		if !ok {
-			c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "Job not found"})
+			c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: jobNotFoundMessage})
 			return
 		}
 

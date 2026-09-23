@@ -190,7 +190,7 @@ func (p *PriorityConfig) PerFieldOverride(fieldKey string) []string {
 func (p PriorityConfig) MarshalJSON() ([]byte, error) {
 	m := make(map[string]any, 1+len(p.Fields))
 	if p.Priority != nil {
-		m["priority"] = p.Priority
+		m[priorityKey] = p.Priority
 	}
 	for k, v := range p.Fields {
 		m[k] = v
@@ -213,7 +213,7 @@ func (p *PriorityConfig) UnmarshalJSON(data []byte) error {
 func (p PriorityConfig) MarshalYAML() (interface{}, error) {
 	m := make(map[string]any, 1+len(p.Fields))
 	if p.Priority != nil {
-		m["priority"] = p.Priority
+		m[priorityKey] = p.Priority
 	}
 	for k, v := range p.Fields {
 		m[k] = v
@@ -238,7 +238,7 @@ func (p *PriorityConfig) UnmarshalYAML(node *yaml.Node) error {
 func (p *PriorityConfig) decodeFromMap(raw map[string]any) error {
 	p.Fields = make(map[string][]string)
 	for key, value := range raw {
-		if key == "priority" {
+		if key == priorityKey {
 			if value == nil {
 				p.Priority = nil
 				continue
@@ -280,9 +280,12 @@ func (p *PriorityConfig) decodeFromMap(raw map[string]any) error {
 
 // ActressDatabaseConfig holds actress image database configuration
 type ActressDatabaseConfig struct {
-	Enabled      bool `yaml:"enabled" json:"enabled"`             // Enable actress image lookup from database
-	AutoAdd      bool `yaml:"auto_add" json:"auto_add"`           // Automatically add new actresses to database
-	ConvertAlias bool `yaml:"convert_alias" json:"convert_alias"` // Convert actress names using alias database
+	Enabled                 bool     `yaml:"enabled" json:"enabled"`                                     // Enable actress image lookup from database
+	AutoAdd                 bool     `yaml:"auto_add" json:"auto_add"`                                   // Automatically add new actresses to database
+	ConvertAlias            bool     `yaml:"convert_alias" json:"convert_alias"`                         // Convert actress names using alias database
+	CollisionPolicy         string   `yaml:"collision_policy" json:"collision_policy"`                   // Scrape-vs-identity collision policy: block (default) | auto_keep | auto_alias
+	TrustedCollisionSources []string `yaml:"trusted_collision_sources" json:"trusted_collision_sources"` // Scrapers eligible for auto_alias
+	CandidateRetentionDays  int      `yaml:"candidate_retention_days" json:"candidate_retention_days"`   // GC age for creditless candidates (default 30)
 }
 
 // GenreReplacementConfig holds genre replacement/normalization configuration
@@ -343,8 +346,9 @@ type NFOFeatureConfig struct {
 	IncludeStreamDetails bool `yaml:"include_stream_details" json:"include_stream_details"`
 	IncludeOriginalPath  bool `yaml:"include_originalpath" json:"include_originalpath"` // Include source filename in NFO
 	ActressAsTag         bool `yaml:"actress_as_tag" json:"actress_as_tag"`
-	AddGenericRole       bool `yaml:"add_generic_role" json:"add_generic_role"` // Add generic "Actress" role to all actresses
-	AltNameRole          bool `yaml:"alt_name_role" json:"alt_name_role"`       // Use alternate name (Japanese) in role field
+	AddGenericRole       bool `yaml:"add_generic_role" json:"add_generic_role"`   // Add generic "Actress" role to all actresses
+	AltNameRole          bool `yaml:"alt_name_role" json:"alt_name_role"`         // Use alternate name (Japanese) in role field
+	UseCreditedName      bool `yaml:"use_credited_name" json:"use_credited_name"` // Render credited names instead of canonical identity names
 }
 
 // NFOFormatConfig controls NFO display and format settings.

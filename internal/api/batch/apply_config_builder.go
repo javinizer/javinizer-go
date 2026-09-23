@@ -384,7 +384,7 @@ func makeScrapeFileScrapedBroadcaster(job worker.BatchJobInterface, sink progres
 	return func(filePath, movieID, message string) {
 		args := map[string]any{}
 		if movieID != "" {
-			args["movie_id"] = movieID
+			args[movieIDKey] = movieID
 		}
 		sink(stampJobCounts(&websocket.ProgressMessage{
 			JobID:       job.GetID(),
@@ -405,9 +405,9 @@ func makeScrapeFileScrapedBroadcaster(job worker.BatchJobInterface, sink progres
 // sink so the closure is unit-testable.
 func makeScrapeFileFailedBroadcaster(job worker.BatchJobInterface, sink progressSink) func(filePath, movieID, errMsg string) {
 	return func(filePath, movieID, errMsg string) {
-		args := map[string]any{"error": errMsg}
+		args := map[string]any{errorResponseKey: errMsg}
 		if movieID != "" {
-			args["movie_id"] = movieID
+			args[movieIDKey] = movieID
 		}
 		sink(stampJobCounts(&websocket.ProgressMessage{
 			JobID:       job.GetID(),

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/javinizer/javinizer-go/internal/applyplan"
+	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/eventlog"
 	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -107,12 +108,13 @@ type BatchJobFactoryInterface interface {
 // It holds the infrastructure dependencies so callers don't need to reach into
 // the worker package for construction.
 type batchJobFactory struct {
-	jobStore  JobStoreInterface
-	wf        workflow.WorkflowInterface
-	matcher   matcher.MatcherInterface
-	posterGen poster.PosterGenerator
-	batchCfg  BatchJobConfig
-	emitter   eventlog.EventEmitter
+	jobStore         JobStoreInterface
+	wf               workflow.WorkflowInterface
+	matcher          matcher.MatcherInterface
+	posterGen        poster.PosterGenerator
+	batchCfg         BatchJobConfig
+	emitter          eventlog.EventEmitter
+	publicationFence database.ApplyPublicationFencer
 }
 
 // NewBatchJobFactory creates a BatchJobFactoryInterface with the given infrastructure
@@ -123,14 +125,19 @@ type batchJobFactory struct {
 // (API, TUI, CLI) should use the factory instead of constructing worker.JobConfig,
 // worker.BatchJobDeps, worker.ScrapePhaseConfig, worker.ApplyPhaseConfig, or
 // worker.RescrapeCmd directly.
-func NewBatchJobFactory(jobStore JobStoreInterface, wf workflow.WorkflowInterface, m matcher.MatcherInterface, posterGen poster.PosterGenerator, batchCfg BatchJobConfig, emitter eventlog.EventEmitter) BatchJobFactoryInterface {
+func NewBatchJobFactory(jobStore JobStoreInterface, wf workflow.WorkflowInterface, m matcher.MatcherInterface, posterGen poster.PosterGenerator, batchCfg BatchJobConfig, emitter eventlog.EventEmitter, publicationFence ...database.ApplyPublicationFencer) BatchJobFactoryInterface {
+	var fence database.ApplyPublicationFencer
+	if len(publicationFence) > 0 {
+		fence = publicationFence[0]
+	}
 	return &batchJobFactory{
-		jobStore:  jobStore,
-		wf:        wf,
-		matcher:   m,
-		posterGen: posterGen,
-		batchCfg:  batchCfg,
-		emitter:   emitter,
+		jobStore:         jobStore,
+		wf:               wf,
+		matcher:          m,
+		posterGen:        posterGen,
+		batchCfg:         batchCfg,
+		emitter:          emitter,
+		publicationFence: fence,
 	}
 }
 
@@ -220,6 +227,7 @@ func (f *batchJobFactory) buildJobConfig(opts BatchJobOptions) *JobConfig {
 	if f.emitter != nil {
 		deps.Emitter = f.emitter
 	}
+	deps.PublicationFence = f.publicationFence
 	return &JobConfig{
 		ID:                    opts.ID,
 		Destination:           opts.Destination,

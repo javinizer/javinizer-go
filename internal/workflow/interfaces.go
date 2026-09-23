@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 
+	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/nfo"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
@@ -45,7 +46,10 @@ type MergeOptions struct {
 // and step-control options grouped by step (Organize, Merge).
 // OperationMode is resolved at the factory boundary.
 type ApplyCmd struct {
-	Movie                  *models.Movie
+	Movie            *models.Movie
+	PublicationFence database.ApplyPublicationFencer
+	// PersistedMovie records a successful repository lookup before apply; ContentID alone is not proof of persistence.
+	PersistedMovie         bool
 	Match                  models.FileMatchInfo
 	DestPath               string
 	DryRun                 bool
@@ -59,9 +63,11 @@ type ApplyCmd struct {
 	Dedup                  *sync.Map
 	// DedupOwnerKey/LogicalKey are populated by apply before fan-out so
 	// shared poster destinations have a deterministic first owner.
-	DedupOwnerKey   string
-	DedupLogicalKey string
-	OperationMode   operationmode.OperationMode // resolved at factory boundary
+	DedupOwnerKey       string
+	DedupLogicalKey     string
+	ArtifactCoordinator *SharedArtifactCoordinator
+	ArtifactOwnerKey    string
+	OperationMode       operationmode.OperationMode // resolved at factory boundary
 }
 
 // stepCompletion records which Apply steps completed successfully.

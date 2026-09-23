@@ -36,7 +36,7 @@ type settingRow struct {
 // locales that ship a catalog should appear here; "auto" resolves the OS
 // locale preference list at localizer construction time.
 func supportedLanguages() []string {
-	return []string{"auto", "en", "ja", "zh-Hans", "zh-Hant"}
+	return []string{autoSettingValue, "en", "ja", "zh-Hans", "zh-Hant"}
 }
 
 // languageDisplayName returns the self-name shown in the selector. Explicit
@@ -44,7 +44,7 @@ func supportedLanguages() []string {
 // the active locale is wrong; "auto" is localized since it is chrome.
 func (s *settingsView) languageDisplayName(lang string) string {
 	switch strings.ToLower(strings.TrimSpace(lang)) {
-	case "", "auto":
+	case "", autoSettingValue:
 		return s.loc("TUISettingsLanguageAuto")
 	case "en":
 		return "English"
@@ -77,7 +77,7 @@ func newSettingsView() *settingsView {
 			OrganizeEnabled: true,
 			NFOEnabled:      true,
 		},
-		language: "auto",
+		language: autoSettingValue,
 	}
 }
 

@@ -120,8 +120,8 @@ func TestActressAliasRepository_GetAliasMap(t *testing.T) {
 
 	aliasMap, err := repo.GetAliasMap(context.TODO())
 	require.NoError(t, err)
-	assert.Equal(t, "C1", aliasMap["A1"])
-	assert.Equal(t, "C2", aliasMap["A2"])
+	assert.Equal(t, "C1", aliasMap["a1"])
+	assert.Equal(t, "C2", aliasMap["a2"])
 }
 
 func TestActressTranslationRepository_Integration(t *testing.T) {

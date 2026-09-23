@@ -20,7 +20,10 @@ func enrichActressesFromDB(ctx context.Context, scraped *models.Movie, actressRe
 	for i := range scraped.Actresses {
 		actress := &scraped.Actresses[i]
 		dbActress, err := lookupActress(ctx, actressRepo, actress)
-		if err != nil {
+		if err != nil || dbActress == nil {
+			continue
+		}
+		if !dbActress.Verified {
 			continue
 		}
 		if enrichActressFields(actress, dbActress) {
