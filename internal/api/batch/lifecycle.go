@@ -146,16 +146,17 @@ func refreshBatchJobMovies(c *gin.Context, deps *core.APIDeps, job *worker.Batch
 	if deps == nil || deps.Repos.MovieProjectionRepo == nil || job == nil {
 		return nil
 	}
-	contentIDs := make([]string, 0, len(job.Results))
-	fallbackIDs := make([]string, 0, len(job.Results)*2)
+	contentIDs := make([]string, 0, len(job.Results)*2)
+	canonicalIDs := make([]string, 0, len(job.Results)*2)
 	for _, result := range job.Results {
 		if result == nil || result.Movie == nil {
 			continue
 		}
-		contentIDs = append(contentIDs, result.Movie.ContentID)
-		fallbackIDs = append(fallbackIDs, result.Movie.ID, result.FileMatchInfo.MovieID)
+		resultContentIDs, resultCanonicalIDs := movieProjectionLookupIDs(result.Movie, result.FileMatchInfo.MovieID)
+		contentIDs = append(contentIDs, resultContentIDs...)
+		canonicalIDs = append(canonicalIDs, resultCanonicalIDs...)
 	}
-	projection, err := deps.Repos.MovieProjectionRepo.FindAuthoritativeProjections(c.Request.Context(), contentIDs, fallbackIDs)
+	projection, err := deps.Repos.MovieProjectionRepo.FindAuthoritativeProjections(c.Request.Context(), contentIDs, canonicalIDs)
 	if err != nil {
 		return err
 	}

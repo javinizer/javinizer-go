@@ -11,8 +11,9 @@ import (
 
 // AuthoritativeMovieProjection indexes the narrow movie/credit API projection.
 type AuthoritativeMovieProjection struct {
-	ByContentID   map[string]*models.Movie
-	ByCanonicalID map[string]*models.Movie
+	ByContentID           map[string]*models.Movie
+	ByCanonicalID         map[string]*models.Movie
+	AmbiguousCanonicalIDs map[string]struct{}
 }
 
 // MovieProjectionRepositoryInterface batches authoritative API movie projections.

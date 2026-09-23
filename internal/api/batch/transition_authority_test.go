@@ -81,6 +81,133 @@ func (r authorityLookupRepo) FindByID(ctx context.Context, id string) (*models.M
 	return r.findByID(ctx, id)
 }
 
+type authorityProjectionRepo struct {
+	authorityLookupRepo
+	findProjection func(context.Context, []string, []string) (*database.AuthoritativeMovieProjection, error)
+}
+
+func (r authorityProjectionRepo) FindAuthoritativeProjections(ctx context.Context, contentIDs, canonicalIDs []string) (*database.AuthoritativeMovieProjection, error) {
+	return r.findProjection(ctx, contentIDs, canonicalIDs)
+}
+
+func TestProjectionLookupResolvesThenHydratesAndPropagatesErrors(t *testing.T) {
+	ctx := context.Background()
+	projected := &models.Movie{ContentID: "stored-content", ID: "STORED-ID"}
+	hydrated := &models.Movie{ContentID: projected.ContentID, ID: projected.ID, Genres: []models.Genre{{Name: "Hydrated"}}, Translations: []models.MovieTranslation{{Language: "en", Title: "Hydrated"}}}
+	var requestedContent, requestedCanonical []string
+	repo := authorityProjectionRepo{
+		authorityLookupRepo: authorityLookupRepo{
+			findByContentID: func(_ context.Context, contentID string) (*models.Movie, error) {
+				require.Equal(t, projected.ContentID, contentID)
+				return hydrated, nil
+			},
+			findByID: func(context.Context, string) (*models.Movie, error) {
+				t.Fatal("projection resolution must hydrate by authoritative content ID")
+				return nil, nil
+			},
+		},
+		findProjection: func(_ context.Context, contentIDs, canonicalIDs []string) (*database.AuthoritativeMovieProjection, error) {
+			requestedContent = append([]string(nil), contentIDs...)
+			requestedCanonical = append([]string(nil), canonicalIDs...)
+			return &database.AuthoritativeMovieProjection{ByContentID: map[string]*models.Movie{projected.ContentID: projected}}, nil
+		},
+	}
+	movie, err := findAuthoritativeMovie(ctx, repo, &models.Movie{ContentID: "snapshot-content", ID: "snapshot-id"}, projected.ContentID)
+	require.NoError(t, err)
+	require.Same(t, hydrated, movie)
+	require.ElementsMatch(t, []string{"snapshot-content", "stored-content"}, requestedContent)
+	require.ElementsMatch(t, []string{"snapshot-id", "stored-content"}, requestedCanonical)
+
+	boom := errors.New("full movie read failed")
+	repo.findProjection = func(context.Context, []string, []string) (*database.AuthoritativeMovieProjection, error) {
+		return &database.AuthoritativeMovieProjection{ByContentID: map[string]*models.Movie{"snapshot-content": {ContentID: "snapshot-content"}}}, nil
+	}
+	repo.findByContentID = func(context.Context, string) (*models.Movie, error) { return nil, boom }
+	_, err = findAuthoritativeMovie(ctx, repo, &models.Movie{ContentID: "snapshot-content"}, "")
+	require.ErrorIs(t, err, boom)
+
+	repo.findProjection = func(context.Context, []string, []string) (*database.AuthoritativeMovieProjection, error) {
+		return nil, boom
+	}
+	repo.findByContentID = func(context.Context, string) (*models.Movie, error) {
+		t.Fatal("projection errors must abort before hydration")
+		return nil, nil
+	}
+	_, err = findAuthoritativeMovie(ctx, repo, &models.Movie{ContentID: "snapshot-content"}, "")
+	require.ErrorIs(t, err, boom)
+}
+
+func TestRealProjectionAliasFallbackAndFullPreviewHydration(t *testing.T) {
+	deps := createTestDeps(t, &config.Config{}, "")
+	ctx := context.Background()
+	actress := models.Actress{JapaneseName: "Hydrated Actress", Verified: true, Origin: database.ActressOriginUser}
+	genre := models.Genre{Name: "Hydrated Genre"}
+	require.NoError(t, deps.Repos.DB.Create(&actress).Error)
+	require.NoError(t, deps.Repos.DB.Create(&genre).Error)
+	movies := []models.Movie{
+		{ContentID: "hydrated-content", ID: "DUPLICATE-ID", Title: "Hydrated"},
+		{ContentID: "other-content", ID: "DUPLICATE-ID", Title: "Other"},
+		{ContentID: "legacy-alias-content", ID: "CANONICAL-ID", Title: "Alias Target"},
+		{ContentID: "canonical-collision-owner", ID: "COLLISION", Title: "Canonical Collision Owner"},
+		{ContentID: "COLLISION", ID: "CONTENT-COLLISION-OWNER", Title: "Content Collision Owner"},
+	}
+	require.NoError(t, deps.Repos.DB.Create(&movies).Error)
+	require.NoError(t, deps.Repos.DB.Exec("INSERT INTO movie_genres (movie_content_id, genre_id) VALUES (?, ?)", movies[0].ContentID, genre.ID).Error)
+	require.NoError(t, deps.Repos.DB.Create(&models.MovieTranslation{MovieID: movies[0].ContentID, Language: "en", Title: "Hydrated Translation"}).Error)
+	require.NoError(t, deps.Repos.DB.Exec("INSERT INTO movie_actresses (movie_content_id, actress_id) VALUES (?, ?)", movies[0].ContentID, actress.ID).Error)
+	require.NoError(t, deps.Repos.DB.Create(&models.MovieCredit{MovieContentID: movies[0].ContentID, ActressID: actress.ID, CreditedName: "Hydrated Credit"}).Error)
+
+	aliasMovie, err := findAuthoritativeMovie(ctx, deps.Repos.MovieRepo, &models.Movie{ID: "missing-snapshot-id"}, movies[2].ContentID)
+	require.NoError(t, err)
+	require.NotNil(t, aliasMovie)
+	require.Equal(t, movies[2].ContentID, aliasMovie.ContentID)
+	require.Equal(t, movies[2].ID, aliasMovie.ID)
+
+	collisionMovie, err := findAuthoritativeMovie(ctx, deps.Repos.MovieRepo, &models.Movie{ID: "missing-snapshot-id"}, "COLLISION")
+	require.NoError(t, err)
+	require.NotNil(t, collisionMovie)
+	require.Equal(t, movies[3].ContentID, collisionMovie.ContentID, "canonical alias lookup must precede content-ID alias fallback")
+
+	job := deps.JobStore.CreateJobBatch([]string{"preview.mp4"})
+	setJobResult(job, "preview.mp4", &resultstore.MovieResult{ResultID: "preview", Movie: &models.Movie{ContentID: movies[0].ContentID, ID: movies[0].ID, Title: "Snapshot"}})
+	preview, resolveErr := authoritativePreviewMovie(ctx, deps, job.GetID(), "preview", nil)
+	require.Nil(t, resolveErr)
+	require.Equal(t, movies[0].ContentID, preview.ContentID, "exact content ID must win despite a duplicate canonical ID")
+	require.Len(t, preview.Genres, 1)
+	require.Len(t, preview.Translations, 1)
+	require.Len(t, preview.Actresses, 1)
+	require.Len(t, preview.Credits, 1)
+	require.Equal(t, "Hydrated Genre", preview.Genres[0].Name)
+	require.Equal(t, "Hydrated Translation", preview.Translations[0].Title)
+	require.Equal(t, "Hydrated Actress", preview.Actresses[0].JapaneseName)
+	require.Equal(t, "Hydrated Credit", preview.Credits[0].CreditedName)
+}
+
+func TestRealProjectionAmbiguousSnapshotCanonicalIDBlocksAliasResolution(t *testing.T) {
+	deps := createTestDeps(t, &config.Config{}, "")
+	ctx := context.Background()
+	movies := []models.Movie{
+		{ContentID: "dup-one", ID: "DUPLICATE-ID", Title: "One"},
+		{ContentID: "dup-two", ID: "DUPLICATE-ID", Title: "Two"},
+		{ContentID: "alias-target", ID: "ALIAS-TARGET-ID", Title: "Alias Target"},
+	}
+	require.NoError(t, deps.Repos.DB.Create(&movies).Error)
+
+	// Sanity: the matcher alias alone resolves through the real projection by
+	// matching the authoritative content ID.
+	resolved, err := findAuthoritativeMovie(ctx, deps.Repos.MovieRepo, &models.Movie{}, movies[2].ContentID)
+	require.NoError(t, err)
+	require.NotNil(t, resolved)
+	require.Equal(t, movies[2].ContentID, resolved.ContentID)
+
+	// A duplicate snapshot canonical ID must fail closed even though the matcher
+	// alias points at a resolvable movie: the ambiguous canonical ID is resolved
+	// before alias fallback and blocks it.
+	blocked, err := findAuthoritativeMovie(ctx, deps.Repos.MovieRepo, &models.Movie{ID: "DUPLICATE-ID"}, movies[2].ContentID)
+	require.NoError(t, err)
+	require.Nil(t, blocked)
+}
+
 func TestAuthoritativeMovieLookupFallbacksAndErrors(t *testing.T) {
 	ctx := context.Background()
 	require.Nil(t, func() *models.Movie {
@@ -93,6 +220,15 @@ func TestAuthoritativeMovieLookupFallbacksAndErrors(t *testing.T) {
 		require.NoError(t, err)
 		return movie
 	}())
+
+	contentMovie := &models.Movie{ContentID: "content-hit", ID: "CONTENT-HIT"}
+	contentRepo := authorityLookupRepo{
+		findByContentID: func(context.Context, string) (*models.Movie, error) { return contentMovie, nil },
+		findByID:        func(context.Context, string) (*models.Movie, error) { return nil, database.ErrNotFound },
+	}
+	movie, err := findAuthoritativeMovie(ctx, contentRepo, &models.Movie{ContentID: "content-hit"}, "")
+	require.NoError(t, err)
+	require.Same(t, contentMovie, movie)
 
 	boom := errors.New("read failed")
 	repo := authorityLookupRepo{
@@ -108,7 +244,7 @@ func TestAuthoritativeMovieLookupFallbacksAndErrors(t *testing.T) {
 			}
 		},
 	}
-	movie, err := findAuthoritativeMovie(ctx, repo, &models.Movie{ContentID: "content", ID: "canonical"}, "alias")
+	movie, err = findAuthoritativeMovie(ctx, repo, &models.Movie{ContentID: "content", ID: "canonical"}, "alias")
 	require.NoError(t, err)
 	require.Equal(t, "canonical", movie.ID)
 	movie, err = findAuthoritativeMovie(ctx, repo, &models.Movie{ID: "missing"}, "missing")

@@ -21,6 +21,19 @@ func (r failingProjectionRepo) FindAuthoritativeProjections(context.Context, []s
 	return nil, r.err
 }
 
+type recordingProjectionRepo struct {
+	calls        int
+	contentIDs   []string
+	canonicalIDs []string
+}
+
+func (r *recordingProjectionRepo) FindAuthoritativeProjections(_ context.Context, contentIDs, canonicalIDs []string) (*database.AuthoritativeMovieProjection, error) {
+	r.calls++
+	r.contentIDs = append([]string(nil), contentIDs...)
+	r.canonicalIDs = append([]string(nil), canonicalIDs...)
+	return &database.AuthoritativeMovieProjection{}, nil
+}
+
 func TestBatchProjectionPrecedenceAndDeepIsolation(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	deps := createTestDeps(t, &config.Config{}, "")
@@ -66,6 +79,77 @@ func TestBatchProjectionPrecedenceAndDeepIsolation(t *testing.T) {
 	require.Equal(t, "One|Two", projection.ByContentID[movie.ContentID].Credits[0].Actress.Aliases)
 }
 
+func TestBatchProjectionDuplicateCanonicalIDFailsClosedInMixedRefresh(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	deps := createTestDeps(t, &config.Config{}, "")
+	actresses := []models.Actress{{JapaneseName: "Duplicate A", Verified: true}, {JapaneseName: "Duplicate B", Verified: true}, {JapaneseName: "Unique", Verified: true}}
+	require.NoError(t, deps.Repos.DB.Create(&actresses).Error)
+	movies := []models.Movie{
+		{ContentID: "duplicate-a", ID: "DUPLICATE"},
+		{ContentID: "duplicate-b", ID: "DUPLICATE"},
+		{ContentID: "unique-content", ID: "UNIQUE"},
+	}
+	require.NoError(t, deps.Repos.DB.Create(&movies).Error)
+	require.NoError(t, deps.Repos.DB.Create(&[]models.MovieCredit{
+		{MovieContentID: "duplicate-a", ActressID: actresses[0].ID, CreditedName: "Wrong if selected"},
+		{MovieContentID: "duplicate-b", ActressID: actresses[1].ID, CreditedName: "Also wrong"},
+		{MovieContentID: "unique-content", ActressID: actresses[2].ID, CreditedName: "Unique credit"},
+	}).Error)
+
+	job := deps.JobStore.CreateJobBatch([]string{"ambiguous.mp4", "exact.mp4", "unique.mp4"})
+	ambiguous := &resultstore.MovieResult{ResultID: "ambiguous", FileMatchInfo: models.FileMatchInfo{MovieID: "UNIQUE"}, Movie: &models.Movie{ID: "DUPLICATE"}}
+	setJobResult(job, "ambiguous.mp4", ambiguous)
+	setJobResult(job, "exact.mp4", &resultstore.MovieResult{ResultID: "exact", Movie: &models.Movie{ContentID: "duplicate-b", ID: "DUPLICATE"}})
+	setJobResult(job, "unique.mp4", &resultstore.MovieResult{ResultID: "unique", Movie: &models.Movie{ID: "UNIQUE"}})
+	status := job.GetStatus()
+	ambiguousSnapshot := status.Results["ambiguous.mp4"]
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest("GET", "/batch?include_data=true", nil)
+	require.NoError(t, refreshBatchJobMovies(c, deps, status))
+
+	require.Same(t, ambiguousSnapshot, status.Results["ambiguous.mp4"])
+	require.Empty(t, status.Results["ambiguous.mp4"].Movie.Credits)
+	require.Empty(t, status.Results["ambiguous.mp4"].Movie.Actresses)
+	require.Equal(t, "Also wrong", status.Results["exact.mp4"].Movie.Credits[0].CreditedName)
+	require.Equal(t, "Unique credit", status.Results["unique.mp4"].Movie.Credits[0].CreditedName)
+}
+
+func TestBatchProjectionCollectorUsesOneRequestForBothAliasDimensions(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	deps := createTestDeps(t, &config.Config{}, "")
+	repo := &recordingProjectionRepo{}
+	deps.Repos.MovieProjectionRepo = repo
+	job := &worker.BatchJobStatus{Results: map[string]*resultstore.MovieResult{
+		"one": {Movie: &models.Movie{ContentID: "content-one", ID: "canonical-one"}, FileMatchInfo: models.FileMatchInfo{MovieID: "alias-one"}},
+		"two": {Movie: &models.Movie{ContentID: "content-two", ID: "canonical-two"}, FileMatchInfo: models.FileMatchInfo{MovieID: "alias-two"}},
+	}}
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest("GET", "/batch?include_data=true", nil)
+	require.NoError(t, refreshBatchJobMovies(c, deps, job))
+	require.Equal(t, 1, repo.calls)
+	require.ElementsMatch(t, []string{"content-one", "alias-one", "content-two", "alias-two"}, repo.contentIDs)
+	require.ElementsMatch(t, []string{"canonical-one", "alias-one", "canonical-two", "alias-two"}, repo.canonicalIDs)
+}
+
+func TestBatchProjectionAliasContentFallback(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	deps := createTestDeps(t, &config.Config{}, "")
+	actress := models.Actress{JapaneseName: "Alias Authority", Verified: true}
+	require.NoError(t, deps.Repos.DB.Create(&actress).Error)
+	movie := models.Movie{ContentID: "legacy-content-alias", ID: "CANONICAL-ALIAS", Title: "Persisted"}
+	require.NoError(t, deps.Repos.DB.Create(&movie).Error)
+	require.NoError(t, deps.Repos.DB.Create(&models.MovieCredit{MovieContentID: movie.ContentID, ActressID: actress.ID, CreditedName: "Alias Credit"}).Error)
+
+	job := deps.JobStore.CreateJobBatch([]string{"alias.mp4"})
+	setJobResult(job, "alias.mp4", &resultstore.MovieResult{ResultID: "alias", FileMatchInfo: models.FileMatchInfo{MovieID: movie.ContentID}, Movie: &models.Movie{ID: "missing-snapshot-id", Credits: []models.MovieCredit{{CreditedName: "Stale"}}}})
+	status := job.GetStatus()
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest("GET", "/batch?include_data=true", nil)
+	require.NoError(t, refreshBatchJobMovies(c, deps, status))
+	require.Equal(t, "Alias Credit", status.Results["alias.mp4"].Movie.Credits[0].CreditedName)
+	require.Equal(t, "Alias Authority", status.Results["alias.mp4"].Movie.Actresses[0].JapaneseName)
+}
+
 func TestBatchProjectionErrorLeavesEverySnapshotUntouched(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	deps := createTestDeps(t, &config.Config{}, "")
@@ -86,6 +170,14 @@ func TestBatchProjectionErrorLeavesEverySnapshotUntouched(t *testing.T) {
 }
 
 func TestFindAuthoritativeMovieProjectionPrecedence(t *testing.T) {
+	contentIDs, canonicalIDs := movieProjectionLookupIDs(nil, "alias")
+	require.Nil(t, contentIDs)
+	require.Nil(t, canonicalIDs)
+	movie, canonicalAmbiguous := projectionMovieByCanonicalID(nil, "")
+	require.Nil(t, movie)
+	require.False(t, canonicalAmbiguous)
+	require.Nil(t, projectionMovieByContentID(nil, "alias"))
+	require.Nil(t, projectionMovieByContentID(&database.AuthoritativeMovieProjection{}, "alias"))
 	require.Nil(t, findAuthoritativeMovieProjection(nil, &models.Movie{}, ""))
 	require.Nil(t, findAuthoritativeMovieProjection(&database.AuthoritativeMovieProjection{}, nil, ""))
 	content := &models.Movie{ContentID: "content", ID: "CONTENT"}
@@ -96,4 +188,23 @@ func TestFindAuthoritativeMovieProjectionPrecedence(t *testing.T) {
 	require.Same(t, canonical, findAuthoritativeMovieProjection(projection, &models.Movie{ID: "canonical"}, "alias"))
 	require.Same(t, alias, findAuthoritativeMovieProjection(projection, &models.Movie{ID: "missing"}, "alias"))
 	require.Nil(t, findAuthoritativeMovieProjection(projection, &models.Movie{ID: "missing"}, "missing"))
+
+	collisionCanonical := &models.Movie{ContentID: "canonical-content", ID: "collision"}
+	collisionContent := &models.Movie{ContentID: "collision", ID: "other"}
+	collision := &database.AuthoritativeMovieProjection{
+		ByContentID:   map[string]*models.Movie{"collision": collisionContent},
+		ByCanonicalID: map[string]*models.Movie{"collision": collisionCanonical},
+	}
+	require.Same(t, collisionCanonical, findAuthoritativeMovieProjection(collision, &models.Movie{ID: "missing"}, "collision"), "alias canonical ID must retain FindByID precedence over content ID")
+
+	ambiguous := &database.AuthoritativeMovieProjection{
+		ByContentID:           map[string]*models.Movie{"alias": {ContentID: "alias", ID: "safe-alias"}},
+		ByCanonicalID:         map[string]*models.Movie{"alias": {ContentID: "safe-alias", ID: "alias"}},
+		AmbiguousCanonicalIDs: map[string]struct{}{"duplicate": {}},
+	}
+	require.Nil(t, findAuthoritativeMovieProjection(ambiguous, &models.Movie{ID: "duplicate"}, "alias"), "an ambiguous snapshot canonical ID must fail closed before alias fallback")
+	ambiguous.AmbiguousCanonicalIDs["alias"] = struct{}{}
+	require.Nil(t, findAuthoritativeMovieProjection(ambiguous, &models.Movie{ID: "missing"}, "alias"), "an ambiguous alias canonical ID must fail closed before content fallback")
+	require.Nil(t, findAuthoritativeMovieProjection(&database.AuthoritativeMovieProjection{ByContentID: map[string]*models.Movie{"content": {ContentID: "wrong"}}}, &models.Movie{ContentID: "content"}, ""))
+	require.Nil(t, findAuthoritativeMovieProjection(&database.AuthoritativeMovieProjection{ByCanonicalID: map[string]*models.Movie{"alias": {ID: "wrong"}}}, &models.Movie{}, "alias"))
 }

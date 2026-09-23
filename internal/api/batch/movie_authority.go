@@ -11,30 +11,84 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 )
 
+func movieProjectionLookupIDs(snapshot *models.Movie, matcherAlias string) (contentIDs, canonicalIDs []string) {
+	if snapshot == nil {
+		return nil, nil
+	}
+	contentIDs = []string{snapshot.ContentID, matcherAlias}
+	canonicalIDs = []string{snapshot.ID, matcherAlias}
+	return contentIDs, canonicalIDs
+}
+
+func projectionMovieByContentID(projection *database.AuthoritativeMovieProjection, contentID string) *models.Movie {
+	contentID = strings.TrimSpace(contentID)
+	if projection == nil || contentID == "" {
+		return nil
+	}
+	movie := projection.ByContentID[contentID]
+	if movie == nil || strings.TrimSpace(movie.ContentID) != contentID {
+		return nil
+	}
+	return movie
+}
+
+func projectionMovieByCanonicalID(projection *database.AuthoritativeMovieProjection, canonicalID string) (*models.Movie, bool) {
+	canonicalID = strings.TrimSpace(canonicalID)
+	if projection == nil || canonicalID == "" {
+		return nil, false
+	}
+	if _, ambiguous := projection.AmbiguousCanonicalIDs[canonicalID]; ambiguous {
+		return nil, true
+	}
+	movie := projection.ByCanonicalID[canonicalID]
+	if movie == nil || strings.TrimSpace(movie.ID) != canonicalID || strings.TrimSpace(movie.ContentID) == "" {
+		return nil, false
+	}
+	return movie, false
+}
+
 func findAuthoritativeMovieProjection(projection *database.AuthoritativeMovieProjection, snapshot *models.Movie, matcherAlias string) *models.Movie {
 	if projection == nil || snapshot == nil {
 		return nil
 	}
-	if contentID := strings.TrimSpace(snapshot.ContentID); contentID != "" {
-		if movie := projection.ByContentID[contentID]; movie != nil {
-			return movie
-		}
+	if movie := projectionMovieByContentID(projection, snapshot.ContentID); movie != nil {
+		return movie
 	}
-	if canonicalID := strings.TrimSpace(snapshot.ID); canonicalID != "" {
-		if movie := projection.ByCanonicalID[canonicalID]; movie != nil && strings.TrimSpace(movie.ID) == canonicalID {
+	canonicalID := strings.TrimSpace(snapshot.ID)
+	if canonicalID != "" {
+		if movie, ambiguous := projectionMovieByCanonicalID(projection, canonicalID); movie != nil {
 			return movie
+		} else if ambiguous {
+			return nil
 		}
 	}
 	alias := strings.TrimSpace(matcherAlias)
-	if alias == "" || alias == strings.TrimSpace(snapshot.ID) {
+	if alias == "" || alias == canonicalID {
 		return nil
 	}
-	return projection.ByCanonicalID[alias]
+	if movie, ambiguous := projectionMovieByCanonicalID(projection, alias); movie != nil {
+		return movie
+	} else if ambiguous {
+		return nil
+	}
+	return projectionMovieByContentID(projection, alias)
 }
 
 func findAuthoritativeMovie(ctx context.Context, repo database.MovieRepositoryInterface, snapshot *models.Movie, matcherAlias string) (*models.Movie, error) {
 	if repo == nil || snapshot == nil {
 		return nil, nil
+	}
+	if projectionRepo, ok := repo.(database.MovieProjectionRepositoryInterface); ok {
+		contentIDs, canonicalIDs := movieProjectionLookupIDs(snapshot, matcherAlias)
+		projection, err := projectionRepo.FindAuthoritativeProjections(ctx, contentIDs, canonicalIDs)
+		if err != nil {
+			return nil, err
+		}
+		resolved := findAuthoritativeMovieProjection(projection, snapshot, matcherAlias)
+		if resolved == nil {
+			return nil, nil
+		}
+		return repo.FindByContentID(ctx, resolved.ContentID)
 	}
 	if contentID := strings.TrimSpace(snapshot.ContentID); contentID != "" {
 		movie, err := repo.FindByContentID(ctx, contentID)

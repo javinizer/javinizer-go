@@ -117,6 +117,95 @@ func TestFindAuthoritativeProjectionsBoundedQueriesAndSourceOfTruth(t *testing.T
 	require.ErrorIs(t, err, context.Canceled)
 }
 
+func TestFindAuthoritativeProjectionsAliasDuplicationStaysBounded(t *testing.T) {
+	db := newCreditTestDB(t)
+	actress := models.Actress{JapaneseName: "Bounded", Verified: true, Origin: ActressOriginUser}
+	require.NoError(t, db.Create(&actress).Error)
+	movies := make([]models.Movie, 500)
+	credits := make([]models.MovieCredit, 0, len(movies))
+	for i := range movies {
+		movies[i] = models.Movie{ContentID: fmt.Sprintf("bounded-content-%03d", i), ID: fmt.Sprintf("BOUNDED-%03d", i)}
+		credits = append(credits, models.MovieCredit{MovieContentID: movies[i].ContentID, ActressID: actress.ID})
+	}
+	require.NoError(t, db.CreateInBatches(&movies, 100).Error)
+	require.NoError(t, db.CreateInBatches(&credits, 100).Error)
+
+	// Mirror movieProjectionLookupIDs: every result contributes its matcher alias
+	// to BOTH the content and canonical lookup dimensions. The alias is duplicated
+	// 2*len(movies) times per list and also overlaps a canonical movie ID.
+	alias := movies[0].ID
+	contentIDs := make([]string, 0, len(movies)*2)
+	canonicalIDs := make([]string, 0, len(movies)*2)
+	for i := range movies {
+		contentIDs = append(contentIDs, movies[i].ContentID, alias)
+		canonicalIDs = append(canonicalIDs, movies[i].ID, alias)
+	}
+
+	repo := NewMovieRepository(db)
+	var queries atomic.Int64
+	name := "projection_alias_duplication_query_count"
+	require.NoError(t, db.Callback().Query().After("gorm:query").Register(name, func(*gorm.DB) { queries.Add(1) }))
+	projection, err := repo.FindAuthoritativeProjections(context.Background(), contentIDs, canonicalIDs)
+	require.NoError(t, db.Callback().Query().Remove(name))
+	require.NoError(t, err)
+	require.EqualValues(t, 3, queries.Load(), "dedup must keep the batched projection at one query per phase")
+	require.Len(t, projection.ByContentID, 500)
+	require.Len(t, projection.ByCanonicalID, 500)
+	require.Empty(t, projection.AmbiguousCanonicalIDs)
+	require.Equal(t, movies[0].ContentID, projection.ByCanonicalID[alias].ContentID)
+
+	empty, err := repo.FindAuthoritativeProjections(context.Background(), nil, nil)
+	require.NoError(t, err)
+	require.Empty(t, empty.ByContentID)
+	require.Empty(t, empty.ByCanonicalID)
+	require.Empty(t, empty.AmbiguousCanonicalIDs)
+}
+
+func TestFindAuthoritativeProjectionsAmbiguousCanonicalIDsFailClosed(t *testing.T) {
+	for _, reverse := range []bool{false, true} {
+		t.Run(fmt.Sprintf("reverse-%t", reverse), func(t *testing.T) {
+			db := newCreditTestDB(t)
+			actresses := []models.Actress{{JapaneseName: "First", Verified: true}, {JapaneseName: "Second", Verified: true}, {JapaneseName: "Unique", Verified: true}}
+			require.NoError(t, db.Create(&actresses).Error)
+			movies := []models.Movie{
+				{ContentID: "duplicate-a", ID: "DUPLICATE"},
+				{ContentID: "duplicate-b", ID: "DUPLICATE"},
+				{ContentID: "unique", ID: "Unique"},
+				{ContentID: "case", ID: "unique"},
+				{ContentID: "empty", ID: ""},
+			}
+			if reverse {
+				for left, right := 0, len(movies)-1; left < right; left, right = left+1, right-1 {
+					movies[left], movies[right] = movies[right], movies[left]
+				}
+			}
+			require.NoError(t, db.Create(&movies).Error)
+			require.NoError(t, db.Create(&[]models.MovieCredit{
+				{MovieContentID: "duplicate-a", ActressID: actresses[0].ID},
+				{MovieContentID: "duplicate-b", ActressID: actresses[1].ID},
+				{MovieContentID: "unique", ActressID: actresses[2].ID},
+			}).Error)
+
+			projection, err := NewMovieRepository(db).FindAuthoritativeProjections(t.Context(),
+				[]string{"duplicate-a", "duplicate-b", "empty"},
+				[]string{"DUPLICATE", "Unique", "unique", "", "   "},
+			)
+			require.NoError(t, err)
+			require.Contains(t, projection.ByContentID, "duplicate-a")
+			require.Contains(t, projection.ByContentID, "duplicate-b")
+			require.NotContains(t, projection.ByCanonicalID, "DUPLICATE")
+			require.Contains(t, projection.AmbiguousCanonicalIDs, "DUPLICATE")
+			require.NotContains(t, projection.ByCanonicalID, "")
+			require.Equal(t, "unique", projection.ByCanonicalID["Unique"].ContentID)
+			require.Equal(t, "case", projection.ByCanonicalID["unique"].ContentID)
+
+			canonicalOnly, err := NewMovieRepository(db).FindAuthoritativeProjections(t.Context(), nil, []string{"Unique"})
+			require.NoError(t, err)
+			require.Equal(t, "unique", canonicalOnly.ByCanonicalID["Unique"].ContentID)
+		})
+	}
+}
+
 func projectionPhaseFixture(t *testing.T) (*DB, *MovieRepository, models.Movie) {
 	t.Helper()
 	db := newCreditTestDB(t)

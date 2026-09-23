@@ -46,8 +46,9 @@ func projectionChunks(values []string) [][]string {
 // FindAuthoritativeProjections loads movie cast projections in bounded query phases.
 func (r *MovieRepository) FindAuthoritativeProjections(ctx context.Context, contentIDs, canonicalIDs []string) (*AuthoritativeMovieProjection, error) {
 	projection := &AuthoritativeMovieProjection{
-		ByContentID:   make(map[string]*models.Movie),
-		ByCanonicalID: make(map[string]*models.Movie),
+		ByContentID:           make(map[string]*models.Movie),
+		ByCanonicalID:         make(map[string]*models.Movie),
+		AmbiguousCanonicalIDs: make(map[string]struct{}),
 	}
 	contentIDs = projectionIDs(contentIDs)
 	canonicalIDs = projectionIDs(canonicalIDs)
@@ -65,6 +66,10 @@ func (r *MovieRepository) FindAuthoritativeProjections(ctx context.Context, cont
 	}
 	for _, id := range canonicalIDs {
 		lookups = append(lookups, lookup{value: id, canonical: true})
+	}
+	canonicalIDSet := make(map[string]struct{}, len(canonicalIDs))
+	for _, id := range canonicalIDs {
+		canonicalIDSet[id] = struct{}{}
 	}
 	moviesByContentID := make(map[string]models.Movie)
 	for start := 0; start < len(lookups); start += projectionQueryVariableLimit {
@@ -148,8 +153,12 @@ func (r *MovieRepository) FindAuthoritativeProjections(ctx context.Context, cont
 		return nil, err
 	}
 
+	canonicalOwners := make(map[string][]string, len(canonicalIDs))
 	for _, contentID := range foundContentIDs {
 		movie := moviesByContentID[contentID]
+		if _, requested := canonicalIDSet[movie.ID]; requested && movie.ID != "" {
+			canonicalOwners[movie.ID] = append(canonicalOwners[movie.ID], contentID)
+		}
 		credits := creditsByMovie[contentID]
 		movie.Credits = make([]models.MovieCredit, len(credits))
 		movie.Actresses = make([]models.Actress, 0, len(credits))
@@ -165,8 +174,12 @@ func (r *MovieRepository) FindAuthoritativeProjections(ctx context.Context, cont
 		}
 		movieCopy := movie
 		projection.ByContentID[movie.ContentID] = &movieCopy
-		if _, exists := projection.ByCanonicalID[movie.ID]; !exists {
-			projection.ByCanonicalID[movie.ID] = &movieCopy
+	}
+	for canonicalID, owners := range canonicalOwners {
+		if len(owners) == 1 {
+			projection.ByCanonicalID[canonicalID] = projection.ByContentID[owners[0]]
+		} else {
+			projection.AmbiguousCanonicalIDs[canonicalID] = struct{}{}
 		}
 	}
 	return projection, nil
