@@ -226,7 +226,7 @@ const docTemplate = `{
         },
         "/api/v1/actresses/candidates/{id}/promote": {
             "post": {
-                "description": "Confirms canonical fields and marks the candidate verified and user-owned.",
+                "description": "Confirms canonical fields and marks the candidate verified and user-owned. Omitted fields keep scraped values; present empty fields clear them. The resolved first_name or japanese_name must remain non-empty, and a present non-empty thumb_url must use HTTP or HTTPS.",
                 "consumes": [
                     "application/json"
                 ],
@@ -246,25 +246,11 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "description": "Canonical fields (empty = keep scraped values)",
+                        "description": "Canonical fields (omitted = keep scraped value, present empty = clear)",
                         "name": "request",
                         "in": "body",
                         "schema": {
-                            "type": "object",
-                            "properties": {
-                                "first_name": {
-                                    "type": "string"
-                                },
-                                "japanese_name": {
-                                    "type": "string"
-                                },
-                                "last_name": {
-                                    "type": "string"
-                                },
-                                "thumb_url": {
-                                    "type": "string"
-                                }
-                            }
+                            "$ref": "#/definitions/internal_api_actress.CandidatePromotionRequest"
                         }
                     }
                 ],
@@ -8783,6 +8769,23 @@ const docTemplate = `{
                     "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_updater.State"
                 },
                 "version": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_api_actress.CandidatePromotionRequest": {
+            "type": "object",
+            "properties": {
+                "first_name": {
+                    "type": "string"
+                },
+                "japanese_name": {
+                    "type": "string"
+                },
+                "last_name": {
+                    "type": "string"
+                },
+                "thumb_url": {
                     "type": "string"
                 }
             }

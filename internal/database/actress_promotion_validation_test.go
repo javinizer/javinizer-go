@@ -86,3 +86,45 @@ func TestPromoteCandidateValidationPrecedesDatabaseAccess(t *testing.T) {
 	require.ErrorIs(t, err, ErrInvalidLookup)
 	require.False(t, errors.Is(err, ErrCandidateAlreadyVerified))
 }
+
+func TestPromoteCandidateClearsFieldsAndRejectsEmptyCanonicalNameWithoutWriting(t *testing.T) {
+	tests := []struct {
+		name                         string
+		first, last, japanese, thumb string
+		wantErr                      bool
+		wantFirst, wantLast, wantJP  string
+		wantThumb                    string
+	}{
+		{name: "clear optional fields", first: "Existing", wantFirst: "Existing"},
+		{name: "clear first while japanese remains", japanese: "既存", wantJP: "既存"},
+		{name: "reject both canonical names empty", wantErr: true, wantFirst: "Existing", wantLast: "Person", wantJP: "既存", wantThumb: "https://example.test/existing.jpg"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			db := newCreditTestDB(t)
+			repo := NewActressRepository(db)
+			candidate := models.Actress{
+				FirstName: "Existing", LastName: "Person", JapaneseName: "既存",
+				ThumbURL: "https://example.test/existing.jpg", Origin: ActressOriginScrape,
+				AmbiguityQuarantined: true,
+			}
+			require.NoError(t, db.Create(&candidate).Error)
+
+			err := repo.PromoteCandidate(t.Context(), candidate.ID, test.first, test.last, test.japanese, test.thumb)
+			if test.wantErr {
+				require.ErrorIs(t, err, ErrInvalidLookup)
+			} else {
+				require.NoError(t, err)
+			}
+
+			var stored models.Actress
+			require.NoError(t, db.First(&stored, candidate.ID).Error)
+			require.Equal(t, test.wantFirst, stored.FirstName)
+			require.Equal(t, test.wantLast, stored.LastName)
+			require.Equal(t, test.wantJP, stored.JapaneseName)
+			require.Equal(t, test.wantThumb, stored.ThumbURL)
+			require.Equal(t, !test.wantErr, stored.Verified)
+		})
+	}
+}

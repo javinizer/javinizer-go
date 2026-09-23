@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -19,6 +20,16 @@ const databaseNotConfiguredError = "database not configured"
 type candidateListResponse struct {
 	Candidates []models.Actress `json:"candidates"`
 	Total      int64            `json:"total"`
+}
+
+// CandidatePromotionRequest is the presence-aware candidate promotion payload:
+// omitted fields keep the candidate's scraped value while present empty fields
+// clear it.
+type CandidatePromotionRequest struct {
+	FirstName    *string `json:"first_name,omitempty"`
+	LastName     *string `json:"last_name,omitempty"`
+	JapaneseName *string `json:"japanese_name,omitempty"`
+	ThumbURL     *string `json:"thumb_url,omitempty"`
 }
 
 type collisionResponse struct {
@@ -64,12 +75,12 @@ func ListCandidates(deps ActressDeps) gin.HandlerFunc {
 // canonical fields; the candidate becomes a verified user-owned identity.
 //
 //	@Summary		Promote a candidate identity
-//	@Description	Confirms canonical fields and marks the candidate verified and user-owned.
+//	@Description	Confirms canonical fields and marks the candidate verified and user-owned. Omitted fields keep scraped values; present empty fields clear them. The resolved first_name or japanese_name must remain non-empty, and a present non-empty thumb_url must use HTTP or HTTPS.
 //	@Tags			actresses
 //	@Accept			json
 //	@Produce		json
 //	@Param			id		path		int					true	"Candidate ID"
-//	@Param			request	body		object{first_name=string,last_name=string,japanese_name=string,thumb_url=string}	false	"Canonical fields (empty = keep scraped values)"
+//	@Param			request	body		CandidatePromotionRequest	false	"Canonical fields (omitted = keep scraped value, present empty = clear)"
 //	@Success		200		{object}	models.Actress
 //	@Failure		400		{object}	contracts.ErrorResponse
 //	@Failure		404		{object}	contracts.ErrorResponse
@@ -77,19 +88,13 @@ func ListCandidates(deps ActressDeps) gin.HandlerFunc {
 //	@Failure		500		{object}	contracts.ErrorResponse
 //	@Router			/api/v1/actresses/candidates/{id}/promote [post]
 func PromoteCandidate(deps ActressDeps) gin.HandlerFunc {
-	type promoteRequest struct {
-		FirstName    string `json:"first_name"`
-		LastName     string `json:"last_name"`
-		JapaneseName string `json:"japanese_name"`
-		ThumbURL     string `json:"thumb_url"`
-	}
 	return func(c *gin.Context) {
 		id, err := strconv.ParseUint(c.Param("id"), 10, 64)
-		if err != nil {
+		if err != nil || id == 0 {
 			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "invalid candidate id"})
 			return
 		}
-		var req promoteRequest
+		var req CandidatePromotionRequest
 		if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
 			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
 			return
@@ -107,25 +112,17 @@ func PromoteCandidate(deps ActressDeps) gin.HandlerFunc {
 			c.JSON(http.StatusConflict, contracts.ErrorResponse{Error: "identity is already verified"})
 			return
 		}
-		first := strings.TrimSpace(req.FirstName)
-		last := strings.TrimSpace(req.LastName)
-		jp := strings.TrimSpace(req.JapaneseName)
-		thumb := strings.TrimSpace(req.ThumbURL)
-		if first == "" {
-			first = strings.TrimSpace(existing.FirstName)
-		}
-		if last == "" {
-			last = strings.TrimSpace(existing.LastName)
-		}
-		if jp == "" {
-			jp = strings.TrimSpace(existing.JapaneseName)
-		}
-		if thumb == "" {
-			thumb = strings.TrimSpace(existing.ThumbURL)
-		}
+		first := resolveCandidatePromotionField(req.FirstName, existing.FirstName)
+		last := resolveCandidatePromotionField(req.LastName, existing.LastName)
+		jp := resolveCandidatePromotionField(req.JapaneseName, existing.JapaneseName)
+		thumb := resolveCandidatePromotionField(req.ThumbURL, existing.ThumbURL)
 		resolved := actressRequest{FirstName: first, LastName: last, JapaneseName: jp, ThumbURL: thumb}
 		if err := validateActressRequest(&resolved); err != nil {
 			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
+			return
+		}
+		if req.ThumbURL != nil && thumb != "" && !isHTTPURL(thumb) {
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "thumb_url must be a valid HTTP or HTTPS URL"})
 			return
 		}
 		if err := deps.ActressRepo.PromoteCandidate(c.Request.Context(), uint(id), first, last, jp, thumb); err != nil {
@@ -146,6 +143,18 @@ func PromoteCandidate(deps ActressDeps) gin.HandlerFunc {
 		}
 		c.JSON(http.StatusOK, updated)
 	}
+}
+
+func resolveCandidatePromotionField(requested *string, current string) string {
+	if requested == nil {
+		return strings.TrimSpace(current)
+	}
+	return strings.TrimSpace(*requested)
+}
+
+func isHTTPURL(value string) bool {
+	parsed, err := url.Parse(value)
+	return err == nil && parsed.Host != "" && (parsed.Scheme == "http" || parsed.Scheme == "https")
 }
 
 // ResolveCollision handles POST /actresses/collisions/:id/resolve — user-only

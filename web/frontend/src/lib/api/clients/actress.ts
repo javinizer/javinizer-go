@@ -2,6 +2,7 @@ import type {
 	ActressListParams,
 	ActressListResponse,
 	ActressUpsertRequest,
+	CandidatePromotionRequest,
 	Actress,
 	ActressMergePreviewRequest,
 	ActressMergePreviewResponse,
@@ -89,10 +90,7 @@ export class ActressClient extends BaseClient {
 		return this.request<CandidateListResponse>(`/api/v1/actresses/candidates?${query}`);
 	}
 
-	async promoteCandidate(
-		id: number,
-		request: Partial<ActressUpsertRequest> = {},
-	): Promise<Actress> {
+	async promoteCandidate(id: number, request: CandidatePromotionRequest = {}): Promise<Actress> {
 		return this.request<Actress>(`/api/v1/actresses/candidates/${id}/promote`, {
 			method: 'POST',
 			body: JSON.stringify(request),
@@ -101,12 +99,13 @@ export class ActressClient extends BaseClient {
 
 	async listCollisions(movieId: string): Promise<{ collisions: CreditCollision[] }> {
 		const query = new URLSearchParams({ movie_id: movieId });
-		return this.request<{ collisions: CreditCollision[] }>(
-			`/api/v1/actresses/collisions?${query}`,
-		);
+		return this.request<{ collisions: CreditCollision[] }>(`/api/v1/actresses/collisions?${query}`);
 	}
 
-	async resolveCollision(id: number, request: CollisionResolveRequest): Promise<{ resolved: boolean; remaining_open: number }> {
+	async resolveCollision(
+		id: number,
+		request: CollisionResolveRequest,
+	): Promise<{ resolved: boolean; remaining_open: number }> {
 		return this.request<{ resolved: boolean; remaining_open: number }>(
 			`/api/v1/actresses/collisions/${id}/resolve`,
 			{

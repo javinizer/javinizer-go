@@ -50,7 +50,7 @@ func TestPromoteCandidateRejectsVerificationAfterHandlerPrecheck(t *testing.T) {
 	content.ActressRepo = wrapped
 	router := gin.New()
 	RegisterRoutes(router.Group("/api/v1"), NewActressDeps(content, repos.TranslationRepos))
-	body := bytes.NewBufferString(`{"first_name":"Stale","last_name":"Request","thumb_url":"stale-thumb"}`)
+	body := bytes.NewBufferString(`{"first_name":"Stale","last_name":"Request","thumb_url":"https://example.test/stale.jpg"}`)
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/actresses/candidates/"+itoa(candidate.ID)+"/promote", body)
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()

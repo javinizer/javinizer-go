@@ -54,6 +54,17 @@ func TestPromoteCandidateErrorStatusMapping(t *testing.T) {
 	}
 }
 
+func TestPromoteCandidateRejectsZeroID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := mocks.NewMockActressRepositoryInterface(t)
+	router := gin.New()
+	router.POST("/candidates/:id/promote", PromoteCandidate(ActressDeps{ContentRepos: database.ContentRepos{ActressRepo: repo}}))
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/candidates/0/promote", bytes.NewBufferString(`{"first_name":"Zero"}`)))
+	require.Equal(t, http.StatusBadRequest, response.Code, response.Body.String())
+	repo.AssertNotCalled(t, "FindByID", mock.Anything, uint(0))
+}
+
 func TestPromoteCandidateNormalizesResolvedCanonicalFields(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -65,8 +76,15 @@ func TestPromoteCandidateNormalizesResolvedCanonicalFields(t *testing.T) {
 		wantJP    string
 		wantThumb string
 	}{
-		{name: "whitespace overrides keep trimmed scraped fields", candidate: models.Actress{FirstName: "  Scraped  ", LastName: "  Person  ", JapaneseName: "  候補  ", ThumbURL: "  scraped-thumb  "}, body: `{"first_name":" ","last_name":"\t","japanese_name":"  ","thumb_url":"\n"}`, wantCode: http.StatusOK, wantFirst: "Scraped", wantLast: "Person", wantJP: "候補", wantThumb: "scraped-thumb"},
-		{name: "trim overrides", candidate: models.Actress{FirstName: "Scraped"}, body: `{"first_name":"  Override  ","last_name":"  Name  ","thumb_url":"  override-thumb  "}`, wantCode: http.StatusOK, wantFirst: "Override", wantLast: "Name", wantThumb: "override-thumb"},
+		{name: "present whitespace clears all fields and rejects missing canonical name", candidate: models.Actress{FirstName: "Scraped", LastName: "Person", JapaneseName: "候補", ThumbURL: "https://example.test/scraped.jpg"}, body: `{"first_name":" ","last_name":"\t","japanese_name":"  ","thumb_url":"\n"}`, wantCode: http.StatusBadRequest},
+		{name: "omitted fields keep scraped values", candidate: models.Actress{FirstName: "Scraped", LastName: "Person", JapaneseName: "候補", ThumbURL: "https://example.test/scraped.jpg"}, body: `{"first_name":"  Override  "}`, wantCode: http.StatusOK, wantFirst: "Override", wantLast: "Person", wantJP: "候補", wantThumb: "https://example.test/scraped.jpg"},
+		{name: "present empty optional fields clear", candidate: models.Actress{FirstName: "Scraped", LastName: "Person", JapaneseName: "候補", ThumbURL: "https://example.test/scraped.jpg"}, body: `{"last_name":"","japanese_name":"","thumb_url":""}`, wantCode: http.StatusOK, wantFirst: "Scraped"},
+		{name: "present empty first clears while omitted japanese remains", candidate: models.Actress{FirstName: "Scraped", LastName: "Person", JapaneseName: "候補", ThumbURL: "https://example.test/scraped.jpg"}, body: `{"first_name":""}`, wantCode: http.StatusOK, wantLast: "Person", wantJP: "候補", wantThumb: "https://example.test/scraped.jpg"},
+		{name: "present empty first rejects when japanese is empty", candidate: models.Actress{FirstName: "Scraped", LastName: "Person", ThumbURL: "https://example.test/scraped.jpg"}, body: `{"first_name":""}`, wantCode: http.StatusBadRequest},
+		{name: "malformed thumbnail URL", candidate: models.Actress{FirstName: "Scraped", ThumbURL: "https://example.test/scraped.jpg"}, body: `{"thumb_url":"not a url"}`, wantCode: http.StatusBadRequest},
+		{name: "non HTTP thumbnail URL", candidate: models.Actress{FirstName: "Scraped", ThumbURL: "https://example.test/scraped.jpg"}, body: `{"thumb_url":"ftp://example.test/image.jpg"}`, wantCode: http.StatusBadRequest},
+		{name: "valid HTTP thumbnail URL", candidate: models.Actress{FirstName: "Scraped"}, body: `{"thumb_url":"http://example.test/image.jpg"}`, wantCode: http.StatusOK, wantFirst: "Scraped", wantThumb: "http://example.test/image.jpg"},
+		{name: "trim overrides", candidate: models.Actress{FirstName: "Scraped"}, body: `{"first_name":"  Override  ","last_name":"  Name  ","thumb_url":"  https://example.test/override.jpg  "}`, wantCode: http.StatusOK, wantFirst: "Override", wantLast: "Name", wantThumb: "https://example.test/override.jpg"},
 		{name: "id only empty object", candidate: models.Actress{DMMID: 701}, body: `{}`, wantCode: http.StatusBadRequest},
 		{name: "id only whitespace body", candidate: models.Actress{DMMID: 702}, body: "  \n\t", wantCode: http.StatusBadRequest},
 		{name: "whitespace existing and body", candidate: models.Actress{DMMID: 702, FirstName: " ", JapaneseName: "\t"}, body: `{"first_name":" ","japanese_name":"\n"}`, wantCode: http.StatusBadRequest},

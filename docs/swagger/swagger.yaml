@@ -3045,6 +3045,17 @@ definitions:
       version:
         type: string
     type: object
+  internal_api_actress.CandidatePromotionRequest:
+    properties:
+      first_name:
+        type: string
+      japanese_name:
+        type: string
+      last_name:
+        type: string
+      thumb_url:
+        type: string
+    type: object
   internal_api_actress.actressRequest:
     properties:
       aliases:
@@ -3832,27 +3843,21 @@ paths:
       consumes:
       - application/json
       description: Confirms canonical fields and marks the candidate verified and
-        user-owned.
+        user-owned. Omitted fields keep scraped values; present empty fields clear
+        them. The resolved first_name or japanese_name must remain non-empty, and
+        a present non-empty thumb_url must use HTTP or HTTPS.
       parameters:
       - description: Candidate ID
         in: path
         name: id
         required: true
         type: integer
-      - description: Canonical fields (empty = keep scraped values)
+      - description: Canonical fields (omitted = keep scraped value, present empty
+          = clear)
         in: body
         name: request
         schema:
-          properties:
-            first_name:
-              type: string
-            japanese_name:
-              type: string
-            last_name:
-              type: string
-            thumb_url:
-              type: string
-          type: object
+          $ref: '#/definitions/internal_api_actress.CandidatePromotionRequest'
       produces:
       - application/json
       responses:

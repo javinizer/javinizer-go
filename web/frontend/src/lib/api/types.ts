@@ -647,11 +647,7 @@ export interface MovieCredit {
 
 export type CollisionField = 'credited_name' | 'reported_thumb_url' | 'identity_link';
 
-export type CollisionResolution =
-	| 'keep_identity'
-	| 'adopt_canonical'
-	| 'adopt_alias'
-	| 'reassign';
+export type CollisionResolution = 'keep_identity' | 'adopt_canonical' | 'adopt_alias' | 'reassign';
 
 export interface CreditCollision {
 	id: number;
@@ -707,6 +703,13 @@ export interface ActressUpsertRequest {
 	japanese_name?: string;
 	thumb_url?: string;
 	aliases?: string;
+}
+
+export interface CandidatePromotionRequest {
+	first_name?: string;
+	last_name?: string;
+	japanese_name?: string;
+	thumb_url?: string;
 }
 
 export type ActressMergeResolution = 'target' | 'source';
