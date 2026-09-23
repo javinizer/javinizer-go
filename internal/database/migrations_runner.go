@@ -126,6 +126,12 @@ func (db *DB) RunMigrationsOnStartup(ctx context.Context) (err error) {
 		}
 		return fmt.Errorf("database migration failed: %w", err)
 	}
+	if err := backfillActressAliasNameKeys(ctx, db.DB); err != nil {
+		return fmt.Errorf("backfill normalized actress alias keys: %w", err)
+	}
+	if err := backfillActressCandidateNameKeys(ctx, db.DB); err != nil {
+		return fmt.Errorf("backfill normalized actress candidate keys: %w", err)
+	}
 
 	if storedHash == "" {
 		if err := StoreMigrationHash(sqlDB, "000001_baseline.sql", baselineHash); err != nil {

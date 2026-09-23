@@ -1006,6 +1006,15 @@ func (l *dbRevertLog) MarkReplacementRestorePendingKind(ctx context.Context, opI
 
 // ConfirmReplacement flips the matching journal entry to installed.
 func (l *dbRevertLog) ConfirmReplacement(ctx context.Context, opID OperationID, replacedPath, backupPath string) error {
+	return l.confirmReplacement(ctx, opID, replacedPath, backupPath, nil)
+}
+
+// ConfirmReplacementInstalled persists the exact installed output identity.
+func (l *dbRevertLog) ConfirmReplacementInstalled(ctx context.Context, opID, replacedPath, backupPath string, facts models.ReplacementBackupFacts) error {
+	return l.confirmReplacement(ctx, opID, replacedPath, backupPath, &facts)
+}
+
+func (l *dbRevertLog) confirmReplacement(ctx context.Context, opID OperationID, replacedPath, backupPath string, facts *models.ReplacementBackupFacts) error {
 	if opID == "" {
 		return fmt.Errorf("revert log ConfirmReplacement: empty operation ID")
 	}
@@ -1027,9 +1036,15 @@ func (l *dbRevertLog) ConfirmReplacement(ctx context.Context, opID OperationID, 
 		changed := false
 		for i := range gf.Replacements {
 			e := &gf.Replacements[i]
-			if e.Destination == replacedPath && e.Backup == backupPath && !e.Installed {
-				e.Installed = true
-				changed = true
+			if e.Destination == replacedPath && e.Backup == backupPath {
+				if !e.Installed {
+					e.Installed = true
+					changed = true
+				}
+				if facts != nil && (e.InstalledSize != facts.Size || e.InstalledModUnix != facts.ModUnix || e.InstalledSHA256 != facts.SHA256) {
+					e.InstalledSize, e.InstalledModUnix, e.InstalledSHA256 = facts.Size, facts.ModUnix, facts.SHA256
+					changed = true
+				}
 			}
 		}
 		if !changed {

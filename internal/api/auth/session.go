@@ -24,12 +24,12 @@ import (
 func getAuthStatus(rt *core.APIRuntime) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if rt == nil {
-			c.JSON(http.StatusServiceUnavailable, contracts.ErrorResponse{Error: "authentication is unavailable"})
+			c.JSON(http.StatusServiceUnavailable, contracts.ErrorResponse{Error: authUnavailableMessage})
 			return
 		}
 		deps := rt.Deps()
 		if deps == nil || deps.Auth == nil {
-			c.JSON(http.StatusServiceUnavailable, contracts.ErrorResponse{Error: "authentication is unavailable"})
+			c.JSON(http.StatusServiceUnavailable, contracts.ErrorResponse{Error: authUnavailableMessage})
 			return
 		}
 
@@ -78,12 +78,12 @@ func getAuthStatus(rt *core.APIRuntime) gin.HandlerFunc {
 func setupAuth(rt *core.APIRuntime) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if rt == nil {
-			c.JSON(http.StatusServiceUnavailable, contracts.ErrorResponse{Error: "authentication is unavailable"})
+			c.JSON(http.StatusServiceUnavailable, contracts.ErrorResponse{Error: authUnavailableMessage})
 			return
 		}
 		deps := rt.Deps()
 		if deps == nil || deps.Auth == nil {
-			c.JSON(http.StatusServiceUnavailable, contracts.ErrorResponse{Error: "authentication is unavailable"})
+			c.JSON(http.StatusServiceUnavailable, contracts.ErrorResponse{Error: authUnavailableMessage})
 			return
 		}
 
@@ -94,13 +94,13 @@ func setupAuth(rt *core.APIRuntime) gin.HandlerFunc {
 			headerSecret := c.GetHeader("X-Setup-Secret")
 			if headerSecret != bootstrapSecret {
 				logging.Warnf("Setup attempt rejected from %s: invalid bootstrap secret", clientIP)
-				c.AbortWithStatusJSON(http.StatusForbidden, contracts.ErrorResponse{Error: "setup requires a bootstrap secret", Code: "AUTH_UNAUTHORIZED"})
+				c.AbortWithStatusJSON(http.StatusForbidden, contracts.ErrorResponse{Error: "setup requires a bootstrap secret", Code: authUnauthorizedCode})
 				return
 			}
 		} else {
 			if !isTrustedClient(clientIP, deps.Auth.GetEnv) {
 				logging.Warnf("Setup attempt rejected from %s: remote access without bootstrap secret", clientIP)
-				c.AbortWithStatusJSON(http.StatusForbidden, contracts.ErrorResponse{Error: "setup is only available from localhost or trusted networks", Code: "AUTH_UNAUTHORIZED"})
+				c.AbortWithStatusJSON(http.StatusForbidden, contracts.ErrorResponse{Error: "setup is only available from localhost or trusted networks", Code: authUnauthorizedCode})
 				return
 			}
 		}
@@ -160,12 +160,12 @@ func setupAuth(rt *core.APIRuntime) gin.HandlerFunc {
 func loginAuth(rt *core.APIRuntime) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if rt == nil {
-			c.JSON(http.StatusServiceUnavailable, contracts.ErrorResponse{Error: "authentication is unavailable"})
+			c.JSON(http.StatusServiceUnavailable, contracts.ErrorResponse{Error: authUnavailableMessage})
 			return
 		}
 		deps := rt.Deps()
 		if deps == nil || deps.Auth == nil {
-			c.JSON(http.StatusServiceUnavailable, contracts.ErrorResponse{Error: "authentication is unavailable"})
+			c.JSON(http.StatusServiceUnavailable, contracts.ErrorResponse{Error: authUnavailableMessage})
 			return
 		}
 
@@ -179,7 +179,7 @@ func loginAuth(rt *core.APIRuntime) gin.HandlerFunc {
 		if err != nil {
 			switch {
 			case errors.Is(err, ErrAuthNotInitialized):
-				c.JSON(http.StatusServiceUnavailable, contracts.ErrorResponse{Error: "authentication is not initialized"})
+				c.JSON(http.StatusServiceUnavailable, contracts.ErrorResponse{Error: authUninitializedMessage})
 			case errors.Is(err, ErrInvalidCredentials):
 				c.JSON(http.StatusUnauthorized, contracts.ErrorResponse{Error: "invalid username or password", Code: "AUTH_INVALID_CREDENTIALS"})
 			case errors.Is(err, ErrLoginRateLimited):

@@ -61,6 +61,7 @@ type MovieView struct {
 	// Relationships (contract DTOs — see collection_views.go; persistence
 	// models.* types never cross the API boundary)
 	Actresses    []ActressView          `json:"actresses"`
+	CastVersion  string                 `json:"cast_version,omitempty"`
 	Genres       []GenreView            `json:"genres"`
 	Translations []MovieTranslationView `json:"translations"`
 
@@ -114,6 +115,7 @@ func MovieViewFromModel(m *models.Movie) *MovieView {
 		OriginalFileName:         m.OriginalFileName,
 		Screenshots:              m.Screenshots,
 		Actresses:                ActressViewSliceFromModels(m.Actresses),
+		CastVersion:              models.ActressCastVersion(m.Actresses),
 		Genres:                   GenreViewSliceFromModels(m.Genres),
 		Translations:             MovieTranslationViewSliceFromModels(m.Translations),
 		SourceName:               m.SourceName,

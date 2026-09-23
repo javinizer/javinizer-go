@@ -109,6 +109,17 @@ func TestApplyFieldOverride_ActressesRebuildsActressSources(t *testing.T) {
 	}
 }
 
+func TestApplyFieldOverride_ActressesRebuildsCredits(t *testing.T) {
+	movie, prov := overrideFixture()
+	movie.Credits = []models.MovieCredit{{CreditedName: "Old Credit", Scraped: models.Actress{FirstName: "Old"}}}
+
+	require.NoError(t, applyFieldOverride(movie, prov, "actresses", "dmm"))
+	require.Len(t, movie.Credits, 1)
+	assert.Equal(t, "Hatano Yui", movie.Credits[0].CreditedName)
+	assert.Equal(t, "dmm", movie.Credits[0].Source)
+	assert.Equal(t, 555, movie.Credits[0].Scraped.DMMID)
+}
+
 func TestApplyFieldOverride_GenresAndScreenshots(t *testing.T) {
 	movie, prov := overrideFixture()
 	err := applyFieldOverride(movie, prov, "genres", "dmm")

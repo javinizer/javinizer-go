@@ -67,7 +67,7 @@ func updateConfig(rt *core.APIRuntime) gin.HandlerFunc {
 		// Parse incoming config
 		var req UpdateConfigRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "Invalid configuration format", Code: "CONFIG_INVALID"})
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "Invalid configuration format", Code: configInvalidCode})
 			return
 		}
 
@@ -138,7 +138,7 @@ func reloadComponents(rt *core.APIRuntime, deps *core.APIDeps, newCfg *config.Co
 func configErrorResponse(status int, msg string) contracts.ErrorResponse {
 	resp := contracts.ErrorResponse{Error: msg}
 	if status == http.StatusBadRequest {
-		resp.Code = "CONFIG_INVALID"
+		resp.Code = configInvalidCode
 	}
 	return resp
 }

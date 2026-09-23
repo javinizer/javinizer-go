@@ -27,8 +27,9 @@ func TestMovieResultToBatchFileResultDriftGuard(t *testing.T) {
 	// Fields on MovieResult that are intentionally NOT exposed in the full
 	// BatchFileResult API response, with documented reasons.
 	intentionallyUnmappedInFull := map[string]string{
-		"Revision":      "internal versioning counter, not exposed to API consumers",
-		"FileMatchInfo": "flattened into BatchFileResult top-level fields (FilePath, MovieID, IsMultiPart, PartNumber, PartSuffix)",
+		"Revision":       "internal versioning counter, not exposed to API consumers",
+		"PersistedMovie": "server-owned repository-read provenance; never accept client authority or expose it in full/slim responses",
+		"FileMatchInfo":  "flattened into BatchFileResult top-level fields (FilePath, MovieID, IsMultiPart, PartNumber, PartSuffix)",
 		// OrchestrationState is embedded — its sub-fields are checked separately below.
 		// DisplayTitleApplied, PosterGenerated, Persisted, and PosterError are internal
 		// orchestration metadata not exposed in the API response. TranslationWarning and

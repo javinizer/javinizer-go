@@ -57,6 +57,7 @@ func (s *Scraper) tryCache(ctx context.Context, cmd ScrapeCmd, actressRepo datab
 	}
 
 	scrapedToReturn := cached
+	scrapedToReturn.SkipCreditReconcile = true
 	fieldSources := buildFieldSourcesFromCachedMovie(cached)
 	actressSources := buildActressSourcesFromCachedMovie(cached)
 

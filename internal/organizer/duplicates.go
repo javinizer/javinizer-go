@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/javinizer/javinizer-go/internal/fsutil"
@@ -250,6 +251,28 @@ func (t *DuplicateTracker) PrimeBatch(primings []DuplicatePriming) {
 			done:  make(chan struct{}),
 		}
 	}
+}
+
+// ObserveClaim reports an existing destination claim for a source.
+func (t *DuplicateTracker) ObserveClaim(ctx context.Context, source, target string, willMove bool) (string, bool) {
+	if t == nil || strings.TrimSpace(source) == "" || strings.TrimSpace(target) == "" {
+		return "", false
+	}
+	claim, duplicate := t.observe(ctx, &OrganizePlan{SourcePath: source, TargetPath: target, WillMove: willMove})
+	if !duplicate {
+		return "", false
+	}
+	return claim.source, true
+}
+
+// SettleClaim marks a destination claim as completed.
+func (t *DuplicateTracker) SettleClaim(source, target string) {
+	t.settle(&OrganizePlan{SourcePath: source, TargetPath: target})
+}
+
+// ReleaseClaim relinquishes a destination claim.
+func (t *DuplicateTracker) ReleaseClaim(source, target string) {
+	t.release(&OrganizePlan{SourcePath: source, TargetPath: target})
 }
 
 // containsClaimant reports whether queue already names source.

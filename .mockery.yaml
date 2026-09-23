@@ -12,6 +12,8 @@ packages:
     interfaces:
       MovieRepositoryInterface:
       ActressRepositoryInterface:
+      MovieCreditRepositoryInterface:
+      CreditCollisionRepositoryInterface:
       GenreReplacementRepositoryInterface:
       HistoryRepositoryInterface:
       BatchFileOperationRepositoryInterface:

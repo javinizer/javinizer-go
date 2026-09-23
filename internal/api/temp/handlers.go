@@ -40,18 +40,9 @@ func serveTempPoster(rt *core.APIRuntime) gin.HandlerFunc {
 		jobID := c.Param("jobId")
 		filename := c.Param("filename")
 
-		// Validate both jobID and filename to prevent path traversal attacks.
-		// Reject "."/".." and any path separators — filepath.Base("..") == "..",
-		// so the prior base-name check alone let jobID=".." resolve posters/..
-		// to the temp root and serve sibling files.
-		if !isSafePathSegment(jobID) || !isSafePathSegment(filename) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Not Found"})
-			return
-		}
-
 		// Validate filename has .jpg extension
 		if !strings.HasSuffix(strings.ToLower(filename), ".jpg") {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Not Found"})
+			c.JSON(http.StatusNotFound, gin.H{errorResponseKey: notFoundMessage})
 			return
 		}
 
@@ -66,15 +57,10 @@ func serveTempPoster(rt *core.APIRuntime) gin.HandlerFunc {
 			}
 		}
 
-		// Construct path and verify it's within tempPosterDir
-		tempPosterDir := filepath.Join(tempDir, "posters", jobID)
-		posterPath := filepath.Join(tempPosterDir, filename)
-
-		// Double-check the resolved path is still within tempPosterDir (defense in depth)
-		cleanPosterPath := filepath.Clean(posterPath)
-		cleanTempDir := filepath.Clean(tempPosterDir) + string(os.PathSeparator)
-		if !strings.HasPrefix(cleanPosterPath, cleanTempDir) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Not Found"})
+		posterRoot := filepath.Join(tempDir, "posters")
+		posterPath, ok := resolvePosterPath(posterRoot, jobID, filename)
+		if !ok {
+			c.JSON(http.StatusNotFound, gin.H{errorResponseKey: notFoundMessage})
 			return
 		}
 
@@ -83,7 +69,7 @@ func serveTempPoster(rt *core.APIRuntime) gin.HandlerFunc {
 		// identity headers can describe a different poster than the response body.
 		body, err := os.ReadFile(posterPath)
 		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Not Found"})
+			c.JSON(http.StatusNotFound, gin.H{errorResponseKey: notFoundMessage})
 			return
 		}
 		c.Header("Content-Type", "image/jpeg")
@@ -104,28 +90,21 @@ func serveCroppedPoster() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		filename := c.Param("filename")
 
-		// Validate filename to prevent path traversal attacks.
-		// Reject "."/".." and path separators in addition to requiring .jpg.
-		if !isSafePathSegment(filename) || !strings.HasSuffix(strings.ToLower(filename), ".jpg") {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Not Found"})
+		if !strings.HasSuffix(strings.ToLower(filename), ".jpg") {
+			c.JSON(http.StatusNotFound, gin.H{errorResponseKey: notFoundMessage})
 			return
 		}
 
-		// Construct path and verify it's within posterDir
 		posterDir := filepath.Join("data", "posters")
-		posterPath := filepath.Join(posterDir, filename)
-
-		// Double-check the resolved path is still within posterDir (defense in depth)
-		cleanPosterPath := filepath.Clean(posterPath)
-		cleanPosterDir := filepath.Clean(posterDir) + string(os.PathSeparator)
-		if !strings.HasPrefix(cleanPosterPath, cleanPosterDir) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Not Found"})
+		posterPath, ok := resolvePosterPath(posterDir, filename)
+		if !ok {
+			c.JSON(http.StatusNotFound, gin.H{errorResponseKey: notFoundMessage})
 			return
 		}
 
 		// Check if file exists and is accessible before serving
 		if _, err := os.Stat(posterPath); err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Not Found"})
+			c.JSON(http.StatusNotFound, gin.H{errorResponseKey: notFoundMessage})
 			return
 		}
 
@@ -156,13 +135,13 @@ func serveTempImage(rt *core.APIRuntime) gin.HandlerFunc {
 
 		rawURL := strings.TrimSpace(c.Query("url"))
 		if rawURL == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "url query parameter is required"})
+			c.JSON(http.StatusBadRequest, gin.H{errorResponseKey: "url query parameter is required"})
 			return
 		}
 
 		parsedURL, err := url.Parse(rawURL)
 		if err != nil || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") || parsedURL.Host == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid image url"})
+			c.JSON(http.StatusBadRequest, gin.H{errorResponseKey: "invalid image url"})
 			return
 		}
 
@@ -209,7 +188,7 @@ func serveTempImage(rt *core.APIRuntime) gin.HandlerFunc {
 			if staleFile != nil && serveStaleFile(c, staleFile, staleCT) {
 				return
 			}
-			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			c.JSON(http.StatusForbidden, gin.H{errorResponseKey: err.Error()})
 			return
 		}
 
@@ -246,11 +225,11 @@ func serveTempImage(rt *core.APIRuntime) gin.HandlerFunc {
 			}
 			if result.persistFailed {
 				logging.Warnf("image cache: persist failed for %s: %v", redactImageURL(normalizedURL), result.err)
-				c.JSON(http.StatusBadGateway, gin.H{"error": "failed to fetch image"})
+				c.JSON(http.StatusBadGateway, gin.H{errorResponseKey: "failed to fetch image"})
 				return
 			}
 			logging.Warnf("image cache: fetch failed for %s: %v", redactImageURL(normalizedURL), result.err)
-			c.JSON(http.StatusBadGateway, gin.H{"error": "failed to fetch image"})
+			c.JSON(http.StatusBadGateway, gin.H{errorResponseKey: "failed to fetch image"})
 			return
 		}
 
@@ -260,7 +239,7 @@ func serveTempImage(rt *core.APIRuntime) gin.HandlerFunc {
 			c.Header("X-Content-Type-Options", "nosniff")
 			cachedFile, openErr := fs.Open(result.cachedPath)
 			if openErr != nil {
-				c.JSON(http.StatusBadGateway, gin.H{"error": "failed to open cached image"})
+				c.JSON(http.StatusBadGateway, gin.H{errorResponseKey: "failed to open cached image"})
 				return
 			}
 			body, rerr := io.ReadAll(cachedFile)
@@ -309,7 +288,7 @@ func writeImageBody(c *gin.Context, body []byte) {
 
 func serveTempImageUncached(c *gin.Context, tempCfg *core.TempNarrowConfig, downloadURL, rawURL string) {
 	if err := ssrf.CheckURL(rawURL); err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		c.JSON(http.StatusForbidden, gin.H{errorResponseKey: err.Error()})
 		return
 	}
 
@@ -317,7 +296,7 @@ func serveTempImageUncached(c *gin.Context, tempCfg *core.TempNarrowConfig, down
 
 	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, downloadURL, nil)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to create request"})
+		c.JSON(http.StatusBadRequest, gin.H{errorResponseKey: "failed to create request"})
 		return
 	}
 
@@ -333,7 +312,7 @@ func serveTempImageUncached(c *gin.Context, tempCfg *core.TempNarrowConfig, down
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to fetch image"})
+		c.JSON(http.StatusBadGateway, gin.H{errorResponseKey: "failed to fetch image"})
 		return
 	}
 	defer func() {
@@ -341,7 +320,7 @@ func serveTempImageUncached(c *gin.Context, tempCfg *core.TempNarrowConfig, down
 	}()
 
 	if resp.StatusCode != http.StatusOK {
-		c.JSON(http.StatusBadGateway, gin.H{"error": "image source returned non-200 status"})
+		c.JSON(http.StatusBadGateway, gin.H{errorResponseKey: "image source returned non-200 status"})
 		return
 	}
 
@@ -375,6 +354,23 @@ func resolveTempImageReferer(downloadURL, configuredReferer string) string {
 // not "." or "..", and containing no path separators (os.PathSeparator or '/').
 // filepath.Base alone is insufficient because filepath.Base("..") == "..",
 // which would let a jobID/filename of ".." escape its intended directory.
+func resolvePosterPath(dir string, segments ...string) (string, bool) {
+	for _, segment := range segments {
+		if !isSafePathSegment(segment) {
+			return "", false
+		}
+	}
+	parts := append([]string{dir}, segments...)
+	path := filepath.Join(parts...)
+	return path, pathWithinDir(dir, path)
+}
+
+func pathWithinDir(dir, path string) bool {
+	cleanPath := filepath.Clean(path)
+	cleanDir := filepath.Clean(dir) + string(os.PathSeparator)
+	return strings.HasPrefix(cleanPath, cleanDir)
+}
+
 func isSafePathSegment(s string) bool {
 	if s == "" || s == "." || s == ".." {
 		return false

@@ -84,7 +84,7 @@ func createWordReplacement(deps GenreDeps, invalidate invalidateCaches) gin.Hand
 		req.Replacement = strings.TrimSpace(req.Replacement)
 
 		if req.Original == "" {
-			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "original is required"})
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: originalRequiredMessage})
 			return
 		}
 
@@ -134,7 +134,7 @@ func updateWordReplacement(deps GenreDeps, invalidate invalidateCaches) gin.Hand
 		req.Replacement = strings.TrimSpace(req.Replacement)
 
 		if req.Original == "" {
-			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "original is required"})
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: originalRequiredMessage})
 			return
 		}
 
@@ -177,7 +177,7 @@ func updateWordReplacement(deps GenreDeps, invalidate invalidateCaches) gin.Hand
 func deleteWordReplacement(deps GenreDeps, invalidate invalidateCaches) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		idStr := c.Query("id")
-		original := strings.TrimSpace(c.Query("original"))
+		original := strings.TrimSpace(c.Query(originalKey))
 
 		if idStr != "" {
 			id, err := strconv.ParseUint(idStr, 10, 64)
@@ -203,7 +203,7 @@ func deleteWordReplacement(deps GenreDeps, invalidate invalidateCaches) gin.Hand
 
 			invalidate()
 
-			c.JSON(http.StatusOK, gin.H{"message": "word replacement deleted", "original": replacement.Original})
+			c.JSON(http.StatusOK, gin.H{messageResponseKey: "word replacement deleted", originalKey: replacement.Original})
 			return
 		}
 
@@ -225,7 +225,7 @@ func deleteWordReplacement(deps GenreDeps, invalidate invalidateCaches) gin.Hand
 
 			invalidate()
 
-			c.JSON(http.StatusOK, gin.H{"message": "word replacement deleted", "original": existing.Original})
+			c.JSON(http.StatusOK, gin.H{messageResponseKey: "word replacement deleted", originalKey: existing.Original})
 			return
 		}
 

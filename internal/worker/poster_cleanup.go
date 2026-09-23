@@ -39,8 +39,8 @@ func CleanupPosterPaths(fs afero.Fs, paths []string) {
 func CleanupMoviePosters(fs afero.Fs, tempDir string, jobID models.JobID, movie *models.Movie) {
 	if movie != nil && movie.ID != "" {
 		CleanupPosterPaths(fs, []string{
-			filepath.Join(tempDir, "posters", jobID.String(), movie.ID+".jpg"),
-			filepath.Join(tempDir, "posters", jobID.String(), movie.ID+"-full.jpg"),
+			filepath.Join(tempDir, "posters", jobID.String(), movie.ID+jpgExtension),
+			filepath.Join(tempDir, "posters", jobID.String(), movie.ID+fullImageSuffix),
 		})
 	}
 }
@@ -103,10 +103,10 @@ type commitMeta struct {
 // the durable row stands; startup simply keeps the backup instead of dropping.
 func writeCommitToken(fs afero.Fs, commitPath, id string, genSHA map[string]string) error {
 	meta := commitMeta{PosterID: id}
-	if sha, ok := genSHA[id+"-full.jpg"]; ok {
+	if sha, ok := genSHA[id+fullImageSuffix]; ok {
 		meta.FullSHA = sha
 	}
-	if sha, ok := genSHA[id+".jpg"]; ok {
+	if sha, ok := genSHA[id+jpgExtension]; ok {
 		meta.CropSHA = sha
 	}
 	// static lap — Marshal of this struct cannot fail; no error arm needed.
@@ -135,8 +135,8 @@ func parkCanonicalPosterPair(fs afero.Fs, dir, id string, prevRev uint64) *rescr
 		logging.Warnf("rescrape pair backup skipped: unsafe poster ID %q", id)
 		return b
 	}
-	b.full = filepath.Join(dir, id+"-full.jpg")
-	b.crop = filepath.Join(dir, id+".jpg")
+	b.full = filepath.Join(dir, id+fullImageSuffix)
+	b.crop = filepath.Join(dir, id+jpgExtension)
 	nonce := fmt.Sprintf("%x.%x", time.Now().UnixNano(), rescrapeBackupSeq.Add(1))
 	b.fullBak = b.full + ".rsbak." + nonce
 	b.cropBak = b.crop + ".rsbak." + nonce
@@ -301,7 +301,7 @@ func (b *rescrapePosterBackup) discard() {
 	// vetting binds it to this sentinel's baseline, so marker and token sweep
 	// (or persist) together. Rival pending legs or an unreadable dir keep both.
 	dir := filepath.Dir(b.commitPath)
-	baseID := strings.TrimSuffix(filepath.Base(b.crop), ".jpg")
+	baseID := strings.TrimSuffix(filepath.Base(b.crop), jpgExtension)
 	keep := false
 	if entries, rerr := afero.ReadDir(b.fs, dir); rerr != nil {
 		logging.Warnf("rival backup scan %s unreadable (%v) — commit token AND marker retained", dir, rerr)
@@ -313,7 +313,7 @@ func (b *rescrapePosterBackup) discard() {
 				continue
 			}
 			cb := name[:strings.LastIndex(name, ".rsbak.")]
-			bb := strings.TrimSuffix(strings.TrimSuffix(cb, "-full.jpg"), ".jpg")
+			bb := strings.TrimSuffix(strings.TrimSuffix(cb, fullImageSuffix), jpgExtension)
 			if strings.EqualFold(bb, baseID) && !strings.HasSuffix(name, "."+b.nonce) {
 				keep = true
 				break
@@ -352,8 +352,8 @@ func OrphanedPosterPaths(orphanedIDs []string, newMovieID string, tempDir string
 			logging.Infof("[Rescrape] Case change detected (%s → %s) on case-sensitive filesystem, cleaning up poster", id, newMovieID)
 		}
 		paths = append(paths,
-			filepath.Join(tempDir, "posters", jobID.String(), id+".jpg"),
-			filepath.Join(tempDir, "posters", jobID.String(), id+"-full.jpg"),
+			filepath.Join(tempDir, "posters", jobID.String(), id+jpgExtension),
+			filepath.Join(tempDir, "posters", jobID.String(), id+fullImageSuffix),
 		)
 	}
 	return paths

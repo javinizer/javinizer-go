@@ -25,6 +25,9 @@ type ActressView struct {
 	JapaneseName string                   `json:"japanese_name"`
 	ThumbURL     string                   `json:"thumb_url"`
 	Aliases      string                   `json:"aliases"`
+	Verified     bool                     `json:"verified"`
+	Origin       string                   `json:"origin"`
+	NameKey      string                   `json:"name_key"`
 	Translations []ActressTranslationView `json:"translations,omitempty"`
 	CreatedAt    time.Time                `json:"created_at"`
 	UpdatedAt    time.Time                `json:"updated_at"`
@@ -95,6 +98,9 @@ func ActressViewFromModel(a *models.Actress) *ActressView {
 		JapaneseName: a.JapaneseName,
 		ThumbURL:     a.ThumbURL,
 		Aliases:      a.Aliases,
+		Verified:     a.Verified,
+		Origin:       a.Origin,
+		NameKey:      a.NameKey,
 		Translations: ActressTranslationViewSliceFromModels(a.Translations),
 		CreatedAt:    a.CreatedAt,
 		UpdatedAt:    a.UpdatedAt,

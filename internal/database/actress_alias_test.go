@@ -50,16 +50,15 @@ func TestActressAliasRepository(t *testing.T) {
 		require.NoError(t, err)
 		originalID := alias.ID
 
-		// Second upsert (update)
-		alias.CanonicalName = "Tsubasa Amami (Updated)"
-		err = repo.Upsert(context.TODO(), alias)
-		require.NoError(t, err)
-		assert.Equal(t, originalID, alias.ID, "ID should remain the same")
+		// A different owner cannot replace an existing normalized claim.
+		conflict := &models.ActressAlias{AliasName: alias.AliasName, CanonicalName: "Tsubasa Amami (Updated)"}
+		err = repo.Upsert(context.TODO(), conflict)
+		require.ErrorIs(t, err, ErrActressAliasOwnershipConflict)
+		assert.Equal(t, originalID, alias.ID)
 
-		// Verify update
 		found, err := repo.FindByAliasName(context.TODO(), "Tsubasa Amami")
 		require.NoError(t, err)
-		assert.Equal(t, "Tsubasa Amami (Updated)", found.CanonicalName)
+		assert.Equal(t, "Amami Tsubasa", found.CanonicalName)
 	})
 
 	t.Run("FindByCanonicalName", func(t *testing.T) {
@@ -87,8 +86,8 @@ func TestActressAliasRepository(t *testing.T) {
 
 		// Should contain all aliases created in previous tests
 		assert.GreaterOrEqual(t, len(aliasMap), 3)
-		assert.Equal(t, "Hatano Yui", aliasMap["Yui Hatano"])
-		assert.Equal(t, "Amamiya Jun", aliasMap["Jun Amamiya"])
+		assert.Equal(t, "Hatano Yui", aliasMap["yui hatano"])
+		assert.Equal(t, "Amamiya Jun", aliasMap["jun amamiya"])
 	})
 
 	t.Run("Delete", func(t *testing.T) {

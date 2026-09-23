@@ -21,6 +21,7 @@ const (
 )
 
 var (
+	osOpenFileFunc = os.OpenFile
 	osRemoveFunc   = os.Remove
 	osReadFileFunc = os.ReadFile
 
@@ -163,9 +164,11 @@ func acquireConfigFileLock(path string) (func(), error) {
 	lockPath := path + ".lock"
 	deadline := time.Now().Add(configLockTimeout)
 	token := makeConfigLockToken()
+	observedContention := false
+	transientOpenFailures := 0
 
 	for {
-		lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+		lockFile, err := osOpenFileFunc(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 		if err == nil {
 			if _, writeErr := lockFile.WriteString(token); writeErr != nil {
 				_ = lockFile.Close()
@@ -191,8 +194,20 @@ func acquireConfigFileLock(path string) (func(), error) {
 		}
 
 		if !os.IsExist(err) {
+			// Windows can briefly report access denied while a previously observed
+			// lock is delete-pending. Retry only that proven contention transition,
+			// and bound retries so a genuine permission failure is still returned.
+			if lockRetryEnabled && observedContention && os.IsPermission(err) {
+				transientOpenFailures++
+				if transientOpenFailures < lockRetryAttempts {
+					time.Sleep(configLockWaitInterval)
+					continue
+				}
+			}
 			return nil, fmt.Errorf("failed to acquire config lock: %w", err)
 		}
+		observedContention = true
+		transientOpenFailures = 0
 
 		lockContent, readErr := os.ReadFile(lockPath)
 		if readErr == nil {

@@ -220,7 +220,7 @@ func (s *ScrapersConfig) UnmarshalYAML(node *yaml.Node) error {
 				return fmt.Errorf("request_timeout_seconds must be an integer: %w", err)
 			}
 			s.RequestTimeoutSeconds = v
-		case "priority":
+		case priorityKey:
 			if valNode.Kind == yaml.ScalarNode && valNode.Value == "" {
 				s.Priority = nil
 				continue

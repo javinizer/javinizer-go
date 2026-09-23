@@ -663,52 +663,78 @@ func (d *Downloader) downloadTrailer(ctx context.Context, movie *models.Movie, d
 
 func (d *Downloader) downloadActressImages(ctx context.Context, movie *models.Movie, destDir string, options ...any) ([]DownloadResult, error) {
 	overwriteExisting, dedup := resolveDownloadOptions(options)
-	if !d.config.DownloadActress || len(movie.Actresses) == 0 {
+	if !d.config.DownloadActress {
+		return []DownloadResult{}, nil
+	}
+
+	type imageCredit struct {
+		actress models.Actress
+		name    string
+		movie   *models.Movie
+	}
+	credits := make([]imageCredit, 0)
+	if len(movie.Credits) > 0 {
+		for i := range movie.Credits {
+			credit := movie.Credits[i]
+			if credit.Suppressed || credit.Actress == nil || !credit.Actress.Verified {
+				continue
+			}
+			canonical := models.FormatActressName(*credit.Actress, models.FormatActressNameOptions{
+				JapaneseNames: d.config.ActorJapaneseNames, FirstNameOrder: d.config.ActorFirstNameOrder,
+				UnknownActress: d.config.UnknownActressText, UnknownActressMode: d.config.UnknownActressMode,
+			})
+			name := credit.RenderName(d.config.UseCreditedName, canonical)
+			if name == "" {
+				continue
+			}
+			creditMovie := movie.Clone()
+			creditMovie.Credits = []models.MovieCredit{creditMovie.Credits[i]}
+			creditMovie.Actresses = []models.Actress{*creditMovie.Credits[0].Actress}
+			credits = append(credits, imageCredit{actress: *credit.Actress, name: name, movie: creditMovie})
+		}
+	} else {
+		for i := range movie.Actresses {
+			actress := movie.Actresses[i]
+			name := models.FormatActressName(actress, models.FormatActressNameOptions{
+				JapaneseNames: d.config.ActorJapaneseNames, FirstNameOrder: d.config.ActorFirstNameOrder,
+				UnknownActress: d.config.UnknownActressText, UnknownActressMode: d.config.UnknownActressMode,
+			})
+			if name == "" {
+				continue
+			}
+			legacyMovie := movie.Clone()
+			legacyMovie.Actresses = []models.Actress{actress}
+			credits = append(credits, imageCredit{actress: actress, name: name, movie: legacyMovie})
+		}
+	}
+	if len(credits) == 0 {
 		return []DownloadResult{}, nil
 	}
 
 	actressDir := filepath.Join(destDir, d.config.ActressFolder)
-	results := make([]DownloadResult, 0)
-
-	for _, actress := range movie.Actresses {
+	results := make([]DownloadResult, 0, len(credits))
+	for _, image := range credits {
 		select {
 		case <-ctx.Done():
 			return results, ctx.Err()
 		default:
 		}
-
-		if actress.ThumbURL == "" {
+		if image.actress.ThumbURL == "" {
 			continue
 		}
-
-		formattedName := models.FormatActressName(actress, models.FormatActressNameOptions{
-			JapaneseNames:      d.config.ActorJapaneseNames,
-			FirstNameOrder:     d.config.ActorFirstNameOrder,
-			UnknownActress:     d.config.UnknownActressText,
-			UnknownActressMode: d.config.UnknownActressMode,
-		})
-		if formattedName == "" {
-			continue
-		}
-
-		actressMovie := &models.Movie{ID: movie.ID}
-		filename := d.generateActressFilename(actressMovie, formattedName, d.config.ActressFormat)
+		filename := d.generateActressFilename(image.movie, image.name, d.config.ActressFormat)
 		if filename == "" {
-			name := template.SanitizeFilename(formattedName)
-			filename = fmt.Sprintf("%s.jpg", name)
+			filename = fmt.Sprintf("%s.jpg", template.SanitizeFilename(image.name))
 		}
 		destPath := filepath.Join(actressDir, filename)
-
-		result, err := d.download(ctx, actress.ThumbURL, destPath, MediaTypeActress, overwriteExisting, dedup, resolveDownloadLedger(options))
+		result, err := d.download(ctx, image.actress.ThumbURL, destPath, MediaTypeActress, overwriteExisting, dedup, resolveDownloadLedger(options))
 		if err != nil {
 			result.Error = err
 		}
 		results = append(results, *result)
 	}
-
 	return results, nil
 }
-
 func (d *Downloader) downloadAllWithExtrafanart(ctx context.Context, movie *models.Movie, destDir string, multipart *MultipartInfo, extrafanartEnabled bool, options ...any) ([]DownloadResult, error) {
 	overwriteExisting, dedup := resolveDownloadOptions(options)
 	results := make([]DownloadResult, 0)

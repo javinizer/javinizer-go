@@ -254,7 +254,10 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 	// state IS the journal. Restored destinations are structurally excluded
 	// from the generated-file Delete list. Order rejections are tagged
 	// retryable for this run's fixpoint.
-	restored, rejErr := r.restoreReplacementJournal(ctx, op)
+	primaryReplacement := op.OperationType == models.OperationTypeMove && replacementJournalContainsDestination(op, op.NewPath)
+	restored, rejErr := r.restoreReplacementJournalWhere(ctx, op, func(destination string) bool {
+		return !primaryReplacement || filepath.Clean(destination) != filepath.Clean(op.NewPath)
+	})
 	if rejErr != nil {
 		logging.Warnf("Replacement journal restore refused/failed for op %d: %v", op.ID, rejErr)
 		return rejectedRevert(op, rejErr).withRetryable(rejErr), nil
@@ -282,6 +285,24 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 	// subtitle/NFO/download behind an anchor_missing skip. Those rows run
 	// cleanup independently of the primary anchor below.
 	if op.OperationType == models.OperationTypeMove || isUpdate {
+		if primaryReplacement {
+			if _, statErr := r.fs.Stat(op.NewPath); os.IsNotExist(statErr) {
+				primaryRestored, restoreErr := r.restoreReplacementJournalWhere(ctx, op, func(destination string) bool {
+					return filepath.Clean(destination) == filepath.Clean(op.NewPath)
+				})
+				if restoreErr != nil {
+					return rejectedRevert(op, restoreErr).withRetryable(restoreErr), nil
+				}
+				for path := range primaryRestored {
+					restored[path] = true
+				}
+				if err := r.batchFileOpRepo.UpdateRevertStatus(ctx, op.ID, models.RevertStatusReverted); err != nil {
+					return nil, fmt.Errorf("prior destination restored but failed to persist revert status for op %d: %w", op.ID, err)
+				}
+				op.RevertStatus = models.RevertStatusReverted
+				return &RevertFileResult{OperationID: op.ID, MovieID: op.MovieID, OriginalPath: op.OriginalPath, NewPath: op.NewPath, Outcome: models.RevertOutcomeReverted, Error: "installed primary was missing; prior destination restored, source could not be reconstructed"}, nil
+			}
+		}
 		if result, err := r.checkAnchor(ctx, op); result != nil || err != nil {
 			return result, err
 		}
@@ -293,6 +314,17 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 	case models.OperationTypeMove:
 		if result, err := r.fsReverter.revertPrimaryFile(ctx, op); result != nil || err != nil {
 			return result, err
+		}
+		if primaryReplacement {
+			primaryRestored, restoreErr := r.restoreReplacementJournalWhere(ctx, op, func(destination string) bool {
+				return filepath.Clean(destination) == filepath.Clean(op.NewPath)
+			})
+			if restoreErr != nil {
+				return rejectedRevert(op, restoreErr).withRetryable(restoreErr), nil
+			}
+			for path := range primaryRestored {
+				restored[path] = true
+			}
 		}
 		destRoot := filepath.Dir(filepath.Dir(op.NewPath))
 		r.fsReverter.cleanupGeneratedFiles(op, destRoot)

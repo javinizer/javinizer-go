@@ -25,6 +25,15 @@ func (ru *resultUpdater) UpdateFileResult(filePath string, result *MovieResult) 
 	ru.updateFileResultLocked(filePath, result)
 }
 
+// MarkPersistedMovie records repository provenance without publishing a result or advancing its revision.
+func (ru *resultUpdater) MarkPersistedMovie(filePath, resultID string, revision uint64) {
+	ru.mu.Lock()
+	defer ru.mu.Unlock()
+	if current := ru.Results[filePath]; current != nil && current.ResultID == resultID && current.Revision == revision {
+		current.PersistedMovie = true
+	}
+}
+
 // UpsertFileResultWithProvenance publishes a result and its provenance under
 // one lock acquisition. It is the missing-row fallback for callers whose
 // normal atomic read-modify-write requires an existing result.

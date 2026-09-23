@@ -40,7 +40,7 @@ func newSettingsManager(deps settingsManagerDeps, extrafanartCfg bool, moveFiles
 			MoveFiles:           moveFilesCfg,
 		},
 		cursor:   0,
-		language: "auto",
+		language: autoSettingValue,
 		deps:     deps,
 	}
 }
@@ -66,8 +66,8 @@ func (sm *settingsManager) languageValue() string {
 // startup or after a live change).
 func (sm *settingsManager) setLanguage(lang string) {
 	lang = strings.TrimSpace(lang)
-	if lang == "" || strings.EqualFold(lang, "auto") {
-		lang = "auto"
+	if lang == "" || strings.EqualFold(lang, autoSettingValue) {
+		lang = autoSettingValue
 	}
 	sm.language = lang
 }

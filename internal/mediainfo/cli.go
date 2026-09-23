@@ -61,7 +61,7 @@ func (p *cliProber) Name() string {
 }
 
 // canProbe checks if this prober can handle the file based on header
-func (p *cliProber) canProbe(header []byte) bool {
+func (p *cliProber) canProbe(_ []byte) bool {
 	// CLI can probe anything if enabled
 	return p.enabled
 }

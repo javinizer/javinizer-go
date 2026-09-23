@@ -19,6 +19,8 @@ type Config struct {
 	UserAgent               string
 	Referer                 string
 	TempDir                 string
+	CollisionPolicy         string
+	TrustedCollisionSources []string
 }
 
 // Translator is the interface for applying metadata translation to a scraped Movie.
@@ -100,21 +102,24 @@ func (a *translationAdapter) Translate(ctx context.Context, movie *models.Movie)
 //
 // Config-bridge reads: cfg.Scrapers.Priority, cfg.Metadata.Translation.Enabled,
 // cfg.Metadata.Translation.TargetLanguage, cfg.Metadata.Translation.SettingsHash(),
-// cfg.Metadata.ActressDatabase.Enabled, cfg.Scrapers.ScrapeActress,
+// cfg.Metadata.ActressDatabase.Enabled, cfg.Metadata.ActressDatabase.CollisionPolicy,
+// cfg.Metadata.ActressDatabase.TrustedCollisionSources, cfg.Scrapers.ScrapeActress,
 // cfg.Scrapers.UserAgent, cfg.Scrapers.Referer, cfg.System.TempDir
 func ConfigFromAppConfig(cfg *config.Config) *Config {
 	if cfg == nil {
 		return nil
 	}
 	c := &Config{
-		ScrapersPriority:      cfg.Scrapers.Priority,
-		TranslationEnabled:    cfg.Metadata.Translation.Enabled,
-		TranslationTargetLang: cfg.Metadata.Translation.TargetLanguage,
-		ActressDBEnabled:      cfg.Metadata.ActressDatabase.Enabled,
-		ScrapeActress:         cfg.Scrapers.ScrapeActress,
-		UserAgent:             cfg.Scrapers.UserAgent,
-		Referer:               cfg.Scrapers.Referer,
-		TempDir:               cfg.System.TempDir,
+		ScrapersPriority:        cfg.Scrapers.Priority,
+		TranslationEnabled:      cfg.Metadata.Translation.Enabled,
+		TranslationTargetLang:   cfg.Metadata.Translation.TargetLanguage,
+		ActressDBEnabled:        cfg.Metadata.ActressDatabase.Enabled,
+		ScrapeActress:           cfg.Scrapers.ScrapeActress,
+		UserAgent:               cfg.Scrapers.UserAgent,
+		Referer:                 cfg.Scrapers.Referer,
+		TempDir:                 cfg.System.TempDir,
+		CollisionPolicy:         cfg.Metadata.ActressDatabase.CollisionPolicy,
+		TrustedCollisionSources: cfg.Metadata.ActressDatabase.TrustedCollisionSources,
 	}
 	if c.TranslationEnabled {
 		c.TranslationSettingsHash = cfg.Metadata.Translation.SettingsHash()

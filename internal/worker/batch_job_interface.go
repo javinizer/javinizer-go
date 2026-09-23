@@ -15,11 +15,15 @@ import (
 
 // ApplyFileContext provides per-file context to PreApply/PostApply hooks.
 type ApplyFileContext struct {
-	FilePath    string
-	Movie       *models.Movie
-	MovieResult *resultstore.MovieResult
-	Match       models.FileMatchInfo
-	Destination string
+	FilePath              string
+	Movie                 *models.Movie
+	MovieResult           *resultstore.MovieResult
+	reviewBaseline        *models.Movie
+	PublicationGeneration int64
+	// PersistedMovie means apply observed the row before publication, not merely a ContentID.
+	PersistedMovie bool
+	Match          models.FileMatchInfo
+	Destination    string
 }
 
 // ApplyFileResult captures the outcome of applying to a single file.
@@ -597,11 +601,19 @@ type controlledJobAdapter struct {
 // Per DEEP-1: PhaseController now includes mutation methods (SetWorkflow,
 // SetBatchCfg, SetJobStatus, etc.) that were previously on BatchJob.
 type batchJobAdapter struct {
+	results resultstore.Store
 	JobReader
 	resultstore.MovieLookup
 	PhaseController
 	JobCanceller
 	JobEditor
+}
+
+// MarkPersistedMovie records a successful repository read on the unchanged live result.
+func (a *batchJobAdapter) MarkPersistedMovie(filePath, resultID string, revision uint64) {
+	if marker, ok := a.results.(interface{ MarkPersistedMovie(string, string, uint64) }); ok {
+		marker.MarkPersistedMovie(filePath, resultID, revision)
+	}
 }
 
 // standaloneJobAdapter satisfies StandaloneJob by composing ControlledJob

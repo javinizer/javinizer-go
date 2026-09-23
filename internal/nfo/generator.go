@@ -181,16 +181,7 @@ func (g *Generator) Generate(ctx context.Context, movie *models.Movie, outputPat
 	// Compute the NFO filename using the same logic as ResolveNFOFilename,
 	// but fail on template errors (Generate is the write path — broken templates
 	// should be reported, not silently fallen back).
-	tmplCtx := template.NewContextFromMovieWithOptions(movie, template.ContextOptions{
-		FirstNameOrder: g.config.FirstNameOrder,
-	})
-	tmplCtx.GroupActress = g.config.GroupActress
-	tmplCtx.GroupActressMin = g.config.GroupActressMin
-	tmplCtx.GroupActressName = g.config.GroupActressName
-	tmplCtx.GroupUnknownActressName = g.config.GroupUnknownActressName
-	tmplCtx.UnknownActressMode = g.config.UnknownActressMode
-	tmplCtx.ActressLanguageJa = g.config.ActressLanguageJA
-	tmplCtx.ActressDelimiter = g.config.ActressDelimiter
+	tmplCtx := newNFOFilenameContext(movie, g.config.ToNFONameConfig(false, "", 0))
 	filename, err := g.templateEngine.Execute(g.config.FilenameTemplate, tmplCtx)
 	if err != nil {
 		return fmt.Errorf("failed to generate NFO filename: %w", err)
@@ -268,12 +259,7 @@ func (g *Generator) generateAtPath(ctx context.Context, movie *models.Movie, nfo
 func (g *Generator) ResolveAndGenerate(ctx context.Context, movie *models.Movie, destDir string, nameCfg NFONameConfig, videoFilePath string, tags []string) (string, error) {
 	// Validate the template before resolving the filename — broken templates
 	// must skip NFO generation rather than silently falling back to movie.ID.nfo.
-	tmplCtx := template.NewContextFromMovieWithOptions(movie, template.ContextOptions{
-		FirstNameOrder: nameCfg.FirstNameOrder,
-	})
-	tmplCtx.GroupActress = nameCfg.GroupActress
-	tmplCtx.GroupActressMin = nameCfg.GroupActressMin
-	tmplCtx.GroupActressName = nameCfg.GroupActressName
+	tmplCtx := newNFOFilenameContext(movie, nameCfg)
 	if _, tmplErr := g.templateEngine.Execute(nameCfg.FilenameTemplate, tmplCtx); tmplErr != nil {
 		return "", nil //nolint:nilerr // intentional: broken templates skip NFO generation, not an error
 	}
@@ -448,6 +434,22 @@ func (g *Generator) extractStreamDetails(ctx context.Context, videoFilePath stri
 	return details
 }
 
+func newNFOFilenameContext(movie *models.Movie, cfg NFONameConfig) *template.Context {
+	ctx := template.NewContextFromMovieWithOptions(movie, template.ContextOptions{
+		FirstNameOrder:  cfg.FirstNameOrder,
+		RenderCredits:   true,
+		UseCreditedName: cfg.UseCreditedName,
+	})
+	ctx.GroupActress = cfg.GroupActress
+	ctx.GroupActressMin = cfg.GroupActressMin
+	ctx.GroupActressName = cfg.GroupActressName
+	ctx.GroupUnknownActressName = cfg.GroupUnknownActressName
+	ctx.UnknownActressMode = cfg.UnknownActressMode
+	ctx.ActressLanguageJa = cfg.ActressLanguageJA
+	ctx.ActressDelimiter = cfg.ActressDelimiter
+	return ctx
+}
+
 // ResolveNFOFilename computes the NFO filename for a movie using the same logic
 // as Generate, without writing the file. On template execution error, falls back
 // to movie.ID.nfo (unlike Generate, which returns the error). This ensures that
@@ -458,16 +460,7 @@ func ResolveNFOFilename(engine template.EngineInterface, movie *models.Movie, cf
 	if engine == nil {
 		engine = template.NewEngine()
 	}
-	tmplCtx := template.NewContextFromMovieWithOptions(movie, template.ContextOptions{
-		FirstNameOrder: cfg.FirstNameOrder,
-	})
-	tmplCtx.GroupActress = cfg.GroupActress
-	tmplCtx.GroupActressMin = cfg.GroupActressMin
-	tmplCtx.GroupActressName = cfg.GroupActressName
-	tmplCtx.GroupUnknownActressName = cfg.GroupUnknownActressName
-	tmplCtx.UnknownActressMode = cfg.UnknownActressMode
-	tmplCtx.ActressLanguageJa = cfg.ActressLanguageJA
-	tmplCtx.ActressDelimiter = cfg.ActressDelimiter
+	tmplCtx := newNFOFilenameContext(movie, cfg)
 	filename, err := engine.Execute(cfg.FilenameTemplate, tmplCtx)
 	if err != nil {
 		sanitized := template.SanitizeFilename(movie.ID)

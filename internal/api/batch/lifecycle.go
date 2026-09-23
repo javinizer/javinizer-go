@@ -128,20 +128,84 @@ func getBatchJob(rt *core.APIRuntime) gin.HandlerFunc {
 func getBatchJobFull(deps *core.APIDeps, c *gin.Context, jobID string) {
 	job, ok := deps.GetJobStore().GetJob(jobID)
 	if !ok {
-		c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "Job not found", Code: "JOB_NOT_FOUND", Params: map[string]any{"job_id": jobID}})
+		c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: jobNotFoundMessage, Code: jobNotFoundCode, Params: map[string]any{jobIDKey: jobID}})
 		return
 	}
 
 	logging.Debugf("[GET /batch/%s] Returning full job with %d results, completed=%d, failed=%d",
 		jobID, len(job.Results), job.Completed, job.Failed)
 
+	if err := refreshBatchJobMovies(c, deps, job); err != nil {
+		c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: fmt.Sprintf("failed to refresh batch movie projections: %v", err)})
+		return
+	}
 	c.JSON(http.StatusOK, buildBatchJobResponse(job))
+}
+
+func refreshBatchJobMovies(c *gin.Context, deps *core.APIDeps, job *worker.BatchJobStatus) error {
+	if deps == nil || deps.Repos.MovieProjectionRepo == nil || job == nil {
+		return nil
+	}
+	contentIDs := make([]string, 0, len(job.Results)*2)
+	canonicalIDs := make([]string, 0, len(job.Results)*2)
+	for _, result := range job.Results {
+		if result == nil || result.Movie == nil {
+			continue
+		}
+		resultContentIDs, resultCanonicalIDs := movieProjectionLookupIDs(result.Movie, result.FileMatchInfo.MovieID)
+		contentIDs = append(contentIDs, resultContentIDs...)
+		canonicalIDs = append(canonicalIDs, resultCanonicalIDs...)
+	}
+	projection, err := deps.Repos.MovieProjectionRepo.FindAuthoritativeProjections(c.Request.Context(), contentIDs, canonicalIDs)
+	if err != nil {
+		return err
+	}
+	type refreshedResult struct {
+		filePath string
+		result   *resultstore.MovieResult
+	}
+	refreshed := make([]refreshedResult, 0, len(job.Results))
+	for filePath, result := range job.Results {
+		if result == nil || result.Movie == nil {
+			continue
+		}
+		current := findAuthoritativeMovieProjection(projection, result.Movie, result.FileMatchInfo.MovieID)
+		if current == nil {
+			continue
+		}
+		copyResult := *result
+		copyMovie := result.Movie.Clone()
+		authority := current.Clone()
+		copyMovie.Actresses = authority.Actresses
+		copyMovie.Credits = authority.Credits
+		copyMovie.UpdatedAt = authority.UpdatedAt
+		copyResult.Movie = copyMovie
+		refreshed = append(refreshed, refreshedResult{filePath: filePath, result: &copyResult})
+	}
+	if len(refreshed) == 0 {
+		return nil
+	}
+	live, ok := deps.GetJobStore().GetBatchJob(string(job.ID))
+	if !ok {
+		return fmt.Errorf("job %s vanished during authoritative movie refresh", job.ID)
+	}
+	marker, ok := live.(interface{ MarkPersistedMovie(string, string, uint64) })
+	if !ok {
+		return fmt.Errorf("job %s cannot record authoritative movie refresh", job.ID)
+	}
+	for _, item := range refreshed {
+		marker.MarkPersistedMovie(item.filePath, item.result.ResultID, item.result.Revision)
+	}
+	for _, item := range refreshed {
+		job.Results[item.filePath] = item.result
+	}
+	return nil
 }
 
 func getBatchJobSlim(deps *core.APIDeps, c *gin.Context, jobID string) {
 	status, ok := deps.GetJobStore().GetJob(jobID)
 	if !ok {
-		c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "Job not found", Code: "JOB_NOT_FOUND", Params: map[string]any{"job_id": jobID}})
+		c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: jobNotFoundMessage, Code: jobNotFoundCode, Params: map[string]any{jobIDKey: jobID}})
 		return
 	}
 
@@ -197,7 +261,7 @@ func cancelBatchJob(rt *core.APIRuntime) gin.HandlerFunc {
 			cleanupJobTempPosters(deps.GetFs(), job.GetID(), tempDir)
 		}()
 
-		c.JSON(http.StatusOK, gin.H{"message": "Job cancelled successfully"})
+		c.JSON(http.StatusOK, gin.H{messageResponseKey: "Job cancelled successfully"})
 	}
 }
 
@@ -221,11 +285,11 @@ func deleteBatchJob(rt *core.APIRuntime) gin.HandlerFunc {
 		if err := deps.GetJobStore().DeleteJob(jobID); err != nil {
 			switch {
 			case errors.Is(err, worker.ErrJobNotFound):
-				c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: err.Error(), Code: "JOB_NOT_FOUND", Params: map[string]any{"job_id": jobID}})
+				c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: err.Error(), Code: jobNotFoundCode, Params: map[string]any{jobIDKey: jobID}})
 			case errors.Is(err, worker.ErrJobGone):
 				// Recently deleted — distinguishable tombstone (410) so clients
 				// stop retrying instead of re-GET-ing a phantom row.
-				c.JSON(http.StatusGone, contracts.ErrorResponse{Error: err.Error(), Code: "JOB_GONE", Params: map[string]any{"job_id": jobID}})
+				c.JSON(http.StatusGone, contracts.ErrorResponse{Error: err.Error(), Code: "JOB_GONE", Params: map[string]any{jobIDKey: jobID}})
 			case strings.Contains(err.Error(), "cannot delete running job"):
 				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
 			default:
@@ -234,7 +298,7 @@ func deleteBatchJob(rt *core.APIRuntime) gin.HandlerFunc {
 			return
 		}
 
-		c.JSON(http.StatusOK, gin.H{"message": "Job deleted successfully"})
+		c.JSON(http.StatusOK, gin.H{messageResponseKey: "Job deleted successfully"})
 	}
 }
 

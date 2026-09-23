@@ -142,6 +142,16 @@ func TestMovieRepository_FindByID(t *testing.T) {
 		assert.Equal(t, "IPX-020", found.ID)
 	})
 
+	t.Run("Find by content ID fallback", func(t *testing.T) {
+		movie := createTestMovie("IPX-021")
+		require.NoError(t, repo.Create(context.TODO(), movie))
+
+		found, err := repo.FindByID(context.TODO(), movie.ContentID)
+		require.NoError(t, err)
+		assert.Equal(t, movie.ID, found.ID)
+		assert.Equal(t, movie.ContentID, found.ContentID)
+	})
+
 	t.Run("Find non-existent movie", func(t *testing.T) {
 		_, err := repo.FindByID(context.TODO(), "NONEXISTENT-999")
 		assert.Error(t, err)
@@ -173,6 +183,17 @@ func TestMovieRepository_FindByContentID(t *testing.T) {
 	t.Run("Find by non-existent content ID", func(t *testing.T) {
 		_, err := repo.FindByContentID(context.TODO(), "nonexistent-content-id")
 		assert.Error(t, err)
+	})
+
+	t.Run("credit hydration failure", func(t *testing.T) {
+		movie := createTestMovie("IPX-031")
+		movie.ContentID = "credit-query-failure"
+		require.NoError(t, repo.Create(context.TODO(), movie))
+		require.NoError(t, db.Exec("DROP TABLE movie_credits").Error)
+
+		found, err := repo.FindByContentID(context.TODO(), movie.ContentID)
+		require.ErrorContains(t, err, "list credits for movie credit-query-failure")
+		require.Nil(t, found)
 	})
 }
 
@@ -639,20 +660,9 @@ func TestMovieRepository_EnsureActressesExist(t *testing.T) {
 		_, err = repo.Upsert(context.TODO(), movie2)
 		require.NoError(t, err)
 
-		// Verify actress data was merged
 		actressRepo := NewActressRepository(db)
-		actresses, err := actressRepo.List(context.TODO(), 100, 0)
+		foundActress, err := actressRepo.FindByDMMID(context.TODO(), 55555)
 		require.NoError(t, err)
-
-		var foundActress *models.Actress
-		for i := range actresses {
-			if actresses[i].DMMID == 55555 {
-				foundActress = &actresses[i]
-				break
-			}
-		}
-
-		require.NotNil(t, foundActress, "Should find actress with DMMID 55555")
 		assert.Equal(t, "http://example.com/thumb.jpg", foundActress.ThumbURL)
 		assert.Equal(t, "Test", foundActress.FirstName)
 		assert.Equal(t, "Actress", foundActress.LastName)

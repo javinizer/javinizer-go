@@ -463,10 +463,10 @@ func scrapeFile(
 	if scrapeCtx.Err() != nil && err == nil {
 		err = scrapeCtx.Err()
 		if result == nil {
-			result = &scrape.ScrapeResult{Status: scrape.StatusFailed, Message: "scrape timed out"}
+			result = &scrape.ScrapeResult{Status: scrape.StatusFailed, Message: scrapeTimeoutMessage}
 		} else {
 			result.Status = scrape.StatusFailed
-			result.Message = "scrape timed out"
+			result.Message = scrapeTimeoutMessage
 		}
 	}
 	return interpretScrapeResult(filePath, fmi, cmd, startTime, taskCtx, inputs, result, meta, err, movieIDFromMatcher)
@@ -662,7 +662,7 @@ func classifyFileScrapeError(err error) (errMsg, errorCode string) {
 		return "", string(models.ScraperErrorKindUnknown)
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
-		return "scrape timed out", string(models.ScraperErrorKindUnavailable)
+		return scrapeTimeoutMessage, string(models.ScraperErrorKindUnavailable)
 	}
 	if errors.Is(err, context.Canceled) {
 		return "scrape canceled", string(models.ScraperErrorKindUnavailable)

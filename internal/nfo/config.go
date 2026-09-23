@@ -26,6 +26,7 @@ type NFONameConfig struct {
 	UnknownActressMode      models.UnknownActressMode
 	ActressDelimiter        string
 	ActressLanguageJA       bool
+	UseCreditedName         bool
 }
 
 // Config holds NFO generation settings.
@@ -64,6 +65,7 @@ type Config struct {
 	// Actress rendering options for <ACTORS>/<ACTRESSES> template tags.
 	GroupUnknownActressName string // Replacement when group_actress is enabled and the actress list is empty or unknown (default: "@Unknown")
 	ActressDelimiter        string // Delimiter between actress names when no DELIM= modifier is present (default: ", ")
+	UseCreditedName         bool   // Render the credit's credited name instead of the identity canonical name (default: false)
 }
 
 // ConfigFromAppConfig converts application config to NFO generator config.
@@ -75,7 +77,8 @@ type Config struct {
 // Config-bridge reads: cfg.Metadata.NFO.Format.ActressLanguageJA,
 // cfg.Metadata.NFO.Format.UnknownActressMode, cfg.Metadata.NFO.Format.UnknownActressText,
 // cfg.Metadata.NFO.Feature.ActressAsTag, cfg.Metadata.NFO.Feature.AddGenericRole,
-// cfg.Metadata.NFO.Feature.AltNameRole, cfg.Metadata.NFO.Feature.IncludeOriginalPath,
+// cfg.Metadata.NFO.Feature.AltNameRole, cfg.Metadata.NFO.Feature.UseCreditedName,
+// cfg.Metadata.NFO.Feature.IncludeOriginalPath,
 // cfg.Metadata.NFO.Feature.IncludeStreamDetails, cfg.Metadata.NFO.Feature.IncludeFanart,
 // cfg.Metadata.NFO.Feature.IncludeTrailer, cfg.Metadata.NFO.Format.RatingSource,
 // cfg.Metadata.NFO.Extra.Tag, cfg.Metadata.NFO.Format.Tagline, cfg.Metadata.NFO.Extra.Credits
@@ -108,6 +111,7 @@ func ConfigFromAppConfig(cfg *config.Config, nameCfg NFONameConfig) *Config {
 		GroupActressName:        nameCfg.GroupActressName,
 		GroupUnknownActressName: nameCfg.GroupUnknownActressName,
 		ActressDelimiter:        nameCfg.ActressDelimiter,
+		UseCreditedName:         cfg.Metadata.NFO.Feature.UseCreditedName,
 	}
 }
 
@@ -129,6 +133,7 @@ func (c *Config) ToNFONameConfig(isMultiPart bool, partSuffix string, partNumber
 		UnknownActressMode:      c.UnknownActressMode,
 		ActressDelimiter:        c.ActressDelimiter,
 		ActressLanguageJA:       c.ActressLanguageJA,
+		UseCreditedName:         c.UseCreditedName,
 	}
 }
 
@@ -140,7 +145,8 @@ func (c *Config) ToNFONameConfig(isMultiPart bool, partSuffix string, partNumber
 // Config-bridge reads: cfg.Metadata.NFO.Format.FilenameTemplate, cfg.Metadata.NFO.Format.FirstNameOrder,
 // cfg.Metadata.NFO.Feature.PerFile, cfg.Output.Operation.GroupActress, cfg.Output.Operation.GroupActressMin,
 // cfg.Output.Operation.GroupActressName, cfg.Output.Operation.GroupUnknownActressName, cfg.Output.Template,
-// cfg.Output.Template.ActressDelimiter, cfg.Metadata.NFO.Format.ActressLanguageJA, cfg.Metadata.NFO.Format.UnknownActressMode
+// cfg.Output.Template.ActressDelimiter, cfg.Metadata.NFO.Format.ActressLanguageJA, cfg.Metadata.NFO.Format.UnknownActressMode,
+// cfg.Metadata.NFO.Feature.UseCreditedName
 func NFONameConfigFromAppConfig(cfg *config.Config) NFONameConfig {
 	if cfg == nil {
 		return NFONameConfig{}
@@ -156,5 +162,6 @@ func NFONameConfigFromAppConfig(cfg *config.Config) NFONameConfig {
 		UnknownActressMode:      cfg.Metadata.NFO.Format.UnknownActressMode,
 		ActressDelimiter:        cfg.Output.Template.ActressDelimiter,
 		ActressLanguageJA:       cfg.Metadata.NFO.Format.ActressLanguageJA,
+		UseCreditedName:         cfg.Metadata.NFO.Feature.UseCreditedName,
 	}
 }

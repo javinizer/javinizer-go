@@ -4,6 +4,8 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 // ---------------------------------------------------------------------------
@@ -82,9 +84,22 @@ type Movie struct {
 	OriginalFileName string      `json:"original_filename"`
 
 	// Relationships
-	Actresses   []Actress `json:"actresses" gorm:"many2many:movie_actresses;foreignKey:ContentID;joinForeignKey:MovieContentID;References:ID;joinReferences:ActressID"`
-	Genres      []Genre   `json:"genres" gorm:"many2many:movie_genres;foreignKey:ContentID;joinForeignKey:MovieContentID;References:ID;joinReferences:GenreID"`
-	Screenshots []string  `json:"screenshot_urls" gorm:"serializer:json"`
+	Actresses []Actress     `json:"actresses" gorm:"many2many:movie_actresses;foreignKey:ContentID;joinForeignKey:MovieContentID;References:ID;joinReferences:ActressID"`
+	Credits   []MovieCredit `json:"credits" gorm:"-"`
+
+	RenderDirty      bool  `json:"render_dirty" gorm:"default:false"`
+	RenderGeneration int64 `json:"render_generation"`
+
+	// CreditPolicy carries the collision policy (block|auto_keep|auto_alias) for
+	// the persisting scrape job. Not persisted — consumed by the upserter.
+	CreditPolicy string `json:"-" gorm:"-"`
+	// TrustedCollisionSources lists scraper sources eligible for auto_alias.
+	TrustedCollisionSources []string `json:"-" gorm:"-"`
+	// SkipCreditReconcile marks a cache-hit re-persist: existing credits stay untouched.
+	SkipCreditReconcile bool `json:"-" gorm:"-"`
+
+	Genres      []Genre  `json:"genres" gorm:"many2many:movie_genres;foreignKey:ContentID;joinForeignKey:MovieContentID;References:ID;joinReferences:GenreID"`
+	Screenshots []string `json:"screenshot_urls" gorm:"serializer:json"`
 
 	// Translations
 	Translations []MovieTranslation `json:"translations" gorm:"foreignKey:MovieID;references:ContentID"`
@@ -116,13 +131,17 @@ type MovieTranslation struct {
 
 // Actress represents a JAV actress
 type Actress struct {
-	ID           uint   `json:"id" gorm:"primaryKey"`
-	DMMID        int    `json:"dmm_id"` // Real DMM actress ID when available (unique only for values > 0)
-	FirstName    string `json:"first_name"`
-	LastName     string `json:"last_name"`
-	JapaneseName string `json:"japanese_name" gorm:"index"`
-	ThumbURL     string `json:"thumb_url"`
-	Aliases      string `json:"aliases"` // Pipe-separated
+	ID                   uint   `json:"id" gorm:"primaryKey"`
+	DMMID                int    `json:"dmm_id"` // Real DMM actress ID when available (unique only for values > 0)
+	FirstName            string `json:"first_name"`
+	LastName             string `json:"last_name"`
+	JapaneseName         string `json:"japanese_name" gorm:"index"`
+	ThumbURL             string `json:"thumb_url"`
+	Aliases              string `json:"aliases"` // Pipe-separated
+	Verified             bool   `json:"verified"`
+	Origin               string `json:"origin"`
+	NameKey              string `json:"name_key" gorm:"index"`
+	AmbiguityQuarantined bool   `json:"-" gorm:"not null;default:false"`
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -238,11 +257,20 @@ func IsValidMatchMode(mode string) bool {
 // ActressAlias represents an alternate name mapping for an actress
 // This allows users to consolidate multiple actress names into a canonical one
 type ActressAlias struct {
-	ID            uint      `json:"id" gorm:"primaryKey"`
-	AliasName     string    `json:"alias_name" gorm:"uniqueIndex;not null"` // The alternate name (e.g., "Yui Hatano")
-	CanonicalName string    `json:"canonical_name" gorm:"index;not null"`   // The canonical/preferred name (e.g., "Hatano Yui")
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	ID               uint      `json:"id" gorm:"primaryKey"`
+	AliasName        string    `json:"alias_name" gorm:"uniqueIndex;not null"` // The alternate name (e.g., "Yui Hatano")
+	AliasNameKey     string    `json:"-" gorm:"index;not null;default:''"`
+	CanonicalName    string    `json:"canonical_name" gorm:"index;not null"` // The canonical/preferred name (e.g., "Hatano Yui")
+	CanonicalNameKey string    `json:"-" gorm:"index;not null;default:''"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+}
+
+// BeforeSave keeps the indexed alias lookup key aligned for every GORM write path.
+func (a *ActressAlias) BeforeSave(_ *gorm.DB) error {
+	a.AliasNameKey = NormalizeActressNameKey(a.AliasName)
+	a.CanonicalNameKey = NormalizeActressNameKey(a.CanonicalName)
+	return nil
 }
 
 // MovieTag represents a custom user-defined tag for a specific movie
@@ -276,6 +304,22 @@ func (m *Movie) Clone() *Movie {
 			if m.Actresses[i].Translations != nil {
 				clone.Actresses[i].Translations = make([]ActressTranslation, len(m.Actresses[i].Translations))
 				copy(clone.Actresses[i].Translations, m.Actresses[i].Translations)
+			}
+		}
+	}
+	if m.Credits != nil {
+		clone.Credits = make([]MovieCredit, len(m.Credits))
+		copy(clone.Credits, m.Credits)
+		for i := range clone.Credits {
+			if clone.Credits[i].Scraped.Translations != nil {
+				clone.Credits[i].Scraped.Translations = append([]ActressTranslation(nil), clone.Credits[i].Scraped.Translations...)
+			}
+			if m.Credits[i].Actress != nil {
+				actress := *m.Credits[i].Actress
+				if actress.Translations != nil {
+					actress.Translations = append([]ActressTranslation(nil), actress.Translations...)
+				}
+				clone.Credits[i].Actress = &actress
 			}
 		}
 	}

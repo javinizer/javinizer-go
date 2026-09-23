@@ -32,6 +32,7 @@ type JobStore struct {
 	movieRepo        database.MovieRepositoryInterface
 	actressRepo      database.ActressRepositoryInterface
 	historyRepo      database.HistoryRepositoryInterface
+	collisionRepo    database.CreditCollisionRepositoryInterface
 	persistence      JobPersistencer
 	envLocks         *keyedMutexRegistry // POSTER-WRITE-HARDENING D2: per-job envelope persist lock
 	persistFlightsMu sync.Mutex
@@ -117,6 +118,14 @@ func WithActressRepo(r database.ActressRepositoryInterface) JobStoreOption {
 func WithHistoryRepo(r database.HistoryRepositoryInterface) JobStoreOption {
 	return func(s *JobStore) {
 		s.historyRepo = r
+	}
+}
+
+// WithCollisionRepo sets the credit collision repository used by the organize
+// collision gate. When unset (tests, scan-only), the gate is disabled.
+func WithCollisionRepo(r database.CreditCollisionRepositoryInterface) JobStoreOption {
+	return func(s *JobStore) {
+		s.collisionRepo = r
 	}
 }
 
@@ -629,6 +638,9 @@ func (s *JobStore) createJob(files []string, jobCfg ...*JobConfig) *BatchJob {
 	if job.deps.HistoryRepo == nil {
 		job.deps.HistoryRepo = s.historyRepo
 	}
+	if job.deps.CollisionRepo == nil {
+		job.deps.CollisionRepo = s.collisionRepo
+	}
 
 	s.mu.Lock()
 	s.jobs[job.ID] = job
@@ -716,6 +728,7 @@ func (s *JobStore) GetBatchJob(id string) (BatchJobInterface, bool) {
 	}
 	a := job.getAdapters()
 	return &batchJobAdapter{
+		results:         job.Results(),
 		JobReader:       a.reader,
 		MovieLookup:     a.movieLookup,
 		PhaseController: a.phaseController,

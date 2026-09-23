@@ -156,4 +156,46 @@ describe('review mutations route-change reconciliation', () => {
 		expect(toastSuccess).not.toHaveBeenCalled();
 		expect(toastError).not.toHaveBeenCalled();
 	});
+
+	it('transmits cast generation and multipart revisions, then surfaces a conflict without retry', async () => {
+		const queryClient = new QueryClient();
+		const firstPath = '/media/a.mp4';
+		const secondPath = '/media/a.part2.mp4';
+		const firstMovie = { id: 'movie-1', title: 'Title', cast_version: 'cast-v7' } as Movie;
+		const latestMovie = { ...firstMovie, maker: 'User Maker', actresses: [{ id: 2 }] };
+		const job = {
+			id: 'job-a',
+			results: {
+				[firstPath]: { result_id: 'result-a', movie_id: 'movie-1', revision: 7, movie: firstMovie },
+				[secondPath]: { result_id: 'result-b', movie_id: 'movie-1', revision: 8, movie: latestMovie },
+			},
+		} as unknown as BatchJobResponse;
+		const editedMovies = new Map<string, Movie>([[firstPath, firstMovie], [secondPath, latestMovie]]);
+		const updateBatchMovie = vi.fn().mockRejectedValue(new Error('409 cast conflict'));
+		const toastError = vi.fn();
+		const deps = {
+			getJobId: () => 'job-a', getJob: () => job, setJob: vi.fn(), isCurrentOperation: () => true,
+			getRouteGeneration: () => 1, skipJobSync: vi.fn(), clearEditStorage: vi.fn(),
+			clearEditedMovies: vi.fn(), clearPosterPreviewOverrides: vi.fn(), getEditedMovies: () => editedMovies,
+			getCurrentResult: () => undefined, getPosterPreviewOverrides: () => new Map(),
+			getPosterCropStates: () => new Map(), getCropMetrics: () => null, getCropBox: () => null,
+			getQueryClient: () => queryClient, getCurrentMovieIndex: () => 0, setCurrentMovieIndex: vi.fn(),
+			getMovieResultsLength: () => 2, gotoJobs: vi.fn(), setShowPosterCropModal: vi.fn(),
+			updateBatchMoviePosterFromURL: vi.fn(), getBatchMovieSources: vi.fn(), overrideBatchMovieField: vi.fn(),
+			excludeBatchMovie: vi.fn(), updateBatchMovie, updateBatchMoviePosterCrop: vi.fn(),
+			batchExcludeMovies: vi.fn(), bulkRescrapeMovies: vi.fn(), getSelectedMovieIds: () => new Set<string>(),
+			clearSelectedMovieIds: vi.fn(), deleteSelectedMovieId: vi.fn(), toastSuccess: vi.fn(), toastError,
+		} as Parameters<typeof createReviewMutations>[0];
+
+		const mutations = createReviewMutations(deps);
+		await mutations.saveEditsMutation.mutateAsync({ jobId: 'job-a', generation: 1 });
+
+		expect(updateBatchMovie).toHaveBeenCalledOnce();
+		expect(updateBatchMovie).toHaveBeenCalledWith(
+			'job-a', 'result-b', expect.objectContaining({ cast_version: 'cast-v7', maker: 'User Maker' }),
+			{ 'result-a': 7, 'result-b': 8 },
+		);
+		expect(toastError).toHaveBeenCalled();
+		expect(editedMovies.has(secondPath)).toBe(true);
+	});
 });

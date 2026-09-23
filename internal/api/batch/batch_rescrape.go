@@ -149,7 +149,7 @@ func batchRescrapeMovies(rt *core.APIRuntime) gin.HandlerFunc {
 			case errors.Is(admitErr, worker.ErrJobGone):
 				writeErrorResponse(c, http.StatusGone, true, "Job has been deleted")
 			case errors.Is(admitErr, worker.ErrJobNotFound):
-				c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "Job not found"})
+				c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: jobNotFoundMessage})
 			default:
 				status := models.JobStatusPending
 				var busy *worker.EditPhaseBusyError
@@ -168,7 +168,7 @@ func batchRescrapeMovies(rt *core.APIRuntime) gin.HandlerFunc {
 		rtSnap := rt.Snapshot()
 		factory := rtSnap.BatchJobFactory()
 		if factory == nil {
-			c.JSON(http.StatusServiceUnavailable, contracts.ErrorResponse{Error: "batch job factory unavailable — workflow factory not ready; retry the request"})
+			c.JSON(http.StatusServiceUnavailable, contracts.ErrorResponse{Error: factoryUnavailableMessage})
 			return
 		}
 		orch := NewRescrapeOrchestrator(RescrapeDeps{

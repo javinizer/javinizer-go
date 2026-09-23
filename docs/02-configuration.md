@@ -454,6 +454,7 @@ metadata:
     actress_as_tag: false            # Add actress names as tags
     add_generic_role: false          # Add generic "Actress" role to all actresses
     alt_name_role: false             # Use alternate (Japanese) name in role field
+    use_credited_name: false          # Use each movie's credited actress name
     include_originalpath: false      # Include source filename in NFO
     include_stream_details: false    # Include video stream metadata
     include_fanart: true             # Include fanart URL
@@ -489,6 +490,8 @@ metadata:
 **add_generic_role**: If true, adds a generic "Actress" `<role>` to every actress entry.
 
 **alt_name_role**: If true, uses the alternate (Japanese) name in the actress `<role>` field.
+
+**use_credited_name**: If true, uses each movie's credited actress name instead of the canonical database name when generating NFO files.
 
 **include_originalpath**: If true, records the original source filename in the NFO. Note the spelling: `include_originalpath` (no underscore between `original` and `path`).
 
@@ -1433,6 +1436,7 @@ metadata:
     actress_as_tag: false
     add_generic_role: false
     alt_name_role: false
+    use_credited_name: false
     include_originalpath: false
     include_stream_details: false
     include_fanart: true

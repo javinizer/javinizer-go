@@ -6,6 +6,7 @@ package mocks
 
 import (
 	"context"
+	"time"
 
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -95,6 +96,66 @@ func (_c *MockActressRepositoryInterface_Count_Call) Return(n int64, err error) 
 }
 
 func (_c *MockActressRepositoryInterface_Count_Call) RunAndReturn(run func(ctx context.Context) (int64, error)) *MockActressRepositoryInterface_Count_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CountCandidates provides a mock function for the type MockActressRepositoryInterface
+func (_mock *MockActressRepositoryInterface) CountCandidates(ctx context.Context) (int64, error) {
+	ret := _mock.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CountCandidates")
+	}
+
+	var r0 int64
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context) (int64, error)); ok {
+		return returnFunc(ctx)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context) int64); ok {
+		r0 = returnFunc(ctx)
+	} else {
+		r0 = ret.Get(0).(int64)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = returnFunc(ctx)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockActressRepositoryInterface_CountCandidates_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CountCandidates'
+type MockActressRepositoryInterface_CountCandidates_Call struct {
+	*mock.Call
+}
+
+// CountCandidates is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *MockActressRepositoryInterface_Expecter) CountCandidates(ctx any) *MockActressRepositoryInterface_CountCandidates_Call {
+	return &MockActressRepositoryInterface_CountCandidates_Call{Call: _e.mock.On("CountCandidates", ctx)}
+}
+
+func (_c *MockActressRepositoryInterface_CountCandidates_Call) Run(run func(ctx context.Context)) *MockActressRepositoryInterface_CountCandidates_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockActressRepositoryInterface_CountCandidates_Call) Return(n int64, err error) *MockActressRepositoryInterface_CountCandidates_Call {
+	_c.Call.Return(n, err)
+	return _c
+}
+
+func (_c *MockActressRepositoryInterface_CountCandidates_Call) RunAndReturn(run func(ctx context.Context) (int64, error)) *MockActressRepositoryInterface_CountCandidates_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -275,6 +336,72 @@ func (_c *MockActressRepositoryInterface_Delete_Call) Return(err error) *MockAct
 }
 
 func (_c *MockActressRepositoryInterface_Delete_Call) RunAndReturn(run func(ctx context.Context, id uint) error) *MockActressRepositoryInterface_Delete_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DeleteStaleCandidates provides a mock function for the type MockActressRepositoryInterface
+func (_mock *MockActressRepositoryInterface) DeleteStaleCandidates(ctx context.Context, olderThan time.Time) (int64, error) {
+	ret := _mock.Called(ctx, olderThan)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteStaleCandidates")
+	}
+
+	var r0 int64
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, time.Time) (int64, error)); ok {
+		return returnFunc(ctx, olderThan)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, time.Time) int64); ok {
+		r0 = returnFunc(ctx, olderThan)
+	} else {
+		r0 = ret.Get(0).(int64)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, time.Time) error); ok {
+		r1 = returnFunc(ctx, olderThan)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockActressRepositoryInterface_DeleteStaleCandidates_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteStaleCandidates'
+type MockActressRepositoryInterface_DeleteStaleCandidates_Call struct {
+	*mock.Call
+}
+
+// DeleteStaleCandidates is a helper method to define mock.On call
+//   - ctx context.Context
+//   - olderThan time.Time
+func (_e *MockActressRepositoryInterface_Expecter) DeleteStaleCandidates(ctx any, olderThan any) *MockActressRepositoryInterface_DeleteStaleCandidates_Call {
+	return &MockActressRepositoryInterface_DeleteStaleCandidates_Call{Call: _e.mock.On("DeleteStaleCandidates", ctx, olderThan)}
+}
+
+func (_c *MockActressRepositoryInterface_DeleteStaleCandidates_Call) Run(run func(ctx context.Context, olderThan time.Time)) *MockActressRepositoryInterface_DeleteStaleCandidates_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 time.Time
+		if args[1] != nil {
+			arg1 = args[1].(time.Time)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockActressRepositoryInterface_DeleteStaleCandidates_Call) Return(n int64, err error) *MockActressRepositoryInterface_DeleteStaleCandidates_Call {
+	_c.Call.Return(n, err)
+	return _c
+}
+
+func (_c *MockActressRepositoryInterface_DeleteStaleCandidates_Call) RunAndReturn(run func(ctx context.Context, olderThan time.Time) (int64, error)) *MockActressRepositoryInterface_DeleteStaleCandidates_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -688,6 +815,279 @@ func (_c *MockActressRepositoryInterface_FindOrCreate_Call) RunAndReturn(run fun
 	return _c
 }
 
+// FindVerifiedByAlias provides a mock function for the type MockActressRepositoryInterface
+func (_mock *MockActressRepositoryInterface) FindVerifiedByAlias(ctx context.Context, aliasName string) (*models.Actress, error) {
+	ret := _mock.Called(ctx, aliasName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for FindVerifiedByAlias")
+	}
+
+	var r0 *models.Actress
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) (*models.Actress, error)); ok {
+		return returnFunc(ctx, aliasName)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) *models.Actress); ok {
+		r0 = returnFunc(ctx, aliasName)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*models.Actress)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = returnFunc(ctx, aliasName)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockActressRepositoryInterface_FindVerifiedByAlias_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FindVerifiedByAlias'
+type MockActressRepositoryInterface_FindVerifiedByAlias_Call struct {
+	*mock.Call
+}
+
+// FindVerifiedByAlias is a helper method to define mock.On call
+//   - ctx context.Context
+//   - aliasName string
+func (_e *MockActressRepositoryInterface_Expecter) FindVerifiedByAlias(ctx any, aliasName any) *MockActressRepositoryInterface_FindVerifiedByAlias_Call {
+	return &MockActressRepositoryInterface_FindVerifiedByAlias_Call{Call: _e.mock.On("FindVerifiedByAlias", ctx, aliasName)}
+}
+
+func (_c *MockActressRepositoryInterface_FindVerifiedByAlias_Call) Run(run func(ctx context.Context, aliasName string)) *MockActressRepositoryInterface_FindVerifiedByAlias_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockActressRepositoryInterface_FindVerifiedByAlias_Call) Return(actress *models.Actress, err error) *MockActressRepositoryInterface_FindVerifiedByAlias_Call {
+	_c.Call.Return(actress, err)
+	return _c
+}
+
+func (_c *MockActressRepositoryInterface_FindVerifiedByAlias_Call) RunAndReturn(run func(ctx context.Context, aliasName string) (*models.Actress, error)) *MockActressRepositoryInterface_FindVerifiedByAlias_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// FindVerifiedByDMMID provides a mock function for the type MockActressRepositoryInterface
+func (_mock *MockActressRepositoryInterface) FindVerifiedByDMMID(ctx context.Context, dmmID int) (*models.Actress, error) {
+	ret := _mock.Called(ctx, dmmID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for FindVerifiedByDMMID")
+	}
+
+	var r0 *models.Actress
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, int) (*models.Actress, error)); ok {
+		return returnFunc(ctx, dmmID)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, int) *models.Actress); ok {
+		r0 = returnFunc(ctx, dmmID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*models.Actress)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, int) error); ok {
+		r1 = returnFunc(ctx, dmmID)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockActressRepositoryInterface_FindVerifiedByDMMID_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FindVerifiedByDMMID'
+type MockActressRepositoryInterface_FindVerifiedByDMMID_Call struct {
+	*mock.Call
+}
+
+// FindVerifiedByDMMID is a helper method to define mock.On call
+//   - ctx context.Context
+//   - dmmID int
+func (_e *MockActressRepositoryInterface_Expecter) FindVerifiedByDMMID(ctx any, dmmID any) *MockActressRepositoryInterface_FindVerifiedByDMMID_Call {
+	return &MockActressRepositoryInterface_FindVerifiedByDMMID_Call{Call: _e.mock.On("FindVerifiedByDMMID", ctx, dmmID)}
+}
+
+func (_c *MockActressRepositoryInterface_FindVerifiedByDMMID_Call) Run(run func(ctx context.Context, dmmID int)) *MockActressRepositoryInterface_FindVerifiedByDMMID_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 int
+		if args[1] != nil {
+			arg1 = args[1].(int)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockActressRepositoryInterface_FindVerifiedByDMMID_Call) Return(actress *models.Actress, err error) *MockActressRepositoryInterface_FindVerifiedByDMMID_Call {
+	_c.Call.Return(actress, err)
+	return _c
+}
+
+func (_c *MockActressRepositoryInterface_FindVerifiedByDMMID_Call) RunAndReturn(run func(ctx context.Context, dmmID int) (*models.Actress, error)) *MockActressRepositoryInterface_FindVerifiedByDMMID_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// FindVerifiedByExactName provides a mock function for the type MockActressRepositoryInterface
+func (_mock *MockActressRepositoryInterface) FindVerifiedByExactName(ctx context.Context, japaneseName string, firstName string, lastName string) ([]models.Actress, error) {
+	ret := _mock.Called(ctx, japaneseName, firstName, lastName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for FindVerifiedByExactName")
+	}
+
+	var r0 []models.Actress
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, string) ([]models.Actress, error)); ok {
+		return returnFunc(ctx, japaneseName, firstName, lastName)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, string) []models.Actress); ok {
+		r0 = returnFunc(ctx, japaneseName, firstName, lastName)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]models.Actress)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string, string) error); ok {
+		r1 = returnFunc(ctx, japaneseName, firstName, lastName)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockActressRepositoryInterface_FindVerifiedByExactName_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FindVerifiedByExactName'
+type MockActressRepositoryInterface_FindVerifiedByExactName_Call struct {
+	*mock.Call
+}
+
+// FindVerifiedByExactName is a helper method to define mock.On call
+//   - ctx context.Context
+//   - japaneseName string
+//   - firstName string
+//   - lastName string
+func (_e *MockActressRepositoryInterface_Expecter) FindVerifiedByExactName(ctx any, japaneseName any, firstName any, lastName any) *MockActressRepositoryInterface_FindVerifiedByExactName_Call {
+	return &MockActressRepositoryInterface_FindVerifiedByExactName_Call{Call: _e.mock.On("FindVerifiedByExactName", ctx, japaneseName, firstName, lastName)}
+}
+
+func (_c *MockActressRepositoryInterface_FindVerifiedByExactName_Call) Run(run func(ctx context.Context, japaneseName string, firstName string, lastName string)) *MockActressRepositoryInterface_FindVerifiedByExactName_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
+		var arg3 string
+		if args[3] != nil {
+			arg3 = args[3].(string)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+			arg3,
+		)
+	})
+	return _c
+}
+
+func (_c *MockActressRepositoryInterface_FindVerifiedByExactName_Call) Return(actresss []models.Actress, err error) *MockActressRepositoryInterface_FindVerifiedByExactName_Call {
+	_c.Call.Return(actresss, err)
+	return _c
+}
+
+func (_c *MockActressRepositoryInterface_FindVerifiedByExactName_Call) RunAndReturn(run func(ctx context.Context, japaneseName string, firstName string, lastName string) ([]models.Actress, error)) *MockActressRepositoryInterface_FindVerifiedByExactName_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ImportUpsert provides a mock function for the type MockActressRepositoryInterface
+func (_mock *MockActressRepositoryInterface) ImportUpsert(ctx context.Context, incoming *models.Actress) error {
+	ret := _mock.Called(ctx, incoming)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ImportUpsert")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, *models.Actress) error); ok {
+		r0 = returnFunc(ctx, incoming)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockActressRepositoryInterface_ImportUpsert_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ImportUpsert'
+type MockActressRepositoryInterface_ImportUpsert_Call struct {
+	*mock.Call
+}
+
+// ImportUpsert is a helper method to define mock.On call
+//   - ctx context.Context
+//   - incoming *models.Actress
+func (_e *MockActressRepositoryInterface_Expecter) ImportUpsert(ctx any, incoming any) *MockActressRepositoryInterface_ImportUpsert_Call {
+	return &MockActressRepositoryInterface_ImportUpsert_Call{Call: _e.mock.On("ImportUpsert", ctx, incoming)}
+}
+
+func (_c *MockActressRepositoryInterface_ImportUpsert_Call) Run(run func(ctx context.Context, incoming *models.Actress)) *MockActressRepositoryInterface_ImportUpsert_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 *models.Actress
+		if args[1] != nil {
+			arg1 = args[1].(*models.Actress)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockActressRepositoryInterface_ImportUpsert_Call) Return(err error) *MockActressRepositoryInterface_ImportUpsert_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockActressRepositoryInterface_ImportUpsert_Call) RunAndReturn(run func(ctx context.Context, incoming *models.Actress) error) *MockActressRepositoryInterface_ImportUpsert_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // List provides a mock function for the type MockActressRepositoryInterface
 func (_mock *MockActressRepositoryInterface) List(ctx context.Context, limit int, offset int) ([]models.Actress, error) {
 	ret := _mock.Called(ctx, limit, offset)
@@ -820,6 +1220,80 @@ func (_c *MockActressRepositoryInterface_ListAll_Call) Return(actresss []models.
 }
 
 func (_c *MockActressRepositoryInterface_ListAll_Call) RunAndReturn(run func(ctx context.Context) ([]models.Actress, error)) *MockActressRepositoryInterface_ListAll_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListCandidates provides a mock function for the type MockActressRepositoryInterface
+func (_mock *MockActressRepositoryInterface) ListCandidates(ctx context.Context, limit int, offset int) ([]models.Actress, error) {
+	ret := _mock.Called(ctx, limit, offset)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListCandidates")
+	}
+
+	var r0 []models.Actress
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, int, int) ([]models.Actress, error)); ok {
+		return returnFunc(ctx, limit, offset)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, int, int) []models.Actress); ok {
+		r0 = returnFunc(ctx, limit, offset)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]models.Actress)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, int, int) error); ok {
+		r1 = returnFunc(ctx, limit, offset)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockActressRepositoryInterface_ListCandidates_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListCandidates'
+type MockActressRepositoryInterface_ListCandidates_Call struct {
+	*mock.Call
+}
+
+// ListCandidates is a helper method to define mock.On call
+//   - ctx context.Context
+//   - limit int
+//   - offset int
+func (_e *MockActressRepositoryInterface_Expecter) ListCandidates(ctx any, limit any, offset any) *MockActressRepositoryInterface_ListCandidates_Call {
+	return &MockActressRepositoryInterface_ListCandidates_Call{Call: _e.mock.On("ListCandidates", ctx, limit, offset)}
+}
+
+func (_c *MockActressRepositoryInterface_ListCandidates_Call) Run(run func(ctx context.Context, limit int, offset int)) *MockActressRepositoryInterface_ListCandidates_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 int
+		if args[1] != nil {
+			arg1 = args[1].(int)
+		}
+		var arg2 int
+		if args[2] != nil {
+			arg2 = args[2].(int)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
+func (_c *MockActressRepositoryInterface_ListCandidates_Call) Return(actresss []models.Actress, err error) *MockActressRepositoryInterface_ListCandidates_Call {
+	_c.Call.Return(actresss, err)
+	return _c
+}
+
+func (_c *MockActressRepositoryInterface_ListCandidates_Call) RunAndReturn(run func(ctx context.Context, limit int, offset int) ([]models.Actress, error)) *MockActressRepositoryInterface_ListCandidates_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1064,6 +1538,87 @@ func (_c *MockActressRepositoryInterface_PreviewMerge_Call) RunAndReturn(run fun
 	return _c
 }
 
+// PromoteCandidate provides a mock function for the type MockActressRepositoryInterface
+func (_mock *MockActressRepositoryInterface) PromoteCandidate(ctx context.Context, id uint, firstName string, lastName string, japaneseName string, thumbURL string) error {
+	ret := _mock.Called(ctx, id, firstName, lastName, japaneseName, thumbURL)
+
+	if len(ret) == 0 {
+		panic("no return value specified for PromoteCandidate")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, uint, string, string, string, string) error); ok {
+		r0 = returnFunc(ctx, id, firstName, lastName, japaneseName, thumbURL)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockActressRepositoryInterface_PromoteCandidate_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'PromoteCandidate'
+type MockActressRepositoryInterface_PromoteCandidate_Call struct {
+	*mock.Call
+}
+
+// PromoteCandidate is a helper method to define mock.On call
+//   - ctx context.Context
+//   - id uint
+//   - firstName string
+//   - lastName string
+//   - japaneseName string
+//   - thumbURL string
+func (_e *MockActressRepositoryInterface_Expecter) PromoteCandidate(ctx any, id any, firstName any, lastName any, japaneseName any, thumbURL any) *MockActressRepositoryInterface_PromoteCandidate_Call {
+	return &MockActressRepositoryInterface_PromoteCandidate_Call{Call: _e.mock.On("PromoteCandidate", ctx, id, firstName, lastName, japaneseName, thumbURL)}
+}
+
+func (_c *MockActressRepositoryInterface_PromoteCandidate_Call) Run(run func(ctx context.Context, id uint, firstName string, lastName string, japaneseName string, thumbURL string)) *MockActressRepositoryInterface_PromoteCandidate_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 uint
+		if args[1] != nil {
+			arg1 = args[1].(uint)
+		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
+		var arg3 string
+		if args[3] != nil {
+			arg3 = args[3].(string)
+		}
+		var arg4 string
+		if args[4] != nil {
+			arg4 = args[4].(string)
+		}
+		var arg5 string
+		if args[5] != nil {
+			arg5 = args[5].(string)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+			arg3,
+			arg4,
+			arg5,
+		)
+	})
+	return _c
+}
+
+func (_c *MockActressRepositoryInterface_PromoteCandidate_Call) Return(err error) *MockActressRepositoryInterface_PromoteCandidate_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockActressRepositoryInterface_PromoteCandidate_Call) RunAndReturn(run func(ctx context.Context, id uint, firstName string, lastName string, japaneseName string, thumbURL string) error) *MockActressRepositoryInterface_PromoteCandidate_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // RenameNameFields provides a mock function for the type MockActressRepositoryInterface
 func (_mock *MockActressRepositoryInterface) RenameNameFields(ctx context.Context, id uint, firstName string, lastName string, japaneseName string) error {
 	ret := _mock.Called(ctx, id, firstName, lastName, japaneseName)
@@ -1299,6 +1854,63 @@ func (_c *MockActressRepositoryInterface_SearchPagedSorted_Call) RunAndReturn(ru
 	return _c
 }
 
+// SetUserOwned provides a mock function for the type MockActressRepositoryInterface
+func (_mock *MockActressRepositoryInterface) SetUserOwned(ctx context.Context, id uint) error {
+	ret := _mock.Called(ctx, id)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SetUserOwned")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, uint) error); ok {
+		r0 = returnFunc(ctx, id)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockActressRepositoryInterface_SetUserOwned_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetUserOwned'
+type MockActressRepositoryInterface_SetUserOwned_Call struct {
+	*mock.Call
+}
+
+// SetUserOwned is a helper method to define mock.On call
+//   - ctx context.Context
+//   - id uint
+func (_e *MockActressRepositoryInterface_Expecter) SetUserOwned(ctx any, id any) *MockActressRepositoryInterface_SetUserOwned_Call {
+	return &MockActressRepositoryInterface_SetUserOwned_Call{Call: _e.mock.On("SetUserOwned", ctx, id)}
+}
+
+func (_c *MockActressRepositoryInterface_SetUserOwned_Call) Run(run func(ctx context.Context, id uint)) *MockActressRepositoryInterface_SetUserOwned_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 uint
+		if args[1] != nil {
+			arg1 = args[1].(uint)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockActressRepositoryInterface_SetUserOwned_Call) Return(err error) *MockActressRepositoryInterface_SetUserOwned_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockActressRepositoryInterface_SetUserOwned_Call) RunAndReturn(run func(ctx context.Context, id uint) error) *MockActressRepositoryInterface_SetUserOwned_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Update provides a mock function for the type MockActressRepositoryInterface
 func (_mock *MockActressRepositoryInterface) Update(ctx context.Context, actress *models.Actress) error {
 	ret := _mock.Called(ctx, actress)
@@ -1352,6 +1964,87 @@ func (_c *MockActressRepositoryInterface_Update_Call) Return(err error) *MockAct
 }
 
 func (_c *MockActressRepositoryInterface_Update_Call) RunAndReturn(run func(ctx context.Context, actress *models.Actress) error) *MockActressRepositoryInterface_Update_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// UpdateCanonicalFields provides a mock function for the type MockActressRepositoryInterface
+func (_mock *MockActressRepositoryInterface) UpdateCanonicalFields(ctx context.Context, id uint, firstName string, lastName string, japaneseName string, thumbURL string) error {
+	ret := _mock.Called(ctx, id, firstName, lastName, japaneseName, thumbURL)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateCanonicalFields")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, uint, string, string, string, string) error); ok {
+		r0 = returnFunc(ctx, id, firstName, lastName, japaneseName, thumbURL)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockActressRepositoryInterface_UpdateCanonicalFields_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateCanonicalFields'
+type MockActressRepositoryInterface_UpdateCanonicalFields_Call struct {
+	*mock.Call
+}
+
+// UpdateCanonicalFields is a helper method to define mock.On call
+//   - ctx context.Context
+//   - id uint
+//   - firstName string
+//   - lastName string
+//   - japaneseName string
+//   - thumbURL string
+func (_e *MockActressRepositoryInterface_Expecter) UpdateCanonicalFields(ctx any, id any, firstName any, lastName any, japaneseName any, thumbURL any) *MockActressRepositoryInterface_UpdateCanonicalFields_Call {
+	return &MockActressRepositoryInterface_UpdateCanonicalFields_Call{Call: _e.mock.On("UpdateCanonicalFields", ctx, id, firstName, lastName, japaneseName, thumbURL)}
+}
+
+func (_c *MockActressRepositoryInterface_UpdateCanonicalFields_Call) Run(run func(ctx context.Context, id uint, firstName string, lastName string, japaneseName string, thumbURL string)) *MockActressRepositoryInterface_UpdateCanonicalFields_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 uint
+		if args[1] != nil {
+			arg1 = args[1].(uint)
+		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
+		var arg3 string
+		if args[3] != nil {
+			arg3 = args[3].(string)
+		}
+		var arg4 string
+		if args[4] != nil {
+			arg4 = args[4].(string)
+		}
+		var arg5 string
+		if args[5] != nil {
+			arg5 = args[5].(string)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+			arg3,
+			arg4,
+			arg5,
+		)
+	})
+	return _c
+}
+
+func (_c *MockActressRepositoryInterface_UpdateCanonicalFields_Call) Return(err error) *MockActressRepositoryInterface_UpdateCanonicalFields_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockActressRepositoryInterface_UpdateCanonicalFields_Call) RunAndReturn(run func(ctx context.Context, id uint, firstName string, lastName string, japaneseName string, thumbURL string) error) *MockActressRepositoryInterface_UpdateCanonicalFields_Call {
 	_c.Call.Return(run)
 	return _c
 }

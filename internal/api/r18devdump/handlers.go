@@ -158,7 +158,7 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 	h.mu.Lock()
 	if h.running {
 		h.mu.Unlock()
-		c.JSON(http.StatusConflict, gin.H{"error": "a dump download is already in progress"})
+		c.JSON(http.StatusConflict, gin.H{errorResponseKey: "a dump download is already in progress"})
 		return
 	}
 	h.running = true
@@ -299,7 +299,7 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 			if reloadErr := h.reloadDump(path); reloadErr != nil {
 				logging.Warnf("r18dev dump: failed to restore handle after failed download: %v", reloadErr)
 			}
-			h.broadcastProgress("error", 0, 0)
+			h.broadcastProgress(errorResponseKey, 0, 0)
 			return
 		}
 		if res.Unchanged {
@@ -370,7 +370,7 @@ type dumpMatchView struct {
 func (h *dumpHandler) search(c *gin.Context) {
 	query := c.Query("q")
 	if query == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "query parameter 'q' is required"})
+		c.JSON(http.StatusBadRequest, gin.H{errorResponseKey: "query parameter 'q' is required"})
 		return
 	}
 
@@ -383,7 +383,7 @@ func (h *dumpHandler) search(c *gin.Context) {
 	running := h.running
 	h.mu.Unlock()
 	if running {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "dump import in progress"})
+		c.JSON(http.StatusServiceUnavailable, gin.H{errorResponseKey: "dump import in progress"})
 		return
 	}
 
@@ -391,7 +391,7 @@ func (h *dumpHandler) search(c *gin.Context) {
 	defer h.dumpMu.RUnlock()
 	store, err := r18devdump.Open(path)
 	if err != nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "dump not downloaded"})
+		c.JSON(http.StatusServiceUnavailable, gin.H{errorResponseKey: "dump not downloaded"})
 		return
 	}
 	defer func() { _ = store.Close() }()
@@ -402,7 +402,7 @@ func (h *dumpHandler) search(c *gin.Context) {
 		if !errors.Is(err, models.ErrDumpMiss) {
 			logging.Warnf("r18dev dump search: lookup failed for %s: %v", query, err)
 		}
-		c.JSON(http.StatusNotFound, gin.H{"error": "not found in dump"})
+		c.JSON(http.StatusNotFound, gin.H{errorResponseKey: "not found in dump"})
 		return
 	}
 
@@ -442,7 +442,7 @@ func (h *dumpHandler) clearDump(c *gin.Context) {
 	h.mu.Lock()
 	if h.running {
 		h.mu.Unlock()
-		c.JSON(http.StatusConflict, gin.H{"error": "a dump download is already in progress"})
+		c.JSON(http.StatusConflict, gin.H{errorResponseKey: "a dump download is already in progress"})
 		return
 	}
 	// Keep the lock held for the entire clear operation so a concurrent
@@ -453,7 +453,7 @@ func (h *dumpHandler) clearDump(c *gin.Context) {
 	path := resolveDumpPath(cfg)
 
 	if _, err := os.Stat(path); err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "dump not present"})
+		c.JSON(http.StatusNotFound, gin.H{errorResponseKey: "dump not present"})
 		return
 	}
 
@@ -464,7 +464,7 @@ func (h *dumpHandler) clearDump(c *gin.Context) {
 	}
 	if err != nil {
 		logging.Warnf("r18dev dump clear: refusing to delete invalid dump database %s: %v", path, err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "file is not a valid r18.dev dump database"})
+		c.JSON(http.StatusBadRequest, gin.H{errorResponseKey: "file is not a valid r18.dev dump database"})
 		return
 	}
 
@@ -492,7 +492,7 @@ func (h *dumpHandler) clearDump(c *gin.Context) {
 		if reloadErr := h.reloadDumpLocked(path); reloadErr != nil {
 			logging.Warnf("r18dev dump clear: failed to restore handle after delete error: %v", reloadErr)
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to delete dump file: %v", removeErr)})
+		c.JSON(http.StatusInternalServerError, gin.H{errorResponseKey: fmt.Sprintf("failed to delete dump file: %v", removeErr)})
 		return
 	}
 
@@ -531,7 +531,7 @@ func (h *dumpHandler) broadcastProgress(phase string, bytes, total int64) {
 		msg.Status = ws.ProgressStatusSuccess
 		msg.Progress = 100
 	}
-	if phase == "error" {
+	if phase == errorResponseKey {
 		msg.Status = ws.ProgressStatusError
 		msg.Error = "dump download failed"
 	}

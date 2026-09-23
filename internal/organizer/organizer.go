@@ -55,7 +55,7 @@ func resolveFileName(cfg *Config, engine template.EngineInterface, ctx *template
 
 func resolveBaseFileName(cfg *Config, engine template.EngineInterface, movie *models.Movie, match models.FileMatchInfo) string {
 	if cfg.RenameFile {
-		baseCtx := template.NewContextFromMovie(movie)
+		baseCtx := template.NewContextFromMovieWithOptions(movie, template.ContextOptions{FirstNameOrder: cfg.FirstNameOrder, RenderCredits: true, UseCreditedName: cfg.UseCreditedName})
 		baseCtx.GroupActress = cfg.GroupActress
 		baseCtx.GroupActressMin = cfg.GroupActressMin
 		baseCtx.GroupActressName = cfg.GroupActressName
@@ -185,7 +185,7 @@ type planContext struct {
 }
 
 func buildPlanContext(cfg *Config, engine template.EngineInterface, movie *models.Movie, match models.FileMatchInfo) planContext {
-	ctx := template.NewContextFromMovie(movie)
+	ctx := template.NewContextFromMovieWithOptions(movie, template.ContextOptions{FirstNameOrder: cfg.FirstNameOrder, RenderCredits: true, UseCreditedName: cfg.UseCreditedName})
 	ctx.GroupActress = cfg.GroupActress
 	ctx.GroupActressMin = cfg.GroupActressMin
 	ctx.GroupActressName = cfg.GroupActressName
@@ -441,6 +441,23 @@ func (o *Organizer) plan(match models.FileMatchInfo, movie *models.Movie, destDi
 		strategy = ResolveStrategy(o.fs, &overrideCfg, o.matcher, o.templateEngine)
 	}
 	return strategy.Plan(match, movie, destDir, forceUpdate)
+}
+
+// ExecuteOrganizePlan validates and executes a planned organization with the requested file mode.
+func (o *Organizer) ExecuteOrganizePlan(plan *OrganizePlan, moveFiles bool, linkMode LinkMode) (*OrganizeResult, error) {
+	if plan == nil {
+		return nil, fmt.Errorf("organization plan is nil")
+	}
+	plan.moveFiles = moveFiles
+	if !moveFiles {
+		plan.LinkMode = linkMode
+	}
+	if !plan.overwriteAuthorized {
+		if issues := o.validatePlan(plan); len(issues) > 0 {
+			return nil, fmt.Errorf("organization validation failed: %v", issues)
+		}
+	}
+	return o.execute(plan)
 }
 
 // execute executes an organization plan

@@ -253,14 +253,14 @@ func rescrapeProgressCode(result *contracts.BulkRescrapeMovieResult, movieID str
 	}
 	args := map[string]any{}
 	if movieID != "" {
-		args["movie_id"] = movieID
+		args[movieIDKey] = movieID
 	}
 	switch result.Status {
 	case models.RescrapeStatusSuccess:
 		return "SCRAPE_SUCCEEDED", args
 	case models.RescrapeStatusFailed:
 		if result.Error != "" {
-			args["error"] = result.Error
+			args[errorResponseKey] = result.Error
 		}
 		return "SCRAPE_FAILED", args
 	default:

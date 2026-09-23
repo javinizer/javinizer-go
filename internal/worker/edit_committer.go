@@ -56,6 +56,8 @@ type EditCommitPlan struct {
 	// later persist to fail closed rather than overwrite the committed row.
 	EnvelopeGenerationCommitted func(uint64)
 
+	Validate func(context.Context, database.EditUnit) error
+
 	// Publish commits the candidate to in-memory state. Executed only AFTER
 	// the transaction commits — never inside it, never before it.
 	Publish func() error
@@ -133,10 +135,11 @@ func (c *EditCommitter) Commit(ctx context.Context, plan *EditCommitPlan) error 
 	var acceptedGeneration uint64
 	generationCommitted := false
 	if err := c.tx.WithEditTx(ctx, func(u database.EditUnit) error {
-		// Renames FIRST inside the tx: the movie upserter's fill-merge reads
-		// renamed DB rows by ID/name back into the in-memory movie (edited
-		// names must reach NFO generation). Atomicity is unaffected — any
-		// failing leg rolls the whole transaction back.
+		if plan.Validate != nil {
+			if err := plan.Validate(ctx, u); err != nil {
+				return err
+			}
+		}
 		for _, rn := range plan.Renames {
 			existing, err := u.Actresses.FindByID(ctx, rn.ID)
 			switch {
@@ -186,8 +189,6 @@ func (c *EditCommitter) Commit(ctx context.Context, plan *EditCommitPlan) error 
 					generationCommitted = true
 					row.EnvelopeGeneration = accepted
 				} else if err := u.Jobs.Upsert(ctx, row); err != nil {
-					// Legacy/test repositories without the optional seam retain
-					// the pre-Phase-6 composite behavior.
 					return fmt.Errorf("persist job envelope: %w", err)
 				}
 			}

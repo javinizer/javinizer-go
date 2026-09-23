@@ -1,12 +1,13 @@
 package batch
 
 import (
-	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -25,6 +26,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/worker"
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/javinizer/javinizer-go/internal/workflow"
+	"go.uber.org/goleak"
 )
 
 type updateOptions struct {
@@ -271,91 +273,442 @@ func excludeFile(job *worker.BatchJob, filePath string) {
 	}
 }
 
-// newTestWSConn establishes a real local WebSocket connection pair (server +
-// client) for end-to-end hub-broadcast tests, mirroring the websocket package's
-// createTestConnections. Returns (serverConn, clientConn, server). The caller
-// wraps serverConn in ws.NewClient, registers it on a running hub, starts its
-// WritePump, and reads broadcasts from clientConn. Caller MUST close the conns
-// and server (t.Cleanup is recommended). Used by the e2e organize-progress
-// wiring test to prove the resolver's production sink delivers to a real client.
-func newTestWSConn(t *testing.T) (*websocket.Conn, *websocket.Conn, *httptest.Server) {
-	t.Helper()
-	var upgrader = websocket.Upgrader{ReadBufferSize: 1024, WriteBufferSize: 1024}
-	serverConnCh := make(chan *websocket.Conn, 1)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		conn, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			t.Errorf("upgrade failed: %v", err)
-			return
+type websocketDialFunc func(string, http.Header) (*websocket.Conn, *http.Response, error)
+type websocketUpgradeFunc func(http.ResponseWriter, *http.Request, http.Header) (*websocket.Conn, error)
+
+type testWSConnOptions struct {
+	dial            websocketDialFunc
+	upgrade         websocketUpgradeFunc
+	resultGate      <-chan struct{}
+	acceptTimeout   time.Duration
+	shutdownStarted chan<- struct{}
+	handlerDone     chan<- struct{}
+}
+
+type testWSConnResult struct {
+	conn *websocket.Conn
+	err  error
+}
+
+type testWSConnections struct {
+	serverConn *websocket.Conn
+	clientConn *websocket.Conn
+	server     *httptest.Server
+
+	stop            chan struct{}
+	result          <-chan testWSConnResult
+	shutdownStarted chan<- struct{}
+	closeOnce       sync.Once
+
+	handlerMu       sync.Mutex
+	handlerStopping bool
+	handlerWG       sync.WaitGroup
+	handlerErr      error
+}
+
+func (c *testWSConnections) beginHandler() bool {
+	c.handlerMu.Lock()
+	defer c.handlerMu.Unlock()
+	if c.handlerStopping {
+		return false
+	}
+	c.handlerWG.Add(1)
+	return true
+}
+
+func (c *testWSConnections) publishHandlerResult(result chan<- testWSConnResult, value testWSConnResult) {
+	c.handlerMu.Lock()
+	defer c.handlerMu.Unlock()
+	if c.handlerStopping {
+		if value.conn != nil {
+			_ = value.conn.Close()
 		}
-		serverConnCh <- conn
-	}))
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
-	clientConn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
-	if err != nil {
-		t.Fatalf("dial websocket failed: %v", err)
+		return
 	}
 	select {
-	case serverConn := <-serverConnCh:
-		return serverConn, clientConn, server
-	case <-time.After(2 * time.Second):
-		t.Fatal("timeout waiting for server-side websocket connection")
-		return nil, nil, nil
+	case result <- value:
+	default:
+		if value.conn != nil {
+			_ = value.conn.Close()
+		}
 	}
 }
 
-// registerClientOnHub registers a real ws.Client (wrapping serverConn) on the
-// running hub, starts its WritePump so broadcasts reach clientConn, and waits
-// deterministically (by spec, not just by runtime scheduler behavior) for
-// registration to complete. Readiness is confirmed by a probe round-trip: a
-// probe message is broadcast and we block until clientConn receives it. A
-// broadcast is only forwarded to REGISTERED clients, so receiving the probe
-// proves the hub's Run loop has processed the registration.
-//
-// Why retry: Hub.Run drains its register and broadcast channels via a select
-// whose case choice among multiple-ready cases is not spec-guaranteed, so a
-// single probe could (in principle) be processed before the registration and
-// dropped, leaving the helper blocked. The loop re-broadcasts the probe on
-// each read timeout: by the second iteration the register has been drained
-// (registration is ~nanoseconds), so a subsequent probe is guaranteed to be
-// forwarded — making success independent of select ordering. Bounded by an
-// overall deadline so a genuinely broken setup fails fast rather than hanging.
-// Any non-probe frame (e.g. a ping) received while waiting is drained and
-// skipped. Cleanup of conns/server is the caller's responsibility.
-func registerClientOnHub(t *testing.T, hub *ws.Hub, serverConn *websocket.Conn, clientConn *websocket.Conn) {
-	t.Helper()
-	const probeJobID = "__probe_ready__"
-	probe := &ws.ProgressMessage{JobID: probeJobID, Status: ws.ProgressStatusPending}
-	client := ws.NewClient(serverConn)
-	hub.Register(client)
-	go client.WritePump()
+// Close first prevents new handler ownership, then closes known resources and
+// the listener before joining every handler. Only after the join can it safely
+// drain a result that raced with timeout; no handler can publish afterward.
+func (c *testWSConnections) Close() {
+	c.closeOnce.Do(func() {
+		c.handlerMu.Lock()
+		close(c.stop)
+		c.handlerStopping = true
+		c.handlerMu.Unlock()
+		if c.shutdownStarted != nil {
+			c.shutdownStarted <- struct{}{}
+		}
 
+		if c.clientConn != nil {
+			_ = c.clientConn.Close()
+		}
+		if c.serverConn != nil {
+			_ = c.serverConn.Close()
+		}
+		c.server.Close()
+		c.handlerWG.Wait()
+
+		select {
+		case result := <-c.result:
+			if result.conn != nil && result.conn != c.serverConn {
+				_ = result.conn.Close()
+			}
+			c.handlerErr = result.err
+		default:
+		}
+	})
+}
+
+// newTestWSConn establishes a real local WebSocket pair. Setup errors are
+// returned to the test goroutine; the HTTP handler only publishes its result
+// through a bounded channel. Failed setup closes every acquired resource before
+// returning, while successful callers own the returned idempotent Close method.
+func newTestWSConn() (*testWSConnections, error) {
+	return newTestWSConnWithOptions(testWSConnOptions{})
+}
+
+func newTestWSConnWithOptions(options testWSConnOptions) (*testWSConnections, error) {
+	if options.acceptTimeout == 0 {
+		options.acceptTimeout = 2 * time.Second
+	}
+	if options.dial == nil {
+		options.dial = websocket.DefaultDialer.Dial
+	}
+	if options.upgrade == nil {
+		upgrader := websocket.Upgrader{ReadBufferSize: 1024, WriteBufferSize: 1024}
+		options.upgrade = upgrader.Upgrade
+	}
+
+	resultCh := make(chan testWSConnResult, 1)
+	connections := &testWSConnections{
+		stop:            make(chan struct{}),
+		result:          resultCh,
+		shutdownStarted: options.shutdownStarted,
+	}
+	connections.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !connections.beginHandler() {
+			return
+		}
+		defer connections.handlerWG.Done()
+		if options.handlerDone != nil {
+			defer func() { options.handlerDone <- struct{}{} }()
+		}
+
+		conn, err := options.upgrade(w, r, nil)
+		if err == nil && options.resultGate != nil {
+			<-options.resultGate
+		}
+		connections.publishHandlerResult(resultCh, testWSConnResult{conn: conn, err: err})
+	}))
+
+	wsURL := "ws" + strings.TrimPrefix(connections.server.URL, "http")
+	clientConn, _, err := options.dial(wsURL, nil)
+	connections.clientConn = clientConn
+	if err != nil {
+		connections.Close()
+		if connections.handlerErr != nil {
+			return nil, fmt.Errorf("upgrade websocket: %w", connections.handlerErr)
+		}
+		return nil, fmt.Errorf("dial websocket: %w", err)
+	}
+
+	timer := time.NewTimer(options.acceptTimeout)
+	defer timer.Stop()
+	select {
+	case result := <-resultCh:
+		if result.err != nil {
+			connections.Close()
+			return nil, fmt.Errorf("upgrade websocket: %w", result.err)
+		}
+		connections.serverConn = result.conn
+		return connections, nil
+	case <-timer.C:
+		connections.Close()
+		return nil, fmt.Errorf("timeout waiting for server-side websocket connection after %v", options.acceptTimeout)
+	}
+}
+
+type websocketMessageReader interface {
+	ReadMessage() (messageType int, data []byte, err error)
+}
+
+// readUntilMessage performs one Gorilla-compatible read loop. Successful
+// unrelated frames may be skipped, but a read error is terminal: Gorilla
+// WebSocket connections must never be read again after ReadMessage reports an
+// error. The caller must set a read deadline before entering the loop.
+func readUntilMessage(reader websocketMessageReader, marker string) ([]byte, error) {
+	for {
+		_, data, err := reader.ReadMessage()
+		if err != nil {
+			return nil, err
+		}
+		var message ws.ProgressMessage
+		if err := json.Unmarshal(data, &message); err != nil {
+			return nil, fmt.Errorf("decode websocket progress message: %w", err)
+		}
+		if message.JobID == "" {
+			return nil, fmt.Errorf("decode websocket progress message: missing job_id")
+		}
+		if message.JobID == marker {
+			return data, nil
+		}
+	}
+}
+
+func readUntilProbe(reader websocketMessageReader, probeJobID string) error {
+	_, err := readUntilMessage(reader, probeJobID)
+	return err
+}
+
+// registerClientOnHub registers a real ws.Client, starts its WritePump, and
+// waits for an observed probe delivered through the running hub. Probe sends
+// repeat because Hub.Run may select broadcast before registration when both
+// channels are ready. Reads do not repeat after an error: one overall deadline
+// bounds a single read loop, while a separate sender retries the harmless
+// broadcast side until registration is acknowledged.
+//
+// The returned channel closes when WritePump exits. Callers must stop the hub,
+// wait for this channel, then close the connection pair and HTTP server.
+func registerClientOnHub(hub *ws.Hub, serverConn *websocket.Conn, clientConn *websocket.Conn) (<-chan struct{}, error) {
 	const (
+		probeJobID      = "__probe_ready__"
 		probeInterval   = 20 * time.Millisecond
 		overallDeadline = 2 * time.Second
 	)
-	deadline := time.Now().Add(overallDeadline)
-	for {
-		if err := hub.BroadcastProgress(probe); err != nil {
-			t.Fatalf("probe broadcast failed: %v", err)
-		}
-		// Short per-attempt read deadline: on timeout, re-broadcast and retry
-		// (the register has by now been drained, so the next probe is delivered).
-		if err := clientConn.SetReadDeadline(time.Now().Add(probeInterval)); err != nil {
-			t.Fatalf("set probe read deadline: %v", err)
-		}
-		_, data, err := clientConn.ReadMessage()
-		if err == nil {
-			if bytes.Contains(data, []byte(probeJobID)) {
-				return // registration confirmed; pipeline ready for the real broadcast
+
+	client := ws.NewClient(serverConn)
+	hub.Register(client)
+	writePumpDone := make(chan struct{})
+	go func() {
+		defer close(writePumpDone)
+		client.WritePump()
+	}()
+
+	if err := clientConn.SetReadDeadline(time.Now().Add(overallDeadline)); err != nil {
+		return writePumpDone, fmt.Errorf("set probe read deadline: %w", err)
+	}
+
+	probe := &ws.ProgressMessage{JobID: probeJobID, Status: ws.ProgressStatusPending}
+	stopProbe := make(chan struct{})
+	probeSenderDone := make(chan struct{})
+	probeErr := make(chan error, 1)
+	go func() {
+		defer close(probeSenderDone)
+		ticker := time.NewTicker(probeInterval)
+		defer ticker.Stop()
+		for {
+			if err := hub.BroadcastProgress(probe); err != nil {
+				probeErr <- err
+				return
 			}
-			// not the probe (e.g. a ping frame payload) — drain and keep reading
-			// the current probe without re-broadcasting.
-			continue
+			select {
+			case <-stopProbe:
+				return
+			case <-ticker.C:
+			}
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("did not receive probe (hub registration not processed within %v): %v", overallDeadline, err)
-		}
-		// read timed out — loop re-broadcasts the probe and retries
+	}()
+
+	readErr := readUntilProbe(clientConn, probeJobID)
+	close(stopProbe)
+	<-probeSenderDone
+	select {
+	case err := <-probeErr:
+		return writePumpDone, fmt.Errorf("probe broadcast failed: %w", err)
+	default:
+	}
+	if readErr != nil {
+		return writePumpDone, fmt.Errorf("hub registration probe failed: %w", readErr)
+	}
+	return writePumpDone, nil
+}
+
+type queuedMessageReader struct {
+	messages [][]byte
+	reads    int
+}
+
+func (r *queuedMessageReader) ReadMessage() (int, []byte, error) {
+	if r.reads >= len(r.messages) {
+		return 0, nil, fmt.Errorf("message queue exhausted")
+	}
+	message := r.messages[r.reads]
+	r.reads++
+	return websocket.TextMessage, message, nil
+}
+
+func TestReadUntilMessageMatchesExactJobID(t *testing.T) {
+	reader := &queuedMessageReader{messages: [][]byte{
+		[]byte(`{"job_id":"other-job","file_path":"/tmp/stub-job.mp4","message":"processing stub-job"}`),
+		[]byte(`{"job_id":"stub-job-suffix","message":"not the requested job"}`),
+		[]byte(`{"job_id":"stub-job","message":"expected"}`),
+	}}
+
+	data, err := readUntilMessage(reader, "stub-job")
+	if err != nil {
+		t.Fatalf("readUntilMessage() error = %v", err)
+	}
+	if string(data) != string(reader.messages[2]) {
+		t.Fatalf("readUntilMessage() = %s, want exact JobID frame %s", data, reader.messages[2])
+	}
+	if reader.reads != 3 {
+		t.Fatalf("ReadMessage called %d times, want 3", reader.reads)
+	}
+}
+
+func TestReadUntilMessageRejectsMalformedFrame(t *testing.T) {
+	tests := map[string][]byte{
+		"invalid JSON":  []byte(`{"job_id":"stub-job"`),
+		"missing JobID": []byte(`{"message":"stub-job"}`),
+	}
+	for name, frame := range tests {
+		t.Run(name, func(t *testing.T) {
+			reader := &queuedMessageReader{messages: [][]byte{
+				frame,
+				[]byte(`{"job_id":"stub-job"}`),
+			}}
+
+			_, err := readUntilMessage(reader, "stub-job")
+			if err == nil || !strings.Contains(err.Error(), "decode websocket progress message") {
+				t.Fatalf("readUntilMessage() error = %v, want malformed-frame decode error", err)
+			}
+			if reader.reads != 1 {
+				t.Fatalf("ReadMessage called %d times after malformed frame, want 1", reader.reads)
+			}
+		})
+	}
+}
+
+func TestReadUntilProbeRequiresExactJobID(t *testing.T) {
+	reader := &queuedMessageReader{messages: [][]byte{
+		[]byte(`{"job_id":"other-job","message":"__probe_ready__"}`),
+	}}
+
+	err := readUntilProbe(reader, "__probe_ready__")
+	if err == nil || !strings.Contains(err.Error(), "message queue exhausted") {
+		t.Fatalf("readUntilProbe() error = %v, want terminal queue error after unrelated frame", err)
+	}
+	if reader.reads != 1 {
+		t.Fatalf("ReadMessage called %d times before terminal queue error, want 1", reader.reads)
+	}
+}
+
+func TestNewTestWSConnDialFailureCleansUp(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
+	connections, err := newTestWSConnWithOptions(testWSConnOptions{
+		dial: func(string, http.Header) (*websocket.Conn, *http.Response, error) {
+			return nil, nil, fmt.Errorf("injected dial failure")
+		},
+	})
+	if connections != nil {
+		t.Fatalf("newTestWSConnWithOptions() connections = %v, want nil", connections)
+	}
+	if err == nil || !strings.Contains(err.Error(), "dial websocket: injected dial failure") {
+		t.Fatalf("newTestWSConnWithOptions() error = %v, want dial failure", err)
+	}
+}
+
+func TestNewTestWSConnUpgradeFailureCleansUp(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
+	connections, err := newTestWSConnWithOptions(testWSConnOptions{
+		upgrade: func(http.ResponseWriter, *http.Request, http.Header) (*websocket.Conn, error) {
+			return nil, fmt.Errorf("injected upgrade failure")
+		},
+	})
+	if connections != nil {
+		t.Fatalf("newTestWSConnWithOptions() connections = %v, want nil", connections)
+	}
+	if err == nil || !strings.Contains(err.Error(), "upgrade websocket: injected upgrade failure") {
+		t.Fatalf("newTestWSConnWithOptions() error = %v, want upgrade failure", err)
+	}
+}
+
+func TestNewTestWSConnAcceptTimeoutJoinsLateHandoff(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
+	resultGate := make(chan struct{})
+	upgraded := make(chan *websocket.Conn, 1)
+	shutdownStarted := make(chan struct{}, 1)
+	handlerDone := make(chan struct{}, 1)
+	upgrader := websocket.Upgrader{ReadBufferSize: 1024, WriteBufferSize: 1024}
+
+	type constructorResult struct {
+		connections *testWSConnections
+		err         error
+	}
+	constructorDone := make(chan constructorResult, 1)
+	go func() {
+		connections, err := newTestWSConnWithOptions(testWSConnOptions{
+			upgrade: func(w http.ResponseWriter, r *http.Request, h http.Header) (*websocket.Conn, error) {
+				conn, err := upgrader.Upgrade(w, r, h)
+				if err == nil {
+					upgraded <- conn
+				}
+				return conn, err
+			},
+			resultGate:      resultGate,
+			acceptTimeout:   10 * time.Millisecond,
+			shutdownStarted: shutdownStarted,
+			handlerDone:     handlerDone,
+		})
+		constructorDone <- constructorResult{connections: connections, err: err}
+	}()
+
+	serverConn := <-upgraded
+	<-shutdownStarted
+	select {
+	case result := <-constructorDone:
+		t.Fatalf("constructor returned before gated handler exited: connections=%v err=%v", result.connections, result.err)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(resultGate)
+	result := <-constructorDone
+	if result.connections != nil {
+		t.Fatalf("newTestWSConnWithOptions() connections = %v, want nil", result.connections)
+	}
+	if result.err == nil || !strings.Contains(result.err.Error(), "timeout waiting for server-side websocket connection") {
+		t.Fatalf("newTestWSConnWithOptions() error = %v, want accept timeout", result.err)
+	}
+	select {
+	case <-handlerDone:
+	default:
+		t.Fatal("Close returned before the upgraded handler completed")
+	}
+	if err := serverConn.WriteMessage(websocket.TextMessage, []byte("late")); err == nil {
+		t.Fatal("late server connection remained open after Close returned")
+	}
+}
+
+type terminalErrorMessageReader struct {
+	reads int
+}
+
+func (r *terminalErrorMessageReader) ReadMessage() (int, []byte, error) {
+	r.reads++
+	if r.reads > 1 {
+		panic("ReadMessage called after terminal error")
+	}
+	return 0, nil, fmt.Errorf("injected terminal read failure")
+}
+
+func TestReadUntilProbeStopsAfterReadFailure(t *testing.T) {
+	reader := &terminalErrorMessageReader{}
+	err := readUntilProbe(reader, "probe")
+	if err == nil || !strings.Contains(err.Error(), "injected terminal read failure") {
+		t.Fatalf("readUntilProbe() error = %v, want injected terminal read failure", err)
+	}
+	if reader.reads != 1 {
+		t.Fatalf("ReadMessage called %d times after terminal failure, want 1", reader.reads)
 	}
 }

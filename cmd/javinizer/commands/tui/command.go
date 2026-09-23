@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"os/signal"
@@ -134,21 +133,13 @@ func run(cmd *cobra.Command, args []string) error {
 		_, _ = fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
 		os.Exit(1)
 	}
+	defer logging.CloseLogger()
 
 	logging.Infof("Starting TUI mode for path: %s", sourcePath)
 
-	// Create context with cancellation
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Handle signals
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-	go func() {
-		<-sigChan
-		logging.Info("Received interrupt signal, shutting down...")
-		cancel()
-	}()
+	// Tie command cancellation and process signals to one bounded context.
+	ctx, stopSignals := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
 
 	// Create TUI model with narrow config
 	model := tui.New(tui.TUIModelConfig{
@@ -201,6 +192,7 @@ func run(cmd *cobra.Command, args []string) error {
 
 	// Initialize repositories
 	actressRepo := database.NewActressRepository(bs.DB)
+	movieRepo := database.NewMovieRepository(bs.DB)
 	model.SetActressRepo(actressRepo)
 
 	// --- Construct SortService (the TUI→worker seam) ---
@@ -226,6 +218,7 @@ func run(cmd *cobra.Command, args []string) error {
 				NFOEnabled:      processorCfg.NFOEnabled,
 			},
 			nil, // no emitter for TUI
+			movieRepo,
 		),
 		bs.ScraperRegistry,
 		processorCfg,
@@ -286,6 +279,9 @@ func run(cmd *cobra.Command, args []string) error {
 		model,
 		tea.WithAltScreen(),
 		tea.WithMouseCellMotion(),
+		tea.WithInput(cmd.InOrStdin()),
+		tea.WithOutput(cmd.OutOrStdout()),
+		tea.WithContext(ctx),
 	)
 
 	// Run TUI

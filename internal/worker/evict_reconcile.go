@@ -133,7 +133,7 @@ func (c *TempDirCleaner) reconcileEvictWitness(ctx context.Context, dir, jobID, 
 	}
 	failed := false
 	if committed {
-		for _, name := range []string{w.OldID + "-full.jpg", w.OldID + ".jpg"} {
+		for _, name := range []string{w.OldID + fullImageSuffix, w.OldID + jpgExtension} {
 			if rmErr := c.fs.Remove(filepath.Join(dir, name)); rmErr != nil && !os.IsNotExist(rmErr) {
 				failed = true
 				logging.Warnf("evict reconcile removal %s: %v", name, rmErr)

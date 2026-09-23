@@ -12,6 +12,7 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import { createActressStore } from './stores/actress-store.svelte';
 	import ActressForm from './components/ActressForm.svelte';
+	import ActressCandidatesSection from '$lib/components/actress/ActressCandidatesSection.svelte';
 	import ActressToolbar from './components/ActressToolbar.svelte';
 	import ActressCardsView from './components/ActressCardsView.svelte';
 	import ActressCompactView from './components/ActressCompactView.svelte';
@@ -188,6 +189,10 @@
 						</Card>
 					</div>
 				{/if}
+
+				<div class="mb-4">
+					<ActressCandidatesSection onPromoted={() => queryClient.invalidateQueries({ queryKey: ['actresses'] })} />
+				</div>
 
 				{#if store.loading}
 					<div in:fade|local={{ duration: 180 }}>
