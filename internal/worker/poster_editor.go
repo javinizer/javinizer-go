@@ -387,10 +387,14 @@ func (m *LockedMovieOps) legacyRenames(ctx context.Context, plan *EditCommitPlan
 // thumbnail. Intent travels in the request (Actress.ThumbEdited) instead of
 // being inferred: inference from any baseline can revert a newer database value
 // (stale cache) or silently drop a legitimate edit when the client's projection
-// is fresher than the cache. An empty value is still treated as "not provided",
-// so clearing a shared identity thumbnail stays a catalog operation.
+// is fresher than the cache. The intent flag itself distinguishes a clear from
+// an omitted field: thumb_edited=true with an empty URL is an explicit CLEAR
+// that must reach RenameIdentityFields (otherwise the stored thumbnail
+// survives the save and the next refresh restores it, so the editor could
+// never clear a thumbnail), while an omitted field (no flag) leaves the shared
+// identity thumbnail untouched.
 func actressThumbEdited(a models.Actress) bool {
-	return a.ThumbEdited && strings.TrimSpace(a.ThumbURL) != ""
+	return a.ThumbEdited
 }
 
 func fileFirstMovieResult(m *LockedMovieOps, filePaths []string) *resultstore.MovieResult {

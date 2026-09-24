@@ -287,6 +287,12 @@
 	// Select an actress from search results
 	function selectActressFromSearch(actress: Actress) {
 		editingActress = { ...actress };
+		// Re-baseline the thumbnail comparison against the SELECTED actress: the
+		// editor may have opened on a different row whose thumb_url would
+		// otherwise stay the baseline, and restoring the selected actress's own
+		// thumbnail would still be flagged as an edit — submitting an
+		// unnecessary shared-identity thumbnail write on save.
+		originalThumbURL = actress.thumb_url ?? '';
 		searchQuery = getFullName(actress); // Show selected name in input
 		showSearchResults = false;
 	}

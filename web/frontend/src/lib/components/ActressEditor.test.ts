@@ -13,6 +13,12 @@ describe('ActressEditor production persistence', () => {
 			configurable: true,
 			value: () => ({ cancel: vi.fn(), finished: Promise.resolve(), onfinish: null }),
 		});
+		// jsdom has no Web Animations API: the cast grid's flip animation probes
+		// element.getAnimations() when a keyed item is replaced.
+		Object.defineProperty(Element.prototype, 'getAnimations', {
+			configurable: true,
+			value: () => [],
+		});
 	});
 
 	afterEach(() => {
@@ -167,5 +173,52 @@ describe('ActressEditor production persistence', () => {
 			thumb_url: 'https://new.test/thumb.jpg',
 			thumb_edited: true,
 		});
+	});
+
+	it('re-baselines the thumbnail comparison when the search selection changes', async () => {
+		vi.spyOn(apiClient, 'request').mockResolvedValue([
+			{
+				id: 9,
+				first_name: 'Other',
+				last_name: 'Identity',
+				thumb_url: 'https://b.test/thumb.jpg',
+			},
+		]);
+		const onUpdate = vi.fn();
+		const movie = {
+			id: 'movie-thumb-baseline',
+			title: 'Movie',
+			actresses: [
+				{
+					id: 3,
+					first_name: 'First',
+					last_name: 'Actress',
+					thumb_url: 'https://a.test/thumb.jpg',
+				},
+			],
+		};
+
+		const view = render(ActressEditor, { movie, onUpdate });
+		// Open the editor on actress A, then pick actress B from the search
+		// results: the comparison baseline must follow B, not stay on A's URL.
+		await fireEvent.click(view.getAllByRole('button', { name: /Edit Actress/i })[0]);
+		await fireEvent.focus(view.getByPlaceholderText(/Type to search actresses/i));
+		const row = await view.findByText('Identity Other');
+		await fireEvent.click(row);
+
+		// Change B's thumbnail, then restore it to B's original URL.
+		const thumb = await view.findByLabelText(/Thumbnail URL/i);
+		await fireEvent.input(thumb, { target: { value: 'https://new.test/thumb.jpg' } });
+		await fireEvent.input(thumb, { target: { value: 'https://b.test/thumb.jpg' } });
+		const save = view.getAllByRole('button', { name: /Save Changes/i });
+		await fireEvent.click(save[save.length - 1]);
+
+		await waitFor(() => expect(onUpdate).toHaveBeenCalled());
+		const updated = onUpdate.mock.lastCall?.[0];
+		expect(updated.actresses[0]).toMatchObject({
+			id: 9,
+			thumb_url: 'https://b.test/thumb.jpg',
+		});
+		expect(updated.actresses[0].thumb_edited).toBe(false);
 	});
 });
