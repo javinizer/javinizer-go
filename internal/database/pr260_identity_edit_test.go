@@ -58,6 +58,42 @@ func TestRenameIdentityFieldsPersistsThumbnailAndRefreshesSnapshotCredits(t *tes
 	assert.Equal(t, "Pinned Display", gotOverridden.OverrideName)
 }
 
+func TestRenameIdentityFieldsKeepsUserTouchedScrapeSnapshotName(t *testing.T) {
+	db := newCreditTestDB(t)
+	ctx := context.Background()
+
+	identity := models.Actress{
+		FirstName: "Old", LastName: "Name", JapaneseName: "旧名",
+		Verified: true, Origin: ActressOriginUser,
+	}
+	require.NoError(t, db.Create(&identity).Error)
+	movie := models.Movie{ContentID: "user-touched-scrape", ID: "user-touched-scrape", Title: "User-touched scrape"}
+	require.NoError(t, db.Create(&movie).Error)
+	credit := models.MovieCredit{
+		MovieContentID:       movie.ContentID,
+		ActressID:            identity.ID,
+		CreditedName:         "Name Old",
+		CreditedJapaneseName: "旧名",
+		Source:               "dmm",
+		Origin:               string(models.CreditOriginScrape),
+	}
+	require.NoError(t, db.Create(&credit).Error)
+
+	service := NewCollisionService(db)
+	require.NoError(t, service.UpdateCreditOverride(ctx, credit.ID, "Temporary Override", true))
+	require.NoError(t, service.UpdateCreditOverride(ctx, credit.ID, "", false))
+	require.NoError(t, db.First(&credit, credit.ID).Error)
+	require.Equal(t, "dmm", credit.Source)
+	require.Equal(t, string(models.CreditOriginUser), credit.Origin)
+	require.False(t, credit.UserOverride)
+
+	require.NoError(t, NewActressRepository(db).RenameIdentityFields(ctx, identity.ID, "New", "Identity", "新名", ""))
+
+	require.NoError(t, db.First(&credit, credit.ID).Error)
+	assert.Equal(t, "Name Old", credit.CreditedName, "scraper attribution must survive a later canonical rename")
+	assert.Equal(t, "旧名", credit.CreditedJapaneseName)
+}
+
 func TestRenameNameFieldsLeavesThumbnailUntouched(t *testing.T) {
 	db := newCreditTestDB(t)
 	repos := db.Repositories()

@@ -18,13 +18,14 @@
 		movie: Movie;
 		onUpdate: (movie: Movie) => void;
 		onPersistEdits?: () => void | Promise<void>;
+		onCreditOverridePersisted?: (movieContentId: string) => void | Promise<void>;
 		actressSources?: Record<string, string>;
 		showFieldSources?: boolean;
 		savingEdits?: boolean;
 		organizing?: boolean;
 	}
 
-	let { movie, onUpdate, onPersistEdits, actressSources, showFieldSources = false, savingEdits = false, organizing = false }: Props = $props();
+	let { movie, onUpdate, onPersistEdits, onCreditOverridePersisted, actressSources, showFieldSources = false, savingEdits = false, organizing = false }: Props = $props();
 	const configQuery = createConfigQuery();
 	let firstNameOrder = $derived(configQuery.data?.output?.first_name_order ?? false);
 	let japaneseNames = $derived(
@@ -333,10 +334,9 @@
 			);
 			creditStates = nextCredits.map((item) => ({ ...item }));
 			overrideDrafts = { ...overrideDrafts, [credit.id]: name };
-			// Propagate into the parent movie/job state: the override endpoint already
-			// persisted it, so a private copy alone would lose the badge and clear
-			// action as soon as the movie prop is rebuilt from the stale snapshot.
-			onUpdate({ ...movie, credits: nextCredits });
+			// This endpoint is already persisted. Refresh the authoritative batch result
+			// instead of adding it to the parent's pending movie-edit overlay.
+			await onCreditOverridePersisted?.(movie.code ?? movie.content_id ?? movie.id);
 		} catch (error) {
 			console.error('Failed to update movie-specific actress name:', error);
 			creditUpdateErrors = { ...creditUpdateErrors, [credit.id]: true };
