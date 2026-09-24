@@ -48,6 +48,8 @@ type ActressRepositoryInterface interface {
 	Create(ctx context.Context, actress *models.Actress) error
 	Update(ctx context.Context, actress *models.Actress) error
 	RenameNameFields(ctx context.Context, id uint, firstName, lastName, japaneseName string) error
+	// RenameIdentityFields applies an explicit identity edit including the thumbnail.
+	RenameIdentityFields(ctx context.Context, id uint, firstName, lastName, japaneseName, thumbURL string) error
 	FindByID(ctx context.Context, id uint) (*models.Actress, error)
 	FindByDMMID(ctx context.Context, dmmID int) (*models.Actress, error)
 	FindByFirstNameLastName(ctx context.Context, firstName, lastName string) (*models.Actress, error)

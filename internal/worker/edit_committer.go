@@ -26,6 +26,11 @@ type ActressRenamePlan struct {
 	FirstName    string
 	LastName     string
 	JapaneseName string
+	ThumbURL     string
+	// ThumbEdited carries explicit client intent for the thumbnail. The server
+	// never infers it: inference from any baseline can revert a newer database
+	// value or silently drop a legitimate edit when the client is fresher.
+	ThumbEdited bool
 }
 
 // EditCommitPlan is the complete atomic unit of a review-edit commit.
@@ -148,7 +153,15 @@ func (c *EditCommitter) Commit(ctx context.Context, plan *EditCommitPlan) error 
 			case err != nil || existing == nil:
 				continue
 			}
-			if existing.FirstName == rn.FirstName && existing.LastName == rn.LastName && existing.JapaneseName == rn.JapaneseName {
+			namesUnchanged := existing.FirstName == rn.FirstName && existing.LastName == rn.LastName && existing.JapaneseName == rn.JapaneseName
+			thumbChanged := rn.ThumbEdited
+			if namesUnchanged && !thumbChanged {
+				continue
+			}
+			if thumbChanged {
+				if err := u.Actresses.RenameIdentityFields(ctx, rn.ID, rn.FirstName, rn.LastName, rn.JapaneseName, rn.ThumbURL); err != nil {
+					return fmt.Errorf("persist actress identity edit: %w", err)
+				}
 				continue
 			}
 			if err := u.Actresses.RenameNameFields(ctx, rn.ID, rn.FirstName, rn.LastName, rn.JapaneseName); err != nil {

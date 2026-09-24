@@ -18,12 +18,15 @@ import (
 
 // ActressView is the API-layer projection of models.Actress.
 type ActressView struct {
-	ID           uint                     `json:"id"`
-	DMMID        int                      `json:"dmm_id"`
-	FirstName    string                   `json:"first_name"`
-	LastName     string                   `json:"last_name"`
-	JapaneseName string                   `json:"japanese_name"`
-	ThumbURL     string                   `json:"thumb_url"`
+	ID           uint   `json:"id"`
+	DMMID        int    `json:"dmm_id"`
+	FirstName    string `json:"first_name"`
+	LastName     string `json:"last_name"`
+	JapaneseName string `json:"japanese_name"`
+	ThumbURL     string `json:"thumb_url"`
+	// ThumbEdited marks an explicit client edit of thumb_url so the server never
+	// infers thumbnail intent from snapshot or database comparisons.
+	ThumbEdited  bool                     `json:"thumb_edited,omitempty"`
 	Aliases      string                   `json:"aliases"`
 	Verified     bool                     `json:"verified"`
 	Origin       string                   `json:"origin"`
@@ -31,6 +34,21 @@ type ActressView struct {
 	Translations []ActressTranslationView `json:"translations,omitempty"`
 	CreatedAt    time.Time                `json:"created_at"`
 	UpdatedAt    time.Time                `json:"updated_at"`
+}
+
+// MovieCreditView is the read-only API projection of a per-movie actress credit.
+// Credit mutations use dedicated endpoints; review PATCH payloads must not map
+// these rows back into models.Movie.
+type MovieCreditView struct {
+	ID                   uint   `json:"id"`
+	ActressID            uint   `json:"actress_id"`
+	CreditedName         string `json:"credited_name"`
+	CreditedJapaneseName string `json:"credited_japanese_name"`
+	ReportedThumbURL     string `json:"reported_thumb_url"`
+	OverrideName         string `json:"override_name"`
+	UserOverride         bool   `json:"user_override"`
+	Suppressed           bool   `json:"suppressed"`
+	OrderIndex           int    `json:"order_index"`
 }
 
 // GenreView is the API-layer projection of models.Genre.
@@ -120,10 +138,30 @@ func ActressViewToModel(v *ActressView) *models.Actress {
 		LastName:     v.LastName,
 		JapaneseName: v.JapaneseName,
 		ThumbURL:     v.ThumbURL,
+		ThumbEdited:  v.ThumbEdited,
 		Aliases:      v.Aliases,
 		Translations: ActressTranslationViewSliceToModels(v.Translations),
 		CreatedAt:    v.CreatedAt,
 		UpdatedAt:    v.UpdatedAt,
+	}
+}
+
+// MovieCreditViewFromModel maps the read-only fields of a persistence-layer
+// MovieCredit to its API projection.
+func MovieCreditViewFromModel(c *models.MovieCredit) *MovieCreditView {
+	if c == nil {
+		return nil
+	}
+	return &MovieCreditView{
+		ID:                   c.ID,
+		ActressID:            c.ActressID,
+		CreditedName:         c.CreditedName,
+		CreditedJapaneseName: c.CreditedJapaneseName,
+		ReportedThumbURL:     c.ReportedThumbURL,
+		OverrideName:         c.OverrideName,
+		UserOverride:         c.UserOverride,
+		Suppressed:           c.Suppressed,
+		OrderIndex:           c.OrderIndex,
 	}
 }
 
@@ -309,6 +347,11 @@ func sliceToModels[V any, M any](vs []V, conv func(*V) *M) []M {
 // A nil input yields a nil result so the JSON shape (null vs []) is preserved.
 func ActressViewSliceFromModels(ms []models.Actress) []ActressView {
 	return sliceFromModels(ms, ActressViewFromModel)
+}
+
+// MovieCreditViewSliceFromModels maps movie credits to read-only API views.
+func MovieCreditViewSliceFromModels(ms []models.MovieCredit) []MovieCreditView {
+	return sliceFromModels(ms, MovieCreditViewFromModel)
 }
 
 // ActressViewSliceToModels maps a slice of ActressViews to Actresses.

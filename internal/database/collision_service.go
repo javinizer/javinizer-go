@@ -249,6 +249,13 @@ func (s *CollisionService) resolveTx(tx *gorm.DB, collisionID uint, resolution s
 			if err := deleteActressTranslationsTx(tx, credit.ActressID); err != nil {
 				return 0, err
 			}
+			// Canonical adoption renames the identity row like a catalog edit,
+			// so identity-snapshot credits must be refreshed with it or movies
+			// rendered with use_credited_name keep the pre-adoption name.
+			if err := refreshIdentitySnapshotCreditsTx(tx, credit.ActressID, previousIdentity,
+				currentIdentity.FirstName, currentIdentity.LastName, currentIdentity.JapaneseName); err != nil {
+				return 0, err
+			}
 		}
 		if err := transitionActressCanonicalNamesTx(tx, credit.ActressID, previousIdentity); err != nil {
 			return 0, err

@@ -4726,6 +4726,10 @@ const docTemplate = `{
                 "origin": {
                     "type": "string"
                 },
+                "thumb_edited": {
+                    "description": "ThumbEdited marks an explicit client edit of thumb_url so the server never\ninfers thumbnail intent from snapshot or database comparisons.",
+                    "type": "boolean"
+                },
                 "thumb_url": {
                     "type": "string"
                 },
@@ -5579,6 +5583,38 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_javinizer_javinizer-go_internal_api_contracts.MovieCreditView": {
+            "type": "object",
+            "properties": {
+                "actress_id": {
+                    "type": "integer"
+                },
+                "credited_japanese_name": {
+                    "type": "string"
+                },
+                "credited_name": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "order_index": {
+                    "type": "integer"
+                },
+                "override_name": {
+                    "type": "string"
+                },
+                "reported_thumb_url": {
+                    "type": "string"
+                },
+                "suppressed": {
+                    "type": "boolean"
+                },
+                "user_override": {
+                    "type": "boolean"
+                }
+            }
+        },
         "github_com_javinizer_javinizer-go_internal_api_contracts.MovieResponse": {
             "type": "object",
             "properties": {
@@ -5693,6 +5729,12 @@ const docTemplate = `{
                 "created_at": {
                     "description": "Audit timestamps",
                     "type": "string"
+                },
+                "credits": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.MovieCreditView"
+                    }
                 },
                 "cropped_poster_url": {
                     "type": "string"
@@ -8057,6 +8099,10 @@ const docTemplate = `{
                 "origin": {
                     "type": "string"
                 },
+                "thumb_edited": {
+                    "description": "ThumbEdited is a transient request signal: the client edited the\nthumbnail field for this actress. It is never persisted.",
+                    "type": "boolean"
+                },
                 "thumb_url": {
                     "type": "string"
                 },
@@ -8865,6 +8911,10 @@ const docTemplate = `{
                 },
                 "origin": {
                     "type": "string"
+                },
+                "thumb_edited": {
+                    "description": "ThumbEdited is a transient request signal: the client edited the\nthumbnail field for this actress. It is never persisted.",
+                    "type": "boolean"
                 },
                 "thumb_url": {
                     "type": "string"
