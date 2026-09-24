@@ -515,7 +515,14 @@
 						{/if}
 
 						<div class="flex gap-1">
-							<Button variant="outline" size="sm" onclick={() => openEditActress(index)} class="flex-1" disabled={savingEdits || organizing}>
+							<Button
+								variant="outline"
+								size="sm"
+								onclick={() => openEditActress(index)}
+								class="flex-1"
+								aria-label={m.editor_edit_actress()}
+								disabled={savingEdits || organizing}
+							>
 								{#snippet children()}
 									<SquarePen class="h-3 w-3" />
 								{/snippet}
@@ -524,7 +531,9 @@
 								variant="outline"
 								size="sm"
 								onclick={() => removeActress(index)}
-								class="flex-1 text-destructive hover:bg-destructive/10" disabled={savingEdits || organizing}
+								class="flex-1 text-destructive hover:bg-destructive/10"
+								aria-label={m.editor_remove_actress_action()}
+								disabled={savingEdits || organizing}
 							>
 								{#snippet children()}
 									<Trash2 class="h-3 w-3" />
