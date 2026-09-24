@@ -1368,6 +1368,8 @@
   "settings_models_fetch_failed": "[ Fåílëd tö fëtçh mödëls ]",
   "settings_nfo_actress_as_tag_desc": "[ Íñçlüdë åçtrëss ñåmës íñ thë <tåg> fíëld ]",
   "settings_nfo_actress_as_tag_label": "[ Åçtrëss ås tåg ]",
+  "settings_nfo_actress_images_desc": "[ Íñçlüdë åçtrëss ímågë ÜRLs íñ ÑFÖ åçtör thümbs ]",
+  "settings_nfo_actress_images_label": "[ Íñçlüdë åçtrëss ímågës ]",
   "settings_nfo_actress_subsection": "[ Åçtrëss Šëttíñgs ]",
   "settings_nfo_advanced_subsection": "[ Ådvåñçëd ÑFÖ Öptíöñs ]",
   "settings_nfo_alt_name_role_desc": "[ Üsë åçtrëss åltërñåtë ñåmës íñ <rölë> fíëld ]",

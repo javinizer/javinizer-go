@@ -346,7 +346,7 @@ func TestBuildActors_AltNameRole_NoJapaneseName_Partial(t *testing.T) {
 // TestBuildActors_ThumbURL covers thumbURL
 func TestBuildActors_ThumbURL_Partial(t *testing.T) {
 	fs := afero.NewMemMapFs()
-	cfg := &Config{FirstNameOrder: true}
+	cfg := &Config{FirstNameOrder: true, IncludeActressImages: true}
 	g := NewGenerator(fs, cfg)
 
 	actors := g.buildActors([]models.Actress{

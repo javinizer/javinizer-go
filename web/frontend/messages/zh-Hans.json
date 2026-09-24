@@ -2031,6 +2031,8 @@
   "settings_models_fetch_failed": "获取模型失败",
   "settings_nfo_actress_as_tag_desc": "在 <tag> 字段中包含女优名称",
   "settings_nfo_actress_as_tag_label": "女优作为标签",
+  "settings_nfo_actress_images_desc": "在 NFO 的演员信息中包含女优图片 URL",
+  "settings_nfo_actress_images_label": "包含女优图片",
   "settings_nfo_actress_subsection": "女优设置",
   "settings_nfo_advanced_subsection": "高级 NFO 选项",
   "settings_nfo_alt_name_role_desc": "在 <role> 字段中使用女优的备用名称",

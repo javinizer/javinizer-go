@@ -78,13 +78,14 @@ func newGeneratorWithAnalyzer(fs afero.Fs, cfg *Config, ma mediaAnalyzer) *Gener
 // defaultConfig returns default NFO generation settings
 func defaultConfig() *Config {
 	return &Config{
-		FirstNameOrder:     true,
-		UnknownActressText: "Unknown",
-		UnknownActressMode: models.UnknownActressModeSkip,
-		FilenameTemplate:   "<ID>.nfo",
-		IncludeFanart:      true,
-		IncludeTrailer:     true,
-		RatingSource:       "themoviedb",
+		FirstNameOrder:       true,
+		UnknownActressText:   "Unknown",
+		UnknownActressMode:   models.UnknownActressModeSkip,
+		FilenameTemplate:     "<ID>.nfo",
+		IncludeFanart:        true,
+		IncludeActressImages: true,
+		IncludeTrailer:       true,
+		RatingSource:         "themoviedb",
 	}
 }
 

@@ -336,7 +336,7 @@ func (g *Generator) buildActorsFromCredits(credits []models.MovieCredit) []actor
 			models.NormalizeActressNameKey(actress.JapaneseName) != normalizeActressNameForDedup(name) {
 			act.Role = actress.JapaneseName
 		}
-		if actress != nil && actress.ThumbURL != "" {
+		if g.config.IncludeActressImages && actress != nil && actress.ThumbURL != "" {
 			act.Thumb = actress.ThumbURL
 		}
 		actors = append(actors, act)
@@ -393,7 +393,7 @@ func (g *Generator) buildActors(movieActresses []models.Actress) []actor {
 			act.Role = a.JapaneseName
 		}
 
-		if a.ThumbURL != "" {
+		if g.config.IncludeActressImages && a.ThumbURL != "" {
 			act.Thumb = a.ThumbURL
 		}
 

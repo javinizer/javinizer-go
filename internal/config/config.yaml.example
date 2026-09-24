@@ -371,6 +371,7 @@ metadata:
         include_stream_details: false
         include_fanart: true
         include_trailer: true
+        include_actress_images: true  # Include actress image URLs in NFO actor thumbs
         rating_source: r18dev
         tag: []
         tagline: ""

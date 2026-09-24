@@ -7347,6 +7347,10 @@ const docTemplate = `{
                 "enabled": {
                     "type": "boolean"
                 },
+                "include_actress_images": {
+                    "description": "Include actress image URLs in NFO actor thumbs",
+                    "type": "boolean"
+                },
                 "include_fanart": {
                     "type": "boolean"
                 },

@@ -80,6 +80,7 @@
 //	cfg.Metadata.NFO.Format.FirstNameOrder         → downloader, nfo, organizer, workflow
 //	cfg.Metadata.NFO.Format.FilenameTemplate       → api/core, nfo, workflow
 //	cfg.Metadata.NFO.Feature.IncludeFanart          → nfo
+//	cfg.Metadata.NFO.Feature.IncludeActressImages   → nfo
 //	cfg.Metadata.NFO.Feature.IncludeOriginalPath    → nfo
 //	cfg.Metadata.NFO.Feature.IncludeStreamDetails   → nfo
 //	cfg.Metadata.NFO.Feature.IncludeTrailer         → nfo

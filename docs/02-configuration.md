@@ -459,6 +459,7 @@ metadata:
     include_stream_details: false    # Include video stream metadata
     include_fanart: true             # Include fanart URL
     include_trailer: true            # Include trailer URL
+    include_actress_images: true     # Include actress image URLs in NFO actor thumbs
     rating_source: r18dev            # Rating source identifier
     tag: []                          # Additional custom tags
     tagline: ""                      # Custom tagline template
@@ -500,6 +501,10 @@ metadata:
 **include_fanart**: Includes `<fanart>` URL in NFO.
 
 **include_trailer**: Includes `<trailer>` URL in NFO.
+
+**include_actress_images**: Includes actress image URLs in `<actor><thumb>` metadata. Independent of
+`output.download.download_actress`, which saves actress image files to disk — disable this to stop media
+servers such as Emby, Jellyfin, or Plex from fetching actress images out of the NFO.
 
 **rating_source**: Source identifier for the rating. Defaults to the first scraper in `scrapers.priority` (`r18dev` with the default priority list). Common values: `r18dev`, `dmm`, `libredmm`, or any scraper name.
 
@@ -1441,6 +1446,7 @@ metadata:
     include_stream_details: false
     include_fanart: true
     include_trailer: true
+    include_actress_images: true
     rating_source: "r18dev"  # First scraper in default priority list
     tag: []
     tagline: ""
