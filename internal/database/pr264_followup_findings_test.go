@@ -148,3 +148,79 @@ func TestUpsertDropsSparseCreditWithOnlyOverrideName(t *testing.T) {
 	assert.EqualValues(t, 0, credits, "an override-only credit must not be persisted")
 	assert.EqualValues(t, 0, actresses, "and must not fabricate a blank identity")
 }
+
+func TestCollisionAdoptionRefreshFailureRollsBack(t *testing.T) {
+	db := newCreditTestDB(t)
+	service := NewCollisionService(db)
+
+	identity := models.Actress{FirstName: "Truth", LastName: "Original", Verified: true, Origin: ActressOriginUser}
+	require.NoError(t, db.Create(&identity).Error)
+	for _, contentID := range []string{"collision-refresh-failure-movie", "collision-refresh-failure-snapshot"} {
+		require.NoError(t, db.Create(&models.Movie{ContentID: contentID, ID: contentID, Title: contentID}).Error)
+	}
+	credit := models.MovieCredit{
+		MovieContentID: "collision-refresh-failure-movie", ActressID: identity.ID,
+		CreditedName: "Reported Person", Source: "dmm", Origin: string(models.CreditOriginScrape),
+	}
+	require.NoError(t, db.Create(&credit).Error)
+	collision := models.CreditCollision{
+		CreditID: credit.ID, MovieContentID: credit.MovieContentID,
+		Field: models.CreditFieldCreditedName, ReportedValue: "Reported Person", CanonicalValue: "Original Truth",
+		Status: models.CollisionStatusOpen, Occurrences: 1, SourcesSeen: "dmm",
+	}
+	require.NoError(t, db.Create(&collision).Error)
+	snapshot := models.MovieCredit{MovieContentID: "collision-refresh-failure-snapshot", ActressID: identity.ID, CreditedName: "Original Truth", Origin: string(models.CreditOriginUser)}
+	require.NoError(t, db.Create(&snapshot).Error)
+
+	injectDatabaseCallbackError(t, db, "update", "movie_credits", 1)
+	_, err := service.Resolve(context.Background(), collision.ID, models.CollisionResolutionAdoptCanonical, 0)
+	require.Error(t, err)
+
+	var storedIdentity models.Actress
+	require.NoError(t, db.First(&storedIdentity, identity.ID).Error)
+	assert.Equal(t, "Original Truth", storedIdentity.FullName(), "adoption rolls back when the snapshot refresh fails")
+	var storedSnapshot models.MovieCredit
+	require.NoError(t, db.First(&storedSnapshot, snapshot.ID).Error)
+	assert.Equal(t, "Original Truth", storedSnapshot.CreditedName)
+	var storedCollision models.CreditCollision
+	require.NoError(t, db.First(&storedCollision, collision.ID).Error)
+	assert.Equal(t, models.CollisionStatusOpen, storedCollision.Status)
+}
+
+func TestUpsertSparseCreditWithDanglingActressIDFails(t *testing.T) {
+	db := newCreditTestDB(t)
+	repos := db.Repositories()
+
+	movie := creditMovie("dangling-actress-id", []models.MovieCredit{{ActressID: 424242}})
+	_, err := repos.MovieRepo.UpsertWithTranslations(context.Background(), movie, nil, nil)
+	require.Error(t, err, "a dangling explicit link fails the upsert loudly")
+
+	var credits int64
+	require.NoError(t, db.Model(&models.MovieCredit{}).Count(&credits).Error)
+	assert.EqualValues(t, 0, credits, "the failed upsert leaves no credits behind")
+}
+
+func TestUpsertCreditWithIDAndNameEvidenceResolvesDeferred(t *testing.T) {
+	db := newCreditTestDB(t)
+	repos := db.Repositories()
+
+	identity := models.Actress{FirstName: "Linked", LastName: "Identity", Verified: true, Origin: ActressOriginUser}
+	require.NoError(t, db.Create(&identity).Error)
+
+	movie := creditMovie("id-with-name-evidence", []models.MovieCredit{{
+		ActressID: identity.ID, CreditedName: "Linked Identity",
+		Actress: &models.Actress{FirstName: "Linked", LastName: "Identity"},
+	}})
+	saved, err := repos.MovieRepo.UpsertWithTranslations(context.Background(), movie, nil, nil)
+	require.NoError(t, err)
+	require.Len(t, saved.Credits, 1)
+	require.NotZero(t, saved.Credits[0].ActressID, "the credit links to a resolved identity")
+
+	var actresses int64
+	require.NoError(t, db.Model(&models.Actress{}).Count(&actresses).Error)
+	assert.EqualValues(t, 2, actresses, "name evidence defers to the resolver, which decides the identity (candidates allowed)")
+
+	var resolvedIdentity models.Actress
+	require.NoError(t, db.First(&resolvedIdentity, saved.Credits[0].ActressID).Error)
+	assert.Equal(t, "Identity Linked", resolvedIdentity.FullName(), "the resolved identity carries the reported name")
+}
