@@ -208,8 +208,11 @@ func refreshIdentitySnapshotCreditsTx(tx *gorm.DB, actressID uint, previous *mod
 	if err := tx.Model(&models.MovieCredit{}).
 		Where("actress_id = ? AND user_override = ? AND credited_name = ? AND origin = ?", actressID, false, previousName, string(models.CreditOriginUser)).
 		Updates(map[string]interface{}{
-			"credited_name":          name,
-			"credited_japanese_name": strings.TrimSpace(japaneseName),
+			"credited_name": name,
+			"credited_japanese_name": gorm.Expr(
+				"CASE WHEN TRIM(credited_japanese_name) = ? THEN ? ELSE credited_japanese_name END",
+				strings.TrimSpace(previous.JapaneseName), strings.TrimSpace(japaneseName),
+			),
 		}).Error; err != nil {
 		return wrapDBErr("refresh", fmt.Sprintf("identity snapshot credits for actress %d", actressID), err)
 	}
