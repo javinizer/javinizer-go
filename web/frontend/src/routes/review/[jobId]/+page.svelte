@@ -370,6 +370,7 @@
 								<ActressEditor
 									movie={s.currentMovie!}
 									onUpdate={s.updateCurrentMovie}
+									onCreditOverridePersisted={s.refreshAfterCollision}
 								onPersistEdits={s.saveAllEdits}
 								savingEdits={s.isSavingEdits}
 								organizing={s.organizing}

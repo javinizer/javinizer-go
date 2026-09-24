@@ -61,6 +61,7 @@ type MovieView struct {
 	// Relationships (contract DTOs — see collection_views.go; persistence
 	// models.* types never cross the API boundary)
 	Actresses    []ActressView          `json:"actresses"`
+	Credits      []MovieCreditView      `json:"credits,omitempty"`
 	CastVersion  string                 `json:"cast_version,omitempty"`
 	Genres       []GenreView            `json:"genres"`
 	Translations []MovieTranslationView `json:"translations"`
@@ -77,8 +78,8 @@ type MovieView struct {
 // MovieViewFromModel maps a persistence-layer Movie to an API-layer MovieView.
 // The single rename (content_id → code) is the only wire-format change.
 // PosterState fields are lifted to top-level MovieView fields. Relationship
-// collections (Actresses/Genres/Translations) are projected through contract
-// DTOs and copied into fresh slices, so the view does not alias the model.
+// collections (Actresses/Credits/Genres/Translations) are projected through
+// contract DTOs and copied into fresh slices, so the view does not alias the model.
 // Screenshots remains a shared string slice — treat it as read-only.
 func MovieViewFromModel(m *models.Movie) *MovieView {
 	if m == nil {
@@ -115,6 +116,7 @@ func MovieViewFromModel(m *models.Movie) *MovieView {
 		OriginalFileName:         m.OriginalFileName,
 		Screenshots:              m.Screenshots,
 		Actresses:                ActressViewSliceFromModels(m.Actresses),
+		Credits:                  MovieCreditViewSliceFromModels(m.Credits),
 		CastVersion:              models.ActressCastVersion(m.Actresses),
 		Genres:                   GenreViewSliceFromModels(m.Genres),
 		Translations:             MovieTranslationViewSliceFromModels(m.Translations),
@@ -125,10 +127,12 @@ func MovieViewFromModel(m *models.Movie) *MovieView {
 	}
 }
 
-// MovieViewToModel maps an API-layer MovieView back to a persistence-layer Movie.
-// This is the inverse of MovieViewFromModel — used for request types where
-// the API client sends a MovieView and the handler needs *models.Movie for
-// processing (e.g., UpdateMovieRequest, OrganizePreviewRequest).
+// MovieViewToModel maps editable API fields back to a persistence-layer Movie.
+// This mapping is intentionally asymmetric: Credits is read-only response data
+// and is ignored here. Review PATCHes remain actresses-based so identity edits
+// keep their existing semantics; credit overrides use their dedicated endpoints.
+// The mapping is used for requests such as UpdateMovieRequest and
+// OrganizePreviewRequest.
 func MovieViewToModel(v *MovieView) *models.Movie {
 	if v == nil {
 		return nil

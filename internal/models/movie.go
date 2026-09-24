@@ -131,12 +131,15 @@ type MovieTranslation struct {
 
 // Actress represents a JAV actress
 type Actress struct {
-	ID                   uint   `json:"id" gorm:"primaryKey"`
-	DMMID                int    `json:"dmm_id"` // Real DMM actress ID when available (unique only for values > 0)
-	FirstName            string `json:"first_name"`
-	LastName             string `json:"last_name"`
-	JapaneseName         string `json:"japanese_name" gorm:"index"`
-	ThumbURL             string `json:"thumb_url"`
+	ID           uint   `json:"id" gorm:"primaryKey"`
+	DMMID        int    `json:"dmm_id"` // Real DMM actress ID when available (unique only for values > 0)
+	FirstName    string `json:"first_name"`
+	LastName     string `json:"last_name"`
+	JapaneseName string `json:"japanese_name" gorm:"index"`
+	ThumbURL     string `json:"thumb_url"`
+	// ThumbEdited is a transient request signal: the client edited the
+	// thumbnail field for this actress. It is never persisted.
+	ThumbEdited          bool   `json:"thumb_edited,omitempty" gorm:"-"`
 	Aliases              string `json:"aliases"` // Pipe-separated
 	Verified             bool   `json:"verified"`
 	Origin               string `json:"origin"`

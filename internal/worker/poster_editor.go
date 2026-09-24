@@ -361,7 +361,18 @@ func (m *LockedMovieOps) legacyRenames(ctx context.Context, plan *EditCommitPlan
 			}
 			return fmt.Errorf("load actress for rename: %w", err)
 		}
-		if existing == nil || (existing.FirstName == rn.FirstName && existing.LastName == rn.LastName && existing.JapaneseName == rn.JapaneseName) {
+		if existing == nil {
+			continue
+		}
+		namesUnchanged := existing.FirstName == rn.FirstName && existing.LastName == rn.LastName && existing.JapaneseName == rn.JapaneseName
+		thumbChanged := rn.ThumbEdited
+		if namesUnchanged && !thumbChanged {
+			continue
+		}
+		if thumbChanged {
+			if err := actressRepo.RenameIdentityFields(ctx, rn.ID, rn.FirstName, rn.LastName, rn.JapaneseName, rn.ThumbURL); err != nil {
+				return fmt.Errorf("persist actress identity edit: %w", err)
+			}
 			continue
 		}
 		if err := actressRepo.RenameNameFields(ctx, rn.ID, rn.FirstName, rn.LastName, rn.JapaneseName); err != nil {
@@ -372,6 +383,20 @@ func (m *LockedMovieOps) legacyRenames(ctx context.Context, plan *EditCommitPlan
 }
 
 // fileFirstMovieResult returns the first family file's non-nil result.
+// actressThumbEdited reports whether the client explicitly edited this actress
+// thumbnail. Intent travels in the request (Actress.ThumbEdited) instead of
+// being inferred: inference from any baseline can revert a newer database value
+// (stale cache) or silently drop a legitimate edit when the client's projection
+// is fresher than the cache. The intent flag itself distinguishes a clear from
+// an omitted field: thumb_edited=true with an empty URL is an explicit CLEAR
+// that must reach RenameIdentityFields (otherwise the stored thumbnail
+// survives the save and the next refresh restores it, so the editor could
+// never clear a thumbnail), while an omitted field (no flag) leaves the shared
+// identity thumbnail untouched.
+func actressThumbEdited(a models.Actress) bool {
+	return a.ThumbEdited
+}
+
 func fileFirstMovieResult(m *LockedMovieOps, filePaths []string) *resultstore.MovieResult {
 	for _, fp := range filePaths {
 		if r, err := m.pe.lookup.GetMovieResult(fp); err == nil && r != nil && r.Movie != nil {
@@ -814,7 +839,7 @@ func (m *LockedMovieOps) updateMovieFamily(ctx context.Context, movie *models.Mo
 		if a.ID == 0 {
 			continue
 		}
-		renames = append(renames, ActressRenamePlan{ID: a.ID, FirstName: a.FirstName, LastName: a.LastName, JapaneseName: a.JapaneseName})
+		renames = append(renames, ActressRenamePlan{ID: a.ID, FirstName: a.FirstName, LastName: a.LastName, JapaneseName: a.JapaneseName, ThumbURL: a.ThumbURL, ThumbEdited: actressThumbEdited(a)})
 	}
 
 	// Family-scoped sanitize against the first file WITH a movie (legacy
@@ -1296,7 +1321,7 @@ func (m *LockedMovieOps) ApplyFieldOverride(ctx context.Context, resultID, field
 		if a.ID == 0 {
 			continue
 		}
-		renames = append(renames, ActressRenamePlan{ID: a.ID, FirstName: a.FirstName, LastName: a.LastName, JapaneseName: a.JapaneseName})
+		renames = append(renames, ActressRenamePlan{ID: a.ID, FirstName: a.FirstName, LastName: a.LastName, JapaneseName: a.JapaneseName, ThumbURL: a.ThumbURL, ThumbEdited: actressThumbEdited(a)})
 	}
 	if err := m.commitCandidate(ctx, candidates, map[string]*resultstore.ProvenanceData{filePath: prov}, func(plan *EditCommitPlan) {
 		plan.UpsertMovie = movie
@@ -1583,7 +1608,7 @@ func (m *LockedMovieOps) updateMovieSingleLocked(ctx context.Context, filePath s
 		if a.ID == 0 {
 			continue
 		}
-		renames = append(renames, ActressRenamePlan{ID: a.ID, FirstName: a.FirstName, LastName: a.LastName, JapaneseName: a.JapaneseName})
+		renames = append(renames, ActressRenamePlan{ID: a.ID, FirstName: a.FirstName, LastName: a.LastName, JapaneseName: a.JapaneseName, ThumbURL: a.ThumbURL, ThumbEdited: actressThumbEdited(a)})
 	}
 	current, err := m.pe.lookup.GetMovieResult(filePath)
 	if err != nil || current == nil {

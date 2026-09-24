@@ -75,6 +75,7 @@ func findVerifiedByAliasTx(tx *gorm.DB, japaneseName, firstName, lastName string
 		return nil, err
 	}
 	matched := make([]models.Actress, 0, len(aliases))
+	reversed := make([]models.Actress, 0, len(aliases))
 	seenIDs := make(map[uint]struct{}, len(aliases))
 	var verifiedAll []models.Actress
 	if err := tx.Where("verified = ?", true).Find(&verifiedAll).Error; err != nil {
@@ -92,11 +93,20 @@ func findVerifiedByAliasTx(tx *gorm.DB, japaneseName, firstName, lastName string
 			ja := models.NormalizeActressNameKey(a.JapaneseName)
 			lf := models.NormalizeActressNameKey(a.LastName + " " + a.FirstName)
 			fl := models.NormalizeActressNameKey(a.FirstName + " " + a.LastName)
-			if key == ja || key == lf || key == fl {
+			switch key {
+			case ja, lf:
 				matched = append(matched, a)
+				seenIDs[a.ID] = struct{}{}
+			case fl:
+				// Alias agrees only with the swapped field order; exact-order
+				// candidates win, so this is a fallback.
+				reversed = append(reversed, a)
 				seenIDs[a.ID] = struct{}{}
 			}
 		}
+	}
+	if len(matched) == 0 {
+		return reversed, nil
 	}
 	return matched, nil
 }
@@ -117,18 +127,26 @@ func findVerifiedByNameTx(tx *gorm.DB, japaneseName, firstName, lastName string)
 	targetLF := models.NormalizeActressNameKey(lastName + " " + firstName)
 	targetFL := models.NormalizeActressNameKey(firstName + " " + lastName)
 	matched := make([]models.Actress, 0, 2)
+	reversed := make([]models.Actress, 0, 2)
 	for _, a := range verifiedAll {
 		if hasJP && targetJP != "" && models.NormalizeActressNameKey(a.JapaneseName) == targetJP {
 			matched = append(matched, a)
 			continue
 		}
-		if hasBoth && targetLF != "" && targetLF == models.NormalizeActressNameKey(a.LastName+" "+a.FirstName) {
-			matched = append(matched, a)
-			continue
-		}
-		if hasBoth && targetFL != "" && targetFL == models.NormalizeActressNameKey(a.FirstName+" "+a.LastName) {
-			matched = append(matched, a)
-			continue
+		if hasBoth {
+			// Exact field order always wins: two actresses can legitimately have
+			// swapped romanized parts, and matching both as equal would turn an
+			// unambiguous scrape into an ambiguous one.
+			storedLF := models.NormalizeActressNameKey(a.LastName + " " + a.FirstName)
+			storedFL := models.NormalizeActressNameKey(a.FirstName + " " + a.LastName)
+			switch {
+			case targetLF != "" && targetLF == storedLF, targetFL != "" && targetFL == storedFL:
+				matched = append(matched, a)
+				continue
+			case targetLF != "" && targetLF == storedFL, targetFL != "" && targetFL == storedLF:
+				reversed = append(reversed, a)
+				continue
+			}
 		}
 		if hasFirst && !hasLast && strings.TrimSpace(a.LastName) == "" && models.NormalizeActressNameKey(firstName) == models.NormalizeActressNameKey(a.FirstName) {
 			matched = append(matched, a)
@@ -137,6 +155,10 @@ func findVerifiedByNameTx(tx *gorm.DB, japaneseName, firstName, lastName string)
 		if hasLast && !hasFirst && strings.TrimSpace(a.FirstName) == "" && models.NormalizeActressNameKey(lastName) == models.NormalizeActressNameKey(a.LastName) {
 			matched = append(matched, a)
 		}
+	}
+	if len(matched) == 0 && len(reversed) > 0 {
+		// Only fall back to swapped romanized order when nothing matched exactly.
+		matched = reversed
 	}
 	return matched, nil
 }
