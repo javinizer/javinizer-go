@@ -939,9 +939,24 @@ func (u *MovieUpserter) persistCreditsTx(tx *gorm.DB, movie *models.Movie) error
 			}
 		}
 
-		resolved, outcome, err := resolveActressIdentityDeferredTx(tx, &scraped, nil)
-		if err != nil {
-			return err
+		var resolved *models.Actress
+		var outcome ResolutionOutcome
+		if credit.ActressID != 0 && !actressHasResolutionInputs(scraped) {
+			// An explicit ActressID is an explicit link, not a resolution
+			// hint. When the credit carries no name evidence the deferred
+			// resolver could consume, resolving would fabricate a nameless
+			// candidate identity and replace the supplied link with that blank
+			// row, so resolve the referenced identity directly.
+			linked, linkErr := resolveLinkedCreditActressTx(tx, credit.ActressID)
+			if linkErr != nil {
+				return linkErr
+			}
+			resolved, outcome = linked, ResolutionMatched
+		} else {
+			resolved, outcome, err = resolveActressIdentityDeferredTx(tx, &scraped, nil)
+			if err != nil {
+				return err
+			}
 		}
 		sourceActressID := resolved.ID
 		if targetActressID, ok := reassignments[sourceActressID]; ok && targetActressID != sourceActressID {
@@ -1046,15 +1061,14 @@ func (u *MovieUpserter) persistCreditsTx(tx *gorm.DB, movie *models.Movie) error
 
 // creditHasIdentityEvidence reports whether a credit carries enough name or
 // identity information to resolve an actress; entries with none are dropped
-// instead of creating a nameless identity row.
+// instead of creating a nameless identity row. Override names are display
+// labels, not identity evidence: a credit carrying only an override name
+// cannot be linked to an identity and is dropped as well.
 func creditHasIdentityEvidence(credit *models.MovieCredit) bool {
 	if credit == nil {
 		return false
 	}
 	if strings.TrimSpace(credit.CreditedName) != "" || strings.TrimSpace(credit.CreditedJapaneseName) != "" {
-		return true
-	}
-	if strings.TrimSpace(credit.OverrideName) != "" {
 		return true
 	}
 	if credit.ActressID != 0 {
@@ -1068,6 +1082,23 @@ func creditHasIdentityEvidence(credit *models.MovieCredit) bool {
 	scraped := credit.Scraped
 	return strings.TrimSpace(scraped.FirstName) != "" || strings.TrimSpace(scraped.LastName) != "" ||
 		strings.TrimSpace(scraped.JapaneseName) != "" || scraped.DMMID != 0
+}
+
+// actressHasResolutionInputs reports whether the scraped model carries name or
+// DMM evidence the deferred identity resolver can consume.
+func actressHasResolutionInputs(actress models.Actress) bool {
+	return actress.DMMID != 0 || len(actressIdentityNameKeys(actress)) > 0
+}
+
+// resolveLinkedCreditActressTx loads the identity an explicit credit link
+// references. A dangling reference fails the upsert rather than silently
+// dropping the caller's explicit link.
+func resolveLinkedCreditActressTx(tx *gorm.DB, actressID uint) (*models.Actress, error) {
+	var linked models.Actress
+	if err := tx.First(&linked, actressID).Error; err != nil {
+		return nil, wrapDBErr("resolve", fmt.Sprintf("linked actress %d", actressID), err)
+	}
+	return &linked, nil
 }
 
 func scrapedFirstName(credit *models.MovieCredit) string {

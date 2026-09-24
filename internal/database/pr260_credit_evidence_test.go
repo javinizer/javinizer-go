@@ -17,7 +17,7 @@ func TestCreditHasIdentityEvidence(t *testing.T) {
 		{"no evidence", &models.MovieCredit{}, false},
 		{"credited name", &models.MovieCredit{CreditedName: "Name"}, true},
 		{"credited japanese name", &models.MovieCredit{CreditedJapaneseName: "名"}, true},
-		{"override name", &models.MovieCredit{OverrideName: "Override"}, true},
+		{"override name", &models.MovieCredit{OverrideName: "Override"}, false},
 		{"actress id", &models.MovieCredit{ActressID: 7}, true},
 		{"bare actress pointer", &models.MovieCredit{Actress: &models.Actress{}}, false},
 		{"named actress pointer", &models.MovieCredit{Actress: &models.Actress{JapaneseName: "名前"}}, true},
