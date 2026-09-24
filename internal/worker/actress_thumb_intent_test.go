@@ -9,15 +9,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestActressThumbEditedRequiresBaselineChange(t *testing.T) {
+func TestActressThumbIntentRequiresBaselineChange(t *testing.T) {
 	baseline := &models.Movie{Actresses: []models.Actress{{ID: 1, ThumbURL: "https://old.test/thumb.jpg"}}}
 
-	require.False(t, actressThumbEdited(nil, models.Actress{ID: 1, ThumbURL: "https://new.test/thumb.jpg"}), "no baseline means no proven intent")
-	require.False(t, actressThumbEdited(baseline, models.Actress{ID: 2, ThumbURL: "https://new.test/thumb.jpg"}), "unknown actress means no proven intent")
-	require.False(t, actressThumbEdited(baseline, models.Actress{ID: 1, ThumbURL: "https://old.test/thumb.jpg"}), "unchanged thumbnail is not an edit")
-	require.True(t, actressThumbEdited(baseline, models.Actress{ID: 1, ThumbURL: "https://new.test/thumb.jpg"}), "a changed thumbnail is an edit")
-	require.False(t, actressThumbEdited(baseline, models.Actress{ID: 1, ThumbURL: ""}), "an omitted or empty thumbnail must not clear a shared identity")
-	require.False(t, actressThumbEdited(baseline, models.Actress{ID: 1, ThumbURL: "   "}), "whitespace-only thumbnails are treated as absent")
+	edited, _ := actressThumbIntent(nil, models.Actress{ID: 1, ThumbURL: "https://new.test/thumb.jpg"})
+	require.False(t, edited, "no baseline means no proven intent")
+	edited, _ = actressThumbIntent(baseline, models.Actress{ID: 2, ThumbURL: "https://new.test/thumb.jpg"})
+	require.False(t, edited, "unknown actress means no proven intent")
+	edited, _ = actressThumbIntent(baseline, models.Actress{ID: 1, ThumbURL: "https://old.test/thumb.jpg"})
+	require.False(t, edited, "unchanged thumbnail is not an edit")
+	edited, base := actressThumbIntent(baseline, models.Actress{ID: 1, ThumbURL: "https://new.test/thumb.jpg"})
+	require.True(t, edited, "a changed thumbnail is an edit")
+	require.Equal(t, "https://old.test/thumb.jpg", base, "the baseline travels with the intent for the drift guard")
+	edited, _ = actressThumbIntent(baseline, models.Actress{ID: 1, ThumbURL: ""})
+	require.False(t, edited, "an omitted or empty thumbnail must not clear a shared identity")
+	edited, _ = actressThumbIntent(baseline, models.Actress{ID: 1, ThumbURL: "   "})
+	require.False(t, edited, "whitespace-only thumbnails are treated as absent")
 }
 
 func TestUpdateMovieUnrelatedSaveKeepsDatabaseThumbnail(t *testing.T) {

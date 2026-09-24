@@ -1057,7 +1057,12 @@ func creditHasIdentityEvidence(credit *models.MovieCredit) bool {
 	if strings.TrimSpace(credit.OverrideName) != "" {
 		return true
 	}
-	if credit.ActressID != 0 || credit.Actress != nil {
+	if credit.ActressID != 0 {
+		return true
+	}
+	if actor := credit.Actress; actor != nil &&
+		(actor.ID != 0 || actor.DMMID != 0 || strings.TrimSpace(actor.FirstName) != "" ||
+			strings.TrimSpace(actor.LastName) != "" || strings.TrimSpace(actor.JapaneseName) != "") {
 		return true
 	}
 	scraped := credit.Scraped

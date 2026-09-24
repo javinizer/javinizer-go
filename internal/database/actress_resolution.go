@@ -75,6 +75,7 @@ func findVerifiedByAliasTx(tx *gorm.DB, japaneseName, firstName, lastName string
 		return nil, err
 	}
 	matched := make([]models.Actress, 0, len(aliases))
+	reversed := make([]models.Actress, 0, len(aliases))
 	seenIDs := make(map[uint]struct{}, len(aliases))
 	var verifiedAll []models.Actress
 	if err := tx.Where("verified = ?", true).Find(&verifiedAll).Error; err != nil {
@@ -92,11 +93,20 @@ func findVerifiedByAliasTx(tx *gorm.DB, japaneseName, firstName, lastName string
 			ja := models.NormalizeActressNameKey(a.JapaneseName)
 			lf := models.NormalizeActressNameKey(a.LastName + " " + a.FirstName)
 			fl := models.NormalizeActressNameKey(a.FirstName + " " + a.LastName)
-			if key == ja || key == lf || key == fl {
+			switch key {
+			case ja, lf:
 				matched = append(matched, a)
+				seenIDs[a.ID] = struct{}{}
+			case fl:
+				// Alias agrees only with the swapped field order; exact-order
+				// candidates win, so this is a fallback.
+				reversed = append(reversed, a)
 				seenIDs[a.ID] = struct{}{}
 			}
 		}
+	}
+	if len(matched) == 0 {
+		return reversed, nil
 	}
 	return matched, nil
 }

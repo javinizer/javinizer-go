@@ -201,7 +201,7 @@ func refreshIdentitySnapshotCreditsTx(tx *gorm.DB, actressID uint, previous *mod
 		return nil
 	}
 	if err := tx.Model(&models.MovieCredit{}).
-		Where("actress_id = ? AND user_override = ? AND credited_name = ?", actressID, false, previousName).
+		Where("actress_id = ? AND user_override = ? AND credited_name = ? AND origin IS NOT ?", actressID, false, previousName, string(models.CreditOriginScrape)).
 		Updates(map[string]interface{}{
 			"credited_name":          name,
 			"credited_japanese_name": strings.TrimSpace(japaneseName),
