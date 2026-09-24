@@ -94,6 +94,11 @@ func (r *ActressRepository) Update(ctx context.Context, actress *models.Actress)
 			if err := deleteActressTranslationsTx(tx, actress.ID); err != nil {
 				return err
 			}
+			// Catalog renames must refresh identity-snapshot credits too, otherwise
+			// movies rendered with use_credited_name keep the pre-rename name.
+			if err := refreshIdentitySnapshotCreditsTx(tx, actress.ID, &current, actress.FirstName, actress.LastName, actress.JapaneseName); err != nil {
+				return err
+			}
 		}
 		if identityChanged {
 			if err := transitionActressCanonicalNamesTx(tx, actress.ID, &current); err != nil {
@@ -669,6 +674,9 @@ func (r *ActressRepository) UpdateCanonicalFields(ctx context.Context, id uint, 
 			}
 			if actressCanonicalNameChanged(&current, firstName, lastName, japaneseName) {
 				if err := deleteActressTranslationsTx(tx, id); err != nil {
+					return err
+				}
+				if err := refreshIdentitySnapshotCreditsTx(tx, id, &current, firstName, lastName, japaneseName); err != nil {
 					return err
 				}
 			}
