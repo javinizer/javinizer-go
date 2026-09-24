@@ -346,9 +346,10 @@ type NFOFeatureConfig struct {
 	IncludeStreamDetails bool `yaml:"include_stream_details" json:"include_stream_details"`
 	IncludeOriginalPath  bool `yaml:"include_originalpath" json:"include_originalpath"` // Include source filename in NFO
 	ActressAsTag         bool `yaml:"actress_as_tag" json:"actress_as_tag"`
-	AddGenericRole       bool `yaml:"add_generic_role" json:"add_generic_role"`   // Add generic "Actress" role to all actresses
-	AltNameRole          bool `yaml:"alt_name_role" json:"alt_name_role"`         // Use alternate name (Japanese) in role field
-	UseCreditedName      bool `yaml:"use_credited_name" json:"use_credited_name"` // Render credited names instead of canonical identity names
+	AddGenericRole       bool `yaml:"add_generic_role" json:"add_generic_role"`             // Add generic "Actress" role to all actresses
+	AltNameRole          bool `yaml:"alt_name_role" json:"alt_name_role"`                   // Use alternate name (Japanese) in role field
+	UseCreditedName      bool `yaml:"use_credited_name" json:"use_credited_name"`           // Render credited names instead of canonical identity names
+	IncludeActressImages bool `yaml:"include_actress_images" json:"include_actress_images"` // Include actress image URLs in NFO actor thumbs
 }
 
 // NFOFormatConfig controls NFO display and format settings.

@@ -2029,6 +2029,8 @@
   "settings_models_fetch_failed": "Failed to fetch models",
   "settings_nfo_actress_as_tag_desc": "Include actress names in the <tag> field",
   "settings_nfo_actress_as_tag_label": "Actress as tag",
+  "settings_nfo_actress_images_desc": "Include actress image URLs in NFO actor thumbs",
+  "settings_nfo_actress_images_label": "Include actress images",
   "settings_nfo_actress_subsection": "Actress Settings",
   "settings_nfo_advanced_subsection": "Advanced NFO Options",
   "settings_nfo_alt_name_role_desc": "Use actress alternate names in <role> field",

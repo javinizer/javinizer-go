@@ -193,6 +193,16 @@
 			/>
 
 			<FormToggle
+				label={m.settings_nfo_actress_images_label()}
+				description={m.settings_nfo_actress_images_desc()}
+				checked={config.metadata.nfo?.include_actress_images ?? true}
+				onchange={(val) => {
+					if (!config.metadata.nfo) config.metadata.nfo = {};
+					config.metadata.nfo.include_actress_images = val;
+				}}
+			/>
+
+			<FormToggle
 				label={m.settings_nfo_trailer_label()}
 				description={m.settings_nfo_trailer_desc()}
 				checked={config.metadata.nfo?.include_trailer ?? true}
