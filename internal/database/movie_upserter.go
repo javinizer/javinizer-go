@@ -377,6 +377,11 @@ func (u *MovieUpserter) reconcileLegacyActressEditsTx(tx *gorm.DB, movie *models
 	incoming := make(map[uint]bool, len(movie.Actresses))
 	for i := range movie.Actresses {
 		actress := &movie.Actresses[i]
+		if actress.ID == 0 {
+			// Nameless or unresolved entries never existed as identities and
+			// must not produce a credit row.
+			continue
+		}
 		incoming[actress.ID] = true
 		if credit, ok := existingByActress[actress.ID]; ok {
 			if credit.Suppressed {
@@ -803,6 +808,11 @@ func lookupActressByName(tx *gorm.DB, act *models.Actress) (models.Actress, bool
 		err = tx.Where("japanese_name = ?", act.JapaneseName).First(&found).Error
 	} else if act.FirstName != "" && act.LastName != "" {
 		err = tx.Where("first_name = ? AND last_name = ?", act.FirstName, act.LastName).First(&found).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			// Scrapers and mirrors disagree on romanized name order; a reversed
+			// presentation of the same two parts is still the same identity.
+			err = tx.Where("first_name = ? AND last_name = ?", act.LastName, act.FirstName).First(&found).Error
+		}
 	} else if act.FirstName != "" {
 		err = tx.Where("first_name = ?", act.FirstName).First(&found).Error
 	} else {
@@ -908,6 +918,11 @@ func (u *MovieUpserter) persistCreditsTx(tx *gorm.DB, movie *models.Movie) error
 	for i := range movie.Credits {
 		credit := &movie.Credits[i]
 		credit.MovieContentID = movie.ContentID
+		if !creditHasIdentityEvidence(credit) {
+			// A credit with no name evidence would resolve to no identity and
+			// would otherwise create a nameless ghost actress row.
+			continue
+		}
 		if ex, ok := existingByActress[credit.ActressID]; ok && ex.OrderPinned {
 			credit.OrderIndex = ex.OrderIndex
 		} else {
@@ -1032,6 +1047,27 @@ func (u *MovieUpserter) persistCreditsTx(tx *gorm.DB, movie *models.Movie) error
 		return err
 	}
 	return nil
+}
+
+// creditHasIdentityEvidence reports whether a credit carries enough name or
+// identity information to resolve an actress; entries with none are dropped
+// instead of creating a nameless identity row.
+func creditHasIdentityEvidence(credit *models.MovieCredit) bool {
+	if credit == nil {
+		return false
+	}
+	if strings.TrimSpace(credit.CreditedName) != "" || strings.TrimSpace(credit.CreditedJapaneseName) != "" {
+		return true
+	}
+	if strings.TrimSpace(credit.OverrideName) != "" {
+		return true
+	}
+	if credit.ActressID != 0 || credit.Actress != nil {
+		return true
+	}
+	scraped := credit.Scraped
+	return strings.TrimSpace(scraped.FirstName) != "" || strings.TrimSpace(scraped.LastName) != "" ||
+		strings.TrimSpace(scraped.JapaneseName) != "" || scraped.DMMID != 0
 }
 
 func scrapedFirstName(credit *models.MovieCredit) string {

@@ -122,13 +122,16 @@ func findVerifiedByNameTx(tx *gorm.DB, japaneseName, firstName, lastName string)
 			matched = append(matched, a)
 			continue
 		}
-		if hasBoth && targetLF != "" && targetLF == models.NormalizeActressNameKey(a.LastName+" "+a.FirstName) {
-			matched = append(matched, a)
-			continue
-		}
-		if hasBoth && targetFL != "" && targetFL == models.NormalizeActressNameKey(a.FirstName+" "+a.LastName) {
-			matched = append(matched, a)
-			continue
+		if hasBoth {
+			// Scrapers and mirrors disagree on romanized name order, so compare the
+			// incoming parts against BOTH stored orders before giving up.
+			storedLF := models.NormalizeActressNameKey(a.LastName + " " + a.FirstName)
+			storedFL := models.NormalizeActressNameKey(a.FirstName + " " + a.LastName)
+			if (targetLF != "" && (targetLF == storedLF || targetLF == storedFL)) ||
+				(targetFL != "" && (targetFL == storedLF || targetFL == storedFL)) {
+				matched = append(matched, a)
+				continue
+			}
 		}
 		if hasFirst && !hasLast && strings.TrimSpace(a.LastName) == "" && models.NormalizeActressNameKey(firstName) == models.NormalizeActressNameKey(a.FirstName) {
 			matched = append(matched, a)
