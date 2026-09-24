@@ -2031,6 +2031,8 @@
   "settings_models_fetch_failed": "モデルの取得に失敗しました",
   "settings_nfo_actress_as_tag_desc": "<tag> フィールドに女優名を含める",
   "settings_nfo_actress_as_tag_label": "女優をタグとして扱う",
+  "settings_nfo_actress_images_desc": "NFO の俳優情報に女優画像の URL を含める",
+  "settings_nfo_actress_images_label": "女優画像を含める",
   "settings_nfo_actress_subsection": "女優設定",
   "settings_nfo_advanced_subsection": "詳細 NFO オプション",
   "settings_nfo_alt_name_role_desc": "<role> フィールドに女優の別名を使用",

@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"strings"
 )
 
 // NFOConfig groups its settings into named sub-structs (Feature, Format,
@@ -58,6 +59,7 @@ func (n *NFOConfig) UnmarshalJSON(data []byte) error {
 			return err
 		}
 		*n = NFOConfig(v)
+		n.applyDocumentedTrueDefaults(probe)
 		return nil
 	}
 
@@ -70,5 +72,54 @@ func (n *NFOConfig) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &n.Extra); err != nil {
 		return err
 	}
+	n.applyDocumentedTrueDefaults(probe)
 	return nil
+}
+
+// documentedTrueFeatureDefaults lists NFO feature toggles whose documented
+// default is true. The config API decodes a fresh NFOConfig, so a payload that
+// omits them would otherwise persist the Go zero value (false) and silently
+// change behaviour for clients that predate the key.
+var documentedTrueFeatureDefaults = []struct {
+	key    string
+	target func(*NFOFeatureConfig) *bool
+}{
+	{key: "include_fanart", target: func(f *NFOFeatureConfig) *bool { return &f.IncludeFanart }},
+	{key: "include_trailer", target: func(f *NFOFeatureConfig) *bool { return &f.IncludeTrailer }},
+	{key: "include_actress_images", target: func(f *NFOFeatureConfig) *bool { return &f.IncludeActressImages }},
+}
+
+// applyDocumentedTrueDefaults restores the documented default for every toggle
+// the JSON payload omitted. An explicit false is always honoured.
+func (n *NFOConfig) applyDocumentedTrueDefaults(probe map[string]json.RawMessage) {
+	for _, entry := range documentedTrueFeatureDefaults {
+		if jsonPayloadHasKey(probe, entry.key) {
+			continue
+		}
+		*entry.target(&n.Feature) = true
+	}
+}
+
+// jsonPayloadHasKey reports whether a key appears at the top level of the flat
+// payload or inside one of the legacy grouped objects.
+func jsonPayloadHasKey(probe map[string]json.RawMessage, key string) bool {
+	if raw, ok := probe[key]; ok && !isJSONNull(raw) {
+		return true
+	}
+	for _, raw := range probe {
+		var nested map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &nested); err != nil {
+			continue
+		}
+		if nestedRaw, ok := nested[key]; ok && !isJSONNull(nestedRaw) {
+			return true
+		}
+	}
+	return false
+}
+
+// isJSONNull reports an explicit JSON null, which callers treat as "not
+// specified" so the documented default still applies.
+func isJSONNull(raw json.RawMessage) bool {
+	return strings.TrimSpace(string(raw)) == "null"
 }

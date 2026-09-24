@@ -69,7 +69,7 @@ func TestResolveCreditDisplayNamePatchBranches(t *testing.T) {
 }
 
 func TestBuildActorsFromCreditsPatchBranches(t *testing.T) {
-	g := &Generator{config: &Config{AddGenericRole: true, AltNameRole: true}}
+	g := &Generator{config: &Config{AddGenericRole: true, AltNameRole: true, IncludeActressImages: true}}
 	assert.Nil(t, g.buildActorsFromCredits(nil))
 
 	primary := &models.Actress{

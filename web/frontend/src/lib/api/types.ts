@@ -1066,6 +1066,7 @@ export interface NFOConfig {
 	include_stream_details?: boolean;
 	include_fanart?: boolean;
 	include_trailer?: boolean;
+	include_actress_images?: boolean;
 	rating_source?: string;
 	tag?: string[];
 	tagline?: string;

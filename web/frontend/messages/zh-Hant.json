@@ -2031,6 +2031,8 @@
   "settings_models_fetch_failed": "模型擷取失敗",
   "settings_nfo_actress_as_tag_desc": "在 <tag> 欄位中包含女優名稱",
   "settings_nfo_actress_as_tag_label": "女優作為標籤",
+  "settings_nfo_actress_images_desc": "在 NFO 的演員資訊中包含女優圖片 URL",
+  "settings_nfo_actress_images_label": "包含女優圖片",
   "settings_nfo_actress_subsection": "女優設定",
   "settings_nfo_advanced_subsection": "進階 NFO 選項",
   "settings_nfo_alt_name_role_desc": "在 <role> 欄位使用女優別名",

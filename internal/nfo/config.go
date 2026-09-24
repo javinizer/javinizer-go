@@ -36,6 +36,7 @@ type Config struct {
 	// NFO generation toggles
 	PerFile              bool // Create separate NFO for each multi-part file
 	IncludeFanart        bool
+	IncludeActressImages bool // Emit actress image URLs as actor thumbs
 	IncludeTrailer       bool
 	IncludeStreamDetails bool
 	IncludeOriginalPath  bool
@@ -80,6 +81,7 @@ type Config struct {
 // cfg.Metadata.NFO.Feature.AltNameRole, cfg.Metadata.NFO.Feature.UseCreditedName,
 // cfg.Metadata.NFO.Feature.IncludeOriginalPath,
 // cfg.Metadata.NFO.Feature.IncludeStreamDetails, cfg.Metadata.NFO.Feature.IncludeFanart,
+// cfg.Metadata.NFO.Feature.IncludeActressImages,
 // cfg.Metadata.NFO.Feature.IncludeTrailer, cfg.Metadata.NFO.Format.RatingSource,
 // cfg.Metadata.NFO.Extra.Tag, cfg.Metadata.NFO.Format.Tagline, cfg.Metadata.NFO.Extra.Credits
 // (Fields FilenameTemplate, FirstNameOrder, PerFile, GroupActress, GroupActressName are read via nameCfg — see NFONameConfigFromAppConfig)
@@ -101,6 +103,7 @@ func ConfigFromAppConfig(cfg *config.Config, nameCfg NFONameConfig) *Config {
 		IncludeOriginalPath:     cfg.Metadata.NFO.Feature.IncludeOriginalPath,
 		IncludeStreamDetails:    cfg.Metadata.NFO.Feature.IncludeStreamDetails,
 		IncludeFanart:           cfg.Metadata.NFO.Feature.IncludeFanart,
+		IncludeActressImages:    cfg.Metadata.NFO.Feature.IncludeActressImages,
 		IncludeTrailer:          cfg.Metadata.NFO.Feature.IncludeTrailer,
 		RatingSource:            cfg.Metadata.NFO.Format.RatingSource,
 		Tag:                     cfg.Metadata.NFO.Extra.Tag,
