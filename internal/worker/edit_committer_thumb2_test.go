@@ -19,7 +19,7 @@ func TestEditCommitterThumbnailEditFailureAborts(t *testing.T) {
 
 	c := newTestCommitter(database.EditUnit{Actresses: actresses})
 	err := c.Commit(context.Background(), &EditCommitPlan{Renames: []ActressRenamePlan{
-		{ID: 21, FirstName: "same", LastName: "name", ThumbURL: "new-thumb"},
+		{ID: 21, FirstName: "same", LastName: "name", ThumbURL: "new-thumb", ThumbEdited: true},
 	}})
 	require.ErrorContains(t, err, "persist actress identity edit")
 }

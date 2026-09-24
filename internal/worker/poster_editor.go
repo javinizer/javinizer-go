@@ -365,7 +365,7 @@ func (m *LockedMovieOps) legacyRenames(ctx context.Context, plan *EditCommitPlan
 			continue
 		}
 		namesUnchanged := existing.FirstName == rn.FirstName && existing.LastName == rn.LastName && existing.JapaneseName == rn.JapaneseName
-		thumbChanged := rn.ThumbURL != existing.ThumbURL
+		thumbChanged := rn.ThumbEdited
 		if namesUnchanged && !thumbChanged {
 			continue
 		}
@@ -383,6 +383,23 @@ func (m *LockedMovieOps) legacyRenames(ctx context.Context, plan *EditCommitPlan
 }
 
 // fileFirstMovieResult returns the first family file's non-nil result.
+// actressThumbEdited reports whether the request actually changed an actress
+// thumbnail relative to the cached job baseline. Intent is carried explicitly,
+// never inferred from inequality against the database: a stale in-memory
+// snapshot must not revert a thumbnail that changed elsewhere, and a sparse
+// payload must not clear one.
+func actressThumbEdited(baseline *models.Movie, a models.Actress) bool {
+	if baseline == nil || a.ID == 0 {
+		return false
+	}
+	for _, base := range baseline.Actresses {
+		if base.ID == a.ID {
+			return a.ThumbURL != base.ThumbURL
+		}
+	}
+	return false
+}
+
 func fileFirstMovieResult(m *LockedMovieOps, filePaths []string) *resultstore.MovieResult {
 	for _, fp := range filePaths {
 		if r, err := m.pe.lookup.GetMovieResult(fp); err == nil && r != nil && r.Movie != nil {
@@ -820,12 +837,16 @@ func (m *LockedMovieOps) updateMovieFamily(ctx context.Context, movie *models.Mo
 
 	// Pre-Upsert snapshot of requested actress name fields (D4): Upsert may
 	// normalize movie.Actresses in place, so renames capture intent first.
+	var baseline *models.Movie
+	if cached := fileFirstMovieResult(m, filePaths); cached != nil {
+		baseline = cached.Movie
+	}
 	renames := make([]ActressRenamePlan, 0, len(movie.Actresses))
 	for _, a := range movie.Actresses {
 		if a.ID == 0 {
 			continue
 		}
-		renames = append(renames, ActressRenamePlan{ID: a.ID, FirstName: a.FirstName, LastName: a.LastName, JapaneseName: a.JapaneseName, ThumbURL: a.ThumbURL})
+		renames = append(renames, ActressRenamePlan{ID: a.ID, FirstName: a.FirstName, LastName: a.LastName, JapaneseName: a.JapaneseName, ThumbURL: a.ThumbURL, ThumbEdited: actressThumbEdited(baseline, a)})
 	}
 
 	// Family-scoped sanitize against the first file WITH a movie (legacy
@@ -1302,12 +1323,13 @@ func (m *LockedMovieOps) ApplyFieldOverride(ctx context.Context, resultID, field
 	cand.Revision = result.Revision + 1
 	candidates := map[string]*resultstore.MovieResult{filePath: cand}
 
+	baseline := result.Movie
 	renames := make([]ActressRenamePlan, 0, len(movie.Actresses))
 	for _, a := range movie.Actresses {
 		if a.ID == 0 {
 			continue
 		}
-		renames = append(renames, ActressRenamePlan{ID: a.ID, FirstName: a.FirstName, LastName: a.LastName, JapaneseName: a.JapaneseName, ThumbURL: a.ThumbURL})
+		renames = append(renames, ActressRenamePlan{ID: a.ID, FirstName: a.FirstName, LastName: a.LastName, JapaneseName: a.JapaneseName, ThumbURL: a.ThumbURL, ThumbEdited: actressThumbEdited(baseline, a)})
 	}
 	if err := m.commitCandidate(ctx, candidates, map[string]*resultstore.ProvenanceData{filePath: prov}, func(plan *EditCommitPlan) {
 		plan.UpsertMovie = movie
@@ -1589,12 +1611,16 @@ func (m *LockedMovieOps) updateMovieSingleLocked(ctx context.Context, filePath s
 	if strings.TrimSpace(movie.ID) == "" {
 		return &EditAdmissionConflictError{Message: "movie ID must not be empty — identity changes belong to rescrape/clear flows"}
 	}
+	var baseline *models.Movie
+	if cached, lookupErr := m.pe.lookup.GetMovieResult(filePath); lookupErr == nil && cached != nil {
+		baseline = cached.Movie
+	}
 	renames := make([]ActressRenamePlan, 0, len(movie.Actresses))
 	for _, a := range movie.Actresses {
 		if a.ID == 0 {
 			continue
 		}
-		renames = append(renames, ActressRenamePlan{ID: a.ID, FirstName: a.FirstName, LastName: a.LastName, JapaneseName: a.JapaneseName, ThumbURL: a.ThumbURL})
+		renames = append(renames, ActressRenamePlan{ID: a.ID, FirstName: a.FirstName, LastName: a.LastName, JapaneseName: a.JapaneseName, ThumbURL: a.ThumbURL, ThumbEdited: actressThumbEdited(baseline, a)})
 	}
 	current, err := m.pe.lookup.GetMovieResult(filePath)
 	if err != nil || current == nil {

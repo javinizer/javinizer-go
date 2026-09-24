@@ -323,10 +323,15 @@
 		creditUpdateErrors = { ...creditUpdateErrors, [credit.id]: false };
 		try {
 			await apiClient.updateCreditOverride(credit.id, name, !clear);
-			creditStates = creditStates.map((item) =>
+			const nextCredits = (movie.credits ?? []).map((item) =>
 				item.id === credit.id ? { ...item, override_name: name, user_override: !clear } : item
 			);
+			creditStates = nextCredits.map((item) => ({ ...item }));
 			overrideDrafts = { ...overrideDrafts, [credit.id]: name };
+			// Propagate into the parent movie/job state: the override endpoint already
+			// persisted it, so a private copy alone would lose the badge and clear
+			// action as soon as the movie prop is rebuilt from the stale snapshot.
+			onUpdate({ ...movie, credits: nextCredits });
 		} catch (error) {
 			console.error('Failed to update movie-specific actress name:', error);
 			creditUpdateErrors = { ...creditUpdateErrors, [credit.id]: true };

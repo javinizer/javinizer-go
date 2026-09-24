@@ -47,8 +47,13 @@ func TestUpdateBatchMoviePersistsActressThumbnailEdit(t *testing.T) {
 		ResultID:      "result-thumb-edit",
 		FileMatchInfo: models.FileMatchInfo{Path: filePath, MovieID: movie.ID},
 		Status:        models.JobStatusCompleted,
-		Movie:         &models.Movie{ContentID: movie.ContentID, ID: movie.ID, Title: movie.Title},
-		StartedAt:     time.Now(),
+		// The cached result mirrors the refreshed projection: it carries the actress
+		// with her current (pre-edit) thumbnail, which is the baseline the rename
+		// plan compares against to detect an explicit thumbnail edit.
+		Movie: &models.Movie{ContentID: movie.ContentID, ID: movie.ID, Title: movie.Title, Actresses: []models.Actress{
+			{ID: identity.ID, FirstName: identity.FirstName, LastName: identity.LastName, JapaneseName: identity.JapaneseName, ThumbURL: identity.ThumbURL},
+		}},
+		StartedAt: time.Now(),
 	})
 
 	router := gin.New()

@@ -102,4 +102,30 @@ describe('ActressEditor production persistence', () => {
 		const view = render(ActressEditor, { movie, onUpdate: vi.fn() });
 		expect(view.queryByRole('button', { name: 'This movie only' })).toBeNull();
 	});
+	it('propagates a saved override into the movie state so it survives a rebuild', async () => {
+		const updateOverride = vi.spyOn(apiClient, 'updateCreditOverride').mockResolvedValue();
+		const onUpdate = vi.fn();
+		const movie = {
+			id: 'movie-sync',
+			title: 'Movie',
+			actresses: [{ id: 9, first_name: 'Shared', last_name: 'Identity' }],
+			credits: [{ id: 51, actress_id: 9, override_name: '', user_override: false }],
+		};
+
+		const view = render(ActressEditor, { movie, onUpdate });
+		await fireEvent.click(view.getByRole('button', { name: 'This movie only' }));
+		await fireEvent.input(view.getByLabelText('Name for this movie'), {
+			target: { value: 'Movie Only' },
+		});
+		const save = view.getAllByRole('button', { name: 'Set name' });
+		await fireEvent.click(save[save.length - 1]);
+
+		await waitFor(() => expect(updateOverride).toHaveBeenCalledWith(51, 'Movie Only', true));
+		await waitFor(() => expect(onUpdate).toHaveBeenCalled());
+		const updated = onUpdate.mock.lastCall?.[0];
+		expect(updated.credits).toEqual([
+			expect.objectContaining({ id: 51, override_name: 'Movie Only', user_override: true }),
+		]);
+		expect(updated.actresses).toEqual(movie.actresses);
+	});
 });
