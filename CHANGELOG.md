@@ -5,22 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
-### Fixed
-
-- Organize conflict authority is kind-typed (`file`/`directory`/`symlink`): destination directories and symlinks can never be forced over with `force` (only regular files honor authorization), the plan surface detects dangling symlinks and "target folder exists as a file" early instead of failing mid-execution, and authorized move legs classify before replacing (no more rename-over-a-symlink under admin overrides). (#224 phase C)
-- Organize file writes are atomically no-clobbering: unauthorized moves/copies publish through the fsutil no-replace composites (renameat2 / hard-link-tiered / MoveFileEx per OS), so a foreign writer claiming a destination mid-run conflicts atomically instead of being overwritten; cross-device copy failures no longer remove foreign destination bytes, and sources are cleaned up only via identity-verified removal. On volumes that cannot express an atomic no-replace publish (e.g. exFAT under macOS), unauthorized organizes now fail closed with a dedicated "cannot express an atomic no-clobber write" error instead of succeeding non-atomically (#224 partial — phases C/D/E remain open)
-- The "Rename in place" operation description in the Browse apply-plan selector now reflects the rename_file setting: with rename files off, the copy no longer claims videos are renamed (#229)
+## [v1.6.0] - 2026-09-24
 
 ### Added
 
-- Wildcard match mode for word replacements: per-entry `match_mode` (`literal` default / `wildcard`) across DB (migration 000015), CLI (`word add --mode`), REST, and the /words page. In wildcard mode, `?`/`？` match a run of one-or-more censor glyphs (`*`, `＊`, `○`, `◯`, `〇`, `●`, `×`, `✕`, `✖`), so one entry uncensors every censor variant of a word (#228)
+- Separate actress identity from per-movie credits: the actress database is the source of truth, scrape results record reported attribution per movie without mutating identities, ambiguous names surface as review candidates, and per-movie credit overrides persist independently of the identity
+- Gate actress image URLs in NFO actors
 
 ### Fixed
 
-- Honor the global rename_file setting for the "rename in place" video operation: web batch/apply with rename_file=false now renames only the (dedicated) folder and preserves video file names, instead of silently forcing a file rename. Note: rename_file=false + rename in place + a mixed-ID (non-dedicated) folder is now a no-op by design (#226)
-- Word-replacement entries containing `*` (the censor character) now match when embedded in Japanese/other non-Latin text: only `*` and Latin-script letters extend a censored token; non-Latin letters (kana, kanji, Cyrillic, …) now count as boundaries. Deliberate behavior flip: a Latin censored token directly abutting CJK letters now replaces (e.g. `F***ドラマ` → `Fuckドラマ`); the #106 over-extension guard (`F***` not firing inside `F****d`) is unchanged (#227)
+- Review thumbnails, name matching, and per-movie overrides: identity-snapshot credits refresh on every rename path (catalog edit, review rename, collision adoption), scraper-reported and user-touched credits are never rewritten as snapshots, explicit thumbnail clears are honored with stale-payload drift protection, and persisted credit overrides update the authoritative review state immediately (#264)
+- Exclude male co-stars from javdb casts and keep actress thumbnails
+- Test unsaved proxy profiles during initial setup (#259)
+- Probe no-clobber capability before staging streams (#255)
+- Restore background job indicator after page reload (#253)
 
 ## [v1.5.2] - 2026-09-08
 
