@@ -27,13 +27,10 @@ type ActressRenamePlan struct {
 	LastName     string
 	JapaneseName string
 	ThumbURL     string
-	// ThumbEdited carries explicit user intent. A thumbnail must only be
-	// written when the request changed it relative to the cached job baseline
-	// AND that baseline still matches the database; inferring an edit from
-	// inequality would let a stale snapshot revert a thumbnail that changed
-	// elsewhere, or a sparse payload clear one.
-	ThumbEdited   bool
-	ThumbBaseline string
+	// ThumbEdited carries explicit client intent for the thumbnail. The server
+	// never infers it: inference from any baseline can revert a newer database
+	// value or silently drop a legitimate edit when the client is fresher.
+	ThumbEdited bool
 }
 
 // EditCommitPlan is the complete atomic unit of a review-edit commit.
@@ -157,9 +154,7 @@ func (c *EditCommitter) Commit(ctx context.Context, plan *EditCommitPlan) error 
 				continue
 			}
 			namesUnchanged := existing.FirstName == rn.FirstName && existing.LastName == rn.LastName && existing.JapaneseName == rn.JapaneseName
-			// Drift guard: skip the write when the shared identity moved on since the
-			// client loaded the job, so a stale request cannot revert it.
-			thumbChanged := rn.ThumbEdited && rn.ThumbBaseline == existing.ThumbURL
+			thumbChanged := rn.ThumbEdited
 			if namesUnchanged && !thumbChanged {
 				continue
 			}

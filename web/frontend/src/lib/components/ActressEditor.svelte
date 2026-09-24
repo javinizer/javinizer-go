@@ -46,6 +46,9 @@
 		japanese_name: '',
 		thumb_url: ''
 	});
+	// Original thumbnail of the row being edited, used to decide whether the user
+	// actually changed the field (explicit intent travels with the save).
+	let originalThumbURL = $state('');
 
 	// Whether the thumbnail preview failed to load for the current URL. Reset
 	// whenever the URL changes so a corrected URL re-fetches instead of staying
@@ -227,6 +230,7 @@
 			japanese_name: '',
 			thumb_url: ''
 		};
+		originalThumbURL = '';
 		aliasGroup = null;
 		showEditModal = true;
 		loadAllActresses(); // Load actresses when opening modal
@@ -235,6 +239,7 @@
 	function openEditActress(index: number) {
 		editingIndex = index;
 		editingActress = { ...actresses[index] };
+		originalThumbURL = actresses[index].thumb_url ?? '';
 		aliasGroup = null;
 		showEditModal = true;
 		loadAllActresses(); // Load actresses when opening modal
@@ -705,7 +710,15 @@
 							<input
 								id="actress-thumb-url"
 								type="url"
-								bind:value={editingActress.thumb_url}
+								value={editingActress.thumb_url ?? ''}
+								oninput={(event) => {
+									const value = event.currentTarget.value;
+									editingActress = {
+										...editingActress,
+										thumb_url: value,
+										thumb_edited: value.trim() !== originalThumbURL.trim()
+									};
+								}}
 								placeholder="https://..."
 								class="w-full px-3 py-2 border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all font-mono text-sm"
 							/>

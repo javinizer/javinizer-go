@@ -71,6 +71,7 @@ func TestUpdateBatchMoviePersistsActressThumbnailEdit(t *testing.T) {
 	revision := batch.Results[filePath].Revision
 
 	view.Actresses[0].ThumbURL = "https://new.test/thumb.jpg"
+	view.Actresses[0].ThumbEdited = true
 	view.UpdatedAt = time.Time{}
 	view.Actresses[0].UpdatedAt = time.Time{}
 

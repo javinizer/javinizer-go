@@ -621,6 +621,9 @@ export interface Actress {
 	verified?: boolean;
 	origin?: string;
 	name_key?: string;
+	// ThumbEdited marks an explicit user edit of thumb_url for this save; it is
+	// never persisted and never returned authoritatively by the API.
+	thumb_edited?: boolean;
 }
 
 export type CreditOrigin = 'scrape' | 'user';

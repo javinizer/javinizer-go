@@ -119,6 +119,11 @@ definitions:
         type: string
       origin:
         type: string
+      thumb_edited:
+        description: |-
+          ThumbEdited marks an explicit client edit of thumb_url so the server never
+          infers thumbnail intent from snapshot or database comparisons.
+        type: boolean
       thumb_url:
         type: string
       translations:
@@ -2543,6 +2548,11 @@ definitions:
         type: string
       origin:
         type: string
+      thumb_edited:
+        description: |-
+          ThumbEdited is a transient request signal: the client edited the
+          thumbnail field for this actress. It is never persisted.
+        type: boolean
       thumb_url:
         type: string
       translations:
@@ -3131,6 +3141,11 @@ definitions:
         type: string
       origin:
         type: string
+      thumb_edited:
+        description: |-
+          ThumbEdited is a transient request signal: the client edited the
+          thumbnail field for this actress. It is never persisted.
+        type: boolean
       thumb_url:
         type: string
       translations:

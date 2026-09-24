@@ -37,7 +37,7 @@ func TestUpdateMovie_ActressThumbnailEditError(t *testing.T) {
 
 	err := ej.UpdateMovie(context.Background(), "file1.mp4",
 		&models.Movie{ID: "ABC-001", Actresses: []models.Actress{
-			{ID: 1, FirstName: "Yui-Edited", LastName: "Hatano", ThumbURL: "https://new.test/thumb.jpg"},
+			{ID: 1, FirstName: "Yui-Edited", LastName: "Hatano", ThumbURL: "https://new.test/thumb.jpg", ThumbEdited: true},
 		}})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "persist actress identity edit",

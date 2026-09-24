@@ -4726,6 +4726,10 @@ const docTemplate = `{
                 "origin": {
                     "type": "string"
                 },
+                "thumb_edited": {
+                    "description": "ThumbEdited marks an explicit client edit of thumb_url so the server never\ninfers thumbnail intent from snapshot or database comparisons.",
+                    "type": "boolean"
+                },
                 "thumb_url": {
                     "type": "string"
                 },
@@ -8095,6 +8099,10 @@ const docTemplate = `{
                 "origin": {
                     "type": "string"
                 },
+                "thumb_edited": {
+                    "description": "ThumbEdited is a transient request signal: the client edited the\nthumbnail field for this actress. It is never persisted.",
+                    "type": "boolean"
+                },
                 "thumb_url": {
                     "type": "string"
                 },
@@ -8903,6 +8911,10 @@ const docTemplate = `{
                 },
                 "origin": {
                     "type": "string"
+                },
+                "thumb_edited": {
+                    "description": "ThumbEdited is a transient request signal: the client edited the\nthumbnail field for this actress. It is never persisted.",
+                    "type": "boolean"
                 },
                 "thumb_url": {
                     "type": "string"

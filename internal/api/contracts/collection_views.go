@@ -18,12 +18,15 @@ import (
 
 // ActressView is the API-layer projection of models.Actress.
 type ActressView struct {
-	ID           uint                     `json:"id"`
-	DMMID        int                      `json:"dmm_id"`
-	FirstName    string                   `json:"first_name"`
-	LastName     string                   `json:"last_name"`
-	JapaneseName string                   `json:"japanese_name"`
-	ThumbURL     string                   `json:"thumb_url"`
+	ID           uint   `json:"id"`
+	DMMID        int    `json:"dmm_id"`
+	FirstName    string `json:"first_name"`
+	LastName     string `json:"last_name"`
+	JapaneseName string `json:"japanese_name"`
+	ThumbURL     string `json:"thumb_url"`
+	// ThumbEdited marks an explicit client edit of thumb_url so the server never
+	// infers thumbnail intent from snapshot or database comparisons.
+	ThumbEdited  bool                     `json:"thumb_edited,omitempty"`
 	Aliases      string                   `json:"aliases"`
 	Verified     bool                     `json:"verified"`
 	Origin       string                   `json:"origin"`
@@ -135,6 +138,7 @@ func ActressViewToModel(v *ActressView) *models.Actress {
 		LastName:     v.LastName,
 		JapaneseName: v.JapaneseName,
 		ThumbURL:     v.ThumbURL,
+		ThumbEdited:  v.ThumbEdited,
 		Aliases:      v.Aliases,
 		Translations: ActressTranslationViewSliceToModels(v.Translations),
 		CreatedAt:    v.CreatedAt,

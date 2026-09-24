@@ -128,4 +128,35 @@ describe('ActressEditor production persistence', () => {
 		]);
 		expect(updated.actresses).toEqual(movie.actresses);
 	});
+	it('marks an edited thumbnail as explicit intent in the saved payload', async () => {
+		vi.spyOn(apiClient, 'request').mockResolvedValue([]);
+		const onUpdate = vi.fn();
+		const movie = {
+			id: 'movie-thumb',
+			title: 'Movie',
+			cast_version: 'cast-v9',
+			actresses: [
+				{
+					id: 3,
+					first_name: 'Shared',
+					last_name: 'Identity',
+					thumb_url: 'https://old.test/thumb.jpg',
+				},
+			],
+		};
+
+		const view = render(ActressEditor, { movie, onUpdate });
+		await fireEvent.click(view.getAllByRole('button', { name: /Edit Actress/i })[0]);
+		const thumb = await view.findByLabelText(/Thumbnail URL/i);
+		await fireEvent.input(thumb, { target: { value: 'https://new.test/thumb.jpg' } });
+		const save = view.getAllByRole('button', { name: /Save Changes/i });
+		await fireEvent.click(save[save.length - 1]);
+
+		await waitFor(() => expect(onUpdate).toHaveBeenCalled());
+		const updated = onUpdate.mock.lastCall?.[0];
+		expect(updated.actresses[0]).toMatchObject({
+			thumb_url: 'https://new.test/thumb.jpg',
+			thumb_edited: true,
+		});
+	});
 });

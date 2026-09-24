@@ -9,22 +9,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestActressThumbIntentRequiresBaselineChange(t *testing.T) {
-	baseline := &models.Movie{Actresses: []models.Actress{{ID: 1, ThumbURL: "https://old.test/thumb.jpg"}}}
+func TestActressThumbEditedRequiresExplicitIntent(t *testing.T) {
+	db := newActressEditTestDB(t)
+	_ = db
 
-	edited, _ := actressThumbIntent(nil, models.Actress{ID: 1, ThumbURL: "https://new.test/thumb.jpg"})
-	require.False(t, edited, "no baseline means no proven intent")
-	edited, _ = actressThumbIntent(baseline, models.Actress{ID: 2, ThumbURL: "https://new.test/thumb.jpg"})
-	require.False(t, edited, "unknown actress means no proven intent")
-	edited, _ = actressThumbIntent(baseline, models.Actress{ID: 1, ThumbURL: "https://old.test/thumb.jpg"})
-	require.False(t, edited, "unchanged thumbnail is not an edit")
-	edited, base := actressThumbIntent(baseline, models.Actress{ID: 1, ThumbURL: "https://new.test/thumb.jpg"})
-	require.True(t, edited, "a changed thumbnail is an edit")
-	require.Equal(t, "https://old.test/thumb.jpg", base, "the baseline travels with the intent for the drift guard")
-	edited, _ = actressThumbIntent(baseline, models.Actress{ID: 1, ThumbURL: ""})
-	require.False(t, edited, "an omitted or empty thumbnail must not clear a shared identity")
-	edited, _ = actressThumbIntent(baseline, models.Actress{ID: 1, ThumbURL: "   "})
-	require.False(t, edited, "whitespace-only thumbnails are treated as absent")
+	require.False(t, actressThumbEdited(models.Actress{ID: 1, ThumbURL: "https://new.test/thumb.jpg"}), "an unmarked thumbnail is not an edit")
+	require.False(t, actressThumbEdited(models.Actress{ID: 1, ThumbURL: "", ThumbEdited: true}), "an empty thumbnail is not a clear")
+	require.False(t, actressThumbEdited(models.Actress{ID: 1, ThumbURL: "   ", ThumbEdited: true}), "whitespace is not a clear")
+	require.True(t, actressThumbEdited(models.Actress{ID: 1, ThumbURL: "https://new.test/thumb.jpg", ThumbEdited: true}), "only an explicit client edit counts")
 }
 
 func TestUpdateMovieUnrelatedSaveKeepsDatabaseThumbnail(t *testing.T) {

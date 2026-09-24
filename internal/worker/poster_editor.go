@@ -365,10 +365,7 @@ func (m *LockedMovieOps) legacyRenames(ctx context.Context, plan *EditCommitPlan
 			continue
 		}
 		namesUnchanged := existing.FirstName == rn.FirstName && existing.LastName == rn.LastName && existing.JapaneseName == rn.JapaneseName
-		// Drift guard: only write the thumbnail the client edited when the baseline
-		// it saw still matches the database. If another writer changed the shared
-		// identity in between, the request is stale and must not revert it.
-		thumbChanged := rn.ThumbEdited && rn.ThumbBaseline == existing.ThumbURL
+		thumbChanged := rn.ThumbEdited
 		if namesUnchanged && !thumbChanged {
 			continue
 		}
@@ -386,24 +383,14 @@ func (m *LockedMovieOps) legacyRenames(ctx context.Context, plan *EditCommitPlan
 }
 
 // fileFirstMovieResult returns the first family file's non-nil result.
-// actressThumbIntent reports whether the request actually set a new actress
-// thumbnail, together with the baseline value the client was shown. Intent is
-// never inferred from inequality against the database: a stale in-memory
-// snapshot must not revert a thumbnail that changed elsewhere. An empty
-// incoming value is treated as "not provided" rather than an explicit clear,
-// because a JSON payload that omits thumb_url decodes to the same empty string
-// as a deliberate clear, and clearing would wipe the shared identity across
-// every movie. Clearing stays available on the actress catalog edit surface.
-func actressThumbIntent(baseline *models.Movie, a models.Actress) (bool, string) {
-	if baseline == nil || a.ID == 0 || strings.TrimSpace(a.ThumbURL) == "" {
-		return false, ""
-	}
-	for _, base := range baseline.Actresses {
-		if base.ID == a.ID {
-			return a.ThumbURL != base.ThumbURL, base.ThumbURL
-		}
-	}
-	return false, ""
+// actressThumbEdited reports whether the client explicitly edited this actress
+// thumbnail. Intent travels in the request (Actress.ThumbEdited) instead of
+// being inferred: inference from any baseline can revert a newer database value
+// (stale cache) or silently drop a legitimate edit when the client's projection
+// is fresher than the cache. An empty value is still treated as "not provided",
+// so clearing a shared identity thumbnail stays a catalog operation.
+func actressThumbEdited(a models.Actress) bool {
+	return a.ThumbEdited && strings.TrimSpace(a.ThumbURL) != ""
 }
 
 func fileFirstMovieResult(m *LockedMovieOps, filePaths []string) *resultstore.MovieResult {
@@ -843,17 +830,12 @@ func (m *LockedMovieOps) updateMovieFamily(ctx context.Context, movie *models.Mo
 
 	// Pre-Upsert snapshot of requested actress name fields (D4): Upsert may
 	// normalize movie.Actresses in place, so renames capture intent first.
-	var baseline *models.Movie
-	if cached := fileFirstMovieResult(m, filePaths); cached != nil {
-		baseline = cached.Movie
-	}
 	renames := make([]ActressRenamePlan, 0, len(movie.Actresses))
 	for _, a := range movie.Actresses {
 		if a.ID == 0 {
 			continue
 		}
-		thumbEdited, thumbBaseline := actressThumbIntent(baseline, a)
-		renames = append(renames, ActressRenamePlan{ID: a.ID, FirstName: a.FirstName, LastName: a.LastName, JapaneseName: a.JapaneseName, ThumbURL: a.ThumbURL, ThumbEdited: thumbEdited, ThumbBaseline: thumbBaseline})
+		renames = append(renames, ActressRenamePlan{ID: a.ID, FirstName: a.FirstName, LastName: a.LastName, JapaneseName: a.JapaneseName, ThumbURL: a.ThumbURL, ThumbEdited: actressThumbEdited(a)})
 	}
 
 	// Family-scoped sanitize against the first file WITH a movie (legacy
@@ -1330,14 +1312,12 @@ func (m *LockedMovieOps) ApplyFieldOverride(ctx context.Context, resultID, field
 	cand.Revision = result.Revision + 1
 	candidates := map[string]*resultstore.MovieResult{filePath: cand}
 
-	baseline := result.Movie
 	renames := make([]ActressRenamePlan, 0, len(movie.Actresses))
 	for _, a := range movie.Actresses {
 		if a.ID == 0 {
 			continue
 		}
-		thumbEdited, thumbBaseline := actressThumbIntent(baseline, a)
-		renames = append(renames, ActressRenamePlan{ID: a.ID, FirstName: a.FirstName, LastName: a.LastName, JapaneseName: a.JapaneseName, ThumbURL: a.ThumbURL, ThumbEdited: thumbEdited, ThumbBaseline: thumbBaseline})
+		renames = append(renames, ActressRenamePlan{ID: a.ID, FirstName: a.FirstName, LastName: a.LastName, JapaneseName: a.JapaneseName, ThumbURL: a.ThumbURL, ThumbEdited: actressThumbEdited(a)})
 	}
 	if err := m.commitCandidate(ctx, candidates, map[string]*resultstore.ProvenanceData{filePath: prov}, func(plan *EditCommitPlan) {
 		plan.UpsertMovie = movie
@@ -1619,17 +1599,12 @@ func (m *LockedMovieOps) updateMovieSingleLocked(ctx context.Context, filePath s
 	if strings.TrimSpace(movie.ID) == "" {
 		return &EditAdmissionConflictError{Message: "movie ID must not be empty — identity changes belong to rescrape/clear flows"}
 	}
-	var baseline *models.Movie
-	if cached, lookupErr := m.pe.lookup.GetMovieResult(filePath); lookupErr == nil && cached != nil {
-		baseline = cached.Movie
-	}
 	renames := make([]ActressRenamePlan, 0, len(movie.Actresses))
 	for _, a := range movie.Actresses {
 		if a.ID == 0 {
 			continue
 		}
-		thumbEdited, thumbBaseline := actressThumbIntent(baseline, a)
-		renames = append(renames, ActressRenamePlan{ID: a.ID, FirstName: a.FirstName, LastName: a.LastName, JapaneseName: a.JapaneseName, ThumbURL: a.ThumbURL, ThumbEdited: thumbEdited, ThumbBaseline: thumbBaseline})
+		renames = append(renames, ActressRenamePlan{ID: a.ID, FirstName: a.FirstName, LastName: a.LastName, JapaneseName: a.JapaneseName, ThumbURL: a.ThumbURL, ThumbEdited: actressThumbEdited(a)})
 	}
 	current, err := m.pe.lookup.GetMovieResult(filePath)
 	if err != nil || current == nil {
