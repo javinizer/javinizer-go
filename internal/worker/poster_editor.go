@@ -361,7 +361,18 @@ func (m *LockedMovieOps) legacyRenames(ctx context.Context, plan *EditCommitPlan
 			}
 			return fmt.Errorf("load actress for rename: %w", err)
 		}
-		if existing == nil || (existing.FirstName == rn.FirstName && existing.LastName == rn.LastName && existing.JapaneseName == rn.JapaneseName) {
+		if existing == nil {
+			continue
+		}
+		namesUnchanged := existing.FirstName == rn.FirstName && existing.LastName == rn.LastName && existing.JapaneseName == rn.JapaneseName
+		thumbChanged := rn.ThumbURL != existing.ThumbURL
+		if namesUnchanged && !thumbChanged {
+			continue
+		}
+		if thumbChanged {
+			if err := actressRepo.RenameIdentityFields(ctx, rn.ID, rn.FirstName, rn.LastName, rn.JapaneseName, rn.ThumbURL); err != nil {
+				return fmt.Errorf("persist actress identity edit: %w", err)
+			}
 			continue
 		}
 		if err := actressRepo.RenameNameFields(ctx, rn.ID, rn.FirstName, rn.LastName, rn.JapaneseName); err != nil {

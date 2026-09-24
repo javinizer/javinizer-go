@@ -377,11 +377,6 @@ func (u *MovieUpserter) reconcileLegacyActressEditsTx(tx *gorm.DB, movie *models
 	incoming := make(map[uint]bool, len(movie.Actresses))
 	for i := range movie.Actresses {
 		actress := &movie.Actresses[i]
-		if actress.ID == 0 {
-			// Nameless or unresolved entries never existed as identities and
-			// must not produce a credit row.
-			continue
-		}
 		incoming[actress.ID] = true
 		if credit, ok := existingByActress[actress.ID]; ok {
 			if credit.Suppressed {
