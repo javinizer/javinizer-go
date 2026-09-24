@@ -16,7 +16,8 @@ func TestActressThumbEditedRequiresBaselineChange(t *testing.T) {
 	require.False(t, actressThumbEdited(baseline, models.Actress{ID: 2, ThumbURL: "https://new.test/thumb.jpg"}), "unknown actress means no proven intent")
 	require.False(t, actressThumbEdited(baseline, models.Actress{ID: 1, ThumbURL: "https://old.test/thumb.jpg"}), "unchanged thumbnail is not an edit")
 	require.True(t, actressThumbEdited(baseline, models.Actress{ID: 1, ThumbURL: "https://new.test/thumb.jpg"}), "a changed thumbnail is an edit")
-	require.True(t, actressThumbEdited(baseline, models.Actress{ID: 1, ThumbURL: ""}), "clearing the thumbnail is an edit")
+	require.False(t, actressThumbEdited(baseline, models.Actress{ID: 1, ThumbURL: ""}), "an omitted or empty thumbnail must not clear a shared identity")
+	require.False(t, actressThumbEdited(baseline, models.Actress{ID: 1, ThumbURL: "   "}), "whitespace-only thumbnails are treated as absent")
 }
 
 func TestUpdateMovieUnrelatedSaveKeepsDatabaseThumbnail(t *testing.T) {
@@ -52,4 +53,13 @@ func TestUpdateMovieUnrelatedSaveKeepsDatabaseThumbnail(t *testing.T) {
 	var stored models.Actress
 	require.NoError(t, db.First(&stored, identity.ID).Error)
 	require.Equal(t, "https://newer.test/thumb.jpg", stored.ThumbURL, "an unrelated save must not revert a thumbnail changed elsewhere")
+
+	// A name-only payload omits thumb_url, which decodes to an empty string; it
+	// must not be mistaken for a deliberate clear of the shared identity.
+	require.NoError(t, ej.UpdateMovie(context.Background(), "file1.mp4", &models.Movie{ID: movie.ID, Title: "Title v3", Actresses: []models.Actress{
+		{ID: identity.ID, FirstName: "Yui", LastName: "Hatano", ThumbURL: ""},
+	}}))
+
+	require.NoError(t, db.First(&stored, identity.ID).Error)
+	require.Equal(t, "https://newer.test/thumb.jpg", stored.ThumbURL, "a sparse payload must not clear the shared thumbnail")
 }

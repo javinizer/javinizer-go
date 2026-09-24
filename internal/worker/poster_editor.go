@@ -383,13 +383,16 @@ func (m *LockedMovieOps) legacyRenames(ctx context.Context, plan *EditCommitPlan
 }
 
 // fileFirstMovieResult returns the first family file's non-nil result.
-// actressThumbEdited reports whether the request actually changed an actress
-// thumbnail relative to the cached job baseline. Intent is carried explicitly,
-// never inferred from inequality against the database: a stale in-memory
-// snapshot must not revert a thumbnail that changed elsewhere, and a sparse
-// payload must not clear one.
+// actressThumbEdited reports whether the request actually set a new actress
+// thumbnail relative to the cached job baseline. Intent is never inferred from
+// inequality against the database: a stale in-memory snapshot must not revert a
+// thumbnail that changed elsewhere. An empty incoming value is treated as
+// "not provided" rather than an explicit clear, because a JSON payload that
+// omits thumb_url decodes to the same empty string as a deliberate clear, and
+// clearing would wipe the shared identity across every movie. Clearing stays
+// available on the actress catalog edit surface.
 func actressThumbEdited(baseline *models.Movie, a models.Actress) bool {
-	if baseline == nil || a.ID == 0 {
+	if baseline == nil || a.ID == 0 || strings.TrimSpace(a.ThumbURL) == "" {
 		return false
 	}
 	for _, base := range baseline.Actresses {
