@@ -45,9 +45,61 @@ describe('ActressEditor production persistence', () => {
 			title: 'Canonical title',
 			cropped_poster_url: 'https://example.test/crop.jpg',
 		});
-		expect(updatedMovie.actresses).toEqual([
-			expect.objectContaining({ first_name: 'New' }),
-		]);
+		expect(updatedMovie.actresses).toEqual([expect.objectContaining({ first_name: 'New' })]);
 		expect(onPersistEdits).toHaveBeenCalledOnce();
+	});
+
+	it('sets a movie-specific name with the matched credit id and shows the indicator', async () => {
+		const updateOverride = vi.spyOn(apiClient, 'updateCreditOverride').mockResolvedValue();
+		const movie = {
+			id: 'movie-1',
+			title: 'Movie',
+			actresses: [{ id: 7, first_name: 'Shared', last_name: 'Identity' }],
+			credits: [{ id: 41, actress_id: 7, override_name: '', user_override: false }],
+		};
+
+		const view = render(ActressEditor, { movie, onUpdate: vi.fn() });
+		expect(view.queryByText('Movie-specific name')).toBeNull();
+		await fireEvent.click(view.getByRole('button', { name: 'This movie only' }));
+		await fireEvent.input(view.getByLabelText('Name for this movie'), {
+			target: { value: 'Stage Name' },
+		});
+		await fireEvent.click(view.getByRole('button', { name: 'Set name' }));
+
+		await waitFor(() => expect(updateOverride).toHaveBeenCalledWith(41, 'Stage Name', true));
+		expect(await view.findByText('Movie-specific name')).toBeTruthy();
+	});
+
+	it('shows an existing movie override and clears it explicitly', async () => {
+		const updateOverride = vi.spyOn(apiClient, 'updateCreditOverride').mockResolvedValue();
+		const movie = {
+			id: 'movie-1',
+			title: 'Movie',
+			actresses: [{ id: 7, first_name: 'Shared', last_name: 'Identity' }],
+			credits: [{ id: 41, actress_id: 7, override_name: 'Movie Name', user_override: true }],
+		};
+
+		const view = render(ActressEditor, { movie, onUpdate: vi.fn() });
+		expect(view.getByText('Movie-specific name')).toBeTruthy();
+		await fireEvent.click(view.getByRole('button', { name: 'This movie only' }));
+		expect((view.getByLabelText('Name for this movie') as HTMLInputElement).value).toBe(
+			'Movie Name',
+		);
+		await fireEvent.click(view.getByRole('button', { name: 'Clear override' }));
+
+		await waitFor(() => expect(updateOverride).toHaveBeenCalledWith(41, '', false));
+		await waitFor(() => expect(view.queryByText('Movie-specific name')).toBeNull());
+	});
+
+	it('hides the movie-only control when the actress has no credit id', () => {
+		const movie = {
+			id: 'movie-1',
+			title: 'Movie',
+			actresses: [{ id: 7, first_name: 'Shared', last_name: 'Identity' }],
+			credits: [{ actress_id: 7 }],
+		};
+
+		const view = render(ActressEditor, { movie, onUpdate: vi.fn() });
+		expect(view.queryByRole('button', { name: 'This movie only' })).toBeNull();
 	});
 });

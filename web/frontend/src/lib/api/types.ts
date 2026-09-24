@@ -572,6 +572,7 @@ export interface Movie {
 	rating_votes?: number;
 	genres?: Genre[];
 	actresses?: Actress[];
+	credits?: MovieCredit[];
 	cast_version?: string;
 	cover_url?: string;
 	poster_url?: string;

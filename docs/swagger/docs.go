@@ -5579,6 +5579,38 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_javinizer_javinizer-go_internal_api_contracts.MovieCreditView": {
+            "type": "object",
+            "properties": {
+                "actress_id": {
+                    "type": "integer"
+                },
+                "credited_japanese_name": {
+                    "type": "string"
+                },
+                "credited_name": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "order_index": {
+                    "type": "integer"
+                },
+                "override_name": {
+                    "type": "string"
+                },
+                "reported_thumb_url": {
+                    "type": "string"
+                },
+                "suppressed": {
+                    "type": "boolean"
+                },
+                "user_override": {
+                    "type": "boolean"
+                }
+            }
+        },
         "github_com_javinizer_javinizer-go_internal_api_contracts.MovieResponse": {
             "type": "object",
             "properties": {
@@ -5693,6 +5725,12 @@ const docTemplate = `{
                 "created_at": {
                     "description": "Audit timestamps",
                     "type": "string"
+                },
+                "credits": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.MovieCreditView"
+                    }
                 },
                 "cropped_poster_url": {
                     "type": "string"
