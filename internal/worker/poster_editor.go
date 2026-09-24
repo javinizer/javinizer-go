@@ -814,7 +814,7 @@ func (m *LockedMovieOps) updateMovieFamily(ctx context.Context, movie *models.Mo
 		if a.ID == 0 {
 			continue
 		}
-		renames = append(renames, ActressRenamePlan{ID: a.ID, FirstName: a.FirstName, LastName: a.LastName, JapaneseName: a.JapaneseName})
+		renames = append(renames, ActressRenamePlan{ID: a.ID, FirstName: a.FirstName, LastName: a.LastName, JapaneseName: a.JapaneseName, ThumbURL: a.ThumbURL})
 	}
 
 	// Family-scoped sanitize against the first file WITH a movie (legacy
@@ -1296,7 +1296,7 @@ func (m *LockedMovieOps) ApplyFieldOverride(ctx context.Context, resultID, field
 		if a.ID == 0 {
 			continue
 		}
-		renames = append(renames, ActressRenamePlan{ID: a.ID, FirstName: a.FirstName, LastName: a.LastName, JapaneseName: a.JapaneseName})
+		renames = append(renames, ActressRenamePlan{ID: a.ID, FirstName: a.FirstName, LastName: a.LastName, JapaneseName: a.JapaneseName, ThumbURL: a.ThumbURL})
 	}
 	if err := m.commitCandidate(ctx, candidates, map[string]*resultstore.ProvenanceData{filePath: prov}, func(plan *EditCommitPlan) {
 		plan.UpsertMovie = movie
@@ -1583,7 +1583,7 @@ func (m *LockedMovieOps) updateMovieSingleLocked(ctx context.Context, filePath s
 		if a.ID == 0 {
 			continue
 		}
-		renames = append(renames, ActressRenamePlan{ID: a.ID, FirstName: a.FirstName, LastName: a.LastName, JapaneseName: a.JapaneseName})
+		renames = append(renames, ActressRenamePlan{ID: a.ID, FirstName: a.FirstName, LastName: a.LastName, JapaneseName: a.JapaneseName, ThumbURL: a.ThumbURL})
 	}
 	current, err := m.pe.lookup.GetMovieResult(filePath)
 	if err != nil || current == nil {

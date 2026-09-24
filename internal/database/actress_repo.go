@@ -116,7 +116,21 @@ func (r *ActressRepository) Update(ctx context.Context, actress *models.Actress)
 // other columns (created_at, dmm_id, thumb_url, aliases) the way a full-row
 // Save would. Callers should gate on a name-field change to avoid bumping
 // updated_at for unedited actresses.
+// RenameNameFields applies an explicit name edit and leaves the thumbnail alone.
 func (r *ActressRepository) RenameNameFields(ctx context.Context, id uint, firstName, lastName, japaneseName string) error {
+	return r.renameIdentityFields(ctx, id, firstName, lastName, japaneseName, nil)
+}
+
+// RenameIdentityFields applies an explicit identity edit: canonical name fields
+// plus the thumbnail. Review-page edits arrive here, because the movie upsert
+// merge is deliberately fill-only for scraper-supplied data.
+func (r *ActressRepository) RenameIdentityFields(ctx context.Context, id uint, firstName, lastName, japaneseName, thumbURL string) error {
+	return r.renameIdentityFields(ctx, id, firstName, lastName, japaneseName, &thumbURL)
+}
+
+// renameIdentityFields keeps the transactional rename semantics shared by both
+// entry points; thumbURL is nil when the caller did not edit the thumbnail.
+func (r *ActressRepository) renameIdentityFields(ctx context.Context, id uint, firstName, lastName, japaneseName string, thumbURL *string) error {
 	if id == 0 {
 		return wrapDBErr("rename", "actress id 0", ErrInvalidLookup)
 	}
@@ -124,6 +138,9 @@ func (r *ActressRepository) RenameNameFields(ctx context.Context, id uint, first
 		colFirstName:    firstName,
 		colLastName:     lastName,
 		colJapaneseName: japaneseName,
+	}
+	if thumbURL != nil {
+		updates[colThumbURL] = *thumbURL
 	}
 	return r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		contentIDs, err := movieContentIDsForActressesTx(tx, id)
@@ -141,13 +158,19 @@ func (r *ActressRepository) RenameNameFields(ctx context.Context, id uint, first
 		if err := tx.Model(&models.Actress{}).Where("id = ?", id).Updates(updates).Error; err != nil {
 			return wrapDBErr("rename", fmt.Sprintf("actress %d", id), err)
 		}
-		if actressCanonicalNameChanged(&current, firstName, lastName, japaneseName) {
+		nameChanged := actressCanonicalNameChanged(&current, firstName, lastName, japaneseName)
+		if nameChanged {
 			if err := deleteActressTranslationsTx(tx, id); err != nil {
 				return err
 			}
 		}
 		if err := transitionActressCanonicalNamesTx(tx, id, &current); err != nil {
 			return err
+		}
+		if nameChanged {
+			if err := refreshIdentitySnapshotCreditsTx(tx, id, firstName, lastName, japaneseName); err != nil {
+				return err
+			}
 		}
 		if err := reconcileActressCollisionsTx(tx, id); err != nil {
 			return err
@@ -157,6 +180,28 @@ func (r *ActressRepository) RenameNameFields(ctx context.Context, id uint, first
 		}
 		return invalidateChangedMovieRenderInputsTx(tx, before, contentIDs)
 	})
+}
+
+// refreshIdentitySnapshotCreditsTx re-derives credited names for credits that
+// are pure identity snapshots: rows backfilled by migration (source "legacy")
+// and rows the movie-save path created for a movie that carried no reported
+// name (empty source). Scraper-reported attribution and user overrides are left
+// untouched so a rename can never rewrite reported history.
+func refreshIdentitySnapshotCreditsTx(tx *gorm.DB, actressID uint, firstName, lastName, japaneseName string) error {
+	updated := models.Actress{FirstName: firstName, LastName: lastName, JapaneseName: japaneseName}
+	name := updated.FullName()
+	if strings.TrimSpace(name) == "" {
+		return nil
+	}
+	if err := tx.Model(&models.MovieCredit{}).
+		Where("actress_id = ? AND user_override = ? AND (source = ? OR source = ?)", actressID, false, "", "legacy").
+		Updates(map[string]interface{}{
+			"credited_name":          name,
+			"credited_japanese_name": strings.TrimSpace(japaneseName),
+		}).Error; err != nil {
+		return wrapDBErr("refresh", fmt.Sprintf("identity snapshot credits for actress %d", actressID), err)
+	}
+	return nil
 }
 
 // FindByID loads an actress by its primary key.
