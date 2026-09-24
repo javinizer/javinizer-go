@@ -168,7 +168,7 @@ func (r *ActressRepository) renameIdentityFields(ctx context.Context, id uint, f
 			return err
 		}
 		if nameChanged {
-			if err := refreshIdentitySnapshotCreditsTx(tx, id, firstName, lastName, japaneseName); err != nil {
+			if err := refreshIdentitySnapshotCreditsTx(tx, id, &current, firstName, lastName, japaneseName); err != nil {
 				return err
 			}
 		}
@@ -183,18 +183,25 @@ func (r *ActressRepository) renameIdentityFields(ctx context.Context, id uint, f
 }
 
 // refreshIdentitySnapshotCreditsTx re-derives credited names for credits that
-// are pure identity snapshots: rows backfilled by migration (source "legacy")
-// and rows the movie-save path created for a movie that carried no reported
-// name (empty source). Scraper-reported attribution and user overrides are left
-// untouched so a rename can never rewrite reported history.
-func refreshIdentitySnapshotCreditsTx(tx *gorm.DB, actressID uint, firstName, lastName, japaneseName string) error {
+// are pure identity snapshots: their credited_name still carries the previous
+// canonical name because no scraper ever reported a name for that movie.
+// Scraper-reported attribution and user overrides are left untouched, so a
+// rename can never rewrite reported history.
+func refreshIdentitySnapshotCreditsTx(tx *gorm.DB, actressID uint, previous *models.Actress, firstName, lastName, japaneseName string) error {
+	if previous == nil {
+		return nil
+	}
+	previousName := strings.TrimSpace(previous.FullName())
+	if previousName == "" {
+		return nil
+	}
 	updated := models.Actress{FirstName: firstName, LastName: lastName, JapaneseName: japaneseName}
 	name := updated.FullName()
 	if strings.TrimSpace(name) == "" {
 		return nil
 	}
 	if err := tx.Model(&models.MovieCredit{}).
-		Where("actress_id = ? AND user_override = ? AND (source = ? OR source = ?)", actressID, false, "", "legacy").
+		Where("actress_id = ? AND user_override = ? AND credited_name = ?", actressID, false, previousName).
 		Updates(map[string]interface{}{
 			"credited_name":          name,
 			"credited_japanese_name": strings.TrimSpace(japaneseName),
