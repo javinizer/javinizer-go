@@ -57,7 +57,10 @@ func shouldPreserveCachedActresses(payload, baseline *models.Movie) bool {
 	}
 	for i := range payload.Actresses {
 		a, b := payload.Actresses[i], baseline.Actresses[i]
-		if a.ID != b.ID || a.DMMID != b.DMMID || a.FirstName != b.FirstName || a.LastName != b.LastName || a.JapaneseName != b.JapaneseName || a.ThumbURL != b.ThumbURL || a.Aliases != b.Aliases || a.NameKey != b.NameKey {
+		// ThumbEdited marks explicit client intent even when the value matches the
+		// stale baseline, so it must take the guarded path or a concurrent write
+		// would be overwritten instead of conflicting.
+		if a.ThumbEdited || a.ID != b.ID || a.DMMID != b.DMMID || a.FirstName != b.FirstName || a.LastName != b.LastName || a.JapaneseName != b.JapaneseName || a.ThumbURL != b.ThumbURL || a.Aliases != b.Aliases || a.NameKey != b.NameKey {
 			return false
 		}
 	}
