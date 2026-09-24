@@ -928,38 +928,53 @@ func extractActresses(sel *goquery.Selection) []models.ActressInfo {
 	actresses := make([]models.ActressInfo, 0)
 	seen := make(map[string]bool)
 	type actressCandidate struct {
-		name          string
-		actorID       string
-		genderHint    string // "female", "male", or ""
-		maleHeuristic bool
+		name           string
+		actorID        string
+		genderHint     string // "female", "male", or ""
+		maleHeuristic  bool
+		explicitFemale bool
+		thumbURL       string
 	}
 	candidates := make([]actressCandidate, 0)
-	hasSymbolGender := false
+	usedMarkers := make(map[*html.Node]bool)
 
 	sel.Find("a").Each(func(_ int, a *goquery.Selection) {
 		name := scraperutil.CleanString(a.Text())
 		if name == "" || seen[name] {
 			return
 		}
-		genderHint := genderHintFromSymbolSibling(a)
-		if genderHint != "" {
-			hasSymbolGender = true
-		}
+		actorID := javdbActorIDFromLink(a)
+		genderHint := genderHintForAnchor(a, usedMarkers)
 		candidates = append(candidates, actressCandidate{
-			name:          name,
-			actorID:       javdbActorIDFromLink(a),
-			genderHint:    genderHint,
-			maleHeuristic: isLikelyMaleActorLink(a),
+			name:           name,
+			actorID:        actorID,
+			genderHint:     genderHint,
+			maleHeuristic:  isLikelyMaleActorLink(a),
+			explicitFemale: genderHint == "female" || hasExplicitFemaleMarker(a),
+			thumbURL:       javdbActorThumbURL(a, actorID),
 		})
 	})
 
+	// javdb.com marks every female performer (actor-female, ♀, data-gender) and
+	// leaves male co-stars entirely unmarked. When a panel advertises female
+	// markers, an unmarked row is therefore male. Panels with no gender
+	// information at all keep unmarked rows so mirrors never lose actresses.
+	panelAdvertisesFemale := false
 	for _, c := range candidates {
-		if hasSymbolGender {
-			// When symbol markers are present, trust them as source of truth.
-			if c.genderHint != "female" {
-				continue
-			}
-		} else if c.genderHint == "male" || c.maleHeuristic {
+		if c.explicitFemale {
+			panelAdvertisesFemale = true
+			break
+		}
+	}
+
+	for _, c := range candidates {
+		if c.genderHint == "male" {
+			continue
+		}
+		if c.genderHint == "" && c.maleHeuristic {
+			continue
+		}
+		if !c.explicitFemale && panelAdvertisesFemale {
 			continue
 		}
 
@@ -972,12 +987,14 @@ func extractActresses(sel *goquery.Selection) []models.ActressInfo {
 			// Keep unknown as zero and let downstream matching use names.
 			DMMID:        0,
 			JapaneseName: c.name,
-			ThumbURL:     javdbActorAvatarURL(c.actorID),
+			ThumbURL:     c.thumbURL,
 		})
 	}
 
-	// Fallback to plain text parsing when no links are available.
-	if len(actresses) == 0 {
+	// Fallback to plain text parsing when the panel exposes no links at all.
+	// Once link candidates existed they were already gender-filtered, so using
+	// the unfiltered text list would re-introduce rows that were dropped as male.
+	if len(actresses) == 0 && len(candidates) == 0 {
 		names := extractStringList(sel)
 		for _, n := range names {
 			if seen[n] {
@@ -1004,15 +1021,21 @@ func javdbActorIDFromLink(a *goquery.Selection) string {
 	if !ok {
 		return ""
 	}
-	const prefix = "/actors/"
-	if !strings.HasPrefix(href, prefix) {
+	href = strings.TrimSpace(href)
+	if href == "" {
 		return ""
 	}
-	id := strings.TrimPrefix(href, prefix)
-	if i := strings.IndexAny(id, "?#"); i >= 0 {
-		id = id[:i]
+	path := href
+	if parsed, err := url.Parse(href); err == nil {
+		path = parsed.Path
+	} else if i := strings.IndexAny(path, "?#"); i >= 0 {
+		path = path[:i]
 	}
-	return id
+	const prefix = "/actors/"
+	if !strings.HasPrefix(path, prefix) {
+		return ""
+	}
+	return strings.Trim(strings.TrimPrefix(path, prefix), "/")
 }
 
 // javdbActorAvatarURL builds the avatar image URL for a JavDB actor ID.
@@ -1027,9 +1050,53 @@ func javdbActorAvatarURL(actorID string) string {
 	return fmt.Sprintf("https://c0.jdbstatic.com/avatars/%s/%s.jpg", prefix, actorID)
 }
 
+// javdbActorThumbURL resolves an actress thumbnail. Mirrors often render the
+// avatar directly inside the actor link, so prefer that image when present and
+// fall back to the avatar path derived from the actor ID.
+func javdbActorThumbURL(a *goquery.Selection, actorID string) string {
+	if a != nil && a.Length() > 0 {
+		if img := a.Find("img").First(); img.Length() > 0 {
+			for _, attr := range []string{"data-src", "data-original", "data-lazy-src", "src"} {
+				if absolute := javdbAbsoluteImageURL(img.AttrOr(attr, "")); absolute != "" {
+					return absolute
+				}
+			}
+		}
+	}
+	return javdbActorAvatarURL(actorID)
+}
+
+// javdbAbsoluteImageURL normalizes mirrored image attributes into an absolute
+// https URL, rejecting lazy-load placeholders and inline data URIs.
+func javdbAbsoluteImageURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	lower := strings.ToLower(raw)
+	if strings.HasPrefix(lower, "data:") {
+		return ""
+	}
+	for _, placeholder := range []string{"blank.gif", "placeholder", "loading.gif", "noavatar"} {
+		if strings.Contains(lower, placeholder) {
+			return ""
+		}
+	}
+	if strings.HasPrefix(raw, "//") {
+		return "https:" + raw
+	}
+	if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
+		return raw
+	}
+	if strings.HasPrefix(raw, "/") {
+		return defaultBaseURL + raw
+	}
+	return ""
+}
+
 func isLikelyMaleActorLink(sel *goquery.Selection) bool {
 	classAttr := strings.ToLower(sel.AttrOr("class", ""))
-	if strings.Contains(classAttr, "male") || strings.Contains(classAttr, "gender-male") {
+	if hasWordToken(classAttr, "male") && !hasWordToken(classAttr, "female") {
 		return true
 	}
 
@@ -1040,46 +1107,105 @@ func isLikelyMaleActorLink(sel *goquery.Selection) bool {
 		}
 	}
 
-	// Common patterns: male marker appears near the anchor in sibling text.
-	context := strings.ToLower(scraperutil.CleanString(sel.Parent().Text()))
-	if context == "" {
-		context = strings.ToLower(scraperutil.CleanString(sel.Text()))
-	}
-
-	hasMaleMarker := strings.Contains(context, "♂") ||
-		hasWordToken(context, "male") ||
-		strings.Contains(context, "男優") ||
-		strings.Contains(context, "男演员") ||
-		strings.Contains(context, "男演員")
-
-	hasFemaleMarker := strings.Contains(context, "♀") ||
-		hasWordToken(context, "female") ||
-		strings.Contains(context, "女優") ||
-		strings.Contains(context, "女优")
-
-	if hasMaleMarker && !hasFemaleMarker {
+	// Only the anchor's own text and the text directly touching it count as
+	// gender evidence. Scanning the enclosing panel would label every row male
+	// as soon as one co-star carries a ♂ marker and the ♀ marker is absent.
+	if hasMaleToken(scraperutil.CleanString(sel.Text())) {
 		return true
+	}
+	for _, forward := range []bool{false, true} {
+		if adjacentTextHasMaleToken(sel, forward) {
+			return true
+		}
 	}
 
 	return false
 }
 
-func genderHintFromSymbolSibling(sel *goquery.Selection) string {
+// hasExplicitFemaleMarker reports a female gender signal on the anchor itself:
+// javdb.com renders actresses as <a class="actor-female"> while male co-stars
+// carry no class at all.
+func hasExplicitFemaleMarker(sel *goquery.Selection) bool {
+	if sel == nil || sel.Length() == 0 {
+		return false
+	}
+	if hasWordToken(strings.ToLower(sel.AttrOr("class", "")), "female") {
+		return true
+	}
+	for _, attr := range []string{"data-gender", "gender", "title", "aria-label"} {
+		v := strings.ToLower(strings.TrimSpace(sel.AttrOr(attr, "")))
+		if hasWordToken(v, "female") || strings.Contains(v, "女優") {
+			return true
+		}
+	}
+	return false
+}
+
+// hasMaleToken reports male gender words in a single string.
+func hasMaleToken(text string) bool {
+	if text == "" {
+		return false
+	}
+	lowered := strings.ToLower(text)
+	return strings.Contains(lowered, "♂") ||
+		hasWordToken(lowered, "male") ||
+		strings.Contains(lowered, "男優") ||
+		strings.Contains(lowered, "男演员") ||
+		strings.Contains(lowered, "男演員")
+}
+
+// adjacentTextHasMaleToken inspects the text siblings touching the anchor,
+// stopping at the next element so neighbouring rows cannot leak markers.
+func adjacentTextHasMaleToken(sel *goquery.Selection, forward bool) bool {
+	if sel == nil || len(sel.Nodes) == 0 {
+		return false
+	}
+	step := func(n *html.Node) *html.Node {
+		if forward {
+			return n.NextSibling
+		}
+		return n.PrevSibling
+	}
+	var b strings.Builder
+	for n := step(sel.Nodes[0]); n != nil; n = step(n) {
+		if n.Type == html.ElementNode {
+			break
+		}
+		if n.Type == html.TextNode {
+			b.WriteString(n.Data)
+		}
+	}
+	return hasMaleToken(b.String())
+}
+
+// genderHintForAnchor resolves the gender symbol that belongs to this anchor.
+// A marker is attributed to its nearest anchor: markers already claimed by a
+// neighbouring row are skipped so that layouts printing the symbol before the
+// name and layouts printing it after the name both resolve correctly.
+func genderHintForAnchor(sel *goquery.Selection, used map[*html.Node]bool) string {
 	if sel == nil || len(sel.Nodes) == 0 {
 		return ""
 	}
 	node := sel.Nodes[0]
 
-	if hint := scanSymbolSibling(node, true); hint != "" {
+	if hint, marker := scanSymbolSiblingUsed(node, false, used); hint != "" {
+		markMarkerUsed(used, marker)
 		return hint
 	}
-	if hint := scanSymbolSibling(node, false); hint != "" {
+	if hint, marker := scanSymbolSiblingUsed(node, true, used); hint != "" {
+		markMarkerUsed(used, marker)
 		return hint
 	}
 	return ""
 }
 
-func scanSymbolSibling(anchor *html.Node, forward bool) string {
+func markMarkerUsed(used map[*html.Node]bool, marker *html.Node) {
+	if used != nil && marker != nil {
+		used[marker] = true
+	}
+}
+
+func scanSymbolSiblingUsed(anchor *html.Node, forward bool, used map[*html.Node]bool) (string, *html.Node) {
 	step := func(n *html.Node) *html.Node {
 		if forward {
 			return n.NextSibling
@@ -1099,23 +1225,26 @@ func scanSymbolSibling(anchor *html.Node, forward bool) string {
 		if !strings.Contains(classAttr, "symbol") {
 			continue
 		}
+		if used != nil && used[n] {
+			continue
+		}
 
 		if strings.Contains(classAttr, "female") {
-			return "female"
+			return "female", n
 		}
 		if strings.Contains(classAttr, "male") {
-			return "male"
+			return "male", n
 		}
 
 		text := strings.TrimSpace(nodeText(n))
 		switch {
 		case strings.Contains(text, "♀"):
-			return "female"
+			return "female", n
 		case strings.Contains(text, "♂"):
-			return "male"
+			return "male", n
 		}
 	}
-	return ""
+	return "", nil
 }
 
 func nodeAttr(n *html.Node, key string) string {

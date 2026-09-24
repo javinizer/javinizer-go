@@ -66,13 +66,13 @@ func TestScanSymbolSiblingDeep2(t *testing.T) {
 	if anchor.Length() > 0 && len(anchor.Nodes) > 0 {
 		// scanSymbolSibling looks for <strong class="symbol"> but we have <span class="symbol female">
 		// The function only matches "strong" elements, so this returns "" with <span>
-		hint := scanSymbolSibling(anchor.Nodes[0], true)
+		hint, _ := scanSymbolSiblingUsed(anchor.Nodes[0], true, nil)
 		assert.Equal(t, "", hint) // <span> is not <strong>
 	}
 }
 
 func TestGenderHintFromSymbolSiblingDeep2_NilSelection(t *testing.T) {
-	hint := genderHintFromSymbolSibling(nil)
+	hint := genderHintForAnchor(nil, nil)
 	assert.Equal(t, "", hint)
 }
 
