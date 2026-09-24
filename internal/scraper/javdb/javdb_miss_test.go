@@ -606,12 +606,9 @@ func TestExtractActresses_MixedGenderWithSymbols(t *testing.T) {
 	doc := docFromHTMLMiss(t, html)
 	sel := doc.Find(".value").First()
 
-	// Note: gender detection via sibling strong.symbol elements requires
-	// the HTML parser to maintain sibling relationships. goquery may not
-	// preserve the exact DOM structure needed for scanSymbolSibling.
-	// This test verifies the function doesn't panic and produces a result.
 	actresses := extractActresses(sel)
-	assert.NotNil(t, actresses)
+	require.Len(t, actresses, 1)
+	assert.Equal(t, "Female Actress", actresses[0].JapaneseName)
 }
 
 func TestExtractActresses_Empty(t *testing.T) {
@@ -631,7 +628,7 @@ func TestScanSymbolSibling_NoSymbolClass(t *testing.T) {
 	anchor := doc.Find("a").First()
 	require.Len(t, anchor.Nodes, 1)
 
-	result := scanSymbolSibling(anchor.Nodes[0], true)
+	result, _ := scanSymbolSiblingUsed(anchor.Nodes[0], true, nil)
 	assert.Equal(t, "", result)
 }
 
@@ -642,7 +639,7 @@ func TestScanSymbolSibling_ForwardAnchorBreak(t *testing.T) {
 	require.Len(t, firstAnchor.Nodes, 1)
 
 	// Scanning forward from first anchor should hit second anchor and stop
-	result := scanSymbolSibling(firstAnchor.Nodes[0], true)
+	result, _ := scanSymbolSiblingUsed(firstAnchor.Nodes[0], true, nil)
 	assert.Equal(t, "", result)
 }
 
@@ -652,7 +649,7 @@ func TestScanSymbolSibling_FemaleSymbolText(t *testing.T) {
 	anchor := doc.Find("a").First()
 	require.Len(t, anchor.Nodes, 1)
 
-	result := scanSymbolSibling(anchor.Nodes[0], false)
+	result, _ := scanSymbolSiblingUsed(anchor.Nodes[0], false, nil)
 	assert.Equal(t, "female", result)
 }
 
@@ -662,7 +659,7 @@ func TestScanSymbolSibling_MaleSymbolText(t *testing.T) {
 	anchor := doc.Find("a").First()
 	require.Len(t, anchor.Nodes, 1)
 
-	result := scanSymbolSibling(anchor.Nodes[0], true)
+	result, _ := scanSymbolSiblingUsed(anchor.Nodes[0], true, nil)
 	assert.Equal(t, "male", result)
 }
 

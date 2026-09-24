@@ -111,7 +111,7 @@ func TestScanSymbolSiblingFinal_ForwardFemale(t *testing.T) {
 		},
 	}
 	node.NextSibling = strong
-	result := scanSymbolSibling(node, true)
+	result, _ := scanSymbolSiblingUsed(node, true, nil)
 	if result != "female" {
 		t.Errorf("expected 'female', got %q", result)
 	}
@@ -132,7 +132,7 @@ func TestScanSymbolSiblingFinal_BackwardMale(t *testing.T) {
 		},
 	}
 	node.PrevSibling = strong
-	result := scanSymbolSibling(node, false)
+	result, _ := scanSymbolSiblingUsed(node, false, nil)
 	if result != "male" {
 		t.Errorf("expected 'male', got %q", result)
 	}
@@ -154,7 +154,7 @@ func TestScanSymbolSiblingFinal_StopsAtAnchor(t *testing.T) {
 	}
 	nextAnchor.NextSibling = strong
 	node.NextSibling = nextAnchor
-	result := scanSymbolSibling(node, true)
+	result, _ := scanSymbolSiblingUsed(node, true, nil)
 	if result != "" {
 		t.Errorf("expected empty string (should stop at anchor), got %q", result)
 	}
@@ -476,7 +476,7 @@ func TestIsLikelyMaleActorLinkFinal_FemaleNotDetected(t *testing.T) {
 }
 
 func TestGenderHintFromSymbolSiblingFinal_Nil(t *testing.T) {
-	result := genderHintFromSymbolSibling(nil)
+	result := genderHintForAnchor(nil, nil)
 	if result != "" {
 		t.Errorf("expected empty for nil, got %q", result)
 	}
