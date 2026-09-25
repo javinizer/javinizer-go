@@ -306,6 +306,64 @@ func TestRemasterMarkerResolutionAndQualityLabels(t *testing.T) {
 		{"WEBDL2160 1rct00156h.mkv", "1RCT00156H"},
 		{"WEBRIP2160 1rct00156h.mkv", "1RCT00156H"},
 
+		// Blu-ray rip spellings are metadata too: the source class's
+		// bd/br+rip qualifier covers the compact BDRIP1080 and BRRIP1080
+		// spellings and their hyphenated, dotted, and spaced siblings —
+		// the catalog scan splits the compound at its separator, so the
+		// RIP fragment would otherwise replace the separated id. The
+		// underscore sibling keeps its word-boundary protection (the
+		// underscore is a word character, so the fragment never becomes a
+		// candidate) and rides the class anyway.
+		{"ABC.123.HD BDRIP1080.mkv", "ABC-123H"},
+		{"ABC.123.HD BDRIP720.mkv", "ABC-123H"},
+		{"ABC.123.HD BDRIP2160.mkv", "ABC-123H"},
+		{"ABC.123.HD BDRIP0720.mkv", "ABC-123H"},
+		{"ABC.123.HD BDrip1080.mkv", "ABC-123H"},
+		{"ABC.123.HD BRRIP1080.mkv", "ABC-123H"},
+		{"ABC.123.HD BD-RIP1080.mkv", "ABC-123H"},
+		{"ABC.123.HD BD.RIP1080.mkv", "ABC-123H"},
+		{"ABC.123.HD BD RIP1080.mkv", "ABC-123H"},
+		{"ABC.123.HD BD_RIP1080.mkv", "ABC-123H"},
+		{"ABC.123.HD BR-RIP1080.mkv", "ABC-123H"},
+		{"ABC.123.HD BR.RIP1080.mkv", "ABC-123H"},
+		{"ABC.123.HD BR RIP1080.mkv", "ABC-123H"},
+		{"ABC.123.HD.BDRIP1080.mkv", "ABC-123H"},
+		{"ABC 123 HD BD-RIP2160.mkv", "ABC-123H"},
+		{"ABC.123.AI BDRIP1080.mkv", "ABC-123AI"},
+		// The qualifier is required where web's is optional: bd, bdr,
+		// and br are real series in the r18.dev content-id prefix lookup,
+		// so the round-12 decision keeps their bare resolution spellings
+		// and display ids in id grammar, as do numerically prefixed content
+		// ids and the series' hyphenated display ids.
+		{"ABC.123.HD BD1080.mkv", "BD1080"},
+		{"ABC.123.HD BDR1080.mkv", "BDR1080"},
+		{"BD1080.mkv", "BD1080"},
+		{"BD-1080.mkv", "BD-1080"},
+		{"BDR-1080.mkv", "BDR-1080"},
+		{"BR-616.mkv", "BR-616"},
+		{"3bd00108.mkv", "3BD00108"},
+		{"155bdr00108.mkv", "155BDR00108"},
+		{"61br00666.mkv", "61BR00666"},
+		{"BD12.mkv", ""},
+		// The qualifier carries the class's digit bound: two-digit
+		// numerals already fail the amateur pattern's own digit bound, and
+		// five-plus-digit id-shaped fragments stay catalog-id grammar
+		// like WEB-DL12345's DL12345 fragment.
+		{"ABC.123.HD BDRIP24.mkv", "ABC-123H"},
+		{"ABC.123.HD BD-RIP24.mkv", "ABC-123H"},
+		{"ABC.123.HD BDRIP12345.mkv", "ABC-123H"},
+		{"ABC.123.HD BD-RIP12345.mkv", "RIP12345"},
+		// No bdrip, brrip, or rip series exists in the r18.dev content-id
+		// prefix lookup; the compound prefix's leading boundary keeps
+		// leading-letter spellings in id grammar (the fweb precedent), a
+		// standalone RIP fragment keeps id grammar (the DL2160
+		// precedent), and a leading rip tag does not shadow a stronger
+		// raw id.
+		{"ABC.123.HD RIP1080.mkv", "RIP1080"},
+		{"ABC.123.HD XBD-RIP1080.mkv", "RIP1080"},
+		{"BDRIP1080 1rct00156h.mkv", "1RCT00156H"},
+		{"BD-RIP1080 1rct00156h.mkv", "1RCT00156H"},
+
 		// Plain forms are unchanged.
 		{"ABC.123.HD.mkv", "ABC-123H"},
 		{"RCT156H.mkv", "RCT-156H"},
@@ -453,6 +511,25 @@ func TestRemasterMarkerResolutionAndQualityLabels(t *testing.T) {
 		require.NotNil(t, fileResult)
 		assert.Equal(t, "ABC-123H", fileResult.ID)
 		assert.Equal(t, "HD", fileResult.RemasterMarker)
+	}
+
+	// Blu-ray rip metadata after a separated remaster id must not
+	// replace it either, and the marker stays intact — for the compact
+	// BDRIP and BRRIP spellings and their separated siblings.
+	for _, name := range []string{"ABC.123.HD BDRIP1080.mkv", "ABC.123.HD BRRIP1080.mkv", "ABC.123.HD BD-RIP1080.mkv", "ABC.123.HD BD.RIP1080.mkv", "ABC.123.HD BD RIP1080.mkv", "ABC.123.HD BR-RIP1080.mkv"} {
+		fileResult := matchOne(t, m, name)
+		require.NotNil(t, fileResult)
+		assert.Equal(t, "ABC-123H", fileResult.ID)
+		assert.Equal(t, "HD", fileResult.RemasterMarker)
+	}
+
+	// The round-12 controls keep their id grammar on both entry points:
+	// the real bd series' bare resolution spelling and the br series'
+	// hyphenated display id still match as ids.
+	for _, name := range []string{"BD1080.mkv", "BD-1080.mkv", "BR-616.mkv"} {
+		fileResult := matchOne(t, m, name)
+		require.NotNil(t, fileResult)
+		assert.NotEmpty(t, fileResult.ID)
 	}
 
 	// The class is bounded on the id-shaped side: a five-digit trailing
