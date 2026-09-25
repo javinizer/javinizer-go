@@ -372,6 +372,13 @@ func (s *scraper) findDetailURLCtx(ctx context.Context, id string) (string, erro
 	// so only exact/padding-equal identities qualify and the query misses
 	// honestly when the remaster is not among the results.
 	markerQuery := remasterMarkerSuffix(id) != ""
+	// Marker queries compare id + folded marker class rather than raw
+	// normalized strings: JavDB lists the same HD remaster under either
+	// marker spelling (RCT-156H and RCT-156-HD), so HD folds to H —
+	// mirroring the matcher's foldRemasterMarker — while AI stays its own
+	// class. The base release carries no marker and still compares
+	// unequal; only the marker spelling is bridged.
+	foldedTargetID := foldRemasterMarkerID(targetID)
 	var (
 		foundURL  string
 		bestMatch idMatchType
@@ -391,7 +398,15 @@ func (s *scraper) findDetailURLCtx(ctx context.Context, id string) (string, erro
 		}
 
 		for _, c := range candidates {
-			match := idMatchRank(c, targetID)
+			var match idMatchType
+			if markerQuery {
+				// Marker queries compare id + folded marker class: H and
+				// HD both spell the HD remaster, so an HD-labeled listing
+				// matches the folded H query and vice versa.
+				match = idMatchRank(foldRemasterMarkerID(c), foldedTargetID)
+			} else {
+				match = idMatchRank(c, targetID)
+			}
 			if markerQuery && match == idMatchVariant {
 				// The trailing H/HD/AI is a remaster marker, not a variant
 				// suffix: the base release must not stand in for the remaster.
@@ -876,6 +891,21 @@ func remasterMarkerSuffix(id string) string {
 	default:
 		return ""
 	}
+}
+
+// foldRemasterMarkerID rewrites an id's trailing remaster marker to its
+// folded equivalence-class spelling, mirroring the matcher's
+// foldRemasterMarker (HD -> H): H and HD both spell the HD remaster, while
+// AI stays its own class and marker-less ids only normalize. This lets a
+// marker-carrying query match a candidate whose marker spelling differs
+// only within the H/HD class (RCT-156H vs RCT-156-HD); the base release
+// (no marker) still compares unequal.
+func foldRemasterMarkerID(id string) string {
+	normalized := normalizeIDForCompare(id)
+	if marker := remasterMarkerSuffix(normalized); marker == "HD" {
+		return normalized[:len(normalized)-len(marker)] + "H"
+	}
+	return normalized
 }
 
 func normalizeLabel(s string) string {
