@@ -241,11 +241,63 @@ func TestCachedAIQueryMarkerlessPageRejected(t *testing.T) {
 	assert.Contains(t, err.Error(), "different release")
 }
 
+// Round-26: the round-25b markerless conflict extends to E/Z-suffixed
+// base-release spellings. The catalog-suffix grammar displayIdentityTuple
+// parses (RCT-157E, RCT-157Z) names the base release's catalog variant,
+// never the queried remaster, so the page must miss honestly exactly like
+// the plain RCT-157 case.
+func TestCachedHQueryEZSuffixedMarkerlessPageRejected(t *testing.T) {
+	for _, tc := range []struct{ name, pinzan string }{
+		{"e-catalog base release", "RCT-157E"},
+		{"z-catalog base release", "RCT-157Z"},
+		{"compact e-catalog base release", "rct157e"},
+		{"hyphenated z-catalog base release", "RCT-157-Z"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, _ := newRemasterTestScraper(t)
+			s.cacheContentID(context.Background(), "RCT-156H", "1rct00156h")
+			s.client.SetTransport(&remasterRoundTripper{serve: func(u string) (int, string) {
+				if strings.Contains(u, "cid=1rct00156h") {
+					return 200, `<html><body><h1 id="title" class="item">Base release</h1>` +
+						`<table><tr><td>品番：</td><td>` + tc.pinzan + `</td></tr></table></body></html>`
+				}
+				return 404, ""
+			}})
+			res, err := s.Search(context.Background(), "RCT-156H")
+			require.Error(t, err, tc.name+": the E/Z-suffixed markerless 品番 names the base release and must miss honestly")
+			assert.Nil(t, res)
+			assert.Contains(t, err.Error(), "different release")
+		})
+	}
+}
+
+// The E/Z grammar keeps matching pages succeeding: an E-catalog remaster
+// query whose page publishes the matching E-suffixed 品番 resolves as
+// before, so the round-26 markerless extension rejects only base-release
+// spellings.
+func TestCachedEZSuffixedQueryMatchingPageReturns(t *testing.T) {
+	s, _ := newRemasterTestScraper(t)
+	s.cacheContentID(context.Background(), "RCT-156EH", "1rct00156eh")
+	s.client.SetTransport(&remasterRoundTripper{serve: func(u string) (int, string) {
+		if strings.Contains(u, "cid=1rct00156eh") {
+			return 200, `<html><body><h1 id="title" class="item">Remaster</h1>` +
+				`<table><tr><td>品番：</td><td>RCT-156-E-HD</td></tr></table></body></html>`
+		}
+		return 404, ""
+	}})
+	res, err := s.Search(context.Background(), "RCT-156EH")
+	require.NoError(t, err, "a matching E-suffixed 品番 proves the queried remaster")
+	require.NotNil(t, res)
+	assert.Equal(t, "RCT-156EH", res.ID)
+	assert.Equal(t, "1rct00156eh", res.ContentID)
+}
+
 // The identity guard publishes nothing authoritative to compare for nil
 // documents, unparseable display ids, or unparseable queries, and must keep
 // the existing behavior in those cases rather than reject the page. A
-// nonempty markerless 品番 is the exception: on a marker-bearing query it
-// names the base release — never the remaster — and rejects the page.
+// nonempty markerless 品番 — plain or E/Z-suffixed — is the exception: on a
+// marker-bearing query it names the base release, never the remaster, and
+// rejects the page.
 func TestPageDisplayIdentityMatchesQueryGuards(t *testing.T) {
 	page := func(display string) *goquery.Document {
 		t.Helper()
@@ -266,6 +318,8 @@ func TestPageDisplayIdentityMatchesQueryGuards(t *testing.T) {
 		{"unparseable query keeps existing behavior", page("DV-818-AI"), "remastered", true},
 		{"markerless display rejects a marker-bearing query", page("RCT-157"), "RCT-156H", false},
 		{"compact markerless display rejects a marker-bearing query", page("RCT157"), "RCT-156H", false},
+		{"e-suffixed markerless display rejects a marker-bearing query", page("RCT-157E"), "RCT-156H", false},
+		{"z-suffixed markerless display rejects a marker-bearing query", page("RCT-157Z"), "RCT-156H", false},
 		{"markerless display with unparseable query keeps existing behavior", page("RCT-157"), "remastered", true},
 		{"mismatched release rejects", page("DV-819-AI"), "DV-818AI", false},
 		{"matching release accepts", page("DV-818-AI"), "DV-818AI", true},

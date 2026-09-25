@@ -329,9 +329,10 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 // padding-normalized identity names a different series, number, catalog
 // suffix or marker than the query belongs to the wrong release. A nonempty
 // markerless 品番 conflicts the same way on a marker-bearing query: it names
-// the base release, not the remaster, so the page belongs to the wrong
-// product. Pages without a 品番 row and unparseable queries publish nothing
-// authoritative to compare and keep the existing behavior.
+// the base release — plain or carrying the E/Z catalog suffix — not the
+// remaster, so the page belongs to the wrong product. Pages without a 品番
+// row and unparseable queries publish nothing authoritative to compare and
+// keep the existing behavior.
 func pageDisplayIdentityMatchesQuery(doc *goquery.Document, query string) bool {
 	if doc == nil {
 		return true
@@ -347,9 +348,10 @@ func pageDisplayIdentityMatchesQuery(doc *goquery.Document, query string) bool {
 	pSeries, pNumber, pSuffix, pMarker, ok := displayIdentityTuple(display)
 	if !ok {
 		// A nonempty markerless 品番 (a cached RCT-156H query whose page
-		// publishes RCT-157) names the base release, not the query's remaster:
-		// the page is the wrong product's and must miss honestly instead of
-		// publishing its metadata under the query's identity.
+		// publishes RCT-157, or its E/Z-suffixed spelling RCT-157E) names the
+		// base release, not the query's remaster: the page is the wrong
+		// product's and must miss honestly instead of publishing its metadata
+		// under the query's identity.
 		if qOK && isMarkerlessDisplayID(display) {
 			return false
 		}

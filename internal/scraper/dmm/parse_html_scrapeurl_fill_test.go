@@ -112,6 +112,7 @@ func TestScrapeURLMarkerCIDForeignIdentityPageRejected(t *testing.T) {
 		{"foreign marker line row", "https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=1rct00156h/", "RCT-156-AI"},
 		{"foreign catalog suffix row", "https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=1ipx00535zh/", "IPX-535-HD"},
 		{"foreign series row on an ai url", "https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=dv00899ai/", "RCT-156H"},
+		{"e-suffixed marker-bearing row", "https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=1rct00156h/", "RCT-157-E-HD"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s, _ := newRemasterTestScraper(t)
@@ -133,7 +134,8 @@ func TestScrapeURLMarkerCIDForeignIdentityPageRejected(t *testing.T) {
 // keeping the cid-derived spelling would label release 157's metadata
 // RCT-156H via fillMarkerIDFromURL. The row naming the cid's own base
 // release conflicts identically (it is still not the remaster), compact
-// spellings parse the same, and an AI url conflicts too — the request is
+// spellings parse the same, the E/Z-suffixed catalog spellings conflict
+// identically (round 26), and an AI url conflicts too — the request is
 // marker-bearing. Empty or absent rows keep the pass-through pinned by
 // TestScrapeURLHDCIDKeepsDerivedID and TestScrapeURLAICIDWithoutPinzan.
 func TestScrapeURLMarkerCIDMarkerlessRowRejected(t *testing.T) {
@@ -141,6 +143,9 @@ func TestScrapeURLMarkerCIDMarkerlessRowRejected(t *testing.T) {
 		{"h url serving the next base release", "https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=1rct00156h/", "RCT-157"},
 		{"h url serving compact markerless spelling", "https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=1rct00156h/", "RCT157"},
 		{"h url serving its own base release", "https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=1rct00156h/", "RCT-156"},
+		{"h url serving the e-suffixed base release", "https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=1rct00156h/", "RCT-157E"},
+		{"h url serving the z-suffixed base release", "https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=1rct00156h/", "RCT-157Z"},
+		{"h url serving compact e-suffixed markerless spelling", "https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=1rct00156h/", "rct157e"},
 		{"ai url serving the base release", "https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=dv00899ai/", "DV-818"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

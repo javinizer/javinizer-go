@@ -329,8 +329,9 @@ func TestPageRemasterDisplayID_RequiresSuffixMatch(t *testing.T) {
 // way: the page provably belongs to another product. AI numbers diverge from
 // the cid by design, so same-series AI rows keep outranking it, but a foreign
 // row on an AI url is still another product's page and conflicts. A
-// nonempty markerless row conflicts identically (round 25b): it names the
-// base release, never the remaster the marker-bearing cid asks for.
+// nonempty markerless row conflicts identically (round 25b), plain or
+// E/Z-suffixed (round 26): it names the base release, never the remaster
+// the marker-bearing cid asks for.
 func TestPageRemasterDisplayID_RequiresNumberMatch(t *testing.T) {
 	assert.Equal(t, "", pageRemasterDisplayID(doc2(t, "RCT-157-HD"), "1rct00156h", "rct", "h", ""),
 		"page display numbering another release must not be trusted")
@@ -375,6 +376,19 @@ func TestPageRemasterDisplayID_RequiresNumberMatch(t *testing.T) {
 	assert.True(t, conflict, "a compact markerless row conflicts the same way")
 	_, conflict = pageDisplayIdentityForCID(doc2(t, "DV-818"), "dv00899ai", "dv", "ai", "")
 	assert.True(t, conflict, "a markerless row on an AI cid conflicts: the request is marker-bearing")
+	// E/Z-suffixed base-release spellings conflict identically (round 26):
+	// RCT-157E and RCT-157Z name the base release's catalog variants, never
+	// the remaster, while marker-bearing E/Z rows keep the tuple comparison.
+	_, conflict = pageDisplayIdentityForCID(doc2(t, "RCT-157E"), "1rct00156h", "rct", "h", "")
+	assert.True(t, conflict, "an E-suffixed markerless row naming the base release conflicts with the marker-bearing cid")
+	_, conflict = pageDisplayIdentityForCID(doc2(t, "RCT-157Z"), "1rct00156h", "rct", "h", "")
+	assert.True(t, conflict, "a Z-suffixed markerless row naming the base release conflicts with the marker-bearing cid")
+	_, conflict = pageDisplayIdentityForCID(doc2(t, "rct157e"), "1rct00156h", "rct", "h", "")
+	assert.True(t, conflict, "a compact E-suffixed markerless row conflicts the same way")
+	_, conflict = pageDisplayIdentityForCID(doc2(t, "RCT-157-E-HD"), "1rct00156h", "rct", "h", "")
+	assert.True(t, conflict, "an E-suffixed marker-bearing row is not markerless: it conflicts through the tuple comparison")
+	assert.Equal(t, "RCT-156EH", pageRemasterDisplayID(doc2(t, "RCT-156-E-HD"), "1rct00156eh", "rct", "h", "e"),
+		"a matching E-suffixed row proves the cid's release")
 	_, conflict = pageDisplayIdentityForCID(doc2(t, "RCT-157"), "1rct00156h", "rct", "", "")
 	assert.False(t, conflict, "a markerless request keeps the markerless pass-through")
 	_, conflict = pageDisplayIdentityForCID(doc2(t, "12345"), "1rct00156h", "rct", "h", "")
@@ -384,9 +398,9 @@ func TestPageRemasterDisplayID_RequiresNumberMatch(t *testing.T) {
 }
 
 // The round-25b markerless probe: it must accept every base-release
-// spelling — separator-pinned or compact — and reject marker-bearing rows,
-// catalog-suffix vocabulary and unparseable values, mirroring the
-// displayIdentityTuple splits.
+// spelling — separator-pinned or compact, plain or carrying the E/Z
+// catalog suffix — and reject marker-bearing rows and unparseable values,
+// mirroring the displayIdentityTuple splits.
 func TestIsMarkerlessDisplayID(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -398,9 +412,16 @@ func TestIsMarkerlessDisplayID(t *testing.T) {
 		{"zero-padded base release", "RCT-00157", true},
 		{"t-series base release", "T-28123", true},
 		{"compact t-series base release", "t28123", true},
+		{"e-suffixed base release", "RCT-157E", true},
+		{"z-suffixed base release", "RCT-157Z", true},
+		{"compact e-suffixed base release", "rct157e", true},
+		{"hyphenated z-suffixed base release", "RCT-157-Z", true},
+		{"e-suffixed t-series base release", "T-28123-E", true},
 		{"hd marker row is not markerless", "RCT-157-HD", false},
 		{"h marker row is not markerless", "RCT-157H", false},
-		{"catalog-suffix-only row is unparseable", "RCT-157-E", false},
+		{"e-suffixed marker-bearing row is not markerless", "RCT-157-E-HD", false},
+		{"compact z-suffixed marker-bearing row is not markerless", "RCT157ZHD", false},
+		{"non-ez catalog-suffix row is unparseable", "RCT-157-X", false},
 		{"digits-only row is unparseable", "12345", false},
 		{"word row is unparseable", "garbage", false},
 		{"empty row is unparseable", "", false},
