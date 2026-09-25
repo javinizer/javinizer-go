@@ -81,6 +81,32 @@ func TestRemasterMarkerResolutionAndQualityLabels(t *testing.T) {
 		{"ABC.123.HD HLG2020.mkv", "ABC-123H"},
 		{"ABC.123.HD ST2084.mkv", "ABC-123H"},
 		{"ABC.123.HD YCbCr420.mkv", "ABC-123H"},
+		// Dotless standard color/transfer spellings — BT.601, Rec.601 and
+		// Rec.2020 without the dot — are metadata too: the vocabulary's
+		// (bt|rec|st|smpte)+digits class covers them along with future
+		// standards (BT1886, REC2100, ST2086, SMPTE2086).
+		{"ABC.123.HD BT601.mkv", "ABC-123H"},
+		{"ABC.123.HD REC601.mkv", "ABC-123H"},
+		{"ABC.123.HD REC2020.mkv", "ABC-123H"},
+		{"ABC.123.HD BT1886.mkv", "ABC-123H"},
+		{"ABC.123.HD REC2100.mkv", "ABC-123H"},
+		{"ABC.123.HD ST2086.mkv", "ABC-123H"},
+		{"ABC.123.HD SMPTE2086.mkv", "ABC-123H"},
+		// Dotted spellings never match the trailing catalog grammar; they
+		// stay metadata as well.
+		{"ABC.123.HD BT.601.mkv", "ABC-123H"},
+		{"ABC.123.HD REC.601.mkv", "ABC-123H"},
+		{"ABC.123.HD REC.2020.mkv", "ABC-123H"},
+		// The class is bounded: two-digit numbers (REC12) leave the
+		// separated id alone, five-digit id-shaped tokens and hyphenated
+		// spellings stay catalog-id grammar, a plain trailing id still
+		// replaces the separated id, and a leading metadata token does not
+		// shadow a strong raw id.
+		{"ABC.123.HD REC12.mkv", "ABC-123H"},
+		{"ABC.123.HD BT60123.mkv", "BT60123"},
+		{"ABC.123.HD BT-601.mkv", "BT-601"},
+		{"ABC.123.HD ABC987.mkv", "ABC987"},
+		{"BT601 1rct00156h.mkv", "1RCT00156H"},
 		{"QUALITY 1080 HD ABCDEFGHI.123.HD.mkv", "ABCDEFGHI-123H"},
 		{"birthday2024.mkv", ""},
 		{"birthday2024hdr.mkv", ""},
@@ -182,4 +208,19 @@ func TestRemasterMarkerResolutionAndQualityLabels(t *testing.T) {
 	fileResult = matchOne(t, m, "ABC.123.HD ST2084.mkv")
 	require.NotNil(t, fileResult)
 	assert.Equal(t, "ABC-123H", fileResult.ID)
+
+	// Dotless standard color/transfer metadata (BT.601, Rec.601, Rec.2020)
+	// must not replace the separated id, and the marker stays intact.
+	for _, name := range []string{"ABC.123.HD BT601.mkv", "ABC.123.HD REC601.mkv", "ABC.123.HD REC2020.mkv"} {
+		fileResult := matchOne(t, m, name)
+		require.NotNil(t, fileResult)
+		assert.Equal(t, "ABC-123H", fileResult.ID)
+		assert.Equal(t, "HD", fileResult.RemasterMarker)
+	}
+
+	// The class is bounded on the id-shaped side: a five-digit trailing
+	// token is a plausible catalog id and still replaces the separated id.
+	fileResult = matchOne(t, m, "ABC.123.HD BT60123.mkv")
+	require.NotNil(t, fileResult)
+	assert.Equal(t, "BT60123", fileResult.ID)
 }
