@@ -8,10 +8,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// ScrapeURL ports Search's canonical-spelling fill: an AI-remaster page whose
-// 品番 row is absent would otherwise publish an empty display ID, so the ID
-// is derived from the URL cid instead.
-func TestScrapeURLFillsIDFromCIDWithoutPinzan(t *testing.T) {
+// ScrapeURL follows the marker-aware parser's AI rule end to end: AI-remaster
+// cid numbers are unrelated to display numbers (dv00899ai maps to DV-818AI),
+// so a page without an authoritative 品番 row publishes an empty display ID
+// instead of a cid-derived spelling that would misfile the release.
+func TestScrapeURLAICIDWithoutPinzanLeavesIDEmpty(t *testing.T) {
 	s, _ := newRemasterTestScraper(t)
 	s.client.SetTransport(&remasterRoundTripper{serve: func(u string) (int, string) {
 		return 200, `<html><body><h1 id="title" class="item">AI Remaster</h1></body></html>`
@@ -21,7 +22,7 @@ func TestScrapeURLFillsIDFromCIDWithoutPinzan(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, res)
 	assert.Equal(t, "dv00899ai", res.ContentID)
-	assert.Equal(t, "DV-00899AI", res.ID, "canonical spelling derived from the URL cid fills the empty page id")
+	assert.Empty(t, res.ID, "no page 品番 and an AI cid must leave the display id unset")
 }
 
 // HD cids already derive their display id from the cid; the fill must not

@@ -351,9 +351,12 @@ func (s *scraper) ScrapeURL(ctx context.Context, url string) (*models.ScraperRes
 }
 
 // fillMarkerIDFromURL ports Search's canonical-spelling fill to direct URL
-// scrapes: a marker-bearing page whose 品番 row is absent publishes an empty
-// display ID (AI-remaster cids do not encode the display number), so derive
-// the canonical spelling from the URL cid instead of returning an empty ID.
+// scrapes: an H/HD-marker page whose 品番 row is absent publishes an empty
+// display ID, so derive the canonical spelling from the URL cid, whose
+// number matches the display number for H/HD releases. AI-marker cids do
+// not encode the display number (dv00899ai maps to DV-818AI), so they never
+// derive a spelling — only the page's authoritative 品番 may publish an
+// AI-remaster identity, and an absent row leaves the ID empty.
 func fillMarkerIDFromURL(res *models.ScraperResult, url string) {
 	if res == nil || res.ID != "" {
 		return
@@ -362,7 +365,7 @@ func fillMarkerIDFromURL(res *models.ScraperResult, url string) {
 	if cid == "" {
 		return
 	}
-	if marker, _, _, _ := classifyRemasterQuery(cid); marker != "" {
+	if marker, _, _, _ := classifyRemasterQuery(cid); marker == "h" {
 		res.ID = canonicalRemasterDisplayID(cid)
 	}
 }
