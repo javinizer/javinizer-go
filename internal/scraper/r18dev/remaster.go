@@ -233,19 +233,29 @@ func cidMatchesRemasterQuery(contentID, queryID, marker, series string) bool {
 // the query's number, padding-normalized — a stale same-series marker row for
 // a different release (1rct00157h for RCT-156H) must never be recorded as the
 // fuzzy fallback, or release 157's metadata would be published for release
-// 156 once the content-id variations miss. AI queries keep the
-// cidMatchesRemasterQuery acceptance verbatim: AI content ids diverge from
-// display numbers (dv00899ai is DV-818AI), so AI cannot number-bind and
-// stays number-free.
+// 156 once the content-id variations miss. AI display queries REJECT
+// null-dvd_id rows outright: AI content ids diverge from display numbers
+// (dv00899ai is DV-818AI), so no number binding is possible and series+marker
+// alone are not sufficient identity — an unrelated same-series AI row
+// (dv00999ai for DV-818AI) must never be recorded or accepted, or its
+// metadata would be published with an empty ID once the content-id
+// variations miss. The only admissible null-dvd_id AI row answers a raw cid
+// query, where cidMatchesRemasterQuery has already bound the row's content
+// id to the query literally — the same self-verifying evidence
+// markerVariationAccept's raw early-return relies on. A display-query row
+// that does carry a dvd_id is instead verified through the display identity
+// comparison (displayIDsMatchByIdentity) before this predicate runs.
 func cidMatchesRemasterFuzzyQuery(contentID, queryID, marker, series string) bool {
 	if !cidMatchesRemasterQuery(contentID, queryID, marker, series) {
 		return false
 	}
 	if marker == "ai" {
 		// AI content ids diverge from display numbers (dv00899ai is
-		// DV-818AI): the marker-based acceptance is already the strongest
-		// available identity check.
-		return true
+		// DV-818AI), so a display query cannot number-bind a null-dvd_id
+		// row and series+marker alone are not identity: reject. A raw cid
+		// query keeps the row only through the literal cid equality
+		// cidMatchesRemasterQuery has already enforced above.
+		return isRawRemasterContentIDQuery(queryID)
 	}
 	// H/HD remaster cids keep the display number: require the row's cid core
 	// number to equal the query's number, padding-normalized (1rct00156h
@@ -320,9 +330,11 @@ func responseContentIDMatchesVariation(body []byte, variation string) bool {
 // (series, folded marker, E/Z suffix; raw queries additionally require
 // literal cid equality), a present dvd_id must agree on the display
 // identity, and a null-dvd_id row must bind the query's core number for
-// H/HD spellings. This predicate is both the Step-2 variation acceptance
-// and the final guard in fetchAndParseCombined, so the normalized
-// combined= fallback is covered by the same check.
+// H/HD spellings — AI display queries reject null-dvd_id rows outright
+// (cidMatchesRemasterFuzzyQuery: with diverging numbers, no evidence ties
+// the row to the requested release). This predicate is both the Step-2
+// variation acceptance and the final guard in fetchAndParseCombined, so the
+// normalized combined= fallback is covered by the same check.
 func markerVariationAccept(body []byte, queryID, foldedMarker, series string) bool {
 	var data contentIDLookupResponse
 	if err := json.Unmarshal(body, &data); err != nil {
@@ -342,8 +354,12 @@ func markerVariationAccept(body []byte, queryID, foldedMarker, series string) bo
 	// separately fetched combined= fallback (every resolver variation
 	// missed) accepts a stale same-series marker row for a different
 	// release — r18.dev's fuzzy combined= matching can answer RCT-156H with
-	// 1rct00157h, publishing release 157 for 156. AI queries diverge from
-	// display numbers by design (dv00899ai is DV-818AI) and stay number-free.
+	// 1rct00157h, publishing release 157 for 156. AI display queries are
+	// rejected by the same predicate: AI cid numbers diverge from display
+	// numbers by design (dv00899ai is DV-818AI), so a null-dvd_id AI row
+	// carries no verifiable evidence tying it to the requested release.
+	// Raw cid queries never reach this branch — their literal cid equality
+	// is accepted above.
 	return cidMatchesRemasterFuzzyQuery(data.ContentID, queryID, foldedMarker, series)
 }
 

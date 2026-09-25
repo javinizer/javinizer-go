@@ -15,13 +15,15 @@ import (
 // normalized combined=<id> URL is fetched by fetchAndParseCombined) must bind
 // H/HD responses to the query's core number: a stale null-dvd_id row for a
 // different release of the same series (1rct00157h for RCT-156H) is r18.dev
-// fuzzy-match output, never the requested product. AI queries keep the
-// number-free marker acceptance because AI content ids diverge from display
-// numbers by design (dv00899ai is DV-818AI).
+// fuzzy-match output, never the requested product. AI display queries reject
+// null-dvd_id rows outright — AI content ids diverge from display numbers by
+// design (dv00899ai is DV-818AI), so the row carries no verifiable identity.
 
 // Unit coverage for the null-dvd_id branch of markerVariationAccept: H/HD
 // rows bind the query's core number (padding-normalized, T/T28 folding
-// consistent with the marker guard), while AI stays number-free.
+// consistent with the marker guard), while AI display queries reject
+// null-dvd_id rows and verify rows carrying a dvd_id through the display
+// comparison.
 func TestMarkerVariationAccept_CombinedNullDVDIDNumberBinding(t *testing.T) {
 	// H/HD: the row's cid core number must equal the query's number.
 	assert.False(t, markerVariationAccept([]byte(`{"content_id":"1rct00157h","dvd_id":null}`), "RCT-156H", "h", "rct"),
@@ -29,8 +31,14 @@ func TestMarkerVariationAccept_CombinedNullDVDIDNumberBinding(t *testing.T) {
 	assert.True(t, markerVariationAccept([]byte(`{"content_id":"1rct00156h","dvd_id":null}`), "RCT-156H", "h", "rct"))
 	assert.True(t, markerVariationAccept([]byte(`{"content_id":"1rct156h","dvd_id":null}`), "RCT-00156-HD", "h", "rct"),
 		"padding differences must not reject the matching release")
-	// AI: number-free acceptance retained — cid numbers diverge by design.
-	assert.True(t, markerVariationAccept([]byte(`{"content_id":"dv00899ai","dvd_id":null}`), "DV-818AI", "ai", "dv"))
+	// AI: a null-dvd_id row carries no verifiable identity — reject.
+	assert.False(t, markerVariationAccept([]byte(`{"content_id":"dv00899ai","dvd_id":null}`), "DV-818AI", "ai", "dv"),
+		"a null-dvd_id AI row must be rejected for an AI display query")
+	// AI with a dvd_id: the display comparison decides.
+	assert.True(t, markerVariationAccept([]byte(`{"content_id":"dv00899ai","dvd_id":"DV-818AI"}`), "DV-818AI", "ai", "dv"),
+		"an AI row whose dvd_id matches the query identity is accepted")
+	assert.False(t, markerVariationAccept([]byte(`{"content_id":"dv00899ai","dvd_id":"DV-999AI"}`), "DV-818AI", "ai", "dv"),
+		"an AI row whose dvd_id names another release is rejected")
 }
 
 // An H/HD query whose every resolver variation misses and whose combined=
@@ -85,11 +93,12 @@ func TestRemaster_CombinedFallback_HQuery_SameNumberAccepted(t *testing.T) {
 	assert.Greater(t, combinedFetches, 0)
 }
 
-// AI queries keep their number-free acceptance on the combined= fallback:
-// the served row's cid number diverges from the display number (dv00899ai
-// is DV-818AI), which the variations cannot reach, so only the number-free
-// marker gate can accept it.
-func TestRemaster_CombinedFallback_AIQuery_NumberFreeAcceptance(t *testing.T) {
+// An AI display query whose every resolver variation misses and whose
+// combined= fallback serves a null-dvd_id AI row (dv00899ai for DV-818AI)
+// must be rejected: AI cid numbers are slot numbers that diverge from
+// display numbers, so the row carries no evidence tying it to the requested
+// release — no unrelated metadata and no empty-ID result is published.
+func TestRemaster_CombinedFallback_AIQuery_NullDVDIDRejected(t *testing.T) {
 	var combinedFetches int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -105,9 +114,33 @@ func TestRemaster_CombinedFallback_AIQuery_NumberFreeAcceptance(t *testing.T) {
 
 	s := newR18TestScraper(server, true, "en")
 	result, err := s.Search(context.Background(), "DV-818AI")
-	require.NoError(t, err, "AI number divergence must keep the number-free marker acceptance on the combined= path")
+	require.Error(t, err, "a null-dvd_id AI row must not resolve through the combined= fallback")
+	assert.Nil(t, result)
+	assert.Greater(t, combinedFetches, 0, "the combined= fallback must have been fetched and rejected by the guard")
+}
+
+// The AI combined= fallback with evidence: a served row whose dvd_id
+// matches the query's display identity (DV-818AI) is accepted and published
+// under the server-provided display ID.
+func TestRemaster_CombinedFallback_AIQuery_MatchingDVDIDAccepted(t *testing.T) {
+	var combinedFetches int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "combined=dv818ai/json") {
+			combinedFetches++
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"content_id": "dv00899ai", "dvd_id": "DV-818AI", "title_en": "AI Remaster"}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	s := newR18TestScraper(server, true, "en")
+	result, err := s.Search(context.Background(), "DV-818AI")
+	require.NoError(t, err, "an AI row whose dvd_id matches the query identity must resolve via the combined= fallback")
 	require.NotNil(t, result)
 	assert.Equal(t, "dv00899ai", result.ContentID)
-	assert.Equal(t, "", result.ID, "null dvd_id with an AI cid leaves the display ID unset: AI numbers diverge")
+	assert.Equal(t, "DV-818AI", result.ID, "a matching server dvd_id is published verbatim, canonicalized")
 	assert.Greater(t, combinedFetches, 0)
 }

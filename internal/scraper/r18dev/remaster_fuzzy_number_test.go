@@ -13,13 +13,15 @@ import (
 
 // The Step-1 fuzzy record gate must bind the core number for H/HD queries:
 // a null-dvd_id row for a different release of the same series is stale
-// r18.dev fuzzy-match output, never the requested product. AI queries keep
-// the marker-based, number-free acceptance because AI content ids diverge
-// from display numbers.
+// r18.dev fuzzy-match output, never the requested product. AI display
+// queries reject null-dvd_id rows outright — AI content ids diverge from
+// display numbers, so series+marker alone are not identity; only a raw cid
+// query's literal echo is admissible.
 
 // cidMatchesRemasterFuzzyQuery unit coverage: H/HD binds the core number
 // (padding-normalized, T/T28 folding consistent with the marker guard),
-// while AI stays number-free.
+// while AI display queries reject null-dvd_id rows and raw cid queries keep
+// the literal-echo acceptance.
 func TestCidMatchesRemasterFuzzyQuery(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -41,8 +43,11 @@ func TestCidMatchesRemasterFuzzyQuery(t *testing.T) {
 		{"h unparseable cid rejected", "1abc0012xh", "ABC-012H", "h", "abc", false},
 		{"h unparseable query rejected", "1rct00156h", "nonsense", "h", "rct", false},
 		// AI content ids diverge from display numbers (dv00899ai is
-		// DV-818AI): number-free, marker-based acceptance.
-		{"ai divergent number accepted", "dv00899ai", "DV-818AI", "ai", "dv", true},
+		// DV-818AI): a display query has no number binding and series+marker
+		// alone are not identity, so null-dvd_id AI rows are rejected; only a
+		// raw cid query keeps the literal-echo acceptance.
+		{"ai display query unrelated row rejected", "dv00999ai", "DV-818AI", "ai", "dv", false},
+		{"ai display query slot-echo row rejected", "dv00899ai", "DV-818AI", "ai", "dv", false},
 		{"ai raw query echoes itself", "dv00899ai", "dv00899ai", "ai", "dv", true},
 		{"ai wrong marker rejected", "dv00899h", "DV-818AI", "ai", "dv", false},
 	}
@@ -118,24 +123,26 @@ func TestRemaster_FuzzyHQuery_SameNumberRecordedAndReturned(t *testing.T) {
 	assert.Equal(t, 1, fuzzyFetches, "the recorded fuzzy URL must be fetched exactly once")
 }
 
-// AI queries keep their number-free acceptance for null-dvd_id rows: AI
-// content ids diverge from display numbers (dv00899ai is DV-818AI), so the
-// marker-based gate must still record and return the row when the
-// variations miss (the divergent number is unreachable via Step 2).
-func TestRemaster_FuzzyAIQuery_NumberDivergenceStillAccepted(t *testing.T) {
-	var fuzzyFetches int
+// An AI display query whose fuzzy null-dvd_id row is an unrelated
+// same-series cid (dv00999ai for DV-818AI) must NOT be recorded as the
+// fuzzy fallback: AI content ids diverge from display numbers, so the row
+// carries no evidence tying it to the requested release. When the
+// content-id variations miss, the search misses — no unrelated metadata and
+// no empty-ID result is published.
+func TestRemaster_FuzzyAIQuery_NullDVDIDRowNotRecorded(t *testing.T) {
+	var staleFetched bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		path := r.URL.Path
 		switch {
 		case strings.Contains(path, "dvd_id="):
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"content_id": "dv00899ai", "dvd_id": null}`))
+			_, _ = w.Write([]byte(`{"content_id": "dv00999ai", "dvd_id": null}`))
 			return
-		case strings.Contains(path, "combined=dv00899ai"):
-			fuzzyFetches++
+		case strings.Contains(path, "combined=dv00999ai"):
+			staleFetched = true
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"content_id": "dv00899ai", "dvd_id": null, "title_en": "AI Remaster"}`))
+			_, _ = w.Write([]byte(`{"content_id": "dv00999ai", "dvd_id": null, "title_en": "Unrelated AI release"}`))
 			return
 		}
 		w.WriteHeader(http.StatusNotFound)
@@ -144,16 +151,43 @@ func TestRemaster_FuzzyAIQuery_NumberDivergenceStillAccepted(t *testing.T) {
 
 	s := newR18TestScraper(server, true, "en")
 	result, err := s.Search(context.Background(), "DV-818AI")
-	require.NoError(t, err, "AI number divergence must keep the number-free marker acceptance")
-	require.NotNil(t, result)
-	assert.Equal(t, "dv00899ai", result.ContentID)
-	assert.Equal(t, "", result.ID, "null dvd_id with an AI cid leaves the display ID unset: AI numbers diverge")
-	assert.Equal(t, 1, fuzzyFetches)
+	require.Error(t, err, "a null-dvd_id AI row must not resolve for an AI display query")
+	assert.Nil(t, result)
+	assert.False(t, staleFetched, "the unrelated fuzzy AI row must never be fetched")
 }
 
-// The AI stale-reject side: number-free does not mean marker-free — a
-// null-dvd_id row carrying a different folded marker must not be recorded
-// for an AI query.
+// The AI happy path with evidence: a row whose dvd_id matches the query's
+// display identity (DV-818AI) is accepted by the Step-1 display identity
+// match and published under the server-provided display ID.
+func TestRemaster_FuzzyAIQuery_MatchingDVDIDStillAccepted(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		path := r.URL.Path
+		switch {
+		case strings.Contains(path, "dvd_id="):
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"content_id": "dv00899ai", "dvd_id": "DV-818AI"}`))
+			return
+		case strings.Contains(path, "combined=dv00899ai"):
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"content_id": "dv00899ai", "dvd_id": "DV-818AI", "title_en": "AI Remaster"}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	s := newR18TestScraper(server, true, "en")
+	result, err := s.Search(context.Background(), "DV-818AI")
+	require.NoError(t, err, "an AI row whose dvd_id matches the query identity must resolve")
+	require.NotNil(t, result)
+	assert.Equal(t, "dv00899ai", result.ContentID)
+	assert.Equal(t, "DV-818AI", result.ID)
+}
+
+// The AI stale-reject side: rejection is not only about identity evidence —
+// a null-dvd_id row carrying a different folded marker must not be recorded
+// for an AI query either.
 func TestRemaster_FuzzyAIQuery_ForeignMarkerRowNotRecorded(t *testing.T) {
 	var staleFetched bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

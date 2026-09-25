@@ -85,18 +85,53 @@ func TestSearchSkipsMarkerlessDisplayMatch(t *testing.T) {
 }
 
 func TestDumpRemasterCandidateSingleFetch(t *testing.T) {
-	for _, id := range []string{"RCT-156H", "RCT-156-HD", "DV-818AI", "1rct00156hd"} {
-		t.Run(id, func(t *testing.T) {
-			all := r18devdump.ContentIDCandidatesWithMarker(id)
+	for _, tc := range []struct {
+		id     string
+		dvdID  string // served dvd_id; "" renders null
+		wantID string // expected published display ID
+	}{
+		{"RCT-156H", "", "RCT-156H"},
+		{"RCT-156-HD", "", "RCT-156H"},
+		{"1rct00156hd", "", "RCT-156H"},
+		// An AI display query cannot verify a null-dvd_id row (cid numbers
+		// diverge by design), so the AI case needs a matching dvd_id to
+		// resolve through the display comparison.
+		{"DV-818AI", "DV-818AI", "DV-818AI"},
+	} {
+		t.Run(tc.id, func(t *testing.T) {
+			all := r18devdump.ContentIDCandidatesWithMarker(tc.id)
 			require.NotEmpty(t, all)
 			cid := all[0]
+			dvdField := "null"
+			if tc.dvdID != "" {
+				dvdField = `"` + tc.dvdID + `"`
+			}
 			dump := &stubDumpLookup{matches: []models.DumpMatch{{ContentID: cid}}}
-			tr := &candidateAPITransport{body: `{"content_id":"` + cid + `","dvd_id":null,"title_en":"Remaster"}`}
+			tr := &candidateAPITransport{body: `{"content_id":"` + cid + `","dvd_id":` + dvdField + `,"title_en":"Remaster"}`}
 			s := newCandidateScraper(dump, tr)
-			result, err := s.Search(context.Background(), id)
+			result, err := s.Search(context.Background(), tc.id)
 			require.NoError(t, err)
 			assert.Equal(t, cid, result.ContentID)
 			assert.Equal(t, 1, tr.count())
+			assert.Equal(t, tc.wantID, result.ID)
 		})
 	}
+}
+
+// A dump-resolved AI candidate whose fetched row has a null dvd_id must be
+// rejected: AI cid numbers are slot numbers that diverge from display
+// numbers, so the row carries no evidence tying it to the display query —
+// the search falls through and misses instead of publishing unrelated
+// metadata with an empty ID.
+func TestDumpRemasterAICandidate_NullDVDIDRejected(t *testing.T) {
+	all := r18devdump.ContentIDCandidatesWithMarker("DV-818AI")
+	require.NotEmpty(t, all)
+	cid := all[0]
+	dump := &stubDumpLookup{matches: []models.DumpMatch{{ContentID: cid}}}
+	tr := &candidateAPITransport{body: `{"content_id":"` + cid + `","dvd_id":null,"title_en":"Remaster"}`}
+	s := newCandidateScraper(dump, tr)
+	result, err := s.Search(context.Background(), "DV-818AI")
+	require.Error(t, err, "a null-dvd_id AI row must not publish for an AI display query")
+	assert.Nil(t, result)
+	assert.Greater(t, tr.count(), 0, "the candidate must have been fetched and rejected by the guard")
 }

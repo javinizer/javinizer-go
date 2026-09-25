@@ -406,8 +406,9 @@ func (r *r18ContentIDResolver) ResolveURL(ctx context.Context, id string) (strin
 					// the content-id variation lookup below prefers canonical
 					// prefixes and avoids mislabeled duplicate dvd_id entries.
 					// Marker queries gate on marker identity; H/HD spellings
-					// additionally bind the query's core number, while AI cids
-					// diverge from display numbers and stay number-free (see
+					// additionally bind the query's core number, while AI display
+					// queries reject null-dvd_id rows outright — series+marker
+					// alone are not identity for AI (see
 					// cidMatchesRemasterFuzzyQuery).
 					if returnedDVDID == "" && fuzzyContentIDURL == "" {
 						fuzzyOK := contentIDCoreMatch(lookupData.ContentID, idVariation)
