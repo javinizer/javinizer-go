@@ -21,14 +21,25 @@ var (
 	// and hyphenated spellings (BT-601) stay catalog-id grammar.
 	// Lossless-audio sample rates get the same class treatment — (l)pcm
 	// plus 3-4 digits with an optional dot or space — so PCM192, LPCM384,
-	// and PCM.768 spellings are vetoed like the dts/flac literals instead
-	// of matching the builtin amateur pattern. The bound mirrors the color
-	// class because it mirrors the collision: two-digit numbers (PCM12,
-	// PCM96) and five-plus-digit id-shaped tokens (PCM00123) stay
+	// and PCM.768 spellings are vetoed like the bt709/st2084 literals
+	// instead of matching the builtin amateur pattern. The bound mirrors
+	// the color class because it mirrors the collision: two-digit numbers
+	// (PCM12, PCM96) and five-plus-digit id-shaped tokens (PCM00123) stay
 	// catalog-id grammar, and hyphenated spellings (PCM-192) do too. Real
 	// pcm-series ids are prefix-pinned (5pcm013, n_600pcm00103), so the
 	// word-boundary anchor leaves them alone.
-	trailingQualityTagRegex           = regexp.MustCompile(`(?i)\b(?:[hx]26[3-9]|avc\d*|aac\d*|hevc\d*|ac3|dts|flac|opus|truehd|vc1|av1|mp[34]|ddp\d*|eac3|divx\d*|xvid\d*|prores\d*|yuv\d*|rgb\d*|p0(?:10|16)|mpeg\d*|vp\d+|fhd\d{2,4}|uhd\d{2,4}|hdtv|hdr\d*|bt2020|bt709|rec709|smpte\d+|pq\d+|st2084|hlg\d*|ycbcr\d*|(?:bt|rec|st|smpte)[. ]?\d{3,4}|l?pcm[. ]?\d{3,4}|\d+(?:bit|point)\d+)\b`)
+	// Codec rate suffixes fold into the same class — dts, flac, and opus
+	// plus 3-4 digits with an optional dot or space — because their bare
+	// literals stop at the word boundary before the digits: DTS768, FLAC192,
+	// and OPUS192 sample-rate/bitrate spellings otherwise satisfy the
+	// builtin amateur pattern as replacement catalog ids. The identical
+	// bound keeps the same collisions live: two-digit numerals (DTS24) and
+	// five-plus-digit id-shaped tokens (DTS00123) stay catalog-id grammar,
+	// and hyphenated spellings (DTS-768) keep the bare literals' veto. Real
+	// dts-series ids are hyphenated display spellings (DTS-24) or
+	// numerically prefixed content ids (189dts00087), so the separator and
+	// word-boundary anchors leave them alone.
+	trailingQualityTagRegex           = regexp.MustCompile(`(?i)\b(?:[hx]26[3-9]|avc\d*|aac\d*|hevc\d*|ac3|dts|flac|opus|truehd|vc1|av1|mp[34]|ddp\d*|eac3|divx\d*|xvid\d*|prores\d*|yuv\d*|rgb\d*|p0(?:10|16)|mpeg\d*|vp\d+|fhd\d{2,4}|uhd\d{2,4}|hdtv|hdr\d*|bt2020|bt709|rec709|smpte\d+|pq\d+|st2084|hlg\d*|ycbcr\d*|(?:bt|rec|st|smpte)[. ]?\d{3,4}|(?:l?pcm|dts|flac|opus)[. ]?\d{3,4}|\d+(?:bit|point)\d+)\b`)
 	trailingResolutionCatalogIDRegex  = regexp.MustCompile(`(?i)\b[a-z]+-(?:144|240|288|360|432|480|540|576|720|1080|2160)\b`)
 	trailingResolutionQualityTagRegex = regexp.MustCompile(`(?i)^(?:fhd|uhd|hd)-(?:144|240|288|360|432|480|540|576|720|1080|2160)$`)
 	// qualitySeriesNumberRegex recognizes a consumed remaster phrase that is

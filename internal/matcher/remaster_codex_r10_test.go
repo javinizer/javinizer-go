@@ -130,6 +130,32 @@ func TestRemasterMarkerResolutionAndQualityLabels(t *testing.T) {
 		{"ABC.123.HD PCM-192.mkv", "PCM-192"},
 		{"ABC.123.HD HIKARI345.mkv", "HIKARI345"},
 		{"PCM192 1rct00156h.mkv", "1RCT00156H"},
+		// Codec rate suffixes fold into the lossless-audio class: DTS768,
+		// FLAC192, and OPUS192 sample-rate/bitrate spellings are metadata
+		// too — the bare dts/flac/opus literals stop at the word boundary
+		// before the digits, so without the class these tokens satisfy
+		// the builtin amateur pattern as replacement catalog ids.
+		{"ABC.123.HD DTS768.mkv", "ABC-123H"},
+		{"ABC.123.HD FLAC192.mkv", "ABC-123H"},
+		{"ABC.123.HD OPUS192.mkv", "ABC-123H"},
+		{"ABC.123.HD OPUS128.mkv", "ABC-123H"},
+		{"ABC.123.HD DTS1536.mkv", "ABC-123H"},
+		{"ABC.123.HD DTS.768.mkv", "ABC-123H"},
+		{"ABC.123.HD FLAC 192.mkv", "ABC-123H"},
+		{"DTS768 1rct00156h.mkv", "1RCT00156H"},
+		// The codec class is bounded like the audio class: two-digit
+		// numerals (DTS24) leave the separated id alone, five-digit
+		// id-shaped tokens stay catalog-id grammar, and hyphenated
+		// spellings keep the bare literals' veto. The dts series is real
+		// (its DMM content-id prefixes are pinned in the r18.dev lookup
+		// table), so its canonical spellings keep matching as ids:
+		// hyphenated display ids and numerically prefixed content ids.
+		{"ABC.123.HD DTS24.mkv", "ABC-123H"},
+		{"ABC.123.HD DTS00123.mkv", "DTS00123"},
+		{"ABC.123.HD DTS-768.mkv", "ABC-123H"},
+		{"DTS-24.mkv", "DTS-24"},
+		{"DTS-768.mkv", "DTS-768"},
+		{"189dts00087.mkv", "189DTS00087"},
 		{"QUALITY 1080 HD ABCDEFGHI.123.HD.mkv", "ABCDEFGHI-123H"},
 		{"birthday2024.mkv", ""},
 		{"birthday2024hdr.mkv", ""},
@@ -244,6 +270,15 @@ func TestRemasterMarkerResolutionAndQualityLabels(t *testing.T) {
 	// Lossless-audio sample-rate metadata after a separated remaster id
 	// must not replace it, and the marker stays intact.
 	for _, name := range []string{"ABC.123.HD PCM192.mkv", "ABC.123.HD LPCM384.mkv"} {
+		fileResult := matchOne(t, m, name)
+		require.NotNil(t, fileResult)
+		assert.Equal(t, "ABC-123H", fileResult.ID)
+		assert.Equal(t, "HD", fileResult.RemasterMarker)
+	}
+
+	// Codec rate-suffix metadata after a separated remaster id must not
+	// replace it either, and the marker stays intact.
+	for _, name := range []string{"ABC.123.HD DTS768.mkv", "ABC.123.HD FLAC192.mkv", "ABC.123.HD OPUS192.mkv"} {
 		fileResult := matchOne(t, m, name)
 		require.NotNil(t, fileResult)
 		assert.Equal(t, "ABC-123H", fileResult.ID)
