@@ -118,11 +118,19 @@ func parseRemasterTail(lower, compact string) (series, number, ez, marker string
 // for both H and HD spellings and "ai" for AI; series is the letter sequence.
 func classifyRemasterQuery(id string) (foldedMarker, series, catalogSuffix string, isContentID bool) {
 	lowerRaw := stripRentalSuffixMarkerAware(strings.ToLower(strings.TrimSpace(id)))
-	compact := stripRentalSuffixMarkerAware(compactQueryID(lowerRaw))
 	// A hyphenated/spaced input is a display ID, not a raw content ID: it must
 	// keep the resolver path (catalog-prefix search, padding, server-mediated
 	// number mapping). Only separator-free compact forms count as content IDs.
 	hasSeparator := strings.ContainsAny(lowerRaw, "-_. ")
+	compact := compactQueryID(lowerRaw)
+	// The marker-aware rental strip belongs to genuine rental cid endings
+	// (…hr/…hdr/…air) in separator-free cid/URL contexts. Compacting a display
+	// query must not manufacture one: a trailing -HDR token is a
+	// quality/vocabulary word (like HDTV/HDrip), not an HD-remaster marker
+	// plus a rental 'r', so ABW-121-HDR stays a base-release query.
+	if !hasSeparator {
+		compact = stripRentalSuffixMarkerAware(compact)
+	}
 	isContentID = underscoreCIDShapeRegex.MatchString(lowerRaw) ||
 		(!hasSeparator && remasterCIDShapeRegex.MatchString(compact))
 	if underscoreCIDShapeRegex.MatchString(lowerRaw) {
@@ -191,6 +199,37 @@ func stripRentalSuffixMarkerAware(cid string) string {
 	return cid
 }
 
+// normalizeCIDPadding canonicalizes a marker-bearing content id by
+// stripping leading zeros from its number: the unpadded query spelling
+// 1rct156h and the server's padded cid 1rct00156h reduce to the same
+// identity. The [hn]_<digits> channel prefix, catalog digits, series, E/Z
+// suffix and marker stay verbatim; ids without a marker-bearing cid shape
+// (including markerless base cids) are returned unchanged so the
+// normalization never rewrites non-marker identities.
+func normalizeCIDPadding(cid string) string {
+	s := strings.ToLower(strings.TrimSpace(cid))
+	prefix := ""
+	core := s
+	if underscoreCIDShapeRegex.MatchString(s) {
+		// [hn]_<digits> channel prefix: keep it verbatim, normalize the rest.
+		rest := s[2:]
+		i := 0
+		for i < len(rest) && rest[i] >= '0' && rest[i] <= '9' {
+			i++
+		}
+		prefix, core = s[:2+i], rest[i:]
+	}
+	m := anchoredMarkerCIDReg.FindStringSubmatch(core)
+	if m == nil {
+		return s
+	}
+	n := strings.TrimLeft(m[3], "0")
+	if n == "" {
+		n = "0"
+	}
+	return prefix + m[1] + m[2] + n + m[4]
+}
+
 // bindResolvedCID reports whether a URL-extracted cid may stand in for the
 // resolved cid on marker paths: exact equality, or equality up to DMM
 // catalog-digit prefix stripping with the marker suffix intact.
@@ -198,7 +237,10 @@ func bindResolvedCID(urlCID, resolved string, exact bool) bool {
 	if exact {
 		a := stripRentalSuffixMarkerAware(strings.ToLower(strings.TrimSpace(urlCID)))
 		b := stripRentalSuffixMarkerAware(strings.ToLower(strings.TrimSpace(resolved)))
-		return a == b
+		// Raw queries may arrive unpadded (1rct156h) while the server states
+		// the padded cid (1rct00156h); the zero-trimmed identity is the same
+		// product, so compare padding-normalized spellings.
+		return a == b || normalizeCIDPadding(a) == normalizeCIDPadding(b)
 	}
 	a := stripRentalSuffixMarkerAware(compactQueryID(urlCID))
 	b := compactQueryID(resolved)

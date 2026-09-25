@@ -343,5 +343,26 @@ func (s *scraper) ScrapeURL(ctx context.Context, url string) (*models.ScraperRes
 		}
 	}
 
-	return s.parseHTML(ctx, doc, url)
+	res, err := s.parseHTML(ctx, doc, url)
+	if err == nil {
+		fillMarkerIDFromURL(res, url)
+	}
+	return res, err
+}
+
+// fillMarkerIDFromURL ports Search's canonical-spelling fill to direct URL
+// scrapes: a marker-bearing page whose 品番 row is absent publishes an empty
+// display ID (AI-remaster cids do not encode the display number), so derive
+// the canonical spelling from the URL cid instead of returning an empty ID.
+func fillMarkerIDFromURL(res *models.ScraperResult, url string) {
+	if res == nil || res.ID != "" {
+		return
+	}
+	cid := stripRentalSuffixMarkerAware(extractContentIDFromURL(url))
+	if cid == "" {
+		return
+	}
+	if marker, _, _, _ := classifyRemasterQuery(cid); marker != "" {
+		res.ID = canonicalRemasterDisplayID(cid)
+	}
 }

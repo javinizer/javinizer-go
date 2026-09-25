@@ -319,13 +319,19 @@ func (s *scraper) searchFromDump(ctx context.Context, id string) (*models.Scrape
 		// prefix order never picks, and a gappy list ([c0, c2]) would skip the
 		// intermediate candidate the resolver tries over the wire first.
 		all := r18devdump.ContentIDCandidates(id)
+		markerQuery := false
 		if marker, _ := classifyRemaster(id); marker != "" {
 			all = r18devdump.ContentIDCandidatesWithMarker(id)
+			markerQuery = true
 		}
 		trusted := len(all) >= len(candidates)
 		if trusted {
 			for i, c := range candidates {
-				if c.ContentID != all[i] {
+				// A dump row may state the padded server cid where the
+				// canonical expansion spells the unpadded query form
+				// (1rct00156h vs 1rct156h); padding-equivalent rows name
+				// the same product, so marker queries compare by identity.
+				if c.ContentID != all[i] && (!markerQuery || !rawRemasterCIDEqual(c.ContentID, all[i])) {
 					trusted = false
 					break
 				}

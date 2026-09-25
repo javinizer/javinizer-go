@@ -365,6 +365,13 @@ func (s *scraper) findDetailURLCtx(ctx context.Context, id string) (string, erro
 	}
 
 	targetID := normalizeIDForCompare(id)
+	// A marker-suffixed display ID (the folded spelling the matcher
+	// propagates for HD/AI remaster queries, e.g. RCT-156H from RCT-156-HD)
+	// targets the remaster release itself: a variant match or the
+	// single-link fallback would silently return the base release's page,
+	// so only exact/padding-equal identities qualify and the query misses
+	// honestly when the remaster is not among the results.
+	markerQuery := remasterMarkerSuffix(id) != ""
 	var (
 		foundURL  string
 		bestMatch idMatchType
@@ -385,6 +392,11 @@ func (s *scraper) findDetailURLCtx(ctx context.Context, id string) (string, erro
 
 		for _, c := range candidates {
 			match := idMatchRank(c, targetID)
+			if markerQuery && match == idMatchVariant {
+				// The trailing H/HD/AI is a remaster marker, not a variant
+				// suffix: the base release must not stand in for the remaster.
+				match = idMatchNone
+			}
 			if match > bestMatch {
 				bestMatch = match
 				foundURL = scraperutil.ResolveURL(s.baseURL, href)
@@ -407,7 +419,10 @@ func (s *scraper) findDetailURLCtx(ctx context.Context, id string) (string, erro
 			detailLinks = append(detailLinks, scraperutil.ResolveURL(s.baseURL, href))
 		}
 	})
-	if len(detailLinks) == 1 {
+	// Marker queries skip the fallback too: a lone listed item cannot be
+	// assumed to be the requested remaster (DV-818 must not stand in for
+	// DV-818AI).
+	if len(detailLinks) == 1 && !markerQuery {
 		return detailLinks[0], nil
 	}
 
@@ -833,6 +848,37 @@ func trimVariantSuffix(id string) string {
 		return id[:len(id)-1]
 	}
 	return id
+}
+
+// remasterMarkerSuffix reports the folded remaster marker (H, HD or AI) a
+// display ID carries directly after its release number, e.g. "RCT-156H" ->
+// "H", "DV-818AI" -> "AI". The matcher folds HD/AI spellings into exactly
+// this position when it propagates a remaster query, so a non-empty result
+// means the query targets a remaster release: its trailing letters must
+// never be read as a variant suffix of the base release.
+func remasterMarkerSuffix(id string) string {
+	normalized := normalizeIDForCompare(id)
+	if normalized == "" {
+		return ""
+	}
+	// Locate the trailing ASCII letter run; the release number must sit
+	// immediately before it for the letters to be a marker suffix.
+	i := len(normalized)
+	for i > 0 && normalized[i-1] >= 'A' && normalized[i-1] <= 'Z' {
+		i--
+	}
+	if i == len(normalized) || i == 0 {
+		return ""
+	}
+	if normalized[i-1] < '0' || normalized[i-1] > '9' {
+		return ""
+	}
+	switch normalized[i:] {
+	case "H", "HD", "AI":
+		return normalized[i:]
+	default:
+		return ""
+	}
 }
 
 func normalizeLabel(s string) string {

@@ -91,7 +91,11 @@ func stripRentalSuffixMarkerAware(id string) string {
 	if r18PrefixedCIDRegex.MatchString(core) {
 		core = core[2:]
 	}
-	if r18RemasterTailRegex.FindStringSubmatch(r18CompactID(core)) != nil {
+	// The marker-base test requires a separator-free cid shape: the rental
+	// strip belongs to genuine rental cid endings (…hr/…hdr/…air), and a
+	// display query whose compaction would satisfy it (ABW-121-HDR) carries
+	// a quality/vocabulary word, not an HD-remaster marker plus a rental 'r'.
+	if r18RemasterTailRegex.FindStringSubmatch(core) != nil {
 		return base
 	}
 	return s
@@ -215,9 +219,48 @@ func cidMatchesRemasterQuery(contentID, queryID, marker, series string) bool {
 		return false
 	}
 	if isRawRemasterContentIDQuery(queryID) {
-		return strings.EqualFold(strings.TrimSpace(contentID), strings.TrimSpace(queryID))
+		return rawRemasterCIDEqual(contentID, queryID)
 	}
 	return true
+}
+
+// rawRemasterCIDEqual compares a server-stated content id against a raw
+// marker-bearing query spelling: equal verbatim, or equal after padding
+// normalization — the unpadded query 1rct156h and the server's padded cid
+// 1rct00156h name the same product. The marker guard (series, folded
+// marker, E/Z suffix) has already passed by the time this comparison runs.
+func rawRemasterCIDEqual(contentID, queryID string) bool {
+	if strings.EqualFold(strings.TrimSpace(contentID), strings.TrimSpace(queryID)) {
+		return true
+	}
+	return normalizeRawCIDPadding(contentID) == normalizeRawCIDPadding(queryID)
+}
+
+// normalizeRawCIDPadding canonicalizes a raw content id by stripping
+// leading zeros from its number (1rct00156h -> 1rct156h). The [hn]_ channel
+// prefix, catalog digits, series, E/Z suffix and marker stay verbatim; ids
+// without a cid shape are returned lowercased and compacted for comparison.
+func normalizeRawCIDPadding(cid string) string {
+	s := strings.ToLower(strings.TrimSpace(cid))
+	prefix := ""
+	core := r18CompactID(s)
+	if r18PrefixedCIDRegex.MatchString(s) {
+		rest := s[2:]
+		i := 0
+		for i < len(rest) && rest[i] >= '0' && rest[i] <= '9' {
+			i++
+		}
+		prefix, core = s[:2+i], rest[i:]
+	}
+	m := r18CIDAnchoredRegex.FindStringSubmatch(core)
+	if m == nil {
+		return core
+	}
+	n := strings.TrimLeft(m[3], "0")
+	if n == "" {
+		n = "0"
+	}
+	return prefix + m[1] + m[2] + n + m[4]
 }
 
 // cidRemasterSuffix extracts the E/Z catalog suffix from an id; empty when the
