@@ -6,11 +6,22 @@ import (
 )
 
 var (
-	fusedRemasterRegex     = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(t28|[a-z]+)((?:\d{1,3}|\d{6}))([ez]?)(hd|ai|h)(?:(cd|disc|disk|pt|part)(\d{1,2}))?(?:$|[-_.\s[\]()])`)
-	separatedRemasterRegex = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(t28|[a-z]+)[._\s]+(\d{1,6})([ez]?)?[-._\s]?(hd|ai|h)(?:(cd|disc|disk|pt|part)(\d{1,2}))?(?:$|[-_.\s[\]()])`)
-	reRemasterRemainder    = regexp.MustCompile(`(?i)^[-_.\s]?(HD|AI|H)(?:(cd|disc|disk|pt|part)\d{1,2})?(?:$|[-_.\s[\]()])`)
+	// Volume suffixes ride the part-label groups (vol joins
+	// cd/disc/disk/pt/part): a fused vol after the remaster marker
+	// (RCT156HDvol2, RCT-156HDvol2) flows to the same part detection as
+	// cd2 instead of failing the marker boundary (compact form: no
+	// match) or parsing as the raw id 156HDVOL2. The round-6 decision
+	// excluded vol from these groups because DetectPartSuffix had no vol
+	// grammar (reDiscPart covered cd/disc/disk, reNumericPart pt/part);
+	// reDiscPart now accepts vol, and no bare vol series exists in the
+	// r18.dev content-id prefix lookup (evol/gvol/qvol/zvol/vola/vold
+	// keep their leading letters), so the marker-boundary acceptance is
+	// safe and the suffix feeds part detection instead of the id.
+	fusedRemasterRegex     = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(t28|[a-z]+)((?:\d{1,3}|\d{6}))([ez]?)(hd|ai|h)(?:(cd|disc|disk|pt|part|vol)(\d{1,2}))?(?:$|[-_.\s[\]()])`)
+	separatedRemasterRegex = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(t28|[a-z]+)[._\s]+(\d{1,6})([ez]?)?[-._\s]?(hd|ai|h)(?:(cd|disc|disk|pt|part|vol)(\d{1,2}))?(?:$|[-_.\s[\]()])`)
+	reRemasterRemainder    = regexp.MustCompile(`(?i)^[-_.\s]?(HD|AI|H)(?:(cd|disc|disk|pt|part|vol)\d{1,2})?(?:$|[-_.\s[\]()])`)
 	remasterCodecTailRegex = regexp.MustCompile(`(?i)^[-_.\s]?\d{3}(?:\D|$)`)
-	contentIDShapeRegex    = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])((?:\d+(?:t28|[A-Za-z]+)\d+[A-Za-z]{0,3}|(?:t28|[A-Za-z]+)\d{4,5}[A-Za-z]{0,3}))(?:[-_.\s[\]()](.*)$|(?:cd|disc|disk|pt|part)\d{1,2}$|$)`)
+	contentIDShapeRegex    = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])((?:\d+(?:t28|[A-Za-z]+)\d+[A-Za-z]{0,3}|(?:t28|[A-Za-z]+)\d{4,5}[A-Za-z]{0,3}))(?:[-_.\s[\]()](.*)$|(?:cd|disc|disk|pt|part|vol)\d{1,2}$|$)`)
 	trailingCatalogIDRegex = regexp.MustCompile(`(?i)(?:[a-z]{1,}-(?:\d{2}|[0-3689]\d\d|4[0-79]\d|48[1-9]|5[0-689]\d|57[0-57-9]|7[0-13-9]\d|72[1-9])\b|[a-z]{1,}-\d{6,}\b|[a-z]{1,}-\d{1,6}[-._\s]?(?:hd|ai|h)\b|t28-\d{1,}\b|[hn]_\d+[a-z]+\d+|\b[a-z]+\d{4,5}[a-z]{0,3}\b|\b\d+[a-z]{2,}\d+[a-z]{0,3}\b|\b(?:t28|[a-z]{1,})[-._\s]\d{1,6}[-._\s]?(?:hd|ai|h)\b|\b[a-z]{2,6}\d{1,6}\b|\b[a-z](?:\d{5}|\d{4}|[013-9]\d\d|2(?:[013-9]\d|4\d|6[0-36-9]))\b)`)
 	// Standard color/transfer metadata is matched as a class —
 	// (bt|rec|st|smpte) plus 3-4 digits with an optional dot or space — so
@@ -58,6 +69,17 @@ var (
 	// Shorter remainders (AC307, AC364) leave only two digits after the
 	// ac3 head and stay catalog-id grammar, so the residual fused
 	// spelling (AC3640) rides the same tradeoff as DTS768.
+	// TrueHD joins the rate class with the same fold — the codec name
+	// is letters-only like the dts/flac/opus members, and its bare
+	// literal stops at the word boundary before the digits, so the
+	// numbered sample-rate spelling (TRUEHD192) otherwise satisfies the
+	// builtin amateur pattern and the trailing catalog grammar as a
+	// replacement catalog id behind a separated remaster id, on both
+	// entry points. No truehd series exists in the r18.dev content-id
+	// prefix lookup, and the class keeps the rate members' 3-4 digit
+	// bound: two-digit numerals (TRUEHD24) stay catalog-id grammar,
+	// five-digit zero-padded tokens (TRUEHD00123) keep the raw-id path,
+	// and hyphenated spellings (TRUEHD-768) keep the bare literals' veto.
 	// The VVC codec-name spelling — H.266's name, as AVC is H.264's and
 	// HEVC is H.265's — joins the avc/hevc free-digit codec-name aliases:
 	// VVC266, VVC1080, and other numbered spellings otherwise satisfy the
@@ -132,7 +154,7 @@ var (
 	// amateur pattern's own digit bound — and the hyphenated, dotted, and
 	// spaced siblings ride the compound span (see
 	// compoundSourceTagPrefixRegex) exactly like the web compounds.
-	trailingQualityTagRegex = regexp.MustCompile(`(?i)\b(?:[hx]26[3-9]|avc\d*|aac\d*|hevc\d*|vvc\d*|ac3|dts|flac|opus|truehd|vc1|av1|mp[34]|ddp\d*|eac3|divx\d*|xvid\d*|prores\d*|yuv\d*|rgb\d*|p0(?:10|16)|mpeg\d*|vp\d+|fhd\d{2,4}|uhd\d{2,4}|hdtv|hdr\d*|bt2020|bt709|rec709|smpte\d+|pq\d+|st2084|hlg\d*|ycbcr\d*|(?:bt|rec|st|smpte)[. ]?\d{3,4}|(?:l?pcm|dts|flac|opus|e?ac3)[. ]?\d{3,4}|\d+(?:bit|point)\d+|(?:web(?:[-_. ]?(?:dl(?:rip)?|rip))?|remux|bluray|(?:bd|br)[-_. ]?rip)\d{3,4})\b`)
+	trailingQualityTagRegex = regexp.MustCompile(`(?i)\b(?:[hx]26[3-9]|avc\d*|aac\d*|hevc\d*|vvc\d*|ac3|dts|flac|opus|truehd|vc1|av1|mp[34]|ddp\d*|eac3|divx\d*|xvid\d*|prores\d*|yuv\d*|rgb\d*|p0(?:10|16)|mpeg\d*|vp\d+|fhd\d{2,4}|uhd\d{2,4}|hdtv|hdr\d*|bt2020|bt709|rec709|smpte\d+|pq\d+|st2084|hlg\d*|ycbcr\d*|(?:bt|rec|st|smpte)[. ]?\d{3,4}|(?:l?pcm|dts|flac|opus|e?ac3|truehd)[. ]?\d{3,4}|\d+(?:bit|point)\d+|(?:web(?:[-_. ]?(?:dl(?:rip)?|rip))?|remux|bluray|(?:bd|br)[-_. ]?rip)\d{3,4})\b`)
 	// compoundSourceTagPrefixRegex recognizes the source-tag prefix —
 	// web, bd, or br plus exactly one separator — ending where a
 	// trailing-catalog candidate begins, so the candidate's quality veto
@@ -172,8 +194,9 @@ var (
 	resolutionTailRegex            = regexp.MustCompile(`(?i)^[-_.\s]?(?:\d{3,4}[pi]|\d{3,4}x\d{3,4}|(?:144|240|288|360|432|480|540|576|720))(?:\D|$)`)
 	framerateTokenRegex            = regexp.MustCompile(`(?i)^\d{3,4}[pi](?:\d{2,3})?$`)
 	remasterMarkerTailRegex        = regexp.MustCompile(`(?i)(?:ez)?(?:hd|ai|h)$`)
+	explicitMarkerTailRegex        = regexp.MustCompile(`(?i)(?:ez)?(?:hd|ai)$`)
 	rawTokenRegex                  = regexp.MustCompile(`[A-Za-z0-9]+`)
-	fusedPartLabelTailRegex        = regexp.MustCompile(`(?i)(?:cd|disc|disk|pt|part)\d{1,2}$`)
+	fusedPartLabelTailRegex        = regexp.MustCompile(`(?i)(?:cd|disc|disk|pt|part|vol)\d{1,2}$`)
 	strongRawTokenRegex            = regexp.MustCompile(`(?i)^(?:\d+(?:t28|[A-Za-z]+)\d+[A-Za-z]{0,3}|(?:t28|[A-Za-z]+)\d{4,5}[ez]?(?:hd|ai|h))$`)
 	zeroPaddedRawTokenRegex        = regexp.MustCompile(`(?i)^(?:t28|[a-z]+)0\d{3,4}[a-z]{0,3}$`)
 	weakWordYearRegex              = regexp.MustCompile(`(?i)^[a-z]{4,}\d{4,5}[a-z]{0,3}$`)
@@ -357,7 +380,11 @@ func isFPSLikeBarePartNumber(num int, partSuffix string) bool {
 // candidate only up to the label when the trimmed spelling is itself strong
 // or zero-padded, so the label feeds part detection instead of malforming
 // the id; the full token stays a candidate when only the whole spelling is
-// strong (118cd2).
+// strong (118cd2). A trimmed spelling that ends in an explicit remaster
+// marker (156HDvol2) is display-id debris — the number, marker, and part
+// label tail of a hyphenated release name — and backs no candidate at any
+// length: the builtin tier's marker handling owns it, so it never displaces
+// the display id as a raw content id.
 func rawTokenCandidateEnd(token string) (int, bool) {
 	if isResolutionToken(token) || trailingQualityTagRegex.MatchString(token) {
 		return 0, false
@@ -367,11 +394,31 @@ func rawTokenCandidateEnd(token string) (int, bool) {
 		if strongRawTokenRegex.MatchString(trimmed) || zeroPaddedRawTokenRegex.MatchString(trimmed) {
 			return loc[0], true
 		}
+		if explicitMarkerTailRegex.MatchString(trimmed) {
+			return 0, false
+		}
 	}
 	if strongRawTokenRegex.MatchString(token) || zeroPaddedRawTokenRegex.MatchString(token) {
 		return len(token), true
 	}
 	return 0, false
+}
+
+// remasterPartLabelDebris reports whether a raw token or content-id shape
+// match is display-id debris rather than a raw content id: a number and
+// explicit remaster marker directly followed by a fused part label
+// (156HDvol2 — the tail of "RCT-156-HD-vol2"). The marker is restricted to
+// the explicit HD/AI spellings because bare H ends real series spellings in
+// the r18.dev content-id prefix lookup (hcd, hhcd, hpt, lhpt, qhcd), so
+// ids like 300hcd12 keep their id grammar; no series ends in hd or ai
+// directly before a part label, and the label's 1-2 digit bound keeps the
+// zero-padded numbers of real numerically prefixed ids out.
+func remasterPartLabelDebris(token string) bool {
+	loc := fusedPartLabelTailRegex.FindStringIndex(token)
+	if loc == nil {
+		return false
+	}
+	return explicitMarkerTailRegex.MatchString(token[:loc[0]])
 }
 
 // contentIDPrefixMatch extracts a content-id prefix from a stem, returning the
@@ -390,11 +437,12 @@ func contentIDCandidate(s string) (start, end int, ok bool) {
 	if remasterMarkerTailRegex.MatchString(id) {
 		return m[2], m[3], true
 	}
-	if isResolutionToken(id) || trailingQualityTagRegex.MatchString(id) {
-		// The leftmost shape hit is a resolution or quality token;
-		// it never becomes the candidate, but a strong raw id later in the
-		// name still wins, as with the weak standalone-token case. Without
-		// one, there is no candidate.
+	if isResolutionToken(id) || trailingQualityTagRegex.MatchString(id) || remasterPartLabelDebris(id) {
+		// The leftmost shape hit is a resolution token, quality tag, or
+		// marker+part-label debris (156HDvol2); it never becomes the
+		// candidate, but a strong raw id later in the name still wins, as
+		// with the weak standalone-token case. Without one, there is no
+		// candidate.
 		for _, loc := range rawTokenRegex.FindAllStringIndex(s, -1) {
 			tokEnd, isCandidate := rawTokenCandidateEnd(s[loc[0]:loc[1]])
 			if !isCandidate {

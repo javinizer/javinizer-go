@@ -538,3 +538,109 @@ func TestRemasterMarkerResolutionAndQualityLabels(t *testing.T) {
 	require.NotNil(t, fileResult)
 	assert.Equal(t, "BT60123", fileResult.ID)
 }
+
+// Codex round-22: a fused volume suffix after the remaster marker is
+// recognized like the cd/disc/disk/pt/part labels — vol rides the same
+// marker-boundary label groups and part detection, so the compact
+// spelling (RCT156HDvol2) normalizes instead of matching nothing and the
+// hyphenated spelling (RCT-156HDvol2) keeps its display id instead of
+// misclassifying the marker+label tail as the raw id 156HDVOL2.
+func TestFusedRemasterVolumeSuffixes(t *testing.T) {
+	m, err := NewMatcher(&Config{})
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name, id, marker, matchedBy string
+		part                        int
+		partSuffix                  string
+	}{
+		{"RCT156HDvol2.mkv", "RCT-156H", "HD", "builtin", 2, "-vol2"},
+		{"RCT-156HDvol2.mkv", "RCT-156H", "HD", "builtin", 2, "-vol2"},
+		{"RCT156HDvol1.mkv", "RCT-156H", "HD", "builtin", 1, "-vol1"},
+		{"RCT-156HD-vol2.mkv", "RCT-156H", "HD", "builtin", 2, "-vol2"},
+		{"RCT156HD vol2.mkv", "RCT-156H", "HD", "builtin", 2, "-vol2"},
+		{"RCT.156.HDvol2.mkv", "RCT-156H", "HD", "builtin", 2, "-vol2"},
+		// The AI marker rides the same label groups.
+		{"RCT156AIvol2.mkv", "RCT-156AI", "AI", "builtin", 2, "-vol2"},
+		{"RCT-156AIvol2.mkv", "RCT-156AI", "AI", "builtin", 2, "-vol2"},
+		// Tier-2 raw content ids keep their fused volume tails.
+		{"1rct00156hvol2.mkv", "1RCT00156H", "", "contentid", 2, "-vol2"},
+		{"1rct00156hdvol2.mkv", "1RCT00156HD", "", "contentid", 2, "-vol2"},
+		// The marker+label debris veto is label-uniform: the cd/pt
+		// siblings of the vol misclassification keep their display ids
+		// too (they previously parsed as 156HDCD2/156HDPT2).
+		{"RCT-156HDcd2.mkv", "RCT-156H", "HD", "builtin", 2, "-cd2"},
+		{"RCT-156HDpt2.mkv", "RCT-156H", "HD", "builtin", 2, "-pt2"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := matchOne(t, m, tc.name)
+			require.NotNil(t, got)
+			assert.Equal(t, tc.id, got.ID)
+			assert.Equal(t, tc.marker, got.RemasterMarker)
+			assert.Equal(t, tc.part, got.PartNumber)
+			assert.Equal(t, tc.partSuffix, got.PartSuffix)
+			assert.Equal(t, PatternExplicit, got.MultipartPattern)
+			assert.True(t, got.IsMultiPart)
+			assert.Equal(t, tc.matchedBy, got.MatchedBy)
+			assert.Equal(t, tc.id, m.MatchString(tc.name))
+		})
+	}
+	// Controls: vol-less spellings keep their pinned behavior, the
+	// full-token-strong path keeps ids like 118cd2, and a real series
+	// whose spelling contains vol keeps its id grammar.
+	for _, tc := range []struct{ name, id string }{
+		{"RCT156HD.mkv", "RCT-156H"},
+		{"RCT156HDcd2.mkv", "RCT-156H"},
+		{"118cd2.mkv", "118CD2"},
+		{"evol0123.mkv", "EVOL0123"},
+	} {
+		t.Run(tc.name+" control", func(t *testing.T) {
+			assert.Equal(t, tc.id, m.MatchString(tc.name))
+			got := matchOne(t, m, tc.name)
+			require.NotNil(t, got)
+			assert.Equal(t, tc.id, got.ID)
+		})
+	}
+	single := matchOne(t, m, "RCT156HD.mkv")
+	require.NotNil(t, single)
+	assert.Equal(t, 0, single.PartNumber)
+	assert.Empty(t, single.PartSuffix)
+	assert.Nil(t, matchOne(t, m, "VOL2.mkv"))
+}
+
+// Codex round-22: numbered TrueHD sample-rate tags are quality metadata
+// like the other numbered audio-codec tags — truehd joins the
+// pcm/dts/flac/opus/ac3 rate class, so the compact TRUEHD192 spelling no
+// longer satisfies the builtin amateur pattern and the trailing catalog
+// grammar as a replacement id behind a separated remaster id.
+func TestNumberedTrueHDTagIsQuality(t *testing.T) {
+	m, err := NewMatcher(&Config{})
+	require.NoError(t, err)
+	for _, tc := range []struct{ name, id string }{
+		{"ABC.123.HD TRUEHD192.mkv", "ABC-123H"},
+		{"ABC.123.HD TRUEHD768.mkv", "ABC-123H"},
+		{"ABC.123.HD TrueHD1411.mkv", "ABC-123H"},
+		{"ABC.123.HD TRUEHD.768.mkv", "ABC-123H"},
+		{"ABC.123.HD TRUEHD 768.mkv", "ABC-123H"},
+		// The class keeps the rate members' 3-4 digit bound: two-digit
+		// numerals stay catalog-id grammar and five-digit zero-padded
+		// tokens keep the raw-id path, exactly like PCM12/PCM00123.
+		{"ABC.123.HD TRUEHD24.mkv", "ABC-123H"},
+		{"ABC.123.HD TRUEHD00123.mkv", "TRUEHD00123"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.id, m.MatchString(tc.name))
+			got := matchOne(t, m, tc.name)
+			require.NotNil(t, got)
+			assert.Equal(t, tc.id, got.ID)
+		})
+	}
+	// The marker stays on the separated id, not on the tag.
+	got := matchOne(t, m, "ABC.123.HD TRUEHD192.mkv")
+	require.NotNil(t, got)
+	assert.Equal(t, "HD", got.RemasterMarker)
+	// A leading numbered tag does not shadow a strong raw id (the
+	// DTS768 1rct00156h precedent); a standalone tag keeps the builtin
+	// tier's pinned fallback, exactly like standalone DTS768/PCM192.
+	assert.Equal(t, "1RCT00156H", m.MatchString("TRUEHD192 1rct00156h.mkv"))
+	assert.Equal(t, "TRUEHD192", m.MatchString("TRUEHD192.mkv"))
+}

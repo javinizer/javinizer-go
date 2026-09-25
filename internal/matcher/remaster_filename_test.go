@@ -18,6 +18,11 @@ func TestMatchStringRemasterFilename(t *testing.T) {
 		{"RCT-156-HD.pt2", "RCT-156H"},
 		{"1rct00156hd.pt2.mkv", "1RCT00156HD"},
 		{"RCT-156.mkv", "RCT-156"},
+		// Round-22: fused volume suffixes after the remaster marker.
+		{"RCT156HDvol2.mkv", "RCT-156H"},
+		{"RCT-156HDvol2.mkv", "RCT-156H"},
+		{"RCT-156-HD-vol2.mkv", "RCT-156H"},
+		{"1rct00156hvol2.mkv", "1RCT00156H"},
 	} {
 		t.Run(tc.input, func(t *testing.T) { assert.Equal(t, tc.want, m.MatchString(tc.input)) })
 	}
