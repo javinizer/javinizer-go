@@ -870,9 +870,6 @@ func remasterMarkerSuffix(id string) string {
 	if i == len(normalized) || i == 0 {
 		return ""
 	}
-	if normalized[i-1] < '0' || normalized[i-1] > '9' {
-		return ""
-	}
 	switch normalized[i:] {
 	case "H", "HD", "AI":
 		return normalized[i:]
