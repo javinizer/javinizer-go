@@ -369,7 +369,15 @@ func isRawRemasterContentIDQuery(id string) bool {
 	return rawRemasterCIDShapeRegex.MatchString(s)
 }
 
-var rawRemasterCIDShapeRegex = regexp.MustCompile(`^(?:\d+(?:t28|[a-z]+)\d+[a-z]{0,3}|(?:t28|[a-z]+)\d{5}[a-z]{0,3})$`)
+// rawRemasterCIDShapeRegex mirrors the DMM classifier's content-id shape: a
+// catalog-digit prefix, a five-digit zero-padded number (the leading zero is
+// the padding evidence — display numbers never carry one), or the
+// prefix-free t28 tail whose compact display spelling doubles as the raw cid
+// (t28123h is T-28123H). A non-padded five-digit separator-free form
+// (ABC12345H compacts to abc12345h) is a display id whose server cid is
+// catalog-prefixed (1abc12345h): it must resolve as a display query, not
+// demand literal cid equality.
+var rawRemasterCIDShapeRegex = regexp.MustCompile(`^(?:\d+(?:t28|[a-z]+)\d+[a-z]{0,3}|(?:t28(?:0\d{4}|\d{3})|[a-z]+0\d{4})[a-z]{0,3})$`)
 
 // rawDisplayMatchesCID reports whether a server-provided display ID agrees
 // with the content id's nonnumeric identity (series, E/Z suffix, folded

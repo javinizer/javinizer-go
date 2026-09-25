@@ -13,10 +13,16 @@ import (
 )
 
 var (
-	// Unambiguous content-id shapes only: a channel prefix or a five-digit
-	// zero-padded number. Separator-free four-digit display ids (ABP1234) are
-	// ambiguous and must stay on the resolver path.
-	remasterCIDShapeRegex   = regexp.MustCompile(`^(?:\d+(?:t28|[a-z]+)\d+[a-z]{0,3}|(?:t28|[a-z]+)\d{5}[a-z]{0,3})$`)
+	// Unambiguous content-id shapes only: a channel prefix, a five-digit
+	// zero-padded number, or the prefix-free t28 tail whose compact display
+	// spelling doubles as the raw cid (t28123h is T-28123H, so the raw bypass
+	// binds the server cid verbatim). The leading zero is the padding
+	// evidence: display numbers never carry one, while DMM pads cid numbers
+	// to five digits. A non-padded five-digit separator-free form (ABC12345H
+	// compacts to abc12345h) is a display id whose server cid is
+	// catalog-prefixed (1abc12345h); like the four-digit display ids
+	// (ABP1234), it is ambiguous and must stay on the resolver path.
+	remasterCIDShapeRegex   = regexp.MustCompile(`^(?:\d+(?:t28|[a-z]+)\d+[a-z]{0,3}|(?:t28(?:0\d{4}|\d{3})|[a-z]+0\d{4})[a-z]{0,3})$`)
 	underscoreCIDShapeRegex = regexp.MustCompile(`^[hn]_\d+[a-z]+\d+(?:[ez]?(?:hd|ai|h)|[a-z]{0,2})$`)
 	remasterTailRegex       = regexp.MustCompile(`^(\d*)((?:t28|[a-z]+))(\d+)([ez]?)(hd|ai|h)$`)
 	anchoredMarkerCIDReg    = regexp.MustCompile(`^(\d*)((?:t28|[a-z]+))(\d+)([a-z]{1,3})$`)
