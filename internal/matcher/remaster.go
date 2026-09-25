@@ -39,6 +39,25 @@ var (
 	// dts-series ids are hyphenated display spellings (DTS-24) or
 	// numerically prefixed content ids (189dts00087), so the separator and
 	// word-boundary anchors leave them alone.
+	// The Dolby Digital family folds into the rate class with both of its
+	// spellings in one alternative — e?ac3 plus 3-4 digits with an optional
+	// dot or space — because the bare ac3/eac3 literals stop at the word
+	// boundary before the digits: AC3640, AC3448, and EAC3640 bitrate
+	// spellings otherwise satisfy the builtin amateur pattern and the
+	// trailing catalog grammar as replacement ids behind a separated
+	// remaster id. The bound stays at the family's 3-4 digits — bitrates
+	// are three digits (640, 448) and eac3's higher rates run to four —
+	// and since the codec name itself ends in a digit, the id-shaped
+	// tokens it covers are the ac series' fused spellings with four or
+	// five digits starting with 3. No ac3 or eac3 series exists in the
+	// r18.dev content-id prefix lookup, and the real ac series keeps its
+	// spellings: zero-padded content ids start with 0 (ac00364 — the
+	// digit after ac cannot be the class's 3), numerically prefixed
+	// content ids (306ac00123) never offer the leading word boundary, and
+	// hyphenated display ids (AC-3640) keep the separator's protection.
+	// Shorter remainders (AC307, AC364) leave only two digits after the
+	// ac3 head and stay catalog-id grammar, so the residual fused
+	// spelling (AC3640) rides the same tradeoff as DTS768.
 	// The VVC codec-name spelling — H.266's name, as AVC is H.264's and
 	// HEVC is H.265's — joins the avc/hevc free-digit codec-name aliases:
 	// VVC266, VVC1080, and other numbered spellings otherwise satisfy the
@@ -90,7 +109,7 @@ var (
 	// numerically prefixed (189WEB-DL1) spellings keep the leading-letter
 	// protection, and a DL fragment without the web prefix stays id
 	// grammar.
-	trailingQualityTagRegex = regexp.MustCompile(`(?i)\b(?:[hx]26[3-9]|avc\d*|aac\d*|hevc\d*|vvc\d*|ac3|dts|flac|opus|truehd|vc1|av1|mp[34]|ddp\d*|eac3|divx\d*|xvid\d*|prores\d*|yuv\d*|rgb\d*|p0(?:10|16)|mpeg\d*|vp\d+|fhd\d{2,4}|uhd\d{2,4}|hdtv|hdr\d*|bt2020|bt709|rec709|smpte\d+|pq\d+|st2084|hlg\d*|ycbcr\d*|(?:bt|rec|st|smpte)[. ]?\d{3,4}|(?:l?pcm|dts|flac|opus)[. ]?\d{3,4}|\d+(?:bit|point)\d+|(?:web(?:[-_. ]?(?:dl(?:rip)?|rip))?|remux|bluray)\d{3,4})\b`)
+	trailingQualityTagRegex = regexp.MustCompile(`(?i)\b(?:[hx]26[3-9]|avc\d*|aac\d*|hevc\d*|vvc\d*|ac3|dts|flac|opus|truehd|vc1|av1|mp[34]|ddp\d*|eac3|divx\d*|xvid\d*|prores\d*|yuv\d*|rgb\d*|p0(?:10|16)|mpeg\d*|vp\d+|fhd\d{2,4}|uhd\d{2,4}|hdtv|hdr\d*|bt2020|bt709|rec709|smpte\d+|pq\d+|st2084|hlg\d*|ycbcr\d*|(?:bt|rec|st|smpte)[. ]?\d{3,4}|(?:l?pcm|dts|flac|opus|e?ac3)[. ]?\d{3,4}|\d+(?:bit|point)\d+|(?:web(?:[-_. ]?(?:dl(?:rip)?|rip))?|remux|bluray)\d{3,4})\b`)
 	// compoundSourceTagPrefixRegex recognizes the source-tag prefix — web
 	// plus exactly one separator — ending where a trailing-catalog
 	// candidate begins, so the candidate's quality veto can span the

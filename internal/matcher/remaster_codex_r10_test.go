@@ -156,6 +156,43 @@ func TestRemasterMarkerResolutionAndQualityLabels(t *testing.T) {
 		{"DTS-24.mkv", "DTS-24"},
 		{"DTS-768.mkv", "DTS-768"},
 		{"189dts00087.mkv", "189DTS00087"},
+		// The Dolby Digital bitrate family rides the codec rate class
+		// — e?ac3 plus 3-4 digits with an optional dot or space —
+		// because the bare ac3/eac3 literals stop at the word boundary
+		// before the digits: AC3640, AC3448, and EAC3640 bitrate
+		// spellings otherwise satisfy the builtin amateur pattern and
+		// the trailing catalog grammar as replacement ids behind a
+		// separated remaster id, on both entry points. Four-digit
+		// suffixes ride the same class (eac3's higher bitrates), so the
+		// five-digit ac token AC36400 is covered too.
+		{"ABC.123.HD AC3640.mkv", "ABC-123H"},
+		{"ABC.123.HD AC3448.mkv", "ABC-123H"},
+		{"ABC.123.HD EAC3640.mkv", "ABC-123H"},
+		{"ABC.123.HD EAC3448.mkv", "ABC-123H"},
+		{"ABC.123.HD EAC31536.mkv", "ABC-123H"},
+		{"ABC.123.HD AC36400.mkv", "ABC-123H"},
+		{"ABC.123.HD AC3.640.mkv", "ABC-123H"},
+		{"ABC.123.HD AC3 640.mkv", "ABC-123H"},
+		{"ABC.123.HD EAC3.640.mkv", "ABC-123H"},
+		{"ABC.123.HD EAC3 640.mkv", "ABC-123H"},
+		{"AC3640 1rct00156h.mkv", "1RCT00156H"},
+		// The ac3 member keeps the class's bound, and since the codec
+		// name itself ends in a digit, the id-shaped tokens it excludes
+		// are the ac series' spellings with shorter remainders or
+		// pinned anchors: no ac3 or eac3 series exists in the r18.dev
+		// content-id prefix lookup, and the real ac series keeps its
+		// spellings — two-digit remainders (AC307), hyphenated display
+		// (AC-3640), numerically prefixed (306ac00123), zero-padded
+		// (ac00364), standalone fused (AC3640), marker tails (AC3640H),
+		// and leading-letter near misses (PEAC3640) all stay id grammar.
+		{"ABC.123.HD AC307.mkv", "AC307"},
+		{"ABC.123.HD AC364.mkv", "AC364"},
+		{"AC-3640.mkv", "AC-3640"},
+		{"306ac00123.mkv", "306AC00123"},
+		{"ac00364.mkv", "AC00364"},
+		{"AC3640.mkv", "AC3640"},
+		{"AC3640H.mkv", "AC3640H"},
+		{"PEAC3640.mkv", "PEAC3640"},
 		{"QUALITY 1080 HD ABCDEFGHI.123.HD.mkv", "ABCDEFGHI-123H"},
 		{"birthday2024.mkv", ""},
 		{"birthday2024hdr.mkv", ""},
@@ -371,6 +408,24 @@ func TestRemasterMarkerResolutionAndQualityLabels(t *testing.T) {
 		assert.Equal(t, "ABC-123H", fileResult.ID)
 		assert.Equal(t, "HD", fileResult.RemasterMarker)
 	}
+
+	// Dolby Digital bitrate metadata after a separated remaster id must
+	// not replace it either, and the marker stays intact — for the
+	// compact AC3/EAC3 bitrate spellings and their dotted and spaced
+	// siblings.
+	for _, name := range []string{"ABC.123.HD AC3640.mkv", "ABC.123.HD AC3448.mkv", "ABC.123.HD EAC3640.mkv", "ABC.123.HD AC3.640.mkv", "ABC.123.HD AC3 640.mkv"} {
+		fileResult := matchOne(t, m, name)
+		require.NotNil(t, fileResult)
+		assert.Equal(t, "ABC-123H", fileResult.ID)
+		assert.Equal(t, "HD", fileResult.RemasterMarker)
+	}
+
+	// The ac3 member's bound keeps the ac series' shorter id shapes: a
+	// trailing AC307 still replaces the separated id, like any other
+	// short-prefix catalog id.
+	fileResult = matchOne(t, m, "ABC.123.HD AC307.mkv")
+	require.NotNil(t, fileResult)
+	assert.Equal(t, "AC307", fileResult.ID)
 
 	// The VVC codec-name spelling after a separated remaster id must not
 	// replace it either, and the marker stays intact.
