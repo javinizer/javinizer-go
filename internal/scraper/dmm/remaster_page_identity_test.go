@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/PuerkitoBio/goquery"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -67,4 +68,33 @@ func TestCachedHQueryMatchingPageReturns(t *testing.T) {
 	require.NotNil(t, res)
 	assert.Equal(t, "RCT-156H", res.ID)
 	assert.Equal(t, "1rct00156h", res.ContentID)
+}
+
+// The identity guard publishes nothing authoritative to compare for nil
+// documents, unparseable display ids, or unparseable queries, and must keep
+// the existing behavior in those cases rather than reject the page.
+func TestPageDisplayIdentityMatchesQueryGuards(t *testing.T) {
+	page := func(display string) *goquery.Document {
+		t.Helper()
+		doc, err := goquery.NewDocumentFromReader(strings.NewReader(
+			"<html><body><table><tr><td>品番：</td><td>" + display + "</td></tr></table></body></html>"))
+		require.NoError(t, err)
+		return doc
+	}
+	for _, tc := range []struct {
+		name  string
+		doc   *goquery.Document
+		query string
+		want  bool
+	}{
+		{"nil document keeps existing behavior", nil, "DV-818AI", true},
+		{"unparseable display keeps existing behavior", page("???"), "DV-818AI", true},
+		{"unparseable query keeps existing behavior", page("DV-818-AI"), "remastered", true},
+		{"mismatched release rejects", page("DV-819-AI"), "DV-818AI", false},
+		{"matching release accepts", page("DV-818-AI"), "DV-818AI", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, pageDisplayIdentityMatchesQuery(tc.doc, tc.query))
+		})
+	}
 }
