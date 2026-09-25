@@ -19,10 +19,27 @@ var (
 	// safe and the suffix feeds part detection instead of the id.
 	fusedRemasterRegex     = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(t28|[a-z]+)((?:\d{1,3}|\d{6}))([ez]?)(hd|ai|h)(?:(cd|disc|disk|pt|part|vol)(\d{1,2}))?(?:$|[-_.\s[\]()])`)
 	separatedRemasterRegex = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(t28|[a-z]+)[._\s]+(\d{1,6})([ez]?)?[-._\s]?(hd|ai|h)(?:(cd|disc|disk|pt|part|vol)(\d{1,2}))?(?:$|[-_.\s[\]()])`)
-	reRemasterRemainder    = regexp.MustCompile(`(?i)^[-_.\s]?(HD|AI|H)(?:(cd|disc|disk|pt|part|vol)\d{1,2})?(?:$|[-_.\s[\]()])`)
-	remasterCodecTailRegex = regexp.MustCompile(`(?i)^[-_.\s]?\d{3}(?:\D|$)`)
-	contentIDShapeRegex    = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])((?:\d+(?:t28|[A-Za-z]+)\d+[A-Za-z]{0,3}|(?:t28|[A-Za-z]+)\d{4,5}[A-Za-z]{0,3}))(?:[-_.\s[\]()](.*)$|(?:cd|disc|disk|pt|part|vol)\d{1,2}$|$)`)
-	trailingCatalogIDRegex = regexp.MustCompile(`(?i)(?:[a-z]{1,}-(?:\d{2}|[0-3689]\d\d|4[0-79]\d|48[1-9]|5[0-689]\d|57[0-57-9]|7[0-13-9]\d|72[1-9])\b|[a-z]{1,}-\d{6,}\b|[a-z]{1,}-\d{1,6}[-._\s]?(?:hd|ai|h)\b|t28-\d{1,}\b|[hn]_\d+[a-z]+\d+|\b[a-z]+\d{4,5}[a-z]{0,3}\b|\b\d+[a-z]{2,}\d+[a-z]{0,3}\b|\b(?:t28|[a-z]{1,})[-._\s]\d{1,6}[-._\s]?(?:hd|ai|h)\b|\b[a-z]{2,6}\d{1,6}\b|\b[a-z](?:\d{5}|\d{4}|[013-9]\d\d|2(?:[013-9]\d|4\d|6[0-36-9]))\b)`)
+	// The compact 4-5-digit display number rides its own grammar beside
+	// the legacy fused one: the separated spelling (ABC.1234.HD) and the
+	// round-11 scraper classifier decision (zero-padding is the raw-cid
+	// evidence; a non-padded compact number is a display id) both
+	// canonicalize ABC1234HD/ABC12345AI, so the fused tier must too or the
+	// content-id fallback returns the raw spelling with no marker. The
+	// bounds reconcile the raw surfaces the legacy 1-3/6-digit grammar
+	// never reaches: the number must be non-padded (a leading [1-9] —
+	// abc01234h and the zero-padded marker-bearing raw ids keep tier-2),
+	// and the series word must carry 3+ letters — the 1-2-letter
+	// short-prefix family (AC3640H; the real ac series keeps its fused
+	// spellings) and the t28 tail (t28123h is a raw cid per the same
+	// classifier, and prefix-free t28 numbers keep the T-series special
+	// case) stay on their existing paths. Four-plus-letter series pass
+	// this regex but bail as word-years in the caller (vacation2024hd),
+	// exactly like the separated spelling.
+	fusedLongNumberRemasterRegex = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])([a-z]{3,})((?:[1-9]\d{3,4}))([ez]?)(hd|ai|h)(?:(cd|disc|disk|pt|part|vol)(\d{1,2}))?(?:$|[-_.\s[\]()])`)
+	reRemasterRemainder          = regexp.MustCompile(`(?i)^[-_.\s]?(HD|AI|H)(?:(cd|disc|disk|pt|part|vol)\d{1,2})?(?:$|[-_.\s[\]()])`)
+	remasterCodecTailRegex       = regexp.MustCompile(`(?i)^[-_.\s]?\d{3}(?:\D|$)`)
+	contentIDShapeRegex          = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])((?:\d+(?:t28|[A-Za-z]+)\d+[A-Za-z]{0,3}|(?:t28|[A-Za-z]+)\d{4,5}[A-Za-z]{0,3}))(?:[-_.\s[\]()](.*)$|(?:cd|disc|disk|pt|part|vol)\d{1,2}$|$)`)
+	trailingCatalogIDRegex       = regexp.MustCompile(`(?i)(?:[a-z]{1,}-(?:\d{2}|[0-3689]\d\d|4[0-79]\d|48[1-9]|5[0-689]\d|57[0-57-9]|7[0-13-9]\d|72[1-9])\b|[a-z]{1,}-\d{6,}\b|[a-z]{1,}-\d{1,6}[-._\s]?(?:hd|ai|h)\b|t28-\d{1,}\b|[hn]_\d+[a-z]+\d+|\b[a-z]+\d{4,5}[a-z]{0,3}\b|\b\d+[a-z]{2,}\d+[a-z]{0,3}\b|\b(?:t28|[a-z]{1,})[-._\s]\d{1,6}[-._\s]?(?:hd|ai|h)\b|\b[a-z]{2,6}\d{1,6}\b|\b[a-z](?:\d{5}|\d{4}|[013-9]\d\d|2(?:[013-9]\d|4\d|6[0-36-9]))\b)`)
 	// Standard color/transfer metadata is matched as a class —
 	// (bt|rec|st|smpte) plus 3-4 digits with an optional dot or space — so
 	// dotless spellings (BT601, REC601, REC2020) and future standards
@@ -248,8 +265,25 @@ func trailingCandidateVetoSpan(remainder string, candidateIndex []int) string {
 	return remainder[spanStart:candidateIndex[1]]
 }
 
-func normalizeFusedRemasterFilename(name string, builtinPattern *regexp.Regexp) string {
+// fusedRemasterSubmatchIndex returns the submatch index of the leftmost
+// compact remaster spelling in name: the legacy grammar (1-3- and 6-digit
+// numbers on any series word or the t28 tail) or the long-number display
+// grammar (non-padded 4-5 digits on a 3+-letter series). Both grammars
+// share the capture layout (series, number, E/Z suffix, marker, part
+// label, part digits), so the caller's index handling is uniform. The
+// leftmost match wins so an earlier display-number spelling is not
+// displaced by a later legacy spelling.
+func fusedRemasterSubmatchIndex(name string) []int {
 	m := fusedRemasterRegex.FindStringSubmatchIndex(name)
+	long := fusedLongNumberRemasterRegex.FindStringSubmatchIndex(name)
+	if long != nil && (m == nil || long[0] < m[0]) {
+		return long
+	}
+	return m
+}
+
+func normalizeFusedRemasterFilename(name string, builtinPattern *regexp.Regexp) string {
+	m := fusedRemasterSubmatchIndex(name)
 	fused := m != nil
 	if m == nil {
 		m = separatedRemasterRegex.FindStringSubmatchIndex(name)
@@ -257,12 +291,17 @@ func normalizeFusedRemasterFilename(name string, builtinPattern *regexp.Regexp) 
 	if m == nil {
 		return ""
 	}
-	if !fused {
-		separatedID := name[m[2]:m[3]] + name[m[4]:m[5]]
+	// Word-year guard: a 4-5-digit number on a 4+-letter word is a year,
+	// not a catalog number, on both separator-bearing surfaces (Vacation
+	// 2024 HD) and the compact long-number grammar (vacation2024hd). The
+	// legacy compact numbers (1-3, 6 digits) never collide with a year and
+	// keep their guard-free path.
+	if n := m[5] - m[4]; n >= 4 && n <= 5 {
+		matchedID := name[m[2]:m[3]] + name[m[4]:m[5]]
 		if m[6] >= 0 {
-			separatedID += name[m[6]:m[7]]
+			matchedID += name[m[6]:m[7]]
 		}
-		if weakWordYearRegex.MatchString(separatedID) {
+		if weakWordYearRegex.MatchString(matchedID) {
 			return normalizeFusedRemasterFilename(name[m[1]:], builtinPattern)
 		}
 	}

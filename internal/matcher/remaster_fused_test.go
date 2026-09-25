@@ -106,3 +106,69 @@ func TestFusedRemasterPartLabels(t *testing.T) {
 	assert.Nil(t, matchOne(t, m, "RCT156HD2.mkv"))
 	assert.Empty(t, m.MatchString("RCT156HD2.mkv"))
 }
+
+// A compact display filename with a four- or five-digit release number
+// canonicalizes like its separated spelling (ABC.1234.HD, ABC 1234 H): the
+// long-number fused grammar recognizes the marker and hyphenates the id, so
+// the content-id fallback no longer returns the raw spelling with no
+// marker. The number must be non-padded and the series word 3+ letters:
+// zero-padded marker-bearing raw ids, the 1-2-letter short-prefix family
+// (AC3640H — the real ac series keeps its fused spellings), and word-year
+// spellings stay on their existing tiers, and a t28 tail keeps the legacy
+// grammar's T-series handling.
+func TestFusedFourFiveDigitRemaster(t *testing.T) {
+	m, err := NewMatcher(&Config{})
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name, id, marker string
+		part             int
+	}{
+		{"ABC1234HD.mkv", "ABC-1234H", "HD", 0},
+		{"ABC12345AI.mkv", "ABC-12345AI", "AI", 0},
+		{"ABC1234H.mkv", "ABC-1234H", "H", 0},
+		{"abc12345ai.mkv", "ABC-12345AI", "AI", 0},
+		{"ABC1234ZHD.mkv", "ABC-1234ZH", "HD", 0},
+		{"ABC1234HD-pt2.mkv", "ABC-1234H", "HD", 2},
+		{"ABC1234HDPT2.mkv", "ABC-1234H", "HD", 2},
+		{"[site]ABC1234HD.mkv", "ABC-1234H", "HD", 0},
+		{"ABC12345AI[1080p].mkv", "ABC-12345AI", "AI", 0},
+		// The leftmost compact spelling drives the normalization in both
+		// orders: an earlier display-number spelling is not displaced by a
+		// later legacy one, and a trailing display-number candidate still
+		// replaces an earlier spelling as the real id.
+		{"ABC1234HD RCT156H.mkv", "ABC-1234H", "HD", 0},
+		{"RCT156H ABC1234HD.mkv", "ABC-1234H", "HD", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := matchOne(t, m, tc.name)
+			require.NotNil(t, got)
+			assert.Equal(t, tc.id, got.ID)
+			assert.Equal(t, tc.id, m.MatchString(tc.name))
+			assert.Equal(t, tc.marker, got.RemasterMarker)
+			assert.Equal(t, tc.part, got.PartNumber)
+		})
+	}
+	// Raw-cid-shaped controls keep the tier-2 path: zero padding is the
+	// raw-cid evidence (round-11 classifier), the short-prefix family keeps
+	// its fused spellings, and a word-year is not a catalog number.
+	for _, tc := range []struct{ name, id string }{
+		{"abc01234.mkv", "ABC01234"},
+		{"abc01234h.mkv", "ABC01234H"},
+		{"a00123h.mkv", "A00123H"},
+		{"AC3640H.mkv", "AC3640H"},
+		{"vacation2024hd.mkv", "VACATION2024HD"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := matchOne(t, m, tc.name)
+			require.NotNil(t, got)
+			assert.Equal(t, tc.id, got.ID)
+			assert.Equal(t, tc.id, m.MatchString(tc.name))
+			assert.Equal(t, "contentid", got.MatchedBy)
+			assert.Empty(t, got.RemasterMarker)
+		})
+	}
+	// The t28 tail keeps the legacy grammar: prefix-free t28 numbers stay
+	// T-series releases at every digit count the old grammar reaches.
+	assert.Equal(t, "T-28123H", m.MatchString("t28123h.mkv"))
+	assert.Equal(t, "T-281234H", m.MatchString("t281234h.mkv"))
+}
