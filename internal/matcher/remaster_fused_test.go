@@ -149,14 +149,13 @@ func TestFusedFourFiveDigitRemaster(t *testing.T) {
 		})
 	}
 	// Raw-cid-shaped controls keep the tier-2 path: zero padding is the
-	// raw-cid evidence (round-11 classifier), the short-prefix family keeps
-	// its fused spellings, and a word-year is not a catalog number.
+	// raw-cid evidence (round-11 classifier) and the short-prefix family
+	// keeps its fused spellings.
 	for _, tc := range []struct{ name, id string }{
 		{"abc01234.mkv", "ABC01234"},
 		{"abc01234h.mkv", "ABC01234H"},
 		{"a00123h.mkv", "A00123H"},
 		{"AC3640H.mkv", "AC3640H"},
-		{"vacation2024hd.mkv", "VACATION2024HD"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := matchOne(t, m, tc.name)
@@ -167,6 +166,11 @@ func TestFusedFourFiveDigitRemaster(t *testing.T) {
 			assert.Empty(t, got.RemasterMarker)
 		})
 	}
+	// A compact word-year keeps no tier at all: the word-year guard rejects
+	// it in the fused normalization, and the raw-cid marker-tail fallback
+	// no longer re-accepts the same token as a content id.
+	assert.Nil(t, matchOne(t, m, "vacation2024hd.mkv"))
+	assert.Empty(t, m.MatchString("vacation2024hd.mkv"))
 	// The t28 tail keeps the legacy grammar: prefix-free t28 numbers stay
 	// T-series releases at every digit count the old grammar reaches.
 	assert.Equal(t, "T-28123H", m.MatchString("t28123h.mkv"))
@@ -181,10 +185,11 @@ func TestFusedFourFiveDigitRemaster(t *testing.T) {
 // content id, and MIAA.1234.HD matches at all, exactly like MIAA-1234-HD.
 // Every other word-year spelling keeps the bail: lowercase prose words
 // (sample2024hd, birthday2024hd) and lowercase catalog spellings
-// (miaa1234hd) fail the display-case axis, all-caps words beyond the
-// builtin series shapes (BIRTHDAY2024) and five-digit numbers
-// (MIAA12345HD) fail the builtin-support axis, and all of them stay on
-// the raw tier-2 path with no marker.
+// (miaa1234hd) fail the display-case axis and match nothing at all — the
+// raw-cid marker-tail fallback no longer re-accepts the phrase as a
+// content id — while all-caps words beyond the builtin series shapes
+// (BIRTHDAY2024) and five-digit numbers (MIAA12345HD) fail the
+// builtin-support axis and keep the raw tier-2 path with no marker.
 func TestFusedFourDigitLongSeriesRemaster(t *testing.T) {
 	m, err := NewMatcher(&Config{})
 	require.NoError(t, err)
@@ -212,13 +217,23 @@ func TestFusedFourDigitLongSeriesRemaster(t *testing.T) {
 			assert.Equal(t, "builtin", got.MatchedBy)
 		})
 	}
-	// Word-year spellings that fail at least one discriminator axis keep
-	// the raw tier-2 content id with no marker.
+	// Lowercase prose word-years keep no tier at all: they fail the
+	// display-case axis, and the raw-cid marker-tail fallback no longer
+	// re-accepts the same token as a content id.
+	for _, name := range []string{
+		"sample2024hd.mkv",
+		"birthday2024hd.mkv",
+		"miaa1234hd.mkv",
+	} {
+		t.Run(name, func(t *testing.T) {
+			assert.Nil(t, matchOne(t, m, name))
+			assert.Empty(t, m.MatchString(name))
+		})
+	}
+	// Display-cased word-year spellings that fail only the builtin-support
+	// axis keep the raw tier-2 content id with no marker.
 	for _, tc := range []struct{ name, id string }{
-		{"sample2024hd.mkv", "SAMPLE2024HD"},
-		{"birthday2024hd.mkv", "BIRTHDAY2024HD"},
 		{"BIRTHDAY2024HD.mkv", "BIRTHDAY2024HD"},
-		{"miaa1234hd.mkv", "MIAA1234HD"},
 		{"MIAA12345HD.mkv", "MIAA12345HD"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

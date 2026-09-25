@@ -219,6 +219,11 @@ var (
 	strongRawTokenRegex            = regexp.MustCompile(`(?i)^(?:\d+(?:t28|[A-Za-z]+)\d+[A-Za-z]{0,3}|(?:t28|[A-Za-z]+)\d{4,5}[ez]?(?:hd|ai|h))$`)
 	zeroPaddedRawTokenRegex        = regexp.MustCompile(`(?i)^(?:t28|[a-z]+)0\d{3,4}[a-z]{0,3}$`)
 	weakWordYearRegex              = regexp.MustCompile(`(?i)^[a-z]{4,}\d{4,5}[a-z]{0,3}$`)
+	// weakWordYearSeriesRegex captures the leading series word of a weak
+	// word-year id — weakWordYearRegex guarantees a word-first shape — so
+	// the raw-cid surfaces can apply the round-24 display-case axis to the
+	// same token the fused normalization's word-year guard rejected.
+	weakWordYearSeriesRegex = regexp.MustCompile(`(?i)^[a-z]+`)
 )
 
 func builtinMatchConflictsWithContentID(s string, pattern *regexp.Regexp) bool {
@@ -307,6 +312,26 @@ func catalogSeriesReleaseNumber(series, number string, builtinPattern *regexp.Re
 	seriesNumber := series + number
 	loc := builtinPattern.FindStringIndex(seriesNumber)
 	return loc != nil && loc[0] == 0 && loc[1] == len(seriesNumber)
+}
+
+// proseWordYearID reports whether a compact marker-tail id — the shape the
+// raw-cid surfaces would accept as a marker-bearing token — is a lowercase
+// prose word-year phrase (vacation2024hd, birthday2024ai) rather than a raw
+// content id. The predicate is the one the fused normalization's word-year
+// guard uses (weakWordYearRegex), bounded for the raw-cid surfaces: a
+// zero-padded number is raw-cid evidence (the round-11 classifier —
+// mide00968h and abeauty00123hd keep their raw ids), and a display-cased
+// series word — the first axis of the round-24 catalog-series discriminator
+// — marks a catalog spelling rather than prose (BIRTHDAY2024HD and
+// MIAA12345HD keep the raw tier-2 id, and builtin-supported spellings such
+// as MIAA1234HD canonicalize in the fused normalization before this tier
+// ever runs).
+func proseWordYearID(id string) bool {
+	if !weakWordYearRegex.MatchString(id) || zeroPaddedRawTokenRegex.MatchString(id) {
+		return false
+	}
+	series := weakWordYearSeriesRegex.FindString(id)
+	return series != strings.ToUpper(series)
 }
 
 func normalizeFusedRemasterFilename(name string, builtinPattern *regexp.Regexp) string {
@@ -455,21 +480,24 @@ func isFPSLikeBarePartNumber(num int, partSuffix string) bool {
 // marker (156HDvol2) is display-id debris — the number, marker, and part
 // label tail of a hyphenated release name — and backs no candidate at any
 // length: the builtin tier's marker handling owns it, so it never displaces
-// the display id as a raw content id.
+// the display id as a raw content id. A lowercase prose word-year — the
+// same token the fused normalization's word-year guard rejected — is not a
+// candidate at any length either (see proseWordYearID), so the marker-tail
+// fallback and the token scan cannot disagree about the phrase.
 func rawTokenCandidateEnd(token string) (int, bool) {
 	if isResolutionToken(token) || trailingQualityTagRegex.MatchString(token) {
 		return 0, false
 	}
 	if loc := fusedPartLabelTailRegex.FindStringIndex(token); loc != nil {
 		trimmed := token[:loc[0]]
-		if strongRawTokenRegex.MatchString(trimmed) || zeroPaddedRawTokenRegex.MatchString(trimmed) {
+		if (strongRawTokenRegex.MatchString(trimmed) && !proseWordYearID(trimmed)) || zeroPaddedRawTokenRegex.MatchString(trimmed) {
 			return loc[0], true
 		}
 		if explicitMarkerTailRegex.MatchString(trimmed) {
 			return 0, false
 		}
 	}
-	if strongRawTokenRegex.MatchString(token) || zeroPaddedRawTokenRegex.MatchString(token) {
+	if (strongRawTokenRegex.MatchString(token) && !proseWordYearID(token)) || zeroPaddedRawTokenRegex.MatchString(token) {
 		return len(token), true
 	}
 	return 0, false
@@ -496,16 +524,24 @@ func remasterPartLabelDebris(token string) bool {
 // captured id text and the post-id remainder (which may carry part suffixes).
 // contentIDCandidate locates the raw content id the name should resolve to.
 // The leftmost shape match wins unless it is a weak prefixless form without a
-// marker tail (a word plus a year, e.g. birthday2024). Weak forms are only
-// accepted when a numeric-prefixed or marker-bearing raw id later in the name
-// corroborates them.
+// marker tail (a word plus a year, e.g. birthday2024) or a lowercase prose
+// word-year whose marker tail is a quality phrase rather than release
+// metadata (vacation2024hd). Weak forms are only accepted when a
+// numeric-prefixed or marker-bearing raw id later in the name corroborates
+// them.
 func contentIDCandidate(s string) (start, end int, ok bool) {
 	m := contentIDShapeRegex.FindStringSubmatchIndex(s)
 	if m == nil {
 		return 0, 0, false
 	}
 	id := s[m[2]:m[3]]
-	if remasterMarkerTailRegex.MatchString(id) {
+	// A marker tail does not corroborate a prose word-year: the compact
+	// word/year/quality phrase (vacation2024hd) is rejected by the fused
+	// normalization's word-year guard, and this raw-marker fallback must not
+	// re-accept the same token as a content id. The token flows on like the
+	// weak prefixless form below: a genuine raw id later in the name still
+	// wins, and without one there is no candidate.
+	if remasterMarkerTailRegex.MatchString(id) && !proseWordYearID(id) {
 		return m[2], m[3], true
 	}
 	if isResolutionToken(id) || trailingQualityTagRegex.MatchString(id) || remasterPartLabelDebris(id) {
