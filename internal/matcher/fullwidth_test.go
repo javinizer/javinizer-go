@@ -5,6 +5,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/javinizer/javinizer-go/internal/models"
 )
 
 // Fullwidth ASCII spellings (common in JP-sourced filenames) must behave like
@@ -49,4 +51,37 @@ func TestMatchFile_FullwidthSpellingsFoldToASCII(t *testing.T) {
 	// returned unchanged.
 	assert.Equal(t, "RCT-156-HD アイ・無修正", foldFullwidthASCII("ＲＣＴ-156-ＨＤ アイ・無修正"))
 	assert.Equal(t, "RCT-156-HD", foldFullwidthASCII("RCT-156-HD"))
+}
+
+// A fullwidth slash (／) inside a filename is a legal character, not a path
+// separator. MatchString must take the basename before folding — mirroring
+// MatchFile — so the folded slash cannot make filepath.Base discard the
+// ID-bearing segment of a JP-sourced name.
+func TestMatchString_FullwidthSlashStaysInsideBasename(t *testing.T) {
+	m, err := NewMatcher(&Config{})
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		input string
+		want  string
+	}{
+		{"IPX-535／sample.mkv", "IPX-535"},
+		{"dir/IPX-535／sample.mkv", "IPX-535"},
+		{"/abs/dir/IPX-535／sample.mkv", "IPX-535"},
+		{"dir/IPX-535／sample．ｍｋｖ", "IPX-535"},
+		// Control: pure-ASCII paths behave exactly as before.
+		{"dir/IPX-535.mkv", "IPX-535"},
+	} {
+		t.Run(tc.input, func(t *testing.T) {
+			assert.Equal(t, tc.want, m.MatchString(tc.input))
+		})
+	}
+
+	// MatchString must agree with MatchFile, which basenames before folding
+	// and keeps the folded slash inside the name.
+	file := models.FileMatchInfo{Path: "/v/dir/IPX-535／sample.mkv", Name: "IPX-535／sample.mkv", Extension: ".mkv"}
+	got := m.MatchFile(file)
+	require.NotNil(t, got, "MatchFile finds the id despite the folded slash")
+	assert.Equal(t, "IPX-535", got.ID)
+	assert.Equal(t, "IPX-535", m.MatchString(file.Path))
 }

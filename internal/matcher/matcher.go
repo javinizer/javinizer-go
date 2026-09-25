@@ -245,10 +245,16 @@ func (m *Matcher) MatchString(s string) string {
 	// folded name (still ahead of every automated tier), so halfwidth-written
 	// custom regexes also match fullwidth filenames.
 	raw := stripVideoExtension(filepath.Base(s))
-	// Fullwidth ASCII spellings fold to halfwidth before the extension
-	// strip, so fullwidth extensions (．ｍｋｖ) fold and strip like ASCII ones
-	// and every automated tier sees the ASCII form.
-	s = stripVideoExtension(filepath.Base(foldFullwidthASCII(s)))
+	// The basename is taken BEFORE folding, mirroring MatchFile: folding the
+	// whole input first would turn a legal fullwidth slash (／) inside the
+	// filename into an ASCII separator, letting filepath.Base discard the
+	// ID-bearing segment (dir/IPX-535／sample.mkv would collapse to
+	// "sample"). A folded slash may remain inside the folded name — exactly
+	// how MatchFile treats it — where it cannot hide the ID from the tiers
+	// below, which scan the whole string. Folding still precedes the
+	// extension strip so fullwidth extensions (．ｍｋｖ → .mkv) fold and strip
+	// like ASCII ones.
+	s = stripVideoExtension(foldFullwidthASCII(filepath.Base(s)))
 	if m.config.RegexEnabled && m.regexPattern != nil {
 		if id := m.matchStringCustomRegex(raw); id != "" {
 			return id
