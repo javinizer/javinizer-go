@@ -226,6 +226,48 @@ func TestRemasterMarkerResolutionAndQualityLabels(t *testing.T) {
 		{"WEB2160 1rct00156h.mkv", "1RCT00156H"},
 		{"189web00087.mkv", "189WEB00087"},
 		{"fweb0123.mkv", "FWEB0123"},
+		// Compound source spellings are metadata too: the source class's
+		// web+dl/rip qualifier covers the standard WEB-DL2160 spelling and
+		// its compact, dotted, spaced, and hyphenated siblings — the
+		// catalog scan splits them at the separator, so the DL/RIP
+		// fragment would otherwise replace the separated id.
+		{"ABC.123.HD WEB-DL2160.mkv", "ABC-123H"},
+		{"ABC.123.HD WEB-DL1080.mkv", "ABC-123H"},
+		{"ABC.123.HD WEB-DL720.mkv", "ABC-123H"},
+		{"ABC.123.HD.WEB-DL2160.mkv", "ABC-123H"},
+		{"ABC 123 HD WEB-DL2160.mkv", "ABC-123H"},
+		{"ABC.123.AI WEB-DL2160.mkv", "ABC-123AI"},
+		{"ABC.123.HD WEBDL2160.mkv", "ABC-123H"},
+		{"ABC.123.HD WEBRIP2160.mkv", "ABC-123H"},
+		{"ABC.123.HD WEB-RIP2160.mkv", "ABC-123H"},
+		{"ABC.123.HD WEB.RIP2160.mkv", "ABC-123H"},
+		{"ABC.123.HD WEB RIP2160.mkv", "ABC-123H"},
+		{"ABC.123.HD WEB.DL2160.mkv", "ABC-123H"},
+		{"ABC.123.HD WEB DL2160.mkv", "ABC-123H"},
+		{"ABC.123.HD WEB-DLRip2160.mkv", "ABC-123H"},
+		{"ABC.123.HD WEB_DL2160.mkv", "ABC-123H"},
+		{"ABC.123.HD WEB-DL 2160.mkv", "ABC-123H"},
+		// The compound is bounded like the class: the qualifier must
+		// directly precede the 3-4 digit resolution, so id-shaped
+		// fragments, real dl-series display ids, and the resolution
+		// window keep id grammar.
+		{"ABC.123.HD WEB-DL24.mkv", "ABC-123H"},
+		{"ABC.123.HD WEB-DL12345.mkv", "DL12345"},
+		{"ABC.123.HD WEB-DL-24.mkv", "DL-24"},
+		{"ABC.123.HD WEB-DL-2160.mkv", "DL-2160"},
+		{"ABC.123.HD WEB-24.mkv", "WEB-24"},
+		{"ABC.123.HD WEB-2160.mkv", "WEB-2160"},
+		// No webdl, webrip, or rip series exists in the r18.dev content-id
+		// prefix lookup; the real dl series keeps its bare DL2160
+		// spellings, the web prefix's leading boundary keeps fweb and
+		// numerically prefixed spellings in id grammar, and a leading
+		// compound tag does not shadow a stronger raw id.
+		{"ABC.123.HD DL2160.mkv", "DL2160"},
+		{"ABC.123.HD RIP2160.mkv", "RIP2160"},
+		{"ABC.123.HD FWEB-DL2160.mkv", "DL2160"},
+		{"WEB-DL2160 1rct00156h.mkv", "1RCT00156H"},
+		{"WEBDL2160 1rct00156h.mkv", "1RCT00156H"},
+		{"WEBRIP2160 1rct00156h.mkv", "1RCT00156H"},
 
 		// Plain forms are unchanged.
 		{"ABC.123.HD.mkv", "ABC-123H"},
@@ -342,6 +384,16 @@ func TestRemasterMarkerResolutionAndQualityLabels(t *testing.T) {
 	// Compact source-tag metadata after a separated remaster id must not
 	// replace it, and the marker stays intact.
 	for _, name := range []string{"ABC.123.HD WEB2160.mkv", "ABC.123.HD REMUX2160.mkv", "ABC.123.HD BLURAY1080.mkv"} {
+		fileResult := matchOne(t, m, name)
+		require.NotNil(t, fileResult)
+		assert.Equal(t, "ABC-123H", fileResult.ID)
+		assert.Equal(t, "HD", fileResult.RemasterMarker)
+	}
+
+	// Compound source-tag metadata after a separated remaster id must not
+	// replace it either, and the marker stays intact — for the standard
+	// WEB-DL spelling and its compact and separated siblings.
+	for _, name := range []string{"ABC.123.HD WEB-DL2160.mkv", "ABC.123.HD WEBDL2160.mkv", "ABC.123.HD WEBRIP2160.mkv", "ABC.123.HD WEB-RIP2160.mkv", "ABC.123.HD WEB.DL2160.mkv", "ABC.123.HD WEB DL2160.mkv"} {
 		fileResult := matchOne(t, m, name)
 		require.NotNil(t, fileResult)
 		assert.Equal(t, "ABC-123H", fileResult.ID)

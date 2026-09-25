@@ -68,7 +68,38 @@ var (
 	// and DVD1080 tokens and the BLU-RAY1080 fragment (RAY1080) keep
 	// matching as ids, and the hyphenated WEB-2160 rides the trailing
 	// resolution grammar — a separate window this class does not touch.
-	trailingQualityTagRegex           = regexp.MustCompile(`(?i)\b(?:[hx]26[3-9]|avc\d*|aac\d*|hevc\d*|vvc\d*|ac3|dts|flac|opus|truehd|vc1|av1|mp[34]|ddp\d*|eac3|divx\d*|xvid\d*|prores\d*|yuv\d*|rgb\d*|p0(?:10|16)|mpeg\d*|vp\d+|fhd\d{2,4}|uhd\d{2,4}|hdtv|hdr\d*|bt2020|bt709|rec709|smpte\d+|pq\d+|st2084|hlg\d*|ycbcr\d*|(?:bt|rec|st|smpte)[. ]?\d{3,4}|(?:l?pcm|dts|flac|opus)[. ]?\d{3,4}|\d+(?:bit|point)\d+|(?:web|remux|bluray)\d{3,4})\b`)
+	// Compound source spellings extend the source class — web plus an
+	// optional single separator and the dl/rip qualifier, directly
+	// followed by the 3-4 digit resolution number — because the standard
+	// WEB-DL2160 spelling and its WEBRIP2160, WEB.RIP2160, and WEB
+	// DL2160 siblings otherwise satisfy the builtin amateur pattern and
+	// the trailing catalog grammar as replacement ids behind a separated
+	// remaster id: the catalog scan splits the compound at its separator,
+	// so the DL2160 fragment arrives alone while the WEB- prefix belongs
+	// to it (see compoundSourceTagPrefixRegex). The compound carries the
+	// class's bounds — the digit bound keeps five-digit id-shaped tokens
+	// (WEB-DL12345) and two-digit numerals (WEB-DL24) out, and the
+	// qualifier must directly precede the digits, so the spaced
+	// resolution (WEB-DL 2160), the double-hyphen WEB-DL-2160 (which
+	// rides the trailing resolution grammar like WEB-2160), and real
+	// dl-series display ids (WEB-DL-24) stay id grammar. No webdl,
+	// webrip, or rip series exists in the r18.dev content-id prefix
+	// lookup, and the real dl series (h_952, n_600) keeps its bare
+	// DL2160 spellings: the veto span extends only over a web prefix
+	// with a leading word boundary, so fweb (FWEB-DL2160) and
+	// numerically prefixed (189WEB-DL1) spellings keep the leading-letter
+	// protection, and a DL fragment without the web prefix stays id
+	// grammar.
+	trailingQualityTagRegex = regexp.MustCompile(`(?i)\b(?:[hx]26[3-9]|avc\d*|aac\d*|hevc\d*|vvc\d*|ac3|dts|flac|opus|truehd|vc1|av1|mp[34]|ddp\d*|eac3|divx\d*|xvid\d*|prores\d*|yuv\d*|rgb\d*|p0(?:10|16)|mpeg\d*|vp\d+|fhd\d{2,4}|uhd\d{2,4}|hdtv|hdr\d*|bt2020|bt709|rec709|smpte\d+|pq\d+|st2084|hlg\d*|ycbcr\d*|(?:bt|rec|st|smpte)[. ]?\d{3,4}|(?:l?pcm|dts|flac|opus)[. ]?\d{3,4}|\d+(?:bit|point)\d+|(?:web(?:[-_. ]?(?:dl(?:rip)?|rip))?|remux|bluray)\d{3,4})\b`)
+	// compoundSourceTagPrefixRegex recognizes the source-tag prefix — web
+	// plus exactly one separator — ending where a trailing-catalog
+	// candidate begins, so the candidate's quality veto can span the
+	// compound spelling (WEB-DL2160) that the catalog scan split apart.
+	// The leading boundary requirement (start of text or a
+	// non-alphanumeric character before web) keeps the word-boundary
+	// protections of the source class: fweb and 189web spellings never
+	// extend the span.
+	compoundSourceTagPrefixRegex      = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(web)[-_. ]$`)
 	trailingResolutionCatalogIDRegex  = regexp.MustCompile(`(?i)\b[a-z]+-(?:144|240|288|360|432|480|540|576|720|1080|2160)\b`)
 	trailingResolutionQualityTagRegex = regexp.MustCompile(`(?i)^(?:fhd|uhd|hd)-(?:144|240|288|360|432|480|540|576|720|1080|2160)$`)
 	// qualitySeriesNumberRegex recognizes a consumed remaster phrase that is
@@ -130,6 +161,24 @@ func builtinQualityShadowsContentID(name, id string) bool {
 	return idText != ""
 }
 
+// trailingCandidateVetoSpan returns the span a trailing-catalog candidate is
+// vetted against as a quality tag: the candidate itself, or the candidate
+// extended back over a compound source-tag prefix (web plus one separator)
+// that directly precedes it. The catalog scan splits compound source
+// spellings at their separator — WEB-DL2160 leaves the DL2160 fragment
+// standing alone as an id-shaped candidate while the WEB- prefix belongs to
+// it — so the veto must see the compound spelling for the vocabulary's digit
+// bound to decide it as a whole. The leading boundary before the web prefix
+// keeps the class's word-boundary protections: fweb (FWEB-DL2160) and
+// numerically prefixed (189WEB-DL1) spellings never extend.
+func trailingCandidateVetoSpan(remainder string, candidateIndex []int) string {
+	spanStart := candidateIndex[0]
+	if prefix := compoundSourceTagPrefixRegex.FindStringSubmatchIndex(remainder[:spanStart]); prefix != nil {
+		spanStart = prefix[2]
+	}
+	return remainder[spanStart:candidateIndex[1]]
+}
+
 func normalizeFusedRemasterFilename(name string, builtinPattern *regexp.Regexp) string {
 	m := fusedRemasterRegex.FindStringSubmatchIndex(name)
 	fused := m != nil
@@ -155,7 +204,11 @@ func normalizeFusedRemasterFilename(name string, builtinPattern *regexp.Regexp) 
 	// alternatives; they are tags, not replacement ids, so veto the suppression.
 	for _, candidateIndex := range trailingCatalogIDRegex.FindAllStringIndex(remainder, -1) {
 		candidate := remainder[candidateIndex[0]:candidateIndex[1]]
-		if trailingQualityTagRegex.MatchString(candidate) {
+		// A compound source tag splits at its separator in the catalog
+		// scan, so the fragment arrives as a standalone candidate while
+		// the web prefix belongs to it: the veto spans the compound
+		// spelling and the vocabulary decides it as a whole.
+		if trailingQualityTagRegex.MatchString(trailingCandidateVetoSpan(remainder, candidateIndex)) {
 			continue
 		}
 		candidateRemainder := remainder[candidateIndex[0]:]
