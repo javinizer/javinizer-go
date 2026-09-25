@@ -287,6 +287,13 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 
 	foldedMarker, _, _, isCID := classifyRemasterQuery(id)
 	res, err := s.parseHTMLWithOptions(ctx, doc, url, foldedMarker != "")
+	if err == nil && isCID && foldedMarker == "h" && rawHCIDPageConflict(doc, url) {
+		// The raw-H counterpart of the page-identity guard below: DMM
+		// followed a redirect or served a different product for the echoed
+		// cid (see rawHCIDPageConflict), so miss honestly instead of
+		// returning its metadata under the cid-derived identity.
+		return nil, models.NewScraperNotFoundError("DMM", fmt.Sprintf("DMM page for %s publishes a different release", id))
+	}
 	if err == nil && foldedMarker != "" && !isCID {
 		// The page's 品番 is the authoritative display identity even for AI
 		// remasters (unlike the cid digits, which diverge from the display
@@ -361,6 +368,31 @@ func pageDisplayIdentityMatchesQuery(doc *goquery.Document, query string) bool {
 		return true
 	}
 	return pSeries == qSeries && pNumber == qNumber && pSuffix == qSuffix && pMarker == qMarker
+}
+
+// rawHCIDPageConflict reports whether the page fetched for a raw H/HD
+// content-id query (1rct00156h) publishes another release's identity. The
+// query echoes itself as the resolved cid, so the page is expected to
+// publish that cid's release; a 品番 that numbers another release
+// (RCT-157-HD under a 156 cid), names a foreign series or marker line, or is
+// markerless and so names the base release means DMM followed a redirect or
+// served a different product — the same conflicts parseHTML's ScrapeURL-side
+// gate (pageDisplayIdentityForCID, rounds 17/18/20a) rejects for the same
+// URL. Raw AI queries are deliberately number-free — their cid numbers
+// diverge from the display number by design (dv00899ai maps to DV-818AI),
+// so their pages keep the existing page-outranks semantics — and pages
+// without a parseable 品番 publish nothing authoritative to conflict with.
+func rawHCIDPageConflict(doc *goquery.Document, url string) bool {
+	cid := extractContentIDFromURL(url)
+	if cid == "" {
+		return false
+	}
+	cidMarker, cidSeries, cidSuffix, _ := classifyRemasterQuery(cid)
+	if cidMarker != "h" {
+		return false
+	}
+	_, conflict := pageDisplayIdentityForCID(doc, cid, cidSeries, cidMarker, cidSuffix)
+	return conflict
 }
 
 func (s *scraper) ScrapeURL(ctx context.Context, url string) (*models.ScraperResult, error) {
