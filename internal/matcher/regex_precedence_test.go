@@ -149,3 +149,38 @@ func TestMatchString_CustomRegexRawThenFolded(t *testing.T) {
 		assert.Equal(t, "1RCT00156H", plain.MatchString("１ｒｃｔ００１５６ｈ.mkv"))
 	})
 }
+
+// TestMatchString_CustomRegexSeesArgumentUntouched pins the raw-attempt
+// contract for extension- and path-anchored configurations: the first
+// custom-regex attempt sees the MatchString argument exactly as passed —
+// no filepath.Base, no extension strip — because callers such as the
+// in-place organizer pass entry.Name() verbatim and configurations may
+// anchor on the extension or a leading path. Go regexes match anywhere in
+// the string unless anchored, so prefix and unanchored patterns are
+// unaffected by the preserved extension and path. Stem-anchored
+// configurations keep matching through the folded retry, which still
+// sees the folded, extension-stripped basename.
+func TestMatchString_CustomRegexSeesArgumentUntouched(t *testing.T) {
+	cfg := &Config{RegexEnabled: true, RegexPattern: `^special_(.+)\.mkv$`}
+	m, err := NewMatcher(cfg)
+	require.NoError(t, err)
+	assert.Equal(t, "FOO", m.MatchString("special_foo.mkv"), "extension-anchored custom regex must see the argument with its extension")
+
+	pathCfg := &Config{RegexEnabled: true, RegexPattern: `^special/([a-z]+)\.mkv$`}
+	pathMatcher, err := NewMatcher(pathCfg)
+	require.NoError(t, err)
+	assert.Equal(t, "FOO", pathMatcher.MatchString("special/foo.mkv"), "path-anchored custom regex must see the argument with its path")
+
+	stemCfg := &Config{RegexEnabled: true, RegexPattern: `^(ABC)-(\d+)$`}
+	stemMatcher, err := NewMatcher(stemCfg)
+	require.NoError(t, err)
+	assert.Equal(t, "ABC", stemMatcher.MatchString("ABC-123.mkv"), "stem-anchored custom regex must keep matching via the folded retry")
+	assert.Equal(t, "ABC", stemMatcher.MatchString("ABC-123"))
+
+	// A caret-anchored prefix regex on a path argument matches through the
+	// basename retry, not the raw attempt: the raw argument keeps its path.
+	prefixCfg := &Config{RegexEnabled: true, RegexPattern: `^(IPX-\d+)`}
+	prefixMatcher, err := NewMatcher(prefixCfg)
+	require.NoError(t, err)
+	assert.Equal(t, "IPX-535", prefixMatcher.MatchString("dir/IPX-535.mkv"))
+}

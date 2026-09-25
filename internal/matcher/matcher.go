@@ -237,14 +237,22 @@ func (m *Matcher) matchWithRegex(file models.FileMatchInfo, filename string, pat
 
 // MatchString is a helper to extract ID from a string directly
 func (m *Matcher) MatchString(s string) string {
-	// A user-specified custom regex outranks every automated tier and keeps
-	// its pre-folding semantics: it runs against the raw (unfolded) name —
-	// the basename with any video extension stripped, exactly what it saw
-	// before fullwidth folding existed — so regexes written against
-	// fullwidth spellings keep matching. A miss is retried once against the
-	// folded name (still ahead of every automated tier), so halfwidth-written
-	// custom regexes also match fullwidth filenames.
-	raw := stripVideoExtension(filepath.Base(s))
+	// A user-specified custom regex outranks every automated tier. Its
+	// first attempt sees the argument exactly as passed — no filepath.Base,
+	// no extension strip — so configurations that deliberately anchor on
+	// the extension (^special_(.+)\.mkv$) or on a leading path keep
+	// matching what the caller supplied (the in-place organizer passes
+	// entry.Name() verbatim). Go regexes match anywhere in the string
+	// unless anchored, so prefix and unanchored patterns are unaffected
+	// by the preserved extension and path. A miss is retried once against
+	// the folded, extension-stripped basename (still ahead of every
+	// automated tier): that attempt keeps stem-anchored regexes
+	// (^special_(.+)$) matching on names that carry an extension and lets
+	// halfwidth-written regexes match fullwidth filenames. Folding the raw
+	// argument instead would drop the stem attempt entirely and regress
+	// stem-anchored configurations, so the folded retry keeps the
+	// basename/stem handling the automated tiers below use.
+	raw := s
 	// The basename is taken BEFORE folding, mirroring MatchFile: folding the
 	// whole input first would turn a legal fullwidth slash (／) inside the
 	// filename into an ASCII separator, letting filepath.Base discard the
