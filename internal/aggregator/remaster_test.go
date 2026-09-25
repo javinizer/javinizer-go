@@ -15,6 +15,14 @@ func TestFoldRemasterDisplayID(t *testing.T) {
 		"RCT-156-HD": "RCT-156H",
 		"RCT-156_HD": "RCT-156H",
 		"RCT-156 HD": "RCT-156H",
+		// JavDB preserves the detail page's single-letter H spelling
+		// verbatim; the separated lone H folds like -HD, and the compact
+		// lone-H form is already canonical and stays unchanged.
+		"RCT-156-H":  "RCT-156H",
+		"RCT-156_H":  "RCT-156H",
+		"RCT-156 H":  "RCT-156H",
+		"rct-156-h":  "rct-156H",
+		"RCT156H":    "RCT156H",
 		"DV-818-AI":  "DV-818AI",
 		"DV-899AI":   "DV-899AI",
 		"RCT-156H":   "RCT-156H",
@@ -68,17 +76,22 @@ func TestAggregate_FoldsRemasterDisplayID(t *testing.T) {
 	}
 	a := newAggregatorNoDB(testConfigFromAppConfig(cfg))
 	require.NotNil(t, a)
-	results := []*models.ScraperResult{
-		{
-			Source:    "r18dev",
-			ID:        "RCT-156-HD",
-			ContentID: "1rct00156h",
-			Title:     "Remaster",
-		},
+	// Both separated spellings of the HD remaster marker — the two-letter
+	// -HD and the lone -H JavDB preserves verbatim from the detail page —
+	// fold to the matcher's canonical RCT-156H.
+	for _, id := range []string{"RCT-156-HD", "RCT-156-H"} {
+		results := []*models.ScraperResult{
+			{
+				Source:    "r18dev",
+				ID:        id,
+				ContentID: "1rct00156h",
+				Title:     "Remaster",
+			},
+		}
+		movie, _, err := a.Aggregate(results)
+		require.NoError(t, err, id)
+		require.NotNil(t, movie, id)
+		assert.Equal(t, "RCT-156H", movie.ID, id)
+		assert.Equal(t, "1rct00156h", movie.ContentID, id)
 	}
-	movie, _, err := a.Aggregate(results)
-	require.NoError(t, err)
-	require.NotNil(t, movie)
-	assert.Equal(t, "RCT-156H", movie.ID)
-	assert.Equal(t, "1rct00156h", movie.ContentID)
 }
