@@ -97,3 +97,48 @@ func TestScrapeURLAICIDPageStillOutranksCID(t *testing.T) {
 	assert.Equal(t, "dv00899ai", res.ContentID)
 	assert.Equal(t, "DV-818AI", res.ID, "the divergent page 品番 keeps outranking the cid spelling")
 }
+
+// Round-20a: a direct H/HD url redirected to a page whose parseable 品番
+// belongs to another series or marker line — cid=1rct00156h serving
+// ABC-999-HD — must reject the whole page: merely dropping the page-ID
+// override would still label the foreign product's metadata with the
+// URL-derived RCT-156H via fillMarkerIDFromURL. A foreign series on an AI
+// url conflicts the same way: AI numbers diverge from the cid by design, so
+// the number guard never applies, but the series/marker identity never
+// diverges between an AI cid and its display.
+func TestScrapeURLMarkerCIDForeignIdentityPageRejected(t *testing.T) {
+	for _, tc := range []struct{ name, url, pinzan string }{
+		{"foreign series row", "https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=1rct00156h/", "ABC-999-HD"},
+		{"foreign marker line row", "https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=1rct00156h/", "RCT-156-AI"},
+		{"foreign catalog suffix row", "https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=1ipx00535zh/", "IPX-535-HD"},
+		{"foreign series row on an ai url", "https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=dv00899ai/", "RCT-156H"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, _ := newRemasterTestScraper(t)
+			s.client.SetTransport(&remasterRoundTripper{serve: func(u string) (int, string) {
+				return 200, `<html><body><table><tr><td>品番：</td><td>` + tc.pinzan + `</td></tr></table></body></html>`
+			}})
+
+			res, err := s.ScrapeURL(context.Background(), tc.url)
+			require.Error(t, err, "a page publishing another product's 品番 must be a hard miss")
+			assert.Nil(t, res)
+			assert.Contains(t, err.Error(), "different release")
+		})
+	}
+}
+
+// Markerless 品番 rows keep the existing behavior: a row without a marker
+// publishes nothing parseable to trust, so the page is never rejected and
+// the cid-derived identity stands.
+func TestScrapeURLHDCIDMarkerlessRowKeepsDerivedID(t *testing.T) {
+	s, _ := newRemasterTestScraper(t)
+	s.client.SetTransport(&remasterRoundTripper{serve: func(u string) (int, string) {
+		return 200, `<html><body><table><tr><td>品番：</td><td>RCT-157</td></tr></table></body></html>`
+	}})
+
+	res, err := s.ScrapeURL(context.Background(), "https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=1rct00156h/")
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	assert.Equal(t, "1rct00156h", res.ContentID)
+	assert.Equal(t, "RCT-156H", res.ID, "a markerless row never rejects the page: the cid-derived spelling stands")
+}

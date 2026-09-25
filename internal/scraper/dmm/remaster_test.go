@@ -323,11 +323,17 @@ func TestPageRemasterDisplayID_RequiresSuffixMatch(t *testing.T) {
 // H/HD remaster cids keep the display number, so a same-series 品番 numbering
 // another release (a redirect or a served mismatched page for cid=1rct00156h
 // under RCT-157-HD) publishes no display id — and flags the page as a
-// conflict so callers reject it instead of re-keying the release. AI numbers
-// diverge from the cid by design, so AI rows keep outranking it.
+// conflict so callers reject it instead of re-keying the release. A
+// parseable marker-bearing row of a foreign identity (another series, catalog
+// suffix or marker line, cid=1rct00156h under ABC-999-HD) conflicts the same
+// way: the page provably belongs to another product. AI numbers diverge from
+// the cid by design, so same-series AI rows keep outranking it, but a foreign
+// row on an AI url is still another product's page and conflicts.
 func TestPageRemasterDisplayID_RequiresNumberMatch(t *testing.T) {
 	assert.Equal(t, "", pageRemasterDisplayID(doc2(t, "RCT-157-HD"), "1rct00156h", "rct", "h", ""),
 		"page display numbering another release must not be trusted")
+	assert.Equal(t, "", pageRemasterDisplayID(doc2(t, "ABC-999-HD"), "1rct00156h", "rct", "h", ""),
+		"a foreign-series page display must not be trusted")
 	assert.Equal(t, "RCT-156H", pageRemasterDisplayID(doc2(t, "RCT-156-HD"), "1rct00156h", "rct", "h", ""))
 	// Padding differences normalize on both sides (cid 00156, page 0156).
 	assert.Equal(t, "RCT-156H", pageRemasterDisplayID(doc2(t, "RCT-00156-HD"), "1rct00156h", "rct", "h", ""))
@@ -337,17 +343,29 @@ func TestPageRemasterDisplayID_RequiresNumberMatch(t *testing.T) {
 	// acceptance (mirroring cachedRemasterIdentityMatches).
 	assert.Equal(t, "IPX-535H", pageRemasterDisplayID(doc2(t, "IPX-535-H"), "not-a-cid", "ipx", "h", ""))
 
-	// The same row is a whole-page conflict, not just an unusable row: DMM
+	// The same rows are whole-page conflicts, not just unusable rows: DMM
 	// followed a redirect or served another product for the cid, so the
 	// page must be rejected instead of keeping the cid-derived identity.
 	_, conflict := pageDisplayIdentityForCID(doc2(t, "RCT-157-HD"), "1rct00156h", "rct", "h", "")
 	assert.True(t, conflict, "a same-line row numbering another release conflicts with the cid")
+	_, conflict = pageDisplayIdentityForCID(doc2(t, "ABC-999-HD"), "1rct00156h", "rct", "h", "")
+	assert.True(t, conflict, "a foreign-series row conflicts with the cid: the page is another product's")
+	_, conflict = pageDisplayIdentityForCID(doc2(t, "RCT-156-AI"), "1rct00156h", "rct", "h", "")
+	assert.True(t, conflict, "a foreign marker line conflicts with the cid: the AI remaster is another product")
+	_, conflict = pageDisplayIdentityForCID(doc2(t, "IPX-535-HD"), "1ipx00535zh", "ipx", "h", "z")
+	assert.True(t, conflict, "a row missing the cid's catalog suffix conflicts: the page is another product's")
 	_, conflict = pageDisplayIdentityForCID(doc2(t, "RCT-156-HD"), "1rct00156h", "rct", "h", "")
 	assert.False(t, conflict, "a row numbering the cid's release does not conflict")
 	_, conflict = pageDisplayIdentityForCID(doc2(t, "DV-819-AI"), "dv00899ai", "dv", "ai", "")
 	assert.False(t, conflict, "AI numbers diverge by design: a number difference is never a conflict")
 	_, conflict = pageDisplayIdentityForCID(doc2(t, "RCT-156H"), "dv00899ai", "dv", "ai", "")
-	assert.False(t, conflict, "a foreign-series row is ignored, not a conflict")
+	assert.True(t, conflict, "a foreign-series row on an AI cid conflicts: the page is another product's")
+	// Absent, markerless and unparseable rows publish nothing parseable to
+	// trust and keep the ignore behavior instead of rejecting the page.
+	_, conflict = pageDisplayIdentityForCID(doc2(t, "RCT-157"), "1rct00156h", "rct", "h", "")
+	assert.False(t, conflict, "a markerless row is nothing parseable to trust, not a conflict")
+	_, conflict = pageDisplayIdentityForCID(doc2(t, "12345"), "1rct00156h", "rct", "h", "")
+	assert.False(t, conflict, "an unparseable row is not a conflict")
 	_, conflict = pageDisplayIdentityForCID(nil, "1rct00156h", "rct", "h", "")
 	assert.False(t, conflict, "a nil document publishes nothing to compare")
 }

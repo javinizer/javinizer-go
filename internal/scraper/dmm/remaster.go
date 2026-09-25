@@ -655,10 +655,19 @@ func displayIdentityTuple(display string) (series, value, suffix, marker string,
 // cids keep the display number). A row that passes those gates but numbers
 // another release conflicts: DMM followed a redirect or served a different
 // product for the cid (cid=1rct00156h under RCT-157-HD), so the page cannot
-// publish the queried release's identity at all. Everything else — absent,
-// markerless, unparseable or foreign rows — proves nothing either way and is
-// ignored. AI numbers diverge from the cid by design, so AI rows never
-// conflict on number and keep the page-outranks-cid rule.
+// publish the queried release's identity at all. A parseable marker-bearing
+// row that belongs to a foreign identity — another series, catalog suffix or
+// marker line (cid=1rct00156h serving ABC-999-HD, or the AI remaster under an
+// H url) — conflicts the same way: the page provably belongs to another
+// product, and publishing its metadata under the cid-derived identity would
+// misfile the release, so the whole page is rejected rather than merely
+// distrusted. This mirrors Search's pageDisplayIdentityMatchesQuery tuple
+// comparison and holds for AI cids too: AI numbers diverge from the cid by
+// design, so an AI row never conflicts on number, but the series, marker and
+// suffix never diverge between an AI cid and its display, so a foreign row
+// on an AI url is still another product's page. Everything else — absent,
+// markerless or unparseable rows — publishes nothing parseable to trust and
+// is ignored.
 func pageDisplayIdentityForCID(doc *goquery.Document, cid, series, foldedMarker, catalogSuffix string) (string, bool) {
 	if doc == nil {
 		return "", false
@@ -670,10 +679,17 @@ func pageDisplayIdentityForCID(doc *goquery.Document, cid, series, foldedMarker,
 	// The page value arrives separator-pinned, so its identity keeps the
 	// boundary that separates T-28123H from T28-123H; a separator-free page
 	// value decodes with the same prefix-free disambiguation the query parser
-	// applies.
+	// applies. Unparseable and markerless rows publish no identity to trust.
 	pSeries, number, ez, marker, ok := displayIdentityTuple(display)
-	if !ok || pSeries != series || ez != catalogSuffix || marker != foldedMarker {
+	if !ok {
 		return "", false
+	}
+	// A parseable marker-bearing 品番 belonging to a foreign series, catalog
+	// suffix or marker line proves the page is another product's: the whole
+	// page is a conflict, not merely an unusable row whose override is
+	// dropped while the foreign metadata keeps the cid-derived identity.
+	if pSeries != series || ez != catalogSuffix || marker != foldedMarker {
+		return "", true
 	}
 	if marker != "ai" {
 		// The cid-side analog of cachedRemasterIdentityMatches' number
