@@ -369,6 +369,9 @@ func TestSearch_SuccessViaHTTP(t *testing.T) {
 // --- ScrapeURL: browser mode path for video.dmm.co.jp ---
 
 func TestScrapeURL_BrowserModeVideoDMM(t *testing.T) {
+	if testing.Short() {
+		t.Skip("live-network browser fetch; a locally available Chrome succeeds where CI has none")
+	}
 	s := &scraper{
 		enabled:       true,
 		useBrowser:    true,

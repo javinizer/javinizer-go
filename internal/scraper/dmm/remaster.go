@@ -33,6 +33,17 @@ var (
 	underscorePrefixRegex   = regexp.MustCompile(`^[hn]_`)
 )
 
+// cachedRemasterIdentityMatches reports whether a cached content-id mapping
+// may stand in for the query without re-running resolution. Markerless
+// queries accept any mapping; raw content-id queries require the verbatim
+// cid. Display marker queries bind series, folded marker and E/Z suffix —
+// and, for H/HD mappings, the padding-normalized number: an H/HD remaster
+// cid keeps the display number (1rct00156h is RCT-156H), so a stale
+// same-series mapping for a different release (1rct00157h under RCT-156H)
+// must not short-circuit the verified resolver and publish the wrong movie.
+// AI mappings stay number-free: AI cids diverge from display numbers
+// (dv00899ai is DV-818AI), so the marker-based identity is the strongest
+// check available.
 func cachedRemasterIdentityMatches(id, cid, marker, series, suffix string, raw bool) bool {
 	if marker == "" {
 		return true
@@ -42,7 +53,48 @@ func cachedRemasterIdentityMatches(id, cid, marker, series, suffix string, raw b
 	}
 	clean := cleanPrefixRegex.ReplaceAllString(strings.ToLower(cid), "$1")
 	cachedMarker, cachedSuffix, ok := parseAnchoredMarkerCID(clean)
-	return ok && anchoredSeriesMatches(cid, series) && cachedMarker == marker && cachedSuffix == suffix
+	if !ok || !anchoredSeriesMatches(cid, series) || cachedMarker != marker || cachedSuffix != suffix {
+		return false
+	}
+	if marker == "ai" {
+		// AI content ids diverge from display numbers (dv00899ai is
+		// DV-818AI): the marker-based acceptance is already the strongest
+		// available identity check.
+		return true
+	}
+	qNumber, qOK := remasterTailNumber(id)
+	cNumber, cOK := remasterTailNumber(cid)
+	if !qOK || !cOK {
+		// No parseable number on either side: nothing to bind beyond the
+		// marker-based acceptance already applied.
+		return true
+	}
+	// H/HD remaster cids keep the display number: require the cached cid's
+	// padding-normalized number to equal the query's display number
+	// (1rct00156h matches RCT-156H and RCT-00156-HD; 1rct00157h does not).
+	return trimDisplayZeros(qNumber) == trimDisplayZeros(cNumber)
+}
+
+// remasterTailNumber extracts an id's display number through the same parse
+// classifyRemasterQuery applies: rental-normalized and compacted, with an
+// underscore channel cid pre-cleaned so the tail regex reads the series. The
+// number alone carries no identity — callers compare padding-normalized
+// values (trimDisplayZeros).
+func remasterTailNumber(id string) (string, bool) {
+	lowerRaw := stripRentalSuffixMarkerAware(strings.ToLower(strings.TrimSpace(id)))
+	hasSeparator := strings.ContainsAny(lowerRaw, "-_. ")
+	compact := compactQueryID(lowerRaw)
+	if !hasSeparator {
+		compact = stripRentalSuffixMarkerAware(compact)
+	}
+	if underscoreCIDShapeRegex.MatchString(lowerRaw) {
+		compact = cleanPrefixRegex.ReplaceAllString(lowerRaw, "$1")
+	}
+	_, number, _, _, ok := parseRemasterTail(lowerRaw, compact)
+	if !ok {
+		return "", false
+	}
+	return number, true
 }
 
 // anchoredSeriesMatches reports whether the raw cid's anchored series matches
