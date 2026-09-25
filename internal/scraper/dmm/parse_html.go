@@ -2,6 +2,7 @@ package dmm
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -24,10 +25,22 @@ var (
 )
 
 func (s *scraper) parseHTML(ctx context.Context, doc *goquery.Document, sourceURL string) (*models.ScraperResult, error) {
+	cid := extractContentIDFromURL(sourceURL)
+	marker, series, catalogSuffix, _ := classifyRemasterQuery(cid)
+	if marker != "" {
+		// The ScrapeURL-side analog of Search's pageDisplayIdentityMatchesQuery
+		// guard: H/HD remaster cids keep the display number, so a 品番 row that
+		// passes the series/marker gates but numbers another release means
+		// DMM followed a redirect or served a different product for the cid.
+		// The page is rejected outright instead of labeling another release's
+		// metadata with the cid-derived identity via fillMarkerIDFromURL.
+		if _, conflict := pageDisplayIdentityForCID(doc, cid, series, marker, catalogSuffix); conflict {
+			return nil, models.NewScraperNotFoundError("DMM", fmt.Sprintf("DMM page for %s publishes a different release", cid))
+		}
+	}
 	// Direct-URL scrapes take the same marker-aware path as search results: a
 	// marker-bearing URL cid (dv00899ai) defers to the page's authoritative
 	// 品番 instead of the cid-derived spelling.
-	marker, _, _, _ := classifyRemasterQuery(extractContentIDFromURL(sourceURL))
 	return s.parseHTMLWithOptions(ctx, doc, sourceURL, marker != "")
 }
 

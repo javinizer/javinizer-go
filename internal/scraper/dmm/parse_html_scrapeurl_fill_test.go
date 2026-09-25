@@ -44,21 +44,20 @@ func TestScrapeURLHDCIDKeepsDerivedID(t *testing.T) {
 // The ScrapeURL-side analog of the round-16a search identity guard: H/HD
 // remaster cids keep the display number, so a 品番 row numbering another
 // release — DMM followed a redirect or served a mismatched page for
-// cid=1rct00156h under RCT-157-HD — must not replace the cid-derived
-// identity. The row is ignored like pageRemasterDisplayID's other mismatch
-// cases, keeping ContentID and ID a coherent pair for the queried release.
-func TestScrapeURLHDCIDMismatchedPageKeepsDerivedID(t *testing.T) {
+// cid=1rct00156h under RCT-157-HD — means the page is for the wrong product.
+// Declining the page-ID override is not enough: release 157's title and media
+// must not be labeled RCT-156H via fillMarkerIDFromURL, so the whole page is
+// a hard miss instead of a result carrying the URL-derived identity.
+func TestScrapeURLHDCIDMismatchedPageRejected(t *testing.T) {
 	s, _ := newRemasterTestScraper(t)
 	s.client.SetTransport(&remasterRoundTripper{serve: func(u string) (int, string) {
 		return 200, `<html><body><table><tr><td>品番：</td><td>RCT-157-HD</td></tr></table></body></html>`
 	}})
 
 	res, err := s.ScrapeURL(context.Background(), "https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=1rct00156h/")
-	require.NoError(t, err)
-	require.NotNil(t, res)
-	assert.Equal(t, "1rct00156h", res.ContentID)
-	assert.NotEqual(t, "RCT-157H", res.ID, "a number-mismatched page 品番 must not re-key the release")
-	assert.Equal(t, "RCT-156H", res.ID, "the cid-derived identity is kept")
+	require.Error(t, err, "a page publishing another release's 品番 must be a hard miss")
+	assert.Nil(t, res)
+	assert.Contains(t, err.Error(), "different release")
 }
 
 // A matching 品番 still outranks the derived spelling, padding differences

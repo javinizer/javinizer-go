@@ -648,26 +648,24 @@ func displayIdentityTuple(display string) (series, value, suffix, marker string,
 	return series, trimDisplayZeros(value), suffix, marker, true
 }
 
-// pageRemasterDisplayID returns the canonical display ID from the page's 品番
-// row when it is marker-bearing and matches the query's series and folded
-// marker. Remaster content-id numbers are server-owned (dv00899ai displays as
-// DV-818AI), so the page value outranks the CID-derived spelling; markerless
-// rows, foreign series, mismatched markers and mismatched E/Z catalog
-// suffixes are ignored so a derived identity never loses its edition suffix
-// or collapses onto the base release. H/HD remaster cids keep the display
-// number (1rct00156h is RCT-156H), so an H/HD row must also carry the cid's
-// padding-normalized number: a redirect or a served page for another
-// release (cid=1rct00156h under RCT-157-HD) is ignored like the other
-// mismatch cases instead of re-keying the metadata onto the wrong release.
-// AI numbers diverge from the cid by design, so AI rows keep the
-// page-outranks-cid rule.
-func pageRemasterDisplayID(doc *goquery.Document, cid, series, foldedMarker, catalogSuffix string) string {
+// pageDisplayIdentityForCID resolves what the page's 品番 proves for a
+// marker-bearing cid. A row matching the cid's series, folded marker and E/Z
+// catalog suffix proves the page's canonical display id — for non-AI markers
+// only when its padding-normalized number equals the cid's (H/HD remaster
+// cids keep the display number). A row that passes those gates but numbers
+// another release conflicts: DMM followed a redirect or served a different
+// product for the cid (cid=1rct00156h under RCT-157-HD), so the page cannot
+// publish the queried release's identity at all. Everything else — absent,
+// markerless, unparseable or foreign rows — proves nothing either way and is
+// ignored. AI numbers diverge from the cid by design, so AI rows never
+// conflict on number and keep the page-outranks-cid rule.
+func pageDisplayIdentityForCID(doc *goquery.Document, cid, series, foldedMarker, catalogSuffix string) (string, bool) {
 	if doc == nil {
-		return ""
+		return "", false
 	}
 	display := extractDisplayID(doc)
 	if display == "" {
-		return ""
+		return "", false
 	}
 	// The page value arrives separator-pinned, so its identity keeps the
 	// boundary that separates T-28123H from T28-123H; a separator-free page
@@ -675,17 +673,17 @@ func pageRemasterDisplayID(doc *goquery.Document, cid, series, foldedMarker, cat
 	// applies.
 	pSeries, number, ez, marker, ok := displayIdentityTuple(display)
 	if !ok || pSeries != series || ez != catalogSuffix || marker != foldedMarker {
-		return ""
+		return "", false
 	}
 	if marker != "ai" {
 		// The cid-side analog of cachedRemasterIdentityMatches' number
 		// binding: an H/HD 品番 numbering a different release than the cid
-		// must not replace the derived identity. A cid without a parseable
-		// number binds nothing beyond the marker-based acceptance already
-		// applied.
+		// names the wrong product — the whole page is a conflict, not merely
+		// an unusable row. A cid without a parseable number binds nothing
+		// beyond the marker-based acceptance already applied.
 		cidNumber, cidOK := remasterTailNumber(cid)
 		if cidOK && trimDisplayZeros(cidNumber) != number {
-			return ""
+			return "", true
 		}
 	}
 	// Render from the verified split rather than re-parsing the compact form,
@@ -694,5 +692,14 @@ func pageRemasterDisplayID(doc *goquery.Document, cid, series, foldedMarker, cat
 	if marker == "ai" {
 		markerSpelling = "AI"
 	}
-	return strings.ToUpper(pSeries + "-" + number + ez + markerSpelling)
+	return strings.ToUpper(pSeries + "-" + number + ez + markerSpelling), false
+}
+
+// pageRemasterDisplayID returns the canonical display ID the page's 品番
+// proves for the cid, ignoring rows that conflict with it (see
+// pageDisplayIdentityForCID): the page value outranks the CID-derived
+// spelling for the releases it proves and publishes nothing for the rest.
+func pageRemasterDisplayID(doc *goquery.Document, cid, series, foldedMarker, catalogSuffix string) string {
+	pageID, _ := pageDisplayIdentityForCID(doc, cid, series, foldedMarker, catalogSuffix)
+	return pageID
 }

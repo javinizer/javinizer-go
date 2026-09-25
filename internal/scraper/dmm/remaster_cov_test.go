@@ -7,12 +7,14 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/ratelimit"
 )
 
 func TestRemasterSearchSpellings_NilForUnparseable(t *testing.T) {
@@ -114,6 +116,55 @@ func TestResolveRemaster_QueryErrorPaths(t *testing.T) {
 		_, err := s.ResolveContentIDCtx(ctx, "RCT-156H")
 		require.Error(t, err)
 	})
+}
+
+// The markerless resolution path surfaces search failures the same way the
+// marker path does: a failed rate-limit wait, geo-block status codes and
+// non-200 search responses all wrap into resolution errors.
+func TestResolveContentID_MarkerlessQueryErrorPaths(t *testing.T) {
+	t.Run("rate limit wait failure", func(t *testing.T) {
+		s, _ := newRemasterTestScraper(t)
+		s.rateLimiter = ratelimit.NewLimiter(time.Hour)
+		require.NoError(t, s.rateLimiter.Wait(context.Background()))
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		_, err := s.ResolveContentIDCtx(ctx, "IPX-535")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "rate limit wait failed")
+	})
+
+	t.Run("403 status", func(t *testing.T) {
+		s, _ := newRemasterTestScraper(t)
+		s.client.SetTransport(statusTransport(403))
+		_, err := s.ResolveContentIDCtx(context.Background(), "IPX-535")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "access blocked")
+	})
+
+	t.Run("500 status", func(t *testing.T) {
+		s, _ := newRemasterTestScraper(t)
+		s.client.SetTransport(statusTransport(500))
+		_, err := s.ResolveContentIDCtx(context.Background(), "IPX-535")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "status code 500")
+	})
+}
+
+// A context cancelled before the URL finder's search loop surfaces as a
+// wrapped cancellation error: the raw-cid bypass needs no HTTP for
+// resolution, so the failed rate-limit wait is the first cancellation the
+// finder observes.
+func TestGetURL_SearchCancelledMidLoop(t *testing.T) {
+	s, _ := newRemasterTestScraper(t)
+	s.rateLimiter = ratelimit.NewLimiter(time.Hour)
+	require.NoError(t, s.rateLimiter.Wait(context.Background()))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	s.client.SetTransport(&remasterRoundTripper{serve: func(u string) (int, string) { return 404, "" }})
+
+	_, err := s.GetURL(ctx, "118ipx00535")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
 }
 
 type errTransport struct{}

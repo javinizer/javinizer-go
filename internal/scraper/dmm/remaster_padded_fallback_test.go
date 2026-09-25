@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -52,16 +51,15 @@ func TestSearchPaddedDisplayFallback(t *testing.T) {
 	})
 }
 
-// A cached content-id mapping short-circuits on-line verification; when the
-// AI cid page carries no 品番 row the parse publishes an empty display id and
-// Search fills it from the query's canonical spelling.
-func TestSearchAIFallbackFillsEmptyPageID(t *testing.T) {
-	s, repo := newRemasterTestScraper(t)
-	require.NoError(t, repo.Create(context.Background(), &models.ContentIDMapping{
-		SearchID:  "DV-818-AI",
-		ContentID: "dv00899ai",
-		Source:    "dmm",
-	}))
+// A cached AI mapping whose page publishes no 品番 can no longer be verified
+// in-flow (AI cid numbers diverge from display numbers), so the
+// canonical-spelling fill is withheld: the mapping is invalidated and the
+// query re-resolves through the verified resolver. When the resolver cannot
+// verify the release either, the search misses honestly instead of
+// publishing the unverified page's metadata under the query's identity.
+func TestSearchCachedAIWithoutPageIdentityMissesHonestly(t *testing.T) {
+	s, _ := newRemasterTestScraper(t)
+	s.cacheContentID(context.Background(), "DV-818AI", "dv00899ai")
 	rt := &remasterRoundTripper{serve: func(u string) (int, string) {
 		switch {
 		case strings.Contains(u, "cid=dv00899ai"):
@@ -71,8 +69,43 @@ func TestSearchAIFallbackFillsEmptyPageID(t *testing.T) {
 	}}
 	s.client.SetTransport(rt)
 
-	res, err := s.Search(context.Background(), "DV-818-AI")
+	res, err := s.Search(context.Background(), "DV-818AI")
+	require.Error(t, err, "an unverifiable cached mapping must not publish the query identity")
+	assert.Nil(t, res)
+	assert.Positive(t, rt.searchN, "the mapping was invalidated and resolution re-ran")
+}
+
+// A freshly resolved AI query whose fetched page publishes no 品番 keeps the
+// canonical-spelling fill: the resolver verified the query's release
+// against a product-page 品番 earlier in the same call, so the identity-less
+// page's metadata may be labeled with the query's canonical spelling. The
+// monthly page carries the 品番 the resolver verifies; the URL finder then
+// selects the digital page, which publishes none.
+func TestSearchFreshResolutionFillsEmptyPageID(t *testing.T) {
+	s, _ := newRemasterTestScraper(t)
+	s.client.SetTransport(&remasterRoundTripper{serve: func(u string) (int, string) {
+		switch {
+		case strings.Contains(u, "searchstr=dv00818ai/"):
+			// The resolver's spelling finds the monthly product page.
+			return 200, `<html><body><a href="/monthly/premium/-/detail/=/cid=dv00899ai/">remaster</a></body></html>`
+		case strings.Contains(u, "searchstr=dv00899ai/"):
+			// The URL finder's content-id spelling finds the digital page.
+			return 200, `<html><body><a href="/digital/videoa/-/detail/=/cid=dv00899ai/">remaster</a></body></html>`
+		case strings.Contains(u, "/monthly/"):
+			return 200, `<html><body><h1 id="title" class="item">AI Remaster</h1>` +
+				`<table><tr><td>品番：</td><td>DV-818-AI</td></tr></table></body></html>`
+		case strings.Contains(u, "/digital/"):
+			return 200, `<html><body><h1 id="title" class="item">AI Remaster (digital)</h1></body></html>`
+		case strings.Contains(u, "/search/="):
+			return 200, `<html><body></body></html>`
+		}
+		return 404, ""
+	}})
+
+	res, err := s.Search(context.Background(), "DV-818AI")
 	require.NoError(t, err)
 	require.NotNil(t, res)
-	assert.Equal(t, "DV-818AI", res.ID, "canonical query spelling fills the empty page id")
+	assert.Equal(t, "dv00899ai", res.ContentID)
+	assert.Equal(t, "DV-818AI", res.ID, "this-call verification gates the canonical query fill")
+	assert.Equal(t, "AI Remaster (digital)", res.Title, "the metadata comes from the fetched digital page")
 }

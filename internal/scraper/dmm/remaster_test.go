@@ -322,9 +322,9 @@ func TestPageRemasterDisplayID_RequiresSuffixMatch(t *testing.T) {
 
 // H/HD remaster cids keep the display number, so a same-series 品番 numbering
 // another release (a redirect or a served mismatched page for cid=1rct00156h
-// under RCT-157-HD) must be ignored like the other mismatch cases instead of
-// re-keying the release. AI numbers diverge from the cid by design, so AI
-// rows keep outranking it.
+// under RCT-157-HD) publishes no display id — and flags the page as a
+// conflict so callers reject it instead of re-keying the release. AI numbers
+// diverge from the cid by design, so AI rows keep outranking it.
 func TestPageRemasterDisplayID_RequiresNumberMatch(t *testing.T) {
 	assert.Equal(t, "", pageRemasterDisplayID(doc2(t, "RCT-157-HD"), "1rct00156h", "rct", "h", ""),
 		"page display numbering another release must not be trusted")
@@ -336,6 +336,20 @@ func TestPageRemasterDisplayID_RequiresNumberMatch(t *testing.T) {
 	// A cid without a parseable number binds nothing beyond the marker-based
 	// acceptance (mirroring cachedRemasterIdentityMatches).
 	assert.Equal(t, "IPX-535H", pageRemasterDisplayID(doc2(t, "IPX-535-H"), "not-a-cid", "ipx", "h", ""))
+
+	// The same row is a whole-page conflict, not just an unusable row: DMM
+	// followed a redirect or served another product for the cid, so the
+	// page must be rejected instead of keeping the cid-derived identity.
+	_, conflict := pageDisplayIdentityForCID(doc2(t, "RCT-157-HD"), "1rct00156h", "rct", "h", "")
+	assert.True(t, conflict, "a same-line row numbering another release conflicts with the cid")
+	_, conflict = pageDisplayIdentityForCID(doc2(t, "RCT-156-HD"), "1rct00156h", "rct", "h", "")
+	assert.False(t, conflict, "a row numbering the cid's release does not conflict")
+	_, conflict = pageDisplayIdentityForCID(doc2(t, "DV-819-AI"), "dv00899ai", "dv", "ai", "")
+	assert.False(t, conflict, "AI numbers diverge by design: a number difference is never a conflict")
+	_, conflict = pageDisplayIdentityForCID(doc2(t, "RCT-156H"), "dv00899ai", "dv", "ai", "")
+	assert.False(t, conflict, "a foreign-series row is ignored, not a conflict")
+	_, conflict = pageDisplayIdentityForCID(nil, "1rct00156h", "rct", "h", "")
+	assert.False(t, conflict, "a nil document publishes nothing to compare")
 }
 
 func TestExtractDisplayID(t *testing.T) {

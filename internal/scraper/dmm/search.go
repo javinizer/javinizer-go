@@ -36,11 +36,21 @@ func (s *scraper) GetURL(ctx context.Context, id string) (string, error) {
 }
 
 func (s *scraper) getURLCtx(ctx context.Context, id string) (string, error) {
-	contentID, err := s.resolveContentIDCtx(ctx, id)
+	url, _, err := s.getURLCtxWithResolution(ctx, id)
+	return url, err
+}
+
+// getURLCtxWithResolution is getURLCtx plus the resolution origin: fromCache
+// reports whether the content id came from the persistent cache instead of
+// this call's verified resolver. Search gates its display-id fill on the
+// origin — a cached AI mapping whose page publishes no 品番 cannot be
+// verified in-flow, while a freshly resolved mapping was just verified.
+func (s *scraper) getURLCtxWithResolution(ctx context.Context, id string) (string, bool, error) {
+	contentID, fromCache, err := s.resolveContentIDWithOrigin(ctx, id)
 
 	if err != nil {
 		logging.Debugf("DMM: Content-ID resolution failed for %s: %v", id, err)
-		return "", fmt.Errorf("movie not found on DMM: %w", err)
+		return "", fromCache, fmt.Errorf("movie not found on DMM: %w", err)
 	}
 
 	boundMarker, _, _, rawQuery := classifyRemasterQuery(id)
@@ -75,7 +85,7 @@ func (s *scraper) getURLCtx(ctx context.Context, id string) (string, error) {
 		if err := s.rateLimiter.Wait(ctx); err != nil {
 			if ctx.Err() != nil {
 				logging.Debugf("DMM: Context cancelled before search query '%s'", searchQuery)
-				return "", fmt.Errorf("DMM search cancelled: %w", ctx.Err())
+				return "", fromCache, fmt.Errorf("DMM search cancelled: %w", ctx.Err())
 			}
 			logging.Debugf("DMM: Rate limit wait failed for query '%s': %v", searchQuery, err)
 			continue
@@ -140,14 +150,14 @@ func (s *scraper) getURLCtx(ctx context.Context, id string) (string, error) {
 	}
 
 	if len(allCandidates) == 0 {
-		return "", fmt.Errorf("no scrapable URL found for movie on DMM")
+		return "", fromCache, fmt.Errorf("no scrapable URL found for movie on DMM")
 	}
 
 	sortCandidates(allCandidates)
 
 	foundURL := allCandidates[0].url
 	logging.Debugf("DMM: Selected URL for %s (priority %d): %s", id, allCandidates[0].priority, foundURL)
-	return foundURL, nil
+	return foundURL, fromCache, nil
 }
 
 func (s *scraper) tryDirectURLs(ctx context.Context, contentID string) []urlCandidate {
@@ -232,7 +242,7 @@ func urlPriority(rawURL string) int {
 }
 
 func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult, error) {
-	url, err := s.getURLCtx(ctx, id)
+	url, resolvedFromCache, err := s.getURLCtxWithResolution(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -289,6 +299,23 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		// The page's authoritative 品番 (zero-trimmed by the site) outranks the
 		// query-derived spelling; only fill in when the page provided nothing.
 		if res.ID == "" {
+			if resolvedFromCache {
+				// A cached AI mapping whose page publishes no 品番 is
+				// unverified: a stale same-series sibling (dv00999ai under
+				// DV-818AI) would otherwise publish its metadata under the
+				// query's identity. Invalidate the mapping (its existence is
+				// proven by the cache-hit resolution) and re-resolve through
+				// the verified resolver — the round-15-style cache repair —
+				// falling back to a miss when re-resolution cannot verify the
+				// release. The retried pass resolves freshly, so it may fill
+				// the canonical spelling from this-call verification.
+				if derr := s.contentIDRepo.Delete(ctx, id); derr != nil {
+					logging.Debugf("DMM: cannot invalidate content-id mapping for %s: %v", id, derr)
+					return nil, models.NewScraperNotFoundError("DMM", fmt.Sprintf("DMM page for %s publishes no identity to verify its cached content-id mapping", id))
+				}
+				logging.Debugf("DMM: invalidated unverified content-id mapping for %s; re-resolving", id)
+				return s.Search(ctx, id)
+			}
 			res.ID = canonicalRemasterDisplayID(id)
 		}
 	}
