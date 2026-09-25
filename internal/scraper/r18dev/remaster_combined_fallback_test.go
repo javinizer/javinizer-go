@@ -81,7 +81,7 @@ func TestRemaster_CombinedFallback_HQuery_SameNumberAccepted(t *testing.T) {
 	require.NoError(t, err, "a null-dvd_id row carrying the query's core number must resolve via the combined= fallback")
 	require.NotNil(t, result)
 	assert.Equal(t, "1rct00156h", result.ContentID)
-	assert.Equal(t, "", result.ID, "null dvd_id with a marker cid leaves the display ID unset")
+	assert.Equal(t, "RCT-156H", result.ID, "null dvd_id with a number-bound H/HD cid derives the canonical display ID")
 	assert.Greater(t, combinedFetches, 0)
 }
 
@@ -108,6 +108,6 @@ func TestRemaster_CombinedFallback_AIQuery_NumberFreeAcceptance(t *testing.T) {
 	require.NoError(t, err, "AI number divergence must keep the number-free marker acceptance on the combined= path")
 	require.NotNil(t, result)
 	assert.Equal(t, "dv00899ai", result.ContentID)
-	assert.Equal(t, "", result.ID, "null dvd_id with a marker cid leaves the display ID unset")
+	assert.Equal(t, "", result.ID, "null dvd_id with an AI cid leaves the display ID unset: AI numbers diverge")
 	assert.Greater(t, combinedFetches, 0)
 }

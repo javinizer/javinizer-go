@@ -350,10 +350,11 @@ func markerVariationAccept(body []byte, queryID, foldedMarker, series string) bo
 // guardRemasterResult applies the marker guard to a fully parsed result:
 // marker-bearing queries only accept results whose content id carries the
 // folded marker (verification of the number is server-owned). Raw queries
-// canonicalize any display ID the server provided; the null-dvd_id cid echo
-// never reaches this point because resolveIDs and resultFromDump leave the
-// ID unset for marker-bearing content ids (r18.dev cid numbers are slot
-// numbers, not display numbers — dv00899ai is DV-818-AI).
+// canonicalize any display ID the server provided; a null-dvd_id response
+// reaches the guard with a resolveIDs-derived display ID for H/HD cids (their
+// numbers are display numbers, bound by the admitting guards), while AI cids
+// — whose numbers are slot numbers, not display numbers (dv00899ai is
+// DV-818-AI) — and the dump path leave the ID unset.
 func guardRemasterResult(id string, res *models.ScraperResult) (*models.ScraperResult, error) {
 	foldedMarker, series := classifyRemaster(id)
 	if foldedMarker == "" || res == nil {

@@ -114,6 +114,7 @@ func TestRemaster_FuzzyHQuery_SameNumberRecordedAndReturned(t *testing.T) {
 	require.NoError(t, err, "a null-dvd_id row carrying the query's core number must resolve via the fuzzy fallback")
 	require.NotNil(t, result)
 	assert.Equal(t, "7zzqq00042h", result.ContentID)
+	assert.Equal(t, "ZZQQ-042H", result.ID, "the Step-3 fuzzy row derives its display ID from the number-bound cid")
 	assert.Equal(t, 1, fuzzyFetches, "the recorded fuzzy URL must be fetched exactly once")
 }
 
@@ -146,7 +147,7 @@ func TestRemaster_FuzzyAIQuery_NumberDivergenceStillAccepted(t *testing.T) {
 	require.NoError(t, err, "AI number divergence must keep the number-free marker acceptance")
 	require.NotNil(t, result)
 	assert.Equal(t, "dv00899ai", result.ContentID)
-	assert.Equal(t, "", result.ID, "null dvd_id with a marker cid leaves the display ID unset")
+	assert.Equal(t, "", result.ID, "null dvd_id with an AI cid leaves the display ID unset: AI numbers diverge")
 	assert.Equal(t, 1, fuzzyFetches)
 }
 

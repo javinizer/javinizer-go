@@ -609,18 +609,44 @@ func (s *scraper) parseResponse(ctx context.Context, data *r18Response, sourceUR
 	return result, nil
 }
 
-// resolveIDs determines the movie ID from DVDID or ContentID. A marker-bearing
-// content id with a null dvd_id stays unset: r18.dev cid numbers are slot
-// numbers, not display numbers (dv00899ai is DV-818-AI), so the synthesized
-// echo would sort the title under the wrong release.
+// resolveIDs determines the movie ID from DVDID or ContentID. With a null
+// dvd_id, an H/HD remaster content id derives its display ID: H/HD cids keep
+// the display number (1rct00156h is RCT-156H), and the admitting guards
+// (cidMatchesRemasterFuzzyQuery / markerVariationAccept) have already bound
+// the cid's number to the query's display number, so the derived identity is
+// verified rather than a synthesized echo — without it an R18-only scrape
+// would succeed with no identity to aggregate or organize. AI content ids
+// stay unset: r18.dev AI cid numbers are slot numbers, not display numbers
+// (dv00899ai is DV-818-AI), so deriving would fabricate a wrong ID; that
+// path publishes only the dvd_id the response itself supplies.
 func resolveIDs(data *r18Response) string {
 	if data.DVDID != "" {
 		return data.DVDID
 	}
-	if data.ContentID == "" || cidCarriesRemasterMarker(data.ContentID) {
+	if data.ContentID == "" {
 		return ""
 	}
-	return contentIDToID(data.ContentID)
+	series, number, ez, marker, ok := r18ParseRemasterTail(data.ContentID)
+	if !ok {
+		return contentIDToID(data.ContentID)
+	}
+	if marker == "ai" {
+		return ""
+	}
+	return remasterCIDDisplayID(series, number, ez)
+}
+
+// remasterCIDDisplayID renders the parsed identity of an H/HD remaster
+// content id as its canonical display ID, normalizing number padding the way
+// contentIDToID does (1rct00156h -> RCT-156H, 7zzqq00042h -> ZZQQ-042H). The
+// parse is T/T28-aware, so a catalog-prefixed t28 cid keeps its real series
+// (9t2800123h -> T28-123H) where contentIDToID's plain regex split would
+// misread it as series t and fabricate a conflicting display identity.
+func remasterCIDDisplayID(series, number, ez string) string {
+	if num, err := strconv.Atoi(number); err == nil {
+		number = fmt.Sprintf("%03d", num)
+	}
+	return strings.ToUpper(series) + "-" + number + strings.ToUpper(ez) + "H"
 }
 
 // cidCarriesRemasterMarker reports whether the content id itself ends in a

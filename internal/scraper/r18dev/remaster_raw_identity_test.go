@@ -75,7 +75,7 @@ func TestSearchRemasterUnderscoreCatalogPrefixes(t *testing.T) {
 				require.NoError(t, err)
 				assert.Equal(t, cid, result.ContentID)
 				if query == "ABC-123H" {
-					assert.Empty(t, result.ID)
+					assert.Equal(t, "ABC-123H", result.ID, "a display query derives the display ID from the null-dvd_id marker cid")
 				}
 			})
 		}

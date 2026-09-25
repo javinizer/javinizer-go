@@ -82,8 +82,13 @@ func TestRemasterHelpers(t *testing.T) {
 
 	guarded, gerr = guardRemasterResult("ABC-123H", &models.ScraperResult{ContentID: "118abc00123", ID: "ABC-123"})
 
-	assert.Equal(t, "", resolveIDs(&r18Response{ContentID: "dv00899ai"}), "null dvd_id with a marker cid leaves the ID unset: cid numbers are slot numbers")
-	assert.Equal(t, "", resolveIDs(&r18Response{ContentID: "1abc00123h"}), "marker cids never synthesize an echo")
+	const hugeNumber = "99999999999999999999999" // exceeds int64: padding normalization must keep it verbatim
+	assert.Equal(t, "", resolveIDs(&r18Response{ContentID: "dv00899ai"}), "null dvd_id with an AI cid leaves the ID unset: AI cid numbers are slot numbers that diverge from display numbers")
+	assert.Equal(t, "ABC-123H", resolveIDs(&r18Response{ContentID: "1abc00123h"}), "null dvd_id with an H/HD cid derives the display ID: H/HD cids keep the display number")
+	assert.Equal(t, "ABC-123H", resolveIDs(&r18Response{ContentID: "h_003abc00123hd"}), "underscore-prefixed HD cids derive the same canonical display ID")
+	assert.Equal(t, "IPX-535ZH", resolveIDs(&r18Response{ContentID: "1ipx00535zh"}), "the E/Z catalog suffix survives the derivation")
+	assert.Equal(t, "T28-123H", resolveIDs(&r18Response{ContentID: "9t2800123h"}), "a catalog-prefixed t28 cid derives its real series, not the t misreading")
+	assert.Equal(t, "ABC-"+hugeNumber+"H", resolveIDs(&r18Response{ContentID: "1abc" + hugeNumber + "h"}), "a number too wide for padding normalization stays verbatim")
 	assert.Equal(t, "ABW-013", resolveIDs(&r18Response{ContentID: "118abw00013"}), "marker-free cids keep the derived echo")
 	assert.Equal(t, "DV-818AI", resolveIDs(&r18Response{ContentID: "dv00899ai", DVDID: "DV-818AI"}), "an explicit dvd_id always wins")
 	assert.Error(t, gerr, "wide-prefix base release must still fail a marker query")
@@ -116,6 +121,7 @@ func TestRemaster_FuzzyMarkerRecordedAndReturned(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	assert.Equal(t, "1rct00156h", result.ContentID)
+	assert.Equal(t, "RCT-156H", result.ID, "a response with an explicit dvd_id keeps publishing it, canonicalized")
 }
 
 // A dump-resolved candidate carrying base identity must be rejected by the
