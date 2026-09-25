@@ -182,6 +182,19 @@ func TestRemasterMarkerResolutionAndQualityLabels(t *testing.T) {
 		{"ABC.123.HD AAC2.mkv", "ABC-123H"},
 		{"ABC.123.HD VVC1.mkv", "ABC-123H"},
 		{"ABC.123.HD AVS3.mkv", "ABC-123H"},
+		// The VVC codec-name spelling (H.266/VVC266) is metadata like its
+		// avc/hevc siblings; the numeric h.26x spellings (H266, x266) are
+		// already covered by the [hx]26 class.
+		{"ABC.123.HD VVC266.mkv", "ABC-123H"},
+		{"ABC.123.HD.VVC266.mkv", "ABC-123H"},
+		{"ABC.123.HD VVC1080.mkv", "ABC-123H"},
+		// No vvc series exists in the r18.dev content-id prefix lookup
+		// (only lvvc, which the word boundary protects), so the free-digit
+		// codec-name alias has no id-grammar exceptions to preserve.
+		{"ABC.123.HD VVC24.mkv", "ABC-123H"},
+		{"ABC.123.HD VVC00123.mkv", "ABC-123H"},
+		{"VVC266 1rct00156h.mkv", "1RCT00156H"},
+		{"189vvc00087.mkv", "189VVC00087"},
 		// Plain forms are unchanged.
 		{"ABC.123.HD.mkv", "ABC-123H"},
 		{"RCT156H.mkv", "RCT-156H"},
@@ -279,6 +292,15 @@ func TestRemasterMarkerResolutionAndQualityLabels(t *testing.T) {
 	// Codec rate-suffix metadata after a separated remaster id must not
 	// replace it either, and the marker stays intact.
 	for _, name := range []string{"ABC.123.HD DTS768.mkv", "ABC.123.HD FLAC192.mkv", "ABC.123.HD OPUS192.mkv"} {
+		fileResult := matchOne(t, m, name)
+		require.NotNil(t, fileResult)
+		assert.Equal(t, "ABC-123H", fileResult.ID)
+		assert.Equal(t, "HD", fileResult.RemasterMarker)
+	}
+
+	// The VVC codec-name spelling after a separated remaster id must not
+	// replace it either, and the marker stays intact.
+	for _, name := range []string{"ABC.123.HD VVC266.mkv", "ABC.123.HD.VVC266.mkv"} {
 		fileResult := matchOne(t, m, name)
 		require.NotNil(t, fileResult)
 		assert.Equal(t, "ABC-123H", fileResult.ID)

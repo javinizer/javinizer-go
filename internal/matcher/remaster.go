@@ -39,7 +39,17 @@ var (
 	// dts-series ids are hyphenated display spellings (DTS-24) or
 	// numerically prefixed content ids (189dts00087), so the separator and
 	// word-boundary anchors leave them alone.
-	trailingQualityTagRegex           = regexp.MustCompile(`(?i)\b(?:[hx]26[3-9]|avc\d*|aac\d*|hevc\d*|ac3|dts|flac|opus|truehd|vc1|av1|mp[34]|ddp\d*|eac3|divx\d*|xvid\d*|prores\d*|yuv\d*|rgb\d*|p0(?:10|16)|mpeg\d*|vp\d+|fhd\d{2,4}|uhd\d{2,4}|hdtv|hdr\d*|bt2020|bt709|rec709|smpte\d+|pq\d+|st2084|hlg\d*|ycbcr\d*|(?:bt|rec|st|smpte)[. ]?\d{3,4}|(?:l?pcm|dts|flac|opus)[. ]?\d{3,4}|\d+(?:bit|point)\d+)\b`)
+	// The VVC codec-name spelling — H.266's name, as AVC is H.264's and
+	// HEVC is H.265's — joins the avc/hevc free-digit codec-name aliases:
+	// VVC266, VVC1080, and other numbered spellings otherwise satisfy the
+	// trailing catalog and builtin amateur grammars as replacement ids
+	// (the numeric h.26x spellings H266/x266 are already covered by the
+	// [hx]26 class). No vvc series exists in the r18.dev content-id
+	// prefix lookup (only lvvc, whose leading letter blocks the word
+	// boundary), so unlike the dts/flac/opus rate class no digit bound is
+	// needed: numerically prefixed content ids (189vvc00087) and lvvc
+	// series spellings (n_600lvvc123) keep matching as ids.
+	trailingQualityTagRegex           = regexp.MustCompile(`(?i)\b(?:[hx]26[3-9]|avc\d*|aac\d*|hevc\d*|vvc\d*|ac3|dts|flac|opus|truehd|vc1|av1|mp[34]|ddp\d*|eac3|divx\d*|xvid\d*|prores\d*|yuv\d*|rgb\d*|p0(?:10|16)|mpeg\d*|vp\d+|fhd\d{2,4}|uhd\d{2,4}|hdtv|hdr\d*|bt2020|bt709|rec709|smpte\d+|pq\d+|st2084|hlg\d*|ycbcr\d*|(?:bt|rec|st|smpte)[. ]?\d{3,4}|(?:l?pcm|dts|flac|opus)[. ]?\d{3,4}|\d+(?:bit|point)\d+)\b`)
 	trailingResolutionCatalogIDRegex  = regexp.MustCompile(`(?i)\b[a-z]+-(?:144|240|288|360|432|480|540|576|720|1080|2160)\b`)
 	trailingResolutionQualityTagRegex = regexp.MustCompile(`(?i)^(?:fhd|uhd|hd)-(?:144|240|288|360|432|480|540|576|720|1080|2160)$`)
 	// qualitySeriesNumberRegex recognizes a consumed remaster phrase that is
