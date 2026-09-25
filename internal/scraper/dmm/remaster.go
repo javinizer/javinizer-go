@@ -29,8 +29,11 @@ var (
 	seriesSegmentRegex      = regexp.MustCompile(`^\d*(?:t28|[a-z]+)$`)
 	separatorRunRegex       = regexp.MustCompile(`[-_.\s]+`)
 	seriesPinnedTailRegex   = regexp.MustCompile(`^(\d+)([ez]?)(hd|ai|h)$`)
-	nonAlnumRegex           = regexp.MustCompile(`[^a-z0-9]+`)
-	underscorePrefixRegex   = regexp.MustCompile(`^[hn]_`)
+	// A base release's 品番 shape: series plus number with no remaster
+	// marker (rct157, t28123). The round-25b markerless-conflict probe.
+	markerlessTailRegex   = regexp.MustCompile(`^\d*(?:t28|[a-z]+)\d+$`)
+	nonAlnumRegex         = regexp.MustCompile(`[^a-z0-9]+`)
+	underscorePrefixRegex = regexp.MustCompile(`^[hn]_`)
 )
 
 // cachedRemasterIdentityMatches reports whether a cached content-id mapping
@@ -648,6 +651,19 @@ func displayIdentityTuple(display string) (series, value, suffix, marker string,
 	return series, trimDisplayZeros(value), suffix, marker, true
 }
 
+// isMarkerlessDisplayID reports whether a nonempty 品番 parses as a base
+// release's identity: series and number with no remaster marker (RCT-157,
+// rct157, T-28123). The tail regexes displayIdentityTuple applies require
+// the h/ai/hd ending, so a row they reject that still pairs a series with
+// a number names the base release rather than a remaster; pure digits,
+// bare letters and vocabulary-bearing rows (12345, garbage, RCT-157-E)
+// parse as neither and stay unparseable. Callers gate on the request being
+// marker-bearing: on a base-release request a markerless row is the
+// normal, trusted identity.
+func isMarkerlessDisplayID(display string) bool {
+	return markerlessTailRegex.MatchString(compactQueryID(display))
+}
+
 // pageDisplayIdentityForCID resolves what the page's 品番 proves for a
 // marker-bearing cid. A row matching the cid's series, folded marker and E/Z
 // catalog suffix proves the page's canonical display id — for non-AI markers
@@ -665,9 +681,11 @@ func displayIdentityTuple(display string) (series, value, suffix, marker string,
 // comparison and holds for AI cids too: AI numbers diverge from the cid by
 // design, so an AI row never conflicts on number, but the series, marker and
 // suffix never diverge between an AI cid and its display, so a foreign row
-// on an AI url is still another product's page. Everything else — absent,
-// markerless or unparseable rows — publishes nothing parseable to trust and
-// is ignored.
+// on an AI url is still another product's page. A nonempty markerless 品番
+// conflicts the same way: it names the base release, not the remaster the
+// marker-bearing cid asks for (cid=1rct00156h serving RCT-157), so the page
+// is the base product's. Everything else — absent or unparseable rows —
+// publishes nothing parseable to trust and is ignored.
 func pageDisplayIdentityForCID(doc *goquery.Document, cid, series, foldedMarker, catalogSuffix string) (string, bool) {
 	if doc == nil {
 		return "", false
@@ -679,9 +697,16 @@ func pageDisplayIdentityForCID(doc *goquery.Document, cid, series, foldedMarker,
 	// The page value arrives separator-pinned, so its identity keeps the
 	// boundary that separates T-28123H from T28-123H; a separator-free page
 	// value decodes with the same prefix-free disambiguation the query parser
-	// applies. Unparseable and markerless rows publish no identity to trust.
+	// applies. Unparseable rows publish no identity to trust.
 	pSeries, number, ez, marker, ok := displayIdentityTuple(display)
 	if !ok {
+		// A nonempty markerless 品番 names the base release, not the remaster
+		// the marker-bearing cid asks for: DMM followed a redirect or served
+		// the base product's page, so the row cannot publish the remaster's
+		// identity and conflicts instead of passing through like an absent one.
+		if foldedMarker != "" && isMarkerlessDisplayID(display) {
+			return "", true
+		}
 		return "", false
 	}
 	// A parseable marker-bearing 品番 belonging to a foreign series, catalog

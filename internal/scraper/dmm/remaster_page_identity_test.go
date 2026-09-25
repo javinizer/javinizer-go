@@ -202,9 +202,50 @@ func TestCachedHQueryMatchingPageReturns(t *testing.T) {
 	assert.Equal(t, "1rct00156h", res.ContentID)
 }
 
+// Round-25b: a cached H query whose page serves a markerless 品番 must miss
+// honestly: the row names the base release (cid=1rct00156h under RCT-157),
+// not the queried remaster, so returning its metadata would publish release
+// 157's content under RCT-156H's identity.
+func TestCachedHQueryMarkerlessPageRejected(t *testing.T) {
+	s, _ := newRemasterTestScraper(t)
+	s.cacheContentID(context.Background(), "RCT-156H", "1rct00156h")
+	s.client.SetTransport(&remasterRoundTripper{serve: func(u string) (int, string) {
+		if strings.Contains(u, "cid=1rct00156h") {
+			return 200, `<html><body><h1 id="title" class="item">Base release</h1>` +
+				`<table><tr><td>品番：</td><td>RCT-157</td></tr></table></body></html>`
+		}
+		return 404, ""
+	}})
+	res, err := s.Search(context.Background(), "RCT-156H")
+	require.Error(t, err, "the markerless 品番 names the base release and must miss honestly")
+	assert.Nil(t, res)
+	assert.Contains(t, err.Error(), "different release")
+}
+
+// The AI request case of the same rule: the query is marker-bearing, so a
+// markerless 品番 (DV-818, the base release the AI cid diverged from) still
+// conflicts and must not pass through like an absent identity.
+func TestCachedAIQueryMarkerlessPageRejected(t *testing.T) {
+	s, _ := newRemasterTestScraper(t)
+	s.cacheContentID(context.Background(), "DV-818AI", "dv00899ai")
+	s.client.SetTransport(&remasterRoundTripper{serve: func(u string) (int, string) {
+		if strings.Contains(u, "cid=dv00899ai") {
+			return 200, `<html><body><h1 id="title" class="item">Base release</h1>` +
+				`<table><tr><td>品番：</td><td>DV-818</td></tr></table></body></html>`
+		}
+		return 404, ""
+	}})
+	res, err := s.Search(context.Background(), "DV-818AI")
+	require.Error(t, err, "the markerless 品番 names the base release and must miss honestly")
+	assert.Nil(t, res)
+	assert.Contains(t, err.Error(), "different release")
+}
+
 // The identity guard publishes nothing authoritative to compare for nil
 // documents, unparseable display ids, or unparseable queries, and must keep
-// the existing behavior in those cases rather than reject the page.
+// the existing behavior in those cases rather than reject the page. A
+// nonempty markerless 品番 is the exception: on a marker-bearing query it
+// names the base release — never the remaster — and rejects the page.
 func TestPageDisplayIdentityMatchesQueryGuards(t *testing.T) {
 	page := func(display string) *goquery.Document {
 		t.Helper()
@@ -223,6 +264,9 @@ func TestPageDisplayIdentityMatchesQueryGuards(t *testing.T) {
 		{"missing display value keeps existing behavior", page("???"), "DV-818AI", true},
 		{"unparseable display keeps existing behavior", page("12345"), "DV-818AI", true},
 		{"unparseable query keeps existing behavior", page("DV-818-AI"), "remastered", true},
+		{"markerless display rejects a marker-bearing query", page("RCT-157"), "RCT-156H", false},
+		{"compact markerless display rejects a marker-bearing query", page("RCT157"), "RCT-156H", false},
+		{"markerless display with unparseable query keeps existing behavior", page("RCT-157"), "remastered", true},
 		{"mismatched release rejects", page("DV-819-AI"), "DV-818AI", false},
 		{"matching release accepts", page("DV-818-AI"), "DV-818AI", true},
 	} {

@@ -30,12 +30,13 @@ func (s *scraper) parseHTML(ctx context.Context, doc *goquery.Document, sourceUR
 	if marker != "" {
 		// The ScrapeURL-side analog of Search's pageDisplayIdentityMatchesQuery
 		// guard: a 品番 row whose parseable identity belongs to another
-		// release — a foreign series, catalog suffix or marker line, or (for
-		// H/HD cids, which keep the display number) a same-series row numbering
-		// another release — means DMM followed a redirect or served a different
-		// product for the cid. The page is rejected outright instead of
-		// labeling another release's metadata with the cid-derived identity
-		// via fillMarkerIDFromURL.
+		// release — a foreign series, catalog suffix or marker line, a
+		// markerless row naming the base release rather than the remaster, or
+		// (for H/HD cids, which keep the display number) a same-series row
+		// numbering another release — means DMM followed a redirect or served
+		// a different product for the cid. The page is rejected outright
+		// instead of labeling another release's metadata with the cid-derived
+		// identity via fillMarkerIDFromURL.
 		if _, conflict := pageDisplayIdentityForCID(doc, cid, series, marker, catalogSuffix); conflict {
 			return nil, models.NewScraperNotFoundError("DMM", fmt.Sprintf("DMM page for %s publishes a different release", cid))
 		}

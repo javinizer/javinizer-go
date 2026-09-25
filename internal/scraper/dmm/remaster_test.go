@@ -328,7 +328,9 @@ func TestPageRemasterDisplayID_RequiresSuffixMatch(t *testing.T) {
 // suffix or marker line, cid=1rct00156h under ABC-999-HD) conflicts the same
 // way: the page provably belongs to another product. AI numbers diverge from
 // the cid by design, so same-series AI rows keep outranking it, but a foreign
-// row on an AI url is still another product's page and conflicts.
+// row on an AI url is still another product's page and conflicts. A
+// nonempty markerless row conflicts identically (round 25b): it names the
+// base release, never the remaster the marker-bearing cid asks for.
 func TestPageRemasterDisplayID_RequiresNumberMatch(t *testing.T) {
 	assert.Equal(t, "", pageRemasterDisplayID(doc2(t, "RCT-157-HD"), "1rct00156h", "rct", "h", ""),
 		"page display numbering another release must not be trusted")
@@ -360,14 +362,53 @@ func TestPageRemasterDisplayID_RequiresNumberMatch(t *testing.T) {
 	assert.False(t, conflict, "AI numbers diverge by design: a number difference is never a conflict")
 	_, conflict = pageDisplayIdentityForCID(doc2(t, "RCT-156H"), "dv00899ai", "dv", "ai", "")
 	assert.True(t, conflict, "a foreign-series row on an AI cid conflicts: the page is another product's")
-	// Absent, markerless and unparseable rows publish nothing parseable to
-	// trust and keep the ignore behavior instead of rejecting the page.
+	// A nonempty markerless 品番 names the base release, not the remaster the
+	// marker-bearing cid asks for, so it conflicts like a foreign row — with
+	// or without a number match (RCT-157 and RCT-156 both name the base
+	// product, never the remaster) — while a markerless request keeps the
+	// pass-through and unparseable rows stay ignored.
 	_, conflict = pageDisplayIdentityForCID(doc2(t, "RCT-157"), "1rct00156h", "rct", "h", "")
-	assert.False(t, conflict, "a markerless row is nothing parseable to trust, not a conflict")
+	assert.True(t, conflict, "a markerless row naming the base release conflicts with the marker-bearing cid")
+	_, conflict = pageDisplayIdentityForCID(doc2(t, "RCT-156"), "1rct00156h", "rct", "h", "")
+	assert.True(t, conflict, "a markerless row naming the cid's own base release still conflicts: it is not the remaster")
+	_, conflict = pageDisplayIdentityForCID(doc2(t, "rct157"), "1rct00156h", "rct", "h", "")
+	assert.True(t, conflict, "a compact markerless row conflicts the same way")
+	_, conflict = pageDisplayIdentityForCID(doc2(t, "DV-818"), "dv00899ai", "dv", "ai", "")
+	assert.True(t, conflict, "a markerless row on an AI cid conflicts: the request is marker-bearing")
+	_, conflict = pageDisplayIdentityForCID(doc2(t, "RCT-157"), "1rct00156h", "rct", "", "")
+	assert.False(t, conflict, "a markerless request keeps the markerless pass-through")
 	_, conflict = pageDisplayIdentityForCID(doc2(t, "12345"), "1rct00156h", "rct", "h", "")
 	assert.False(t, conflict, "an unparseable row is not a conflict")
 	_, conflict = pageDisplayIdentityForCID(nil, "1rct00156h", "rct", "h", "")
 	assert.False(t, conflict, "a nil document publishes nothing to compare")
+}
+
+// The round-25b markerless probe: it must accept every base-release
+// spelling — separator-pinned or compact — and reject marker-bearing rows,
+// catalog-suffix vocabulary and unparseable values, mirroring the
+// displayIdentityTuple splits.
+func TestIsMarkerlessDisplayID(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		display string
+		want    bool
+	}{
+		{"hyphenated base release", "RCT-157", true},
+		{"compact base release", "rct157", true},
+		{"zero-padded base release", "RCT-00157", true},
+		{"t-series base release", "T-28123", true},
+		{"compact t-series base release", "t28123", true},
+		{"hd marker row is not markerless", "RCT-157-HD", false},
+		{"h marker row is not markerless", "RCT-157H", false},
+		{"catalog-suffix-only row is unparseable", "RCT-157-E", false},
+		{"digits-only row is unparseable", "12345", false},
+		{"word row is unparseable", "garbage", false},
+		{"empty row is unparseable", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, isMarkerlessDisplayID(tc.display))
+		})
+	}
 }
 
 func TestExtractDisplayID(t *testing.T) {

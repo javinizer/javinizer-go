@@ -127,18 +127,32 @@ func TestScrapeURLMarkerCIDForeignIdentityPageRejected(t *testing.T) {
 	}
 }
 
-// Markerless 品番 rows keep the existing behavior: a row without a marker
-// publishes nothing parseable to trust, so the page is never rejected and
-// the cid-derived identity stands.
-func TestScrapeURLHDCIDMarkerlessRowKeepsDerivedID(t *testing.T) {
-	s, _ := newRemasterTestScraper(t)
-	s.client.SetTransport(&remasterRoundTripper{serve: func(u string) (int, string) {
-		return 200, `<html><body><table><tr><td>品番：</td><td>RCT-157</td></tr></table></body></html>`
-	}})
+// Round-25b: a marker-bearing url redirected to a markerless product page —
+// cid=1rct00156h serving 品番 RCT-157 — must reject the whole page. A
+// nonempty markerless row names the base release, not the remaster, so
+// keeping the cid-derived spelling would label release 157's metadata
+// RCT-156H via fillMarkerIDFromURL. The row naming the cid's own base
+// release conflicts identically (it is still not the remaster), compact
+// spellings parse the same, and an AI url conflicts too — the request is
+// marker-bearing. Empty or absent rows keep the pass-through pinned by
+// TestScrapeURLHDCIDKeepsDerivedID and TestScrapeURLAICIDWithoutPinzan.
+func TestScrapeURLMarkerCIDMarkerlessRowRejected(t *testing.T) {
+	for _, tc := range []struct{ name, url, pinzan string }{
+		{"h url serving the next base release", "https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=1rct00156h/", "RCT-157"},
+		{"h url serving compact markerless spelling", "https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=1rct00156h/", "RCT157"},
+		{"h url serving its own base release", "https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=1rct00156h/", "RCT-156"},
+		{"ai url serving the base release", "https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=dv00899ai/", "DV-818"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, _ := newRemasterTestScraper(t)
+			s.client.SetTransport(&remasterRoundTripper{serve: func(u string) (int, string) {
+				return 200, `<html><body><table><tr><td>品番：</td><td>` + tc.pinzan + `</td></tr></table></body></html>`
+			}})
 
-	res, err := s.ScrapeURL(context.Background(), "https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=1rct00156h/")
-	require.NoError(t, err)
-	require.NotNil(t, res)
-	assert.Equal(t, "1rct00156h", res.ContentID)
-	assert.Equal(t, "RCT-156H", res.ID, "a markerless row never rejects the page: the cid-derived spelling stands")
+			res, err := s.ScrapeURL(context.Background(), tc.url)
+			require.Error(t, err, "a markerless 品番 names the base release, not the remaster: the page must be a hard miss")
+			assert.Nil(t, res)
+			assert.Contains(t, err.Error(), "different release")
+		})
+	}
 }
