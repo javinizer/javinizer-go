@@ -224,9 +224,11 @@ func cidMatchesRemasterQuery(contentID, queryID, marker, series string) bool {
 	return true
 }
 
-// cidMatchesRemasterFuzzyQuery gates the Step-1 null-dvd_id fuzzy record for
-// marker queries, and is deliberately stricter than cidMatchesRemasterQuery
-// for H/HD spellings. An H/HD remaster content id keeps the display number
+// cidMatchesRemasterFuzzyQuery gates null-dvd_id marker rows — both the
+// Step-1 fuzzy record and the combined= acceptance in markerVariationAccept
+// (the same predicate, only applied at a different point: record vs. accept)
+// — and is deliberately stricter than cidMatchesRemasterQuery for H/HD
+// spellings. An H/HD remaster content id keeps the display number
 // (1rct00156h is RCT-156H), so the recorded row's cid core number must equal
 // the query's number, padding-normalized — a stale same-series marker row for
 // a different release (1rct00157h for RCT-156H) must never be recorded as the
@@ -313,6 +315,14 @@ func responseContentIDMatchesVariation(body []byte, variation string) bool {
 	return strings.EqualFold(strings.TrimSpace(data.ContentID), strings.TrimSpace(variation))
 }
 
+// markerVariationAccept validates a combined= response body against a
+// marker-bearing query: the cid must carry the query's marker identity
+// (series, folded marker, E/Z suffix; raw queries additionally require
+// literal cid equality), a present dvd_id must agree on the display
+// identity, and a null-dvd_id row must bind the query's core number for
+// H/HD spellings. This predicate is both the Step-2 variation acceptance
+// and the final guard in fetchAndParseCombined, so the normalized
+// combined= fallback is covered by the same check.
 func markerVariationAccept(body []byte, queryID, foldedMarker, series string) bool {
 	var data contentIDLookupResponse
 	if err := json.Unmarshal(body, &data); err != nil {
@@ -327,7 +337,14 @@ func markerVariationAccept(body []byte, queryID, foldedMarker, series string) bo
 	if data.DVDID != "" {
 		return displayIDsMatchByIdentity(data.DVDID, queryID)
 	}
-	return true
+	// Null dvd_id: bind the query's core number for H/HD through the same
+	// round-10 predicate that gates the Step-1 fuzzy record. Without it the
+	// separately fetched combined= fallback (every resolver variation
+	// missed) accepts a stale same-series marker row for a different
+	// release — r18.dev's fuzzy combined= matching can answer RCT-156H with
+	// 1rct00157h, publishing release 157 for 156. AI queries diverge from
+	// display numbers by design (dv00899ai is DV-818AI) and stay number-free.
+	return cidMatchesRemasterFuzzyQuery(data.ContentID, queryID, foldedMarker, series)
 }
 
 // guardRemasterResult applies the marker guard to a fully parsed result:
