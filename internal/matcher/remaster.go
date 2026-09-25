@@ -5,6 +5,27 @@ import (
 	"strings"
 )
 
+// tagDelimiterClass is the closed, non-alphanumeric delimiter set shared by
+// every marker-tail boundary (the fused, separated, and long-number
+// normalizations plus the splitRemasterMarker remainder) and by the
+// content-id shape's remainder introducer: the ASCII separator family —
+// hyphen, underscore, dot, whitespace, and the square and round brackets —
+// plus the curly braces and CJK bracket pairs (〈〉《》「」『』【】〔〕) that
+// scene names ({1080p}) and JP-sourced names (【1080p】) wrap tags in. A tag
+// may sit directly against the remaster marker, so a boundary that accepts
+// one delimiter must accept the whole family: rejecting the brace forms
+// fails the marker-tail boundary, so a remastered release collapses to its
+// base id (ABC-123-HD{1080p} matched ABC-123) and the tier-2 content-id
+// shape loses the candidate the same way (1rct00156h{1080p} matched
+// nothing). The class stays bounded and non-alphanumeric rather than a \W
+// catch-all so a marker-bearing letter still fails the boundary and rejects
+// the marker (ABC-123-HDA keeps the base id, not a marker A). Fullwidth
+// ASCII delimiters （）｛｝ fold to their halfwidth members via
+// foldFullwidthASCII (the fold covers U+FF01-U+FF5E and the ideographic
+// space only), but the CJK brackets live outside that range and take
+// explicit membership here.
+const tagDelimiterClass = `[-_.\s[\](){}【】「」『』《》〈〉〔〕]`
+
 var (
 	// Volume suffixes ride the part-label groups (vol joins
 	// cd/disc/disk/pt/part): a fused vol after the remaster marker
@@ -17,8 +38,8 @@ var (
 	// r18.dev content-id prefix lookup (evol/gvol/qvol/zvol/vola/vold
 	// keep their leading letters), so the marker-boundary acceptance is
 	// safe and the suffix feeds part detection instead of the id.
-	fusedRemasterRegex     = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(t28|[a-z]+)((?:\d{1,3}|\d{6}))([ez]?)(hd|ai|h)(?:(cd|disc|disk|pt|part|vol)(\d{1,2}))?(?:$|[-_.\s[\]()])`)
-	separatedRemasterRegex = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(t28|[a-z]+)[._\s]+(\d{1,6})([ez]?)?[-._\s]?(hd|ai|h)(?:(cd|disc|disk|pt|part|vol)(\d{1,2}))?(?:$|[-_.\s[\]()])`)
+	fusedRemasterRegex     = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(t28|[a-z]+)((?:\d{1,3}|\d{6}))([ez]?)(hd|ai|h)(?:(cd|disc|disk|pt|part|vol)(\d{1,2}))?(?:$|` + tagDelimiterClass + `)`)
+	separatedRemasterRegex = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(t28|[a-z]+)[._\s]+(\d{1,6})([ez]?)?[-._\s]?(hd|ai|h)(?:(cd|disc|disk|pt|part|vol)(\d{1,2}))?(?:$|` + tagDelimiterClass + `)`)
 	// The compact 4-5-digit display number rides its own grammar beside
 	// the legacy fused one: the separated spelling (ABC.1234.HD) and the
 	// round-11 scraper classifier decision (zero-padding is the raw-cid
@@ -37,10 +58,10 @@ var (
 	// unless the caller's catalog-series discriminator (see
 	// catalogSeriesReleaseNumber) recognizes a catalog release number
 	// (MIAA1234HD), exactly like the separated spelling.
-	fusedLongNumberRemasterRegex = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])([a-z]{3,})((?:[1-9]\d{3,4}))([ez]?)(hd|ai|h)(?:(cd|disc|disk|pt|part|vol)(\d{1,2}))?(?:$|[-_.\s[\]()])`)
-	reRemasterRemainder          = regexp.MustCompile(`(?i)^[-_.\s]?(HD|AI|H)(?:(cd|disc|disk|pt|part|vol)\d{1,2})?(?:$|[-_.\s[\]()])`)
+	fusedLongNumberRemasterRegex = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])([a-z]{3,})((?:[1-9]\d{3,4}))([ez]?)(hd|ai|h)(?:(cd|disc|disk|pt|part|vol)(\d{1,2}))?(?:$|` + tagDelimiterClass + `)`)
+	reRemasterRemainder          = regexp.MustCompile(`(?i)^[-_.\s]?(HD|AI|H)(?:(cd|disc|disk|pt|part|vol)\d{1,2})?(?:$|` + tagDelimiterClass + `)`)
 	remasterCodecTailRegex       = regexp.MustCompile(`(?i)^[-_.\s]?\d{3}(?:\D|$)`)
-	contentIDShapeRegex          = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])((?:\d+(?:t28|[A-Za-z]+)\d+[A-Za-z]{0,3}|(?:t28|[A-Za-z]+)\d{4,5}[A-Za-z]{0,3}))(?:[-_.\s[\]()](.*)$|(?:cd|disc|disk|pt|part|vol)\d{1,2}$|$)`)
+	contentIDShapeRegex          = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])((?:\d+(?:t28|[A-Za-z]+)\d+[A-Za-z]{0,3}|(?:t28|[A-Za-z]+)\d{4,5}[A-Za-z]{0,3}))(?:` + tagDelimiterClass + `(.*)$|(?:cd|disc|disk|pt|part|vol)\d{1,2}$|$)`)
 	trailingCatalogIDRegex       = regexp.MustCompile(`(?i)(?:[a-z]{1,}-(?:\d{2}|[0-3689]\d\d|4[0-79]\d|48[1-9]|5[0-689]\d|57[0-57-9]|7[0-13-9]\d|72[1-9])\b|[a-z]{1,}-\d{6,}\b|[a-z]{1,}-\d{1,6}[-._\s]?(?:hd|ai|h)\b|t28-\d{1,}\b|[hn]_\d+[a-z]+\d+|\b[a-z]+\d{4,5}[a-z]{0,3}\b|\b\d+[a-z]{2,}\d+[a-z]{0,3}\b|\b(?:t28|[a-z]{1,})[-._\s]\d{1,6}[-._\s]?(?:hd|ai|h)\b|\b[a-z]{2,6}\d{1,6}\b|\b[a-z](?:\d{5}|\d{4}|[013-9]\d\d|2(?:[013-9]\d|4\d|6[0-36-9]))\b)`)
 	// Standard color/transfer metadata is matched as a class —
 	// (bt|rec|st|smpte) plus 3-4 digits with an optional dot or space — so

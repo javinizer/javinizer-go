@@ -27,6 +27,26 @@ func TestRemasterTrailingTags(t *testing.T) {
 		{"DV-818AI[1080p].mkv", "DV-818AI", "AI", PatternNone, 0},
 		{"RCT-156-HD(4K).mkv", "RCT-156H", "HD", PatternNone, 0},
 		{"ABC12H[4K].mkv", "ABC-12H", "H", PatternNone, 0},
+		// Curly and CJK bracket tags are tag delimiters like the square and
+		// round forms above: the marker survives a tag that directly abuts
+		// it, the fullwidth curly spelling rides the foldFullwidthASCII fold
+		// (the CJK brackets live outside the fold's range and are explicit
+		// members of the delimiter class), and the fused and tier-2 surfaces
+		// keep their ids through the same delimiters.
+		{"ABC-123-HD{1080p}.mkv", "ABC-123H", "HD", PatternNone, 0},
+		{"ABC-123-HD【1080p】.mkv", "ABC-123H", "HD", PatternNone, 0},
+		{"ABC-123-HD｛1080p｝.mkv", "ABC-123H", "HD", PatternNone, 0},
+		{"RCT-156-HD「4K」.mkv", "RCT-156H", "HD", PatternNone, 0},
+		{"ABC123HD{1080p}.mkv", "ABC-123H", "HD", PatternNone, 0},
+		{"1rct00156h{1080p}.mkv", "1RCT00156H", "", PatternNone, 0},
+		{"dv00899ai{1080p}.mkv", "DV00899AI", "", PatternNone, 0},
+		// The delimiter class stays non-alphanumeric and bounded: a
+		// marker-bearing letter still fails the boundary, and the quality
+		// vocabulary inside the new delimiters is still a vetoed tag rather
+		// than a replacement id.
+		{"ABC-123-HDA.mkv", "ABC-123", "", PatternNone, 0},
+		{"ABC.123.HD{BT601}.mkv", "ABC-123H", "HD", PatternNone, 0},
+		{"ABC.123.HD【BT601】.mkv", "ABC-123H", "HD", PatternNone, 0},
 		{"RCT-156-HDrip[4K].mkv", "RCT-156", "", PatternNone, 0},
 		{"RCT-156 HDrip 1080p.mkv", "RCT-156", "", PatternNone, 0},
 		{"RCT-156HDTV.mkv", "RCT-156", "", PatternNone, 0},
