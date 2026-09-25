@@ -32,6 +32,8 @@ func TestMatchFile_RemasterMarkers(t *testing.T) {
 		{"DV-818AI.mkv", "DV-818AI", "AI"},
 		{"DV-818-AI.mkv", "DV-818AI", "AI"},
 		{"IPX-535Z-HD.mkv", "IPX-535ZH", "HD"},
+		{"IPX-535-Z-HD.mkv", "IPX-535ZH", "HD"},
+		{"IPX.535.Z.HD.mkv", "IPX-535ZH", "HD"},
 		{"IPX-535-H.mkv", "IPX-535H", "H"},
 	}
 	for _, tc := range cases {
@@ -42,6 +44,84 @@ func TestMatchFile_RemasterMarkers(t *testing.T) {
 			assert.Equal(t, tc.wantMarker, got.RemasterMarker)
 			assert.Equal(t, 0, got.PartNumber)
 			assert.Equal(t, "", got.MultipartPattern)
+		})
+	}
+}
+
+// The E/Z catalog suffix separated from the number resolves to the same
+// canonical identity the scraper-side parsers (displayIdentityTuple /
+// parseRemasterTail) read from the same spellings: the separated remaster
+// grammar (the dot/underscore/space series-number separators) and the
+// marker-tail remainder path (the hyphenated family the built-in tier
+// owns) both accept the suffix with a separator on either side of it, so
+// every separator family collapses to SERIES-NUMBER<suffix><marker>
+// instead of the base id.
+func TestMatchFile_SeparatedCatalogSuffixRemaster(t *testing.T) {
+	m, err := NewMatcher(&Config{})
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name       string
+		wantID     string
+		wantMarker string
+	}{
+		// Hyphenated family: parsed by the marker-tail remainder path.
+		{"IPX-535-Z-HD.mkv", "IPX-535ZH", "HD"},
+		{"IPX-535-ZH.mkv", "IPX-535ZH", "H"},
+		{"IPX-535-ZHD.mkv", "IPX-535ZH", "HD"},
+		{"IPX-535-E-HD.mkv", "IPX-535EH", "HD"},
+		{"IPX-535-Z-AI.mkv", "IPX-535ZAI", "AI"},
+		{"ipx-535-z-hd.mkv", "IPX-535ZH", "HD"},
+		// Dot/underscore/space families: canonicalized by the separated
+		// remaster grammar's normalization.
+		{"IPX.535.Z.HD.mkv", "IPX-535ZH", "HD"},
+		{"IPX_535_Z_HD.mkv", "IPX-535ZH", "HD"},
+		{"IPX 535 Z HD.mkv", "IPX-535ZH", "HD"},
+		// Unseparated suffix spellings stay on their existing paths.
+		{"IPX-535Z-HD.mkv", "IPX-535ZH", "HD"},
+		{"IPX-535ZH.mkv", "IPX-535ZH", "H"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := matchOne(t, m, tc.name)
+			require.NotNil(t, got)
+			assert.Equal(t, tc.wantID, got.ID)
+			assert.Equal(t, tc.wantMarker, got.RemasterMarker)
+			assert.Equal(t, 0, got.PartNumber)
+			assert.Equal(t, "", got.MultipartPattern)
+			assert.Equal(t, tc.wantID, m.MatchString(tc.name), "MatchString keeps parity with MatchFile")
+		})
+	}
+}
+
+// The separated catalog suffix keeps the marker-tail path's existing
+// guardrails: a codec spelling after the marker still vetoes it (the base
+// id survives), AI still outranks the codec veto, and part labels and fps
+// shorthands after the marker still parse as parts and quality metadata
+// respectively.
+func TestMatchFile_SeparatedCatalogSuffixMarkerTailGuards(t *testing.T) {
+	m, err := NewMatcher(&Config{})
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name       string
+		wantID     string
+		wantMarker string
+		part       int
+		pattern    string
+	}{
+		{"IPX-535-Z-H.264.mkv", "IPX-535", "", 0, ""},
+		{"IPX-535-Z-HD.265.mkv", "IPX-535", "", 0, ""},
+		{"IPX-535-Z-AI.264.mkv", "IPX-535ZAI", "AI", 0, ""},
+		{"IPX-535-Z-HD-cd2.mkv", "IPX-535ZH", "HD", 2, PatternExplicit},
+		{"IPX-535-Z-HD-60.mkv", "IPX-535ZH", "HD", 0, PatternNone},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := matchOne(t, m, tc.name)
+			require.NotNil(t, got)
+			assert.Equal(t, tc.wantID, got.ID)
+			assert.Equal(t, tc.wantMarker, got.RemasterMarker)
+			assert.Equal(t, tc.part, got.PartNumber)
+			assert.Equal(t, tc.pattern, got.MultipartPattern)
 		})
 	}
 }

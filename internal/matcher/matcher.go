@@ -185,8 +185,8 @@ func (m *Matcher) matchWithRegex(file models.FileMatchInfo, filename string, pat
 		// The suffix comes after the actual match location: the id text may
 		// also occur earlier inside an ineligible token, and remainderAfterID
 		// would inspect the wrong occurrence.
-		if spelling, suffix := splitRemasterMarker(strings.TrimSpace(filename[loc[3]:])); spelling != "" {
-			result.ID += foldRemasterMarker(spelling)
+		if spelling, catalogSuffix, suffix := splitRemasterMarker(strings.TrimSpace(filename[loc[3]:])); spelling != "" {
+			result.ID += catalogSuffix + foldRemasterMarker(spelling)
 			result.RemasterMarker = spelling
 			num, partSuffix, patternType, trailingPrefix := DetectPartSuffix(suffix, "")
 			// A bare numeric right after a consumed marker is a part only
@@ -291,9 +291,11 @@ func (m *Matcher) MatchString(s string) string {
 	if loc != nil && !builtinMatchConflictsWithContentID(s, m.builtinPattern) && !builtinQualityShadowsContentID(s, strings.ToUpper(s[loc[2]:loc[3]])) {
 		id := strings.ToUpper(s[loc[2]:loc[3]])
 		// The suffix comes after the actual match location: the id text may
-		// also occur earlier inside an ineligible token.
-		if spelling := remasterMarkerSpelling(strings.TrimSpace(s[loc[1]:])); spelling != "" {
-			return id + foldRemasterMarker(spelling)
+		// also occur earlier inside an ineligible token. The E/Z catalog
+		// suffix letter rides onto the id ahead of the folded marker, exactly
+		// as matchWithRegex appends it for MatchFile parity.
+		if spelling, catalogSuffix := remasterMarkerSpelling(strings.TrimSpace(s[loc[1]:])); spelling != "" {
+			return id + catalogSuffix + foldRemasterMarker(spelling)
 		}
 		// Apply the same E/Z catalog-suffix stripping as matchWithRegex so MatchString
 		// stays consistent with MatchFile for downstream re-match callers (e.g. the

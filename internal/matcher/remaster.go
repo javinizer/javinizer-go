@@ -38,8 +38,25 @@ var (
 	// r18.dev content-id prefix lookup (evol/gvol/qvol/zvol/vola/vold
 	// keep their leading letters), so the marker-boundary acceptance is
 	// safe and the suffix feeds part detection instead of the id.
-	fusedRemasterRegex     = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(t28|[a-z]+)((?:\d{1,3}|\d{6}))([ez]?)(hd|ai|h)(?:(cd|disc|disk|pt|part|vol)(\d{1,2}))?(?:$|` + tagDelimiterClass + `)`)
-	separatedRemasterRegex = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(t28|[a-z]+)[._\s]+(\d{1,6})([ez]?)?[-._\s]?(hd|ai|h)(?:(cd|disc|disk|pt|part|vol)(\d{1,2}))?(?:$|` + tagDelimiterClass + `)`)
+	fusedRemasterRegex = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(t28|[a-z]+)((?:\d{1,3}|\d{6}))([ez]?)(hd|ai|h)(?:(cd|disc|disk|pt|part|vol)(\d{1,2}))?(?:$|` + tagDelimiterClass + `)`)
+	// The separated grammar accepts the E/Z catalog suffix with a separator
+	// on BOTH sides of it — the number may separate it from the marker
+	// either way (IPX-535Z-HD, IPX-535-ZHD, IPX-535-Z-HD, IPX.535.Z.HD) —
+	// matching the scraper-side identity parsers (parseRemasterTail /
+	// displayIdentityTuple), which strip a display id's separators before
+	// reading series, number, suffix and marker: permitting the separator
+	// only after the suffix read the separated spellings as the base id
+	// (IPX-535) with no marker, so the matcher and the scraper disagreed
+	// about the same filename. The normalization splices the pre-suffix
+	// separator out (see normalizeFusedRemasterFilename) so the canonical
+	// spelling keeps the suffix fused to the number (IPX-535Z-HD), the
+	// shape the built-in tier parses and the scraper search spellings
+	// share. The capture layout stays (series, number, E/Z suffix, marker,
+	// part label, part digits) so the caller's index handling stays uniform
+	// across the three grammars; the suffix group no longer participates
+	// when the spelling carries no suffix, which every caller guards with
+	// m[6] >= 0.
+	separatedRemasterRegex = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(t28|[a-z]+)[._\s]+(\d{1,6})(?:[-._\s]?([ez]))?[-._\s]?(hd|ai|h)(?:(cd|disc|disk|pt|part|vol)(\d{1,2}))?(?:$|` + tagDelimiterClass + `)`)
 	// The compact 4-5-digit display number rides its own grammar beside
 	// the legacy fused one: the separated spelling (ABC.1234.HD) and the
 	// round-11 scraper classifier decision (zero-padding is the raw-cid
@@ -59,10 +76,22 @@ var (
 	// catalogSeriesReleaseNumber) recognizes a catalog release number
 	// (MIAA1234HD), exactly like the separated spelling.
 	fusedLongNumberRemasterRegex = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])([a-z]{3,})((?:[1-9]\d{3,4}))([ez]?)(hd|ai|h)(?:(cd|disc|disk|pt|part|vol)(\d{1,2}))?(?:$|` + tagDelimiterClass + `)`)
-	reRemasterRemainder          = regexp.MustCompile(`(?i)^[-_.\s]?(HD|AI|H)(?:(cd|disc|disk|pt|part|vol)\d{1,2})?(?:$|` + tagDelimiterClass + `)`)
-	remasterCodecTailRegex       = regexp.MustCompile(`(?i)^[-_.\s]?\d{3}(?:\D|$)`)
-	contentIDShapeRegex          = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])((?:\d+(?:t28|[A-Za-z]+)\d+[A-Za-z]{0,3}|(?:t28|[A-Za-z]+)\d{4,5}[A-Za-z]{0,3}))(?:` + tagDelimiterClass + `(.*)$|(?:cd|disc|disk|pt|part|vol)\d{1,2}$|$)`)
-	trailingCatalogIDRegex       = regexp.MustCompile(`(?i)(?:[a-z]{1,}-(?:\d{2}|[0-3689]\d\d|4[0-79]\d|48[1-9]|5[0-689]\d|57[0-57-9]|7[0-13-9]\d|72[1-9])\b|[a-z]{1,}-\d{6,}\b|[a-z]{1,}-\d{1,6}[-._\s]?(?:hd|ai|h)\b|t28-\d{1,}\b|[hn]_\d+[a-z]+\d+|\b[a-z]+\d{4,5}[a-z]{0,3}\b|\b\d+[a-z]{2,}\d+[a-z]{0,3}\b|\b(?:t28|[a-z]{1,})[-._\s]\d{1,6}[-._\s]?(?:hd|ai|h)\b|\b[a-z]{2,6}\d{1,6}\b|\b[a-z](?:\d{5}|\d{4}|[013-9]\d\d|2(?:[013-9]\d|4\d|6[0-36-9]))\b)`)
+	// The marker-tail remainder accepts the E/Z catalog suffix with a
+	// separator on BOTH sides of it (IPX-535-Z-HD leaves "-Z-HD" after the
+	// built-in tier's id capture; IPX-535-ZH leaves "-ZH"), mirroring the
+	// both-sides separator the separated remaster grammar carries and the
+	// scraper identity parsers' separator-stripped tail parse: the built-in
+	// pattern cannot capture a suffix the separators split from the number,
+	// so without this slot the hyphenated spelling resolves to the base id
+	// (IPX-535) with no marker. The suffix letter is captured so
+	// splitRemasterMarker can hand it to the caller to ride onto the id the
+	// same way the folded marker does (IPX-535 + Z + H -> IPX-535ZH); the
+	// marker stays the first alternative that can match alone ("-HD",
+	// ".HD", " HD" keep their existing parse with no suffix).
+	reRemasterRemainder    = regexp.MustCompile(`(?i)^[-._\s]?(?:([ez])[-._\s]?)?(HD|AI|H)(?:(cd|disc|disk|pt|part|vol)\d{1,2})?(?:$|` + tagDelimiterClass + `)`)
+	remasterCodecTailRegex = regexp.MustCompile(`(?i)^[-_.\s]?\d{3}(?:\D|$)`)
+	contentIDShapeRegex    = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])((?:\d+(?:t28|[A-Za-z]+)\d+[A-Za-z]{0,3}|(?:t28|[A-Za-z]+)\d{4,5}[A-Za-z]{0,3}))(?:` + tagDelimiterClass + `(.*)$|(?:cd|disc|disk|pt|part|vol)\d{1,2}$|$)`)
+	trailingCatalogIDRegex = regexp.MustCompile(`(?i)(?:[a-z]{1,}-(?:\d{2}|[0-3689]\d\d|4[0-79]\d|48[1-9]|5[0-689]\d|57[0-57-9]|7[0-13-9]\d|72[1-9])\b|[a-z]{1,}-\d{6,}\b|[a-z]{1,}-\d{1,6}[-._\s]?(?:hd|ai|h)\b|t28-\d{1,}\b|[hn]_\d+[a-z]+\d+|\b[a-z]+\d{4,5}[a-z]{0,3}\b|\b\d+[a-z]{2,}\d+[a-z]{0,3}\b|\b(?:t28|[a-z]{1,})[-._\s]\d{1,6}[-._\s]?(?:hd|ai|h)\b|\b[a-z]{2,6}\d{1,6}\b|\b[a-z](?:\d{5}|\d{4}|[013-9]\d\d|2(?:[013-9]\d|4\d|6[0-36-9]))\b)`)
 	// Standard color/transfer metadata is matched as a class —
 	// (bt|rec|st|smpte) plus 3-4 digits with an optional dot or space — so
 	// dotless spellings (BT601, REC601, REC2020) and future standards
@@ -431,12 +460,28 @@ func normalizeFusedRemasterFilename(name string, builtinPattern *regexp.Regexp) 
 			return candidate + "-" + name[m[8]:m[9]] + remainder[candidateIndex[1]:]
 		}
 	}
+	// A separator between the number and the E/Z catalog suffix
+	// (IPX-535-Z-HD, IPX.535.Z.HD) is spliced out of the remainder so the
+	// suffix stays fused to the number in the canonical spelling
+	// (IPX-535Z-HD) the built-in tier parses — the same separator-stripped
+	// tail the scraper identity parsers read from a display id. The suffix
+	// group participates with at most one separator in front (see
+	// separatedRemasterRegex), so the splice removes that one character —
+	// the separator sitting immediately before the captured suffix letter —
+	// and the part-label offset below shifts with it; the fused grammars
+	// never carry the separator, so their spellings are untouched.
+	rest := name[m[4]:]
+	suffixSep := 0
+	if m[6] > m[5] {
+		sepAt := m[6] - m[4] - 1
+		rest = rest[:sepAt] + rest[sepAt+1:]
+		suffixSep = 1
+	}
 	// A fused part label directly after the marker (rct156hdcd2) is split
 	// off with a separator so the builtin marker and part detection see the
 	// canonical hyphenated spelling (rct-156hd-cd2).
-	rest := name[m[4]:]
 	if m[10] >= 0 {
-		labelStart := m[10] - m[4]
+		labelStart := m[10] - m[4] - suffixSep
 		rest = rest[:labelStart] + "-" + rest[labelStart:]
 	}
 	// A prefix-free compact t28 tail with a three-digit number reads as the
@@ -448,25 +493,39 @@ func normalizeFusedRemasterFilename(name string, builtinPattern *regexp.Regexp) 
 	return name[:m[3]] + "-" + rest
 }
 
-func splitRemasterMarker(remainder string) (string, string) {
+// splitRemasterMarker splits a marker-bearing remainder into the folded
+// marker spelling, the E/Z catalog suffix letter riding in front of the
+// marker, and the post-marker remainder. The separated catalog-suffix
+// spelling on the hyphenated family (IPX-535-Z-HD leaves "-Z-HD" after
+// the built-in tier's id) is parsed here — the hyphenated series-number
+// form never enters the separated remaster grammar, and the built-in
+// pattern cannot capture a suffix the separator splits from the number,
+// so the suffix letter rides onto the caller's id the same way the folded
+// marker does (IPX-535 + Z + H -> IPX-535ZH). A remainder with no marker
+// keeps its empty spelling, empty suffix, and the remainder verbatim.
+func splitRemasterMarker(remainder string) (string, string, string) {
 	remainder = strings.TrimSpace(remainder)
 	m := reRemasterRemainder.FindStringSubmatchIndex(remainder)
 	if m == nil {
-		return "", remainder
+		return "", "", remainder
 	}
-	marker := strings.ToUpper(remainder[m[2]:m[3]])
+	marker := strings.ToUpper(remainder[m[4]:m[5]])
 	// H/HD before codec digits stays ambiguous (H.264-class), but AI is an
 	// explicit release marker and must survive a following codec tag, and a
 	// resolution tag (720p, 1080i) is not a codec spelling.
-	if marker != "AI" && remasterCodecTailRegex.MatchString(remainder[m[3]:]) && !resolutionTailRegex.MatchString(remainder[m[3]:]) {
-		return "", remainder
+	if marker != "AI" && remasterCodecTailRegex.MatchString(remainder[m[5]:]) && !resolutionTailRegex.MatchString(remainder[m[5]:]) {
+		return "", "", remainder
 	}
-	return marker, remainder[m[3]:]
+	catalogSuffix := ""
+	if m[2] >= 0 {
+		catalogSuffix = strings.ToUpper(remainder[m[2]:m[3]])
+	}
+	return marker, catalogSuffix, remainder[m[5]:]
 }
 
-func remasterMarkerSpelling(remainder string) string {
-	spelling, _ := splitRemasterMarker(remainder)
-	return spelling
+func remasterMarkerSpelling(remainder string) (string, string) {
+	spelling, catalogSuffix, _ := splitRemasterMarker(remainder)
+	return spelling, catalogSuffix
 }
 
 func foldRemasterMarker(spelling string) string {
