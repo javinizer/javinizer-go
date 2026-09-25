@@ -224,6 +224,38 @@ func cidMatchesRemasterQuery(contentID, queryID, marker, series string) bool {
 	return true
 }
 
+// cidMatchesRemasterFuzzyQuery gates the Step-1 null-dvd_id fuzzy record for
+// marker queries, and is deliberately stricter than cidMatchesRemasterQuery
+// for H/HD spellings. An H/HD remaster content id keeps the display number
+// (1rct00156h is RCT-156H), so the recorded row's cid core number must equal
+// the query's number, padding-normalized — a stale same-series marker row for
+// a different release (1rct00157h for RCT-156H) must never be recorded as the
+// fuzzy fallback, or release 157's metadata would be published for release
+// 156 once the content-id variations miss. AI queries keep the
+// cidMatchesRemasterQuery acceptance verbatim: AI content ids diverge from
+// display numbers (dv00899ai is DV-818AI), so AI cannot number-bind and
+// stays number-free.
+func cidMatchesRemasterFuzzyQuery(contentID, queryID, marker, series string) bool {
+	if !cidMatchesRemasterQuery(contentID, queryID, marker, series) {
+		return false
+	}
+	if marker == "ai" {
+		// AI content ids diverge from display numbers (dv00899ai is
+		// DV-818AI): the marker-based acceptance is already the strongest
+		// available identity check.
+		return true
+	}
+	// H/HD remaster cids keep the display number: require the row's cid core
+	// number to equal the query's number, padding-normalized (1rct00156h
+	// matches RCT-156H; 1rct156h and RCT-00156-HD match too).
+	_, qNumber, _, _, qOK := r18ParseRemasterTail(queryID)
+	_, cNumber, _, _, cOK := r18ParseRemasterTail(contentID)
+	if !qOK || !cOK {
+		return false
+	}
+	return strings.TrimLeft(qNumber, "0") == strings.TrimLeft(cNumber, "0")
+}
+
 // rawRemasterCIDEqual compares a server-stated content id against a raw
 // marker-bearing query spelling: equal verbatim, or equal after padding
 // normalization — the unpadded query 1rct156h and the server's padded cid

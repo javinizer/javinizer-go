@@ -405,12 +405,14 @@ func (r *r18ContentIDResolver) ResolveURL(ctx context.Context, id string) (strin
 					// query. Record it as a fallback but keep trying variations —
 					// the content-id variation lookup below prefers canonical
 					// prefixes and avoids mislabeled duplicate dvd_id entries.
-					// Marker queries instead require the content_id to carry the
-					// marker (number equality is server-owned).
+					// Marker queries gate on marker identity; H/HD spellings
+					// additionally bind the query's core number, while AI cids
+					// diverge from display numbers and stay number-free (see
+					// cidMatchesRemasterFuzzyQuery).
 					if returnedDVDID == "" && fuzzyContentIDURL == "" {
 						fuzzyOK := contentIDCoreMatch(lookupData.ContentID, idVariation)
 						if foldedMarker != "" {
-							fuzzyOK = cidMatchesRemasterQuery(lookupData.ContentID, id, foldedMarker, markerSeries)
+							fuzzyOK = cidMatchesRemasterFuzzyQuery(lookupData.ContentID, id, foldedMarker, markerSeries)
 						}
 						if fuzzyOK {
 							fuzzyContentIDURL = fmt.Sprintf("%s/videos/vod/movies/detail/-/combined=%s/json", baseURL, lookupData.ContentID)
