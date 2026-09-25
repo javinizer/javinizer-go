@@ -53,6 +53,72 @@ func TestMatchFile_FullwidthSpellingsFoldToASCII(t *testing.T) {
 	assert.Equal(t, "RCT-156-HD", foldFullwidthASCII("RCT-156-HD"))
 }
 
+// A fullwidth extension (．ｍｋｖ) must fold and strip like an ASCII one in
+// MatchFile: the fold precedes the video-extension strip — mirroring
+// MatchString — so the extension resolves even when FileMatchInfo.Extension
+// is empty (a caller that derived no extension) or holds the folded ASCII
+// ".mkv" while Name keeps the raw fullwidth spelling (the scanner's folded
+// extension cannot be trimmed from the raw name). Without the fold-first
+// order the folded ".mkv" stays inside the stem and buries a trailing part
+// number behind it (the suffix would read "-2.mkv" and part 2 is lost).
+func TestMatchFile_FullwidthExtensionFoldThenStrip(t *testing.T) {
+	m, err := NewMatcher(&Config{})
+	require.NoError(t, err)
+
+	fwName := "RCT-156-HD-2．ｍｋｖ"
+	for _, ext := range []string{"", ".mkv"} {
+		t.Run("extension "+ext, func(t *testing.T) {
+			file := models.FileMatchInfo{Path: "/v/" + fwName, Name: fwName, Extension: ext}
+			got := m.MatchFile(file)
+			require.NotNil(t, got, "a fullwidth extension must resolve like an ASCII one")
+			assert.Equal(t, "RCT-156H", got.ID)
+			assert.Equal(t, "HD", got.RemasterMarker)
+			assert.Equal(t, 2, got.PartNumber, "the part number behind the fullwidth extension survives the fold+strip")
+			assert.Equal(t, "builtin", got.MatchedBy)
+			assert.Equal(t, "RCT-156H", m.MatchString(fwName))
+		})
+	}
+
+	// Fullwidth spelling throughout the name — including the part digit and
+	// the extension — keeps resolving, and the control: a plain ASCII
+	// extension is unaffected.
+	for _, tc := range []struct {
+		name, ext, wantID, marker string
+		part                      int
+	}{
+		{"ＲＣＴ-156-ＨＤ-２．ｍｋｖ", ".mkv", "RCT-156H", "HD", 2},
+		{"RCT-156-HD-2.mkv", ".mkv", "RCT-156H", "HD", 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := m.MatchFile(models.FileMatchInfo{Path: "/v/" + tc.name, Name: tc.name, Extension: tc.ext})
+			require.NotNil(t, got)
+			assert.Equal(t, tc.wantID, got.ID)
+			assert.Equal(t, tc.marker, got.RemasterMarker)
+			assert.Equal(t, tc.part, got.PartNumber)
+		})
+	}
+
+	// The custom regex keeps its raw-first contract with a fullwidth
+	// extension present: the first attempt sees the raw name with the
+	// unfoldable extension, and the folded retry sees the folded,
+	// extension-stripped stem.
+	rawCfg := &Config{RegexEnabled: true, RegexPattern: `(ＲＣＴ-\d+)`}
+	rawMatcher, err := NewMatcher(rawCfg)
+	require.NoError(t, err)
+	got := rawMatcher.MatchFile(models.FileMatchInfo{Path: "/v/ＲＣＴ-156．ｍｋｖ", Name: "ＲＣＴ-156．ｍｋｖ", Extension: ""})
+	require.NotNil(t, got, "a fullwidth-written custom regex must see the raw name including the fullwidth extension")
+	assert.Equal(t, "ＲＣＴ-156", got.ID)
+	assert.Equal(t, "regex", got.MatchedBy)
+
+	foldCfg := &Config{RegexEnabled: true, RegexPattern: `(RCT-\d+)`}
+	foldMatcher, err := NewMatcher(foldCfg)
+	require.NoError(t, err)
+	got = foldMatcher.MatchFile(models.FileMatchInfo{Path: "/v/ＲＣＴ-156．ｍｋｖ", Name: "ＲＣＴ-156．ｍｋｖ", Extension: ""})
+	require.NotNil(t, got, "a halfwidth-written custom regex must match via the folded, extension-stripped retry")
+	assert.Equal(t, "RCT-156", got.ID)
+	assert.Equal(t, "regex", got.MatchedBy)
+}
+
 // A fullwidth slash (／) inside a filename is a legal character, not a path
 // separator. MatchString must take the basename before folding — mirroring
 // MatchFile — so the folded slash cannot make filepath.Base discard the

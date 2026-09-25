@@ -100,8 +100,16 @@ func (m *Matcher) MatchFile(file models.FileMatchInfo) *MatchResult {
 	nameWithoutExt := strings.TrimSuffix(basename, file.Extension)
 	// Fullwidth ASCII spellings (ＲＣＴ-156-ＨＤ) fold to halfwidth for the
 	// automated tiers below; kana/kanji are untouched and the original
-	// FileMatchInfo is preserved unchanged.
-	foldedName := foldFullwidthASCII(nameWithoutExt)
+	// FileMatchInfo is preserved unchanged. The fold precedes the video-
+	// extension strip — mirroring MatchString — so a fullwidth extension
+	// folds and strips even when FileMatchInfo.Extension is empty (the
+	// raw-attempt contract above keeps the unfoldable extension out of the
+	// custom regex's first pass): the scanner folds the extension it
+	// derives, but a raw fullwidth extension in Name outlives TrimSuffix,
+	// and without the strip the folded ".mkv" would stay inside the stem
+	// and bury a trailing part number behind it (RCT-156-HD-2．ｍｋｖ would
+	// read the suffix as "-2.mkv" and lose part 2).
+	foldedName := stripVideoExtension(foldFullwidthASCII(nameWithoutExt))
 
 	// A user-specified custom regex outranks every automated tier and keeps
 	// its pre-folding semantics: it runs against the raw (unfolded) name

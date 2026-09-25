@@ -174,7 +174,7 @@ func (s *Scanner) ScanWithFilter(ctx context.Context, rootPath string, maxFiles 
 			fmi := models.FileMatchInfo{
 				Path:      path,
 				Name:      d.Name(),
-				Extension: filepath.Ext(path),
+				Extension: fileExtension(path),
 				Size:      info.Size(),
 				ModTime:   info.ModTime(),
 			}
@@ -264,7 +264,7 @@ func (s *Scanner) ScanSingle(path string) (*ScanResult, error) {
 				fmi := models.FileMatchInfo{
 					Path:      fullPath,
 					Name:      entryInfo.Name(),
-					Extension: filepath.Ext(fullPath),
+					Extension: fileExtension(fullPath),
 					Size:      entryInfo.Size(),
 					ModTime:   entryInfo.ModTime(),
 				}
@@ -280,7 +280,7 @@ func (s *Scanner) ScanSingle(path string) (*ScanResult, error) {
 			fmi := models.FileMatchInfo{
 				Path:      absPath,
 				Name:      info.Name(),
-				Extension: filepath.Ext(absPath),
+				Extension: fileExtension(absPath),
 				Size:      info.Size(),
 				ModTime:   info.ModTime(),
 			}
@@ -349,7 +349,7 @@ func (s *Scanner) ScanSingleFromHandle(dir *os.File, canonicalPath string) (*Sca
 			fmi := models.FileMatchInfo{
 				Path:      fullPath,
 				Name:      info.Name(),
-				Extension: filepath.Ext(fullPath),
+				Extension: fileExtension(fullPath),
 				Size:      info.Size(),
 				ModTime:   info.ModTime(),
 			}
@@ -364,8 +364,10 @@ func (s *Scanner) ScanSingleFromHandle(dir *os.File, canonicalPath string) (*Sca
 
 // shouldIncludeFile checks if a file should be included based on configuration
 func (s *Scanner) shouldIncludeFile(path string, entry os.DirEntry) bool {
-	// Check extension
-	ext := strings.ToLower(filepath.Ext(path))
+	// Check extension. Fullwidth-ext spellings (．ｍｋｖ) fold first so
+	// the same video file set accepts them and the folded ASCII extension
+	// matches the configured set.
+	ext := strings.ToLower(fileExtension(path))
 	_, hasValidExt := s.extSet[ext]
 	if !hasValidExt {
 		return false
@@ -427,7 +429,7 @@ func (s *Scanner) Filter(files []string) []models.FileMatchInfo {
 		fmi := models.FileMatchInfo{
 			Path:      path,
 			Name:      info.Name(),
-			Extension: filepath.Ext(path),
+			Extension: fileExtension(path),
 			Size:      info.Size(),
 			ModTime:   info.ModTime(),
 		}
