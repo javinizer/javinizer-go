@@ -49,7 +49,26 @@ var (
 	// boundary), so unlike the dts/flac/opus rate class no digit bound is
 	// needed: numerically prefixed content ids (189vvc00087) and lvvc
 	// series spellings (n_600lvvc123) keep matching as ids.
-	trailingQualityTagRegex           = regexp.MustCompile(`(?i)\b(?:[hx]26[3-9]|avc\d*|aac\d*|hevc\d*|vvc\d*|ac3|dts|flac|opus|truehd|vc1|av1|mp[34]|ddp\d*|eac3|divx\d*|xvid\d*|prores\d*|yuv\d*|rgb\d*|p0(?:10|16)|mpeg\d*|vp\d+|fhd\d{2,4}|uhd\d{2,4}|hdtv|hdr\d*|bt2020|bt709|rec709|smpte\d+|pq\d+|st2084|hlg\d*|ycbcr\d*|(?:bt|rec|st|smpte)[. ]?\d{3,4}|(?:l?pcm|dts|flac|opus)[. ]?\d{3,4}|\d+(?:bit|point)\d+)\b`)
+	// Compact source tags join the vocabulary as a class — web, remux,
+	// and bluray plus a 3-4 digit resolution number — because the compact
+	// spellings WEB2160, REMUX1080, and BLURAY2160 otherwise satisfy the
+	// builtin amateur pattern and the trailing catalog grammar as
+	// replacement catalog ids behind a separated remaster id. The bound
+	// mirrors the color/audio/codec classes because it mirrors the
+	// collision: resolution numbers are 3-4 digits (720, 1080, 2160), so
+	// two-digit numerals (WEB24) and five-plus-digit id-shaped tokens
+	// (WEB12345) stay catalog-id grammar. No web, remux, or bluray series
+	// exists in the r18.dev content-id prefix lookup (only fweb and ziweb,
+	// whose leading letters block the word boundary, exactly as lvvc does
+	// for the vvc codec-name alias), so the word-boundary anchor leaves
+	// numerically prefixed content ids (189web00087) alone and hyphenated
+	// display spellings (WEB-24) keep the separator's protection. The
+	// remaining probed source spellings stay id grammar on purpose: bd,
+	// dvd, blu, and ray are real series in the lookup table, so BD1080
+	// and DVD1080 tokens and the BLU-RAY1080 fragment (RAY1080) keep
+	// matching as ids, and the hyphenated WEB-2160 rides the trailing
+	// resolution grammar — a separate window this class does not touch.
+	trailingQualityTagRegex           = regexp.MustCompile(`(?i)\b(?:[hx]26[3-9]|avc\d*|aac\d*|hevc\d*|vvc\d*|ac3|dts|flac|opus|truehd|vc1|av1|mp[34]|ddp\d*|eac3|divx\d*|xvid\d*|prores\d*|yuv\d*|rgb\d*|p0(?:10|16)|mpeg\d*|vp\d+|fhd\d{2,4}|uhd\d{2,4}|hdtv|hdr\d*|bt2020|bt709|rec709|smpte\d+|pq\d+|st2084|hlg\d*|ycbcr\d*|(?:bt|rec|st|smpte)[. ]?\d{3,4}|(?:l?pcm|dts|flac|opus)[. ]?\d{3,4}|\d+(?:bit|point)\d+|(?:web|remux|bluray)\d{3,4})\b`)
 	trailingResolutionCatalogIDRegex  = regexp.MustCompile(`(?i)\b[a-z]+-(?:144|240|288|360|432|480|540|576|720|1080|2160)\b`)
 	trailingResolutionQualityTagRegex = regexp.MustCompile(`(?i)^(?:fhd|uhd|hd)-(?:144|240|288|360|432|480|540|576|720|1080|2160)$`)
 	// qualitySeriesNumberRegex recognizes a consumed remaster phrase that is

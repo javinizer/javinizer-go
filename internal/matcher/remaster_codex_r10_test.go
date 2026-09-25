@@ -195,6 +195,38 @@ func TestRemasterMarkerResolutionAndQualityLabels(t *testing.T) {
 		{"ABC.123.HD VVC00123.mkv", "ABC-123H"},
 		{"VVC266 1rct00156h.mkv", "1RCT00156H"},
 		{"189vvc00087.mkv", "189VVC00087"},
+		// Compact source tags are metadata too: the vocabulary's
+		// (?:web|remux|bluray)+digits class covers the compact
+		// source/resolution spellings that the builtin amateur pattern and
+		// the trailing catalog grammar would otherwise accept as replacement
+		// catalog ids.
+		{"ABC.123.HD WEB2160.mkv", "ABC-123H"},
+		{"ABC.123.HD.WEB2160.mkv", "ABC-123H"},
+		{"ABC.123.HD REMUX2160.mkv", "ABC-123H"},
+		{"ABC.123.HD WEB1080.mkv", "ABC-123H"},
+		{"ABC.123.HD WEB720.mkv", "ABC-123H"},
+		{"ABC.123.HD REMUX1080.mkv", "ABC-123H"},
+		{"ABC.123.HD REMUX720.mkv", "ABC-123H"},
+		{"ABC.123.HD BLURAY1080.mkv", "ABC-123H"},
+		{"ABC.123.HD BLURAY2160.mkv", "ABC-123H"},
+		// The source class is bounded like the audio and codec classes:
+		// two-digit numerals (WEB24) leave the separated id alone,
+		// five-plus-digit id-shaped tokens (WEB12345) stay catalog-id
+		// grammar, and zero-padded four-digit tokens (WEB0720) are compact
+		// source-tag spellings — no web series exists to own zero-padded
+		// raw ids — so they ride the class's 3-4 digit bound.
+		{"ABC.123.HD WEB24.mkv", "ABC-123H"},
+		{"ABC.123.HD WEB12345.mkv", "WEB12345"},
+		{"ABC.123.HD WEB0720.mkv", "ABC-123H"},
+		// No web or remux series exists in the r18.dev content-id prefix
+		// lookup, so the id grammar keeps its protections: numerically
+		// prefixed content ids keep the word boundary, the fweb series
+		// keeps its leading letter, and a leading source tag does not
+		// shadow a stronger raw id.
+		{"WEB2160 1rct00156h.mkv", "1RCT00156H"},
+		{"189web00087.mkv", "189WEB00087"},
+		{"fweb0123.mkv", "FWEB0123"},
+
 		// Plain forms are unchanged.
 		{"ABC.123.HD.mkv", "ABC-123H"},
 		{"RCT156H.mkv", "RCT-156H"},
@@ -301,6 +333,15 @@ func TestRemasterMarkerResolutionAndQualityLabels(t *testing.T) {
 	// The VVC codec-name spelling after a separated remaster id must not
 	// replace it either, and the marker stays intact.
 	for _, name := range []string{"ABC.123.HD VVC266.mkv", "ABC.123.HD.VVC266.mkv"} {
+		fileResult := matchOne(t, m, name)
+		require.NotNil(t, fileResult)
+		assert.Equal(t, "ABC-123H", fileResult.ID)
+		assert.Equal(t, "HD", fileResult.RemasterMarker)
+	}
+
+	// Compact source-tag metadata after a separated remaster id must not
+	// replace it, and the marker stays intact.
+	for _, name := range []string{"ABC.123.HD WEB2160.mkv", "ABC.123.HD REMUX2160.mkv", "ABC.123.HD BLURAY1080.mkv"} {
 		fileResult := matchOne(t, m, name)
 		require.NotNil(t, fileResult)
 		assert.Equal(t, "ABC-123H", fileResult.ID)
