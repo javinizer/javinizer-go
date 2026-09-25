@@ -397,17 +397,34 @@ func isRawRemasterContentIDQuery(id string) bool {
 var rawRemasterCIDShapeRegex = regexp.MustCompile(`^(?:\d+(?:t28|[a-z]+)\d+[a-z]{0,3}|(?:t28(?:0\d{4}|\d{3})|[a-z]+0\d{4})[a-z]{0,3})$`)
 
 // rawDisplayMatchesCID reports whether a server-provided display ID agrees
-// with the content id's nonnumeric identity (series, E/Z suffix, folded
-// marker). The number is server-owned and may legitimately diverge, but a
-// conflicting variant spelling would silently collapse catalog variants, so
+// with the content id's identity (series, E/Z suffix, folded marker) and, for
+// H/HD spellings, the padding-normalized number. An H/HD remaster content id
+// keeps the display number (1rct00156h is RCT-156H), so a conflicting dvd_id
+// (RCT-157-HD for cid 1rct00156h) is rejected instead of canonicalized and
+// published under the wrong release ID — the raw-CID analog of the
+// display-query guard (displayIDsMatchByIdentity) and the round-10/14 number
+// binding. AI content ids diverge from display numbers by design (dv00899ai
+// is DV-818AI), so AI keeps the number-free series/marker comparison;
 // unverifiable or conflicting displays leave the ID unset.
 func rawDisplayMatchesCID(cid, display string) bool {
-	cSeries, _, cEz, cMarker, cOk := r18ParseRemasterTail(cid)
-	dSeries, _, dEz, dMarker, dOk := r18ParseRemasterTail(display)
+	cSeries, cNumber, cEz, cMarker, cOk := r18ParseRemasterTail(cid)
+	dSeries, dNumber, dEz, dMarker, dOk := r18ParseRemasterTail(display)
 	if !cOk || !dOk {
 		return false
 	}
-	return cSeries == dSeries && cEz == dEz && foldMarkerSpelling(cMarker) == foldMarkerSpelling(dMarker)
+	if cSeries != dSeries || cEz != dEz || foldMarkerSpelling(cMarker) != foldMarkerSpelling(dMarker) {
+		return false
+	}
+	if foldMarkerSpelling(cMarker) == "ai" {
+		// AI content ids diverge from display numbers (dv00899ai is
+		// DV-818AI): the series/marker identity check is already the
+		// strongest available comparison, so AI stays number-free.
+		return true
+	}
+	// H/HD remaster cids keep the display number (1rct00156h is RCT-156H):
+	// require the display number to equal the cid number, padding-normalized
+	// (1rct00156h matches RCT-156-HD and RCT-00156-HD, rejects RCT-157-HD).
+	return strings.TrimLeft(cNumber, "0") == strings.TrimLeft(dNumber, "0")
 }
 
 func foldMarkerSpelling(marker string) string {
