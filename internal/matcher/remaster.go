@@ -33,8 +33,10 @@ var (
 	// spellings) and the t28 tail (t28123h is a raw cid per the same
 	// classifier, and prefix-free t28 numbers keep the T-series special
 	// case) stay on their existing paths. Four-plus-letter series pass
-	// this regex but bail as word-years in the caller (vacation2024hd),
-	// exactly like the separated spelling.
+	// this regex but bail as word-years in the caller (vacation2024hd)
+	// unless the caller's catalog-series discriminator (see
+	// catalogSeriesReleaseNumber) recognizes a catalog release number
+	// (MIAA1234HD), exactly like the separated spelling.
 	fusedLongNumberRemasterRegex = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])([a-z]{3,})((?:[1-9]\d{3,4}))([ez]?)(hd|ai|h)(?:(cd|disc|disk|pt|part|vol)(\d{1,2}))?(?:$|[-_.\s[\]()])`)
 	reRemasterRemainder          = regexp.MustCompile(`(?i)^[-_.\s]?(HD|AI|H)(?:(cd|disc|disk|pt|part|vol)\d{1,2})?(?:$|[-_.\s[\]()])`)
 	remasterCodecTailRegex       = regexp.MustCompile(`(?i)^[-_.\s]?\d{3}(?:\D|$)`)
@@ -282,6 +284,31 @@ func fusedRemasterSubmatchIndex(name string) []int {
 	return m
 }
 
+// catalogSeriesReleaseNumber reports whether a 4-5-digit number riding a
+// 4+-letter series word is a catalog release number rather than a prose
+// year phrase, on two axes a word-year never satisfies jointly. The series
+// must be written in catalog display case — all uppercase, the convention of
+// display filenames (MIAA1234HD, ABCD1234HD) — and the built-in matcher
+// itself must support the series+number spelling as a catalog id, which
+// bounds the series to the amateur alternative's 3-6 letters and the number
+// to its 3-4 digits (MIAA1234, ABCD1234; five-digit numbers and 7+-letter
+// words like BIRTHDAY2024 have no builtin series shape). Prose year phrases
+// fail at least one axis: lowercase spellings (birthday2024, sample2024)
+// keep the word-year bail even when the builtin pattern would match the
+// spelling (sample is six letters and sample2024 already matches the
+// amateur alternative), and all-caps words longer than the builtin series
+// shapes fail the builtin-support axis. The builtin match must span the
+// whole series+number so a partial hit inside a longer word cannot
+// masquerade as catalog support.
+func catalogSeriesReleaseNumber(series, number string, builtinPattern *regexp.Regexp) bool {
+	if series != strings.ToUpper(series) {
+		return false
+	}
+	seriesNumber := series + number
+	loc := builtinPattern.FindStringIndex(seriesNumber)
+	return loc != nil && loc[0] == 0 && loc[1] == len(seriesNumber)
+}
+
 func normalizeFusedRemasterFilename(name string, builtinPattern *regexp.Regexp) string {
 	m := fusedRemasterSubmatchIndex(name)
 	fused := m != nil
@@ -295,13 +322,18 @@ func normalizeFusedRemasterFilename(name string, builtinPattern *regexp.Regexp) 
 	// not a catalog number, on both separator-bearing surfaces (Vacation
 	// 2024 HD) and the compact long-number grammar (vacation2024hd). The
 	// legacy compact numbers (1-3, 6 digits) never collide with a year and
-	// keep their guard-free path.
+	// keep their guard-free path. The exception is a catalog series the
+	// built-in matcher itself supports: MIAA1234HD is a display release
+	// number, not a word plus a year, so the guard bypasses only the
+	// shapes catalogSeriesReleaseNumber accepts (MIAA.1234.HD canonicalizes
+	// too) and every other word-year spelling keeps the bail.
 	if n := m[5] - m[4]; n >= 4 && n <= 5 {
-		matchedID := name[m[2]:m[3]] + name[m[4]:m[5]]
+		series := name[m[2]:m[3]]
+		matchedID := series + name[m[4]:m[5]]
 		if m[6] >= 0 {
 			matchedID += name[m[6]:m[7]]
 		}
-		if weakWordYearRegex.MatchString(matchedID) {
+		if weakWordYearRegex.MatchString(matchedID) && !catalogSeriesReleaseNumber(series, name[m[4]:m[5]], builtinPattern) {
 			return normalizeFusedRemasterFilename(name[m[1]:], builtinPattern)
 		}
 	}

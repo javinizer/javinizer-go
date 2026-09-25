@@ -172,3 +172,62 @@ func TestFusedFourFiveDigitRemaster(t *testing.T) {
 	assert.Equal(t, "T-28123H", m.MatchString("t28123h.mkv"))
 	assert.Equal(t, "T-281234H", m.MatchString("t281234h.mkv"))
 }
+
+// A 4+-letter catalog series with a compact four-digit number canonicalizes
+// like its hyphenated spelling: the word-year guard bypasses the shapes
+// catalogSeriesReleaseNumber accepts — an all-uppercase series whose
+// series+number spelling the built-in matcher itself supports — so
+// MIAA1234HD resolves to MIAA-1234H (marker HD) instead of the raw tier-2
+// content id, and MIAA.1234.HD matches at all, exactly like MIAA-1234-HD.
+// Every other word-year spelling keeps the bail: lowercase prose words
+// (sample2024hd, birthday2024hd) and lowercase catalog spellings
+// (miaa1234hd) fail the display-case axis, all-caps words beyond the
+// builtin series shapes (BIRTHDAY2024) and five-digit numbers
+// (MIAA12345HD) fail the builtin-support axis, and all of them stay on
+// the raw tier-2 path with no marker.
+func TestFusedFourDigitLongSeriesRemaster(t *testing.T) {
+	m, err := NewMatcher(&Config{})
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name, id, marker string
+		part             int
+	}{
+		{"MIAA1234HD.mkv", "MIAA-1234H", "HD", 0},
+		{"MIAA1234H.mkv", "MIAA-1234H", "H", 0},
+		{"MIAA1234ZHD.mkv", "MIAA-1234ZH", "HD", 0},
+		{"MIAA.1234.HD.mkv", "MIAA-1234H", "HD", 0},
+		{"MIAA 1234 HD.mkv", "MIAA-1234H", "HD", 0},
+		{"MIAA-1234-HD.mkv", "MIAA-1234H", "HD", 0},
+		{"ABCD1234AI.mkv", "ABCD-1234AI", "AI", 0},
+		{"[site]MIAA1234HD.mkv", "MIAA-1234H", "HD", 0},
+		{"MIAA1234HD-pt2.mkv", "MIAA-1234H", "HD", 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := matchOne(t, m, tc.name)
+			require.NotNil(t, got)
+			assert.Equal(t, tc.id, got.ID)
+			assert.Equal(t, tc.id, m.MatchString(tc.name))
+			assert.Equal(t, tc.marker, got.RemasterMarker)
+			assert.Equal(t, tc.part, got.PartNumber)
+			assert.Equal(t, "builtin", got.MatchedBy)
+		})
+	}
+	// Word-year spellings that fail at least one discriminator axis keep
+	// the raw tier-2 content id with no marker.
+	for _, tc := range []struct{ name, id string }{
+		{"sample2024hd.mkv", "SAMPLE2024HD"},
+		{"birthday2024hd.mkv", "BIRTHDAY2024HD"},
+		{"BIRTHDAY2024HD.mkv", "BIRTHDAY2024HD"},
+		{"miaa1234hd.mkv", "MIAA1234HD"},
+		{"MIAA12345HD.mkv", "MIAA12345HD"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := matchOne(t, m, tc.name)
+			require.NotNil(t, got)
+			assert.Equal(t, tc.id, got.ID)
+			assert.Equal(t, tc.id, m.MatchString(tc.name))
+			assert.Equal(t, "contentid", got.MatchedBy)
+			assert.Empty(t, got.RemasterMarker)
+		})
+	}
+}
