@@ -346,6 +346,11 @@ func stripVideoExtension(s string) string {
 //     AND same TrailingPrefix.
 //   - Any letter file not confirmed has PartNumber/PartSuffix cleared.
 //   - Letter part numbers must not collide with explicit/trailing-confirmed parts.
+//   - A bare-H remaster match demoted to part 8 (see applyRemasterDemotions)
+//     survives only when the augmented part set is coherent — the pinned
+//     A,B,H shape (parts 1, 2, 8) or a contiguous run 1..N completed by
+//     part 8; any other shape fails validation and restores the remaster
+//     spelling.
 //
 // This prevents false positives for:
 //   - "ABW-121-C.mp4" where -C means Chinese subtitles, not part 3
@@ -363,7 +368,11 @@ func ValidateMultipartInDirectory(results []MatchResult) []MatchResult {
 	copy(validated, results)
 
 	demoted := applyRemasterDemotions(validated)
-	validateMultipartGroups(validated)
+	demotedIdx := make(map[int]bool, len(demoted))
+	for _, d := range demoted {
+		demotedIdx[d.idx] = true
+	}
+	validateMultipartGroups(validated, demotedIdx)
 
 	if len(demoted) > 0 {
 		failedGroups := make(map[dirIDKey]bool)
@@ -378,7 +387,7 @@ func ValidateMultipartInDirectory(results []MatchResult) []MatchResult {
 					validated[i] = results[i]
 				}
 			}
-			validateMultipartGroups(validated)
+			validateMultipartGroups(validated, demotedIdx)
 		}
 		for _, d := range demoted {
 			if validated[d.idx].IsMultiPart {
@@ -391,12 +400,16 @@ func ValidateMultipartInDirectory(results []MatchResult) []MatchResult {
 }
 
 // applyRemasterDemotions tentatively rewrites bare-H remaster matches as
-// multipart part 8 of the base ID when the same-directory bare-letter
-// siblings form exactly the contiguous A,B run of the classic two-part
-// original. Larger, gapped, or offset letter sets describe a multi-part
-// original whose part 8 is unreachable, so the remaster reading wins.
-// Returns the indices that were demoted; callers must treat demotion as
-// provisional and roll everything back if a demoted result fails validation.
+// multipart part 8 of the base ID when at least two same-directory
+// bare-letter siblings with distinct part numbers corroborate the multipart
+// reading. Corroboration is deliberately permissive — any distinct letter
+// set qualifies, not only the classic A,B pair — because the bet stays
+// provisional: validateMultipartGroups keeps the demotion only when the
+// augmented part set is coherent (the pinned A,B,H shape, or a contiguous
+// run that part 8 completes), and any other shape rolls back to the
+// remaster spelling. Returns the indices that were demoted; callers must
+// treat demotion as provisional and roll everything back if a demoted
+// result fails validation.
 func applyRemasterDemotions(validated []MatchResult) []demotion {
 	var demoted []demotion
 	for i, r := range validated {
@@ -424,7 +437,10 @@ func applyRemasterDemotions(validated []MatchResult) []demotion {
 			}
 			siblingParts[sib.PartNumber] = struct{}{}
 		}
-		if !contiguousABLetterRun(siblingParts) {
+		// A single distinct bare-letter sibling (or none) does not
+		// corroborate the multipart reading; any distinct set of two or
+		// more does, and the group validation layer settles coherence.
+		if len(siblingParts) < 2 {
 			continue
 		}
 		validated[i].ID = baseID
@@ -436,23 +452,38 @@ func applyRemasterDemotions(validated []MatchResult) []demotion {
 	return demoted
 }
 
-// contiguousABLetterRun reports whether the distinct sibling letter parts
-// are exactly the A,B pair: two parts, starting at A, with no gap. Only that
-// shape demotes a bare-H match to part 8 (the pinned A,B,H bet); three or
-// more visible letters, a gap, or a set without A read as a multi-part
-// original where part 8 cannot exist, and the remaster spelling survives.
-func contiguousABLetterRun(parts map[int]struct{}) bool {
-	if len(parts) != 2 {
-		return false
+// coherentDemotedPartSet reports whether an augmented bare-letter part set —
+// the corroborating siblings plus the demoted part 8 — is a shape the
+// directory can explain. Exactly two shapes qualify: the pinned A,B,H bet
+// (parts 1, 2 and 8 — the classic two-part original whose remaster files as
+// part 8 of the group), and a contiguous run 1..N that part 8 completes
+// (N >= 8; the H file is the genuine eighth part of an eight-or-more-part
+// original). Every other shape — a three-or-more-part original whose part 8
+// cannot exist, a gapped or offset run — is incoherent: the group must not
+// confirm, the demotion rolls back, and the remaster spelling survives.
+func coherentDemotedPartSet(countByPart map[int]int) bool {
+	if len(countByPart) == 3 {
+		_, hasA := countByPart[1]
+		_, hasB := countByPart[2]
+		_, hasH := countByPart[8]
+		return hasA && hasB && hasH
 	}
-	if _, hasA := parts[1]; !hasA {
-		return false
+	// A contiguous run 1..N with N == len(countByPart): every part from 1
+	// through N is present. Part 8 is always in the set (the demotion put
+	// it there), so a passing run always includes part 8.
+	n := len(countByPart)
+	for p := 1; p <= n; p++ {
+		if _, ok := countByPart[p]; !ok {
+			return false
+		}
 	}
-	_, hasB := parts[2]
-	return hasB
+	return true
 }
 
-func validateMultipartGroups(validated []MatchResult) {
+// demotedIdx carries the indices applyRemasterDemotions tentatively
+// rewrote; a letter set containing one of them confirms only when the
+// augmented part set is coherent (see coherentDemotedPartSet).
+func validateMultipartGroups(validated []MatchResult, demotedIdx map[int]bool) {
 	// Group by (directory, movieID)
 	groups := make(map[dirIDKey][]int)
 
@@ -548,6 +579,19 @@ func validateMultipartGroups(validated []MatchResult) {
 				if _, ok := confirmedLetterParts[pn]; ok {
 					return
 				}
+			}
+			// A set carrying a demoted part-8 entry confirms only when the
+			// augmented part set is coherent; an incoherent set does not
+			// confirm, so the demotion rolls back to the remaster spelling
+			// (the caller restores the original results and revalidates).
+			for _, idx := range set {
+				if !demotedIdx[idx] {
+					continue
+				}
+				if !coherentDemotedPartSet(countByPart) {
+					return
+				}
+				break
 			}
 			for _, idx := range set {
 				validated[idx].IsMultiPart = true
