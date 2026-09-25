@@ -88,7 +88,8 @@ func TestPageDisplayIdentityMatchesQueryGuards(t *testing.T) {
 		want  bool
 	}{
 		{"nil document keeps existing behavior", nil, "DV-818AI", true},
-		{"unparseable display keeps existing behavior", page("???"), "DV-818AI", true},
+		{"missing display value keeps existing behavior", page("???"), "DV-818AI", true},
+		{"unparseable display keeps existing behavior", page("12345"), "DV-818AI", true},
 		{"unparseable query keeps existing behavior", page("DV-818-AI"), "remastered", true},
 		{"mismatched release rejects", page("DV-819-AI"), "DV-818AI", false},
 		{"matching release accepts", page("DV-818-AI"), "DV-818AI", true},
