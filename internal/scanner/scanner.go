@@ -362,6 +362,29 @@ func (s *Scanner) ScanSingleFromHandle(dir *os.File, canonicalPath string) (*Sca
 	return result, nil
 }
 
+// excludedByName reports whether any configured exclusion glob matches the
+// basename in either of its two spellings. The raw basename is matched so
+// fullwidth exclusion patterns keep hitting fullwidth names exactly where
+// they did before folding existed; the folded basename is matched as well
+// because the extension check admits fullwidth spellings (．ｍｋｖ → .mkv)
+// as videos — a fullwidth filename (ＡＢＣ－１２３－ｓａｍｐｌｅ．ｍｋｖ) must
+// therefore trigger the same ASCII exclusion globs (*-sample*) that its
+// ASCII spelling would, instead of proceeding to matching and organization.
+func (s *Scanner) excludedByName(basename string) bool {
+	folded := foldFullwidthASCII(basename)
+	for _, pattern := range s.config.ExcludePatterns {
+		if matched, err := filepath.Match(pattern, basename); err == nil && matched {
+			return true
+		}
+		if folded != basename {
+			if matched, err := filepath.Match(pattern, folded); err == nil && matched {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // shouldIncludeFile checks if a file should be included based on configuration
 func (s *Scanner) shouldIncludeFile(path string, entry os.DirEntry) bool {
 	// Check extension. Fullwidth-ext spellings (．ｍｋｖ) fold first so
@@ -374,12 +397,8 @@ func (s *Scanner) shouldIncludeFile(path string, entry os.DirEntry) bool {
 	}
 
 	// Check exclude patterns (glob patterns)
-	basename := filepath.Base(path)
-	for _, pattern := range s.config.ExcludePatterns {
-		matched, err := filepath.Match(pattern, basename)
-		if err == nil && matched {
-			return false
-		}
+	if s.excludedByName(filepath.Base(path)) {
+		return false
 	}
 
 	// Check minimum file size

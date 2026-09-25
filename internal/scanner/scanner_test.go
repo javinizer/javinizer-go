@@ -375,6 +375,9 @@ func TestScanner_ExcludePatterns(t *testing.T) {
 		{"SAMPLE-movie.mp4", []string{"SAMPLE-*"}, false},   // Match uppercase at start
 		{"movie.mp4", []string{"*-trailer*", "*-sample*"}, true},
 		{"trailer-movie.mp4", []string{"trailer-*"}, false},
+		{"ＡＢＣ－１２３－ｓａｍｐｌｅ．ｍｐ４", []string{"*-sample*"}, false}, // Folded basename triggers the ASCII glob
+		{"ＡＢＣ－９９９．ｍｐ４", []string{"*-sample*"}, true},         // Fullwidth name matching no exclusion proceeds
+		{"ＡＢＣ－７７７．ｍｐ４", []string{"ＡＢＣ－７７７*"}, false},         // Fullwidth pattern still matches the raw name
 	}
 
 	for _, tc := range testCases {
