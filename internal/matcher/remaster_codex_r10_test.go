@@ -14,6 +14,7 @@ import (
 func TestBuiltinQualityShadowsContentID(t *testing.T) {
 	assert.True(t, builtinQualityShadowsContentID("x265 1rct00156h", "x265"))
 	assert.False(t, builtinQualityShadowsContentID("x265", "x265"))
+	assert.True(t, builtinQualityShadowsContentID("PCM192 1rct00156h", "PCM192"))
 }
 
 func TestRemasterMarkerResolutionAndQualityLabels(t *testing.T) {
@@ -107,6 +108,28 @@ func TestRemasterMarkerResolutionAndQualityLabels(t *testing.T) {
 		{"ABC.123.HD BT-601.mkv", "BT-601"},
 		{"ABC.123.HD ABC987.mkv", "ABC987"},
 		{"BT601 1rct00156h.mkv", "1RCT00156H"},
+		// Lossless-audio sample rates are metadata too: the vocabulary's
+		// (l)pcm+digits class covers the 3-4-digit sample rates (192, 384,
+		// 768, 1411) that the builtin amateur pattern would otherwise
+		// accept, along with dotted and spaced spellings.
+		{"ABC.123.HD PCM192.mkv", "ABC-123H"},
+		{"ABC.123.HD LPCM384.mkv", "ABC-123H"},
+		{"ABC.123.HD PCM768.mkv", "ABC-123H"},
+		{"ABC.123.HD LPCM1411.mkv", "ABC-123H"},
+		{"ABC.123.HD PCM.192.mkv", "ABC-123H"},
+		{"ABC.123.HD LPCM.384.mkv", "ABC-123H"},
+		{"ABC.123.HD PCM 192.mkv", "ABC-123H"},
+		// The audio class is bounded like the color class: two-digit
+		// numbers (PCM12, PCM96) leave the separated id alone, five-digit
+		// id-shaped tokens and hyphenated spellings stay catalog-id
+		// grammar, a non-audio trailing token still replaces the separated
+		// id, and a leading PCM token does not shadow a strong raw id.
+		{"ABC.123.HD PCM12.mkv", "ABC-123H"},
+		{"ABC.123.HD PCM96.mkv", "ABC-123H"},
+		{"ABC.123.HD PCM00123.mkv", "PCM00123"},
+		{"ABC.123.HD PCM-192.mkv", "PCM-192"},
+		{"ABC.123.HD HIKARI345.mkv", "HIKARI345"},
+		{"PCM192 1rct00156h.mkv", "1RCT00156H"},
 		{"QUALITY 1080 HD ABCDEFGHI.123.HD.mkv", "ABCDEFGHI-123H"},
 		{"birthday2024.mkv", ""},
 		{"birthday2024hdr.mkv", ""},
@@ -212,6 +235,15 @@ func TestRemasterMarkerResolutionAndQualityLabels(t *testing.T) {
 	// Dotless standard color/transfer metadata (BT.601, Rec.601, Rec.2020)
 	// must not replace the separated id, and the marker stays intact.
 	for _, name := range []string{"ABC.123.HD BT601.mkv", "ABC.123.HD REC601.mkv", "ABC.123.HD REC2020.mkv"} {
+		fileResult := matchOne(t, m, name)
+		require.NotNil(t, fileResult)
+		assert.Equal(t, "ABC-123H", fileResult.ID)
+		assert.Equal(t, "HD", fileResult.RemasterMarker)
+	}
+
+	// Lossless-audio sample-rate metadata after a separated remaster id
+	// must not replace it, and the marker stays intact.
+	for _, name := range []string{"ABC.123.HD PCM192.mkv", "ABC.123.HD LPCM384.mkv"} {
 		fileResult := matchOne(t, m, name)
 		require.NotNil(t, fileResult)
 		assert.Equal(t, "ABC-123H", fileResult.ID)

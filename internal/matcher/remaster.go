@@ -19,7 +19,16 @@ var (
 	// instead of arriving one review round at a time. The class is bounded:
 	// two-digit numbers (REC12), five-plus-digit id-shaped tokens (BT60123),
 	// and hyphenated spellings (BT-601) stay catalog-id grammar.
-	trailingQualityTagRegex           = regexp.MustCompile(`(?i)\b(?:[hx]26[3-9]|avc\d*|aac\d*|hevc\d*|ac3|dts|flac|opus|truehd|vc1|av1|mp[34]|ddp\d*|eac3|divx\d*|xvid\d*|prores\d*|yuv\d*|rgb\d*|p0(?:10|16)|mpeg\d*|vp\d+|fhd\d{2,4}|uhd\d{2,4}|hdtv|hdr\d*|bt2020|bt709|rec709|smpte\d+|pq\d+|st2084|hlg\d*|ycbcr\d*|(?:bt|rec|st|smpte)[. ]?\d{3,4}|\d+(?:bit|point)\d+)\b`)
+	// Lossless-audio sample rates get the same class treatment — (l)pcm
+	// plus 3-4 digits with an optional dot or space — so PCM192, LPCM384,
+	// and PCM.768 spellings are vetoed like the dts/flac literals instead
+	// of matching the builtin amateur pattern. The bound mirrors the color
+	// class because it mirrors the collision: two-digit numbers (PCM12,
+	// PCM96) and five-plus-digit id-shaped tokens (PCM00123) stay
+	// catalog-id grammar, and hyphenated spellings (PCM-192) do too. Real
+	// pcm-series ids are prefix-pinned (5pcm013, n_600pcm00103), so the
+	// word-boundary anchor leaves them alone.
+	trailingQualityTagRegex           = regexp.MustCompile(`(?i)\b(?:[hx]26[3-9]|avc\d*|aac\d*|hevc\d*|ac3|dts|flac|opus|truehd|vc1|av1|mp[34]|ddp\d*|eac3|divx\d*|xvid\d*|prores\d*|yuv\d*|rgb\d*|p0(?:10|16)|mpeg\d*|vp\d+|fhd\d{2,4}|uhd\d{2,4}|hdtv|hdr\d*|bt2020|bt709|rec709|smpte\d+|pq\d+|st2084|hlg\d*|ycbcr\d*|(?:bt|rec|st|smpte)[. ]?\d{3,4}|l?pcm[. ]?\d{3,4}|\d+(?:bit|point)\d+)\b`)
 	trailingResolutionCatalogIDRegex  = regexp.MustCompile(`(?i)\b[a-z]+-(?:144|240|288|360|432|480|540|576|720|1080|2160)\b`)
 	trailingResolutionQualityTagRegex = regexp.MustCompile(`(?i)^(?:fhd|uhd|hd)-(?:144|240|288|360|432|480|540|576|720|1080|2160)$`)
 	remasterPartLabelRegex            = regexp.MustCompile(`(?i)\b(?:part|pt|disc|vol|cd)-?\d{1,2}\b`)
