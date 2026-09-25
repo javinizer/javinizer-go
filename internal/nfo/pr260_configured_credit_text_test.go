@@ -13,7 +13,7 @@ func TestPR260ConfiguredTextUsesCreditDisplayPolicy(t *testing.T) {
 	canonical := models.Actress{FirstName: "Canonical", LastName: "One", Verified: true}
 	forced := models.Actress{FirstName: "Canonical", LastName: "Two", Verified: true}
 	overridden := models.Actress{FirstName: "Canonical", LastName: "Three", Verified: true}
-	quarantined := models.Actress{FirstName: "Quarantined", LastName: "Person", Verified: false}
+	quarantined := models.Actress{FirstName: "Quarantined", LastName: "Person", Verified: false, AmbiguityQuarantined: true}
 	suppressed := models.Actress{FirstName: "Suppressed", LastName: "Person", Verified: true}
 	movie := &models.Movie{
 		ID:        "CREDIT-TEXT",

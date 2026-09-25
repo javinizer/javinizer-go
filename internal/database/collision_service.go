@@ -202,21 +202,23 @@ func (s *CollisionService) resolveTx(tx *gorm.DB, collisionID uint, resolution s
 		case models.CreditFieldCreditedName:
 			if isCJK(collision.ReportedValue) {
 				if err := tx.Model(&models.Actress{}).Where("id = ?", credit.ActressID).Updates(map[string]interface{}{
-					colJapaneseName: collision.ReportedValue,
-					colOrigin:       ActressOriginUser,
-					colVerified:     true,
-					colUpdatedAt:    time.Now().UTC(),
+					colJapaneseName:         collision.ReportedValue,
+					colOrigin:               ActressOriginUser,
+					colVerified:             true,
+					colAmbiguityQuarantined: false,
+					colUpdatedAt:            time.Now().UTC(),
 				}).Error; err != nil {
 					return 0, wrapDBErr("adopt canonical", fmt.Sprintf("actress %d", credit.ActressID), err)
 				}
 			} else {
 				first, last := splitReportedName(collision.ReportedValue)
 				if err := tx.Model(&models.Actress{}).Where("id = ?", credit.ActressID).Updates(map[string]interface{}{
-					colFirstName: first,
-					colLastName:  last,
-					colOrigin:    ActressOriginUser,
-					colVerified:  true,
-					colUpdatedAt: time.Now().UTC(),
+					colFirstName:            first,
+					colLastName:             last,
+					colOrigin:               ActressOriginUser,
+					colVerified:             true,
+					colAmbiguityQuarantined: false,
+					colUpdatedAt:            time.Now().UTC(),
 				}).Error; err != nil {
 					return 0, wrapDBErr("adopt canonical", fmt.Sprintf("actress %d", credit.ActressID), err)
 				}
