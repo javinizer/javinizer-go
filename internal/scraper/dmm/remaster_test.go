@@ -316,8 +316,26 @@ func TestPageRemasterDisplayID_RequiresSuffixMatch(t *testing.T) {
 		`<html><body><table><tr><td>品番：</td><td>IPX-535-H</td></tr></table></body></html>`))
 	require.NoError(t, err)
 
-	assert.Equal(t, "IPX-535H", pageRemasterDisplayID(doc, "ipx", "h", ""))
-	assert.Equal(t, "", pageRemasterDisplayID(doc, "ipx", "h", "e"), "page display missing the query's E/Z suffix must not be trusted")
+	assert.Equal(t, "IPX-535H", pageRemasterDisplayID(doc, "1ipx00535h", "ipx", "h", ""))
+	assert.Equal(t, "", pageRemasterDisplayID(doc, "1ipx00535h", "ipx", "h", "e"), "page display missing the query's E/Z suffix must not be trusted")
+}
+
+// H/HD remaster cids keep the display number, so a same-series 品番 numbering
+// another release (a redirect or a served mismatched page for cid=1rct00156h
+// under RCT-157-HD) must be ignored like the other mismatch cases instead of
+// re-keying the release. AI numbers diverge from the cid by design, so AI
+// rows keep outranking it.
+func TestPageRemasterDisplayID_RequiresNumberMatch(t *testing.T) {
+	assert.Equal(t, "", pageRemasterDisplayID(doc2(t, "RCT-157-HD"), "1rct00156h", "rct", "h", ""),
+		"page display numbering another release must not be trusted")
+	assert.Equal(t, "RCT-156H", pageRemasterDisplayID(doc2(t, "RCT-156-HD"), "1rct00156h", "rct", "h", ""))
+	// Padding differences normalize on both sides (cid 00156, page 0156).
+	assert.Equal(t, "RCT-156H", pageRemasterDisplayID(doc2(t, "RCT-00156-HD"), "1rct00156h", "rct", "h", ""))
+	assert.Equal(t, "DV-818AI", pageRemasterDisplayID(doc2(t, "DV-818-AI"), "dv00899ai", "dv", "ai", ""),
+		"AI numbers diverge from the cid by design: the page stays authoritative")
+	// A cid without a parseable number binds nothing beyond the marker-based
+	// acceptance (mirroring cachedRemasterIdentityMatches).
+	assert.Equal(t, "IPX-535H", pageRemasterDisplayID(doc2(t, "IPX-535-H"), "not-a-cid", "ipx", "h", ""))
 }
 
 func TestExtractDisplayID(t *testing.T) {

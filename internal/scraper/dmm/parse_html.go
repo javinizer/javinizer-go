@@ -75,7 +75,7 @@ func (s *scraper) extractIdentifiers(result *models.ScraperResult, doc *goquery.
 				} else if strings.HasSuffix(result.ID, "HD") {
 					result.ID = result.ID[:len(result.ID)-2] + "H"
 				}
-				if pageID := pageRemasterDisplayID(doc, series, marker, catalogSuffix); pageID != "" {
+				if pageID := pageRemasterDisplayID(doc, cid, series, marker, catalogSuffix); pageID != "" {
 					result.ID = pageID
 				}
 			}

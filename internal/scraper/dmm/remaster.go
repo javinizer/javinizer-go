@@ -654,8 +654,14 @@ func displayIdentityTuple(display string) (series, value, suffix, marker string,
 // DV-818AI), so the page value outranks the CID-derived spelling; markerless
 // rows, foreign series, mismatched markers and mismatched E/Z catalog
 // suffixes are ignored so a derived identity never loses its edition suffix
-// or collapses onto the base release.
-func pageRemasterDisplayID(doc *goquery.Document, series, foldedMarker, catalogSuffix string) string {
+// or collapses onto the base release. H/HD remaster cids keep the display
+// number (1rct00156h is RCT-156H), so an H/HD row must also carry the cid's
+// padding-normalized number: a redirect or a served page for another
+// release (cid=1rct00156h under RCT-157-HD) is ignored like the other
+// mismatch cases instead of re-keying the metadata onto the wrong release.
+// AI numbers diverge from the cid by design, so AI rows keep the
+// page-outranks-cid rule.
+func pageRemasterDisplayID(doc *goquery.Document, cid, series, foldedMarker, catalogSuffix string) string {
 	if doc == nil {
 		return ""
 	}
@@ -670,6 +676,17 @@ func pageRemasterDisplayID(doc *goquery.Document, series, foldedMarker, catalogS
 	pSeries, number, ez, marker, ok := displayIdentityTuple(display)
 	if !ok || pSeries != series || ez != catalogSuffix || marker != foldedMarker {
 		return ""
+	}
+	if marker != "ai" {
+		// The cid-side analog of cachedRemasterIdentityMatches' number
+		// binding: an H/HD 品番 numbering a different release than the cid
+		// must not replace the derived identity. A cid without a parseable
+		// number binds nothing beyond the marker-based acceptance already
+		// applied.
+		cidNumber, cidOK := remasterTailNumber(cid)
+		if cidOK && trimDisplayZeros(cidNumber) != number {
+			return ""
+		}
 	}
 	// Render from the verified split rather than re-parsing the compact form,
 	// which cannot distinguish T-28123H from T28-123H.
