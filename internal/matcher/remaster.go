@@ -31,16 +31,36 @@ var (
 	trailingQualityTagRegex           = regexp.MustCompile(`(?i)\b(?:[hx]26[3-9]|avc\d*|aac\d*|hevc\d*|ac3|dts|flac|opus|truehd|vc1|av1|mp[34]|ddp\d*|eac3|divx\d*|xvid\d*|prores\d*|yuv\d*|rgb\d*|p0(?:10|16)|mpeg\d*|vp\d+|fhd\d{2,4}|uhd\d{2,4}|hdtv|hdr\d*|bt2020|bt709|rec709|smpte\d+|pq\d+|st2084|hlg\d*|ycbcr\d*|(?:bt|rec|st|smpte)[. ]?\d{3,4}|l?pcm[. ]?\d{3,4}|\d+(?:bit|point)\d+)\b`)
 	trailingResolutionCatalogIDRegex  = regexp.MustCompile(`(?i)\b[a-z]+-(?:144|240|288|360|432|480|540|576|720|1080|2160)\b`)
 	trailingResolutionQualityTagRegex = regexp.MustCompile(`(?i)^(?:fhd|uhd|hd)-(?:144|240|288|360|432|480|540|576|720|1080|2160)$`)
-	remasterPartLabelRegex            = regexp.MustCompile(`(?i)\b(?:part|pt|disc|vol|cd)-?\d{1,2}\b`)
-	resolutionTokenRegex              = regexp.MustCompile(`(?i)^\d{3,4}x\d{3,4}$`)
-	resolutionTailRegex               = regexp.MustCompile(`(?i)^[-_.\s]?(?:\d{3,4}[pi]|\d{3,4}x\d{3,4}|(?:144|240|288|360|432|480|540|576|720))(?:\D|$)`)
-	framerateTokenRegex               = regexp.MustCompile(`(?i)^\d{3,4}[pi](?:\d{2,3})?$`)
-	remasterMarkerTailRegex           = regexp.MustCompile(`(?i)(?:ez)?(?:hd|ai|h)$`)
-	rawTokenRegex                     = regexp.MustCompile(`[A-Za-z0-9]+`)
-	fusedPartLabelTailRegex           = regexp.MustCompile(`(?i)(?:cd|disc|disk|pt|part)\d{1,2}$`)
-	strongRawTokenRegex               = regexp.MustCompile(`(?i)^(?:\d+(?:t28|[A-Za-z]+)\d+[A-Za-z]{0,3}|(?:t28|[A-Za-z]+)\d{4,5}[ez]?(?:hd|ai|h))$`)
-	zeroPaddedRawTokenRegex           = regexp.MustCompile(`(?i)^(?:t28|[a-z]+)0\d{3,4}[a-z]{0,3}$`)
-	weakWordYearRegex                 = regexp.MustCompile(`(?i)^[a-z]{4,}\d{4,5}[a-z]{0,3}$`)
+	// qualitySeriesNumberRegex recognizes a consumed remaster phrase that is
+	// display-quality vocabulary rather than a catalog id: a quality series
+	// word (FHD/UHD/HD/SD) with a 3-4 digit resolution number. The plain
+	// hyphenated trailing-id bounds (two digits, selected three digits,
+	// six-plus digits) double as the quality-token veto — HD-720, FHD-1080,
+	// and UHD-3840 are exactly the excluded shapes — so they cannot be
+	// widened wholesale. But once the leading phrase is itself recognized
+	// vocabulary, the boundary is already decided by the phrase: a trailing
+	// hyphenated candidate with a plain series word is the real catalog id
+	// at the reserved digit counts (one, four, five), and the phrase's
+	// remaster marker moves onto it.
+	qualitySeriesNumberRegex = regexp.MustCompile(`(?i)^(?:fhd|uhd|hd|sd)-\d{3,4}$`)
+	// trailingQualitySeriesRegex vetoes hyphenated candidates whose series
+	// word is itself quality vocabulary: a trailing FHD-1080 or UHD-3840
+	// behind a quality phrase is more display metadata, not a catalog id.
+	trailingQualitySeriesRegex = regexp.MustCompile(`(?i)^(?:fhd|uhd|hd|sd)-`)
+	// trailingPlainHyphenatedIDRegex recognizes hyphenated candidates at
+	// the digit counts the conservative trailing grammar reserves for the
+	// quality veto: one, four, or five digits (ABC-1, ABC-1234, ABC-12345).
+	trailingPlainHyphenatedIDRegex = regexp.MustCompile(`(?i)[a-z]{1,}-(?:\d|\d{4,5})\b`)
+	remasterPartLabelRegex         = regexp.MustCompile(`(?i)\b(?:part|pt|disc|vol|cd)-?\d{1,2}\b`)
+	resolutionTokenRegex           = regexp.MustCompile(`(?i)^\d{3,4}x\d{3,4}$`)
+	resolutionTailRegex            = regexp.MustCompile(`(?i)^[-_.\s]?(?:\d{3,4}[pi]|\d{3,4}x\d{3,4}|(?:144|240|288|360|432|480|540|576|720))(?:\D|$)`)
+	framerateTokenRegex            = regexp.MustCompile(`(?i)^\d{3,4}[pi](?:\d{2,3})?$`)
+	remasterMarkerTailRegex        = regexp.MustCompile(`(?i)(?:ez)?(?:hd|ai|h)$`)
+	rawTokenRegex                  = regexp.MustCompile(`[A-Za-z0-9]+`)
+	fusedPartLabelTailRegex        = regexp.MustCompile(`(?i)(?:cd|disc|disk|pt|part)\d{1,2}$`)
+	strongRawTokenRegex            = regexp.MustCompile(`(?i)^(?:\d+(?:t28|[A-Za-z]+)\d+[A-Za-z]{0,3}|(?:t28|[A-Za-z]+)\d{4,5}[ez]?(?:hd|ai|h))$`)
+	zeroPaddedRawTokenRegex        = regexp.MustCompile(`(?i)^(?:t28|[a-z]+)0\d{3,4}[a-z]{0,3}$`)
+	weakWordYearRegex              = regexp.MustCompile(`(?i)^[a-z]{4,}\d{4,5}[a-z]{0,3}$`)
 )
 
 func builtinMatchConflictsWithContentID(s string, pattern *regexp.Regexp) bool {
@@ -116,6 +136,20 @@ func normalizeFusedRemasterFilename(name string, builtinPattern *regexp.Regexp) 
 		}
 		if builtinPattern.FindStringIndex(candidate) != nil {
 			return remainder[candidateIndex[0]:]
+		}
+	}
+	// A quality-phrased remaster (FHD 1080 HD ABC-1234) leaves the real
+	// catalog id in the remainder at the digit counts the grammars above
+	// reserve for the quality veto; with the phrase itself recognized
+	// vocabulary, those counts are safe for a plain series word, and the
+	// phrase's marker belongs to the trailing id.
+	if qualitySeriesNumberRegex.MatchString(name[m[2]:m[3]] + "-" + name[m[4]:m[5]]) {
+		for _, candidateIndex := range trailingPlainHyphenatedIDRegex.FindAllStringIndex(remainder, -1) {
+			candidate := remainder[candidateIndex[0]:candidateIndex[1]]
+			if trailingQualityTagRegex.MatchString(candidate) || trailingQualitySeriesRegex.MatchString(candidate) {
+				continue
+			}
+			return candidate + "-" + name[m[8]:m[9]] + remainder[candidateIndex[1]:]
 		}
 	}
 	// A fused part label directly after the marker (rct156hdcd2) is split

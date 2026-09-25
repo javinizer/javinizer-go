@@ -45,6 +45,59 @@ func TestMatchFile_LeadingQualityLabelsDoNotPreemptCatalogID(t *testing.T) {
 	}
 }
 
+// A quality-shaped remaster phrase followed by a plain hyphenated id at
+// the digit counts the conservative trailing grammar reserves for quality
+// tokens (one, four, five digits): the phrase is consumed vocabulary, so
+// the trailing candidate is the real catalog id and the phrase's remaster
+// marker moves onto it. The quality tokens themselves (FHD-1080,
+// UHD-3840, HD-720, AVC-1) never become ids, and a filename of only
+// quality tokens keeps its pinned fallback behavior.
+func TestMatchFile_QualityPhrasePlainHyphenatedCatalogID(t *testing.T) {
+	m, err := NewMatcher(&Config{})
+	require.NoError(t, err)
+	for _, tc := range []struct{ input, want string }{
+		{"FHD 1080 HD ABC-1234.mkv", "ABC-1234H"},
+		{"FHD 1080 HD ABC-12345.mkv", "ABC-12345H"},
+		{"FHD 1080 HD ABC-1.mkv", "ABC-1H"},
+		// Quality tokens at the widened digit counts stay suppressed: the
+		// series word is display vocabulary, not a catalog id.
+		{"FHD 1080 HD FHD-1080.mkv", "FHD-1080H"},
+		{"FHD 1080 HD UHD-3840.mkv", "FHD-1080H"},
+		{"FHD 1080 HD HD-720.mkv", "FHD-1080H"},
+		{"FHD 1080 HD AVC-1.mkv", "FHD-1080H"},
+		// A filename of only quality tokens pins the pre-existing fallback:
+		// the marker-less form matches nothing; the marker form keeps the
+		// synthetic phrase id.
+		{"FHD 1080.mkv", ""},
+		{"FHD 1080 HD.mkv", "FHD-1080H"},
+	} {
+		t.Run(tc.input, func(t *testing.T) {
+			assert.Equal(t, tc.want, m.MatchString(tc.input))
+			if tc.want == "" {
+				assert.Nil(t, matchOne(t, m, tc.input))
+				return
+			}
+			got := matchOne(t, m, tc.input)
+			require.NotNil(t, got)
+			assert.Equal(t, tc.want, got.ID)
+		})
+	}
+
+	// The quality phrase's remaster marker moves onto the trailing id.
+	for _, tc := range []struct{ input, id, marker string }{
+		{"FHD 1080 HD ABC-1234.mkv", "ABC-1234H", "HD"},
+		{"FHD 1080 HD ABC-12345.mkv", "ABC-12345H", "HD"},
+		{"FHD 1080 HD ABC-1.mkv", "ABC-1H", "HD"},
+	} {
+		t.Run(tc.input+" marker", func(t *testing.T) {
+			got := matchOne(t, m, tc.input)
+			require.NotNil(t, got)
+			assert.Equal(t, tc.id, got.ID)
+			assert.Equal(t, tc.marker, got.RemasterMarker)
+		})
+	}
+}
+
 func TestMatchFile_ResolutionTokensAreNotContentIDs(t *testing.T) {
 	m, err := NewMatcher(&Config{})
 	require.NoError(t, err)
