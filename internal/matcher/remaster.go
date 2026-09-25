@@ -6,11 +6,11 @@ import (
 )
 
 var (
-	fusedRemasterRegex                = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(t28|[a-z]+)((?:\d{1,3}|\d{6}))([ez]?)(hd|ai|h)(?:$|[-_.\s[\]()])`)
-	separatedRemasterRegex            = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(t28|[a-z]+)[._\s]+(\d{1,6})([ez]?)?[-._\s]?(hd|ai|h)(?:$|[-_.\s[\]()])`)
-	reRemasterRemainder               = regexp.MustCompile(`(?i)^[-_.\s]?(HD|AI|H)(?:$|[-_.\s[\]()])`)
+	fusedRemasterRegex                = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(t28|[a-z]+)((?:\d{1,3}|\d{6}))([ez]?)(hd|ai|h)(?:(cd|disc|disk|pt|part)(\d{1,2}))?(?:$|[-_.\s[\]()])`)
+	separatedRemasterRegex            = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(t28|[a-z]+)[._\s]+(\d{1,6})([ez]?)?[-._\s]?(hd|ai|h)(?:(cd|disc|disk|pt|part)(\d{1,2}))?(?:$|[-_.\s[\]()])`)
+	reRemasterRemainder               = regexp.MustCompile(`(?i)^[-_.\s]?(HD|AI|H)(?:(cd|disc|disk|pt|part)\d{1,2})?(?:$|[-_.\s[\]()])`)
 	remasterCodecTailRegex            = regexp.MustCompile(`(?i)^[-_.\s]?\d{3}(?:\D|$)`)
-	contentIDShapeRegex               = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])((?:\d+(?:t28|[A-Za-z]+)\d+[A-Za-z]{0,3}|(?:t28|[A-Za-z]+)\d{4,5}[A-Za-z]{0,3}))(?:[-_.\s[\]()](.*)$|$)`)
+	contentIDShapeRegex               = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])((?:\d+(?:t28|[A-Za-z]+)\d+[A-Za-z]{0,3}|(?:t28|[A-Za-z]+)\d{4,5}[A-Za-z]{0,3}))(?:[-_.\s[\]()](.*)$|(?:cd|disc|disk|pt|part)\d{1,2}$|$)`)
 	trailingCatalogIDRegex            = regexp.MustCompile(`(?i)(?:[a-z]{1,}-(?:\d{2}|[0-3689]\d\d|4[0-79]\d|48[1-9]|5[0-689]\d|57[0-57-9]|7[0-13-9]\d|72[1-9])\b|[a-z]{1,}-\d{6,}\b|[a-z]{1,}-\d{1,6}[-._\s]?(?:hd|ai|h)\b|t28-\d{1,}\b|[hn]_\d+[a-z]+\d+|\b[a-z]+\d{4,5}[a-z]{0,3}\b|\b\d+[a-z]{2,}\d+[a-z]{0,3}\b|\b(?:t28|[a-z]{1,})[-._\s]\d{1,6}[-._\s]?(?:hd|ai|h)\b|\b[a-z]{2,6}\d{1,6}\b|\b[a-z](?:\d{5}|\d{4}|[013-9]\d\d|2(?:[013-9]\d|4\d|6[0-36-9]))\b)`)
 	trailingQualityTagRegex           = regexp.MustCompile(`(?i)\b(?:[hx]26[3-9]|avc\d*|aac\d*|hevc\d*|ac3|dts|flac|opus|truehd|vc1|av1|mp[34]|ddp\d*|eac3|divx\d*|xvid\d*|prores\d*|yuv\d*|rgb\d*|p0(?:10|16)|mpeg\d*|vp\d+|fhd\d{2,4}|uhd\d{2,4}|hdtv|hdr\d*|bt2020|bt709|rec709|smpte\d+|pq\d+|st2084|hlg\d*|ycbcr\d*|\d+(?:bit|point)\d+)\b`)
 	trailingResolutionCatalogIDRegex  = regexp.MustCompile(`(?i)\b[a-z]+-(?:144|240|288|360|432|480|540|576|720|1080|2160)\b`)
@@ -21,6 +21,7 @@ var (
 	framerateTokenRegex               = regexp.MustCompile(`(?i)^\d{3,4}[pi](?:\d{2,3})?$`)
 	remasterMarkerTailRegex           = regexp.MustCompile(`(?i)(?:ez)?(?:hd|ai|h)$`)
 	rawTokenRegex                     = regexp.MustCompile(`[A-Za-z0-9]+`)
+	fusedPartLabelTailRegex           = regexp.MustCompile(`(?i)(?:cd|disc|disk|pt|part)\d{1,2}$`)
 	strongRawTokenRegex               = regexp.MustCompile(`(?i)^(?:\d+(?:t28|[A-Za-z]+)\d+[A-Za-z]{0,3}|(?:t28|[A-Za-z]+)\d{4,5}[ez]?(?:hd|ai|h))$`)
 	zeroPaddedRawTokenRegex           = regexp.MustCompile(`(?i)^(?:t28|[a-z]+)0\d{3,4}[a-z]{0,3}$`)
 	weakWordYearRegex                 = regexp.MustCompile(`(?i)^[a-z]{4,}\d{4,5}[a-z]{0,3}$`)
@@ -101,13 +102,21 @@ func normalizeFusedRemasterFilename(name string, builtinPattern *regexp.Regexp) 
 			return remainder[candidateIndex[0]:]
 		}
 	}
+	// A fused part label directly after the marker (rct156hdcd2) is split
+	// off with a separator so the builtin marker and part detection see the
+	// canonical hyphenated spelling (rct-156hd-cd2).
+	rest := name[m[4]:]
+	if m[10] >= 0 {
+		labelStart := m[10] - m[4]
+		rest = rest[:labelStart] + "-" + rest[labelStart:]
+	}
 	// A prefix-free compact t28 tail with a three-digit number reads as the
 	// T-series release T-28123H (catalog-prefixed or separator-pinned forms
 	// stay T28-123).
 	if fused && strings.EqualFold(name[m[2]:m[3]], "t28") && m[5]-m[4] == 3 {
-		return name[:m[2]] + "t-28" + name[m[4]:]
+		return name[:m[2]] + "t-28" + rest
 	}
-	return name[:m[3]] + "-" + name[m[4]:]
+	return name[:m[3]] + "-" + rest
 }
 
 func splitRemasterMarker(remainder string) (string, string) {
@@ -138,6 +147,44 @@ func foldRemasterMarker(spelling string) string {
 	return spelling
 }
 
+// remasterBarePartCeiling bounds the plain part numbers accepted directly
+// after a consumed remaster marker: 24 and above are fps shorthands
+// (24/25/30/50/60), not plausible part counts.
+const remasterBarePartCeiling = 23
+
+var bareNumericPartSuffixRegex = regexp.MustCompile(`^-\d{1,2}$`)
+
+// isFPSLikeBarePartNumber reports whether a part detected right after a
+// consumed remaster marker is a bare numeric in fps-shorthand range
+// ("IPX-535-HD-60"): such numbers are quality metadata, not part numbers.
+// Labeled parts (cd2, pt2) and small plain numbers stay parts.
+func isFPSLikeBarePartNumber(num int, partSuffix string) bool {
+	return num > remasterBarePartCeiling && bareNumericPartSuffixRegex.MatchString(partSuffix)
+}
+
+// rawTokenCandidateEnd returns the candidate end offset relative to the
+// token start, or isCandidate=false when the token cannot back a content-id
+// candidate. A token carrying a fused part-label tail (1rct00156hcd2) is a
+// candidate only up to the label when the trimmed spelling is itself strong
+// or zero-padded, so the label feeds part detection instead of malforming
+// the id; the full token stays a candidate when only the whole spelling is
+// strong (118cd2).
+func rawTokenCandidateEnd(token string) (int, bool) {
+	if isResolutionToken(token) || trailingQualityTagRegex.MatchString(token) {
+		return 0, false
+	}
+	if loc := fusedPartLabelTailRegex.FindStringIndex(token); loc != nil {
+		trimmed := token[:loc[0]]
+		if strongRawTokenRegex.MatchString(trimmed) || zeroPaddedRawTokenRegex.MatchString(trimmed) {
+			return loc[0], true
+		}
+	}
+	if strongRawTokenRegex.MatchString(token) || zeroPaddedRawTokenRegex.MatchString(token) {
+		return len(token), true
+	}
+	return 0, false
+}
+
 // contentIDPrefixMatch extracts a content-id prefix from a stem, returning the
 // captured id text and the post-id remainder (which may carry part suffixes).
 // contentIDCandidate locates the raw content id the name should resolve to.
@@ -160,20 +207,20 @@ func contentIDCandidate(s string) (start, end int, ok bool) {
 		// name still wins, as with the weak standalone-token case. Without
 		// one, there is no candidate.
 		for _, loc := range rawTokenRegex.FindAllStringIndex(s, -1) {
-			token := s[loc[0]:loc[1]]
-			if isResolutionToken(token) || trailingQualityTagRegex.MatchString(token) || (!strongRawTokenRegex.MatchString(token) && !zeroPaddedRawTokenRegex.MatchString(token)) {
+			tokEnd, isCandidate := rawTokenCandidateEnd(s[loc[0]:loc[1]])
+			if !isCandidate {
 				continue
 			}
-			return loc[0], loc[1], true
+			return loc[0], loc[0] + tokEnd, true
 		}
 		return 0, 0, false
 	}
 	for _, loc := range rawTokenRegex.FindAllStringIndex(s, -1) {
-		token := s[loc[0]:loc[1]]
-		if isResolutionToken(token) || trailingQualityTagRegex.MatchString(token) || (!strongRawTokenRegex.MatchString(token) && !zeroPaddedRawTokenRegex.MatchString(token)) {
+		tokEnd, isCandidate := rawTokenCandidateEnd(s[loc[0]:loc[1]])
+		if !isCandidate {
 			continue
 		}
-		return loc[0], loc[1], true
+		return loc[0], loc[0] + tokEnd, true
 	}
 	if weakWordYearRegex.MatchString(id) {
 		return 0, 0, false

@@ -98,13 +98,29 @@ func (m *Matcher) MatchFile(file models.FileMatchInfo) *MatchResult {
 	// Get filename without extension
 	basename := filepath.Base(file.Name)
 	nameWithoutExt := strings.TrimSuffix(basename, file.Extension)
+	// Fullwidth ASCII spellings (ＲＣＴ-156-ＨＤ) fold to halfwidth for the
+	// automated tiers below; kana/kanji are untouched and the original
+	// FileMatchInfo is preserved unchanged.
+	foldedName := foldFullwidthASCII(nameWithoutExt)
 
-	// Try custom regex first if enabled
+	// A user-specified custom regex outranks every automated tier and keeps
+	// its pre-folding semantics: it runs against the raw (unfolded) name
+	// first — exactly what it saw before fullwidth folding existed — so
+	// regexes written against fullwidth spellings keep matching. A miss is
+	// retried once against the folded name (still ahead of every automated
+	// tier), so halfwidth-written custom regexes also match fullwidth
+	// filenames.
 	if m.config.RegexEnabled && m.regexPattern != nil {
 		if result := m.matchWithRegex(file, nameWithoutExt, m.regexPattern, "regex"); result != nil {
 			return result
 		}
+		if foldedName != nameWithoutExt {
+			if result := m.matchWithRegex(file, foldedName, m.regexPattern, "regex"); result != nil {
+				return result
+			}
+		}
 	}
+	nameWithoutExt = foldedName
 
 	if normalized := normalizeFusedRemasterFilename(nameWithoutExt, m.builtinPattern); normalized != "" {
 		nameWithoutExt = normalized
@@ -165,6 +181,12 @@ func (m *Matcher) matchWithRegex(file models.FileMatchInfo, filename string, pat
 			result.ID += foldRemasterMarker(spelling)
 			result.RemasterMarker = spelling
 			num, partSuffix, patternType, trailingPrefix := DetectPartSuffix(suffix, "")
+			// A bare numeric right after a consumed marker is a part only
+			// within realistic part counts; fps shorthands ("-HD-60") are
+			// quality metadata, not part 60.
+			if isFPSLikeBarePartNumber(num, partSuffix) {
+				num, partSuffix, patternType, trailingPrefix = 0, "", PatternNone, ""
+			}
 			result.PartNumber = num
 			result.PartSuffix = partSuffix
 			result.MultipartPattern = patternType
@@ -215,19 +237,25 @@ func (m *Matcher) matchWithRegex(file models.FileMatchInfo, filename string, pat
 
 // MatchString is a helper to extract ID from a string directly
 func (m *Matcher) MatchString(s string) string {
-	s = filepath.Base(s)
-	ext := filepath.Ext(s)
-	switch strings.ToLower(ext) {
-	case ".mp4", ".mkv", ".avi", ".wmv", ".flv", ".mov", ".m4v", ".webm", ".mpg", ".mpeg", ".m2ts", ".ts":
-		s = strings.TrimSuffix(s, ext)
-	}
-	// Try custom regex first
+	// A user-specified custom regex outranks every automated tier and keeps
+	// its pre-folding semantics: it runs against the raw (unfolded) name —
+	// the basename with any video extension stripped, exactly what it saw
+	// before fullwidth folding existed — so regexes written against
+	// fullwidth spellings keep matching. A miss is retried once against the
+	// folded name (still ahead of every automated tier), so halfwidth-written
+	// custom regexes also match fullwidth filenames.
+	raw := stripVideoExtension(filepath.Base(s))
+	// Fullwidth ASCII spellings fold to halfwidth before the extension
+	// strip, so fullwidth extensions (．ｍｋｖ) fold and strip like ASCII ones
+	// and every automated tier sees the ASCII form.
+	s = stripVideoExtension(filepath.Base(foldFullwidthASCII(s)))
 	if m.config.RegexEnabled && m.regexPattern != nil {
-		matches := m.regexPattern.FindStringSubmatch(s)
-		if len(matches) > 1 {
-			id := strings.TrimSpace(matches[1])
-			if id != "" {
-				return strings.ToUpper(id)
+		if id := m.matchStringCustomRegex(raw); id != "" {
+			return id
+		}
+		if s != raw {
+			if id := m.matchStringCustomRegex(s); id != "" {
+				return id
 			}
 		}
 	}
@@ -260,6 +288,31 @@ func (m *Matcher) MatchString(s string) string {
 	}
 
 	return matchContentIDShape(s)
+}
+
+// matchStringCustomRegex applies the user-specified custom regex to s and
+// returns the uppercased first capture group, or "" when the regex does not
+// produce a usable capture (missing group, non-participating group, or empty
+// capture). Raw and folded attempts share this contract.
+func (m *Matcher) matchStringCustomRegex(s string) string {
+	matches := m.regexPattern.FindStringSubmatch(s)
+	if len(matches) > 1 {
+		id := strings.TrimSpace(matches[1])
+		if id != "" {
+			return strings.ToUpper(id)
+		}
+	}
+	return ""
+}
+
+// stripVideoExtension returns s with a trailing video extension removed.
+func stripVideoExtension(s string) string {
+	ext := filepath.Ext(s)
+	switch strings.ToLower(ext) {
+	case ".mp4", ".mkv", ".avi", ".wmv", ".flv", ".mov", ".m4v", ".webm", ".mpg", ".mpeg", ".m2ts", ".ts":
+		return strings.TrimSuffix(s, ext)
+	}
+	return s
 }
 
 // ValidateMultipartInDirectory validates ambiguous multipart patterns
@@ -324,10 +377,12 @@ func ValidateMultipartInDirectory(results []MatchResult) []MatchResult {
 }
 
 // applyRemasterDemotions tentatively rewrites bare-H remaster matches as
-// multipart part 8 of the base ID when at least two same-directory siblings
-// carry the exact base ID with distinct bare-letter patterns. Returns the
-// indices that were demoted; callers must treat demotion as provisional and
-// roll everything back if a demoted result fails validation.
+// multipart part 8 of the base ID when the same-directory bare-letter
+// siblings form exactly the contiguous A,B run of the classic two-part
+// original. Larger, gapped, or offset letter sets describe a multi-part
+// original whose part 8 is unreachable, so the remaster reading wins.
+// Returns the indices that were demoted; callers must treat demotion as
+// provisional and roll everything back if a demoted result fails validation.
 func applyRemasterDemotions(validated []MatchResult) []demotion {
 	var demoted []demotion
 	for i, r := range validated {
@@ -355,7 +410,7 @@ func applyRemasterDemotions(validated []MatchResult) []demotion {
 			}
 			siblingParts[sib.PartNumber] = struct{}{}
 		}
-		if len(siblingParts) < 2 {
+		if !contiguousABLetterRun(siblingParts) {
 			continue
 		}
 		validated[i].ID = baseID
@@ -365,6 +420,22 @@ func applyRemasterDemotions(validated []MatchResult) []demotion {
 		demoted = append(demoted, demotion{idx: i, key: dirIDKey{dir: dir, id: baseID}})
 	}
 	return demoted
+}
+
+// contiguousABLetterRun reports whether the distinct sibling letter parts
+// are exactly the A,B pair: two parts, starting at A, with no gap. Only that
+// shape demotes a bare-H match to part 8 (the pinned A,B,H bet); three or
+// more visible letters, a gap, or a set without A read as a multi-part
+// original where part 8 cannot exist, and the remaster spelling survives.
+func contiguousABLetterRun(parts map[int]struct{}) bool {
+	if len(parts) != 2 {
+		return false
+	}
+	if _, hasA := parts[1]; !hasA {
+		return false
+	}
+	_, hasB := parts[2]
+	return hasB
 }
 
 func validateMultipartGroups(validated []MatchResult) {

@@ -62,3 +62,47 @@ func TestFusedThreeDigitRemaster(t *testing.T) {
 		assert.Empty(t, m.MatchString(name))
 	}
 }
+
+// A fused part label directly after the marker (cd2/pt2/part3/disc1) is
+// recognized in every spelling family: fused tier-1 (rct156hdcd2),
+// hyphenated tier-1 (rct-156-hdcd2), and tier-2 raw content ids
+// (1rct00156hcd2), consistently with the already-supported separated forms.
+func TestFusedRemasterPartLabels(t *testing.T) {
+	m, err := NewMatcher(&Config{})
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name, id, marker, matchedBy string
+		part                        int
+	}{
+		{"RCT156HDCD2.mkv", "RCT-156H", "HD", "builtin", 2},
+		{"rct156hdcd2.mkv", "RCT-156H", "HD", "builtin", 2},
+		{"RCT156HCD2.mkv", "RCT-156H", "H", "builtin", 2},
+		{"ABC12HDPT2.mkv", "ABC-12H", "HD", "builtin", 2},
+		{"RCT156HDPART3.mkv", "RCT-156H", "HD", "builtin", 3},
+		{"T28123HDCD2.mkv", "T-28123H", "HD", "builtin", 2},
+		{"rct-156-hdcd2.mkv", "RCT-156H", "HD", "builtin", 2},
+		{"1rct00156hcd2.mkv", "1RCT00156H", "", "contentid", 2},
+		{"1rct00156hdcd2.mkv", "1RCT00156HD", "", "contentid", 2},
+		{"abeauty00123hdcd2.mkv", "ABEAUTY00123HD", "", "contentid", 2},
+		{"118ipx00535cd2.mkv", "118IPX00535", "", "contentid", 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := matchOne(t, m, tc.name)
+			require.NotNil(t, got)
+			assert.Equal(t, tc.id, got.ID)
+			assert.Equal(t, tc.marker, got.RemasterMarker)
+			assert.Equal(t, tc.part, got.PartNumber)
+			assert.Equal(t, PatternExplicit, got.MultipartPattern)
+			assert.True(t, got.IsMultiPart)
+			assert.Equal(t, tc.matchedBy, got.MatchedBy)
+			assert.Equal(t, tc.id, m.MatchString(tc.name))
+		})
+	}
+	// Separated forms keep working.
+	assert.Equal(t, "RCT-156H", m.MatchString("rct156hd-cd2.mkv"))
+	assert.Equal(t, "1RCT00156H", m.MatchString("1rct00156h-cd2.mkv"))
+	// Bare digits after a fused marker stay unmatched: without a part label
+	// they are indistinguishable from codec tails (h264) and stay rejected.
+	assert.Nil(t, matchOne(t, m, "RCT156HD2.mkv"))
+	assert.Empty(t, m.MatchString("RCT156HD2.mkv"))
+}

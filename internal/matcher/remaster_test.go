@@ -291,6 +291,67 @@ func TestRemasterHelpersAndDemotionSkips(t *testing.T) {
 	assert.Equal(t, "H", out[3].RemasterMarker, "defensive: marker without trailing-H ID is not demoted")
 }
 
+// A bare numeric right after a consumed remaster marker is quality metadata
+// (fps shorthand), not a part number; labeled parts and small plain numbers
+// stay parts.
+func TestMatchFile_RemasterFPSLikeBareNumericIsQualityMetadata(t *testing.T) {
+	m, err := NewMatcher(&Config{})
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name    string
+		id      string
+		marker  string
+		part    int
+		pattern string
+	}{
+		{"IPX-535-HD-60.mkv", "IPX-535H", "HD", 0, PatternNone},
+		{"IPX-535-H-30.mkv", "IPX-535H", "H", 0, PatternNone},
+		{"RCT-156-HD-24.mkv", "RCT-156H", "HD", 0, PatternNone},
+		{"RCT-156-HD.50.mkv", "RCT-156H", "HD", 0, PatternNone},
+		// Small plain numbers stay parts (pinned semantics).
+		{"IPX-535-HD-2.mkv", "IPX-535H", "HD", 2, PatternExplicit},
+		{"IPX-535-HD-12.mkv", "IPX-535H", "HD", 12, PatternExplicit},
+		// Labeled parts are unaffected.
+		{"IPX-535-HD-cd2.mkv", "IPX-535H", "HD", 2, PatternExplicit},
+		{"IPX-535-HD-pt2.mkv", "IPX-535H", "HD", 2, PatternExplicit},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := matchOne(t, m, tc.name)
+			require.NotNil(t, got)
+			assert.Equal(t, tc.id, got.ID)
+			assert.Equal(t, tc.marker, got.RemasterMarker)
+			assert.Equal(t, tc.part, got.PartNumber)
+			assert.Equal(t, tc.pattern, got.MultipartPattern)
+			assert.Equal(t, tc.pattern == PatternExplicit, got.IsMultiPart)
+		})
+	}
+	assert.Equal(t, "IPX-535H", m.MatchString("IPX-535-HD-60.mkv"))
+}
+
+// Stacked marker spellings keep the FIRST marker; the remainder is treated
+// as metadata (no part, no second marker).
+func TestMatchFile_StackedMarkersFirstWins(t *testing.T) {
+	m, err := NewMatcher(&Config{})
+	require.NoError(t, err)
+
+	for _, tc := range []struct{ name, id, marker string }{
+		{"RCT-156-HD-AI.mkv", "RCT-156H", "HD"},
+		{"RCT-156-hd-ai.mkv", "RCT-156H", "HD"},
+		{"DV-818-AI-HD.mkv", "DV-818AI", "AI"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := matchOne(t, m, tc.name)
+			require.NotNil(t, got)
+			assert.Equal(t, tc.id, got.ID)
+			assert.Equal(t, tc.marker, got.RemasterMarker)
+			assert.Equal(t, 0, got.PartNumber)
+			assert.Equal(t, PatternNone, got.MultipartPattern)
+			assert.Equal(t, tc.id, m.MatchString(tc.name))
+		})
+	}
+}
+
 func TestValidateMultipart_ScopedDemotionRollback(t *testing.T) {
 	mk := func(path, id string, part int, pattern, marker string, multi bool) MatchResult {
 		return MatchResult{File: models.FileMatchInfo{Path: path}, ID: id, PartNumber: part, MultipartPattern: pattern, RemasterMarker: marker, IsMultiPart: multi}
@@ -415,5 +476,79 @@ func TestValidateMultipart_RemasterDemotion(t *testing.T) {
 		out := ValidateMultipartInDirectory(in)
 		assert.Equal(t, "ABC-123H", out[2].ID)
 		assert.Equal(t, "H", out[2].RemasterMarker)
+	})
+
+	t.Run("A B C H keeps remaster (three-part original)", func(t *testing.T) {
+		in := []MatchResult{
+			mk("ABC-123A.mkv", "ABC-123", 1, PatternLetter, "", ""),
+			mk("ABC-123B.mkv", "ABC-123", 2, PatternLetter, "", ""),
+			mk("ABC-123C.mkv", "ABC-123", 3, PatternLetter, "", ""),
+			mk("ABC-123H.mkv", "ABC-123H", 0, "", "", "H"),
+		}
+		out := ValidateMultipartInDirectory(in)
+		assert.Equal(t, "ABC-123H", out[3].ID, "three visible letters make part 8 unreachable; the remaster reading wins")
+		assert.Equal(t, 0, out[3].PartNumber)
+		assert.Equal(t, "H", out[3].RemasterMarker)
+		assert.True(t, out[0].IsMultiPart)
+		assert.True(t, out[1].IsMultiPart)
+		assert.True(t, out[2].IsMultiPart)
+	})
+
+	t.Run("A B C D H keeps remaster", func(t *testing.T) {
+		in := []MatchResult{
+			mk("ABC-123A.mkv", "ABC-123", 1, PatternLetter, "", ""),
+			mk("ABC-123B.mkv", "ABC-123", 2, PatternLetter, "", ""),
+			mk("ABC-123C.mkv", "ABC-123", 3, PatternLetter, "", ""),
+			mk("ABC-123D.mkv", "ABC-123", 4, PatternLetter, "", ""),
+			mk("ABC-123H.mkv", "ABC-123H", 0, "", "", "H"),
+		}
+		out := ValidateMultipartInDirectory(in)
+		assert.Equal(t, "ABC-123H", out[4].ID)
+		assert.Equal(t, 0, out[4].PartNumber)
+		assert.Equal(t, "H", out[4].RemasterMarker)
+	})
+
+	t.Run("B C H keeps remaster (no A)", func(t *testing.T) {
+		in := []MatchResult{
+			mk("ABC-123B.mkv", "ABC-123", 2, PatternLetter, "", ""),
+			mk("ABC-123C.mkv", "ABC-123", 3, PatternLetter, "", ""),
+			mk("ABC-123H.mkv", "ABC-123H", 0, "", "", "H"),
+		}
+		out := ValidateMultipartInDirectory(in)
+		assert.Equal(t, "ABC-123H", out[2].ID, "a run without A never demotes")
+		assert.Equal(t, 0, out[2].PartNumber)
+		assert.Equal(t, "H", out[2].RemasterMarker)
+		assert.True(t, out[0].IsMultiPart)
+		assert.True(t, out[1].IsMultiPart)
+	})
+
+	t.Run("A C H keeps remaster (gapped siblings)", func(t *testing.T) {
+		in := []MatchResult{
+			mk("ABC-123A.mkv", "ABC-123", 1, PatternLetter, "", ""),
+			mk("ABC-123C.mkv", "ABC-123", 3, PatternLetter, "", ""),
+			mk("ABC-123H.mkv", "ABC-123H", 0, "", "", "H"),
+		}
+		out := ValidateMultipartInDirectory(in)
+		assert.Equal(t, "ABC-123H", out[2].ID, "a gapped letter set never demotes")
+		assert.Equal(t, 0, out[2].PartNumber)
+		assert.Equal(t, "H", out[2].RemasterMarker)
+	})
+
+	t.Run("end-to-end files keep the remaster spelling", func(t *testing.T) {
+		m, err := NewMatcher(&Config{})
+		require.NoError(t, err)
+		results := m.Match([]models.FileMatchInfo{
+			{Path: "/v/RCT-156-A.mkv", Name: "RCT-156-A.mkv", Extension: ".mkv"},
+			{Path: "/v/RCT-156-B.mkv", Name: "RCT-156-B.mkv", Extension: ".mkv"},
+			{Path: "/v/RCT-156-C.mkv", Name: "RCT-156-C.mkv", Extension: ".mkv"},
+			{Path: "/v/RCT-156-H.mkv", Name: "RCT-156-H.mkv", Extension: ".mkv"},
+		})
+		require.Len(t, results, 4)
+		validated := ValidateMultipartInDirectory(results)
+		remaster := validated[3]
+		assert.Equal(t, "RCT-156H", remaster.ID)
+		assert.Equal(t, "H", remaster.RemasterMarker)
+		assert.Equal(t, 0, remaster.PartNumber)
+		assert.False(t, remaster.IsMultiPart)
 	})
 }
