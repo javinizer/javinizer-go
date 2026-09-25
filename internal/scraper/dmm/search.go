@@ -277,12 +277,49 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 
 	foldedMarker, _, _, isCID := classifyRemasterQuery(id)
 	res, err := s.parseHTMLWithOptions(ctx, doc, url, foldedMarker != "")
-	// The page's authoritative 品番 (zero-trimmed by the site) outranks the
-	// query-derived spelling; only fill in when the page provided nothing.
-	if err == nil && foldedMarker != "" && !isCID && res.ID == "" {
-		res.ID = canonicalRemasterDisplayID(id)
+	if err == nil && foldedMarker != "" && !isCID {
+		// The page's 品番 is the authoritative display identity even for AI
+		// remasters (unlike the cid digits, which diverge from the display
+		// number): a page publishing another release's identity means
+		// resolution landed on the wrong product (e.g. a stale same-series
+		// cache mapping), so miss honestly instead of returning it.
+		if !pageDisplayIdentityMatchesQuery(doc, id) {
+			return nil, models.NewScraperNotFoundError("DMM", fmt.Sprintf("DMM page for %s publishes a different release", id))
+		}
+		// The page's authoritative 品番 (zero-trimmed by the site) outranks the
+		// query-derived spelling; only fill in when the page provided nothing.
+		if res.ID == "" {
+			res.ID = canonicalRemasterDisplayID(id)
+		}
 	}
 	return res, err
+}
+
+// pageDisplayIdentityMatchesQuery reports whether the page's 品番, when it
+// publishes a parseable remaster display identity, names the queried release.
+// The page-supplied display identity is authoritative for display numbers
+// even on AI remasters (unlike cid numbers, which diverge), so a 品番 whose
+// padding-normalized identity names a different series, number, catalog
+// suffix or marker than the query belongs to the wrong release. Pages
+// without a 品番 row, markerless rows and unparseable queries publish
+// nothing authoritative to compare and keep the existing behavior.
+func pageDisplayIdentityMatchesQuery(doc *goquery.Document, query string) bool {
+	if doc == nil {
+		return true
+	}
+	display := extractDisplayID(doc)
+	if display == "" {
+		return true
+	}
+	pSeries, pNumber, pSuffix, pMarker, ok := displayIdentityTuple(display)
+	if !ok {
+		return true
+	}
+	qSeries, qNumber, qSuffix, qMarker, qOK := displayIdentityTuple(query)
+	if !qOK {
+		return true
+	}
+	return pSeries == qSeries && pNumber == qNumber && pSuffix == qSuffix && pMarker == qMarker
 }
 
 func (s *scraper) ScrapeURL(ctx context.Context, url string) (*models.ScraperResult, error) {
