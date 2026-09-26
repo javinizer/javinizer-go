@@ -271,3 +271,42 @@ func TestPropagateQuarantineTransitionsErrors(t *testing.T) {
 		require.Error(t, NewActressAliasRepository(db).Upsert(context.Background(), &models.ActressAlias{AliasName: "舞台名", CanonicalName: "確定名"}))
 	})
 }
+func TestQuarantinePropagationChunksLargeFlipSets(t *testing.T) {
+	db := newCreditTestDB(t)
+	verified := models.Actress{JapaneseName: "同名大量", Verified: true, Origin: ActressOriginUser}
+	require.NoError(t, db.Create(&verified).Error)
+	const flipCount = 305
+	candidates := make([]models.Actress, flipCount)
+	for i := range candidates {
+		candidates[i] = models.Actress{DMMID: 992000 + i, JapaneseName: "同名大量", Origin: ActressOriginScrape}
+	}
+	require.NoError(t, db.CreateInBatches(&candidates, 200).Error)
+	movies := make([]models.Movie, flipCount)
+	credits := make([]models.MovieCredit, flipCount)
+	for i := range movies {
+		movies[i] = models.Movie{ContentID: fmt.Sprintf("quarantine-chunk-%03d", i), ID: fmt.Sprintf("quarantine-chunk-%03d", i)}
+		credits[i] = models.MovieCredit{MovieContentID: movies[i].ContentID, ActressID: candidates[i].ID, CreditedName: "同名大量", Origin: "scrape"}
+	}
+	require.NoError(t, db.CreateInBatches(&movies, 200).Error)
+	require.NoError(t, db.CreateInBatches(&credits, 200).Error)
+	for i := range movies {
+		require.NoError(t, db.Exec("INSERT INTO movie_actresses (movie_content_id, actress_id) VALUES (?, ?)", movies[i].ContentID, candidates[i].ID).Error)
+	}
+
+	require.NoError(t, db.DB.WithContext(context.Background()).Transaction(func(tx *gorm.DB) error {
+		return recomputeActressCandidateQuarantineTx(tx)
+	}))
+
+	var quarantinedCount int64
+	require.NoError(t, db.Model(&models.Actress{}).Where("ambiguity_quarantined = ?", true).Count(&quarantinedCount).Error)
+	require.Equal(t, int64(flipCount), quarantinedCount)
+	var joinCount int64
+	require.NoError(t, db.Table("movie_actresses").Count(&joinCount).Error)
+	require.Zero(t, joinCount)
+	var dirtyCount int64
+	require.NoError(t, db.Model(&models.Movie{}).Where("render_dirty = ?", true).Count(&dirtyCount).Error)
+	require.Equal(t, int64(flipCount), dirtyCount)
+	var sample models.Movie
+	require.NoError(t, db.First(&sample, "content_id = ?", "quarantine-chunk-000").Error)
+	require.Equal(t, int64(1), sample.RenderGeneration)
+}
