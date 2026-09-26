@@ -114,8 +114,11 @@ func (sh *subtitleHandler) FindSubtitles(videoFile models.FileMatchInfo) []subti
 		// Check if subtitle filename matches the video filename
 		// Require exact match or separator after video name to avoid false matches
 		// (e.g., "IPX-535.mp4" should not match "IPX-535-trailer.srt")
-		// Use case-insensitive matching for Windows compatibility
-		subtitleNameWithoutExt := strings.TrimSuffix(subtitleName, filepath.Ext(subtitleName))
+		// Use case-insensitive matching for Windows compatibility.
+		// The split is fold-aware (splitRawExtension): filepath.Ext is
+		// ASCII-only, so a fullwidth dot would leave the raw suffix on the
+		// stem and misfire the association and language strip below.
+		subtitleNameWithoutExt, _ := splitRawExtension(subtitleName)
 
 		if !subtitleStemAssociates(subtitleNameWithoutExt, videoNameWithoutExt) {
 			continue
@@ -125,9 +128,17 @@ func (sh *subtitleHandler) FindSubtitles(videoFile models.FileMatchInfo) []subti
 		language := sh.extractLanguageCode(subtitleName, videoNameWithoutExt)
 
 		matches = append(matches, subtitleMatch{
+			// OriginalPath keeps the raw on-disk spelling: the move — and the
+			// source removal it performs — operates on the real file, never a
+			// folded rewriting of its name (round-30 contract: raw for I/O).
 			OriginalPath: subtitlePath,
 			Language:     language,
-			Extension:    filepath.Ext(subtitleName),
+			// The extension classifies the sidecar and names its destination,
+			// so it is carried folded (round-30 contract: folded for
+			// classification): a fullwidth-source subtitle
+			// (ＲＣＴ－１５６－ＨＤ．ｓｒｔ) lands on a playable ASCII .srt
+			// target under the round-32a/36b folded sidecar stem.
+			Extension: filepath.Ext(foldFullwidthASCII(subtitleName)),
 		})
 	}
 
@@ -167,9 +178,14 @@ func subtitleStemMatches(cand, base string) bool {
 			strings.ContainsRune("._-", rune(cand[len(base)])))
 }
 
-// isSubtitleFile checks if a filename has a subtitle extension
+// isSubtitleFile checks if a filename has a subtitle extension. The
+// extension is derived from the FOLDED spelling: filepath.Ext is ASCII-only
+// and does not recognize the fullwidth dot, so a sidecar admitted beside a
+// fullwidth video (ＲＣＴ－１５６－ＨＤ．ｓｒｔ) was rejected before the
+// round-36b folded-stem comparison ever ran. Mirrors the round-30 contract:
+// folded for classification — the raw name still performs all file I/O.
 func (sh *subtitleHandler) isSubtitleFile(filename string) bool {
-	ext := strings.ToLower(filepath.Ext(filename))
+	ext := strings.ToLower(filepath.Ext(foldFullwidthASCII(filename)))
 	for _, allowedExt := range sh.extensions {
 		if ext == strings.ToLower(allowedExt) {
 			return true
@@ -181,7 +197,10 @@ func (sh *subtitleHandler) isSubtitleFile(filename string) bool {
 // ExtractLanguageCode extracts language code from subtitle filename
 // Examples: "IPX-535.eng.srt" -> "eng", "IPX-535.english.srt" -> "english"
 func (sh *subtitleHandler) extractLanguageCode(subtitleName, videoNameWithoutExt string) string {
-	subtitleNameWithoutExt := strings.TrimSuffix(subtitleName, filepath.Ext(subtitleName))
+	// Fold-aware split (splitRawExtension): filepath.Ext is ASCII-only, so a
+	// fullwidth dot would leave the raw suffix on the stem and report the
+	// extension itself as the subtitle's language.
+	subtitleNameWithoutExt, _ := splitRawExtension(subtitleName)
 
 	// The raw prefix strip runs first so fullwidth-written subtitles beside
 	// fullwidth-written videos keep extracting language exactly where they
