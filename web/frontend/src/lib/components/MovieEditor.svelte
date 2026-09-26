@@ -4,6 +4,7 @@
 	import { apiClient } from '$lib/api/client';
 	import { CircleAlert, LoaderCircle, X, Plus, Check, Star } from 'lucide-svelte';
 	import NfoDiffBadge from './NfoDiffBadge.svelte';
+	import { buildDisplayTitlePreviewSignature } from '$lib/utils/display-title-preview';
 
 	interface Props {
 		movie: Movie;
@@ -36,29 +37,7 @@
 	let previewTimer: ReturnType<typeof setTimeout> | undefined;
 	let previewGeneration = 0;
 
-	const previewSignature = $derived(
-		JSON.stringify({
-			id: editedMovie.id,
-			code: editedMovie.code,
-			title: editedMovie.title,
-			original_title: editedMovie.original_title,
-			description: editedMovie.description,
-			actresses: editedMovie.actresses,
-			genres: editedMovie.genres,
-			runtime: editedMovie.runtime,
-			release_year: editedMovie.release_year,
-			release_date: editedMovie.release_date,
-			director: editedMovie.director,
-			maker: editedMovie.maker,
-			label: editedMovie.label,
-			series: editedMovie.series,
-			rating_score: editedMovie.rating_score,
-			poster_url: editedMovie.poster_url,
-			cover_url: editedMovie.cover_url,
-			trailer_url: editedMovie.trailer_url,
-			original_filename: editedMovie.original_filename,
-		}),
-	);
+	const previewSignature = $derived(buildDisplayTitlePreviewSignature(editedMovie));
 
 	$effect(() => {
 		const sig = previewSignature;
