@@ -366,18 +366,21 @@ func (s *scraper) findDetailURLCtx(ctx context.Context, id string) (string, erro
 
 	targetID := normalizeIDForCompare(id)
 	// A marker-suffixed display ID (the folded spelling the matcher
-	// propagates for HD/AI remaster queries, e.g. RCT-156H from RCT-156-HD)
-	// targets the remaster release itself: a variant match or the
-	// single-link fallback would silently return the base release's page,
-	// so only exact/padding-equal identities qualify and the query misses
-	// honestly when the remaster is not among the results.
+	// propagates for HD/AI remaster queries, e.g. RCT-156H from RCT-156-HD,
+	// including the E/Z-catalog-suffixed spellings like IPX-535ZH) targets
+	// the remaster release itself: a variant match or the single-link
+	// fallback would silently return the base release's page, so only
+	// exact/padding-equal identities qualify and the query misses honestly
+	// when the remaster is not among the results.
 	markerQuery := remasterMarkerSuffix(id) != ""
 	// Marker queries compare id + folded marker class rather than raw
 	// normalized strings: JavDB lists the same HD remaster under either
 	// marker spelling (RCT-156H and RCT-156-HD), so HD folds to H —
 	// mirroring the matcher's foldRemasterMarker — while AI stays its own
-	// class. The base release carries no marker and still compares
-	// unequal; only the marker spelling is bridged.
+	// class. The E/Z catalog suffix letter rides along the fold
+	// (IPX-535-Z-HD and IPX-535ZH fold alike) and stays part of the
+	// compared identity. The base release carries no marker and still
+	// compares unequal; only the marker spelling is bridged.
 	foldedTargetID := foldRemasterMarkerID(targetID)
 	var (
 		foundURL  string
@@ -865,47 +868,104 @@ func trimVariantSuffix(id string) string {
 	return id
 }
 
-// remasterMarkerSuffix reports the folded remaster marker (H, HD or AI) a
-// display ID carries directly after its release number, e.g. "RCT-156H" ->
-// "H", "DV-818AI" -> "AI". The matcher folds HD/AI spellings into exactly
-// this position when it propagates a remaster query, so a non-empty result
-// means the query targets a remaster release: its trailing letters must
-// never be read as a variant suffix of the base release.
+// remasterMarkerSuffix reports the remaster marker spelling (H, HD or AI) a
+// display ID carries at the end of its release number, behind the optional
+// E/Z catalog suffix letter, e.g. "RCT-156H" -> "H", "IPX-535ZH" -> "H" (Z
+// catalog suffix), "IPX-535-Z-HD" -> "HD" (the same Z-suffixed H-class
+// release), "DV-818AI" -> "AI". The matcher folds HD/AI spellings into
+// exactly this position when it propagates a remaster query, so a non-empty
+// result means the query targets a remaster release: its trailing letters
+// must never be read as a variant suffix of the base release, and the E/Z
+// suffix letter stays part of the release identity.
 func remasterMarkerSuffix(id string) string {
-	normalized := normalizeIDForCompare(id)
-	if normalized == "" {
+	_, _, marker, ok := splitRemasterMarkerTail(normalizeIDForCompare(id))
+	if !ok {
 		return ""
 	}
+	return marker
+}
+
+// splitRemasterMarkerTail splits a normalized comparison id into the base
+// (series and release number), the optional E/Z catalog suffix letter, and
+// the leading marker spelling of its trailing remaster tail. The tail
+// grammar mirrors the matcher's: an optional E or Z catalog suffix rides
+// immediately in front of the terminal marker, so IPX-535ZH, IPX-535-Z-HD
+// and IPX-535-ZHD all carry the same Z-suffixed release, and a display
+// spelling may repeat the marker after the folded one (IPX-535-ZH-HD).
+// ok is false when the letters carry no marker at all (IPX-535Z is the
+// suffix-only base release, IPX-535A a part letter) or when no release
+// number precedes them.
+func splitRemasterMarkerTail(normalized string) (base, catalogSuffix, marker string, ok bool) {
 	// Locate the trailing ASCII letter run; the release number must sit
-	// immediately before it for the letters to be a marker suffix.
-	i := len(normalized)
-	for i > 0 && normalized[i-1] >= 'A' && normalized[i-1] <= 'Z' {
-		i--
+	// immediately before it for the letters to be a marker tail.
+	runStart := len(normalized)
+	for runStart > 0 && normalized[runStart-1] >= 'A' && normalized[runStart-1] <= 'Z' {
+		runStart--
 	}
-	if i == len(normalized) || i == 0 {
-		return ""
+	if runStart == len(normalized) || runStart == 0 {
+		return "", "", "", false
 	}
-	switch normalized[i:] {
-	case "H", "HD", "AI":
-		return normalized[i:]
+	run := normalized[runStart:]
+	// The optional E/Z catalog suffix is parsed separately from the
+	// terminal marker: a bare E/Z without a following marker spells the
+	// suffix-only base release and carries no marker.
+	rest := run
+	if rest[0] == 'E' || rest[0] == 'Z' {
+		catalogSuffix = rest[:1]
+		rest = rest[1:]
+	}
+	marker, rest, ok = takeRemasterMarkerSpelling(rest)
+	if !ok {
+		return "", "", "", false
+	}
+	// A display spelling may repeat the marker behind the folded one
+	// (IPX-535-ZH-HD), so redundant trailing marker spellings collapse
+	// into the same tail; any other trailing letters end it, keeping
+	// run-of-the-mill part letters out of the marker class.
+	for rest != "" {
+		if _, rest, ok = takeRemasterMarkerSpelling(rest); !ok {
+			return "", "", "", false
+		}
+	}
+	return normalized[:runStart], catalogSuffix, marker, true
+}
+
+// takeRemasterMarkerSpelling strips one leading H/HD/AI marker spelling
+// from rest, reporting whether the head is a marker at all. HD is tried
+// before H so the two-letter spelling is not split in two.
+func takeRemasterMarkerSpelling(rest string) (marker, remaining string, ok bool) {
+	switch {
+	case strings.HasPrefix(rest, "HD"):
+		return "HD", rest[2:], true
+	case strings.HasPrefix(rest, "AI"):
+		return "AI", rest[2:], true
+	case strings.HasPrefix(rest, "H"):
+		return "H", rest[1:], true
 	default:
-		return ""
+		return "", rest, false
 	}
 }
 
-// foldRemasterMarkerID rewrites an id's trailing remaster marker to its
+// foldRemasterMarkerID rewrites an id's trailing remaster tail to its
 // folded equivalence-class spelling, mirroring the matcher's
-// foldRemasterMarker (HD -> H): H and HD both spell the HD remaster, while
-// AI stays its own class and marker-less ids only normalize. This lets a
-// marker-carrying query match a candidate whose marker spelling differs
-// only within the H/HD class (RCT-156H vs RCT-156-HD); the base release
-// (no marker) still compares unequal.
+// foldRemasterMarker (HD -> H): H and HD both spell the HD remaster while
+// AI stays its own class, the optional E/Z catalog suffix letter survives
+// the fold as part of the identity, and redundant trailing marker spellings
+// collapse — IPX-535ZH, IPX-535-Z-HD and IPX-535-ZH-HD all fold to
+// IPX535ZH. This lets a marker-carrying query match a candidate whose marker
+// spelling differs only within the H/HD class (RCT-156H vs RCT-156-HD); the
+// base release (no marker) and the suffix-only release (IPX-535Z) still
+// compare unequal.
 func foldRemasterMarkerID(id string) string {
 	normalized := normalizeIDForCompare(id)
-	if marker := remasterMarkerSuffix(normalized); marker == "HD" {
-		return normalized[:len(normalized)-len(marker)] + "H"
+	base, catalogSuffix, marker, ok := splitRemasterMarkerTail(normalized)
+	if !ok {
+		return normalized
 	}
-	return normalized
+	if marker == "AI" {
+		return base + catalogSuffix + "AI"
+	}
+	return base + catalogSuffix + "H"
 }
 
 func normalizeLabel(s string) string {
