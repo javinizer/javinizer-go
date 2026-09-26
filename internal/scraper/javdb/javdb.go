@@ -38,7 +38,8 @@ var (
 
 	// Separator-pinned remaster identity: the series shape a separator-
 	// bearing display id pins in its first segment, and the compact
-	// series/number split whose t28 branch decodes compact spellings.
+	// series/number split whose t28 branch decodes compact spellings
+	// under the shared t28 rule.
 	remasterSeriesSegmentRegex = regexp.MustCompile(`^\d*(?:t28|[a-z]+)$`)
 	remasterCompactSplitRegex  = regexp.MustCompile(`^(\d*)(T28|[A-Z]+)(\d+)$`)
 )
@@ -387,11 +388,12 @@ func (s *scraper) findDetailURLCtx(ctx context.Context, id string) (string, erro
 	// suffix letter rides along the fold (IPX-535-Z-HD and IPX-535ZH fold
 	// alike) and stays part of the compared identity. The fold key pins
 	// the series/number boundary before punctuation is discarded, as the
-	// DMM/R18 identity code does: T-28123H folds to the key T+28123,
-	// never the T28+123 identity its compact spelling shares with the
-	// distinct T28-123H release, so a search result for that other series
-	// does not rank as a match. The base release carries no marker and
-	// still compares unequal; only the marker spelling is bridged.
+	// DMM/R18 identity code does: T-28123H — and its compact t28123h
+	// spelling, per the shared t28 rule — folds to the key T+28123, never
+	// the T28+123 identity of the distinct T28-123H release, so a search
+	// result for that other series does not rank as a match. The base
+	// release carries no marker and still compares unequal; only the
+	// marker spelling is bridged.
 	var foldedTargetKey remasterFoldKey
 	if markerQuery {
 		foldedTargetKey = foldRemasterMarkerKey(id)
@@ -1014,8 +1016,10 @@ type remasterFoldKey struct {
 // DMM/R18 identity code does (displayIdentityTuple / r18ParseRemasterTail):
 // a separator-bearing id takes its first separator-delimited segment as the
 // series — T-28123H is T+28123 while T28-123H is T28+123 — and a compact id
-// decodes through the t28-first split, so t28123h reads as the T28 label's
-// T28-123H. The tail grammar is splitRemasterMarkerTail's: the E/Z catalog
+// decodes through the t28-first split under the shared t28 rule, so a
+// prefix-free t28123h reads as the T-series T+28123 while its
+// catalog-prefixed spellings (9t28123h) keep the T28 label's T28+123. The
+// tail grammar is splitRemasterMarkerTail's: the E/Z catalog
 // suffix rides in front of the marker, redundant marker spellings collapse
 // and HD folds into the H class. Ids whose grammar does not pin — no marker
 // tail, or a series/number split the regexes do not model — stay unpinned
@@ -1038,7 +1042,24 @@ func foldRemasterMarkerKey(id string) remasterFoldKey {
 		return key
 	}
 	if m := remasterCompactSplitRegex.FindStringSubmatch(base); m != nil {
-		key.pin(m[1]+m[2], m[3], suffix, marker)
+		// The t28 branch mirrors the rule the matcher, DMM and R18
+		// classifiers decode by (parseRemasterTail / r18ParseRemasterTail):
+		// a genuinely compact, prefix-free t28 with a three-digit number
+		// reads as the T-series release — t28123h is T+28123, the release
+		// a manual search for t28123h targets on every source — while the
+		// catalog digits prefixing a t28 cid (9t28123h, 55t28123h) are
+		// maker junk that leaves the T28 label's T28+123 identity intact.
+		// Separator-bearing spellings never reinterpret: their series
+		// boundary is pinned — or falls through unresolved — above.
+		if m[2] == "T28" {
+			if m[1] == "" && len(m[3]) == 3 && !strings.ContainsAny(lower, "-_. ") {
+				key.pin("T", "28"+m[3], suffix, marker)
+			} else {
+				key.pin("T28", m[3], suffix, marker)
+			}
+		} else {
+			key.pin(m[1]+m[2], m[3], suffix, marker)
+		}
 	}
 	return key
 }

@@ -11,9 +11,10 @@ import (
 
 // The fold key keeps the t28 convention the DMM/R18 identity code applies:
 // the series/number boundary is parsed before punctuation is discarded, so
-// T-28123H folds to the key T+28123 while T28-123H — and the compact
-// t28123h — fold to T28+123, and the compaction-equal spellings of the two
-// distinct releases never share a fold key.
+// T-28123H — and the compact t28123h its shared t28 rule decodes the same
+// way — fold to the key T+28123 while T28-123H and its catalog-prefixed
+// cids (9t28123h) fold to T28+123, and the compaction-equal spellings of
+// the two distinct releases never share a fold key.
 func TestFoldRemasterMarkerKeyPinsSeriesBoundary(t *testing.T) {
 	for _, tc := range []struct {
 		name           string
@@ -26,8 +27,14 @@ func TestFoldRemasterMarkerKeyPinsSeriesBoundary(t *testing.T) {
 		{"T series with separator", "T-28123H", "T", "28123", "", "H", true},
 		{"T series HD spelling folds", "T-28123-HD", "T", "28123", "", "H", true},
 		{"T28 series with separator", "T28-123H", "T28", "123", "", "H", true},
-		{"compact t28 spelling", "t28123h", "T28", "123", "", "H", true},
-		{"compact t28 HD spelling", "T28123HD", "T28", "123", "", "H", true},
+		{"compact t28 spelling", "t28123h", "T", "28123", "", "H", true},
+		{"compact t28 HD spelling", "T28123HD", "T", "28123", "", "H", true},
+		{"catalog-prefixed t28 stays T28", "9t28123h", "T28", "123", "", "H", true},
+		{"double-digit catalog prefix stays T28", "55t28123h", "T28", "123", "", "H", true},
+		{"zero-padded five-digit tail stays T28", "t2800123h", "T28", "00123", "", "H", true},
+		{"separator-bearing fall-through stays T28", "T2-8123H", "T28", "123", "", "H", true},
+		{"compact non-t28 spelling", "rct156h", "RCT", "156", "", "H", true},
+		{"compact digit-led series keeps its digits", "1rct156h", "1RCT", "156", "", "H", true},
 		{"separator variants pin alike", "T_28123_H", "T", "28123", "", "H", true},
 		{"E/Z suffix survives the pin", "IPX-535-ZH-HD", "IPX", "535", "Z", "H", true},
 		{"E-suffixed AI keeps its class", "T28-123-E-AI", "T28", "123", "E", "AI", true},
@@ -65,7 +72,10 @@ func TestRemasterFoldMatchRankPinnedIdentity(t *testing.T) {
 	}{
 		{"cross-series compact collision", "T28-123H", "T-28123H", idMatchNone},
 		{"cross-series reverse direction", "T-28123H", "T28-123-HD", idMatchNone},
-		{"compact t28 form matches its series", "T28123H", "T28-123-HD", idMatchExact},
+		{"compact t28 form matches its T series", "T28123H", "T-28123-HD", idMatchExact},
+		{"compact t28 form misses the T28 label", "T28123H", "T28-123-HD", idMatchNone},
+		{"compact t28 query misses the T28 label", "T28-123H", "t28123h", idMatchNone},
+		{"catalog-prefixed t28 matches its label", "T28-123H", "9t28123h", idMatchExact},
 		{"HD spelling folds into H", "T-28123-HD", "T-28123H", idMatchExact},
 		{"padding-equal number", "RCT-0156H", "RCT-156H", idMatchNormalized},
 		{"different number stays none", "T28-124H", "T28-123H", idMatchNone},
@@ -140,4 +150,51 @@ func TestSearchMarkerQueryT28FormDoesNotCrossTSeries(t *testing.T) {
 	scraperErr, ok := models.AsScraperError(err)
 	require.True(t, ok)
 	assert.Equal(t, models.ScraperErrorKindNotFound, scraperErr.Kind)
+}
+
+// A manual compact t28123h query follows the shared t28 rule the matcher,
+// DMM and R18 classifiers decode by: the prefix-free three-digit tail reads
+// as the T-series release T-28123H, so the T28 label's T28-123H — whose
+// compact spelling coincides — must not rank as a match and the query misses
+// honestly instead of leaking the other series' detail page.
+func TestSearchCompactT28QueryMissesT28LabelRelease(t *testing.T) {
+	// The /v/t28123h video-code URL stays unregistered on purpose: the
+	// direct-code shortcut would otherwise bypass the search matching, and
+	// an honest miss must come from the fold key (a broken fold would rank
+	// the T28 listing, fetch this unregistered detail URL and fail with a
+	// non-NotFound error instead).
+	s := newMarkerTestScraper(map[string]string{
+		"https://javdb.test/search?q=t28123h&f=all": remasterSearchPage("T28-123H"),
+	})
+	_, err := s.Search(context.Background(), "t28123h")
+	require.Error(t, err, "a T28-label listing must not satisfy the T-series compact query")
+	scraperErr, ok := models.AsScraperError(err)
+	require.True(t, ok)
+	assert.Equal(t, models.ScraperErrorKindNotFound, scraperErr.Kind)
+}
+
+// Control: the same compact query resolves when the listing is the T-series
+// release it names, spelled with the HD marker the query's folded H bridges.
+func TestSearchCompactT28QueryMatchesTSeriesRelease(t *testing.T) {
+	s := newMarkerTestScraper(map[string]string{
+		"https://javdb.test/search?q=t28123h&f=all": remasterSearchPage("T-28123-HD"),
+		"https://javdb.test/v/t28123hd":             remasterDetailPage("T-28123-HD"),
+	})
+	res, err := s.Search(context.Background(), "t28123h")
+	require.NoError(t, err, "the T-series HD spelling must match the compact query's folded H")
+	require.NotNil(t, res)
+	assert.Equal(t, "T-28123-HD", res.ID)
+}
+
+// Catalog-prefixed cids keep the T28 decoding: 9t28123h is the T28 label's
+// T28-123H, so its query matches the T28-123 listing.
+func TestSearchCatalogPrefixedT28QueryMatchesT28LabelRelease(t *testing.T) {
+	s := newMarkerTestScraper(map[string]string{
+		"https://javdb.test/search?q=9t28123h&f=all": remasterSearchPage("T28-123H"),
+		"https://javdb.test/v/t28123h":               remasterDetailPage("T28-123H"),
+	})
+	res, err := s.Search(context.Background(), "9t28123h")
+	require.NoError(t, err, "the catalog prefix must not break the T28-series identity")
+	require.NotNil(t, res)
+	assert.Equal(t, "T28-123H", res.ID)
 }
