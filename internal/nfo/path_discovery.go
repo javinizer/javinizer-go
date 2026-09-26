@@ -2,7 +2,6 @@ package nfo
 
 import (
 	"path/filepath"
-	"strings"
 
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/template"
@@ -29,10 +28,11 @@ func resolveNFOPath(baseDir string, movie *models.Movie, cfg NFONameConfig, vide
 	}
 
 	if cfg.PerFile && cfg.IsMultiPart && videoFilePath != "" {
-		videoName := strings.TrimSuffix(filepath.Base(videoFilePath), filepath.Ext(videoFilePath))
-		videoNFO := filepath.Join(baseDir, videoName+".nfo")
-		if videoNFO != nfoPath {
-			legacyPaths = append(legacyPaths, videoNFO)
+		for _, sidecar := range nfoSidecarFilenames(videoFilePath) {
+			videoNFO := filepath.Join(baseDir, sidecar)
+			if videoNFO != nfoPath {
+				legacyPaths = append(legacyPaths, videoNFO)
+			}
 		}
 	}
 
@@ -60,15 +60,19 @@ func findNFOFile(fs afero.Fs, baseDir string, movie *models.Movie, cfg NFONameCo
 	// metadata (e.g. <TITLE>), so a file written under the old title is missed
 	// when the fresh scrape changes it. Locate the existing NFO independently of
 	// scraped-only fields via the video sidecar (<video>.nfo) — the standard
-	// convention that survives title changes. A directory scan for any .nfo is
+	// convention that survives title changes. The stem derivation folds
+	// fullwidth-spelled extensions (videoStem), and both sidecar spellings
+	// (<stem>.nfo and <stem>．ｎｆｏ for fullwidth-bearing video names) are
+	// probed. A directory scan for any .nfo is
 	// intentionally avoided: it could pick an unrelated file from a shared
 	// directory (e.g. a sibling movie's NFO) and merge wrong metadata.
 	if videoFilePath != "" {
-		videoName := strings.TrimSuffix(filepath.Base(videoFilePath), filepath.Ext(videoFilePath))
-		sidecarNFO := filepath.Join(baseDir, videoName+nfoExtension)
-		if sidecarNFO != nfoPath {
-			if _, err := fs.Stat(sidecarNFO); err == nil {
-				return sidecarNFO
+		for _, sidecar := range nfoSidecarFilenames(videoFilePath) {
+			sidecarNFO := filepath.Join(baseDir, sidecar)
+			if sidecarNFO != nfoPath {
+				if _, err := fs.Stat(sidecarNFO); err == nil {
+					return sidecarNFO
+				}
 			}
 		}
 	}
