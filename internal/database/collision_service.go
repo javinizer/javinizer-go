@@ -400,18 +400,18 @@ func setCreditSuppressedDeferredTx(tx *gorm.DB, creditID uint, suppressed bool) 
 		INSERT OR IGNORE INTO movie_actresses (movie_content_id, actress_id)
 		SELECT ?, ?
 		WHERE EXISTS (
-			SELECT 1 FROM actresses WHERE id = ? AND verified = ?
+			SELECT 1 FROM actresses WHERE id = ? AND (verified = ? OR ambiguity_quarantined = ?)
 		)
-	`, credit.MovieContentID, credit.ActressID, credit.ActressID, true).Error; err != nil {
+	`, credit.MovieContentID, credit.ActressID, credit.ActressID, true, false).Error; err != nil {
 			return err
 		}
 	} else if err := tx.Exec(`
 		INSERT OR IGNORE INTO movie_actresses (movie_content_id, actress_id)
 		SELECT ?, ?
 		WHERE EXISTS (
-			SELECT 1 FROM actresses WHERE id = ? AND verified = ?
+			SELECT 1 FROM actresses WHERE id = ? AND (verified = ? OR ambiguity_quarantined = ?)
 		)
-	`, credit.MovieContentID, credit.ActressID, credit.ActressID, true).Error; err != nil {
+	`, credit.MovieContentID, credit.ActressID, credit.ActressID, true, false).Error; err != nil {
 		return err
 	}
 	return nil
