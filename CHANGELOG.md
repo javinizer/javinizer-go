@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.6.1] - 2026-09-27
+
+### Fixed
+
+- Stop title preview flap from volatile actress metadata (#269)
+- Resolve pre-commit golangci-lint robustly (#267)
+- Replace 30m r18dev dump download deadline with stall watchdog (#266)
+- Render unquarantined scrape candidates (#265)
+
 ## [v1.6.0] - 2026-09-24
 
 ### Added
