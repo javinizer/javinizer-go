@@ -31,12 +31,11 @@ describe('buildDisplayTitlePreviewSignature', () => {
 		// name_key/aliases. None of these affect the rendered display title, so
 		// the preview must NOT refire for them.
 		const before = makeMovie([
-			makeActress({ thumb_url: '', verified: false, origin: 'scrape', name_key: '', aliases: '' }),
+			makeActress({ thumb_url: '', origin: 'scrape', name_key: '', aliases: '' }),
 		]);
 		const after = makeMovie([
 			makeActress({
 				thumb_url: 'https://cdn.example/t.jpg',
-				verified: true,
 				origin: 'identity',
 				name_key: 'hatano yui',
 				aliases: 'Y.H.',
@@ -51,7 +50,7 @@ describe('buildDisplayTitlePreviewSignature', () => {
 		const baseline = { ...makeMovie([makeActress({ thumb_url: '' })]), cast_version: 'vA' };
 		const overlay = { ...baseline };
 		const fresh = {
-			...makeMovie([makeActress({ thumb_url: 'https://cdn.example/t.jpg', verified: true })]),
+			...makeMovie([makeActress({ thumb_url: 'https://cdn.example/t.jpg' })]),
 			cast_version: 'vB',
 		};
 		const rebased = rebaseOverlayOntoMovie(baseline, overlay, fresh);
@@ -59,6 +58,27 @@ describe('buildDisplayTitlePreviewSignature', () => {
 		expect(buildDisplayTitlePreviewSignature(rebased)).toBe(
 			buildDisplayTitlePreviewSignature(overlay),
 		);
+	});
+
+	it('changes when verification transitions (render eligibility)', () => {
+		// codex PR269 P2: the template context drops credits whose actress is
+		// unverified + ambiguity-quarantined, so verification alone can change
+		// the rendered title — the signature must track it.
+		const a = makeMovie([makeActress({ verified: false })]);
+		const b = makeMovie([makeActress({ verified: true })]);
+		expect(buildDisplayTitlePreviewSignature(b)).not.toBe(buildDisplayTitlePreviewSignature(a));
+	});
+
+	it('changes when a credit render token changes', () => {
+		const credit = {
+			actress_id: 7,
+			credited_name: 'Yui Hatano',
+			suppressed: false,
+			order_index: 0,
+		};
+		const a = { ...makeMovie([makeActress({})]), credits: [credit] };
+		const b = { ...makeMovie([makeActress({})]), credits: [{ ...credit, suppressed: true }] };
+		expect(buildDisplayTitlePreviewSignature(b)).not.toBe(buildDisplayTitlePreviewSignature(a));
 	});
 
 	it('changes when an actress display name changes', () => {
