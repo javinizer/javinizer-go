@@ -306,6 +306,24 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		// resolution landed on the wrong product (e.g. a stale same-series
 		// cache mapping), so miss honestly instead of returning it.
 		if !pageDisplayIdentityMatchesQuery(doc, id) {
+			if resolvedFromCache {
+				// A cached mapping whose page publishes a conflicting 品番
+				// is stale: DMM redirected the cached cid to another
+				// release's product (a cached 1rct00156h serving RCT-157-HD),
+				// so every retry would reuse it and never reach the verified
+				// resolver even if search could now find the correct product.
+				// Invalidate the mapping — its existence is proven by the
+				// cache-hit resolution — and re-resolve through the verified
+				// resolver like the missing-品番 self-heal below, falling back
+				// to a miss when the mapping cannot be invalidated. The
+				// retried pass resolves freshly, so it cannot loop back here.
+				if derr := s.contentIDRepo.Delete(ctx, id); derr != nil {
+					logging.Debugf("DMM: cannot invalidate content-id mapping for %s: %v", id, derr)
+					return nil, models.NewScraperNotFoundError("DMM", fmt.Sprintf("DMM page for %s publishes a different release", id))
+				}
+				logging.Debugf("DMM: invalidated conflicting content-id mapping for %s; re-resolving", id)
+				return s.Search(ctx, id)
+			}
 			return nil, models.NewScraperNotFoundError("DMM", fmt.Sprintf("DMM page for %s publishes a different release", id))
 		}
 		// The page's authoritative 品番 (zero-trimmed by the site) outranks the

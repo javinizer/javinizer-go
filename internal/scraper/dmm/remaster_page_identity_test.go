@@ -13,23 +13,31 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 )
 
-// Finding probe: a persistent cache maps the AI display query DV-818AI to a
-// stale same-series cid whose page 品番 is DV-819-AI; Search must not return
-// release 819 metadata for the query.
+// A persistent cache maps the AI display query DV-818AI to a stale
+// same-series cid whose page 品番 is DV-819-AI; Search must not return
+// release 819 metadata for the query. Round 39 routes that miss through
+// the conflicting-cache self-heal: the mapping is invalidated and the retry
+// resolves freshly, but search publishes nothing for the query, so the
+// honest miss comes from the failed fresh resolution.
 func TestCachedAIQueryWrongPageNumberRejected(t *testing.T) {
-	s, _ := newRemasterTestScraper(t)
+	s, repo := newRemasterTestScraper(t)
 	s.cacheContentID(context.Background(), "DV-818AI", "dv00999ai")
 	s.client.SetTransport(&remasterRoundTripper{serve: func(u string) (int, string) {
-		if strings.Contains(u, "cid=dv00999ai") {
+		switch {
+		case strings.Contains(u, "cid=dv00999ai"):
 			return 200, `<html><body><h1 id="title" class="item">DV-819 AI Remaster</h1>` +
 				`<table><tr><td>品番：</td><td>DV-819-AI</td></tr></table></body></html>`
+		case strings.Contains(u, "/search/="):
+			return 200, `<html><body></body></html>`
 		}
 		return 404, ""
 	}})
 	res, err := s.Search(context.Background(), "DV-818AI")
 	require.Error(t, err, "the wrong-release page must miss honestly")
 	assert.Nil(t, res)
-	assert.Contains(t, err.Error(), "different release")
+	assert.Contains(t, err.Error(), "movie not found")
+	_, lookupErr := repo.FindBySearchID(context.Background(), "DV-818AI")
+	assert.Error(t, lookupErr, "the conflicting mapping is invalidated before the retry misses")
 }
 
 // A matching page (DV-818-AI or DV-818AI) returns as today, with hyphenation
@@ -96,6 +104,96 @@ func TestCachedAIQueryNoPageIdentityInvalidatesAndReResolves(t *testing.T) {
 	assert.Equal(t, "dv00899ai", cached.ContentID, "the cache is repaired with the verified release")
 }
 
+// Round 39: a cached H mapping whose page's 品番 conflicts with the query
+// (a cached 1rct00156h serving RCT-157-HD) is stale, not merely wrong for
+// this fetch: without invalidation every retry would resolve through the
+// same cached cid and never reach the verified remaster resolver, even if
+// search could now find the correct product. The mapping is invalidated and
+// the query re-resolves through the verified resolver, which proves release
+// 156 (9rct00156h) via its page 品番 and republishes the correct metadata —
+// the conflict-side twin of the missing-品番 self-heal above, repairing
+// the cache.
+func TestCachedHQueryConflictingPageInvalidatesAndReResolves(t *testing.T) {
+	s, repo := newRemasterTestScraper(t)
+	s.cacheContentID(context.Background(), "RCT-156H", "1rct00156h")
+	rt := &remasterRoundTripper{serve: func(u string) (int, string) {
+		switch {
+		case strings.Contains(u, "searchstr=1rct00156h/"):
+			// Pass one: the URL finder only needs any 1rct00156h product URL.
+			return 200, `<html><body><a href="/digital/videoa/-/detail/=/cid=1rct00156h/">stale</a></body></html>`
+		case strings.Contains(u, "searchstr=rct00156h/"):
+			// Re-resolution: the verified resolver's spelling finds release 156.
+			return 200, `<html><body><a href="/mono/dvd/-/detail/=/cid=9rct00156h/">remaster</a></body></html>`
+		case strings.Contains(u, "searchstr=9rct00156h/"):
+			// The retried URL finder resolves the verified cid's product page.
+			return 200, `<html><body><a href="/mono/dvd/-/detail/=/cid=9rct00156h/">remaster</a></body></html>`
+		case strings.Contains(u, "cid=1rct00156h"):
+			return 200, `<html><body><h1 id="title" class="item">Wrong release</h1>` +
+				`<table><tr><td>品番：</td><td>RCT-157-HD</td></tr></table></body></html>`
+		case strings.Contains(u, "cid=9rct00156h"):
+			return 200, `<html><body><h1 id="title" class="item">Remaster</h1>` +
+				`<table><tr><td>品番：</td><td>RCT-156-HD</td></tr></table></body></html>`
+		case strings.Contains(u, "/search/="):
+			return 200, `<html><body></body></html>`
+		}
+		return 404, ""
+	}}
+	s.client.SetTransport(rt)
+
+	res, err := s.Search(context.Background(), "RCT-156H")
+	require.NoError(t, err, "the conflicting mapping self-heals: release 156 resolves through the verified resolver")
+	require.NotNil(t, res)
+	assert.Equal(t, "9rct00156h", res.ContentID, "the verified release replaces the conflicting mapping's product")
+	assert.Equal(t, "RCT-156H", res.ID)
+	assert.Equal(t, "Remaster", res.Title, "the conflicting product's metadata must not be published")
+
+	cached, err := repo.FindBySearchID(context.Background(), "RCT-156H")
+	require.NoError(t, err)
+	assert.Equal(t, "9rct00156h", cached.ContentID, "the cache is repaired with the verified release")
+
+	freshResolverRan := false
+	for _, hit := range rt.hits {
+		if strings.Contains(hit, "searchstr=rct00156h/") {
+			freshResolverRan = true
+		}
+	}
+	assert.True(t, freshResolverRan, "the retry resolved through the verified resolver's spelling")
+}
+
+// The freshly resolved counterpart: a display query resolved and verified
+// this call (the resolver proved release 156 on the monthly page) whose
+// selected product page (the digital page the URL finder prefers) still
+// publishes a conflicting 品番 — DMM served another product there. Nothing
+// is stale to invalidate, so the miss is immediate: no recursion, no honest
+// retry through the verified resolver.
+func TestSearchFreshResolutionConflictingPageRejected(t *testing.T) {
+	s, _ := newRemasterTestScraper(t)
+	s.client.SetTransport(&remasterRoundTripper{serve: func(u string) (int, string) {
+		switch {
+		case strings.Contains(u, "searchstr=rct00156h/"):
+			// The resolver's spelling finds the monthly product page.
+			return 200, `<html><body><a href="/monthly/premium/-/detail/=/cid=9rct00156h/">remaster</a></body></html>`
+		case strings.Contains(u, "searchstr=9rct00156h/"):
+			// The URL finder's content-id spelling finds the digital page.
+			return 200, `<html><body><a href="/digital/videoa/-/detail/=/cid=9rct00156h/">remaster</a></body></html>`
+		case strings.Contains(u, "/monthly/"):
+			return 200, `<html><body><h1 id="title" class="item">Remaster</h1>` +
+				`<table><tr><td>品番：</td><td>RCT-156-HD</td></tr></table></body></html>`
+		case strings.Contains(u, "/digital/"):
+			return 200, `<html><body><h1 id="title" class="item">Wrong release</h1>` +
+				`<table><tr><td>品番：</td><td>RCT-157-HD</td></tr></table></body></html>`
+		case strings.Contains(u, "/search/="):
+			return 200, `<html><body></body></html>`
+		}
+		return 404, ""
+	}})
+
+	res, err := s.Search(context.Background(), "RCT-156H")
+	require.Error(t, err, "a freshly resolved page that numbers another release must miss honestly")
+	assert.Nil(t, res)
+	assert.Contains(t, err.Error(), "different release")
+}
+
 // A healthy cached AI mapping whose page carries a 品番 verifies in-flow and
 // returns without re-resolution: the identity comes from the page row, so
 // the self-heal never fires and the HTTP traffic stays at the cache-hit
@@ -154,6 +252,32 @@ func TestCachedAIQueryInvalidateFailureMissesHonestly(t *testing.T) {
 	assert.Contains(t, err.Error(), "no identity")
 }
 
+// Round 39: when the conflicting cached mapping cannot be invalidated
+// (repository delete failure), Search must miss honestly instead of
+// recursing on the same stale mapping — the conflict-side twin of the
+// missing-品番 invalidation-failure miss above.
+func TestCachedHQueryConflictInvalidateFailureMissesHonestly(t *testing.T) {
+	s, _ := newRemasterTestScraper(t)
+	s.contentIDRepo = &deleteFailingCIDRepo{cached: &models.ContentIDMapping{
+		SearchID: "RCT-156H", ContentID: "1rct00156h", Source: "dmm",
+	}}
+	s.client.SetTransport(&remasterRoundTripper{serve: func(u string) (int, string) {
+		switch {
+		case strings.Contains(u, "/search/="):
+			return 200, `<html><body><a href="/digital/videoa/-/detail/=/cid=1rct00156h/">stale</a></body></html>`
+		case strings.Contains(u, "cid=1rct00156h"):
+			return 200, `<html><body><h1 id="title" class="item">Wrong release</h1>` +
+				`<table><tr><td>品番：</td><td>RCT-157-HD</td></tr></table></body></html>`
+		}
+		return 404, ""
+	}})
+
+	res, err := s.Search(context.Background(), "RCT-156H")
+	require.Error(t, err, "a conflicting mapping that cannot be invalidated must miss honestly")
+	assert.Nil(t, res)
+	assert.Contains(t, err.Error(), "different release")
+}
+
 // deleteFailingCIDRepo serves cached lookups but fails deletes, pinning the
 // miss-honestly branch of the cache self-heal.
 type deleteFailingCIDRepo struct{ cached *models.ContentIDMapping }
@@ -205,47 +329,64 @@ func TestCachedHQueryMatchingPageReturns(t *testing.T) {
 // Round-25b: a cached H query whose page serves a markerless 品番 must miss
 // honestly: the row names the base release (cid=1rct00156h under RCT-157),
 // not the queried remaster, so returning its metadata would publish release
-// 157's content under RCT-156H's identity.
+// 157's content under RCT-156H's identity. Round 39 routes that miss through
+// the conflicting-cache self-heal: the mapping is invalidated, the retry
+// resolves freshly, and the miss comes from the failed fresh resolution.
 func TestCachedHQueryMarkerlessPageRejected(t *testing.T) {
-	s, _ := newRemasterTestScraper(t)
+	s, repo := newRemasterTestScraper(t)
 	s.cacheContentID(context.Background(), "RCT-156H", "1rct00156h")
 	s.client.SetTransport(&remasterRoundTripper{serve: func(u string) (int, string) {
-		if strings.Contains(u, "cid=1rct00156h") {
+		switch {
+		case strings.Contains(u, "cid=1rct00156h"):
 			return 200, `<html><body><h1 id="title" class="item">Base release</h1>` +
 				`<table><tr><td>品番：</td><td>RCT-157</td></tr></table></body></html>`
+		case strings.Contains(u, "/search/="):
+			return 200, `<html><body></body></html>`
 		}
 		return 404, ""
 	}})
 	res, err := s.Search(context.Background(), "RCT-156H")
 	require.Error(t, err, "the markerless 品番 names the base release and must miss honestly")
 	assert.Nil(t, res)
-	assert.Contains(t, err.Error(), "different release")
+	assert.Contains(t, err.Error(), "movie not found")
+	_, lookupErr := repo.FindBySearchID(context.Background(), "RCT-156H")
+	assert.Error(t, lookupErr, "the conflicting mapping is invalidated before the retry misses")
 }
 
 // The AI request case of the same rule: the query is marker-bearing, so a
 // markerless 品番 (DV-818, the base release the AI cid diverged from) still
-// conflicts and must not pass through like an absent identity.
+// conflicts and must not pass through like an absent identity. Round 39
+// routes that miss through the conflicting-cache self-heal: the mapping is
+// invalidated, the retry resolves freshly, and the miss comes from the
+// failed fresh resolution.
 func TestCachedAIQueryMarkerlessPageRejected(t *testing.T) {
-	s, _ := newRemasterTestScraper(t)
+	s, repo := newRemasterTestScraper(t)
 	s.cacheContentID(context.Background(), "DV-818AI", "dv00899ai")
 	s.client.SetTransport(&remasterRoundTripper{serve: func(u string) (int, string) {
-		if strings.Contains(u, "cid=dv00899ai") {
+		switch {
+		case strings.Contains(u, "cid=dv00899ai"):
 			return 200, `<html><body><h1 id="title" class="item">Base release</h1>` +
 				`<table><tr><td>品番：</td><td>DV-818</td></tr></table></body></html>`
+		case strings.Contains(u, "/search/="):
+			return 200, `<html><body></body></html>`
 		}
 		return 404, ""
 	}})
 	res, err := s.Search(context.Background(), "DV-818AI")
 	require.Error(t, err, "the markerless 品番 names the base release and must miss honestly")
 	assert.Nil(t, res)
-	assert.Contains(t, err.Error(), "different release")
+	assert.Contains(t, err.Error(), "movie not found")
+	_, lookupErr := repo.FindBySearchID(context.Background(), "DV-818AI")
+	assert.Error(t, lookupErr, "the conflicting mapping is invalidated before the retry misses")
 }
 
 // Round-26: the round-25b markerless conflict extends to E/Z-suffixed
 // base-release spellings. The catalog-suffix grammar displayIdentityTuple
 // parses (RCT-157E, RCT-157Z) names the base release's catalog variant,
 // never the queried remaster, so the page must miss honestly exactly like
-// the plain RCT-157 case.
+// the plain RCT-157 case. Round 39 routes these misses through the
+// conflicting-cache self-heal: the mapping is invalidated, the retry
+// resolves freshly, and the miss comes from the failed fresh resolution.
 func TestCachedHQueryEZSuffixedMarkerlessPageRejected(t *testing.T) {
 	for _, tc := range []struct{ name, pinzan string }{
 		{"e-catalog base release", "RCT-157E"},
@@ -254,19 +395,24 @@ func TestCachedHQueryEZSuffixedMarkerlessPageRejected(t *testing.T) {
 		{"hyphenated z-catalog base release", "RCT-157-Z"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			s, _ := newRemasterTestScraper(t)
+			s, repo := newRemasterTestScraper(t)
 			s.cacheContentID(context.Background(), "RCT-156H", "1rct00156h")
 			s.client.SetTransport(&remasterRoundTripper{serve: func(u string) (int, string) {
-				if strings.Contains(u, "cid=1rct00156h") {
+				switch {
+				case strings.Contains(u, "cid=1rct00156h"):
 					return 200, `<html><body><h1 id="title" class="item">Base release</h1>` +
 						`<table><tr><td>品番：</td><td>` + tc.pinzan + `</td></tr></table></body></html>`
+				case strings.Contains(u, "/search/="):
+					return 200, `<html><body></body></html>`
 				}
 				return 404, ""
 			}})
 			res, err := s.Search(context.Background(), "RCT-156H")
 			require.Error(t, err, tc.name+": the E/Z-suffixed markerless 品番 names the base release and must miss honestly")
 			assert.Nil(t, res)
-			assert.Contains(t, err.Error(), "different release")
+			assert.Contains(t, err.Error(), "movie not found")
+			_, lookupErr := repo.FindBySearchID(context.Background(), "RCT-156H")
+			assert.Error(t, lookupErr, tc.name+": the conflicting mapping is invalidated before the retry misses")
 		})
 	}
 }
