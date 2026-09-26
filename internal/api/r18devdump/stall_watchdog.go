@@ -16,27 +16,32 @@ const dumpStallTimeout = 5 * time.Minute
 // The transfer duration is unbounded (dump size x network speed), so an
 // absolute deadline kills slow-but-healthy downloads; only stalled progress
 // proves failure. Ping is fed by the download progress callback.
+//
+// last, stopped, and the fire claim all serialize on mu: Stop, Ping, and
+// tryFire are atomic with respect to each other, so activity arriving at the
+// stall boundary is always accounted for, and a watchdog disarmed at stream
+// EOF can never cancel the local import tail. last holds monotonic time.Time
+// values (never UnixNano) so host clock jumps cannot fabricate or extend
+// stalls. stop exists only to wake run; it is closed exactly once, under mu.
 type stallWatchdog struct {
 	timeout time.Duration
-	last    atomic.Int64
 	mu      sync.Mutex
+	last    time.Time
 	stopped bool
 	stop    chan struct{}
 	fired   atomic.Bool
 }
 
 func newStallWatchdog(timeout time.Duration) *stallWatchdog {
-	w := &stallWatchdog{timeout: timeout, stop: make(chan struct{})}
-	w.last.Store(time.Now().UnixNano())
-	return w
+	return &stallWatchdog{timeout: timeout, last: time.Now(), stop: make(chan struct{})}
 }
 
-func (w *stallWatchdog) Ping() { w.last.Store(time.Now().UnixNano()) }
+func (w *stallWatchdog) Ping() {
+	w.mu.Lock()
+	w.last = time.Now()
+	w.mu.Unlock()
+}
 
-// Stop disarms the watchdog permanently. The stopped claim and the fire claim
-// (tryFire) serialize on mu, so once either transition wins, the other can
-// never observe the pre-claim state — Stop and onTimeout are atomic with
-// respect to each other and each happens at most once.
 func (w *stallWatchdog) Stop() {
 	w.mu.Lock()
 	if !w.stopped {
@@ -48,17 +53,14 @@ func (w *stallWatchdog) Stop() {
 
 func (w *stallWatchdog) Fired() bool { return w.fired.Load() }
 
-// tryFire claims a timeout at now: if the watchdog has been stalled for at
-// least timeout and was not already stopped or fired, it transitions to
-// stopped and invokes onTimeout. The claim is atomic with Stop, so a watchdog
-// disarmed at stream EOF can never abort the local import tail. onTimeout
-// runs outside mu; only the claim is serialized.
+// tryFire claims a timeout at now: if the watchdog has seen no activity for
+// at least timeout and is not already stopped, it transitions to stopped and
+// invokes onTimeout. The elapsed check runs under mu, so a Ping that won the
+// lock first is always observed. onTimeout runs outside mu; only the claim
+// is serialized.
 func (w *stallWatchdog) tryFire(now time.Time, onTimeout func()) bool {
-	if now.Sub(time.Unix(0, w.last.Load())) < w.timeout {
-		return false
-	}
 	w.mu.Lock()
-	if w.stopped {
+	if w.stopped || now.Sub(w.last) < w.timeout {
 		w.mu.Unlock()
 		return false
 	}

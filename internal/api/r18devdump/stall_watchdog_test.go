@@ -124,12 +124,13 @@ func TestStallWatchdog_StopAndFireAreAtomic(t *testing.T) {
 		time.Sleep(time.Millisecond)
 		var wg sync.WaitGroup
 		var fires atomic.Int32
-		wg.Add(2)
+		wg.Add(3)
 		go func() { defer wg.Done(); w.Stop() }()
 		go func() {
 			defer wg.Done()
 			w.tryFire(time.Now(), func() { fires.Add(1) })
 		}()
+		go func() { defer wg.Done(); w.Ping() }()
 		wg.Wait()
 
 		assert.LessOrEqual(t, fires.Load(), int32(1), "onTimeout must run at most once")
@@ -138,6 +139,17 @@ func TestStallWatchdog_StopAndFireAreAtomic(t *testing.T) {
 			"after either transition claimed the watchdog, no further fire is possible")
 		assert.LessOrEqual(t, fires.Load(), int32(1))
 	}
+}
+
+func TestStallWatchdog_CompletedPingSuppressesFire(t *testing.T) {
+	// A Ping that completes before the claim must always be observed, even
+	// after the stall window elapsed before the Ping.
+	w := newStallWatchdog(time.Millisecond)
+	time.Sleep(5 * time.Millisecond)
+	w.Ping()
+	assert.False(t, w.tryFire(time.Now(), func() {
+		t.Error("fire must see a Ping that completed before the claim")
+	}))
 }
 
 func TestStallWatchdog_StopDisarmsImmediatelyBeforeDeadline(t *testing.T) {
