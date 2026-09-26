@@ -285,6 +285,32 @@ var (
 	// own digit bound — and the hyphenated, dotted, and spaced siblings
 	// ride the compound span (see compoundSourceTagPrefixRegex) exactly
 	// like the web compounds.
+	// The source classes accept the progressive/interlaced suffix — an
+	// optional P or I directly behind the 3-4 digit resolution number
+	// (WEB-DL1080P, WEB1080P, BDRIP1080P, REMUX2160P, BR-RIP1080I) —
+	// the same extension round 44 gave the fhd/uhd heads: the bare
+	// alternatives stop at the word boundary before the suffix letter,
+	// and the suffixed spelling — the DL1080P/RIP1080P fragment the
+	// catalog scan splits off, or the whole WEB1080P token — is a
+	// letter-run plus 4 digits plus a single letter, exactly the
+	// content-id shape, so it rode the content-id tier and the trailing
+	// catalog grammar as the replacement id on both entry points. The
+	// 4+-letter heads (bdrip, remux) only survived that miss through
+	// the weak word-year bail — an incidental protection, not the
+	// vocabulary's decision — so the suffix joins the class rather than
+	// leaning on the guard. The bounds mirror round 44's: the suffix
+	// stays the single letter the scan spellings carry, so the
+	// fps-bearing (WEB-DL1080P60) and longer (WEB-DL1080PQ) tails fail
+	// the trailing word boundary and keep id grammar, and the heads are
+	// unchanged, so the hd head stays excluded (hd is a real series in
+	// the r18.dev content-id prefix lookup — HD1080P keeps id grammar,
+	// the round-12/44 decision), the rip qualifier stays required
+	// (BD1080P keeps id grammar), the five-plus-digit fragments
+	// (WEB-DL12345P) stay id grammar, and the word-boundary protections
+	// (fweb, 189web, XBD-RIP1080P) ride the class as before. No real id
+	// shape is displaced: no content id ends in P or I behind digits
+	// behind a source head, exactly as no content id ends in P or I
+	// behind the fhd/uhd heads' digits.
 	// Codec-profile compounds join the vocabulary as a class — an audio
 	// codec head (dts, aac, ac3, eac3, truehd, dd, or ddp) plus one
 	// separator and one or more profile words (DTS-HD, DTS-HD MA,
@@ -362,7 +388,7 @@ var (
 	// rides the bare vocabulary's prior-round decision — and no
 	// content id ends in P or I behind digits, since the marker tails
 	// real ids carry are hd/ai/h.
-	trailingQualityTagRegex = regexp.MustCompile(`(?i)\b(?:[hx]26[3-9](?:(?:8|10|12)bit)?|hi(?:10p?|444(?:pp)?)|avc\d*|aac\d*|hevc\d*|vvc\d*|ac3|dts|flac|opus|truehd|vc1|av1|mp[34]|ddp\d*|eac3|divx\d*|xvid\d*|prores\d*|yuv\d*|rgb\d*|p0(?:10|16)|mpeg\d*|vp\d+|fhd\d{2,4}[pi]?|uhd\d{2,4}[pi]?|hdtv|hdr\d*|bt2020|bt709|rec709|smpte\d+|pq\d+|st2084|hlg\d*|ycbcr\d*|(?:bt|rec|st|smpte)[. ]?\d{3,4}|(?:l?pcm|dts|flac|opus|e?ac3|truehd)[. ]?\d{3,4}|\d+(?:bit|point)\d+|(?:web(?:[-_. ]?(?:dl(?:rip)?|rip))?|remux|bluray|(?:bd|br|dvd)[-_. ]?rip)\d{3,4}|` + `(?:` + codecProfileHeadAlternation + `)[-_. ](?:` + codecProfileWordAlternation + `)(?:[-_. ]?(?:` + codecProfileWordAlternation + `))*\d{3,4}|(?:` + fusedCodecProfileHeadAlternation + `)(?:` + codecProfileWordAlternation + `)+\d{3,4})\b`)
+	trailingQualityTagRegex = regexp.MustCompile(`(?i)\b(?:[hx]26[3-9](?:(?:8|10|12)bit)?|hi(?:10p?|444(?:pp)?)|avc\d*|aac\d*|hevc\d*|vvc\d*|ac3|dts|flac|opus|truehd|vc1|av1|mp[34]|ddp\d*|eac3|divx\d*|xvid\d*|prores\d*|yuv\d*|rgb\d*|p0(?:10|16)|mpeg\d*|vp\d+|fhd\d{2,4}[pi]?|uhd\d{2,4}[pi]?|hdtv|hdr\d*|bt2020|bt709|rec709|smpte\d+|pq\d+|st2084|hlg\d*|ycbcr\d*|(?:bt|rec|st|smpte)[. ]?\d{3,4}|(?:l?pcm|dts|flac|opus|e?ac3|truehd)[. ]?\d{3,4}|\d+(?:bit|point)\d+|(?:web(?:[-_. ]?(?:dl(?:rip)?|rip))?|remux|bluray|(?:bd|br|dvd)[-_. ]?rip)\d{3,4}[pi]?|` + `(?:` + codecProfileHeadAlternation + `)[-_. ](?:` + codecProfileWordAlternation + `)(?:[-_. ]?(?:` + codecProfileWordAlternation + `))*\d{3,4}|(?:` + fusedCodecProfileHeadAlternation + `)(?:` + codecProfileWordAlternation + `)+\d{3,4})\b`)
 	// compoundSourceTagPrefixRegex recognizes the source-tag prefix —
 	// web, bd, br, or dvd plus exactly one separator — ending where a
 	// trailing-catalog candidate begins, so the candidate's quality veto
