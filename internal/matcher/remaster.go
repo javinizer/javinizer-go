@@ -218,29 +218,33 @@ var (
 	// numerically prefixed (189WEB-DL1) spellings keep the leading-letter
 	// protection, and a DL fragment without the web prefix stays id
 	// grammar.
-	// The Blu-ray rip spellings extend the source class with a required
-	// qualifier — bd or br plus an optional single separator and rip,
-	// directly followed by the 3-4 digit resolution number — because the
-	// compact BDRIP1080 and BRRIP1080 spellings and their BD-RIP1080,
-	// BD.RIP1080, and BD RIP1080 siblings otherwise satisfy the builtin
-	// amateur pattern and the trailing catalog grammar as replacement ids
-	// behind a separated remaster id. The qualifier is required where
-	// web's is optional because the heads are real series: bd, bdr, and
-	// br all exist in the r18.dev content-id prefix lookup, and the
-	// round-12 decision keeps their bare resolution spellings (BD1080,
-	// BDR1080) in catalog-id grammar. The rip compound is a longer token
-	// than every real head it extends — bdrip, brrip, and rip are not
-	// series in the lookup, and no real bd, bdr, or br id carries a rip
-	// fragment — so the word-boundary shapes differ: bare BD1080 and
-	// BDR1080 tokens, hyphenated display ids (BR-616), and numerically
-	// prefixed content ids (3bd00108, 155bdr00108) keep matching as ids
-	// while the compound BDRIP1080 spelling becomes metadata. The digit
-	// bound rides the class — five-plus-digit fragments stay id grammar
-	// (BD-RIP12345 leaves RIP12345 standing, like WEB-DL12345 leaves
-	// DL12345), and two-digit numerals (BD-RIP24) already fail the
-	// amateur pattern's own digit bound — and the hyphenated, dotted, and
-	// spaced siblings ride the compound span (see
-	// compoundSourceTagPrefixRegex) exactly like the web compounds.
+	// The Blu-ray/DVD rip spellings extend the source class with a
+	// required qualifier — bd, br, or dvd plus an optional single
+	// separator and rip, directly followed by the 3-4 digit resolution
+	// number — because the compact BDRIP1080, BRRIP1080, and DVDRIP480
+	// spellings and their BD-RIP1080, BD.RIP1080, and BD RIP1080
+	// siblings otherwise satisfy the builtin amateur pattern and the
+	// trailing catalog grammar as replacement ids behind a separated
+	// remaster id. The qualifier is required where web's is optional
+	// because the heads are real series: bd, bdr, br, and dvd all exist
+	// in the r18.dev content-id prefix lookup, and the round-12
+	// decision keeps their bare resolution spellings (BD1080, BDR1080,
+	// DVD480) in catalog-id grammar. The rip compound is a longer token
+	// than every real head it extends — bdrip, brrip, dvdrip, and rip
+	// are not series in the lookup, and no real bd, bdr, br, or dvd id
+	// carries a rip fragment (the real dvd family tops out at heads
+	// like dvdes and dvdzm, all shorter than dvdrip) — so the
+	// word-boundary shapes differ: bare BD1080, BDR1080, and DVD480
+	// tokens, hyphenated display ids (BR-616, DVD-480), and numerically
+	// prefixed content ids (3bd00108, 155bdr00108, 150dvd00123) keep
+	// matching as ids while the compound BDRIP1080 and DVDRIP480
+	// spellings become metadata. The digit bound rides the class —
+	// five-plus-digit fragments stay id grammar (BD-RIP12345 leaves
+	// RIP12345 standing, like WEB-DL12345 leaves DL12345), and
+	// two-digit numerals (BD-RIP24) already fail the amateur pattern's
+	// own digit bound — and the hyphenated, dotted, and spaced siblings
+	// ride the compound span (see compoundSourceTagPrefixRegex) exactly
+	// like the web compounds.
 	// Codec-profile compounds join the vocabulary as a class — an audio
 	// codec head (dts, aac, ac3, eac3, truehd, dd, or ddp) plus one
 	// separator and one or more profile words (DTS-HD, DTS-HD MA,
@@ -266,19 +270,22 @@ var (
 	// by those literals as well — the same veto DTS-24 rides today —
 	// while the dd head (no bare literal of its own) leans on the
 	// compound's own bounds.
-	trailingQualityTagRegex = regexp.MustCompile(`(?i)\b(?:[hx]26[3-9]|avc\d*|aac\d*|hevc\d*|vvc\d*|ac3|dts|flac|opus|truehd|vc1|av1|mp[34]|ddp\d*|eac3|divx\d*|xvid\d*|prores\d*|yuv\d*|rgb\d*|p0(?:10|16)|mpeg\d*|vp\d+|fhd\d{2,4}|uhd\d{2,4}|hdtv|hdr\d*|bt2020|bt709|rec709|smpte\d+|pq\d+|st2084|hlg\d*|ycbcr\d*|(?:bt|rec|st|smpte)[. ]?\d{3,4}|(?:l?pcm|dts|flac|opus|e?ac3|truehd)[. ]?\d{3,4}|\d+(?:bit|point)\d+|(?:web(?:[-_. ]?(?:dl(?:rip)?|rip))?|remux|bluray|(?:bd|br)[-_. ]?rip)\d{3,4}|` + `(?:` + codecProfileHeadAlternation + `)[-_. ](?:` + codecProfileWordAlternation + `)(?:[-_. ]?(?:` + codecProfileWordAlternation + `))*\d{3,4})\b`)
+	trailingQualityTagRegex = regexp.MustCompile(`(?i)\b(?:[hx]26[3-9]|avc\d*|aac\d*|hevc\d*|vvc\d*|ac3|dts|flac|opus|truehd|vc1|av1|mp[34]|ddp\d*|eac3|divx\d*|xvid\d*|prores\d*|yuv\d*|rgb\d*|p0(?:10|16)|mpeg\d*|vp\d+|fhd\d{2,4}|uhd\d{2,4}|hdtv|hdr\d*|bt2020|bt709|rec709|smpte\d+|pq\d+|st2084|hlg\d*|ycbcr\d*|(?:bt|rec|st|smpte)[. ]?\d{3,4}|(?:l?pcm|dts|flac|opus|e?ac3|truehd)[. ]?\d{3,4}|\d+(?:bit|point)\d+|(?:web(?:[-_. ]?(?:dl(?:rip)?|rip))?|remux|bluray|(?:bd|br|dvd)[-_. ]?rip)\d{3,4}|` + `(?:` + codecProfileHeadAlternation + `)[-_. ](?:` + codecProfileWordAlternation + `)(?:[-_. ]?(?:` + codecProfileWordAlternation + `))*\d{3,4})\b`)
 	// compoundSourceTagPrefixRegex recognizes the source-tag prefix —
-	// web, bd, or br plus exactly one separator — ending where a
+	// web, bd, br, or dvd plus exactly one separator — ending where a
 	// trailing-catalog candidate begins, so the candidate's quality veto
-	// can span the compound spelling (WEB-DL2160, BD-RIP1080) that the
-	// catalog scan split apart. The bd and br heads are real series, but
-	// the span extension stays inert for them: the extended span must
-	// still match the quality vocabulary, and no real bd, bdr, or br id
-	// carries a rip fragment. The leading boundary requirement (start of
-	// text or a non-alphanumeric character before the head) keeps the
-	// word-boundary protections of the source class: fweb, xbd, and
-	// 189web spellings never extend the span.
-	compoundSourceTagPrefixRegex = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(web|bd|br)[-_. ]$`)
+	// can span the compound spelling (WEB-DL2160, BD-RIP1080,
+	// DVD-RIP1080) that the catalog scan split apart. The bd, br, and
+	// dvd heads are real series, but the span extension stays inert for
+	// them: the extended span must still match the quality vocabulary,
+	// and no real bd, bdr, br, or dvd id carries a rip fragment. The
+	// leading boundary requirement (start of text or a non-alphanumeric
+	// character before the head) keeps the word-boundary protections of
+	// the source class: fweb, xbd, and 189web spellings never extend the
+	// span, and the near-miss heads with leading letters stay protected
+	// too — dvdp and dvdes are real series, so DVDP-RIP1080 keeps its
+	// RIP1080 fragment in id grammar the way XBD-RIP1080 does.
+	compoundSourceTagPrefixRegex = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(web|bd|br|dvd)[-_. ]$`)
 	// compoundCodecProfileTagPrefixRegex recognizes the codec-profile
 	// prefix — an audio codec head plus zero or more separated profile
 	// words and exactly one trailing separator — ending where a
@@ -365,8 +372,8 @@ func builtinQualityShadowsContentID(name, id string) bool {
 
 // trailingCandidateVetoSpan returns the span a trailing-catalog candidate is
 // vetted against as a quality tag: the candidate itself, or the candidate
-// extended back over a compound source-tag prefix (web, bd, or br plus
-// one separator) or a codec-profile prefix (an audio codec head plus its
+// extended back over a compound source-tag prefix (web, bd, br, or dvd
+// plus one separator) or a codec-profile prefix (an audio codec head plus its
 // profile words and one separator) that directly precedes it. The catalog
 // scan splits
 // compound source spellings at their separator — WEB-DL2160 leaves the
