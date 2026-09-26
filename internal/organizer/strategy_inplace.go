@@ -55,7 +55,14 @@ func (s *inPlaceStrategy) isDedicatedFolder(dir string, id string, m matcher.Mat
 			continue
 		}
 
-		ext := strings.ToLower(filepath.Ext(entry.Name()))
+		// Fold fullwidth spellings before deriving the extension, mirroring
+		// the scanner's admission path (internal/scanner fullwidth.go):
+		// filepath.Ext is ASCII-only, so a fullwidth extension
+		// (RCT-156-HD．ｍｋｖ) would otherwise keep its raw ．ｍｋｖ spelling,
+		// videoExtensions would reject the file, and a folder holding only
+		// such videos would be misreported as NON-DEDICATED — skipping the
+		// expected in-place folder rename.
+		ext := strings.ToLower(fileExtension(entry.Name()))
 
 		if !videoExtensions[ext] {
 			continue
@@ -310,10 +317,7 @@ func (s *inPlaceStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) {
 				result.OldDirectoryPath = plan.OldDir
 				result.NewDirectoryPath = plan.TargetDir
 
-				oldFileName := plan.Match.Name
-				if oldFileName == "" {
-					oldFileName = filepath.Base(plan.SourcePath)
-				}
+				oldFileName := innerRenameSourceName(plan)
 				currentFilePath := filepath.Join(plan.TargetDir, oldFileName)
 				if currentFilePath != plan.TargetPath {
 					// Both destination locks are already held (see above), so no sibling can slip a
@@ -467,6 +471,67 @@ func (s *inPlaceStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) {
 	return result, nil
 }
 
+// foldFullwidthASCII folds fullwidth ASCII-range codepoints (Ａ-Ｚ, ａ-ｚ,
+// ０-９, and the rest of U+FF01..U+FF5E, plus the ideographic space U+3000)
+// to their halfwidth counterparts, mirroring the scanner's and matcher's
+// same-named folds (internal/scanner/fullwidth.go,
+// internal/matcher/fullwidth.go): both are package-private, so the in-place
+// rescan carries the identical fold locally instead of importing it. Kana,
+// kanji, and all other runes are untouched, and ASCII-only input is
+// returned unchanged.
+func foldFullwidthASCII(s string) string {
+	if !containsFullwidthASCII(s) {
+		return s
+	}
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r >= 0xFF01 && r <= 0xFF5E:
+			return r - 0xFEE0
+		case r == 0x3000:
+			return ' '
+		default:
+			return r
+		}
+	}, s)
+}
+
+func containsFullwidthASCII(s string) bool {
+	for _, r := range s {
+		if (r >= 0xFF01 && r <= 0xFF5E) || r == 0x3000 {
+			return true
+		}
+	}
+	return false
+}
+
+// fileExtension derives an extension with fullwidth ASCII spellings folded
+// to halfwidth first — the same derivation the scanner used to admit the
+// file (internal/scanner/fullwidth.go fileExtension, mirrored locally
+// because that helper is package-private): filepath.Ext is ASCII-only, so
+// a fullwidth extension (RCT-156-HD．ｍｋｖ) would otherwise yield the raw
+// fullwidth spelling that videoExtensions rejects. The rescan in
+// isDedicatedFolder must recognize exactly the videos the scanner
+// admitted, or a fullwidth-only folder is misreported NON-DEDICATED.
+func fileExtension(path string) string {
+	return filepath.Ext(foldFullwidthASCII(path))
+}
+
+// innerRenameSourceName returns the on-disk spelling of the match's file:
+// the raw basename of the raw-spelled SourcePath (models.FileMatchInfo:
+// Path is the source of truth for file I/O). plan.Match.Name carries the
+// scanner's extension-folded spelling (internal/scanner foldNameExtension
+// folds ．ｍｋｖ to .mkv), which names nothing on disk when the file was
+// admitted with a fullwidth extension — deriving the inner rename's source
+// from it would fail on a nonexistent path and roll the whole directory
+// rename back. Only a degenerate plan without a SourcePath falls back to
+// Match.Name.
+func innerRenameSourceName(plan *OrganizePlan) string {
+	if plan.SourcePath != "" {
+		return filepath.Base(plan.SourcePath)
+	}
+	return plan.Match.Name
+}
+
 // finishInPlaceInnerRename is only invoked on an inner-op failure (call site
 // guarantees err != nil), so branches reach every classification. codex P1
 // (PR #241): a rollback here shapes the failed result exactly like the rb
@@ -482,10 +547,7 @@ func (s *inPlaceStrategy) finishInPlaceInnerRename(plan *OrganizePlan, result *O
 	}
 	if rb := s.fs.Rename(plan.TargetDir, plan.OldDir); rb != nil {
 		logging.Errorf("[in-place] Failed to rollback directory rename %s → %s: %v", plan.TargetDir, plan.OldDir, rb)
-		oldFileName := plan.Match.Name
-		if oldFileName == "" {
-			oldFileName = filepath.Base(plan.SourcePath)
-		}
+		oldFileName := innerRenameSourceName(plan)
 		result.NewPath = filepath.Join(plan.TargetDir, oldFileName)
 		result.FileName = oldFileName
 		return fmt.Errorf("failed to rename file after directory rename (directory rename survived — rollback refused): %w", mapNoReplaceRefusal(err, plan.TargetPath))
