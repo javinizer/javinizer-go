@@ -34,7 +34,9 @@ func TestFoldRemasterMarkerKeyPinsSeriesBoundary(t *testing.T) {
 		{"zero-padded five-digit tail stays T28", "t2800123h", "T28", "00123", "", "H", true},
 		{"separator-bearing fall-through stays T28", "T2-8123H", "T28", "123", "", "H", true},
 		{"compact non-t28 spelling", "rct156h", "RCT", "156", "", "H", true},
-		{"compact digit-led series keeps its digits", "1rct156h", "1RCT", "156", "", "H", true},
+		// The catalog prefix strips (see stripCompactCatalogPrefix): the
+		// raw cid of the RCT-156H remaster pins the RCT identity.
+		{"catalog-prefixed compact cid strips its prefix", "1rct156h", "RCT", "156", "", "H", true},
 		{"separator variants pin alike", "T_28123_H", "T", "28123", "", "H", true},
 		{"E/Z suffix survives the pin", "IPX-535-ZH-HD", "IPX", "535", "Z", "H", true},
 		{"E-suffixed AI keeps its class", "T28-123-E-AI", "T28", "123", "E", "AI", true},

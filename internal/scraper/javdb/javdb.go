@@ -393,7 +393,12 @@ func (s *scraper) findDetailURLCtx(ctx context.Context, id string) (string, erro
 	// the T28+123 identity of the distinct T28-123H release, so a search
 	// result for that other series does not rank as a match. The base
 	// release carries no marker and still compares unequal; only the
-	// marker spelling is bridged.
+	// marker spelling is bridged. Raw marker-bearing content ids the
+	// matcher's tier-2 propagates fold onto the display listing too: the
+	// leading catalog/channel prefix digits strip before the series pins
+	// (1rct00156h -> the RCT+156H-class identity, see
+	// stripCompactCatalogPrefix), so the RCT-156-HD listing ranks as its
+	// match.
 	var foldedTargetKey remasterFoldKey
 	if markerQuery {
 		foldedTargetKey = foldRemasterMarkerKey(id)
@@ -1018,7 +1023,11 @@ type remasterFoldKey struct {
 // series — T-28123H is T+28123 while T28-123H is T28+123 — and a compact id
 // decodes through the t28-first split under the shared t28 rule, so a
 // prefix-free t28123h reads as the T-series T+28123 while its
-// catalog-prefixed spellings (9t28123h) keep the T28 label's T28+123. The
+// catalog-prefixed spellings (9t28123h) keep the T28 label's T28+123. A
+// compact id's leading 1-4 digit run is a DMM catalog/channel prefix, not
+// part of the series (1rct00156h is the RCT-156H remaster's cid), so it is
+// stripped from the pinned series the same way the DMM/R18 classifiers read
+// the spelling — see stripCompactCatalogPrefix. The
 // tail grammar is splitRemasterMarkerTail's: the E/Z catalog
 // suffix rides in front of the marker, redundant marker spellings collapse
 // and HD folds into the H class. Ids whose grammar does not pin — no marker
@@ -1061,7 +1070,15 @@ func foldRemasterMarkerKey(id string) remasterFoldKey {
 				key.pin("T28", m[3], suffix, marker)
 			}
 		} else {
-			key.pin(m[1]+m[2], m[3], suffix, marker)
+			// A leading 1-4 digit run on a compact marker-bearing id is a
+			// DMM catalog/channel prefix, not part of the series — every
+			// real prefixed cid's series part is letters-only, and the
+			// DMM/R18 classifiers read the same spelling through the same
+			// split — so 1rct00156h pins RCT+00156+H, the identity the
+			// RCT-156-HD display listing carries, instead of a 1RCT series
+			// no listing spells. stripCompactCatalogPrefix bounds the
+			// ambiguous digit runs.
+			key.pin(stripCompactCatalogPrefix(m[1], m[2]), m[3], suffix, marker)
 		}
 	}
 	return key
@@ -1076,6 +1093,31 @@ func foldRemasterMarkerKey(id string) remasterFoldKey {
 // cids.
 func t28TailDecodesTSeries(tail string) bool {
 	return len(tail) == 3 || len(tail) == 4
+}
+
+// maxCatalogPrefixDigits bounds the digit run stripCompactCatalogPrefix
+// treats as a DMM catalog/channel prefix: the prefixes real prefixed cids
+// carry (the 1 in 1rct00156, the 9/55/118/874/1038 on the t28 cids) never
+// run past four digits.
+const maxCatalogPrefixDigits = 4
+
+// stripCompactCatalogPrefix removes a compact id's leading DMM catalog or
+// channel prefix digits from its series when the digit run is unambiguous
+// maker junk. The catalog prefixes real prefixed cids carry (1rct00156h,
+// 118ipx00535h) run 1-4 digits and the series parts behind them are
+// letters-only in the r18.dev content-id prefix lookup, so a 1-4 digit run
+// is never part of the series — the DMM/R18 classifiers read the same
+// spellings through the same split (parseRemasterTail /
+// r18ParseRemasterTail return the digit-free series group), and the raw
+// content ids the matcher's tier-2 propagates must fold onto the display
+// listing's identity (1rct00156h -> RCT+00156+H, matching RCT-156-HD).
+// Longer digit runs match no known catalog prefix, so they stay glued to
+// the series and an ambiguous spelling is not over-stripped.
+func stripCompactCatalogPrefix(digits, series string) string {
+	if len(digits) > 0 && len(digits) <= maxCatalogPrefixDigits {
+		return series
+	}
+	return digits + series
 }
 
 // pin fills the key's pinned identity, folding the marker spelling into its
