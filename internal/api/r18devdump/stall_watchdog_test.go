@@ -2,6 +2,8 @@ package r18devdump
 
 import (
 	"context"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -114,6 +116,28 @@ func TestStallWatchdog_FireSucceedsWhenElapsedAndArmed(t *testing.T) {
 	assert.True(t, w.tryFire(time.Now(), func() { fired = true }))
 	assert.True(t, fired)
 	assert.True(t, w.Fired())
+}
+
+func TestStallWatchdog_StopAndFireAreAtomic(t *testing.T) {
+	for i := 0; i < 2000; i++ {
+		w := newStallWatchdog(time.Nanosecond)
+		time.Sleep(time.Millisecond)
+		var wg sync.WaitGroup
+		var fires atomic.Int32
+		wg.Add(2)
+		go func() { defer wg.Done(); w.Stop() }()
+		go func() {
+			defer wg.Done()
+			w.tryFire(time.Now(), func() { fires.Add(1) })
+		}()
+		wg.Wait()
+
+		assert.LessOrEqual(t, fires.Load(), int32(1), "onTimeout must run at most once")
+		assert.Equal(t, fires.Load() == 1, w.Fired(), "Fired must reflect whether the fire claim won")
+		assert.False(t, w.tryFire(time.Now(), func() { fires.Add(1) }),
+			"after either transition claimed the watchdog, no further fire is possible")
+		assert.LessOrEqual(t, fires.Load(), int32(1))
+	}
 }
 
 func TestStallWatchdog_StopDisarmsImmediatelyBeforeDeadline(t *testing.T) {

@@ -19,8 +19,9 @@ const dumpStallTimeout = 5 * time.Minute
 type stallWatchdog struct {
 	timeout time.Duration
 	last    atomic.Int64
+	mu      sync.Mutex
+	stopped bool
 	stop    chan struct{}
-	once    sync.Once
 	fired   atomic.Bool
 }
 
@@ -32,25 +33,39 @@ func newStallWatchdog(timeout time.Duration) *stallWatchdog {
 
 func (w *stallWatchdog) Ping() { w.last.Store(time.Now().UnixNano()) }
 
-func (w *stallWatchdog) Stop() { w.once.Do(func() { close(w.stop) }) }
+// Stop disarms the watchdog permanently. The stopped claim and the fire claim
+// (tryFire) serialize on mu, so once either transition wins, the other can
+// never observe the pre-claim state — Stop and onTimeout are atomic with
+// respect to each other and each happens at most once.
+func (w *stallWatchdog) Stop() {
+	w.mu.Lock()
+	if !w.stopped {
+		w.stopped = true
+		close(w.stop)
+	}
+	w.mu.Unlock()
+}
 
 func (w *stallWatchdog) Fired() bool { return w.fired.Load() }
 
-// tryFire claims a timeout at now. When a tick and Stop race, select may pick
-// the tick branch even though w.stop is already closed; the non-blocking
-// recheck makes Stop win regardless, so a watchdog disarmed at stream EOF
-// never aborts the local import tail.
+// tryFire claims a timeout at now: if the watchdog has been stalled for at
+// least timeout and was not already stopped or fired, it transitions to
+// stopped and invokes onTimeout. The claim is atomic with Stop, so a watchdog
+// disarmed at stream EOF can never abort the local import tail. onTimeout
+// runs outside mu; only the claim is serialized.
 func (w *stallWatchdog) tryFire(now time.Time, onTimeout func()) bool {
 	if now.Sub(time.Unix(0, w.last.Load())) < w.timeout {
 		return false
 	}
-	select {
-	case <-w.stop:
+	w.mu.Lock()
+	if w.stopped {
+		w.mu.Unlock()
 		return false
-	default:
 	}
+	w.stopped = true
+	close(w.stop)
+	w.mu.Unlock()
 	w.fired.Store(true)
-	w.Stop()
 	onTimeout()
 	return true
 }
