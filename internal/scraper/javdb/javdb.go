@@ -44,6 +44,17 @@ var (
 	remasterSeriesSegmentRegex = regexp.MustCompile(`^\d*(?:t28|[a-z]+)$`)
 	remasterCompactSplitRegex  = regexp.MustCompile(`^(\d*)(T28|[A-Z]+)(\d+)$`)
 	remasterUnderscoreCIDRegex = regexp.MustCompile(`^[hn]_\d+(?:t28|[a-z]+)\d+[a-z]{0,3}$`)
+	// The raw cid shape a separator-free spelling takes when it is a
+	// content id rather than a display id — the raw-vs-display distinction
+	// the AI number-free exemption keys on (see isRawRemasterCIDShape),
+	// mirroring the DMM/R18 classifiers' shape (rawRemasterCIDShapeRegex):
+	// a catalog-digit prefix, a five-digit zero-padded number (the leading
+	// zero is the padding evidence — display numbers never carry one), or
+	// the prefix-free t28 tail whose compact display spelling doubles as
+	// the raw cid (t28123h is T-28123H). A non-padded five-digit
+	// separator-free form (abc12345h) is a display id whose server cid is
+	// catalog-prefixed, so it must not read as raw.
+	remasterRawCIDShapeRegex = regexp.MustCompile(`^(?:\d+(?:t28|[a-z]+)\d+[a-z]{0,3}|(?:t28(?:0\d{4}|\d{3})|[a-z]+0\d{4})[a-z]{0,3})$`)
 )
 
 // scraper implements the JavDB scraper.
@@ -379,8 +390,9 @@ func (s *scraper) findDetailURLCtx(ctx context.Context, id string) (string, erro
 	// including the E/Z-catalog-suffixed spellings like IPX-535ZH) targets
 	// the remaster release itself: a variant match or the single-link
 	// fallback would silently return the base release's page, so only
-	// exact/padding-equal identities qualify and the query misses honestly
-	// when the remaster is not among the results.
+	// exact/padding-equal identities qualify — the raw AI cid number-free
+	// exemption below included — and the query misses honestly when the
+	// remaster is not among the results.
 	markerQuery := remasterMarkerSuffix(id) != ""
 	// Marker queries compare the separator-pinned series, number and
 	// folded marker class rather than raw normalized strings: JavDB lists
@@ -402,6 +414,16 @@ func (s *scraper) findDetailURLCtx(ctx context.Context, id string) (string, erro
 	// (1rct00156h -> the RCT+156H-class identity, h_003abc00123hd -> the
 	// ABC+123H-class one; see stripCompactCatalogPrefix), so the RCT-156-HD
 	// and ABC-123-HD listings rank as its match.
+	// Raw AI cids get one further bridge: their number is a server slot,
+	// not a display number (dv00899ai is DV-818AI), so a raw AI cid query
+	// compares series, catalog suffix and AI marker class against a display
+	// listing without the number — the number-free exception the DMM/R18
+	// identity code already applies (rawDisplayMatchesCID /
+	// pageDisplayIdentityForCID). Raw H/HD cids keep binding the number
+	// (1rct00156h is RCT-156H, and 1rct00157h must not match RCT-156-HD),
+	// display AI queries keep binding it too, and a raw cid listing facing
+	// a raw cid query still binds literally — only the raw-cid-query vs
+	// display-listing direction is exempt (see remasterFoldMatchRank).
 	var foldedTargetKey remasterFoldKey
 	if markerQuery {
 		foldedTargetKey = foldRemasterMarkerKey(id)
@@ -432,7 +454,8 @@ func (s *scraper) findDetailURLCtx(ctx context.Context, id string) (string, erro
 				// remaster, so an HD-labeled listing matches the folded
 				// H query and vice versa, while the pinned series and
 				// number keep compaction-equal spellings of different
-				// releases apart.
+				// releases apart — the raw AI cid query's number-free
+				// exemption aside (see remasterFoldMatchRank).
 				match = remasterFoldMatchRank(c, foldedTargetKey)
 			} else {
 				match = idMatchRank(c, targetID)
@@ -1009,7 +1032,11 @@ func foldRemasterMarkerClass(marker string) string {
 // suffix that survives the fold, and the folded marker class. pinned is true
 // only when the id's grammar exposes that series/number boundary; compact
 // keeps the round-30 folded spelling the unpinned forms — spellings whose
-// series the segment regexes do not model — still compare under.
+// series the segment regexes do not model — still compare under. rawCID
+// marks that the folded id spells a raw DMM content id rather than a
+// display spelling (see isRawRemasterCIDShape): remasterFoldMatchRank's
+// AI number-free exemption consults it on the query side, and the literal
+// cid binding consults it on the listing side.
 type remasterFoldKey struct {
 	series        string
 	number        string
@@ -1017,6 +1044,7 @@ type remasterFoldKey struct {
 	marker        string
 	compact       string
 	pinned        bool
+	rawCID        bool
 }
 
 // foldRemasterMarkerKey parses a display id's remaster identity with the
@@ -1037,7 +1065,10 @@ type remasterFoldKey struct {
 // suffix rides in front of the marker, redundant marker spellings collapse
 // and HD folds into the H class. Ids whose grammar does not pin — no marker
 // tail, or a series/number split the regexes do not model — stay unpinned
-// and compare under the round-30 compact fold.
+// and compare under the round-30 compact fold. The key additionally
+// records whether the id spells a raw content id rather than a display
+// spelling (rawCID, see isRawRemasterCIDShape) — the distinction the AI
+// number-free exemption in remasterFoldMatchRank keys on.
 func foldRemasterMarkerKey(id string) remasterFoldKey {
 	// A raw channel-prefixed content id (h_003abc00123hd) carries maker
 	// junk in front of its identity: the h_/n_ channel letter never spells
@@ -1048,8 +1079,12 @@ func foldRemasterMarkerKey(id string) remasterFoldKey {
 	// so the stripped cid composes with the round-40b catalog-prefix rules
 	// below: h_003abc00123hd pins ABC+00123+H, the identity the ABC-123-HD
 	// display listing carries.
-	lower := stripRemasterChannelPrefix(strings.ToLower(strings.TrimSpace(id)))
-	key := remasterFoldKey{compact: foldRemasterMarkerID(lower)}
+	trimmed := strings.ToLower(strings.TrimSpace(id))
+	lower := stripRemasterChannelPrefix(trimmed)
+	key := remasterFoldKey{
+		compact: foldRemasterMarkerID(lower),
+		rawCID:  isRawRemasterCIDShape(trimmed),
+	}
 	// Separator-bearing spellings pin the series boundary that compaction
 	// erases; a remainder the tail grammar cannot read as the bare number
 	// plus marker falls through to the compact split, mirroring DMM.
@@ -1151,6 +1186,29 @@ func stripRemasterChannelPrefix(lower string) string {
 	return lower
 }
 
+// isRawRemasterCIDShape reports whether a lowercased, trimmed marker-bearing
+// id spells a raw DMM content id rather than a display id — the raw-vs-
+// display distinction remasterFoldMatchRank's AI number-free exemption
+// keys on. The shape mirrors the DMM/R18 classifiers' raw-cid rules
+// (r18dev's isRawRemasterContentIDQuery / rawRemasterCIDShapeRegex): the
+// h_/n_ channel-prefixed cid shape is raw outright, any separator (-, _
+// . or space) pins a display spelling, and a separator-free form is raw
+// when it carries a catalog-digit prefix, a five-digit zero-padded number
+// (the leading zero is the padding evidence — display numbers never carry
+// one) or the prefix-free t28 tail whose compact display spelling doubles
+// as the raw cid (t28123h is T-28123H). A non-padded five-digit
+// separator-free form (abc12345h) is a display id whose server cid is
+// catalog-prefixed, so it must not read as raw.
+func isRawRemasterCIDShape(lower string) bool {
+	if remasterUnderscoreCIDRegex.MatchString(lower) {
+		return true
+	}
+	if strings.ContainsAny(lower, "-_. ") {
+		return false
+	}
+	return remasterRawCIDShapeRegex.MatchString(lower)
+}
+
 // pin fills the key's pinned identity, folding the marker spelling into its
 // comparison class and uppercasing the separator-pinned series so pinned
 // keys and compact-decoded keys compare alike.
@@ -1223,9 +1281,18 @@ func trimRemasterNumberPadding(number string) string {
 // catalog suffix, marker class and number compare directly — exact when
 // the spellings agree, padding-normalized when only the number's leading
 // zeros differ — so T-28123H and T28-123H never cross-match even though
-// their compact spellings coincide. Any unpinned side keeps the round-30
-// compact comparison instead; its variant rung still dies at the caller,
-// where the base release must not stand in for the remaster.
+// their compact spellings coincide. A raw AI cid target adds one
+// number-free rung below exact: AI cid numbers are server slots that
+// diverge from the display number (dv00899ai is DV-818AI), so a raw AI
+// cid query accepts a same-series, same-suffix, same-class display
+// listing without the number — the DMM/R18 precedent's exception
+// (rawDisplayMatchesCID / pageDisplayIdentityForCID) — while raw H/HD
+// queries, display queries of every class and raw cid listings facing
+// raw cid queries all keep binding the number (different slots are
+// different releases, mirroring r18dev's rawRemasterCIDEqual). Any unpinned
+// side keeps the round-30 compact comparison instead; its variant rung
+// still dies at the caller, where the base release must not stand in
+// for the remaster.
 func remasterFoldMatchRank(candidate string, target remasterFoldKey) idMatchType {
 	c := foldRemasterMarkerKey(candidate)
 	if target.pinned && c.pinned {
@@ -1236,6 +1303,19 @@ func remasterFoldMatchRank(candidate string, target remasterFoldKey) idMatchType
 			return idMatchExact
 		}
 		if trimRemasterNumberPadding(c.number) == trimRemasterNumberPadding(target.number) {
+			return idMatchNormalized
+		}
+		if target.rawCID && target.marker == "AI" && !c.rawCID {
+			// The raw AI number-free exemption: the slot number carries
+			// no display information (dv00899ai is DV-818AI), so any
+			// same-series, same-suffix, same-class display listing
+			// satisfies the identity — the honest reading the DMM/R18
+			// identity code already applies (rawDisplayMatchesCID /
+			// pageDisplayIdentityForCID). The rank stays below exact so
+			// a listing numbering the cid's own digits still outranks
+			// it, and the candidate guard keeps raw cid listings on
+			// the literal comparison: a different slot is a different
+			// release.
 			return idMatchNormalized
 		}
 		return idMatchNone
