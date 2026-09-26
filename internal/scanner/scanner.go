@@ -82,7 +82,8 @@ func (s *Scanner) ScanWithLimits(ctx context.Context, rootPath string, maxFiles 
 
 // ScanWithFilter recursively scans a directory for video files with timeout, file count limits, and optional name filter
 // maxFiles = 0 means no limit
-// filter = "" means no filter; otherwise, only directories/files containing the filter string (case-insensitive) are processed
+// filter = "" means no filter; otherwise, only directories/files containing the filter string (case-insensitive,
+// in either their raw or fullwidth-folded spelling) are processed
 func (s *Scanner) ScanWithFilter(ctx context.Context, rootPath string, maxFiles int, filter string) (*ScanResult, error) {
 	result := &ScanResult{
 		Files:   make([]models.FileMatchInfo, 0),
@@ -148,8 +149,7 @@ func (s *Scanner) ScanWithFilter(ctx context.Context, rootPath string, maxFiles 
 		// Always process the root directory regardless of filter
 		if d.IsDir() {
 			if filterLower != "" && path != absPath {
-				dirName := strings.ToLower(d.Name())
-				if !strings.Contains(dirName, filterLower) {
+				if !filterMatchesName(d.Name(), filterLower) {
 					// Skip this directory entirely - don't recurse into it
 					return filepath.SkipDir
 				}
@@ -159,8 +159,7 @@ func (s *Scanner) ScanWithFilter(ctx context.Context, rootPath string, maxFiles 
 
 		// For files: check if filter matches the file name
 		if filterLower != "" {
-			fileName := strings.ToLower(d.Name())
-			if !strings.Contains(fileName, filterLower) {
+			if !filterMatchesName(d.Name(), filterLower) {
 				// File doesn't match filter, skip it
 				result.SkippedCount++
 				return nil
@@ -360,6 +359,25 @@ func (s *Scanner) ScanSingleFromHandle(dir *os.File, canonicalPath string) (*Sca
 	}
 
 	return result, nil
+}
+
+// filterMatchesName reports whether an entry name contains the (already
+// lowercased) filter substring in either of its two spellings. The raw
+// name is matched so fullwidth-written filters keep hitting fullwidth
+// names exactly where they did before folding existed; the folded name is
+// matched as well because the extension check admits fullwidth spellings
+// (ＲＣＴ－１５６－ＨＤ．ｍｋｖ) as videos — an ASCII filter (rct) must
+// therefore discover those files in filtered scans, mirroring the
+// dual-form matching excludedByName applies to exclusion patterns.
+func filterMatchesName(name, filterLower string) bool {
+	if strings.Contains(strings.ToLower(name), filterLower) {
+		return true
+	}
+	folded := foldFullwidthASCII(name)
+	if folded != name {
+		return strings.Contains(strings.ToLower(folded), filterLower)
+	}
+	return false
 }
 
 // excludedByName reports whether any configured exclusion glob matches the

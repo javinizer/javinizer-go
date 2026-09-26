@@ -1,6 +1,7 @@
 package scanner
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -259,5 +260,66 @@ func TestScanner_FullwidthExclusionFoldsToASCII(t *testing.T) {
 		got := nameSet(t, res.Files)
 		assert.False(t, got[fwKeepName], "a fullwidth pattern must still match the raw fullwidth name")
 		assert.True(t, got[asciiKeep], "a fullwidth pattern does not start matching ASCII names")
+	})
+}
+
+// ScanWithFilter applies the filter to the folded entry name as well as
+// the raw one: the extension check admits ＲＣＴ－１５６－ＨＤ．ｍｋｖ as a
+// video, so an ASCII filter (rct) must discover that file — and a
+// fullwidth-named subdirectory containing it — exactly as it discovers the
+// ASCII twin rct-777.mkv, mirroring the dual-form matching excludedByName
+// applies to exclusion patterns. A filter matching neither spelling still
+// excludes the file, and a fullwidth filter still matches raw fullwidth
+// names without starting to match ASCII ones.
+func TestScanner_FullwidthFilterFoldsToASCII(t *testing.T) {
+	dir := t.TempDir()
+	const fwFile = "ＲＣＴ－１５６－ＨＤ．ｍｋｖ"
+	const asciiTwin = "rct-777.mkv"
+	const neither = "abc-999.mkv"
+	const fwDir = "ＲＣＴ　Ｓｅｒｉｅｓ"
+	const plainDir = "Other Series"
+
+	for _, name := range []string{fwFile, asciiTwin, neither} {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte("data"), 0644))
+	}
+	require.NoError(t, os.Mkdir(filepath.Join(dir, fwDir), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, fwDir, fwFile), []byte("data"), 0644))
+	require.NoError(t, os.Mkdir(filepath.Join(dir, plainDir), 0755))
+	// A fullwidth file under a subdirectory matching no filter spelling:
+	// SkipDir fires before the file's own filter check, so the file stays
+	// hidden — pre-existing semantics, unchanged by the fold.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, plainDir, fwFile), []byte("data"), 0644))
+
+	s := NewScanner(afero.NewOsFs(), &Config{Extensions: []string{".mkv"}})
+
+	scanned := func(t *testing.T, filter string) map[string]bool {
+		t.Helper()
+		res, err := s.ScanWithFilter(context.Background(), dir, 0, filter)
+		require.NoError(t, err)
+		got := make(map[string]bool, len(res.Files))
+		for _, f := range res.Files {
+			got[f.Path] = true
+		}
+		return got
+	}
+
+	t.Run("ASCII filter matches both spellings", func(t *testing.T) {
+		got := scanned(t, "rct")
+		assert.True(t, got[filepath.Join(dir, fwFile)], "the folded name must admit the fullwidth file to an ASCII filter")
+		assert.True(t, got[filepath.Join(dir, fwDir, fwFile)], "a fullwidth-named subdirectory is admitted by its folded spelling")
+		assert.True(t, got[filepath.Join(dir, asciiTwin)], "an ASCII filter still matches ASCII names")
+		assert.Len(t, got, 3, "exactly the rct-spelled files are found")
+	})
+
+	t.Run("filter matching neither spelling still excludes", func(t *testing.T) {
+		got := scanned(t, "xyzzy")
+		assert.Empty(t, got, "a filter matching neither raw nor folded spelling excludes the file")
+	})
+
+	t.Run("fullwidth filter still matches the raw name", func(t *testing.T) {
+		got := scanned(t, "ＲＣＴ")
+		assert.True(t, got[filepath.Join(dir, fwFile)], "a fullwidth filter keeps matching the raw fullwidth name")
+		assert.True(t, got[filepath.Join(dir, fwDir, fwFile)])
+		assert.Len(t, got, 2, "a fullwidth filter does not start matching ASCII names")
 	})
 }
