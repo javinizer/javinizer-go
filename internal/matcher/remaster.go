@@ -52,6 +52,29 @@ const (
 	// reasoning that clears the rest — see the codec-profile comment at
 	// the quality vocabulary.
 	fusedCodecProfileHeadAlternation = `dts|aac|ac3|eac3|truehd|ddp`
+	// streamingPlatformTagPrefixAlternation enumerates the streaming-platform
+	// abbreviations scene names fuse directly onto the WEB-DL head
+	// (NFWEB-DL1080P, AMZNWEBRIP2160P): nf (Netflix), amzn (Amazon),
+	// atvp (Apple TV+), disney, dsnp and dspn (Disney+), hbo, hmax (HBO Max),
+	// hulu, max, and pmax (Paramount+). The list stays enumerated —
+	// never a generic letter run — because the platform prefix must be
+	// scene vocabulary rather than a series-word fragment: the r18.dev
+	// content-id prefix lookup holds no series spelled <platform>web
+	// (nfweb, amznweb, dsnpweb, dspnweb, huluweb, hboweb, and maxweb
+	// are all absent, so the fused compound never displaces a real
+	// series spelling), while the real series that merely end in the platform
+	// letters (atnf, binf, and inf for nf; ahbo for hbo; amax, dmax,
+	// and imax for max) never start the abbreviation at a leading
+	// boundary, so their fused spellings keep the DL fragment in id
+	// grammar exactly as fweb does. dspn, max, and pmax are real series
+	// keys themselves, but the compound the prefix recognizes —
+	// platform plus web plus qualifier plus 3-4 digit resolution — is
+	// not an id shape those series carry (their ids are hyphenated
+	// display spellings and numerically prefixed content ids), and the
+	// veto span only reaches the compound behind a separated remaster
+	// id. The platform fuses onto the web head alone; the bd/br/dvd
+	// heads keep their unprefixed shapes.
+	streamingPlatformTagPrefixAlternation = `nf|amzn|atvp|disney|dsnp|dspn|hbo|hmax|hulu|max|pmax`
 )
 
 var (
@@ -311,6 +334,30 @@ var (
 	// shape is displaced: no content id ends in P or I behind digits
 	// behind a source head, exactly as no content id ends in P or I
 	// behind the fhd/uhd heads' digits.
+	// Streaming-platform prefixes extend the web source head — one of
+	// the enumerated platform abbreviations (see
+	// streamingPlatformTagPrefixAlternation) fused directly onto the web
+	// head with no separator (NFWEB-DL1080P, AMZNWEBRIP2160P) —
+	// because the platform-fused compound defeats the bare web head's
+	// leading word boundary: the boundary sits immediately before web,
+	// and inside NFWEB the f blocks it, so the prefix recognizer never
+	// extended the veto span and the split-off DL1080P fragment rode
+	// the catalog grammar as the replacement id on both entry points
+	// (round 47). The platform abbreviation carries the boundary
+	// instead and must directly abut the web head, and the enumeration
+	// keeps it scene vocabulary rather than a series-word run: no
+	// nfweb, amznweb, dsnpweb, dspnweb, huluweb, hboweb, or maxweb
+	// series exists in the r18.dev content-id prefix lookup, so the fused compound
+	// never displaces a real series spelling, while series that merely
+	// end in the platform letters (atnf, binf, inf; ahbo; amax, dmax,
+	// imax) never start the abbreviation at the boundary, so
+	// FWEB-DL1080P, XNFWEB-DL1080P, and IMAXWEB-DL1080P keep their DL
+	// fragments in id grammar exactly as XBD-RIP1080P does. The web
+	// head stays required behind the platform, so the abbreviation
+	// alone (NF1080P) keeps id grammar, the platform fuses onto the web
+	// head alone (bd/br/dvd keep their unprefixed shapes), and the
+	// spaced sibling (NF WEB-DL1080P) was already metadata through the
+	// bare web head's own boundary.
 	// Codec-profile compounds join the vocabulary as a class — an audio
 	// codec head (dts, aac, ac3, eac3, truehd, dd, or ddp) plus one
 	// separator and one or more profile words (DTS-HD, DTS-HD MA,
@@ -388,22 +435,28 @@ var (
 	// rides the bare vocabulary's prior-round decision — and no
 	// content id ends in P or I behind digits, since the marker tails
 	// real ids carry are hd/ai/h.
-	trailingQualityTagRegex = regexp.MustCompile(`(?i)\b(?:[hx]26[3-9](?:(?:8|10|12)bit)?|hi(?:10p?|444(?:pp)?)|avc\d*|aac\d*|hevc\d*|vvc\d*|ac3|dts|flac|opus|truehd|vc1|av1|mp[34]|ddp\d*|eac3|divx\d*|xvid\d*|prores\d*|yuv\d*|rgb\d*|p0(?:10|16)|mpeg\d*|vp\d+|fhd\d{2,4}[pi]?|uhd\d{2,4}[pi]?|hdtv|hdr\d*|bt2020|bt709|rec709|smpte\d+|pq\d+|st2084|hlg\d*|ycbcr\d*|(?:bt|rec|st|smpte)[. ]?\d{3,4}|(?:l?pcm|dts|flac|opus|e?ac3|truehd)[. ]?\d{3,4}|\d+(?:bit|point)\d+|(?:web(?:[-_. ]?(?:dl(?:rip)?|rip))?|remux|bluray|(?:bd|br|dvd)[-_. ]?rip)\d{3,4}[pi]?|` + `(?:` + codecProfileHeadAlternation + `)[-_. ](?:` + codecProfileWordAlternation + `)(?:[-_. ]?(?:` + codecProfileWordAlternation + `))*\d{3,4}|(?:` + fusedCodecProfileHeadAlternation + `)(?:` + codecProfileWordAlternation + `)+\d{3,4})\b`)
+	trailingQualityTagRegex = regexp.MustCompile(`(?i)\b(?:[hx]26[3-9](?:(?:8|10|12)bit)?|hi(?:10p?|444(?:pp)?)|avc\d*|aac\d*|hevc\d*|vvc\d*|ac3|dts|flac|opus|truehd|vc1|av1|mp[34]|ddp\d*|eac3|divx\d*|xvid\d*|prores\d*|yuv\d*|rgb\d*|p0(?:10|16)|mpeg\d*|vp\d+|fhd\d{2,4}[pi]?|uhd\d{2,4}[pi]?|hdtv|hdr\d*|bt2020|bt709|rec709|smpte\d+|pq\d+|st2084|hlg\d*|ycbcr\d*|(?:bt|rec|st|smpte)[. ]?\d{3,4}|(?:l?pcm|dts|flac|opus|e?ac3|truehd)[. ]?\d{3,4}|\d+(?:bit|point)\d+|(?:(?:` + streamingPlatformTagPrefixAlternation + `)?web(?:[-_. ]?(?:dl(?:rip)?|rip))?|remux|bluray|(?:bd|br|dvd)[-_. ]?rip)\d{3,4}[pi]?|` + `(?:` + codecProfileHeadAlternation + `)[-_. ](?:` + codecProfileWordAlternation + `)(?:[-_. ]?(?:` + codecProfileWordAlternation + `))*\d{3,4}|(?:` + fusedCodecProfileHeadAlternation + `)(?:` + codecProfileWordAlternation + `)+\d{3,4})\b`)
 	// compoundSourceTagPrefixRegex recognizes the source-tag prefix —
 	// web, bd, br, or dvd plus exactly one separator — ending where a
 	// trailing-catalog candidate begins, so the candidate's quality veto
 	// can span the compound spelling (WEB-DL2160, BD-RIP1080,
-	// DVD-RIP1080) that the catalog scan split apart. The bd, br, and
-	// dvd heads are real series, but the span extension stays inert for
-	// them: the extended span must still match the quality vocabulary,
-	// and no real bd, bdr, br, or dvd id carries a rip fragment. The
-	// leading boundary requirement (start of text or a non-alphanumeric
-	// character before the head) keeps the word-boundary protections of
-	// the source class: fweb, xbd, and 189web spellings never extend the
-	// span, and the near-miss heads with leading letters stay protected
-	// too — dvdp and dvdes are real series, so DVDP-RIP1080 keeps its
-	// RIP1080 fragment in id grammar the way XBD-RIP1080 does.
-	compoundSourceTagPrefixRegex = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(web|bd|br|dvd)[-_. ]$`)
+	// DVD-RIP1080) that the catalog scan split apart. The web head may
+	// carry one of the enumerated streaming-platform abbreviations fused
+	// directly onto it (NFWEB-, AMZNWEB-), with the abbreviation itself
+	// starting at the leading boundary, so the platform-fused compound
+	// extends the span exactly as the bare web head does while a leading
+	// letter before the platform run (FWEB-, XNFWEB-) never does. The
+	// bd, br, and dvd heads are real series, but the span extension
+	// stays inert for them: the extended span must still match the
+	// quality vocabulary, and no real bd, bdr, br, or dvd id carries a
+	// rip fragment. The leading boundary requirement (start of text or a
+	// non-alphanumeric character before the head) keeps the
+	// word-boundary protections of the source class: fweb, xbd, and
+	// 189web spellings never extend the span, and the near-miss heads
+	// with leading letters stay protected too — dvdp and dvdes are real
+	// series, so DVDP-RIP1080 keeps its RIP1080 fragment in id grammar
+	// the way XBD-RIP1080 does.
+	compoundSourceTagPrefixRegex = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])((?:` + streamingPlatformTagPrefixAlternation + `)?web|bd|br|dvd)[-_. ]$`)
 	// compoundCodecProfileTagPrefixRegex recognizes the codec-profile
 	// prefix — an audio codec head plus zero or more separated profile
 	// words and exactly one trailing separator — ending where a
@@ -490,8 +543,9 @@ func builtinQualityShadowsContentID(name, id string) bool {
 
 // trailingCandidateVetoSpan returns the span a trailing-catalog candidate is
 // vetted against as a quality tag: the candidate itself, or the candidate
-// extended back over a compound source-tag prefix (web, bd, br, or dvd
-// plus one separator) or a codec-profile prefix (an audio codec head plus its
+// extended back over a compound source-tag prefix (web — optionally
+// fused behind an enumerated streaming-platform abbreviation — bd, br,
+// or dvd, plus one separator) or a codec-profile prefix (an audio codec head plus its
 // profile words and one separator) that directly precedes it. The catalog
 // scan splits
 // compound source spellings at their separator — WEB-DL2160 leaves the
@@ -499,8 +553,9 @@ func builtinQualityShadowsContentID(name, id string) bool {
 // WEB- prefix belongs to it — so the veto must see the compound
 // spelling for the vocabulary's digit bound to decide it as a whole.
 // The leading boundary before the prefix keeps the class's
-// word-boundary protections: fweb (FWEB-DL2160), xbd (XBD-RIP1080),
-// and numerically prefixed (189WEB-DL1, 189dts1) spellings never extend.
+// word-boundary protections: fweb (FWEB-DL2160), xnfweb
+// (XNFWEB-DL2160), xbd (XBD-RIP1080), and numerically prefixed
+// (189WEB-DL1, 189dts1) spellings never extend.
 // The two prefix recognizers are checked independently against the
 // candidate's own start: a codec head never sits inside a web compound's
 // head, so at most one of them matches the same text ending, and the
