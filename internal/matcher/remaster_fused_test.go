@@ -179,17 +179,17 @@ func TestFusedFourFiveDigitRemaster(t *testing.T) {
 
 // A 4+-letter catalog series with a compact four-digit number canonicalizes
 // like its hyphenated spelling: the word-year guard bypasses the shapes
-// catalogSeriesReleaseNumber accepts — an all-uppercase series whose
-// series+number spelling the built-in matcher itself supports — so
-// MIAA1234HD resolves to MIAA-1234H (marker HD) instead of the raw tier-2
-// content id, and MIAA.1234.HD matches at all, exactly like MIAA-1234-HD.
-// Every other word-year spelling keeps the bail: lowercase prose words
-// (sample2024hd, birthday2024hd) and lowercase catalog spellings
-// (miaa1234hd) fail the display-case axis and match nothing at all — the
+// catalogSeriesReleaseNumber accepts — a real r18.dev catalog series whose
+// series+number spelling the built-in matcher itself supports, in any
+// casing — so MIAA1234HD and its lowercase siblings miaa1234hd /
+// miaa.1234.hd resolve to MIAA-1234H (marker HD) instead of the raw tier-2
+// content id, exactly like MIAA-1234-HD. Every other word-year spelling
+// keeps the bail: prose words (sample2024hd, birthday2024hd) are not
+// catalog series and fail the catalog-series axis in every casing — the
 // raw-cid marker-tail fallback no longer re-accepts the phrase as a
-// content id — while all-caps words beyond the builtin series shapes
-// (BIRTHDAY2024) and five-digit numbers (MIAA12345HD) fail the
-// builtin-support axis and keep the raw tier-2 path with no marker.
+// content id — while words and numbers beyond the builtin series shapes
+// (BIRTHDAY2024, MIAA12345HD) fail the builtin-support axis and keep the
+// raw tier-2 path with no marker.
 func TestFusedFourDigitLongSeriesRemaster(t *testing.T) {
 	m, err := NewMatcher(&Config{})
 	require.NoError(t, err)
@@ -203,6 +203,10 @@ func TestFusedFourDigitLongSeriesRemaster(t *testing.T) {
 		{"MIAA.1234.HD.mkv", "MIAA-1234H", "HD", 0},
 		{"MIAA 1234 HD.mkv", "MIAA-1234H", "HD", 0},
 		{"MIAA-1234-HD.mkv", "MIAA-1234H", "HD", 0},
+		// A lowercase spelling of a real catalog series canonicalizes
+		// too (round 36a): the discriminator is series-hood, not case.
+		{"miaa1234hd.mkv", "MIAA-1234H", "HD", 0},
+		{"miaa.1234.hd.mkv", "MIAA-1234H", "HD", 0},
 		{"ABCD1234AI.mkv", "ABCD-1234AI", "AI", 0},
 		{"[site]MIAA1234HD.mkv", "MIAA-1234H", "HD", 0},
 		{"MIAA1234HD-pt2.mkv", "MIAA-1234H", "HD", 2},
@@ -217,13 +221,13 @@ func TestFusedFourDigitLongSeriesRemaster(t *testing.T) {
 			assert.Equal(t, "builtin", got.MatchedBy)
 		})
 	}
-	// Lowercase prose word-years keep no tier at all: they fail the
-	// display-case axis, and the raw-cid marker-tail fallback no longer
-	// re-accepts the same token as a content id.
+	// Prose word-years keep no tier at all: they fail the catalog-series
+	// axis (the word is not a real r18.dev catalog series), and the
+	// raw-cid marker-tail fallback no longer re-accepts the same token
+	// as a content id.
 	for _, name := range []string{
 		"sample2024hd.mkv",
 		"birthday2024hd.mkv",
-		"miaa1234hd.mkv",
 	} {
 		t.Run(name, func(t *testing.T) {
 			assert.Nil(t, matchOne(t, m, name))

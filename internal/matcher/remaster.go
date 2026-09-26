@@ -3,6 +3,8 @@ package matcher
 import (
 	"regexp"
 	"strings"
+
+	"github.com/javinizer/javinizer-go/internal/r18devdump"
 )
 
 // tagDelimiterClass is the closed, non-alphanumeric delimiter set shared by
@@ -42,6 +44,14 @@ const tagDelimiterClass = `[-_.\s[\](){}【】「」『』《》〈〉〔〕]`
 const (
 	codecProfileHeadAlternation = `dts|aac|ac3|eac3|truehd|dd|ddp`
 	codecProfileWordAlternation = `hd|ma|x|lc|he|ex|hra|sbr|atmos`
+	// fusedCodecProfileHeadAlternation is the codec-profile head subset
+	// that carries the fused, separator-free profile spelling
+	// (DTSHD192, AACLC192, TRUEHDATMOS768): every head except dd, whose
+	// fused compounds collide with real series in the r18.dev content-id
+	// prefix lookup (ddex, ddma, ddxx) and so fail the round-21 fused
+	// reasoning that clears the rest — see the codec-profile comment at
+	// the quality vocabulary.
+	fusedCodecProfileHeadAlternation = `dts|aac|ac3|eac3|truehd|ddp`
 )
 
 var (
@@ -270,7 +280,33 @@ var (
 	// by those literals as well — the same veto DTS-24 rides today —
 	// while the dd head (no bare literal of its own) leans on the
 	// compound's own bounds.
-	trailingQualityTagRegex = regexp.MustCompile(`(?i)\b(?:[hx]26[3-9]|avc\d*|aac\d*|hevc\d*|vvc\d*|ac3|dts|flac|opus|truehd|vc1|av1|mp[34]|ddp\d*|eac3|divx\d*|xvid\d*|prores\d*|yuv\d*|rgb\d*|p0(?:10|16)|mpeg\d*|vp\d+|fhd\d{2,4}|uhd\d{2,4}|hdtv|hdr\d*|bt2020|bt709|rec709|smpte\d+|pq\d+|st2084|hlg\d*|ycbcr\d*|(?:bt|rec|st|smpte)[. ]?\d{3,4}|(?:l?pcm|dts|flac|opus|e?ac3|truehd)[. ]?\d{3,4}|\d+(?:bit|point)\d+|(?:web(?:[-_. ]?(?:dl(?:rip)?|rip))?|remux|bluray|(?:bd|br|dvd)[-_. ]?rip)\d{3,4}|` + `(?:` + codecProfileHeadAlternation + `)[-_. ](?:` + codecProfileWordAlternation + `)(?:[-_. ]?(?:` + codecProfileWordAlternation + `))*\d{3,4})\b`)
+	// Fused codec-profile spellings join the same family — the profile
+	// words ride directly behind the head with no separator
+	// (DTSHD192, AACLC192, TRUEHDATMOS768), so the token never splits in
+	// the catalog scan and arrives whole as an id-shaped candidate that
+	// satisfies both the trailing catalog grammar and the builtin amateur
+	// pattern: the vocabulary must decide it directly, exactly as it
+	// decides the separated compound as a span. The bounds mirror the
+	// family's — the words are the shared profile vocabulary (one or
+	// more, like the separated compound's word iterations) and the rate
+	// rides the 3-4 digit bound — so five-plus-digit id-shaped tokens
+	// (DTSHD12345) and two-digit numerals (DTSHD24) stay id grammar. The
+	// dd head carries no fused variant: its compounds collide with real
+	// series in the r18.dev content-id prefix lookup — ddex (n_726),
+	// ddma (111, h_175), and ddxx (111) — so the round-21 fused
+	// reasoning that clears the other heads (the compound is a longer
+	// letter-run than every real head it extends, and dtshd, dtsma,
+	// dtsx, dtshdma, dtshra, aaclc, aache, aacsbr, truehdatmos,
+	// ddpatmos, and ddatmos are all absent from the lookup) fails for
+	// it: the bare DDEX192 keeps id grammar while its separated sibling
+	// DD-EX448 — a spelling no real ddex id uses, since display ids
+	// hyphenate between series and number and raw ids ride the n_726
+	// prefix — stays vetoed. The word-boundary anchors keep the class's
+	// protections: xdts (XDTSHD192) and numerically prefixed
+	// (189dts00087) spellings never match, and the digit-bearing
+	// ac3/eac3 compounds cannot collide with a lookup series at all
+	// because content-id series are letter-runs.
+	trailingQualityTagRegex = regexp.MustCompile(`(?i)\b(?:[hx]26[3-9]|avc\d*|aac\d*|hevc\d*|vvc\d*|ac3|dts|flac|opus|truehd|vc1|av1|mp[34]|ddp\d*|eac3|divx\d*|xvid\d*|prores\d*|yuv\d*|rgb\d*|p0(?:10|16)|mpeg\d*|vp\d+|fhd\d{2,4}|uhd\d{2,4}|hdtv|hdr\d*|bt2020|bt709|rec709|smpte\d+|pq\d+|st2084|hlg\d*|ycbcr\d*|(?:bt|rec|st|smpte)[. ]?\d{3,4}|(?:l?pcm|dts|flac|opus|e?ac3|truehd)[. ]?\d{3,4}|\d+(?:bit|point)\d+|(?:web(?:[-_. ]?(?:dl(?:rip)?|rip))?|remux|bluray|(?:bd|br|dvd)[-_. ]?rip)\d{3,4}|` + `(?:` + codecProfileHeadAlternation + `)[-_. ](?:` + codecProfileWordAlternation + `)(?:[-_. ]?(?:` + codecProfileWordAlternation + `))*\d{3,4}|(?:` + fusedCodecProfileHeadAlternation + `)(?:` + codecProfileWordAlternation + `)+\d{3,4})\b`)
 	// compoundSourceTagPrefixRegex recognizes the source-tag prefix —
 	// web, bd, br, or dvd plus exactly one separator — ending where a
 	// trailing-catalog candidate begins, so the candidate's quality veto
@@ -420,26 +456,34 @@ func fusedRemasterSubmatchIndex(name string) []int {
 // catalogSeriesReleaseNumber reports whether a 4-5-digit number riding a
 // 4+-letter series word is a catalog release number rather than a prose
 // year phrase, on two axes a word-year never satisfies jointly. The series
-// must be written in catalog display case — all uppercase, the convention of
-// display filenames (MIAA1234HD, ABCD1234HD) — and the built-in matcher
-// itself must support the series+number spelling as a catalog id, which
-// bounds the series to the amateur alternative's 3-6 letters and the number
-// to its 3-4 digits (MIAA1234, ABCD1234; five-digit numbers and 7+-letter
-// words like BIRTHDAY2024 have no builtin series shape). Prose year phrases
-// fail at least one axis: lowercase spellings (birthday2024, sample2024)
-// keep the word-year bail even when the builtin pattern would match the
-// spelling (sample is six letters and sample2024 already matches the
-// amateur alternative), and all-caps words longer than the builtin series
-// shapes fail the builtin-support axis. The builtin match must span the
-// whole series+number so a partial hit inside a longer word cannot
-// masquerade as catalog support.
+// must be a real catalog series — present in the r18.dev content-id prefix
+// lookup — and the built-in matcher itself must support the series+number
+// spelling as a catalog id, which bounds the series to the amateur
+// alternative's 3-6 letters and the number to its 3-4 digits (MIAA1234,
+// ABCD1234; five-digit numbers and 7+-letter words like BIRTHDAY2024 have
+// no builtin series shape). Both axes are case-insensitive — the lookup
+// key lowercases the series word and the builtin pattern carries (?i) —
+// so a lowercase spelling of a real catalog series (miaa1234hd,
+// miaa.1234.hd) bypasses the word-year bail exactly as its uppercase
+// sibling does: the round-24 case axis was meant to separate prose words
+// from catalog series, but a real catalog series spelled lowercase is
+// still a catalog series, so the discriminator is series-hood, not case.
+// Prose year phrases fail at least one axis: non-series words (birthday,
+// sample, vacation — none is a series in the lookup) fail the catalog axis
+// in every casing, even when the builtin pattern would match the spelling
+// (sample is six letters and sample2024 already matches the amateur
+// alternative), and words or numbers beyond the builtin series shapes
+// (BIRTHDAY2024, MIAA12345) fail the builtin-support axis and keep the raw
+// tier-2 path. The builtin match must span the whole series+number so a
+// partial hit inside a longer word cannot masquerade as catalog support.
 func catalogSeriesReleaseNumber(series, number string, builtinPattern *regexp.Regexp) bool {
-	if series != strings.ToUpper(series) {
-		return false
-	}
 	seriesNumber := series + number
 	loc := builtinPattern.FindStringIndex(seriesNumber)
-	return loc != nil && loc[0] == 0 && loc[1] == len(seriesNumber)
+	if loc == nil || loc[0] != 0 || loc[1] != len(seriesNumber) {
+		return false
+	}
+	_, ok := r18devdump.ContentIDPrefixLookup[strings.ToLower(series)]
+	return ok
 }
 
 // proseWordYearID reports whether a compact marker-tail id — the shape the
@@ -449,11 +493,12 @@ func catalogSeriesReleaseNumber(series, number string, builtinPattern *regexp.Re
 // guard uses (weakWordYearRegex), bounded for the raw-cid surfaces: a
 // zero-padded number is raw-cid evidence (the round-11 classifier —
 // mide00968h and abeauty00123hd keep their raw ids), and a display-cased
-// series word — the first axis of the round-24 catalog-series discriminator
-// — marks a catalog spelling rather than prose (BIRTHDAY2024HD and
-// MIAA12345HD keep the raw tier-2 id, and builtin-supported spellings such
-// as MIAA1234HD canonicalize in the fused normalization before this tier
-// ever runs).
+// series word — the round-24 display-case axis, retired from the bypass by
+// the round-36a series-hood fix but kept for the raw tier — marks a
+// catalog spelling rather than prose (BIRTHDAY2024HD and MIAA12345HD keep
+// the raw tier-2 id, and catalog-supported spellings — MIAA1234HD and its
+// lowercase sibling miaa1234hd — canonicalize in the fused normalization
+// before this tier ever runs).
 func proseWordYearID(id string) bool {
 	if !weakWordYearRegex.MatchString(id) || zeroPaddedRawTokenRegex.MatchString(id) {
 		return false
@@ -475,11 +520,13 @@ func normalizeFusedRemasterFilename(name string, builtinPattern *regexp.Regexp) 
 	// not a catalog number, on both separator-bearing surfaces (Vacation
 	// 2024 HD) and the compact long-number grammar (vacation2024hd). The
 	// legacy compact numbers (1-3, 6 digits) never collide with a year and
-	// keep their guard-free path. The exception is a catalog series the
-	// built-in matcher itself supports: MIAA1234HD is a display release
+	// keep their guard-free path. The exception is a real catalog series
+	// the built-in matcher itself supports: MIAA1234HD is a display release
 	// number, not a word plus a year, so the guard bypasses only the
-	// shapes catalogSeriesReleaseNumber accepts (MIAA.1234.HD canonicalizes
-	// too) and every other word-year spelling keeps the bail.
+	// shapes catalogSeriesReleaseNumber accepts — in any casing, since the
+	// discriminator is series-hood rather than display case (miaa1234hd and
+	// miaa.1234.hd canonicalize too) — and every other word-year spelling
+	// keeps the bail.
 	if n := m[5] - m[4]; n >= 4 && n <= 5 {
 		series := name[m[2]:m[3]]
 		matchedID := series + name[m[4]:m[5]]
