@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -681,14 +680,27 @@ func newSimpleTagRegistry() map[string]tagResolver {
 
 	registry["ID"] = func(ctx *Context) (string, error) { return ctx.ID, nil }
 	registry["CONTENTID"] = func(ctx *Context) (string, error) { return ctx.ContentID, nil }
+	// Filename tags split fold-aware (round 46a): round 40a publishes the
+	// raw on-disk basename (RCT-156-HD．ｍｋｖ) in Movie.OriginalFileName, and
+	// filepath.Ext is ASCII-only — without the fold, <FILENAME> would keep
+	// the fullwidth extension in the stem and the organizer would append the
+	// folded .mkv on top (RCT-156-HD．ｍｋｖ.mkv). The fold happens here at
+	// tag resolution; the metadata field keeps the raw spelling.
 	registry["FILENAME"] = func(ctx *Context) (string, error) {
 		name := ctx.OriginalFilename
-		if ext := filepath.Ext(name); ext != "" && len(ext) < len(name) {
-			name = strings.TrimSuffix(name, ext)
+		stem, ext := splitRawExtension(name)
+		if ext != "" && len(ext) < len(name) {
+			return stem, nil
 		}
 		return name, nil
 	}
-	registry["FILENAME_EXT"] = func(ctx *Context) (string, error) { return ctx.OriginalFilename, nil }
+	// <FILENAME_EXT> keeps the raw stem but folds the extension spelling
+	// (RCT-156-HD．ｍｋｖ -> RCT-156-HD.mkv): the extension is classification
+	// data that names a file, so it is carried folded (round-30 contract,
+	// like FileMatchInfo.Name), while the stem keeps its raw spelling.
+	registry["FILENAME_EXT"] = func(ctx *Context) (string, error) {
+		return foldNameExtension(ctx.OriginalFilename), nil
+	}
 	registry["FILENAMEEXT"] = registry["FILENAME_EXT"]
 	registry["FIRSTNAME"] = func(ctx *Context) (string, error) { return ctx.FirstName, nil }
 	registry["LASTNAME"] = func(ctx *Context) (string, error) { return ctx.LastName, nil }

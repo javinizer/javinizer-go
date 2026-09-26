@@ -48,6 +48,12 @@ func scrapeResultToMovieResult(fmi models.FileMatchInfo, result *scrape.ScrapeRe
 	// the raw spelling, which can end in a fullwidth extension (RCT-156-HD．ｍｋｖ);
 	// fmi.Name is the scanner's folded spelling (RCT-156-HD.mkv), which never
 	// existed on disk, so it only serves as a fallback for Path-less matches.
+	// The raw spelling is safe to publish because the template engine's
+	// filename tags are fold-aware at tag resolution (round 46a:
+	// internal/template/fullwidth.go): <FILENAME> strips the fullwidth
+	// extension from the stem and <FILENAME_EXT> folds it, so organized
+	// names never carry the fullwidth extension while this field keeps the
+	// on-disk truth.
 	if result.Movie != nil && result.Movie.OriginalFileName == "" {
 		if fmi.Path != "" {
 			result.Movie.OriginalFileName = filepath.Base(fmi.Path)

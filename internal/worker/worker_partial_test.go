@@ -132,6 +132,43 @@ func TestScrapeResultToMovieResult_FilenameTemplateEndToEnd(t *testing.T) {
 	assert.Equal(t, "IPX-535.mp4", gotExt) // <FILENAME_EXT> keeps the extension
 }
 
+// --- round 46a: the raw on-disk basename (round 40a) flows into the
+// filename tags fold-aware — the fullwidth extension is stripped from the
+// stem tag and folded in the ext tag at tag resolution, so it can never
+// leak into organized names while the metadata field stays raw ---
+
+func TestScrapeResultToMovieResult_FilenameTemplateFullwidthEndToEnd(t *testing.T) {
+	fmi := models.FileMatchInfo{
+		Path: "/media/RCT-156-HD．ｍｋｖ", // raw on-disk spelling (fullwidth)
+		Name: "RCT-156-HD.mkv",        // folded synthetic spelling
+	}
+	result := &scrape.ScrapeResult{Movie: &models.Movie{ID: "RCT-156"}}
+	mr, _ := scrapeResultToMovieResult(fmi, result, nil, false)
+	require.NotNil(t, mr)
+	require.NotNil(t, mr.Movie)
+
+	// round-40a contract: the metadata field keeps the raw on-disk spelling.
+	assert.Equal(t, "RCT-156-HD．ｍｋｖ", mr.Movie.OriginalFileName)
+
+	eng := template.NewEngine()
+	ctx := template.NewContextFromMovie(mr.Movie)
+
+	got, err := eng.Execute("<FILENAME>", ctx)
+	require.NoError(t, err)
+	assert.Equal(t, "RCT-156-HD", got,
+		"the stem tag strips the fullwidth extension at tag resolution (not in the field)")
+
+	got, err = eng.Execute("<FILENAME>.nfo", ctx)
+	require.NoError(t, err)
+	assert.Equal(t, "RCT-156-HD.nfo", got,
+		"the organizer appends the folded .mkv to this stem, never the fullwidth spelling")
+
+	got, err = eng.Execute("<FILENAME_EXT>", ctx)
+	require.NoError(t, err)
+	assert.Equal(t, "RCT-156-HD.mkv", got,
+		"the ext-style tag yields the folded .mkv spelling")
+}
+
 // --- Clone: nil resultstore.MovieResult (line 146) ---
 
 func TestMovieResult_Clone_Nil_Partial(t *testing.T) {
