@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/fsutil"
@@ -514,6 +515,28 @@ func containsFullwidthASCII(s string) bool {
 // admitted, or a fullwidth-only folder is misreported NON-DEDICATED.
 func fileExtension(path string) string {
 	return filepath.Ext(foldFullwidthASCII(path))
+}
+
+// splitRawExtension splits name into its stem and extension using the
+// fullwidth-aware fold: the extension is the suffix starting at the last dot
+// of the folded spelling, and because foldFullwidthASCII maps
+// rune-for-rune, the raw extension carries the same rune count as the
+// folded one — so the raw split trims that many runes. It exists because
+// plan.TargetFile keeps the raw on-disk spelling when rename_file=false
+// (noRenameFileName), and filepath.Ext is ASCII-only: a fullwidth extension
+// (RCT-156-HD．ｍｋｖ) would not be stripped, leaking the video extension into
+// subtitle sidecar stems. ASCII-only input reduces exactly to
+// strings.TrimSuffix(name, filepath.Ext(name)).
+func splitRawExtension(name string) (stem, ext string) {
+	foldedExt := filepath.Ext(foldFullwidthASCII(name))
+	if foldedExt == "" {
+		return name, ""
+	}
+	// foldFullwidthASCII maps rune-for-rune, so the raw extension carries
+	// the same rune count as the folded one — trim exactly that many runes.
+	n := utf8.RuneCountInString(foldedExt)
+	runes := []rune(name)
+	return string(runes[:len(runes)-n]), string(runes[len(runes)-n:])
 }
 
 // innerRenameSourceName returns the on-disk spelling of the match's file:

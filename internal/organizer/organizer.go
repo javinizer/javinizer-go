@@ -184,6 +184,22 @@ type planContext struct {
 	Err        error
 }
 
+// noRenameFileName returns the file name plans must carry when the config
+// disables file renames (rename_file=false): the raw basename of match.Path —
+// the on-disk source of truth per the models.FileMatchInfo contract — not
+// match.Name, which carries the scanner's extension-folded spelling
+// (RCT-156-HD．ｍｋｖ reports "RCT-156-HD.mkv"). Deriving the no-rename target
+// from the folded Name would rename the file's extension despite
+// rename_file=false; the folded Name keeps serving matching only (codex P2,
+// PR #257). Only a degenerate match without a Path falls back to Name,
+// mirroring innerRenameSourceName's raw-spelling derivation.
+func noRenameFileName(match models.FileMatchInfo) string {
+	if match.Path != "" {
+		return filepath.Base(match.Path)
+	}
+	return match.Name
+}
+
 func buildPlanContext(cfg *Config, engine template.EngineInterface, movie *models.Movie, match models.FileMatchInfo) planContext {
 	ctx := template.NewContextFromMovie(movie)
 	ctx.GroupActress = cfg.GroupActress
@@ -209,10 +225,7 @@ func buildPlanContext(cfg *Config, engine template.EngineInterface, movie *model
 			return planContext{Err: err}
 		}
 	} else {
-		fileName = match.Name
-		if fileName == "" && match.Path != "" {
-			fileName = filepath.Base(match.Path)
-		}
+		fileName = noRenameFileName(match)
 	}
 
 	var folderName string
@@ -494,7 +507,13 @@ func (o *Organizer) subtitleFileInfo(plan *OrganizePlan) models.FileMatchInfo {
 	}
 	if plan.InPlace {
 		fileInfoForSubtitles.Path = plan.TargetPath
-		oldFileName := plan.Match.Name
+		// The pre-rename on-disk spelling locates the video — and its
+		// sibling subtitles — inside the already-renamed directory:
+		// plan.Match.Name's folded spelling names nothing on disk when the
+		// file was admitted with a fullwidth extension. SourcePath is the
+		// primary raw spelling; Match.Path backs directly-constructed plans
+		// that only carry the match.
+		oldFileName := innerRenameSourceName(plan)
 		if oldFileName == "" && plan.Match.Path != "" {
 			oldFileName = filepath.Base(plan.Match.Path)
 		}
@@ -528,7 +547,11 @@ func (o *Organizer) handleSubtitles(plan *OrganizePlan, result *OrganizeResult, 
 
 	subtitleResults := make([]SubtitleResult, len(subtitles))
 	for i, subtitle := range subtitles {
-		videoNameWithoutExt := strings.TrimSuffix(plan.TargetFile, filepath.Ext(plan.TargetFile))
+		// TargetFile keeps the raw on-disk spelling when rename_file=false
+		// (noRenameFileName), so the stem needs the fold-aware split:
+		// filepath.Ext is ASCII-only and would not strip a fullwidth
+		// extension, leaking it into subtitle sidecar names.
+		videoNameWithoutExt, _ := splitRawExtension(plan.TargetFile)
 		newSubtitleName := o.subtitleHandler.generateSubtitleFileName(
 			videoNameWithoutExt,
 			subtitle.Language,
