@@ -93,6 +93,29 @@ func TestStallWatchdog_SubTickTimeoutClamp(t *testing.T) {
 	assert.True(t, w.Fired())
 }
 
+func TestStallWatchdog_StopWinsOverElapsedTick(t *testing.T) {
+	w := newStallWatchdog(time.Millisecond)
+	time.Sleep(5 * time.Millisecond)
+	w.Stop()
+
+	fired := false
+	if w.tryFire(time.Now(), func() { fired = true }) {
+		t.Fatal("tryFire must be suppressed after Stop")
+	}
+	assert.False(t, fired)
+	assert.False(t, w.Fired())
+}
+
+func TestStallWatchdog_FireSucceedsWhenElapsedAndArmed(t *testing.T) {
+	w := newStallWatchdog(time.Millisecond)
+	time.Sleep(5 * time.Millisecond)
+
+	fired := false
+	assert.True(t, w.tryFire(time.Now(), func() { fired = true }))
+	assert.True(t, fired)
+	assert.True(t, w.Fired())
+}
+
 func TestStallWatchdog_StopDisarmsImmediatelyBeforeDeadline(t *testing.T) {
 	w := newStallWatchdog(50 * time.Millisecond)
 	fired := make(chan struct{})

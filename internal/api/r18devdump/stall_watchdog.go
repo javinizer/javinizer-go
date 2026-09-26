@@ -36,6 +36,25 @@ func (w *stallWatchdog) Stop() { w.once.Do(func() { close(w.stop) }) }
 
 func (w *stallWatchdog) Fired() bool { return w.fired.Load() }
 
+// tryFire claims a timeout at now. When a tick and Stop race, select may pick
+// the tick branch even though w.stop is already closed; the non-blocking
+// recheck makes Stop win regardless, so a watchdog disarmed at stream EOF
+// never aborts the local import tail.
+func (w *stallWatchdog) tryFire(now time.Time, onTimeout func()) bool {
+	if now.Sub(time.Unix(0, w.last.Load())) < w.timeout {
+		return false
+	}
+	select {
+	case <-w.stop:
+		return false
+	default:
+	}
+	w.fired.Store(true)
+	w.Stop()
+	onTimeout()
+	return true
+}
+
 func (w *stallWatchdog) run(ctx context.Context, onTimeout func()) {
 	interval := w.timeout / 4
 	if interval <= 0 {
@@ -50,10 +69,7 @@ func (w *stallWatchdog) run(ctx context.Context, onTimeout func()) {
 		case <-ctx.Done():
 			return
 		case now := <-t.C:
-			if now.Sub(time.Unix(0, w.last.Load())) >= w.timeout {
-				w.fired.Store(true)
-				w.Stop()
-				onTimeout()
+			if w.tryFire(now, onTimeout) {
 				return
 			}
 		}
