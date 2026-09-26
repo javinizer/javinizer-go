@@ -50,8 +50,8 @@ resolve_golangci_lint
 golangci_lint_go_compat() {
     local lint_line lint_go tool_go
     lint_line=$("$GOLANGCI_LINT" version 2>&1 | head -1)
-    lint_go=$(echo "$lint_line" | sed -E 's/.*built with go([0-9]+\.[0-9]+).*/\1/')
-    tool_go=$(go version 2>/dev/null | sed -E 's/^go version go([0-9]+\.[0-9]+).*/\1/')
+    lint_go=$(echo "$lint_line" | sed -nE 's/.*built with go([0-9]+\.[0-9]+).*/\1/p')
+    tool_go=$(go version 2>/dev/null | sed -nE 's/^go version go([0-9]+\.[0-9]+).*/\1/p')
     [[ -z "$lint_go" || -z "$tool_go" ]] && return 0
     local lint_major lint_minor tool_major tool_minor
     IFS='.' read -r lint_major lint_minor <<< "$lint_go"
@@ -78,7 +78,7 @@ check_golangci_lint_version() {
     # Extract version number (e.g., "golangci-lint has version 2.4.0 built with...")
     # Use sed instead of grep -P for macOS compatibility
     local version_str
-    version_str=$(echo "$version" | sed -E 's/.*version ([0-9]+\.[0-9]+).*/\1/')
+    version_str=$(echo "$version" | sed -nE 's/.*version ([0-9]+\.[0-9]+).*/\1/p')
 
     if [[ -z "$version_str" ]]; then
         return 1
