@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -133,5 +134,140 @@ func TestStandaloneCreditAndCollisionImmediatelyMaintainCandidateQuarantine(t *t
 		require.NoError(t, NewMovieCreditRepository(db).DeleteByIDTx(db.DB, credit.ID))
 		require.NoError(t, db.First(&candidate, candidate.ID).Error)
 		require.False(t, candidate.AmbiguityQuarantined)
+	})
+}
+func TestQuarantineTransitionPropagationRepairsCastAndRender(t *testing.T) {
+	db := newCreditTestDB(t)
+	repos := db.Repositories()
+	verified := models.Actress{JapaneseName: "確定名", Verified: true, Origin: ActressOriginUser}
+	require.NoError(t, repos.ActressRepo.Create(context.Background(), &verified))
+	movie := creditMovie("propagate-quarantine", []models.MovieCredit{{
+		CreditedName:         "舞台名",
+		CreditedJapaneseName: "舞台名",
+		Scraped:              models.Actress{DMMID: 991001, JapaneseName: "舞台名"},
+	}})
+	saved, err := repos.MovieRepo.UpsertWithTranslations(context.Background(), movie, nil, nil)
+	require.NoError(t, err)
+	candidateID := saved.Credits[0].ActressID
+
+	var candidate models.Actress
+	require.NoError(t, db.First(&candidate, candidateID).Error)
+	require.False(t, candidate.AmbiguityQuarantined)
+	joinIDs := func() []uint {
+		var ids []uint
+		require.NoError(t, db.Table("movie_actresses").Where("movie_content_id = ?", "propagate-quarantine").Pluck("actress_id", &ids).Error)
+		return ids
+	}
+	require.Equal(t, []uint{candidateID}, joinIDs())
+	renderState := func() (bool, int64) {
+		var m models.Movie
+		require.NoError(t, db.First(&m, "content_id = ?", "propagate-quarantine").Error)
+		return m.RenderDirty, m.RenderGeneration
+	}
+	dirty, generation := renderState()
+	require.False(t, dirty)
+	require.Equal(t, int64(0), generation)
+
+	aliasRepo := NewActressAliasRepository(db)
+	require.NoError(t, aliasRepo.Upsert(context.Background(), &models.ActressAlias{AliasName: "舞台名", CanonicalName: "確定名"}))
+	require.NoError(t, db.First(&candidate, candidateID).Error)
+	require.True(t, candidate.AmbiguityQuarantined)
+	require.Empty(t, joinIDs())
+	dirty, generation = renderState()
+	require.True(t, dirty)
+	require.Equal(t, int64(1), generation)
+
+	require.NoError(t, aliasRepo.Delete(context.Background(), "舞台名"))
+	require.NoError(t, db.First(&candidate, candidateID).Error)
+	require.False(t, candidate.AmbiguityQuarantined)
+	require.Equal(t, []uint{candidateID}, joinIDs())
+	dirty, generation = renderState()
+	require.True(t, dirty)
+	require.Equal(t, int64(2), generation)
+}
+
+func TestQuarantineTransitionWithoutCreditingMovies(t *testing.T) {
+	db := newCreditTestDB(t)
+	repos := db.Repositories()
+	candidate := models.Actress{DMMID: 991002, JapaneseName: "舞台名", Origin: ActressOriginScrape}
+	require.NoError(t, db.Create(&candidate).Error)
+	verified := models.Actress{JapaneseName: "確定名", Verified: true, Origin: ActressOriginUser}
+	require.NoError(t, repos.ActressRepo.Create(context.Background(), &verified))
+
+	aliasRepo := NewActressAliasRepository(db)
+	require.NoError(t, aliasRepo.Upsert(context.Background(), &models.ActressAlias{AliasName: "舞台名", CanonicalName: "確定名"}))
+	require.NoError(t, db.First(&candidate, candidate.ID).Error)
+	require.True(t, candidate.AmbiguityQuarantined)
+
+	countCandidates := func() int64 {
+		var count int64
+		require.NoError(t, db.Model(&models.Movie{}).Where("render_dirty = ?", true).Count(&count).Error)
+		return count
+	}
+	require.Zero(t, countCandidates())
+}
+
+func injectRawStatementError(t *testing.T, db *DB, fragment string) {
+	t.Helper()
+	name := fmt.Sprintf("quarantine-propagation:%s", fragment)
+	seen := 0
+	require.NoError(t, db.DB.Callback().Raw().Before("gorm:raw").Register(name, func(tx *gorm.DB) {
+		if tx.Statement == nil || !strings.Contains(tx.Statement.SQL.String(), fragment) {
+			return
+		}
+		seen++
+		if seen == 1 {
+			_ = tx.AddError(errors.New("injected raw statement error"))
+		}
+	}))
+	t.Cleanup(func() { _ = db.DB.Callback().Raw().Remove(name) })
+}
+
+func propagationFlipFixture(t *testing.T, contentID string) *DB {
+	t.Helper()
+	db := newCreditTestDB(t)
+	repos := db.Repositories()
+	verified := models.Actress{JapaneseName: "確定名", Verified: true, Origin: ActressOriginUser}
+	require.NoError(t, repos.ActressRepo.Create(context.Background(), &verified))
+	movie := creditMovie(contentID, []models.MovieCredit{{
+		CreditedName:         "舞台名",
+		CreditedJapaneseName: "舞台名",
+		Scraped:              models.Actress{DMMID: 991003, JapaneseName: "舞台名"},
+	}})
+	_, err := repos.MovieRepo.UpsertWithTranslations(context.Background(), movie, nil, nil)
+	require.NoError(t, err)
+	return db
+}
+
+func TestPropagateQuarantineTransitionsErrors(t *testing.T) {
+	t.Run("collect quarantined", func(t *testing.T) {
+		db := propagationFlipFixture(t, "propagate-err-collect-quarantine")
+		injectDatabaseCallbackError(t, db, "query", "movie_credits", 1)
+		err := NewActressAliasRepository(db).Upsert(context.Background(), &models.ActressAlias{AliasName: "舞台名", CanonicalName: "確定名"})
+		require.Error(t, err)
+	})
+	t.Run("collect unquarantined", func(t *testing.T) {
+		db := propagationFlipFixture(t, "propagate-err-collect-unquarantine")
+		aliasRepo := NewActressAliasRepository(db)
+		require.NoError(t, aliasRepo.Upsert(context.Background(), &models.ActressAlias{AliasName: "舞台名", CanonicalName: "確定名"}))
+		injectDatabaseCallbackError(t, db, "query", "movie_credits", 1)
+		require.Error(t, aliasRepo.Delete(context.Background(), "舞台名"))
+	})
+	t.Run("remove join", func(t *testing.T) {
+		db := propagationFlipFixture(t, "propagate-err-remove")
+		injectRawStatementError(t, db, "DELETE FROM movie_actresses")
+		require.Error(t, NewActressAliasRepository(db).Upsert(context.Background(), &models.ActressAlias{AliasName: "舞台名", CanonicalName: "確定名"}))
+	})
+	t.Run("restore join", func(t *testing.T) {
+		db := propagationFlipFixture(t, "propagate-err-restore")
+		aliasRepo := NewActressAliasRepository(db)
+		require.NoError(t, aliasRepo.Upsert(context.Background(), &models.ActressAlias{AliasName: "舞台名", CanonicalName: "確定名"}))
+		injectRawStatementError(t, db, "INSERT OR IGNORE INTO movie_actresses")
+		require.Error(t, aliasRepo.Delete(context.Background(), "舞台名"))
+	})
+	t.Run("mark render dirty", func(t *testing.T) {
+		db := propagationFlipFixture(t, "propagate-err-dirty")
+		injectDatabaseCallbackError(t, db, "update", "movies", 1)
+		require.Error(t, NewActressAliasRepository(db).Upsert(context.Background(), &models.ActressAlias{AliasName: "舞台名", CanonicalName: "確定名"}))
 	})
 }

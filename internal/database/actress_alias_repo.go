@@ -406,6 +406,76 @@ func recomputeActressCandidateQuarantineTx(tx *gorm.DB) error {
 			return wrapDBErr("backfill", "actress candidate normalized keys", err)
 		}
 	}
+	return propagateQuarantineTransitionsTx(tx, quarantine, unquarantine)
+}
+
+func propagateQuarantineTransitionsTx(tx *gorm.DB, quarantined, unquarantined []uint) error {
+	if len(quarantined) == 0 && len(unquarantined) == 0 {
+		return nil
+	}
+	collect := func(actressIDs []uint) ([]string, error) {
+		if len(actressIDs) == 0 {
+			return nil, nil
+		}
+		var contentIDs []string
+		if err := tx.Model(&models.MovieCredit{}).
+			Where("actress_id IN ? AND suppressed = ?", actressIDs, false).
+			Distinct().Pluck("movie_content_id", &contentIDs).Error; err != nil {
+			return nil, wrapDBErr("list", "crediting movies for quarantine transitions", err)
+		}
+		return contentIDs, nil
+	}
+	quarantinedMovies, err := collect(quarantined)
+	if err != nil {
+		return err
+	}
+	unquarantinedMovies, err := collect(unquarantined)
+	if err != nil {
+		return err
+	}
+	if len(quarantined) > 0 {
+		if err := tx.Exec(`
+DELETE FROM movie_actresses
+WHERE actress_id IN ?
+  AND movie_content_id IN (SELECT movie_content_id FROM movie_credits WHERE actress_id IN ? AND suppressed = ?)`, quarantined, quarantined, false).Error; err != nil {
+			return wrapDBErr("remove", "quarantined candidate cast projections", err)
+		}
+	}
+	if len(unquarantined) > 0 {
+		if err := tx.Exec(`
+INSERT OR IGNORE INTO movie_actresses (movie_content_id, actress_id)
+SELECT movie_content_id, actress_id
+FROM movie_credits
+WHERE actress_id IN ? AND suppressed = ?`, unquarantined, false).Error; err != nil {
+			return wrapDBErr("restore", "unquarantined candidate cast projections", err)
+		}
+	}
+	markers := make(map[string]struct{}, len(quarantinedMovies)+len(unquarantinedMovies))
+	for _, id := range quarantinedMovies {
+		markers[id] = struct{}{}
+	}
+	for _, id := range unquarantinedMovies {
+		markers[id] = struct{}{}
+	}
+	if len(markers) == 0 {
+		return nil
+	}
+	contentIDs := make([]string, 0, len(markers))
+	for id := range markers {
+		contentIDs = append(contentIDs, id)
+	}
+	sort.Strings(contentIDs)
+	for start := 0; start < len(contentIDs); start += 300 {
+		end := start + 300
+		if end > len(contentIDs) {
+			end = len(contentIDs)
+		}
+		if err := tx.Model(&models.Movie{}).
+			Where("content_id IN ?", contentIDs[start:end]).
+			Updates(map[string]any{"render_dirty": true, "render_generation": gorm.Expr("render_generation + 1")}).Error; err != nil {
+			return wrapDBErr("invalidate render", "crediting movies for quarantine transitions", err)
+		}
+	}
 	return nil
 }
 

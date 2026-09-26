@@ -13,7 +13,7 @@ func TestPR260ImportKeepsConflictingDMMCandidateDistinct(t *testing.T) {
 	repo := NewActressRepository(db)
 	candidate := models.Actress{
 		DMMID: 111, FirstName: "Same", LastName: "Performer", JapaneseName: "同名",
-		Verified: false, Origin: ActressOriginScrape,
+		Verified: false, Origin: ActressOriginScrape, AmbiguityQuarantined: true,
 		NameKey: models.NormalizeActressNameKey("Performer Same"),
 	}
 	require.NoError(t, db.Create(&candidate).Error)
