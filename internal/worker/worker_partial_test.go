@@ -75,12 +75,38 @@ func TestScrapeResultToMovieResult_PreservesExistingOriginalFileName(t *testing.
 	assert.Equal(t, "custom.mp4", mr.Movie.OriginalFileName)
 }
 
-func TestScrapeResultToMovieResult_NoOriginalFileNameWhenFMINameEmpty(t *testing.T) {
-	fmi := models.FileMatchInfo{Path: "test.mp4"} // Name empty
+func TestScrapeResultToMovieResult_NoOriginalFileNameWhenFMIEmpty(t *testing.T) {
+	fmi := models.FileMatchInfo{} // Path and Name both empty
 	result := &scrape.ScrapeResult{Movie: &models.Movie{ID: "TEST-001"}}
 	mr, _ := scrapeResultToMovieResult(fmi, result, nil, false)
 	require.NotNil(t, mr)
 	assert.Empty(t, mr.Movie.OriginalFileName)
+}
+
+// --- scrapeResultToMovieResult: OriginalFileName prefers the raw on-disk
+// basename over the folded Name (round 40: a fullwidth source file
+// RCT-156-HD．ｍｋｖ must publish its actual on-disk spelling — the folded
+// synthetic RCT-156-HD.mkv never existed on disk) ---
+
+func TestScrapeResultToMovieResult_OriginalFileNameFromRawPathBasename(t *testing.T) {
+	fmi := models.FileMatchInfo{
+		Path: "/media/RCT-156-HD．ｍｋｖ", // raw on-disk spelling (fullwidth)
+		Name: "RCT-156-HD.mkv",        // folded synthetic spelling
+	}
+	result := &scrape.ScrapeResult{Movie: &models.Movie{ID: "RCT-156"}}
+	mr, _ := scrapeResultToMovieResult(fmi, result, nil, false)
+	require.NotNil(t, mr)
+	require.NotNil(t, mr.Movie)
+	assert.Equal(t, "RCT-156-HD．ｍｋｖ", mr.Movie.OriginalFileName,
+		"OriginalFileName must carry the raw on-disk basename, not the folded Name")
+}
+
+func TestScrapeResultToMovieResult_OriginalFileNameFallsBackToNameWhenPathEmpty(t *testing.T) {
+	fmi := models.FileMatchInfo{Name: "ABF-346.mp4"} // Path-less match
+	result := &scrape.ScrapeResult{Movie: &models.Movie{ID: "ABF-346"}}
+	mr, _ := scrapeResultToMovieResult(fmi, result, nil, false)
+	require.NotNil(t, mr)
+	assert.Equal(t, "ABF-346.mp4", mr.Movie.OriginalFileName)
 }
 
 // --- end-to-end: <FILENAME> template tag resolves from scrapeResultToMovieResult
