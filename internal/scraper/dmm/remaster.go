@@ -104,10 +104,23 @@ func remasterTailNumber(id string) (string, bool) {
 
 // anchoredSeriesMatches reports whether the raw cid's anchored series matches
 // the query's series, resolving the t28/t ambiguity. The catalog prefix is
-// decisive: a prefix-free three-digit tail reads as series t with the
-// five-digit number 28123 (t28123h is T-28123H), while catalog-prefixed or
-// longer tails stay series t28 (9t28123h is T28-123H).
+// decisive: a prefix-free tail that decodes as the T series (t28123h is
+// T-28123H, t281234h is T-281234H — see t28TailDecodesTSeries) reads as
+// series t, while catalog-prefixed, zero-padded and longer tails stay series
+// t28 (9t28123h and t2800123h are T28-123H).
 const t28Series = "t28"
+
+// t28TailDecodesTSeries reports whether a prefix-free compact t28 tail of
+// this digit count reads as the T series rather than the T28 label:
+// three-digit tails spell the five-digit T-series numbers (t28123h is
+// T-28123H) and four-digit tails the six-digit ones (t281234h is T-281234H,
+// the digit run the matcher's re-anchoring grammar decodes the same way),
+// while zero-padded five-digit tails (t2800123h) are the T28 label's padded
+// cids and longer unpadded tails are ambiguous display spellings that stay
+// T28.
+func t28TailDecodesTSeries(tail string) bool {
+	return len(tail) == 3 || len(tail) == 4
+}
 
 func anchoredSeriesMatches(rawCID, wantSeries string) bool {
 	norm := strings.ToLower(strings.ReplaceAll(rawCID, "-", ""))
@@ -119,9 +132,9 @@ func anchoredSeriesMatches(rawCID, wantSeries string) bool {
 	prefix, cidSeries, number := m[1], m[2], m[3]
 	switch wantSeries {
 	case "t":
-		return cidSeries == "t" || (prefix == "" && cidSeries == t28Series && len(number) == 3)
+		return cidSeries == "t" || (prefix == "" && cidSeries == t28Series && t28TailDecodesTSeries(number))
 	case t28Series:
-		return cidSeries == t28Series && (prefix != "" || len(number) != 3)
+		return cidSeries == t28Series && (prefix != "" || !t28TailDecodesTSeries(number))
 	default:
 		return cidSeries == wantSeries
 	}
@@ -165,12 +178,14 @@ func parseRemasterTail(lower, compact string) (series, number, ez, marker string
 		return "", "", "", "", false
 	}
 	series, number = m[2], m[3]
-	// A prefix-free compact t28 tail with a three-digit number reads as the
-	// T-series release T-28123H — but only when the input was genuinely
-	// separator-free: separator-bearing display forms pin the series boundary
-	// (T28-123-HD stays T28-123), and underscore cids pass a prefix-stripped
-	// compact whose maker digits still own the catalog prefix.
-	if lower == compact && m[1] == "" && series == t28Series && len(number) == 3 {
+	// A prefix-free compact t28 tail with a three- or four-digit number
+	// reads as the T-series release — t28123h is T-28123H, and t281234h is
+	// T-281234H, the six-digit run the matcher's re-anchoring grammar decodes
+	// the same way (see t28TailDecodesTSeries) — but only when the input was
+	// genuinely separator-free: separator-bearing display forms pin the series
+	// boundary (T28-1234-HD stays T28-1234), and underscore cids pass a
+	// prefix-stripped compact whose maker digits still own the catalog prefix.
+	if lower == compact && m[1] == "" && series == t28Series && t28TailDecodesTSeries(number) {
 		series, number = "t", "28"+number
 	}
 	return series, number, m[4], m[5], true

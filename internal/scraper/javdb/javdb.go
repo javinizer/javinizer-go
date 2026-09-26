@@ -1044,15 +1044,18 @@ func foldRemasterMarkerKey(id string) remasterFoldKey {
 	if m := remasterCompactSplitRegex.FindStringSubmatch(base); m != nil {
 		// The t28 branch mirrors the rule the matcher, DMM and R18
 		// classifiers decode by (parseRemasterTail / r18ParseRemasterTail):
-		// a genuinely compact, prefix-free t28 with a three-digit number
-		// reads as the T-series release — t28123h is T+28123, the release
-		// a manual search for t28123h targets on every source — while the
-		// catalog digits prefixing a t28 cid (9t28123h, 55t28123h) are
-		// maker junk that leaves the T28 label's T28+123 identity intact.
-		// Separator-bearing spellings never reinterpret: their series
-		// boundary is pinned — or falls through unresolved — above.
+		// a genuinely compact, prefix-free t28 with a three- or four-digit
+		// number reads as the T-series release — t28123h is T+28123 and
+		// t281234h is T+281234, the six-digit run the matcher's re-anchoring
+		// grammar decodes the same way, the release a manual search for
+		// either spelling targets on every source (see
+		// t28TailDecodesTSeries) — while the catalog digits prefixing a
+		// t28 cid (9t28123h, 55t28123h) are maker junk that leaves the T28
+		// label's T28+123 identity intact. Separator-bearing spellings never
+		// reinterpret: their series boundary is pinned — or falls through
+		// unresolved — above.
 		if m[2] == "T28" {
-			if m[1] == "" && len(m[3]) == 3 && !strings.ContainsAny(lower, "-_. ") {
+			if m[1] == "" && t28TailDecodesTSeries(m[3]) && !strings.ContainsAny(lower, "-_. ") {
 				key.pin("T", "28"+m[3], suffix, marker)
 			} else {
 				key.pin("T28", m[3], suffix, marker)
@@ -1062,6 +1065,17 @@ func foldRemasterMarkerKey(id string) remasterFoldKey {
 		}
 	}
 	return key
+}
+
+// t28TailDecodesTSeries reports whether a genuinely compact, prefix-free
+// t28 tail of this digit count reads as the T series rather than the T28
+// label: three-digit tails spell the five-digit T-series numbers (t28123h
+// is T+28123) and four-digit tails the six-digit ones (t281234h is T+281234,
+// the digit run the matcher's re-anchoring grammar decodes the same way),
+// while zero-padded five-digit tails (t2800123h) are the T28 label's padded
+// cids.
+func t28TailDecodesTSeries(tail string) bool {
+	return len(tail) == 3 || len(tail) == 4
 }
 
 // pin fills the key's pinned identity, folding the marker spelling into its

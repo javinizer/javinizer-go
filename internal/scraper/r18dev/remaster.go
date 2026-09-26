@@ -64,7 +64,12 @@ func r18ParseRemasterTail(id string) (series, number, ez, marker string, ok bool
 		return "", "", "", "", false
 	}
 	series, number = m[2], m[3]
-	if m[1] == "" && series == t28Series && len(number) == 3 {
+	// The shared t28 rule: a prefix-free compact t28 tail with a three- or
+	// four-digit number reads as the T-series release — t28123h is T-28123H,
+	// and t281234h is T-281234H, the six-digit run the matcher's re-anchoring
+	// grammar decodes the same way (see t28TailDecodesTSeries) — while
+	// zero-padded five-digit tails stay the T28 label's padded cid.
+	if m[1] == "" && series == t28Series && t28TailDecodesTSeries(number) {
 		series, number = "t", "28"+number
 	}
 	return series, number, m[4], m[5], true
@@ -134,17 +139,31 @@ func cidMatchesMarker(contentID, foldedMarker, series string) bool {
 
 const t28Series = "t28"
 
+// t28TailDecodesTSeries reports whether a prefix-free compact t28 tail of
+// this digit count reads as the T series rather than the T28 label:
+// three-digit tails spell the five-digit T-series numbers (t28123h is
+// T-28123H) and four-digit tails the six-digit ones (t281234h is T-281234H,
+// the digit run the matcher's re-anchoring grammar decodes the same way),
+// while zero-padded five-digit tails (t2800123h) are the T28 label's padded
+// cids and longer unpadded tails are ambiguous display spellings that stay
+// T28.
+func t28TailDecodesTSeries(tail string) bool {
+	return len(tail) == 3 || len(tail) == 4
+}
+
 // anchoredSeriesMatches resolves the t28/t ambiguity in the anchored cid
-// split. A separator-pinned series-t query also matches a prefix-free
-// three-digit t28 tail — the convention reads t28123 as series t with the
-// five-digit number 28123 (T-28123H) — while catalog-prefixed or longer
-// number tails stay series t28 (9t28123h is T28-123H).
+// split. A separator-pinned series-t query also matches a prefix-free t28
+// tail that decodes as the T series — the convention reads t28123 as series
+// t with the five-digit number 28123 (T-28123H) and t281234 as series t
+// with the six-digit 281234 (T-281234H) — while catalog-prefixed,
+// zero-padded and longer number tails stay series t28 (9t28123h is
+// T28-123H).
 func anchoredSeriesMatches(prefix, cidSeries, number, wantSeries string) bool {
 	switch wantSeries {
 	case "t":
-		return cidSeries == "t" || (prefix == "" && cidSeries == "t28" && len(number) == 3)
+		return cidSeries == "t" || (prefix == "" && cidSeries == "t28" && t28TailDecodesTSeries(number))
 	case t28Series:
-		return cidSeries == t28Series && (prefix != "" || len(number) != 3)
+		return cidSeries == t28Series && (prefix != "" || !t28TailDecodesTSeries(number))
 	default:
 		return cidSeries == wantSeries
 	}
