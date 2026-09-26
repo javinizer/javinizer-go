@@ -24,9 +24,44 @@ for path in $FORBIDDEN_PATHS; do
 done
 
 # Golangci-lint configuration
-GOLANGCI_LINT="${HOME}/go/bin/golangci-lint"
 REQUIRED_VERSION_MAJOR=2
 REQUIRED_VERSION_MINOR=4
+
+# Resolve golangci-lint by preference: explicit $GOLANGCI_LINT override, then
+# PATH, then ~/go/bin. PATH precedes ~/go/bin so a stale or toolchain-incompatible
+# copy in ~/go/bin (e.g. reinstalled by a tooling sync) cannot shadow a working one.
+resolve_golangci_lint() {
+    if [[ -n "${GOLANGCI_LINT:-}" ]]; then
+        return 0
+    fi
+    if command -v golangci-lint >/dev/null 2>&1; then
+        GOLANGCI_LINT="$(command -v golangci-lint)"
+        return 0
+    fi
+    GOLANGCI_LINT="${HOME}/go/bin/golangci-lint"
+}
+
+resolve_golangci_lint
+
+# A golangci-lint build can only decode export data from Go toolchains up to
+# its own build toolchain; an older build fails every typecheck against a newer
+# Go installation. Detect that combination and skip with guidance rather than
+# failing the commit on an environment problem.
+golangci_lint_go_compat() {
+    local lint_line lint_go tool_go
+    lint_line=$("$GOLANGCI_LINT" version 2>&1 | head -1)
+    lint_go=$(echo "$lint_line" | sed -nE 's/.*built with go([0-9]+\.[0-9]+).*/\1/p')
+    tool_go=$(go version 2>/dev/null | sed -nE 's/^go version go([0-9]+\.[0-9]+).*/\1/p')
+    [[ -z "$lint_go" || -z "$tool_go" ]] && return 0
+    local lint_major lint_minor tool_major tool_minor
+    IFS='.' read -r lint_major lint_minor <<< "$lint_go"
+    IFS='.' read -r tool_major tool_minor <<< "$tool_go"
+    if (( lint_major > tool_major )) || \
+       (( lint_major == tool_major && lint_minor >= tool_minor )); then
+        return 0
+    fi
+    return 1
+}
 
 echo -e "${BLUE}Running pre-commit checks...${NC}"
 echo ""
@@ -43,7 +78,7 @@ check_golangci_lint_version() {
     # Extract version number (e.g., "golangci-lint has version 2.4.0 built with...")
     # Use sed instead of grep -P for macOS compatibility
     local version_str
-    version_str=$(echo "$version" | sed -E 's/.*version ([0-9]+\.[0-9]+).*/\1/')
+    version_str=$(echo "$version" | sed -nE 's/.*version ([0-9]+\.[0-9]+).*/\1/p')
 
     if [[ -z "$version_str" ]]; then
         return 1
@@ -79,12 +114,17 @@ echo ""
 # Check 2: golangci-lint
 echo -e "${BLUE}[2/8] Running golangci-lint...${NC}"
 if [[ -x "$GOLANGCI_LINT" ]] && check_golangci_lint_version; then
-    echo -e "${BLUE}  Using golangci-lint from $GOLANGCI_LINT${NC}"
-    if ! "$GOLANGCI_LINT" run ./... 2>&1; then
+    if ! golangci_lint_go_compat; then
+        echo -e "${YELLOW}⚠ $GOLANGCI_LINT is built with an older Go than the installed toolchain (skipping)${NC}"
+        echo -e "${YELLOW}  Lint:   $("$GOLANGCI_LINT" version 2>&1 | head -1)${NC}"
+        echo -e "${YELLOW}  Go:     $(go version)${NC}"
+        echo -e "${YELLOW}  Fix:    reinstall golangci-lint built with >= $(go version | sed -E 's/^go version (go[0-9]+\.[0-9]+).*/\1/') or set GOLANGCI_LINT to a working binary${NC}"
+    elif ! "$GOLANGCI_LINT" run ./... 2>&1; then
         echo -e "${RED}✗ golangci-lint found issues${NC}"
         exit 1
+    else
+        echo -e "${GREEN}✓ golangci-lint passed${NC}"
     fi
-    echo -e "${GREEN}✓ golangci-lint passed${NC}"
 else
     echo -e "${YELLOW}⚠ golangci-lint not installed or version too old (skipping)${NC}"
     echo -e "${YELLOW}  Required: >=${REQUIRED_VERSION_MAJOR}.${REQUIRED_VERSION_MINOR}.0${NC}"
