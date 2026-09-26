@@ -37,11 +37,13 @@ var (
 	javdbVideoPathRegex = regexp.MustCompile(`/v/([A-Za-z0-9]+)`)
 
 	// Separator-pinned remaster identity: the series shape a separator-
-	// bearing display id pins in its first segment, and the compact
+	// bearing display id pins in its first segment, the compact
 	// series/number split whose t28 branch decodes compact spellings
-	// under the shared t28 rule.
+	// under the shared t28 rule, and the raw channel-prefixed cid shape
+	// whose h_/n_ letter is maker junk, not the series.
 	remasterSeriesSegmentRegex = regexp.MustCompile(`^\d*(?:t28|[a-z]+)$`)
 	remasterCompactSplitRegex  = regexp.MustCompile(`^(\d*)(T28|[A-Z]+)(\d+)$`)
+	remasterUnderscoreCIDRegex = regexp.MustCompile(`^[hn]_\d+(?:t28|[a-z]+)\d+[a-z]{0,3}$`)
 )
 
 // scraper implements the JavDB scraper.
@@ -395,10 +397,11 @@ func (s *scraper) findDetailURLCtx(ctx context.Context, id string) (string, erro
 	// release carries no marker and still compares unequal; only the
 	// marker spelling is bridged. Raw marker-bearing content ids the
 	// matcher's tier-2 propagates fold onto the display listing too: the
-	// leading catalog/channel prefix digits strip before the series pins
-	// (1rct00156h -> the RCT+156H-class identity, see
-	// stripCompactCatalogPrefix), so the RCT-156-HD listing ranks as its
-	// match.
+	// leading h_/n_ channel letter strips first (see
+	// stripRemasterChannelPrefix), then the catalog/channel prefix digits
+	// (1rct00156h -> the RCT+156H-class identity, h_003abc00123hd -> the
+	// ABC+123H-class one; see stripCompactCatalogPrefix), so the RCT-156-HD
+	// and ABC-123-HD listings rank as its match.
 	var foldedTargetKey remasterFoldKey
 	if markerQuery {
 		foldedTargetKey = foldRemasterMarkerKey(id)
@@ -1027,15 +1030,26 @@ type remasterFoldKey struct {
 // compact id's leading 1-4 digit run is a DMM catalog/channel prefix, not
 // part of the series (1rct00156h is the RCT-156H remaster's cid), so it is
 // stripped from the pinned series the same way the DMM/R18 classifiers read
-// the spelling — see stripCompactCatalogPrefix. The
+// the spelling — see stripCompactCatalogPrefix — and a channel-prefixed
+// raw cid first drops its leading h_/n_ maker letter
+// (h_003abc00123hd -> ABC+00123+H; see stripRemasterChannelPrefix). The
 // tail grammar is splitRemasterMarkerTail's: the E/Z catalog
 // suffix rides in front of the marker, redundant marker spellings collapse
 // and HD folds into the H class. Ids whose grammar does not pin — no marker
 // tail, or a series/number split the regexes do not model — stay unpinned
 // and compare under the round-30 compact fold.
 func foldRemasterMarkerKey(id string) remasterFoldKey {
-	key := remasterFoldKey{compact: foldRemasterMarkerID(id)}
-	lower := strings.ToLower(strings.TrimSpace(id))
+	// A raw channel-prefixed content id (h_003abc00123hd) carries maker
+	// junk in front of its identity: the h_/n_ channel letter never spells
+	// the series, and the underscore it sits behind would pin a phantom
+	// single-letter series segment before the compact split ever reads the
+	// cid. Strip the channel prefix the same way the DMM/R18 classifiers
+	// read the spelling (underscoreCIDShapeRegex / r18PrefixedCIDRegex),
+	// so the stripped cid composes with the round-40b catalog-prefix rules
+	// below: h_003abc00123hd pins ABC+00123+H, the identity the ABC-123-HD
+	// display listing carries.
+	lower := stripRemasterChannelPrefix(strings.ToLower(strings.TrimSpace(id)))
+	key := remasterFoldKey{compact: foldRemasterMarkerID(lower)}
 	// Separator-bearing spellings pin the series boundary that compaction
 	// erases; a remainder the tail grammar cannot read as the bare number
 	// plus marker falls through to the compact split, mirroring DMM.
@@ -1045,7 +1059,7 @@ func foldRemasterMarkerKey(id string) remasterFoldKey {
 			return key
 		}
 	}
-	normalized := normalizeIDForCompare(id)
+	normalized := normalizeIDForCompare(lower)
 	base, suffix, marker, ok := splitRemasterMarkerTail(normalized)
 	if !ok {
 		return key
@@ -1118,6 +1132,23 @@ func stripCompactCatalogPrefix(digits, series string) string {
 		return series
 	}
 	return digits + series
+}
+
+// stripRemasterChannelPrefix removes a raw content id's leading h_/n_
+// channel prefix (with the letter's underscore) when the lowercase id has
+// the underscore cid shape: h_003abc00123hd -> 003abc00123hd. The channel
+// letter is maker junk — the DMM/R18 classifiers read the same spelling
+// through their prefixed-cid regexes (underscoreCIDShapeRegex /
+// r18PrefixedCIDRegex) and never treat it as the series — while the
+// catalog digit run it fronts stays for stripCompactCatalogPrefix to
+// bound, composing round 40b's rules. Spellings the cid shape does not
+// model keep every character: display ids and ambiguous forms are
+// untouched.
+func stripRemasterChannelPrefix(lower string) string {
+	if remasterUnderscoreCIDRegex.MatchString(lower) {
+		return lower[2:]
+	}
+	return lower
 }
 
 // pin fills the key's pinned identity, folding the marker spelling into its
