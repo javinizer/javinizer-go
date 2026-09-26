@@ -26,6 +26,24 @@ import (
 // explicit membership here.
 const tagDelimiterClass = `[-_.\s[\](){}【】「」『』《》〈〉〔〕]`
 
+// codecProfileHeadAlternation and codecProfileWordAlternation are the two
+// halves of the codec-profile compound vocabulary: the audio codecs that
+// carry separated profile spellings (DTS-HD, DTS-HD MA, AAC-LC,
+// TRUEHD-ATMOS) and the profile words that ride behind them. The halves
+// are shared by the quality vocabulary's codec-profile alternative and the
+// veto-span prefix recognizer (compoundCodecProfileTagPrefixRegex) so the
+// two grammars cannot drift apart. The head set stops at the audio codecs
+// with profile spellings — flac, opus, and pcm carry none — and the word
+// set stops at the profiles those codecs spell: DTS's HD/MA/X/HRA, AAC's
+// LC/HE/SBR, and the EX/ATMOS family the Dolby spellings carry. The heads
+// dts, aac, and dd are real series in the r18.dev content-id prefix
+// lookup, and so are the profile words hd, lc, ma, he, x, and ex; the
+// bounds documented at each use keep their id shapes intact.
+const (
+	codecProfileHeadAlternation = `dts|aac|ac3|eac3|truehd|dd|ddp`
+	codecProfileWordAlternation = `hd|ma|x|lc|he|ex|hra|sbr|atmos`
+)
+
 var (
 	// Volume suffixes ride the part-label groups (vol joins
 	// cd/disc/disk/pt/part): a fused vol after the remaster marker
@@ -223,7 +241,32 @@ var (
 	// amateur pattern's own digit bound — and the hyphenated, dotted, and
 	// spaced siblings ride the compound span (see
 	// compoundSourceTagPrefixRegex) exactly like the web compounds.
-	trailingQualityTagRegex = regexp.MustCompile(`(?i)\b(?:[hx]26[3-9]|avc\d*|aac\d*|hevc\d*|vvc\d*|ac3|dts|flac|opus|truehd|vc1|av1|mp[34]|ddp\d*|eac3|divx\d*|xvid\d*|prores\d*|yuv\d*|rgb\d*|p0(?:10|16)|mpeg\d*|vp\d+|fhd\d{2,4}|uhd\d{2,4}|hdtv|hdr\d*|bt2020|bt709|rec709|smpte\d+|pq\d+|st2084|hlg\d*|ycbcr\d*|(?:bt|rec|st|smpte)[. ]?\d{3,4}|(?:l?pcm|dts|flac|opus|e?ac3|truehd)[. ]?\d{3,4}|\d+(?:bit|point)\d+|(?:web(?:[-_. ]?(?:dl(?:rip)?|rip))?|remux|bluray|(?:bd|br)[-_. ]?rip)\d{3,4})\b`)
+	// Codec-profile compounds join the vocabulary as a class — an audio
+	// codec head (dts, aac, ac3, eac3, truehd, dd, or ddp) plus one
+	// separator and one or more profile words (DTS-HD, DTS-HD MA,
+	// AAC-LC, TRUEHD-ATMOS), directly followed by the 3-4 digit rate —
+	// because the profile-bearing spellings split at their separator in
+	// the catalog scan: DTS-HD192 and AAC-LC192 leave the HD192/LC192
+	// fragments standing alone as id-shaped candidates while the
+	// codec-profile prefix belongs to them, so the veto span extends
+	// back over the prefix (see compoundCodecProfileTagPrefixRegex) and
+	// the vocabulary decides the compound as a whole, exactly as it
+	// does for the web source compounds. The bounds mirror the class:
+	// the profile word must be letters directly behind the head's one
+	// separator, so hyphenated display ids (AAC-1086) and zero-padded
+	// fused ids (DTS00123) of the real dts/aac/dd series keep their id
+	// grammar, and the rate rides the class's 3-4 digit bound, so
+	// five-plus-digit id-shaped fragments (DTS-HD12345) stay outside the
+	// compound. The profile words hd, lc, ma, he, x, and ex are real
+	// series too, and their bare id shapes (HD1080, LC1234, X192) keep
+	// matching as ids: without a codec head the veto span never extends,
+	// exactly as a DL2160 fragment without the web prefix stays id
+	// grammar. The dts/aac/ac3/eac3/truehd/ddp heads are already bare
+	// literals in this vocabulary, so an extended span over them vetoes
+	// by those literals as well — the same veto DTS-24 rides today —
+	// while the dd head (no bare literal of its own) leans on the
+	// compound's own bounds.
+	trailingQualityTagRegex = regexp.MustCompile(`(?i)\b(?:[hx]26[3-9]|avc\d*|aac\d*|hevc\d*|vvc\d*|ac3|dts|flac|opus|truehd|vc1|av1|mp[34]|ddp\d*|eac3|divx\d*|xvid\d*|prores\d*|yuv\d*|rgb\d*|p0(?:10|16)|mpeg\d*|vp\d+|fhd\d{2,4}|uhd\d{2,4}|hdtv|hdr\d*|bt2020|bt709|rec709|smpte\d+|pq\d+|st2084|hlg\d*|ycbcr\d*|(?:bt|rec|st|smpte)[. ]?\d{3,4}|(?:l?pcm|dts|flac|opus|e?ac3|truehd)[. ]?\d{3,4}|\d+(?:bit|point)\d+|(?:web(?:[-_. ]?(?:dl(?:rip)?|rip))?|remux|bluray|(?:bd|br)[-_. ]?rip)\d{3,4}|` + `(?:` + codecProfileHeadAlternation + `)[-_. ](?:` + codecProfileWordAlternation + `)(?:[-_. ]?(?:` + codecProfileWordAlternation + `))*\d{3,4})\b`)
 	// compoundSourceTagPrefixRegex recognizes the source-tag prefix —
 	// web, bd, or br plus exactly one separator — ending where a
 	// trailing-catalog candidate begins, so the candidate's quality veto
@@ -235,9 +278,26 @@ var (
 	// text or a non-alphanumeric character before the head) keeps the
 	// word-boundary protections of the source class: fweb, xbd, and
 	// 189web spellings never extend the span.
-	compoundSourceTagPrefixRegex      = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(web|bd|br)[-_. ]$`)
-	trailingResolutionCatalogIDRegex  = regexp.MustCompile(`(?i)\b[a-z]+-(?:144|240|288|360|432|480|540|576|720|1080|2160)\b`)
-	trailingResolutionQualityTagRegex = regexp.MustCompile(`(?i)^(?:fhd|uhd|hd)-(?:144|240|288|360|432|480|540|576|720|1080|2160)$`)
+	compoundSourceTagPrefixRegex = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(web|bd|br)[-_. ]$`)
+	// compoundCodecProfileTagPrefixRegex recognizes the codec-profile
+	// prefix — an audio codec head plus zero or more separated profile
+	// words and exactly one trailing separator — ending where a
+	// trailing-catalog candidate begins, so the candidate's quality
+	// veto can span the profile-bearing compound spelling (DTS-HD192,
+	// AAC-LC192, TRUEHD-ATMOS768) that the catalog scan split apart:
+	// the fragment after the separator (HD192, LC192) arrives alone as
+	// an id-shaped candidate while the DTS-HD/AAC-LC prefix belongs to
+	// it, exactly as the DL2160 fragment belongs to its WEB- prefix.
+	// The profile words may ride inside the prefix instead — DTS-HD
+	// MA768 leaves the MA768 fragment standing — so the iterations cover
+	// both layouts. The leading boundary before the head keeps the
+	// class's word-boundary protections: xdts (XDTS-HD192) and
+	// numerically prefixed (189dts1) spellings never extend the span,
+	// and a profile-word fragment without a codec head (HD1080, LC1234
+	// — the hd and lc series are real) stays id grammar.
+	compoundCodecProfileTagPrefixRegex = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(` + codecProfileHeadAlternation + `)(?:[-_. ](?:` + codecProfileWordAlternation + `))*[-_. ]$`)
+	trailingResolutionCatalogIDRegex   = regexp.MustCompile(`(?i)\b[a-z]+-(?:144|240|288|360|432|480|540|576|720|1080|2160)\b`)
+	trailingResolutionQualityTagRegex  = regexp.MustCompile(`(?i)^(?:fhd|uhd|hd)-(?:144|240|288|360|432|480|540|576|720|1080|2160)$`)
 	// qualitySeriesNumberRegex recognizes a consumed remaster phrase that is
 	// display-quality vocabulary rather than a catalog id: a quality series
 	// word (FHD/UHD/HD/SD) with a 3-4 digit resolution number. The plain
@@ -306,17 +366,28 @@ func builtinQualityShadowsContentID(name, id string) bool {
 // trailingCandidateVetoSpan returns the span a trailing-catalog candidate is
 // vetted against as a quality tag: the candidate itself, or the candidate
 // extended back over a compound source-tag prefix (web, bd, or br plus
-// one separator) that directly precedes it. The catalog scan splits
+// one separator) or a codec-profile prefix (an audio codec head plus its
+// profile words and one separator) that directly precedes it. The catalog
+// scan splits
 // compound source spellings at their separator — WEB-DL2160 leaves the
 // DL2160 fragment standing alone as an id-shaped candidate while the
 // WEB- prefix belongs to it — so the veto must see the compound
 // spelling for the vocabulary's digit bound to decide it as a whole.
 // The leading boundary before the prefix keeps the class's
 // word-boundary protections: fweb (FWEB-DL2160), xbd (XBD-RIP1080),
-// and numerically prefixed (189WEB-DL1) spellings never extend.
+// and numerically prefixed (189WEB-DL1, 189dts1) spellings never extend.
+// The two prefix recognizers are checked independently against the
+// candidate's own start: a codec head never sits inside a web compound's
+// head, so at most one of them matches the same text ending, and the
+// codec-profile span covers the profile word riding on either side of
+// the split — DTS-HD192 leaves HD192 standing, and DTS-HD MA768 leaves
+// MA768 standing the same way.
 func trailingCandidateVetoSpan(remainder string, candidateIndex []int) string {
 	spanStart := candidateIndex[0]
 	if prefix := compoundSourceTagPrefixRegex.FindStringSubmatchIndex(remainder[:spanStart]); prefix != nil {
+		spanStart = prefix[2]
+	}
+	if prefix := compoundCodecProfileTagPrefixRegex.FindStringSubmatchIndex(remainder[:candidateIndex[0]]); prefix != nil {
 		spanStart = prefix[2]
 	}
 	return remainder[spanStart:candidateIndex[1]]
@@ -419,10 +490,11 @@ func normalizeFusedRemasterFilename(name string, builtinPattern *regexp.Regexp) 
 	// alternatives; they are tags, not replacement ids, so veto the suppression.
 	for _, candidateIndex := range trailingCatalogIDRegex.FindAllStringIndex(remainder, -1) {
 		candidate := remainder[candidateIndex[0]:candidateIndex[1]]
-		// A compound source tag splits at its separator in the catalog
-		// scan, so the fragment arrives as a standalone candidate while
-		// the source prefix belongs to it: the veto spans the compound
-		// spelling and the vocabulary decides it as a whole.
+		// A compound source tag or codec-profile spelling splits at its
+		// separator in the catalog scan, so the fragment arrives as a
+		// standalone candidate while the prefix belongs to it: the veto
+		// spans the compound spelling and the vocabulary decides it as a
+		// whole.
 		if trailingQualityTagRegex.MatchString(trailingCandidateVetoSpan(remainder, candidateIndex)) {
 			continue
 		}
