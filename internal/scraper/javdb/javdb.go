@@ -314,7 +314,7 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 			doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
 			if err == nil {
 				result, err := s.parseDetailPage(doc, directURL, cleanID)
-				if err == nil && hasDetailMetadata(result, cleanID) {
+				if err == nil && hasDetailMetadata(result, cleanID) && detailIdentityMatchesQuery(result, cleanID) {
 					logging.Debugf("JavDB: Found movie via direct URL: %s", directURL)
 					return result, nil
 				}
@@ -344,6 +344,14 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 	}
 
 	if hasDetailMetadata(result, id) {
+		if !detailIdentityMatchesQuery(result, id) {
+			// The selected detail page publishes another release's identity
+			// than the marker query's — the post-fetch guard the DMM side's
+			// pageDisplayIdentityMatchesQuery performs (see
+			// detailIdentityMatchesQuery): miss honestly instead of returning
+			// that release's metadata.
+			return nil, models.NewScraperNotFoundError("JavDB", fmt.Sprintf("JavDB page for %s publishes a different release", id))
+		}
 		return result, nil
 	}
 
@@ -364,6 +372,11 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 	}
 	if !hasDetailMetadata(retryResult, id) {
 		return nil, fmt.Errorf("JavDB returned non-detail content for %s", detailURL)
+	}
+	if !detailIdentityMatchesQuery(retryResult, id) {
+		// The retried page publishes another release's identity too: the
+		// same post-fetch guard as the primary parse above.
+		return nil, models.NewScraperNotFoundError("JavDB", fmt.Sprintf("JavDB page for %s publishes a different release", id))
 	}
 	return retryResult, nil
 }
@@ -665,6 +678,38 @@ func hasDetailMetadata(result *models.ScraperResult, fallbackID string) bool {
 		return true
 	}
 	return strings.TrimSpace(result.Title) != "" && !idsMatch(result.Title, fallbackID)
+}
+
+// detailIdentityMatchesQuery reports whether the parsed detail result's
+// published ID satisfies the query's remaster identity — the post-fetch
+// guard the DMM side performs on its fetched pages
+// (pageDisplayIdentityMatchesQuery, rounds 16a/18/20a). findDetailURLCtx
+// validates only the ID the SEARCH card showed, so a stale or redirected
+// detail URL can serve another release's page: an RCT-156H query whose
+// selected link serves RCT-156 (the base) or RCT-157-HD (another
+// remaster) must miss honestly instead of returning that release's
+// metadata under the query's identity. The comparison rides the same fold
+// machinery the search-card check uses (foldRemasterMarkerKey /
+// remasterFoldMatchRank): H and HD spell the same remaster (an RCT-156H
+// query accepts a page serving RCT-156-HD), the pinned series/number
+// boundary, E/Z catalog suffix and marker class stay bound, and the
+// variant rung still rejects the base release. The round-42 AI slot
+// exemption rides the same rank function rather than a stricter literal
+// comparison: a raw AI cid query (dv00899ai) accepts the display listing
+// it resolved to (DV-818AI) through the number-free rung, while raw H/HD
+// cids and display queries keep binding the number. Non-marker queries
+// carry no remaster identity to validate and keep the existing behavior,
+// as do results that publish no ID of their own: the page-served fallback
+// spelling (the query itself) ranks exact.
+func detailIdentityMatchesQuery(result *models.ScraperResult, query string) bool {
+	if remasterMarkerSuffix(query) == "" {
+		return true
+	}
+	if result == nil || strings.TrimSpace(result.ID) == "" {
+		return true
+	}
+	rank := remasterFoldMatchRank(result.ID, foldRemasterMarkerKey(query))
+	return rank == idMatchExact || rank == idMatchNormalized
 }
 
 // ParseHTML parses a JavDB detail page from a goquery.Document.
