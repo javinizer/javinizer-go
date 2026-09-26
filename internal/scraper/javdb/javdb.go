@@ -35,6 +35,12 @@ var (
 	votesRegex       = regexp.MustCompile(`([0-9][0-9,]*)`)
 	// URL extraction pattern
 	javdbVideoPathRegex = regexp.MustCompile(`/v/([A-Za-z0-9]+)`)
+
+	// Separator-pinned remaster identity: the series shape a separator-
+	// bearing display id pins in its first segment, and the compact
+	// series/number split whose t28 branch decodes compact spellings.
+	remasterSeriesSegmentRegex = regexp.MustCompile(`^\d*(?:t28|[a-z]+)$`)
+	remasterCompactSplitRegex  = regexp.MustCompile(`^(\d*)(T28|[A-Z]+)(\d+)$`)
 )
 
 // scraper implements the JavDB scraper.
@@ -373,15 +379,23 @@ func (s *scraper) findDetailURLCtx(ctx context.Context, id string) (string, erro
 	// exact/padding-equal identities qualify and the query misses honestly
 	// when the remaster is not among the results.
 	markerQuery := remasterMarkerSuffix(id) != ""
-	// Marker queries compare id + folded marker class rather than raw
-	// normalized strings: JavDB lists the same HD remaster under either
-	// marker spelling (RCT-156H and RCT-156-HD), so HD folds to H —
-	// mirroring the matcher's foldRemasterMarker — while AI stays its own
-	// class. The E/Z catalog suffix letter rides along the fold
-	// (IPX-535-Z-HD and IPX-535ZH fold alike) and stays part of the
-	// compared identity. The base release carries no marker and still
-	// compares unequal; only the marker spelling is bridged.
-	foldedTargetID := foldRemasterMarkerID(targetID)
+	// Marker queries compare the separator-pinned series, number and
+	// folded marker class rather than raw normalized strings: JavDB lists
+	// the same HD remaster under either marker spelling (RCT-156H and
+	// RCT-156-HD), so HD folds to H — mirroring the matcher's
+	// foldRemasterMarker — while AI stays its own class. The E/Z catalog
+	// suffix letter rides along the fold (IPX-535-Z-HD and IPX-535ZH fold
+	// alike) and stays part of the compared identity. The fold key pins
+	// the series/number boundary before punctuation is discarded, as the
+	// DMM/R18 identity code does: T-28123H folds to the key T+28123,
+	// never the T28+123 identity its compact spelling shares with the
+	// distinct T28-123H release, so a search result for that other series
+	// does not rank as a match. The base release carries no marker and
+	// still compares unequal; only the marker spelling is bridged.
+	var foldedTargetKey remasterFoldKey
+	if markerQuery {
+		foldedTargetKey = foldRemasterMarkerKey(id)
+	}
 	var (
 		foundURL  string
 		bestMatch idMatchType
@@ -403,10 +417,13 @@ func (s *scraper) findDetailURLCtx(ctx context.Context, id string) (string, erro
 		for _, c := range candidates {
 			var match idMatchType
 			if markerQuery {
-				// Marker queries compare id + folded marker class: H and
-				// HD both spell the HD remaster, so an HD-labeled listing
-				// matches the folded H query and vice versa.
-				match = idMatchRank(foldRemasterMarkerID(c), foldedTargetID)
+				// Marker queries compare the separator-pinned identity +
+				// folded marker class: H and HD both spell the HD
+				// remaster, so an HD-labeled listing matches the folded
+				// H query and vice versa, while the pinned series and
+				// number keep compaction-equal spellings of different
+				// releases apart.
+				match = remasterFoldMatchRank(c, foldedTargetKey)
 			} else {
 				match = idMatchRank(c, targetID)
 			}
@@ -955,17 +972,167 @@ func takeRemasterMarkerSpelling(rest string) (marker, remaining string, ok bool)
 // IPX535ZH. This lets a marker-carrying query match a candidate whose marker
 // spelling differs only within the H/HD class (RCT-156H vs RCT-156-HD); the
 // base release (no marker) and the suffix-only release (IPX-535Z) still
-// compare unequal.
+// compare unequal. The compact spelling discards punctuation, so the
+// series/number identity it names belongs to remasterFoldKey: ids whose
+// boundary pins (T-28123H vs T28-123H) compare through the pinned key, and
+// this spelling serves the forms whose grammar does not pin.
 func foldRemasterMarkerID(id string) string {
 	normalized := normalizeIDForCompare(id)
 	base, catalogSuffix, marker, ok := splitRemasterMarkerTail(normalized)
 	if !ok {
 		return normalized
 	}
+	return base + catalogSuffix + foldRemasterMarkerClass(marker)
+}
+
+// foldRemasterMarkerClass folds a marker spelling into its comparison
+// class: H and HD both spell the HD remaster, while AI stays its own.
+func foldRemasterMarkerClass(marker string) string {
 	if marker == "AI" {
-		return base + catalogSuffix + "AI"
+		return "AI"
 	}
-	return base + catalogSuffix + "H"
+	return "H"
+}
+
+// remasterFoldKey is a marker query's folded identity: the separator-pinned
+// series and number parsed BEFORE punctuation is discarded, the E/Z catalog
+// suffix that survives the fold, and the folded marker class. pinned is true
+// only when the id's grammar exposes that series/number boundary; compact
+// keeps the round-30 folded spelling the unpinned forms — spellings whose
+// series the segment regexes do not model — still compare under.
+type remasterFoldKey struct {
+	series        string
+	number        string
+	catalogSuffix string
+	marker        string
+	compact       string
+	pinned        bool
+}
+
+// foldRemasterMarkerKey parses a display id's remaster identity with the
+// series/number boundary pinned before punctuation is discarded, as the
+// DMM/R18 identity code does (displayIdentityTuple / r18ParseRemasterTail):
+// a separator-bearing id takes its first separator-delimited segment as the
+// series — T-28123H is T+28123 while T28-123H is T28+123 — and a compact id
+// decodes through the t28-first split, so t28123h reads as the T28 label's
+// T28-123H. The tail grammar is splitRemasterMarkerTail's: the E/Z catalog
+// suffix rides in front of the marker, redundant marker spellings collapse
+// and HD folds into the H class. Ids whose grammar does not pin — no marker
+// tail, or a series/number split the regexes do not model — stay unpinned
+// and compare under the round-30 compact fold.
+func foldRemasterMarkerKey(id string) remasterFoldKey {
+	key := remasterFoldKey{compact: foldRemasterMarkerID(id)}
+	lower := strings.ToLower(strings.TrimSpace(id))
+	// Separator-bearing spellings pin the series boundary that compaction
+	// erases; a remainder the tail grammar cannot read as the bare number
+	// plus marker falls through to the compact split, mirroring DMM.
+	if series, rest, ok := remasterSeparatorSeriesTail(lower); ok {
+		if number, suffix, marker, ok := remasterPinnedNumberTail(rest); ok {
+			key.pin(series, number, suffix, marker)
+			return key
+		}
+	}
+	normalized := normalizeIDForCompare(id)
+	base, suffix, marker, ok := splitRemasterMarkerTail(normalized)
+	if !ok {
+		return key
+	}
+	if m := remasterCompactSplitRegex.FindStringSubmatch(base); m != nil {
+		key.pin(m[1]+m[2], m[3], suffix, marker)
+	}
+	return key
+}
+
+// pin fills the key's pinned identity, folding the marker spelling into its
+// comparison class and uppercasing the separator-pinned series so pinned
+// keys and compact-decoded keys compare alike.
+func (k *remasterFoldKey) pin(series, number, catalogSuffix, marker string) {
+	k.series = strings.ToUpper(series)
+	k.number = number
+	k.catalogSuffix = catalogSuffix
+	k.marker = foldRemasterMarkerClass(marker)
+	k.pinned = true
+}
+
+// remasterSeparatorSeriesTail splits a separator-bearing display id into its
+// series segment and the joined remainder. Separators pin the series
+// boundary that compaction erases — T-28123-HD is series T number 28123,
+// not the T28+123 identity the compact form T28123HD decodes to. ok is
+// false when the id carries no separator or its first segment is not a
+// series shape (FC2-PPV spellings keep the compact comparison).
+func remasterSeparatorSeriesTail(lower string) (series, rest string, ok bool) {
+	if !strings.ContainsAny(lower, "-_. ") {
+		return "", "", false
+	}
+	parts := strings.FieldsFunc(lower, func(r rune) bool {
+		return r == '-' || r == '_' || r == '.' || r == ' '
+	})
+	if len(parts) < 2 || !remasterSeriesSegmentRegex.MatchString(parts[0]) {
+		return "", "", false
+	}
+	return parts[0], strings.Join(parts[1:], ""), true
+}
+
+// remasterPinnedNumberTail splits the separator-pinned remainder into the
+// release number, E/Z catalog suffix and marker spelling through the same
+// tail grammar splitRemasterMarkerTail applies, requiring the base to be
+// the bare release number: a remainder carrying letters of its own
+// (IPX-PPV-535H) does not pin and falls back to the compact comparison.
+func remasterPinnedNumberTail(rest string) (number, catalogSuffix, marker string, ok bool) {
+	base, suffix, spelling, tailOK := splitRemasterMarkerTail(strings.ToUpper(rest))
+	if !tailOK || !allDigits(base) {
+		return "", "", "", false
+	}
+	return base, suffix, spelling, true
+}
+
+// allDigits reports whether s is a nonempty run of ASCII digits.
+func allDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// trimRemasterNumberPadding normalizes a release number's leading zeros for
+// the padding-equal rank — RCT-0156-HD and RCT-156H number the same
+// release — mirroring the DMM identity code's trimDisplayZeros.
+func trimRemasterNumberPadding(number string) string {
+	trimmed := strings.TrimLeft(number, "0")
+	if trimmed == "" {
+		return "0"
+	}
+	return trimmed
+}
+
+// remasterFoldMatchRank ranks a candidate listing id against a marker
+// query's folded key. With both sides pinned, the separator-pinned series,
+// catalog suffix, marker class and number compare directly — exact when
+// the spellings agree, padding-normalized when only the number's leading
+// zeros differ — so T-28123H and T28-123H never cross-match even though
+// their compact spellings coincide. Any unpinned side keeps the round-30
+// compact comparison instead; its variant rung still dies at the caller,
+// where the base release must not stand in for the remaster.
+func remasterFoldMatchRank(candidate string, target remasterFoldKey) idMatchType {
+	c := foldRemasterMarkerKey(candidate)
+	if target.pinned && c.pinned {
+		if c.series != target.series || c.catalogSuffix != target.catalogSuffix || c.marker != target.marker {
+			return idMatchNone
+		}
+		if c.number == target.number {
+			return idMatchExact
+		}
+		if trimRemasterNumberPadding(c.number) == trimRemasterNumberPadding(target.number) {
+			return idMatchNormalized
+		}
+		return idMatchNone
+	}
+	return idMatchRank(c.compact, target.compact)
 }
 
 func normalizeLabel(s string) string {
