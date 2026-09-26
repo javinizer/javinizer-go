@@ -95,8 +95,9 @@ func TestPersistCreditsTxSuccessBranches(t *testing.T) {
 	require.Equal(t, 9, movie.Credits[0].OrderIndex)
 	require.True(t, movie.Credits[1].Suppressed)
 	require.NotZero(t, movie.Credits[2].ActressID)
-	require.Len(t, movie.Actresses, 1)
-	require.Equal(t, verified.ID, movie.Actresses[0].ID)
+	require.Len(t, movie.Actresses, 2)
+	require.Equal(t, movie.Credits[2].ActressID, movie.Actresses[0].ID)
+	require.Equal(t, verified.ID, movie.Actresses[1].ID)
 
 	var refreshed models.MovieCredit
 	require.NoError(t, db.First(&refreshed, movie.Credits[0].ID).Error)

@@ -167,7 +167,7 @@ func (r *MovieRepository) FindAuthoritativeProjections(ctx context.Context, cont
 			if actress, ok := actressesByID[credits[i].ActressID]; ok {
 				identity := actress
 				movie.Credits[i].Actress = &identity
-				if identity.Verified {
+				if identity.Verified || !identity.AmbiguityQuarantined {
 					movie.Actresses = append(movie.Actresses, identity)
 				}
 			}

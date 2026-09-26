@@ -416,7 +416,7 @@ func TestPromoteCandidateMarksCreditingMoviesDirty(t *testing.T) {
 
 	var beforeIDs []uint
 	require.NoError(t, db.Table("movie_actresses").Where("movie_content_id = ?", "abc015").Pluck("actress_id", &beforeIDs).Error)
-	assert.Empty(t, beforeIDs)
+	assert.Equal(t, []uint{actressID}, beforeIDs)
 
 	require.NoError(t, repo.ActressRepo.PromoteCandidate(context.Background(), actressID, "Promote", "Me", "", ""))
 
@@ -618,7 +618,7 @@ func TestPromoteCandidateRollsBackProjectionRestoreFailure(t *testing.T) {
 		assert.False(t, candidate.Verified)
 		var actressIDs []uint
 		require.NoError(t, db.Table("movie_actresses").Where("movie_content_id = ?", movie.ContentID).Pluck("actress_id", &actressIDs).Error)
-		assert.Empty(t, actressIDs)
+		assert.Equal(t, []uint{actressID}, actressIDs)
 	})
 }
 
@@ -698,4 +698,22 @@ func TestDeleteStaleCandidatesKeepsReferenced(t *testing.T) {
 	assert.NoError(t, err, "candidate with credits must not be pruned")
 	_, err = repo.ActressRepo.FindByID(context.Background(), reassignmentSource.ID)
 	assert.NoError(t, err, "candidate referenced by a reassignment must not be pruned")
+}
+func TestMovieUpsertProjectsUnquarantinedScrapeCandidates(t *testing.T) {
+	db := newCreditTestDB(t)
+	repo := db.Repositories()
+	movie := creditMovie("candidate-projection", []models.MovieCredit{
+		{CreditedName: "Tachibana Yui", CreditedJapaneseName: "立花結衣", Scraped: models.Actress{DMMID: 940001, FirstName: "Yui", LastName: "Tachibana", JapaneseName: "立花結衣"}},
+		{CreditedName: "Sena Ryo", CreditedJapaneseName: "瀬奈涼", Scraped: models.Actress{DMMID: 940002, FirstName: "Ryo", LastName: "Sena", JapaneseName: "瀬奈涼"}},
+	})
+	saved, err := repo.MovieRepo.UpsertWithTranslations(context.Background(), movie, nil, nil)
+	require.NoError(t, err)
+	require.Len(t, saved.Actresses, 2)
+	for _, actress := range saved.Actresses {
+		require.False(t, actress.Verified)
+		require.False(t, actress.AmbiguityQuarantined)
+	}
+	var joinIDs []uint
+	require.NoError(t, db.Table("movie_actresses").Where("movie_content_id = ?", "candidate-projection").Pluck("actress_id", &joinIDs).Error)
+	require.Len(t, joinIDs, 2)
 }

@@ -36,7 +36,7 @@ func TestPR260ConfiguredCreditNameRealOutputs(t *testing.T) {
 		{label: "forced canonical", credited: true, forced: true, expected: "Canonical Identity"},
 		{label: "forced canonical explicit override", credited: true, forced: true, override: "Pinned Identity", expected: "Pinned Identity"},
 		{label: "canonical rename after reload", rename: true, expected: "Renamed Identity"},
-		{label: "suppressed and candidate excluded", credited: true, suppressed: true, expected: "Reported Identity"},
+		{label: "suppressed credits excluded", credited: true, suppressed: true, expected: "Reported Identity"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.label, func(t *testing.T) {
@@ -51,7 +51,7 @@ func TestPR260ConfiguredCreditNameRealOutputs(t *testing.T) {
 			if tc.suppressed {
 				excluded := models.Actress{FirstName: "Candidate", LastName: "Identity", Verified: false, Origin: "scrape"}
 				require.NoError(t, db.Create(&excluded).Error)
-				require.NoError(t, db.Create(&models.MovieCredit{MovieContentID: movie.ContentID, ActressID: excluded.ID, CreditedName: "Candidate Identity", Origin: "scrape"}).Error)
+				require.NoError(t, db.Create(&models.MovieCredit{MovieContentID: movie.ContentID, ActressID: excluded.ID, CreditedName: "Candidate Identity", Suppressed: true, Origin: "scrape"}).Error)
 				suppressed := models.Actress{FirstName: "Suppressed", LastName: "Identity", Verified: true, Origin: "user"}
 				require.NoError(t, db.Create(&suppressed).Error)
 				require.NoError(t, db.Create(&models.MovieCredit{MovieContentID: movie.ContentID, ActressID: suppressed.ID, CreditedName: "Suppressed Identity", Suppressed: true, Origin: "user"}).Error)

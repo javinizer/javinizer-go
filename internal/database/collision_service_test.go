@@ -437,7 +437,11 @@ func TestCollisionServiceSuppressionRestoreReconcilesRescrapedEvidence(t *testin
 
 func TestCollisionServiceCandidateSuppressionRestoreKeepsProjectionQuarantined(t *testing.T) {
 	db := newCreditTestDB(t)
-	candidate := models.Actress{FirstName: "Candidate", LastName: "Restore", Origin: ActressOriginScrape}
+	for _, lastName := range []string{"One", "Two"} {
+		verified := models.Actress{FirstName: "Candidate", LastName: lastName, JapaneseName: "同名女優", Verified: true, Origin: ActressOriginUser}
+		require.NoError(t, db.Create(&verified).Error)
+	}
+	candidate := models.Actress{DMMID: 992011, JapaneseName: "同名女優", Origin: ActressOriginScrape}
 	require.NoError(t, db.Create(&candidate).Error)
 	movie := models.Movie{ContentID: "candidate-suppression-restore", ID: "candidate-suppression-restore"}
 	require.NoError(t, db.Create(&movie).Error)
@@ -766,4 +770,35 @@ func TestCollisionServiceCancelledContext(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 	require.ErrorIs(t, service.UpdateCreditOverride(ctx, credit.ID, "x", true), context.Canceled)
 	require.ErrorIs(t, service.SetCreditSuppressed(ctx, credit.ID, true), context.Canceled)
+}
+func TestUnsuppressedUnquarantinedCandidateRestoresCastJoin(t *testing.T) {
+	db := newCreditTestDB(t)
+	repos := db.Repositories()
+	movie := creditMovie("unsuppress-candidate-join", []models.MovieCredit{{
+		CreditedName:         "舞台名",
+		CreditedJapaneseName: "舞台名",
+		Scraped:              models.Actress{DMMID: 991010, JapaneseName: "舞台名"},
+	}})
+	saved, err := repos.MovieRepo.UpsertWithTranslations(context.Background(), movie, nil, nil)
+	require.NoError(t, err)
+	creditID := saved.Credits[0].ID
+	candidateID := saved.Credits[0].ActressID
+	joinIDs := func() []uint {
+		var ids []uint
+		require.NoError(t, db.Table("movie_actresses").Where("movie_content_id = ?", movie.ContentID).Pluck("actress_id", &ids).Error)
+		return ids
+	}
+	require.Equal(t, []uint{candidateID}, joinIDs())
+
+	service := NewCollisionService(db)
+	require.NoError(t, service.SetCreditSuppressed(context.Background(), creditID, true))
+	require.Empty(t, joinIDs())
+
+	require.NoError(t, service.SetCreditSuppressed(context.Background(), creditID, false))
+	require.Equal(t, []uint{candidateID}, joinIDs())
+
+	var candidate models.Actress
+	require.NoError(t, db.First(&candidate, candidateID).Error)
+	require.False(t, candidate.Verified)
+	require.False(t, candidate.AmbiguityQuarantined)
 }
