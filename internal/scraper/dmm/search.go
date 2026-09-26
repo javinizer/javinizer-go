@@ -287,11 +287,16 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 
 	foldedMarker, _, _, isCID := classifyRemasterQuery(id)
 	res, err := s.parseHTMLWithOptions(ctx, doc, url, foldedMarker != "")
-	if err == nil && isCID && foldedMarker == "h" && rawHCIDPageConflict(doc, url) {
-		// The raw-H counterpart of the page-identity guard below: DMM
-		// followed a redirect or served a different product for the echoed
-		// cid (see rawHCIDPageConflict), so miss honestly instead of
-		// returning its metadata under the cid-derived identity.
+	if err == nil && isCID && foldedMarker != "" && rawRemasterCIDPageConflict(doc, url) {
+		// The raw-query counterpart of the page-identity guard below, for
+		// H/HD and AI cids alike: DMM followed a redirect or served a
+		// different product for the echoed cid (see
+		// rawRemasterCIDPageConflict), so miss honestly instead of
+		// returning its metadata under the cid-derived identity. The AI leg
+		// is number-free — AI cid numbers diverge from the display number
+		// by design, so only the series, marker and catalog suffix
+		// comparison, plus the markerless base-release row, can prove the
+		// foreign page.
 		return nil, models.NewScraperNotFoundError("DMM", fmt.Sprintf("DMM page for %s publishes a different release", id))
 	}
 	if err == nil && foldedMarker != "" && !isCID {
@@ -370,25 +375,29 @@ func pageDisplayIdentityMatchesQuery(doc *goquery.Document, query string) bool {
 	return pSeries == qSeries && pNumber == qNumber && pSuffix == qSuffix && pMarker == qMarker
 }
 
-// rawHCIDPageConflict reports whether the page fetched for a raw H/HD
-// content-id query (1rct00156h) publishes another release's identity. The
-// query echoes itself as the resolved cid, so the page is expected to
-// publish that cid's release; a 品番 that numbers another release
-// (RCT-157-HD under a 156 cid), names a foreign series or marker line, or is
-// markerless and so names the base release means DMM followed a redirect or
-// served a different product — the same conflicts parseHTML's ScrapeURL-side
-// gate (pageDisplayIdentityForCID, rounds 17/18/20a) rejects for the same
-// URL. Raw AI queries are deliberately number-free — their cid numbers
-// diverge from the display number by design (dv00899ai maps to DV-818AI),
-// so their pages keep the existing page-outranks semantics — and pages
-// without a parseable 品番 publish nothing authoritative to conflict with.
-func rawHCIDPageConflict(doc *goquery.Document, url string) bool {
+// rawRemasterCIDPageConflict reports whether the page fetched for a raw
+// marker-bearing content-id query (1rct00156h, dv00899ai) publishes another
+// release's identity. The query echoes itself as the resolved cid, so the
+// page is expected to publish that cid's release; a 品番 that numbers
+// another release (RCT-157-HD under a 156 cid), names a foreign series or
+// marker line, or is markerless and so names the base release means DMM
+// followed a redirect or served a different product — the same conflicts
+// parseHTML's ScrapeURL-side gate (pageDisplayIdentityForCID, rounds
+// 17/18/20a) rejects for the same URL. Raw AI queries take the gate
+// number-free (rounds 25b/26): their cid numbers diverge from the display
+// number by design (dv00899ai maps to DV-818AI), so a same-series 品番
+// numbering a different release is still adopted — the page-outranks
+// semantics TestSearchRawAICIDPageOutranksKept pins — and only the series,
+// marker and catalog suffix comparison, plus the markerless base-release
+// row, can prove the foreign page. Pages without a parseable 品番 publish
+// nothing authoritative to conflict with.
+func rawRemasterCIDPageConflict(doc *goquery.Document, url string) bool {
 	cid := extractContentIDFromURL(url)
 	if cid == "" {
 		return false
 	}
 	cidMarker, cidSeries, cidSuffix, _ := classifyRemasterQuery(cid)
-	if cidMarker != "h" {
+	if cidMarker == "" {
 		return false
 	}
 	_, conflict := pageDisplayIdentityForCID(doc, cid, cidSeries, cidMarker, cidSuffix)

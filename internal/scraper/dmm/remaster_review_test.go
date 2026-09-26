@@ -17,10 +17,14 @@ func TestRemasterWidePrefixContentID(t *testing.T) {
 			require.NotEmpty(t, marker)
 			assert.Equal(t, "abc", series)
 			require.True(t, raw)
+			// The page must publish the queried marker line: a marker-swapped
+			// 品番 under the AI cid is another product's page, which the raw
+			// page gate (F1) rejects like ScrapeURL's parseHTML gate does.
+			pinzan := "ABC-123" + strings.ToUpper(marker)
 			s, _ := newRemasterTestScraper(t)
 			rt := &remasterRoundTripper{serve: func(u string) (int, string) {
 				if strings.Contains(u, "cid="+cid) {
-					return 200, `<html><h1 id="title" class="item">Remaster</h1><table><tr><td>品番：</td><td>ABC-123H</td></tr></table></html>`
+					return 200, `<html><h1 id="title" class="item">Remaster</h1><table><tr><td>品番：</td><td>` + pinzan + `</td></tr></table></html>`
 				}
 				return 404, ""
 			}}
