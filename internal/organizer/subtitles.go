@@ -223,12 +223,28 @@ func (sh *subtitleHandler) extractLanguageCode(subtitleName, videoNameWithoutExt
 // from the subtitle stem and normalizes the remainder into a language name:
 // "" when the subtitle carries nothing beyond the stem or is not prefixed
 // by it at all, and otherwise the language the suffix spells —
-// languageAfterVideoStem("IPX-535.eng", "IPX-535") -> "english".
+// languageAfterVideoStem("IPX-535.eng", "IPX-535") -> "english". The
+// suffix is folded to its ASCII spelling along the way, so a fullwidth
+// spelling of the same tag extracts the same language:
+// languageAfterVideoStem("ＲＣＴ－１５６－ＨＤ．ｅｎｇ", "ＲＣＴ－１５６－ＨＤ")
+// -> "english" too.
 func languageAfterVideoStem(subtitleStem, videoStem string) string {
 	// Remove the video name prefix to get the language part (case-insensitive)
 	if len(subtitleStem) >= len(videoStem) &&
 		strings.EqualFold(subtitleStem[:len(videoStem)], videoStem) {
 		remaining := subtitleStem[len(videoStem):]
+
+		// Fold the suffix before the separator strip: a fully fullwidth
+		// sidecar (ＲＣＴ－１５６－ＨＤ．ｅｎｇ．ｓｒｔ) strips to the suffix
+		// ．ｅｎｇ, which is nonempty — so extractLanguageCode's raw early
+		// return fired before the round-37 folded retry could map it, and
+		// the fullwidth spelling leaked into the destination
+		// (RCT-156.．ｅｎｇ.srt). Folding first turns ．ｅｎｇ into .eng, which
+		// the separator strip and the code table below recognize as
+		// english. The language field is classification data that names the
+		// destination, so it is carried folded (round-30 contract: folded
+		// for classification); ASCII-only input is returned unchanged.
+		remaining = foldFullwidthASCII(remaining)
 
 		// Remove leading dots, dashes, or underscores
 		remaining = strings.TrimLeft(remaining, "._-")
