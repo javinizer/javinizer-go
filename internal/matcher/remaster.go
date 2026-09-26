@@ -336,7 +336,33 @@ var (
 	// (189dts00087) spellings never match, and the digit-bearing
 	// ac3/eac3 compounds cannot collide with a lookup series at all
 	// because content-id series are letter-runs.
-	trailingQualityTagRegex = regexp.MustCompile(`(?i)\b(?:[hx]26[3-9](?:(?:8|10|12)bit)?|hi(?:10p?|444(?:pp)?)|avc\d*|aac\d*|hevc\d*|vvc\d*|ac3|dts|flac|opus|truehd|vc1|av1|mp[34]|ddp\d*|eac3|divx\d*|xvid\d*|prores\d*|yuv\d*|rgb\d*|p0(?:10|16)|mpeg\d*|vp\d+|fhd\d{2,4}|uhd\d{2,4}|hdtv|hdr\d*|bt2020|bt709|rec709|smpte\d+|pq\d+|st2084|hlg\d*|ycbcr\d*|(?:bt|rec|st|smpte)[. ]?\d{3,4}|(?:l?pcm|dts|flac|opus|e?ac3|truehd)[. ]?\d{3,4}|\d+(?:bit|point)\d+|(?:web(?:[-_. ]?(?:dl(?:rip)?|rip))?|remux|bluray|(?:bd|br|dvd)[-_. ]?rip)\d{3,4}|` + `(?:` + codecProfileHeadAlternation + `)[-_. ](?:` + codecProfileWordAlternation + `)(?:[-_. ]?(?:` + codecProfileWordAlternation + `))*\d{3,4}|(?:` + fusedCodecProfileHeadAlternation + `)(?:` + codecProfileWordAlternation + `)+\d{3,4})\b`)
+	// The fhd/uhd resolution heads accept the progressive/interlaced
+	// suffix — an optional P or I directly behind the 2-4 digit
+	// resolution number (FHD1080P, UHD2160P, FHD1080I) — because the
+	// bare alternatives stop at the word boundary before the suffix
+	// letter: the suffixed token is a letter-run plus 4-5 digits plus a
+	// single letter, exactly the content-id shape, so it satisfies the
+	// content-id tier and the trailing catalog grammar as a replacement
+	// catalog id behind a separated remaster id, on both entry points.
+	// The suffix stays the single letter the scan spellings carry, so
+	// the fps-bearing (FHD1080P60) and longer (FHD1080PQ) tails fail
+	// the trailing word boundary and keep id grammar, and the bare
+	// 720P/1080P forms stay with the resolution-tail and framerate
+	// token families — this covers the fused head+number+suffix
+	// spelling only. The hd head is deliberately absent: hd is a real
+	// series in the r18.dev content-id prefix lookup and the round-12
+	// decision keeps its bare resolution spellings (HD1080, HD1080P)
+	// in catalog-id grammar, so only the fhd/uhd heads — already
+	// metadata vocabulary per prior rounds — extend. No real id shape
+	// is displaced: the lookup's series keys are letter-runs (no
+	// fhd1080p or uhd2160p series exists), the fhd series' raw ids are
+	// numerically prefixed (15fhd00119) or five-digit zero-padded
+	// (fhd00119) spellings that never offer the fused 2-4-digit-plus-
+	// suffix shape — its three-digit-padded sibling (fhd015) already
+	// rides the bare vocabulary's prior-round decision — and no
+	// content id ends in P or I behind digits, since the marker tails
+	// real ids carry are hd/ai/h.
+	trailingQualityTagRegex = regexp.MustCompile(`(?i)\b(?:[hx]26[3-9](?:(?:8|10|12)bit)?|hi(?:10p?|444(?:pp)?)|avc\d*|aac\d*|hevc\d*|vvc\d*|ac3|dts|flac|opus|truehd|vc1|av1|mp[34]|ddp\d*|eac3|divx\d*|xvid\d*|prores\d*|yuv\d*|rgb\d*|p0(?:10|16)|mpeg\d*|vp\d+|fhd\d{2,4}[pi]?|uhd\d{2,4}[pi]?|hdtv|hdr\d*|bt2020|bt709|rec709|smpte\d+|pq\d+|st2084|hlg\d*|ycbcr\d*|(?:bt|rec|st|smpte)[. ]?\d{3,4}|(?:l?pcm|dts|flac|opus|e?ac3|truehd)[. ]?\d{3,4}|\d+(?:bit|point)\d+|(?:web(?:[-_. ]?(?:dl(?:rip)?|rip))?|remux|bluray|(?:bd|br|dvd)[-_. ]?rip)\d{3,4}|` + `(?:` + codecProfileHeadAlternation + `)[-_. ](?:` + codecProfileWordAlternation + `)(?:[-_. ]?(?:` + codecProfileWordAlternation + `))*\d{3,4}|(?:` + fusedCodecProfileHeadAlternation + `)(?:` + codecProfileWordAlternation + `)+\d{3,4})\b`)
 	// compoundSourceTagPrefixRegex recognizes the source-tag prefix —
 	// web, bd, br, or dvd plus exactly one separator — ending where a
 	// trailing-catalog candidate begins, so the candidate's quality veto
