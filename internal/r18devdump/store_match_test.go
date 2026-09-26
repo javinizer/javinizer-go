@@ -99,6 +99,44 @@ func TestT28PinnedDVDNormCollisionSelectsMatchingRows(t *testing.T) {
 	}
 }
 
+// The finding's end-to-end scenario: a separator-pinned remaster query whose
+// dump row exists only under a catalog-prefixed content id (null dvd_id) must
+// resolve through candidate expansion. Pre-fix, T-28123-Z-HD collapsed to the
+// t28-series candidate set and the 55t28123zh row was never probed.
+func TestMatchByDisplayID_SeparatedEZSuffixResolvesCatalogPrefixedTSeriesRow(t *testing.T) {
+	store, err := Open(seedDump(t, "55t28123zh\t\\N"))
+	require.NoError(t, err)
+	defer store.Close()
+
+	matches, err := store.MatchByDisplayID(context.Background(), "T-28123-Z-HD")
+	require.NoError(t, err)
+	require.Len(t, matches, 1)
+	assert.Equal(t, "55t28123zh", matches[0].ContentID)
+}
+
+// Both releases normalize to the same dvd_id_norm key, so candidate priority
+// must pick the row the display spelling pinned: the T-28123-Z-HD query takes
+// the T-series row, not the T28-123-Z-HD release sharing its compacted shape.
+func TestMatchByDisplayID_SeparatedEZSuffixCollisionSelectsPinnedRow(t *testing.T) {
+	fixture := "55t28123zh\tT-28123-Z-HD\t\\N\t\\N\n" +
+		"9t28123zh\tT28-123-Z-HD\t\\N\t\\N"
+	store, err := Open(seedDumpFullCols(t, fixture))
+	require.NoError(t, err)
+	defer store.Close()
+
+	matches, err := store.MatchByDisplayID(context.Background(), "T-28123-Z-HD")
+	require.NoError(t, err)
+	require.Len(t, matches, 1)
+	assert.Equal(t, "55t28123zh", matches[0].ContentID)
+	assert.Equal(t, "T-28123-Z-HD", matches[0].DVDID)
+
+	matches, err = store.MatchByDisplayID(context.Background(), "T28-123-Z-HD")
+	require.NoError(t, err)
+	require.Len(t, matches, 1)
+	assert.Equal(t, "9t28123zh", matches[0].ContentID)
+	assert.Equal(t, "T28-123-Z-HD", matches[0].DVDID)
+}
+
 func TestMatchByDisplayID_DirectContentIDInputExpandsToo(t *testing.T) {
 	store, err := Open(seedDumpFullCols(t, matchFixture))
 	require.NoError(t, err)

@@ -120,15 +120,37 @@ func expandCandidates(direct, series, numStr string, markerAware bool) []string 
 	return variations
 }
 
+// appendUniqueCandidates appends the extra candidates that base does not
+// already carry, preserving first-seen order so the leading set keeps its
+// priority.
+func appendUniqueCandidates(base, extra []string) []string {
+	seen := make(map[string]bool, len(base)+len(extra))
+	for _, c := range base {
+		seen[c] = true
+	}
+	for _, c := range extra {
+		if !seen[c] {
+			seen[c] = true
+			base = append(base, c)
+		}
+	}
+	return base
+}
+
 var t28RemasterBaseRegex = regexp.MustCompile(`(?i)^t28(\d+)$`)
 
 var remasterMarkerTailRgx = regexp.MustCompile(`(?i)^(.*\d)([ez]?)(hd|ai|h)$`)
 
 // tDisplayRemasterRegex captures a separator-pinned display spelling of the
-// form <series><sep><digits><marker>: the separator pins the series boundary
-// ("t-28123-hd" => series t, number 28123), which the compacted candidate
-// shape would otherwise collapse into t28/123.
-var tDisplayRemasterRegex = regexp.MustCompile(`^(.*?)[-_.\s](\d+)[ez]?[-_.\s]*(?:hd|ai|h)$`)
+// form <series><sep><digits>[<sep>E/Z]<marker>: the separator pins the series
+// boundary ("t-28123-hd" => series t, number 28123), which the compacted
+// candidate shape would otherwise collapse into t28/123. The optional E/Z
+// catalog suffix accepts a separator on BOTH sides (the matcher's round-29a
+// convention), so "t-28123-z-hd" pins the same t/28123 boundary the glued
+// "t-28123z-hd" spelling does. Group 3 captures the suffix together with any
+// leading separators, so its length distinguishes the separated ("-z") from
+// the glued ("z") spelling.
+var tDisplayRemasterRegex = regexp.MustCompile(`^(.*?)[-_.\s](\d+)([-_.\s]*[ez])?[-_.\s]*(?:hd|ai|h)$`)
 
 // ContentIDCandidatesWithMarker is ContentIDCandidates for marker-bearing
 // inputs: the trailing H/HD/AI marker is split off, base candidates are built
@@ -168,6 +190,17 @@ func ContentIDCandidatesWithMarker(id string) []string {
 		// are generated instead of the t28-series set.
 		if ts := tDisplayRemasterRegex.FindStringSubmatch(trimmedLower); ts != nil {
 			base = expandCandidates(m[1], ts[1], ts[2], true)
+			// A separated E/Z suffix (T-28123-Z-HD) is the one spelling the
+			// pinned grammar above used to miss, so the compact t28 reading of
+			// the same compacted shape (t28123zh -> 9t2800123zh) was the only
+			// candidate set the query produced. When the compacted base
+			// re-parses as a t28 series the display did not pin, keep that
+			// probe set alongside the pinned candidates — dump rows reached
+			// through the compact reading still resolve, while the pinned
+			// T-series boundary now leads the list.
+			if len(ts[3]) > 1 && ts[1] != "t28" && t28RemasterBaseRegex.MatchString(m[1]) {
+				base = appendUniqueCandidates(base, contentIDCandidates(m[1], true))
+			}
 		}
 	}
 	if base == nil {
