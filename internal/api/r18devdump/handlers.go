@@ -38,6 +38,7 @@ type dumpHandler struct {
 	running             bool
 	lastError           string // last download outcome; non-empty when the most recent run failed
 	httpClient          *http.Client
+	stallTimeout        time.Duration // stall watchdog timeout; zero falls back to dumpStallTimeout (tests override)
 	reloadFn            func(cfg *config.Config, lockHeld bool) error
 	removeFn            func(string) error
 	broadcastProgressFn func(phase string, bytes, total int64)
@@ -45,7 +46,7 @@ type dumpHandler struct {
 }
 
 func newDumpHandler(rt *core.APIRuntime) *dumpHandler {
-	h := &dumpHandler{rt: rt, httpClient: &http.Client{}, removeFn: os.Remove}
+	h := &dumpHandler{rt: rt, httpClient: &http.Client{}, stallTimeout: dumpStallTimeout, removeFn: os.Remove}
 	h.reloadFn = func(cfg *config.Config, lockHeld bool) error {
 		if lockHeld {
 			return h.rt.ReloadConfigLocked(cfg)
@@ -168,10 +169,19 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 
 	cfg := h.rt.Deps().CoreDeps.GetConfig()
 	path := resolveDumpPath(cfg)
-	// Use a detached context with a generous timeout so the download goroutine
-	// survives the HTTP response being sent (202). The request context is
-	// cancelled when the handler returns, which would abort the download.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	// Use a detached context without a wall-clock deadline so the download
+	// goroutine survives the HTTP response being sent (202) and slow-but-healthy
+	// transfers run to completion. The stall watchdog (below) is the failure
+	// signal instead: it cancels the context only when no bytes arrive for
+	// stallTimeout. A fixed deadline would abort a slow download mid-import and
+	// roll back all progress (single transaction) with an opaque error.
+	ctx, cancel := context.WithCancel(context.Background())
+
+	stallTimeout := h.stallTimeout
+	if stallTimeout <= 0 {
+		stallTimeout = dumpStallTimeout
+	}
+	watchdog := newStallWatchdog(stallTimeout)
 
 	// For update-only, check the current source URL so the download skips if
 	// the version is unchanged.
@@ -194,6 +204,7 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 		progressSeen   bool
 	)
 	progress := func(bytes, total int64) {
+		watchdog.Ping()
 		progressMu.Lock()
 		now := time.Now()
 		if progressSeen && now.Sub(lastProgressAt) < 500*time.Millisecond {
@@ -218,6 +229,11 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 	go func() {
 		defer cancel()
 		defer close(done)
+		defer watchdog.Stop()
+		go watchdog.run(ctx, func() {
+			logging.Warnf("r18dev dump download stalled: no data received for %s, aborting", stallTimeout)
+			cancel()
+		})
 		var succeeded bool
 		var failErr error
 		defer func() {
@@ -249,7 +265,13 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 			streamConsumed := make(chan struct{})
 			go h.runImportHeartbeat(streamConsumed, importDone, importHeartbeatInterval)
 			defer close(importDone)
-			r = &eofDetectReader{r: r, onEOF: sync.OnceFunc(func() { close(streamConsumed) })}
+			r = &eofDetectReader{r: r, onEOF: sync.OnceFunc(func() {
+				// Stream fully consumed: only local disk work remains (final
+				// batches, meta, commit, WAL checkpoint), which must never be
+				// aborted by the stall watchdog.
+				watchdog.Stop()
+				close(streamConsumed)
+			})}
 			var unlockReload func()
 			impRes, importErr := r18devdump.Import(ctx, r, path, r18devdump.ImportOptions{
 				SourceURL:  d.FinalURL,
@@ -285,6 +307,9 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 			return nil
 		})
 		if err != nil {
+			if watchdog.Fired() {
+				err = fmt.Errorf("download stalled (no data received for %s): %w", stallTimeout, err)
+			}
 			logging.Warnf("r18dev dump download failed: %v", err)
 			failErr = err
 			// Clean up only temp files — the existing dump (if any) is still
