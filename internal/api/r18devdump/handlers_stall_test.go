@@ -111,12 +111,14 @@ func TestStartDownload_SlowButSteadySucceeds(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	// 10 lines x 60ms ~= 600ms total, 4x the stall timeout: proves no
-	// wall-clock cutoff, while 60ms gaps keep the watchdog fed.
+	// 10 lines x 60ms ~= 600ms total, >2x the stall timeout: proves no
+	// wall-clock cutoff, while 60ms gaps keep the watchdog fed. The stall
+	// timeout stays comfortably above the pre-import local setup window
+	// (schema creation etc.) even on heavily loaded Windows CI runners.
 	h, dumpPath, _ := newTestHandlerWithHub(t)
 	h.httpClient = srv.Client()
 	h.reloadFn = func(_ *config.Config, _ bool) error { return nil }
-	h.stallTimeout = 150 * time.Millisecond
+	h.stallTimeout = 250 * time.Millisecond
 
 	orig := r18devdump.LatestDumpURL
 	r18devdump.LatestDumpURL = srv.URL + "/dump.sql.gz"

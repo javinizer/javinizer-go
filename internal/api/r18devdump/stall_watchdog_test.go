@@ -78,6 +78,21 @@ func TestStallWatchdog_ContextCancel(t *testing.T) {
 	assert.False(t, w.Fired())
 }
 
+func TestStallWatchdog_SubTickTimeoutClamp(t *testing.T) {
+	// A timeout of a few nanoseconds divides to a non-positive tick interval;
+	// the clamp must kick in and the watchdog must still fire normally.
+	w := newStallWatchdog(time.Nanosecond)
+	fired := make(chan struct{})
+	go w.run(context.Background(), func() { close(fired) })
+
+	select {
+	case <-fired:
+	case <-time.After(2 * time.Second):
+		t.Fatal("clamped watchdog should still fire")
+	}
+	assert.True(t, w.Fired())
+}
+
 func TestStallWatchdog_StopDisarmsImmediatelyBeforeDeadline(t *testing.T) {
 	w := newStallWatchdog(50 * time.Millisecond)
 	fired := make(chan struct{})

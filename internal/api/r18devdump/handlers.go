@@ -252,6 +252,11 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 			}
 		}()
 		res, err := r18devdump.Download(ctx, client, currentSourceURL, progress, func(r io.Reader, d r18devdump.DownloadResult) error {
+			// Response headers arrived: record activity. Import runs its local
+			// setup (DB open, schema, BeginTx) before reading the first body
+			// byte, so without this ping a slow pre-import window reads as a
+			// stall even though the network is alive.
+			watchdog.Ping()
 			// The download streams the response body through gzip into Import,
 			// so the download progress callback and the SQL import run
 			// concurrently: Import pulls compressed bytes through the
