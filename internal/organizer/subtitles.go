@@ -116,15 +116,8 @@ func (sh *subtitleHandler) FindSubtitles(videoFile models.FileMatchInfo) []subti
 		// (e.g., "IPX-535.mp4" should not match "IPX-535-trailer.srt")
 		// Use case-insensitive matching for Windows compatibility
 		subtitleNameWithoutExt := strings.TrimSuffix(subtitleName, filepath.Ext(subtitleName))
-		base := strings.ToLower(videoNameWithoutExt)
-		cand := strings.ToLower(subtitleNameWithoutExt)
 
-		// Exact match or has separator (., -, _) after base name
-		isMatch := cand == base ||
-			(strings.HasPrefix(cand, base) && len(cand) > len(base) &&
-				strings.ContainsRune("._-", rune(cand[len(base)])))
-
-		if !isMatch {
+		if !subtitleStemAssociates(subtitleNameWithoutExt, videoNameWithoutExt) {
 			continue
 		}
 
@@ -139,6 +132,39 @@ func (sh *subtitleHandler) FindSubtitles(videoFile models.FileMatchInfo) []subti
 	}
 
 	return matches
+}
+
+// subtitleStemAssociates reports whether a subtitle stem associates with the
+// video stem in either of its two spellings. The raw comparison runs first
+// so fullwidth-written subtitles beside fullwidth-written videos keep
+// matching exactly where they did before folding existed; the folded
+// comparison runs as well because Name deliberately retains the raw
+// fullwidth stem while the scanner admits fullwidth spellings (round-30/32
+// contract: Name folds only the extension; Path stays fully raw) — an ASCII
+// subtitle beside a fullwidth video (ＲＣＴ－１５６－ＨＤ．ｍｋｖ +
+// RCT-156-HD.srt) associates through the folded spelling, mirroring the
+// dual-form matching the scanner applies to filters (internal/scanner
+// scanner.go filterMatchesName).
+func subtitleStemAssociates(subtitleStem, videoStem string) bool {
+	cand, base := strings.ToLower(subtitleStem), strings.ToLower(videoStem)
+	if subtitleStemMatches(cand, base) {
+		return true
+	}
+	foldedCand := strings.ToLower(foldFullwidthASCII(subtitleStem))
+	foldedBase := strings.ToLower(foldFullwidthASCII(videoStem))
+	if foldedCand == cand && foldedBase == base {
+		return false // nothing folded — the raw attempt already covered it
+	}
+	return subtitleStemMatches(foldedCand, foldedBase)
+}
+
+// subtitleStemMatches reports whether the (already lowercased) candidate
+// stem is the video stem itself or extends it with a separator (., -, _):
+// "ipx-535" matches "ipx-535" and "ipx-535.en" but not "ipx-535trailer".
+func subtitleStemMatches(cand, base string) bool {
+	return cand == base ||
+		(strings.HasPrefix(cand, base) && len(cand) > len(base) &&
+			strings.ContainsRune("._-", rune(cand[len(base)])))
 }
 
 // isSubtitleFile checks if a filename has a subtitle extension
@@ -157,10 +183,33 @@ func (sh *subtitleHandler) isSubtitleFile(filename string) bool {
 func (sh *subtitleHandler) extractLanguageCode(subtitleName, videoNameWithoutExt string) string {
 	subtitleNameWithoutExt := strings.TrimSuffix(subtitleName, filepath.Ext(subtitleName))
 
+	// The raw prefix strip runs first so fullwidth-written subtitles beside
+	// fullwidth-written videos keep extracting language exactly where they
+	// did before folding existed; the folded strip then covers the mixed
+	// spellings the dual-form association admits (an ASCII subtitle beside
+	// a fullwidth video), mirroring the raw-then-folded order of
+	// subtitleStemAssociates.
+	if lang := languageAfterVideoStem(subtitleNameWithoutExt, videoNameWithoutExt); lang != "" {
+		return lang
+	}
+	foldedSubtitle := foldFullwidthASCII(subtitleNameWithoutExt)
+	foldedVideo := foldFullwidthASCII(videoNameWithoutExt)
+	if foldedSubtitle == subtitleNameWithoutExt && foldedVideo == videoNameWithoutExt {
+		return "" // No language code detected
+	}
+	return languageAfterVideoStem(foldedSubtitle, foldedVideo)
+}
+
+// languageAfterVideoStem strips the video stem prefix (case-insensitively)
+// from the subtitle stem and normalizes the remainder into a language name:
+// "" when the subtitle carries nothing beyond the stem or is not prefixed
+// by it at all, and otherwise the language the suffix spells —
+// languageAfterVideoStem("IPX-535.eng", "IPX-535") -> "english".
+func languageAfterVideoStem(subtitleStem, videoStem string) string {
 	// Remove the video name prefix to get the language part (case-insensitive)
-	if len(subtitleNameWithoutExt) >= len(videoNameWithoutExt) &&
-		strings.EqualFold(subtitleNameWithoutExt[:len(videoNameWithoutExt)], videoNameWithoutExt) {
-		remaining := subtitleNameWithoutExt[len(videoNameWithoutExt):]
+	if len(subtitleStem) >= len(videoStem) &&
+		strings.EqualFold(subtitleStem[:len(videoStem)], videoStem) {
+		remaining := subtitleStem[len(videoStem):]
 
 		// Remove leading dots, dashes, or underscores
 		remaining = strings.TrimLeft(remaining, "._-")
