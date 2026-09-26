@@ -80,8 +80,10 @@ func (sh *subtitleHandler) FindSubtitles(videoFile models.FileMatchInfo) []subti
 	}
 
 	videoDir := filepath.Dir(videoFile.Path)
-	videoName := filepath.Base(videoFile.Path)
-	videoNameWithoutExt := strings.TrimSuffix(videoName, videoFile.Extension)
+	// The stem must derive from the folded-extension Name so a fullwidth
+	// spelling does not survive into the sidecar base name (the Path keeps
+	// the raw on-disk spelling).
+	videoNameWithoutExt := strings.TrimSuffix(videoFile.Name, videoFile.Extension)
 
 	matches := make([]subtitleMatch, 0)
 

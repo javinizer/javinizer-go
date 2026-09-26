@@ -173,7 +173,7 @@ func (s *Scanner) ScanWithFilter(ctx context.Context, rootPath string, maxFiles 
 		if s.shouldIncludeFile(path, d) {
 			fmi := models.FileMatchInfo{
 				Path:      path,
-				Name:      d.Name(),
+				Name:      foldNameExtension(d.Name()),
 				Extension: fileExtension(path),
 				Size:      info.Size(),
 				ModTime:   info.ModTime(),
@@ -263,7 +263,7 @@ func (s *Scanner) ScanSingle(path string) (*ScanResult, error) {
 			if s.shouldIncludeFile(fullPath, nil) {
 				fmi := models.FileMatchInfo{
 					Path:      fullPath,
-					Name:      entryInfo.Name(),
+					Name:      foldNameExtension(entryInfo.Name()),
 					Extension: fileExtension(fullPath),
 					Size:      entryInfo.Size(),
 					ModTime:   entryInfo.ModTime(),
@@ -279,7 +279,7 @@ func (s *Scanner) ScanSingle(path string) (*ScanResult, error) {
 		if s.shouldIncludeFile(absPath, nil) {
 			fmi := models.FileMatchInfo{
 				Path:      absPath,
-				Name:      info.Name(),
+				Name:      foldNameExtension(info.Name()),
 				Extension: fileExtension(absPath),
 				Size:      info.Size(),
 				ModTime:   info.ModTime(),
@@ -348,7 +348,7 @@ func (s *Scanner) ScanSingleFromHandle(dir *os.File, canonicalPath string) (*Sca
 		if s.shouldIncludeFile(fullPath, entry) {
 			fmi := models.FileMatchInfo{
 				Path:      fullPath,
-				Name:      info.Name(),
+				Name:      foldNameExtension(info.Name()),
 				Extension: fileExtension(fullPath),
 				Size:      info.Size(),
 				ModTime:   info.ModTime(),
@@ -447,7 +447,7 @@ func (s *Scanner) Filter(files []string) []models.FileMatchInfo {
 
 		fmi := models.FileMatchInfo{
 			Path:      path,
-			Name:      info.Name(),
+			Name:      foldNameExtension(info.Name()),
 			Extension: fileExtension(path),
 			Size:      info.Size(),
 			ModTime:   info.ModTime(),
