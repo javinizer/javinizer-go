@@ -187,6 +187,36 @@ var (
 	// boundary), so unlike the dts/flac/opus rate class no digit bound is
 	// needed: numerically prefixed content ids (189vvc00087) and lvvc
 	// series spellings (n_600lvvc123) keep matching as ids.
+	// Fused bit-depth spellings extend the video-codec class — the
+	// [hx]26x head directly followed by a bit-depth suffix (H26510BIT,
+	// X26510BIT, H2648BIT, H2658BIT) — because the bare [hx]26[3-9]
+	// literal stops at the word boundary before the depth: the fused
+	// compound is a letter plus 4-5 digits plus a 3-letter tail, exactly
+	// the content-id shape, so it satisfies the content-id tier and the
+	// trailing catalog grammar as a replacement id behind a separated
+	// remaster id, on both entry points. The suffix stays enumerated to
+	// the bit depths video releases spell (8, 10, 12) and the bit word is
+	// required, so the residual spellings keep id grammar: bare depth
+	// digits (H26510, H26510b) are indistinguishable from the real h
+	// series' fused ids, junk depths (H26599BIT) fail the enumeration,
+	// and longer digit runs (H2651080, H26510BITS) fail the bare
+	// literal's word boundary exactly as before. The compound carries
+	// the class's word-boundary protections — a leading letter
+	// (XH26510BIT) or a numeric prefix (1h26510bit) never offers the
+	// boundary — and no digit-bearing h2/x2 series can exist in the
+	// r18.dev content-id prefix lookup because content-id series are
+	// letter-runs, so unlike the codec-profile family's dd head no
+	// exception is needed. The x264 hi-profile spellings join the same
+	// alternative (hi10, hi10p, hi444, hi444pp) because the bare HI444
+	// satisfies the builtin amateur pattern's 1-2-letter alternative as
+	// a replacement id; no hi series exists in the lookup, and the
+	// sibling spellings (HI10, HI10P, HI444PP) are two-digit or
+	// tail-bearing shapes no id tier claims, so their membership is
+	// declarative. The separated spellings (H265 10BIT, H265-10BIT,
+	// H.26510BIT) already classify as metadata: the split tokens carry
+	// fewer than the 4-5 digits the content-id shape and the trailing
+	// catalog grammar require, so no tier claims them and the fused
+	// compound needs no separated sibling.
 	// Compact source tags join the vocabulary as a class — web, remux,
 	// and bluray plus a 3-4 digit resolution number — because the compact
 	// spellings WEB2160, REMUX1080, and BLURAY2160 otherwise satisfy the
@@ -306,7 +336,7 @@ var (
 	// (189dts00087) spellings never match, and the digit-bearing
 	// ac3/eac3 compounds cannot collide with a lookup series at all
 	// because content-id series are letter-runs.
-	trailingQualityTagRegex = regexp.MustCompile(`(?i)\b(?:[hx]26[3-9]|avc\d*|aac\d*|hevc\d*|vvc\d*|ac3|dts|flac|opus|truehd|vc1|av1|mp[34]|ddp\d*|eac3|divx\d*|xvid\d*|prores\d*|yuv\d*|rgb\d*|p0(?:10|16)|mpeg\d*|vp\d+|fhd\d{2,4}|uhd\d{2,4}|hdtv|hdr\d*|bt2020|bt709|rec709|smpte\d+|pq\d+|st2084|hlg\d*|ycbcr\d*|(?:bt|rec|st|smpte)[. ]?\d{3,4}|(?:l?pcm|dts|flac|opus|e?ac3|truehd)[. ]?\d{3,4}|\d+(?:bit|point)\d+|(?:web(?:[-_. ]?(?:dl(?:rip)?|rip))?|remux|bluray|(?:bd|br|dvd)[-_. ]?rip)\d{3,4}|` + `(?:` + codecProfileHeadAlternation + `)[-_. ](?:` + codecProfileWordAlternation + `)(?:[-_. ]?(?:` + codecProfileWordAlternation + `))*\d{3,4}|(?:` + fusedCodecProfileHeadAlternation + `)(?:` + codecProfileWordAlternation + `)+\d{3,4})\b`)
+	trailingQualityTagRegex = regexp.MustCompile(`(?i)\b(?:[hx]26[3-9](?:(?:8|10|12)bit)?|hi(?:10p?|444(?:pp)?)|avc\d*|aac\d*|hevc\d*|vvc\d*|ac3|dts|flac|opus|truehd|vc1|av1|mp[34]|ddp\d*|eac3|divx\d*|xvid\d*|prores\d*|yuv\d*|rgb\d*|p0(?:10|16)|mpeg\d*|vp\d+|fhd\d{2,4}|uhd\d{2,4}|hdtv|hdr\d*|bt2020|bt709|rec709|smpte\d+|pq\d+|st2084|hlg\d*|ycbcr\d*|(?:bt|rec|st|smpte)[. ]?\d{3,4}|(?:l?pcm|dts|flac|opus|e?ac3|truehd)[. ]?\d{3,4}|\d+(?:bit|point)\d+|(?:web(?:[-_. ]?(?:dl(?:rip)?|rip))?|remux|bluray|(?:bd|br|dvd)[-_. ]?rip)\d{3,4}|` + `(?:` + codecProfileHeadAlternation + `)[-_. ](?:` + codecProfileWordAlternation + `)(?:[-_. ]?(?:` + codecProfileWordAlternation + `))*\d{3,4}|(?:` + fusedCodecProfileHeadAlternation + `)(?:` + codecProfileWordAlternation + `)+\d{3,4})\b`)
 	// compoundSourceTagPrefixRegex recognizes the source-tag prefix —
 	// web, bd, br, or dvd plus exactly one separator — ending where a
 	// trailing-catalog candidate begins, so the candidate's quality veto
