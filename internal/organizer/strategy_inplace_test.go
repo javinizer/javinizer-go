@@ -545,3 +545,182 @@ func TestInPlaceStrategy_Execute_MoveFileFails(t *testing.T) {
 	require.NotNil(t, result)
 	assert.Contains(t, result.Error.Error(), "failed to move file")
 }
+
+// --- codex P2 (PR #257): fullwidth extensions in the in-place rescan ---
+//
+// The in-place organizer's directory rescan derived extensions with raw
+// filepath.Ext, so a video admitted by the scanner with a fullwidth
+// extension (RCT-156-HD．ｍｋｖ — folded to .mkv at admission since the
+// round-24/30 fold work) kept its raw ．ｍｋｖ spelling in the rescan,
+// videoExtensions rejected it, and a folder holding ONLY such videos was
+// misreported NON-DEDICATED, skipping the expected in-place folder rename.
+// The rescan must fold exactly like the scanner that admitted the file.
+
+func TestInPlaceStrategy_isDedicatedFolder_FullwidthExtensionVideo(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	cfg := &Config{}
+	m, err := matcher.NewMatcher(&matcher.Config{})
+	require.NoError(t, err)
+	strategy := newInPlaceStrategy(fs, cfg, m, nil)
+
+	_ = fs.MkdirAll("/source/old-name", 0777)
+	_ = afero.WriteFile(fs, "/source/old-name/RCT-156-HD．ｍｋｖ", []byte("video"), 0644)
+
+	dedicated, err := strategy.isDedicatedFolder("/source/old-name", "RCT-156", m)
+	require.NoError(t, err)
+	assert.True(t, dedicated, "folder whose only video carries a fullwidth extension should be dedicated")
+}
+
+func TestInPlaceStrategy_isDedicatedFolder_MixedFullwidthAndASCIIExtensions(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	cfg := &Config{}
+	m, err := matcher.NewMatcher(&matcher.Config{})
+	require.NoError(t, err)
+	strategy := newInPlaceStrategy(fs, cfg, m, nil)
+
+	_ = fs.MkdirAll("/source/mixed", 0777)
+	_ = afero.WriteFile(fs, "/source/mixed/RCT-156-HD．ｍｋｖ", []byte("video1"), 0644)
+	_ = afero.WriteFile(fs, "/source/mixed/RCT-156-pt2.mp4", []byte("video2"), 0644)
+
+	dedicated, err := strategy.isDedicatedFolder("/source/mixed", "RCT-156", m)
+	require.NoError(t, err)
+	assert.True(t, dedicated, "folder mixing fullwidth and ASCII extension spellings of the same ID should be dedicated")
+}
+
+func TestInPlaceStrategy_isDedicatedFolder_ASCIIExtensionsUnchanged(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	cfg := &Config{}
+	m, err := matcher.NewMatcher(&matcher.Config{})
+	require.NoError(t, err)
+	strategy := newInPlaceStrategy(fs, cfg, m, nil)
+
+	_ = fs.MkdirAll("/source/old-name", 0777)
+	_ = afero.WriteFile(fs, "/source/old-name/RCT-156-HD.mkv", []byte("video"), 0644)
+
+	dedicated, err := strategy.isDedicatedFolder("/source/old-name", "RCT-156", m)
+	require.NoError(t, err)
+	assert.True(t, dedicated, "all-ASCII behavior is unchanged by the fold")
+}
+
+func TestInPlaceStrategy_isDedicatedFolder_FullwidthNonVideoExcluded(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	cfg := &Config{}
+	m, err := matcher.NewMatcher(&matcher.Config{})
+	require.NoError(t, err)
+	strategy := newInPlaceStrategy(fs, cfg, m, nil)
+
+	_ = fs.MkdirAll("/source/no-videos", 0777)
+	_ = afero.WriteFile(fs, "/source/no-videos/note．ｔｘｔ", []byte("text"), 0644)
+
+	dedicated, err := strategy.isDedicatedFolder("/source/no-videos", "RCT-156", m)
+	require.NoError(t, err)
+	assert.False(t, dedicated, "a fullwidth .txt is not a video: folder with only it must stay non-dedicated")
+
+	_ = fs.MkdirAll("/source/with-note", 0777)
+	_ = afero.WriteFile(fs, "/source/with-note/RCT-156-HD．ｍｋｖ", []byte("video"), 0644)
+	_ = afero.WriteFile(fs, "/source/with-note/note．ｔｘｔ", []byte("text"), 0644)
+
+	dedicated, err = strategy.isDedicatedFolder("/source/with-note", "RCT-156", m)
+	require.NoError(t, err)
+	assert.True(t, dedicated, "a fullwidth .txt alongside the video is ignored, not counted against dedication")
+}
+
+func TestInPlaceStrategy_PlanAndExecute_FullwidthExtensionVideo(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	cfg := &Config{
+		FolderFormat: "<ID>",
+		FileFormat:   "<ID>",
+		RenameFile:   true,
+	}
+	m, err := matcher.NewMatcher(&matcher.Config{})
+	require.NoError(t, err)
+	strategy := newInPlaceStrategy(fs, cfg, m, nil)
+
+	_ = fs.MkdirAll("/source/old-name", 0777)
+	_ = afero.WriteFile(fs, "/source/old-name/RCT-156-HD．ｍｋｖ", []byte("video"), 0644)
+
+	// Scanner-style admission (internal/scanner fullwidth.go): Path keeps
+	// the raw on-disk spelling — the source of truth for file I/O — while
+	// Name/Extension carry the extension-folded spelling.
+	match := models.FileMatchInfo{
+		MovieID:   "RCT-156",
+		Path:      "/source/old-name/RCT-156-HD．ｍｋｖ",
+		Name:      "RCT-156-HD.mkv",
+		Extension: ".mkv",
+	}
+	movie := &models.Movie{ID: "RCT-156"}
+
+	plan, err := strategy.Plan(match, movie, "/dest", false)
+	require.NoError(t, err)
+	assert.True(t, plan.IsDedicated, "fullwidth-only folder should be dedicated")
+	assert.True(t, plan.InPlace, "dedicated folder with a different name should rename in place")
+	assert.Equal(t, filepath.ToSlash("/source/old-name"), filepath.ToSlash(plan.OldDir))
+	assert.Equal(t, filepath.ToSlash("/source/RCT-156"), filepath.ToSlash(plan.TargetDir),
+		"pin the expected renamed folder")
+
+	result, err := strategy.Execute(plan)
+	require.NoError(t, err)
+	assert.True(t, result.Moved)
+	assert.True(t, result.InPlaceRenamed)
+	assert.Equal(t, filepath.ToSlash("/source/RCT-156"), filepath.ToSlash(result.NewDirectoryPath))
+	assert.Equal(t, filepath.ToSlash("/source/RCT-156/RCT-156.mkv"), filepath.ToSlash(result.NewPath))
+
+	exists, _ := afero.Exists(fs, "/source/RCT-156/RCT-156.mkv")
+	assert.True(t, exists, "file should be renamed inside the renamed folder")
+	exists, _ = afero.Exists(fs, "/source/old-name")
+	assert.False(t, exists, "old directory should not exist")
+}
+
+func TestInPlaceStrategy_Plan_MixedFullwidthAndASCIIExtensions(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	cfg := &Config{
+		FolderFormat: "<ID>",
+		FileFormat:   "<ID>",
+		RenameFile:   true,
+	}
+	m, err := matcher.NewMatcher(&matcher.Config{})
+	require.NoError(t, err)
+	strategy := newInPlaceStrategy(fs, cfg, m, nil)
+
+	_ = fs.MkdirAll("/source/old-name", 0777)
+	_ = afero.WriteFile(fs, "/source/old-name/RCT-156-HD．ｍｋｖ", []byte("video1"), 0644)
+	_ = afero.WriteFile(fs, "/source/old-name/RCT-156-pt2.mp4", []byte("video2"), 0644)
+
+	match := models.FileMatchInfo{
+		MovieID:   "RCT-156",
+		Path:      "/source/old-name/RCT-156-HD．ｍｋｖ",
+		Name:      "RCT-156-HD.mkv",
+		Extension: ".mkv",
+	}
+	movie := &models.Movie{ID: "RCT-156"}
+
+	plan, err := strategy.Plan(match, movie, "/dest", false)
+	require.NoError(t, err)
+	assert.True(t, plan.IsDedicated, "fullwidth+ASCII mixed folder of one ID should be dedicated")
+	assert.True(t, plan.InPlace, "dedicated mixed-spelling folder with a different name should rename in place")
+	assert.Equal(t, filepath.ToSlash("/source/RCT-156"), filepath.ToSlash(plan.TargetDir))
+}
+
+func TestFoldFullwidthASCII_LocalMirror(t *testing.T) {
+	assert.Equal(t, "RCT 156 あ", foldFullwidthASCII("ＲＣＴ　１５６　あ"),
+		"fullwidth ASCII folds, the ideographic space folds to a plain space, kana survives")
+	assert.Equal(t, "ABC-123", foldFullwidthASCII("ABC-123"), "ASCII-only input is returned unchanged")
+}
+
+func TestInnerRenameSourceName(t *testing.T) {
+	assert.Equal(t, "RCT-156-HD．ｍｋｖ", innerRenameSourceName(&OrganizePlan{
+		SourcePath: "/source/old-name/RCT-156-HD．ｍｋｖ",
+		Match:      models.FileMatchInfo{Name: "RCT-156-HD.mkv"},
+	}), "on-disk spelling comes from the raw SourcePath basename, never the folded Match.Name")
+	assert.Equal(t, "fallback.mp4", innerRenameSourceName(&OrganizePlan{
+		Match: models.FileMatchInfo{Name: "fallback.mp4"},
+	}), "degenerate plan without a SourcePath falls back to Match.Name")
+}
+
+func TestFileExtension_FullwidthFolding(t *testing.T) {
+	assert.Equal(t, ".mkv", fileExtension("RCT-156-HD．ｍｋｖ"), "fullwidth ．ｍｋｖ folds to .mkv")
+	assert.Equal(t, ".mp4", fileExtension("ABC-123.mp4"), "ASCII spelling is unchanged")
+	assert.Equal(t, ".txt", fileExtension("note．ｔｘｔ"), "fullwidth ．ｔｘｔ folds to .txt (still a non-video)")
+	assert.Equal(t, "", fileExtension("no-extension"), "no extension stays none")
+	assert.Equal(t, ".mkv", fileExtension("ＲＣＴ-156．ｍｋｖ"), "fullwidth stem folds with the extension")
+}

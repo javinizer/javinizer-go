@@ -82,7 +82,8 @@ func (s *Scanner) ScanWithLimits(ctx context.Context, rootPath string, maxFiles 
 
 // ScanWithFilter recursively scans a directory for video files with timeout, file count limits, and optional name filter
 // maxFiles = 0 means no limit
-// filter = "" means no filter; otherwise, only directories/files containing the filter string (case-insensitive) are processed
+// filter = "" means no filter; otherwise, only directories/files containing the filter string (case-insensitive,
+// in either their raw or fullwidth-folded spelling) are processed
 func (s *Scanner) ScanWithFilter(ctx context.Context, rootPath string, maxFiles int, filter string) (*ScanResult, error) {
 	result := &ScanResult{
 		Files:   make([]models.FileMatchInfo, 0),
@@ -148,8 +149,7 @@ func (s *Scanner) ScanWithFilter(ctx context.Context, rootPath string, maxFiles 
 		// Always process the root directory regardless of filter
 		if d.IsDir() {
 			if filterLower != "" && path != absPath {
-				dirName := strings.ToLower(d.Name())
-				if !strings.Contains(dirName, filterLower) {
+				if !filterMatchesName(d.Name(), filterLower) {
 					// Skip this directory entirely - don't recurse into it
 					return filepath.SkipDir
 				}
@@ -159,8 +159,7 @@ func (s *Scanner) ScanWithFilter(ctx context.Context, rootPath string, maxFiles 
 
 		// For files: check if filter matches the file name
 		if filterLower != "" {
-			fileName := strings.ToLower(d.Name())
-			if !strings.Contains(fileName, filterLower) {
+			if !filterMatchesName(d.Name(), filterLower) {
 				// File doesn't match filter, skip it
 				result.SkippedCount++
 				return nil
@@ -173,8 +172,8 @@ func (s *Scanner) ScanWithFilter(ctx context.Context, rootPath string, maxFiles 
 		if s.shouldIncludeFile(path, d) {
 			fmi := models.FileMatchInfo{
 				Path:      path,
-				Name:      d.Name(),
-				Extension: filepath.Ext(path),
+				Name:      foldNameExtension(d.Name()),
+				Extension: fileExtension(path),
 				Size:      info.Size(),
 				ModTime:   info.ModTime(),
 			}
@@ -263,8 +262,8 @@ func (s *Scanner) ScanSingle(path string) (*ScanResult, error) {
 			if s.shouldIncludeFile(fullPath, nil) {
 				fmi := models.FileMatchInfo{
 					Path:      fullPath,
-					Name:      entryInfo.Name(),
-					Extension: filepath.Ext(fullPath),
+					Name:      foldNameExtension(entryInfo.Name()),
+					Extension: fileExtension(fullPath),
 					Size:      entryInfo.Size(),
 					ModTime:   entryInfo.ModTime(),
 				}
@@ -279,8 +278,8 @@ func (s *Scanner) ScanSingle(path string) (*ScanResult, error) {
 		if s.shouldIncludeFile(absPath, nil) {
 			fmi := models.FileMatchInfo{
 				Path:      absPath,
-				Name:      info.Name(),
-				Extension: filepath.Ext(absPath),
+				Name:      foldNameExtension(info.Name()),
+				Extension: fileExtension(absPath),
 				Size:      info.Size(),
 				ModTime:   info.ModTime(),
 			}
@@ -348,8 +347,8 @@ func (s *Scanner) ScanSingleFromHandle(dir *os.File, canonicalPath string) (*Sca
 		if s.shouldIncludeFile(fullPath, entry) {
 			fmi := models.FileMatchInfo{
 				Path:      fullPath,
-				Name:      info.Name(),
-				Extension: filepath.Ext(fullPath),
+				Name:      foldNameExtension(info.Name()),
+				Extension: fileExtension(fullPath),
 				Size:      info.Size(),
 				ModTime:   info.ModTime(),
 			}
@@ -362,22 +361,62 @@ func (s *Scanner) ScanSingleFromHandle(dir *os.File, canonicalPath string) (*Sca
 	return result, nil
 }
 
+// filterMatchesName reports whether an entry name contains the (already
+// lowercased) filter substring in either of its two spellings. The raw
+// name is matched so fullwidth-written filters keep hitting fullwidth
+// names exactly where they did before folding existed; the folded name is
+// matched as well because the extension check admits fullwidth spellings
+// (ＲＣＴ－１５６－ＨＤ．ｍｋｖ) as videos — an ASCII filter (rct) must
+// therefore discover those files in filtered scans, mirroring the
+// dual-form matching excludedByName applies to exclusion patterns.
+func filterMatchesName(name, filterLower string) bool {
+	if strings.Contains(strings.ToLower(name), filterLower) {
+		return true
+	}
+	folded := foldFullwidthASCII(name)
+	if folded != name {
+		return strings.Contains(strings.ToLower(folded), filterLower)
+	}
+	return false
+}
+
+// excludedByName reports whether any configured exclusion glob matches the
+// basename in either of its two spellings. The raw basename is matched so
+// fullwidth exclusion patterns keep hitting fullwidth names exactly where
+// they did before folding existed; the folded basename is matched as well
+// because the extension check admits fullwidth spellings (．ｍｋｖ → .mkv)
+// as videos — a fullwidth filename (ＡＢＣ－１２３－ｓａｍｐｌｅ．ｍｋｖ) must
+// therefore trigger the same ASCII exclusion globs (*-sample*) that its
+// ASCII spelling would, instead of proceeding to matching and organization.
+func (s *Scanner) excludedByName(basename string) bool {
+	folded := foldFullwidthASCII(basename)
+	for _, pattern := range s.config.ExcludePatterns {
+		if matched, err := filepath.Match(pattern, basename); err == nil && matched {
+			return true
+		}
+		if folded != basename {
+			if matched, err := filepath.Match(pattern, folded); err == nil && matched {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // shouldIncludeFile checks if a file should be included based on configuration
 func (s *Scanner) shouldIncludeFile(path string, entry os.DirEntry) bool {
-	// Check extension
-	ext := strings.ToLower(filepath.Ext(path))
+	// Check extension. Fullwidth-ext spellings (．ｍｋｖ) fold first so
+	// the same video file set accepts them and the folded ASCII extension
+	// matches the configured set.
+	ext := strings.ToLower(fileExtension(path))
 	_, hasValidExt := s.extSet[ext]
 	if !hasValidExt {
 		return false
 	}
 
 	// Check exclude patterns (glob patterns)
-	basename := filepath.Base(path)
-	for _, pattern := range s.config.ExcludePatterns {
-		matched, err := filepath.Match(pattern, basename)
-		if err == nil && matched {
-			return false
-		}
+	if s.excludedByName(filepath.Base(path)) {
+		return false
 	}
 
 	// Check minimum file size
@@ -426,8 +465,8 @@ func (s *Scanner) Filter(files []string) []models.FileMatchInfo {
 
 		fmi := models.FileMatchInfo{
 			Path:      path,
-			Name:      info.Name(),
-			Extension: filepath.Ext(path),
+			Name:      foldNameExtension(info.Name()),
+			Extension: fileExtension(path),
 			Size:      info.Size(),
 			ModTime:   info.ModTime(),
 		}

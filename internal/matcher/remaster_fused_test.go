@@ -1,0 +1,252 @@
+package matcher
+
+import (
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"testing"
+)
+
+func TestFusedThreeDigitRemaster(t *testing.T) {
+	m, err := NewMatcher(&Config{})
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name, id, marker string
+		part             int
+	}{
+		{"RCT156H.mkv", "RCT-156H", "H", 0},
+		{"ABC12H.mkv", "ABC-12H", "H", 0},
+		{"ABC12HD-pt2.mkv", "ABC-12H", "HD", 2},
+		{"A12AI.mkv", "A-12AI", "AI", 0},
+		{"T2812H.mkv", "T28-12H", "H", 0},
+		{"ABEAUTY-123-HD.mkv", "ABEAUTY-123H", "HD", 0},
+		{"ABEAUTY.123.AI-pt2.mkv", "ABEAUTY-123AI", "AI", 2},
+		{"ABEAUTY123HD.mkv", "ABEAUTY-123H", "HD", 0},
+		{"A123H.mkv", "A-123H", "H", 0},
+		{"A-123-HD.mkv", "A-123H", "HD", 0},
+		{"A.123.HD.mkv", "A-123H", "HD", 0},
+		{"A_123_AI-pt2.mkv", "A-123AI", "AI", 2},
+		{"A 123 HD.mkv", "A-123H", "HD", 0},
+		{"T28123H.mkv", "T-28123H", "H", 0},
+		{"[site]T28123HD-pt2.mkv", "T-28123H", "HD", 2},
+		{"T28123AI.mkv", "T-28123AI", "AI", 0},
+		{"RCT.156.HD.mkv", "RCT-156H", "HD", 0},
+		{"ABC.12.HD.mkv", "ABC-12H", "HD", 0},
+		{"ABC_12_AI-pt2.mkv", "ABC-12AI", "AI", 2},
+		{"RCT_156_HD-pt2.mkv", "RCT-156H", "HD", 2},
+		{"RCT 156 HD.mkv", "RCT-156H", "HD", 0},
+		{"[site]DV.818.AI.part2.mkv", "DV-818AI", "AI", 2},
+		{"T28.123.HD.mkv", "T28-123H", "HD", 0},
+		{"RCT.00156.HD.mkv", "RCT-00156H", "HD", 0},
+		{"RCT_156H.mkv", "RCT-156H", "H", 0},
+		{"[site]RCT156HD.mkv", "RCT-156H", "HD", 0},
+		{"[HD]DV818AI-pt2.mkv", "DV-818AI", "AI", 2},
+		{"pt9 [site]RCT156H-pt2.mkv", "RCT-156H", "H", 2},
+		{"[site]RCT156H-1080p.mkv", "RCT-156H", "H", 0},
+		{"RCT156HD.mkv", "RCT-156H", "HD", 0},
+		{"DV818AI.mkv", "DV-818AI", "AI", 0},
+		{"RCT156HD-pt2.mkv", "RCT-156H", "HD", 2},
+		{"DV818AI.part2.mkv", "DV-818AI", "AI", 2},
+		{"RCT156H-1080p.mkv", "RCT-156H", "H", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := matchOne(t, m, tc.name)
+			require.NotNil(t, got)
+			assert.Equal(t, tc.id, got.ID)
+			assert.Equal(t, tc.id, m.MatchString(tc.name))
+			assert.Equal(t, tc.marker, got.RemasterMarker)
+			assert.Equal(t, tc.part, got.PartNumber)
+		})
+	}
+	for _, name := range []string{"ABC123Q.mkv", "RCT156HDrip.mkv", "DV818AIR.mkv", "T28123HDrip.mkv", "RCT.156.HDrip.mkv", "DV_818_AIR.mkv"} {
+		assert.Nil(t, matchOne(t, m, name))
+		assert.Empty(t, m.MatchString(name))
+	}
+}
+
+// A fused part label directly after the marker (cd2/pt2/part3/disc1) is
+// recognized in every spelling family: fused tier-1 (rct156hdcd2),
+// hyphenated tier-1 (rct-156-hdcd2), and tier-2 raw content ids
+// (1rct00156hcd2), consistently with the already-supported separated forms.
+func TestFusedRemasterPartLabels(t *testing.T) {
+	m, err := NewMatcher(&Config{})
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name, id, marker, matchedBy string
+		part                        int
+	}{
+		{"RCT156HDCD2.mkv", "RCT-156H", "HD", "builtin", 2},
+		{"rct156hdcd2.mkv", "RCT-156H", "HD", "builtin", 2},
+		{"RCT156HCD2.mkv", "RCT-156H", "H", "builtin", 2},
+		{"ABC12HDPT2.mkv", "ABC-12H", "HD", "builtin", 2},
+		{"RCT156HDPART3.mkv", "RCT-156H", "HD", "builtin", 3},
+		{"T28123HDCD2.mkv", "T-28123H", "HD", "builtin", 2},
+		{"rct-156-hdcd2.mkv", "RCT-156H", "HD", "builtin", 2},
+		{"1rct00156hcd2.mkv", "1RCT00156H", "", "contentid", 2},
+		{"1rct00156hdcd2.mkv", "1RCT00156HD", "", "contentid", 2},
+		{"abeauty00123hdcd2.mkv", "ABEAUTY00123HD", "", "contentid", 2},
+		{"118ipx00535cd2.mkv", "118IPX00535", "", "contentid", 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := matchOne(t, m, tc.name)
+			require.NotNil(t, got)
+			assert.Equal(t, tc.id, got.ID)
+			assert.Equal(t, tc.marker, got.RemasterMarker)
+			assert.Equal(t, tc.part, got.PartNumber)
+			assert.Equal(t, PatternExplicit, got.MultipartPattern)
+			assert.True(t, got.IsMultiPart)
+			assert.Equal(t, tc.matchedBy, got.MatchedBy)
+			assert.Equal(t, tc.id, m.MatchString(tc.name))
+		})
+	}
+	// Separated forms keep working.
+	assert.Equal(t, "RCT-156H", m.MatchString("rct156hd-cd2.mkv"))
+	assert.Equal(t, "1RCT00156H", m.MatchString("1rct00156h-cd2.mkv"))
+	// Bare digits after a fused marker stay unmatched: without a part label
+	// they are indistinguishable from codec tails (h264) and stay rejected.
+	assert.Nil(t, matchOne(t, m, "RCT156HD2.mkv"))
+	assert.Empty(t, m.MatchString("RCT156HD2.mkv"))
+}
+
+// A compact display filename with a four- or five-digit release number
+// canonicalizes like its separated spelling (ABC.1234.HD, ABC 1234 H): the
+// long-number fused grammar recognizes the marker and hyphenates the id, so
+// the content-id fallback no longer returns the raw spelling with no
+// marker. The number must be non-padded and the series word 3+ letters:
+// zero-padded marker-bearing raw ids, the 1-2-letter short-prefix family
+// (AC3640H — the real ac series keeps its fused spellings), and word-year
+// spellings stay on their existing tiers, and a t28 tail keeps the legacy
+// grammar's T-series handling.
+func TestFusedFourFiveDigitRemaster(t *testing.T) {
+	m, err := NewMatcher(&Config{})
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name, id, marker string
+		part             int
+	}{
+		{"ABC1234HD.mkv", "ABC-1234H", "HD", 0},
+		{"ABC12345AI.mkv", "ABC-12345AI", "AI", 0},
+		{"ABC1234H.mkv", "ABC-1234H", "H", 0},
+		{"abc12345ai.mkv", "ABC-12345AI", "AI", 0},
+		{"ABC1234ZHD.mkv", "ABC-1234ZH", "HD", 0},
+		{"ABC1234HD-pt2.mkv", "ABC-1234H", "HD", 2},
+		{"ABC1234HDPT2.mkv", "ABC-1234H", "HD", 2},
+		{"[site]ABC1234HD.mkv", "ABC-1234H", "HD", 0},
+		{"ABC12345AI[1080p].mkv", "ABC-12345AI", "AI", 0},
+		// The leftmost compact spelling drives the normalization in both
+		// orders: an earlier display-number spelling is not displaced by a
+		// later legacy one, and a trailing display-number candidate still
+		// replaces an earlier spelling as the real id.
+		{"ABC1234HD RCT156H.mkv", "ABC-1234H", "HD", 0},
+		{"RCT156H ABC1234HD.mkv", "ABC-1234H", "HD", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := matchOne(t, m, tc.name)
+			require.NotNil(t, got)
+			assert.Equal(t, tc.id, got.ID)
+			assert.Equal(t, tc.id, m.MatchString(tc.name))
+			assert.Equal(t, tc.marker, got.RemasterMarker)
+			assert.Equal(t, tc.part, got.PartNumber)
+		})
+	}
+	// Raw-cid-shaped controls keep the tier-2 path: zero padding is the
+	// raw-cid evidence (round-11 classifier) and the short-prefix family
+	// keeps its fused spellings.
+	for _, tc := range []struct{ name, id string }{
+		{"abc01234.mkv", "ABC01234"},
+		{"abc01234h.mkv", "ABC01234H"},
+		{"a00123h.mkv", "A00123H"},
+		{"AC3640H.mkv", "AC3640H"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := matchOne(t, m, tc.name)
+			require.NotNil(t, got)
+			assert.Equal(t, tc.id, got.ID)
+			assert.Equal(t, tc.id, m.MatchString(tc.name))
+			assert.Equal(t, "contentid", got.MatchedBy)
+			assert.Empty(t, got.RemasterMarker)
+		})
+	}
+	// A compact word-year keeps no tier at all: the word-year guard rejects
+	// it in the fused normalization, and the raw-cid marker-tail fallback
+	// no longer re-accepts the same token as a content id.
+	assert.Nil(t, matchOne(t, m, "vacation2024hd.mkv"))
+	assert.Empty(t, m.MatchString("vacation2024hd.mkv"))
+	// The t28 tail keeps the legacy grammar: prefix-free t28 numbers stay
+	// T-series releases at every digit count the old grammar reaches.
+	assert.Equal(t, "T-28123H", m.MatchString("t28123h.mkv"))
+	assert.Equal(t, "T-281234H", m.MatchString("t281234h.mkv"))
+}
+
+// A 4+-letter catalog series with a compact four-digit number canonicalizes
+// like its hyphenated spelling: the word-year guard bypasses the shapes
+// catalogSeriesReleaseNumber accepts — a real r18.dev catalog series whose
+// series+number spelling the built-in matcher itself supports, in any
+// casing — so MIAA1234HD and its lowercase siblings miaa1234hd /
+// miaa.1234.hd resolve to MIAA-1234H (marker HD) instead of the raw tier-2
+// content id, exactly like MIAA-1234-HD. Every other word-year spelling
+// keeps the bail: prose words (sample2024hd, birthday2024hd) are not
+// catalog series and fail the catalog-series axis in every casing — the
+// raw-cid marker-tail fallback no longer re-accepts the phrase as a
+// content id — while words and numbers beyond the builtin series shapes
+// (BIRTHDAY2024, MIAA12345HD) fail the builtin-support axis and keep the
+// raw tier-2 path with no marker.
+func TestFusedFourDigitLongSeriesRemaster(t *testing.T) {
+	m, err := NewMatcher(&Config{})
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name, id, marker string
+		part             int
+	}{
+		{"MIAA1234HD.mkv", "MIAA-1234H", "HD", 0},
+		{"MIAA1234H.mkv", "MIAA-1234H", "H", 0},
+		{"MIAA1234ZHD.mkv", "MIAA-1234ZH", "HD", 0},
+		{"MIAA.1234.HD.mkv", "MIAA-1234H", "HD", 0},
+		{"MIAA 1234 HD.mkv", "MIAA-1234H", "HD", 0},
+		{"MIAA-1234-HD.mkv", "MIAA-1234H", "HD", 0},
+		// A lowercase spelling of a real catalog series canonicalizes
+		// too (round 36a): the discriminator is series-hood, not case.
+		{"miaa1234hd.mkv", "MIAA-1234H", "HD", 0},
+		{"miaa.1234.hd.mkv", "MIAA-1234H", "HD", 0},
+		{"ABCD1234AI.mkv", "ABCD-1234AI", "AI", 0},
+		{"[site]MIAA1234HD.mkv", "MIAA-1234H", "HD", 0},
+		{"MIAA1234HD-pt2.mkv", "MIAA-1234H", "HD", 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := matchOne(t, m, tc.name)
+			require.NotNil(t, got)
+			assert.Equal(t, tc.id, got.ID)
+			assert.Equal(t, tc.id, m.MatchString(tc.name))
+			assert.Equal(t, tc.marker, got.RemasterMarker)
+			assert.Equal(t, tc.part, got.PartNumber)
+			assert.Equal(t, "builtin", got.MatchedBy)
+		})
+	}
+	// Prose word-years keep no tier at all: they fail the catalog-series
+	// axis (the word is not a real r18.dev catalog series), and the
+	// raw-cid marker-tail fallback no longer re-accepts the same token
+	// as a content id.
+	for _, name := range []string{
+		"sample2024hd.mkv",
+		"birthday2024hd.mkv",
+	} {
+		t.Run(name, func(t *testing.T) {
+			assert.Nil(t, matchOne(t, m, name))
+			assert.Empty(t, m.MatchString(name))
+		})
+	}
+	// Display-cased word-year spellings that fail only the builtin-support
+	// axis keep the raw tier-2 content id with no marker.
+	for _, tc := range []struct{ name, id string }{
+		{"BIRTHDAY2024HD.mkv", "BIRTHDAY2024HD"},
+		{"MIAA12345HD.mkv", "MIAA12345HD"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := matchOne(t, m, tc.name)
+			require.NotNil(t, got)
+			assert.Equal(t, tc.id, got.ID)
+			assert.Equal(t, tc.id, m.MatchString(tc.name))
+			assert.Equal(t, "contentid", got.MatchedBy)
+			assert.Empty(t, got.RemasterMarker)
+		})
+	}
+}

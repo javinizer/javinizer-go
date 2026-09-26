@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"path/filepath"
 	"time"
 
 	"github.com/google/uuid"
@@ -42,9 +43,23 @@ func scrapeResultToMovieResult(fmi models.FileMatchInfo, result *scrape.ScrapeRe
 		EndedAt:       &now,
 	}
 	// Populate OriginalFileName from the source file so templates (e.g. NFO
-	// <FILENAME>) resolve; the scrape workflow builds the movie from the ID only.
-	if result.Movie != nil && result.Movie.OriginalFileName == "" && fmi.Name != "" {
-		result.Movie.OriginalFileName = fmi.Name
+	// <FILENAME>, include_originalpath) resolve; the scrape workflow builds the
+	// movie from the ID only. fmi.Path is the on-disk source of truth and keeps
+	// the raw spelling, which can end in a fullwidth extension (RCT-156-HD．ｍｋｖ);
+	// fmi.Name is the scanner's folded spelling (RCT-156-HD.mkv), which never
+	// existed on disk, so it only serves as a fallback for Path-less matches.
+	// The raw spelling is safe to publish because the template engine's
+	// filename tags are fold-aware at tag resolution (round 46a:
+	// internal/template/fullwidth.go): <FILENAME> strips the fullwidth
+	// extension from the stem and <FILENAME_EXT> folds it, so organized
+	// names never carry the fullwidth extension while this field keeps the
+	// on-disk truth.
+	if result.Movie != nil && result.Movie.OriginalFileName == "" {
+		if fmi.Path != "" {
+			result.Movie.OriginalFileName = filepath.Base(fmi.Path)
+		} else if fmi.Name != "" {
+			result.Movie.OriginalFileName = fmi.Name
+		}
 	}
 	if meta != nil {
 		// Struct copy from OrchestrationMeta's embedded OrchestrationState.

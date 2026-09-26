@@ -1,0 +1,287 @@
+package javdb
+
+import (
+	"context"
+	"strings"
+	"testing"
+
+	"github.com/go-resty/resty/v2"
+	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/ratelimit"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// remasterSearchPage renders a JavDB search result page listing the given IDs.
+func remasterSearchPage(ids ...string) string {
+	var b strings.Builder
+	b.WriteString(`<html><body><div class="movie-list">`)
+	for _, id := range ids {
+		slug := strings.ToLower(strings.NewReplacer("-", "", "_", "").Replace(id))
+		b.WriteString(`<div class="item"><a href="/v/` + slug + `">` +
+			`<div class="video-title"><strong>` + id + `</strong> Some Title</div>` +
+			`<div class="uid">` + id + `</div></a></div>`)
+	}
+	b.WriteString(`</div></body></html>`)
+	return b.String()
+}
+
+// remasterDetailPage renders a minimal JavDB detail page for the given ID.
+func remasterDetailPage(id string) string {
+	return `<html><body>
+		<h2 class="title is-4"><strong>` + id + `</strong> Some Title</h2>
+		<div class="movie-panel-info">
+			<div class="panel-block"><strong>日期:</strong><span class="value">2024-01-02</span></div>
+		</div>
+	</body></html>`
+}
+
+func newMarkerTestScraper(responses map[string]string) *scraper {
+	client := resty.New()
+	client.SetTransport(&staticRoundTripper{responses: responses})
+	return &scraper{
+		client:      client,
+		enabled:     true,
+		baseURL:     "https://javdb.test",
+		rateLimiter: ratelimit.NewLimiter(0),
+		settings:    models.ScraperSettings{Enabled: true},
+	}
+}
+
+func TestRemasterMarkerSuffix(t *testing.T) {
+	assert.Equal(t, "H", remasterMarkerSuffix("RCT-156H"))
+	assert.Equal(t, "H", remasterMarkerSuffix("rct-156-h"))
+	assert.Equal(t, "HD", remasterMarkerSuffix("RCT-156HD"))
+	assert.Equal(t, "AI", remasterMarkerSuffix("DV-818AI"))
+	assert.Equal(t, "AI", remasterMarkerSuffix("dv818ai"))
+	assert.Empty(t, remasterMarkerSuffix("RCT-156"))
+	assert.Empty(t, remasterMarkerSuffix("IPX-535A"), "a part letter is not a remaster marker")
+	assert.Empty(t, remasterMarkerSuffix("IPX-535"))
+	assert.Empty(t, remasterMarkerSuffix("300MIUM-700"))
+	// The optional E/Z catalog suffix is parsed separately from the
+	// terminal marker, so the suffix-carrying spellings classify as
+	// marker queries just like the plain ones.
+	assert.Equal(t, "H", remasterMarkerSuffix("IPX-535ZH"), "the E/Z catalog suffix rides in front of the terminal marker")
+	assert.Equal(t, "HD", remasterMarkerSuffix("IPX-535-Z-HD"))
+	assert.Equal(t, "HD", remasterMarkerSuffix("IPX-535-ZHD"))
+	assert.Equal(t, "H", remasterMarkerSuffix("IPX-535-ZH-HD"), "the redundant trailing HD spelling folds behind the ZH tail")
+	assert.Equal(t, "AI", remasterMarkerSuffix("T28-123-E-AI"))
+	assert.Empty(t, remasterMarkerSuffix("IPX-535Z"), "the suffix-only base release carries no marker")
+	assert.Empty(t, remasterMarkerSuffix("IPX-535-ZHA"), "part letters behind the marker tail end the tail")
+}
+
+// A folded marker query must not variant-match the base release when only the
+// original is listed: RCT-156H (folded from RCT-156-HD) targets the remaster,
+// and returning the original's page would scrape the wrong movie.
+func TestSearchMarkerQueryDoesNotResolveBaseRelease(t *testing.T) {
+	s := newMarkerTestScraper(map[string]string{
+		"https://javdb.test/search?q=RCT-156H&f=all": remasterSearchPage("RCT-156"),
+		"https://javdb.test/v/rct156":                remasterDetailPage("RCT-156"),
+	})
+	_, err := s.Search(context.Background(), "RCT-156H")
+	require.Error(t, err, "marker query must miss honestly when only the base release is listed")
+	scraperErr, ok := models.AsScraperError(err)
+	require.True(t, ok)
+	assert.Equal(t, models.ScraperErrorKindNotFound, scraperErr.Kind)
+}
+
+// The single-detail-link fallback must not return the base release for an
+// AI-folded query either.
+func TestSearchMarkerQuerySkipsSingleLinkFallback(t *testing.T) {
+	s := newMarkerTestScraper(map[string]string{
+		"https://javdb.test/search?q=DV-818AI&f=all": remasterSearchPage("DV-818"),
+		"https://javdb.test/v/dv818":                 remasterDetailPage("DV-818"),
+	})
+	_, err := s.Search(context.Background(), "DV-818AI")
+	require.Error(t, err, "a lone base-release listing must not stand in for an AI-folded query")
+	scraperErr, ok := models.AsScraperError(err)
+	require.True(t, ok)
+	assert.Equal(t, models.ScraperErrorKindNotFound, scraperErr.Kind)
+}
+
+// Control: when both releases are listed, the marker query resolves the
+// remaster — the exact identity wins.
+func TestSearchMarkerQueryResolvesListedRemaster(t *testing.T) {
+	s := newMarkerTestScraper(map[string]string{
+		"https://javdb.test/search?q=RCT-156H&f=all": remasterSearchPage("RCT-156", "RCT-156H"),
+		"https://javdb.test/v/rct156":                remasterDetailPage("RCT-156"),
+		"https://javdb.test/v/rct156h":               remasterDetailPage("RCT-156H"),
+	})
+	res, err := s.Search(context.Background(), "RCT-156H")
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	assert.Equal(t, "RCT-156H", res.ID)
+}
+
+// Control: a marker query whose remaster is the sole listing still resolves
+// it — the single-link fallback is only skipped for marker queries whose
+// listed items did not match.
+func TestSearchMarkerQueryResolvesSoleListedRemaster(t *testing.T) {
+	s := newMarkerTestScraper(map[string]string{
+		"https://javdb.test/search?q=DV-818AI&f=all": remasterSearchPage("DV-818AI"),
+		"https://javdb.test/v/dv818ai":               remasterDetailPage("DV-818AI"),
+	})
+	res, err := s.Search(context.Background(), "DV-818AI")
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	assert.Equal(t, "DV-818AI", res.ID)
+}
+
+// Control: a padding-equal marker spelling (RCT-0156H vs RCT-156H) is the
+// same release and still resolves.
+func TestSearchMarkerQueryAcceptsPaddingEqualSpelling(t *testing.T) {
+	s := newMarkerTestScraper(map[string]string{
+		"https://javdb.test/search?q=RCT-156H&f=all": remasterSearchPage("RCT-0156H"),
+		"https://javdb.test/v/rct0156h":              remasterDetailPage("RCT-0156H"),
+	})
+	res, err := s.Search(context.Background(), "RCT-156H")
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	assert.Equal(t, "RCT-0156H", res.ID)
+}
+
+// foldRemasterMarkerID folds HD into the H equivalence class, mirroring the
+// matcher's foldRemasterMarker (HD -> H): both spell the HD remaster. H and
+// AI stay their own spellings, and a marker-less id only normalizes.
+func TestFoldRemasterMarkerID(t *testing.T) {
+	assert.Equal(t, "RCT156H", foldRemasterMarkerID("RCT-156-HD"))
+	assert.Equal(t, "RCT156H", foldRemasterMarkerID("RCT-156H"))
+	assert.Equal(t, "DV818AI", foldRemasterMarkerID("DV-818AI"))
+	assert.Equal(t, "RCT156", foldRemasterMarkerID("RCT-156"))
+	assert.Equal(t, "RCT0156H", foldRemasterMarkerID("RCT-0156-HD"), "padding survives the fold for the normalized rank")
+	assert.Equal(t, "IPX535A", foldRemasterMarkerID("IPX-535A"), "a part letter is not a marker and never folds")
+	// The E/Z catalog suffix survives the fold as part of the identity and
+	// the marker class still bridges its H/HD spellings.
+	assert.Equal(t, "IPX535ZH", foldRemasterMarkerID("IPX-535ZH"))
+	assert.Equal(t, "IPX535ZH", foldRemasterMarkerID("IPX-535-Z-HD"))
+	assert.Equal(t, "IPX535ZH", foldRemasterMarkerID("IPX-535-ZHD"))
+	assert.Equal(t, "IPX535ZH", foldRemasterMarkerID("IPX-535-ZH-HD"))
+	assert.Equal(t, "T28123EAI", foldRemasterMarkerID("T28-123-E-AI"))
+	assert.Equal(t, "IPX535Z", foldRemasterMarkerID("IPX-535Z"), "the suffix-only base release never folds")
+}
+
+// JavDB labels the sole HD-remaster search result with the -HD spelling
+// while the matcher propagates the folded RCT-156H query: both spell the
+// same remaster, so the marker-class comparison must match the sole correct
+// result instead of disabling the fallback and reporting not found.
+func TestSearchMarkerQueryMatchesHDRemasterSpelling(t *testing.T) {
+	s := newMarkerTestScraper(map[string]string{
+		"https://javdb.test/search?q=RCT-156H&f=all": remasterSearchPage("RCT-156-HD"),
+		"https://javdb.test/v/rct156hd":              remasterDetailPage("RCT-156-HD"),
+	})
+	res, err := s.Search(context.Background(), "RCT-156H")
+	require.NoError(t, err, "an HD-labeled remaster must match its folded H query")
+	require.NotNil(t, res)
+	assert.Equal(t, "RCT-156-HD", res.ID)
+}
+
+// Symmetric: a query spelled with the -HD marker (reachable through a raw
+// Search call) matches a listing labeled with the folded H spelling.
+func TestSearchMarkerQueryHDSpellingMatchesFoldedListing(t *testing.T) {
+	s := newMarkerTestScraper(map[string]string{
+		"https://javdb.test/search?q=RCT-156-HD&f=all": remasterSearchPage("RCT-156H"),
+		"https://javdb.test/v/rct156h":                 remasterDetailPage("RCT-156H"),
+	})
+	res, err := s.Search(context.Background(), "RCT-156-HD")
+	require.NoError(t, err, "a folded H listing must match an HD-spelled query")
+	require.NotNil(t, res)
+	assert.Equal(t, "RCT-156H", res.ID)
+}
+
+// AI stays its own marker class: an H query must not match an AI-labeled
+// candidate even though both carry a marker.
+func TestSearchMarkerQueryDoesNotCrossMarkerClasses(t *testing.T) {
+	s := newMarkerTestScraper(map[string]string{
+		"https://javdb.test/search?q=RCT-156H&f=all": remasterSearchPage("RCT-156AI"),
+	})
+	_, err := s.Search(context.Background(), "RCT-156H")
+	require.Error(t, err, "an AI-labeled remaster is a different release from the H remaster")
+	scraperErr, ok := models.AsScraperError(err)
+	require.True(t, ok)
+	assert.Equal(t, models.ScraperErrorKindNotFound, scraperErr.Kind)
+}
+
+// Control: non-marker queries keep the variant rung — an A-suffixed
+// listing still resolves a plain query, since the marker-class fold only
+// applies to marker-carrying queries.
+func TestSearchNonMarkerQueryKeepsVariantMatch(t *testing.T) {
+	s := newMarkerTestScraper(map[string]string{
+		"https://javdb.test/search?q=IPX-535&f=all": remasterSearchPage("IPX-535A"),
+		"https://javdb.test/v/ipx535a":              remasterDetailPage("IPX-535A"),
+	})
+	res, err := s.Search(context.Background(), "IPX-535")
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	assert.Equal(t, "IPX-535A", res.ID)
+}
+
+// An E/Z-catalog-suffixed remaster query targets the suffix-carrying
+// release: the base release, the suffix-only release and the plain (no
+// suffix) remaster are all different releases and must not stand in for
+// it, so the query misses honestly and the single-link fallback stays
+// disabled.
+func TestSearchMarkerQuerySuffixIdentityRejectsOtherReleases(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		listed string
+	}{
+		{"base release", "IPX-535"},
+		{"suffix-only release", "IPX-535Z"},
+		{"plain remaster without suffix", "IPX-535H"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newMarkerTestScraper(map[string]string{
+				"https://javdb.test/search?q=IPX-535ZH&f=all":                                                       remasterSearchPage(tc.listed),
+				"https://javdb.test/v/" + strings.ToLower(strings.NewReplacer("-", "", "_", "").Replace(tc.listed)): remasterDetailPage(tc.listed),
+			})
+			_, err := s.Search(context.Background(), "IPX-535ZH")
+			require.Error(t, err, "%s must not satisfy a suffix-carrying remaster query", tc.listed)
+			scraperErr, ok := models.AsScraperError(err)
+			require.True(t, ok)
+			assert.Equal(t, models.ScraperErrorKindNotFound, scraperErr.Kind)
+		})
+	}
+}
+
+// The HD/H class folding still applies with the E/Z catalog suffix
+// present: a query spelled IPX-535-Z-HD matches a listing spelled with
+// the folded compact IPX-535ZH form.
+func TestSearchMarkerQuerySuffixSpellingFolds(t *testing.T) {
+	s := newMarkerTestScraper(map[string]string{
+		"https://javdb.test/search?q=IPX-535-Z-HD&f=all": remasterSearchPage("IPX-535ZH"),
+		"https://javdb.test/v/ipx535zh":                  remasterDetailPage("IPX-535ZH"),
+	})
+	res, err := s.Search(context.Background(), "IPX-535-Z-HD")
+	require.NoError(t, err, "an H-labeled listing must match the same release's HD-spelled query with the suffix present")
+	require.NotNil(t, res)
+	assert.Equal(t, "IPX-535ZH", res.ID)
+}
+
+// A listing that repeats the marker spelling behind the folded ZH tail
+// (IPX-535-ZH-HD) is the same suffix-carrying remaster an IPX-535ZH query
+// targets: the redundant spelling folds away and the match is a genuine
+// identity match, not the single-link fallback.
+func TestSearchMarkerQuerySuffixRedundantSpellingFolds(t *testing.T) {
+	s := newMarkerTestScraper(map[string]string{
+		"https://javdb.test/search?q=IPX-535ZH&f=all": remasterSearchPage("IPX-535", "IPX-535-ZH-HD"),
+		"https://javdb.test/v/ipx535":                 remasterDetailPage("IPX-535"),
+		"https://javdb.test/v/ipx535zhhd":             remasterDetailPage("IPX-535-ZH-HD"),
+	})
+	res, err := s.Search(context.Background(), "IPX-535ZH")
+	require.NoError(t, err, "the redundant -HD spelling behind the ZH tail folds to the same release")
+	require.NotNil(t, res)
+	assert.Equal(t, "IPX-535-ZH-HD", res.ID)
+}
+
+// The E-suffixed AI spelling classifies as a marker query too and folds
+// with its compact spelling.
+func TestSearchMarkerQueryESuffixAIRemaster(t *testing.T) {
+	s := newMarkerTestScraper(map[string]string{
+		"https://javdb.test/search?q=T28-123-E-AI&f=all": remasterSearchPage("T28-123EAI"),
+		"https://javdb.test/v/t28123eai":                 remasterDetailPage("T28-123EAI"),
+	})
+	res, err := s.Search(context.Background(), "T28-123-E-AI")
+	require.NoError(t, err, "an E-suffixed AI remaster must match its compact spelling")
+	require.NotNil(t, res)
+	assert.Equal(t, "T28-123EAI", res.ID)
+}

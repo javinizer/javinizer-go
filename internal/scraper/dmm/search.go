@@ -36,13 +36,24 @@ func (s *scraper) GetURL(ctx context.Context, id string) (string, error) {
 }
 
 func (s *scraper) getURLCtx(ctx context.Context, id string) (string, error) {
-	contentID, err := s.resolveContentIDCtx(ctx, id)
+	url, _, err := s.getURLCtxWithResolution(ctx, id)
+	return url, err
+}
+
+// getURLCtxWithResolution is getURLCtx plus the resolution origin: fromCache
+// reports whether the content id came from the persistent cache instead of
+// this call's verified resolver. Search gates its display-id fill on the
+// origin — a cached AI mapping whose page publishes no 品番 cannot be
+// verified in-flow, while a freshly resolved mapping was just verified.
+func (s *scraper) getURLCtxWithResolution(ctx context.Context, id string) (string, bool, error) {
+	contentID, fromCache, err := s.resolveContentIDWithOrigin(ctx, id)
 
 	if err != nil {
 		logging.Debugf("DMM: Content-ID resolution failed for %s: %v", id, err)
-		return "", fmt.Errorf("movie not found on DMM: %w", err)
+		return "", fromCache, fmt.Errorf("movie not found on DMM: %w", err)
 	}
 
+	boundMarker, _, _, rawQuery := classifyRemasterQuery(id)
 	baseID := normalizeID(contentID)
 
 	searchQueries := []string{
@@ -74,7 +85,7 @@ func (s *scraper) getURLCtx(ctx context.Context, id string) (string, error) {
 		if err := s.rateLimiter.Wait(ctx); err != nil {
 			if ctx.Err() != nil {
 				logging.Debugf("DMM: Context cancelled before search query '%s'", searchQuery)
-				return "", fmt.Errorf("DMM search cancelled: %w", ctx.Err())
+				return "", fromCache, fmt.Errorf("DMM search cancelled: %w", ctx.Err())
 			}
 			logging.Debugf("DMM: Rate limit wait failed for query '%s': %v", searchQuery, err)
 			continue
@@ -112,7 +123,11 @@ func (s *scraper) getURLCtx(ctx context.Context, id string) (string, error) {
 
 		candidates := s.extractCandidateURLs(doc, contentID)
 		logging.Debugf("DMM: Found %d candidates from search query '%s'", len(candidates), searchQuery)
-		allCandidates = append(allCandidates, candidates...)
+		for _, candidate := range candidates {
+			if boundMarker == "" || bindResolvedCID(candidate.contentID, contentID, rawQuery) {
+				allCandidates = append(allCandidates, candidate)
+			}
+		}
 	}
 
 	if len(allCandidates) == 0 {
@@ -124,15 +139,25 @@ func (s *scraper) getURLCtx(ctx context.Context, id string) (string, error) {
 		allCandidates = append(allCandidates, directCandidates...)
 	}
 
+	if boundMarker != "" {
+		boundCandidates := make([]urlCandidate, 0, len(allCandidates))
+		for _, c := range allCandidates {
+			if bindResolvedCID(c.contentID, contentID, rawQuery) {
+				boundCandidates = append(boundCandidates, c)
+			}
+		}
+		allCandidates = boundCandidates
+	}
+
 	if len(allCandidates) == 0 {
-		return "", fmt.Errorf("no scrapable URL found for movie on DMM")
+		return "", fromCache, fmt.Errorf("no scrapable URL found for movie on DMM")
 	}
 
 	sortCandidates(allCandidates)
 
 	foundURL := allCandidates[0].url
 	logging.Debugf("DMM: Selected URL for %s (priority %d): %s", id, allCandidates[0].priority, foundURL)
-	return foundURL, nil
+	return foundURL, fromCache, nil
 }
 
 func (s *scraper) tryDirectURLs(ctx context.Context, contentID string) []urlCandidate {
@@ -217,7 +242,7 @@ func urlPriority(rawURL string) int {
 }
 
 func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult, error) {
-	url, err := s.getURLCtx(ctx, id)
+	url, resolvedFromCache, err := s.getURLCtxWithResolution(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -227,7 +252,7 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 	if strings.Contains(url, "video.dmm.co.jp") && s.useBrowser {
 		logging.Debug("DMM: Using browser mode for video.dmm.co.jp page")
 
-		bodyHTML, err := fetchWithBrowser(ctx, url, s.browserConfig.Timeout, s.proxyProfile, s.getEnvLookup(), s.getFs())
+		bodyHTML, err := s.fetchBrowserPage(ctx, url)
 		if err != nil {
 			return nil, fmt.Errorf("browser fetch failed: %w", err)
 		}
@@ -260,7 +285,141 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		}
 	}
 
-	return s.parseHTML(ctx, doc, url)
+	foldedMarker, _, _, isCID := classifyRemasterQuery(id)
+	res, err := s.parseHTMLWithOptions(ctx, doc, url, foldedMarker != "")
+	if err == nil && isCID && foldedMarker != "" && rawRemasterCIDPageConflict(doc, url) {
+		// The raw-query counterpart of the page-identity guard below, for
+		// H/HD and AI cids alike: DMM followed a redirect or served a
+		// different product for the echoed cid (see
+		// rawRemasterCIDPageConflict), so miss honestly instead of
+		// returning its metadata under the cid-derived identity. The AI leg
+		// is number-free — AI cid numbers diverge from the display number
+		// by design, so only the series, marker and catalog suffix
+		// comparison, plus the markerless base-release row, can prove the
+		// foreign page.
+		return nil, models.NewScraperNotFoundError("DMM", fmt.Sprintf("DMM page for %s publishes a different release", id))
+	}
+	if err == nil && foldedMarker != "" && !isCID {
+		// The page's 品番 is the authoritative display identity even for AI
+		// remasters (unlike the cid digits, which diverge from the display
+		// number): a page publishing another release's identity means
+		// resolution landed on the wrong product (e.g. a stale same-series
+		// cache mapping), so miss honestly instead of returning it.
+		if !pageDisplayIdentityMatchesQuery(doc, id) {
+			if resolvedFromCache {
+				// A cached mapping whose page publishes a conflicting 品番
+				// is stale: DMM redirected the cached cid to another
+				// release's product (a cached 1rct00156h serving RCT-157-HD),
+				// so every retry would reuse it and never reach the verified
+				// resolver even if search could now find the correct product.
+				// Invalidate the mapping — its existence is proven by the
+				// cache-hit resolution — and re-resolve through the verified
+				// resolver like the missing-品番 self-heal below, falling back
+				// to a miss when the mapping cannot be invalidated. The
+				// retried pass resolves freshly, so it cannot loop back here.
+				if derr := s.contentIDRepo.Delete(ctx, id); derr != nil {
+					logging.Debugf("DMM: cannot invalidate content-id mapping for %s: %v", id, derr)
+					return nil, models.NewScraperNotFoundError("DMM", fmt.Sprintf("DMM page for %s publishes a different release", id))
+				}
+				logging.Debugf("DMM: invalidated conflicting content-id mapping for %s; re-resolving", id)
+				return s.Search(ctx, id)
+			}
+			return nil, models.NewScraperNotFoundError("DMM", fmt.Sprintf("DMM page for %s publishes a different release", id))
+		}
+		// The page's authoritative 品番 (zero-trimmed by the site) outranks the
+		// query-derived spelling; only fill in when the page provided nothing.
+		if res.ID == "" {
+			if resolvedFromCache {
+				// A cached AI mapping whose page publishes no 品番 is
+				// unverified: a stale same-series sibling (dv00999ai under
+				// DV-818AI) would otherwise publish its metadata under the
+				// query's identity. Invalidate the mapping (its existence is
+				// proven by the cache-hit resolution) and re-resolve through
+				// the verified resolver — the round-15-style cache repair —
+				// falling back to a miss when re-resolution cannot verify the
+				// release. The retried pass resolves freshly, so it may fill
+				// the canonical spelling from this-call verification.
+				if derr := s.contentIDRepo.Delete(ctx, id); derr != nil {
+					logging.Debugf("DMM: cannot invalidate content-id mapping for %s: %v", id, derr)
+					return nil, models.NewScraperNotFoundError("DMM", fmt.Sprintf("DMM page for %s publishes no identity to verify its cached content-id mapping", id))
+				}
+				logging.Debugf("DMM: invalidated unverified content-id mapping for %s; re-resolving", id)
+				return s.Search(ctx, id)
+			}
+			res.ID = canonicalRemasterDisplayID(id)
+		}
+	}
+	return res, err
+}
+
+// pageDisplayIdentityMatchesQuery reports whether the page's 品番, when it
+// publishes a parseable remaster display identity, names the queried release.
+// The page-supplied display identity is authoritative for display numbers
+// even on AI remasters (unlike cid numbers, which diverge), so a 品番 whose
+// padding-normalized identity names a different series, number, catalog
+// suffix or marker than the query belongs to the wrong release. A nonempty
+// markerless 品番 conflicts the same way on a marker-bearing query: it names
+// the base release — plain or carrying the E/Z catalog suffix — not the
+// remaster, so the page belongs to the wrong product. Pages without a 品番
+// row and unparseable queries publish nothing authoritative to compare and
+// keep the existing behavior.
+func pageDisplayIdentityMatchesQuery(doc *goquery.Document, query string) bool {
+	if doc == nil {
+		return true
+	}
+	display := extractDisplayID(doc)
+	if display == "" {
+		return true
+	}
+	// A parseable query is marker-bearing by construction — the tail regex
+	// requires the marker — so the query parse doubles as the marker-bearing
+	// request gate for the markerless row below.
+	qSeries, qNumber, qSuffix, qMarker, qOK := displayIdentityTuple(query)
+	pSeries, pNumber, pSuffix, pMarker, ok := displayIdentityTuple(display)
+	if !ok {
+		// A nonempty markerless 品番 (a cached RCT-156H query whose page
+		// publishes RCT-157, or its E/Z-suffixed spelling RCT-157E) names the
+		// base release, not the query's remaster: the page is the wrong
+		// product's and must miss honestly instead of publishing its metadata
+		// under the query's identity.
+		if qOK && isMarkerlessDisplayID(display) {
+			return false
+		}
+		return true
+	}
+	if !qOK {
+		return true
+	}
+	return pSeries == qSeries && pNumber == qNumber && pSuffix == qSuffix && pMarker == qMarker
+}
+
+// rawRemasterCIDPageConflict reports whether the page fetched for a raw
+// marker-bearing content-id query (1rct00156h, dv00899ai) publishes another
+// release's identity. The query echoes itself as the resolved cid, so the
+// page is expected to publish that cid's release; a 品番 that numbers
+// another release (RCT-157-HD under a 156 cid), names a foreign series or
+// marker line, or is markerless and so names the base release means DMM
+// followed a redirect or served a different product — the same conflicts
+// parseHTML's ScrapeURL-side gate (pageDisplayIdentityForCID, rounds
+// 17/18/20a) rejects for the same URL. Raw AI queries take the gate
+// number-free (rounds 25b/26): their cid numbers diverge from the display
+// number by design (dv00899ai maps to DV-818AI), so a same-series 品番
+// numbering a different release is still adopted — the page-outranks
+// semantics TestSearchRawAICIDPageOutranksKept pins — and only the series,
+// marker and catalog suffix comparison, plus the markerless base-release
+// row, can prove the foreign page. Pages without a parseable 品番 publish
+// nothing authoritative to conflict with.
+func rawRemasterCIDPageConflict(doc *goquery.Document, url string) bool {
+	cid := extractContentIDFromURL(url)
+	if cid == "" {
+		return false
+	}
+	cidMarker, cidSeries, cidSuffix, _ := classifyRemasterQuery(cid)
+	if cidMarker == "" {
+		return false
+	}
+	_, conflict := pageDisplayIdentityForCID(doc, cid, cidSeries, cidMarker, cidSuffix)
+	return conflict
 }
 
 func (s *scraper) ScrapeURL(ctx context.Context, url string) (*models.ScraperResult, error) {
@@ -273,7 +432,7 @@ func (s *scraper) ScrapeURL(ctx context.Context, url string) (*models.ScraperRes
 	if strings.Contains(url, "video.dmm.co.jp") && s.useBrowser {
 		logging.Debug("DMM ScrapeURL: Using browser mode for video.dmm.co.jp page")
 
-		bodyHTML, err := fetchWithBrowser(ctx, url, s.browserConfig.Timeout, s.proxyProfile, s.getEnvLookup(), s.getFs())
+		bodyHTML, err := s.fetchBrowserPage(ctx, url)
 		if err != nil {
 			return nil, models.NewScraperStatusError("DMM", 0, fmt.Sprintf("browser fetch failed: %v", err))
 		}
@@ -321,5 +480,29 @@ func (s *scraper) ScrapeURL(ctx context.Context, url string) (*models.ScraperRes
 		}
 	}
 
-	return s.parseHTML(ctx, doc, url)
+	res, err := s.parseHTML(ctx, doc, url)
+	if err == nil {
+		fillMarkerIDFromURL(res, url)
+	}
+	return res, err
+}
+
+// fillMarkerIDFromURL ports Search's canonical-spelling fill to direct URL
+// scrapes: an H/HD-marker page whose 品番 row is absent publishes an empty
+// display ID, so derive the canonical spelling from the URL cid, whose
+// number matches the display number for H/HD releases. AI-marker cids do
+// not encode the display number (dv00899ai maps to DV-818AI), so they never
+// derive a spelling — only the page's authoritative 品番 may publish an
+// AI-remaster identity, and an absent row leaves the ID empty.
+func fillMarkerIDFromURL(res *models.ScraperResult, url string) {
+	if res == nil || res.ID != "" {
+		return
+	}
+	cid := stripRentalSuffixMarkerAware(extractContentIDFromURL(url))
+	if cid == "" {
+		return
+	}
+	if marker, _, _, _ := classifyRemasterQuery(cid); marker == "h" {
+		res.ID = canonicalRemasterDisplayID(cid)
+	}
 }

@@ -190,7 +190,11 @@ func (s *scraper) ScrapeURL(ctx context.Context, urlStr string) (*models.Scraper
 		return nil, fmt.Errorf("failed to parse R18.dev response (preview: %s): %w", bodyPreview, err)
 	}
 
-	return s.parseResponse(ctx, &data, urlStr)
+	res, err := s.parseResponse(ctx, &data, urlStr)
+	if err == nil {
+		res, err = guardRemasterResult(id, res)
+	}
+	return res, err
 }
 
 // ResolveDownloadProxyForHost declares R18.dev-owned media hosts for downloader proxy routing.
@@ -340,6 +344,10 @@ func (r *r18ContentIDResolver) ResolveURL(ctx context.Context, id string) (strin
 		normalizeIDWithoutStripping(id),
 		normalizeID(id),
 	}
+	foldedMarker, markerSeries := classifyRemaster(id)
+	if foldedMarker != "" {
+		idVariations = append(idVariations, remasterDisplaySpellings(id)...)
+	}
 
 	// Remove duplicates
 	seen := make(map[string]bool)
@@ -371,9 +379,24 @@ func (r *r18ContentIDResolver) ResolveURL(ctx context.Context, id string) (strin
 			if !strings.Contains(contentType, "text/html") {
 				var lookupData contentIDLookupResponse
 				if err := json.Unmarshal(resp.Body(), &lookupData); err == nil && lookupData.ContentID != "" {
+					if foldedMarker != "" && !cidMatchesRemasterQuery(lookupData.ContentID, id, foldedMarker, markerSeries) {
+						continue
+					}
 					returnedDVDID := normalizeDVDID(lookupData.DVDID)
+					if foldedMarker != "" && lookupData.DVDID != "" && displayIDsMatchByIdentity(lookupData.DVDID, id) {
+						// Marker-carrying display identity match (H/HD-folded) — trust it.
+						contentID := lookupData.ContentID
+						logging.Debugf("R18: ✓ Resolved marker query %s (display %s) to content-id: %s", id, lookupData.DVDID, contentID)
+						return fmt.Sprintf("%s/videos/vod/movies/detail/-/combined=%s/json", baseURL, contentID), true
+					}
 					if returnedDVDID == idVariation {
-						// Exact dvd_id match — trust it immediately.
+						// Exact normalized dvd_id match — trust it immediately, unless
+						// normalization collapsed a pinned T/T28 boundary: a marker query
+						// only trusts a row whose display identity agrees.
+						if foldedMarker != "" && lookupData.DVDID != "" && !displayIDsMatchByIdentity(lookupData.DVDID, id) {
+							// claims a conflicting display identity; do not trust it
+							continue
+						}
 						contentID := lookupData.ContentID
 						logging.Debugf("R18: ✓ Resolved %s (tried: %s) to content-id: %s", id, idVariation, contentID)
 						return fmt.Sprintf("%s/videos/vod/movies/detail/-/combined=%s/json", baseURL, contentID), true
@@ -382,9 +405,20 @@ func (r *r18ContentIDResolver) ResolveURL(ctx context.Context, id string) (strin
 					// query. Record it as a fallback but keep trying variations —
 					// the content-id variation lookup below prefers canonical
 					// prefixes and avoids mislabeled duplicate dvd_id entries.
-					if returnedDVDID == "" && fuzzyContentIDURL == "" && contentIDCoreMatch(lookupData.ContentID, idVariation) {
-						fuzzyContentIDURL = fmt.Sprintf("%s/videos/vod/movies/detail/-/combined=%s/json", baseURL, lookupData.ContentID)
-						logging.Debugf("R18: Recorded fuzzy content-id %s for %s (null dvd_id); deferring to variation lookup", lookupData.ContentID, idVariation)
+					// Marker queries gate on marker identity; H/HD spellings
+					// additionally bind the query's core number, while AI display
+					// queries reject null-dvd_id rows outright — series+marker
+					// alone are not identity for AI (see
+					// cidMatchesRemasterFuzzyQuery).
+					if returnedDVDID == "" && fuzzyContentIDURL == "" {
+						fuzzyOK := contentIDCoreMatch(lookupData.ContentID, idVariation)
+						if foldedMarker != "" {
+							fuzzyOK = cidMatchesRemasterFuzzyQuery(lookupData.ContentID, id, foldedMarker, markerSeries)
+						}
+						if fuzzyOK {
+							fuzzyContentIDURL = fmt.Sprintf("%s/videos/vod/movies/detail/-/combined=%s/json", baseURL, lookupData.ContentID)
+							logging.Debugf("R18: Recorded fuzzy content-id %s for %s (null dvd_id); deferring to variation lookup", lookupData.ContentID, idVariation)
+						}
 					}
 				}
 			}
@@ -430,6 +464,11 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		return nil, fmt.Errorf("R18.dev scraper is disabled")
 	}
 
+	// DMM rental content ids (e.g. dv00899air, 1rct00156hr) never exist on
+	// r18.dev: normalize to the base identity before the dump lookup,
+	// classification, candidate generation and raw-identity comparisons.
+	id = stripRentalSuffixMarkerAware(id)
+
 	// Dump fast path: on a dvd_id hit the dump returns a complete
 	// ScraperResult with no r18.dev API call at all; on a norm miss it may
 	// resolve content_id candidates locally, in which case each candidate URL
@@ -437,7 +476,9 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 	// per-candidate fallthrough so a stale dump row never dead-ends the scrape.
 	result, dumpCandidates := s.searchFromDump(ctx, id)
 	if result != nil {
-		return result, nil
+		if guarded, err := guardRemasterResult(id, result); err == nil {
+			return guarded, nil
+		}
 	}
 
 	// If the context was cancelled (e.g. user hit Ctrl+C) during the dump
@@ -450,8 +491,8 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 	for _, candidate := range dumpCandidates {
 		candidateURL := fmt.Sprintf(apiURL, candidate.ContentID)
 		logging.Debugf("R18: Fetching dump-resolved candidate URL for %s: %s", id, candidateURL)
-		if res, fetchErr := s.fetchAndParseCandidate(ctx, candidateURL, candidate.ContentID); fetchErr == nil && res != nil {
-			return res, nil
+		if res, fetchErr := s.fetchAndParseCandidate(ctx, candidateURL, candidate.ContentID, id); fetchErr == nil && res != nil {
+			return guardRemasterResult(id, res)
 		} else if fetchErr != nil {
 			logging.Debugf("R18: dump-resolved candidate %s failed for %s: %v", candidateURL, id, fetchErr)
 		}
@@ -464,16 +505,16 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 	if resolvedURL, ok := resolver.ResolveURL(ctx, id); ok {
 		finalURL = resolvedURL
 	} else {
-		// Fallback: use normalized ID URL
-		var err error
-		finalURL, err = s.getURLCtx(ctx, id)
-		if err != nil {
-			return nil, err
-		}
+		// Fallback: use normalized ID URL (normalization is total; it cannot error)
+		finalURL, _ = s.getURLCtx(ctx, id)
 		logging.Debugf("R18: Using normalized ID URL (no content-id found): %s", finalURL)
 	}
 
-	return s.fetchAndParseCombined(ctx, finalURL)
+	res, err := s.fetchAndParseCombined(ctx, finalURL, id)
+	if err != nil {
+		return nil, err
+	}
+	return guardRemasterResult(id, res)
 }
 
 // fetchAndParseCandidate fetches a dump-resolved candidate URL and validates
@@ -481,8 +522,8 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 // answer a stale dump row with a 200 carrying a different movie (or an empty
 // payload); treat those as failures so the next candidate or the HTTP resolver
 // takes over, mirroring the resolver's core-match safeguard.
-func (s *scraper) fetchAndParseCandidate(ctx context.Context, url, wantContentID string) (*models.ScraperResult, error) {
-	res, err := s.fetchAndParseCombined(ctx, url)
+func (s *scraper) fetchAndParseCandidate(ctx context.Context, url, wantContentID, queryID string) (*models.ScraperResult, error) {
+	res, err := s.fetchAndParseCombined(ctx, url, queryID)
 	if err != nil {
 		return nil, err
 	}
@@ -499,7 +540,7 @@ func (s *scraper) fetchAndParseCandidate(ctx context.Context, url, wantContentID
 // fetchAndParseCombined fetches the combined-detail JSON for url and parses it
 // into a ScraperResult. Non-200 status codes, HTML payloads, and malformed
 // JSON all surface as errors so callers can fail over to the next candidate.
-func (s *scraper) fetchAndParseCombined(ctx context.Context, url string) (*models.ScraperResult, error) {
+func (s *scraper) fetchAndParseCombined(ctx context.Context, url, queryID string) (*models.ScraperResult, error) {
 	resp, err := s.doRequestWithRetryCtx(ctx, url)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch data from R18.dev: %w", err)
@@ -525,6 +566,10 @@ func (s *scraper) fetchAndParseCombined(ctx context.Context, url string) (*model
 			bodyPreview = bodyPreview[:200]
 		}
 		return nil, fmt.Errorf("failed to parse R18.dev response (preview: %s): %w", bodyPreview, err)
+	}
+
+	if marker, series := classifyRemaster(queryID); marker != "" && !isRawRemasterContentIDQuery(queryID) && !markerVariationAccept(resp.Body(), queryID, marker, series) {
+		return nil, models.NewScraperNotFoundError("R18.dev", "response conflicts with the requested remaster identity")
 	}
 
 	return s.parseResponse(ctx, &data, url)
@@ -565,13 +610,51 @@ func (s *scraper) parseResponse(ctx context.Context, data *r18Response, sourceUR
 	return result, nil
 }
 
-// resolveIDs determines the movie ID from DVDID or ContentID.
+// resolveIDs determines the movie ID from DVDID or ContentID. With a null
+// dvd_id, an H/HD remaster content id derives its display ID: H/HD cids keep
+// the display number (1rct00156h is RCT-156H), and the admitting guards
+// (cidMatchesRemasterFuzzyQuery / markerVariationAccept) have already bound
+// the cid's number to the query's display number, so the derived identity is
+// verified rather than a synthesized echo — without it an R18-only scrape
+// would succeed with no identity to aggregate or organize. AI content ids
+// stay unset: r18.dev AI cid numbers are slot numbers, not display numbers
+// (dv00899ai is DV-818-AI), so deriving would fabricate a wrong ID; that
+// path publishes only the dvd_id the response itself supplies.
 func resolveIDs(data *r18Response) string {
-	movieID := data.DVDID
-	if movieID == "" && data.ContentID != "" {
-		movieID = contentIDToID(data.ContentID)
+	if data.DVDID != "" {
+		return data.DVDID
 	}
-	return movieID
+	if data.ContentID == "" {
+		return ""
+	}
+	series, number, ez, marker, ok := r18ParseRemasterTail(data.ContentID)
+	if !ok {
+		return contentIDToID(data.ContentID)
+	}
+	if marker == "ai" {
+		return ""
+	}
+	return remasterCIDDisplayID(series, number, ez)
+}
+
+// remasterCIDDisplayID renders the parsed identity of an H/HD remaster
+// content id as its canonical display ID, normalizing number padding the way
+// contentIDToID does (1rct00156h -> RCT-156H, 7zzqq00042h -> ZZQQ-042H). The
+// parse is T/T28-aware, so a catalog-prefixed t28 cid keeps its real series
+// (9t2800123h -> T28-123H) where contentIDToID's plain regex split would
+// misread it as series t and fabricate a conflicting display identity.
+func remasterCIDDisplayID(series, number, ez string) string {
+	if num, err := strconv.Atoi(number); err == nil {
+		number = fmt.Sprintf("%03d", num)
+	}
+	return strings.ToUpper(series) + "-" + number + strings.ToUpper(ez) + "H"
+}
+
+// cidCarriesRemasterMarker reports whether the content id itself ends in a
+// remaster marker (h/hd/ai, with optional e/z).
+func cidCarriesRemasterMarker(cid string) bool {
+	_, _, _, marker, ok := r18ParseRemasterTail(cid)
+	return ok && marker != ""
 }
 
 // resolveLocalizedStrings populates title, description, director, maker, label, and series
@@ -911,7 +994,11 @@ func stripDMMPrefix(id string) string {
 // r18.dev returning a 200 for a different movie that happens to share a prefix slot, so the
 // result does not depend solely on global prefix-table ordering.
 func (s *scraper) resolveByContentIDVariations(ctx context.Context, id string) (string, error) {
+	foldedMarker, markerSeries := classifyRemaster(id)
 	variations := r18devdump.ContentIDCandidates(id)
+	if foldedMarker != "" {
+		variations = r18devdump.ContentIDCandidatesWithMarker(id)
+	}
 	if len(variations) == 0 {
 		return "", nil
 	}
@@ -939,7 +1026,12 @@ func (s *scraper) resolveByContentIDVariations(ctx context.Context, id string) (
 		if resp.StatusCode() == 200 {
 			contentType := resp.Header().Get("Content-Type")
 			if !strings.Contains(contentType, "text/html") {
-				if variationCoreMatches(resp.Body(), normalizedDVDID) {
+				matched := variationCoreMatches(resp.Body(), normalizedDVDID)
+				if foldedMarker != "" {
+					matched = responseContentIDMatchesVariation(resp.Body(), variation) &&
+						markerVariationAccept(resp.Body(), id, foldedMarker, markerSeries)
+				}
+				if matched {
 					logging.Debugf("R18: ✓ Content-id variation %s resolved for %s", variation, id)
 					return u, nil
 				}

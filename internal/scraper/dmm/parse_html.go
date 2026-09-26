@@ -2,6 +2,7 @@ package dmm
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -24,6 +25,32 @@ var (
 )
 
 func (s *scraper) parseHTML(ctx context.Context, doc *goquery.Document, sourceURL string) (*models.ScraperResult, error) {
+	cid := extractContentIDFromURL(sourceURL)
+	marker, series, catalogSuffix, _ := classifyRemasterQuery(cid)
+	if marker != "" {
+		// The ScrapeURL-side analog of Search's pageDisplayIdentityMatchesQuery
+		// guard: a 品番 row whose parseable identity belongs to another
+		// release — a foreign series, catalog suffix or marker line, a
+		// markerless row naming the base release rather than the remaster, or
+		// (for H/HD cids, which keep the display number) a same-series row
+		// numbering another release — means DMM followed a redirect or served
+		// a different product for the cid. The page is rejected outright
+		// instead of labeling another release's metadata with the cid-derived
+		// identity via fillMarkerIDFromURL.
+		if _, conflict := pageDisplayIdentityForCID(doc, cid, series, marker, catalogSuffix); conflict {
+			return nil, models.NewScraperNotFoundError("DMM", fmt.Sprintf("DMM page for %s publishes a different release", cid))
+		}
+	}
+	// Direct-URL scrapes take the same marker-aware path as search results: a
+	// marker-bearing URL cid (dv00899ai) defers to the page's authoritative
+	// 品番 instead of the cid-derived spelling.
+	return s.parseHTMLWithOptions(ctx, doc, sourceURL, marker != "")
+}
+
+// parseHTMLWithOptions is parseHTML plus marker-path identity control: when
+// verbatimContentID is true the server-stated content id (catalog digit
+// intact) is persisted instead of the prefix-cleaned form.
+func (s *scraper) parseHTMLWithOptions(ctx context.Context, doc *goquery.Document, sourceURL string, verbatimContentID bool) (*models.ScraperResult, error) {
 	result := &models.ScraperResult{
 		Source:    s.Name(),
 		SourceURL: sourceURL,
@@ -37,7 +64,7 @@ func (s *scraper) parseHTML(ctx context.Context, doc *goquery.Document, sourceUR
 	}
 
 	// 4-step pipeline
-	s.extractIdentifiers(result, sourceURL)
+	s.extractIdentifiers(result, doc, sourceURL, verbatimContentID)
 	s.extractTextualMetadata(result, doc, isNewSite, jsonldMetadata)
 	s.extractStructuredData(ctx, result, doc, sourceURL, isNewSite, jsonldMetadata)
 	s.extractMediaFields(ctx, result, doc, sourceURL, isNewSite, jsonldMetadata)
@@ -46,8 +73,30 @@ func (s *scraper) parseHTML(ctx context.Context, doc *goquery.Document, sourceUR
 }
 
 // extractIdentifiers populates ContentID and ID from the source URL.
-func (s *scraper) extractIdentifiers(result *models.ScraperResult, sourceURL string) {
+func (s *scraper) extractIdentifiers(result *models.ScraperResult, doc *goquery.Document, sourceURL string, verbatim bool) {
 	if cid := extractContentIDFromURL(sourceURL); cid != "" {
+		if verbatim {
+			cid = stripRentalSuffixMarkerAware(cid)
+			cid = strings.ToLower(strings.ReplaceAll(cid, "-", ""))
+			result.ContentID = cid
+			result.ID = normalizeID(cid)
+			if marker, series, catalogSuffix, _ := classifyRemasterQuery(cid); marker != "" {
+				if series == t28Series {
+					result.ID = t28CidDisplayID(cid)
+				} else if marker == "ai" {
+					// AI release CIDs do not encode the display number (dv00899ai maps
+					// to DV-818AI), so the CID-derived spelling would sort the title
+					// under the wrong release; only the page 品番 may publish the identity.
+					result.ID = ""
+				} else if strings.HasSuffix(result.ID, "HD") {
+					result.ID = result.ID[:len(result.ID)-2] + "H"
+				}
+				if pageID := pageRemasterDisplayID(doc, cid, series, marker, catalogSuffix); pageID != "" {
+					result.ID = pageID
+				}
+			}
+			return
+		}
 		// Always strip rental 'r' suffix from content IDs regardless of URL path.
 		// DMM uses 'r' suffix for rental content IDs across all URL types, not just /rental/ pages.
 		cid = stripRentalSuffix(cid)

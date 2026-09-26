@@ -11,7 +11,12 @@ var (
 	reNumericPart = regexp.MustCompile(`(?i)(?:^|[-_.\s])(?:(pt|part))[-_.\s]?(\d{1,2})(?:$|[-_.\s])`)
 	// Matches plain numbers: -1, -2, _3, .1, etc. (common multi-part pattern)
 	rePlainNumber = regexp.MustCompile(`^[-_.\s]?(\d{1,2})$`)
-	reDiscPart    = regexp.MustCompile(`(?i)(?:^|[-_.\s])(cd|disc|disk)[-_.\s]?(\d{1,2})(?:$|[-_.\s])`)
+	// vol joins the disc family so marker-adjacent volume suffixes
+	// (RCT-156-HD-vol2, RCT156HDvol2) feed the same part detection as
+	// cd2: no bare vol series exists in the r18.dev content-id prefix
+	// lookup (evol/gvol/qvol/zvol/vola/vold keep their leading letters),
+	// so the label's leading boundary never eats a real series spelling.
+	reDiscPart = regexp.MustCompile(`(?i)(?:^|[-_.\s])(cd|disc|disk|vol)[-_.\s]?(\d{1,2})(?:$|[-_.\s])`)
 	// Strict letter-only remainder: optional sep + [a-z] + optional sep
 	reLetterOnlyRemainder = regexp.MustCompile(`(?i)^\s*[-_.\s]?([a-z])\s*$`)
 	reLetterWithTrailing  = regexp.MustCompile(`(?i)^\s*[-_.\s]?([a-z])[-_.\s]+\[?(?:\d{3,}|\d[a-z0-9]*[a-z][a-z0-9]*)\]?[a-z0-9]*(?:[-_.\s]+\[?[a-z0-9]+\]?)*\s*$`)

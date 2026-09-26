@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 
@@ -282,6 +283,51 @@ func TestRescrapePhase_Rescrape_BackfillsNameAndExtensionOnMapMiss(t *testing.T)
 	assert.Equal(t, ".mp4", r.FileMatchInfo.Extension,
 		"rescrape fallback fmi.Extension must be backfilled from filepath.Ext(lookup.FilePath) — "+
 			"without it the organize preview renders the video row as 'ABF-346' (no extension)")
+}
+
+func TestRescrapePhase_Rescrape_BackfillsNameAndExtensionOnMapMiss_FullwidthExtension(t *testing.T) {
+	// Regression (round 30 folded contract): rescrape_phase.go's fallback
+	// FileMatchInfo previously derived Name + Extension with raw
+	// filepath.Base/filepath.Ext, which is ASCII-only — a fullwidth extension
+	// (RCT-156-HD．ｍｋｖ) yielded an empty Extension, so the tracker-map-miss
+	// path handed the organize preview a match whose rename target lost the
+	// .mkv suffix. The fallback must fold like the scanner did when it
+	// admitted the file: Name carries the folded extension, Path stays raw.
+	wf := &stubRescrapeWorkflow{
+		scrapeResult: &scrape.ScrapeResult{Movie: &models.Movie{ID: "RCT-156"}},
+	}
+	rt := resultstore.New(1, []string{"source/RCT-156-HD．ｍｋｖ"})
+	// Empty tracker — the file is registered so CommitResult runs, but the
+	// FileMatchInfo map has no entry for this path (map-miss scenario), so
+	// the fallback fmi persists into the stored resultstore.MovieResult.
+	inputs := rescrapePhaseInputs{
+		WF:        wf,
+		ResultMap: rt,
+		Finder:    rt,
+		JobID:     models.NewJobID(),
+	}
+
+	phase := NewRescrapePhase()
+	cmd := RescrapeCmd{MovieID: "RCT-156", FilePath: "source/RCT-156-HD．ｍｋｖ"}
+	result, err := phase.Rescrape(context.Background(), inputs, cmd)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, models.RescrapeStatusSuccess, result.Status)
+
+	// Tracker's FileMatchInfo map misses this path, so the fallback fmi
+	// persists into the stored resultstore.MovieResult.
+	results := rt.GetMovieResultsForMovieID("RCT-156")
+	require.NotEmpty(t, results)
+	r := results[0]
+	assert.Equal(t, "source/RCT-156-HD．ｍｋｖ", r.FileMatchInfo.Path,
+		"rescrape fallback fmi.Path keeps the raw on-disk spelling (source of truth for file I/O)")
+	assert.Equal(t, "RCT-156-HD.mkv", r.FileMatchInfo.Name,
+		"rescrape fallback fmi.Name must fold the fullwidth extension — the stem keeps its raw spelling")
+	assert.Equal(t, ".mkv", r.FileMatchInfo.Extension,
+		"rescrape fallback fmi.Extension must fold the fullwidth spelling to .mkv — "+
+			"without it rename-enabled organize previews produce a target without the extension")
+	assert.True(t, strings.HasSuffix(r.FileMatchInfo.Name, r.FileMatchInfo.Extension),
+		"the folded contract requires Extension to be a literal suffix of Name")
 }
 
 func TestRescrapePhase_ScrapeSingle_NilWorkflow(t *testing.T) {

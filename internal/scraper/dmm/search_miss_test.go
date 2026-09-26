@@ -2,6 +2,7 @@ package dmm
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -366,9 +367,69 @@ func TestSearch_SuccessViaHTTP(t *testing.T) {
 	assert.Equal(t, "dmm", result.Source)
 }
 
+// Search: browser-mode fetch failure for a video.dmm.co.jp product page.
+// The cached markerless mapping skips resolution, the URL finder falls back
+// to direct URLs, and only the video.dmm.co.jp amateur page answers — so
+// Search must fetch it through the browser and surface the hook's failure
+// instead of falling back to the HTTP client.
+func TestSearch_BrowserFetchErrorVideoDMM(t *testing.T) {
+	s, _ := newRemasterTestScraper(t)
+	s.useBrowser = true
+	s.browserFetch = func(ctx context.Context, url string) (string, error) {
+		return "", errors.New("no local chrome")
+	}
+	s.cacheContentID(context.Background(), "ABF-030", "118abf030")
+	s.client.SetTransport(&remasterRoundTripper{serve: func(u string) (int, string) {
+		if strings.Contains(u, "video.dmm.co.jp/amateur/content/") {
+			return 200, `<html><body><h1 id="title" class="item">Amateur</h1></body></html>`
+		}
+		return 404, ""
+	}})
+
+	_, err := s.Search(context.Background(), "ABF-030")
+	require.Error(t, err, "the browser fetch failure must surface")
+	assert.Contains(t, err.Error(), "browser fetch failed")
+}
+
+// Search: HTTP fetch failure for the selected product page. The URL finder
+// finds the candidate from the search results, but the product-page GET
+// fails at the transport level — Search must surface the fetch error.
+func TestSearch_ProductPageFetchError(t *testing.T) {
+	s, _ := newRemasterTestScraper(t)
+	s.cacheContentID(context.Background(), "HTTP-001", "http00001")
+	s.client.SetTransport(&detailFetchErrorRoundTripper{
+		searchHTML: `<html><body><a href="/digital/videoa/-/detail/=/cid=http00001/">HTTP-001</a></body></html>`,
+	})
+
+	_, err := s.Search(context.Background(), "HTTP-001")
+	require.Error(t, err, "the product-page fetch failure must surface")
+	assert.Contains(t, err.Error(), "failed to fetch data from DMM")
+}
+
+// detailFetchErrorRoundTripper serves search pages but fails every
+// product-page fetch, pinning Search's HTTP-fetch error return.
+type detailFetchErrorRoundTripper struct{ searchHTML string }
+
+func (rt *detailFetchErrorRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if strings.Contains(req.URL.String(), "/detail/=") {
+		return nil, errors.New("connection reset")
+	}
+	header := make(http.Header)
+	header.Set("Content-Type", "text/html")
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     header,
+		Body:       io.NopCloser(strings.NewReader(rt.searchHTML)),
+		Request:    req,
+	}, nil
+}
+
 // --- ScrapeURL: browser mode path for video.dmm.co.jp ---
 
 func TestScrapeURL_BrowserModeVideoDMM(t *testing.T) {
+	if testing.Short() {
+		t.Skip("live-network browser fetch; a locally available Chrome succeeds where CI has none")
+	}
 	s := &scraper{
 		enabled:       true,
 		useBrowser:    true,
