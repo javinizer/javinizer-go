@@ -94,8 +94,9 @@ func TestFindAuthoritativeProjectionsBoundedQueriesAndSourceOfTruth(t *testing.T
 		require.Len(t, movie.Credits, 2)
 		require.Equal(t, "Candidate Credit", movie.Credits[0].CreditedName)
 		require.NotNil(t, movie.Credits[0].Actress)
-		require.Len(t, movie.Actresses, 1)
-		require.Equal(t, verified.ID, movie.Actresses[0].ID)
+		require.Len(t, movie.Actresses, 2)
+		require.Equal(t, candidate.ID, movie.Actresses[0].ID)
+		require.Equal(t, verified.ID, movie.Actresses[1].ID)
 	})
 	allContent, allCanonical := make([]string, 0, 1000), make([]string, 0, 1000)
 	for i := range movies {

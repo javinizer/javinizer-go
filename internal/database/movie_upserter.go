@@ -1036,13 +1036,16 @@ func (u *MovieUpserter) persistCreditsTx(tx *gorm.DB, movie *models.Movie) error
 		}
 	}
 
+	if err := recomputeActressCandidateQuarantineTx(tx); err != nil {
+		return err
+	}
 	surviving, err := creditRepo.ListByMovieTx(tx, movie.ContentID)
 	if err != nil {
 		return err
 	}
 	projections := make([]models.Actress, 0, len(surviving))
 	for _, credit := range surviving {
-		if credit.Suppressed || credit.Actress == nil || !credit.Actress.Verified {
+		if credit.Suppressed || credit.Actress == nil || (!credit.Actress.Verified && credit.Actress.AmbiguityQuarantined) {
 			continue
 		}
 		projections = append(projections, *credit.Actress)

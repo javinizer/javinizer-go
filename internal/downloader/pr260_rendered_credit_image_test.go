@@ -88,7 +88,7 @@ func TestPR260ActressImageCreditEligibilityAndLegacyFallback(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("image")) }))
 	defer server.Close()
 	verified := models.Actress{ID: 1, FirstName: "Visible", LastName: "Person", ThumbURL: server.URL + "/visible.jpg", Verified: true}
-	candidate := models.Actress{ID: 2, FirstName: "Hidden", LastName: "Candidate", ThumbURL: server.URL + "/candidate.jpg", Verified: false}
+	candidate := models.Actress{ID: 2, FirstName: "Hidden", LastName: "Candidate", ThumbURL: server.URL + "/candidate.jpg", Verified: false, AmbiguityQuarantined: true}
 
 	tests := []struct {
 		name      string
@@ -97,7 +97,7 @@ func TestPR260ActressImageCreditEligibilityAndLegacyFallback(t *testing.T) {
 		wantNFO   []string
 		denyNFO   []string
 	}{
-		{name: "suppressed and unverified excluded", movie: &models.Movie{ID: "EXCLUDED", Actresses: []models.Actress{verified, candidate}, Credits: []models.MovieCredit{{ActressID: verified.ID, Actress: &verified, Suppressed: true}, {ActressID: candidate.ID, Actress: &candidate}}}, denyNFO: []string{"Visible Person", "Hidden Candidate"}},
+		{name: "suppressed and quarantined excluded", movie: &models.Movie{ID: "EXCLUDED", Actresses: []models.Actress{verified, candidate}, Credits: []models.MovieCredit{{ActressID: verified.ID, Actress: &verified, Suppressed: true}, {ActressID: candidate.ID, Actress: &candidate}}}, denyNFO: []string{"Visible Person", "Hidden Candidate"}},
 		{name: "present unresolved credits do not fall back", movie: &models.Movie{ID: "UNRESOLVED", Actresses: []models.Actress{verified}, Credits: []models.MovieCredit{{ActressID: candidate.ID, Actress: &candidate, CreditedName: "Reported Candidate"}}}, denyNFO: []string{"Visible Person", "Reported Candidate"}},
 		{name: "blank verified credit is skipped", movie: &models.Movie{ID: "BLANK-CREDIT", Credits: []models.MovieCredit{{Actress: &models.Actress{ID: 3, ThumbURL: server.URL + "/blank.jpg", Verified: true}}}}},
 		{name: "blank legacy actress is skipped", movie: &models.Movie{ID: "BLANK-LEGACY", Actresses: []models.Actress{{ID: 4, ThumbURL: server.URL + "/blank-legacy.jpg", Verified: true}}, Credits: nil}},

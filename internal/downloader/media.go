@@ -676,7 +676,7 @@ func (d *Downloader) downloadActressImages(ctx context.Context, movie *models.Mo
 	if len(movie.Credits) > 0 {
 		for i := range movie.Credits {
 			credit := movie.Credits[i]
-			if credit.Suppressed || credit.Actress == nil || !credit.Actress.Verified {
+			if credit.Suppressed || credit.Actress == nil || (!credit.Actress.Verified && credit.Actress.AmbiguityQuarantined) {
 				continue
 			}
 			canonical := models.FormatActressName(*credit.Actress, models.FormatActressNameOptions{

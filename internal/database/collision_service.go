@@ -202,21 +202,23 @@ func (s *CollisionService) resolveTx(tx *gorm.DB, collisionID uint, resolution s
 		case models.CreditFieldCreditedName:
 			if isCJK(collision.ReportedValue) {
 				if err := tx.Model(&models.Actress{}).Where("id = ?", credit.ActressID).Updates(map[string]interface{}{
-					colJapaneseName: collision.ReportedValue,
-					colOrigin:       ActressOriginUser,
-					colVerified:     true,
-					colUpdatedAt:    time.Now().UTC(),
+					colJapaneseName:         collision.ReportedValue,
+					colOrigin:               ActressOriginUser,
+					colVerified:             true,
+					colAmbiguityQuarantined: false,
+					colUpdatedAt:            time.Now().UTC(),
 				}).Error; err != nil {
 					return 0, wrapDBErr("adopt canonical", fmt.Sprintf("actress %d", credit.ActressID), err)
 				}
 			} else {
 				first, last := splitReportedName(collision.ReportedValue)
 				if err := tx.Model(&models.Actress{}).Where("id = ?", credit.ActressID).Updates(map[string]interface{}{
-					colFirstName: first,
-					colLastName:  last,
-					colOrigin:    ActressOriginUser,
-					colVerified:  true,
-					colUpdatedAt: time.Now().UTC(),
+					colFirstName:            first,
+					colLastName:             last,
+					colOrigin:               ActressOriginUser,
+					colVerified:             true,
+					colAmbiguityQuarantined: false,
+					colUpdatedAt:            time.Now().UTC(),
 				}).Error; err != nil {
 					return 0, wrapDBErr("adopt canonical", fmt.Sprintf("actress %d", credit.ActressID), err)
 				}
@@ -398,18 +400,18 @@ func setCreditSuppressedDeferredTx(tx *gorm.DB, creditID uint, suppressed bool) 
 		INSERT OR IGNORE INTO movie_actresses (movie_content_id, actress_id)
 		SELECT ?, ?
 		WHERE EXISTS (
-			SELECT 1 FROM actresses WHERE id = ? AND verified = ?
+			SELECT 1 FROM actresses WHERE id = ? AND (verified = ? OR ambiguity_quarantined = ?)
 		)
-	`, credit.MovieContentID, credit.ActressID, credit.ActressID, true).Error; err != nil {
+	`, credit.MovieContentID, credit.ActressID, credit.ActressID, true, false).Error; err != nil {
 			return err
 		}
 	} else if err := tx.Exec(`
 		INSERT OR IGNORE INTO movie_actresses (movie_content_id, actress_id)
 		SELECT ?, ?
 		WHERE EXISTS (
-			SELECT 1 FROM actresses WHERE id = ? AND verified = ?
+			SELECT 1 FROM actresses WHERE id = ? AND (verified = ? OR ambiguity_quarantined = ?)
 		)
-	`, credit.MovieContentID, credit.ActressID, credit.ActressID, true).Error; err != nil {
+	`, credit.MovieContentID, credit.ActressID, credit.ActressID, true, false).Error; err != nil {
 		return err
 	}
 	return nil

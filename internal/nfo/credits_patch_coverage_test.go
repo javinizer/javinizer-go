@@ -84,11 +84,17 @@ func TestBuildActorsFromCreditsPatchBranches(t *testing.T) {
 		{},
 		{Actress: primary},
 		{CreditedName: "Hatano Yui"},
-		{CreditedName: "Aoi", Actress: &models.Actress{JapaneseName: "葵", Verified: false}},
+		{CreditedName: "Aoi", Actress: &models.Actress{JapaneseName: "葵", Verified: false, AmbiguityQuarantined: true}},
 	}
 
 	actors := g.buildActorsFromCredits(credits)
 	assert.Equal(t, []actor{
 		{Name: "Hatano Yui", Role: "波多野結衣", Thumb: "https://example.com/yui.jpg"},
 	}, actors)
+}
+func TestBuildActorsFromCreditsIncludesUnquarantinedCandidates(t *testing.T) {
+	g := &Generator{config: &Config{FirstNameOrder: true}}
+	candidate := &models.Actress{FirstName: "Aoi", Verified: false}
+	actors := g.buildActorsFromCredits([]models.MovieCredit{{CreditedName: "Aoi", Actress: candidate}})
+	assert.Equal(t, []actor{{Name: "Aoi", Order: 0}}, actors)
 }

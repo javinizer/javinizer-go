@@ -309,7 +309,7 @@ func (g *Generator) buildActorsFromCredits(credits []models.MovieCredit) []actor
 			continue
 		}
 		if credit.Actress != nil {
-			if !credit.Actress.Verified {
+			if !credit.Actress.Verified && credit.Actress.AmbiguityQuarantined {
 				continue
 			}
 		}
