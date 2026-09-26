@@ -231,7 +231,7 @@ The pre-commit hook (`scripts/pre-commit.sample`) runs **8 checks** and blocks f
 | # | Check | Command |
 |---|-------|---------|
 | 1 | Go formatting | `gofmt -l .` |
-| 2 | golangci-lint | `$HOME/go/bin/golangci-lint run ./...` (≥ v2.4.0; skipped if not installed) |
+| 2 | golangci-lint | `golangci-lint run ./...` (≥ v2.4.0; resolved via `$GOLANGCI_LINT` → `PATH` → `$HOME/go/bin`; skipped if not installed, too old, or built with an older Go than the active toolchain) |
 | 3 | go vet | `go vet ./...` |
 | 4 | Fast unit tests | `go test -short -timeout=60s ./...` |
 | 5 | Build verification | `go build -o /tmp/javinizer-test ./cmd/javinizer` |
