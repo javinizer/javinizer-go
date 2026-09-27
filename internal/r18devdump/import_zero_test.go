@@ -178,18 +178,17 @@ func TestReplaceFile_BothRenamesFail(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestReplaceFile_RemoveThenRenameFallback(t *testing.T) {
+func TestReplaceFile_OverwriteExistingDestination_Windows(t *testing.T) {
 	if runtime.GOOS != "windows" {
-		t.Skip("POSIX os.Rename replaces in place; the fallback path exists only on Windows")
+		t.Skip("POSIX stays on plain os.Rename; this side effect is Windows-only")
 	}
-	// First rename fails (file onto directory), remove succeeds (empty dir),
-	// and the second rename lands — exercising the fallback branch used on
-	// Windows for destination-exists updates.
+	// dst exists and gets replaced via MoveFileEx(REPLACE_EXISTING) — the
+	// customer case this helper was added for.
 	dir := t.TempDir()
 	src := filepath.Join(dir, "new.db")
-	dst := filepath.Join(dir, "stale.db")
+	dst := filepath.Join(dir, "old.db")
 	require.NoError(t, os.WriteFile(src, []byte("new"), 0o600))
-	require.NoError(t, os.MkdirAll(dst, 0o755))
+	require.NoError(t, os.WriteFile(dst, []byte("old"), 0o600))
 	require.NoError(t, ReplaceFile(src, dst))
 	data, err := os.ReadFile(dst)
 	require.NoError(t, err)

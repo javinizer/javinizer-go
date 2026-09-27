@@ -460,8 +460,11 @@ func TestValidateSidecar_UppercaseEntityIDAccepted(t *testing.T) {
 	path := looseTableFixture(t, "actresses",
 		"id TEXT PRIMARY KEY, name_romaji TEXT, image_url TEXT, name_kanji TEXT, name_kana TEXT",
 		"INSERT INTO actresses_loose (id, name_romaji) VALUES ('ABC', 'Jane')")
-	_, err := ValidateSidecar(context.Background(), path)
+	store, err := ValidateSidecar(context.Background(), path)
 	require.NoError(t, err)
+	// Windows: temp-dir cleanup unlinks the held DB file, so accept-path
+	// callers MUST be closed; production code closes before any swap.
+	require.NoError(t, store.Close())
 }
 
 func TestValidateSidecar_BlankContentIDRejected(t *testing.T) {
