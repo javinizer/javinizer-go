@@ -117,6 +117,31 @@ func TestValidateSidecar_WrongMetaColumnsRejected(t *testing.T) {
 	assert.Contains(t, err.Error(), "dump_meta.key")
 }
 
+func TestValidateSidecar_IndexNameSquattingRejected(t *testing.T) {
+	// Codex: an index named like ours but defined on the wrong column passes
+	// name-only validation while turning every lookup into a full table scan.
+	path := importFixture(t)
+	alterFixture(t, path,
+		"DROP INDEX idx_videos_dvd_id_norm",
+		"CREATE INDEX idx_videos_dvd_id_norm ON videos(title_en)")
+	_, err := ValidateSidecar(context.Background(), path)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrDumpInvalid)
+	assert.Contains(t, err.Error(), "idx_videos_dvd_id_norm")
+	assert.Contains(t, err.Error(), "title_en")
+}
+
+func TestValidateSidecar_IndexWrongTableRejected(t *testing.T) {
+	path := importFixture(t)
+	alterFixture(t, path,
+		"DROP INDEX idx_videos_dvd_id_norm",
+		"CREATE INDEX idx_videos_dvd_id_norm ON video_actresses(content_id)")
+	_, err := ValidateSidecar(context.Background(), path)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrDumpInvalid)
+	assert.Contains(t, err.Error(), "wrong table")
+}
+
 func TestValidateSidecar_NotADatabase(t *testing.T) {
 	dst := filepath.Join(t.TempDir(), "junk.db")
 	require.NoError(t, os.WriteFile(dst, []byte("SQLite format 3\x00 but then garbage"), 0o600))

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -14,13 +15,17 @@ import (
 // kind.
 var ErrDumpInvalid = errors.New("invalid dump sidecar")
 
-// requiredIndexes are the exact index names Import creates; a sidecar missing
-// any of them is structurally invalid for the current read paths.
-var requiredIndexes = []string{
-	"idx_videos_dvd_id_norm",
-	"idx_video_actresses_cid",
-	"idx_video_categories_cid",
-	"idx_video_directors_cid",
+// requiredIndexDefs pin each Import-created index's name, owning table, and
+// column list in key order. A duck-typed reuse of the name (e.g. an
+// idx_videos_dvd_id_norm over title_en) passes a name-only check while
+// silently turning every dump lookup into a full table scan.
+type indexDef struct{ table, columns string }
+
+var requiredIndexDefs = map[string]indexDef{
+	"idx_video_actresses_cid":  {"video_actresses", "content_id"},
+	"idx_video_categories_cid": {"video_categories", "content_id"},
+	"idx_video_directors_cid":  {"video_directors", "content_id"},
+	"idx_videos_dvd_id_norm":   {"videos", "dvd_id_norm"},
 }
 
 // ValidateSidecar opens the staged sidecar at path and verifies it is a
@@ -127,16 +132,45 @@ func validateColumns(ctx context.Context, db *sql.DB, table string, cols []strin
 	return nil
 }
 
-// validateIndexes requires every import-created index by exact name.
+// queryString runs a single-row aggregate query scanning into a string.
+// Callers' queries use COALESCE so absent entities scan as "" with no error;
+// the only error path is transport-level (e.g. cancelled context).
+func queryString(ctx context.Context, db *sql.DB, query string, args ...any) (string, error) {
+	var s string
+	if err := db.QueryRowContext(ctx, query, args...).Scan(&s); err != nil {
+		return "", err
+	}
+	return s, nil
+}
+
+// validateIndexes requires every index to exist with its exact owning table
+// and ordered column list, not merely by name.
 func validateIndexes(ctx context.Context, db *sql.DB) error {
-	for _, idx := range requiredIndexes {
-		n, err := queryCount(ctx, db,
-			"SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=?", idx)
+	names := make([]string, 0, len(requiredIndexDefs))
+	for name := range requiredIndexDefs {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		want := requiredIndexDefs[name]
+		// One row per index: owning table and ordered column list, both empty
+		// (":") when the index is missing.
+		combined, err := queryString(ctx, db,
+			"SELECT COALESCE((SELECT tbl_name FROM sqlite_master WHERE type='index' AND name=?), '') || ':' || "+
+				"COALESCE((SELECT group_concat(name, ',') FROM (SELECT name FROM pragma_index_info(?) ORDER BY seqno)), '')",
+			name, name)
 		if err != nil {
-			return fmt.Errorf("%w: index probe %s: %v", ErrDumpInvalid, idx, err)
+			return fmt.Errorf("%w: index probe %s: %v", ErrDumpInvalid, name, err)
 		}
-		if n == 0 {
-			return fmt.Errorf("%w: missing required index %s", ErrDumpInvalid, idx)
+		tbl, cols, _ := strings.Cut(combined, ":")
+		if tbl == "" {
+			return fmt.Errorf("%w: missing required index %s", ErrDumpInvalid, name)
+		}
+		if tbl != want.table {
+			return fmt.Errorf("%w: index %s on wrong table %s (want %s)", ErrDumpInvalid, name, tbl, want.table)
+		}
+		if cols != want.columns {
+			return fmt.Errorf("%w: index %s on %s has columns [%s], want [%s]", ErrDumpInvalid, name, tbl, cols, want.columns)
 		}
 	}
 	return nil
