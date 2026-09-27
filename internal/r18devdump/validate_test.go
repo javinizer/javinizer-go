@@ -278,6 +278,19 @@ func TestValidateSidecar_CollationIndexRejected(t *testing.T) {
 	assert.Contains(t, err.Error(), "collations")
 }
 
+func TestValidateSidecar_TextRuntimeMinsRejected(t *testing.T) {
+	// Codex: SQLite affinity doesn't constrain storage, so a loose rebuild may
+	// carry 'unknown' where the reads scan sql.NullInt64.
+	path := looseTableFixture(t, "videos",
+		"content_id TEXT PRIMARY KEY, dvd_id TEXT, dvd_id_norm TEXT, title_en TEXT, title_ja TEXT, comment_en TEXT, comment_ja TEXT, runtime_mins INTEGER, release_date TEXT, sample_url TEXT, maker_id TEXT, label_id TEXT, series_id TEXT, jacket_full_url TEXT, jacket_thumb_url TEXT, gallery_full_first TEXT, gallery_full_last TEXT, gallery_thumb_first TEXT, gallery_thumb_last TEXT, site_id TEXT, service_code TEXT",
+		"INSERT INTO videos_loose (content_id, runtime_mins) VALUES ('118ipx00535', 'unknown')")
+	alterFixture(t, path, "CREATE INDEX idx_videos_dvd_id_norm ON videos(dvd_id_norm)")
+	_, err := ValidateSidecar(context.Background(), path)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrDumpInvalid)
+	assert.Contains(t, err.Error(), "runtime_mins")
+}
+
 func TestValidateSidecar_NotADatabase(t *testing.T) {
 	dst := filepath.Join(t.TempDir(), "junk.db")
 	require.NoError(t, os.WriteFile(dst, []byte("SQLite format 3\x00 but then garbage"), 0o600))

@@ -22,10 +22,10 @@ var ErrDumpInvalid = errors.New("invalid dump sidecar")
 type indexDef struct{ table, columns string }
 
 var requiredIndexDefs = map[string]indexDef{
-	"idx_video_actresses_cid":  {"video_actresses", contentIDColumn},
-	"idx_video_categories_cid": {"video_categories", contentIDColumn},
-	"idx_video_directors_cid":  {"video_directors", contentIDColumn},
-	"idx_videos_dvd_id_norm":   {"videos", "dvd_id_norm"},
+	"idx_video_actresses_cid":  {videoActressesTable, contentIDColumn},
+	"idx_video_categories_cid": {videoCategoriesTable, contentIDColumn},
+	"idx_video_directors_cid":  {videoDirectorsTable, contentIDColumn},
+	"idx_videos_dvd_id_norm":   {videosTable, "dvd_id_norm"},
 }
 
 // ValidateSidecar opens the staged sidecar at path and verifies it is a
@@ -59,6 +59,7 @@ func ValidateSidecar(ctx context.Context, path string) (*Store, error) {
 		validateIndexes,
 		validateNonEmpty,
 		validateLogicalKeys,
+		validateColumnTypes,
 		validateIntegrity,
 	} {
 		if err := stage(ctx, store.db); err != nil {
@@ -227,7 +228,7 @@ var logicalKeys = []struct {
 	table string
 	keys  []string
 }{
-	{"videos", []string{contentIDColumn}},
+	{videosTable, []string{contentIDColumn}},
 	{"actresses", []string{"id"}},
 	{"makers", []string{"id"}},
 	{"labels", []string{"id"}},
@@ -235,9 +236,9 @@ var logicalKeys = []struct {
 	{"directors", []string{"id"}},
 	{"categories", []string{"id"}},
 	{"trailers", []string{contentIDColumn}},
-	{"video_actresses", []string{contentIDColumn, "actress_id"}},
-	{"video_categories", []string{contentIDColumn, "category_id"}},
-	{"video_directors", []string{contentIDColumn, "director_id"}},
+	{videoActressesTable, []string{contentIDColumn, "actress_id"}},
+	{videoCategoriesTable, []string{contentIDColumn, "category_id"}},
+	{videoDirectorsTable, []string{contentIDColumn, "director_id"}},
 }
 
 // validateLogicalKeys enforces the lost-primary-key invariants for every table
@@ -319,6 +320,34 @@ func notNullPredicates(keys []string) []string {
 		out = append(out, k+" IS NOT NULL")
 	}
 	return out
+}
+
+// typedColumns are the generated schema's INTEGER columns; lookups scan these
+// into sql.NullInt64, so non-integer/non-NULL content (possible in a loose
+// rebuild) must be rejected up front.
+var typedColumns = []struct {
+	table string
+	col   string
+}{
+	{videosTable, "runtime_mins"},
+	{videoActressesTable, "ordinality"},
+}
+
+// validateColumnTypes enforces the INTEGER storage class for every typed
+// column. SQLite column affinity does not constrain storage; checking typeof
+// on non-NULL values is the only reliable gate.
+func validateColumnTypes(ctx context.Context, db *sql.DB) error {
+	for _, tc := range typedColumns {
+		bad, err := queryCount(ctx, db,
+			"SELECT COUNT(*) FROM "+tc.table+" WHERE "+tc.col+" IS NOT NULL AND typeof("+tc.col+") != 'integer'")
+		if err != nil {
+			return fmt.Errorf("%w: %s.%s type probe: %v", ErrDumpInvalid, tc.table, tc.col, err)
+		}
+		if bad > 0 {
+			return fmt.Errorf("%w: dump contains %s.%s values that are not integers", ErrDumpInvalid, tc.table, tc.col)
+		}
+	}
+	return nil
 }
 
 // validateIntegrity runs quick_check; the result must be exactly 'ok'.

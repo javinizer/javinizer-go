@@ -159,11 +159,19 @@ var tableSchema = map[string]struct {
 	},
 }
 
+// SQLite-side table names shared by import and validation.
+const (
+	videosTable          = "videos"
+	videoActressesTable  = "video_actresses"
+	videoCategoriesTable = "video_categories"
+	videoDirectorsTable  = "video_directors"
+)
+
 // sqliteTableName maps a dump table name to its SQLite destination.
 func sqliteTableName(dumpName string) string {
 	switch dumpName {
 	case derivedVideoTable:
-		return "videos"
+		return videosTable
 	case "derived_actress":
 		return "actresses"
 	case "derived_maker":
@@ -177,11 +185,11 @@ func sqliteTableName(dumpName string) string {
 	case "derived_category":
 		return "categories"
 	case "derived_video_actress":
-		return "video_actresses"
+		return videoActressesTable
 	case "derived_video_category":
-		return "video_categories"
+		return videoCategoriesTable
 	case "derived_video_director":
-		return "video_directors"
+		return videoDirectorsTable
 	case "source_dmm_trailer":
 		return "trailers"
 	default:
