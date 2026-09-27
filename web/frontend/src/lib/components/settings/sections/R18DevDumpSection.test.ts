@@ -143,6 +143,36 @@ describe('R18DevDumpSection upload', () => {
 		);
 	}, 12_000);
 
+	it('prefers last_error over the presence fallback when no WS terminal frame arrives', async () => {
+		// Codex #273: rename-succeeded-but-reload-failed uploads report
+		// present:true + nonempty last_error; the poller must surface the
+		// failure instead of exiting successfully at the presence check.
+		uploadDump.mockResolvedValue({ message: 'upload staged' });
+		mockGetDumpStatus.mockResolvedValue({
+			present: true,
+			enabled: true,
+			running: false,
+			last_error: 'dump installed but registry reload failed: simulated',
+			last_error_kind: 'reload',
+			row_count: 1,
+			path: '/tmp/x.db',
+		} as never);
+
+		render(R18DevDumpSection);
+		await expandSection();
+		const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+		await fireEvent.change(input, { target: { files: [dumpFile('good.db')] } });
+
+		await waitFor(
+			() => {
+				expect(
+					screen.getByText('[reload] dump installed but registry reload failed: simulated'),
+				).toBeTruthy();
+			},
+			{ timeout: 9000 },
+		);
+	});
+
 	it('renders async failures with the server error kind prefix', async () => {
 		uploadDump.mockResolvedValue({ message: 'upload staged' });
 		mockGetDumpStatus.mockResolvedValue({

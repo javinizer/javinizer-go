@@ -57,6 +57,9 @@ func TestUpload_StagingCreateFailure_500(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("read-only directory attribute is not enforced on Windows")
 	}
+	if os.Geteuid() == 0 {
+		t.Skip("permission bits do not constrain the root user")
+	}
 	h, dumpPath, srv := newUploadHandler(t)
 	require.NoError(t, os.MkdirAll(filepath.Dir(dumpPath), 0o755))
 	require.NoError(t, os.Chmod(filepath.Dir(dumpPath), 0o500))

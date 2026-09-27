@@ -143,6 +143,16 @@
 				status = s;
 				// Fallback: if the dump was absent before and is now present,
 				// the download completed (WS frame may have been missed).
+				// Failure wins over presence: a renamed-but-not-reloaded
+				// upload reports present:true with a nonempty last_error.
+				if (!s.running && s.last_error) {
+					downloadError = s.last_error_kind
+						? `[${s.last_error_kind}] ${s.last_error}`
+						: s.last_error;
+					downloading = false;
+					polling = false;
+					return;
+				}
 				if (!wasPresent && s.present) {
 					downloading = false;
 					polling = false;

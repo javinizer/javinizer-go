@@ -102,6 +102,21 @@ func TestValidateSidecar_ZeroVideosRejected(t *testing.T) {
 	assert.Contains(t, err.Error(), "zero videos")
 }
 
+func TestValidateSidecar_WrongMetaColumnsRejected(t *testing.T) {
+	// Codex: a dump_meta with a row count but no key/value columns passes the
+	// old count-only check while breaking every provenance read afterward.
+	path := importFixture(t)
+	alterFixture(t, path,
+		"CREATE TABLE dump_meta_new (k TEXT PRIMARY KEY, v TEXT)",
+		"INSERT INTO dump_meta_new VALUES ('source_url', 'https://example/x')",
+		"DROP TABLE dump_meta",
+		"ALTER TABLE dump_meta_new RENAME TO dump_meta")
+	_, err := ValidateSidecar(context.Background(), path)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrDumpInvalid)
+	assert.Contains(t, err.Error(), "dump_meta.key")
+}
+
 func TestValidateSidecar_NotADatabase(t *testing.T) {
 	dst := filepath.Join(t.TempDir(), "junk.db")
 	require.NoError(t, os.WriteFile(dst, []byte("SQLite format 3\x00 but then garbage"), 0o600))

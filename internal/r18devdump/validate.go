@@ -73,7 +73,9 @@ func queryCount(ctx context.Context, db *sql.DB, query string, args ...any) (int
 	return n, nil
 }
 
-// validateProvenance requires a present, non-empty dump_meta.
+// validateProvenance requires a present, non-empty dump_meta with the
+// key/value columns Stats reads (a wrong-shaped dump_meta passes a row count
+// while breaking every subsequent provenance read).
 func validateProvenance(ctx context.Context, db *sql.DB) error {
 	n, err := queryCount(ctx, db, "SELECT COUNT(*) FROM dump_meta")
 	if err != nil {
@@ -81,6 +83,9 @@ func validateProvenance(ctx context.Context, db *sql.DB) error {
 	}
 	if n == 0 {
 		return fmt.Errorf("%w: dump_meta carries no provenance rows", ErrDumpInvalid)
+	}
+	if err := validateColumns(ctx, db, "dump_meta", []string{"key", "value"}); err != nil {
+		return err
 	}
 	return nil
 }
