@@ -303,9 +303,13 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 			if importErr != nil {
 				// Import failed — restore the old dump handle so the scraper
 				// can keep using the existing dump. The old file is intact
-				// (Import writes to .tmp and only renames on success).
-				if reloadErr := h.reloadDump(path); reloadErr != nil {
-					logging.Warnf("r18dev dump: failed to restore handle after import error: %v", reloadErr)
+				// (Import writes to .tmp and only renames on success). Skip the
+				// rebuild when no dump exists yet — reloading would only log a
+				// bogus "hot-swapped" line for a missing file.
+				if _, statErr := os.Stat(path); statErr == nil {
+					if reloadErr := h.reloadDump(path); reloadErr != nil {
+						logging.Warnf("r18dev dump: failed to restore handle after import error: %v", reloadErr)
+					}
 				}
 				return importErr
 			}
@@ -325,9 +329,13 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 				_ = os.Remove(p)
 			}
 			// Re-open the dump handle if we closed it above (restore the
-			// previous dump so the scraper can keep using it).
-			if reloadErr := h.reloadDump(path); reloadErr != nil {
-				logging.Warnf("r18dev dump: failed to restore handle after failed download: %v", reloadErr)
+			// previous dump so the scraper can keep using it). Skip when the
+			// dump file doesn't exist — nothing to restore, and reloading
+			// would log "hot-swapped" for a missing file.
+			if _, statErr := os.Stat(path); statErr == nil {
+				if reloadErr := h.reloadDump(path); reloadErr != nil {
+					logging.Warnf("r18dev dump: failed to restore handle after failed download: %v", reloadErr)
+				}
 			}
 			h.broadcastProgress(errorResponseKey, 0, 0)
 			return
