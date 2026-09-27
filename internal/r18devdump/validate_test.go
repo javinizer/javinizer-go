@@ -427,6 +427,20 @@ func TestValidateSidecar_NotADatabase(t *testing.T) {
 	assert.True(t, errors.Is(err, ErrDumpInvalid))
 }
 
+func TestValidateSidecar_TabbedContentIDRejected(t *testing.T) {
+	// Codex: SQLite's one-arg TRIM strips only ASCII spaces; 'abc\t' would
+	// pass TRIM while the importer's TrimSpace rejects it. The probe strips
+	// the full ASCII whitespace set to mirror the importer.
+	path := looseTableFixture(t, "videos",
+		"content_id TEXT PRIMARY KEY, dvd_id TEXT, dvd_id_norm TEXT, title_en TEXT, title_ja TEXT, comment_en TEXT, comment_ja TEXT, runtime_mins INTEGER, release_date TEXT, sample_url TEXT, maker_id TEXT, label_id TEXT, series_id TEXT, jacket_full_url TEXT, jacket_thumb_url TEXT, gallery_full_first TEXT, gallery_full_last TEXT, gallery_thumb_first TEXT, gallery_thumb_last TEXT, site_id TEXT, service_code TEXT",
+		"INSERT INTO videos_loose (content_id, dvd_id, dvd_id_norm) VALUES ('118ipx00001' || char(9), 'IPX-001', 'IPX001')")
+	alterFixture(t, path, "CREATE INDEX idx_videos_dvd_id_norm ON videos(dvd_id_norm)")
+	_, err := ValidateSidecar(context.Background(), path)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrDumpInvalid)
+	assert.Contains(t, err.Error(), "noncanonical")
+}
+
 func TestValidateSidecar_UppercaseEntityIDAccepted(t *testing.T) {
 	// Codex: entity lookups compare exactly — no lowercase contract exists for
 	// entity ids, so an uppercase entity key must remain valid.

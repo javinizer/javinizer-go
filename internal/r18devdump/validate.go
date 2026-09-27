@@ -283,7 +283,12 @@ func checkLogicalKey(ctx context.Context, db *sql.DB, table string, keys []strin
 	idHygiene := ""
 	for _, k := range keys {
 		if k == contentIDColumn {
-			idHygiene = " AND (TRIM(" + k + ") = '' OR TRIM(" + k + ") != " + k + " OR " + k + " != LOWER(" + k + "))"
+			// SQLite's one-arg TRIM only strips ASCII spaces; mirror Go's
+			// strings.TrimSpace for the full ASCII whitespace set (the DMM
+			// content-id domain is ASCII by construction; non-ASCII whitespace
+			// divergences are deliberately out of scope).
+			fullTrim := "TRIM(" + k + ", ' '||char(9)||char(10)||char(11)||char(12)||char(13))"
+			idHygiene = " AND (" + fullTrim + " = '' OR " + fullTrim + " != " + k + " OR " + k + " != LOWER(" + k + "))"
 		}
 	}
 	casingMetric := "0"
