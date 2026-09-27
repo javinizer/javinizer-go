@@ -1104,3 +1104,58 @@ func TestDownload_ImportFnError(t *testing.T) {
 		t.Fatalf("expected importFn error, got: %v", err)
 	}
 }
+
+func TestDownload_DateAwareSkipForTokenProvenance(t *testing.T) {
+	dumpBody := "COPY public.derived_video (content_id, dvd_id) FROM stdin;\n118ipx00535\tIPX-535\n\\.\n"
+	gz := gzipped(t, dumpBody)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/latest" {
+			http.Redirect(w, r, "/dumps/r18dotdev_dump_2026-09-20.sql.gz", http.StatusFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/gzip")
+		_, _ = w.Write(gz)
+	}))
+	defer srv.Close()
+
+	imported := false
+	imp := func(r io.Reader, d DownloadResult) error { imported = true; return nil }
+
+	orig := LatestDumpURL
+	defer func() { LatestDumpURL = orig }()
+	LatestDumpURL = srv.URL + "/latest"
+
+	res, err := Download(context.Background(), srv.Client(), "r18dotdev_dump_2026-09-20.sql.gz", "2026-09-20", nil, imp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Unchanged {
+		t.Fatal("same-date token provenance should report the dump unchanged")
+	}
+	if imported {
+		t.Fatal("unchanged result must not invoke the importer")
+	}
+	if res.SourceDate != "2026-09-20" {
+		t.Fatalf("source date = %q, want 2026-09-20", res.SourceDate)
+	}
+
+	imported = false
+	res, err = Download(context.Background(), srv.Client(), "r18dotdev_dump_2026-09-20.sql.gz", "2026-09-19", nil, imp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Unchanged {
+		t.Fatal("newer upstream date must not be skipped")
+	}
+	if !imported {
+		t.Fatal("a newer dated dump must import")
+	}
+
+	res, err = Download(context.Background(), srv.Client(), srv.URL+"/dumps/r18dotdev_dump_2026-09-20.sql.gz", "2026-09-20", nil, imp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Unchanged {
+		t.Fatal("identical redirect target URL should report unchanged")
+	}
+}
