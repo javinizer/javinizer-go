@@ -474,3 +474,14 @@ func TestValidateSidecar_BlankContentIDRejected(t *testing.T) {
 	assert.ErrorIs(t, err, ErrDumpInvalid)
 	assert.Contains(t, err.Error(), "noncanonical")
 }
+
+func TestValidateSidecar_MissingProvenanceKeyRejected(t *testing.T) {
+	// Codex: a dump_meta with rows but no source_url makes Update unable to
+	// recognize the installed version, forcing spurious multi-GB redownloads.
+	path := importFixture(t)
+	alterFixture(t, path, "DELETE FROM dump_meta WHERE key = 'source_url'")
+	_, err := ValidateSidecar(context.Background(), path)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrDumpInvalid)
+	assert.Contains(t, err.Error(), "missing required provenance keys")
+}

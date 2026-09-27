@@ -107,10 +107,20 @@ func validateProvenance(ctx context.Context, db *sql.DB) error {
 // ordering, so a PK-less dump_meta makes provenance — and the update-skip
 // decision keyed on source_url — nondeterministic.
 func validateNoNullMetaKeys(ctx context.Context, db *sql.DB) error {
-	var nulls, dups int64
+	// Required provenance keys, in writeMeta order; an empty source_date value
+	// is legitimate (unknown-date dump), other keys' values are still covered
+	// by the separate NULL probe.
+	requiredKeys := []string{"source_url", "source_date", "imported_at"}
+	parts := []string{
+		"(SELECT COUNT(*) FROM dump_meta WHERE key IS NULL OR value IS NULL)",
+		"(SELECT COUNT(*) - COUNT(DISTINCT key) FROM dump_meta)",
+	}
+	for _, k := range requiredKeys {
+		parts = append(parts, "(SELECT COUNT(*) FROM dump_meta WHERE key = '"+k+"')")
+	}
+	var nulls, dups, haveURL, haveDate, haveImportedAt int64
 	err := db.QueryRowContext(ctx,
-		"SELECT (SELECT COUNT(*) FROM dump_meta WHERE key IS NULL OR value IS NULL), "+
-			"(SELECT COUNT(*) - COUNT(DISTINCT key) FROM dump_meta)").Scan(&nulls, &dups)
+		"SELECT "+strings.Join(parts, ", ")).Scan(&nulls, &dups, &haveURL, &haveDate, &haveImportedAt)
 	if err != nil {
 		return fmt.Errorf("%w: dump_meta key probe: %v", ErrDumpInvalid, err)
 	}
@@ -119,6 +129,10 @@ func validateNoNullMetaKeys(ctx context.Context, db *sql.DB) error {
 	}
 	if dups > 0 {
 		return fmt.Errorf("%w: dump_meta contains duplicate keys", ErrDumpInvalid)
+	}
+	presentKeyCount := haveURL + haveDate + haveImportedAt
+	if presentKeyCount < int64(len(requiredKeys)) {
+		return fmt.Errorf("%w: dump_meta is missing required provenance keys (has %d of %d)", ErrDumpInvalid, presentKeyCount, len(requiredKeys))
 	}
 	return nil
 }
