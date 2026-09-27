@@ -21,6 +21,9 @@ func TestImport_RejectsNoRecognizedRows(t *testing.T) {
 		{"garbage text", "<html><body>503 Service Unavailable</body></html>\n"},
 		{"copy header zero rows", "COPY public.derived_video (content_id, dvd_id) FROM stdin;\n\\.\n"},
 		{"unknown table with rows", "COPY public.not_a_dump_table (a) FROM stdin;\n1\n2\n\\.\n"},
+		// Codex round on #273: rows only for a non-video table are desynced
+		// garbage, not a dump — reject them like other tableless inputs.
+		{"non-video table rows only", "COPY public.derived_actress (id, name_romaji) FROM stdin;\n1\tJane\n\\.\n"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

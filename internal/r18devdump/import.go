@@ -246,7 +246,11 @@ func Import(ctx context.Context, r io.Reader, path string, opts ImportOptions) (
 	// Per-table batch accumulators.
 	batches := make(map[string][]DumpRow)
 	var totalVideos int64
-	var storedRows int64
+	// storedVideos counts emitted derived_video rows — the invariant guards
+	// video content specifically: a stream containing rows only for other
+	// tables (e.g. actresses) is desynced garbage and must not replace a
+	// working sidecar.
+	var storedVideos int64
 
 	flush := func(table string) error {
 		batch := batches[table]
@@ -289,7 +293,9 @@ func Import(ctx context.Context, r io.Reader, path string, opts ImportOptions) (
 		// Map dump column positions to our stored column order.
 		mapped := mapDumpRow(row, schema.columns)
 		batches[row.Table] = append(batches[row.Table], DumpRow{Table: row.Table, Values: mapped})
-		storedRows++
+		if row.Table == derivedVideoTable {
+			storedVideos++
+		}
 		if len(batches[row.Table]) >= importBatchSize {
 			return flush(row.Table)
 		}
@@ -300,9 +306,9 @@ func Import(ctx context.Context, r io.Reader, path string, opts ImportOptions) (
 		_ = tx.Rollback()
 		return ImportResult{}, fmt.Errorf("parse dump: %w", err)
 	}
-	if storedRows == 0 {
+	if storedVideos == 0 {
 		_ = tx.Rollback()
-		return ImportResult{}, fmt.Errorf("%w: input contained no COPY data for any known dump table (check that the source is a gzipped r18.dev pg_dump, decompressed before import)", ErrDumpNoRows)
+		return ImportResult{}, fmt.Errorf("%w: input contained no derived_video rows (check that the source is a gzipped r18.dev pg_dump, decompressed before import)", ErrDumpNoRows)
 	}
 	if err := flushAll(); err != nil {
 		_ = tx.Rollback()
