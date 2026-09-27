@@ -5,12 +5,16 @@ import (
 	"compress/gzip"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func setLatestDumpURL(u string) {
@@ -209,6 +213,239 @@ func TestDownload_InvalidGzip(t *testing.T) {
 	_, err := Download(context.Background(), srv.Client(), "", nil, func(io.Reader, DownloadResult) error { return nil })
 	if err == nil {
 		t.Fatal("expected gunzip error for non-gzip body")
+	}
+}
+
+// --- resumeReader coverage ---
+
+// truncatingServer serves the gzip body with a declared Content-Length but
+// writes only truncateAt bytes on the first (non-Range) request, then closes
+// the connection — producing io.ErrUnexpectedEOF on the client. Range
+// requests are honored with a proper 206 + Content-Range response.
+func truncatingServer(t *testing.T, gz []byte, truncateAt int) (*httptest.Server, *atomic.Int64, *atomic.Bool, *atomic.Bool) {
+	t.Helper()
+	var rangeStart atomic.Int64
+	var sawRange, sawIfRange atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("ETag", `"test-etag"`)
+		rangeHdr := r.Header.Get("Range")
+		if rangeHdr == "" {
+			w.Header().Set("Content-Type", "application/sql")
+			w.Header().Set("Content-Length", strconv.Itoa(len(gz)))
+			_, _ = w.Write(gz[:truncateAt])
+			return
+		}
+		sawRange.Store(true)
+		if r.Header.Get("If-Range") == `"test-etag"` {
+			sawIfRange.Store(true)
+		}
+		var off int64
+		if _, err := fmt.Sscanf(rangeHdr, "bytes=%d-", &off); err != nil {
+			t.Errorf("malformed Range header %q: %v", rangeHdr, err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		rangeStart.Store(off)
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", off, len(gz)-1, len(gz)))
+		w.WriteHeader(http.StatusPartialContent)
+		_, _ = w.Write(gz[off:])
+	}))
+	return srv, &rangeStart, &sawRange, &sawIfRange
+}
+
+func shrinkResumeBackoff(t *testing.T) {
+	t.Helper()
+	orig := resumeBackoffBase
+	resumeBackoffBase = time.Millisecond
+	t.Cleanup(func() { resumeBackoffBase = orig })
+}
+
+func TestDownload_ResumesAfterTruncation(t *testing.T) {
+	dumpBody := "COPY public.derived_video (content_id, dvd_id) FROM stdin;\n118ipx00535\tIPX-535\n\\.\n"
+	gz := gzipped(t, dumpBody)
+	truncateAt := len(gz) / 2
+
+	srv, rangeStart, sawRange, sawIfRange := truncatingServer(t, gz, truncateAt)
+	defer srv.Close()
+	orig := LatestDumpURL
+	setLatestDumpURL(srv.URL)
+	defer setLatestDumpURL(orig)
+	shrinkResumeBackoff(t)
+
+	var lastProgress, lastTotal int64
+	var received bytes.Buffer
+	_, err := Download(context.Background(), srv.Client(), "", func(n, total int64) {
+		lastProgress, lastTotal = n, total
+	}, func(r io.Reader, d DownloadResult) error {
+		_, err := io.Copy(&received, r)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("Download: %v", err)
+	}
+	if received.String() != dumpBody {
+		t.Errorf("received body mismatch:\ngot  %q\nwant %q", received.String(), dumpBody)
+	}
+	if !sawRange.Load() {
+		t.Error("server never saw a Range request — truncation was not resumed")
+	}
+	if !sawIfRange.Load() {
+		t.Error("resume request did not send If-Range with the original ETag")
+	}
+	if got := rangeStart.Load(); got != int64(truncateAt) {
+		t.Errorf("Range resume started at byte %d, want %d", got, truncateAt)
+	}
+	if lastProgress != int64(len(gz)) || lastTotal != int64(len(gz)) {
+		t.Errorf("final progress = %d/%d, want %d/%d", lastProgress, lastTotal, len(gz), len(gz))
+	}
+}
+
+func TestDownload_ResumeFailsWhenRangeIgnored(t *testing.T) {
+	dumpBody := "COPY public.derived_video (content_id, dvd_id) FROM stdin;\n118ipx00535\tIPX-535\n\\.\n"
+	gz := gzipped(t, dumpBody)
+	truncateAt := len(gz) / 2
+
+	// Truncate the first request; pretend to ignore Range afterwards (200
+	// full-body), simulating a server/proxy that cannot resume.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/sql")
+		w.Header().Set("Content-Length", strconv.Itoa(len(gz)))
+		if r.Header.Get("Range") == "" {
+			_, _ = w.Write(gz[:truncateAt])
+			return
+		}
+		_, _ = w.Write(gz) // status 200 — Range ignored
+	}))
+	defer srv.Close()
+	orig := LatestDumpURL
+	setLatestDumpURL(srv.URL)
+	defer setLatestDumpURL(orig)
+	shrinkResumeBackoff(t)
+
+	_, err := Download(context.Background(), srv.Client(), "", nil, func(r io.Reader, d DownloadResult) error {
+		_, err := io.Copy(io.Discard, r)
+		return err
+	})
+	if err == nil || !strings.Contains(err.Error(), "dump stream interrupted") {
+		t.Fatalf("expected a stream-interrupted error, got: %v", err)
+	}
+}
+
+func TestDownload_ResumeFailsWhenObjectChanges(t *testing.T) {
+	dumpBody := "COPY public.derived_video (content_id, dvd_id) FROM stdin;\n118ipx00535\tIPX-535\n\\.\n"
+	gz := gzipped(t, dumpBody)
+	truncateAt := len(gz) / 2
+
+	// Honor Range, but report a different total size on resume — the object
+	// changed mid-download and the splice is unsafe.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/sql")
+		rangeHdr := r.Header.Get("Range")
+		if rangeHdr == "" {
+			w.Header().Set("Content-Length", strconv.Itoa(len(gz)))
+			_, _ = w.Write(gz[:truncateAt])
+			return
+		}
+		var off int64
+		_, _ = fmt.Sscanf(rangeHdr, "bytes=%d-", &off)
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", off, len(gz), len(gz)+1))
+		w.WriteHeader(http.StatusPartialContent)
+		_, _ = w.Write(gz[off:])
+	}))
+	defer srv.Close()
+	orig := LatestDumpURL
+	setLatestDumpURL(srv.URL)
+	defer setLatestDumpURL(orig)
+	shrinkResumeBackoff(t)
+
+	_, err := Download(context.Background(), srv.Client(), "", nil, func(r io.Reader, d DownloadResult) error {
+		_, err := io.Copy(io.Discard, r)
+		return err
+	})
+	if err == nil || !strings.Contains(err.Error(), "dump object changed mid-download") {
+		t.Fatalf("expected an object-changed error, got: %v", err)
+	}
+}
+
+func TestDownload_ResumePrefersLastModifiedOverWeakETag(t *testing.T) {
+	dumpBody := "COPY public.derived_video (content_id, dvd_id) FROM stdin;\n118ipx00535\tIPX-535\n\\.\n"
+	gz := gzipped(t, dumpBody)
+	truncateAt := len(gz) / 2
+	lastMod := time.Date(2026, 4, 28, 12, 0, 0, 0, time.UTC).Format(http.TimeFormat)
+
+	var gotIfRange atomic.Value
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/sql")
+		if r.Header.Get("Range") == "" {
+			w.Header().Set("ETag", `W/"weak-v1"`)
+			w.Header().Set("Last-Modified", lastMod)
+			w.Header().Set("Content-Length", strconv.Itoa(len(gz)))
+			_, _ = w.Write(gz[:truncateAt])
+			return
+		}
+		gotIfRange.Store(r.Header.Get("If-Range"))
+		var off int64
+		_, _ = fmt.Sscanf(r.Header.Get("Range"), "bytes=%d-", &off)
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", off, len(gz)-1, len(gz)))
+		w.WriteHeader(http.StatusPartialContent)
+		_, _ = w.Write(gz[off:])
+	}))
+	defer srv.Close()
+	orig := LatestDumpURL
+	setLatestDumpURL(srv.URL)
+	defer setLatestDumpURL(orig)
+	shrinkResumeBackoff(t)
+
+	_, err := Download(context.Background(), srv.Client(), "", nil, func(r io.Reader, d DownloadResult) error {
+		_, err := io.Copy(io.Discard, r)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("Download: %v", err)
+	}
+	v, ok := gotIfRange.Load().(string)
+	if !ok {
+		t.Fatal("server never saw a Range request — truncation was not resumed")
+	}
+	if v != lastMod {
+		t.Errorf("If-Range = %q, want Last-Modified %q (weak ETag must not be used)", v, lastMod)
+	}
+}
+
+func TestParseContentRange(t *testing.T) {
+	cases := []struct {
+		name      string
+		header    string
+		wantStart int64
+		wantTotal int64
+		wantErr   bool
+	}{
+		{"standard", "bytes 100-199/1234", 100, 1234, false},
+		{"unknown total", "bytes 1000-1999/*", 1000, -1, false},
+		{"zero start", "bytes 0-99/100", 0, 100, false},
+		{"empty", "", 0, 0, true},
+		{"wrong unit", "items 0-1/2", 0, 0, true},
+		{"missing slash", "bytes 0-1", 0, 0, true},
+		{"missing dash", "bytes 0100/200", 0, 0, true},
+		{"bad start", "bytes x-1/2", 0, 0, true},
+		{"bad total", "bytes 0-1/zz", 0, 0, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			start, total, err := parseContentRange(tc.header)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("expected error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseContentRange: %v", err)
+			}
+			if start != tc.wantStart || total != tc.wantTotal {
+				t.Errorf("parseContentRange(%q) = (%d, %d), want (%d, %d)", tc.header, start, total, tc.wantStart, tc.wantTotal)
+			}
+		})
 	}
 }
 
