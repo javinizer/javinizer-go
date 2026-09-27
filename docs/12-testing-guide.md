@@ -1250,7 +1250,7 @@ The project uses `.github/workflows/test.yml`, which defines **9 jobs** that run
 3. **Linting & Code Quality** (`lint`)
    - `make vet` (go vet)
    - `./scripts/check_api_file_size.sh 700 internal/api` (enforces the 700-line guardrail on `internal/api`)
-   - `golangci-lint` (pinned to `v2.9.0`, `--timeout=5m`)
+   - `golangci-lint` (pinned to `v2.14.0`, `--timeout=5m`; local installs need v2.14.0+ on Go 1.27, v2.9.0+ on Go 1.26)
    - `gofmt` formatting check
 
 4. **Vulnerability Scan** (`vuln`)
@@ -1321,7 +1321,7 @@ chmod +x .git/hooks/pre-commit
 `scripts/pre-commit.sample` runs 8 checks, after a guard that blocks `.planning/` from being committed:
 
 1. **Code formatting** (`[1/8]`) - `gofmt -l .`; fails if any file is unformatted (run `make fmt` to fix)
-2. **golangci-lint** (`[2/8]`) - runs `golangci-lint run ./...` if installed at v2.4.0+ (warns and skips otherwise)
+2. **golangci-lint** (`[2/8]`) - runs `golangci-lint run ./...` with a toolchain-dependent minimum — v2.9.0+ on Go 1.26, v2.14.0+ on Go 1.27+ (Go 1.27 export data needs the newer reader), else v2.4.0+; warns and skips otherwise
 3. **go vet** (`[3/8]`) - `go vet ./...`
 4. **Fast unit tests** (`[4/8]`) - `go test -short -timeout=60s ./...`
 5. **Build verification** (`[5/8]`) - `go build ./cmd/javinizer`
