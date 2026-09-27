@@ -31,6 +31,7 @@ func TestValidateStages_CancelledContext(t *testing.T) {
 		{"provenance", validateProvenance},
 		{"noNullMetaKeys", validateNoNullMetaKeys},
 		{"logicalKeys", validateLogicalKeys},
+		{"normConsistency", validateNormConsistency},
 		{"columnTypes", validateColumnTypes},
 		{"structure", validateStructure},
 		{"indexes", validateIndexes},
