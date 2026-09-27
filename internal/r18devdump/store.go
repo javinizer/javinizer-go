@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"unicode"
@@ -53,6 +54,54 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
+type dumpDVDRow struct {
+	contentID   string
+	dvdID       string
+	releaseDate string
+	serviceCode string
+}
+
+func (s *Store) selectDVDRow(ctx context.Context, key, id string) (dumpDVDRow, bool, error) {
+	rows, err := s.db.QueryContext(ctx,
+		"SELECT content_id, dvd_id, release_date, service_code FROM videos WHERE dvd_id_norm = ? ORDER BY content_id",
+		key,
+	)
+	if err != nil {
+		return dumpDVDRow{}, false, fmt.Errorf("dump dvd_id lookup failed for %q: %w", key, err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	matches := make([]dumpDVDRow, 0)
+	for rows.Next() {
+		var row dumpDVDRow
+		var dvdID, releaseDate, serviceCode sql.NullString
+		if err := rows.Scan(&row.contentID, &dvdID, &releaseDate, &serviceCode); err != nil {
+			return dumpDVDRow{}, false, fmt.Errorf("dump dvd_id lookup failed for %q: scan: %w", key, err)
+		}
+		row.dvdID = dvdID.String
+		row.releaseDate = releaseDate.String
+		row.serviceCode = serviceCode.String
+		matches = append(matches, row)
+	}
+	if err := rows.Err(); err != nil {
+		return dumpDVDRow{}, false, fmt.Errorf("dump dvd_id lookup failed for %q: %w", key, err)
+	}
+	if len(matches) == 0 {
+		return dumpDVDRow{}, false, nil
+	}
+
+	byContentID := make(map[string]dumpDVDRow, len(matches))
+	for _, row := range matches {
+		byContentID[strings.ToLower(row.contentID)] = row
+	}
+	for _, candidate := range ContentIDCandidatesWithMarker(id) {
+		if row, ok := byContentID[strings.ToLower(candidate)]; ok {
+			return row, true, nil
+		}
+	}
+	return matches[0], true, nil
+}
+
 // LookupByDVDID resolves a display dvd_id (e.g. "IPX-535") to its DMM
 // content_id. The query is matched against a normalized dvd_id column
 // (uppercase, hyphens and whitespace stripped), so "IPX-535", "ipx535", and
@@ -61,22 +110,16 @@ func (s *Store) LookupByDVDID(ctx context.Context, dvdID string) (string, error)
 	if s == nil || dvdID == "" {
 		return "", models.ErrDumpMiss
 	}
-	norm := normalizeDVDID(dvdID)
-	if norm == "" {
-		return "", models.ErrDumpMiss
+	for _, key := range dumpNormKeys(dvdID) {
+		row, found, err := s.selectDVDRow(ctx, key, dvdID)
+		if err != nil {
+			return "", err
+		}
+		if found {
+			return row.contentID, nil
+		}
 	}
-	var contentID string
-	err := s.db.QueryRowContext(ctx,
-		"SELECT content_id FROM videos WHERE dvd_id_norm = ? ORDER BY content_id LIMIT 1",
-		norm,
-	).Scan(&contentID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", models.ErrDumpMiss
-	}
-	if err != nil {
-		return "", fmt.Errorf("dump lookup by dvd_id %q: %w", dvdID, err)
-	}
-	return contentID, nil
+	return "", models.ErrDumpMiss
 }
 
 // LookupByContentID resolves a DMM content_id back to its display dvd_id.
@@ -115,20 +158,19 @@ func (s *Store) MatchByDisplayID(ctx context.Context, id string) ([]models.DumpM
 	}
 	norm := normalizeDVDID(id)
 	if norm != "" {
-		var m models.DumpMatch
-		var dvdID, rel, svc sql.NullString
-		err := s.db.QueryRowContext(ctx,
-			"SELECT content_id, dvd_id, release_date, service_code FROM videos WHERE dvd_id_norm = ? ORDER BY content_id LIMIT 1",
-			norm,
-		).Scan(&m.ContentID, &dvdID, &rel, &svc)
-		if err == nil {
-			m.DVDID = dvdID.String
-			m.ReleaseDate = rel.String
-			m.ServiceCode = svc.String
-			return []models.DumpMatch{m}, nil
-		}
-		if !errors.Is(err, sql.ErrNoRows) {
-			return nil, fmt.Errorf("dump dvd_id lookup failed for %q: %w", norm, err)
+		for _, key := range dumpNormKeys(id) {
+			row, found, err := s.selectDVDRow(ctx, key, id)
+			if err != nil {
+				return nil, err
+			}
+			if found {
+				return []models.DumpMatch{{
+					ContentID:   row.contentID,
+					DVDID:       row.dvdID,
+					ReleaseDate: row.releaseDate,
+					ServiceCode: row.serviceCode,
+				}}, nil
+			}
 		}
 	}
 
@@ -138,7 +180,11 @@ func (s *Store) MatchByDisplayID(ctx context.Context, id string) ([]models.DumpM
 	// set is the exact input first, then the expanded candidates, deduped —
 	// order within the result follows probe order.
 	exactID := strings.ToLower(strings.TrimSpace(id))
+	compacted := strings.NewReplacer("-", "", "_", "", ".", "", " ", "").Replace(strings.TrimSpace(id))
 	candidates := ContentIDCandidates(id)
+	if remasterMarkerTailRgx.MatchString(compacted) {
+		candidates = ContentIDCandidatesWithMarker(id)
+	}
 
 	probe := make([]string, 0, len(candidates)+1)
 	seen := make(map[string]bool, len(candidates)+1)
@@ -206,8 +252,8 @@ func (s *Store) LookupMovie(ctx context.Context, dvdID string) (*models.DumpMovi
 	if s == nil || dvdID == "" {
 		return nil, models.ErrDumpMiss
 	}
-	norm := normalizeDVDID(dvdID)
-	if norm == "" {
+	keys := dumpNormKeys(dvdID)
+	if len(keys) == 0 {
 		return nil, models.ErrDumpMiss
 	}
 
@@ -222,7 +268,17 @@ func (s *Store) LookupMovie(ctx context.Context, dvdID string) (*models.DumpMovi
 	var thumbFirst, thumbLast sql.NullString
 	var siteID, serviceCode, releaseDate sql.NullString
 	var runtime sql.NullInt64
-	err := s.db.QueryRowContext(ctx, `SELECT
+	var err error
+	var found bool
+	for _, key := range keys {
+		row, rowFound, selectErr := s.selectDVDRow(ctx, key, dvdID)
+		if selectErr != nil {
+			return nil, selectErr
+		}
+		if !rowFound {
+			continue
+		}
+		err = s.db.QueryRowContext(ctx, `SELECT
 		content_id, dvd_id, title_en, title_ja, comment_en, comment_ja,
 		runtime_mins, release_date, sample_url,
 		maker_id, label_id, series_id,
@@ -230,21 +286,26 @@ func (s *Store) LookupMovie(ctx context.Context, dvdID string) (*models.DumpMovi
 		gallery_full_first, gallery_full_last,
 		gallery_thumb_first, gallery_thumb_last,
 		site_id, service_code
-		FROM videos WHERE dvd_id_norm = ? ORDER BY content_id LIMIT 1`, norm,
-	).Scan(
-		&m.ContentID, &dvdIDCol, &titleEn, &titleJa, &commentEn, &commentJa,
-		&runtime, &releaseDate, &sampleURL,
-		&makerID, &labelID, &seriesID,
-		&jacketFull, &jacketThumb,
-		&galleryFirst, &galleryLast,
-		&thumbFirst, &thumbLast,
-		&siteID, &serviceCode,
-	)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, models.ErrDumpMiss
+		FROM videos WHERE dvd_id_norm = ? AND content_id = ? LIMIT 1`, key, row.contentID,
+		).Scan(
+			&m.ContentID, &dvdIDCol, &titleEn, &titleJa, &commentEn, &commentJa,
+			&runtime, &releaseDate, &sampleURL,
+			&makerID, &labelID, &seriesID,
+			&jacketFull, &jacketThumb,
+			&galleryFirst, &galleryLast,
+			&thumbFirst, &thumbLast,
+			&siteID, &serviceCode,
+		)
+		if err == nil {
+			found = true
+			break
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("dump lookup movie %q: %w", key, err)
+		}
 	}
-	if err != nil {
-		return nil, fmt.Errorf("dump lookup movie %q: %w", dvdID, err)
+	if !found {
+		return nil, models.ErrDumpMiss
 	}
 
 	m.DVDID = dvdIDCol.String
@@ -571,4 +632,45 @@ func normalizeDVDID(id string) string {
 		return r
 	}, id)
 	return id
+}
+
+var dumpPaddedMarkerRegex = regexp.MustCompile(`^((?:T28|[A-Z]+))([0-9]+)([EZ]?)(HD|H|AI)$`)
+
+var dumpMarkerTailRegex = regexp.MustCompile(`^((?:T28|[A-Z]+)[0-9]+[EZ]?)(H|AI)$`)
+
+// dumpNormKeys returns all dvd_id_norm variants to probe for a query id: the
+// direct normalization plus, for canonical remaster ids (…156H), the stored
+// display-spelling form (…156HD) so dump rows recorded as "RCT-156-HD" hit.
+func dumpNormKeys(id string) []string {
+	n := normalizeDVDID(id)
+	compacted := strings.NewReplacer(".", "", "_", "").Replace(n)
+	if dumpPaddedMarkerRegex.MatchString(compacted) {
+		n = compacted
+	}
+	if n == "" {
+		return nil
+	}
+	keys := []string{n}
+	if m := dumpPaddedMarkerRegex.FindStringSubmatch(n); m != nil {
+		number := strings.TrimLeft(m[2], "0")
+		if number == "" {
+			number = "0"
+		}
+		for _, digits := range []string{number, strings.Repeat("0", max(0, 3-len(number))) + number} {
+			key := m[1] + digits + m[3] + m[4]
+			if key != n && key != keys[len(keys)-1] {
+				keys = append(keys, key)
+			}
+		}
+	}
+	for _, key := range append([]string(nil), keys...) {
+		if m := dumpMarkerTailRegex.FindStringSubmatch(key); m != nil {
+			if m[2] == "H" {
+				keys = append(keys, m[1]+"HD")
+			}
+			// AI is already the stored form in both spellings (DV-818AI /
+			// DV-818-AI normalize to the same key), so nothing to add.
+		}
+	}
+	return keys
 }

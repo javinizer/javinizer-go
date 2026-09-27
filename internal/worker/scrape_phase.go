@@ -392,12 +392,17 @@ func scrapeFile(
 	// preview row renders as `ABF-346` (no `.mp4` appended) — even though NFO /
 	// poster / fanart rows look correct because they derive from movie.ID, not
 	// from the source extension. Mirror scanner.go's own construction
-	// (Name: filepath.Base(path); Extension: filepath.Ext(path)).
+	// (Name: foldNameExtension(base); Extension: fileExtension(path)) so the
+	// fallback carries the same fullwidth-aware contract the scanner used to
+	// admit the file: filepath.Ext is ASCII-only and returns an empty
+	// extension for a fullwidth spelling (RCT-156-HD．ｍｋｖ), which would leave
+	// rename-enabled previews and organization without the .mkv suffix
+	// (round 30: Name carries the folded extension, Path stays raw).
 	if fmi.Name == "" {
-		fmi.Name = filepath.Base(filePath)
+		fmi.Name = foldNameExtension(filepath.Base(filePath))
 	}
 	if fmi.Extension == "" {
-		fmi.Extension = filepath.Ext(filePath)
+		fmi.Extension = fileExtension(filePath)
 	}
 
 	taskCtx := egCtx

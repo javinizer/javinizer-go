@@ -574,11 +574,16 @@ func (p *rescrapePhase) Rescrape(ctx context.Context, inputs rescrapePhaseInputs
 		// Build a fallback here that carries Name + Extension so a tracker map-miss
 		// (nil map or path-normalization mismatch) doesn't leak a MovieResult
 		// with empty Extension — which would make the organize preview render the
-		// video row without `.mp4`. Mirrors scrape_phase.go's backfill.
+		// video row without `.mp4`. Mirrors scrape_phase.go's backfill, including
+		// its fullwidth-aware derivation (foldNameExtension/fileExtension): the
+		// scanner admits fullwidth-extension files (RCT-156-HD．ｍｋｖ) with the
+		// extension folded, and filepath.Ext alone is ASCII-only — the raw
+		// spelling would leave a rename-enabled organize target without .mkv
+		// (round 30: Name carries the folded extension, Path stays raw).
 		fallbackFMI := models.FileMatchInfo{
 			Path:      lookup.FilePath,
-			Name:      filepath.Base(lookup.FilePath),
-			Extension: filepath.Ext(lookup.FilePath),
+			Name:      foldNameExtension(filepath.Base(lookup.FilePath)),
+			Extension: fileExtension(lookup.FilePath),
 		}
 		movieResult, prov = scrapeResultToMovieResult(fallbackFMI, scrapeResult, meta, false)
 

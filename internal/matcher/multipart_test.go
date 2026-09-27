@@ -41,6 +41,16 @@ func TestDetectPartSuffix(t *testing.T) {
 		{"IPX-535-cd12", "IPX-535", 12, "-cd12", PatternExplicit},
 		{"IPX-535cd1", "IPX-535", 1, "-cd1", PatternExplicit},
 		{"IPX-535CD2", "IPX-535", 2, "-cd2", PatternExplicit},
+		// Volume parts: vol + 1-2 digits - EXPLICIT (round-22: vol joins
+		// the disc family so marker-adjacent volume suffixes feed the same
+		// part detection)
+		{"ABC-123-vol1", "ABC-123", 1, "-vol1", PatternExplicit},
+		{"ABC-123-VOL2", "ABC-123", 2, "-vol2", PatternExplicit},
+		{"IPX-535.vol2", "IPX-535", 2, "-vol2", PatternExplicit},
+		{"IPX-535 vol3", "IPX-535", 3, "-vol3", PatternExplicit},
+		{"IPX-535-vol-1", "IPX-535", 1, "-vol1", PatternExplicit},
+		{"IPX-535vol2", "IPX-535", 2, "-vol2", PatternExplicit},
+		{"IPX-535-vol12", "IPX-535", 12, "-vol12", PatternExplicit},
 
 		// Ambiguous letter patterns - need directory context validation
 		{"MDB-087A", "MDB-087", 1, "-A", PatternLetter},
@@ -79,6 +89,13 @@ func TestDetectPartSuffix(t *testing.T) {
 		{"IPX-535-hdcd1", "IPX-535", 0, "", PatternNone},
 		{"IPX-535-cd0", "IPX-535", 0, "", PatternNone},
 		{"IPX-535-cd100", "IPX-535", 0, "", PatternNone},
+		{"IPX-535-vol", "IPX-535", 0, "", PatternNone},
+		{"IPX-535-volx", "IPX-535", 0, "", PatternNone},
+		{"IPX-535-vol0", "IPX-535", 0, "", PatternNone},
+		{"IPX-535-vol100", "IPX-535", 0, "", PatternNone},
+		// evol is a real series spelling containing vol; the label's
+		// leading boundary keeps it out of part detection.
+		{"IPX-535-evol2", "IPX-535", 0, "", PatternNone},
 	}
 
 	for _, tt := range tests {

@@ -3,7 +3,6 @@ package organizer
 import (
 	"fmt"
 	"path/filepath"
-	"strings"
 
 	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/matcher"
@@ -44,10 +43,15 @@ func (s *inPlaceNoRenameFolderStrategy) Plan(match models.FileMatchInfo, movie *
 
 	if s.config.MaxPathLength > 0 && len(targetPath) > s.config.MaxPathLength {
 		excess := len(targetPath) - s.config.MaxPathLength
-		ext := match.Extension
-		currentNameLen := len(pc.FileName) - len(ext)
+		// pc.FileName may keep the raw on-disk spelling (rename_file=false,
+		// noRenameFileName), whose fullwidth extension defeats both
+		// strings.TrimSuffix and filepath.Ext — split it with the fold-aware
+		// helper so the extension survives truncation in its raw spelling
+		// instead of being swapped for the folded one.
+		stem, ext := splitRawExtension(pc.FileName)
+		currentNameLen := len(stem)
 		if currentNameLen > excess && currentNameLen-excess > 0 {
-			baseName := s.templateEngine.TruncateTitleBytes(strings.TrimSuffix(pc.FileName, ext), currentNameLen-excess)
+			baseName := s.templateEngine.TruncateTitleBytes(stem, currentNameLen-excess)
 			if baseName != "" {
 				pc.FileName = template.SanitizeFilename(baseName) + ext
 				targetPath = filepath.Join(targetDir, pc.FileName)

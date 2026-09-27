@@ -16,6 +16,9 @@ func TestAcquireReplacementBusyW18A_WindowsLiveMarkerIgnoresAge(t *testing.T) {
 	require.NoError(t, fs.MkdirAll("/out/w18a-live", 0o755))
 	pid := os.Getpid() + 1000
 	probedPID := 0
+	oldStart := replacementProcessStartTime
+	replacementProcessStartTime = func(int) *time.Time { return nil }
+	t.Cleanup(func() { replacementProcessStartTime = oldStart })
 	setReplacementW18AProbe(t, func(gotPID int) replacementPIDLiveness {
 		probedPID = gotPID
 		return replacementPIDAlive

@@ -106,9 +106,11 @@ func ParseInput(input string, registry URLScraperLister) (*parsedInput, error) {
 			firstFailedScraper, firstFailedErr)
 	}
 
-	// No scraper handles this URL - treat as plain movie ID
+	// No scraper handles this URL - treat as plain movie ID. Fullwidth
+	// ASCII spellings fold to halfwidth so manual queries behave like their
+	// ASCII counterparts for every downstream scraper.
 	return &parsedInput{
-		ID:                 input,
+		ID:                 foldFullwidthASCII(input),
 		ScraperHint:        "",
 		IsURL:              false,
 		CompatibleScrapers: nil,

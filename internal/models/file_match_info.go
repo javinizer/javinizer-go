@@ -6,6 +6,18 @@ import "time"
 // It carries file match metadata from scan+match through apply, organize,
 // and preview. Adding a new multipart field requires updating only this
 // struct — no bridge functions or duplicate types needed.
+//
+// Filename-spelling contract (fullwidth ASCII):
+//   - Path is the file's actual on-disk path, raw spelling included; it is
+//     the source of truth for file I/O (moves, renames, directory scans)
+//     and can end in a fullwidth extension (RCT-156-HD．ｍｋｖ).
+//   - Name is the file's basename with its extension spelling folded to
+//     ASCII (RCT-156-HD．ｍｋｖ reports "RCT-156-HD.mkv"); the stem keeps its
+//     raw spelling so fullwidth-written custom regexes still see it.
+//   - Extension is the folded ASCII extension and is always a literal
+//     suffix of Name. Base-name derivation must go through
+//     strings.TrimSuffix(Name, Extension) — deriving from base(Path)
+//     instead retains the raw fullwidth extension.
 type FileMatchInfo struct {
 	Path        string    `json:"path"`
 	MovieID     string    `json:"movie_id"`
