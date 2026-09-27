@@ -318,6 +318,18 @@ func TestValidateSidecar_MisorderedPKRejected(t *testing.T) {
 	assert.Contains(t, err.Error(), "does not start with content_id")
 }
 
+func TestValidateSidecar_WrongNormRejected(t *testing.T) {
+	// Codex: installed dumps key every DVD lookup on dvd_id_norm; a norm that
+	// disagrees with dvd_id makes the movie unreachable or misrouted.
+	path := importFixture(t)
+	alterFixture(t, path,
+		"INSERT INTO videos (content_id, dvd_id, dvd_id_norm) VALUES ('118abw00013', 'ABW-013', 'WRONGNORM')")
+	_, err := ValidateSidecar(context.Background(), path)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrDumpInvalid)
+	assert.Contains(t, err.Error(), "dvd_id_norm")
+}
+
 func TestValidateSidecar_NotADatabase(t *testing.T) {
 	dst := filepath.Join(t.TempDir(), "junk.db")
 	require.NoError(t, os.WriteFile(dst, []byte("SQLite format 3\x00 but then garbage"), 0o600))

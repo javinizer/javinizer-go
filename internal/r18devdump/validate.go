@@ -59,6 +59,7 @@ func ValidateSidecar(ctx context.Context, path string) (*Store, error) {
 		validateIndexes,
 		validateNonEmpty,
 		validateLogicalKeys,
+		validateNormConsistency,
 		validateColumnTypes,
 		validateIntegrity,
 	} {
@@ -334,6 +335,26 @@ func validateColumnTypes(ctx context.Context, db *sql.DB) error {
 		if bad > 0 {
 			return fmt.Errorf("%w: dump contains %s.%s values that are not integers", ErrDumpInvalid, tc.table, tc.col)
 		}
+	}
+	return nil
+}
+
+// validateNormConsistency rejects rows whose stored dvd_id_norm disagrees
+// with normalization of the row's dvd_id (Import computes one from the other;
+// after install every DVD-ID lookup keys on dvd_id_norm only — a mismatched
+// row is unreachable or routes to the wrong content_id). The SQL mirrors
+// normalizeDVDID (upper, strip hyphens, strip spaces) for the ASCII-only
+// dvd_id domain; exotic unicode-space edges do not occur in DMM IDs (they are
+// ASCII by construction) and stay out of scope deliberately.
+func validateNormConsistency(ctx context.Context, db *sql.DB) error {
+	bad, err := queryCount(ctx, db,
+		"SELECT COUNT(*) FROM videos WHERE dvd_id_norm IS NOT NULL AND dvd_id_norm != '' "+
+			"AND UPPER(REPLACE(REPLACE(dvd_id, '-', ''), ' ', '')) != dvd_id_norm")
+	if err != nil {
+		return fmt.Errorf("%w: norm consistency probe: %v", ErrDumpInvalid, err)
+	}
+	if bad > 0 {
+		return fmt.Errorf("%w: dump contains %d videos whose dvd_id_norm disagrees with its dvd_id", ErrDumpInvalid, bad)
 	}
 	return nil
 }
