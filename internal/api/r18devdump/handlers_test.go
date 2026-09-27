@@ -464,32 +464,32 @@ func TestStartDownload_DownloadError(t *testing.T) {
 func TestBroadcastProgress_NilHub(t *testing.T) {
 	h, _ := newTestHandler(t)
 	// No hub set — broadcastProgress should be a no-op.
-	h.broadcastProgress("downloading", 50, 100)
-	h.broadcastProgress("done", 0, 0)
-	h.broadcastProgress("error", 0, 0)
+	h.broadcastProgress("downloading", 50, 100, "")
+	h.broadcastProgress("done", 0, 0, "")
+	h.broadcastProgress("error", 0, 0, "")
 }
 
 func TestBroadcastProgress_WithHub(t *testing.T) {
 	h, _, _ := newTestHandlerWithHub(t)
 
 	// These should not panic and should broadcast via the hub.
-	h.broadcastProgress("downloading", 50, 100)
-	h.broadcastProgress("importing", 0, 0)
-	h.broadcastProgress("done", 0, 0)
-	h.broadcastProgress("error", 0, 0)
+	h.broadcastProgress("downloading", 50, 100, "")
+	h.broadcastProgress("importing", 0, 0, "")
+	h.broadcastProgress("done", 0, 0, "")
+	h.broadcastProgress("error", 0, 0, "")
 }
 
 func TestBroadcastProgress_WithFn(t *testing.T) {
 	h, _, _ := newTestHandlerWithHub(t)
 
 	var calls []string
-	h.broadcastProgressFn = func(phase string, bytes, total int64) {
+	h.broadcastProgressFn = func(phase string, bytes, total int64, errText string) {
 		calls = append(calls, phase)
 	}
-	h.broadcastProgress("downloading", 50, 100)
-	h.broadcastProgress("importing", 0, 0)
-	h.broadcastProgress("done", 0, 0)
-	h.broadcastProgress("error", 0, 0)
+	h.broadcastProgress("downloading", 50, 100, "")
+	h.broadcastProgress("importing", 0, 0, "")
+	h.broadcastProgress("done", 0, 0, "")
+	h.broadcastProgress("error", 0, 0, "")
 
 	assert.Equal(t, []string{"downloading", "importing", "done", "error"}, calls)
 }
@@ -529,7 +529,7 @@ func TestRunImportHeartbeat_BothClosedBeforeSchedule(t *testing.T) {
 
 	var mu sync.Mutex
 	var broadcasts []string
-	h.broadcastProgressFn = func(phase string, bytes, total int64) {
+	h.broadcastProgressFn = func(phase string, bytes, total int64, errText string) {
 		mu.Lock()
 		defer mu.Unlock()
 		broadcasts = append(broadcasts, phase)
@@ -810,18 +810,18 @@ func TestSearch_LookupError(t *testing.T) {
 func TestBroadcastProgress_RuntimeNil(t *testing.T) {
 	h, _ := newTestHandler(t)
 	// Don't call EnsureRuntime — GetRuntime returns nil.
-	h.broadcastProgress("downloading", 50, 100)
-	h.broadcastProgress("done", 0, 0)
-	h.broadcastProgress("error", 0, 0)
+	h.broadcastProgress("downloading", 50, 100, "")
+	h.broadcastProgress("done", 0, 0, "")
+	h.broadcastProgress("error", 0, 0, "")
 }
 
 func TestBroadcastProgress_HubNil(t *testing.T) {
 	h, _ := newTestHandler(t)
 	// Call EnsureRuntime but don't set a hub — WebSocketHub returns nil.
 	h.rt.EnsureRuntime()
-	h.broadcastProgress("downloading", 50, 100)
-	h.broadcastProgress("done", 0, 0)
-	h.broadcastProgress("error", 0, 0)
+	h.broadcastProgress("downloading", 50, 100, "")
+	h.broadcastProgress("done", 0, 0, "")
+	h.broadcastProgress("error", 0, 0, "")
 }
 
 // --- Coverage for reloadDump error + download goroutine reload error ---

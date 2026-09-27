@@ -3,6 +3,7 @@ package r18devdump
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -26,6 +27,11 @@ type ImportResult struct {
 	Rows int64
 	Path string
 }
+
+// ErrDumpNoRows marks import input that produced zero recognized dump rows —
+// fed garbage (e.g. compressed bytes or an error page) rather than a
+// decompressed pg_dump, import must fail instead of installing an empty DB.
+var ErrDumpNoRows = errors.New("dump import yielded no recognized rows")
 
 // importBatchSize is the number of rows per multi-row INSERT. The widest table
 // (derived_video) has 21 columns, so 40 rows = 840 bound parameters — safely
@@ -240,6 +246,7 @@ func Import(ctx context.Context, r io.Reader, path string, opts ImportOptions) (
 	// Per-table batch accumulators.
 	batches := make(map[string][]DumpRow)
 	var totalVideos int64
+	var storedRows int64
 
 	flush := func(table string) error {
 		batch := batches[table]
@@ -282,6 +289,7 @@ func Import(ctx context.Context, r io.Reader, path string, opts ImportOptions) (
 		// Map dump column positions to our stored column order.
 		mapped := mapDumpRow(row, schema.columns)
 		batches[row.Table] = append(batches[row.Table], DumpRow{Table: row.Table, Values: mapped})
+		storedRows++
 		if len(batches[row.Table]) >= importBatchSize {
 			return flush(row.Table)
 		}
@@ -291,6 +299,10 @@ func Import(ctx context.Context, r io.Reader, path string, opts ImportOptions) (
 	if err := ParseDump(r, emit); err != nil {
 		_ = tx.Rollback()
 		return ImportResult{}, fmt.Errorf("parse dump: %w", err)
+	}
+	if storedRows == 0 {
+		_ = tx.Rollback()
+		return ImportResult{}, fmt.Errorf("%w: input contained no COPY data for any known dump table (check that the source is a gzipped r18.dev pg_dump, decompressed before import)", ErrDumpNoRows)
 	}
 	if err := flushAll(); err != nil {
 		_ = tx.Rollback()

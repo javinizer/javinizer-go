@@ -33,12 +33,19 @@ type Store struct {
 // error if the file does not exist or is not a valid dump database; callers
 // should treat that as "dump not available" and fall back to HTTP resolution.
 func Open(path string) (*Store, error) {
+	return OpenContext(context.Background(), path)
+}
+
+// OpenContext opens a read-only connection like Open but honors ctx
+// cancellation during open/ping (used by paths that open unknown files where
+// the ping itself may block on a corrupt or slow filesystem).
+func OpenContext(ctx context.Context, path string) (*Store, error) {
 	dsn := fmt.Sprintf("file:%s?mode=ro&_busy_timeout=5000", path)
 	db, err := sql.Open("sqlite3", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open dump db: %w", err)
 	}
-	if err := db.PingContext(context.Background()); err != nil {
+	if err := db.PingContext(ctx); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("ping dump db: %w", err)
 	}
