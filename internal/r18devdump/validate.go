@@ -5,11 +5,13 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // ErrDumpInvalid marks a staged sidecar database that failed dump validation
-// (missing required structure or failed integrity check). Upload handlers map
-// it to the async 'validation' error kind.
+// (missing/empty/unreadable required content, schema drift, or failed
+// integrity check). Upload handlers map it to the async 'validation' error
+// kind.
 var ErrDumpInvalid = errors.New("invalid dump sidecar")
 
 // requiredIndexes are the exact index names Import creates; a sidecar missing
@@ -22,15 +24,18 @@ var requiredIndexes = []string{
 }
 
 // ValidateSidecar opens the staged sidecar at path and verifies it is a
-// complete, uncorrupted current-schema dump database. Compatibility policy:
-// MISSING required structure is rejected with a named-structure error;
-// ADDITIVE structure (extra tables/columns/indexes from a newer build) is
-// accepted — all read paths use explicit column lists. There is no migration.
+// complete, uncorrupted, current-schema dump database. Compatibility policy:
+// MISSING or EMPTY required structure is rejected with a named-structure
+// error; ADDITIVE structure (extra tables/columns/indexes from a newer build)
+// is accepted — all read paths use explicit column lists. No migration.
 //
 // On success it returns the open Store; the caller MUST Close it before any
 // filesystem operation on the file (swap/rename fails with open handles on
 // Windows). On failure it returns an error wrapping ErrDumpInvalid and holds
 // no open handle.
+//
+// Every probe is a single-row query, so each stage's error branch is
+// reachable deterministically (direct stage calls with a cancelled context).
 func ValidateSidecar(ctx context.Context, path string) (*Store, error) {
 	store, err := OpenContext(ctx, path)
 	if err != nil {
@@ -43,100 +48,116 @@ func ValidateSidecar(ctx context.Context, path string) (*Store, error) {
 		}
 	}()
 
-	// 1. Metadata table must exist, be readable, and carry provenance. A
-	// shell database with an empty dump_meta is not a usable dump.
-	var metaCount int64
-	if err := store.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM dump_meta").Scan(&metaCount); err != nil {
-		return nil, fmt.Errorf("%w: dump_meta unreadable: %v", ErrDumpInvalid, err)
-	}
-	if metaCount == 0 {
-		return nil, fmt.Errorf("%w: dump_meta carries no provenance rows", ErrDumpInvalid)
-	}
-
-	// 2. Required tables and columns (additive extras are fine).
-	for dumpTable, schema := range tableSchema {
-		sqlite := sqliteTableName(dumpTable)
-		cols, err := tableColumns(ctx, store.db, sqlite)
-		if err != nil {
-			return nil, fmt.Errorf("%w: required table %s unreadable: %v", ErrDumpInvalid, sqlite, err)
-		}
-		if cols == nil {
-			return nil, fmt.Errorf("%w: missing required table %s", ErrDumpInvalid, sqlite)
-		}
-		for _, want := range schema.columns {
-			if !cols[want] {
-				return nil, fmt.Errorf("%w: missing required column %s.%s", ErrDumpInvalid, sqlite, want)
-			}
-		}
-	}
-
-	// 3. Required indexes (table_info cannot prove these).
-	for _, idx := range requiredIndexes {
-		if err := indexExists(ctx, store.db, idx); err != nil {
+	for _, stage := range []func(context.Context, *sql.DB) error{
+		validateProvenance,
+		validateStructure,
+		validateIndexes,
+		validateNonEmpty,
+		validateIntegrity,
+	} {
+		if err := stage(ctx, store.db); err != nil {
 			return nil, err
 		}
 	}
-
-	// 3b. An empty dump must never replace a working one.
-	var videoCount int64
-	if err := store.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM videos").Scan(&videoCount); err != nil {
-		return nil, fmt.Errorf("%w: videos unreadable: %v", ErrDumpInvalid, err)
-	}
-	if videoCount == 0 {
-		return nil, fmt.Errorf("%w: dump contains zero videos", ErrDumpInvalid)
-	}
-
-	// 4. Integrity: quick_check must return exactly 'ok'.
-	var qc string
-	if err := store.db.QueryRowContext(ctx, "PRAGMA quick_check").Scan(&qc); err != nil {
-		return nil, fmt.Errorf("%w: quick_check failed to run: %v", ErrDumpInvalid, err)
-	}
-	if qc != "ok" {
-		return nil, fmt.Errorf("%w: integrity check: %s", ErrDumpInvalid, qc)
-	}
-
 	valid = true
 	return store, nil
 }
 
-// tableColumns returns the column name set for table, or nil when the table
-// does not exist (PRAGMA table_info returns zero rows for missing tables).
-func tableColumns(ctx context.Context, db *sql.DB, table string) (map[string]bool, error) {
-	rows, err := db.QueryContext(ctx, "PRAGMA table_info("+table+")")
-	if err != nil {
-		return nil, err
+// queryCount runs a single-row COUNT query; every error surfaces with the
+// stage-appropriate context string.
+func queryCount(ctx context.Context, db *sql.DB, query string, args ...any) (int64, error) {
+	var n int64
+	if err := db.QueryRowContext(ctx, query, args...).Scan(&n); err != nil {
+		return 0, err
 	}
-	defer func() { _ = rows.Close() }()
-	cols := map[string]bool{}
-	found := false
-	for rows.Next() {
-		var cid int
-		var name, ctype string
-		var notnull, pk int
-		var dflt sql.NullString
-		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
-			return nil, err
-		}
-		found = true
-		cols[name] = true
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	if !found {
-		return nil, nil
-	}
-	return cols, nil
+	return n, nil
 }
 
-func indexExists(ctx context.Context, db *sql.DB, name string) error {
-	var n int64
-	if err := db.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=?", name).Scan(&n); err != nil {
-		return fmt.Errorf("%w: index probe failed: %v", ErrDumpInvalid, err)
+// validateProvenance requires a present, non-empty dump_meta.
+func validateProvenance(ctx context.Context, db *sql.DB) error {
+	n, err := queryCount(ctx, db, "SELECT COUNT(*) FROM dump_meta")
+	if err != nil {
+		return fmt.Errorf("%w: dump_meta unreadable or missing: %v", ErrDumpInvalid, err)
 	}
 	if n == 0 {
-		return fmt.Errorf("%w: missing required index %s", ErrDumpInvalid, name)
+		return fmt.Errorf("%w: dump_meta carries no provenance rows", ErrDumpInvalid)
+	}
+	return nil
+}
+
+// validateStructure checks every required table and column individually via
+// single-row probes so missing structure names itself in the error. Additive
+// extras pass silently.
+func validateStructure(ctx context.Context, db *sql.DB) error {
+	for dumpTable, schema := range tableSchema {
+		table := sqliteTableName(dumpTable)
+		n, err := queryCount(ctx, db,
+			"SELECT COUNT(*) FROM sqlite_master WHERE type IN ('table','view') AND name=?", table)
+		if err != nil {
+			return fmt.Errorf("%w: table probe: %v", ErrDumpInvalid, err)
+		}
+		if n == 0 {
+			return fmt.Errorf("%w: missing required table %s", ErrDumpInvalid, table)
+		}
+		if err := validateColumns(ctx, db, table, schema.columns); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateColumns probes each required column individually (separated from
+// validateStructure so its cancelled-context error path is reachable directly).
+func validateColumns(ctx context.Context, db *sql.DB, table string, cols []string) error {
+	for _, col := range cols {
+		n, err := queryCount(ctx, db,
+			"SELECT COUNT(*) FROM pragma_table_info(?) WHERE name=?", table, col)
+		if err != nil {
+			return fmt.Errorf("%w: column probe %s: %v", ErrDumpInvalid, table, err)
+		}
+		if n == 0 {
+			return fmt.Errorf("%w: missing required column %s.%s", ErrDumpInvalid, table, col)
+		}
+	}
+	return nil
+}
+
+// validateIndexes requires every import-created index by exact name.
+func validateIndexes(ctx context.Context, db *sql.DB) error {
+	for _, idx := range requiredIndexes {
+		n, err := queryCount(ctx, db,
+			"SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=?", idx)
+		if err != nil {
+			return fmt.Errorf("%w: index probe %s: %v", ErrDumpInvalid, idx, err)
+		}
+		if n == 0 {
+			return fmt.Errorf("%w: missing required index %s", ErrDumpInvalid, idx)
+		}
+	}
+	return nil
+}
+
+// validateNonEmpty rejects zero-video dumps (a shell that would replace a
+// working dump with nothing).
+func validateNonEmpty(ctx context.Context, db *sql.DB) error {
+	n, err := queryCount(ctx, db, "SELECT COUNT(*) FROM videos")
+	if err != nil {
+		return fmt.Errorf("%w: videos unreadable: %v", ErrDumpInvalid, err)
+	}
+	if n == 0 {
+		return fmt.Errorf("%w: dump contains zero videos", ErrDumpInvalid)
+	}
+	return nil
+}
+
+// validateIntegrity runs quick_check; the result must be exactly 'ok'.
+func validateIntegrity(ctx context.Context, db *sql.DB) error {
+	var report string
+	if err := db.QueryRowContext(ctx, "PRAGMA quick_check").Scan(&report); err != nil {
+		return fmt.Errorf("%w: integrity check could not run: %v", ErrDumpInvalid, err)
+	}
+	if strings.TrimSpace(report) != "ok" {
+		return fmt.Errorf("%w: integrity check: %s", ErrDumpInvalid, report)
 	}
 	return nil
 }
