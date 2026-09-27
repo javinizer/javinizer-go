@@ -62,6 +62,27 @@ func TestUpload_StagingCreateFailure_500(t *testing.T) {
 	assert.False(t, running)
 }
 
+// Parent path of the staged file is blocked by a regular file: MkdirAll
+// must fail (can't mkdir over a file) and the response must be a staging 500.
+func TestUpload_StagingMkdirBlockedByFile_500(t *testing.T) {
+	h, _, _ := newTestHandlerWithHub(t)
+	h.reloadFn = func(_ *config.Config, _ bool) error { return nil }
+	blockerParent := t.TempDir()
+	require.NoError(t, os.WriteFile(blockerParent+"/blocker", []byte("file"), 0o600))
+	blocked := blockerParent + "/blocker/sub/r18dev_dump.db"
+	cfg := &config.Config{}
+	cfg.Metadata.R18DevDump.Path = blocked
+	cfg.Metadata.R18DevDump.Enabled = true
+	h.rt.SetConfig(cfg)
+	srv := newUploadTestServer(t, h)
+
+	status, body, _ := srv.doUpload(t, buildUploadBody(t, gzBytes(t, uploadOneRowDump), "r18dotdev_dump_2026-09-20.sql.gz"))
+	assert.Equal(t, http.StatusInternalServerError, status)
+	assert.Contains(t, body, "stage upload")
+	_, _, running := handlerState(h)
+	assert.False(t, running)
+}
+
 // erroringFile is a multipart.File whose Copy/reads fail deterministically.
 type erroringFile struct{}
 
