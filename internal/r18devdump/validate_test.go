@@ -360,6 +360,16 @@ func TestValidateSidecar_NullNormOnRealIDRejected(t *testing.T) {
 	assert.Contains(t, err.Error(), "dvd_id_norm")
 }
 
+func TestValidateSidecar_NullMetaValueRejected(t *testing.T) {
+	path := importFixture(t)
+	alterFixture(t, path,
+		"INSERT OR REPLACE INTO dump_meta (key, value) VALUES ('source_url', NULL)")
+	_, err := ValidateSidecar(context.Background(), path)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrDumpInvalid)
+	assert.Contains(t, err.Error(), "NULL keys or values")
+}
+
 func TestValidateSidecar_NotADatabase(t *testing.T) {
 	dst := filepath.Join(t.TempDir(), "junk.db")
 	require.NoError(t, os.WriteFile(dst, []byte("SQLite format 3\x00 but then garbage"), 0o600))

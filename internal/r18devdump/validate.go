@@ -101,15 +101,16 @@ func validateProvenance(ctx context.Context, db *sql.DB) error {
 	return validateNoNullMetaKeys(ctx, db)
 }
 
-// validateNoNullMetaKeys rejects dump_meta rows with NULL keys (split out so
-// its transport error branch is directly testable).
+// validateNoNullMetaKeys rejects dump_meta rows with NULL keys or values:
+// Stats scans both columns, so either breaks every status read afterwards and
+// makes clearDump refuse to remove the installed dump.
 func validateNoNullMetaKeys(ctx context.Context, db *sql.DB) error {
-	nullKeys, err := queryCount(ctx, db, "SELECT COUNT(*) FROM dump_meta WHERE key IS NULL")
+	nulls, err := queryCount(ctx, db, "SELECT COUNT(*) FROM dump_meta WHERE key IS NULL OR value IS NULL")
 	if err != nil {
-		return fmt.Errorf("%w: dump_meta null-key probe: %v", ErrDumpInvalid, err)
+		return fmt.Errorf("%w: dump_meta null-value probe: %v", ErrDumpInvalid, err)
 	}
-	if nullKeys > 0 {
-		return fmt.Errorf("%w: dump_meta contains NULL keys", ErrDumpInvalid)
+	if nulls > 0 {
+		return fmt.Errorf("%w: dump_meta contains NULL keys or values", ErrDumpInvalid)
 	}
 	return nil
 }
