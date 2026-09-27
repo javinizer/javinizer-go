@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -98,11 +99,24 @@ func (h *dumpHandler) startUpload(c *gin.Context) {
 
 	watchdog := newStallWatchdog(h.receiveStallTimeout())
 	var bodyBytes atomic.Int64
+	// The stall watchdog pings on every read, but WebSocket broadcasts are
+	// throttled: a fast LAN upload produces thousands of body reads per second,
+	// and the hub disconnects clients whose bounded send queue overflows.
+	var progressMu sync.Mutex
+	var lastProgress time.Time
 	wrapped := newReceiveWrapper(
 		http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes),
 		watchdog,
 		func(n int64) {
 			bodyBytes.Add(n)
+			progressMu.Lock()
+			now := time.Now()
+			if now.Sub(lastProgress) < 500*time.Millisecond {
+				progressMu.Unlock()
+				return
+			}
+			lastProgress = now
+			progressMu.Unlock()
 			h.broadcastProgress("downloading", bodyBytes.Load(), c.Request.ContentLength, "")
 		},
 	)

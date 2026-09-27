@@ -18,9 +18,12 @@ vi.mock('$lib/api/client', () => ({
 	},
 }));
 
+let wsSubscriber: ((s: { messages: unknown[] }) => void) | null = null;
+
 vi.mock('$lib/stores/websocket', () => ({
 	websocketStore: {
 		subscribe: (fn: (s: { messages: unknown[] }) => void) => {
+			wsSubscriber = fn;
 			fn({ messages: [] });
 			return () => {};
 		},
@@ -96,6 +99,49 @@ describe('R18DevDumpSection upload', () => {
 
 		await waitFor(() => expect(screen.getByText('multipart: no file part')).toBeTruthy());
 	});
+
+	it('renders the error kind when the terminal frame arrives over WebSocket', async () => {
+		// Codex #273: when the WS terminal error frame wins the race, its text
+		// must still carry the status endpoint's error kind.
+		uploadDump.mockResolvedValue({ message: 'upload staged' });
+		mockGetDumpStatus.mockResolvedValue({
+			present: false,
+			enabled: true,
+			running: false,
+			last_error: 'invalid dump sidecar: missing required table videos',
+			last_error_kind: 'validation',
+			path: '/tmp/x.db',
+		} as never);
+
+		render(R18DevDumpSection);
+		await expandSection();
+		const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+		await fireEvent.change(input, { target: { files: [dumpFile('bad.db')] } });
+
+		// Deliver the WS terminal error frame while the poll sleeps.
+		setTimeout(() => {
+			wsSubscriber?.({
+				messages: [
+					{
+						job_id: 'r18dev-dump-download',
+						message: 'error',
+						status: 'error',
+						progress: 0,
+						error: 'invalid dump sidecar: missing required table videos',
+					},
+				],
+			});
+		}, 300);
+
+		await waitFor(
+			() => {
+				expect(
+					screen.getByText('[validation] invalid dump sidecar: missing required table videos'),
+				).toBeTruthy();
+			},
+			{ timeout: 9000 },
+		);
+	}, 12_000);
 
 	it('renders async failures with the server error kind prefix', async () => {
 		uploadDump.mockResolvedValue({ message: 'upload staged' });

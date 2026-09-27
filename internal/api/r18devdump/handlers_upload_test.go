@@ -863,7 +863,35 @@ func TestUpload_StagingCreatesMissingParentDir(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// --- receive wrapper + provenance units ---
+func TestUpload_ProgressThrottledUnderFastLAN(t *testing.T) {
+	// A fast body lands entirely inside one throttle window: without the
+	// throttle this would emit one WebSocket frame per body read (~60+ for a
+	// 2 MB part), overflowing the hub's 256-deep client queues and dropping
+	// listeners mid-upload.
+	h, _, srv := newUploadHandler(t)
+	var mu sync.Mutex
+	var frames []string
+	h.broadcastProgressFn = func(phase string, _, _ int64, _ string) {
+		mu.Lock()
+		frames = append(frames, phase)
+		mu.Unlock()
+	}
+
+	big := bytes.Repeat([]byte("row"), 700000) // ~2.1 MB part
+	status, _, _ := srv.doUpload(t, buildUploadBody(t, big, "r18dotdev_dump_2026-09-20.sql.gz"))
+	require.Equal(t, http.StatusAccepted, status)
+	awaitDone(t, h, 10*time.Second)
+
+	mu.Lock()
+	defer mu.Unlock()
+	downloading := 0
+	for _, f := range frames {
+		if f == "downloading" {
+			downloading++
+		}
+	}
+	assert.LessOrEqual(t, downloading, 3, "downloading progress must be throttled, got %d frames for one fast body", downloading)
+}
 
 func TestReceiveWrapper_ClassificationTable(t *testing.T) {
 	mkWrapper := func() *receiveWrapper {

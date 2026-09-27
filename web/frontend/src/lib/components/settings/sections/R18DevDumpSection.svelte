@@ -127,10 +127,12 @@
 					if (wsStatus === 'error') {
 						// Render the server's real error (upload failures, download
 						// stalls); fall back to the generic string only when absent.
-						downloadError =
+						const kind = status?.last_error_kind;
+						const text =
 							downloadProgress.error ||
 							status?.last_error ||
 							m.settings_r18dev_download_failed_msg();
+						downloadError = kind ? `[${kind}] ${text}` : text;
 					}
 					return;
 				}
