@@ -169,8 +169,18 @@ func (r *resumeReader) Read(p []byte) (int, error) {
 		if err == nil {
 			continue
 		}
-		if err == io.EOF && (r.total < 0 || r.offset >= r.total) {
-			return 0, io.EOF
+		if err == io.EOF {
+			if r.total < 0 {
+				// Unknown length (close-delimited/chunked): EOF may be the
+				// genuine end or a premature close. Probe before concluding.
+				if r.classifyUnknownEOF() {
+					return 0, io.EOF
+				}
+				continue // resumed body installed, or total refined — keep reading
+			}
+			if r.offset >= r.total {
+				return 0, io.EOF
+			}
 		}
 		// A canceled context (user abort, stall watchdog) must fail fast —
 		// retrying would just re-arm a doomed request.
@@ -192,9 +202,26 @@ func (r *resumeReader) Read(p []byte) (int, error) {
 	}
 }
 
+// ifRangeValidator returns the validator to send in If-Range on resume/probe
+// requests, or "" when the original response carried no usable one. RFC 9110
+// 13.1.4 requires a strong validator for If-Range — a weak entity-tag
+// (W/"...") must not match and makes servers answer 200 — so a weak ETag
+// falls back to Last-Modified. An empty result means the object identity
+// cannot be verified across connections: splicing resumed bytes would risk
+// merging two different objects, so resumes and EOF probes are refused.
+func (r *resumeReader) ifRangeValidator() string {
+	if r.etag != "" && !strings.HasPrefix(r.etag, "W/") {
+		return r.etag
+	}
+	return r.lastMod
+}
+
 // resume re-opens the dump object with a Range request starting at the
 // consumed offset, retrying with backoff until the consecutive-failure cap.
 func (r *resumeReader) resume() (io.ReadCloser, error) {
+	if r.ifRangeValidator() == "" {
+		return nil, fmt.Errorf("cannot resume safely: the original response has no strong ETag or Last-Modified to verify the object is unchanged")
+	}
 	var lastErr error
 	for r.consecFailures < maxResumeAttempts {
 		r.consecFailures++
@@ -220,19 +247,7 @@ func (r *resumeReader) openRange() (io.ReadCloser, error) {
 	req.Header.Set("User-Agent", downloadUserAgent)
 	req.Header.Set("Accept", "*/*")
 	req.Header.Set("Range", fmt.Sprintf("bytes=%d-", r.offset))
-	// RFC 9110 13.1.4: If-Range needs a strong validator — a weak entity-tag
-	// (W/"...") must not match, so an RFC-compliant server answers 200 and the
-	// resume fails. Prefer Last-Modified over a weak ETag.
-	validator := r.etag
-	if strings.HasPrefix(validator, "W/") {
-		validator = ""
-	}
-	if validator == "" {
-		validator = r.lastMod
-	}
-	if validator != "" {
-		req.Header.Set("If-Range", validator)
-	}
+	req.Header.Set("If-Range", r.ifRangeValidator())
 	resp, err := r.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("resume request: %w", err)
@@ -259,6 +274,87 @@ func (r *resumeReader) openRange() (io.ReadCloser, error) {
 		return nil, fmt.Errorf("dump object changed mid-download: size %d, started with %d", total, r.total)
 	}
 	return resp.Body, nil
+}
+
+// classifyUnknownEOF runs when the stream reports a clean EOF but the
+// response carried no Content-Length, so a premature connection close is
+// indistinguishable from the end of the object. It PROBES the final URL with
+// a Range request from the consumed offset:
+//
+// HTTP 416 with total == offset → genuine end (returns true).
+// HTTP 206 starting at offset   → truncated; the response body continues the
+// stream and is adopted, with r.total recorded (returns false).
+// HTTP 416 with total > offset  → truncated; r.total is recorded and the
+// caller's standard resume path re-opens the stream (returns false).
+// Anything else (probe error, Range ignored, malformed headers) is
+// indeterminate → return true and hand io.EOF to the gzip layer, which
+// validates stream completeness — a mid-member EOF surfaces there as
+// "unexpected EOF" instead of silently truncating data.
+func (r *resumeReader) classifyUnknownEOF() bool {
+	// A stream that repeatedly stops without progress must not loop probes
+	// forever — treat a run of them as indeterminate and let gzip enforce
+	// integrity, with one bounded budget shared with the resume path.
+	// Without a validator the probe could splice bytes from a different
+	// object — degrade to io.EOF and let the gzip layer enforce integrity.
+	validator := r.ifRangeValidator()
+	if validator == "" {
+		return true
+	}
+	if r.consecFailures >= maxResumeAttempts {
+		return true
+	}
+	r.consecFailures++
+	req, err := http.NewRequestWithContext(r.ctx, http.MethodGet, r.url, nil)
+	if err != nil {
+		return true
+	}
+	req.Header.Set("User-Agent", downloadUserAgent)
+	req.Header.Set("Accept", "*/*")
+	req.Header.Set("Range", fmt.Sprintf("bytes=%d-", r.offset))
+	req.Header.Set("If-Range", validator)
+	resp, err := r.client.Do(req)
+	if err != nil {
+		return true
+	}
+	switch resp.StatusCode {
+	case http.StatusPartialContent:
+		start, total, perr := parseContentRange(resp.Header.Get("Content-Range"))
+		if perr != nil || start != r.offset {
+			_ = resp.Body.Close()
+			return true
+		}
+		if total >= 0 {
+			r.total = total
+		}
+		_ = r.body.Close()
+		r.body = resp.Body
+		return false
+	case http.StatusRequestedRangeNotSatisfiable:
+		size, ok := parseRangeNotSatisfiableTotal(resp.Header.Get("Content-Range"))
+		_ = resp.Body.Close()
+		if !ok || size <= r.offset {
+			return true // genuine end (size == offset expected) or unparseable
+		}
+		r.total = size // truncated — the standard resume path re-opens the stream
+		return false
+	default:
+		_ = resp.Body.Close()
+		return true
+	}
+}
+
+// parseRangeNotSatisfiableTotal parses the total size from a 416 response's
+// "Content-Range: bytes */<total>" header.
+func parseRangeNotSatisfiableTotal(s string) (int64, bool) {
+	const prefix = "bytes */"
+	if !strings.HasPrefix(s, prefix) {
+		return 0, false
+	}
+	n, err := strconv.ParseInt(strings.TrimPrefix(s, prefix), 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return n, true
 }
 
 func (r *resumeReader) Close() error {

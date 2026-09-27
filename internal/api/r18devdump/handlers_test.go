@@ -1191,6 +1191,52 @@ func TestStartDownload_RestoresHandleOnFailure(t *testing.T) {
 	assert.True(t, reloadCalled, "reloadDump should be called after failed download to restore handle")
 }
 
+func TestStartDownload_RestoreWarnsOnReloadErrorAfterImportFailure(t *testing.T) {
+	// Import must fail AFTER the parse succeeds but with the dump path still
+	// present on disk, so the stat-gated restore reload runs (and its error
+	// branch logs). A non-empty directory at the dump path breaks the final
+	// os.Rename while passing os.Stat.
+	gz := gzipped("COPY public.derived_video (content_id, dvd_id) FROM stdin;\n118ipx00535\tIPX-535\n\\.\n")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/gzip")
+		_, _ = w.Write(gz)
+	}))
+	defer srv.Close()
+
+	h, _, _ := newTestHandlerWithHub(t)
+	h.httpClient = srv.Client()
+
+	dumpPath := filepath.Join(t.TempDir(), "r18dev_dump.db")
+	require.NoError(t, os.MkdirAll(dumpPath, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(dumpPath, "sentinel"), []byte("x"), 0o644))
+	h.rt.Deps().CoreDeps.GetConfig().Metadata.R18DevDump.Path = dumpPath
+
+	reloadCalled := false
+	h.reloadFn = func(_ *config.Config, _ bool) error {
+		reloadCalled = true
+		return fmt.Errorf("simulated restore failure")
+	}
+
+	orig := r18devdump.LatestDumpURL
+	r18devdump.LatestDumpURL = srv.URL + "/latest"
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/r18dev/dump/download", nil)
+
+	h.startDownload(c)
+	require.Equal(t, http.StatusAccepted, w.Code)
+
+	<-h.done
+	r18devdump.LatestDumpURL = orig
+
+	assert.True(t, reloadCalled, "restore reload should run when the dump path exists but import failed")
+	h.mu.Lock()
+	lastErr := h.lastError
+	h.mu.Unlock()
+	assert.Contains(t, lastErr, "rename tmp db", "import should fail at the final rename onto a non-empty directory")
+}
+
 func TestStartDownload_SkipsRestoreWhenDumpMissing(t *testing.T) {
 	// When the download fails and no dump file exists at the configured path,
 	// there is nothing to restore: reloadFn must not run (it would only log a
