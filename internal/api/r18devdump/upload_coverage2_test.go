@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -48,8 +49,14 @@ func TestUpload_WriteDeadlineLiftUnsupported_500(t *testing.T) {
 	assert.False(t, running)
 }
 
-// Staged-file create failure: dump dir read-only.
+// Staged-file create failure: dump dir read-only. POSIX-only by design: a
+// read-only directory attribute does not block file creation on Windows. The
+// Windows-covered variant is TestUpload_StagingMkdirBlockedByFile_500, which
+// blocks the dump parent with a regular file (fails portably).
 func TestUpload_StagingCreateFailure_500(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("read-only directory attribute is not enforced on Windows")
+	}
 	h, dumpPath, srv := newUploadHandler(t)
 	require.NoError(t, os.MkdirAll(filepath.Dir(dumpPath), 0o755))
 	require.NoError(t, os.Chmod(filepath.Dir(dumpPath), 0o500))

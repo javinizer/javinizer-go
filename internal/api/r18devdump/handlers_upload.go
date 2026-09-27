@@ -284,15 +284,25 @@ func (h *dumpHandler) runUploadJob(ctx context.Context, path, staged string, pro
 		h.broadcastProgress(errorResponseKey, 0, 0, failErr.Error())
 		return
 	}
-	defer func() { _ = stagedFile.Close() }()
 	var fsFault atomic.Bool
 	br := bufio.NewReader(&fsTagReader{inner: stagedFile, failed: &fsFault})
 	head, _ := br.Peek(sniffSize)
+	isGzip := len(head) >= 2 && head[0] == 0x1f && head[1] == 0x8b
+	isSQLite := len(head) >= sniffSize && string(head) == string(sqliteMagic)
+	if !isGzip {
+		// Sidecar renaming happens outside this function; Windows refuses to
+		// rename a file with an open handle, so the sniff handle must be closed
+		// before dispatching to the sidecar job.
+		_ = stagedFile.Close()
+	}
 
 	switch {
-	case len(head) >= 2 && head[0] == 0x1f && head[1] == 0x8b:
+	case isGzip:
 		h.runRawDumpJob(ctx, br, path, prov, &fsFault, &failKind, &failErr, &succeeded)
-	case len(head) >= sniffSize && string(head) == string(sqliteMagic):
+		// Raw path: Import consumes the reader; the sniff handle closes only
+		// after the job returns (raw imports never rename the staged file).
+		_ = stagedFile.Close()
+	case isSQLite:
 		h.runSidecarJob(ctx, staged, path, &failKind, &failErr, &succeeded)
 	default:
 		failKind = kindValidation
