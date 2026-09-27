@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -276,9 +277,18 @@ func checkLogicalKey(ctx context.Context, db *sql.DB, table string, keys []strin
 	for _, k := range keys {
 		typePreds = append(typePreds, "(typeof("+k+") != 'text')")
 	}
-	casingPreds := make([]string, 0, len(keys))
+	// content_id carries THE only normalization contract (lookups lowercase
+	// and trim before BINARY compare); entity/association IDs are compared
+	// exactly, so hygiene metrics apply only to content_id columns.
+	idHygiene := ""
 	for _, k := range keys {
-		casingPreds = append(casingPreds, "("+k+" != LOWER("+k+"))")
+		if k == contentIDColumn {
+			idHygiene = " AND (TRIM(" + k + ") = '' OR TRIM(" + k + ") != " + k + " OR " + k + " != LOWER(" + k + "))"
+		}
+	}
+	casingMetric := "0"
+	if idHygiene != "" {
+		casingMetric = "(SELECT COUNT(*) FROM " + table + " WHERE " + notNullPred + idHygiene + ")"
 	}
 	q := "SELECT " +
 		"(SELECT COUNT(*) FROM " + table + " WHERE " + nullPred + "), " +
@@ -286,9 +296,7 @@ func checkLogicalKey(ctx context.Context, db *sql.DB, table string, keys []strin
 		"(SELECT COUNT(*) FROM (SELECT DISTINCT " + keysList + " FROM " + table + " WHERE " + notNullPred + ")), " +
 		"(SELECT COUNT(*) FROM pragma_table_info('" + table + "') WHERE " + orderedPkPredicate(keys) + "), " +
 		"(SELECT COUNT(*) FROM " + table + " WHERE " + notNullPred + " AND (" + strings.Join(typePreds, " OR ") + ")), " +
-		"(SELECT COUNT(*) FROM " + table + " WHERE " + notNullPred + " AND (" + strings.Join(casingPreds, " OR ") + ")), " +
-		// PK-backed autoindex collation: declared non-BINARY pk collations make
-		// the autoindex unusable for the lookups' binary predicates.
+		casingMetric + ", " +
 		"(SELECT COALESCE((SELECT COUNT(*) FROM (SELECT coll FROM pragma_index_xinfo((SELECT name FROM pragma_index_list('" + table + "') WHERE origin='pk')) WHERE key=1 AND coll != 'BINARY')), 0))"
 	var nulls, total, distinct, pkOrdered, badTypes, badCasing, badPkColl int64
 	if err := db.QueryRowContext(ctx, q).Scan(&nulls, &total, &distinct, &pkOrdered, &badTypes, &badCasing, &badPkColl); err != nil {
@@ -300,18 +308,14 @@ func checkLogicalKey(ctx context.Context, db *sql.DB, table string, keys []strin
 	if total > distinct {
 		return fmt.Errorf("%w: dump contains %s rows with duplicate %s", ErrDumpInvalid, table, keyList)
 	}
-	// BLOB/REAL key storage binds unequal to the lookups' TEXT parameters
-	// (SQLite does not coerce at bind time), making valid rows unreachable.
 	if badTypes > 0 {
 		return fmt.Errorf("%w: dump contains %s rows with non-TEXT %s", ErrDumpInvalid, table, keyList)
 	}
 	if pkOrdered < int64(len(keys)) {
 		return fmt.Errorf("%w: table %s' primary key does not start with %s in order — lookups on it would full-scan", ErrDumpInvalid, table, keyList)
 	}
-	// Lookups lowercase-bound their parameters before comparing against the
-	// BINARY key, so uppercase-stored ids are unreachable after install.
 	if badCasing > 0 {
-		return fmt.Errorf("%w: dump contains %s rows with noncanonical (non-lowercase) %s", ErrDumpInvalid, table, keyList)
+		return fmt.Errorf("%w: dump contains %s rows with noncanonical %s", ErrDumpInvalid, table, keyList)
 	}
 	if badPkColl > 0 {
 		return fmt.Errorf("%w: %s primary key has a non-BINARY collation — lookups would full-scan", ErrDumpInvalid, table)
@@ -319,12 +323,13 @@ func checkLogicalKey(ctx context.Context, db *sql.DB, table string, keys []strin
 	return nil
 }
 
-// orderedPkPredicate matches exactly the tables whose pk position i column is
-// keys[i] — membership alone accepts reordered keys (unusable as a prefix).
+// orderedPkPredicate matches pk positions 1..len(keys) against the logical
+// key columns in order — membership alone accepts reordered keys (unusable as
+// a lookup prefix).
 func orderedPkPredicate(keys []string) string {
 	parts := make([]string, 0, len(keys))
 	for i, k := range keys {
-		parts = append(parts, fmt.Sprintf("(pk = %d AND name = '%s')", i+1, k))
+		parts = append(parts, "(pk = "+strconv.Itoa(i+1)+" AND name = '"+k+"')")
 	}
 	return strings.Join(parts, " OR ")
 }
