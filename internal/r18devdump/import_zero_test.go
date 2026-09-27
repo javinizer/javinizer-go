@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -166,4 +167,48 @@ func TestReplaceFile_RemoveThenRenameFallback(t *testing.T) {
 	data, err := os.ReadFile(dst)
 	require.NoError(t, err)
 	assert.Equal(t, "new", string(data))
+}
+
+func TestEnforceDumpSizeLimit(t *testing.T) {
+	// Snapshot the ceiling's constant — this is the receive-time policy value.
+	require.Positive(t, MaxDecompressedDumpBytes)
+
+	t.Run("content within the limit reads cleanly", func(t *testing.T) {
+		r := EnforceDumpSizeLimit(strings.NewReader("copy dump bytes"), 16)
+		buf := make([]byte, 10)
+		var got []byte
+		for {
+			n, err := r.Read(buf)
+			got = append(got, buf[:n]...)
+			if err != nil {
+				require.ErrorIs(t, err, io.EOF)
+				break
+			}
+		}
+		assert.Contains(t, string(got), "copy dum", "reads up to the cap should all succeed")
+	})
+
+	t.Run("crossing the limit fails with the sentinel and keeps partial data", func(t *testing.T) {
+		r := EnforceDumpSizeLimit(strings.NewReader("0123456789abcdef"), 8)
+		buf := make([]byte, 16)
+		var got []byte
+		var finalErr error
+		for finalErr == nil {
+			n, err := r.Read(buf)
+			got = append(got, buf[:n]...)
+			finalErr = err
+		}
+		require.ErrorIs(t, finalErr, ErrDumpTooLarge)
+		assert.Equal(t, "01234567", string(got))
+	})
+
+	t.Run("import stops with a classified too-large error against the tiny cap", func(t *testing.T) {
+		// exercises the Import integration (fsTagReader → ErrDumpTooLarge →
+		// validation classification) without generating GBs of data.
+		var body strings.Builder
+		body.WriteString("COPY public.derived_video (content_id, dvd_id) FROM stdin;\n118ipx00535\tIPX-535\n\\.\n")
+		_, err := Import(context.Background(), EnforceDumpSizeLimit(strings.NewReader(body.String()), 8), filepath.Join(t.TempDir(), "x.db"), ImportOptions{})
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrDumpTooLarge)
+	})
 }

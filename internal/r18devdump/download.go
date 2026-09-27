@@ -128,9 +128,10 @@ func Download(ctx context.Context, client *http.Client, currentSourceURL string,
 	if err != nil {
 		return res, fmt.Errorf("gunzip dump: %w", err)
 	}
+	bounded := EnforceDumpSizeLimit(gz, MaxDecompressedDumpBytes)
 	defer func() { _ = gz.Close() }()
 
-	if err := importFn(gz, res); err != nil {
+	if err := importFn(bounded, res); err != nil {
 		return res, err
 	}
 	if cr, ok := body.(*countingReader); ok {

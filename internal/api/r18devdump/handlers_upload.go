@@ -226,6 +226,7 @@ func classifyImportError(importErr error, fsFault, gzFault bool) string {
 	case errors.Is(importErr, r18devdump.ErrDumpNoRows) ||
 		errors.Is(importErr, r18devdump.ErrTruncatedDump) ||
 		errors.Is(importErr, r18devdump.ErrDumpTypedValue) ||
+		errors.Is(importErr, r18devdump.ErrDumpTooLarge) ||
 		gzFault:
 		return kindValidation
 	default:
@@ -334,6 +335,7 @@ func (h *dumpHandler) runUploadJob(ctx context.Context, path, staged string, pro
 
 func (h *dumpHandler) runRawDumpJob(ctx context.Context, br *bufio.Reader, path string, prov provenanceCapture, fsFault *atomic.Bool, failKind *string, failErr *error, succeeded *bool) {
 	gz, err := gzip.NewReader(br)
+	bounded := r18devdump.EnforceDumpSizeLimit(gz, r18devdump.MaxDecompressedDumpBytes)
 	if err != nil {
 		*failKind = kindValidation
 		*failErr = fmt.Errorf("invalid gzip stream: %w", err)
@@ -351,7 +353,7 @@ func (h *dumpHandler) runRawDumpJob(ctx context.Context, br *bufio.Reader, path 
 	date := r18devdump.ParseFilenameSourceDate(token)
 
 	gzFault := &atomic.Bool{}
-	taggedGz := &fsTagReader{inner: gz, failed: gzFault}
+	taggedGz := &fsTagReader{inner: bounded, failed: gzFault}
 	var unlockReload func()
 
 	impRes, importErr := r18devdump.Import(ctx, taggedGz, path, r18devdump.ImportOptions{
