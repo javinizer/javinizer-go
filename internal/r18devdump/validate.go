@@ -43,10 +43,14 @@ func ValidateSidecar(ctx context.Context, path string) (*Store, error) {
 		}
 	}()
 
-	// 1. Metadata table must exist and be readable.
+	// 1. Metadata table must exist, be readable, and carry provenance. A
+	// shell database with an empty dump_meta is not a usable dump.
 	var metaCount int64
 	if err := store.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM dump_meta").Scan(&metaCount); err != nil {
 		return nil, fmt.Errorf("%w: dump_meta unreadable: %v", ErrDumpInvalid, err)
+	}
+	if metaCount == 0 {
+		return nil, fmt.Errorf("%w: dump_meta carries no provenance rows", ErrDumpInvalid)
 	}
 
 	// 2. Required tables and columns (additive extras are fine).
@@ -71,6 +75,15 @@ func ValidateSidecar(ctx context.Context, path string) (*Store, error) {
 		if err := indexExists(ctx, store.db, idx); err != nil {
 			return nil, err
 		}
+	}
+
+	// 3b. An empty dump must never replace a working one.
+	var videoCount int64
+	if err := store.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM videos").Scan(&videoCount); err != nil {
+		return nil, fmt.Errorf("%w: videos unreadable: %v", ErrDumpInvalid, err)
+	}
+	if videoCount == 0 {
+		return nil, fmt.Errorf("%w: dump contains zero videos", ErrDumpInvalid)
 	}
 
 	// 4. Integrity: quick_check must return exactly 'ok'.

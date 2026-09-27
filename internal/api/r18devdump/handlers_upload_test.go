@@ -839,6 +839,30 @@ func TestUpload_UnobservedServerTimer_Completes202(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestUpload_StagingCreatesMissingParentDir(t *testing.T) {
+	// Fresh-install layout: data/r18dev/ may not exist when the first upload
+	// arrives (nothing else creates it outside Import).
+	h, _, _ := newTestHandlerWithHub(t)
+	h.reloadFn = func(_ *config.Config, _ bool) error { return nil }
+	nested := t.TempDir() + "/data/r18dev/r18dev_dump.db"
+	cfg := &config.Config{}
+	cfg.Metadata.R18DevDump.Path = nested
+	cfg.Metadata.R18DevDump.Enabled = true
+	h.rt.SetConfig(cfg)
+	srv := newUploadTestServer(t, h)
+
+	status, body, _ := srv.doUpload(t, buildUploadBody(t, gzBytes(t, uploadOneRowDump), "r18dotdev_dump_2026-09-20.sql.gz"))
+	require.Equal(t, http.StatusAccepted, status, body)
+	awaitDone(t, h, 10*time.Second)
+	lastErr, _, _ := handlerState(h)
+	require.Empty(t, lastErr)
+	store, err := r18devdump.Open(nested)
+	require.NoError(t, err)
+	defer func() { _ = store.Close() }()
+	_, err = store.Stats(context.Background())
+	require.NoError(t, err)
+}
+
 // --- receive wrapper + provenance units ---
 
 func TestReceiveWrapper_ClassificationTable(t *testing.T) {

@@ -11,6 +11,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sync/atomic"
 	"time"
 
@@ -152,6 +153,13 @@ func (h *dumpHandler) startUpload(c *gin.Context) {
 
 	src, err := h.openPart(fh)
 	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{errorResponseKey: fmt.Sprintf("stage upload: %v", err)})
+		return
+	}
+	// The dump's parent dir may not exist on a fresh install (nothing else
+	// creates it before the first upload).
+	if err := os.MkdirAll(filepath.Dir(staged), 0o750); err != nil {
+		_ = src.Close()
 		c.JSON(http.StatusInternalServerError, gin.H{errorResponseKey: fmt.Sprintf("stage upload: %v", err)})
 		return
 	}

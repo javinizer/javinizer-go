@@ -85,6 +85,23 @@ func TestValidateSidecar_TruncatedRejected(t *testing.T) {
 	assert.True(t, errors.Is(err, ErrDumpInvalid))
 }
 
+func TestValidateSidecar_EmptyProvenanceRejected(t *testing.T) {
+	path := importFixture(t)
+	alterFixture(t, path, "DELETE FROM dump_meta")
+	_, err := ValidateSidecar(context.Background(), path)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "provenance")
+}
+
+func TestValidateSidecar_ZeroVideosRejected(t *testing.T) {
+	path := importFixture(t)
+	alterFixture(t, path, "DELETE FROM videos")
+	_, err := ValidateSidecar(context.Background(), path)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrDumpInvalid)
+	assert.Contains(t, err.Error(), "zero videos")
+}
+
 func TestValidateSidecar_NotADatabase(t *testing.T) {
 	dst := filepath.Join(t.TempDir(), "junk.db")
 	require.NoError(t, os.WriteFile(dst, []byte("SQLite format 3\x00 but then garbage"), 0o600))
