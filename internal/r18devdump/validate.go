@@ -320,8 +320,11 @@ func checkLogicalKey(ctx context.Context, db *sql.DB, table string, keys []strin
 			// strings.TrimSpace for the full ASCII whitespace set (the DMM
 			// content-id domain is ASCII by construction; non-ASCII whitespace
 			// divergences are deliberately out of scope).
-			fullTrim := "TRIM(" + k + ", ' '||char(9)||char(10)||char(11)||char(12)||char(13))"
-			idHygiene = " AND (" + fullTrim + " = '' OR " + fullTrim + " != " + k + " OR " + k + " != LOWER(" + k + "))"
+			// Mirror the importer's normalizeDVDID in pure SQL: strip hyphen
+			// and the full ASCII whitespace set (SQLite's one-arg TRIM covers
+			// only spaces; tabs/internal padding made norms diverge).
+			setTrim := "TRIM(" + k + ", ' '||char(9)||char(10)||char(11)||char(12)||char(13))"
+			idHygiene = " AND (" + setTrim + " = '' OR " + k + " != LOWER(" + setTrim + "))"
 		}
 	}
 	casingMetric := "0"
@@ -360,6 +363,19 @@ func checkLogicalKey(ctx context.Context, db *sql.DB, table string, keys []strin
 // orderedPkPredicate matches pk positions 1..len(keys) against the logical
 // key columns in order — membership alone accepts reordered keys (unusable as
 // a lookup prefix).
+// buildNormExpr returns the SQL expression computing the same transform as
+// normalizeDVDID: strip hyphen and the full ASCII whitespace set, then
+// uppercase. The chain is assembled afterhand so nesting is balanced by
+// construction.
+func buildNormExpr(col string) string {
+	expr := col
+	chain := "REPLACE(" + expr + ", '-', '')"
+	for _, cExpr := range []string{"' '", "char(9)", "char(10)", "char(11)", "char(12)", "char(13)"} {
+		chain = "REPLACE(" + chain + ", " + cExpr + ", '')"
+	}
+	return "UPPER(" + chain + ")"
+}
+
 func orderedPkPredicate(keys []string) string {
 	parts := make([]string, 0, len(keys))
 	for i, k := range keys {
@@ -426,7 +442,7 @@ func validateNormConsistency(ctx context.Context, db *sql.DB) error {
 	// requires the agreeing norm (empty/NULL norms are invisible to lookups).
 	bad, err := queryCount(ctx, db,
 		"SELECT COUNT(*) FROM videos WHERE "+
-			"COALESCE(dvd_id_norm, '') != COALESCE(UPPER(REPLACE(REPLACE(dvd_id, '-', ''), ' ', '')), '')")
+			"COALESCE(dvd_id_norm, '') != COALESCE("+buildNormExpr("dvd_id")+", '')")
 	if err != nil {
 		return fmt.Errorf("%w: norm consistency probe: %v", ErrDumpInvalid, err)
 	}
