@@ -416,7 +416,20 @@ func TestValidateSidecar_PKWithNoCaseCollationRejected(t *testing.T) {
 	_, err := ValidateSidecar(context.Background(), path)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrDumpInvalid)
-	assert.Contains(t, err.Error(), "non-BINARY")
+	assert.Contains(t, err.Error(), "declares a collation")
+}
+
+func TestValidateSidecar_CollatedColumnDDLRejected(t *testing.T) {
+	// Codex: TEXT COLLATE NOCASE column declarations are invisible to pragma
+	// metadata probes but change predicate collation, defeating BINARY keys.
+	path := looseTableFixture(t, "videos",
+		"content_id TEXT COLLATE NOCASE PRIMARY KEY, dvd_id TEXT, dvd_id_norm TEXT, title_en TEXT, title_ja TEXT, comment_en TEXT, comment_ja TEXT, runtime_mins INTEGER, release_date TEXT, sample_url TEXT, maker_id TEXT, label_id TEXT, series_id TEXT, jacket_full_url TEXT, jacket_thumb_url TEXT, gallery_full_first TEXT, gallery_full_last TEXT, gallery_thumb_first TEXT, gallery_thumb_last TEXT, site_id TEXT, service_code TEXT",
+		"INSERT INTO videos_loose (content_id, dvd_id, dvd_id_norm) VALUES ('118iptest001', 'IPT-001', 'IPT001')")
+	alterFixture(t, path, "CREATE INDEX idx_videos_dvd_id_norm ON videos(dvd_id_norm)")
+	_, err := ValidateSidecar(context.Background(), path)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrDumpInvalid)
+	assert.Contains(t, err.Error(), "declares a collation")
 }
 
 func TestValidateSidecar_NotADatabase(t *testing.T) {

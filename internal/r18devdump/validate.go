@@ -137,9 +137,28 @@ func validateStructure(ctx context.Context, db *sql.DB) error {
 		if n == 0 {
 			return fmt.Errorf("%w: missing required table %s", ErrDumpInvalid, table)
 		}
+		if err := checkTableDDL(ctx, db, table); err != nil {
+			return err
+		}
 		if err := validateColumns(ctx, db, table, schema.columns); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// checkTableDDL enforces the generated schema's no-COLLATE property via the
+// stored DDL: a column- or index-declared collation on a key column changes
+// predicate semantics while pragma metadata probes stay blind to it. Genuine
+// dumps never declare collations, so any COLLATE keyword is off-schema.
+func checkTableDDL(ctx context.Context, db *sql.DB, table string) error {
+	ddl, err := queryString(ctx, db,
+		"SELECT COALESCE((SELECT sql FROM sqlite_master WHERE type='table' AND name=?), '')", table)
+	if err != nil {
+		return fmt.Errorf("%w: %s DDL probe: %v", ErrDumpInvalid, table, err)
+	}
+	if strings.Contains(strings.ToUpper(ddl), "COLLATE") {
+		return fmt.Errorf("%w: %s DDL declares a collation the lookups cannot use", ErrDumpInvalid, table)
 	}
 	return nil
 }
@@ -301,10 +320,9 @@ func checkLogicalKey(ctx context.Context, db *sql.DB, table string, keys []strin
 		"(SELECT COUNT(*) FROM (SELECT DISTINCT " + keysList + " FROM " + table + " WHERE " + notNullPred + ")), " +
 		"(SELECT COUNT(*) FROM pragma_table_info('" + table + "') WHERE " + orderedPkPredicate(keys) + "), " +
 		"(SELECT COUNT(*) FROM " + table + " WHERE " + notNullPred + " AND (" + strings.Join(typePreds, " OR ") + ")), " +
-		casingMetric + ", " +
-		"(SELECT COALESCE((SELECT COUNT(*) FROM (SELECT coll FROM pragma_index_xinfo((SELECT name FROM pragma_index_list('" + table + "') WHERE origin='pk')) WHERE key=1 AND coll != 'BINARY')), 0))"
-	var nulls, total, distinct, pkOrdered, badTypes, badCasing, badPkColl int64
-	if err := db.QueryRowContext(ctx, q).Scan(&nulls, &total, &distinct, &pkOrdered, &badTypes, &badCasing, &badPkColl); err != nil {
+		casingMetric
+	var nulls, total, distinct, pkOrdered, badTypes, badCasing int64
+	if err := db.QueryRowContext(ctx, q).Scan(&nulls, &total, &distinct, &pkOrdered, &badTypes, &badCasing); err != nil {
 		return fmt.Errorf("%w: %s logical-key probe: %v", ErrDumpInvalid, table, err)
 	}
 	if nulls > 0 {
@@ -321,9 +339,6 @@ func checkLogicalKey(ctx context.Context, db *sql.DB, table string, keys []strin
 	}
 	if badCasing > 0 {
 		return fmt.Errorf("%w: dump contains %s rows with noncanonical %s", ErrDumpInvalid, table, keyList)
-	}
-	if badPkColl > 0 {
-		return fmt.Errorf("%w: %s primary key has a non-BINARY collation — lookups would full-scan", ErrDumpInvalid, table)
 	}
 	return nil
 }
