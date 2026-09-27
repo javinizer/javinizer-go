@@ -374,7 +374,7 @@ When you push to GitHub, the workflow runs automatically:
 2. **Jobs run in parallel** (9 jobs in `.github/workflows/test.yml`):
    - `test` — Unit Tests & Coverage (uploads to Codecov; `timeout-minutes: 20`)
    - `race-tests` — Race Detector Tests (`timeout-minutes: 30`)
-   - `lint` — Linting & Code Quality: `go vet`, `internal/api` 700-line size guardrail, `golangci-lint` v2.9.0, `gofmt` check (`timeout-minutes: 15`)
+   - `lint` — Linting & Code Quality: `go vet`, `internal/api` 700-line size guardrail, `golangci-lint` v2.14.0, `gofmt` check (`timeout-minutes: 15`)
    - `vuln` — Vulnerability Scan via `govulncheck@v1.5.0` (`timeout-minutes: 10`)
    - `test-windows` — Unit Tests (Windows), `go test -short ./...` on `windows-latest` (`timeout-minutes: 25`)
    - `frontend-tests` — Frontend Tests, Node 22 + Vitest (`timeout-minutes: 15`)

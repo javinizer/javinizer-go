@@ -297,7 +297,7 @@ Main CI checks include:
 - Unit/integration tests (Linux + Windows)
 - Coverage threshold enforcement (75% line coverage)
 - Race detector tests (`internal/worker`, `internal/tui`, `internal/websocket`, `internal/api`)
-- Linting and static analysis (go vet, golangci-lint v2.9.0, gofmt)
+- Linting and static analysis (go vet, golangci-lint v2.14.0, gofmt)
 - Vulnerability scanning (govulncheck)
 - Frontend tests (Vitest)
 - Build and Docker verification
@@ -324,10 +324,11 @@ The project uses the following tools for code quality:
   - Run: `make vet` or `go vet ./...`
   - CI: Required to pass in CI pipeline
 
-- **golangci-lint** - Comprehensive linter suite (v2.9.0+)
+- **golangci-lint** - Comprehensive linter suite (CI pin: v2.14.0 in `.github/workflows/test.yml`)
   - Config: `.golangci.yml`
   - Run: `make lint` or `golangci-lint run`
-  - CI: Required to pass (pinned to v2.9.0 in `.github/workflows/test.yml`)
+  - CI: Required to pass
+  - Local minimum depends on your Go toolchain: Go 1.27 or newer needs golangci-lint **v2.14.0+** (Go 1.27 export data "version 4" is unreadable by older releases — even ones built with Go 1.27); Go 1.26 needs **v2.9.0+**. The pre-commit hook enforces this automatically.
 
 ### Run Commands
 
@@ -453,7 +454,7 @@ which run in parallel:
 
 - **Unit Tests & Coverage** (`test`) - Runs all Go tests and enforces the 75% line-coverage threshold
 - **Race Detector Tests** (`race-tests`) - Runs the race detector on `internal/worker`, `internal/tui`, `internal/websocket`, and `internal/api`
-- **Linting & Code Quality** (`lint`) - Runs go vet, golangci-lint (v2.9.0), gofmt check, and the `internal/api` file-size guardrail
+- **Linting & Code Quality** (`lint`) - Runs go vet, golangci-lint (v2.14.0), gofmt check, and the `internal/api` file-size guardrail
 - **Vulnerability Scan** (`vuln`) - Runs `govulncheck ./...`
 - **Unit Tests (Windows)** (`test-windows`) - Runs the Go test suite on Windows
 - **Frontend Tests** (`frontend-tests`) - Runs the Vitest suite (`npm run test --prefix web/frontend`)

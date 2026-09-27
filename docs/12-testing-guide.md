@@ -1250,7 +1250,7 @@ The project uses `.github/workflows/test.yml`, which defines **9 jobs** that run
 3. **Linting & Code Quality** (`lint`)
    - `make vet` (go vet)
    - `./scripts/check_api_file_size.sh 700 internal/api` (enforces the 700-line guardrail on `internal/api`)
-   - `golangci-lint` (pinned to `v2.9.0`, `--timeout=5m`)
+   - `golangci-lint` (pinned to `v2.14.0`, `--timeout=5m`; local installs need v2.14.0+ on Go 1.27, v2.9.0+ on Go 1.26)
    - `gofmt` formatting check
 
 4. **Vulnerability Scan** (`vuln`)
