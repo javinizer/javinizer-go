@@ -291,6 +291,17 @@ func TestValidateSidecar_TextRuntimeMinsRejected(t *testing.T) {
 	assert.Contains(t, err.Error(), "runtime_mins")
 }
 
+func TestValidateSidecar_LooseUniqueNoPKRejected(t *testing.T) {
+	// Codex: unique-but-PK-less keys slip past the NULL/dup probes while
+	// forcing every content_id lookup to full-scan the table.
+	path := looseVideosFixture(t,
+		"INSERT INTO videos_loose (content_id, dvd_id_norm) VALUES ('118ipx00535', 'IPX535')")
+	_, err := ValidateSidecar(context.Background(), path)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrDumpInvalid)
+	assert.Contains(t, err.Error(), "primary-key coverage")
+}
+
 func TestValidateSidecar_NotADatabase(t *testing.T) {
 	dst := filepath.Join(t.TempDir(), "junk.db")
 	require.NoError(t, os.WriteFile(dst, []byte("SQLite format 3\x00 but then garbage"), 0o600))

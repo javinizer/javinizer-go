@@ -11,29 +11,17 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 )
 
-// integerText reports whether s is a valid base-10 integer literal; the dump's
-// INTEGER-affinity columns feed sql.NullInt64 scans, where anything else
-// (including empty strings) fails at lookup time.
+// integerText reports whether s is a valid int64 text literal; the dump's
+// INTEGER-affinity columns feed sql.NullInt64 scans at lookup time, and the
+// SQLite integer storage class is the only other acceptable state (SQLite
+// coerces out-of-range digit strings to REAL, silently breaking Class scans).
 func integerText(s string) bool {
-	if s == "" {
-		return false
-	}
-	start := 0
-	if s[0] == '-' {
-		if len(s) == 1 {
-			return false
-		}
-		start = 1
-	}
-	for i := start; i < len(s); i++ {
-		if s[i] < '0' || s[i] > '9' {
-			return false
-		}
-	}
-	return true
+	_, err := strconv.ParseInt(s, 10, 64)
+	return err == nil
 }
 
 // ErrTruncatedDump marks input that ends inside an open COPY block: pg_dump

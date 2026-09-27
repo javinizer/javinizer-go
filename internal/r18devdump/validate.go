@@ -254,54 +254,32 @@ func validateLogicalKeys(ctx context.Context, db *sql.DB) error {
 	return nil
 }
 
-// logicalKeyProbe is one probe of a table's logical key with its transport
-// label and rejection semantics; closures carry no branching statements.
-type logicalKeyProbe struct {
-	label string
-	query string
-	bad   func(n int64) bool
-	fail  func(n int64) error
-}
-
-// checkLogicalKey runs a table's probes through one shared transport-error
-// branch and one shared semantic-decision branch.
+// checkLogicalKey runs ONE combined probe per logical-key table (NULL count,
+// non-NULL total, distinct non-NULL count, PK coverage) — a single transport
+// error branch for the row read, then decisions applied in NULL → duplicate →
+// primary-key order.
 func checkLogicalKey(ctx context.Context, db *sql.DB, table string, keys []string) error {
 	keyList := strings.Join(keys, "+")
-	nullWhere := strings.Join(nullPredicates(keys), " OR ")
-	notNullWhere := strings.Join(notNullPredicates(keys), " AND ")
-	probes := []logicalKeyProbe{
-		{
-			label: "null-key probe",
-			query: "SELECT COUNT(*) FROM " + table + " WHERE " + nullWhere,
-			bad:   func(n int64) bool { return n > 0 },
-			fail: func(n int64) error {
-				return fmt.Errorf("%w: dump contains %s rows with NULL %s", ErrDumpInvalid, table, keyList)
-			},
-		},
-		{
-			label: "row count probe",
-			query: "SELECT COUNT(*) FROM " + table + " WHERE " + notNullWhere,
-			bad:   func(int64) bool { return false },
-		},
-		{
-			label: "distinct-count probe",
-			query: "SELECT COUNT(*) FROM (SELECT DISTINCT " + strings.Join(keys, ", ") + " FROM " + table + " WHERE " + notNullWhere + ")",
-			bad:   func(int64) bool { return false },
-		},
+	nullPred := strings.Join(nullPredicates(keys), " OR ")
+	notNullPred := strings.Join(notNullPredicates(keys), " AND ")
+	keysList := strings.Join(keys, ", ")
+	q := "SELECT " +
+		"(SELECT COUNT(*) FROM " + table + " WHERE " + nullPred + "), " +
+		"(SELECT COUNT(*) FROM " + table + " WHERE " + notNullPred + "), " +
+		"(SELECT COUNT(*) FROM (SELECT DISTINCT " + keysList + " FROM " + table + " WHERE " + notNullPred + ")), " +
+		"(SELECT COUNT(*) FROM pragma_table_info('" + table + "') WHERE pk > 0 AND name IN ('" + strings.Join(keys, "', '") + "'))"
+	var nulls, total, distinct, pkMembers int64
+	if err := db.QueryRowContext(ctx, q).Scan(&nulls, &total, &distinct, &pkMembers); err != nil {
+		return fmt.Errorf("%w: %s logical-key probe: %v", ErrDumpInvalid, table, err)
 	}
-	var counts [3]int64
-	for i, p := range probes {
-		n, err := queryCount(ctx, db, p.query)
-		if err != nil {
-			return fmt.Errorf("%w: %s %s: %v", ErrDumpInvalid, table, p.label, err)
-		}
-		counts[i] = n
-		if p.bad(n) {
-			return p.fail(n)
-		}
+	if nulls > 0 {
+		return fmt.Errorf("%w: dump contains %s rows with NULL %s", ErrDumpInvalid, table, keyList)
 	}
-	if counts[1] > counts[2] {
+	if total > distinct {
 		return fmt.Errorf("%w: dump contains %s rows with duplicate %s", ErrDumpInvalid, table, keyList)
+	}
+	if pkMembers < int64(len(keys)) {
+		return fmt.Errorf("%w: table %s lacks primary-key coverage for %s", ErrDumpInvalid, table, keyList)
 	}
 	return nil
 }
