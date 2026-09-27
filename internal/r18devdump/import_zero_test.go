@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -135,6 +136,9 @@ func TestReplaceFile_OverwriteExistingDestination(t *testing.T) {
 }
 
 func TestReplaceFile_BothRenamesFail(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("fallback-only error path; POSIX rename fails once directly")
+	}
 	dir := t.TempDir()
 	src := filepath.Join(dir, "new.db")
 	dst := filepath.Join(dir, "blocked.db")
@@ -147,6 +151,9 @@ func TestReplaceFile_BothRenamesFail(t *testing.T) {
 }
 
 func TestReplaceFile_RemoveThenRenameFallback(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("POSIX os.Rename replaces in place; the fallback path exists only on Windows")
+	}
 	// First rename fails (file onto directory), remove succeeds (empty dir),
 	// and the second rename lands — exercising the fallback branch used on
 	// Windows for destination-exists updates.

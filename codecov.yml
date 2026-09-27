@@ -39,6 +39,10 @@ ignore:
   # Windows hosts, so no coverage-upload job ever hits them either.
   - "internal/history/restore_source_nofollow_windows.go"
   - "internal/downloader/restore_source_nofollow_windows.go"
+  # //go:build windows MoveFileEx-based dump replacement. Same rationale as
+  # the platform stubs above: only compiled on Windows, so no coverage-upload
+  # job can hit it.
+  - "internal/r18devdump/replace_windows.go"
   # //go:build windows leg of the wave-30 publish-with-reverify helper
   # (PublishStagedBound): MoveFileEx cannot rename an open Go handle, so the
   # Windows leg keeps a prove-close-publish-reverify posture that compiles
