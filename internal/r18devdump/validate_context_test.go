@@ -30,12 +30,10 @@ func TestValidateStages_CancelledContext(t *testing.T) {
 	}{
 		{"provenance", validateProvenance},
 		{"noNullMetaKeys", validateNoNullMetaKeys},
-		{"noNullVideoIDs", validateNoNullVideoIDs},
-		{"noDuplicateVideoIDs", validateNoDuplicateVideoIDs},
+		{"logicalKeys", validateLogicalKeys},
 		{"structure", validateStructure},
 		{"indexes", validateIndexes},
 		{"nonEmpty", validateNonEmpty},
-		{"noNullVideoIDs", validateNoNullVideoIDs},
 		{"integrity", validateIntegrity},
 	}
 	for _, s := range stages {

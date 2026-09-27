@@ -22,9 +22,9 @@ var ErrDumpInvalid = errors.New("invalid dump sidecar")
 type indexDef struct{ table, columns string }
 
 var requiredIndexDefs = map[string]indexDef{
-	"idx_video_actresses_cid":  {"video_actresses", "content_id"},
-	"idx_video_categories_cid": {"video_categories", "content_id"},
-	"idx_video_directors_cid":  {"video_directors", "content_id"},
+	"idx_video_actresses_cid":  {"video_actresses", contentIDColumn},
+	"idx_video_categories_cid": {"video_categories", contentIDColumn},
+	"idx_video_directors_cid":  {"video_directors", contentIDColumn},
 	"idx_videos_dvd_id_norm":   {"videos", "dvd_id_norm"},
 }
 
@@ -58,7 +58,7 @@ func ValidateSidecar(ctx context.Context, path string) (*Store, error) {
 		validateStructure,
 		validateIndexes,
 		validateNonEmpty,
-		validateNoDuplicateVideoIDs,
+		validateLogicalKeys,
 		validateIntegrity,
 	} {
 		if err := stage(ctx, store.db); err != nil {
@@ -175,14 +175,16 @@ func validateIndexes(ctx context.Context, db *sql.DB) error {
 		combined, err := queryString(ctx, db,
 			"SELECT COALESCE((SELECT tbl_name FROM sqlite_master WHERE type='index' AND name=?), '') || ':' || "+
 				"COALESCE((SELECT group_concat(name, ',') FROM (SELECT name FROM pragma_index_info(?) ORDER BY seqno)), '') || ':' || "+
-				"COALESCE((SELECT CAST(partial AS TEXT) FROM pragma_index_list((SELECT tbl_name FROM sqlite_master WHERE type='index' AND name=?)) WHERE name=?), '0')",
-			name, name, name, name)
+				"COALESCE((SELECT CAST(partial AS TEXT) FROM pragma_index_list((SELECT tbl_name FROM sqlite_master WHERE type='index' AND name=?)) WHERE name=?), '0') || ':' || "+
+				"COALESCE((SELECT group_concat(coll, ',') FROM (SELECT coll FROM pragma_index_xinfo(?) WHERE key=1 ORDER BY seqno)), '')",
+			name, name, name, name, name)
 		if err != nil {
 			return fmt.Errorf("%w: index probe %s: %v", ErrDumpInvalid, name, err)
 		}
-		// Exactly one row: "table:col1,col2:partial" (empty fields when absent).
+		// Exactly one row: "table:col1,col2:partial:coll1,coll2".
 		tbl, rest, _ := strings.Cut(combined, ":")
-		cols, partial, _ := strings.Cut(rest, ":")
+		cols, rest2, _ := strings.Cut(rest, ":")
+		partial, colls, _ := strings.Cut(rest2, ":")
 		if tbl == "" {
 			return fmt.Errorf("%w: missing required index %s", ErrDumpInvalid, name)
 		}
@@ -194,6 +196,12 @@ func validateIndexes(ctx context.Context, db *sql.DB) error {
 		}
 		if partial != "0" {
 			return fmt.Errorf("%w: index %s on %s is partial (WHERE predicate) — normal lookups cannot use it", ErrDumpInvalid, name, tbl)
+		}
+		// The generated schema's columns all sort BINARY; a collated index (e.g.
+		// COLLATE NOCASE) matches the column probe but is unusable for the
+		// binary equality predicates every lookup issues.
+		if colls != "" && colls != "BINARY" {
+			return fmt.Errorf("%w: index %s on %s has collations [%s], want [BINARY]", ErrDumpInvalid, name, tbl, colls)
 		}
 	}
 	return nil
@@ -209,36 +217,108 @@ func validateNonEmpty(ctx context.Context, db *sql.DB) error {
 	if n == 0 {
 		return fmt.Errorf("%w: dump contains zero videos", ErrDumpInvalid)
 	}
-	return validateNoNullVideoIDs(ctx, db)
+	return nil
 }
 
-// validateNoDuplicateVideoIDs enforces the lost primary-key invariant: a
-// loose-rebuilt videos table may admit duplicate non-NULL content_ids, making
-// LookupByContentID (LIMIT 1) and candidate matching nondeterministic.
-func validateNoDuplicateVideoIDs(ctx context.Context, db *sql.DB) error {
-	dups, err := queryCount(ctx, db, "SELECT COUNT(*) - COUNT(DISTINCT content_id) FROM videos")
-	if err != nil {
-		return fmt.Errorf("%w: video content_id duplicate probe: %v", ErrDumpInvalid, err)
-	}
-	if dups > 0 {
-		return fmt.Errorf("%w: dump contains %d videos with duplicate content_id", ErrDumpInvalid, dups)
+// logicalKeys pins the logical primary keys every lookup path relies on:
+// entity tables carry a single-column id; association tables carry a
+// composite (content_id, *_id) key. Both are modelled uniformly.
+var logicalKeys = []struct {
+	table string
+	keys  []string
+}{
+	{"videos", []string{contentIDColumn}},
+	{"actresses", []string{"id"}},
+	{"makers", []string{"id"}},
+	{"labels", []string{"id"}},
+	{"series", []string{"id"}},
+	{"directors", []string{"id"}},
+	{"categories", []string{"id"}},
+	{"trailers", []string{contentIDColumn}},
+	{"video_actresses", []string{contentIDColumn, "actress_id"}},
+	{"video_categories", []string{contentIDColumn, "category_id"}},
+	{"video_directors", []string{contentIDColumn, "director_id"}},
+}
+
+// validateLogicalKeys enforces the lost-primary-key invariants for every table
+// the lookups join over: no NULL key components (they poison scans) and no
+// duplicate key values (they make LIMIT-1 lookups nondeterministic and inflate
+// joined results).
+func validateLogicalKeys(ctx context.Context, db *sql.DB) error {
+	for _, lk := range logicalKeys {
+		if err := checkLogicalKey(ctx, db, lk.table, lk.keys); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
-// validateNoNullVideoIDs rejects rows whose content_id is NULL (possible in
-// sidecars whose videos table was rebuilt loose, dropping NOT NULL/PK) —
-// every lookup scan reads content_id into a plain string, so they would
-// install pass validation and then fail every scan.
-func validateNoNullVideoIDs(ctx context.Context, db *sql.DB) error {
-	nullIDs, err := queryCount(ctx, db, "SELECT COUNT(*) FROM videos WHERE content_id IS NULL")
-	if err != nil {
-		return fmt.Errorf("%w: video content_id null probe: %v", ErrDumpInvalid, err)
+// logicalKeyProbe is one probe of a table's logical key with its transport
+// label and rejection semantics; closures carry no branching statements.
+type logicalKeyProbe struct {
+	label string
+	query string
+	bad   func(n int64) bool
+	fail  func(n int64) error
+}
+
+// checkLogicalKey runs a table's probes through one shared transport-error
+// branch and one shared semantic-decision branch.
+func checkLogicalKey(ctx context.Context, db *sql.DB, table string, keys []string) error {
+	keyList := strings.Join(keys, "+")
+	nullWhere := strings.Join(nullPredicates(keys), " OR ")
+	notNullWhere := strings.Join(notNullPredicates(keys), " AND ")
+	probes := []logicalKeyProbe{
+		{
+			label: "null-key probe",
+			query: "SELECT COUNT(*) FROM " + table + " WHERE " + nullWhere,
+			bad:   func(n int64) bool { return n > 0 },
+			fail: func(n int64) error {
+				return fmt.Errorf("%w: dump contains %s rows with NULL %s", ErrDumpInvalid, table, keyList)
+			},
+		},
+		{
+			label: "row count probe",
+			query: "SELECT COUNT(*) FROM " + table + " WHERE " + notNullWhere,
+			bad:   func(int64) bool { return false },
+		},
+		{
+			label: "distinct-count probe",
+			query: "SELECT COUNT(*) FROM (SELECT DISTINCT " + strings.Join(keys, ", ") + " FROM " + table + " WHERE " + notNullWhere + ")",
+			bad:   func(int64) bool { return false },
+		},
 	}
-	if nullIDs > 0 {
-		return fmt.Errorf("%w: dump contains videos with NULL content_id", ErrDumpInvalid)
+	var counts [3]int64
+	for i, p := range probes {
+		n, err := queryCount(ctx, db, p.query)
+		if err != nil {
+			return fmt.Errorf("%w: %s %s: %v", ErrDumpInvalid, table, p.label, err)
+		}
+		counts[i] = n
+		if p.bad(n) {
+			return p.fail(n)
+		}
+	}
+	if counts[1] > counts[2] {
+		return fmt.Errorf("%w: dump contains %s rows with duplicate %s", ErrDumpInvalid, table, keyList)
 	}
 	return nil
+}
+
+func nullPredicates(keys []string) []string {
+	out := make([]string, 0, len(keys))
+	for _, k := range keys {
+		out = append(out, k+" IS NULL")
+	}
+	return out
+}
+
+func notNullPredicates(keys []string) []string {
+	out := make([]string, 0, len(keys))
+	for _, k := range keys {
+		out = append(out, k+" IS NOT NULL")
+	}
+	return out
 }
 
 // validateIntegrity runs quick_check; the result must be exactly 'ok'.

@@ -212,6 +212,72 @@ func TestValidateSidecar_PartialIndexPredicateRejected(t *testing.T) {
 	assert.Contains(t, err.Error(), "partial")
 }
 
+// looseTableFixture rebuilds a required table without constraints, inserting
+// the given row SQL, so logical-key probes observe exactly the crafted shape.
+// looseAssocFixture rebuilds the video_actresses association without its
+// composite PK (and recreates its required index, which DROP TABLE cascades).
+func looseAssocFixture(t *testing.T, rowsSQL string) string {
+	t.Helper()
+	path := importFixture(t)
+	alterFixture(t, path,
+		"CREATE TABLE video_actresses_loose (content_id TEXT, actress_id TEXT, ordinality INTEGER, release_date TEXT)",
+		rowsSQL,
+		"DROP TABLE video_actresses",
+		"ALTER TABLE video_actresses_loose RENAME TO video_actresses",
+		"CREATE INDEX idx_video_actresses_cid ON video_actresses(content_id)")
+	return path
+}
+
+func looseTableFixture(t *testing.T, table, colsDDL, rowsSQL string) string {
+	t.Helper()
+	path := importFixture(t)
+	alterFixture(t, path,
+		"CREATE TABLE "+table+"_loose ("+colsDDL+")",
+		rowsSQL,
+		"DROP TABLE "+table,
+		"ALTER TABLE "+table+"_loose RENAME TO "+table)
+	return path
+}
+
+func TestValidateSidecar_DuplicateEntityIDRejected(t *testing.T) {
+	path := looseTableFixture(t, "actresses",
+		"id TEXT, name_romaji TEXT, image_url TEXT, name_kanji TEXT, name_kana TEXT",
+		"INSERT INTO actresses_loose (id, name_romaji) VALUES ('a1', 'Jane'), ('a1', 'Jane')")
+	_, err := ValidateSidecar(context.Background(), path)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrDumpInvalid)
+	assert.Contains(t, err.Error(), "duplicate id")
+}
+
+func TestValidateSidecar_NullEntityIDRejected(t *testing.T) {
+	path := looseTableFixture(t, "makers",
+		"id TEXT, name_en TEXT, name_ja TEXT",
+		"INSERT INTO makers_loose (id, name_en) VALUES (NULL, 'x')")
+	_, err := ValidateSidecar(context.Background(), path)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrDumpInvalid)
+	assert.Contains(t, err.Error(), "NULL id")
+}
+
+func TestValidateSidecar_DuplicateAssociationRejected(t *testing.T) {
+	path := looseAssocFixture(t, "INSERT INTO video_actresses_loose (content_id, actress_id) VALUES ('118ipx00535', 'a1'), ('118ipx00535', 'a1')")
+	_, err := ValidateSidecar(context.Background(), path)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrDumpInvalid)
+	assert.Contains(t, err.Error(), "duplicate content_id")
+}
+
+func TestValidateSidecar_CollationIndexRejected(t *testing.T) {
+	path := importFixture(t)
+	alterFixture(t, path,
+		"DROP INDEX idx_videos_dvd_id_norm",
+		"CREATE INDEX idx_videos_dvd_id_norm ON videos(dvd_id_norm COLLATE NOCASE)")
+	_, err := ValidateSidecar(context.Background(), path)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrDumpInvalid)
+	assert.Contains(t, err.Error(), "collations")
+}
+
 func TestValidateSidecar_NotADatabase(t *testing.T) {
 	dst := filepath.Join(t.TempDir(), "junk.db")
 	require.NoError(t, os.WriteFile(dst, []byte("SQLite format 3\x00 but then garbage"), 0o600))
