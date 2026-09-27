@@ -567,6 +567,17 @@ func TestUpload_TextRuntimeValue_Validation(t *testing.T) {
 	assert.True(t, os.IsNotExist(statErr))
 }
 
+func TestUpload_UppercaseContentID_Validation(t *testing.T) {
+	h, _, srv := newUploadHandler(t)
+	dump := "COPY public.derived_video (content_id, dvd_id) FROM stdin;\n118IPX00535\tIPX-535\n\\.\n"
+	status, _, _ := srv.doUpload(t, buildUploadBody(t, gzBytes(t, dump), "r18dotdev_dump_2026-09-20.sql.gz"))
+	require.Equal(t, http.StatusAccepted, status)
+	awaitDone(t, h, 10*time.Second)
+	lastErr, kind, _ := handlerState(h)
+	assert.Equal(t, "validation", kind)
+	assert.Contains(t, lastErr, "content_id")
+}
+
 // --- swap failure paths ---
 
 func TestUpload_Sidecar_RenameFailure_RestoresPrevious(t *testing.T) {

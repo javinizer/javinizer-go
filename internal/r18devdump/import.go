@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -32,6 +33,11 @@ type ImportResult struct {
 // declared type (e.g. text in an INTEGER column). Import rejects such input
 // before swap instead of producing a sidecar whose lookups fail on scan.
 var ErrDumpTypedValue = errors.New("invalid typed value in dump")
+
+// ErrDumpNonCanonicalID marks a content_id whose stored form is not the
+// canonical lowercase that lookups bind — such rows become unreachable (the
+// lookups lowercase-bind before comparing against BINARY primary keys).
+var ErrDumpNonCanonicalID = errors.New("non-canonical content_id casing")
 
 // ErrDumpSwap marks failures at the commit+swap boundary (checkpoint, close,
 // rename onto the destination). Upload handlers map them to the 'staging'
@@ -133,7 +139,7 @@ var tableSchema = map[string]struct {
 		)`,
 		columns: []string{"id", nameENColumn, nameJAColumn},
 	},
-	"derived_video_actress": {
+	derivedVideoActressTable: {
 		create: `CREATE TABLE video_actresses (
 			content_id  TEXT NOT NULL,
 			actress_id  TEXT NOT NULL,
@@ -143,7 +149,7 @@ var tableSchema = map[string]struct {
 		)`,
 		columns: []string{contentIDColumn, "actress_id", "ordinality", "release_date"},
 	},
-	"derived_video_category": {
+	derivedVideoCategoryTable: {
 		create: `CREATE TABLE video_categories (
 			content_id   TEXT NOT NULL,
 			category_id  TEXT NOT NULL,
@@ -152,7 +158,7 @@ var tableSchema = map[string]struct {
 		)`,
 		columns: []string{contentIDColumn, "category_id", "release_date"},
 	},
-	"derived_video_director": {
+	derivedVideoDirectorTable: {
 		create: `CREATE TABLE video_directors (
 			content_id TEXT NOT NULL,
 			director_id TEXT NOT NULL,
@@ -295,26 +301,35 @@ func Import(ctx context.Context, r io.Reader, path string, opts ImportOptions) (
 		return nil
 	}
 
-	// Integer-typed columns per dump table — verified per emitted row so a
-	// typed break fails the import instead of producing a sidecar whose scans
-	// fail at lookup time. Computed once from the stored schemas.
-	typedCols := map[string][]struct {
+	// Per emitted row, INTEGER-typed columns prove storage class (else the built
+	// sidecar fails NullInt64 scans at lookup time) and every content_id column
+	// proves canonical lowercase (lookups lowercase-bind before comparing against
+	// the BINARY primary key; uppercase-stored ids become unreachable). Indices
+	// resolve once per schema, up front.
+	type colCheck struct {
 		idx  int
 		name string
-	}{}
+	}
+	typedCols := map[string][]colCheck{}
+	casingCols := map[string][]colCheck{}
 	for table, cols := range map[string][]string{
-		derivedVideoTable:       {"runtime_mins"},
-		"derived_video_actress": {"ordinality"},
+		derivedVideoTable:        {"runtime_mins"},
+		derivedVideoActressTable: {"ordinality"},
 	} {
 		schema := tableSchema[table]
 		for _, col := range cols {
 			for i, c := range schema.columns {
 				if c == col {
-					typedCols[table] = append(typedCols[table], struct {
-						idx  int
-						name string
-					}{i, col})
+					typedCols[table] = append(typedCols[table], colCheck{i, col})
 				}
+			}
+		}
+	}
+	for _, table := range []string{derivedVideoTable, trailerTable, derivedVideoActressTable, derivedVideoCategoryTable, derivedVideoDirectorTable} {
+		schema := tableSchema[table]
+		for i, c := range schema.columns {
+			if c == contentIDColumn {
+				casingCols[table] = []colCheck{{i, c}}
 			}
 		}
 	}
@@ -337,6 +352,14 @@ func Import(ctx context.Context, r io.Reader, path string, opts ImportOptions) (
 				v := mapped[tc.idx]
 				if v != nullSentinel && !integerText(v) {
 					return fmt.Errorf("%w: %s.%s = %q", ErrDumpTypedValue, sqliteTableName(row.Table), tc.name, v)
+				}
+			}
+		}
+		for _, cc := range casingCols[row.Table] {
+			if cc.idx < len(mapped) {
+				v := mapped[cc.idx]
+				if v != nullSentinel && v != strings.ToLower(v) {
+					return fmt.Errorf("%w: %s.%s = %q", ErrDumpNonCanonicalID, sqliteTableName(row.Table), cc.name, v)
 				}
 			}
 		}

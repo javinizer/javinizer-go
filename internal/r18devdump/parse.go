@@ -174,6 +174,14 @@ const derivedVideoTable = "derived_video"
 // production dumps always end with it populated.
 const trailerTable = "source_dmm_trailer"
 
+// Association dump table names (shared by tableSchema keys, the sqlite name
+// mapping, and emit-time per-row validation).
+const (
+	derivedVideoActressTable  = "derived_video_actress"
+	derivedVideoCategoryTable = "derived_video_category"
+	derivedVideoDirectorTable = "derived_video_director"
+)
+
 // decodeCopyField unescapes a single PostgreSQL COPY text-format field. The
 // pg_dump text format encodes special characters with a backslash escape:
 // \n (newline), \t (tab), \r (CR), \b (backspace), \f (form feed), \v
