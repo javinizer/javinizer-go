@@ -286,9 +286,12 @@ func checkLogicalKey(ctx context.Context, db *sql.DB, table string, keys []strin
 		"(SELECT COUNT(*) FROM (SELECT DISTINCT " + keysList + " FROM " + table + " WHERE " + notNullPred + ")), " +
 		"(SELECT COUNT(*) FROM pragma_table_info('" + table + "') WHERE " + orderedPkPredicate(keys) + "), " +
 		"(SELECT COUNT(*) FROM " + table + " WHERE " + notNullPred + " AND (" + strings.Join(typePreds, " OR ") + ")), " +
-		"(SELECT COUNT(*) FROM " + table + " WHERE " + notNullPred + " AND (" + strings.Join(casingPreds, " OR ") + "))"
-	var nulls, total, distinct, pkOrdered, badTypes, badCasing int64
-	if err := db.QueryRowContext(ctx, q).Scan(&nulls, &total, &distinct, &pkOrdered, &badTypes, &badCasing); err != nil {
+		"(SELECT COUNT(*) FROM " + table + " WHERE " + notNullPred + " AND (" + strings.Join(casingPreds, " OR ") + ")), " +
+		// PK-backed autoindex collation: declared non-BINARY pk collations make
+		// the autoindex unusable for the lookups' binary predicates.
+		"(SELECT COALESCE((SELECT COUNT(*) FROM (SELECT coll FROM pragma_index_xinfo((SELECT name FROM pragma_index_list('" + table + "') WHERE origin='pk')) WHERE key=1 AND coll != 'BINARY')), 0))"
+	var nulls, total, distinct, pkOrdered, badTypes, badCasing, badPkColl int64
+	if err := db.QueryRowContext(ctx, q).Scan(&nulls, &total, &distinct, &pkOrdered, &badTypes, &badCasing, &badPkColl); err != nil {
 		return fmt.Errorf("%w: %s logical-key probe: %v", ErrDumpInvalid, table, err)
 	}
 	if nulls > 0 {
@@ -309,6 +312,9 @@ func checkLogicalKey(ctx context.Context, db *sql.DB, table string, keys []strin
 	// BINARY key, so uppercase-stored ids are unreachable after install.
 	if badCasing > 0 {
 		return fmt.Errorf("%w: dump contains %s rows with noncanonical (non-lowercase) %s", ErrDumpInvalid, table, keyList)
+	}
+	if badPkColl > 0 {
+		return fmt.Errorf("%w: %s primary key has a non-BINARY collation — lookups would full-scan", ErrDumpInvalid, table)
 	}
 	return nil
 }

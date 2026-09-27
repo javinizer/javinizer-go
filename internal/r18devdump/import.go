@@ -358,8 +358,14 @@ func Import(ctx context.Context, r io.Reader, path string, opts ImportOptions) (
 		for _, cc := range casingCols[row.Table] {
 			if cc.idx < len(mapped) {
 				v := mapped[cc.idx]
-				if v != nullSentinel && v != strings.ToLower(v) {
-					return fmt.Errorf("%w: %s.%s = %q", ErrDumpNonCanonicalID, sqliteTableName(row.Table), cc.name, v)
+				// Canonical = nonempty, trimmed, already-lowercase (both the
+				// empties that yield a tautological pass and padding that
+				// poisons the lookup key are rejected here).
+				if v != nullSentinel {
+					trimmed := strings.TrimSpace(v)
+					if trimmed == "" || trimmed != v || v != strings.ToLower(v) {
+						return fmt.Errorf("%w: %s.%s = %q", ErrDumpNonCanonicalID, sqliteTableName(row.Table), cc.name, v)
+					}
 				}
 			}
 		}

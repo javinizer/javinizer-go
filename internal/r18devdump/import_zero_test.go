@@ -55,6 +55,22 @@ func TestImport_NonCanonicalContentID(t *testing.T) {
 	assert.True(t, os.IsNotExist(statErr))
 }
 
+func TestImport_RejectsEmptyOrPaddedContentID(t *testing.T) {
+	cases := []struct{ name, cid string }{
+		{"empty", ""},
+		{"space padded", " 118ipx00535 "},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "out.db")
+			dump := "COPY public.derived_video (content_id, dvd_id) FROM stdin;\n" + tc.cid + "\tIPX-535\n\\.\n"
+			_, err := Import(context.Background(), strings.NewReader(dump), path, ImportOptions{})
+			require.Error(t, err)
+			assert.True(t, errors.Is(err, ErrDumpNonCanonicalID), "want ErrDumpNonCanonicalID, got %v", err)
+		})
+	}
+}
+
 func TestImport_ErrorsOnEOFFInsideCopyBlock(t *testing.T) {
 	// A gzip-valid but SQL-truncated dump: rows stream fine but the COPY block
 	// never terminates — without this check the partial database would install
