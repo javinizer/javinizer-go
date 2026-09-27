@@ -374,12 +374,17 @@ func validateNormConsistency(ctx context.Context, db *sql.DB) error {
 	return nil
 }
 
-// validateIntegrity runs quick_check; the result must be exactly 'ok'.
+// validateIntegrity runs quick_check; the decision rule is split out so its
+// failure branch is coverable without crafting a corrupt database image.
 func validateIntegrity(ctx context.Context, db *sql.DB) error {
 	var report string
 	if err := db.QueryRowContext(ctx, "PRAGMA quick_check").Scan(&report); err != nil {
 		return fmt.Errorf("%w: integrity check could not run: %v", ErrDumpInvalid, err)
 	}
+	return interpretQuickCheck(report)
+}
+
+func interpretQuickCheck(report string) error {
 	if strings.TrimSpace(report) != "ok" {
 		return fmt.Errorf("%w: integrity check: %s", ErrDumpInvalid, report)
 	}

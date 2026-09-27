@@ -47,6 +47,15 @@ func TestValidateStages_CancelledContext(t *testing.T) {
 	}
 }
 
+func TestInterpretQuickCheck(t *testing.T) {
+	assert.NoError(t, interpretQuickCheck("ok"))
+	assert.NoError(t, interpretQuickCheck(" ok \n"))
+	err := interpretQuickCheck("page 3 btree corruption")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrDumpInvalid)
+	assert.Contains(t, err.Error(), "corruption")
+}
+
 func TestOpenContext_CancelledPing(t *testing.T) {
 	// Needs an openable database so Open succeeds and the cancelled-context
 	// ping is the failing operation.
