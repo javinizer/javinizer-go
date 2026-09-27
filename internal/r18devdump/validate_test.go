@@ -299,7 +299,23 @@ func TestValidateSidecar_LooseUniqueNoPKRejected(t *testing.T) {
 	_, err := ValidateSidecar(context.Background(), path)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrDumpInvalid)
-	assert.Contains(t, err.Error(), "primary-key coverage")
+	assert.Contains(t, err.Error(), "primary key does not start with content_id")
+}
+
+func TestValidateSidecar_MisorderedPKRejected(t *testing.T) {
+	// Codex: membership alone allowed PRIMARY KEY(dvd_id_norm, content_id),
+	// which is unusable for content_id-prefix lookups; ordered check rejects it.
+	path := importFixture(t)
+	alterFixture(t, path,
+		"CREATE TABLE videos_reordered (content_id TEXT, dvd_id TEXT, dvd_id_norm TEXT, title_en TEXT, title_ja TEXT, comment_en TEXT, comment_ja TEXT, runtime_mins INTEGER, release_date TEXT, sample_url TEXT, maker_id TEXT, label_id TEXT, series_id TEXT, jacket_full_url TEXT, jacket_thumb_url TEXT, gallery_full_first TEXT, gallery_full_last TEXT, gallery_thumb_first TEXT, gallery_thumb_last TEXT, site_id TEXT, service_code TEXT, PRIMARY KEY (dvd_id_norm, content_id))",
+		"INSERT INTO videos_reordered (content_id, dvd_id_norm) VALUES ('118ipx00535', 'IPX535')",
+		"DROP TABLE videos",
+		"ALTER TABLE videos_reordered RENAME TO videos",
+		"CREATE INDEX idx_videos_dvd_id_norm ON videos(dvd_id_norm)")
+	_, err := ValidateSidecar(context.Background(), path)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrDumpInvalid)
+	assert.Contains(t, err.Error(), "does not start with content_id")
 }
 
 func TestValidateSidecar_NotADatabase(t *testing.T) {
