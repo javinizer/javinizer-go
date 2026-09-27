@@ -392,6 +392,20 @@ func TestValidateSidecar_UppercaseContentIDRejected(t *testing.T) {
 	assert.Contains(t, err.Error(), "noncanonical")
 }
 
+func TestValidateSidecar_DuplicateMetaKeysRejected(t *testing.T) {
+	// Codex: duplicate source_url rows make Update's skip decision
+	// nondeterministic (loadMeta overwrites map entries unordered).
+	path := importFixture(t)
+	alterFixture(t, path,
+		"DROP TABLE dump_meta",
+		"CREATE TABLE dump_meta (key TEXT, value TEXT)",
+		"INSERT INTO dump_meta VALUES ('source_url', 'https://a/x.sql.gz'), ('source_url', 'https://b/x.sql.gz'), ('source_date', '2026-09-20'), ('imported_at', '2026-09-27T00:00:00Z')")
+	_, err := ValidateSidecar(context.Background(), path)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrDumpInvalid)
+	assert.Contains(t, err.Error(), "duplicate keys")
+}
+
 func TestValidateSidecar_NotADatabase(t *testing.T) {
 	dst := filepath.Join(t.TempDir(), "junk.db")
 	require.NoError(t, os.WriteFile(dst, []byte("SQLite format 3\x00 but then garbage"), 0o600))

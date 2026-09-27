@@ -101,16 +101,23 @@ func validateProvenance(ctx context.Context, db *sql.DB) error {
 	return validateNoNullMetaKeys(ctx, db)
 }
 
-// validateNoNullMetaKeys rejects dump_meta rows with NULL keys or values:
-// Stats scans both columns, so either breaks every status read afterwards and
-// makes clearDump refuse to remove the installed dump.
+// validateNoNullMetaKeys rejects dump_meta rows with NULL keys/values (Stats
+// scans both), and duplicate keys: loadMeta overwrites map entries without
+// ordering, so a PK-less dump_meta makes provenance — and the update-skip
+// decision keyed on source_url — nondeterministic.
 func validateNoNullMetaKeys(ctx context.Context, db *sql.DB) error {
-	nulls, err := queryCount(ctx, db, "SELECT COUNT(*) FROM dump_meta WHERE key IS NULL OR value IS NULL")
+	var nulls, dups int64
+	err := db.QueryRowContext(ctx,
+		"SELECT (SELECT COUNT(*) FROM dump_meta WHERE key IS NULL OR value IS NULL), "+
+			"(SELECT COUNT(*) - COUNT(DISTINCT key) FROM dump_meta)").Scan(&nulls, &dups)
 	if err != nil {
-		return fmt.Errorf("%w: dump_meta null-value probe: %v", ErrDumpInvalid, err)
+		return fmt.Errorf("%w: dump_meta key probe: %v", ErrDumpInvalid, err)
 	}
 	if nulls > 0 {
 		return fmt.Errorf("%w: dump_meta contains NULL keys or values", ErrDumpInvalid)
+	}
+	if dups > 0 {
+		return fmt.Errorf("%w: dump_meta contains duplicate keys", ErrDumpInvalid)
 	}
 	return nil
 }
