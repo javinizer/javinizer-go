@@ -33,6 +33,7 @@ func TestValidateStages_CancelledContext(t *testing.T) {
 		{"structure", validateStructure},
 		{"indexes", validateIndexes},
 		{"nonEmpty", validateNonEmpty},
+		{"noNullVideoIDs", validateNoNullVideoIDs},
 		{"integrity", validateIntegrity},
 	}
 	for _, s := range stages {

@@ -223,7 +223,9 @@ func classifyImportError(importErr error, fsFault, gzFault bool) string {
 	switch {
 	case fsFault:
 		return kindStaging
-	case errors.Is(importErr, r18devdump.ErrDumpNoRows) || gzFault:
+	case errors.Is(importErr, r18devdump.ErrDumpNoRows) ||
+		errors.Is(importErr, r18devdump.ErrTruncatedDump) ||
+		gzFault:
 		return kindValidation
 	default:
 		return kindImport

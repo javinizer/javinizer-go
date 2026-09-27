@@ -539,6 +539,19 @@ func TestUpload_RawDump_MalformedDateInstallsWithEmptyDate(t *testing.T) {
 	assert.Empty(t, stats.SourceDate)
 }
 
+func TestUpload_SQLTruncatedCopy_Validation(t *testing.T) {
+	// Codex: a dumped stream that ends before the COPY block's \. terminator
+	// (gzip intact, SQL truncated) must be a validation failure — previously a
+	// partial database could replace a complete one.
+	h, _, srv := newUploadHandler(t)
+	status, _, _ := srv.doUpload(t, buildUploadBody(t, gzBytes(t, "COPY public.derived_video (content_id, dvd_id) FROM stdin;\n118ipx00535\tIPX-535\n"), "r18dotdev_dump_2026-09-20.sql.gz"))
+	require.Equal(t, http.StatusAccepted, status)
+	awaitDone(t, h, 10*time.Second)
+	lastErr, kind, _ := handlerState(h)
+	assert.Equal(t, "validation", kind, "SQL-level truncation is a validation failure (content problem), not import")
+	assert.Contains(t, lastErr, "truncated")
+}
+
 // --- swap failure paths ---
 
 func TestUpload_Sidecar_RenameFailure_RestoresPrevious(t *testing.T) {

@@ -202,6 +202,21 @@ func validateNonEmpty(ctx context.Context, db *sql.DB) error {
 	if n == 0 {
 		return fmt.Errorf("%w: dump contains zero videos", ErrDumpInvalid)
 	}
+	return validateNoNullVideoIDs(ctx, db)
+}
+
+// validateNoNullVideoIDs rejects rows whose content_id is NULL (possible in
+// sidecars whose videos table was rebuilt loose, dropping NOT NULL/PK) —
+// every lookup scan reads content_id into a plain string, so they would
+// install pass validation and then fail every scan.
+func validateNoNullVideoIDs(ctx context.Context, db *sql.DB) error {
+	nullIDs, err := queryCount(ctx, db, "SELECT COUNT(*) FROM videos WHERE content_id IS NULL")
+	if err != nil {
+		return fmt.Errorf("%w: video content_id null probe: %v", ErrDumpInvalid, err)
+	}
+	if nullIDs > 0 {
+		return fmt.Errorf("%w: dump contains videos with NULL content_id", ErrDumpInvalid)
+	}
 	return nil
 }
 

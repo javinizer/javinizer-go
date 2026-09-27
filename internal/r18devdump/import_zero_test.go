@@ -40,3 +40,20 @@ func TestImport_RejectsNoRecognizedRows(t *testing.T) {
 		})
 	}
 }
+
+func TestImport_ErrorsOnEOFFInsideCopyBlock(t *testing.T) {
+	// A gzip-valid but SQL-truncated dump: rows stream fine but the COPY block
+	// never terminates — without this check the partial database would install
+	// as if complete.
+	path := filepath.Join(t.TempDir(), "out.db")
+	_, err := Import(context.Background(), strings.NewReader("COPY public.derived_video (content_id, dvd_id) FROM stdin;\n118ipx00535\tIPX-535\n"), path, ImportOptions{})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrTruncatedDump), "want ErrTruncatedDump, got %v", err)
+	_, statErr := os.Stat(path)
+	assert.True(t, os.IsNotExist(statErr))
+
+	// Sanctioned termination path still imports fine.
+	path2 := filepath.Join(t.TempDir(), "ok.db")
+	_, err = Import(context.Background(), strings.NewReader("COPY public.derived_video (content_id, dvd_id) FROM stdin;\n118ipx00535\tIPX-535\n\\.\n"), path2, ImportOptions{})
+	require.NoError(t, err)
+}

@@ -156,6 +156,23 @@ func TestValidateSidecar_NullMetaKeysRejected(t *testing.T) {
 	assert.Contains(t, err.Error(), "NULL keys")
 }
 
+func TestValidateSidecar_NullableContentIDRejected(t *testing.T) {
+	// Codex: a rebuilt videos table without NOT NULL/PK passes index,
+	// nonempty, and integrity checks while NULL content_id rows break every
+	// lookup scan afterward.
+	path := importFixture(t)
+	alterFixture(t, path,
+		"CREATE TABLE videos_loose (content_id TEXT, dvd_id TEXT, dvd_id_norm TEXT, title_en TEXT, title_ja TEXT, comment_en TEXT, comment_ja TEXT, runtime_mins INTEGER, release_date TEXT, sample_url TEXT, maker_id TEXT, label_id TEXT, series_id TEXT, jacket_full_url TEXT, jacket_thumb_url TEXT, gallery_full_first TEXT, gallery_full_last TEXT, gallery_thumb_first TEXT, gallery_thumb_last TEXT, site_id TEXT, service_code TEXT)",
+		"INSERT INTO videos_loose (content_id, dvd_id_norm) VALUES (NULL, 'IPX535')",
+		"DROP TABLE videos",
+		"ALTER TABLE videos_loose RENAME TO videos",
+		"CREATE INDEX idx_videos_dvd_id_norm ON videos(dvd_id_norm)")
+	_, err := ValidateSidecar(context.Background(), path)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrDumpInvalid)
+	assert.Contains(t, err.Error(), "NULL content_id")
+}
+
 func TestValidateSidecar_NotADatabase(t *testing.T) {
 	dst := filepath.Join(t.TempDir(), "junk.db")
 	require.NoError(t, os.WriteFile(dst, []byte("SQLite format 3\x00 but then garbage"), 0o600))

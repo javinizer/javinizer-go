@@ -8,10 +8,16 @@ package r18devdump
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
 )
+
+// ErrTruncatedDump marks input that ends inside an open COPY block: pg_dump
+// streams that terminate without their . terminator are silently partial
+// data otherwise, and a truncated hand-built dump must never look importable.
+var ErrTruncatedDump = errors.New("truncated dump")
 
 // nullSentinel is the internal marker for a SQL NULL carried in a DumpRow's
 // Values. It is distinct from the dump's "\N" text marker: ParseDump detects
@@ -85,6 +91,9 @@ func ParseDump(r io.Reader, emit func(DumpRow) error) error {
 	}
 	if err := scanner.Err(); err != nil {
 		return fmt.Errorf("scanning dump: %w", err)
+	}
+	if inCopy {
+		return fmt.Errorf("%w: EOF inside COPY block for %s (missing \\. terminator)", ErrTruncatedDump, table)
 	}
 	return nil
 }
