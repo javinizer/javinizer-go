@@ -494,6 +494,9 @@ func TestRunDownload_ProgressOutput(t *testing.T) {
 		fmt.Fprintf(&rows, "118ipx%05d\tIPX-%d\n", i, i)
 	}
 	rows.WriteString("\\.\n")
+	// Production-scale video sets must carry a trailer block (Import's
+	// truncation invariant); production dumps always end with it populated.
+	rows.WriteString("COPY public.source_dmm_trailer (content_id, url) FROM stdin;\n118ipx00000\thttps://example/trailer.mp4\n\\.\n")
 	gz := gzipBytes(t, rows.String())
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/gzip")

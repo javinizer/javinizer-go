@@ -256,8 +256,9 @@ func Import(ctx context.Context, r io.Reader, path string, opts ImportOptions) (
 		return ImportResult{}, fmt.Errorf("begin tx: %w", err)
 	}
 
-	// Per-table batch accumulators.
+	// Per-table batch accumulators and inserted-row tallies.
 	batches := make(map[string][]DumpRow)
+	tableCounts := make(map[string]int64)
 	var totalVideos int64
 
 	flush := func(table string) error {
@@ -266,6 +267,7 @@ func Import(ctx context.Context, r io.Reader, path string, opts ImportOptions) (
 			return nil
 		}
 		n, err := insertBatch(ctx, tx, table, batch)
+		tableCounts[table] += n
 		if table == derivedVideoTable {
 			totalVideos += n
 		}
@@ -357,6 +359,14 @@ func Import(ctx context.Context, r io.Reader, path string, opts ImportOptions) (
 		_ = tx.Rollback()
 		return ImportResult{}, fmt.Errorf("%w: no derived_video rows were stored (input missing them or every row was rejected)", ErrDumpNoRows)
 	}
+	// Production dumps always carry trailer rows last; a production-scale
+	// video set with none means the stream was truncated after its final
+	// completed COPY block. Tiny dumps are synthetic fixtures/mirrors and
+	// allowed (the rule only bites at production scale).
+	if totalVideos >= 1000 && tableCounts[trailerTable] == 0 {
+		_ = tx.Rollback()
+		return ImportResult{}, fmt.Errorf("%w: dump has %d videos but no trailer rows — stream truncated after its final COPY block", ErrTruncatedDump, totalVideos)
+	}
 
 	if err := writeMeta(ctx, tx, opts); err != nil {
 		_ = tx.Rollback()
@@ -389,7 +399,7 @@ func Import(ctx context.Context, r io.Reader, path string, opts ImportOptions) (
 	if opts.AfterSwap != nil {
 		defer opts.AfterSwap()
 	}
-	if err := os.Rename(tmpPath, path); err != nil {
+	if err := ReplaceFile(tmpPath, path); err != nil {
 		return ImportResult{}, fmt.Errorf("rename tmp db: %w", err)
 	}
 	committed = true

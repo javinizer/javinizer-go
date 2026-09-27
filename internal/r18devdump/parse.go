@@ -170,6 +170,10 @@ func parseCopyHeader(line string) (copyHeader, bool) {
 // derivedVideoTable is the dump table name for the main video metadata table.
 const derivedVideoTable = "derived_video"
 
+// trailerTable is the dump's canonical tail COPY block (source_dmm_trailer) —
+// production dumps always end with it populated.
+const trailerTable = "source_dmm_trailer"
+
 // decodeCopyField unescapes a single PostgreSQL COPY text-format field. The
 // pg_dump text format encodes special characters with a backslash escape:
 // \n (newline), \t (tab), \r (CR), \b (backspace), \f (form feed), \v
