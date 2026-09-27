@@ -58,6 +58,7 @@ func ValidateSidecar(ctx context.Context, path string) (*Store, error) {
 		validateStructure,
 		validateIndexes,
 		validateNonEmpty,
+		validateNoDuplicateVideoIDs,
 		validateIntegrity,
 	} {
 		if err := stage(ctx, store.db); err != nil {
@@ -173,12 +174,15 @@ func validateIndexes(ctx context.Context, db *sql.DB) error {
 		// (":") when the index is missing.
 		combined, err := queryString(ctx, db,
 			"SELECT COALESCE((SELECT tbl_name FROM sqlite_master WHERE type='index' AND name=?), '') || ':' || "+
-				"COALESCE((SELECT group_concat(name, ',') FROM (SELECT name FROM pragma_index_info(?) ORDER BY seqno)), '')",
-			name, name)
+				"COALESCE((SELECT group_concat(name, ',') FROM (SELECT name FROM pragma_index_info(?) ORDER BY seqno)), '') || ':' || "+
+				"COALESCE((SELECT CAST(partial AS TEXT) FROM pragma_index_list((SELECT tbl_name FROM sqlite_master WHERE type='index' AND name=?)) WHERE name=?), '0')",
+			name, name, name, name)
 		if err != nil {
 			return fmt.Errorf("%w: index probe %s: %v", ErrDumpInvalid, name, err)
 		}
-		tbl, cols, _ := strings.Cut(combined, ":")
+		// Exactly one row: "table:col1,col2:partial" (empty fields when absent).
+		tbl, rest, _ := strings.Cut(combined, ":")
+		cols, partial, _ := strings.Cut(rest, ":")
 		if tbl == "" {
 			return fmt.Errorf("%w: missing required index %s", ErrDumpInvalid, name)
 		}
@@ -187,6 +191,9 @@ func validateIndexes(ctx context.Context, db *sql.DB) error {
 		}
 		if cols != want.columns {
 			return fmt.Errorf("%w: index %s on %s has columns [%s], want [%s]", ErrDumpInvalid, name, tbl, cols, want.columns)
+		}
+		if partial != "0" {
+			return fmt.Errorf("%w: index %s on %s is partial (WHERE predicate) — normal lookups cannot use it", ErrDumpInvalid, name, tbl)
 		}
 	}
 	return nil
@@ -203,6 +210,20 @@ func validateNonEmpty(ctx context.Context, db *sql.DB) error {
 		return fmt.Errorf("%w: dump contains zero videos", ErrDumpInvalid)
 	}
 	return validateNoNullVideoIDs(ctx, db)
+}
+
+// validateNoDuplicateVideoIDs enforces the lost primary-key invariant: a
+// loose-rebuilt videos table may admit duplicate non-NULL content_ids, making
+// LookupByContentID (LIMIT 1) and candidate matching nondeterministic.
+func validateNoDuplicateVideoIDs(ctx context.Context, db *sql.DB) error {
+	dups, err := queryCount(ctx, db, "SELECT COUNT(*) - COUNT(DISTINCT content_id) FROM videos")
+	if err != nil {
+		return fmt.Errorf("%w: video content_id duplicate probe: %v", ErrDumpInvalid, err)
+	}
+	if dups > 0 {
+		return fmt.Errorf("%w: dump contains %d videos with duplicate content_id", ErrDumpInvalid, dups)
+	}
+	return nil
 }
 
 // validateNoNullVideoIDs rejects rows whose content_id is NULL (possible in
