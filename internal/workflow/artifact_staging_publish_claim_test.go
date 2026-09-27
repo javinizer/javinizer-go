@@ -75,9 +75,14 @@ func TestPR260PublicationUsesNewPathWhenFinalFolderIsEmpty(t *testing.T) {
 	stage, staged, err := orch.prepareArtifact(context.Background(), cmd)
 	require.NoError(t, err)
 	defer stage.cleanup()
-	stagedResult, err := real.Organize(context.Background(), organizer.OrganizeCmd{Match: staged.Match, Movie: staged.Movie, DestDir: staged.DestPath, MoveFiles: true, OperationMode: staged.OperationMode})
-	require.NoError(t, err)
+	// Organize mode defers the video: the execute steps plan against the staged
+	// (virtual) paths and publication replans against the real source. Mirror
+	// the pipeline's plan-only step here.
+	plan, planErr := real.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: staged.Match, Movie: staged.Movie, DestDir: staged.DestPath, MoveFiles: true, OperationMode: staged.OperationMode})
+	require.NoError(t, planErr)
+	stagedResult := &organizer.OrganizeResult{NewPath: plan.TargetPath, FolderPath: plan.TargetDir}
 	nfoPath := filepath.Join(stagedResult.FolderPath, "movie.nfo")
+	require.NoError(t, fs.MkdirAll(stagedResult.FolderPath, 0o755))
 	require.NoError(t, afero.WriteFile(fs, nfoPath, []byte("metadata"), 0o644))
 	state := &applyPipelineState{organizeResult: stagedResult, nfoPath: nfoPath}
 
@@ -146,7 +151,7 @@ func TestPR260PublicationClaimPlanAndExecutionFaults(t *testing.T) {
 					t.Fatal("claim waiter blocked")
 				}
 				tracker.ReleaseClaim(other, target)
-				exists, e := afero.Exists(fs, stage.stagedSource)
+				exists, e := afero.DirExists(fs, stage.root)
 				require.NoError(t, e)
 				require.True(t, exists, "fault leaves owned stage for cleanup")
 				stage.cleanup()

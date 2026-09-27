@@ -42,7 +42,9 @@ func TestPR260PublicationFinalCleanupFaults(t *testing.T) {
 		name, role string
 		want       string
 	}{
-		{"video original removal", "video", "remove original after artifact publication"},
+		// The video-original removal leg is gone in organize mode: the
+		// deferred video is consumed by the fenced move itself, and rollback
+		// via the armed origin restores it. The sidecar removal leg remains.
 		{"sidecar original removal", "sidecar", "remove original sidecar after artifact publication"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -93,6 +95,10 @@ func TestPR260PublicationFinalCleanupFaults(t *testing.T) {
 }
 
 func TestPR260PublicationSidecarFinalizeFaults(t *testing.T) {
+	// stat faults the sidecar inspection inside rehome; rename faults the
+	// sidecar rehome rename itself. The deferred video now publishes from its
+	// real source before these legs run, and the armed rollback origin must
+	// restore it.
 	for _, tc := range []struct{ op, want string }{{"stat", "preflight staged artifacts"}, {"rename", "stage sidecar"}} {
 		t.Run(tc.op, func(t *testing.T) {
 			db, _ := pr260ArtifactDB(t)
@@ -105,11 +111,10 @@ func TestPR260PublicationSidecarFinalizeFaults(t *testing.T) {
 			stage, _, err := orch.prepareArtifact(context.Background(), cmd)
 			require.NoError(t, err)
 			require.NotEmpty(t, stage.siblings)
-			old := stage.stagedSource
-			renamed := filepath.Join(filepath.Dir(old), "renamed.mp4")
-			require.NoError(t, base.Rename(old, renamed))
+			plan, planErr := orch.organizer.(artifactPlanExecutor).PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: stage.original.Match, Movie: stage.original.Movie, DestDir: stage.root, MoveFiles: true, ForceUpdate: true, OperationMode: stage.original.OperationMode})
+			require.NoError(t, planErr)
 			fs.path = stage.siblings[0].stagedPath
-			state := &applyPipelineState{organizeResult: &organizer.OrganizeResult{NewPath: renamed}}
+			state := &applyPipelineState{organizeResult: &organizer.OrganizeResult{NewPath: plan.TargetPath, FolderPath: plan.TargetDir}}
 			err = stage.publish(context.Background(), orch, state, nil)
 			require.ErrorContains(t, err, tc.want)
 			pr260AssertRetained(t, base, source, subtitle, multipart, unrelated)
@@ -127,9 +132,6 @@ func TestPR260PublicationSidecarFinalizeFaults(t *testing.T) {
 				require.True(t, os.IsNotExist(walkErr))
 			}
 			require.Zero(t, regularFiles, "failed staged publication rolls every final file back")
-			exists, e := afero.Exists(base, renamed)
-			require.NoError(t, e)
-			require.Equal(t, tc.op == "stat", exists, "preflight rejection preserves staging; post-publish rollback may consume it")
 			stage.cleanup()
 			pr260AssertStageGone(t, base, root)
 		})

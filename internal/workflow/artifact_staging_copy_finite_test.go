@@ -55,6 +55,10 @@ func (f *pr260FiniteCopyFS) Stat(name string) (os.FileInfo, error) {
 	}
 	return f.Fs.Stat(name)
 }
+
+// The staged create/write/close faults target the SIBLING sidecar copy:
+// organize mode defers the video (no staged video copy), so sibling sidecars
+// are the staged legs that must stay finite and retain inputs on failure.
 func (f *pr260FiniteCopyFS) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
 	if strings.Contains(name, ".javinizer-apply-") && strings.HasSuffix(name, filepath.Base(f.source)) {
 		if f.op == "staged create" {
@@ -82,7 +86,7 @@ func TestPR260FiniteArtifactCopyAndSiblingFailures(t *testing.T) {
 	} {
 		t.Run(tc.op, func(t *testing.T) {
 			base, root, source, subtitle, multipart, unrelated, match := pr260FencedFiles(t, "copy-"+tc.op)
-			fs := &pr260FiniteCopyFS{Fs: base, op: tc.op, source: source, sourceDir: filepath.Dir(source), sidecar: subtitle}
+			fs := &pr260FiniteCopyFS{Fs: base, op: tc.op, source: subtitle, sourceDir: filepath.Dir(source), sidecar: subtitle}
 			dest := filepath.Join(root, "published")
 			cmd := ApplyCmd{Movie: &models.Movie{ContentID: "pr260-copy"}, PublicationFence: pr260FailureArtifactFencer{}, Match: match, DestPath: dest, Organize: OrganizeOptions{MoveFiles: true}}
 			stage, _, err := (&applyOrchImpl{fs: fs}).prepareArtifact(context.Background(), cmd)

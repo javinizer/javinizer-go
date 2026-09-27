@@ -15,11 +15,18 @@ import (
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/downloader"
 	"github.com/javinizer/javinizer-go/internal/fsutil"
+	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
 	"github.com/javinizer/javinizer-go/internal/organizer"
 	"github.com/spf13/afero"
 )
+
+// videoStagingDeferred marks organize-mode stages whose source video was
+// deliberately NOT copied into the staging tree: the fenced publication
+// moves (or copies) it directly from its real path instead, so organizing a
+// multi-GB file never duplicates the payload into a hidden sibling folder.
+func (s *artifactStage) videoStagingDeferred() bool { return s != nil && s.videoDeferred }
 
 type artifactPlanExecutor interface {
 	PlanOrganize(context.Context, organizer.OrganizeCmd) (*organizer.OrganizePlan, error)
@@ -41,6 +48,7 @@ type artifactStage struct {
 	stagedSource       string
 	siblings           []artifactSibling
 	inPlace            bool
+	videoDeferred      bool
 	original           ApplyCmd
 	rejected           bool
 	duplicatePlan      *organizer.OrganizePlan
@@ -129,13 +137,15 @@ func (o *applyOrchImpl) prepareArtifact(ctx context.Context, cmd ApplyCmd) (*art
 		}
 		duplicatePlan = plan
 	}
+	sweepArtifactStaging(o.fs, filepath.Dir(finalRoot))
 	if err := o.fs.MkdirAll(filepath.Dir(finalRoot), 0o755); err != nil {
 		return nil, cmd, fmt.Errorf("create artifact staging parent: %w", err)
 	}
-	root, err := afero.TempDir(o.fs, filepath.Dir(finalRoot), ".javinizer-apply-")
+	root, err := afero.TempDir(o.fs, filepath.Dir(finalRoot), artifactStageDirPrefix)
 	if err != nil {
 		return nil, cmd, fmt.Errorf("create artifact staging area: %w", err)
 	}
+	writeArtifactStageManifest(o.fs, root)
 	stage := &artifactStage{fs: o.fs, fencer: artifactFencer(cmd), root: root, finalRoot: finalRoot, sourcePath: cmd.Match.Path, inPlace: inPlace, original: cmd, duplicatePlan: duplicatePlan}
 	stagedCmd := cmd
 	if duplicatePlan != nil {
@@ -161,9 +171,16 @@ func (o *applyOrchImpl) prepareArtifact(ctx context.Context, cmd ApplyCmd) (*art
 			stagedDir = root
 		}
 		stage.stagedSource = filepath.Join(stagedDir, base)
-		if err := copyArtifactFile(o.fs, sourcePath, stage.stagedSource, sourceInfo.Mode().Perm()); err != nil {
-			stage.cleanup()
-			return nil, cmd, err
+		if inPlace {
+			if err := copyArtifactFile(o.fs, sourcePath, stage.stagedSource, sourceInfo.Mode().Perm()); err != nil {
+				stage.cleanup()
+				return nil, cmd, err
+			}
+		} else {
+			// Organize mode defers the video: the fenced publication moves (or
+			// copies) it directly from its real path, so a same-volume "move" is
+			// a rename again instead of a full copy through .javinizer-apply-*.
+			stage.videoDeferred = true
 		}
 		entries, readErr := afero.ReadDir(o.fs, filepath.Dir(sourcePath))
 		if readErr != nil {
@@ -296,7 +313,9 @@ func (s *artifactStage) cleanup() {
 	if s == nil || s.fs == nil || s.root == "" {
 		return
 	}
-	_ = s.fs.RemoveAll(s.root)
+	if err := removeArtifactTreeWithRetry(s.fs, s.root); err != nil {
+		logging.Warnf("artifact staging cleanup retained %s: %v", s.root, err)
+	}
 }
 
 func (s *artifactStage) finalPath(path string) (string, error) {
@@ -428,6 +447,7 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 	finalReplaced := false
 	stagedVideo := ""
 	videoInstalledByTree := false
+	publishedTarget := ""
 	if !s.original.Organize.Skip {
 		if state.organizeResult == nil {
 			return fmt.Errorf("artifact publication has no organize result")
@@ -445,7 +465,7 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 		}
 		match := s.original.Match
 		match.Path = stagedVideo
-		if !s.original.Organize.MoveFiles && s.original.Organize.LinkMode != organizer.LinkModeNone {
+		if s.videoDeferred || (!s.original.Organize.MoveFiles && s.original.Organize.LinkMode != organizer.LinkModeNone) {
 			match.Path = s.sourcePath
 		}
 		match.Name = filepath.Base(match.Path)
@@ -502,7 +522,15 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 			plan = guardedPlan
 			batch.YieldToLockedPublisher(plan.TargetPath)
 		}
-		finalResult, err = executor.ExecuteOrganizePlan(plan, s.original.Organize.MoveFiles || s.original.Organize.LinkMode == organizer.LinkModeNone, s.original.Organize.LinkMode)
+		// The staged-era second argument bakes in link-free flows as a move
+		// because the staged copy was expendable. A deferred video publishes its
+		// REAL source: copy mode must keep it, only an explicit move consumes it.
+		publishMove := s.original.Organize.MoveFiles || s.original.Organize.LinkMode == organizer.LinkModeNone
+		if s.videoDeferred {
+			publishMove = s.original.Organize.MoveFiles
+		}
+		publishedTarget = plan.TargetPath
+		finalResult, err = executor.ExecuteOrganizePlan(plan, publishMove, s.original.Organize.LinkMode)
 		if filepath.Clean(plan.SourcePath) != filepath.Clean(plan.TargetPath) && (err == nil || fsutil.PublishCompleted(err)) {
 			batch.ObservePublishResult(plan.TargetPath)
 		}
@@ -521,6 +549,29 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 			finalResult.Warnings = append(finalResult.Warnings, organizer.AuthorizedOverwriteWarning(plan.TargetPath))
 		}
 		finalResult.OriginalPath = s.sourcePath
+	}
+	// A deferred-video move consumed the original source during the plan
+	// execution above: persist the inverse immediately so the rename→ledger
+	// crash window stays revertable before any later leg can fail.
+	directSourceConsumed := s.videoDeferred && !s.original.Organize.Skip && s.original.Organize.MoveFiles && s.sourcePath != "" && finalResult != nil && filepath.Clean(s.sourcePath) != filepath.Clean(finalResult.NewPath)
+	if directSourceConsumed {
+		// The real source was consumed by the move: arm rollback BEFORE any
+		// later leg can fail, or the destination would be removed without the
+		// source ever coming back. A rewired/untracked reported NewPath falls
+		// back to the tracked planned leg so rollback stays fail-closed.
+		s.sourceCleanupArmed = true
+		if err := batch.SetRollbackOrigin(finalResult.NewPath, s.sourcePath); err != nil {
+			if altErr := batch.SetRollbackOrigin(publishedTarget, s.sourcePath); altErr != nil {
+				return err
+			}
+			return err
+		}
+		if o.revertLog != nil && opID != "" {
+			partial := &ApplyResult{OrganizeResult: finalResult, Movie: state.movie, OperationID: opID}
+			if err := o.revertLog.Complete(ctx, opID, partial); err != nil {
+				return fmt.Errorf("persist inverse after direct video publication: %w", err)
+			}
+		}
 	}
 	if err := s.rehomeRemainingSiblings(stagedVideo); err != nil {
 		return err
@@ -617,21 +668,27 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 				return fmt.Errorf("inspect publication sidecar: %w", statErr)
 			}
 		}
-		// Persist the final-path inverse before deleting any source. A crash
-		// after this point leaves history with every published path.
-		if o.revertLog != nil && opID != "" {
-			partial := &ApplyResult{OrganizeResult: finalResult, Movie: state.movie, DownloadPaths: state.downloadPaths, NFOPath: state.nfoPath, FoundNFOPath: state.foundNFOPath, Merged: state.merged, OperationID: opID}
-			if err := o.revertLog.Complete(ctx, opID, partial); err != nil {
-				return fmt.Errorf("persist inverse before source cleanup: %w", err)
+		if s.videoDeferred {
+			// The direct publication already journaled the inverse and armed
+			// rollback; the move consumed the original, so there is no
+			// source-path removal here.
+		} else {
+			// Persist the final-path inverse before deleting any source. A crash
+			// after this point leaves history with every published path.
+			if o.revertLog != nil && opID != "" {
+				partial := &ApplyResult{OrganizeResult: finalResult, Movie: state.movie, DownloadPaths: state.downloadPaths, NFOPath: state.nfoPath, FoundNFOPath: state.foundNFOPath, Merged: state.merged, OperationID: opID}
+				if err := o.revertLog.Complete(ctx, opID, partial); err != nil {
+					return fmt.Errorf("persist inverse before source cleanup: %w", err)
+				}
 			}
-		}
-		s.sourceCleanupArmed = true
-		if err := batch.SetRollbackOrigin(finalResult.NewPath, s.sourcePath); err != nil {
-			return err
-		}
-		if err := s.fs.Remove(s.sourcePath); err != nil {
-			_ = batch.SetRollbackOrigin(finalResult.NewPath, "")
-			return fmt.Errorf("remove original after artifact publication: %w", err)
+			s.sourceCleanupArmed = true
+			if err := batch.SetRollbackOrigin(finalResult.NewPath, s.sourcePath); err != nil {
+				return err
+			}
+			if err := s.fs.Remove(s.sourcePath); err != nil {
+				_ = batch.SetRollbackOrigin(finalResult.NewPath, "")
+				return fmt.Errorf("remove original after artifact publication: %w", err)
+			}
 		}
 		for _, sibling := range s.siblings {
 			target := filepath.Join(filepath.Dir(finalResult.NewPath), stagedArtifactSiblingName(filepath.Base(s.sourcePath), filepath.Base(finalResult.NewPath), filepath.Base(sibling.sourcePath)))
@@ -724,6 +781,9 @@ func (s *artifactStage) treeDestinations(skipFile, skipDir, stagedArtifactDir, f
 			return nil
 		}
 		clean := filepath.Clean(path)
+		if info.Name() == artifactStageManifestName && filepath.Clean(filepath.Dir(path)) == filepath.Clean(s.root) {
+			return nil
+		}
 		if skipFile != "" && clean == filepath.Clean(skipFile) {
 			return nil
 		}
@@ -762,6 +822,9 @@ func (s *artifactStage) installTree(skipFile, skipDir string, preserve []string,
 			return nil
 		}
 		clean := filepath.Clean(path)
+		if info.Name() == artifactStageManifestName && filepath.Clean(filepath.Dir(path)) == filepath.Clean(s.root) {
+			return nil
+		}
 		if skipFile != "" && clean == filepath.Clean(skipFile) {
 			return nil
 		}

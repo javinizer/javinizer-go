@@ -374,7 +374,10 @@ func TestMoveCleanupRejectsUntrackedOrganizerResult(t *testing.T) {
 	defer stage.cleanup()
 	state := &applyPipelineState{organizeResult: &organizer.OrganizeResult{NewPath: stage.stagedSource}}
 	err = stage.publish(t.Context(), orch, state, nil)
-	require.ErrorContains(t, err, "no regular installed output")
+	// The reported NewPath is untracked: arming rollback against it fails
+	// closed; the fallback arms the tracked planned leg so rollback still
+	// restores the consumed source.
+	require.ErrorContains(t, err, "track staged publication destination")
 	pr260AssertRetained(t, base, source, subtitle, multipart, unrelated)
 }
 
