@@ -357,9 +357,13 @@ func validateColumnTypes(ctx context.Context, db *sql.DB) error {
 // dvd_id domain; exotic unicode-space edges do not occur in DMM IDs (they are
 // ASCII by construction) and stay out of scope deliberately.
 func validateNormConsistency(ctx context.Context, db *sql.DB) error {
+	// Norm-lookup coverage: every nonempty dvd_id needs a norm agreeing with
+	// normalization — empty/NULL norms make the row invisible to lookup paths
+	// that only query dvd_id_norm (COALESCE collapses NULL into the same
+	// disagreement as an empty string).
 	bad, err := queryCount(ctx, db,
-		"SELECT COUNT(*) FROM videos WHERE dvd_id_norm IS NOT NULL AND dvd_id_norm != '' "+
-			"AND UPPER(REPLACE(REPLACE(dvd_id, '-', ''), ' ', '')) != dvd_id_norm")
+		"SELECT COUNT(*) FROM videos WHERE dvd_id IS NOT NULL AND dvd_id != '' "+
+			"AND UPPER(REPLACE(REPLACE(dvd_id, '-', ''), ' ', '')) != COALESCE(dvd_id_norm, '')")
 	if err != nil {
 		return fmt.Errorf("%w: norm consistency probe: %v", ErrDumpInvalid, err)
 	}

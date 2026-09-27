@@ -340,6 +340,26 @@ func TestValidateSidecar_BlobKeyRejected(t *testing.T) {
 	assert.Contains(t, err.Error(), "non-TEXT")
 }
 
+func TestValidateSidecar_EmptyNormOnRealIDRejected(t *testing.T) {
+	path := importFixture(t)
+	alterFixture(t, path,
+		"INSERT INTO videos (content_id, dvd_id, dvd_id_norm) VALUES ('118xyz00099', 'XYZ-99', '')")
+	_, err := ValidateSidecar(context.Background(), path)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrDumpInvalid)
+	assert.Contains(t, err.Error(), "dvd_id_norm")
+}
+
+func TestValidateSidecar_NullNormOnRealIDRejected(t *testing.T) {
+	path := importFixture(t)
+	alterFixture(t, path,
+		"INSERT INTO videos (content_id, dvd_id, dvd_id_norm) VALUES ('118xyz00098', 'XYZ-987', NULL)")
+	_, err := ValidateSidecar(context.Background(), path)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrDumpInvalid)
+	assert.Contains(t, err.Error(), "dvd_id_norm")
+}
+
 func TestValidateSidecar_NotADatabase(t *testing.T) {
 	dst := filepath.Join(t.TempDir(), "junk.db")
 	require.NoError(t, os.WriteFile(dst, []byte("SQLite format 3\x00 but then garbage"), 0o600))

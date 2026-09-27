@@ -422,7 +422,7 @@ func (h *dumpHandler) runSidecarJob(ctx context.Context, staged, path string, fa
 	}
 	renameFn := h.renameFn
 	if renameFn == nil {
-		renameFn = os.Rename
+		renameFn = r18devdump.ReplaceFile
 	}
 	renameErr := renameFn(staged, path)
 	if renameErr != nil {

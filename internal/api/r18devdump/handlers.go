@@ -71,7 +71,7 @@ func (h *dumpHandler) releaseDumpOp() {
 }
 
 func newDumpHandler(rt *core.APIRuntime) *dumpHandler {
-	h := &dumpHandler{rt: rt, httpClient: &http.Client{}, stallTimeout: dumpStallTimeout, renameFn: os.Rename, removeFn: os.Remove}
+	h := &dumpHandler{rt: rt, httpClient: &http.Client{}, stallTimeout: dumpStallTimeout, renameFn: r18devdump.ReplaceFile, removeFn: os.Remove}
 	h.reloadFn = func(cfg *config.Config, lockHeld bool) error {
 		if lockHeld {
 			return h.rt.ReloadConfigLocked(cfg)
