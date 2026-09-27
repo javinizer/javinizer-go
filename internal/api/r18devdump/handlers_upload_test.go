@@ -468,7 +468,7 @@ func TestUpload_GzipCarryingHTML_Validation(t *testing.T) {
 	awaitDone(t, h, 10*time.Second)
 	lastErr, kind, _ := handlerState(h)
 	assert.Equal(t, "validation", kind)
-	assert.True(t, strings.Contains(lastErr, "no COPY data") || strings.Contains(lastErr, "no recognized"), lastErr)
+	assert.Contains(t, lastErr, "derived_video", lastErr)
 }
 
 func TestUpload_TruncatedGzip_Validation(t *testing.T) {

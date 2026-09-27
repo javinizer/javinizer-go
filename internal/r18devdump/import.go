@@ -246,11 +246,6 @@ func Import(ctx context.Context, r io.Reader, path string, opts ImportOptions) (
 	// Per-table batch accumulators.
 	batches := make(map[string][]DumpRow)
 	var totalVideos int64
-	// storedVideos counts emitted derived_video rows — the invariant guards
-	// video content specifically: a stream containing rows only for other
-	// tables (e.g. actresses) is desynced garbage and must not replace a
-	// working sidecar.
-	var storedVideos int64
 
 	flush := func(table string) error {
 		batch := batches[table]
@@ -293,9 +288,6 @@ func Import(ctx context.Context, r io.Reader, path string, opts ImportOptions) (
 		// Map dump column positions to our stored column order.
 		mapped := mapDumpRow(row, schema.columns)
 		batches[row.Table] = append(batches[row.Table], DumpRow{Table: row.Table, Values: mapped})
-		if row.Table == derivedVideoTable {
-			storedVideos++
-		}
 		if len(batches[row.Table]) >= importBatchSize {
 			return flush(row.Table)
 		}
@@ -306,13 +298,18 @@ func Import(ctx context.Context, r io.Reader, path string, opts ImportOptions) (
 		_ = tx.Rollback()
 		return ImportResult{}, fmt.Errorf("parse dump: %w", err)
 	}
-	if storedVideos == 0 {
-		_ = tx.Rollback()
-		return ImportResult{}, fmt.Errorf("%w: input contained no derived_video rows (check that the source is a gzipped r18.dev pg_dump, decompressed before import)", ErrDumpNoRows)
-	}
 	if err := flushAll(); err != nil {
 		_ = tx.Rollback()
 		return ImportResult{}, fmt.Errorf("insert rows: %w", err)
+	}
+	// INSERT OR IGNORE silently drops unsatisfiable video rows (e.g. \N
+	// content_id violating the NOT NULL primary key), so the invariant must
+	// count INSERTED rows, after the final flush: otherwise a dump whose
+	// every video row was ignored would pass and replace a working sidecar
+	// with an empty one.
+	if totalVideos == 0 {
+		_ = tx.Rollback()
+		return ImportResult{}, fmt.Errorf("%w: no derived_video rows were stored (input missing them or every row was rejected)", ErrDumpNoRows)
 	}
 
 	if err := writeMeta(ctx, tx, opts); err != nil {

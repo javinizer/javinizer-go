@@ -24,6 +24,10 @@ func TestImport_RejectsNoRecognizedRows(t *testing.T) {
 		// Codex round on #273: rows only for a non-video table are desynced
 		// garbage, not a dump — reject them like other tableless inputs.
 		{"non-video table rows only", "COPY public.derived_actress (id, name_romaji) FROM stdin;\n1\tJane\n\\.\n"},
+		// Rows that INSERT OR IGNORE silently discards (NULL content_id breaks
+		// the NOT NULL primary key) must also fail the import invariant — the
+		// gate counts inserted rows, not emitted ones.
+		{"null content_id row ignored", "COPY public.derived_video (content_id, dvd_id) FROM stdin;\n\\N\tIPX-535\n\\.\n"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
