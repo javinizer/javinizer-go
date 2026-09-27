@@ -264,13 +264,18 @@ func checkLogicalKey(ctx context.Context, db *sql.DB, table string, keys []strin
 	nullPred := strings.Join(nullPredicates(keys), " OR ")
 	notNullPred := strings.Join(notNullPredicates(keys), " AND ")
 	keysList := strings.Join(keys, ", ")
+	typePreds := make([]string, 0, len(keys))
+	for _, k := range keys {
+		typePreds = append(typePreds, "(typeof("+k+") != 'text')")
+	}
 	q := "SELECT " +
 		"(SELECT COUNT(*) FROM " + table + " WHERE " + nullPred + "), " +
 		"(SELECT COUNT(*) FROM " + table + " WHERE " + notNullPred + "), " +
 		"(SELECT COUNT(*) FROM (SELECT DISTINCT " + keysList + " FROM " + table + " WHERE " + notNullPred + ")), " +
-		"(SELECT COUNT(*) FROM pragma_table_info('" + table + "') WHERE " + orderedPkPredicate(keys) + ")"
-	var nulls, total, distinct, pkOrdered int64
-	if err := db.QueryRowContext(ctx, q).Scan(&nulls, &total, &distinct, &pkOrdered); err != nil {
+		"(SELECT COUNT(*) FROM pragma_table_info('" + table + "') WHERE " + orderedPkPredicate(keys) + "), " +
+		"(SELECT COUNT(*) FROM " + table + " WHERE " + notNullPred + " AND (" + strings.Join(typePreds, " OR ") + "))"
+	var nulls, total, distinct, pkOrdered, badTypes int64
+	if err := db.QueryRowContext(ctx, q).Scan(&nulls, &total, &distinct, &pkOrdered, &badTypes); err != nil {
 		return fmt.Errorf("%w: %s logical-key probe: %v", ErrDumpInvalid, table, err)
 	}
 	if nulls > 0 {
@@ -278,6 +283,11 @@ func checkLogicalKey(ctx context.Context, db *sql.DB, table string, keys []strin
 	}
 	if total > distinct {
 		return fmt.Errorf("%w: dump contains %s rows with duplicate %s", ErrDumpInvalid, table, keyList)
+	}
+	// BLOB/REAL key storage binds unequal to the lookups' TEXT parameters
+	// (SQLite does not coerce at bind time), making valid rows unreachable.
+	if badTypes > 0 {
+		return fmt.Errorf("%w: dump contains %s rows with non-TEXT %s", ErrDumpInvalid, table, keyList)
 	}
 	if pkOrdered < int64(len(keys)) {
 		return fmt.Errorf("%w: table %s' primary key does not start with %s in order — lookups on it would full-scan", ErrDumpInvalid, table, keyList)

@@ -330,6 +330,16 @@ func TestValidateSidecar_WrongNormRejected(t *testing.T) {
 	assert.Contains(t, err.Error(), "dvd_id_norm")
 }
 
+func TestValidateSidecar_BlobKeyRejected(t *testing.T) {
+	// Codex: BLOB-valued keys match nothing when the lookups bind TEXT.
+	path := looseVideosFixture(t,
+		"INSERT INTO videos_loose (content_id, dvd_id_norm) VALUES (CAST('118ipx00535' AS BLOB), 'IPX535')")
+	_, err := ValidateSidecar(context.Background(), path)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrDumpInvalid)
+	assert.Contains(t, err.Error(), "non-TEXT")
+}
+
 func TestValidateSidecar_NotADatabase(t *testing.T) {
 	dst := filepath.Join(t.TempDir(), "junk.db")
 	require.NoError(t, os.WriteFile(dst, []byte("SQLite format 3\x00 but then garbage"), 0o600))
