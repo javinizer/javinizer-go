@@ -274,7 +274,7 @@ func TestDownload_ResumesAfterTruncation(t *testing.T) {
 
 	var lastProgress, lastTotal int64
 	var received bytes.Buffer
-	_, err := Download(context.Background(), srv.Client(), "", func(n, total int64) {
+	_, err := Download(context.Background(), srv.Client(), "", "", func(n, total int64) {
 		lastProgress, lastTotal = n, total
 	}, func(r io.Reader, d DownloadResult) error {
 		_, err := io.Copy(&received, r)
@@ -323,7 +323,7 @@ func TestDownload_ResumeFailsWhenRangeIgnored(t *testing.T) {
 	defer setLatestDumpURL(orig)
 	shrinkResumeBackoff(t)
 
-	_, err := Download(context.Background(), srv.Client(), "", nil, func(r io.Reader, d DownloadResult) error {
+	_, err := Download(context.Background(), srv.Client(), "", "", nil, func(r io.Reader, d DownloadResult) error {
 		_, err := io.Copy(io.Discard, r)
 		return err
 	})
@@ -360,7 +360,7 @@ func TestDownload_ResumeFailsWhenObjectChanges(t *testing.T) {
 	defer setLatestDumpURL(orig)
 	shrinkResumeBackoff(t)
 
-	_, err := Download(context.Background(), srv.Client(), "", nil, func(r io.Reader, d DownloadResult) error {
+	_, err := Download(context.Background(), srv.Client(), "", "", nil, func(r io.Reader, d DownloadResult) error {
 		_, err := io.Copy(io.Discard, r)
 		return err
 	})
@@ -623,7 +623,7 @@ func TestDownload_ResumePrefersLastModifiedOverWeakETag(t *testing.T) {
 	defer setLatestDumpURL(orig)
 	shrinkResumeBackoff(t)
 
-	_, err := Download(context.Background(), srv.Client(), "", nil, func(r io.Reader, d DownloadResult) error {
+	_, err := Download(context.Background(), srv.Client(), "", "", nil, func(r io.Reader, d DownloadResult) error {
 		_, err := io.Copy(io.Discard, r)
 		return err
 	})
@@ -675,7 +675,7 @@ func TestDownload_UnknownLengthTruncationResumedByProbe(t *testing.T) {
 	shrinkResumeBackoff(t)
 
 	var received bytes.Buffer
-	_, err := Download(context.Background(), srv.Client(), "", nil, func(r io.Reader, d DownloadResult) error {
+	_, err := Download(context.Background(), srv.Client(), "", "", nil, func(r io.Reader, d DownloadResult) error {
 		_, err := io.Copy(&received, r)
 		return err
 	})
@@ -713,7 +713,7 @@ func TestDownload_UnknownLengthGenuineEOFConfirmedBy416(t *testing.T) {
 	shrinkResumeBackoff(t)
 
 	var received bytes.Buffer
-	_, err := Download(context.Background(), srv.Client(), "", nil, func(r io.Reader, d DownloadResult) error {
+	_, err := Download(context.Background(), srv.Client(), "", "", nil, func(r io.Reader, d DownloadResult) error {
 		_, err := io.Copy(&received, r)
 		return err
 	})
@@ -765,7 +765,7 @@ func TestDownload_UnknownLengthTruncationVia416ThenResume(t *testing.T) {
 	shrinkResumeBackoff(t)
 
 	var received bytes.Buffer
-	_, err := Download(context.Background(), srv.Client(), "", nil, func(r io.Reader, d DownloadResult) error {
+	_, err := Download(context.Background(), srv.Client(), "", "", nil, func(r io.Reader, d DownloadResult) error {
 		_, err := io.Copy(&received, r)
 		return err
 	})
@@ -803,7 +803,7 @@ func TestDownload_UnknownLengthDeferToGzipWhenProbeInconclusive(t *testing.T) {
 	defer setLatestDumpURL(orig)
 	shrinkResumeBackoff(t)
 
-	_, err := Download(context.Background(), srv.Client(), "", nil, func(r io.Reader, d DownloadResult) error {
+	_, err := Download(context.Background(), srv.Client(), "", "", nil, func(r io.Reader, d DownloadResult) error {
 		_, err := io.Copy(io.Discard, r)
 		return err
 	})
@@ -941,7 +941,7 @@ func TestDownload_ResumeRefusedWithoutValidator(t *testing.T) {
 	defer setLatestDumpURL(orig)
 	shrinkResumeBackoff(t)
 
-	_, err := Download(context.Background(), srv.Client(), "", nil, func(r io.Reader, d DownloadResult) error {
+	_, err := Download(context.Background(), srv.Client(), "", "", nil, func(r io.Reader, d DownloadResult) error {
 		_, err := io.Copy(io.Discard, r)
 		return err
 	})
