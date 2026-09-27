@@ -107,13 +107,13 @@
 		const wasPresent = status?.present ?? false;
 		const prevImportedAt = status?.imported_at ?? '';
 		const prevSourceDate = status?.source_date ?? '';
-		// The backend download context may run for up to 30 minutes on slow
-		// connections or slow imports. Poll for the full server-side window
-		// instead of stopping after a fixed iteration count, and rely on the
-		// `running` flag (and WS terminal frames) to determine completion.
+		// Codex #273: uploads/downloads have no server-side wall-clock cap, so
+		// a fixed UI deadline would sit silent mid-import on slow storage.
+		// Poll until the server stops reporting the job running (every exit
+		// path below is completion-based; component unmount stops via polling
+		// being cleared).
 		const pollIntervalMs = 3000;
-		const deadline = Date.now() + 30 * 60 * 1000;
-		while (Date.now() < deadline) {
+		for (;;) {
 			if (!polling) return; // stopped by component unmount
 			await new Promise((r) => setTimeout(r, pollIntervalMs));
 			if (!polling) return;

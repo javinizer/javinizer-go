@@ -30,6 +30,16 @@ type sizeLimitReader struct {
 
 func (s *sizeLimitReader) Read(p []byte) (int, error) {
 	if s.left <= 0 {
+		// Codex: content landing exactly on the cap must read its EOF cleanly;
+		// only data beyond the cap is a real overflow.
+		one := make([]byte, 1)
+		n, err := s.r.Read(one)
+		if n == 0 || err != nil {
+			if err == nil {
+				err = io.EOF
+			}
+			return 0, err
+		}
 		return 0, ErrDumpTooLarge
 	}
 	if int64(len(p)) > s.left {

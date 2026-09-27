@@ -215,6 +215,28 @@ func TestEnforceDumpSizeLimit(t *testing.T) {
 		assert.Contains(t, string(got), "copy dum", "reads up to the cap should all succeed")
 	})
 
+	t.Run("exactly at the limit reads to clean EOF", func(t *testing.T) {
+		r := EnforceDumpSizeLimit(strings.NewReader("0123456789abcdef"), 16)
+		buf := make([]byte, 16)
+		var got []byte
+		var finalErr error
+		for finalErr == nil {
+			n, err := r.Read(buf)
+			got = append(got, buf[:n]...)
+			finalErr = err
+		}
+		require.ErrorIs(t, finalErr, io.EOF)
+		assert.Equal(t, "0123456789abcdef", string(got))
+	})
+
+	t.Run("inner reader returning zero-nil normalizes to EOF", func(t *testing.T) {
+		// Codex: after the cap endpoint probe fires, a misbehaving inner reader
+		// returning (0, nil) must not mask the clean-EOF tell to the caller.
+		r := EnforceDumpSizeLimit(zeroNilReader{}, 0)
+		_, err := r.Read(make([]byte, 4))
+		require.ErrorIs(t, err, io.EOF)
+	})
+
 	t.Run("crossing the limit fails with the sentinel and keeps partial data", func(t *testing.T) {
 		r := EnforceDumpSizeLimit(strings.NewReader("0123456789abcdef"), 8)
 		buf := make([]byte, 16)
@@ -239,3 +261,7 @@ func TestEnforceDumpSizeLimit(t *testing.T) {
 		assert.ErrorIs(t, err, ErrDumpTooLarge)
 	})
 }
+
+type zeroNilReader struct{}
+
+func (zeroNilReader) Read([]byte) (int, error) { return 0, nil }
