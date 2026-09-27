@@ -269,14 +269,19 @@ func checkLogicalKey(ctx context.Context, db *sql.DB, table string, keys []strin
 	for _, k := range keys {
 		typePreds = append(typePreds, "(typeof("+k+") != 'text')")
 	}
+	casingPreds := make([]string, 0, len(keys))
+	for _, k := range keys {
+		casingPreds = append(casingPreds, "("+k+" != LOWER("+k+"))")
+	}
 	q := "SELECT " +
 		"(SELECT COUNT(*) FROM " + table + " WHERE " + nullPred + "), " +
 		"(SELECT COUNT(*) FROM " + table + " WHERE " + notNullPred + "), " +
 		"(SELECT COUNT(*) FROM (SELECT DISTINCT " + keysList + " FROM " + table + " WHERE " + notNullPred + ")), " +
 		"(SELECT COUNT(*) FROM pragma_table_info('" + table + "') WHERE " + orderedPkPredicate(keys) + "), " +
-		"(SELECT COUNT(*) FROM " + table + " WHERE " + notNullPred + " AND (" + strings.Join(typePreds, " OR ") + "))"
-	var nulls, total, distinct, pkOrdered, badTypes int64
-	if err := db.QueryRowContext(ctx, q).Scan(&nulls, &total, &distinct, &pkOrdered, &badTypes); err != nil {
+		"(SELECT COUNT(*) FROM " + table + " WHERE " + notNullPred + " AND (" + strings.Join(typePreds, " OR ") + ")), " +
+		"(SELECT COUNT(*) FROM " + table + " WHERE " + notNullPred + " AND (" + strings.Join(casingPreds, " OR ") + "))"
+	var nulls, total, distinct, pkOrdered, badTypes, badCasing int64
+	if err := db.QueryRowContext(ctx, q).Scan(&nulls, &total, &distinct, &pkOrdered, &badTypes, &badCasing); err != nil {
 		return fmt.Errorf("%w: %s logical-key probe: %v", ErrDumpInvalid, table, err)
 	}
 	if nulls > 0 {
@@ -292,6 +297,11 @@ func checkLogicalKey(ctx context.Context, db *sql.DB, table string, keys []strin
 	}
 	if pkOrdered < int64(len(keys)) {
 		return fmt.Errorf("%w: table %s' primary key does not start with %s in order — lookups on it would full-scan", ErrDumpInvalid, table, keyList)
+	}
+	// Lookups lowercase-bound their parameters before comparing against the
+	// BINARY key, so uppercase-stored ids are unreachable after install.
+	if badCasing > 0 {
+		return fmt.Errorf("%w: dump contains %s rows with noncanonical (non-lowercase) %s", ErrDumpInvalid, table, keyList)
 	}
 	return nil
 }
@@ -358,13 +368,13 @@ func validateColumnTypes(ctx context.Context, db *sql.DB) error {
 // dvd_id domain; exotic unicode-space edges do not occur in DMM IDs (they are
 // ASCII by construction) and stay out of scope deliberately.
 func validateNormConsistency(ctx context.Context, db *sql.DB) error {
-	// Norm-lookup coverage: every nonempty dvd_id needs a norm agreeing with
-	// normalization — empty/NULL norms make the row invisible to lookup paths
-	// that only query dvd_id_norm (COALESCE collapses NULL into the same
-	// disagreement as an empty string).
+	// Full equation: every row's stored norm must equal the normalization of
+	// its dvd_id — empty/NULL dvd_id requires an empty norm (an orphaned norm
+	// routes DVD-ID lookups at content with no DVD ID), and a nonempty dvd_id
+	// requires the agreeing norm (empty/NULL norms are invisible to lookups).
 	bad, err := queryCount(ctx, db,
-		"SELECT COUNT(*) FROM videos WHERE dvd_id IS NOT NULL AND dvd_id != '' "+
-			"AND UPPER(REPLACE(REPLACE(dvd_id, '-', ''), ' ', '')) != COALESCE(dvd_id_norm, '')")
+		"SELECT COUNT(*) FROM videos WHERE "+
+			"COALESCE(dvd_id_norm, '') != COALESCE(UPPER(REPLACE(REPLACE(dvd_id, '-', ''), ' ', '')), '')")
 	if err != nil {
 		return fmt.Errorf("%w: norm consistency probe: %v", ErrDumpInvalid, err)
 	}
