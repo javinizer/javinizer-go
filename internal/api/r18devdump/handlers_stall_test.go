@@ -87,7 +87,7 @@ func TestStartDownload_SlowButSteadySucceeds(t *testing.T) {
 	// must not, because bytes keep arriving.
 	var dumpBody strings.Builder
 	dumpBody.WriteString("COPY public.derived_video (content_id, dvd_id) FROM stdin;\n")
-	for i := 0; i < 8; i++ {
+	for i := 0; i < 20; i++ {
 		fmt.Fprintf(&dumpBody, "content%03d\tDVD-%03d\n", i, i)
 	}
 	dumpBody.WriteString("\\.\n")
@@ -105,20 +105,22 @@ func TestStartDownload_SlowButSteadySucceeds(t *testing.T) {
 			if flusher != nil {
 				flusher.Flush()
 			}
-			time.Sleep(60 * time.Millisecond)
+			time.Sleep(120 * time.Millisecond)
 		}
 		_ = gw.Close()
 	}))
 	defer srv.Close()
 
-	// 10 lines x 60ms ~= 600ms total, >2x the stall timeout: proves no
-	// wall-clock cutoff, while 60ms gaps keep the watchdog fed. The stall
-	// timeout stays comfortably above the pre-import local setup window
-	// (schema creation etc.) even on heavily loaded Windows CI runners.
+	// 22 lines x 120ms ~= 2.6s total, >2x the stall timeout: proves no
+	// wall-clock cutoff, while 120ms gaps keep the watchdog fed (~8x margin).
+	// The stall timeout includes ~4x headroom over the pre-import local setup
+	// window (mkdir, SQLite WAL open, schema creation) — that window was
+	// empirically blowable on loaded CI runners at 250ms (observed flakes on
+	// merge-queue runs of #266 and #272, Windows Defender + race scheduling).
 	h, dumpPath, _ := newTestHandlerWithHub(t)
 	h.httpClient = srv.Client()
 	h.reloadFn = func(_ *config.Config, _ bool) error { return nil }
-	h.stallTimeout = 250 * time.Millisecond
+	h.stallTimeout = 1 * time.Second
 
 	orig := r18devdump.LatestDumpURL
 	r18devdump.LatestDumpURL = srv.URL + "/dump.sql.gz"
