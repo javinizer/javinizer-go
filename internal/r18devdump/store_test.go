@@ -797,6 +797,7 @@ func TestImport_RenameError(t *testing.T) {
 	_, err := Import(context.Background(), strings.NewReader(dump), path, ImportOptions{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "rename tmp db")
+	assert.True(t, errors.Is(err, ErrDumpSwap), "Rename failures must carry ErrDumpSwap for downstream classification")
 }
 
 func TestImport_BeforeSwap(t *testing.T) {

@@ -221,7 +221,9 @@ func (h *dumpHandler) receiveStallTimeout() time.Duration {
 // zero-rows invariant (validation), or genuine parser/SQLite errors (import).
 func classifyImportError(importErr error, fsFault, gzFault bool) string {
 	switch {
-	case fsFault:
+	// Staging wins first: staged-fs faults and update/swap (filesystem)
+	// failures are staging errors per the error-kind mapping.
+	case fsFault || errors.Is(importErr, r18devdump.ErrDumpSwap):
 		return kindStaging
 	case errors.Is(importErr, r18devdump.ErrDumpNoRows) ||
 		errors.Is(importErr, r18devdump.ErrTruncatedDump) ||

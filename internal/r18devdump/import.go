@@ -33,6 +33,11 @@ type ImportResult struct {
 // before swap instead of producing a sidecar whose lookups fail on scan.
 var ErrDumpTypedValue = errors.New("invalid typed value in dump")
 
+// ErrDumpSwap marks failures at the commit+swap boundary (checkpoint, close,
+// rename onto the destination). Upload handlers map them to the 'staging'
+// error kind (filesystem/install failures), not 'import'.
+var ErrDumpSwap = errors.New("dump swap failed")
+
 // ErrDumpNoRows marks import input that produced zero recognized dump rows —
 // fed garbage (e.g. compressed bytes or an error page) rather than a
 // decompressed pg_dump, import must fail instead of installing an empty DB.
@@ -400,7 +405,7 @@ func Import(ctx context.Context, r io.Reader, path string, opts ImportOptions) (
 		defer opts.AfterSwap()
 	}
 	if err := ReplaceFile(tmpPath, path); err != nil {
-		return ImportResult{}, fmt.Errorf("rename tmp db: %w", err)
+		return ImportResult{}, fmt.Errorf("rename tmp db: %w: %w", ErrDumpSwap, err)
 	}
 	committed = true
 	return ImportResult{Rows: totalVideos, Path: path}, nil
