@@ -1,48 +1,49 @@
-import type { Movie } from '$lib/api/types';
+import type { Movie, MovieCredit } from '$lib/api/types';
 
 /**
  * Change signature for the live display-title preview in MovieEditor.
  * A change in the signature refires the (debounced) display-title-preview POST.
  *
- * Volatile actress/credit fields (thumb_url, origin, name_key, aliases,
- * reported_thumb_url, timestamps) are intentionally excluded: media snapshots
- * and identity resolution churn them between job polls while the rendered
- * title is unchanged. Including them made the preview refire on every poll
- * during organize (v1.6.0 flap between "Preview unavailable" and "Rendering
- * preview…").
+ * The signature keys ONLY on inputs the title template actually renders:
  *
- * Render-eligibility tokens ARE retained (codex PR269 P2): the template
- * context drops a credit when its actress is unverified AND ambiguity-
- * quarantined, and renders suppress/name-override/order from credits — those
- * transitions change the rendered title without any name change, so verified,
- * suppressed, override names and ordering stay in the signature.
+ * - Volatile actress/credit fields (thumb_url, origin, name_key, aliases,
+ *   reported_thumb_url, dmm_id, timestamps) are excluded: media snapshots and
+ *   identity resolution churn them between job polls while the rendered title
+ *   is unchanged (v1.6.0 flap between "Preview unavailable" and "Rendering
+ *   preview…").
+ * - Raw `verified` is excluded: since v1.6.1 the render gate is
+ *   `verified || !ambiguity_quarantined`, so a bare verified flip does not
+ *   change the rendered title. Render visibility instead comes from the
+ *   server-computed `render_visible` credit flag (the exact template gate).
+ * - Credits drive the render whenever any exist (mirrors
+ *   NewContextFromMovieWithOptions), so the raw movie.actresses array — whose
+ *   authoritative set membership oscillates mid-batch as quarantine is
+ *   recomputed across sibling movies — is only hashed when no credits render.
+ * - A credit that cannot render (render_visible=false, or locally suppressed,
+ *   matching the nil-actress/quarantine gate) hashes to a fixed marker: its
+ *   name/order churn is invisible in the title and must not refire.
+ * - poster_url is dropped: the title Context has no poster field (cover_url
+ *   and trailer_url remain — they are template inputs).
  */
 export function buildDisplayTitlePreviewSignature(movie: Movie): string {
+	const credits = movie.credits ?? [];
+	const creditTokens = credits.map((c) => creditRenderToken(c));
+	const includeActresses = credits.length === 0;
 	return JSON.stringify({
 		id: movie.id,
 		code: movie.code,
 		title: movie.title,
 		original_title: movie.original_title,
 		description: movie.description,
-		actresses: (movie.actresses ?? []).map((a) => [
-			a.id ?? 0,
-			a.dmm_id ?? 0,
-			a.first_name ?? '',
-			a.last_name ?? '',
-			a.japanese_name ?? '',
-			a.verified ?? false,
-		]),
-		credits: (movie.credits ?? []).map((c) => [
-			c.actress_id ?? 0,
-			c.credited_name ?? '',
-			c.credited_japanese_name ?? '',
-			c.override_name ?? '',
-			c.suppressed ?? false,
-			c.order_index ?? 0,
-			c.order_pinned ?? false,
-			c.display_force_canonical ?? false,
-			c.actress?.verified ?? false,
-		]),
+		actresses: includeActresses
+			? (movie.actresses ?? []).map((a) => [
+					a.id ?? 0,
+					a.first_name ?? '',
+					a.last_name ?? '',
+					a.japanese_name ?? '',
+				])
+			: null,
+		credits: creditTokens,
 		genres: movie.genres,
 		runtime: movie.runtime,
 		release_year: movie.release_year,
@@ -52,9 +53,24 @@ export function buildDisplayTitlePreviewSignature(movie: Movie): string {
 		label: movie.label,
 		series: movie.series,
 		rating_score: movie.rating_score,
-		poster_url: movie.poster_url,
 		cover_url: movie.cover_url,
 		trailer_url: movie.trailer_url,
 		original_filename: movie.original_filename,
 	});
+}
+
+function creditRenderToken(c: MovieCredit): unknown[] {
+	const visible = (c.render_visible ?? true) && !(c.suppressed ?? false);
+	if (!visible) {
+		return [c.actress_id ?? 0, 'hidden'];
+	}
+	return [
+		c.actress_id ?? 0,
+		c.credited_name ?? '',
+		c.credited_japanese_name ?? '',
+		c.override_name ?? '',
+		c.order_index ?? 0,
+		c.order_pinned ?? false,
+		c.display_force_canonical ?? false,
+	];
 }
