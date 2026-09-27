@@ -105,22 +105,20 @@ func TestStartDownload_SlowButSteadySucceeds(t *testing.T) {
 			if flusher != nil {
 				flusher.Flush()
 			}
-			time.Sleep(120 * time.Millisecond)
+			time.Sleep(60 * time.Millisecond)
 		}
 		_ = gw.Close()
 	}))
 	defer srv.Close()
 
-	// 22 lines x 120ms ~= 2.6s total, >2x the stall timeout: proves no
-	// wall-clock cutoff, while 120ms gaps keep the watchdog fed (~8x margin).
-	// The stall timeout includes ~4x headroom over the pre-import local setup
-	// window (mkdir, SQLite WAL open, schema creation) — that window was
-	// empirically blowable on loaded CI runners at 250ms (observed flakes on
-	// merge-queue runs of #266 and #272, Windows Defender + race scheduling).
+	// 22 lines x 60ms ~= 1.3s total, exceeding the stall timeout: proves no
+	// wall-clock cutoff, while 60ms gaps keep the watchdog fed. The pre-import
+	// local setup window (schema, BeginTx) precedes the first read ping, so on
+	// heavily loaded Windows CI the margin must exceed both.
 	h, dumpPath, _ := newTestHandlerWithHub(t)
 	h.httpClient = srv.Client()
 	h.reloadFn = func(_ *config.Config, _ bool) error { return nil }
-	h.stallTimeout = 1 * time.Second
+	h.stallTimeout = 800 * time.Millisecond
 
 	orig := r18devdump.LatestDumpURL
 	r18devdump.LatestDumpURL = srv.URL + "/dump.sql.gz"
