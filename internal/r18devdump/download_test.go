@@ -63,7 +63,7 @@ func TestDownload_Import(t *testing.T) {
 
 	var received strings.Builder
 	gotURL := ""
-	res, err := Download(context.Background(), srv.Client(), "", nil, func(r io.Reader, d DownloadResult) error {
+	res, err := Download(context.Background(), srv.Client(), "", "", nil, func(r io.Reader, d DownloadResult) error {
 		gotURL = d.FinalURL
 		_, err := io.Copy(&received, r)
 		return err
@@ -93,7 +93,7 @@ func TestDownload_UnchangedSkipsImport(t *testing.T) {
 	defer setLatestDumpURL(orig)
 
 	// First download to discover the final (dated) URL.
-	first, err := Download(context.Background(), srv.Client(), "", nil, func(io.Reader, DownloadResult) error { return nil })
+	first, err := Download(context.Background(), srv.Client(), "", "", nil, func(io.Reader, DownloadResult) error { return nil })
 	if err != nil {
 		t.Fatalf("first Download: %v", err)
 	}
@@ -101,7 +101,7 @@ func TestDownload_UnchangedSkipsImport(t *testing.T) {
 
 	// Second download with currentSourceURL == finalURL must skip.
 	importCalled := false
-	res, err := Download(context.Background(), srv.Client(), finalURL, nil, func(io.Reader, DownloadResult) error {
+	res, err := Download(context.Background(), srv.Client(), finalURL, "", nil, func(io.Reader, DownloadResult) error {
 		importCalled = true
 		return nil
 	})
@@ -125,7 +125,7 @@ func TestDownload_ProgressReported(t *testing.T) {
 
 	var lastProgress int64
 	var lastTotal int64
-	res, err := Download(context.Background(), srv.Client(), "", func(n, total int64) {
+	res, err := Download(context.Background(), srv.Client(), "", "", func(n, total int64) {
 		lastProgress = n
 		lastTotal = total
 	}, func(r io.Reader, d DownloadResult) error {
@@ -169,7 +169,7 @@ func TestDownload_ProgressReported_ChunkedUnknownTotal(t *testing.T) {
 	defer setLatestDumpURL(orig)
 
 	var lastTotal int64 = -1
-	res, err := Download(context.Background(), srv.Client(), "", func(n, total int64) {
+	res, err := Download(context.Background(), srv.Client(), "", "", func(n, total int64) {
 		lastTotal = total
 	}, func(r io.Reader, d DownloadResult) error {
 		_, _ = io.Copy(io.Discard, r)
@@ -195,7 +195,7 @@ func TestDownload_NonOKStatus(t *testing.T) {
 	setLatestDumpURL(srv.URL)
 	defer setLatestDumpURL(orig)
 
-	_, err := Download(context.Background(), srv.Client(), "", nil, func(io.Reader, DownloadResult) error { return nil })
+	_, err := Download(context.Background(), srv.Client(), "", "", nil, func(io.Reader, DownloadResult) error { return nil })
 	if err == nil {
 		t.Fatal("expected error for non-200 status")
 	}
@@ -210,7 +210,7 @@ func TestDownload_InvalidGzip(t *testing.T) {
 	setLatestDumpURL(srv.URL)
 	defer setLatestDumpURL(orig)
 
-	_, err := Download(context.Background(), srv.Client(), "", nil, func(io.Reader, DownloadResult) error { return nil })
+	_, err := Download(context.Background(), srv.Client(), "", "", nil, func(io.Reader, DownloadResult) error { return nil })
 	if err == nil {
 		t.Fatal("expected gunzip error for non-gzip body")
 	}
@@ -1064,7 +1064,7 @@ func TestDownload_FetchError(t *testing.T) {
 	setLatestDumpURL("http://127.0.0.1:1/unreachable") // port 1: connection refused
 	defer setLatestDumpURL(orig)
 
-	_, err := Download(context.Background(), &http.Client{}, "", nil, func(io.Reader, DownloadResult) error { return nil })
+	_, err := Download(context.Background(), &http.Client{}, "", "", nil, func(io.Reader, DownloadResult) error { return nil })
 	if err == nil {
 		t.Fatal("expected a fetch error for an unreachable endpoint")
 	}
@@ -1079,7 +1079,7 @@ func TestDownload_BuildRequestError(t *testing.T) {
 	setLatestDumpURL("http://example.com/\x7f")
 	defer setLatestDumpURL(orig)
 
-	_, err := Download(context.Background(), &http.Client{}, "", nil, func(io.Reader, DownloadResult) error { return nil })
+	_, err := Download(context.Background(), &http.Client{}, "", "", nil, func(io.Reader, DownloadResult) error { return nil })
 	if err == nil || !strings.Contains(err.Error(), "build request") {
 		t.Fatalf("expected build-request error, got: %v", err)
 	}
@@ -1097,7 +1097,7 @@ func TestDownload_ImportFnError(t *testing.T) {
 	defer setLatestDumpURL(orig)
 
 	importErr := errors.New("import failed")
-	_, err := Download(context.Background(), srv.Client(), "", nil, func(io.Reader, DownloadResult) error {
+	_, err := Download(context.Background(), srv.Client(), "", "", nil, func(io.Reader, DownloadResult) error {
 		return importErr
 	})
 	if err != importErr {

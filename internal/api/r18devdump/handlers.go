@@ -212,7 +212,7 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 
 	// For update-only, check the current source URL so the download skips if
 	// the version is unchanged.
-	var currentSourceURL string
+	var currentSourceURL, currentSourceDate string
 	if updateOnly {
 		h.dumpMu.RLock()
 		if store, err := r18devdump.Open(path); err == nil {
@@ -220,6 +220,7 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 			_ = store.Close()
 			if err == nil {
 				currentSourceURL = stats.SourceURL
+				currentSourceDate = stats.SourceDate
 			}
 		}
 		h.dumpMu.RUnlock()
@@ -280,7 +281,7 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 				h.broadcastProgress("done", 0, 0, "")
 			}
 		}()
-		res, err := r18devdump.Download(ctx, client, currentSourceURL, progress, func(r io.Reader, d r18devdump.DownloadResult) error {
+		res, err := r18devdump.Download(ctx, client, currentSourceURL, currentSourceDate, progress, func(r io.Reader, d r18devdump.DownloadResult) error {
 			// Response headers arrived: record activity. Import runs its local
 			// setup (DB open, schema, BeginTx) before reading the first body
 			// byte, so without this ping a slow pre-import window reads as a

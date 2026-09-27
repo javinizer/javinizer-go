@@ -75,6 +75,8 @@ func newUploadTestServer(t *testing.T, h *dumpHandler) *uploadTestServer {
 	t.Helper()
 	router := gin.New()
 	router.POST("/api/v1/r18dev/dump/upload", h.startUpload)
+	router.POST("/api/v1/r18dev/dump/update", h.startUpdate)
+	router.POST("/api/v1/r18dev/dump/download", h.startDownload)
 	router.DELETE("/api/v1/r18dev/dump", h.clearDump)
 	srv := httptest.NewServer(router)
 	t.Cleanup(srv.Close)
@@ -86,6 +88,8 @@ func newUploadTestServerH2(t *testing.T, h *dumpHandler) *uploadTestServer {
 	t.Helper()
 	router := gin.New()
 	router.POST("/api/v1/r18dev/dump/upload", h.startUpload)
+	router.POST("/api/v1/r18dev/dump/update", h.startUpdate)
+	router.POST("/api/v1/r18dev/dump/download", h.startDownload)
 	srv := httptest.NewUnstartedServer(router)
 	srv.EnableHTTP2 = true
 	srv.StartTLS()
@@ -1025,4 +1029,84 @@ func TestUpload_DownloadBuiltSidecar_PreservedThroughUpload(t *testing.T) {
 	stats, err := store.Stats(context.Background())
 	require.NoError(t, err)
 	assert.Equal(t, embedded, stats.SourceURL)
+}
+
+func TestUpload_TokenProvenance_DateAwareUpdateSkip(t *testing.T) {
+	// Upload a raw dump carrying filename-token provenance dated 2026-09-20,
+	// then drive Update against an upstream whose latest dump is SAME date:
+	// the update must no-op without redownloading (Codex: raw uploads need
+	// comparable identity for Update to skip correctly).
+	h, dumpPath, srv := newUploadHandler(t)
+
+	dumpSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/latest" {
+			http.Redirect(w, r, "/dumps/r18dotdev_dump_2026-09-20.sql.gz", http.StatusFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/gzip")
+		_, _ = w.Write(gzBytes(t, uploadOneRowDump))
+	}))
+	defer dumpSrv.Close()
+	orig := r18devdump.LatestDumpURL
+	r18devdump.LatestDumpURL = dumpSrv.URL + "/latest"
+	defer func() { r18devdump.LatestDumpURL = orig }()
+
+	status, _, _ := srv.doUpload(t, buildUploadBody(t, gzBytes(t, uploadOneRowDump), "r18dotdev_dump_2026-09-20.sql.gz"))
+	require.Equal(t, http.StatusAccepted, status)
+	awaitDone(t, h, 10*time.Second)
+
+	store1, err := r18devdump.Open(dumpPath)
+	require.NoError(t, err)
+	stats1, err := store1.Stats(context.Background())
+	require.NoError(t, err)
+	require.NoError(t, store1.Close())
+
+	resp, err := srv.client.Post(srv.srv.URL+"/api/v1/r18dev/dump/update", "application/json", nil)
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+	awaitDone(t, h, 10*time.Second)
+
+	store2, err := r18devdump.Open(dumpPath)
+	require.NoError(t, err)
+	stats2, err := store2.Stats(context.Background())
+	require.NoError(t, err)
+	require.NoError(t, store2.Close())
+	assert.Equal(t, stats1.ImportedAt, stats2.ImportedAt, "same-date dump must skip the update (no re-import)")
+	assert.Equal(t, "r18dotdev_dump_2026-09-20.sql.gz", stats2.SourceURL, "token provenance preserved")
+}
+
+func TestUpload_TokenProvenance_NewerDateRedownloads(t *testing.T) {
+	// Same token provenance, but upstream moved to a newer dated dump: Update
+	// must download and install it (token ⇒ never URL-equal, date differs).
+	h, dumpPath, srv := newUploadHandler(t)
+
+	dumpSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/latest" {
+			http.Redirect(w, r, "/dumps/r18dotdev_dump_2026-09-21.sql.gz", http.StatusFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/gzip")
+		_, _ = w.Write(gzBytes(t, uploadOneRowDump))
+	}))
+	defer dumpSrv.Close()
+	orig := r18devdump.LatestDumpURL
+	r18devdump.LatestDumpURL = dumpSrv.URL + "/latest"
+	defer func() { r18devdump.LatestDumpURL = orig }()
+
+	status, _, _ := srv.doUpload(t, buildUploadBody(t, gzBytes(t, uploadOneRowDump), "r18dotdev_dump_2026-09-20.sql.gz"))
+	require.Equal(t, http.StatusAccepted, status)
+	awaitDone(t, h, 10*time.Second)
+
+	resp, err := srv.client.Post(srv.srv.URL+"/api/v1/r18dev/dump/update", "application/json", nil)
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+	awaitDone(t, h, 10*time.Second)
+
+	store, err := r18devdump.Open(dumpPath)
+	require.NoError(t, err)
+	defer func() { _ = store.Close() }()
+	stats, err := store.Stats(context.Background())
+	require.NoError(t, err)
+	assert.Contains(t, stats.SourceURL, "r18dotdev_dump_2026-09-21.sql.gz", "newer date must redownload and install")
+	assert.Equal(t, "2026-09-21", stats.SourceDate)
 }

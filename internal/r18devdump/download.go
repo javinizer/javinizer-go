@@ -69,12 +69,16 @@ type DownloadResult struct {
 //
 // When currentSourceURL is non-empty and equals the redirect target, the
 // download is skipped (Unchanged=true) and importFn is not called — this lets
-// `javinizer dump update` no-op when the dump hasn't changed.
+// `javinizer dump update` no-op when the dump hasn't changed. Manually
+// uploaded dumps carry a filename token (never a URL) plus a parsed
+// source_date: when that's non-empty and the redirect's embedded date is
+// equal, update can also no-op (the multi-GB rebuild would otherwise fire on
+// every Check Updates click for a dump the user already installed manually).
 //
 // progress, if non-nil, receives cumulative compressed byte counts during the
 // transfer. totalBytes is the response Content-Length when known (0 if
 // unknown, e.g. chunked/streamed responses).
-func Download(ctx context.Context, client *http.Client, currentSourceURL string,
+func Download(ctx context.Context, client *http.Client, currentSourceURL, currentSourceDate string,
 	progress func(compressedBytes, totalBytes int64), importFn func(io.Reader, DownloadResult) error) (DownloadResult, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, DumpURLOverride(), nil)
 	if err != nil {
@@ -100,6 +104,13 @@ func Download(ctx context.Context, client *http.Client, currentSourceURL string,
 
 	if currentSourceURL != "" && finalURL == currentSourceURL {
 		_ = resp.Body.Close()
+		res.Unchanged = true
+		return res, nil
+	}
+	// Upload-token provenance: non-URL source values never equal a redirect
+	// URL, but an equal source date means the uploaded dump is already current.
+	if currentSourceDate != "" && !strings.Contains(currentSourceURL, "://") &&
+		currentSourceDate == res.SourceDate {
 		res.Unchanged = true
 		return res, nil
 	}
