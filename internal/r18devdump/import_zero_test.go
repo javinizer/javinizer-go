@@ -57,3 +57,32 @@ func TestImport_ErrorsOnEOFFInsideCopyBlock(t *testing.T) {
 	_, err = Import(context.Background(), strings.NewReader("COPY public.derived_video (content_id, dvd_id) FROM stdin;\n118ipx00535\tIPX-535\n\\.\n"), path2, ImportOptions{})
 	require.NoError(t, err)
 }
+
+func TestImport_TypedValues(t *testing.T) {
+	cases := []struct {
+		name    string
+		runtime string // COPY-level text value for runtime_mins (\\N = NULL)
+		wantErr error
+	}{
+		{"integer ok", "120", nil},
+		{"null ok", "\\N", nil},
+		{"text rejected", "unknown", ErrDumpTypedValue},
+		{"empty rejected", "", ErrDumpTypedValue},
+		{"float rejected", "120.5", ErrDumpTypedValue},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "out.db")
+			dump := "COPY public.derived_video (content_id, runtime_mins) FROM stdin;\n118ipx00535\t" + tc.runtime + "\n\\.\n"
+			_, err := Import(context.Background(), strings.NewReader(dump), path, ImportOptions{})
+			if tc.wantErr == nil {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.True(t, errors.Is(err, ErrDumpTypedValue), "want ErrDumpTypedValue, got %v", err)
+			_, statErr := os.Stat(path)
+			assert.True(t, os.IsNotExist(statErr), "no sidecar may be installed on a typed-value failure")
+		})
+	}
+}

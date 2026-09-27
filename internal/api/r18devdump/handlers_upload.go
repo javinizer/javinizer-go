@@ -225,6 +225,7 @@ func classifyImportError(importErr error, fsFault, gzFault bool) string {
 		return kindStaging
 	case errors.Is(importErr, r18devdump.ErrDumpNoRows) ||
 		errors.Is(importErr, r18devdump.ErrTruncatedDump) ||
+		errors.Is(importErr, r18devdump.ErrDumpTypedValue) ||
 		gzFault:
 		return kindValidation
 	default:

@@ -33,6 +33,8 @@ func TestClassifyImportError_Table(t *testing.T) {
 		{"zero rows is validation", fmt.Errorf("parse dump: %w", r18devdump.ErrDumpNoRows), false, false, "validation"},
 		{"gzip-layer fault is validation", errors.New("unexpected EOF in stream"), false, true, "validation"},
 		{"plain sqlite exec is import", errors.New("exec batch: constraint failed"), false, false, "import"},
+		{"typed value is validation", fmt.Errorf("parse dump: %w", r18devdump.ErrDumpTypedValue), false, false, "validation"},
+		{"truncated dump is validation", fmt.Errorf("parse dump: %w", r18devdump.ErrTruncatedDump), false, false, "validation"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

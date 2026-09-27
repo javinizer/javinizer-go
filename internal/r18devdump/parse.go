@@ -14,6 +14,28 @@ import (
 	"strings"
 )
 
+// integerText reports whether s is a valid base-10 integer literal; the dump's
+// INTEGER-affinity columns feed sql.NullInt64 scans, where anything else
+// (including empty strings) fails at lookup time.
+func integerText(s string) bool {
+	if s == "" {
+		return false
+	}
+	start := 0
+	if s[0] == '-' {
+		if len(s) == 1 {
+			return false
+		}
+		start = 1
+	}
+	for i := start; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 // ErrTruncatedDump marks input that ends inside an open COPY block: pg_dump
 // streams that terminate without their . terminator are silently partial
 // data otherwise, and a truncated hand-built dump must never look importable.

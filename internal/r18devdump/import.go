@@ -28,6 +28,11 @@ type ImportResult struct {
 	Path string
 }
 
+// ErrDumpTypedValue marks a value whose storage class violates the column's
+// declared type (e.g. text in an INTEGER column). Import rejects such input
+// before swap instead of producing a sidecar whose lookups fail on scan.
+var ErrDumpTypedValue = errors.New("invalid typed value in dump")
+
 // ErrDumpNoRows marks import input that produced zero recognized dump rows —
 // fed garbage (e.g. compressed bytes or an error page) rather than a
 // decompressed pg_dump, import must fail instead of installing an empty DB.
@@ -283,6 +288,30 @@ func Import(ctx context.Context, r io.Reader, path string, opts ImportOptions) (
 		return nil
 	}
 
+	// Integer-typed columns per dump table — verified per emitted row so a
+	// typed break fails the import instead of producing a sidecar whose scans
+	// fail at lookup time. Computed once from the stored schemas.
+	typedCols := map[string][]struct {
+		idx  int
+		name string
+	}{}
+	for table, cols := range map[string][]string{
+		derivedVideoTable:       {"runtime_mins"},
+		"derived_video_actress": {"ordinality"},
+	} {
+		schema := tableSchema[table]
+		for _, col := range cols {
+			for i, c := range schema.columns {
+				if c == col {
+					typedCols[table] = append(typedCols[table], struct {
+						idx  int
+						name string
+					}{i, col})
+				}
+			}
+		}
+	}
+
 	emit := func(row DumpRow) error {
 		// Honor cancellation between batch flushes so a large network-streamed
 		// dump can be aborted without waiting for the next tx.ExecContext.
@@ -293,8 +322,17 @@ func Import(ctx context.Context, r io.Reader, path string, opts ImportOptions) (
 		if !ok {
 			return nil // skip tables we don't store
 		}
-		// Map dump column positions to our stored column order.
+		// Map dump column positions to our stored column order, then enforce
+		// INTEGER storage where scans will demand it.
 		mapped := mapDumpRow(row, schema.columns)
+		for _, tc := range typedCols[row.Table] {
+			if tc.idx < len(mapped) {
+				v := mapped[tc.idx]
+				if v != nullSentinel && !integerText(v) {
+					return fmt.Errorf("%w: %s.%s = %q", ErrDumpTypedValue, sqliteTableName(row.Table), tc.name, v)
+				}
+			}
+		}
 		batches[row.Table] = append(batches[row.Table], DumpRow{Table: row.Table, Values: mapped})
 		if len(batches[row.Table]) >= importBatchSize {
 			return flush(row.Table)

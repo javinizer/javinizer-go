@@ -552,6 +552,21 @@ func TestUpload_SQLTruncatedCopy_Validation(t *testing.T) {
 	assert.Contains(t, lastErr, "truncated")
 }
 
+func TestUpload_TextRuntimeValue_Validation(t *testing.T) {
+	// Codex: typed-value violations mid-stream are user-content problems
+	// (validation), never import plumbing errors or a broken installed dump.
+	h, dumpPath, srv := newUploadHandler(t)
+	dump := "COPY public.derived_video (content_id, runtime_mins) FROM stdin;\n118ipx00535\tunknown\n\\.\n"
+	status, _, _ := srv.doUpload(t, buildUploadBody(t, gzBytes(t, dump), "r18dotdev_dump_2026-09-20.sql.gz"))
+	require.Equal(t, http.StatusAccepted, status)
+	awaitDone(t, h, 10*time.Second)
+	lastErr, kind, _ := handlerState(h)
+	assert.Equal(t, "validation", kind)
+	assert.Contains(t, lastErr, "runtime_mins")
+	_, statErr := os.Stat(dumpPath)
+	assert.True(t, os.IsNotExist(statErr))
+}
+
 // --- swap failure paths ---
 
 func TestUpload_Sidecar_RenameFailure_RestoresPrevious(t *testing.T) {
