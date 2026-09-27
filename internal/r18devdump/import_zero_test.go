@@ -145,3 +145,18 @@ func TestReplaceFile_BothRenamesFail(t *testing.T) {
 	err := ReplaceFile(src, dst)
 	require.Error(t, err)
 }
+
+func TestReplaceFile_RemoveThenRenameFallback(t *testing.T) {
+	// First rename fails (file onto directory), remove succeeds (empty dir),
+	// and the second rename lands — exercising the fallback branch used on
+	// Windows for destination-exists updates.
+	dir := t.TempDir()
+	src := filepath.Join(dir, "new.db")
+	dst := filepath.Join(dir, "stale.db")
+	require.NoError(t, os.WriteFile(src, []byte("new"), 0o600))
+	require.NoError(t, os.MkdirAll(dst, 0o755))
+	require.NoError(t, ReplaceFile(src, dst))
+	data, err := os.ReadFile(dst)
+	require.NoError(t, err)
+	assert.Equal(t, "new", string(data))
+}
