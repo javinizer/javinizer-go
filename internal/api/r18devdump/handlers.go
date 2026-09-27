@@ -504,15 +504,16 @@ func (h *dumpHandler) search(c *gin.Context) {
 // @Failure 409 {object} map[string]string
 // @Router /api/v1/r18dev/dump [delete]
 func (h *dumpHandler) clearDump(c *gin.Context) {
-	h.dumpMu.Lock()
-	defer h.dumpMu.Unlock()
+	// Claim the nonblocking operation guard FIRST: swap/reload phases hold
+	// dumpMu, so acquiring dumpMu before the guard could park a clear request
+	// behind a long upload instead of returning the documented 409.
 	if !h.tryAcquireDumpOp() {
 		c.JSON(http.StatusConflict, gin.H{errorResponseKey: "another dump operation is already in progress"})
 		return
 	}
-	// The guard (not h.mu held throughout) excludes concurrent operations for
-	// the whole clear; dumpMu keeps status/search from opening the file.
 	defer h.releaseDumpOp()
+	h.dumpMu.Lock()
+	defer h.dumpMu.Unlock()
 
 	cfg := h.rt.Deps().CoreDeps.GetConfig()
 	path := resolveDumpPath(cfg)

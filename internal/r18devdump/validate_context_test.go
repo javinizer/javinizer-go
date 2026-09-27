@@ -29,6 +29,7 @@ func TestValidateStages_CancelledContext(t *testing.T) {
 		fn   func(context.Context, *sql.DB) error
 	}{
 		{"provenance", validateProvenance},
+		{"noNullMetaKeys", validateNoNullMetaKeys},
 		{"structure", validateStructure},
 		{"indexes", validateIndexes},
 		{"nonEmpty", validateNonEmpty},

@@ -142,6 +142,20 @@ func TestValidateSidecar_IndexWrongTableRejected(t *testing.T) {
 	assert.Contains(t, err.Error(), "wrong table")
 }
 
+func TestValidateSidecar_NullMetaKeysRejected(t *testing.T) {
+	// Codex: NULL-key dump_meta rows pass count+column checks but break every
+	// Stats scan and make clearDump refuse to delete the installed dump.
+	path := importFixture(t)
+	alterFixture(t, path,
+		"DROP TABLE dump_meta",
+		"CREATE TABLE dump_meta (key TEXT, value TEXT)",
+		"INSERT INTO dump_meta VALUES ('source_url', 'https://example/x'), (NULL, 'orphan')")
+	_, err := ValidateSidecar(context.Background(), path)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrDumpInvalid)
+	assert.Contains(t, err.Error(), "NULL keys")
+}
+
 func TestValidateSidecar_NotADatabase(t *testing.T) {
 	dst := filepath.Join(t.TempDir(), "junk.db")
 	require.NoError(t, os.WriteFile(dst, []byte("SQLite format 3\x00 but then garbage"), 0o600))

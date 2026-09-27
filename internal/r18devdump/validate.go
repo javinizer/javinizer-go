@@ -92,6 +92,22 @@ func validateProvenance(ctx context.Context, db *sql.DB) error {
 	if err := validateColumns(ctx, db, "dump_meta", []string{"key", "value"}); err != nil {
 		return err
 	}
+	// loadMeta scans keys into plain string: a NULL key would install fine
+	// structurally but fail every subsequent Stats read (and make clearDump
+	// refuse deletion as an invalid dump).
+	return validateNoNullMetaKeys(ctx, db)
+}
+
+// validateNoNullMetaKeys rejects dump_meta rows with NULL keys (split out so
+// its transport error branch is directly testable).
+func validateNoNullMetaKeys(ctx context.Context, db *sql.DB) error {
+	nullKeys, err := queryCount(ctx, db, "SELECT COUNT(*) FROM dump_meta WHERE key IS NULL")
+	if err != nil {
+		return fmt.Errorf("%w: dump_meta null-key probe: %v", ErrDumpInvalid, err)
+	}
+	if nullKeys > 0 {
+		return fmt.Errorf("%w: dump_meta contains NULL keys", ErrDumpInvalid)
+	}
 	return nil
 }
 
