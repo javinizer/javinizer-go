@@ -72,6 +72,14 @@ type RevertLog interface {
 	// earlier step has already mutated the filesystem.
 	CompleteFailed(ctx context.Context, opID OperationID, result *ApplyResult) error
 
+	// RecordMoveIntent journals a pending source→destination move BEFORE the
+	// move consumes the source (deferred artifact publication): the ledger entry
+	// rides the MoveBack channel recovery already understands — a crash before
+	// execution leaves an entry recovery skips idempotently (destination
+	// absent), a crash after execution arms the rename-back. It must not touch
+	// the row's completion columns: this is intent, not an executed move.
+	RecordMoveIntent(ctx context.Context, opID OperationID, originalPath, newPath string) error
+
 	// RecordReplacement implements the downloader's ReplacementRecorder seam
 	// (POSTER-WRITE-HARDENING P3): the pre-existing bytes at replacedPath have
 	// already been moved aside to backupPath under the downloader's
@@ -166,6 +174,8 @@ func (noOpRevertLog) CaptureSnapshot(_ context.Context, _ OperationID, _ ApplyCm
 func (noOpRevertLog) Complete(_ context.Context, _ OperationID, _ *ApplyResult) error {
 	return nil
 }
+
+func (noOpRevertLog) RecordMoveIntent(context.Context, OperationID, string, string) error { return nil }
 
 func (noOpRevertLog) CompleteFailed(_ context.Context, _ OperationID, _ *ApplyResult) error {
 	return nil
@@ -469,6 +479,30 @@ func (l *dbRevertLog) Begin(ctx context.Context, cmd ApplyCmd) (OperationID, err
 	}
 
 	return fmt.Sprintf("%d", preRecord.ID), nil
+}
+
+// RecordMoveIntent implements RevertLog: the pending-move entry lands in the
+// row's generated-files journal through the same serialized single-writer
+// transaction channel as completions and replacement records.
+func (l *dbRevertLog) RecordMoveIntent(ctx context.Context, opID OperationID, originalPath, newPath string) error {
+	if opID == "" {
+		return nil
+	}
+	recordID64, err := strconv.ParseUint(opID, 10, 64)
+	if err != nil || recordID64 == 0 {
+		return fmt.Errorf("revert log RecordMoveIntent: unparsable operation ID %q", opID)
+	}
+	if originalPath == "" || newPath == "" {
+		return fmt.Errorf("revert log RecordMoveIntent: empty move endpoint")
+	}
+	recordID := uint(recordID64)
+
+	release := replacementLedgerLocks.Acquire(opID)
+	defer release()
+
+	intent := models.MarshalLedgerJSON(models.GeneratedFilesJSON{MoveBack: []models.FileMove{{OriginalPath: originalPath, NewPath: newPath}}})
+	_, err = l.mergeJournalInTx(ctx, recordID, opID, "RecordMoveIntent", intent, "")
+	return err
 }
 
 // CaptureSnapshot reads the existing NFO file and updates the revert record

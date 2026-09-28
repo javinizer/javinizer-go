@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync/atomic"
 	"testing"
 
@@ -219,19 +220,30 @@ func TestDeferredPublishStaleFinalizeRollsBackAndResetsMarkers(t *testing.T) {
 	assert.Zero(t, regularFiles, "compensation removes every published file")
 }
 
-// completeCallFaultLog fails exactly the first Complete — the pre-consume
-// durable intent write — so the deferred move must abort before any mutation.
+// completeCallFaultLog fails the failAt-th Complete; intentErr fails the
+// pending move-intent write, letting tests target each durable-journal leg in
+// the deferred publish separately.
 type completeCallFaultLog struct {
 	RevertLog
-	failAt int32
-	calls  int32
+	failAt       int32
+	calls        int32
+	intentErr    error
+	intentFailAt int32
+	intents      int32
 }
 
 func (l *completeCallFaultLog) Complete(context.Context, OperationID, *ApplyResult) error {
 	if atomic.AddInt32(&l.calls, 1) == l.failAt {
-		return errors.New("intent unavailable")
+		return errors.New("journal unavailable")
 	}
 	return nil
+}
+
+func (l *completeCallFaultLog) RecordMoveIntent(context.Context, OperationID, string, string) error {
+	if atomic.AddInt32(&l.intents, 1) == l.intentFailAt {
+		return errors.New("intent journal unavailable")
+	}
+	return l.intentErr
 }
 
 // A deferred move whose intended inverse cannot be journaled must NOT consume
@@ -240,7 +252,7 @@ func TestDeferredMoveAbortsWhenIntentCannotPersist(t *testing.T) {
 	base, root, source, subtitle, multipart, unrelated, match := pr260FencedFiles(t, "deferred-intent-fault")
 	dest := filepath.Join(root, "library")
 	real := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize}, template.NewEngine(), nil)
-	ledger := &completeCallFaultLog{failAt: 1}
+	ledger := &completeCallFaultLog{intentErr: errors.New("intent unavailable")}
 	orch := &applyOrchImpl{fs: base, organizer: real, revertLog: ledger}
 	cmd := pr260ArtifactFailureCommand(&models.Movie{ContentID: "deferred-intent-fault"}, match, dest)
 	cmd.Organize.Skip = false
@@ -256,7 +268,8 @@ func TestDeferredMoveAbortsWhenIntentCannotPersist(t *testing.T) {
 
 	publishErr := stage.publish(context.Background(), orch, state, nil)
 	require.ErrorContains(t, publishErr, "persist inverse before direct video publication")
-	require.Equal(t, int32(1), atomic.LoadInt32(&ledger.calls), "aborted at the pre-consume intent write")
+	require.Equal(t, int32(1), atomic.LoadInt32(&ledger.intents), "aborted at the pre-consume intent write")
+	require.Zero(t, atomic.LoadInt32(&ledger.calls), "no completion journal before the intent succeeded")
 	pr260AssertRetained(t, base, source, subtitle, multipart, unrelated)
 	pr260AssertNoFinals(t, base, dest)
 }
@@ -267,7 +280,7 @@ func TestDeferredMovePostPublishInverseFaultRollsBack(t *testing.T) {
 	base, root, source, subtitle, multipart, unrelated, match := pr260FencedFiles(t, "deferred-postinverse-fault")
 	dest := filepath.Join(root, "library")
 	real := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize}, template.NewEngine(), nil)
-	orch := &applyOrchImpl{fs: base, organizer: real, revertLog: &completeCallFaultLog{failAt: 2}}
+	orch := &applyOrchImpl{fs: base, organizer: real, revertLog: &completeCallFaultLog{failAt: 1}}
 	cmd := pr260ArtifactFailureCommand(&models.Movie{ContentID: "deferred-postinverse-fault"}, match, dest)
 	cmd.Organize.Skip = false
 	cmd.Organize.MoveFiles = true
@@ -284,4 +297,153 @@ func TestDeferredMovePostPublishInverseFaultRollsBack(t *testing.T) {
 	require.ErrorContains(t, publishErr, "persist inverse after direct video publication")
 	assert.False(t, stage.sourceCleanupArmed)
 	pr260AssertRetained(t, base, source, subtitle, multipart, unrelated)
+}
+
+// MoveSubtitles enabled + a post-publish journal fault: rollback must restore
+// BOTH the video and the moved subtitle onto their original paths, and the
+// armed markers reset.
+func TestDeferredMoveRollbackRestoresMovedSubtitle(t *testing.T) {
+	base, root, source, subtitle, multipart, unrelated, match := pr260FencedFiles(t, "deferred-sub-restore")
+	dest := filepath.Join(root, "library")
+	real := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize, MoveSubtitles: true, SubtitleExtensions: []string{".srt"}}, template.NewEngine(), nil)
+	orch := &applyOrchImpl{fs: base, organizer: real, revertLog: &completeCallFaultLog{failAt: 1}}
+	cmd := pr260ArtifactFailureCommand(&models.Movie{ContentID: "deferred-sub-restore"}, match, dest)
+	cmd.Organize.Skip = false
+	cmd.Organize.MoveFiles = true
+	cmd.Download = false
+	stage, _, err := orch.prepareArtifact(context.Background(), cmd)
+	require.NoError(t, err)
+	defer stage.cleanup()
+
+	plan, planErr := real.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: match, Movie: stage.original.Movie, DestDir: stage.root, MoveFiles: true, OperationMode: stage.original.OperationMode})
+	require.NoError(t, planErr)
+	state := &applyPipelineState{operationID: "op", organizeResult: &organizer.OrganizeResult{NewPath: plan.TargetPath, FolderPath: plan.TargetDir}}
+
+	publishErr := stage.publish(context.Background(), orch, state, nil)
+	require.ErrorContains(t, publishErr, "persist inverse after direct video publication")
+	assert.False(t, stage.sourceCleanupArmed)
+	pr260AssertRetained(t, base, source, subtitle, multipart, unrelated)
+	regularFiles := 0
+	_ = afero.Walk(base, dest, func(_ string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if info.Mode().IsRegular() {
+			regularFiles++
+		}
+		return nil
+	})
+	assert.Zero(t, regularFiles, "rollback removes video and subtitle copies from the destination")
+}
+
+// RecordMoveIntent writes a pending move-back journal entry without touching
+// the row's completion columns: recovery can tell the intent apart from an
+// executed move.
+func TestRecordMoveIntentJournalsPendingMoveOnly(t *testing.T) {
+	db, _ := pr260ArtifactDB(t)
+	movie := pr260FencedMovie(t, db, "move-intent", "")
+	fs, root, source, _, _, _, match := pr260FencedFiles(t, "move-intent")
+	repo := database.NewBatchFileOperationRepository(db)
+	log := NewDBRevertLog(repo, NewRevertLogConfig(true, nil), "move-intent", fs, nil, nil, nil)
+	dest := filepath.Join(root, "library")
+	opID, err := log.Begin(context.Background(), ApplyCmd{Movie: &movie, Match: match, DestPath: dest})
+	require.NoError(t, err)
+	require.NotEmpty(t, opID)
+
+	target := filepath.Join(dest, "movie.mp4")
+	require.NoError(t, log.RecordMoveIntent(context.Background(), opID, source, target))
+
+	row, rowErr := repo.FindByID(context.Background(), mustParseOpID(t, opID))
+	require.NoError(t, rowErr)
+	require.NotNil(t, row)
+	assert.Empty(t, row.NewPath, "intent write never touches completion columns")
+	gf, parseErr := models.ParseGeneratedFiles(row.GeneratedFiles)
+	require.NoError(t, parseErr)
+	require.Len(t, gf.MoveBack, 1)
+	assert.Equal(t, source, gf.MoveBack[0].OriginalPath)
+	assert.Equal(t, target, gf.MoveBack[0].NewPath)
+	assert.NotEmpty(t, gf.Roots, "begin-seeded discovery root survives the intent merge")
+
+	require.NoError(t, log.RecordMoveIntent(context.Background(), "", source, target), "empty op id is a no-op")
+	require.Error(t, log.RecordMoveIntent(context.Background(), "abc", source, target), "unparsable id")
+	require.Error(t, log.RecordMoveIntent(context.Background(), "99999999", source, target), "missing row")
+	require.Error(t, log.RecordMoveIntent(context.Background(), opID, "", target), "empty endpoint")
+}
+
+func mustParseOpID(t *testing.T, opID OperationID) uint {
+	t.Helper()
+	id, err := strconv.ParseUint(opID, 10, 64)
+	require.NoError(t, err)
+	return uint(id)
+}
+
+// Sidecar leg faults in the deferred publish: an unarmable subtitle move and a
+// failing subtitle intent journal both fail closed; non-moved subtitle entries
+// are skipped.
+func TestDeferredMoveSubtitleLegFaults(t *testing.T) {
+	type variant string
+	const (
+		armFailure     variant = "arm"
+		intentFailure  variant = "intent"
+		skippedEntries variant = "skipped"
+	)
+	for _, v := range []variant{armFailure, intentFailure, skippedEntries} {
+		t.Run(string(v), func(t *testing.T) {
+			base, root, source, subtitle, _, unrelated, match := pr260FencedFiles(t, "deferred-subfault-"+string(v))
+			dest := filepath.Join(root, "library")
+			real := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize, MoveSubtitles: true, SubtitleExtensions: []string{".srt"}}, template.NewEngine(), nil)
+			var fs = base
+			_ = fs
+			var org organizer.OrganizerInterface = real
+			var log RevertLog
+			switch v {
+			case armFailure:
+				org = &pr260PublicationFaultOrganizer{Organizer: real, afterExecute: func(_ *organizer.OrganizePlan, result *organizer.OrganizeResult) {
+					for i := range result.Subtitles {
+						result.Subtitles[i].NewPath = filepath.Join(root, "missing-parent", filepath.Base(result.Subtitles[i].NewPath))
+					}
+				}}
+			case intentFailure:
+				log = &completeCallFaultLog{intentFailAt: 2}
+			case skippedEntries:
+				org = &pr260PublicationFaultOrganizer{Organizer: real, afterExecute: func(_ *organizer.OrganizePlan, result *organizer.OrganizeResult) {
+					result.Subtitles = append(result.Subtitles, organizer.SubtitleResult{SubtitleMove: models.SubtitleMove{OriginalPath: subtitle, NewPath: "", Copied: true}})
+				}}
+				log = &completeCallFaultLog{failAt: 1}
+			}
+			orch := &applyOrchImpl{fs: fs, organizer: org, revertLog: log}
+			cmd := pr260ArtifactFailureCommand(&models.Movie{ContentID: "deferred-subfault-" + string(v)}, match, dest)
+			cmd.Organize.Skip = false
+			cmd.Organize.MoveFiles = true
+			cmd.Download = false
+			stage, _, err := orch.prepareArtifact(context.Background(), cmd)
+			require.NoError(t, err)
+			defer stage.cleanup()
+			plan, planErr := real.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: match, Movie: stage.original.Movie, DestDir: stage.root, MoveFiles: true, OperationMode: stage.original.OperationMode})
+			require.NoError(t, planErr)
+			state := &applyPipelineState{operationID: "op", organizeResult: &organizer.OrganizeResult{NewPath: plan.TargetPath, FolderPath: plan.TargetDir}}
+			publishErr := stage.publish(context.Background(), orch, state, nil)
+			switch v {
+			case armFailure:
+				require.ErrorContains(t, publishErr, "arm subtitle rollback")
+			case intentFailure:
+				require.ErrorContains(t, publishErr, "journal subtitle move intent")
+			case skippedEntries:
+				require.ErrorContains(t, publishErr, "persist inverse after direct video publication")
+			}
+			exists, statErr := afero.Exists(base, source)
+			require.NoError(t, statErr)
+			require.True(t, exists, "video restored or never consumed")
+			exists3, statErr3 := afero.Exists(base, unrelated)
+			require.NoError(t, statErr3)
+			require.True(t, exists3)
+			if v != armFailure {
+				// arm failure faults the subtitle target path itself (nothing to
+				// recover there); the other legs restore the moved subtitle.
+				exists2, statErr2 := afero.Exists(base, subtitle)
+				require.NoError(t, statErr2)
+				require.True(t, exists2, "original subtitle restored")
+			}
+		})
+	}
 }

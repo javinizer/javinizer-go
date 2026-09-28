@@ -544,10 +544,11 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 		// Persist the intended inverse BEFORE the move consumes the real
 		// source: a crash in the rename→record window must still leave a durable
 		// source→destination trail (Begin cannot name it — the plan is only
-		// final after the conflict guards).
+		// final after the conflict guards). This is a pending intent — recovery
+		// reads it via the MoveBack channel and can tell it apart from an
+		// executed move (no completion columns are touched).
 		if s.videoDeferred && s.original.Organize.MoveFiles && s.original.Organize.LinkMode == organizer.LinkModeNone && filepath.Clean(plan.SourcePath) != filepath.Clean(plan.TargetPath) && o.revertLog != nil && opID != "" {
-			intent := &ApplyResult{OrganizeResult: &organizer.OrganizeResult{NewPath: plan.TargetPath, FolderPath: plan.TargetDir, FileName: filepath.Base(plan.TargetPath)}, Movie: state.movie, OperationID: opID}
-			if err := o.revertLog.Complete(ctx, opID, intent); err != nil {
+			if err := o.revertLog.RecordMoveIntent(ctx, opID, plan.SourcePath, plan.TargetPath); err != nil {
 				return fmt.Errorf("persist inverse before direct video publication: %w", err)
 			}
 		}
@@ -586,6 +587,23 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 			return errors.Join(err, batch.SetRollbackOrigin(publishedTarget, s.sourcePath))
 		}
 		s.directOriginArmed = true
+		// The same execution moved source sidecars along with the video:
+		// register each with the batch (in-process rollback) and the journal
+		// (crash recovery) before any later leg can fail, or cleanup would
+		// strand installed copies beside a failed destination.
+		for _, sr := range finalResult.Subtitles {
+			if !sr.Moved || sr.OriginalPath == "" || sr.NewPath == "" {
+				continue
+			}
+			if err := batch.SetRollbackOrigin(sr.NewPath, sr.OriginalPath); err != nil {
+				return fmt.Errorf("arm subtitle rollback %s: %w", sr.NewPath, err)
+			}
+			if o.revertLog != nil && opID != "" {
+				if err := o.revertLog.RecordMoveIntent(ctx, opID, sr.OriginalPath, sr.NewPath); err != nil {
+					return fmt.Errorf("journal subtitle move intent: %w", err)
+				}
+			}
+		}
 		if o.revertLog != nil && opID != "" {
 			partial := &ApplyResult{OrganizeResult: finalResult, Movie: state.movie, OperationID: opID}
 			if err := o.revertLog.Complete(ctx, opID, partial); err != nil {

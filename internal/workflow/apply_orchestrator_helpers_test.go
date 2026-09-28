@@ -96,3 +96,7 @@ func (s *stubRevertLog) ReleaseReplacement(_ context.Context, _ OperationID, _, 
 func (s *stubRevertLog) RecordReplacement(_ context.Context, _ OperationID, _, _ string, _ ...models.ReplacementBackupFacts) error {
 	return nil
 }
+
+func (s *stubRevertLog) RecordMoveIntent(context.Context, OperationID, string, string) error {
+	return nil
+}

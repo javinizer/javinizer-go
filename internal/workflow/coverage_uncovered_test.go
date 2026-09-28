@@ -805,6 +805,10 @@ type errorRevertLog struct {
 	completeErr error
 }
 
+func (e errorRevertLog) RecordMoveIntent(context.Context, OperationID, string, string) error {
+	return nil
+}
+
 func (e errorRevertLog) Begin(_ context.Context, _ ApplyCmd) (OperationID, error) {
 	return "1", nil
 }

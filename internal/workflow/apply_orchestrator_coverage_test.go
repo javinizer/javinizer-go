@@ -125,6 +125,10 @@ type recordingRevertLog struct {
 	beginErr      error
 }
 
+func (r *recordingRevertLog) RecordMoveIntent(context.Context, OperationID, string, string) error {
+	return nil
+}
+
 func (r *recordingRevertLog) Begin(_ context.Context, _ ApplyCmd) (OperationID, error) {
 	r.beginCalls++
 	if r.beginErr != nil {
