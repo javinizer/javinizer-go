@@ -100,3 +100,23 @@ func TestRecordDeleteIntentJournalsPlannedDeletions(t *testing.T) {
 	require.Error(t, log.RecordDeleteIntent(context.Background(), "abc", planned))
 	require.Error(t, log.RecordDeleteIntent(context.Background(), "99999999", planned))
 }
+
+// A corrupt journal surfaces as a reconcile error; the no-op writer is
+// covered explicitly.
+func TestReconcileMoveIntentsErrorsOnCorruptJournal(t *testing.T) {
+	db, _ := pr260ArtifactDB(t)
+	movie := pr260FencedMovie(t, db, "reconcile-corrupt", "")
+	fs, root, _, _, _, _, match := pr260FencedFiles(t, "reconcile-corrupt")
+	repo := database.NewBatchFileOperationRepository(db)
+	log := NewDBRevertLog(repo, NewRevertLogConfig(true, nil), "reconcile-corrupt", fs, nil, nil, nil)
+	dest := filepath.Join(root, "library")
+	opID, err := log.Begin(context.Background(), ApplyCmd{Movie: &movie, Match: match, DestPath: dest})
+	require.NoError(t, err)
+	id := mustParseOpID(t, opID)
+	// force the journal to malformed JSON through the raw model update
+	require.NoError(t, db.Model(&models.BatchFileOperation{}).Where("id = ?", id).Update("generated_files", "{broken").Error)
+
+	err = log.ReconcileMoveIntents(context.Background(), opID, nil)
+	require.Error(t, err, "malformed journal propagate")
+	require.NoError(t, (noOpRevertLog{}).ReconcileMoveIntents(context.Background(), opID, nil))
+}

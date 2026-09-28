@@ -233,6 +233,9 @@ type completeCallFaultLog struct {
 	deleteErr    error
 	deletes      int32
 	deletePaths  []string
+	reconcileErr error
+	reconciles   int32
+	keepCaptured []models.FileMove
 }
 
 func (l *completeCallFaultLog) Complete(context.Context, OperationID, *ApplyResult) error {
@@ -253,6 +256,12 @@ func (l *completeCallFaultLog) RecordDeleteIntent(_ context.Context, _ Operation
 	atomic.AddInt32(&l.deletes, 1)
 	l.deletePaths = append(l.deletePaths, paths...)
 	return l.deleteErr
+}
+
+func (l *completeCallFaultLog) ReconcileMoveIntents(_ context.Context, _ OperationID, keep []models.FileMove) error {
+	atomic.AddInt32(&l.reconciles, 1)
+	l.keepCaptured = append([]models.FileMove(nil), keep...)
+	return l.reconcileErr
 }
 
 // A deferred move whose intended inverse cannot be journaled must NOT consume
@@ -483,7 +492,10 @@ func TestDeferredPublishAbortsWhenArtifactIntentFails(t *testing.T) {
 	require.ErrorContains(t, publishErr, "journal artifact destination intent")
 	require.Equal(t, int32(1), atomic.LoadInt32(&ledger.deletes))
 	pr260AssertRetained(t, base, source, subtitle, multipart, unrelated)
-	pr260AssertNoFinals(t, base, dest)
+	targetVideo := filepath.Join(dest, "movie", filepath.Base(state.organizeResult.NewPath))
+	exists, statErr := afero.Exists(base, targetVideo)
+	require.NoError(t, statErr)
+	require.False(t, exists, "rollback removes the published video")
 }
 
 // The publish flow must journal pending subtitle intents BEFORE the execute
@@ -541,8 +553,10 @@ func TestInstallPathsJournalsOnlyOwnedNonReplacementDestinations(t *testing.T) {
 		"only the new destination is journaled; replacements preserved bytes and preserved paths excluded")
 }
 
-// A failing delete-intent journal aborts before any install.
-func TestInstallPathsJournalFailureAbortsInstalls(t *testing.T) {
+// The delete intent is journaled after the install confirms: a fault surfaces
+// the error but the landed install stays (pending-intent-journal-then-install
+// would instead let a revert delete unrelated later bytes).
+func TestInstallPathsJournalFailureAfterConfirmedInstall(t *testing.T) {
 	base := afero.NewMemMapFs()
 	require.NoError(t, base.MkdirAll("/stage", 0o755))
 	require.NoError(t, afero.WriteFile(base, "/stage/new.txt", []byte("new"), 0o644))
@@ -552,5 +566,151 @@ func TestInstallPathsJournalFailureAbortsInstalls(t *testing.T) {
 	})
 	require.ErrorContains(t, err, "journal down")
 	exists, _ := afero.Exists(base, "/final/new.txt")
-	require.False(t, exists)
+	require.True(t, exists, "the confirmed install stays; only the journal failed")
+}
+
+// Outcome reconciliation publishes exactly the executed moves: the pending
+// journal contains the video intent and the sidecar that actually moved.
+func TestDeferredMoveReconcilesOutcomesIntoJournal(t *testing.T) {
+	base, root, source, subtitle, multipart, unrelated, match := pr260FencedFiles(t, "deferred-reconcile-outcomes")
+	dest := filepath.Join(root, "library")
+	db, _ := pr260ArtifactDB(t)
+	movie := pr260FencedMovie(t, db, "deferred-reconcile-outcomes", "")
+	org := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize, MoveSubtitles: true, SubtitleExtensions: []string{".srt"}}, template.NewEngine(), nil)
+	orch := &applyOrchImpl{fs: base, organizer: org, revertLog: &completeCallFaultLog{}}
+	cmd := pr260ArtifactFailureCommand(&movie, match, dest)
+	cmd.Organize.Skip = false
+	cmd.Organize.MoveFiles = true
+	cmd.Download = false
+	stage, _, err := orch.prepareArtifact(context.Background(), cmd)
+	require.NoError(t, err)
+	defer stage.cleanup()
+
+	finalPlan, planErr := org.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: match, Movie: stage.original.Movie, DestDir: dest, MoveFiles: true, OperationMode: stage.original.OperationMode})
+	require.NoError(t, planErr)
+	subMoves := org.PlanSubtitleMoves(finalPlan)
+	require.Len(t, subMoves, 1)
+
+	stagedPlan, planErr2 := org.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: models.FileMatchInfo{Path: stage.stagedSource, Name: filepath.Base(source)}, Movie: stage.original.Movie, DestDir: stage.root, MoveFiles: true, OperationMode: stage.original.OperationMode})
+	require.NoError(t, planErr2)
+	state := &applyPipelineState{operationID: "op", organizeResult: &organizer.OrganizeResult{NewPath: stagedPlan.TargetPath, FolderPath: stagedPlan.TargetDir}}
+
+	require.NoError(t, stage.publish(context.Background(), orch, state, nil))
+	ledger := orch.revertLog.(*completeCallFaultLog)
+	require.Equal(t, int32(1), atomic.LoadInt32(&ledger.reconciles), "outcome reconciliation ran once")
+	require.NotNil(t, ledger.keepCaptured)
+	assert.Contains(t, ledger.keepCaptured, models.FileMove{OriginalPath: source, NewPath: finalPlan.TargetPath})
+	assert.Contains(t, ledger.keepCaptured, models.FileMove{OriginalPath: subMoves[0].OriginalPath, NewPath: subMoves[0].NewPath}, "the executed subtitle move stays armed")
+	assert.Len(t, ledger.keepCaptured, 2)
+	existsSub, _ := afero.Exists(base, subtitle)
+	assert.False(t, existsSub, "moved subtitle left the source")
+	existsMulti, _ := afero.Exists(base, multipart)
+	assert.False(t, existsMulti, "the staged sibling video also moves in move mode")
+	existsUnrelated, _ := afero.Exists(base, unrelated)
+	assert.True(t, existsUnrelated)
+}
+
+// A failing outcome reconciliation surfaces and the rollback restores the moved
+// video (armed origin) — the row keeps no stale intents.
+func TestDeferredMoveReconcileFailureRollsBack(t *testing.T) {
+	base, root, source, subtitle, multipart, unrelated, match := pr260FencedFiles(t, "deferred-reconcile-fault")
+	dest := filepath.Join(root, "library")
+	org := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize, MoveSubtitles: true, SubtitleExtensions: []string{".srt"}}, template.NewEngine(), nil)
+	orch := &applyOrchImpl{fs: base, organizer: org, revertLog: &completeCallFaultLog{reconcileErr: errors.New("reconcile down")}}
+	cmd := pr260ArtifactFailureCommand(&models.Movie{ContentID: "deferred-reconcile-fault"}, match, dest)
+	cmd.Organize.Skip = false
+	cmd.Organize.MoveFiles = true
+	cmd.Download = false
+	stage, _, err := orch.prepareArtifact(context.Background(), cmd)
+	require.NoError(t, err)
+	defer stage.cleanup()
+	stagedPlan, planErr := org.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: models.FileMatchInfo{Path: stage.stagedSource, Name: filepath.Base(source)}, Movie: stage.original.Movie, DestDir: stage.root, MoveFiles: true, OperationMode: stage.original.OperationMode})
+	require.NoError(t, planErr)
+	state := &applyPipelineState{operationID: "op", organizeResult: &organizer.OrganizeResult{NewPath: stagedPlan.TargetPath, FolderPath: stagedPlan.TargetDir}}
+
+	publishErr := stage.publish(context.Background(), orch, state, nil)
+	require.ErrorContains(t, publishErr, "reconcile move intents")
+	pr260AssertRetained(t, base, source, subtitle, multipart, unrelated)
+	assert.False(t, stage.sourceCleanupArmed)
+}
+
+// Deferred COPY mode still rehomes staged sidecar copies into the tree; a
+// staged-sidecar stat fault inside that leg fails closed.
+func TestDeferredCopyRehomeStatFaultRollsBack(t *testing.T) {
+	base, root, source, subtitle, multipart, unrelated, match := pr260FencedFiles(t, "deferred-copy-rehome-fault")
+	dest := filepath.Join(root, "library")
+	fs := &pr260PublishFinalFS{Fs: base, op: "stat"}
+	org := organizer.NewOrganizer(fs, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize}, template.NewEngine(), nil)
+	orch := &applyOrchImpl{fs: fs, organizer: org}
+	cmd := pr260ArtifactFailureCommand(&models.Movie{ContentID: "deferred-copy-rehome-fault"}, match, dest)
+	cmd.Organize.Skip = false
+	cmd.Organize.MoveFiles = false
+	cmd.Download = false
+	stage, _, err := orch.prepareArtifact(context.Background(), cmd)
+	require.NoError(t, err)
+	defer stage.cleanup()
+	stagedPlan, planErr := org.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: models.FileMatchInfo{Path: stage.stagedSource, Name: filepath.Base(source)}, Movie: stage.original.Movie, DestDir: stage.root, MoveFiles: false, OperationMode: stage.original.OperationMode})
+	require.NoError(t, planErr)
+	fs.path = stage.siblings[0].stagedPath
+	state := &applyPipelineState{organizeResult: &organizer.OrganizeResult{NewPath: stagedPlan.TargetPath, FolderPath: stagedPlan.TargetDir}}
+
+	publishErr := stage.publish(context.Background(), orch, state, nil)
+	require.ErrorContains(t, publishErr, "preflight staged artifacts")
+	pr260AssertRetained(t, base, source, subtitle, multipart, unrelated)
+}
+
+// ReconcileMoveIntents replaces pending intents wholesale: skipped planned
+// moves are retracted; nothing else in the ledger is disturbed.
+func TestReconcileMoveIntentsReplacesPending(t *testing.T) {
+	db, _ := pr260ArtifactDB(t)
+	movie := pr260FencedMovie(t, db, "reconcile-settle", "")
+	fs, root, source, _, _, _, match := pr260FencedFiles(t, "reconcile-settle")
+	repo := database.NewBatchFileOperationRepository(db)
+	log := NewDBRevertLog(repo, NewRevertLogConfig(true, nil), "reconcile-settle", fs, nil, nil, nil)
+	dest := filepath.Join(root, "library")
+	opID, err := log.Begin(context.Background(), ApplyCmd{Movie: &movie, Match: match, DestPath: dest})
+	require.NoError(t, err)
+
+	video := models.FileMove{OriginalPath: source, NewPath: filepath.Join(dest, "movie.mp4")}
+	subA := models.FileMove{OriginalPath: source + ".srt", NewPath: filepath.Join(dest, "movie.srt")}
+	subB := models.FileMove{OriginalPath: source + "-cd2.mp4", NewPath: filepath.Join(dest, "movie-cd2.mp4")}
+	for _, mv := range []models.FileMove{video, subA, subB} {
+		require.NoError(t, log.RecordMoveIntent(context.Background(), opID, mv.OriginalPath, mv.NewPath))
+	}
+	require.NoError(t, log.ReconcileMoveIntents(context.Background(), opID, []models.FileMove{video, subB}))
+
+	row, rowErr := repo.FindByID(context.Background(), mustParseOpID(t, opID))
+	require.NoError(t, rowErr)
+	gf, parseErr := models.ParseGeneratedFiles(row.GeneratedFiles)
+	require.NoError(t, parseErr)
+	assert.ElementsMatch(t, []models.FileMove{video, subB}, gf.MoveBack, "skipped plan retracted")
+	assert.Empty(t, row.NewPath, "completion columns remain untouched")
+
+	require.NoError(t, log.ReconcileMoveIntents(context.Background(), opID, []models.FileMove{video, subB}))
+	require.NoError(t, log.ReconcileMoveIntents(context.Background(), "", nil), "empty op is a no-op")
+	require.Error(t, log.ReconcileMoveIntents(context.Background(), "abc", nil), "unparsable id")
+	require.Error(t, log.ReconcileMoveIntents(context.Background(), "99999999", nil), "missing row")
+}
+
+// Deferred copy: a faulted rehome rename of a staged sidecar fails closed.
+func TestDeferredCopyRehomeRenameFaultRollsBack(t *testing.T) {
+	base, root, source, subtitle, multipart, unrelated, match := pr260FencedFiles(t, "deferred-copy-rehome-rename-fault")
+	dest := filepath.Join(root, "library")
+	fss := &pr260PublishFinalFS{Fs: base, op: "rename"}
+	orgDef := organizer.NewOrganizer(fss, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize}, template.NewEngine(), nil)
+	cmd := pr260ArtifactFailureCommand(&models.Movie{ContentID: "deferred-copy-rehome-rename-fault"}, match, dest)
+	cmd.Organize.Skip = false
+	cmd.Organize.MoveFiles = false
+	cmd.Download = false
+	orch := &applyOrchImpl{fs: fss, organizer: orgDef}
+	stage, _, err := orch.prepareArtifact(context.Background(), cmd)
+	require.NoError(t, err)
+	defer stage.cleanup()
+	stagedPlan, planErr := orgDef.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: models.FileMatchInfo{Path: stage.stagedSource, Name: filepath.Base(source)}, Movie: stage.original.Movie, DestDir: stage.root, MoveFiles: false, OperationMode: stage.original.OperationMode})
+	require.NoError(t, planErr)
+	fss.path = stage.siblings[0].stagedPath
+	state := &applyPipelineState{organizeResult: &organizer.OrganizeResult{NewPath: stagedPlan.TargetPath, FolderPath: stagedPlan.TargetDir}}
+	publishErr := stage.publish(context.Background(), orch, state, nil)
+	require.ErrorContains(t, publishErr, "stage sidecar")
+	pr260AssertRetained(t, base, source, subtitle, multipart, unrelated)
 }

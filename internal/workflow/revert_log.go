@@ -80,6 +80,12 @@ type RevertLog interface {
 	// the row's completion columns: this is intent, not an executed move.
 	RecordMoveIntent(ctx context.Context, opID OperationID, originalPath, newPath string) error
 
+	// ReconcileMoveIntents replaces the row's pending MoveBack intents with the
+	// confirmed outcomes once execution is over (post-execute, pre-completion):
+	// planned-but-skipped moves are retracted so a later revert never renames a
+	// retained destination over its source.
+	ReconcileMoveIntents(ctx context.Context, opID OperationID, keep []models.FileMove) error
+
 	// RecordDeleteIntent journals planned generated-file deletions (downloads,
 	// NFO) BEFORE installTree publishes them: a crash after install but before
 	// the outcome completion would otherwise leave the paths absent from the
@@ -185,6 +191,10 @@ func (noOpRevertLog) Complete(_ context.Context, _ OperationID, _ *ApplyResult) 
 func (noOpRevertLog) RecordMoveIntent(context.Context, OperationID, string, string) error { return nil }
 
 func (noOpRevertLog) RecordDeleteIntent(context.Context, OperationID, []string) error { return nil }
+
+func (noOpRevertLog) ReconcileMoveIntents(context.Context, OperationID, []models.FileMove) error {
+	return nil
+}
 
 func (noOpRevertLog) CompleteFailed(_ context.Context, _ OperationID, _ *ApplyResult) error {
 	return nil
@@ -516,6 +526,40 @@ func (l *dbRevertLog) Begin(ctx context.Context, cmd ApplyCmd) (OperationID, err
 	}
 
 	return fmt.Sprintf("%d", preRecord.ID), nil
+}
+
+// ReconcileMoveIntents implements RevertLog: once execution outcomes are known
+// the pending intents are replaced wholesale by the confirmed set — retracted
+// (skipped) plans leave no rename-back residue for the reverter to run.
+func (l *dbRevertLog) ReconcileMoveIntents(ctx context.Context, opID OperationID, keep []models.FileMove) error {
+	if opID == "" {
+		return nil
+	}
+	recordID64, err := strconv.ParseUint(opID, 10, 64)
+	if err != nil || recordID64 == 0 {
+		return fmt.Errorf("revert log ReconcileMoveIntents: unparsable operation ID %q", opID)
+	}
+	recordID := uint(recordID64)
+
+	release := replacementLedgerLocks.Acquire(opID)
+	defer release()
+
+	txErr := l.repo.UpdateJournalInTx(ctx, recordID, func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
+		gf, perr := models.ParseGeneratedFiles(current.GeneratedFiles)
+		if perr != nil {
+			return models.GeneratedFilesJSON{}, false, perr
+		}
+		gf.MoveBack = append([]models.FileMove(nil), keep...)
+		next := models.MarshalLedgerJSON(gf)
+		if next == current.GeneratedFiles {
+			return models.GeneratedFilesJSON{}, false, nil
+		}
+		return gf, true, nil
+	})
+	if errors.Is(txErr, database.ErrNotFound) {
+		return fmt.Errorf("revert log ReconcileMoveIntents: record %s not found", opID)
+	}
+	return txErr
 }
 
 // RecordMoveIntent implements RevertLog: the pending-move entry lands in the

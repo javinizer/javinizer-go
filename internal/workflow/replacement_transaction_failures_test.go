@@ -116,6 +116,10 @@ func (l *completionFaultLog) RecordDeleteIntent(context.Context, OperationID, []
 	return nil
 }
 
+func (l *completionFaultLog) ReconcileMoveIntents(context.Context, OperationID, []models.FileMove) error {
+	return nil
+}
+
 func stagedPublicationTarget(t *testing.T, real *organizer.Organizer, stage *artifactStage, cmd ApplyCmd) *organizer.OrganizePlan {
 	t.Helper()
 	match := cmd.Match

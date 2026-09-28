@@ -102,3 +102,7 @@ func (s *stubRevertLog) RecordMoveIntent(context.Context, OperationID, string, s
 }
 
 func (s *stubRevertLog) RecordDeleteIntent(context.Context, OperationID, []string) error { return nil }
+
+func (s *stubRevertLog) ReconcileMoveIntents(context.Context, OperationID, []models.FileMove) error {
+	return nil
+}

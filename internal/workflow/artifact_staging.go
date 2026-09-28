@@ -610,14 +610,35 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 			}
 		}
 		if o.revertLog != nil && opID != "" {
+			// Reconcile pending intents with the executed outcome: skipped subtitle
+			// moves are retracted so a later revert never renames a retained
+			// destination over its source.
+			keep := make([]models.FileMove, 0, len(finalResult.Subtitles)+1)
+			keep = append(keep, models.FileMove{OriginalPath: s.sourcePath, NewPath: finalResult.NewPath})
+			for _, sr := range finalResult.Subtitles {
+				if sr.Moved && sr.OriginalPath != "" && sr.NewPath != "" {
+					keep = append(keep, models.FileMove{OriginalPath: sr.OriginalPath, NewPath: sr.NewPath})
+				}
+			}
+			if err := o.revertLog.ReconcileMoveIntents(ctx, opID, keep); err != nil {
+				return fmt.Errorf("reconcile move intents: %w", err)
+			}
+		}
+		if o.revertLog != nil && opID != "" {
 			partial := &ApplyResult{OrganizeResult: finalResult, Movie: state.movie, OperationID: opID}
 			if err := o.revertLog.Complete(ctx, opID, partial); err != nil {
 				return fmt.Errorf("persist inverse after direct video publication: %w", err)
 			}
 		}
 	}
-	if err := s.rehomeRemainingSiblings(stagedVideo); err != nil {
-		return err
+	// Deferred organize MOVED sidecars install through the organizer (or the
+	// post-publish sidecar block for un-moved remainder); rehoming the staged
+	// copies into the tree would collide at the final targets with those
+	// installs. Deferred copy flows publish only through this tree.
+	if !s.videoDeferred || !s.original.Organize.MoveFiles {
+		if err := s.rehomeRemainingSiblings(stagedVideo); err != nil {
+			return err
+		}
 	}
 	artifactSkipDir := filepath.Dir(s.stagedSource)
 	if s.inPlace {
@@ -985,18 +1006,6 @@ func (s *artifactStage) installPaths(paths, preserve []string, stagedArtifactDir
 		plans = append(plans, plan)
 	}
 
-	if journalDeleteIntent != nil {
-		destinations := make([]string, 0, len(plans))
-		for _, plan := range plans {
-			if plan.skip || plan.replace {
-				continue
-			}
-			destinations = append(destinations, plan.target)
-		}
-		if err := journalDeleteIntent(destinations); err != nil {
-			return false, err
-		}
-	}
 	for _, plan := range plans {
 		if plan.skip {
 			continue
@@ -1018,6 +1027,15 @@ func (s *artifactStage) installPaths(paths, preserve []string, stagedArtifactDir
 		}
 		if err := s.fs.Rename(plan.source, plan.target); err != nil {
 			return false, fmt.Errorf("publish staged artifact %s: %w", plan.target, err)
+		}
+		// The intent is journaled only AFTER the install confirms: a pending
+		// deletion entry for a path that never received our bytes would let a
+		// revert delete whatever later lands there (user or foreign content).
+		// Replacement paths are already journaled via their replacement legs.
+		if journalDeleteIntent != nil && !plan.replace {
+			if err := journalDeleteIntent([]string{plan.target}); err != nil {
+				return false, err
+			}
 		}
 		if s.publishBatch != nil {
 			if err := s.publishBatch.ConfirmPublish(s.publishCtx, plan.target); err != nil {

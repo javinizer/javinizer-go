@@ -37,6 +37,13 @@ func (f *pr260PublishFinalFS) Rename(old, new string) error {
 	return f.Fs.Rename(old, new)
 }
 
+func (f *pr260PublishFinalFS) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
+	if f.op == "write" && name == f.path && flag&(os.O_WRONLY|os.O_CREATE) != 0 {
+		return nil, errors.New("sidecar target write denied")
+	}
+	return f.Fs.OpenFile(name, flag, perm)
+}
+
 func TestPR260PublicationFinalCleanupFaults(t *testing.T) {
 	for _, tc := range []struct {
 		name, role string
@@ -95,11 +102,10 @@ func TestPR260PublicationFinalCleanupFaults(t *testing.T) {
 }
 
 func TestPR260PublicationSidecarFinalizeFaults(t *testing.T) {
-	// stat faults the sidecar inspection inside rehome; rename faults the
-	// sidecar rehome rename itself. The deferred video now publishes from its
-	// real source before these legs run, and the armed rollback origin must
-	// restore it.
-	for _, tc := range []struct{ op, want string }{{"stat", "preflight staged artifacts"}, {"rename", "stage sidecar"}} {
+	// stat faults the staged sidecar inspection in the publish block; write
+	// faults the sidecar publication write itself. Deferred move mode runs those
+	// legs at publish, and the armed rollback origin must restore the video.
+	for _, tc := range []struct{ op, want string }{{"stat", "preflight staged artifacts"}, {"write", "publish sidecar before source cleanup"}} {
 		t.Run(tc.op, func(t *testing.T) {
 			db, _ := pr260ArtifactDB(t)
 			movie := pr260FencedMovie(t, db, "sidecar-"+tc.op, "")
@@ -113,7 +119,13 @@ func TestPR260PublicationSidecarFinalizeFaults(t *testing.T) {
 			require.NotEmpty(t, stage.siblings)
 			plan, planErr := orch.organizer.(artifactPlanExecutor).PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: stage.original.Match, Movie: stage.original.Movie, DestDir: stage.root, MoveFiles: true, ForceUpdate: true, OperationMode: stage.original.OperationMode})
 			require.NoError(t, planErr)
-			fs.path = stage.siblings[0].stagedPath
+			if tc.op == "write" {
+				finalPlan, finalPlanErr := orch.organizer.(artifactPlanExecutor).PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: stage.original.Match, Movie: stage.original.Movie, DestDir: dest, MoveFiles: true, ForceUpdate: true, OperationMode: stage.original.OperationMode})
+				require.NoError(t, finalPlanErr)
+				fs.path = filepath.Join(filepath.Dir(finalPlan.TargetPath), stagedArtifactSiblingName(filepath.Base(source), filepath.Base(finalPlan.TargetPath), filepath.Base(stage.siblings[0].stagedPath)))
+			} else {
+				fs.path = stage.siblings[0].stagedPath
+			}
 			state := &applyPipelineState{organizeResult: &organizer.OrganizeResult{NewPath: plan.TargetPath, FolderPath: plan.TargetDir}}
 			err = stage.publish(context.Background(), orch, state, nil)
 			require.ErrorContains(t, err, tc.want)
