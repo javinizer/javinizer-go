@@ -317,8 +317,11 @@ func (s *artifactStage) cleanup() {
 	}
 	if err := removeArtifactTreeWithRetry(s.fs, s.root); err != nil {
 		// The owner is finished with this root: stamp completion so a later
-		// sweep reclaims the residue even while this process keeps running.
+		// sweep reclaims the residue even while this process keeps running. The
+		// in-tree manifest can itself vanish mid-RemoveAll (a locked payload
+		// survives it), so the completed proof also lives outside the tree.
 		markArtifactStageCompleted(s.fs, s.root)
+		writeArtifactStageProof(s.fs, s.root)
 		logging.Warnf("artifact staging cleanup retained %s: %v", s.root, err)
 	}
 }

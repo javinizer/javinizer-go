@@ -147,3 +147,15 @@ func TestCompletionLedgerMergeCarriesAndDedupesBothKinds(t *testing.T) {
 	assert.Equal(t, []string{"/lib/x.nfo", "/lib/new.nfo"}, merged.Delete, "deduped re-stated delete")
 	require.Len(t, merged.PlannedDeletes, 2, "carried pin-a once and pin-b once")
 }
+
+// An empty completion payload must not erase pending planned deletions
+// (copy-mode applies that publish only staged siblings can produce them).
+func TestCompletionLedgerMergeEmptyOutcomeKeepsPlannedDeletes(t *testing.T) {
+	prior := models.MarshalLedgerJSON(models.GeneratedFilesJSON{
+		PlannedDeletes: []models.DeleteEntry{{Path: "/lib/sibling-cd2.mp4", SHA256: "pin"}},
+	})
+	merged, persist, _, err := completionLedgerMerge(prior, "", "")
+	require.NoError(t, err)
+	require.False(t, persist, "empty outcome merges identical — nothing is dropped, no write needed")
+	_ = merged
+}

@@ -337,7 +337,9 @@ func TestSweepArtifactStaging_RetainedWhenDeleteKeepsFailing(t *testing.T) {
 	require.NoError(t, rerr)
 	remaining := []string{}
 	for _, e := range entries {
-		remaining = append(remaining, e.Name())
+		if e.IsDir() {
+			remaining = append(remaining, e.Name())
+		}
 	}
 	require.Len(t, remaining, 1, "unremovable root is retained (quarantined) for a later sweep")
 	assert.Contains(t, remaining[0], artifactStageQuarantineMark)
@@ -375,4 +377,119 @@ func TestSweepArtifactStaging_CompletedRootReclaimedDespiteLiveOwner(t *testing.
 
 	exists, _ := afero.DirExists(fs, root)
 	assert.False(t, exists, "a finished root is residue even while its owner process stays alive")
+}
+
+// A quarantined root whose in-tree manifest was consumed mid-remove re-proves
+// ownership through the external sidecar; the reclaim removes both.
+func TestSweepArtifactStaging_QuarantineProofFallback(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	setSweepSeams(t, fsutil.ProcessDead, nil)
+	root := seedStagingRoot(t, fs, "/lib", nil)
+	markArtifactStageCompleted(fs, root)
+	quarantine := root + artifactStageQuarantineMark + "zz"
+	require.NoError(t, fs.Rename(root, quarantine))
+	// mirror to the sidecar, then consume the in-tree manifest (partial remove)
+	body, err := afero.ReadFile(fs, filepath.Join(quarantine, artifactStageManifestName))
+	require.NoError(t, err)
+	require.NoError(t, afero.WriteFile(fs, artifactStageProofPath(quarantine), body, 0o600))
+	require.NoError(t, fs.Remove(filepath.Join(quarantine, artifactStageManifestName)))
+	require.False(t, artifactStageManifestReclaimable(fs, quarantine))
+	require.True(t, artifactStageReclaimable(fs, quarantine), "sidecar re-proves ownership")
+
+	sweepArtifactStaging(fs, "/lib")
+	exists, _ := afero.DirExists(fs, quarantine)
+	assert.False(t, exists)
+	proofGone, _ := afero.Exists(fs, artifactStageProofPath(quarantine))
+	assert.False(t, proofGone, "sidecar removed with the tree")
+}
+
+// A quarantined root without manifest AND without proof stays:
+// the fallback never invents ownership.
+func TestSweepArtifactStaging_QuarantineWithoutProofRetained(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	setSweepSeams(t, fsutil.ProcessDead, nil)
+	root := seedStagingRoot(t, fs, "/lib", nil)
+	quarantine := root + artifactStageQuarantineMark + "qq"
+	require.NoError(t, fs.Rename(root, quarantine))
+	require.NoError(t, fs.Remove(filepath.Join(quarantine, artifactStageManifestName)))
+	require.False(t, artifactStageReclaimable(fs, quarantine))
+	sweepArtifactStaging(fs, "/lib")
+	exists, _ := afero.DirExists(fs, quarantine)
+	assert.True(t, exists)
+}
+
+// Proof sidecar writer has silent no-op legs: missing manifest or unreadable,
+// unwritable sidecar; nothing may panic.
+func TestWriteArtifactStageProofSilentLegs(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	assert.NotPanics(t, func() { writeArtifactStageProof(fs, "/lib/absent") }, "missing manifest no-op")
+	require.NoError(t, fs.MkdirAll("/lib/broken", 0o755))
+	require.NoError(t, afero.WriteFile(fs, "/lib/broken/"+artifactStageManifestName, []byte("{no"), 0o600))
+	assert.NotPanics(t, func() { writeArtifactStageProof(fs, "/lib/broken") }, "broken manifest no-op")
+	root := seedStagingRoot(t, fs, "/lib", func(m *artifactStageManifest) { m.CompletedUnixNano = time.Now().UnixNano() })
+	writeArtifactStageProof(fs, root)
+	ok, _ := afero.Exists(fs, artifactStageProofPath(root))
+	require.True(t, ok, "valid manifest mirrors a proof")
+
+	// unwritable sidecar logs but never fails
+	fsy := &failWriteFileFS{Fs: fs}
+	assert.NotPanics(t, func() { writeArtifactStageProof(fsy, root) })
+
+	// marshal denial also logs without failing
+	old := artifactSweepMarshal
+	artifactSweepMarshal = func(any) ([]byte, error) { return nil, errors.New("encode denied") }
+	t.Cleanup(func() { artifactSweepMarshal = old })
+	assert.NotPanics(t, func() { writeArtifactStageProof(fs, root) })
+}
+
+func TestReadArtifactStageProofBranches(t *testing.T) {
+	base := afero.NewMemMapFs()
+	start := time.Now()
+	setSweepSeams(t, fsutil.ProcessDead, &start)
+	path := "/lib/" + artifactStageDirPrefix + "tok" + artifactStageQuarantineMark + "zz"
+	require.NoError(t, base.MkdirAll(path, 0o755))
+	valid := artifactStageManifest{
+		Version:           artifactStageManifestVer,
+		Token:             artifactStageManifestToken(path),
+		PID:               os.Getpid(),
+		Hostname:          mustHostname(t),
+		CompletedUnixNano: 1,
+	}
+	write := func(mut func(*artifactStageManifest)) {
+		m := valid
+		if mut != nil {
+			mut(&m)
+		}
+		body, err := json.Marshal(&m)
+		require.NoError(t, err)
+		require.NoError(t, afero.WriteFile(base, artifactStageProofPath(path), body, 0o600))
+	}
+
+	assert.False(t, readArtifactStageProof(base, path), "absent sidecar")
+	require.NoError(t, afero.WriteFile(base, artifactStageProofPath(path), []byte("{broken"), 0o600))
+	assert.False(t, readArtifactStageProof(base, path), "broken json")
+	write(func(m *artifactStageManifest) { m.Version = 99 })
+	assert.False(t, readArtifactStageProof(base, path), "wrong version")
+	write(func(m *artifactStageManifest) { m.PID = 0 })
+	assert.False(t, readArtifactStageProof(base, path), "no pid")
+	write(func(m *artifactStageManifest) { m.Token = "other" })
+	assert.False(t, readArtifactStageProof(base, path), "token mismatch")
+	write(func(m *artifactStageManifest) { m.CompletedUnixNano = 0 })
+	assert.False(t, readArtifactStageProof(base, path), "incomplete lifecycle")
+	oldHost := artifactSweepHostname
+	artifactSweepHostname = func() (string, error) { return "", errors.New("hostname denied") }
+	write(nil)
+	assert.False(t, readArtifactStageProof(base, path), "unverifiable host")
+	artifactSweepHostname = func() (string, error) { return "other-host", nil }
+	assert.False(t, readArtifactStageProof(base, path), "foreign host")
+	artifactSweepHostname = oldHost
+	write(nil)
+	assert.True(t, readArtifactStageProof(base, path), "valid completed proof")
+}
+
+func mustHostname(t *testing.T) string {
+	t.Helper()
+	host, err := os.Hostname()
+	require.NoError(t, err)
+	return host
 }

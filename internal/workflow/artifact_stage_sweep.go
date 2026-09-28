@@ -101,6 +101,21 @@ func writeArtifactStageManifestState(fs afero.Fs, root string, completedUnixNano
 // mismatch, foreign host, live or undecidable owner) is retained — residue is
 // recoverable, a wrong delete is not.
 func artifactStageReclaimable(fs afero.Fs, path string) bool {
+	if !artifactStageManifestReclaimable(fs, path) {
+		// A quarantined tree whose in-tree manifest was already consumed by a
+		// partial removal re-proves ownership through its external sidecar.
+		if strings.Contains(filepath.Base(path), artifactStageQuarantineMark) {
+			return readArtifactStageProof(fs, path)
+		}
+		return false
+	}
+	return true
+}
+
+// artifactStageManifestReclaimable enforces the manifest-backed ownership
+// rules: valid marker, matching token, same hostname, and either a completed
+// lifecycle stamp or a provably-dead (or provably-reused) owner PID.
+func artifactStageManifestReclaimable(fs afero.Fs, path string) bool {
 	body, err := afero.ReadFile(fs, filepath.Join(path, artifactStageManifestName))
 	if err != nil {
 		return false
@@ -115,8 +130,6 @@ func artifactStageReclaimable(fs afero.Fs, path string) bool {
 	if manifest.Token == "" || manifest.Token != artifactStageManifestToken(path) {
 		return false
 	}
-	// Hostname must be provable on both sides: an unverifiable local host or
-	// an empty recorded host cannot rule out a foreign owner — fail closed.
 	hostname, herr := artifactSweepHostname()
 	if herr != nil || manifest.Hostname == "" {
 		return false
@@ -150,6 +163,73 @@ func artifactStageQuarantineName(path string) string {
 		return path + artifactStageQuarantineMark + "0"
 	}
 	return path + artifactStageQuarantineMark + hex.EncodeToString(b)
+}
+
+const artifactStageProofSuffix = ".proof"
+
+// artifactStageProofPath names the ownership sidecar kept OUTSIDE the staging
+// tree. RemoveAll deletes the in-tree manifest first whenever a payload file
+// refuses, so the sidecar preserves the completed-owner evidence for later
+// sweeps of the quarantined residue.
+func artifactStageProofPath(path string) string { return path + artifactStageProofSuffix }
+
+// writeArtifactStageProof restates ownership (and completion, if set) beside
+// the tree so proof survives a partial RemoveAll. Best-effort.
+func writeArtifactStageProof(fs afero.Fs, path string) {
+	body, err := afero.ReadFile(fs, filepath.Join(path, artifactStageManifestName))
+	if err != nil {
+		return
+	}
+	var manifest artifactStageManifest
+	if err := json.Unmarshal(body, &manifest); err != nil {
+		return
+	}
+	// A completed cleanup stamps complete; an in-flight failure stamps the
+	// marker only when removal had already been decided by the caller.
+	proof := artifactStageManifest{
+		Version:              manifest.Version,
+		Token:                manifest.Token,
+		PID:                  manifest.PID,
+		Hostname:             manifest.Hostname,
+		ProcessStartUnixNano: manifest.ProcessStartUnixNano,
+		CreatedAt:            manifest.CreatedAt,
+		CompletedUnixNano:    manifest.CompletedUnixNano,
+	}
+	encoded, err := artifactSweepMarshal(proof)
+	if err != nil {
+		return
+	}
+	if err := afero.WriteFile(fs, artifactStageProofPath(path), encoded, 0o600); err != nil {
+		logging.Warnf("artifact staging proof write failed for %s: %v", path, err)
+	}
+}
+
+// readArtifactStageProof validates a proof sidecar written by
+// writeArtifactStageProof. Quarantined names already prove an own-process
+// claim, so a sidecar only needs to be well-formed and completed on this host.
+func readArtifactStageProof(fs afero.Fs, path string) bool {
+	body, err := afero.ReadFile(fs, artifactStageProofPath(path))
+	if err != nil {
+		return false
+	}
+	var manifest artifactStageManifest
+	if err := json.Unmarshal(body, &manifest); err != nil {
+		return false
+	}
+	if manifest.Version != artifactStageManifestVer || manifest.PID <= 0 {
+		return false
+	}
+	if manifest.Token == "" || manifest.Token != artifactStageManifestToken(path) {
+		return false
+	}
+	if manifest.CompletedUnixNano == 0 {
+		return false
+	}
+	hostname, herr := artifactSweepHostname()
+	if herr != nil || manifest.Hostname == "" {
+		return false
+	}
+	return manifest.Hostname == hostname
 }
 
 // removeArtifactTreeWithRetry retries recursive removal with bounded backoff:
@@ -203,8 +283,15 @@ func sweepArtifactStaging(fs afero.Fs, parent string) {
 			}
 			candidate = target
 		}
+		// Stamp the completed lifecycle on the in-tree manifest, then mirror it
+		// outside the tree: RemoveAll can consume the manifest before a locked
+		// payload refuses, so the proof must exist before removal starts.
+		markArtifactStageCompleted(fs, candidate)
+		writeArtifactStageProof(fs, candidate)
 		if err := removeArtifactTreeWithRetry(fs, candidate); err != nil {
 			logging.Warnf("artifact staging sweep retained %s: %v", candidate, err)
+		} else {
+			_ = fs.Remove(artifactStageProofPath(candidate))
 		}
 	}
 }

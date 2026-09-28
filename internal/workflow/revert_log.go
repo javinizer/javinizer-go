@@ -329,7 +329,7 @@ func mergeReplacementLedger(priorRaw, newRaw string) string {
 		return newRaw
 	}
 	if newRaw == "" {
-		return models.MarshalLedgerJSON(models.GeneratedFilesJSON{Replacements: prior.Replacements, Roots: prior.Roots, MoveBack: prior.MoveBack, Delete: prior.Delete})
+		return models.MarshalLedgerJSON(models.GeneratedFilesJSON{Replacements: prior.Replacements, Roots: prior.Roots, MoveBack: prior.MoveBack, Delete: prior.Delete, PlannedDeletes: prior.PlannedDeletes})
 	}
 	fresh, err := models.ParseGeneratedFiles(newRaw)
 	if err != nil {
