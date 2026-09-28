@@ -59,6 +59,9 @@ func TestImport_RejectsEmptyOrPaddedContentID(t *testing.T) {
 	cases := []struct{ name, cid string }{
 		{"empty", ""},
 		{"space padded", " 118ipx00535 "},
+		// internal tabs cannot arrive: 	 is pg_dump's field delimiter, so a
+		// tabbed id splits into two columns long before the casing gate runs.
+		{"space internal", "118ipx 00535"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

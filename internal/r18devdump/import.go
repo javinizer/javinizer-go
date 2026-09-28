@@ -363,7 +363,7 @@ func Import(ctx context.Context, r io.Reader, path string, opts ImportOptions) (
 				// poisons the lookup key are rejected here).
 				if v != nullSentinel {
 					trimmed := strings.TrimSpace(v)
-					if trimmed == "" || trimmed != v || v != strings.ToLower(v) {
+					if trimmed == "" || trimmed != v || v != strings.ToLower(v) || strings.ContainsAny(v, " \t\n\v\f\r") {
 						return fmt.Errorf("%w: %s.%s = %q", ErrDumpNonCanonicalID, sqliteTableName(row.Table), cc.name, v)
 					}
 				}
