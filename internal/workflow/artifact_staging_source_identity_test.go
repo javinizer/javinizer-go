@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -19,6 +20,24 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// swapReplace installs replacement bytes at path with the admitted size
+// and mtime restored, as a true rename swap: the replacement is written
+// under a temporary name while the original still occupies its inode, then
+// renamed onto the vacated path, so POSIX allocators provably hand it a
+// different inode. An unlink+create pair is not a valid swap fixture —
+// ext4/tmpfs recycle a freshly freed inode number for the next create in
+// the same directory, which makes before/after compare equal.
+func swapReplace(t *testing.T, fs afero.Fs, path string, replacement []byte, admitted os.FileInfo) {
+	t.Helper()
+	aside := path + ".swap-aside"
+	repl := path + ".swap-repl"
+	require.NoError(t, fs.Rename(path, aside))
+	require.NoError(t, afero.WriteFile(fs, repl, replacement, 0o644))
+	require.NoError(t, fs.Chtimes(repl, admitted.ModTime(), admitted.ModTime()))
+	require.NoError(t, fs.Rename(repl, path))
+	require.NoError(t, fs.Remove(aside))
+}
 
 func TestCaptureArtifactSourceIdentityRejectsNonRegular(t *testing.T) {
 	assert.False(t, captureArtifactSourceIdentity(nil).known, "nil info captures nothing")
@@ -80,11 +99,8 @@ func TestArtifactSourceIdentityOsFsRenameSwapChangesInode(t *testing.T) {
 	assert.True(t, id.matches(restat), "a quiet file keeps its identity")
 
 	// Replace-then-restore: same size, mtime forced back to the admitted
-	// value — the surviving difference must be the inode, because a
-	// rename-swap necessarily renames a NEW directory entry into place.
-	require.NoError(t, base.Remove(path))
-	require.NoError(t, afero.WriteFile(base, path, []byte("VIDEO"), 0o644))
-	require.NoError(t, base.Chtimes(path, info.ModTime(), info.ModTime()))
+	// value — the surviving difference must be the inode.
+	swapReplace(t, base, path, []byte("VIDEO"), info)
 	swapped, err := base.Stat(path)
 	require.NoError(t, err)
 	assert.Equal(t, id.size, swapped.Size())
@@ -188,17 +204,17 @@ func journalCounts(l *completeCallFaultLog) (completes, reconciles int32) {
 // pre-consumption publication failure.
 func TestDeferredMovePublishAbortsWhenSourceReplaced(t *testing.T) {
 	type mutation struct {
-		name    string
-		mutate  func(t *testing.T, fs afero.Fs, source string, admitted os.FileInfo)
-		foreign string
+		name           string
+		requiresDevIno bool
+		mutate         func(t *testing.T, fs afero.Fs, source string, admitted os.FileInfo)
+		foreign        string
 	}
 	for _, m := range []mutation{
 		{
-			name: "rename swap with restored size and mtime",
+			name:           "rename swap with restored size and mtime",
+			requiresDevIno: true,
 			mutate: func(t *testing.T, fs afero.Fs, source string, admitted os.FileInfo) {
-				require.NoError(t, fs.Remove(source))
-				require.NoError(t, afero.WriteFile(fs, source, []byte("VIDEO"), 0o644))
-				require.NoError(t, fs.Chtimes(source, admitted.ModTime(), admitted.ModTime()))
+				swapReplace(t, fs, source, []byte("VIDEO"), admitted)
 			},
 			foreign: "VIDEO",
 		},
@@ -226,6 +242,9 @@ func TestDeferredMovePublishAbortsWhenSourceReplaced(t *testing.T) {
 			dest := filepath.Join(root, "library")
 			admitted, statErr := base.Stat(source)
 			require.NoError(t, statErr)
+			if m.requiresDevIno && !captureArtifactSourceIdentity(admitted).hasDevIno {
+				t.Skip("platform exposes no dev/inode identity: a same-size, same-mtime rename swap is indistinguishable from the admitted file there")
+			}
 			org := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize, MoveSubtitles: true, SubtitleExtensions: []string{".srt"}}, template.NewEngine(), nil)
 			ledger := &completeCallFaultLog{}
 			orch := &applyOrchImpl{fs: base, organizer: org, revertLog: ledger}
@@ -300,6 +319,9 @@ func TestDeferredMovePublishAbortsWhenSubtitleReplaced(t *testing.T) {
 	dest := filepath.Join(root, "library")
 	admitted, statErr := base.Stat(subtitle)
 	require.NoError(t, statErr)
+	if !captureArtifactSourceIdentity(admitted).hasDevIno {
+		t.Skip("platform exposes no dev/inode identity: a same-size, same-mtime rename swap is indistinguishable from the admitted file there")
+	}
 	org := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize, MoveSubtitles: true, SubtitleExtensions: []string{".srt"}}, template.NewEngine(), nil)
 	ledger := &completeCallFaultLog{}
 	orch := &applyOrchImpl{fs: base, organizer: org, revertLog: ledger}
@@ -311,9 +333,7 @@ func TestDeferredMovePublishAbortsWhenSubtitleReplaced(t *testing.T) {
 	require.NoError(t, err)
 	defer stage.cleanup()
 
-	require.NoError(t, base.Remove(subtitle))
-	require.NoError(t, afero.WriteFile(base, subtitle, []byte("SUBTITLE"), 0o644))
-	require.NoError(t, base.Chtimes(subtitle, admitted.ModTime(), admitted.ModTime()))
+	swapReplace(t, base, subtitle, []byte("SUBTITLE"), admitted)
 
 	stagedPlan, planErr := org.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: models.FileMatchInfo{Path: stage.stagedSource, Name: filepath.Base(source)}, Movie: stage.original.Movie, DestDir: stage.root, MoveFiles: true, OperationMode: stage.original.OperationMode})
 	require.NoError(t, planErr)
@@ -347,7 +367,12 @@ func TestDeferredMovePublishSucceedsWhenSourcesUntouched(t *testing.T) {
 	defer stage.cleanup()
 
 	require.True(t, stage.sourceIdentity.known, "admission pinned the video identity")
-	assert.True(t, stage.sourceIdentity.hasDevIno, "OsFs admission carries dev/inode")
+	switch runtime.GOOS {
+	case "darwin", "dragonfly", "freebsd", "linux", "netbsd", "openbsd", "solaris":
+		require.True(t, stage.sourceIdentity.hasDevIno, "OsFs admission carries dev/inode on POSIX Stat_t targets")
+	default:
+		require.False(t, stage.sourceIdentity.hasDevIno, "no POSIX Stat_t on this target — admission keeps the size+mtime legs")
+	}
 	require.Len(t, stage.siblings, 2)
 	for _, sibling := range stage.siblings {
 		assert.True(t, sibling.identity.known, "admission pinned sibling %s", sibling.sourcePath)
@@ -378,6 +403,9 @@ func TestDeferredMoveAbortsRemovingReplacedSiblingOriginal(t *testing.T) {
 	dest := filepath.Join(root, "library")
 	admitted, statErr := base.Stat(multipart)
 	require.NoError(t, statErr)
+	if !captureArtifactSourceIdentity(admitted).hasDevIno {
+		t.Skip("platform exposes no dev/inode identity: a same-size, same-mtime rename swap is indistinguishable from the admitted file there")
+	}
 	org := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize, MoveSubtitles: true, SubtitleExtensions: []string{".srt"}}, template.NewEngine(), nil)
 	ledger := &completeCallFaultLog{}
 	orch := &applyOrchImpl{fs: base, organizer: org, revertLog: ledger}
@@ -389,9 +417,7 @@ func TestDeferredMoveAbortsRemovingReplacedSiblingOriginal(t *testing.T) {
 	require.NoError(t, err)
 	defer stage.cleanup()
 
-	require.NoError(t, base.Remove(multipart))
-	require.NoError(t, afero.WriteFile(base, multipart, []byte("PART-TWO"), 0o644))
-	require.NoError(t, base.Chtimes(multipart, admitted.ModTime(), admitted.ModTime()))
+	swapReplace(t, base, multipart, []byte("PART-TWO"), admitted)
 
 	stagedPlan, planErr := org.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: models.FileMatchInfo{Path: stage.stagedSource, Name: filepath.Base(source)}, Movie: stage.original.Movie, DestDir: stage.root, MoveFiles: true, OperationMode: stage.original.OperationMode})
 	require.NoError(t, planErr)
