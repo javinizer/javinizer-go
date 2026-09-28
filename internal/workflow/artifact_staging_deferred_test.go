@@ -142,19 +142,22 @@ func TestPrepareArtifactInPlaceStagedCopyFailureRetainsInputs(t *testing.T) {
 // must exclude it from publication destinations and installs.
 func TestStagingWalksSkipOwnershipManifest(t *testing.T) {
 	base := afero.NewMemMapFs()
-	require.NoError(t, base.MkdirAll("/stage/child", 0o755))
-	require.NoError(t, afero.WriteFile(base, "/stage/"+artifactStageManifestName, []byte("{}"), 0o600))
-	require.NoError(t, afero.WriteFile(base, "/stage/child/a.txt", []byte("x"), 0o644))
-	stage := &artifactStage{fs: base, root: "/stage", finalRoot: "/final"}
+	root := filepath.FromSlash("/stage")
+	final := filepath.FromSlash("/final")
+	artifact := filepath.Join(root, "child", "a.txt")
+	require.NoError(t, base.MkdirAll(filepath.Dir(artifact), 0o755))
+	require.NoError(t, afero.WriteFile(base, filepath.Join(root, artifactStageManifestName), []byte("{}"), 0o600))
+	require.NoError(t, afero.WriteFile(base, artifact, []byte("x"), 0o644))
+	stage := &artifactStage{fs: base, root: root, finalRoot: final}
 
 	dests, err := stage.treeDestinations("", "", "", "")
 	require.NoError(t, err)
-	require.Equal(t, []string{"/final/child/a.txt"}, dests)
+	require.Equal(t, []string{filepath.Join(final, "child", "a.txt")}, dests)
 
 	_, err = stage.installTree("", "", nil, "", "")
 	require.NoError(t, err)
-	exists, _ := afero.Exists(base, "/final/child/a.txt")
+	exists, _ := afero.Exists(base, filepath.Join(final, "child", "a.txt"))
 	require.True(t, exists)
-	manifestLeaked, _ := afero.Exists(base, "/final/"+artifactStageManifestName)
+	manifestLeaked, _ := afero.Exists(base, filepath.Join(final, artifactStageManifestName))
 	require.False(t, manifestLeaked, "manifest is never installed into the library")
 }
