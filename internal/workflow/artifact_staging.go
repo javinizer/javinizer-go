@@ -57,6 +57,7 @@ type artifactStage struct {
 	completedBatch     *downloader.ReplacementBatch
 	unresolvedBatch    *downloader.ReplacementBatch
 	sourceCleanupArmed bool
+	directOriginArmed  bool
 	sharedClaims       []SharedArtifactClaim
 	sharedConsumers    []SharedArtifactClaim
 	sharedPublishBegan bool
@@ -314,6 +315,9 @@ func (s *artifactStage) cleanup() {
 		return
 	}
 	if err := removeArtifactTreeWithRetry(s.fs, s.root); err != nil {
+		// The owner is finished with this root: stamp completion so a later
+		// sweep reclaims the residue even while this process keeps running.
+		markArtifactStageCompleted(s.fs, s.root)
 		logging.Warnf("artifact staging cleanup retained %s: %v", s.root, err)
 	}
 }
@@ -400,6 +404,9 @@ func (s *artifactStage) publish(ctx context.Context, o *applyOrchImpl, state *ap
 		if rollbackErr := s.completedBatch.Rollback(context.WithoutCancel(ctx)); rollbackErr != nil {
 			s.sharedPoisoned = true
 			returnErr = errors.Join(returnErr, fmt.Errorf("rollback staged publication after fence failure: %w", rollbackErr))
+		} else if s.directOriginArmed {
+			s.sourceCleanupArmed = false
+			s.directOriginArmed = false
 		}
 	}
 	s.completedBatch, s.unresolvedBatch = nil, nil
@@ -435,6 +442,11 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 				s.unresolvedBatch = batch
 				s.sharedPoisoned = true
 				returnErr = errors.Join(returnErr, fmt.Errorf("rollback staged publication: %w", rollbackErr))
+			} else if s.directOriginArmed {
+				// The rollback moved the video back onto the source path: the
+				// apply terminates pre-publication despite the armed marker.
+				s.sourceCleanupArmed = false
+				s.directOriginArmed = false
 			}
 			if createdFinalParent != "" {
 				_ = s.fs.Remove(createdFinalParent)
@@ -563,6 +575,7 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 		if err := batch.SetRollbackOrigin(finalResult.NewPath, s.sourcePath); err != nil {
 			return errors.Join(err, batch.SetRollbackOrigin(publishedTarget, s.sourcePath))
 		}
+		s.directOriginArmed = true
 		if o.revertLog != nil && opID != "" {
 			partial := &ApplyResult{OrganizeResult: finalResult, Movie: state.movie, OperationID: opID}
 			if err := o.revertLog.Complete(ctx, opID, partial); err != nil {

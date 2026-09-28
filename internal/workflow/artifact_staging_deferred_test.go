@@ -3,9 +3,11 @@ package workflow
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
 	"github.com/javinizer/javinizer-go/internal/organizer"
@@ -160,4 +162,58 @@ func TestStagingWalksSkipOwnershipManifest(t *testing.T) {
 	require.True(t, exists)
 	manifestLeaked, _ := afero.Exists(base, filepath.Join(final, artifactStageManifestName))
 	require.False(t, manifestLeaked, "manifest is never installed into the library")
+}
+
+// A fence that finalizes post-publication as stale drives the completedBatch
+// compensation path: the deferred video must roll back onto its source and
+// the armed markers reset (the failure is pre-publication again).
+type staleFinalizeFencer struct{}
+
+func (staleFinalizeFencer) WithApplyPublicationFence(_ context.Context, _ string, _ int64, fn func(*models.Movie) error) error {
+	return fn(&models.Movie{})
+}
+
+func (staleFinalizeFencer) WithApplyArtifactPublicationFence(_ context.Context, _ string, _ int64, fn func(*models.Movie) error) error {
+	if err := fn(&models.Movie{}); err != nil {
+		return err
+	}
+	return database.ErrApplyPublicationStale
+}
+
+func TestDeferredPublishStaleFinalizeRollsBackAndResetsMarkers(t *testing.T) {
+	db, _ := pr260ArtifactDB(t)
+	movie := pr260FencedMovie(t, db, "deferred-stale-finalize", "")
+	base, root, source, subtitle, multipart, unrelated, match := pr260FencedFiles(t, "deferred-stale-finalize")
+	dest := filepath.Join(root, "library")
+	real := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize}, template.NewEngine(), nil)
+	orch := &applyOrchImpl{fs: base, organizer: real}
+	cmd := pr260ArtifactFailureCommand(&movie, match, dest)
+	cmd.Organize.Skip = false
+	cmd.Organize.MoveFiles = true
+	cmd.Download = false
+	cmd.PublicationFence = staleFinalizeFencer{}
+	stage, _, err := orch.prepareArtifact(context.Background(), cmd)
+	require.NoError(t, err)
+	defer stage.cleanup()
+
+	plan, planErr := real.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: match, Movie: stage.original.Movie, DestDir: stage.root, MoveFiles: true, OperationMode: stage.original.OperationMode})
+	require.NoError(t, planErr)
+	state := &applyPipelineState{operationID: "op", organizeResult: &organizer.OrganizeResult{NewPath: plan.TargetPath, FolderPath: plan.TargetDir}}
+
+	publishErr := stage.publish(context.Background(), orch, state, nil)
+	require.ErrorIs(t, publishErr, database.ErrApplyPublicationStale)
+	assert.False(t, stage.sourceCleanupArmed, "rollback restored the source: marker resets")
+	assert.False(t, stage.directOriginArmed)
+	pr260AssertRetained(t, base, source, subtitle, multipart, unrelated)
+	regularFiles := 0
+	_ = afero.Walk(base, dest, func(_ string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if info.Mode().IsRegular() {
+			regularFiles++
+		}
+		return nil
+	})
+	assert.Zero(t, regularFiles, "compensation removes every published file")
 }

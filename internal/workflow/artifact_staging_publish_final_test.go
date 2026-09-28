@@ -118,6 +118,7 @@ func TestPR260PublicationSidecarFinalizeFaults(t *testing.T) {
 			err = stage.publish(context.Background(), orch, state, nil)
 			require.ErrorContains(t, err, tc.want)
 			pr260AssertRetained(t, base, source, subtitle, multipart, unrelated)
+			require.False(t, stage.sourceCleanupArmed, "successful rollback restores the source: the failure is pre-publication")
 			regularFiles := 0
 			walkErr := afero.Walk(base, dest, func(_ string, info os.FileInfo, err error) error {
 				if err != nil {

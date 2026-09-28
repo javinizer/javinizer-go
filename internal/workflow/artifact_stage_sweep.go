@@ -34,6 +34,10 @@ type artifactStageManifest struct {
 	Hostname             string    `json:"hostname"`
 	ProcessStartUnixNano int64     `json:"process_start_unix_nano,omitempty"`
 	CreatedAt            time.Time `json:"created_at"`
+	// CompletedUnixNano is stamped when the owner finished with the root
+	// (cleanup exhausted its retries): the residue is trash regardless of
+	// owner liveness, so a long-lived process never blocks its own sweeps.
+	CompletedUnixNano int64 `json:"completed_unix_nano,omitempty"`
 }
 
 // Sweep seams stay injectable: reclaim decisions must be testable without
@@ -60,13 +64,24 @@ func artifactStageManifestToken(root string) string {
 // failed write must not block the apply (an unstamped root is simply never
 // swept — the conservative default).
 func writeArtifactStageManifest(fs afero.Fs, root string) {
+	writeArtifactStageManifestState(fs, root, 0)
+}
+
+// markArtifactStageCompleted stamps the finished lifecycle state so later
+// sweeps can reclaim residue even while the owning process stays alive.
+func markArtifactStageCompleted(fs afero.Fs, root string) {
+	writeArtifactStageManifestState(fs, root, time.Now().UTC().UnixNano())
+}
+
+func writeArtifactStageManifestState(fs afero.Fs, root string, completedUnixNano int64) {
 	hostname, _ := artifactSweepHostname()
 	manifest := artifactStageManifest{
-		Version:   artifactStageManifestVer,
-		Token:     artifactStageManifestToken(root),
-		PID:       os.Getpid(),
-		Hostname:  hostname,
-		CreatedAt: time.Now().UTC(),
+		Version:           artifactStageManifestVer,
+		Token:             artifactStageManifestToken(root),
+		PID:               os.Getpid(),
+		Hostname:          hostname,
+		CreatedAt:         time.Now().UTC(),
+		CompletedUnixNano: completedUnixNano,
 	}
 	if start := artifactSweepStartTime(manifest.PID); start != nil {
 		manifest.ProcessStartUnixNano = start.UnixNano()
@@ -108,6 +123,9 @@ func artifactStageReclaimable(fs afero.Fs, path string) bool {
 	}
 	if manifest.Hostname != hostname {
 		return false
+	}
+	if manifest.CompletedUnixNano != 0 {
+		return true
 	}
 	switch artifactSweepLiveness(manifest.PID) {
 	case fsutil.ProcessAlive:

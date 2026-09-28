@@ -18,7 +18,10 @@ import type { Movie, MovieCredit } from '$lib/api/types';
  * - Credits drive the render whenever any exist (mirrors
  *   NewContextFromMovieWithOptions), so the raw movie.actresses array — whose
  *   authoritative set membership oscillates mid-batch as quarantine is
- *   recomputed across sibling movies — is only hashed when no credits render.
+ *   recomputed across sibling movies — is only hashed wholesale when no
+ *   credits render; with credits, only the canonical names of actresses
+ *   referenced by visible credits are hashed (identity renames change the
+ *   rendered canonical name and must refire).
  * - A credit that cannot render (render_visible=false, or locally suppressed,
  *   matching the nil-actress/quarantine gate) hashes to a fixed marker: its
  *   name/order churn is invisible in the title and must not refire.
@@ -43,6 +46,7 @@ export function buildDisplayTitlePreviewSignature(movie: Movie): string {
 					a.japanese_name ?? '',
 				])
 			: null,
+		referencedActresses: includeActresses ? null : referencedActressTokens(movie, credits),
 		credits: creditTokens,
 		genres: movie.genres,
 		runtime: movie.runtime,
@@ -57,6 +61,21 @@ export function buildDisplayTitlePreviewSignature(movie: Movie): string {
 		trailer_url: movie.trailer_url,
 		original_filename: movie.original_filename,
 	});
+}
+
+// canonical-name tokens for actresses referenced by VISIBLE credits, in credit
+// order. Canonical-name rendering (the default) draws the rendered name from
+// the actress identity row, so an identity rename must refire the preview even
+// though credit-level fields are unchanged. Unreferenced/extra actresses in the
+// poll payload cannot affect the render and stay out of the hash.
+function referencedActressTokens(movie: Movie, credits: MovieCredit[]): unknown[] {
+	const actresses = movie.actresses ?? [];
+	return credits
+		.filter((c) => (c.render_visible ?? true) && !(c.suppressed ?? false))
+		.map((c) => {
+			const a = actresses.find((x) => (x.id ?? 0) === (c.actress_id ?? 0));
+			return [c.actress_id ?? 0, a?.first_name ?? '', a?.last_name ?? '', a?.japanese_name ?? ''];
+		});
 }
 
 function creditRenderToken(c: MovieCredit): unknown[] {

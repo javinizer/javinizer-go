@@ -98,6 +98,35 @@ describe('buildDisplayTitlePreviewSignature', () => {
 		expect(buildDisplayTitlePreviewSignature(b)).toBe(buildDisplayTitlePreviewSignature(a));
 	});
 
+	it('changes when a credit-referenced actress canonical name changes', () => {
+		// Default canonical-name rendering draws the rendered name from the
+		// identity row: a rename must refire even when credit fields are static.
+		const credits = [makeCredit({})];
+		const a = makeMovie([makeActress({})], credits);
+		const b = makeMovie([makeActress({ first_name: 'Aoi' })], credits);
+		expect(buildDisplayTitlePreviewSignature(b)).not.toBe(buildDisplayTitlePreviewSignature(a));
+	});
+
+	it('is stable when an unreferenced actress name changes (credits render)', () => {
+		const credits = [makeCredit({})];
+		const stranger = makeActress({
+			id: 99,
+			first_name: 'Aoi',
+			last_name: 'Sora',
+			japanese_name: '',
+		});
+		const a = makeMovie([makeActress({}), stranger], credits);
+		const b = makeMovie([makeActress({}), { ...stranger, first_name: 'Renamed' }], credits);
+		expect(buildDisplayTitlePreviewSignature(b)).toBe(buildDisplayTitlePreviewSignature(a));
+	});
+
+	it('is stable when the actress of a hidden credit churns', () => {
+		const credits = [makeCredit({ render_visible: false })];
+		const a = makeMovie([makeActress({})], credits);
+		const b = makeMovie([makeActress({ first_name: 'Aoi' })], credits);
+		expect(buildDisplayTitlePreviewSignature(b)).toBe(buildDisplayTitlePreviewSignature(a));
+	});
+
 	it('changes when credit render visibility transitions', () => {
 		const a = makeMovie([], [makeCredit({ render_visible: false })]);
 		const b = makeMovie([], [makeCredit({ render_visible: true })]);

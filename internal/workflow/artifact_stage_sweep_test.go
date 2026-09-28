@@ -363,3 +363,16 @@ func TestSweepArtifactStaging_RetainedWhenClaimRenameFails(t *testing.T) {
 	exists, _ := afero.DirExists(base, root)
 	assert.True(t, exists, "a failed claim rename retains the root untouched")
 }
+
+func TestSweepArtifactStaging_CompletedRootReclaimedDespiteLiveOwner(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	setSweepSeams(t, fsutil.ProcessAlive, nil)
+	root := seedStagingRoot(t, fs, "/lib", func(m *artifactStageManifest) {
+		m.CompletedUnixNano = time.Now().UnixNano()
+	})
+
+	sweepArtifactStaging(fs, "/lib")
+
+	exists, _ := afero.DirExists(fs, root)
+	assert.False(t, exists, "a finished root is residue even while its owner process stays alive")
+}
