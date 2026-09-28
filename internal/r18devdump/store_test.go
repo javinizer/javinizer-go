@@ -785,17 +785,19 @@ func TestImport_WriteMetaError(t *testing.T) {
 	}
 }
 
-// TestImport_RenameError covers the os.Rename error branch (line 321): when
-// the target path already exists as a directory, Rename fails.
+// TestImport_RenameError covers ReplaceFile's terminal error branch: both the
+// direct rename and the remove-then-rename fallback must fail, which a
+// NON-EMPTY directory at the target path guarantees (Remove refuses it).
 func TestImport_RenameError(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "sub", "r18dev_dump.db")
-	// Create the target path as a directory so Rename(tmpPath, path) fails.
 	require.NoError(t, os.MkdirAll(path, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(path, "blocker"), []byte("x"), 0o600))
 	dump := "COPY public.derived_video (content_id, dvd_id) FROM stdin;\n118ipx00535\tIPX-535\n\\.\n"
 	_, err := Import(context.Background(), strings.NewReader(dump), path, ImportOptions{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "rename tmp db")
+	assert.True(t, errors.Is(err, ErrDumpSwap), "Rename failures must carry ErrDumpSwap for downstream classification")
 }
 
 func TestImport_BeforeSwap(t *testing.T) {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"strings"
@@ -36,17 +37,41 @@ type dumpHandler struct {
 	mu                  sync.Mutex
 	dumpMu              sync.RWMutex
 	running             bool
-	lastError           string // last download outcome; non-empty when the most recent run failed
+	lastError           string // last operation outcome; non-empty when the most recent run failed
+	lastErrorKind       string // machine-readable kind (validation|import|staging|reload) for the last async failure
 	httpClient          *http.Client
 	stallTimeout        time.Duration // stall watchdog timeout; zero falls back to dumpStallTimeout (tests override)
+	uploadMaxBytes      int64         // upload body cap; zero falls back to defaultUploadMaxBytes (tests inject smaller)
+	uploadMaxMemory     int64         // multipart memory threshold; zero falls back to defaultUploadMaxMemory
+	renameFn            func(oldpath, newpath string) error
+	openPartFn          func(fh *multipart.FileHeader) (multipart.File, error)
 	reloadFn            func(cfg *config.Config, lockHeld bool) error
 	removeFn            func(string) error
-	broadcastProgressFn func(phase string, bytes, total int64)
-	done                chan struct{} // closed when the download goroutine finishes
+	broadcastProgressFn func(phase string, bytes, total int64, errText string)
+	done                chan struct{} // closed when the operation goroutine finishes
+}
+
+// tryAcquireDumpOp atomically claims the shared dump-operation guard. Every
+// mutating dump operation (download, update, upload, clear) holds it for its
+// whole lifetime, giving 409 symmetry in every direction.
+func (h *dumpHandler) tryAcquireDumpOp() bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.running {
+		return false
+	}
+	h.running = true
+	return true
+}
+
+func (h *dumpHandler) releaseDumpOp() {
+	h.mu.Lock()
+	h.running = false
+	h.mu.Unlock()
 }
 
 func newDumpHandler(rt *core.APIRuntime) *dumpHandler {
-	h := &dumpHandler{rt: rt, httpClient: &http.Client{}, stallTimeout: dumpStallTimeout, removeFn: os.Remove}
+	h := &dumpHandler{rt: rt, httpClient: &http.Client{}, stallTimeout: dumpStallTimeout, renameFn: r18devdump.ReplaceFile, removeFn: os.Remove}
 	h.reloadFn = func(cfg *config.Config, lockHeld bool) error {
 		if lockHeld {
 			return h.rt.ReloadConfigLocked(cfg)
@@ -58,16 +83,17 @@ func newDumpHandler(rt *core.APIRuntime) *dumpHandler {
 
 // dumpStatusResponse is the JSON shape returned by GET /status.
 type dumpStatusResponse struct {
-	Present    bool   `json:"present"`
-	Running    bool   `json:"running"`
-	LastError  string `json:"last_error,omitempty"`
-	RowCount   int64  `json:"row_count,omitempty"`
-	SourceURL  string `json:"source_url,omitempty"`
-	SourceDate string `json:"source_date,omitempty"`
-	ImportedAt string `json:"imported_at,omitempty"`
-	Path       string `json:"path"`
-	SizeBytes  int64  `json:"size_bytes,omitempty"`
-	Enabled    bool   `json:"enabled"`
+	Present       bool   `json:"present"`
+	Running       bool   `json:"running"`
+	LastError     string `json:"last_error,omitempty"`
+	LastErrorKind string `json:"last_error_kind,omitempty"`
+	RowCount      int64  `json:"row_count,omitempty"`
+	SourceURL     string `json:"source_url,omitempty"`
+	SourceDate    string `json:"source_date,omitempty"`
+	ImportedAt    string `json:"imported_at,omitempty"`
+	Path          string `json:"path"`
+	SizeBytes     int64  `json:"size_bytes,omitempty"`
+	Enabled       bool   `json:"enabled"`
 }
 
 // getStatus godoc
@@ -92,9 +118,11 @@ func (h *dumpHandler) getStatus(c *gin.Context) {
 	h.mu.Lock()
 	running := h.running
 	lastErr := h.lastError
+	lastKind := h.lastErrorKind
 	h.mu.Unlock()
 	resp.Running = running
 	resp.LastError = lastErr
+	resp.LastErrorKind = lastKind
 	if running {
 		c.JSON(http.StatusOK, resp)
 		return
@@ -156,14 +184,13 @@ func (h *dumpHandler) startUpdate(c *gin.Context) {
 }
 
 func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
-	h.mu.Lock()
-	if h.running {
-		h.mu.Unlock()
-		c.JSON(http.StatusConflict, gin.H{errorResponseKey: "a dump download is already in progress"})
+	if !h.tryAcquireDumpOp() {
+		c.JSON(http.StatusConflict, gin.H{errorResponseKey: "another dump operation is already in progress"})
 		return
 	}
-	h.running = true
+	h.mu.Lock()
 	h.lastError = ""
+	h.lastErrorKind = ""
 	h.done = make(chan struct{})
 	h.mu.Unlock()
 
@@ -185,7 +212,7 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 
 	// For update-only, check the current source URL so the download skips if
 	// the version is unchanged.
-	var currentSourceURL string
+	var currentSourceURL, currentSourceDate string
 	if updateOnly {
 		h.dumpMu.RLock()
 		if store, err := r18devdump.Open(path); err == nil {
@@ -193,6 +220,7 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 			_ = store.Close()
 			if err == nil {
 				currentSourceURL = stats.SourceURL
+				currentSourceDate = stats.SourceDate
 			}
 		}
 		h.dumpMu.RUnlock()
@@ -214,7 +242,7 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 		progressSeen = true
 		lastProgressAt = now
 		progressMu.Unlock()
-		h.broadcastProgress("downloading", bytes, total)
+		h.broadcastProgress("downloading", bytes, total, "")
 	}
 
 	// Run the download in a background goroutine. The HTTP response is already
@@ -241,17 +269,19 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 			h.running = false
 			if !succeeded {
 				h.lastError = failErr.Error()
+				h.lastErrorKind = ""
 			} else {
 				h.lastError = ""
+				h.lastErrorKind = ""
 			}
 			h.mu.Unlock()
 			// Only broadcast 'done' if the download succeeded.
 			// If it failed, the error path already broadcast 'error'.
 			if succeeded {
-				h.broadcastProgress("done", 0, 0)
+				h.broadcastProgress("done", 0, 0, "")
 			}
 		}()
-		res, err := r18devdump.Download(ctx, client, currentSourceURL, progress, func(r io.Reader, d r18devdump.DownloadResult) error {
+		res, err := r18devdump.Download(ctx, client, currentSourceURL, currentSourceDate, progress, func(r io.Reader, d r18devdump.DownloadResult) error {
 			// Response headers arrived: record activity. Import runs its local
 			// setup (DB open, schema, BeginTx) before reading the first body
 			// byte, so without this ping a slow pre-import window reads as a
@@ -337,7 +367,7 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 					logging.Warnf("r18dev dump: failed to restore handle after failed download: %v", reloadErr)
 				}
 			}
-			h.broadcastProgress(errorResponseKey, 0, 0)
+			h.broadcastProgress(errorResponseKey, 0, 0, err.Error())
 			return
 		}
 		if res.Unchanged {
@@ -475,17 +505,16 @@ func (h *dumpHandler) search(c *gin.Context) {
 // @Failure 409 {object} map[string]string
 // @Router /api/v1/r18dev/dump [delete]
 func (h *dumpHandler) clearDump(c *gin.Context) {
-	h.dumpMu.Lock()
-	defer h.dumpMu.Unlock()
-	h.mu.Lock()
-	if h.running {
-		h.mu.Unlock()
-		c.JSON(http.StatusConflict, gin.H{errorResponseKey: "a dump download is already in progress"})
+	// Claim the nonblocking operation guard FIRST: swap/reload phases hold
+	// dumpMu, so acquiring dumpMu before the guard could park a clear request
+	// behind a long upload instead of returning the documented 409.
+	if !h.tryAcquireDumpOp() {
+		c.JSON(http.StatusConflict, gin.H{errorResponseKey: "another dump operation is already in progress"})
 		return
 	}
-	// Keep the lock held for the entire clear operation so a concurrent
-	// download/update can't start while we're deleting the dump file.
-	defer h.mu.Unlock()
+	defer h.releaseDumpOp()
+	h.dumpMu.Lock()
+	defer h.dumpMu.Unlock()
 
 	cfg := h.rt.Deps().CoreDeps.GetConfig()
 	path := resolveDumpPath(cfg)
@@ -546,9 +575,9 @@ func (h *dumpHandler) clearDump(c *gin.Context) {
 // broadcastProgress sends a dump progress message over the WebSocket hub so
 // the WebUI can render a progress bar. Non-blocking — if no WS clients are
 // connected, the message is silently dropped.
-func (h *dumpHandler) broadcastProgress(phase string, bytes, total int64) {
+func (h *dumpHandler) broadcastProgress(phase string, bytes, total int64, errText string) {
 	if h.broadcastProgressFn != nil {
-		h.broadcastProgressFn(phase, bytes, total)
+		h.broadcastProgressFn(phase, bytes, total, errText)
 		return
 	}
 	rt := h.rt.GetRuntime()
@@ -571,7 +600,10 @@ func (h *dumpHandler) broadcastProgress(phase string, bytes, total int64) {
 	}
 	if phase == errorResponseKey {
 		msg.Status = ws.ProgressStatusError
-		msg.Error = "dump download failed"
+		if errText == "" {
+			errText = "dump operation failed"
+		}
+		msg.Error = errText
 	}
 	_ = hub.BroadcastProgress(msg)
 }
@@ -621,13 +653,13 @@ func (h *dumpHandler) runImportHeartbeat(streamConsumed, importDone <-chan struc
 		return
 	default:
 	}
-	h.broadcastProgress("importing", 0, 0)
+	h.broadcastProgress("importing", 0, 0, "")
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ticker.C:
-			h.broadcastProgress("importing", 0, 0)
+			h.broadcastProgress("importing", 0, 0, "")
 		case <-importDone:
 			return
 		}

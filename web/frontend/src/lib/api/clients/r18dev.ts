@@ -20,4 +20,16 @@ export class R18DevClient extends BaseClient {
 	async clearDump(): Promise<void> {
 		await this.request<void>('/api/v1/r18dev/dump', { method: 'DELETE' });
 	}
+
+	// uploadDump posts a user-selected dump file (.db sidecar or .sql.gz raw
+	// dump) via multipart. The receive is synchronous (202 once staged) and the
+	// job outcome arrives via the dump progress channel + status endpoint.
+	async uploadDump(file: File): Promise<{ message: string }> {
+		const form = new FormData();
+		form.append('file', file, file.name);
+		return this.request<{ message: string }>('/api/v1/r18dev/dump/upload', {
+			method: 'POST',
+			body: form,
+		});
+	}
 }

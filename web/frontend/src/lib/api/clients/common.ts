@@ -159,12 +159,15 @@ export class BaseClient {
 		const abortControl = createRequestAbortControl(options);
 
 		try {
+			// FormData bodies must NOT carry an explicit Content-Type: the
+			// browser sets multipart/form-data with the boundary it generated.
+			const isFormData = typeof FormData !== 'undefined' && fetchOptions.body instanceof FormData;
 			const response = await fetch(url, {
 				credentials: 'same-origin',
 				...fetchOptions,
 				...(abortControl.signal ? { signal: abortControl.signal } : {}),
 				headers: {
-					'Content-Type': 'application/json',
+					...(isFormData ? {} : { 'Content-Type': 'application/json' }),
 					...(BaseClient.getSessionID() ? { 'X-Session-ID': BaseClient.getSessionID()! } : {}),
 					...fetchOptions.headers,
 				},

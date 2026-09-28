@@ -4010,6 +4010,86 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/r18dev/dump/upload": {
+            "post": {
+                "description": "Accepts one uploaded file: a pre-built dump sidecar (.db, validated then swapped in) or the raw upstream gzipped pg_dump (.sql.gz, gunzipped and imported through the standard pipeline). The body is received and staged synchronously (deterministic 400/408/409/413/500 failures), then validation/import/install runs asynchronously with progress over the dump WebSocket channel. Returns 409 while any dump operation (download/update/upload/clear) is running.",
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "r18dev"
+                ],
+                "summary": "Upload the r18.dev dump manually",
+                "parameters": [
+                    {
+                        "type": "file",
+                        "description": "dump file (.db sidecar or .sql.gz raw dump)",
+                        "name": "file",
+                        "in": "formData",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Accepted",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "malformed multipart envelope or no/multiple/empty file part (incl. empty filename)",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "408": {
+                        "description": "receive stall or server read-timer timeout (connection disposed; retry on a fresh connection)",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "413": {
+                        "description": "body exceeds the upload size limit",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "deadline lift unsupported, staging failure, or panic",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/scan": {
             "post": {
                 "description": "Scan a directory for video files and match JAV IDs",
@@ -9334,6 +9414,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "last_error": {
+                    "type": "string"
+                },
+                "last_error_kind": {
                     "type": "string"
                 },
                 "path": {

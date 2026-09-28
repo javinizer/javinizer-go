@@ -10,6 +10,10 @@ node_modules/
 package-lock.json
 pnpm-lock.yaml
 
+# Paraglide/inlang message catalogs are tool-managed (extraction + compile
+# pipeline owns their formatting; parity is enforced by scripts/i18n-check.sh).
+messages/
+
 # Svelte components are formatted/linted by svelte-check, not prettier
 # (prettier-plugin-svelte has a getVisitorKeys incompatibility with prettier 3.8).
 *.svelte

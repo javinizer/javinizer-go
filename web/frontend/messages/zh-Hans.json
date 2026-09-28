@@ -2236,6 +2236,8 @@
   "settings_r18dev_phase_starting": "启动中…",
   "settings_r18dev_present": "数据库已就绪",
   "settings_r18dev_refresh": "刷新",
+  "settings_r18dev_upload_dump": "上传数据库",
+  "settings_r18dev_upload_failed": "上传失败",
   "settings_r18dev_rows": "行数",
   "settings_r18dev_search_button": "搜索",
   "settings_r18dev_search_content_id": "content_id:",

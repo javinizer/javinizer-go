@@ -3422,6 +3422,8 @@ definitions:
         type: string
       last_error:
         type: string
+      last_error_kind:
+        type: string
       path:
         type: string
       present:
@@ -6345,6 +6347,66 @@ paths:
               type: string
             type: object
       summary: Update the r18.dev dump
+      tags:
+      - r18dev
+  /api/v1/r18dev/dump/upload:
+    post:
+      consumes:
+      - multipart/form-data
+      description: 'Accepts one uploaded file: a pre-built dump sidecar (.db, validated
+        then swapped in) or the raw upstream gzipped pg_dump (.sql.gz, gunzipped and
+        imported through the standard pipeline). The body is received and staged synchronously
+        (deterministic 400/408/409/413/500 failures), then validation/import/install
+        runs asynchronously with progress over the dump WebSocket channel. Returns
+        409 while any dump operation (download/update/upload/clear) is running.'
+      parameters:
+      - description: dump file (.db sidecar or .sql.gz raw dump)
+        in: formData
+        name: file
+        required: true
+        type: file
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: malformed multipart envelope or no/multiple/empty file part
+            (incl. empty filename)
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "408":
+          description: receive stall or server read-timer timeout (connection disposed;
+            retry on a fresh connection)
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "413":
+          description: body exceeds the upload size limit
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: deadline lift unsupported, staging failure, or panic
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Upload the r18.dev dump manually
       tags:
       - r18dev
   /api/v1/scan:

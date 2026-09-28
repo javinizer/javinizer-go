@@ -2234,6 +2234,8 @@
   "settings_r18dev_phase_starting": "Starting...",
   "settings_r18dev_present": "Dump is present and ready",
   "settings_r18dev_refresh": "Refresh",
+  "settings_r18dev_upload_dump": "Upload Dump",
+  "settings_r18dev_upload_failed": "Upload failed",
   "settings_r18dev_rows": "Rows",
   "settings_r18dev_search_button": "Search",
   "settings_r18dev_search_content_id": "content_id:",
