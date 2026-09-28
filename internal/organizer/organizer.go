@@ -548,6 +548,15 @@ func (o *Organizer) PlanSubtitleMoves(plan *OrganizePlan) []models.SubtitleMove 
 	o.handleSubtitles(plan, result, subtitleInstall{})
 	moves := make([]models.SubtitleMove, 0, len(result.Subtitles))
 	for _, sr := range result.Subtitles {
+		// Intended-move intents must not cover destinations that are already
+		// occupied: execution will skip them (handleSubtitles exists-check),
+		// and a pending MoveBack armed against a foreign occupancy would
+		// rename it over the retained source at revert. In-execute skips post
+		// probe drift are pruned by the outcome reconcile.
+		exists, statErr := pathExistsBestEffort(o.fs, sr.NewPath)
+		if statErr == nil && exists {
+			continue
+		}
 		moves = append(moves, sr.SubtitleMove)
 	}
 	return moves

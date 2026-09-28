@@ -120,3 +120,29 @@ func TestPlanSubtitleMovesEnumeratesWithoutMutating(t *testing.T) {
 	require.FileExists(t, sub, "probe never mutates the source")
 	assert.Nil(t, org.PlanSubtitleMoves(nil))
 }
+
+// An occupied destination never gets an armed intent: execution would skip
+// that move, and a durable MoveBack against the occupied destination would
+// rename foreign bytes over the retained source at revert.
+func TestPlanSubtitleMovesSkipsOccupiedDestination(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "ABC-123.mkv")
+	sub := filepath.Join(dir, "ABC-123.srt")
+	require.NoError(t, os.WriteFile(src, []byte("video"), 0o600))
+	require.NoError(t, os.WriteFile(sub, []byte("subtitle"), 0o600))
+	dest := filepath.Join(dir, "out")
+	require.NoError(t, os.MkdirAll(filepath.Join(dest, "ABC-123"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dest, "ABC-123", "ABC-123.srt"), []byte("foreign"), 0o644))
+
+	org := NewOrganizer(afero.NewOsFs(), &Config{
+		FolderFormat: "<ID>", FileFormat: "<ID>", RenameFile: true,
+		OperationMode: operationmode.OperationModeOrganize,
+		MoveSubtitles: true, SubtitleExtensions: []string{".srt"},
+	}, nil, nil)
+	plan, planErr := org.PlanOrganize(context.Background(), OrganizeCmd{
+		Match: models.FileMatchInfo{MovieID: "ABC-123", Path: src, Name: "ABC-123.mkv", Extension: ".mkv"},
+		Movie: &models.Movie{ID: "ABC-123"}, DestDir: dest, MoveFiles: true, LinkMode: LinkModeNone,
+	})
+	require.NoError(t, planErr)
+	assert.Empty(t, org.PlanSubtitleMoves(plan), "occupied destination yields no intent")
+}
