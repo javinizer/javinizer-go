@@ -726,3 +726,118 @@ func TestArtifactCleanup_RestatedSidecarPreservesSweepAssociation(t *testing.T) 
 	proofGone, _ := afero.Exists(base, artifactStageProofPath(residue))
 	assert.False(t, proofGone, "sidecar removed with the residue")
 }
+
+// manifestWriteDenyFS refuses only WRITES of the in-tree ownership manifest:
+// the completion stamp can never persist, so any restated sidecar carries a
+// zero completion stamp — the Windows/SMB failure shape the sweep gate
+// guards against.
+type manifestWriteDenyFS struct{ afero.Fs }
+
+func (f *manifestWriteDenyFS) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
+	if strings.HasSuffix(name, artifactStageManifestName) && flag&(os.O_WRONLY|os.O_CREATE|os.O_APPEND) != 0 {
+		return nil, errors.New("manifest write denied")
+	}
+	return f.Fs.OpenFile(name, flag, perm)
+}
+
+// proofReadDenyFS refuses OPENS of the ownership sidecar: the proof was
+// written, but the pre-removal re-read cannot verify it, so the sweep retains.
+type proofReadDenyFS struct{ afero.Fs }
+
+func (f *proofReadDenyFS) Open(name string) (afero.File, error) {
+	if strings.HasSuffix(name, artifactStageProofSuffix) {
+		return nil, errors.New("proof read denied")
+	}
+	return f.Fs.Open(name)
+}
+
+// The manifest rewrite with the completion stamp fails (locked/ACL'd file on
+// SMB): the sweep must NOT open RemoveAll. The restated proof it can still
+// write carries the stale zero stamp and fails the gate; the retained tree
+// keeps its original manifest and stays reclaimable for a healthy retry.
+func TestSweepArtifactStaging_RetainsWhenCompletionStampUnwritable(t *testing.T) {
+	base := afero.NewMemMapFs()
+	setSweepSeams(t, fsutil.ProcessDead, nil)
+	seedStagingRoot(t, base, "/lib", nil)
+	witness := &proofWitnessRemoveAllFS{Fs: base}
+
+	sweepArtifactStaging(&manifestWriteDenyFS{Fs: witness}, "/lib")
+
+	assert.Zero(t, witness.attempts, "no destructive removal without a re-readable completed proof")
+	residue := quarantineResidue(t, base, "/lib")
+	require.NotEmpty(t, residue, "the tree is retained under its quarantined name")
+	manifestHeld, _ := afero.Exists(base, filepath.Join(residue, artifactStageManifestName))
+	assert.True(t, manifestHeld, "the original manifest survived unconsumed")
+	assert.True(t, artifactStageReclaimable(base, residue), "the dead-owner manifest keeps the residue reclaimable — not stranded")
+	proof, _ := afero.Exists(base, artifactStageProofPath(residue))
+	assert.True(t, proof, "the sidecar was written but with a zero completion stamp")
+
+	sweepArtifactStaging(base, "/lib")
+	exists, _ := afero.DirExists(base, residue)
+	assert.False(t, exists, "a later healthy sweep completes the reclaim")
+}
+
+// The sidecar proof write itself is denied under the quarantined name: no
+// proof exists to validate, so the tree must be retained even though the
+// in-tree manifest now carries the completion stamp (still reclaimable).
+func TestSweepArtifactStaging_RetainsWhenSidecarProofUnwritable(t *testing.T) {
+	base := afero.NewMemMapFs()
+	setSweepSeams(t, fsutil.ProcessDead, nil)
+	root := seedStagingRoot(t, base, "/lib", nil)
+	quarantine := root + artifactStageQuarantineMark + "beef"
+	require.NoError(t, base.Rename(root, quarantine))
+	witness := &proofWitnessRemoveAllFS{Fs: base}
+
+	sweepArtifactStaging(&quarantineProofWriteDenyFS{Fs: witness}, "/lib")
+
+	assert.Zero(t, witness.attempts, "no destructive removal when the proof cannot restate beside the quarantined name")
+	exists, _ := afero.DirExists(base, quarantine)
+	assert.True(t, exists, "the quarantined tree is retained")
+	assert.True(t, artifactStageReclaimable(base, quarantine), "the completed in-tree manifest keeps the residue reclaimable")
+
+	sweepArtifactStaging(base, "/lib")
+	exists, _ = afero.DirExists(base, quarantine)
+	assert.False(t, exists, "a later healthy sweep completes the reclaim")
+}
+
+// The proof was written but cannot be read back for the pre-removal
+// validation: retention beats an unverifiable delete.
+func TestSweepArtifactStaging_RetainsWhenProofUnreadable(t *testing.T) {
+	base := afero.NewMemMapFs()
+	setSweepSeams(t, fsutil.ProcessDead, nil)
+	seedStagingRoot(t, base, "/lib", nil)
+	witness := &proofWitnessRemoveAllFS{Fs: base}
+
+	sweepArtifactStaging(&proofReadDenyFS{Fs: witness}, "/lib")
+
+	assert.Zero(t, witness.attempts, "no destructive removal when the proof cannot be validated")
+	residue := quarantineResidue(t, base, "/lib")
+	require.NotEmpty(t, residue, "the tree is retained under its quarantined name")
+	proofHeld, _ := afero.Exists(base, artifactStageProofPath(residue))
+	assert.True(t, proofHeld, "the completed proof exists — only its validation read failed")
+
+	sweepArtifactStaging(base, "/lib")
+	exists, _ := afero.DirExists(base, residue)
+	assert.False(t, exists, "readable on retry: the residue reclaims")
+}
+
+// Happy path with the gate armed: a dead owner's quarantined tree reclaims in
+// one attempt, and the completed proof sat beside the tree the moment
+// destructive removal ran.
+func TestSweepArtifactStaging_RemovesOnlyWithCompletedProofBeside(t *testing.T) {
+	base := afero.NewMemMapFs()
+	setSweepSeams(t, fsutil.ProcessDead, nil)
+	root := seedStagingRoot(t, base, "/lib", nil)
+	quarantine := root + artifactStageQuarantineMark + "cafe"
+	require.NoError(t, base.Rename(root, quarantine))
+	witness := &proofWitnessRemoveAllFS{Fs: base}
+
+	sweepArtifactStaging(witness, "/lib")
+
+	assert.Equal(t, 1, witness.attempts, "one removal attempt on a healthy volume")
+	assert.Empty(t, witness.missingProof, "the completed sidecar proof sat beside the tree at removal time")
+	exists, _ := afero.DirExists(base, quarantine)
+	assert.False(t, exists, "dead-owner quarantined residue still reclaims")
+	proofGone, _ := afero.Exists(base, artifactStageProofPath(quarantine))
+	assert.False(t, proofGone, "the proof sidecar is removed with the residue")
+}

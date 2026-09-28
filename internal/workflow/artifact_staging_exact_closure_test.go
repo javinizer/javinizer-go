@@ -37,6 +37,19 @@ func (f *pr260ClosureFS) Stat(p string) (os.FileInfo, error) {
 	}
 	return f.Fs.Stat(p)
 }
+
+// The sibling admission lookup is no-follow: the stat fault must wedge
+// LstatIfPossible as well, or the embedded Lstater answers around it.
+func (f *pr260ClosureFS) LstatIfPossible(p string) (os.FileInfo, bool, error) {
+	if f.enabled && f.op == "stat" && p == f.path {
+		return nil, false, errors.New("stat denied")
+	}
+	if lst, ok := f.Fs.(afero.Lstater); ok {
+		return lst.LstatIfPossible(p)
+	}
+	info, err := f.Fs.Stat(p)
+	return info, false, err
+}
 func (f *pr260ClosureFS) Open(p string) (afero.File, error) {
 	if f.enabled && f.op == "open" && p == f.path {
 		return nil, errors.New("walk denied")

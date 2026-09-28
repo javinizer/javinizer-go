@@ -56,6 +56,19 @@ func (f *pr260FiniteCopyFS) Stat(name string) (os.FileInfo, error) {
 	return f.Fs.Stat(name)
 }
 
+// The sibling admission lookup is no-follow: the "sibling stat" fault must
+// wedge LstatIfPossible as well, or the embedded Lstater answers around it.
+func (f *pr260FiniteCopyFS) LstatIfPossible(name string) (os.FileInfo, bool, error) {
+	if f.op == "sibling stat" && name == f.sidecar {
+		return nil, false, errors.New("sidecar stat denied")
+	}
+	if lst, ok := f.Fs.(afero.Lstater); ok {
+		return lst.LstatIfPossible(name)
+	}
+	info, err := f.Fs.Stat(name)
+	return info, false, err
+}
+
 // The staged create/write/close faults target the SIBLING sidecar copy:
 // organize mode defers the video (no staged video copy), so sibling sidecars
 // are the staged legs that must stay finite and retain inputs on failure.

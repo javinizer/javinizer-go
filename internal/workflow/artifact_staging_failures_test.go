@@ -55,6 +55,19 @@ func (f *pr260StatFailureFs) Stat(name string) (os.FileInfo, error) {
 	return f.Fs.Stat(name)
 }
 
+// The admission and revalidation lookups are no-follow: the wedge must sit on
+// LstatIfPossible too, or the filesystem's own Lstater answers around it.
+func (f *pr260StatFailureFs) LstatIfPossible(name string) (os.FileInfo, bool, error) {
+	if filepath.Clean(name) == filepath.Clean(f.path) {
+		return nil, false, errors.New("pr260: source stat denied")
+	}
+	if lst, ok := f.Fs.(afero.Lstater); ok {
+		return lst.LstatIfPossible(name)
+	}
+	info, err := f.Fs.Stat(name)
+	return info, false, err
+}
+
 // Organize mode defers the video, so prepareArtifact never opens the source;
 // its pre-staging source gate is the Stat. A denied probe must fail before any
 // staging payload lands and must retain every input.

@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/spf13/afero"
+
 	"github.com/javinizer/javinizer-go/internal/organizer"
 )
 
@@ -48,7 +50,10 @@ func captureArtifactSourceIdentity(info os.FileInfo) artifactSourceIdentity {
 // matches re-derives the identity legs from a fresh lookup: dev/inode must
 // agree whenever BOTH sides expose it (a rename-swap necessarily changes the
 // inode even with size and mtime restored), then size and modtime on every
-// platform. A nil or non-regular current entry never matches.
+// platform. A nil or non-regular current entry never matches — under the
+// no-follow lookup a symlink planted at the admitted pathname reports its own
+// ModeSymlink entry, so it fails regularity even when its TARGET still names
+// the admitted inode.
 func (id artifactSourceIdentity) matches(info os.FileInfo) bool {
 	if !id.known || info == nil || !info.Mode().IsRegular() {
 		return false
@@ -61,15 +66,36 @@ func (id artifactSourceIdentity) matches(info os.FileInfo) bool {
 	return info.Size() == id.size && info.ModTime().Equal(id.modTime)
 }
 
+// lstatArtifactSource resolves path WITHOUT following a final symlink where
+// the filesystem exposes the distinction (afero.Lstater: OsFs and wrappers
+// that forward it). The following Stat is not an acceptable substitute on
+// real filesystems: a rename-aside plus symlink plant at the admitted
+// pathname resolves to the admitted inode through Stat, so the identity proof
+// would pass and a same-volume publish would then move the LINK object into
+// the library (a broken relative link), leaving the video behind. In-memory
+// afero filesystems answer Stat-based (LstatIfPossible reports didLstat=false)
+// and have no symlink model at all, so there the answer is regular-or-absent
+// by construction — the documented test-time posture, matching
+// scanner.lstatInfo and fsutil.asideLstat.
+func lstatArtifactSource(fs afero.Fs, path string) (os.FileInfo, error) {
+	if lst, ok := fs.(afero.Lstater); ok {
+		info, _, err := lst.LstatIfPossible(path)
+		return info, err
+	}
+	return fs.Stat(path)
+}
+
 // revalidateAdmittedSource proves — immediately before a publish leg moves,
 // copies, or removes path — that it still names the regular file admitted at
-// preparation time. Any capture gap (admission never pinned this path) skips
-// the proof; any lookup failure or identity drift refuses the leg.
+// preparation time. The lookup never follows a final symlink: any symlink (or
+// other non-regular) directory entry at path refuses the leg. Any capture gap
+// (admission never pinned this path) skips the proof; any lookup failure or
+// identity drift refuses the leg.
 func (s *artifactStage) revalidateAdmittedSource(path string, admitted artifactSourceIdentity) error {
 	if !admitted.known {
 		return nil
 	}
-	info, err := s.fs.Stat(path)
+	info, err := lstatArtifactSource(s.fs, path)
 	if err != nil {
 		return fmt.Errorf("%w: revalidate %s: %v", errArtifactSourceChanged, path, err)
 	}

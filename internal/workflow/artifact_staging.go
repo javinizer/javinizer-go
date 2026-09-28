@@ -164,7 +164,11 @@ func (o *applyOrchImpl) prepareArtifact(ctx context.Context, cmd ApplyCmd) (*art
 			stage.cleanup()
 			return nil, cmd, fmt.Errorf("artifact staging requires a source path")
 		}
-		sourceInfo, statErr := o.fs.Stat(sourcePath)
+		// Admission is no-follow: the pin must name the directory entry the
+		// deferred publication later moves — a symlink source would publish the
+		// link object (not its bytes), so it fails the regularity gate like any
+		// other non-regular entry instead of being admitted.
+		sourceInfo, statErr := lstatArtifactSource(o.fs, sourcePath)
 		if statErr != nil {
 			stage.cleanup()
 			return nil, cmd, fmt.Errorf("artifact staging source: %w", statErr)
@@ -204,7 +208,9 @@ func (o *applyOrchImpl) prepareArtifact(ctx context.Context, cmd ApplyCmd) (*art
 				continue
 			}
 			sibling := filepath.Join(filepath.Dir(sourcePath), entry.Name())
-			siblingInfo, siblingErr := o.fs.Stat(sibling)
+			// No-follow like the video admission: a symlinked sibling is skipped,
+			// never pinned as a source the publication may consume.
+			siblingInfo, siblingErr := lstatArtifactSource(o.fs, sibling)
 			if siblingErr != nil {
 				stage.cleanup()
 				return nil, cmd, fmt.Errorf("artifact staging sibling %s: %w", sibling, siblingErr)

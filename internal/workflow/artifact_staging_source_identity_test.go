@@ -479,3 +479,263 @@ func TestInPlaceMoveAbortsRemovingReplacedOriginal(t *testing.T) {
 	assert.ElementsMatch(t, []string{source, sub, part, other, standalone}, regularFiles,
 		"rollback removed every published artifact; only the inputs remain")
 }
+
+// symlinkModeInfo reports the shape a no-follow lookup of a symlink returns:
+// a non-regular entry carrying ModeSymlink. MemMapFs has no symlink model, so
+// the memfs rejection legs model the entry mode directly.
+type symlinkModeInfo struct{ os.FileInfo }
+
+func (symlinkModeInfo) Mode() os.FileMode { return os.ModeSymlink | 0o777 }
+
+// symlinkEntryLstatFs reports linkPath as a symlink directory entry through
+// the no-follow lookup while the following Stat still resolves the underlying
+// regular file — the rename-aside-then-symlink plant, on any platform.
+type symlinkEntryLstatFs struct {
+	afero.Fs
+	linkPath string
+}
+
+func (f *symlinkEntryLstatFs) LstatIfPossible(name string) (os.FileInfo, bool, error) {
+	if filepath.Clean(name) == filepath.Clean(f.linkPath) {
+		info, err := f.Fs.Stat(name)
+		if err != nil {
+			return nil, false, err
+		}
+		return symlinkModeInfo{info}, true, nil
+	}
+	if lst, ok := f.Fs.(afero.Lstater); ok {
+		return lst.LstatIfPossible(name)
+	}
+	info, err := f.Fs.Stat(name)
+	return info, false, err
+}
+
+// statOnlyArtifactFs hides the Lstater capability so the revalidation lookup
+// exercises its Stat fallback leg (a filesystem without a symlink view).
+type statOnlyArtifactFs struct{ afero.Fs }
+
+// symlinkSwapAside renames the admitted file aside and plants a symlink at its
+// pathname pointing back at the same inode — the codex shape: a following
+// Stat still resolves the admitted bytes, only a no-follow lookup sees the
+// foreign link object. Returns the aside path. Requires an OsFs-backed tree.
+func symlinkSwapAside(t *testing.T, fs afero.Fs, path string) string {
+	t.Helper()
+	aside := path + ".symlink-aside"
+	require.NoError(t, fs.Rename(path, aside))
+	require.NoError(t, os.Symlink(aside, path))
+	return aside
+}
+
+func pr260AssertSymlinkPreserved(t *testing.T, link, aside, asideContent string) {
+	t.Helper()
+	linkInfo, lerr := os.Lstat(link)
+	require.NoError(t, lerr)
+	assert.NotZero(t, linkInfo.Mode()&os.ModeSymlink, "the foreign symlink object is never followed, moved, or removed")
+	got, readErr := os.ReadFile(aside)
+	require.NoError(t, readErr)
+	assert.Equal(t, asideContent, string(got), "the admitted bytes survive untouched under the aside name")
+}
+
+// The revalidation lookup is no-follow: a symlink planted at the admitted
+// pathname is rejected even when its target still names the admitted file.
+func TestRevalidateAdmittedSourceRejectsSymlinkDirectoryEntry(t *testing.T) {
+	base := afero.NewMemMapFs()
+	require.NoError(t, afero.WriteFile(base, "/m.mp4", []byte("video"), 0o644))
+	info, err := base.Stat("/m.mp4")
+	require.NoError(t, err)
+	id := captureArtifactSourceIdentity(info)
+	stage := &artifactStage{fs: &symlinkEntryLstatFs{Fs: base, linkPath: "/m.mp4"}}
+	err = stage.revalidateAdmittedSource("/m.mp4", id)
+	require.ErrorIs(t, err, errArtifactSourceChanged,
+		"a symlink directory entry at the admitted pathname never matches — its link object, not the target, would be moved")
+	assert.False(t, captureArtifactSourceIdentity(symlinkModeInfo{info}).known,
+		"admission never pins a symlink entry")
+	assert.False(t, captureArtifactSourceIdentity(symlinkModeInfo{info}).matches(info),
+		"a symlink-shaped pin matches nothing")
+	got, readErr := afero.ReadFile(base, "/m.mp4")
+	require.NoError(t, readErr)
+	assert.Equal(t, "video", string(got), "the entry under the foreign alias is untouched")
+}
+
+// A filesystem without any symlink distinction (or one that hides the
+// Lstater) falls back to Stat: MemMapFs itself has no symlink model, so the
+// answer stays regular-or-absent and the happy path remains provable there.
+func TestRevalidateAdmittedSourceStatFallbackWithoutLstater(t *testing.T) {
+	base := afero.NewMemMapFs()
+	require.NoError(t, afero.WriteFile(base, "/m.mp4", []byte("video"), 0o644))
+	info, err := base.Stat("/m.mp4")
+	require.NoError(t, err)
+	id := captureArtifactSourceIdentity(info)
+	stage := &artifactStage{fs: statOnlyArtifactFs{base}}
+	require.NoError(t, stage.revalidateAdmittedSource("/m.mp4", id),
+		"no Lstater: Stat answers the lookup; memfs has no symlinks to hide")
+	blocked := &artifactStage{fs: &pr260StatFailureFs{Fs: statOnlyArtifactFs{base}, path: "/m.mp4"}}
+	err = blocked.revalidateAdmittedSource("/m.mp4", id)
+	require.ErrorIs(t, err, errArtifactSourceChanged, "a lookup failure still fails closed on the fallback leg")
+}
+
+// The pre-execution gate: the admitted video renamed aside and replaced by a
+// symlink to that same inode must abort the deferred move publication — a
+// following Stat would still resolve the original bytes here.
+func TestDeferredMovePublishAbortsWhenSourceSwappedForSymlink(t *testing.T) {
+	db, _ := pr260ArtifactDB(t)
+	movie := pr260FencedMovie(t, db, "deferred-source-symlinked", "")
+	base, root, source, subtitle, multipart, unrelated, match := pr260FencedFiles(t, "deferred-source-symlinked")
+	if !pr260LinkSupported(t, organizer.LinkModeSoft, source) {
+		return
+	}
+	dest := filepath.Join(root, "library")
+	org := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize, MoveSubtitles: true, SubtitleExtensions: []string{".srt"}}, template.NewEngine(), nil)
+	ledger := &completeCallFaultLog{}
+	orch := &applyOrchImpl{fs: base, organizer: org, revertLog: ledger}
+	cmd := pr260ArtifactFailureCommand(&movie, match, dest)
+	cmd.Organize.Skip = false
+	cmd.Organize.MoveFiles = true
+	cmd.Download = false
+	stage, _, err := orch.prepareArtifact(context.Background(), cmd)
+	require.NoError(t, err)
+	defer stage.cleanup()
+
+	aside := symlinkSwapAside(t, base, source)
+
+	stagedPlan, planErr := org.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: models.FileMatchInfo{Path: stage.stagedSource, Name: filepath.Base(source)}, Movie: stage.original.Movie, DestDir: stage.root, MoveFiles: true, OperationMode: stage.original.OperationMode})
+	require.NoError(t, planErr)
+	state := &applyPipelineState{operationID: "op", organizeResult: &organizer.OrganizeResult{NewPath: stagedPlan.TargetPath, FolderPath: stagedPlan.TargetDir}}
+	publishErr := stage.publish(context.Background(), orch, state, nil)
+	require.ErrorIs(t, publishErr, errArtifactSourceChanged)
+	require.ErrorContains(t, publishErr, filepath.Base(source))
+	assert.False(t, stage.sourceCleanupArmed, "marker state matches any pre-consumption failure")
+	assert.False(t, stage.directOriginArmed)
+	completes, reconciles := journalCounts(ledger)
+	assert.Zero(t, completes, "the completion journal path never ran")
+	assert.Zero(t, reconciles)
+	pr260AssertRetained(t, base, source, subtitle, multipart, unrelated)
+	pr260AssertNoFinals(t, base, dest)
+	pr260AssertSymlinkPreserved(t, source, aside, "video")
+}
+
+// The post-publish original-removal gate: in-place move mode consumes the
+// original only after the staged copy lands; a symlink swapped in admits no
+// removal, and rollback restores the untouched state.
+func TestInPlaceMoveAbortsRemovingSymlinkedOriginal(t *testing.T) {
+	db, _ := pr260ArtifactDB(t)
+	movie := pr260FencedMovie(t, db, "inplace-original-symlinked", "")
+	base, root, source, sub, part, other, match := pr260FencedFiles(t, "inplace-original-symlinked")
+	isolatedDir := filepath.Join(root, "only-video")
+	require.NoError(t, base.MkdirAll(isolatedDir, 0o755))
+	standalone := filepath.Join(isolatedDir, movie.ID+".mp4")
+	require.NoError(t, afero.WriteFile(base, standalone, []byte("isolated media"), 0o644))
+	if !pr260LinkSupported(t, organizer.LinkModeSoft, standalone) {
+		return
+	}
+	match.Path = standalone
+	match.Name = filepath.Base(standalone)
+	match.MovieID = movie.ID
+	orch := pr260RealApply(base, &movie, organizer.MediaFormatConfig{}, nil, false)
+	m, matchErr := matcher.NewMatcher(&matcher.Config{})
+	require.NoError(t, matchErr)
+	orch.organizer = organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "renamed-folder", FileFormat: "<ID>", RenameFile: true, OperationMode: operationmode.OperationModeInPlace}, template.NewEngine(), m)
+	cmd := pr260FencedCommand(&movie, match, isolatedDir, pr260FencedCounter(t, db), operationmode.OperationModeInPlace, false, true, organizer.LinkModeNone, false, false)
+	stage, _, err := orch.prepareArtifact(context.Background(), cmd)
+	require.NoError(t, err)
+	require.True(t, stage.inPlace)
+	defer stage.cleanup()
+
+	require.True(t, stage.sourceIdentity.known)
+	aside := symlinkSwapAside(t, base, standalone)
+
+	state := &applyPipelineState{organizeResult: &organizer.OrganizeResult{NewPath: stage.stagedSource, InPlaceRenamed: true}}
+	publishErr := stage.publish(context.Background(), orch, state, nil)
+	require.ErrorIs(t, publishErr, errArtifactSourceChanged)
+	pr260AssertSymlinkPreserved(t, standalone, aside, "isolated media")
+	regularFiles := []string{}
+	walkErr := afero.Walk(base, root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.Mode().IsRegular() && !strings.Contains(path, ".javinizer-apply-") {
+			regularFiles = append(regularFiles, path)
+		}
+		return nil
+	})
+	require.NoError(t, walkErr)
+	assert.ElementsMatch(t, []string{source, sub, part, other, aside}, regularFiles,
+		"rollback removed every published artifact; only the inputs remain, and the symlink never counted as a payload")
+}
+
+// The sibling-original removal gate: a multipart sibling video renamed aside
+// and replaced by a symlink to itself refuses its removal after publication.
+func TestDeferredMoveAbortsRemovingSymlinkedSiblingOriginal(t *testing.T) {
+	db, _ := pr260ArtifactDB(t)
+	movie := pr260FencedMovie(t, db, "deferred-sibling-symlinked", "")
+	base, root, source, subtitle, multipart, unrelated, match := pr260FencedFiles(t, "deferred-sibling-symlinked")
+	if !pr260LinkSupported(t, organizer.LinkModeSoft, multipart) {
+		return
+	}
+	dest := filepath.Join(root, "library")
+	org := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize, MoveSubtitles: true, SubtitleExtensions: []string{".srt"}}, template.NewEngine(), nil)
+	ledger := &completeCallFaultLog{}
+	orch := &applyOrchImpl{fs: base, organizer: org, revertLog: ledger}
+	cmd := pr260ArtifactFailureCommand(&movie, match, dest)
+	cmd.Organize.Skip = false
+	cmd.Organize.MoveFiles = true
+	cmd.Download = false
+	stage, _, err := orch.prepareArtifact(context.Background(), cmd)
+	require.NoError(t, err)
+	defer stage.cleanup()
+
+	aside := symlinkSwapAside(t, base, multipart)
+
+	stagedPlan, planErr := org.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: models.FileMatchInfo{Path: stage.stagedSource, Name: filepath.Base(source)}, Movie: stage.original.Movie, DestDir: stage.root, MoveFiles: true, OperationMode: stage.original.OperationMode})
+	require.NoError(t, planErr)
+	state := &applyPipelineState{operationID: "op", organizeResult: &organizer.OrganizeResult{NewPath: stagedPlan.TargetPath, FolderPath: stagedPlan.TargetDir}}
+	publishErr := stage.publish(context.Background(), orch, state, nil)
+	require.ErrorIs(t, publishErr, errArtifactSourceChanged)
+	assert.False(t, stage.sourceCleanupArmed, "rollback restored the video: markers reset")
+	assert.False(t, stage.directOriginArmed)
+	pr260AssertRetained(t, base, source, subtitle, multipart, unrelated)
+	pr260AssertNoFinals(t, base, dest)
+	pr260AssertSymlinkPreserved(t, multipart, aside, "part two")
+}
+
+func TestPrepareArtifactNeverAdmitsSymlinkSource(t *testing.T) {
+	base, root, source, subtitle, multipart, unrelated, match := pr260FencedFiles(t, "admit-symlink-source")
+	if !pr260LinkSupported(t, organizer.LinkModeSoft, source) {
+		return
+	}
+	aside := symlinkSwapAside(t, base, source)
+	dest := filepath.Join(root, "published")
+	cmd := pr260ArtifactFailureCommand(&models.Movie{ContentID: "admit-symlink-source"}, match, dest)
+	cmd.Organize.Skip = false
+	stage, _, err := (&applyOrchImpl{fs: base}).prepareArtifact(context.Background(), cmd)
+	require.ErrorContains(t, err, "non-regular source",
+		"a symlinked video source is never admitted as a direct-publish source")
+	assert.Nil(t, stage)
+	pr260AssertSymlinkPreserved(t, source, aside, "video")
+	pr260AssertRetained(t, base, aside, subtitle, multipart, unrelated)
+	pr260AssertStageGone(t, base, root)
+	pr260AssertNoFinals(t, base, dest)
+}
+
+// A symlinked sibling — even one pointing at a real regular file — is never
+// pinned for direct publication; the regular siblings still admit.
+func TestPrepareArtifactSkipsSymlinkedSibling(t *testing.T) {
+	base, root, source, subtitle, multipart, unrelated, match := pr260FencedFiles(t, "admit-symlink-sibling")
+	if !pr260LinkSupported(t, organizer.LinkModeSoft, subtitle) {
+		return
+	}
+	aside := symlinkSwapAside(t, base, subtitle)
+	dest := filepath.Join(root, "published")
+	cmd := pr260ArtifactFailureCommand(&models.Movie{ContentID: "admit-symlink-sibling"}, match, dest)
+	cmd.Organize.Skip = false
+	stage, _, err := (&applyOrchImpl{fs: base}).prepareArtifact(context.Background(), cmd)
+	require.NoError(t, err)
+	defer stage.cleanup()
+	require.True(t, stage.sourceIdentity.known, "the regular video still admits")
+	for _, s := range stage.siblings {
+		assert.NotEqual(t, subtitle, s.sourcePath, "a symlinked sibling is never pinned for direct publication")
+	}
+	require.Len(t, stage.siblings, 1, "only the regular multipart sibling admitted")
+	pr260AssertSymlinkPreserved(t, subtitle, aside, "subtitle")
+	pr260AssertRetained(t, base, source, subtitle, multipart, unrelated)
+}

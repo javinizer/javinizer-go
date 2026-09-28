@@ -292,6 +292,17 @@ func sweepArtifactStaging(fs afero.Fs, parent string) {
 		// payload refuses, so the proof must exist before removal starts.
 		markArtifactStageCompleted(fs, candidate)
 		writeArtifactStageProof(fs, candidate)
+		// Both markers are best-effort writes: on Windows/SMB either can fail
+		// while the removal below half-succeeds, stranding a payload whose
+		// manifest is already gone and whose proof is missing or still carries a
+		// zero completion stamp — residue no later sweep could reclaim. Mirror
+		// the cleanup-path gate: open the destructive leg only with a
+		// re-readable COMPLETED sidecar proof beside the current name, else
+		// retain the tree for a retry-safe later sweep.
+		if !readArtifactStageProof(fs, candidate) {
+			logging.Warnf("artifact staging sweep retained %s: completed ownership proof unavailable beside the staging root", candidate)
+			continue
+		}
 		if err := removeArtifactTreeWithRetry(fs, candidate); err != nil {
 			logging.Warnf("artifact staging sweep retained %s: %v", candidate, err)
 		} else {
