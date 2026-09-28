@@ -1117,3 +1117,94 @@ func TestDeferredCopyPublishesStagedSiblingWithoutOrganizer(t *testing.T) {
 	_ = multipart
 	_ = unrelated
 }
+
+// Ledger-active copy path: the hash-pinned delete intent writes for each
+// copy-installed sidecar before execute, and the run lands cleanly.
+func TestDeferredCopySidecarIntentJournalHappyPath(t *testing.T) {
+	base, root, source, subtitle, _, _, match := pr260FencedFiles(t, "deferred-copy-intent-happy")
+	dest := filepath.Join(root, "library")
+	org := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize, MoveSubtitles: true, SubtitleExtensions: []string{".srt"}}, template.NewEngine(), nil)
+	orch := &applyOrchImpl{fs: base, organizer: org, revertLog: &completeCallFaultLog{}}
+	cmd := pr260ArtifactFailureCommand(&models.Movie{ContentID: "deferred-copy-intent-happy"}, match, dest)
+	cmd.Organize.Skip = false
+	cmd.Organize.MoveFiles = false
+	cmd.Download = false
+	cmd.PublicationFence = pr260FailureArtifactFencer{}
+	stage, _, err := orch.prepareArtifact(context.Background(), cmd)
+	require.NoError(t, err)
+	defer stage.cleanup()
+	stagedPlan, planErr := org.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: models.FileMatchInfo{Path: stage.stagedSource, Name: filepath.Base(source)}, Movie: stage.original.Movie, DestDir: stage.root, OperationMode: stage.original.OperationMode})
+	require.NoError(t, planErr)
+	state := &applyPipelineState{operationID: "op", organizeResult: &organizer.OrganizeResult{NewPath: stagedPlan.TargetPath, FolderPath: stagedPlan.TargetDir}}
+	require.NoError(t, stage.publish(context.Background(), orch, state, nil))
+	log := orch.revertLog.(*completeCallFaultLog)
+	assert.Positive(t, atomic.LoadInt32(&log.deletes), "pinned delete intents journaled for armed copy-installed sidecars")
+	assert.NotEmpty(t, log.deletePaths)
+	existsSub, _ := afero.Exists(base, subtitle)
+	assert.True(t, existsSub, "copy retains source")
+}
+
+type denyOpenAfterPrepareFS struct {
+	afero.Fs
+	path  string
+	armed bool
+}
+
+func (f *denyOpenAfterPrepareFS) Open(name string) (afero.File, error) {
+	if f.armed && name == f.path {
+		return nil, errors.New("digest read denied")
+	}
+	return f.Fs.Open(name)
+}
+
+// Copy-mode arm: unreadable source content at digest time shows the digest
+// leg's error (journal never gets a bogus hash to pin).
+func TestDeferredCopySidecarDigestFaultAborts(t *testing.T) {
+	base, root, source, subtitle, _, _, match := pr260FencedFiles(t, "deferred-copy-digest-fault")
+	dest := filepath.Join(root, "library")
+	org := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize, MoveSubtitles: true, SubtitleExtensions: []string{".srt"}}, template.NewEngine(), nil)
+	orch := &applyOrchImpl{fs: base, organizer: org, revertLog: &completeCallFaultLog{}}
+	cmd := pr260ArtifactFailureCommand(&models.Movie{ContentID: "deferred-copy-digest-fault"}, match, dest)
+	cmd.Organize.Skip = false
+	cmd.Organize.MoveFiles = false
+	cmd.Download = false
+	cmd.PublicationFence = pr260FailureArtifactFencer{}
+	stage, _, err := orch.prepareArtifact(context.Background(), cmd)
+	require.NoError(t, err)
+	defer stage.cleanup()
+	stagedPlan, planErr := org.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: models.FileMatchInfo{Path: stage.stagedSource, Name: filepath.Base(source)}, Movie: stage.original.Movie, DestDir: stage.root, OperationMode: stage.original.OperationMode})
+	require.NoError(t, planErr)
+
+	fsWithFault := &denyOpenAfterPrepareFS{Fs: base}
+	fsWithFault.path = subtitle
+	fsWithFault.armed = true
+	stage.fs = fsWithFault
+	orch.fs = fsWithFault
+	state := &applyPipelineState{operationID: "op", organizeResult: &organizer.OrganizeResult{NewPath: stagedPlan.TargetPath, FolderPath: stagedPlan.TargetDir}}
+	publishErr := stage.publish(context.Background(), orch, state, nil)
+	require.ErrorContains(t, publishErr, "digest", "digest failure prevents the journal from pinning wrong bytes")
+}
+
+// Journal refusal for a copy-installed sidecar also fails closed.
+func TestDeferredCopySidecarIntentJournalFaultAborts(t *testing.T) {
+	base, root, source, subtitle, _, _, match := pr260FencedFiles(t, "deferred-copy-intent-refusal")
+	dest := filepath.Join(root, "library")
+	org := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize, MoveSubtitles: true, SubtitleExtensions: []string{".srt"}}, template.NewEngine(), nil)
+	orch := &applyOrchImpl{fs: base, organizer: org, revertLog: &completeCallFaultLog{deleteErr: errors.New("ledger down")}}
+	cmd := pr260ArtifactFailureCommand(&models.Movie{ContentID: "deferred-copy-intent-refusal"}, match, dest)
+	cmd.Organize.Skip = false
+	cmd.Organize.MoveFiles = false
+	cmd.Download = false
+	cmd.PublicationFence = pr260FailureArtifactFencer{}
+	stage, _, err := orch.prepareArtifact(context.Background(), cmd)
+	require.NoError(t, err)
+	defer stage.cleanup()
+	stagedPlan, planErr := org.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: models.FileMatchInfo{Path: stage.stagedSource, Name: filepath.Base(source)}, Movie: stage.original.Movie, DestDir: stage.root, OperationMode: stage.original.OperationMode})
+	require.NoError(t, planErr)
+	state := &applyPipelineState{operationID: "op", organizeResult: &organizer.OrganizeResult{NewPath: stagedPlan.TargetPath, FolderPath: stagedPlan.TargetDir}}
+	publishErr := stage.publish(context.Background(), orch, state, nil)
+	require.ErrorContains(t, publishErr, "record copy-installed sidecar intent")
+	existsSub, serr := afero.Exists(base, subtitle)
+	require.NoError(t, serr)
+	assert.True(t, existsSub, "the faulted intent never ran execution; the subtitle never left its source")
+}

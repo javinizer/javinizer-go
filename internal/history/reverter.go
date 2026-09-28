@@ -251,6 +251,8 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 		return result, err
 	}
 
+	// only a hydrated pending intent gets the unexecuted-intent settle below.
+	hydratedPendingIntent := false
 	if op.NewPath == "" && op.OperationType == models.OperationTypeMove {
 		// A deferred-move row that crashed between publish and completion
 		// carries its primary endpoints ONLY as a pending MoveBack intent:
@@ -258,22 +260,7 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 		// never overwrite the freshly moved destination with its pre-overwrite
 		// backup (that would clobber the moved source's only remaining copy).
 		pendingMoveIntentAnchor(op)
-		// An intent with unreadable endpoints (malformed ledger) stays a no-op:
-		// checkAnchor skips it as anchor_missing.
-		if op.NewPath != "" {
-			_, dstErr := r.fs.Stat(op.NewPath)
-			_, srcErr := r.fs.Stat(op.OriginalPath)
-			if os.IsNotExist(dstErr) && srcErr == nil {
-				// Destination never landed while the source still stands: the move
-				// never executed — this intent settles as a no-op so the batch can
-				// report fully reverted instead of deferring retries forever.
-				if uerr := r.batchFileOpRepo.UpdateRevertStatus(ctx, op.ID, models.RevertStatusNoOp); uerr != nil {
-					return failRevert(ctx, r.batchFileOpRepo, op, models.RevertReasonUnexpectedPathState, fmt.Sprintf("settle unexecuted pending intent for op %d: %v", op.ID, uerr)), nil
-				}
-				op.RevertStatus = models.RevertStatusNoOp
-				return &RevertFileResult{OperationID: op.ID, MovieID: op.MovieID, OriginalPath: op.OriginalPath, NewPath: op.NewPath, Outcome: models.RevertOutcomeSkipped, Reason: models.RevertReasonAnchorMissing}, nil
-			}
-		}
+		hydratedPendingIntent = op.NewPath != ""
 	}
 
 	// P3: replay the replacement journal BEFORE the anchor check AND before
@@ -293,6 +280,21 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 	}
 	if len(restored) > 0 {
 		logging.Debugf("Reverted %d journaled replacement(s) for op %d ahead of the %s leg", len(restored), op.ID, op.OperationType)
+	}
+
+	// Only after the journal replay may an unexecuted intent settle a no-op,
+	// because a crash-severed overwrite has already restored its prior bytes by
+	// now — destination-absent + source-present proves the move never ran.
+	if hydratedPendingIntent && op.OperationType == models.OperationTypeMove {
+		_, dstErr := r.fs.Stat(op.NewPath)
+		_, srcErr := r.fs.Stat(op.OriginalPath)
+		if os.IsNotExist(dstErr) && srcErr == nil {
+			if uerr := r.batchFileOpRepo.UpdateRevertStatus(ctx, op.ID, models.RevertStatusNoOp); uerr != nil {
+				return failRevert(ctx, r.batchFileOpRepo, op, models.RevertReasonUnexpectedPathState, fmt.Sprintf("settle unexecuted pending intent for op %d: %v", op.ID, uerr)), nil
+			}
+			op.RevertStatus = models.RevertStatusNoOp
+			return &RevertFileResult{OperationID: op.ID, MovieID: op.MovieID, OriginalPath: op.OriginalPath, NewPath: op.NewPath, Outcome: models.RevertOutcomeSkipped, Reason: models.RevertReasonAnchorMissing}, nil
+		}
 	}
 
 	// Journal replay may have refreshed a stale caller snapshot. Re-check the

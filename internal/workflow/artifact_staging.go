@@ -587,6 +587,18 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 					return fmt.Errorf("arm copy-installed sidecar %s: %w", mv.NewPath, err)
 				}
 				sidecarIntentTargets = append(sidecarIntentTargets, mv.NewPath)
+				// The copy install writes the source's bytes verbatim: pin the
+				// delete intent before execute can place them so a crash between
+				// execute and completion still finds a hash-proofed entry.
+				if o.revertLog != nil && opID != "" {
+					digest, digestErr := artifactDigest(s.fs, mv.OriginalPath)
+					if digestErr != nil {
+						return fmt.Errorf("arm copy-installed sidecar digest %s: %w", mv.NewPath, digestErr)
+					}
+					if err := o.revertLog.RecordDeleteIntent(ctx, opID, []models.DeleteEntry{{Path: mv.NewPath, SHA256: digest}}); err != nil {
+						return fmt.Errorf("record copy-installed sidecar intent %s: %w", mv.NewPath, err)
+					}
+				}
 				// The organizer's subtitle lane locks the same destination key
 				// during execute; hand the in-process hold over exactly like the
 				// video lane does for the video plan target.
@@ -681,7 +693,10 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 				// directly — never clobbering anything that reappeared at the source —
 				// and let the outer rollback restore everything it did arm.
 				if _, statErr := s.fs.Stat(sr.OriginalPath); os.IsNotExist(statErr) {
-					if rerr := s.fs.Rename(sr.NewPath, sr.OriginalPath); rerr != nil {
+					// Only the provably-vacant source slot gets the direct reversal,
+					// and even that move must be no-replace: a source recreated after
+					// this Stat must never be clobbered by the compensation.
+					if rerr := fsutil.MoveFileNoReplace(s.fs, sr.NewPath, sr.OriginalPath); rerr != nil {
 						logging.Warnf("subtitle direct rollback failed for %s: %v (arm error: %v)", sr.NewPath, rerr, err)
 					}
 				}
@@ -1127,21 +1142,29 @@ func (s *artifactStage) installPaths(paths, preserve []string, stagedArtifactDir
 			plans = append(plans, plan)
 			continue
 		}
+		// The verdict that matters is the ARMING one: preflight's stale
+		// occupation snapshot can say replace where BeforePublish finds nothing
+		// (armed as a create) and vice versa — journal deletion intent based on
+		// what BeforePublish actually did, not the stale classification.
+		replaced := false
 		if s.publishBatch != nil {
-			if _, err := s.publishBatch.BeforePublish(s.publishCtx, plan.target, plan.replace); err != nil {
-				return false, err
+			var prepErr error
+			replaced, prepErr = s.publishBatch.BeforePublish(s.publishCtx, plan.target, plan.replace)
+			if prepErr != nil {
+				return false, prepErr
 			}
 		} else if plan.replace {
 			if removeErr := s.fs.Remove(plan.target); removeErr != nil {
 				return false, fmt.Errorf("replace artifact destination %s: %w", plan.target, removeErr)
 			}
+			replaced = true
 		}
 		// Journal the pending deletion BEFORE the install lands, pinned to the
 		// staged payload's digest: a crash anywhere from here on is covered, and
 		// a revert deletes the destination only while its bytes still match what
 		// this operation meant to publish (never unrelated later content).
 		// Replacement paths are already journaled via their replacement legs.
-		if journalDeleteIntent != nil && !plan.replace {
+		if journalDeleteIntent != nil && !replaced {
 			digest, digestErr := artifactDigest(s.fs, plan.source)
 			if digestErr != nil {
 				return false, digestErr
