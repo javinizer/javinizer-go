@@ -781,3 +781,50 @@ func TestDeferredMoveRetainSkippedSubtitleSource(t *testing.T) {
 	existsVideoSrc, _ := afero.Exists(base, source)
 	assert.False(t, existsVideoSrc, "video move consumed its original")
 }
+
+type denyLstatAtPublishFS struct {
+	afero.Fs
+	path string
+}
+
+func (f *denyLstatAtPublishFS) LstatIfPossible(name string) (os.FileInfo, bool, error) {
+	if name == f.path {
+		return nil, false, errors.New("confirmation inspect denied")
+	}
+	if l, ok := f.Fs.(afero.Lstater); ok {
+		return l.LstatIfPossible(name)
+	}
+	info, err := f.Fs.Stat(name)
+	return info, false, err
+}
+
+// Move mode with confirmation failing after the real source was renamed: the
+// early-armed rollback origin must restore the video to its original path.
+func TestDeferredMoveConfirmFaultRollsBackViaEarlyArm(t *testing.T) {
+	base, root, source, subtitle, multipart, unrelated, match := pr260FencedFiles(t, "deferred-confirm-fault")
+	dest := filepath.Join(root, "library")
+	org := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize}, template.NewEngine(), nil)
+	orch := &applyOrchImpl{fs: base, organizer: org}
+	cmd := pr260ArtifactFailureCommand(&models.Movie{ContentID: "deferred-confirm-fault"}, match, dest)
+	cmd.Organize.Skip = false
+	cmd.Organize.MoveFiles = true
+	cmd.Download = false
+	stage, _, err := orch.prepareArtifact(context.Background(), cmd)
+	require.NoError(t, err)
+	defer stage.cleanup()
+
+	finalPlan, planErr := org.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: match, Movie: stage.original.Movie, DestDir: dest, MoveFiles: true, OperationMode: stage.original.OperationMode})
+	require.NoError(t, planErr)
+	stagedPlan, planErr2 := org.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: models.FileMatchInfo{Path: stage.stagedSource, Name: filepath.Base(source)}, Movie: stage.original.Movie, DestDir: stage.root, MoveFiles: true, OperationMode: stage.original.OperationMode})
+	require.NoError(t, planErr2)
+
+	fsWithFault := &denyLstatAtPublishFS{Fs: base, path: finalPlan.TargetPath}
+	stage.fs = fsWithFault
+	state := &applyPipelineState{operationID: "op", organizeResult: &organizer.OrganizeResult{NewPath: stagedPlan.TargetPath, FolderPath: stagedPlan.TargetDir}}
+	publishErr := stage.publish(context.Background(), orch, state, nil)
+	require.Error(t, publishErr)
+	pr260AssertRetained(t, base, source, subtitle, multipart, unrelated)
+	assert.False(t, stage.directOriginArmed, "reset after rollback")
+	exists, _ := afero.Exists(base, finalPlan.TargetPath)
+	assert.False(t, exists, "destination folder cleaned by rollback")
+}

@@ -463,7 +463,6 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 	finalReplaced := false
 	stagedVideo := ""
 	videoInstalledByTree := false
-	publishedTarget := ""
 	// The video leg moves the real source whenever the publish call carries
 	// move semantics: explicit MoveFiles, or any flow where ExecuteOrganizePlan
 	// would still rename (an irrelevant link_mode must not disarm intents).
@@ -563,10 +562,26 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 				}
 			}
 		}
-		publishedTarget = plan.TargetPath
 		finalResult, err = executor.ExecuteOrganizePlan(plan, publishMove, s.original.Organize.LinkMode)
 		if filepath.Clean(plan.SourcePath) != filepath.Clean(plan.TargetPath) && (err == nil || fsutil.PublishCompleted(err)) {
 			batch.ObservePublishResult(plan.TargetPath)
+			if s.videoDeferred && publishMove {
+				// The rename already consumed the real source: arm rollback before
+				// any fallible leg (ConfirmPublish, later installs) can observe an
+				// installed destination worth deleting with no armed inverse.
+				s.sourceCleanupArmed = true
+				s.directOriginArmed = true
+				target := s.sourcePath
+				if finalResult != nil && finalResult.NewPath != "" {
+					target = finalResult.NewPath
+				}
+				if armErr := batch.SetRollbackOrigin(target, s.sourcePath); armErr != nil {
+					if altErr := batch.SetRollbackOrigin(plan.TargetPath, s.sourcePath); altErr != nil {
+						return errors.Join(armErr, altErr)
+					}
+					return armErr
+				}
+			}
 		}
 		if err != nil {
 			return fmt.Errorf("publish organized video: %w", err)
@@ -589,15 +604,9 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 	// crash window stays revertable before any later leg can fail.
 	directSourceConsumed := s.videoDeferred && !s.original.Organize.Skip && publishMove && s.sourcePath != "" && finalResult != nil && filepath.Clean(s.sourcePath) != filepath.Clean(finalResult.NewPath)
 	if directSourceConsumed {
-		// The real source was consumed by the move: arm rollback BEFORE any
-		// later leg can fail, or the destination would be removed without the
-		// source ever coming back. A rewired/untracked reported NewPath falls
-		// back to the tracked planned leg so rollback stays fail-closed.
-		s.sourceCleanupArmed = true
-		if err := batch.SetRollbackOrigin(finalResult.NewPath, s.sourcePath); err != nil {
-			return errors.Join(err, batch.SetRollbackOrigin(publishedTarget, s.sourcePath))
-		}
-		s.directOriginArmed = true
+		// The early arm (immediately after ObservePublishResult) owns the
+		// inverse for the consumed source; every path reaching this block armed
+		// it, so there is no arm work left here.
 		// The same execution moved source sidecars along with the video:
 		// register each with the batch (in-process rollback) and the journal
 		// (crash recovery) before any later leg can fail, or cleanup would

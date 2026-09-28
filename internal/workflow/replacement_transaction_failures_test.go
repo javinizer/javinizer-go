@@ -15,6 +15,8 @@ import (
 	"github.com/javinizer/javinizer-go/internal/organizer"
 	"github.com/javinizer/javinizer-go/internal/template"
 	"github.com/spf13/afero"
+	"github.com/stretchr/testify/assert"
+
 	"github.com/stretchr/testify/require"
 )
 
@@ -432,3 +434,38 @@ func TestTreeDestinationWalkRejectsEscapingEntry(t *testing.T) {
 }
 
 var _ database.ApplyArtifactPublicationFencer = postPublishFence{}
+
+// Fail-closed even when BOTH the reported destination and the tracked planned
+// leg are hostile: the join surfaces, nothing is touched, the source is
+// restored (or never consumed).
+// Fail-closed even when the reported destination is hostile and the tracked
+// planned leg lost its installed proof (its destination was consumed): the
+// joined error surfaces; untouched inputs stay where they were.
+func TestMoveCleanupFailsClosedOnDualUntrackedArms(t *testing.T) {
+	base, root, _, subtitle, multipart, unrelated, match := pr260FencedFiles(t, "untracked-dual")
+	movie := models.Movie{ContentID: "untracked-dual", RenderGeneration: 1}
+	real := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize}, template.NewEngine(), nil)
+	fault := &pr260PublicationFaultOrganizer{Organizer: real, afterExecute: func(plan *organizer.OrganizePlan, result *organizer.OrganizeResult) {
+		result.NewPath = filepath.Join(root, "missing-parent", "untracked.mp4")
+		_ = base.RemoveAll(filepath.Dir(plan.TargetPath))
+	}}
+	orch := &applyOrchImpl{fs: base, organizer: fault}
+	cmd := pr260ArtifactFailureCommand(&movie, match, filepath.Join(root, "library"))
+	cmd.Download = false
+	cmd.Organize.Skip = false
+	cmd.Organize.MoveFiles = true
+	cmd.PublicationFence = postPublishFence{movie: &movie}
+	stage, _, err := orch.prepareArtifact(t.Context(), cmd)
+	require.NoError(t, err)
+	defer stage.cleanup()
+	state := &applyPipelineState{organizeResult: &organizer.OrganizeResult{NewPath: stage.stagedSource}}
+	publishErr := stage.publish(t.Context(), orch, state, nil)
+	require.Error(t, publishErr)
+	require.ErrorContains(t, publishErr, "track staged publication destination", "joined double-fail keeps the tracked-leg error visible")
+	existsSub, _ := afero.Exists(base, subtitle)
+	assert.True(t, existsSub)
+	existsMulti, _ := afero.Exists(base, multipart)
+	assert.True(t, existsMulti)
+	existsUnrelated, _ := afero.Exists(base, unrelated)
+	assert.True(t, existsUnrelated)
+}
