@@ -587,7 +587,21 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 		finalResult, err = executor.ExecuteOrganizePlan(plan, publishMove, s.original.Organize.LinkMode)
 		if filepath.Clean(plan.SourcePath) != filepath.Clean(plan.TargetPath) && (err == nil || fsutil.PublishCompleted(err)) {
 			batch.ObservePublishResult(plan.TargetPath)
+			// Confirm only what execute reports as Copied: a would-be target
+			// that turned out occupied/armed-skip mid-run must not be registered
+			// as ours, or rollback would UnlinkVerified a foreign file.
+			copiedTargets := map[string]bool{}
+			if finalResult != nil {
+				for _, sr := range finalResult.Subtitles {
+					if sr.Copied && sr.NewPath != "" {
+						copiedTargets[filepath.Clean(sr.NewPath)] = true
+					}
+				}
+			}
 			for _, target := range sidecarIntentTargets {
+				if !copiedTargets[filepath.Clean(target)] {
+					continue
+				}
 				batch.ObservePublishResult(target)
 				if cerr := batch.ConfirmPublish(ctx, target); cerr != nil {
 					return cerr
@@ -829,6 +843,15 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 			// its source: no journal inverse exists to rebuild a deleted original.
 			if skipped[filepath.Clean(sibling.sourcePath)] {
 				continue
+			}
+			if o.revertLog != nil && opID != "" {
+				// Persist this sibling inverse before removing its source: a generic
+				// staged sibling (e.g. a multipart sibling video published through
+				// the sidecar block) has no other durable entry if the process dies
+				// before the outcome completion.
+				if err := o.revertLog.RecordMoveIntent(ctx, opID, sibling.sourcePath, target); err != nil {
+					return fmt.Errorf("journal sibling move intent: %w", err)
+				}
 			}
 			if err := batch.SetRollbackOrigin(target, sibling.sourcePath); err != nil {
 				return err

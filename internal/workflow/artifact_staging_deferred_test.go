@@ -1028,3 +1028,56 @@ func TestDeferredCopySidecarConfirmDirSwapFails(t *testing.T) {
 	require.ErrorContains(t, publishErr, "did not install a file")
 	pr260AssertRetained(t, base, source, subtitle, multipart, unrelated)
 }
+
+// An armed sidecar target whose execute-leg outcome is anything but Copied
+// must NOT be confirmed as ours: keep it out of the batch.
+func TestDeferredCopySkipsConfirmForUncopiedSidecars(t *testing.T) {
+	base, root, source, subtitle, multipart, unrelated, match := pr260FencedFiles(t, "deferred-copy-nocopy-skip")
+	dest := filepath.Join(root, "library")
+	real := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize, MoveSubtitles: true, SubtitleExtensions: []string{".srt"}}, template.NewEngine(), nil)
+	fault := &pr260PublicationFaultOrganizer{Organizer: real, afterExecute: func(_ *organizer.OrganizePlan, result *organizer.OrganizeResult) {
+		for i := range result.Subtitles {
+			result.Subtitles[i].Copied = false
+		}
+	}}
+	orch := &applyOrchImpl{fs: base, organizer: fault}
+	cmd := pr260ArtifactFailureCommand(&models.Movie{ContentID: "deferred-copy-nocopy-skip"}, match, dest)
+	cmd.Organize.Skip = false
+	cmd.Organize.MoveFiles = false
+	cmd.Download = false
+	cmd.PublicationFence = pr260FailureArtifactFencer{}
+	stage, _, err := orch.prepareArtifact(context.Background(), cmd)
+	require.NoError(t, err)
+	defer stage.cleanup()
+	stagedPlan, planErr := real.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: models.FileMatchInfo{Path: stage.stagedSource, Name: filepath.Base(source)}, Movie: stage.original.Movie, DestDir: stage.root, OperationMode: stage.original.OperationMode})
+	require.NoError(t, planErr)
+	state := &applyPipelineState{operationID: "op", organizeResult: &organizer.OrganizeResult{NewPath: stagedPlan.TargetPath, FolderPath: stagedPlan.TargetDir}}
+	require.NoError(t, stage.publish(context.Background(), orch, state, nil), "nothing uncopied gets batch-confirmed, but publish still settles")
+	pr260AssertRetained(t, base, source, subtitle, multipart, unrelated)
+}
+
+// A faulted sibling inverse journal aborts the source-removal loop without
+// consuming anything.
+func TestDeferredMoveSiblingIntentFaultAborts(t *testing.T) {
+	base, root, source, subtitle, _, _, match := pr260FencedFiles(t, "deferred-sibling-intent-fault")
+	dest := filepath.Join(root, "library")
+	org := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize}, template.NewEngine(), nil)
+	orch := &applyOrchImpl{fs: base, organizer: org, revertLog: &completeCallFaultLog{intentFailAt: 3}}
+	cmd := pr260ArtifactFailureCommand(&models.Movie{ContentID: "deferred-sibling-intent-fault"}, match, dest)
+	cmd.Organize.Skip = false
+	cmd.Organize.MoveFiles = true
+	cmd.Download = false
+	stage, _, err := orch.prepareArtifact(context.Background(), cmd)
+	require.NoError(t, err)
+	defer stage.cleanup()
+	stagedPlan, planErr := org.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: models.FileMatchInfo{Path: stage.stagedSource, Name: filepath.Base(source)}, Movie: stage.original.Movie, DestDir: stage.root, MoveFiles: true, OperationMode: stage.original.OperationMode})
+	require.NoError(t, planErr)
+	state := &applyPipelineState{operationID: "op", organizeResult: &organizer.OrganizeResult{NewPath: stagedPlan.TargetPath, FolderPath: stagedPlan.TargetDir}}
+	publishErr := stage.publish(context.Background(), orch, state, nil)
+	require.ErrorContains(t, publishErr, "journal sibling move intent")
+	exists, _ := afero.Exists(base, subtitle)
+	assert.True(t, exists, "the faulted sibling never got its source consumed")
+	existsSrc, _ := afero.Exists(base, source)
+	assert.True(t, existsSrc, "rollback restores the moved video onto its source path")
+
+}
