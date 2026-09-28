@@ -102,12 +102,11 @@ func writeArtifactStageManifestState(fs afero.Fs, root string, completedUnixNano
 // recoverable, a wrong delete is not.
 func artifactStageReclaimable(fs afero.Fs, path string) bool {
 	if !artifactStageManifestReclaimable(fs, path) {
-		// A quarantined tree whose in-tree manifest was already consumed by a
-		// partial removal re-proves ownership through its external sidecar.
-		if strings.Contains(filepath.Base(path), artifactStageQuarantineMark) {
-			return readArtifactStageProof(fs, path)
-		}
-		return false
+		// Manifest-level claims failed: an external sidecar proof is the
+		// last-remaining ownership evidence. It applies to any staging-named tree
+		// (quarantined or left under its original name after a failed carry),
+		// whose token binding proves nobody else could have written the marker.
+		return readArtifactStageProof(fs, path)
 	}
 	return true
 }

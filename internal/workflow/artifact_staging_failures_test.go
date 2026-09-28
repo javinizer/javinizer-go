@@ -156,7 +156,12 @@ func TestPR260ArtifactStagingRenameFailureRetainsSourceAfterPartialPublish(t *te
 	stage.cleanup()
 	pr260AssertNoFinals(t, baseFS, dest)
 	pr260AssertRetained(t, baseFS, source, subtitle, multipart, unrelated)
-	pr260AssertStageGone(t, baseFS, root)
+	// With renames wedged the retention-first cleanup cannot carry the proof
+	// through a quarantine rename, so the staged tree (completed-marked) is
+	// retained for the next organize's sweep rather than partially removed.
+	exists, err := afero.Exists(baseFS, root)
+	require.NoError(t, err)
+	assert.True(t, exists, "failed quarantine must retain the staging root")
 }
 
 type pr260RenameFailureFs struct{ afero.Fs }

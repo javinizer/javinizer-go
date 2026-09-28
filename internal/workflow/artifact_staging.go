@@ -61,12 +61,8 @@ type artifactStage struct {
 	directOriginArmed  bool
 	sharedClaims       []SharedArtifactClaim
 	sharedConsumers    []SharedArtifactClaim
-	// deferredCopySidecarTargets names sidecar destinations the copy/link
-	// execute installed through the batch, so installPaths skips their staged
-	// sibling copies instead of double-publishing over the live install.
-	deferredCopySidecarTargets []string
-	sharedPublishBegan         bool
-	sharedPoisoned             bool
+	sharedPublishBegan bool
+	sharedPoisoned     bool
 }
 
 var errArtifactDirtyAdmission = errors.New("artifact publication preparation failed")
@@ -327,11 +323,13 @@ func (s *artifactStage) cleanup() {
 	writeArtifactStageProof(s.fs, s.root)
 	quarantine := artifactStageQuarantineName(s.root)
 	proofSrc, _ := artifactStageProofPath(s.root), ""
-	if err := s.fs.Rename(s.root, quarantine); err == nil {
-		s.root = quarantine
-		if _, statErr := s.fs.Stat(proofSrc); statErr == nil {
-			_ = s.fs.Rename(proofSrc, artifactStageProofPath(quarantine))
-		}
+	if err := s.fs.Rename(s.root, quarantine); err != nil {
+		logging.Warnf("artifact staging cleanup retention %s: quarantine rename failed, retained for the next organize sweep: %v", s.root, err)
+		return
+	}
+	s.root = quarantine
+	if _, statErr := s.fs.Stat(proofSrc); statErr == nil {
+		_ = s.fs.Rename(proofSrc, artifactStageProofPath(quarantine))
 	}
 	if err := removeArtifactTreeWithRetry(s.fs, s.root); err != nil {
 		logging.Warnf("artifact staging cleanup retained %s: %v", s.root, err)
@@ -478,7 +476,6 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 	stagedVideo := ""
 	videoInstalledByTree := false
 	sidecarIntentTargets := []string{}
-	s.deferredCopySidecarTargets = nil
 	// The video leg moves the real source whenever the publish call carries
 	// move semantics: explicit MoveFiles, or any flow where ExecuteOrganizePlan
 	// would still rename (an irrelevant link_mode must not disarm intents).
@@ -604,7 +601,6 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 				// video lane does for the video plan target.
 				batch.YieldToLockedPublisher(mv.NewPath)
 			}
-			s.deferredCopySidecarTargets = sidecarIntentTargets
 		}
 		finalResult, err = executor.ExecuteOrganizePlan(plan, publishMove, s.original.Organize.LinkMode)
 		if filepath.Clean(plan.SourcePath) != filepath.Clean(plan.TargetPath) && (err == nil || fsutil.PublishCompleted(err)) {
@@ -817,6 +813,7 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 	if !s.original.Organize.Skip && s.original.Organize.MoveFiles && s.sourcePath != "" && filepath.Clean(s.sourcePath) != filepath.Clean(finalResult.NewPath) {
 		// Planned execution publishes the video, but may leave copied siblings
 		// under .source. Publish them before removing any original sidecar.
+		published := map[string]bool{}
 		for _, sibling := range s.siblings {
 			target := filepath.Join(filepath.Dir(finalResult.NewPath), stagedArtifactSiblingName(filepath.Base(s.sourcePath), filepath.Base(finalResult.NewPath), filepath.Base(sibling.sourcePath)))
 			if _, statErr := s.fs.Stat(target); os.IsNotExist(statErr) {
@@ -833,6 +830,7 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 				if confirmErr := batch.ConfirmPublish(ctx, target); confirmErr != nil {
 					return confirmErr
 				}
+				published[filepath.Clean(target)] = true
 				// This block runs in move mode only: published sibling targets are
 				// MoveBack-owned (inverse recorded above), never enrolled in the
 				// ordinary Delete ledger — a revert moves them back.
@@ -875,6 +873,13 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 			// A subtitle the organizer skipped (its destination was occupied) keeps
 			// its source: no journal inverse exists to rebuild a deleted original.
 			if skipped[filepath.Clean(sibling.sourcePath)] {
+				continue
+			}
+			// Only an apply that actually published the staged copy may consume the
+			// original: an occupied target that nothing wrote stays foreign, and
+			// removing the source would leave a permanent MoveBack rename of
+			// foreign bytes onto it.
+			if !published[filepath.Clean(target)] {
 				continue
 			}
 			if o.revertLog != nil && opID != "" {
@@ -1096,6 +1101,13 @@ func (s *artifactStage) installPaths(paths, preserve []string, stagedArtifactDir
 			if info.IsDir() {
 				return false, fmt.Errorf("artifact destination is a directory: %s", target)
 			}
+			if digestEq, eqErr := sameBytes(s.fs, source, target); eqErr == nil && digestEq {
+				// Byte-identical (e.g. this operation just copy-installed through the
+				// memberdBatch route): no duplicate install, no replacement journal.
+				plan.skip = true
+				plans = append(plans, plan)
+				continue
+			}
 			if !s.original.OverwriteExistingMedia && containsPath(preserve, source) {
 				plan.skip = true
 				preserved = true
@@ -1134,14 +1146,7 @@ func (s *artifactStage) installPaths(paths, preserve []string, stagedArtifactDir
 		if plan.sharedOwner {
 			s.sharedPublishBegan = true
 		}
-		// A copy-installed sidecar target that arrived during this run is not
-		// a content conflict for the staged sibling: the staged copy's bytes
-		// already sit there. Skip its tree install instead of replacing it.
-		if len(s.deferredCopySidecarTargets) > 0 && containsPath(s.deferredCopySidecarTargets, plan.target) {
-			plan.skip = true
-			plans = append(plans, plan)
-			continue
-		}
+
 		// The verdict that matters is the ARMING one: preflight's stale
 		// occupation snapshot can say replace where BeforePublish finds nothing
 		// (armed as a create) and vice versa — journal deletion intent based on
@@ -1198,6 +1203,20 @@ func (s *artifactStage) publicationPath(path, stagedArtifactDir, finalArtifactDi
 		return target, nil
 	}
 	return filepath.Join(finalArtifactDir, rel), nil
+}
+
+// sameBytes reports whether two files hold identical content, surfacing any
+// read failure as an error (the caller treats that as not-equal).
+func sameBytes(fs afero.Fs, a, b string) (bool, error) {
+	da, errA := artifactDigest(fs, a)
+	if errA != nil {
+		return false, errA
+	}
+	db, errB := artifactDigest(fs, b)
+	if errB != nil {
+		return false, errB
+	}
+	return da == db, nil
 }
 
 func artifactDigest(fs afero.Fs, path string) (string, error) {

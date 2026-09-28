@@ -1208,3 +1208,21 @@ func TestDeferredCopySidecarIntentJournalFaultAborts(t *testing.T) {
 	require.NoError(t, serr)
 	assert.True(t, existsSub, "the faulted intent never ran execution; the subtitle never left its source")
 }
+
+// sameBytes surfaces read failures so the caller classifies them as unequal.
+func TestSameBytesFaultLegs(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	require.NoError(t, fs.MkdirAll("/x", 0o755))
+	require.NoError(t, afero.WriteFile(fs, "/x/a.txt", []byte("same"), 0o644))
+	require.NoError(t, afero.WriteFile(fs, "/x/b.txt", []byte("same"), 0o644))
+	eq, err := sameBytes(fs, "/x/a.txt", "/x/b.txt")
+	require.NoError(t, err)
+	assert.True(t, eq)
+
+	deny := &denyOpenAfterPrepareFS{Fs: fs, armed: true, path: "/x/a.txt"}
+	_, err = sameBytes(deny, "/x/a.txt", "/x/b.txt")
+	require.Error(t, err, "first source's digest fail surfaces")
+	deny.path = "/x/b.txt"
+	_, err = sameBytes(deny, "/x/a.txt", "/x/b.txt")
+	require.Error(t, err, "second source's digest fail surfaces")
+}

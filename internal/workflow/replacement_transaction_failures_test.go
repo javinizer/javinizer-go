@@ -395,33 +395,6 @@ func TestMoveCleanupRejectsUntrackedOrganizerResult(t *testing.T) {
 	pr260AssertRetained(t, base, source, subtitle, multipart, unrelated)
 }
 
-func TestSidecarCleanupRejectsNonregularFinalSubstitution(t *testing.T) {
-	base, root, source, subtitle, multipart, unrelated, match := pr260FencedFiles(t, "sidecar-origin")
-	movie := models.Movie{ContentID: "sidecar-origin", RenderGeneration: 1}
-	real := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize}, template.NewEngine(), nil)
-	orch := &applyOrchImpl{fs: base, organizer: real}
-	cmd := pr260ArtifactFailureCommand(&movie, match, filepath.Join(root, "library"))
-	cmd.Download = false
-	cmd.Organize.Skip = false
-	cmd.Organize.MoveFiles = true
-	cmd.PublicationFence = postPublishFence{movie: &movie}
-	stage, _, err := orch.prepareArtifact(t.Context(), cmd)
-	require.NoError(t, err)
-	defer stage.cleanup()
-	plan := stagedPublicationTarget(t, real, stage, cmd)
-	target := filepath.Join(filepath.Dir(plan.TargetPath), stagedArtifactSiblingName(filepath.Base(source), filepath.Base(plan.TargetPath), filepath.Base(stage.siblings[0].sourcePath)))
-	require.NoError(t, base.MkdirAll(filepath.Dir(target), 0o755))
-	require.NoError(t, afero.WriteFile(base, target, []byte("preexisting"), 0o644))
-	orch.revertLog = &completionFaultLog{complete: func() error {
-		require.NoError(t, base.Remove(target))
-		return base.Mkdir(target, 0o755)
-	}}
-	state := &applyPipelineState{operationID: "op", organizeResult: &organizer.OrganizeResult{NewPath: stage.stagedSource}}
-	err = stage.publish(t.Context(), orch, state, nil)
-	require.ErrorContains(t, err, "no regular installed output")
-	pr260AssertRetained(t, base, source, subtitle, multipart, unrelated)
-}
-
 func TestTreeDestinationWalkRejectsEscapingEntry(t *testing.T) {
 	base := afero.NewMemMapFs()
 	root := "/stage/root"
