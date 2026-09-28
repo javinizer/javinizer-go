@@ -104,7 +104,7 @@ func TestPR260ClosureMappingAndInstallGuard(t *testing.T) {
 	require.NoError(t, err)
 	stage.inPlace = true
 	stage.cleanup()
-	preserved, err := stage.installTree("", "", nil, "", "")
+	preserved, err := stage.installTree("", "", nil, "", "", nil)
 	require.NoError(t, err)
 	require.False(t, preserved)
 	pr260AssertRetained(t, base, source, sub, part, other)

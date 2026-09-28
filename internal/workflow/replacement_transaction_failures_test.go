@@ -261,7 +261,7 @@ func TestArtifactTreeInspectionAndLegacyReplacementFailures(t *testing.T) {
 	require.NoError(t, afero.WriteFile(base, target, []byte("old"), 0o644))
 	stage.original.OverwriteExistingMedia = true
 	fs.removePath = target
-	_, err = stage.installTree("", "", nil, "", "")
+	_, err = stage.installTree("", "", nil, "", "", nil)
 	require.ErrorContains(t, err, "replace artifact destination")
 }
 
@@ -278,7 +278,7 @@ func TestArtifactTreeConfirmFailureRetainsRecoverableStage(t *testing.T) {
 	require.NoError(t, err)
 	stage.publishBatch, stage.publishCtx = batch, t.Context()
 	fs.enableLstatAfterRename = target
-	_, err = stage.installTree("", "", nil, "", "")
+	_, err = stage.installTree("", "", nil, "", "", nil)
 	require.ErrorContains(t, err, "inspect staged publication result")
 	require.NoError(t, batch.Rollback(t.Context()))
 }

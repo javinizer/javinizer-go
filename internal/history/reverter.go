@@ -402,10 +402,39 @@ func (r *Reverter) guardDoubleRevert(ctx context.Context, op *models.BatchFileOp
 	return nil, nil
 }
 
+// pendingMoveIntentAnchor recovers a move row's primary destination from its
+// pending MoveBack intent ledger and stamps the row's column-shaped fields, so
+// later revert legs (checkAnchor, revertPrimaryFile, cleanup) see a coherent
+// operation. Only the intent whose source matches the row's OriginalPath can
+// pose as the primary move.
+func pendingMoveIntentAnchor(op *models.BatchFileOperation) string {
+	if op.OriginalPath == "" || op.GeneratedFiles == "" {
+		return ""
+	}
+	gf, err := models.ParseGeneratedFiles(op.GeneratedFiles)
+	if err != nil {
+		return ""
+	}
+	for _, fm := range gf.MoveBack {
+		if fm.OriginalPath == op.OriginalPath && fm.NewPath != "" {
+			op.NewPath = fm.NewPath
+			return fm.NewPath
+		}
+	}
+	return ""
+}
+
 func (r *Reverter) checkAnchor(ctx context.Context, op *models.BatchFileOperation) (*RevertFileResult, error) {
 	anchorPath := op.NewPath
 	if op.OperationType == models.OperationTypeUpdate {
 		anchorPath = op.OriginalPath
+	}
+	if anchorPath == "" && op.OperationType == models.OperationTypeMove {
+		// A deferred-move row that crashed between publish and completion
+		// carries its primary endpoints ONLY as a pending MoveBack intent:
+		// hydrate the column-shaped anchor so the row stays revertable
+		// instead of anchor-skipping forever.
+		anchorPath = pendingMoveIntentAnchor(op)
 	}
 
 	if _, err := r.fs.Stat(anchorPath); err != nil {

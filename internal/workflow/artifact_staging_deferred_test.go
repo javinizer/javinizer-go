@@ -158,7 +158,7 @@ func TestStagingWalksSkipOwnershipManifest(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []string{filepath.Join(final, "child", "a.txt")}, dests)
 
-	_, err = stage.installTree("", "", nil, "", "")
+	_, err = stage.installTree("", "", nil, "", "", nil)
 	require.NoError(t, err)
 	exists, _ := afero.Exists(base, filepath.Join(final, "child", "a.txt"))
 	require.True(t, exists)
@@ -232,6 +232,7 @@ type completeCallFaultLog struct {
 	intents      int32
 	deleteErr    error
 	deletes      int32
+	deletePaths  []string
 }
 
 func (l *completeCallFaultLog) Complete(context.Context, OperationID, *ApplyResult) error {
@@ -248,8 +249,9 @@ func (l *completeCallFaultLog) RecordMoveIntent(context.Context, OperationID, st
 	return l.intentErr
 }
 
-func (l *completeCallFaultLog) RecordDeleteIntent(context.Context, OperationID, []string) error {
+func (l *completeCallFaultLog) RecordDeleteIntent(_ context.Context, _ OperationID, paths []string) error {
 	atomic.AddInt32(&l.deletes, 1)
+	l.deletePaths = append(l.deletePaths, paths...)
 	return l.deleteErr
 }
 
@@ -411,7 +413,7 @@ func TestDeferredMoveSubtitleLegFaults(t *testing.T) {
 					}
 				}}
 			case intentFailure:
-				log = &completeCallFaultLog{intentFailAt: 2}
+				log = &completeCallFaultLog{failAt: 1}
 			case skippedEntries:
 				org = &pr260PublicationFaultOrganizer{Organizer: real, afterExecute: func(_ *organizer.OrganizePlan, result *organizer.OrganizeResult) {
 					result.Subtitles = append(result.Subtitles, organizer.SubtitleResult{SubtitleMove: models.SubtitleMove{OriginalPath: subtitle, NewPath: "", Copied: true}})
@@ -434,7 +436,7 @@ func TestDeferredMoveSubtitleLegFaults(t *testing.T) {
 			case armFailure:
 				require.ErrorContains(t, publishErr, "arm subtitle rollback")
 			case intentFailure:
-				require.ErrorContains(t, publishErr, "journal subtitle move intent")
+				require.ErrorContains(t, publishErr, "persist inverse after direct video publication")
 			case skippedEntries:
 				require.ErrorContains(t, publishErr, "persist inverse after direct video publication")
 			}
@@ -482,4 +484,73 @@ func TestDeferredPublishAbortsWhenArtifactIntentFails(t *testing.T) {
 	require.Equal(t, int32(1), atomic.LoadInt32(&ledger.deletes))
 	pr260AssertRetained(t, base, source, subtitle, multipart, unrelated)
 	pr260AssertNoFinals(t, base, dest)
+}
+
+// The publish flow must journal pending subtitle intents BEFORE the execute
+// step runs: faulting the subtitle intent proves nothing mutated yet.
+func TestDeferredMoveJournalsSubtitleIntentsBeforeExecute(t *testing.T) {
+	base, root, source, subtitle, multipart, unrelated, match := pr260FencedFiles(t, "deferred-subintent-order")
+	dest := filepath.Join(root, "library")
+	org := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize, MoveSubtitles: true, SubtitleExtensions: []string{".srt"}}, template.NewEngine(), nil)
+	ledger := &completeCallFaultLog{intentFailAt: 2} // video=1, subtitle=2
+	orch := &applyOrchImpl{fs: base, organizer: org, revertLog: ledger}
+	cmd := pr260ArtifactFailureCommand(&models.Movie{ContentID: "deferred-subintent-order"}, match, dest)
+	cmd.Organize.Skip = false
+	cmd.Organize.MoveFiles = true
+	cmd.Download = false
+	stage, _, err := orch.prepareArtifact(context.Background(), cmd)
+	require.NoError(t, err)
+	defer stage.cleanup()
+	plan, planErr := org.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: match, Movie: stage.original.Movie, DestDir: stage.root, MoveFiles: true, OperationMode: stage.original.OperationMode})
+	require.NoError(t, planErr)
+	state := &applyPipelineState{operationID: "op", organizeResult: &organizer.OrganizeResult{NewPath: plan.TargetPath, FolderPath: plan.TargetDir}}
+
+	publishErr := stage.publish(context.Background(), orch, state, nil)
+	require.ErrorContains(t, publishErr, "persist inverse before subtitle publication")
+	require.Equal(t, int32(2), atomic.LoadInt32(&ledger.intents))
+	pr260AssertRetained(t, base, source, subtitle, multipart, unrelated)
+	pr260AssertNoFinals(t, base, dest)
+}
+
+// installPaths journals deletion intents only for targets this operation will
+// actually install: skipped (preserved/consumer) and replacement destinations
+// are excluded (their pre-existing bytes are restored by the replacement legs).
+func TestInstallPathsJournalsOnlyOwnedNonReplacementDestinations(t *testing.T) {
+	base := afero.NewMemMapFs()
+	require.NoError(t, base.MkdirAll("/stage", 0o755))
+	require.NoError(t, base.MkdirAll("/final", 0o755))
+	require.NoError(t, afero.WriteFile(base, "/stage/new.txt", []byte("new"), 0o644))
+	require.NoError(t, afero.WriteFile(base, "/stage/existing.txt", []byte("payload"), 0o644))
+	require.NoError(t, afero.WriteFile(base, "/final/existing.txt", []byte("prior bytes"), 0o644))
+	require.NoError(t, afero.WriteFile(base, "/stage/keep.txt", []byte("keep"), 0o644))
+	require.NoError(t, afero.WriteFile(base, "/final/keep.txt", []byte("user kept"), 0o644))
+
+	stage := &artifactStage{fs: base, root: "/stage", finalRoot: "/final", original: ApplyCmd{}}
+	var journaled []string
+	_, err := stage.installPaths(
+		[]string{"/stage/new.txt", "/stage/existing.txt", "/stage/keep.txt"},
+		[]string{"/stage/keep.txt"},
+		"", "",
+		func(paths []string) error {
+			journaled = append(journaled, paths...)
+			return nil
+		},
+	)
+	require.NoError(t, err)
+	require.Equal(t, []string{filepath.Join("/final", "new.txt")}, journaled,
+		"only the new destination is journaled; replacements preserved bytes and preserved paths excluded")
+}
+
+// A failing delete-intent journal aborts before any install.
+func TestInstallPathsJournalFailureAbortsInstalls(t *testing.T) {
+	base := afero.NewMemMapFs()
+	require.NoError(t, base.MkdirAll("/stage", 0o755))
+	require.NoError(t, afero.WriteFile(base, "/stage/new.txt", []byte("new"), 0o644))
+	stage := &artifactStage{fs: base, root: "/stage", finalRoot: "/final", original: ApplyCmd{}}
+	_, err := stage.installPaths([]string{"/stage/new.txt"}, nil, "", "", func([]string) error {
+		return errors.New("journal down")
+	})
+	require.ErrorContains(t, err, "journal down")
+	exists, _ := afero.Exists(base, "/final/new.txt")
+	require.False(t, exists)
 }

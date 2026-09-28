@@ -94,7 +94,7 @@ func TestPR260FiniteArtifactInstallFailuresAndRetry(t *testing.T) {
 			}
 			pr260AssertRetained(t, base, source, subtitle, multipart, unrelated)
 			fs.enabled = false
-			_, err = stage.installTree("", "", nil, "", "")
+			_, err = stage.installTree("", "", nil, "", "", nil)
 			require.NoError(t, err)
 			b, err := afero.ReadFile(base, target)
 			require.NoError(t, err)

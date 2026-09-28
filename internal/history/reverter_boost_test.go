@@ -1577,3 +1577,42 @@ func TestCleanupGeneratedFilesFS_SkipsIntentEqualToPrimaryMove(t *testing.T) {
 		t.Fatalf("genuinely moved sidecar must be moved back: %v", err)
 	}
 }
+
+// A deferred-move row that crashed between publish and completion carries its
+// endpoints only as a pending MoveBack intent: checkAnchor hydrates the
+// column-shaped anchor from it instead of anchor-missing forever.
+func TestCheckAnchor_PendingMoveIntentHydrates(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	require.NoError(t, fs.MkdirAll("/dest/lib", 0o755))
+	require.NoError(t, afero.WriteFile(fs, "/dest/lib/movie.mp4", []byte("x"), 0o644))
+	gf := models.GeneratedFilesJSON{MoveBack: []models.FileMove{{OriginalPath: "/src/movie.mp4", NewPath: "/dest/lib/movie.mp4"}}}
+	gfJSON, _ := json.Marshal(gf)
+	op := &models.BatchFileOperation{OperationType: models.OperationTypeMove, OriginalPath: "/src/movie.mp4", NewPath: "", GeneratedFiles: string(gfJSON)}
+	rv := NewReverter(fs, nil)
+	res, err := rv.checkAnchor(context.Background(), op)
+	require.NoError(t, err)
+	assert.Nil(t, res, "hydrated intent anchor present: no anchor_missing skip")
+	assert.Equal(t, "/dest/lib/movie.mp4", op.NewPath)
+
+	op.NewPath = ""
+	require.NoError(t, fs.Remove("/dest/lib/movie.mp4"))
+	res, err = rv.checkAnchor(context.Background(), op)
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	assert.Equal(t, models.RevertOutcomeSkipped, res.Outcome)
+	assert.Equal(t, models.RevertReasonAnchorMissing, res.Reason)
+}
+
+// An intent whose source does not match the row's original path must never
+// pose as the primary anchor (it is a journaled sidecar move).
+func TestPendingMoveIntentAnchor_MismatchedSource(t *testing.T) {
+	gf := models.GeneratedFilesJSON{MoveBack: []models.FileMove{{OriginalPath: "/src/other.srt", NewPath: "/dest/other.srt"}}}
+	gfJSON, _ := json.Marshal(gf)
+	op := &models.BatchFileOperation{OperationType: models.OperationTypeMove, OriginalPath: "/src/movie.mp4", GeneratedFiles: string(gfJSON)}
+	assert.Empty(t, pendingMoveIntentAnchor(op))
+	assert.Empty(t, op.NewPath)
+	op2 := &models.BatchFileOperation{OperationType: models.OperationTypeMove, OriginalPath: "", GeneratedFiles: string(gfJSON)}
+	assert.Empty(t, pendingMoveIntentAnchor(op2))
+	op3 := &models.BatchFileOperation{OperationType: models.OperationTypeMove, OriginalPath: "/src/movie.mp4", GeneratedFiles: "{broken"}
+	assert.Empty(t, pendingMoveIntentAnchor(op3))
+}

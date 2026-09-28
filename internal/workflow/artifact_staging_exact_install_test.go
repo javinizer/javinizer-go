@@ -30,7 +30,7 @@ func TestPR260ClosureStageSiblingAndWalkFaults(t *testing.T) {
 				fs.op = "open"
 				fs.path = stage.root
 				fs.enabled = true
-				_, err = stage.installTree("", "", nil, "", "")
+				_, err = stage.installTree("", "", nil, "", "", nil)
 				require.ErrorContains(t, err, tc.want)
 				fs.enabled = false
 				stage.cleanup()
@@ -51,7 +51,7 @@ func TestPR260ClosureDestinationDirectoryDoesNotReplaceMedia(t *testing.T) {
 	target := filepath.Join(dest, "poster.jpg")
 	require.NoError(t, afero.WriteFile(base, staged, []byte("new"), 0o644))
 	require.NoError(t, base.MkdirAll(target, 0o755))
-	_, err = stage.installTree("", "", nil, "", "")
+	_, err = stage.installTree("", "", nil, "", "", nil)
 	require.ErrorContains(t, err, "artifact destination is a directory")
 	b, e := afero.ReadFile(base, staged)
 	require.NoError(t, e)

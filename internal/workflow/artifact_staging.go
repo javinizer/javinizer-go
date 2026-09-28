@@ -32,6 +32,7 @@ type artifactPlanExecutor interface {
 	PlanOrganize(context.Context, organizer.OrganizeCmd) (*organizer.OrganizePlan, error)
 	PlanSourceExists(*organizer.OrganizePlan) bool
 	ExecuteOrganizePlan(*organizer.OrganizePlan, bool, organizer.LinkMode) (*organizer.OrganizeResult, error)
+	PlanSubtitleMoves(*organizer.OrganizePlan) []models.SubtitleMove
 }
 
 type artifactSibling struct {
@@ -501,16 +502,6 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 		if preflightErr != nil {
 			return preflightErr
 		}
-		// Journal every planned artifact destination BEFORE any of it installs:
-		// for a deferred move a crash between installTree and the outcome
-		// completion must not leave downloaded/generated files absent from the
-		// deletion ledger. Deferred-only: other modes map staged copies whose
-		// final names this walk cannot yet prove.
-		if s.videoDeferred && o.revertLog != nil && opID != "" && len(artifactDestinations) > 0 {
-			if err := o.revertLog.RecordDeleteIntent(ctx, opID, artifactDestinations); err != nil {
-				return fmt.Errorf("journal artifact destination intent: %w", err)
-			}
-		}
 		if err := batch.Preflight(append([]string{plan.TargetPath}, artifactDestinations...)); err != nil {
 			return err
 		}
@@ -561,6 +552,13 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 			if err := o.revertLog.RecordMoveIntent(ctx, opID, plan.SourcePath, plan.TargetPath); err != nil {
 				return fmt.Errorf("persist inverse before direct video publication: %w", err)
 			}
+			// Subtitles move inside the same execution: their endpoints are known
+			// from the plan, so the pending intent lands BEFORE the consume too.
+			for _, mv := range executor.PlanSubtitleMoves(plan) {
+				if err := o.revertLog.RecordMoveIntent(ctx, opID, mv.OriginalPath, mv.NewPath); err != nil {
+					return fmt.Errorf("persist inverse before subtitle publication: %w", err)
+				}
+			}
 		}
 		publishedTarget = plan.TargetPath
 		finalResult, err = executor.ExecuteOrganizePlan(plan, publishMove, s.original.Organize.LinkMode)
@@ -605,13 +603,10 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 			if !sr.Moved || sr.OriginalPath == "" || sr.NewPath == "" {
 				continue
 			}
+			// The pending intent for this move was journaled pre-execution; only
+			// the in-process rollback arm belongs here.
 			if err := batch.SetRollbackOrigin(sr.NewPath, sr.OriginalPath); err != nil {
 				return fmt.Errorf("arm subtitle rollback %s: %w", sr.NewPath, err)
-			}
-			if o.revertLog != nil && opID != "" {
-				if err := o.revertLog.RecordMoveIntent(ctx, opID, sr.OriginalPath, sr.NewPath); err != nil {
-					return fmt.Errorf("journal subtitle move intent: %w", err)
-				}
 			}
 		}
 		if o.revertLog != nil && opID != "" {
@@ -641,7 +636,19 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 	if videoInstalledByTree {
 		installSkipVideo = ""
 	}
-	preservedMedia, err := s.installTree(installSkipVideo, artifactSkipDir, state.downloadPaths, stagedArtifactDir, finalArtifactDir)
+	// Deletion intent lands after artifact claims settle (consumer, skipped,
+	// and replacement destinations are never journaled for removal) and before
+	// any install touches the final tree.
+	journalDeleteIntent := func(paths []string) error {
+		if len(paths) == 0 || o.revertLog == nil || opID == "" {
+			return nil
+		}
+		if err := o.revertLog.RecordDeleteIntent(ctx, opID, paths); err != nil {
+			return fmt.Errorf("journal artifact destination intent: %w", err)
+		}
+		return nil
+	}
+	preservedMedia, err := s.installTree(installSkipVideo, artifactSkipDir, state.downloadPaths, stagedArtifactDir, finalArtifactDir, journalDeleteIntent)
 	if err != nil {
 		return err
 	}
@@ -853,7 +860,7 @@ func (s *artifactStage) treeDestinations(skipFile, skipDir, stagedArtifactDir, f
 	return paths, nil
 }
 
-func (s *artifactStage) installTree(skipFile, skipDir string, preserve []string, stagedArtifactDir, finalArtifactDir string) (bool, error) {
+func (s *artifactStage) installTree(skipFile, skipDir string, preserve []string, stagedArtifactDir, finalArtifactDir string, journalDeleteIntent func([]string) error) (bool, error) {
 	if s.inPlace {
 		if _, err := s.fs.Stat(s.root); os.IsNotExist(err) {
 			return false, nil
@@ -888,10 +895,10 @@ func (s *artifactStage) installTree(skipFile, skipDir string, preserve []string,
 		return false, fmt.Errorf("walk staged artifacts: %w", err)
 	}
 	sort.Strings(paths)
-	return s.installPaths(paths, preserve, stagedArtifactDir, finalArtifactDir)
+	return s.installPaths(paths, preserve, stagedArtifactDir, finalArtifactDir, journalDeleteIntent)
 }
 
-func (s *artifactStage) installPaths(paths, preserve []string, stagedArtifactDir, finalArtifactDir string) (bool, error) {
+func (s *artifactStage) installPaths(paths, preserve []string, stagedArtifactDir, finalArtifactDir string, journalDeleteIntent func([]string) error) (bool, error) {
 	type installPath struct {
 		source, target string
 		skip           bool
@@ -978,6 +985,18 @@ func (s *artifactStage) installPaths(paths, preserve []string, stagedArtifactDir
 		plans = append(plans, plan)
 	}
 
+	if journalDeleteIntent != nil {
+		destinations := make([]string, 0, len(plans))
+		for _, plan := range plans {
+			if plan.skip || plan.replace {
+				continue
+			}
+			destinations = append(destinations, plan.target)
+		}
+		if err := journalDeleteIntent(destinations); err != nil {
+			return false, err
+		}
+	}
 	for _, plan := range plans {
 		if plan.skip {
 			continue

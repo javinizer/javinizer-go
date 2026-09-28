@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/spf13/afero"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -88,4 +89,34 @@ func TestExecuteOrganizePlanCopyModePreservesSourceSubtitles(t *testing.T) {
 			}
 		})
 	}
+}
+
+// PlanSubtitleMoves enumerates the endpoints execute would deliver without
+// installing anything — the deferred publish flow journals these before the
+// consume.
+func TestPlanSubtitleMovesEnumeratesWithoutMutating(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "ABC-123.mkv")
+	sub := filepath.Join(dir, "ABC-123.srt")
+	require.NoError(t, os.WriteFile(src, []byte("video"), 0o600))
+	require.NoError(t, os.WriteFile(sub, []byte("subtitle"), 0o600))
+	org := NewOrganizer(afero.NewOsFs(), &Config{
+		FolderFormat: "<ID>", FileFormat: "<ID>", RenameFile: true,
+		OperationMode: operationmode.OperationModeOrganize,
+		MoveSubtitles: true, SubtitleExtensions: []string{".srt"},
+	}, nil, nil)
+	dest := filepath.Join(dir, "out")
+	plan, planErr := org.PlanOrganize(context.Background(), OrganizeCmd{
+		Match: models.FileMatchInfo{MovieID: "ABC-123", Path: src, Name: "ABC-123.mkv", Extension: ".mkv"},
+		Movie: &models.Movie{ID: "ABC-123"}, DestDir: dest, MoveFiles: true, LinkMode: LinkModeNone,
+	})
+	require.NoError(t, planErr)
+
+	moves := org.PlanSubtitleMoves(plan)
+	require.Len(t, moves, 1)
+	assert.Equal(t, sub, moves[0].OriginalPath)
+	assert.Equal(t, filepath.Join(dest, "ABC-123", "ABC-123.srt"), moves[0].NewPath)
+	assert.False(t, moves[0].Moved || moves[0].Copied, "planned entries carry no installation outcome")
+	require.FileExists(t, sub, "probe never mutates the source")
+	assert.Nil(t, org.PlanSubtitleMoves(nil))
 }

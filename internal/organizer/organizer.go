@@ -534,6 +534,25 @@ func (o *Organizer) subtitleFileInfo(plan *OrganizePlan) models.FileMatchInfo {
 // the fsutil no-replace composites, and copied records the mode distinction in
 // results (#224 phase E): a copy install retains the source (revert deletes
 // the installed copy), a move install does not (revert moves it back).
+
+// PlanSubtitleMoves enumerates the subtitle endpoints execute would
+// deliver for plan WITHOUT installing anything (nil-install probe). The
+// artifact publish flow journals these as pending intents before
+// ExecuteOrganizePlan consumes them; entries for skipped destinations are
+// always included (their rename-back is idempotent on an absent target).
+func (o *Organizer) PlanSubtitleMoves(plan *OrganizePlan) []models.SubtitleMove {
+	if plan == nil {
+		return nil
+	}
+	result := &OrganizeResult{}
+	o.handleSubtitles(plan, result, subtitleInstall{})
+	moves := make([]models.SubtitleMove, 0, len(result.Subtitles))
+	for _, sr := range result.Subtitles {
+		moves = append(moves, sr.SubtitleMove)
+	}
+	return moves
+}
+
 type subtitleInstall struct {
 	op     func(afero.Fs, string, string) error
 	copied bool
