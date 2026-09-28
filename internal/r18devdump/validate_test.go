@@ -534,6 +534,13 @@ func TestValidateSidecar_InternalWhitespaceContentIDRejected(t *testing.T) {
 	assert.Contains(t, err.Error(), "noncanonical content_id")
 }
 
+func TestCollationScopeColumns(t *testing.T) {
+	assert.Equal(t, []string{contentIDColumn, "dvd_id"}, collationScopeColumns(videosTable))
+	assert.Equal(t, []string{"id"}, collationScopeColumns("actresses"))
+	assert.Equal(t, []string{contentIDColumn, "actress_id"}, collationScopeColumns(videoActressesTable))
+	assert.Nil(t, collationScopeColumns("must_never_exist"))
+}
+
 func TestValidateSidecar_RequiredNonKeyCollationAccepted(t *testing.T) {
 	// Codex: a COLLATE clause on a required-but-never-compared column (e.g.
 	// videos.title_en) is decoration — runtime lookups compare only the
