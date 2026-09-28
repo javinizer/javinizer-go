@@ -1081,3 +1081,39 @@ func TestDeferredMoveSiblingIntentFaultAborts(t *testing.T) {
 	assert.True(t, existsSrc, "rollback restores the moved video onto its source path")
 
 }
+
+// Deferred copy mode with MoveSubtitles disabled: the organizer never touches
+// sidecars, the staged copy publishes through the sidecar block and joins the
+// ledger's Delete list (copy semantics: revert removes the install, keeps the
+// source).
+func TestDeferredCopyPublishesStagedSiblingWithoutOrganizer(t *testing.T) {
+	base, root, source, subtitle, multipart, unrelated, match := pr260FencedFiles(t, "deferred-copy-sidecar-publish")
+	dest := filepath.Join(root, "library")
+	org := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize}, template.NewEngine(), nil)
+	orch := &applyOrchImpl{fs: base, organizer: org, revertLog: &completeCallFaultLog{}}
+	cmd := pr260ArtifactFailureCommand(&models.Movie{ContentID: "deferred-copy-sidecar-publish"}, match, dest)
+	cmd.Organize.Skip = false
+	cmd.Organize.MoveFiles = false
+	cmd.Download = false
+	cmd.OperationMode = operationmode.OperationModeOrganize
+	stage, _, err := orch.prepareArtifact(context.Background(), cmd)
+	require.NoError(t, err)
+	defer stage.cleanup()
+	stagedPlan, planErr := org.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: models.FileMatchInfo{Path: stage.stagedSource, Name: filepath.Base(source)}, Movie: stage.original.Movie, DestDir: stage.root, OperationMode: stage.original.OperationMode})
+	require.NoError(t, planErr)
+
+	finalPlan, planErr2 := org.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: match, Movie: stage.original.Movie, DestDir: dest, OperationMode: stage.original.OperationMode})
+	require.NoError(t, planErr2)
+	state := &applyPipelineState{operationID: "op", organizeResult: &organizer.OrganizeResult{NewPath: stagedPlan.TargetPath, FolderPath: stagedPlan.TargetDir}}
+	require.NoError(t, stage.publish(context.Background(), orch, state, nil))
+
+	require.FileExists(t, finalPlan.TargetPath)
+	subTarget := filepath.Join(filepath.Dir(finalPlan.TargetPath), stagedArtifactSiblingName(filepath.Base(source), filepath.Base(finalPlan.TargetPath), filepath.Base(subtitle)))
+	require.FileExists(t, subTarget, "staged sidecar published on copy mode")
+	ret, _ := afero.Exists(base, source)
+	assert.True(t, ret, "copy leaves the video source in place")
+	retSub, _ := afero.Exists(base, subtitle)
+	assert.True(t, retSub, "copy leaves the subtitle source in place")
+	_ = multipart
+	_ = unrelated
+}

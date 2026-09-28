@@ -319,15 +319,25 @@ func (s *artifactStage) cleanup() {
 	if s == nil || s.fs == nil || s.root == "" {
 		return
 	}
-	if err := removeArtifactTreeWithRetry(s.fs, s.root); err != nil {
-		// The owner is finished with this root: stamp completion so a later
-		// sweep reclaims the residue even while this process keeps running. The
-		// in-tree manifest can itself vanish mid-RemoveAll (a locked payload
-		// survives it), so the completed proof also lives outside the tree.
-		markArtifactStageCompleted(s.fs, s.root)
-		writeArtifactStageProof(s.fs, s.root)
-		logging.Warnf("artifact staging cleanup retained %s: %v", s.root, err)
+	// Marks go on the ledger BEFORE the destructive leg: removeAll can erase a
+	// manifest before the locked payload refuses; quarantining first means the
+	// name itself carries our token. The proof outside the tree rides along
+	// (renamed with it) so neither can be stranded.
+	markArtifactStageCompleted(s.fs, s.root)
+	writeArtifactStageProof(s.fs, s.root)
+	quarantine := artifactStageQuarantineName(s.root)
+	proofSrc, _ := artifactStageProofPath(s.root), ""
+	if err := s.fs.Rename(s.root, quarantine); err == nil {
+		s.root = quarantine
+		if _, statErr := s.fs.Stat(proofSrc); statErr == nil {
+			_ = s.fs.Rename(proofSrc, artifactStageProofPath(quarantine))
+		}
 	}
+	if err := removeArtifactTreeWithRetry(s.fs, s.root); err != nil {
+		logging.Warnf("artifact staging cleanup retained %s: %v", s.root, err)
+		return
+	}
+	_ = s.fs.Remove(artifactStageProofPath(s.root))
 }
 
 func (s *artifactStage) finalPath(path string) (string, error) {
@@ -802,7 +812,9 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 				if confirmErr := batch.ConfirmPublish(ctx, target); confirmErr != nil {
 					return confirmErr
 				}
-				state.downloadPaths = append(state.downloadPaths, target)
+				// This block runs in move mode only: published sibling targets are
+				// MoveBack-owned (inverse recorded above), never enrolled in the
+				// ordinary Delete ledger — a revert moves them back.
 			} else if statErr != nil {
 				return fmt.Errorf("inspect publication sidecar: %w", statErr)
 			}

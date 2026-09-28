@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -221,7 +222,15 @@ func TestArtifactCleanup_RetainsOnPersistentFailure(t *testing.T) {
 
 	assert.Equal(t, artifactRemoveAttempts, fsy.attempts, "bounded retries only")
 	exists, _ := afero.DirExists(base, "/stage")
-	assert.True(t, exists, "residue retained for the next sweep")
+	assert.False(t, exists, "the root was claimed by the quarantine rename")
+	entries, _ := afero.ReadDir(base, "/")
+	quarantined := 0
+	for _, e := range entries {
+		if e.IsDir() && strings.Contains(e.Name(), artifactStageQuarantineMark) {
+			quarantined++
+		}
+	}
+	assert.Equal(t, 1, quarantined, "quarantine-named residue retained for the next sweep")
 }
 
 func TestArtifactStageManifestToken(t *testing.T) {
