@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/database"
@@ -216,4 +217,71 @@ func TestDeferredPublishStaleFinalizeRollsBackAndResetsMarkers(t *testing.T) {
 		return nil
 	})
 	assert.Zero(t, regularFiles, "compensation removes every published file")
+}
+
+// completeCallFaultLog fails exactly the first Complete — the pre-consume
+// durable intent write — so the deferred move must abort before any mutation.
+type completeCallFaultLog struct {
+	RevertLog
+	failAt int32
+	calls  int32
+}
+
+func (l *completeCallFaultLog) Complete(context.Context, OperationID, *ApplyResult) error {
+	if atomic.AddInt32(&l.calls, 1) == l.failAt {
+		return errors.New("intent unavailable")
+	}
+	return nil
+}
+
+// A deferred move whose intended inverse cannot be journaled must NOT consume
+// the real source: fail before ExecuteOrganizePlan ever runs.
+func TestDeferredMoveAbortsWhenIntentCannotPersist(t *testing.T) {
+	base, root, source, subtitle, multipart, unrelated, match := pr260FencedFiles(t, "deferred-intent-fault")
+	dest := filepath.Join(root, "library")
+	real := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize}, template.NewEngine(), nil)
+	ledger := &completeCallFaultLog{failAt: 1}
+	orch := &applyOrchImpl{fs: base, organizer: real, revertLog: ledger}
+	cmd := pr260ArtifactFailureCommand(&models.Movie{ContentID: "deferred-intent-fault"}, match, dest)
+	cmd.Organize.Skip = false
+	cmd.Organize.MoveFiles = true
+	cmd.Download = false
+	stage, _, err := orch.prepareArtifact(context.Background(), cmd)
+	require.NoError(t, err)
+	defer stage.cleanup()
+
+	plan, planErr := real.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: match, Movie: stage.original.Movie, DestDir: stage.root, MoveFiles: true, OperationMode: stage.original.OperationMode})
+	require.NoError(t, planErr)
+	state := &applyPipelineState{operationID: "op", organizeResult: &organizer.OrganizeResult{NewPath: plan.TargetPath, FolderPath: plan.TargetDir}}
+
+	publishErr := stage.publish(context.Background(), orch, state, nil)
+	require.ErrorContains(t, publishErr, "persist inverse before direct video publication")
+	require.Equal(t, int32(1), atomic.LoadInt32(&ledger.calls), "aborted at the pre-consume intent write")
+	pr260AssertRetained(t, base, source, subtitle, multipart, unrelated)
+	pr260AssertNoFinals(t, base, dest)
+}
+
+// The intent journal lands, the move consumes the source, then the post-move
+// inverse record fails: rollback must restore the video and reset markers.
+func TestDeferredMovePostPublishInverseFaultRollsBack(t *testing.T) {
+	base, root, source, subtitle, multipart, unrelated, match := pr260FencedFiles(t, "deferred-postinverse-fault")
+	dest := filepath.Join(root, "library")
+	real := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize}, template.NewEngine(), nil)
+	orch := &applyOrchImpl{fs: base, organizer: real, revertLog: &completeCallFaultLog{failAt: 2}}
+	cmd := pr260ArtifactFailureCommand(&models.Movie{ContentID: "deferred-postinverse-fault"}, match, dest)
+	cmd.Organize.Skip = false
+	cmd.Organize.MoveFiles = true
+	cmd.Download = false
+	stage, _, err := orch.prepareArtifact(context.Background(), cmd)
+	require.NoError(t, err)
+	defer stage.cleanup()
+
+	plan, planErr := real.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: match, Movie: stage.original.Movie, DestDir: stage.root, MoveFiles: true, OperationMode: stage.original.OperationMode})
+	require.NoError(t, planErr)
+	state := &applyPipelineState{operationID: "op", organizeResult: &organizer.OrganizeResult{NewPath: plan.TargetPath, FolderPath: plan.TargetDir}}
+
+	publishErr := stage.publish(context.Background(), orch, state, nil)
+	require.ErrorContains(t, publishErr, "persist inverse after direct video publication")
+	assert.False(t, stage.sourceCleanupArmed)
+	pr260AssertRetained(t, base, source, subtitle, multipart, unrelated)
 }

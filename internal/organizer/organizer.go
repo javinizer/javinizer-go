@@ -495,7 +495,14 @@ func (o *Organizer) execute(plan *OrganizePlan) (*OrganizeResult, error) {
 	}
 
 	if o.config.MoveSubtitles {
-		o.handleSubtitles(plan, strategyResult, subtitleMoveInstall)
+		// Copy-mode executions must not remove sidecars from the source
+		// directory. This applies only to organize-to-destination copies:
+		// in-place renames always move subtitles so they track the renamed video.
+		install := subtitleMoveInstall
+		if _, isOrganize := strategy.(*organizeStrategy); !plan.moveFiles && isOrganize {
+			install = subtitleCopyInstall
+		}
+		o.handleSubtitles(plan, strategyResult, install)
 	}
 
 	return strategyResult, nil

@@ -91,5 +91,6 @@ function creditRenderToken(c: MovieCredit): unknown[] {
 		c.order_index ?? 0,
 		c.order_pinned ?? false,
 		c.display_force_canonical ?? false,
+		c.user_override ?? false,
 	];
 }

@@ -148,6 +148,14 @@ describe('buildDisplayTitlePreviewSignature', () => {
 		expect(buildDisplayTitlePreviewSignature(b)).not.toBe(buildDisplayTitlePreviewSignature(a));
 	});
 
+	it('changes when user_override toggles with the same override text', () => {
+		// RenderNameWithSelection applies override_name only when user_override is
+		// set, so the boolean is render-relevant independent of the text.
+		const a = makeMovie([], [makeCredit({ override_name: 'Alias', user_override: false })]);
+		const b = makeMovie([], [makeCredit({ override_name: 'Alias', user_override: true })]);
+		expect(buildDisplayTitlePreviewSignature(b)).not.toBe(buildDisplayTitlePreviewSignature(a));
+	});
+
 	it('changes when a visible credit render token changes', () => {
 		const a = makeMovie([], [makeCredit({})]);
 		const b = makeMovie([], [makeCredit({ override_name: 'Alias' })]);

@@ -541,6 +541,16 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 		if s.videoDeferred {
 			publishMove = s.original.Organize.MoveFiles
 		}
+		// Persist the intended inverse BEFORE the move consumes the real
+		// source: a crash in the rename→record window must still leave a durable
+		// source→destination trail (Begin cannot name it — the plan is only
+		// final after the conflict guards).
+		if s.videoDeferred && s.original.Organize.MoveFiles && s.original.Organize.LinkMode == organizer.LinkModeNone && filepath.Clean(plan.SourcePath) != filepath.Clean(plan.TargetPath) && o.revertLog != nil && opID != "" {
+			intent := &ApplyResult{OrganizeResult: &organizer.OrganizeResult{NewPath: plan.TargetPath, FolderPath: plan.TargetDir, FileName: filepath.Base(plan.TargetPath)}, Movie: state.movie, OperationID: opID}
+			if err := o.revertLog.Complete(ctx, opID, intent); err != nil {
+				return fmt.Errorf("persist inverse before direct video publication: %w", err)
+			}
+		}
 		publishedTarget = plan.TargetPath
 		finalResult, err = executor.ExecuteOrganizePlan(plan, publishMove, s.original.Organize.LinkMode)
 		if filepath.Clean(plan.SourcePath) != filepath.Clean(plan.TargetPath) && (err == nil || fsutil.PublishCompleted(err)) {

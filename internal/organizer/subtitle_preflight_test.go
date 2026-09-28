@@ -50,3 +50,42 @@ func TestOrganizeSubtitlePreflightOsFs(t *testing.T) {
 		})
 	}
 }
+
+// The artifact publish seam (ExecuteOrganizePlan) must honor copy semantics
+// for sidecars too: a nominal copy operation never removes subtitles from the
+// source directory.
+func TestExecuteOrganizePlanCopyModePreservesSourceSubtitles(t *testing.T) {
+	for _, move := range []bool{false, true} {
+		t.Run(map[bool]string{false: "copy", true: "move"}[move], func(t *testing.T) {
+			dir := t.TempDir()
+			src := filepath.Join(dir, "ABC-123.mkv")
+			sub := filepath.Join(dir, "ABC-123.srt")
+			require.NoError(t, os.WriteFile(src, []byte("video"), 0o600))
+			require.NoError(t, os.WriteFile(sub, []byte("subtitle"), 0o600))
+			org := NewOrganizer(afero.NewOsFs(), &Config{
+				FolderFormat: "<ID>", FileFormat: "<ID>", RenameFile: true,
+				OperationMode: operationmode.OperationModeOrganize,
+				MoveSubtitles: true, SubtitleExtensions: []string{".srt"},
+			}, nil, nil)
+			dest := filepath.Join(dir, "out")
+			plan, planErr := org.PlanOrganize(context.Background(), OrganizeCmd{
+				Match: models.FileMatchInfo{MovieID: "ABC-123", Path: src, Name: "ABC-123.mkv", Extension: ".mkv"},
+				Movie: &models.Movie{ID: "ABC-123"}, DestDir: dest, MoveFiles: move, LinkMode: LinkModeNone,
+			})
+			require.NoError(t, planErr)
+			result, err := org.ExecuteOrganizePlan(plan, move, LinkModeNone)
+			require.NoError(t, err)
+			require.Len(t, result.Subtitles, 1)
+			require.Equal(t, move, result.Subtitles[0].Moved)
+			require.Equal(t, !move, result.Subtitles[0].Copied)
+			got, readErr := os.ReadFile(filepath.Join(dest, "ABC-123", "ABC-123.srt"))
+			require.NoError(t, readErr)
+			require.Equal(t, "subtitle", string(got))
+			if move {
+				require.NoFileExists(t, sub)
+			} else {
+				require.FileExists(t, sub, "copy mode keeps the source sidecar")
+			}
+		})
+	}
+}
