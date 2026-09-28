@@ -86,7 +86,7 @@ var tableSchema = map[string]struct {
 			site_id           TEXT,
 			service_code      TEXT
 		)`,
-		columns: []string{contentIDColumn, "dvd_id", "dvd_id_norm", "title_en", "title_ja", "comment_en", "comment_ja", "runtime_mins", "release_date", "sample_url", "maker_id", "label_id", "series_id", "jacket_full_url", "jacket_thumb_url", "gallery_full_first", "gallery_full_last", "gallery_thumb_first", "gallery_thumb_last", "site_id", "service_code"},
+		columns: []string{contentIDColumn, "dvd_id", dvdIDNormColumn, "title_en", "title_ja", "comment_en", "comment_ja", "runtime_mins", "release_date", "sample_url", "maker_id", "label_id", "series_id", "jacket_full_url", "jacket_thumb_url", "gallery_full_first", "gallery_full_last", "gallery_thumb_first", "gallery_thumb_last", "site_id", "service_code"},
 	},
 	"derived_actress": {
 		create: `CREATE TABLE actresses (
@@ -178,6 +178,7 @@ var tableSchema = map[string]struct {
 // SQLite-side table names shared by import and validation.
 const (
 	videosTable          = "videos"
+	dvdIDNormColumn      = "dvd_id_norm"
 	videoActressesTable  = "video_actresses"
 	videoCategoriesTable = "video_categories"
 	videoDirectorsTable  = "video_directors"
@@ -493,7 +494,7 @@ func mapDumpRow(row DumpRow, storedCols []string) []string {
 	// an INTEGER column, breaking later NullInt64 scans.
 	if row.Table == derivedVideoTable {
 		for i, col := range storedCols {
-			if col == "dvd_id_norm" {
+			if col == dvdIDNormColumn {
 				did := colMap["dvd_id"]
 				if did == nullSentinel || did == "" {
 					mapped[i] = ""

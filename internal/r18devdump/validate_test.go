@@ -327,7 +327,7 @@ func TestValidateSidecar_WrongNormRejected(t *testing.T) {
 	_, err := ValidateSidecar(context.Background(), path)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrDumpInvalid)
-	assert.Contains(t, err.Error(), "dvd_id_norm")
+	assert.Contains(t, err.Error(), dvdIDNormColumn)
 }
 
 func TestValidateSidecar_BlobKeyRejected(t *testing.T) {
@@ -347,7 +347,7 @@ func TestValidateSidecar_EmptyNormOnRealIDRejected(t *testing.T) {
 	_, err := ValidateSidecar(context.Background(), path)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrDumpInvalid)
-	assert.Contains(t, err.Error(), "dvd_id_norm")
+	assert.Contains(t, err.Error(), dvdIDNormColumn)
 }
 
 func TestValidateSidecar_NullNormOnRealIDRejected(t *testing.T) {
@@ -357,7 +357,7 @@ func TestValidateSidecar_NullNormOnRealIDRejected(t *testing.T) {
 	_, err := ValidateSidecar(context.Background(), path)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrDumpInvalid)
-	assert.Contains(t, err.Error(), "dvd_id_norm")
+	assert.Contains(t, err.Error(), dvdIDNormColumn)
 }
 
 func TestValidateSidecar_NullMetaValueRejected(t *testing.T) {
@@ -378,7 +378,7 @@ func TestValidateSidecar_OrphanNormRejected(t *testing.T) {
 	_, err := ValidateSidecar(context.Background(), path)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrDumpInvalid)
-	assert.Contains(t, err.Error(), "dvd_id_norm")
+	assert.Contains(t, err.Error(), dvdIDNormColumn)
 }
 
 func TestValidateSidecar_UppercaseContentIDRejected(t *testing.T) {
@@ -535,10 +535,38 @@ func TestValidateSidecar_InternalWhitespaceContentIDRejected(t *testing.T) {
 }
 
 func TestCollationScopeColumns(t *testing.T) {
-	assert.Equal(t, []string{contentIDColumn, "dvd_id"}, collationScopeColumns(videosTable))
+	assert.Equal(t, []string{contentIDColumn, dvdIDNormColumn}, collationScopeColumns(videosTable))
 	assert.Equal(t, []string{"id"}, collationScopeColumns("actresses"))
 	assert.Equal(t, []string{contentIDColumn, "actress_id"}, collationScopeColumns(videoActressesTable))
 	assert.Nil(t, collationScopeColumns("must_never_exist"))
+}
+
+func TestValidateSidecar_NormColumnCollationRejected(t *testing.T) {
+	// dvd_id_norm is additive, but the runtime compares it — a NOCASE
+	// collation there defeats the required BINARY index (Codex on #273).
+	path := importFixture(t)
+	alterFixture(t, path,
+		`ALTER TABLE videos RENAME TO videos_old`,
+		`CREATE TABLE videos (
+			content_id TEXT PRIMARY KEY, dvd_id TEXT, dvd_id_norm TEXT COLLATE NOCASE,
+			title_en TEXT, title_ja TEXT,
+			comment_en TEXT, comment_ja TEXT,
+			runtime_mins INTEGER, release_date TEXT, sample_url TEXT,
+			maker_id TEXT, label_id TEXT, series_id TEXT,
+			jacket_full_url TEXT, jacket_thumb_url TEXT,
+			gallery_full_first TEXT, gallery_full_last TEXT,
+			gallery_thumb_first TEXT, gallery_thumb_last TEXT,
+			site_id TEXT, service_code TEXT
+		)`,
+		`INSERT INTO videos SELECT content_id, dvd_id, dvd_id_norm, title_en, title_ja, comment_en, comment_ja, runtime_mins, release_date, sample_url, maker_id, label_id, series_id, jacket_full_url, jacket_thumb_url, gallery_full_first, gallery_full_last, gallery_thumb_first, gallery_thumb_last, site_id, service_code FROM videos_old`,
+		`DROP TABLE videos_old`,
+		`CREATE INDEX idx_videos_dvd_id_norm ON videos(dvd_id_norm COLLATE BINARY)`,
+	)
+	_, err := ValidateSidecar(context.Background(), path)
+	if !errors.Is(err, ErrDumpInvalid) {
+		t.Fatalf("expected ErrDumpInvalid for collated dvd_id_norm, got %v", err)
+	}
+	assert.Contains(t, err.Error(), "COLLATE")
 }
 
 func TestValidateSidecar_RequiredNonKeyCollationAccepted(t *testing.T) {

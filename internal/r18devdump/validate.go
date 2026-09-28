@@ -27,7 +27,7 @@ var requiredIndexDefs = map[string]indexDef{
 	"idx_video_actresses_cid":  {videoActressesTable, contentIDColumn},
 	"idx_video_categories_cid": {videoCategoriesTable, contentIDColumn},
 	"idx_video_directors_cid":  {videoDirectorsTable, contentIDColumn},
-	"idx_videos_dvd_id_norm":   {videosTable, "dvd_id_norm"},
+	"idx_videos_dvd_id_norm":   {videosTable, dvdIDNormColumn},
 }
 
 // ValidateSidecar opens the staged sidecar at path and verifies it is a
@@ -369,7 +369,10 @@ var logicalKeys = []struct {
 func collationScopeColumns(table string) []string {
 	switch table {
 	case videosTable:
-		return []string{contentIDColumn, "dvd_id"}
+		// store.go compares dvd_id_norm (never dvd_id) in its WHERE clause;
+		// dvd_id_norm is an additive column, but when present its collation
+		// still governs predicate plan choice — hence it belongs in scope.
+		return []string{contentIDColumn, dvdIDNormColumn}
 	default:
 		for _, lk := range logicalKeys {
 			if lk.table == table {
