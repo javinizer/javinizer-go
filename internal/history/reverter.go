@@ -647,6 +647,11 @@ func cleanupGeneratedFilesFS(fs afero.Fs, op *models.BatchFileOperation, stopAt 
 	// function doc above).
 	moveMode := op.OperationType == models.OperationTypeMove
 	for _, fm := range gf.MoveBack {
+		if fm.NewPath == op.NewPath && fm.OriginalPath == op.OriginalPath {
+			// A pending move intent equal to the row columns: the primary move is
+			// already reverted by the column-driven arm — never double-drive it.
+			continue
+		}
 		if !moveMode {
 			if err := fs.Remove(fm.NewPath); err != nil && !os.IsNotExist(err) {
 				logging.Debugf("cleanupGeneratedFiles: failed to delete copy-installed artifact %s (original at %s retained): %v", fm.NewPath, fm.OriginalPath, err)

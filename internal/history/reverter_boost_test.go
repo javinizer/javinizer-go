@@ -1544,3 +1544,36 @@ func TestRevertScrape_MovieAlreadyReverted(t *testing.T) {
 	assert.Contains(t, err.Error(), "no processable operations found")
 	mockRepo.AssertExpectations(t)
 }
+
+// A MoveBack entry that repeats the row's primary move (the deferred publish
+// intent ledger) must not double-drive the column-driven rename-back: the
+// intent is skipped and the destination file is untouched by this cleanup.
+func TestCleanupGeneratedFilesFS_SkipsIntentEqualToPrimaryMove(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	require.NoError(t, fs.MkdirAll("/src", 0777))
+	require.NoError(t, fs.MkdirAll("/dst", 0777))
+	require.NoError(t, afero.WriteFile(fs, "/dst/movie.mp4", []byte("video"), 0666))
+	require.NoError(t, afero.WriteFile(fs, "/dst/sub.srt", []byte("subs"), 0666))
+
+	gf := models.GeneratedFilesJSON{
+		MoveBack: []models.FileMove{
+			{OriginalPath: "/src/movie.mp4", NewPath: "/dst/movie.mp4"}, // matches columns: skipped
+			{OriginalPath: "/src/sub.srt", NewPath: "/dst/sub.srt"},     // real sidecar intent: driven
+		},
+	}
+	gfJSON, _ := json.Marshal(gf)
+	op := &models.BatchFileOperation{
+		OperationType:  models.OperationTypeMove,
+		OriginalPath:   "/src/movie.mp4",
+		NewPath:        "/dst/movie.mp4",
+		GeneratedFiles: string(gfJSON),
+	}
+	cleanupGeneratedFilesFS(fs, op, "/dst")
+
+	if _, err := fs.Stat("/dst/movie.mp4"); err != nil {
+		t.Fatalf("primary destination must not be touched by its pending intent: %v", err)
+	}
+	if _, err := fs.Stat("/src/sub.srt"); err != nil {
+		t.Fatalf("genuinely moved sidecar must be moved back: %v", err)
+	}
+}

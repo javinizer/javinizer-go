@@ -501,6 +501,16 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 		if preflightErr != nil {
 			return preflightErr
 		}
+		// Journal every planned artifact destination BEFORE any of it installs:
+		// for a deferred move a crash between installTree and the outcome
+		// completion must not leave downloaded/generated files absent from the
+		// deletion ledger. Deferred-only: other modes map staged copies whose
+		// final names this walk cannot yet prove.
+		if s.videoDeferred && o.revertLog != nil && opID != "" && len(artifactDestinations) > 0 {
+			if err := o.revertLog.RecordDeleteIntent(ctx, opID, artifactDestinations); err != nil {
+				return fmt.Errorf("journal artifact destination intent: %w", err)
+			}
+		}
 		if err := batch.Preflight(append([]string{plan.TargetPath}, artifactDestinations...)); err != nil {
 			return err
 		}

@@ -80,6 +80,13 @@ type RevertLog interface {
 	// the row's completion columns: this is intent, not an executed move.
 	RecordMoveIntent(ctx context.Context, opID OperationID, originalPath, newPath string) error
 
+	// RecordDeleteIntent journals planned generated-file deletions (downloads,
+	// NFO) BEFORE installTree publishes them: a crash after install but before
+	// the outcome completion would otherwise leave the paths absent from the
+	// Delete list, so later reverts could not clean them up. Completion columns
+	// stay untouched — this is intent, not outcome.
+	RecordDeleteIntent(ctx context.Context, opID OperationID, paths []string) error
+
 	// RecordReplacement implements the downloader's ReplacementRecorder seam
 	// (POSTER-WRITE-HARDENING P3): the pre-existing bytes at replacedPath have
 	// already been moved aside to backupPath under the downloader's
@@ -176,6 +183,8 @@ func (noOpRevertLog) Complete(_ context.Context, _ OperationID, _ *ApplyResult) 
 }
 
 func (noOpRevertLog) RecordMoveIntent(context.Context, OperationID, string, string) error { return nil }
+
+func (noOpRevertLog) RecordDeleteIntent(context.Context, OperationID, []string) error { return nil }
 
 func (noOpRevertLog) CompleteFailed(_ context.Context, _ OperationID, _ *ApplyResult) error {
 	return nil
@@ -304,11 +313,11 @@ func mergeReplacementLedger(priorRaw, newRaw string) string {
 		return newRaw
 	}
 	prior, err := models.ParseGeneratedFiles(priorRaw)
-	if err != nil || (len(prior.Replacements) == 0 && len(prior.Roots) == 0) {
+	if err != nil || (len(prior.Replacements) == 0 && len(prior.Roots) == 0 && len(prior.MoveBack) == 0 && len(prior.Delete) == 0) {
 		return newRaw
 	}
 	if newRaw == "" {
-		return models.MarshalLedgerJSON(models.GeneratedFilesJSON{Replacements: prior.Replacements, Roots: prior.Roots})
+		return models.MarshalLedgerJSON(models.GeneratedFilesJSON{Replacements: prior.Replacements, Roots: prior.Roots, MoveBack: prior.MoveBack, Delete: prior.Delete})
 	}
 	fresh, err := models.ParseGeneratedFiles(newRaw)
 	if err != nil {
@@ -317,6 +326,34 @@ func mergeReplacementLedger(priorRaw, newRaw string) string {
 	fresh.Replacements = prior.Replacements
 	if len(fresh.Roots) == 0 {
 		fresh.Roots = prior.Roots
+	}
+	// Pending move intents (RecordMoveIntent) live in MoveBack until the outcome
+	// completion rewrites them from the final result; dropping prior entries in
+	// between erases an armed inverse for an already-moved file. Carry them
+	// forward, deduplicated by endpoint pair.
+	for _, priorMB := range prior.MoveBack {
+		dupe := false
+		for _, freshMB := range fresh.MoveBack {
+			if freshMB.OriginalPath == priorMB.OriginalPath && freshMB.NewPath == priorMB.NewPath {
+				dupe = true
+				break
+			}
+		}
+		if !dupe {
+			fresh.MoveBack = append(fresh.MoveBack, priorMB)
+		}
+	}
+	for _, priorDel := range prior.Delete {
+		dupe := false
+		for _, freshDel := range fresh.Delete {
+			if freshDel == priorDel {
+				dupe = true
+				break
+			}
+		}
+		if !dupe {
+			fresh.Delete = append(fresh.Delete, priorDel)
+		}
 	}
 	return models.MarshalLedgerJSON(fresh)
 }
@@ -502,6 +539,24 @@ func (l *dbRevertLog) RecordMoveIntent(ctx context.Context, opID OperationID, or
 
 	intent := models.MarshalLedgerJSON(models.GeneratedFilesJSON{MoveBack: []models.FileMove{{OriginalPath: originalPath, NewPath: newPath}}})
 	_, err = l.mergeJournalInTx(ctx, recordID, opID, "RecordMoveIntent", intent, "")
+	return err
+}
+
+func (l *dbRevertLog) RecordDeleteIntent(ctx context.Context, opID OperationID, paths []string) error {
+	if opID == "" || len(paths) == 0 {
+		return nil
+	}
+	recordID64, err := strconv.ParseUint(opID, 10, 64)
+	if err != nil || recordID64 == 0 {
+		return fmt.Errorf("revert log RecordDeleteIntent: unparsable operation ID %q", opID)
+	}
+	recordID := uint(recordID64)
+
+	release := replacementLedgerLocks.Acquire(opID)
+	defer release()
+
+	intent := models.MarshalLedgerJSON(models.GeneratedFilesJSON{Delete: append([]string(nil), paths...)})
+	_, err = l.mergeJournalInTx(ctx, recordID, opID, "RecordDeleteIntent", intent, "")
 	return err
 }
 

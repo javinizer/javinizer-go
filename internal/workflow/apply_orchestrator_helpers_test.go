@@ -100,3 +100,5 @@ func (s *stubRevertLog) RecordReplacement(_ context.Context, _ OperationID, _, _
 func (s *stubRevertLog) RecordMoveIntent(context.Context, OperationID, string, string) error {
 	return nil
 }
+
+func (s *stubRevertLog) RecordDeleteIntent(context.Context, OperationID, []string) error { return nil }

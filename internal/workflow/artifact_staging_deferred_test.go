@@ -230,6 +230,8 @@ type completeCallFaultLog struct {
 	intentErr    error
 	intentFailAt int32
 	intents      int32
+	deleteErr    error
+	deletes      int32
 }
 
 func (l *completeCallFaultLog) Complete(context.Context, OperationID, *ApplyResult) error {
@@ -244,6 +246,11 @@ func (l *completeCallFaultLog) RecordMoveIntent(context.Context, OperationID, st
 		return errors.New("intent journal unavailable")
 	}
 	return l.intentErr
+}
+
+func (l *completeCallFaultLog) RecordDeleteIntent(context.Context, OperationID, []string) error {
+	atomic.AddInt32(&l.deletes, 1)
+	return l.deleteErr
 }
 
 // A deferred move whose intended inverse cannot be journaled must NOT consume
@@ -446,4 +453,33 @@ func TestDeferredMoveSubtitleLegFaults(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A failed artifact-destination intent journal aborts the publication before
+// any filesystem mutation: source and staged tree intact, destination absent.
+func TestDeferredPublishAbortsWhenArtifactIntentFails(t *testing.T) {
+	base, root, source, subtitle, multipart, unrelated, match := pr260FencedFiles(t, "deferred-delintent-fault")
+	dest := filepath.Join(root, "library")
+	real := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize}, template.NewEngine(), nil)
+	ledger := &completeCallFaultLog{deleteErr: errors.New("destination journal unavailable")}
+	orch := &applyOrchImpl{fs: base, organizer: real, revertLog: ledger}
+	cmd := pr260ArtifactFailureCommand(&models.Movie{ContentID: "deferred-delintent-fault"}, match, dest)
+	cmd.Organize.Skip = false
+	cmd.Organize.MoveFiles = true
+	cmd.Download = false
+	stage, _, err := orch.prepareArtifact(context.Background(), cmd)
+	require.NoError(t, err)
+	defer stage.cleanup()
+
+	plan, planErr := real.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: match, Movie: stage.original.Movie, DestDir: stage.root, MoveFiles: true, OperationMode: stage.original.OperationMode})
+	require.NoError(t, planErr)
+	require.NoError(t, base.MkdirAll(plan.TargetDir, 0o755))
+	require.NoError(t, afero.WriteFile(base, filepath.Join(plan.TargetDir, "generated.nfo"), []byte("metadata"), 0o644))
+	state := &applyPipelineState{operationID: "op", organizeResult: &organizer.OrganizeResult{NewPath: plan.TargetPath, FolderPath: plan.TargetDir}}
+
+	publishErr := stage.publish(context.Background(), orch, state, nil)
+	require.ErrorContains(t, publishErr, "journal artifact destination intent")
+	require.Equal(t, int32(1), atomic.LoadInt32(&ledger.deletes))
+	pr260AssertRetained(t, base, source, subtitle, multipart, unrelated)
+	pr260AssertNoFinals(t, base, dest)
 }
