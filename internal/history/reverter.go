@@ -710,7 +710,11 @@ func cleanupGeneratedFilesFS(fs afero.Fs, op *models.BatchFileOperation, stopAt 
 	// the PlannedDeletes leg below then remains eligible for the same path, so
 	// a hash-pinned published copy is deleted by its pin instead — never by
 	// the rename. A source whose state cannot be PROVEN absent suppresses too:
-	// uncertainty must never license a rename-over.
+	// uncertainty must never license a rename-over. The vacancy probe never
+	// follows a final symlink (codex P2, PRRT_kwDORn9KaM6m5HFu): a link planted
+	// at the source — even a DANGLING one, which Stat reports as ENOENT — is
+	// itself a directory entry the POSIX rename back would REPLACE, so any
+	// occupant type suppresses exactly like a present file.
 	moveMode := op.OperationType == models.OperationTypeMove
 	renameSuppressed := make(map[string]bool, len(gf.MoveBack))
 	if moveMode {
@@ -718,17 +722,37 @@ func cleanupGeneratedFilesFS(fs afero.Fs, op *models.BatchFileOperation, stopAt 
 			if fm.OriginalPath == "" || fm.NewPath == "" {
 				continue
 			}
-			if _, statErr := fs.Stat(fm.OriginalPath); statErr == nil || !os.IsNotExist(statErr) {
+			if _, statErr := lstatRestoreSource(fs, fm.OriginalPath); statErr == nil || !os.IsNotExist(statErr) {
 				renameSuppressed[fm.NewPath] = true
 			}
 		}
 	}
 	// PlannedDeletes are intent entries pinned to the publisher's content hash:
-	// delete only while the destination still carries exactly those bytes —
-	// absent paths are consumed, rebuilt/touched or foreign bytes are kept.
+	// delete only while the destination still carries exactly those bytes AND
+	// still names a regular file — absent paths are consumed, rebuilt/touched
+	// or foreign bytes are kept, and any non-regular occupant (a planted or
+	// leftover symlink, a directory) is kept, pin match or not.
 	for _, entry := range gf.PlannedDeletes {
 		path := entry.Path
 		if moveBackTargets[path] && !renameSuppressed[path] {
+			continue
+		}
+		// The pin certifies the previously published REGULAR file only, so the
+		// occupancy check never follows a final symlink (codex P2,
+		// PRRT_kwDORn9KaM6m5HF7): a successor link whose TARGET happens to hold
+		// the pinned bytes is a foreign directory entry — hashing through it
+		// and removing the link would unlink an unrelated object.
+		info, lstatErr := lstatRestoreSource(fs, path)
+		if os.IsNotExist(lstatErr) {
+			dirsToCheck[filepath.Dir(path)] = true
+			continue
+		}
+		if lstatErr != nil {
+			logging.Debugf("cleanupGeneratedFiles: pending delete probe failed for %s: %v", path, lstatErr)
+			continue
+		}
+		if !info.Mode().IsRegular() {
+			logging.Debugf("cleanupGeneratedFiles: pending delete %s is not the pinned regular file (mode %v) — retained", path, info.Mode())
 			continue
 		}
 		file, openErr := fs.Open(path)
