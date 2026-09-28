@@ -344,3 +344,22 @@ func TestSweepArtifactStaging_RetainedWhenDeleteKeepsFailing(t *testing.T) {
 	exists, _ := afero.DirExists(base, root)
 	assert.False(t, exists, "ownership claimed via quarantine rename")
 }
+
+type failRenameFS struct {
+	afero.Fs
+}
+
+func (f *failRenameFS) Rename(oldname, newname string) error {
+	return errors.New("quarantine claim denied")
+}
+
+func TestSweepArtifactStaging_RetainedWhenClaimRenameFails(t *testing.T) {
+	base := afero.NewMemMapFs()
+	root := seedStagingRoot(t, base, "/lib", nil)
+	setSweepSeams(t, fsutil.ProcessDead, nil)
+
+	sweepArtifactStaging(&failRenameFS{Fs: base}, "/lib")
+
+	exists, _ := afero.DirExists(base, root)
+	assert.True(t, exists, "a failed claim rename retains the root untouched")
+}
