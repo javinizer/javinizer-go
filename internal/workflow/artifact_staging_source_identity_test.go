@@ -1,0 +1,455 @@
+package workflow
+
+import (
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/javinizer/javinizer-go/internal/matcher"
+	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/operationmode"
+	"github.com/javinizer/javinizer-go/internal/organizer"
+	"github.com/javinizer/javinizer-go/internal/template"
+	"github.com/spf13/afero"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestCaptureArtifactSourceIdentityRejectsNonRegular(t *testing.T) {
+	assert.False(t, captureArtifactSourceIdentity(nil).known, "nil info captures nothing")
+	base := afero.NewMemMapFs()
+	require.NoError(t, base.MkdirAll("/dir", 0o755))
+	info, err := base.Stat("/dir")
+	require.NoError(t, err)
+	assert.False(t, captureArtifactSourceIdentity(info).known, "a directory is never an admitted source")
+}
+
+func TestArtifactSourceIdentityMemfsShapeAndDrift(t *testing.T) {
+	base := afero.NewMemMapFs()
+	require.NoError(t, afero.WriteFile(base, "/m.mp4", []byte("video"), 0o644))
+	info, err := base.Stat("/m.mp4")
+	require.NoError(t, err)
+	id := captureArtifactSourceIdentity(info)
+	require.True(t, id.known)
+	assert.False(t, id.hasDevIno, "in-memory afero keeps the size+modtime legs only")
+	assert.True(t, id.matches(info), "an untouched source still matches")
+	assert.False(t, id.matches(nil))
+
+	require.NoError(t, afero.WriteFile(base, "/m.mp4", []byte("video payload"), 0o644))
+	grown, err := base.Stat("/m.mp4")
+	require.NoError(t, err)
+	assert.False(t, id.matches(grown), "a size change proves a rewrite")
+
+	require.NoError(t, afero.WriteFile(base, "/m.mp4", []byte("VIDEO"), 0o644))
+	moved := info.ModTime().Add(2 * time.Hour)
+	require.NoError(t, base.Chtimes("/m.mp4", moved, moved))
+	shifted, err := base.Stat("/m.mp4")
+	require.NoError(t, err)
+	assert.False(t, id.matches(shifted), "a modtime change proves a rewrite at equal size")
+
+	dirInfo, err := base.Stat("/")
+	require.NoError(t, err)
+	assert.False(t, id.matches(dirInfo), "a non-regular replacement never matches")
+
+	// A captured dev/inode leg degrades to size+modtime when the current
+	// lookup exposes none (mixed real/wrapper filesystem postures).
+	fabricated := artifactSourceIdentity{known: true, hasDevIno: true, dev: 1, ino: 2, size: grown.Size(), modTime: grown.ModTime()}
+	assert.True(t, fabricated.matches(grown))
+	assert.False(t, artifactSourceIdentity{}.matches(grown), "unknown identity matches nothing")
+}
+
+func TestArtifactSourceIdentityOsFsRenameSwapChangesInode(t *testing.T) {
+	base := afero.NewOsFs()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "m.mp4")
+	require.NoError(t, afero.WriteFile(base, path, []byte("video"), 0o644))
+	info, err := base.Stat(path)
+	require.NoError(t, err)
+	id := captureArtifactSourceIdentity(info)
+	require.True(t, id.known)
+	if !id.hasDevIno {
+		t.Skip("platform exposes no dev/inode identity")
+	}
+	restat, err := base.Stat(path)
+	require.NoError(t, err)
+	assert.True(t, id.matches(restat), "a quiet file keeps its identity")
+
+	// Replace-then-restore: same size, mtime forced back to the admitted
+	// value — the surviving difference must be the inode, because a
+	// rename-swap necessarily renames a NEW directory entry into place.
+	require.NoError(t, base.Remove(path))
+	require.NoError(t, afero.WriteFile(base, path, []byte("VIDEO"), 0o644))
+	require.NoError(t, base.Chtimes(path, info.ModTime(), info.ModTime()))
+	swapped, err := base.Stat(path)
+	require.NoError(t, err)
+	assert.Equal(t, id.size, swapped.Size())
+	assert.True(t, info.ModTime().Equal(swapped.ModTime()), "size and mtime restored")
+	assert.False(t, id.matches(swapped), "inode leg alone still pins the swap")
+}
+
+func TestRevalidateAdmittedSourceSkipsUnknownIdentity(t *testing.T) {
+	stage := &artifactStage{fs: &pr260StatFailureFs{Fs: afero.NewMemMapFs(), path: "never"}}
+	assert.NoError(t, stage.revalidateAdmittedSource("/anything", artifactSourceIdentity{}),
+		"a path admission never pinned keeps existing plan semantics")
+}
+
+func TestRevalidateAdmittedSourceStatFaultRefuses(t *testing.T) {
+	base := afero.NewMemMapFs()
+	require.NoError(t, afero.WriteFile(base, "/m.mp4", []byte("video"), 0o644))
+	info, err := base.Stat("/m.mp4")
+	require.NoError(t, err)
+	id := captureArtifactSourceIdentity(info)
+	stage := &artifactStage{fs: &pr260StatFailureFs{Fs: base, path: "/m.mp4"}}
+	err = stage.revalidateAdmittedSource("/m.mp4", id)
+	require.ErrorIs(t, err, errArtifactSourceChanged)
+	require.ErrorContains(t, err, "stat denied")
+}
+
+type identityProbeExecutor struct {
+	moves []models.SubtitleMove
+}
+
+func (identityProbeExecutor) PlanOrganize(context.Context, organizer.OrganizeCmd) (*organizer.OrganizePlan, error) {
+	return nil, errors.New("unused")
+}
+func (identityProbeExecutor) PlanSourceExists(*organizer.OrganizePlan) bool { return true }
+func (identityProbeExecutor) ExecuteOrganizePlan(*organizer.OrganizePlan, bool, organizer.LinkMode) (*organizer.OrganizeResult, error) {
+	return nil, errors.New("unused")
+}
+func (e identityProbeExecutor) PlanSubtitleMoves(*organizer.OrganizePlan) []models.SubtitleMove {
+	return e.moves
+}
+
+func TestRevalidateDirectSourcesDispatch(t *testing.T) {
+	base := afero.NewMemMapFs()
+	require.NoError(t, afero.WriteFile(base, "/real/m.mp4", []byte("video"), 0o644))
+	require.NoError(t, afero.WriteFile(base, "/real/m.srt", []byte("subtitle"), 0o644))
+	require.NoError(t, afero.WriteFile(base, "/real/late.srt", []byte("late"), 0o644))
+	videoInfo, err := base.Stat("/real/m.mp4")
+	require.NoError(t, err)
+	subInfo, err := base.Stat("/real/m.srt")
+	require.NoError(t, err)
+	stage := &artifactStage{
+		fs:             base,
+		sourcePath:     "/real/m.mp4",
+		sourceIdentity: captureArtifactSourceIdentity(videoInfo),
+		siblings: []artifactSibling{
+			{sourcePath: "/real/m.srt", stagedPath: "/stage/.source/m.srt", identity: captureArtifactSourceIdentity(subInfo)},
+		},
+	}
+	moves := []models.SubtitleMove{{OriginalPath: "/real/m.srt", NewPath: "/out/m.srt"}}
+
+	// Staged-video plans never touch the real source: the video leg skips and
+	// subtitle endpoints unknown at admission pass through untouched.
+	stagedPlan := &organizer.OrganizePlan{SourcePath: "/stage/.source/m.mp4"}
+	probe := identityProbeExecutor{moves: append([]models.SubtitleMove{}, moves...)}
+	probe.moves = append(probe.moves, models.SubtitleMove{OriginalPath: "/real/late.srt", NewPath: "/out/late.srt"})
+	require.NoError(t, stage.revalidateDirectSources(probe, stagedPlan))
+
+	// The deferred plan addresses the real source: drift there refuses.
+	realPlan := &organizer.OrganizePlan{SourcePath: "/real/m.mp4"}
+	require.NoError(t, afero.WriteFile(base, "/real/m.mp4", []byte("video!"), 0o644))
+	err = stage.revalidateDirectSources(identityProbeExecutor{moves: moves}, realPlan)
+	require.ErrorIs(t, err, errArtifactSourceChanged)
+
+	// Video intact, admitted subtitle drifted: refused through the sibling leg.
+	require.NoError(t, afero.WriteFile(base, "/real/m.mp4", []byte("video"), 0o644))
+	videoRestat, err := base.Stat("/real/m.mp4")
+	require.NoError(t, err)
+	stage.sourceIdentity = captureArtifactSourceIdentity(videoRestat)
+	require.NoError(t, afero.WriteFile(base, "/real/m.srt", []byte("subtitle-drifted"), 0o644))
+	err = stage.revalidateDirectSources(identityProbeExecutor{moves: moves}, realPlan)
+	require.ErrorIs(t, err, errArtifactSourceChanged)
+	require.ErrorContains(t, err, "/real/m.srt")
+
+	// Everything as admitted: the dispatch passes.
+	require.NoError(t, afero.WriteFile(base, "/real/m.srt", []byte("subtitle"), 0o644))
+	restat, err := base.Stat("/real/m.mp4")
+	require.NoError(t, err)
+	stage.sourceIdentity = captureArtifactSourceIdentity(restat)
+	subRestat, err := base.Stat("/real/m.srt")
+	require.NoError(t, err)
+	stage.siblings[0].identity = captureArtifactSourceIdentity(subRestat)
+	require.NoError(t, stage.revalidateDirectSources(identityProbeExecutor{moves: moves}, realPlan))
+}
+
+func journalCounts(l *completeCallFaultLog) (completes, reconciles int32) {
+	return atomic.LoadInt32(&l.calls), atomic.LoadInt32(&l.deleteReconciles)
+}
+
+// A source replaced between preparation and the deferred publication must
+// abort the fenced publish: the foreign bytes stay untouched, no completion
+// journal lands, and the rollback markers read exactly like any other
+// pre-consumption publication failure.
+func TestDeferredMovePublishAbortsWhenSourceReplaced(t *testing.T) {
+	type mutation struct {
+		name    string
+		mutate  func(t *testing.T, fs afero.Fs, source string, admitted os.FileInfo)
+		foreign string
+	}
+	for _, m := range []mutation{
+		{
+			name: "rename swap with restored size and mtime",
+			mutate: func(t *testing.T, fs afero.Fs, source string, admitted os.FileInfo) {
+				require.NoError(t, fs.Remove(source))
+				require.NoError(t, afero.WriteFile(fs, source, []byte("VIDEO"), 0o644))
+				require.NoError(t, fs.Chtimes(source, admitted.ModTime(), admitted.ModTime()))
+			},
+			foreign: "VIDEO",
+		},
+		{
+			name: "in-place rewrite with different size",
+			mutate: func(t *testing.T, fs afero.Fs, source string, _ os.FileInfo) {
+				require.NoError(t, afero.WriteFile(fs, source, []byte("a much longer replacement payload"), 0o644))
+			},
+			foreign: "a much longer replacement payload",
+		},
+		{
+			name: "in-place rewrite with shifted mtime",
+			mutate: func(t *testing.T, fs afero.Fs, source string, admitted os.FileInfo) {
+				require.NoError(t, afero.WriteFile(fs, source, []byte("VIDEO"), 0o644))
+				shifted := admitted.ModTime().Add(2 * time.Hour)
+				require.NoError(t, fs.Chtimes(source, shifted, shifted))
+			},
+			foreign: "VIDEO",
+		},
+	} {
+		t.Run(m.name, func(t *testing.T) {
+			db, _ := pr260ArtifactDB(t)
+			movie := pr260FencedMovie(t, db, "deferred-source-replaced", "")
+			base, root, source, subtitle, multipart, unrelated, match := pr260FencedFiles(t, "deferred-source-replaced")
+			dest := filepath.Join(root, "library")
+			admitted, statErr := base.Stat(source)
+			require.NoError(t, statErr)
+			org := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize, MoveSubtitles: true, SubtitleExtensions: []string{".srt"}}, template.NewEngine(), nil)
+			ledger := &completeCallFaultLog{}
+			orch := &applyOrchImpl{fs: base, organizer: org, revertLog: ledger}
+			cmd := pr260ArtifactFailureCommand(&movie, match, dest)
+			cmd.Organize.Skip = false
+			cmd.Organize.MoveFiles = true
+			cmd.Download = false
+			stage, _, err := orch.prepareArtifact(context.Background(), cmd)
+			require.NoError(t, err)
+			defer stage.cleanup()
+
+			m.mutate(t, base, source, admitted)
+
+			stagedPlan, planErr := org.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: models.FileMatchInfo{Path: stage.stagedSource, Name: filepath.Base(source)}, Movie: stage.original.Movie, DestDir: stage.root, MoveFiles: true, OperationMode: stage.original.OperationMode})
+			require.NoError(t, planErr)
+			state := &applyPipelineState{operationID: "op", organizeResult: &organizer.OrganizeResult{NewPath: stagedPlan.TargetPath, FolderPath: stagedPlan.TargetDir}}
+			publishErr := stage.publish(context.Background(), orch, state, nil)
+			require.ErrorIs(t, publishErr, errArtifactSourceChanged)
+			require.ErrorContains(t, publishErr, filepath.Base(source))
+			assert.False(t, stage.sourceCleanupArmed, "marker state matches any pre-consumption failure")
+			assert.False(t, stage.directOriginArmed)
+			completes, reconciles := journalCounts(ledger)
+			assert.Zero(t, completes, "the completion journal path never ran")
+			assert.Zero(t, reconciles)
+			pr260AssertRetained(t, base, source, subtitle, multipart, unrelated)
+			pr260AssertNoFinals(t, base, dest)
+			got, readErr := afero.ReadFile(base, source)
+			require.NoError(t, readErr)
+			assert.Equal(t, m.foreign, string(got), "foreign replacement bytes are never touched")
+		})
+	}
+}
+
+// Deferred copy mode consumes the same real source: the same refusal pin
+// applies before any copy/link leg reads it.
+func TestDeferredCopyPublishAbortsWhenSourceReplaced(t *testing.T) {
+	db, _ := pr260ArtifactDB(t)
+	movie := pr260FencedMovie(t, db, "deferred-copy-source-replaced", "")
+	base, root, source, subtitle, multipart, unrelated, match := pr260FencedFiles(t, "deferred-copy-source-replaced")
+	dest := filepath.Join(root, "library")
+	org := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize, MoveSubtitles: true, SubtitleExtensions: []string{".srt"}}, template.NewEngine(), nil)
+	ledger := &completeCallFaultLog{}
+	orch := &applyOrchImpl{fs: base, organizer: org, revertLog: ledger}
+	cmd := pr260ArtifactFailureCommand(&movie, match, dest)
+	cmd.Organize.Skip = false
+	cmd.Organize.MoveFiles = false
+	cmd.Download = false
+	stage, _, err := orch.prepareArtifact(context.Background(), cmd)
+	require.NoError(t, err)
+	defer stage.cleanup()
+
+	require.NoError(t, afero.WriteFile(base, source, []byte("replacement video"), 0o644))
+
+	stagedPlan, planErr := org.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: models.FileMatchInfo{Path: stage.stagedSource, Name: filepath.Base(source)}, Movie: stage.original.Movie, DestDir: stage.root, MoveFiles: false, OperationMode: stage.original.OperationMode})
+	require.NoError(t, planErr)
+	state := &applyPipelineState{operationID: "op", organizeResult: &organizer.OrganizeResult{NewPath: stagedPlan.TargetPath, FolderPath: stagedPlan.TargetDir}}
+	publishErr := stage.publish(context.Background(), orch, state, nil)
+	require.ErrorIs(t, publishErr, errArtifactSourceChanged)
+	completes, reconciles := journalCounts(ledger)
+	assert.Zero(t, completes)
+	assert.Zero(t, reconciles, "intent reconciliation waits for a confirmed publish")
+	pr260AssertRetained(t, base, source, subtitle, multipart, unrelated)
+	pr260AssertNoFinals(t, base, dest)
+}
+
+// An admitted subtitle replaced inside the window aborts the publication even
+// though the video itself is untouched: its bytes were never admitted.
+func TestDeferredMovePublishAbortsWhenSubtitleReplaced(t *testing.T) {
+	db, _ := pr260ArtifactDB(t)
+	movie := pr260FencedMovie(t, db, "deferred-subtitle-replaced", "")
+	base, root, source, subtitle, multipart, unrelated, match := pr260FencedFiles(t, "deferred-subtitle-replaced")
+	dest := filepath.Join(root, "library")
+	admitted, statErr := base.Stat(subtitle)
+	require.NoError(t, statErr)
+	org := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize, MoveSubtitles: true, SubtitleExtensions: []string{".srt"}}, template.NewEngine(), nil)
+	ledger := &completeCallFaultLog{}
+	orch := &applyOrchImpl{fs: base, organizer: org, revertLog: ledger}
+	cmd := pr260ArtifactFailureCommand(&movie, match, dest)
+	cmd.Organize.Skip = false
+	cmd.Organize.MoveFiles = true
+	cmd.Download = false
+	stage, _, err := orch.prepareArtifact(context.Background(), cmd)
+	require.NoError(t, err)
+	defer stage.cleanup()
+
+	require.NoError(t, base.Remove(subtitle))
+	require.NoError(t, afero.WriteFile(base, subtitle, []byte("SUBTITLE"), 0o644))
+	require.NoError(t, base.Chtimes(subtitle, admitted.ModTime(), admitted.ModTime()))
+
+	stagedPlan, planErr := org.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: models.FileMatchInfo{Path: stage.stagedSource, Name: filepath.Base(source)}, Movie: stage.original.Movie, DestDir: stage.root, MoveFiles: true, OperationMode: stage.original.OperationMode})
+	require.NoError(t, planErr)
+	state := &applyPipelineState{operationID: "op", organizeResult: &organizer.OrganizeResult{NewPath: stagedPlan.TargetPath, FolderPath: stagedPlan.TargetDir}}
+	publishErr := stage.publish(context.Background(), orch, state, nil)
+	require.ErrorIs(t, publishErr, errArtifactSourceChanged)
+	require.ErrorContains(t, publishErr, filepath.Base(subtitle))
+	completes, _ := journalCounts(ledger)
+	assert.Zero(t, completes)
+	pr260AssertRetained(t, base, source, subtitle, multipart, unrelated)
+	pr260AssertNoFinals(t, base, dest)
+}
+
+// Identity preserved across the window: admission pinned dev/inode + size +
+// mtime for the video and every sibling, and the deferred publication is the
+// unchanged success path.
+func TestDeferredMovePublishSucceedsWhenSourcesUntouched(t *testing.T) {
+	db, _ := pr260ArtifactDB(t)
+	movie := pr260FencedMovie(t, db, "deferred-sources-untouched", "")
+	base, root, source, subtitle, multipart, unrelated, match := pr260FencedFiles(t, "deferred-sources-untouched")
+	dest := filepath.Join(root, "library")
+	org := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize, MoveSubtitles: true, SubtitleExtensions: []string{".srt"}}, template.NewEngine(), nil)
+	ledger := &completeCallFaultLog{}
+	orch := &applyOrchImpl{fs: base, organizer: org, revertLog: ledger}
+	cmd := pr260ArtifactFailureCommand(&movie, match, dest)
+	cmd.Organize.Skip = false
+	cmd.Organize.MoveFiles = true
+	cmd.Download = false
+	stage, _, err := orch.prepareArtifact(context.Background(), cmd)
+	require.NoError(t, err)
+	defer stage.cleanup()
+
+	require.True(t, stage.sourceIdentity.known, "admission pinned the video identity")
+	assert.True(t, stage.sourceIdentity.hasDevIno, "OsFs admission carries dev/inode")
+	require.Len(t, stage.siblings, 2)
+	for _, sibling := range stage.siblings {
+		assert.True(t, sibling.identity.known, "admission pinned sibling %s", sibling.sourcePath)
+	}
+
+	stagedPlan, planErr := org.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: models.FileMatchInfo{Path: stage.stagedSource, Name: filepath.Base(source)}, Movie: stage.original.Movie, DestDir: stage.root, MoveFiles: true, OperationMode: stage.original.OperationMode})
+	require.NoError(t, planErr)
+	state := &applyPipelineState{operationID: "op", organizeResult: &organizer.OrganizeResult{NewPath: stagedPlan.TargetPath, FolderPath: stagedPlan.TargetDir}}
+	require.NoError(t, stage.publish(context.Background(), orch, state, nil))
+	for _, consumed := range []string{source, subtitle, multipart} {
+		exists, existsErr := afero.Exists(base, consumed)
+		require.NoError(t, existsErr)
+		assert.False(t, exists, "unchanged sources moved out: %s", consumed)
+	}
+	exists, existsErr := afero.Exists(base, unrelated)
+	require.NoError(t, existsErr)
+	assert.True(t, exists)
+	assert.NotZero(t, atomic.LoadInt32(&ledger.calls), "the success path still completes")
+}
+
+// The post-publish original-removal legs are direct source consumers too: a
+// sibling video replaced inside the window (same size, mtime restored — only
+// the inode differs) must refuse its removal and roll the publication back.
+func TestDeferredMoveAbortsRemovingReplacedSiblingOriginal(t *testing.T) {
+	db, _ := pr260ArtifactDB(t)
+	movie := pr260FencedMovie(t, db, "deferred-sibling-replaced", "")
+	base, root, source, subtitle, multipart, unrelated, match := pr260FencedFiles(t, "deferred-sibling-replaced")
+	dest := filepath.Join(root, "library")
+	admitted, statErr := base.Stat(multipart)
+	require.NoError(t, statErr)
+	org := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize, MoveSubtitles: true, SubtitleExtensions: []string{".srt"}}, template.NewEngine(), nil)
+	ledger := &completeCallFaultLog{}
+	orch := &applyOrchImpl{fs: base, organizer: org, revertLog: ledger}
+	cmd := pr260ArtifactFailureCommand(&movie, match, dest)
+	cmd.Organize.Skip = false
+	cmd.Organize.MoveFiles = true
+	cmd.Download = false
+	stage, _, err := orch.prepareArtifact(context.Background(), cmd)
+	require.NoError(t, err)
+	defer stage.cleanup()
+
+	require.NoError(t, base.Remove(multipart))
+	require.NoError(t, afero.WriteFile(base, multipart, []byte("PART-TWO"), 0o644))
+	require.NoError(t, base.Chtimes(multipart, admitted.ModTime(), admitted.ModTime()))
+
+	stagedPlan, planErr := org.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: models.FileMatchInfo{Path: stage.stagedSource, Name: filepath.Base(source)}, Movie: stage.original.Movie, DestDir: stage.root, MoveFiles: true, OperationMode: stage.original.OperationMode})
+	require.NoError(t, planErr)
+	state := &applyPipelineState{operationID: "op", organizeResult: &organizer.OrganizeResult{NewPath: stagedPlan.TargetPath, FolderPath: stagedPlan.TargetDir}}
+	publishErr := stage.publish(context.Background(), orch, state, nil)
+	require.ErrorIs(t, publishErr, errArtifactSourceChanged)
+	assert.False(t, stage.sourceCleanupArmed, "rollback restored the video: markers reset")
+	assert.False(t, stage.directOriginArmed)
+	pr260AssertRetained(t, base, source, subtitle, multipart, unrelated)
+	pr260AssertNoFinals(t, base, dest)
+	got, readErr := afero.ReadFile(base, multipart)
+	require.NoError(t, readErr)
+	assert.Equal(t, "PART-TWO", string(got), "the foreign sibling replacement is never removed")
+}
+
+// In-place move mode consumes the original only after the staged copy is
+// published: a source rewritten inside the window refuses that removal.
+func TestInPlaceMoveAbortsRemovingReplacedOriginal(t *testing.T) {
+	db, _ := pr260ArtifactDB(t)
+	movie := pr260FencedMovie(t, db, "inplace-original-replaced", "")
+	base, root, source, sub, part, other, match := pr260FencedFiles(t, "inplace-original-replaced")
+	isolatedDir := filepath.Join(root, "only-video")
+	require.NoError(t, base.MkdirAll(isolatedDir, 0o755))
+	standalone := filepath.Join(isolatedDir, movie.ID+".mp4")
+	require.NoError(t, afero.WriteFile(base, standalone, []byte("isolated media"), 0o644))
+	match.Path = standalone
+	match.Name = filepath.Base(standalone)
+	match.MovieID = movie.ID
+	orch := pr260RealApply(base, &movie, organizer.MediaFormatConfig{}, nil, false)
+	m, matchErr := matcher.NewMatcher(&matcher.Config{})
+	require.NoError(t, matchErr)
+	orch.organizer = organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "renamed-folder", FileFormat: "<ID>", RenameFile: true, OperationMode: operationmode.OperationModeInPlace}, template.NewEngine(), m)
+	cmd := pr260FencedCommand(&movie, match, isolatedDir, pr260FencedCounter(t, db), operationmode.OperationModeInPlace, false, true, organizer.LinkModeNone, false, false)
+	stage, _, err := orch.prepareArtifact(context.Background(), cmd)
+	require.NoError(t, err)
+	require.True(t, stage.inPlace)
+	defer stage.cleanup()
+
+	require.True(t, stage.sourceIdentity.known)
+	require.NoError(t, afero.WriteFile(base, standalone, []byte("rewritten foreign bytes"), 0o644))
+
+	state := &applyPipelineState{organizeResult: &organizer.OrganizeResult{NewPath: stage.stagedSource, InPlaceRenamed: true}}
+	publishErr := stage.publish(context.Background(), orch, state, nil)
+	require.ErrorIs(t, publishErr, errArtifactSourceChanged)
+	got, readErr := afero.ReadFile(base, standalone)
+	require.NoError(t, readErr)
+	assert.Equal(t, "rewritten foreign bytes", string(got), "the replaced original survives untouched")
+	regularFiles := []string{}
+	walkErr := afero.Walk(base, root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.Mode().IsRegular() && !strings.Contains(path, ".javinizer-apply-") {
+			regularFiles = append(regularFiles, path)
+		}
+		return nil
+	})
+	require.NoError(t, walkErr)
+	assert.ElementsMatch(t, []string{source, sub, part, other, standalone}, regularFiles,
+		"rollback removed every published artifact; only the inputs remain")
+}

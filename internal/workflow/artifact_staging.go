@@ -38,6 +38,7 @@ type artifactPlanExecutor interface {
 type artifactSibling struct {
 	sourcePath string
 	stagedPath string
+	identity   artifactSourceIdentity
 }
 
 type artifactStage struct {
@@ -46,6 +47,7 @@ type artifactStage struct {
 	root               string
 	finalRoot          string
 	sourcePath         string
+	sourceIdentity     artifactSourceIdentity
 	stagedSource       string
 	siblings           []artifactSibling
 	inPlace            bool
@@ -171,6 +173,10 @@ func (o *applyOrchImpl) prepareArtifact(ctx context.Context, cmd ApplyCmd) (*art
 			stage.cleanup()
 			return nil, cmd, fmt.Errorf("artifact staging blocked for non-regular source %s", cmd.Match.Path)
 		}
+		// Pin the admitted source identity: the deferred publication consumes
+		// sourcePath directly after the merge/download/NFO interval and must
+		// re-prove it still names THIS file before any byte moves or copies.
+		stage.sourceIdentity = captureArtifactSourceIdentity(sourceInfo)
 		base := filepath.Base(sourcePath)
 		stagedDir := filepath.Join(root, ".source")
 		if inPlace {
@@ -211,7 +217,7 @@ func (o *applyOrchImpl) prepareArtifact(ctx context.Context, cmd ApplyCmd) (*art
 				stage.cleanup()
 				return nil, cmd, err
 			}
-			stage.siblings = append(stage.siblings, artifactSibling{sourcePath: sibling, stagedPath: stagedSibling})
+			stage.siblings = append(stage.siblings, artifactSibling{sourcePath: sibling, stagedPath: stagedSibling, identity: captureArtifactSourceIdentity(siblingInfo)})
 		}
 		stagedCmd.Match.Path = stage.stagedSource
 		stagedCmd.Match.Name = base
@@ -626,6 +632,13 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 				primaryCopyPinned = true
 			}
 		}
+		// Fail closed one Stat before the execution consumes the real source
+		// paths: a source replaced or rewritten during the merge/download/NFO
+		// interval must abort here — publishing it would land bytes the
+		// metadata/NFO was never generated for (or destroy a foreign original).
+		if err := s.revalidateDirectSources(executor, plan); err != nil {
+			return err
+		}
 		finalResult, err = executor.ExecuteOrganizePlan(plan, publishMove, s.original.Organize.LinkMode)
 		if filepath.Clean(plan.SourcePath) != filepath.Clean(plan.TargetPath) && (err == nil || fsutil.PublishCompleted(err)) {
 			batch.ObservePublishResult(plan.TargetPath)
@@ -905,6 +918,12 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 					return fmt.Errorf("persist inverse before source cleanup: %w", err)
 				}
 			}
+			// The staged payload already landed; consuming the original must
+			// still refuse a source that changed since admission: deleting a
+			// foreign replacement is not "move" semantics.
+			if err := s.revalidateAdmittedSource(s.sourcePath, s.sourceIdentity); err != nil {
+				return err
+			}
 			s.sourceCleanupArmed = true
 			if err := batch.SetRollbackOrigin(finalResult.NewPath, s.sourcePath); err != nil {
 				return err
@@ -935,6 +954,11 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 			// foreign bytes onto it.
 			if !published[filepath.Clean(target)] {
 				continue
+			}
+			// This apply published the ADMITTED staged copy: refuse to consume an
+			// original that changed since admission — those bytes are foreign.
+			if err := s.revalidateAdmittedSource(sibling.sourcePath, sibling.identity); err != nil {
+				return err
 			}
 			if o.revertLog != nil && opID != "" {
 				// Persist this sibling inverse before removing its source: a generic
