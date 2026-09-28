@@ -86,6 +86,12 @@ type RevertLog interface {
 	// retained destination over its source.
 	ReconcileMoveIntents(ctx context.Context, opID OperationID, keep []models.FileMove) error
 
+	// ReconcileDeleteIntents replaces the row's pending PlannedDeletes with the
+	// subset pinned to keep once execution outcomes are known (post-execute,
+	// pre-completion): pins whose install never landed are retracted so a later
+	// revert never hash-matches a same-content foreign occupant into deletion.
+	ReconcileDeleteIntents(ctx context.Context, opID OperationID, keep []string) error
+
 	// RecordDeleteIntent journals an artifactS intended final deletion BEFORE
 	// its install lands, pinned to the content hash: the entry closes the
 	// journal gap (crash between intent and install) AND the stray-delete gap
@@ -195,6 +201,10 @@ func (noOpRevertLog) RecordDeleteIntent(context.Context, OperationID, []models.D
 }
 
 func (noOpRevertLog) ReconcileMoveIntents(context.Context, OperationID, []models.FileMove) error {
+	return nil
+}
+
+func (noOpRevertLog) ReconcileDeleteIntents(context.Context, OperationID, []string) error {
 	return nil
 }
 
@@ -621,6 +631,55 @@ func (l *dbRevertLog) ReconcileMoveIntents(ctx context.Context, opID OperationID
 	})
 	if errors.Is(txErr, database.ErrNotFound) {
 		return fmt.Errorf("revert log ReconcileMoveIntents: record %s not found", opID)
+	}
+	return txErr
+}
+
+// ReconcileDeleteIntents implements RevertLog: the pending delete intents are
+// replaced wholesale by the confirmed-install set through the same serialized
+// single-writer transaction channel as move reconciliations — pins naming
+// unconfirmed destinations are retracted so the reverter's hash check can
+// never condemn a same-content foreign occupant.
+func (l *dbRevertLog) ReconcileDeleteIntents(ctx context.Context, opID OperationID, keep []string) error {
+	if opID == "" {
+		return nil
+	}
+	recordID64, err := strconv.ParseUint(opID, 10, 64)
+	if err != nil || recordID64 == 0 {
+		return fmt.Errorf("revert log ReconcileDeleteIntents: unparsable operation ID %q", opID)
+	}
+	recordID := uint(recordID64)
+
+	release := replacementLedgerLocks.Acquire(opID)
+	defer release()
+
+	txErr := l.repo.UpdateJournalInTx(ctx, recordID, func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
+		gf, perr := models.ParseGeneratedFiles(current.GeneratedFiles)
+		if perr != nil {
+			return models.GeneratedFilesJSON{}, false, perr
+		}
+		if len(gf.PlannedDeletes) == 0 {
+			return models.GeneratedFilesJSON{}, false, nil
+		}
+		keepTargets := make(map[string]bool, len(keep))
+		for _, path := range keep {
+			keepTargets[path] = true
+		}
+		remaining := gf.PlannedDeletes[:0]
+		for _, pd := range gf.PlannedDeletes {
+			if keepTargets[pd.Path] {
+				remaining = append(remaining, pd)
+			}
+		}
+		gf.PlannedDeletes = remaining
+		next := models.MarshalLedgerJSON(gf)
+		if next == current.GeneratedFiles {
+			return models.GeneratedFilesJSON{}, false, nil
+		}
+		return gf, true, nil
+	})
+	if errors.Is(txErr, database.ErrNotFound) {
+		return fmt.Errorf("revert log ReconcileDeleteIntents: record %s not found", opID)
 	}
 	return txErr
 }

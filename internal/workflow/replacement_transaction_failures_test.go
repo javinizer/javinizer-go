@@ -122,6 +122,10 @@ func (l *completionFaultLog) ReconcileMoveIntents(context.Context, OperationID, 
 	return nil
 }
 
+func (l *completionFaultLog) ReconcileDeleteIntents(context.Context, OperationID, []string) error {
+	return nil
+}
+
 func stagedPublicationTarget(t *testing.T, real *organizer.Organizer, stage *artifactStage, cmd ApplyCmd) *organizer.OrganizePlan {
 	t.Helper()
 	match := cmd.Match

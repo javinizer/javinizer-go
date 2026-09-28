@@ -233,11 +233,16 @@ type completeCallFaultLog struct {
 	intentFailAt int32
 	intents      int32
 	deleteErr    error
+	deleteFailAt int32
 	deletes      int32
 	deletePaths  []models.DeleteEntry
 	reconcileErr error
 	reconciles   int32
 	keepCaptured []models.FileMove
+
+	deleteReconcileErr error
+	deleteReconciles   int32
+	deleteKeepCaptured []string
 }
 
 func (l *completeCallFaultLog) Complete(context.Context, OperationID, *ApplyResult) error {
@@ -255,8 +260,14 @@ func (l *completeCallFaultLog) RecordMoveIntent(context.Context, OperationID, st
 }
 
 func (l *completeCallFaultLog) RecordDeleteIntent(_ context.Context, _ OperationID, entries []models.DeleteEntry) error {
-	atomic.AddInt32(&l.deletes, 1)
+	call := atomic.AddInt32(&l.deletes, 1)
 	l.deletePaths = append(l.deletePaths, entries...)
+	if l.deleteFailAt > 0 {
+		if call == l.deleteFailAt {
+			return l.deleteErr
+		}
+		return nil
+	}
 	return l.deleteErr
 }
 
@@ -264,6 +275,12 @@ func (l *completeCallFaultLog) ReconcileMoveIntents(_ context.Context, _ Operati
 	atomic.AddInt32(&l.reconciles, 1)
 	l.keepCaptured = append([]models.FileMove(nil), keep...)
 	return l.reconcileErr
+}
+
+func (l *completeCallFaultLog) ReconcileDeleteIntents(_ context.Context, _ OperationID, keep []string) error {
+	atomic.AddInt32(&l.deleteReconciles, 1)
+	l.deleteKeepCaptured = append([]string(nil), keep...)
+	return l.deleteReconcileErr
 }
 
 // A deferred move whose intended inverse cannot be journaled must NOT consume

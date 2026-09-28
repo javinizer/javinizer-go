@@ -817,6 +817,10 @@ func (e errorRevertLog) ReconcileMoveIntents(context.Context, OperationID, []mod
 	return nil
 }
 
+func (e errorRevertLog) ReconcileDeleteIntents(context.Context, OperationID, []string) error {
+	return nil
+}
+
 func (e errorRevertLog) Begin(_ context.Context, _ ApplyCmd) (OperationID, error) {
 	return "1", nil
 }

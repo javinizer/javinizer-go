@@ -258,3 +258,72 @@ func TestReconcileMoveIntentsConsumesPinnedDeleteForKeptMoves(t *testing.T) {
 	require.Len(t, gf.PlannedDeletes, 1, "the kept move's pinned delete is consumed")
 	assert.Equal(t, unrelatedTarget, gf.PlannedDeletes[0].Path)
 }
+
+// Reconciled delete intents keep only the confirmed installs: pins whose
+// planned destination never landed are retracted wholesale so a later revert
+// can never hash-match a same-content foreign occupant into deletion.
+func TestReconcileDeleteIntentsRetractsUnconfirmedPins(t *testing.T) {
+	db, _ := pr260ArtifactDB(t)
+	movie := pr260FencedMovie(t, db, "reconcile-delete-intents", "")
+	fs, root, _, _, _, _, match := pr260FencedFiles(t, "reconcile-delete-intents")
+	repo := database.NewBatchFileOperationRepository(db)
+	log := NewDBRevertLog(repo, NewRevertLogConfig(true, nil), "reconcile-delete-intents", fs, nil, nil, nil)
+	dest := filepath.Join(root, "library")
+	opID, err := log.Begin(context.Background(), ApplyCmd{Movie: &movie, Match: match, DestPath: dest})
+	require.NoError(t, err)
+
+	copiedTarget := filepath.Join(dest, "movie", "movie.srt")
+	skippedTarget := filepath.Join(dest, "movie", "movie.sup")
+	primaryTarget := filepath.Join(dest, "movie", "movie.mp4")
+	require.NoError(t, log.RecordDeleteIntent(context.Background(), opID, []models.DeleteEntry{
+		{Path: copiedTarget, SHA256: "pin-copied"},
+		{Path: skippedTarget, SHA256: "pin-skipped"},
+		{Path: primaryTarget, SHA256: "pin-primary"},
+	}))
+	require.NoError(t, log.ReconcileDeleteIntents(context.Background(), opID, []string{copiedTarget}))
+
+	row, rowErr := repo.FindByID(context.Background(), mustParseOpID(t, opID))
+	require.NoError(t, rowErr)
+	require.NotNil(t, row)
+	gf, parseErr := models.ParseGeneratedFiles(row.GeneratedFiles)
+	require.NoError(t, parseErr)
+	require.Len(t, gf.PlannedDeletes, 1, "unconfirmed pins retract; the graduated primary pin is consumed")
+	assert.Equal(t, copiedTarget, gf.PlannedDeletes[0].Path)
+	assert.NotEmpty(t, gf.Roots, "unrelated journal channels survive the reconcile")
+	assert.Empty(t, row.NewPath, "completion columns remain untouched")
+
+	// Idempotent: the same reconcile applied twice writes nothing new.
+	require.NoError(t, log.ReconcileDeleteIntents(context.Background(), opID, []string{copiedTarget}))
+	rowAgain, rowErr := repo.FindByID(context.Background(), mustParseOpID(t, opID))
+	require.NoError(t, rowErr)
+	require.NotNil(t, rowAgain)
+	gfAgain, parseErr := models.ParseGeneratedFiles(rowAgain.GeneratedFiles)
+	require.NoError(t, parseErr)
+	require.Len(t, gfAgain.PlannedDeletes, 1)
+
+	// A reconcile on a row carrying no pending deletes is a no-op write.
+	require.NoError(t, db.Model(&models.BatchFileOperation{}).Where("id = ?", mustParseOpID(t, opID)).Update("generated_files", models.MarshalLedgerJSON(models.GeneratedFilesJSON{Roots: []string{dest}})).Error)
+	require.NoError(t, log.ReconcileDeleteIntents(context.Background(), opID, nil))
+
+	require.NoError(t, log.ReconcileDeleteIntents(context.Background(), "", nil), "empty op is a no-op")
+	require.Error(t, log.ReconcileDeleteIntents(context.Background(), "abc", nil), "unparsable id")
+	require.Error(t, log.ReconcileDeleteIntents(context.Background(), "99999999", nil), "missing row")
+	require.NoError(t, (noOpRevertLog{}).ReconcileDeleteIntents(context.Background(), opID, nil), "noop reconcile")
+}
+
+// A corrupt journal surfaces as a delete-reconcile error instead of silently
+// dropping the persisted ledger.
+func TestReconcileDeleteIntentsErrorsOnCorruptJournal(t *testing.T) {
+	db, _ := pr260ArtifactDB(t)
+	movie := pr260FencedMovie(t, db, "reconcile-delete-corrupt", "")
+	fs, root, _, _, _, _, match := pr260FencedFiles(t, "reconcile-delete-corrupt")
+	repo := database.NewBatchFileOperationRepository(db)
+	log := NewDBRevertLog(repo, NewRevertLogConfig(true, nil), "reconcile-delete-corrupt", fs, nil, nil, nil)
+	dest := filepath.Join(root, "library")
+	opID, err := log.Begin(context.Background(), ApplyCmd{Movie: &movie, Match: match, DestPath: dest})
+	require.NoError(t, err)
+	require.NoError(t, db.Model(&models.BatchFileOperation{}).Where("id = ?", mustParseOpID(t, opID)).Update("generated_files", "{broken").Error)
+
+	err = log.ReconcileDeleteIntents(context.Background(), opID, nil)
+	require.Error(t, err, "malformed journal propagates")
+}

@@ -23,6 +23,7 @@ type pr260PublicationFaultOrganizer struct {
 	missingSource   bool
 	emptyFolder     bool
 	changeGuardPath bool
+	preExecute      func(*organizer.OrganizePlan)
 	afterExecute    func(*organizer.OrganizePlan, *organizer.OrganizeResult)
 }
 
@@ -49,6 +50,9 @@ func (o *pr260PublicationFaultOrganizer) ExecuteOrganizePlan(p *organizer.Organi
 	}
 	if o.noResult {
 		return nil, nil
+	}
+	if o.preExecute != nil {
+		o.preExecute(p)
 	}
 	result, err := o.Organizer.ExecuteOrganizePlan(p, move, link)
 	if result != nil && o.afterExecute != nil {

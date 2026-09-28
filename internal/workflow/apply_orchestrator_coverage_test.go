@@ -137,6 +137,10 @@ func (r *recordingRevertLog) ReconcileMoveIntents(context.Context, OperationID, 
 	return nil
 }
 
+func (r *recordingRevertLog) ReconcileDeleteIntents(context.Context, OperationID, []string) error {
+	return nil
+}
+
 func (r *recordingRevertLog) Begin(_ context.Context, _ ApplyCmd) (OperationID, error) {
 	r.beginCalls++
 	if r.beginErr != nil {

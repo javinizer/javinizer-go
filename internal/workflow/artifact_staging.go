@@ -63,6 +63,10 @@ type artifactStage struct {
 	sharedConsumers    []SharedArtifactClaim
 	sharedPublishBegan bool
 	sharedPoisoned     bool
+	// identicalSkips tracks destinations whose pre-existing bytes proved identical
+	// to the staged payload (installPaths sameBytes skip): this apply landed
+	// nothing there, so the path must never enter the revert delete ledger.
+	identicalSkips map[string]bool
 }
 
 var errArtifactDirtyAdmission = errors.New("artifact publication preparation failed")
@@ -476,6 +480,8 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 	stagedVideo := ""
 	videoInstalledByTree := false
 	sidecarIntentTargets := []string{}
+	copiedSidecarTargets := map[string]bool{}
+	primaryCopyPinned := false
 	// The video leg moves the real source whenever the publish call carries
 	// move semantics: explicit MoveFiles, or any flow where ExecuteOrganizePlan
 	// would still rename (an irrelevant link_mode must not disarm intents).
@@ -601,6 +607,24 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 				// video lane does for the video plan target.
 				batch.YieldToLockedPublisher(mv.NewPath)
 			}
+			// The PRIMARY leg analogue of the sidecar pins: execute can publish the
+			// video itself, yet an absent destination has no other durable trail
+			// (an occupied one graduated through BeforePublish's replacement
+			// journal). Pin the source bytes against the target BEFORE execute so
+			// an interrupted row's revert can still attribute — and remove —
+			// exactly the bytes this apply landed. The confirmed publish below
+			// consumes this pin: a copy/link primary is user-owned once installed
+			// and this row's revert retains it.
+			if filepath.Clean(plan.SourcePath) != filepath.Clean(plan.TargetPath) && !finalReplaced && o.revertLog != nil && opID != "" {
+				digest, digestErr := artifactDigest(s.fs, plan.SourcePath)
+				if digestErr != nil {
+					return fmt.Errorf("pin deferred primary copy digest %s: %w", plan.TargetPath, digestErr)
+				}
+				if err := o.revertLog.RecordDeleteIntent(ctx, opID, []models.DeleteEntry{{Path: plan.TargetPath, SHA256: digest}}); err != nil {
+					return fmt.Errorf("record deferred primary copy intent %s: %w", plan.TargetPath, err)
+				}
+				primaryCopyPinned = true
+			}
 		}
 		finalResult, err = executor.ExecuteOrganizePlan(plan, publishMove, s.original.Organize.LinkMode)
 		if filepath.Clean(plan.SourcePath) != filepath.Clean(plan.TargetPath) && (err == nil || fsutil.PublishCompleted(err)) {
@@ -608,16 +632,15 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 			// Confirm only what execute reports as Copied: a would-be target
 			// that turned out occupied/armed-skip mid-run must not be registered
 			// as ours, or rollback would UnlinkVerified a foreign file.
-			copiedTargets := map[string]bool{}
 			if finalResult != nil {
 				for _, sr := range finalResult.Subtitles {
 					if sr.Copied && sr.NewPath != "" {
-						copiedTargets[filepath.Clean(sr.NewPath)] = true
+						copiedSidecarTargets[filepath.Clean(sr.NewPath)] = true
 					}
 				}
 			}
 			for _, target := range sidecarIntentTargets {
-				if !copiedTargets[filepath.Clean(target)] {
+				if !copiedSidecarTargets[filepath.Clean(target)] {
 					// An armed-but-uncopied target pinned a .dlbusy claim that only
 					// ConfirmPublish or rollback would release: free it now or the
 					// destination reports ErrReplacementBusy for the server's lifetime.
@@ -658,6 +681,24 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 		if filepath.Clean(plan.SourcePath) != filepath.Clean(plan.TargetPath) {
 			if err := batch.ConfirmPublish(ctx, plan.TargetPath); err != nil {
 				return err
+			}
+			// The confirmed primary graduated to a user-owned install: settle the
+			// durable pins in one journal transaction. The primary's pin is
+			// retracted (this row's revert retains installed copy/link primaries —
+			// and must never delete them), and every sidecar pin whose install the
+			// organizer did NOT confirm is retracted: a surviving pin could
+			// hash-match a same-content foreign occupant and let a later revert
+			// delete bytes this apply never landed.
+			if s.videoDeferred && !publishMove && o.revertLog != nil && opID != "" && (primaryCopyPinned || len(sidecarIntentTargets) > 0) {
+				keep := make([]string, 0, len(sidecarIntentTargets))
+				for _, target := range sidecarIntentTargets {
+					if copiedSidecarTargets[filepath.Clean(target)] {
+						keep = append(keep, target)
+					}
+				}
+				if err := o.revertLog.ReconcileDeleteIntents(ctx, opID, keep); err != nil {
+					return fmt.Errorf("reconcile copy-installed delete intents: %w", err)
+				}
 			}
 		}
 		if finalReplaced {
@@ -791,7 +832,7 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 		if err != nil {
 			return err
 		}
-		if s.isSharedConsumer(state.nfoPath) {
+		if s.isSharedConsumer(state.nfoPath) || s.skippedIdentical(state.nfoPath) {
 			state.nfoPath = ""
 		}
 	}
@@ -801,7 +842,7 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 		if mapErr != nil {
 			return mapErr
 		}
-		if !batch.IsReplacement(mapped) && !s.isSharedConsumer(mapped) {
+		if !batch.IsReplacement(mapped) && !s.isSharedConsumer(mapped) && !s.skippedIdentical(mapped) {
 			mappedDownloads = append(mappedDownloads, mapped)
 		}
 	}
@@ -1117,7 +1158,11 @@ func (s *artifactStage) installPaths(paths, preserve []string, stagedArtifactDir
 			if digestEq, eqErr := sameBytes(s.fs, source, target); eqErr == nil && digestEq {
 				// Byte-identical (e.g. this operation just copy-installed through the
 				// memberdBatch route): no duplicate install, no replacement journal.
+				// Track the skip: this apply landed nothing at the destination, so
+				// the pre-existing bytes stay foreign to it and the delete-ledger
+				// mapping must never condemn them on revert.
 				plan.skip = true
+				s.markIdenticalSkipped(target)
 				plans = append(plans, plan)
 				continue
 			}
@@ -1265,6 +1310,17 @@ func (s *artifactStage) finishSharedArtifactClaims(disposition SharedArtifactCom
 		coordinator.Complete(claim, disposition)
 	}
 	s.sharedClaims = nil
+}
+
+func (s *artifactStage) markIdenticalSkipped(target string) {
+	if s.identicalSkips == nil {
+		s.identicalSkips = map[string]bool{}
+	}
+	s.identicalSkips[filepath.Clean(target)] = true
+}
+
+func (s *artifactStage) skippedIdentical(target string) bool {
+	return s.identicalSkips[filepath.Clean(target)]
 }
 
 func (s *artifactStage) isSharedConsumer(path string) bool {
