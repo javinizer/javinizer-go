@@ -1226,3 +1226,99 @@ func TestSameBytesFaultLegs(t *testing.T) {
 	_, err = sameBytes(deny, "/x/a.txt", "/x/b.txt")
 	require.Error(t, err, "second source's digest fail surfaces")
 }
+
+// A copy-published generic sibling registers a hash-pinned delete intent
+// BEFORE its bytes land: a crash window between the copy and the MoveBack
+// arm must still prove ownership of the destination. The capturing recorder
+// asserts the intent order.
+type genericSiblingIntentCapture struct {
+	noOpRevertLog
+	intents []models.DeleteEntry
+}
+
+func (c *genericSiblingIntentCapture) RecordDeleteIntent(_ context.Context, _ OperationID, entries []models.DeleteEntry) error {
+	c.intents = append(c.intents, entries...)
+	return nil
+}
+
+func TestDeferredPublishGenericSiblingPinsInstallIntent(t *testing.T) {
+	base, root, _, _, _, _, match := pr260FencedFiles(t, "deferred-sibling-intent")
+	dest := filepath.Join(root, "library")
+	real := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize}, template.NewEngine(), nil)
+	capture := &genericSiblingIntentCapture{}
+	orch := &applyOrchImpl{fs: base, organizer: real, revertLog: capture}
+	cmd := pr260ArtifactFailureCommand(&models.Movie{ContentID: "deferred-sibling-intent"}, match, dest)
+	cmd.Organize.Skip = false
+	cmd.Organize.MoveFiles = true
+	cmd.Download = false
+	stage, _, err := orch.prepareArtifact(context.Background(), cmd)
+	require.NoError(t, err)
+	defer stage.cleanup()
+
+	plan, planErr := real.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: match, Movie: stage.original.Movie, DestDir: stage.root, MoveFiles: true, OperationMode: stage.original.OperationMode})
+	require.NoError(t, planErr)
+	state := &applyPipelineState{operationID: "op", organizeResult: &organizer.OrganizeResult{NewPath: plan.TargetPath, FolderPath: plan.TargetDir}}
+
+	require.NoError(t, stage.publish(context.Background(), orch, state, nil))
+	require.NotEmpty(t, capture.intents, "the sibling publish must register hash-pinned intents")
+	for _, entry := range capture.intents {
+		require.NotEmpty(t, entry.SHA256, "intent on %s needs its content pin", entry.Path)
+	}
+}
+
+// The pinned-intent leg propagates recorder faults; a staged-read fault marg
+// surfaces before the copy as the digest error.
+type faultSiblingIntentRecorder struct {
+	noOpRevertLog
+}
+
+func (faultSiblingIntentRecorder) RecordDeleteIntent(context.Context, OperationID, []models.DeleteEntry) error {
+	return errors.New("intent persistence fault")
+}
+
+func TestDeferredPublishGenericSiblingPinsIntentFaults(t *testing.T) {
+	t.Run("recorder fault", func(t *testing.T) {
+		base, root, _, _, _, _, match := pr260FencedFiles(t, "deferred-sibling-intent-rec")
+		dest := filepath.Join(root, "library")
+		real := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize}, template.NewEngine(), nil)
+		orch := &applyOrchImpl{fs: base, organizer: real, revertLog: faultSiblingIntentRecorder{}}
+		cmd := pr260ArtifactFailureCommand(&models.Movie{ContentID: "deferred-sibling-intent-rec"}, match, dest)
+		cmd.Organize.Skip = false
+		cmd.Organize.MoveFiles = true
+		cmd.Download = false
+		stage, _, err := orch.prepareArtifact(context.Background(), cmd)
+		require.NoError(t, err)
+		defer stage.cleanup()
+
+		plan, planErr := real.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: match, Movie: stage.original.Movie, DestDir: stage.root, MoveFiles: true, OperationMode: stage.original.OperationMode})
+		require.NoError(t, planErr)
+		state := &applyPipelineState{operationID: "op", organizeResult: &organizer.OrganizeResult{NewPath: plan.TargetPath, FolderPath: plan.TargetDir}}
+
+		publishErr := stage.publish(context.Background(), orch, state, nil)
+		require.ErrorContains(t, publishErr, "intent persistence fault")
+	})
+
+	t.Run("staged digest fault", func(t *testing.T) {
+		base, root, _, _, _, _, match := pr260FencedFiles(t, "deferred-sibling-intent-dig")
+		dest := filepath.Join(root, "library")
+		real := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize}, template.NewEngine(), nil)
+		orch := &applyOrchImpl{fs: base, organizer: real, revertLog: noOpRevertLog{}}
+		cmd := pr260ArtifactFailureCommand(&models.Movie{ContentID: "deferred-sibling-intent-dig"}, match, dest)
+		cmd.Organize.Skip = false
+		cmd.Organize.MoveFiles = true
+		cmd.Download = false
+		stage, _, err := orch.prepareArtifact(context.Background(), cmd)
+		require.NoError(t, err)
+		defer stage.cleanup()
+
+		plan, planErr := real.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: match, Movie: stage.original.Movie, DestDir: stage.root, MoveFiles: true, OperationMode: stage.original.OperationMode})
+		require.NoError(t, planErr)
+		state := &applyPipelineState{operationID: "op", organizeResult: &organizer.OrganizeResult{NewPath: plan.TargetPath, FolderPath: plan.TargetDir}}
+
+		// Make the staged sibling undigestible (only its Open faults), so the
+		// digest leg errors BEFORE the publish loop records or copies anything.
+		stage.fs = &denyOpenStagedFS{Fs: base, path: stage.siblings[0].stagedPath}
+		publishErr := stage.publish(context.Background(), orch, state, nil)
+		require.ErrorContains(t, publishErr, "staged read denied")
+	})
+}

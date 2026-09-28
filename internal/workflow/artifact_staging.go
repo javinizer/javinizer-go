@@ -824,6 +824,19 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 				if _, armErr := batch.BeforePublish(ctx, target, false); armErr != nil {
 					return armErr
 				}
+				// Pin the incoming bytes durably BEFORE copying: a crash between the
+				// copy and the MoveBack arming must still prove the destination's
+				// bytes are ours (the owner-pinned Delete intent then clears them
+				// and retains the untouched source).
+				if o.revertLog != nil && opID != "" {
+					digest, dErr := artifactDigest(s.fs, sibling.stagedPath)
+					if dErr != nil {
+						return dErr
+					}
+					if recErr := o.revertLog.RecordDeleteIntent(ctx, opID, []models.DeleteEntry{{Path: target, SHA256: digest}}); recErr != nil {
+						return recErr
+					}
+				}
 				if copyErr := copyArtifactFile(s.fs, sibling.stagedPath, target, info.Mode().Perm()); copyErr != nil {
 					return fmt.Errorf("publish sidecar before source cleanup: %w", copyErr)
 				}
