@@ -281,6 +281,11 @@ func sweepArtifactStaging(fs afero.Fs, parent string) {
 			if err := fs.Rename(candidate, target); err != nil {
 				continue
 			}
+			// The pre-quarantine proof sidecar from an earlier cleanup failure
+			// belongs to this same tree: carry it so the removal deletes both.
+			if _, statErr := fs.Stat(artifactStageProofPath(candidate)); statErr == nil {
+				_ = fs.Rename(artifactStageProofPath(candidate), artifactStageProofPath(target))
+			}
 			candidate = target
 		}
 		// Stamp the completed lifecycle on the in-tree manifest, then mirror it

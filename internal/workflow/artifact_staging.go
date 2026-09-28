@@ -769,8 +769,21 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 				return fmt.Errorf("remove original after artifact publication: %w", err)
 			}
 		}
+		skipped := map[string]bool{}
+		if s.videoDeferred && finalResult != nil {
+			for _, sr := range finalResult.Subtitles {
+				if sr.Skipped && sr.OriginalPath != "" {
+					skipped[filepath.Clean(sr.OriginalPath)] = true
+				}
+			}
+		}
 		for _, sibling := range s.siblings {
 			target := filepath.Join(filepath.Dir(finalResult.NewPath), stagedArtifactSiblingName(filepath.Base(s.sourcePath), filepath.Base(finalResult.NewPath), filepath.Base(sibling.sourcePath)))
+			// A subtitle the organizer skipped (its destination was occupied) keeps
+			// its source: no journal inverse exists to rebuild a deleted original.
+			if skipped[filepath.Clean(sibling.sourcePath)] {
+				continue
+			}
 			if err := batch.SetRollbackOrigin(target, sibling.sourcePath); err != nil {
 				return err
 			}

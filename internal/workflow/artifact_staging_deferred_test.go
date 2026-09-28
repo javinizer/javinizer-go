@@ -740,3 +740,44 @@ func TestInstallPathsDigestFaultAbortsInstall(t *testing.T) {
 	exists, _ := afero.Exists(base, "/final/new.txt")
 	require.False(t, exists)
 }
+
+// A subtitle skipped because its destination is occupied keeps its source:
+// the publish flow records no inverse for it, so a deletion here would be
+// unrecoverable. The source-cleanup loop skips it entirely.
+func TestDeferredMoveRetainSkippedSubtitleSource(t *testing.T) {
+	base, root, source, subtitle, multipart, unrelated, match := pr260FencedFiles(t, "deferred-skip-retain")
+	dest := filepath.Join(root, "library")
+	db, _ := pr260ArtifactDB(t)
+	movie := pr260FencedMovie(t, db, "deferred-skip-retain", "")
+	org := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize, MoveSubtitles: true, SubtitleExtensions: []string{".srt"}}, template.NewEngine(), nil)
+	orch := &applyOrchImpl{fs: base, organizer: org, revertLog: &completeCallFaultLog{}}
+	cmd := pr260ArtifactFailureCommand(&movie, match, dest)
+	cmd.Organize.Skip = false
+	cmd.Organize.MoveFiles = true
+	cmd.Download = false
+	stage, _, err := orch.prepareArtifact(context.Background(), cmd)
+	require.NoError(t, err)
+	defer stage.cleanup()
+
+	finalPlan, planErr := org.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: match, Movie: stage.original.Movie, DestDir: dest, MoveFiles: true, OperationMode: stage.original.OperationMode})
+	require.NoError(t, planErr)
+	subTarget := filepath.Join(filepath.Dir(finalPlan.TargetPath), stagedArtifactSiblingName(filepath.Base(source), filepath.Base(finalPlan.TargetPath), filepath.Base(subtitle)))
+	require.NoError(t, base.MkdirAll(filepath.Dir(subTarget), 0o755))
+	require.NoError(t, afero.WriteFile(base, subTarget, []byte("foreign"), 0o644))
+
+	stagedPlan, planErr2 := org.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: models.FileMatchInfo{Path: stage.stagedSource, Name: filepath.Base(source)}, Movie: stage.original.Movie, DestDir: stage.root, MoveFiles: true, OperationMode: stage.original.OperationMode})
+	require.NoError(t, planErr2)
+	state := &applyPipelineState{operationID: "op", organizeResult: &organizer.OrganizeResult{NewPath: stagedPlan.TargetPath, FolderPath: stagedPlan.TargetDir}}
+
+	require.NoError(t, stage.publish(context.Background(), orch, state, nil))
+	existsSrc, _ := afero.Exists(base, subtitle)
+	assert.True(t, existsSrc, "skipped subtitle never loses its source")
+	got, _ := afero.ReadFile(base, subTarget)
+	assert.Equal(t, "foreign", string(got), "foreign destination never touched")
+	existsMulti, _ := afero.Exists(base, multipart)
+	assert.False(t, existsMulti, "staged sibling move consumed the part")
+	existsUnrelated, _ := afero.Exists(base, unrelated)
+	assert.True(t, existsUnrelated)
+	existsVideoSrc, _ := afero.Exists(base, source)
+	assert.False(t, existsVideoSrc, "video move consumed its original")
+}

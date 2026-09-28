@@ -493,3 +493,29 @@ func mustHostname(t *testing.T) string {
 	require.NoError(t, err)
 	return host
 }
+
+// The proof from an earlier cleanup failure follows the tree into quarantine,
+// and a successful removal deletes both.
+func TestSweepArtifactStaging_QuarantineCarriesPriorProof(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	setSweepSeams(t, fsutil.ProcessDead, nil)
+	root := seedStagingRoot(t, fs, "/lib", func(m *artifactStageManifest) { m.CompletedUnixNano = time.Now().UnixNano() })
+	writeArtifactStageProof(fs, root)
+	proofAtRoot := artifactStageProofPath(root)
+	ok, _ := afero.Exists(fs, proofAtRoot)
+	require.True(t, ok, "proof beside pre-quarantine root")
+
+	sweepArtifactStaging(fs, "/lib")
+
+	exists, _ := afero.DirExists(fs, root)
+	assert.False(t, exists, "root removed")
+	existsProof, _ := afero.Exists(fs, proofAtRoot)
+	assert.False(t, existsProof, "pre-quarantine proof removed too")
+	added := []string{}
+	entries, rerr := afero.ReadDir(fs, "/lib")
+	require.NoError(t, rerr)
+	for _, e := range entries {
+		added = append(added, e.Name())
+	}
+	assert.Empty(t, added, "no residue of any kind after quarantine+remove")
+}
