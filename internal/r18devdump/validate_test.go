@@ -522,6 +522,18 @@ func TestDDLBody(t *testing.T) {
 	assert.Empty(t, ddlBody("widowed"))
 }
 
+func TestValidateSidecar_InternalWhitespaceContentIDRejected(t *testing.T) {
+	path := importFixture(t)
+	alterFixture(t, path,
+		`INSERT INTO videos (content_id, dvd_id) VALUES ('118ipx 00535', 'DVD-900')`,
+	)
+	_, err := ValidateSidecar(context.Background(), path)
+	if !errors.Is(err, ErrDumpInvalid) {
+		t.Fatalf("expected ErrDumpInvalid for internal-whitespace content_id, got %v", err)
+	}
+	assert.Contains(t, err.Error(), "noncanonical content_id")
+}
+
 func TestValidateSidecar_NonKeyCollatedAdditiveAccepted(t *testing.T) {
 	// Codex: additive unrelated columns keep their own collations (the DDL
 	// blanket-rejection that preceded the scoped check must not come back).

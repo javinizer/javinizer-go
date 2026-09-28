@@ -398,7 +398,14 @@ func checkLogicalKey(ctx context.Context, db *sql.DB, table string, keys []strin
 			// and the full ASCII whitespace set (SQLite's one-arg TRIM covers
 			// only spaces; tabs/internal padding made norms diverge).
 			setTrim := "TRIM(" + k + ", ' '||char(9)||char(10)||char(11)||char(12)||char(13))"
-			idHygiene = " AND (" + setTrim + " = '' OR " + k + " != LOWER(" + setTrim + "))"
+			// Internal whitespace (the importer's ContainsAny rule in
+			// SQL form): edge-trimmed values can still carry it, and
+			// lookups cannot reproduce such keys.
+			var internalWs []string
+			for _, ws := range []string{"' '", "char(9)", "char(10)", "char(11)", "char(12)", "char(13)"} {
+				internalWs = append(internalWs, "INSTR("+k+", "+ws+") > 0")
+			}
+			idHygiene = " AND (" + setTrim + " = '' OR " + k + " != LOWER(" + setTrim + ") OR (" + strings.Join(internalWs, " OR ") + "))"
 		}
 	}
 	casingMetric := "0"
