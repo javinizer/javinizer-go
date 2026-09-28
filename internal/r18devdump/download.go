@@ -111,6 +111,7 @@ func Download(ctx context.Context, client *http.Client, currentSourceURL, curren
 	// URL, but an equal source date means the uploaded dump is already current.
 	if currentSourceDate != "" && !strings.Contains(currentSourceURL, "://") &&
 		currentSourceDate == res.SourceDate {
+		_ = resp.Body.Close()
 		res.Unchanged = true
 		return res, nil
 	}
