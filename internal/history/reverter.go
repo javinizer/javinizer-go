@@ -2,12 +2,16 @@ package history
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/javinizer/javinizer-go/internal/config"
@@ -670,6 +674,38 @@ func cleanupGeneratedFilesFS(fs afero.Fs, op *models.BatchFileOperation, stopAt 
 		}
 		dirsToCheck[filepath.Dir(path)] = true
 	}
+	// PlannedDeletes are intent entries pinned to the publisher's content hash:
+	// delete only while the destination still carries exactly those bytes —
+	// absent paths are consumed, rebuilt/touched or foreign bytes are kept.
+	for _, entry := range gf.PlannedDeletes {
+		path := entry.Path
+		file, openErr := fs.Open(path)
+		if os.IsNotExist(openErr) {
+			dirsToCheck[filepath.Dir(path)] = true
+			continue
+		}
+		if openErr != nil {
+			logging.Debugf("cleanupGeneratedFiles: pending delete probe failed for %s: %v", path, openErr)
+			continue
+		}
+		h := sha256.New()
+		_, copyErr := io.Copy(h, file)
+		closeErr := file.Close()
+		if copyErr != nil || closeErr != nil {
+			logging.Debugf("cleanupGeneratedFiles: pending delete digest failed for %s: %v/%v", path, copyErr, closeErr)
+			continue
+		}
+		if hex.EncodeToString(h.Sum(nil)) != strings.ToLower(entry.SHA256) {
+			logging.Debugf("cleanupGeneratedFiles: pending delete %s no longer carries the pinned bytes — retained", path)
+			continue
+		}
+		if err := fs.Remove(path); err != nil && !os.IsNotExist(err) {
+			logging.Debugf("cleanupGeneratedFiles: failed to remove pending delete %s: %v", path, err)
+			continue
+		}
+		dirsToCheck[filepath.Dir(path)] = true
+	}
+
 	// Execute the MoveBack array (best-effort): rename-back for move-mode rows
 	// only; delete-the-installed-copy for every other mode's legacy entries
 	// (rename-over must NEVER run against a retained original — see the

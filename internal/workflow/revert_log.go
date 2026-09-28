@@ -86,12 +86,12 @@ type RevertLog interface {
 	// retained destination over its source.
 	ReconcileMoveIntents(ctx context.Context, opID OperationID, keep []models.FileMove) error
 
-	// RecordDeleteIntent journals planned generated-file deletions (downloads,
-	// NFO) BEFORE installTree publishes them: a crash after install but before
-	// the outcome completion would otherwise leave the paths absent from the
-	// Delete list, so later reverts could not clean them up. Completion columns
-	// stay untouched — this is intent, not outcome.
-	RecordDeleteIntent(ctx context.Context, opID OperationID, paths []string) error
+	// RecordDeleteIntent journals an artifactS intended final deletion BEFORE
+	// its install lands, pinned to the content hash: the entry closes the
+	// journal gap (crash between intent and install) AND the stray-delete gap
+	// (a reverter deletes only bytes matching the pinned content). Completion
+	// columns stay untouched — this is intent, not outcome.
+	RecordDeleteIntent(ctx context.Context, opID OperationID, entries []models.DeleteEntry) error
 
 	// RecordReplacement implements the downloader's ReplacementRecorder seam
 	// (POSTER-WRITE-HARDENING P3): the pre-existing bytes at replacedPath have
@@ -190,7 +190,9 @@ func (noOpRevertLog) Complete(_ context.Context, _ OperationID, _ *ApplyResult) 
 
 func (noOpRevertLog) RecordMoveIntent(context.Context, OperationID, string, string) error { return nil }
 
-func (noOpRevertLog) RecordDeleteIntent(context.Context, OperationID, []string) error { return nil }
+func (noOpRevertLog) RecordDeleteIntent(context.Context, OperationID, []models.DeleteEntry) error {
+	return nil
+}
 
 func (noOpRevertLog) ReconcileMoveIntents(context.Context, OperationID, []models.FileMove) error {
 	return nil
@@ -323,7 +325,7 @@ func mergeReplacementLedger(priorRaw, newRaw string) string {
 		return newRaw
 	}
 	prior, err := models.ParseGeneratedFiles(priorRaw)
-	if err != nil || (len(prior.Replacements) == 0 && len(prior.Roots) == 0 && len(prior.MoveBack) == 0 && len(prior.Delete) == 0) {
+	if err != nil || (len(prior.Replacements) == 0 && len(prior.Roots) == 0 && len(prior.MoveBack) == 0 && len(prior.Delete) == 0 && len(prior.PlannedDeletes) == 0) {
 		return newRaw
 	}
 	if newRaw == "" {
@@ -363,6 +365,31 @@ func mergeReplacementLedger(priorRaw, newRaw string) string {
 		}
 		if !dupe {
 			fresh.Delete = append(fresh.Delete, priorDel)
+		}
+	}
+	// Pending deletes graduate to plain entries when the outcome completion
+	// restates the path in Delete; pending entries the outcome never restated
+	// (crash mid-publish) stay, still hash-pinned.
+	for _, priorPD := range prior.PlannedDeletes {
+		graduated := false
+		for _, freshDel := range fresh.Delete {
+			if freshDel == priorPD.Path {
+				graduated = true
+				break
+			}
+		}
+		if graduated {
+			continue
+		}
+		dupe := false
+		for _, freshPD := range fresh.PlannedDeletes {
+			if freshPD.Path == priorPD.Path {
+				dupe = true
+				break
+			}
+		}
+		if !dupe {
+			fresh.PlannedDeletes = append(fresh.PlannedDeletes, priorPD)
 		}
 	}
 	return models.MarshalLedgerJSON(fresh)
@@ -586,8 +613,8 @@ func (l *dbRevertLog) RecordMoveIntent(ctx context.Context, opID OperationID, or
 	return err
 }
 
-func (l *dbRevertLog) RecordDeleteIntent(ctx context.Context, opID OperationID, paths []string) error {
-	if opID == "" || len(paths) == 0 {
+func (l *dbRevertLog) RecordDeleteIntent(ctx context.Context, opID OperationID, entries []models.DeleteEntry) error {
+	if opID == "" || len(entries) == 0 {
 		return nil
 	}
 	recordID64, err := strconv.ParseUint(opID, 10, 64)
@@ -599,7 +626,7 @@ func (l *dbRevertLog) RecordDeleteIntent(ctx context.Context, opID OperationID, 
 	release := replacementLedgerLocks.Acquire(opID)
 	defer release()
 
-	intent := models.MarshalLedgerJSON(models.GeneratedFilesJSON{Delete: append([]string(nil), paths...)})
+	intent := models.MarshalLedgerJSON(models.GeneratedFilesJSON{PlannedDeletes: append([]models.DeleteEntry(nil), entries...)})
 	_, err = l.mergeJournalInTx(ctx, recordID, opID, "RecordDeleteIntent", intent, "")
 	return err
 }

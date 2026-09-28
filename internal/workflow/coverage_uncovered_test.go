@@ -809,7 +809,9 @@ func (e errorRevertLog) RecordMoveIntent(context.Context, OperationID, string, s
 	return nil
 }
 
-func (e errorRevertLog) RecordDeleteIntent(context.Context, OperationID, []string) error { return nil }
+func (e errorRevertLog) RecordDeleteIntent(context.Context, OperationID, []models.DeleteEntry) error {
+	return nil
+}
 
 func (e errorRevertLog) ReconcileMoveIntents(context.Context, OperationID, []models.FileMove) error {
 	return nil

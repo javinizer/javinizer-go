@@ -129,7 +129,7 @@ func (r *recordingRevertLog) RecordMoveIntent(context.Context, OperationID, stri
 	return nil
 }
 
-func (r *recordingRevertLog) RecordDeleteIntent(context.Context, OperationID, []string) error {
+func (r *recordingRevertLog) RecordDeleteIntent(context.Context, OperationID, []models.DeleteEntry) error {
 	return nil
 }
 

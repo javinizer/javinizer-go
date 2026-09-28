@@ -75,7 +75,10 @@ func TestRecordDeleteIntentJournalsPlannedDeletions(t *testing.T) {
 	opID, err := log.Begin(context.Background(), ApplyCmd{Movie: &movie, Match: match, DestPath: dest})
 	require.NoError(t, err)
 
-	planned := []string{filepath.Join(dest, "movie", "movie.nfo"), filepath.Join(dest, "movie", "poster.jpg")}
+	planned := []models.DeleteEntry{
+		{Path: filepath.Join(dest, "movie", "movie.nfo"), SHA256: "aaaa"},
+		{Path: filepath.Join(dest, "movie", "poster.jpg"), SHA256: "bbbb"},
+	}
 	require.NoError(t, log.RecordDeleteIntent(context.Background(), opID, planned))
 	require.NoError(t, log.RecordMoveIntent(context.Background(), opID, source, filepath.Join(dest, "movie", "movie.mp4")))
 
@@ -85,20 +88,26 @@ func TestRecordDeleteIntentJournalsPlannedDeletions(t *testing.T) {
 	assert.Empty(t, row.NewPath)
 	gf, parseErr := models.ParseGeneratedFiles(row.GeneratedFiles)
 	require.NoError(t, parseErr)
-	assert.ElementsMatch(t, planned, gf.Delete)
+	require.Empty(t, gf.Delete, "pending intents stay out of the plain delete list")
+	plannedPaths := []string{}
+	for _, e := range gf.PlannedDeletes {
+		plannedPaths = append(plannedPaths, e.Path)
+	}
+	assert.ElementsMatch(t, []string{planned[0].Path, planned[1].Path}, plannedPaths)
 	require.Len(t, gf.MoveBack, 1, "the pending move intent survives the delete-intent merge")
 	assert.NotEmpty(t, gf.Roots)
 
 	require.NoError(t, (noOpRevertLog{}).RecordDeleteIntent(context.Background(), opID, planned), "noop intent writer")
 	require.NoError(t, log.RecordDeleteIntent(context.Background(), "", planned))
+	require.Error(t, log.RecordDeleteIntent(context.Background(), "0", planned), "id zero")
 
-	// Delete carry dedupes paths already present in the fresh payload.
-	again := models.MarshalLedgerJSON(models.GeneratedFilesJSON{Delete: append([]string{planned[0]}, filepath.Join(dest, "movie", "extra.sup"))})
+	// Pending deletes graduate when the outcome completion restates the path in
+	// Delete; a pending path the outcome never restated stays hash-pinned.
+	again := models.MarshalLedgerJSON(models.GeneratedFilesJSON{Delete: append([]string{planned[0].Path}, filepath.Join(dest, "movie", "extra.sup"))})
 	mergedAgain, _, _, mergeErr := completionLedgerMerge(row.GeneratedFiles, again, "")
 	require.NoError(t, mergeErr)
-	require.Len(t, mergedAgain.Delete, 3, "planned + restated + new path, deduplicated")
-	require.Error(t, log.RecordDeleteIntent(context.Background(), "abc", planned))
-	require.Error(t, log.RecordDeleteIntent(context.Background(), "99999999", planned))
+	require.Len(t, mergedAgain.PlannedDeletes, 1)
+	require.Equal(t, planned[1].Path, mergedAgain.PlannedDeletes[0].Path, "graduated path pruned; pending unrelated path keeps its pin")
 }
 
 // A corrupt journal surfaces as a reconcile error; the no-op writer is
@@ -119,4 +128,22 @@ func TestReconcileMoveIntentsErrorsOnCorruptJournal(t *testing.T) {
 	err = log.ReconcileMoveIntents(context.Background(), opID, nil)
 	require.Error(t, err, "malformed journal propagate")
 	require.NoError(t, (noOpRevertLog{}).ReconcileMoveIntents(context.Background(), opID, nil))
+}
+
+// Carry dedupes across both entry kinds: Delete and PlannedDeletes restated
+// by the outcome appear once; entries the outcome omits stay pending.
+func TestCompletionLedgerMergeCarriesAndDedupesBothKinds(t *testing.T) {
+	prior := models.MarshalLedgerJSON(models.GeneratedFilesJSON{
+		Delete:         []string{"/lib/x.nfo"},
+		PlannedDeletes: []models.DeleteEntry{{Path: "/lib/a.jpg", SHA256: "pin-a"}},
+	})
+	fresh := models.MarshalLedgerJSON(models.GeneratedFilesJSON{
+		Delete:         []string{"/lib/x.nfo", "/lib/new.nfo"},
+		PlannedDeletes: []models.DeleteEntry{{Path: "/lib/a.jpg", SHA256: "pin-a"}, {Path: "/lib/b.jpg", SHA256: "pin-b"}},
+	})
+	merged, persist, _, err := completionLedgerMerge(prior, fresh, "")
+	require.NoError(t, err)
+	require.True(t, persist)
+	assert.Equal(t, []string{"/lib/x.nfo", "/lib/new.nfo"}, merged.Delete, "deduped re-stated delete")
+	require.Len(t, merged.PlannedDeletes, 2, "carried pin-a once and pin-b once")
 }

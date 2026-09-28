@@ -112,7 +112,7 @@ func (l *completionFaultLog) RecordMoveIntent(context.Context, OperationID, stri
 	return nil
 }
 
-func (l *completionFaultLog) RecordDeleteIntent(context.Context, OperationID, []string) error {
+func (l *completionFaultLog) RecordDeleteIntent(context.Context, OperationID, []models.DeleteEntry) error {
 	return nil
 }
 

@@ -232,7 +232,7 @@ type completeCallFaultLog struct {
 	intents      int32
 	deleteErr    error
 	deletes      int32
-	deletePaths  []string
+	deletePaths  []models.DeleteEntry
 	reconcileErr error
 	reconciles   int32
 	keepCaptured []models.FileMove
@@ -252,9 +252,9 @@ func (l *completeCallFaultLog) RecordMoveIntent(context.Context, OperationID, st
 	return l.intentErr
 }
 
-func (l *completeCallFaultLog) RecordDeleteIntent(_ context.Context, _ OperationID, paths []string) error {
+func (l *completeCallFaultLog) RecordDeleteIntent(_ context.Context, _ OperationID, entries []models.DeleteEntry) error {
 	atomic.AddInt32(&l.deletes, 1)
-	l.deletePaths = append(l.deletePaths, paths...)
+	l.deletePaths = append(l.deletePaths, entries...)
 	return l.deleteErr
 }
 
@@ -538,35 +538,35 @@ func TestInstallPathsJournalsOnlyOwnedNonReplacementDestinations(t *testing.T) {
 	require.NoError(t, afero.WriteFile(base, "/final/keep.txt", []byte("user kept"), 0o644))
 
 	stage := &artifactStage{fs: base, root: "/stage", finalRoot: "/final", original: ApplyCmd{}}
-	var journaled []string
+	var journaled []models.DeleteEntry
 	_, err := stage.installPaths(
 		[]string{"/stage/new.txt", "/stage/existing.txt", "/stage/keep.txt"},
 		[]string{"/stage/keep.txt"},
 		"", "",
-		func(paths []string) error {
-			journaled = append(journaled, paths...)
+		func(entries []models.DeleteEntry) error {
+			journaled = append(journaled, entries...)
 			return nil
 		},
 	)
 	require.NoError(t, err)
-	require.Equal(t, []string{filepath.Join("/final", "new.txt")}, journaled,
+	require.Len(t, journaled, 1)
+	assert.Equal(t, filepath.Join("/final", "new.txt"), journaled[0].Path,
 		"only the new destination is journaled; replacements preserved bytes and preserved paths excluded")
 }
 
-// The delete intent is journaled after the install confirms: a fault surfaces
-// the error but the landed install stays (pending-intent-journal-then-install
-// would instead let a revert delete unrelated later bytes).
-func TestInstallPathsJournalFailureAfterConfirmedInstall(t *testing.T) {
+// The pending delete is journaled before the install lands (hash-pinned): a
+// failed journal aborts the install, so nothing lands without a ledger entry.
+func TestInstallPathsJournalFailureAbortInstall(t *testing.T) {
 	base := afero.NewMemMapFs()
 	require.NoError(t, base.MkdirAll("/stage", 0o755))
 	require.NoError(t, afero.WriteFile(base, "/stage/new.txt", []byte("new"), 0o644))
 	stage := &artifactStage{fs: base, root: "/stage", finalRoot: "/final", original: ApplyCmd{}}
-	_, err := stage.installPaths([]string{"/stage/new.txt"}, nil, "", "", func([]string) error {
+	_, err := stage.installPaths([]string{"/stage/new.txt"}, nil, "", "", func([]models.DeleteEntry) error {
 		return errors.New("journal down")
 	})
 	require.ErrorContains(t, err, "journal down")
 	exists, _ := afero.Exists(base, "/final/new.txt")
-	require.True(t, exists, "the confirmed install stays; only the journal failed")
+	require.False(t, exists, "journal failure aborts before the install")
 }
 
 // Outcome reconciliation publishes exactly the executed moves: the pending
@@ -713,4 +713,30 @@ func TestDeferredCopyRehomeRenameFaultRollsBack(t *testing.T) {
 	publishErr := stage.publish(context.Background(), orch, state, nil)
 	require.ErrorContains(t, publishErr, "stage sidecar")
 	pr260AssertRetained(t, base, source, subtitle, multipart, unrelated)
+}
+
+// Install hook: unreadable staged source surfaces the digest error before the
+// install, nothing publishes.
+type denyOpenStagedFS struct {
+	afero.Fs
+	path string
+}
+
+func (f *denyOpenStagedFS) Open(name string) (afero.File, error) {
+	if name == f.path {
+		return nil, errors.New("staged read denied")
+	}
+	return f.Fs.Open(name)
+}
+
+func TestInstallPathsDigestFaultAbortsInstall(t *testing.T) {
+	base := afero.NewMemMapFs()
+	require.NoError(t, base.MkdirAll("/stage", 0o755))
+	require.NoError(t, afero.WriteFile(base, "/stage/new.txt", []byte("new"), 0o644))
+	fs := &denyOpenStagedFS{Fs: base, path: "/stage/new.txt"}
+	stage := &artifactStage{fs: fs, root: "/stage", finalRoot: "/final", original: ApplyCmd{}}
+	_, err := stage.installPaths([]string{"/stage/new.txt"}, nil, "", "", func([]models.DeleteEntry) error { return nil })
+	require.ErrorContains(t, err, "digest")
+	exists, _ := afero.Exists(base, "/final/new.txt")
+	require.False(t, exists)
 }

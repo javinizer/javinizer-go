@@ -39,10 +39,19 @@
 
 	const previewSignature = $derived(buildDisplayTitlePreviewSignature(editedMovie));
 
+	let previewTargetKey = '';
+
 	$effect(() => {
 		const sig = previewSignature;
 		const jid = jobId;
 		const rid = resultId;
+		const targetKey = `${jid ?? ''}/${rid ?? ''}`;
+		if (targetKey !== previewTargetKey) {
+			previewTargetKey = targetKey;
+			previewDisplayTitle = null;
+			previewLoading = false;
+			previewError = false;
+		}
 		if (!jid || !rid) {
 			previewDisplayTitle = null;
 			previewLoading = false;

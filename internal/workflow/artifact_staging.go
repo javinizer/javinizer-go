@@ -461,6 +461,13 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 	stagedVideo := ""
 	videoInstalledByTree := false
 	publishedTarget := ""
+	// The video leg moves the real source whenever the publish call carries
+	// move semantics: explicit MoveFiles, or any flow where ExecuteOrganizePlan
+	// would still rename (an irrelevant link_mode must not disarm intents).
+	publishMove := s.original.Organize.MoveFiles || s.original.Organize.LinkMode == organizer.LinkModeNone
+	if s.videoDeferred {
+		publishMove = s.original.Organize.MoveFiles
+	}
 	if !s.original.Organize.Skip {
 		if state.organizeResult == nil {
 			return fmt.Errorf("artifact publication has no organize result")
@@ -535,20 +542,13 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 			plan = guardedPlan
 			batch.YieldToLockedPublisher(plan.TargetPath)
 		}
-		// The staged-era second argument bakes in link-free flows as a move
-		// because the staged copy was expendable. A deferred video publishes its
-		// REAL source: copy mode must keep it, only an explicit move consumes it.
-		publishMove := s.original.Organize.MoveFiles || s.original.Organize.LinkMode == organizer.LinkModeNone
-		if s.videoDeferred {
-			publishMove = s.original.Organize.MoveFiles
-		}
 		// Persist the intended inverse BEFORE the move consumes the real
 		// source: a crash in the rename→record window must still leave a durable
 		// source→destination trail (Begin cannot name it — the plan is only
 		// final after the conflict guards). This is a pending intent — recovery
 		// reads it via the MoveBack channel and can tell it apart from an
 		// executed move (no completion columns are touched).
-		if s.videoDeferred && s.original.Organize.MoveFiles && s.original.Organize.LinkMode == organizer.LinkModeNone && filepath.Clean(plan.SourcePath) != filepath.Clean(plan.TargetPath) && o.revertLog != nil && opID != "" {
+		if s.videoDeferred && publishMove && filepath.Clean(plan.SourcePath) != filepath.Clean(plan.TargetPath) && o.revertLog != nil && opID != "" {
 			if err := o.revertLog.RecordMoveIntent(ctx, opID, plan.SourcePath, plan.TargetPath); err != nil {
 				return fmt.Errorf("persist inverse before direct video publication: %w", err)
 			}
@@ -584,7 +584,7 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 	// A deferred-video move consumed the original source during the plan
 	// execution above: persist the inverse immediately so the rename→ledger
 	// crash window stays revertable before any later leg can fail.
-	directSourceConsumed := s.videoDeferred && !s.original.Organize.Skip && s.original.Organize.MoveFiles && s.sourcePath != "" && finalResult != nil && filepath.Clean(s.sourcePath) != filepath.Clean(finalResult.NewPath)
+	directSourceConsumed := s.videoDeferred && !s.original.Organize.Skip && publishMove && s.sourcePath != "" && finalResult != nil && filepath.Clean(s.sourcePath) != filepath.Clean(finalResult.NewPath)
 	if directSourceConsumed {
 		// The real source was consumed by the move: arm rollback BEFORE any
 		// later leg can fail, or the destination would be removed without the
@@ -660,11 +660,11 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 	// Deletion intent lands after artifact claims settle (consumer, skipped,
 	// and replacement destinations are never journaled for removal) and before
 	// any install touches the final tree.
-	journalDeleteIntent := func(paths []string) error {
-		if len(paths) == 0 || o.revertLog == nil || opID == "" {
+	journalDeleteIntent := func(entries []models.DeleteEntry) error {
+		if len(entries) == 0 || o.revertLog == nil || opID == "" {
 			return nil
 		}
-		if err := o.revertLog.RecordDeleteIntent(ctx, opID, paths); err != nil {
+		if err := o.revertLog.RecordDeleteIntent(ctx, opID, entries); err != nil {
 			return fmt.Errorf("journal artifact destination intent: %w", err)
 		}
 		return nil
@@ -881,7 +881,7 @@ func (s *artifactStage) treeDestinations(skipFile, skipDir, stagedArtifactDir, f
 	return paths, nil
 }
 
-func (s *artifactStage) installTree(skipFile, skipDir string, preserve []string, stagedArtifactDir, finalArtifactDir string, journalDeleteIntent func([]string) error) (bool, error) {
+func (s *artifactStage) installTree(skipFile, skipDir string, preserve []string, stagedArtifactDir, finalArtifactDir string, journalDeleteIntent func([]models.DeleteEntry) error) (bool, error) {
 	if s.inPlace {
 		if _, err := s.fs.Stat(s.root); os.IsNotExist(err) {
 			return false, nil
@@ -919,7 +919,7 @@ func (s *artifactStage) installTree(skipFile, skipDir string, preserve []string,
 	return s.installPaths(paths, preserve, stagedArtifactDir, finalArtifactDir, journalDeleteIntent)
 }
 
-func (s *artifactStage) installPaths(paths, preserve []string, stagedArtifactDir, finalArtifactDir string, journalDeleteIntent func([]string) error) (bool, error) {
+func (s *artifactStage) installPaths(paths, preserve []string, stagedArtifactDir, finalArtifactDir string, journalDeleteIntent func([]models.DeleteEntry) error) (bool, error) {
 	type installPath struct {
 		source, target string
 		skip           bool
@@ -1025,17 +1025,22 @@ func (s *artifactStage) installPaths(paths, preserve []string, stagedArtifactDir
 				return false, fmt.Errorf("replace artifact destination %s: %w", plan.target, removeErr)
 			}
 		}
-		if err := s.fs.Rename(plan.source, plan.target); err != nil {
-			return false, fmt.Errorf("publish staged artifact %s: %w", plan.target, err)
-		}
-		// The intent is journaled only AFTER the install confirms: a pending
-		// deletion entry for a path that never received our bytes would let a
-		// revert delete whatever later lands there (user or foreign content).
+		// Journal the pending deletion BEFORE the install lands, pinned to the
+		// staged payload's digest: a crash anywhere from here on is covered, and
+		// a revert deletes the destination only while its bytes still match what
+		// this operation meant to publish (never unrelated later content).
 		// Replacement paths are already journaled via their replacement legs.
 		if journalDeleteIntent != nil && !plan.replace {
-			if err := journalDeleteIntent([]string{plan.target}); err != nil {
+			digest, digestErr := artifactDigest(s.fs, plan.source)
+			if digestErr != nil {
+				return false, digestErr
+			}
+			if err := journalDeleteIntent([]models.DeleteEntry{{Path: plan.target, SHA256: digest}}); err != nil {
 				return false, err
 			}
+		}
+		if err := s.fs.Rename(plan.source, plan.target); err != nil {
+			return false, fmt.Errorf("publish staged artifact %s: %w", plan.target, err)
 		}
 		if s.publishBatch != nil {
 			if err := s.publishBatch.ConfirmPublish(s.publishCtx, plan.target); err != nil {

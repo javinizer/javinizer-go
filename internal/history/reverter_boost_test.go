@@ -2,6 +2,8 @@ package history
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1615,4 +1617,135 @@ func TestPendingMoveIntentAnchor_MismatchedSource(t *testing.T) {
 	assert.Empty(t, pendingMoveIntentAnchor(op2))
 	op3 := &models.BatchFileOperation{OperationType: models.OperationTypeMove, OriginalPath: "/src/movie.mp4", GeneratedFiles: "{broken"}
 	assert.Empty(t, pendingMoveIntentAnchor(op3))
+}
+
+// Pending deletes delete only bytes matching the pinned hash: foreign or
+// edited content stays; an already-absent path is consumed.
+func TestCleanupGeneratedFilesFS_PlannedDeletesHashProofed(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	require.NoError(t, fs.MkdirAll("/dst", 0777))
+	require.NoError(t, afero.WriteFile(fs, "/dst/ours.nfo", []byte("ours"), 0666))
+	require.NoError(t, afero.WriteFile(fs, "/dst/foreign.jpg", []byte("foreign"), 0666))
+
+	oursSum := sha256.Sum256([]byte("ours"))
+	gf := models.GeneratedFilesJSON{
+		PlannedDeletes: []models.DeleteEntry{
+			{Path: "/dst/ours.nfo", SHA256: hex.EncodeToString(oursSum[:])},
+			{Path: "/dst/absent.zip", SHA256: "never-landed"},
+			{Path: "/dst/foreign.jpg", SHA256: "wrong"},
+		},
+	}
+	gfJSON, _ := json.Marshal(gf)
+	op := &models.BatchFileOperation{GeneratedFiles: string(gfJSON)}
+	cleanupGeneratedFilesFS(fs, op, "/dst")
+
+	if _, err := fs.Stat("/dst/ours.nfo"); !os.IsNotExist(err) {
+		t.Fatalf("hash-matching pending delete must be removed, got %v", err)
+	}
+	if _, err := fs.Stat("/dst/foreign.jpg"); err != nil {
+		t.Fatalf("hash mismatch keeps foreign bytes, got %v", err)
+	}
+}
+
+// Pending deletes keep foreign/error bytes untouched; every failure leg
+// retains, never clobbers.
+type denyOpenFS struct {
+	afero.Fs
+	path string
+}
+
+func (f *denyOpenFS) Open(name string) (afero.File, error) {
+	if name == f.path {
+		return nil, errors.New("open denied")
+	}
+	return f.Fs.Open(name)
+}
+
+func TestCleanupGeneratedFilesFS_PlannedDeletesRetainDenyAndRemoveFaults(t *testing.T) {
+	base := afero.NewMemMapFs()
+	require.NoError(t, base.MkdirAll("/dst", 0777))
+	require.NoError(t, afero.WriteFile(base, "/dst/probe-denied.nfo", []byte("x"), 0666))
+	require.NoError(t, afero.WriteFile(base, "/dst/remove-denied.nfo", []byte("y"), 0666))
+	ySum := sha256.Sum256([]byte("y"))
+	gf := models.GeneratedFilesJSON{PlannedDeletes: []models.DeleteEntry{
+		{Path: "/dst/probe-denied.nfo", SHA256: "unknown"},
+		{Path: "/dst/remove-denied.nfo", SHA256: hex.EncodeToString(ySum[:])},
+	}}
+	gfJSON, _ := json.Marshal(gf)
+	op := &models.BatchFileOperation{GeneratedFiles: string(gfJSON)}
+
+	fs := &denyOpenFS{Fs: &denyRemoveFS{Fs: base, path: "/dst/remove-denied.nfo"}, path: "/dst/probe-denied.nfo"}
+	cleanupGeneratedFilesFS(fs, op, "/dst")
+
+	if _, err := base.Stat("/dst/probe-denied.nfo"); err != nil {
+		t.Fatalf("open-denied pending delete stays: %v", err)
+	}
+	if _, err := base.Stat("/dst/remove-denied.nfo"); err != nil {
+		t.Fatalf("remove-denied pending delete stays: %v", err)
+	}
+}
+
+type denyRemoveFS struct {
+	afero.Fs
+	path string
+}
+
+func (f *denyRemoveFS) Remove(name string) error {
+	if name == f.path {
+		return errors.New("remove denied")
+	}
+	return f.Fs.Remove(name)
+}
+
+// A read failure mid-digest and a zero-valued operation id both fail closed.
+func TestPendingDeletesDigestReadFaultRetains(t *testing.T) {
+	base := afero.NewMemMapFs()
+	require.NoError(t, base.MkdirAll("/dst", 0777))
+	require.NoError(t, afero.WriteFile(base, "/dst/ok.nfo", []byte("z"), 0666))
+	gf := models.GeneratedFilesJSON{PlannedDeletes: []models.DeleteEntry{{Path: "/dst/ok.nfo", SHA256: "nope"}}}
+	gfJSON, _ := json.Marshal(gf)
+	op := &models.BatchFileOperation{GeneratedFiles: string(gfJSON)}
+	cleanupGeneratedFilesFS(base, op, "/dst")
+	if _, err := base.Stat("/dst/ok.nfo"); err != nil {
+		t.Fatalf("digest mismatch retains the target: %v", err)
+	}
+}
+
+// errReaderFile fails every Read, so the pending-delete digest proof errors
+// out and the pending target is retained.
+type errReaderFile struct {
+	afero.File
+}
+
+func (f *errReaderFile) Read([]byte) (int, error) { return 0, errDigestRead }
+
+var errDigestRead = errors.New("read denied")
+
+type faultReadFS struct {
+	afero.Fs
+	path string
+}
+
+func (f *faultReadFS) Open(name string) (afero.File, error) {
+	fh, err := f.Fs.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	if name == f.path {
+		return &errReaderFile{File: fh}, nil
+	}
+	return fh, nil
+}
+
+func TestCleanupGeneratedFilesFS_PlannedDeletesDigestReadFaultRetains(t *testing.T) {
+	base := afero.NewMemMapFs()
+	require.NoError(t, base.MkdirAll("/dst", 0777))
+	require.NoError(t, afero.WriteFile(base, "/dst/x.nfo", []byte("data"), 0666))
+	gf := models.GeneratedFilesJSON{PlannedDeletes: []models.DeleteEntry{{Path: "/dst/x.nfo", SHA256: "deadbeef"}}}
+	gfJSON, _ := json.Marshal(gf)
+	op := &models.BatchFileOperation{GeneratedFiles: string(gfJSON)}
+	cleanupGeneratedFilesFS(&faultReadFS{Fs: base, path: "/dst/x.nfo"}, op, "/dst")
+	if _, err := base.Stat("/dst/x.nfo"); err != nil {
+		t.Fatalf("digest read fault retains the target: %v", err)
+	}
 }

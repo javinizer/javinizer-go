@@ -14,6 +14,18 @@ type GeneratedFilesJSON struct {
 	MoveBack     []FileMove         `json:"move_back,omitempty"`    // Files to move back on revert (subtitles)
 	Replacements []ReplacementEntry `json:"replacements,omitempty"` // Overwritten byte pairs journaled before the replace landed (P3)
 	Roots        []string           `json:"roots,omitempty"`        // Destination roots seeded at Begin — sweeper discovery independent of any later journal (P3 R3-3)
+	// PlannedDeletes journals artifacts BEFORE they install at their final
+	// destination (deferred artifact publication): the hash pins the intended
+	// content so a revert deletes only bytes this operation published, never
+	// whatever unrelated file later occupies the path.
+	PlannedDeletes []DeleteEntry `json:"planned_deletes,omitempty"`
+}
+
+// DeleteEntry is a pending deletion pinned to the payload the publisher plans
+// to land at Path.
+type DeleteEntry struct {
+	Path   string `json:"path"`
+	SHA256 string `json:"sha256"`
 }
 
 // ReplacementEntry journals one destructive media overwrite: the destination's
