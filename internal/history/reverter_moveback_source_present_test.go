@@ -36,9 +36,13 @@ func sha256HexOf(b []byte) string {
 // still exists belongs to a move whose source was never consumed (an exit
 // between the pending intent commit and the source removal) or whose source
 // reappeared afterwards. The rename-back must never run — on POSIX rename
-// would REPLACE those bytes. The hash-pinned published copy, when a pin
-// survived alongside the pending arm, is deleted by the PlannedDeletes leg
-// instead; an unpinned or hash-mismatched target is retained both ways.
+// would REPLACE those bytes. The two shapes are indistinguishable without a
+// durable source-consumed record, so a hash-pinned published copy whose pin
+// survived alongside the pending arm is RETAINED with the source (codex P1,
+// PRRT_kwDORn9KaM6m5kmF): deleting it would destroy the last copy of the
+// moved sibling whenever the move's source had in fact been consumed. An
+// unpinned or hash-mismatched target is retained both ways for that same
+// reason.
 func TestCleanupGeneratedFilesFS_MoveBackSourcePresentSuppressesRename(t *testing.T) {
 	const (
 		src = "/src/ABC-123-cd2.mp4"
@@ -65,16 +69,14 @@ func TestCleanupGeneratedFilesFS_MoveBackSourcePresentSuppressesRename(t *testin
 		assert.Equal(t, want, got, path)
 	}
 
-	t.Run("pinned published copy deleted, foreign source retained", func(t *testing.T) {
+	t.Run("pinned published copy retained alongside the foreign source", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
 		seedTarget(t, fs, []byte("part two"))
 		seedSource(t, fs, []byte("user re-edit"))
 		op := newMoveOp(t, sha256HexOf([]byte("part two")))
 		cleanupGeneratedFilesFS(fs, op, "/dst")
 		assertFileBytes(t, fs, src, []byte("user re-edit"))
-		if _, err := fs.Stat(dst); !os.IsNotExist(err) {
-			t.Fatalf("the pinned published copy was deleted by its pin, not renamed over the source: %v", err)
-		}
+		assertFileBytes(t, fs, dst, []byte("part two"))
 	})
 
 	t.Run("unpinned target retained with the source", func(t *testing.T) {
@@ -97,7 +99,7 @@ func TestCleanupGeneratedFilesFS_MoveBackSourcePresentSuppressesRename(t *testin
 		assertFileBytes(t, fs, dst, []byte("foreign replacement"))
 	})
 
-	t.Run("unprovable source state suppresses the rename but keeps the pin", func(t *testing.T) {
+	t.Run("unprovable source state suppresses the rename and stays the pin", func(t *testing.T) {
 		base := afero.NewMemMapFs()
 		seedTarget(t, base, []byte("part two"))
 		seedSource(t, base, []byte("user re-edit"))
@@ -105,9 +107,7 @@ func TestCleanupGeneratedFilesFS_MoveBackSourcePresentSuppressesRename(t *testin
 		fs := &statDenyFS{Fs: base, path: src, err: errors.New("stat denied")}
 		cleanupGeneratedFilesFS(fs, op, "/dst")
 		assertFileBytes(t, base, src, []byte("user re-edit"))
-		if _, err := base.Stat(dst); !os.IsNotExist(err) {
-			t.Fatalf("uncertainty never licenses a rename-over; the pin still consumed the published copy: %v", err)
-		}
+		assertFileBytes(t, base, dst, []byte("part two"))
 	})
 
 	t.Run("consumed leg: source absent renames the target back", func(t *testing.T) {
@@ -156,11 +156,14 @@ func TestCleanupGeneratedFilesFS_CopyModeSourcePresentKeepsDeleteOnlySemantic(t 
 	}
 }
 
-// Crash-replay E2E (PRRT_kwDORn9KaM6m3ujI, crash matrix row 1): the sibling
-// move intent is journaled, the source removal never runs, and foreign bytes
-// land on the source path before recovery. Reverting the batch must leave the
-// source bytes untouched and delete the hash-pinned published copy.
-func TestRevertRowSiblingIntentCrashSourcePresentDeletesPinnedCopy(t *testing.T) {
+// Crash-replay E2E (PRRT_kwDORn9KaM6m3ujI, crash matrix row 1, disambiguated
+// per codex P1 PRRT_kwDORn9KaM6m5kmF): the sibling move intent is journaled,
+// the source removal never runs, and foreign bytes land on the source path
+// before recovery. Recovery cannot distinguish this shape from a CONSUMED
+// source that reappeared, so reverting the batch leaves the source bytes
+// untouched AND retains the hash-pinned published copy — a harmless
+// duplicate is the price of never losing the last remaining copy.
+func TestRevertRowSiblingIntentCrashSourcePresentRetainsBothCopies(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	repo := newP3OpRepo()
 	ctx := context.Background()
@@ -200,9 +203,72 @@ func TestRevertRowSiblingIntentCrashSourcePresentDeletesPinnedCopy(t *testing.T)
 	srcBytes, readErr := afero.ReadFile(fs, siblingSource)
 	require.NoError(t, readErr, "rollback never overwrote the surviving source")
 	assert.Equal(t, "user re-edit", string(srcBytes))
-	if _, statErr := fs.Stat(siblingTarget); !os.IsNotExist(statErr) {
-		t.Fatalf("the pinned published copy was deleted, not moved back over the source: %v", statErr)
+	pinnedCopy, readErr := afero.ReadFile(fs, siblingTarget)
+	require.NoError(t, readErr, "the pinned published copy is retained — neither deleted by its pin nor moved over the occupied source")
+	assert.Equal(t, "part two", string(pinnedCopy))
+	videoBytes, readErr := afero.ReadFile(fs, videoSource)
+	require.NoError(t, readErr, "the consumed primary still renames back normally")
+	assert.Equal(t, "video", string(videoBytes))
+
+	row, findErr := repo.FindByID(ctx, op.ID)
+	require.NoError(t, findErr)
+	assert.Equal(t, models.RevertStatusReverted, row.RevertStatus)
+}
+
+// codex P1 (PRRT_kwDORn9KaM6m5kmF) — the flagged shape, in full chronology:
+// the sibling copy was journaled with its pin, the pending arm was journaled
+// WITHOUT consuming the pin, and the apply DID remove the sibling source —
+// then the crash before completion left both rows. Recovery probes the
+// source only after a foreign process recreated it, and the on-disk state is
+// identical to the never-consumed row above; the same retention rule keeps
+// every byte: the foreign source survives, and the pinned target — the only
+// remaining copy of the originally moved sibling — is NOT deleted.
+func TestRevertRowSiblingIntentConsumedSourceRecreatedRetainsTarget(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	repo := newP3OpRepo()
+	ctx := context.Background()
+
+	srcDir := "/src-w161r"
+	dstDir := "/dst-w161r/lib/W161R-001"
+	videoSource := srcDir + "/W161R-001.mkv"
+	videoTarget := dstDir + "/W161R-001.mkv"
+	siblingSource := srcDir + "/W161R-001-cd2.mp4"
+	siblingTarget := dstDir + "/W161R-001-cd2.mp4"
+	require.NoError(t, fs.MkdirAll(dstDir, 0o777))
+	require.NoError(t, fs.MkdirAll(srcDir, 0o777))
+	require.NoError(t, afero.WriteFile(fs, videoTarget, []byte("video"), 0o666))
+	require.NoError(t, afero.WriteFile(fs, siblingTarget, []byte("part two"), 0o666))
+	require.NoError(t, afero.WriteFile(fs, siblingSource, []byte("part two"), 0o666))
+
+	op := &models.BatchFileOperation{
+		BatchJobID:    "job-w161r-recreated",
+		MovieID:       "W161R-001",
+		OriginalPath:  videoSource,
+		NewPath:       videoTarget,
+		OperationType: models.OperationTypeMove,
+		GeneratedFiles: models.MarshalLedgerJSON(models.GeneratedFilesJSON{
+			PlannedDeletes: []models.DeleteEntry{{Path: siblingTarget, SHA256: sha256HexOf([]byte("part two"))}},
+			MoveBack:       []models.FileMove{{OriginalPath: siblingSource, NewPath: siblingTarget}},
+		}),
+		RevertStatus: models.RevertStatusApplied,
 	}
+	require.NoError(t, repo.Create(ctx, op))
+
+	// The source removal lands after both journal rows, then a foreign
+	// process recreates the path before the recovery run gauges it.
+	require.NoError(t, fs.Remove(siblingSource))
+	require.NoError(t, afero.WriteFile(fs, siblingSource, []byte("foreign re-creation"), 0o666))
+
+	res, err := NewReverter(fs, repo).RevertBatch(ctx, "job-w161r-recreated")
+	require.NoError(t, err)
+	require.Equal(t, 1, res.Succeeded)
+
+	srcBytes, readErr := afero.ReadFile(fs, siblingSource)
+	require.NoError(t, readErr, "the foreign re-creation is never renamed over or deleted")
+	assert.Equal(t, "foreign re-creation", string(srcBytes))
+	pinnedCopy, readErr := afero.ReadFile(fs, siblingTarget)
+	require.NoError(t, readErr, "the only remaining copy of the originally moved sibling survives")
+	assert.Equal(t, "part two", string(pinnedCopy))
 	videoBytes, readErr := afero.ReadFile(fs, videoSource)
 	require.NoError(t, readErr, "the consumed primary still renames back normally")
 	assert.Equal(t, "video", string(videoBytes))

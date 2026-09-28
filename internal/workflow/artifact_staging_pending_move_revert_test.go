@@ -19,9 +19,12 @@ import (
 // block writes them, then the process "exits" BEFORE the source removal is
 // confirmed and foreign bytes land on the source path. While the intent is
 // unconfirmed the row retains BOTH the pin and the arm; recovery suppresses
-// the rename-back and consumes the hash-pinned published copy, so the
-// surviving source is never overwritten.
-func TestPendingSiblingMoveIntentCrashReplayKeepsSource(t *testing.T) {
+// the rename-back AND stays the pinned delete (codex P1,
+// PRRT_kwDORn9KaM6m5kmF) — this shape cannot be told apart from a consumed
+// source that a foreign process recreated, so the surviving source is never
+// overwritten and the pinned published copy, potentially the last remaining
+// copy of the moved sibling, is retained alongside it.
+func TestPendingSiblingMoveIntentCrashReplayKeepsSourceAndPinnedCopy(t *testing.T) {
 	db, _ := pr260ArtifactDB(t)
 	movie := pr260FencedMovie(t, db, "pending-sibling-crash", "")
 	fs, root, source, subtitle, multipart, unrelated, match := pr260FencedFiles(t, "pending-sibling-crash")
@@ -82,9 +85,9 @@ func TestPendingSiblingMoveIntentCrashReplayKeepsSource(t *testing.T) {
 	restored, readErr := afero.ReadFile(fs, multipart)
 	require.NoError(t, readErr, "the surviving source was never renamed over")
 	assert.Equal(t, "user re-edit", string(restored), "pre-recovery source edits survive the revert")
-	siblingGone, goneErr := afero.Exists(fs, siblingTarget)
-	require.NoError(t, goneErr)
-	assert.False(t, siblingGone, "the hash-pinned published copy is deleted, not moved back")
+	siblingCopy, siblingErr := afero.ReadFile(fs, siblingTarget)
+	require.NoError(t, siblingErr, "the hash-pinned published copy is retained — neither deleted nor moved back over the occupied source")
+	assert.Equal(t, "part two", string(siblingCopy))
 	videoBack, videoErr := afero.ReadFile(fs, source)
 	require.NoError(t, videoErr, "the consumed primary still renames back onto its source")
 	assert.Equal(t, "video", string(videoBack))

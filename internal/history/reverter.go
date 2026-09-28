@@ -695,9 +695,16 @@ func cleanupGeneratedFilesFS(fs afero.Fs, op *models.BatchFileOperation, stopAt 
 		dirsToCheck[filepath.Dir(path)] = true
 	}
 	// A MoveBack arm supersedes any pending delete pinned to the same
-	// destination (rows journaled before the intent promoted with its arm):
-	// the rename-back restores those bytes onto their source, so the pinned
-	// delete must never fire first and destroy them.
+	// destination in BOTH vacancy outcomes (rows journaled before the intent
+	// promoted with its arm): with the source absent the rename-back
+	// restores those bytes onto their source, so the pinned delete must
+	// never fire first and destroy them; with the source PRESENT the rename
+	// is suppressed and the pin must still not fire — source-present is
+	// ambiguous between "the move never consumed its source" and "the move
+	// consumed it and a foreign file reappeared afterwards", and without a
+	// durable source-consumed record the pin cannot tell those apart, so
+	// both paths are retained (a duplicate, never a lost last copy)
+	// (codex P1, PRRT_kwDORn9KaM6m5kmF).
 	moveBackTargets := make(map[string]bool, len(gf.MoveBack))
 	for _, fm := range gf.MoveBack {
 		moveBackTargets[fm.NewPath] = true
@@ -707,10 +714,12 @@ func cleanupGeneratedFilesFS(fs afero.Fs, op *models.BatchFileOperation, stopAt 
 	// source removal) or whose source reappeared afterwards: running the
 	// rename-back would REPLACE those retained/foreign bytes on POSIX
 	// (codex P1, PRRT_kwDORn9KaM6m3ujI). Suppress the rename for such targets;
-	// the PlannedDeletes leg below then remains eligible for the same path, so
-	// a hash-pinned published copy is deleted by its pin instead — never by
-	// the rename. A source whose state cannot be PROVEN absent suppresses too:
-	// uncertainty must never license a rename-over. The vacancy probe never
+	// the PlannedDeletes leg below retains a pinned copy of the same target as
+	// well — the pin would fire identically in the never-consumed shape and
+	// the consumed-then-foreignly-recreated one, so only retention protects
+	// both (codex P1, PRRT_kwDORn9KaM6m5kmF). A source whose state cannot be
+	// PROVEN absent suppresses too: uncertainty licenses neither a
+	// rename-over nor the delete. The vacancy probe never
 	// follows a final symlink (codex P2, PRRT_kwDORn9KaM6m5HFu): a link planted
 	// at the source — even a DANGLING one, which Stat reports as ENOENT — is
 	// itself a directory entry the POSIX rename back would REPLACE, so any
@@ -734,7 +743,7 @@ func cleanupGeneratedFilesFS(fs afero.Fs, op *models.BatchFileOperation, stopAt 
 	// leftover symlink, a directory) is kept, pin match or not.
 	for _, entry := range gf.PlannedDeletes {
 		path := entry.Path
-		if moveBackTargets[path] && !renameSuppressed[path] {
+		if moveBackTargets[path] {
 			continue
 		}
 		// The pin certifies the previously published REGULAR file only, so the
@@ -786,10 +795,9 @@ func cleanupGeneratedFilesFS(fs afero.Fs, op *models.BatchFileOperation, stopAt 
 	// whose source is GONE (the move consumed it); delete-the-installed-copy
 	// for every other mode's legacy entries (rename-over must NEVER run
 	// against a retained original — see the function doc above). A suppressed
-	// entry (source still present) does neither: its hash-pinned published
-	// copy, when a pin survived alongside the arm, was already consumed by the
-	// PlannedDeletes leg above, and an unpinned target is simply retained both
-	// ways.
+	// entry (source still present) does neither: the PlannedDeletes leg above
+	// already retained its published copy, pinned or not, alongside the
+	// occupied source — nothing is lost in either crash shape.
 	for _, fm := range gf.MoveBack {
 		if fm.NewPath == op.NewPath && fm.OriginalPath == op.OriginalPath {
 			// A pending move intent equal to the row columns: the primary move is
@@ -801,7 +809,7 @@ func cleanupGeneratedFilesFS(fs afero.Fs, op *models.BatchFileOperation, stopAt 
 				logging.Debugf("cleanupGeneratedFiles: failed to delete copy-installed artifact %s (original at %s retained): %v", fm.NewPath, fm.OriginalPath, err)
 			}
 		} else if renameSuppressed[fm.NewPath] {
-			logging.Debugf("cleanupGeneratedFiles: move-back %s → %s suppressed — the original still exists (the move intent was never consumed or the source reappeared); any pinned published copy was handled by the planned-delete leg", fm.NewPath, fm.OriginalPath)
+			logging.Debugf("cleanupGeneratedFiles: move-back %s → %s suppressed — the original still exists (the move intent was never consumed or the source reappeared); the destination, pinned or not, is retained alongside it", fm.NewPath, fm.OriginalPath)
 		} else if err := fs.Rename(fm.NewPath, fm.OriginalPath); err != nil {
 			logging.Debugf("cleanupGeneratedFiles: failed to move back %s → %s: %v", fm.NewPath, fm.OriginalPath, err)
 		}

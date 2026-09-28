@@ -50,7 +50,7 @@ func (f *cleanupLinkEntryLstatFs) LstatIfPossible(name string) (os.FileInfo, boo
 // rename back would otherwise REPLACE that foreign link. The matrix pins
 // every occupant class: absent renames back; file, directory, and symlink
 // occupants all suppress; the error leg is covered by the round-24 family
-// ("unprovable source state suppresses the rename but keeps the pin").
+// ("unprovable source state suppresses the rename and stays the pin").
 func TestCleanupGeneratedFilesFS_MoveBackSourceOccupants(t *testing.T) {
 	const (
 		src = "/src-w161e/W161E-001-cd2.mp4"
@@ -126,16 +126,16 @@ func TestCleanupGeneratedFilesFS_MoveBackSourceOccupants(t *testing.T) {
 		assert.Equal(t, "part two", string(got), "suppressed: the unpinned target is retained")
 	})
 
-	t.Run("dangling symlink occupant with a surviving pin deletes by pin only", func(t *testing.T) {
+	t.Run("dangling symlink occupant with a surviving pin retains the pinned copy too", func(t *testing.T) {
 		base := afero.NewMemMapFs()
 		seedTarget(t, base)
 		targetInfo, err := base.Stat(dst)
 		require.NoError(t, err)
 		fs := &cleanupLinkEntryLstatFs{Fs: base, linkPath: src, info: targetInfo}
 		cleanupGeneratedFilesFS(fs, newOp(true), "/dst-w161e")
-		if _, err := base.Stat(dst); !os.IsNotExist(err) {
-			t.Fatalf("the pinned published copy went by its pin, never by a rename over the link: %v", err)
-		}
+		got, err := afero.ReadFile(base, dst)
+		require.NoError(t, err, "neither the rename nor the pin may act on an armed-and-suppressed target")
+		assert.Equal(t, "part two", string(got))
 		if _, err := base.Stat(src); !os.IsNotExist(err) {
 			t.Fatalf("nothing materialized at the linked source path: %v", err)
 		}
@@ -228,9 +228,11 @@ func TestCleanupGeneratedFilesFS_PlannedDeleteEntryKinds(t *testing.T) {
 
 // Real-filesystem proof of both no-follow legs (the memfs legs above model
 // link entries through the Lstater wrapper): a REAL dangling symlink at the
-// move-back source suppresses the rename-back and survives untouched, and a
-// REAL symlink at a pinned planned-delete destination whose target carries
-// the pinned bytes is never hashed through or unlinked.
+// move-back source suppresses the rename-back and survives untouched, the
+// armed pinned target retained alongside it (codex P1,
+// PRRT_kwDORn9KaM6m5kmF), and a REAL symlink at an un-armed pinned
+// planned-delete destination whose target carries the pinned bytes is never
+// hashed through or unlinked.
 func TestRevertCleanupNoFollowRealSymlinks(t *testing.T) {
 	root := t.TempDir()
 	fs := afero.NewOsFs()
@@ -282,9 +284,9 @@ func TestRevertCleanupNoFollowRealSymlinks(t *testing.T) {
 	linkDest, err := os.Readlink(siblingSource)
 	require.NoError(t, err)
 	assert.Equal(t, danglingTarget, linkDest, "the foreign dangling symlink survives byte-for-byte — the rename back never ran")
-	if _, statErr := os.Lstat(siblingTarget); !os.IsNotExist(statErr) {
-		t.Fatalf("the pinned published copy went by its pin, never by a rename over the link: %v", statErr)
-	}
+	siblingBytes, siblingErr := os.ReadFile(siblingTarget)
+	require.NoError(t, siblingErr, "the armed pinned target is retained — neither renamed over the link nor deleted by its pin")
+	assert.Equal(t, "part two", string(siblingBytes))
 
 	linkDest, err = os.Readlink(stray)
 	require.NoError(t, err)
