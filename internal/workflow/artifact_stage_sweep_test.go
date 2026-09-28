@@ -143,7 +143,7 @@ func TestSweepArtifactStaging_LegacyUnstampedRetained(t *testing.T) {
 
 func TestSweepArtifactStaging_QuarantineRetried(t *testing.T) {
 	fs := afero.NewMemMapFs()
-	setSweepSeams(t, fsutil.ProcessAlive, nil)
+	setSweepSeams(t, fsutil.ProcessDead, nil)
 	root := seedStagingRoot(t, fs, "/lib", nil)
 	quarantine := root + artifactStageQuarantineMark + "ab12"
 	require.NoError(t, fs.Rename(root, quarantine))
@@ -151,7 +151,36 @@ func TestSweepArtifactStaging_QuarantineRetried(t *testing.T) {
 	sweepArtifactStaging(fs, "/lib")
 
 	exists, _ := afero.DirExists(fs, quarantine)
-	assert.False(t, exists, "claimed quarantine roots retry removal regardless of liveness")
+	assert.False(t, exists, "claimed quarantine roots retry removal once ownership re-proves reclaimable")
+}
+
+func TestSweepArtifactStaging_QuarantinedWithoutOwnershipRetained(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	setSweepSeams(t, fsutil.ProcessDead, nil)
+	// A directory that merely matches prefix+marker but carries no manifest:
+	// never ours to delete.
+	foreign := "/lib/" + artifactStageDirPrefix + "foreign" + artifactStageQuarantineMark + "99"
+	require.NoError(t, fs.MkdirAll(foreign, 0o755))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(foreign, "payload.bin"), []byte("x"), 0o644))
+
+	sweepArtifactStaging(fs, "/lib")
+
+	exists, _ := afero.DirExists(fs, foreign)
+	assert.True(t, exists, "quarantine-marked foreign directories are never auto-deleted")
+}
+
+func TestArtifactStageReclaimable_FailsClosedOnUnverifiableHost(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	root := seedStagingRoot(t, fs, "/lib", nil)
+
+	setSweepSeams(t, fsutil.ProcessDead, nil)
+	oldHost := artifactSweepHostname
+	artifactSweepHostname = func() (string, error) { return "", errors.New("hostname denied") }
+	assert.False(t, artifactStageReclaimable(fs, root), "unverifiable local hostname retains the root")
+	artifactSweepHostname = oldHost
+
+	root2 := seedStagingRoot(t, fs, "/lib", func(m *artifactStageManifest) { m.Hostname = "" })
+	assert.False(t, artifactStageReclaimable(fs, root2), "empty recorded hostname retains the root")
 }
 
 func TestSweepArtifactStaging_IgnoresNonStagingEntries(t *testing.T) {

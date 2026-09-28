@@ -100,7 +100,13 @@ func artifactStageReclaimable(fs afero.Fs, path string) bool {
 	if manifest.Token == "" || manifest.Token != artifactStageManifestToken(path) {
 		return false
 	}
-	if hostname, herr := artifactSweepHostname(); herr == nil && manifest.Hostname != "" && manifest.Hostname != hostname {
+	// Hostname must be provable on both sides: an unverifiable local host or
+	// an empty recorded host cannot rule out a foreign owner — fail closed.
+	hostname, herr := artifactSweepHostname()
+	if herr != nil || manifest.Hostname == "" {
+		return false
+	}
+	if manifest.Hostname != hostname {
 		return false
 	}
 	switch artifactSweepLiveness(manifest.PID) {
@@ -167,11 +173,12 @@ func sweepArtifactStaging(fs afero.Fs, parent string) {
 			continue
 		}
 		candidate := filepath.Join(parent, name)
-		quarantined := strings.Contains(name, artifactStageQuarantineMark)
-		if !quarantined {
-			if !artifactStageReclaimable(fs, candidate) {
-				continue
-			}
+		// Already-quarantined names re-prove ownership too: a prefix-and-marker
+		// match alone never authorizes deletion (foreign plants, PID reuse).
+		if !artifactStageReclaimable(fs, candidate) {
+			continue
+		}
+		if !strings.Contains(name, artifactStageQuarantineMark) {
 			target := artifactStageQuarantineName(candidate)
 			if err := fs.Rename(candidate, target); err != nil {
 				continue
