@@ -202,6 +202,7 @@ func TestArtifactCleanup_RetriesTransientFailure(t *testing.T) {
 	require.NoError(t, afero.WriteFile(base, "/stage/file.bin", []byte("x"), 0o644))
 	fsy := &failRemoveAllFS{Fs: base, failures: 2}
 	setSweepSeams(t, fsutil.ProcessDead, nil)
+	writeArtifactStageManifest(base, "/stage")
 
 	stage := &artifactStage{fs: fsy, root: "/stage"}
 	stage.cleanup()
@@ -216,6 +217,7 @@ func TestArtifactCleanup_RetainsOnPersistentFailure(t *testing.T) {
 	require.NoError(t, base.MkdirAll("/stage", 0o755))
 	fsy := &failRemoveAllFS{Fs: base, failures: 100}
 	setSweepSeams(t, fsutil.ProcessDead, nil)
+	writeArtifactStageManifest(base, "/stage")
 
 	stage := &artifactStage{fs: fsy, root: "/stage"}
 	stage.cleanup()
@@ -527,4 +529,200 @@ func TestSweepArtifactStaging_QuarantineCarriesPriorProof(t *testing.T) {
 		added = append(added, e.Name())
 	}
 	assert.Empty(t, added, "no residue of any kind after quarantine+remove")
+}
+
+// proofCarryDenyFS refuses renames of the ownership sidecar (Windows/SMB-style
+// carry failure) while every other filesystem operation passes through.
+type proofCarryDenyFS struct{ afero.Fs }
+
+func (f *proofCarryDenyFS) Rename(oldname, newname string) error {
+	if strings.HasSuffix(oldname, artifactStageProofSuffix) || strings.HasSuffix(newname, artifactStageProofSuffix) {
+		return errors.New("proof carry denied")
+	}
+	return f.Fs.Rename(oldname, newname)
+}
+
+// quarantineProofWriteDenyFS refuses writes of the sidecar under its
+// quarantined name only, so the pre-quarantine mirror still lands and the
+// restate leg is the one that fails.
+type quarantineProofWriteDenyFS struct{ afero.Fs }
+
+func (f *quarantineProofWriteDenyFS) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
+	if strings.HasSuffix(name, artifactStageProofSuffix) && strings.Contains(filepath.Base(name), artifactStageQuarantineMark) {
+		return nil, errors.New("quarantine proof write denied")
+	}
+	return f.Fs.OpenFile(name, flag, perm)
+}
+
+// originalProofWriteDenyFS refuses writes of the sidecar under the original
+// (pre-quarantine) name, so cleanup reaches the carry leg with no proof at all.
+type originalProofWriteDenyFS struct{ afero.Fs }
+
+func (f *originalProofWriteDenyFS) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
+	if strings.HasSuffix(name, artifactStageProofSuffix) && !strings.Contains(filepath.Base(name), artifactStageQuarantineMark) {
+		return nil, errors.New("original proof write denied")
+	}
+	return f.Fs.OpenFile(name, flag, perm)
+}
+
+// proofWitnessRemoveAllFS records whether the ownership sidecar sat beside the
+// quarantined name at the moment destructive removal was attempted, and can
+// mimic a partial RemoveAll that consumes the in-tree manifest before a locked
+// payload refuses.
+type proofWitnessRemoveAllFS struct {
+	afero.Fs
+	attempts           int
+	missingProof       []string
+	manifestThenRefuse bool
+}
+
+func (f *proofWitnessRemoveAllFS) RemoveAll(path string) error {
+	f.attempts++
+	if ok, _ := afero.Exists(f.Fs, artifactStageProofPath(path)); !ok {
+		f.missingProof = append(f.missingProof, path)
+	}
+	if f.manifestThenRefuse {
+		_ = f.Fs.Remove(filepath.Join(path, artifactStageManifestName))
+		return errors.New("locked payload refuses removal")
+	}
+	return f.Fs.RemoveAll(path)
+}
+
+func quarantineResidue(t *testing.T, fs afero.Fs, parent string) string {
+	t.Helper()
+	entries, err := afero.ReadDir(fs, parent)
+	require.NoError(t, err)
+	residue := ""
+	for _, e := range entries {
+		if e.IsDir() && strings.Contains(e.Name(), artifactStageQuarantineMark) {
+			require.Empty(t, residue, "at most one quarantined residue")
+			residue = filepath.Join(parent, e.Name())
+		}
+	}
+	return residue
+}
+
+// Carry denied, restate succeeds: the delete must proceed with the recreated
+// sidecar beside the quarantined name, and no proof residue may outlive it.
+func TestArtifactCleanup_ProofCarryDeniedRestatesSidecar(t *testing.T) {
+	base := afero.NewMemMapFs()
+	setSweepSeams(t, fsutil.ProcessDead, nil)
+	root := seedStagingRoot(t, base, "/lib", nil)
+	witness := &proofWitnessRemoveAllFS{Fs: base}
+	stage := &artifactStage{fs: &proofCarryDenyFS{Fs: witness}, root: root}
+
+	stage.cleanup()
+
+	assert.Equal(t, 1, witness.attempts, "restated sidecar lets the delete proceed")
+	assert.Empty(t, witness.missingProof, "removal opened only with the sidecar beside the quarantined name")
+	exists, _ := afero.DirExists(base, root)
+	assert.False(t, exists, "original root consumed by the quarantine rename")
+	stranded, _ := afero.Exists(base, artifactStageProofPath(root))
+	assert.False(t, stranded, "stranded original-name sidecar removed after the successful delete")
+	entries, err := afero.ReadDir(base, "/lib")
+	require.NoError(t, err)
+	for _, e := range entries {
+		assert.NotContains(t, e.Name(), artifactStageDirPrefix, "neither tree nor sidecar residue remains")
+	}
+}
+
+// Carry denied AND restate denied: no destructive removal at all. The
+// quarantined tree keeps its manifest, the stranded original-name sidecar is
+// retained untouched as evidence, and the residue stays sweep-reclaimable.
+func TestArtifactCleanup_RetainedWhenProofCannotFollowQuarantine(t *testing.T) {
+	base := afero.NewMemMapFs()
+	setSweepSeams(t, fsutil.ProcessDead, nil)
+	root := seedStagingRoot(t, base, "/lib", nil)
+	witness := &proofWitnessRemoveAllFS{Fs: base}
+	deny := &quarantineProofWriteDenyFS{Fs: witness}
+	stage := &artifactStage{fs: &proofCarryDenyFS{Fs: deny}, root: root}
+
+	stage.cleanup()
+
+	assert.Zero(t, witness.attempts, "no destructive removal without a proof beside the quarantined name")
+	stranded, _ := afero.Exists(base, artifactStageProofPath(root))
+	assert.True(t, stranded, "stranded original-name sidecar retained as evidence")
+	residue := quarantineResidue(t, base, "/lib")
+	require.NotEmpty(t, residue, "quarantined tree retained")
+	manifestHeld, _ := afero.Exists(base, filepath.Join(residue, artifactStageManifestName))
+	assert.True(t, manifestHeld, "in-tree manifest unconsumed")
+	assert.True(t, artifactStageReclaimable(base, residue), "retained residue stays reclaimable through its completed manifest")
+}
+
+// Mirror-image leg: the sidecar never existed at carry time (its initial write
+// was denied). Cleanup restates it from the manifest before removing anything.
+func TestArtifactCleanup_MissingSidecarRestatedBeforeRemoval(t *testing.T) {
+	base := afero.NewMemMapFs()
+	setSweepSeams(t, fsutil.ProcessDead, nil)
+	root := seedStagingRoot(t, base, "/lib", nil)
+	witness := &proofWitnessRemoveAllFS{Fs: base}
+	stage := &artifactStage{fs: &originalProofWriteDenyFS{Fs: witness}, root: root}
+
+	stage.cleanup()
+
+	assert.Equal(t, 1, witness.attempts, "removal proceeded after restating the absent sidecar")
+	assert.Empty(t, witness.missingProof, "restated sidecar sat beside the quarantined name for the delete")
+	entries, err := afero.ReadDir(base, "/lib")
+	require.NoError(t, err)
+	assert.Empty(t, entries, "tree and sidecar fully removed")
+}
+
+// unstampableStagingFS refuses to persist either ownership marker, so a root
+// stays unprovable: no in-tree manifest, hence no restatable sidecar.
+type unstampableStagingFS struct{ afero.Fs }
+
+func (f *unstampableStagingFS) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
+	if strings.HasSuffix(name, artifactStageManifestName) || strings.HasSuffix(name, artifactStageProofSuffix) {
+		return nil, errors.New("staging markers unwritable")
+	}
+	return f.Fs.OpenFile(name, flag, perm)
+}
+
+// A root that can restate no ownership evidence at all (no manifest, hence no
+// sidecar) is retained rather than deleted: residue is recoverable, a wrong
+// delete is not.
+func TestArtifactCleanup_UnprovableRootRetained(t *testing.T) {
+	base := afero.NewMemMapFs()
+	require.NoError(t, base.MkdirAll("/stage", 0o755))
+	require.NoError(t, afero.WriteFile(base, "/stage/file.bin", []byte("x"), 0o644))
+	witness := &proofWitnessRemoveAllFS{Fs: base}
+	setSweepSeams(t, fsutil.ProcessDead, nil)
+
+	stage := &artifactStage{fs: &unstampableStagingFS{Fs: witness}, root: "/stage"}
+	stage.cleanup()
+
+	assert.Zero(t, witness.attempts, "an unprovable root is retained, never deleted")
+	exists, _ := afero.DirExists(base, "/stage")
+	assert.False(t, exists, "the root was claimed by the quarantine rename")
+	residue := quarantineResidue(t, base, "/")
+	require.NotEmpty(t, residue, "unprovable residue retained under its quarantined name")
+}
+
+// End-to-end codex scenario: the carry rename fails after a successful
+// quarantine, the restated sidecar rides out a partial RemoveAll that consumes
+// the in-tree manifest, and the next sweep still associates the residue with
+// this owner through the recreated proof and reclaims it.
+func TestArtifactCleanup_RestatedSidecarPreservesSweepAssociation(t *testing.T) {
+	base := afero.NewMemMapFs()
+	setSweepSeams(t, fsutil.ProcessDead, nil)
+	root := seedStagingRoot(t, base, "/lib", nil)
+	witness := &proofWitnessRemoveAllFS{Fs: base, manifestThenRefuse: true}
+	stage := &artifactStage{fs: &proofCarryDenyFS{Fs: witness}, root: root}
+
+	stage.cleanup()
+
+	assert.Equal(t, artifactRemoveAttempts, witness.attempts, "removal retried to exhaustion")
+	assert.Empty(t, witness.missingProof, "every refusal still saw the restated sidecar")
+	residue := quarantineResidue(t, base, "/lib")
+	require.NotEmpty(t, residue, "partially-removed tree retained under its quarantined name")
+	manifestHeld, _ := afero.Exists(base, filepath.Join(residue, artifactStageManifestName))
+	assert.False(t, manifestHeld, "the partial delete consumed the in-tree manifest")
+	require.True(t, readArtifactStageProof(base, residue), "restated sidecar still binds the residue to this owner")
+
+	sweepArtifactStaging(base, "/lib")
+
+	exists, _ := afero.DirExists(base, residue)
+	assert.False(t, exists, "the sweep reclaimed the residue through the restated proof")
+	proofGone, _ := afero.Exists(base, artifactStageProofPath(residue))
+	assert.False(t, proofGone, "sidecar removed with the residue")
 }

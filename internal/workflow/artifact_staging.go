@@ -332,20 +332,37 @@ func (s *artifactStage) cleanup() {
 	markArtifactStageCompleted(s.fs, s.root)
 	writeArtifactStageProof(s.fs, s.root)
 	quarantine := artifactStageQuarantineName(s.root)
-	proofSrc, _ := artifactStageProofPath(s.root), ""
+	proofSrc := artifactStageProofPath(s.root)
+	proofDst := artifactStageProofPath(quarantine)
 	if err := s.fs.Rename(s.root, quarantine); err != nil {
 		logging.Warnf("artifact staging cleanup retention %s: quarantine rename failed, retained for the next organize sweep: %v", s.root, err)
 		return
 	}
 	s.root = quarantine
+	// Destructive removal opens ONLY with a valid proof beside the quarantined
+	// name: RemoveAll can still erase the in-tree manifest before a locked
+	// payload refuses, and the sidecar is then the residue's sole associable
+	// evidence. A failed carry is restated from the intact manifest (identical
+	// token/PID binding); when ownership cannot be restated under the current
+	// name, retention beats a delete no later sweep could associate.
 	if _, statErr := s.fs.Stat(proofSrc); statErr == nil {
-		_ = s.fs.Rename(proofSrc, artifactStageProofPath(quarantine))
+		if err := s.fs.Rename(proofSrc, proofDst); err != nil {
+			logging.Warnf("artifact staging cleanup proof carry %s denied; restating beside the quarantined root: %v", proofSrc, err)
+			writeArtifactStageProof(s.fs, s.root)
+		}
+	} else {
+		writeArtifactStageProof(s.fs, s.root)
+	}
+	if !readArtifactStageProof(s.fs, s.root) {
+		logging.Warnf("artifact staging cleanup retention %s: ownership proof unavailable beside the quarantined root, retained for the next organize sweep", s.root)
+		return
 	}
 	if err := removeArtifactTreeWithRetry(s.fs, s.root); err != nil {
 		logging.Warnf("artifact staging cleanup retained %s: %v", s.root, err)
 		return
 	}
-	_ = s.fs.Remove(artifactStageProofPath(s.root))
+	_ = s.fs.Remove(proofSrc)
+	_ = s.fs.Remove(proofDst)
 }
 
 func (s *artifactStage) finalPath(path string) (string, error) {
