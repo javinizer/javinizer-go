@@ -194,3 +194,124 @@ func TestArtifactCleanup_RetainsOnPersistentFailure(t *testing.T) {
 	exists, _ := afero.DirExists(base, "/stage")
 	assert.True(t, exists, "residue retained for the next sweep")
 }
+
+func TestArtifactStageManifestToken(t *testing.T) {
+	root := "/lib/" + artifactStageDirPrefix + "abc123"
+	assert.Equal(t, "abc123", artifactStageManifestToken(root))
+	quarantined := root + artifactStageQuarantineMark + "de45"
+	assert.Equal(t, "abc123", artifactStageManifestToken(quarantined), "quarantine suffix is cut from the token")
+}
+
+func TestWriteArtifactStageManifest_Roundtrip(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	require.NoError(t, fs.MkdirAll("/stage", 0o755))
+	start := time.Now().Add(-time.Minute)
+	oldHost, oldStart := artifactSweepHostname, artifactSweepStartTime
+	artifactSweepHostname = func() (string, error) { return "test-host", nil }
+	artifactSweepStartTime = func(int) *time.Time { return &start }
+	t.Cleanup(func() { artifactSweepHostname, artifactSweepStartTime = oldHost, oldStart })
+
+	root := "/stage/" + artifactStageDirPrefix + "tok9"
+	require.NoError(t, fs.MkdirAll(root, 0o755))
+	writeArtifactStageManifest(fs, root)
+
+	body, err := afero.ReadFile(fs, filepath.Join(root, artifactStageManifestName))
+	require.NoError(t, err)
+	var manifest artifactStageManifest
+	require.NoError(t, json.Unmarshal(body, &manifest))
+	assert.Equal(t, "tok9", manifest.Token)
+	assert.Equal(t, "test-host", manifest.Hostname)
+	assert.Equal(t, os.Getpid(), manifest.PID)
+	assert.Equal(t, start.UnixNano(), manifest.ProcessStartUnixNano)
+}
+
+func TestWriteArtifactStageManifest_MarshalFailureWarnsOnly(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	old := artifactSweepMarshal
+	artifactSweepMarshal = func(any) ([]byte, error) { return nil, errors.New("encode denied") }
+	t.Cleanup(func() { artifactSweepMarshal = old })
+	require.NoError(t, fs.MkdirAll("/stage", 0o755))
+	assert.NotPanics(t, func() { writeArtifactStageManifest(fs, "/stage") })
+}
+
+type failWriteFileFS struct {
+	afero.Fs
+}
+
+func (f *failWriteFileFS) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
+	if flag&(os.O_WRONLY|os.O_CREATE|os.O_APPEND) != 0 {
+		return nil, errors.New("write denied")
+	}
+	return f.Fs.OpenFile(name, flag, perm)
+}
+
+func TestWriteArtifactStageManifest_WriteFailureWarnsOnly(t *testing.T) {
+	base := afero.NewMemMapFs()
+	require.NoError(t, base.MkdirAll("/stage", 0o755))
+	assert.NotPanics(t, func() { writeArtifactStageManifest(&failWriteFileFS{Fs: base}, "/stage") })
+}
+
+func TestArtifactStageReclaimable_MalformedManifestRetained(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	require.NoError(t, fs.MkdirAll("/stage", 0o755))
+	require.NoError(t, afero.WriteFile(fs, "/stage/"+artifactStageManifestName, []byte("{not json"), 0o600))
+	assert.False(t, artifactStageReclaimable(fs, "/stage"))
+}
+
+func TestSweepArtifactStaging_LiveOwnerNilProbeStartRetained(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	recorded := time.Now().Add(-time.Hour)
+	root := seedStagingRoot(t, fs, "/lib", func(m *artifactStageManifest) { m.ProcessStartUnixNano = recorded.UnixNano() })
+	setSweepSeams(t, fsutil.ProcessAlive, nil)
+
+	sweepArtifactStaging(fs, "/lib")
+
+	exists, _ := afero.DirExists(fs, root)
+	assert.True(t, exists, "live owner without probeable start time is retained")
+}
+
+func TestSweepArtifactStaging_MissingParentIgnored(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	assert.NotPanics(t, func() { sweepArtifactStaging(fs, "/does/not/exist") })
+	assert.NotPanics(t, func() { sweepArtifactStaging(nil, "/lib") })
+	assert.NotPanics(t, func() { sweepArtifactStaging(fs, "  ") })
+}
+
+func TestArtifactStageQuarantineName_RandFallback(t *testing.T) {
+	old := artifactSweepRand
+	artifactSweepRand = func([]byte) (int, error) { return 0, errors.New("entropy denied") }
+	t.Cleanup(func() { artifactSweepRand = old })
+	assert.Equal(t, "/lib/x"+artifactStageQuarantineMark+"0", artifactStageQuarantineName("/lib/x"))
+}
+
+type notExistRemoveAllFS struct {
+	afero.Fs
+}
+
+func (f *notExistRemoveAllFS) RemoveAll(string) error {
+	return os.ErrNotExist
+}
+
+func TestRemoveArtifactTreeWithRetry_NotExistIsSuccess(t *testing.T) {
+	assert.NoError(t, removeArtifactTreeWithRetry(&notExistRemoveAllFS{Fs: afero.NewMemMapFs()}, "/stage"))
+}
+
+func TestSweepArtifactStaging_RetainedWhenDeleteKeepsFailing(t *testing.T) {
+	base := afero.NewMemMapFs()
+	setSweepSeams(t, fsutil.ProcessDead, nil)
+	root := seedStagingRoot(t, base, "/lib", nil)
+	fsy := &failRemoveAllFS{Fs: base, failures: 100}
+
+	sweepArtifactStaging(fsy, "/lib")
+
+	entries, rerr := afero.ReadDir(base, "/lib")
+	require.NoError(t, rerr)
+	remaining := []string{}
+	for _, e := range entries {
+		remaining = append(remaining, e.Name())
+	}
+	require.Len(t, remaining, 1, "unremovable root is retained (quarantined) for a later sweep")
+	assert.Contains(t, remaining[0], artifactStageQuarantineMark)
+	exists, _ := afero.DirExists(base, root)
+	assert.False(t, exists, "ownership claimed via quarantine rename")
+}

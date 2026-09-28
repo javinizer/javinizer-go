@@ -561,10 +561,7 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 		// back to the tracked planned leg so rollback stays fail-closed.
 		s.sourceCleanupArmed = true
 		if err := batch.SetRollbackOrigin(finalResult.NewPath, s.sourcePath); err != nil {
-			if altErr := batch.SetRollbackOrigin(publishedTarget, s.sourcePath); altErr != nil {
-				return err
-			}
-			return err
+			return errors.Join(err, batch.SetRollbackOrigin(publishedTarget, s.sourcePath))
 		}
 		if o.revertLog != nil && opID != "" {
 			partial := &ApplyResult{OrganizeResult: finalResult, Movie: state.movie, OperationID: opID}

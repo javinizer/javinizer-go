@@ -43,6 +43,8 @@ var (
 	artifactSweepLiveness  = fsutil.ProbeProcessLiveness
 	artifactSweepStartTime = fsutil.ProbeProcessStartTime
 	artifactSweepSleep     = time.Sleep
+	artifactSweepRand      = rand.Read
+	artifactSweepMarshal   = json.Marshal
 )
 
 func artifactStageManifestToken(root string) string {
@@ -69,7 +71,7 @@ func writeArtifactStageManifest(fs afero.Fs, root string) {
 	if start := artifactSweepStartTime(manifest.PID); start != nil {
 		manifest.ProcessStartUnixNano = start.UnixNano()
 	}
-	body, err := json.Marshal(manifest)
+	body, err := artifactSweepMarshal(manifest)
 	if err != nil {
 		logging.Warnf("artifact staging manifest encode failed for %s: %v", root, err)
 		return
@@ -120,7 +122,7 @@ func artifactStageReclaimable(fs afero.Fs, path string) bool {
 
 func artifactStageQuarantineName(path string) string {
 	b := make([]byte, 4)
-	if _, err := rand.Read(b); err != nil {
+	if _, err := artifactSweepRand(b); err != nil {
 		return path + artifactStageQuarantineMark + "0"
 	}
 	return path + artifactStageQuarantineMark + hex.EncodeToString(b)
