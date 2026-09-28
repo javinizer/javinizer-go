@@ -866,3 +866,165 @@ func TestDeferredMoveSubtitleArmFaultCompensates(t *testing.T) {
 	existsUnrelated, _ := afero.Exists(base, unrelated)
 	assert.True(t, existsUnrelated)
 }
+
+type lstatSecondProbeDeniedFS struct {
+	afero.Fs
+	path string
+	seen bool
+}
+
+func (f *lstatSecondProbeDeniedFS) LstatIfPossible(name string) (os.FileInfo, bool, error) {
+	if name == f.path && f.seen {
+		return nil, false, errors.New("confirm probe denied")
+	}
+	if name == f.path {
+		f.seen = true
+	}
+	if l, ok := f.Fs.(afero.Lstater); ok {
+		return l.LstatIfPossible(name)
+	}
+	info, err := f.Fs.Stat(name)
+	return info, false, err
+}
+
+// Copy-mode: a faulted arm for a copy-installed sidecar fails the publication
+// with the tracked error.
+func TestDeferredCopySidecarArmStatFaultAborts(t *testing.T) {
+	base, root, source, subtitle, multipart, unrelated, match := pr260FencedFiles(t, "deferred-copy-arm-fault")
+	dest := filepath.Join(root, "library")
+	org := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize, MoveSubtitles: true, SubtitleExtensions: []string{".srt"}}, template.NewEngine(), nil)
+	orch := &applyOrchImpl{fs: base, organizer: org}
+	cmd := pr260ArtifactFailureCommand(&models.Movie{ContentID: "deferred-copy-arm-fault"}, match, dest)
+	cmd.Organize.Skip = false
+	cmd.Organize.MoveFiles = false
+	cmd.Download = false
+	stage, _, err := orch.prepareArtifact(context.Background(), cmd)
+	require.NoError(t, err)
+	defer stage.cleanup()
+
+	finalPlan, planErr := org.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: match, Movie: stage.original.Movie, DestDir: dest, OperationMode: stage.original.OperationMode})
+	require.NoError(t, planErr)
+	subMoves := org.PlanSubtitleMoves(finalPlan)
+	require.NotEmpty(t, subMoves)
+	fsWithFault := &pr260PublishFinalFS{Fs: base, op: "stat", path: subMoves[0].NewPath}
+	stage.fs = fsWithFault
+	orch.fs = fsWithFault
+	stagedPlan, planErr2 := org.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: models.FileMatchInfo{Path: stage.stagedSource, Name: filepath.Base(source)}, Movie: stage.original.Movie, DestDir: stage.root, OperationMode: stage.original.OperationMode})
+	require.NoError(t, planErr2)
+	state := &applyPipelineState{operationID: "op", organizeResult: &organizer.OrganizeResult{NewPath: stagedPlan.TargetPath, FolderPath: stagedPlan.TargetDir}}
+	publishErr := stage.publish(context.Background(), orch, state, nil)
+	require.ErrorContains(t, publishErr, "arm copy-installed sidecar")
+	pr260AssertRetained(t, base, source, subtitle, multipart, unrelated)
+}
+
+// A faulted confirm of the armed copy-installed sidecar fails closed.
+func TestDeferredCopySidecarConfirmFaultAborts(t *testing.T) {
+	base, root, source, subtitle, multipart, unrelated, match := pr260FencedFiles(t, "deferred-copy-confirm-fault")
+	dest := filepath.Join(root, "library")
+	org := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize, MoveSubtitles: true, SubtitleExtensions: []string{".srt"}}, template.NewEngine(), nil)
+	orch := &applyOrchImpl{fs: base, organizer: org}
+	cmd := pr260ArtifactFailureCommand(&models.Movie{ContentID: "deferred-copy-confirm-fault"}, match, dest)
+	cmd.Organize.Skip = false
+	cmd.Organize.MoveFiles = false
+	cmd.Download = false
+	stage, _, err := orch.prepareArtifact(context.Background(), cmd)
+	require.NoError(t, err)
+	defer stage.cleanup()
+
+	finalPlan, planErr := org.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: match, Movie: stage.original.Movie, DestDir: dest, OperationMode: stage.original.OperationMode})
+	require.NoError(t, planErr)
+	subMoves := org.PlanSubtitleMoves(finalPlan)
+	require.NotEmpty(t, subMoves)
+	fsWithFault := &lstatSecondProbeDeniedFS{Fs: base, path: subMoves[0].NewPath}
+	stage.fs = fsWithFault
+	stagedPlan, planErr2 := org.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: models.FileMatchInfo{Path: stage.stagedSource, Name: filepath.Base(source)}, Movie: stage.original.Movie, DestDir: stage.root, OperationMode: stage.original.OperationMode})
+	require.NoError(t, planErr2)
+	state := &applyPipelineState{operationID: "op", organizeResult: &organizer.OrganizeResult{NewPath: stagedPlan.TargetPath, FolderPath: stagedPlan.TargetDir}}
+	publishErr := stage.publish(context.Background(), orch, state, nil)
+	require.Error(t, publishErr)
+	pr260AssertRetained(t, base, source, subtitle, multipart, unrelated)
+}
+
+// Copy mode with MoveSubtitles: the sidecar participates in the batch
+// arm→install→confirm discipline, and a clean publish keeps sources and
+// installs the correct copies.
+func TestDeferredCopySidecarArmedAndConfirmed(t *testing.T) {
+	base, root, source, subtitle, multipart, unrelated, match := pr260FencedFiles(t, "deferred-copy-armed")
+	dest := filepath.Join(root, "library")
+	org := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize, MoveSubtitles: true, SubtitleExtensions: []string{".srt"}}, template.NewEngine(), nil)
+	orch := &applyOrchImpl{fs: base, organizer: org}
+	cmd := pr260ArtifactFailureCommand(&models.Movie{ContentID: "deferred-copy-armed"}, match, dest)
+	cmd.Organize.Skip = false
+	cmd.Organize.MoveFiles = false
+	cmd.Download = false
+	cmd.PublicationFence = pr260FailureArtifactFencer{}
+	stage, _, err := orch.prepareArtifact(context.Background(), cmd)
+	require.NoError(t, err)
+	defer stage.cleanup()
+
+	finalPlan, planErr := org.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: match, Movie: stage.original.Movie, DestDir: dest, OperationMode: stage.original.OperationMode})
+	require.NoError(t, planErr)
+	subMoves := org.PlanSubtitleMoves(finalPlan)
+	require.NotEmpty(t, subMoves)
+	stagedPlan, planErr2 := org.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: models.FileMatchInfo{Path: stage.stagedSource, Name: filepath.Base(source)}, Movie: stage.original.Movie, DestDir: stage.root, OperationMode: stage.original.OperationMode})
+	require.NoError(t, planErr2)
+	state := &applyPipelineState{operationID: "op", organizeResult: &organizer.OrganizeResult{NewPath: stagedPlan.TargetPath, FolderPath: stagedPlan.TargetDir}}
+	require.NoError(t, stage.publish(context.Background(), orch, state, nil))
+
+	require.FileExists(t, finalPlan.TargetPath, "video copy installed")
+	require.FileExists(t, subMoves[0].NewPath, "sidecar copy installed")
+	pr260AssertRetained(t, base, source, subtitle, multipart, unrelated)
+}
+
+type swapToDirWhenPresentFS struct {
+	afero.Fs
+	path    string
+	swapped bool
+}
+
+func (f *swapToDirWhenPresentFS) LstatIfPossible(name string) (os.FileInfo, bool, error) {
+	if name == f.path && !f.swapped {
+		if info, err := f.Fs.Stat(name); err == nil && info.Mode().IsRegular() {
+			f.swapped = true
+			_ = f.Fs.Remove(name)
+			_ = f.Fs.Mkdir(name, 0o755)
+		}
+	}
+	if l, ok := f.Fs.(afero.Lstater); ok {
+		return l.LstatIfPossible(name)
+	}
+	info, err := f.Fs.Stat(name)
+	return info, false, err
+}
+
+// Swapping a copy-installed sidecar target for a directory between the
+// organizer's execute and the batch confirm fails that leg specifically.
+// The swap triggers on the first probe-while-present so the arm probe (made
+// before anything is staged there) stays untouched.
+func TestDeferredCopySidecarConfirmDirSwapFails(t *testing.T) {
+	base, root, source, subtitle, multipart, unrelated, match := pr260FencedFiles(t, "deferred-copy-confirm-swap")
+	dest := filepath.Join(root, "library")
+	org := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize, MoveSubtitles: true, SubtitleExtensions: []string{".srt"}}, template.NewEngine(), nil)
+	orch := &applyOrchImpl{fs: base, organizer: org}
+	cmd := pr260ArtifactFailureCommand(&models.Movie{ContentID: "deferred-copy-confirm-swap"}, match, dest)
+	cmd.Organize.Skip = false
+	cmd.Organize.MoveFiles = false
+	cmd.Download = false
+	cmd.PublicationFence = pr260FailureArtifactFencer{}
+	stage, _, err := orch.prepareArtifact(context.Background(), cmd)
+	require.NoError(t, err)
+	defer stage.cleanup()
+
+	finalPlan, planErr := org.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: match, Movie: stage.original.Movie, DestDir: dest, OperationMode: stage.original.OperationMode})
+	require.NoError(t, planErr)
+	subMoves := org.PlanSubtitleMoves(finalPlan)
+	require.NotEmpty(t, subMoves)
+	stagedPlan, planErr2 := org.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: models.FileMatchInfo{Path: stage.stagedSource, Name: filepath.Base(source)}, Movie: stage.original.Movie, DestDir: stage.root, OperationMode: stage.original.OperationMode})
+	require.NoError(t, planErr2)
+	fsWithFault := &swapToDirWhenPresentFS{Fs: base, path: subMoves[0].NewPath}
+	stage.fs = fsWithFault
+	state := &applyPipelineState{operationID: "op", organizeResult: &organizer.OrganizeResult{NewPath: stagedPlan.TargetPath, FolderPath: stagedPlan.TargetDir}}
+	publishErr := stage.publish(context.Background(), orch, state, nil)
+	require.ErrorContains(t, publishErr, "did not install a file")
+	pr260AssertRetained(t, base, source, subtitle, multipart, unrelated)
+}

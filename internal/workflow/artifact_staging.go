@@ -61,8 +61,12 @@ type artifactStage struct {
 	directOriginArmed  bool
 	sharedClaims       []SharedArtifactClaim
 	sharedConsumers    []SharedArtifactClaim
-	sharedPublishBegan bool
-	sharedPoisoned     bool
+	// deferredCopySidecarTargets names sidecar destinations the copy/link
+	// execute installed through the batch, so installPaths skips their staged
+	// sibling copies instead of double-publishing over the live install.
+	deferredCopySidecarTargets []string
+	sharedPublishBegan         bool
+	sharedPoisoned             bool
 }
 
 var errArtifactDirtyAdmission = errors.New("artifact publication preparation failed")
@@ -463,6 +467,8 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 	finalReplaced := false
 	stagedVideo := ""
 	videoInstalledByTree := false
+	sidecarIntentTargets := []string{}
+	s.deferredCopySidecarTargets = nil
 	// The video leg moves the real source whenever the publish call carries
 	// move semantics: explicit MoveFiles, or any flow where ExecuteOrganizePlan
 	// would still rename (an irrelevant link_mode must not disarm intents).
@@ -562,9 +568,31 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 				}
 			}
 		}
+		if s.videoDeferred && !publishMove {
+			// Copy/link executions install sidecars directly into the destination
+			// during execute. Arm each as a rollback-tracked created output now, or
+			// a later failed leg would strand an untracked copy at the destination.
+			for _, mv := range executor.PlanSubtitleMoves(plan) {
+				if _, err := batch.BeforePublish(ctx, mv.NewPath, false); err != nil {
+					return fmt.Errorf("arm copy-installed sidecar %s: %w", mv.NewPath, err)
+				}
+				sidecarIntentTargets = append(sidecarIntentTargets, mv.NewPath)
+				// The organizer's subtitle lane locks the same destination key
+				// during execute; hand the in-process hold over exactly like the
+				// video lane does for the video plan target.
+				batch.YieldToLockedPublisher(mv.NewPath)
+			}
+			s.deferredCopySidecarTargets = sidecarIntentTargets
+		}
 		finalResult, err = executor.ExecuteOrganizePlan(plan, publishMove, s.original.Organize.LinkMode)
 		if filepath.Clean(plan.SourcePath) != filepath.Clean(plan.TargetPath) && (err == nil || fsutil.PublishCompleted(err)) {
 			batch.ObservePublishResult(plan.TargetPath)
+			for _, target := range sidecarIntentTargets {
+				batch.ObservePublishResult(target)
+				if cerr := batch.ConfirmPublish(ctx, target); cerr != nil {
+					return cerr
+				}
+			}
 			if s.videoDeferred && publishMove {
 				// The rename already consumed the real source: arm rollback before
 				// any fallible leg (ConfirmPublish, later installs) can observe an
@@ -1049,6 +1077,14 @@ func (s *artifactStage) installPaths(paths, preserve []string, stagedArtifactDir
 		}
 		if plan.sharedOwner {
 			s.sharedPublishBegan = true
+		}
+		// A copy-installed sidecar target that arrived during this run is not
+		// a content conflict for the staged sibling: the staged copy's bytes
+		// already sit there. Skip its tree install instead of replacing it.
+		if len(s.deferredCopySidecarTargets) > 0 && containsPath(s.deferredCopySidecarTargets, plan.target) {
+			plan.skip = true
+			plans = append(plans, plan)
+			continue
 		}
 		if s.publishBatch != nil {
 			if _, err := s.publishBatch.BeforePublish(s.publishCtx, plan.target, plan.replace); err != nil {
