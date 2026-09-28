@@ -258,6 +258,22 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 		// never overwrite the freshly moved destination with its pre-overwrite
 		// backup (that would clobber the moved source's only remaining copy).
 		pendingMoveIntentAnchor(op)
+		// An intent with unreadable endpoints (malformed ledger) stays a no-op:
+		// checkAnchor skips it as anchor_missing.
+		if op.NewPath != "" {
+			_, dstErr := r.fs.Stat(op.NewPath)
+			_, srcErr := r.fs.Stat(op.OriginalPath)
+			if os.IsNotExist(dstErr) && srcErr == nil {
+				// Destination never landed while the source still stands: the move
+				// never executed — this intent settles as a no-op so the batch can
+				// report fully reverted instead of deferring retries forever.
+				if uerr := r.batchFileOpRepo.UpdateRevertStatus(ctx, op.ID, models.RevertStatusNoOp); uerr != nil {
+					return failRevert(ctx, r.batchFileOpRepo, op, models.RevertReasonUnexpectedPathState, fmt.Sprintf("settle unexecuted pending intent for op %d: %v", op.ID, uerr)), nil
+				}
+				op.RevertStatus = models.RevertStatusNoOp
+				return &RevertFileResult{OperationID: op.ID, MovieID: op.MovieID, OriginalPath: op.OriginalPath, NewPath: op.NewPath, Outcome: models.RevertOutcomeSkipped, Reason: models.RevertReasonAnchorMissing}, nil
+			}
+		}
 	}
 
 	// P3: replay the replacement journal BEFORE the anchor check AND before

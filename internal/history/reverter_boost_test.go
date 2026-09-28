@@ -1777,3 +1777,100 @@ func TestRevertFile_PendingMoveIntentDrivesHydratedRevert(t *testing.T) {
 	}
 	mockRepo.AssertExpectations(t)
 }
+
+// A pending intent whose destination never materialized while the source
+// still stands means the move never executed: consume the row as a no-op so
+// revert retries stop anchor-skipping it and the batch can finish.
+func TestRevertFile_UnexecutedMoveIntentSettlesNoOp(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	mockRepo := mocks.NewMockBatchFileOperationRepositoryInterface(t)
+	require.NoError(t, fs.MkdirAll("/src", 0777))
+	require.NoError(t, afero.WriteFile(fs, "/src/ABC-123.mp4", []byte("video"), 0666))
+
+	gf := models.GeneratedFilesJSON{MoveBack: []models.FileMove{{OriginalPath: "/src/ABC-123.mp4", NewPath: "/dst/lib/ABC-123.mp4"}}}
+	gfJSON, _ := json.Marshal(gf)
+
+	op := &models.BatchFileOperation{
+		ID:             806,
+		MovieID:        "ABC-123",
+		OriginalPath:   "/src/ABC-123.mp4",
+		NewPath:        "",
+		OperationType:  models.OperationTypeMove,
+		RevertStatus:   models.RevertStatusApplied,
+		GeneratedFiles: string(gfJSON),
+	}
+	mockRepo.On("FindByID", mock.Anything, uint(806)).Return(op, nil)
+	mockRepo.On("UpdateRevertStatus", mock.Anything, uint(806), models.RevertStatusNoOp).Return(nil)
+
+	r := NewReverter(fs, mockRepo)
+	result, err := r.revertFile(context.Background(), op)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, models.RevertOutcomeSkipped, result.Outcome)
+	if _, err := fs.Stat("/src/ABC-123.mp4"); err != nil {
+		t.Fatalf("source untouched: %v", err)
+	}
+	mockRepo.AssertExpectations(t)
+}
+
+// The update-status leg of the noop settle: its failure turns the skip into a
+// failed revert report instead of leaving a phantom journal state.
+func TestRevertFile_UnexecutedIntentSettleFailurePropagates(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	mockRepo := mocks.NewMockBatchFileOperationRepositoryInterface(t)
+	require.NoError(t, fs.MkdirAll("/src", 0777))
+	require.NoError(t, afero.WriteFile(fs, "/src/ABC-123.mp4", []byte("video"), 0666))
+	gf := models.GeneratedFilesJSON{MoveBack: []models.FileMove{{OriginalPath: "/src/ABC-123.mp4", NewPath: "/dst/lib/ABC-123.mp4"}}}
+	gfJSON, _ := json.Marshal(gf)
+	op := &models.BatchFileOperation{
+		ID:             807,
+		MovieID:        "ABC-123",
+		OriginalPath:   "/src/ABC-123.mp4",
+		NewPath:        "",
+		OperationType:  models.OperationTypeMove,
+		RevertStatus:   models.RevertStatusApplied,
+		GeneratedFiles: string(gfJSON),
+	}
+	mockRepo.On("FindByID", mock.Anything, uint(807)).Return(op, nil)
+	mockRepo.On("UpdateRevertStatus", mock.Anything, uint(807), models.RevertStatusNoOp).Return(errors.New("write fails"))
+	mockRepo.On("UpdateRevertStatus", mock.Anything, uint(807), models.RevertStatusFailed).Return(nil)
+
+	r := NewReverter(fs, mockRepo)
+	result, err := r.revertFile(context.Background(), op)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.NotEqual(t, models.RevertOutcomeReverted, result.Outcome)
+}
+
+// Hydrated intent with the destination materialized: settles as a real
+// primary-move revert (no noop conversion), restoring the file to its source.
+func TestRevertFile_HydratedIntentRevertsMove(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	mockRepo := mocks.NewMockBatchFileOperationRepositoryInterface(t)
+	require.NoError(t, fs.MkdirAll("/dst/lib", 0777))
+	require.NoError(t, fs.MkdirAll("/src", 0777))
+	require.NoError(t, afero.WriteFile(fs, "/dst/lib/ABC-123.mp4", []byte("video"), 0666))
+
+	gf := models.GeneratedFilesJSON{MoveBack: []models.FileMove{{OriginalPath: "/src/ABC-123.mp4", NewPath: "/dst/lib/ABC-123.mp4"}}}
+	gfJSON, _ := json.Marshal(gf)
+	op := &models.BatchFileOperation{
+		ID:             808,
+		MovieID:        "ABC-123",
+		OriginalPath:   "/src/ABC-123.mp4",
+		NewPath:        "",
+		OperationType:  models.OperationTypeMove,
+		RevertStatus:   models.RevertStatusApplied,
+		GeneratedFiles: string(gfJSON),
+	}
+	mockRepo.On("FindByID", mock.Anything, uint(808)).Return(op, nil)
+	mockRepo.On("UpdateRevertStatus", mock.Anything, uint(808), models.RevertStatusReverted).Return(nil)
+
+	r := NewReverter(fs, mockRepo)
+	result, err := r.revertFile(context.Background(), op)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, models.RevertOutcomeReverted, result.Outcome)
+	if _, err := fs.Stat("/src/ABC-123.mp4"); err != nil {
+		t.Fatalf("file must move back to its original path: %v", err)
+	}
+}

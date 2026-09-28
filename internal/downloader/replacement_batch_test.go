@@ -199,3 +199,49 @@ func mustReadReplacementBatch(t *testing.T, fs afero.Fs, path string) []byte {
 	require.NoError(t, err)
 	return data
 }
+
+// An armed-but-never-installed destination releases its marker and lock on
+// release; an installed destination refuses (rollback keeps jurisdiction).
+func TestReplacementBatchReleaseUninstalled(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	batch, err := NewReplacementBatch(fs, "op-release", nil)
+	require.NoError(t, err)
+	dest := filepath.Join("/lib", "movie", "sidecar.srt")
+	require.NoError(t, fs.MkdirAll(filepath.Dir(dest), 0o755))
+
+	require.NoError(t, batch.Preflight([]string{dest}))
+	_, err = batch.BeforePublish(context.Background(), dest, false)
+	require.NoError(t, err)
+	require.NoError(t, batch.ReleaseUninstalled(dest), "armed-but-never-installed free")
+
+	// The claim is gone: re-arming the same destination works immediately.
+	_, err = batch.BeforePublish(context.Background(), dest, false)
+	require.NoError(t, err)
+
+	require.NoError(t, afero.WriteFile(fs, dest, []byte("installed"), 0o644))
+	batch.ObservePublishResult(dest)
+	require.Error(t, batch.ReleaseUninstalled(dest), "installed legs refuse release")
+
+	require.NoError(t, batch.Rollback(context.Background()))
+}
+
+// Find past other destinations, release ours, and tolerate unknown
+// destinations.
+func TestReplacementBatchReleaseUninstalledTargets(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	batch, err := NewReplacementBatch(fs, "op-release-targets", nil)
+	require.NoError(t, err)
+	require.NoError(t, fs.MkdirAll("/lib/movie", 0o755))
+	first := filepath.Join("/lib", "movie", "first.srt")
+	second := filepath.Join("/lib", "movie", "second.srt")
+	require.NoError(t, batch.Preflight([]string{first, second}))
+	if _, err := batch.BeforePublish(context.Background(), first, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := batch.BeforePublish(context.Background(), second, false); err != nil {
+		t.Fatal(err)
+	}
+	require.NoError(t, batch.ReleaseUninstalled(first), "still finds the entry past non-matching legs")
+	require.NoError(t, batch.ReleaseUninstalled("/lib/movie/never-armed.srt"), "unknown destination is a no-op")
+	require.NoError(t, batch.Rollback(context.Background()))
+}

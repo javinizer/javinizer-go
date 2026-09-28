@@ -610,6 +610,12 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 			}
 			for _, target := range sidecarIntentTargets {
 				if !copiedTargets[filepath.Clean(target)] {
+					// An armed-but-uncopied target pinned a .dlbusy claim that only
+					// ConfirmPublish or rollback would release: free it now or the
+					// destination reports ErrReplacementBusy for the server's lifetime.
+					// A refusal (leg already proves an install) must never delete
+					// those bytes just to free the marker.
+					_ = batch.ReleaseUninstalled(target)
 					continue
 				}
 				batch.ObservePublishResult(target)

@@ -340,6 +340,26 @@ func (l *replacementBatchLeg) unlock() {
 	}
 }
 
+// ReleaseUninstalled frees a destination leg whose publish never landed
+// (armed but never confirmed): the destination lock and busy marker release,
+// and the leg drops out of the batch, so nothing observes ErrReplacementBusy
+// for the server's lifetime.
+func (b *ReplacementBatch) ReleaseUninstalled(destination string) error {
+	target := filepath.Clean(destination)
+	for i, leg := range b.legs {
+		if leg.destination != target {
+			continue
+		}
+		if leg.installed {
+			return fmt.Errorf("cannot release installed staged publication destination %s", target)
+		}
+		leg.release()
+		b.legs = append(b.legs[:i], b.legs[i+1:]...)
+		return nil
+	}
+	return nil
+}
+
 func (l *replacementBatchLeg) release() {
 	if l.releaseBusy != nil {
 		l.releaseBusy()
