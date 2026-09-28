@@ -1580,33 +1580,29 @@ func TestCleanupGeneratedFilesFS_SkipsIntentEqualToPrimaryMove(t *testing.T) {
 	}
 }
 
-// A deferred-move row that crashed between publish and completion carries its
-// endpoints only as a pending MoveBack intent: checkAnchor hydrates the
-// column-shaped anchor from it instead of anchor-missing forever.
-func TestCheckAnchor_PendingMoveIntentHydrates(t *testing.T) {
+// checkAnchor no longer hydrates: hydration happens in revertFile before any
+// classification or replacement replay. checkAnchor with an empty primary
+// anchor skips; pendingMoveIntentAnchor stamps the endpoints from the ledger,
+// proof that a crashed move stays recoverable without waiting for Complete.
+func TestCheckAnchor_EmptyAnchorSkips(t *testing.T) {
 	fs := afero.NewMemMapFs()
-	require.NoError(t, fs.MkdirAll("/dest/lib", 0o755))
-	require.NoError(t, afero.WriteFile(fs, "/dest/lib/movie.mp4", []byte("x"), 0o644))
-	gf := models.GeneratedFilesJSON{MoveBack: []models.FileMove{{OriginalPath: "/src/movie.mp4", NewPath: "/dest/lib/movie.mp4"}}}
-	gfJSON, _ := json.Marshal(gf)
-	op := &models.BatchFileOperation{OperationType: models.OperationTypeMove, OriginalPath: "/src/movie.mp4", NewPath: "", GeneratedFiles: string(gfJSON)}
+	op := &models.BatchFileOperation{OperationType: models.OperationTypeMove, OriginalPath: "/src/movie.mp4", NewPath: "/dst/never-sorted/movie.mp4", GeneratedFiles: ""}
 	rv := NewReverter(fs, nil)
 	res, err := rv.checkAnchor(context.Background(), op)
-	require.NoError(t, err)
-	assert.Nil(t, res, "hydrated intent anchor present: no anchor_missing skip")
-	assert.Equal(t, "/dest/lib/movie.mp4", op.NewPath)
-
-	op.NewPath = ""
-	require.NoError(t, fs.Remove("/dest/lib/movie.mp4"))
-	res, err = rv.checkAnchor(context.Background(), op)
 	require.NoError(t, err)
 	require.NotNil(t, res)
 	assert.Equal(t, models.RevertOutcomeSkipped, res.Outcome)
 	assert.Equal(t, models.RevertReasonAnchorMissing, res.Reason)
 }
 
-// An intent whose source does not match the row's original path must never
-// pose as the primary anchor (it is a journaled sidecar move).
+func TestPendingMoveIntentAnchor_HydratesEndpoints(t *testing.T) {
+	gf := models.GeneratedFilesJSON{MoveBack: []models.FileMove{{OriginalPath: "/src/movie.mp4", NewPath: "/dest/lib/movie.mp4"}}}
+	gfJSON, _ := json.Marshal(gf)
+	op := &models.BatchFileOperation{OperationType: models.OperationTypeMove, OriginalPath: "/src/movie.mp4", GeneratedFiles: string(gfJSON)}
+	assert.Equal(t, "/dest/lib/movie.mp4", pendingMoveIntentAnchor(op))
+	assert.Equal(t, "/dest/lib/movie.mp4", op.NewPath)
+}
+
 func TestPendingMoveIntentAnchor_MismatchedSource(t *testing.T) {
 	gf := models.GeneratedFilesJSON{MoveBack: []models.FileMove{{OriginalPath: "/src/other.srt", NewPath: "/dest/other.srt"}}}
 	gfJSON, _ := json.Marshal(gf)
@@ -1748,4 +1744,36 @@ func TestCleanupGeneratedFilesFS_PlannedDeletesDigestReadFaultRetains(t *testing
 	if _, err := base.Stat("/dst/x.nfo"); err != nil {
 		t.Fatalf("digest read fault retains the target: %v", err)
 	}
+}
+
+func TestRevertFile_PendingMoveIntentDrivesHydratedRevert(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	mockRepo := mocks.NewMockBatchFileOperationRepositoryInterface(t)
+	require.NoError(t, fs.MkdirAll("/dst/lib", 0777))
+	require.NoError(t, afero.WriteFile(fs, "/dst/lib/ABC-123.mp4", []byte("video"), 0666))
+
+	gf := models.GeneratedFilesJSON{MoveBack: []models.FileMove{{OriginalPath: "/src/ABC-123.mp4", NewPath: "/dst/lib/ABC-123.mp4"}}}
+	gfJSON, _ := json.Marshal(gf)
+
+	op := &models.BatchFileOperation{
+		ID:             805,
+		MovieID:        "ABC-123",
+		OriginalPath:   "/src/ABC-123.mp4",
+		NewPath:        "",
+		OperationType:  models.OperationTypeMove,
+		RevertStatus:   models.RevertStatusApplied,
+		GeneratedFiles: string(gfJSON),
+	}
+	mockRepo.On("FindByID", mock.Anything, uint(805)).Return(op, nil)
+	mockRepo.On("UpdateRevertStatus", mock.Anything, uint(805), models.RevertStatusReverted).Return(nil)
+
+	r := NewReverter(fs, mockRepo)
+	result, err := r.revertFile(context.Background(), op)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, models.RevertOutcomeReverted, result.Outcome, "hydrated intent drives the primary move-back")
+	if _, err := fs.Stat("/src/ABC-123.mp4"); err != nil {
+		t.Fatalf("moved file must return to its source: %v", err)
+	}
+	mockRepo.AssertExpectations(t)
 }

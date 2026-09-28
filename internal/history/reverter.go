@@ -251,6 +251,15 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 		return result, err
 	}
 
+	if op.NewPath == "" && op.OperationType == models.OperationTypeMove {
+		// A deferred-move row that crashed between publish and completion
+		// carries its primary endpoints ONLY as a pending MoveBack intent:
+		// hydrate BEFORE classification/replay — the replacement restore must
+		// never overwrite the freshly moved destination with its pre-overwrite
+		// backup (that would clobber the moved source's only remaining copy).
+		pendingMoveIntentAnchor(op)
+	}
+
 	// P3: replay the replacement journal BEFORE the anchor check AND before
 	// any operation-type leg (codex P3 R2-1/R6-in-2): a deleted primary
 	// anchor must not strand independently recoverable overwritten media —
@@ -432,13 +441,6 @@ func (r *Reverter) checkAnchor(ctx context.Context, op *models.BatchFileOperatio
 	anchorPath := op.NewPath
 	if op.OperationType == models.OperationTypeUpdate {
 		anchorPath = op.OriginalPath
-	}
-	if anchorPath == "" && op.OperationType == models.OperationTypeMove {
-		// A deferred-move row that crashed between publish and completion
-		// carries its primary endpoints ONLY as a pending MoveBack intent:
-		// hydrate the column-shaped anchor so the row stays revertable
-		// instead of anchor-skipping forever.
-		anchorPath = pendingMoveIntentAnchor(op)
 	}
 
 	if _, err := r.fs.Stat(anchorPath); err != nil {
