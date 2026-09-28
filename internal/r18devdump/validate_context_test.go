@@ -32,7 +32,9 @@ func TestValidateStages_CancelledContext(t *testing.T) {
 		{"noNullMetaKeys", validateNoNullMetaKeys},
 		{"logicalKeys", validateLogicalKeys},
 		{"normConsistency", validateNormConsistency},
-		{"tableDDL", func(ctx context.Context, db *sql.DB) error { return checkTableDDL(ctx, db, "videos") }},
+		{"tableDDL", func(ctx context.Context, db *sql.DB) error {
+			return checkTableDDL(ctx, db, "videos", tableSchema[derivedVideoTable].columns)
+		}},
 		{"columnTypes", validateColumnTypes},
 		{"structure", validateStructure},
 		{"indexes", validateIndexes},

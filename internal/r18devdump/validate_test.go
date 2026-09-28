@@ -416,7 +416,7 @@ func TestValidateSidecar_PKWithNoCaseCollationRejected(t *testing.T) {
 	_, err := ValidateSidecar(context.Background(), path)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrDumpInvalid)
-	assert.Contains(t, err.Error(), "declares a collation")
+	assert.Contains(t, err.Error(), "declares COLLATE NOCASE")
 }
 
 func TestValidateSidecar_CollatedColumnDDLRejected(t *testing.T) {
@@ -429,7 +429,7 @@ func TestValidateSidecar_CollatedColumnDDLRejected(t *testing.T) {
 	_, err := ValidateSidecar(context.Background(), path)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrDumpInvalid)
-	assert.Contains(t, err.Error(), "declares a collation")
+	assert.Contains(t, err.Error(), "declares COLLATE NOCASE")
 }
 
 func TestValidateSidecar_NotADatabase(t *testing.T) {
@@ -487,4 +487,48 @@ func TestValidateSidecar_MissingProvenanceKeyRejected(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrDumpInvalid)
 	assert.Contains(t, err.Error(), "missing required provenance keys")
+}
+
+func TestDDLHelpers_TableDriven(t *testing.T) {
+	assert.Equal(t, []string{"a INTEGER", " b TEXT", " PRIMARY KEY (a, b)"},
+		splitColumnsDDL("a INTEGER, b TEXT, PRIMARY KEY (a, b)"))
+	assert.Equal(t, []string{"a INTEGER DEFAULT f(1,2)", " b TEXT"},
+		splitColumnsDDL("a INTEGER DEFAULT f(1,2), b TEXT"))
+	assert.Equal(t, []string{""}, splitColumnsDDL(""))
+
+	n1, c1, ok1 := segmentColumnAndCollation("content_id TEXT PRIMARY KEY COLLATE NOCASE")
+	assert.True(t, ok1)
+	assert.Equal(t, "content_id", n1)
+	assert.Equal(t, "NOCASE", c1)
+
+	n2, c2, ok2 := segmentColumnAndCollation("PRIMARY KEY (content_id)")
+	assert.False(t, ok2)
+	assert.Equal(t, "PRIMARY", n2)
+	assert.Empty(t, c2)
+
+	n3, c3, ok3 := segmentColumnAndCollation("   ")
+	assert.Empty(t, n3)
+	assert.Empty(t, c3)
+	assert.False(t, ok3)
+
+	n4, _, ok4 := segmentColumnAndCollation("notes TEXT COLLATE NOCASE")
+	assert.True(t, ok4)
+	assert.Equal(t, "notes", n4)
+}
+
+func TestDDLBody(t *testing.T) {
+	assert.Equal(t, "a, b", ddlBody("CREATE TABLE t (a, b)"))
+	assert.Empty(t, ddlBody("CREATE TABLE t"))
+	assert.Empty(t, ddlBody("widowed"))
+}
+
+func TestValidateSidecar_NonKeyCollatedAdditiveAccepted(t *testing.T) {
+	// Codex: additive unrelated columns keep their own collations (the DDL
+	// blanket-rejection that preceded the scoped check must not come back).
+	path := looseTableFixture(t, "videos",
+		"content_id TEXT PRIMARY KEY, dvd_id TEXT, dvd_id_norm TEXT, title_en TEXT, title_ja TEXT, comment_en TEXT, comment_ja TEXT, runtime_mins INTEGER, release_date TEXT, sample_url TEXT, maker_id TEXT, label_id TEXT, series_id TEXT, jacket_full_url TEXT, jacket_thumb_url TEXT, gallery_full_first TEXT, gallery_full_last TEXT, gallery_thumb_first TEXT, gallery_thumb_last TEXT, site_id TEXT, service_code TEXT, notes TEXT COLLATE NOCASE",
+		"INSERT INTO videos_loose (content_id, dvd_id, dvd_id_norm, notes) VALUES ('118iptest002', 'IPT-002', 'IPT002', 'abc')")
+	alterFixture(t, path, "CREATE INDEX idx_videos_dvd_id_norm ON videos(dvd_id_norm)")
+	_, err := ValidateSidecar(context.Background(), path)
+	require.NoError(t, err, "additive collated non-key columns must remain acceptable")
 }

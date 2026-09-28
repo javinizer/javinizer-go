@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -151,7 +152,7 @@ func validateStructure(ctx context.Context, db *sql.DB) error {
 		if n == 0 {
 			return fmt.Errorf("%w: missing required table %s", ErrDumpInvalid, table)
 		}
-		if err := checkTableDDL(ctx, db, table); err != nil {
+		if err := checkTableDDL(ctx, db, table, schema.columns); err != nil {
 			return err
 		}
 		if err := validateColumns(ctx, db, table, schema.columns); err != nil {
@@ -161,20 +162,93 @@ func validateStructure(ctx context.Context, db *sql.DB) error {
 	return nil
 }
 
-// checkTableDDL enforces the generated schema's no-COLLATE property via the
-// stored DDL: a column- or index-declared collation on a key column changes
-// predicate semantics while pragma metadata probes stay blind to it. Genuine
-// dumps never declare collations, so any COLLATE keyword is off-schema.
-func checkTableDDL(ctx context.Context, db *sql.DB, table string) error {
+// checkTableDDL enforces collation fidelity for the columns the lookups
+// depend on. SQLite DDL carries collations nowhere else (pragma metadata is
+// blind to them), and an incompatible collation on a key column changes
+// predicate semantics: split the DDL body into top-level comma segments,
+// and reject any REQUIRED column segment declaring a non-BINARY COLLATE.
+// Unrelated additive columns keep their own collations (compatibility
+// policy) — the earlier whole-DDL substring check falsely rejected them.
+func checkTableDDL(ctx context.Context, db *sql.DB, table string, required []string) error {
 	ddl, err := queryString(ctx, db,
 		"SELECT COALESCE((SELECT sql FROM sqlite_master WHERE type='table' AND name=?), '')", table)
 	if err != nil {
 		return fmt.Errorf("%w: %s DDL probe: %v", ErrDumpInvalid, table, err)
 	}
-	if strings.Contains(strings.ToUpper(ddl), "COLLATE") {
-		return fmt.Errorf("%w: %s DDL declares a collation the lookups cannot use", ErrDumpInvalid, table)
+	if !strings.Contains(strings.ToUpper(ddl), "COLLATE") {
+		return nil
+	}
+	for _, seg := range splitColumnsDDL(ddlBody(ddl)) {
+		name, coll, hasColl := segmentColumnAndCollation(seg)
+		if !hasColl {
+			continue
+		}
+		for _, req := range required {
+			if name == req && !strings.EqualFold(coll, "BINARY") {
+				return fmt.Errorf("%w: %s.%s declares COLLATE %s (lookup needs BINARY)", ErrDumpInvalid, table, req, coll)
+			}
+		}
 	}
 	return nil
+}
+
+// ddlBody extracts the (...) body of a CREATE TABLE statement; malformed
+// input (missing or reversed delimiters) yields an empty body rather than
+// panicking (only reachable via a garbled sqlite_master row).
+func ddlBody(ddl string) string {
+	open := strings.IndexByte(ddl, '(')
+	closing := strings.LastIndexByte(ddl, ')')
+	if open >= 0 && closing > open {
+		return ddl[open+1 : closing]
+	}
+	return ""
+}
+
+// splitColumnsDDL splits a CREATE TABLE's (...) body at top-level commas.
+func splitColumnsDDL(body string) []string {
+	var out []string
+	depth := 0
+	start := 0
+	for i := 0; i < len(body); i++ {
+		switch body[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+		case ',':
+			if depth == 0 {
+				out = append(out, body[start:i])
+				start = i + 1
+			}
+		}
+	}
+	return append(out, body[start:])
+}
+
+// unquoteIdent strips identifier quoting/brackets pairs a hand-built dump
+// may carry around key column names.
+func unquoteIdent(s string) string {
+	for _, c := range []byte{0x22, 0x27, 0x5B, 0x5D, 0x60} {
+		s = strings.Trim(s, string(c))
+	}
+	return s
+}
+
+// segmentColumnAndCollation reads one comma-segment: the first token is the
+// column name (quoted identifiers reduced); a COLLATE clause reports its name.
+var collRe = regexp.MustCompile(`(?i)\bCOLLATE\s+([A-Za-z_][A-Za-z0-9_]*)\b`)
+
+func segmentColumnAndCollation(seg string) (name, coll string, hasColl bool) {
+	fields := strings.Fields(strings.TrimSpace(seg))
+	if len(fields) == 0 {
+		return "", "", false
+	}
+	name = unquoteIdent(fields[0])
+	m := collRe.FindStringSubmatch(seg)
+	if m == nil {
+		return name, "", false
+	}
+	return name, m[1], true
 }
 
 // validateColumns probes each required column individually (separated from
