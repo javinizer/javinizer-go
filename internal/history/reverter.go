@@ -694,11 +694,22 @@ func cleanupGeneratedFilesFS(fs afero.Fs, op *models.BatchFileOperation, stopAt 
 		}
 		dirsToCheck[filepath.Dir(path)] = true
 	}
+	// A MoveBack arm supersedes any pending delete pinned to the same
+	// destination (rows journaled before the intent promoted with its arm):
+	// the rename-back restores those bytes onto their source, so the pinned
+	// delete must never fire first and destroy them.
+	moveBackTargets := make(map[string]bool, len(gf.MoveBack))
+	for _, fm := range gf.MoveBack {
+		moveBackTargets[fm.NewPath] = true
+	}
 	// PlannedDeletes are intent entries pinned to the publisher's content hash:
 	// delete only while the destination still carries exactly those bytes —
 	// absent paths are consumed, rebuilt/touched or foreign bytes are kept.
 	for _, entry := range gf.PlannedDeletes {
 		path := entry.Path
+		if moveBackTargets[path] {
+			continue
+		}
 		file, openErr := fs.Open(path)
 		if os.IsNotExist(openErr) {
 			dirsToCheck[filepath.Dir(path)] = true

@@ -159,3 +159,102 @@ func TestCompletionLedgerMergeEmptyOutcomeKeepsPlannedDeletes(t *testing.T) {
 	require.False(t, persist, "empty outcome merges identical — nothing is dropped, no write needed")
 	_ = merged
 }
+
+// A pending delete promotes into the move-back arm when the same destination
+// restates as a MoveBack (deferred sibling publication): the armed inverse
+// restores the bytes on revert, so the hash-pinned delete must not survive.
+func TestCompletionLedgerMergeMoveBackArmConsumesPinnedDelete(t *testing.T) {
+	sibling := models.FileMove{OriginalPath: "/src/movie-cd2.mp4", NewPath: "/lib/movie/movie-cd2.mp4"}
+	prior := models.MarshalLedgerJSON(models.GeneratedFilesJSON{
+		PlannedDeletes: []models.DeleteEntry{
+			{Path: "/lib/movie/movie-cd2.mp4", SHA256: "pin-sibling"},
+			{Path: "/lib/movie/poster.jpg", SHA256: "pin-poster"},
+		},
+	})
+	fresh := models.MarshalLedgerJSON(models.GeneratedFilesJSON{
+		MoveBack: []models.FileMove{sibling},
+	})
+	merged, persist, _, err := completionLedgerMerge(prior, fresh, "")
+	require.NoError(t, err)
+	require.True(t, persist)
+	assert.Equal(t, []models.FileMove{sibling}, merged.MoveBack)
+	require.Len(t, merged.PlannedDeletes, 1, "the move-armed pin promotes; the unrelated pin keeps its entry")
+	assert.Equal(t, "/lib/movie/poster.jpg", merged.PlannedDeletes[0].Path)
+
+	// The inverse journal order resolves identically: a delete intent landing
+	// after the move intent armed is still consumed, pinned or not.
+	armed := models.MarshalLedgerJSON(models.GeneratedFilesJSON{MoveBack: []models.FileMove{sibling}})
+	late := models.MarshalLedgerJSON(models.GeneratedFilesJSON{
+		PlannedDeletes: []models.DeleteEntry{
+			{Path: "/lib/movie/movie-cd2.mp4", SHA256: "pin-sibling"},
+			{Path: "/lib/movie/fanart.jpg", SHA256: "pin-fanart"},
+		},
+	})
+	merged, _, _, err = completionLedgerMerge(armed, late, "")
+	require.NoError(t, err)
+	assert.Equal(t, []models.FileMove{sibling}, merged.MoveBack, "the carried arm survives the late intent merge")
+	require.Len(t, merged.PlannedDeletes, 1, "the late pin on the armed destination never lands")
+	assert.Equal(t, "/lib/movie/fanart.jpg", merged.PlannedDeletes[0].Path)
+}
+
+// RecordMoveIntent journals the promotion in the same durable transaction:
+// the row keeps the armed inverse and drops only the move-backed pin.
+func TestRecordMoveIntentPromotesPinnedDelete(t *testing.T) {
+	db, _ := pr260ArtifactDB(t)
+	movie := pr260FencedMovie(t, db, "move-promotes-pin", "")
+	fs, root, source, _, multipart, _, match := pr260FencedFiles(t, "move-promotes-pin")
+	repo := database.NewBatchFileOperationRepository(db)
+	log := NewDBRevertLog(repo, NewRevertLogConfig(true, nil), "move-promotes-pin", fs, nil, nil, nil)
+	dest := filepath.Join(root, "library")
+	opID, err := log.Begin(context.Background(), ApplyCmd{Movie: &movie, Match: match, DestPath: dest})
+	require.NoError(t, err)
+
+	siblingTarget := filepath.Join(dest, "movie", filepath.Base(multipart))
+	unrelatedTarget := filepath.Join(dest, "movie", "poster.jpg")
+	require.NoError(t, log.RecordDeleteIntent(context.Background(), opID, []models.DeleteEntry{
+		{Path: siblingTarget, SHA256: "pin-sibling"},
+		{Path: unrelatedTarget, SHA256: "pin-poster"},
+	}))
+	require.NoError(t, log.RecordMoveIntent(context.Background(), opID, multipart, siblingTarget))
+	require.NoError(t, log.RecordMoveIntent(context.Background(), opID, source, filepath.Join(dest, "movie", filepath.Base(source))))
+
+	row, rowErr := repo.FindByID(context.Background(), mustParseOpID(t, opID))
+	require.NoError(t, rowErr)
+	require.NotNil(t, row)
+	gf, parseErr := models.ParseGeneratedFiles(row.GeneratedFiles)
+	require.NoError(t, parseErr)
+	require.Len(t, gf.MoveBack, 2)
+	require.Len(t, gf.PlannedDeletes, 1, "the move-backed pending delete promotes with the arm")
+	assert.Equal(t, unrelatedTarget, gf.PlannedDeletes[0].Path, "the pin whose destination never move-arms keeps its entry")
+}
+
+// Reconciled move-backs consume the matching pending deletes the same way the
+// intent journal does: the confirmed arm owns the destination's revert.
+func TestReconcileMoveIntentsConsumesPinnedDeleteForKeptMoves(t *testing.T) {
+	db, _ := pr260ArtifactDB(t)
+	movie := pr260FencedMovie(t, db, "reconcile-promotes-pin", "")
+	fs, root, _, _, multipart, _, match := pr260FencedFiles(t, "reconcile-promotes-pin")
+	repo := database.NewBatchFileOperationRepository(db)
+	log := NewDBRevertLog(repo, NewRevertLogConfig(true, nil), "reconcile-promotes-pin", fs, nil, nil, nil)
+	dest := filepath.Join(root, "library")
+	opID, err := log.Begin(context.Background(), ApplyCmd{Movie: &movie, Match: match, DestPath: dest})
+	require.NoError(t, err)
+
+	siblingTarget := filepath.Join(dest, "movie", filepath.Base(multipart))
+	unrelatedTarget := filepath.Join(dest, "movie", "poster.jpg")
+	require.NoError(t, log.RecordDeleteIntent(context.Background(), opID, []models.DeleteEntry{
+		{Path: siblingTarget, SHA256: "pin-sibling"},
+		{Path: unrelatedTarget, SHA256: "pin-poster"},
+	}))
+	keep := []models.FileMove{{OriginalPath: multipart, NewPath: siblingTarget}}
+	require.NoError(t, log.ReconcileMoveIntents(context.Background(), opID, keep))
+
+	row, rowErr := repo.FindByID(context.Background(), mustParseOpID(t, opID))
+	require.NoError(t, rowErr)
+	require.NotNil(t, row)
+	gf, parseErr := models.ParseGeneratedFiles(row.GeneratedFiles)
+	require.NoError(t, parseErr)
+	assert.ElementsMatch(t, keep, gf.MoveBack)
+	require.Len(t, gf.PlannedDeletes, 1, "the kept move's pinned delete is consumed")
+	assert.Equal(t, unrelatedTarget, gf.PlannedDeletes[0].Path)
+}

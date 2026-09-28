@@ -11,6 +11,7 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/fsutil"
+	"github.com/javinizer/javinizer-go/internal/history"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
 	"github.com/javinizer/javinizer-go/internal/organizer"
@@ -1321,4 +1322,51 @@ func TestDeferredPublishGenericSiblingPinsIntentFaults(t *testing.T) {
 		publishErr := stage.publish(context.Background(), orch, state, nil)
 		require.ErrorContains(t, publishErr, "staged read denied")
 	})
+}
+
+// codex P1 (PRRT_kwDORn9KaM6m0-JL): after a successful deferred move with a
+// generic sibling, the durable revert record must NOT retain a PlannedDeletes
+// row for the sibling target — the armed move-back inverse owns it. Reverting
+// the batch restores the sibling onto its source path instead of deleting the
+// destination and losing the removed source.
+func TestDeferredMoveGenericSiblingPinPromotesAndReverts(t *testing.T) {
+	db, _ := pr260ArtifactDB(t)
+	movie := pr260FencedMovie(t, db, "sibling-promote-w161", "")
+	fs, root, source, _, multipart, _, match := pr260FencedFiles(t, "sibling-promote-w161")
+	dest := filepath.Join(root, "library")
+	orch := pr260RealApply(fs, &movie, organizer.MediaFormatConfig{}, nil, false)
+	repo := database.NewBatchFileOperationRepository(db)
+	orch.revertLog = NewDBRevertLog(repo, NewRevertLogConfig(true, nil), "sibling-promote-w161", fs, nil, nil, nil)
+	cmd := pr260FencedCommand(&movie, match, dest, pr260FencedCounter(t, db), operationmode.OperationModeOrganize, false, true, organizer.LinkModeNone, false, false)
+
+	result, err := orch.Execute(t.Context(), cmd)
+	require.NoError(t, err)
+	require.NotNil(t, result.OrganizeResult)
+
+	siblingTarget := filepath.Join(filepath.Dir(result.OrganizeResult.NewPath),
+		stagedArtifactSiblingName(filepath.Base(source), filepath.Base(result.OrganizeResult.NewPath), filepath.Base(multipart)))
+	require.Equal(t, []byte("part two"), mustReadStagedTxn(t, fs, siblingTarget), "the sibling published at the final destination")
+	exists, statErr := afero.Exists(fs, multipart)
+	require.NoError(t, statErr)
+	assert.False(t, exists, "move mode consumed the sibling source")
+
+	ledger := p3Ledger(t, repo, result.OperationID)
+	moveBacked := map[string]bool{}
+	for _, fm := range ledger.MoveBack {
+		moveBacked[fm.NewPath] = true
+	}
+	assert.True(t, moveBacked[siblingTarget], "the sibling inverse is armed in the durable record")
+	for _, pd := range ledger.PlannedDeletes {
+		assert.False(t, moveBacked[pd.Path], "no pending delete survives for a move-armed destination: %s", pd.Path)
+		assert.NotEqual(t, siblingTarget, pd.Path, "the sibling target's pinned delete promoted with the arm")
+	}
+
+	res, revErr := history.NewReverter(fs, repo).RevertBatch(t.Context(), "sibling-promote-w161")
+	require.NoError(t, revErr)
+	require.Equal(t, 1, res.Succeeded)
+	require.Equal(t, []byte("part two"), mustReadStagedTxn(t, fs, multipart), "revert moved the sibling back onto its source path")
+	require.Equal(t, []byte("video"), mustReadStagedTxn(t, fs, source), "the primary moved back too")
+	exists, statErr = afero.Exists(fs, siblingTarget)
+	require.NoError(t, statErr)
+	assert.False(t, exists, "the revert moved the destination away, never deleted-then-lost it")
 }

@@ -367,10 +367,30 @@ func mergeReplacementLedger(priorRaw, newRaw string) string {
 			fresh.Delete = append(fresh.Delete, priorDel)
 		}
 	}
+	// A MoveBack arm wins over a pending delete pinned to the same path: the
+	// armed inverse restores those bytes onto their source on revert, so the
+	// pinned delete must not survive to fire first and destroy them.
+	moveBackTargets := make(map[string]bool, len(fresh.MoveBack))
+	for _, freshMB := range fresh.MoveBack {
+		moveBackTargets[freshMB.NewPath] = true
+	}
+	if len(moveBackTargets) > 0 {
+		keptPinned := fresh.PlannedDeletes[:0]
+		for _, freshPD := range fresh.PlannedDeletes {
+			if !moveBackTargets[freshPD.Path] {
+				keptPinned = append(keptPinned, freshPD)
+			}
+		}
+		fresh.PlannedDeletes = keptPinned
+	}
 	// Pending deletes graduate to plain entries when the outcome completion
-	// restates the path in Delete; pending entries the outcome never restated
-	// (crash mid-publish) stay, still hash-pinned.
+	// restates the path in Delete or promotes into the move-back above;
+	// pending entries the outcome never restated (crash mid-publish) stay,
+	// still hash-pinned.
 	for _, priorPD := range prior.PlannedDeletes {
+		if moveBackTargets[priorPD.Path] {
+			continue
+		}
 		graduated := false
 		for _, freshDel := range fresh.Delete {
 			if freshDel == priorPD.Path {
@@ -577,6 +597,22 @@ func (l *dbRevertLog) ReconcileMoveIntents(ctx context.Context, opID OperationID
 			return models.GeneratedFilesJSON{}, false, perr
 		}
 		gf.MoveBack = append([]models.FileMove(nil), keep...)
+		// Kept move destinations consume pending deletes pinned to the same
+		// path (deferred sibling publication): the confirmed move-back arm
+		// owns that target's revert, so the pinned delete must not survive.
+		if len(gf.PlannedDeletes) > 0 {
+			keepTargets := make(map[string]bool, len(keep))
+			for _, fm := range keep {
+				keepTargets[fm.NewPath] = true
+			}
+			remaining := gf.PlannedDeletes[:0]
+			for _, pd := range gf.PlannedDeletes {
+				if !keepTargets[pd.Path] {
+					remaining = append(remaining, pd)
+				}
+			}
+			gf.PlannedDeletes = remaining
+		}
 		next := models.MarshalLedgerJSON(gf)
 		if next == current.GeneratedFiles {
 			return models.GeneratedFilesJSON{}, false, nil
