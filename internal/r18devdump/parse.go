@@ -53,6 +53,18 @@ type DumpRow struct {
 // pg_dump encodes NULL values as the literal "\N"; callers receive them
 // verbatim and may interpret them as needed.
 func ParseDump(r io.Reader, emit func(DumpRow) error) error {
+	return parseDump(r, nil, emit)
+}
+
+// ParseDumpWithBlocks streams a pg_dump like ParseDump and additionally
+// invokes onBlock for every recognized COPY header — including empty blocks,
+// whose presence is the only signal Import's production-scale completeness
+// check can use without straining memory.
+func ParseDumpWithBlocks(r io.Reader, onBlock func(table string), emit func(DumpRow) error) error {
+	return parseDump(r, onBlock, emit)
+}
+
+func parseDump(r io.Reader, onBlock func(table string), emit func(DumpRow) error) error {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
 
@@ -70,6 +82,9 @@ func ParseDump(r io.Reader, emit func(DumpRow) error) error {
 				table = copyInfo.table
 				columns = copyInfo.columns
 				inCopy = true
+				if onBlock != nil {
+					onBlock(table)
+				}
 			}
 			continue
 		}

@@ -376,7 +376,12 @@ func Import(ctx context.Context, r io.Reader, path string, opts ImportOptions) (
 		return nil
 	}
 
-	if err := ParseDump(r, emit); err != nil {
+	// At production scale, completeness == every expected COPY block seen
+	// (headers included, even zero-row blocks — those are legal). Codex on the
+	// upload PR: the trailer-only rule let "videos + trailer" partials through.
+	seenBlocks := make(map[string]bool)
+	onBlock := func(table string) { seenBlocks[table] = true }
+	if err := ParseDumpWithBlocks(r, onBlock, emit); err != nil {
 		_ = tx.Rollback()
 		return ImportResult{}, fmt.Errorf("parse dump: %w", err)
 	}
@@ -397,9 +402,18 @@ func Import(ctx context.Context, r io.Reader, path string, opts ImportOptions) (
 	// video set with none means the stream was truncated after its final
 	// completed COPY block. Tiny dumps are synthetic fixtures/mirrors and
 	// allowed (the rule only bites at production scale).
-	if totalVideos >= 1000 && tableCounts[trailerTable] == 0 {
-		_ = tx.Rollback()
-		return ImportResult{}, fmt.Errorf("%w: dump has %d videos but no trailer rows — stream truncated after its final COPY block", ErrTruncatedDump, totalVideos)
+	if totalVideos >= 1000 {
+		var missing []string
+		for table := range tableSchema {
+			if !seenBlocks[table] {
+				missing = append(missing, table)
+			}
+		}
+		if len(missing) > 0 {
+			sort.Strings(missing)
+			_ = tx.Rollback()
+			return ImportResult{}, fmt.Errorf("%w: production-scale dump (%d videos) is missing COPY blocks for: %s", ErrTruncatedDump, totalVideos, strings.Join(missing, ", "))
+		}
 	}
 
 	if err := writeMeta(ctx, tx, opts); err != nil {

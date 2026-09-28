@@ -118,39 +118,65 @@ func TestImport_TypedValues(t *testing.T) {
 }
 
 func TestImport_TrailerCompletenessInvariant(t *testing.T) {
-	mkDump := func(videos int, trailer bool) string {
+	dumpVideoBlock := "COPY public.derived_video (content_id, dvd_id) FROM stdin;\n"
+	dumpTrailerBlock := "COPY public.source_dmm_trailer (content_id, url) FROM stdin;\n"
+	allExtra := []string{
+		"COPY public.derived_actress (id, name_romaji) FROM stdin;\njanedoe\tJane Doe\n\\.\n",
+		"COPY public.derived_maker (id, name_en) FROM stdin;\nm1\tMaker\n\\.\n",
+		"COPY public.derived_label (id, name_en) FROM stdin;\nl1\tLabel\n\\.\n",
+		"COPY public.derived_series (id, name_en) FROM stdin;\ns1\tSeries\n\\.\n",
+		"COPY public.derived_director (id, name_romaji) FROM stdin;\nd1\tDir\n\\.\n",
+		"COPY public.derived_category (id, name_en) FROM stdin;\nc1\tCat\n\\.\n",
+		"COPY public.derived_video_actress (content_id, actress_id) FROM stdin;\ncontent0000000\tjanedoe\n\\.\n",
+		"COPY public.derived_video_category (content_id, category_id) FROM stdin;\ncontent0000000\tc1\n\\.\n",
+		"COPY public.derived_video_director (content_id, director_id) FROM stdin;\ncontent0000000\td1\n\\.\n",
+	}
+
+	mkDump := func(videos int, withTrailer, allBlocks bool) string {
 		var b strings.Builder
-		b.WriteString("COPY public.derived_video (content_id, dvd_id) FROM stdin;\n")
+		b.WriteString(dumpVideoBlock)
 		for i := 0; i < videos; i++ {
 			fmt.Fprintf(&b, "content%07d\tDVD-%07d\n", i, i)
 		}
 		b.WriteString("\\.\n")
-		if trailer {
-			b.WriteString("COPY public.source_dmm_trailer (content_id, url) FROM stdin;\ncontent0000000\thttps://example/t.mp4\n\\.\n")
+		if allBlocks {
+			for _, blk := range allExtra {
+				b.WriteString(blk)
+			}
+		}
+		if withTrailer {
+			b.WriteString(dumpTrailerBlock + "content0000000\thttps://example/t.mp4\n\\.\n")
 		}
 		return b.String()
 	}
 
-	t.Run("production-scale without trailers ⇒ truncated", func(t *testing.T) {
+	t.Run("production-scale without trailer rejected", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "out.db")
-		_, err := Import(context.Background(), strings.NewReader(mkDump(1500, false)), path, ImportOptions{})
+		_, err := Import(context.Background(), strings.NewReader(mkDump(1500, false, true)), path, ImportOptions{})
 		require.Error(t, err)
 		assert.True(t, errors.Is(err, ErrTruncatedDump))
 	})
 
-	t.Run("production-scale with trailer ⇒ ok", func(t *testing.T) {
+	t.Run("production-scale with trailer but missing entity blocks rejected", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "out.db")
-		_, err := Import(context.Background(), strings.NewReader(mkDump(1500, true)), path, ImportOptions{})
+		_, err := Import(context.Background(), strings.NewReader(mkDump(1500, true, false)), path, ImportOptions{})
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, ErrTruncatedDump))
+		assert.Contains(t, err.Error(), "derived_actress")
+	})
+
+	t.Run("production-scale with all blocks accepted", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "out.db")
+		_, err := Import(context.Background(), strings.NewReader(mkDump(1500, true, true)), path, ImportOptions{})
 		require.NoError(t, err)
 	})
 
-	t.Run("synthetic small dumps exempt", func(t *testing.T) {
+	t.Run("small dumps remain exempt", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "out.db")
-		_, err := Import(context.Background(), strings.NewReader(mkDump(1, false)), path, ImportOptions{})
+		_, err := Import(context.Background(), strings.NewReader(mkDump(1, false, false)), path, ImportOptions{})
 		require.NoError(t, err)
 	})
 }
-
 func TestReplaceFile_OverwriteExistingDestination(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "new.db")
