@@ -139,7 +139,7 @@ func TestPR260FiniteArtifactRehomeFaultsRetainSidecars(t *testing.T) {
 				fs.path = filepath.Dir(target)
 			}
 			fs.enabled = true
-			err = stage.rehomeRemainingSiblings(video)
+			err = stage.rehomeRemainingSiblings(video, nil)
 			require.ErrorContains(t, err, tc.want)
 			if tc.existing {
 				b, e := afero.ReadFile(base, target)
@@ -148,7 +148,7 @@ func TestPR260FiniteArtifactRehomeFaultsRetainSidecars(t *testing.T) {
 			}
 			pr260AssertRetained(t, base, source, subtitle, multipart, unrelated)
 			fs.enabled = false
-			require.NoError(t, stage.rehomeRemainingSiblings(video))
+			require.NoError(t, stage.rehomeRemainingSiblings(video, nil))
 			b, err := afero.ReadFile(base, target)
 			require.NoError(t, err)
 			original, readErr := afero.ReadFile(base, stage.siblings[0].sourcePath)

@@ -330,7 +330,17 @@ func appendLedgerRoot(raw, root string) string {
 	return data
 }
 
-func mergeReplacementLedger(priorRaw, newRaw string) string {
+// promotePinnedDeletes distinguishes a GRADUATED arm merge (outcome
+// completions and reconciliations pass true) from a still-PENDING intent arm
+// (RecordMoveIntent passes false). A graduated arm wins over a pending delete
+// pinned to the same path: the armed inverse restores those bytes onto their
+// source on revert, so the pinned delete must not survive to fire first and
+// destroy them. A pending arm keeps the pin: the record only proves the
+// inverse is INTENDED — until the source removal is confirmed the pin is the
+// sole ownership proof inside the intent→consumption crash window, and the
+// reverter fires it only when the surviving source suppresses the rename-back.
+// Graduation (an outcome completion or ReconcileMoveIntents) consumes it.
+func mergeReplacementLedgerIntents(priorRaw, newRaw string, promotePinnedDeletes bool) string {
 	if priorRaw == "" {
 		return newRaw
 	}
@@ -339,7 +349,26 @@ func mergeReplacementLedger(priorRaw, newRaw string) string {
 		return newRaw
 	}
 	if newRaw == "" {
-		return models.MarshalLedgerJSON(models.GeneratedFilesJSON{Replacements: prior.Replacements, Roots: prior.Roots, MoveBack: prior.MoveBack, Delete: prior.Delete, PlannedDeletes: prior.PlannedDeletes})
+		// An outcome with no generated payload still GRADUATES already-armed
+		// pending intents: pins under a graduated arm are consumed here (a
+		// pending-intent merge passes promotePinnedDeletes=false and keeps
+		// them). Pins whose destination never armed always survive, so a
+		// payloadless completion cannot erase unrelated pending deletes.
+		retained := prior.PlannedDeletes
+		if promotePinnedDeletes && len(prior.MoveBack) > 0 {
+			armed := make(map[string]bool, len(prior.MoveBack))
+			for _, fm := range prior.MoveBack {
+				armed[fm.NewPath] = true
+			}
+			kept := make([]models.DeleteEntry, 0, len(prior.PlannedDeletes))
+			for _, pd := range prior.PlannedDeletes {
+				if !armed[pd.Path] {
+					kept = append(kept, pd)
+				}
+			}
+			retained = kept
+		}
+		return models.MarshalLedgerJSON(models.GeneratedFilesJSON{Replacements: prior.Replacements, Roots: prior.Roots, MoveBack: prior.MoveBack, Delete: prior.Delete, PlannedDeletes: retained})
 	}
 	fresh, err := models.ParseGeneratedFiles(newRaw)
 	if err != nil {
@@ -377,9 +406,6 @@ func mergeReplacementLedger(priorRaw, newRaw string) string {
 			fresh.Delete = append(fresh.Delete, priorDel)
 		}
 	}
-	// A MoveBack arm wins over a pending delete pinned to the same path: the
-	// armed inverse restores those bytes onto their source on revert, so the
-	// pinned delete must not survive to fire first and destroy them.
 	moveBackTargets := make(map[string]bool, len(fresh.MoveBack))
 	for _, freshMB := range fresh.MoveBack {
 		moveBackTargets[freshMB.NewPath] = true
@@ -398,7 +424,7 @@ func mergeReplacementLedger(priorRaw, newRaw string) string {
 	// pending entries the outcome never restated (crash mid-publish) stay,
 	// still hash-pinned.
 	for _, priorPD := range prior.PlannedDeletes {
-		if moveBackTargets[priorPD.Path] {
+		if promotePinnedDeletes && moveBackTargets[priorPD.Path] {
 			continue
 		}
 		graduated := false
@@ -486,8 +512,8 @@ func updatePostOrganize(op *models.BatchFileOperation, newPath string, inPlaceRe
 // actually lands there, so the sweeper's bounded recursion starts there).
 // persist=false reports an idempotent no-op (merged bytes identical to what
 // the row already carries, e.g. a retried completion).
-func completionLedgerMerge(currentRaw, newRaw, folderRoot string) (next models.GeneratedFilesJSON, persist bool, merged string, err error) {
-	merged = mergeReplacementLedger(currentRaw, newRaw)
+func completionLedgerMergeOpt(currentRaw, newRaw, folderRoot string, promotePinnedDeletes bool) (next models.GeneratedFilesJSON, persist bool, merged string, err error) {
+	merged = mergeReplacementLedgerIntents(currentRaw, newRaw, promotePinnedDeletes)
 	if folderRoot != "" {
 		merged = appendLedgerRoot(merged, folderRoot)
 	}
@@ -517,9 +543,13 @@ func completionLedgerMerge(currentRaw, newRaw, folderRoot string) (next models.G
 // clobbered any journal mutation committed between the tx commit and the
 // Save), so generated_files is owned exclusively by UpdateJournalInTx.
 func (l *dbRevertLog) mergeJournalInTx(ctx context.Context, recordID uint, opID OperationID, caller, newRaw, folderRoot string) (string, error) {
+	return l.mergeJournalInTxOpt(ctx, recordID, opID, caller, newRaw, folderRoot, true)
+}
+
+func (l *dbRevertLog) mergeJournalInTxOpt(ctx context.Context, recordID uint, opID OperationID, caller, newRaw, folderRoot string, promotePinnedDeletes bool) (string, error) {
 	var merged string
 	txErr := l.repo.UpdateJournalInTx(ctx, recordID, func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
-		next, persist, m, err := completionLedgerMerge(current.GeneratedFiles, newRaw, folderRoot)
+		next, persist, m, err := completionLedgerMergeOpt(current.GeneratedFiles, newRaw, folderRoot, promotePinnedDeletes)
 		merged = m
 		return next, persist, err
 	})
@@ -704,7 +734,7 @@ func (l *dbRevertLog) RecordMoveIntent(ctx context.Context, opID OperationID, or
 	defer release()
 
 	intent := models.MarshalLedgerJSON(models.GeneratedFilesJSON{MoveBack: []models.FileMove{{OriginalPath: originalPath, NewPath: newPath}}})
-	_, err = l.mergeJournalInTx(ctx, recordID, opID, "RecordMoveIntent", intent, "")
+	_, err = l.mergeJournalInTxOpt(ctx, recordID, opID, "RecordMoveIntent", intent, "", false)
 	return err
 }
 

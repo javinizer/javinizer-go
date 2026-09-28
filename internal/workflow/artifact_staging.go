@@ -795,9 +795,12 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 	// Deferred organize MOVED sidecars install through the organizer (or the
 	// post-publish sidecar block for un-moved remainder); rehoming the staged
 	// copies into the tree would collide at the final targets with those
-	// installs. Deferred copy flows publish only through this tree.
+	// installs. Deferred copy flows publish only through this tree — minus any
+	// subtitle the organizer lane reported as skipped-on-occupancy: its staged
+	// copy stays in the staging residue so the tree install can never republish
+	// over the foreign occupant the organizer refused to touch.
 	if !s.videoDeferred || !s.original.Organize.MoveFiles {
-		if err := s.rehomeRemainingSiblings(stagedVideo); err != nil {
+		if err := s.rehomeRemainingSiblings(stagedVideo, s.occupiedSkipExcludedSiblings(stagedVideo, finalResult)); err != nil {
 			return err
 		}
 	}
@@ -1009,12 +1012,57 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 	return nil
 }
 
-func (s *artifactStage) rehomeRemainingSiblings(stagedVideo string) error {
+// occupiedSkipExcludedSiblings names the staged sibling copies the rehome leg
+// must NOT pull into the install tree (codex P1, PRRT_kwDORn9KaM6m3ujF). In a
+// deferred copy the organizer lane owns subtitle delivery, and a Skipped
+// outcome is a refusal. Occupancy is the determinant: a skip whose destination
+// is provably ABSENT (a refused publish on a no-replace-unsupported volume)
+// has no foreign occupant, so the staged copy may still install through the
+// tree; a skip whose destination exists — or whose state cannot be proven
+// absent — owns a foreign file there, and installing the staged copy would
+// overwrite exactly what the organizer refused to touch. Returned keys are
+// cleaned staged paths.
+func (s *artifactStage) occupiedSkipExcludedSiblings(stagedVideo string, finalResult *organizer.OrganizeResult) map[string]bool {
+	if !s.videoDeferred || s.original.Organize.MoveFiles || s.original.Organize.LinkMode != organizer.LinkModeNone || stagedVideo == "" || s.stagedSource == "" || finalResult == nil || finalResult.NewPath == "" {
+		return nil
+	}
+	finalDir := finalResult.FolderPath
+	if finalDir == "" {
+		finalDir = filepath.Dir(finalResult.NewPath)
+	}
+	occupied := make(map[string]bool, len(finalResult.Subtitles))
+	for _, sr := range finalResult.Subtitles {
+		if !sr.Skipped || sr.NewPath == "" {
+			continue
+		}
+		if _, statErr := s.fs.Stat(sr.NewPath); statErr == nil || !os.IsNotExist(statErr) {
+			occupied[filepath.Clean(sr.NewPath)] = true
+		}
+	}
+	if len(occupied) == 0 {
+		return nil
+	}
+	excluded := make(map[string]bool)
+	sourceName := filepath.Base(s.stagedSource)
+	targetName := filepath.Base(stagedVideo)
+	for _, sibling := range s.siblings {
+		target := filepath.Join(finalDir, stagedArtifactSiblingName(sourceName, targetName, filepath.Base(sibling.stagedPath)))
+		if occupied[filepath.Clean(target)] {
+			excluded[filepath.Clean(sibling.stagedPath)] = true
+		}
+	}
+	return excluded
+}
+
+func (s *artifactStage) rehomeRemainingSiblings(stagedVideo string, excluded map[string]bool) error {
 	if stagedVideo == "" || s.original.Organize.LinkMode != organizer.LinkModeNone || s.stagedSource == "" {
 		return nil
 	}
 	targetDir := filepath.Dir(stagedVideo)
 	for _, sibling := range s.siblings {
+		if excluded[filepath.Clean(sibling.stagedPath)] {
+			continue
+		}
 		if _, err := s.fs.Stat(sibling.stagedPath); err != nil {
 			if os.IsNotExist(err) {
 				continue

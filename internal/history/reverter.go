@@ -702,12 +702,33 @@ func cleanupGeneratedFilesFS(fs afero.Fs, op *models.BatchFileOperation, stopAt 
 	for _, fm := range gf.MoveBack {
 		moveBackTargets[fm.NewPath] = true
 	}
+	// A MoveBack entry whose ORIGINAL still exists names a move whose source
+	// was never consumed (an exit between the pending intent commit and the
+	// source removal) or whose source reappeared afterwards: running the
+	// rename-back would REPLACE those retained/foreign bytes on POSIX
+	// (codex P1, PRRT_kwDORn9KaM6m3ujI). Suppress the rename for such targets;
+	// the PlannedDeletes leg below then remains eligible for the same path, so
+	// a hash-pinned published copy is deleted by its pin instead — never by
+	// the rename. A source whose state cannot be PROVEN absent suppresses too:
+	// uncertainty must never license a rename-over.
+	moveMode := op.OperationType == models.OperationTypeMove
+	renameSuppressed := make(map[string]bool, len(gf.MoveBack))
+	if moveMode {
+		for _, fm := range gf.MoveBack {
+			if fm.OriginalPath == "" || fm.NewPath == "" {
+				continue
+			}
+			if _, statErr := fs.Stat(fm.OriginalPath); statErr == nil || !os.IsNotExist(statErr) {
+				renameSuppressed[fm.NewPath] = true
+			}
+		}
+	}
 	// PlannedDeletes are intent entries pinned to the publisher's content hash:
 	// delete only while the destination still carries exactly those bytes —
 	// absent paths are consumed, rebuilt/touched or foreign bytes are kept.
 	for _, entry := range gf.PlannedDeletes {
 		path := entry.Path
-		if moveBackTargets[path] {
+		if moveBackTargets[path] && !renameSuppressed[path] {
 			continue
 		}
 		file, openErr := fs.Open(path)
@@ -738,10 +759,13 @@ func cleanupGeneratedFilesFS(fs afero.Fs, op *models.BatchFileOperation, stopAt 
 	}
 
 	// Execute the MoveBack array (best-effort): rename-back for move-mode rows
-	// only; delete-the-installed-copy for every other mode's legacy entries
-	// (rename-over must NEVER run against a retained original — see the
-	// function doc above).
-	moveMode := op.OperationType == models.OperationTypeMove
+	// whose source is GONE (the move consumed it); delete-the-installed-copy
+	// for every other mode's legacy entries (rename-over must NEVER run
+	// against a retained original — see the function doc above). A suppressed
+	// entry (source still present) does neither: its hash-pinned published
+	// copy, when a pin survived alongside the arm, was already consumed by the
+	// PlannedDeletes leg above, and an unpinned target is simply retained both
+	// ways.
 	for _, fm := range gf.MoveBack {
 		if fm.NewPath == op.NewPath && fm.OriginalPath == op.OriginalPath {
 			// A pending move intent equal to the row columns: the primary move is
@@ -752,6 +776,8 @@ func cleanupGeneratedFilesFS(fs afero.Fs, op *models.BatchFileOperation, stopAt 
 			if err := fs.Remove(fm.NewPath); err != nil && !os.IsNotExist(err) {
 				logging.Debugf("cleanupGeneratedFiles: failed to delete copy-installed artifact %s (original at %s retained): %v", fm.NewPath, fm.OriginalPath, err)
 			}
+		} else if renameSuppressed[fm.NewPath] {
+			logging.Debugf("cleanupGeneratedFiles: move-back %s → %s suppressed — the original still exists (the move intent was never consumed or the source reappeared); any pinned published copy was handled by the planned-delete leg", fm.NewPath, fm.OriginalPath)
 		} else if err := fs.Rename(fm.NewPath, fm.OriginalPath); err != nil {
 			logging.Debugf("cleanupGeneratedFiles: failed to move back %s → %s: %v", fm.NewPath, fm.OriginalPath, err)
 		}

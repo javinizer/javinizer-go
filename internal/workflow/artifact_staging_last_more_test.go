@@ -20,7 +20,7 @@ func TestPR260FiniteSidecarMissingDuringRehomeLeavesOriginal(t *testing.T) {
 	absent := stage.siblings[0].stagedPath
 	require.NoError(t, fs.Remove(absent))
 	stagedVideo := filepath.Join(stage.root, "renamed.mp4")
-	err = stage.rehomeRemainingSiblings(stagedVideo)
+	err = stage.rehomeRemainingSiblings(stagedVideo, nil)
 	require.NoError(t, err)
 	exists, err := afero.Exists(fs, absent)
 	require.NoError(t, err)

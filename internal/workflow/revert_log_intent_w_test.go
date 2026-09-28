@@ -22,7 +22,7 @@ func TestCompletionLedgerMergePreservesPriorMoveBack(t *testing.T) {
 		MoveBack: []models.FileMove{{OriginalPath: "/in/a.srt", NewPath: "/lib/a.srt"}},
 	})
 
-	next, persist, _, err := completionLedgerMerge(prior, subtitleOnly, "")
+	next, persist, _, err := completionLedgerMergeOpt(prior, subtitleOnly, "", true)
 	require.NoError(t, err)
 	require.True(t, persist)
 	assert.ElementsMatch(t,
@@ -44,7 +44,7 @@ func TestCompletionLedgerMergePreservesPriorMoveBack(t *testing.T) {
 			{OriginalPath: "/in/b.srt", NewPath: "/lib/b.srt"},
 		},
 	})
-	next, _, _, err = completionLedgerMerge(prior, restated, "")
+	next, _, _, err = completionLedgerMergeOpt(prior, restated, "", true)
 	require.NoError(t, err)
 	assert.ElementsMatch(t,
 		[]models.FileMove{
@@ -55,7 +55,7 @@ func TestCompletionLedgerMergePreservesPriorMoveBack(t *testing.T) {
 		next.MoveBack, "identical intents are not duplicated")
 
 	// Empty fresh payload keeps prior state (incl. MoveBack) untouched.
-	next, persist, _, err = completionLedgerMerge(prior, "", "")
+	next, persist, _, err = completionLedgerMergeOpt(prior, "", "", true)
 	require.NoError(t, err)
 	if persist {
 		require.Len(t, next.MoveBack, 1)
@@ -104,7 +104,7 @@ func TestRecordDeleteIntentJournalsPlannedDeletions(t *testing.T) {
 	// Pending deletes graduate when the outcome completion restates the path in
 	// Delete; a pending path the outcome never restated stays hash-pinned.
 	again := models.MarshalLedgerJSON(models.GeneratedFilesJSON{Delete: append([]string{planned[0].Path}, filepath.Join(dest, "movie", "extra.sup"))})
-	mergedAgain, _, _, mergeErr := completionLedgerMerge(row.GeneratedFiles, again, "")
+	mergedAgain, _, _, mergeErr := completionLedgerMergeOpt(row.GeneratedFiles, again, "", true)
 	require.NoError(t, mergeErr)
 	require.Len(t, mergedAgain.PlannedDeletes, 1)
 	require.Equal(t, planned[1].Path, mergedAgain.PlannedDeletes[0].Path, "graduated path pruned; pending unrelated path keeps its pin")
@@ -141,7 +141,7 @@ func TestCompletionLedgerMergeCarriesAndDedupesBothKinds(t *testing.T) {
 		Delete:         []string{"/lib/x.nfo", "/lib/new.nfo"},
 		PlannedDeletes: []models.DeleteEntry{{Path: "/lib/a.jpg", SHA256: "pin-a"}, {Path: "/lib/b.jpg", SHA256: "pin-b"}},
 	})
-	merged, persist, _, err := completionLedgerMerge(prior, fresh, "")
+	merged, persist, _, err := completionLedgerMergeOpt(prior, fresh, "", true)
 	require.NoError(t, err)
 	require.True(t, persist)
 	assert.Equal(t, []string{"/lib/x.nfo", "/lib/new.nfo"}, merged.Delete, "deduped re-stated delete")
@@ -154,7 +154,7 @@ func TestCompletionLedgerMergeEmptyOutcomeKeepsPlannedDeletes(t *testing.T) {
 	prior := models.MarshalLedgerJSON(models.GeneratedFilesJSON{
 		PlannedDeletes: []models.DeleteEntry{{Path: "/lib/sibling-cd2.mp4", SHA256: "pin"}},
 	})
-	merged, persist, _, err := completionLedgerMerge(prior, "", "")
+	merged, persist, _, err := completionLedgerMergeOpt(prior, "", "", true)
 	require.NoError(t, err)
 	require.False(t, persist, "empty outcome merges identical — nothing is dropped, no write needed")
 	_ = merged
@@ -174,7 +174,7 @@ func TestCompletionLedgerMergeMoveBackArmConsumesPinnedDelete(t *testing.T) {
 	fresh := models.MarshalLedgerJSON(models.GeneratedFilesJSON{
 		MoveBack: []models.FileMove{sibling},
 	})
-	merged, persist, _, err := completionLedgerMerge(prior, fresh, "")
+	merged, persist, _, err := completionLedgerMergeOpt(prior, fresh, "", true)
 	require.NoError(t, err)
 	require.True(t, persist)
 	assert.Equal(t, []models.FileMove{sibling}, merged.MoveBack)
@@ -190,16 +190,21 @@ func TestCompletionLedgerMergeMoveBackArmConsumesPinnedDelete(t *testing.T) {
 			{Path: "/lib/movie/fanart.jpg", SHA256: "pin-fanart"},
 		},
 	})
-	merged, _, _, err = completionLedgerMerge(armed, late, "")
+	merged, _, _, err = completionLedgerMergeOpt(armed, late, "", true)
 	require.NoError(t, err)
 	assert.Equal(t, []models.FileMove{sibling}, merged.MoveBack, "the carried arm survives the late intent merge")
 	require.Len(t, merged.PlannedDeletes, 1, "the late pin on the armed destination never lands")
 	assert.Equal(t, "/lib/movie/fanart.jpg", merged.PlannedDeletes[0].Path)
 }
 
-// RecordMoveIntent journals the promotion in the same durable transaction:
-// the row keeps the armed inverse and drops only the move-backed pin.
-func TestRecordMoveIntentPromotesPinnedDelete(t *testing.T) {
+// RecordMoveIntent journals a STILL-PENDING arm: the row keeps the armed
+// inverse AND the destination's content-hash pin (codex P1
+// PRRT_kwDORn9KaM6m3ujI) — until the source removal is confirmed the pin is
+// the sole ownership proof for the crash window, and recovery fires it only
+// when the surviving source suppresses the rename-back. Graduation (an outcome
+// completion merge) consumes the move-armed pin once the consumption is
+// confirmed; an unrelated pin whose destination never armed always survives.
+func TestRecordMoveIntentKeepsPinnedDeleteUntilGraduation(t *testing.T) {
 	db, _ := pr260ArtifactDB(t)
 	movie := pr260FencedMovie(t, db, "move-promotes-pin", "")
 	fs, root, source, _, multipart, _, match := pr260FencedFiles(t, "move-promotes-pin")
@@ -224,8 +229,35 @@ func TestRecordMoveIntentPromotesPinnedDelete(t *testing.T) {
 	gf, parseErr := models.ParseGeneratedFiles(row.GeneratedFiles)
 	require.NoError(t, parseErr)
 	require.Len(t, gf.MoveBack, 2)
-	require.Len(t, gf.PlannedDeletes, 1, "the move-backed pending delete promotes with the arm")
-	assert.Equal(t, unrelatedTarget, gf.PlannedDeletes[0].Path, "the pin whose destination never move-arms keeps its entry")
+	require.Len(t, gf.PlannedDeletes, 2, "pending arms retain every pin — nothing is consumed before consumption is confirmed")
+
+	// Re-intent is idempotent under retention: no duplicate arm, no pin drift.
+	require.NoError(t, log.RecordMoveIntent(context.Background(), opID, multipart, siblingTarget))
+	rowAgain, rowErrAgain := repo.FindByID(context.Background(), mustParseOpID(t, opID))
+	require.NoError(t, rowErrAgain)
+	gfAgain, parseErrAgain := models.ParseGeneratedFiles(rowAgain.GeneratedFiles)
+	require.NoError(t, parseErrAgain)
+	require.Len(t, gfAgain.MoveBack, 2)
+	require.Len(t, gfAgain.PlannedDeletes, 2)
+
+	// Graduation: the outcome completion merge consumes the move-armed pin —
+	// exactly like the confirmed-consumption path — and the unrelated pin
+	// restated by the outcome as a plain Delete graduates out of pending too.
+	graduated, persist, _, mergeErr := completionLedgerMergeOpt(rowAgain.GeneratedFiles, models.MarshalLedgerJSON(models.GeneratedFilesJSON{Delete: []string{unrelatedTarget}}), "", true)
+	require.NoError(t, mergeErr)
+	require.True(t, persist)
+	require.Len(t, graduated.MoveBack, 2)
+	require.Empty(t, graduated.PlannedDeletes, "the armed pin promotes at graduation; the Delete-restated pin graduates out of pending")
+	graduatedEmpty, persistEmpty, _, mergeErrEmpty := completionLedgerMergeOpt(rowAgain.GeneratedFiles, "", "", true)
+	require.NoError(t, mergeErrEmpty)
+	require.True(t, persistEmpty, "a payloadless graduation still consumes armed pins")
+	require.ElementsMatch(t, []models.DeleteEntry{{Path: unrelatedTarget, SHA256: "pin-poster"}}, graduatedEmpty.PlannedDeletes)
+	_, persistPendingEmpty, mergedPendingEmpty, mergeErrPendingEmpty := completionLedgerMergeOpt(rowAgain.GeneratedFiles, "", "", false)
+	require.NoError(t, mergeErrPendingEmpty)
+	require.False(t, persistPendingEmpty, "a payloadless pending-intent merge is a byte-identical no-op")
+	pendingEmpty, parsePendingErr := models.ParseGeneratedFiles(mergedPendingEmpty)
+	require.NoError(t, parsePendingErr)
+	require.Len(t, pendingEmpty.PlannedDeletes, 2, "pending retention survives even a payloadless intent merge")
 }
 
 // Reconciled move-backs consume the matching pending deletes the same way the
