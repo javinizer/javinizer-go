@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/database"
+	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
 	"github.com/javinizer/javinizer-go/internal/organizer"
@@ -827,4 +828,41 @@ func TestDeferredMoveConfirmFaultRollsBackViaEarlyArm(t *testing.T) {
 	assert.False(t, stage.directOriginArmed, "reset after rollback")
 	exists, _ := afero.Exists(base, finalPlan.TargetPath)
 	assert.False(t, exists, "destination folder cleaned by rollback")
+}
+
+// When a subtitle's rollback arm fails (busy-marker creation denied), the
+// already-moved sidecar is reversed directly onto its vacated source path so
+// nothing strands outside the batch.
+func TestDeferredMoveSubtitleArmFaultCompensates(t *testing.T) {
+	base, root, source, subtitle, multipart, unrelated, match := pr260FencedFiles(t, "deferred-sub-arm-fault")
+	dest := filepath.Join(root, "library")
+	org := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize, MoveSubtitles: true, SubtitleExtensions: []string{".srt"}}, template.NewEngine(), nil)
+	orch := &applyOrchImpl{fs: base, organizer: org}
+	cmd := pr260ArtifactFailureCommand(&models.Movie{ContentID: "deferred-sub-arm-fault"}, match, dest)
+	cmd.Organize.Skip = false
+	cmd.Organize.MoveFiles = true
+	cmd.Download = false
+	stage, _, err := orch.prepareArtifact(context.Background(), cmd)
+	require.NoError(t, err)
+	defer stage.cleanup()
+
+	finalPlan, planErr := org.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: match, Movie: stage.original.Movie, DestDir: dest, MoveFiles: true, OperationMode: stage.original.OperationMode})
+	require.NoError(t, planErr)
+	subMoves := org.PlanSubtitleMoves(finalPlan)
+	require.NotEmpty(t, subMoves)
+	fsWithFault := &pr260PublishFinalFS{Fs: base, op: "write", path: subMoves[0].NewPath + fsutil.ReplacementBusySuffix}
+	stage.fs = fsWithFault
+	stagedPlan, planErr2 := org.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: models.FileMatchInfo{Path: stage.stagedSource, Name: filepath.Base(source)}, Movie: stage.original.Movie, DestDir: stage.root, MoveFiles: true, OperationMode: stage.original.OperationMode})
+	require.NoError(t, planErr2)
+	state := &applyPipelineState{operationID: "op", organizeResult: &organizer.OrganizeResult{NewPath: stagedPlan.TargetPath, FolderPath: stagedPlan.TargetDir}}
+	publishErr := stage.publish(context.Background(), orch, state, nil)
+	require.ErrorContains(t, publishErr, "arm subtitle rollback")
+	existsSub, _ := afero.Exists(base, subtitle)
+	assert.True(t, existsSub, "compensation moved the sidecar back onto its source")
+	existsSubDest, _ := afero.Exists(base, subMoves[0].NewPath)
+	assert.False(t, existsSubDest, "the failed-arm destination copy did not linger")
+	existsMulti, _ := afero.Exists(base, multipart)
+	assert.True(t, existsMulti)
+	existsUnrelated, _ := afero.Exists(base, unrelated)
+	assert.True(t, existsUnrelated)
 }

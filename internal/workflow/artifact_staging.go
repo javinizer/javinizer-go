@@ -618,6 +618,15 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 			// The pending intent for this move was journaled pre-execution; only
 			// the in-process rollback arm belongs here.
 			if err := batch.SetRollbackOrigin(sr.NewPath, sr.OriginalPath); err != nil {
+				// The organizer already moved this sidecar off its source: a failed
+				// arm must not leave it stranded outside the batch. Reverse the move
+				// directly — never clobbering anything that reappeared at the source —
+				// and let the outer rollback restore everything it did arm.
+				if _, statErr := s.fs.Stat(sr.OriginalPath); os.IsNotExist(statErr) {
+					if rerr := s.fs.Rename(sr.NewPath, sr.OriginalPath); rerr != nil {
+						logging.Warnf("subtitle direct rollback failed for %s: %v (arm error: %v)", sr.NewPath, rerr, err)
+					}
+				}
 				return fmt.Errorf("arm subtitle rollback %s: %w", sr.NewPath, err)
 			}
 		}
