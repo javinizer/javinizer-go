@@ -534,6 +534,33 @@ func TestValidateSidecar_InternalWhitespaceContentIDRejected(t *testing.T) {
 	assert.Contains(t, err.Error(), "noncanonical content_id")
 }
 
+func TestValidateSidecar_RequiredNonKeyCollationAccepted(t *testing.T) {
+	// Codex: a COLLATE clause on a required-but-never-compared column (e.g.
+	// videos.title_en) is decoration — runtime lookups compare only the
+	// logical keys, so this kind of dump must validate.
+	path := importFixture(t)
+	alterFixture(t, path,
+		`ALTER TABLE videos RENAME TO videos_old`,
+		`CREATE TABLE videos (
+			content_id TEXT PRIMARY KEY, dvd_id TEXT, dvd_id_norm TEXT,
+			title_en TEXT COLLATE NOCASE, title_ja TEXT,
+			comment_en TEXT, comment_ja TEXT,
+			runtime_mins INTEGER, release_date TEXT, sample_url TEXT,
+			maker_id TEXT, label_id TEXT, series_id TEXT,
+			jacket_full_url TEXT, jacket_thumb_url TEXT,
+			gallery_full_first TEXT, gallery_full_last TEXT,
+			gallery_thumb_first TEXT, gallery_thumb_last TEXT,
+			site_id TEXT, service_code TEXT
+		)`,
+		`INSERT INTO videos SELECT content_id, dvd_id, dvd_id_norm, title_en, title_ja, comment_en, comment_ja, runtime_mins, release_date, sample_url, maker_id, label_id, series_id, jacket_full_url, jacket_thumb_url, gallery_full_first, gallery_full_last, gallery_thumb_first, gallery_thumb_last, site_id, service_code FROM videos_old`,
+		`DROP TABLE videos_old`,
+		`CREATE INDEX idx_videos_dvd_id_norm ON videos(dvd_id_norm)`,
+	)
+	store, err := ValidateSidecar(context.Background(), path)
+	require.NoError(t, err)
+	require.NoError(t, store.Close())
+}
+
 func TestValidateSidecar_NonKeyCollatedAdditiveAccepted(t *testing.T) {
 	// Codex: additive unrelated columns keep their own collations (the DDL
 	// blanket-rejection that preceded the scoped check must not come back).

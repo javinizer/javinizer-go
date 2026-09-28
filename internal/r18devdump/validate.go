@@ -152,7 +152,11 @@ func validateStructure(ctx context.Context, db *sql.DB) error {
 		if n == 0 {
 			return fmt.Errorf("%w: missing required table %s", ErrDumpInvalid, table)
 		}
-		if err := checkTableDDL(ctx, db, table, schema.columns); err != nil {
+		// DDL rules apply only to the columns the runtime compares — the
+		// logical/lookup keys (content_id, dvd_id, entity ids, association
+		// compound keys). Other required columns are only SELECTed (see
+		// store.go), so a COLLATE on them is decoration.
+		if err := checkTableDDL(ctx, db, table, collationScopeColumns(table)); err != nil {
 			return err
 		}
 		if err := validateColumns(ctx, db, table, schema.columns); err != nil {
@@ -167,8 +171,10 @@ func validateStructure(ctx context.Context, db *sql.DB) error {
 // blind to them), and an incompatible collation on a key column changes
 // predicate semantics: split the DDL body into top-level comma segments,
 // and reject any REQUIRED column segment declaring a non-BINARY COLLATE.
-// Unrelated additive columns keep their own collations (compatibility
-// policy) — the earlier whole-DDL substring check falsely rejected them.
+// Additive columns keep their own collations (compatibility policy), as do
+// required non-key columns like videos.title_en — neither class is ever
+// compared by a runtime predicate (checked against store.go's WHERE
+// clauses). The ban is scoped to logicalKeys alone.
 func checkTableDDL(ctx context.Context, db *sql.DB, table string, required []string) error {
 	ddl, err := queryString(ctx, db,
 		"SELECT COALESCE((SELECT sql FROM sqlite_master WHERE type='table' AND name=?), '')", table)
@@ -356,6 +362,22 @@ var logicalKeys = []struct {
 	{videoActressesTable, []string{contentIDColumn, "actress_id"}},
 	{videoCategoriesTable, []string{contentIDColumn, "category_id"}},
 	{videoDirectorsTable, []string{contentIDColumn, "director_id"}},
+}
+
+// collationScopeColumns returns the key columns the dump DDL check polices for
+// a required table (videos and trailers add their lookup columns).
+func collationScopeColumns(table string) []string {
+	switch table {
+	case videosTable:
+		return []string{contentIDColumn, "dvd_id"}
+	default:
+		for _, lk := range logicalKeys {
+			if lk.table == table {
+				return lk.keys
+			}
+		}
+	}
+	return nil
 }
 
 // validateLogicalKeys enforces the lost-primary-key invariants for every table
