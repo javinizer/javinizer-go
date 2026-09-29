@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"testing"
@@ -113,6 +114,31 @@ func renameSwap(t *testing.T, fs afero.Fs, path string, aside string, data []byt
 	require.NoError(t, fs.Remove(path))
 	require.NoError(t, fs.Rename(aside, path))
 	return aside
+}
+
+// liveEntrySwap re-points path at a differently-bodied foreign object WHILE a
+// reader handle pins the admitted object — the post-open swap the verified
+// copy leg is bound against. POSIX unlink/rename of an open entry is
+// permissive, so the plain remove+rename construction stands. Windows refuses
+// a Remove against an open entry, and a DeleteFile'd name stays parked until
+// the last handle closes even with the delete share granted, so the
+// platform's expressible live swap is the downloader's own construction:
+// rename the live entry aside (admitted only because the composite opened it
+// with FILE_SHARE_DELETE sharing) and create the replacement fresh at the
+// freed name. The displaced victim's name is returned for post-completion
+// cleanup — remove-after-return ordering is load-bearing on Windows (the
+// composite's own defer must already have closed the pin), and the POSIX leg
+// returns "".
+func liveEntrySwap(t *testing.T, fs afero.Fs, path string, aside string, data []byte) (victim string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		victim = path + ".swapped-aside"
+		require.NoError(t, fs.Rename(path, victim))
+		require.NoError(t, afero.WriteFile(fs, path, data, 0o644))
+		return victim
+	}
+	renameSwap(t, fs, path, aside, data)
+	return ""
 }
 
 func assertNoBoundResidue(t *testing.T, fs afero.Fs, dir string) {
@@ -700,6 +726,27 @@ func TestCopyFileNoReplaceVerifiedHandleStatFailure(t *testing.T) {
 	require.ErrorContains(t, CopyFileNoReplaceVerified(fs, src, dst, proof), "inspect the open source handle")
 }
 
+// The copy leg's staging draw wedged mid-flight: the failure surfaces raw
+// (no cross-device wrap), the source is never consumed, nothing publishes.
+func TestCopyFileNoReplaceVerifiedStagingFailure(t *testing.T) {
+	base, src, dst, body := verifyFixture(t)
+	fs := &verifyHookFS{Fs: base, openFile: func(name string, flag int, perm os.FileMode) (afero.File, error) {
+		if strings.Contains(name, ".nrstg.") {
+			return nil, errors.New("staging draw denied")
+		}
+		return base.OpenFile(name, flag, perm)
+	}}
+	proof, _ := verifyProofOf(t, base, src)
+	err := CopyFileNoReplaceVerified(fs, src, dst, proof)
+	require.ErrorContains(t, err, "exclusive staging")
+	got, rerr := afero.ReadFile(base, src)
+	require.NoError(t, rerr)
+	assert.Equal(t, body, string(got), "a failed stage never consumes the copy source")
+	exists, _ := afero.Exists(base, dst)
+	assert.False(t, exists)
+	assertNoBoundResidue(t, base, "/")
+}
+
 // A source swapped before the open: the handle names the replacement, the
 // proof refuses, and nothing stages or publishes.
 func TestCopyFileNoReplaceVerifiedForeignSwapRefuses(t *testing.T) {
@@ -727,14 +774,20 @@ func TestCopyFileNoReplaceVerifiedPostOpenSwapPublishesAdmitted(t *testing.T) {
 	require.NoError(t, fs.MkdirAll(filepath.Dir(src), 0o755))
 	require.NoError(t, afero.WriteFile(fs, src, []byte("admitted video bytes"), 0o644))
 	proof, _ := verifyProofOf(t, fs, src)
+	victim := ""
 	swapping := VerifiedSourceProof(func(path string, info os.FileInfo) error {
 		if err := proof(path, info); err != nil {
 			return err
 		}
-		renameSwap(t, fs, src, filepath.Join(root, "in", "replacement.bin"), []byte("the swapped-in replacement"))
+		victim = liveEntrySwap(t, fs, src, filepath.Join(root, "in", "replacement.bin"), []byte("the swapped-in replacement"))
 		return nil
 	})
 	require.NoError(t, CopyFileNoReplaceVerified(fs, src, dst, swapping))
+	if victim != "" {
+		// Close-before-remove: the composite's verified source handle is
+		// already closed here — a leaked pin wedges this remove on Windows.
+		require.NoError(t, fs.Remove(victim))
+	}
 	got, err := afero.ReadFile(fs, dst)
 	require.NoError(t, err)
 	assert.Equal(t, "admitted video bytes", string(got), "the pinned handle published the admitted bytes despite the swap")

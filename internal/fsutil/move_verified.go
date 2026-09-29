@@ -130,25 +130,49 @@ func MoveFileNoReplaceVerified(fs afero.Fs, src, dst string, proof VerifiedSourc
 }
 
 // copyClaimAcrossDevices is the verified move's EXDEV leg: the claimed
-// (admission-proven) object is opened, the handle re-proven against the
-// admission proof before a byte flows, and streamed through the verified
-// copy's stage/publish tail. Every failure leaves the unwinding to the
-// caller's claim compensation.
+// (admission-proven) object is opened through the verified-source open (the
+// delete-shared platform leg), the handle re-proven against the admission
+// proof before a byte flows, and streamed through the verified copy's
+// stage/publish tail. Every failure leaves the unwinding to the caller's
+// claim compensation; the handle itself is closed inside
+// streamVerifiedSource on every branch, before the caller's bound unlink
+// re-points the consumed claim (close-before-remove — load-bearing on
+// Windows, where a stale pin parks the name's directory slot).
 func copyClaimAcrossDevices(fs afero.Fs, claimName, dst string, proof VerifiedSourceProof) error {
-	srcFile, err := fs.Open(claimName)
+	srcFile, err := openVerifiedSource(fs, claimName)
 	if err != nil {
 		return fmt.Errorf("verified move: open the claimed source %s for the cross-device publish: %w", claimName, err)
 	}
+	return streamVerifiedSource(fs, srcFile, claimName, dst, proof, "verified move", "claim handle", true)
+}
+
+// streamVerifiedSource is the shared verified-stream inner leg of both
+// verified composites: the caller pins the source object through
+// openVerifiedSource and owns NO further handle discipline — the defer below
+// is registered at entry, so the handle closes deterministically in EVERY
+// exit branch (stat failure, admission refusal, staging/stream/publish
+// failure, success) before the caller runs its next filesystem verb against
+// the consumed entry. On Windows that close-before-remove ordering is
+// load-bearing: the verb (bound unlink, swap cleanup, follow-up publish)
+// fails against an entry whose any past opener omitted the delete share,
+// and a leaked handle holds the slot until process exit. The handle's own
+// Stat re-proves against the admission proof BEFORE a byte flows, and the
+// pinned descriptor supplies the staged stream, so a name-swap anywhere
+// inside the window can never retarget the published bytes.
+func streamVerifiedSource(fs afero.Fs, srcFile afero.File, src, dst string, proof VerifiedSourceProof, op, noun string, crossDevice bool) error {
 	defer func() { _ = srcFile.Close() }()
 	srcInfo, statErr := srcFile.Stat()
 	if statErr != nil {
-		return fmt.Errorf("verified move: inspect the open claim handle %s: %w", claimName, statErr)
+		return fmt.Errorf("%s: inspect the open %s %s: %w", op, noun, src, statErr)
 	}
-	if perr := proof(claimName, srcInfo); perr != nil {
-		return fmt.Errorf("verified move: the open claim handle failed its admission proof (%w): %w", ErrTakeAsideForeign, perr)
+	if perr := proof(src, srcInfo); perr != nil {
+		return fmt.Errorf("%s: the open %s failed its admission proof (%w): %w", op, noun, ErrTakeAsideForeign, perr)
 	}
 	if copyErr := copyStreamNoReplace(fs, srcFile, dst); copyErr != nil {
-		return fmt.Errorf("verified move: cross-device publish of the claim onto %s: %w", dst, copyErr)
+		if crossDevice {
+			return fmt.Errorf("%s: cross-device publish of the claim onto %s: %w", op, dst, copyErr)
+		}
+		return copyErr
 	}
 	return nil
 }
@@ -177,17 +201,9 @@ func CopyFileNoReplaceVerified(fs afero.Fs, src, dst string, proof VerifiedSourc
 	if err := fs.MkdirAll(filepath.Dir(dst), config.DirPerm); err != nil {
 		return fmt.Errorf("verified copy: create destination directory: %w", err)
 	}
-	srcFile, err := fs.Open(src)
+	srcFile, err := openVerifiedSource(fs, src)
 	if err != nil {
 		return fmt.Errorf("verified copy: open source %s: %w", src, err)
 	}
-	defer func() { _ = srcFile.Close() }()
-	srcInfo, statErr := srcFile.Stat()
-	if statErr != nil {
-		return fmt.Errorf("verified copy: inspect the open source handle %s: %w", src, statErr)
-	}
-	if perr := proof(src, srcInfo); perr != nil {
-		return fmt.Errorf("verified copy: the open source handle failed its admission proof (%w): %w", ErrTakeAsideForeign, perr)
-	}
-	return copyStreamNoReplace(fs, srcFile, dst)
+	return streamVerifiedSource(fs, srcFile, src, dst, proof, "verified copy", "source handle", false)
 }

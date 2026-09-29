@@ -58,6 +58,12 @@ ignore:
   # coverage-upload job never compiles these lines; the POSIX wrapper legs of
   # the same helper ARE covered through workflow/organizer/fsutil tests.
   - "internal/fsutil/bound_identity_windows.go"
+  # The Windows (//go:build windows) delete-shared source open of the
+  # verified composites (openVerifiedSource): Go's os.Open omits
+  # FILE_SHARE_DELETE, so the OsFs leg runs raw CreateFile — compiled only
+  # on Windows hosts. The POSIX passthrough twin and every caller ARE
+  # covered (verified_source_open_posix.go / move_verified.go).
+  - "internal/fsutil/verified_source_open_windows.go"
   # Desktop-only build-tagged file (//go:build desktop). The real Wails
   # runner pulls in per-platform webview headers and must not enter the
   # default build/test path; without this ignore, its new lines all count
