@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
@@ -90,11 +91,20 @@ func plannedDeleteOp(t *testing.T, path, content string) *models.BatchFileOperat
 	}
 }
 
-// codex P1 (PRRT_kwDORn9KaM6m6WAj): a rename swap landing between the pinned
-// hash and the unlink must NOT delete the new occupant. The foreign plant
-// rides the no-replace vacate onto the terminal, fails the identity rebind
-// against the hashed handle's identity, and is rewound onto the freed name
-// byte-intact; the hashed bytes stay untouched under the aside name.
+// codex P1 (PRRT_kwDORn9KaM6m6WAj): a swap landing around the pinned hash
+// window must NOT delete the new occupant. The contract splits by what each
+// platform can observe: the pinned digest refuses foreign bytes planted
+// BEFORE the hash on every platform, and a plant swap INSIDE the hash→unlink
+// window rides the no-replace vacate onto the terminal, fails the identity
+// rebind against the hashed handle's identity, and is rewound onto the freed
+// name byte-intact — where the terminal "identity rebind" is dev/inode on
+// POSIX OsFs but size+mtime only on memfs and on Windows OsFs (fsutil's
+// bound identity exposes no kernel identity there by construction, so a
+// same-size, same-mtime, same-bytes swap is definitionally unobservable).
+// The legs below pin each half on exactly the platforms that can prove it:
+// the hash leg and the size/mtime legs are the whole Windows OsFs contract
+// and run everywhere; the dev/inode leg is POSIX-shaped and skips where the
+// filesystem exposes no kernel identity.
 func TestCleanupGeneratedFilesFS_PlannedDeleteVerifyUnlinkSwapRetainsForeign(t *testing.T) {
 	const target = "/dst-w161f/lib/w161f-ours.nfo"
 	const aside = "/dst-w161f/lib/w161f-aside.bin"
@@ -124,7 +134,82 @@ func TestCleanupGeneratedFilesFS_PlannedDeleteVerifyUnlinkSwapRetainsForeign(t *
 		}
 	})
 
-	t.Run("osfs inode leg pins the swap even at identical size and mtime", func(t *testing.T) {
+	t.Run("osfs hash leg: pre-window foreign bytes refused before any claim (all platforms)", func(t *testing.T) {
+		base := afero.NewOsFs()
+		root := t.TempDir()
+		targetOS := filepath.Join(root, "lib", "w161h-ours.nfo")
+		require.NoError(t, base.MkdirAll(filepath.Dir(targetOS), 0o777))
+		require.NoError(t, afero.WriteFile(base, targetOS, plant, 0o666))
+		fs := &vacClaimHookFs{Fs: base, target: targetOS, hook: func() {
+			t.Error("the digest must refuse before the verified unlink claims a terminal")
+		}}
+		cleanupGeneratedFilesFS(fs, plannedDeleteOp(t, targetOS, "ours"), root)
+		assert.False(t, fs.done, "the pinned digest never matched the foreign occupant — no claim ran")
+
+		got, err := afero.ReadFile(base, targetOS)
+		require.NoError(t, err, "the foreign occupant is retained, never unlinked")
+		assert.Equal(t, string(plant), string(got), "foreign bytes survive byte-intact")
+		entries, readErr := afero.ReadDir(base, filepath.Dir(targetOS))
+		require.NoError(t, readErr)
+		for _, e := range entries {
+			assert.NotContains(t, e.Name(), ".vac.", "no bound-unlink terminal litter remains")
+		}
+	})
+
+	t.Run("osfs size/mtime legs pin the in-window swap (all platforms)", func(t *testing.T) {
+		for _, arm := range []struct {
+			name       string
+			plantBytes []byte
+			shiftMtime bool
+		}{
+			{name: "different size", plantBytes: plant},
+			{name: "same size, shifted mtime", plantBytes: []byte("OURS"), shiftMtime: true},
+		} {
+			t.Run(arm.name, func(t *testing.T) {
+				base := afero.NewOsFs()
+				root := t.TempDir()
+				targetOS := filepath.Join(root, "lib", "w161m-ours.nfo")
+				asideOS := filepath.Join(root, "lib", "w161m-aside.bin")
+				require.NoError(t, base.MkdirAll(filepath.Dir(targetOS), 0o777))
+				require.NoError(t, afero.WriteFile(base, targetOS, []byte("ours"), 0o666))
+				admitted, statErr := base.Stat(targetOS)
+				require.NoError(t, statErr)
+
+				fs := &vacClaimHookFs{Fs: base, target: targetOS, hook: func() {
+					require.NoError(t, base.Rename(targetOS, asideOS))
+					require.NoError(t, afero.WriteFile(base, targetOS, arm.plantBytes, 0o666))
+					if arm.shiftMtime {
+						shifted := admitted.ModTime().Add(2 * time.Hour)
+						require.NoError(t, base.Chtimes(targetOS, shifted, shifted))
+					}
+					plantInfo, err := base.Stat(targetOS)
+					require.NoError(t, err)
+					if arm.shiftMtime {
+						require.Equal(t, admitted.Size(), plantInfo.Size(), "the fixture keeps the admitted size — only the mtime leg can observe the swap")
+						require.False(t, admitted.ModTime().Equal(plantInfo.ModTime()), "the fixture shifts the mtime")
+					} else {
+						require.NotEqual(t, admitted.Size(), plantInfo.Size(), "the fixture changes the size — the size leg observes the swap even where no dev/inode exists")
+					}
+				}}
+				cleanupGeneratedFilesFS(fs, plannedDeleteOp(t, targetOS, "ours"), root)
+				require.True(t, fs.done, "the swap actually fired inside the hash→unlink window")
+
+				got, err := afero.ReadFile(base, targetOS)
+				require.NoError(t, err, "the foreign occupant is retained, never unlinked")
+				assert.Equal(t, string(arm.plantBytes), string(got), "foreign bytes survive byte-intact after the terminal rewind")
+				kept, err := afero.ReadFile(base, asideOS)
+				require.NoError(t, err, "the pinned bytes survive under the swapped-aside name")
+				assert.Equal(t, "ours", string(kept), "the hashed object was never the removal target")
+				entries, readErr := afero.ReadDir(base, filepath.Dir(targetOS))
+				require.NoError(t, readErr)
+				for _, e := range entries {
+					assert.NotContains(t, e.Name(), ".vac.", "no bound-unlink terminal litter remains")
+				}
+			})
+		}
+	})
+
+	t.Run("osfs dev/ino leg pins the swap even at identical size and mtime (POSIX)", func(t *testing.T) {
 		base := afero.NewOsFs()
 		root := t.TempDir()
 		targetOS := filepath.Join(root, "lib", "w161f-ours.nfo")
@@ -133,6 +218,9 @@ func TestCleanupGeneratedFilesFS_PlannedDeleteVerifyUnlinkSwapRetainsForeign(t *
 		require.NoError(t, afero.WriteFile(base, targetOS, []byte("ours"), 0o666))
 		admitted, statErr := base.Stat(targetOS)
 		require.NoError(t, statErr)
+		if _, _, ok := restoreSourceIdentity(admitted); !ok {
+			t.Skip("platform exposes no dev/inode identity: a same-size, same-mtime, same-bytes swap is indistinguishable from the admitted object there — the size/mtime legs carry that platform's coverage")
+		}
 
 		var plantInfo os.FileInfo
 		fs := &vacClaimHookFs{Fs: base, target: targetOS, hook: func() {
