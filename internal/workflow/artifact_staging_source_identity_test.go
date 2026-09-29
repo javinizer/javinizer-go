@@ -75,10 +75,11 @@ func TestArtifactSourceIdentityMemfsShapeAndDrift(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, id.matches(base, "/m.mp4", dirInfo), "a non-regular replacement never matches")
 
-	// A captured dev/inode leg degrades to size+modtime when the current
-	// lookup exposes none (mixed real/wrapper filesystem postures).
+	// A captured dev/inode leg whose current lookup exposes no identity
+	// refuses: the strong pin must be re-proven, never degraded to the
+	// size+modtime legs (a transient probe failure is not a downgrade).
 	fabricated := artifactSourceIdentity{known: true, hasDevIno: true, dev: 1, ino: 2, size: grown.Size(), modTime: grown.ModTime()}
-	assert.True(t, fabricated.matches(base, "/m.mp4", grown))
+	assert.False(t, fabricated.matches(base, "/m.mp4", grown))
 	assert.False(t, artifactSourceIdentity{}.matches(base, "/m.mp4", grown), "unknown identity matches nothing")
 }
 
@@ -740,4 +741,237 @@ func TestPrepareArtifactSkipsSymlinkedSibling(t *testing.T) {
 	require.Len(t, stage.siblings, 1, "only the regular multipart sibling admitted")
 	pr260AssertSymlinkPreserved(t, subtitle, aside, "subtitle")
 	pr260AssertRetained(t, base, source, subtitle, multipart, unrelated)
+}
+
+// weakIdentityInfo strips the kernel identity a real FileInfo exposes through
+// Sys(): the identity probe reports not-OK for the entry — the transient
+// handle-open failure shape on Windows/SMB and a non-Stat_t Sys leg on POSIX.
+type weakIdentityInfo struct{ os.FileInfo }
+
+func (weakIdentityInfo) Sys() any { return nil }
+
+// weakIdentityProbeFs degrades ONLY the identity probe for path: lookups still
+// succeed and still report the file's size and modtime, but the dev/inode (or
+// volume/file-index) leg answers not-OK. The wrapper is also not an
+// *afero.OsFs, so on Windows the handle probe is never attempted — the same
+// ok=false a transient SMB handle failure produces there.
+type weakIdentityProbeFs struct {
+	afero.Fs
+	path string
+}
+
+func (f *weakIdentityProbeFs) weaken(name string, info os.FileInfo) os.FileInfo {
+	if info != nil && filepath.Clean(name) == filepath.Clean(f.path) {
+		return weakIdentityInfo{info}
+	}
+	return info
+}
+
+func (f *weakIdentityProbeFs) Stat(name string) (os.FileInfo, error) {
+	info, err := f.Fs.Stat(name)
+	return f.weaken(name, info), err
+}
+
+func (f *weakIdentityProbeFs) LstatIfPossible(name string) (os.FileInfo, bool, error) {
+	if lst, ok := f.Fs.(afero.Lstater); ok {
+		info, did, err := lst.LstatIfPossible(name)
+		return f.weaken(name, info), did, err
+	}
+	info, err := f.Fs.Stat(name)
+	return f.weaken(name, info), false, err
+}
+
+// executeCountingOrganizer records ExecuteOrganizePlan calls so a refusal can
+// be attributed to a gate relative to the execution: the pre-execute gate
+// refuses with zero executions, the post-publish removal gates with one.
+type executeCountingOrganizer struct {
+	*organizer.Organizer
+	executes int32
+}
+
+func (o *executeCountingOrganizer) ExecuteOrganizePlan(plan *organizer.OrganizePlan, moveFiles bool, linkMode organizer.LinkMode) (*organizer.OrganizeResult, error) {
+	atomic.AddInt32(&o.executes, 1)
+	return o.Organizer.ExecuteOrganizePlan(plan, moveFiles, linkMode)
+}
+
+func executesRun(o *executeCountingOrganizer) int32 { return atomic.LoadInt32(&o.executes) }
+
+// A strong admission whose revalidation probe cannot re-prove the identity
+// refuses publication: the probe failure surfaces through the fail-closed
+// sentinel, never as a size+modtime fallback.
+func TestRevalidateAdmittedSourceRefusesUnprovableStrongIdentity(t *testing.T) {
+	base := afero.NewOsFs()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "m.mp4")
+	require.NoError(t, afero.WriteFile(base, path, []byte("video"), 0o644))
+	info, err := base.Stat(path)
+	require.NoError(t, err)
+	strong := captureArtifactSourceIdentity(base, path, info)
+	require.True(t, strong.known)
+	if !strong.hasDevIno {
+		t.Skip("platform exposes no re-provable source identity")
+	}
+
+	faulted := &artifactStage{fs: &weakIdentityProbeFs{Fs: base, path: path}}
+	err = faulted.revalidateAdmittedSource(path, strong)
+	require.ErrorIs(t, err, errArtifactSourceChanged,
+		"a weak probe against a strong admission refuses — fail closed, never a metadata fallback")
+
+	quiet := &artifactStage{fs: &weakIdentityProbeFs{Fs: base, path: filepath.Join(dir, "other.mp4")}}
+	require.NoError(t, quiet.revalidateAdmittedSource(path, strong),
+		"a probe that re-proves the admitted strong identity still accepts")
+
+	mem := afero.NewMemMapFs()
+	require.NoError(t, afero.WriteFile(mem, "/w.mp4", []byte("video"), 0o644))
+	winfo, err := mem.Stat("/w.mp4")
+	require.NoError(t, err)
+	weak := captureArtifactSourceIdentity(mem, "/w.mp4", winfo)
+	require.True(t, weak.known)
+	require.False(t, weak.hasDevIno)
+	permissive := &artifactStage{fs: &weakIdentityProbeFs{Fs: mem, path: "/w.mp4"}}
+	require.NoError(t, permissive.revalidateAdmittedSource("/w.mp4", weak),
+		"weak admission + weak probe keeps the size+modtime legs — no strong anchor to demand")
+}
+
+// The pre-execute gate: a transient identity-probe failure against the
+// strongly-admitted video refuses the deferred move publication before the
+// execution runs, exactly like an observed swap.
+func TestDeferredMovePublishAbortsOnSourceIdentityProbeFailure(t *testing.T) {
+	db, _ := pr260ArtifactDB(t)
+	movie := pr260FencedMovie(t, db, "deferred-source-probe-fails", "")
+	base, root, source, subtitle, multipart, unrelated, match := pr260FencedFiles(t, "deferred-source-probe-fails")
+	dest := filepath.Join(root, "library")
+	org := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize, MoveSubtitles: true, SubtitleExtensions: []string{".srt"}}, template.NewEngine(), nil)
+	counting := &executeCountingOrganizer{Organizer: org}
+	ledger := &completeCallFaultLog{}
+	orch := &applyOrchImpl{fs: base, organizer: counting, revertLog: ledger}
+	cmd := pr260ArtifactFailureCommand(&movie, match, dest)
+	cmd.Organize.Skip = false
+	cmd.Organize.MoveFiles = true
+	cmd.Download = false
+	stage, _, err := orch.prepareArtifact(context.Background(), cmd)
+	require.NoError(t, err)
+	defer stage.cleanup()
+	require.True(t, stage.sourceIdentity.known)
+	if !stage.sourceIdentity.hasDevIno {
+		t.Skip("platform exposes no re-provable source identity")
+	}
+
+	stage.fs = &weakIdentityProbeFs{Fs: base, path: source}
+
+	stagedPlan, planErr := org.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: models.FileMatchInfo{Path: stage.stagedSource, Name: filepath.Base(source)}, Movie: stage.original.Movie, DestDir: stage.root, MoveFiles: true, OperationMode: stage.original.OperationMode})
+	require.NoError(t, planErr)
+	state := &applyPipelineState{operationID: "op", organizeResult: &organizer.OrganizeResult{NewPath: stagedPlan.TargetPath, FolderPath: stagedPlan.TargetDir}}
+	publishErr := stage.publish(context.Background(), orch, state, nil)
+	require.ErrorIs(t, publishErr, errArtifactSourceChanged)
+	require.ErrorContains(t, publishErr, filepath.Base(source))
+	assert.Zero(t, executesRun(counting), "the refusal lands at the pre-execute gate: no plan execution consumed the source")
+	assert.False(t, stage.sourceCleanupArmed, "marker state matches any pre-consumption failure")
+	assert.False(t, stage.directOriginArmed)
+	completes, reconciles := journalCounts(ledger)
+	assert.Zero(t, completes, "the completion journal path never ran")
+	assert.Zero(t, reconciles)
+	pr260AssertRetained(t, base, source, subtitle, multipart, unrelated)
+	pr260AssertNoFinals(t, base, dest)
+	got, readErr := afero.ReadFile(base, source)
+	require.NoError(t, readErr)
+	assert.Equal(t, "video", string(got), "an unprovable source is never consumed")
+}
+
+// The post-publish original-removal gate: in-place move mode consumes the
+// original only after the staged copy lands; an identity probe that cannot
+// re-prove the admission refuses that removal and rolls the publication back.
+func TestInPlaceMoveAbortsRemovingOriginalOnIdentityProbeFailure(t *testing.T) {
+	db, _ := pr260ArtifactDB(t)
+	movie := pr260FencedMovie(t, db, "inplace-original-probe-fails", "")
+	base, root, source, sub, part, other, match := pr260FencedFiles(t, "inplace-original-probe-fails")
+	isolatedDir := filepath.Join(root, "only-video")
+	require.NoError(t, base.MkdirAll(isolatedDir, 0o755))
+	standalone := filepath.Join(isolatedDir, movie.ID+".mp4")
+	require.NoError(t, afero.WriteFile(base, standalone, []byte("isolated media"), 0o644))
+	match.Path = standalone
+	match.Name = filepath.Base(standalone)
+	match.MovieID = movie.ID
+	orch := pr260RealApply(base, &movie, organizer.MediaFormatConfig{}, nil, false)
+	m, matchErr := matcher.NewMatcher(&matcher.Config{})
+	require.NoError(t, matchErr)
+	counting := &executeCountingOrganizer{Organizer: organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "renamed-folder", FileFormat: "<ID>", RenameFile: true, OperationMode: operationmode.OperationModeInPlace}, template.NewEngine(), m)}
+	orch.organizer = counting
+	cmd := pr260FencedCommand(&movie, match, isolatedDir, pr260FencedCounter(t, db), operationmode.OperationModeInPlace, false, true, organizer.LinkModeNone, false, false)
+	stage, _, err := orch.prepareArtifact(context.Background(), cmd)
+	require.NoError(t, err)
+	require.True(t, stage.inPlace)
+	defer stage.cleanup()
+
+	require.True(t, stage.sourceIdentity.known)
+	if !stage.sourceIdentity.hasDevIno {
+		t.Skip("platform exposes no re-provable source identity")
+	}
+	stage.fs = &weakIdentityProbeFs{Fs: base, path: standalone}
+
+	state := &applyPipelineState{organizeResult: &organizer.OrganizeResult{NewPath: stage.stagedSource, InPlaceRenamed: true}}
+	publishErr := stage.publish(context.Background(), orch, state, nil)
+	require.ErrorIs(t, publishErr, errArtifactSourceChanged)
+	assert.Equal(t, int32(1), executesRun(counting),
+		"the staged copy executed; the refusal lands at the original-removal gate")
+	got, readErr := afero.ReadFile(base, standalone)
+	require.NoError(t, readErr)
+	assert.Equal(t, "isolated media", string(got), "the unprovable original survives untouched")
+	regularFiles := []string{}
+	walkErr := afero.Walk(base, root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.Mode().IsRegular() && !strings.Contains(path, ".javinizer-apply-") {
+			regularFiles = append(regularFiles, path)
+		}
+		return nil
+	})
+	require.NoError(t, walkErr)
+	assert.ElementsMatch(t, []string{source, sub, part, other, standalone}, regularFiles,
+		"rollback removed every published artifact; only the inputs remain")
+}
+
+// The sibling-original removal gate: an admitted sibling whose identity cannot
+// be re-proven refuses its removal after publication; rollback restores the
+// consumed video exactly like the observed-swap refusal.
+func TestDeferredMoveAbortsRemovingSiblingOnIdentityProbeFailure(t *testing.T) {
+	db, _ := pr260ArtifactDB(t)
+	movie := pr260FencedMovie(t, db, "deferred-sibling-probe-fails", "")
+	base, root, source, subtitle, multipart, unrelated, match := pr260FencedFiles(t, "deferred-sibling-probe-fails")
+	dest := filepath.Join(root, "library")
+	admitted, statErr := base.Stat(multipart)
+	require.NoError(t, statErr)
+	if !captureArtifactSourceIdentity(base, multipart, admitted).hasDevIno {
+		t.Skip("platform exposes no re-provable source identity")
+	}
+	org := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize, MoveSubtitles: true, SubtitleExtensions: []string{".srt"}}, template.NewEngine(), nil)
+	counting := &executeCountingOrganizer{Organizer: org}
+	ledger := &completeCallFaultLog{}
+	orch := &applyOrchImpl{fs: base, organizer: counting, revertLog: ledger}
+	cmd := pr260ArtifactFailureCommand(&movie, match, dest)
+	cmd.Organize.Skip = false
+	cmd.Organize.MoveFiles = true
+	cmd.Download = false
+	stage, _, err := orch.prepareArtifact(context.Background(), cmd)
+	require.NoError(t, err)
+	defer stage.cleanup()
+
+	stage.fs = &weakIdentityProbeFs{Fs: base, path: multipart}
+
+	stagedPlan, planErr := org.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: models.FileMatchInfo{Path: stage.stagedSource, Name: filepath.Base(source)}, Movie: stage.original.Movie, DestDir: stage.root, MoveFiles: true, OperationMode: stage.original.OperationMode})
+	require.NoError(t, planErr)
+	state := &applyPipelineState{operationID: "op", organizeResult: &organizer.OrganizeResult{NewPath: stagedPlan.TargetPath, FolderPath: stagedPlan.TargetDir}}
+	publishErr := stage.publish(context.Background(), orch, state, nil)
+	require.ErrorIs(t, publishErr, errArtifactSourceChanged)
+	require.ErrorContains(t, publishErr, filepath.Base(multipart))
+	assert.Equal(t, int32(1), executesRun(counting),
+		"the video move executed; the refusal lands at the sibling-removal gate")
+	assert.False(t, stage.sourceCleanupArmed, "rollback restored the video: markers reset")
+	assert.False(t, stage.directOriginArmed)
+	pr260AssertRetained(t, base, source, subtitle, multipart, unrelated)
+	pr260AssertNoFinals(t, base, dest)
+	got, readErr := afero.ReadFile(base, multipart)
+	require.NoError(t, readErr)
+	assert.Equal(t, "part two", string(got), "the unprovable sibling is never removed")
 }

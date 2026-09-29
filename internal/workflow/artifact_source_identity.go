@@ -50,19 +50,29 @@ func captureArtifactSourceIdentity(fs afero.Fs, path string, info os.FileInfo) a
 	return id
 }
 
-// matches re-derives the identity legs from a fresh lookup: dev/inode must
-// agree whenever BOTH sides expose it (a rename-swap necessarily changes the
-// inode even with size and mtime restored), then size and modtime on every
-// platform. A nil or non-regular current entry never matches — under the
-// no-follow lookup a symlink planted at the admitted pathname reports its own
-// ModeSymlink entry, so it fails regularity even when its TARGET still names
-// the admitted inode.
+// matches re-derives the identity legs from a fresh lookup. An admitted
+// STRONG identity must be re-proven by the probe: a probe exposing no identity
+// (a transient handle-open failure on Windows/SMB, a non-Stat_t Sys leg on a
+// wrapped POSIX filesystem) refuses outright — an already-pinned strong
+// identity never degrades to the size+modtime legs, or a same-metadata
+// replacement rename-swapped into the path would be consumed and published. A
+// probe that re-proves the identity (a rename-swap necessarily changes the
+// dev/inode pair even with size and mtime restored) then still requires size
+// and modtime agreement; only an admitted WEAK capture (memfs posture,
+// identity-free filesystems) relies on the metadata legs alone. A nil or
+// non-regular current entry never matches — under the no-follow lookup a
+// symlink planted at the admitted pathname reports its own ModeSymlink entry,
+// so it fails regularity even when its TARGET still names the admitted inode.
 func (id artifactSourceIdentity) matches(fs afero.Fs, path string, info os.FileInfo) bool {
 	if !id.known || info == nil || !info.Mode().IsRegular() {
 		return false
 	}
 	if id.hasDevIno {
-		if dev, ino, ok := artifactSourceDevIno(fs, path, info); ok && (dev != id.dev || ino != id.ino) {
+		dev, ino, ok := artifactSourceDevIno(fs, path, info)
+		if !ok {
+			return false
+		}
+		if dev != id.dev || ino != id.ino {
 			return false
 		}
 	}

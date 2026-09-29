@@ -31,10 +31,11 @@ func (s sysStatInfo) Sys() any { return s.sys }
 // identity; a different file index or volume — the downloader's
 // size/mtime-preserving replacement shape (codex P1, the deferred-source
 // identity window) — refuses even when every metadata leg is restored. A
-// lookup exposing NO identity keeps the documented size+modtime fallback,
-// and a weak capture (memfs posture) against a strong lookup likewise keeps
-// the metadata legs: identity strength is never imputed to a side that did
-// not expose it.
+// lookup exposing NO identity refuses too: an already-strong pin must be
+// re-proven, never degraded to the metadata legs (a transient probe failure
+// must fail closed). A weak capture (memfs posture) against a strong lookup
+// keeps the metadata legs: identity strength is never imputed to a side that
+// did not expose it.
 func TestArtifactSourceIdentityStrongTupleComparator(t *testing.T) {
 	base := afero.NewMemMapFs()
 	require.NoError(t, afero.WriteFile(base, "/m.mp4", []byte("video payload"), 0o644))
@@ -62,8 +63,8 @@ func TestArtifactSourceIdentityStrongTupleComparator(t *testing.T) {
 	assert.False(t, admitted.matches(base, "/m.mp4", foreignVolume),
 		"a replacement on another volume refuses even at an equal file index")
 
-	assert.True(t, admitted.matches(base, "/m.mp4", info),
-		"a lookup exposing no identity keeps the size+modtime fallback legs")
+	assert.False(t, admitted.matches(base, "/m.mp4", info),
+		"a lookup exposing no identity refuses: a strong pin must be re-proven, never degraded to the size+modtime legs")
 
 	weak := artifactSourceIdentity{known: true, size: info.Size(), modTime: info.ModTime()}
 	assert.True(t, weak.matches(base, "/m.mp4", same),
