@@ -752,9 +752,11 @@ func (weakIdentityInfo) Sys() any { return nil }
 
 // weakIdentityProbeFs degrades ONLY the identity probe for path: lookups still
 // succeed and still report the file's size and modtime, but the dev/inode (or
-// volume/file-index) leg answers not-OK. The wrapper is also not an
-// *afero.OsFs, so on Windows the handle probe is never attempted — the same
-// ok=false a transient SMB handle failure produces there.
+// volume/file-index) leg answers not-OK. The masked Sys() carries the
+// weakening on every platform — the non-Stat_t Sys leg on POSIX, and on
+// Windows a probe only re-proves through a FileInfo that still transports the
+// real OS attribute record — the same ok=false a transient SMB handle failure
+// produces there.
 type weakIdentityProbeFs struct {
 	afero.Fs
 	path string
