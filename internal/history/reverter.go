@@ -293,6 +293,26 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 		// skips the anchor check unsettled and every retry stays incomplete.
 		_, srcErr := lstatRestoreSource(r.fs, op.OriginalPath)
 		if os.IsNotExist(dstErr) && srcErr == nil {
+			// The replay exclusion above stays correct OUTSIDE this guard: a
+			// hydrated intent whose destination is present can mean the publish
+			// DID land, and restoring the backup there would clobber the moved
+			// source's only remaining copy. Inside this guard the absent
+			// destination + present source prove the publish never ran, so the
+			// excluded entry is exactly the stranded forced-overwrite backup:
+			// restore it BEFORE the no-op verdict, or the terminal settle leaves
+			// the user's prior bytes at the backup path with the row no longer
+			// retryable.
+			if primaryReplacement {
+				primaryRestored, restoreErr := r.restoreReplacementJournalWhere(ctx, op, func(destination string) bool {
+					return filepath.Clean(destination) == filepath.Clean(op.NewPath)
+				})
+				if restoreErr != nil {
+					return rejectedRevert(op, restoreErr).withRetryable(restoreErr), nil
+				}
+				for path := range primaryRestored {
+					restored[path] = true
+				}
+			}
 			if uerr := r.batchFileOpRepo.UpdateRevertStatus(ctx, op.ID, models.RevertStatusNoOp); uerr != nil {
 				return failRevert(ctx, r.batchFileOpRepo, op, models.RevertReasonUnexpectedPathState, fmt.Sprintf("settle unexecuted pending intent for op %d: %v", op.ID, uerr)), nil
 			}
