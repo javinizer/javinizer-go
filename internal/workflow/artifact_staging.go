@@ -614,7 +614,20 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 			// Copy/link executions install sidecars directly into the destination
 			// during execute. Arm each as a rollback-tracked created output now, or
 			// a later failed leg would strand an untracked copy at the destination.
+			// Two source subtitles can normalize onto ONE endpoint (e.g. .en.srt
+			// and .eng.srt both become .eng.srt): the organizer's sequential lane
+			// installs the FIRST planned source and skips the rest, so only the
+			// first-planned entry per endpoint arms — a second BeforePublish would
+			// collide with the first's own live busy claim and fail the whole
+			// apply (codex P2, PRRT_kwDORn9KaM6m7CBR). The single durable pin then
+			// carries the first source's digest, matching the bytes execute lands
+			// and the reconciler's one-pin-per-endpoint keep-set.
+			armedSidecarEndpoints := map[string]bool{}
 			for _, mv := range executor.PlanSubtitleMoves(plan) {
+				if armedSidecarEndpoints[filepath.Clean(mv.NewPath)] {
+					continue
+				}
+				armedSidecarEndpoints[filepath.Clean(mv.NewPath)] = true
 				if _, err := batch.BeforePublish(ctx, mv.NewPath, false); err != nil {
 					return fmt.Errorf("arm copy-installed sidecar %s: %w", mv.NewPath, err)
 				}
@@ -811,9 +824,21 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 	// installs. Deferred copy flows publish only through this tree — minus any
 	// subtitle the organizer lane reported as skipped-on-occupancy: its staged
 	// copy stays in the staging residue so the tree install can never republish
-	// over the foreign occupant the organizer refused to touch.
+	// over the foreign occupant the organizer refused to touch. Seats proving
+	// THIS apply installed the destination (Copied, or a publish-completed
+	// error) stay out for the same reason in reverse: their staged duplicates
+	// must never re-aim the endpoint through installPaths, where a foreign
+	// writer's post-copy swap would no longer compare byte-identical and read
+	// as replaceable (codex P2, PRRT_kwDORn9KaM6m7CBi).
 	if !s.videoDeferred || !s.original.Organize.MoveFiles {
-		if err := s.rehomeRemainingSiblings(stagedVideo, s.occupiedSkipExcludedSiblings(stagedVideo, finalResult)); err != nil {
+		excluded := s.occupiedSkipExcludedSiblings(stagedVideo, finalResult)
+		for staged := range s.installedSidecarExcludedSiblings(finalResult) {
+			if excluded == nil {
+				excluded = map[string]bool{}
+			}
+			excluded[staged] = true
+		}
+		if err := s.rehomeRemainingSiblings(stagedVideo, excluded); err != nil {
 			return err
 		}
 	}
@@ -1061,6 +1086,49 @@ func (s *artifactStage) occupiedSkipExcludedSiblings(stagedVideo string, finalRe
 	for _, sibling := range s.siblings {
 		target := filepath.Join(finalDir, stagedArtifactSiblingName(sourceName, targetName, filepath.Base(sibling.stagedPath)))
 		if occupied[filepath.Clean(target)] {
+			excluded[filepath.Clean(sibling.stagedPath)] = true
+		}
+	}
+	return excluded
+}
+
+// installedSidecarExcludedSiblings names the staged sibling copies the rehome
+// leg must NOT pull into the install tree because the organizer lane ALREADY
+// delivered that source's bytes to the destination (codex P2,
+// PRRT_kwDORn9KaM6m7CBi): a Copied seat, or its publish-completed error twin
+// (round-28: the post-publish leg failed AFTER the bytes landed — the same
+// classification that feeds copiedSidecarTargets above), proves the
+// destination holds this apply's install. Rehoming the staged duplicate would
+// republish the endpoint through installPaths, where a foreign writer that
+// swapped the destination after the organizer copy fails the sameBytes skip
+// and reads as replaceable — an overwrite of bytes the publication no longer
+// owns. Matching is by SOURCE identity (the seat's OriginalPath against the
+// admitted sibling's sourcePath), never by computed target name: language
+// normalization can re-derive a leaf stagedArtifactSiblingName never
+// reproduces, so the exclusion must follow the source the organizer actually
+// installed.
+func (s *artifactStage) installedSidecarExcludedSiblings(finalResult *organizer.OrganizeResult) map[string]bool {
+	if !s.videoDeferred || s.original.Organize.MoveFiles || s.original.Organize.LinkMode != organizer.LinkModeNone || finalResult == nil {
+		return nil
+	}
+	var installed map[string]bool
+	for _, sr := range finalResult.Subtitles {
+		if sr.NewPath != "" && sr.OriginalPath != "" && (sr.Copied || fsutil.PublishCompleted(sr.Error)) {
+			if installed == nil {
+				installed = map[string]bool{}
+			}
+			installed[filepath.Clean(sr.OriginalPath)] = true
+		}
+	}
+	if installed == nil {
+		return nil
+	}
+	var excluded map[string]bool
+	for _, sibling := range s.siblings {
+		if installed[filepath.Clean(sibling.sourcePath)] {
+			if excluded == nil {
+				excluded = map[string]bool{}
+			}
 			excluded[filepath.Clean(sibling.stagedPath)] = true
 		}
 	}
