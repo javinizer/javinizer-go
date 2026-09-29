@@ -502,6 +502,16 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 				// #224: the atomic no-replace composite — a foreign writer
 				// claiming the name after classification conflicts atomically
 				// instead of being replaced by the rename inside the window.
+				// A caller-bound admission proof routes through the verified
+				// twin: the source OBJECT — never merely its pathname — is what
+				// gets consumed, take-aside and re-proven before publication
+				// (codex P1, the validation→publication window).
+				if plan.verifiedSourceProof != nil {
+					if err := fsutil.MoveFileNoReplaceVerified(s.fs, plan.SourcePath, plan.TargetPath, plan.verifiedSourceProof); err != nil {
+						return mapNoReplaceRefusal(err, plan.TargetPath)
+					}
+					return nil
+				}
 				if err := fsutil.MoveFileNoReplace(s.fs, plan.SourcePath, plan.TargetPath); err != nil {
 					return mapNoReplaceRefusal(err, plan.TargetPath)
 				}
@@ -706,7 +716,17 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 					return nil
 				}
 				if !plan.overwriteAuthorized {
-					// #224: copy leg is atomically no-clobbering too.
+					// #224: copy leg is atomically no-clobbering too. The
+					// verified twin binds the consumed bytes to the caller's
+					// admission proof at the open handle: a source renamed
+					// aside mid-publish still lands the admitted bytes — or
+					// refuses before staging (codex P1).
+					if plan.verifiedSourceProof != nil {
+						if err := fsutil.CopyFileNoReplaceVerified(s.fs, plan.SourcePath, plan.TargetPath, plan.verifiedSourceProof); err != nil {
+							return mapNoReplaceRefusal(fmt.Errorf("failed to copy file: %w", err), plan.TargetPath)
+						}
+						return nil
+					}
 					if err := fsutil.CopyFileNoReplace(s.fs, plan.SourcePath, plan.TargetPath); err != nil {
 						return mapNoReplaceRefusal(fmt.Errorf("failed to copy file: %w", err), plan.TargetPath)
 					}

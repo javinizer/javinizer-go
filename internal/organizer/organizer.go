@@ -396,6 +396,34 @@ type OrganizePlan struct {
 	// install lane must refuse them even when the occupant vacates inside the
 	// probe→execute window: nothing durable would track that late install.
 	subtitleProbeOccupied map[string]bool
+	// subtitleProbeAdmitted is the complementary freeze of
+	// subtitleProbeOccupied (codex P2, PRRT_kwDORn9KaM6m9afD): the FIRST
+	// PlanSubtitleMoves probe for this plan pins every subtitle SOURCE
+	// endpoint it enumerated (vacant-destination or occupied), keyed by
+	// cleaned original path. The fence flow journals exactly that enumeration
+	// before ExecuteOrganizePlan runs, so a source appearing inside the
+	// probe→execute window was never journaled and handleSubtitles refuses
+	// it with the same skip classification the occupied gate uses — no pin,
+	// no entry, as if the organizer never saw it. Nil until the first probe:
+	// un-probed plans (non-deferred direct flows) keep the historical
+	// rescan-at-execute behavior.
+	subtitleProbeAdmitted map[string]bool
+	// verifiedSourceProof binds the plan's video-source consumption to the
+	// identity a caller admitted earlier (the fenced artifact publication's
+	// deferred-source seam, codex P1, PRRT_kwDORn9KaM6m9ae4): the no-replace
+	// move/copy legs then run through fsutil's verified composites and refuse
+	// a source path re-pointed at a different object after validation, rather
+	// than publishing the replacement. Nil keeps the legacy by-name
+	// consumption (every direct flow and the overwrite-authorized lanes).
+	verifiedSourceProof fsutil.VerifiedSourceProof
+}
+
+// BindVerifiedSource pins the plan's video-source consumption to the admission
+// identity the proof re-validates at publish time. Only the fenced deferred
+// publication sets it — plans that never carry a proof execute exactly as
+// before.
+func (p *OrganizePlan) BindVerifiedSource(proof fsutil.VerifiedSourceProof) {
+	p.verifiedSourceProof = proof
 }
 
 // Plan creates an organization plan without executing it
@@ -556,8 +584,25 @@ func (o *Organizer) PlanSubtitleMoves(plan *OrganizePlan) []models.SubtitleMove 
 	}
 	result := &OrganizeResult{}
 	o.handleSubtitles(plan, result, subtitleInstall{})
+	// Freeze the executed subtitle set at the FIRST probe (codex P2,
+	// PRRT_kwDORn9KaM6m9afD): the fence flow journals exactly this
+	// enumeration before ExecuteOrganizePlan consumes it, so a source that
+	// appears later was never journaled and must be refused at install time
+	// (the handleSubtitles gate). Later probes keep the frozen set — the
+	// returned enumeration still mirrors exactly what execution will deliver.
+	if plan.subtitleProbeAdmitted == nil {
+		plan.subtitleProbeAdmitted = make(map[string]bool, len(result.Subtitles))
+		for _, sr := range result.Subtitles {
+			plan.subtitleProbeAdmitted[filepath.Clean(sr.OriginalPath)] = true
+		}
+	}
 	moves := make([]models.SubtitleMove, 0, len(result.Subtitles))
 	for _, sr := range result.Subtitles {
+		if !plan.subtitleProbeAdmitted[filepath.Clean(sr.OriginalPath)] {
+			// Appeared after the probe freeze: execution refuses it, so the
+			// "what execute would deliver" contract stays exact.
+			continue
+		}
 		// Intended-move intents must not cover destinations that are already
 		// occupied: execution will skip them (handleSubtitles exists-check),
 		// and a pending MoveBack armed against a foreign occupancy would
@@ -627,6 +672,17 @@ func (o *Organizer) handleSubtitles(plan *OrganizePlan, result *OrganizeResult, 
 		// parallel per file, but a directory rename elsewhere drains us before moving.
 		err := withDestDirSharedLock(plan.TargetDir, func() error {
 			return withDestFileLock(newPath, func() error {
+				// The probe-frozen admission set (codex P2, PRRT_kwDORn9KaM6m9afD): a
+				// source endpoint discovered only now — created inside the probe→execute
+				// window — was never journaled, so the install is refused with the same
+				// skip classification the probe-occupied gate uses: the caller's
+				// skip/keep machinery absorbs it, leaving the source untouched and the
+				// endpoint uninstalled. A nil set means no probe ever ran (direct
+				// flows) and keeps the historical behavior.
+				if plan.subtitleProbeAdmitted != nil && !plan.subtitleProbeAdmitted[filepath.Clean(subtitle.OriginalPath)] {
+					sr.Skipped = true
+					return nil
+				}
 				// pathExistsBestEffort also sees dangling symlink objects: a filesystem whose
 				// Stat follows links (no true Lstat) would otherwise let this op replace one.
 				exists, statErr := pathExistsBestEffort(o.fs, newPath)

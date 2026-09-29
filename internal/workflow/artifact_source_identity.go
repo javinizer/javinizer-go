@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/afero"
 
+	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/organizer"
 )
 
@@ -116,6 +117,29 @@ func (s *artifactStage) revalidateAdmittedSource(path string, admitted artifactS
 		return fmt.Errorf("%w: %s", errArtifactSourceChanged, path)
 	}
 	return nil
+}
+
+// deferredSourceProof derives the fsutil admission proof that binds the
+// deferred publication's execute-time source consumption to THIS stage's
+// admitted video identity (codex P1, PRRT_kwDORn9KaM6m9ae4): every object the
+// verified move/copy composites are about to consume — the taken-aside claim,
+// the open copy handle — is re-proven through the same no-follow,
+// strong-identity-or-refuse matching the pre-execute gate applies, so a source
+// renamed aside after the last gate refuses the publish leg instead of being
+// consumed under its old name. A stage without a pinned identity keeps the
+// legacy unbound consumption (nil proof).
+func (s *artifactStage) deferredSourceProof() fsutil.VerifiedSourceProof {
+	if s == nil || !s.sourceIdentity.known {
+		return nil
+	}
+	admitted := s.sourceIdentity
+	fs := s.fs
+	return func(path string, info os.FileInfo) error {
+		if !admitted.matches(fs, path, info) {
+			return fmt.Errorf("%w: %s", errArtifactSourceChanged, path)
+		}
+		return nil
+	}
 }
 
 // revalidateDirectSources re-proves every real source path the plan execution

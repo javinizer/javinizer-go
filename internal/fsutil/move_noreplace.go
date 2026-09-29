@@ -168,6 +168,16 @@ func CopyFileNoReplace(fs afero.Fs, src, dst string) error {
 	}
 	defer func() { _ = srcFile.Close() }()
 
+	return copyStreamNoReplace(fs, srcFile, dst)
+}
+
+// copyStreamNoReplace is the shared publish tail of CopyFileNoReplace and the
+// verified composites (move_verified.go): the ALREADY-OPEN source stream is
+// staged dest-adjacent with O_EXCL, streamed through its pinned handle, and
+// bound-published onto dst with no-replace semantics. On every failure leg the
+// staged name is discarded via the bound discipline (a planted substitute is
+// never unlinked) and dst content is never replaced.
+func copyStreamNoReplace(fs afero.Fs, srcFile afero.File, dst string) error {
 	staged, handle, err := CreateExclusiveStagingFile(fs, dst, ".nrstg", noreplaceOrdinal.Add(1), stagingFileMode())
 	if err != nil {
 		return fmt.Errorf("no-replace copy: exclusive staging for %s: %w", dst, err)

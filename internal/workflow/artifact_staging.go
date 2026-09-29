@@ -675,6 +675,19 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 		if err := s.revalidateDirectSources(executor, plan); err != nil {
 			return err
 		}
+		// …and bind the validation to the publication act itself (codex P1,
+		// PRRT_kwDORn9KaM6m9ae4): the gate above and the organizer's consume
+		// (rename or open) remain separate filesystem operations, so the
+		// executed plan carries the admitted identity into the no-replace
+		// legs — the move take-aside re-proves the claimed object before
+		// publishing, the copy leg proves the very handle it streams. Only the
+		// deferred real-source plan is bound; staged/in-place plans publish
+		// staging-owned copies the staging sweep already owns.
+		if s.videoDeferred && filepath.Clean(plan.SourcePath) == filepath.Clean(s.sourcePath) {
+			if proof := s.deferredSourceProof(); proof != nil {
+				plan.BindVerifiedSource(proof)
+			}
+		}
 		finalResult, err = executor.ExecuteOrganizePlan(plan, publishMove, s.original.Organize.LinkMode)
 		if filepath.Clean(plan.SourcePath) != filepath.Clean(plan.TargetPath) && (err == nil || fsutil.PublishCompleted(err)) {
 			batch.ObservePublishResult(plan.TargetPath)
