@@ -60,6 +60,25 @@ var moveFileDestReplaced = fsutil.MoveFileFsDestReplaced
 // shape deterministically).
 var filepathAbsFn = filepath.Abs
 
+// SymlinkLinkTarget computes the exact payload the organize strategy's
+// LinkModeSoft leg installs at the destination: the source path itself when
+// absolute, else its absolutized form. The fenced deferred publication's
+// delete intent pins THIS string (the symlink's entire payload is the
+// target, so the readlink payload IS the ownership certificate), and both
+// sides must derive it through one route or the pin would authenticate a
+// string the install never wrote.
+func SymlinkLinkTarget(sourcePath string) (string, error) {
+	linkTarget := sourcePath
+	if !filepath.IsAbs(linkTarget) {
+		abs, err := filepathAbsFn(linkTarget)
+		if err != nil {
+			return "", fmt.Errorf("failed to resolve source path for symlink: %w", err)
+		}
+		linkTarget = abs
+	}
+	return linkTarget, nil
+}
+
 // foldMovePublishCrumb is the move lanes' unified retained-crumb predicate
 // (PR #249 codex P2 follow-up) — the three strategies' duplicated
 // replace-then-key-the-crumb gates collapse into this one fold: the
@@ -587,6 +606,11 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 	// never to plan-time state. No-op and refused lanes never set it, and a
 	// failed install discards it by returning before the warning.
 	overwroteOccupiedDest := false
+	// copySHA256 is the tee-captured digest of the verified copy leg's single
+	// publish stream (bound via BindCopyDigestCapture): set only on a copy
+	// that actually streamed — no-op early returns leave it empty, and the
+	// caller's seal then matches the result's empty PrimaryCopySHA256.
+	copySHA256 := ""
 	// Every destination-touching step runs under the destination lock: unauthorized
 	// paths guard inside it (a plain copy would otherwise overwrite a late-created file),
 	// and authorized Remove+link work must serialize against concurrent guarded calls.
@@ -695,13 +719,9 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 				// were replaced at the destination (crumb bound at the Remove
 				// above — F2 binds it at the destruction, not at this success).
 			case LinkModeSoft:
-				linkTarget := plan.SourcePath
-				if !filepath.IsAbs(linkTarget) {
-					abs, err := filepathAbsFn(linkTarget)
-					if err != nil {
-						return fmt.Errorf("failed to resolve source path for symlink: %w", err)
-					}
-					linkTarget = abs
+				linkTarget, err := SymlinkLinkTarget(plan.SourcePath)
+				if err != nil {
+					return err
 				}
 				if err := s.linker.symlink(linkTarget, plan.TargetPath); err != nil {
 					if errors.Is(err, os.ErrPermission) {
@@ -720,8 +740,19 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 					// verified twin binds the consumed bytes to the caller's
 					// admission proof at the open handle: a source renamed
 					// aside mid-publish still lands the admitted bytes — or
-					// refuses before staging (codex P1).
+					// refuses before staging (codex P1). The digest-capture twin
+					// additionally tees the stream's sha256 — the deferred
+					// publication seals its interim partial pin with the exact
+					// bytes that landed, without any second read of the payload.
 					if plan.verifiedSourceProof != nil {
+						if plan.copyDigestCapture {
+							digest, copyErr := fsutil.CopyFileNoReplaceVerifiedDigest(s.fs, plan.SourcePath, plan.TargetPath, plan.verifiedSourceProof)
+							if copyErr != nil {
+								return mapNoReplaceRefusal(fmt.Errorf("failed to copy file: %w", copyErr), plan.TargetPath)
+							}
+							copySHA256 = digest
+							return nil
+						}
 						if err := fsutil.CopyFileNoReplaceVerified(s.fs, plan.SourcePath, plan.TargetPath, plan.verifiedSourceProof); err != nil {
 							return mapNoReplaceRefusal(fmt.Errorf("failed to copy file: %w", err), plan.TargetPath)
 						}
@@ -794,6 +825,7 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 	}
 
 	result.Moved = true
+	result.PrimaryCopySHA256 = copySHA256
 	// Force-overwrite audit crumb: the replace actually landed — keep the
 	// resident bytes' replacement visible to every audit consumer.
 	if overwroteOccupiedDest {

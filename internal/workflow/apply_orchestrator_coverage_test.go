@@ -141,6 +141,10 @@ func (r *recordingRevertLog) ReconcileDeleteIntents(context.Context, OperationID
 	return nil
 }
 
+func (r *recordingRevertLog) FinalizeDeleteIntentCopyDigest(context.Context, OperationID, string, string) error {
+	return nil
+}
+
 func (r *recordingRevertLog) Begin(_ context.Context, _ ApplyCmd) (OperationID, error) {
 	r.beginCalls++
 	if r.beginErr != nil {

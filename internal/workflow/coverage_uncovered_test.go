@@ -821,6 +821,10 @@ func (e errorRevertLog) ReconcileDeleteIntents(context.Context, OperationID, []s
 	return nil
 }
 
+func (e errorRevertLog) FinalizeDeleteIntentCopyDigest(context.Context, OperationID, string, string) error {
+	return nil
+}
+
 func (e errorRevertLog) Begin(_ context.Context, _ ApplyCmd) (OperationID, error) {
 	return "1", nil
 }

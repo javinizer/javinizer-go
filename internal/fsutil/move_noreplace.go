@@ -1,6 +1,8 @@
 package fsutil
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -171,20 +173,58 @@ func CopyFileNoReplace(fs afero.Fs, src, dst string) error {
 	return copyStreamNoReplace(fs, srcFile, dst)
 }
 
-// copyStreamNoReplace is the shared publish tail of CopyFileNoReplace and the
-// verified composites (move_verified.go): the ALREADY-OPEN source stream is
-// staged dest-adjacent with O_EXCL, streamed through its pinned handle, and
-// bound-published onto dst with no-replace semantics. On every failure leg the
-// staged name is discarded via the bound discipline (a planted substitute is
-// never unlinked) and dst content is never replaced.
+// CopyFileNoReplaceDigest is CopyFileNoReplace with the streamed bytes'
+// sha256 teed off the single publish pass: the destination provably carries
+// the returned digest (the staged file holds exactly the streamed bytes and
+// the bound publish renames it unchanged). No second read of the payload is
+// ever taken — the digest exists because the copy had to stream anyway.
+func CopyFileNoReplaceDigest(fs afero.Fs, src, dst string) (string, error) {
+	done, err := classifyNoreplaceDestination(fs, src, dst)
+	if done || err != nil {
+		return "", err
+	}
+	if err := fs.MkdirAll(filepath.Dir(dst), config.DirPerm); err != nil {
+		return "", fmt.Errorf("no-replace copy: create destination directory: %w", err)
+	}
+
+	if err := ProbeNoClobberPublish(fs, filepath.Dir(dst)); err != nil {
+		return "", err
+	}
+
+	srcFile, err := fs.Open(src)
+	if err != nil {
+		return "", fmt.Errorf("no-replace copy: open source %s: %w", src, err)
+	}
+	defer func() { _ = srcFile.Close() }()
+
+	return copyStreamNoReplaceDigest(fs, srcFile, dst)
+}
+
+// copyStreamNoReplace is copyStreamNoReplaceDigest for callers that do not
+// consume the streamed digest.
 func copyStreamNoReplace(fs afero.Fs, srcFile afero.File, dst string) error {
+	_, err := copyStreamNoReplaceDigest(fs, srcFile, dst)
+	return err
+}
+
+// copyStreamNoReplaceDigest is the shared publish tail of CopyFileNoReplace
+// and the verified composites (move_verified.go): the ALREADY-OPEN source
+// stream is staged dest-adjacent with O_EXCL, streamed through its pinned
+// handle, and bound-published onto dst with no-replace semantics. The source
+// stream tees into a sha256 as it flows, so the returned digest certifies
+// the published destination's bytes for the same single read the copy
+// performs. On every failure leg the staged name is discarded via the bound
+// discipline (a planted substitute is never unlinked) and dst content is
+// never replaced.
+func copyStreamNoReplaceDigest(fs afero.Fs, srcFile afero.File, dst string) (string, error) {
 	staged, handle, err := CreateExclusiveStagingFile(fs, dst, ".nrstg", noreplaceOrdinal.Add(1), stagingFileMode())
 	if err != nil {
-		return fmt.Errorf("no-replace copy: exclusive staging for %s: %w", dst, err)
+		return "", fmt.Errorf("no-replace copy: exclusive staging for %s: %w", dst, err)
 	}
-	if _, err := io.Copy(handle, srcFile); err != nil {
+	h := sha256.New()
+	if _, err := io.Copy(handle, io.TeeReader(srcFile, h)); err != nil {
 		DiscardFailedExclusiveStaging(fs, staged, handle)
-		return fmt.Errorf("no-replace copy: stream into staging for %s: %w", dst, err)
+		return "", fmt.Errorf("no-replace copy: stream into staging for %s: %w", dst, err)
 	}
 
 	stagedIdentity := stagingIdentity(handle)
@@ -201,9 +241,9 @@ func copyStreamNoReplace(fs afero.Fs, srcFile afero.File, dst string) error {
 	}
 	if err := PublishStagedBound(p); err != nil {
 		discardStagedAfterFailedPublish(fs, staged, stagedIdentity, err)
-		return fmt.Errorf("no-replace copy: publish %s: %w", dst, err)
+		return "", fmt.Errorf("no-replace copy: publish %s: %w", dst, err)
 	}
-	return nil
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // stagingIdentity captures the staged object's identity while its handle is

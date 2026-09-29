@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/fsutil"
@@ -98,6 +99,17 @@ type RevertLog interface {
 	// (a reverter deletes only bytes matching the pinned content). Completion
 	// columns stay untouched — this is intent, not outcome.
 	RecordDeleteIntent(ctx context.Context, opID OperationID, entries []models.DeleteEntry) error
+
+	// FinalizeDeleteIntentCopyDigest seals a copy install's INTERIM partial
+	// pin (DeleteEntry CopySize/CopyPartialSHA256, journaled before execute so
+	// the intent never pre-streams the payload) into the full-hash shape once
+	// the publish's single verified stream returns the teed sha256: the
+	// durable pin then authenticates exactly the bytes the destination
+	// received, and a post-seal crash recovers with the full-hash proof. The
+	// interim shape is deliberately kept crash-correct on its own (see
+	// fsutil.PartialCopyDigest's threat model), so a missing/already-sealed
+	// entry is an idempotent no-op, not an error.
+	FinalizeDeleteIntentCopyDigest(ctx context.Context, opID OperationID, path, sha256 string) error
 
 	// RecordReplacement implements the downloader's ReplacementRecorder seam
 	// (POSTER-WRITE-HARDENING P3): the pre-existing bytes at replacedPath have
@@ -205,6 +217,10 @@ func (noOpRevertLog) ReconcileMoveIntents(context.Context, OperationID, []models
 }
 
 func (noOpRevertLog) ReconcileDeleteIntents(context.Context, OperationID, []string) error {
+	return nil
+}
+
+func (noOpRevertLog) FinalizeDeleteIntentCopyDigest(context.Context, OperationID, string, string) error {
 	return nil
 }
 
@@ -710,6 +726,57 @@ func (l *dbRevertLog) ReconcileDeleteIntents(ctx context.Context, opID Operation
 	})
 	if errors.Is(txErr, database.ErrNotFound) {
 		return fmt.Errorf("revert log ReconcileDeleteIntents: record %s not found", opID)
+	}
+	return txErr
+}
+
+// FinalizeDeleteIntentCopyDigest implements RevertLog: the interim partial
+// pin naming path is rewritten in place to the full-hash shape through the
+// same serialized single-writer transaction channel as the reconciliations.
+// The seal is a pure strength upgrade (partial proof → streamed full digest
+// of the very bytes the publish landed); an entry that is absent, pinned to
+// another shape, or already sealed is left untouched so crash-retried seals
+// stay idempotent.
+func (l *dbRevertLog) FinalizeDeleteIntentCopyDigest(ctx context.Context, opID OperationID, path, sha256 string) error {
+	if opID == "" {
+		return nil
+	}
+	recordID64, err := strconv.ParseUint(opID, 10, 64)
+	if err != nil || recordID64 == 0 {
+		return fmt.Errorf("revert log FinalizeDeleteIntentCopyDigest: unparsable operation ID %q", opID)
+	}
+	if path == "" || sha256 == "" {
+		return fmt.Errorf("revert log FinalizeDeleteIntentCopyDigest: empty seal endpoint")
+	}
+	recordID := uint(recordID64)
+
+	release := replacementLedgerLocks.Acquire(opID)
+	defer release()
+
+	txErr := l.repo.UpdateJournalInTx(ctx, recordID, func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
+		gf, perr := models.ParseGeneratedFiles(current.GeneratedFiles)
+		if perr != nil {
+			return models.GeneratedFilesJSON{}, false, perr
+		}
+		sealed := false
+		for i, pd := range gf.PlannedDeletes {
+			if pd.Path != path || pd.CopyPartialSHA256 == "" || pd.SHA256 != "" {
+				continue
+			}
+			gf.PlannedDeletes[i] = models.DeleteEntry{Path: pd.Path, SHA256: strings.ToLower(sha256)}
+			sealed = true
+		}
+		if !sealed {
+			return models.GeneratedFilesJSON{}, false, nil
+		}
+		// A true seal always rewrites the entry's shape ({CopySize,
+		// CopyPartialSHA256} → {SHA256}), so the marshaled journal differs from
+		// the row's blob by construction — the sibling reconciliations'
+		// identical-content guard has no reachable state here and is omitted.
+		return gf, true, nil
+	})
+	if errors.Is(txErr, database.ErrNotFound) {
+		return fmt.Errorf("revert log FinalizeDeleteIntentCopyDigest: record %s not found", opID)
 	}
 	return txErr
 }

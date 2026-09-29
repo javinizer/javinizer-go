@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/database"
+	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/history"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/nfo"
@@ -41,11 +42,13 @@ func copyIntentPlans(t *testing.T, real *organizer.Organizer, stage *artifactSta
 	return staged, final
 }
 
-// The deferred primary copy/link leg must journal a hash-pinned delete intent
-// for plan.TargetPath BEFORE ExecuteOrganizePlan runs — an exit between the
-// copy landing and the final completion otherwise leaves a copy no journal
-// can attribute. The pin must carry the exact bytes about to land (the real
-// source's content) and come after the sidecar pins.
+// The deferred primary copy/link leg must journal a delete intent for
+// plan.TargetPath BEFORE ExecuteOrganizePlan runs — an exit between the copy
+// landing and the final completion otherwise leaves a copy no journal can
+// attribute. The pin authenticates the bytes about to land WITHOUT streaming
+// the multi-gigabyte source in advance (codex P2, PRRT_kwDORn9KaM6nBUrF):
+// the size + bounded head+tail interim shape (fsutil.PartialCopyDigest), and
+// it comes after the sidecar pins.
 func TestDeferredCopyPrimaryPinPrecedesExecute(t *testing.T) {
 	base, root, source, subtitle, multipart, unrelated, match := pr260FencedFiles(t, "copy-primary-pin-order")
 	dest := filepath.Join(root, "library")
@@ -66,12 +69,13 @@ func TestDeferredCopyPrimaryPinPrecedesExecute(t *testing.T) {
 
 	wantSub, err := artifactDigest(base, subtitle)
 	require.NoError(t, err)
-	wantVideo, err := artifactDigest(base, source)
+	wantInfo, wantVideoPartial, err := fsutil.PartialCopyDigest(base, source)
 	require.NoError(t, err)
 	require.Equal(t, []models.DeleteEntry{
 		{Path: subMoves[0].NewPath, SHA256: wantSub},
-		{Path: finalPlan.TargetPath, SHA256: wantVideo},
-	}, ledger.deletePaths, "sidecar pin, then the primary pin — both journaled BEFORE execute can land bytes")
+		{Path: finalPlan.TargetPath, CopySize: wantInfo.Size(), CopyPartialSHA256: wantVideoPartial},
+	}, ledger.deletePaths, "sidecar pin, then the interim partial primary pin — both journaled BEFORE execute can land bytes, and no full pre-read")
+	assert.Zero(t, atomic.LoadInt32(&ledger.seals), "no seal before execute ever returned a stream digest")
 	pr260AssertRetained(t, base, source, subtitle, multipart, unrelated)
 	pr260AssertNoFinals(t, base, dest)
 }

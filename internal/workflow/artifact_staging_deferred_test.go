@@ -245,6 +245,10 @@ type completeCallFaultLog struct {
 	deleteReconcileErr error
 	deleteReconciles   int32
 	deleteKeepCaptured []string
+
+	sealErr       error
+	seals         int32
+	sealsCaptured []sealedCopyDigest
 }
 
 func (l *completeCallFaultLog) Complete(context.Context, OperationID, *ApplyResult) error {
@@ -284,6 +288,20 @@ func (l *completeCallFaultLog) ReconcileDeleteIntents(_ context.Context, _ Opera
 	atomic.AddInt32(&l.deleteReconciles, 1)
 	l.deleteKeepCaptured = append([]string(nil), keep...)
 	return l.deleteReconcileErr
+}
+
+// sealedCopyDigest captures one FinalizeDeleteIntentCopyDigest call (the
+// copy lane's interim-pin seal after the publish stream returns its teed
+// digest).
+type sealedCopyDigest struct {
+	path   string
+	sha256 string
+}
+
+func (l *completeCallFaultLog) FinalizeDeleteIntentCopyDigest(_ context.Context, _ OperationID, path, sha256 string) error {
+	atomic.AddInt32(&l.seals, 1)
+	l.sealsCaptured = append(l.sealsCaptured, sealedCopyDigest{path: path, sha256: sha256})
+	return l.sealErr
 }
 
 // A deferred move whose intended inverse cannot be journaled must NOT consume

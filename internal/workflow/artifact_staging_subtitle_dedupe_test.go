@@ -76,13 +76,17 @@ func TestDeferredCopyDuplicateSubtitleEndpointsSinglePin(t *testing.T) {
 	require.NoError(t, err)
 	wantVideo, err := artifactDigest(base, source)
 	require.NoError(t, err)
+	wantVideoInfo, wantVideoPartial, err := fsutil.PartialCopyDigest(base, source)
+	require.NoError(t, err)
 	wantPart, err := artifactDigest(base, multipart)
 	require.NoError(t, err)
 	require.Equal(t, []models.DeleteEntry{
 		{Path: subMoves[0].NewPath, SHA256: wantFirst},
-		{Path: finalPlan.TargetPath, SHA256: wantVideo},
+		{Path: finalPlan.TargetPath, CopySize: wantVideoInfo.Size(), CopyPartialSHA256: wantVideoPartial},
 		{Path: filepath.Join(finalPlan.TargetDir, "movie-cd2.mp4"), SHA256: wantPart},
-	}, ledger.deletePaths, "exactly one pin per normalized endpoint, digest of the FIRST planned source — never the skipped duplicate's bytes (the tree lane pins its own multipart install)")
+	}, ledger.deletePaths, "exactly one pin per normalized endpoint, digest of the FIRST planned source — never the skipped duplicate's bytes (the tree lane pins its own multipart install); the primary pins the interim partial shape (codex P2, PRRT_kwDORn9KaM6nBUrF)")
+	require.Equal(t, []sealedCopyDigest{{path: finalPlan.TargetPath, sha256: wantVideo}}, ledger.sealsCaptured,
+		"the publish stream's teed digest seals the interim pin — and it must equal the independently computed source digest, proving the tee counted the admitted bytes")
 	pinHits := 0
 	for _, pd := range ledger.deletePaths {
 		if pd.Path == subMoves[0].NewPath {

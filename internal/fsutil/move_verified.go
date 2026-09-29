@@ -207,3 +207,49 @@ func CopyFileNoReplaceVerified(fs afero.Fs, src, dst string, proof VerifiedSourc
 	}
 	return streamVerifiedSource(fs, srcFile, src, dst, proof, "verified copy", "source handle", false)
 }
+
+// CopyFileNoReplaceVerifiedDigest is CopyFileNoReplaceVerified with the
+// published bytes' sha256 teed off the single verified stream (seal evidence
+// for the deferred publication's interim copy pin): the digest certifies the
+// EXACT admitted-object bytes that reached the destination — the proof is
+// re-run against the open handle before a byte flows and the tee counts only
+// what that handle yields, so a swap can never make the returned digest
+// describe bytes other than the published ones. A nil proof degrades to the
+// by-name CopyFileNoReplaceDigest, mirroring the verified composite's nil
+// contract.
+func CopyFileNoReplaceVerifiedDigest(fs afero.Fs, src, dst string, proof VerifiedSourceProof) (string, error) {
+	if proof == nil {
+		return CopyFileNoReplaceDigest(fs, src, dst)
+	}
+	done, err := classifyNoreplaceDestination(fs, src, dst)
+	if done || err != nil {
+		return "", err
+	}
+	if err := fs.MkdirAll(filepath.Dir(dst), config.DirPerm); err != nil {
+		return "", fmt.Errorf("verified copy: create destination directory: %w", err)
+	}
+	srcFile, err := openVerifiedSource(fs, src)
+	if err != nil {
+		return "", fmt.Errorf("verified copy: open source %s: %w", src, err)
+	}
+	return streamVerifiedSourceDigest(fs, srcFile, src, dst, proof, "verified copy", "source handle")
+}
+
+// streamVerifiedSourceDigest is the digest-returning twin of
+// streamVerifiedSource for the same-volume copy lane, sharing its handle
+// discipline byte for byte: the defer closes the pinned source descriptor in
+// EVERY exit branch before the caller runs its next filesystem verb, and the
+// admission proof re-runs against the handle's own Stat before a byte flows.
+// The digest tees the staged stream, so it counts exactly the bytes the
+// proof admitted.
+func streamVerifiedSourceDigest(fs afero.Fs, srcFile afero.File, src, dst string, proof VerifiedSourceProof, op, noun string) (string, error) {
+	defer func() { _ = srcFile.Close() }()
+	srcInfo, statErr := srcFile.Stat()
+	if statErr != nil {
+		return "", fmt.Errorf("%s: inspect the open %s %s: %w", op, noun, src, statErr)
+	}
+	if perr := proof(src, srcInfo); perr != nil {
+		return "", fmt.Errorf("%s: the open %s failed its admission proof (%w): %w", op, noun, ErrTakeAsideForeign, perr)
+	}
+	return copyStreamNoReplaceDigest(fs, srcFile, dst)
+}

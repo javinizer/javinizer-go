@@ -336,6 +336,14 @@ type OrganizeResult struct {
 	OldDirectoryPath       string // Original directory path (for updating subsequent file paths)
 	NewDirectoryPath       string // New directory path after in-place rename
 	ShouldGenerateMetadata bool   // Whether NFO/media should be generated for this result
+	// PrimaryCopySHA256 carries the sha256 the copy leg teed off its single
+	// publish stream (set only when the plan bound copy-digest capture): the
+	// digest certifies the exact admitted-object bytes the destination
+	// received, and the fenced deferred publication seals its interim
+	// partial-pin delete intent into the full-hash shape with it — the pin
+	// upgrades WITHOUT a second read of the published payload. Empty on every
+	// other lane (moves, links, no-op publishes, unauthorized flows).
+	PrimaryCopySHA256 string
 }
 
 // SubtitleResult records the outcome for one matched subtitle file: planned
@@ -428,6 +436,15 @@ type OrganizePlan struct {
 	// executed bytes carry. Nil map = legacy by-name consumption (every
 	// direct/un-fenced flow), and endpoints without an entry keep it too.
 	verifiedSubtitleProofs map[string]fsutil.VerifiedSourceProof
+	// copyDigestCapture asks the no-replace verified copy leg to return the
+	// sha256 of the bytes it streams (teed off the single unavoidable read —
+	// never a separate pre-pass). Only the fenced deferred publication binds
+	// it: that flow pins the destination with a partial interim proof BEFORE
+	// execute and seals the pin to the full digest the publish returns, so a
+	// crash inside the execute→seal window still authenticates the install
+	// without ever streaming the payload twice. It acts only alongside a
+	// verifiedSourceProof-bound leg; unbound plans ignore it.
+	copyDigestCapture bool
 }
 
 // BindVerifiedSource pins the plan's video-source consumption to the admission
@@ -445,6 +462,14 @@ func (p *OrganizePlan) BindVerifiedSource(proof fsutil.VerifiedSourceProof) {
 // carry proofs install subtitles exactly as before.
 func (p *OrganizePlan) BindVerifiedSubtitleSources(proofs map[string]fsutil.VerifiedSourceProof) {
 	p.verifiedSubtitleProofs = proofs
+}
+
+// BindCopyDigestCapture requests the plan's verified copy leg to tee the
+// sha256 of the bytes it streams onto the result (see copyDigestCapture).
+// Only the fenced deferred publication binds it; every other plan copies
+// exactly as before.
+func (p *OrganizePlan) BindCopyDigestCapture() {
+	p.copyDigestCapture = true
 }
 
 // Plan creates an organization plan without executing it

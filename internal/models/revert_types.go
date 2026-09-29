@@ -22,10 +22,62 @@ type GeneratedFilesJSON struct {
 }
 
 // DeleteEntry is a pending deletion pinned to the payload the publisher plans
-// to land at Path.
+// to land at Path. The pin shape keys on HOW the payload installs:
+//
+//   - SHA256 (regular-file copy/move installs): the destination must hash to
+//     the pinned digest before the reverter removes it.
+//   - LinkTarget (LinkModeSoft installs): the publisher cannot know a content
+//     hash — the install is the link OBJECT, not bytes — so the pin is the
+//     exact readlink payload the soft-link leg resolves at journal time. The
+//     reverter removes the destination only while it is a symlink whose
+//     target matches (fsutil.UnlinkSymlinkVerified); the regular-file
+//     nonregular-retain rule stays in force for every other occupant shape.
+//   - Identity* (LinkModeHard installs): the hard-linked destination IS the
+//     source's object (same volume/index), so the admitted source identity
+//     tuple (dev/ino where the platform exposes one, plus size+mtime) IS the
+//     ownership certificate — constant-time, no payload read. IdentityStrong
+//     records whether dev/ino were capturable at pin time; a strong pin never
+//     degrades to the size+mtime legs at recovery.
+//   - CopySize/CopyPartialSHA256 (streaming copy installs, pre-graduation):
+//     the interim pin captured WITHOUT a second full read of the source —
+//     size plus a bounded head+tail digest (fsutil.CopyPartialDigestSpan).
+//     The copy leg tees the full digest during its single unavoidable stream
+//     and FinalizeDeleteIntentCopyDigest seals this entry into the SHA256
+//     shape as soon as the publish lands, so the interim shape covers only
+//     the execute→seal crash window.
+//
+// All newer fields are omitempty: blobs written before their introduction
+// parse into zero values, and the reverter's dispatch falls through to the
+// SHA256 leg (an empty hash never matches — retain), preserving the legacy
+// posture byte-for-byte.
 type DeleteEntry struct {
 	Path   string `json:"path"`
 	SHA256 string `json:"sha256"`
+	// LinkTarget pins a soft-link install: the expected readlink payload of
+	// the destination entry (the string the organizer's symlink leg passes,
+	// computed by organizer.SymlinkLinkTarget). Non-empty selects the
+	// symlink-authenticated removal leg in the reverter.
+	LinkTarget string `json:"link_target,omitempty"`
+	// Identity* pin a hard-link install to the admitted source object's
+	// kernel identity: the destination must resolve to THE same object
+	// (dev+ino/volume+index) with the same size and modification time.
+	// IdentityStrong asserts the dev/ino pair was captured from the platform
+	// identity route (in-memory filesystems pin only the metadata legs).
+	// IdentityModUnix == 0 marks "no identity pin" — a modification time at
+	// the Unix epoch never occurs for admitted media sources.
+	IdentityStrong  bool   `json:"identity_strong,omitempty"`
+	IdentityDev     uint64 `json:"identity_dev,omitempty"`
+	IdentityIno     uint64 `json:"identity_ino,omitempty"`
+	IdentitySize    int64  `json:"identity_size,omitempty"`
+	IdentityModUnix int64  `json:"identity_mod_unix,omitempty"`
+	// CopySize/CopyPartialSHA256 pin an in-flight streaming copy without a
+	// pre-pass: size equality plus the bounded head+tail digest
+	// (fsutil.PartialCopyDigest) must hold before the reverter removes the
+	// destination. Sealed to SHA256 once the publish returns the streamed
+	// digest; a recovery that still sees this shape fires on the interim
+	// proof alone (see PartialCopyDigest's threat-model note).
+	CopySize          int64  `json:"copy_size,omitempty"`
+	CopyPartialSHA256 string `json:"copy_partial_sha256,omitempty"`
 }
 
 // ReplacementEntry journals one destructive media overwrite: the destination's

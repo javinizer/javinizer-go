@@ -112,3 +112,7 @@ func (s *stubRevertLog) ReconcileMoveIntents(context.Context, OperationID, []mod
 func (s *stubRevertLog) ReconcileDeleteIntents(context.Context, OperationID, []string) error {
 	return nil
 }
+
+func (s *stubRevertLog) FinalizeDeleteIntentCopyDigest(context.Context, OperationID, string, string) error {
+	return nil
+}

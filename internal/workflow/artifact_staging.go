@@ -510,7 +510,12 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 	videoInstalledByTree := false
 	sidecarIntentTargets := []string{}
 	copiedSidecarTargets := map[string]bool{}
-	primaryCopyPinned := false
+	// primaryPinRecorded tracks ANY pre-execute durable pin on the deferred
+	// primary target (its reconcile must run even with zero sidecars);
+	// primaryPinCopyPartial narrows it to the copy lane's interim partial
+	// pin, the only shape the publish's stream-teed digest later seals.
+	primaryPinRecorded := false
+	primaryPinCopyPartial := false
 	// The video leg moves the real source whenever the publish call carries
 	// move semantics: explicit MoveFiles, or any flow where ExecuteOrganizePlan
 	// would still rename (an irrelevant link_mode must not disarm intents).
@@ -670,20 +675,30 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 			// The PRIMARY leg analogue of the sidecar pins: execute can publish the
 			// video itself, yet an absent destination has no other durable trail
 			// (an occupied one graduated through BeforePublish's replacement
-			// journal). Pin the source bytes against the target BEFORE execute so
-			// an interrupted row's revert can still attribute — and remove —
-			// exactly the bytes this apply landed. The confirmed publish below
-			// consumes this pin: a copy/link primary is user-owned once installed
-			// and this row's revert retains it.
+			// journal). Pin the install against the target BEFORE execute so an
+			// interrupted row's revert can still attribute — and remove — exactly
+			// what this apply landed, WITHOUT the content-hash pin's second
+			// streaming read of the whole payload (codex P2,
+			// PRRT_kwDORn9KaM6nBUrF): the proof shape keys on the publication's
+			// link mode — a hard link IS the admitted source's object (its
+			// identity tuple is the ownership certificate), a soft link's entire
+			// payload is its target string (readlink authenticates it — a hash
+			// pin could never fire on the non-regular entry at all, codex P2
+			// PRRT_kwDORn9KaM6nBUq8), and only a byte-streaming copy carries a
+			// content proof — the bounded head+tail interim digest, sealed to
+			// the full sha256 the publish stream tees once the install lands.
+			// The confirmed publish below consumes this pin: a copy/link primary
+			// is user-owned once installed and this row's revert retains it.
 			if filepath.Clean(plan.SourcePath) != filepath.Clean(plan.TargetPath) && !finalReplaced && o.revertLog != nil && opID != "" {
-				digest, digestErr := artifactDigest(s.fs, plan.SourcePath)
-				if digestErr != nil {
-					return fmt.Errorf("pin deferred primary copy digest %s: %w", plan.TargetPath, digestErr)
+				entry, pinErr := s.deferredPrimaryDeleteEntry(plan)
+				if pinErr != nil {
+					return pinErr
 				}
-				if err := o.revertLog.RecordDeleteIntent(ctx, opID, []models.DeleteEntry{{Path: plan.TargetPath, SHA256: digest}}); err != nil {
+				if err := o.revertLog.RecordDeleteIntent(ctx, opID, []models.DeleteEntry{entry}); err != nil {
 					return fmt.Errorf("record deferred primary copy intent %s: %w", plan.TargetPath, err)
 				}
-				primaryCopyPinned = true
+				primaryPinRecorded = true
+				primaryPinCopyPartial = entry.CopyPartialSHA256 != ""
 			}
 		}
 		// Fail closed one Stat before the execution consumes the real source
@@ -704,6 +719,12 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 		if s.videoDeferred && filepath.Clean(plan.SourcePath) == filepath.Clean(s.sourcePath) {
 			if proof := s.deferredSourceProof(); proof != nil {
 				plan.BindVerifiedSource(proof)
+				// Serve the copy lane's interim partial pin: the verified
+				// copy tees the payload's sha256 off its single publish
+				// stream, and the post-execute seal upgrades the pin with it
+				// (never a second read). Link lanes ignore the flag — their
+				// pins carry no content digest by construction.
+				plan.BindCopyDigestCapture()
 			}
 			// The subtitle lane binds per endpoint the same way (codex P1,
 			// PRRT_kwDORn9KaM6m_lgp): the probe freeze already decided WHICH
@@ -779,6 +800,20 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 			if err := batch.ConfirmPublish(ctx, plan.TargetPath); err != nil {
 				return err
 			}
+			// Seal the copy lane's interim partial pin with the digest the
+			// verified copy teed off its single publish stream: a crash after
+			// the publish but before graduation then recovers against the full
+			// hash of the very bytes that landed. Placement is deliberate —
+			// AFTER every batch leg observed its install, so a seal refusal
+			// rolls back with the same confirmed-install discipline the
+			// reconcile refusal exercises; the interim partial proof stays the
+			// crash evidence for any earlier exit (it never needed the stream
+			// to be correct).
+			if primaryPinCopyPartial && finalResult != nil && finalResult.PrimaryCopySHA256 != "" && o.revertLog != nil && opID != "" {
+				if sealErr := o.revertLog.FinalizeDeleteIntentCopyDigest(ctx, opID, plan.TargetPath, finalResult.PrimaryCopySHA256); sealErr != nil {
+					return fmt.Errorf("seal deferred primary copy pin %s: %w", plan.TargetPath, sealErr)
+				}
+			}
 			// The confirmed primary graduated to a user-owned install: settle the
 			// durable pins in one journal transaction. The primary's pin is
 			// retracted (this row's revert retains installed copy/link primaries —
@@ -786,7 +821,7 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 			// organizer did NOT confirm is retracted: a surviving pin could
 			// hash-match a same-content foreign occupant and let a later revert
 			// delete bytes this apply never landed.
-			if s.videoDeferred && !publishMove && o.revertLog != nil && opID != "" && (primaryCopyPinned || len(sidecarIntentTargets) > 0) {
+			if s.videoDeferred && !publishMove && o.revertLog != nil && opID != "" && (primaryPinRecorded || len(sidecarIntentTargets) > 0) {
 				keep := make([]string, 0, len(sidecarIntentTargets))
 				for _, target := range sidecarIntentTargets {
 					if copiedSidecarTargets[filepath.Clean(target)] {
@@ -1510,6 +1545,76 @@ func sameBytes(fs afero.Fs, a, b string) (bool, error) {
 		return false, errB
 	}
 	return da == db, nil
+}
+
+// symlinkLinkTargetFn is the test seam over organizer.SymlinkLinkTarget for
+// the soft-link pin arm of deferredPrimaryDeleteEntry (the same discipline as
+// organizer's filepathAbsFn): the helper's only error leg is the
+// source-absolutization failure on a relative path — a cwd failure this
+// package cannot induce deterministically — so fault tests replay it here.
+var symlinkLinkTargetFn = organizer.SymlinkLinkTarget
+
+// deferredPrimaryDeleteEntry derives the durable delete-intent pin for the
+// deferred primary publication WITHOUT a streaming read of the payload
+// (codex P2, PRRT_kwDORn9KaM6nBUrF — the superseded content-hash pin cost a
+// second full pass over a multi-gigabyte source before the copy it merely
+// anticipated): the proof shape keys on the publication's link mode.
+//
+// LinkModeSoft: the install is the link OBJECT, whose entire payload is its
+// target string — the pin carries exactly the string the strategy's symlink
+// leg installs (organizer.SymlinkLinkTarget computes both sides through one
+// route), and recovery authenticates by readlink. A regular-file hash pin
+// could never serve here: the planned-delete leg retains every non-regular
+// entry (m5HF7), so the link install would survive recovery orphaned (codex
+// P2, PRRT_kwDORn9KaM6nBUq8).
+//
+// LinkModeHard: the linked destination IS the admitted source's object
+// (link(2) shares the volume/index), so the admission identity tuple pinned
+// at preparation IS the ownership certificate — dev/inode where the platform
+// exposes one, plus size+mtime as the metadata legs, recovered through the
+// same no-follow identity route the admission proofs use. The plan must name
+// the admitted source; any other shape is refused closed.
+//
+// Default (byte-streaming copy): the bounded head+tail interim digest of
+// fsutil.PartialCopyDigest — the only content proof available before the
+// stream exists, and the only one the execute→seal crash window needs (see
+// its threat model). The verified copy leg tees the full sha256 off its
+// single publish stream and FinalizeDeleteIntentCopyDigest seals this entry
+// once the install lands.
+func (s *artifactStage) deferredPrimaryDeleteEntry(plan *organizer.OrganizePlan) (models.DeleteEntry, error) {
+	switch s.original.Organize.LinkMode {
+	case organizer.LinkModeSoft:
+		target, err := symlinkLinkTargetFn(plan.SourcePath)
+		if err != nil {
+			return models.DeleteEntry{}, fmt.Errorf("pin deferred primary symlink target %s: %w", plan.TargetPath, err)
+		}
+		return models.DeleteEntry{Path: plan.TargetPath, LinkTarget: target}, nil
+	case organizer.LinkModeHard:
+		if filepath.Clean(plan.SourcePath) != filepath.Clean(s.sourcePath) {
+			return models.DeleteEntry{}, fmt.Errorf("pin deferred primary hardlink identity %s: plan source %s is not the admitted deferred source", plan.TargetPath, plan.SourcePath)
+		}
+		identity := s.sourceIdentity
+		if !identity.known {
+			return models.DeleteEntry{}, fmt.Errorf("pin deferred primary hardlink identity %s: the deferred source carries no admitted identity", plan.TargetPath)
+		}
+		entry := models.DeleteEntry{
+			Path:            plan.TargetPath,
+			IdentitySize:    identity.size,
+			IdentityModUnix: identity.modTime.Unix(),
+		}
+		if identity.hasDevIno {
+			entry.IdentityStrong = true
+			entry.IdentityDev = identity.dev
+			entry.IdentityIno = identity.ino
+		}
+		return entry, nil
+	default:
+		info, digest, err := fsutil.PartialCopyDigest(s.fs, plan.SourcePath)
+		if err != nil {
+			return models.DeleteEntry{}, fmt.Errorf("pin deferred primary copy digest %s: %w", plan.TargetPath, err)
+		}
+		return models.DeleteEntry{Path: plan.TargetPath, CopySize: info.Size(), CopyPartialSHA256: digest}, nil
+	}
 }
 
 func artifactDigest(fs afero.Fs, path string) (string, error) {

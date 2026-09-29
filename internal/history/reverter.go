@@ -760,14 +760,154 @@ func cleanupGeneratedFilesFS(fs afero.Fs, op *models.BatchFileOperation, stopAt 
 			}
 		}
 	}
-	// PlannedDeletes are intent entries pinned to the publisher's content hash:
-	// delete only while the destination still carries exactly those bytes AND
-	// still names a regular file — absent paths are consumed, rebuilt/touched
-	// or foreign bytes are kept, and any non-regular occupant (a planted or
-	// leftover symlink, a directory) is kept, pin match or not.
+	// PlannedDeletes are intent entries pinned to the publisher's payload:
+	// delete only while the destination still carries exactly that payload —
+	// absent paths are consumed, rebuilt/touched or foreign occupants are
+	// kept. The pin shape keys on how the payload installed (models.DeleteEntry):
+	// a LinkTarget pin authenticates the link OBJECT by readlink, an Identity
+	// pin the hard-linked object by its admitted identity tuple, and a
+	// CopySize/CopyPartialSHA256 pin an in-flight copy by size plus a bounded
+	// head+tail digest; none of those ever hashes or follows a non-regular
+	// entry, so the full-hash leg's nonregular-retain rule (m5HF7) is
+	// preserved in every shape. Dispatch precedence is deterministic:
+	// LinkTarget, then the SHA-cleared identity/partial shapes, then the
+	// full-hash leg (an entry carrying SHA256 always hashes).
 	for _, entry := range gf.PlannedDeletes {
 		path := entry.Path
 		if moveBackTargets[path] {
+			continue
+		}
+		if entry.LinkTarget != "" {
+			// Soft-link pin (codex P2, PRRT_kwDORn9KaM6nBUq8): the install is
+			// the link OBJECT, authenticated solely by its readback payload.
+			// Any occupant that is not a symlink — a regular file holding any
+			// bytes at all, a directory — is foreign to this install shape and
+			// retains untouched, the m5HF7 partition applied from the other
+			// side (the hash leg retains every non-regular; this leg retains
+			// every non-link).
+			linkInfo, linkLstatErr := lstatRestoreSource(fs, path)
+			if os.IsNotExist(linkLstatErr) {
+				dirsToCheck[filepath.Dir(path)] = true
+				continue
+			}
+			if linkLstatErr != nil {
+				logging.Debugf("cleanupGeneratedFiles: pending symlink delete probe failed for %s: %v", path, linkLstatErr)
+				continue
+			}
+			if linkInfo.Mode()&os.ModeSymlink == 0 {
+				logging.Debugf("cleanupGeneratedFiles: pending symlink delete %s is not the pinned link object (mode %v) — retained", path, linkInfo.Mode())
+				continue
+			}
+			// The removal re-authenticates post-vacate (readlink of the
+			// terminal object), so a plant swapped onto path inside the
+			// probe→vacate window is rewound byte-intact, never unlinked.
+			if err := fsutil.UnlinkSymlinkVerified(fs, path, entry.LinkTarget); err != nil {
+				if errors.Is(err, fsutil.ErrTakeAsideVanished) {
+					dirsToCheck[filepath.Dir(path)] = true
+					continue
+				}
+				logging.Debugf("cleanupGeneratedFiles: pending symlink delete %s could not be removed link-verified — retained: %v", path, err)
+				continue
+			}
+			dirsToCheck[filepath.Dir(path)] = true
+			continue
+		}
+		if entry.SHA256 == "" && entry.IdentityModUnix != 0 {
+			// Hard-link pin: the published destination must BE the admitted
+			// source's object — link(2) shares the volume/index, so the
+			// identity tuple authenticates without reading a byte. The
+			// metadata legs (size + mtime-seconds) always run; the dev/inode
+			// legs run only against a strong pin and never degrade for one
+			// (a platform that re-probed no identity cannot authenticate a
+			// strong claim — retain, the admission-proof posture). Any
+			// non-regular occupant retains untouched (m5HF7 unchanged).
+			idInfo, idLstatErr := lstatRestoreSource(fs, path)
+			if os.IsNotExist(idLstatErr) {
+				dirsToCheck[filepath.Dir(path)] = true
+				continue
+			}
+			if idLstatErr != nil {
+				logging.Debugf("cleanupGeneratedFiles: pending identity delete probe failed for %s: %v", path, idLstatErr)
+				continue
+			}
+			if !idInfo.Mode().IsRegular() {
+				logging.Debugf("cleanupGeneratedFiles: pending identity delete %s is not a regular file (mode %v) — retained", path, idInfo.Mode())
+				continue
+			}
+			if entry.IdentityStrong {
+				dev, ino, identityOK := fsutil.BoundObjectIdentity(fs, path, idInfo)
+				if !identityOK {
+					logging.Debugf("cleanupGeneratedFiles: pending identity delete %s exposes no kernel identity for a strong pin — retained", path)
+					continue
+				}
+				if dev != entry.IdentityDev || ino != entry.IdentityIno {
+					logging.Debugf("cleanupGeneratedFiles: pending identity delete %s names a different object than the admitted source — retained", path)
+					continue
+				}
+			}
+			if idInfo.Size() != entry.IdentitySize || idInfo.ModTime().Unix() != entry.IdentityModUnix {
+				logging.Debugf("cleanupGeneratedFiles: pending identity delete %s no longer matches the pinned identity tuple — retained", path)
+				continue
+			}
+			// The lstat identity binds the verified unlink: a swap inside the
+			// probe→unlink window rides the vacate, fails the rebind, and is
+			// rewound byte-intact — never a pathname Remove of an unproven
+			// occupant.
+			if err := fsutil.UnlinkVerified(fs, path, idInfo); err != nil {
+				if errors.Is(err, fsutil.ErrTakeAsideVanished) {
+					dirsToCheck[filepath.Dir(path)] = true
+					continue
+				}
+				logging.Debugf("cleanupGeneratedFiles: pending identity delete %s could not be removed identity-verified — retained: %v", path, err)
+				continue
+			}
+			dirsToCheck[filepath.Dir(path)] = true
+			continue
+		}
+		if entry.SHA256 == "" && entry.CopyPartialSHA256 != "" {
+			// Interim copy pin (the execute→seal crash window of a streaming
+			// copy install — see fsutil.PartialCopyDigest's threat model):
+			// size equality plus the bounded head+tail digest. The
+			// regularity probe never follows a final symlink (m5HF7), and the
+			// digest re-derives from ONE open handle whose own Stat supplies
+			// the unlink identity — a link planted inside the lstat→open
+			// window reads the TARGET through the handle, and the verified
+			// unlink's rebind then refuses the vacated link object.
+			partialInfo, partialLstatErr := lstatRestoreSource(fs, path)
+			if os.IsNotExist(partialLstatErr) {
+				dirsToCheck[filepath.Dir(path)] = true
+				continue
+			}
+			if partialLstatErr != nil {
+				logging.Debugf("cleanupGeneratedFiles: pending partial delete probe failed for %s: %v", path, partialLstatErr)
+				continue
+			}
+			if !partialInfo.Mode().IsRegular() {
+				logging.Debugf("cleanupGeneratedFiles: pending partial delete %s is not a regular file (mode %v) — retained", path, partialInfo.Mode())
+				continue
+			}
+			pinned, digest, probeErr := fsutil.PartialCopyDigest(fs, path)
+			if errors.Is(probeErr, os.ErrNotExist) {
+				dirsToCheck[filepath.Dir(path)] = true
+				continue
+			}
+			if probeErr != nil {
+				logging.Debugf("cleanupGeneratedFiles: pending partial delete digest failed for %s: %v", path, probeErr)
+				continue
+			}
+			if pinned.Size() != entry.CopySize || digest != strings.ToLower(entry.CopyPartialSHA256) {
+				logging.Debugf("cleanupGeneratedFiles: pending partial delete %s no longer matches the interim pin — retained", path)
+				continue
+			}
+			if err := fsutil.UnlinkVerified(fs, path, pinned); err != nil {
+				if errors.Is(err, fsutil.ErrTakeAsideVanished) {
+					dirsToCheck[filepath.Dir(path)] = true
+					continue
+				}
+				logging.Debugf("cleanupGeneratedFiles: pending partial delete %s could not be removed identity-verified — retained: %v", path, err)
+				continue
+			}
+			dirsToCheck[filepath.Dir(path)] = true
 			continue
 		}
 		// The pin certifies the previously published REGULAR file only, so the
