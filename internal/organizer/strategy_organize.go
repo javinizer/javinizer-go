@@ -298,6 +298,22 @@ func mapNoReplaceRefusal(err error, dst string) error {
 	}
 }
 
+// mapLinkInstallError keeps the legacy and verified hardlink legs on one error
+// vocabulary: cross-device and permission failures keep their historical
+// guidance text, everything else wraps generically with the typed classes
+// (the verified leg's ErrTakeAsideForeign / ErrPublishCompleted /
+// ErrPublishCollision) unwrap-reachable for mapNoReplaceRefusal and the
+// caller's seat classifiers.
+func mapLinkInstallError(err error) error {
+	if errors.Is(err, syscall.EXDEV) {
+		return fmt.Errorf("failed to create hard link (source and destination must be on the same filesystem): %w", err)
+	}
+	if errors.Is(err, os.ErrPermission) {
+		return fmt.Errorf("failed to create hard link (permission denied): %w", err)
+	}
+	return fmt.Errorf("failed to create hard link: %w", err)
+}
+
 // symlinkObjectExists probes path specifically for a symlink OBJECT (including dangling
 // ones) on filesystems whose Stat follows links — where a dangling symlink otherwise
 // masquerades as not-exists.
@@ -706,14 +722,24 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 
 			switch plan.LinkMode {
 			case LinkModeHard:
+				// A caller-bound admission proof routes the install through the
+				// verified twin (codex P1, PRRT_kwDORn9KaM6nEnUw): link(2)
+				// resolves the source BY NAME, so the composite re-proves the
+				// open source handle before the link and re-proves the INSTALLED
+				// entry (which aliases whatever the source named at the link
+				// instant) after it — a source swapped inside the
+				// validation→link window refuses typed with the rejected install
+				// bound-unlinked, never a foreign object published as the
+				// admitted video. The kernel's EEXIST keeps the install
+				// no-clobber; the shared refusal/classes mapping is unchanged.
+				if plan.verifiedSourceProof != nil {
+					if err := fsutil.LinkFileNoReplaceVerified(s.fs, plan.SourcePath, plan.TargetPath, s.linker.hardlink, plan.verifiedSourceProof); err != nil {
+						return mapNoReplaceRefusal(mapLinkInstallError(err), plan.TargetPath)
+					}
+					return nil
+				}
 				if err := s.linker.hardlink(plan.SourcePath, plan.TargetPath); err != nil {
-					if errors.Is(err, syscall.EXDEV) {
-						return fmt.Errorf("failed to create hard link (source and destination must be on the same filesystem): %w", err)
-					}
-					if errors.Is(err, os.ErrPermission) {
-						return fmt.Errorf("failed to create hard link (permission denied): %w", err)
-					}
-					return fmt.Errorf("failed to create hard link: %w", err)
+					return mapLinkInstallError(err)
 				}
 				// Authorized link install delivered: a foreign occupant's bytes
 				// were replaced at the destination (crumb bound at the Remove

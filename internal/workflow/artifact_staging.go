@@ -713,7 +713,11 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 		// (rename or open) remain separate filesystem operations, so the
 		// executed plan carries the admitted identity into the no-replace
 		// legs — the move take-aside re-proves the claimed object before
-		// publishing, the copy leg proves the very handle it streams. Only the
+		// publishing, the copy leg proves the very handle it streams, and the
+		// hard-link leg re-proves the installed entry against the same
+		// admission identity (link(2) resolves its source by name, so the
+		// post-link alias proof is what refuses a swap that won the
+		// validation→link window — codex P1, PRRT_kwDORn9KaM6nEnUw). Only the
 		// deferred real-source plan is bound; staged/in-place plans publish
 		// staging-owned copies the staging sweep already owns.
 		if s.videoDeferred && filepath.Clean(plan.SourcePath) == filepath.Clean(s.sourcePath) {

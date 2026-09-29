@@ -794,3 +794,50 @@ func TestDeferredSourceProofUnits(t *testing.T) {
 	assert.NoError(t, proof("/src/m.mp4", info))
 	require.ErrorIs(t, proof("/src/other.mp4", other), errArtifactSourceChanged)
 }
+
+// F1 (codex P1, PRRT_kwDORn9KaM6nEnUw), hardlink leg: the source directory
+// entry is rename-swapped AT ExecuteOrganizePlan — after the pre-execute
+// identity gate passed. The bound publication must refuse rather than install
+// a link to the replacement: the link shares its inode with whatever the
+// source names at the link instant, so the admitted-identity wiring runs
+// INSIDE the install leg exactly like the move/copy verified lanes — the
+// destination never exists, the replacement stays byte-intact at the source
+// name, and the admitted object is never touched.
+func TestDeferredHardLinkRefusesSourceSwappedInsideExecute(t *testing.T) {
+	base, root, source, subtitle, multipart, unrelated, match := pr260FencedFiles(t, "verified-hardlink-swap")
+	dest := filepath.Join(root, "library")
+	real := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize}, template.NewEngine(), nil)
+	aside := filepath.Join(root, "incoming", "swapped-aside.mp4")
+	fault := &pr260PublicationFaultOrganizer{Organizer: real, preExecute: func(*organizer.OrganizePlan) {
+		_ = base.Rename(source, aside)
+		_ = afero.WriteFile(base, source, []byte("replacement video"), 0o644)
+	}}
+	orch := &applyOrchImpl{fs: base, organizer: fault}
+	cmd := pr260ArtifactFailureCommand(&models.Movie{ContentID: "verified-hardlink-swap"}, match, dest)
+	cmd.Organize.Skip = false
+	cmd.Organize.MoveFiles = false
+	cmd.Organize.LinkMode = organizer.LinkModeHard
+	cmd.Download = false
+
+	stage, _, publishErr := verifiedStagePublish(t, orch, real, base, root, source, dest, match, cmd)
+	defer stage.cleanup()
+
+	require.ErrorIs(t, publishErr, fsutil.ErrTakeAsideForeign, "the bound link install refuses the swapped entry")
+	require.ErrorIs(t, publishErr, errArtifactSourceChanged, "the admission class rides the refusal")
+	assert.False(t, fsutil.PublishRefusal(publishErr), "a pre-publication admission refusal never classifies as a publish refusal")
+	assert.False(t, fsutil.PublishCompleted(publishErr), "nothing was installed at the destination")
+	assert.False(t, stage.sourceCleanupArmed)
+	pr260AssertNoFinals(t, base, dest)
+	got, err := afero.ReadFile(base, source)
+	require.NoError(t, err)
+	assert.Equal(t, "replacement video", string(got), "the replacement stays byte-intact at the source name, never linked")
+	got, err = afero.ReadFile(base, aside)
+	require.NoError(t, err)
+	assert.Equal(t, "video", string(got), "the admitted object is never consumed")
+	assertNoVacResidue(t, base, filepath.Dir(source))
+	for _, kept := range []string{subtitle, multipart, unrelated} {
+		exists, serr := afero.Exists(base, kept)
+		require.NoError(t, serr)
+		assert.True(t, exists, kept)
+	}
+}

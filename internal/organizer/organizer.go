@@ -421,7 +421,9 @@ type OrganizePlan struct {
 	// deferred-source seam, codex P1, PRRT_kwDORn9KaM6m9ae4): the no-replace
 	// move/copy legs then run through fsutil's verified composites and refuse
 	// a source path re-pointed at a different object after validation, rather
-	// than publishing the replacement. Nil keeps the legacy by-name
+	// than publishing the replacement; the hard-link install binds through
+	// the same proof's pre-/post-link re-proofs (codex P1,
+	// PRRT_kwDORn9KaM6nEnUw). Nil keeps the legacy by-name
 	// consumption (every direct flow and the overwrite-authorized lanes).
 	verifiedSourceProof fsutil.VerifiedSourceProof
 	// verifiedSubtitleProofs is the per-sidecar twin of verifiedSourceProof
