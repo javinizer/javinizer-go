@@ -73,12 +73,31 @@ func (f *verifyHookFS) LstatIfPossible(name string) (os.FileInfo, bool, error) {
 }
 
 // verifyProofOf admits exactly the object snapshot captured at admission
-// (no-follow), via the composites' asideSameObject discipline.
+// (no-follow). The capture is EAGER wherever the platform exposes an identity —
+// dev/inode out of a POSIX Stat_t, the volume-serial+file-index handle identity
+// through BoundObjectIdentity on Windows — and re-proves the object under proof
+// at equal strength. os.SameFile cannot serve as this pin on Windows: a
+// path-captured FileInfo there records the PATH, not the object, and SameFile's
+// lazy file-id load re-opens that path at COMPARE time — by the verified move's
+// claim re-proof the source name is already vacated (the comparison fails
+// closed and refuses the admitted object's own happy path), and after a
+// pre-execute swap the same lazy load binds the REPLACEMENT, silently admitting
+// it. In-memory filesystems keep the asideSameObject size+modtime discipline
+// (Sys()==nil, no identity to pin).
 func verifyProofOf(t *testing.T, fs afero.Fs, path string) (VerifiedSourceProof, os.FileInfo) {
 	t.Helper()
 	admitted, err := asideLstat(fs, path)
 	require.NoError(t, err)
-	return func(_ string, info os.FileInfo) error {
+	admDev, admIno, admStrong := BoundObjectIdentity(fs, path, admitted)
+	return func(probed string, info os.FileInfo) error {
+		if admStrong {
+			dev, ino, strong := BoundObjectIdentity(fs, probed, info)
+			if info == nil || !info.Mode().IsRegular() || !strong || dev != admDev || ino != admIno ||
+				info.Size() != admitted.Size() || !info.ModTime().Equal(admitted.ModTime()) {
+				return fmt.Errorf("%s no longer names the admitted object", path)
+			}
+			return nil
+		}
 		if !asideSameObject(info, admitted) {
 			return fmt.Errorf("%s no longer names the admitted object", path)
 		}
@@ -443,7 +462,19 @@ func TestMoveFileNoReplaceVerifiedOsFsInodeSwapRefuses(t *testing.T) {
 // The take hop's link-publish landing with a refused staged unlink is an
 // internal-hop publish-completion: the class must NOT surface, or callers
 // would register the video destination as published when nothing reached it.
-func TestMoveFileNoReplaceVerifiedTakeCompletedClassStripped(t *testing.T) {
+// The scenario stands only on the hard-link take leg, so the per-GOOS
+// TestMoveFileNoReplaceVerifiedTakeCompletedClassStripped wrappers
+// (move_verified_take_completed_*_test.go) route the take through
+// publishNoReplaceFallback and wedge its staged-unlink seam BEFORE calling
+// this body: Linux otherwise publishes the take through
+// renameat2(RENAME_NOREPLACE) — a kernel-atomic rename with no
+// link-then-unlink construction, where the wedged remove seam never fires
+// and the scenario silently degrades into the happy path — and Windows's
+// MoveFileEx take has no residue construction at all, so the completed-class
+// strip has no reachable take-hop leg there (the class remains guarded for
+// the fallback shape the POSIX legs express).
+func assertVerifiedTakeCompletedClassStripped(t *testing.T) {
+	t.Helper()
 	fs := afero.NewOsFs()
 	root := t.TempDir()
 	src := filepath.Join(root, "in", "movie.mp4")
@@ -452,10 +483,8 @@ func TestMoveFileNoReplaceVerifiedTakeCompletedClassStripped(t *testing.T) {
 	require.NoError(t, afero.WriteFile(fs, src, []byte("admitted video bytes"), 0o644))
 	proof, _ := verifyProofOf(t, fs, src)
 
-	originalRemove := publishNoReplaceRemove
-	publishNoReplaceRemove = func(name string) error { return errors.New("simulated unlink refusal") }
-	defer func() { publishNoReplaceRemove = originalRemove }()
-
+	// Precondition installed by the per-GOOS wrapper: the take hop rides the
+	// hard-link fallback with its staged-unlink seam wedged.
 	err := MoveFileNoReplaceVerified(fs, src, dst, proof)
 	require.Error(t, err)
 	assert.NotErrorIs(t, err, ErrPublishCompleted, "the internal take hop's completed-with-residue class never surfaces")

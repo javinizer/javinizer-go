@@ -170,14 +170,33 @@ func TestProbeAdmittedComposesWithOccupiedGate(t *testing.T) {
 	assert.Equal(t, "foreign occupant", string(got), "the occupant's bytes are never touched")
 }
 
-// admitSnapshotProof admits exactly the object the snapshot named (the
-// composite's binding discipline: identity plus size/mtime).
-func admitSnapshotProof(t *testing.T, path string) fsutil.VerifiedSourceProof {
+// admitSnapshotProof pins the admission identity EAGERLY — dev/inode out of a
+// POSIX Stat_t, the volume-serial+file-index handle identity through
+// fsutil.BoundObjectIdentity on Windows — and re-proves the object the
+// composite is about to consume at equal strength. os.SameFile is NOT this pin
+// on Windows: a path-captured FileInfo there records the path, not the object,
+// and SameFile's lazy file-id load re-opens that path at COMPARE time — with
+// the verified move the source name is already vacated when the claim re-proof
+// runs (the comparison fails and the happy path is refused), and with a
+// pre-execute swap the same lazy load binds the REPLACEMENT, which the proof
+// then silently admits (CI run 36525447204, windows leg). BoundObjectIdentity
+// captures the identity at admission, while the name still resolves to the
+// admitted object, mirroring the workflow's deferred-source binding (codex P1,
+// PRRT_kwDORn9KaM6m9ae4).
+func admitSnapshotProof(t *testing.T, fs afero.Fs, path string) fsutil.VerifiedSourceProof {
 	t.Helper()
 	admitted, err := os.Lstat(path)
 	require.NoError(t, err)
-	return func(_ string, info os.FileInfo) error {
-		if !os.SameFile(info, admitted) {
+	admDev, admIno, admStrong := fsutil.BoundObjectIdentity(fs, path, admitted)
+	return func(probed string, info os.FileInfo) error {
+		if info == nil || !info.Mode().IsRegular() {
+			return fmt.Errorf("%s names a non-regular entry", path)
+		}
+		dev, ino, strong := fsutil.BoundObjectIdentity(fs, probed, info)
+		if admStrong && (!strong || dev != admDev || ino != admIno) {
+			return fmt.Errorf("%s names a different object", path)
+		}
+		if info.Size() != admitted.Size() || !info.ModTime().Equal(admitted.ModTime()) {
 			return fmt.Errorf("%s names a different object", path)
 		}
 		return nil
@@ -198,7 +217,7 @@ func TestVerifiedSourceProofDispatchHappyPath(t *testing.T) {
 	for _, move := range []bool{true, false} {
 		t.Run(map[bool]string{false: "copy", true: "move"}[move], func(t *testing.T) {
 			org, src, _, dest, _ := probeAdmittedFixture(t)
-			plan := verifiedDispatchPlan(t, org, src, dest, move, admitSnapshotProof(t, src))
+			plan := verifiedDispatchPlan(t, org, src, dest, move, admitSnapshotProof(t, afero.NewOsFs(), src))
 			result, err := org.ExecuteOrganizePlan(plan, move, LinkModeNone)
 			require.NoError(t, err)
 			require.FileExists(t, result.NewPath)
@@ -214,7 +233,7 @@ func TestVerifiedSourceProofDispatchRefusal(t *testing.T) {
 	for _, move := range []bool{true, false} {
 		t.Run(map[bool]string{false: "copy", true: "move"}[move], func(t *testing.T) {
 			org, src, _, dest, dir := probeAdmittedFixture(t)
-			proof := admitSnapshotProof(t, src)
+			proof := admitSnapshotProof(t, afero.NewOsFs(), src)
 			// Rename-swap the source for a different object after the admission
 			// snapshot: the proof then refuses inside execute.
 			aside := filepath.Join(dir, "swap.bin")
@@ -241,7 +260,7 @@ func TestVerifiedSourceProofDispatchRefusal(t *testing.T) {
 // disjoint on the refusal text.
 func TestVerifiedSourceProofDispatchRefusalClassification(t *testing.T) {
 	org, src, _, dest, dir := probeAdmittedFixture(t)
-	proof := admitSnapshotProof(t, src)
+	proof := admitSnapshotProof(t, afero.NewOsFs(), src)
 	aside := filepath.Join(dir, "swap.bin")
 	require.NoError(t, os.WriteFile(aside, []byte("replacement payload"), 0o600))
 	require.NoError(t, os.Remove(src))

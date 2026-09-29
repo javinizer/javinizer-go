@@ -52,6 +52,12 @@ ignore:
   # posix variant.
   - "internal/fsutil/bound_identity_narrow_unix.go"
   - "internal/fsutil/bound_identity_other.go"
+  # The Windows handle-route twin of the admission-time object identity
+  # capture (BoundObjectIdentity — volume serial + file index via
+  # GetFileInformationByHandle): //go:build windows, so the ubuntu
+  # coverage-upload job never compiles these lines; the POSIX wrapper legs of
+  # the same helper ARE covered through workflow/organizer/fsutil tests.
+  - "internal/fsutil/bound_identity_windows.go"
   # Desktop-only build-tagged file (//go:build desktop). The real Wails
   # runner pulls in per-platform webview headers and must not enter the
   # default build/test path; without this ignore, its new lines all count

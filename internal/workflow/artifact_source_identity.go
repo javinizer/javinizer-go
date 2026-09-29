@@ -24,8 +24,8 @@ var errArtifactSourceChanged = errors.New("artifact source changed since admissi
 // prepareArtifact admitted it: dev+inode where the filesystem exposes a POSIX
 // Stat_t (afero.OsFs on unix, including network mounts surfaced through the OS
 // VFS), the volume-serial+file-index handle identity on Windows
-// (artifact_source_identity_windows.go — a stat-only FileInfo exposes no
-// comparable key there), plus size and modtime on every platform. In-memory
+// (fsutil.BoundObjectIdentity — a stat-only FileInfo exposes no comparable key
+// there), plus size and modtime on every platform. In-memory
 // afero filesystems return Sys()==nil and keep only the size+modtime legs —
 // the same posture as the downloader/history identity helpers. The tuple
 // deliberately avoids hashing: admission must not read multi-GB video
@@ -44,7 +44,7 @@ func captureArtifactSourceIdentity(fs afero.Fs, path string, info os.FileInfo) a
 		return artifactSourceIdentity{}
 	}
 	id := artifactSourceIdentity{known: true, size: info.Size(), modTime: info.ModTime()}
-	if dev, ino, ok := artifactSourceDevIno(fs, path, info); ok {
+	if dev, ino, ok := fsutil.BoundObjectIdentity(fs, path, info); ok {
 		id.hasDevIno = true
 		id.dev, id.ino = dev, ino
 	}
@@ -69,7 +69,7 @@ func (id artifactSourceIdentity) matches(fs afero.Fs, path string, info os.FileI
 		return false
 	}
 	if id.hasDevIno {
-		dev, ino, ok := artifactSourceDevIno(fs, path, info)
+		dev, ino, ok := fsutil.BoundObjectIdentity(fs, path, info)
 		if !ok {
 			return false
 		}
