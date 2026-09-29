@@ -21,7 +21,11 @@ import type { Movie, MovieCredit } from '$lib/api/types';
  *   recomputed across sibling movies — is only hashed wholesale when no
  *   credits render; with credits, only the canonical names of actresses
  *   referenced by visible credits are hashed (identity renames change the
- *   rendered canonical name and must refire).
+ *   rendered canonical name and must refire). A visible credit whose user
+ *   override determines the rendered name (user_override with a non-blank
+ *   override_name) contributes NO canonical names — RenderNameWithSelection
+ *   renders the override regardless of the identity row, and the override
+ *   text itself stays hashed in the credit render token.
  * - A credit that cannot render (render_visible=false, or locally suppressed,
  *   matching the nil-actress/quarantine gate) hashes to a fixed,
  *   identity-independent marker: its name/order churn AND identity
@@ -70,12 +74,20 @@ export function buildDisplayTitlePreviewSignature(movie: Movie): string {
 // order. Canonical-name rendering (the default) draws the rendered name from
 // the actress identity row, so an identity rename must refire the preview even
 // though credit-level fields are unchanged. Unreferenced/extra actresses in the
-// poll payload cannot affect the render and stay out of the hash.
+// poll payload cannot affect the render and stay out of the hash. A credit
+// whose user override determines the rendered name (user_override set with a
+// non-blank override_name — RenderNameWithSelection's first-precedence arm,
+// ahead of display_force_canonical) contributes only its actress_id: canonical
+// name churn on the referenced identity row cannot reach the render and must
+// not refire; the override text itself remains hashed via creditRenderToken.
 function referencedActressTokens(movie: Movie, credits: MovieCredit[]): unknown[] {
 	const actresses = movie.actresses ?? [];
 	return credits
 		.filter((c) => (c.render_visible ?? true) && !(c.suppressed ?? false))
 		.map((c) => {
+			if (c.user_override && (c.override_name ?? '').trim() !== '') {
+				return [c.actress_id ?? 0];
+			}
 			const a = actresses.find((x) => (x.id ?? 0) === (c.actress_id ?? 0));
 			return [c.actress_id ?? 0, a?.first_name ?? '', a?.last_name ?? '', a?.japanese_name ?? ''];
 		});

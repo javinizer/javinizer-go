@@ -180,6 +180,58 @@ describe('buildDisplayTitlePreviewSignature', () => {
 		expect(buildDisplayTitlePreviewSignature(b)).not.toBe(buildDisplayTitlePreviewSignature(a));
 	});
 
+	it("is stable when an override-bearing credit's referenced actress canonical name changes", () => {
+		// user_override + non-blank override_name: RenderNameWithSelection
+		// renders the override regardless of the canonical identity row, so
+		// canonical-name churn must not refire the preview.
+		const credits = [makeCredit({ user_override: true, override_name: 'Alias A' })];
+		const a = makeMovie([makeActress({})], credits);
+		const b = makeMovie(
+			[makeActress({ first_name: 'Aoi', last_name: 'Sora', japanese_name: '蒼井そら' })],
+			credits,
+		);
+		expect(buildDisplayTitlePreviewSignature(b)).toBe(buildDisplayTitlePreviewSignature(a));
+	});
+
+	it('changes when the override is blank or unset so canonical churn reaches the render', () => {
+		// A blank override falls through to credited/canonical rendering
+		// (RenderNameWithSelection trims), so canonical churn must refire.
+		const blank = [makeCredit({ user_override: true, override_name: '   ' })];
+		const a = makeMovie([makeActress({})], blank);
+		const b = makeMovie([makeActress({ first_name: 'Aoi' })], blank);
+		expect(buildDisplayTitlePreviewSignature(b)).not.toBe(buildDisplayTitlePreviewSignature(a));
+	});
+
+	it('keeps the override credit slot positional: sibling canonical churn still refires', () => {
+		const overrideCredit = makeCredit({
+			actress_id: 7,
+			user_override: true,
+			override_name: 'Alias A',
+		});
+		const plain = makeCredit({ actress_id: 9, credited_name: 'Aoi Sora', order_index: 1 });
+		const a = makeMovie(
+			[makeActress({}), makeActress({ id: 9, first_name: 'Aoi', last_name: 'Sora' })],
+			[overrideCredit, plain],
+		);
+		const overrideActressChurn = makeMovie(
+			[
+				makeActress({ first_name: 'Renamed' }),
+				makeActress({ id: 9, first_name: 'Aoi', last_name: 'Sora' }),
+			],
+			[overrideCredit, plain],
+		);
+		const siblingActressChurn = makeMovie(
+			[makeActress({}), makeActress({ id: 9, first_name: 'Yui' })],
+			[overrideCredit, plain],
+		);
+		expect(buildDisplayTitlePreviewSignature(overrideActressChurn)).toBe(
+			buildDisplayTitlePreviewSignature(a),
+		);
+		expect(buildDisplayTitlePreviewSignature(siblingActressChurn)).not.toBe(
+			buildDisplayTitlePreviewSignature(a),
+		);
+	});
+
 	it('changes when a visible credit render token changes', () => {
 		const a = makeMovie([], [makeCredit({})]);
 		const b = makeMovie([], [makeCredit({ override_name: 'Alias' })]);

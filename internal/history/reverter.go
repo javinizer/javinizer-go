@@ -319,6 +319,16 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 			op.RevertStatus = models.RevertStatusNoOp
 			return &RevertFileResult{OperationID: op.ID, MovieID: op.MovieID, OriginalPath: op.OriginalPath, NewPath: op.NewPath, Outcome: models.RevertOutcomeSkipped, Reason: models.RevertReasonAnchorMissing}, nil
 		}
+		if dstErr == nil && srcErr == nil {
+			// codex P2 (PRRT_kwDORn9KaM6nD37F): destination present + ANY
+			// source-pathname entry — a dangling symlink included — must take
+			// the same conflict verdict revertPrimaryFileFS gives an occupied
+			// regular-file source there. A dangling link reads as vacant under
+			// that leg's following Stat, so the happy rename-back would POSIX
+			// rename the moved destination over the occupant; the conflict
+			// instead fails retryably and retains both sides byte-for-byte.
+			return failRevert(ctx, r.batchFileOpRepo, op, models.RevertReasonDestinationConflict, fmt.Sprintf("pending move intent retains both copies: source path %s is occupied (destination conflict)", op.OriginalPath)), nil
+		}
 	}
 
 	// Journal replay may have refreshed a stale caller snapshot. Re-check the
