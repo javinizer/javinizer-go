@@ -665,12 +665,19 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 		finalResult, err = executor.ExecuteOrganizePlan(plan, publishMove, s.original.Organize.LinkMode)
 		if filepath.Clean(plan.SourcePath) != filepath.Clean(plan.TargetPath) && (err == nil || fsutil.PublishCompleted(err)) {
 			batch.ObservePublishResult(plan.TargetPath)
-			// Confirm only what execute reports as Copied: a would-be target
+			// Confirm only what execute proves installed: a would-be target
 			// that turned out occupied/armed-skip mid-run must not be registered
-			// as ours, or rollback would UnlinkVerified a foreign file.
+			// as ours, or rollback would UnlinkVerified a foreign file. A
+			// publish-completed subtitle error IS an install — the post-publish
+			// leg failed after the bytes landed (the primary leg's
+			// PublishCompleted check above applies the same classification), so
+			// the seat stays in the confirmed-copy set: its batch leg confirms
+			// and its durable pin survives reconciliation, letting a later
+			// revert clean the installed sidecar instead of stranding it
+			// untracked (codex P2, PRRT_kwDORn9KaM6m5-ms).
 			if finalResult != nil {
 				for _, sr := range finalResult.Subtitles {
-					if sr.Copied && sr.NewPath != "" {
+					if sr.NewPath != "" && (sr.Copied || fsutil.PublishCompleted(sr.Error)) {
 						copiedSidecarTargets[filepath.Clean(sr.NewPath)] = true
 					}
 				}

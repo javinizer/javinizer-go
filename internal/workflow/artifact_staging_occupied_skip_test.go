@@ -2,9 +2,11 @@ package workflow
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"testing"
 
+	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/history"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
@@ -144,6 +146,17 @@ func TestOccupiedSkipExcludedSiblings(t *testing.T) {
 		res.Subtitles[0].Skipped = false
 		res.Subtitles[0].Copied = true
 		require.Empty(t, newStage(fs).occupiedSkipExcludedSiblings(stagedVideo, res))
+	})
+
+	t.Run("publish-completed error seat was installed — never excluded", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		require.NoError(t, fs.MkdirAll(finalDir, 0o755))
+		require.NoError(t, afero.WriteFile(fs, subTarget, []byte("subtitle"), 0o644))
+		res := skippedResult()
+		res.Subtitles[0].Skipped = false
+		res.Subtitles[0].Error = fmt.Errorf("subtitle published but source cleanup refused: %w", fsutil.ErrPublishCompleted)
+		require.Empty(t, newStage(fs).occupiedSkipExcludedSiblings(stagedVideo, res),
+			"an ErrPublishCompleted error slot proves this apply's own install, not a foreign occupant")
 	})
 
 	t.Run("skipped with empty target does not exclude", func(t *testing.T) {
