@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/database"
@@ -1670,25 +1671,38 @@ func TestCleanupGeneratedFilesFS_PlannedDeletesRetainDenyAndRemoveFaults(t *test
 	gfJSON, _ := json.Marshal(gf)
 	op := &models.BatchFileOperation{GeneratedFiles: string(gfJSON)}
 
-	fs := &denyOpenFS{Fs: &denyRemoveFS{Fs: base, path: "/dst/remove-denied.nfo"}, path: "/dst/probe-denied.nfo"}
+	fs := &denyOpenFS{Fs: &denyTerminalRemoveFS{Fs: base, target: "/dst/remove-denied.nfo"}, path: "/dst/probe-denied.nfo"}
 	cleanupGeneratedFilesFS(fs, op, "/dst")
 
 	if _, err := base.Stat("/dst/probe-denied.nfo"); err != nil {
 		t.Fatalf("open-denied pending delete stays: %v", err)
 	}
-	if _, err := base.Stat("/dst/remove-denied.nfo"); err != nil {
-		t.Fatalf("remove-denied pending delete stays: %v", err)
+	got, err := afero.ReadFile(base, "/dst/remove-denied.nfo")
+	if err != nil {
+		t.Fatalf("terminal-remove-wedged pending delete stays: %v", err)
+	}
+	if string(got) != "y" {
+		t.Fatalf("the wedged verified unlink rewound the object byte-intact, got %q", got)
 	}
 }
 
-type denyRemoveFS struct {
+// denyTerminalRemoveFS wedges the identity-verified unlink's LAST remove —
+// the terminal holding the re-bound object — by denying the second ".vac."
+// remove of the target (the first is the claim's own release). The object
+// must ride back onto its freed name byte-intact (rerideBoundUnlink), never
+// lost to a half-finished unlink.
+type denyTerminalRemoveFS struct {
 	afero.Fs
-	path string
+	target  string
+	vacSeen int
 }
 
-func (f *denyRemoveFS) Remove(name string) error {
-	if name == f.path {
-		return errors.New("remove denied")
+func (f *denyTerminalRemoveFS) Remove(name string) error {
+	if strings.HasPrefix(name, f.target+".vac.") {
+		f.vacSeen++
+		if f.vacSeen > 1 {
+			return errors.New("terminal remove denied")
+		}
 	}
 	return f.Fs.Remove(name)
 }

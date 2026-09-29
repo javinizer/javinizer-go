@@ -22,10 +22,13 @@ var errArtifactSourceChanged = errors.New("artifact source changed since admissi
 // artifactSourceIdentity pins which regular file a path named when
 // prepareArtifact admitted it: dev+inode where the filesystem exposes a POSIX
 // Stat_t (afero.OsFs on unix, including network mounts surfaced through the OS
-// VFS), plus size and modtime on every platform. In-memory afero filesystems
-// return Sys()==nil and keep only the size+modtime legs — the same posture as
-// the downloader/history identity helpers. The tuple deliberately avoids
-// hashing: admission must not read multi-GB video payloads a second time.
+// VFS), the volume-serial+file-index handle identity on Windows
+// (artifact_source_identity_windows.go — a stat-only FileInfo exposes no
+// comparable key there), plus size and modtime on every platform. In-memory
+// afero filesystems return Sys()==nil and keep only the size+modtime legs —
+// the same posture as the downloader/history identity helpers. The tuple
+// deliberately avoids hashing: admission must not read multi-GB video
+// payloads a second time.
 type artifactSourceIdentity struct {
 	known     bool
 	hasDevIno bool
@@ -35,12 +38,12 @@ type artifactSourceIdentity struct {
 	modTime   time.Time
 }
 
-func captureArtifactSourceIdentity(info os.FileInfo) artifactSourceIdentity {
+func captureArtifactSourceIdentity(fs afero.Fs, path string, info os.FileInfo) artifactSourceIdentity {
 	if info == nil || !info.Mode().IsRegular() {
 		return artifactSourceIdentity{}
 	}
 	id := artifactSourceIdentity{known: true, size: info.Size(), modTime: info.ModTime()}
-	if dev, ino, ok := artifactSourceDevIno(info); ok {
+	if dev, ino, ok := artifactSourceDevIno(fs, path, info); ok {
 		id.hasDevIno = true
 		id.dev, id.ino = dev, ino
 	}
@@ -54,12 +57,12 @@ func captureArtifactSourceIdentity(info os.FileInfo) artifactSourceIdentity {
 // no-follow lookup a symlink planted at the admitted pathname reports its own
 // ModeSymlink entry, so it fails regularity even when its TARGET still names
 // the admitted inode.
-func (id artifactSourceIdentity) matches(info os.FileInfo) bool {
+func (id artifactSourceIdentity) matches(fs afero.Fs, path string, info os.FileInfo) bool {
 	if !id.known || info == nil || !info.Mode().IsRegular() {
 		return false
 	}
 	if id.hasDevIno {
-		if dev, ino, ok := artifactSourceDevIno(info); ok && (dev != id.dev || ino != id.ino) {
+		if dev, ino, ok := artifactSourceDevIno(fs, path, info); ok && (dev != id.dev || ino != id.ino) {
 			return false
 		}
 	}
@@ -99,7 +102,7 @@ func (s *artifactStage) revalidateAdmittedSource(path string, admitted artifactS
 	if err != nil {
 		return fmt.Errorf("%w: revalidate %s: %v", errArtifactSourceChanged, path, err)
 	}
-	if !admitted.matches(info) {
+	if !admitted.matches(s.fs, path, info) {
 		return fmt.Errorf("%w: %s", errArtifactSourceChanged, path)
 	}
 	return nil

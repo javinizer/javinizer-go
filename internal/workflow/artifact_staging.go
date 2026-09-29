@@ -180,7 +180,7 @@ func (o *applyOrchImpl) prepareArtifact(ctx context.Context, cmd ApplyCmd) (*art
 		// Pin the admitted source identity: the deferred publication consumes
 		// sourcePath directly after the merge/download/NFO interval and must
 		// re-prove it still names THIS file before any byte moves or copies.
-		stage.sourceIdentity = captureArtifactSourceIdentity(sourceInfo)
+		stage.sourceIdentity = captureArtifactSourceIdentity(o.fs, sourcePath, sourceInfo)
 		base := filepath.Base(sourcePath)
 		stagedDir := filepath.Join(root, ".source")
 		if inPlace {
@@ -223,7 +223,7 @@ func (o *applyOrchImpl) prepareArtifact(ctx context.Context, cmd ApplyCmd) (*art
 				stage.cleanup()
 				return nil, cmd, err
 			}
-			stage.siblings = append(stage.siblings, artifactSibling{sourcePath: sibling, stagedPath: stagedSibling, identity: captureArtifactSourceIdentity(siblingInfo)})
+			stage.siblings = append(stage.siblings, artifactSibling{sourcePath: sibling, stagedPath: stagedSibling, identity: captureArtifactSourceIdentity(o.fs, sibling, siblingInfo)})
 		}
 		stagedCmd.Match.Path = stage.stagedSource
 		stagedCmd.Match.Name = base

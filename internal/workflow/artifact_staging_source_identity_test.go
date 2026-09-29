@@ -40,12 +40,12 @@ func swapReplace(t *testing.T, fs afero.Fs, path string, replacement []byte, adm
 }
 
 func TestCaptureArtifactSourceIdentityRejectsNonRegular(t *testing.T) {
-	assert.False(t, captureArtifactSourceIdentity(nil).known, "nil info captures nothing")
+	assert.False(t, captureArtifactSourceIdentity(nil, "", nil).known, "nil info captures nothing")
 	base := afero.NewMemMapFs()
 	require.NoError(t, base.MkdirAll("/dir", 0o755))
 	info, err := base.Stat("/dir")
 	require.NoError(t, err)
-	assert.False(t, captureArtifactSourceIdentity(info).known, "a directory is never an admitted source")
+	assert.False(t, captureArtifactSourceIdentity(base, "/dir", info).known, "a directory is never an admitted source")
 }
 
 func TestArtifactSourceIdentityMemfsShapeAndDrift(t *testing.T) {
@@ -53,33 +53,33 @@ func TestArtifactSourceIdentityMemfsShapeAndDrift(t *testing.T) {
 	require.NoError(t, afero.WriteFile(base, "/m.mp4", []byte("video"), 0o644))
 	info, err := base.Stat("/m.mp4")
 	require.NoError(t, err)
-	id := captureArtifactSourceIdentity(info)
+	id := captureArtifactSourceIdentity(base, "/m.mp4", info)
 	require.True(t, id.known)
 	assert.False(t, id.hasDevIno, "in-memory afero keeps the size+modtime legs only")
-	assert.True(t, id.matches(info), "an untouched source still matches")
-	assert.False(t, id.matches(nil))
+	assert.True(t, id.matches(base, "/m.mp4", info), "an untouched source still matches")
+	assert.False(t, id.matches(base, "/m.mp4", nil))
 
 	require.NoError(t, afero.WriteFile(base, "/m.mp4", []byte("video payload"), 0o644))
 	grown, err := base.Stat("/m.mp4")
 	require.NoError(t, err)
-	assert.False(t, id.matches(grown), "a size change proves a rewrite")
+	assert.False(t, id.matches(base, "/m.mp4", grown), "a size change proves a rewrite")
 
 	require.NoError(t, afero.WriteFile(base, "/m.mp4", []byte("VIDEO"), 0o644))
 	moved := info.ModTime().Add(2 * time.Hour)
 	require.NoError(t, base.Chtimes("/m.mp4", moved, moved))
 	shifted, err := base.Stat("/m.mp4")
 	require.NoError(t, err)
-	assert.False(t, id.matches(shifted), "a modtime change proves a rewrite at equal size")
+	assert.False(t, id.matches(base, "/m.mp4", shifted), "a modtime change proves a rewrite at equal size")
 
 	dirInfo, err := base.Stat("/")
 	require.NoError(t, err)
-	assert.False(t, id.matches(dirInfo), "a non-regular replacement never matches")
+	assert.False(t, id.matches(base, "/m.mp4", dirInfo), "a non-regular replacement never matches")
 
 	// A captured dev/inode leg degrades to size+modtime when the current
 	// lookup exposes none (mixed real/wrapper filesystem postures).
 	fabricated := artifactSourceIdentity{known: true, hasDevIno: true, dev: 1, ino: 2, size: grown.Size(), modTime: grown.ModTime()}
-	assert.True(t, fabricated.matches(grown))
-	assert.False(t, artifactSourceIdentity{}.matches(grown), "unknown identity matches nothing")
+	assert.True(t, fabricated.matches(base, "/m.mp4", grown))
+	assert.False(t, artifactSourceIdentity{}.matches(base, "/m.mp4", grown), "unknown identity matches nothing")
 }
 
 func TestArtifactSourceIdentityOsFsRenameSwapChangesInode(t *testing.T) {
@@ -89,14 +89,14 @@ func TestArtifactSourceIdentityOsFsRenameSwapChangesInode(t *testing.T) {
 	require.NoError(t, afero.WriteFile(base, path, []byte("video"), 0o644))
 	info, err := base.Stat(path)
 	require.NoError(t, err)
-	id := captureArtifactSourceIdentity(info)
+	id := captureArtifactSourceIdentity(base, path, info)
 	require.True(t, id.known)
 	if !id.hasDevIno {
 		t.Skip("platform exposes no dev/inode identity")
 	}
 	restat, err := base.Stat(path)
 	require.NoError(t, err)
-	assert.True(t, id.matches(restat), "a quiet file keeps its identity")
+	assert.True(t, id.matches(base, path, restat), "a quiet file keeps its identity")
 
 	// Replace-then-restore: same size, mtime forced back to the admitted
 	// value — the surviving difference must be the inode.
@@ -105,7 +105,7 @@ func TestArtifactSourceIdentityOsFsRenameSwapChangesInode(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, id.size, swapped.Size())
 	assert.True(t, info.ModTime().Equal(swapped.ModTime()), "size and mtime restored")
-	assert.False(t, id.matches(swapped), "inode leg alone still pins the swap")
+	assert.False(t, id.matches(base, path, swapped), "inode leg alone still pins the swap")
 }
 
 func TestRevalidateAdmittedSourceSkipsUnknownIdentity(t *testing.T) {
@@ -119,7 +119,7 @@ func TestRevalidateAdmittedSourceStatFaultRefuses(t *testing.T) {
 	require.NoError(t, afero.WriteFile(base, "/m.mp4", []byte("video"), 0o644))
 	info, err := base.Stat("/m.mp4")
 	require.NoError(t, err)
-	id := captureArtifactSourceIdentity(info)
+	id := captureArtifactSourceIdentity(base, "/m.mp4", info)
 	stage := &artifactStage{fs: &pr260StatFailureFs{Fs: base, path: "/m.mp4"}}
 	err = stage.revalidateAdmittedSource("/m.mp4", id)
 	require.ErrorIs(t, err, errArtifactSourceChanged)
@@ -153,9 +153,9 @@ func TestRevalidateDirectSourcesDispatch(t *testing.T) {
 	stage := &artifactStage{
 		fs:             base,
 		sourcePath:     "/real/m.mp4",
-		sourceIdentity: captureArtifactSourceIdentity(videoInfo),
+		sourceIdentity: captureArtifactSourceIdentity(base, "/real/m.mp4", videoInfo),
 		siblings: []artifactSibling{
-			{sourcePath: "/real/m.srt", stagedPath: "/stage/.source/m.srt", identity: captureArtifactSourceIdentity(subInfo)},
+			{sourcePath: "/real/m.srt", stagedPath: "/stage/.source/m.srt", identity: captureArtifactSourceIdentity(base, "/real/m.srt", subInfo)},
 		},
 	}
 	moves := []models.SubtitleMove{{OriginalPath: "/real/m.srt", NewPath: "/out/m.srt"}}
@@ -177,7 +177,7 @@ func TestRevalidateDirectSourcesDispatch(t *testing.T) {
 	require.NoError(t, afero.WriteFile(base, "/real/m.mp4", []byte("video"), 0o644))
 	videoRestat, err := base.Stat("/real/m.mp4")
 	require.NoError(t, err)
-	stage.sourceIdentity = captureArtifactSourceIdentity(videoRestat)
+	stage.sourceIdentity = captureArtifactSourceIdentity(base, "/real/m.mp4", videoRestat)
 	require.NoError(t, afero.WriteFile(base, "/real/m.srt", []byte("subtitle-drifted"), 0o644))
 	err = stage.revalidateDirectSources(identityProbeExecutor{moves: moves}, realPlan)
 	require.ErrorIs(t, err, errArtifactSourceChanged)
@@ -187,10 +187,10 @@ func TestRevalidateDirectSourcesDispatch(t *testing.T) {
 	require.NoError(t, afero.WriteFile(base, "/real/m.srt", []byte("subtitle"), 0o644))
 	restat, err := base.Stat("/real/m.mp4")
 	require.NoError(t, err)
-	stage.sourceIdentity = captureArtifactSourceIdentity(restat)
+	stage.sourceIdentity = captureArtifactSourceIdentity(base, "/real/m.mp4", restat)
 	subRestat, err := base.Stat("/real/m.srt")
 	require.NoError(t, err)
-	stage.siblings[0].identity = captureArtifactSourceIdentity(subRestat)
+	stage.siblings[0].identity = captureArtifactSourceIdentity(base, "/real/m.srt", subRestat)
 	require.NoError(t, stage.revalidateDirectSources(identityProbeExecutor{moves: moves}, realPlan))
 }
 
@@ -242,7 +242,7 @@ func TestDeferredMovePublishAbortsWhenSourceReplaced(t *testing.T) {
 			dest := filepath.Join(root, "library")
 			admitted, statErr := base.Stat(source)
 			require.NoError(t, statErr)
-			if m.requiresDevIno && !captureArtifactSourceIdentity(admitted).hasDevIno {
+			if m.requiresDevIno && !captureArtifactSourceIdentity(base, source, admitted).hasDevIno {
 				t.Skip("platform exposes no dev/inode identity: a same-size, same-mtime rename swap is indistinguishable from the admitted file there")
 			}
 			org := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize, MoveSubtitles: true, SubtitleExtensions: []string{".srt"}}, template.NewEngine(), nil)
@@ -319,7 +319,7 @@ func TestDeferredMovePublishAbortsWhenSubtitleReplaced(t *testing.T) {
 	dest := filepath.Join(root, "library")
 	admitted, statErr := base.Stat(subtitle)
 	require.NoError(t, statErr)
-	if !captureArtifactSourceIdentity(admitted).hasDevIno {
+	if !captureArtifactSourceIdentity(base, subtitle, admitted).hasDevIno {
 		t.Skip("platform exposes no dev/inode identity: a same-size, same-mtime rename swap is indistinguishable from the admitted file there")
 	}
 	org := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize, MoveSubtitles: true, SubtitleExtensions: []string{".srt"}}, template.NewEngine(), nil)
@@ -370,8 +370,10 @@ func TestDeferredMovePublishSucceedsWhenSourcesUntouched(t *testing.T) {
 	switch runtime.GOOS {
 	case "darwin", "dragonfly", "freebsd", "linux", "netbsd", "openbsd", "solaris":
 		require.True(t, stage.sourceIdentity.hasDevIno, "OsFs admission carries dev/inode on POSIX Stat_t targets")
+	case "windows":
+		require.True(t, stage.sourceIdentity.hasDevIno, "OsFs admission carries the volume-serial+file-index handle identity on Windows")
 	default:
-		require.False(t, stage.sourceIdentity.hasDevIno, "no POSIX Stat_t on this target — admission keeps the size+mtime legs")
+		require.False(t, stage.sourceIdentity.hasDevIno, "no POSIX Stat_t or Windows handle identity on this target — admission keeps the size+mtime legs")
 	}
 	require.Len(t, stage.siblings, 2)
 	for _, sibling := range stage.siblings {
@@ -403,7 +405,7 @@ func TestDeferredMoveAbortsRemovingReplacedSiblingOriginal(t *testing.T) {
 	dest := filepath.Join(root, "library")
 	admitted, statErr := base.Stat(multipart)
 	require.NoError(t, statErr)
-	if !captureArtifactSourceIdentity(admitted).hasDevIno {
+	if !captureArtifactSourceIdentity(base, multipart, admitted).hasDevIno {
 		t.Skip("platform exposes no dev/inode identity: a same-size, same-mtime rename swap is indistinguishable from the admitted file there")
 	}
 	org := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize, MoveSubtitles: true, SubtitleExtensions: []string{".srt"}}, template.NewEngine(), nil)
@@ -543,14 +545,14 @@ func TestRevalidateAdmittedSourceRejectsSymlinkDirectoryEntry(t *testing.T) {
 	require.NoError(t, afero.WriteFile(base, "/m.mp4", []byte("video"), 0o644))
 	info, err := base.Stat("/m.mp4")
 	require.NoError(t, err)
-	id := captureArtifactSourceIdentity(info)
+	id := captureArtifactSourceIdentity(base, "/m.mp4", info)
 	stage := &artifactStage{fs: &symlinkEntryLstatFs{Fs: base, linkPath: "/m.mp4"}}
 	err = stage.revalidateAdmittedSource("/m.mp4", id)
 	require.ErrorIs(t, err, errArtifactSourceChanged,
 		"a symlink directory entry at the admitted pathname never matches — its link object, not the target, would be moved")
-	assert.False(t, captureArtifactSourceIdentity(symlinkModeInfo{info}).known,
+	assert.False(t, captureArtifactSourceIdentity(base, "/m.mp4", symlinkModeInfo{info}).known,
 		"admission never pins a symlink entry")
-	assert.False(t, captureArtifactSourceIdentity(symlinkModeInfo{info}).matches(info),
+	assert.False(t, captureArtifactSourceIdentity(base, "/m.mp4", symlinkModeInfo{info}).matches(base, "/m.mp4", info),
 		"a symlink-shaped pin matches nothing")
 	got, readErr := afero.ReadFile(base, "/m.mp4")
 	require.NoError(t, readErr)
@@ -565,7 +567,7 @@ func TestRevalidateAdmittedSourceStatFallbackWithoutLstater(t *testing.T) {
 	require.NoError(t, afero.WriteFile(base, "/m.mp4", []byte("video"), 0o644))
 	info, err := base.Stat("/m.mp4")
 	require.NoError(t, err)
-	id := captureArtifactSourceIdentity(info)
+	id := captureArtifactSourceIdentity(base, "/m.mp4", info)
 	stage := &artifactStage{fs: statOnlyArtifactFs{base}}
 	require.NoError(t, stage.revalidateAdmittedSource("/m.mp4", id),
 		"no Lstater: Stat answers the lookup; memfs has no symlinks to hide")

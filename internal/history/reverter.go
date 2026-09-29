@@ -773,9 +773,19 @@ func cleanupGeneratedFilesFS(fs afero.Fs, op *models.BatchFileOperation, stopAt 
 			logging.Debugf("cleanupGeneratedFiles: pending delete probe failed for %s: %v", path, openErr)
 			continue
 		}
+		// The identity is captured from the OPEN HANDLE, never the pathname:
+		// the digest below authenticates exactly this object's bytes, so the
+		// removal must bind to the same object (codex P1,
+		// PRRT_kwDORn9KaM6m6WAj). A capture failure leaves nothing to bind the
+		// unlink to — retain rather than pathname-remove an unproven name.
+		pinned, pinnedErr := file.Stat()
 		h := sha256.New()
 		_, copyErr := io.Copy(h, file)
 		closeErr := file.Close()
+		if pinnedErr != nil {
+			logging.Debugf("cleanupGeneratedFiles: pending delete %s identity could not be captured — retained: %v", path, pinnedErr)
+			continue
+		}
 		if copyErr != nil || closeErr != nil {
 			logging.Debugf("cleanupGeneratedFiles: pending delete digest failed for %s: %v/%v", path, copyErr, closeErr)
 			continue
@@ -784,8 +794,22 @@ func cleanupGeneratedFilesFS(fs afero.Fs, op *models.BatchFileOperation, stopAt 
 			logging.Debugf("cleanupGeneratedFiles: pending delete %s no longer carries the pinned bytes — retained", path)
 			continue
 		}
-		if err := fs.Remove(path); err != nil && !os.IsNotExist(err) {
-			logging.Debugf("cleanupGeneratedFiles: failed to remove pending delete %s: %v", path, err)
+		// Identity-verified unlink (fsutil.UnlinkVerified — the same
+		// bound-unlink construction the quarantine holds carry): the hashed
+		// object vacates onto a fresh crypto-claimed terminal sibling, the
+		// terminal re-binds to the pinned identity, and ONLY the re-bound
+		// terminal is unlinked. A foreign occupant rename-swapped onto path
+		// inside the hash→unlink window rides the vacate onto the terminal,
+		// fails the rebind, and is rewound byte-intact — never a pathname
+		// Remove of an unproven occupant.
+		if err := fsutil.UnlinkVerified(fs, path, pinned); err != nil {
+			if errors.Is(err, fsutil.ErrTakeAsideVanished) {
+				// The pinned bytes vanished under the verified unlink — the
+				// entry consumed itself; prune the empty parent as consumed.
+				dirsToCheck[filepath.Dir(path)] = true
+				continue
+			}
+			logging.Debugf("cleanupGeneratedFiles: pending delete %s could not be removed identity-verified — retained: %v", path, err)
 			continue
 		}
 		dirsToCheck[filepath.Dir(path)] = true
