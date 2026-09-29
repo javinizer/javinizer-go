@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -517,6 +518,19 @@ func TestDeferredMovePublishesAdmittedSubtitleDespitePostClaimPlant(t *testing.T
 // opens it (armed at ExecuteOrganizePlan entry — after every admission-phase
 // reader). The just-opened handle keeps addressing the ADMITTED object, so a
 // name swap anywhere after the open cannot retarget the streamed bytes.
+//
+// The pin is opened per-platform (openSwapPinnedSource): Windows relocation
+// (MoveFileEx) is refused with ERROR_ACCESS_DENIED while ANY handle on the
+// entry lacks FILE_SHARE_DELETE, and Go's os.Open does not share deletion
+// (syscall.Open's fixed read|write sharemode). A plain-open pin would rehearse
+// a state the production verified opener (fsutil.openVerifiedSource, which
+// pins an OsFs source delete-shared on Windows) can never produce: the swap's
+// rename refused, then its replacement plant rewriting the pinned object IN
+// PLACE — no aside, and the streamed handle poisoned with foreign bytes the
+// admission proof then refuses on the size/modtime legs. Mirroring the
+// production sharing lets the simulated adversary relocate the admitted entry
+// aside and plant the replacement as a NEW object — the exact mid-flight
+// shape the composite is bound against on every platform.
 type swapAfterSourceOpenFS struct {
 	afero.Fs
 	sourcePath string
@@ -527,7 +541,7 @@ type swapAfterSourceOpenFS struct {
 }
 
 func (f *swapAfterSourceOpenFS) Open(name string) (afero.File, error) {
-	file, err := f.Fs.Open(name)
+	file, err := openSwapPinnedSource(f.Fs, name)
 	if err == nil && f.armed && !f.fired && filepath.Clean(name) == filepath.Clean(f.sourcePath) {
 		f.fired = true
 		_ = f.Fs.Rename(f.sourcePath, f.aside)
@@ -537,10 +551,16 @@ func (f *swapAfterSourceOpenFS) Open(name string) (afero.File, error) {
 }
 
 // F1 sidecar leg, copy lane, descriptor pinning: the subtitle entry is
-// swapped after the verified open. The stream reads the pinned handle, so the
-// destination receives the ADMITTED bytes and the replacement entry is never
-// read for the publish (the video-leg twin of
-// TestDeferredCopyPublishesAdmittedBytesDespitePostOpenSwap).
+// swapped after the verified open. The destination receives the ADMITTED
+// bytes and the replacement entry is never read for the publish (the
+// video-leg twin of TestDeferredCopyPublishesAdmittedBytesDespitePostOpenSwap).
+// POSIX streams the pinned handle directly; on Windows the admission identity
+// cannot be re-proven off the swapped NAME (the strong-identity route,
+// fsutil.BoundObjectIdentity, re-opens the cleaned path and cross-checks the
+// handle stat against it — Win32FileAttributeData carries no volume/index key),
+// so the leg refuses typed BEFORE a byte flows — the same fail-closed class
+// pair as the pre-open swap twin — and the staged twin carries the admitted
+// bytes to the destination instead.
 func TestDeferredCopyPublishesAdmittedSubtitleDespitePostOpenSwap(t *testing.T) {
 	base, root, source, subtitle, multipart, unrelated, match := pr260FencedFiles(t, "verified-sub-open-swap")
 	dest := filepath.Join(root, "library")
@@ -560,17 +580,33 @@ func TestDeferredCopyPublishesAdmittedSubtitleDespitePostOpenSwap(t *testing.T) 
 	require.NoError(t, publishErr)
 	require.True(t, faultFS.fired, "the swap actually landed after the verified open")
 	require.Len(t, state.organizeResult.Subtitles, 1)
-	assert.True(t, state.organizeResult.Subtitles[0].Copied, "the handle-bound copy installed")
+	seat := state.organizeResult.Subtitles[0]
+	if runtime.GOOS == "windows" {
+		// Windows ABI shape of the same proof-first invariant: the swap replants
+		// the source name inside the composite's open→proof window, and the
+		// Windows identity route re-proves through the cleaned PATH — the
+		// admitted object's strong identity is unprovable the moment the name
+		// moved, so the leg refuses typed before a byte flows (fail-closed,
+		// class-identical to TestDeferredCopyRefusesSubtitleSwappedInsideExecute)
+		// rather than streaming the pinned handle. The destination earns the
+		// admitted bytes through the staged twin below either way.
+		require.Error(t, seat.Error)
+		assert.True(t, errors.Is(seat.Error, fsutil.ErrTakeAsideForeign), "seat: %v", seat.Error)
+		assert.True(t, errors.Is(seat.Error, errArtifactSourceChanged), "seat: %v", seat.Error)
+		assert.False(t, seat.Copied || seat.Moved || seat.Skipped, "a refusal is none of the consumption classes")
+	} else {
+		assert.True(t, seat.Copied, "the handle-bound copy installed")
+	}
 	target := filepath.Join(dest, "movie", "movie.srt")
 	got, err := afero.ReadFile(base, target)
 	require.NoError(t, err)
-	assert.Equal(t, "subtitle", string(got), "the pinned handle delivered the admitted bytes despite the swap")
+	assert.Equal(t, "subtitle", string(got), "the destination earns the admitted bytes despite the swap (POSIX: the pinned handle; Windows: the staged twin after the typed refusal)")
 	got, err = afero.ReadFile(base, subtitle)
 	require.NoError(t, err)
 	assert.Equal(t, "replacement subtitle", string(got), "the replacement is retained untouched")
 	got, err = afero.ReadFile(base, aside)
 	require.NoError(t, err)
-	assert.Equal(t, "subtitle", string(got))
+	assert.Equal(t, "subtitle", string(got), "the admitted object survives clean at the swept-aside name on every platform")
 	assertNoVacResidue(t, base, filepath.Dir(source))
 	for _, kept := range []string{source, multipart, unrelated} {
 		exists, serr := afero.Exists(base, kept)
