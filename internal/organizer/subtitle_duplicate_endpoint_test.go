@@ -18,27 +18,31 @@ import (
 // enumerates BOTH planned endpoints; the artifact staging arming loop dedupes
 // by normalized target and pins the FIRST planned source, mirroring this.
 func TestHandleSubtitles_DuplicateNormalizedEndpointsFirstWins(t *testing.T) {
+	srcDir := filepath.Join("/", "source")
+	srcFirst := filepath.Join(srcDir, "ABC-123.en.srt")
+	srcSecond := filepath.Join(srcDir, "ABC-123.eng.srt")
+	targetDir := filepath.Join("/", "dest", "ABC-123")
 	newPlan := func() *OrganizePlan {
 		return &OrganizePlan{
 			Match: models.FileMatchInfo{
 				MovieID: "ABC-123",
-				Path:    "/source/ABC-123.mp4", Name: "ABC-123.mp4", Extension: ".mp4",
+				Path:    filepath.Join(srcDir, "ABC-123.mp4"), Name: "ABC-123.mp4", Extension: ".mp4",
 			},
-			TargetDir:  "/dest/ABC-123",
+			TargetDir:  targetDir,
 			TargetFile: "ABC-123.mp4",
-			TargetPath: "/dest/ABC-123/ABC-123.mp4",
+			TargetPath: filepath.Join(targetDir, "ABC-123.mp4"),
 		}
 	}
 	newFS := func(t *testing.T) afero.Fs {
 		t.Helper()
 		fs := afero.NewMemMapFs()
-		require.NoError(t, fs.MkdirAll("/source", 0o777))
-		require.NoError(t, afero.WriteFile(fs, "/source/ABC-123.en.srt", []byte("first english"), 0o644))
-		require.NoError(t, afero.WriteFile(fs, "/source/ABC-123.eng.srt", []byte("second english"), 0o644))
+		require.NoError(t, fs.MkdirAll(srcDir, 0o777))
+		require.NoError(t, afero.WriteFile(fs, srcFirst, []byte("first english"), 0o644))
+		require.NoError(t, afero.WriteFile(fs, srcSecond, []byte("second english"), 0o644))
 		return fs
 	}
 	cfg := &Config{MoveSubtitles: true, SubtitleExtensions: []string{".srt"}}
-	endpoint := filepath.Join("/dest", "ABC-123", "ABC-123.eng.srt")
+	endpoint := filepath.Join(targetDir, "ABC-123.eng.srt")
 
 	t.Run("copy install copies the first and skips the duplicate", func(t *testing.T) {
 		fs := newFS(t)
@@ -48,15 +52,15 @@ func TestHandleSubtitles_DuplicateNormalizedEndpointsFirstWins(t *testing.T) {
 
 		require.Len(t, result.Subtitles, 2)
 		assert.True(t, result.Subtitles[0].Copied)
-		assert.Equal(t, "/source/ABC-123.en.srt", result.Subtitles[0].OriginalPath)
+		assert.Equal(t, srcFirst, result.Subtitles[0].OriginalPath)
 		assert.Equal(t, endpoint, result.Subtitles[0].NewPath)
 		assert.True(t, result.Subtitles[1].Skipped, "the duplicate endpoint seat skips (the first install occupies it)")
-		assert.Equal(t, "/source/ABC-123.eng.srt", result.Subtitles[1].OriginalPath)
+		assert.Equal(t, srcSecond, result.Subtitles[1].OriginalPath)
 		assert.Equal(t, endpoint, result.Subtitles[1].NewPath)
 		bytes, err := afero.ReadFile(fs, endpoint)
 		require.NoError(t, err)
 		assert.Equal(t, "first english", string(bytes), "the alphabetically-first source wins the endpoint")
-		for _, src := range []string{"/source/ABC-123.en.srt", "/source/ABC-123.eng.srt"} {
+		for _, src := range []string{srcFirst, srcSecond} {
 			exists, err := afero.Exists(fs, src)
 			require.NoError(t, err)
 			assert.True(t, exists, "copy install retains every source: %s", src)
@@ -75,10 +79,10 @@ func TestHandleSubtitles_DuplicateNormalizedEndpointsFirstWins(t *testing.T) {
 		bytes, err := afero.ReadFile(fs, endpoint)
 		require.NoError(t, err)
 		assert.Equal(t, "first english", string(bytes))
-		firstGone, err := afero.Exists(fs, "/source/ABC-123.en.srt")
+		firstGone, err := afero.Exists(fs, srcFirst)
 		require.NoError(t, err)
 		assert.False(t, firstGone, "the winning source moved")
-		secondRetained, err := afero.Exists(fs, "/source/ABC-123.eng.srt")
+		secondRetained, err := afero.Exists(fs, srcSecond)
 		require.NoError(t, err)
 		assert.True(t, secondRetained, "the skipped duplicate source stays put")
 	})
@@ -88,11 +92,11 @@ func TestHandleSubtitles_DuplicateNormalizedEndpointsFirstWins(t *testing.T) {
 		org := NewOrganizer(fs, cfg, nil, nil)
 		moves := org.PlanSubtitleMoves(newPlan())
 		require.Len(t, moves, 2, "the nil-install probe enumerates BOTH duplicate endpoints — dedupe is the arming lane's job")
-		assert.Equal(t, "/source/ABC-123.en.srt", moves[0].OriginalPath)
-		assert.Equal(t, "/source/ABC-123.eng.srt", moves[1].OriginalPath)
+		assert.Equal(t, srcFirst, moves[0].OriginalPath)
+		assert.Equal(t, srcSecond, moves[1].OriginalPath)
 		assert.Equal(t, endpoint, moves[0].NewPath)
 		assert.Equal(t, endpoint, moves[1].NewPath)
-		bytes, err := afero.ReadFile(fs, "/source/ABC-123.en.srt")
+		bytes, err := afero.ReadFile(fs, srcFirst)
 		require.NoError(t, err)
 		assert.Equal(t, "first english", string(bytes), "the probe never mutates the sources")
 	})
