@@ -416,6 +416,18 @@ type OrganizePlan struct {
 	// than publishing the replacement. Nil keeps the legacy by-name
 	// consumption (every direct flow and the overwrite-authorized lanes).
 	verifiedSourceProof fsutil.VerifiedSourceProof
+	// verifiedSubtitleProofs is the per-sidecar twin of verifiedSourceProof
+	// (codex P1, PRRT_kwDORn9KaM6m_lgp), keying each admitted subtitle SOURCE
+	// endpoint (cleaned original path) to the admission proof the fenced
+	// publication pinned at preparation. handleSubtitles' install legs consult
+	// it: a bound source installs through the verified no-replace twin, which
+	// re-proves the very object consumed and refuses a source rename-swapped
+	// after the caller's last validation (move mode restores the rejected
+	// object, copy mode never streams it). The m9afD probe freeze constrains
+	// WHICH endpoints may execute; this map constrains WHICH OBJECT the
+	// executed bytes carry. Nil map = legacy by-name consumption (every
+	// direct/un-fenced flow), and endpoints without an entry keep it too.
+	verifiedSubtitleProofs map[string]fsutil.VerifiedSourceProof
 }
 
 // BindVerifiedSource pins the plan's video-source consumption to the admission
@@ -424,6 +436,15 @@ type OrganizePlan struct {
 // before.
 func (p *OrganizePlan) BindVerifiedSource(proof fsutil.VerifiedSourceProof) {
 	p.verifiedSourceProof = proof
+}
+
+// BindVerifiedSubtitleSources pins each admitted subtitle source's install to
+// the admission identity its proof re-validates inside the install leg.
+// Setter semantics mirror BindVerifiedSource: the fenced deferred publication
+// rebinds the (freshly re-planned) execution plan once, and plans that never
+// carry proofs install subtitles exactly as before.
+func (p *OrganizePlan) BindVerifiedSubtitleSources(proofs map[string]fsutil.VerifiedSourceProof) {
+	p.verifiedSubtitleProofs = proofs
 }
 
 // Plan creates an organization plan without executing it
@@ -625,13 +646,26 @@ func (o *Organizer) PlanSubtitleMoves(plan *OrganizePlan) []models.SubtitleMove 
 }
 
 type subtitleInstall struct {
-	op     func(afero.Fs, string, string) error
-	copied bool
+	op       func(afero.Fs, string, string) error
+	verified func(afero.Fs, string, string, fsutil.VerifiedSourceProof) error
+	copied   bool
+}
+
+// run delivers one subtitle through the lane's composite. A source the caller
+// bound to an admission proof installs identity-bound through the verified
+// twin — the object consumed is re-proven, never merely its pathname — while
+// an unbound source keeps the legacy by-name leg unchanged. Both packaged
+// lanes always carry their twin; install.op == nil (probe) never reaches run.
+func (install subtitleInstall) run(fs afero.Fs, source, dest string, proof fsutil.VerifiedSourceProof) error {
+	if proof != nil {
+		return install.verified(fs, source, dest, proof)
+	}
+	return install.op(fs, source, dest)
 }
 
 var (
-	subtitleMoveInstall = subtitleInstall{op: fsutil.MoveFileNoReplace}
-	subtitleCopyInstall = subtitleInstall{op: fsutil.CopyFileNoReplace, copied: true}
+	subtitleMoveInstall = subtitleInstall{op: fsutil.MoveFileNoReplace, verified: fsutil.MoveFileNoReplaceVerified}
+	subtitleCopyInstall = subtitleInstall{op: fsutil.CopyFileNoReplace, verified: fsutil.CopyFileNoReplaceVerified, copied: true}
 )
 
 func (o *Organizer) handleSubtitles(plan *OrganizePlan, result *OrganizeResult, install subtitleInstall) {
@@ -696,7 +730,15 @@ func (o *Organizer) handleSubtitles(plan *OrganizePlan, result *OrganizeResult, 
 					sr.Skipped = true
 					return nil
 				}
-				err := install.op(o.fs, subtitle.OriginalPath, newPath)
+				// Admission-bound install (codex P1, PRRT_kwDORn9KaM6m_lgp): a source
+				// the fenced publication pinned at preparation is consumed through the
+				// verified composite, so a rename-swap inside the gate-to-consume
+				// window refuses with the typed classes instead of publishing the
+				// replacement under the admitted name. The probe freeze above decides
+				// WHETHER this endpoint installs; the proof decides WHICH object its
+				// bytes carry. Unbound sources (direct flows, post-admission
+				// arrivals) keep the legacy by-name composite.
+				err := install.run(o.fs, subtitle.OriginalPath, newPath, plan.verifiedSubtitleProofs[filepath.Clean(subtitle.OriginalPath)])
 				if err != nil && fsutil.PublishCompleted(err) {
 					// Post-publish cleanup refusal (#224 codex P2): bytes at the
 					// destination AND the source retained — an ambiguous delivery,

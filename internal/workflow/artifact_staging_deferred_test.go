@@ -240,6 +240,8 @@ type completeCallFaultLog struct {
 	reconciles   int32
 	keepCaptured []models.FileMove
 
+	movesCaptured []models.FileMove
+
 	deleteReconcileErr error
 	deleteReconciles   int32
 	deleteKeepCaptured []string
@@ -252,10 +254,11 @@ func (l *completeCallFaultLog) Complete(context.Context, OperationID, *ApplyResu
 	return nil
 }
 
-func (l *completeCallFaultLog) RecordMoveIntent(context.Context, OperationID, string, string) error {
+func (l *completeCallFaultLog) RecordMoveIntent(_ context.Context, _ OperationID, originalPath, newPath string) error {
 	if atomic.AddInt32(&l.intents, 1) == l.intentFailAt {
 		return errors.New("intent journal unavailable")
 	}
+	l.movesCaptured = append(l.movesCaptured, models.FileMove{OriginalPath: originalPath, NewPath: newPath})
 	return l.intentErr
 }
 

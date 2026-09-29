@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -354,6 +355,388 @@ func TestDeferredCopyFreezesSubtitleSetAtProbe(t *testing.T) {
 		require.NoError(t, serr)
 		assert.True(t, e, kept)
 	}
+}
+
+// F1 sidecar leg (codex P1, PRRT_kwDORn9KaM6m_lgp), move lane: the subtitle
+// source directory entry is rename-swapped AT ExecuteOrganizePlan — after the
+// pre-execute identity gate passed. The bound install must refuse rather than
+// consume the replacement: the verified composite restores the foreign object
+// onto the source name byte-intact, the seat records the typed refusal (never
+// Moved/Skipped), and the staged-twin republish's source-consumption
+// revalidation then aborts the apply with full rollback — the admitted
+// sidecar, the foreign replacement, and every other input stay put.
+func TestDeferredMoveRefusesSubtitleSwappedInsideExecute(t *testing.T) {
+	base, root, source, subtitle, multipart, unrelated, match := pr260FencedFiles(t, "verified-sub-move-swap")
+	dest := filepath.Join(root, "library")
+	real := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize, MoveSubtitles: true, SubtitleExtensions: []string{".srt"}}, template.NewEngine(), nil)
+	aside := filepath.Join(root, "incoming", "swapped-aside.srt")
+	var seatErr error
+	fault := &pr260PublicationFaultOrganizer{Organizer: real, preExecute: func(*organizer.OrganizePlan) {
+		_ = base.Rename(subtitle, aside)
+		_ = afero.WriteFile(base, subtitle, []byte("replacement subtitle"), 0o644)
+	}, afterExecute: func(_ *organizer.OrganizePlan, result *organizer.OrganizeResult) {
+		for i := range result.Subtitles {
+			if result.Subtitles[i].Error != nil {
+				seatErr = result.Subtitles[i].Error
+			}
+		}
+	}}
+	orch := &applyOrchImpl{fs: base, organizer: fault}
+	cmd := pr260ArtifactFailureCommand(&models.Movie{ContentID: "verified-sub-move-swap"}, match, dest)
+	cmd.Organize.Skip = false
+	cmd.Organize.MoveFiles = true
+	cmd.Download = false
+
+	stage, _, publishErr := verifiedStagePublish(t, orch, real, base, root, source, dest, match, cmd)
+	defer stage.cleanup()
+
+	require.ErrorIs(t, publishErr, errArtifactSourceChanged, "the republished twin's source-consumption revalidation aborts the apply")
+	assert.False(t, fsutil.PublishRefusal(publishErr), "a pre-publication admission refusal never classifies as a publish refusal")
+	require.Error(t, seatErr, "the organizer lane recorded the refused subtitle install on its seat")
+	assert.True(t, errors.Is(seatErr, fsutil.ErrTakeAsideForeign), "seat error class: %v", seatErr)
+	assert.True(t, errors.Is(seatErr, errArtifactSourceChanged), "the admission class rides the seat error: %v", seatErr)
+	got, err := afero.ReadFile(base, subtitle)
+	require.NoError(t, err)
+	assert.Equal(t, "replacement subtitle", string(got), "the rejected object rides back onto the source name byte-intact")
+	got, err = afero.ReadFile(base, aside)
+	require.NoError(t, err)
+	assert.Equal(t, "subtitle", string(got), "the admitted object is never touched")
+	got, err = afero.ReadFile(base, source)
+	require.NoError(t, err)
+	assert.Equal(t, "video", string(got), "rollback restored the moved video")
+	pr260AssertNoFinals(t, base, dest)
+	assertNoVacResidue(t, base, filepath.Dir(source))
+	for _, kept := range []string{multipart, unrelated} {
+		exists, serr := afero.Exists(base, kept)
+		require.NoError(t, serr)
+		assert.True(t, exists, kept)
+	}
+}
+
+// F1 sidecar leg, copy lane: the same swap refuses the verified copy (the
+// open handle fails its admission proof before a byte flows). The apply still
+// publishes: the tree lane installs the ADMITTED staged twin, the foreign
+// replacement stays put at the source name, and the seat records the typed
+// refusal (never Copied/Skipped — nothing the destination holds came through
+// this seat).
+func TestDeferredCopyRefusesSubtitleSwappedInsideExecute(t *testing.T) {
+	base, root, source, subtitle, multipart, unrelated, match := pr260FencedFiles(t, "verified-sub-copy-swap")
+	dest := filepath.Join(root, "library")
+	real := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize, MoveSubtitles: true, SubtitleExtensions: []string{".srt"}}, template.NewEngine(), nil)
+	aside := filepath.Join(root, "incoming", "swapped-aside.srt")
+	fault := &pr260PublicationFaultOrganizer{Organizer: real, preExecute: func(*organizer.OrganizePlan) {
+		_ = base.Rename(subtitle, aside)
+		_ = afero.WriteFile(base, subtitle, []byte("replacement subtitle"), 0o644)
+	}}
+	orch := &applyOrchImpl{fs: base, organizer: fault}
+	cmd := pr260ArtifactFailureCommand(&models.Movie{ContentID: "verified-sub-copy-swap"}, match, dest)
+	cmd.Organize.Skip = false
+	cmd.Organize.MoveFiles = false
+	cmd.Download = false
+
+	stage, state, publishErr := verifiedStagePublish(t, orch, real, base, root, source, dest, match, cmd)
+	defer stage.cleanup()
+
+	require.NoError(t, publishErr)
+	var seat *organizer.SubtitleResult
+	for i := range state.organizeResult.Subtitles {
+		if filepath.Clean(state.organizeResult.Subtitles[i].OriginalPath) == filepath.Clean(subtitle) {
+			seat = &state.organizeResult.Subtitles[i]
+		}
+	}
+	require.NotNil(t, seat, "the subtitle lane classified the refused install")
+	require.Error(t, seat.Error)
+	assert.True(t, errors.Is(seat.Error, fsutil.ErrTakeAsideForeign), "seat: %v", seat.Error)
+	assert.True(t, errors.Is(seat.Error, errArtifactSourceChanged), "seat: %v", seat.Error)
+	assert.False(t, seat.Copied || seat.Moved || seat.Skipped, "a refusal is none of the consumption classes")
+	targetDir := filepath.Join(dest, "movie")
+	got, err := afero.ReadFile(base, filepath.Join(targetDir, "movie.srt"))
+	require.NoError(t, err)
+	assert.Equal(t, "subtitle", string(got), "the destination holds the ADMITTED staged twin, never the replacement")
+	got, err = afero.ReadFile(base, filepath.Join(targetDir, "movie.mp4"))
+	require.NoError(t, err)
+	assert.Equal(t, "video", string(got))
+	got, err = afero.ReadFile(base, subtitle)
+	require.NoError(t, err)
+	assert.Equal(t, "replacement subtitle", string(got), "copy mode consumes nothing — the foreign replacement is retained")
+	got, err = afero.ReadFile(base, aside)
+	require.NoError(t, err)
+	assert.Equal(t, "subtitle", string(got))
+	assertNoVacResidue(t, base, filepath.Dir(source))
+	for _, kept := range []string{source, multipart, unrelated} {
+		exists, serr := afero.Exists(base, kept)
+		require.NoError(t, serr)
+		assert.True(t, exists, kept)
+	}
+}
+
+// F1 sidecar leg, move lane, mid-composite window: the plant lands at the
+// subtitle source name the moment the claim take consumed it. The claim still
+// carries the admitted object, so the publication installs the ADMITTED
+// subtitle and the plant is preserved, never consumed (the video-leg twin of
+// TestDeferredMovePublishesAdmittedDespitePostClaimPlant, sharing its probe).
+func TestDeferredMovePublishesAdmittedSubtitleDespitePostClaimPlant(t *testing.T) {
+	base, root, source, subtitle, multipart, unrelated, match := verifiedMemFixture(t, "verified-sub-plant-move")
+	dest := filepath.Join(root, "library")
+	faultFS := &plantAfterSourceRenameFS{Fs: base, sourcePath: subtitle, plant: []byte("planted foreign subtitle")}
+	org := organizer.NewOrganizer(faultFS, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize, MoveSubtitles: true, SubtitleExtensions: []string{".srt"}}, template.NewEngine(), nil)
+	orch := &applyOrchImpl{fs: faultFS, organizer: org}
+	cmd := pr260ArtifactFailureCommand(&models.Movie{ContentID: "verified-sub-plant-move"}, match, dest)
+	cmd.Organize.Skip = false
+	cmd.Organize.MoveFiles = true
+	cmd.Download = false
+
+	stage, state, publishErr := verifiedStagePublish(t, orch, org, faultFS, root, source, dest, match, cmd)
+	defer stage.cleanup()
+
+	require.NoError(t, publishErr)
+	require.True(t, faultFS.fired, "the plant actually landed mid-composite")
+	require.Len(t, state.organizeResult.Subtitles, 1)
+	assert.True(t, state.organizeResult.Subtitles[0].Moved, "the admitted subtitle's install succeeded")
+	target := filepath.Join(dest, "movie", "movie.srt")
+	got, err := afero.ReadFile(base, target)
+	require.NoError(t, err)
+	assert.Equal(t, "subtitle", string(got), "the bound install delivered the admitted identity")
+	got, err = afero.ReadFile(base, subtitle)
+	require.NoError(t, err)
+	assert.Equal(t, "planted foreign subtitle", string(got), "the foreign plant is preserved at the source name, never consumed")
+	got, err = afero.ReadFile(base, filepath.Join(dest, "movie", "movie.mp4"))
+	require.NoError(t, err)
+	assert.Equal(t, "video", string(got))
+	assertNoVacResidue(t, base, filepath.Dir(source))
+	for _, gone := range []string{source, multipart} {
+		exists, serr := afero.Exists(base, gone)
+		require.NoError(t, serr)
+		assert.False(t, exists, "deferred-move consumption of the untouched inputs is unchanged: %s", gone)
+	}
+	exists, _ := afero.Exists(base, unrelated)
+	assert.True(t, exists)
+}
+
+// swapAfterSourceOpenFS rename-swaps sourcePath the moment the verified copy
+// opens it (armed at ExecuteOrganizePlan entry — after every admission-phase
+// reader). The just-opened handle keeps addressing the ADMITTED object, so a
+// name swap anywhere after the open cannot retarget the streamed bytes.
+type swapAfterSourceOpenFS struct {
+	afero.Fs
+	sourcePath string
+	aside      string
+	replBytes  []byte
+	armed      bool
+	fired      bool
+}
+
+func (f *swapAfterSourceOpenFS) Open(name string) (afero.File, error) {
+	file, err := f.Fs.Open(name)
+	if err == nil && f.armed && !f.fired && filepath.Clean(name) == filepath.Clean(f.sourcePath) {
+		f.fired = true
+		_ = f.Fs.Rename(f.sourcePath, f.aside)
+		_ = afero.WriteFile(f.Fs, f.sourcePath, f.replBytes, 0o644)
+	}
+	return file, err
+}
+
+// F1 sidecar leg, copy lane, descriptor pinning: the subtitle entry is
+// swapped after the verified open. The stream reads the pinned handle, so the
+// destination receives the ADMITTED bytes and the replacement entry is never
+// read for the publish (the video-leg twin of
+// TestDeferredCopyPublishesAdmittedBytesDespitePostOpenSwap).
+func TestDeferredCopyPublishesAdmittedSubtitleDespitePostOpenSwap(t *testing.T) {
+	base, root, source, subtitle, multipart, unrelated, match := pr260FencedFiles(t, "verified-sub-open-swap")
+	dest := filepath.Join(root, "library")
+	aside := filepath.Join(root, "incoming", "swapped-aside.srt")
+	faultFS := &swapAfterSourceOpenFS{Fs: base, sourcePath: subtitle, aside: aside, replBytes: []byte("replacement subtitle")}
+	real := organizer.NewOrganizer(faultFS, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize, MoveSubtitles: true, SubtitleExtensions: []string{".srt"}}, template.NewEngine(), nil)
+	fault := &pr260PublicationFaultOrganizer{Organizer: real, preExecute: func(*organizer.OrganizePlan) { faultFS.armed = true }}
+	orch := &applyOrchImpl{fs: faultFS, organizer: fault}
+	cmd := pr260ArtifactFailureCommand(&models.Movie{ContentID: "verified-sub-open-swap"}, match, dest)
+	cmd.Organize.Skip = false
+	cmd.Organize.MoveFiles = false
+	cmd.Download = false
+
+	stage, state, publishErr := verifiedStagePublish(t, orch, real, faultFS, root, source, dest, match, cmd)
+	defer stage.cleanup()
+
+	require.NoError(t, publishErr)
+	require.True(t, faultFS.fired, "the swap actually landed after the verified open")
+	require.Len(t, state.organizeResult.Subtitles, 1)
+	assert.True(t, state.organizeResult.Subtitles[0].Copied, "the handle-bound copy installed")
+	target := filepath.Join(dest, "movie", "movie.srt")
+	got, err := afero.ReadFile(base, target)
+	require.NoError(t, err)
+	assert.Equal(t, "subtitle", string(got), "the pinned handle delivered the admitted bytes despite the swap")
+	got, err = afero.ReadFile(base, subtitle)
+	require.NoError(t, err)
+	assert.Equal(t, "replacement subtitle", string(got), "the replacement is retained untouched")
+	got, err = afero.ReadFile(base, aside)
+	require.NoError(t, err)
+	assert.Equal(t, "subtitle", string(got))
+	assertNoVacResidue(t, base, filepath.Dir(source))
+	for _, kept := range []string{source, multipart, unrelated} {
+		exists, serr := afero.Exists(base, kept)
+		require.NoError(t, serr)
+		assert.True(t, exists, kept)
+	}
+}
+
+// faultClaimStatFS faults the verified move's POST-TAKE claim lookup once —
+// the claim name is sourcePath+".vac."+token, so the fault keys on that
+// prefix and never touches the video leg's claims. The reservation release
+// and the take's own destination classification look the claim name up too,
+// so the fault gates on the take itself: once the source rename lands, the
+// NEXT claim-name lookup is the post-take re-proof (the leg under test).
+type faultClaimStatFS struct {
+	afero.Fs
+	sourcePath string
+	taken      bool
+	fired      bool
+}
+
+func (f *faultClaimStatFS) Rename(oldname, newname string) error {
+	err := f.Fs.Rename(oldname, newname)
+	if err == nil && filepath.Clean(oldname) == filepath.Clean(f.sourcePath) {
+		f.taken = true
+	}
+	return err
+}
+
+func (f *faultClaimStatFS) LstatIfPossible(name string) (os.FileInfo, bool, error) {
+	if f.taken && !f.fired && strings.HasPrefix(filepath.Clean(name), filepath.Clean(f.sourcePath)+".vac.") {
+		f.fired = true
+		return nil, false, errors.New("claim stat fault")
+	}
+	if lst, ok := f.Fs.(afero.Lstater); ok {
+		return lst.LstatIfPossible(name)
+	}
+	info, err := f.Fs.Stat(name)
+	return info, false, err
+}
+
+// F1 sidecar stat-fault leg, move lane: the post-take re-proof lookup fails.
+// The taken-aside ADMITTED subtitle rides back onto its source (no-replace),
+// the seat records the stat fault, and the staged-twin lane republishes the
+// admitted bytes and consumes the revalidated original — move semantics hold
+// end to end with no claim residue.
+func TestDeferredMoveSubtitleClaimStatFaultRestoresAndRepublishes(t *testing.T) {
+	base, root, source, subtitle, multipart, unrelated, match := verifiedMemFixture(t, "verified-sub-claim-stat")
+	dest := filepath.Join(root, "library")
+	faultFS := &faultClaimStatFS{Fs: base, sourcePath: subtitle}
+	org := organizer.NewOrganizer(faultFS, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize, MoveSubtitles: true, SubtitleExtensions: []string{".srt"}}, template.NewEngine(), nil)
+	orch := &applyOrchImpl{fs: faultFS, organizer: org}
+	cmd := pr260ArtifactFailureCommand(&models.Movie{ContentID: "verified-sub-claim-stat"}, match, dest)
+	cmd.Organize.Skip = false
+	cmd.Organize.MoveFiles = true
+	cmd.Download = false
+
+	stage, state, publishErr := verifiedStagePublish(t, orch, org, faultFS, root, source, dest, match, cmd)
+	defer stage.cleanup()
+
+	require.NoError(t, publishErr)
+	require.True(t, faultFS.fired, "the stat fault actually hit the subtitle claim")
+	require.Len(t, state.organizeResult.Subtitles, 1)
+	seat := state.organizeResult.Subtitles[0]
+	require.Error(t, seat.Error)
+	assert.Contains(t, seat.Error.Error(), "inspect the taken claim")
+	assert.False(t, seat.Moved || seat.Skipped)
+	got, err := afero.ReadFile(base, filepath.Join(dest, "movie", "movie.srt"))
+	require.NoError(t, err)
+	assert.Equal(t, "subtitle", string(got), "the republished staged twin delivers the admitted bytes")
+	exists, serr := afero.Exists(base, subtitle)
+	require.NoError(t, serr)
+	assert.False(t, exists, "the revalidated original was consumed per move semantics")
+	assertNoVacResidue(t, base, filepath.Dir(source))
+	for _, gone := range []string{source, multipart} {
+		e, serr := afero.Exists(base, gone)
+		require.NoError(t, serr)
+		assert.False(t, e, gone)
+	}
+	e, _ := afero.Exists(base, unrelated)
+	assert.True(t, e)
+}
+
+// faultSourceOpenFS faults the verified copy's source open once while armed —
+// arming rides the fault organizer's preExecute hook so admission-phase
+// readers (staging copy, identity capture) never see it.
+type faultSourceOpenFS struct {
+	afero.Fs
+	sourcePath string
+	armed      bool
+	fired      bool
+}
+
+func (f *faultSourceOpenFS) Open(name string) (afero.File, error) {
+	if f.armed && !f.fired && filepath.Clean(name) == filepath.Clean(f.sourcePath) {
+		f.fired = true
+		return nil, errors.New("source open fault")
+	}
+	return f.Fs.Open(name)
+}
+
+// F1 sidecar stat-fault leg, copy lane: the source open itself fails. The
+// seat records the fault, nothing is consumed (copy mode retains sources),
+// and the tree lane installs the admitted staged twin.
+func TestDeferredCopySubtitleSourceOpenFaultRepublishesTwin(t *testing.T) {
+	base, root, source, subtitle, multipart, unrelated, match := verifiedMemFixture(t, "verified-sub-open-fault")
+	dest := filepath.Join(root, "library")
+	faultFS := &faultSourceOpenFS{Fs: base, sourcePath: subtitle}
+	real := organizer.NewOrganizer(faultFS, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize, MoveSubtitles: true, SubtitleExtensions: []string{".srt"}}, template.NewEngine(), nil)
+	fault := &pr260PublicationFaultOrganizer{Organizer: real, preExecute: func(*organizer.OrganizePlan) { faultFS.armed = true }}
+	orch := &applyOrchImpl{fs: faultFS, organizer: fault}
+	cmd := pr260ArtifactFailureCommand(&models.Movie{ContentID: "verified-sub-open-fault"}, match, dest)
+	cmd.Organize.Skip = false
+	cmd.Organize.MoveFiles = false
+	cmd.Download = false
+
+	stage, state, publishErr := verifiedStagePublish(t, orch, real, faultFS, root, source, dest, match, cmd)
+	defer stage.cleanup()
+
+	require.NoError(t, publishErr)
+	require.True(t, faultFS.fired, "the open fault actually hit the subtitle source")
+	require.Len(t, state.organizeResult.Subtitles, 1)
+	seat := state.organizeResult.Subtitles[0]
+	require.Error(t, seat.Error)
+	assert.Contains(t, seat.Error.Error(), "open source")
+	assert.False(t, seat.Copied || seat.Skipped)
+	got, err := afero.ReadFile(base, filepath.Join(dest, "movie", "movie.srt"))
+	require.NoError(t, err)
+	assert.Equal(t, "subtitle", string(got), "the tree lane installs the admitted staged twin")
+	got, err = afero.ReadFile(base, subtitle)
+	require.NoError(t, err)
+	assert.Equal(t, "subtitle", string(got), "copy mode retains the source")
+	assertNoVacResidue(t, base, filepath.Dir(source))
+	for _, kept := range []string{source, multipart, unrelated} {
+		e, serr := afero.Exists(base, kept)
+		require.NoError(t, serr)
+		assert.True(t, e, kept)
+	}
+}
+
+// siblingSourceProofs: nil for unpinned/absent-identity stages; each closure
+// applies the admission identity matcher verbatim, keyed by cleaned source
+// path, and unpinnable siblings contribute no entry.
+func TestSiblingSourceProofsUnits(t *testing.T) {
+	assert.Nil(t, (*artifactStage)(nil).siblingSourceProofs())
+	assert.Nil(t, (&artifactStage{}).siblingSourceProofs())
+
+	base := afero.NewMemMapFs()
+	require.NoError(t, afero.WriteFile(base, "/src/m.srt", []byte("admitted sub"), 0o644))
+	require.NoError(t, afero.WriteFile(base, "/src/other.srt", []byte("other sub"), 0o644))
+	info, err := base.Stat("/src/m.srt")
+	require.NoError(t, err)
+	other, err := base.Stat("/src/other.srt")
+	require.NoError(t, err)
+	stage := &artifactStage{fs: base, siblings: []artifactSibling{
+		{sourcePath: "/src/m.srt", identity: captureArtifactSourceIdentity(base, "/src/m.srt", info)},
+		{sourcePath: "/src/unpinned.srt"},
+	}}
+	proofs := stage.siblingSourceProofs()
+	require.Len(t, proofs, 1, "only pinnable-identity siblings bind")
+	proof := proofs[filepath.Clean("/src/m.srt")]
+	require.NotNil(t, proof)
+	assert.NoError(t, proof("/src/m.srt", info))
+	require.ErrorIs(t, proof("/src/other.srt", other), errArtifactSourceChanged)
+	_, unpinned := proofs[filepath.Clean("/src/unpinned.srt")]
+	assert.False(t, unpinned)
 }
 
 // deferredSourceProof: nil for unpinned stages; the closure applies the

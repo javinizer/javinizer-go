@@ -119,6 +119,154 @@ func TestDeferredCopyDuplicateSubtitleEndpointsSinglePin(t *testing.T) {
 	pr260AssertRetained(t, base, source, subFirst, multipart, unrelated)
 }
 
+// The deferred-MOVE intent journaling dedupes the same normalized endpoint
+// BEFORE any pending intent lands (codex P2, PRRT_kwDORn9KaM6m_lgt): the
+// organizer's sequential lane moves the FIRST planned source and skips the
+// duplicate, so exactly one MoveBack intent journals per shared destination
+// (pinned to the winner's source), the skipped duplicate keeps no row at all
+// for the outcome reconciliation to retract, and the reconciler's keep-set
+// carries exactly video + winner.
+func TestDeferredMoveDuplicateSubtitleEndpointsSingleIntent(t *testing.T) {
+	fs, root, source, subFirst, subSecond, multipart, unrelated, match := dupSubFiles(t, "move-dup-single-intent")
+	dest := filepath.Join(root, "library")
+	real := organizer.NewOrganizer(fs, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize, MoveSubtitles: true, SubtitleExtensions: []string{".srt"}}, template.NewEngine(), nil)
+	ledger := &completeCallFaultLog{}
+	orch := &applyOrchImpl{fs: fs, organizer: real, revertLog: ledger}
+	cmd := pr260ArtifactFailureCommand(&models.Movie{ContentID: "move-dup-single-intent"}, match, dest)
+	cmd.Organize.Skip = false
+	cmd.Organize.MoveFiles = true
+	cmd.Download = false
+
+	stage, state, publishErr := verifiedStagePublish(t, orch, real, fs, root, source, dest, match, cmd)
+	defer stage.cleanup()
+	require.NoError(t, publishErr)
+
+	require.Len(t, state.organizeResult.Subtitles, 2, "both source subtitles enumerate onto the endpoint set")
+	seats := state.organizeResult.Subtitles
+	require.Equal(t, filepath.Clean(seats[0].NewPath), filepath.Clean(seats[1].NewPath), "both normalize onto ONE endpoint")
+	assert.True(t, seats[0].Moved, "the first-planned source won the endpoint")
+	assert.True(t, seats[1].Skipped, "the duplicate source was skipped in place")
+	require.Equal(t, filepath.Clean(subFirst), filepath.Clean(seats[0].OriginalPath))
+	require.Equal(t, filepath.Clean(subSecond), filepath.Clean(seats[1].OriginalPath))
+	endpoint := filepath.Clean(seats[0].NewPath)
+
+	endpointIntents := 0
+	for _, mv := range ledger.movesCaptured {
+		assert.NotEqual(t, filepath.Clean(subSecond), filepath.Clean(mv.OriginalPath), "the skipped duplicate never journals a move intent — no row for reconciliation to see")
+		if filepath.Clean(mv.NewPath) == endpoint {
+			endpointIntents++
+			assert.Equal(t, filepath.Clean(subFirst), filepath.Clean(mv.OriginalPath), "the shared endpoint's only intent names the winner's source")
+		}
+	}
+	assert.Equal(t, 1, endpointIntents, "single MoveBack intent per normalized destination")
+	assert.Len(t, ledger.movesCaptured, 3, "video + winner subtitle + trampoline-published multipart")
+	videoTarget := state.organizeResult.NewPath
+	require.Len(t, ledger.keepCaptured, 2, "the reconciler keep-set carries exactly the winner video and winner subtitle")
+	assert.Contains(t, ledger.keepCaptured, models.FileMove{OriginalPath: source, NewPath: videoTarget})
+	assert.Contains(t, ledger.keepCaptured, models.FileMove{OriginalPath: subFirst, NewPath: seats[0].NewPath})
+
+	got, err := afero.ReadFile(fs, seats[0].NewPath)
+	require.NoError(t, err)
+	assert.Equal(t, "english-sub-first", string(got), "the first-planned source's bytes won the endpoint")
+	gone, statErr := afero.Exists(fs, subFirst)
+	require.NoError(t, statErr)
+	assert.False(t, gone, "the winner's source was consumed by the move")
+	got, err = afero.ReadFile(fs, subSecond)
+	require.NoError(t, err)
+	assert.Equal(t, "english-sub-second", string(got), "the skipped duplicate keeps its source spot, unconsumed")
+	got, err = afero.ReadFile(fs, videoTarget)
+	require.NoError(t, err)
+	assert.Equal(t, "video", string(got))
+	for _, gone := range []string{source, multipart} {
+		exists, serr := afero.Exists(fs, gone)
+		require.NoError(t, serr)
+		assert.False(t, exists, gone)
+	}
+	exists, statErr := afero.Exists(fs, unrelated)
+	require.NoError(t, statErr)
+	assert.True(t, exists)
+}
+
+// Crash-into-window replay of the F2 journal shape (codex P2,
+// PRRT_kwDORn9KaM6m_lgt), written through the production journal writers and
+// reverted by the production reverter exactly like
+// TestPendingSiblingMoveIntentCrashReplayKeepsSourceAndPinnedCopy: the
+// process "exits" AFTER execution consumed the video and the WINNER subtitle
+// but BEFORE ReconcileMoveIntents. The journal holds one pending intent per
+// shared destination (the winner's) and none for the skipped duplicate, so
+// nothing suppresses the winner's rename-back — recovery restores the winner
+// onto its source, the shared endpoint empties, and the duplicate source sits
+// untouched with no row ever naming it. Before the dedupe the loser's
+// never-consumed intent suppressed the SHARED destination and stranded the
+// winner's bytes in the library.
+func TestDuplicateSubtitleMoveIntentCrashReplayRestoresWinnerOnly(t *testing.T) {
+	db, _ := pr260ArtifactDB(t)
+	movie := pr260FencedMovie(t, db, "dup-sub-crash", "")
+	fs, root, source, subFirst, subSecond, multipart, unrelated, match := dupSubFiles(t, "dup-sub-crash")
+	dest := filepath.Join(root, "library")
+	repo := database.NewBatchFileOperationRepository(db)
+	log := NewDBRevertLog(repo, NewRevertLogConfig(true, nil), "dup-sub-crash", fs, nil, nil, nil)
+	opID, err := log.Begin(context.Background(), ApplyCmd{Movie: &movie, Match: match, DestPath: dest, Organize: OrganizeOptions{MoveFiles: true}})
+	require.NoError(t, err)
+
+	finalDir := filepath.Join(dest, "movie")
+	videoTarget := filepath.Join(finalDir, "movie.mp4")
+	endpoint := filepath.Join(finalDir, "movie.eng.srt")
+	require.NoError(t, fs.MkdirAll(finalDir, 0o755))
+
+	// The execution's disk state at the crash instant: video and winner
+	// sources consumed into the library; the duplicate-normalized loser was
+	// skipped by the organizer lane and retained its source spot untouched.
+	require.NoError(t, afero.WriteFile(fs, videoTarget, []byte("video"), 0o644))
+	require.NoError(t, afero.WriteFile(fs, endpoint, []byte("english-sub-first"), 0o644))
+	require.NoError(t, fs.Remove(source))
+	require.NoError(t, fs.Remove(subFirst))
+
+	// The post-dedupe writer shape, through the real recorder: one pending
+	// intent for the video and ONE for the shared subtitle endpoint.
+	require.NoError(t, log.RecordMoveIntent(context.Background(), opID, source, videoTarget))
+	require.NoError(t, log.RecordMoveIntent(context.Background(), opID, subFirst, endpoint))
+	require.NoError(t, db.Model(&models.BatchFileOperation{}).Where("id = ?", mustParseOpID(t, opID)).Update("new_path", videoTarget).Error)
+
+	row, rowErr := repo.FindByID(context.Background(), mustParseOpID(t, opID))
+	require.NoError(t, rowErr)
+	journal, parseErr := models.ParseGeneratedFiles(row.GeneratedFiles)
+	require.NoError(t, parseErr)
+	endpointRows := 0
+	for _, fm := range journal.MoveBack {
+		assert.NotEqual(t, subSecond, fm.OriginalPath, "the skipped duplicate has no row to suppress the shared endpoint")
+		if fm.NewPath == endpoint {
+			endpointRows++
+		}
+	}
+	require.Equal(t, 1, endpointRows, "single MoveBack per shared destination")
+
+	res, revErr := history.NewReverter(fs, repo).RevertBatch(t.Context(), "dup-sub-crash")
+	require.NoError(t, revErr)
+	require.Equal(t, 1, res.Succeeded)
+
+	restored, readErr := afero.ReadFile(fs, subFirst)
+	require.NoError(t, readErr, "the winner's rename-back fires — its suppression check finds the consumed source absent")
+	assert.Equal(t, "english-sub-first", string(restored))
+	gone, statErr := afero.Exists(fs, endpoint)
+	require.NoError(t, statErr)
+	assert.False(t, gone, "the shared endpoint vacated back onto the winner's source")
+	loser, readErr := afero.ReadFile(fs, subSecond)
+	require.NoError(t, readErr)
+	assert.Equal(t, "english-sub-second", string(loser), "the skipped duplicate retains its spot — source-consumed-only semantics apply")
+	videoBack, videoErr := afero.ReadFile(fs, source)
+	require.NoError(t, videoErr)
+	assert.Equal(t, "video", string(videoBack), "the consumed primary restores alongside")
+	persisted, findErr := repo.FindByID(context.Background(), mustParseOpID(t, opID))
+	require.NoError(t, findErr)
+	assert.Equal(t, models.RevertStatusReverted, persisted.RevertStatus)
+	for _, kept := range []string{multipart, unrelated} {
+		exists, existsErr := afero.Exists(fs, kept)
+		require.NoError(t, existsErr)
+		assert.True(t, exists, kept)
+	}
+}
+
 // End-to-end deferred copy with duplicate-normalized subtitle endpoints: the
 // apply succeeds (no all-up failure), exactly one endpoint is published with
 // the first source's bytes, the durable ledger carries exactly one entry for

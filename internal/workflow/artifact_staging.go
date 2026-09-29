@@ -604,7 +604,25 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 			}
 			// Subtitles move inside the same execution: their endpoints are known
 			// from the plan, so the pending intent lands BEFORE the consume too.
+			// Two sources can normalize onto ONE endpoint (e.g. .en.srt and
+			// .eng.srt both become .eng.srt): the organizer's sequential lane
+			// moves the FIRST planned source and skips the rest, so only the
+			// first-planned entry per endpoint journals — the same first-wins
+			// dedupe the copy lane's arming applies (codex P2,
+			// PRRT_kwDORn9KaM6m7CBR). A second pending intent would survive
+			// execution as a never-consumed row whose source is still present,
+			// and its rename-suppression keys on the SHARED destination: in the
+			// execute→reconcile crash window the winner's move-back would stay
+			// suppressed and its bytes stranded at the destination (codex P2,
+			// PRRT_kwDORn9KaM6m_lgt). The skipped source keeps no row at all —
+			// execution leaves it in place, and the outcome reconcile never has
+			// it to retract.
+			journaledSubtitleEndpoints := map[string]bool{}
 			for _, mv := range executor.PlanSubtitleMoves(plan) {
+				if journaledSubtitleEndpoints[filepath.Clean(mv.NewPath)] {
+					continue
+				}
+				journaledSubtitleEndpoints[filepath.Clean(mv.NewPath)] = true
 				if err := o.revertLog.RecordMoveIntent(ctx, opID, mv.OriginalPath, mv.NewPath); err != nil {
 					return fmt.Errorf("persist inverse before subtitle publication: %w", err)
 				}
@@ -687,6 +705,16 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 			if proof := s.deferredSourceProof(); proof != nil {
 				plan.BindVerifiedSource(proof)
 			}
+			// The subtitle lane binds per endpoint the same way (codex P1,
+			// PRRT_kwDORn9KaM6m_lgp): the probe freeze already decided WHICH
+			// sources may execute; these proofs bind WHICH OBJECT each executed
+			// byte stream carries, closing the admitted→consumed window the
+			// gate above cannot (its check and the move/copy remain separate
+			// filesystem acts for sidecars exactly as for the video). Keys are
+			// cleaned REAL source paths, so only lanes consuming real sources
+			// (this deferred plan) consult them — staged-tree installs
+			// enumerate staging-owned paths and never match.
+			plan.BindVerifiedSubtitleSources(s.siblingSourceProofs())
 		}
 		finalResult, err = executor.ExecuteOrganizePlan(plan, publishMove, s.original.Organize.LinkMode)
 		if filepath.Clean(plan.SourcePath) != filepath.Clean(plan.TargetPath) && (err == nil || fsutil.PublishCompleted(err)) {
@@ -938,8 +966,26 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 	if !s.original.Organize.Skip && s.original.Organize.MoveFiles && s.sourcePath != "" && filepath.Clean(s.sourcePath) != filepath.Clean(finalResult.NewPath) {
 		// Planned execution publishes the video, but may leave copied siblings
 		// under .source. Publish them before removing any original sidecar.
+		// Subtitle seats the organizer lane already MOVED own their endpoint:
+		// the apply published the real source (never a staged twin), and
+		// language normalization can re-derive a leaf stagedArtifactSiblingName
+		// never reproduces (e.g. .en.srt installing as .eng.srt), so probing a
+		// trampoline-derived name for them double-delivers the twin under the
+		// un-normalized name and the removal leg below then revalidates an
+		// already-consumed source. Skip them in BOTH legs.
+		movedByOrganizer := map[string]bool{}
+		if s.videoDeferred && finalResult != nil {
+			for _, sr := range finalResult.Subtitles {
+				if sr.Moved && sr.OriginalPath != "" {
+					movedByOrganizer[filepath.Clean(sr.OriginalPath)] = true
+				}
+			}
+		}
 		published := map[string]bool{}
 		for _, sibling := range s.siblings {
+			if movedByOrganizer[filepath.Clean(sibling.sourcePath)] {
+				continue
+			}
 			target := filepath.Join(filepath.Dir(finalResult.NewPath), stagedArtifactSiblingName(filepath.Base(s.sourcePath), filepath.Base(finalResult.NewPath), filepath.Base(sibling.sourcePath)))
 			if _, statErr := s.fs.Stat(target); os.IsNotExist(statErr) {
 				info, sourceErr := s.fs.Stat(sibling.stagedPath)
@@ -1017,6 +1063,12 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 			// A subtitle the organizer skipped (its destination was occupied) keeps
 			// its source: no journal inverse exists to rebuild a deleted original.
 			if skipped[filepath.Clean(sibling.sourcePath)] {
+				continue
+			}
+			// A subtitle the organizer MOVED already had its source consumed by
+			// the install leg (and its inverse journaled pre-execution); the
+			// trampoline twin was never published for it.
+			if movedByOrganizer[filepath.Clean(sibling.sourcePath)] {
 				continue
 			}
 			// Only an apply that actually published the staged copy may consume the

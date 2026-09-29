@@ -142,6 +142,41 @@ func (s *artifactStage) deferredSourceProof() fsutil.VerifiedSourceProof {
 	}
 }
 
+// siblingSourceProofs derives one admission proof per sibling pinned at
+// preparation, keyed by cleaned source path — the sidecar twin of
+// deferredSourceProof (codex P1, PRRT_kwDORn9KaM6m_lgp). Each closure applies
+// the SAME no-Follow, strong-identity-or-refuse matcher the video proof and
+// the pre-execution gate use, so a sidecar whose name was swapped onto a
+// replacement past the last gate refuses its install leg (the move twin
+// restores the rejected object no-replace; the copy twin never streams it)
+// instead of publishing it under the admitted name. Siblings admitted without
+// a pinnable identity contribute no entry and keep the legacy unbound
+// semantics. A nil stage (or one without known sibling identities) answers
+// nil — the unbound lane every direct flow already executes.
+func (s *artifactStage) siblingSourceProofs() map[string]fsutil.VerifiedSourceProof {
+	if s == nil {
+		return nil
+	}
+	var proofs map[string]fsutil.VerifiedSourceProof
+	for _, sibling := range s.siblings {
+		if !sibling.identity.known {
+			continue
+		}
+		admitted := sibling.identity
+		fs := s.fs
+		if proofs == nil {
+			proofs = make(map[string]fsutil.VerifiedSourceProof, len(s.siblings))
+		}
+		proofs[filepath.Clean(sibling.sourcePath)] = func(path string, info os.FileInfo) error {
+			if !admitted.matches(fs, path, info) {
+				return fmt.Errorf("%w: %s", errArtifactSourceChanged, path)
+			}
+			return nil
+		}
+	}
+	return proofs
+}
+
 // revalidateDirectSources re-proves every real source path the plan execution
 // is about to consume directly: the video when the plan addresses the real
 // source (deferred organize executions, in-place link sources) instead of the
