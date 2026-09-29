@@ -136,7 +136,8 @@ func TestOrganizeStrategy_SoftLinkPayloadMatchesSharedComputation(t *testing.T) 
 
 func TestSymlinkLinkTarget_Computation(t *testing.T) {
 	t.Run("absolute passthrough", func(t *testing.T) {
-		abs := "/already/absolute/m.mkv"
+		abs := filepath.Join(t.TempDir(), "already", "absolute", "m.mkv")
+		require.True(t, filepath.IsAbs(abs))
 		got, err := SymlinkLinkTarget(abs)
 		require.NoError(t, err)
 		assert.Equal(t, abs, got)
