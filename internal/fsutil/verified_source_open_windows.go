@@ -25,7 +25,7 @@ import (
 // Virtual filesystems keep their interface open — their semantics are the
 // test host's, not the Windows ABI's.
 func openVerifiedSource(fs afero.Fs, path string) (afero.File, error) {
-	if _, ok := fs.(afero.OsFs); !ok {
+	if _, ok := fs.(*afero.OsFs); !ok {
 		return fs.Open(path)
 	}
 	p, perr := windows.UTF16PtrFromString(path)

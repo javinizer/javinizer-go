@@ -4,6 +4,7 @@ package fsutil
 
 import (
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -40,6 +41,23 @@ func TestCopyFileNoReplaceVerifiedSourceHandleClosedOnReturn(t *testing.T) {
 	err := CopyFileNoReplaceVerified(fs, src, dstRefused, refusing)
 	require.ErrorIs(t, err, ErrTakeAsideForeign)
 	requireExclusiveReopen(t, src)
+}
+
+func TestOpenVerifiedSourcePinSharesDelete(t *testing.T) {
+	fs := afero.NewOsFs()
+	root := t.TempDir()
+	src := filepath.Join(root, "movie.mp4")
+	require.NoError(t, afero.WriteFile(fs, src, []byte("admitted video bytes"), 0o644))
+
+	pinned, err := openVerifiedSource(fs, src)
+	require.NoError(t, err)
+	aside := src + ".aside"
+	require.NoError(t, fs.Rename(src, aside), "the verified-source pin must share delete so the name may move mid-open")
+	got, err := io.ReadAll(pinned)
+	require.NoError(t, err)
+	require.Equal(t, "admitted video bytes", string(got), "the descriptor still addresses the admitted object after the name moved")
+	require.NoError(t, pinned.Close())
+	require.NoError(t, fs.Rename(aside, src))
 }
 
 func requireExclusiveReopen(t *testing.T, path string) {
