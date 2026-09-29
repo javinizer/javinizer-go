@@ -120,6 +120,30 @@ describe('buildDisplayTitlePreviewSignature', () => {
 		expect(buildDisplayTitlePreviewSignature(b)).toBe(buildDisplayTitlePreviewSignature(a));
 	});
 
+	it('is stable when a hidden credit churns actress_id (identity reconciliation)', () => {
+		// Hidden credits never render: identity reconciliation re-pointing
+		// their actress_id must not refire the preview.
+		const a = makeMovie([], [makeCredit({ render_visible: false, actress_id: 7 })]);
+		const b = makeMovie([], [makeCredit({ render_visible: false, actress_id: 42 })]);
+		expect(buildDisplayTitlePreviewSignature(b)).toBe(buildDisplayTitlePreviewSignature(a));
+	});
+
+	it('changes when a visible credit churns actress_id', () => {
+		// Visible credits stay identity-bearing (both the render token and the
+		// referenced-actress token), so an identity re-point refires.
+		const a = makeMovie([], [makeCredit({ actress_id: 7 })]);
+		const b = makeMovie([], [makeCredit({ actress_id: 42 })]);
+		expect(buildDisplayTitlePreviewSignature(b)).not.toBe(buildDisplayTitlePreviewSignature(a));
+	});
+
+	it('hidden markers pad slots: moving a visible credit past a hidden one changes the signature', () => {
+		const visible = makeCredit({ actress_id: 9, credited_name: 'Aoi Sora' });
+		const hidden = makeCredit({ render_visible: false, actress_id: 7 });
+		const a = makeMovie([], [visible, hidden]);
+		const b = makeMovie([], [hidden, visible]);
+		expect(buildDisplayTitlePreviewSignature(b)).not.toBe(buildDisplayTitlePreviewSignature(a));
+	});
+
 	it('is stable when the actress of a hidden credit churns', () => {
 		const credits = [makeCredit({ render_visible: false })];
 		const a = makeMovie([makeActress({})], credits);

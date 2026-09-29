@@ -234,3 +234,72 @@ func TestOccupiedSkipExcludedSiblingsFolderPathEmptyFallsBackToNewPathDir(t *tes
 			"the fallback never consults the skipped row's own directory")
 	})
 }
+
+// codex P2 (PRRT_kwDORn9KaM6m7sQ0), reversed timing of the occupied-skip
+// case: the subtitle destination is already occupied when the apply's arm
+// probe runs (the endpoint is omitted from every armed pin/intent), and the
+// occupant vacates between the arm and the execute. The organizer lane must
+// REFUSE the now-vacant slot — nothing durable journaled that endpoint — and
+// report Skipped; the deferred-copy tree leg then delivers the staged sibling
+// through its own journaled install, so the apply still completes and the
+// revert cleans exactly the ledgered bytes.
+func TestDeferredCopyProbeOmittedEndpointRefusesVacatedInstall(t *testing.T) {
+	env := setupCopyIntentE2E(t, "copy-probe-gate")
+	probePlan, planErr := env.org.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: env.match, Movie: &env.movie, DestDir: env.dest, ForceUpdate: true, OperationMode: operationmode.OperationModeOrganize})
+	require.NoError(t, planErr)
+	subMoves := env.org.PlanSubtitleMoves(probePlan)
+	require.Len(t, subMoves, 1)
+	subTarget := subMoves[0].NewPath
+
+	// The occupant exists before the apply's arm probe: the endpoint is
+	// omitted from every pending pin/intent the apply journals.
+	require.NoError(t, env.fs.MkdirAll(filepath.Dir(subTarget), 0o755))
+	require.NoError(t, afero.WriteFile(env.fs, subTarget, []byte("foreign-subtitle-bytes"), 0o644))
+
+	env.orch.organizer = &pr260PublicationFaultOrganizer{Organizer: env.org, preExecute: func(*organizer.OrganizePlan) {
+		// …and vacates after the arm, before execution consumes the slot.
+		require.NoError(t, env.fs.Remove(subTarget))
+	}}
+	cmd := pr260FencedCommand(&env.movie, env.match, env.dest, pr260FencedCounter(t, env.db), operationmode.OperationModeOrganize, false, false, organizer.LinkModeNone, false, false)
+	result, err := env.orch.Execute(t.Context(), cmd)
+	require.NoError(t, err)
+	require.NotNil(t, result.OrganizeResult)
+	video := result.OrganizeResult.NewPath
+	require.FileExists(t, video)
+
+	skipped := false
+	for _, sr := range result.OrganizeResult.Subtitles {
+		if filepath.Clean(sr.NewPath) == filepath.Clean(subTarget) {
+			require.True(t, sr.Skipped, "the probe-omitted endpoint refuses the vacated slot (fail-closed)")
+			assert.False(t, sr.Copied || sr.Moved, "no unjournaled install through the organizer lane")
+			skipped = true
+		}
+	}
+	require.True(t, skipped, "the gated endpoint reports through the skip classification")
+
+	installed, readErr := afero.ReadFile(env.fs, subTarget)
+	require.NoError(t, readErr, "the staged sibling still delivers through the journaled tree leg")
+	assert.Equal(t, "subtitle", string(installed))
+	pr260AssertRetained(t, env.fs, env.source, env.subtitle, env.multipart, env.unrelated)
+	pr260AssertStageGone(t, env.fs, filepath.Dir(env.dest))
+
+	ledger := p3Ledger(t, env.repo, result.OperationID)
+	pinned := false
+	for _, pd := range ledger.PlannedDeletes {
+		assert.NotEqual(t, video, pd.Path, "the graduated primary pin was consumed")
+		if filepath.Clean(pd.Path) == filepath.Clean(subTarget) {
+			require.NotEmpty(t, pd.SHA256, "the tree pin keeps its content proof")
+			pinned = true
+		}
+	}
+	assert.True(t, pinned, "the journaled tree install leaves a durable hash-pinned delete record")
+
+	res, revErr := history.NewReverter(env.fs, env.repo).RevertBatch(t.Context(), env.jobID)
+	require.NoError(t, revErr)
+	require.Equal(t, 1, res.Succeeded)
+	subGone, statErr := afero.Exists(env.fs, subTarget)
+	require.NoError(t, statErr)
+	assert.False(t, subGone, "revert reaps the journaled tree install")
+	require.FileExists(t, video, "the installed copy primary is retained")
+	pr260AssertRetained(t, env.fs, env.source, env.subtitle, env.multipart, env.unrelated)
+}

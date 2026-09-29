@@ -23,8 +23,11 @@ import type { Movie, MovieCredit } from '$lib/api/types';
  *   referenced by visible credits are hashed (identity renames change the
  *   rendered canonical name and must refire).
  * - A credit that cannot render (render_visible=false, or locally suppressed,
- *   matching the nil-actress/quarantine gate) hashes to a fixed marker: its
- *   name/order churn is invisible in the title and must not refire.
+ *   matching the nil-actress/quarantine gate) hashes to a fixed,
+ *   identity-independent marker: its name/order churn AND identity
+ *   reconciliation re-pointing its actress_id are invisible in the title and
+ *   must not refire. The marker still pads the array slot, so visible credits
+ *   reordering past a hidden one keep invalidating the signature positionally.
  * - poster_url is dropped: the title Context has no poster field (cover_url
  *   and trailer_url remain — they are template inputs).
  */
@@ -81,7 +84,7 @@ function referencedActressTokens(movie: Movie, credits: MovieCredit[]): unknown[
 function creditRenderToken(c: MovieCredit): unknown[] {
 	const visible = (c.render_visible ?? true) && !(c.suppressed ?? false);
 	if (!visible) {
-		return [c.actress_id ?? 0, 'hidden'];
+		return ['hidden'];
 	}
 	return [
 		c.actress_id ?? 0,

@@ -390,6 +390,12 @@ type OrganizePlan struct {
 	// destination (cmd.ForceUpdate). When false, move execution refuses to replace a file that
 	// exists at the target even if it appeared after plan-time conflict checks (TOCTOU guard).
 	overwriteAuthorized bool
+	// subtitleProbeOccupied pins every subtitle destination a PlanSubtitleMoves
+	// probe found occupied, keyed by cleaned new-path. Such endpoints are
+	// omitted from the intents the workflow arms before execution, so the
+	// install lane must refuse them even when the occupant vacates inside the
+	// probe→execute window: nothing durable would track that late install.
+	subtitleProbeOccupied map[string]bool
 }
 
 // Plan creates an organization plan without executing it
@@ -539,7 +545,11 @@ func (o *Organizer) subtitleFileInfo(plan *OrganizePlan) models.FileMatchInfo {
 // deliver for plan WITHOUT installing anything (nil-install probe). The
 // artifact publish flow journals these as pending intents before
 // ExecuteOrganizePlan consumes them; entries for skipped destinations are
-// always included (their rename-back is idempotent on an absent target).
+// always included when vacant at probe time (their rename-back is idempotent
+// on an absent target). Endpoints OCCUPIED at probe time stay out of the
+// enumeration, and the same plan's execution refuses to install into them
+// (fail-closed): no durable intent covers such a late install, so a crash
+// after it would strand an untracked sidecar.
 func (o *Organizer) PlanSubtitleMoves(plan *OrganizePlan) []models.SubtitleMove {
 	if plan == nil {
 		return nil
@@ -555,6 +565,13 @@ func (o *Organizer) PlanSubtitleMoves(plan *OrganizePlan) []models.SubtitleMove 
 		// probe drift are pruned by the outcome reconcile.
 		exists, statErr := pathExistsBestEffort(o.fs, sr.NewPath)
 		if statErr == nil && exists {
+			// Fail closed for the omitted endpoint: record it on the plan so
+			// handleSubtitles refuses the slot even if the occupant vacates
+			// before execute runs (no armed intent journals that install).
+			if plan.subtitleProbeOccupied == nil {
+				plan.subtitleProbeOccupied = make(map[string]bool)
+			}
+			plan.subtitleProbeOccupied[filepath.Clean(sr.NewPath)] = true
 			continue
 		}
 		moves = append(moves, sr.SubtitleMove)
@@ -616,7 +633,10 @@ func (o *Organizer) handleSubtitles(plan *OrganizePlan, result *OrganizeResult, 
 				if statErr != nil {
 					return fmt.Errorf("failed to check subtitle destination: %w", statErr)
 				}
-				if exists {
+				// A probe-omitted endpoint is refused even when its occupant
+				// vacated post-probe: no intent was journaled for it, so this
+				// install would be invisible to crash recovery.
+				if exists || plan.subtitleProbeOccupied[filepath.Clean(newPath)] {
 					sr.Skipped = true
 					return nil
 				}

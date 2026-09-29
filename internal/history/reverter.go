@@ -287,7 +287,11 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 	// now — destination-absent + source-present proves the move never ran.
 	if hydratedPendingIntent && op.OperationType == models.OperationTypeMove {
 		_, dstErr := r.fs.Stat(op.NewPath)
-		_, srcErr := r.fs.Stat(op.OriginalPath)
+		// The source probe must NOT follow symlinks: a dangling symlink at the
+		// source pathname is an existing directory entry the move never
+		// consumed, and plain Stat would misread it as absent — the row then
+		// skips the anchor check unsettled and every retry stays incomplete.
+		_, srcErr := lstatRestoreSource(r.fs, op.OriginalPath)
 		if os.IsNotExist(dstErr) && srcErr == nil {
 			if uerr := r.batchFileOpRepo.UpdateRevertStatus(ctx, op.ID, models.RevertStatusNoOp); uerr != nil {
 				return failRevert(ctx, r.batchFileOpRepo, op, models.RevertReasonUnexpectedPathState, fmt.Sprintf("settle unexecuted pending intent for op %d: %v", op.ID, uerr)), nil
