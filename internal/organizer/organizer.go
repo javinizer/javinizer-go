@@ -632,6 +632,28 @@ func (o *Organizer) PlanSubtitleMoves(plan *OrganizePlan) []models.SubtitleMove 
 	}
 	result := &OrganizeResult{}
 	o.handleSubtitles(plan, result, subtitleInstall{})
+	// The fenced artifact admission is no-FOLLOW and deliberately rejects
+	// non-regular siblings (workflow prepareArtifact skips a symlinked
+	// subtitle), but FindSubtitles rescans by NAME and would return that
+	// same symlink here: no identity proof is bound for it
+	// (siblingSourceProofs covers only admitted siblings), so move-mode
+	// execution would fall back to the unverified no-replace leg and
+	// relocate the link OBJECT into the library — a relative link then
+	// commonly dangles (codex P2, PRRT_kwDORn9KaM6neyyH). Reject
+	// non-regular sources before the journal enumeration AND the
+	// admission freeze are computed, so probing, journaling, arming, and
+	// the execute-time gate all agree the entry was never a source. A
+	// failed lookup keeps the entry — the probe stays advisory for
+	// transient errors, and admission-bound sources are re-proven at
+	// consumption.
+	regular := make([]SubtitleResult, 0, len(result.Subtitles))
+	for _, sr := range result.Subtitles {
+		if !probeSubtitleSourceRegular(o.fs, sr.OriginalPath) {
+			continue
+		}
+		regular = append(regular, sr)
+	}
+	result.Subtitles = regular
 	// Freeze the executed subtitle set at the FIRST probe (codex P2,
 	// PRRT_kwDORn9KaM6m9afD): the fence flow journals exactly this
 	// enumeration before ExecuteOrganizePlan consumes it, so a source that
@@ -670,6 +692,32 @@ func (o *Organizer) PlanSubtitleMoves(plan *OrganizePlan) []models.SubtitleMove 
 		moves = append(moves, sr.SubtitleMove)
 	}
 	return moves
+}
+
+// probeSubtitleSourceRegular reports whether path names a regular file
+// under a no-FOLLOW lookup — the same regularity the fenced artifact
+// admission demands of subtitle siblings, so a symlink at path answers
+// for its own link entry, never its target. A filesystem without a
+// no-follow view answers through the following Stat (in-memory
+// filesystems have no symlink model: regular-or-absent by construction),
+// and a failed lookup keeps the source — the probe is advisory there,
+// with admission-bound consumption re-proving pinned entries.
+func probeSubtitleSourceRegular(fs afero.Fs, path string) bool {
+	var info os.FileInfo
+	var err error
+	if lst, ok := fs.(afero.Lstater); ok {
+		if linfo, didLstat, lerr := lst.LstatIfPossible(path); lerr == nil && didLstat {
+			info = linfo
+		} else {
+			info, err = fs.Stat(path)
+		}
+	} else {
+		info, err = fs.Stat(path)
+	}
+	if err != nil {
+		return true
+	}
+	return info.Mode().IsRegular()
 }
 
 type subtitleInstall struct {

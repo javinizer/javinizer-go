@@ -273,3 +273,47 @@ func TestVerifiedSourceProofDispatchRefusalClassification(t *testing.T) {
 	assert.False(t, fsutil.PublishRefusal(mapped), "an admission refusal is a pre-publication failure, never a refusal class")
 	assert.False(t, fsutil.PublishCompleted(mapped))
 }
+
+// The probe rejects a non-regular subtitle source outright: the fenced
+// artifact admission excludes symlinked siblings at preparation and pins
+// identity proofs only for admitted siblings, so returning one here would
+// journal it and install it through the unverified no-replace leg —
+// relocating the link OBJECT into the library (codex P2,
+// PRRT_kwDORn9KaM6neyyH). The frozen admission set excludes it too, so
+// execute's rescan classifies it as a skip and the object at the source is
+// never touched, while the video leg runs normally.
+func TestProbeSkipsNonRegularSubtitleSource(t *testing.T) {
+	for _, move := range []bool{true, false} {
+		t.Run(map[bool]string{false: "copy", true: "move"}[move], func(t *testing.T) {
+			org, src, sub, dest, dir := probeAdmittedFixture(t)
+			// The link target's name must not itself match the video stem, or
+			// it would be enumerated as a subtitle in its own right.
+			aside := filepath.Join(dir, "detached-subtitle.srt")
+			require.NoError(t, os.Rename(sub, aside))
+			if err := os.Symlink(aside, sub); err != nil {
+				t.Skipf("symlinks unsupported: %v", err)
+			}
+
+			plan := probeAdmittedPlan(t, org, src, dest, move)
+			assert.Empty(t, org.PlanSubtitleMoves(plan), "the probe never returns a non-regular subtitle source")
+
+			result, err := org.ExecuteOrganizePlan(plan, move, LinkModeNone)
+			require.NoError(t, err)
+			frozen := subtitleResultFor(result, sub)
+			require.NotNil(t, frozen, "execute's rescan still enumerates the path…")
+			assert.True(t, frozen.Skipped, "…but the frozen admission set refuses it as a skip")
+			assert.False(t, frozen.Moved || frozen.Copied, "no install the probe never admitted")
+
+			linkInfo, lerr := os.Lstat(sub)
+			require.NoError(t, lerr)
+			assert.NotZero(t, linkInfo.Mode()&os.ModeSymlink, "the link object stays at the source, never moved or copied")
+			require.NoFileExists(t, filepath.Join(dest, "ABC-123", "ABC-123.srt"), "nothing lands in the library under the subtitle name")
+			got, rerr := os.ReadFile(aside)
+			require.NoError(t, rerr)
+			assert.Equal(t, "subtitle", string(got), "the link target's bytes are untouched")
+			require.FileExists(t, result.NewPath, "the video leg is unaffected")
+			_, statErr := os.Stat(src)
+			assert.Equal(t, move, os.IsNotExist(statErr), "move consumes, copy retains the video source")
+		})
+	}
+}

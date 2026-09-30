@@ -743,6 +743,68 @@ func TestPrepareArtifactSkipsSymlinkedSibling(t *testing.T) {
 	pr260AssertRetained(t, base, source, subtitle, multipart, unrelated)
 }
 
+// A subtitle that is a symlink at PREPARATION time is excluded twice: the
+// admission gate never pins it as a sibling (TestPrepareArtifactSkipsSymlinkedSibling)
+// AND the deferred fence's rescan never returns or journals it — so move-mode
+// publication cannot fall back to the unverified no-replace leg and relocate
+// the link object into the library (codex P2, PRRT_kwDORn9KaM6neyyH). The
+// regular video and the admitted multipart sibling still publish normally.
+func TestDeferredMovePublishSkipsSymlinkedSubtitle(t *testing.T) {
+	db, _ := pr260ArtifactDB(t)
+	movie := pr260FencedMovie(t, db, "deferred-subtitle-symlinked", "")
+	base, root, source, subtitle, multipart, unrelated, match := pr260FencedFiles(t, "deferred-subtitle-symlinked")
+	if !pr260LinkSupported(t, organizer.LinkModeSoft, subtitle) {
+		return
+	}
+	aside := symlinkSwapAside(t, base, subtitle)
+	dest := filepath.Join(root, "library")
+	org := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize, MoveSubtitles: true, SubtitleExtensions: []string{".srt"}}, template.NewEngine(), nil)
+	ledger := &completeCallFaultLog{}
+	orch := &applyOrchImpl{fs: base, organizer: org, revertLog: ledger}
+	cmd := pr260ArtifactFailureCommand(&movie, match, dest)
+	cmd.Organize.Skip = false
+	cmd.Organize.MoveFiles = true
+	cmd.Download = false
+	stage, _, err := orch.prepareArtifact(context.Background(), cmd)
+	require.NoError(t, err)
+	defer stage.cleanup()
+	require.Len(t, stage.siblings, 1, "only the regular multipart sibling is admitted")
+	assert.Equal(t, multipart, stage.siblings[0].sourcePath, "the symlinked subtitle is never pinned for publication")
+
+	stagedPlan, planErr := org.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: models.FileMatchInfo{Path: stage.stagedSource, Name: filepath.Base(source)}, Movie: stage.original.Movie, DestDir: stage.root, MoveFiles: true, OperationMode: stage.original.OperationMode})
+	require.NoError(t, planErr)
+	state := &applyPipelineState{operationID: "op", organizeResult: &organizer.OrganizeResult{NewPath: stagedPlan.TargetPath, FolderPath: stagedPlan.TargetDir}}
+	publishErr := stage.publish(context.Background(), orch, state, nil)
+	require.NoError(t, publishErr, "the admitted video and sibling legs publish normally")
+
+	for _, mv := range ledger.movesCaptured {
+		assert.NotEqual(t, subtitle, mv.OriginalPath, "no pending intent journals the non-regular subtitle")
+		assert.NotEqual(t, ".srt", strings.ToLower(filepath.Ext(mv.NewPath)), "no pending intent names a subtitle endpoint")
+	}
+	pr260AssertSymlinkPreserved(t, subtitle, aside, "subtitle")
+	srtEntries := []string{}
+	publishedVideos := []string{}
+	walkErr := afero.Walk(base, dest, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if strings.HasSuffix(path, ".srt") {
+			srtEntries = append(srtEntries, path)
+		}
+		if info.Mode().IsRegular() && strings.HasSuffix(path, ".mp4") {
+			publishedVideos = append(publishedVideos, path)
+		}
+		return nil
+	})
+	require.NoError(t, walkErr)
+	assert.Empty(t, srtEntries, "neither the link object nor its target's bytes reach the library")
+	assert.Len(t, publishedVideos, 2, "the video and the admitted multipart sibling publish")
+	pr260AssertRemoved(t, base, source, multipart)
+	unrelatedBytes, readErr := afero.ReadFile(base, unrelated)
+	require.NoError(t, readErr)
+	assert.Equal(t, "unrelated", string(unrelatedBytes))
+}
+
 // weakIdentityInfo strips the kernel identity a real FileInfo exposes through
 // Sys(): the identity probe reports not-OK for the entry — the transient
 // handle-open failure shape on Windows/SMB and a non-Stat_t Sys leg on POSIX.
