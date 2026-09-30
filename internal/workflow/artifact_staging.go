@@ -1603,6 +1603,7 @@ func (s *artifactStage) deferredPrimaryDeleteEntry(plan *organizer.OrganizePlan)
 		}
 		entry := models.DeleteEntry{
 			Path:            plan.TargetPath,
+			IdentityPinned:  true,
 			IdentitySize:    identity.size,
 			IdentityModUnix: identity.modTime.Unix(),
 		}

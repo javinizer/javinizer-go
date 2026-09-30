@@ -822,10 +822,14 @@ func cleanupGeneratedFilesFS(fs afero.Fs, op *models.BatchFileOperation, stopAt 
 			dirsToCheck[filepath.Dir(path)] = true
 			continue
 		}
-		if entry.SHA256 == "" && entry.IdentityModUnix != 0 {
-			// Hard-link pin: the published destination must BE the admitted
-			// source's object — link(2) shares the volume/index, so the
-			// identity tuple authenticates without reading a byte. The
+		if entry.SHA256 == "" && entry.HasIdentityPin() {
+			// Hard-link pin: presence is the explicit identity_pinned marker
+			// for new blobs, with the pre-marker evidence mapping folded into
+			// models.DeleteEntry.HasIdentityPin (the ModUnix sentinel, then
+			// the strong bool) — an epoch-dated source's pin never classifies
+			// through the timestamp alone. The published destination must BE
+			// the admitted source's object — link(2) shares the volume/index,
+			// so the identity tuple authenticates without reading a byte. The
 			// metadata legs (size + mtime-seconds) always run; the dev/inode
 			// legs run only against a strong pin and never degrade for one
 			// (a platform that re-probed no identity cannot authenticate a

@@ -63,13 +63,17 @@ type DeleteEntry struct {
 	// (dev+ino/volume+index) with the same size and modification time.
 	// IdentityStrong asserts the dev/ino pair was captured from the platform
 	// identity route (in-memory filesystems pin only the metadata legs).
-	// IdentityModUnix == 0 marks "no identity pin" — a modification time at
-	// the Unix epoch never occurs for admitted media sources.
 	IdentityStrong  bool   `json:"identity_strong,omitempty"`
 	IdentityDev     uint64 `json:"identity_dev,omitempty"`
 	IdentityIno     uint64 `json:"identity_ino,omitempty"`
 	IdentitySize    int64  `json:"identity_size,omitempty"`
 	IdentityModUnix int64  `json:"identity_mod_unix,omitempty"`
+	// IdentityPinned is the hard-link pin's explicit presence marker (codex
+	// P2, PRRT_kwDORn9KaM6nHyl5): an epoch-dated source — a restored or
+	// normalized media file — serializes IdentityModUnix as zero, so the
+	// timestamp must not double as the pin's sentinel. HasIdentityPin owns
+	// the classification, including the pre-marker row mapping.
+	IdentityPinned bool `json:"identity_pinned,omitempty"`
 	// CopySize/CopyPartialSHA256 pin an in-flight streaming copy without a
 	// pre-pass: size equality plus the bounded head+tail digest
 	// (fsutil.PartialCopyDigest) must hold before the reverter removes the
@@ -78,6 +82,21 @@ type DeleteEntry struct {
 	// proof alone (see PartialCopyDigest's threat-model note).
 	CopySize          int64  `json:"copy_size,omitempty"`
 	CopyPartialSHA256 string `json:"copy_partial_sha256,omitempty"`
+}
+
+// HasIdentityPin reports whether the entry carries a hard-link identity
+// pin. IdentityPinned is authoritative for blobs written since its
+// introduction. Pre-marker rows are classified by their own evidence in
+// precedence order: IdentityModUnix != 0 (the original sentinel — pre-marker
+// code always journaled a non-epoch mtime), then IdentityStrong (a bool
+// omitempty keeps in the blob — a pre-marker row for an epoch-dated source on
+// an identity-exposing platform still carries identity_strong:true plus the
+// dev/ino pair, and no other pin arm ever sets them, so the strong evidence
+// overrides the zeroed sentinel). A pre-marker row whose evidence all
+// decodes zero — a weak epoch pin the sentinel could not express, or a plain
+// SHA row — keeps its old classification exactly and never flips branches.
+func (e DeleteEntry) HasIdentityPin() bool {
+	return e.IdentityPinned || e.IdentityModUnix != 0 || e.IdentityStrong
 }
 
 // ReplacementEntry journals one destructive media overwrite: the destination's
