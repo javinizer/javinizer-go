@@ -180,9 +180,12 @@ func TestPendingHardLinkPrimaryIntentCrashReplayRemovesLinkedName(t *testing.T) 
 // codex P2 (PRRT_kwDORn9KaM6nBUrF) crash replay, copy lane: the interrupted
 // row may hold EITHER interim shape — the head+tail partial pin (crash
 // between publish and seal) or the sealed full hash (crash between seal and
-// reconcile) — and each must consume exactly the published bytes while
-// retaining a same-size foreign occupant.
-func TestPendingCopyPrimaryIntentCrashReplayInterimAndSealed(t *testing.T) {
+// reconcile). Only the SEALED shape authorizes removal (codex P1,
+// PRRT_kwDORn9KaM6novbT): the unsealed interim survived the crash, so its
+// bounded proof can no longer distinguish the published copy from a payload
+// edited between the digest windows — recovery retains it; the sealed row
+// still consumes exactly the published bytes.
+func TestPendingCopyPrimaryIntentCrashReplaySealBoundary(t *testing.T) {
 	for _, sealedSeal := range []bool{false, true} {
 		name := "interim partial pin"
 		if sealedSeal {
@@ -223,7 +226,11 @@ func TestPendingCopyPrimaryIntentCrashReplayInterimAndSealed(t *testing.T) {
 			require.Equal(t, 1, res.Succeeded)
 			exists, existsErr := afero.Exists(fs, videoTarget)
 			require.NoError(t, existsErr)
-			assert.False(t, exists, "the interrupted row's published copy is consumed under both pin shapes")
+			if sealedSeal {
+				assert.False(t, exists, "the sealed full-hash row's published copy is consumed")
+			} else {
+				assert.True(t, exists, "the unsealed interim retains the published copy — its bounded proof is not removal authorization")
+			}
 			assert.FileExists(t, source, "copy mode never consumed the source")
 		})
 	}
@@ -259,7 +266,7 @@ func TestPendingCopyPrimaryIntentCrashReplayInterimAndSealed(t *testing.T) {
 		require.NoError(t, revErr)
 		require.Equal(t, 1, res.Succeeded)
 		got, readErr := afero.ReadFile(fs, videoTarget)
-		require.NoError(t, readErr, "the interim proof refused and the foreign bytes stay byte-intact")
+		require.NoError(t, readErr, "the unsealed interim retains every occupant — the foreign bytes stay byte-intact")
 		assert.Equal(t, foreign, got)
 	})
 }

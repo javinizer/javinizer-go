@@ -776,12 +776,17 @@ func cleanupGeneratedFilesFS(fs afero.Fs, op *models.BatchFileOperation, stopAt 
 	// kept. The pin shape keys on how the payload installed (models.DeleteEntry):
 	// a LinkTarget pin authenticates the link OBJECT by readlink, an Identity
 	// pin the hard-linked object by its admitted identity tuple, and a
-	// CopySize/CopyPartialSHA256 pin an in-flight copy by size plus a bounded
-	// head+tail digest; none of those ever hashes or follows a non-regular
-	// entry, so the full-hash leg's nonregular-retain rule (m5HF7) is
-	// preserved in every shape. Dispatch precedence is deterministic:
-	// LinkTarget, then the SHA-cleared identity/partial shapes, then the
-	// full-hash leg (an entry carrying SHA256 always hashes).
+	// CopySize/CopyPartialSHA256 pin MARKS an in-flight copy intent —
+	// journaled before the stream exists, it is retain-only at recovery
+	// (codex P1, PRRT_kwDORn9KaM6novbT: the entry survives the very crash it
+	// covers, so its bounded head+tail proof can no longer distinguish the
+	// landed copy from a payload edited between the digest windows); only the
+	// sealed SHA256 shape authorizes a copy removal. None of the pin shapes
+	// ever hashes or follows a non-regular entry, so the full-hash leg's
+	// nonregular-retain rule (m5HF7) is preserved in every shape. Dispatch
+	// precedence is deterministic: LinkTarget, then the SHA-cleared
+	// identity/partial shapes, then the full-hash leg (an entry carrying
+	// SHA256 always hashes).
 	for _, entry := range gf.PlannedDeletes {
 		path := entry.Path
 		if moveBackTargets[path] {
@@ -879,46 +884,22 @@ func cleanupGeneratedFilesFS(fs afero.Fs, op *models.BatchFileOperation, stopAt 
 			continue
 		}
 		if entry.SHA256 == "" && entry.CopyPartialSHA256 != "" {
-			// Interim copy pin (the execute→seal crash window of a streaming
-			// copy install — see fsutil.PartialCopyDigest's threat model):
-			// size equality plus the bounded head+tail digest. The
-			// regularity probe never follows a final symlink (m5HF7), and the
-			// digest re-derives from ONE open handle whose own Stat supplies
-			// the unlink identity — a link planted inside the lstat→open
-			// window reads the TARGET through the handle, and the verified
-			// unlink's rebind then refuses the vacated link object.
-			partialInfo, partialLstatErr := lstatRestoreSource(fs, path)
-			if os.IsNotExist(partialLstatErr) {
-				dirsToCheck[filepath.Dir(path)] = true
+			// Interim copy pin that never graduated to the sealed full digest
+			// (the execute→seal crash window of a streaming copy install):
+			// RETAIN-ONLY (codex P1, PRRT_kwDORn9KaM6novbT). The pin was
+			// journaled before the stream existed, and the crash this entry
+			// covers leaves it durable for the whole crash→recovery interval —
+			// a payload edited only BETWEEN the digest windows afterwards
+			// still satisfies the bounded size+head/tail proof, so that proof
+			// can never authorize an unlink here. Only the sealed SHA256 (the
+			// full-hash leg below) may remove the destination. An absent path
+			// is still consumed bookkeeping: the install never landed (or was
+			// already cleaned), so prune the empty parent like every shape.
+			if _, interimLstatErr := lstatRestoreSource(fs, path); interimLstatErr == nil {
+				logging.Debugf("cleanupGeneratedFiles: pending interim copy delete %s carries no sealed full digest — retained (the unsealed size+edge proof is not deletion authorization)", path)
 				continue
-			}
-			if partialLstatErr != nil {
-				logging.Debugf("cleanupGeneratedFiles: pending partial delete probe failed for %s: %v", path, partialLstatErr)
-				continue
-			}
-			if !partialInfo.Mode().IsRegular() {
-				logging.Debugf("cleanupGeneratedFiles: pending partial delete %s is not a regular file (mode %v) — retained", path, partialInfo.Mode())
-				continue
-			}
-			pinned, digest, probeErr := fsutil.PartialCopyDigest(fs, path)
-			if errors.Is(probeErr, os.ErrNotExist) {
-				dirsToCheck[filepath.Dir(path)] = true
-				continue
-			}
-			if probeErr != nil {
-				logging.Debugf("cleanupGeneratedFiles: pending partial delete digest failed for %s: %v", path, probeErr)
-				continue
-			}
-			if pinned.Size() != entry.CopySize || digest != strings.ToLower(entry.CopyPartialSHA256) {
-				logging.Debugf("cleanupGeneratedFiles: pending partial delete %s no longer matches the interim pin — retained", path)
-				continue
-			}
-			if err := fsutil.UnlinkVerified(fs, path, pinned); err != nil {
-				if errors.Is(err, fsutil.ErrTakeAsideVanished) {
-					dirsToCheck[filepath.Dir(path)] = true
-					continue
-				}
-				logging.Debugf("cleanupGeneratedFiles: pending partial delete %s could not be removed identity-verified — retained: %v", path, err)
+			} else if !os.IsNotExist(interimLstatErr) {
+				logging.Debugf("cleanupGeneratedFiles: pending interim copy delete probe failed for %s — retained: %v", path, interimLstatErr)
 				continue
 			}
 			dirsToCheck[filepath.Dir(path)] = true

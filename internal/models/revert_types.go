@@ -44,7 +44,11 @@ type GeneratedFilesJSON struct {
 //     The copy leg tees the full digest during its single unavoidable stream
 //     and FinalizeDeleteIntentCopyDigest seals this entry into the SHA256
 //     shape as soon as the publish lands, so the interim shape covers only
-//     the execute→seal crash window.
+//     the execute→seal crash window. Recovery NEVER deletes on the interim
+//     shape (codex P1, PRRT_kwDORn9KaM6novbT): entries are journaled before
+//     the crash they cover, so by recovery time the bounded proof can match
+//     a payload edited only between the digest windows — retain until
+//     sealed.
 //
 // All newer fields are omitempty: blobs written before their introduction
 // parse into zero values, and the reverter's dispatch falls through to the
@@ -74,12 +78,15 @@ type DeleteEntry struct {
 	// timestamp must not double as the pin's sentinel. HasIdentityPin owns
 	// the classification, including the pre-marker row mapping.
 	IdentityPinned bool `json:"identity_pinned,omitempty"`
-	// CopySize/CopyPartialSHA256 pin an in-flight streaming copy without a
-	// pre-pass: size equality plus the bounded head+tail digest
-	// (fsutil.PartialCopyDigest) must hold before the reverter removes the
-	// destination. Sealed to SHA256 once the publish returns the streamed
-	// digest; a recovery that still sees this shape fires on the interim
-	// proof alone (see PartialCopyDigest's threat-model note).
+	// CopySize/CopyPartialSHA256 record an in-flight streaming copy's install
+	// intent without a pre-pass: size plus the bounded head+tail digest
+	// (fsutil.PartialCopyDigest), sealed to SHA256 once the publish returns
+	// the streamed digest. The interim shape is intent evidence only (codex
+	// P1, PRRT_kwDORn9KaM6novbT): the entry survives the crash it was
+	// journaled against, so recovery can no longer tell the landed copy from
+	// a payload edited between the digest windows — it RETAINS any entry
+	// still carrying this shape, and only the sealed SHA256 authorizes
+	// removal.
 	CopySize          int64  `json:"copy_size,omitempty"`
 	CopyPartialSHA256 string `json:"copy_partial_sha256,omitempty"`
 }

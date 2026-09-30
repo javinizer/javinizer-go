@@ -15,11 +15,14 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 )
 
-// The three new planned-delete pin shapes (DeleteEntry LinkTarget / Identity
-// / CopyPartial) must consume on proof, retain on doubt, and NEVER touch an
+// The planned-delete pin shapes (DeleteEntry LinkTarget / Identity /
+// CopyPartial) consume on proof, retain on doubt, and NEVER touch an
 // occupant outside their install shape — the m5HF7 nonregular-retain
-// partition carried into each shape. Symlink-bearing legs run on OsFs and
-// skip where the platform cannot create links (unprivileged Windows).
+// partition carried into each shape. The CopyPartial interim is retain-only
+// by rule (codex P1, PRRT_kwDORn9KaM6novbT): the crash-surviving entry's
+// bounded proof cannot authorize an unlink — only the sealed SHA256 may
+// remove. Symlink-bearing legs run on OsFs and skip where the platform
+// cannot create links (unprivileged Windows).
 
 // symlinkVacClaimHookFs is vacClaimHookFs plus a TRUE no-follow Lstat: the
 // symlink pin's regularity pre-check must see the link OBJECT (a wrapped fs
@@ -260,7 +263,15 @@ func TestCleanupGeneratedFilesFS_HardLinkIdentityWeakLegs(t *testing.T) {
 	})
 }
 
-func TestCleanupGeneratedFilesFS_CopyPartialPin(t *testing.T) {
+// codex P1 (PRRT_kwDORn9KaM6novbT): the interim copy pin is journaled BEFORE
+// the execute→seal window it covers, so the crash leaves it durable for the
+// whole crash→recovery interval — an interval in which a payload edited ONLY
+// between the digest windows (same size, same first/last 64KiB) still matches
+// the bounded proof. The unsealed interim is therefore intent, never removal
+// authorization: recovery retains EVERY occupant under this shape; only
+// FinalizeDeleteIntentCopyDigest’s sealed SHA256 may unlink. Before the fix,
+// the two "retains" subtests below were deletions.
+func TestCleanupGeneratedFilesFS_InterimCopyPinRetainsUnsealed(t *testing.T) {
 	base := afero.NewMemMapFs()
 	require.NoError(t, base.MkdirAll("/lib", 0o755))
 	content := make([]byte, 2*fsutil.CopyPartialDigestSpan+128)
@@ -274,28 +285,28 @@ func TestCleanupGeneratedFilesFS_CopyPartialPin(t *testing.T) {
 		return models.DeleteEntry{Path: path, CopySize: int64(len(content)), CopyPartialSHA256: wantDigest}
 	}
 
-	t.Run("fires on size plus head+tail proof", func(t *testing.T) {
+	t.Run("the byte-identical published copy retains", func(t *testing.T) {
 		cleanupGeneratedFilesFS(base, pinLedgerOp(models.OperationTypeCopy, pinFor("/lib/movie.mkv")), "/lib")
-		exists, _ := afero.Exists(base, "/lib/movie.mkv")
-		assert.False(t, exists)
+		got, readErr := afero.ReadFile(base, "/lib/movie.mkv")
+		require.NoError(t, readErr, "even an exact interim match is intent, not removal power")
+		assert.Equal(t, content, got)
 	})
 
-	t.Run("retains a same-size foreign payload with a diverging tail", func(t *testing.T) {
-		foreign := make([]byte, len(content))
-		copy(foreign, content)
-		foreign[len(foreign)-1] ^= 0xFF
-		require.NoError(t, afero.WriteFile(base, "/lib/foreign.mkv", foreign, 0o644))
-		cleanupGeneratedFilesFS(base, pinLedgerOp(models.OperationTypeCopy, pinFor("/lib/foreign.mkv")), "/lib")
-		got, readErr := afero.ReadFile(base, "/lib/foreign.mkv")
-		require.NoError(t, readErr, "the interim proof refused — foreign bytes stay byte-intact")
-		assert.Equal(t, foreign, got)
-	})
-
-	t.Run("size drift retains without digest work", func(t *testing.T) {
-		require.NoError(t, afero.WriteFile(base, "/lib/short.mkv", []byte("short"), 0o644))
-		cleanupGeneratedFilesFS(base, pinLedgerOp(models.OperationTypeCopy, pinFor("/lib/short.mkv")), "/lib")
-		exists, _ := afero.Exists(base, "/lib/short.mkv")
-		assert.True(t, exists)
+	t.Run("a middle-only payload edit survives recovery byte-intact", func(t *testing.T) {
+		// The reported hazard: size and the first/last 64KiB are untouched,
+		// only bytes BETWEEN the digest windows changed — the retired interim
+		// probe would still have matched and unlinked the EDITED file.
+		edited := make([]byte, len(content))
+		copy(edited, content)
+		edited[fsutil.CopyPartialDigestSpan+64] ^= 0xFF
+		require.NoError(t, afero.WriteFile(base, "/lib/movie.mkv", edited, 0o644))
+		_, editedDigest, digestErr := fsutil.PartialCopyDigest(base, "/lib/movie.mkv")
+		require.NoError(t, digestErr)
+		require.Equal(t, wantDigest, editedDigest, "constructed to fool the bounded probe: same size and edge windows")
+		cleanupGeneratedFilesFS(base, pinLedgerOp(models.OperationTypeCopy, pinFor("/lib/movie.mkv")), "/lib")
+		got, readErr := afero.ReadFile(base, "/lib/movie.mkv")
+		require.NoError(t, readErr, "the edited payload must survive — only the sealed full digest may authorize this unlink")
+		assert.Equal(t, edited, got, "the middle-of-payload edit is intact")
 	})
 
 	t.Run("directory occupant retains (nonregular rule)", func(t *testing.T) {
@@ -310,21 +321,6 @@ func TestCleanupGeneratedFilesFS_CopyPartialPin(t *testing.T) {
 		cleanupGeneratedFilesFS(base, pinLedgerOp(models.OperationTypeCopy, pinFor("/lib/absent.mkv")), "/lib")
 		exists, _ := afero.Exists(base, "/lib/absent.mkv")
 		assert.False(t, exists)
-	})
-
-	t.Run("open refusal retains", func(t *testing.T) {
-		require.NoError(t, afero.WriteFile(base, "/lib/movie.mkv", content, 0o644))
-		fs := &denyOpenFS{Fs: base, path: "/lib/movie.mkv"}
-		cleanupGeneratedFilesFS(fs, pinLedgerOp(models.OperationTypeCopy, pinFor("/lib/movie.mkv")), "/lib")
-		exists, _ := afero.Exists(base, "/lib/movie.mkv")
-		assert.True(t, exists, "a probe that cannot prove is a probe that must retain")
-	})
-
-	t.Run("handle stat refusal retains", func(t *testing.T) {
-		fs := &pinnedStatDenyFs{Fs: base, path: "/lib/movie.mkv", err: errors.New("stat denied")}
-		cleanupGeneratedFilesFS(fs, pinLedgerOp(models.OperationTypeCopy, pinFor("/lib/movie.mkv")), "/lib")
-		exists, _ := afero.Exists(base, "/lib/movie.mkv")
-		assert.True(t, exists)
 	})
 }
 
@@ -438,55 +434,11 @@ func TestCleanupGeneratedFilesFS_VanishLegsConsume(t *testing.T) {
 		assert.True(t, fs.done, "the vacate hook ran — else the leg proves nothing")
 	})
 
-	t.Run("partial pin vanished under the unlink", func(t *testing.T) {
-		base := afero.NewMemMapFs()
-		require.NoError(t, base.MkdirAll("/lib", 0o755))
-		require.NoError(t, afero.WriteFile(base, "/lib/movie.mkv", []byte("vid"), 0o644))
-		info, _, pErr := fsutil.PartialCopyDigest(base, "/lib/movie.mkv")
-		require.NoError(t, pErr)
-		fs := &vacateVanishFs{Fs: base, target: "/lib/movie.mkv"}
-		cleanupGeneratedFilesFS(fs, pinLedgerOp(models.OperationTypeCopy, models.DeleteEntry{Path: "/lib/movie.mkv", CopySize: info.Size(), CopyPartialSHA256: digestOfPartial(t, base, "/lib/movie.mkv")}), "/lib")
-		assert.True(t, fs.done)
-	})
-
-	t.Run("absent at partial re-open consumes", func(t *testing.T) {
-		base := afero.NewMemMapFs()
-		require.NoError(t, base.MkdirAll("/lib", 0o755))
-		require.NoError(t, afero.WriteFile(base, "/lib/movie.mkv", []byte("vid"), 0o644))
-		info, partial, pErr := fsutil.PartialCopyDigest(base, "/lib/movie.mkv")
-		require.NoError(t, pErr)
-		fs := &notExistOpenFS{Fs: base, path: "/lib/movie.mkv"}
-		cleanupGeneratedFilesFS(fs, pinLedgerOp(models.OperationTypeCopy, models.DeleteEntry{Path: "/lib/movie.mkv", CopySize: info.Size(), CopyPartialSHA256: partial}), "/lib")
-		exists, _ := afero.Exists(base, "/lib/movie.mkv")
-		assert.True(t, exists, "the wrapper hides it from Open only — the pin consumed without a removal")
-	})
 }
 
-// notExistOpenFS answers Open of path with a wrapped NotExist: the pin's
-// lstat succeeded, the payload vanished before the digest handle.
-type notExistOpenFS struct {
-	afero.Fs
-	path string
-}
-
-func (f *notExistOpenFS) Open(name string) (afero.File, error) {
-	if filepath.Clean(name) == filepath.Clean(f.path) {
-		return nil, &os.PathError{Op: "open", Path: name, Err: os.ErrNotExist}
-	}
-	return f.Fs.Open(name)
-}
-
-func digestOfPartial(t *testing.T, fs afero.Fs, path string) string {
-	t.Helper()
-	_, digest, err := fsutil.PartialCopyDigest(fs, path)
-	require.NoError(t, err)
-	return digest
-}
-
-// Swaps landing INSIDE the unlink window against the identity/partial legs:
-// the vacate rides the foreign occupant, the identity rebind refuses it, and
-// it rides BACK byte-intact — the bound discipline the SHA leg already
-// proves, now exercised by both new content legs.
+// Swaps landing INSIDE the unlink window against the identity leg: the
+// vacate rides the foreign occupant, the identity rebind refuses it, and it
+// rides BACK byte-intact — the bound discipline the SHA leg already proves.
 func TestCleanupGeneratedFilesFS_PinWindowSwapRewinds(t *testing.T) {
 	t.Run("identity pin", func(t *testing.T) {
 		base := afero.NewMemMapFs()
@@ -506,23 +458,6 @@ func TestCleanupGeneratedFilesFS_PinWindowSwapRewinds(t *testing.T) {
 		assert.Equal(t, plant, got, "the foreign occupant rides back byte-intact")
 	})
 
-	t.Run("partial pin", func(t *testing.T) {
-		base := afero.NewMemMapFs()
-		require.NoError(t, base.MkdirAll("/lib", 0o755))
-		require.NoError(t, afero.WriteFile(base, "/lib/movie.mkv", []byte("vid"), 0o644))
-		info, partial, pErr := fsutil.PartialCopyDigest(base, "/lib/movie.mkv")
-		require.NoError(t, pErr)
-		plant := []byte("a foreign occupant swapped inside the window")
-		fs := &vacClaimHookFs{Fs: base, target: "/lib/movie.mkv", hook: func() {
-			require.NoError(t, base.Rename("/lib/movie.mkv", "/lib/aside.bin"))
-			require.NoError(t, afero.WriteFile(base, "/lib/movie.mkv", plant, 0o644))
-		}}
-		cleanupGeneratedFilesFS(fs, pinLedgerOp(models.OperationTypeCopy, models.DeleteEntry{Path: "/lib/movie.mkv", CopySize: info.Size(), CopyPartialSHA256: partial}), "/lib")
-		require.True(t, fs.done)
-		got, readErr := afero.ReadFile(base, "/lib/movie.mkv")
-		require.NoError(t, readErr)
-		assert.Equal(t, plant, got)
-	})
 }
 
 // symlinkVacateVanishFs removes the pinned name the moment the vacate rename

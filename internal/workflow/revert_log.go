@@ -106,9 +106,11 @@ type RevertLog interface {
 	// the publish's single verified stream returns the teed sha256: the
 	// durable pin then authenticates exactly the bytes the destination
 	// received, and a post-seal crash recovers with the full-hash proof. The
-	// interim shape is deliberately kept crash-correct on its own (see
-	// fsutil.PartialCopyDigest's threat model), so a missing/already-sealed
-	// entry is an idempotent no-op, not an error.
+	// seal is what grants removal power (codex P1, PRRT_kwDORn9KaM6novbT):
+	// recovery RETAINS a row still in the interim shape — the crash-surviving
+	// bounded proof cannot distinguish the landed copy from a payload edited
+	// between the digest windows — so a missing/already-sealed entry is an
+	// idempotent no-op, not an error.
 	FinalizeDeleteIntentCopyDigest(ctx context.Context, opID OperationID, path, sha256 string) error
 
 	// RecordReplacement implements the downloader's ReplacementRecorder seam

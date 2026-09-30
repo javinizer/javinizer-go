@@ -700,8 +700,8 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 			// video itself, yet an absent destination has no other durable trail
 			// (an occupied one graduated through BeforePublish's replacement
 			// journal). Pin the install against the target BEFORE execute so an
-			// interrupted row's revert can still attribute — and remove — exactly
-			// what this apply landed, WITHOUT the content-hash pin's second
+			// interrupted row's revert can still attribute exactly what this apply
+			// landed, WITHOUT the content-hash pin's second
 			// streaming read of the whole payload (codex P2,
 			// PRRT_kwDORn9KaM6nBUrF): the proof shape keys on the publication's
 			// link mode — a hard link IS the admitted source's object (its
@@ -710,7 +710,9 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 			// pin could never fire on the non-regular entry at all, codex P2
 			// PRRT_kwDORn9KaM6nBUq8), and only a byte-streaming copy carries a
 			// content proof — the bounded head+tail interim digest, sealed to
-			// the full sha256 the publish stream tees once the install lands.
+			// the full sha256 the publish stream tees once the install lands. The
+			// unsealed interim is intent only: recovery retains it rather than
+			// unlinking on the bounded proof (codex P1, PRRT_kwDORn9KaM6novbT).
 			// The confirmed publish below consumes this pin: a copy/link primary
 			// is user-owned once installed and this row's revert retains it.
 			if filepath.Clean(plan.SourcePath) != filepath.Clean(plan.TargetPath) && !finalReplaced && o.revertLog != nil && opID != "" {
@@ -834,9 +836,10 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 			// hash of the very bytes that landed. Placement is deliberate —
 			// AFTER every batch leg observed its install, so a seal refusal
 			// rolls back with the same confirmed-install discipline the
-			// reconcile refusal exercises; the interim partial proof stays the
-			// crash evidence for any earlier exit (it never needed the stream
-			// to be correct).
+			// reconcile refusal exercises; the interim entry stays the crash
+			// evidence for any earlier exit — intent without removal power:
+			// recovery retains it until this seal lands (codex P1,
+			// PRRT_kwDORn9KaM6novbT).
 			if primaryPinCopyPartial && finalResult != nil && finalResult.PrimaryCopySHA256 != "" && o.revertLog != nil && opID != "" {
 				if sealErr := o.revertLog.FinalizeDeleteIntentCopyDigest(ctx, opID, plan.TargetPath, finalResult.PrimaryCopySHA256); sealErr != nil {
 					return fmt.Errorf("seal deferred primary copy pin %s: %w", plan.TargetPath, sealErr)
@@ -1621,11 +1624,14 @@ var symlinkLinkTargetFn = organizer.SymlinkLinkTarget
 // the admitted source; any other shape is refused closed.
 //
 // Default (byte-streaming copy): the bounded head+tail interim digest of
-// fsutil.PartialCopyDigest — the only content proof available before the
-// stream exists, and the only one the execute→seal crash window needs (see
-// its threat model). The verified copy leg tees the full sha256 off its
-// single publish stream and FinalizeDeleteIntentCopyDigest seals this entry
-// once the install lands.
+// fsutil.PartialCopyDigest — the only content marker available before the
+// stream exists. It is intent evidence, NOT removal power (codex P1,
+// PRRT_kwDORn9KaM6novbT): an entry still in this shape at recovery retains
+// the destination, because the crash-surviving bounded proof can no longer
+// tell the landed copy from a payload edited between the digest windows. The
+// verified copy leg tees the full sha256 off its single publish stream and
+// FinalizeDeleteIntentCopyDigest seals this entry once the install lands —
+// only the sealed shape authorizes the removal.
 func (s *artifactStage) deferredPrimaryDeleteEntry(plan *organizer.OrganizePlan) (models.DeleteEntry, error) {
 	switch s.original.Organize.LinkMode {
 	case organizer.LinkModeSoft:
