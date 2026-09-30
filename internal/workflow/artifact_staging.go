@@ -614,7 +614,12 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 			// moves the FIRST planned source and skips the rest, so only the
 			// first-planned entry per endpoint journals — the same first-wins
 			// dedupe the copy lane's arming applies (codex P2,
-			// PRRT_kwDORn9KaM6m7CBR). A second pending intent would survive
+			// PRRT_kwDORn9KaM6m7CBR). The lane also ENFORCES the first-wins
+			// claim: once the first source attempts the endpoint, later
+			// duplicates are refused even when that attempt failed before
+			// publishing, so the single journaled source is the only one that
+			// can ever install into it (codex P2, PRRT_kwDORn9KaM6nmSaI). A
+			// second pending intent would survive
 			// execution as a never-consumed row whose source is still present,
 			// and its rename-suppression keys on the SHARED destination: in the
 			// execute→reconcile crash window the winner's move-back would stay
@@ -642,9 +647,12 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 			// installs the FIRST planned source and skips the rest, so only the
 			// first-planned entry per endpoint arms — a second BeforePublish would
 			// collide with the first's own live busy claim and fail the whole
-			// apply (codex P2, PRRT_kwDORn9KaM6m7CBR). The single durable pin then
-			// carries the first source's digest, matching the bytes execute lands
-			// and the reconciler's one-pin-per-endpoint keep-set.
+			// apply (codex P2, PRRT_kwDORn9KaM6m7CBR). The execute lane likewise
+			// refuses later duplicates even after a failed first attempt (codex
+			// P2, PRRT_kwDORn9KaM6nmSaI), so the pinned source stays the only
+			// possible installer of the armed endpoint. The single durable pin
+			// then carries the first source's digest, matching the bytes execute
+			// lands and the reconciler's one-pin-per-endpoint keep-set.
 			armedSidecarEndpoints := map[string]bool{}
 			for _, mv := range executor.PlanSubtitleMoves(plan) {
 				if armedSidecarEndpoints[filepath.Clean(mv.NewPath)] {

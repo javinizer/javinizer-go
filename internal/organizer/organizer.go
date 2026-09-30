@@ -750,6 +750,13 @@ func (o *Organizer) handleSubtitles(plan *OrganizePlan, result *OrganizeResult, 
 	}
 
 	subtitleResults := make([]SubtitleResult, len(subtitles))
+	// endpointAttempts enforces strict first-wins when two sources normalize
+	// onto ONE destination (codex P2, PRRT_kwDORn9KaM6nmSaI): the FIRST install
+	// attempt claims the endpoint for the rest of this pass — the value records
+	// whether that attempt left the endpoint VACANT (the winner failed before
+	// its bytes published; a later duplicate is then additionally worth a
+	// warning) or whether this lane's bytes occupy it (silent ordinary dedupe).
+	endpointAttempts := map[string]bool{}
 	for i, subtitle := range subtitles {
 		videoNameWithoutExt := strings.TrimSuffix(plan.TargetFile, filepath.Ext(plan.TargetFile))
 		newSubtitleName := o.subtitleHandler.generateSubtitleFileName(
@@ -792,6 +799,28 @@ func (o *Organizer) handleSubtitles(plan *OrganizePlan, result *OrganizeResult, 
 					sr.Skipped = true
 					return nil
 				}
+				// Strict first-wins on a shared normalized endpoint (codex P2,
+				// PRRT_kwDORn9KaM6nmSaI). The pre-execution journal dedupes every
+				// normalized destination to its FIRST planned source — the move
+				// lane's pending intent names only that source, the copy lane's
+				// armed pin carries only that source's digest — so no LATER
+				// duplicate may publish into the endpoint, not even after the
+				// first source's attempt FAILED before its bytes landed (e.g. the
+				// verified-source proof refused a rename-swap past the
+				// pre-execution gate): a second source's successful move would
+				// leave no journaled inverse for crash recovery to reconcile, and
+				// second-source copy bytes could never authenticate against the
+				// first source's hash pin. The duplicate takes the same skip
+				// classification the occupancy gates use — its source stays put,
+				// and the caller's skip/keep machinery settles the endpoint on
+				// the FIRST source's journal entry alone.
+				if vacant, attempted := endpointAttempts[filepath.Clean(newPath)]; attempted {
+					if vacant {
+						logging.Warnf("[organizer] skipping duplicate subtitle %s → %s: the shared destination's first-planned source already attempted it and did not install", subtitle.OriginalPath, newPath)
+					}
+					sr.Skipped = true
+					return nil
+				}
 				// pathExistsBestEffort also sees dangling symlink objects: a filesystem whose
 				// Stat follows links (no true Lstat) would otherwise let this op replace one.
 				exists, statErr := pathExistsBestEffort(o.fs, newPath)
@@ -813,7 +842,18 @@ func (o *Organizer) handleSubtitles(plan *OrganizePlan, result *OrganizeResult, 
 				// WHETHER this endpoint installs; the proof decides WHICH object its
 				// bytes carry. Unbound sources (direct flows, post-admission
 				// arrivals) keep the legacy by-name composite.
+				// The FIRST source to reach the install claims the endpoint for
+				// this pass regardless of the outcome: a refusal or error before
+				// publishing leaves it vacant-but-claimed (true), while landed
+				// bytes — a clean install or the publish-completed ambiguity —
+				// occupy it (false), so a later duplicate blocks silently as the
+				// ordinary first-wins dedupe instead of alarming.
+				endpointKey := filepath.Clean(newPath)
+				endpointAttempts[endpointKey] = true
 				err := install.run(o.fs, subtitle.OriginalPath, newPath, plan.verifiedSubtitleProofs[filepath.Clean(subtitle.OriginalPath)])
+				if err == nil || fsutil.PublishCompleted(err) {
+					endpointAttempts[endpointKey] = false
+				}
 				if err != nil && fsutil.PublishCompleted(err) {
 					// Post-publish cleanup refusal (#224 codex P2): bytes at the
 					// destination AND the source retained — an ambiguous delivery,

@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -349,4 +350,205 @@ func TestDeferredCopyDuplicateSubtitleEndpointsGraduateOnce(t *testing.T) {
 	secondRetainedAfter, err := afero.Exists(fs, subSecond)
 	require.NoError(t, err)
 	assert.True(t, secondRetainedAfter, "revert never consumes the skipped duplicate source")
+}
+
+// Winner refusal on a shared endpoint, deferred MOVE (codex P2,
+// PRRT_kwDORn9KaM6nmSaI): the first-planned duplicate's verified-source proof
+// detects a swap AFTER the pre-execution gate and refuses before publishing,
+// leaving the endpoint vacant. Before the strict first-wins gate the SECOND
+// duplicate then moved into that vacancy with NO journaled inverse — the
+// intent dedupe journals the first source only — so a crash before
+// reconciliation stranded the second source's bytes at the destination. Now
+// the duplicate is blocked (Skipped, never Moved), its seat keeps no journal
+// row, and the endpoint's only pending intent still names the first source.
+// The apply itself aborts on the swapped winner's republish revalidation
+// exactly like the single-subtitle refusal, and rollback restores everything.
+func TestDeferredMoveDuplicateWinnerRefusalBlocksSecond(t *testing.T) {
+	fs, root, source, subFirst, subSecond, multipart, unrelated, match := dupSubFiles(t, "move-dup-winner-refusal")
+	dest := filepath.Join(root, "library")
+	real := organizer.NewOrganizer(fs, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize, MoveSubtitles: true, SubtitleExtensions: []string{".srt"}}, template.NewEngine(), nil)
+	ledger := &completeCallFaultLog{}
+	aside := filepath.Join(root, "incoming", "swapped-aside.srt")
+	seats := map[string]organizer.SubtitleResult{}
+	fault := &pr260PublicationFaultOrganizer{Organizer: real, preExecute: func(*organizer.OrganizePlan) {
+		// The winner's bound proof detects this rename-swap at the consume —
+		// after the pre-execution gate already passed.
+		_ = fs.Rename(subFirst, aside)
+		_ = afero.WriteFile(fs, subFirst, []byte("replacement subtitle"), 0o644)
+	}, afterExecute: func(_ *organizer.OrganizePlan, result *organizer.OrganizeResult) {
+		for _, sr := range result.Subtitles {
+			seats[filepath.Clean(sr.OriginalPath)] = sr
+		}
+	}}
+	orch := &applyOrchImpl{fs: fs, organizer: fault, revertLog: ledger}
+	cmd := pr260ArtifactFailureCommand(&models.Movie{ContentID: "move-dup-winner-refusal"}, match, dest)
+	cmd.Organize.Skip = false
+	cmd.Organize.MoveFiles = true
+	cmd.Download = false
+
+	stage, _, publishErr := verifiedStagePublish(t, orch, real, fs, root, source, dest, match, cmd)
+	defer stage.cleanup()
+
+	require.ErrorIs(t, publishErr, errArtifactSourceChanged, "the swapped winner aborts the apply exactly like the single-subtitle refusal")
+	winner, ok := seats[filepath.Clean(subFirst)]
+	require.True(t, ok, "the winner seat exists")
+	require.Error(t, winner.Error)
+	assert.True(t, errors.Is(winner.Error, fsutil.ErrTakeAsideForeign), "winner seat error class: %v", winner.Error)
+	assert.False(t, winner.Moved || winner.Skipped, "a refusal is none of the consumption classes")
+	dup, ok := seats[filepath.Clean(subSecond)]
+	require.True(t, ok, "the duplicate seat exists")
+	assert.True(t, dup.Skipped, "strict first-wins blocks the duplicate after the winner's failed attempt")
+	assert.False(t, dup.Moved, "pre-fix the duplicate moved into the vacant endpoint with no journaled inverse")
+	endpoint := filepath.Clean(winner.NewPath)
+	require.NotEmpty(t, endpoint)
+	require.Equal(t, endpoint, filepath.Clean(dup.NewPath), "both seats normalize onto ONE endpoint")
+
+	for _, mv := range ledger.movesCaptured {
+		assert.NotEqual(t, filepath.Clean(subSecond), filepath.Clean(mv.OriginalPath), "the blocked duplicate never journals a move intent")
+		if filepath.Clean(mv.NewPath) == endpoint {
+			assert.Equal(t, filepath.Clean(subFirst), filepath.Clean(mv.OriginalPath), "the endpoint's only intent names the first-planned source")
+		}
+	}
+	exists, err := afero.Exists(fs, endpoint)
+	require.NoError(t, err)
+	assert.False(t, exists, "rollback leaves the shared endpoint vacant — nothing unjournaled installed")
+	got, err := afero.ReadFile(fs, source)
+	require.NoError(t, err)
+	assert.Equal(t, "video", string(got), "rollback restored the moved video")
+	got, err = afero.ReadFile(fs, subFirst)
+	require.NoError(t, err)
+	assert.Equal(t, "replacement subtitle", string(got), "the foreign replacement rides back onto the winner's name byte-intact")
+	got, err = afero.ReadFile(fs, aside)
+	require.NoError(t, err)
+	assert.Equal(t, "english-sub-first", string(got), "the admitted winner object is never consumed")
+	got, err = afero.ReadFile(fs, subSecond)
+	require.NoError(t, err)
+	assert.Equal(t, "english-sub-second", string(got), "the blocked duplicate keeps its source spot, unconsumed")
+	pr260AssertNoFinals(t, fs, dest)
+	for _, kept := range []string{multipart, unrelated} {
+		exists, serr := afero.Exists(fs, kept)
+		require.NoError(t, serr)
+		assert.True(t, exists, kept)
+	}
+}
+
+// Winner refusal on a shared endpoint, deferred COPY (codex P2,
+// PRRT_kwDORn9KaM6nmSaI): the armed endpoint pin carries the FIRST-planned
+// source's digest. Before the strict first-wins gate the second duplicate
+// could still copy into the still-vacant endpoint after the winner's verified
+// refusal — bytes the surviving pin can never authenticate, so a later
+// revert's verified unlink refused and STRANDED the installed sidecar. Now
+// the duplicate is blocked (Skipped, never Copied), the released pin is
+// reconciled away, and the endpoint settles only through hash-coherent lanes
+// (the staged-twin tree install pins exactly the bytes it lands), so
+// recovery reaps precisely what this apply published.
+func TestDeferredCopyDuplicateWinnerRefusalBlocksSecond(t *testing.T) {
+	db, _ := pr260ArtifactDB(t)
+	slug := "copy-dup-winner-refusal"
+	movie := pr260FencedMovie(t, db, slug, "")
+	fs, root, source, subFirst, subSecond, multipart, unrelated, match := dupSubFiles(t, slug)
+	dest := filepath.Join(root, "library")
+	engine := template.NewEngine()
+	org := organizer.NewOrganizer(fs, &organizer.Config{FolderFormat: "<ACTRESS>", FileFormat: "<ID>", RenameFile: true, OperationMode: operationmode.OperationModeOrganize, MoveSubtitles: true, SubtitleExtensions: []string{".srt"}}, engine, nil)
+	aside := filepath.Join(root, "incoming", "swapped-aside.srt")
+	fault := &pr260PublicationFaultOrganizer{Organizer: org, preExecute: func(*organizer.OrganizePlan) {
+		// After the pre-execution gate, before the consume: the winner's bound
+		// proof refuses this rename-swap; its armed pin keeps the ADMITTED
+		// digest recorded at arming time.
+		_ = fs.Rename(subFirst, aside)
+		_ = afero.WriteFile(fs, subFirst, []byte("replacement subtitle"), 0o644)
+	}}
+	repo := database.NewBatchFileOperationRepository(db)
+	log := NewDBRevertLog(repo, NewRevertLogConfig(true, nil), slug, fs, nil, nil, nil)
+	nameCfg := nfo.NFONameConfig{FilenameTemplate: "<ACTRESS>.nfo", FirstNameOrder: true}
+	orch := newApplyOrchestrator(fs, fault, nil, nil, nil, ApplyConfig{NFONameCfg: nameCfg}, engine, log, nil, nil)
+
+	probePlan, err := org.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: match, Movie: &movie, DestDir: dest, ForceUpdate: true, OperationMode: operationmode.OperationModeOrganize})
+	require.NoError(t, err)
+	subMoves := org.PlanSubtitleMoves(probePlan)
+	require.Len(t, subMoves, 2)
+	require.Equal(t, filepath.Clean(subMoves[0].NewPath), filepath.Clean(subMoves[1].NewPath))
+	require.Equal(t, filepath.Clean(subFirst), filepath.Clean(subMoves[0].OriginalPath))
+	subTarget := subMoves[0].NewPath
+
+	cmd := pr260FencedCommand(&movie, match, dest, pr260FencedCounter(t, db), operationmode.OperationModeOrganize, false, false, organizer.LinkModeNone, false, false)
+	result, err := orch.Execute(t.Context(), cmd)
+	require.NoError(t, err)
+	require.NotNil(t, result.OrganizeResult)
+	video := result.OrganizeResult.NewPath
+	require.FileExists(t, video)
+
+	require.Len(t, result.OrganizeResult.Subtitles, 2)
+	seats := map[string]organizer.SubtitleResult{}
+	for _, sr := range result.OrganizeResult.Subtitles {
+		seats[filepath.Clean(sr.OriginalPath)] = sr
+	}
+	winner, ok := seats[filepath.Clean(subFirst)]
+	require.True(t, ok, "the winner seat exists")
+	require.Error(t, winner.Error, "the swapped winner's verified copy refuses")
+	assert.True(t, errors.Is(winner.Error, fsutil.ErrTakeAsideForeign), "winner seat: %v", winner.Error)
+	assert.False(t, winner.Copied)
+	dup, ok := seats[filepath.Clean(subSecond)]
+	require.True(t, ok, "the duplicate seat exists")
+	assert.True(t, dup.Skipped, "strict first-wins blocks the duplicate after the winner's failed attempt")
+	assert.False(t, dup.Copied, "pre-fix the duplicate copied bytes the armed pin could never authenticate")
+
+	// The armed first-source pin released and reconciled away; the endpoint
+	// reaches the destination only through the staged-twin tree install, which
+	// pins exactly the bytes it lands — so recovery reaps the endpoint instead
+	// of stranding it behind a hash it can never match.
+	stem := strings.TrimSuffix(filepath.Base(video), filepath.Ext(video))
+	winnerTwin := filepath.Join(filepath.Dir(video), stem+".en.srt")
+	twinBytes, err := afero.ReadFile(fs, winnerTwin)
+	require.NoError(t, err, "the refused winner's admitted staged twin installs through the tree (un-normalized leaf)")
+	assert.Equal(t, "english-sub-first", string(twinBytes))
+	endpointBytes, err := afero.ReadFile(fs, subTarget)
+	require.NoError(t, err, "the shared endpoint is delivered by the hash-pinned tree twin")
+	assert.Equal(t, "english-sub-second", string(endpointBytes))
+	ledger := p3Ledger(t, repo, result.OperationID)
+	// Nothing graduated through the organizer lane (no Copied seat restates the
+	// endpoint at completion), so the tree installs stay hash-pinned planned
+	// deletes the reverter verifies — exactly the crash-window shape. The
+	// endpoint's single surviving pin must authenticate the bytes that actually
+	// landed: pre-fix it carried the FIRST source's armed digest against the
+	// second source's installed bytes (unlinkable on mismatch in the crash
+	// window); post-fix the failed winner's armed pin is retracted and the
+	// landed twin's own pin takes over.
+	var endpointPins []models.DeleteEntry
+	for _, pd := range ledger.PlannedDeletes {
+		if pd.Path == subTarget {
+			endpointPins = append(endpointPins, pd)
+		}
+	}
+	require.Len(t, endpointPins, 1, "exactly one surviving pin for the normalized endpoint")
+	landedDigest, err := artifactDigest(fs, subSecond)
+	require.NoError(t, err)
+	assert.Equal(t, landedDigest, endpointPins[0].SHA256, "the surviving pin authenticates the bytes that actually landed")
+	failedWinnerDigest, err := artifactDigest(fs, aside)
+	require.NoError(t, err)
+	assert.NotEqual(t, failedWinnerDigest, endpointPins[0].SHA256, "the retracted armed pin carried the failed winner's digest — it must not survive")
+	for _, rp := range ledger.Replacements {
+		assert.NotEqual(t, subTarget, rp.Destination, "the endpoint never registered as a replacement")
+	}
+
+	res, revErr := history.NewReverter(fs, repo).RevertBatch(t.Context(), slug)
+	require.NoError(t, revErr)
+	require.Equal(t, 1, res.Succeeded)
+	for _, reaped := range []string{subTarget, winnerTwin} {
+		gone, statErr := afero.Exists(fs, reaped)
+		require.NoError(t, statErr)
+		assert.False(t, gone, "revert reaps the tree-installed sidecar: %s", reaped)
+	}
+	require.FileExists(t, video, "copy-mode revert retains the installed primary")
+	pr260AssertRetained(t, fs, source, subFirst, multipart, unrelated)
+	got, err := afero.ReadFile(fs, subFirst)
+	require.NoError(t, err)
+	assert.Equal(t, "replacement subtitle", string(got), "the foreign replacement is never consumed")
+	got, err = afero.ReadFile(fs, aside)
+	require.NoError(t, err)
+	assert.Equal(t, "english-sub-first", string(got), "the admitted winner object survives at the swept-aside name")
+	got, err = afero.ReadFile(fs, subSecond)
+	require.NoError(t, err)
+	assert.Equal(t, "english-sub-second", string(got), "copy mode retains the blocked duplicate source")
+	pr260AssertStageGone(t, fs, filepath.Dir(dest))
 }

@@ -1,9 +1,11 @@
 package organizer
 
 import (
+	"errors"
 	"path/filepath"
 	"testing"
 
+	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
@@ -100,4 +102,67 @@ func TestHandleSubtitles_DuplicateNormalizedEndpointsFirstWins(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "first english", string(bytes), "the probe never mutates the sources")
 	})
+}
+
+// Winner-refusal half of codex P2 (PRRT_kwDORn9KaM6nmSaI): two sources share
+// one normalized endpoint, and the FIRST-planned source's install FAILS before
+// publishing — here its bound admission proof refuses the object at the
+// consume, the same shape as a rename-swap detected after the pre-execution
+// gate. The pre-execution journal dedupes the endpoint to the first source
+// only (the move lane's pending intent names it, the copy lane's armed pin
+// carries its digest), so the second duplicate must NEVER install into the
+// still-vacant endpoint: its move would leave no journaled inverse for crash
+// recovery to reconcile, and its copy bytes could never authenticate against
+// the first source's hash pin. Strict first-wins holds: the duplicate skips,
+// the endpoint stays vacant, and both sources survive byte-intact — the
+// first-source journal entry settles the endpoint on its own.
+func TestHandleSubtitles_DuplicateBlockedAfterWinnerRefusal(t *testing.T) {
+	lanes := map[string]subtitleInstall{
+		"move": subtitleMoveInstall,
+		"copy": subtitleCopyInstall,
+	}
+	for name, lane := range lanes {
+		t.Run(name, func(t *testing.T) {
+			fs := afero.NewMemMapFs()
+			org := NewOrganizer(fs, &Config{MoveSubtitles: true, SubtitleExtensions: []string{".srt"}}, nil, nil)
+			srcFirst := "/source/ABC-123.en.srt"
+			srcSecond := "/source/ABC-123.eng.srt"
+			dest := "/dest/ABC-123/ABC-123.eng.srt"
+			require.NoError(t, fs.MkdirAll("/source", 0o777))
+			require.NoError(t, afero.WriteFile(fs, srcFirst, []byte("first english"), 0o644))
+			require.NoError(t, afero.WriteFile(fs, srcSecond, []byte("second english"), 0o644))
+			require.NoError(t, fs.MkdirAll("/dest/ABC-123", 0o777))
+
+			plan := verifiedSubtitleTestPlan()
+			plan.BindVerifiedSubtitleSources(map[string]fsutil.VerifiedSourceProof{
+				filepath.Clean(srcFirst):  refusingSubtitleProof,
+				filepath.Clean(srcSecond): acceptingSubtitleProof,
+			})
+			result := &OrganizeResult{}
+			org.handleSubtitles(plan, result, lane)
+
+			require.Len(t, result.Subtitles, 2)
+			winner := result.Subtitles[0]
+			require.Equal(t, srcFirst, winner.OriginalPath)
+			require.Error(t, winner.Error)
+			assert.True(t, errors.Is(winner.Error, errAdmissionProofRefused), "the proof error rides: %v", winner.Error)
+			assert.True(t, errors.Is(winner.Error, fsutil.ErrTakeAsideForeign), "typed admission refusal: %v", winner.Error)
+			assert.False(t, winner.Moved || winner.Copied || winner.Skipped, "a refusal is none of the consumption classes")
+
+			dup := result.Subtitles[1]
+			require.Equal(t, srcSecond, dup.OriginalPath)
+			assert.True(t, dup.Skipped, "strict first-wins blocks the duplicate once the winner attempted the endpoint")
+			assert.NoError(t, dup.Error)
+			assert.False(t, dup.Moved || dup.Copied, "the duplicate NEVER installs after the winner failed before publishing")
+
+			exists, err := afero.Exists(fs, dest)
+			require.NoError(t, err)
+			assert.False(t, exists, "the still-vacant endpoint stays vacant — no unjournaled install can become the winner")
+			for path, want := range map[string]string{srcFirst: "first english", srcSecond: "second english"} {
+				got, readErr := afero.ReadFile(fs, path)
+				require.NoError(t, readErr)
+				assert.Equal(t, want, string(got), "source retained byte-intact: %s", path)
+			}
+		})
+	}
 }
