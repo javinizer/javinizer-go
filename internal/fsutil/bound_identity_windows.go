@@ -53,6 +53,33 @@ func boundObjectIdentity(os.FileInfo) (device, inode uint64, ok bool) {
 // size+modtime legs exactly like the POSIX in-memory posture. The fs leg is
 // unused: the path names the object on every OsFs-compatible fs, and the
 // gating record travels with the FileInfo.
+// streamedHandleIdentity supplies the streamed re-proof's strong legs from
+// the ALREADY-OPEN descriptor — never by re-resolving a path
+// (reproofStreamedSource): GetFileInformationByHandle on the live handle
+// answers the volume-serial+file-index pair of the object the descriptor
+// pins, so a post-open rename-over of the source NAME leaves the legs
+// untouched (the re-proof's rename-stable Windows vector: by-path capture
+// would bind the replacement), while an in-place truncate/rewrite of the
+// pinned object still moves the handle Stat's size/last-write legs compared
+// alongside. Handles exposing no fd leg (virtual filesystems, wrapping test
+// handles) degrade to not-OK, keeping the size+modtime legs exactly like
+// BoundObjectIdentity's Sys() gate; an fd whose query fails degrades the
+// same way. Both re-proof captures ride this one mechanism, so no
+// representation drift (by-path vs by-handle attribute records) can
+// intervene between them.
+func streamedHandleIdentity(file afero.File, _ os.FileInfo) (device, inode uint64, ok bool) {
+	fder, fOK := file.(interface{ Fd() uintptr })
+	if !fOK {
+		return 0, 0, false
+	}
+	var byHandle windows.ByHandleFileInformation
+	if err := windows.GetFileInformationByHandle(windows.Handle(fder.Fd()), &byHandle); err != nil {
+		return 0, 0, false
+	}
+	return uint64(byHandle.VolumeSerialNumber),
+		uint64(byHandle.FileIndexHigh)<<32 | uint64(byHandle.FileIndexLow), true
+}
+
 func BoundObjectIdentity(_ afero.Fs, path string, info os.FileInfo) (device, inode uint64, ok bool) {
 	if info == nil {
 		return 0, 0, false

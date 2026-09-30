@@ -49,8 +49,9 @@ type VerifiedSourceProof func(path string, info os.FileInfo) error
 //     reclaiming the draw itself.
 //  4. EXDEV (library on another volume): the claim is opened, its handle
 //     re-proven against the admission proof (and, since the descriptor pins
-//     the object but not its bytes, re-proven once more between the stream's
-//     completion and the publish), streamed into dest-adjacent
+//     the object but not its bytes, the opened object's handle-derived
+//     identity is re-proven once more between the stream's completion and
+//     the publish), streamed into dest-adjacent
 //     O_EXCL staging and bound-published no-replace (the verified copy's
 //     construction), then the consumed claim is removed ONLY through
 //     UnlinkVerified's claim-bound terminal unlink. A refused cleanup keeps
@@ -162,9 +163,11 @@ func copyClaimAcrossDevices(fs afero.Fs, claimName, dst string, proof VerifiedSo
 // pinned descriptor supplies the staged stream, so a name-swap anywhere
 // inside the window can never retarget the published bytes. The descriptor
 // pins the file object, not an immutable snapshot of its bytes, so the
-// admission proof also re-runs between the stream's completion and the bound
-// publish: an in-place rewrite landing mid-stream refuses with the staged
-// copy discarded instead of publishing content the proof never admitted.
+// opened object's handle-derived identity re-proves between the stream's
+// completion and the bound publish (reproofStreamedSource — handle-legs-only,
+// never a path re-resolve): an in-place rewrite landing mid-stream refuses
+// with the staged copy discarded instead of publishing content the proof
+// never admitted.
 func streamVerifiedSource(fs afero.Fs, srcFile afero.File, src, dst string, proof VerifiedSourceProof, op, noun string, crossDevice bool) error {
 	defer func() { _ = srcFile.Close() }()
 	srcInfo, statErr := srcFile.Stat()
@@ -174,7 +177,7 @@ func streamVerifiedSource(fs afero.Fs, srcFile afero.File, src, dst string, proo
 	if perr := proof(src, srcInfo); perr != nil {
 		return fmt.Errorf("%s: the open %s failed its admission proof (%w): %w", op, noun, ErrTakeAsideForeign, perr)
 	}
-	if copyErr := copyStreamNoReplaceReproof(fs, srcFile, dst, reproofStreamedSource(srcFile, src, proof, op, noun)); copyErr != nil {
+	if copyErr := copyStreamNoReplaceReproof(fs, srcFile, dst, reproofStreamedSource(srcFile, srcInfo, src, op, noun)); copyErr != nil {
 		if crossDevice {
 			return fmt.Errorf("%s: cross-device publish of the claim onto %s: %w", op, dst, copyErr)
 		}
@@ -218,9 +221,10 @@ func CopyFileNoReplaceVerified(fs afero.Fs, src, dst string, proof VerifiedSourc
 // published bytes' sha256 teed off the single verified stream (seal evidence
 // for the deferred publication's interim copy pin): the digest certifies the
 // EXACT admitted-object bytes that reached the destination — the proof is
-// re-run against the open handle before a byte flows and again between the
-// stream's completion and the publish (a mid-stream in-place rewrite refuses:
-// the staged copy is discarded and no digest is attributed), and the tee
+// re-run against the open handle before a byte flows, and the pinned object's
+// handle-derived identity is re-proven between the stream's completion and
+// the publish (a mid-stream in-place rewrite refuses: the staged copy is
+// discarded and no digest is attributed), and the tee
 // counts only what that handle yields, so neither a swap nor a rewrite can
 // make the returned digest describe bytes other than the published ones. A
 // nil proof degrades to the by-name CopyFileNoReplaceDigest, mirroring the
@@ -248,10 +252,10 @@ func CopyFileNoReplaceVerifiedDigest(fs afero.Fs, src, dst string, proof Verifie
 // discipline byte for byte: the defer closes the pinned source descriptor in
 // EVERY exit branch before the caller runs its next filesystem verb, and the
 // admission proof re-runs against the handle's own Stat before a byte flows.
-// The digest tees the staged stream, and the same post-stream re-proof runs
-// before the bound publish — a mid-stream in-place rewrite discards the
-// staged copy and attributes no digest — so a returned digest counts exactly
-// the bytes the proof admitted.
+// The digest tees the staged stream, and the same handle-derived post-stream
+// re-proof runs before the bound publish — a mid-stream in-place rewrite
+// discards the staged copy and attributes no digest — so a returned digest
+// counts exactly the bytes the proof admitted.
 func streamVerifiedSourceDigest(fs afero.Fs, srcFile afero.File, src, dst string, proof VerifiedSourceProof, op, noun string) (string, error) {
 	defer func() { _ = srcFile.Close() }()
 	srcInfo, statErr := srcFile.Stat()
@@ -261,7 +265,7 @@ func streamVerifiedSourceDigest(fs afero.Fs, srcFile afero.File, src, dst string
 	if perr := proof(src, srcInfo); perr != nil {
 		return "", fmt.Errorf("%s: the open %s failed its admission proof (%w): %w", op, noun, ErrTakeAsideForeign, perr)
 	}
-	return copyStreamNoReplaceDigestReproof(fs, srcFile, dst, reproofStreamedSource(srcFile, src, proof, op, noun))
+	return copyStreamNoReplaceDigestReproof(fs, srcFile, dst, reproofStreamedSource(srcFile, srcInfo, src, op, noun))
 }
 
 // reproofStreamedSource builds the post-stream re-proof both verified stream
@@ -270,18 +274,34 @@ func streamVerifiedSourceDigest(fs afero.Fs, srcFile afero.File, src, dst string
 // OBJECT, not an immutable snapshot of its bytes, so an in-place rewrite
 // landing after the admission proof but mid-stream would otherwise publish —
 // and on the digest lane digest-certify — content the proof never admitted.
-// The handle's fresh Stat re-runs the admission proof against the streamed
-// object's CURRENT identity; a refusal carries the same ErrTakeAsideForeign
-// class as the pre-stream refusal, and the shared tail discards the staged
-// copy (nothing published, no digest attributed).
-func reproofStreamedSource(srcFile afero.File, src string, proof VerifiedSourceProof, op, noun string) func() error {
+// The re-proof compares the OPENED OBJECT's identity captured through the
+// SAME handle mechanism on both sides of the stream — admitted is the
+// pre-stream handle Stat the admission proof just accepted, and the closure
+// repeats the handle Stat after the staged stream completes. It deliberately
+// never re-runs the caller's proof or re-resolves the source path: the
+// Windows admission identity strong leg (BoundObjectIdentity) derives the
+// volume-serial+file-index pair by re-opening the PATH, so re-running it
+// after a post-open rename-over would bind the REPLACEMENT and falsely refuse
+// the still-admitted object the descriptor pins (the wave-44 Windows false
+// trip). A rename moves the NAME, not the handle legs — the dev/inode or
+// volume/index pair plus size and last write time all hold across one —
+// while an in-place truncate/rewrite of the pinned object moves the size or
+// write-time legs and refuses with the ErrTakeAsideForeign class; the shared
+// tail discards the staged copy (nothing published, no digest attributed).
+// Handles exposing no comparable kernel key (virtual filesystems, wrapping
+// handles) keep the size+modtime legs only, the POSIX in-memory posture.
+func reproofStreamedSource(srcFile afero.File, admitted os.FileInfo, src, op, noun string) func() error {
+	admDevice, admInode, admStrong := streamedHandleIdentity(srcFile, admitted)
+	admSize, admModTime := admitted.Size(), admitted.ModTime()
 	return func() error {
 		info, err := srcFile.Stat()
 		if err != nil {
 			return fmt.Errorf("%s: re-inspect the streamed %s %s: %w", op, noun, src, err)
 		}
-		if perr := proof(src, info); perr != nil {
-			return fmt.Errorf("%s: the streamed %s failed its admission re-proof (%w): %w", op, noun, ErrTakeAsideForeign, perr)
+		curDevice, curInode, curStrong := streamedHandleIdentity(srcFile, info)
+		if curStrong != admStrong || (admStrong && (curDevice != admDevice || curInode != admInode)) ||
+			info.Size() != admSize || !info.ModTime().Equal(admModTime) {
+			return fmt.Errorf("%s: the streamed %s %s drifted from its admitted object mid-stream (%w)", op, noun, src, ErrTakeAsideForeign)
 		}
 		return nil
 	}

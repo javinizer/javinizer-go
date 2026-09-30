@@ -23,3 +23,10 @@ func boundObjectIdentity(os.FileInfo) (device, inode uint64, ok bool) {
 func BoundObjectIdentity(afero.Fs, string, os.FileInfo) (device, inode uint64, ok bool) {
 	return 0, 0, false
 }
+
+// streamedHandleIdentity degrades to not-OK alongside the identity binding
+// on this target: the streamed re-proof keeps the size+modtime legs, the
+// POSIX in-memory posture.
+func streamedHandleIdentity(afero.File, os.FileInfo) (device, inode uint64, ok bool) {
+	return 0, 0, false
+}

@@ -31,3 +31,14 @@ func boundObjectIdentity(info os.FileInfo) (device, inode uint64, ok bool) {
 func BoundObjectIdentity(_ afero.Fs, _ string, info os.FileInfo) (device, inode uint64, ok bool) {
 	return boundObjectIdentity(info)
 }
+
+// streamedHandleIdentity supplies the streamed re-proof's strong legs from
+// the open handle's OWN stat (reproofStreamedSource): the dev/inode pair
+// rides the lookup eagerly, so a post-open rename-over leaves the legs
+// untouched while an in-place truncate/rewrite of the pinned object moves
+// the size+modtime legs compared alongside. The file leg is unused here —
+// the FileInfo already carries the kernel pair; the Windows twin needs the
+// descriptor itself (bound_identity_windows.go).
+func streamedHandleIdentity(_ afero.File, info os.FileInfo) (device, inode uint64, ok bool) {
+	return boundObjectIdentity(info)
+}
