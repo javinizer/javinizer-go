@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -192,6 +193,57 @@ func TestDeferredMovePublishCompletedSubtitleMoveBackSurvivesRevert(t *testing.T
 	require.NoError(t, readErr, "the consumed primary still renames back onto its source")
 	assert.Equal(t, "video", string(videoBack))
 	unrelatedBytes, readErr := afero.ReadFile(env.fs, env.unrelated)
+	require.NoError(t, readErr)
+	assert.Equal(t, "unrelated", string(unrelatedBytes))
+}
+
+// Round-43 follow-up to the publish-completed compensation (codex P2,
+// PRRT_kwDORn9KaM6nqzn8): the movedByOrganizer map gating BOTH the fallback
+// sidecar-publish leg and its source-consumption leg must classify a
+// publish-completed subtitle exactly like the rollback arm and reconcile
+// keep-list do. Language normalization renames the install (.en.srt lands as
+// .eng.srt), so the trampoline-derived fallback target keeps the un-normalized
+// leaf and is absent: a Moved-only check double-delivers the staged twin there,
+// then the removal leg refuses the already-consumed admitted source — erroring
+// the apply and rolling back a COMPLETED publication, leaving claim residue.
+func TestDeferredMovePublishCompletedNormalizedSubtitleSkipsFallbackTwin(t *testing.T) {
+	base, root, source, plainSubtitle, _, unrelated, match := pr260FencedFiles(t, "move-publish-completed-normalized")
+	subtitle := filepath.Join(filepath.Dir(plainSubtitle), strings.TrimSuffix(filepath.Base(plainSubtitle), ".srt")+".en.srt")
+	require.NoError(t, base.Rename(plainSubtitle, subtitle), "admit the language-tagged subtitle the finding describes")
+	dest := filepath.Join(root, "library")
+	real := movePublishCompletedOrganizer(base)
+	fault := &pr260PublicationFaultOrganizer{Organizer: real, afterExecute: func(_ *organizer.OrganizePlan, result *organizer.OrganizeResult) {
+		doctorMovePublishCompletedSubtitle(result)
+	}}
+	ledger := &completeCallFaultLog{}
+	orch := &applyOrchImpl{fs: base, organizer: fault, revertLog: ledger}
+	cmd := movePublishCompletedCommand(&models.Movie{ContentID: "move-publish-completed-normalized"}, match, dest)
+	stage, _, err := orch.prepareArtifact(context.Background(), cmd)
+	require.NoError(t, err)
+	defer stage.cleanup()
+	probePlan, subTarget := movePublishCompletedProbe(t, real, stage, match, dest)
+	require.True(t, strings.HasSuffix(subTarget, ".eng.srt"), "the organizer normalizes the .en tag to .eng: %s", subTarget)
+	twin := filepath.Join(filepath.Dir(probePlan.TargetPath), stagedArtifactSiblingName(filepath.Base(source), filepath.Base(probePlan.TargetPath), filepath.Base(subtitle)))
+	require.True(t, strings.HasSuffix(twin, ".en.srt"), "the trampoline-derived fallback leaf keeps the un-normalized tag: %s", twin)
+	require.NotEqual(t, filepath.Clean(twin), filepath.Clean(subTarget), "normalization is what makes the fallback target miss the real install")
+	state := &applyPipelineState{operationID: "op", organizeResult: &organizer.OrganizeResult{NewPath: probePlan.TargetPath, FolderPath: probePlan.TargetDir}}
+
+	require.NoError(t, stage.publish(context.Background(), orch, state, nil),
+		"the publish-completed seat is excluded from the fallback: no twin copy, no consumed-source revalidation failure, no rollback")
+
+	installed, readErr := afero.ReadFile(base, subTarget)
+	require.NoError(t, readErr, "the normalize-named install is retained")
+	assert.Equal(t, "subtitle", string(installed))
+	twinThere, statErr := afero.Exists(base, twin)
+	require.NoError(t, statErr)
+	assert.False(t, twinThere, "the staged twin is never double-delivered under the un-normalized name")
+	require.Len(t, state.organizeResult.Subtitles, 1)
+	assert.True(t, fsutil.PublishCompleted(state.organizeResult.Subtitles[0].Error))
+	assert.False(t, state.organizeResult.Subtitles[0].Moved, "the row keeps the organizer's ambiguity shape")
+	assert.True(t, moveIntentRecorded(ledger.keepCaptured, subtitle, subTarget),
+		"the round-42 durable-intent keep stays intact alongside the fallback exclusion")
+	pr260AssertRemoved(t, base, source, subtitle)
+	unrelatedBytes, readErr := afero.ReadFile(base, unrelated)
 	require.NoError(t, readErr)
 	assert.Equal(t, "unrelated", string(unrelatedBytes))
 }

@@ -1059,7 +1059,12 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 		movedByOrganizer := map[string]bool{}
 		if s.videoDeferred && finalResult != nil {
 			for _, sr := range finalResult.Subtitles {
-				if sr.Moved && sr.OriginalPath != "" {
+				// A publish-completed subtitle IS installed at its (possibly
+				// language-normalized) endpoint: classify it exactly like the
+				// rollback arm and reconcile keep-list above, or the fallback
+				// double-delivers the staged twin under the un-normalized leaf
+				// and the removal leg revalidates an already-consumed source.
+				if (sr.Moved || fsutil.PublishCompleted(sr.Error)) && sr.OriginalPath != "" {
 					movedByOrganizer[filepath.Clean(sr.OriginalPath)] = true
 				}
 			}
