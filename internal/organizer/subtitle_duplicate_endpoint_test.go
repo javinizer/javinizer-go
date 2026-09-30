@@ -125,13 +125,18 @@ func TestHandleSubtitles_DuplicateBlockedAfterWinnerRefusal(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			fs := afero.NewMemMapFs()
 			org := NewOrganizer(fs, &Config{MoveSubtitles: true, SubtitleExtensions: []string{".srt"}}, nil, nil)
-			srcFirst := "/source/ABC-123.en.srt"
-			srcSecond := "/source/ABC-123.eng.srt"
-			dest := "/dest/ABC-123/ABC-123.eng.srt"
-			require.NoError(t, fs.MkdirAll("/source", 0o777))
+			// Host-form path literals: handleSubtitles enumerates sources through
+			// the host-aware filepath package, so on Windows the seats report
+			// OriginalPath as `\source\…` and a posix literal never string-equals it.
+			srcDir := filepath.Join("/", "source")
+			srcFirst := filepath.Join(srcDir, "ABC-123.en.srt")
+			srcSecond := filepath.Join(srcDir, "ABC-123.eng.srt")
+			destDir := filepath.Join("/", "dest", "ABC-123")
+			dest := filepath.Join(destDir, "ABC-123.eng.srt")
+			require.NoError(t, fs.MkdirAll(srcDir, 0o777))
 			require.NoError(t, afero.WriteFile(fs, srcFirst, []byte("first english"), 0o644))
 			require.NoError(t, afero.WriteFile(fs, srcSecond, []byte("second english"), 0o644))
-			require.NoError(t, fs.MkdirAll("/dest/ABC-123", 0o777))
+			require.NoError(t, fs.MkdirAll(destDir, 0o777))
 
 			plan := verifiedSubtitleTestPlan()
 			plan.BindVerifiedSubtitleSources(map[string]fsutil.VerifiedSourceProof{
