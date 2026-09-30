@@ -89,17 +89,25 @@ func verifyProofOf(t *testing.T, fs afero.Fs, path string) (VerifiedSourceProof,
 	t.Helper()
 	admitted, err := asideLstat(fs, path)
 	require.NoError(t, err)
+	// Snapshot the metadata legs EAGERLY at admission: virtual filesystems
+	// answer lstat with a LIVE FileInfo view (afero mem.FileInfo wraps the
+	// shared FileData), so comparing admitted.Size() at proof time would
+	// re-read an in-place rewrite and admit exactly what the proof exists to
+	// refuse — the production matchers snapshot into scalars for the same
+	// reason (workflow.captureArtifactSourceIdentity).
+	admSize, admMod := admitted.Size(), admitted.ModTime()
 	admDev, admIno, admStrong := BoundObjectIdentity(fs, path, admitted)
 	return func(probed string, info os.FileInfo) error {
 		if admStrong {
 			dev, ino, strong := BoundObjectIdentity(fs, probed, info)
 			if info == nil || !info.Mode().IsRegular() || !strong || dev != admDev || ino != admIno ||
-				info.Size() != admitted.Size() || !info.ModTime().Equal(admitted.ModTime()) {
+				info.Size() != admSize || !info.ModTime().Equal(admMod) {
 				return fmt.Errorf("%s no longer names the admitted object", path)
 			}
 			return nil
 		}
-		if !asideSameObject(info, admitted) {
+		if info == nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() ||
+			info.Size() != admSize || !info.ModTime().Equal(admMod) {
 			return fmt.Errorf("%s no longer names the admitted object", path)
 		}
 		return nil
@@ -638,6 +646,35 @@ func TestMoveFileNoReplaceVerifiedCrossDeviceClaimProofRefusalRestores(t *testin
 	got, rerr := afero.ReadFile(base, src)
 	require.NoError(t, rerr)
 	assert.Equal(t, body, string(got))
+	assertNoBoundResidue(t, base, "/")
+}
+
+// The EXDEV leg replays the mid-stream in-place mutation (codex P2,
+// PRRT_kwDORn9KaM6nkVjY) against the taken-aside claim: the claim's open
+// handle pins the object, not its bytes, so a concurrent rewrite mid-stream
+// must fail the post-stream re-proof — the stale staged copy is discarded,
+// nothing publishes, and the claim compensation rides the (mutated) object
+// back onto the source name byte-intact.
+func TestMoveFileNoReplaceVerifiedCrossDeviceMidStreamMutationRestores(t *testing.T) {
+	base, src, dst, _ := verifyFixture(t)
+	mutant := []byte(strings.Repeat("post-admission in-place rewrite ", 64))
+	exdev := &exdevHookFS{Fs: base, dst: dst, fire: true}
+	mut := &midStreamMutator{fs: base, body: mutant, quota: 2}
+	fs := &verifyHookFS{Fs: exdev, open: func(name string) (afero.File, error) {
+		if strings.Contains(name, ".vac.") {
+			return mut.open(name)
+		}
+		return exdev.Open(name)
+	}}
+	proof, _ := verifyProofOf(t, base, src)
+	err := MoveFileNoReplaceVerified(fs, src, dst, proof)
+	require.ErrorIs(t, err, ErrTakeAsideForeign)
+	assert.True(t, mut.mutated, "the replay really landed mid-stream")
+	exists, _ := afero.Exists(base, dst)
+	assert.False(t, exists, "the refused publish writes no destination")
+	got, rerr := afero.ReadFile(base, src)
+	require.NoError(t, rerr)
+	assert.Equal(t, mutant, got, "the claim compensation restores the object onto the source name")
 	assertNoBoundResidue(t, base, "/")
 }
 

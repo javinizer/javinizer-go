@@ -1,6 +1,7 @@
 package fsutil
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -240,6 +241,101 @@ func TestCopyFileNoReplaceVerifiedDigest_FaultLegs(t *testing.T) {
 		_, statErr := os.Stat(dst)
 		assert.True(t, os.IsNotExist(statErr), "no partial publish, no partial digest")
 	})
+}
+
+// midStreamMutator replays the codex P2 hazard (PRRT_kwDORn9KaM6nkVjY): a
+// concurrent writer rewrites the admitted object IN PLACE — same file object,
+// new bytes — once the stream has passed quota bytes. The composite's pinned
+// descriptor keeps reading the LIVE object, so without the post-stream
+// re-proof the staged copy would publish (and the digest lane would
+// digest-certify) content the admission proof never saw.
+type midStreamMutator struct {
+	fs      afero.Fs
+	body    []byte
+	quota   int
+	mutated bool
+}
+
+func (m *midStreamMutator) open(name string) (afero.File, error) {
+	fh, err := m.fs.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	return &midStreamMutatingFile{File: fh, mut: m, name: name}, nil
+}
+
+type midStreamMutatingFile struct {
+	afero.File
+	mut  *midStreamMutator
+	name string
+	seen int
+}
+
+func (f *midStreamMutatingFile) Read(p []byte) (int, error) {
+	if !f.mut.mutated && f.seen >= f.mut.quota {
+		f.mut.mutated = true
+		if err := afero.WriteFile(f.mut.fs, f.name, f.mut.body, 0o644); err != nil {
+			return 0, err
+		}
+	}
+	n, err := f.File.Read(p)
+	f.seen += n
+	return n, err
+}
+
+// The P2 replay on both verified copy lanes: the admitted object is
+// rewritten in place while its bytes stream into staging. The publication
+// must refuse typed (the stale staged copy discarded), stamp no digest, and
+// leave the destination unwritten — on a virtual and a real filesystem.
+func TestCopyFileNoReplaceVerified_MidStreamMutationRefusesPublication(t *testing.T) {
+	admitted := []byte("admitted pre-copy source state — the NFO and metadata describe THESE bytes")
+	mutant := bytes.Repeat([]byte("MID-STREAM IN-PLACE REWRITE "), 256)
+	lanes := []struct {
+		name string
+		run  func(fs afero.Fs, src, dst string, proof VerifiedSourceProof) (string, error)
+	}{
+		{"digest lane", func(fs afero.Fs, src, dst string, proof VerifiedSourceProof) (string, error) {
+			return CopyFileNoReplaceVerifiedDigest(fs, src, dst, proof)
+		}},
+		{"copy lane", func(fs afero.Fs, src, dst string, proof VerifiedSourceProof) (string, error) {
+			return "", CopyFileNoReplaceVerified(fs, src, dst, proof)
+		}},
+	}
+	for _, lane := range lanes {
+		for _, fsKind := range []string{"memfs", "osfs"} {
+			t.Run(lane.name+"/"+fsKind, func(t *testing.T) {
+				var base afero.Fs
+				var src, dst, root string
+				if fsKind == "osfs" {
+					base = afero.NewOsFs()
+					root = t.TempDir()
+					src = filepath.Join(root, "src.mkv")
+					dst = filepath.Join(root, "out", "dst.mkv")
+					require.NoError(t, os.WriteFile(src, admitted, 0o644))
+				} else {
+					base = afero.NewMemMapFs()
+					src = filepath.FromSlash("/in/src.mkv")
+					dst = filepath.FromSlash("/out/dst.mkv")
+					require.NoError(t, base.MkdirAll(filepath.Dir(src), 0o755))
+					require.NoError(t, afero.WriteFile(base, src, admitted, 0o644))
+					root = "/"
+				}
+				proof, _ := verifyProofOf(t, base, src)
+				mut := &midStreamMutator{fs: base, body: mutant, quota: 4}
+
+				digest, err := lane.run(&verifyHookFS{Fs: base, open: mut.open}, src, dst, proof)
+				require.ErrorIs(t, err, ErrTakeAsideForeign, "the post-stream re-proof refuses the mid-stream-mutated object")
+				assert.Empty(t, digest, "no digest may certify the post-admission bytes")
+				assert.True(t, mut.mutated, "the replay really landed mid-stream")
+				_, statErr := base.Stat(dst)
+				assert.True(t, os.IsNotExist(statErr), "the refused publication writes no destination")
+				got, rerr := afero.ReadFile(base, src)
+				require.NoError(t, rerr)
+				assert.Equal(t, mutant, got, "the source keeps its mid-stream bytes untouched by the refusal")
+				assertNoBoundResidue(t, base, root)
+			})
+		}
+	}
 }
 
 type openFailForSrcFS struct {

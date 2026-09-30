@@ -217,6 +217,27 @@ func copyStreamNoReplace(fs afero.Fs, srcFile afero.File, dst string) error {
 // discipline (a planted substitute is never unlinked) and dst content is
 // never replaced.
 func copyStreamNoReplaceDigest(fs afero.Fs, srcFile afero.File, dst string) (string, error) {
+	return copyStreamNoReplaceDigestReproof(fs, srcFile, dst, nil)
+}
+
+// copyStreamNoReplaceReproof is copyStreamNoReplaceDigestReproof for callers
+// that do not consume the streamed digest.
+func copyStreamNoReplaceReproof(fs afero.Fs, srcFile afero.File, dst string, reproof func() error) error {
+	_, err := copyStreamNoReplaceDigestReproof(fs, srcFile, dst, reproof)
+	return err
+}
+
+// copyStreamNoReplaceDigestReproof is copyStreamNoReplaceDigest with the
+// verified composites' post-stream re-validation seam: reproof, when
+// non-nil, runs AFTER the staged stream completes and BEFORE the bound
+// publish. The pinned source descriptor pins the file OBJECT, not an
+// immutable snapshot of its bytes, so an in-place rewrite landing after the
+// admission proof but mid-stream must refuse here — otherwise the publish
+// (and the teed digest) would describe content the proof never admitted
+// (codex P2, PRRT_kwDORn9KaM6nkVjY). A refusal discards the staged copy
+// through the same bound discipline as a stream failure: nothing is
+// published and no digest is attributed.
+func copyStreamNoReplaceDigestReproof(fs afero.Fs, srcFile afero.File, dst string, reproof func() error) (string, error) {
 	staged, handle, err := CreateExclusiveStagingFile(fs, dst, ".nrstg", noreplaceOrdinal.Add(1), stagingFileMode())
 	if err != nil {
 		return "", fmt.Errorf("no-replace copy: exclusive staging for %s: %w", dst, err)
@@ -225,6 +246,12 @@ func copyStreamNoReplaceDigest(fs afero.Fs, srcFile afero.File, dst string) (str
 	if _, err := io.Copy(handle, io.TeeReader(srcFile, h)); err != nil {
 		DiscardFailedExclusiveStaging(fs, staged, handle)
 		return "", fmt.Errorf("no-replace copy: stream into staging for %s: %w", dst, err)
+	}
+	if reproof != nil {
+		if rerr := reproof(); rerr != nil {
+			DiscardFailedExclusiveStaging(fs, staged, handle)
+			return "", rerr
+		}
 	}
 
 	stagedIdentity := stagingIdentity(handle)

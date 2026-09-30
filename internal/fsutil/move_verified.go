@@ -48,7 +48,9 @@ type VerifiedSourceProof func(path string, info os.FileInfo) error
 //     writer can predict, so re-resolving it cannot be raced short of
 //     reclaiming the draw itself.
 //  4. EXDEV (library on another volume): the claim is opened, its handle
-//     re-proven against the admission proof, streamed into dest-adjacent
+//     re-proven against the admission proof (and, since the descriptor pins
+//     the object but not its bytes, re-proven once more between the stream's
+//     completion and the publish), streamed into dest-adjacent
 //     O_EXCL staging and bound-published no-replace (the verified copy's
 //     construction), then the consumed claim is removed ONLY through
 //     UnlinkVerified's claim-bound terminal unlink. A refused cleanup keeps
@@ -158,7 +160,11 @@ func copyClaimAcrossDevices(fs afero.Fs, claimName, dst string, proof VerifiedSo
 // and a leaked handle holds the slot until process exit. The handle's own
 // Stat re-proves against the admission proof BEFORE a byte flows, and the
 // pinned descriptor supplies the staged stream, so a name-swap anywhere
-// inside the window can never retarget the published bytes.
+// inside the window can never retarget the published bytes. The descriptor
+// pins the file object, not an immutable snapshot of its bytes, so the
+// admission proof also re-runs between the stream's completion and the bound
+// publish: an in-place rewrite landing mid-stream refuses with the staged
+// copy discarded instead of publishing content the proof never admitted.
 func streamVerifiedSource(fs afero.Fs, srcFile afero.File, src, dst string, proof VerifiedSourceProof, op, noun string, crossDevice bool) error {
 	defer func() { _ = srcFile.Close() }()
 	srcInfo, statErr := srcFile.Stat()
@@ -168,7 +174,7 @@ func streamVerifiedSource(fs afero.Fs, srcFile afero.File, src, dst string, proo
 	if perr := proof(src, srcInfo); perr != nil {
 		return fmt.Errorf("%s: the open %s failed its admission proof (%w): %w", op, noun, ErrTakeAsideForeign, perr)
 	}
-	if copyErr := copyStreamNoReplace(fs, srcFile, dst); copyErr != nil {
+	if copyErr := copyStreamNoReplaceReproof(fs, srcFile, dst, reproofStreamedSource(srcFile, src, proof, op, noun)); copyErr != nil {
 		if crossDevice {
 			return fmt.Errorf("%s: cross-device publish of the claim onto %s: %w", op, dst, copyErr)
 		}
@@ -212,11 +218,13 @@ func CopyFileNoReplaceVerified(fs afero.Fs, src, dst string, proof VerifiedSourc
 // published bytes' sha256 teed off the single verified stream (seal evidence
 // for the deferred publication's interim copy pin): the digest certifies the
 // EXACT admitted-object bytes that reached the destination — the proof is
-// re-run against the open handle before a byte flows and the tee counts only
-// what that handle yields, so a swap can never make the returned digest
-// describe bytes other than the published ones. A nil proof degrades to the
-// by-name CopyFileNoReplaceDigest, mirroring the verified composite's nil
-// contract.
+// re-run against the open handle before a byte flows and again between the
+// stream's completion and the publish (a mid-stream in-place rewrite refuses:
+// the staged copy is discarded and no digest is attributed), and the tee
+// counts only what that handle yields, so neither a swap nor a rewrite can
+// make the returned digest describe bytes other than the published ones. A
+// nil proof degrades to the by-name CopyFileNoReplaceDigest, mirroring the
+// verified composite's nil contract.
 func CopyFileNoReplaceVerifiedDigest(fs afero.Fs, src, dst string, proof VerifiedSourceProof) (string, error) {
 	if proof == nil {
 		return CopyFileNoReplaceDigest(fs, src, dst)
@@ -240,8 +248,10 @@ func CopyFileNoReplaceVerifiedDigest(fs afero.Fs, src, dst string, proof Verifie
 // discipline byte for byte: the defer closes the pinned source descriptor in
 // EVERY exit branch before the caller runs its next filesystem verb, and the
 // admission proof re-runs against the handle's own Stat before a byte flows.
-// The digest tees the staged stream, so it counts exactly the bytes the
-// proof admitted.
+// The digest tees the staged stream, and the same post-stream re-proof runs
+// before the bound publish — a mid-stream in-place rewrite discards the
+// staged copy and attributes no digest — so a returned digest counts exactly
+// the bytes the proof admitted.
 func streamVerifiedSourceDigest(fs afero.Fs, srcFile afero.File, src, dst string, proof VerifiedSourceProof, op, noun string) (string, error) {
 	defer func() { _ = srcFile.Close() }()
 	srcInfo, statErr := srcFile.Stat()
@@ -251,5 +261,28 @@ func streamVerifiedSourceDigest(fs afero.Fs, srcFile afero.File, src, dst string
 	if perr := proof(src, srcInfo); perr != nil {
 		return "", fmt.Errorf("%s: the open %s failed its admission proof (%w): %w", op, noun, ErrTakeAsideForeign, perr)
 	}
-	return copyStreamNoReplaceDigest(fs, srcFile, dst)
+	return copyStreamNoReplaceDigestReproof(fs, srcFile, dst, reproofStreamedSource(srcFile, src, proof, op, noun))
+}
+
+// reproofStreamedSource builds the post-stream re-proof both verified stream
+// lanes run between the staged copy's completion and its bound publish (codex
+// P2, PRRT_kwDORn9KaM6nkVjY): the handle pinned at open keeps the file
+// OBJECT, not an immutable snapshot of its bytes, so an in-place rewrite
+// landing after the admission proof but mid-stream would otherwise publish —
+// and on the digest lane digest-certify — content the proof never admitted.
+// The handle's fresh Stat re-runs the admission proof against the streamed
+// object's CURRENT identity; a refusal carries the same ErrTakeAsideForeign
+// class as the pre-stream refusal, and the shared tail discards the staged
+// copy (nothing published, no digest attributed).
+func reproofStreamedSource(srcFile afero.File, src string, proof VerifiedSourceProof, op, noun string) func() error {
+	return func() error {
+		info, err := srcFile.Stat()
+		if err != nil {
+			return fmt.Errorf("%s: re-inspect the streamed %s %s: %w", op, noun, src, err)
+		}
+		if perr := proof(src, info); perr != nil {
+			return fmt.Errorf("%s: the streamed %s failed its admission re-proof (%w): %w", op, noun, ErrTakeAsideForeign, perr)
+		}
+		return nil
+	}
 }
