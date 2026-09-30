@@ -49,10 +49,17 @@ type LinkFunc func(oldname, newname string) error
 //     the link→lstat window, and authenticating the unlink against the entry's
 //     own current identity would delete that foreign successor. Such an entry
 //     is therefore RETAINED byte-intact (unproven outcomes retain — the
-//     round-46 precedent), the typed refusal (ErrTakeAsideForeign) joining
-//     ErrPublishCompleted so the caller's observe/rollback machinery reaps
-//     whatever stands — the same posture a wedged compensation already took.
-//     The refused object stays put at the source name throughout.
+//     round-46 precedent): the typed refusal (ErrTakeAsideForeign) joins
+//     ErrPublishCompleted — the doubt class, since this operation's own bytes
+//     may still stand at another name — AND ErrPublishSuccessorUnproven (codex
+//     P1, PRRT_kwDORn9KaM6nsX9a), the affirmative divergence marker telling the
+//     caller's observe/rollback machinery that the destination's current
+//     occupant is explicitly NOT provably this operation's installed output:
+//     the successor is retained byte-intact, never observed/adopted as the
+//     installed record (which would arm UnlinkVerified against the successor's
+//     own identity) — the same adopt-not posture a wedged compensation avoids
+//     by retaining the PROVEN install. The refused object stays put at the
+//     source name throughout.
 //
 // Lookup classes after the link: NotExist proves nothing stands at the
 // destination (plain refusal — the doubt-as-published class would lie); any
@@ -107,9 +114,18 @@ func LinkFileNoReplaceVerified(fs afero.Fs, src, dst string, link LinkFunc, proo
 		// compensation. Only an entry still provably aliasing the admitted
 		// object is bound-unlinked.
 		if !asideSameObject(dstInfo, srcInfo) {
+			// The current occupant affirmatively DIVERGES from the link
+			// operation's own identity: an explicitly unproven successor, not a
+			// merely indeterminate re-proof. It is retained byte-intact here,
+			// and ErrPublishSuccessorUnproven tells the caller's
+			// record-reflection that it is likewise NOT this batch's installed
+			// output there — observing it for rollback would arm UnlinkVerified
+			// against the successor's own identity and delete the foreign bytes
+			// (codex P1, PRRT_kwDORn9KaM6nsX9a).
 			return errors.Join(
 				fmt.Errorf("verified link: the installed entry %s failed its admission proof (%w): %w", dst, ErrTakeAsideForeign, perr),
 				fmt.Errorf("%w: %s no longer provably names the object the link operation installed — the unproven entry is retained byte-intact (never bound-unlinked against its own current identity)", ErrPublishCompleted, dst),
+				fmt.Errorf("%w: the occupant at %s must be retained, never observed as this operation's installed output", ErrPublishSuccessorUnproven, dst),
 			)
 		}
 		if rmErr := UnlinkVerified(fs, dst, srcInfo); rmErr != nil {

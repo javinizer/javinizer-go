@@ -123,6 +123,42 @@ var ErrPublishNoReplaceRollbackUnverified = errors.New("no-replace publish rollb
 // completed-despite-error leg.
 var ErrPublishNoReplaceStagedUnverified = errors.New("no-replace publish staged source could not be re-proven after linking")
 
+// ErrPublishSuccessorUnproven classifies a publish error where the destination
+// name's CURRENT occupant is explicitly NOT provably the object this operation
+// installed (codex P1, PR#276, PRRT_kwDORn9KaM6nsX9a). On the verified
+// hard-link leg the composite re-proves the entry it just installed (the
+// post-install twin of the admitted pre-link identity), and an entry
+// DIVERGING from that identity is an unproven SUCCESSOR: another writer may
+// have renamed the fresh install aside and replanted the name inside the
+// link→lstat window, so the composite retains it byte-intact (the sealed
+// retain contract — unproven outcomes retain, never an unlink authenticated
+// against the entry's own current identity). The sentinel JOINS
+// ErrPublishCompleted (the doubt class: this operation's own bytes may still
+// stand somewhere, e.g. moved aside by the successor's writer) while marking
+// the destination occupant itself as explicitly unproven: consumers doing
+// record-reflection for rollback MUST NOT adopt it as this operation's
+// installed output — observing the successor's own identity as the installed
+// record would arm rollback's UnlinkVerified against that identity and delete
+// foreign bytes before restoring any displaced backup. It is the observation
+// twin of ErrPublishNoReplaceRollbackUnverified ("the name is NOT provably
+// this operation's own object") scoped to the post-link successor case; the
+// proven-install doubt classes (ErrPublishCompleted alone, the wedged
+// compensation leg) never carry it, and neither does a merely INDETERMINATE
+// re-proof (doubt without an affirmative divergence proof).
+var ErrPublishSuccessorUnproven = errors.New("publish destination holds an explicitly unproven successor")
+
+// PublishSuccessorUnproven reports whether err carries
+// ErrPublishSuccessorUnproven — the destination name's current occupant is
+// explicitly unproven as this operation's own install (the verified hard-link
+// post-link successor leg), so the entry must be RETAINED byte-intact rather
+// than observed, moved, or unlinked as installed output. The pairing with
+// PublishCompleted mirrors PublishRefusal: PublishCompleted says the publish
+// may stand SOMEWHERE (doubt), PublishSuccessorUnproven says the name's
+// current occupant is affirmatively not provably ours (retention routing).
+func PublishSuccessorUnproven(err error) bool {
+	return errors.Is(err, ErrPublishSuccessorUnproven)
+}
+
 // linkUnsupportedClass is shared by publication and its preflight. Only
 // capability-class failures justify a conclusive unsupported verdict; access,
 // IO, and other transient failures remain indeterminate. EPERM can mean an

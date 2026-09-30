@@ -769,7 +769,27 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 		}
 		finalResult, err = executor.ExecuteOrganizePlan(plan, publishMove, s.original.Organize.LinkMode)
 		if filepath.Clean(plan.SourcePath) != filepath.Clean(plan.TargetPath) && (err == nil || fsutil.PublishCompleted(err)) {
-			batch.ObservePublishResult(plan.TargetPath)
+			// An explicitly-unproven successor is NOT this batch's installed
+			// output (codex P1, PRRT_kwDORn9KaM6nsX9a): the verified hard-link
+			// leg found the destination's current occupant DIVERGING from the
+			// identity its own link installed — another writer replanted the
+			// name inside the link→lstat window — and already retained that
+			// occupant byte-intact, classifying the doubt with
+			// ErrPublishCompleted joined to ErrPublishSuccessorUnproven.
+			// Adopting it here would record the successor's own identity as
+			// this batch's installed output, arming the failed apply's rollback
+			// to UnlinkVerified the successor into deletion before restoring
+			// any displaced backup. The sealed retain contract (round 46/47
+			// lineage) applies to the batch's record-reflection exactly as it
+			// did to the composite's cleanup: skip the observation, leave the
+			// leg uninstalled, and let rollback retain the successor. The
+			// proven publish-completed classification (round 42,
+			// PRRT_kwDORn9KaM6nfbS3 — the pending-kind and subtitle data flow)
+			// is unchanged: only this explicit-successor class drops out of
+			// the observe.
+			if !fsutil.PublishSuccessorUnproven(err) {
+				batch.ObservePublishResult(plan.TargetPath)
+			}
 			// Confirm only what execute proves installed: a would-be target
 			// that turned out occupied/armed-skip mid-run must not be registered
 			// as ours, or rollback would UnlinkVerified a foreign file. A
