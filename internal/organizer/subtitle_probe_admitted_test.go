@@ -392,13 +392,18 @@ func TestOrganizePlanBindSubtitleAdmissionSetSetterSemantics(t *testing.T) {
 	plan.BindSubtitleAdmissionSet(nil)
 	assert.Nil(t, plan.subtitleAdmissionSet, "a nil bind leaves the plan unbound")
 
-	plan.BindSubtitleAdmissionSet([]string{"/a.srt"})
+	// The binder stores filepath.Clean(source) keys: assert the modifier side
+	// of the contract against host-form keys — a posix literal misses on
+	// Windows, where Clean stores `\a.srt`.
+	admittedA := filepath.Join("/", "a.srt")
+	plan.BindSubtitleAdmissionSet([]string{admittedA})
 	require.Len(t, plan.subtitleAdmissionSet, 1)
-	assert.True(t, plan.subtitleAdmissionSet["/a.srt"])
+	assert.True(t, plan.subtitleAdmissionSet[admittedA], "the bound key is the host-cleaned source path")
 
-	plan.BindSubtitleAdmissionSet([]string{"/b.srt"})
+	admittedB := filepath.Join("/", "b.srt")
+	plan.BindSubtitleAdmissionSet([]string{admittedB})
 	require.Len(t, plan.subtitleAdmissionSet, 1, "setter semantics mirror the proof bindings — a rebind REPLACES")
-	assert.True(t, plan.subtitleAdmissionSet["/b.srt"])
+	assert.True(t, plan.subtitleAdmissionSet[admittedB])
 
 	plan.BindSubtitleAdmissionSet([]string{})
 	require.NotNil(t, plan.subtitleAdmissionSet, "an empty slice stays bound: nothing was admitted at preparation")
