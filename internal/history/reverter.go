@@ -981,6 +981,15 @@ func cleanupGeneratedFilesFS(fs afero.Fs, op *models.BatchFileOperation, stopAt 
 	// entry (source still present) does neither: the PlannedDeletes leg above
 	// already retained its published copy, pinned or not, alongside the
 	// occupied source — nothing is lost in either crash shape.
+	// The rename-back executes through the atomic NO-REPLACE primitive (codex
+	// P1, PRRT_kwDORn9KaM6npnwr): the no-follow vacancy prepass above and this
+	// mutation are temporally separated — the planned-delete hashes stream
+	// between them — so another process can recreate the original path inside
+	// the gap, and a plain POSIX rename would REPLACE and destroy that late
+	// occupant. MoveFileNoReplace re-proves the destination at the publish
+	// instant and refuses occupancy with the shared no-replace refusal
+	// classes, suppressing the recovery with BOTH objects retained byte-intact
+	// (the moved sibling, pinned or not, stays put alongside the occupant).
 	for _, fm := range gf.MoveBack {
 		if fm.NewPath == op.NewPath && fm.OriginalPath == op.OriginalPath {
 			// A pending move intent equal to the row columns: the primary move is
@@ -993,8 +1002,12 @@ func cleanupGeneratedFilesFS(fs afero.Fs, op *models.BatchFileOperation, stopAt 
 			}
 		} else if renameSuppressed[fm.NewPath] {
 			logging.Debugf("cleanupGeneratedFiles: move-back %s → %s suppressed — the original still exists (the move intent was never consumed or the source reappeared); the destination, pinned or not, is retained alongside it", fm.NewPath, fm.OriginalPath)
-		} else if err := fs.Rename(fm.NewPath, fm.OriginalPath); err != nil {
-			logging.Debugf("cleanupGeneratedFiles: failed to move back %s → %s: %v", fm.NewPath, fm.OriginalPath, err)
+		} else if err := fsutil.MoveFileNoReplace(fs, fm.NewPath, fm.OriginalPath); err != nil {
+			if fsutil.PublishRefusal(err) {
+				logging.Debugf("cleanupGeneratedFiles: move-back %s → %s suppressed by the atomic no-replace leg — an occupant claimed the original path after the vacancy probe (or the volume cannot express no-replace); both objects retained byte-intact: %v", fm.NewPath, fm.OriginalPath, err)
+			} else {
+				logging.Debugf("cleanupGeneratedFiles: failed to move back %s → %s: %v", fm.NewPath, fm.OriginalPath, err)
+			}
 		}
 		dirsToCheck[filepath.Dir(fm.NewPath)] = true
 	}

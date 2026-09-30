@@ -138,10 +138,15 @@ func TestOrganizeStrategy_VerifiedHardLinkErrorClassesMatchLegacy(t *testing.T) 
 }
 
 // The swap subject's view of a swap that wins the validation→link window: the
-// installed entry fails the post-link admission proof and the rejected
-// install is compensated off the destination — ErrTakeAsideForeign is what
-// the caller sees, never a silently published foreign object.
-func TestOrganizeStrategy_VerifiedHardLinkForeignInstallCompensated(t *testing.T) {
+// installed entry fails the post-link admission proof — and is RETAINED, never
+// compensated off the destination (codex P1, PRRT_kwDORn9KaM6npnwi): from the
+// composite's vantage that entry is indistinguishable from another writer's
+// post-install successor, so cleanup binds to the link operation's own provable
+// identity and anything diverging stays byte-intact. ErrTakeAsideForeign is
+// what the caller sees, with the doubt-as-published class joined for the
+// rollback machinery — never a foreign object silently standing in for the
+// admitted video without caller visibility.
+func TestOrganizeStrategy_VerifiedHardLinkForeignInstallRetainedUnproven(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	require.NoError(t, afero.WriteFile(fs, "/in/m.mp4", []byte("video"), 0o644))
 	info, err := fs.Stat("/in/m.mp4")
@@ -162,11 +167,13 @@ func TestOrganizeStrategy_VerifiedHardLinkForeignInstallCompensated(t *testing.T
 	res, err := strategy.Execute(plan)
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, fsutil.ErrTakeAsideForeign), "the swap subject sees the typed refusal: %v", err)
+	assert.True(t, fsutil.PublishCompleted(err), "the retained entry rides the doubt-as-published class for the rollback machinery: %v", err)
 	assert.False(t, res.Moved)
 	assert.True(t, linker.called, "the kernel resolved the link against the swapped name")
-	exists, _ := afero.Exists(fs, "/out/m/m.mp4")
-	assert.False(t, exists, "the rejected install was unlinked off the destination")
-	got, _ := afero.ReadFile(fs, "/in/m.mp4")
+	got, readErr := afero.ReadFile(fs, "/out/m/m.mp4")
+	require.NoError(t, readErr, "the unproven entry is retained byte-intact — never unlinked against its own current identity")
+	assert.Equal(t, "foreign replacement — a different size", string(got))
+	got, _ = afero.ReadFile(fs, "/in/m.mp4")
 	assert.Equal(t, "video", string(got), "the link lane consumes nothing at the source")
 }
 

@@ -220,29 +220,41 @@ func TestLinkFileNoReplaceVerifiedIndeterminateReproofKeepsCompleted(t *testing.
 	assert.True(t, exists, "an unproven entry is never unlinked by pathname")
 }
 
-// The core guarantee: a swap that wins the open→link window lands a link to
-// the REPLACEMENT; the post-link proof refuses it and the bound unlink
-// compensates — the destination ends vacant, the foreign object intact at the
-// source name, the admitted object untouched.
-func TestLinkFileNoReplaceVerifiedPostLinkSwapCompensated(t *testing.T) {
+// A swap that wins the open→link window lands a link to the REPLACEMENT; the
+// post-link proof refuses it — and the rejected entry is RETAINED, never
+// unlinked (codex P1, PRRT_kwDORn9KaM6npnwi): from the composite's vantage the
+// post-link entry is indistinguishable from another writer's post-install
+// successor (our install renamed aside, the name replanted inside the
+// link→lstat window), so cleanup binds to the link operation's own provable
+// identity — the admitted pre-link object — and an entry diverging from it is
+// unproven. The doubt-as-published class joins the typed refusal so the
+// caller's observe/rollback machinery reaps whatever stands; every object
+// stays byte-intact under the composite's own resolution (the round-46
+// precedent: unproven outcomes retain).
+func TestLinkFileNoReplaceVerifiedPostLinkSwapRetainedUnproven(t *testing.T) {
 	fs, src, dst := linkFixture(t)
 	proof, _ := verifyProofOf(t, fs, src)
 	err := LinkFileNoReplaceVerified(fs, src, dst, func(_, _ string) error {
 		return afero.WriteFile(fs, dst, []byte("foreign replacement — a different size"), 0o644)
 	}, proof)
 	require.ErrorIs(t, err, ErrTakeAsideForeign)
-	assert.False(t, PublishCompleted(err), "the compensation removed the rejected install")
-	exists, _ := afero.Exists(fs, dst)
-	assert.False(t, exists, "the foreign install is unlinked, never left standing as the admitted video")
-	got, _ := afero.ReadFile(fs, src)
+	require.ErrorIs(t, err, ErrPublishCompleted, "the rejected entry may stand at the destination — the caller's rollback reaps it")
+	got, readErr := afero.ReadFile(fs, dst)
+	require.NoError(t, readErr, "the unproven entry is retained byte-intact — never an unlink authenticated against its own current identity")
+	assert.Equal(t, "foreign replacement — a different size", string(got))
+	got, _ = afero.ReadFile(fs, src)
 	assert.Equal(t, "admitted video bytes", string(got))
 	assertNoBoundResidue(t, fs, filepath.Dir(dst))
 }
 
-// A wedged compensation keeps every object and classifies BOTH: the typed
-// admission refusal the swap subject sees, and the doubt-as-published class
-// so the caller's observe/rollback machinery reaps the stranded install.
-func TestLinkFileNoReplaceVerifiedCompensationWedgeKeepsBothClasses(t *testing.T) {
+// The retained entry stays byte-intact even when the bound-unlink machinery
+// could not have run anyway (the terminal claim wedged): retention of an
+// unproven entry precedes any compensation attempt (codex P1,
+// PRRT_kwDORn9KaM6npnwi), and BOTH classes still ride — the typed admission
+// refusal the swap subject sees and the doubt-as-published class so the
+// caller's observe/rollback machinery reaps whatever stands at the
+// destination.
+func TestLinkFileNoReplaceVerifiedUnprovenRetainKeepsBothClasses(t *testing.T) {
 	base, src, dst := linkFixture(t)
 	proof, _ := verifyProofOf(t, base, src)
 	fs := &verifyHookFS{Fs: base, openFile: func(name string, flag int, perm os.FileMode) (afero.File, error) {
@@ -325,8 +337,12 @@ func TestLinkFileNoReplaceVerifiedOsFsLinkAliasesAdmittedObject(t *testing.T) {
 // The real-link mid-window swap on a kernel-identity filesystem: the swap
 // lands between the verified open and the kernel's by-name link resolution,
 // so link(2) binds the REPLACEMENT's inode. The post-link alias proof refuses
-// it and the compensation unlinks the rejected install.
-func TestLinkFileNoReplaceVerifiedOsFsMidWindowSwapRefused(t *testing.T) {
+// the entry, and — diverging from the admitted pre-link identity, it could
+// equally be another writer's successor replanted after our install was moved
+// aside (codex P1, PRRT_kwDORn9KaM6npnwi) — it is RETAINED byte-intact, the
+// doubt-as-published class joining the typed refusal for the caller's
+// rollback machinery.
+func TestLinkFileNoReplaceVerifiedOsFsMidWindowSwapRetainedUnproven(t *testing.T) {
 	fs := afero.NewOsFs()
 	root := t.TempDir()
 	src := filepath.Join(root, "in", "movie.mp4")
@@ -345,12 +361,87 @@ func TestLinkFileNoReplaceVerifiedOsFsMidWindowSwapRefused(t *testing.T) {
 	}, proof)
 	require.True(t, swapped, "the swap actually landed inside the open→link window")
 	require.ErrorIs(t, err, ErrTakeAsideForeign)
-	assert.False(t, PublishCompleted(err), "the compensation removed the rejected install")
-	exists, _ := afero.Exists(fs, dst)
-	assert.False(t, exists, "the replacement's link never survives the post-link proof")
-	got, _ := afero.ReadFile(fs, src)
+	require.ErrorIs(t, err, ErrPublishCompleted, "the retained entry stays caller-visible for the rollback machinery")
+	got, readErr := afero.ReadFile(fs, dst)
+	require.NoError(t, readErr, "an entry diverging from the link operation's identity is never unlinked")
+	assert.Equal(t, "replacement video — different bytes", string(got), "the entry stands as the swap's own bytes, retained byte-intact")
+	got, _ = afero.ReadFile(fs, src)
 	assert.Equal(t, "replacement video — different bytes", string(got), "the replacement stays byte-intact at the source name")
 	got, _ = afero.ReadFile(fs, aside)
 	assert.Equal(t, "admitted video bytes", string(got), "the admitted object was never consumed")
+	assertNoBoundResidue(t, fs, root)
+}
+
+// codex P1 (PRRT_kwDORn9KaM6npnwi) — the flagged shape: the install lands as
+// the admitted object's own alias, then ANOTHER writer renames the fresh link
+// aside and plants a successor at dst inside the link→lstat window. The
+// post-link proof fails on the successor as expected, but the cleanup must not
+// authenticate against the successor's own identity — that unlink destroys
+// another writer's file. The unproven entry is RETAINED byte-intact, the
+// doubt-as-published class rides, and the moved-aside install stays
+// recoverable at its new name.
+func TestLinkFileNoReplaceVerifiedPostLinkSuccessorNeverUnlinked(t *testing.T) {
+	base, src, dst := linkFixture(t)
+	aside := filepath.Join(filepath.Dir(dst), "install-moved-aside.bin")
+	proof, _ := verifyProofOf(t, base, src)
+	successorPlanted := false
+	err := LinkFileNoReplaceVerified(base, src, dst, func(_, _ string) error {
+		require.NoError(t, faithfulLink(t, base, src, dst))
+		require.NoError(t, base.Rename(dst, aside))
+		require.NoError(t, afero.WriteFile(base, dst, []byte("another writer's successor — planted post-install"), 0o644))
+		successorPlanted = true
+		return nil
+	}, proof)
+	require.True(t, successorPlanted, "the successor genuinely claimed the destination inside the link→lstat window")
+	require.ErrorIs(t, err, ErrTakeAsideForeign)
+	require.ErrorIs(t, err, ErrPublishCompleted, "the install may stand at another name — the caller's observe/rollback machinery reaps")
+	got, readErr := afero.ReadFile(base, dst)
+	require.NoError(t, readErr, "the successor is another writer's file — never destroyed by the failed admission proof's cleanup")
+	assert.Equal(t, "another writer's successor — planted post-install", string(got))
+	got, _ = afero.ReadFile(base, aside)
+	assert.Equal(t, "admitted video bytes", string(got), "the install the successor's writer moved aside stays recoverable")
+	got, _ = afero.ReadFile(base, src)
+	assert.Equal(t, "admitted video bytes", string(got))
+	assertNoBoundResidue(t, base, filepath.Dir(dst))
+}
+
+// The kernel-identity twin of the post-install successor window: link(2)
+// landed a REAL alias of the admitted object, another process renamed it
+// aside, and a successor claimed dst before the post-link lstat. The proof
+// fails on the successor; the cleanup gate binds to the link operation's own
+// identity (the admitted dev/ino captured pre-link), observes the divergence,
+// and RETAINS the successor — the flagged construction authenticated
+// UnlinkVerified against the successor's own identity and destroyed it.
+func TestLinkFileNoReplaceVerifiedOsFsPostLinkSuccessorNeverUnlinked(t *testing.T) {
+	fs := afero.NewOsFs()
+	root := t.TempDir()
+	src := filepath.Join(root, "in", "movie.mp4")
+	dst := filepath.Join(root, "lib", "movie.mp4")
+	aside := filepath.Join(root, "lib", "install-moved-aside.bin")
+	require.NoError(t, fs.MkdirAll(filepath.Dir(src), 0o755))
+	require.NoError(t, fs.MkdirAll(filepath.Dir(dst), 0o755))
+	require.NoError(t, afero.WriteFile(fs, src, []byte("admitted video bytes"), 0o644))
+	proof, _ := verifyProofOf(t, fs, src)
+	successorPlanted := false
+	err := LinkFileNoReplaceVerified(fs, src, dst, func(oldname, newname string) error {
+		if lerr := os.Link(oldname, newname); lerr != nil {
+			return lerr
+		}
+		require.NoError(t, os.Rename(newname, aside))
+		require.NoError(t, os.WriteFile(newname, []byte("another writer's successor — planted post-install"), 0o644))
+		successorPlanted = true
+		return nil
+	}, proof)
+	require.True(t, successorPlanted, "the successor genuinely claimed the destination inside the link→lstat window")
+	require.ErrorIs(t, err, ErrTakeAsideForeign)
+	require.ErrorIs(t, err, ErrPublishCompleted)
+	successor, readErr := os.ReadFile(dst)
+	require.NoError(t, readErr, "the successor file is never destroyed by the cleanup")
+	assert.Equal(t, "another writer's successor — planted post-install", string(successor))
+	srcInfo, sErr := os.Stat(src)
+	require.NoError(t, sErr)
+	asideInfo, aErr := os.Stat(aside)
+	require.NoError(t, aErr, "the moved-aside install stays recoverable")
+	assert.True(t, os.SameFile(srcInfo, asideInfo), "the install is the admitted object, recoverable at the aside name")
 	assertNoBoundResidue(t, fs, root)
 }

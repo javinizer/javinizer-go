@@ -727,11 +727,15 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 				// resolves the source BY NAME, so the composite re-proves the
 				// open source handle before the link and re-proves the INSTALLED
 				// entry (which aliases whatever the source named at the link
-				// instant) after it — a source swapped inside the
-				// validation→link window refuses typed with the rejected install
-				// bound-unlinked, never a foreign object published as the
-				// admitted video. The kernel's EEXIST keeps the install
-				// no-clobber; the shared refusal/classes mapping is unchanged.
+				// instant) after it. An entry failing that proof is bound-unlinked
+				// only while it still provably aliases the admitted source object;
+				// a divergent entry is unproven — a post-install successor of
+				// another writer may be standing at the name — and is RETAINED
+				// byte-intact with the doubt-as-published class joined (codex P1,
+				// PRRT_kwDORn9KaM6npnwi), never an unlink authenticated against the
+				// entry's own current identity. The kernel's EEXIST keeps the
+				// install no-clobber; the shared refusal/classes mapping is
+				// unchanged.
 				if plan.verifiedSourceProof != nil {
 					if err := fsutil.LinkFileNoReplaceVerified(s.fs, plan.SourcePath, plan.TargetPath, s.linker.hardlink, plan.verifiedSourceProof); err != nil {
 						return mapNoReplaceRefusal(mapLinkInstallError(err), plan.TargetPath)

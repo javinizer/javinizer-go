@@ -40,13 +40,19 @@ type LinkFunc func(oldname, newname string) error
 //     destination), and dst then ALIASES whatever object src named at the link
 //     instant — so the installed entry itself is re-proven against the same
 //     admission proof (no-follow lookup). A swap that won the open→link window
-//     fails that proof, and the foreign install is removed through
-//     UnlinkVerified: only the exact re-proven object is ever unlinked (never
-//     a pathname Remove of an unproven entry), the refused object stays put at
-//     the source name, and the typed refusal (ErrTakeAsideForeign) is what the
-//     swap subject sees. A compensation that itself wedges keeps every object
-//     and joins ErrPublishCompleted so the caller's observe/rollback machinery
-//     reaps the stranded install.
+//     fails that proof. The cleanup binds to the link operation's OWN identity
+//     (codex P1, PRRT_kwDORn9KaM6npnwi): the admitted pre-link object is the
+//     only node this composite provably installed, so an entry still aliasing
+//     it is unlinked through UnlinkVerified bound to THAT captured identity —
+//     never dst's CURRENT one. An entry diverging from it is UNPROVEN: another
+//     writer may have renamed the fresh install aside and replanted dst inside
+//     the link→lstat window, and authenticating the unlink against the entry's
+//     own current identity would delete that foreign successor. Such an entry
+//     is therefore RETAINED byte-intact (unproven outcomes retain — the
+//     round-46 precedent), the typed refusal (ErrTakeAsideForeign) joining
+//     ErrPublishCompleted so the caller's observe/rollback machinery reaps
+//     whatever stands — the same posture a wedged compensation already took.
+//     The refused object stays put at the source name throughout.
 //
 // Lookup classes after the link: NotExist proves nothing stands at the
 // destination (plain refusal — the doubt-as-published class would lie); any
@@ -91,7 +97,22 @@ func LinkFileNoReplaceVerified(fs afero.Fs, src, dst string, link LinkFunc, proo
 		return fmt.Errorf("%w: verified link: the installed entry %s could not be re-proven (%v) — the publish may stand at the destination", ErrPublishCompleted, dst, dstErr)
 	}
 	if perr := proof(dst, dstInfo); perr != nil {
-		if rmErr := UnlinkVerified(fs, dst, dstInfo); rmErr != nil {
+		// Bind the cleanup decision to the link operation's OWN identity (the
+		// admitted pre-link object — the only node this composite provably
+		// installed), never dst's CURRENT identity (codex P1,
+		// PRRT_kwDORn9KaM6npnwi): a divergent entry is unproven — our install
+		// may have been renamed aside and the name replanted by another writer
+		// inside the link→lstat window — so it is RETAINED byte-intact with
+		// the doubt-as-published class joined, exactly like a wedged
+		// compensation. Only an entry still provably aliasing the admitted
+		// object is bound-unlinked.
+		if !asideSameObject(dstInfo, srcInfo) {
+			return errors.Join(
+				fmt.Errorf("verified link: the installed entry %s failed its admission proof (%w): %w", dst, ErrTakeAsideForeign, perr),
+				fmt.Errorf("%w: %s no longer provably names the object the link operation installed — the unproven entry is retained byte-intact (never bound-unlinked against its own current identity)", ErrPublishCompleted, dst),
+			)
+		}
+		if rmErr := UnlinkVerified(fs, dst, srcInfo); rmErr != nil {
 			return errors.Join(
 				fmt.Errorf("verified link: the installed entry %s failed its admission proof (%w): %w", dst, ErrTakeAsideForeign, perr),
 				fmt.Errorf("%w: the rejected install could not be bound-unlinked and stays recoverable at %s: %v", ErrPublishCompleted, dst, rmErr),
