@@ -855,7 +855,19 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 		// (crash recovery) before any later leg can fail, or cleanup would
 		// strand installed copies beside a failed destination.
 		for _, sr := range finalResult.Subtitles {
-			if !sr.Moved || sr.OriginalPath == "" || sr.NewPath == "" {
+			// A publish-completed subtitle move error IS an install wearing the
+			// sr.Moved=false ambiguity slot (codex P1, PRRT_kwDORn9KaM6nfbS3): the
+			// post-publish cleanup leg refused AFTER the bytes landed at the
+			// destination (the organizer withholds Moved so nothing re-aims a
+			// surviving source by name). Skipping the arm here would strand an
+			// untracked sidecar at the destination — the original left
+			// recoverable only under the mover's hidden claim name. Arm it
+			// exactly like a clean move: the batch move-back is no-replace and
+			// the durable revert rename-back is source-vacancy-gated, so a
+			// retained or reappeared source suppresses the compensation and
+			// keeps both copies instead of clobbering or dropping one.
+			installed := sr.Moved || fsutil.PublishCompleted(sr.Error)
+			if !installed || sr.OriginalPath == "" || sr.NewPath == "" {
 				continue
 			}
 			// The pending intent for this move was journaled pre-execution; only
@@ -883,7 +895,12 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 			keep := make([]models.FileMove, 0, len(finalResult.Subtitles)+1)
 			keep = append(keep, models.FileMove{OriginalPath: s.sourcePath, NewPath: finalResult.NewPath})
 			for _, sr := range finalResult.Subtitles {
-				if sr.Moved && sr.OriginalPath != "" && sr.NewPath != "" {
+				// Publish-completed moves keep their intent (codex P1,
+				// PRRT_kwDORn9KaM6nfbS3): retracting it would commit the apply
+				// with an untracked destination sidecar, while the kept intent
+				// is exactly the vacancy-gated compensation the reverter runs
+				// for an install whose claimed-source cleanup refused.
+				if (sr.Moved || fsutil.PublishCompleted(sr.Error)) && sr.OriginalPath != "" && sr.NewPath != "" {
 					keep = append(keep, models.FileMove{OriginalPath: sr.OriginalPath, NewPath: sr.NewPath})
 				}
 			}
