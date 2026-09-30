@@ -177,12 +177,32 @@ func (s *artifactStage) siblingSourceProofs() map[string]fsutil.VerifiedSourcePr
 	return proofs
 }
 
+// admittedSubtitleSources lists the SOURCE paths prepareArtifact admitted as
+// siblings — the prepare-time snapshot the deferred publication binds into the
+// plan BEFORE its first subtitle probe (codex P2, PRRT_kwDORn9KaM6nnjvh), so a
+// regular subtitle materializing after the sibling scan is dropped from the
+// probe enumeration instead of being frozen and journaled without an admitted
+// identity or a verified-source proof. Every admitted sibling counts — even an
+// identity-free capture (memfs posture): admission, not pinnability, is the
+// contract. The binder cleans the keys.
+func (s *artifactStage) admittedSubtitleSources() []string {
+	sources := make([]string, 0, len(s.siblings))
+	for _, sibling := range s.siblings {
+		sources = append(sources, sibling.sourcePath)
+	}
+	return sources
+}
+
 // revalidateDirectSources re-proves every real source path the plan execution
 // is about to consume directly: the video when the plan addresses the real
 // source (deferred organize executions, in-place link sources) instead of the
 // staged copy, and every planned subtitle endpoint admitted as a sibling at
-// preparation. Subtitle endpoints that were never admitted (created inside the
-// prepare→publish window) are left to the existing plan semantics.
+// preparation. The deferred publication binds the prepare-time admission into
+// the plan before its first probe, so a subtitle endpoint absent from that
+// snapshot never reaches this enumeration at all (codex P2,
+// PRRT_kwDORn9KaM6nnjvh); the continue below now serves only un-bound lanes
+// (staged-source plans enumerate staging-owned paths), which keep the existing
+// plan semantics.
 func (s *artifactStage) revalidateDirectSources(executor artifactPlanExecutor, plan *organizer.OrganizePlan) error {
 	if filepath.Clean(plan.SourcePath) == filepath.Clean(s.sourcePath) {
 		if err := s.revalidateAdmittedSource(s.sourcePath, s.sourceIdentity); err != nil {

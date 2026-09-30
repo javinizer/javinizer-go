@@ -597,6 +597,22 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 			plan = guardedPlan
 			batch.YieldToLockedPublisher(plan.TargetPath)
 		}
+		// Bind the prepare-time admission BEFORE the first subtitle probe
+		// (codex P2, PRRT_kwDORn9KaM6nnjvh): the probes below rescan the
+		// source directory by name, so a regular subtitle materializing after
+		// prepareArtifact's sibling scan would otherwise be frozen into the
+		// plan's probe admission and journaled without an admitted identity or
+		// a verified-source proof — a rename-swap before handleSubtitles would
+		// then make move mode consume (or copy mode publish) a different file
+		// than admission ever saw. The exclusion leg is deliberate: binding
+		// identity for a file the admission gate never took would require a
+		// fresh pre-execution proof, opening new attack surface. Only the
+		// deferred real-source plan is bound, mirroring the proof bindings
+		// below; staged/in-place plans enumerate staging-owned sources and
+		// keep the rescan enumeration.
+		if s.videoDeferred && filepath.Clean(plan.SourcePath) == filepath.Clean(s.sourcePath) {
+			plan.BindSubtitleAdmissionSet(s.admittedSubtitleSources())
+		}
 		// Persist the intended inverse BEFORE the move consumes the real
 		// source: a crash in the rename→record window must still leave a durable
 		// source→destination trail (Begin cannot name it — the plan is only

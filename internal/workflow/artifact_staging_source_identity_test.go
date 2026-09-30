@@ -1039,3 +1039,105 @@ func TestDeferredMoveAbortsRemovingSiblingOnIdentityProbeFailure(t *testing.T) {
 	require.NoError(t, readErr)
 	assert.Equal(t, "part two", string(got), "the unprovable sibling is never removed")
 }
+
+// The pre-probe race window (codex P2, PRRT_kwDORn9KaM6nnjvh): a REGULAR
+// subtitle materializing after prepareArtifact's sibling admission scan but
+// before the deferred fence's first PlanSubtitleMoves probe has no entry in
+// the prepare-time admitted map — the probe once froze and journaled it
+// anyway (the revalidatedirectsources continue passed it through unproven,
+// and no BindVerifiedSubtitleSources proof covered it), so a rename-swap
+// before handleSubtitles made move mode consume — or copy mode publish — a
+// different file than the admission gate ever saw. The deferred publication
+// now binds the admitted set into the plan BEFORE the first probe: the
+// latecomer never enters the enumeration, no pending intent or sidecar pin
+// ever names it, execution refuses it as a skip, and the swapped bytes stay
+// at the source. The admitted multipart sibling and the video publish
+// normally.
+func TestDeferredPublishExcludesPreProbeWindowSubtitle(t *testing.T) {
+	for _, move := range []bool{true, false} {
+		t.Run(map[bool]string{false: "copy", true: "move"}[move], func(t *testing.T) {
+			slug := map[bool]string{false: "subtitle-preprobe-copy", true: "subtitle-preprobe-move"}[move]
+			db, _ := pr260ArtifactDB(t)
+			movie := pr260FencedMovie(t, db, slug, "")
+			base, root, source, subtitle, multipart, unrelated, match := pr260FencedFiles(t, slug)
+			dest := filepath.Join(root, "library")
+			org := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize, MoveSubtitles: true, SubtitleExtensions: []string{".srt"}}, template.NewEngine(), nil)
+			ledger := &completeCallFaultLog{}
+			orch := &applyOrchImpl{fs: base, organizer: org, revertLog: ledger}
+			cmd := pr260ArtifactFailureCommand(&movie, match, dest)
+			cmd.Organize.Skip = false
+			cmd.Organize.MoveFiles = move
+			cmd.Download = false
+
+			// The admission snapshot names NO subtitle: it materializes only
+			// afterwards, inside the prepare→probe window.
+			require.NoError(t, base.Remove(subtitle))
+			stage, _, err := orch.prepareArtifact(context.Background(), cmd)
+			require.NoError(t, err)
+			defer stage.cleanup()
+			require.Len(t, stage.siblings, 1, "only the multipart sibling was admitted at preparation")
+			require.NoError(t, afero.WriteFile(base, subtitle, []byte("late subtitle"), 0o644))
+
+			// The finding's hostile leg: a rename-swap re-points the
+			// latecomer's pathname at different bytes before the execute —
+			// the probe the buggy flow froze named one file, consumption
+			// would have installed the swapped bytes.
+			lateInfo, statErr := base.Stat(subtitle)
+			require.NoError(t, statErr)
+			swapReplace(t, base, subtitle, []byte("swap payload"), lateInfo)
+
+			stagedPlan, planErr := org.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: models.FileMatchInfo{Path: stage.stagedSource, Name: filepath.Base(source)}, Movie: stage.original.Movie, DestDir: stage.root, MoveFiles: move, OperationMode: stage.original.OperationMode})
+			require.NoError(t, planErr)
+			state := &applyPipelineState{operationID: "op", organizeResult: &organizer.OrganizeResult{NewPath: stagedPlan.TargetPath, FolderPath: stagedPlan.TargetDir}}
+			publishErr := stage.publish(context.Background(), orch, state, nil)
+			require.NoError(t, publishErr, "the admitted video and multipart legs publish normally")
+
+			lateSkipped := false
+			require.NotNil(t, state.organizeResult)
+			for _, sr := range state.organizeResult.Subtitles {
+				if filepath.Clean(sr.OriginalPath) == filepath.Clean(subtitle) {
+					lateSkipped = sr.Skipped && !sr.Moved && !sr.Copied
+				}
+			}
+			assert.True(t, lateSkipped, "execution refuses the pre-probe-window subtitle as a skip")
+			for _, mv := range ledger.movesCaptured {
+				assert.NotEqual(t, subtitle, mv.OriginalPath, "no pending intent journals the latecomer")
+				assert.NotEqual(t, ".srt", strings.ToLower(filepath.Ext(mv.NewPath)), "no pending intent names a subtitle endpoint")
+			}
+			for _, entry := range ledger.deletePaths {
+				assert.NotEqual(t, ".srt", strings.ToLower(filepath.Ext(entry.Path)), "no sidecar delete pin names a subtitle endpoint")
+			}
+			for _, kept := range ledger.keepCaptured {
+				assert.NotEqual(t, ".srt", strings.ToLower(filepath.Ext(kept.NewPath)), "no reconciled intent keeps a subtitle endpoint")
+			}
+			got, readErr := afero.ReadFile(base, subtitle)
+			require.NoError(t, readErr)
+			assert.Equal(t, "swap payload", string(got), "the latecomer is never consumed: the swapped bytes stay put")
+			srtEntries := []string{}
+			publishedVideos := []string{}
+			walkErr := afero.Walk(base, dest, func(path string, info os.FileInfo, walkErr error) error {
+				if walkErr != nil {
+					return walkErr
+				}
+				if strings.HasSuffix(path, ".srt") {
+					srtEntries = append(srtEntries, path)
+				}
+				if info.Mode().IsRegular() && strings.HasSuffix(path, ".mp4") {
+					publishedVideos = append(publishedVideos, path)
+				}
+				return nil
+			})
+			require.NoError(t, walkErr)
+			assert.Empty(t, srtEntries, "the swap payload never reaches the library")
+			assert.Len(t, publishedVideos, 2, "the video and the admitted multipart sibling publish")
+			if move {
+				pr260AssertRemoved(t, base, source, multipart)
+			} else {
+				pr260AssertRetained(t, base, source, subtitle, multipart, unrelated)
+			}
+			unrelatedBytes, readErr := afero.ReadFile(base, unrelated)
+			require.NoError(t, readErr)
+			assert.Equal(t, "unrelated", string(unrelatedBytes))
+		})
+	}
+}

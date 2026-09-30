@@ -416,6 +416,20 @@ type OrganizePlan struct {
 	// un-probed plans (non-deferred direct flows) keep the historical
 	// rescan-at-execute behavior.
 	subtitleProbeAdmitted map[string]bool
+	// subtitleAdmissionSet is the caller-bound prepare-time admission
+	// snapshot (codex P2, PRRT_kwDORn9KaM6nnjvh): the fenced deferred
+	// publication pins every subtitle SOURCE prepareArtifact admitted, keyed
+	// by cleaned original path. The subtitle probes rescan the source
+	// directory by NAME, so a regular subtitle materializing after that
+	// snapshot but before the first probe would otherwise be frozen into
+	// subtitleProbeAdmitted and journaled with no admitted identity and no
+	// verified-source proof — a rename-swap before handleSubtitles would
+	// then make move mode consume (or copy mode publish) a different file
+	// than the admission gate ever saw. The probe enumeration drops such
+	// latecomers BEFORE the freeze, so probing, journaling, and the
+	// execute-time gate all agree they never were sources. Nil until bound:
+	// every non-deferred or direct flow enumerates exactly as before.
+	subtitleAdmissionSet map[string]bool
 	// verifiedSourceProof binds the plan's video-source consumption to the
 	// identity a caller admitted earlier (the fenced artifact publication's
 	// deferred-source seam, codex P1, PRRT_kwDORn9KaM6m9ae4): the no-replace
@@ -464,6 +478,27 @@ func (p *OrganizePlan) BindVerifiedSource(proof fsutil.VerifiedSourceProof) {
 // carry proofs install subtitles exactly as before.
 func (p *OrganizePlan) BindVerifiedSubtitleSources(proofs map[string]fsutil.VerifiedSourceProof) {
 	p.verifiedSubtitleProofs = proofs
+}
+
+// BindSubtitleAdmissionSet pins the caller's prepare-time admission snapshot:
+// the subtitle SOURCE paths the fenced publication admitted at preparation.
+// The subtitle probe drops any enumerated source absent from the set (a file
+// that materialized after the snapshot) instead of freezing and journaling it
+// — the excluded entry also misses the probe freeze, so execute's admission
+// gate refuses it as a skip with the source left untouched. Setter semantics
+// mirror BindVerifiedSubtitleSources: the fenced deferred publication binds
+// each freshly replanned plan once, a nil slice unbinds, and a bound EMPTY
+// set admits nothing (no subtitle sibling was admitted at preparation).
+func (p *OrganizePlan) BindSubtitleAdmissionSet(sources []string) {
+	if sources == nil {
+		p.subtitleAdmissionSet = nil
+		return
+	}
+	set := make(map[string]bool, len(sources))
+	for _, source := range sources {
+		set[filepath.Clean(source)] = true
+	}
+	p.subtitleAdmissionSet = set
 }
 
 // BindCopyDigestCapture requests the plan's verified copy leg to tee the
@@ -654,6 +689,25 @@ func (o *Organizer) PlanSubtitleMoves(plan *OrganizePlan) []models.SubtitleMove 
 		regular = append(regular, sr)
 	}
 	result.Subtitles = regular
+	// The caller-bound prepare-time admission snapshot (codex P2,
+	// PRRT_kwDORn9KaM6nnjvh): a regular subtitle that materialized after the
+	// snapshot but before this first probe has no admitted identity and no
+	// verified-source proof bound — freezing it here would journal it anyway,
+	// and a rename-swap before handleSubtitles would then make move mode
+	// consume (or copy mode publish) a different file than admission ever
+	// saw. Drop it BEFORE the freeze so probing, journaling, and the
+	// execute-time admission gate all agree the entry was never a source. A
+	// nil set (every non-bound plan) keeps the historical enumeration.
+	if plan.subtitleAdmissionSet != nil {
+		admitted := make([]SubtitleResult, 0, len(result.Subtitles))
+		for _, sr := range result.Subtitles {
+			if !plan.subtitleAdmissionSet[filepath.Clean(sr.OriginalPath)] {
+				continue
+			}
+			admitted = append(admitted, sr)
+		}
+		result.Subtitles = admitted
+	}
 	// Freeze the executed subtitle set at the FIRST probe (codex P2,
 	// PRRT_kwDORn9KaM6m9afD): the fence flow journals exactly this
 	// enumeration before ExecuteOrganizePlan consumes it, so a source that

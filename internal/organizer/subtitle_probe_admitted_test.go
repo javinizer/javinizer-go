@@ -317,3 +317,90 @@ func TestProbeSkipsNonRegularSubtitleSource(t *testing.T) {
 		})
 	}
 }
+
+// The caller-bound prepare-time admission closes the pre-probe race window the
+// m9afD freeze cannot (codex P2, PRRT_kwDORn9KaM6nnjvh): a REGULAR subtitle
+// materializing after the caller's admission snapshot but before the first
+// probe would otherwise be frozen into subtitleProbeAdmitted and journaled
+// with no admitted identity and no verified-source proof, so a rename-swap
+// before handleSubtitles made move mode consume — or copy mode publish — a
+// different file than admission ever saw. A bound plan excludes the latecomer
+// from the probe enumeration and the freeze alike, executes it as a skip, and
+// leaves its bytes untouched at the source; the admitted sibling still
+// installs and the video leg is unaffected.
+func TestProbeAdmissionSetExcludesPreProbeWindowSubtitle(t *testing.T) {
+	for _, move := range []bool{true, false} {
+		t.Run(map[bool]string{false: "copy", true: "move"}[move], func(t *testing.T) {
+			org, src, sub, dest, dir := probeAdmittedFixture(t)
+			plan := probeAdmittedPlan(t, org, src, dest, move)
+			// The prepare-time snapshot admitted ONLY the fixture subtitle…
+			plan.BindSubtitleAdmissionSet([]string{sub})
+
+			// …then a regular subtitle materializes before the first probe.
+			late := filepath.Join(dir, "ABC-123.jpn.srt")
+			require.NoError(t, os.WriteFile(late, []byte("late subtitle"), 0o600))
+
+			moves := org.PlanSubtitleMoves(plan)
+			require.Len(t, moves, 1, "the pre-probe-window latecomer never enters the journal enumeration")
+			assert.Equal(t, sub, moves[0].OriginalPath)
+
+			// The finding's hostile leg: a rename-swap re-points the
+			// latecomer's pathname at different bytes before execute. With no
+			// freeze entry the gate refuses it no matter what the swap leaves.
+			aside := filepath.Join(dir, "swap-aside.srt")
+			replacement := filepath.Join(dir, "replacement.srt")
+			require.NoError(t, os.Rename(late, aside))
+			require.NoError(t, os.WriteFile(replacement, []byte("swap payload"), 0o600))
+			require.NoError(t, os.Rename(replacement, late))
+			require.NoError(t, os.Remove(aside))
+
+			result, err := org.ExecuteOrganizePlan(plan, move, LinkModeNone)
+			require.NoError(t, err)
+			require.Len(t, result.Subtitles, 2, "execute's rescan sees both sources; the gate classifies the latecomer")
+
+			admitted := subtitleResultFor(result, sub)
+			require.NotNil(t, admitted)
+			assert.True(t, admitted.Moved || admitted.Copied, "the admitted subtitle still installs")
+			assert.False(t, admitted.Skipped)
+
+			frozen := subtitleResultFor(result, late)
+			require.NotNil(t, frozen)
+			assert.True(t, frozen.Skipped, "the un-admitted latecomer is refused as a skip")
+			assert.False(t, frozen.Moved || frozen.Copied, "no install the admission never covered")
+
+			targetStem := filepath.Join(dest, "ABC-123", "ABC-123")
+			got, readErr := os.ReadFile(targetStem + ".srt")
+			require.NoError(t, readErr)
+			assert.Equal(t, "subtitle", string(got), "the admitted endpoint installed")
+			require.NoFileExists(t, targetStem+".jpn.srt", "the swap payload never reaches the library")
+			got, readErr = os.ReadFile(late)
+			require.NoError(t, readErr)
+			assert.Equal(t, "swap payload", string(got), "the latecomer's bytes stay put, never consumed")
+			require.FileExists(t, result.NewPath, "the video leg is unaffected")
+			_, statErr := os.Stat(src)
+			assert.Equal(t, move, os.IsNotExist(statErr), "move consumes, copy retains the video source")
+		})
+	}
+}
+
+// Setter semantics mirror the proof bindings: a nil bind leaves the plan
+// unbound, a rebind REPLACES (the fenced flow binds each freshly replanned
+// plan once), and a bound EMPTY set stays bound — no subtitle was admitted at
+// preparation, so the probe must admit nothing.
+func TestOrganizePlanBindSubtitleAdmissionSetSetterSemantics(t *testing.T) {
+	plan := &OrganizePlan{}
+	plan.BindSubtitleAdmissionSet(nil)
+	assert.Nil(t, plan.subtitleAdmissionSet, "a nil bind leaves the plan unbound")
+
+	plan.BindSubtitleAdmissionSet([]string{"/a.srt"})
+	require.Len(t, plan.subtitleAdmissionSet, 1)
+	assert.True(t, plan.subtitleAdmissionSet["/a.srt"])
+
+	plan.BindSubtitleAdmissionSet([]string{"/b.srt"})
+	require.Len(t, plan.subtitleAdmissionSet, 1, "setter semantics mirror the proof bindings — a rebind REPLACES")
+	assert.True(t, plan.subtitleAdmissionSet["/b.srt"])
+
+	plan.BindSubtitleAdmissionSet([]string{})
+	require.NotNil(t, plan.subtitleAdmissionSet, "an empty slice stays bound: nothing was admitted at preparation")
+	assert.Empty(t, plan.subtitleAdmissionSet)
+}
