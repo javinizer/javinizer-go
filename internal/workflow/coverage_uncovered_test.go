@@ -805,6 +805,26 @@ type errorRevertLog struct {
 	completeErr error
 }
 
+func (e errorRevertLog) RecordMoveIntent(context.Context, OperationID, string, string) error {
+	return nil
+}
+
+func (e errorRevertLog) RecordDeleteIntent(context.Context, OperationID, []models.DeleteEntry) error {
+	return nil
+}
+
+func (e errorRevertLog) ReconcileMoveIntents(context.Context, OperationID, []models.FileMove) error {
+	return nil
+}
+
+func (e errorRevertLog) ReconcileDeleteIntents(context.Context, OperationID, []string) error {
+	return nil
+}
+
+func (e errorRevertLog) FinalizeDeleteIntentCopyDigest(context.Context, OperationID, string, string) error {
+	return nil
+}
+
 func (e errorRevertLog) Begin(_ context.Context, _ ApplyCmd) (OperationID, error) {
 	return "1", nil
 }

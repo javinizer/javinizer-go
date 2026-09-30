@@ -67,7 +67,7 @@ func TestArtifactDigestErrorsPropagateFromSharedPreflight(t *testing.T) {
 				original:   ApplyCmd{ArtifactCoordinator: NewSharedArtifactCoordinator([]string{"part-1"}), ArtifactOwnerKey: "part-1"},
 				publishCtx: context.Background(),
 			}
-			_, err := stage.installPaths([]string{source}, nil, "", "")
+			_, err := stage.installPaths([]string{source}, nil, "", "", nil)
 			require.ErrorContains(t, err, tc.want)
 		})
 	}
@@ -116,7 +116,7 @@ func TestArtifactSharedClaimRejectsUnknownContender(t *testing.T) {
 		original:   ApplyCmd{ArtifactCoordinator: NewSharedArtifactCoordinator([]string{"part-1"}), ArtifactOwnerKey: "unknown"},
 		publishCtx: context.Background(),
 	}
-	_, err := stage.installPaths([]string{source}, nil, "", "")
+	_, err := stage.installPaths([]string{source}, nil, "", "", nil)
 	require.ErrorContains(t, err, "not registered")
 }
 

@@ -43,9 +43,37 @@ func (pr260FailureArtifactFencer) WithApplyArtifactPublicationFence(_ context.Co
 	return fn(&models.Movie{})
 }
 
+type pr260StatFailureFs struct {
+	afero.Fs
+	path string
+}
+
+func (f *pr260StatFailureFs) Stat(name string) (os.FileInfo, error) {
+	if filepath.Clean(name) == filepath.Clean(f.path) {
+		return nil, errors.New("pr260: source stat denied")
+	}
+	return f.Fs.Stat(name)
+}
+
+// The admission and revalidation lookups are no-follow: the wedge must sit on
+// LstatIfPossible too, or the filesystem's own Lstater answers around it.
+func (f *pr260StatFailureFs) LstatIfPossible(name string) (os.FileInfo, bool, error) {
+	if filepath.Clean(name) == filepath.Clean(f.path) {
+		return nil, false, errors.New("pr260: source stat denied")
+	}
+	if lst, ok := f.Fs.(afero.Lstater); ok {
+		return lst.LstatIfPossible(name)
+	}
+	info, err := f.Fs.Stat(name)
+	return info, false, err
+}
+
+// Organize mode defers the video, so prepareArtifact never opens the source;
+// its pre-staging source gate is the Stat. A denied probe must fail before any
+// staging payload lands and must retain every input.
 func TestPR260ArtifactStagingSourceOpenFailureRetainsInputs(t *testing.T) {
 	baseFS, root, source, subtitle, multipart, unrelated, match := pr260FencedFiles(t, "source-open-failure")
-	fs := &pr260OpenFailureFs{Fs: baseFS, path: source}
+	fs := &pr260StatFailureFs{Fs: baseFS, path: source}
 	dest := filepath.Join(root, "published")
 	cmd := ApplyCmd{
 		Movie:            &models.Movie{ContentID: "pr260-source-open-failure"},
@@ -57,7 +85,7 @@ func TestPR260ArtifactStagingSourceOpenFailureRetainsInputs(t *testing.T) {
 
 	orch := &applyOrchImpl{fs: fs}
 	stage, _, err := orch.prepareArtifact(context.Background(), cmd)
-	require.ErrorContains(t, err, "open artifact source")
+	require.ErrorContains(t, err, "artifact staging source")
 	assert.Nil(t, stage)
 	pr260AssertNoFinals(t, baseFS, dest)
 	pr260AssertRetained(t, baseFS, source, subtitle, multipart, unrelated)
@@ -141,7 +169,12 @@ func TestPR260ArtifactStagingRenameFailureRetainsSourceAfterPartialPublish(t *te
 	stage.cleanup()
 	pr260AssertNoFinals(t, baseFS, dest)
 	pr260AssertRetained(t, baseFS, source, subtitle, multipart, unrelated)
-	pr260AssertStageGone(t, baseFS, root)
+	// With renames wedged the retention-first cleanup cannot carry the proof
+	// through a quarantine rename, so the staged tree (completed-marked) is
+	// retained for the next organize's sweep rather than partially removed.
+	exists, err := afero.Exists(baseFS, root)
+	require.NoError(t, err)
+	assert.True(t, exists, "failed quarantine must retain the staging root")
 }
 
 type pr260RenameFailureFs struct{ afero.Fs }

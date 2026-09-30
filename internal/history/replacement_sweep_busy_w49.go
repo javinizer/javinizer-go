@@ -137,12 +137,30 @@ type sweepBusyMarkerClaim struct {
 	released atomic.Bool // wave-53: signaled by releaseForReclaim once both holds are freed
 	wedged   atomic.Bool // wave-57: admission timeout — holds retained, reverter skips (busy-class)
 
-	// completed is flipped by the worker's untrack closure under the ledger
-	// mutex (sweepBusyClaimLedger.mu) BEFORE the delete, so the wave-58
-	// wedged-claim reinsertion (same lock) reinserts ONLY while the worker is
-	// still running; a worker that already finished (untrack + releases) is
-	// not resurrected (the dest would stay pinned wedged until restart).
-	completed bool
+	// Wave-64 (PR#276 Windows CI hang — "the consult must never sample a
+	// cross-goroutine wall-clock race"): reclaim used to DELETE the record up
+	// front and reinsert it only if the wedged flag was visible after its
+	// bounded waitReleased — one wall-clock grace on the reclaim goroutine
+	// racing a second, structurally-later wall-clock deadline (the drain's
+	// admission timeout) on the detached drain goroutine. A slow or
+	// oversubscribed runner (Windows CI) can exhaust the release grace before
+	// the drain publishes the wedge: the record stayed deleted, the
+	// reverter's sweepClaimIsWedged consult read "nothing wedged", and the
+	// restore fell through to the BLOCKING destination-lock acquisition
+	// behind the still-held lock — a hard deadlock (the 10m package panic).
+	// The record now STAYS in the ledger across the drain; the drain closes
+	// admitResolved the instant its admission decision is FINAL (the wedge
+	// leg stores the flag before closing), and the consult AWAITS that
+	// channel instead of sampling a race outcome — a wait on a runnable
+	// goroutine's bounded in-process TryLock polling, never on the stranded
+	// filesystem and never on another in-flight waiter. The wave-58
+	// "completed" reinsert gate is obsoleted by the keep-in-place record: a
+	// finished worker still removes its record through untrack's
+	// pointer-scoped delete, so nothing wedged survives worker completion.
+	reclaimStarted bool          // ledger-mutex-guarded: reclaim already detached this claim's drain
+	admitResolved  chan struct{} // closed by the drain once the wave-56 admission decision is FINAL
+
+	dest string // the recorded destination spelling — the drain's settled-forget re-derives the keyed bucket (wave-64)
 
 	fs    afero.Fs // wave-55: filesystem the marker was claimed on, for the ownership-attestation gate
 	token string   // wave-55: the busy-marker token this claim wrote ("" for markerless test claims)
@@ -377,7 +395,8 @@ func (c *sweepBusyMarkerClaim) releaseForReclaim() {
 		// (bindDestLock): a markerless test claim frees nothing real, so its
 		// reclaim keeps the ordinary released posture; in production a claim always
 		// binds its dest lock before any admitted mutation.
-		c.wedged.Store(true)
+		c.wedged.Store(true) // store BEFORE closing so every waiter reads a final flag (wave-64)
+		close(c.admitResolved)
 		return
 	}
 	if destRelease != nil {
@@ -386,8 +405,17 @@ func (c *sweepBusyMarkerClaim) releaseForReclaim() {
 	if admitted {
 		c.admitMu.Unlock() // new sweep admits now TryLock-fail and read revoked → abandon
 	}
+	// Wave-64: the admission decision is FINAL here (never-wedged legs). Close
+	// AFTER the pure in-process frees (a woken consult contends at worst on
+	// the marker acquire, never on the dest lock) but BEFORE the marker
+	// take-aside — that fs work may wedge on the stranded filesystem and is
+	// gated only by the released signal's bounded grace, never a consult.
+	close(c.admitResolved)
 	c.release()            // wave-55: free the marker directly — the attestation gates the worker
 	c.released.Store(true) // wave-53, finding 4: signal the detached releases completed
+	// Wave-64: the record stayed in the ledger across the drain so a landing
+	// consult could await this decision; settled non-wedged — forget it.
+	sweepBusyClaims.forgetSettled(c)
 }
 
 // waitAdmitted polls TryLock on the admit gate up to sweepReclaimAdmitGrace:
@@ -466,7 +494,7 @@ func recordSweepBusyClaim(ctx context.Context, fs afero.Fs, dest, token string, 
 }
 
 func (l *sweepBusyClaimLedger) record(ctx context.Context, fs afero.Fs, dest, token string, release func()) (*sweepBusyMarkerClaim, func()) {
-	rec := &sweepBusyMarkerClaim{ctx: ctx, fs: fs, token: token, release: release}
+	rec := &sweepBusyMarkerClaim{ctx: ctx, dest: dest, fs: fs, token: token, release: release, admitResolved: make(chan struct{})}
 	l.mu.Lock()
 	l.epoch++
 	rec.epoch = l.epoch
@@ -474,8 +502,10 @@ func (l *sweepBusyClaimLedger) record(ctx context.Context, fs afero.Fs, dest, to
 	l.byDest[key] = rec
 	l.mu.Unlock()
 	return rec, func() {
+		// Wave-64: pointer-scoped removal only. No wave-58 "completed" barrier
+		// is needed — with the record kept in place for the whole drain there
+		// is no reinsertion path that could resurrect a finished worker.
 		l.mu.Lock()
-		rec.completed = true // wave-58: mark the worker finished before untrack, under the ledger lock
 		if l.byDest[key] == rec {
 			delete(l.byDest, key)
 		}
@@ -513,9 +543,59 @@ func sweepClaimIsWedged(dest string) bool {
 
 func (l *sweepBusyClaimLedger) isWedged(dest string) bool {
 	l.mu.Lock()
-	defer l.mu.Unlock()
-	rec := l.byDest[l.resolver.Key(dest)]
-	return rec != nil && rec.wedged.Load()
+	key := l.resolver.Key(dest)
+	rec := l.byDest[key]
+	if rec == nil {
+		l.mu.Unlock()
+		return false
+	}
+	if rec.wedged.Load() {
+		l.mu.Unlock()
+		return true
+	}
+	if !rec.reclaimStarted {
+		// Live claim (a sweep someone still waits on) or an abandoned claim no
+		// reclaim has reached yet: no drain in flight, so there is no pending
+		// decision to await — keep the ordinary posture (the reverter's
+		// blocking dest-lock wait against a live sweep, wave-50).
+		l.mu.Unlock()
+		return false
+	}
+	// Wave-64 (PR#276): reclaim's drain is between its detach and the wave-56
+	// admission decision — the record's wedged flag is not yet meaningful and
+	// must NOT be sampled as "final" (the Windows CI hang: a sampled false
+	// sent the reverter into the blocking dest-lock acquisition behind the
+	// still-held lock). AWAIT the decision instead: admitResolved is closed by
+	// a runnable goroutine after strictly in-process, deadline-bounded TryLock
+	// polling — this wait can never strand on the wedged filesystem the claim
+	// guards against, and the ledger mutex is held by nobody across it (the
+	// worker's untrack and the drain's forgetSettled proceed meanwhile).
+	l.mu.Unlock()
+	<-rec.admitResolved
+	// Re-validate under the ledger lock: the record must still name THIS claim
+	// — a finished worker's untrack already removed it (its once-guarded
+	// releases freed both holds — the dest is NOT wedged) — and the flag must
+	// carry the drain's final word.
+	l.mu.Lock()
+	settled := l.byDest[key] == rec && rec.wedged.Load()
+	l.mu.Unlock()
+	return settled
+}
+
+// forgetSettled removes a drain-settled NON-WEDGED record (wave-64): the
+// record stayed in the ledger for the whole drain so a landing consult could
+// await the admission decision; once settled there is no decision left to
+// await. Pointer-scoped — a fresh re-recorded claim for the same destination
+// is never retracted (untrack's discipline) — and keyed through the ledger's
+// frozen resolver so the removal lands on the record's own bucket regardless
+// of probe drift (wave-50 F2).
+func (l *sweepBusyClaimLedger) forgetSettled(rec *sweepBusyMarkerClaim) {
+	l.mu.Lock()
+	key := l.resolver.Key(rec.dest)
+	if l.byDest[key] == rec {
+		delete(l.byDest, key)
+	}
+	l.mu.Unlock()
 }
 
 func (l *sweepBusyClaimLedger) reclaim(dest string) bool {
@@ -533,7 +613,22 @@ func (l *sweepBusyClaimLedger) reclaim(dest string) bool {
 		l.mu.Unlock()
 		return false
 	}
-	delete(l.byDest, key)
+	if rec.reclaimStarted {
+		// Wave-64 (PR#276): an earlier reclaim already detached this claim's
+		// drain, and the record stays in the ledger for the drain's lifetime —
+		// refuse the re-reclaim instead of detaching a second drain: two drains
+		// racing one admit gate could flip the loser's TryLock-timeout leg to
+		// the wedged posture against holds the winner already released, and the
+		// caller's wedge consult never needs a second reclaim — it awaits the
+		// in-flight decision through admitResolved.
+		l.mu.Unlock()
+		return false
+	}
+	// Wave-64: the record STAYS in the ledger across the drain (no up-front
+	// delete, no post-wait reinsertion): the wedge decision publishes to the
+	// consult through the claim's admitResolved channel — deterministic — not
+	// through a delete-then-maybe-reinsert sample of a wall-clock race.
+	rec.reclaimStarted = true
 	// Wave-51: flip the claim's OWN revocation flag under the ledger mutex and
 	// ONLY THEN fire the releases — the stranded claimant must read "revoked"
 	// at its mutation gates from the instant the freed arbitration lets the
@@ -554,20 +649,11 @@ func (l *sweepBusyClaimLedger) reclaim(dest string) bool {
 	// freed marker under its own token and never bypasses a still-owned marker.
 	go rec.releaseForReclaim()
 	rec.waitReleased()
-	if rec.wedged.Load() {
-		// Wave-57: the release wedged (admission timeout) — holds retained. Re-insert
-		// so the reverter's consult skips this dest; the stranded worker's untrack
-		// removes it once it self-releases. The revoke already landed, so report
-		// true — the reverter consults sweepClaimIsWedged (not this boolean) to skip.
-		// Wave-58: reinsert ONLY while the worker is still running — its untrack
-		// flips `completed` under this same lock before releasing, so a worker that
-		// finished between the ledger-unlock and here is not resurrected (it would
-		// pin the dest wedged until restart). `nil` keeps the pointer-scoped guard.
-		l.mu.Lock()
-		if l.byDest[key] == nil && !rec.completed {
-			l.byDest[key] = rec
-		}
-		l.mu.Unlock()
-	}
+	// Wave-64: NO wedge-flag sampling here. waitReleased's grace and the
+	// drain's admission grace are two independent wall-clock deadlines on two
+	// goroutines; a slow runner can return here a beat BEFORE the drain
+	// publishes the wedge (the Windows CI hang). The wedge consult awaits the
+	// drain's final decision via admitResolved instead — reclaim simply
+	// reports that a revocation was detached.
 	return true
 }

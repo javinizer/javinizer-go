@@ -336,6 +336,14 @@ type OrganizeResult struct {
 	OldDirectoryPath       string // Original directory path (for updating subsequent file paths)
 	NewDirectoryPath       string // New directory path after in-place rename
 	ShouldGenerateMetadata bool   // Whether NFO/media should be generated for this result
+	// PrimaryCopySHA256 carries the sha256 the copy leg teed off its single
+	// publish stream (set only when the plan bound copy-digest capture): the
+	// digest certifies the exact admitted-object bytes the destination
+	// received, and the fenced deferred publication seals its interim
+	// partial-pin delete intent into the full-hash shape with it — the pin
+	// upgrades WITHOUT a second read of the published payload. Empty on every
+	// other lane (moves, links, no-op publishes, unauthorized flows).
+	PrimaryCopySHA256 string
 }
 
 // SubtitleResult records the outcome for one matched subtitle file: planned
@@ -390,6 +398,115 @@ type OrganizePlan struct {
 	// destination (cmd.ForceUpdate). When false, move execution refuses to replace a file that
 	// exists at the target even if it appeared after plan-time conflict checks (TOCTOU guard).
 	overwriteAuthorized bool
+	// subtitleProbeOccupied pins every subtitle destination a PlanSubtitleMoves
+	// probe found occupied, keyed by cleaned new-path. Such endpoints are
+	// omitted from the intents the workflow arms before execution, so the
+	// install lane must refuse them even when the occupant vacates inside the
+	// probe→execute window: nothing durable would track that late install.
+	subtitleProbeOccupied map[string]bool
+	// subtitleProbeAdmitted is the complementary freeze of
+	// subtitleProbeOccupied (codex P2, PRRT_kwDORn9KaM6m9afD): the FIRST
+	// PlanSubtitleMoves probe for this plan pins every subtitle SOURCE
+	// endpoint it enumerated (vacant-destination or occupied), keyed by
+	// cleaned original path. The fence flow journals exactly that enumeration
+	// before ExecuteOrganizePlan runs, so a source appearing inside the
+	// probe→execute window was never journaled and handleSubtitles refuses
+	// it with the same skip classification the occupied gate uses — no pin,
+	// no entry, as if the organizer never saw it. Nil until the first probe:
+	// un-probed plans (non-deferred direct flows) keep the historical
+	// rescan-at-execute behavior.
+	subtitleProbeAdmitted map[string]bool
+	// subtitleAdmissionSet is the caller-bound prepare-time admission
+	// snapshot (codex P2, PRRT_kwDORn9KaM6nnjvh): the fenced deferred
+	// publication pins every subtitle SOURCE prepareArtifact admitted, keyed
+	// by cleaned original path. The subtitle probes rescan the source
+	// directory by NAME, so a regular subtitle materializing after that
+	// snapshot but before the first probe would otherwise be frozen into
+	// subtitleProbeAdmitted and journaled with no admitted identity and no
+	// verified-source proof — a rename-swap before handleSubtitles would
+	// then make move mode consume (or copy mode publish) a different file
+	// than the admission gate ever saw. The probe enumeration drops such
+	// latecomers BEFORE the freeze, so probing, journaling, and the
+	// execute-time gate all agree they never were sources. Nil until bound:
+	// every non-deferred or direct flow enumerates exactly as before.
+	subtitleAdmissionSet map[string]bool
+	// verifiedSourceProof binds the plan's video-source consumption to the
+	// identity a caller admitted earlier (the fenced artifact publication's
+	// deferred-source seam, codex P1, PRRT_kwDORn9KaM6m9ae4): the no-replace
+	// move/copy legs then run through fsutil's verified composites and refuse
+	// a source path re-pointed at a different object after validation, rather
+	// than publishing the replacement; the hard-link install binds through
+	// the same proof's pre-/post-link re-proofs (codex P1,
+	// PRRT_kwDORn9KaM6nEnUw). Nil keeps the legacy by-name
+	// consumption (every direct flow and the overwrite-authorized lanes).
+	verifiedSourceProof fsutil.VerifiedSourceProof
+	// verifiedSubtitleProofs is the per-sidecar twin of verifiedSourceProof
+	// (codex P1, PRRT_kwDORn9KaM6m_lgp), keying each admitted subtitle SOURCE
+	// endpoint (cleaned original path) to the admission proof the fenced
+	// publication pinned at preparation. handleSubtitles' install legs consult
+	// it: a bound source installs through the verified no-replace twin, which
+	// re-proves the very object consumed and refuses a source rename-swapped
+	// after the caller's last validation (move mode restores the rejected
+	// object, copy mode never streams it). The m9afD probe freeze constrains
+	// WHICH endpoints may execute; this map constrains WHICH OBJECT the
+	// executed bytes carry. Nil map = legacy by-name consumption (every
+	// direct/un-fenced flow), and endpoints without an entry keep it too.
+	verifiedSubtitleProofs map[string]fsutil.VerifiedSourceProof
+	// copyDigestCapture asks the no-replace verified copy leg to return the
+	// sha256 of the bytes it streams (teed off the single unavoidable read —
+	// never a separate pre-pass). Only the fenced deferred publication binds
+	// it: that flow pins the destination with a partial interim proof BEFORE
+	// execute and seals the pin to the full digest the publish returns, so a
+	// crash inside the execute→seal window still authenticates the install
+	// without ever streaming the payload twice. It acts only alongside a
+	// verifiedSourceProof-bound leg; unbound plans ignore it.
+	copyDigestCapture bool
+}
+
+// BindVerifiedSource pins the plan's video-source consumption to the admission
+// identity the proof re-validates at publish time. Only the fenced deferred
+// publication sets it — plans that never carry a proof execute exactly as
+// before.
+func (p *OrganizePlan) BindVerifiedSource(proof fsutil.VerifiedSourceProof) {
+	p.verifiedSourceProof = proof
+}
+
+// BindVerifiedSubtitleSources pins each admitted subtitle source's install to
+// the admission identity its proof re-validates inside the install leg.
+// Setter semantics mirror BindVerifiedSource: the fenced deferred publication
+// rebinds the (freshly re-planned) execution plan once, and plans that never
+// carry proofs install subtitles exactly as before.
+func (p *OrganizePlan) BindVerifiedSubtitleSources(proofs map[string]fsutil.VerifiedSourceProof) {
+	p.verifiedSubtitleProofs = proofs
+}
+
+// BindSubtitleAdmissionSet pins the caller's prepare-time admission snapshot:
+// the subtitle SOURCE paths the fenced publication admitted at preparation.
+// The subtitle probe drops any enumerated source absent from the set (a file
+// that materialized after the snapshot) instead of freezing and journaling it
+// — the excluded entry also misses the probe freeze, so execute's admission
+// gate refuses it as a skip with the source left untouched. Setter semantics
+// mirror BindVerifiedSubtitleSources: the fenced deferred publication binds
+// each freshly replanned plan once, a nil slice unbinds, and a bound EMPTY
+// set admits nothing (no subtitle sibling was admitted at preparation).
+func (p *OrganizePlan) BindSubtitleAdmissionSet(sources []string) {
+	if sources == nil {
+		p.subtitleAdmissionSet = nil
+		return
+	}
+	set := make(map[string]bool, len(sources))
+	for _, source := range sources {
+		set[filepath.Clean(source)] = true
+	}
+	p.subtitleAdmissionSet = set
+}
+
+// BindCopyDigestCapture requests the plan's verified copy leg to tee the
+// sha256 of the bytes it streams onto the result (see copyDigestCapture).
+// Only the fenced deferred publication binds it; every other plan copies
+// exactly as before.
+func (p *OrganizePlan) BindCopyDigestCapture() {
+	p.copyDigestCapture = true
 }
 
 // Plan creates an organization plan without executing it
@@ -495,7 +612,14 @@ func (o *Organizer) execute(plan *OrganizePlan) (*OrganizeResult, error) {
 	}
 
 	if o.config.MoveSubtitles {
-		o.handleSubtitles(plan, strategyResult, subtitleMoveInstall)
+		// Copy-mode executions must not remove sidecars from the source
+		// directory. This applies only to organize-to-destination copies:
+		// in-place renames always move subtitles so they track the renamed video.
+		install := subtitleMoveInstall
+		if _, isOrganize := strategy.(*organizeStrategy); !plan.moveFiles && isOrganize {
+			install = subtitleCopyInstall
+		}
+		o.handleSubtitles(plan, strategyResult, install)
 	}
 
 	return strategyResult, nil
@@ -527,14 +651,150 @@ func (o *Organizer) subtitleFileInfo(plan *OrganizePlan) models.FileMatchInfo {
 // the fsutil no-replace composites, and copied records the mode distinction in
 // results (#224 phase E): a copy install retains the source (revert deletes
 // the installed copy), a move install does not (revert moves it back).
+
+// PlanSubtitleMoves enumerates the subtitle endpoints execute would
+// deliver for plan WITHOUT installing anything (nil-install probe). The
+// artifact publish flow journals these as pending intents before
+// ExecuteOrganizePlan consumes them; entries for skipped destinations are
+// always included when vacant at probe time (their rename-back is idempotent
+// on an absent target). Endpoints OCCUPIED at probe time stay out of the
+// enumeration, and the same plan's execution refuses to install into them
+// (fail-closed): no durable intent covers such a late install, so a crash
+// after it would strand an untracked sidecar.
+func (o *Organizer) PlanSubtitleMoves(plan *OrganizePlan) []models.SubtitleMove {
+	if plan == nil {
+		return nil
+	}
+	result := &OrganizeResult{}
+	o.handleSubtitles(plan, result, subtitleInstall{})
+	// The fenced artifact admission is no-FOLLOW and deliberately rejects
+	// non-regular siblings (workflow prepareArtifact skips a symlinked
+	// subtitle), but FindSubtitles rescans by NAME and would return that
+	// same symlink here: no identity proof is bound for it
+	// (siblingSourceProofs covers only admitted siblings), so move-mode
+	// execution would fall back to the unverified no-replace leg and
+	// relocate the link OBJECT into the library — a relative link then
+	// commonly dangles (codex P2, PRRT_kwDORn9KaM6neyyH). Reject
+	// non-regular sources before the journal enumeration AND the
+	// admission freeze are computed, so probing, journaling, arming, and
+	// the execute-time gate all agree the entry was never a source. A
+	// failed lookup keeps the entry — the probe stays advisory for
+	// transient errors, and admission-bound sources are re-proven at
+	// consumption.
+	regular := make([]SubtitleResult, 0, len(result.Subtitles))
+	for _, sr := range result.Subtitles {
+		if !probeSubtitleSourceRegular(o.fs, sr.OriginalPath) {
+			continue
+		}
+		regular = append(regular, sr)
+	}
+	result.Subtitles = regular
+	// The caller-bound prepare-time admission snapshot (codex P2,
+	// PRRT_kwDORn9KaM6nnjvh): a regular subtitle that materialized after the
+	// snapshot but before this first probe has no admitted identity and no
+	// verified-source proof bound — freezing it here would journal it anyway,
+	// and a rename-swap before handleSubtitles would then make move mode
+	// consume (or copy mode publish) a different file than admission ever
+	// saw. Drop it BEFORE the freeze so probing, journaling, and the
+	// execute-time admission gate all agree the entry was never a source. A
+	// nil set (every non-bound plan) keeps the historical enumeration.
+	if plan.subtitleAdmissionSet != nil {
+		admitted := make([]SubtitleResult, 0, len(result.Subtitles))
+		for _, sr := range result.Subtitles {
+			if !plan.subtitleAdmissionSet[filepath.Clean(sr.OriginalPath)] {
+				continue
+			}
+			admitted = append(admitted, sr)
+		}
+		result.Subtitles = admitted
+	}
+	// Freeze the executed subtitle set at the FIRST probe (codex P2,
+	// PRRT_kwDORn9KaM6m9afD): the fence flow journals exactly this
+	// enumeration before ExecuteOrganizePlan consumes it, so a source that
+	// appears later was never journaled and must be refused at install time
+	// (the handleSubtitles gate). Later probes keep the frozen set — the
+	// returned enumeration still mirrors exactly what execution will deliver.
+	if plan.subtitleProbeAdmitted == nil {
+		plan.subtitleProbeAdmitted = make(map[string]bool, len(result.Subtitles))
+		for _, sr := range result.Subtitles {
+			plan.subtitleProbeAdmitted[filepath.Clean(sr.OriginalPath)] = true
+		}
+	}
+	moves := make([]models.SubtitleMove, 0, len(result.Subtitles))
+	for _, sr := range result.Subtitles {
+		if !plan.subtitleProbeAdmitted[filepath.Clean(sr.OriginalPath)] {
+			// Appeared after the probe freeze: execution refuses it, so the
+			// "what execute would deliver" contract stays exact.
+			continue
+		}
+		// Intended-move intents must not cover destinations that are already
+		// occupied: execution will skip them (handleSubtitles exists-check),
+		// and a pending MoveBack armed against a foreign occupancy would
+		// rename it over the retained source at revert. In-execute skips post
+		// probe drift are pruned by the outcome reconcile.
+		exists, statErr := pathExistsBestEffort(o.fs, sr.NewPath)
+		if statErr == nil && exists {
+			// Fail closed for the omitted endpoint: record it on the plan so
+			// handleSubtitles refuses the slot even if the occupant vacates
+			// before execute runs (no armed intent journals that install).
+			if plan.subtitleProbeOccupied == nil {
+				plan.subtitleProbeOccupied = make(map[string]bool)
+			}
+			plan.subtitleProbeOccupied[filepath.Clean(sr.NewPath)] = true
+			continue
+		}
+		moves = append(moves, sr.SubtitleMove)
+	}
+	return moves
+}
+
+// probeSubtitleSourceRegular reports whether path names a regular file
+// under a no-FOLLOW lookup — the same regularity the fenced artifact
+// admission demands of subtitle siblings, so a symlink at path answers
+// for its own link entry, never its target. A filesystem without a
+// no-follow view answers through the following Stat (in-memory
+// filesystems have no symlink model: regular-or-absent by construction),
+// and a failed lookup keeps the source — the probe is advisory there,
+// with admission-bound consumption re-proving pinned entries.
+func probeSubtitleSourceRegular(fs afero.Fs, path string) bool {
+	var info os.FileInfo
+	var err error
+	if lst, ok := fs.(afero.Lstater); ok {
+		if linfo, didLstat, lerr := lst.LstatIfPossible(path); lerr == nil && didLstat {
+			info = linfo
+		} else {
+			info, err = fs.Stat(path)
+		}
+	} else {
+		info, err = fs.Stat(path)
+	}
+	if err != nil {
+		return true
+	}
+	return info.Mode().IsRegular()
+}
+
 type subtitleInstall struct {
-	op     func(afero.Fs, string, string) error
-	copied bool
+	op       func(afero.Fs, string, string) error
+	verified func(afero.Fs, string, string, fsutil.VerifiedSourceProof) error
+	copied   bool
+}
+
+// run delivers one subtitle through the lane's composite. A source the caller
+// bound to an admission proof installs identity-bound through the verified
+// twin — the object consumed is re-proven, never merely its pathname — while
+// an unbound source keeps the legacy by-name leg unchanged. Both packaged
+// lanes always carry their twin; install.op == nil (probe) never reaches run.
+func (install subtitleInstall) run(fs afero.Fs, source, dest string, proof fsutil.VerifiedSourceProof) error {
+	if proof != nil {
+		return install.verified(fs, source, dest, proof)
+	}
+	return install.op(fs, source, dest)
 }
 
 var (
-	subtitleMoveInstall = subtitleInstall{op: fsutil.MoveFileNoReplace}
-	subtitleCopyInstall = subtitleInstall{op: fsutil.CopyFileNoReplace, copied: true}
+	subtitleMoveInstall = subtitleInstall{op: fsutil.MoveFileNoReplace, verified: fsutil.MoveFileNoReplaceVerified}
+	subtitleCopyInstall = subtitleInstall{op: fsutil.CopyFileNoReplace, verified: fsutil.CopyFileNoReplaceVerified, copied: true}
 )
 
 func (o *Organizer) handleSubtitles(plan *OrganizePlan, result *OrganizeResult, install subtitleInstall) {
@@ -544,6 +804,13 @@ func (o *Organizer) handleSubtitles(plan *OrganizePlan, result *OrganizeResult, 
 	}
 
 	subtitleResults := make([]SubtitleResult, len(subtitles))
+	// endpointAttempts enforces strict first-wins when two sources normalize
+	// onto ONE destination (codex P2, PRRT_kwDORn9KaM6nmSaI): the FIRST install
+	// attempt claims the endpoint for the rest of this pass — the value records
+	// whether that attempt left the endpoint VACANT (the winner failed before
+	// its bytes published; a later duplicate is then additionally worth a
+	// warning) or whether this lane's bytes occupy it (silent ordinary dedupe).
+	endpointAttempts := map[string]bool{}
 	for i, subtitle := range subtitles {
 		videoNameWithoutExt := strings.TrimSuffix(plan.TargetFile, filepath.Ext(plan.TargetFile))
 		newSubtitleName := o.subtitleHandler.generateSubtitleFileName(
@@ -575,17 +842,72 @@ func (o *Organizer) handleSubtitles(plan *OrganizePlan, result *OrganizeResult, 
 		// parallel per file, but a directory rename elsewhere drains us before moving.
 		err := withDestDirSharedLock(plan.TargetDir, func() error {
 			return withDestFileLock(newPath, func() error {
+				// The probe-frozen admission set (codex P2, PRRT_kwDORn9KaM6m9afD): a
+				// source endpoint discovered only now — created inside the probe→execute
+				// window — was never journaled, so the install is refused with the same
+				// skip classification the probe-occupied gate uses: the caller's
+				// skip/keep machinery absorbs it, leaving the source untouched and the
+				// endpoint uninstalled. A nil set means no probe ever ran (direct
+				// flows) and keeps the historical behavior.
+				if plan.subtitleProbeAdmitted != nil && !plan.subtitleProbeAdmitted[filepath.Clean(subtitle.OriginalPath)] {
+					sr.Skipped = true
+					return nil
+				}
+				// Strict first-wins on a shared normalized endpoint (codex P2,
+				// PRRT_kwDORn9KaM6nmSaI). The pre-execution journal dedupes every
+				// normalized destination to its FIRST planned source — the move
+				// lane's pending intent names only that source, the copy lane's
+				// armed pin carries only that source's digest — so no LATER
+				// duplicate may publish into the endpoint, not even after the
+				// first source's attempt FAILED before its bytes landed (e.g. the
+				// verified-source proof refused a rename-swap past the
+				// pre-execution gate): a second source's successful move would
+				// leave no journaled inverse for crash recovery to reconcile, and
+				// second-source copy bytes could never authenticate against the
+				// first source's hash pin. The duplicate takes the same skip
+				// classification the occupancy gates use — its source stays put,
+				// and the caller's skip/keep machinery settles the endpoint on
+				// the FIRST source's journal entry alone.
+				if vacant, attempted := endpointAttempts[filepath.Clean(newPath)]; attempted {
+					if vacant {
+						logging.Warnf("[organizer] skipping duplicate subtitle %s → %s: the shared destination's first-planned source already attempted it and did not install", subtitle.OriginalPath, newPath)
+					}
+					sr.Skipped = true
+					return nil
+				}
 				// pathExistsBestEffort also sees dangling symlink objects: a filesystem whose
 				// Stat follows links (no true Lstat) would otherwise let this op replace one.
 				exists, statErr := pathExistsBestEffort(o.fs, newPath)
 				if statErr != nil {
 					return fmt.Errorf("failed to check subtitle destination: %w", statErr)
 				}
-				if exists {
+				// A probe-omitted endpoint is refused even when its occupant
+				// vacated post-probe: no intent was journaled for it, so this
+				// install would be invisible to crash recovery.
+				if exists || plan.subtitleProbeOccupied[filepath.Clean(newPath)] {
 					sr.Skipped = true
 					return nil
 				}
-				err := install.op(o.fs, subtitle.OriginalPath, newPath)
+				// Admission-bound install (codex P1, PRRT_kwDORn9KaM6m_lgp): a source
+				// the fenced publication pinned at preparation is consumed through the
+				// verified composite, so a rename-swap inside the gate-to-consume
+				// window refuses with the typed classes instead of publishing the
+				// replacement under the admitted name. The probe freeze above decides
+				// WHETHER this endpoint installs; the proof decides WHICH object its
+				// bytes carry. Unbound sources (direct flows, post-admission
+				// arrivals) keep the legacy by-name composite.
+				// The FIRST source to reach the install claims the endpoint for
+				// this pass regardless of the outcome: a refusal or error before
+				// publishing leaves it vacant-but-claimed (true), while landed
+				// bytes — a clean install or the publish-completed ambiguity —
+				// occupy it (false), so a later duplicate blocks silently as the
+				// ordinary first-wins dedupe instead of alarming.
+				endpointKey := filepath.Clean(newPath)
+				endpointAttempts[endpointKey] = true
+				err := install.run(o.fs, subtitle.OriginalPath, newPath, plan.verifiedSubtitleProofs[filepath.Clean(subtitle.OriginalPath)])
+				if err == nil || fsutil.PublishCompleted(err) {
+					endpointAttempts[endpointKey] = false
+				}
 				if err != nil && fsutil.PublishCompleted(err) {
 					// Post-publish cleanup refusal (#224 codex P2): bytes at the
 					// destination AND the source retained — an ambiguous delivery,

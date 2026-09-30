@@ -2,11 +2,14 @@ package history
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/database"
@@ -1543,4 +1546,345 @@ func TestRevertScrape_MovieAlreadyReverted(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "no processable operations found")
 	mockRepo.AssertExpectations(t)
+}
+
+// A MoveBack entry that repeats the row's primary move (the deferred publish
+// intent ledger) must not double-drive the column-driven rename-back: the
+// intent is skipped and the destination file is untouched by this cleanup.
+func TestCleanupGeneratedFilesFS_SkipsIntentEqualToPrimaryMove(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	require.NoError(t, fs.MkdirAll("/src", 0777))
+	require.NoError(t, fs.MkdirAll("/dst", 0777))
+	require.NoError(t, afero.WriteFile(fs, "/dst/movie.mp4", []byte("video"), 0666))
+	require.NoError(t, afero.WriteFile(fs, "/dst/sub.srt", []byte("subs"), 0666))
+
+	gf := models.GeneratedFilesJSON{
+		MoveBack: []models.FileMove{
+			{OriginalPath: "/src/movie.mp4", NewPath: "/dst/movie.mp4"}, // matches columns: skipped
+			{OriginalPath: "/src/sub.srt", NewPath: "/dst/sub.srt"},     // real sidecar intent: driven
+		},
+	}
+	gfJSON, _ := json.Marshal(gf)
+	op := &models.BatchFileOperation{
+		OperationType:  models.OperationTypeMove,
+		OriginalPath:   "/src/movie.mp4",
+		NewPath:        "/dst/movie.mp4",
+		GeneratedFiles: string(gfJSON),
+	}
+	cleanupGeneratedFilesFS(fs, op, "/dst")
+
+	if _, err := fs.Stat("/dst/movie.mp4"); err != nil {
+		t.Fatalf("primary destination must not be touched by its pending intent: %v", err)
+	}
+	if _, err := fs.Stat("/src/sub.srt"); err != nil {
+		t.Fatalf("genuinely moved sidecar must be moved back: %v", err)
+	}
+}
+
+// checkAnchor no longer hydrates: hydration happens in revertFile before any
+// classification or replacement replay. checkAnchor with an empty primary
+// anchor skips; pendingMoveIntentAnchor stamps the endpoints from the ledger,
+// proof that a crashed move stays recoverable without waiting for Complete.
+func TestCheckAnchor_EmptyAnchorSkips(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	op := &models.BatchFileOperation{OperationType: models.OperationTypeMove, OriginalPath: "/src/movie.mp4", NewPath: "/dst/never-sorted/movie.mp4", GeneratedFiles: ""}
+	rv := NewReverter(fs, nil)
+	res, err := rv.checkAnchor(context.Background(), op)
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	assert.Equal(t, models.RevertOutcomeSkipped, res.Outcome)
+	assert.Equal(t, models.RevertReasonAnchorMissing, res.Reason)
+}
+
+func TestPendingMoveIntentAnchor_HydratesEndpoints(t *testing.T) {
+	gf := models.GeneratedFilesJSON{MoveBack: []models.FileMove{{OriginalPath: "/src/movie.mp4", NewPath: "/dest/lib/movie.mp4"}}}
+	gfJSON, _ := json.Marshal(gf)
+	op := &models.BatchFileOperation{OperationType: models.OperationTypeMove, OriginalPath: "/src/movie.mp4", GeneratedFiles: string(gfJSON)}
+	assert.Equal(t, "/dest/lib/movie.mp4", pendingMoveIntentAnchor(op))
+	assert.Equal(t, "/dest/lib/movie.mp4", op.NewPath)
+}
+
+func TestPendingMoveIntentAnchor_MismatchedSource(t *testing.T) {
+	gf := models.GeneratedFilesJSON{MoveBack: []models.FileMove{{OriginalPath: "/src/other.srt", NewPath: "/dest/other.srt"}}}
+	gfJSON, _ := json.Marshal(gf)
+	op := &models.BatchFileOperation{OperationType: models.OperationTypeMove, OriginalPath: "/src/movie.mp4", GeneratedFiles: string(gfJSON)}
+	assert.Empty(t, pendingMoveIntentAnchor(op))
+	assert.Empty(t, op.NewPath)
+	op2 := &models.BatchFileOperation{OperationType: models.OperationTypeMove, OriginalPath: "", GeneratedFiles: string(gfJSON)}
+	assert.Empty(t, pendingMoveIntentAnchor(op2))
+	op3 := &models.BatchFileOperation{OperationType: models.OperationTypeMove, OriginalPath: "/src/movie.mp4", GeneratedFiles: "{broken"}
+	assert.Empty(t, pendingMoveIntentAnchor(op3))
+}
+
+// Pending deletes delete only bytes matching the pinned hash: foreign or
+// edited content stays; an already-absent path is consumed.
+func TestCleanupGeneratedFilesFS_PlannedDeletesHashProofed(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	require.NoError(t, fs.MkdirAll("/dst", 0777))
+	require.NoError(t, afero.WriteFile(fs, "/dst/ours.nfo", []byte("ours"), 0666))
+	require.NoError(t, afero.WriteFile(fs, "/dst/foreign.jpg", []byte("foreign"), 0666))
+
+	oursSum := sha256.Sum256([]byte("ours"))
+	gf := models.GeneratedFilesJSON{
+		PlannedDeletes: []models.DeleteEntry{
+			{Path: "/dst/ours.nfo", SHA256: hex.EncodeToString(oursSum[:])},
+			{Path: "/dst/absent.zip", SHA256: "never-landed"},
+			{Path: "/dst/foreign.jpg", SHA256: "wrong"},
+		},
+	}
+	gfJSON, _ := json.Marshal(gf)
+	op := &models.BatchFileOperation{GeneratedFiles: string(gfJSON)}
+	cleanupGeneratedFilesFS(fs, op, "/dst")
+
+	if _, err := fs.Stat("/dst/ours.nfo"); !os.IsNotExist(err) {
+		t.Fatalf("hash-matching pending delete must be removed, got %v", err)
+	}
+	if _, err := fs.Stat("/dst/foreign.jpg"); err != nil {
+		t.Fatalf("hash mismatch keeps foreign bytes, got %v", err)
+	}
+}
+
+// Pending deletes keep foreign/error bytes untouched; every failure leg
+// retains, never clobbers.
+type denyOpenFS struct {
+	afero.Fs
+	path string
+}
+
+func (f *denyOpenFS) Open(name string) (afero.File, error) {
+	if name == f.path {
+		return nil, errors.New("open denied")
+	}
+	return f.Fs.Open(name)
+}
+
+func TestCleanupGeneratedFilesFS_PlannedDeletesRetainDenyAndRemoveFaults(t *testing.T) {
+	base := afero.NewMemMapFs()
+	require.NoError(t, base.MkdirAll("/dst", 0777))
+	require.NoError(t, afero.WriteFile(base, "/dst/probe-denied.nfo", []byte("x"), 0666))
+	require.NoError(t, afero.WriteFile(base, "/dst/remove-denied.nfo", []byte("y"), 0666))
+	ySum := sha256.Sum256([]byte("y"))
+	gf := models.GeneratedFilesJSON{PlannedDeletes: []models.DeleteEntry{
+		{Path: "/dst/probe-denied.nfo", SHA256: "unknown"},
+		{Path: "/dst/remove-denied.nfo", SHA256: hex.EncodeToString(ySum[:])},
+	}}
+	gfJSON, _ := json.Marshal(gf)
+	op := &models.BatchFileOperation{GeneratedFiles: string(gfJSON)}
+
+	fs := &denyOpenFS{Fs: &denyTerminalRemoveFS{Fs: base, target: "/dst/remove-denied.nfo"}, path: "/dst/probe-denied.nfo"}
+	cleanupGeneratedFilesFS(fs, op, "/dst")
+
+	if _, err := base.Stat("/dst/probe-denied.nfo"); err != nil {
+		t.Fatalf("open-denied pending delete stays: %v", err)
+	}
+	got, err := afero.ReadFile(base, "/dst/remove-denied.nfo")
+	if err != nil {
+		t.Fatalf("terminal-remove-wedged pending delete stays: %v", err)
+	}
+	if string(got) != "y" {
+		t.Fatalf("the wedged verified unlink rewound the object byte-intact, got %q", got)
+	}
+}
+
+// denyTerminalRemoveFS wedges the identity-verified unlink's LAST remove —
+// the terminal holding the re-bound object — by denying the second ".vac."
+// remove of the target (the first is the claim's own release). The object
+// must ride back onto its freed name byte-intact (rerideBoundUnlink), never
+// lost to a half-finished unlink.
+type denyTerminalRemoveFS struct {
+	afero.Fs
+	target  string
+	vacSeen int
+}
+
+func (f *denyTerminalRemoveFS) Remove(name string) error {
+	if strings.HasPrefix(name, f.target+".vac.") {
+		f.vacSeen++
+		if f.vacSeen > 1 {
+			return errors.New("terminal remove denied")
+		}
+	}
+	return f.Fs.Remove(name)
+}
+
+// A read failure mid-digest and a zero-valued operation id both fail closed.
+func TestPendingDeletesDigestReadFaultRetains(t *testing.T) {
+	base := afero.NewMemMapFs()
+	require.NoError(t, base.MkdirAll("/dst", 0777))
+	require.NoError(t, afero.WriteFile(base, "/dst/ok.nfo", []byte("z"), 0666))
+	gf := models.GeneratedFilesJSON{PlannedDeletes: []models.DeleteEntry{{Path: "/dst/ok.nfo", SHA256: "nope"}}}
+	gfJSON, _ := json.Marshal(gf)
+	op := &models.BatchFileOperation{GeneratedFiles: string(gfJSON)}
+	cleanupGeneratedFilesFS(base, op, "/dst")
+	if _, err := base.Stat("/dst/ok.nfo"); err != nil {
+		t.Fatalf("digest mismatch retains the target: %v", err)
+	}
+}
+
+// errReaderFile fails every Read, so the pending-delete digest proof errors
+// out and the pending target is retained.
+type errReaderFile struct {
+	afero.File
+}
+
+func (f *errReaderFile) Read([]byte) (int, error) { return 0, errDigestRead }
+
+var errDigestRead = errors.New("read denied")
+
+type faultReadFS struct {
+	afero.Fs
+	path string
+}
+
+func (f *faultReadFS) Open(name string) (afero.File, error) {
+	fh, err := f.Fs.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	if name == f.path {
+		return &errReaderFile{File: fh}, nil
+	}
+	return fh, nil
+}
+
+func TestCleanupGeneratedFilesFS_PlannedDeletesDigestReadFaultRetains(t *testing.T) {
+	base := afero.NewMemMapFs()
+	require.NoError(t, base.MkdirAll("/dst", 0777))
+	require.NoError(t, afero.WriteFile(base, "/dst/x.nfo", []byte("data"), 0666))
+	gf := models.GeneratedFilesJSON{PlannedDeletes: []models.DeleteEntry{{Path: "/dst/x.nfo", SHA256: "deadbeef"}}}
+	gfJSON, _ := json.Marshal(gf)
+	op := &models.BatchFileOperation{GeneratedFiles: string(gfJSON)}
+	cleanupGeneratedFilesFS(&faultReadFS{Fs: base, path: "/dst/x.nfo"}, op, "/dst")
+	if _, err := base.Stat("/dst/x.nfo"); err != nil {
+		t.Fatalf("digest read fault retains the target: %v", err)
+	}
+}
+
+func TestRevertFile_PendingMoveIntentDrivesHydratedRevert(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	mockRepo := mocks.NewMockBatchFileOperationRepositoryInterface(t)
+	require.NoError(t, fs.MkdirAll("/dst/lib", 0777))
+	require.NoError(t, afero.WriteFile(fs, "/dst/lib/ABC-123.mp4", []byte("video"), 0666))
+
+	gf := models.GeneratedFilesJSON{MoveBack: []models.FileMove{{OriginalPath: "/src/ABC-123.mp4", NewPath: "/dst/lib/ABC-123.mp4"}}}
+	gfJSON, _ := json.Marshal(gf)
+
+	op := &models.BatchFileOperation{
+		ID:             805,
+		MovieID:        "ABC-123",
+		OriginalPath:   "/src/ABC-123.mp4",
+		NewPath:        "",
+		OperationType:  models.OperationTypeMove,
+		RevertStatus:   models.RevertStatusApplied,
+		GeneratedFiles: string(gfJSON),
+	}
+	mockRepo.On("FindByID", mock.Anything, uint(805)).Return(op, nil)
+	mockRepo.On("UpdateRevertStatus", mock.Anything, uint(805), models.RevertStatusReverted).Return(nil)
+
+	r := NewReverter(fs, mockRepo)
+	result, err := r.revertFile(context.Background(), op)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, models.RevertOutcomeReverted, result.Outcome, "hydrated intent drives the primary move-back")
+	if _, err := fs.Stat("/src/ABC-123.mp4"); err != nil {
+		t.Fatalf("moved file must return to its source: %v", err)
+	}
+	mockRepo.AssertExpectations(t)
+}
+
+// A pending intent whose destination never materialized while the source
+// still stands means the move never executed: consume the row as a no-op so
+// revert retries stop anchor-skipping it and the batch can finish.
+func TestRevertFile_UnexecutedMoveIntentSettlesNoOp(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	mockRepo := mocks.NewMockBatchFileOperationRepositoryInterface(t)
+	require.NoError(t, fs.MkdirAll("/src", 0777))
+	require.NoError(t, afero.WriteFile(fs, "/src/ABC-123.mp4", []byte("video"), 0666))
+
+	gf := models.GeneratedFilesJSON{MoveBack: []models.FileMove{{OriginalPath: "/src/ABC-123.mp4", NewPath: "/dst/lib/ABC-123.mp4"}}}
+	gfJSON, _ := json.Marshal(gf)
+
+	op := &models.BatchFileOperation{
+		ID:             806,
+		MovieID:        "ABC-123",
+		OriginalPath:   "/src/ABC-123.mp4",
+		NewPath:        "",
+		OperationType:  models.OperationTypeMove,
+		RevertStatus:   models.RevertStatusApplied,
+		GeneratedFiles: string(gfJSON),
+	}
+	mockRepo.On("FindByID", mock.Anything, uint(806)).Return(op, nil)
+	mockRepo.On("UpdateRevertStatus", mock.Anything, uint(806), models.RevertStatusNoOp).Return(nil)
+
+	r := NewReverter(fs, mockRepo)
+	result, err := r.revertFile(context.Background(), op)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, models.RevertOutcomeSkipped, result.Outcome)
+	if _, err := fs.Stat("/src/ABC-123.mp4"); err != nil {
+		t.Fatalf("source untouched: %v", err)
+	}
+	mockRepo.AssertExpectations(t)
+}
+
+// The update-status leg of the noop settle: its failure turns the skip into a
+// failed revert report instead of leaving a phantom journal state.
+func TestRevertFile_UnexecutedIntentSettleFailurePropagates(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	mockRepo := mocks.NewMockBatchFileOperationRepositoryInterface(t)
+	require.NoError(t, fs.MkdirAll("/src", 0777))
+	require.NoError(t, afero.WriteFile(fs, "/src/ABC-123.mp4", []byte("video"), 0666))
+	gf := models.GeneratedFilesJSON{MoveBack: []models.FileMove{{OriginalPath: "/src/ABC-123.mp4", NewPath: "/dst/lib/ABC-123.mp4"}}}
+	gfJSON, _ := json.Marshal(gf)
+	op := &models.BatchFileOperation{
+		ID:             807,
+		MovieID:        "ABC-123",
+		OriginalPath:   "/src/ABC-123.mp4",
+		NewPath:        "",
+		OperationType:  models.OperationTypeMove,
+		RevertStatus:   models.RevertStatusApplied,
+		GeneratedFiles: string(gfJSON),
+	}
+	mockRepo.On("FindByID", mock.Anything, uint(807)).Return(op, nil)
+	mockRepo.On("UpdateRevertStatus", mock.Anything, uint(807), models.RevertStatusNoOp).Return(errors.New("write fails"))
+	mockRepo.On("UpdateRevertStatus", mock.Anything, uint(807), models.RevertStatusFailed).Return(nil)
+
+	r := NewReverter(fs, mockRepo)
+	result, err := r.revertFile(context.Background(), op)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.NotEqual(t, models.RevertOutcomeReverted, result.Outcome)
+}
+
+// Hydrated intent with the destination materialized: settles as a real
+// primary-move revert (no noop conversion), restoring the file to its source.
+func TestRevertFile_HydratedIntentRevertsMove(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	mockRepo := mocks.NewMockBatchFileOperationRepositoryInterface(t)
+	require.NoError(t, fs.MkdirAll("/dst/lib", 0777))
+	require.NoError(t, fs.MkdirAll("/src", 0777))
+	require.NoError(t, afero.WriteFile(fs, "/dst/lib/ABC-123.mp4", []byte("video"), 0666))
+
+	gf := models.GeneratedFilesJSON{MoveBack: []models.FileMove{{OriginalPath: "/src/ABC-123.mp4", NewPath: "/dst/lib/ABC-123.mp4"}}}
+	gfJSON, _ := json.Marshal(gf)
+	op := &models.BatchFileOperation{
+		ID:             808,
+		MovieID:        "ABC-123",
+		OriginalPath:   "/src/ABC-123.mp4",
+		NewPath:        "",
+		OperationType:  models.OperationTypeMove,
+		RevertStatus:   models.RevertStatusApplied,
+		GeneratedFiles: string(gfJSON),
+	}
+	mockRepo.On("FindByID", mock.Anything, uint(808)).Return(op, nil)
+	mockRepo.On("UpdateRevertStatus", mock.Anything, uint(808), models.RevertStatusReverted).Return(nil)
+
+	r := NewReverter(fs, mockRepo)
+	result, err := r.revertFile(context.Background(), op)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, models.RevertOutcomeReverted, result.Outcome)
+	if _, err := fs.Stat("/src/ABC-123.mp4"); err != nil {
+		t.Fatalf("file must move back to its original path: %v", err)
+	}
 }

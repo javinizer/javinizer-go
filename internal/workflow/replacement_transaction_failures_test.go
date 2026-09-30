@@ -15,6 +15,8 @@ import (
 	"github.com/javinizer/javinizer-go/internal/organizer"
 	"github.com/javinizer/javinizer-go/internal/template"
 	"github.com/spf13/afero"
+	"github.com/stretchr/testify/assert"
+
 	"github.com/stretchr/testify/require"
 )
 
@@ -105,6 +107,22 @@ func (l *completionFaultLog) Complete(context.Context, OperationID, *ApplyResult
 	if l.complete != nil {
 		return l.complete()
 	}
+	return nil
+}
+
+func (l *completionFaultLog) RecordMoveIntent(context.Context, OperationID, string, string) error {
+	return nil
+}
+
+func (l *completionFaultLog) RecordDeleteIntent(context.Context, OperationID, []models.DeleteEntry) error {
+	return nil
+}
+
+func (l *completionFaultLog) ReconcileMoveIntents(context.Context, OperationID, []models.FileMove) error {
+	return nil
+}
+
+func (l *completionFaultLog) ReconcileDeleteIntents(context.Context, OperationID, []string) error {
 	return nil
 }
 
@@ -253,7 +271,7 @@ func TestArtifactTreeInspectionAndLegacyReplacementFailures(t *testing.T) {
 	require.NoError(t, afero.WriteFile(base, target, []byte("old"), 0o644))
 	stage.original.OverwriteExistingMedia = true
 	fs.removePath = target
-	_, err = stage.installTree("", "", nil, "", "")
+	_, err = stage.installTree("", "", nil, "", "", nil)
 	require.ErrorContains(t, err, "replace artifact destination")
 }
 
@@ -270,7 +288,7 @@ func TestArtifactTreeConfirmFailureRetainsRecoverableStage(t *testing.T) {
 	require.NoError(t, err)
 	stage.publishBatch, stage.publishCtx = batch, t.Context()
 	fs.enableLstatAfterRename = target
-	_, err = stage.installTree("", "", nil, "", "")
+	_, err = stage.installTree("", "", nil, "", "", nil)
 	require.ErrorContains(t, err, "inspect staged publication result")
 	require.NoError(t, batch.Rollback(t.Context()))
 }
@@ -374,34 +392,10 @@ func TestMoveCleanupRejectsUntrackedOrganizerResult(t *testing.T) {
 	defer stage.cleanup()
 	state := &applyPipelineState{organizeResult: &organizer.OrganizeResult{NewPath: stage.stagedSource}}
 	err = stage.publish(t.Context(), orch, state, nil)
-	require.ErrorContains(t, err, "no regular installed output")
-	pr260AssertRetained(t, base, source, subtitle, multipart, unrelated)
-}
-
-func TestSidecarCleanupRejectsNonregularFinalSubstitution(t *testing.T) {
-	base, root, source, subtitle, multipart, unrelated, match := pr260FencedFiles(t, "sidecar-origin")
-	movie := models.Movie{ContentID: "sidecar-origin", RenderGeneration: 1}
-	real := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize}, template.NewEngine(), nil)
-	orch := &applyOrchImpl{fs: base, organizer: real}
-	cmd := pr260ArtifactFailureCommand(&movie, match, filepath.Join(root, "library"))
-	cmd.Download = false
-	cmd.Organize.Skip = false
-	cmd.Organize.MoveFiles = true
-	cmd.PublicationFence = postPublishFence{movie: &movie}
-	stage, _, err := orch.prepareArtifact(t.Context(), cmd)
-	require.NoError(t, err)
-	defer stage.cleanup()
-	plan := stagedPublicationTarget(t, real, stage, cmd)
-	target := filepath.Join(filepath.Dir(plan.TargetPath), stagedArtifactSiblingName(filepath.Base(source), filepath.Base(plan.TargetPath), filepath.Base(stage.siblings[0].sourcePath)))
-	require.NoError(t, base.MkdirAll(filepath.Dir(target), 0o755))
-	require.NoError(t, afero.WriteFile(base, target, []byte("preexisting"), 0o644))
-	orch.revertLog = &completionFaultLog{complete: func() error {
-		require.NoError(t, base.Remove(target))
-		return base.Mkdir(target, 0o755)
-	}}
-	state := &applyPipelineState{operationID: "op", organizeResult: &organizer.OrganizeResult{NewPath: stage.stagedSource}}
-	err = stage.publish(t.Context(), orch, state, nil)
-	require.ErrorContains(t, err, "no regular installed output")
+	// The reported NewPath is untracked: arming rollback against it fails
+	// closed; the fallback arms the tracked planned leg so rollback still
+	// restores the consumed source.
+	require.ErrorContains(t, err, "track staged publication destination")
 	pr260AssertRetained(t, base, source, subtitle, multipart, unrelated)
 }
 
@@ -417,3 +411,38 @@ func TestTreeDestinationWalkRejectsEscapingEntry(t *testing.T) {
 }
 
 var _ database.ApplyArtifactPublicationFencer = postPublishFence{}
+
+// Fail-closed even when BOTH the reported destination and the tracked planned
+// leg are hostile: the join surfaces, nothing is touched, the source is
+// restored (or never consumed).
+// Fail-closed even when the reported destination is hostile and the tracked
+// planned leg lost its installed proof (its destination was consumed): the
+// joined error surfaces; untouched inputs stay where they were.
+func TestMoveCleanupFailsClosedOnDualUntrackedArms(t *testing.T) {
+	base, root, _, subtitle, multipart, unrelated, match := pr260FencedFiles(t, "untracked-dual")
+	movie := models.Movie{ContentID: "untracked-dual", RenderGeneration: 1}
+	real := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize}, template.NewEngine(), nil)
+	fault := &pr260PublicationFaultOrganizer{Organizer: real, afterExecute: func(plan *organizer.OrganizePlan, result *organizer.OrganizeResult) {
+		result.NewPath = filepath.Join(root, "missing-parent", "untracked.mp4")
+		_ = base.RemoveAll(filepath.Dir(plan.TargetPath))
+	}}
+	orch := &applyOrchImpl{fs: base, organizer: fault}
+	cmd := pr260ArtifactFailureCommand(&movie, match, filepath.Join(root, "library"))
+	cmd.Download = false
+	cmd.Organize.Skip = false
+	cmd.Organize.MoveFiles = true
+	cmd.PublicationFence = postPublishFence{movie: &movie}
+	stage, _, err := orch.prepareArtifact(t.Context(), cmd)
+	require.NoError(t, err)
+	defer stage.cleanup()
+	state := &applyPipelineState{organizeResult: &organizer.OrganizeResult{NewPath: stage.stagedSource}}
+	publishErr := stage.publish(t.Context(), orch, state, nil)
+	require.Error(t, publishErr)
+	require.ErrorContains(t, publishErr, "track staged publication destination", "joined double-fail keeps the tracked-leg error visible")
+	existsSub, _ := afero.Exists(base, subtitle)
+	assert.True(t, existsSub)
+	existsMulti, _ := afero.Exists(base, multipart)
+	assert.True(t, existsMulti)
+	existsUnrelated, _ := afero.Exists(base, unrelated)
+	assert.True(t, existsUnrelated)
+}

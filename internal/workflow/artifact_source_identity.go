@@ -1,0 +1,226 @@
+package workflow
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"time"
+
+	"github.com/spf13/afero"
+
+	"github.com/javinizer/javinizer-go/internal/fsutil"
+	"github.com/javinizer/javinizer-go/internal/organizer"
+)
+
+// errArtifactSourceChanged classifies the fail-closed publication refusal when
+// a source path about to be consumed directly from the user's directory no
+// longer names the regular file admitted at preparation time: the file was
+// replaced, rewritten, or cannot be re-proven. The publication must abort and
+// leave the current directory entry untouched — its bytes were never admitted.
+var errArtifactSourceChanged = errors.New("artifact source changed since admission")
+
+// artifactSourceIdentity pins which regular file a path named when
+// prepareArtifact admitted it: dev+inode where the filesystem exposes a POSIX
+// Stat_t (afero.OsFs on unix, including network mounts surfaced through the OS
+// VFS), the volume-serial+file-index handle identity on Windows
+// (fsutil.BoundObjectIdentity — a stat-only FileInfo exposes no comparable key
+// there), plus size and modtime on every platform. In-memory
+// afero filesystems return Sys()==nil and keep only the size+modtime legs —
+// the same posture as the downloader/history identity helpers. The tuple
+// deliberately avoids hashing: admission must not read multi-GB video
+// payloads a second time.
+type artifactSourceIdentity struct {
+	known     bool
+	hasDevIno bool
+	dev       uint64
+	ino       uint64
+	size      int64
+	modTime   time.Time
+}
+
+func captureArtifactSourceIdentity(fs afero.Fs, path string, info os.FileInfo) artifactSourceIdentity {
+	if info == nil || !info.Mode().IsRegular() {
+		return artifactSourceIdentity{}
+	}
+	id := artifactSourceIdentity{known: true, size: info.Size(), modTime: info.ModTime()}
+	if dev, ino, ok := fsutil.BoundObjectIdentity(fs, path, info); ok {
+		id.hasDevIno = true
+		id.dev, id.ino = dev, ino
+	}
+	return id
+}
+
+// matches re-derives the identity legs from a fresh lookup. An admitted
+// STRONG identity must be re-proven by the probe: a probe exposing no identity
+// (a transient handle-open failure on Windows/SMB, a non-Stat_t Sys leg on a
+// wrapped POSIX filesystem) refuses outright — an already-pinned strong
+// identity never degrades to the size+modtime legs, or a same-metadata
+// replacement rename-swapped into the path would be consumed and published. A
+// probe that re-proves the identity (a rename-swap necessarily changes the
+// dev/inode pair even with size and mtime restored) then still requires size
+// and modtime agreement; only an admitted WEAK capture (memfs posture,
+// identity-free filesystems) relies on the metadata legs alone. A nil or
+// non-regular current entry never matches — under the no-follow lookup a
+// symlink planted at the admitted pathname reports its own ModeSymlink entry,
+// so it fails regularity even when its TARGET still names the admitted inode.
+func (id artifactSourceIdentity) matches(fs afero.Fs, path string, info os.FileInfo) bool {
+	if !id.known || info == nil || !info.Mode().IsRegular() {
+		return false
+	}
+	if id.hasDevIno {
+		dev, ino, ok := fsutil.BoundObjectIdentity(fs, path, info)
+		if !ok {
+			return false
+		}
+		if dev != id.dev || ino != id.ino {
+			return false
+		}
+	}
+	return info.Size() == id.size && info.ModTime().Equal(id.modTime)
+}
+
+// lstatArtifactSource resolves path WITHOUT following a final symlink where
+// the filesystem exposes the distinction (afero.Lstater: OsFs and wrappers
+// that forward it). The following Stat is not an acceptable substitute on
+// real filesystems: a rename-aside plus symlink plant at the admitted
+// pathname resolves to the admitted inode through Stat, so the identity proof
+// would pass and a same-volume publish would then move the LINK object into
+// the library (a broken relative link), leaving the video behind. In-memory
+// afero filesystems answer Stat-based (LstatIfPossible reports didLstat=false)
+// and have no symlink model at all, so there the answer is regular-or-absent
+// by construction — the documented test-time posture, matching
+// scanner.lstatInfo and fsutil.asideLstat.
+func lstatArtifactSource(fs afero.Fs, path string) (os.FileInfo, error) {
+	if lst, ok := fs.(afero.Lstater); ok {
+		info, _, err := lst.LstatIfPossible(path)
+		return info, err
+	}
+	return fs.Stat(path)
+}
+
+// revalidateAdmittedSource proves — immediately before a publish leg moves,
+// copies, or removes path — that it still names the regular file admitted at
+// preparation time. The lookup never follows a final symlink: any symlink (or
+// other non-regular) directory entry at path refuses the leg. Any capture gap
+// (admission never pinned this path) skips the proof; any lookup failure or
+// identity drift refuses the leg.
+func (s *artifactStage) revalidateAdmittedSource(path string, admitted artifactSourceIdentity) error {
+	if !admitted.known {
+		return nil
+	}
+	info, err := lstatArtifactSource(s.fs, path)
+	if err != nil {
+		return fmt.Errorf("%w: revalidate %s: %v", errArtifactSourceChanged, path, err)
+	}
+	if !admitted.matches(s.fs, path, info) {
+		return fmt.Errorf("%w: %s", errArtifactSourceChanged, path)
+	}
+	return nil
+}
+
+// deferredSourceProof derives the fsutil admission proof that binds the
+// deferred publication's execute-time source consumption to THIS stage's
+// admitted video identity (codex P1, PRRT_kwDORn9KaM6m9ae4): every object the
+// verified move/copy composites are about to consume — the taken-aside claim,
+// the open copy handle — is re-proven through the same no-follow,
+// strong-identity-or-refuse matching the pre-execute gate applies, so a source
+// renamed aside after the last gate refuses the publish leg instead of being
+// consumed under its old name. A stage without a pinned identity keeps the
+// legacy unbound consumption (nil proof).
+func (s *artifactStage) deferredSourceProof() fsutil.VerifiedSourceProof {
+	if s == nil || !s.sourceIdentity.known {
+		return nil
+	}
+	admitted := s.sourceIdentity
+	fs := s.fs
+	return func(path string, info os.FileInfo) error {
+		if !admitted.matches(fs, path, info) {
+			return fmt.Errorf("%w: %s", errArtifactSourceChanged, path)
+		}
+		return nil
+	}
+}
+
+// siblingSourceProofs derives one admission proof per sibling pinned at
+// preparation, keyed by cleaned source path — the sidecar twin of
+// deferredSourceProof (codex P1, PRRT_kwDORn9KaM6m_lgp). Each closure applies
+// the SAME no-Follow, strong-identity-or-refuse matcher the video proof and
+// the pre-execution gate use, so a sidecar whose name was swapped onto a
+// replacement past the last gate refuses its install leg (the move twin
+// restores the rejected object no-replace; the copy twin never streams it)
+// instead of publishing it under the admitted name. Siblings admitted without
+// a pinnable identity contribute no entry and keep the legacy unbound
+// semantics. A nil stage (or one without known sibling identities) answers
+// nil — the unbound lane every direct flow already executes.
+func (s *artifactStage) siblingSourceProofs() map[string]fsutil.VerifiedSourceProof {
+	if s == nil {
+		return nil
+	}
+	var proofs map[string]fsutil.VerifiedSourceProof
+	for _, sibling := range s.siblings {
+		if !sibling.identity.known {
+			continue
+		}
+		admitted := sibling.identity
+		fs := s.fs
+		if proofs == nil {
+			proofs = make(map[string]fsutil.VerifiedSourceProof, len(s.siblings))
+		}
+		proofs[filepath.Clean(sibling.sourcePath)] = func(path string, info os.FileInfo) error {
+			if !admitted.matches(fs, path, info) {
+				return fmt.Errorf("%w: %s", errArtifactSourceChanged, path)
+			}
+			return nil
+		}
+	}
+	return proofs
+}
+
+// admittedSubtitleSources lists the SOURCE paths prepareArtifact admitted as
+// siblings — the prepare-time snapshot the deferred publication binds into the
+// plan BEFORE its first subtitle probe (codex P2, PRRT_kwDORn9KaM6nnjvh), so a
+// regular subtitle materializing after the sibling scan is dropped from the
+// probe enumeration instead of being frozen and journaled without an admitted
+// identity or a verified-source proof. Every admitted sibling counts — even an
+// identity-free capture (memfs posture): admission, not pinnability, is the
+// contract. The binder cleans the keys.
+func (s *artifactStage) admittedSubtitleSources() []string {
+	sources := make([]string, 0, len(s.siblings))
+	for _, sibling := range s.siblings {
+		sources = append(sources, sibling.sourcePath)
+	}
+	return sources
+}
+
+// revalidateDirectSources re-proves every real source path the plan execution
+// is about to consume directly: the video when the plan addresses the real
+// source (deferred organize executions, in-place link sources) instead of the
+// staged copy, and every planned subtitle endpoint admitted as a sibling at
+// preparation. The deferred publication binds the prepare-time admission into
+// the plan before its first probe, so a subtitle endpoint absent from that
+// snapshot never reaches this enumeration at all (codex P2,
+// PRRT_kwDORn9KaM6nnjvh); the continue below now serves only un-bound lanes
+// (staged-source plans enumerate staging-owned paths), which keep the existing
+// plan semantics.
+func (s *artifactStage) revalidateDirectSources(executor artifactPlanExecutor, plan *organizer.OrganizePlan) error {
+	if filepath.Clean(plan.SourcePath) == filepath.Clean(s.sourcePath) {
+		if err := s.revalidateAdmittedSource(s.sourcePath, s.sourceIdentity); err != nil {
+			return err
+		}
+	}
+	admitted := make(map[string]artifactSourceIdentity, len(s.siblings))
+	for _, sibling := range s.siblings {
+		admitted[filepath.Clean(sibling.sourcePath)] = sibling.identity
+	}
+	for _, mv := range executor.PlanSubtitleMoves(plan) {
+		identity, ok := admitted[filepath.Clean(mv.OriginalPath)]
+		if !ok {
+			continue
+		}
+		if err := s.revalidateAdmittedSource(mv.OriginalPath, identity); err != nil {
+			return err
+		}
+	}
+	return nil
+}

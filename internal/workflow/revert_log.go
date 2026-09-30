@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/fsutil"
@@ -71,6 +72,46 @@ type RevertLog interface {
 	// RevertStatusFailed. Use this when a later pipeline step fails after an
 	// earlier step has already mutated the filesystem.
 	CompleteFailed(ctx context.Context, opID OperationID, result *ApplyResult) error
+
+	// RecordMoveIntent journals a pending source→destination move BEFORE the
+	// move consumes the source (deferred artifact publication): the ledger entry
+	// rides the MoveBack channel recovery already understands — a crash before
+	// execution leaves an entry recovery skips idempotently (destination
+	// absent), a crash after execution arms the rename-back. It must not touch
+	// the row's completion columns: this is intent, not an executed move.
+	RecordMoveIntent(ctx context.Context, opID OperationID, originalPath, newPath string) error
+
+	// ReconcileMoveIntents replaces the row's pending MoveBack intents with the
+	// confirmed outcomes once execution is over (post-execute, pre-completion):
+	// planned-but-skipped moves are retracted so a later revert never renames a
+	// retained destination over its source.
+	ReconcileMoveIntents(ctx context.Context, opID OperationID, keep []models.FileMove) error
+
+	// ReconcileDeleteIntents replaces the row's pending PlannedDeletes with the
+	// subset pinned to keep once execution outcomes are known (post-execute,
+	// pre-completion): pins whose install never landed are retracted so a later
+	// revert never hash-matches a same-content foreign occupant into deletion.
+	ReconcileDeleteIntents(ctx context.Context, opID OperationID, keep []string) error
+
+	// RecordDeleteIntent journals an artifactS intended final deletion BEFORE
+	// its install lands, pinned to the content hash: the entry closes the
+	// journal gap (crash between intent and install) AND the stray-delete gap
+	// (a reverter deletes only bytes matching the pinned content). Completion
+	// columns stay untouched — this is intent, not outcome.
+	RecordDeleteIntent(ctx context.Context, opID OperationID, entries []models.DeleteEntry) error
+
+	// FinalizeDeleteIntentCopyDigest seals a copy install's INTERIM partial
+	// pin (DeleteEntry CopySize/CopyPartialSHA256, journaled before execute so
+	// the intent never pre-streams the payload) into the full-hash shape once
+	// the publish's single verified stream returns the teed sha256: the
+	// durable pin then authenticates exactly the bytes the destination
+	// received, and a post-seal crash recovers with the full-hash proof. The
+	// seal is what grants removal power (codex P1, PRRT_kwDORn9KaM6novbT):
+	// recovery RETAINS a row still in the interim shape — the crash-surviving
+	// bounded proof cannot distinguish the landed copy from a payload edited
+	// between the digest windows — so a missing/already-sealed entry is an
+	// idempotent no-op, not an error.
+	FinalizeDeleteIntentCopyDigest(ctx context.Context, opID OperationID, path, sha256 string) error
 
 	// RecordReplacement implements the downloader's ReplacementRecorder seam
 	// (POSTER-WRITE-HARDENING P3): the pre-existing bytes at replacedPath have
@@ -164,6 +205,24 @@ func (noOpRevertLog) CaptureSnapshot(_ context.Context, _ OperationID, _ ApplyCm
 }
 
 func (noOpRevertLog) Complete(_ context.Context, _ OperationID, _ *ApplyResult) error {
+	return nil
+}
+
+func (noOpRevertLog) RecordMoveIntent(context.Context, OperationID, string, string) error { return nil }
+
+func (noOpRevertLog) RecordDeleteIntent(context.Context, OperationID, []models.DeleteEntry) error {
+	return nil
+}
+
+func (noOpRevertLog) ReconcileMoveIntents(context.Context, OperationID, []models.FileMove) error {
+	return nil
+}
+
+func (noOpRevertLog) ReconcileDeleteIntents(context.Context, OperationID, []string) error {
+	return nil
+}
+
+func (noOpRevertLog) FinalizeDeleteIntentCopyDigest(context.Context, OperationID, string, string) error {
 	return nil
 }
 
@@ -289,16 +348,45 @@ func appendLedgerRoot(raw, root string) string {
 	return data
 }
 
-func mergeReplacementLedger(priorRaw, newRaw string) string {
+// promotePinnedDeletes distinguishes a GRADUATED arm merge (outcome
+// completions and reconciliations pass true) from a still-PENDING intent arm
+// (RecordMoveIntent passes false). A graduated arm wins over a pending delete
+// pinned to the same path: the armed inverse restores those bytes onto their
+// source on revert, so the pinned delete must not survive to fire first and
+// destroy them. A pending arm keeps the pin: the record only proves the
+// inverse is INTENDED — until the source removal is confirmed the pin is the
+// sole ownership proof inside the intent→consumption crash window, and the
+// reverter fires it only when the surviving source suppresses the rename-back.
+// Graduation (an outcome completion or ReconcileMoveIntents) consumes it.
+func mergeReplacementLedgerIntents(priorRaw, newRaw string, promotePinnedDeletes bool) string {
 	if priorRaw == "" {
 		return newRaw
 	}
 	prior, err := models.ParseGeneratedFiles(priorRaw)
-	if err != nil || (len(prior.Replacements) == 0 && len(prior.Roots) == 0) {
+	if err != nil || (len(prior.Replacements) == 0 && len(prior.Roots) == 0 && len(prior.MoveBack) == 0 && len(prior.Delete) == 0 && len(prior.PlannedDeletes) == 0) {
 		return newRaw
 	}
 	if newRaw == "" {
-		return models.MarshalLedgerJSON(models.GeneratedFilesJSON{Replacements: prior.Replacements, Roots: prior.Roots})
+		// An outcome with no generated payload still GRADUATES already-armed
+		// pending intents: pins under a graduated arm are consumed here (a
+		// pending-intent merge passes promotePinnedDeletes=false and keeps
+		// them). Pins whose destination never armed always survive, so a
+		// payloadless completion cannot erase unrelated pending deletes.
+		retained := prior.PlannedDeletes
+		if promotePinnedDeletes && len(prior.MoveBack) > 0 {
+			armed := make(map[string]bool, len(prior.MoveBack))
+			for _, fm := range prior.MoveBack {
+				armed[fm.NewPath] = true
+			}
+			kept := make([]models.DeleteEntry, 0, len(prior.PlannedDeletes))
+			for _, pd := range prior.PlannedDeletes {
+				if !armed[pd.Path] {
+					kept = append(kept, pd)
+				}
+			}
+			retained = kept
+		}
+		return models.MarshalLedgerJSON(models.GeneratedFilesJSON{Replacements: prior.Replacements, Roots: prior.Roots, MoveBack: prior.MoveBack, Delete: prior.Delete, PlannedDeletes: retained})
 	}
 	fresh, err := models.ParseGeneratedFiles(newRaw)
 	if err != nil {
@@ -307,6 +395,76 @@ func mergeReplacementLedger(priorRaw, newRaw string) string {
 	fresh.Replacements = prior.Replacements
 	if len(fresh.Roots) == 0 {
 		fresh.Roots = prior.Roots
+	}
+	// Pending move intents (RecordMoveIntent) live in MoveBack until the outcome
+	// completion rewrites them from the final result; dropping prior entries in
+	// between erases an armed inverse for an already-moved file. Carry them
+	// forward, deduplicated by endpoint pair.
+	for _, priorMB := range prior.MoveBack {
+		dupe := false
+		for _, freshMB := range fresh.MoveBack {
+			if freshMB.OriginalPath == priorMB.OriginalPath && freshMB.NewPath == priorMB.NewPath {
+				dupe = true
+				break
+			}
+		}
+		if !dupe {
+			fresh.MoveBack = append(fresh.MoveBack, priorMB)
+		}
+	}
+	for _, priorDel := range prior.Delete {
+		dupe := false
+		for _, freshDel := range fresh.Delete {
+			if freshDel == priorDel {
+				dupe = true
+				break
+			}
+		}
+		if !dupe {
+			fresh.Delete = append(fresh.Delete, priorDel)
+		}
+	}
+	moveBackTargets := make(map[string]bool, len(fresh.MoveBack))
+	for _, freshMB := range fresh.MoveBack {
+		moveBackTargets[freshMB.NewPath] = true
+	}
+	if len(moveBackTargets) > 0 {
+		keptPinned := fresh.PlannedDeletes[:0]
+		for _, freshPD := range fresh.PlannedDeletes {
+			if !moveBackTargets[freshPD.Path] {
+				keptPinned = append(keptPinned, freshPD)
+			}
+		}
+		fresh.PlannedDeletes = keptPinned
+	}
+	// Pending deletes graduate to plain entries when the outcome completion
+	// restates the path in Delete or promotes into the move-back above;
+	// pending entries the outcome never restated (crash mid-publish) stay,
+	// still hash-pinned.
+	for _, priorPD := range prior.PlannedDeletes {
+		if promotePinnedDeletes && moveBackTargets[priorPD.Path] {
+			continue
+		}
+		graduated := false
+		for _, freshDel := range fresh.Delete {
+			if freshDel == priorPD.Path {
+				graduated = true
+				break
+			}
+		}
+		if graduated {
+			continue
+		}
+		dupe := false
+		for _, freshPD := range fresh.PlannedDeletes {
+			if freshPD.Path == priorPD.Path {
+				dupe = true
+				break
+			}
+		}
+		if !dupe {
+			fresh.PlannedDeletes = append(fresh.PlannedDeletes, priorPD)
+		}
 	}
 	return models.MarshalLedgerJSON(fresh)
 }
@@ -372,8 +530,8 @@ func updatePostOrganize(op *models.BatchFileOperation, newPath string, inPlaceRe
 // actually lands there, so the sweeper's bounded recursion starts there).
 // persist=false reports an idempotent no-op (merged bytes identical to what
 // the row already carries, e.g. a retried completion).
-func completionLedgerMerge(currentRaw, newRaw, folderRoot string) (next models.GeneratedFilesJSON, persist bool, merged string, err error) {
-	merged = mergeReplacementLedger(currentRaw, newRaw)
+func completionLedgerMergeOpt(currentRaw, newRaw, folderRoot string, promotePinnedDeletes bool) (next models.GeneratedFilesJSON, persist bool, merged string, err error) {
+	merged = mergeReplacementLedgerIntents(currentRaw, newRaw, promotePinnedDeletes)
 	if folderRoot != "" {
 		merged = appendLedgerRoot(merged, folderRoot)
 	}
@@ -403,9 +561,13 @@ func completionLedgerMerge(currentRaw, newRaw, folderRoot string) (next models.G
 // clobbered any journal mutation committed between the tx commit and the
 // Save), so generated_files is owned exclusively by UpdateJournalInTx.
 func (l *dbRevertLog) mergeJournalInTx(ctx context.Context, recordID uint, opID OperationID, caller, newRaw, folderRoot string) (string, error) {
+	return l.mergeJournalInTxOpt(ctx, recordID, opID, caller, newRaw, folderRoot, true)
+}
+
+func (l *dbRevertLog) mergeJournalInTxOpt(ctx context.Context, recordID uint, opID OperationID, caller, newRaw, folderRoot string, promotePinnedDeletes bool) (string, error) {
 	var merged string
 	txErr := l.repo.UpdateJournalInTx(ctx, recordID, func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
-		next, persist, m, err := completionLedgerMerge(current.GeneratedFiles, newRaw, folderRoot)
+		next, persist, m, err := completionLedgerMergeOpt(current.GeneratedFiles, newRaw, folderRoot, promotePinnedDeletes)
 		merged = m
 		return next, persist, err
 	})
@@ -469,6 +631,198 @@ func (l *dbRevertLog) Begin(ctx context.Context, cmd ApplyCmd) (OperationID, err
 	}
 
 	return fmt.Sprintf("%d", preRecord.ID), nil
+}
+
+// ReconcileMoveIntents implements RevertLog: once execution outcomes are known
+// the pending intents are replaced wholesale by the confirmed set — retracted
+// (skipped) plans leave no rename-back residue for the reverter to run.
+func (l *dbRevertLog) ReconcileMoveIntents(ctx context.Context, opID OperationID, keep []models.FileMove) error {
+	if opID == "" {
+		return nil
+	}
+	recordID64, err := strconv.ParseUint(opID, 10, 64)
+	if err != nil || recordID64 == 0 {
+		return fmt.Errorf("revert log ReconcileMoveIntents: unparsable operation ID %q", opID)
+	}
+	recordID := uint(recordID64)
+
+	release := replacementLedgerLocks.Acquire(opID)
+	defer release()
+
+	txErr := l.repo.UpdateJournalInTx(ctx, recordID, func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
+		gf, perr := models.ParseGeneratedFiles(current.GeneratedFiles)
+		if perr != nil {
+			return models.GeneratedFilesJSON{}, false, perr
+		}
+		gf.MoveBack = append([]models.FileMove(nil), keep...)
+		// Kept move destinations consume pending deletes pinned to the same
+		// path (deferred sibling publication): the confirmed move-back arm
+		// owns that target's revert, so the pinned delete must not survive.
+		if len(gf.PlannedDeletes) > 0 {
+			keepTargets := make(map[string]bool, len(keep))
+			for _, fm := range keep {
+				keepTargets[fm.NewPath] = true
+			}
+			remaining := gf.PlannedDeletes[:0]
+			for _, pd := range gf.PlannedDeletes {
+				if !keepTargets[pd.Path] {
+					remaining = append(remaining, pd)
+				}
+			}
+			gf.PlannedDeletes = remaining
+		}
+		next := models.MarshalLedgerJSON(gf)
+		if next == current.GeneratedFiles {
+			return models.GeneratedFilesJSON{}, false, nil
+		}
+		return gf, true, nil
+	})
+	if errors.Is(txErr, database.ErrNotFound) {
+		return fmt.Errorf("revert log ReconcileMoveIntents: record %s not found", opID)
+	}
+	return txErr
+}
+
+// ReconcileDeleteIntents implements RevertLog: the pending delete intents are
+// replaced wholesale by the confirmed-install set through the same serialized
+// single-writer transaction channel as move reconciliations — pins naming
+// unconfirmed destinations are retracted so the reverter's hash check can
+// never condemn a same-content foreign occupant.
+func (l *dbRevertLog) ReconcileDeleteIntents(ctx context.Context, opID OperationID, keep []string) error {
+	if opID == "" {
+		return nil
+	}
+	recordID64, err := strconv.ParseUint(opID, 10, 64)
+	if err != nil || recordID64 == 0 {
+		return fmt.Errorf("revert log ReconcileDeleteIntents: unparsable operation ID %q", opID)
+	}
+	recordID := uint(recordID64)
+
+	release := replacementLedgerLocks.Acquire(opID)
+	defer release()
+
+	txErr := l.repo.UpdateJournalInTx(ctx, recordID, func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
+		gf, perr := models.ParseGeneratedFiles(current.GeneratedFiles)
+		if perr != nil {
+			return models.GeneratedFilesJSON{}, false, perr
+		}
+		if len(gf.PlannedDeletes) == 0 {
+			return models.GeneratedFilesJSON{}, false, nil
+		}
+		keepTargets := make(map[string]bool, len(keep))
+		for _, path := range keep {
+			keepTargets[path] = true
+		}
+		remaining := gf.PlannedDeletes[:0]
+		for _, pd := range gf.PlannedDeletes {
+			if keepTargets[pd.Path] {
+				remaining = append(remaining, pd)
+			}
+		}
+		gf.PlannedDeletes = remaining
+		next := models.MarshalLedgerJSON(gf)
+		if next == current.GeneratedFiles {
+			return models.GeneratedFilesJSON{}, false, nil
+		}
+		return gf, true, nil
+	})
+	if errors.Is(txErr, database.ErrNotFound) {
+		return fmt.Errorf("revert log ReconcileDeleteIntents: record %s not found", opID)
+	}
+	return txErr
+}
+
+// FinalizeDeleteIntentCopyDigest implements RevertLog: the interim partial
+// pin naming path is rewritten in place to the full-hash shape through the
+// same serialized single-writer transaction channel as the reconciliations.
+// The seal is a pure strength upgrade (partial proof → streamed full digest
+// of the very bytes the publish landed); an entry that is absent, pinned to
+// another shape, or already sealed is left untouched so crash-retried seals
+// stay idempotent.
+func (l *dbRevertLog) FinalizeDeleteIntentCopyDigest(ctx context.Context, opID OperationID, path, sha256 string) error {
+	if opID == "" {
+		return nil
+	}
+	recordID64, err := strconv.ParseUint(opID, 10, 64)
+	if err != nil || recordID64 == 0 {
+		return fmt.Errorf("revert log FinalizeDeleteIntentCopyDigest: unparsable operation ID %q", opID)
+	}
+	if path == "" || sha256 == "" {
+		return fmt.Errorf("revert log FinalizeDeleteIntentCopyDigest: empty seal endpoint")
+	}
+	recordID := uint(recordID64)
+
+	release := replacementLedgerLocks.Acquire(opID)
+	defer release()
+
+	txErr := l.repo.UpdateJournalInTx(ctx, recordID, func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
+		gf, perr := models.ParseGeneratedFiles(current.GeneratedFiles)
+		if perr != nil {
+			return models.GeneratedFilesJSON{}, false, perr
+		}
+		sealed := false
+		for i, pd := range gf.PlannedDeletes {
+			if pd.Path != path || pd.CopyPartialSHA256 == "" || pd.SHA256 != "" {
+				continue
+			}
+			gf.PlannedDeletes[i] = models.DeleteEntry{Path: pd.Path, SHA256: strings.ToLower(sha256)}
+			sealed = true
+		}
+		if !sealed {
+			return models.GeneratedFilesJSON{}, false, nil
+		}
+		// A true seal always rewrites the entry's shape ({CopySize,
+		// CopyPartialSHA256} → {SHA256}), so the marshaled journal differs from
+		// the row's blob by construction — the sibling reconciliations'
+		// identical-content guard has no reachable state here and is omitted.
+		return gf, true, nil
+	})
+	if errors.Is(txErr, database.ErrNotFound) {
+		return fmt.Errorf("revert log FinalizeDeleteIntentCopyDigest: record %s not found", opID)
+	}
+	return txErr
+}
+
+// RecordMoveIntent implements RevertLog: the pending-move entry lands in the
+// row's generated-files journal through the same serialized single-writer
+// transaction channel as completions and replacement records.
+func (l *dbRevertLog) RecordMoveIntent(ctx context.Context, opID OperationID, originalPath, newPath string) error {
+	if opID == "" {
+		return nil
+	}
+	recordID64, err := strconv.ParseUint(opID, 10, 64)
+	if err != nil || recordID64 == 0 {
+		return fmt.Errorf("revert log RecordMoveIntent: unparsable operation ID %q", opID)
+	}
+	if originalPath == "" || newPath == "" {
+		return fmt.Errorf("revert log RecordMoveIntent: empty move endpoint")
+	}
+	recordID := uint(recordID64)
+
+	release := replacementLedgerLocks.Acquire(opID)
+	defer release()
+
+	intent := models.MarshalLedgerJSON(models.GeneratedFilesJSON{MoveBack: []models.FileMove{{OriginalPath: originalPath, NewPath: newPath}}})
+	_, err = l.mergeJournalInTxOpt(ctx, recordID, opID, "RecordMoveIntent", intent, "", false)
+	return err
+}
+
+func (l *dbRevertLog) RecordDeleteIntent(ctx context.Context, opID OperationID, entries []models.DeleteEntry) error {
+	if opID == "" || len(entries) == 0 {
+		return nil
+	}
+	recordID64, err := strconv.ParseUint(opID, 10, 64)
+	if err != nil || recordID64 == 0 {
+		return fmt.Errorf("revert log RecordDeleteIntent: unparsable operation ID %q", opID)
+	}
+	recordID := uint(recordID64)
+
+	release := replacementLedgerLocks.Acquire(opID)
+	defer release()
+
+	intent := models.MarshalLedgerJSON(models.GeneratedFilesJSON{PlannedDeletes: append([]models.DeleteEntry(nil), entries...)})
+	_, err = l.mergeJournalInTx(ctx, recordID, opID, "RecordDeleteIntent", intent, "")
+	return err
 }
 
 // CaptureSnapshot reads the existing NFO file and updates the revert record
