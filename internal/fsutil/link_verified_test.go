@@ -312,6 +312,61 @@ func TestLinkFileNoReplaceVerifiedStrongCaptureRejectsWeakProbe(t *testing.T) {
 	assert.False(t, exists, "the unprovable install was unlinked, never retained")
 }
 
+// The wedged-compensation leg of the cleanup gate: the post-link entry still
+// PROVABLY aliases the admitted object (the same sysless probe shape as the
+// strong-capture test — the proof refuses, the identity binding holds), so the
+// gate chooses the bound unlink — but the terminal claim is wedged, so the
+// rejected install could not be bound-unlinked. BOTH classes join: the typed
+// admission refusal and the doubt-as-published class, and the install STAYS
+// RECOVERABLE at the destination for the caller's observe/rollback machinery.
+func TestLinkFileNoReplaceVerifiedWedgedBoundUnlinkKeepsRejectedInstall(t *testing.T) {
+	base := afero.NewOsFs()
+	root := t.TempDir()
+	src := filepath.Join(root, "in", "movie.mp4")
+	dst := filepath.Join(root, "lib", "movie.mp4")
+	require.NoError(t, base.MkdirAll(filepath.Dir(src), 0o755))
+	require.NoError(t, base.MkdirAll(filepath.Dir(dst), 0o755))
+	require.NoError(t, afero.WriteFile(base, src, []byte("admitted video bytes"), 0o644))
+	info, err := base.Stat(src)
+	require.NoError(t, err)
+	if _, _, strong := BoundObjectIdentity(base, src, info); !strong {
+		t.Skip("this target exposes no kernel identity — the weak-probe leg has nothing to refuse")
+	}
+	proof, _ := verifyProofOf(t, base, src)
+	fs := &verifyHookFS{Fs: base}
+	fs.lstat = func(name string) (os.FileInfo, bool, error) {
+		var info os.FileInfo
+		var err error
+		if l, ok := base.(afero.Lstater); ok {
+			info, _, err = l.LstatIfPossible(name)
+		} else {
+			info, err = base.Stat(name)
+		}
+		if info == nil || err != nil {
+			return info, false, err
+		}
+		return syslessInfo{info}, false, nil
+	}
+	fs.openFile = func(name string, flag int, perm os.FileMode) (afero.File, error) {
+		if flag&os.O_EXCL != 0 && strings.Contains(name, ".vac.") {
+			return nil, errors.New("terminal claim denied")
+		}
+		return base.OpenFile(name, flag, perm)
+	}
+	err = LinkFileNoReplaceVerified(fs, src, dst, os.Link, proof)
+	require.ErrorIs(t, err, ErrTakeAsideForeign)
+	require.ErrorIs(t, err, ErrPublishCompleted, "the wedged bound-unlink leaves the rejected install standing — the caller's rollback reaps it")
+	require.ErrorContains(t, err, "could not be bound-unlinked")
+	srcInfo, sErr := os.Stat(src)
+	require.NoError(t, sErr)
+	dstInfo, dErr := os.Stat(dst)
+	require.NoError(t, dErr, "the rejected install stays recoverable at the destination")
+	assert.True(t, os.SameFile(srcInfo, dstInfo), "the retained entry still provably aliases the admitted object")
+	got, _ := afero.ReadFile(base, dst)
+	assert.Equal(t, "admitted video bytes", string(got))
+	assertNoBoundResidue(t, base, root)
+}
+
 // The real-link happy path on a kernel-identity filesystem: the installed
 // entry provably ALIASES the admitted object — the post-link stat vs admitted
 // identity is the actual guarantee, and the source stays put.
