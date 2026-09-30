@@ -338,6 +338,83 @@ func TestCopyFileNoReplaceVerified_MidStreamMutationRefusesPublication(t *testin
 	}
 }
 
+// reproofStatFailFile answers the admission handle Stat cleanly, then wedges
+// the RE-INSPECTION the post-stream re-proof runs (the closure built by
+// reproofStreamedSource) — an NFS/SMB-style handle invalidated mid-stream —
+// so the lane's re-inspect guard fires rather than the drift classifier.
+type reproofStatFailFile struct {
+	afero.File
+	calls int
+	err   error
+}
+
+func (f *reproofStatFailFile) Stat() (os.FileInfo, error) {
+	f.calls++
+	if f.calls > 1 {
+		return nil, f.err
+	}
+	return f.File.Stat()
+}
+
+// reproofStatFailFS hands each opened source one reproofStatFailFile and keeps
+// it, so the test can pin the exact admission/re-inspection Stat call count.
+type reproofStatFailFS struct {
+	afero.Fs
+	err  error
+	last *reproofStatFailFile
+}
+
+func (f *reproofStatFailFS) Open(name string) (afero.File, error) {
+	fh, err := f.Fs.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	f.last = &reproofStatFailFile{File: fh, err: f.err}
+	return f.last, nil
+}
+
+// The re-proof's re-inspection fault on both verified copy lanes: the
+// admission Stat passes, the staged stream lands every admitted byte, and only
+// the post-stream handle re-inspection wedges. The refusal must carry the
+// re-inspect class (never the ErrTakeAsideForeign drift verdict), discard the
+// staged copy, and attribute no digest; the destination is never written.
+func TestCopyFileNoReplaceVerified_ReproofStatFaultRefusesPublication(t *testing.T) {
+	sentinel := errors.New("re-inspect wedged")
+	lanes := []struct {
+		name string
+		run  func(fs afero.Fs, src, dst string, proof VerifiedSourceProof) (string, error)
+	}{
+		{"digest lane", func(fs afero.Fs, src, dst string, proof VerifiedSourceProof) (string, error) {
+			return CopyFileNoReplaceVerifiedDigest(fs, src, dst, proof)
+		}},
+		{"copy lane", func(fs afero.Fs, src, dst string, proof VerifiedSourceProof) (string, error) {
+			return "", CopyFileNoReplaceVerified(fs, src, dst, proof)
+		}},
+	}
+	for _, lane := range lanes {
+		t.Run(lane.name, func(t *testing.T) {
+			base := afero.NewOsFs()
+			root := t.TempDir()
+			src := filepath.Join(root, "src.mkv")
+			dst := filepath.Join(root, "out", "dst.mkv")
+			require.NoError(t, os.WriteFile(src, []byte("payload for the re-inspect fault leg"), 0o644))
+			admit := func(string, os.FileInfo) error { return nil }
+			fault := &reproofStatFailFS{Fs: base, err: sentinel}
+
+			digest, err := lane.run(fault, src, dst, admit)
+			require.ErrorIs(t, err, sentinel)
+			assert.ErrorContains(t, err, "re-inspect the streamed")
+			assert.NotErrorIs(t, err, ErrTakeAsideForeign, "an indeterminate re-inspection is not a foreign-object drift verdict")
+			assert.Empty(t, digest, "no digest may be attributed to bytes the re-proof never re-inspected")
+			require.NotNil(t, fault.last)
+			assert.Equal(t, 2, fault.last.calls, "exactly the admission Stat and the post-stream re-inspection touched the source handle")
+			_, statErr := os.Stat(dst)
+			assert.True(t, os.IsNotExist(statErr), "the refused publication writes no destination")
+			assertNoBoundResidue(t, base, root)
+		})
+	}
+}
+
 type openFailForSrcFS struct {
 	afero.Fs
 	src string
