@@ -217,6 +217,59 @@ func CopyFileNoReplaceVerified(fs afero.Fs, src, dst string, proof VerifiedSourc
 	return streamVerifiedSource(fs, srcFile, src, dst, proof, "verified copy", "source handle", false)
 }
 
+// CopyFileNoReplaceVerifiedInstall is CopyFileNoReplaceVerified with the
+// INSTALLED destination object's identity handed back (codex P1, PR #276,
+// finding ntCe6): the verified copy proves WHICH object it consumed, and the
+// returned FileInfo proves WHICH object it installed — the bound publish's
+// post-publish reverify stat (os.SameFile-bound to the staged inode on the
+// native legs; see copyStreamNoReplaceInstallReproof for the virtual leg's
+// lookup and the indeterminate-lookup doubt class). A caller recording the
+// install for later compensation (the deferred publication's rollback
+// observation) must bind THAT identity to its record instead of re-resolving
+// the destination name afterwards: between this copy's lock release and the
+// caller's observation an external writer can replace the destination, and a
+// record re-derived from the NAME then authenticates the foreign successor —
+// arming an identity-verified delete against bytes this operation never
+// wrote. Error classes are exactly CopyFileNoReplaceVerified's (the legacy
+// nil-proof lane returns a nil identity with the by-name behavior).
+func CopyFileNoReplaceVerifiedInstall(fs afero.Fs, src, dst string, proof VerifiedSourceProof) (os.FileInfo, error) {
+	if proof == nil {
+		return nil, CopyFileNoReplace(fs, src, dst)
+	}
+	done, err := classifyNoreplaceDestination(fs, src, dst)
+	if done || err != nil {
+		return nil, err
+	}
+	if err := fs.MkdirAll(filepath.Dir(dst), config.DirPerm); err != nil {
+		return nil, fmt.Errorf("verified copy: create destination directory: %w", err)
+	}
+	srcFile, err := openVerifiedSource(fs, src)
+	if err != nil {
+		return nil, fmt.Errorf("verified copy: open source %s: %w", src, err)
+	}
+	return streamVerifiedSourceInstall(fs, srcFile, src, dst, proof)
+}
+
+// streamVerifiedSourceInstall is the identity-returning twin of
+// streamVerifiedSource for the same-volume copy lane, sharing its handle
+// discipline byte for byte: the defer closes the pinned source descriptor in
+// EVERY exit branch before the caller runs its next filesystem verb, and the
+// admission proof re-runs against the handle's own Stat before a byte flows.
+// The publish tail returns the installed object's proven identity; a refusal
+// (admission, mid-stream drift, publish classes) discards the staged copy and
+// attributes no identity.
+func streamVerifiedSourceInstall(fs afero.Fs, srcFile afero.File, src, dst string, proof VerifiedSourceProof) (os.FileInfo, error) {
+	defer func() { _ = srcFile.Close() }()
+	srcInfo, statErr := srcFile.Stat()
+	if statErr != nil {
+		return nil, fmt.Errorf("verified copy: inspect the open source handle %s: %w", src, statErr)
+	}
+	if perr := proof(src, srcInfo); perr != nil {
+		return nil, fmt.Errorf("verified copy: the open source handle failed its admission proof (%w): %w", ErrTakeAsideForeign, perr)
+	}
+	return copyStreamNoReplaceInstallReproof(fs, srcFile, dst, reproofStreamedSource(srcFile, srcInfo, src, "verified copy", "source handle"))
+}
+
 // CopyFileNoReplaceVerifiedDigest is CopyFileNoReplaceVerified with the
 // published bytes' sha256 teed off the single verified stream (seal evidence
 // for the deferred publication's interim copy pin): the digest certifies the

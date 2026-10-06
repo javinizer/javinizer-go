@@ -689,6 +689,66 @@ func UnlinkVerified(fs afero.Fs, name string, verified os.FileInfo) error {
 	return nil
 }
 
+// ObserveVerifiedInstall re-resolves name and confirms the entry currently
+// occupying it still names the object a verified publish installed (codex P1,
+// PR #276, finding ntCe6 — the observation twin of the verified hard-link
+// leg's post-link successor re-proof, PRRT_kwDORn9KaM6nsX9a, for the copy
+// lane). The caller captured installed at publish time (e.g.
+// CopyFileNoReplaceVerifiedInstall) and must observe THAT identity, never a
+// fresh name-derived lookup: a publication lane that releases its destination
+// lock before the record is made leaves a window in which an external writer
+// replaces the destination, and a record bound to the NAME then authenticates
+// whatever occupies it — arming later compensation (the staged replacement
+// batch's UnlinkVerified rollback) against a foreign successor.
+//
+// Return classes, mirroring the sealed retain contract (round 46/47 lineage):
+//
+//   - (info, nil): the current occupant provably IS the installed object —
+//     the comparison rides asideSameObject, the SAME predicate UnlinkVerified
+//     applies at unlink time, so adoption and later unlink can never
+//     disagree about which object is ours;
+//   - (nil, nil): the name is VACANT, the occupant is NON-REGULAR (a
+//     directory or symlink — never a plausible sibling file successor and
+//     classified by the caller's legacy confirmation leg as the
+//     did-not-install failure it always was), or the lookup is
+//     indeterminate — doubt without an affirmative divergence proof
+//     (nothing is adopted);
+//   - typed error: a REGULAR-FILE occupant AFFIRMATIVELY diverges from the
+//     installed identity — an explicitly unproven SUCCESSOR. The error
+//     joins ErrPublishSuccessorUnproven (the occupant must be retained
+//     byte-intact, never observed as this operation's installed output)
+//     with ErrPublishCompleted (the doubt class: this operation's own
+//     bytes may still stand somewhere, e.g. moved aside by the successor's
+//     writer). Callers classify on PublishSuccessorUnproven: the armed
+//     record leg is released uninstalled, never armed for deletion.
+//
+// A nil installed identity is a caller bug, never a lookup: it fails closed.
+func ObserveVerifiedInstall(fs afero.Fs, name string, installed os.FileInfo) (os.FileInfo, error) {
+	if installed == nil {
+		return nil, fmt.Errorf("bound install observation of %s requires the identity its publish produced", name)
+	}
+	cur, err := asideLstat(fs, name)
+	switch {
+	case os.IsNotExist(err):
+		return nil, nil
+	case err != nil || cur == nil:
+		return nil, nil //nolint:nilerr // indeterminate lookup is failure-classified by ObservePublishResultBound as "did not install", not an observe error
+	}
+	if cur.Mode()&os.ModeSymlink != 0 || !cur.Mode().IsRegular() {
+		// A directory or link at the endpoint is not a plausible file
+		// successor; the caller's confirmation leg keeps its legacy
+		// did-not-install classification for it.
+		return nil, nil
+	}
+	if !asideSameObject(cur, installed) {
+		return nil, errors.Join(
+			fmt.Errorf("%w: %s no longer provably names the object this operation installed — the regular-file occupant is an explicitly unproven successor, retained byte-intact (never adopted as installed output)", ErrPublishSuccessorUnproven, name),
+			fmt.Errorf("%w: this operation's own installed bytes may still stand elsewhere under another name", ErrPublishCompleted),
+		)
+	}
+	return cur, nil
+}
+
 // rerideBoundUnlink rewinds the bound-unlink terminal object BACK onto the
 // freed name NO-REPLACE after a doubt leg (a foreign terminal, an
 // indeterminate lookup, or a wedged remove), restoring the pre-vacate

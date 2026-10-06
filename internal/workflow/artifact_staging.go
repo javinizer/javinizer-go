@@ -510,6 +510,12 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 	videoInstalledByTree := false
 	sidecarIntentTargets := []string{}
 	copiedSidecarTargets := map[string]bool{}
+	// copiedSidecarIdentities carries each copy-installed sidecar's
+	// publish-time destination identity (the verified copy's proven output,
+	// finding ntCe6): the observation loop below binds THOSE identities
+	// instead of re-resolving destination names the organizer already
+	// unlocked.
+	copiedSidecarIdentities := map[string]os.FileInfo{}
 	// primaryPinRecorded tracks ANY pre-execute durable pin on the deferred
 	// primary target (its reconcile must run even with zero sidecars);
 	// primaryPinCopyPartial narrows it to the copy lane's interim partial
@@ -804,6 +810,9 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 				for _, sr := range finalResult.Subtitles {
 					if sr.NewPath != "" && (sr.Copied || fsutil.PublishCompleted(sr.Error)) {
 						copiedSidecarTargets[filepath.Clean(sr.NewPath)] = true
+						if sr.Error == nil && sr.InstalledIdentity != nil {
+							copiedSidecarIdentities[filepath.Clean(sr.NewPath)] = sr.InstalledIdentity
+						}
 					}
 				}
 			}
@@ -817,7 +826,37 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 					_ = batch.ReleaseUninstalled(target)
 					continue
 				}
-				batch.ObservePublishResult(target)
+				if identity := copiedSidecarIdentities[filepath.Clean(target)]; identity != nil {
+					// Bind the observation to the identity the verified copy
+					// PRODUCED, never to whatever the destination name resolves
+					// to now (codex P1, PR #276, finding ntCe6 — the copy lane's
+					// twin of the hard-link successor binding,
+					// PRRT_kwDORn9KaM6nsX9a): handleSubtitles released its
+					// destination lock after the copy, so an external writer can
+					// have replaced the subtitle before this loop runs. A
+					// name-derived observation would adopt that successor's
+					// identity as this batch's install, and a later failed leg's
+					// rollback would UnlinkVerified those foreign bytes before
+					// restoring any displaced backup. An affirmative divergence
+					// (ErrPublishSuccessorUnproven, joined with the round-42
+					// ErrPublishCompleted doubt class) releases the armed leg
+					// UNINSTALLED instead: the occupant is retained byte-intact
+					// (the durable hash pin never matches the successor's bytes, so
+					// a later revert retains it too — the PRRT_kwDORn9KaM6m7CBi
+					// foreign-swap-survives contract), the apply commits, and
+					// rollback can never be armed against the successor. Every
+					// other observe failure keeps its legacy shape.
+					if oerr := batch.ObservePublishResultBound(target, identity); oerr != nil {
+						if fsutil.PublishSuccessorUnproven(oerr) {
+							logging.Warnf("copy-installed sidecar %s holds an explicitly unproven successor — retained byte-intact and never armed for rollback deletion: %v", target, oerr)
+							_ = batch.ReleaseUninstalled(target)
+							continue
+						}
+						return fmt.Errorf("bind copy-installed sidecar %s to its installed identity: %w", target, oerr)
+					}
+				} else {
+					batch.ObservePublishResult(target)
+				}
 				if cerr := batch.ConfirmPublish(ctx, target); cerr != nil {
 					return cerr
 				}

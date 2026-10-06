@@ -53,6 +53,11 @@ func seedStagingRoot(t *testing.T, fs afero.Fs, parent string, mutate func(*arti
 	if mutate != nil {
 		mutate(&manifest)
 	}
+	// Seeding rides the production seal (finding ntCe1): sweep authority comes
+	// from the MAC over exactly these fields, so a legitimately-owned test
+	// tree is one sealed with the test key (TestMain pins it), while the
+	// forge tests hand-write unsealed manifests to prove retention.
+	require.NoError(t, sealArtifactStageManifest(&manifest))
 	body, err := json.Marshal(&manifest)
 	require.NoError(t, err)
 	require.NoError(t, afero.WriteFile(fs, filepath.Join(root, artifactStageManifestName), body, 0o600))
@@ -471,6 +476,9 @@ func TestReadArtifactStageProofBranches(t *testing.T) {
 		if mut != nil {
 			mut(&m)
 		}
+		// Valid sidecars are sealed after any structural mutation, so each
+		// rejection below exercises its structural leg (never the seal gate).
+		require.NoError(t, sealArtifactStageManifest(&m))
 		body, err := json.Marshal(&m)
 		require.NoError(t, err)
 		require.NoError(t, afero.WriteFile(base, artifactStageProofPath(path), body, 0o600))

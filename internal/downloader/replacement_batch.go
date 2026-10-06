@@ -174,6 +174,44 @@ func (b *ReplacementBatch) ObservePublishResult(destination string) {
 	}
 }
 
+// ObservePublishResultBound is ObservePublishResult with the observation
+// bound to the identity the publish operation PRODUCED (codex P1, PR #276,
+// finding ntCe6) instead of whatever the destination name resolves to at
+// observation time: a publisher that released its destination lock before
+// this observation (the organizer's copied-sidecar lane) leaves a window in
+// which an external writer can replace the freshly installed bytes, and a
+// name-derived observation would record the foreign SUCCESSOR's identity as
+// this batch's install — arming rollback's UnlinkVerified against it (an
+// identity-verified delete of bytes the batch never wrote, executed before
+// any displaced-backup restore). The re-proof rides
+// fsutil.ObserveVerifiedInstall, the same predicate the rollback unlink
+// applies, so observation and deletion can never disagree on which object is
+// ours:
+//
+//   - match: the leg adopts the publish-time identity;
+//   - vacant/indeterminate lookup: nothing is adopted and no error is
+//     returned (the caller's ConfirmPublish surfaces the legacy failure);
+//   - affirmative divergence: the leg stays UNINSTALLED and the typed
+//     successor refusal propagates (ErrPublishSuccessorUnproven joined with
+//     ErrPublishCompleted) — the occupant is retained byte-intact, exactly
+//     the verified hard-link leg's post-link successor contract
+//     (PRRT_kwDORn9KaM6nsX9a) applied to the copy lane's record;
+//   - a nil installed identity is a caller bug and fails closed.
+func (b *ReplacementBatch) ObservePublishResultBound(destination string, installed os.FileInfo) error {
+	leg := b.find(destination)
+	if leg == nil || leg.installed {
+		return nil
+	}
+	info, err := fsutil.ObserveVerifiedInstall(b.fs, leg.destination, installed)
+	if err != nil {
+		return err
+	}
+	if info != nil {
+		leg.installed, leg.installedID = true, info
+	}
+	return nil
+}
+
 // ConfirmPublish marks the most recently armed destination installed only
 // after the publisher has landed its output.
 func (b *ReplacementBatch) ConfirmPublish(ctx context.Context, destination string) error {
@@ -188,7 +226,16 @@ func (b *ReplacementBatch) ConfirmPublish(ctx context.Context, destination strin
 	if info == nil || info.IsDir() {
 		return fmt.Errorf("staged publication did not install a file at %s", destination)
 	}
-	leg.installed, leg.installedID = true, info
+	leg.installed = true
+	// An identity an earlier observation bound to the publish's own output
+	// (ObservePublishResult's record or ObservePublishResultBound's proven
+	// install) outranks a fresh name lookup here: re-deriving the identity
+	// at confirmation time would re-anchor rollback to whatever occupies the
+	// name AFTER the observation window closed — exactly the successor
+	// substitution the bound observation exists to refuse (finding ntCe6).
+	if leg.installedID == nil {
+		leg.installedID = info
+	}
 	if leg.replaced {
 		var confirmErr error
 		if factual, ok := b.recorder.(ReplacementInstalledFactsRecorder); ok {

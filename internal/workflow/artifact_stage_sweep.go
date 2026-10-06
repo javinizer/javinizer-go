@@ -38,6 +38,15 @@ type artifactStageManifest struct {
 	// (cleanup exhausted its retries): the residue is trash regardless of
 	// owner liveness, so a long-lived process never blocks its own sweeps.
 	CompletedUnixNano int64 `json:"completed_unix_nano,omitempty"`
+	// Seal is the HMAC-SHA256 ownership proof over every other field (codex
+	// P1, PR #276, finding ntCe1): the evidence above is PUBLIC to any writer
+	// sharing the filesystem — a directory renamed to .javinizer-apply-* plus
+	// a manifest restating the visible token, local hostname, any positive
+	// PID, and a nonzero completed stamp would otherwise authorize recursive
+	// deletion of a tree Javinizer never created. The seal is keyed by a
+	// Javinizer-local secret stored outside the tree (artifact_stage_seal.go);
+	// pre-fix trees carry no seal and are retained, never swept.
+	Seal string `json:"seal,omitempty"`
 }
 
 // Sweep seams stay injectable: reclaim decisions must be testable without
@@ -86,6 +95,12 @@ func writeArtifactStageManifestState(fs afero.Fs, root string, completedUnixNano
 	if start := artifactSweepStartTime(manifest.PID); start != nil {
 		manifest.ProcessStartUnixNano = start.UnixNano()
 	}
+	// Sealed ownership (finding ntCe1): the manifest alone is forgeable by
+	// any writer sharing the filesystem, so the authority to sweep comes
+	// from the MAC, never from the evidence fields. A sealing failure
+	// downgrades to the pre-fix unsealed shape — retention-guaranteed by
+	// the verification gates — rather than blocking the apply.
+	sealArtifactStageManifestBestEffort(root, &manifest)
 	body, err := artifactSweepMarshal(manifest)
 	if err != nil {
 		logging.Warnf("artifact staging manifest encode failed for %s: %v", root, err)
@@ -97,23 +112,28 @@ func writeArtifactStageManifestState(fs afero.Fs, root string, completedUnixNano
 }
 
 // artifactStageReclaimable decides whether the staging root at path may be
-// reclaimed. Anything unverifiable (missing/malformed manifest, token
-// mismatch, foreign host, live or undecidable owner) is retained — residue is
-// recoverable, a wrong delete is not.
+// reclaimed. Anything unverifiable (missing/malformed manifest, a forged or
+// unsealed marker, token mismatch, foreign host, live or undecidable owner)
+// is retained — residue is recoverable, a wrong delete is not.
 func artifactStageReclaimable(fs afero.Fs, path string) bool {
 	if !artifactStageManifestReclaimable(fs, path) {
 		// Manifest-level claims failed: an external sidecar proof is the
 		// last-remaining ownership evidence. It applies to any staging-named tree
-		// (quarantined or left under its original name after a failed carry),
-		// whose token binding proves nobody else could have written the marker.
+		// (quarantined or left under its original name after a failed carry).
+		// The token binding alone never proved origin — any writer can derive it
+		// from the directory name — so the sidecar must pass the same MAC seal
+		// gate as the manifest (finding ntCe1): nobody without the local sweep
+		// secret could have written it.
 		return readArtifactStageProof(fs, path)
 	}
 	return true
 }
 
 // artifactStageManifestReclaimable enforces the manifest-backed ownership
-// rules: valid marker, matching token, same hostname, and either a completed
-// lifecycle stamp or a provably-dead (or provably-reused) owner PID.
+// rules: a MAC-sealed marker (the ONLY authentic origin proof — every other
+// field is forgeable by a filesystem-sharing writer, finding ntCe1), valid
+// version, matching token, same hostname, and either a completed lifecycle
+// stamp or a provably-dead (or provably-reused) owner PID.
 func artifactStageManifestReclaimable(fs afero.Fs, path string) bool {
 	body, err := afero.ReadFile(fs, filepath.Join(path, artifactStageManifestName))
 	if err != nil {
@@ -121,6 +141,13 @@ func artifactStageManifestReclaimable(fs afero.Fs, path string) bool {
 	}
 	var manifest artifactStageManifest
 	if err := json.Unmarshal(body, &manifest); err != nil {
+		return false
+	}
+	// Authentic ownership FIRST: a fabricated manifest restating the visible
+	// token, local hostname, a positive PID, and a completed stamp is rejected
+	// here before any structural claim is consulted (pre-fix unsealed trees
+	// take the same refusal and are retained, the round-27 precedent).
+	if !artifactStageSealed(&manifest) {
 		return false
 	}
 	if manifest.Version != artifactStageManifestVer || manifest.PID <= 0 {
@@ -193,6 +220,11 @@ func writeArtifactStageProof(fs afero.Fs, path string) {
 		ProcessStartUnixNano: manifest.ProcessStartUnixNano,
 		CreatedAt:            manifest.CreatedAt,
 		CompletedUnixNano:    manifest.CompletedUnixNano,
+		// The seal MACs exactly these fields through one canonical encoding,
+		// so the in-tree seal transfers to the byte-identical sidecar — but
+		// only a VALID seal does: a forged manifest without a verifiable seal
+		// never reaches this writer (the reclaim gates refuse it first).
+		Seal: manifest.Seal,
 	}
 	encoded, err := artifactSweepMarshal(proof)
 	if err != nil {
@@ -204,8 +236,11 @@ func writeArtifactStageProof(fs afero.Fs, path string) {
 }
 
 // readArtifactStageProof validates a proof sidecar written by
-// writeArtifactStageProof. Quarantined names already prove an own-process
-// claim, so a sidecar only needs to be well-formed and completed on this host.
+// writeArtifactStageProof. A sidecar must be MAC-sealed by the local sweep
+// secret (finding ntCe1): the pre-fix gate — well-formed, completed, same
+// host, token matching the directory name — was forgeable end-to-end by any
+// writer sharing the filesystem, so the name+token pairing alone never
+// authorizes the destructive removal this reader gates.
 func readArtifactStageProof(fs afero.Fs, path string) bool {
 	body, err := afero.ReadFile(fs, artifactStageProofPath(path))
 	if err != nil {
@@ -213,6 +248,9 @@ func readArtifactStageProof(fs afero.Fs, path string) bool {
 	}
 	var manifest artifactStageManifest
 	if err := json.Unmarshal(body, &manifest); err != nil {
+		return false
+	}
+	if !artifactStageSealed(&manifest) {
 		return false
 	}
 	if manifest.Version != artifactStageManifestVer || manifest.PID <= 0 {

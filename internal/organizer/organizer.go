@@ -354,6 +354,17 @@ type SubtitleResult struct {
 	Skipped bool
 	Planned bool
 	Error   error
+	// InstalledIdentity is the destination object's identity AS THE COPY
+	// PRODUCED IT (codex P1, PR #276, finding ntCe6): the copy lane's
+	// admission-bound install returns the bound publish's proven installed
+	// identity, so a caller recording this seat for later compensation binds
+	// ITS record to the object the copy installed instead of re-resolving
+	// the destination name after this lane released its destination lock —
+	// the window in which an external writer's replacement would otherwise
+	// be adopted (and later identity-verified-DELETED) as this operation's
+	// own install. Nil unless a verified copy installed cleanly; moves,
+	// skips, errors, and legacy by-name copies carry none.
+	InstalledIdentity os.FileInfo
 }
 
 // strategyType is an internal enum identifying the operation strategy.
@@ -777,24 +788,36 @@ func probeSubtitleSourceRegular(fs afero.Fs, path string) bool {
 type subtitleInstall struct {
 	op       func(afero.Fs, string, string) error
 	verified func(afero.Fs, string, string, fsutil.VerifiedSourceProof) error
-	copied   bool
+	// install is the identity-returning verified twin (the copy lane):
+	// beyond re-proving the consumed object it hands back the INSTALLED
+	// destination object's publish-time identity, so the caller's
+	// post-publication record binds the copy's own product rather than a
+	// later name lookup (codex P1, PR #276, finding ntCe6). Nil lanes never
+	// produce an identity.
+	install func(afero.Fs, string, string, fsutil.VerifiedSourceProof) (os.FileInfo, error)
+	copied  bool
 }
 
 // run delivers one subtitle through the lane's composite. A source the caller
 // bound to an admission proof installs identity-bound through the verified
 // twin — the object consumed is re-proven, never merely its pathname — while
-// an unbound source keeps the legacy by-name leg unchanged. Both packaged
-// lanes always carry their twin; install.op == nil (probe) never reaches run.
-func (install subtitleInstall) run(fs afero.Fs, source, dest string, proof fsutil.VerifiedSourceProof) error {
+// an unbound source keeps the legacy by-name leg unchanged. The returned
+// FileInfo is the installed object's publish-proven identity where the lane
+// produces one (the verified copy), nil everywhere else. Both packaged lanes
+// always carry their twin; install.op == nil (probe) never reaches run.
+func (install subtitleInstall) run(fs afero.Fs, source, dest string, proof fsutil.VerifiedSourceProof) (os.FileInfo, error) {
 	if proof != nil {
-		return install.verified(fs, source, dest, proof)
+		if install.install != nil {
+			return install.install(fs, source, dest, proof)
+		}
+		return nil, install.verified(fs, source, dest, proof)
 	}
-	return install.op(fs, source, dest)
+	return nil, install.op(fs, source, dest)
 }
 
 var (
 	subtitleMoveInstall = subtitleInstall{op: fsutil.MoveFileNoReplace, verified: fsutil.MoveFileNoReplaceVerified}
-	subtitleCopyInstall = subtitleInstall{op: fsutil.CopyFileNoReplace, verified: fsutil.CopyFileNoReplaceVerified, copied: true}
+	subtitleCopyInstall = subtitleInstall{op: fsutil.CopyFileNoReplace, verified: fsutil.CopyFileNoReplaceVerified, install: fsutil.CopyFileNoReplaceVerifiedInstall, copied: true}
 )
 
 func (o *Organizer) handleSubtitles(plan *OrganizePlan, result *OrganizeResult, install subtitleInstall) {
@@ -904,7 +927,17 @@ func (o *Organizer) handleSubtitles(plan *OrganizePlan, result *OrganizeResult, 
 				// ordinary first-wins dedupe instead of alarming.
 				endpointKey := filepath.Clean(newPath)
 				endpointAttempts[endpointKey] = true
-				err := install.run(o.fs, subtitle.OriginalPath, newPath, plan.verifiedSubtitleProofs[filepath.Clean(subtitle.OriginalPath)])
+				// The copy lane's install additionally hands back the destination
+				// object's publish-time identity: captured HERE, inside the
+				// destination lock the lane still holds, the identity provably
+				// names the object this operation installed. Recording it on the
+				// seat lets the deferred publication's rollback observation bind
+				// THIS object rather than re-resolving the name after the lock is
+				// released (codex P1, PR #276, finding ntCe6).
+				identity, err := install.run(o.fs, subtitle.OriginalPath, newPath, plan.verifiedSubtitleProofs[filepath.Clean(subtitle.OriginalPath)])
+				if identity != nil {
+					sr.InstalledIdentity = identity
+				}
 				if err == nil || fsutil.PublishCompleted(err) {
 					endpointAttempts[endpointKey] = false
 				}
