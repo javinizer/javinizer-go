@@ -121,7 +121,10 @@ func TestSweepArtifactStaging_TamperedSealedManifestRetained(t *testing.T) {
 	var manifest artifactStageManifest
 	require.NoError(t, json.Unmarshal(body, &manifest))
 	require.NoError(t, sealArtifactStageManifest(&manifest), "a genuine owner seals first")
-	manifest.CompletedUnixNano = time.Now().UTC().UnixNano() // attacker flips completion post-seal
+	// Deterministic tamper: a fresh time.Now() returns identical nanos on
+	// coarse-clock runners (Windows VMs observed it collapse), which keeps
+	// the seal valid and flips the whole assertion set.
+	manifest.CompletedUnixNano = manifest.CompletedUnixNano + 1 // attacker flips completion post-seal
 	tampered, err := json.Marshal(&manifest)
 	require.NoError(t, err)
 	require.NoError(t, afero.WriteFile(fs, filepath.Join(root, artifactStageManifestName), tampered, 0o600))
