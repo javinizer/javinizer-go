@@ -52,18 +52,31 @@ const (
 // key (never the developer's real cache dir) and replay the loader's failure
 // legs deterministically.
 var (
-	artifactSweepSecretPath = defaultArtifactSweepSecretPath
-	artifactSweepSecretKey  = defaultArtifactSweepSecretKey
+	artifactSweepSecretPath   = defaultArtifactSweepSecretPath
+	artifactSweepSecretKey    = defaultArtifactSweepSecretKey
+	artifactSweepUserCacheDir = os.UserCacheDir
+	artifactSweepUserHomeDir  = os.UserHomeDir
+	artifactSweepMkdirAll     = os.MkdirAll
+	artifactSweepCreateKey    = defaultArtifactSweepCreateKey
 )
+
+type artifactSweepKeyFile interface {
+	Write(p []byte) (int, error)
+	Close() error
+}
+
+func defaultArtifactSweepCreateKey(path string) (artifactSweepKeyFile, error) {
+	return os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+}
 
 // defaultArtifactSweepSecretPath locates the sealing key under the per-user
 // cache dir ("Javinizer" rides the desktop package's dir-name convention),
 // falling back to ~/.javinizer when the OS cache dir is unresolvable — the
 // same fallback chain desktop.UserDataDir applies for the config dir.
 func defaultArtifactSweepSecretPath() (string, error) {
-	base, err := os.UserCacheDir()
+	base, err := artifactSweepUserCacheDir()
 	if err != nil || base == "" {
-		home, herr := os.UserHomeDir()
+		home, herr := artifactSweepUserHomeDir()
 		if herr != nil {
 			return "", fmt.Errorf("locate artifact sweep key dir: %w (home fallback: %v)", err, herr)
 		}
@@ -89,14 +102,14 @@ func defaultArtifactSweepSecretKey() ([]byte, error) {
 	if !os.IsNotExist(err) {
 		return nil, err
 	}
-	if mkErr := os.MkdirAll(filepath.Dir(path), 0o700); mkErr != nil {
+	if mkErr := artifactSweepMkdirAll(filepath.Dir(path), 0o700); mkErr != nil {
 		return nil, fmt.Errorf("create artifact sweep key dir: %w", mkErr)
 	}
 	drawn := make([]byte, artifactStageSecretBytes)
 	if _, randErr := artifactSweepRand(drawn); randErr != nil {
 		return nil, fmt.Errorf("draw artifact sweep key: %w", randErr)
 	}
-	handle, createErr := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	handle, createErr := artifactSweepCreateKey(path)
 	if createErr != nil {
 		if os.IsExist(createErr) {
 			// A concurrent process won the create; its key is the key.

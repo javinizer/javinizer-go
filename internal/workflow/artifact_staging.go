@@ -26,6 +26,8 @@ import (
 // deliberately NOT copied into the staging tree: the fenced publication
 // moves (or copies) it directly from its real path instead, so organizing a
 // multi-GB file never duplicates the payload into a hidden sibling folder.
+var observeBoundSidecarPublish = (*downloader.ReplacementBatch).ObservePublishResultBound
+
 func (s *artifactStage) videoStagingDeferred() bool { return s != nil && s.videoDeferred }
 
 type artifactPlanExecutor interface {
@@ -846,7 +848,7 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 					// foreign-swap-survives contract), the apply commits, and
 					// rollback can never be armed against the successor. Every
 					// other observe failure keeps its legacy shape.
-					if oerr := batch.ObservePublishResultBound(target, identity); oerr != nil {
+					if oerr := observeBoundSidecarPublish(batch, target, identity); oerr != nil {
 						if fsutil.PublishSuccessorUnproven(oerr) {
 							logging.Warnf("copy-installed sidecar %s holds an explicitly unproven successor — retained byte-intact and never armed for rollback deletion: %v", target, oerr)
 							_ = batch.ReleaseUninstalled(target)
