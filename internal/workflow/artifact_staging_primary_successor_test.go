@@ -1,6 +1,8 @@
 package workflow
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -124,4 +126,81 @@ func TestRetractCopiedSidecarOwnershipClearsClaimKeepsExclusion(t *testing.T) {
 	assert.True(t, result.Subtitles[0].SuccessorRefused, "the seat is marked so the completion ledger skips it")
 	assert.True(t, result.Subtitles[0].Copied, "Copied stays set: the rehome exclusion still keeps the staged duplicate out of the tree")
 	assert.False(t, result.Subtitles[1].SuccessorRefused)
+}
+
+// codex P1 (PR #276, finding PRRT_kwDORn9KaM6p6mdQ) — the refusal must not be
+// re-adopted by the unconditional primary confirmation: with no later failing
+// leg the apply commits, the successor stays byte-intact, and the leg is left
+// UNINSTALLED instead of confirmed against the intruder's name.
+func TestDeferredPrimarySuccessorRefusalSkipsConfirmation(t *testing.T) {
+	base, root, source, _, _, _, match := pr260FencedFiles(t, "primary-refused-confirm")
+	dest := filepath.Join(root, "library")
+	real := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize}, template.NewEngine(), nil)
+	videoDst := ""
+	fault := &pr260PublicationFaultOrganizer{Organizer: real,
+		afterExecute: func(plan *organizer.OrganizePlan, result *organizer.OrganizeResult) {
+			if filepath.Clean(plan.SourcePath) != filepath.Clean(source) || result.InstalledIdentity == nil {
+				return
+			}
+			videoDst = plan.TargetPath
+			require.NoError(t, base.Remove(videoDst))
+			require.NoError(t, afero.WriteFile(base, videoDst, []byte(primarySuccessorPayload), 0o644))
+		},
+	}
+	orch := &applyOrchImpl{fs: base, organizer: fault}
+	cmd := pr260ArtifactFailureCommand(&models.Movie{ContentID: "primary-refused-confirm"}, match, dest)
+	cmd.Organize.Skip = false
+	cmd.Organize.MoveFiles = false
+	cmd.Organize.LinkMode = organizer.LinkModeNone
+	cmd.Download = false
+
+	stage, _, publishErr := verifiedStagePublish(t, orch, real, base, root, source, dest, match, cmd)
+	defer stage.cleanup()
+
+	require.NotEmpty(t, videoDst, "the primary install ran and the swap landed in the observation window")
+	require.NoError(t, publishErr, "the refusal is nonfatal — the apply commits")
+	got, readErr := afero.ReadFile(base, videoDst)
+	require.NoError(t, readErr)
+	assert.Equal(t, primarySuccessorPayload, string(got), "the occupant is retained and never confirmed as this apply's install")
+}
+
+// primarySealFaultLog fails the deferred primary copy seal, placing a failure
+// AFTER the point where the unbound confirmation used to adopt the successor.
+type primaryReconcileFaultLog struct {
+	RevertLog
+	err error
+}
+
+func (l primaryReconcileFaultLog) ReconcileDeleteIntents(context.Context, OperationID, []string) error {
+	return l.err
+}
+
+var errPrimaryReconcileDenied = errors.New("injected reconcile failure")
+
+// The exploit shape: with the primary refused, a LATER failure must not let
+// rollback delete the successor. Pre-fix the unconditional ConfirmPublish
+// adopted the occupant, so the rollback's identity-verified unlink removed
+// foreign bytes here (codex P1, PRRT_kwDORn9KaM6p6mdQ).
+func TestDeferredPrimarySuccessorRefusalSurvivesLaterFailure(t *testing.T) {
+	env := setupCopyIntentE2E(t, "primary-refused-rollback")
+	env.orch.revertLog = primaryReconcileFaultLog{RevertLog: env.orch.revertLog, err: errPrimaryReconcileDenied}
+	videoDst := ""
+	env.orch.organizer = &pr260PublicationFaultOrganizer{Organizer: env.org,
+		afterExecute: func(plan *organizer.OrganizePlan, result *organizer.OrganizeResult) {
+			if filepath.Clean(plan.SourcePath) != filepath.Clean(env.source) || result.InstalledIdentity == nil {
+				return
+			}
+			videoDst = plan.TargetPath
+			require.NoError(t, env.fs.Remove(videoDst))
+			require.NoError(t, afero.WriteFile(env.fs, videoDst, []byte(primarySuccessorPayload), 0o644))
+		},
+	}
+	cmd := pr260FencedCommand(&env.movie, env.match, env.dest, pr260FencedCounter(t, env.db), operationmode.OperationModeOrganize, false, false, organizer.LinkModeHard, false, false)
+	_, err := env.orch.Execute(t.Context(), cmd)
+
+	require.NotEmpty(t, videoDst, "the primary install ran and the swap landed in the observation window")
+	require.Error(t, err, "the injected reconcile failure aborts the apply after the confirmation point")
+	got, readErr := afero.ReadFile(env.fs, videoDst)
+	require.NoError(t, readErr, "rollback must never unlink the successor: the refused leg was never confirmed against its name")
+	assert.Equal(t, primarySuccessorPayload, string(got), "the successor is retained byte-intact")
 }

@@ -529,6 +529,12 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 	// pin, the only shape the publish's stream-teed digest later seals.
 	primaryPinRecorded := false
 	primaryPinCopyPartial := false
+	// primarySuccessorRefused records that the bound observation proved another
+	// writer replaced the primary install (codex P1, PRRT_kwDORn9KaM6p6mdQ): no
+	// later leg may re-adopt the occupant by name, so the unconditional primary
+	// confirmation is skipped and the move-lane inverse is not armed against a
+	// destination this apply no longer owns.
+	primarySuccessorRefused := false
 	// The video leg moves the real source whenever the publish call carries
 	// move semantics: explicit MoveFiles, or any flow where ExecuteOrganizePlan
 	// would still rename (an irrelevant link_mode must not disarm intents).
@@ -823,6 +829,12 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 					if oerr := observeBoundPrimaryPublish(batch, plan.TargetPath, finalResult.InstalledIdentity); oerr != nil {
 						if fsutil.PublishSuccessorUnproven(oerr) {
 							logging.Warnf("deferred primary %s holds an explicitly unproven successor — retained byte-intact and never armed for rollback deletion: %v", plan.TargetPath, oerr)
+							// Release the leg UNINSTALLED and remember the refusal: the
+							// unconditional confirmation below stats the pathname, and adopting
+							// it would arm rollback's verified unlink against the very occupant
+							// this observer just rejected (codex P1, PRRT_kwDORn9KaM6p6mdQ).
+							_ = batch.ReleaseUninstalled(plan.TargetPath)
+							primarySuccessorRefused = true
 						} else {
 							return fmt.Errorf("bind deferred primary install %s to its published identity: %w", plan.TargetPath, oerr)
 						}
@@ -903,7 +915,7 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 					return cerr
 				}
 			}
-			if s.videoDeferred && publishMove {
+			if s.videoDeferred && publishMove && !primarySuccessorRefused {
 				// The rename already consumed the real source: arm rollback before
 				// any fallible leg (ConfirmPublish, later installs) can observe an
 				// installed destination worth deleting with no armed inverse.
@@ -928,7 +940,13 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 			return fmt.Errorf("publish organized video returned no result")
 		}
 		if filepath.Clean(plan.SourcePath) != filepath.Clean(plan.TargetPath) {
-			if err := batch.ConfirmPublish(ctx, plan.TargetPath); err != nil {
+			// A refused primary is never confirmed (codex P1,
+			// PRRT_kwDORn9KaM6p6mdQ): ConfirmPublish stats the pathname and would
+			// re-adopt the successor the bound observer rejected, leaving a later
+			// seal/reconcile/generation failure to rollback-delete foreign bytes.
+			if primarySuccessorRefused {
+				logging.Warnf("deferred primary %s left unconfirmed — its occupant is not this apply's install", plan.TargetPath)
+			} else if err := batch.ConfirmPublish(ctx, plan.TargetPath); err != nil {
 				return err
 			}
 			// Seal the copy lane's interim partial pin with the digest the
