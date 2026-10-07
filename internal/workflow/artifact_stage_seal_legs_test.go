@@ -32,7 +32,8 @@ func TestDefaultArtifactSweepSecretPath_Legs(t *testing.T) {
 	artifactSweepUserCacheDir = func() (string, error) { return "", nil }
 	got, err = defaultArtifactSweepSecretPath()
 	require.NoError(t, err)
-	assert.True(t, strings.HasPrefix(got, "/home"))
+	want := filepath.Join("/home", ".javinizer", "Javinizer", artifactStageSecretName)
+	assert.Equal(t, want, got, "home fallback joins under the OS-local separator form")
 
 	// both fail -> wrapped composite error
 	artifactSweepUserCacheDir = func() (string, error) { return "", errors.New("cache gone") }
