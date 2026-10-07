@@ -249,9 +249,12 @@ type completeCallFaultLog struct {
 	sealErr       error
 	seals         int32
 	sealsCaptured []sealedCopyDigest
+
+	completed *ApplyResult
 }
 
-func (l *completeCallFaultLog) Complete(context.Context, OperationID, *ApplyResult) error {
+func (l *completeCallFaultLog) Complete(_ context.Context, _ OperationID, result *ApplyResult) error {
+	l.completed = result
 	if atomic.AddInt32(&l.calls, 1) == l.failAt {
 		return errors.New("journal unavailable")
 	}

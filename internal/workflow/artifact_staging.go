@@ -1039,7 +1039,9 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 			// moves are retracted so a later revert never renames a retained
 			// destination over its source.
 			keep := make([]models.FileMove, 0, len(finalResult.Subtitles)+1)
-			keep = append(keep, models.FileMove{OriginalPath: s.sourcePath, NewPath: finalResult.NewPath})
+			if !primarySuccessorRefused {
+				keep = append(keep, models.FileMove{OriginalPath: s.sourcePath, NewPath: finalResult.NewPath})
+			}
 			for _, sr := range finalResult.Subtitles {
 				// Publish-completed moves keep their intent (codex P1,
 				// PRRT_kwDORn9KaM6nfbS3): retracting it would commit the apply
@@ -1056,6 +1058,18 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 		}
 		if o.revertLog != nil && opID != "" {
 			partial := &ApplyResult{OrganizeResult: finalResult, Movie: state.movie, OperationID: opID}
+			if primarySuccessorRefused {
+				// Settle the row WITHOUT the move (codex P1, PRRT_kwDORn9KaM6p_JGh):
+				// the ledger's NewPath would otherwise name the foreign successor as
+				// this row's moved primary, and a later revert would relocate those
+				// foreign bytes onto the now-vacant source path. The pending move
+				// intent was already retracted above, so nothing in the ledger names
+				// a destination this apply no longer owns.
+				settled := *finalResult
+				settled.Moved = false
+				settled.NewPath = ""
+				partial.OrganizeResult = &settled
+			}
 			if err := o.revertLog.Complete(ctx, opID, partial); err != nil {
 				return fmt.Errorf("persist inverse after direct video publication: %w", err)
 			}

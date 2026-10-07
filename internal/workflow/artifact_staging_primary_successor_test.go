@@ -204,3 +204,52 @@ func TestDeferredPrimarySuccessorRefusalSurvivesLaterFailure(t *testing.T) {
 	require.NoError(t, readErr, "rollback must never unlink the successor: the refused leg was never confirmed against its name")
 	assert.Equal(t, primarySuccessorPayload, string(got), "the successor is retained byte-intact")
 }
+
+// codex P1 (PR #276, finding PRRT_kwDORn9KaM6p_JGh) — in deferred MOVE mode a
+// refused primary must not graduate into the durable move ledger: the pending
+// intent is retracted and the row settles WITHOUT the move, so a later revert
+// can never relocate the foreign successor onto the now-vacant source path.
+func TestDeferredMoveSuccessorRefusalRetractsMoveIntent(t *testing.T) {
+	base, root, source, _, _, _, match := pr260FencedFiles(t, "primary-move-refused")
+	dest := filepath.Join(root, "library")
+	db, _ := pr260ArtifactDB(t)
+	movie := pr260FencedMovie(t, db, "primary-move-refused", "")
+	org := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize, MoveSubtitles: true, SubtitleExtensions: []string{".srt"}}, template.NewEngine(), nil)
+	ledger := &completeCallFaultLog{}
+	videoDst := ""
+	orch := &applyOrchImpl{fs: base, organizer: &pr260PublicationFaultOrganizer{Organizer: org,
+		afterExecute: func(plan *organizer.OrganizePlan, result *organizer.OrganizeResult) {
+			if filepath.Clean(plan.SourcePath) != filepath.Clean(source) || result.InstalledIdentity == nil {
+				return
+			}
+			videoDst = plan.TargetPath
+			require.NoError(t, base.Remove(videoDst))
+			require.NoError(t, afero.WriteFile(base, videoDst, []byte(primarySuccessorPayload), 0o644))
+		},
+	}, revertLog: ledger}
+	cmd := pr260ArtifactFailureCommand(&movie, match, dest)
+	cmd.Organize.Skip = false
+	cmd.Organize.MoveFiles = true
+	cmd.Download = false
+
+	stage, _, err := orch.prepareArtifact(context.Background(), cmd)
+	require.NoError(t, err)
+	defer stage.cleanup()
+	stagedPlan, planErr := org.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: models.FileMatchInfo{Path: stage.stagedSource, Name: filepath.Base(source)}, Movie: stage.original.Movie, DestDir: stage.root, MoveFiles: true, OperationMode: stage.original.OperationMode})
+	require.NoError(t, planErr)
+	state := &applyPipelineState{operationID: "op", organizeResult: &organizer.OrganizeResult{NewPath: stagedPlan.TargetPath, FolderPath: stagedPlan.TargetDir}}
+
+	require.NoError(t, stage.publish(context.Background(), orch, state, nil))
+
+	require.NotEmpty(t, videoDst, "the move ran and the swap landed in the observation window")
+	got, readErr := afero.ReadFile(base, videoDst)
+	require.NoError(t, readErr)
+	assert.Equal(t, primarySuccessorPayload, string(got), "the successor is retained byte-intact")
+	for _, mv := range ledger.keepCaptured {
+		assert.NotEqual(t, videoDst, mv.NewPath, "the refused primary's move intent was retracted")
+	}
+	require.NotNil(t, ledger.completed, "the row still settles")
+	require.NotNil(t, ledger.completed.OrganizeResult)
+	assert.Empty(t, ledger.completed.OrganizeResult.NewPath, "the row records no moved primary for the foreign successor")
+	assert.False(t, ledger.completed.OrganizeResult.Moved)
+}
