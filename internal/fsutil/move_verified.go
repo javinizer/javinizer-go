@@ -64,6 +64,18 @@ type VerifiedSourceProof func(path string, info os.FileInfo) error
 // admission refusal additionally carries ErrTakeAsideForeign. A nil proof
 // preserves the legacy by-name behavior unchanged.
 func MoveFileNoReplaceVerified(fs afero.Fs, src, dst string, proof VerifiedSourceProof) error {
+	return MoveFileNoReplaceVerifiedMode(fs, src, dst, proof, stagingFileMode())
+}
+
+// MoveFileNoReplaceVerifiedMode is MoveFileNoReplaceVerified with an explicit
+// staging mode for its cross-device leg (codex P2, PRRT_kwDORn9KaM6pw_EY): the
+// same-volume rename carries the consumed object's own permission bits either
+// way, while the EXDEV stream publishes destination-adjacent bytes and would
+// otherwise stage them at the umask-masked default — widening a private or
+// read-only source the caller admitted. The mode applies verbatim; a nil proof
+// keeps the legacy by-name behavior AND the default staging mode: the mode
+// describes an ADMITTED source, and nothing was admitted without a proof.
+func MoveFileNoReplaceVerifiedMode(fs afero.Fs, src, dst string, proof VerifiedSourceProof, mode os.FileMode) error {
 	if proof == nil {
 		return MoveFileNoReplace(fs, src, dst)
 	}
@@ -122,7 +134,7 @@ func MoveFileNoReplaceVerified(fs afero.Fs, src, dst string, proof VerifiedSourc
 		if !isCrossDeviceError(pubErr) {
 			return restoreClaim(fmt.Errorf("verified move: no-replace publish of the claimed %s onto %s refused: %w", claimName, dst, pubErr))
 		}
-		if copyErr := copyClaimAcrossDevices(fs, claimName, dst, proof); copyErr != nil {
+		if copyErr := copyClaimAcrossDevices(fs, claimName, dst, proof, mode); copyErr != nil {
 			return restoreClaim(copyErr)
 		}
 		if rmErr := UnlinkVerified(fs, claimName, claimInfo); rmErr != nil {
@@ -141,12 +153,12 @@ func MoveFileNoReplaceVerified(fs afero.Fs, src, dst string, proof VerifiedSourc
 // streamVerifiedSource on every branch, before the caller's bound unlink
 // re-points the consumed claim (close-before-remove — load-bearing on
 // Windows, where a stale pin parks the name's directory slot).
-func copyClaimAcrossDevices(fs afero.Fs, claimName, dst string, proof VerifiedSourceProof) error {
+func copyClaimAcrossDevices(fs afero.Fs, claimName, dst string, proof VerifiedSourceProof, mode os.FileMode) error {
 	srcFile, err := openVerifiedSource(fs, claimName)
 	if err != nil {
 		return fmt.Errorf("verified move: open the claimed source %s for the cross-device publish: %w", claimName, err)
 	}
-	return streamVerifiedSource(fs, srcFile, claimName, dst, proof, "verified move", "claim handle", true)
+	return streamVerifiedSource(fs, srcFile, claimName, dst, proof, "verified move", "claim handle", true, mode)
 }
 
 // streamVerifiedSource is the shared verified-stream inner leg of both
@@ -168,7 +180,7 @@ func copyClaimAcrossDevices(fs afero.Fs, claimName, dst string, proof VerifiedSo
 // never a path re-resolve): an in-place rewrite landing mid-stream refuses
 // with the staged copy discarded instead of publishing content the proof
 // never admitted.
-func streamVerifiedSource(fs afero.Fs, srcFile afero.File, src, dst string, proof VerifiedSourceProof, op, noun string, crossDevice bool) error {
+func streamVerifiedSource(fs afero.Fs, srcFile afero.File, src, dst string, proof VerifiedSourceProof, op, noun string, crossDevice bool, mode os.FileMode) error {
 	defer func() { _ = srcFile.Close() }()
 	srcInfo, statErr := srcFile.Stat()
 	if statErr != nil {
@@ -177,7 +189,7 @@ func streamVerifiedSource(fs afero.Fs, srcFile afero.File, src, dst string, proo
 	if perr := proof(src, srcInfo); perr != nil {
 		return fmt.Errorf("%s: the open %s failed its admission proof (%w): %w", op, noun, ErrTakeAsideForeign, perr)
 	}
-	if copyErr := copyStreamNoReplaceReproof(fs, srcFile, dst, reproofStreamedSource(srcFile, srcInfo, src, op, noun)); copyErr != nil {
+	if copyErr := copyStreamNoReplaceReproof(fs, srcFile, dst, reproofStreamedSource(srcFile, srcInfo, src, op, noun), mode); copyErr != nil {
 		if crossDevice {
 			return fmt.Errorf("%s: cross-device publish of the claim onto %s: %w", op, dst, copyErr)
 		}
@@ -200,6 +212,20 @@ func streamVerifiedSource(fs afero.Fs, srcFile afero.File, src, dst string, proo
 // already refuse unsupported volumes with the identical typed class. A nil
 // proof preserves the legacy by-name behavior unchanged.
 func CopyFileNoReplaceVerified(fs afero.Fs, src, dst string, proof VerifiedSourceProof) error {
+	return CopyFileNoReplaceVerifiedMode(fs, src, dst, proof, stagingFileMode())
+}
+
+// CopyFileNoReplaceVerifiedMode is CopyFileNoReplaceVerified with an explicit
+// destination staging mode (codex P2, PRRT_kwDORn9KaM6pw_EY): the deferred
+// publication's copy lane publishes the ADMITTED source's permission bits
+// through it, so the library entry keeps a private (0640) or read-only
+// source's bits instead of inheriting the umask-masked staging default — the
+// widening the pre-deferral flow never had (prepareArtifact staged the copy at
+// the source's own bits and the publication renamed that staged file into
+// place). The mode applies verbatim: the caller admitted these exact bits, so
+// no umask re-masking applies. A nil proof keeps the sibling's contract — the
+// by-name leg and the default staging mode.
+func CopyFileNoReplaceVerifiedMode(fs afero.Fs, src, dst string, proof VerifiedSourceProof, mode os.FileMode) error {
 	if proof == nil {
 		return CopyFileNoReplace(fs, src, dst)
 	}
@@ -214,7 +240,7 @@ func CopyFileNoReplaceVerified(fs afero.Fs, src, dst string, proof VerifiedSourc
 	if err != nil {
 		return fmt.Errorf("verified copy: open source %s: %w", src, err)
 	}
-	return streamVerifiedSource(fs, srcFile, src, dst, proof, "verified copy", "source handle", false)
+	return streamVerifiedSource(fs, srcFile, src, dst, proof, "verified copy", "source handle", false, mode)
 }
 
 // CopyFileNoReplaceVerifiedInstall is CopyFileNoReplaceVerified with the
@@ -283,6 +309,15 @@ func streamVerifiedSourceInstall(fs afero.Fs, srcFile afero.File, src, dst strin
 // nil proof degrades to the by-name CopyFileNoReplaceDigest, mirroring the
 // verified composite's nil contract.
 func CopyFileNoReplaceVerifiedDigest(fs afero.Fs, src, dst string, proof VerifiedSourceProof) (string, error) {
+	return CopyFileNoReplaceVerifiedDigestMode(fs, src, dst, proof, stagingFileMode())
+}
+
+// CopyFileNoReplaceVerifiedDigestMode is CopyFileNoReplaceVerifiedDigest with an
+// explicit destination staging mode (codex P2, PRRT_kwDORn9KaM6pw_EY) — the
+// digest lane's twin of CopyFileNoReplaceVerifiedMode, same contract: the mode
+// is the ADMITTED source's bits applied verbatim, and a nil proof keeps the
+// by-name leg with the default staging mode.
+func CopyFileNoReplaceVerifiedDigestMode(fs afero.Fs, src, dst string, proof VerifiedSourceProof, mode os.FileMode) (string, error) {
 	if proof == nil {
 		return CopyFileNoReplaceDigest(fs, src, dst)
 	}
@@ -297,7 +332,7 @@ func CopyFileNoReplaceVerifiedDigest(fs afero.Fs, src, dst string, proof Verifie
 	if err != nil {
 		return "", fmt.Errorf("verified copy: open source %s: %w", src, err)
 	}
-	return streamVerifiedSourceDigest(fs, srcFile, src, dst, proof, "verified copy", "source handle")
+	return streamVerifiedSourceDigest(fs, srcFile, src, dst, proof, "verified copy", "source handle", mode)
 }
 
 // streamVerifiedSourceDigest is the digest-returning twin of
@@ -309,7 +344,7 @@ func CopyFileNoReplaceVerifiedDigest(fs afero.Fs, src, dst string, proof Verifie
 // re-proof runs before the bound publish — a mid-stream in-place rewrite
 // discards the staged copy and attributes no digest — so a returned digest
 // counts exactly the bytes the proof admitted.
-func streamVerifiedSourceDigest(fs afero.Fs, srcFile afero.File, src, dst string, proof VerifiedSourceProof, op, noun string) (string, error) {
+func streamVerifiedSourceDigest(fs afero.Fs, srcFile afero.File, src, dst string, proof VerifiedSourceProof, op, noun string, mode os.FileMode) (string, error) {
 	defer func() { _ = srcFile.Close() }()
 	srcInfo, statErr := srcFile.Stat()
 	if statErr != nil {
@@ -318,7 +353,7 @@ func streamVerifiedSourceDigest(fs afero.Fs, srcFile afero.File, src, dst string
 	if perr := proof(src, srcInfo); perr != nil {
 		return "", fmt.Errorf("%s: the open %s failed its admission proof (%w): %w", op, noun, ErrTakeAsideForeign, perr)
 	}
-	return copyStreamNoReplaceDigestReproof(fs, srcFile, dst, reproofStreamedSource(srcFile, srcInfo, src, op, noun))
+	return copyStreamNoReplaceDigestReproof(fs, srcFile, dst, reproofStreamedSource(srcFile, srcInfo, src, op, noun), mode)
 }
 
 // reproofStreamedSource builds the post-stream re-proof both verified stream

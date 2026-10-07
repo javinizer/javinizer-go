@@ -37,13 +37,22 @@ type artifactSourceIdentity struct {
 	ino       uint64
 	size      int64
 	modTime   time.Time
+	// perm is the admitted entry's permission bits (codex P2,
+	// PRRT_kwDORn9KaM6pw_EY): the deferred publication copies the real source's
+	// bytes, and the pre-deferral flow staged those bytes at the source's own
+	// bits before renaming them into place, so the plan carries them
+	// (BindCopySourcePerm) instead of letting the umask-masked staging default
+	// widen a private or read-only source on its way into the library. Not a
+	// matches() leg: a mode change is not an identity drift — the bytes the
+	// admission covered are the ones published either way.
+	perm os.FileMode
 }
 
 func captureArtifactSourceIdentity(fs afero.Fs, path string, info os.FileInfo) artifactSourceIdentity {
 	if info == nil || !info.Mode().IsRegular() {
 		return artifactSourceIdentity{}
 	}
-	id := artifactSourceIdentity{known: true, size: info.Size(), modTime: info.ModTime()}
+	id := artifactSourceIdentity{known: true, size: info.Size(), modTime: info.ModTime(), perm: info.Mode().Perm()}
 	if dev, ino, ok := fsutil.BoundObjectIdentity(fs, path, info); ok {
 		id.hasDevIno = true
 		id.dev, id.ino = dev, ino

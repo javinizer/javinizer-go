@@ -472,6 +472,18 @@ type OrganizePlan struct {
 	// without ever streaming the payload twice. It acts only alongside a
 	// verifiedSourceProof-bound leg; unbound plans ignore it.
 	copyDigestCapture bool
+	// copySourcePerm is the permission set the plan's verified streaming legs
+	// publish with (codex P2, PRRT_kwDORn9KaM6pw_EY): the deferred
+	// publication stages its copies at the ADMITTED source's own bits, so the
+	// library entry keeps a private (0640) or read-only source's permissions
+	// instead of inheriting the umask-masked staging default — the widening the
+	// pre-deferral flow (a source-bits staged copy renamed into place) never
+	// had. It reaches the lanes that STREAM bytes into staging (the verified
+	// copy legs and the verified move's cross-device leg); a same-volume rename
+	// carries the object's own bits and needs no hint. Unbound plans keep
+	// fsutil.StagingFileMode() on every lane, exactly as before.
+	copySourcePerm    os.FileMode
+	copySourcePermSet bool
 }
 
 // BindVerifiedSource pins the plan's video-source consumption to the admission
@@ -518,6 +530,26 @@ func (p *OrganizePlan) BindSubtitleAdmissionSet(sources []string) {
 // exactly as before.
 func (p *OrganizePlan) BindCopyDigestCapture() {
 	p.copyDigestCapture = true
+}
+
+// BindCopySourcePerm pins the permission set the plan's verified streaming
+// legs must publish — the ADMITTED source's own bits (see copySourcePerm).
+// Only the fenced deferred publication binds it, alongside the admission
+// proof it belongs to (a mode without an admitted source names nothing);
+// every other plan streams at the composites' default staging mode.
+func (p *OrganizePlan) BindCopySourcePerm(perm os.FileMode) {
+	p.copySourcePerm = perm
+	p.copySourcePermSet = true
+}
+
+// copyStagingMode resolves the staging mode the plan's verified streaming
+// legs apply: the bound admitted-source bits when the caller pinned them,
+// else the composites' historical umask-masked default.
+func (p *OrganizePlan) copyStagingMode() os.FileMode {
+	if p.copySourcePermSet {
+		return p.copySourcePerm
+	}
+	return fsutil.StagingFileMode()
 }
 
 // Plan creates an organization plan without executing it

@@ -757,6 +757,12 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 		if s.videoDeferred && filepath.Clean(plan.SourcePath) == filepath.Clean(s.sourcePath) {
 			if proof := s.deferredSourceProof(); proof != nil {
 				plan.BindVerifiedSource(proof)
+				// The admitted source's permission bits ride the same bind (codex P2,
+				// PRRT_kwDORn9KaM6pw_EY): before the video was deferred this flow staged a
+				// copy AT the admitted mode and the publication renamed it into place, so
+				// the direct consume must publish those bits rather than the
+				// umask-masked staging default — a 0640 or read-only source stays private.
+				plan.BindCopySourcePerm(s.sourceIdentity.perm)
 				// Serve the copy lane's interim partial pin: the verified
 				// copy tees the payload's sha256 off its single publish
 				// stream, and the post-execute seal upgrades the pin with it

@@ -36,6 +36,15 @@ func stagingFileMode() os.FileMode {
 	return config.FilePerm &^ os.FileMode(config.UmaskValue())
 }
 
+// StagingFileMode is the historical destination staging mode — config.FilePerm
+// as narrowed by the process umask (see stagingFileMode) — for callers that
+// must state a staging mode explicitly and keep the default as their fallback.
+// The deferred publication's plan resolves the ADMITTED source's permission
+// bits and falls back here when nothing was bound (codex P2,
+// PRRT_kwDORn9KaM6pw_EY); routing both lanes through one resolver keeps the
+// explicit and the default mode from ever disagreeing.
+func StagingFileMode() os.FileMode { return stagingFileMode() }
+
 // noreplaceOrdinal is the process-local staging-name nonce for the
 // no-replace composites (exclusive staging retries ordinals inside).
 var noreplaceOrdinal atomic.Uint64
@@ -217,13 +226,13 @@ func copyStreamNoReplace(fs afero.Fs, srcFile afero.File, dst string) error {
 // discipline (a planted substitute is never unlinked) and dst content is
 // never replaced.
 func copyStreamNoReplaceDigest(fs afero.Fs, srcFile afero.File, dst string) (string, error) {
-	return copyStreamNoReplaceDigestReproof(fs, srcFile, dst, nil)
+	return copyStreamNoReplaceDigestReproof(fs, srcFile, dst, nil, stagingFileMode())
 }
 
 // copyStreamNoReplaceReproof is copyStreamNoReplaceDigestReproof for callers
 // that do not consume the streamed digest.
-func copyStreamNoReplaceReproof(fs afero.Fs, srcFile afero.File, dst string, reproof func() error) error {
-	_, err := copyStreamNoReplaceDigestReproof(fs, srcFile, dst, reproof)
+func copyStreamNoReplaceReproof(fs afero.Fs, srcFile afero.File, dst string, reproof func() error, mode os.FileMode) error {
+	_, err := copyStreamNoReplaceDigestReproof(fs, srcFile, dst, reproof, mode)
 	return err
 }
 
@@ -304,8 +313,12 @@ func copyStreamNoReplaceInstallReproof(fs afero.Fs, srcFile afero.File, dst stri
 // (codex P2, PRRT_kwDORn9KaM6nkVjY). A refusal discards the staged copy
 // through the same bound discipline as a stream failure: nothing is
 // published and no digest is attributed.
-func copyStreamNoReplaceDigestReproof(fs afero.Fs, srcFile afero.File, dst string, reproof func() error) (string, error) {
-	staged, handle, err := CreateExclusiveStagingFile(fs, dst, ".nrstg", noreplaceOrdinal.Add(1), stagingFileMode())
+//
+// mode is the staged file's permission set, applied verbatim: the verified
+// composites hand down the ADMITTED source's bits (codex P2,
+// PRRT_kwDORn9KaM6pw_EY), every other caller passes stagingFileMode().
+func copyStreamNoReplaceDigestReproof(fs afero.Fs, srcFile afero.File, dst string, reproof func() error, mode os.FileMode) (string, error) {
+	staged, handle, err := CreateExclusiveStagingFile(fs, dst, ".nrstg", noreplaceOrdinal.Add(1), mode)
 	if err != nil {
 		return "", fmt.Errorf("no-replace copy: exclusive staging for %s: %w", dst, err)
 	}

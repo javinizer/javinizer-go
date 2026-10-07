@@ -542,7 +542,7 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 				// gets consumed, take-aside and re-proven before publication
 				// (codex P1, the validation→publication window).
 				if plan.verifiedSourceProof != nil {
-					if err := fsutil.MoveFileNoReplaceVerified(s.fs, plan.SourcePath, plan.TargetPath, plan.verifiedSourceProof); err != nil {
+					if err := fsutil.MoveFileNoReplaceVerifiedMode(s.fs, plan.SourcePath, plan.TargetPath, plan.verifiedSourceProof, plan.copyStagingMode()); err != nil {
 						return mapNoReplaceRefusal(err, plan.TargetPath)
 					}
 					return nil
@@ -776,14 +776,14 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 					// bytes that landed, without any second read of the payload.
 					if plan.verifiedSourceProof != nil {
 						if plan.copyDigestCapture {
-							digest, copyErr := fsutil.CopyFileNoReplaceVerifiedDigest(s.fs, plan.SourcePath, plan.TargetPath, plan.verifiedSourceProof)
+							digest, copyErr := fsutil.CopyFileNoReplaceVerifiedDigestMode(s.fs, plan.SourcePath, plan.TargetPath, plan.verifiedSourceProof, plan.copyStagingMode())
 							if copyErr != nil {
 								return mapNoReplaceRefusal(fmt.Errorf("failed to copy file: %w", copyErr), plan.TargetPath)
 							}
 							copySHA256 = digest
 							return nil
 						}
-						if err := fsutil.CopyFileNoReplaceVerified(s.fs, plan.SourcePath, plan.TargetPath, plan.verifiedSourceProof); err != nil {
+						if err := fsutil.CopyFileNoReplaceVerifiedMode(s.fs, plan.SourcePath, plan.TargetPath, plan.verifiedSourceProof, plan.copyStagingMode()); err != nil {
 							return mapNoReplaceRefusal(fmt.Errorf("failed to copy file: %w", err), plan.TargetPath)
 						}
 						return nil
