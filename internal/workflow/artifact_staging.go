@@ -28,6 +28,11 @@ import (
 // multi-GB file never duplicates the payload into a hidden sibling folder.
 var observeBoundSidecarPublish = (*downloader.ReplacementBatch).ObservePublishResultBound
 
+// observeBoundPrimaryPublish is the primary lane's bound observation (codex
+// P1, PRRT_kwDORn9KaM6p3Dq1) — a package-level seam so the non-successor
+// error leg stays testable, exactly like observeBoundSidecarPublish.
+var observeBoundPrimaryPublish = (*downloader.ReplacementBatch).ObservePublishResultBound
+
 func (s *artifactStage) videoStagingDeferred() bool { return s != nil && s.videoDeferred }
 
 type artifactPlanExecutor interface {
@@ -815,7 +820,7 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 				// Lanes whose publish offers no identity (by-name copies, soft
 				// links, authorized replace legs) keep the legacy observation.
 				if finalResult != nil && finalResult.InstalledIdentity != nil {
-					if oerr := batch.ObservePublishResultBound(plan.TargetPath, finalResult.InstalledIdentity); oerr != nil {
+					if oerr := observeBoundPrimaryPublish(batch, plan.TargetPath, finalResult.InstalledIdentity); oerr != nil {
 						if fsutil.PublishSuccessorUnproven(oerr) {
 							logging.Warnf("deferred primary %s holds an explicitly unproven successor — retained byte-intact and never armed for rollback deletion: %v", plan.TargetPath, oerr)
 						} else {

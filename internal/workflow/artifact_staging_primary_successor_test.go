@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/javinizer/javinizer-go/internal/downloader"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
 	"github.com/javinizer/javinizer-go/internal/organizer"
@@ -69,25 +70,57 @@ func TestDeferredPrimaryCopyPostUnlockSuccessorRetainedNotAdopted(t *testing.T) 
 	assert.Equal(t, "subtitle", string(got), "copy mode retains the admitted sidecar source")
 }
 
+// Mirror of the copied-sidecar coverage test: when the PRIMARY bound
+// observation refuses with something other than the typed successor class,
+// the apply propagates it wrapped as "bind deferred primary install" rather
+// than swallowing an unexpected failure.
+func TestDeferredPrimaryBoundObserveGenericErrorWraps(t *testing.T) {
+	base, root, source, _, _, _, match := pr260FencedFiles(t, "primary-bound-observe-wrap")
+	dest := filepath.Join(root, "library")
+	real := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize}, template.NewEngine(), nil)
+	orch := &applyOrchImpl{fs: base, organizer: real}
+	cmd := pr260ArtifactFailureCommand(&models.Movie{ContentID: "primary-bound-observe-wrap"}, match, dest)
+	cmd.Organize.Skip = false
+	cmd.Organize.MoveFiles = false
+	cmd.Download = false
+
+	old := observeBoundPrimaryPublish
+	t.Cleanup(func() { observeBoundPrimaryPublish = old })
+	observeBoundPrimaryPublish = func(*downloader.ReplacementBatch, string, os.FileInfo) error {
+		return errBoundObserveInjected
+	}
+
+	stage, _, publishErr := verifiedStagePublish(t, orch, real, base, root, source, dest, match, cmd)
+	defer stage.cleanup()
+
+	require.Error(t, publishErr)
+	assert.ErrorIs(t, publishErr, errBoundObserveInjected, "the injected refusal unwraps through the wrap")
+	assert.Contains(t, publishErr.Error(), "bind deferred primary install")
+}
+
 // codex P1 (PR #276, finding PRRT_kwDORn9KaM6p3Dq8) — "retract sidecar
 // ownership after successor refusal": the refusal must withdraw the durable
 // claim too, or the completion reconcile keeps the target pinned and the
 // seat graduates into the ledger's unconditional Delete list.
 func TestRetractCopiedSidecarOwnershipClearsClaimKeepsExclusion(t *testing.T) {
+	// Paths go through the same normalization the helper applies, so the case
+	// holds on every host (Windows cleans to volume-style separators).
+	movie := filepath.Clean(filepath.FromSlash("/lib/movie.srt"))
+	other := filepath.Clean(filepath.FromSlash("/lib/other.srt"))
 	result := &organizer.OrganizeResult{
 		Subtitles: []organizer.SubtitleResult{
-			{SubtitleMove: models.SubtitleMove{NewPath: "/lib/movie.srt", Copied: true}},
-			{SubtitleMove: models.SubtitleMove{NewPath: "/lib/other.srt", Copied: true}},
+			{SubtitleMove: models.SubtitleMove{NewPath: movie, Copied: true}},
+			{SubtitleMove: models.SubtitleMove{NewPath: other, Copied: true}},
 		},
 	}
-	targets := map[string]bool{"/lib/movie.srt": true, "/lib/other.srt": true}
-	identities := map[string]os.FileInfo{"/lib/movie.srt": nil, "/lib/other.srt": nil}
+	targets := map[string]bool{movie: true, other: true}
+	identities := map[string]os.FileInfo{movie: nil, other: nil}
 
-	retractCopiedSidecarOwnership(result, targets, identities, "/lib/movie.srt")
+	retractCopiedSidecarOwnership(result, targets, identities, movie)
 
-	assert.False(t, targets["/lib/movie.srt"], "the refused target leaves the set the reconcile keeps")
-	assert.True(t, targets["/lib/other.srt"], "unrelated seats keep their claim")
-	assert.NotContains(t, identities, "/lib/movie.srt")
+	assert.False(t, targets[movie], "the refused target leaves the set the reconcile keeps")
+	assert.True(t, targets[other], "unrelated seats keep their claim")
+	assert.NotContains(t, identities, movie)
 	assert.True(t, result.Subtitles[0].SuccessorRefused, "the seat is marked so the completion ledger skips it")
 	assert.True(t, result.Subtitles[0].Copied, "Copied stays set: the rehome exclusion still keeps the staged duplicate out of the tree")
 	assert.False(t, result.Subtitles[1].SuccessorRefused)
