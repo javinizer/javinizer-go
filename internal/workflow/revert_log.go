@@ -985,7 +985,10 @@ func (l *dbRevertLog) Complete(ctx context.Context, opID OperationID, result *Ap
 		newPath = org.NewPath
 		inPlaceRenamed = org.InPlaceRenamed
 		for _, sr := range org.Subtitles {
-			if sr.Moved || sr.Copied {
+			// A successor-refused seat owns nothing at the destination (codex P1,
+			// PRRT_kwDORn9KaM6p3Dq8): graduating it would put the explicitly
+			// unproven occupant into the unconditional delete ledger.
+			if (sr.Moved || sr.Copied) && !sr.SuccessorRefused {
 				subtitles = append(subtitles, sr.SubtitleMove)
 			}
 		}
@@ -1104,7 +1107,10 @@ func (l *dbRevertLog) CompleteFailed(ctx context.Context, opID OperationID, resu
 		newPath = org.NewPath
 		inPlaceRenamed = org.InPlaceRenamed
 		for _, sr := range org.Subtitles {
-			if sr.Moved || sr.Copied {
+			// A successor-refused seat owns nothing at the destination (codex P1,
+			// PRRT_kwDORn9KaM6p3Dq8): graduating it would put the explicitly
+			// unproven occupant into the unconditional delete ledger.
+			if (sr.Moved || sr.Copied) && !sr.SuccessorRefused {
 				subtitles = append(subtitles, sr.SubtitleMove)
 			}
 		}

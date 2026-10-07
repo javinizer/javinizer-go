@@ -170,10 +170,16 @@ func TestDeferredCopyCopiedSidecarForeignSwapSurvives(t *testing.T) {
 		assert.NotEqual(t, subTarget, rp.Destination, "the occupant never registered as this apply's replacement")
 	}
 	for _, pd := range ledger.PlannedDeletes {
-		assert.NotEqual(t, subTarget, pd.Path, "the confirmed pin was never retracted to pending — it graduated")
 		assert.NotEqual(t, video, pd.Path, "the graduated primary pin was consumed")
 	}
-	assert.Contains(t, ledger.Delete, subTarget, "the armed pin graduated into the plain delete ledger unretracted")
+	// Superseded by codex P1 PRRT_kwDORn9KaM6p3Dq8: the refusal now retracts the
+	// ownership claim instead of graduating it. An explicitly unproven successor
+	// must never reach the unconditional delete ledger, or reverting this
+	// successful apply would remove the occupant the refusal protects.
+	assert.NotContains(t, ledger.Delete, subTarget, "the refused seat never graduates into the plain delete ledger")
+	for _, pd := range ledger.PlannedDeletes {
+		assert.NotEqual(t, subTarget, pd.Path, "the refused target keeps no ownership claim at all — the pin was retracted, neither graduated nor left pending")
+	}
 }
 
 // The publish-completed classification is installed for the exclusion too:

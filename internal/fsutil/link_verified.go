@@ -71,37 +71,49 @@ type LinkFunc func(oldname, newname string) error
 // unwrapped so callers keep their EXDEV / permission classification. A nil
 // proof preserves the legacy by-name behavior unchanged.
 func LinkFileNoReplaceVerified(fs afero.Fs, src, dst string, link LinkFunc, proof VerifiedSourceProof) error {
+	_, err := LinkFileNoReplaceVerifiedInstall(fs, src, dst, link, proof)
+	return err
+}
+
+// LinkFileNoReplaceVerifiedInstall is LinkFileNoReplaceVerified with the
+// INSTALLED entry's proven identity handed back (codex P1,
+// PRRT_kwDORn9KaM6p3Dq1): the composite re-proves the entry it installed
+// against the admitted pre-link object, so that proven stat IS the identity a
+// caller must bind its record to — a later name lookup could authenticate a
+// successor another writer planted after the install. A nil proof keeps the
+// legacy by-name behavior and yields no identity.
+func LinkFileNoReplaceVerifiedInstall(fs afero.Fs, src, dst string, link LinkFunc, proof VerifiedSourceProof) (os.FileInfo, error) {
 	if proof == nil {
-		return link(src, dst)
+		return nil, link(src, dst)
 	}
 	done, err := classifyNoreplaceDestination(fs, src, dst)
 	if done || err != nil {
-		return err
+		return nil, err
 	}
 	if err := fs.MkdirAll(filepath.Dir(dst), config.DirPerm); err != nil {
-		return fmt.Errorf("verified link: create destination directory: %w", err)
+		return nil, fmt.Errorf("verified link: create destination directory: %w", err)
 	}
 	srcFile, err := openVerifiedSource(fs, src)
 	if err != nil {
-		return fmt.Errorf("verified link: open source %s: %w", src, err)
+		return nil, fmt.Errorf("verified link: open source %s: %w", src, err)
 	}
 	defer func() { _ = srcFile.Close() }()
 	srcInfo, statErr := srcFile.Stat()
 	if statErr != nil {
-		return fmt.Errorf("verified link: inspect the open source handle %s: %w", src, statErr)
+		return nil, fmt.Errorf("verified link: inspect the open source handle %s: %w", src, statErr)
 	}
 	if perr := proof(src, srcInfo); perr != nil {
-		return fmt.Errorf("verified link: the open source handle failed its admission proof (%w): %w", ErrTakeAsideForeign, perr)
+		return nil, fmt.Errorf("verified link: the open source handle failed its admission proof (%w): %w", ErrTakeAsideForeign, perr)
 	}
 	if lerr := link(src, dst); lerr != nil {
-		return lerr
+		return nil, lerr
 	}
 	dstInfo, dstErr := asideLstat(fs, dst)
 	switch {
 	case errors.Is(dstErr, os.ErrNotExist):
-		return fmt.Errorf("verified link: the installed entry %s vanished before its identity proof: %w", dst, dstErr)
+		return nil, fmt.Errorf("verified link: the installed entry %s vanished before its identity proof: %w", dst, dstErr)
 	case dstErr != nil:
-		return fmt.Errorf("%w: verified link: the installed entry %s could not be re-proven (%v) — the publish may stand at the destination", ErrPublishCompleted, dst, dstErr)
+		return nil, fmt.Errorf("%w: verified link: the installed entry %s could not be re-proven (%v) — the publish may stand at the destination", ErrPublishCompleted, dst, dstErr)
 	}
 	if perr := proof(dst, dstInfo); perr != nil {
 		// Bind the cleanup decision to the link operation's OWN identity (the
@@ -122,19 +134,19 @@ func LinkFileNoReplaceVerified(fs afero.Fs, src, dst string, link LinkFunc, proo
 			// output there — observing it for rollback would arm UnlinkVerified
 			// against the successor's own identity and delete the foreign bytes
 			// (codex P1, PRRT_kwDORn9KaM6nsX9a).
-			return errors.Join(
+			return nil, errors.Join(
 				fmt.Errorf("verified link: the installed entry %s failed its admission proof (%w): %w", dst, ErrTakeAsideForeign, perr),
 				fmt.Errorf("%w: %s no longer provably names the object the link operation installed — the unproven entry is retained byte-intact (never bound-unlinked against its own current identity)", ErrPublishCompleted, dst),
 				fmt.Errorf("%w: the occupant at %s must be retained, never observed as this operation's installed output", ErrPublishSuccessorUnproven, dst),
 			)
 		}
 		if rmErr := UnlinkVerified(fs, dst, srcInfo); rmErr != nil {
-			return errors.Join(
+			return nil, errors.Join(
 				fmt.Errorf("verified link: the installed entry %s failed its admission proof (%w): %w", dst, ErrTakeAsideForeign, perr),
 				fmt.Errorf("%w: the rejected install could not be bound-unlinked and stays recoverable at %s: %v", ErrPublishCompleted, dst, rmErr),
 			)
 		}
-		return fmt.Errorf("verified link: the installed entry %s failed its admission proof — the rejected install was unlinked (%w): %w", dst, ErrTakeAsideForeign, perr)
+		return nil, fmt.Errorf("verified link: the installed entry %s failed its admission proof — the rejected install was unlinked (%w): %w", dst, ErrTakeAsideForeign, perr)
 	}
-	return nil
+	return dstInfo, nil
 }

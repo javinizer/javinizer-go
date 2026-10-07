@@ -505,6 +505,12 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 		// republish-exhaustion family) keeps the crumb ON the FAILED result
 		// — see foldMovePublishCrumb.
 		overwroteOccupiedDest := false
+		// installedIdentity is the moved object's publish-proven identity: the
+		// verified composite re-proves the object it installed, and the result
+		// carries that proof so the caller never re-derives it from the
+		// destination NAME after a foreign writer could have replanted it
+		// (codex P1, PRRT_kwDORn9KaM6p3Dq1).
+		var installedIdentity os.FileInfo
 		move := func() error {
 			if plan.overwriteAuthorized {
 				// Authorized: still classify (#224 Phase C) — symlink/dir dests
@@ -542,9 +548,11 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 				// gets consumed, take-aside and re-proven before publication
 				// (codex P1, the validation→publication window).
 				if plan.verifiedSourceProof != nil {
-					if err := fsutil.MoveFileNoReplaceVerifiedMode(s.fs, plan.SourcePath, plan.TargetPath, plan.verifiedSourceProof, plan.copyStagingMode()); err != nil {
-						return mapNoReplaceRefusal(err, plan.TargetPath)
+					moved, moveErr := fsutil.MoveFileNoReplaceVerifiedMode(s.fs, plan.SourcePath, plan.TargetPath, plan.verifiedSourceProof, plan.copyStagingMode())
+					if moveErr != nil {
+						return mapNoReplaceRefusal(moveErr, plan.TargetPath)
 					}
+					installedIdentity = moved
 					return nil
 				}
 				if err := fsutil.MoveFileNoReplace(s.fs, plan.SourcePath, plan.TargetPath); err != nil {
@@ -593,6 +601,7 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 		}
 
 		result.Moved = true
+		result.InstalledIdentity = installedIdentity
 		// Force-overwrite audit crumb: the replace actually landed — keep the
 		// resident bytes' replacement visible to every audit consumer.
 		if overwroteOccupiedDest {
@@ -627,6 +636,11 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 	// that actually streamed — no-op early returns leave it empty, and the
 	// caller's seal then matches the result's empty PrimaryCopySHA256.
 	copySHA256 := ""
+	// installedIdentity is the copied/linked primary's publish-proven identity
+	// (codex P1, PRRT_kwDORn9KaM6p3Dq1): the verified legs hand back the object
+	// they installed so the caller binds THAT object, never a destination name
+	// lookup taken after a foreign writer could have replanted it.
+	var installedIdentity os.FileInfo
 	// Every destination-touching step runs under the destination lock: unauthorized
 	// paths guard inside it (a plain copy would otherwise overwrite a late-created file),
 	// and authorized Remove+link work must serialize against concurrent guarded calls.
@@ -737,9 +751,11 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 				// install no-clobber; the shared refusal/classes mapping is
 				// unchanged.
 				if plan.verifiedSourceProof != nil {
-					if err := fsutil.LinkFileNoReplaceVerified(s.fs, plan.SourcePath, plan.TargetPath, s.linker.hardlink, plan.verifiedSourceProof); err != nil {
-						return mapNoReplaceRefusal(mapLinkInstallError(err), plan.TargetPath)
+					linked, linkErr := fsutil.LinkFileNoReplaceVerifiedInstall(s.fs, plan.SourcePath, plan.TargetPath, s.linker.hardlink, plan.verifiedSourceProof)
+					if linkErr != nil {
+						return mapNoReplaceRefusal(mapLinkInstallError(linkErr), plan.TargetPath)
 					}
+					installedIdentity = linked
 					return nil
 				}
 				if err := s.linker.hardlink(plan.SourcePath, plan.TargetPath); err != nil {
@@ -776,16 +792,19 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 					// bytes that landed, without any second read of the payload.
 					if plan.verifiedSourceProof != nil {
 						if plan.copyDigestCapture {
-							digest, copyErr := fsutil.CopyFileNoReplaceVerifiedDigestMode(s.fs, plan.SourcePath, plan.TargetPath, plan.verifiedSourceProof, plan.copyStagingMode())
+							digest, installed, copyErr := fsutil.CopyFileNoReplaceVerifiedDigestMode(s.fs, plan.SourcePath, plan.TargetPath, plan.verifiedSourceProof, plan.copyStagingMode())
 							if copyErr != nil {
 								return mapNoReplaceRefusal(fmt.Errorf("failed to copy file: %w", copyErr), plan.TargetPath)
 							}
 							copySHA256 = digest
+							installedIdentity = installed
 							return nil
 						}
-						if err := fsutil.CopyFileNoReplaceVerifiedMode(s.fs, plan.SourcePath, plan.TargetPath, plan.verifiedSourceProof, plan.copyStagingMode()); err != nil {
-							return mapNoReplaceRefusal(fmt.Errorf("failed to copy file: %w", err), plan.TargetPath)
+						installed, copyErr := fsutil.CopyFileNoReplaceVerifiedMode(s.fs, plan.SourcePath, plan.TargetPath, plan.verifiedSourceProof, plan.copyStagingMode())
+						if copyErr != nil {
+							return mapNoReplaceRefusal(fmt.Errorf("failed to copy file: %w", copyErr), plan.TargetPath)
 						}
+						installedIdentity = installed
 						return nil
 					}
 					if err := fsutil.CopyFileNoReplace(s.fs, plan.SourcePath, plan.TargetPath); err != nil {
@@ -856,6 +875,7 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 
 	result.Moved = true
 	result.PrimaryCopySHA256 = copySHA256
+	result.InstalledIdentity = installedIdentity
 	// Force-overwrite audit crumb: the replace actually landed — keep the
 	// resident bytes' replacement visible to every audit consumer.
 	if overwroteOccupiedDest {

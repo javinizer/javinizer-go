@@ -802,7 +802,29 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 			// is unchanged: only this explicit-successor class drops out of
 			// the observe.
 			if !fsutil.PublishSuccessorUnproven(err) {
-				batch.ObservePublishResult(plan.TargetPath)
+				// Bind the primary observation to the object the publish PROVED it
+				// installed (codex P1, PRRT_kwDORn9KaM6p3Dq1): execute released its
+				// destination lock, so a foreign writer can replant the name before
+				// this observation runs. A name-derived record would adopt that
+				// successor as this batch's install, and a later failed leg's
+				// rollback would then UnlinkVerified (or move back over the source)
+				// bytes this apply never wrote — the same discipline the copied
+				// sidecars already apply. An affirmative divergence retains the
+				// occupant byte-intact and leaves the leg UNINSTALLED: the apply
+				// commits and rollback can never be armed against the successor.
+				// Lanes whose publish offers no identity (by-name copies, soft
+				// links, authorized replace legs) keep the legacy observation.
+				if finalResult != nil && finalResult.InstalledIdentity != nil {
+					if oerr := batch.ObservePublishResultBound(plan.TargetPath, finalResult.InstalledIdentity); oerr != nil {
+						if fsutil.PublishSuccessorUnproven(oerr) {
+							logging.Warnf("deferred primary %s holds an explicitly unproven successor — retained byte-intact and never armed for rollback deletion: %v", plan.TargetPath, oerr)
+						} else {
+							return fmt.Errorf("bind deferred primary install %s to its published identity: %w", plan.TargetPath, oerr)
+						}
+					}
+				} else {
+					batch.ObservePublishResult(plan.TargetPath)
+				}
 			}
 			// Confirm only what execute proves installed: a would-be target
 			// that turned out occupied/armed-skip mid-run must not be registered
@@ -858,6 +880,13 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 						if fsutil.PublishSuccessorUnproven(oerr) {
 							logging.Warnf("copy-installed sidecar %s holds an explicitly unproven successor — retained byte-intact and never armed for rollback deletion: %v", target, oerr)
 							_ = batch.ReleaseUninstalled(target)
+							// The durable ownership claim is retracted with the in-process
+							// leg (codex P1, PRRT_kwDORn9KaM6p3Dq8): a surviving claim keeps
+							// the target in the completion reconcile's keep-set and lets the
+							// seat graduate into the ledger's unconditional Delete list, so
+							// reverting this otherwise-successful apply would remove the
+							// explicitly unproven successor.
+							retractCopiedSidecarOwnership(finalResult, copiedSidecarTargets, copiedSidecarIdentities, target)
 							continue
 						}
 						return fmt.Errorf("bind copy-installed sidecar %s to its installed identity: %w", target, oerr)
@@ -1353,6 +1382,33 @@ func (s *artifactStage) installedSidecarExcludedSiblings(finalResult *organizer.
 		}
 	}
 	return excluded
+}
+
+// retractCopiedSidecarOwnership withdraws every ownership claim this apply
+// recorded for a copied subtitle seat after a bound observation proved another
+// writer replaced the installed bytes (codex P1, PRRT_kwDORn9KaM6p3Dq8):
+// releasing only the in-process batch leg would leave the durable claim
+// standing — the target stays in the set the completion reconcile KEEPS, and
+// the seat later graduates into the ledger's unconditional Delete list, so
+// reverting this otherwise-successful apply would remove the explicitly
+// unproven successor. The target leaves both in-process sets (the reconcile
+// keep-filter and the identity map) and the seat is marked SuccessorRefused so
+// the completion ledger skips it — while Copied stays SET: the rehome/install
+// exclusion reads that flag to keep the staged duplicate OUT of the tree, and
+// a cleared flag would let installPaths republish over the retained occupant.
+// The result is non-nil by construction: only the copied-seat path — whose
+// copied set a non-nil result produced — reaches this refusal.
+func retractCopiedSidecarOwnership(result *organizer.OrganizeResult, targets map[string]bool, identities map[string]os.FileInfo, target string) {
+	key := filepath.Clean(target)
+	delete(targets, key)
+	delete(identities, key)
+	for i := range result.Subtitles {
+		seat := &result.Subtitles[i]
+		if filepath.Clean(seat.NewPath) != key {
+			continue
+		}
+		seat.SuccessorRefused = true
+	}
 }
 
 func (s *artifactStage) rehomeRemainingSiblings(stagedVideo string, excluded map[string]bool) error {

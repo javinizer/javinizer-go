@@ -302,6 +302,17 @@ type OrganizeResult struct {
 	FileName     string
 	Moved        bool
 	Error        error
+	// InstalledIdentity is the primary destination object's identity AS THE
+	// PUBLISH PROVED IT (codex P1, PRRT_kwDORn9KaM6p3Dq1): the verified move,
+	// copy, and hard-link composites hand back the object they installed, so a
+	// caller recording the install for later compensation binds THAT object
+	// rather than whatever the destination name resolves to after the
+	// publisher releases its lock (a later writer can replant the name, and a
+	// name-derived record arms rollback's verified unlink against foreign
+	// bytes). Nil on every lane that offers no such proof (by-name copies,
+	// soft links, authorized replace lanes) — those keep the legacy
+	// name-based observation.
+	InstalledIdentity os.FileInfo
 	// Warnings carries non-fatal per-file advisories an authorized run must
 	// not silently drop (#224 phase E): authorized intra-batch duplicates land
 	// here so the worker history rows and the API eventlog can persist them.
@@ -365,6 +376,17 @@ type SubtitleResult struct {
 	// own install. Nil unless a verified copy installed cleanly; moves,
 	// skips, errors, and legacy by-name copies carry none.
 	InstalledIdentity os.FileInfo
+	// SuccessorRefused marks a copied seat whose bound observation proved
+	// another writer replaced the installed bytes (codex P1, PR #276,
+	// finding PRRT_kwDORn9KaM6p3Dq8): the occupant is retained byte-intact
+	// and this apply owns nothing there, so the seat must NOT graduate into
+	// the completion ledger's unconditional Delete list — a later revert of
+	// this successful apply would otherwise remove the explicitly unproven
+	// successor. The seat keeps its Copied flag: the rehome/install
+	// exclusion reads it to keep the staged duplicate OUT of the tree (a
+	// cleared flag would let installPaths republish over the retained
+	// occupant), so refusal suppresses the ledger claim only.
+	SuccessorRefused bool
 }
 
 // strategyType is an internal enum identifying the operation strategy.

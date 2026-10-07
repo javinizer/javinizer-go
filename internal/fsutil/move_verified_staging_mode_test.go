@@ -38,11 +38,20 @@ func TestVerifiedCompositesPublishExplicitStagingMode(t *testing.T) {
 		require.NoError(t, err)
 		return info.Mode().Perm()
 	}
+	assertSameObject := func(t *testing.T, installed os.FileInfo, path string) {
+		t.Helper()
+		require.NotNil(t, installed, "the publish hands back the object it installed")
+		info, err := os.Lstat(path)
+		require.NoError(t, err)
+		assert.True(t, os.SameFile(installed, info), "the returned identity IS the published object")
+	}
 
 	t.Run("copy twin applies the explicit mode", func(t *testing.T) {
 		dst := filepath.Join(t.TempDir(), "out.mp4")
-		require.NoError(t, CopyFileNoReplaceVerifiedMode(fs, newSource(t), dst, admitAll, 0o640))
+		installed, err := CopyFileNoReplaceVerifiedMode(fs, newSource(t), dst, admitAll, 0o640)
+		require.NoError(t, err)
 		assert.Equal(t, os.FileMode(0o640), permOf(t, dst), "the mode is written verbatim, umask unmasked")
+		assertSameObject(t, installed, dst)
 		got, err := os.ReadFile(dst)
 		require.NoError(t, err)
 		assert.Equal(t, content, got)
@@ -51,10 +60,11 @@ func TestVerifiedCompositesPublishExplicitStagingMode(t *testing.T) {
 	t.Run("copy digest twin applies the explicit mode", func(t *testing.T) {
 		dst := filepath.Join(t.TempDir(), "out.mp4")
 		sum := sha256.Sum256(content)
-		digest, err := CopyFileNoReplaceVerifiedDigestMode(fs, newSource(t), dst, admitAll, 0o640)
+		digest, installed, err := CopyFileNoReplaceVerifiedDigestMode(fs, newSource(t), dst, admitAll, 0o640)
 		require.NoError(t, err)
 		assert.Equal(t, hex.EncodeToString(sum[:]), digest)
 		assert.Equal(t, os.FileMode(0o640), permOf(t, dst))
+		assertSameObject(t, installed, dst)
 	})
 
 	t.Run("move twins keep the consumed object's bits", func(t *testing.T) {
@@ -65,8 +75,39 @@ func TestVerifiedCompositesPublishExplicitStagingMode(t *testing.T) {
 
 		src2 := newSource(t)
 		dst2 := filepath.Join(t.TempDir(), "moved-mode.mp4")
-		require.NoError(t, MoveFileNoReplaceVerifiedMode(fs, src2, dst2, admitAll, 0o640))
+		installed, err := MoveFileNoReplaceVerifiedMode(fs, src2, dst2, admitAll, 0o640)
+		require.NoError(t, err)
 		assert.Equal(t, os.FileMode(0o640), permOf(t, dst2))
+		assertSameObject(t, installed, dst2)
+	})
+
+	t.Run("hard-link install twin hands back the linked entry", func(t *testing.T) {
+		src := newSource(t)
+		dst := filepath.Join(t.TempDir(), "linked.mp4")
+		installed, err := LinkFileNoReplaceVerifiedInstall(fs, src, dst, os.Link, admitAll)
+		require.NoError(t, err)
+		assertSameObject(t, installed, dst)
+		assertSameObject(t, installed, src)
+	})
+
+	t.Run("virtual leg resolves the installed identity by lookup", func(t *testing.T) {
+		mem := afero.NewMemMapFs()
+		require.NoError(t, afero.WriteFile(mem, "/in/source.srt", content, 0o644))
+		digest, installed, err := CopyFileNoReplaceVerifiedDigestMode(mem, "/in/source.srt", "/out/source.srt", admitAll, 0o644)
+		require.NoError(t, err)
+		assert.NotEmpty(t, digest)
+		require.NotNil(t, installed, "a MemMap publish carries no bound identity, so the entry is looked up")
+	})
+
+	t.Run("virtual leg surfaces an indeterminate identity lookup", func(t *testing.T) {
+		mem := afero.NewMemMapFs()
+		require.NoError(t, afero.WriteFile(mem, "/in/source.srt", content, 0o644))
+		require.NoError(t, mem.MkdirAll("/out", 0o755))
+		wrapped := &lstatIndeterminateOnDestCreateFs{Fs: mem, victim: "/out/source.srt"}
+		_, _, err := CopyFileNoReplaceVerifiedDigestMode(wrapped, "/in/source.srt", "/out/source.srt", admitAll, 0o644)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrPublishCompleted, "the indeterminate lookup rides the publish-completed doubt class")
+		assert.Contains(t, err.Error(), "indeterminate")
 	})
 
 	t.Run("default wrappers keep the umask-masked staging mode", func(t *testing.T) {
@@ -85,14 +126,22 @@ func TestVerifiedCompositesPublishExplicitStagingMode(t *testing.T) {
 	t.Run("nil proof keeps the by-name leg and the default staging mode", func(t *testing.T) {
 		src := newSource(t)
 		dst := filepath.Join(t.TempDir(), "nil-proof.mp4")
-		require.NoError(t, CopyFileNoReplaceVerifiedMode(fs, src, dst, nil, 0o640))
+		installed, err := CopyFileNoReplaceVerifiedMode(fs, src, dst, nil, 0o640)
+		require.NoError(t, err)
+		assert.Nil(t, installed, "an unadmitted lane offers no proven identity")
 		assert.Equal(t, StagingFileMode(), permOf(t, dst), "an unadmitted lane keeps the composite default")
 
 		dst2 := filepath.Join(t.TempDir(), "nil-proof-digest.mp4")
-		digest, err := CopyFileNoReplaceVerifiedDigestMode(fs, src, dst2, nil, 0o640)
+		digest, installed2, err := CopyFileNoReplaceVerifiedDigestMode(fs, src, dst2, nil, 0o640)
 		require.NoError(t, err)
 		assert.NotEmpty(t, digest)
+		assert.Nil(t, installed2)
 		assert.Equal(t, StagingFileMode(), permOf(t, dst2))
+
+		dst3 := filepath.Join(t.TempDir(), "nil-proof-move.mp4")
+		moved, err := MoveFileNoReplaceVerifiedMode(fs, src, dst3, nil, 0o640)
+		require.NoError(t, err)
+		assert.Nil(t, moved, "the by-name move lane offers no proven identity")
 	})
 
 	t.Run("StagingFileMode mirrors the umask-masked default", func(t *testing.T) {
