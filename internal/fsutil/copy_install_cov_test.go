@@ -143,8 +143,13 @@ func TestCoverObserveVerifiedInstall_IndeterminateLookup(t *testing.T) {
 
 	wrapped := &failFsWrap{Fs: fs, victim: "/dst"}
 	got, err := ObserveVerifiedInstall(wrapped, "/dst", info)
-	require.NoError(t, err)
-	assert.Nil(t, got, "indeterminate lookup classifies as did-not-install, not an error")
+	// codex P1, PRRT_kwDORn9KaM6qJY2i: an unreadable destination is an
+	// INCONCLUSIVE observation, not a silent did-not-install — a foreign file
+	// may already stand behind the transient error, so the leg is refused
+	// instead of being handed to the name-based confirmation.
+	require.Error(t, err, "an indeterminate lookup is refused, never adopted")
+	assert.True(t, errors.Is(err, ErrPublishCompleted), "the doubt class rides the refusal")
+	assert.Nil(t, got, "nothing is adopted from an unreadable destination")
 }
 
 type failFsWrap struct {

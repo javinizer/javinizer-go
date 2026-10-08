@@ -132,12 +132,17 @@ func TestObserveVerifiedInstall_SuccessorDivergenceTyped(t *testing.T) {
 	}
 }
 
-func TestObserveVerifiedInstall_VacantAndIndeterminateStaySilent(t *testing.T) {
+func TestObserveVerifiedInstall_VacantRefuses(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	identity := writeTempIdentity(t, fs, "/seed.srt")
 
+	// codex P1, PRRT_kwDORn9KaM6qJY2i: the publish proved an install at this
+	// name, so an absent entry cannot be classified as a did-not-install that
+	// the unbound confirmation later re-derives from whatever appears.
 	observed, err := ObserveVerifiedInstall(fs, "/absent.srt", identity)
-	require.NoError(t, err, "a vacant name is doubt without divergence — the caller's confirmation leg surfaces it")
+	require.Error(t, err, "a vacant name after a proven publish is inconclusive and refused")
+	assert.True(t, errors.Is(err, ErrPublishCompleted), "absence is the doubt class")
+	assert.False(t, errors.Is(err, ErrPublishSuccessorUnproven), "absence is doubt, never an affirmative divergence")
 	assert.Nil(t, observed)
 }
 

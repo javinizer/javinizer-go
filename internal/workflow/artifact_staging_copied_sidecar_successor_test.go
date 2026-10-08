@@ -21,6 +21,7 @@ package workflow
 // (PRRT_kwDORn9KaM6m7CBi: the durable hash pin owns later-revert retention).
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"sort"
@@ -73,12 +74,14 @@ func TestDeferredCopiedSidecarPostUnlockSuccessorRetainedNotAdopted(t *testing.T
 			keptTarget, swappedTarget = copied[0], copied[1]
 			require.NoError(t, base.Remove(swappedTarget))
 			require.NoError(t, afero.WriteFile(base, swappedTarget, []byte(copiedSuccessorPayload), 0o644))
-			if videoDst != "" {
-				require.NoError(t, base.Remove(videoDst), "the late failing leg: the pre-fix lane's poisoned adoption must reach rollback")
-			}
+			// The late failing leg is injected through the delete-reconcile fault
+			// below instead of by removing the video destination: under the
+			// fail-closed observation (codex P1, PRRT_kwDORn9KaM6qJY2i) a removed
+			// destination is refused at the observation itself, which would abort
+			// before the sidecar decisions this case pins.
 		},
 	}
-	orch := &applyOrchImpl{fs: base, organizer: fault}
+	orch := &applyOrchImpl{fs: base, organizer: fault, revertLog: &completeCallFaultLog{deleteReconcileErr: errors.New("injected delete reconcile failure")}}
 	cmd := pr260ArtifactFailureCommand(&models.Movie{ContentID: "copied-sidecar-successor"}, match, dest)
 	cmd.Organize.Skip = false
 	cmd.Organize.MoveFiles = false
@@ -90,7 +93,10 @@ func TestDeferredCopiedSidecarPostUnlockSuccessorRetainedNotAdopted(t *testing.T
 
 	require.NotEmpty(t, swappedTarget, "the copied sidecar install ran and the external swap landed in the observation window")
 	require.Error(t, publishErr, "the late leg (the removed video destination) still fails the apply")
-	require.ErrorContains(t, publishErr, "inspect staged publication result")
+	require.ErrorContains(t, publishErr, "reconcile copy-installed delete intents", "the injected late leg fails the apply after the sidecar observations and confirmations")
+	require.NotEmpty(t, videoDst, "the primary copy install ran")
+	_, videoErr := base.Stat(videoDst)
+	assert.True(t, os.IsNotExist(videoErr), "rollback unwound this batch's own identity-matched primary copy as well")
 	require.NotErrorIs(t, publishErr, fsutil.ErrPublishSuccessorUnproven, "adoption-skip is nonfatal for the sidecar: the successor never becomes a batch leg")
 	got, readErr := afero.ReadFile(base, swappedTarget)
 	require.NoError(t, readErr, "rollback must never UnlinkVerified the successor: the leg was never installed against its identity")

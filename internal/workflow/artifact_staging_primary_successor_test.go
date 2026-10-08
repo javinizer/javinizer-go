@@ -39,16 +39,13 @@ func TestDeferredPrimaryCopyPostUnlockSuccessorRetainedNotAdopted(t *testing.T) 
 			// The intruder: same name, different inode and bytes.
 			require.NoError(t, base.Remove(videoDst))
 			require.NoError(t, afero.WriteFile(base, videoDst, []byte(primarySuccessorPayload), 0o644))
-			// Force a later failing leg (the sidecar confirm) so the pre-fix
-			// lane's poisoned adoption actually reaches rollback.
-			for _, sr := range result.Subtitles {
-				if sr.Copied && sr.NewPath != "" {
-					require.NoError(t, base.Remove(sr.NewPath))
-				}
-			}
+			// The later failing leg is injected through the delete-reconcile fault
+			// below: removing a sidecar destination would now be refused at the
+			// fail-closed observation itself (codex P1, PRRT_kwDORn9KaM6qJY2i),
+			// aborting before the primary decision this case pins.
 		},
 	}
-	orch := &applyOrchImpl{fs: base, organizer: fault}
+	orch := &applyOrchImpl{fs: base, organizer: fault, revertLog: &completeCallFaultLog{deleteReconcileErr: errors.New("injected delete reconcile failure")}}
 	cmd := pr260ArtifactFailureCommand(&models.Movie{ContentID: "primary-copy-successor"}, match, dest)
 	cmd.Organize.Skip = false
 	cmd.Organize.MoveFiles = false
@@ -60,7 +57,7 @@ func TestDeferredPrimaryCopyPostUnlockSuccessorRetainedNotAdopted(t *testing.T) 
 
 	require.NotEmpty(t, videoDst, "the primary copy installed and the swap landed in the observation window")
 	require.Error(t, publishErr, "the late sidecar leg fails the apply, running compensation")
-	require.ErrorContains(t, publishErr, "inspect staged publication result", "the removed sidecar destination is the late failing leg")
+	require.ErrorContains(t, publishErr, "reconcile copy-installed delete intents", "the injected late leg fails the apply after the primary refusal")
 	got, readErr := afero.ReadFile(base, videoDst)
 	require.NoError(t, readErr, "rollback must never unlink the successor: the bound observation never adopted it")
 	assert.Equal(t, primarySuccessorPayload, string(got), "the successor is retained byte-intact")

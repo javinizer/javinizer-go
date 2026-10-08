@@ -8,6 +8,7 @@ package downloader
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -101,7 +102,7 @@ func TestReplacementBatchConfirmKeepsBoundIdentityAcrossObservationGap(t *testin
 	assert.Equal(t, "gap window successor", string(got), "gap-window successor retained byte-intact")
 }
 
-func TestReplacementBatchBoundObserveVacantStaysUninstalled(t *testing.T) {
+func TestReplacementBatchBoundObserveVacantRefusedStaysUninstalled(t *testing.T) {
 	fs := afero.NewOsFs()
 	dir := t.TempDir()
 	src := filepath.Join(dir, "in.srt")
@@ -116,6 +117,45 @@ func TestReplacementBatchBoundObserveVacantStaysUninstalled(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, fs.Remove(dst))
 
-	require.NoError(t, batch.ObservePublishResultBound(dst, identity), "a vacant name is doubt without divergence")
-	require.Error(t, batch.ConfirmPublish(context.Background(), dst), "confirmation surfaces the vanished install, mirroring the legacy name-based flow")
+	// codex P1, PRRT_kwDORn9KaM6qJY2i: the vacant name is refused (doubt class),
+	// never adopted — and the leg stays uninstalled so no later rollback can be
+	// armed against whatever occupies the endpoint.
+	obsErr := batch.ObservePublishResultBound(dst, identity)
+	require.Error(t, obsErr, "a vacant name after a proven publish is refused")
+	assert.True(t, errors.Is(obsErr, fsutil.ErrPublishCompleted), "the doubt class rides the refusal")
+	assert.False(t, errors.Is(obsErr, fsutil.ErrPublishSuccessorUnproven), "absence is doubt, not divergence")
+	require.Error(t, batch.ConfirmPublish(context.Background(), dst), "the leg stays uninstalled")
+}
+
+// codex P1 (PRRT_kwDORn9KaM6qJY2g): the rollback MOVE-BACK is identity-bound. A
+// destination swapped by another writer after the publish marker was released
+// must be retained byte-intact — never relocated onto the original source.
+func TestReplacementBatchRollbackMoveBackRefusesForeignSuccessor(t *testing.T) {
+	fs := afero.NewOsFs()
+	dir := t.TempDir()
+	src := filepath.Join(dir, "in.mp4")
+	dst := filepath.Join(dir, "out.mp4")
+	origin := filepath.Join(dir, "origin.mp4")
+	require.NoError(t, afero.WriteFile(fs, src, []byte("ours"), 0o644))
+	batch, err := NewReplacementBatch(fs, "op", nil)
+	require.NoError(t, err)
+	_, err = batch.BeforePublish(context.Background(), dst, false)
+	require.NoError(t, err)
+	identity, err := fsutil.CopyFileNoReplaceVerifiedInstall(fs, src, dst, func(string, os.FileInfo) error { return nil })
+	require.NoError(t, err)
+	require.NoError(t, batch.ObservePublishResultBound(dst, identity))
+	require.NoError(t, batch.SetRollbackOrigin(dst, origin))
+
+	// The intruder: same name, different inode and bytes, after the marker.
+	require.NoError(t, fs.Remove(dst))
+	require.NoError(t, afero.WriteFile(fs, dst, []byte("foreign successor"), 0o644))
+
+	rerr := batch.Rollback(context.Background())
+	require.Error(t, rerr, "the skipped compensation is reported, not silently ignored")
+	assert.True(t, errors.Is(rerr, fsutil.ErrPublishSuccessorUnproven) || errors.Is(rerr, fsutil.ErrPublishCompleted), "the doubt class rides the skipped move-back: %v", rerr)
+	got, readErr := afero.ReadFile(fs, dst)
+	require.NoError(t, readErr)
+	assert.Equal(t, "foreign successor", string(got), "the successor is retained byte-intact at the destination")
+	_, statErr := fs.Stat(origin)
+	assert.True(t, os.IsNotExist(statErr), "no foreign bytes were relocated onto the source path")
 }

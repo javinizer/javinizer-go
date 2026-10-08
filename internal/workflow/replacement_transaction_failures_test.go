@@ -423,8 +423,12 @@ func TestMoveCleanupFailsClosedOnDualUntrackedArms(t *testing.T) {
 	movie := models.Movie{ContentID: "untracked-dual", RenderGeneration: 1}
 	real := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize}, template.NewEngine(), nil)
 	fault := &pr260PublicationFaultOrganizer{Organizer: real, afterExecute: func(plan *organizer.OrganizePlan, result *organizer.OrganizeResult) {
+		// The real destination stays intact: under the fail-closed bound
+		// observation (codex P1, PRRT_kwDORn9KaM6qJY2i) removing it would be
+		// refused at the observation, masking the arm-failure join this case
+		// pins — the bogus NewPath alone drives the tracked-leg failure.
 		result.NewPath = filepath.Join(root, "missing-parent", "untracked.mp4")
-		_ = base.RemoveAll(filepath.Dir(plan.TargetPath))
+		_ = base.RemoveAll(filepath.Join(root, "missing-parent"))
 	}}
 	orch := &applyOrchImpl{fs: base, organizer: fault}
 	cmd := pr260ArtifactFailureCommand(&movie, match, filepath.Join(root, "library"))

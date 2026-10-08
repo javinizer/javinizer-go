@@ -152,6 +152,13 @@ func asideLstat(fs afero.Fs, name string) (os.FileInfo, error) {
 // gates): always regular and non-symlink, dev/inode compared only where BOTH
 // sides expose them (virtual filesystems ride the shape/metadata legs), and
 // size + mtime equal on every platform.
+// NOTE (codex P1, PRRT_kwDORn9KaM6qJY2k): carrying the publish-time strong key
+// (volume serial + file index) INTO these comparisons cannot ride a FileInfo
+// wrapper — Go 1.27's os.SameFile type-asserts the concrete *os.fileStat, so a
+// wrapper silently compares unequal and breaks every downstream SameFile call.
+// The pair therefore needs a struct field threaded through the layers (fsutil
+// publish → organizer result → downloader batch → workflow observation), which
+// is tracked as its own change.
 func asideSameObject(cur, expect os.FileInfo) bool {
 	if cur == nil || expect == nil || cur.Mode()&os.ModeSymlink != 0 || !cur.Mode().IsRegular() {
 		return false
@@ -707,12 +714,17 @@ func UnlinkVerified(fs afero.Fs, name string, verified os.FileInfo) error {
 //     the comparison rides asideSameObject, the SAME predicate UnlinkVerified
 //     applies at unlink time, so adoption and later unlink can never
 //     disagree about which object is ours;
-//   - (nil, nil): the name is VACANT, the occupant is NON-REGULAR (a
-//     directory or symlink — never a plausible sibling file successor and
-//     classified by the caller's legacy confirmation leg as the
-//     did-not-install failure it always was), or the lookup is
-//     indeterminate — doubt without an affirmative divergence proof
-//     (nothing is adopted);
+//   - (nil, nil): the occupant is NON-REGULAR (a directory or symlink —
+//     never a plausible sibling file successor and classified by the
+//     caller's legacy confirmation leg as the did-not-install failure it
+//     always was);
+//   - typed ErrPublishCompleted-carrying error: the name is VACANT or the
+//     lookup is indeterminate (codex P1, PRRT_kwDORn9KaM6qJY2i). Both are
+//     INCONCLUSIVE — the publish proved an install, so absence or an
+//     unreadable entry means the observation cannot prove which object
+//     stands there. Nothing is adopted and the leg is never handed to the
+//     unbound confirmation, which would otherwise re-derive the identity
+//     from the name;
 //   - typed error: a REGULAR-FILE occupant AFFIRMATIVELY diverges from the
 //     installed identity — an explicitly unproven SUCCESSOR. The error
 //     joins ErrPublishSuccessorUnproven (the occupant must be retained
@@ -730,9 +742,19 @@ func ObserveVerifiedInstall(fs afero.Fs, name string, installed os.FileInfo) (os
 	cur, err := asideLstat(fs, name)
 	switch {
 	case os.IsNotExist(err):
-		return nil, nil
+		// The publish PROVED an install at this name, so an absent entry is an
+		// inconclusive observation, never a silent "did not install" (codex P1,
+		// PRRT_kwDORn9KaM6qJY2i): returning success without an identity let the
+		// caller's later unbound confirmation adopt whatever regular file
+		// appeared in the meantime. Fail closed instead — the leg stays
+		// uninstalled and the caller reports the refusal.
+		return nil, fmt.Errorf("%w: bound install observation of %s found no entry — the publish proved an install, so an absent name can never be adopted or quietly uninstalled", ErrPublishCompleted, name)
 	case err != nil || cur == nil:
-		return nil, nil //nolint:nilerr // indeterminate lookup is failure-classified by ObservePublishResultBound as "did not install", not an observe error
+		// An indeterminate lookup is doubt, not success (codex P1,
+		// PRRT_kwDORn9KaM6qJY2i): a foreign regular file may already stand behind
+		// the transient error, so nothing is adopted and the leg is refused
+		// rather than handed to a name-based confirmation.
+		return nil, fmt.Errorf("%w: bound install observation of %s is indeterminate (%v) — the destination cannot be proven to name the installed object", ErrPublishCompleted, name, err)
 	}
 	if cur.Mode()&os.ModeSymlink != 0 || !cur.Mode().IsRegular() {
 		// A directory or link at the endpoint is not a plausible file

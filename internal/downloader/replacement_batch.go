@@ -312,6 +312,21 @@ func (b *ReplacementBatch) rollback(ctx context.Context, releaseJournal bool) er
 		if leg.installed {
 			var err error
 			if leg.rollbackOrigin != "" {
+				// Identity-bound move-back (codex P1, PRRT_kwDORn9KaM6qJY2g): the
+				// destination name is ours only while it still names the object this
+				// leg installed. ConfirmPublish released the destination marker, so
+				// another writer can rename-swap the target, and a path-only
+				// MoveFileNoReplace would then consume that foreign successor and
+				// relocate it onto the original source path. The observation rides
+				// the same predicate the unlink branch applies below (and fails
+				// closed on a vacant or unreadable name), so a divergent occupant is
+				// retained byte-intact and this leg reports the skipped compensation
+				// instead of moving foreign bytes.
+				if _, oerr := fsutil.ObserveVerifiedInstall(b.fs, leg.destination, leg.installedID); oerr != nil {
+					joined = errors.Join(joined, fmt.Errorf("skipped rollback move-back of %s: the destination no longer provably names this leg's installed object: %w", leg.destination, oerr))
+					leg.release()
+					continue
+				}
 				err = fsutil.MoveFileNoReplace(b.fs, leg.destination, leg.rollbackOrigin)
 			} else {
 				err = fsutil.UnlinkVerified(b.fs, leg.destination, leg.installedID)

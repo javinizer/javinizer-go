@@ -281,7 +281,6 @@ func copyStreamNoReplaceInstallReproof(fs afero.Fs, srcFile afero.File, dst stri
 	}
 
 	stagedIdentity := stagingIdentity(handle)
-
 	p := StagedPublish{
 		FS:          fs,
 		Publish:     func(fsys afero.Fs, s, d string) error { return PublishNoReplace(fsys, s, d) },
@@ -339,7 +338,6 @@ func copyStreamNoReplaceDigestReproof(fs afero.Fs, srcFile afero.File, dst strin
 	}
 
 	stagedIdentity := stagingIdentity(handle)
-
 	p := StagedPublish{
 		FS:          fs,
 		Publish:     func(fsys afero.Fs, s, d string) error { return PublishNoReplace(fsys, s, d) },
