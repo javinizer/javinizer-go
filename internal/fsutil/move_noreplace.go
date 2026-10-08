@@ -281,6 +281,11 @@ func copyStreamNoReplaceInstallReproof(fs afero.Fs, srcFile afero.File, dst stri
 	}
 
 	stagedIdentity := stagingIdentity(handle)
+	// codex P1, PRRT_kwDORn9KaM6qKyWN: pairs of the published identity must
+	// come from the object's FINAL identity — the OS publish leg restages
+	// bytes into a fresh O_EXCL object when a plant consumed the staged
+	// name, so the pre-publish handle capture would describe the abandoned
+	// staging entry and make the observation reject our own install.
 	strongDevice, strongInode, strongOK := streamedHandleIdentity(handle, stagedIdentity)
 	p := StagedPublish{
 		FS:          fs,
@@ -298,6 +303,11 @@ func copyStreamNoReplaceInstallReproof(fs afero.Fs, srcFile afero.File, dst stri
 		return nil, fmt.Errorf("no-replace copy: publish %s: %w", dst, err)
 	}
 	if info != nil {
+		// Same as the digest twin: the published object's own key outranks the
+		// initial handle capture when the publish restaged onto a fresh inode.
+		if dev, ino, ok := boundObjectIdentity(info); ok {
+			strongDevice, strongInode, strongOK = dev, ino, true
+		}
 		return newBoundInstallIdentity(info, strongDevice, strongInode, strongOK), nil
 	}
 	installed, lerr := asideLstat(fs, dst)
@@ -339,6 +349,11 @@ func copyStreamNoReplaceDigestReproof(fs afero.Fs, srcFile afero.File, dst strin
 	}
 
 	stagedIdentity := stagingIdentity(handle)
+	// codex P1, PRRT_kwDORn9KaM6qKyWN: pairs of the published identity must
+	// come from the object's FINAL identity — the OS publish leg restages
+	// bytes into a fresh O_EXCL object when a plant consumed the staged
+	// name, so the pre-publish handle capture would describe the abandoned
+	// staging entry and make the observation reject our own install.
 	strongDevice, strongInode, strongOK := streamedHandleIdentity(handle, stagedIdentity)
 	p := StagedPublish{
 		FS:          fs,
@@ -356,6 +371,11 @@ func copyStreamNoReplaceDigestReproof(fs afero.Fs, srcFile afero.File, dst strin
 		return "", nil, fmt.Errorf("no-replace copy: publish %s: %w", dst, err)
 	}
 	if info != nil {
+		// The publish leg returned the re-proved post-publish identity: its own
+		// dev/inode outranks the pre-publish handle capture (the restage case).
+		if dev, ino, ok := boundObjectIdentity(info); ok {
+			strongDevice, strongInode, strongOK = dev, ino, true
+		}
 		return hex.EncodeToString(h.Sum(nil)), newBoundInstallIdentity(info, strongDevice, strongInode, strongOK), nil
 	}
 	// Virtual leg (wrapper/MemMap filesystems): the bound publish proves the
