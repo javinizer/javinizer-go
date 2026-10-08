@@ -170,8 +170,27 @@ func (b *ReplacementBatch) ObservePublishResult(destination string) {
 		return
 	}
 	if info, err := lstatBackupCandidate(b.fs, leg.destination); err == nil {
-		leg.installed, leg.installedID = true, fsutil.NewWeakBoundInstallIdentity(info)
+		leg.installed, leg.installedID = true, observedInstallIdentity(b.fs, leg.destination, info)
 	}
+}
+
+// observedInstallIdentity records the observed install for the unverified
+// (name-based) recording seams (codex P1, PRRT_kwDORn9KaM6qKDM5): a symlink
+// occupant carries no kernel key a FileInfo can serve, so its readlink payload
+// — the entire ownership certificate for a link object — is captured with the
+// record; rollback then routes the link to the link-object unlink instead of
+// stranding it (the regular-file unlink has no link model). Regular files keep
+// the weak record.
+func observedInstallIdentity(fs afero.Fs, destination string, info os.FileInfo) *fsutil.BoundInstallIdentity {
+	if info == nil {
+		return nil
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		if target, ok, rerr := fsutil.ReadlinkNoFollow(fs, destination); rerr == nil && ok && target != "" {
+			return fsutil.NewBoundInstallLinkIdentity(info, target)
+		}
+	}
+	return fsutil.NewWeakBoundInstallIdentity(info)
 }
 
 // ObservePublishResultBound is ObservePublishResult with the observation
@@ -234,7 +253,7 @@ func (b *ReplacementBatch) ConfirmPublish(ctx context.Context, destination strin
 	// name AFTER the observation window closed — exactly the successor
 	// substitution the bound observation exists to refuse (finding ntCe6).
 	if leg.installedID == nil {
-		leg.installedID = fsutil.NewWeakBoundInstallIdentity(info)
+		leg.installedID = observedInstallIdentity(b.fs, leg.destination, info)
 	}
 	if leg.replaced {
 		var confirmErr error
@@ -329,7 +348,16 @@ func (b *ReplacementBatch) rollback(ctx context.Context, releaseJournal bool) er
 				}
 				err = fsutil.MoveFileNoReplace(b.fs, leg.destination, leg.rollbackOrigin)
 			} else {
-				err = fsutil.UnlinkVerifiedInstall(b.fs, leg.destination, leg.installedID)
+				// A soft-link leg carries its ownership proof as the recorded
+				// readlink payload — a symlink has no kernel key the regular-file
+				// unlink can prove, so it rolls back through the link-object twin
+				// (codex P1, PRRT_kwDORn9KaM6qKDM5). Legacy recordings (no payload)
+				// keep the verified-unlink shape they always had.
+				if target := leg.installedID.LinkTarget(); target != "" {
+					err = fsutil.UnlinkSymlinkVerified(b.fs, leg.destination, target)
+				} else {
+					err = fsutil.UnlinkVerifiedInstall(b.fs, leg.destination, leg.installedID)
+				}
 			}
 			if err != nil {
 				joined = errors.Join(joined, fmt.Errorf("reverse staged publication %s during rollback: %w", leg.destination, err))
