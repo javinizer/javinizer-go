@@ -312,7 +312,7 @@ type OrganizeResult struct {
 	// bytes). Nil on every lane that offers no such proof (by-name copies,
 	// soft links, authorized replace lanes) — those keep the legacy
 	// name-based observation.
-	InstalledIdentity os.FileInfo
+	InstalledIdentity *fsutil.BoundInstallIdentity
 	// Warnings carries non-fatal per-file advisories an authorized run must
 	// not silently drop (#224 phase E): authorized intra-batch duplicates land
 	// here so the worker history rows and the API eventlog can persist them.
@@ -375,7 +375,7 @@ type SubtitleResult struct {
 	// be adopted (and later identity-verified-DELETED) as this operation's
 	// own install. Nil unless a verified copy installed cleanly; moves,
 	// skips, errors, and legacy by-name copies carry none.
-	InstalledIdentity os.FileInfo
+	InstalledIdentity *fsutil.BoundInstallIdentity
 	// SuccessorRefused marks a copied seat whose bound observation proved
 	// another writer replaced the installed bytes (codex P1, PR #276,
 	// finding PRRT_kwDORn9KaM6p3Dq8): the occupant is retained byte-intact
@@ -848,7 +848,7 @@ type subtitleInstall struct {
 	// post-publication record binds the copy's own product rather than a
 	// later name lookup (codex P1, PR #276, finding ntCe6). Nil lanes never
 	// produce an identity.
-	install func(afero.Fs, string, string, fsutil.VerifiedSourceProof) (os.FileInfo, error)
+	install func(afero.Fs, string, string, fsutil.VerifiedSourceProof) (*fsutil.BoundInstallIdentity, error)
 	copied  bool
 }
 
@@ -859,7 +859,7 @@ type subtitleInstall struct {
 // FileInfo is the installed object's publish-proven identity where the lane
 // produces one (the verified copy), nil everywhere else. Both packaged lanes
 // always carry their twin; install.op == nil (probe) never reaches run.
-func (install subtitleInstall) run(fs afero.Fs, source, dest string, proof fsutil.VerifiedSourceProof) (os.FileInfo, error) {
+func (install subtitleInstall) run(fs afero.Fs, source, dest string, proof fsutil.VerifiedSourceProof) (*fsutil.BoundInstallIdentity, error) {
 	if proof != nil {
 		if install.install != nil {
 			return install.install(fs, source, dest, proof)

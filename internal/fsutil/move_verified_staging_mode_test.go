@@ -38,12 +38,12 @@ func TestVerifiedCompositesPublishExplicitStagingMode(t *testing.T) {
 		require.NoError(t, err)
 		return info.Mode().Perm()
 	}
-	assertSameObject := func(t *testing.T, installed os.FileInfo, path string) {
+	assertSameObject := func(t *testing.T, installed *BoundInstallIdentity, path string) {
 		t.Helper()
 		require.NotNil(t, installed, "the publish hands back the object it installed")
 		info, err := os.Lstat(path)
 		require.NoError(t, err)
-		assert.True(t, os.SameFile(installed, info), "the returned identity IS the published object")
+		assert.True(t, os.SameFile(installed.FileInfo(), info), "the returned identity IS the published object")
 	}
 
 	t.Run("copy twin applies the explicit mode", func(t *testing.T) {

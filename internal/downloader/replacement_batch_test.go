@@ -7,8 +7,10 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/spf13/afero"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -142,7 +144,7 @@ func TestReplacementBatchDirectRecoveryStates(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, fs.Remove("/created"))
 		require.NoError(t, afero.WriteFile(fs, "/created", []byte("foreign"), 0o644))
-		b := &ReplacementBatch{fs: fs, legs: []*replacementBatchLeg{{destination: "/created", installed: true, installedID: oldInfo}}}
+		b := &ReplacementBatch{fs: fs, legs: []*replacementBatchLeg{{destination: "/created", installed: true, installedID: fsutil.NewWeakBoundInstallIdentity(oldInfo)}}}
 		require.ErrorContains(t, b.Rollback(ctx), "reverse staged publication")
 	})
 	t.Run("missing replacement backup", func(t *testing.T) {
@@ -190,6 +192,19 @@ func TestReplacementBatchRollbackOriginMovesInstalledOutputWithoutClobber(t *tes
 		leg := b.find("/dest")
 		require.NotNil(t, leg)
 		require.Equal(t, "old", string(mustReadReplacementBatch(t, fs, leg.backup)))
+	})
+
+	t.Run("tracks existing output without armed leg", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		b, err := NewReplacementBatch(fs, "op", nil)
+		require.NoError(t, err)
+		require.NoError(t, afero.WriteFile(fs, "/dest", []byte("new"), 0o644))
+		require.NoError(t, b.SetRollbackOrigin("/dest", "/source"))
+		require.NoError(t, b.Rollback(ctx))
+		require.Equal(t, "new", string(mustReadReplacementBatch(t, fs, "/source")))
+		exists, existsErr := afero.Exists(fs, "/dest")
+		require.NoError(t, existsErr)
+		assert.False(t, exists)
 	})
 }
 

@@ -45,7 +45,7 @@ func TestCopyFileNoReplaceVerifiedInstall_ReturnsPublishIdentity(t *testing.T) {
 
 			current, err := asideLstat(fs, dst)
 			require.NoError(t, err)
-			assert.True(t, asideSameObject(current, identity), "the returned identity names the installed object under the same predicate UnlinkVerified applies")
+			assert.True(t, asideSameObject(current, identity.FileInfo()), "the returned identity names the installed object under the same predicate UnlinkVerified applies")
 			got, err := afero.ReadFile(fs, dst)
 			require.NoError(t, err)
 			assert.Equal(t, "admitted bytes", string(got))
@@ -146,20 +146,21 @@ func TestObserveVerifiedInstall_VacantRefuses(t *testing.T) {
 	assert.Nil(t, observed)
 }
 
-func TestObserveVerifiedInstall_NonRegularOccupantDefersToConfirmation(t *testing.T) {
+func TestObserveVerifiedInstall_NonRegularOccupantRefusedNotAdopted(t *testing.T) {
 	fs := afero.NewOsFs()
 	dir := t.TempDir()
 	dst := filepath.Join(dir, "out.srt")
 	require.NoError(t, fs.MkdirAll(dst, 0o755))
 	identity := writeTempIdentity(t, fs, filepath.Join(dir, "seed.srt"))
 
-	// A directory at the endpoint is not a plausible file successor: the
-	// observation stays silent so the legacy confirmation leg keeps its
-	// did-not-install classification of the state.
+	// A directory at the endpoint where a regular-file install was proven is
+	// an explicitly unproven successor (codex P1, PRRT_kwDORn9KaM6qKbdT):
+	// the refusal keeps the leg uninstalled so the name-based confirmation
+	// never adopts whatever now stands there.
 	observed, err := ObserveVerifiedInstall(fs, dst, identity)
-	require.NoError(t, err)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrPublishSuccessorUnproven)
 	assert.Nil(t, observed)
-	assert.NotErrorIs(t, err, ErrPublishSuccessorUnproven)
 	entries, rerr := afero.ReadDir(fs, dir)
 	require.NoError(t, rerr)
 	assert.NotEmpty(t, entries, "the directory occupant was never touched")
@@ -170,10 +171,109 @@ func TestObserveVerifiedInstall_NilIdentityFailsClosed(t *testing.T) {
 	require.Error(t, err, "a bound observation without the publish-produced identity is a caller bug")
 }
 
-func writeTempIdentity(t *testing.T, fs afero.Fs, path string) os.FileInfo {
+func TestObserveVerifiedInstall_StrongIdentityRefusesWithoutCurrentStrongKey(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	require.NoError(t, afero.WriteFile(fs, "/dst.srt", []byte("seed"), 0o644))
+	info, err := fs.Stat("/dst.srt")
+	require.NoError(t, err)
+	identity := &BoundInstallIdentity{info: info, device: 1, inode: 2, ok: true}
+
+	observed, err := ObserveVerifiedInstall(fs, "/dst.srt", identity)
+	require.Error(t, err)
+	assert.Nil(t, observed)
+	assert.ErrorIs(t, err, ErrPublishCompleted)
+	assert.NotErrorIs(t, err, ErrPublishSuccessorUnproven)
+}
+
+func TestUnlinkVerifiedInstall_StrongIdentityRefusesWithoutCurrentStrongKey(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	require.NoError(t, afero.WriteFile(fs, "/dst.srt", []byte("seed"), 0o644))
+	info, err := fs.Stat("/dst.srt")
+	require.NoError(t, err)
+	identity := &BoundInstallIdentity{info: info, device: 1, inode: 2, ok: true}
+
+	err = UnlinkVerifiedInstall(fs, "/dst.srt", identity)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrPublishCompleted)
+	exists, existsErr := afero.Exists(fs, "/dst.srt")
+	require.NoError(t, existsErr)
+	assert.True(t, exists)
+}
+
+func TestUnlinkVerifiedInstall_WeakLegacyRemoves(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	require.NoError(t, afero.WriteFile(fs, "/dst.srt", []byte("seed"), 0o644))
+	info, err := fs.Stat("/dst.srt")
+	require.NoError(t, err)
+
+	require.NoError(t, UnlinkVerifiedInstall(fs, "/dst.srt", NewWeakBoundInstallIdentity(info)))
+	exists, existsErr := afero.Exists(fs, "/dst.srt")
+	require.NoError(t, existsErr)
+	assert.False(t, exists)
+}
+
+func TestUnlinkVerifiedInstall_NilIdentityFailsClosed(t *testing.T) {
+	err := UnlinkVerifiedInstall(afero.NewMemMapFs(), "/dst.srt", nil)
+	require.Error(t, err)
+}
+
+func TestUnlinkVerifiedInstall_StrongMismatchRestoresOccupant(t *testing.T) {
+	fs := afero.NewOsFs()
+	dir := t.TempDir()
+	owned := filepath.Join(dir, "owned.srt")
+	dst := filepath.Join(dir, "dst.srt")
+	require.NoError(t, afero.WriteFile(fs, owned, []byte("owned"), 0o644))
+	require.NoError(t, afero.WriteFile(fs, dst, []byte("foreign"), 0o644))
+	ownedInfo, err := fs.Stat(owned)
+	require.NoError(t, err)
+	device, inode, ok := BoundObjectIdentity(fs, owned, ownedInfo)
+	require.True(t, ok)
+	identity := &BoundInstallIdentity{info: ownedInfo, device: device, inode: inode, ok: true}
+
+	err = UnlinkVerifiedInstall(fs, dst, identity)
+	require.ErrorIs(t, err, ErrTakeAsideForeign)
+	got, readErr := afero.ReadFile(fs, dst)
+	require.NoError(t, readErr)
+	assert.Equal(t, "foreign", string(got))
+}
+
+func TestSameBoundInstallObjectRejectsInvalidInputs(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	identity := NewWeakBoundInstallIdentity(writeTempIdentity(t, fs, "/seed.srt").FileInfo())
+	same, err := sameBoundInstallObject(fs, "/dst.srt", nil, identity)
+	require.NoError(t, err)
+	assert.False(t, same)
+}
+func writeTempIdentity(t *testing.T, fs afero.Fs, path string) *BoundInstallIdentity {
 	t.Helper()
 	require.NoError(t, afero.WriteFile(fs, path, []byte("seed"), 0o644))
 	info, err := fs.Stat(path)
 	require.NoError(t, err)
-	return info
+	return NewWeakBoundInstallIdentity(info)
+}
+
+// codex P1 (PRRT_kwDORn9KaM6qKbdT): a symlink planted over a verified
+// regular-file install after the publisher unlocked is an explicitly unproven
+// successor — the name-based confirmation must never adopt it (the link-aware
+// rollback would otherwise delete a foreign link by payload).
+func TestObserveVerifiedInstall_SymlinkSuccessorRefused(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires a symlink-capable test host without elevation")
+	}
+	root := t.TempDir()
+	fs := afero.NewOsFs()
+	src := filepath.Join(root, "in.srt")
+	dst := filepath.Join(root, "out.srt")
+	require.NoError(t, os.WriteFile(src, []byte("ours"), 0o644))
+
+	identity, err := CopyFileNoReplaceVerifiedInstall(fs, src, dst, admitAll)
+	require.NoError(t, err)
+	// The publish unlocked, and the destination got replaced by a symlink.
+	require.NoError(t, fs.Remove(dst))
+	require.NoError(t, os.Symlink(src, dst))
+
+	observed, oerr := ObserveVerifiedInstall(fs, dst, identity)
+	require.Error(t, oerr, "a symlink after a regular-file install is refused")
+	assert.ErrorIs(t, oerr, ErrPublishSuccessorUnproven, "the successor class rides the refusal")
+	assert.Nil(t, observed, "nothing is adopted from the symlink")
 }
