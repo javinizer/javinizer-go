@@ -756,10 +756,11 @@ func UnlinkVerifiedInstall(fs afero.Fs, name string, verified *BoundInstallIdent
 //     the comparison rides asideSameObject, the SAME predicate UnlinkVerified
 //     applies at unlink time, so adoption and later unlink can never
 //     disagree about which object is ours;
-//   - (nil, nil): the occupant is NON-REGULAR (a directory or symlink —
-//     never a plausible sibling file successor and classified by the
-//     caller's legacy confirmation leg as the did-not-install failure it
-//     always was);
+//   - typed error: a NON-REGULAR occupant (directory or symlink) where a
+//     regular-file install was expected is rejected with
+//     ErrPublishSuccessorUnproven (codex P1, PRRT_kwDORn9KaM6qKbdT): the
+//     weak confirmation fallback would otherwise adopt — and now even
+//     unlink-delete — a foreign link object by payload;
 //   - typed ErrPublishCompleted-carrying error: the name is VACANT or the
 //     lookup is indeterminate (codex P1, PRRT_kwDORn9KaM6qJY2i). Both are
 //     INCONCLUSIVE — the publish proved an install, so absence or an
@@ -799,10 +800,17 @@ func ObserveVerifiedInstall(fs afero.Fs, name string, installed *BoundInstallIde
 		return nil, fmt.Errorf("%w: bound install observation of %s is indeterminate (%v) — the destination cannot be proven to name the installed object", ErrPublishCompleted, name, err)
 	}
 	if cur.Mode()&os.ModeSymlink != 0 || !cur.Mode().IsRegular() {
-		// A directory or link at the endpoint is not a plausible file
-		// successor; the caller's confirmation leg keeps its legacy
-		// did-not-install classification for it.
-		return nil, nil
+		// codex P1, PRRT_kwDORn9KaM6qKbdT: a non-regular entry where a verified
+		// REGULAR-FILE install was expected is an unproven successor, not a
+		// did-not-install. Adopting nothing lets the caller's unbound
+		// confirmation re-read the name and record whatever a foreign writer
+		// planted (and with the link-aware rollback that can mean deleting a
+		// foreign symlink by payload), so the leg is refused with the
+		// successor-doubt class and the occupant retained byte-intact.
+		return nil, errors.Join(
+			fmt.Errorf("%w: %s no longer names a regular-file object of this operation's install (mode %v) — the occupant is an explicitly unproven successor, retained byte-intact (never adopted as installed output)", ErrPublishSuccessorUnproven, name, cur.Mode()),
+			fmt.Errorf("%w: this operation's own installed bytes may still stand elsewhere under another name", ErrPublishCompleted),
+		)
 	}
 	same, serr := sameBoundInstallObject(fs, name, cur, installed)
 	if serr != nil {

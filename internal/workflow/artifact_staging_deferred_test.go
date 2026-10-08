@@ -1040,9 +1040,12 @@ func (f *swapToDirWhenPresentFS) LstatIfPossible(name string) (os.FileInfo, bool
 }
 
 // Swapping a copy-installed sidecar target for a directory between the
-// organizer's execute and the batch confirm fails that leg specifically.
-// The swap triggers on the first probe-while-present so the arm probe (made
-// before anything is staged there) stays untouched.
+// organizer's execute and the batch observation refuses that seat (codex P1,
+// PRRT_kwDORn9KaM6qKbdT): a non-regular occupant after a proven regular-file
+// install is an unproven successor — the record is released with the refusal
+// nonfatal, the confirmation never runs, and the directory occupant is
+// retained byte-intact. The swap triggers on the first probe-while-present so
+// the arm probe (made before anything is staged there) stays untouched.
 func TestDeferredCopySidecarConfirmDirSwapFails(t *testing.T) {
 	base, root, source, subtitle, multipart, unrelated, match := pr260FencedFiles(t, "deferred-copy-confirm-swap")
 	dest := filepath.Join(root, "library")
@@ -1067,7 +1070,10 @@ func TestDeferredCopySidecarConfirmDirSwapFails(t *testing.T) {
 	stage.fs = fsWithFault
 	state := &applyPipelineState{operationID: "op", organizeResult: &organizer.OrganizeResult{NewPath: stagedPlan.TargetPath, FolderPath: stagedPlan.TargetDir}}
 	publishErr := stage.publish(context.Background(), orch, state, nil)
-	require.ErrorContains(t, publishErr, "did not install a file")
+	require.NoError(t, publishErr, "the dir-swapped seat is refused nonfatally — never confirmed against the foreign directory")
+	info, statErr := base.Stat(subMoves[0].NewPath)
+	require.NoError(t, statErr)
+	assert.True(t, info.IsDir(), "the directory occupant was never touched")
 	pr260AssertRetained(t, base, source, subtitle, multipart, unrelated)
 }
 

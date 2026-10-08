@@ -183,8 +183,12 @@ func TestCoverObserveVerifiedInstall_DirOccupantNotSuccessor(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, got, "same-object observation still returns the current occupant")
 
-	// directory at the name: not a plausible successor — legacy nil answer
+	// codex P1, PRRT_kwDORn9KaM6qKbdT: a non-regular occupant where a
+	// regular-file install was proven is refused as an explicitly unproven
+	// successor, never silently deferred — the unbound confirmation would
+	// adopt whatever a foreign writer planted.
 	got2, err2 := ObserveVerifiedInstall(fs, "/dst_dir", NewWeakBoundInstallIdentity(info))
-	require.NoError(t, err2)
-	assert.Nil(t, got2, "directory occupants are not classified as successor installs")
+	require.Error(t, err2, "directory occupants refuse after a bound regular-file install")
+	assert.True(t, errors.Is(err2, ErrPublishSuccessorUnproven), "the successor class rides the refusal")
+	assert.Nil(t, got2, "nothing is adopted from the directory")
 }
