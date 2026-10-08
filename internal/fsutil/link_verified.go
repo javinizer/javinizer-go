@@ -82,7 +82,7 @@ func LinkFileNoReplaceVerified(fs afero.Fs, src, dst string, link LinkFunc, proo
 // caller must bind its record to — a later name lookup could authenticate a
 // successor another writer planted after the install. A nil proof keeps the
 // legacy by-name behavior and yields no identity.
-func LinkFileNoReplaceVerifiedInstall(fs afero.Fs, src, dst string, link LinkFunc, proof VerifiedSourceProof) (os.FileInfo, error) {
+func LinkFileNoReplaceVerifiedInstall(fs afero.Fs, src, dst string, link LinkFunc, proof VerifiedSourceProof) (*BoundInstallIdentity, error) {
 	if proof == nil {
 		return nil, link(src, dst)
 	}
@@ -105,6 +105,7 @@ func LinkFileNoReplaceVerifiedInstall(fs afero.Fs, src, dst string, link LinkFun
 	if perr := proof(src, srcInfo); perr != nil {
 		return nil, fmt.Errorf("verified link: the open source handle failed its admission proof (%w): %w", ErrTakeAsideForeign, perr)
 	}
+	srcDevice, srcInode, srcOK := streamedHandleIdentity(srcFile, srcInfo)
 	if lerr := link(src, dst); lerr != nil {
 		return nil, lerr
 	}
@@ -148,5 +149,5 @@ func LinkFileNoReplaceVerifiedInstall(fs afero.Fs, src, dst string, link LinkFun
 		}
 		return nil, fmt.Errorf("verified link: the installed entry %s failed its admission proof — the rejected install was unlinked (%w): %w", dst, ErrTakeAsideForeign, perr)
 	}
-	return dstInfo, nil
+	return newBoundInstallIdentity(dstInfo, srcDevice, srcInode, srcOK), nil
 }

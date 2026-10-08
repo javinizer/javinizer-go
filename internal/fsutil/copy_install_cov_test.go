@@ -142,7 +142,7 @@ func TestCoverObserveVerifiedInstall_IndeterminateLookup(t *testing.T) {
 	require.NoError(t, err)
 
 	wrapped := &failFsWrap{Fs: fs, victim: "/dst"}
-	got, err := ObserveVerifiedInstall(wrapped, "/dst", info)
+	got, err := ObserveVerifiedInstall(wrapped, "/dst", NewWeakBoundInstallIdentity(info))
 	// codex P1, PRRT_kwDORn9KaM6qJY2i: an unreadable destination is an
 	// INCONCLUSIVE observation, not a silent did-not-install — a foreign file
 	// may already stand behind the transient error, so the leg is refused
@@ -179,12 +179,12 @@ func TestCoverObserveVerifiedInstall_DirOccupantNotSuccessor(t *testing.T) {
 	info, err := fs.Stat("/dst_file")
 	require.NoError(t, err)
 
-	got, err := ObserveVerifiedInstall(fs, "/dst_file", info)
+	got, err := ObserveVerifiedInstall(fs, "/dst_file", NewWeakBoundInstallIdentity(info))
 	require.NoError(t, err)
 	require.NotNil(t, got, "same-object observation still returns the current occupant")
 
 	// directory at the name: not a plausible successor — legacy nil answer
-	got2, err2 := ObserveVerifiedInstall(fs, "/dst_dir", info)
+	got2, err2 := ObserveVerifiedInstall(fs, "/dst_dir", NewWeakBoundInstallIdentity(info))
 	require.NoError(t, err2)
 	assert.Nil(t, got2, "directory occupants are not classified as successor installs")
 }

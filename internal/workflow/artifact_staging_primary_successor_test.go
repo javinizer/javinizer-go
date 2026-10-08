@@ -3,7 +3,6 @@ package workflow
 import (
 	"context"
 	"errors"
-	"os"
 	"path/filepath"
 	"testing"
 
@@ -12,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/javinizer/javinizer-go/internal/downloader"
+	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
 	"github.com/javinizer/javinizer-go/internal/organizer"
@@ -85,7 +85,7 @@ func TestDeferredPrimaryBoundObserveGenericErrorWraps(t *testing.T) {
 
 	old := observeBoundPrimaryPublish
 	t.Cleanup(func() { observeBoundPrimaryPublish = old })
-	observeBoundPrimaryPublish = func(*downloader.ReplacementBatch, string, os.FileInfo) error {
+	observeBoundPrimaryPublish = func(*downloader.ReplacementBatch, string, *fsutil.BoundInstallIdentity) error {
 		return errBoundObserveInjected
 	}
 
@@ -113,7 +113,7 @@ func TestRetractCopiedSidecarOwnershipClearsClaimKeepsExclusion(t *testing.T) {
 		},
 	}
 	targets := map[string]bool{movie: true, other: true}
-	identities := map[string]os.FileInfo{movie: nil, other: nil}
+	identities := map[string]*fsutil.BoundInstallIdentity{movie: nil, other: nil}
 
 	retractCopiedSidecarOwnership(result, targets, identities, movie)
 

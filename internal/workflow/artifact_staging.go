@@ -522,7 +522,7 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 	// finding ntCe6): the observation loop below binds THOSE identities
 	// instead of re-resolving destination names the organizer already
 	// unlocked.
-	copiedSidecarIdentities := map[string]os.FileInfo{}
+	copiedSidecarIdentities := map[string]*fsutil.BoundInstallIdentity{}
 	// primaryPinRecorded tracks ANY pre-execute durable pin on the deferred
 	// primary target (its reconcile must run even with zero sidecars);
 	// primaryPinCopyPartial narrows it to the copy lane's interim partial
@@ -1435,7 +1435,7 @@ func (s *artifactStage) installedSidecarExcludedSiblings(finalResult *organizer.
 // a cleared flag would let installPaths republish over the retained occupant.
 // The result is non-nil by construction: only the copied-seat path — whose
 // copied set a non-nil result produced — reaches this refusal.
-func retractCopiedSidecarOwnership(result *organizer.OrganizeResult, targets map[string]bool, identities map[string]os.FileInfo, target string) {
+func retractCopiedSidecarOwnership(result *organizer.OrganizeResult, targets map[string]bool, identities map[string]*fsutil.BoundInstallIdentity, target string) {
 	key := filepath.Clean(target)
 	delete(targets, key)
 	delete(identities, key)

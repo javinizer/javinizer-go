@@ -31,7 +31,7 @@ type replacementBatchLeg struct {
 	backup         string
 	replaced       bool
 	installed      bool
-	installedID    os.FileInfo
+	installedID    *fsutil.BoundInstallIdentity
 	rollbackOrigin string
 	releaseLock    func()
 	releaseBusy    func()
@@ -170,7 +170,7 @@ func (b *ReplacementBatch) ObservePublishResult(destination string) {
 		return
 	}
 	if info, err := lstatBackupCandidate(b.fs, leg.destination); err == nil {
-		leg.installed, leg.installedID = true, info
+		leg.installed, leg.installedID = true, fsutil.NewWeakBoundInstallIdentity(info)
 	}
 }
 
@@ -197,7 +197,7 @@ func (b *ReplacementBatch) ObservePublishResult(destination string) {
 //     the verified hard-link leg's post-link successor contract
 //     (PRRT_kwDORn9KaM6nsX9a) applied to the copy lane's record;
 //   - a nil installed identity is a caller bug and fails closed.
-func (b *ReplacementBatch) ObservePublishResultBound(destination string, installed os.FileInfo) error {
+func (b *ReplacementBatch) ObservePublishResultBound(destination string, installed *fsutil.BoundInstallIdentity) error {
 	leg := b.find(destination)
 	if leg == nil || leg.installed {
 		return nil
@@ -207,7 +207,7 @@ func (b *ReplacementBatch) ObservePublishResultBound(destination string, install
 		return err
 	}
 	if info != nil {
-		leg.installed, leg.installedID = true, info
+		leg.installed, leg.installedID = true, installed
 	}
 	return nil
 }
@@ -234,7 +234,7 @@ func (b *ReplacementBatch) ConfirmPublish(ctx context.Context, destination strin
 	// name AFTER the observation window closed — exactly the successor
 	// substitution the bound observation exists to refuse (finding ntCe6).
 	if leg.installedID == nil {
-		leg.installedID = info
+		leg.installedID = fsutil.NewWeakBoundInstallIdentity(info)
 	}
 	if leg.replaced {
 		var confirmErr error
@@ -274,7 +274,7 @@ func (b *ReplacementBatch) SetRollbackOrigin(destination, origin string) error {
 			leg.release()
 			return fmt.Errorf("staged publication destination has no regular installed output: %s: %w", destination, err)
 		}
-		leg.installed, leg.installedID = true, info
+		leg.installed, leg.installedID = true, fsutil.NewWeakBoundInstallIdentity(info)
 		b.legs = append(b.legs, leg)
 		leg.release()
 	}
@@ -329,7 +329,7 @@ func (b *ReplacementBatch) rollback(ctx context.Context, releaseJournal bool) er
 				}
 				err = fsutil.MoveFileNoReplace(b.fs, leg.destination, leg.rollbackOrigin)
 			} else {
-				err = fsutil.UnlinkVerified(b.fs, leg.destination, leg.installedID)
+				err = fsutil.UnlinkVerifiedInstall(b.fs, leg.destination, leg.installedID)
 			}
 			if err != nil {
 				joined = errors.Join(joined, fmt.Errorf("reverse staged publication %s during rollback: %w", leg.destination, err))

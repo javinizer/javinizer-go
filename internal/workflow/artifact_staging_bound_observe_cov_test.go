@@ -2,13 +2,13 @@ package workflow
 
 import (
 	"errors"
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/javinizer/javinizer-go/internal/downloader"
+	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
 	"github.com/javinizer/javinizer-go/internal/organizer"
@@ -39,7 +39,7 @@ func TestDeferredCopiedSidecarBoundObserveGenericErrorWraps(t *testing.T) {
 
 	old := observeBoundSidecarPublish
 	t.Cleanup(func() { observeBoundSidecarPublish = old })
-	observeBoundSidecarPublish = func(b *downloader.ReplacementBatch, destination string, installed os.FileInfo) error {
+	observeBoundSidecarPublish = func(b *downloader.ReplacementBatch, destination string, installed *fsutil.BoundInstallIdentity) error {
 		return errBoundObserveInjected
 	}
 

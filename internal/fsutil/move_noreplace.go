@@ -235,7 +235,7 @@ func copyStreamNoReplaceDigest(fs afero.Fs, srcFile afero.File, dst string) (str
 // rides out (codex P1, PRRT_kwDORn9KaM6p3Dq1): a caller recording the publish
 // for later compensation binds THAT object, never a name lookup taken after
 // its lock release.
-func copyStreamNoReplaceReproof(fs afero.Fs, srcFile afero.File, dst string, reproof func() error, mode os.FileMode) (os.FileInfo, error) {
+func copyStreamNoReplaceReproof(fs afero.Fs, srcFile afero.File, dst string, reproof func() error, mode os.FileMode) (*BoundInstallIdentity, error) {
 	_, installed, err := copyStreamNoReplaceDigestReproof(fs, srcFile, dst, reproof, mode)
 	return installed, err
 }
@@ -264,7 +264,7 @@ func copyStreamNoReplaceReproof(fs afero.Fs, srcFile afero.File, dst string, rep
 //     ErrPublishCompleted (the doubt class — this operation's bytes stand
 //     at the destination) with the lookup error, never asserting an
 //     identity. Error legs are exactly the digest twin's.
-func copyStreamNoReplaceInstallReproof(fs afero.Fs, srcFile afero.File, dst string, reproof func() error) (os.FileInfo, error) {
+func copyStreamNoReplaceInstallReproof(fs afero.Fs, srcFile afero.File, dst string, reproof func() error) (*BoundInstallIdentity, error) {
 	staged, handle, err := CreateExclusiveStagingFile(fs, dst, ".nrstg", noreplaceOrdinal.Add(1), stagingFileMode())
 	if err != nil {
 		return nil, fmt.Errorf("no-replace copy: exclusive staging for %s: %w", dst, err)
@@ -281,6 +281,7 @@ func copyStreamNoReplaceInstallReproof(fs afero.Fs, srcFile afero.File, dst stri
 	}
 
 	stagedIdentity := stagingIdentity(handle)
+	strongDevice, strongInode, strongOK := streamedHandleIdentity(handle, stagedIdentity)
 	p := StagedPublish{
 		FS:          fs,
 		Publish:     func(fsys afero.Fs, s, d string) error { return PublishNoReplace(fsys, s, d) },
@@ -297,13 +298,13 @@ func copyStreamNoReplaceInstallReproof(fs afero.Fs, srcFile afero.File, dst stri
 		return nil, fmt.Errorf("no-replace copy: publish %s: %w", dst, err)
 	}
 	if info != nil {
-		return info, nil
+		return newBoundInstallIdentity(info, strongDevice, strongInode, strongOK), nil
 	}
 	installed, lerr := asideLstat(fs, dst)
 	if lerr != nil {
 		return nil, fmt.Errorf("no-replace copy: the installed identity at %s is indeterminate (%w): %w", dst, ErrPublishCompleted, lerr)
 	}
-	return installed, nil
+	return newBoundInstallIdentity(installed, 0, 0, false), nil
 }
 
 // copyStreamNoReplaceDigestReproof is copyStreamNoReplaceDigest with the
@@ -320,7 +321,7 @@ func copyStreamNoReplaceInstallReproof(fs afero.Fs, srcFile afero.File, dst stri
 // mode is the staged file's permission set, applied verbatim: the verified
 // composites hand down the ADMITTED source's bits (codex P2,
 // PRRT_kwDORn9KaM6pw_EY), every other caller passes stagingFileMode().
-func copyStreamNoReplaceDigestReproof(fs afero.Fs, srcFile afero.File, dst string, reproof func() error, mode os.FileMode) (string, os.FileInfo, error) {
+func copyStreamNoReplaceDigestReproof(fs afero.Fs, srcFile afero.File, dst string, reproof func() error, mode os.FileMode) (string, *BoundInstallIdentity, error) {
 	staged, handle, err := CreateExclusiveStagingFile(fs, dst, ".nrstg", noreplaceOrdinal.Add(1), mode)
 	if err != nil {
 		return "", nil, fmt.Errorf("no-replace copy: exclusive staging for %s: %w", dst, err)
@@ -338,6 +339,7 @@ func copyStreamNoReplaceDigestReproof(fs afero.Fs, srcFile afero.File, dst strin
 	}
 
 	stagedIdentity := stagingIdentity(handle)
+	strongDevice, strongInode, strongOK := streamedHandleIdentity(handle, stagedIdentity)
 	p := StagedPublish{
 		FS:          fs,
 		Publish:     func(fsys afero.Fs, s, d string) error { return PublishNoReplace(fsys, s, d) },
@@ -354,7 +356,7 @@ func copyStreamNoReplaceDigestReproof(fs afero.Fs, srcFile afero.File, dst strin
 		return "", nil, fmt.Errorf("no-replace copy: publish %s: %w", dst, err)
 	}
 	if info != nil {
-		return hex.EncodeToString(h.Sum(nil)), info, nil
+		return hex.EncodeToString(h.Sum(nil)), newBoundInstallIdentity(info, strongDevice, strongInode, strongOK), nil
 	}
 	// Virtual leg (wrapper/MemMap filesystems): the bound publish proves the
 	// publish but carries no identity, so the installed entry is looked up
@@ -363,7 +365,7 @@ func copyStreamNoReplaceDigestReproof(fs afero.Fs, srcFile afero.File, dst strin
 	if lerr != nil {
 		return "", nil, fmt.Errorf("no-replace copy: the installed identity at %s is indeterminate (%w): %w", dst, ErrPublishCompleted, lerr)
 	}
-	return hex.EncodeToString(h.Sum(nil)), installed, nil
+	return hex.EncodeToString(h.Sum(nil)), newBoundInstallIdentity(installed, 0, 0, false), nil
 }
 
 // stagingIdentity captures the staged object's identity while its handle is

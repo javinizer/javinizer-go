@@ -510,7 +510,7 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 		// carries that proof so the caller never re-derives it from the
 		// destination NAME after a foreign writer could have replanted it
 		// (codex P1, PRRT_kwDORn9KaM6p3Dq1).
-		var installedIdentity os.FileInfo
+		var installedIdentity *fsutil.BoundInstallIdentity
 		move := func() error {
 			if plan.overwriteAuthorized {
 				// Authorized: still classify (#224 Phase C) — symlink/dir dests
@@ -640,7 +640,7 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 	// (codex P1, PRRT_kwDORn9KaM6p3Dq1): the verified legs hand back the object
 	// they installed so the caller binds THAT object, never a destination name
 	// lookup taken after a foreign writer could have replanted it.
-	var installedIdentity os.FileInfo
+	var installedIdentity *fsutil.BoundInstallIdentity
 	// Every destination-touching step runs under the destination lock: unauthorized
 	// paths guard inside it (a plain copy would otherwise overwrite a late-created file),
 	// and authorized Remove+link work must serialize against concurrent guarded calls.

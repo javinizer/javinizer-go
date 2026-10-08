@@ -62,7 +62,7 @@ func TestOrganizeStrategy_CopyPublishesAdmittedSourceMode(t *testing.T) {
 		require.NotNil(t, res.InstalledIdentity, "the publish-proven identity rides the result")
 		info, statErr := os.Lstat(plan.TargetPath)
 		require.NoError(t, statErr)
-		assert.True(t, os.SameFile(res.InstalledIdentity, info), "the identity IS the published object")
+		assert.True(t, os.SameFile(res.InstalledIdentity.FileInfo(), info), "the identity IS the published object")
 		got, readErr := os.ReadFile(plan.TargetPath)
 		require.NoError(t, readErr)
 		assert.Equal(t, content, got)
@@ -79,7 +79,7 @@ func TestOrganizeStrategy_CopyPublishesAdmittedSourceMode(t *testing.T) {
 		require.NotNil(t, res.InstalledIdentity)
 		info, statErr := os.Lstat(plan.TargetPath)
 		require.NoError(t, statErr)
-		assert.True(t, os.SameFile(res.InstalledIdentity, info))
+		assert.True(t, os.SameFile(res.InstalledIdentity.FileInfo(), info))
 	})
 
 	t.Run("an unbound plan keeps the staging default", func(t *testing.T) {
@@ -100,7 +100,7 @@ func TestOrganizeStrategy_CopyPublishesAdmittedSourceMode(t *testing.T) {
 		require.NotNil(t, res.InstalledIdentity, "the verified link re-proves the entry it installed and hands it back")
 		info, statErr := os.Lstat(plan.TargetPath)
 		require.NoError(t, statErr)
-		assert.True(t, os.SameFile(res.InstalledIdentity, info))
+		assert.True(t, os.SameFile(res.InstalledIdentity.FileInfo(), info))
 		assert.Equal(t, os.FileMode(0o640), permOf(t, plan.TargetPath))
 	})
 
@@ -115,7 +115,7 @@ func TestOrganizeStrategy_CopyPublishesAdmittedSourceMode(t *testing.T) {
 		require.NotNil(t, res.InstalledIdentity, "the move lane hands back the object it installed")
 		info, statErr := os.Lstat(plan.TargetPath)
 		require.NoError(t, statErr)
-		assert.True(t, os.SameFile(res.InstalledIdentity, info))
+		assert.True(t, os.SameFile(res.InstalledIdentity.FileInfo(), info))
 		exists, existsErr := afero.Exists(fs, src)
 		require.NoError(t, existsErr)
 		assert.False(t, exists, "the move lane consumed the source")

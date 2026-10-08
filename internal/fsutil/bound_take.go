@@ -696,6 +696,48 @@ func UnlinkVerified(fs afero.Fs, name string, verified os.FileInfo) error {
 	return nil
 }
 
+// UnlinkVerifiedInstall is UnlinkVerified for identities whose publish carried
+// a strong kernel key (codex P1, PRRT_kwDORn9KaM6qJY2k).
+func UnlinkVerifiedInstall(fs afero.Fs, name string, verified *BoundInstallIdentity) error {
+	if verified == nil || verified.FileInfo() == nil {
+		return fmt.Errorf("bound install unlink of %s requires the identity its publish produced", name)
+	}
+	terminal, termClaim, cerr := claimTakeAsideVacName(fs, name)
+	if cerr != nil {
+		return fmt.Errorf("reserve the bound-unlink terminal for %s: %w", name, cerr)
+	}
+	if relErr := releaseTakeAsideVacClaim(fs, terminal, termClaim); relErr != nil {
+		return relErr
+	}
+	if moveErr := PublishNoReplace(fs, name, terminal); moveErr != nil {
+		if os.IsNotExist(moveErr) {
+			return fmt.Errorf("%w: %s vanished under the bound unlink", ErrTakeAsideVanished, name)
+		}
+		return fmt.Errorf("bound-unlink vacate of %s onto %s refused — occupant preserved byte-intact: %w", name, terminal, moveErr)
+	}
+	term, terr := asideLstat(fs, terminal)
+	switch {
+	case os.IsNotExist(terr):
+		return fmt.Errorf("%w: %s (terminal %s empty after the vacate)", ErrTakeAsideVanished, name, terminal)
+	case terr != nil:
+		return rerideBoundUnlink(fs, terminal, name, fmt.Errorf("inspect the bound-unlink terminal %s: %w", terminal, terr))
+	}
+	same, serr := sameBoundInstallObject(fs, terminal, term, verified)
+	if serr != nil {
+		return rerideBoundUnlink(fs, terminal, name, serr)
+	}
+	if !same {
+		return rerideBoundUnlink(fs, terminal, name, fmt.Errorf("bound-unlink terminal %s names a foreign object, not the verified one — foreign bytes preserved (never unlinked): %w", terminal, ErrTakeAsideForeign))
+	}
+	if rerr := fs.Remove(terminal); rerr != nil {
+		if os.IsNotExist(rerr) {
+			return fmt.Errorf("%w: %s (terminal %s vanished under the unlink)", ErrTakeAsideVanished, name, terminal)
+		}
+		return rerideBoundUnlink(fs, terminal, name, fmt.Errorf("remove the bound-unlink terminal %s: %w", terminal, rerr))
+	}
+	return nil
+}
+
 // ObserveVerifiedInstall re-resolves name and confirms the entry currently
 // occupying it still names the object a verified publish installed (codex P1,
 // PR #276, finding ntCe6 — the observation twin of the verified hard-link
@@ -735,8 +777,8 @@ func UnlinkVerified(fs afero.Fs, name string, verified os.FileInfo) error {
 //     record leg is released uninstalled, never armed for deletion.
 //
 // A nil installed identity is a caller bug, never a lookup: it fails closed.
-func ObserveVerifiedInstall(fs afero.Fs, name string, installed os.FileInfo) (os.FileInfo, error) {
-	if installed == nil {
+func ObserveVerifiedInstall(fs afero.Fs, name string, installed *BoundInstallIdentity) (os.FileInfo, error) {
+	if installed == nil || installed.FileInfo() == nil {
 		return nil, fmt.Errorf("bound install observation of %s requires the identity its publish produced", name)
 	}
 	cur, err := asideLstat(fs, name)
@@ -762,13 +804,36 @@ func ObserveVerifiedInstall(fs afero.Fs, name string, installed os.FileInfo) (os
 		// did-not-install classification for it.
 		return nil, nil
 	}
-	if !asideSameObject(cur, installed) {
+	same, serr := sameBoundInstallObject(fs, name, cur, installed)
+	if serr != nil {
+		return nil, serr
+	}
+	if !same {
 		return nil, errors.Join(
 			fmt.Errorf("%w: %s no longer provably names the object this operation installed — the regular-file occupant is an explicitly unproven successor, retained byte-intact (never adopted as installed output)", ErrPublishSuccessorUnproven, name),
 			fmt.Errorf("%w: this operation's own installed bytes may still stand elsewhere under another name", ErrPublishCompleted),
 		)
 	}
 	return cur, nil
+}
+
+func sameBoundInstallObject(fs afero.Fs, name string, cur os.FileInfo, installed *BoundInstallIdentity) (bool, error) {
+	if cur == nil || installed == nil || installed.FileInfo() == nil || cur.Mode()&os.ModeSymlink != 0 || !cur.Mode().IsRegular() {
+		return false, nil
+	}
+	expectDevice, expectInode, expectOK := installed.strongIdentity()
+	if !expectOK {
+		return asideSameObject(cur, installed.FileInfo()), nil
+	}
+	curDevice, curInode, curOK := BoundObjectIdentity(fs, name, cur)
+	if !curOK {
+		return false, fmt.Errorf("%w: bound install observation of %s cannot re-derive the strong identity required by PRRT_kwDORn9KaM6qJY2k", ErrPublishCompleted, name)
+	}
+	if curDevice != expectDevice || curInode != expectInode {
+		return false, nil
+	}
+	info := installed.FileInfo()
+	return cur.Size() == info.Size() && cur.ModTime().Equal(info.ModTime()), nil
 }
 
 // rerideBoundUnlink rewinds the bound-unlink terminal object BACK onto the
