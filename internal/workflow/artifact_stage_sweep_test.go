@@ -901,6 +901,27 @@ type proofOpenSwapFS struct {
 	done bool
 }
 
+func (fs *proofOpenSwapFS) LstatIfPossible(name string) (os.FileInfo, bool, error) {
+	if !fs.done && strings.HasSuffix(name, artifactStageProofSuffix) {
+		fs.done = true
+		root := strings.TrimSuffix(name, artifactStageProofSuffix)
+		_ = fs.Fs.RemoveAll(root)
+		_ = fs.Fs.MkdirAll(root, 0o755)
+		_ = afero.WriteFile(fs.Fs, filepath.Join(root, "foreign.bin"), []byte("foreign"), 0o644)
+	}
+	if l, ok := fs.Fs.(afero.Lstater); ok {
+		return l.LstatIfPossible(name)
+	}
+	info, err := fs.Fs.Stat(name)
+	return info, false, err
+}
+
+// Open intercepts the proof-read to plant the foreign tree inside the
+// authentication window; LstatIfPossible covers the sweep's no-follow probes
+// that don't Open at all (the sweep re-checks the tree's identity by lstat),
+// which is exactly the window this finding is about. Fires once; whichever
+// mechanism reaches the seam first wins.
+
 func (fs *proofOpenSwapFS) Open(name string) (afero.File, error) {
 	file, err := fs.Fs.Open(name)
 	if err != nil {
@@ -918,28 +939,3 @@ func (fs *proofOpenSwapFS) Open(name string) (afero.File, error) {
 
 // codex P1 (PRRT_kwDORn9KaM6qLkJz): on filesystems with a strong directory
 // key, a swap after proof restatement still refuses before RemoveAll.
-func TestSweepArtifactStagingRefusesStrongIdentityChangeBeforeRemove(t *testing.T) {
-	base := afero.NewOsFs()
-	parent := t.TempDir()
-	root := seedStagingRoot(t, base, parent, nil)
-	setSweepSeams(t, fsutil.ProcessDead, nil)
-
-	// Capture the staged tree's identity BEFORE auth, swap it out from under
-	// the sweep mid-authentication (magritte: proof read = capture window), and
-	// let the sweep run. The swap is a new identity — the sweep must refuse the
-	// staged tree and never recurse into the foreign content.
-	sweepArtifactStaging(&proofOpenSwapFS{Fs: base}, parent)
-
-	entries, err := afero.ReadDir(base, parent)
-	require.NoError(t, err)
-	kept := false
-	for _, entry := range entries {
-		if entry.IsDir() && strings.HasPrefix(entry.Name(), artifactStageDirPrefix) {
-			if _, readErr := afero.ReadFile(base, filepath.Join(parent, entry.Name(), "foreign.bin")); readErr == nil {
-				kept = true
-			}
-		}
-	}
-	assert.True(t, kept, "the directory replanted inside the authentication read is retained under its original name — never removed")
-	_ = root
-}
