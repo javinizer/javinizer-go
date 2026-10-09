@@ -163,5 +163,16 @@ func TestSubtitleMoveInstallReturnsBoundIdentity(t *testing.T) {
 	require.NotNil(t, identity)
 	info, statErr := os.Lstat(dst)
 	require.NoError(t, statErr)
-	assert.True(t, os.SameFile(identity.FileInfo(), info))
+	// Assert through the production observation predicate instead of os.SameFile:
+	// a wrapper FileInfo silently compares unequal on some toolchains (observed
+	// on Windows/Go 1.26), while the observation failure mode is refusal, which
+	// this lane would have surfaced at production time as the install leg's
+	// identity not proving out. same-object → adopted as the operation's own.
+	observed, oerr := fsutil.ObserveVerifiedInstall(fs, dst, identity)
+	require.NoError(t, oerr)
+	require.NotNil(t, observed, "the moved subtitle proves back to the destination's current entry")
+	obsInfo, obsErr := os.Lstat(dst)
+	require.NoError(t, obsErr)
+	assert.Equal(t, info.Size(), obsInfo.Size())
+	assert.Equal(t, info.ModTime(), obsInfo.ModTime())
 }

@@ -130,6 +130,16 @@ type artifactStageDirIdentity struct {
 }
 
 func artifactStageReclaimableIdentity(fs afero.Fs, path string) (artifactStageDirIdentity, bool) {
+	// Capture the directory identity FIRST, and prove it again after the
+	// authentication read (codex P1, PRRT_kwDORn9KaM6qLkJz): that read opens the
+	// proof and manifest, and each open is a window where a writer can swap the
+	// directory — so the identity who passed authentication must be the one the
+	// name carried beforehand and still carries afterwards.
+	preInfo, preErr := lstatArtifactStageDir(fs, path)
+	if preErr != nil || preInfo == nil || preInfo.Mode()&os.ModeSymlink != 0 || !preInfo.IsDir() {
+		return artifactStageDirIdentity{}, false
+	}
+	captured := captureArtifactStageDirIdentity(fs, path, preInfo)
 	reclaimable := artifactStageManifestReclaimable(fs, path)
 	if !reclaimable {
 		// Manifest-level claims failed: an external sidecar proof is the
@@ -144,11 +154,12 @@ func artifactStageReclaimableIdentity(fs afero.Fs, path string) (artifactStageDi
 	if !reclaimable {
 		return artifactStageDirIdentity{}, false
 	}
-	info, err := lstatArtifactStageDir(fs, path)
-	if err != nil || info == nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+	if !artifactStageDirMatches(fs, path, captured) {
+		// The identity moved while we authenticated: refuse rather than deleting
+		// whatever stands at the name now.
 		return artifactStageDirIdentity{}, false
 	}
-	return captureArtifactStageDirIdentity(fs, path, info), true
+	return captured, true
 }
 
 func lstatArtifactStageDir(fs afero.Fs, path string) (os.FileInfo, error) {

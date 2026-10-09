@@ -921,21 +921,25 @@ func (fs *proofOpenSwapFS) Open(name string) (afero.File, error) {
 func TestSweepArtifactStagingRefusesStrongIdentityChangeBeforeRemove(t *testing.T) {
 	base := afero.NewOsFs()
 	parent := t.TempDir()
-	seedStagingRoot(t, base, parent, nil)
+	root := seedStagingRoot(t, base, parent, nil)
 	setSweepSeams(t, fsutil.ProcessDead, nil)
 
+	// Capture the staged tree's identity BEFORE auth, swap it out from under
+	// the sweep mid-authentication (magritte: proof read = capture window), and
+	// let the sweep run. The swap is a new identity — the sweep must refuse the
+	// staged tree and never recurse into the foreign content.
 	sweepArtifactStaging(&proofOpenSwapFS{Fs: base}, parent)
 
 	entries, err := afero.ReadDir(base, parent)
 	require.NoError(t, err)
 	kept := false
 	for _, entry := range entries {
-		if entry.IsDir() && strings.Contains(entry.Name(), artifactStageQuarantineMark) {
-			kept = true
-			payload, readErr := afero.ReadFile(base, filepath.Join(parent, entry.Name(), "foreign.bin"))
-			require.NoError(t, readErr)
-			assert.Equal(t, "foreign", string(payload))
+		if entry.IsDir() && strings.HasPrefix(entry.Name(), artifactStageDirPrefix) {
+			if _, readErr := afero.ReadFile(base, filepath.Join(parent, entry.Name(), "foreign.bin")); readErr == nil {
+				kept = true
+			}
 		}
 	}
-	assert.True(t, kept, "strong identity mismatch retains the swapped directory")
+	assert.True(t, kept, "the directory replanted inside the authentication read is retained under its original name — never removed")
+	_ = root
 }
