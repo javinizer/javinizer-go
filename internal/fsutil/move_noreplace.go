@@ -1,6 +1,8 @@
 package fsutil
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -33,6 +35,15 @@ import (
 func stagingFileMode() os.FileMode {
 	return config.FilePerm &^ os.FileMode(config.UmaskValue())
 }
+
+// StagingFileMode is the historical destination staging mode — config.FilePerm
+// as narrowed by the process umask (see stagingFileMode) — for callers that
+// must state a staging mode explicitly and keep the default as their fallback.
+// The deferred publication's plan resolves the ADMITTED source's permission
+// bits and falls back here when nothing was bound (codex P2,
+// PRRT_kwDORn9KaM6pw_EY); routing both lanes through one resolver keeps the
+// explicit and the default mode from ever disagreeing.
+func StagingFileMode() os.FileMode { return stagingFileMode() }
 
 // noreplaceOrdinal is the process-local staging-name nonce for the
 // no-replace composites (exclusive staging retries ordinals inside).
@@ -168,17 +179,114 @@ func CopyFileNoReplace(fs afero.Fs, src, dst string) error {
 	}
 	defer func() { _ = srcFile.Close() }()
 
+	return copyStreamNoReplace(fs, srcFile, dst)
+}
+
+// CopyFileNoReplaceDigest is CopyFileNoReplace with the streamed bytes'
+// sha256 teed off the single publish pass: the destination provably carries
+// the returned digest (the staged file holds exactly the streamed bytes and
+// the bound publish renames it unchanged). No second read of the payload is
+// ever taken — the digest exists because the copy had to stream anyway.
+func CopyFileNoReplaceDigest(fs afero.Fs, src, dst string) (string, error) {
+	done, err := classifyNoreplaceDestination(fs, src, dst)
+	if done || err != nil {
+		return "", err
+	}
+	if err := fs.MkdirAll(filepath.Dir(dst), config.DirPerm); err != nil {
+		return "", fmt.Errorf("no-replace copy: create destination directory: %w", err)
+	}
+
+	if err := ProbeNoClobberPublish(fs, filepath.Dir(dst)); err != nil {
+		return "", err
+	}
+
+	srcFile, err := fs.Open(src)
+	if err != nil {
+		return "", fmt.Errorf("no-replace copy: open source %s: %w", src, err)
+	}
+	defer func() { _ = srcFile.Close() }()
+
+	return copyStreamNoReplaceDigest(fs, srcFile, dst)
+}
+
+// copyStreamNoReplace is copyStreamNoReplaceDigest for callers that do not
+// consume the streamed digest.
+func copyStreamNoReplace(fs afero.Fs, srcFile afero.File, dst string) error {
+	_, err := copyStreamNoReplaceDigest(fs, srcFile, dst)
+	return err
+}
+
+// copyStreamNoReplaceDigest is the shared publish tail of CopyFileNoReplace
+// and the verified composites (move_verified.go): the ALREADY-OPEN source
+// stream is staged dest-adjacent with O_EXCL, streamed through its pinned
+// handle, and bound-published onto dst with no-replace semantics. The source
+// stream tees into a sha256 as it flows, so the returned digest certifies
+// the published destination's bytes for the same single read the copy
+// performs. On every failure leg the staged name is discarded via the bound
+// discipline (a planted substitute is never unlinked) and dst content is
+// never replaced.
+func copyStreamNoReplaceDigest(fs afero.Fs, srcFile afero.File, dst string) (string, error) {
+	digest, _, err := copyStreamNoReplaceDigestReproof(fs, srcFile, dst, nil, stagingFileMode())
+	return digest, err
+}
+
+// copyStreamNoReplaceReproof is copyStreamNoReplaceDigestReproof for callers
+// that do not consume the streamed digest. The installed object's identity
+// rides out (codex P1, PRRT_kwDORn9KaM6p3Dq1): a caller recording the publish
+// for later compensation binds THAT object, never a name lookup taken after
+// its lock release.
+func copyStreamNoReplaceReproof(fs afero.Fs, srcFile afero.File, dst string, reproof func() error, mode os.FileMode) (*BoundInstallIdentity, error) {
+	_, installed, err := copyStreamNoReplaceDigestReproof(fs, srcFile, dst, reproof, mode)
+	return installed, err
+}
+
+// copyStreamNoReplaceInstallReproof is the identity-returning publish-tail
+// twin of copyStreamNoReplaceDigestReproof (codex P1, PR #276, finding
+// ntCe6): instead of a streamed digest it hands back the INSTALLED OBJECT's
+// identity — the one proven at publish time — so a caller can bind its
+// post-publication record (the deferred publication's rollback observation)
+// to the object this copy actually installed rather than to whatever
+// occupies the destination name at some later lookup. Every stream/proof /
+// discard discipline of the digest twin holds byte-for-byte; the only
+// difference is what a success carries out:
+//
+//   - POSIX/Windows legs: PublishStagedBoundInfo's post-publish reverify
+//     stat — the destination lookup os.SameFile-bound to the staged inode,
+//     i.e. provably the object this operation installed;
+//   - the virtual leg (wrapper/MemMap filesystems — no rename-away threat
+//     model, and CloseStaged restamps mem handles): the pre-close staged
+//     identity is NOT taken (its recorded mtime can drift from the
+//     published entry's at handle close, falsely refusing a later
+//     asideSameObject compare); the destination is looked up directly right
+//     after the proven publish instead;
+//   - an indeterminate post-publish lookup: the published bytes provably
+//     landed (the bound publish's own reverify held), so the refusal joins
+//     ErrPublishCompleted (the doubt class — this operation's bytes stand
+//     at the destination) with the lookup error, never asserting an
+//     identity. Error legs are exactly the digest twin's.
+func copyStreamNoReplaceInstallReproof(fs afero.Fs, srcFile afero.File, dst string, reproof func() error) (*BoundInstallIdentity, error) {
 	staged, handle, err := CreateExclusiveStagingFile(fs, dst, ".nrstg", noreplaceOrdinal.Add(1), stagingFileMode())
 	if err != nil {
-		return fmt.Errorf("no-replace copy: exclusive staging for %s: %w", dst, err)
+		return nil, fmt.Errorf("no-replace copy: exclusive staging for %s: %w", dst, err)
 	}
 	if _, err := io.Copy(handle, srcFile); err != nil {
 		DiscardFailedExclusiveStaging(fs, staged, handle)
-		return fmt.Errorf("no-replace copy: stream into staging for %s: %w", dst, err)
+		return nil, fmt.Errorf("no-replace copy: stream into staging for %s: %w", dst, err)
+	}
+	if reproof != nil {
+		if rerr := reproof(); rerr != nil {
+			DiscardFailedExclusiveStaging(fs, staged, handle)
+			return nil, rerr
+		}
 	}
 
 	stagedIdentity := stagingIdentity(handle)
-
+	// codex P1, PRRT_kwDORn9KaM6qKyWN: pairs of the published identity must
+	// come from the object's FINAL identity — the OS publish leg restages
+	// bytes into a fresh O_EXCL object when a plant consumed the staged
+	// name, so the pre-publish handle capture would describe the abandoned
+	// staging entry and make the observation reject our own install.
+	strongDevice, strongInode, strongOK := streamedHandleIdentity(handle, stagedIdentity)
 	p := StagedPublish{
 		FS:          fs,
 		Publish:     func(fsys afero.Fs, s, d string) error { return PublishNoReplace(fsys, s, d) },
@@ -189,11 +297,95 @@ func CopyFileNoReplace(fs afero.Fs, src, dst string) error {
 		Suffix:      ".nrstg",
 		NextOrdinal: nextNoReplaceOrdinal,
 	}
-	if err := PublishStagedBound(p); err != nil {
+	info, err := PublishStagedBoundInfo(p)
+	if err != nil {
 		discardStagedAfterFailedPublish(fs, staged, stagedIdentity, err)
-		return fmt.Errorf("no-replace copy: publish %s: %w", dst, err)
+		return nil, fmt.Errorf("no-replace copy: publish %s: %w", dst, err)
 	}
-	return nil
+	if info != nil {
+		// Same as the digest twin: the published object's own key outranks the
+		// initial handle capture when the publish restaged onto a fresh inode.
+		if dev, ino, ok := boundObjectIdentity(info); ok {
+			strongDevice, strongInode, strongOK = dev, ino, true
+		}
+		return newBoundInstallIdentity(info, strongDevice, strongInode, strongOK), nil
+	}
+	installed, lerr := asideLstat(fs, dst)
+	if lerr != nil {
+		return nil, fmt.Errorf("no-replace copy: the installed identity at %s is indeterminate (%w): %w", dst, ErrPublishCompleted, lerr)
+	}
+	return newBoundInstallIdentity(installed, 0, 0, false), nil
+}
+
+// copyStreamNoReplaceDigestReproof is copyStreamNoReplaceDigest with the
+// verified composites' post-stream re-validation seam: reproof, when
+// non-nil, runs AFTER the staged stream completes and BEFORE the bound
+// publish. The pinned source descriptor pins the file OBJECT, not an
+// immutable snapshot of its bytes, so an in-place rewrite landing after the
+// admission proof but mid-stream must refuse here — otherwise the publish
+// (and the teed digest) would describe content the proof never admitted
+// (codex P2, PRRT_kwDORn9KaM6nkVjY). A refusal discards the staged copy
+// through the same bound discipline as a stream failure: nothing is
+// published and no digest is attributed.
+//
+// mode is the staged file's permission set, applied verbatim: the verified
+// composites hand down the ADMITTED source's bits (codex P2,
+// PRRT_kwDORn9KaM6pw_EY), every other caller passes stagingFileMode().
+func copyStreamNoReplaceDigestReproof(fs afero.Fs, srcFile afero.File, dst string, reproof func() error, mode os.FileMode) (string, *BoundInstallIdentity, error) {
+	staged, handle, err := CreateExclusiveStagingFile(fs, dst, ".nrstg", noreplaceOrdinal.Add(1), mode)
+	if err != nil {
+		return "", nil, fmt.Errorf("no-replace copy: exclusive staging for %s: %w", dst, err)
+	}
+	h := sha256.New()
+	if _, err := io.Copy(handle, io.TeeReader(srcFile, h)); err != nil {
+		DiscardFailedExclusiveStaging(fs, staged, handle)
+		return "", nil, fmt.Errorf("no-replace copy: stream into staging for %s: %w", dst, err)
+	}
+	if reproof != nil {
+		if rerr := reproof(); rerr != nil {
+			DiscardFailedExclusiveStaging(fs, staged, handle)
+			return "", nil, rerr
+		}
+	}
+
+	stagedIdentity := stagingIdentity(handle)
+	// codex P1, PRRT_kwDORn9KaM6qKyWN: pairs of the published identity must
+	// come from the object's FINAL identity — the OS publish leg restages
+	// bytes into a fresh O_EXCL object when a plant consumed the staged
+	// name, so the pre-publish handle capture would describe the abandoned
+	// staging entry and make the observation reject our own install.
+	strongDevice, strongInode, strongOK := streamedHandleIdentity(handle, stagedIdentity)
+	p := StagedPublish{
+		FS:          fs,
+		Publish:     func(fsys afero.Fs, s, d string) error { return PublishNoReplace(fsys, s, d) },
+		NoReplace:   true,
+		Staged:      staged,
+		Handle:      handle,
+		Dest:        dst,
+		Suffix:      ".nrstg",
+		NextOrdinal: nextNoReplaceOrdinal,
+	}
+	info, err := PublishStagedBoundInfo(p)
+	if err != nil {
+		discardStagedAfterFailedPublish(fs, staged, stagedIdentity, err)
+		return "", nil, fmt.Errorf("no-replace copy: publish %s: %w", dst, err)
+	}
+	if info != nil {
+		// The publish leg returned the re-proved post-publish identity: its own
+		// dev/inode outranks the pre-publish handle capture (the restage case).
+		if dev, ino, ok := boundObjectIdentity(info); ok {
+			strongDevice, strongInode, strongOK = dev, ino, true
+		}
+		return hex.EncodeToString(h.Sum(nil)), newBoundInstallIdentity(info, strongDevice, strongInode, strongOK), nil
+	}
+	// Virtual leg (wrapper/MemMap filesystems): the bound publish proves the
+	// publish but carries no identity, so the installed entry is looked up
+	// directly — the same indeterminate-lookup posture as the install twin.
+	installed, lerr := asideLstat(fs, dst)
+	if lerr != nil {
+		return "", nil, fmt.Errorf("no-replace copy: the installed identity at %s is indeterminate (%w): %w", dst, ErrPublishCompleted, lerr)
+	}
+	return hex.EncodeToString(h.Sum(nil)), newBoundInstallIdentity(installed, 0, 0, false), nil
 }
 
 // stagingIdentity captures the staged object's identity while its handle is

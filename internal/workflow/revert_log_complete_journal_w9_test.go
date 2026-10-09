@@ -190,20 +190,20 @@ func TestW9CompletionLedgerMerge(t *testing.T) {
 
 	// No new payload, no folder root → byte-identical merge is a persist=false
 	// no-op (the retry-after-commit leg).
-	next, persist, merged, err := completionLedgerMerge(journal, "", "")
+	next, persist, merged, err := completionLedgerMergeOpt(journal, "", "", true)
 	require.NoError(t, err)
 	require.False(t, persist)
 	require.Equal(t, journal, merged)
 	require.Empty(t, next.Replacements)
 
 	// Folder root appends against the FRESH row's journal and dedupes.
-	next, persist, merged, err = completionLedgerMerge(journal, "", "/dst/leaf")
+	next, persist, merged, err = completionLedgerMergeOpt(journal, "", "/dst/leaf", true)
 	require.NoError(t, err)
 	require.True(t, persist)
 	require.Contains(t, merged, "/dst/leaf")
 	require.Len(t, next.Roots, 2)
 	require.Len(t, next.Replacements, 1, "fresh-row replacements carry through")
-	_, persist, _, err = completionLedgerMerge(merged, "", "/dst/leaf")
+	_, persist, _, err = completionLedgerMergeOpt(merged, "", "/dst/leaf", true)
 	require.NoError(t, err)
 	require.False(t, persist, "re-appending an existing root is a no-op")
 
@@ -211,7 +211,7 @@ func TestW9CompletionLedgerMerge(t *testing.T) {
 	// transaction instead of persisting unverifiable bytes (unreachable through
 	// mergeReplacementLedger's byte contract — prior malformed degrades to
 	// newRaw, so injecting a malformed newRaw drives the refusal leg directly).
-	_, persist, merged, err = completionLedgerMerge(`{"replacements":broken`, `{"delete":broken`, "")
+	_, persist, merged, err = completionLedgerMergeOpt(`{"replacements":broken`, `{"delete":broken`, "", true)
 	require.Error(t, err)
 	require.False(t, persist)
 	require.Empty(t, merged)

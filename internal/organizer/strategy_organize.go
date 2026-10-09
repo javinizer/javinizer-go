@@ -60,6 +60,25 @@ var moveFileDestReplaced = fsutil.MoveFileFsDestReplaced
 // shape deterministically).
 var filepathAbsFn = filepath.Abs
 
+// SymlinkLinkTarget computes the exact payload the organize strategy's
+// LinkModeSoft leg installs at the destination: the source path itself when
+// absolute, else its absolutized form. The fenced deferred publication's
+// delete intent pins THIS string (the symlink's entire payload is the
+// target, so the readlink payload IS the ownership certificate), and both
+// sides must derive it through one route or the pin would authenticate a
+// string the install never wrote.
+func SymlinkLinkTarget(sourcePath string) (string, error) {
+	linkTarget := sourcePath
+	if !filepath.IsAbs(linkTarget) {
+		abs, err := filepathAbsFn(linkTarget)
+		if err != nil {
+			return "", fmt.Errorf("failed to resolve source path for symlink: %w", err)
+		}
+		linkTarget = abs
+	}
+	return linkTarget, nil
+}
+
 // foldMovePublishCrumb is the move lanes' unified retained-crumb predicate
 // (PR #249 codex P2 follow-up) — the three strategies' duplicated
 // replace-then-key-the-crumb gates collapse into this one fold: the
@@ -279,6 +298,22 @@ func mapNoReplaceRefusal(err error, dst string) error {
 	}
 }
 
+// mapLinkInstallError keeps the legacy and verified hardlink legs on one error
+// vocabulary: cross-device and permission failures keep their historical
+// guidance text, everything else wraps generically with the typed classes
+// (the verified leg's ErrTakeAsideForeign / ErrPublishCompleted /
+// ErrPublishCollision) unwrap-reachable for mapNoReplaceRefusal and the
+// caller's seat classifiers.
+func mapLinkInstallError(err error) error {
+	if errors.Is(err, syscall.EXDEV) {
+		return fmt.Errorf("failed to create hard link (source and destination must be on the same filesystem): %w", err)
+	}
+	if errors.Is(err, os.ErrPermission) {
+		return fmt.Errorf("failed to create hard link (permission denied): %w", err)
+	}
+	return fmt.Errorf("failed to create hard link: %w", err)
+}
+
 // symlinkObjectExists probes path specifically for a symlink OBJECT (including dangling
 // ones) on filesystems whose Stat follows links — where a dangling symlink otherwise
 // masquerades as not-exists.
@@ -470,6 +505,12 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 		// republish-exhaustion family) keeps the crumb ON the FAILED result
 		// — see foldMovePublishCrumb.
 		overwroteOccupiedDest := false
+		// installedIdentity is the moved object's publish-proven identity: the
+		// verified composite re-proves the object it installed, and the result
+		// carries that proof so the caller never re-derives it from the
+		// destination NAME after a foreign writer could have replanted it
+		// (codex P1, PRRT_kwDORn9KaM6p3Dq1).
+		var installedIdentity *fsutil.BoundInstallIdentity
 		move := func() error {
 			if plan.overwriteAuthorized {
 				// Authorized: still classify (#224 Phase C) — symlink/dir dests
@@ -502,6 +543,18 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 				// #224: the atomic no-replace composite — a foreign writer
 				// claiming the name after classification conflicts atomically
 				// instead of being replaced by the rename inside the window.
+				// A caller-bound admission proof routes through the verified
+				// twin: the source OBJECT — never merely its pathname — is what
+				// gets consumed, take-aside and re-proven before publication
+				// (codex P1, the validation→publication window).
+				if plan.verifiedSourceProof != nil {
+					moved, moveErr := fsutil.MoveFileNoReplaceVerifiedMode(s.fs, plan.SourcePath, plan.TargetPath, plan.verifiedSourceProof, plan.copyStagingMode())
+					if moveErr != nil {
+						return mapNoReplaceRefusal(moveErr, plan.TargetPath)
+					}
+					installedIdentity = moved
+					return nil
+				}
 				if err := fsutil.MoveFileNoReplace(s.fs, plan.SourcePath, plan.TargetPath); err != nil {
 					return mapNoReplaceRefusal(err, plan.TargetPath)
 				}
@@ -548,6 +601,7 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 		}
 
 		result.Moved = true
+		result.InstalledIdentity = installedIdentity
 		// Force-overwrite audit crumb: the replace actually landed — keep the
 		// resident bytes' replacement visible to every audit consumer.
 		if overwroteOccupiedDest {
@@ -577,6 +631,16 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 	// never to plan-time state. No-op and refused lanes never set it, and a
 	// failed install discards it by returning before the warning.
 	overwroteOccupiedDest := false
+	// copySHA256 is the tee-captured digest of the verified copy leg's single
+	// publish stream (bound via BindCopyDigestCapture): set only on a copy
+	// that actually streamed — no-op early returns leave it empty, and the
+	// caller's seal then matches the result's empty PrimaryCopySHA256.
+	copySHA256 := ""
+	// installedIdentity is the copied/linked primary's publish-proven identity
+	// (codex P1, PRRT_kwDORn9KaM6p3Dq1): the verified legs hand back the object
+	// they installed so the caller binds THAT object, never a destination name
+	// lookup taken after a foreign writer could have replanted it.
+	var installedIdentity *fsutil.BoundInstallIdentity
 	// Every destination-touching step runs under the destination lock: unauthorized
 	// paths guard inside it (a plain copy would otherwise overwrite a late-created file),
 	// and authorized Remove+link work must serialize against concurrent guarded calls.
@@ -672,26 +736,38 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 
 			switch plan.LinkMode {
 			case LinkModeHard:
+				// A caller-bound admission proof routes the install through the
+				// verified twin (codex P1, PRRT_kwDORn9KaM6nEnUw): link(2)
+				// resolves the source BY NAME, so the composite re-proves the
+				// open source handle before the link and re-proves the INSTALLED
+				// entry (which aliases whatever the source named at the link
+				// instant) after it. An entry failing that proof is bound-unlinked
+				// only while it still provably aliases the admitted source object;
+				// a divergent entry is unproven — a post-install successor of
+				// another writer may be standing at the name — and is RETAINED
+				// byte-intact with the doubt-as-published class joined (codex P1,
+				// PRRT_kwDORn9KaM6npnwi), never an unlink authenticated against the
+				// entry's own current identity. The kernel's EEXIST keeps the
+				// install no-clobber; the shared refusal/classes mapping is
+				// unchanged.
+				if plan.verifiedSourceProof != nil {
+					linked, linkErr := fsutil.LinkFileNoReplaceVerifiedInstall(s.fs, plan.SourcePath, plan.TargetPath, s.linker.hardlink, plan.verifiedSourceProof)
+					if linkErr != nil {
+						return mapNoReplaceRefusal(mapLinkInstallError(linkErr), plan.TargetPath)
+					}
+					installedIdentity = linked
+					return nil
+				}
 				if err := s.linker.hardlink(plan.SourcePath, plan.TargetPath); err != nil {
-					if errors.Is(err, syscall.EXDEV) {
-						return fmt.Errorf("failed to create hard link (source and destination must be on the same filesystem): %w", err)
-					}
-					if errors.Is(err, os.ErrPermission) {
-						return fmt.Errorf("failed to create hard link (permission denied): %w", err)
-					}
-					return fmt.Errorf("failed to create hard link: %w", err)
+					return mapLinkInstallError(err)
 				}
 				// Authorized link install delivered: a foreign occupant's bytes
 				// were replaced at the destination (crumb bound at the Remove
 				// above — F2 binds it at the destruction, not at this success).
 			case LinkModeSoft:
-				linkTarget := plan.SourcePath
-				if !filepath.IsAbs(linkTarget) {
-					abs, err := filepathAbsFn(linkTarget)
-					if err != nil {
-						return fmt.Errorf("failed to resolve source path for symlink: %w", err)
-					}
-					linkTarget = abs
+				linkTarget, err := SymlinkLinkTarget(plan.SourcePath)
+				if err != nil {
+					return err
 				}
 				if err := s.linker.symlink(linkTarget, plan.TargetPath); err != nil {
 					if errors.Is(err, os.ErrPermission) {
@@ -706,7 +782,31 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 					return nil
 				}
 				if !plan.overwriteAuthorized {
-					// #224: copy leg is atomically no-clobbering too.
+					// #224: copy leg is atomically no-clobbering too. The
+					// verified twin binds the consumed bytes to the caller's
+					// admission proof at the open handle: a source renamed
+					// aside mid-publish still lands the admitted bytes — or
+					// refuses before staging (codex P1). The digest-capture twin
+					// additionally tees the stream's sha256 — the deferred
+					// publication seals its interim partial pin with the exact
+					// bytes that landed, without any second read of the payload.
+					if plan.verifiedSourceProof != nil {
+						if plan.copyDigestCapture {
+							digest, installed, copyErr := fsutil.CopyFileNoReplaceVerifiedDigestMode(s.fs, plan.SourcePath, plan.TargetPath, plan.verifiedSourceProof, plan.copyStagingMode())
+							if copyErr != nil {
+								return mapNoReplaceRefusal(fmt.Errorf("failed to copy file: %w", copyErr), plan.TargetPath)
+							}
+							copySHA256 = digest
+							installedIdentity = installed
+							return nil
+						}
+						installed, copyErr := fsutil.CopyFileNoReplaceVerifiedMode(s.fs, plan.SourcePath, plan.TargetPath, plan.verifiedSourceProof, plan.copyStagingMode())
+						if copyErr != nil {
+							return mapNoReplaceRefusal(fmt.Errorf("failed to copy file: %w", copyErr), plan.TargetPath)
+						}
+						installedIdentity = installed
+						return nil
+					}
 					if err := fsutil.CopyFileNoReplace(s.fs, plan.SourcePath, plan.TargetPath); err != nil {
 						return mapNoReplaceRefusal(fmt.Errorf("failed to copy file: %w", err), plan.TargetPath)
 					}
@@ -774,6 +874,8 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 	}
 
 	result.Moved = true
+	result.PrimaryCopySHA256 = copySHA256
+	result.InstalledIdentity = installedIdentity
 	// Force-overwrite audit crumb: the replace actually landed — keep the
 	// resident bytes' replacement visible to every audit consumer.
 	if overwroteOccupiedDest {

@@ -2,12 +2,16 @@ package history
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/javinizer/javinizer-go/internal/config"
@@ -247,6 +251,18 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 		return result, err
 	}
 
+	// only a hydrated pending intent gets the unexecuted-intent settle below.
+	hydratedPendingIntent := false
+	if op.NewPath == "" && op.OperationType == models.OperationTypeMove {
+		// A deferred-move row that crashed between publish and completion
+		// carries its primary endpoints ONLY as a pending MoveBack intent:
+		// hydrate BEFORE classification/replay — the replacement restore must
+		// never overwrite the freshly moved destination with its pre-overwrite
+		// backup (that would clobber the moved source's only remaining copy).
+		pendingMoveIntentAnchor(op)
+		hydratedPendingIntent = op.NewPath != ""
+	}
+
 	// P3: replay the replacement journal BEFORE the anchor check AND before
 	// any operation-type leg (codex P3 R2-1/R6-in-2): a deleted primary
 	// anchor must not strand independently recoverable overwritten media —
@@ -264,6 +280,55 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 	}
 	if len(restored) > 0 {
 		logging.Debugf("Reverted %d journaled replacement(s) for op %d ahead of the %s leg", len(restored), op.ID, op.OperationType)
+	}
+
+	// Only after the journal replay may an unexecuted intent settle a no-op,
+	// because a crash-severed overwrite has already restored its prior bytes by
+	// now — destination-absent + source-present proves the move never ran.
+	if hydratedPendingIntent && op.OperationType == models.OperationTypeMove {
+		_, dstErr := r.fs.Stat(op.NewPath)
+		// The source probe must NOT follow symlinks: a dangling symlink at the
+		// source pathname is an existing directory entry the move never
+		// consumed, and plain Stat would misread it as absent — the row then
+		// skips the anchor check unsettled and every retry stays incomplete.
+		_, srcErr := lstatRestoreSource(r.fs, op.OriginalPath)
+		if os.IsNotExist(dstErr) && srcErr == nil {
+			// The replay exclusion above stays correct OUTSIDE this guard: a
+			// hydrated intent whose destination is present can mean the publish
+			// DID land, and restoring the backup there would clobber the moved
+			// source's only remaining copy. Inside this guard the absent
+			// destination + present source prove the publish never ran, so the
+			// excluded entry is exactly the stranded forced-overwrite backup:
+			// restore it BEFORE the no-op verdict, or the terminal settle leaves
+			// the user's prior bytes at the backup path with the row no longer
+			// retryable.
+			if primaryReplacement {
+				primaryRestored, restoreErr := r.restoreReplacementJournalWhere(ctx, op, func(destination string) bool {
+					return filepath.Clean(destination) == filepath.Clean(op.NewPath)
+				})
+				if restoreErr != nil {
+					return rejectedRevert(op, restoreErr).withRetryable(restoreErr), nil
+				}
+				for path := range primaryRestored {
+					restored[path] = true
+				}
+			}
+			if uerr := r.batchFileOpRepo.UpdateRevertStatus(ctx, op.ID, models.RevertStatusNoOp); uerr != nil {
+				return failRevert(ctx, r.batchFileOpRepo, op, models.RevertReasonUnexpectedPathState, fmt.Sprintf("settle unexecuted pending intent for op %d: %v", op.ID, uerr)), nil
+			}
+			op.RevertStatus = models.RevertStatusNoOp
+			return &RevertFileResult{OperationID: op.ID, MovieID: op.MovieID, OriginalPath: op.OriginalPath, NewPath: op.NewPath, Outcome: models.RevertOutcomeSkipped, Reason: models.RevertReasonAnchorMissing}, nil
+		}
+		if dstErr == nil && srcErr == nil {
+			// codex P2 (PRRT_kwDORn9KaM6nD37F): destination present + ANY
+			// source-pathname entry — a dangling symlink included — must take
+			// the same conflict verdict revertPrimaryFileFS gives an occupied
+			// regular-file source there. A dangling link reads as vacant under
+			// that leg's following Stat, so the happy rename-back would POSIX
+			// rename the moved destination over the occupant; the conflict
+			// instead fails retryably and retains both sides byte-for-byte.
+			return failRevert(ctx, r.batchFileOpRepo, op, models.RevertReasonDestinationConflict, fmt.Sprintf("pending move intent retains both copies: source path %s is occupied (destination conflict)", op.OriginalPath)), nil
+		}
 	}
 
 	// Journal replay may have refreshed a stale caller snapshot. Re-check the
@@ -400,6 +465,28 @@ func (r *Reverter) guardDoubleRevert(ctx context.Context, op *models.BatchFileOp
 	}
 
 	return nil, nil
+}
+
+// pendingMoveIntentAnchor recovers a move row's primary destination from its
+// pending MoveBack intent ledger and stamps the row's column-shaped fields, so
+// later revert legs (checkAnchor, revertPrimaryFile, cleanup) see a coherent
+// operation. Only the intent whose source matches the row's OriginalPath can
+// pose as the primary move.
+func pendingMoveIntentAnchor(op *models.BatchFileOperation) string {
+	if op.OriginalPath == "" || op.GeneratedFiles == "" {
+		return ""
+	}
+	gf, err := models.ParseGeneratedFiles(op.GeneratedFiles)
+	if err != nil {
+		return ""
+	}
+	for _, fm := range gf.MoveBack {
+		if fm.OriginalPath == op.OriginalPath && fm.NewPath != "" {
+			op.NewPath = fm.NewPath
+			return fm.NewPath
+		}
+	}
+	return ""
 }
 
 func (r *Reverter) checkAnchor(ctx context.Context, op *models.BatchFileOperation) (*RevertFileResult, error) {
@@ -641,18 +728,286 @@ func cleanupGeneratedFilesFS(fs afero.Fs, op *models.BatchFileOperation, stopAt 
 		}
 		dirsToCheck[filepath.Dir(path)] = true
 	}
-	// Execute the MoveBack array (best-effort): rename-back for move-mode rows
-	// only; delete-the-installed-copy for every other mode's legacy entries
-	// (rename-over must NEVER run against a retained original — see the
-	// function doc above).
-	moveMode := op.OperationType == models.OperationTypeMove
+	// A MoveBack arm supersedes any pending delete pinned to the same
+	// destination in BOTH vacancy outcomes (rows journaled before the intent
+	// promoted with its arm): with the source absent the rename-back
+	// restores those bytes onto their source, so the pinned delete must
+	// never fire first and destroy them; with the source PRESENT the rename
+	// is suppressed and the pin must still not fire — source-present is
+	// ambiguous between "the move never consumed its source" and "the move
+	// consumed it and a foreign file reappeared afterwards", and without a
+	// durable source-consumed record the pin cannot tell those apart, so
+	// both paths are retained (a duplicate, never a lost last copy)
+	// (codex P1, PRRT_kwDORn9KaM6m5kmF).
+	moveBackTargets := make(map[string]bool, len(gf.MoveBack))
 	for _, fm := range gf.MoveBack {
+		moveBackTargets[fm.NewPath] = true
+	}
+	// A MoveBack entry whose ORIGINAL still exists names a move whose source
+	// was never consumed (an exit between the pending intent commit and the
+	// source removal) or whose source reappeared afterwards: running the
+	// rename-back would REPLACE those retained/foreign bytes on POSIX
+	// (codex P1, PRRT_kwDORn9KaM6m3ujI). Suppress the rename for such targets;
+	// the PlannedDeletes leg below retains a pinned copy of the same target as
+	// well — the pin would fire identically in the never-consumed shape and
+	// the consumed-then-foreignly-recreated one, so only retention protects
+	// both (codex P1, PRRT_kwDORn9KaM6m5kmF). A source whose state cannot be
+	// PROVEN absent suppresses too: uncertainty licenses neither a
+	// rename-over nor the delete. The vacancy probe never
+	// follows a final symlink (codex P2, PRRT_kwDORn9KaM6m5HFu): a link planted
+	// at the source — even a DANGLING one, which Stat reports as ENOENT — is
+	// itself a directory entry the POSIX rename back would REPLACE, so any
+	// occupant type suppresses exactly like a present file.
+	moveMode := op.OperationType == models.OperationTypeMove
+	renameSuppressed := make(map[string]bool, len(gf.MoveBack))
+	if moveMode {
+		for _, fm := range gf.MoveBack {
+			if fm.OriginalPath == "" || fm.NewPath == "" {
+				continue
+			}
+			if _, statErr := lstatRestoreSource(fs, fm.OriginalPath); statErr == nil || !os.IsNotExist(statErr) {
+				renameSuppressed[fm.NewPath] = true
+			}
+		}
+	}
+	// PlannedDeletes are intent entries pinned to the publisher's payload:
+	// delete only while the destination still carries exactly that payload —
+	// absent paths are consumed, rebuilt/touched or foreign occupants are
+	// kept. The pin shape keys on how the payload installed (models.DeleteEntry):
+	// a LinkTarget pin authenticates the link OBJECT by readlink, an Identity
+	// pin the hard-linked object by its admitted identity tuple, and a
+	// CopySize/CopyPartialSHA256 pin MARKS an in-flight copy intent —
+	// journaled before the stream exists, it is retain-only at recovery
+	// (codex P1, PRRT_kwDORn9KaM6novbT: the entry survives the very crash it
+	// covers, so its bounded head+tail proof can no longer distinguish the
+	// landed copy from a payload edited between the digest windows); only the
+	// sealed SHA256 shape authorizes a copy removal. None of the pin shapes
+	// ever hashes or follows a non-regular entry, so the full-hash leg's
+	// nonregular-retain rule (m5HF7) is preserved in every shape. Dispatch
+	// precedence is deterministic: LinkTarget, then the SHA-cleared
+	// identity/partial shapes, then the full-hash leg (an entry carrying
+	// SHA256 always hashes).
+	for _, entry := range gf.PlannedDeletes {
+		path := entry.Path
+		if moveBackTargets[path] {
+			continue
+		}
+		if entry.LinkTarget != "" {
+			// Soft-link pin (codex P2, PRRT_kwDORn9KaM6nBUq8): the install is
+			// the link OBJECT, authenticated solely by its readback payload.
+			// Any occupant that is not a symlink — a regular file holding any
+			// bytes at all, a directory — is foreign to this install shape and
+			// retains untouched, the m5HF7 partition applied from the other
+			// side (the hash leg retains every non-regular; this leg retains
+			// every non-link).
+			linkInfo, linkLstatErr := lstatRestoreSource(fs, path)
+			if os.IsNotExist(linkLstatErr) {
+				dirsToCheck[filepath.Dir(path)] = true
+				continue
+			}
+			if linkLstatErr != nil {
+				logging.Debugf("cleanupGeneratedFiles: pending symlink delete probe failed for %s: %v", path, linkLstatErr)
+				continue
+			}
+			if linkInfo.Mode()&os.ModeSymlink == 0 {
+				logging.Debugf("cleanupGeneratedFiles: pending symlink delete %s is not the pinned link object (mode %v) — retained", path, linkInfo.Mode())
+				continue
+			}
+			// The removal re-authenticates post-vacate (readlink of the
+			// terminal object), so a plant swapped onto path inside the
+			// probe→vacate window is rewound byte-intact, never unlinked.
+			if err := fsutil.UnlinkSymlinkVerified(fs, path, entry.LinkTarget); err != nil {
+				if errors.Is(err, fsutil.ErrTakeAsideVanished) {
+					dirsToCheck[filepath.Dir(path)] = true
+					continue
+				}
+				logging.Debugf("cleanupGeneratedFiles: pending symlink delete %s could not be removed link-verified — retained: %v", path, err)
+				continue
+			}
+			dirsToCheck[filepath.Dir(path)] = true
+			continue
+		}
+		if entry.SHA256 == "" && entry.HasIdentityPin() {
+			// Hard-link pin: presence is the explicit identity_pinned marker
+			// for new blobs, with the pre-marker evidence mapping folded into
+			// models.DeleteEntry.HasIdentityPin (the ModUnix sentinel, then
+			// the strong bool) — an epoch-dated source's pin never classifies
+			// through the timestamp alone. The published destination must BE
+			// the admitted source's object — link(2) shares the volume/index,
+			// so the identity tuple authenticates without reading a byte. The
+			// metadata legs (size + mtime-seconds) always run; the dev/inode
+			// legs run only against a strong pin and never degrade for one
+			// (a platform that re-probed no identity cannot authenticate a
+			// strong claim — retain, the admission-proof posture). Any
+			// non-regular occupant retains untouched (m5HF7 unchanged).
+			idInfo, idLstatErr := lstatRestoreSource(fs, path)
+			if os.IsNotExist(idLstatErr) {
+				dirsToCheck[filepath.Dir(path)] = true
+				continue
+			}
+			if idLstatErr != nil {
+				logging.Debugf("cleanupGeneratedFiles: pending identity delete probe failed for %s: %v", path, idLstatErr)
+				continue
+			}
+			if !idInfo.Mode().IsRegular() {
+				logging.Debugf("cleanupGeneratedFiles: pending identity delete %s is not a regular file (mode %v) — retained", path, idInfo.Mode())
+				continue
+			}
+			if entry.IdentityStrong {
+				dev, ino, identityOK := fsutil.BoundObjectIdentity(fs, path, idInfo)
+				if !identityOK {
+					logging.Debugf("cleanupGeneratedFiles: pending identity delete %s exposes no kernel identity for a strong pin — retained", path)
+					continue
+				}
+				if dev != entry.IdentityDev || ino != entry.IdentityIno {
+					logging.Debugf("cleanupGeneratedFiles: pending identity delete %s names a different object than the admitted source — retained", path)
+					continue
+				}
+			}
+			if idInfo.Size() != entry.IdentitySize || idInfo.ModTime().Unix() != entry.IdentityModUnix {
+				logging.Debugf("cleanupGeneratedFiles: pending identity delete %s no longer matches the pinned identity tuple — retained", path)
+				continue
+			}
+			// The lstat identity binds the verified unlink: a swap inside the
+			// probe→unlink window rides the vacate, fails the rebind, and is
+			// rewound byte-intact — never a pathname Remove of an unproven
+			// occupant.
+			if err := fsutil.UnlinkVerified(fs, path, idInfo); err != nil {
+				if errors.Is(err, fsutil.ErrTakeAsideVanished) {
+					dirsToCheck[filepath.Dir(path)] = true
+					continue
+				}
+				logging.Debugf("cleanupGeneratedFiles: pending identity delete %s could not be removed identity-verified — retained: %v", path, err)
+				continue
+			}
+			dirsToCheck[filepath.Dir(path)] = true
+			continue
+		}
+		if entry.SHA256 == "" && entry.CopyPartialSHA256 != "" {
+			// Interim copy pin that never graduated to the sealed full digest
+			// (the execute→seal crash window of a streaming copy install):
+			// RETAIN-ONLY (codex P1, PRRT_kwDORn9KaM6novbT). The pin was
+			// journaled before the stream existed, and the crash this entry
+			// covers leaves it durable for the whole crash→recovery interval —
+			// a payload edited only BETWEEN the digest windows afterwards
+			// still satisfies the bounded size+head/tail proof, so that proof
+			// can never authorize an unlink here. Only the sealed SHA256 (the
+			// full-hash leg below) may remove the destination. An absent path
+			// is still consumed bookkeeping: the install never landed (or was
+			// already cleaned), so prune the empty parent like every shape.
+			if _, interimLstatErr := lstatRestoreSource(fs, path); interimLstatErr == nil {
+				logging.Debugf("cleanupGeneratedFiles: pending interim copy delete %s carries no sealed full digest — retained (the unsealed size+edge proof is not deletion authorization)", path)
+				continue
+			} else if !os.IsNotExist(interimLstatErr) {
+				logging.Debugf("cleanupGeneratedFiles: pending interim copy delete probe failed for %s — retained: %v", path, interimLstatErr)
+				continue
+			}
+			dirsToCheck[filepath.Dir(path)] = true
+			continue
+		}
+		// The pin certifies the previously published REGULAR file only, so the
+		// occupancy check never follows a final symlink (codex P2,
+		// PRRT_kwDORn9KaM6m5HF7): a successor link whose TARGET happens to hold
+		// the pinned bytes is a foreign directory entry — hashing through it
+		// and removing the link would unlink an unrelated object.
+		info, lstatErr := lstatRestoreSource(fs, path)
+		if os.IsNotExist(lstatErr) {
+			dirsToCheck[filepath.Dir(path)] = true
+			continue
+		}
+		if lstatErr != nil {
+			logging.Debugf("cleanupGeneratedFiles: pending delete probe failed for %s: %v", path, lstatErr)
+			continue
+		}
+		if !info.Mode().IsRegular() {
+			logging.Debugf("cleanupGeneratedFiles: pending delete %s is not the pinned regular file (mode %v) — retained", path, info.Mode())
+			continue
+		}
+		file, openErr := fs.Open(path)
+		if os.IsNotExist(openErr) {
+			dirsToCheck[filepath.Dir(path)] = true
+			continue
+		}
+		if openErr != nil {
+			logging.Debugf("cleanupGeneratedFiles: pending delete probe failed for %s: %v", path, openErr)
+			continue
+		}
+		// The identity is captured from the OPEN HANDLE, never the pathname:
+		// the digest below authenticates exactly this object's bytes, so the
+		// removal must bind to the same object (codex P1,
+		// PRRT_kwDORn9KaM6m6WAj). A capture failure leaves nothing to bind the
+		// unlink to — retain rather than pathname-remove an unproven name.
+		pinned, pinnedErr := file.Stat()
+		h := sha256.New()
+		_, copyErr := io.Copy(h, file)
+		closeErr := file.Close()
+		if pinnedErr != nil {
+			logging.Debugf("cleanupGeneratedFiles: pending delete %s identity could not be captured — retained: %v", path, pinnedErr)
+			continue
+		}
+		if copyErr != nil || closeErr != nil {
+			logging.Debugf("cleanupGeneratedFiles: pending delete digest failed for %s: %v/%v", path, copyErr, closeErr)
+			continue
+		}
+		if hex.EncodeToString(h.Sum(nil)) != strings.ToLower(entry.SHA256) {
+			logging.Debugf("cleanupGeneratedFiles: pending delete %s no longer carries the pinned bytes — retained", path)
+			continue
+		}
+		// Identity-verified unlink (fsutil.UnlinkVerified — the same
+		// bound-unlink construction the quarantine holds carry): the hashed
+		// object vacates onto a fresh crypto-claimed terminal sibling, the
+		// terminal re-binds to the pinned identity, and ONLY the re-bound
+		// terminal is unlinked. A foreign occupant rename-swapped onto path
+		// inside the hash→unlink window rides the vacate onto the terminal,
+		// fails the rebind, and is rewound byte-intact — never a pathname
+		// Remove of an unproven occupant.
+		if err := fsutil.UnlinkVerified(fs, path, pinned); err != nil {
+			if errors.Is(err, fsutil.ErrTakeAsideVanished) {
+				// The pinned bytes vanished under the verified unlink — the
+				// entry consumed itself; prune the empty parent as consumed.
+				dirsToCheck[filepath.Dir(path)] = true
+				continue
+			}
+			logging.Debugf("cleanupGeneratedFiles: pending delete %s could not be removed identity-verified — retained: %v", path, err)
+			continue
+		}
+		dirsToCheck[filepath.Dir(path)] = true
+	}
+
+	// Execute the MoveBack array (best-effort): rename-back for move-mode rows
+	// whose source is GONE (the move consumed it); delete-the-installed-copy
+	// for every other mode's legacy entries (rename-over must NEVER run
+	// against a retained original — see the function doc above). A suppressed
+	// entry (source still present) does neither: the PlannedDeletes leg above
+	// already retained its published copy, pinned or not, alongside the
+	// occupied source — nothing is lost in either crash shape.
+	// The rename-back executes through the atomic NO-REPLACE primitive (codex
+	// P1, PRRT_kwDORn9KaM6npnwr): the no-follow vacancy prepass above and this
+	// mutation are temporally separated — the planned-delete hashes stream
+	// between them — so another process can recreate the original path inside
+	// the gap, and a plain POSIX rename would REPLACE and destroy that late
+	// occupant. MoveFileNoReplace re-proves the destination at the publish
+	// instant and refuses occupancy with the shared no-replace refusal
+	// classes, suppressing the recovery with BOTH objects retained byte-intact
+	// (the moved sibling, pinned or not, stays put alongside the occupant).
+	for _, fm := range gf.MoveBack {
+		if fm.NewPath == op.NewPath && fm.OriginalPath == op.OriginalPath {
+			// A pending move intent equal to the row columns: the primary move is
+			// already reverted by the column-driven arm — never double-drive it.
+			continue
+		}
 		if !moveMode {
 			if err := fs.Remove(fm.NewPath); err != nil && !os.IsNotExist(err) {
 				logging.Debugf("cleanupGeneratedFiles: failed to delete copy-installed artifact %s (original at %s retained): %v", fm.NewPath, fm.OriginalPath, err)
 			}
-		} else if err := fs.Rename(fm.NewPath, fm.OriginalPath); err != nil {
-			logging.Debugf("cleanupGeneratedFiles: failed to move back %s → %s: %v", fm.NewPath, fm.OriginalPath, err)
+		} else if renameSuppressed[fm.NewPath] {
+			logging.Debugf("cleanupGeneratedFiles: move-back %s → %s suppressed — the original still exists (the move intent was never consumed or the source reappeared); the destination, pinned or not, is retained alongside it", fm.NewPath, fm.OriginalPath)
+		} else if err := fsutil.MoveFileNoReplace(fs, fm.NewPath, fm.OriginalPath); err != nil {
+			if fsutil.PublishRefusal(err) {
+				logging.Debugf("cleanupGeneratedFiles: move-back %s → %s suppressed by the atomic no-replace leg — an occupant claimed the original path after the vacancy probe (or the volume cannot express no-replace); both objects retained byte-intact: %v", fm.NewPath, fm.OriginalPath, err)
+			} else {
+				logging.Debugf("cleanupGeneratedFiles: failed to move back %s → %s: %v", fm.NewPath, fm.OriginalPath, err)
+			}
 		}
 		dirsToCheck[filepath.Dir(fm.NewPath)] = true
 	}

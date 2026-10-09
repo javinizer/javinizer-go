@@ -152,6 +152,13 @@ func asideLstat(fs afero.Fs, name string) (os.FileInfo, error) {
 // gates): always regular and non-symlink, dev/inode compared only where BOTH
 // sides expose them (virtual filesystems ride the shape/metadata legs), and
 // size + mtime equal on every platform.
+// NOTE (codex P1, PRRT_kwDORn9KaM6qJY2k): carrying the publish-time strong key
+// (volume serial + file index) INTO these comparisons cannot ride a FileInfo
+// wrapper — Go 1.27's os.SameFile type-asserts the concrete *os.fileStat, so a
+// wrapper silently compares unequal and breaks every downstream SameFile call.
+// The pair therefore needs a struct field threaded through the layers (fsutil
+// publish → organizer result → downloader batch → workflow observation), which
+// is tracked as its own change.
 func asideSameObject(cur, expect os.FileInfo) bool {
 	if cur == nil || expect == nil || cur.Mode()&os.ModeSymlink != 0 || !cur.Mode().IsRegular() {
 		return false
@@ -687,6 +694,154 @@ func UnlinkVerified(fs afero.Fs, name string, verified os.FileInfo) error {
 		return rerideBoundUnlink(fs, terminal, name, fmt.Errorf("remove the bound-unlink terminal %s: %w", terminal, rerr))
 	}
 	return nil
+}
+
+// UnlinkVerifiedInstall is UnlinkVerified for identities whose publish carried
+// a strong kernel key (codex P1, PRRT_kwDORn9KaM6qJY2k).
+func UnlinkVerifiedInstall(fs afero.Fs, name string, verified *BoundInstallIdentity) error {
+	if verified == nil || verified.FileInfo() == nil {
+		return fmt.Errorf("bound install unlink of %s requires the identity its publish produced", name)
+	}
+	terminal, termClaim, cerr := claimTakeAsideVacName(fs, name)
+	if cerr != nil {
+		return fmt.Errorf("reserve the bound-unlink terminal for %s: %w", name, cerr)
+	}
+	if relErr := releaseTakeAsideVacClaim(fs, terminal, termClaim); relErr != nil {
+		return relErr
+	}
+	if moveErr := PublishNoReplace(fs, name, terminal); moveErr != nil {
+		if os.IsNotExist(moveErr) {
+			return fmt.Errorf("%w: %s vanished under the bound unlink", ErrTakeAsideVanished, name)
+		}
+		return fmt.Errorf("bound-unlink vacate of %s onto %s refused — occupant preserved byte-intact: %w", name, terminal, moveErr)
+	}
+	term, terr := asideLstat(fs, terminal)
+	switch {
+	case os.IsNotExist(terr):
+		return fmt.Errorf("%w: %s (terminal %s empty after the vacate)", ErrTakeAsideVanished, name, terminal)
+	case terr != nil:
+		return rerideBoundUnlink(fs, terminal, name, fmt.Errorf("inspect the bound-unlink terminal %s: %w", terminal, terr))
+	}
+	same, serr := sameBoundInstallObject(fs, terminal, term, verified)
+	if serr != nil {
+		return rerideBoundUnlink(fs, terminal, name, serr)
+	}
+	if !same {
+		return rerideBoundUnlink(fs, terminal, name, fmt.Errorf("bound-unlink terminal %s names a foreign object, not the verified one — foreign bytes preserved (never unlinked): %w", terminal, ErrTakeAsideForeign))
+	}
+	if rerr := fs.Remove(terminal); rerr != nil {
+		if os.IsNotExist(rerr) {
+			return fmt.Errorf("%w: %s (terminal %s vanished under the unlink)", ErrTakeAsideVanished, name, terminal)
+		}
+		return rerideBoundUnlink(fs, terminal, name, fmt.Errorf("remove the bound-unlink terminal %s: %w", terminal, rerr))
+	}
+	return nil
+}
+
+// ObserveVerifiedInstall re-resolves name and confirms the entry currently
+// occupying it still names the object a verified publish installed (codex P1,
+// PR #276, finding ntCe6 — the observation twin of the verified hard-link
+// leg's post-link successor re-proof, PRRT_kwDORn9KaM6nsX9a, for the copy
+// lane). The caller captured installed at publish time (e.g.
+// CopyFileNoReplaceVerifiedInstall) and must observe THAT identity, never a
+// fresh name-derived lookup: a publication lane that releases its destination
+// lock before the record is made leaves a window in which an external writer
+// replaces the destination, and a record bound to the NAME then authenticates
+// whatever occupies it — arming later compensation (the staged replacement
+// batch's UnlinkVerified rollback) against a foreign successor.
+//
+// Return classes, mirroring the sealed retain contract (round 46/47 lineage):
+//
+//   - (info, nil): the current occupant provably IS the installed object —
+//     the comparison rides asideSameObject, the SAME predicate UnlinkVerified
+//     applies at unlink time, so adoption and later unlink can never
+//     disagree about which object is ours;
+//   - typed error: a NON-REGULAR occupant (directory or symlink) where a
+//     regular-file install was expected is rejected with
+//     ErrPublishSuccessorUnproven (codex P1, PRRT_kwDORn9KaM6qKbdT): the
+//     weak confirmation fallback would otherwise adopt — and now even
+//     unlink-delete — a foreign link object by payload;
+//   - typed ErrPublishCompleted-carrying error: the name is VACANT or the
+//     lookup is indeterminate (codex P1, PRRT_kwDORn9KaM6qJY2i). Both are
+//     INCONCLUSIVE — the publish proved an install, so absence or an
+//     unreadable entry means the observation cannot prove which object
+//     stands there. Nothing is adopted and the leg is never handed to the
+//     unbound confirmation, which would otherwise re-derive the identity
+//     from the name;
+//   - typed error: a REGULAR-FILE occupant AFFIRMATIVELY diverges from the
+//     installed identity — an explicitly unproven SUCCESSOR. The error
+//     joins ErrPublishSuccessorUnproven (the occupant must be retained
+//     byte-intact, never observed as this operation's installed output)
+//     with ErrPublishCompleted (the doubt class: this operation's own
+//     bytes may still stand somewhere, e.g. moved aside by the successor's
+//     writer). Callers classify on PublishSuccessorUnproven: the armed
+//     record leg is released uninstalled, never armed for deletion.
+//
+// A nil installed identity is a caller bug, never a lookup: it fails closed.
+func ObserveVerifiedInstall(fs afero.Fs, name string, installed *BoundInstallIdentity) (os.FileInfo, error) {
+	if installed == nil || installed.FileInfo() == nil {
+		return nil, fmt.Errorf("bound install observation of %s requires the identity its publish produced", name)
+	}
+	cur, err := asideLstat(fs, name)
+	switch {
+	case os.IsNotExist(err):
+		// The publish PROVED an install at this name, so an absent entry is an
+		// inconclusive observation, never a silent "did not install" (codex P1,
+		// PRRT_kwDORn9KaM6qJY2i): returning success without an identity let the
+		// caller's later unbound confirmation adopt whatever regular file
+		// appeared in the meantime. Fail closed instead — the leg stays
+		// uninstalled and the caller reports the refusal.
+		return nil, fmt.Errorf("%w: bound install observation of %s found no entry — the publish proved an install, so an absent name can never be adopted or quietly uninstalled", ErrPublishCompleted, name)
+	case err != nil || cur == nil:
+		// An indeterminate lookup is doubt, not success (codex P1,
+		// PRRT_kwDORn9KaM6qJY2i): a foreign regular file may already stand behind
+		// the transient error, so nothing is adopted and the leg is refused
+		// rather than handed to a name-based confirmation.
+		return nil, fmt.Errorf("%w: bound install observation of %s is indeterminate (%v) — the destination cannot be proven to name the installed object", ErrPublishCompleted, name, err)
+	}
+	if cur.Mode()&os.ModeSymlink != 0 || !cur.Mode().IsRegular() {
+		// codex P1, PRRT_kwDORn9KaM6qKbdT: a non-regular entry where a verified
+		// REGULAR-FILE install was expected is an unproven successor, not a
+		// did-not-install. Adopting nothing lets the caller's unbound
+		// confirmation re-read the name and record whatever a foreign writer
+		// planted (and with the link-aware rollback that can mean deleting a
+		// foreign symlink by payload), so the leg is refused with the
+		// successor-doubt class and the occupant retained byte-intact.
+		return nil, errors.Join(
+			fmt.Errorf("%w: %s no longer names a regular-file object of this operation's install (mode %v) — the occupant is an explicitly unproven successor, retained byte-intact (never adopted as installed output)", ErrPublishSuccessorUnproven, name, cur.Mode()),
+			fmt.Errorf("%w: this operation's own installed bytes may still stand elsewhere under another name", ErrPublishCompleted),
+		)
+	}
+	same, serr := sameBoundInstallObject(fs, name, cur, installed)
+	if serr != nil {
+		return nil, serr
+	}
+	if !same {
+		return nil, errors.Join(
+			fmt.Errorf("%w: %s no longer provably names the object this operation installed — the regular-file occupant is an explicitly unproven successor, retained byte-intact (never adopted as installed output)", ErrPublishSuccessorUnproven, name),
+			fmt.Errorf("%w: this operation's own installed bytes may still stand elsewhere under another name", ErrPublishCompleted),
+		)
+	}
+	return cur, nil
+}
+
+func sameBoundInstallObject(fs afero.Fs, name string, cur os.FileInfo, installed *BoundInstallIdentity) (bool, error) {
+	if cur == nil || installed == nil || installed.FileInfo() == nil || cur.Mode()&os.ModeSymlink != 0 || !cur.Mode().IsRegular() {
+		return false, nil
+	}
+	expectDevice, expectInode, expectOK := installed.strongIdentity()
+	if !expectOK {
+		return asideSameObject(cur, installed.FileInfo()), nil
+	}
+	curDevice, curInode, curOK := BoundObjectIdentity(fs, name, cur)
+	if !curOK {
+		return false, fmt.Errorf("%w: bound install observation of %s cannot re-derive the strong identity required by PRRT_kwDORn9KaM6qJY2k", ErrPublishCompleted, name)
+	}
+	if curDevice != expectDevice || curInode != expectInode {
+		return false, nil
+	}
+	info := installed.FileInfo()
+	return cur.Size() == info.Size() && cur.ModTime().Equal(info.ModTime()), nil
 }
 
 // rerideBoundUnlink rewinds the bound-unlink terminal object BACK onto the

@@ -38,14 +38,14 @@ func TestW1CRevertLogMergeFallbackArms(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			require.Equal(t, tt.want, mergeReplacementLedger(tt.prior, tt.fresh))
+			require.Equal(t, tt.want, mergeReplacementLedgerIntents(tt.prior, tt.fresh, true))
 		})
 	}
 
 	// A non-empty prior root makes the prior condition false while still
 	// exercising the successful fresh parse and root preservation.
 	priorWithRoot := models.MarshalLedgerJSON(models.GeneratedFilesJSON{Roots: []string{"/dest/root"}})
-	merged := mergeReplacementLedger(priorWithRoot, fresh)
+	merged := mergeReplacementLedgerIntents(priorWithRoot, fresh, true)
 	got, err := models.ParseGeneratedFiles(merged)
 	require.NoError(t, err)
 	require.Equal(t, []string{"/dest/root"}, got.Roots)

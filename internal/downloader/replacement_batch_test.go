@@ -7,8 +7,10 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/spf13/afero"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -142,7 +144,7 @@ func TestReplacementBatchDirectRecoveryStates(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, fs.Remove("/created"))
 		require.NoError(t, afero.WriteFile(fs, "/created", []byte("foreign"), 0o644))
-		b := &ReplacementBatch{fs: fs, legs: []*replacementBatchLeg{{destination: "/created", installed: true, installedID: oldInfo}}}
+		b := &ReplacementBatch{fs: fs, legs: []*replacementBatchLeg{{destination: "/created", installed: true, installedID: fsutil.NewWeakBoundInstallIdentity(oldInfo)}}}
 		require.ErrorContains(t, b.Rollback(ctx), "reverse staged publication")
 	})
 	t.Run("missing replacement backup", func(t *testing.T) {
@@ -191,6 +193,19 @@ func TestReplacementBatchRollbackOriginMovesInstalledOutputWithoutClobber(t *tes
 		require.NotNil(t, leg)
 		require.Equal(t, "old", string(mustReadReplacementBatch(t, fs, leg.backup)))
 	})
+
+	t.Run("tracks existing output without armed leg", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		b, err := NewReplacementBatch(fs, "op", nil)
+		require.NoError(t, err)
+		require.NoError(t, afero.WriteFile(fs, "/dest", []byte("new"), 0o644))
+		require.NoError(t, b.SetRollbackOrigin("/dest", "/source"))
+		require.NoError(t, b.Rollback(ctx))
+		require.Equal(t, "new", string(mustReadReplacementBatch(t, fs, "/source")))
+		exists, existsErr := afero.Exists(fs, "/dest")
+		require.NoError(t, existsErr)
+		assert.False(t, exists)
+	})
 }
 
 func mustReadReplacementBatch(t *testing.T, fs afero.Fs, path string) []byte {
@@ -198,4 +213,50 @@ func mustReadReplacementBatch(t *testing.T, fs afero.Fs, path string) []byte {
 	data, err := afero.ReadFile(fs, path)
 	require.NoError(t, err)
 	return data
+}
+
+// An armed-but-never-installed destination releases its marker and lock on
+// release; an installed destination refuses (rollback keeps jurisdiction).
+func TestReplacementBatchReleaseUninstalled(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	batch, err := NewReplacementBatch(fs, "op-release", nil)
+	require.NoError(t, err)
+	dest := filepath.Join("/lib", "movie", "sidecar.srt")
+	require.NoError(t, fs.MkdirAll(filepath.Dir(dest), 0o755))
+
+	require.NoError(t, batch.Preflight([]string{dest}))
+	_, err = batch.BeforePublish(context.Background(), dest, false)
+	require.NoError(t, err)
+	require.NoError(t, batch.ReleaseUninstalled(dest), "armed-but-never-installed free")
+
+	// The claim is gone: re-arming the same destination works immediately.
+	_, err = batch.BeforePublish(context.Background(), dest, false)
+	require.NoError(t, err)
+
+	require.NoError(t, afero.WriteFile(fs, dest, []byte("installed"), 0o644))
+	batch.ObservePublishResult(dest)
+	require.Error(t, batch.ReleaseUninstalled(dest), "installed legs refuse release")
+
+	require.NoError(t, batch.Rollback(context.Background()))
+}
+
+// Find past other destinations, release ours, and tolerate unknown
+// destinations.
+func TestReplacementBatchReleaseUninstalledTargets(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	batch, err := NewReplacementBatch(fs, "op-release-targets", nil)
+	require.NoError(t, err)
+	require.NoError(t, fs.MkdirAll("/lib/movie", 0o755))
+	first := filepath.Join("/lib", "movie", "first.srt")
+	second := filepath.Join("/lib", "movie", "second.srt")
+	require.NoError(t, batch.Preflight([]string{first, second}))
+	if _, err := batch.BeforePublish(context.Background(), first, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := batch.BeforePublish(context.Background(), second, false); err != nil {
+		t.Fatal(err)
+	}
+	require.NoError(t, batch.ReleaseUninstalled(first), "still finds the entry past non-matching legs")
+	require.NoError(t, batch.ReleaseUninstalled("/lib/movie/never-armed.srt"), "unknown destination is a no-op")
+	require.NoError(t, batch.Rollback(context.Background()))
 }

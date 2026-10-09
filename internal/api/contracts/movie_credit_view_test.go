@@ -31,3 +31,24 @@ func TestMovieCreditViewFromModel(t *testing.T) {
 	require.Len(t, views, 2)
 	assert.Equal(t, uint(1), views[0].ID)
 }
+
+func TestMovieCreditViewFromModel_RenderVisible(t *testing.T) {
+	testCases := []struct {
+		name   string
+		credit models.MovieCredit
+		want   bool
+	}{
+		{"nil actress", models.MovieCredit{}, false},
+		{"verified actress", models.MovieCredit{Actress: &models.Actress{Verified: true}}, true},
+		{"unverified unquarantined", models.MovieCredit{Actress: &models.Actress{}}, true},
+		{"unverified quarantined", models.MovieCredit{Actress: &models.Actress{AmbiguityQuarantined: true}}, false},
+		{"suppressed", models.MovieCredit{Suppressed: true, Actress: &models.Actress{Verified: true}}, false},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			view := MovieCreditViewFromModel(&tc.credit)
+			require.NotNil(t, view)
+			assert.Equal(t, tc.want, view.RenderVisible)
+		})
+	}
+}

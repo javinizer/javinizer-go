@@ -125,6 +125,26 @@ type recordingRevertLog struct {
 	beginErr      error
 }
 
+func (r *recordingRevertLog) RecordMoveIntent(context.Context, OperationID, string, string) error {
+	return nil
+}
+
+func (r *recordingRevertLog) RecordDeleteIntent(context.Context, OperationID, []models.DeleteEntry) error {
+	return nil
+}
+
+func (r *recordingRevertLog) ReconcileMoveIntents(context.Context, OperationID, []models.FileMove) error {
+	return nil
+}
+
+func (r *recordingRevertLog) ReconcileDeleteIntents(context.Context, OperationID, []string) error {
+	return nil
+}
+
+func (r *recordingRevertLog) FinalizeDeleteIntentCopyDigest(context.Context, OperationID, string, string) error {
+	return nil
+}
+
 func (r *recordingRevertLog) Begin(_ context.Context, _ ApplyCmd) (OperationID, error) {
 	r.beginCalls++
 	if r.beginErr != nil {

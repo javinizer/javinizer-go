@@ -19,7 +19,7 @@ func TestPR260InstallPathsValidatesBeforePublishing(t *testing.T) {
 	require.NoError(t, afero.WriteFile(fs, unrelated, []byte("unrelated"), 0o644))
 	stage := &artifactStage{fs: fs, root: stageRoot, finalRoot: finalRoot}
 
-	preserved, err := stage.installPaths([]string{outside}, nil, "", "")
+	preserved, err := stage.installPaths([]string{outside}, nil, "", "", nil)
 	require.ErrorContains(t, err, "staged path escapes staging area")
 	require.False(t, preserved)
 	outsideBytes, readErr := afero.ReadFile(fs, outside)
@@ -46,7 +46,7 @@ func TestPR260InstallPathsRelocatesArtifactsToFinalPlannedFolder(t *testing.T) {
 	require.NoError(t, afero.WriteFile(fs, manifest, []byte("manifest"), 0o644))
 	stage := &artifactStage{fs: fs, root: stageRoot, finalRoot: finalRoot}
 
-	_, err := stage.installPaths([]string{nfo, manifest}, nil, stagedFolder, finalFolder)
+	_, err := stage.installPaths([]string{nfo, manifest}, nil, stagedFolder, finalFolder, nil)
 	require.NoError(t, err)
 	published, err := afero.ReadFile(fs, filepath.Join(finalFolder, "movie.nfo"))
 	require.NoError(t, err)
@@ -73,7 +73,7 @@ func TestPR260InstallPathsPublishesAndPreservesLegitimatePaths(t *testing.T) {
 	require.NoError(t, afero.WriteFile(fs, preserveTarget, []byte("current poster"), 0o644))
 	stage := &artifactStage{fs: fs, root: stageRoot, finalRoot: finalRoot}
 
-	preserved, err := stage.installPaths([]string{publishSource, preserveSource}, []string{preserveSource}, "", "")
+	preserved, err := stage.installPaths([]string{publishSource, preserveSource}, []string{preserveSource}, "", "", nil)
 	require.NoError(t, err)
 	require.True(t, preserved)
 	published, err := afero.ReadFile(fs, filepath.Join(finalRoot, "movie.nfo"))
@@ -95,7 +95,7 @@ func TestPR260InstallPathsAllowsInPlaceParentMapping(t *testing.T) {
 	require.NoError(t, afero.WriteFile(fs, source, []byte("subtitle"), 0o644))
 	stage := &artifactStage{fs: fs, root: filepath.Join("stage", "owned"), finalRoot: finalRoot, inPlace: true}
 
-	preserved, err := stage.installPaths([]string{source}, []string{source}, "", "")
+	preserved, err := stage.installPaths([]string{source}, []string{source}, "", "", nil)
 	require.NoError(t, err)
 	require.True(t, preserved)
 	content, err := afero.ReadFile(fs, source)

@@ -5604,6 +5604,10 @@ const docTemplate = `{
                 "override_name": {
                     "type": "string"
                 },
+                "render_visible": {
+                    "description": "RenderVisible mirrors MovieCredit.RenderVisible: false when the credit\ncannot contribute names to rendered output (suppressed, no actress, or\nthe actress is ambiguity-quarantined without verification).",
+                    "type": "boolean"
+                },
                 "reported_thumb_url": {
                     "type": "string"
                 },
