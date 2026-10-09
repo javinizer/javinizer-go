@@ -147,3 +147,21 @@ func TestOrganizePlanBindVerifiedSubtitleSourcesSetterSemantics(t *testing.T) {
 	require.Len(t, plan.verifiedSubtitleProofs, 1, "setter semantics mirror BindVerifiedSource — a rebind REPLACES (the fenced flow binds each freshly replanned plan once)")
 	assert.NotNil(t, plan.verifiedSubtitleProofs["/b.srt"])
 }
+
+// codex P1 (PRRT_kwDORn9KaM6qLkJ4): the verified move subtitle lane carries
+// the publish identity just like the copy lane, so deferred rollback arms do
+// not have to re-adopt the destination by name.
+func TestSubtitleMoveInstallReturnsBoundIdentity(t *testing.T) {
+	fs := afero.NewOsFs()
+	dir := t.TempDir()
+	src := filepath.Join(dir, "movie.en.srt")
+	dst := filepath.Join(dir, "library", "movie.en.srt")
+	require.NoError(t, afero.WriteFile(fs, src, []byte("subtitle"), 0o640))
+
+	identity, err := subtitleMoveInstall.run(fs, src, dst, acceptingSubtitleProof)
+	require.NoError(t, err)
+	require.NotNil(t, identity)
+	info, statErr := os.Lstat(dst)
+	require.NoError(t, statErr)
+	assert.True(t, os.SameFile(identity.FileInfo(), info))
+}

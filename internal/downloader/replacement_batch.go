@@ -278,6 +278,21 @@ func (b *ReplacementBatch) ConfirmPublish(ctx context.Context, destination strin
 // during rollback instead of deleting it. The origin must already have been
 // removed by the caller; rollback uses no-replace move semantics.
 func (b *ReplacementBatch) SetRollbackOrigin(destination, origin string) error {
+	return b.setRollbackOrigin(destination, origin, nil)
+}
+
+// SetRollbackOriginBound is SetRollbackOrigin with the arm bound to the
+// publish-time identity the caller carried forward (codex P1,
+// PRRT_kwDORn9KaM6qLkJ4). It never creates or arms a rollback inverse from a
+// destination name lookup alone.
+func (b *ReplacementBatch) SetRollbackOriginBound(destination, origin string, installed *fsutil.BoundInstallIdentity) error {
+	if installed == nil || installed.FileInfo() == nil {
+		return fmt.Errorf("staged publication destination %s requires a bound installed identity", destination)
+	}
+	return b.setRollbackOrigin(destination, origin, installed)
+}
+
+func (b *ReplacementBatch) setRollbackOrigin(destination, origin string, installed *fsutil.BoundInstallIdentity) error {
 	leg := b.find(destination)
 	if leg == nil {
 		leg = &replacementBatchLeg{destination: filepath.Clean(destination)}
@@ -288,14 +303,27 @@ func (b *ReplacementBatch) SetRollbackOrigin(destination, origin string) error {
 			return fmt.Errorf("track staged publication destination %s: %w", destination, err)
 		}
 		leg.releaseBusy = busy
-		info, err := lstatBackupCandidate(b.fs, leg.destination)
-		if err != nil || info == nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-			leg.release()
-			return fmt.Errorf("staged publication destination has no regular installed output: %s: %w", destination, err)
+		if installed != nil {
+			if _, err := fsutil.ObserveVerifiedInstall(b.fs, leg.destination, installed); err != nil {
+				leg.release()
+				return fmt.Errorf("staged publication destination %s no longer names its bound installed output: %w", destination, err)
+			}
+			leg.installed, leg.installedID = true, installed
+		} else {
+			info, err := lstatBackupCandidate(b.fs, leg.destination)
+			if err != nil || info == nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+				leg.release()
+				return fmt.Errorf("staged publication destination has no regular installed output: %s: %w", destination, err)
+			}
+			leg.installed, leg.installedID = true, fsutil.NewWeakBoundInstallIdentity(info)
 		}
-		leg.installed, leg.installedID = true, fsutil.NewWeakBoundInstallIdentity(info)
 		b.legs = append(b.legs, leg)
 		leg.release()
+	} else if installed != nil {
+		if _, err := fsutil.ObserveVerifiedInstall(b.fs, leg.destination, installed); err != nil {
+			return fmt.Errorf("staged publication destination %s no longer names its bound installed output: %w", destination, err)
+		}
+		leg.installed, leg.installedID = true, installed
 	}
 	if !leg.installed {
 		return fmt.Errorf("staged publication destination has no installed output: %s", destination)
@@ -331,22 +359,20 @@ func (b *ReplacementBatch) rollback(ctx context.Context, releaseJournal bool) er
 		if leg.installed {
 			var err error
 			if leg.rollbackOrigin != "" {
-				// Identity-bound move-back (codex P1, PRRT_kwDORn9KaM6qJY2g): the
-				// destination name is ours only while it still names the object this
-				// leg installed. ConfirmPublish released the destination marker, so
-				// another writer can rename-swap the target, and a path-only
-				// MoveFileNoReplace would then consume that foreign successor and
-				// relocate it onto the original source path. The observation rides
-				// the same predicate the unlink branch applies below (and fails
-				// closed on a vacant or unreadable name), so a divergent occupant is
-				// retained byte-intact and this leg reports the skipped compensation
-				// instead of moving foreign bytes.
-				if _, oerr := fsutil.ObserveVerifiedInstall(b.fs, leg.destination, leg.installedID); oerr != nil {
-					joined = errors.Join(joined, fmt.Errorf("skipped rollback move-back of %s: the destination no longer provably names this leg's installed object: %w", leg.destination, oerr))
-					leg.release()
-					continue
+				// Identity-bound move-back (codex P1, PRRT_kwDORn9KaM6qLkJ9): the
+				// move composite re-proves the take-aside object against the install
+				// identity before publishing it back to the source. The proof and the
+				// path action are one operation, so a rename-swap inside the old
+				// ObserveVerifiedInstall→MoveFileNoReplace window is taken aside,
+				// rejected, and restored instead of being relocated onto origin.
+				proof := fsutil.VerifiedSourceProofFromBoundInstallIdentity(b.fs, leg.installedID)
+				mode := fsutil.StagingFileMode()
+				if leg.installedID != nil {
+					if info := leg.installedID.FileInfo(); info != nil {
+						mode = info.Mode().Perm()
+					}
 				}
-				err = fsutil.MoveFileNoReplace(b.fs, leg.destination, leg.rollbackOrigin)
+				_, err = fsutil.MoveFileNoReplaceVerifiedMode(b.fs, leg.destination, leg.rollbackOrigin, proof, mode)
 			} else {
 				// A soft-link leg carries its ownership proof as the recorded
 				// readlink payload — a symlink has no kernel key the regular-file

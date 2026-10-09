@@ -116,7 +116,22 @@ func writeArtifactStageManifestState(fs afero.Fs, root string, completedUnixNano
 // unsealed marker, token mismatch, foreign host, live or undecidable owner)
 // is retained — residue is recoverable, a wrong delete is not.
 func artifactStageReclaimable(fs afero.Fs, path string) bool {
-	if !artifactStageManifestReclaimable(fs, path) {
+	_, ok := artifactStageReclaimableIdentity(fs, path)
+	return ok
+}
+
+type artifactStageDirIdentity struct {
+	known     bool
+	hasDevIno bool
+	dev       uint64
+	ino       uint64
+	size      int64
+	modTime   time.Time
+}
+
+func artifactStageReclaimableIdentity(fs afero.Fs, path string) (artifactStageDirIdentity, bool) {
+	reclaimable := artifactStageManifestReclaimable(fs, path)
+	if !reclaimable {
 		// Manifest-level claims failed: an external sidecar proof is the
 		// last-remaining ownership evidence. It applies to any staging-named tree
 		// (quarantined or left under its original name after a failed carry).
@@ -124,9 +139,54 @@ func artifactStageReclaimable(fs afero.Fs, path string) bool {
 		// from the directory name — so the sidecar must pass the same MAC seal
 		// gate as the manifest (finding ntCe1): nobody without the local sweep
 		// secret could have written it.
-		return readArtifactStageProof(fs, path)
+		reclaimable = readArtifactStageProof(fs, path)
 	}
-	return true
+	if !reclaimable {
+		return artifactStageDirIdentity{}, false
+	}
+	info, err := lstatArtifactStageDir(fs, path)
+	if err != nil || info == nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return artifactStageDirIdentity{}, false
+	}
+	return captureArtifactStageDirIdentity(fs, path, info), true
+}
+
+func lstatArtifactStageDir(fs afero.Fs, path string) (os.FileInfo, error) {
+	if lst, ok := fs.(afero.Lstater); ok {
+		info, _, err := lst.LstatIfPossible(path)
+		return info, err
+	}
+	return fs.Stat(path)
+}
+
+func captureArtifactStageDirIdentity(fs afero.Fs, path string, info os.FileInfo) artifactStageDirIdentity {
+	id := artifactStageDirIdentity{known: true, size: info.Size(), modTime: info.ModTime()}
+	if dev, ino, ok := fsutil.BoundObjectIdentity(fs, path, info); ok {
+		id.hasDevIno = true
+		id.dev, id.ino = dev, ino
+	}
+	return id
+}
+
+func (id artifactStageDirIdentity) matches(fs afero.Fs, path string, info os.FileInfo) bool {
+	if !id.known || info == nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return false
+	}
+	if id.hasDevIno {
+		dev, ino, ok := fsutil.BoundObjectIdentity(fs, path, info)
+		return ok && dev == id.dev && ino == id.ino
+	}
+	return info.Size() == id.size && info.ModTime().Equal(id.modTime)
+}
+
+func artifactStageDirMatches(fs afero.Fs, path string, id artifactStageDirIdentity) bool {
+	info, err := lstatArtifactStageDir(fs, path)
+	return err == nil && id.matches(fs, path, info)
+}
+
+func artifactStageDirStillNamed(fs afero.Fs, path string) bool {
+	info, err := lstatArtifactStageDir(fs, path)
+	return err == nil && info != nil && info.Mode()&os.ModeSymlink == 0 && info.IsDir()
 }
 
 // artifactStageManifestReclaimable enforces the manifest-backed ownership
@@ -313,9 +373,20 @@ func sweepArtifactStaging(fs afero.Fs, parent string) {
 		if !artifactStageReclaimable(fs, candidate) {
 			continue
 		}
+		identity, reclaimable := artifactStageReclaimableIdentity(fs, candidate)
+		if !reclaimable {
+			continue
+		}
 		if !strings.Contains(name, artifactStageQuarantineMark) {
 			target := artifactStageQuarantineName(candidate)
 			if err := fs.Rename(candidate, target); err != nil {
+				continue
+			}
+			// Bind quarantine to the directory authenticated above (codex P1,
+			// PRRT_kwDORn9KaM6qLkJz): a rename-swap that plants a different tree
+			// at the quarantine name, or replants the original root name, refuses
+			// before any completion mark or RemoveAll can touch foreign bytes.
+			if !artifactStageDirMatches(fs, target, identity) || artifactStageDirStillNamed(fs, candidate) {
 				continue
 			}
 			// The pre-quarantine proof sidecar from an earlier cleanup failure
@@ -324,6 +395,8 @@ func sweepArtifactStaging(fs afero.Fs, parent string) {
 				_ = fs.Rename(artifactStageProofPath(candidate), artifactStageProofPath(target))
 			}
 			candidate = target
+		} else if !artifactStageDirMatches(fs, candidate, identity) {
+			continue
 		}
 		// Stamp the completed lifecycle on the in-tree manifest, then mirror it
 		// outside the tree: RemoveAll can consume the manifest before a locked
@@ -339,6 +412,10 @@ func sweepArtifactStaging(fs afero.Fs, parent string) {
 		// retain the tree for a retry-safe later sweep.
 		if !readArtifactStageProof(fs, candidate) {
 			logging.Warnf("artifact staging sweep retained %s: completed ownership proof unavailable beside the staging root", candidate)
+			continue
+		}
+		if identity.hasDevIno && !artifactStageDirMatches(fs, candidate, identity) {
+			logging.Warnf("artifact staging sweep retained %s: staging root identity changed before removal", candidate)
 			continue
 		}
 		if err := removeArtifactTreeWithRetry(fs, candidate); err != nil {

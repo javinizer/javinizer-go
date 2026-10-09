@@ -152,10 +152,58 @@ func TestReplacementBatchRollbackMoveBackRefusesForeignSuccessor(t *testing.T) {
 
 	rerr := batch.Rollback(context.Background())
 	require.Error(t, rerr, "the skipped compensation is reported, not silently ignored")
-	assert.True(t, errors.Is(rerr, fsutil.ErrPublishSuccessorUnproven) || errors.Is(rerr, fsutil.ErrPublishCompleted), "the doubt class rides the skipped move-back: %v", rerr)
+	assert.True(t, errors.Is(rerr, fsutil.ErrTakeAsideForeign) || errors.Is(rerr, fsutil.ErrPublishSuccessorUnproven) || errors.Is(rerr, fsutil.ErrPublishCompleted), "the bound move-back refusal rides the skipped compensation: %v", rerr)
 	got, readErr := afero.ReadFile(fs, dst)
 	require.NoError(t, readErr)
 	assert.Equal(t, "foreign successor", string(got), "the successor is retained byte-intact at the destination")
 	_, statErr := fs.Stat(origin)
 	assert.True(t, os.IsNotExist(statErr), "no foreign bytes were relocated onto the source path")
+}
+
+type rollbackMoveBackSwapFS struct {
+	afero.Fs
+	source string
+	done   bool
+}
+
+func (fs *rollbackMoveBackSwapFS) Rename(oldname, newname string) error {
+	if !fs.done && filepath.Clean(oldname) == filepath.Clean(fs.source) {
+		fs.done = true
+		if err := fs.Fs.Remove(oldname); err != nil {
+			return err
+		}
+		if err := afero.WriteFile(fs.Fs, oldname, []byte("foreign in move window"), 0o644); err != nil {
+			return err
+		}
+	}
+	return fs.Fs.Rename(oldname, newname)
+}
+
+// codex P1 (PRRT_kwDORn9KaM6qLkJ9): the rollback move-back itself re-proves
+// the taken object, so a swap after the old observation point cannot be moved
+// onto the rollback origin.
+func TestReplacementBatchRollbackMoveBackBindsProofToMove(t *testing.T) {
+	base := afero.NewOsFs()
+	dir := t.TempDir()
+	src := filepath.Join(dir, "in.mp4")
+	dst := filepath.Join(dir, "out.mp4")
+	origin := filepath.Join(dir, "origin.mp4")
+	require.NoError(t, afero.WriteFile(base, src, []byte("ours"), 0o644))
+	batch, err := NewReplacementBatch(&rollbackMoveBackSwapFS{Fs: base, source: dst}, "op", nil)
+	require.NoError(t, err)
+	_, err = batch.BeforePublish(context.Background(), dst, false)
+	require.NoError(t, err)
+	identity, err := fsutil.CopyFileNoReplaceVerifiedInstall(base, src, dst, func(string, os.FileInfo) error { return nil })
+	require.NoError(t, err)
+	require.NoError(t, batch.ObservePublishResultBound(dst, identity))
+	require.NoError(t, batch.SetRollbackOriginBound(dst, origin, identity))
+
+	rerr := batch.Rollback(context.Background())
+	require.Error(t, rerr)
+	assert.ErrorIs(t, rerr, fsutil.ErrTakeAsideForeign)
+	got, readErr := afero.ReadFile(base, dst)
+	require.NoError(t, readErr)
+	assert.Equal(t, "foreign in move window", string(got))
+	_, statErr := base.Stat(origin)
+	assert.True(t, os.IsNotExist(statErr), "foreign bytes were not moved onto origin")
 }

@@ -1,6 +1,11 @@
 package fsutil
 
-import "os"
+import (
+	"fmt"
+	"os"
+
+	"github.com/spf13/afero"
+)
 
 // BoundInstallIdentity carries the published FileInfo plus the strong kernel
 // key captured while the installed object was still pinned (codex P1,
@@ -61,4 +66,27 @@ func (i *BoundInstallIdentity) strongIdentity() (device, inode uint64, ok bool) 
 		return 0, 0, false
 	}
 	return i.device, i.inode, true
+}
+
+// VerifiedSourceProofFromBoundInstallIdentity turns a publish-time install
+// identity into a verified-move source proof (codex P1,
+// PRRT_kwDORn9KaM6qLkJ9). Strong keys are re-proven strong-or-refuse; only a
+// genuinely weak install record falls back to the FileInfo size+modtime legs.
+func VerifiedSourceProofFromBoundInstallIdentity(fs afero.Fs, installed *BoundInstallIdentity) VerifiedSourceProof {
+	return func(path string, info os.FileInfo) error {
+		if installed == nil || installed.FileInfo() == nil {
+			return fmt.Errorf("bound install proof of %s requires the identity its publish produced", path)
+		}
+		if info == nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+			return fmt.Errorf("bound install proof of %s found no regular-file object", path)
+		}
+		same, err := sameBoundInstallObject(fs, path, info, installed)
+		if err != nil {
+			return err
+		}
+		if !same {
+			return fmt.Errorf("%s no longer names the object this operation installed", path)
+		}
+		return nil
+	}
 }

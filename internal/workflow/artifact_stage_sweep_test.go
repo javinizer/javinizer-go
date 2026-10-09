@@ -61,6 +61,7 @@ func seedStagingRoot(t *testing.T, fs afero.Fs, parent string, mutate func(*arti
 	body, err := json.Marshal(&manifest)
 	require.NoError(t, err)
 	require.NoError(t, afero.WriteFile(fs, filepath.Join(root, artifactStageManifestName), body, 0o600))
+	require.NoError(t, fs.MkdirAll(filepath.Join(root, ".source"), 0o755))
 	require.NoError(t, afero.WriteFile(fs, filepath.Join(root, ".source", "MIRD-281.mp4"), []byte("payload"), 0o644))
 	return root
 }
@@ -848,4 +849,93 @@ func TestSweepArtifactStaging_RemovesOnlyWithCompletedProofBeside(t *testing.T) 
 	assert.False(t, exists, "dead-owner quarantined residue still reclaims")
 	proofGone, _ := afero.Exists(base, artifactStageProofPath(quarantine))
 	assert.False(t, proofGone, "the proof sidecar is removed with the residue")
+}
+
+type quarantineRootReplantFS struct {
+	afero.Fs
+	oldRoot string
+	done    bool
+}
+
+func (fs *quarantineRootReplantFS) Rename(oldname, newname string) error {
+	if err := fs.Fs.Rename(oldname, newname); err != nil {
+		return err
+	}
+	if !fs.done && filepath.Clean(oldname) == filepath.Clean(fs.oldRoot) {
+		fs.done = true
+		if err := fs.Fs.MkdirAll(oldname, 0o755); err != nil {
+			return err
+		}
+		return afero.WriteFile(fs.Fs, filepath.Join(oldname, "foreign.bin"), []byte("foreign"), 0o644)
+	}
+	return nil
+}
+
+// codex P1 (PRRT_kwDORn9KaM6qLkJz): after quarantine rename, a re-planted
+// original root refuses before completion marking or RemoveAll.
+func TestSweepArtifactStagingRefusesReplantedRootAfterQuarantineRename(t *testing.T) {
+	base := afero.NewMemMapFs()
+	parent := "/lib"
+	require.NoError(t, base.MkdirAll(parent, 0o755))
+	root := seedStagingRoot(t, base, parent, nil)
+	setSweepSeams(t, fsutil.ProcessDead, nil)
+
+	sweepArtifactStaging(&quarantineRootReplantFS{Fs: base, oldRoot: root}, parent)
+
+	rootExists, err := afero.DirExists(base, root)
+	require.NoError(t, err)
+	assert.True(t, rootExists, "the re-planted root is retained for a later authenticated pass")
+	entries, readErr := afero.ReadDir(base, parent)
+	require.NoError(t, readErr)
+	quarantines := 0
+	for _, entry := range entries {
+		if entry.IsDir() && strings.Contains(entry.Name(), artifactStageQuarantineMark) {
+			quarantines++
+		}
+	}
+	assert.Equal(t, 1, quarantines, "the authenticated original quarantine is retained, not removed")
+}
+
+type proofOpenSwapFS struct {
+	afero.Fs
+	done bool
+}
+
+func (fs *proofOpenSwapFS) Open(name string) (afero.File, error) {
+	file, err := fs.Fs.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	if !fs.done && strings.HasSuffix(name, artifactStageProofSuffix) {
+		fs.done = true
+		root := strings.TrimSuffix(name, artifactStageProofSuffix)
+		_ = fs.Fs.RemoveAll(root)
+		_ = fs.Fs.MkdirAll(root, 0o755)
+		_ = afero.WriteFile(fs.Fs, filepath.Join(root, "foreign.bin"), []byte("foreign"), 0o644)
+	}
+	return file, nil
+}
+
+// codex P1 (PRRT_kwDORn9KaM6qLkJz): on filesystems with a strong directory
+// key, a swap after proof restatement still refuses before RemoveAll.
+func TestSweepArtifactStagingRefusesStrongIdentityChangeBeforeRemove(t *testing.T) {
+	base := afero.NewOsFs()
+	parent := t.TempDir()
+	seedStagingRoot(t, base, parent, nil)
+	setSweepSeams(t, fsutil.ProcessDead, nil)
+
+	sweepArtifactStaging(&proofOpenSwapFS{Fs: base}, parent)
+
+	entries, err := afero.ReadDir(base, parent)
+	require.NoError(t, err)
+	kept := false
+	for _, entry := range entries {
+		if entry.IsDir() && strings.Contains(entry.Name(), artifactStageQuarantineMark) {
+			kept = true
+			payload, readErr := afero.ReadFile(base, filepath.Join(parent, entry.Name(), "foreign.bin"))
+			require.NoError(t, readErr)
+			assert.Equal(t, "foreign", string(payload))
+		}
+	}
+	assert.True(t, kept, "strong identity mismatch retains the swapped directory")
 }

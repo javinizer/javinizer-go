@@ -365,16 +365,16 @@ type SubtitleResult struct {
 	Skipped bool
 	Planned bool
 	Error   error
-	// InstalledIdentity is the destination object's identity AS THE COPY
-	// PRODUCED IT (codex P1, PR #276, finding ntCe6): the copy lane's
-	// admission-bound install returns the bound publish's proven installed
-	// identity, so a caller recording this seat for later compensation binds
-	// ITS record to the object the copy installed instead of re-resolving
-	// the destination name after this lane released its destination lock —
-	// the window in which an external writer's replacement would otherwise
-	// be adopted (and later identity-verified-DELETED) as this operation's
-	// own install. Nil unless a verified copy installed cleanly; moves,
-	// skips, errors, and legacy by-name copies carry none.
+	// InstalledIdentity is the destination object's identity AS THE VERIFIED
+	// INSTALL PRODUCED IT (codex P1, PR #276 finding ntCe6, and
+	// PRRT_kwDORn9KaM6qLkJ4): admission-bound copy and move lanes return the
+	// publish-proven identity, so a caller recording this seat for later
+	// compensation binds ITS record to the object the lane installed instead
+	// of re-resolving the destination name after this lane released its
+	// destination lock — the window in which an external writer's replacement
+	// would otherwise be adopted as this operation's own install. Nil unless a
+	// verified install landed cleanly; skips, errors, and legacy by-name lanes
+	// carry none.
 	InstalledIdentity *fsutil.BoundInstallIdentity
 	// SuccessorRefused marks a copied seat whose bound observation proved
 	// another writer replaced the installed bytes (codex P1, PR #276,
@@ -842,12 +842,12 @@ func probeSubtitleSourceRegular(fs afero.Fs, path string) bool {
 type subtitleInstall struct {
 	op       func(afero.Fs, string, string) error
 	verified func(afero.Fs, string, string, fsutil.VerifiedSourceProof) error
-	// install is the identity-returning verified twin (the copy lane):
-	// beyond re-proving the consumed object it hands back the INSTALLED
-	// destination object's publish-time identity, so the caller's
-	// post-publication record binds the copy's own product rather than a
-	// later name lookup (codex P1, PR #276, finding ntCe6). Nil lanes never
-	// produce an identity.
+	// install is the identity-returning verified twin: beyond re-proving the
+	// consumed object it hands back the INSTALLED destination object's
+	// publish-time identity, so the caller's post-publication record binds the
+	// lane's own product rather than a later name lookup (codex P1, PR #276
+	// finding ntCe6, and PRRT_kwDORn9KaM6qLkJ4). Nil lanes never produce an
+	// identity.
 	install func(afero.Fs, string, string, fsutil.VerifiedSourceProof) (*fsutil.BoundInstallIdentity, error)
 	copied  bool
 }
@@ -870,7 +870,9 @@ func (install subtitleInstall) run(fs afero.Fs, source, dest string, proof fsuti
 }
 
 var (
-	subtitleMoveInstall = subtitleInstall{op: fsutil.MoveFileNoReplace, verified: fsutil.MoveFileNoReplaceVerified}
+	subtitleMoveInstall = subtitleInstall{op: fsutil.MoveFileNoReplace, verified: fsutil.MoveFileNoReplaceVerified, install: func(fs afero.Fs, source, dest string, proof fsutil.VerifiedSourceProof) (*fsutil.BoundInstallIdentity, error) {
+		return fsutil.MoveFileNoReplaceVerifiedMode(fs, source, dest, proof, fsutil.StagingFileMode())
+	}}
 	subtitleCopyInstall = subtitleInstall{op: fsutil.CopyFileNoReplace, verified: fsutil.CopyFileNoReplaceVerified, install: fsutil.CopyFileNoReplaceVerifiedInstall, copied: true}
 )
 
@@ -981,7 +983,7 @@ func (o *Organizer) handleSubtitles(plan *OrganizePlan, result *OrganizeResult, 
 				// ordinary first-wins dedupe instead of alarming.
 				endpointKey := filepath.Clean(newPath)
 				endpointAttempts[endpointKey] = true
-				// The copy lane's install additionally hands back the destination
+				// The verified install additionally hands back the destination
 				// object's publish-time identity: captured HERE, inside the
 				// destination lock the lane still holds, the identity provably
 				// names the object this operation installed. Recording it on the

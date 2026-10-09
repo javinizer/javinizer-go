@@ -915,18 +915,24 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 					return cerr
 				}
 			}
-			if s.videoDeferred && publishMove && !primarySuccessorRefused {
+			if s.videoDeferred && publishMove && !primarySuccessorRefused && finalResult != nil {
 				// The rename already consumed the real source: arm rollback before
 				// any fallible leg (ConfirmPublish, later installs) can observe an
-				// installed destination worth deleting with no armed inverse.
+				// installed destination worth deleting with no armed inverse. The arm
+				// binds to the move lane's carried identity (codex P1,
+				// PRRT_kwDORn9KaM6qLkJ4); a destination re-stat may only confirm that
+				// exact object, never adopt a name-only successor.
 				s.sourceCleanupArmed = true
 				s.directOriginArmed = true
+				if finalResult.InstalledIdentity == nil {
+					return fmt.Errorf("arm deferred primary rollback %s: missing bound installed identity", plan.TargetPath)
+				}
 				target := s.sourcePath
-				if finalResult != nil && finalResult.NewPath != "" {
+				if finalResult.NewPath != "" {
 					target = finalResult.NewPath
 				}
-				if armErr := batch.SetRollbackOrigin(target, s.sourcePath); armErr != nil {
-					if altErr := batch.SetRollbackOrigin(plan.TargetPath, s.sourcePath); altErr != nil {
+				if armErr := batch.SetRollbackOriginBound(target, s.sourcePath, finalResult.InstalledIdentity); armErr != nil {
+					if altErr := batch.SetRollbackOriginBound(plan.TargetPath, s.sourcePath, finalResult.InstalledIdentity); altErr != nil {
 						return errors.Join(armErr, altErr)
 					}
 					return armErr
@@ -1017,17 +1023,25 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 				continue
 			}
 			// The pending intent for this move was journaled pre-execution; only
-			// the in-process rollback arm belongs here.
-			if err := batch.SetRollbackOrigin(sr.NewPath, sr.OriginalPath); err != nil {
+			// the in-process rollback arm belongs here. The arm binds to the
+			// subtitle move lane's carried identity (codex P1,
+			// PRRT_kwDORn9KaM6qLkJ4); a destination re-stat may only confirm that
+			// exact object, never adopt a name-only successor.
+			if sr.InstalledIdentity == nil {
+				return fmt.Errorf("arm subtitle rollback %s: missing bound installed identity", sr.NewPath)
+			}
+			if err := batch.SetRollbackOriginBound(sr.NewPath, sr.OriginalPath, sr.InstalledIdentity); err != nil {
 				// The organizer already moved this sidecar off its source: a failed
-				// arm must not leave it stranded outside the batch. Reverse the move
-				// directly — never clobbering anything that reappeared at the source —
-				// and let the outer rollback restore everything it did arm.
+				// arm must not leave it stranded outside the batch. Reverse only the
+				// carried identity — never clobbering anything that reappeared at the
+				// source and never relocating a successor that replaced the sidecar.
 				if _, statErr := s.fs.Stat(sr.OriginalPath); os.IsNotExist(statErr) {
-					// Only the provably-vacant source slot gets the direct reversal,
-					// and even that move must be no-replace: a source recreated after
-					// this Stat must never be clobbered by the compensation.
-					if rerr := fsutil.MoveFileNoReplace(s.fs, sr.NewPath, sr.OriginalPath); rerr != nil {
+					proof := fsutil.VerifiedSourceProofFromBoundInstallIdentity(s.fs, sr.InstalledIdentity)
+					mode := fsutil.StagingFileMode()
+					if info := sr.InstalledIdentity.FileInfo(); info != nil {
+						mode = info.Mode().Perm()
+					}
+					if _, rerr := fsutil.MoveFileNoReplaceVerifiedMode(s.fs, sr.NewPath, sr.OriginalPath, proof, mode); rerr != nil {
 						logging.Warnf("subtitle direct rollback failed for %s: %v (arm error: %v)", sr.NewPath, rerr, err)
 					}
 				}
