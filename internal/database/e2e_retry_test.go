@@ -35,12 +35,12 @@ func TestIsLocked_DetectsErrLocked(t *testing.T) {
 }
 
 func TestIsLocked_DetectsWrappedErrBusy(t *testing.T) {
-	wrapped := fmt.Errorf("wrapped: %w", &sqlite3.Error{Code: sqlite3.ErrBusy})
+	wrapped := fmt.Errorf("wrapped: %w", error(&sqlite3.Error{Code: sqlite3.ErrBusy}))
 	assert.True(t, isLocked(wrapped))
 }
 
 func TestIsLocked_DetectsDoubleWrappedErrLocked(t *testing.T) {
-	inner := &sqlite3.Error{Code: sqlite3.ErrLocked}
+	inner := error(&sqlite3.Error{Code: sqlite3.ErrLocked})
 	outer1 := fmt.Errorf("level1: %w", inner)
 	outer2 := fmt.Errorf("level2: %w", outer1)
 	assert.True(t, isLocked(outer2))

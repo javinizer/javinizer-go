@@ -1,6 +1,6 @@
 module github.com/javinizer/javinizer-go
 
-go 1.26.6
+go 1.27
 
 require (
 	github.com/Eyevinn/mp4ff v0.51.0
