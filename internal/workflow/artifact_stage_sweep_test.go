@@ -901,13 +901,23 @@ type proofOpenSwapFS struct {
 	done bool
 }
 
+// proofOpenSwap replants a root by rename, never delete+recreate: on
+// overlayfs/tmpfs a recreated directory can land on the exact inode the
+// delete just freed, which would defeat the identity-gate seam this type
+// exists to exercise. Allocating the replacement while the original still
+// occupies its inode guarantees a fresh kernel identity on every filesystem.
+func proofOpenSwap(under afero.Fs, root string) {
+	near := root + ".swapside"
+	_ = under.MkdirAll(near, 0o755)
+	_ = afero.WriteFile(under, filepath.Join(near, "foreign.bin"), []byte("foreign"), 0o644)
+	_ = under.RemoveAll(root)
+	_ = under.Rename(near, root)
+}
+
 func (fs *proofOpenSwapFS) LstatIfPossible(name string) (os.FileInfo, bool, error) {
 	if !fs.done && strings.HasSuffix(name, artifactStageProofSuffix) {
 		fs.done = true
-		root := strings.TrimSuffix(name, artifactStageProofSuffix)
-		_ = fs.Fs.RemoveAll(root)
-		_ = fs.Fs.MkdirAll(root, 0o755)
-		_ = afero.WriteFile(fs.Fs, filepath.Join(root, "foreign.bin"), []byte("foreign"), 0o644)
+		proofOpenSwap(fs.Fs, strings.TrimSuffix(name, artifactStageProofSuffix))
 	}
 	if l, ok := fs.Fs.(afero.Lstater); ok {
 		return l.LstatIfPossible(name)
@@ -929,10 +939,7 @@ func (fs *proofOpenSwapFS) Open(name string) (afero.File, error) {
 	}
 	if !fs.done && strings.HasSuffix(name, artifactStageProofSuffix) {
 		fs.done = true
-		root := strings.TrimSuffix(name, artifactStageProofSuffix)
-		_ = fs.Fs.RemoveAll(root)
-		_ = fs.Fs.MkdirAll(root, 0o755)
-		_ = afero.WriteFile(fs.Fs, filepath.Join(root, "foreign.bin"), []byte("foreign"), 0o644)
+		proofOpenSwap(fs.Fs, strings.TrimSuffix(name, artifactStageProofSuffix))
 	}
 	return file, nil
 }

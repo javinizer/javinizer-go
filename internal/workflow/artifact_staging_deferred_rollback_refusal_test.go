@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -139,6 +140,13 @@ func (fs *driftAtArmWindowFS) LstatIfPossible(name string) (os.FileInfo, bool, e
 }
 
 func TestDeferredMoveRollbackArmJoinsRefusalsWhenBothAnchorsDrift(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// The drift write lands inside the observation's re-derivation: the
+		// Windows handle-based identity refuses earlier (via the
+		// strong-identity-not-rederivable bound arm) rather than at the joined
+		// anchor arms. The join is exercised by the POSIX coverage runs.
+		t.Skip("windows refuses mid-observation through its handle identity twin")
+	}
 	probe := &driftAtArmWindowFS{}
 	env := buildDeferredArmEnv(t, "arm-drift-joined", func(base afero.Fs) afero.Fs { probe.Fs = base; return probe }, nil)
 	cmd := pr260FencedCommand(&env.movie, env.match, env.dest, pr260FencedCounter(t, env.db), operationmode.OperationModeOrganize, false, true, organizer.LinkModeNone, false, false)
