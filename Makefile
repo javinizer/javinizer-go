@@ -324,13 +324,19 @@ docs: swagger
 	@echo "View at: http://localhost:8765/docs"
 
 # Generate mocks from interfaces using mockery v3
-# Pinned to v3.7.1 for reproducible output (regen drift otherwise).
-# Requires: mockery v3.7.1 (install: go install github.com/vektra/mockery/v3@v3.8.0)
+# Built from tools/mockery (mockery v3.8.0 + x/tools v0.52.0) because the
+# x/tools v0.49.0 pinned in mockery v3.8.0 cannot read Go 1.27 export data
+# (format v5), breaking package loading on this module.
 # Config: .mockery.yaml
 # Output: internal/mocks/
-mocks:
+MOCKERY_BIN := bin/mockery
+
+$(MOCKERY_BIN): tools/mockery/go.mod tools/mockery/go.sum
+	@cd tools/mockery && go build -o ../../$(MOCKERY_BIN) github.com/vektra/mockery/v3
+
+mocks: $(MOCKERY_BIN)
 	@echo "Generating mocks with mockery..."
-	@go run github.com/vektra/mockery/v3@v3.8.0 --config .mockery.yaml
+	@$(MOCKERY_BIN) --config .mockery.yaml
 	@echo "Post-processing: Unifying package names to 'mocks'..."
 	@for file in internal/mocks/*.go; do \
 		sed -i.bak 's/^package models$$/package mocks/' "$$file"; \
@@ -342,9 +348,9 @@ mocks:
 	@echo "Mock generation complete! Generated mocks in internal/mocks/"
 
 # Check if mocks are up to date (mirrors check-swagger)
-check-mocks:
+check-mocks: $(MOCKERY_BIN)
 	@echo "Checking mocks are up to date..."
-	@go run github.com/vektra/mockery/v3@v3.8.0 --config .mockery.yaml >/dev/null
+	@$(MOCKERY_BIN) --config .mockery.yaml >/dev/null
 	@for file in internal/mocks/*.go; do \
 		sed -i.bak 's/^package models$$/package mocks/' "$$file"; \
 		sed -i.bak 's/^package database$$/package mocks/' "$$file"; \
