@@ -233,11 +233,11 @@ func TestSidecarPublicationFaultsRestorePublishedVideo(t *testing.T) {
 			require.NoError(t, err)
 			defer stage.cleanup()
 			plan := stagedPublicationTarget(t, real, stage, cmd)
-			target := filepath.Join(filepath.Dir(plan.TargetPath), stagedArtifactSiblingName(filepath.Base(source), filepath.Base(plan.TargetPath), filepath.Base(stage.siblings[0].sourcePath)))
+			target := filepath.Join(filepath.Dir(plan.TargetPath), stagedArtifactSiblingName(filepath.Base(source), filepath.Base(plan.TargetPath), filepath.Base(stage.siblings[stagedSiblingIndex(t, stage)].sourcePath)))
 			switch mode {
 			case "staged inspect":
 				fs.activateStatFaultPath = target
-				fs.activateStatFaultTarget = stage.siblings[0].stagedPath
+				fs.activateStatFaultTarget = stage.siblings[stagedSiblingIndex(t, stage)].stagedPath
 			case "occupied destination":
 				require.NoError(t, base.MkdirAll(filepath.Dir(target), 0o755))
 				fs.plantOnMissingPath = target

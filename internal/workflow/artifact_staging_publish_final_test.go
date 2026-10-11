@@ -122,9 +122,9 @@ func TestPR260PublicationSidecarFinalizeFaults(t *testing.T) {
 			if tc.op == "write" {
 				finalPlan, finalPlanErr := orch.organizer.(artifactPlanExecutor).PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: stage.original.Match, Movie: stage.original.Movie, DestDir: dest, MoveFiles: true, ForceUpdate: true, OperationMode: stage.original.OperationMode})
 				require.NoError(t, finalPlanErr)
-				fs.path = filepath.Join(filepath.Dir(finalPlan.TargetPath), stagedArtifactSiblingName(filepath.Base(source), filepath.Base(finalPlan.TargetPath), filepath.Base(stage.siblings[0].stagedPath)))
+				fs.path = filepath.Join(filepath.Dir(finalPlan.TargetPath), stagedArtifactSiblingName(filepath.Base(source), filepath.Base(finalPlan.TargetPath), filepath.Base(stage.siblings[stagedSiblingIndex(t, stage)].stagedPath)))
 			} else {
-				fs.path = stage.siblings[0].stagedPath
+				fs.path = stage.siblings[stagedSiblingIndex(t, stage)].stagedPath
 			}
 			state := &applyPipelineState{organizeResult: &organizer.OrganizeResult{NewPath: plan.TargetPath, FolderPath: plan.TargetDir}}
 			err = stage.publish(context.Background(), orch, state, nil)

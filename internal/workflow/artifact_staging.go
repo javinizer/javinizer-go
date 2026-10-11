@@ -46,6 +46,10 @@ type artifactSibling struct {
 	sourcePath string
 	stagedPath string
 	identity   artifactSourceIdentity
+	// deferred marks a multipart video sibling admitted without staged bytes:
+	// it installs by the verified move lane straight off its real source at
+	// publication, like the deferred primary (codex P2, PRRT_kwDORn9KaM6rLI28).
+	deferred bool
 }
 
 type artifactStage struct {
@@ -225,12 +229,25 @@ func (o *applyOrchImpl) prepareArtifact(ctx context.Context, cmd ApplyCmd) (*art
 			if !siblingInfo.Mode().IsRegular() {
 				continue
 			}
+			admitted := artifactSibling{sourcePath: sibling, identity: captureArtifactSourceIdentity(o.fs, sibling, siblingInfo)}
+			if !inPlace && cmd.Organize.MoveFiles && isStagedArtifactVideoExtension(strings.ToLower(filepath.Ext(entry.Name()))) {
+				// Defer multipart video siblings with the primary in MOVE flows
+				// (codex P2, PRRT_kwDORn9KaM6rLI28): the publication installs
+				// them straight off the real source by the verified move lane,
+				// so staging their bytes would restore exactly the
+				// multi-gigabyte copy this mode exists to eliminate. Copy/link
+				// flows keep the staged copy — their source must be retained.
+				admitted.deferred = true
+				stage.siblings = append(stage.siblings, admitted)
+				continue
+			}
 			stagedSibling := filepath.Join(stagedDir, entry.Name())
 			if err := copyArtifactFile(o.fs, sibling, stagedSibling, siblingInfo.Mode().Perm()); err != nil {
 				stage.cleanup()
 				return nil, cmd, err
 			}
-			stage.siblings = append(stage.siblings, artifactSibling{sourcePath: sibling, stagedPath: stagedSibling, identity: captureArtifactSourceIdentity(o.fs, sibling, siblingInfo)})
+			admitted.stagedPath = stagedSibling
+			stage.siblings = append(stage.siblings, admitted)
 		}
 		stagedCmd.Match.Path = stage.stagedSource
 		stagedCmd.Match.Name = base
@@ -344,6 +361,19 @@ func (s *artifactStage) cleanup() {
 	// (renamed with it) so neither can be stranded.
 	markArtifactStageCompleted(s.fs, s.root)
 	writeArtifactStageProof(s.fs, s.root)
+	// Bind the quarantine rename to the directory the manifest+proof writes just
+	// authenticated (codex P1, PRRT_kwDORn9KaM6rLI26): a writer able to rename
+	// entries in the staging parent can move the authenticated root aside and
+	// plant a foreign tree at s.root inside the window; the rename and the
+	// sealed sidecar carry would then authenticate the foreign tree for
+	// recursive deletion. Refuse the destructive leg on any identity drift and
+	// leave the proof uncarried, so no later sweep can associate the foreign
+	// tree with our seal either.
+	stagedInfo, stagedInfoErr := lstatArtifactStageDir(s.fs, s.root)
+	stagedIdentity := artifactStageDirIdentity{}
+	if stagedInfoErr == nil && stagedInfo != nil {
+		stagedIdentity = captureArtifactStageDirIdentity(s.fs, s.root, stagedInfo)
+	}
 	quarantine := artifactStageQuarantineName(s.root)
 	proofSrc := artifactStageProofPath(s.root)
 	proofDst := artifactStageProofPath(quarantine)
@@ -352,6 +382,10 @@ func (s *artifactStage) cleanup() {
 		return
 	}
 	s.root = quarantine
+	if stagedIdentity.known && !artifactStageDirMatches(s.fs, s.root, stagedIdentity) {
+		logging.Warnf("artifact staging cleanup retention %s: quarantined root identity changed during the rename, retained for the next organize sweep", s.root)
+		return
+	}
 	// Destructive removal opens ONLY with a valid proof beside the quarantined
 	// name: RemoveAll can still erase the in-tree manifest before a locked
 	// payload refuses, and the sidecar is then the residue's sole associable
@@ -1217,11 +1251,49 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 			}
 		}
 		published := map[string]bool{}
+		deferredSiblingProofs := s.siblingSourceProofs()
 		for _, sibling := range s.siblings {
 			if movedByOrganizer[filepath.Clean(sibling.sourcePath)] {
 				continue
 			}
 			target := filepath.Join(filepath.Dir(finalResult.NewPath), stagedArtifactSiblingName(filepath.Base(s.sourcePath), filepath.Base(finalResult.NewPath), filepath.Base(sibling.sourcePath)))
+			if sibling.deferred {
+				// A deferred video sibling (codex P2, PRRT_kwDORn9KaM6rLI28)
+				// installs by the verified move lane straight off its real
+				// source, mirroring the deferred primary: the admission identity
+				// is re-proven at consumption, the MoveBack inverse is journaled
+				// pre-move, and the install binds the identity the move lane
+				// produced rather than re-deriving it from the destination name.
+				if _, statErr := s.fs.Stat(target); statErr == nil {
+					continue
+				} else if !os.IsNotExist(statErr) {
+					return fmt.Errorf("inspect deferred publication sibling: %w", statErr)
+				}
+				if _, armErr := batch.BeforePublish(ctx, target, false); armErr != nil {
+					return armErr
+				}
+				if o.revertLog != nil && opID != "" {
+					if err := o.revertLog.RecordMoveIntent(ctx, opID, sibling.sourcePath, target); err != nil {
+						return fmt.Errorf("journal deferred sibling move intent: %w", err)
+					}
+				}
+				if err := s.revalidateAdmittedSource(sibling.sourcePath, sibling.identity); err != nil {
+					return err
+				}
+				proof := deferredSiblingProofs[filepath.Clean(sibling.sourcePath)]
+				movedID, moveErr := fsutil.MoveFileNoReplaceVerifiedMode(s.fs, sibling.sourcePath, target, proof, fsutil.StagingFileMode())
+				if moveErr != nil {
+					return fmt.Errorf("publish deferred sibling from source: %w", moveErr)
+				}
+				if err := batch.SetRollbackOriginBound(target, sibling.sourcePath, movedID); err != nil {
+					return err
+				}
+				if confirmErr := batch.ConfirmPublish(ctx, target); confirmErr != nil {
+					return confirmErr
+				}
+				published[filepath.Clean(target)] = true
+				continue
+			}
 			if _, statErr := s.fs.Stat(target); os.IsNotExist(statErr) {
 				info, sourceErr := s.fs.Stat(sibling.stagedPath)
 				if sourceErr != nil {
@@ -1310,6 +1382,10 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 			// original: an occupied target that nothing wrote stays foreign, and
 			// removing the source would leave a permanent MoveBack rename of
 			// foreign bytes onto it.
+			if sibling.deferred {
+				// The deferred move leg consumed the source at install time.
+				continue
+			}
 			if !published[filepath.Clean(target)] {
 				continue
 			}
@@ -1468,6 +1544,11 @@ func (s *artifactStage) rehomeRemainingSiblings(stagedVideo string, excluded map
 	}
 	targetDir := filepath.Dir(stagedVideo)
 	for _, sibling := range s.siblings {
+		if sibling.deferred {
+			// No staged bytes to rehome: the deferred sibling is published
+			// straight off its real source by the verified move lane.
+			continue
+		}
 		if excluded[filepath.Clean(sibling.stagedPath)] {
 			continue
 		}

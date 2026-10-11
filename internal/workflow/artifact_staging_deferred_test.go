@@ -51,11 +51,22 @@ func TestPrepareArtifactOrganizeDefersVideoCopy(t *testing.T) {
 	assert.Equal(t, stage.stagedSource, staged.Match.Path, "pipeline still addresses the virtual staged path")
 	assert.Equal(t, source, stage.sourcePath)
 
-	for _, sibling := range []string{subtitle, multipart} {
-		exists, serr := afero.Exists(base, filepath.Join(stage.root, ".source", filepath.Base(sibling)))
-		require.NoError(t, serr)
-		assert.True(t, exists, "small sidecars stay staged: %s", sibling)
+	exists, serr := afero.Exists(base, filepath.Join(stage.root, ".source", filepath.Base(subtitle)))
+	require.NoError(t, serr)
+	assert.True(t, exists, "the small subtitle sidecar stays staged")
+
+	deferredExists, derr := afero.Exists(base, filepath.Join(stage.root, ".source", filepath.Base(multipart)))
+	require.NoError(t, derr)
+	assert.False(t, deferredExists, "the multipart video sibling defers with the primary — no staged copy")
+
+	videoSiblings := 0
+	for _, sibling := range stage.siblings {
+		if sibling.deferred {
+			assert.Empty(t, sibling.stagedPath)
+			videoSiblings++
+		}
 	}
+	assert.Equal(t, 1, videoSiblings, "exactly the multipart sibling is deferred")
 	manifestExists, merr := afero.Exists(base, filepath.Join(stage.root, artifactStageManifestName))
 	require.NoError(t, merr)
 	assert.True(t, manifestExists, "ownership manifest stamped")
@@ -1365,7 +1376,7 @@ func TestDeferredPublishGenericSiblingPinsIntentFaults(t *testing.T) {
 
 		// Make the staged sibling undigestible (only its Open faults), so the
 		// digest leg errors BEFORE the publish loop records or copies anything.
-		stage.fs = &denyOpenStagedFS{Fs: base, path: stage.siblings[0].stagedPath}
+		stage.fs = &denyOpenStagedFS{Fs: base, path: stage.siblings[stagedSiblingIndex(t, stage)].stagedPath}
 		publishErr := stage.publish(context.Background(), orch, state, nil)
 		require.ErrorContains(t, publishErr, "staged read denied")
 	})

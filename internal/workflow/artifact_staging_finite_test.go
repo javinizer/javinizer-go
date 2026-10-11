@@ -124,7 +124,8 @@ func TestPR260FiniteArtifactRehomeFaultsRetainSidecars(t *testing.T) {
 			defer stage.cleanup()
 			require.NotEmpty(t, stage.siblings)
 			video := filepath.Join(stage.root, "renamed", "NEW.mp4")
-			sibling := stage.siblings[0].stagedPath
+			siblingIdx := stagedSiblingIndex(t, stage)
+			sibling := stage.siblings[siblingIdx].stagedPath
 			target := filepath.Join(filepath.Dir(video), stagedArtifactSiblingName(filepath.Base(stage.stagedSource), filepath.Base(video), filepath.Base(sibling)))
 			require.NoError(t, base.MkdirAll(filepath.Dir(target), 0o755))
 			if tc.existing {
@@ -151,7 +152,7 @@ func TestPR260FiniteArtifactRehomeFaultsRetainSidecars(t *testing.T) {
 			require.NoError(t, stage.rehomeRemainingSiblings(video, nil))
 			b, err := afero.ReadFile(base, target)
 			require.NoError(t, err)
-			original, readErr := afero.ReadFile(base, stage.siblings[0].sourcePath)
+			original, readErr := afero.ReadFile(base, stage.siblings[siblingIdx].sourcePath)
 			require.NoError(t, readErr)
 			require.Equal(t, string(original), string(b))
 		})
