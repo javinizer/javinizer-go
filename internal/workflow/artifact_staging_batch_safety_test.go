@@ -8,6 +8,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
@@ -20,25 +21,46 @@ import (
 
 type cleanupRevalidationFS struct {
 	afero.Fs
-	root   string
-	deny   bool
-	swapAt string
-	fired  bool
-	aside  string
+	root          string
+	deny          bool
+	denyIdentity  bool
+	matchMetadata bool
+	swapAt        string
+	fired         bool
+	aside         string
+}
+
+type unavailableStageNativeInfo struct {
+	os.FileInfo
+}
+
+func (unavailableStageNativeInfo) Sys() any {
+	return struct{}{}
 }
 
 func (f *cleanupRevalidationFS) LstatIfPossible(path string) (os.FileInfo, bool, error) {
 	if f.deny && filepath.Clean(path) == filepath.Clean(f.root) {
 		return nil, false, errors.New("directory identity unavailable")
 	}
+	var info os.FileInfo
+	var err error
+	var lstat bool
 	if fs, ok := f.Fs.(afero.Lstater); ok {
-		return fs.LstatIfPossible(path)
+		info, lstat, err = fs.LstatIfPossible(path)
+	} else {
+		info, err = f.Fs.Stat(path)
 	}
-	info, err := f.Fs.Stat(path)
-	return info, false, err
+	if err == nil && f.denyIdentity && filepath.Clean(path) == filepath.Clean(f.root) {
+		info = unavailableStageNativeInfo{FileInfo: info}
+	}
+	return info, lstat, err
 }
 
 func (f *cleanupRevalidationFS) plant(path string) error {
+	info, err := f.Fs.Stat(path)
+	if err != nil {
+		return err
+	}
 	f.fired = true
 	f.aside = path + ".retained"
 	if err := f.Fs.Rename(path, f.aside); err != nil {
@@ -47,7 +69,14 @@ func (f *cleanupRevalidationFS) plant(path string) error {
 	if err := f.Fs.MkdirAll(path, 0o755); err != nil {
 		return err
 	}
-	return afero.WriteFile(f.Fs, filepath.Join(path, "foreign.bin"), []byte("foreign"), 0o600)
+	if err := afero.WriteFile(f.Fs, filepath.Join(path, "foreign.bin"), []byte("foreign"), 0o600); err != nil {
+		return err
+	}
+	stamp := info.ModTime().Add(time.Second)
+	if f.matchMetadata {
+		stamp = info.ModTime()
+	}
+	return f.Fs.Chtimes(path, stamp, stamp)
 }
 
 func (f *cleanupRevalidationFS) OpenFile(path string, flag int, mode os.FileMode) (afero.File, error) {
@@ -60,6 +89,11 @@ func (f *cleanupRevalidationFS) OpenFile(path string, flag int, mode os.FileMode
 }
 
 func (f *cleanupRevalidationFS) Rename(old, next string) error {
+	if !f.fired && f.swapAt == "quarantine rename" && old == f.root {
+		if err := f.plant(f.root); err != nil {
+			return err
+		}
+	}
 	if !f.fired && f.swapAt == "proof carry" && old == artifactStageProofPath(f.root) {
 		if err := f.plant(strings.TrimSuffix(next, artifactStageProofSuffix)); err != nil {
 			return err
@@ -79,20 +113,29 @@ func (f *cleanupRevalidationFS) RemoveAll(path string) error {
 }
 
 func TestCleanupRetainsRootWhenIdentityIsUnavailable(t *testing.T) {
-	base := afero.NewMemMapFs()
-	require.NoError(t, base.MkdirAll("/library", 0o755))
-	root := seedStagingRoot(t, base, "/library", nil)
-	fs := &cleanupRevalidationFS{Fs: base, root: root, deny: true}
-	stage := &artifactStage{fs: fs, root: root}
-	stage.cleanup()
-	body, err := afero.ReadFile(base, filepath.Join(root, ".source", "MIRD-281.mp4"))
-	require.NoError(t, err)
-	assert.Equal(t, "payload", string(body))
-	assert.Equal(t, root, stage.root)
+	for _, unavailable := range []string{"lookup error", "kernel identity unavailable"} {
+		t.Run(unavailable, func(t *testing.T) {
+			base := afero.NewMemMapFs()
+			require.NoError(t, base.MkdirAll("/library", 0o755))
+			root := seedStagingRoot(t, base, "/library", nil)
+			fs := &cleanupRevalidationFS{Fs: base, root: root, deny: unavailable == "lookup error", denyIdentity: unavailable == "kernel identity unavailable"}
+			stage := &artifactStage{fs: fs, root: root}
+			stage.cleanup()
+			body, err := afero.ReadFile(base, filepath.Join(root, ".source", "MIRD-281.mp4"))
+			require.NoError(t, err)
+			assert.Equal(t, "payload", string(body))
+			assert.Equal(t, root, stage.root)
+			proofExists, err := afero.Exists(base, artifactStageProofPath(root))
+			require.NoError(t, err)
+			assert.False(t, proofExists)
+			_, reclaimable := artifactStageReclaimableIdentity(fs, root)
+			assert.False(t, reclaimable)
+		})
+	}
 }
 
 func TestCleanupRetainsForeignRootAcrossEveryProofBoundary(t *testing.T) {
-	for _, seam := range []string{"proof write", "proof carry", "retry"} {
+	for _, seam := range []string{"proof write", "quarantine rename", "proof carry", "retry"} {
 		t.Run(seam, func(t *testing.T) {
 			base := afero.NewMemMapFs()
 			require.NoError(t, base.MkdirAll("/library", 0o755))
@@ -110,6 +153,38 @@ func TestCleanupRetainsForeignRootAcrossEveryProofBoundary(t *testing.T) {
 			sweepArtifactStaging(base, "/library")
 			foreign, err = afero.ReadFile(base, filepath.Join(stage.root, "foreign.bin"))
 			require.NoError(t, err, "a later sweep must not reuse the refused root's ownership proof")
+			assert.Equal(t, "foreign", string(foreign))
+		})
+	}
+}
+
+func TestCleanupRetainsNativeForeignRootWithMatchingTimestamp(t *testing.T) {
+	for _, seam := range []string{"proof write", "quarantine rename", "proof carry", "retry"} {
+		t.Run(seam, func(t *testing.T) {
+			base := afero.NewOsFs()
+			parent := t.TempDir()
+			root := seedStagingRoot(t, base, parent, nil)
+			info, err := base.Stat(root)
+			require.NoError(t, err)
+			require.True(t, captureArtifactStageDirIdentity(base, root, info).hasDevIno)
+			fs := &cleanupRevalidationFS{Fs: base, root: root, swapAt: seam, matchMetadata: true}
+			stage := &artifactStage{fs: fs, root: root}
+			stage.cleanup()
+			require.True(t, fs.fired)
+			foreign, err := afero.ReadFile(base, filepath.Join(stage.root, "foreign.bin"))
+			require.NoError(t, err)
+			assert.Equal(t, "foreign", string(foreign))
+			original, err := afero.ReadFile(base, filepath.Join(fs.aside, ".source", "MIRD-281.mp4"))
+			require.NoError(t, err)
+			assert.Equal(t, "payload", string(original))
+			ownedInfo, err := base.Stat(fs.aside)
+			require.NoError(t, err)
+			foreignInfo, err := base.Stat(stage.root)
+			require.NoError(t, err)
+			assert.Equal(t, ownedInfo.ModTime(), foreignInfo.ModTime())
+			sweepArtifactStaging(base, parent)
+			foreign, err = afero.ReadFile(base, filepath.Join(stage.root, "foreign.bin"))
+			require.NoError(t, err)
 			assert.Equal(t, "foreign", string(foreign))
 		})
 	}

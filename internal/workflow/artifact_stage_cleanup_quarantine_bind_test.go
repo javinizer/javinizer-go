@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
@@ -27,6 +28,10 @@ type cleanupRenameSwapFS struct {
 
 func (fs *cleanupRenameSwapFS) Rename(oldname, newname string) error {
 	if !fs.fired && filepath.Clean(oldname) == filepath.Clean(fs.root) {
+		info, err := fs.Fs.Stat(fs.root)
+		if err != nil {
+			return err
+		}
 		fs.fired = true
 		aside := fs.root + ".attacker"
 		if err := fs.Fs.Rename(fs.root, aside); err != nil {
@@ -36,6 +41,10 @@ func (fs *cleanupRenameSwapFS) Rename(oldname, newname string) error {
 			return err
 		}
 		if err := afero.WriteFile(fs.Fs, filepath.Join(fs.root, "foreign.bin"), []byte("foreign"), 0o644); err != nil {
+			return err
+		}
+		stamp := info.ModTime().Add(time.Second)
+		if err := fs.Fs.Chtimes(fs.root, stamp, stamp); err != nil {
 			return err
 		}
 	}

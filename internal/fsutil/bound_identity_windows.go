@@ -104,7 +104,7 @@ func BoundObjectIdentity(_ afero.Fs, path string, info os.FileInfo) (device, ino
 	if err := windows.GetFileInformationByHandle(handle, &byHandle); err != nil {
 		return 0, 0, false
 	}
-	if byHandle.FileAttributes&(windows.FILE_ATTRIBUTE_DIRECTORY|windows.FILE_ATTRIBUTE_REPARSE_POINT) != 0 {
+	if byHandle.FileAttributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
 		return 0, 0, false
 	}
 	if byHandle.FileAttributes != stat.FileAttributes ||

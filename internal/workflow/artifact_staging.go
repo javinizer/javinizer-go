@@ -364,6 +364,10 @@ func (s *artifactStage) cleanup() {
 		return
 	}
 	stagedIdentity := captureArtifactStageDirIdentity(s.fs, s.root, stagedInfo)
+	if !stagedIdentity.known {
+		logging.Warnf("artifact staging cleanup retained %s: strong directory identity unavailable", s.root)
+		return
+	}
 	markArtifactStageCompleted(s.fs, s.root)
 	writeArtifactStageProof(s.fs, s.root)
 	proofSrc := artifactStageProofPath(s.root)

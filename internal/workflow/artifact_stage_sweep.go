@@ -141,6 +141,9 @@ func artifactStageReclaimableIdentity(fs afero.Fs, path string) (artifactStageDi
 		return artifactStageDirIdentity{}, false
 	}
 	captured := captureArtifactStageDirIdentity(fs, path, preInfo)
+	if !captured.known {
+		return artifactStageDirIdentity{}, false
+	}
 	reclaimable := artifactStageManifestReclaimable(fs, path)
 	if !reclaimable {
 		// Manifest-level claims failed: an external sidecar proof is the
@@ -172,9 +175,9 @@ func lstatArtifactStageDir(fs afero.Fs, path string) (os.FileInfo, error) {
 }
 
 func captureArtifactStageDirIdentity(fs afero.Fs, path string, info os.FileInfo) artifactStageDirIdentity {
-	id := artifactStageDirIdentity{known: true, size: info.Size(), modTime: info.ModTime()}
+	id := artifactStageDirIdentity{known: info.Sys() == nil, size: info.Size(), modTime: info.ModTime()}
 	if dev, ino, ok := fsutil.BoundObjectIdentity(fs, path, info); ok {
-		id.hasDevIno = true
+		id.known, id.hasDevIno = true, true
 		id.dev, id.ino = dev, ino
 	}
 	return id
