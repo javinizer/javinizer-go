@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/javinizer/javinizer-go/internal/logging"
 )
@@ -74,6 +75,9 @@ func defaultArtifactSweepCreateKey(path string) (artifactSweepKeyFile, error) {
 // falling back to ~/.javinizer when the OS cache dir is unresolvable — the
 // same fallback chain desktop.UserDataDir applies for the config dir.
 func defaultArtifactSweepSecretPath() (string, error) {
+	if home := strings.TrimSpace(os.Getenv("JAVINIZER_HOME")); home != "" {
+		return filepath.Join(home, "cache", "Javinizer", artifactStageSecretName), nil
+	}
 	base, err := artifactSweepUserCacheDir()
 	if err != nil || base == "" {
 		home, herr := artifactSweepUserHomeDir()

@@ -12,6 +12,7 @@ import (
 )
 
 func TestDefaultArtifactSweepSecretPath_Legs(t *testing.T) {
+	t.Setenv("JAVINIZER_HOME", "")
 	// happy path: cache dir answers
 	oldCache, oldHome := artifactSweepUserCacheDir, artifactSweepUserHomeDir
 	t.Cleanup(func() { artifactSweepUserCacheDir, artifactSweepUserHomeDir = oldCache, oldHome })
