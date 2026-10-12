@@ -549,10 +549,10 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 				// (codex P1, the validation→publication window).
 				if plan.verifiedSourceProof != nil {
 					moved, moveErr := fsutil.MoveFileNoReplaceVerifiedMode(s.fs, plan.SourcePath, plan.TargetPath, plan.verifiedSourceProof, plan.copyStagingMode())
+					installedIdentity = moved
 					if moveErr != nil {
 						return mapNoReplaceRefusal(moveErr, plan.TargetPath)
 					}
-					installedIdentity = moved
 					return nil
 				}
 				if err := fsutil.MoveFileNoReplace(s.fs, plan.SourcePath, plan.TargetPath); err != nil {
@@ -583,6 +583,7 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 		err := withDestDirSharedLock(plan.TargetDir, func() error {
 			return withDestFileLock(plan.TargetPath, move)
 		})
+		result.InstalledIdentity = installedIdentity
 		if err != nil {
 			result.Error = err
 			// A failed publish that displaced resident bytes keeps its crumb in
@@ -601,7 +602,6 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 		}
 
 		result.Moved = true
-		result.InstalledIdentity = installedIdentity
 		// Force-overwrite audit crumb: the replace actually landed — keep the
 		// resident bytes' replacement visible to every audit consumer.
 		if overwroteOccupiedDest {

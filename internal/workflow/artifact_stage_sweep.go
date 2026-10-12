@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -343,10 +344,18 @@ func readArtifactStageProof(fs afero.Fs, path string) bool {
 // removeArtifactTreeWithRetry retries recursive removal with bounded backoff:
 // SMB shares, oplocks and antivirus scanners routinely refuse a first delete
 // of just-closed files. A final failure keeps the tree and reports it.
-func removeArtifactTreeWithRetry(fs afero.Fs, path string) error {
+func removeArtifactTreeWithRetry(fs afero.Fs, path string, identity artifactStageDirIdentity) error {
 	var err error
 	delay := 50 * time.Millisecond
 	for attempt := 0; attempt < artifactRemoveAttempts; attempt++ {
+		info, inspectErr := lstatArtifactStageDir(fs, path)
+		if os.IsNotExist(inspectErr) {
+			return nil
+		}
+		if inspectErr != nil || !identity.matches(fs, path, info) {
+			_ = fs.Remove(artifactStageProofPath(path))
+			return fmt.Errorf("staging root identity unavailable or changed before removal %s: %v", path, inspectErr)
+		}
 		err = fs.RemoveAll(path)
 		if err == nil {
 			return nil
@@ -429,7 +438,7 @@ func sweepArtifactStaging(fs afero.Fs, parent string) {
 			logging.Warnf("artifact staging sweep retained %s: staging root identity changed before removal", candidate)
 			continue
 		}
-		if err := removeArtifactTreeWithRetry(fs, candidate); err != nil {
+		if err := removeArtifactTreeWithRetry(fs, candidate, identity); err != nil {
 			logging.Warnf("artifact staging sweep retained %s: %v", candidate, err)
 		} else {
 			_ = fs.Remove(artifactStageProofPath(candidate))

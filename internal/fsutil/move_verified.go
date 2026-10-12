@@ -145,7 +145,7 @@ func MoveFileNoReplaceVerifiedMode(fs afero.Fs, src, dst string, proof VerifiedS
 			return nil, restoreClaim(copyErr)
 		}
 		if rmErr := UnlinkVerified(fs, claimName, claimInfo); rmErr != nil {
-			return nil, fmt.Errorf("%w: verified move published to %s but the claimed-source cleanup refused (%w) — the taken-aside source stays recoverable at %s", ErrPublishCompleted, dst, rmErr, claimName)
+			return installed, fmt.Errorf("%w: verified move published to %s but the claimed-source cleanup refused (%w) — the taken-aside source stays recoverable at %s", ErrPublishCompleted, dst, rmErr, claimName)
 		}
 		// The cross-device leg published a NEW object: the stream tail's
 		// installed identity is the object this call produced.

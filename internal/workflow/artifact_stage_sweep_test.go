@@ -339,7 +339,7 @@ func (f *notExistRemoveAllFS) RemoveAll(string) error {
 }
 
 func TestRemoveArtifactTreeWithRetry_NotExistIsSuccess(t *testing.T) {
-	assert.NoError(t, removeArtifactTreeWithRetry(&notExistRemoveAllFS{Fs: afero.NewMemMapFs()}, "/stage"))
+	assert.NoError(t, removeArtifactTreeWithRetry(&notExistRemoveAllFS{Fs: afero.NewMemMapFs()}, "/stage", artifactStageDirIdentity{}))
 }
 
 func TestSweepArtifactStaging_RetainedWhenDeleteKeepsFailing(t *testing.T) {

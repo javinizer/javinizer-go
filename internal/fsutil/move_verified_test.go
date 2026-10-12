@@ -691,8 +691,11 @@ func TestMoveFileNoReplaceVerifiedCrossDeviceCleanupRefusalCompleted(t *testing.
 		return exdev.OpenFile(name, flag, perm)
 	}}
 	proof, _ := verifyProofOf(t, base, src)
-	err := MoveFileNoReplaceVerified(fs, src, dst, proof)
+	installed, err := MoveFileNoReplaceVerifiedMode(fs, src, dst, proof, StagingFileMode())
 	require.ErrorIs(t, err, ErrPublishCompleted)
+	require.NotNil(t, installed, "a completed publish must carry its bound identity even when source cleanup fails")
+	_, observeErr := ObserveVerifiedInstall(base, dst, installed)
+	require.NoError(t, observeErr)
 	assert.False(t, PublishRefusal(err))
 	got, rerr := afero.ReadFile(base, dst)
 	require.NoError(t, rerr)

@@ -355,43 +355,36 @@ func (s *artifactStage) cleanup() {
 	if s == nil || s.fs == nil || s.root == "" {
 		return
 	}
-	// Marks go on the ledger BEFORE the destructive leg: removeAll can erase a
-	// manifest before the locked payload refuses; quarantining first means the
-	// name itself carries our token. The proof outside the tree rides along
-	// (renamed with it) so neither can be stranded.
+	stagedInfo, stagedInfoErr := lstatArtifactStageDir(s.fs, s.root)
+	if os.IsNotExist(stagedInfoErr) {
+		return
+	}
+	if stagedInfoErr != nil || stagedInfo == nil || stagedInfo.Mode()&os.ModeSymlink != 0 || !stagedInfo.IsDir() {
+		logging.Warnf("artifact staging cleanup retained %s: directory identity unavailable: %v", s.root, stagedInfoErr)
+		return
+	}
+	stagedIdentity := captureArtifactStageDirIdentity(s.fs, s.root, stagedInfo)
 	markArtifactStageCompleted(s.fs, s.root)
 	writeArtifactStageProof(s.fs, s.root)
-	// Bind the quarantine rename to the directory the manifest+proof writes just
-	// authenticated (codex P1, PRRT_kwDORn9KaM6rLI26): a writer able to rename
-	// entries in the staging parent can move the authenticated root aside and
-	// plant a foreign tree at s.root inside the window; the rename and the
-	// sealed sidecar carry would then authenticate the foreign tree for
-	// recursive deletion. Refuse the destructive leg on any identity drift and
-	// leave the proof uncarried, so no later sweep can associate the foreign
-	// tree with our seal either.
-	stagedInfo, stagedInfoErr := lstatArtifactStageDir(s.fs, s.root)
-	stagedIdentity := artifactStageDirIdentity{}
-	if stagedInfoErr == nil && stagedInfo != nil {
-		stagedIdentity = captureArtifactStageDirIdentity(s.fs, s.root, stagedInfo)
-	}
-	quarantine := artifactStageQuarantineName(s.root)
 	proofSrc := artifactStageProofPath(s.root)
+	if !artifactStageDirMatches(s.fs, s.root, stagedIdentity) {
+		_ = s.fs.Remove(proofSrc)
+		logging.Warnf("artifact staging cleanup retained %s: directory identity changed while writing ownership proof", s.root)
+		return
+	}
+	originalRoot := s.root
+	quarantine := artifactStageQuarantineName(s.root)
 	proofDst := artifactStageProofPath(quarantine)
 	if err := s.fs.Rename(s.root, quarantine); err != nil {
 		logging.Warnf("artifact staging cleanup retention %s: quarantine rename failed, retained for the next organize sweep: %v", s.root, err)
 		return
 	}
 	s.root = quarantine
-	if stagedIdentity.known && !artifactStageDirMatches(s.fs, s.root, stagedIdentity) {
-		logging.Warnf("artifact staging cleanup retention %s: quarantined root identity changed during the rename, retained for the next organize sweep", s.root)
+	if !artifactStageDirMatches(s.fs, s.root, stagedIdentity) || artifactStageDirStillNamed(s.fs, originalRoot) {
+		_ = s.fs.Remove(proofSrc)
+		logging.Warnf("artifact staging cleanup retained %s: quarantined root identity changed during the rename", s.root)
 		return
 	}
-	// Destructive removal opens ONLY with a valid proof beside the quarantined
-	// name: RemoveAll can still erase the in-tree manifest before a locked
-	// payload refuses, and the sidecar is then the residue's sole associable
-	// evidence. A failed carry is restated from the intact manifest (identical
-	// token/PID binding); when ownership cannot be restated under the current
-	// name, retention beats a delete no later sweep could associate.
 	if _, statErr := s.fs.Stat(proofSrc); statErr == nil {
 		if err := s.fs.Rename(proofSrc, proofDst); err != nil {
 			logging.Warnf("artifact staging cleanup proof carry %s denied; restating beside the quarantined root: %v", proofSrc, err)
@@ -404,7 +397,7 @@ func (s *artifactStage) cleanup() {
 		logging.Warnf("artifact staging cleanup retention %s: ownership proof unavailable beside the quarantined root, retained for the next organize sweep", s.root)
 		return
 	}
-	if err := removeArtifactTreeWithRetry(s.fs, s.root); err != nil {
+	if err := removeArtifactTreeWithRetry(s.fs, s.root, stagedIdentity); err != nil {
 		logging.Warnf("artifact staging cleanup retained %s: %v", s.root, err)
 		return
 	}
@@ -1281,12 +1274,25 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 					return err
 				}
 				proof := deferredSiblingProofs[filepath.Clean(sibling.sourcePath)]
-				movedID, moveErr := fsutil.MoveFileNoReplaceVerifiedMode(s.fs, sibling.sourcePath, target, proof, fsutil.StagingFileMode())
+				if proof == nil {
+					return fmt.Errorf("publish deferred sibling from source %s: admission identity unavailable", sibling.sourcePath)
+				}
+				movedID, moveErr := fsutil.MoveFileNoReplaceVerifiedMode(s.fs, sibling.sourcePath, target, proof, sibling.identity.perm)
+				if moveErr == nil || (fsutil.PublishCompleted(moveErr) && !fsutil.PublishSuccessorUnproven(moveErr)) {
+					if armErr := batch.SetRollbackOriginBound(target, sibling.sourcePath, movedID); armErr != nil {
+						rollbackProof := fsutil.VerifiedSourceProofFromBoundInstallIdentity(s.fs, movedID)
+						mode := sibling.identity.perm
+						if movedID != nil && movedID.FileInfo() != nil {
+							mode = movedID.FileInfo().Mode().Perm()
+						}
+						if _, rollbackErr := fsutil.MoveFileNoReplaceVerifiedMode(s.fs, target, sibling.sourcePath, rollbackProof, mode); rollbackErr != nil {
+							return errors.Join(moveErr, armErr, fmt.Errorf("restore deferred sibling after rollback arm refusal: %w", rollbackErr))
+						}
+						return errors.Join(moveErr, armErr)
+					}
+				}
 				if moveErr != nil {
 					return fmt.Errorf("publish deferred sibling from source: %w", moveErr)
-				}
-				if err := batch.SetRollbackOriginBound(target, sibling.sourcePath, movedID); err != nil {
-					return err
 				}
 				if confirmErr := batch.ConfirmPublish(ctx, target); confirmErr != nil {
 					return confirmErr

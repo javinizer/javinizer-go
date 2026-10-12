@@ -25,8 +25,8 @@ func TestRun_SourceIsFile_DestIsFileDir(t *testing.T) {
 	// Create a subdirectory and a video file in it
 	subDir := filepath.Join(tmpDir, "videos")
 	require.NoError(t, os.MkdirAll(subDir, 0755))
-	videoFile := filepath.Join(subDir, "SSIS-001.mp4")
-	testutil.CreateTestVideoFile(t, subDir, "SSIS-001.mp4")
+	videoFile := filepath.Join(subDir, "unmatched.mp4")
+	testutil.CreateTestVideoFile(t, subDir, "unmatched.mp4")
 
 	configPath, _ := testutil.CreateTestConfig(t, nil)
 
