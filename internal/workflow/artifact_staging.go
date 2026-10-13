@@ -1623,7 +1623,7 @@ func (s *artifactStage) treeDestinations(skipFile, skipDir, stagedArtifactDir, f
 		if err != nil {
 			return err
 		}
-		if info.IsDir() {
+		if info.IsDir() || stagedBusyReservation(info.Name()) {
 			return nil
 		}
 		clean := filepath.Clean(path)
@@ -1664,7 +1664,7 @@ func (s *artifactStage) installTree(skipFile, skipDir string, preserve []string,
 		if err != nil {
 			return err
 		}
-		if info.IsDir() {
+		if info.IsDir() || stagedBusyReservation(info.Name()) {
 			return nil
 		}
 		clean := filepath.Clean(path)
