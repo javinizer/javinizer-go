@@ -775,6 +775,7 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 					}
 					return fmt.Errorf("failed to create soft link: %w", err)
 				}
+				installedIdentity = fsutil.NewBoundInstallLinkIdentity(nil, linkTarget)
 				// Same audit contract as the hard-link leg above (crumb bound at
 				// the Remove).
 			default:

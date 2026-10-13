@@ -258,7 +258,7 @@ func (b *ReplacementBatch) ConfirmPublish(ctx context.Context, destination strin
 	if leg.replaced {
 		var confirmErr error
 		if factual, ok := b.recorder.(ReplacementInstalledFactsRecorder); ok {
-			facts, factsErr := captureInstalledReplacementFacts(b.fs, leg.destination)
+			facts, factsErr := captureInstalledReplacementFacts(b.fs, leg.destination, leg.installedID)
 			if factsErr != nil {
 				return fmt.Errorf("capture staged replacement result %s: %w", destination, factsErr)
 			}
@@ -413,7 +413,22 @@ func (b *ReplacementBatch) rollback(ctx context.Context, releaseJournal bool) er
 	return joined
 }
 
-func captureInstalledReplacementFacts(fs afero.Fs, path string) (models.ReplacementBackupFacts, error) {
+func captureInstalledReplacementFacts(fs afero.Fs, path string, installed ...*fsutil.BoundInstallIdentity) (models.ReplacementBackupFacts, error) {
+	if len(installed) > 0 {
+		info, err := fsutil.ObserveVerifiedInstall(fs, path, installed[0])
+		if err != nil {
+			return models.ReplacementBackupFacts{}, err
+		}
+		if target := installed[0].LinkTarget(); target != "" {
+			sum := sha256.Sum256([]byte(target))
+			return models.ReplacementBackupFacts{Size: int64(len(target)), ModUnix: info.ModTime().Unix(), SHA256: hex.EncodeToString(sum[:])}, nil
+		}
+		expected := installed[0].FileInfo()
+		facts := models.ReplacementBackupFacts{Size: expected.Size(), ModUnix: expected.ModTime().Unix()}
+		facts.SHA256, err = digestVerifiedInstall(fs, path, installed[0])
+		return facts, err
+	}
+
 	info, err := lstatBackupCandidate(fs, path)
 	if err != nil {
 		return models.ReplacementBackupFacts{}, err

@@ -36,6 +36,9 @@ func NewWeakBoundInstallIdentity(info os.FileInfo) *BoundInstallIdentity {
 // ownership certificate, matching the durable delete-intent pin's rule
 // (models.DeleteEntry LinkTarget).
 func NewBoundInstallLinkIdentity(info os.FileInfo, linkTarget string) *BoundInstallIdentity {
+	if info == nil && linkTarget != "" {
+		return &BoundInstallIdentity{linkTarget: linkTarget}
+	}
 	id := newBoundInstallIdentity(info, 0, 0, false)
 	if target := linkTarget; id != nil && target != "" {
 		id.linkTarget = target
@@ -72,7 +75,7 @@ func (i *BoundInstallIdentity) strongIdentity() (device, inode uint64, ok bool) 
 // identity into a verified-move source proof (codex P1,
 // PRRT_kwDORn9KaM6qLkJ9). Strong keys are re-proven strong-or-refuse; only a
 // genuinely weak install record falls back to the FileInfo size+modtime legs.
-func VerifiedSourceProofFromBoundInstallIdentity(fs afero.Fs, installed *BoundInstallIdentity) VerifiedSourceProof {
+func VerifiedSourceProofFromBoundInstallIdentity(fs afero.Fs, installed *BoundInstallIdentity, opened ...afero.File) VerifiedSourceProof {
 	return func(path string, info os.FileInfo) error {
 		if installed == nil || installed.FileInfo() == nil {
 			return fmt.Errorf("bound install proof of %s requires the identity its publish produced", path)
@@ -80,7 +83,7 @@ func VerifiedSourceProofFromBoundInstallIdentity(fs afero.Fs, installed *BoundIn
 		if info == nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
 			return fmt.Errorf("bound install proof of %s found no regular-file object", path)
 		}
-		same, err := sameBoundInstallObject(fs, path, info, installed)
+		same, err := sameBoundInstallObject(fs, path, info, installed, opened...)
 		if err != nil {
 			return err
 		}

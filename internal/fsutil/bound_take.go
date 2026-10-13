@@ -779,7 +779,7 @@ func UnlinkVerifiedInstall(fs afero.Fs, name string, verified *BoundInstallIdent
 //
 // A nil installed identity is a caller bug, never a lookup: it fails closed.
 func ObserveVerifiedInstall(fs afero.Fs, name string, installed *BoundInstallIdentity) (os.FileInfo, error) {
-	if installed == nil || installed.FileInfo() == nil {
+	if installed == nil || installed.FileInfo() == nil && installed.LinkTarget() == "" {
 		return nil, fmt.Errorf("bound install observation of %s requires the identity its publish produced", name)
 	}
 	cur, err := asideLstat(fs, name)
@@ -797,7 +797,24 @@ func ObserveVerifiedInstall(fs afero.Fs, name string, installed *BoundInstallIde
 		// PRRT_kwDORn9KaM6qJY2i): a foreign regular file may already stand behind
 		// the transient error, so nothing is adopted and the leg is refused
 		// rather than handed to a name-based confirmation.
-		return nil, fmt.Errorf("%w: bound install observation of %s is indeterminate (%v) — the destination cannot be proven to name the installed object", ErrPublishCompleted, name, err)
+		return nil, errors.Join(ErrPublishCompleted, fmt.Errorf("bound install observation of %s is indeterminate (%v) — the destination cannot be proven to name the installed object", name, err), err)
+	}
+	if target := installed.LinkTarget(); target != "" {
+		if cur.Mode()&os.ModeSymlink == 0 {
+			return nil, errors.Join(ErrPublishCompleted, ErrPublishSuccessorUnproven, fmt.Errorf("bound link install observation of %s found a non-link successor", name))
+		}
+		reader, ok := fs.(afero.LinkReader)
+		if !ok {
+			return nil, fmt.Errorf("%w: filesystem cannot verify installed link %s", ErrPublishCompleted, name)
+		}
+		currentTarget, readErr := reader.ReadlinkIfPossible(name)
+		if readErr != nil {
+			return nil, fmt.Errorf("%w: read installed link %s: %w", ErrPublishCompleted, name, readErr)
+		}
+		if currentTarget != target {
+			return nil, errors.Join(ErrPublishCompleted, ErrPublishSuccessorUnproven, fmt.Errorf("bound link install observation of %s found a different link target", name))
+		}
+		return cur, nil
 	}
 	if cur.Mode()&os.ModeSymlink != 0 || !cur.Mode().IsRegular() {
 		// codex P1, PRRT_kwDORn9KaM6qKbdT: a non-regular entry where a verified
@@ -825,7 +842,7 @@ func ObserveVerifiedInstall(fs afero.Fs, name string, installed *BoundInstallIde
 	return cur, nil
 }
 
-func sameBoundInstallObject(fs afero.Fs, name string, cur os.FileInfo, installed *BoundInstallIdentity) (bool, error) {
+func sameBoundInstallObject(fs afero.Fs, name string, cur os.FileInfo, installed *BoundInstallIdentity, opened ...afero.File) (bool, error) {
 	if cur == nil || installed == nil || installed.FileInfo() == nil || cur.Mode()&os.ModeSymlink != 0 || !cur.Mode().IsRegular() {
 		return false, nil
 	}
@@ -834,6 +851,9 @@ func sameBoundInstallObject(fs afero.Fs, name string, cur os.FileInfo, installed
 		return asideSameObject(cur, installed.FileInfo()), nil
 	}
 	curDevice, curInode, curOK := BoundObjectIdentity(fs, name, cur)
+	if len(opened) > 0 {
+		curDevice, curInode, curOK = streamedHandleIdentity(opened[0], cur)
+	}
 	if !curOK {
 		return false, fmt.Errorf("%w: bound install observation of %s cannot re-derive the strong identity required by PRRT_kwDORn9KaM6qJY2k", ErrPublishCompleted, name)
 	}
