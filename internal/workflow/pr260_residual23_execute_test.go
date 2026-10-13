@@ -7,6 +7,7 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/nfo"
+	"github.com/javinizer/javinizer-go/internal/operationmode"
 	"github.com/javinizer/javinizer-go/internal/organizer"
 	"github.com/javinizer/javinizer-go/internal/template"
 	"github.com/spf13/afero"
@@ -18,13 +19,15 @@ func TestPR260ResidualExecuteStagingFailureDoesNotPublish(t *testing.T) {
 	dest := filepath.Join(root, "published")
 	cmd := pr260ArtifactFailureCommand(&models.Movie{ContentID: "execute-staging-fault"}, match, dest)
 	cmd.Organize.Skip = false
-	fs := &pr260OpenFailureFs{Fs: base, path: source}
+	cmd.Organize.MoveFiles = true
+	fs := &pr260SourceMoveFaultFs{Fs: base, path: source}
 	ledger := &dupGateCapturingRevertLog{}
-	orch := &applyOrchImpl{fs: fs, revertLog: ledger}
+	org := organizer.NewOrganizer(fs, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize}, template.NewEngine(), nil)
+	orch := &applyOrchImpl{fs: fs, revertLog: ledger, organizer: org}
 	result, err := orch.Execute(context.Background(), cmd)
-	require.ErrorContains(t, err, "open artifact source")
+	require.ErrorContains(t, err, "source move denied")
 	require.NotNil(t, result)
-	require.Equal(t, "artifact_staging", result.FailedStep)
+	require.Equal(t, "artifact_publication", result.FailedStep)
 	require.True(t, result.PrePublication)
 	require.Equal(t, OperationID("dup-gate-op"), result.OperationID)
 	require.Len(t, ledger.failed, 1)

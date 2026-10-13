@@ -96,3 +96,23 @@ func (s *stubRevertLog) ReleaseReplacement(_ context.Context, _ OperationID, _, 
 func (s *stubRevertLog) RecordReplacement(_ context.Context, _ OperationID, _, _ string, _ ...models.ReplacementBackupFacts) error {
 	return nil
 }
+
+func (s *stubRevertLog) RecordMoveIntent(context.Context, OperationID, string, string) error {
+	return nil
+}
+
+func (s *stubRevertLog) RecordDeleteIntent(context.Context, OperationID, []models.DeleteEntry) error {
+	return nil
+}
+
+func (s *stubRevertLog) ReconcileMoveIntents(context.Context, OperationID, []models.FileMove) error {
+	return nil
+}
+
+func (s *stubRevertLog) ReconcileDeleteIntents(context.Context, OperationID, []string) error {
+	return nil
+}
+
+func (s *stubRevertLog) FinalizeDeleteIntentCopyDigest(context.Context, OperationID, string, string) error {
+	return nil
+}

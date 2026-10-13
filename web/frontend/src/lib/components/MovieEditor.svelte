@@ -39,10 +39,19 @@
 
 	const previewSignature = $derived(buildDisplayTitlePreviewSignature(editedMovie));
 
+	let previewTargetKey = '';
+
 	$effect(() => {
 		const sig = previewSignature;
 		const jid = jobId;
 		const rid = resultId;
+		const targetKey = `${jid ?? ''}/${rid ?? ''}`;
+		if (targetKey !== previewTargetKey) {
+			previewTargetKey = targetKey;
+			previewDisplayTitle = null;
+			previewLoading = false;
+			previewError = false;
+		}
 		if (!jid || !rid) {
 			previewDisplayTitle = null;
 			previewLoading = false;
@@ -52,6 +61,8 @@
 		previewLoading = true;
 		previewError = false;
 		clearTimeout(previewTimer);
+		// stale-while-revalidate: keep the last rendered title visible; a
+		// refire (including poll-driven rebases) must not blank the pane.
 		const snapshot = { ...editedMovie };
 		const gen = ++previewGeneration;
 		previewTimer = setTimeout(async () => {
@@ -63,7 +74,6 @@
 			} catch {
 				if (gen !== previewGeneration) return;
 				previewError = true;
-				previewDisplayTitle = null;
 			} finally {
 				if (gen === previewGeneration) {
 					previewLoading = false;
@@ -253,18 +263,23 @@
 			/>
 			{#if jobId && resultId}
 				<div class="mt-1.5 min-h-4">
-					{#if previewLoading}
+					{#if previewDisplayTitle !== null}
+						<p class="text-xs text-muted-foreground flex items-center gap-1">
+							{m.movie_display_title_preview_label()}:
+							<span class="font-medium text-foreground">{previewDisplayTitle}</span>
+							{#if previewLoading}
+								<LoaderCircle class="h-3 w-3 animate-spin shrink-0" />
+							{:else if previewError}
+								<CircleAlert class="h-3 w-3 text-orange-600 dark:text-orange-400 shrink-0" />
+							{/if}
+						</p>
+					{:else if previewLoading}
 						<p class="text-xs text-muted-foreground flex items-center gap-1">
 							<LoaderCircle class="h-3 w-3 animate-spin" />
 							{m.movie_display_title_preview_loading()}
 						</p>
 					{:else if previewError}
 						<p class="text-xs text-muted-foreground">{m.movie_display_title_preview_error()}</p>
-					{:else if previewDisplayTitle !== null}
-						<p class="text-xs text-muted-foreground">
-							{m.movie_display_title_preview_label()}:
-							<span class="font-medium text-foreground">{previewDisplayTitle}</span>
-						</p>
 					{/if}
 				</div>
 			{/if}

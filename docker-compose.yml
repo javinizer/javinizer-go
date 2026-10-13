@@ -15,6 +15,7 @@ services:
     #     - GROUP_ID=${PGID:-${GROUP_ID:-1000}}
 
     container_name: javinizer
+    hostname: javinizer
     restart: unless-stopped
     env_file:
       - .env
@@ -81,6 +82,7 @@ services:
         - USER_ID=${PUID:-${USER_ID:-1000}}
         - GROUP_ID=${PGID:-${GROUP_ID:-1000}}
     profiles: ["dev"]
+    hostname: javinizer-dev
     env_file:
       - .env
     ports:

@@ -644,6 +644,7 @@ export interface MovieCredit {
 	suppressed?: boolean;
 	legacy_inferred?: boolean;
 	display_force_canonical?: boolean;
+	render_visible?: boolean;
 	actress?: Actress;
 	created_at?: string;
 	updated_at?: string;

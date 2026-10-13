@@ -46,7 +46,7 @@ func TestPR260InstallPathsPreflightsEveryArtifactBeforeMutation(t *testing.T) {
 	fs := &preflightMutationFS{Fs: base}
 	stage := &artifactStage{fs: fs, root: stageRoot, finalRoot: finalRoot, original: ApplyCmd{OverwriteExistingMedia: true}}
 
-	_, err := stage.installPaths([]string{firstSource, lateSource}, nil, "", "")
+	_, err := stage.installPaths([]string{firstSource, lateSource}, nil, "", "", nil)
 	require.ErrorContains(t, err, "artifact destination is a directory")
 	require.Empty(t, fs.mutations, "predictable validation failures must happen before publication starts")
 	for path, want := range map[string]string{firstSource: "new nfo", lateSource: "new poster", firstTarget: "old nfo"} {
@@ -76,7 +76,7 @@ func TestPR260InstallPathsPreflightsLateInvalidMappingAndPreserveSkip(t *testing
 	fs := &preflightMutationFS{Fs: base}
 	stage := &artifactStage{fs: fs, root: stageRoot, finalRoot: finalRoot}
 
-	_, err := stage.installPaths([]string{publishSource, preserveSource, outside}, []string{preserveSource}, "", "")
+	_, err := stage.installPaths([]string{publishSource, preserveSource, outside}, []string{preserveSource}, "", "", nil)
 	require.ErrorContains(t, err, "staged path escapes staging area")
 	require.Empty(t, fs.mutations)
 	got, readErr := afero.ReadFile(base, preserveTarget)
@@ -101,7 +101,7 @@ func TestPR260InstallPathsPreflightSourceAndParentBoundaries(t *testing.T) {
 		base := afero.NewMemMapFs()
 		fs := &preflightMutationFS{Fs: base}
 		stage := &artifactStage{fs: fs, root: filepath.Join("stage", "owned"), finalRoot: filepath.Join("library", "movie")}
-		_, err := stage.installPaths([]string{filepath.Join(stage.root, "missing.nfo")}, nil, "", "")
+		_, err := stage.installPaths([]string{filepath.Join(stage.root, "missing.nfo")}, nil, "", "", nil)
 		require.ErrorContains(t, err, "inspect staged artifact")
 		require.Empty(t, fs.mutations)
 	})
@@ -112,7 +112,7 @@ func TestPR260InstallPathsPreflightSourceAndParentBoundaries(t *testing.T) {
 		require.NoError(t, base.MkdirAll(source, 0o755))
 		fs := &preflightMutationFS{Fs: base}
 		stage := &artifactStage{fs: fs, root: filepath.Join("stage", "owned"), finalRoot: filepath.Join("library", "movie")}
-		_, err := stage.installPaths([]string{source}, nil, "", "")
+		_, err := stage.installPaths([]string{source}, nil, "", "", nil)
 		require.ErrorContains(t, err, "not a regular file")
 		require.Empty(t, fs.mutations)
 	})
@@ -129,7 +129,7 @@ func TestPR260InstallPathsPreflightSourceAndParentBoundaries(t *testing.T) {
 		mutations := &preflightMutationFS{Fs: base}
 		fs := &preflightStatFS{preflightMutationFS: mutations, faults: map[string]error{filepath.Clean(target): os.ErrNotExist}}
 		stage := &artifactStage{fs: fs, root: filepath.Join("stage", "owned"), finalRoot: filepath.Join(blocker, "movie")}
-		_, err := stage.installPaths([]string{source}, nil, "", "")
+		_, err := stage.installPaths([]string{source}, nil, "", "", nil)
 		require.ErrorContains(t, err, "destination parent is not a directory")
 		require.Empty(t, mutations.mutations)
 	})
@@ -143,7 +143,7 @@ func TestPR260InstallPathsPreflightSourceAndParentBoundaries(t *testing.T) {
 		mutations := &preflightMutationFS{Fs: base}
 		fs := &preflightStatFS{preflightMutationFS: mutations, faults: map[string]error{filepath.Clean(parent): os.ErrPermission}}
 		stage := &artifactStage{fs: fs, root: filepath.Join("stage", "owned"), finalRoot: parent}
-		_, err := stage.installPaths([]string{source}, nil, "", "")
+		_, err := stage.installPaths([]string{source}, nil, "", "", nil)
 		require.ErrorContains(t, err, "inspect artifact destination parent")
 		require.Empty(t, mutations.mutations)
 	})
@@ -156,7 +156,7 @@ func TestPR260InstallPathsPreflightSourceAndParentBoundaries(t *testing.T) {
 		mutations := &preflightMutationFS{Fs: base}
 		fs := &preflightStatFS{preflightMutationFS: mutations, faults: map[string]error{string(filepath.Separator): os.ErrNotExist}}
 		stage := &artifactStage{fs: fs, root: filepath.Join("stage", "owned"), finalRoot: filepath.Join(string(filepath.Separator), "missing", "movie")}
-		_, err := stage.installPaths([]string{source}, nil, "", "")
+		_, err := stage.installPaths([]string{source}, nil, "", "", nil)
 		require.NoError(t, err)
 	})
 }

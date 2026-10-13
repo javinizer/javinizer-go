@@ -50,7 +50,7 @@ func TestPR260ExactPostOrganizeFaultLeavesPublishedVideoAndInputs(t *testing.T) 
 			if tc.op == "stat" {
 				fs.path = target
 			} else {
-				fs.path = stage.siblings[0].stagedPath
+				fs.path = stage.siblings[stagedSiblingIndex(t, stage)].stagedPath
 			}
 			fs.enabled = true
 			err = stage.publish(context.Background(), orch, state, nil)

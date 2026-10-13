@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/downloader"
@@ -426,6 +427,31 @@ func (o *applyOrchImpl) stepOrganize(ctx context.Context, cmd ApplyCmd, state *a
 		ForceRenameFile:  cmd.Organize.ForceRenameFile,
 		DuplicateTracker: cmd.Organize.DuplicateTracker,
 	}
+	// A video-deferred artifact stage keeps the real source file in place
+	// until the fenced publication: organize here is plan-only so downloads
+	// and the NFO still target the staged folder structure without the
+	// multi-GB payload ever being copied into the staging tree.
+	if state.artifact != nil && state.artifact.videoStagingDeferred() {
+		planner, ok := o.organizer.(artifactPlanExecutor)
+		if !ok {
+			return fmt.Errorf("video-deferred organize requires the organizer planning seam")
+		}
+		plan, planErr := planner.PlanOrganize(ctx, organizeCmd)
+		if planErr != nil {
+			return planErr
+		}
+		state.organizeResult = &organizer.OrganizeResult{
+			NewPath:    plan.TargetPath,
+			FolderPath: plan.TargetDir,
+			FileName:   filepath.Base(plan.TargetPath),
+		}
+		if state.organizeResult.FolderPath != "" {
+			state.targetDir = state.organizeResult.FolderPath
+			state.finalDir = state.organizeResult.FolderPath
+		}
+		steps.Organized = true
+		return nil
+	}
 	var organizeErr error
 	state.organizeResult, organizeErr = o.organizer.Organize(ctx, organizeCmd)
 	if organizeErr != nil {
@@ -613,7 +639,11 @@ func (o *applyOrchImpl) stepNFO(ctx context.Context, cmd ApplyCmd, state *applyP
 	// Falling back to cmd.Match.Path preserves the original behavior when
 	// organize is skipped or copy/in-place (file remains at source).
 	videoPath := cmd.Match.Path
-	if state.organizeResult != nil && state.organizeResult.NewPath != "" {
+	if state.artifact != nil && state.artifact.videoStagingDeferred() {
+		// The video is still at its real source: no rename has run yet, so the
+		// planned (staged) NewPath names nothing on disk.
+		videoPath = state.artifact.sourcePath
+	} else if state.organizeResult != nil && state.organizeResult.NewPath != "" {
 		videoPath = state.organizeResult.NewPath
 	}
 

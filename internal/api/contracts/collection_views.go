@@ -49,6 +49,10 @@ type MovieCreditView struct {
 	UserOverride         bool   `json:"user_override"`
 	Suppressed           bool   `json:"suppressed"`
 	OrderIndex           int    `json:"order_index"`
+	// RenderVisible mirrors MovieCredit.RenderVisible: false when the credit
+	// cannot contribute names to rendered output (suppressed, no actress, or
+	// the actress is ambiguity-quarantined without verification).
+	RenderVisible bool `json:"render_visible"`
 }
 
 // GenreView is the API-layer projection of models.Genre.
@@ -162,6 +166,7 @@ func MovieCreditViewFromModel(c *models.MovieCredit) *MovieCreditView {
 		UserOverride:         c.UserOverride,
 		Suppressed:           c.Suppressed,
 		OrderIndex:           c.OrderIndex,
+		RenderVisible:        c.RenderVisible(),
 	}
 }
 
