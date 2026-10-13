@@ -143,6 +143,24 @@ func (fs *driftedLstatFS) LstatIfPossible(name string) (os.FileInfo, bool, error
 	return info, true, err
 }
 
+func TestSweepRefusesSecondAuthenticationWithDriftedCapture(t *testing.T) {
+	base := afero.NewMemMapFs()
+	parent := "/lib"
+	root := seedStagingRoot(t, base, parent, nil)
+	quarantined := artifactStageQuarantineName(root)
+	require.NoError(t, base.Rename(root, quarantined))
+	setSweepSeams(t, fsutil.ProcessDead, nil)
+	fs := &driftedLstatFS{Fs: base, target: quarantined, fireOn: 4}
+	sweepArtifactStaging(fs, parent)
+	assert.Equal(t, 6, fs.calls, "the second authentication refused its drifted capture")
+	exists, err := afero.DirExists(base, quarantined)
+	require.NoError(t, err)
+	assert.True(t, exists)
+	body, err := afero.ReadFile(base, filepath.Join(quarantined, ".source", "MIRD-281.mp4"))
+	require.NoError(t, err)
+	assert.Equal(t, "payload", string(body))
+}
+
 func TestSweepArtifactStagingQuarantinedRootRefusesDriftedIdentity(t *testing.T) {
 	base := afero.NewMemMapFs()
 	parent := "/lib"
