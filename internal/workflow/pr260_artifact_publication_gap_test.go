@@ -296,6 +296,7 @@ func TestPR260ArtifactStagingHelpers(t *testing.T) {
 		assert.Equal(t, []byte("video"), func() []byte { b, _ := afero.ReadFile(fs, stagedPath); return b }())
 		require.Error(t, copyArtifactFile(fs, filepath.Join(filepath.Clean("/source"), "missing.mp4"), filepath.Join(stageRoot, "missing.mp4"), 0o644))
 
+		writeArtifactStageManifest(fs, stageRoot)
 		stage := &artifactStage{fs: fs, root: stageRoot, finalRoot: finalRoot}
 		path, err := stage.finalPath(stageRoot)
 		require.NoError(t, err)

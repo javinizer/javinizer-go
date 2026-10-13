@@ -49,7 +49,7 @@ func seedStagingRoot(t *testing.T, fs afero.Fs, parent string, mutate func(*arti
 	require.NoError(t, err)
 	pid := os.Getpid()
 	host, _ := os.Hostname()
-	manifest := artifactStageManifest{Version: artifactStageManifestVer, Token: artifactStageManifestToken(root), PID: pid, Hostname: host, CreatedAt: time.Now().UTC()}
+	manifest := artifactStageManifest{Version: artifactStageManifestVer, Token: artifactStageManifestToken(root), PID: pid, Hostname: host, CreatedAt: time.Now().UTC(), Directory: artifactStageDirectoryProofFromIdentity(artifactStageDirectoryIdentity(fs, root))}
 	if mutate != nil {
 		mutate(&manifest)
 	}
@@ -471,6 +471,7 @@ func TestReadArtifactStageProofBranches(t *testing.T) {
 		PID:               os.Getpid(),
 		Hostname:          mustHostname(t),
 		CompletedUnixNano: 1,
+		Directory:         artifactStageDirectoryProofFromIdentity(artifactStageDirectoryIdentity(base, path)),
 	}
 	write := func(mut func(*artifactStageManifest)) {
 		m := valid
@@ -542,10 +543,14 @@ func TestSweepArtifactStaging_QuarantineCarriesPriorProof(t *testing.T) {
 
 // proofCarryDenyFS refuses renames of the ownership sidecar (Windows/SMB-style
 // carry failure) while every other filesystem operation passes through.
+func artifactMarkerDestinationForTest(name string) string {
+	return strings.SplitN(name, ".jv-stage.", 2)[0]
+}
+
 type proofCarryDenyFS struct{ afero.Fs }
 
 func (f *proofCarryDenyFS) Rename(oldname, newname string) error {
-	if strings.HasSuffix(oldname, artifactStageProofSuffix) || strings.HasSuffix(newname, artifactStageProofSuffix) {
+	if strings.HasSuffix(oldname, artifactStageProofSuffix) {
 		return errors.New("proof carry denied")
 	}
 	return f.Fs.Rename(oldname, newname)
@@ -557,7 +562,7 @@ func (f *proofCarryDenyFS) Rename(oldname, newname string) error {
 type quarantineProofWriteDenyFS struct{ afero.Fs }
 
 func (f *quarantineProofWriteDenyFS) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
-	if strings.HasSuffix(name, artifactStageProofSuffix) && strings.Contains(filepath.Base(name), artifactStageQuarantineMark) {
+	if strings.HasSuffix(artifactMarkerDestinationForTest(name), artifactStageProofSuffix) && strings.Contains(filepath.Base(name), artifactStageQuarantineMark) {
 		return nil, errors.New("quarantine proof write denied")
 	}
 	return f.Fs.OpenFile(name, flag, perm)
@@ -568,7 +573,7 @@ func (f *quarantineProofWriteDenyFS) OpenFile(name string, flag int, perm os.Fil
 type originalProofWriteDenyFS struct{ afero.Fs }
 
 func (f *originalProofWriteDenyFS) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
-	if strings.HasSuffix(name, artifactStageProofSuffix) && !strings.Contains(filepath.Base(name), artifactStageQuarantineMark) {
+	if strings.HasSuffix(artifactMarkerDestinationForTest(name), artifactStageProofSuffix) && !strings.Contains(filepath.Base(name), artifactStageQuarantineMark) {
 		return nil, errors.New("original proof write denied")
 	}
 	return f.Fs.OpenFile(name, flag, perm)
@@ -681,7 +686,7 @@ func TestArtifactCleanup_MissingSidecarRestatedBeforeRemoval(t *testing.T) {
 type unstampableStagingFS struct{ afero.Fs }
 
 func (f *unstampableStagingFS) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
-	if strings.HasSuffix(name, artifactStageManifestName) || strings.HasSuffix(name, artifactStageProofSuffix) {
+	if strings.HasSuffix(artifactMarkerDestinationForTest(name), artifactStageManifestName) || strings.HasSuffix(artifactMarkerDestinationForTest(name), artifactStageProofSuffix) {
 		return nil, errors.New("staging markers unwritable")
 	}
 	return f.Fs.OpenFile(name, flag, perm)
@@ -702,9 +707,9 @@ func TestArtifactCleanup_UnprovableRootRetained(t *testing.T) {
 
 	assert.Zero(t, witness.attempts, "an unprovable root is retained, never deleted")
 	exists, _ := afero.DirExists(base, "/stage")
-	assert.False(t, exists, "the root was claimed by the quarantine rename")
+	assert.True(t, exists, "unproven roots are retained at their original name")
 	residue := quarantineResidue(t, base, "/")
-	require.NotEmpty(t, residue, "unprovable residue retained under its quarantined name")
+	assert.Empty(t, residue, "ownership is proven before any quarantine rename")
 }
 
 // End-to-end codex scenario: the carry rename fails after a successful
@@ -743,7 +748,7 @@ func TestArtifactCleanup_RestatedSidecarPreservesSweepAssociation(t *testing.T) 
 type manifestWriteDenyFS struct{ afero.Fs }
 
 func (f *manifestWriteDenyFS) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
-	if strings.HasSuffix(name, artifactStageManifestName) && flag&(os.O_WRONLY|os.O_CREATE|os.O_APPEND) != 0 {
+	if strings.HasSuffix(artifactMarkerDestinationForTest(name), artifactStageManifestName) && flag&(os.O_WRONLY|os.O_CREATE|os.O_APPEND) != 0 {
 		return nil, errors.New("manifest write denied")
 	}
 	return f.Fs.OpenFile(name, flag, perm)
@@ -754,7 +759,7 @@ func (f *manifestWriteDenyFS) OpenFile(name string, flag int, perm os.FileMode) 
 type proofReadDenyFS struct{ afero.Fs }
 
 func (f *proofReadDenyFS) Open(name string) (afero.File, error) {
-	if strings.HasSuffix(name, artifactStageProofSuffix) {
+	if strings.HasSuffix(artifactMarkerDestinationForTest(name), artifactStageProofSuffix) {
 		return nil, errors.New("proof read denied")
 	}
 	return f.Fs.Open(name)
@@ -915,7 +920,7 @@ func proofOpenSwap(under afero.Fs, root string) {
 }
 
 func (fs *proofOpenSwapFS) LstatIfPossible(name string) (os.FileInfo, bool, error) {
-	if !fs.done && strings.HasSuffix(name, artifactStageProofSuffix) {
+	if !fs.done && strings.HasSuffix(artifactMarkerDestinationForTest(name), artifactStageProofSuffix) {
 		fs.done = true
 		proofOpenSwap(fs.Fs, strings.TrimSuffix(name, artifactStageProofSuffix))
 	}
@@ -937,7 +942,7 @@ func (fs *proofOpenSwapFS) Open(name string) (afero.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !fs.done && strings.HasSuffix(name, artifactStageProofSuffix) {
+	if !fs.done && strings.HasSuffix(artifactMarkerDestinationForTest(name), artifactStageProofSuffix) {
 		fs.done = true
 		proofOpenSwap(fs.Fs, strings.TrimSuffix(name, artifactStageProofSuffix))
 	}

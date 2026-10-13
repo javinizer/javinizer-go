@@ -80,7 +80,12 @@ func (f *cleanupRevalidationFS) plant(path string) error {
 }
 
 func (f *cleanupRevalidationFS) OpenFile(path string, flag int, mode os.FileMode) (afero.File, error) {
-	if !f.fired && f.swapAt == "proof write" && path == artifactStageProofPath(f.root) {
+	if !f.fired && f.swapAt == "completion stamp" && strings.HasPrefix(path, filepath.Join(f.root, artifactStageManifestName)+".jv-stage.") {
+		if err := f.plant(f.root); err != nil {
+			return nil, err
+		}
+	}
+	if !f.fired && f.swapAt == "proof write" && strings.HasPrefix(path, artifactStageProofPath(f.root)+".jv-stage.") {
 		if err := f.plant(f.root); err != nil {
 			return nil, err
 		}
@@ -135,7 +140,7 @@ func TestCleanupRetainsRootWhenIdentityIsUnavailable(t *testing.T) {
 }
 
 func TestCleanupRetainsForeignRootAcrossEveryProofBoundary(t *testing.T) {
-	for _, seam := range []string{"proof write", "quarantine rename", "proof carry", "retry"} {
+	for _, seam := range []string{"completion stamp", "proof write", "quarantine rename", "proof carry", "retry"} {
 		t.Run(seam, func(t *testing.T) {
 			base := afero.NewMemMapFs()
 			require.NoError(t, base.MkdirAll("/library", 0o755))
@@ -159,7 +164,7 @@ func TestCleanupRetainsForeignRootAcrossEveryProofBoundary(t *testing.T) {
 }
 
 func TestCleanupRetainsNativeForeignRootWithMatchingTimestamp(t *testing.T) {
-	for _, seam := range []string{"proof write", "quarantine rename", "proof carry", "retry"} {
+	for _, seam := range []string{"completion stamp", "proof write", "quarantine rename", "proof carry", "retry"} {
 		t.Run(seam, func(t *testing.T) {
 			base := afero.NewOsFs()
 			parent := t.TempDir()
@@ -181,7 +186,9 @@ func TestCleanupRetainsNativeForeignRootWithMatchingTimestamp(t *testing.T) {
 			require.NoError(t, err)
 			foreignInfo, err := base.Stat(stage.root)
 			require.NoError(t, err)
-			assert.Equal(t, ownedInfo.ModTime(), foreignInfo.ModTime())
+			if seam != "completion stamp" {
+				assert.Equal(t, ownedInfo.ModTime(), foreignInfo.ModTime())
+			}
 			sweepArtifactStaging(base, parent)
 			foreign, err = afero.ReadFile(base, filepath.Join(stage.root, "foreign.bin"))
 			require.NoError(t, err)

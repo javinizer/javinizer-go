@@ -47,7 +47,8 @@ type artifactStageManifest struct {
 	// deletion of a tree Javinizer never created. The seal is keyed by a
 	// Javinizer-local secret stored outside the tree (artifact_stage_seal.go);
 	// pre-fix trees carry no seal and are retained, never swept.
-	Seal string `json:"seal,omitempty"`
+	Directory *artifactStageDirectoryProof `json:"directory,omitempty"`
+	Seal      string                       `json:"seal,omitempty"`
 }
 
 // Sweep seams stay injectable: reclaim decisions must be testable without
@@ -79,11 +80,17 @@ func writeArtifactStageManifest(fs afero.Fs, root string) {
 
 // markArtifactStageCompleted stamps the finished lifecycle state so later
 // sweeps can reclaim residue even while the owning process stays alive.
-func markArtifactStageCompleted(fs afero.Fs, root string) {
-	writeArtifactStageManifestState(fs, root, time.Now().UTC().UnixNano())
+func markArtifactStageCompleted(fs afero.Fs, root string, identity ...artifactStageDirIdentity) {
+	writeArtifactStageManifestState(fs, root, time.Now().UTC().UnixNano(), identity...)
 }
 
-func writeArtifactStageManifestState(fs afero.Fs, root string, completedUnixNano int64) {
+func writeArtifactStageManifestState(fs afero.Fs, root string, completedUnixNano int64, expected ...artifactStageDirIdentity) {
+	var identity artifactStageDirIdentity
+	if len(expected) > 0 {
+		identity = expected[0]
+	} else {
+		identity = artifactStageDirectoryIdentity(fs, root)
+	}
 	hostname, _ := artifactSweepHostname()
 	manifest := artifactStageManifest{
 		Version:           artifactStageManifestVer,
@@ -92,9 +99,21 @@ func writeArtifactStageManifestState(fs afero.Fs, root string, completedUnixNano
 		Hostname:          hostname,
 		CreatedAt:         time.Now().UTC(),
 		CompletedUnixNano: completedUnixNano,
+		Directory:         artifactStageDirectoryProofFromIdentity(identity),
 	}
-	if start := artifactSweepStartTime(manifest.PID); start != nil {
-		manifest.ProcessStartUnixNano = start.UnixNano()
+	if completedUnixNano != 0 {
+		existing, authenticated := readArtifactStageAuthenticatedManifest(fs, root)
+		if !authenticated || !existing.Directory.matchesIdentity(identity) {
+			logging.Warnf("artifact staging completion retained %s: authenticated directory ownership unavailable", root)
+			return
+		}
+		manifest = existing
+		manifest.CompletedUnixNano = completedUnixNano
+	}
+	if completedUnixNano == 0 {
+		if start := artifactSweepStartTime(manifest.PID); start != nil {
+			manifest.ProcessStartUnixNano = start.UnixNano()
+		}
 	}
 	// Sealed ownership (finding ntCe1): the manifest alone is forgeable by
 	// any writer sharing the filesystem, so the authority to sweep comes
@@ -107,7 +126,7 @@ func writeArtifactStageManifestState(fs afero.Fs, root string, completedUnixNano
 		logging.Warnf("artifact staging manifest encode failed for %s: %v", root, err)
 		return
 	}
-	if err := afero.WriteFile(fs, filepath.Join(root, artifactStageManifestName), body, 0o600); err != nil {
+	if err := writeArtifactStageBoundMarker(fs, root, filepath.Join(root, artifactStageManifestName), body, identity); err != nil {
 		logging.Warnf("artifact staging manifest write failed for %s: %v", root, err)
 	}
 }
@@ -222,7 +241,7 @@ func artifactStageManifestReclaimable(fs afero.Fs, path string) bool {
 	// token, local hostname, a positive PID, and a completed stamp is rejected
 	// here before any structural claim is consulted (pre-fix unsealed trees
 	// take the same refusal and are retained, the round-27 precedent).
-	if !artifactStageSealed(&manifest) {
+	if !artifactStageSealed(&manifest) || !manifest.Directory.matchesPath(fs, path) {
 		return false
 	}
 	if manifest.Version != artifactStageManifestVer || manifest.PID <= 0 {
@@ -299,13 +318,14 @@ func writeArtifactStageProof(fs afero.Fs, path string) {
 		// so the in-tree seal transfers to the byte-identical sidecar — but
 		// only a VALID seal does: a forged manifest without a verifiable seal
 		// never reaches this writer (the reclaim gates refuse it first).
-		Seal: manifest.Seal,
+		Directory: manifest.Directory,
+		Seal:      manifest.Seal,
 	}
 	encoded, err := artifactSweepMarshal(proof)
 	if err != nil {
 		return
 	}
-	if err := afero.WriteFile(fs, artifactStageProofPath(path), encoded, 0o600); err != nil {
+	if err := writeArtifactStageBoundMarker(fs, path, artifactStageProofPath(path), encoded, manifest.Directory.identity()); err != nil {
 		logging.Warnf("artifact staging proof write failed for %s: %v", path, err)
 	}
 }
@@ -325,7 +345,7 @@ func readArtifactStageProof(fs afero.Fs, path string) bool {
 	if err := json.Unmarshal(body, &manifest); err != nil {
 		return false
 	}
-	if !artifactStageSealed(&manifest) {
+	if !artifactStageSealed(&manifest) || !manifest.Directory.matchesPath(fs, path) {
 		return false
 	}
 	if manifest.Version != artifactStageManifestVer || manifest.PID <= 0 {
@@ -424,7 +444,7 @@ func sweepArtifactStaging(fs afero.Fs, parent string) {
 		// Stamp the completed lifecycle on the in-tree manifest, then mirror it
 		// outside the tree: RemoveAll can consume the manifest before a locked
 		// payload refuses, so the proof must exist before removal starts.
-		markArtifactStageCompleted(fs, candidate)
+		markArtifactStageCompleted(fs, candidate, identity)
 		writeArtifactStageProof(fs, candidate)
 		// Both markers are best-effort writes: on Windows/SMB either can fail
 		// while the removal below half-succeeds, stranding a payload whose

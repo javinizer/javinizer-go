@@ -198,7 +198,7 @@ Contains all application data:
 
 **Host mount**: `./data:/javinizer`
 
-Keep this volume across container updates. With `JAVINIZER_HOME=/javinizer`, staging ownership is signed using the private key under `/javinizer/cache/Javinizer`, not Chromium's ephemeral `/tmp/.chromium` cache. Do not delete this key while recoverable staging roots remain; roots whose signing key is lost are retained rather than automatically deleted.
+Keep this volume across container updates. With `JAVINIZER_HOME=/javinizer`, staging ownership is signed using the private key under `/javinizer/cache/Javinizer`, not Chromium's ephemeral `/tmp/.chromium` cache. Do not delete this key while recoverable staging roots remain; roots whose signing key is lost are retained rather than automatically deleted. Ownership seals also bind the staging directory identity: copied markers cannot authorize deleting a replacement tree. Older sealed markers without this directory binding are retained for manual cleanup, never upgraded into cleanup authority by a pathname-only completion stamp.
 
 The supplied Compose services also set stable hostnames so a recreated instance can recognize its own staging roots. For `docker run`, use a stable, instance-specific `--hostname` (for example, `--hostname javinizer`). Give independent instances distinct application-state volumes and hostnames; roots from another host or an unverifiable owner remain untouched.
 

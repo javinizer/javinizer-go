@@ -368,7 +368,12 @@ func (s *artifactStage) cleanup() {
 		logging.Warnf("artifact staging cleanup retained %s: strong directory identity unavailable", s.root)
 		return
 	}
-	markArtifactStageCompleted(s.fs, s.root)
+	manifest, authenticated := readArtifactStageAuthenticatedManifest(s.fs, s.root)
+	if !authenticated || !manifest.Directory.matchesIdentity(stagedIdentity) {
+		logging.Warnf("artifact staging cleanup retained %s: authenticated directory ownership unavailable", s.root)
+		return
+	}
+	markArtifactStageCompleted(s.fs, s.root, manifest.Directory.identity())
 	writeArtifactStageProof(s.fs, s.root)
 	proofSrc := artifactStageProofPath(s.root)
 	if !artifactStageDirMatches(s.fs, s.root, stagedIdentity) {
