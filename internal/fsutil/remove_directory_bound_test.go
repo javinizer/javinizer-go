@@ -4,6 +4,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
+	"syscall"
 	"testing"
 
 	"github.com/spf13/afero"
@@ -165,9 +167,15 @@ func TestBoundDirectoryRetainsReplacementAfterLastProof(t *testing.T) {
 	original := removeBoundDirectoryChild
 	t.Cleanup(func() { removeBoundDirectoryChild = original })
 	swapped := false
+	blocked := false
 	removeBoundDirectoryChild = func(pinned boundDirectoryRootInterface, child string) error {
 		if !swapped {
-			require.NoError(t, fs.Rename(root, root+".retained"))
+			if err := fs.Rename(root, root+".retained"); err != nil {
+				require.Equal(t, "windows", runtime.GOOS)
+				require.ErrorIs(t, err, syscall.Errno(32))
+				blocked = true
+				return original(pinned, child)
+			}
 			require.NoError(t, fs.MkdirAll(filepath.Join(root, "nested"), 0o700))
 			require.NoError(t, afero.WriteFile(fs, filepath.Join(root, "nested", "foreign.bin"), []byte("foreign nested bytes"), 0o600))
 			require.NoError(t, afero.WriteFile(fs, filepath.Join(root, "foreign.bin"), []byte("foreign root bytes"), 0o600))
@@ -176,6 +184,14 @@ func TestBoundDirectoryRetainsReplacementAfterLastProof(t *testing.T) {
 		return original(pinned, child)
 	}
 	require.NoError(t, removeDirectoryContentsBound(fs, root, dev, ino))
+	if blocked {
+		entries, err := os.ReadDir(root)
+		require.NoError(t, err)
+		assert.Empty(t, entries)
+		_, err = os.Stat(root + ".retained")
+		require.ErrorIs(t, err, os.ErrNotExist)
+		return
+	}
 	require.True(t, swapped)
 	for name, want := range map[string]string{"foreign.bin": "foreign root bytes", filepath.Join("nested", "foreign.bin"): "foreign nested bytes"} {
 		body, err := afero.ReadFile(fs, filepath.Join(root, name))

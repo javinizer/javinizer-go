@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"testing"
@@ -27,6 +28,7 @@ type cleanupRevalidationFS struct {
 	matchMetadata bool
 	swapAt        string
 	fired         bool
+	swapErr       error
 	aside         string
 }
 
@@ -64,6 +66,7 @@ func (f *cleanupRevalidationFS) plant(path string) error {
 	f.fired = true
 	f.aside = path + ".retained"
 	if err := f.Fs.Rename(path, f.aside); err != nil {
+		f.swapErr = err
 		return err
 	}
 	if err := f.Fs.MkdirAll(path, 0o755); err != nil {
@@ -81,7 +84,7 @@ func (f *cleanupRevalidationFS) plant(path string) error {
 
 func (f *cleanupRevalidationFS) Open(path string) (afero.File, error) {
 	file, err := f.Fs.Open(path)
-	if err == nil && !f.fired && f.swapAt == "retry" && strings.Contains(path, artifactStageQuarantineMark) {
+	if err == nil && (!f.fired || f.swapErr != nil) && f.swapAt == "retry" && strings.Contains(path, artifactStageQuarantineMark) {
 		if info, statErr := file.Stat(); statErr == nil && info.IsDir() {
 			if err := f.plant(path); err != nil {
 				_ = file.Close()
@@ -193,6 +196,13 @@ func TestCleanupRetainsNativeForeignRootWithMatchingTimestamp(t *testing.T) {
 			stage := &artifactStage{fs: fs, root: root}
 			stage.cleanup()
 			require.True(t, fs.fired)
+			if runtime.GOOS == "windows" && seam == "retry" && fs.swapErr != nil {
+				require.ErrorIs(t, fs.swapErr, syscall.Errno(32))
+				owned, readErr := afero.ReadFile(base, filepath.Join(stage.root, ".source", "MIRD-281.mp4"))
+				require.NoError(t, readErr)
+				assert.Equal(t, "payload", string(owned))
+				return
+			}
 			foreign, err := afero.ReadFile(base, filepath.Join(stage.root, "foreign.bin"))
 			require.NoError(t, err)
 			assert.Equal(t, "foreign", string(foreign))

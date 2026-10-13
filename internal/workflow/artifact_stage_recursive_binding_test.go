@@ -3,6 +3,8 @@ package workflow
 import (
 	"os"
 	"path/filepath"
+	"runtime"
+	"syscall"
 	"testing"
 	"time"
 
@@ -71,6 +73,13 @@ func TestRecursiveStagingRemovalPreservesReplacementTree(t *testing.T) {
 	fs := &recursiveRemovalSwapFS{Fs: base, root: root}
 	err := removeArtifactTreeWithRetry(fs, root, identity)
 	assert.Error(t, err)
+	if runtime.GOOS == "windows" && !fs.swapped {
+		require.ErrorIs(t, err, syscall.Errno(32))
+		body, readErr := os.ReadFile(filepath.Join(root, "owned.bin"))
+		require.NoError(t, readErr)
+		assert.Equal(t, "owned", string(body))
+		return
+	}
 	require.True(t, fs.swapped)
 	body, err := os.ReadFile(filepath.Join(root, "foreign.bin"))
 	require.NoError(t, err)
