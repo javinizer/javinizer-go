@@ -104,7 +104,11 @@ func (f *cleanupRevalidationFS) Rename(old, next string) error {
 			return err
 		}
 	}
-	return f.Fs.Rename(old, next)
+	err := f.Fs.Rename(old, next)
+	if err == nil && !f.fired && f.swapAt == "proof publication" && next == artifactStageProofPath(f.root) {
+		return f.plant(f.root)
+	}
+	return err
 }
 
 func (f *cleanupRevalidationFS) RemoveAll(path string) error {
@@ -140,7 +144,7 @@ func TestCleanupRetainsRootWhenIdentityIsUnavailable(t *testing.T) {
 }
 
 func TestCleanupRetainsForeignRootAcrossEveryProofBoundary(t *testing.T) {
-	for _, seam := range []string{"completion stamp", "proof write", "quarantine rename", "proof carry", "retry"} {
+	for _, seam := range []string{"completion stamp", "proof write", "proof publication", "quarantine rename", "proof carry", "retry"} {
 		t.Run(seam, func(t *testing.T) {
 			base := afero.NewMemMapFs()
 			require.NoError(t, base.MkdirAll("/library", 0o755))
@@ -164,7 +168,7 @@ func TestCleanupRetainsForeignRootAcrossEveryProofBoundary(t *testing.T) {
 }
 
 func TestCleanupRetainsNativeForeignRootWithMatchingTimestamp(t *testing.T) {
-	for _, seam := range []string{"completion stamp", "proof write", "quarantine rename", "proof carry", "retry"} {
+	for _, seam := range []string{"completion stamp", "proof write", "proof publication", "quarantine rename", "proof carry", "retry"} {
 		t.Run(seam, func(t *testing.T) {
 			base := afero.NewOsFs()
 			parent := t.TempDir()

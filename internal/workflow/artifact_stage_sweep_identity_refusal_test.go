@@ -152,7 +152,9 @@ func TestSweepArtifactStagingQuarantinedRootRefusesDriftedIdentity(t *testing.T)
 	require.NoError(t, base.Rename(root, quarantined))
 	setSweepSeams(t, fsutil.ProcessDead, nil)
 
-	sweepArtifactStaging(&driftedLstatFS{Fs: base, target: quarantined, fireOn: 5}, parent)
+	fs := &driftedLstatFS{Fs: base, target: quarantined, fireOn: 7}
+	sweepArtifactStaging(fs, parent)
+	assert.Equal(t, 7, fs.calls, "the final quarantine recheck refused before stamping")
 
 	exists, err := afero.DirExists(base, quarantined)
 	require.NoError(t, err)
