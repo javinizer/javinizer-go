@@ -1612,10 +1612,6 @@ func stagedArtifactSiblingName(sourceName, targetName, siblingName string) strin
 	return siblingName
 }
 
-func stagedBusyReservation(name string) bool {
-	return strings.HasSuffix(name, fsutil.ReplacementBusySuffix) || strings.Contains(name, fsutil.ReplacementBusySuffix+".")
-}
-
 func (s *artifactStage) treeDestinations(skipFile, skipDir, stagedArtifactDir, finalArtifactDir string) ([]string, error) {
 	paths := make([]string, 0)
 	if _, err := s.fs.Stat(s.root); os.IsNotExist(err) {
@@ -1627,13 +1623,7 @@ func (s *artifactStage) treeDestinations(skipFile, skipDir, stagedArtifactDir, f
 		if err != nil {
 			return err
 		}
-		if stagedBusyReservation(info.Name()) {
-			if info.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if info.IsDir() {
+		if info.IsDir() || stagedBusyReservation(info.Name()) {
 			return nil
 		}
 		clean := filepath.Clean(path)
@@ -1674,13 +1664,7 @@ func (s *artifactStage) installTree(skipFile, skipDir string, preserve []string,
 		if err != nil {
 			return err
 		}
-		if stagedBusyReservation(info.Name()) {
-			if info.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if info.IsDir() {
+		if info.IsDir() || stagedBusyReservation(info.Name()) {
 			return nil
 		}
 		clean := filepath.Clean(path)

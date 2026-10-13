@@ -35,61 +35,93 @@ func (f *stagedReservationReleaseFaultFS) LstatIfPossible(path string) (os.FileI
 }
 
 func TestFencedPublicationWithBusyMarkerReleaseFailure(t *testing.T) {
-	for _, lateFailure := range []bool{false, true} {
-		t.Run(map[bool]string{false: "publish", true: "compensate"}[lateFailure], func(t *testing.T) {
-			ctx := context.Background()
-			base, _, source, subtitle, multipart, unrelated, match := pr260FencedFiles(t, "busy-reservations")
-			root := filepath.Dir(filepath.Dir(source))
-			dest := filepath.Join(root, "library")
-			fs := &stagedReservationReleaseFaultFS{Fs: base, failReads: map[string]int{}}
-			real := organizer.NewOrganizer(fs, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize}, template.NewEngine(), nil)
-			orch := &applyOrchImpl{fs: fs, organizer: real}
-			cmd := pr260ArtifactFailureCommand(&models.Movie{ContentID: "busy-reservations"}, match, dest)
-			cmd.Organize.Skip = false
-			cmd.Organize.MoveFiles = true
-			cmd.Download = false
-			if lateFailure {
-				cmd.PublicationFence = staleFinalizeFencer{}
-			}
-			stage, _, err := orch.prepareArtifact(ctx, cmd)
-			require.NoError(t, err)
-			defer stage.cleanup()
-			plan, err := real.PlanOrganize(ctx, organizer.OrganizeCmd{Match: models.FileMatchInfo{Path: stage.stagedSource, Name: filepath.Base(source)}, Movie: stage.original.Movie, DestDir: stage.root, MoveFiles: true, OperationMode: stage.original.OperationMode})
-			require.NoError(t, err)
-			require.NoError(t, base.MkdirAll(plan.TargetDir, 0o700))
-			fanart, nfo := filepath.Join(plan.TargetDir, "fanart.jpg"), filepath.Join(plan.TargetDir, "movie.nfo")
-			require.NoError(t, afero.WriteFile(base, fanart, []byte("artwork"), 0o600))
-			require.NoError(t, afero.WriteFile(base, nfo, []byte("metadata"), 0o600))
-			fs.failReads[fsutil.ReplacementBusyPath(fanart)] = 1
-			release, err := fsutil.AcquireReplacementBusy(fs, fanart)
-			require.NoError(t, err)
-			release()
-			finalDir := filepath.Join(dest, "movie")
-			if lateFailure {
-				for _, name := range []string{"movie.mp4", "movie.nfo", "fanart.jpg"} {
-					fs.failReads[fsutil.ReplacementBusyPath(filepath.Join(finalDir, name))] = 1
+	for _, format := range []struct{ file, folder string }{{"movie", "movie"}, {"movie.dlbusy", "movie"}, {"movie", "movie.dlbusy"}, {"movie", "movie.dlbusy.takeover-123-abcd"}, {"MOVIE.DLBUSY", "movie"}} {
+		for _, lateFailure := range []bool{false, true} {
+			t.Run(format.file+"/"+format.folder+"/"+map[bool]string{false: "publish", true: "compensate"}[lateFailure], func(t *testing.T) {
+				ctx := context.Background()
+				base, root, source, subtitle, multipart, unrelated, match := pr260FencedFiles(t, "busy-reservations")
+				dest := filepath.Join(root, "library")
+				fs := &stagedReservationReleaseFaultFS{Fs: base, failReads: map[string]int{}}
+				real := organizer.NewOrganizer(fs, &organizer.Config{FolderFormat: format.folder, FileFormat: format.file, RenameFile: true, OperationMode: operationmode.OperationModeOrganize}, template.NewEngine(), nil)
+				orch := &applyOrchImpl{fs: fs, organizer: real}
+				cmd := pr260ArtifactFailureCommand(&models.Movie{ContentID: "busy-reservations"}, match, dest)
+				cmd.Organize.Skip = false
+				cmd.Organize.MoveFiles = true
+				cmd.Download = false
+				if lateFailure {
+					cmd.PublicationFence = staleFinalizeFencer{}
 				}
-			}
-			state := &applyPipelineState{operationID: "busy-operation", organizeResult: &organizer.OrganizeResult{NewPath: plan.TargetPath, FolderPath: plan.TargetDir}, downloadPaths: []string{fanart}, nfoPath: nfo}
-			publishErr := stage.publish(ctx, orch, state, nil)
-			if lateFailure {
-				require.ErrorIs(t, publishErr, database.ErrApplyPublicationStale)
-				require.NotErrorIs(t, publishErr, fsutil.ErrReplacementBusy)
-				pr260AssertRetained(t, base, source, subtitle, multipart, unrelated)
-				files, err := afero.ReadDir(base, finalDir)
+				stage, _, err := orch.prepareArtifact(ctx, cmd)
 				require.NoError(t, err)
-				require.Empty(t, files)
-			} else {
-				require.NoError(t, publishErr)
-				for name, payload := range map[string]string{"movie.mp4": "video", "movie.nfo": "metadata", "fanart.jpg": "artwork"} {
-					actual, err := afero.ReadFile(base, filepath.Join(finalDir, name))
-					require.NoError(t, err)
-					require.Equal(t, payload, string(actual))
-					_, err = base.Stat(fsutil.ReplacementBusyPath(filepath.Join(finalDir, name)))
-					require.True(t, os.IsNotExist(err))
+				defer stage.cleanup()
+				plan, err := real.PlanOrganize(ctx, organizer.OrganizeCmd{Match: models.FileMatchInfo{Path: stage.stagedSource, Name: filepath.Base(source)}, Movie: stage.original.Movie, DestDir: stage.root, MoveFiles: true, OperationMode: stage.original.OperationMode})
+				require.NoError(t, err)
+				require.NoError(t, base.MkdirAll(plan.TargetDir, 0o700))
+				fanart, nfo := filepath.Join(plan.TargetDir, "fanart.jpg"), filepath.Join(plan.TargetDir, format.file+".nfo")
+				require.NoError(t, afero.WriteFile(base, fanart, []byte("artwork"), 0o600))
+				require.NoError(t, afero.WriteFile(base, nfo, []byte("metadata"), 0o600))
+				fs.failReads[fsutil.ReplacementBusyPath(fanart)] = 1
+				release, err := fsutil.AcquireReplacementBusy(fs, fanart)
+				require.NoError(t, err)
+				release()
+				finalDir := filepath.Join(dest, format.folder)
+				if lateFailure {
+					for _, name := range []string{format.file + ".mp4", format.file + ".nfo", "fanart.jpg"} {
+						fs.failReads[fsutil.ReplacementBusyPath(filepath.Join(finalDir, name))] = 1
+					}
 				}
-			}
-		})
+				state := &applyPipelineState{operationID: "busy-operation", organizeResult: &organizer.OrganizeResult{NewPath: plan.TargetPath, FolderPath: plan.TargetDir}, downloadPaths: []string{fanart}, nfoPath: nfo}
+				publishErr := stage.publish(ctx, orch, state, nil)
+				if lateFailure {
+					require.ErrorIs(t, publishErr, database.ErrApplyPublicationStale)
+					require.NotErrorIs(t, publishErr, fsutil.ErrReplacementBusy)
+					pr260AssertRetained(t, base, source, subtitle, multipart, unrelated)
+					files, err := afero.ReadDir(base, finalDir)
+					require.NoError(t, err)
+					require.Empty(t, files)
+				} else {
+					require.NoError(t, publishErr)
+					for name, payload := range map[string]string{format.file + ".mp4": "video", format.file + ".nfo": "metadata", "fanart.jpg": "artwork"} {
+						actual, err := afero.ReadFile(base, filepath.Join(finalDir, name))
+						require.NoError(t, err)
+						require.Equal(t, payload, string(actual))
+						_, err = base.Stat(fsutil.ReplacementBusyPath(filepath.Join(finalDir, name)))
+						require.True(t, os.IsNotExist(err))
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestStagedArtifactWalksPreserveBusyLikeArtifactNames(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	root, final := filepath.FromSlash("/stage"), filepath.FromSlash("/library")
+	names := []string{
+		"movie.dlbusy.nfo", "movie.dlbusy.fanart.jpg", "movie.dlbusy.mp4",
+		"movie.dlbusy.takeover-123-abcd.nfo", "movie.dlbusy.quarantine-123-abcd.jpg",
+		"movie.dlbusy.vac.0123456789abcdef0123456789abcdef.nfo",
+		"movie.dlbusy/fanart.jpg", "movie.dlbusy.takeover-123-abcd/movie.nfo",
+		"movie.dlbusy.quarantine-123-abcd/movie.mp4", "movie.dlbusy.series/movie.nfo",
+		"MOVIE.DLBUSY.NFO", "日本語.dlbusy.metadata.nfo",
+	}
+	destinations := make([]string, 0, len(names))
+	for _, name := range names {
+		source := filepath.Join(root, filepath.FromSlash(name))
+		require.NoError(t, fs.MkdirAll(filepath.Dir(source), 0o700))
+		require.NoError(t, afero.WriteFile(fs, source, []byte(name), 0o600))
+		destinations = append(destinations, filepath.Join(final, filepath.FromSlash(name)))
+	}
+	stage := &artifactStage{fs: fs, root: root, finalRoot: final}
+	actual, err := stage.treeDestinations("", "", "", "")
+	require.NoError(t, err)
+	require.ElementsMatch(t, destinations, actual)
+	_, err = stage.installTree("", "", nil, "", "", nil)
+	require.NoError(t, err)
+	for i, destination := range destinations {
+		payload, err := afero.ReadFile(fs, destination)
+		require.NoError(t, err)
+		require.Equal(t, names[i], string(payload))
 	}
 }
 
@@ -97,12 +129,10 @@ func TestStagedArtifactWalksExcludeBusyReservations(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	root, final := filepath.FromSlash("/stage"), filepath.FromSlash("/library")
 	require.NoError(t, fs.MkdirAll(root, 0o700))
-	names := []string{"fanart.jpg.dlbusy", "fanart.jpg.dlbusy.takeover-123-abcd", "fanart.jpg.dlbusy.quarantine-123-abcd", "fanart.jpg.dlbusy.takeover-123-abcd.vac.001"}
+	names := []string{"fanart.jpg.dlbusy", "fanart.jpg.dlbusy.takeover-123-abcd", "fanart.jpg.dlbusy.quarantine-123-abcd", "fanart.jpg.dlbusy.takeover-123-abcd.vac.0123456789abcdef0123456789abcdef"}
 	for _, name := range names {
 		require.NoError(t, afero.WriteFile(fs, filepath.Join(root, name), []byte("reservation"), 0o600))
 	}
-	require.NoError(t, fs.MkdirAll(filepath.Join(root, "nested.dlbusy"), 0o700))
-	require.NoError(t, afero.WriteFile(fs, filepath.Join(root, "nested.dlbusy", "private"), []byte("control"), 0o600))
 	require.NoError(t, afero.WriteFile(fs, filepath.Join(root, "fanart.jpg"), []byte("artwork"), 0o600))
 	require.NoError(t, afero.WriteFile(fs, filepath.Join(root, "notes.dlbusy-reference.txt"), []byte("ordinary artifact"), 0o600))
 	stage := &artifactStage{fs: fs, root: root, finalRoot: final}
@@ -118,6 +148,4 @@ func TestStagedArtifactWalksExcludeBusyReservations(t *testing.T) {
 		_, err := fs.Stat(filepath.Join(root, name))
 		require.NoError(t, err)
 	}
-	_, err = fs.Stat(filepath.Join(root, "nested.dlbusy", "private"))
-	require.NoError(t, err)
 }
