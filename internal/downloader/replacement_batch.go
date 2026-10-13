@@ -27,14 +27,15 @@ type ReplacementBatch struct {
 }
 
 type replacementBatchLeg struct {
-	destination    string
-	backup         string
-	replaced       bool
-	installed      bool
-	installedID    *fsutil.BoundInstallIdentity
-	rollbackOrigin string
-	releaseLock    func()
-	releaseBusy    func()
+	destination      string
+	backup           string
+	replaced         bool
+	installed        bool
+	installedID      *fsutil.BoundInstallIdentity
+	rollbackOrigin   string
+	releaseLock      func()
+	releaseBusy      func()
+	retryBusyRelease func()
 }
 
 // NewReplacementBatch creates a staged publication transaction.
@@ -348,6 +349,9 @@ func (b *ReplacementBatch) rollback(ctx context.Context, releaseJournal bool) er
 			leg.releaseLock = fsutil.SharedDestLocks().Acquire(leg.destination)
 		}
 		if leg.releaseBusy == nil {
+			if leg.retryBusyRelease != nil {
+				leg.retryBusyRelease()
+			}
 			busy, err := fsutil.AcquireReplacementBusy(b.fs, leg.destination)
 			if err != nil {
 				joined = errors.Join(joined, fmt.Errorf("reacquire rollback destination %s: %w", leg.destination, err))
@@ -493,6 +497,7 @@ func (b *ReplacementBatch) ReleaseUninstalled(destination string) error {
 
 func (l *replacementBatchLeg) release() {
 	if l.releaseBusy != nil {
+		l.retryBusyRelease = l.releaseBusy
 		l.releaseBusy()
 		l.releaseBusy = nil
 	}

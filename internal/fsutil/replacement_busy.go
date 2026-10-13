@@ -144,13 +144,20 @@ func AcquireReplacementBusyEx(fs afero.Fs, dest string) (func(), string, error) 
 				discardBusyMarkerClaim(fs, path, file, nil)
 				return nil, "", fmt.Errorf("stat replacement busy marker: %w", claimStatErr)
 			}
+			device, inode, strong := streamedHandleIdentity(file, claimIdentity)
+			claimed := newBoundInstallIdentity(claimIdentity, device, inode, strong)
 			if err = file.Close(); err != nil {
 				discardBusyMarkerClaim(fs, path, file, claimIdentity)
 				return nil, "", fmt.Errorf("close replacement busy marker: %w", err)
 			}
-			var once sync.Once
+			var releaseMu sync.Mutex
+			released := false
 			return func() {
-				once.Do(func() { releaseReplacementBusy(fs, path, token) })
+				releaseMu.Lock()
+				defer releaseMu.Unlock()
+				if !released {
+					released = releaseReplacementBusy(fs, path, token, claimed)
+				}
 			}, token, nil
 		}
 		if !os.IsExist(err) {
@@ -525,15 +532,21 @@ var replacementBusyReleaseBackoff = []time.Duration{10 * time.Millisecond, 25 * 
 //     inert scratch sibling (the marker name is already free, so the release
 //     is achieved and no later claimant is ever busy-blocked) and is
 //     surfaced through a warn for manual cleanup.
-func releaseReplacementBusy(fs afero.Fs, path, token string) {
-	content, observed, ok := replacementBusyReleaseObserve(fs, path)
-	if !ok || content != token {
-		return
+func releaseReplacementBusy(fs afero.Fs, path, token string, claimed *BoundInstallIdentity) bool {
+	content, observed, ok := replacementBusyReleaseObserve(fs, path, claimed)
+	if !ok {
+		return false
+	}
+	if content != token {
+		return true
+	}
+	if claimed == nil {
+		return false
 	}
 	scratch, claim, cerr := replacementBusyClaimReleaseScratch(fs, path)
 	if cerr != nil {
 		logging.Warnf("replacement busy marker %s could not reserve a release take-aside name (%v); the marker stays as-is — later claims arbitrate it through the normal stale rules", path, cerr)
-		return
+		return false
 	}
 	hold, terr := TakeAside(TakeAsideSpec{
 		FS:      fs,
@@ -541,7 +554,10 @@ func releaseReplacementBusy(fs afero.Fs, path, token string) {
 		Scratch: scratch,
 		Claim:   claim,
 		Prove: func(moved os.FileInfo) error {
-			if !asideSameObject(moved, observed) {
+			if err := VerifiedSourceProofFromBoundInstallIdentity(fs, observed)(scratch, moved); err != nil {
+				return fmt.Errorf("marker taken aside from %s is not the claimed object: %w", path, errors.Join(ErrTakeAsideForeign, err))
+			}
+			if !asideSameObject(moved, observed.FileInfo()) {
 				return fmt.Errorf("marker taken aside from %s is not the observed token object — foreign marker preserved: %w", path, ErrTakeAsideForeign)
 			}
 			return nil
@@ -549,7 +565,7 @@ func releaseReplacementBusy(fs afero.Fs, path, token string) {
 	})
 	if terr != nil {
 		logging.Warnf("replacement busy marker %s could not be taken aside for release (%v); nothing was removed by name — later claims arbitrate the marker normally", path, terr)
-		return
+		return false
 	}
 	var removeErr error
 	for attempt := 0; ; attempt++ {
@@ -568,6 +584,7 @@ func releaseReplacementBusy(fs afero.Fs, path, token string) {
 	if removeErr != nil {
 		logging.Warnf("replacement busy marker %s release: the take-aside unlink of %s failed (%v); the marker name is free, the inert scratch awaits manual cleanup", path, scratch, removeErr)
 	}
+	return true
 }
 
 // replacementBusyReleaseObserve reads the marker and captures ITS identity
@@ -577,12 +594,19 @@ func releaseReplacementBusy(fs afero.Fs, path, token string) {
 // and a separate Lstat could never alias the record. Close errors are
 // ignored: a read-only close mutates nothing and the identity is already
 // bound. Any observation failure answers not-ok (best-effort release posture).
-func replacementBusyReleaseObserve(fs afero.Fs, path string) (string, os.FileInfo, bool) {
+func replacementBusyReleaseObserve(fs afero.Fs, path string, claimed *BoundInstallIdentity) (string, *BoundInstallIdentity, bool) {
 	handle, err := fs.Open(path)
 	if err != nil {
 		return "", nil, false
 	}
 	info, serr := handle.Stat()
+	observed := claimed
+	if serr == nil && claimed != nil {
+		if device, inode, strong := claimed.strongIdentity(); strong {
+			observed = newBoundInstallIdentity(info, device, inode, true)
+		}
+		serr = VerifiedSourceProofFromBoundInstallIdentity(fs, observed, handle)(path, info)
+	}
 	content := []byte(nil)
 	var rerr error
 	if serr == nil {
@@ -592,7 +616,7 @@ func replacementBusyReleaseObserve(fs afero.Fs, path string) (string, os.FileInf
 	if serr != nil || rerr != nil {
 		return "", nil, false
 	}
-	return string(content), info, true
+	return string(content), observed, true
 }
 
 // replacementBusyReleaseClaimTries bounds the release-take-aside scratch
