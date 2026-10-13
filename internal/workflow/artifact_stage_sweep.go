@@ -379,7 +379,11 @@ func removeArtifactTreeWithRetry(fs afero.Fs, path string, identity artifactStag
 			_ = fs.Remove(artifactStageProofPath(path))
 			return fmt.Errorf("staging root identity unavailable or changed before removal %s: %v", path, inspectErr)
 		}
-		err = fs.RemoveAll(path)
+		if identity.hasDevIno {
+			err = fsutil.AferoRemoveAll(fs, path, [2]uint64{identity.dev, identity.ino})
+		} else {
+			err = fs.RemoveAll(path)
+		}
 		if err == nil {
 			return nil
 		}

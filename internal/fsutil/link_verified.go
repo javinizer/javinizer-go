@@ -126,7 +126,9 @@ func LinkFileNoReplaceVerifiedInstall(fs afero.Fs, src, dst string, link LinkFun
 		// the doubt-as-published class joined, exactly like a wedged
 		// compensation. Only an entry still provably aliasing the admitted
 		// object is bound-unlinked.
-		if !asideSameObject(dstInfo, srcInfo) {
+		admitted := newBoundInstallIdentity(srcInfo, srcDevice, srcInode, srcOK)
+		same, identityErr := sameBoundInstallObject(fs, dst, dstInfo, admitted)
+		if !same || identityErr != nil {
 			// The current occupant affirmatively DIVERGES from the link
 			// operation's own identity: an explicitly unproven successor, not a
 			// merely indeterminate re-proof. It is retained byte-intact here,
@@ -141,7 +143,7 @@ func LinkFileNoReplaceVerifiedInstall(fs afero.Fs, src, dst string, link LinkFun
 				fmt.Errorf("%w: the occupant at %s must be retained, never observed as this operation's installed output", ErrPublishSuccessorUnproven, dst),
 			)
 		}
-		if rmErr := UnlinkVerified(fs, dst, srcInfo); rmErr != nil {
+		if rmErr := UnlinkVerifiedInstall(fs, dst, admitted); rmErr != nil {
 			return nil, errors.Join(
 				fmt.Errorf("verified link: the installed entry %s failed its admission proof (%w): %w", dst, ErrTakeAsideForeign, perr),
 				fmt.Errorf("%w: the rejected install could not be bound-unlinked and stays recoverable at %s: %v", ErrPublishCompleted, dst, rmErr),

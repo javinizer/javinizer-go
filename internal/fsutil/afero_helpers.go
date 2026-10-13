@@ -1,6 +1,7 @@
 package fsutil
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -20,7 +21,22 @@ func CanonicalizePath(p string) (string, error) {
 }
 
 // AferoRemoveAll removes path and any children using the provided filesystem.
-func AferoRemoveAll(fs afero.Fs, path string) error {
+func AferoRemoveAll(fs afero.Fs, path string, admittedDirectory ...[2]uint64) error {
+	if len(admittedDirectory) > 0 {
+		identity := admittedDirectory[0]
+		if err := removeDirectoryContentsBound(fs, path, identity[0], identity[1]); err != nil {
+			return err
+		}
+		current, err := asideLstat(fs, path)
+		if err != nil {
+			return err
+		}
+		dev, ino, ok := BoundObjectIdentity(fs, path, current)
+		if !ok || dev != identity[0] || ino != identity[1] || !current.IsDir() || current.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("directory namespace %s changed after bound removal: %w", path, ErrTakeAsideForeign)
+		}
+		return fs.Remove(path)
+	}
 	info, err := fs.Stat(path)
 	if err != nil {
 		if os.IsNotExist(err) {

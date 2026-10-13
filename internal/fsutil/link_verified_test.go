@@ -278,10 +278,6 @@ func TestLinkFileNoReplaceVerifiedUnprovenRetainKeepsBothClasses(t *testing.T) {
 	assert.Equal(t, "admitted video bytes", string(got))
 }
 
-// m8Zqb fail-closed posture on the link lane: a STRONG admission (kernel
-// identity captured) whose post-link probe cannot re-prove at that strength
-// refuses — the leg never degrades to size+modtime for an already-pinned
-// strong identity — and the rejected install is compensated.
 func TestLinkFileNoReplaceVerifiedStrongCaptureRejectsWeakProbe(t *testing.T) {
 	base := afero.NewOsFs()
 	root := t.TempDir()
@@ -313,16 +309,11 @@ func TestLinkFileNoReplaceVerifiedStrongCaptureRejectsWeakProbe(t *testing.T) {
 	err = LinkFileNoReplaceVerified(fs, src, dst, os.Link, proof)
 	require.ErrorIs(t, err, ErrTakeAsideForeign)
 	exists, _ := afero.Exists(base, dst)
-	assert.False(t, exists, "the unprovable install was unlinked, never retained")
+	assert.True(t, exists, "strongly admitted objects cannot be unlinked through a weak lookup")
+	require.ErrorIs(t, err, ErrPublishCompleted)
+	require.ErrorIs(t, err, ErrPublishSuccessorUnproven)
 }
 
-// The wedged-compensation leg of the cleanup gate: the post-link entry still
-// PROVABLY aliases the admitted object (the same sysless probe shape as the
-// strong-capture test — the proof refuses, the identity binding holds), so the
-// gate chooses the bound unlink — but the terminal claim is wedged, so the
-// rejected install could not be bound-unlinked. BOTH classes join: the typed
-// admission refusal and the doubt-as-published class, and the install STAYS
-// RECOVERABLE at the destination for the caller's observe/rollback machinery.
 func TestLinkFileNoReplaceVerifiedWedgedBoundUnlinkKeepsRejectedInstall(t *testing.T) {
 	base := afero.NewOsFs()
 	root := t.TempDir()
@@ -336,21 +327,14 @@ func TestLinkFileNoReplaceVerifiedWedgedBoundUnlinkKeepsRejectedInstall(t *testi
 	if _, _, strong := BoundObjectIdentity(base, src, info); !strong {
 		t.Skip("this target exposes no kernel identity — the weak-probe leg has nothing to refuse")
 	}
-	proof, _ := verifyProofOf(t, base, src)
-	fs := &verifyHookFS{Fs: base}
-	fs.lstat = func(name string) (os.FileInfo, bool, error) {
-		var info os.FileInfo
-		var err error
-		if l, ok := base.(afero.Lstater); ok {
-			info, _, err = l.LstatIfPossible(name)
-		} else {
-			info, err = base.Stat(name)
+	admission, _ := verifyProofOf(t, base, src)
+	proof := func(path string, info os.FileInfo) error {
+		if path == dst {
+			return errors.New("post-link admission rejected")
 		}
-		if info == nil || err != nil {
-			return info, false, err
-		}
-		return syslessInfo{info}, false, nil
+		return admission(path, info)
 	}
+	fs := &verifyHookFS{Fs: base}
 	fs.openFile = func(name string, flag int, perm os.FileMode) (afero.File, error) {
 		if flag&os.O_EXCL != 0 && strings.Contains(name, ".vac.") {
 			return nil, errors.New("terminal claim denied")

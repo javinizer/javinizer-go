@@ -79,6 +79,19 @@ func (f *cleanupRevalidationFS) plant(path string) error {
 	return f.Fs.Chtimes(path, stamp, stamp)
 }
 
+func (f *cleanupRevalidationFS) Open(path string) (afero.File, error) {
+	file, err := f.Fs.Open(path)
+	if err == nil && !f.fired && f.swapAt == "retry" && strings.Contains(path, artifactStageQuarantineMark) {
+		if info, statErr := file.Stat(); statErr == nil && info.IsDir() {
+			if err := f.plant(path); err != nil {
+				_ = file.Close()
+				return nil, err
+			}
+		}
+	}
+	return file, err
+}
+
 func (f *cleanupRevalidationFS) OpenFile(path string, flag int, mode os.FileMode) (afero.File, error) {
 	if !f.fired && f.swapAt == "completion stamp" && strings.HasPrefix(path, filepath.Join(f.root, artifactStageManifestName)+".jv-stage.") {
 		if err := f.plant(f.root); err != nil {
