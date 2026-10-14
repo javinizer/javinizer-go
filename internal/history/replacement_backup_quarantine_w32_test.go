@@ -459,11 +459,11 @@ func TestRestoreReplacementJournalW32_PendingCleanPresenceDivergenceRestoresBack
 // name is absent by construction. The explicit revert then converges
 // journal-only.
 func TestRestoreReplacementJournalW32_VanishedUnlinkUpgradesToJournalOnlyKind(t *testing.T) {
-	base := afero.NewMemMapFs()
+	base := afero.NewOsFs()
 	fs := &w8RemoveFs{Fs: base, notExist: true, fail: true}
 	repo := newP3OpRepo()
-	op, dest, backup := w25ArmedOp(t, fs, repo, "W32V", []byte("new poster"), []byte("original poster"), "stamped")
-	fs.victim = backup
+	op, dest, backup := w25ArmedOpInDir(t, fs, repo, t.TempDir(), "W32V", []byte("new poster"), []byte("original poster"), "stamped")
+	fs.victim = filepath.ToSlash(backup)
 
 	_, err := NewReverter(fs, repo).restoreReplacementJournal(context.Background(), op)
 	require.Error(t, err)
@@ -489,9 +489,9 @@ func TestRestoreReplacementJournalW32_VanishedUnlinkUpgradesToJournalOnlyKind(t 
 // the entry ARMED (never restore-pending), the backup restored to its
 // journaled name, the restored destination untouched.
 func TestSweepW32_ArmedLegPostQuarantineDivergenceRetainsArmed(t *testing.T) {
-	fs := afero.NewMemMapFs()
+	fs := afero.NewOsFs()
 	repo := newP3OpRepo()
-	op, dest, backup := w25SweepCrashOp(t, fs, repo, "W32B", []byte("original bytes"), "stamped")
+	op, dest, backup := w25SweepCrashOpInDir(t, fs, repo, t.TempDir(), "W32B", []byte("original bytes"), "stamped")
 
 	w32ScriptRestoredDestSeam(t, true, false)
 
@@ -505,7 +505,7 @@ func TestSweepW32_ArmedLegPostQuarantineDivergenceRetainsArmed(t *testing.T) {
 	entries := w25JournalEntries(t, repo, op.ID)
 	require.Len(t, entries, 1)
 	require.False(t, entries[0].RestorePending, "the entry stays ARMED — no marker against an unproven destination")
-	require.Empty(t, w26DirQuarNames(t, fs, "/dst/W32B"))
+	require.Empty(t, w26DirQuarNames(t, fs, filepath.Dir(backup)))
 }
 
 // R1 — sweeper ALREADY-CONSUMED leg: post-quarantine divergence restores the
