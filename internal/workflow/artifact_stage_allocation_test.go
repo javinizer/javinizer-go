@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -165,7 +166,7 @@ func TestAllocateArtifactStageApplyPlacement(t *testing.T) {
 			parent := filepath.Join(string(filepath.Separator), "library")
 			dest := filepath.Join(parent, "movie")
 			require.NoError(t, fs.MkdirAll(dest, 0o755))
-			root, err := allocateArtifactStageForApply(fs, dest, ApplyCmd{OperationMode: tc.mode, Organize: OrganizeOptions{MoveFiles: tc.move, Skip: tc.skip}})
+			root, err := (&applyOrchImpl{fs: fs}).allocateArtifactStageForApply(context.Background(), dest, ApplyCmd{OperationMode: tc.mode, Organize: OrganizeOptions{MoveFiles: tc.move, Skip: tc.skip}})
 			require.NoError(t, err)
 			want := dest
 			if tc.sibling {

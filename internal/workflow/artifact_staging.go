@@ -158,7 +158,7 @@ func (o *applyOrchImpl) prepareArtifact(ctx context.Context, cmd ApplyCmd) (*art
 		}
 		duplicatePlan = plan
 	}
-	root, err := allocateArtifactStageForApply(o.fs, finalRoot, cmd)
+	root, err := o.allocateArtifactStageForApply(ctx, finalRoot, cmd)
 	if err != nil {
 		return nil, cmd, err
 	}

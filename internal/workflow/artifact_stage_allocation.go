@@ -1,24 +1,59 @@
 package workflow
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 
-	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
+	"github.com/javinizer/javinizer-go/internal/organizer"
 	"github.com/spf13/afero"
 )
 
 // In-place copy planning renames the staging directory beside the source;
 // its parent is part of the output layout, not just a temporary location.
-func allocateArtifactStageForApply(fs afero.Fs, finalRoot string, cmd ApplyCmd) (string, error) {
+func (o *applyOrchImpl) allocateArtifactStageForApply(ctx context.Context, finalRoot string, cmd ApplyCmd) (string, error) {
 	if cmd.OperationMode == operationmode.OperationModeInPlace && !cmd.Organize.Skip && !cmd.Organize.MoveFiles {
-		return allocateArtifactStageAt(fs, filepath.Dir(finalRoot), finalRoot)
+		return allocateArtifactStageAt(o.fs, filepath.Dir(finalRoot), finalRoot)
 	}
-	return allocateArtifactStage(fs, finalRoot)
+	root, err := allocateArtifactStage(o.fs, finalRoot)
+	if err == nil || (!errors.Is(err, os.ErrPermission) && !errors.Is(err, syscall.EROFS)) || cmd.Organize.Skip || (cmd.OperationMode != "" && cmd.OperationMode != operationmode.OperationModeOrganize) {
+		return root, err
+	}
+	// A read-only library root can contain an existing writable movie folder.
+	// Stage in that planned folder, never beside the root: even equal device
+	// IDs do not prove rename compatibility across a bind mount.
+	planner, ok := o.organizer.(artifactPlanExecutor)
+	if !ok {
+		return "", err
+	}
+	plan, planErr := planner.PlanOrganize(ctx, organizer.OrganizeCmd{Match: cmd.Match, Movie: cmd.Movie, DestDir: finalRoot, ForceUpdate: cmd.Organize.ForceUpdate, MoveFiles: cmd.Organize.MoveFiles, LinkMode: cmd.Organize.LinkMode, OperationMode: cmd.OperationMode, ForceRenameFile: cmd.Organize.ForceRenameFile})
+	if planErr != nil {
+		return "", errors.Join(err, fmt.Errorf("plan artifact staging destination: %w", planErr))
+	}
+	if plan == nil || plan.TargetDir == "" || filepath.Clean(plan.TargetDir) == filepath.Clean(finalRoot) {
+		return "", err
+	}
+	rel, relErr := filepath.Rel(finalRoot, plan.TargetDir)
+	if relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", errors.Join(err, fmt.Errorf("artifact staging destination is outside library: %s", plan.TargetDir))
+	}
+	info, statErr := o.fs.Stat(plan.TargetDir)
+	if statErr != nil {
+		return "", errors.Join(err, fmt.Errorf("inspect artifact staging destination: %w", statErr))
+	}
+	if !info.IsDir() {
+		return "", errors.Join(err, fmt.Errorf("artifact staging destination is not a directory: %s", plan.TargetDir))
+	}
+	root, fallbackErr := allocateArtifactStageAt(o.fs, plan.TargetDir, "")
+	if fallbackErr != nil {
+		return "", errors.Join(err, fallbackErr)
+	}
+	return root, nil
 }
 
 func allocateArtifactStage(fs afero.Fs, finalRoot string) (string, error) {
@@ -31,16 +66,6 @@ func allocateArtifactStage(fs afero.Fs, finalRoot string) (string, error) {
 	// equal device IDs alone do not rule out an EXDEV boundary at a bind mount.
 	if info, err := fs.Stat(finalRoot); err == nil && info.IsDir() {
 		fallback = ""
-		if parentInfo, parentErr := fs.Stat(parent); parentErr == nil {
-			destDevice, _, destKnown := fsutil.BoundObjectIdentity(fs, finalRoot, info)
-			parentDevice, _, parentKnown := fsutil.BoundObjectIdentity(fs, parent, parentInfo)
-			if destKnown && parentKnown && destDevice == parentDevice {
-				// Preserve the legacy permission fallback for a read-only library
-				// root with writable movie subdirectories, but never fall back
-				// across a known filesystem boundary or an unproven device.
-				fallback = parent
-			}
-		}
 		parent = finalRoot
 	}
 	return allocateArtifactStageAt(fs, parent, fallback)
