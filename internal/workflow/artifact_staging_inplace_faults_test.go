@@ -14,10 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// In-place modes keep the staged video copy, so the fenced publication still
-// runs the non-deferred cleanup block: inverse journal, rollback origin, and
-// the post-publish original removal. Each error leg must stay fail-closed.
-func TestInPlacePublicationCleanupFaults(t *testing.T) {
+func TestInPlaceLegacyStagedPublicationCleanupFaults(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		want string
@@ -51,14 +48,15 @@ func TestInPlacePublicationCleanupFaults(t *testing.T) {
 			cmd := pr260ArtifactFailureCommand(&movie, match, filepath.Dir(source))
 			cmd.OperationMode = operationmode.OperationModeInPlaceNoRenameFolder
 			cmd.Organize.Skip = false
-			cmd.Organize.MoveFiles = true
+			cmd.Organize.MoveFiles = false
 			cmd.Download = false
 			cmd.PublicationFence = postPublishFence{movie: &movie}
 			stage, _, err := orch.prepareArtifact(context.Background(), cmd)
 			require.NoError(t, err)
 			require.NotNil(t, stage)
 			defer stage.cleanup()
-			require.False(t, stage.videoStagingDeferred(), "in-place keeps a staged copy")
+			require.False(t, stage.videoStagingDeferred(), "legacy in-place stages retain their copied payload")
+			stage.original.Organize.MoveFiles = true
 			state := &applyPipelineState{operationID: "op", organizeResult: &organizer.OrganizeResult{NewPath: stage.stagedSource}}
 			publishErr := stage.publish(context.Background(), orch, state, nil)
 			require.ErrorContains(t, publishErr, tc.want)

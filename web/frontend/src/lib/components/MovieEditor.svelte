@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import * as m from '$lib/paraglide/messages';
 	import type { Movie, Genre, FieldDifference } from '$lib/api/types';
 	import { apiClient } from '$lib/api/client';
@@ -38,14 +39,15 @@
 	let previewGeneration = 0;
 
 	const previewSignature = $derived(buildDisplayTitlePreviewSignature(editedMovie));
+	const previewRequestKey = $derived(JSON.stringify([jobId ?? '', resultId ?? '', previewSignature]));
 
 	let previewTargetKey = '';
 
 	$effect(() => {
-		const sig = previewSignature;
-		const jid = jobId;
-		const rid = resultId;
-		const targetKey = `${jid ?? ''}/${rid ?? ''}`;
+		const [jid, rid] = JSON.parse(previewRequestKey) as [string, string, string];
+		const gen = ++previewGeneration;
+		clearTimeout(previewTimer);
+		const targetKey = JSON.stringify([jid, rid]);
 		if (targetKey !== previewTargetKey) {
 			previewTargetKey = targetKey;
 			previewDisplayTitle = null;
@@ -60,11 +62,9 @@
 		}
 		previewLoading = true;
 		previewError = false;
-		clearTimeout(previewTimer);
 		// stale-while-revalidate: keep the last rendered title visible; a
 		// refire (including poll-driven rebases) must not blank the pane.
-		const snapshot = { ...editedMovie };
-		const gen = ++previewGeneration;
+		const snapshot = untrack(() => ({ ...editedMovie }));
 		previewTimer = setTimeout(async () => {
 			try {
 				const resp = await apiClient.previewDisplayTitle(jid, rid, { movie: snapshot });
