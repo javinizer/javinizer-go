@@ -179,8 +179,11 @@ func (o *applyOrchImpl) prepareArtifact(ctx context.Context, cmd ApplyCmd) (*art
 		}
 		duplicatePlan = plan
 	}
-	root, err := allocateArtifactStage(o.fs, finalRoot)
+	root, err := o.allocateArtifactStageForApply(ctx, finalRoot, cmd, duplicatePlan)
 	if err != nil {
+		if duplicatePlan != nil {
+			cmd.Organize.DuplicateTracker.ReleaseClaim(duplicatePlan.SourcePath, duplicatePlan.TargetPath)
+		}
 		return nil, cmd, err
 	}
 	writeArtifactStageManifest(o.fs, root)

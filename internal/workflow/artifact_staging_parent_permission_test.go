@@ -54,7 +54,7 @@ func TestArtifactStageParentUnexpectedErrorRefusesFallback(t *testing.T) {
 	fs, root, source, _, _, _, match := pr260FencedFiles(t, "parent-io-error")
 	denied := errors.New("unrelated parent IO failure")
 	wrapped := &deniedStageParentFS{Fs: fs, parent: root, denied: denied}
-	cmd := pr260ArtifactFailureCommand(&models.Movie{ContentID: "parent-io-error"}, match, filepath.Dir(source))
+	cmd := pr260ArtifactFailureCommand(&models.Movie{ContentID: "parent-io-error"}, match, filepath.Join(root, "library"))
 	_, _, err := (&applyOrchImpl{fs: wrapped}).prepareArtifact(context.Background(), cmd)
 	require.ErrorIs(t, err, denied)
 	pr260AssertStageGone(t, fs, filepath.Dir(source))
@@ -102,4 +102,31 @@ func TestArtifactStageParentNativeReadonlyParent(t *testing.T) {
 	stage.cleanup()
 	require.NoFileExists(t, source)
 	pr260AssertStageGone(t, fs, folder)
+}
+
+func TestArtifactStageNativeReadonlyLibraryRoot(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("requires native POSIX permission enforcement")
+	}
+	fs := afero.NewOsFs()
+	parent := t.TempDir()
+	library := filepath.Join(parent, "library")
+	movieDir := filepath.Join(library, "movie")
+	require.NoError(t, fs.MkdirAll(movieDir, 0o755))
+	source := filepath.Join(parent, "ABC-123.mkv")
+	require.NoError(t, afero.WriteFile(fs, source, []byte("video"), 0o644))
+	require.NoError(t, fs.Chmod(library, 0o555))
+	t.Cleanup(func() { _ = fs.Chmod(library, 0o755) })
+	require.ErrorIs(t, afero.WriteFile(fs, filepath.Join(library, "probe"), nil, 0o600), os.ErrPermission)
+
+	movie := models.Movie{ID: "ABC-123", ContentID: "readonly-library-root", RenderGeneration: 1}
+	orch := pr260RealApply(fs, &movie, organizer.MediaFormatConfig{}, nil, true)
+	orch.organizer = organizer.NewOrganizer(fs, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize}, template.NewEngine(), nil)
+	cmd := ApplyCmd{Movie: &movie, PublicationFence: postPublishFence{movie: &movie}, Match: models.FileMatchInfo{Path: source, Name: filepath.Base(source), Extension: ".mkv"}, DestPath: library, Organize: OrganizeOptions{MoveFiles: true}, GenerateNFO: true, OperationMode: operationmode.OperationModeOrganize}
+	result, err := orch.Execute(context.Background(), cmd)
+	require.NoError(t, err)
+	require.FileExists(t, result.OrganizeResult.NewPath)
+	require.FileExists(t, result.NFOPath)
+	require.NoFileExists(t, source)
+	pr260AssertStageGone(t, fs, parent)
 }

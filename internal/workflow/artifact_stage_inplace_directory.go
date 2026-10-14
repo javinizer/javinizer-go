@@ -184,6 +184,9 @@ func (s *artifactStage) rebaseInPlaceDirectory(oldDir, newDir string, state *app
 		state.organizeResult.FolderPath = rebase(state.organizeResult.FolderPath)
 	}
 	state.finalDir, state.targetDir, state.nfoPath, state.foundNFOPath = rebase(state.finalDir), rebase(state.targetDir), rebase(state.nfoPath), rebase(state.foundNFOPath)
+	for i := range state.downloadPaths {
+		state.downloadPaths[i] = rebase(state.downloadPaths[i])
+	}
 }
 
 func (s *artifactStage) directoryOriginalPath(path string) string {

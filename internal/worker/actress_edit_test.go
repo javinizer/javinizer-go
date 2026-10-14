@@ -17,8 +17,32 @@ func newActressEditTestDB(t *testing.T) *database.DB {
 	db, err := database.New(cfg)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
+	// A canceled transaction may discard its connection. Keep the shared-memory
+	// database alive even when all connections used by the tests are replaced.
+	sqlDB, err := db.DB.DB()
+	require.NoError(t, err)
+	keepAlive, err := sqlDB.Conn(context.Background())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = keepAlive.Close() })
 	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
 	return db
+}
+
+func TestActressEditTestDB_SurvivesConnectionReplacement(t *testing.T) {
+	db := newActressEditTestDB(t)
+	movie := models.Movie{ContentID: "fixture-lifecycle", ID: "FIXTURE-LIFECYCLE", Title: "Retained movie"}
+	require.NoError(t, db.Create(&movie).Error)
+
+	sqlDB, err := db.DB.DB()
+	require.NoError(t, err)
+	// Force all pooled connections to close, as can happen after cancellation.
+	// The fixture must keep its schema and data when a new connection opens.
+	sqlDB.SetMaxIdleConns(0)
+
+	persisted, err := db.Repositories().MovieRepo.FindByID(context.Background(), movie.ID)
+	require.NoError(t, err)
+	assert.Equal(t, movie.ContentID, persisted.ContentID)
+	assert.Equal(t, movie.Title, persisted.Title)
 }
 
 func seedCuratedActress(t *testing.T, repo database.ActressRepositoryInterface) models.Actress {

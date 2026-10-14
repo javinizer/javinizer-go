@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/downloader"
@@ -439,10 +440,13 @@ func (o *applyOrchImpl) stepOrganize(ctx context.Context, cmd ApplyCmd, state *a
 		if !ok {
 			return fmt.Errorf("video-deferred organize requires the organizer planning seam")
 		}
-		if state.artifact.inPlace {
+		organizeToDestination := cmd.OperationMode == "" || cmd.OperationMode == operationmode.OperationModeOrganize
+		if state.artifact.inPlace || organizeToDestination {
+			// Apply path budgets to the real destination. A temporary stage
+			// beneath the movie folder must not consume that budget twice.
 			organizeCmd.Match = state.artifact.original.Match
 			organizeCmd.Match.Path = state.artifact.sourcePath
-			organizeCmd.DestDir = state.artifact.original.DestPath
+			organizeCmd.DestDir = state.artifact.finalRoot
 		}
 		plan, planErr := planner.PlanOrganize(ctx, organizeCmd)
 		if planErr != nil {
@@ -454,6 +458,15 @@ func (o *applyOrchImpl) stepOrganize(ctx context.Context, cmd ApplyCmd, state *a
 				return err
 			}
 			targetDir = state.artifact.root
+			targetPath = filepath.Join(targetDir, filepath.Base(plan.TargetPath))
+		} else if organizeToDestination {
+			rel, relErr := filepath.Rel(state.artifact.finalRoot, plan.TargetDir)
+			if relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+				return fmt.Errorf("planned artifact path escapes destination: %s", plan.TargetDir)
+			}
+			// Keep the final relative layout so NFO merging and publication
+			// map temporary paths back to the same canonical output paths.
+			targetDir = filepath.Join(state.artifact.root, rel)
 			targetPath = filepath.Join(targetDir, filepath.Base(plan.TargetPath))
 		}
 		state.organizeResult = &organizer.OrganizeResult{

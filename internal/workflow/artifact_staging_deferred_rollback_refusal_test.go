@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -13,6 +12,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/javinizer/javinizer-go/internal/database"
+	"github.com/javinizer/javinizer-go/internal/downloader"
+	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/nfo"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
@@ -113,50 +114,26 @@ func TestDeferredMoveRollbackArmRefusesMissingPrimaryIdentity(t *testing.T) {
 	assert.ErrorContains(t, err, "missing bound installed identity")
 }
 
-// driftAtArmWindowFS plants drifted bytes at the installed video target
-// exactly between the bound primary observation and the deferred rollback
-// arm: the preferred arm cannot bind the drifted occupant, the alternate
-// anchor names the same drifted object, and both refusals surface joined.
-// The window is pinned to the publication's probe sequence of the target —
-// fixed by the pipeline's own call order.
-type driftAtArmWindowFS struct {
-	afero.Fs
-	calls int
-	fired bool
-}
-
-const deferredArmWindowProbe = 9
-
-func (fs *driftAtArmWindowFS) LstatIfPossible(name string) (os.FileInfo, bool, error) {
-	if l, ok := fs.Fs.(afero.Lstater); ok {
-		info, _, err := l.LstatIfPossible(name)
-		if !fs.fired && filepath.Ext(name) == ".mp4" && strings.Contains(name, "library") && !strings.Contains(name, "-cd") {
-			fs.calls++
-			if fs.calls == deferredArmWindowProbe {
-				fs.fired = true
-				_ = afero.WriteFile(fs.Fs, name, []byte("drifted install bytes"), 0o644)
-			}
-		}
-		return info, true, err
-	}
-	info, err := fs.Fs.Stat(name)
-	return info, false, err
-}
-
+// Plant drift immediately after the bound primary observation, instead of
+// counting target probes: read-only planning may legitimately probe the final
+// path before publication and must not move this safety test's fault window.
 func TestDeferredMoveRollbackArmJoinsRefusalsWhenBothAnchorsDrift(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		// The drift write lands inside the observation's re-derivation: the
-		// Windows handle-based identity refuses earlier (via the
-		// strong-identity-not-rederivable bound arm) rather than at the joined
-		// anchor arms. The join is exercised by the POSIX coverage runs.
-		t.Skip("windows refuses mid-observation through its handle identity twin")
+	env := buildDeferredArmEnv(t, "arm-drift-joined", nil, nil)
+	oldObserve := observeBoundPrimaryPublish
+	t.Cleanup(func() { observeBoundPrimaryPublish = oldObserve })
+	fired := false
+	observeBoundPrimaryPublish = func(batch *downloader.ReplacementBatch, target string, identity *fsutil.BoundInstallIdentity) error {
+		if err := oldObserve(batch, target, identity); err != nil {
+			return err
+		}
+		fired = true
+		require.NoError(t, afero.WriteFile(env.fs, target, []byte("drifted install bytes"), 0o644))
+		return nil
 	}
-	probe := &driftAtArmWindowFS{}
-	env := buildDeferredArmEnv(t, "arm-drift-joined", func(base afero.Fs) afero.Fs { probe.Fs = base; return probe }, nil)
 	cmd := pr260FencedCommand(&env.movie, env.match, env.dest, pr260FencedCounter(t, env.db), operationmode.OperationModeOrganize, false, true, organizer.LinkModeNone, false, false)
 	_, err := env.orch.Execute(t.Context(), cmd)
 	require.Error(t, err)
-	require.True(t, probe.fired, "the drift actually landed inside the arm window")
+	require.True(t, fired, "the drift actually landed inside the arm window")
 	assert.ErrorContains(t, err, "no longer names its bound installed output")
 	assert.Equal(t, 2, strings.Count(err.Error(), "no longer names its bound installed output"),
 		"both the preferred and the alternate anchor refused, joined")
