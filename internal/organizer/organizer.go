@@ -633,6 +633,9 @@ func (o *Organizer) ExecuteOrganizePlan(plan *OrganizePlan, moveFiles bool, link
 	plan.moveFiles = moveFiles
 	if !moveFiles {
 		plan.LinkMode = linkMode
+	} else if plan.verifiedSourceProof != nil && (plan.strategy == strategyInPlace || plan.strategy == strategyInPlaceNoRenameFolder) {
+		plan.InPlace, plan.RenameFolder = false, false
+		plan.executeStrategy = o.strategyFromType(strategyOrganize)
 	}
 	if !plan.overwriteAuthorized {
 		if issues := o.validatePlan(plan); len(issues) > 0 {

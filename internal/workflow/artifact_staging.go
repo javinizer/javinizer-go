@@ -59,6 +59,8 @@ type artifactStage struct {
 	finalRoot          string
 	sourcePath         string
 	sourceIdentity     artifactSourceIdentity
+	sourceDirIdentity  artifactStageDirIdentity
+	directoryMove      *artifactInPlaceDirectoryMove
 	stagedSource       string
 	siblings           []artifactSibling
 	inPlace            bool
@@ -156,13 +158,9 @@ func (o *applyOrchImpl) prepareArtifact(ctx context.Context, cmd ApplyCmd) (*art
 		}
 		duplicatePlan = plan
 	}
-	sweepArtifactStaging(o.fs, filepath.Dir(finalRoot))
-	if err := o.fs.MkdirAll(filepath.Dir(finalRoot), 0o755); err != nil {
-		return nil, cmd, fmt.Errorf("create artifact staging parent: %w", err)
-	}
-	root, err := afero.TempDir(o.fs, filepath.Dir(finalRoot), artifactStageDirPrefix)
+	root, err := allocateArtifactStage(o.fs, finalRoot)
 	if err != nil {
-		return nil, cmd, fmt.Errorf("create artifact staging area: %w", err)
+		return nil, cmd, err
 	}
 	writeArtifactStageManifest(o.fs, root)
 	stage := &artifactStage{fs: o.fs, fencer: artifactFencer(cmd), root: root, finalRoot: finalRoot, sourcePath: cmd.Match.Path, inPlace: inPlace, original: cmd, duplicatePlan: duplicatePlan}
@@ -192,13 +190,22 @@ func (o *applyOrchImpl) prepareArtifact(ctx context.Context, cmd ApplyCmd) (*art
 		// sourcePath directly after the merge/download/NFO interval and must
 		// re-prove it still names THIS file before any byte moves or copies.
 		stage.sourceIdentity = captureArtifactSourceIdentity(o.fs, sourcePath, sourceInfo)
+		if inPlace && cmd.Organize.MoveFiles {
+			dir := filepath.Dir(sourcePath)
+			dirInfo, dirErr := lstatArtifactStageDir(o.fs, dir)
+			if dirErr != nil {
+				stage.cleanup()
+				return nil, cmd, fmt.Errorf("admit in-place source directory: %w", dirErr)
+			}
+			stage.sourceDirIdentity = captureArtifactStageDirIdentity(o.fs, dir, dirInfo)
+		}
 		base := filepath.Base(sourcePath)
 		stagedDir := filepath.Join(root, ".source")
-		if inPlace {
+		if inPlace && !cmd.Organize.MoveFiles {
 			stagedDir = root
 		}
 		stage.stagedSource = filepath.Join(stagedDir, base)
-		if inPlace {
+		if inPlace && !cmd.Organize.MoveFiles {
 			if err := copyArtifactFile(o.fs, sourcePath, stage.stagedSource, sourceInfo.Mode().Perm()); err != nil {
 				stage.cleanup()
 				return nil, cmd, err
@@ -230,7 +237,7 @@ func (o *applyOrchImpl) prepareArtifact(ctx context.Context, cmd ApplyCmd) (*art
 				continue
 			}
 			admitted := artifactSibling{sourcePath: sibling, identity: captureArtifactSourceIdentity(o.fs, sibling, siblingInfo)}
-			if !inPlace && cmd.Organize.MoveFiles && isStagedArtifactVideoExtension(strings.ToLower(filepath.Ext(entry.Name()))) {
+			if cmd.Organize.MoveFiles && isStagedArtifactVideoExtension(strings.ToLower(filepath.Ext(entry.Name()))) {
 				// Defer multipart video siblings with the primary in MOVE flows
 				// (codex P2, PRRT_kwDORn9KaM6rLI28): the publication installs
 				// them straight off the real source by the verified move lane,
@@ -496,6 +503,9 @@ func (s *artifactStage) publish(ctx context.Context, o *applyOrchImpl, state *ap
 		if rollbackErr := s.completedBatch.Rollback(context.WithoutCancel(ctx)); rollbackErr != nil {
 			s.sharedPoisoned = true
 			returnErr = errors.Join(returnErr, fmt.Errorf("rollback staged publication after fence failure: %w", rollbackErr))
+		} else if directoryErr := s.rollbackInPlaceDirectory(context.WithoutCancel(ctx), o, state); directoryErr != nil {
+			s.sharedPoisoned = true
+			returnErr = errors.Join(returnErr, directoryErr)
 		} else if s.directOriginArmed {
 			s.sourceCleanupArmed = false
 			s.directOriginArmed = false
@@ -534,6 +544,9 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 				s.unresolvedBatch = batch
 				s.sharedPoisoned = true
 				returnErr = errors.Join(returnErr, fmt.Errorf("rollback staged publication: %w", rollbackErr))
+			} else if directoryErr := s.rollbackInPlaceDirectory(context.WithoutCancel(ctx), o, state); directoryErr != nil {
+				s.sharedPoisoned = true
+				returnErr = errors.Join(returnErr, directoryErr)
 			} else if s.directOriginArmed {
 				// The rollback moved the video back onto the source path: the
 				// apply terminates pre-publication despite the armed marker.
@@ -585,6 +598,9 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 		if state.organizeResult.DuplicateSkipped {
 			return nil
 		}
+		if err := s.relocateInPlaceDirectory(ctx, o, opID, state); err != nil {
+			return err
+		}
 		stagedVideo = state.organizeResult.NewPath
 		if stagedVideo == "" {
 			stagedVideo = s.stagedSource
@@ -609,12 +625,18 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 		}
 		artifactDestinations, preflightErr := s.treeDestinations(stagedVideo, filepath.Dir(s.stagedSource), filepath.Dir(stagedVideo), plan.TargetDir)
 		if s.inPlace {
-			videoInstalledByTree = filepath.Clean(plan.SourcePath) == filepath.Clean(plan.TargetPath)
-			skipVideo := stagedVideo
+			videoInstalledByTree = !s.videoDeferred && filepath.Clean(plan.SourcePath) == filepath.Clean(plan.TargetPath)
+			skipVideo, skipSource := stagedVideo, ""
+			if s.videoDeferred {
+				if err := s.setInPlaceFinalRoot(plan.TargetDir); err != nil {
+					return err
+				}
+				skipSource = filepath.Dir(s.stagedSource)
+			}
 			if videoInstalledByTree {
 				skipVideo = ""
 			}
-			artifactDestinations, preflightErr = s.treeDestinations(skipVideo, "", "", "")
+			artifactDestinations, preflightErr = s.treeDestinations(skipVideo, skipSource, "", "")
 		}
 		if preflightErr != nil {
 			return preflightErr
@@ -652,6 +674,9 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 			plan = guardedPlan
 			batch.YieldToLockedPublisher(plan.TargetPath)
 		}
+		if s.inPlace && s.videoDeferred {
+			plan.InPlace, plan.RenameFolder = false, false
+		}
 		// Bind the prepare-time admission BEFORE the first subtitle probe
 		// (codex P2, PRRT_kwDORn9KaM6nnjvh): the probes below rescan the
 		// source directory by name, so a regular subtitle materializing after
@@ -675,7 +700,7 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 		// reads it via the MoveBack channel and can tell it apart from an
 		// executed move (no completion columns are touched).
 		if s.videoDeferred && publishMove && filepath.Clean(plan.SourcePath) != filepath.Clean(plan.TargetPath) && o.revertLog != nil && opID != "" {
-			if err := o.revertLog.RecordMoveIntent(ctx, opID, plan.SourcePath, plan.TargetPath); err != nil {
+			if err := o.revertLog.RecordMoveIntent(ctx, opID, s.directoryOriginalPath(plan.SourcePath), plan.TargetPath); err != nil {
 				return fmt.Errorf("persist inverse before direct video publication: %w", err)
 			}
 			// Subtitles move inside the same execution: their endpoints are known
@@ -704,7 +729,7 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 					continue
 				}
 				journaledSubtitleEndpoints[filepath.Clean(mv.NewPath)] = true
-				if err := o.revertLog.RecordMoveIntent(ctx, opID, mv.OriginalPath, mv.NewPath); err != nil {
+				if err := o.revertLog.RecordMoveIntent(ctx, opID, s.directoryOriginalPath(mv.OriginalPath), mv.NewPath); err != nil {
 					return fmt.Errorf("persist inverse before subtitle publication: %w", err)
 				}
 			}
@@ -829,6 +854,7 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 			plan.BindVerifiedSubtitleSources(s.siblingSourceProofs())
 		}
 		finalResult, err = executor.ExecuteOrganizePlan(plan, publishMove, s.original.Organize.LinkMode)
+		s.annotateInPlaceDirectory(finalResult)
 		if filepath.Clean(plan.SourcePath) != filepath.Clean(plan.TargetPath) && (err == nil || fsutil.PublishCompleted(err)) {
 			// An explicitly-unproven successor is NOT this batch's installed
 			// output (codex P1, PRRT_kwDORn9KaM6nsX9a): the verified hard-link
@@ -1028,7 +1054,7 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 		if finalReplaced {
 			finalResult.Warnings = append(finalResult.Warnings, organizer.AuthorizedOverwriteWarning(plan.TargetPath))
 		}
-		finalResult.OriginalPath = s.sourcePath
+		finalResult.OriginalPath = s.directoryOriginalPath(s.sourcePath)
 	}
 	// A deferred-video move consumed the original source during the plan
 	// execution above: persist the inverse immediately so the rename→ledger
@@ -1090,7 +1116,7 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 			// destination over its source.
 			keep := make([]models.FileMove, 0, len(finalResult.Subtitles)+1)
 			if !primarySuccessorRefused {
-				keep = append(keep, models.FileMove{OriginalPath: s.sourcePath, NewPath: finalResult.NewPath})
+				keep = append(keep, models.FileMove{OriginalPath: s.directoryOriginalPath(s.sourcePath), NewPath: finalResult.NewPath})
 			}
 			for _, sr := range finalResult.Subtitles {
 				// Publish-completed moves keep their intent (codex P1,
@@ -1099,7 +1125,7 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 				// is exactly the vacancy-gated compensation the reverter runs
 				// for an install whose claimed-source cleanup refused.
 				if (sr.Moved || fsutil.PublishCompleted(sr.Error)) && sr.OriginalPath != "" && sr.NewPath != "" {
-					keep = append(keep, models.FileMove{OriginalPath: sr.OriginalPath, NewPath: sr.NewPath})
+					keep = append(keep, models.FileMove{OriginalPath: s.directoryOriginalPath(sr.OriginalPath), NewPath: sr.NewPath})
 				}
 			}
 			if err := o.revertLog.ReconcileMoveIntents(ctx, opID, keep); err != nil {
@@ -1150,7 +1176,7 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 		}
 	}
 	artifactSkipDir := filepath.Dir(s.stagedSource)
-	if s.inPlace {
+	if s.inPlace && !s.videoDeferred {
 		artifactSkipDir = ""
 	}
 	stagedArtifactDir := ""
@@ -1275,7 +1301,7 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 					return armErr
 				}
 				if o.revertLog != nil && opID != "" {
-					if err := o.revertLog.RecordMoveIntent(ctx, opID, sibling.sourcePath, target); err != nil {
+					if err := o.revertLog.RecordMoveIntent(ctx, opID, s.directoryOriginalPath(sibling.sourcePath), target); err != nil {
 						return fmt.Errorf("journal deferred sibling move intent: %w", err)
 					}
 				}
@@ -1414,7 +1440,7 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 				// staged sibling (e.g. a multipart sibling video published through
 				// the sidecar block) has no other durable entry if the process dies
 				// before the outcome completion.
-				if err := o.revertLog.RecordMoveIntent(ctx, opID, sibling.sourcePath, target); err != nil {
+				if err := o.revertLog.RecordMoveIntent(ctx, opID, s.directoryOriginalPath(sibling.sourcePath), target); err != nil {
 					return fmt.Errorf("journal sibling move intent: %w", err)
 				}
 			}
@@ -1435,6 +1461,11 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 					_ = s.fs.Remove(oldDir)
 				}
 			}
+		}
+	}
+	if s.directoryMove != nil && finalResult != nil {
+		for i := range finalResult.Subtitles {
+			finalResult.Subtitles[i].OriginalPath = s.directoryOriginalPath(finalResult.Subtitles[i].OriginalPath)
 		}
 	}
 	committed = true

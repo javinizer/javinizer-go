@@ -369,7 +369,13 @@ func TestInPlaceOrganizerResultCannotEscapeOwnedStage(t *testing.T) {
 			}
 			state := &applyPipelineState{organizeResult: &organizer.OrganizeResult{NewPath: stage.stagedSource}}
 			err = stage.publish(t.Context(), orch, state, nil)
-			require.ErrorContains(t, err, "escapes staging area")
+			if field == "new path" {
+				require.ErrorContains(t, err, "no longer names its bound installed output")
+			} else {
+				require.ErrorContains(t, err, "escapes staging area")
+			}
+			require.FileExists(t, match.Path)
+			require.NoFileExists(t, outside+".mp4")
 		})
 	}
 }

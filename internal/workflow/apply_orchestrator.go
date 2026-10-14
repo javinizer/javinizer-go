@@ -436,14 +436,27 @@ func (o *applyOrchImpl) stepOrganize(ctx context.Context, cmd ApplyCmd, state *a
 		if !ok {
 			return fmt.Errorf("video-deferred organize requires the organizer planning seam")
 		}
+		if state.artifact.inPlace {
+			organizeCmd.Match = state.artifact.original.Match
+			organizeCmd.Match.Path = state.artifact.sourcePath
+			organizeCmd.DestDir = state.artifact.original.DestPath
+		}
 		plan, planErr := planner.PlanOrganize(ctx, organizeCmd)
 		if planErr != nil {
 			return planErr
 		}
+		targetDir, targetPath := plan.TargetDir, plan.TargetPath
+		if state.artifact.inPlace {
+			if err := state.artifact.setInPlaceFinalRoot(plan.TargetDir); err != nil {
+				return err
+			}
+			targetDir = state.artifact.root
+			targetPath = filepath.Join(targetDir, filepath.Base(plan.TargetPath))
+		}
 		state.organizeResult = &organizer.OrganizeResult{
-			NewPath:    plan.TargetPath,
-			FolderPath: plan.TargetDir,
-			FileName:   filepath.Base(plan.TargetPath),
+			NewPath:    targetPath,
+			FolderPath: targetDir,
+			FileName:   filepath.Base(targetPath),
 		}
 		if state.organizeResult.FolderPath != "" {
 			state.targetDir = state.organizeResult.FolderPath

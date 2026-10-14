@@ -21,12 +21,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The v1.6.x regression: organize mode copied every source video into a
-// hidden .javinizer-apply-* sibling folder even for "move" operations, which
-// on a network share doubled the transfer volume of large files. The video
-// must now be deferred to the fenced publication (same-volume move = rename),
-// while small sidecar siblings stay staged, and in-place modes keep their
-// real staged copy for directory-rename rollback.
 func TestPrepareArtifactOrganizeDefersVideoCopy(t *testing.T) {
 	base, root, source, subtitle, multipart, _, match := pr260FencedFiles(t, "defer-copy")
 	dest := filepath.Join(root, "library")
@@ -72,13 +66,13 @@ func TestPrepareArtifactOrganizeDefersVideoCopy(t *testing.T) {
 	assert.True(t, manifestExists, "ownership manifest stamped")
 }
 
-func TestPrepareArtifactInPlaceKeepsStagedVideoCopy(t *testing.T) {
+func TestPrepareArtifactInPlaceCopyKeepsStagedVideoCopy(t *testing.T) {
 	base, _, _, _, _, _, match := pr260FencedFiles(t, "defer-inplace")
 	cmd := ApplyCmd{
 		Movie:            &models.Movie{ContentID: "defer-inplace"},
 		PublicationFence: pr260FailureArtifactFencer{},
 		Match:            match,
-		Organize:         OrganizeOptions{MoveFiles: true},
+		Organize:         OrganizeOptions{MoveFiles: false},
 		Download:         true,
 		OperationMode:    operationmode.OperationModeInPlace,
 	}
@@ -144,7 +138,7 @@ func TestPrepareArtifactInPlaceStagedCopyFailureRetainsInputs(t *testing.T) {
 		Movie:            &models.Movie{ContentID: "inplace-copy-fault"},
 		PublicationFence: pr260FailureArtifactFencer{},
 		Match:            match,
-		Organize:         OrganizeOptions{MoveFiles: true},
+		Organize:         OrganizeOptions{MoveFiles: false},
 		Download:         true,
 		OperationMode:    operationmode.OperationModeInPlace,
 	}

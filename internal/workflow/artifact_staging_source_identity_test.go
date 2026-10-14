@@ -976,8 +976,8 @@ func TestInPlaceMoveAbortsRemovingOriginalOnIdentityProbeFailure(t *testing.T) {
 	state := &applyPipelineState{organizeResult: &organizer.OrganizeResult{NewPath: stage.stagedSource, InPlaceRenamed: true}}
 	publishErr := stage.publish(context.Background(), orch, state, nil)
 	require.ErrorIs(t, publishErr, errArtifactSourceChanged)
-	assert.Equal(t, int32(1), executesRun(counting),
-		"the staged copy executed; the refusal lands at the original-removal gate")
+	assert.Equal(t, int32(0), executesRun(counting),
+		"the deferred source is refused before any publication executes")
 	got, readErr := afero.ReadFile(base, standalone)
 	require.NoError(t, readErr)
 	assert.Equal(t, "isolated media", string(got), "the unprovable original survives untouched")
