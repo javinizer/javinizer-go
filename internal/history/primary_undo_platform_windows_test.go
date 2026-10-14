@@ -71,9 +71,18 @@ func TestPrimaryUndoWindowsSameVolumeRenameBypassesAdmissionGate(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Dir(source), 0755))
 	require.NoError(t, os.WriteFile(source, []byte("synthetic"), 0600))
 	op := &models.BatchFileOperation{OperationType: models.OperationTypeMove, NewPath: source, OriginalPath: dest}
-	result, err := revertPrimaryFileFS(context.Background(), afero.NewOsFs(), nil, op, func(string, string) {})
+	repo := newP3OpRepo()
+	require.NoError(t, repo.Create(context.Background(), op))
+	canonicalDir, err := fsutil.CanonicalizePath(filepath.Dir(dest))
 	require.NoError(t, err)
-	require.Nil(t, result)
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+	t.Logf("native same-volume inverse: cwd=%q source=%q destination=%q canonical-parent=%q", cwd, source, dest, canonicalDir)
+	result, err := revertPrimaryFileFS(context.Background(), afero.NewOsFs(), repo, op, func(string, string) {})
+	require.NoError(t, err)
+	if result != nil {
+		t.Fatalf("native same-volume inverse failed: reason=%s error=%s", result.Reason, result.Error)
+	}
 	require.NoFileExists(t, source)
 	got, err := os.ReadFile(dest)
 	require.NoError(t, err)
