@@ -132,10 +132,9 @@ func TestScrapeResultToMovieResult_FilenameTemplateEndToEnd(t *testing.T) {
 	assert.Equal(t, "IPX-535.mp4", gotExt) // <FILENAME_EXT> keeps the extension
 }
 
-// --- round 46a: the raw on-disk basename (round 40a) flows into the
-// filename tags fold-aware — the fullwidth extension is stripped from the
-// stem tag and folded in the ext tag at tag resolution, so it can never
-// leak into organized names while the metadata field stays raw ---
+// The worker preserves the raw on-disk basename. The stem tag strips
+// fullwidth extensions, while extension-inclusive tags retain the actual
+// filename rather than the scanner's synthetic classification spelling.
 
 func TestScrapeResultToMovieResult_FilenameTemplateFullwidthEndToEnd(t *testing.T) {
 	fmi := models.FileMatchInfo{
@@ -165,8 +164,13 @@ func TestScrapeResultToMovieResult_FilenameTemplateFullwidthEndToEnd(t *testing.
 
 	got, err = eng.Execute("<FILENAME_EXT>", ctx)
 	require.NoError(t, err)
-	assert.Equal(t, "RCT-156-HD.mkv", got,
-		"the ext-style tag yields the folded .mkv spelling")
+	assert.Equal(t, "RCT-156-HD．ｍｋｖ", got,
+		"the extension-inclusive tag preserves the original on-disk filename")
+
+	got, err = eng.Execute("<FILENAMEEXT>", ctx)
+	require.NoError(t, err)
+	assert.Equal(t, mr.Movie.OriginalFileName, got,
+		"the alias preserves the same raw metadata value")
 }
 
 // --- Clone: nil resultstore.MovieResult (line 146) ---

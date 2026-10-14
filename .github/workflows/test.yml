@@ -199,14 +199,16 @@ jobs:
     - name: Verify native Windows remaster filename contracts
       shell: python {0}
       run: |
-        import json, pathlib, subprocess
+        import json, pathlib, subprocess, sys
+
+        sys.stdout.reconfigure(encoding="utf-8")
 
         required = ['TestFindNFOMixedWidthSidecarPriority', 'TestNFOSidecarFoldStaysWithinFilename', 'TestNFOSidecarFoldRejectsWindowsDevices', 'TestTemplateFilenameTags_FullwidthExtension', 'TestSplitRawExtension_TemplateMirror', 'TestArtifactStagingFullwidthSubtitlePolicy', 'TestArtifactMatchName', 'TestArtifactStagingFullwidthRenamedStage', 'TestArtifactStagingFullwidthCaseAndMultipartSafety', 'TestArtifactStagingFullwidthMultipartPublication', 'TestArtifactStagingMixedWidthMultipartPublication', 'TestArtifactMixedWidthSiblingBoundaries', 'TestArtifactStagingMixedWidthCollisionFailsClosed', 'TestArtifactMixedWidthCollisionUsesActualSuffix']
         result = subprocess.run([
             "go", "test", "-short", "-count=1", "-json",
             "./internal/nfo", "./internal/workflow", "./internal/template",
             "-run", "^(" + "|".join(required) + ")$",
-        ], capture_output=True, text=True)
+        ], capture_output=True, text=True, encoding="utf-8")
         pathlib.Path("remaster-native-windows.jsonl").write_text(result.stdout, encoding="utf-8")
         print(result.stdout, end="")
         print(result.stderr, end="")
@@ -221,13 +223,15 @@ jobs:
     - name: Verify fixed native Windows NFO paths and collect coverage
       shell: python {0}
       run: |
-        import json, pathlib, subprocess
+        import json, pathlib, subprocess, sys
+
+        sys.stdout.reconfigure(encoding="utf-8")
 
         result = subprocess.run([
             "go", "test", "-short", "-count=1", "-json", "-covermode=atomic",
             "-coverprofile=coverage-nfo-native-windows.out",
             "./internal/history", "./internal/workflow", "-run", "^TestNFONative",
-        ], capture_output=True, text=True)
+        ], capture_output=True, text=True, encoding="utf-8")
         pathlib.Path("nfo-native-fixed.jsonl").write_text(result.stdout, encoding="utf-8")
         print(result.stdout, end="")
         print(result.stderr, end="")
