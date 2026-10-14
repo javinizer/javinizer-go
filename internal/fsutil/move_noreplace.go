@@ -456,7 +456,7 @@ func discardStagedAfterFailedPublish(fs afero.Fs, staged string, identity os.Fil
 
 // Native-backed wrappers still expose the streamed object's eager handle key.
 // Carry that producer key across the wrapper publication only after proving the
-// destination still names it. Never manufacture an original key by restatting
+// destination still names it. Never manufacture an original key by querying
 // the destination, and keep genuinely virtual handles weak.
 func verifiedWrapperCopyIdentity(fs afero.Fs, dst string, installed os.FileInfo, device, inode uint64, strong bool) (*BoundInstallIdentity, error) {
 	identity := newBoundInstallIdentity(installed, device, inode, strong)

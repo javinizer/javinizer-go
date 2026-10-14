@@ -198,5 +198,5 @@ func TestDeferredCopySidecarConfirmFailsClosedWhenDestinationIndeterminate(t *te
 	_, err := env.orch.Execute(t.Context(), cmd)
 	require.Error(t, err)
 	require.True(t, probe.fired, "the destination vanished inside the confirmation window")
-	assert.ErrorContains(t, err, "inspect staged publication result")
+	assert.ErrorContains(t, err, "bind copy-installed sidecar")
 }
