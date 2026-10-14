@@ -1,0 +1,42 @@
+[
+  {
+    "name": "credited alias",
+    "force_canonical": false,
+    "rendered_title": "Stage Alias",
+    "credits": [
+      {
+        "id": 9,
+        "actress_id": 7,
+        "credited_name": "Stage Alias",
+        "credited_japanese_name": "",
+        "reported_thumb_url": "",
+        "override_name": "",
+        "user_override": false,
+        "display_force_canonical": false,
+        "suppressed": false,
+        "order_index": 0,
+        "render_visible": true
+      }
+    ]
+  },
+  {
+    "name": "keep catalog",
+    "force_canonical": true,
+    "rendered_title": "Name Canonical",
+    "credits": [
+      {
+        "id": 9,
+        "actress_id": 7,
+        "credited_name": "Stage Alias",
+        "credited_japanese_name": "",
+        "reported_thumb_url": "",
+        "override_name": "",
+        "user_override": false,
+        "display_force_canonical": true,
+        "suppressed": false,
+        "order_index": 0,
+        "render_visible": true
+      }
+    ]
+  }
+]

@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import creditSelectionFixture from '../../../../../internal/api/contracts/testdata/display_title_credit_selection.json';
 import { buildDisplayTitlePreviewSignature } from './display-title-preview';
 import { rebaseOverlayOntoMovie } from '../../routes/review/[jobId]/stores/save-helpers';
 import type { Actress, Movie, MovieCredit } from '$lib/api/types';
@@ -37,6 +38,33 @@ function makeMovie(actresses: Actress[], credits?: MovieCredit[]): Movie {
 }
 
 describe('buildDisplayTitlePreviewSignature', () => {
+	it('invalidates after Keep catalog using real API-projected credits', () => {
+		// The Go contract test validates this shared fixture against MovieView JSON
+		// and the actual title renderer before/after the collision decision.
+		const [alias, canonical] = creditSelectionFixture;
+		const actress = makeActress({ first_name: 'Canonical', last_name: 'Name', japanese_name: '' });
+		const before = makeMovie([actress], alias.credits);
+		const after = makeMovie([actress], canonical.credits);
+		expect(alias.rendered_title).not.toBe(canonical.rendered_title);
+		expect(buildDisplayTitlePreviewSignature(after)).not.toBe(
+			buildDisplayTitlePreviewSignature(before),
+		);
+	});
+
+	it('ignores canonical selection changes on hidden credits', () => {
+		const before = makeMovie(
+			[],
+			[makeCredit({ render_visible: false, display_force_canonical: false })],
+		);
+		const after = makeMovie(
+			[],
+			[makeCredit({ render_visible: false, display_force_canonical: true })],
+		);
+		expect(buildDisplayTitlePreviewSignature(after)).toBe(
+			buildDisplayTitlePreviewSignature(before),
+		);
+	});
+
 	it('is stable when only volatile actress fields churn between polls', () => {
 		const before = makeMovie([
 			makeActress({ thumb_url: '', origin: 'scrape', name_key: '', aliases: '' }),
