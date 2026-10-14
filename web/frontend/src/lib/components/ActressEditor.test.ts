@@ -143,6 +143,162 @@ describe('ActressEditor production persistence', () => {
 		});
 		expect(view.getByText('Movie-specific name')).toBeTruthy();
 	});
+
+	const creditMovie = () => ({
+		id: 'movie-draft',
+		title: 'Movie',
+		actresses: [{ id: 7, first_name: 'Shared', last_name: 'Identity' }],
+		credits: [{ id: 41, actress_id: 7, override_name: '', user_override: false }],
+	});
+
+	it.each(['refresh clone', 'scalar edit'])(
+		'preserves an open dirty draft across a %s',
+		async (change) => {
+			const movie = creditMovie();
+			const view = render(ActressEditor, { movie, onUpdate: vi.fn() });
+			await fireEvent.click(view.getByRole('button', { name: 'This movie only' }));
+			await fireEvent.input(view.getByLabelText('Name for this movie'), {
+				target: { value: 'Unsaved stage name' },
+			});
+			const next =
+				change === 'refresh clone'
+					? { ...JSON.parse(JSON.stringify(movie)), poster_url: 'new-poster.jpg' }
+					: { ...movie, title: 'Updated scalar title' };
+			await view.rerender({ movie: next });
+			expect((view.getByLabelText('Name for this movie') as HTMLInputElement).value).toBe(
+				'Unsaved stage name',
+			);
+		},
+	);
+
+	it.each([false, true])(
+		'rebases a server override change while preserving dirty=%s',
+		async (dirty) => {
+			const movie = creditMovie();
+			const view = render(ActressEditor, { movie, onUpdate: vi.fn() });
+			await fireEvent.click(view.getByRole('button', { name: 'This movie only' }));
+			if (dirty) {
+				await fireEvent.input(view.getByLabelText('Name for this movie'), {
+					target: { value: 'Unsaved stage name' },
+				});
+			}
+			const refreshed = {
+				...movie,
+				credits: [{ ...movie.credits[0], override_name: 'Server name', user_override: true }],
+			};
+			await view.rerender({ movie: refreshed });
+			expect((view.getByLabelText('Name for this movie') as HTMLInputElement).value).toBe(
+				dirty ? 'Unsaved stage name' : 'Server name',
+			);
+			expect(view.getByText('Movie-specific name')).toBeTruthy();
+			// Further polling must compare against the newly received baseline.
+			await view.rerender({ movie: { ...refreshed, title: 'Updated title' } });
+			expect((view.getByLabelText('Name for this movie') as HTMLInputElement).value).toBe(
+				dirty ? 'Unsaved stage name' : 'Server name',
+			);
+		},
+	);
+
+	it('keeps an acknowledged save across a metadata overlay with pre-save credits', async () => {
+		vi.spyOn(apiClient, 'updateCreditOverride').mockResolvedValue();
+		const movie = creditMovie();
+		const view = render(ActressEditor, { movie, onUpdate: vi.fn() });
+		await fireEvent.click(view.getByRole('button', { name: 'This movie only' }));
+		await fireEvent.input(view.getByLabelText('Name for this movie'), {
+			target: { value: 'Saved name' },
+		});
+		await fireEvent.click(view.getByRole('button', { name: 'Set name' }));
+		await waitFor(() => expect(view.getByText('Movie-specific name')).toBeTruthy());
+		await view.rerender({ movie: { ...movie, title: 'Updated title' } });
+		expect((view.getByLabelText('Name for this movie') as HTMLInputElement).value).toBe(
+			'Saved name',
+		);
+		expect(view.getByText('Movie-specific name')).toBeTruthy();
+	});
+
+	it('keeps a failed-save draft and error across unrelated updates, then allows retry', async () => {
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		const save = vi
+			.spyOn(apiClient, 'updateCreditOverride')
+			.mockRejectedValueOnce(new Error('offline'))
+			.mockResolvedValue();
+		const movie = creditMovie();
+		const view = render(ActressEditor, { movie, onUpdate: vi.fn() });
+		await fireEvent.click(view.getByRole('button', { name: 'This movie only' }));
+		await fireEvent.input(view.getByLabelText('Name for this movie'), {
+			target: { value: 'Retry name' },
+		});
+		await fireEvent.click(view.getByRole('button', { name: 'Set name' }));
+		await view.findByRole('alert');
+		await view.rerender({ movie: { ...movie, title: 'Updated title' } });
+		expect((view.getByLabelText('Name for this movie') as HTMLInputElement).value).toBe(
+			'Retry name',
+		);
+		expect(view.getByRole('alert')).toBeTruthy();
+		await fireEvent.click(view.getByRole('button', { name: 'Set name' }));
+		await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
+		await waitFor(() => expect(view.queryByRole('alert')).toBeNull());
+	});
+
+	it.each(['id', 'code', 'content_id'] as const)(
+		'resets the editor when movie %s changes, even with reused credit IDs',
+		async (identity) => {
+			const movie = { ...creditMovie(), [identity]: 'movie-A' };
+			const view = render(ActressEditor, { movie, onUpdate: vi.fn() });
+			await fireEvent.click(view.getByRole('button', { name: 'This movie only' }));
+			await fireEvent.input(view.getByLabelText('Name for this movie'), {
+				target: { value: 'Old movie draft' },
+			});
+			await view.rerender({ movie: { ...movie, [identity]: 'movie-B' } });
+			expect(view.queryByLabelText('Name for this movie')).toBeNull();
+			await fireEvent.click(view.getByRole('button', { name: 'This movie only' }));
+			expect((view.getByLabelText('Name for this movie') as HTMLInputElement).value).toBe('');
+		},
+	);
+
+	it('drops removed credit drafts and starts from the server value when re-added', async () => {
+		const movie = creditMovie();
+		const view = render(ActressEditor, { movie, onUpdate: vi.fn() });
+		await fireEvent.click(view.getByRole('button', { name: 'This movie only' }));
+		await fireEvent.input(view.getByLabelText('Name for this movie'), {
+			target: { value: 'Removed draft' },
+		});
+		await view.rerender({ movie: { ...movie, credits: [] } });
+		expect(view.queryByLabelText('Name for this movie')).toBeNull();
+		await view.rerender({ movie });
+		expect(view.queryByLabelText('Name for this movie')).toBeNull();
+		await fireEvent.click(view.getByRole('button', { name: 'This movie only' }));
+		expect((view.getByLabelText('Name for this movie') as HTMLInputElement).value).toBe('');
+	});
+
+	it('drops the draft when an existing credit is reassigned to another identity', async () => {
+		const movie = creditMovie();
+		const view = render(ActressEditor, { movie, onUpdate: vi.fn() });
+		await fireEvent.click(view.getByRole('button', { name: 'This movie only' }));
+		await fireEvent.input(view.getByLabelText('Name for this movie'), {
+			target: { value: 'Other actress draft' },
+		});
+		await view.rerender({
+			movie: {
+				...movie,
+				actresses: [{ id: 9, first_name: 'New', last_name: 'Identity' }],
+				credits: [
+					{
+						...movie.credits[0],
+						actress_id: 9,
+						override_name: 'New identity name',
+						user_override: true,
+					},
+				],
+			},
+		});
+		expect(view.queryByLabelText('Name for this movie')).toBeNull();
+		await fireEvent.click(view.getByRole('button', { name: 'This movie only' }));
+		expect((view.getByLabelText('Name for this movie') as HTMLInputElement).value).toBe(
+			'New identity name',
+		);
+	});
+
 	it('marks an edited thumbnail as explicit intent in the saved payload', async () => {
 		vi.spyOn(apiClient, 'request').mockResolvedValue([]);
 		const onUpdate = vi.fn();

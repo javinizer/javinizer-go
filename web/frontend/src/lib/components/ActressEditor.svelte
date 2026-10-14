@@ -37,6 +37,8 @@
 	let creditStates = $state<MovieCredit[]>([]);
 	let expandedCreditID = $state<number | null>(null);
 	let overrideDrafts = $state<Record<number, string>>({});
+	let creditMovieKey: string | undefined;
+	let previousCredits: MovieCredit[] = [];
 	let updatingCreditID = $state<number | null>(null);
 	let creditUpdateErrors = $state<Record<number, boolean>>({});
 	let showEditModal = $state(false);
@@ -109,16 +111,49 @@
 	});
 
 	$effect(() => {
+		const movieKey = movie.code ?? movie.content_id ?? movie.id;
 		const data = movie.credits ?? [];
 		untrack(() => {
-			creditStates = data.map((credit) => ({ ...credit }));
+			const sameMovie = creditMovieKey === movieKey;
+			const previous = new Map(previousCredits.map((credit) => [credit.id, credit]));
+			const local = new Map(creditStates.map((credit) => [credit.id, credit]));
 			const drafts: Record<number, string> = {};
-			for (const credit of data) {
-				if (typeof credit.id === 'number') drafts[credit.id] = credit.override_name ?? '';
-			}
+			const errors: Record<number, boolean> = {};
+			let keepExpanded = false;
+			creditStates = data.map((credit) => {
+				const next = { ...credit };
+				if (typeof credit.id !== 'number') return next;
+				const old = sameMovie ? local.get(credit.id) : undefined;
+				const source = previous.get(credit.id);
+				const sameCredit = old && old.actress_id === credit.actress_id;
+				if (sameCredit) {
+					// A metadata-only overlay still contains the pre-save credit. Keep
+					// an acknowledged local save until the server's override changes.
+					if (
+						source?.override_name === credit.override_name &&
+						source?.user_override === credit.user_override
+					) {
+						next.override_name = old.override_name;
+						next.user_override = old.user_override;
+					}
+					const draft = overrideDrafts[credit.id] ?? '';
+					drafts[credit.id] = draft !== (old.override_name ?? '')
+						? draft
+						: (next.override_name ?? '');
+					errors[credit.id] = creditUpdateErrors[credit.id] ?? false;
+					if (expandedCreditID === credit.id) keepExpanded = true;
+				} else {
+					drafts[credit.id] = next.override_name ?? '';
+				}
+				return next;
+			});
+			// Movie/credit identity changes discard drafts; ordinary updates rebase
+			// clean values and leave an open, dirty movie-specific editor intact.
+			if (!keepExpanded) expandedCreditID = null;
 			overrideDrafts = drafts;
-			expandedCreditID = null;
-			creditUpdateErrors = {};
+			creditUpdateErrors = errors;
+			creditMovieKey = movieKey;
+			previousCredits = data.map((credit) => ({ ...credit }));
 		});
 	});
 
