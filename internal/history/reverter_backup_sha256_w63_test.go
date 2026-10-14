@@ -13,6 +13,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"path/filepath"
 	"testing"
 
 	"github.com/spf13/afero"
@@ -31,8 +32,18 @@ func w63ShaHex(b []byte) string {
 // from the on-disk backup, mirroring the downloader's arm-time capture.
 func w63ArmedOp(t *testing.T, fs afero.Fs, repo *p3OpRepo, movieID string, destBytes, backupBytes []byte) (*models.BatchFileOperation, string, string) {
 	t.Helper()
-	dir := "/dst/" + movieID
-	dest := dir + "/poster.jpg"
+	return w63ArmedOpWithPaths(t, fs, repo, "/dst/"+movieID, "/src/"+movieID+".mkv", movieID, destBytes, backupBytes)
+}
+
+// w63ArmedOpInDir permits native timestamp-sensitive fixtures in t.TempDir.
+func w63ArmedOpInDir(t *testing.T, fs afero.Fs, repo *p3OpRepo, dir, movieID string, destBytes, backupBytes []byte) (*models.BatchFileOperation, string, string) {
+	t.Helper()
+	return w63ArmedOpWithPaths(t, fs, repo, dir, filepath.Join(dir, "src", movieID+".mkv"), movieID, destBytes, backupBytes)
+}
+
+func w63ArmedOpWithPaths(t *testing.T, fs afero.Fs, repo *p3OpRepo, dir, originalPath, movieID string, destBytes, backupBytes []byte) (*models.BatchFileOperation, string, string) {
+	t.Helper()
+	dest := filepath.Join(dir, "poster.jpg")
 	backup := dest + ".dlbak.aaaaaaaaaaaaaaaa"
 	require.NoError(t, fs.MkdirAll(dir, config.DirPerm))
 	require.NoError(t, afero.WriteFile(fs, dest, destBytes, config.FilePerm))
@@ -42,8 +53,8 @@ func w63ArmedOp(t *testing.T, fs afero.Fs, repo *p3OpRepo, movieID string, destB
 	op := &models.BatchFileOperation{
 		BatchJobID:    "job-" + movieID,
 		MovieID:       movieID,
-		OriginalPath:  "/src/" + movieID + ".mkv",
-		NewPath:       dir + "/" + movieID + ".mkv",
+		OriginalPath:  originalPath,
+		NewPath:       filepath.Join(dir, movieID+".mkv"),
 		OperationType: models.OperationTypeMove,
 		GeneratedFiles: models.MarshalLedgerJSON(models.GeneratedFilesJSON{
 			Replacements: []models.ReplacementEntry{{
@@ -97,10 +108,13 @@ func TestRestoreReplacementJournalW63_SHA256MismatchRefuses(t *testing.T) {
 // A matching sha256 restores the backup over the destination and consumes the
 // entry exactly like the pre-wave-63 flow.
 func TestRestoreReplacementJournalW63_CorrectSHA256Restores(t *testing.T) {
-	fs := afero.NewMemMapFs()
+	// Use native read-only handles: MemMapFs treats O_RDONLY|O_NOFOLLOW
+	// as writable, so closing the restore source can change its mtime
+	// across a Unix-second boundary and falsely refuse backup cleanup.
+	fs := afero.NewOsFs()
 	repo := newP3OpRepo()
 	backupBytes := []byte("the original set-aside")
-	op, dest, backup := w63ArmedOp(t, fs, repo, "W63C", []byte("new poster bytes!"), backupBytes)
+	op, dest, backup := w63ArmedOpInDir(t, fs, repo, t.TempDir(), "W63C", []byte("new poster bytes!"), backupBytes)
 
 	restored, err := NewReverter(fs, repo).restoreReplacementJournal(context.Background(), op)
 	require.NoError(t, err)

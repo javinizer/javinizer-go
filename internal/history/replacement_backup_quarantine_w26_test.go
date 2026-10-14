@@ -569,13 +569,14 @@ func TestRemoveReplacementBackupW26_WindowsPostureSeam(t *testing.T) {
 // stays, and the verified object moves back onto the journaled name — then,
 // wedge lifted, the pending retry heals the armed state cleanly.
 func TestSweepW26_QuarantineReverifyMismatchRetainsEntryAndRetryHeals(t *testing.T) {
-	base := afero.NewMemMapFs()
-	require.NoError(t, afero.WriteFile(base, "/w26s/other.bin", []byte("a mismatch-sized foreign body"), config.FilePerm))
-	otherInfo, err := base.Stat("/w26s/other.bin")
+	base := afero.NewOsFs()
+	other := filepath.Join(t.TempDir(), "other.bin")
+	require.NoError(t, afero.WriteFile(base, other, []byte("a mismatch-sized foreign body"), config.FilePerm))
+	otherInfo, err := base.Stat(other)
 	require.NoError(t, err)
 	fs := &w26QuarLstatFs{Fs: base, info: otherInfo}
 	repo := newP3OpRepo()
-	op, dest, backup := w25SweepCrashOp(t, fs, repo, "W26Q", []byte("original bytes"), "stamped")
+	op, dest, backup := w25SweepCrashOpInDir(t, fs, repo, t.TempDir(), "W26Q", []byte("original bytes"), "stamped")
 
 	healed, err := NewReplacementSweeper(fs, repo).Sweep(context.Background())
 	require.NoError(t, err)

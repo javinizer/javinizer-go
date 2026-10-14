@@ -201,14 +201,14 @@ func TestReleaseConfigFileLock_DoesNotRemoveForeignLock(t *testing.T) {
 	assert.Equal(t, "foreign-token", string(data))
 }
 
-func TestReplaceFileOnWindows_RestoresBackupWhenReplaceFails(t *testing.T) {
+func TestReplaceFile_PreservesDestinationWhenReplaceFails(t *testing.T) {
 	tmpDir := t.TempDir()
 	targetPath := filepath.Join(tmpDir, "config.yaml")
 	missingTempPath := filepath.Join(tmpDir, "missing-tmp.yaml")
 
 	require.NoError(t, os.WriteFile(targetPath, []byte("old-config"), 0644))
 
-	err := replaceFileOnWindows(targetPath, missingTempPath)
+	err := replaceFile(targetPath, missingTempPath)
 	require.Error(t, err)
 
 	data, readErr := os.ReadFile(targetPath)

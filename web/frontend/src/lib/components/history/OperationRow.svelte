@@ -76,7 +76,7 @@
 			<StatusBadge status={statusBadge} size="sm" />
 		</div>
 
-		{#if opState === 'success' && onRevert && revertible}
+		{#if (opState === 'success' || opState === 'failed') && onRevert && revertible}
 			{#if reverting}
 				<Button variant="outline" size="sm" disabled>
 					<LoaderCircle class="h-4 w-4 animate-spin" />

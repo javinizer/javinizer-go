@@ -314,7 +314,7 @@ func copyStreamNoReplaceInstallReproof(fs afero.Fs, srcFile afero.File, dst stri
 	if lerr != nil {
 		return nil, fmt.Errorf("no-replace copy: the installed identity at %s is indeterminate (%w): %w", dst, ErrPublishCompleted, lerr)
 	}
-	return newBoundInstallIdentity(installed, 0, 0, false), nil
+	return verifiedWrapperCopyIdentity(fs, dst, installed, strongDevice, strongInode, strongOK)
 }
 
 // copyStreamNoReplaceDigestReproof is copyStreamNoReplaceDigest with the
@@ -378,14 +378,18 @@ func copyStreamNoReplaceDigestReproof(fs afero.Fs, srcFile afero.File, dst strin
 		}
 		return hex.EncodeToString(h.Sum(nil)), newBoundInstallIdentity(info, strongDevice, strongInode, strongOK), nil
 	}
-	// Virtual leg (wrapper/MemMap filesystems): the bound publish proves the
-	// publish but carries no identity, so the installed entry is looked up
-	// directly — the same indeterminate-lookup posture as the install twin.
+	// The wrapper/virtual publish returns no FileInfo. Probe its result and
+	// re-prove any native producer key before carrying it; truly virtual handles
+	// retain the existing weak-identity posture, as in the install twin.
 	installed, lerr := asideLstat(fs, dst)
 	if lerr != nil {
 		return "", nil, fmt.Errorf("no-replace copy: the installed identity at %s is indeterminate (%w): %w", dst, ErrPublishCompleted, lerr)
 	}
-	return hex.EncodeToString(h.Sum(nil)), newBoundInstallIdentity(installed, 0, 0, false), nil
+	identity, identityErr := verifiedWrapperCopyIdentity(fs, dst, installed, strongDevice, strongInode, strongOK)
+	if identityErr != nil {
+		return "", nil, identityErr
+	}
+	return hex.EncodeToString(h.Sum(nil)), identity, nil
 }
 
 // stagingIdentity captures the staged object's identity while its handle is
@@ -448,4 +452,18 @@ func discardStagedAfterFailedPublish(fs afero.Fs, staged string, identity os.Fil
 		return
 	}
 	_ = fs.Remove(vac)
+}
+
+// Native-backed wrappers still expose the streamed object's eager handle key.
+// Carry that producer key across the wrapper publication only after proving the
+// destination still names it. Never manufacture an original key by querying
+// the destination, and keep genuinely virtual handles weak.
+func verifiedWrapperCopyIdentity(fs afero.Fs, dst string, installed os.FileInfo, device, inode uint64, strong bool) (*BoundInstallIdentity, error) {
+	identity := newBoundInstallIdentity(installed, device, inode, strong)
+	if strong {
+		if _, err := ObserveVerifiedInstall(fs, dst, identity); err != nil {
+			return nil, fmt.Errorf("no-replace copy: reprove wrapper install %s: %w", dst, err)
+		}
+	}
+	return identity, nil
 }

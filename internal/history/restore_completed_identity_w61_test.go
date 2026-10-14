@@ -61,9 +61,9 @@ func w61CompletedIdentityPublish(t *testing.T, substitute []byte) {
 // Explicit-revert: the completed-with-identity publish converges — backup
 // removed, journal entry consumed, dest carries the restored bytes.
 func TestRestoreReplacementJournalW61_CompletedIdentityConverges(t *testing.T) {
-	fs := afero.NewMemMapFs()
+	fs := afero.NewOsFs()
 	repo := newP3OpRepo()
-	op, dest, backup := w25ArmedOp(t, fs, repo, "W61A", []byte("new poster"), []byte("original poster"), "stamped")
+	op, dest, backup := w25ArmedOpInDir(t, fs, repo, t.TempDir(), "W61A", []byte("new poster"), []byte("original poster"), "stamped")
 
 	w61CompletedIdentityPublish(t, nil)
 
@@ -81,9 +81,9 @@ func TestRestoreReplacementJournalW61_CompletedIdentityConverges(t *testing.T) {
 // Sweep crash-window restore: identical convergence through the no-replace
 // leg — backup removed, entry consumed, dest carries the restored bytes.
 func TestSweepW61_CompletedIdentityConverges(t *testing.T) {
-	fs := afero.NewMemMapFs()
+	fs := afero.NewOsFs()
 	repo := newP3OpRepo()
-	op, dest, backup := w25SweepCrashOp(t, fs, repo, "W61B", []byte("original bytes"), "stamped")
+	op, dest, backup := w25SweepCrashOpInDir(t, fs, repo, t.TempDir(), "W61B", []byte("original bytes"), "stamped")
 
 	w61CompletedIdentityPublish(t, nil)
 

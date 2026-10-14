@@ -93,3 +93,22 @@ func VerifiedSourceProofFromBoundInstallIdentity(fs afero.Fs, installed *BoundIn
 		return nil
 	}
 }
+
+// ObjectIdentity returns the eager publication-bound kernel key. It never
+// resolves the destination pathname, which may already name another file.
+func (i *BoundInstallIdentity) ObjectIdentity() (device, inode uint64, ok bool) {
+	if dev, ino, ok := i.strongIdentity(); ok {
+		return dev, ino, true
+	}
+	if i == nil || i.info == nil {
+		return 0, 0, false
+	}
+	return boundObjectIdentity(i.info)
+}
+
+// NewObservedBoundInstallIdentity eagerly records the kernel identity at a
+// legacy name-based publication observation, before rollback can run later.
+func NewObservedBoundInstallIdentity(fs afero.Fs, path string, info os.FileInfo) *BoundInstallIdentity {
+	dev, ino, ok := BoundObjectIdentity(fs, path, info)
+	return newBoundInstallIdentity(info, dev, ino, ok)
+}

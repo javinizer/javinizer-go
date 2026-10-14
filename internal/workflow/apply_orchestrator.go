@@ -314,7 +314,7 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult
 		}
 		if err := artifact.publish(ctx, o, state, &steps); err != nil {
 			markArtifactDirty(artifact.original)
-			prePublication := !artifact.sourceCleanupArmed
+			prePublication := !artifact.sourceCleanupArmed && !artifact.residentSidecarMutation && (state.publicationRecovery == nil || !state.publicationRecovery.Unresolved) && (artifact.directoryMove == nil || artifact.directoryMove.currentDir == artifact.directoryMove.oldDir)
 			o.completeRevertLogWithState(ctx, opID, state, prePublication)
 			return &ApplyResult{
 				OrganizeResult: state.organizeResult,
@@ -715,6 +715,8 @@ func (o *applyOrchImpl) stepNFO(ctx context.Context, cmd ApplyCmd, state *applyP
 // applyPipelineState holds mutable state shared across the apply pipeline steps.
 // Steps mutate this via closure — eliminating the need for per-step return value plumbing.
 type applyPipelineState struct {
+	publicationRecovery *models.PublicationRecovery
+
 	movie            *models.Movie
 	targetDir        string
 	finalDir         string
@@ -755,6 +757,7 @@ func (o *applyOrchImpl) completeRevertLogWithStateErr(ctx context.Context, opID 
 		Steps:          stepCompletion{},
 		PrePublication: prePublication,
 	}
+	partial.PublicationRecovery = state.publicationRecovery
 	return o.revertLog.CompleteFailed(ctx, opID, partial)
 }
 

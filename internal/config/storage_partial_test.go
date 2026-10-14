@@ -294,26 +294,24 @@ func TestAtomicReplaceFile_WriteToReadOnlyDir_Partial(t *testing.T) {
 	require.Error(t, err)
 }
 
-// --- replaceFileOnWindows: stat error, backup, rollback (lines 404, 414) ---
+// --- replaceFile: stat error, backup, rollback (lines 404, 414) ---
 
-func TestReplaceFileOnWindows_StatErrNotNotExist_Partial(t *testing.T) {
+func TestReplaceFile_MissingSource_Partial(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("testing non-windows code path")
 	}
 
-	// replaceFileOnWindows is only called on Windows when Rename fails.
-	// On non-Windows, the function exists but the Rename succeeds so it's never called.
-	// We can still call it directly to test its logic.
+	// Exercise the staged-file publication helper directly.
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "target.yaml")
 	tmpPath := filepath.Join(tmpDir, "tmp.yaml")
 
 	// No existing target file, no tmp file
-	err := replaceFileOnWindows(path, tmpPath)
+	err := replaceFile(path, tmpPath)
 	require.Error(t, err) // Rename of nonexistent tmpPath should fail
 }
 
-func TestReplaceFileOnWindows_BackupRestore_Partial(t *testing.T) {
+func TestReplaceFile_PreservesDestination_Partial(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("testing non-windows code path")
 	}
@@ -325,18 +323,18 @@ func TestReplaceFileOnWindows_BackupRestore_Partial(t *testing.T) {
 	// Create the target file
 	require.NoError(t, os.WriteFile(path, []byte("original"), 0644))
 	// Do NOT create tmp file - this will cause Rename(tmpPath, path) to fail
-	// and the backup should be restored
+	// without disturbing the existing destination
 
-	err := replaceFileOnWindows(path, tmpPath)
+	err := replaceFile(path, tmpPath)
 	require.Error(t, err)
 
-	// Original file should be restored from backup
+	// Original file should remain in place
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
 	assert.Equal(t, "original", string(data))
 }
 
-func TestReplaceFileOnWindows_Success_Partial(t *testing.T) {
+func TestReplaceFile_Success_Partial(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("testing non-windows code path")
 	}
@@ -349,7 +347,7 @@ func TestReplaceFileOnWindows_Success_Partial(t *testing.T) {
 	require.NoError(t, os.WriteFile(path, []byte("original"), 0644))
 	require.NoError(t, os.WriteFile(tmpPath, []byte("replacement"), 0644))
 
-	err := replaceFileOnWindows(path, tmpPath)
+	err := replaceFile(path, tmpPath)
 	require.NoError(t, err)
 
 	data, err := os.ReadFile(path)

@@ -198,5 +198,8 @@ func TestDeferredCopySidecarConfirmFailsClosedWhenDestinationIndeterminate(t *te
 	_, err := env.orch.Execute(t.Context(), cmd)
 	require.Error(t, err)
 	require.True(t, probe.fired, "the destination vanished inside the confirmation window")
-	assert.ErrorContains(t, err, "inspect staged publication result")
+	// Native handle probes can reject at binding or at the following confirmation.
+	// Both must refuse the vanished destination rather than report publication success.
+	assert.True(t, strings.Contains(err.Error(), "bind copy-installed sidecar") ||
+		strings.Contains(err.Error(), "inspect staged publication result"), "unexpected refusal: %v", err)
 }

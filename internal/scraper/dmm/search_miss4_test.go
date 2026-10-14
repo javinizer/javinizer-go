@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/go-resty/resty/v2"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -370,14 +371,23 @@ func TestTryDirectURLs_Miss4_ContextCancelledDuringWait(t *testing.T) {
 	settings := models.ScraperSettings{Enabled: true}
 	scraper := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{},
 		dmmOptions{ScrapeActress: false, Browser: models.BrowserConfig{Enabled: false, Timeout: 30}, ContentIDRepo: repo})
+	transport := &dmmSearchSuccessRoundTripper{}
+	scraper.client.SetTransport(transport)
+	scraper.client.SetRetryCount(0)
 
-	// Cancel context so rate limiter wait fails in tryDirectURLs
+	// Reserve the immediate slot so the cancelled context reaches the wait branch.
+	scraper.rateLimiter = ratelimit.NewLimiter(time.Hour)
+	require.NoError(t, scraper.rateLimiter.Wait(context.Background()))
+
+	// Cancel context so rate limiter wait fails before any HTTP request.
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
 	result := scraper.tryDirectURLs(ctx, "tdr00001")
-	// Should return empty/partial candidates since context was cancelled
-	assert.NotNil(t, result)
+	// No request succeeded, so cancellation returns the initial nil candidate slice.
+	assert.Nil(t, result)
+	assert.Empty(t, transport.requested, "cancelled rate-limit wait must not send HTTP requests")
+	assert.ErrorIs(t, ctx.Err(), context.Canceled)
 }
 
 // --- tryDirectURLs: nil response from direct URL ---

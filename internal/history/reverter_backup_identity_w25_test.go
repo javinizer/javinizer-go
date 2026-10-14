@@ -52,8 +52,20 @@ func w25StampBackupFacts(t *testing.T, fs afero.Fs, backup string) (int64, int64
 // stamps deliberately WRONG facts (the foreign-substitution shape).
 func w25ArmedOp(t *testing.T, fs afero.Fs, repo *p3OpRepo, movieID string, destBytes, backupBytes []byte, stampMode string) (*models.BatchFileOperation, string, string) {
 	t.Helper()
-	dir := "/dst/" + movieID
-	dest := dir + "/poster.jpg"
+	return w25ArmedOpWithPaths(t, fs, repo, "/dst/"+movieID, "/src/"+movieID+".mkv", movieID, destBytes, backupBytes, stampMode)
+}
+
+// w25ArmedOpInDir also supports native fixtures rooted in t.TempDir. Native
+// read-only handles preserve the stamped mtime when a restore crosses a second;
+// keep the injected fault wrappers so later identity/refusal gates still run.
+func w25ArmedOpInDir(t *testing.T, fs afero.Fs, repo *p3OpRepo, dir, movieID string, destBytes, backupBytes []byte, stampMode string) (*models.BatchFileOperation, string, string) {
+	t.Helper()
+	return w25ArmedOpWithPaths(t, fs, repo, dir, filepath.Join(dir, "src", movieID+".mkv"), movieID, destBytes, backupBytes, stampMode)
+}
+
+func w25ArmedOpWithPaths(t *testing.T, fs afero.Fs, repo *p3OpRepo, dir, originalPath, movieID string, destBytes, backupBytes []byte, stampMode string) (*models.BatchFileOperation, string, string) {
+	t.Helper()
+	dest := filepath.Join(dir, "poster.jpg")
 	backup := dest + ".dlbak.aaaaaaaaaaaaaaaa"
 	require.NoError(t, fs.MkdirAll(dir, config.DirPerm))
 	require.NoError(t, afero.WriteFile(fs, dest, destBytes, config.FilePerm))
@@ -75,8 +87,8 @@ func w25ArmedOp(t *testing.T, fs afero.Fs, repo *p3OpRepo, movieID string, destB
 	op := &models.BatchFileOperation{
 		BatchJobID:    "job-" + movieID,
 		MovieID:       movieID,
-		OriginalPath:  "/src/" + movieID + ".mkv",
-		NewPath:       dir + "/" + movieID + ".mkv",
+		OriginalPath:  originalPath,
+		NewPath:       filepath.Join(dir, movieID+".mkv"),
 		OperationType: models.OperationTypeMove,
 		GeneratedFiles: models.MarshalLedgerJSON(models.GeneratedFilesJSON{
 			Replacements: []models.ReplacementEntry{entry},
@@ -100,9 +112,12 @@ func w25JournalEntries(t *testing.T, repo *p3OpRepo, id uint) []models.Replaceme
 // Matching stamped identity: the restore unlinks the backup and consumes the
 // entry exactly like the pre-facts flow.
 func TestRestoreReplacementJournalW25_MatchingFactsUnlinkAndConsume(t *testing.T) {
-	fs := afero.NewMemMapFs()
+	// Use native read-only handles: MemMapFs treats O_RDONLY|O_NOFOLLOW
+	// as writable, so closing the restore source can change its mtime
+	// across a Unix-second boundary and falsely refuse backup cleanup.
+	fs := afero.NewOsFs()
 	repo := newP3OpRepo()
-	op, dest, backup := w25ArmedOp(t, fs, repo, "W25A", []byte("new poster"), []byte("original poster"), "stamped")
+	op, dest, backup := w25ArmedOpInDir(t, fs, repo, t.TempDir(), "W25A", []byte("new poster"), []byte("original poster"), "stamped")
 
 	restored, err := NewReverter(fs, repo).restoreReplacementJournal(context.Background(), op)
 	require.NoError(t, err)
@@ -218,6 +233,17 @@ func TestRestoreReplacementJournalW25_PendingCleanMismatchRetainsForeign(t *test
 func w25SweepCrashOp(t *testing.T, fs afero.Fs, repo *p3OpRepo, movieID string, backupBytes []byte, stampMode string) (*models.BatchFileOperation, string, string) {
 	t.Helper()
 	op, dest, backup := w25ArmedOp(t, fs, repo, movieID, []byte("discard-me"), backupBytes, stampMode)
+	return w25MarkCrashWindow(t, fs, repo, op, dest, backup)
+}
+
+func w25SweepCrashOpInDir(t *testing.T, fs afero.Fs, repo *p3OpRepo, dir, movieID string, backupBytes []byte, stampMode string) (*models.BatchFileOperation, string, string) {
+	t.Helper()
+	op, dest, backup := w25ArmedOpInDir(t, fs, repo, dir, movieID, []byte("discard-me"), backupBytes, stampMode)
+	return w25MarkCrashWindow(t, fs, repo, op, dest, backup)
+}
+
+func w25MarkCrashWindow(t *testing.T, fs afero.Fs, repo *p3OpRepo, op *models.BatchFileOperation, dest, backup string) (*models.BatchFileOperation, string, string) {
+	t.Helper()
 	require.NoError(t, fs.Remove(dest)) // the install never landed (crash window)
 	entries := w25JournalEntries(t, repo, op.ID)
 	require.Len(t, entries, 1)
@@ -232,9 +258,31 @@ func w25SweepCrashOp(t *testing.T, fs afero.Fs, repo *p3OpRepo, movieID string, 
 // Sweeper crash-window restore with matching stamped facts: restore, unlink,
 // consume — healed.
 func TestSweepW25_CrashWindowRestoreMatchingFactsHeals(t *testing.T) {
-	fs := afero.NewMemMapFs()
+	// Use real read-only handles: MemMapFs treats O_RDONLY|O_NOFOLLOW as
+	// writable, so closing the restore source can change its mtime and make
+	// the correctly stamped backup fail cleanup across a Unix-second boundary.
+	fs := afero.NewOsFs()
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "poster.jpg")
+	backup := dest + ".dlbak.aaaaaaaaaaaaaaaa"
+	require.NoError(t, afero.WriteFile(fs, backup, []byte("original bytes"), config.FilePerm))
+	size, modUnix := w25StampBackupFacts(t, fs, backup)
 	repo := newP3OpRepo()
-	op, dest, backup := w25SweepCrashOp(t, fs, repo, "W25F", []byte("original bytes"), "stamped")
+	op := &models.BatchFileOperation{
+		BatchJobID:    "job-W25F",
+		MovieID:       "W25F",
+		OriginalPath:  filepath.Join(dir, "src", "W25F.mkv"),
+		NewPath:       filepath.Join(dir, "W25F.mkv"),
+		OperationType: models.OperationTypeMove,
+		GeneratedFiles: models.MarshalLedgerJSON(models.GeneratedFilesJSON{
+			Replacements: []models.ReplacementEntry{{
+				Destination: dest, Backup: backup, DestSeq: 1,
+				BackupSize: size, BackupModUnix: modUnix,
+			}},
+		}),
+		RevertStatus: models.RevertStatusApplied,
+	}
+	require.NoError(t, repo.Create(context.Background(), op))
 
 	healed, err := NewReplacementSweeper(fs, repo).Sweep(context.Background())
 	require.NoError(t, err)

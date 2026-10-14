@@ -59,6 +59,45 @@ describe('OperationRow revert action gating (codex P2, PR #241 F2)', () => {
 		expect(onRevert).toHaveBeenCalledWith('ABC-123');
 	});
 
+	it('offers a working retry for a failed row without changing its failed badge', async () => {
+		const onRevert = vi.fn();
+		const { container } = render(OperationRow, {
+			operation: makeOp('failed'),
+			onRevert,
+			revertible: true,
+		});
+
+		const btn = findButton(container, 'Revert File');
+		expect(btn).toBeTruthy();
+		expect(btn?.disabled).toBe(false);
+		expect(container.textContent).toContain('Failed');
+
+		await fireEvent.click(btn!);
+		expect(onRevert).toHaveBeenCalledOnce();
+		expect(onRevert).toHaveBeenCalledWith('ABC-123');
+	});
+
+	it.each(['applied', 'failed'])('hides the revert action for a %s row when policy disables revert', (status) => {
+		const onRevert = vi.fn();
+		const { container } = render(OperationRow, {
+			operation: makeOp(status),
+			onRevert,
+			revertible: false,
+		});
+
+		expect(findButton(container, 'Revert File')).toBeNull();
+		expect(onRevert).not.toHaveBeenCalled();
+	});
+
+	it.each(['applied', 'failed'])('hides the revert action for a %s row without a handler', (status) => {
+		const { container } = render(OperationRow, {
+			operation: makeOp(status),
+			revertible: true,
+		});
+
+		expect(findButton(container, 'Revert File')).toBeNull();
+	});
+
 	it('classifies a noop row as terminal + non-revertible — no revert action, even when the job allows revert', () => {
 		const onRevert = vi.fn();
 		const { container } = render(OperationRow, {
@@ -106,9 +145,9 @@ describe('OperationRow revert action gating (codex P2, PR #241 F2)', () => {
 		expect(revertedBtn?.disabled).toBe(true);
 	});
 
-	it('shows a spinner while a revert is in flight', () => {
+	it.each(['applied', 'failed'])('disables the %s row action while a revert is in flight', (status) => {
 		const { container } = render(OperationRow, {
-			operation: makeOp('applied'),
+			operation: makeOp(status),
 			onRevert: vi.fn(),
 			reverting: true,
 			revertible: true,

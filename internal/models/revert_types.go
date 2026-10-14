@@ -10,10 +10,14 @@ import (
 // eliminate duplicate type definitions with drift risk. The JSON schema is a
 // persistence contract — one source of truth.
 type GeneratedFilesJSON struct {
-	Delete       []string           `json:"delete,omitempty"`       // Files to delete on revert (NFO, images, screenshots)
-	MoveBack     []FileMove         `json:"move_back,omitempty"`    // Files to move back on revert (subtitles)
-	Replacements []ReplacementEntry `json:"replacements,omitempty"` // Overwritten byte pairs journaled before the replace landed (P3)
-	Roots        []string           `json:"roots,omitempty"`        // Destination roots seeded at Begin — sweeper discovery independent of any later journal (P3 R3-3)
+	// PrimaryResident excludes an admission-proven pre-existing primary from
+	// Undo ownership, while preserving independently installed artifact inverses.
+	DirectoryMove   *DirectoryMove     `json:"directory_move,omitempty"`
+	PrimaryResident bool               `json:"primary_resident,omitempty"`
+	Delete          []string           `json:"delete,omitempty"`       // Files to delete on revert (NFO, images, screenshots)
+	MoveBack        []FileMove         `json:"move_back,omitempty"`    // Files to move back on revert (subtitles)
+	Replacements    []ReplacementEntry `json:"replacements,omitempty"` // Overwritten byte pairs journaled before the replace landed (P3)
+	Roots           []string           `json:"roots,omitempty"`        // Destination roots seeded at Begin — sweeper discovery independent of any later journal (P3 R3-3)
 	// PlannedDeletes journals artifacts BEFORE they install at their final
 	// destination (deferred artifact publication): the hash pins the intended
 	// content so a revert deletes only bytes this operation published, never
@@ -55,8 +59,14 @@ type GeneratedFilesJSON struct {
 // SHA256 leg (an empty hash never matches — retain), preserving the legacy
 // posture byte-for-byte.
 type DeleteEntry struct {
-	Path   string `json:"path"`
-	SHA256 string `json:"sha256"`
+	// RecoveryPublication selects strict status checks for failed-publication
+	// proofs: unavailable identity or incomplete cleanup must remain retryable.
+	RecoveryPublication bool `json:"recovery_publication,omitempty"`
+	// RecoveryUnproven retains an output without a portable install identity.
+	// Undo requires manual recovery while any entry remains at its path.
+	RecoveryUnproven bool   `json:"recovery_unproven,omitempty"`
+	Path             string `json:"path"`
+	SHA256           string `json:"sha256"`
 	// LinkTarget pins a soft-link install: the expected readlink payload of
 	// the destination entry (the string the organizer's symlink leg passes,
 	// computed by organizer.SymlinkLinkTarget). Non-empty selects the
@@ -67,11 +77,15 @@ type DeleteEntry struct {
 	// (dev+ino/volume+index) with the same size and modification time.
 	// IdentityStrong asserts the dev/ino pair was captured from the platform
 	// identity route (in-memory filesystems pin only the metadata legs).
-	IdentityStrong  bool   `json:"identity_strong,omitempty"`
-	IdentityDev     uint64 `json:"identity_dev,omitempty"`
-	IdentityIno     uint64 `json:"identity_ino,omitempty"`
-	IdentitySize    int64  `json:"identity_size,omitempty"`
-	IdentityModUnix int64  `json:"identity_mod_unix,omitempty"`
+	// IdentityMode preserves the installed permission bits for a proof-backed
+	// move's cross-device inverse. A pointer distinguishes mode 0000 from old
+	// records that never captured mode; those records cannot authorize a move.
+	IdentityMode    *uint32 `json:"identity_mode,omitempty"`
+	IdentityStrong  bool    `json:"identity_strong,omitempty"`
+	IdentityDev     uint64  `json:"identity_dev,omitempty"`
+	IdentityIno     uint64  `json:"identity_ino,omitempty"`
+	IdentitySize    int64   `json:"identity_size,omitempty"`
+	IdentityModUnix int64   `json:"identity_mod_unix,omitempty"`
 	// IdentityPinned is the hard-link pin's explicit presence marker (codex
 	// P2, PRRT_kwDORn9KaM6nHyl5): an epoch-dated source — a restored or
 	// normalized media file — serializes IdentityModUnix as zero, so the
@@ -265,8 +279,9 @@ func (e *ReplacementEntry) SetRestorePending(kind string) bool {
 
 // FileMove represents a file that was moved during organize and should be moved back on revert.
 type FileMove struct {
-	OriginalPath string `json:"original_path"` // Where the file was before organize
-	NewPath      string `json:"new_path"`      // Where the file is after organize
+	Proof        *DeleteEntry `json:"proof,omitempty"`
+	OriginalPath string       `json:"original_path"` // Where the file was before organize
+	NewPath      string       `json:"new_path"`      // Where the file is after organize
 }
 
 // ParseGeneratedFiles decodes the persisted ledger blob. Empty content decodes
@@ -281,4 +296,13 @@ func ParseGeneratedFiles(raw string) (GeneratedFilesJSON, error) {
 		return GeneratedFilesJSON{}, err
 	}
 	return gf, nil
+}
+
+// DirectoryMove owns only a physical directory relocation, never a resident
+// primary filename. Locations includes durable pre-publication scratch names.
+type DirectoryMove struct {
+	Original  string   `json:"original"`
+	Locations []string `json:"locations"`
+	Device    uint64   `json:"device"`
+	Inode     uint64   `json:"inode"`
 }

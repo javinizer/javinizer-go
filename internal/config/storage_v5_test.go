@@ -74,7 +74,7 @@ func TestAtomicReplaceFile_V5_EmptyData(t *testing.T) {
 	}
 }
 
-func TestReplaceFileOnWindows_V5_NewFile(t *testing.T) {
+func TestReplaceFile_V5_NewFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "target.yaml")
 	tmpPath := filepath.Join(dir, "tmp.yaml")
@@ -83,8 +83,8 @@ func TestReplaceFileOnWindows_V5_NewFile(t *testing.T) {
 		t.Fatalf("failed to write tmp file: %v", err)
 	}
 
-	if err := replaceFileOnWindows(path, tmpPath); err != nil {
-		t.Fatalf("replaceFileOnWindows failed: %v", err)
+	if err := replaceFile(path, tmpPath); err != nil {
+		t.Fatalf("replaceFile failed: %v", err)
 	}
 
 	got, err := os.ReadFile(path)
@@ -96,7 +96,7 @@ func TestReplaceFileOnWindows_V5_NewFile(t *testing.T) {
 	}
 }
 
-func TestReplaceFileOnWindows_V5_ExistingFile(t *testing.T) {
+func TestReplaceFile_V5_ExistingFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "target.yaml")
 	tmpPath := filepath.Join(dir, "tmp.yaml")
@@ -108,8 +108,8 @@ func TestReplaceFileOnWindows_V5_ExistingFile(t *testing.T) {
 		t.Fatalf("failed to write tmp file: %v", err)
 	}
 
-	if err := replaceFileOnWindows(path, tmpPath); err != nil {
-		t.Fatalf("replaceFileOnWindows failed: %v", err)
+	if err := replaceFile(path, tmpPath); err != nil {
+		t.Fatalf("replaceFile failed: %v", err)
 	}
 
 	got, err := os.ReadFile(path)
@@ -120,7 +120,7 @@ func TestReplaceFileOnWindows_V5_ExistingFile(t *testing.T) {
 		t.Errorf("got %q, want %q", got, "new\n")
 	}
 
-	// Backup should be cleaned up
+	// No backup should be created
 	files, _ := os.ReadDir(dir)
 	for _, f := range files {
 		if f.Name() != "target.yaml" {
@@ -130,7 +130,7 @@ func TestReplaceFileOnWindows_V5_ExistingFile(t *testing.T) {
 	}
 }
 
-func TestReplaceFileOnWindows_V5_RollbackOnFailure(t *testing.T) {
+func TestReplaceFile_V5_PreservesDestinationOnFailure(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "target.yaml")
 	tmpPath := filepath.Join(dir, "nonexistent_tmp.yaml")
@@ -141,7 +141,7 @@ func TestReplaceFileOnWindows_V5_RollbackOnFailure(t *testing.T) {
 	}
 	// Don't create tmp file - the rename will fail
 
-	err := replaceFileOnWindows(path, tmpPath)
+	err := replaceFile(path, tmpPath)
 	if err == nil {
 		t.Error("expected error for missing tmp file")
 	}

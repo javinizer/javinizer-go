@@ -251,6 +251,18 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 		return result, err
 	}
 
+	residentDirectoryRestored := false
+	ledgerBefore, _ := models.ParseGeneratedFiles(op.GeneratedFiles)
+	if ledgerBefore.DirectoryMove != nil {
+		if !ledgerBefore.PrimaryResident {
+			return failRevert(ctx, r.batchFileOpRepo, op, models.RevertReasonUnexpectedPathState, "directory inverse requires resident ownership"), nil
+		}
+		location, err := r.residentDirectoryLocation(ledgerBefore.DirectoryMove)
+		if err != nil {
+			return failRevert(ctx, r.batchFileOpRepo, op, models.RevertReasonDestinationConflict, err.Error()), nil
+		}
+		residentDirectoryRestored = location == ledgerBefore.DirectoryMove.Original
+	}
 	// only a hydrated pending intent gets the unexecuted-intent settle below.
 	hydratedPendingIntent := false
 	if op.NewPath == "" && op.OperationType == models.OperationTypeMove {
@@ -340,6 +352,14 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 		return result, err
 	}
 
+	ledger, _ := models.ParseGeneratedFiles(op.GeneratedFiles)
+	if residentDirectoryRestored {
+		remapResidentDirectoryLedger(&ledger)
+	}
+	if err := checkPublicationRecovery(r.fs, ledger, false); err != nil {
+		return failRevert(ctx, r.batchFileOpRepo, op, models.RevertReasonUnexpectedPathState, err.Error()), nil
+	}
+	primaryResident := ledger.PrimaryResident
 	isUpdate := op.OperationType == models.OperationTypeUpdate
 
 	// codex P2 (PR #241 F1): anchor semantics apply ONLY to the legs that
@@ -351,7 +371,7 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 	// GeneratedFiles cleanup — gating here orphaned every journaled copied
 	// subtitle/NFO/download behind an anchor_missing skip. Those rows run
 	// cleanup independently of the primary anchor below.
-	if op.OperationType == models.OperationTypeMove || isUpdate {
+	if !primaryResident && (op.OperationType == models.OperationTypeMove || isUpdate) {
 		if primaryReplacement {
 			if _, statErr := r.fs.Stat(op.NewPath); os.IsNotExist(statErr) {
 				primaryRestored, restoreErr := r.restoreReplacementJournalWhere(ctx, op, func(destination string) bool {
@@ -379,8 +399,17 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 	case models.OperationTypeUpdate:
 		r.fsReverter.cleanupGeneratedFiles(op, filepath.Dir(filepath.Dir(op.OriginalPath)))
 	case models.OperationTypeMove:
-		if result, err := r.fsReverter.revertPrimaryFile(ctx, op); result != nil || err != nil {
-			return result, err
+		if ledger.DirectoryMove != nil {
+			if err := r.restoreResidentDirectory(ctx, op, ledger.DirectoryMove); err != nil {
+				return failRevert(ctx, r.batchFileOpRepo, op, models.RevertReasonDestinationConflict, err.Error()), nil
+			}
+			op.NFOPath = remapResidentDirectoryPath(ledger.DirectoryMove, op.NFOPath)
+			remapResidentDirectoryLedger(&ledger)
+		}
+		if !primaryResident {
+			if result, err := r.fsReverter.revertPrimaryFile(ctx, op); result != nil || err != nil {
+				return result, err
+			}
 		}
 		if primaryReplacement {
 			primaryRestored, restoreErr := r.restoreReplacementJournalWhere(ctx, op, func(destination string) bool {
@@ -394,8 +423,16 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 			}
 		}
 		destRoot := filepath.Dir(filepath.Dir(op.NewPath))
+		if primaryResident {
+			// This is only a stop boundary for parents of journaled artifacts.
+			// The resident primary and its containing directory are never owned.
+			destRoot = filepath.Dir(op.OriginalPath)
+			if ledger.DirectoryMove != nil {
+				destRoot = ledger.DirectoryMove.Original
+			}
+		}
 		r.fsReverter.cleanupGeneratedFiles(op, destRoot)
-		if !op.InPlaceRenamed {
+		if !primaryResident && !op.InPlaceRenamed {
 			r.fsReverter.cleanupEmptyDir(filepath.Dir(op.NewPath), destRoot)
 		}
 	case models.OperationTypeCopy, models.OperationTypeHardlink, models.OperationTypeSymlink:
@@ -416,6 +453,10 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 		r.fsReverter.cleanupGeneratedFiles(op, filepath.Dir(filepath.Dir(op.NewPath)))
 	default:
 		return failRevert(ctx, r.batchFileOpRepo, op, models.RevertReasonUnexpectedPathState, fmt.Sprintf("unknown operation type %q cannot be reverted", op.OperationType)), nil
+	}
+
+	if err := checkPublicationRecovery(r.fs, ledger, true); err != nil {
+		return failRevert(ctx, r.batchFileOpRepo, op, models.RevertReasonUnexpectedPathState, err.Error()), nil
 	}
 
 	nfoWarning, failedResult := r.fsReverter.restoreNFO(ctx, op, isUpdate)
@@ -642,6 +683,14 @@ func restoreNFOFS(ctx context.Context, fs afero.Fs, batchFileOpRepo database.Bat
 		return "", nil
 	}
 
+	// Older Windows snapshots could persist a rooted path after discarding its
+	// volume. The original video's volume cannot prove the NFO's old volume.
+	// Refuse that ambiguous native record before either restore mode writes.
+	if filepath.IsAbs(op.OriginalPath) && filepath.VolumeName(op.OriginalPath) != "" &&
+		filepath.VolumeName(nfoPath) == "" && os.IsPathSeparator(nfoPath[0]) {
+		return "", failRevert(ctx, batchFileOpRepo, op, models.RevertReasonNFORestoreFailed, "NFO snapshot path has no volume; cannot safely restore a legacy native path")
+	}
+
 	if hardFailure {
 		return restoreNFOHardFailure(ctx, fs, batchFileOpRepo, op, nfoPath)
 	}
@@ -654,10 +703,16 @@ func restoreNFOHardFailure(ctx context.Context, fs afero.Fs, batchFileOpRepo dat
 	if err != nil {
 		return "", failRevert(ctx, batchFileOpRepo, op, models.RevertReasonNFORestoreFailed, fmt.Sprintf("failed to canonicalize NFO path: %v", err))
 	}
+	if filepath.IsAbs(nfoDir) {
+		canonicalNfoDir = filepath.Clean(nfoDir)
+	}
 	if err := fs.MkdirAll(canonicalNfoDir, config.DirPerm); err != nil {
 		return "", failRevert(ctx, batchFileOpRepo, op, models.RevertReasonNFORestoreFailed, fmt.Sprintf("failed to create NFO directory: %v", err))
 	}
-	canonicalNfoPath := fsutil.NormalizePath(filepath.Join(canonicalNfoDir, filepath.Base(nfoPath)))
+	canonicalNfoPath := filepath.Join(canonicalNfoDir, filepath.Base(nfoPath))
+	if !filepath.IsAbs(nfoDir) {
+		canonicalNfoPath = fsutil.NormalizePath(canonicalNfoPath)
+	}
 	if err := afero.WriteFile(fs, canonicalNfoPath, []byte(op.NFOSnapshot), config.FilePerm); err != nil {
 		return "", failRevert(ctx, batchFileOpRepo, op, models.RevertReasonNFORestoreFailed, fmt.Sprintf("failed to restore NFO: %v", err))
 	}
@@ -672,8 +727,14 @@ func restoreNFOSoftFailure(fs afero.Fs, op *models.BatchFileOperation, nfoPath s
 		logging.Warnf("restoreNFOSoftFailure: failed to resolve absolute path for %q: %v", nfoDir, err)
 		canonicalNfoDir = filepath.Clean(nfoDir)
 	}
+	if filepath.IsAbs(nfoDir) {
+		canonicalNfoDir = filepath.Clean(nfoDir)
+	}
 	_ = fs.MkdirAll(canonicalNfoDir, config.DirPerm)
-	restorePath := fsutil.NormalizePath(filepath.Join(canonicalNfoDir, filepath.Base(nfoPath)))
+	restorePath := filepath.Join(canonicalNfoDir, filepath.Base(nfoPath))
+	if !filepath.IsAbs(nfoDir) {
+		restorePath = fsutil.NormalizePath(restorePath)
+	}
 	if err := afero.WriteFile(fs, restorePath, []byte(op.NFOSnapshot), config.FilePerm); err != nil {
 		logging.Warnf("Failed to restore NFO for op %d: %v (move-mode: treating as warning)", op.ID, err)
 		return fmt.Sprintf("NFO restore failed: %v", err), nil
@@ -744,6 +805,7 @@ func cleanupGeneratedFilesFS(fs afero.Fs, op *models.BatchFileOperation, stopAt 
 	if err := json.Unmarshal([]byte(op.GeneratedFiles), &gf); err != nil {
 		return
 	}
+	remapResidentDirectoryLedger(&gf)
 	if op.InPlaceRenamed && op.OriginalDirPath != "" && op.NewPath != "" {
 		currentDir := filepath.Dir(op.NewPath)
 		remap := func(path string) string {
@@ -1053,7 +1115,7 @@ func cleanupGeneratedFilesFS(fs afero.Fs, op *models.BatchFileOperation, stopAt 
 			}
 		} else if renameSuppressed[fm.NewPath] {
 			logging.Debugf("cleanupGeneratedFiles: move-back %s → %s suppressed — the original still exists (the move intent was never consumed or the source reappeared); the destination, pinned or not, is retained alongside it", fm.NewPath, fm.OriginalPath)
-		} else if err := fsutil.MoveFileNoReplace(fs, fm.NewPath, fm.OriginalPath); err != nil {
+		} else if err := recoverPublicationMove(fs, fm); err != nil {
 			if fsutil.PublishRefusal(err) {
 				logging.Debugf("cleanupGeneratedFiles: move-back %s → %s suppressed by the atomic no-replace leg — an occupant claimed the original path after the vacancy probe (or the volume cannot express no-replace); both objects retained byte-intact: %v", fm.NewPath, fm.OriginalPath, err)
 			} else {
@@ -1067,11 +1129,15 @@ func cleanupGeneratedFilesFS(fs afero.Fs, op *models.BatchFileOperation, stopAt 
 	batchRoot := filepath.Clean(stopAt)
 	for dir := range dirsToCheck {
 		cleanDir := filepath.Clean(dir)
-		if !isDescendant(cleanDir, batchRoot) {
+		boundary := batchRoot
+		if gf.PrimaryResident && !isDescendant(cleanDir, boundary) {
+			boundary = residentCleanupAliasBoundary(fs, cleanDir, boundary)
+		}
+		if boundary == "" || !isDescendant(cleanDir, boundary) {
 			logging.Warnf("Skipping cleanup of directory %q: outside batch root %q", cleanDir, batchRoot)
 			continue
 		}
-		cleanupEmptyDirDownwardFS(fs, cleanDir, stopAt)
+		cleanupEmptyDirDownwardFS(fs, cleanDir, boundary)
 	}
 }
 
