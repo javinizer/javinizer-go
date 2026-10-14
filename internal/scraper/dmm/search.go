@@ -157,6 +157,10 @@ func (s *scraper) tryDirectURLs(ctx context.Context, contentID string) []urlCand
 
 	var candidates []urlCandidate
 	for _, directURL := range directURLs {
+		// A cancelled probe must not reserve a slot needed by another caller.
+		if ctx.Err() != nil {
+			return candidates
+		}
 		if err := s.rateLimiter.Wait(ctx); err != nil {
 			if ctx.Err() != nil {
 				logging.Debugf("DMM: Context cancelled trying direct URL")

@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -63,6 +64,99 @@ func TestTryDirectURLs_AlreadyCancelledBeforeImmediateSlot(t *testing.T) {
 				assert.Zero(t, requests, "an already-cancelled context must not start even the first probe")
 			})
 		}
+	}
+}
+
+type dmmObservedWaitContext struct {
+	context.Context
+	waiting chan struct{}
+	once    sync.Once
+}
+
+func (ctx *dmmObservedWaitContext) Done() <-chan struct{} {
+	ctx.once.Do(func() { close(ctx.waiting) })
+	return ctx.Context.Done()
+}
+
+func TestTryDirectURLs_CancelledProbeDoesNotReserveRateLimitSlot(t *testing.T) {
+	for _, expired := range []bool{false, true} {
+		name := "cancelled"
+		if expired {
+			name = "expired"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			if expired {
+				cancel()
+				ctx, cancel = context.WithDeadline(context.Background(), time.Now().Add(-time.Hour))
+			}
+			cancel()
+			requests := 0
+			s := &scraper{
+				rateLimiter: ratelimit.NewLimiter(time.Hour),
+				client: resty.New().SetRetryCount(0).SetTransport(dmmCancellationTransport(func(req *http.Request) (*http.Response, error) {
+					requests++
+					return dmmCancellationResponse(req, http.StatusNotFound), nil
+				})),
+			}
+			assert.Nil(t, s.tryDirectURLs(ctx, "h_123ipx00535"))
+			assert.Zero(t, requests)
+
+			// A valid next caller must get the unused immediate slot. Observe entry
+			// into the limiter's blocking select instead of measuring elapsed time.
+			nextCtx, cancelNext := context.WithCancel(context.Background())
+			observed := &dmmObservedWaitContext{Context: nextCtx, waiting: make(chan struct{})}
+			result := make(chan error, 1)
+			finished := make(chan struct{})
+			go func() {
+				defer close(finished)
+				result <- s.rateLimiter.Wait(observed)
+			}()
+			t.Cleanup(func() {
+				cancelNext()
+				<-finished
+			})
+			select {
+			case err := <-result:
+				require.NoError(t, err)
+			case <-observed.waiting:
+				t.Fatal("cancelled direct probe consumed the next valid caller's immediate rate-limit slot")
+			case <-time.After(2 * time.Second):
+				t.Fatal("next rate-limit call did not complete or enter its blocking select")
+			}
+		})
+	}
+}
+
+type dmmCancelAfterCheckContext struct {
+	context.Context
+	cancel context.CancelFunc
+}
+
+func (ctx dmmCancelAfterCheckContext) Err() error {
+	err := ctx.Context.Err()
+	ctx.cancel() // Model cancellation immediately after the preflight's error read.
+	return err
+}
+
+func TestTryDirectURLs_CancellationAfterPreflightStopsBeforeHTTP(t *testing.T) {
+	for _, delay := range []time.Duration{0, time.Hour} {
+		t.Run(delay.String(), func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			requests := 0
+			s := &scraper{
+				rateLimiter: ratelimit.NewLimiter(delay),
+				client: resty.New().SetRetryCount(0).SetTransport(dmmCancellationTransport(func(req *http.Request) (*http.Response, error) {
+					requests++
+					return dmmCancellationResponse(req, http.StatusNotFound), nil
+				})),
+			}
+
+			assert.Nil(t, s.tryDirectURLs(dmmCancelAfterCheckContext{Context: ctx, cancel: cancel}, "h_123ipx00535"))
+			require.ErrorIs(t, ctx.Err(), context.Canceled)
+			assert.Zero(t, requests, "cancellation after preflight must still stop before HTTP")
+		})
 	}
 }
 
