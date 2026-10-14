@@ -5,6 +5,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -33,7 +34,17 @@ func TestAtomicReplace_WindowsSharingViolationPreservesCommittedConfig(t *testin
 	})
 
 	err = atomicReplaceFile(path, []byte("pending"), FilePerm)
-	require.ErrorIs(t, err, windows.ERROR_SHARING_VIOLATION)
+	require.Error(t, err)
+	var renameErr *os.LinkError
+	require.ErrorAs(t, err, &renameErr)
+	require.Equal(t, "rename", renameErr.Op)
+	require.Equal(t, path, renameErr.New)
+	var nativeErr syscall.Errno
+	require.ErrorAs(t, renameErr.Err, &nativeErr)
+	// With FILE_SHARE_DELETE withheld, MoveFileEx can report access denied
+	// instead of the sharing-violation code returned by conflicting opens.
+	require.Contains(t, []syscall.Errno{windows.ERROR_ACCESS_DENIED, windows.ERROR_SHARING_VIOLATION}, nativeErr)
+	require.ErrorIs(t, err, nativeErr)
 	assert.Contains(t, err.Error(), "failed to atomically replace config file")
 	got, readErr := os.ReadFile(path)
 	require.NoError(t, readErr)
