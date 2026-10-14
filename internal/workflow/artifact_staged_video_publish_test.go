@@ -11,6 +11,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/operationmode"
 	"github.com/javinizer/javinizer-go/internal/organizer"
 	"github.com/javinizer/javinizer-go/internal/template"
+	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 )
 
@@ -86,11 +87,18 @@ func TestStagedVideoResidentSourcesRemainUnowned(t *testing.T) {
 			env.match.Path, env.match.Name = primary, filepath.Base(primary)
 			org := organizer.NewOrganizer(env.fs, &organizer.Config{FileFormat: "<ID>", RenameFile: true, OperationMode: operationmode.OperationModeInPlaceNoRenameFolder}, template.NewEngine(), nil)
 			env.orch.organizer = org
-			identities := map[string]os.FileInfo{}
-			for _, path := range []string{primary, multipart} {
-				var err error
-				identities[path], err = os.Stat(path)
+			identities := map[string]artifactSourceIdentity{}
+			pin := func(path string) {
+				info, err := os.Stat(path)
 				require.NoError(t, err)
+				identity := captureArtifactSourceIdentity(env.fs, path, info)
+				// Capture the kernel key now. Windows os.SameFile can load a
+				// stored FileInfo's identity lazily from a replacement pathname.
+				require.True(t, identity.hasDevIno, "native fixture requires an eagerly captured strong identity")
+				identities[path] = identity
+			}
+			for _, path := range []string{primary, multipart} {
+				pin(path)
 			}
 			if substituted != "" {
 				env.orch.organizer = &pr260PublicationFaultOrganizer{Organizer: org, preExecute: func(*organizer.OrganizePlan) {
@@ -100,9 +108,7 @@ func TestStagedVideoResidentSourcesRemainUnowned(t *testing.T) {
 					}
 					require.NoError(t, os.Rename(path, path+".old"))
 					require.NoError(t, os.WriteFile(path, []byte(body), 0644))
-					var err error
-					identities[path], err = os.Stat(path)
-					require.NoError(t, err)
+					pin(path)
 				}}
 			}
 			cmd := pr260FencedCommand(&env.movie, env.match, incoming, pr260FencedCounter(t, env.db), operationmode.OperationModeInPlaceNoRenameFolder, false, false, organizer.LinkModeNone, false, false)
@@ -113,22 +119,27 @@ func TestStagedVideoResidentSourcesRemainUnowned(t *testing.T) {
 			} else {
 				require.ErrorIs(t, err, errArtifactSourceChanged)
 			}
-			_, _ = history.NewReverter(env.fs, env.repo).RevertBatch(t.Context(), env.jobID)
-			for path, before := range identities {
-				after, err := os.Stat(path)
-				require.NoError(t, err)
-				require.True(t, os.SameFile(before, after), "resident or substituted source must never become this apply's output")
+			assertResidentIdentities := func() {
+				for path, before := range identities {
+					after, err := os.Stat(path)
+					require.NoError(t, err)
+					require.True(t, before.matches(env.fs, path, after), "resident or substituted source must never become this apply's output")
+				}
 			}
+			assertResidentIdentities()
+			_, _ = history.NewReverter(env.fs, env.repo).RevertBatch(t.Context(), env.jobID)
+			assertResidentIdentities()
 		})
 	}
 }
 
 type stagedVideoPlantAfterIntentLog struct {
 	RevertLog
+	fs      afero.Fs
 	target  string
 	fired   bool
 	body    []byte
-	planted os.FileInfo
+	planted artifactSourceIdentity
 }
 
 func (l *stagedVideoPlantAfterIntentLog) RecordDeleteIntent(ctx context.Context, id OperationID, entries []models.DeleteEntry) error {
@@ -145,9 +156,12 @@ func (l *stagedVideoPlantAfterIntentLog) RecordDeleteIntent(ctx context.Context,
 			if err := os.WriteFile(l.target, body, 0644); err != nil {
 				return err
 			}
-			var err error
-			l.planted, err = os.Stat(l.target)
-			return err
+			info, err := os.Stat(l.target)
+			if err != nil {
+				return err
+			}
+			l.planted = captureArtifactSourceIdentity(l.fs, l.target, info)
+			return nil
 		}
 	}
 	return nil
@@ -173,12 +187,16 @@ func TestStagedVideoAfterArmMatrix(t *testing.T) {
 				}
 				target := filepath.Join(incoming, leaf)
 				env.orch.organizer = organizer.NewOrganizer(env.fs, &organizer.Config{FileFormat: "<ID>", RenameFile: true, OperationMode: operationmode.OperationModeInPlaceNoRenameFolder}, template.NewEngine(), nil)
-				l := &stagedVideoPlantAfterIntentLog{RevertLog: env.orch.revertLog, target: target}
+				l := &stagedVideoPlantAfterIntentLog{RevertLog: env.orch.revertLog, fs: env.fs, target: target}
 				env.orch.revertLog = l
 				cmd := pr260FencedCommand(&env.movie, env.match, incoming, pr260FencedCounter(t, env.db), operationmode.OperationModeInPlaceNoRenameFolder, false, false, organizer.LinkModeNone, false, false)
 				cmd.Organize.ForceUpdate = force
 				_, _ = env.orch.Execute(t.Context(), cmd)
 				require.True(t, l.fired, "occupant must be planted after durable create intent/arming")
+				require.True(t, l.planted.hasDevIno, "native fixture requires an eagerly captured strong identity")
+				after, e := os.Stat(target)
+				require.NoError(t, e)
+				require.True(t, l.planted.matches(env.fs, target, after), "after-arm foreign object must not be replaced")
 				b, e := os.ReadFile(target)
 				require.NoError(t, e)
 				require.Equal(t, "foreign after arm", string(b))
@@ -206,20 +224,21 @@ func TestStagedVideoSameBytesAfterArmRetainsOwnership(t *testing.T) {
 			}
 			target := filepath.Join(incoming, leaf)
 			env.orch.organizer = organizer.NewOrganizer(env.fs, &organizer.Config{FileFormat: "<ID>", RenameFile: true, OperationMode: operationmode.OperationModeInPlaceNoRenameFolder}, template.NewEngine(), nil)
-			l := &stagedVideoPlantAfterIntentLog{RevertLog: env.orch.revertLog, target: target, body: []byte(body)}
+			l := &stagedVideoPlantAfterIntentLog{RevertLog: env.orch.revertLog, fs: env.fs, target: target, body: []byte(body)}
 			env.orch.revertLog = l
 			cmd := pr260FencedCommand(&env.movie, env.match, incoming, pr260FencedCounter(t, env.db), operationmode.OperationModeInPlaceNoRenameFolder, false, false, organizer.LinkModeNone, false, false)
 			cmd.Organize.ForceUpdate = false
 			_, _ = env.orch.Execute(t.Context(), cmd)
 			require.True(t, l.fired)
+			require.True(t, l.planted.hasDevIno, "native fixture requires an eagerly captured strong identity")
 			after, e := os.Stat(target)
 			require.NoError(t, e)
-			require.True(t, os.SameFile(l.planted, after), "same-content foreign object must not be replaced")
+			require.True(t, l.planted.matches(env.fs, target, after), "same-content foreign object must not be replaced")
 			_, revErr := history.NewReverter(env.fs, env.repo).RevertBatch(t.Context(), env.jobID)
 			t.Logf("revert outcome: %v", revErr)
 			after, e = os.Stat(target)
 			require.NoError(t, e, "revert must not delete same-content foreign claimant")
-			require.True(t, os.SameFile(l.planted, after))
+			require.True(t, l.planted.matches(env.fs, target, after), "Undo must retain the exact foreign object captured at planting")
 			require.FileExists(t, env.source)
 		})
 	}

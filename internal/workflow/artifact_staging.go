@@ -1709,7 +1709,7 @@ func (s *artifactStage) installPaths(paths, preserve []string, stagedArtifactDir
 			if info.IsDir() {
 				return false, fmt.Errorf("artifact destination is a directory: %s", target)
 			}
-			if plan.video && !(plan.primary && s.original.Organize.ForceUpdate) {
+			if plan.video && (!plan.primary || !s.original.Organize.ForceUpdate) {
 				return false, fmt.Errorf("%w: staged video destination %s", fsutil.ErrPublishCollision, target)
 			}
 			if digestEq, eqErr := sameBytes(s.fs, source, target); !plan.video && eqErr == nil && digestEq {

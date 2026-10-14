@@ -410,6 +410,14 @@ func TestStagedSubtitleIdenticalForeignRaceSurvivesUndo(t *testing.T) {
 			incoming := filepath.Dir(env.source)
 			target := filepath.Join(incoming, env.movie.ID+".eng.srt")
 			env.orch.organizer = organizer.NewOrganizer(env.fs, &organizer.Config{FolderFormat: "movie", FileFormat: "<ID>", RenameFile: true, MoveSubtitles: true, SubtitleExtensions: []string{".srt"}, OperationMode: operationmode.OperationModeInPlaceNoRenameFolder}, template.NewEngine(), nil)
+			var foreign artifactSourceIdentity
+			plant := func(fs afero.Fs, path string) {
+				require.NoError(t, afero.WriteFile(fs, path, []byte("subtitle"), 0644))
+				info, err := fs.Stat(path)
+				require.NoError(t, err)
+				foreign = captureArtifactSourceIdentity(fs, path, info)
+				require.True(t, foreign.hasDevIno, "foreign object identity must be pinned eagerly, including Windows")
+			}
 			oldCopy := stagedSubtitleCopy
 			t.Cleanup(func() { stagedSubtitleCopy = oldCopy })
 			stagedSubtitleCopy = func(fs afero.Fs, source, dest string, proof fsutil.VerifiedSourceProof, mode os.FileMode) (string, *fsutil.BoundInstallIdentity, error) {
@@ -417,10 +425,10 @@ func TestStagedSubtitleIdenticalForeignRaceSurvivesUndo(t *testing.T) {
 					digest, id, err := oldCopy(fs, source, dest, proof, mode)
 					require.NoError(t, err)
 					require.NoError(t, fs.Rename(dest, dest+".previous"))
-					require.NoError(t, afero.WriteFile(fs, dest, []byte("subtitle"), 0644))
+					plant(fs, dest)
 					return digest, id, nil
 				}
-				require.NoError(t, afero.WriteFile(fs, dest, []byte("subtitle"), 0644))
+				plant(fs, dest)
 				return oldCopy(fs, source, dest, proof, mode)
 			}
 			cmd := pr260FencedCommand(&env.movie, env.match, incoming, pr260FencedCounter(t, env.db), operationmode.OperationModeInPlaceNoRenameFolder, false, false, organizer.LinkModeNone, false, false)
@@ -430,6 +438,9 @@ func TestStagedSubtitleIdenticalForeignRaceSurvivesUndo(t *testing.T) {
 			require.Len(t, result.OrganizeResult.Subtitles, 1)
 			require.True(t, result.OrganizeResult.Subtitles[0].Skipped)
 			require.False(t, result.OrganizeResult.Subtitles[0].Copied)
+			info, err := env.fs.Stat(target)
+			require.NoError(t, err)
+			require.True(t, foreign.matches(env.fs, target, info), "apply must retain the exact foreign object")
 			ledger := p3Ledger(t, env.repo, result.OperationID)
 			require.NotContains(t, ledger.Delete, target)
 			found := false
@@ -446,6 +457,9 @@ func TestStagedSubtitleIdenticalForeignRaceSurvivesUndo(t *testing.T) {
 			got, err := os.ReadFile(target)
 			require.NoError(t, err)
 			require.Equal(t, "subtitle", string(got), "same-byte foreign inode is never owned by the failed copy")
+			info, err = env.fs.Stat(target)
+			require.NoError(t, err)
+			require.True(t, foreign.matches(env.fs, target, info), "Undo must retain the exact foreign object")
 			pr260AssertRetained(t, env.fs, env.source, env.subtitle, env.multipart, env.unrelated)
 		})
 	}
