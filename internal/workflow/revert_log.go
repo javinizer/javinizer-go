@@ -392,6 +392,29 @@ func mergeReplacementLedgerIntents(priorRaw, newRaw string, promotePinnedDeletes
 	if err != nil {
 		return newRaw
 	}
+	// Completion reports an NFO path even when publication replaced an
+	// existing NFO. A replacement alone does not grant deletion ownership:
+	// retain it only if the pre-completion ledger already recorded a create
+	// intent (a legitimate create-then-replace chain). Otherwise Undo would
+	// restore the backup and then delete it, including after folder rebasing.
+	keys := fsutil.NewDestKeyResolver()
+	preexisting := make(map[string]bool, len(prior.Replacements))
+	for _, replacement := range prior.Replacements {
+		preexisting[keys.Key(replacement.Destination)] = true
+	}
+	for _, path := range prior.Delete {
+		delete(preexisting, keys.Key(path))
+	}
+	for _, entry := range prior.PlannedDeletes {
+		delete(preexisting, keys.Key(entry.Path))
+	}
+	deletes := fresh.Delete[:0]
+	for _, path := range fresh.Delete {
+		if !preexisting[keys.Key(path)] {
+			deletes = append(deletes, path)
+		}
+	}
+	fresh.Delete = deletes
 	fresh.Replacements = prior.Replacements
 	if len(fresh.Roots) == 0 {
 		fresh.Roots = prior.Roots
