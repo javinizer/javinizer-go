@@ -680,18 +680,6 @@ func (o *Organizer) execute(plan *OrganizePlan) (*OrganizeResult, error) {
 		return result, result.Error
 	}
 
-	if !plan.WillMove {
-		result.ShouldGenerateMetadata = true
-		o.handleSubtitles(plan, result, subtitleInstall{})
-		return result, nil
-	}
-
-	strategy := plan.executeStrategy
-	if strategy == nil {
-		strategy = o.strategyFromType(plan.strategy)
-	}
-
-	strategyResult := result
 	if plan.residentSourceProof != nil {
 		lst, ok := o.fs.(afero.Lstater)
 		if !ok {
@@ -711,7 +699,21 @@ func (o *Organizer) execute(plan *OrganizePlan) (*OrganizeResult, error) {
 		}
 		result.ShouldGenerateMetadata = true
 		result.PrimaryResident = true
-	} else {
+	}
+
+	if !plan.WillMove {
+		result.ShouldGenerateMetadata = true
+		o.handleSubtitles(plan, result, subtitleInstall{})
+		return result, nil
+	}
+
+	strategy := plan.executeStrategy
+	if strategy == nil {
+		strategy = o.strategyFromType(plan.strategy)
+	}
+
+	strategyResult := result
+	if plan.residentSourceProof == nil {
 		var err error
 		strategyResult, err = strategy.Execute(plan)
 		if err != nil {
