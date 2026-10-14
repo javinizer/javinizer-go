@@ -301,12 +301,15 @@ func NewOrganizer(fs afero.Fs, cfg *Config, engine template.EngineInterface, m m
 
 // OrganizeResult represents the result of organizing a file
 type OrganizeResult struct {
-	OriginalPath string
-	NewPath      string
-	FolderPath   string
-	FileName     string
-	Moved        bool
-	Error        error
+	// PrimaryResident marks an admission-proven pre-existing primary. NewPath
+	// is for display/artifact placement only and grants no Undo ownership.
+	PrimaryResident bool
+	OriginalPath    string
+	NewPath         string
+	FolderPath      string
+	FileName        string
+	Moved           bool
+	Error           error
 	// InstalledIdentity is the primary destination object's identity AS THE
 	// PUBLISH PROVED IT (codex P1, PRRT_kwDORn9KaM6p3Dq1): the verified move,
 	// copy, and hard-link composites hand back the object they installed, so a
@@ -478,6 +481,7 @@ type OrganizePlan struct {
 	// PRRT_kwDORn9KaM6nEnUw). Nil keeps the legacy by-name
 	// consumption (every direct flow and the overwrite-authorized lanes).
 	verifiedSourceProof fsutil.VerifiedSourceProof
+	residentSourceProof fsutil.VerifiedSourceProof
 	// verifiedSubtitleProofs is the per-sidecar twin of verifiedSourceProof
 	// (codex P1, PRRT_kwDORn9KaM6m_lgp), keying each admitted subtitle SOURCE
 	// endpoint (cleaned original path) to the admission proof the fenced
@@ -519,6 +523,13 @@ type OrganizePlan struct {
 // before.
 func (p *OrganizePlan) BindVerifiedSource(proof fsutil.VerifiedSourceProof) {
 	p.verifiedSourceProof = proof
+}
+
+// BindResidentSource freezes an already-resident primary as a no-op. Both
+// names must still pass the admission proof at execution; a vanished alias
+// must never become an unjournaled install. Subtitles retain their normal lane.
+func (p *OrganizePlan) BindResidentSource(proof fsutil.VerifiedSourceProof) {
+	p.residentSourceProof = proof
 }
 
 // BindVerifiedSubtitleSources pins each admitted subtitle source's install to
@@ -679,9 +690,32 @@ func (o *Organizer) execute(plan *OrganizePlan) (*OrganizeResult, error) {
 		strategy = o.strategyFromType(plan.strategy)
 	}
 
-	strategyResult, err := strategy.Execute(plan)
-	if err != nil {
-		return strategyResult, err
+	strategyResult := result
+	if plan.residentSourceProof != nil {
+		lst, ok := o.fs.(afero.Lstater)
+		if !ok {
+			return result, fmt.Errorf("resident source requires no-follow lookup")
+		}
+		for _, path := range []string{plan.SourcePath, plan.TargetPath} {
+			info, noFollow, err := lst.LstatIfPossible(path)
+			if err != nil {
+				return result, err
+			}
+			if !noFollow || !info.Mode().IsRegular() {
+				return result, fmt.Errorf("resident source is not a no-follow regular file: %s", path)
+			}
+			if err := plan.residentSourceProof(path, info); err != nil {
+				return result, err
+			}
+		}
+		result.ShouldGenerateMetadata = true
+		result.PrimaryResident = true
+	} else {
+		var err error
+		strategyResult, err = strategy.Execute(plan)
+		if err != nil {
+			return strategyResult, err
+		}
 	}
 
 	if o.config.MoveSubtitles {

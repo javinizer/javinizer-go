@@ -340,6 +340,11 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 		return result, err
 	}
 
+	ledger, _ := models.ParseGeneratedFiles(op.GeneratedFiles)
+	if err := checkPublicationRecovery(r.fs, ledger, false); err != nil {
+		return failRevert(ctx, r.batchFileOpRepo, op, models.RevertReasonUnexpectedPathState, err.Error()), nil
+	}
+	primaryResident := ledger.PrimaryResident
 	isUpdate := op.OperationType == models.OperationTypeUpdate
 
 	// codex P2 (PR #241 F1): anchor semantics apply ONLY to the legs that
@@ -351,7 +356,7 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 	// GeneratedFiles cleanup — gating here orphaned every journaled copied
 	// subtitle/NFO/download behind an anchor_missing skip. Those rows run
 	// cleanup independently of the primary anchor below.
-	if op.OperationType == models.OperationTypeMove || isUpdate {
+	if !primaryResident && (op.OperationType == models.OperationTypeMove || isUpdate) {
 		if primaryReplacement {
 			if _, statErr := r.fs.Stat(op.NewPath); os.IsNotExist(statErr) {
 				primaryRestored, restoreErr := r.restoreReplacementJournalWhere(ctx, op, func(destination string) bool {
@@ -379,8 +384,10 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 	case models.OperationTypeUpdate:
 		r.fsReverter.cleanupGeneratedFiles(op, filepath.Dir(filepath.Dir(op.OriginalPath)))
 	case models.OperationTypeMove:
-		if result, err := r.fsReverter.revertPrimaryFile(ctx, op); result != nil || err != nil {
-			return result, err
+		if !primaryResident {
+			if result, err := r.fsReverter.revertPrimaryFile(ctx, op); result != nil || err != nil {
+				return result, err
+			}
 		}
 		if primaryReplacement {
 			primaryRestored, restoreErr := r.restoreReplacementJournalWhere(ctx, op, func(destination string) bool {
@@ -416,6 +423,10 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 		r.fsReverter.cleanupGeneratedFiles(op, filepath.Dir(filepath.Dir(op.NewPath)))
 	default:
 		return failRevert(ctx, r.batchFileOpRepo, op, models.RevertReasonUnexpectedPathState, fmt.Sprintf("unknown operation type %q cannot be reverted", op.OperationType)), nil
+	}
+
+	if err := checkPublicationRecovery(r.fs, ledger, true); err != nil {
+		return failRevert(ctx, r.batchFileOpRepo, op, models.RevertReasonUnexpectedPathState, err.Error()), nil
 	}
 
 	nfoWarning, failedResult := r.fsReverter.restoreNFO(ctx, op, isUpdate)
@@ -1053,7 +1064,7 @@ func cleanupGeneratedFilesFS(fs afero.Fs, op *models.BatchFileOperation, stopAt 
 			}
 		} else if renameSuppressed[fm.NewPath] {
 			logging.Debugf("cleanupGeneratedFiles: move-back %s → %s suppressed — the original still exists (the move intent was never consumed or the source reappeared); the destination, pinned or not, is retained alongside it", fm.NewPath, fm.OriginalPath)
-		} else if err := fsutil.MoveFileNoReplace(fs, fm.NewPath, fm.OriginalPath); err != nil {
+		} else if err := recoverPublicationMove(fs, fm); err != nil {
 			if fsutil.PublishRefusal(err) {
 				logging.Debugf("cleanupGeneratedFiles: move-back %s → %s suppressed by the atomic no-replace leg — an occupant claimed the original path after the vacancy probe (or the volume cannot express no-replace); both objects retained byte-intact: %v", fm.NewPath, fm.OriginalPath, err)
 			} else {

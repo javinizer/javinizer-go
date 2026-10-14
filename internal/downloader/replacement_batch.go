@@ -20,10 +20,12 @@ import (
 // same-directory backup and journaled before the publisher is allowed to run.
 // Rollback unwinds all published legs in reverse order.
 type ReplacementBatch struct {
-	fs       afero.Fs
-	opID     string
-	recorder ReplacementRecorder
-	legs     []*replacementBatchLeg
+	fs              afero.Fs
+	opID            string
+	recorder        ReplacementRecorder
+	legs            []*replacementBatchLeg
+	released        []string
+	unarmedRecovery []*replacementBatchLeg
 }
 
 type replacementBatchLeg struct {
@@ -181,7 +183,7 @@ func (b *ReplacementBatch) ObservePublishResult(destination string) {
 // — the entire ownership certificate for a link object — is captured with the
 // record; rollback then routes the link to the link-object unlink instead of
 // stranding it (the regular-file unlink has no link model). Regular files keep
-// the weak record.
+// an eager identity when the filesystem exposes one.
 func observedInstallIdentity(fs afero.Fs, destination string, info os.FileInfo) *fsutil.BoundInstallIdentity {
 	if info == nil {
 		return nil
@@ -191,7 +193,7 @@ func observedInstallIdentity(fs afero.Fs, destination string, info os.FileInfo) 
 			return fsutil.NewBoundInstallLinkIdentity(info, target)
 		}
 	}
-	return fsutil.NewWeakBoundInstallIdentity(info)
+	return fsutil.NewObservedBoundInstallIdentity(fs, destination, info)
 }
 
 // ObservePublishResultBound is ObservePublishResult with the observation
@@ -287,10 +289,25 @@ func (b *ReplacementBatch) SetRollbackOrigin(destination, origin string) error {
 // PRRT_kwDORn9KaM6qLkJ4). It never creates or arms a rollback inverse from a
 // destination name lookup alone.
 func (b *ReplacementBatch) SetRollbackOriginBound(destination, origin string, installed *fsutil.BoundInstallIdentity) error {
+	var err error
 	if installed == nil || installed.FileInfo() == nil {
-		return fmt.Errorf("staged publication destination %s requires a bound installed identity", destination)
+		err = fmt.Errorf("staged publication destination %s requires a bound installed identity", destination)
+	} else {
+		err = b.setRollbackOrigin(destination, origin, installed)
 	}
-	return b.setRollbackOrigin(destination, origin, installed)
+	if err != nil {
+		// The publisher already mutated this endpoint. A failed inverse arm must
+		// still revoke stale by-name claims and retain its carried recovery proof.
+		recoveryOrigin := ""
+		if strings.TrimSpace(origin) != "" {
+			recoveryOrigin = filepath.Clean(origin)
+		}
+		b.unarmedRecovery = append(b.unarmedRecovery, &replacementBatchLeg{
+			destination: filepath.Clean(destination), installed: true, installedID: installed,
+			rollbackOrigin: recoveryOrigin,
+		})
+	}
+	return err
 }
 
 func (b *ReplacementBatch) setRollbackOrigin(destination, origin string, installed *fsutil.BoundInstallIdentity) error {
@@ -409,8 +426,11 @@ func (b *ReplacementBatch) rollback(ctx context.Context, releaseJournal bool) er
 						markRollbackRearmFailed(ctx, downloadLedger{opID: b.opID, recorder: b.recorder}, leg.destination, leg.backup, rearmErr)
 					}
 					joined = errors.Join(joined, fmt.Errorf("release rolled-back replacement %s: %w", leg.destination, err))
+					leg.release()
+					continue
 				}
 			}
+			leg.replaced = false
 		}
 		leg.release()
 	}
@@ -489,6 +509,7 @@ func (b *ReplacementBatch) ReleaseUninstalled(destination string) error {
 			return fmt.Errorf("cannot release installed staged publication destination %s", target)
 		}
 		leg.release()
+		b.released = append(b.released, leg.destination)
 		b.legs = append(b.legs[:i], b.legs[i+1:]...)
 		return nil
 	}
