@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"syscall"
 
 	"github.com/javinizer/javinizer-go/internal/fsutil"
@@ -13,7 +14,9 @@ import (
 )
 
 func primaryUndoCrossDevice(err error) bool { return errors.Is(err, syscall.EXDEV) }
-func primaryUndoDurabilitySupported() error { return nil }
+func primaryUndoDurabilitySupported() error {
+	return primaryUndoDurabilitySupportedOn(runtime.GOOS)
+}
 func primaryUndoSyncDir(path string) error {
 	abs, err := filepath.Abs(path)
 	if err != nil {

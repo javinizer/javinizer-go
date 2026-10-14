@@ -28,6 +28,20 @@ var primaryUndoPrepareStage = fsutil.SyncStagedMetadata
 
 const primaryUndoPlannedState = "planned"
 
+// Admission requires the intersection of fd-scoped staging metadata, a native
+// mutation witness, and the POSIX directory-sync/no-replace recovery primitives.
+// In particular, Solaris/illumos have a witness but stagedHandleChtimes returns
+// ENOSYS. Reject before creating a journal or stage instead of rotating a full
+// copy on every retry. Windows retains its separate, stricter admission refusal.
+func primaryUndoDurabilitySupportedOn(goos string) error {
+	switch goos {
+	case "linux", "darwin", "dragonfly", "freebsd", "netbsd", "openbsd":
+		return nil
+	default:
+		return fmt.Errorf("cross-volume primary Undo on %s requires manual recovery: native metadata and recovery durability are not supported; retain source, stage, and history", goos)
+	}
+}
+
 func primaryUndoToken() (string, error) {
 	var token [16]byte
 	if _, err := io.ReadFull(primaryUndoRandom, token[:]); err != nil {
