@@ -368,7 +368,7 @@ func mergeReplacementLedgerIntents(priorRaw, newRaw string, promotePinnedDeletes
 		return newRaw
 	}
 	prior, err := models.ParseGeneratedFiles(priorRaw)
-	if err != nil || (prior.DirectoryMove == nil && !prior.PrimaryResident && len(prior.Replacements) == 0 && len(prior.Roots) == 0 && len(prior.MoveBack) == 0 && len(prior.Delete) == 0 && len(prior.PlannedDeletes) == 0) {
+	if err != nil || (prior.DirectoryMove == nil && !prior.PrimaryResident && prior.PrimaryUndo == nil && len(prior.Replacements) == 0 && len(prior.Roots) == 0 && len(prior.MoveBack) == 0 && len(prior.Delete) == 0 && len(prior.PlannedDeletes) == 0) {
 		return newRaw
 	}
 	if newRaw == "" {
@@ -391,7 +391,7 @@ func mergeReplacementLedgerIntents(priorRaw, newRaw string, promotePinnedDeletes
 			}
 			retained = kept
 		}
-		return models.MarshalLedgerJSON(models.GeneratedFilesJSON{DirectoryMove: prior.DirectoryMove, PrimaryResident: prior.PrimaryResident, Replacements: prior.Replacements, Roots: prior.Roots, MoveBack: prior.MoveBack, Delete: prior.Delete, PlannedDeletes: retained})
+		return models.MarshalLedgerJSON(models.GeneratedFilesJSON{DirectoryMove: prior.DirectoryMove, PrimaryUndo: prior.PrimaryUndo, PrimaryResident: prior.PrimaryResident, Replacements: prior.Replacements, Roots: prior.Roots, MoveBack: prior.MoveBack, Delete: prior.Delete, PlannedDeletes: retained})
 	}
 	fresh, err := models.ParseGeneratedFiles(newRaw)
 	if err != nil {
@@ -421,6 +421,7 @@ func mergeReplacementLedgerIntents(priorRaw, newRaw string, promotePinnedDeletes
 		}
 	}
 	fresh.Delete = deletes
+	fresh.PrimaryUndo = prior.PrimaryUndo
 	if fresh.DirectoryMove == nil {
 		fresh.DirectoryMove = prior.DirectoryMove
 	} else if prior.DirectoryMove != nil {

@@ -359,6 +359,44 @@ func (r *JobRepository) DeleteOrganizedOlderThan(ctx context.Context, date time.
 			}
 			prunedOps = append(prunedOps, chunk...)
 		}
+		// The claim and fresh journal snapshot share this write transaction
+		// with PrimaryUndo admission. Keep whole jobs whose recovery is still
+		// live, and RELEASE their claim before commit so retry remains possible.
+		blocked := make(map[string]bool)
+		for _, op := range prunedOps {
+			if models.PrimaryUndoNeedsRetention(op) {
+				blocked[op.BatchJobID] = true
+			}
+		}
+		if len(blocked) > 0 {
+			ids := make([]string, 0, len(blocked))
+			for id := range blocked {
+				ids = append(ids, id)
+			}
+			for start := 0; start < len(ids); start += pruneDeleteBatchSize {
+				end := start + pruneDeleteBatchSize
+				if end > len(ids) {
+					end = len(ids)
+				}
+				if err := tx.Model(&models.Job{}).Where("id IN ? AND status = ?", ids[start:end], pruningJobStatus).
+					Update("status", models.JobStatusOrganized).Error; err != nil {
+					return wrapDBErr("release", "primary Undo retention claims", err)
+				}
+			}
+			eligibleJobs := make([]models.Job, 0, len(prunedJobs))
+			for _, job := range prunedJobs {
+				if !blocked[job.ID] {
+					eligibleJobs = append(eligibleJobs, job)
+				}
+			}
+			eligibleOps := make([]models.BatchFileOperation, 0, len(prunedOps))
+			for _, op := range prunedOps {
+				if !blocked[op.BatchJobID] {
+					eligibleOps = append(eligibleOps, op)
+				}
+			}
+			prunedJobs, prunedOps = eligibleJobs, eligibleOps
+		}
 		return nil
 	})
 	if err != nil {

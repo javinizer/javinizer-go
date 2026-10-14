@@ -471,6 +471,9 @@ func (s *ReplacementSweeper) PruneOperationBackups(ctx context.Context, ops []mo
 
 	candidateIDs := make(map[uint]struct{}, len(ops))
 	for _, op := range ops {
+		if models.PrimaryUndoNeedsRetention(op) {
+			return fmt.Errorf("operation %d has pending or malformed primary Undo recovery; retain history", op.ID)
+		}
 		candidateIDs[op.ID] = struct{}{}
 	}
 	var errs []error

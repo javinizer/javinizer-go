@@ -253,6 +253,12 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 
 	residentDirectoryRestored := false
 	ledgerBefore, _ := models.ParseGeneratedFiles(op.GeneratedFiles)
+	// Directory compensation and resident admission exclude primary ownership.
+	// Reject contradictory recovery journals before even inspecting directory
+	// locations, without overwriting a concurrent primary Undo terminal status.
+	if ledgerBefore.PrimaryUndo != nil && (ledgerBefore.PrimaryResident || ledgerBefore.DirectoryMove != nil) {
+		return primaryUndoFailure(op, fmt.Errorf("conflicting resident and primary Undo ownership; manual recovery required")), nil
+	}
 	if ledgerBefore.DirectoryMove != nil {
 		if !ledgerBefore.PrimaryResident {
 			return failRevert(ctx, r.batchFileOpRepo, op, models.RevertReasonUnexpectedPathState, "directory inverse requires resident ownership"), nil
@@ -277,6 +283,20 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 
 	r.recoverInPlaceMoveAnchor(op)
 
+	primaryUndoComplete := false
+	if ledger, err := models.ParseGeneratedFiles(op.GeneratedFiles); err == nil && ledger.PrimaryUndo != nil {
+		// A resumed primary can consume the library anchor before reaching
+		// the ordinary primary leg. Preserve failed-publication admission
+		// checks here as well as the original later pre/post checks.
+		if err := checkPublicationRecovery(r.fs, ledger, false); err != nil {
+			return primaryUndoFailure(op, err), nil
+		}
+		if err := resumePrimaryUndo(ctx, r.fs, r.batchFileOpRepo, op, ledger.PrimaryUndo); err != nil {
+			return primaryUndoFailure(op, err), nil
+		}
+		primaryUndoComplete = true
+	}
+
 	// P3: replay the replacement journal BEFORE the anchor check AND before
 	// any operation-type leg (codex P3 R2-1/R6-in-2): a deleted primary
 	// anchor must not strand independently recoverable overwritten media —
@@ -299,7 +319,7 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 	// Only after the journal replay may an unexecuted intent settle a no-op,
 	// because a crash-severed overwrite has already restored its prior bytes by
 	// now — destination-absent + source-present proves the move never ran.
-	if hydratedPendingIntent && op.OperationType == models.OperationTypeMove {
+	if !primaryUndoComplete && hydratedPendingIntent && op.OperationType == models.OperationTypeMove {
 		_, dstErr := r.fs.Stat(op.NewPath)
 		// The source probe must NOT follow symlinks: a dangling symlink at the
 		// source pathname is an existing directory entry the move never
@@ -371,7 +391,7 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 	// GeneratedFiles cleanup — gating here orphaned every journaled copied
 	// subtitle/NFO/download behind an anchor_missing skip. Those rows run
 	// cleanup independently of the primary anchor below.
-	if !primaryResident && (op.OperationType == models.OperationTypeMove || isUpdate) {
+	if !primaryUndoComplete && !primaryResident && (op.OperationType == models.OperationTypeMove || isUpdate) {
 		if primaryReplacement {
 			if _, statErr := r.fs.Stat(op.NewPath); os.IsNotExist(statErr) {
 				primaryRestored, restoreErr := r.restoreReplacementJournalWhere(ctx, op, func(destination string) bool {
@@ -406,7 +426,7 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 			op.NFOPath = remapResidentDirectoryPath(ledger.DirectoryMove, op.NFOPath)
 			remapResidentDirectoryLedger(&ledger)
 		}
-		if !primaryResident {
+		if !primaryUndoComplete && !primaryResident {
 			if result, err := r.fsReverter.revertPrimaryFile(ctx, op); result != nil || err != nil {
 				return result, err
 			}
@@ -648,11 +668,24 @@ func revertPrimaryFileFS(ctx context.Context, fs afero.Fs, batchFileOpRepo datab
 		if err != nil {
 			return failRevert(ctx, batchFileOpRepo, op, models.RevertReasonUnexpectedPathState, fmt.Sprintf("failed to canonicalize directory path: %v", err)), nil
 		}
+		// CanonicalizePath deliberately strips drive letters for virtual path
+		// keys. A native absolute destination must keep its volume when creating
+		// the parent; otherwise Windows can create it on the working drive.
+		if filepath.IsAbs(targetDir) {
+			canonicalDir = filepath.Clean(targetDir)
+		}
 		if err := fs.MkdirAll(canonicalDir, config.DirPerm); err != nil {
 			return failRevert(ctx, batchFileOpRepo, op, models.RevertReasonAccessDenied, fmt.Sprintf("failed to recreate original directory: %v", err)), nil
 		}
 
 		if err := fs.Rename(paths.SourcePath, op.OriginalPath); err != nil {
+			if primaryUndoCrossDevice(err) {
+				if err := beginPrimaryUndo(ctx, fs, batchFileOpRepo, op); err != nil {
+					return primaryUndoFailure(op, err), nil
+				}
+				cleanupDirFn(filepath.Dir(op.NewPath), paths.DestRoot)
+				return nil, nil
+			}
 			reason := models.RevertReasonUnexpectedPathState
 			if os.IsPermission(err) {
 				reason = models.RevertReasonAccessDenied
