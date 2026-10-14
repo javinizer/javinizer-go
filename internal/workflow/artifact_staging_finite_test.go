@@ -118,14 +118,22 @@ func TestPR260FiniteArtifactRehomeFaultsRetainSidecars(t *testing.T) {
 			base, root, source, subtitle, multipart, unrelated, match := pr260FencedFiles(t, "rehome-"+strings.ReplaceAll(tc.name, " ", "-"))
 			fs := &pr260StageFaultFS{Fs: base}
 			dest := filepath.Join(root, "published")
-			cmd := ApplyCmd{Movie: &models.Movie{ContentID: "pr260-rehome"}, PublicationFence: pr260FailureArtifactFencer{}, Match: match, DestPath: dest, Organize: OrganizeOptions{MoveFiles: true}}
-			stage, _, err := (&applyOrchImpl{fs: fs}).prepareArtifact(context.Background(), cmd)
+			cmd := ApplyCmd{Movie: &models.Movie{ContentID: "pr260-rehome"}, PublicationFence: pr260FailureArtifactFencer{}, Match: match, DestPath: dest, Organize: OrganizeOptions{MoveFiles: false}}
+			stage, _, err := (&applyOrchImpl{fs: fs, organizer: subtitleStagingOrganizer(fs)}).prepareArtifact(context.Background(), cmd)
 			require.NoError(t, err)
 			defer stage.cleanup()
 			require.NotEmpty(t, stage.siblings)
 			video := filepath.Join(stage.root, "renamed", "NEW.mp4")
-			siblingIdx := stagedSiblingIndex(t, stage)
-			sibling := stage.siblings[siblingIdx].stagedPath
+			// Copy-mode multipart video is a real admitted generic sibling;
+			// subtitle inputs never enter this rehome lane.
+			sibling := ""
+			for _, admitted := range stage.siblings {
+				if admitted.sourcePath == multipart {
+					require.False(t, admitted.subtitle)
+					sibling = admitted.stagedPath
+				}
+			}
+			require.NotEmpty(t, sibling)
 			target := filepath.Join(filepath.Dir(video), stagedArtifactSiblingName(filepath.Base(stage.stagedSource), filepath.Base(video), filepath.Base(sibling)))
 			require.NoError(t, base.MkdirAll(filepath.Dir(target), 0o755))
 			if tc.existing {
@@ -152,7 +160,7 @@ func TestPR260FiniteArtifactRehomeFaultsRetainSidecars(t *testing.T) {
 			require.NoError(t, stage.rehomeRemainingSiblings(video, nil))
 			b, err := afero.ReadFile(base, target)
 			require.NoError(t, err)
-			original, readErr := afero.ReadFile(base, stage.siblings[siblingIdx].sourcePath)
+			original, readErr := afero.ReadFile(base, multipart)
 			require.NoError(t, readErr)
 			require.Equal(t, string(original), string(b))
 		})

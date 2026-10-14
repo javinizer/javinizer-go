@@ -80,6 +80,10 @@ func (b deferredOrganizerBase) ExecuteOrganizePlan(plan *organizer.OrganizePlan,
 	return b.exec().ExecuteOrganizePlan(plan, hardlinkFailure, link)
 }
 
+func (b deferredOrganizerBase) SubtitleSourcePaths(match models.FileMatchInfo) []string {
+	return b.OrganizerInterface.(artifactSubtitleSelector).SubtitleSourcePaths(match)
+}
+
 func (b deferredOrganizerBase) PlanSubtitleMoves(plan *organizer.OrganizePlan) []models.SubtitleMove {
 	return b.exec().PlanSubtitleMoves(plan)
 }

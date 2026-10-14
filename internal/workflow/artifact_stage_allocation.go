@@ -14,13 +14,11 @@ import (
 	"github.com/spf13/afero"
 )
 
-// In-place copy planning renames the staging directory beside the source;
-// its parent is part of the output layout, not just a temporary location.
+// Stage on the filesystem selected by the real destination plan. Private
+// in-place execution never renames the staging directory into the library.
 func (o *applyOrchImpl) allocateArtifactStageForApply(ctx context.Context, finalRoot string, cmd ApplyCmd, plan *organizer.OrganizePlan) (string, error) {
-	if cmd.OperationMode == operationmode.OperationModeInPlace && !cmd.Organize.Skip && !cmd.Organize.MoveFiles {
-		return allocateArtifactStageAt(o.fs, filepath.Dir(finalRoot), finalRoot)
-	}
-	if cmd.Organize.Skip || (cmd.OperationMode != "" && cmd.OperationMode != operationmode.OperationModeOrganize) {
+	inPlace := cmd.OperationMode == operationmode.OperationModeInPlace || cmd.OperationMode == operationmode.OperationModeInPlaceNoRenameFolder
+	if cmd.Organize.Skip || (cmd.OperationMode != "" && cmd.OperationMode != operationmode.OperationModeOrganize && !inPlace) {
 		return allocateArtifactStage(o.fs, finalRoot)
 	}
 	if plan == nil {
@@ -38,7 +36,7 @@ func (o *applyOrchImpl) allocateArtifactStageForApply(ctx context.Context, final
 		return "", fmt.Errorf("artifact staging destination is empty")
 	}
 	rel, relErr := filepath.Rel(finalRoot, plan.TargetDir)
-	if relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	if !inPlace && (relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))) {
 		return "", fmt.Errorf("artifact staging destination is outside library: %s", plan.TargetDir)
 	}
 	// An already-organized, artifact-free operation need not write its movie
@@ -56,8 +54,17 @@ func (o *applyOrchImpl) allocateArtifactStageForApply(ctx context.Context, final
 			}
 		}
 		if !hasSiblings {
+			if inPlace {
+				return allocateArtifactStage(o.fs, filepath.Dir(plan.TargetDir))
+			}
 			return allocateArtifactStage(o.fs, finalRoot)
 		}
+	}
+	if inPlace {
+		// The in-place strategy selects the existing source directory or a
+		// sibling beneath its existing parent. A retained source directory may
+		// itself be mounted, so its parent cannot determine rename compatibility.
+		return allocateArtifactStage(o.fs, plan.TargetDir)
 	}
 	// The movie folder or any existing ancestor can be a separate mount,
 	// even when the library root is writable and device IDs are equal.

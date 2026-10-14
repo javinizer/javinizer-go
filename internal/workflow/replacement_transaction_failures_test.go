@@ -118,6 +118,10 @@ func (l *completionFaultLog) RecordDeleteIntent(context.Context, OperationID, []
 	return nil
 }
 
+func (l *completionFaultLog) FinalizeDeleteIntentCopyDigest(context.Context, OperationID, string, string) error {
+	return nil
+}
+
 func (l *completionFaultLog) ReconcileMoveIntents(context.Context, OperationID, []models.FileMove) error {
 	return nil
 }
@@ -208,45 +212,6 @@ func TestVideoPublicationFailsClosedAtEachGuard(t *testing.T) {
 				fault.afterExecute = func(plan *organizer.OrganizePlan, _ *organizer.OrganizeResult) { fs.lstatPath = plan.TargetPath }
 			}
 			state := &applyPipelineState{organizeResult: &organizer.OrganizeResult{NewPath: stage.stagedSource}}
-			err = stage.publish(t.Context(), orch, state, nil)
-			require.Error(t, err)
-			pr260AssertRetained(t, base, source, subtitle, multipart, unrelated)
-		})
-	}
-}
-
-func TestSidecarPublicationFaultsRestorePublishedVideo(t *testing.T) {
-	for _, mode := range []string{"staged inspect", "occupied destination", "confirm inspect", "inverse persistence"} {
-		t.Run(mode, func(t *testing.T) {
-			base, root, source, subtitle, multipart, unrelated, match := pr260FencedFiles(t, "sidecar-"+mode)
-			fs := &publicationBranchFS{Fs: base}
-			dest := filepath.Join(root, "library")
-			movie := models.Movie{ContentID: "sidecar-" + mode, RenderGeneration: 1}
-			real := organizer.NewOrganizer(fs, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize}, template.NewEngine(), nil)
-			orch := &applyOrchImpl{fs: fs, organizer: real}
-			cmd := pr260ArtifactFailureCommand(&movie, match, dest)
-			cmd.Download = false
-			cmd.Organize.Skip = false
-			cmd.Organize.MoveFiles = true
-			cmd.PublicationFence = postPublishFence{movie: &movie}
-			stage, _, err := orch.prepareArtifact(t.Context(), cmd)
-			require.NoError(t, err)
-			defer stage.cleanup()
-			plan := stagedPublicationTarget(t, real, stage, cmd)
-			target := filepath.Join(filepath.Dir(plan.TargetPath), stagedArtifactSiblingName(filepath.Base(source), filepath.Base(plan.TargetPath), filepath.Base(stage.siblings[stagedSiblingIndex(t, stage)].sourcePath)))
-			switch mode {
-			case "staged inspect":
-				fs.activateStatFaultPath = target
-				fs.activateStatFaultTarget = stage.siblings[stagedSiblingIndex(t, stage)].stagedPath
-			case "occupied destination":
-				require.NoError(t, base.MkdirAll(filepath.Dir(target), 0o755))
-				fs.plantOnMissingPath = target
-			case "confirm inspect":
-				fs.lstatPath = target
-			case "inverse persistence":
-				orch.revertLog = &completionFaultLog{complete: func() error { return errors.New("inverse unavailable") }}
-			}
-			state := &applyPipelineState{operationID: "op", organizeResult: &organizer.OrganizeResult{NewPath: stage.stagedSource}}
 			err = stage.publish(t.Context(), orch, state, nil)
 			require.Error(t, err)
 			pr260AssertRetained(t, base, source, subtitle, multipart, unrelated)

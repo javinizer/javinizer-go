@@ -254,6 +254,11 @@ type OrganizeCmd struct {
 	// config still carries the global default. Empty = use config mode.
 	OperationMode   operationmode.OperationMode
 	ForceRenameFile bool
+	// StagingFinalDir is the already-validated real directory for a private
+	// in-place copy stage. Its directory-byte delta preserves the final leaf
+	// budget while allowing temporary staging overhead; ordinary callers leave
+	// this empty. It does not change the configured final-path limit.
+	StagingFinalDir string
 	// DuplicateTracker shares intra-batch duplicate-destination preflight
 	// across the plans of one batch run (#224 phase E). Nil disables
 	// detection (single-file callers have no batch to collide with).
@@ -880,7 +885,7 @@ var (
 )
 
 func (o *Organizer) handleSubtitles(plan *OrganizePlan, result *OrganizeResult, install subtitleInstall) {
-	subtitles := o.subtitleHandler.FindSubtitles(o.subtitleFileInfo(plan))
+	subtitles := o.selectedSubtitles(o.subtitleFileInfo(plan))
 	if len(subtitles) == 0 {
 		return
 	}
@@ -1054,6 +1059,20 @@ func (o *Organizer) withForceRename(forceRename bool) *Organizer {
 	return o
 }
 
+// withStagingPathBudget preserves the final filename budget when a validated
+// in-place copy plan is executed inside a longer (or shorter) private directory.
+// Clone only the per-command planner; never relax the shared configuration.
+func (o *Organizer) withStagingPathBudget(cmd OrganizeCmd) *Organizer {
+	if cmd.StagingFinalDir == "" || cmd.OperationMode != operationmode.OperationModeInPlaceNoRenameFolder || o.config == nil || o.config.MaxPathLength <= 0 {
+		return o
+	}
+	clone := *o
+	cfg := *o.config
+	cfg.MaxPathLength = max(1, cfg.MaxPathLength+len(filepath.Dir(cmd.Match.Path))-len(filepath.Clean(cmd.StagingFinalDir)))
+	clone.config = &cfg
+	return &clone
+}
+
 // PlanOrganize computes cmd's organization plan WITHOUT validating,
 // registering duplicate preflight, or executing anything — the read-only
 // planning seam the apply phase calls exactly once per sorted batch item
@@ -1066,7 +1085,7 @@ func (o *Organizer) PlanOrganize(ctx context.Context, cmd OrganizeCmd) (*Organiz
 		return nil, ctx.Err()
 	default:
 	}
-	return o.withForceRename(cmd.ForceRenameFile).plan(cmd.Match, cmd.Movie, cmd.DestDir, cmd.ForceUpdate, cmd.OperationMode)
+	return o.withForceRename(cmd.ForceRenameFile).withStagingPathBudget(cmd).plan(cmd.Match, cmd.Movie, cmd.DestDir, cmd.ForceUpdate, cmd.OperationMode)
 }
 
 // PlanSourceExists reports whether plan's source file is still present on
@@ -1093,7 +1112,7 @@ func (o *Organizer) Organize(ctx context.Context, cmd OrganizeCmd) (*OrganizeRes
 	default:
 	}
 
-	plan, err := o.withForceRename(cmd.ForceRenameFile).plan(cmd.Match, cmd.Movie, cmd.DestDir, cmd.ForceUpdate, cmd.OperationMode)
+	plan, err := o.withForceRename(cmd.ForceRenameFile).withStagingPathBudget(cmd).plan(cmd.Match, cmd.Movie, cmd.DestDir, cmd.ForceUpdate, cmd.OperationMode)
 	if err != nil {
 		return nil, err
 	}

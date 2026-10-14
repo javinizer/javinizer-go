@@ -102,7 +102,7 @@ func TestPR260FiniteArtifactCopyAndSiblingFailures(t *testing.T) {
 			fs := &pr260FiniteCopyFS{Fs: base, op: tc.op, source: subtitle, sourceDir: filepath.Dir(source), sidecar: subtitle}
 			dest := filepath.Join(root, "published")
 			cmd := ApplyCmd{Movie: &models.Movie{ContentID: "pr260-copy"}, PublicationFence: pr260FailureArtifactFencer{}, Match: match, DestPath: dest, Organize: OrganizeOptions{MoveFiles: true}}
-			stage, _, err := (&applyOrchImpl{fs: fs}).prepareArtifact(context.Background(), cmd)
+			stage, _, err := (&applyOrchImpl{fs: fs, organizer: subtitleStagingOrganizer(fs)}).prepareArtifact(context.Background(), cmd)
 			require.ErrorContains(t, err, tc.want)
 			require.Nil(t, stage)
 			pr260AssertNoFinals(t, base, dest)

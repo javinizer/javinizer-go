@@ -5,7 +5,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"syscall"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/matcher"
@@ -39,11 +38,13 @@ func nativeCrossDeviceDestination(t *testing.T, sourceRoot string) string {
 		t.Cleanup(func() { _ = os.RemoveAll(dest) })
 		probeTarget := filepath.Join(dest, "probe")
 		renameErr := os.Rename(probe, probeTarget)
-		if errors.Is(renameErr, syscall.EXDEV) {
+		if nativeArtifactCrossDeviceError(renameErr) {
+			t.Logf("native cross-device rename confirmed: source root %s; destination root %s; error %v", sourceRoot, dest, renameErr)
 			require.NoError(t, os.Remove(probe))
 			return dest
 		}
 		if renameErr == nil {
+			t.Logf("probe roots are rename-compatible: source root %s; candidate root %s", sourceRoot, parent)
 			require.NoError(t, os.Rename(probeTarget, probe))
 		} else {
 			t.Logf("cross-device probe %s: %v", parent, renameErr)

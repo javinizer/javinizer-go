@@ -153,9 +153,6 @@ func TestPR260ClosurePublicationValidationAndPathMapping(t *testing.T) {
 }
 
 func TestPR260ClosureHelperStemAndMode(t *testing.T) {
-	require.False(t, isStagedArtifactPrefixedStem("abc", "abc"))
-	require.False(t, isStagedArtifactPrefixedStem("abc", "abcd"))
-	require.True(t, isStagedArtifactPrefixedStem("abc", "abc-fr"))
 	require.Equal(t, "abc", stagedArtifactMultipartRoot("ABC-disc2"))
 	require.Empty(t, stagedArtifactMultipartRoot("ABC-discX"))
 	base, root, source, sub, part, other, match := pr260FencedFiles(t, "closure-mode")

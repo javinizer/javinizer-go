@@ -199,6 +199,11 @@ jobs:
     - name: Run unit tests
       run: go test -short ./...
 
+    - name: Verify Windows artifact regressions with native-volume evidence
+      run: >-
+        go test -short -count=1 -v ./internal/workflow ./internal/organizer ./internal/fsutil
+        -run '^(TestArtifactStage(NativeCrossDeviceDestination|PlannedMountDestination|InPlacePlannedMount|ReadonlyCrossDeviceDestination|ReadonlyLongFolder|ReadonlyInPlaceStationaryBoundary|PlannedDestinationBoundaries)|TestArtifactInPlaceCopy|TestArtifactSubtitle|TestStaged(Subtitle|Video)|TestCollectStagedSubtitle|TestDeferredSubtitleErrorNeverPublishesFallback|TestDeferredCopyPublishesAdmittedSubtitleDespitePostOpenSwap|TestStagingPathBudgetIsLocalAndSigned|TestCopyFileNoReplaceVerifiedSourceHandleClosedOnReturn|TestOpenVerifiedSourcePinSharesDelete|TestNativeArtifactCrossDeviceError)'
+
   # Job 5: Frontend Tests
   frontend-tests:
     name: Frontend Tests

@@ -151,12 +151,12 @@ func TestAllocateArtifactStageSweepsBothLocations(t *testing.T) {
 
 func TestAllocateArtifactStageApplyPlacement(t *testing.T) {
 	for _, tc := range []struct {
-		name                string
-		mode                operationmode.OperationMode
-		move, skip, sibling bool
+		name       string
+		mode       operationmode.OperationMode
+		move, skip bool
 	}{
 		{name: "organize copy", mode: operationmode.OperationModeOrganize},
-		{name: "in-place copy", mode: operationmode.OperationModeInPlace, sibling: true},
+		{name: "in-place copy", mode: operationmode.OperationModeInPlace},
 		{name: "in-place move", mode: operationmode.OperationModeInPlace, move: true},
 		{name: "in-place skipped organization", mode: operationmode.OperationModeInPlace, skip: true},
 		{name: "in-place no folder rename copy", mode: operationmode.OperationModeInPlaceNoRenameFolder},
@@ -168,11 +168,7 @@ func TestAllocateArtifactStageApplyPlacement(t *testing.T) {
 			require.NoError(t, fs.MkdirAll(dest, 0o755))
 			root, err := (&applyOrchImpl{fs: fs}).allocateArtifactStageForApply(context.Background(), dest, ApplyCmd{OperationMode: tc.mode, Organize: OrganizeOptions{MoveFiles: tc.move, Skip: tc.skip}}, nil)
 			require.NoError(t, err)
-			want := dest
-			if tc.sibling {
-				want = parent
-			}
-			require.Equal(t, want, filepath.Dir(root))
+			require.Equal(t, dest, filepath.Dir(root), "without a planner only the requested destination is known")
 		})
 	}
 }

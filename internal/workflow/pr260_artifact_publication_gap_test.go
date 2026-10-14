@@ -246,8 +246,8 @@ func TestPR260ArtifactStagingHelpers(t *testing.T) {
 			name, source, sibling string
 			want                  bool
 		}{
-			{name: "subtitle", source: "movie.mp4", sibling: "movie.srt", want: true},
-			{name: "prefixed subtitle", source: "movie.mp4", sibling: "movie.en.srt", want: true},
+			{name: "subtitle is not video", source: "movie.mp4", sibling: "movie.srt"},
+			{name: "prefixed subtitle is not video", source: "movie.mp4", sibling: "movie.en.srt"},
 			{name: "wrong subtitle stem", source: "movie.mp4", sibling: "moviex.srt"},
 			{name: "multipart", source: "movie.mp4", sibling: "movie-cd2.mp4", want: true},
 			{name: "multipart source", source: "movie-cd1.mp4", sibling: "movie-cd2.mp4"},
@@ -255,16 +255,12 @@ func TestPR260ArtifactStagingHelpers(t *testing.T) {
 		}
 		for _, tt := range cases {
 			t.Run(tt.name, func(t *testing.T) {
-				assert.Equal(t, tt.want, isStagedArtifactSibling(tt.source, tt.sibling))
+				assert.Equal(t, tt.want, isStagedArtifactVideoSibling(tt.source, tt.sibling))
 			})
 		}
 	})
 
 	t.Run("extensions and multipart roots", func(t *testing.T) {
-		for _, ext := range []string{".srt", ".ass", ".ssa", ".sub", ".idx", ".sup", ".vtt", ".smi", ".sami"} {
-			assert.True(t, isStagedArtifactSubtitleExtension(ext), ext)
-		}
-		assert.False(t, isStagedArtifactSubtitleExtension(".txt"))
 		for _, ext := range []string{".mp4", ".mkv", ".avi", ".wmv", ".flv", ".mov", ".m4v", ".webm", ".mpg", ".mpeg", ".m2ts", ".ts"} {
 			assert.True(t, isStagedArtifactVideoExtension(ext), ext)
 		}

@@ -163,7 +163,7 @@ func TestDeferredMovePublishesAdmittedDespitePostClaimPlant(t *testing.T) {
 	base, root, source, subtitle, multipart, unrelated, match := verifiedMemFixture(t, "verified-plant-move")
 	dest := filepath.Join(root, "library")
 	faultFS := &plantAfterSourceRenameFS{Fs: base, sourcePath: source, plant: []byte("planted foreign video")}
-	org := organizer.NewOrganizer(faultFS, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize}, template.NewEngine(), nil)
+	org := organizer.NewOrganizer(faultFS, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, MoveSubtitles: true, SubtitleExtensions: []string{".srt"}, OperationMode: operationmode.OperationModeOrganize}, template.NewEngine(), nil)
 	orch := &applyOrchImpl{fs: faultFS, organizer: org}
 	cmd := pr260ArtifactFailureCommand(&models.Movie{ContentID: "verified-plant-move"}, match, dest)
 	cmd.Organize.Skip = false
@@ -363,8 +363,8 @@ func TestDeferredCopyFreezesSubtitleSetAtProbe(t *testing.T) {
 // pre-execute identity gate passed. The bound install must refuse rather than
 // consume the replacement: the verified composite restores the foreign object
 // onto the source name byte-intact, the seat records the typed refusal (never
-// Moved/Skipped), and the staged-twin republish's source-consumption
-// revalidation then aborts the apply with full rollback — the admitted
+// Moved/Skipped), and the failed source's admission revalidation
+// then aborts the apply with full rollback — the admitted
 // sidecar, the foreign replacement, and every other input stay put.
 func TestDeferredMoveRefusesSubtitleSwappedInsideExecute(t *testing.T) {
 	base, root, source, subtitle, multipart, unrelated, match := pr260FencedFiles(t, "verified-sub-move-swap")
@@ -391,7 +391,7 @@ func TestDeferredMoveRefusesSubtitleSwappedInsideExecute(t *testing.T) {
 	stage, _, publishErr := verifiedStagePublish(t, orch, real, base, root, source, dest, match, cmd)
 	defer stage.cleanup()
 
-	require.ErrorIs(t, publishErr, errArtifactSourceChanged, "the republished twin's source-consumption revalidation aborts the apply")
+	require.ErrorIs(t, publishErr, errArtifactSourceChanged, "the failed source's admission revalidation aborts the apply")
 	assert.False(t, fsutil.PublishRefusal(publishErr), "a pre-publication admission refusal never classifies as a publish refusal")
 	require.Error(t, seatErr, "the organizer lane recorded the refused subtitle install on its seat")
 	assert.True(t, errors.Is(seatErr, fsutil.ErrTakeAsideForeign), "seat error class: %v", seatErr)
@@ -416,8 +416,8 @@ func TestDeferredMoveRefusesSubtitleSwappedInsideExecute(t *testing.T) {
 
 // F1 sidecar leg, copy lane: the same swap refuses the verified copy (the
 // open handle fails its admission proof before a byte flows). The apply still
-// publishes: the tree lane installs the ADMITTED staged twin, the foreign
-// replacement stays put at the source name, and the seat records the typed
+// publishes unrelated work: the refused subtitle gets no generic fallback,
+// the foreign replacement stays at the source name, and the seat records the typed
 // refusal (never Copied/Skipped — nothing the destination holds came through
 // this seat).
 func TestDeferredCopyRefusesSubtitleSwappedInsideExecute(t *testing.T) {
@@ -451,10 +451,8 @@ func TestDeferredCopyRefusesSubtitleSwappedInsideExecute(t *testing.T) {
 	assert.True(t, errors.Is(seat.Error, errArtifactSourceChanged), "seat: %v", seat.Error)
 	assert.False(t, seat.Copied || seat.Moved || seat.Skipped, "a refusal is none of the consumption classes")
 	targetDir := filepath.Join(dest, "movie")
-	got, err := afero.ReadFile(base, filepath.Join(targetDir, "movie.srt"))
-	require.NoError(t, err)
-	assert.Equal(t, "subtitle", string(got), "the destination holds the ADMITTED staged twin, never the replacement")
-	got, err = afero.ReadFile(base, filepath.Join(targetDir, "movie.mp4"))
+	require.NoFileExists(t, filepath.Join(targetDir, "movie.srt"), "the source refusal cannot publish its staged twin")
+	got, err := afero.ReadFile(base, filepath.Join(targetDir, "movie.mp4"))
 	require.NoError(t, err)
 	assert.Equal(t, "video", string(got))
 	got, err = afero.ReadFile(base, subtitle)
@@ -559,8 +557,8 @@ func (f *swapAfterSourceOpenFS) Open(name string) (afero.File, error) {
 // fsutil.BoundObjectIdentity, re-opens the cleaned path and cross-checks the
 // handle stat against it — Win32FileAttributeData carries no volume/index key),
 // so the leg refuses typed BEFORE a byte flows — the same fail-closed class
-// pair as the pre-open swap twin — and the staged twin carries the admitted
-// bytes to the destination instead.
+// pair as the pre-open swap twin. The refusal is terminal: Windows retains
+// both source objects and never publishes the staged twin as a fallback.
 func TestDeferredCopyPublishesAdmittedSubtitleDespitePostOpenSwap(t *testing.T) {
 	base, root, source, subtitle, multipart, unrelated, match := pr260FencedFiles(t, "verified-sub-open-swap")
 	dest := filepath.Join(root, "library")
@@ -581,6 +579,7 @@ func TestDeferredCopyPublishesAdmittedSubtitleDespitePostOpenSwap(t *testing.T) 
 	require.True(t, faultFS.fired, "the swap actually landed after the verified open")
 	require.Len(t, state.organizeResult.Subtitles, 1)
 	seat := state.organizeResult.Subtitles[0]
+	target := filepath.Join(dest, "movie", "movie.srt")
 	if runtime.GOOS == "windows" {
 		// Windows ABI shape of the same proof-first invariant: the swap replants
 		// the source name inside the composite's open→proof window, and the
@@ -588,20 +587,21 @@ func TestDeferredCopyPublishesAdmittedSubtitleDespitePostOpenSwap(t *testing.T) 
 		// admitted object's strong identity is unprovable the moment the name
 		// moved, so the leg refuses typed before a byte flows (fail-closed,
 		// class-identical to TestDeferredCopyRefusesSubtitleSwappedInsideExecute)
-		// rather than streaming the pinned handle. The destination earns the
-		// admitted bytes through the staged twin below either way.
+		// rather than streaming the pinned handle. The failed source cannot
+		// bypass that refusal through the generic staged-artifact tree.
 		require.Error(t, seat.Error)
 		assert.True(t, errors.Is(seat.Error, fsutil.ErrTakeAsideForeign), "seat: %v", seat.Error)
 		assert.True(t, errors.Is(seat.Error, errArtifactSourceChanged), "seat: %v", seat.Error)
 		assert.False(t, seat.Copied || seat.Moved || seat.Skipped, "a refusal is none of the consumption classes")
+		_, err := base.Stat(target)
+		require.True(t, os.IsNotExist(err), "the typed refusal cannot publish a fallback subtitle")
 	} else {
 		assert.True(t, seat.Copied, "the handle-bound copy installed")
+		got, err := afero.ReadFile(base, target)
+		require.NoError(t, err)
+		assert.Equal(t, "subtitle", string(got), "POSIX streams the pinned admitted object")
 	}
-	target := filepath.Join(dest, "movie", "movie.srt")
-	got, err := afero.ReadFile(base, target)
-	require.NoError(t, err)
-	assert.Equal(t, "subtitle", string(got), "the destination earns the admitted bytes despite the swap (POSIX: the pinned handle; Windows: the staged twin after the typed refusal)")
-	got, err = afero.ReadFile(base, subtitle)
+	got, err := afero.ReadFile(base, subtitle)
 	require.NoError(t, err)
 	assert.Equal(t, "replacement subtitle", string(got), "the replacement is retained untouched")
 	got, err = afero.ReadFile(base, aside)
@@ -650,10 +650,9 @@ func (f *faultClaimStatFS) LstatIfPossible(name string) (os.FileInfo, bool, erro
 
 // F1 sidecar stat-fault leg, move lane: the post-take re-proof lookup fails.
 // The taken-aside ADMITTED subtitle rides back onto its source (no-replace),
-// the seat records the stat fault, and the staged-twin lane republishes the
-// admitted bytes and consumes the revalidated original — move semantics hold
-// end to end with no claim residue.
-func TestDeferredMoveSubtitleClaimStatFaultRestoresAndRepublishes(t *testing.T) {
+// the seat records the stat fault, and the admitted original stays retained.
+// A failed subtitle cannot be retried by the generic staged-sibling lane.
+func TestDeferredMoveSubtitleClaimStatFaultRestoresWithoutFallback(t *testing.T) {
 	base, root, source, subtitle, multipart, unrelated, match := verifiedMemFixture(t, "verified-sub-claim-stat")
 	dest := filepath.Join(root, "library")
 	faultFS := &faultClaimStatFS{Fs: base, sourcePath: subtitle}
@@ -674,12 +673,11 @@ func TestDeferredMoveSubtitleClaimStatFaultRestoresAndRepublishes(t *testing.T) 
 	require.Error(t, seat.Error)
 	assert.Contains(t, seat.Error.Error(), "inspect the taken claim")
 	assert.False(t, seat.Moved || seat.Skipped)
-	got, err := afero.ReadFile(base, filepath.Join(dest, "movie", "movie.srt"))
+	_, err := base.Stat(filepath.Join(dest, "movie", "movie.srt"))
+	require.True(t, os.IsNotExist(err), "the failed subtitle receives no fallback output")
+	got, err := afero.ReadFile(base, subtitle)
 	require.NoError(t, err)
-	assert.Equal(t, "subtitle", string(got), "the republished staged twin delivers the admitted bytes")
-	exists, serr := afero.Exists(base, subtitle)
-	require.NoError(t, serr)
-	assert.False(t, exists, "the revalidated original was consumed per move semantics")
+	assert.Equal(t, "subtitle", string(got), "the failed subtitle retains its original bytes")
 	assertNoVacResidue(t, base, filepath.Dir(source))
 	for _, gone := range []string{source, multipart} {
 		e, serr := afero.Exists(base, gone)
@@ -710,8 +708,8 @@ func (f *faultSourceOpenFS) Open(name string) (afero.File, error) {
 
 // F1 sidecar stat-fault leg, copy lane: the source open itself fails. The
 // seat records the fault, nothing is consumed (copy mode retains sources),
-// and the tree lane installs the admitted staged twin.
-func TestDeferredCopySubtitleSourceOpenFaultRepublishesTwin(t *testing.T) {
+// and the admitted staged twin never bypasses the failed publication.
+func TestDeferredCopySubtitleSourceOpenFaultRetainsRefusal(t *testing.T) {
 	base, root, source, subtitle, multipart, unrelated, match := verifiedMemFixture(t, "verified-sub-open-fault")
 	dest := filepath.Join(root, "library")
 	faultFS := &faultSourceOpenFS{Fs: base, sourcePath: subtitle}
@@ -733,10 +731,9 @@ func TestDeferredCopySubtitleSourceOpenFaultRepublishesTwin(t *testing.T) {
 	require.Error(t, seat.Error)
 	assert.Contains(t, seat.Error.Error(), "open source")
 	assert.False(t, seat.Copied || seat.Skipped)
-	got, err := afero.ReadFile(base, filepath.Join(dest, "movie", "movie.srt"))
-	require.NoError(t, err)
-	assert.Equal(t, "subtitle", string(got), "the tree lane installs the admitted staged twin")
-	got, err = afero.ReadFile(base, subtitle)
+	_, err := base.Stat(filepath.Join(dest, "movie", "movie.srt"))
+	require.True(t, os.IsNotExist(err), "the failed subtitle receives no fallback output")
+	got, err := afero.ReadFile(base, subtitle)
 	require.NoError(t, err)
 	assert.Equal(t, "subtitle", string(got), "copy mode retains the source")
 	assertNoVacResidue(t, base, filepath.Dir(source))
