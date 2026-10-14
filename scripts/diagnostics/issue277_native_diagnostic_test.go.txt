@@ -1,0 +1,255 @@
+package workflow
+
+// This diagnostic is copied unchanged into the four pinned source revisions by
+// the diagnostic workflow. Only synthetic bytes and a rejecting HTTP transport
+// are used; no scraper, user library, or external network is involved.
+import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
+	"image"
+	"image/jpeg"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"reflect"
+	"runtime"
+	"strings"
+	"testing"
+
+	"github.com/javinizer/javinizer-go/internal/database"
+	"github.com/javinizer/javinizer-go/internal/downloader"
+	"github.com/javinizer/javinizer-go/internal/matcher"
+	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/nfo"
+	"github.com/javinizer/javinizer-go/internal/operationmode"
+	"github.com/javinizer/javinizer-go/internal/organizer"
+	"github.com/javinizer/javinizer-go/internal/template"
+	"github.com/spf13/afero"
+	"github.com/stretchr/testify/require"
+)
+
+type issue277NativeFence struct{ movie *models.Movie }
+
+func (f issue277NativeFence) WithApplyPublicationFence(_ context.Context, _ string, _ int64, fn func(*models.Movie) error) error {
+	return fn(f.movie)
+}
+func (f issue277NativeFence) WithApplyArtifactPublicationFence(_ context.Context, _ string, _ int64, fn func(*models.Movie) error) error {
+	return fn(f.movie)
+}
+
+type issue277NativeTransport struct{ body []byte }
+
+func (f issue277NativeTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	if r.URL.String() != "https://issue277.invalid/poster.jpg" {
+		return nil, fmt.Errorf("diagnostic blocked unexpected request: %s", r.URL)
+	}
+	return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"image/jpeg"}}, Body: io.NopCloser(bytes.NewReader(f.body)), Request: r}, nil
+}
+
+// No skips: case-only alias coverage requires a real case-insensitive Windows
+// volume. Non-Windows runs explicitly do not include that native-only case.
+func TestIssue277NativeDiagnostic(t *testing.T) {
+	scenarios := []string{"fresh", "foreign-video", "equal-video", "hardlink-video", "resident", "existing-nfo", "existing-artwork", "existing-subtitle", "existing-subtitle-en", "busy-video", "resident-nfo", "resident-artwork", "resident-subtitle", "resident-busy"}
+	if runtime.GOOS == "windows" {
+		scenarios = append(scenarios, "case-alias")
+	}
+	for _, mode := range []operationmode.OperationMode{operationmode.OperationModeOrganize, operationmode.OperationModeInPlace, operationmode.OperationModeInPlaceNoRenameFolder} {
+		for _, move := range []bool{false, true} {
+			for _, scenario := range scenarios {
+				t.Run(fmt.Sprintf("%s/move=%v/%s", mode, move, scenario), func(t *testing.T) {
+					fs := afero.NewOsFs()
+					root := t.TempDir()
+					incoming := filepath.Join(root, "incoming")
+					dest := filepath.Join(root, "library")
+					finalDir := filepath.Join(dest, "ABC-123")
+					if mode == operationmode.OperationModeInPlace {
+						dest = incoming
+						finalDir = filepath.Join(root, "ABC-123")
+					}
+					if mode == operationmode.OperationModeInPlaceNoRenameFolder {
+						dest = incoming
+						finalDir = incoming
+					}
+					source := filepath.Join(incoming, "ABC-123 original.mp4")
+					target := filepath.Join(finalDir, "ABC-123.mp4")
+					if strings.HasPrefix(scenario, "resident") || scenario == "case-alias" {
+						source = target
+						if mode != operationmode.OperationModeOrganize {
+							dest = finalDir
+						}
+						if scenario == "case-alias" {
+							source = filepath.Join(filepath.Dir(finalDir), strings.ToLower(filepath.Base(finalDir)), "abc-123.mp4")
+						}
+					}
+					write := func(p string, b []byte) {
+						require.NoError(t, os.MkdirAll(filepath.Dir(p), 0755))
+						require.NoError(t, os.WriteFile(p, b, 0644))
+					}
+					video := []byte("synthetic primary video")
+					write(source, video)
+					protected := map[string][]byte{}
+					switch scenario {
+					case "foreign-video":
+						protected[target] = []byte("foreign primary video")
+						write(target, protected[target])
+					case "equal-video":
+						protected[target] = video
+						write(target, video)
+					case "hardlink-video":
+						require.NoError(t, os.MkdirAll(finalDir, 0755))
+						require.NoError(t, os.Link(source, target))
+						a, e := os.Stat(source)
+						require.NoError(t, e)
+						b, e := os.Stat(target)
+						require.NoError(t, e)
+						require.True(t, os.SameFile(a, b))
+						protected[target] = video
+					case "case-alias":
+						a, e := os.Stat(source)
+						require.NoError(t, e)
+						b, e := os.Stat(target)
+						require.NoError(t, e, "native Windows fixture must resolve the case alias")
+						require.True(t, os.SameFile(a, b))
+						protected[source] = video
+					case "resident":
+						protected[source] = video
+					case "existing-nfo", "resident-nfo":
+						write(filepath.Join(finalDir, "movie.nfo"), []byte("<?xml version=\"1.0\"?><movie><title>Existing title</title></movie>"))
+					case "existing-artwork", "resident-artwork":
+						protected[filepath.Join(finalDir, "poster.jpg")] = []byte("existing artwork")
+						write(filepath.Join(finalDir, "poster.jpg"), []byte("existing artwork"))
+					case "existing-subtitle", "existing-subtitle-en", "resident-subtitle":
+						write(strings.TrimSuffix(source, ".mp4")+".en.srt", []byte("input subtitle"))
+						subtitleName := "ABC-123.eng.srt"
+						if scenario == "existing-subtitle-en" {
+							subtitleName = "ABC-123.en.srt"
+						}
+						protected[filepath.Join(finalDir, subtitleName)] = []byte("foreign subtitle")
+						write(filepath.Join(finalDir, subtitleName), []byte("foreign subtitle"))
+					case "busy-video", "resident-busy":
+						protected[target+".dlbusy"] = []byte("foreign reservation")
+						write(target+".dlbusy", []byte("foreign reservation"))
+					}
+					beforeSource, e := issue277NativeSnapshot(source)
+					require.NoError(t, e)
+					protectedIDs := map[string]os.FileInfo{}
+					for p := range protected {
+						info, e := issue277NativeSnapshot(p)
+						require.NoError(t, e)
+						protectedIDs[p] = info
+					}
+					beforeTarget, _ := issue277NativeSnapshot(target)
+					sameObjectBefore := beforeTarget != nil && os.SameFile(beforeSource, beforeTarget)
+					db, e := database.New(&database.Config{Type: "sqlite", DSN: filepath.Join(root, "ledger.sqlite"), LogLevel: "error"})
+					require.NoError(t, e)
+					defer db.Close()
+					require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
+					repo := database.NewBatchFileOperationRepository(db)
+					movie := models.Movie{ID: "ABC-123", ContentID: "issue277-diagnostic", Title: "Synthetic title", Poster: models.PosterState{PosterURL: "https://issue277.invalid/poster.jpg"}}
+					engine := template.NewEngine()
+					m, e := matcher.NewMatcher(&matcher.Config{})
+					require.NoError(t, e)
+					org := organizer.NewOrganizer(fs, &organizer.Config{FolderFormat: "<ID>", FileFormat: "<ID>", RenameFile: true, MoveSubtitles: true, SubtitleExtensions: []string{".srt"}, OperationMode: mode}, engine, m)
+					var img bytes.Buffer
+					require.NoError(t, jpeg.Encode(&img, image.NewRGBA(image.Rect(0, 0, 2, 2)), nil))
+					dl := downloader.NewDownloader(&http.Client{Transport: issue277NativeTransport{body: img.Bytes()}}, fs, &downloader.Config{DownloadPoster: true, MediaFormatConfig: organizer.MediaFormatConfig{PosterFormat: "poster.jpg"}}, engine)
+					gen := nfo.NewGenerator(fs, &nfo.Config{FilenameTemplate: "movie.nfo", TemplateEngine: engine})
+					orch := newApplyOrchestrator(fs, org, dl, gen, nil, ApplyConfig{NFONameCfg: nfo.NFONameConfig{FilenameTemplate: "movie.nfo"}}, engine, NewDBRevertLog(repo, NewRevertLogConfig(true, nil), "issue277", fs, nil, nil, nil), nil, nil)
+					cmd := ApplyCmd{Movie: &movie, Match: models.FileMatchInfo{Path: source, Name: filepath.Base(source), Extension: ".mp4", MovieID: movie.ID}, DestPath: dest, Organize: OrganizeOptions{MoveFiles: move, ForceUpdate: false}, OperationMode: mode, Download: strings.Contains(scenario, "artwork"), GenerateNFO: strings.Contains(scenario, "nfo"), OverwriteExistingMedia: false}
+					fenced := false
+					if f := reflect.ValueOf(&cmd).Elem().FieldByName("PublicationFence"); f.IsValid() {
+						f.Set(reflect.ValueOf(issue277NativeFence{movie: &movie}))
+						fenced = true
+					}
+					result, applyErr := orch.Execute(context.Background(), cmd)
+					errText := ""
+					if applyErr != nil {
+						errText = strings.ReplaceAll(applyErr.Error(), root, "<temp>")
+					}
+					record := map[string]interface{}{"subject_version": os.Getenv("ISSUE277_SUBJECT_VERSION"), "subject_revision": os.Getenv("ISSUE277_SUBJECT_REVISION"), "goos": runtime.GOOS, "goarch": runtime.GOARCH, "mode": mode, "move": move, "scenario": scenario, "fenced": fenced, "error": errText, "force_update": false, "overwrite_existing_media": false}
+					if result != nil {
+						record["failed_step"] = result.FailedStep
+						record["pre_publication"] = result.PrePublication
+						record["nfo_path"] = strings.ReplaceAll(result.NFOPath, root, "<temp>")
+					}
+					// Historical diagnostics record outcomes rather than pretending old bugs
+					// are desired behavior. Byte preservation is checked independently.
+					preserved := true
+					for p, want := range protected {
+						got, e := os.ReadFile(p)
+						if e != nil || !bytes.Equal(want, got) {
+							preserved = false
+							t.Logf("protected file changed: %s (read error %v)", strings.ReplaceAll(p, root, "<temp>"), e)
+						}
+					}
+					record["protected_bytes_preserved"] = preserved
+					identitiesPreserved := true
+					for p, before := range protectedIDs {
+						after, e := issue277NativeSnapshot(p)
+						if e != nil || !os.SameFile(before, after) {
+							identitiesPreserved = false
+						}
+					}
+					record["protected_identities_preserved"] = identitiesPreserved
+					record["source_target_same_object_before"] = sameObjectBefore
+					afterSource, sourceErr := issue277NativeSnapshot(source)
+					record["original_source_present"] = sourceErr == nil
+					record["original_source_identity_preserved"] = sourceErr == nil && os.SameFile(beforeSource, afterSource)
+					sourceBytes, _ := os.ReadFile(source)
+					record["original_source_bytes_preserved"] = bytes.Equal(sourceBytes, video)
+					files := map[string]string{}
+					_ = filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
+						if err == nil && !info.IsDir() && !strings.Contains(info.Name(), "ledger.sqlite") {
+							b, e := os.ReadFile(p)
+							if e == nil {
+								sum := sha256.Sum256(b)
+								files[strings.TrimPrefix(p, root+string(filepath.Separator))] = fmt.Sprintf("%x", sum)
+							}
+						}
+						return nil
+					})
+					record["files_sha256"] = files
+					if mode == operationmode.OperationModeOrganize && (scenario == "foreign-video" || scenario == "equal-video") {
+						require.Error(t, applyErr)
+						require.True(t, preserved, "foreign primary must remain unchanged")
+						got, e := os.ReadFile(source)
+						require.NoError(t, e)
+						require.Equal(t, video, got)
+					}
+					encoded, e := json.Marshal(record)
+					require.NoError(t, e)
+					t.Logf("ISSUE277_RESULT %s", encoded)
+				})
+			}
+		}
+	}
+}
+
+// File.Stat eagerly binds the native Windows ID; pathname Stat can defer it
+// until SameFile and would incorrectly observe a replacement after mutation.
+func issue277NativeSnapshot(path string) (os.FileInfo, error) {
+	f, e := os.Open(path)
+	if e != nil {
+		return nil, e
+	}
+	defer f.Close()
+	return f.Stat()
+}
+func TestIssue277NativeDiagnosticIdentitySnapshot(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "original")
+	require.NoError(t, os.WriteFile(p, []byte("same bytes"), 0644))
+	before, e := issue277NativeSnapshot(p)
+	require.NoError(t, e)
+	require.NoError(t, os.Rename(p, p+".saved"))
+	require.NoError(t, os.WriteFile(p, []byte("same bytes"), 0644))
+	after, e := issue277NativeSnapshot(p)
+	require.NoError(t, e)
+	require.False(t, os.SameFile(before, after))
+	saved, e := issue277NativeSnapshot(p + ".saved")
+	require.NoError(t, e)
+	require.True(t, os.SameFile(before, saved))
+}

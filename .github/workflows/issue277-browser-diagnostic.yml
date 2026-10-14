@@ -1,0 +1,130 @@
+name: Issue 277 isolated browser diagnostic
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - '.github/workflows/issue277-browser-diagnostic.yml'
+      - 'scripts/diagnostics/issue277_browser_guard.py'
+      - 'web/frontend/playwright.issue277.config.ts'
+      - 'web/frontend/tests/fullstack/issue277-setup.ts'
+      - 'web/frontend/tests/fullstack/regressions/issue277-occupied-video.diagnostic.ts'
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    name: Issue 277 / ${{ matrix.version }} / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        version: [main17092, v1.5.2]
+        include:
+          - version: main17092
+            revision: 17092b84850713a3bee8c32390aa56b726942b5c
+          - version: v1.5.2
+            revision: 6e016085be7efded5f3d30f2932c2ad9a7cb2a36
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          path: harness
+          persist-credentials: false
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: ${{ matrix.revision }}
+          path: source
+          persist-credentials: false
+      - name: Overlay diagnostic files only and establish disposable paths
+        shell: python
+        run: |
+          import os, pathlib, shutil
+          files = [
+            'web/frontend/playwright.issue277.config.ts',
+            'web/frontend/tests/fullstack/issue277-setup.ts',
+            'web/frontend/tests/fullstack/regressions/issue277-occupied-video.diagnostic.ts',
+          ]
+          for name in files:
+              shutil.copyfile(pathlib.Path('harness') / name, pathlib.Path('source') / name)
+          root = pathlib.Path(os.environ['RUNNER_TEMP']) / 'issue277-fixtures'
+          values = {
+              'JAVINIZER_E2E_INPUT_DIR': str(root / 'input'),
+              'JAVINIZER_E2E_OUTPUT_DIR': str(root / 'output'),
+              'ISSUE277_BACKEND_BINARY': str(pathlib.Path('source/issue277-fixture.exe').resolve()),
+              'ISSUE277_SOURCE_REVISION': '${{ matrix.revision }}',
+          }
+          for name in ('input', 'output', 'home'):
+              (root / name).mkdir(parents=True, exist_ok=True)
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as out:
+              for key, value in values.items():
+                  out.write(f'{key}={value}\n')
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
+        with:
+          go-version: "1.27.2"
+          cache-dependency-path: source/go.sum
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: source/web/frontend/package-lock.json
+      - name: Install only frontend dependencies
+        working-directory: source/web/frontend
+        run: npm ci
+      - name: Install hosted Chromium
+        working-directory: source/web/frontend
+        run: npx playwright install --with-deps chromium
+      - name: Build synthetic-scraper backend with pre-DNS loopback guard
+        working-directory: source
+        shell: python
+        run: |
+          import pathlib, subprocess
+          evidence = pathlib.Path('web/frontend/test-results-issue277').resolve()
+          subprocess.run(['python', '../harness/scripts/diagnostics/issue277_browser_guard.py', 'prepare', str(evidence)], check=True)
+          subprocess.run(['go', 'build', '-overlay=' + str(evidence / 'offline-overlay.json'),
+                          '-o', 'issue277-fixture.exe', './cmd/javinizer-e2e'], check=True)
+      - name: Record source identity
+        working-directory: source
+        shell: python
+        run: |
+          import json, os, pathlib, subprocess
+          actual = subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip()
+          assert actual == os.environ['ISSUE277_SOURCE_REVISION'], 'Wrong subject checkout'
+          path = pathlib.Path('web/frontend/test-results-issue277')
+          path.mkdir(parents=True, exist_ok=True)
+          (path / 'source.json').write_text(json.dumps({
+              'revision': subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip(),
+              'status': subprocess.check_output(['git','status','--short'], text=True),
+          }, indent=2))
+      - name: Run only the real-browser issue 277 diagnostic
+        working-directory: source/web/frontend
+        env:
+          CI: "1"
+          # Backend must not reach external providers. Dependencies and browser
+          # were installed above; all test API calls are loopback.
+          HTTP_PROXY: http://127.0.0.1:9
+          HTTPS_PROXY: http://127.0.0.1:9
+          NO_PROXY: localhost,127.0.0.1,::1
+        run: npx playwright test --config playwright.issue277.config.ts
+      - name: Require exact named runtime passes and selected evidence
+        working-directory: source/web/frontend
+        shell: python
+        run: |
+          import os, subprocess
+          subprocess.run(['python', '../../../harness/scripts/diagnostics/issue277_browser_guard.py',
+                          'collect', 'test-results-issue277/results.json',
+                          os.environ['ISSUE277_SOURCE_REVISION']], check=True)
+      - name: Upload diagnostic evidence without auth state
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: issue277-${{ matrix.version }}-${{ matrix.os }}
+          path: |
+            source/web/frontend/test-results-issue277/runs/
+            source/web/frontend/test-results-issue277/results.json
+            source/web/frontend/test-results-issue277/validated-summary.json
+            source/web/frontend/test-results-issue277/source.json
+            source/web/frontend/test-results-issue277/offline-overlay.json
+            source/web/frontend/test-results-issue277/dial.go
+          if-no-files-found: warn
+          retention-days: 7
