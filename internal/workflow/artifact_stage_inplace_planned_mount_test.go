@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/matcher"
@@ -135,6 +136,7 @@ func TestArtifactStageReadonlyInPlaceStationaryBoundary(t *testing.T) {
 		for _, tc := range []struct {
 			name, sidecar                            string
 			disabled, download, nfo, rename, wantErr bool
+			caseOnly, primaryAlias                   bool
 		}{
 			{name: "no outputs"},
 			{name: "disabled subtitle", sidecar: "ABC-123.en.srt", disabled: true},
@@ -142,7 +144,8 @@ func TestArtifactStageReadonlyInPlaceStationaryBoundary(t *testing.T) {
 			{name: "pending normalized subtitle", sidecar: "ABC-123.en.srt", wantErr: true},
 			{name: "pending custom subtitle", sidecar: "ABC-123.en.custom", wantErr: true},
 			{name: "resident multipart", sidecar: "ABC-123-cd2.mkv"},
-			{name: "renamed multipart", sidecar: "abc-123-cd2.mkv", wantErr: true},
+			{name: "case-only multipart", sidecar: "abc-123-cd2.mkv", caseOnly: true},
+			{name: "renamed multipart", sidecar: "ABC-123 original-cd2.mkv", primaryAlias: true, wantErr: true},
 			{name: "metadata", nfo: true, wantErr: true},
 			{name: "artwork", download: true, wantErr: true},
 			{name: "video rename", rename: true, wantErr: true},
@@ -153,9 +156,47 @@ func TestArtifactStageReadonlyInPlaceStationaryBoundary(t *testing.T) {
 				folder := filepath.Join(parent, "movie")
 				require.NoError(t, base.Mkdir(folder, 0755))
 				source := filepath.Join(folder, "ABC-123.mkv")
+				if tc.primaryAlias {
+					source = filepath.Join(folder, "ABC-123 original.mkv")
+				}
 				require.NoError(t, afero.WriteFile(base, source, []byte("video"), 0644))
+				paths := []string{source}
 				if tc.sidecar != "" {
-					require.NoError(t, afero.WriteFile(base, filepath.Join(folder, tc.sidecar), []byte("sidecar"), 0644))
+					path := filepath.Join(folder, tc.sidecar)
+					require.NoError(t, afero.WriteFile(base, path, []byte("sidecar"), 0644))
+					paths = append(paths, path)
+				}
+				identities := make(map[string]artifactSourceIdentity)
+				for _, path := range paths {
+					info, err := os.Lstat(path)
+					require.NoError(t, err)
+					identities[path] = captureArtifactSourceIdentity(base, path, info)
+					require.True(t, identities[path].hasDevIno, "native fixture must pin eager object identity")
+				}
+				multipartTarget := filepath.Join(folder, "ABC-123-cd2.mkv")
+				if tc.primaryAlias {
+					// The primary is already resident, but this multipart target is
+					// genuinely different even on a case-insensitive filesystem.
+					primaryTarget := filepath.Join(folder, "ABC-123.mkv")
+					require.NoError(t, os.Link(source, primaryTarget))
+					identities[primaryTarget] = identities[source]
+					require.False(t, strings.EqualFold(tc.sidecar, filepath.Base(multipartTarget)))
+					require.NoFileExists(t, multipartTarget)
+				}
+				wantErr := tc.wantErr
+				if tc.caseOnly {
+					// Probe actual native semantics, not GOOS: Windows normally
+					// aliases this spelling, while a case-sensitive volume does not.
+					info, err := os.Lstat(multipartTarget)
+					if os.IsNotExist(err) {
+						wantErr = true
+					} else {
+						require.NoError(t, err)
+						identity := identities[filepath.Join(folder, tc.sidecar)]
+						require.True(t, identity.matches(base, multipartTarget, info))
+						identities[multipartTarget] = identity
+					}
+					t.Logf("native case-only multipart is already resident: %t", !wantErr)
 				}
 				fs := &stagingPlacementFS{Fs: base, tempErrors: map[string]error{folder: os.ErrPermission}}
 				movie := models.Movie{ID: "ABC-123", ContentID: "readonly-resident", RenderGeneration: 1}
@@ -170,7 +211,7 @@ func TestArtifactStageReadonlyInPlaceStationaryBoundary(t *testing.T) {
 				orch.organizer = org
 				cmd := ApplyCmd{Movie: &movie, PublicationFence: postPublishFence{movie: &movie}, Match: models.FileMatchInfo{Path: source, Name: filepath.Base(source), Extension: ".mkv", MovieID: movie.ID}, DestPath: folder, OperationMode: mode, Download: tc.download, GenerateNFO: tc.nfo}
 				result, err := orch.Execute(t.Context(), cmd)
-				if tc.wantErr {
+				if wantErr {
 					require.ErrorIs(t, err, os.ErrPermission)
 				} else {
 					require.NoError(t, err)
@@ -191,6 +232,14 @@ func TestArtifactStageReadonlyInPlaceStationaryBoundary(t *testing.T) {
 				require.NoFileExists(t, filepath.Join(folder, "ABC-123.eng.srt"))
 				require.NoFileExists(t, filepath.Join(folder, "ABC-123.eng.custom"))
 				require.NoFileExists(t, filepath.Join(folder, "renamed.mkv"))
+				if tc.primaryAlias || (tc.caseOnly && wantErr) {
+					require.NoFileExists(t, multipartTarget)
+				}
+				for path, identity := range identities {
+					info, err := os.Lstat(path)
+					require.NoError(t, err)
+					require.True(t, identity.matches(base, path, info), "resident source identity changed: %s", path)
+				}
 				pr260AssertStageGone(t, fs, parent)
 				pr260AssertStageGone(t, fs, folder)
 			})
