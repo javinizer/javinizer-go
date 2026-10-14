@@ -231,7 +231,11 @@ func TestArtifactStageInPlaceDownloadedArtwork(t *testing.T) {
 					require.NoDirExists(t, incoming)
 				}
 				expected := filepath.Join(expectedDir, "poster.jpg")
-				require.Equal(t, []string{expected}, state.downloadPaths, "published and rollback paths must track directory relocation")
+				if existing {
+					require.Empty(t, state.downloadPaths, "preserved artwork is not owned, including after directory relocation or rollback")
+				} else {
+					require.Equal(t, []string{expected}, state.downloadPaths, "published and rollback paths must track directory relocation")
+				}
 				if rollback && !existing {
 					require.NoFileExists(t, expected)
 				} else {

@@ -87,10 +87,10 @@ type artifactStage struct {
 	sharedConsumers    []SharedArtifactClaim
 	sharedPublishBegan bool
 	sharedPoisoned     bool
-	// identicalSkips tracks destinations whose pre-existing bytes proved identical
-	// to the staged payload (installPaths sameBytes skip): this apply landed
-	// nothing there, so the path must never enter the revert delete ledger.
-	identicalSkips map[string]bool
+	// unownedSkips tracks destinations this stage did not publish, including
+	// preserved existing media and identical artifacts. Skipping publication
+	// never grants ownership of the occupant for the revert delete ledger.
+	unownedSkips map[string]bool
 	// Staged subtitle inputs already handled by the initial organizer must
 	// not become independent outputs during the later tree publication.
 	excludedStagedSubtitleInputs map[string]bool
@@ -1262,7 +1262,7 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 		if err != nil {
 			return err
 		}
-		if s.isSharedConsumer(state.nfoPath) || s.skippedIdentical(state.nfoPath) {
+		if s.isSharedConsumer(state.nfoPath) || s.skippedUnowned(state.nfoPath) {
 			state.nfoPath = ""
 		}
 	}
@@ -1272,7 +1272,7 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 		if mapErr != nil {
 			return mapErr
 		}
-		if !batch.IsReplacement(mapped) && !s.isSharedConsumer(mapped) && !s.skippedIdentical(mapped) {
+		if !batch.IsReplacement(mapped) && !s.isSharedConsumer(mapped) && !s.skippedUnowned(mapped) {
 			mappedDownloads = append(mappedDownloads, mapped)
 		}
 	}
@@ -1689,7 +1689,7 @@ func (s *artifactStage) installPaths(paths, preserve []string, stagedArtifactDir
 			}
 			if resident {
 				plan.skip = true
-				s.markIdenticalSkipped(target)
+				s.markUnownedSkipped(target)
 				plans = append(plans, plan)
 				continue
 			}
@@ -1713,6 +1713,7 @@ func (s *artifactStage) installPaths(paths, preserve []string, stagedArtifactDir
 		}
 		if filepath.Clean(source) == filepath.Clean(target) {
 			plan.skip = true
+			s.markUnownedSkipped(target)
 			if !s.original.OverwriteExistingMedia && containsPath(preserve, source) {
 				preserved = true
 			}
@@ -1737,12 +1738,13 @@ func (s *artifactStage) installPaths(paths, preserve []string, stagedArtifactDir
 				// the pre-existing bytes stay foreign to it and the delete-ledger
 				// mapping must never condemn them on revert.
 				plan.skip = true
-				s.markIdenticalSkipped(target)
+				s.markUnownedSkipped(target)
 				plans = append(plans, plan)
 				continue
 			}
 			if !s.original.OverwriteExistingMedia && containsPath(preserve, source) {
 				plan.skip = true
+				s.markUnownedSkipped(target)
 				preserved = true
 			} else {
 				plan.replace = true
@@ -1967,15 +1969,15 @@ func (s *artifactStage) finishSharedArtifactClaims(disposition SharedArtifactCom
 	s.sharedClaims = nil
 }
 
-func (s *artifactStage) markIdenticalSkipped(target string) {
-	if s.identicalSkips == nil {
-		s.identicalSkips = map[string]bool{}
+func (s *artifactStage) markUnownedSkipped(target string) {
+	if s.unownedSkips == nil {
+		s.unownedSkips = map[string]bool{}
 	}
-	s.identicalSkips[filepath.Clean(target)] = true
+	s.unownedSkips[filepath.Clean(target)] = true
 }
 
-func (s *artifactStage) skippedIdentical(target string) bool {
-	return s.identicalSkips[filepath.Clean(target)]
+func (s *artifactStage) skippedUnowned(target string) bool {
+	return s.unownedSkips[filepath.Clean(target)]
 }
 
 func (s *artifactStage) isSharedConsumer(path string) bool {
