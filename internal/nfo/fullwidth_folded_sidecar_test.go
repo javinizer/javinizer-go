@@ -47,3 +47,11 @@ func TestNFOSidecarFoldStaysWithinFilename(t *testing.T) {
 	require.NoError(t, afero.WriteFile(fs, "/movies/RCT-157-HD.nfo", []byte("foreign"), 0o644))
 	assert.Empty(t, findNFOFile(fs, "/movies", &models.Movie{ID: "RCT-156H"}, NFONameConfig{}, "/movies/ＲＣＴ－１５６－ＨＤ．ｍｋｖ", nil))
 }
+
+func TestFoldedNFOSidecarLocalBoundaries(t *testing.T) {
+	assert.True(t, foldedNFOSidecarIsLocal("RCT-156-HD"))
+	assert.True(t, foldedNFOSidecarIsLocal(".hidden"))
+	assert.True(t, foldedNFOSidecarIsLocal("ordinary.backup"))
+	assert.False(t, foldedNFOSidecarIsLocal(string(filepath.Separator)+"outside"))
+	assert.False(t, foldedNFOSidecarIsLocal(filepath.Join("..", "outside")))
+}

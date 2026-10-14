@@ -81,8 +81,20 @@ func nfoSidecarFilenames(videoFilePath string) []string {
 	}
 	// Prefer the exact raw stem above. A folded equivalent is a fallback
 	// filename in the same directory, never a normalized filesystem path.
-	if folded := foldFullwidthASCII(stem); folded != stem && !strings.ContainsAny(folded, `/\:`) && filepath.IsLocal(folded+nfoExtension) {
+	if folded := foldFullwidthASCII(stem); folded != stem && !strings.ContainsAny(folded, `/\:`) && foldedNFOSidecarIsLocal(folded) {
 		names = append(names, folded+nfoExtension, folded+nfoExtensionFullwidth)
 	}
 	return names
+}
+
+// foldedNFOSidecarIsLocal also checks the bare base name. On newer Windows,
+// IsLocal may allow device names with extensions (CON.nfo), while their bare
+// names remain reserved. Never introduce those aliases via width folding.
+func foldedNFOSidecarIsLocal(stem string) bool {
+	if !filepath.IsLocal(stem + nfoExtension) {
+		return false
+	}
+	base, _, _ := strings.Cut(stem, ".")
+	base = strings.TrimRight(base, " ")
+	return base == "" || filepath.IsLocal(base)
 }
