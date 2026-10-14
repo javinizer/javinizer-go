@@ -16,44 +16,70 @@ import (
 
 // In-place copy planning renames the staging directory beside the source;
 // its parent is part of the output layout, not just a temporary location.
-func (o *applyOrchImpl) allocateArtifactStageForApply(ctx context.Context, finalRoot string, cmd ApplyCmd) (string, error) {
+func (o *applyOrchImpl) allocateArtifactStageForApply(ctx context.Context, finalRoot string, cmd ApplyCmd, plan *organizer.OrganizePlan) (string, error) {
 	if cmd.OperationMode == operationmode.OperationModeInPlace && !cmd.Organize.Skip && !cmd.Organize.MoveFiles {
 		return allocateArtifactStageAt(o.fs, filepath.Dir(finalRoot), finalRoot)
 	}
-	root, err := allocateArtifactStage(o.fs, finalRoot)
-	if err == nil || (!errors.Is(err, os.ErrPermission) && !errors.Is(err, syscall.EROFS)) || cmd.Organize.Skip || (cmd.OperationMode != "" && cmd.OperationMode != operationmode.OperationModeOrganize) {
-		return root, err
+	if cmd.Organize.Skip || (cmd.OperationMode != "" && cmd.OperationMode != operationmode.OperationModeOrganize) {
+		return allocateArtifactStage(o.fs, finalRoot)
 	}
-	// A read-only library root can contain an existing writable movie folder.
-	// Stage in that planned folder, never beside the root: even equal device
-	// IDs do not prove rename compatibility across a bind mount.
-	planner, ok := o.organizer.(artifactPlanExecutor)
-	if !ok {
-		return "", err
+	if plan == nil {
+		planner, ok := o.organizer.(artifactPlanExecutor)
+		if !ok {
+			return allocateArtifactStage(o.fs, finalRoot)
+		}
+		var err error
+		plan, err = planner.PlanOrganize(ctx, organizer.OrganizeCmd{Match: cmd.Match, Movie: cmd.Movie, DestDir: finalRoot, ForceUpdate: cmd.Organize.ForceUpdate, MoveFiles: cmd.Organize.MoveFiles, LinkMode: cmd.Organize.LinkMode, OperationMode: cmd.OperationMode, ForceRenameFile: cmd.Organize.ForceRenameFile})
+		if err != nil {
+			return "", fmt.Errorf("plan artifact staging destination: %w", err)
+		}
 	}
-	plan, planErr := planner.PlanOrganize(ctx, organizer.OrganizeCmd{Match: cmd.Match, Movie: cmd.Movie, DestDir: finalRoot, ForceUpdate: cmd.Organize.ForceUpdate, MoveFiles: cmd.Organize.MoveFiles, LinkMode: cmd.Organize.LinkMode, OperationMode: cmd.OperationMode, ForceRenameFile: cmd.Organize.ForceRenameFile})
-	if planErr != nil {
-		return "", errors.Join(err, fmt.Errorf("plan artifact staging destination: %w", planErr))
-	}
-	if plan == nil || plan.TargetDir == "" || filepath.Clean(plan.TargetDir) == filepath.Clean(finalRoot) {
-		return "", err
+	if plan == nil || plan.TargetDir == "" {
+		return "", fmt.Errorf("artifact staging destination is empty")
 	}
 	rel, relErr := filepath.Rel(finalRoot, plan.TargetDir)
 	if relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", errors.Join(err, fmt.Errorf("artifact staging destination is outside library: %s", plan.TargetDir))
+		return "", fmt.Errorf("artifact staging destination is outside library: %s", plan.TargetDir)
 	}
-	info, statErr := o.fs.Stat(plan.TargetDir)
-	if statErr != nil {
-		return "", errors.Join(err, fmt.Errorf("inspect artifact staging destination: %w", statErr))
+	// An already-organized, artifact-free operation need not write its movie
+	// folder. Preserve no-op applies to read-only folders without allowing
+	// this placement for any primary, subtitle, multipart, or metadata output.
+	if !cmd.Download && !cmd.GenerateNFO && plan.SourcePath != "" && filepath.Clean(plan.SourcePath) == filepath.Clean(plan.TargetPath) {
+		entries, err := afero.ReadDir(o.fs, filepath.Dir(plan.SourcePath))
+		if err != nil {
+			return "", fmt.Errorf("inspect stationary artifact source: %w", err)
+		}
+		hasSiblings := len(o.organizer.(artifactPlanExecutor).PlanSubtitleMoves(plan)) != 0
+		for _, entry := range entries {
+			if !entry.IsDir() && isStagedArtifactVideoSibling(filepath.Base(plan.SourcePath), entry.Name()) {
+				hasSiblings = true
+			}
+		}
+		if !hasSiblings {
+			return allocateArtifactStage(o.fs, finalRoot)
+		}
 	}
-	if !info.IsDir() {
-		return "", errors.Join(err, fmt.Errorf("artifact staging destination is not a directory: %s", plan.TargetDir))
+	// The movie folder or any existing ancestor can be a separate mount,
+	// even when the library root is writable and device IDs are equal.
+	// Stage in the deepest existing destination directory, without creating
+	// final folders before publication or falling back outside that mount.
+	for parent := filepath.Join(finalRoot, rel); parent != filepath.Clean(finalRoot); parent = filepath.Dir(parent) {
+		info, statErr := o.fs.Stat(parent)
+		if errors.Is(statErr, os.ErrNotExist) {
+			continue
+		}
+		if statErr != nil {
+			return "", fmt.Errorf("inspect artifact staging destination: %w", statErr)
+		}
+		if !info.IsDir() {
+			return "", fmt.Errorf("artifact staging destination is not a directory: %s", parent)
+		}
+		// Also reap authenticated residue from earlier root-based allocation.
+		sweepArtifactStaging(o.fs, filepath.Dir(finalRoot))
+		sweepArtifactStaging(o.fs, finalRoot)
+		return allocateArtifactStageAt(o.fs, parent, "")
 	}
-	root, fallbackErr := allocateArtifactStageAt(o.fs, plan.TargetDir, "")
-	if fallbackErr != nil {
-		return "", errors.Join(err, fallbackErr)
-	}
-	return root, nil
+	return allocateArtifactStage(o.fs, finalRoot)
 }
 
 func allocateArtifactStage(fs afero.Fs, finalRoot string) (string, error) {

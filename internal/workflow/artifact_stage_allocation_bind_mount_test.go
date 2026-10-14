@@ -21,6 +21,7 @@ import (
 type stagingPlacementFS struct {
 	afero.Fs
 	tempErrors          map[string]error
+	statErrors          map[string]error
 	mountRoot           string
 	crossDeviceAttempts int
 }
@@ -32,6 +33,13 @@ func (f *stagingPlacementFS) Mkdir(path string, mode os.FileMode) error {
 		}
 	}
 	return f.Fs.Mkdir(path, mode)
+}
+
+func (f *stagingPlacementFS) Stat(path string) (os.FileInfo, error) {
+	if err := f.statErrors[path]; err != nil {
+		return nil, err
+	}
+	return f.Fs.Stat(path)
 }
 
 func (f *stagingPlacementFS) Rename(source, target string) error {
@@ -66,34 +74,34 @@ func (p *stagingPlacementPlanner) PlanOrganize(context.Context, organizer.Organi
 	return p.plan, p.err
 }
 
-func TestArtifactStagePlannedFallbackBoundaries(t *testing.T) {
+func TestArtifactStagePlannedDestinationBoundaries(t *testing.T) {
 	unexpected := errors.New("staging IO failure")
 	planFailure := errors.New("planning failed")
 	childFailure := errors.New("child allocation failed")
 	for _, tc := range []struct {
-		name        string
-		initial     error
-		planErr     error
-		childErr    error
-		path        string
-		noPlanner   bool
-		nilPlan     bool
-		makeFile    bool
-		wantErr     error
-		wantSuccess bool
+		name                                string
+		rootErr, planErr, childErr, statErr error
+		path                                string
+		noPlanner, nilPlan, makeFile        bool
+		wantErr                             error
+		wantMessage, wantParent             string
 	}{
-		{name: "permission", initial: os.ErrPermission, path: "child", wantSuccess: true},
-		{name: "read-only mount", initial: syscall.EROFS, path: "child", wantSuccess: true},
-		{name: "unrelated failure", initial: unexpected, path: "child", wantErr: unexpected},
-		{name: "missing planner", initial: os.ErrPermission, noPlanner: true, wantErr: os.ErrPermission},
-		{name: "planning failure", initial: os.ErrPermission, planErr: planFailure, wantErr: planFailure},
-		{name: "nil plan", initial: os.ErrPermission, nilPlan: true, wantErr: os.ErrPermission},
-		{name: "empty target", initial: os.ErrPermission, wantErr: os.ErrPermission},
-		{name: "same root", initial: os.ErrPermission, path: ".", wantErr: os.ErrPermission},
-		{name: "outside root", initial: os.ErrPermission, path: "../outside", wantErr: os.ErrPermission},
-		{name: "missing target", initial: os.ErrPermission, path: "missing", wantErr: os.ErrNotExist},
-		{name: "file target", initial: os.ErrPermission, path: "child", makeFile: true, wantErr: os.ErrPermission},
-		{name: "child allocation failure", initial: os.ErrPermission, path: "child", childErr: childFailure, wantErr: childFailure},
+		{name: "writable root and child", path: "child", wantParent: "child"},
+		{name: "read-only root", rootErr: os.ErrPermission, path: "child", wantParent: "child"},
+		{name: "read-only mount", rootErr: syscall.EROFS, path: "child", wantParent: "child"},
+		{name: "unused root allocation failure", rootErr: unexpected, path: "child", wantParent: "child"},
+		{name: "missing planner", rootErr: os.ErrPermission, noPlanner: true, wantErr: os.ErrPermission},
+		{name: "planning failure", planErr: planFailure, wantErr: planFailure},
+		{name: "nil plan", nilPlan: true, wantMessage: "destination is empty"},
+		{name: "empty target", wantMessage: "destination is empty"},
+		{name: "same root", path: ".", wantParent: "."},
+		{name: "same root unwritable", rootErr: os.ErrPermission, path: ".", wantErr: os.ErrPermission},
+		{name: "outside root", path: "../outside", wantMessage: "outside library"},
+		{name: "missing target", path: "missing", wantParent: "."},
+		{name: "missing nested target", path: "child/missing/movie", wantParent: "child"},
+		{name: "file target", path: "child", makeFile: true, wantMessage: "not a directory"},
+		{name: "child stat failure", path: "child", statErr: os.ErrPermission, wantErr: os.ErrPermission},
+		{name: "child allocation failure", path: "child", childErr: childFailure, wantErr: childFailure},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			base := afero.NewMemMapFs()
@@ -105,7 +113,7 @@ func TestArtifactStagePlannedFallbackBoundaries(t *testing.T) {
 			} else {
 				require.NoError(t, base.Mkdir(child, 0o755))
 			}
-			fs := &stagingPlacementFS{Fs: base, tempErrors: map[string]error{library: tc.initial, child: tc.childErr}}
+			fs := &stagingPlacementFS{Fs: base, tempErrors: map[string]error{library: tc.rootErr, child: tc.childErr}, statErrors: map[string]error{child: tc.statErr}}
 			plan := &organizer.OrganizePlan{}
 			if tc.path != "" {
 				plan.TargetDir = filepath.Join(library, tc.path)
@@ -118,16 +126,25 @@ func TestArtifactStagePlannedFallbackBoundaries(t *testing.T) {
 			if !tc.noPlanner {
 				orch.organizer = planner
 			}
-			root, err := orch.allocateArtifactStageForApply(context.Background(), library, ApplyCmd{OperationMode: operationmode.OperationModeOrganize})
-			if tc.wantSuccess {
+			root, err := orch.allocateArtifactStageForApply(context.Background(), library, ApplyCmd{OperationMode: operationmode.OperationModeOrganize}, nil)
+			if tc.wantParent != "" {
 				require.NoError(t, err)
-				require.Equal(t, child, filepath.Dir(root))
+				require.Equal(t, filepath.Join(library, tc.wantParent), filepath.Dir(root))
 			} else {
-				require.ErrorIs(t, err, tc.wantErr)
-				require.ErrorIs(t, err, tc.initial, "original allocation error must remain visible")
+				require.Error(t, err)
+				if tc.wantErr != nil {
+					require.ErrorIs(t, err, tc.wantErr)
+				}
+				if tc.wantMessage != "" {
+					require.ErrorContains(t, err, tc.wantMessage)
+				}
 				require.Empty(t, root)
 			}
-			if tc.noPlanner || tc.initial == unexpected {
+			if strings.Contains(tc.path, "missing") {
+				_, statErr := base.Stat(plan.TargetDir)
+				require.ErrorIs(t, statErr, os.ErrNotExist, "allocation must not create final directories before publication")
+			}
+			if tc.noPlanner {
 				require.Zero(t, planner.calls)
 			} else {
 				require.Equal(t, 1, planner.calls)

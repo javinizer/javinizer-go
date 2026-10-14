@@ -158,8 +158,11 @@ func (o *applyOrchImpl) prepareArtifact(ctx context.Context, cmd ApplyCmd) (*art
 		}
 		duplicatePlan = plan
 	}
-	root, err := o.allocateArtifactStageForApply(ctx, finalRoot, cmd)
+	root, err := o.allocateArtifactStageForApply(ctx, finalRoot, cmd, duplicatePlan)
 	if err != nil {
+		if duplicatePlan != nil {
+			cmd.Organize.DuplicateTracker.ReleaseClaim(duplicatePlan.SourcePath, duplicatePlan.TargetPath)
+		}
 		return nil, cmd, err
 	}
 	writeArtifactStageManifest(o.fs, root)
@@ -270,6 +273,13 @@ func isStagedArtifactSibling(sourceName, siblingName string) bool {
 	if isStagedArtifactSubtitleExtension(siblingExt) {
 		return siblingStem == sourceStem || isStagedArtifactPrefixedStem(sourceStem, siblingStem)
 	}
+	return isStagedArtifactVideoSibling(sourceName, siblingName)
+}
+
+func isStagedArtifactVideoSibling(sourceName, siblingName string) bool {
+	sourceStem := strings.TrimSuffix(strings.ToLower(sourceName), strings.ToLower(filepath.Ext(sourceName)))
+	siblingExt := strings.ToLower(filepath.Ext(siblingName))
+	siblingStem := strings.TrimSuffix(strings.ToLower(siblingName), siblingExt)
 	if !isStagedArtifactVideoExtension(siblingExt) {
 		return false
 	}
