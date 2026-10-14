@@ -50,8 +50,10 @@ func TestInPlaceDeferredNativeLifecycle(t *testing.T) {
 					}
 					before, err := fs.Stat(source)
 					require.NoError(t, err)
+					require.True(t, os.SameFile(before, before))
 					partBefore, err := fs.Stat(part)
 					require.NoError(t, err)
+					require.True(t, os.SameFile(partBefore, partBefore))
 					m, err := matcher.NewMatcher(&matcher.Config{})
 					require.NoError(t, err)
 					org := organizer.NewOrganizer(fs, &organizer.Config{FolderFormat: "renamed-folder", FileFormat: "<ID>", RenameFile: true, OperationMode: mode, MoveSubtitles: true}, template.NewEngine(), m)

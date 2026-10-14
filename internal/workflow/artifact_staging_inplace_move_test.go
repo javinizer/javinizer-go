@@ -58,6 +58,7 @@ func TestInPlaceMoveNativePublicationPreservesInode(t *testing.T) {
 			require.NoError(t, afero.WriteFile(fs, source, payload, 0o644))
 			before, err := fs.Stat(source)
 			require.NoError(t, err)
+			require.True(t, os.SameFile(before, before))
 			orch := pr260RealApply(fs, &movie, organizer.MediaFormatConfig{}, nil, true)
 			m, err := matcher.NewMatcher(&matcher.Config{})
 			require.NoError(t, err)
