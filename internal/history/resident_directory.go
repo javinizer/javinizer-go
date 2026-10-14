@@ -144,3 +144,37 @@ func remapResidentDirectoryLedger(ledger *models.GeneratedFilesJSON) {
 		}
 	}
 }
+
+// residentCleanupAliasBoundary accepts an alternate spelling only when each
+// traversed component is a real directory and one is the exact stop object.
+// It grants no file ownership and never expands cleanup above that object.
+func residentCleanupAliasBoundary(fs afero.Fs, dir, stop string) string {
+	if filepath.Clean(stop) == "." {
+		return ""
+	}
+	lst, ok := fs.(afero.Lstater)
+	if !ok {
+		return ""
+	}
+	info, noFollow, err := lst.LstatIfPossible(stop)
+	if err != nil || !noFollow || info == nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return ""
+	}
+	dev, ino, strong := fsutil.BoundObjectIdentity(fs, stop, info)
+	if !strong {
+		return ""
+	}
+	identity := &models.DirectoryMove{Device: dev, Inode: ino}
+	for current := filepath.Clean(dir); ; current = filepath.Dir(current) {
+		info, noFollow, err := lst.LstatIfPossible(current)
+		if err != nil || !noFollow || info == nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			return ""
+		}
+		if directoryIdentityMatches(fs, current, info, identity) {
+			return current
+		}
+		if filepath.Dir(current) == current {
+			return ""
+		}
+	}
+}

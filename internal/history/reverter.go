@@ -423,8 +423,16 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 			}
 		}
 		destRoot := filepath.Dir(filepath.Dir(op.NewPath))
+		if primaryResident {
+			// This is only a stop boundary for parents of journaled artifacts.
+			// The resident primary and its containing directory are never owned.
+			destRoot = filepath.Dir(op.OriginalPath)
+			if ledger.DirectoryMove != nil {
+				destRoot = ledger.DirectoryMove.Original
+			}
+		}
 		r.fsReverter.cleanupGeneratedFiles(op, destRoot)
-		if !op.InPlaceRenamed {
+		if !primaryResident && !op.InPlaceRenamed {
 			r.fsReverter.cleanupEmptyDir(filepath.Dir(op.NewPath), destRoot)
 		}
 	case models.OperationTypeCopy, models.OperationTypeHardlink, models.OperationTypeSymlink:
@@ -1101,11 +1109,15 @@ func cleanupGeneratedFilesFS(fs afero.Fs, op *models.BatchFileOperation, stopAt 
 	batchRoot := filepath.Clean(stopAt)
 	for dir := range dirsToCheck {
 		cleanDir := filepath.Clean(dir)
-		if !isDescendant(cleanDir, batchRoot) {
+		boundary := batchRoot
+		if gf.PrimaryResident && !isDescendant(cleanDir, boundary) {
+			boundary = residentCleanupAliasBoundary(fs, cleanDir, boundary)
+		}
+		if boundary == "" || !isDescendant(cleanDir, boundary) {
 			logging.Warnf("Skipping cleanup of directory %q: outside batch root %q", cleanDir, batchRoot)
 			continue
 		}
-		cleanupEmptyDirDownwardFS(fs, cleanDir, stopAt)
+		cleanupEmptyDirDownwardFS(fs, cleanDir, boundary)
 	}
 }
 
