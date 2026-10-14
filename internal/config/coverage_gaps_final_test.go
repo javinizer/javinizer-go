@@ -168,15 +168,16 @@ func TestValidateConfigExcludingTranslationCredentials_TranslationProviderError(
 
 type reloadInvalidFs struct {
 	afero.Fs
-	invalidFs  afero.Fs
-	openCount  int
-	failOpenAt int
+	invalidFs   afero.Fs
+	invalidPath string
+	openCount   int
+	failOpenAt  int
 }
 
 func (f *reloadInvalidFs) Open(name string) (afero.File, error) {
 	f.openCount++
 	if f.openCount == f.failOpenAt {
-		return f.invalidFs.Open(name)
+		return f.invalidFs.Open(f.invalidPath)
 	}
 	return f.Fs.Open(name)
 }
@@ -188,7 +189,7 @@ func TestCreateFromEmbedded_PrepareFailsReturnsError(t *testing.T) {
 	require.NoError(t, afero.WriteFile(invalid, path,
 		[]byte("config_version: "+strconv.Itoa(CurrentConfigVersion)+"\ndatabase:\n    type: postgres\n"), 0o644))
 	base := afero.NewMemMapFs()
-	wrapper := &reloadInvalidFs{Fs: base, invalidFs: invalid, failOpenAt: 3}
+	wrapper := &reloadInvalidFs{Fs: base, invalidFs: invalid, invalidPath: path, failOpenAt: 3}
 	cs := NewConfigStorage(wrapper, noopLockFactory)
 	_, err := cs.createFromEmbedded(path)
 	require.Error(t, err)

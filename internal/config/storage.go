@@ -201,6 +201,11 @@ func (cs *ConfigStorage) LoadOrCreate(path string) (*Config, error) {
 		return cs.createFromEmbedded(path)
 	}
 
+	return cs.loadExisting(path)
+}
+
+// loadExisting applies migrations and runtime preparation to an existing config.
+func (cs *ConfigStorage) loadExisting(path string) (*Config, error) {
 	cfg, err := cs.Load(path)
 	if err != nil {
 		return nil, err
@@ -266,23 +271,63 @@ func (cs *ConfigStorage) createFromEmbedded(path string) (*Config, error) {
 		return nil, fmt.Errorf("failed to create config directory: %w", err)
 	}
 
-	embeddedData := minimalInitStub()
+	unlock, err := cs.acquireLock(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to save default config: %w", err)
+	}
+	cfg, err := cs.createFromEmbeddedLocked(path)
+	unlock()
+	if err != nil || cfg != nil {
+		return cfg, err
+	}
+	return cs.loadExisting(path)
+}
 
-	if err := cs.atomicReplace(path, embeddedData, FilePerm); err != nil {
+// createFromEmbeddedLocked holds the config lock through init-only defaults and
+// their sparse save. A nil config means another writer already created the file;
+// the caller must release the lock before loading/migrating that existing config.
+func (cs *ConfigStorage) createFromEmbeddedLocked(path string) (*Config, error) {
+	if _, err := cs.fs.Stat(path); err == nil {
+		return nil, nil
+	} else if !isNotExist(err) {
+		return nil, fmt.Errorf("failed to stat config file: %w", err)
+	}
+
+	// Reserve a private sibling so readers cannot observe the initial stub before
+	// init-only defaults have been saved. TempFile exclusively owns this name.
+	stage, err := afero.TempFile(cs.fs, filepath.Dir(path), ".javinizer-init-")
+	if err != nil {
+		return nil, fmt.Errorf("failed to save default config: %w", err)
+	}
+	// Keep the path in the configured filesystem namespace (for BasePathFs).
+	stagePath := filepath.Join(filepath.Dir(path), filepath.Base(stage.Name()))
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = cs.fs.Remove(stagePath)
+		}
+	}()
+	if err := stage.Close(); err != nil {
 		return nil, fmt.Errorf("failed to save default config: %w", err)
 	}
 
-	cfg, err := cs.Load(path)
+	embeddedData := minimalInitStub()
+
+	if err := cs.atomicReplace(stagePath, embeddedData, FilePerm); err != nil {
+		return nil, fmt.Errorf("failed to save default config: %w", err)
+	}
+
+	cfg, err := cs.Load(stagePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load newly created config: %w", err)
 	}
 
 	if applyInitDefaultsFromEnv(cfg) {
 		ctx := BuildSparseSaveContext()
-		if err := cs.SaveSparse(cfg, path, ctx); err != nil {
+		if err := cs.saveSparseLockedWith(cfg, stagePath, ctx, configToYAMLDocument, encodeYAMLDocument); err != nil {
 			return nil, fmt.Errorf("failed to save config with environment overrides: %w", err)
 		}
-		reloaded, err := cs.Load(path)
+		reloaded, err := cs.Load(stagePath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to re-load config: %w", err)
 		}
@@ -294,6 +339,12 @@ func (cs *ConfigStorage) createFromEmbedded(path string) (*Config, error) {
 		return nil, err
 	}
 
+	if err := cs.replaceFile(path, stagePath); err != nil {
+		return nil, fmt.Errorf("failed to save default config: %w", err)
+	}
+	cleanup = false
+	// The final canonical-name publication needs its own directory sync.
+	_ = syncDir(filepath.Dir(path))
 	return cfg, nil
 }
 
@@ -310,11 +361,6 @@ func (cs *ConfigStorage) SaveSparse(cfg *Config, path string, ctx SparseSaveCont
 type encodeYAMLDocFunc func(*yaml.Node) ([]byte, error)
 
 func (cs *ConfigStorage) saveSparseWith(cfg *Config, path string, ctx SparseSaveContext, toDocument configDocumentFunc, encode encodeYAMLDocFunc) error {
-	diffCfg, diffDefaults := resolveScraperOverridesForDiff(cfg, ctx.Defaults, ctx.ScraperDefaults)
-	sparseTarget, err := diffYAMLDocumentsWith(diffCfg, diffDefaults, toDocument)
-	if err != nil {
-		return fmt.Errorf("failed to diff config: %w", err)
-	}
 	dir := filepath.Dir(path)
 	if err := cs.fs.MkdirAll(dir, DirPerm); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
@@ -324,6 +370,17 @@ func (cs *ConfigStorage) saveSparseWith(cfg *Config, path string, ctx SparseSave
 		return err
 	}
 	defer unlock()
+	return cs.saveSparseLockedWith(cfg, path, ctx, toDocument, encode)
+}
+
+// saveSparseLockedWith persists a sparse config while the caller holds the
+// canonical config lock, including when writing its private initialization stage.
+func (cs *ConfigStorage) saveSparseLockedWith(cfg *Config, path string, ctx SparseSaveContext, toDocument configDocumentFunc, encode encodeYAMLDocFunc) error {
+	diffCfg, diffDefaults := resolveScraperOverridesForDiff(cfg, ctx.Defaults, ctx.ScraperDefaults)
+	sparseTarget, err := diffYAMLDocumentsWith(diffCfg, diffDefaults, toDocument)
+	if err != nil {
+		return fmt.Errorf("failed to diff config: %w", err)
+	}
 	existingData, readErr := afero.ReadFile(cs.fs, path)
 	var existingDoc *yaml.Node
 	if readErr == nil {
@@ -365,7 +422,8 @@ func (cs *ConfigStorage) acquireLock(path string) (func(), error) {
 	return acquireConfigFileLock(path)
 }
 
-// atomicReplace writes data to path atomically using the configured filesystem.
+// atomicReplace stages and syncs data before publishing it with Rename.
+// Replacement is atomic where the configured filesystem supports atomic Rename.
 func (cs *ConfigStorage) atomicReplace(path string, data []byte, perm os.FileMode) error {
 	dir := filepath.Dir(path)
 	tmpPath := filepath.Join(dir, fmt.Sprintf(".%s.tmp-%d-%d", filepath.Base(path), time.Now().UnixNano(), os.Getpid()))
@@ -392,13 +450,8 @@ func (cs *ConfigStorage) atomicReplace(path string, data []byte, perm os.FileMod
 		return fmt.Errorf("failed to close temp config file: %w", err)
 	}
 
-	if err := cs.fs.Rename(tmpPath, path); err != nil {
-		if runtime.GOOS != "windows" {
-			return fmt.Errorf("failed to atomically replace config file: %w", err)
-		}
-		if err := cs.replaceFileOnWindows(path, tmpPath); err != nil {
-			return err
-		}
+	if err := cs.replaceFile(path, tmpPath); err != nil {
+		return err
 	}
 
 	// fsync the directory after the atomic rename so the rename itself is
@@ -413,35 +466,15 @@ func (cs *ConfigStorage) atomicReplace(path string, data []byte, perm os.FileMod
 	return nil
 }
 
-// replaceFileOnWindows handles Windows atomic replace with backup.
-func (cs *ConfigStorage) replaceFileOnWindows(path string, tmpPath string) error {
-	backupPath := fmt.Sprintf("%s.bak-%d", path, time.Now().UnixNano())
-	backupCreated := false
-
-	if _, statErr := cs.fs.Stat(path); statErr == nil {
-		if err := cs.fs.Rename(path, backupPath); err != nil {
-			return fmt.Errorf("failed to atomically replace config file: failed to create backup: %w", err)
-		}
-		backupCreated = true
-	} else if !isNotExist(statErr) {
-		return fmt.Errorf("failed to atomically replace config file: failed to stat destination: %w", statErr)
-	}
-
+// replaceFile publishes the staged file without moving the destination aside.
+// Go's Windows Rename already uses MoveFileExW with REPLACE_EXISTING. If it fails
+// (for example, because of a sharing violation), return that error and leave the
+// committed destination in place. A backup/rollback fallback creates a missing-
+// name window and can lose the destination if rollback also fails. Atomicity is
+// still subject to the filesystem and OS guarantees of Rename.
+func (cs *ConfigStorage) replaceFile(path string, tmpPath string) error {
 	if err := cs.fs.Rename(tmpPath, path); err != nil {
-		if backupCreated {
-			if restoreErr := cs.fs.Rename(backupPath, path); restoreErr != nil {
-				return fmt.Errorf(
-					"failed to atomically replace config file: %w (rollback failed: %v)",
-					err,
-					restoreErr,
-				)
-			}
-		}
 		return fmt.Errorf("failed to atomically replace config file: %w", err)
-	}
-
-	if backupCreated {
-		_ = cs.fs.Remove(backupPath)
 	}
 	return nil
 }
@@ -646,16 +679,16 @@ func syncDir(dir string) error {
 	return nil
 }
 
-// atomicReplaceFile writes data to path atomically using the real OS filesystem.
+// atomicReplaceFile stages and replaces data using the real OS filesystem.
 //
 //nolint:unused // used by same-package tests
 func atomicReplaceFile(path string, data []byte, perm os.FileMode) error {
 	return defaultStorage().atomicReplace(path, data, perm)
 }
 
-// replaceFileOnWindows handles Windows atomic replace with backup.
+// replaceFile publishes a staged file using the real OS filesystem.
 //
 //nolint:unused // used by same-package tests
-func replaceFileOnWindows(path string, tmpPath string) error {
-	return defaultStorage().replaceFileOnWindows(path, tmpPath)
+func replaceFile(path string, tmpPath string) error {
+	return defaultStorage().replaceFile(path, tmpPath)
 }
