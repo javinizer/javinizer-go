@@ -401,6 +401,67 @@ func TestArtifactMixedWidthCollisionUsesActualSuffix(t *testing.T) {
 	// Preserved fullwidth suffixes are distinct destination filenames.
 	entries, err := afero.ReadDir(fs, root)
 	require.NoError(t, err)
-	require.NoError(t, validateArtifactVideoSiblingNames(source, entries))
+	require.NoError(t, validateArtifactVideoSiblingNames(source, entries, false))
 	assert.NotEqual(t, stagedArtifactSiblingName(source, "movie.mkv", "RCT-156-HD-cd2.mkv"), stagedArtifactSiblingName(source, "movie.mkv", "ＲＣＴ－１５６－ＨＤ－ｃｄ２.mkv"))
+}
+
+func TestArtifactStagingNoRenameMultipartRawNames(t *testing.T) {
+	for _, mode := range []operationmode.OperationMode{operationmode.OperationModeOrganize, operationmode.OperationModeInPlaceNoRenameFolder} {
+		t.Run(string(mode), func(t *testing.T) {
+			for _, force := range []bool{false, true} {
+				for _, move := range []bool{false, true} {
+					t.Run(fmt.Sprintf("force=%t/move=%t", force, move), func(t *testing.T) {
+						fs := afero.NewOsFs()
+						root := t.TempDir()
+						primary := "ＲＣＴ－１５６－ＨＤ．ｍｋｖ"
+						partName := "RCT-156-HD-cd2．ｍｋｖ"
+						src := filepath.Join(root, "incoming", primary)
+						part := filepath.Join(filepath.Dir(src), partName)
+						require.NoError(t, fs.MkdirAll(filepath.Dir(src), 0755))
+						require.NoError(t, afero.WriteFile(fs, src, []byte("primary"), 0644))
+						require.NoError(t, afero.WriteFile(fs, part, []byte("part"), 0644))
+						org := organizer.NewOrganizer(fs, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: false}, template.NewEngine(), nil)
+						orch := &applyOrchImpl{fs: fs, organizer: org}
+						name, ext := artifactMatchName(primary)
+						cmd := ApplyCmd{Movie: &models.Movie{ContentID: "raw-parts", ID: "RCT-156H"}, Match: models.FileMatchInfo{Path: src, Name: name, Extension: ext}, DestPath: filepath.Join(root, "library"), Organize: OrganizeOptions{MoveFiles: move, ForceRenameFile: force}, OperationMode: mode, PublicationFence: pr260FailureArtifactFencer{}}
+						if mode == operationmode.OperationModeInPlaceNoRenameFolder {
+							cmd.DestPath = filepath.Dir(src)
+						}
+						result, err := orch.Execute(t.Context(), cmd)
+						require.NoError(t, err)
+						require.NotNil(t, result.OrganizeResult)
+						wantPrimary, wantPart := primary, partName
+						if force {
+							wantPrimary, wantPart = "movie.mkv", "movie-cd2.mkv"
+						}
+						assert.Equal(t, wantPrimary, filepath.Base(result.OrganizeResult.NewPath))
+						body, err := afero.ReadFile(fs, filepath.Join(filepath.Dir(result.OrganizeResult.NewPath), wantPart))
+						require.NoError(t, err)
+						assert.Equal(t, "part", string(body))
+						for _, p := range []string{src, part} {
+							exists, err := afero.Exists(fs, p)
+							require.NoError(t, err)
+							assert.Equal(t, !move || (mode == operationmode.OperationModeInPlaceNoRenameFolder && !force), exists)
+						}
+					})
+				}
+			}
+		})
+	}
+}
+
+func TestArtifactNoRenameCollisionUsesRawNames(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	source := "ＲＣＴ－１５６－ＨＤ．ｍｋｖ"
+	for _, name := range []string{source, "RCT-156-HD-cd2.mkv", "ＲＣＴ－１５６－ＨＤ-cd2.mkv"} {
+		require.NoError(t, afero.WriteFile(fs, name, []byte(name), 0644))
+	}
+	entries, err := afero.ReadDir(fs, ".")
+	require.NoError(t, err)
+	require.NoError(t, validateArtifactVideoSiblingNames(source, entries, true))
+	require.ErrorContains(t, validateArtifactVideoSiblingNames(source, entries, false), "ambiguous multipart destination")
+	require.NoError(t, afero.WriteFile(fs, "RCT-156-HD-CD2.MKV", []byte("case collision"), 0644))
+	entries, err = afero.ReadDir(fs, ".")
+	require.NoError(t, err)
+	require.ErrorContains(t, validateArtifactVideoSiblingNames(source, entries, true), "ambiguous multipart destination")
 }

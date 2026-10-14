@@ -42,6 +42,11 @@ type artifactPlanExecutor interface {
 	PlanSubtitleMoves(*organizer.OrganizePlan) []models.SubtitleMove
 }
 
+// artifactFilenamePolicy exposes the effective per-command filename policy.
+type artifactFilenamePolicy interface {
+	PreservesOriginalFilenames(forceRename bool) bool
+}
+
 // artifactSubtitleSelector exposes the organizer's configured source policy
 // independently of destination planning and its probe/admission freeze.
 // Organizers without this seam do not authorize subtitle staging.
@@ -62,6 +67,8 @@ type artifactSibling struct {
 }
 
 type artifactStage struct {
+	preserveSiblingNames bool
+
 	fs                 afero.Fs
 	fencer             database.ApplyArtifactPublicationFencer
 	root               string
@@ -193,6 +200,9 @@ func (o *applyOrchImpl) prepareArtifact(ctx context.Context, cmd ApplyCmd) (*art
 	}
 	writeArtifactStageManifest(o.fs, root)
 	stage := &artifactStage{fs: o.fs, fencer: artifactFencer(cmd), root: root, finalRoot: finalRoot, sourcePath: cmd.Match.Path, inPlace: inPlace, original: cmd, duplicatePlan: duplicatePlan}
+	if policy, ok := o.organizer.(artifactFilenamePolicy); ok {
+		stage.preserveSiblingNames = policy.PreservesOriginalFilenames(cmd.Organize.ForceRenameFile)
+	}
 	stagedCmd := cmd
 	if duplicatePlan != nil {
 		stagedCmd.Organize.DuplicateTracker = nil
@@ -240,7 +250,7 @@ func (o *applyOrchImpl) prepareArtifact(ctx context.Context, cmd ApplyCmd) (*art
 			stage.cleanup()
 			return nil, cmd, fmt.Errorf("artifact staging source directory: %w", readErr)
 		}
-		if err := validateArtifactVideoSiblingNames(base, entries); err != nil {
+		if err := validateArtifactVideoSiblingNames(base, entries, stage.preserveSiblingNames); err != nil {
 			stage.cleanup()
 			return nil, cmd, err
 		}
@@ -339,13 +349,17 @@ func foldArtifactASCII(name string) string {
 // Width/case normalization is many-to-one, so distinct regular directory
 // entries must not compete for one target. The staging loop skips the same
 // nonregular snapshot entries and re-proves regular sources without following links.
-func validateArtifactVideoSiblingNames(sourceName string, entries []os.FileInfo) error {
+func validateArtifactVideoSiblingNames(sourceName string, entries []os.FileInfo, preserveNames bool) error {
 	targets := make(map[string]string)
 	for _, entry := range entries {
 		if !entry.Mode().IsRegular() || !isStagedArtifactVideoSibling(sourceName, entry.Name()) {
 			continue
 		}
-		target := strings.ToLower(stagedArtifactSiblingName(sourceName, sourceName, entry.Name()))
+		targetName := entry.Name()
+		if !preserveNames {
+			targetName = stagedArtifactSiblingName(sourceName, sourceName, targetName)
+		}
+		target := strings.ToLower(targetName)
 		if previous, exists := targets[target]; exists {
 			return fmt.Errorf("ambiguous multipart destination: %s and %s", previous, entry.Name())
 		}
@@ -1433,7 +1447,7 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 			if !sibling.deferred || sibling.subtitle {
 				continue
 			}
-			target := filepath.Join(filepath.Dir(finalResult.NewPath), stagedArtifactSiblingName(filepath.Base(s.sourcePath), filepath.Base(finalResult.NewPath), filepath.Base(sibling.sourcePath)))
+			target := filepath.Join(filepath.Dir(finalResult.NewPath), s.siblingTargetName(filepath.Base(s.sourcePath), filepath.Base(finalResult.NewPath), filepath.Base(sibling.sourcePath)))
 			// A deferred video sibling (codex P2, PRRT_kwDORn9KaM6rLI28)
 			// installs by the verified move lane straight off its real
 			// source, mirroring the deferred primary: the admission identity
@@ -1650,7 +1664,7 @@ func (s *artifactStage) rehomeRemainingSiblings(stagedVideo string, excluded map
 			}
 			return fmt.Errorf("inspect staged sidecar %s: %w", sibling.stagedPath, err)
 		}
-		target := filepath.Join(targetDir, stagedArtifactSiblingName(filepath.Base(s.stagedSource), filepath.Base(stagedVideo), filepath.Base(sibling.stagedPath)))
+		target := filepath.Join(targetDir, s.siblingTargetName(filepath.Base(s.stagedSource), filepath.Base(stagedVideo), filepath.Base(sibling.stagedPath)))
 		if filepath.Clean(target) == filepath.Clean(sibling.stagedPath) {
 			continue
 		}
@@ -1675,6 +1689,14 @@ func (s *artifactStage) rehomeRemainingSiblings(stagedVideo string, excluded map
 		}
 	}
 	return nil
+}
+
+// siblingTargetName keeps raw native basenames when file renaming is disabled.
+func (s *artifactStage) siblingTargetName(sourceName, targetName, siblingName string) string {
+	if s.preserveSiblingNames {
+		return siblingName
+	}
+	return stagedArtifactSiblingName(sourceName, targetName, siblingName)
 }
 
 func stagedArtifactSiblingName(sourceName, targetName, siblingName string) string {

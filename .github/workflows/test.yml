@@ -270,7 +270,7 @@ jobs:
 
         sys.stdout.reconfigure(encoding="utf-8")
 
-        required = ['TestFindNFOMixedWidthSidecarPriority', 'TestNFOSidecarFoldStaysWithinFilename', 'TestNFOSidecarFoldRejectsWindowsDevices', 'TestTemplateFilenameTags_FullwidthExtension', 'TestSplitRawExtension_TemplateMirror', 'TestArtifactStagingFullwidthSubtitlePolicy', 'TestArtifactMatchName', 'TestArtifactStagingFullwidthRenamedStage', 'TestArtifactStagingFullwidthCaseAndMultipartSafety', 'TestArtifactStagingFullwidthMultipartPublication', 'TestArtifactStagingMixedWidthMultipartPublication', 'TestArtifactMixedWidthSiblingBoundaries', 'TestArtifactStagingMixedWidthCollisionFailsClosed', 'TestArtifactMixedWidthCollisionUsesActualSuffix']
+        required = ['TestFindNFOMixedWidthSidecarPriority', 'TestNFOSidecarFoldStaysWithinFilename', 'TestNFOSidecarFoldRejectsWindowsDevices', 'TestTemplateFilenameTags_FullwidthExtension', 'TestSplitRawExtension_TemplateMirror', 'TestArtifactStagingFullwidthSubtitlePolicy', 'TestArtifactMatchName', 'TestArtifactStagingFullwidthRenamedStage', 'TestArtifactStagingFullwidthCaseAndMultipartSafety', 'TestArtifactStagingFullwidthMultipartPublication', 'TestArtifactStagingMixedWidthMultipartPublication', 'TestArtifactMixedWidthSiblingBoundaries', 'TestArtifactStagingMixedWidthCollisionFailsClosed', 'TestArtifactMixedWidthCollisionUsesActualSuffix', 'TestArtifactStagingNoRenameMultipartRawNames', 'TestArtifactNoRenameCollisionUsesRawNames']
         result = subprocess.run([
             "go", "test", "-short", "-count=1", "-json",
             "./internal/nfo", "./internal/workflow", "./internal/template",

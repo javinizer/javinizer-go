@@ -1403,3 +1403,9 @@ func (o *Organizer) validatePlan(plan *OrganizePlan) []string {
 
 	return issues
 }
+
+// PreservesOriginalFilenames reports the effective per-command filename policy.
+// Staging uses the same policy for multipart videos as planning uses for the primary.
+func (o *Organizer) PreservesOriginalFilenames(forceRename bool) bool {
+	return o.config != nil && !o.config.RenameFile && !forceRename
+}

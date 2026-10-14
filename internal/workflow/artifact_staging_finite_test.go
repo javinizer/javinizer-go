@@ -118,7 +118,8 @@ func TestPR260FiniteArtifactRehomeFaultsRetainSidecars(t *testing.T) {
 			base, root, source, subtitle, multipart, unrelated, match := pr260FencedFiles(t, "rehome-"+strings.ReplaceAll(tc.name, " ", "-"))
 			fs := &pr260StageFaultFS{Fs: base}
 			dest := filepath.Join(root, "published")
-			cmd := ApplyCmd{Movie: &models.Movie{ContentID: "pr260-rehome"}, PublicationFence: pr260FailureArtifactFencer{}, Match: match, DestPath: dest, Organize: OrganizeOptions{MoveFiles: false}}
+			// This fixture explicitly exercises renamed multipart targets.
+			cmd := ApplyCmd{Movie: &models.Movie{ContentID: "pr260-rehome"}, PublicationFence: pr260FailureArtifactFencer{}, Match: match, DestPath: dest, Organize: OrganizeOptions{MoveFiles: false, ForceRenameFile: true}}
 			stage, _, err := (&applyOrchImpl{fs: fs, organizer: subtitleStagingOrganizer(fs)}).prepareArtifact(context.Background(), cmd)
 			require.NoError(t, err)
 			defer stage.cleanup()
