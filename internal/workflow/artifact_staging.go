@@ -234,6 +234,16 @@ func (o *applyOrchImpl) prepareArtifact(ctx context.Context, cmd ApplyCmd) (*art
 			stagedDir = root
 		}
 		stage.stagedSource = filepath.Join(stagedDir, base)
+
+		entries, readErr := afero.ReadDir(o.fs, filepath.Dir(sourcePath))
+		if readErr != nil {
+			stage.cleanup()
+			return nil, cmd, fmt.Errorf("artifact staging source directory: %w", readErr)
+		}
+		if err := validateArtifactVideoSiblingNames(base, entries); err != nil {
+			stage.cleanup()
+			return nil, cmd, err
+		}
 		if inPlace && !cmd.Organize.MoveFiles {
 			if err := copyArtifactFile(o.fs, sourcePath, stage.stagedSource, sourceInfo.Mode().Perm()); err != nil {
 				stage.cleanup()
@@ -245,11 +255,6 @@ func (o *applyOrchImpl) prepareArtifact(ctx context.Context, cmd ApplyCmd) (*art
 			// a rename again instead of a full copy through .javinizer-apply-*.
 			stage.videoDeferred = true
 		}
-		entries, readErr := afero.ReadDir(o.fs, filepath.Dir(sourcePath))
-		if readErr != nil {
-			stage.cleanup()
-			return nil, cmd, fmt.Errorf("artifact staging source directory: %w", readErr)
-		}
 		selectedSubtitles := map[string]bool{}
 		if selector, ok := o.organizer.(artifactSubtitleSelector); ok {
 			for _, path := range selector.SubtitleSourcePaths(cmd.Match) {
@@ -258,7 +263,7 @@ func (o *applyOrchImpl) prepareArtifact(ctx context.Context, cmd ApplyCmd) (*art
 		}
 		for _, entry := range entries {
 			sibling := filepath.Join(filepath.Dir(sourcePath), entry.Name())
-			if entry.Name() == base || entry.IsDir() ||
+			if entry.Name() == base || !entry.Mode().IsRegular() ||
 				(!selectedSubtitles[filepath.Clean(sibling)] && !isStagedArtifactVideoSibling(base, entry.Name())) {
 				continue
 			}
@@ -305,16 +310,7 @@ func (o *applyOrchImpl) prepareArtifact(ctx context.Context, cmd ApplyCmd) (*art
 // Never copy the old Name: organizing within the stage may have renamed it.
 // This mirrors scanner.foldNameExtension and fileExtension; Path stays raw.
 func artifactMatchName(base string) (name, extension string) {
-	folded := strings.Map(func(r rune) rune {
-		switch {
-		case r >= 0xFF01 && r <= 0xFF5E:
-			return r - 0xFEE0
-		case r == 0x3000:
-			return ' '
-		default:
-			return r
-		}
-	}, base)
+	folded := foldArtifactASCII(base)
 	extension = filepath.Ext(folded)
 	if extension == "" || folded == base {
 		return base, extension
@@ -325,11 +321,44 @@ func artifactMatchName(base string) (name, extension string) {
 	return string(runes[:len(runes)-len([]rune(extension))]) + extension, extension
 }
 
+// foldArtifactASCII is for matching only; physical source paths stay raw.
+func foldArtifactASCII(name string) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r >= 0xFF01 && r <= 0xFF5E:
+			return r - 0xFEE0
+		case r == 0x3000:
+			return ' '
+		default:
+			return r
+		}
+	}, name)
+}
+
+// Reject ambiguous multipart destinations before staging any source bytes.
+// Width/case normalization is many-to-one, so distinct regular directory
+// entries must not compete for one target. The staging loop skips the same
+// nonregular snapshot entries and re-proves regular sources without following links.
+func validateArtifactVideoSiblingNames(sourceName string, entries []os.FileInfo) error {
+	targets := make(map[string]string)
+	for _, entry := range entries {
+		if !entry.Mode().IsRegular() || !isStagedArtifactVideoSibling(sourceName, entry.Name()) {
+			continue
+		}
+		target := strings.ToLower(stagedArtifactSiblingName(sourceName, sourceName, entry.Name()))
+		if previous, exists := targets[target]; exists {
+			return fmt.Errorf("ambiguous multipart destination: %s and %s", previous, entry.Name())
+		}
+		targets[target] = entry.Name()
+	}
+	return nil
+}
+
 func isStagedArtifactVideoSibling(sourceName, siblingName string) bool {
 	sourceName, sourceExt := artifactMatchName(sourceName)
 	siblingName, siblingExt := artifactMatchName(siblingName)
-	sourceStem := strings.ToLower(strings.TrimSuffix(sourceName, sourceExt))
-	siblingStem := strings.ToLower(strings.TrimSuffix(siblingName, siblingExt))
+	sourceStem := strings.ToLower(foldArtifactASCII(strings.TrimSuffix(sourceName, sourceExt)))
+	siblingStem := strings.ToLower(foldArtifactASCII(strings.TrimSuffix(siblingName, siblingExt)))
 	siblingExt = strings.ToLower(siblingExt)
 	if !isStagedArtifactVideoExtension(siblingExt) {
 		return false
@@ -1655,13 +1684,19 @@ func stagedArtifactSiblingName(sourceName, targetName, siblingName string) strin
 	sourceStem := strings.TrimSuffix(sourceName, sourceExt)
 	siblingStem := strings.TrimSuffix(siblingNormalized, siblingExt)
 	targetStem := strings.TrimSuffix(targetName, targetExt)
-	if strings.EqualFold(siblingStem, sourceStem) {
+	foldedSource := foldArtifactASCII(sourceStem)
+	foldedSibling := foldArtifactASCII(siblingStem)
+	if strings.EqualFold(foldedSibling, foldedSource) {
 		return targetStem + siblingExt
 	}
-	if len(siblingStem) > len(sourceStem) && strings.EqualFold(siblingStem[:len(sourceStem)], sourceStem) {
-		separator := siblingStem[len(sourceStem)]
+	// Compare normalized identities, but split the original suffix by rune
+	// count: fullwidth and ASCII prefixes have different byte lengths.
+	sourceRunes := len([]rune(sourceStem))
+	siblingRunes := []rune(siblingStem)
+	if len(siblingRunes) > sourceRunes && strings.EqualFold(foldArtifactASCII(string(siblingRunes[:sourceRunes])), foldedSource) {
+		separator := []rune(foldedSibling)[sourceRunes]
 		if separator == '.' || separator == '-' || separator == '_' {
-			return targetStem + siblingStem[len(sourceStem):] + siblingExt
+			return targetStem + string(siblingRunes[sourceRunes:]) + siblingExt
 		}
 	}
 	return siblingName

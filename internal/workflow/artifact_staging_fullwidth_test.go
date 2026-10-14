@@ -275,3 +275,132 @@ func TestArtifactStagingFullwidthMultipartPublication(t *testing.T) {
 		}
 	}
 }
+
+func TestArtifactStagingMixedWidthMultipartPublication(t *testing.T) {
+	for _, names := range []struct{ primary, part, suffix string }{
+		{"ＲＣＴ－１５６－ＨＤ．ｍｋｖ", "RCT-156-HD-cd2.mkv", "-cd2.mkv"},
+		{"RCT-156-HD.mkv", "ＲＣＴ－１５６－ＨＤ-cd2．ｍｋｖ", "-cd2.mkv"},
+		{"ＲＣＴ－１５６－ＨＤ．ｍｋｖ", "RCT-156-HD－ｃｄ２．ｍｋｖ", "－ｃｄ２.mkv"},
+		{"作品ＲＣＴ－１５６－ＨＤ．ｍｋｖ", "作品RCT-156-HD-cd2.mkv", "-cd2.mkv"},
+	} {
+		for _, move := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/%s/move=%t", names.primary, names.part, move), func(t *testing.T) {
+				fs := afero.NewOsFs()
+				root := t.TempDir()
+				src := filepath.Join(root, "incoming", names.primary)
+				part := filepath.Join(root, "incoming", names.part)
+				unrelated := filepath.Join(root, "incoming", "RCT-157-HD-cd2.mkv")
+				require.NoError(t, fs.MkdirAll(filepath.Dir(src), 0o755))
+				for path, body := range map[string]string{src: "primary", part: "part two", unrelated: "foreign"} {
+					require.NoError(t, afero.WriteFile(fs, path, []byte(body), 0o644))
+				}
+				org := organizer.NewOrganizer(fs, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize}, template.NewEngine(), nil)
+				orch := &applyOrchImpl{fs: fs, organizer: org}
+				name, ext := artifactMatchName(names.primary)
+				cmd := ApplyCmd{Movie: &models.Movie{ContentID: "mixed-width-parts", ID: "RCT-156H"}, Match: models.FileMatchInfo{Path: src, Name: name, Extension: ext}, DestPath: filepath.Join(root, "library"), Organize: OrganizeOptions{MoveFiles: move}, OperationMode: operationmode.OperationModeOrganize, PublicationFence: pr260FailureArtifactFencer{}}
+				stage, _, err := orch.prepareArtifact(t.Context(), cmd)
+				require.NoError(t, err)
+				require.Len(t, stage.siblings, 1)
+				assert.Equal(t, part, stage.siblings[0].sourcePath)
+				assert.Equal(t, move, stage.siblings[0].deferred)
+				stage.cleanup()
+				result, err := orch.Execute(t.Context(), cmd)
+				require.NoError(t, err)
+				require.NotNil(t, result.OrganizeResult)
+				body, err := afero.ReadFile(fs, filepath.Join(filepath.Dir(result.OrganizeResult.NewPath), "movie"+names.suffix))
+				require.NoError(t, err)
+				assert.Equal(t, "part two", string(body))
+				exists, err := afero.Exists(fs, part)
+				require.NoError(t, err)
+				assert.Equal(t, !move, exists)
+				body, err = afero.ReadFile(fs, unrelated)
+				require.NoError(t, err)
+				assert.Equal(t, "foreign", string(body))
+			})
+		}
+	}
+}
+
+func TestArtifactMixedWidthSiblingBoundaries(t *testing.T) {
+	for _, tc := range []struct {
+		source, sibling string
+		want            bool
+	}{
+		{"ＲＣＴ－１５６－ＨＤ.mkv", "RCT-156-HD-cd2.mkv", true},
+		{"ＲＣＴ－１５６－ＨＤ.mkv", "RCT-156-HDtrailer-cd2.mkv", false},
+		{"ＲＣＴ－１５６－ＨＤ.mkv", "RCT-156-HD-cd2.txt", false},
+		{"ＲＣＴ－１５６－ＨＤ.mkv", "RCT-156-HD-cd2extra.mkv", false},
+		{"ＲＣＴ－１５６－ＨＤ－ｃｄ１.mkv", "RCT-156-HD-cd2.mkv", false},
+		{"作品ＲＣＴ.mkv", "別作品RCT-cd2.mkv", false},
+	} {
+		assert.Equal(t, tc.want, isStagedArtifactVideoSibling(tc.source, tc.sibling), "%s %s", tc.source, tc.sibling)
+	}
+	for _, tc := range []struct{ source, target, sibling, want string }{
+		{"ＲＣＴ.mkv", "ＴＡＲＧＥＴ.mkv", "RCT.mkv", "ＴＡＲＧＥＴ.mkv"},
+		{"ＲＣＴ.mkv", "target.mkv", "RCT-cd2.mkv", "target-cd2.mkv"},
+		{"RCT.mkv", "target.mkv", "ＲＣＴ-cd2.mkv", "target-cd2.mkv"},
+		{"ＲＣＴ.mkv", "target.mkv", "RCTtrailer.mkv", "RCTtrailer.mkv"},
+		{"ＲＣＴ.mkv", "target.mkv", "other.mkv", "other.mkv"},
+	} {
+		assert.Equal(t, tc.want, stagedArtifactSiblingName(tc.source, tc.target, tc.sibling))
+	}
+}
+
+func TestArtifactStagingMixedWidthCollisionFailsClosed(t *testing.T) {
+	for _, partName := range []string{"ＲＣＴ－１５６－ＨＤ-cd2.mkv", "ＲＣＴ－１５６－ＨＤ-CD2.MKV"} {
+		for _, move := range []bool{false, true} {
+			for _, mode := range []operationmode.OperationMode{operationmode.OperationModeOrganize, operationmode.OperationModeInPlaceNoRenameFolder} {
+				t.Run(fmt.Sprintf("%s/move=%t/%s", partName, move, mode), func(t *testing.T) {
+					fs := afero.NewOsFs()
+					root := t.TempDir()
+					src := filepath.Join(root, "incoming", "ＲＣＴ－１５６－ＨＤ．ｍｋｖ")
+					ascii := filepath.Join(root, "incoming", "RCT-156-HD-cd2.mkv")
+					wide := filepath.Join(root, "incoming", partName)
+					dest := filepath.Join(root, "library")
+					if mode == operationmode.OperationModeInPlaceNoRenameFolder {
+						dest = filepath.Dir(src)
+					}
+					targetDir := filepath.Join(dest, "movie")
+					if mode == operationmode.OperationModeInPlaceNoRenameFolder {
+						targetDir = dest
+					}
+					target := filepath.Join(targetDir, "movie-cd2.mkv")
+					require.NoError(t, fs.MkdirAll(filepath.Dir(src), 0o755))
+					require.NoError(t, fs.MkdirAll(targetDir, 0o755))
+					expected := map[string]string{src: "primary", ascii: "ascii part", wide: "wide part", target: "preexisting destination"}
+					for path, body := range expected {
+						require.NoError(t, afero.WriteFile(fs, path, []byte(body), 0o644))
+					}
+					org := organizer.NewOrganizer(fs, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: mode}, template.NewEngine(), nil)
+					orch := &applyOrchImpl{fs: fs, organizer: org}
+					name, ext := artifactMatchName(filepath.Base(src))
+					cmd := ApplyCmd{Movie: &models.Movie{ContentID: "mixed-width-collision", ID: "RCT-156H"}, Match: models.FileMatchInfo{Path: src, Name: name, Extension: ext}, DestPath: dest, Organize: OrganizeOptions{MoveFiles: move}, OperationMode: mode, PublicationFence: pr260FailureArtifactFencer{}}
+					stage, _, err := orch.prepareArtifact(t.Context(), cmd)
+					require.ErrorContains(t, err, "ambiguous multipart destination")
+					require.Nil(t, stage)
+					_, err = orch.Execute(t.Context(), cmd)
+					require.ErrorContains(t, err, "ambiguous multipart destination")
+					for path, want := range expected {
+						body, err := afero.ReadFile(fs, path)
+						require.NoError(t, err)
+						assert.Equal(t, want, string(body), path)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestArtifactMixedWidthCollisionUsesActualSuffix(t *testing.T) {
+	fs := afero.NewOsFs()
+	root := t.TempDir()
+	source := "ＲＣＴ－１５６－ＨＤ．ｍｋｖ"
+	for _, name := range []string{source, "RCT-156-HD-cd2.mkv", "ＲＣＴ－１５６－ＨＤ－ｃｄ２.mkv"} {
+		require.NoError(t, afero.WriteFile(fs, filepath.Join(root, name), []byte(name), 0o644))
+	}
+	// Preserved fullwidth suffixes are distinct destination filenames.
+	entries, err := afero.ReadDir(fs, root)
+	require.NoError(t, err)
+	require.NoError(t, validateArtifactVideoSiblingNames(source, entries))
+	assert.NotEqual(t, stagedArtifactSiblingName(source, "movie.mkv", "RCT-156-HD-cd2.mkv"), stagedArtifactSiblingName(source, "movie.mkv", "ＲＣＴ－１５６－ＨＤ－ｃｄ２.mkv"))
+}

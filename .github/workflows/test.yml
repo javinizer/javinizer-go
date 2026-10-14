@@ -196,6 +196,26 @@ jobs:
     - name: Download dependencies
       run: go mod download
 
+    - name: Verify native Windows remaster filename contracts
+      shell: python {0}
+      run: |
+        import json, pathlib, subprocess
+
+        required = ['TestFindNFOMixedWidthSidecarPriority', 'TestNFOSidecarFoldStaysWithinFilename', 'TestNFOSidecarFoldRejectsWindowsDevices', 'TestTemplateFilenameTags_FullwidthExtension', 'TestSplitRawExtension_TemplateMirror', 'TestArtifactStagingFullwidthSubtitlePolicy', 'TestArtifactMatchName', 'TestArtifactStagingFullwidthRenamedStage', 'TestArtifactStagingFullwidthCaseAndMultipartSafety', 'TestArtifactStagingFullwidthMultipartPublication', 'TestArtifactStagingMixedWidthMultipartPublication', 'TestArtifactMixedWidthSiblingBoundaries', 'TestArtifactStagingMixedWidthCollisionFailsClosed', 'TestArtifactMixedWidthCollisionUsesActualSuffix']
+        result = subprocess.run([
+            "go", "test", "-short", "-count=1", "-json",
+            "./internal/nfo", "./internal/workflow", "./internal/template",
+            "-run", "^(" + "|".join(required) + ")$",
+        ], capture_output=True, text=True)
+        pathlib.Path("remaster-native-windows.jsonl").write_text(result.stdout, encoding="utf-8")
+        print(result.stdout, end="")
+        print(result.stderr, end="")
+        assert result.returncode == 0, "Native Windows remaster tests failed"
+        events = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
+        passed = {event.get("Test") for event in events if event["Action"] == "pass"}
+        assert not any(event["Action"] == "skip" for event in events), "Native remaster scenarios must not skip"
+        assert set(required) <= passed, "Missing native Windows remaster proof: " + repr(set(required) - passed)
+
     # Native before/after regression evidence for 85201f8:
     # https://github.com/javinizer/javinizer-go/actions/runs/38643999346
     - name: Verify fixed native Windows NFO paths and collect coverage
@@ -239,6 +259,7 @@ jobs:
         name: nfo-native-windows-evidence
         path: |
           nfo-native-fixed.jsonl
+          remaster-native-windows.jsonl
           coverage-nfo-native-windows.out
         if-no-files-found: error
         retention-days: 30

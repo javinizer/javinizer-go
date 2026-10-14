@@ -694,12 +694,10 @@ func newSimpleTagRegistry() map[string]tagResolver {
 		}
 		return name, nil
 	}
-	// <FILENAME_EXT> keeps the raw stem but folds the extension spelling
-	// (RCT-156-HD．ｍｋｖ -> RCT-156-HD.mkv): the extension is classification
-	// data that names a file, so it is carried folded (round-30 contract,
-	// like FileMatchInfo.Name), while the stem keeps its raw spelling.
+	// The extension-inclusive tags preserve the original on-disk spelling.
+	// Classification folding belongs to matching, not metadata rendering.
 	registry["FILENAME_EXT"] = func(ctx *Context) (string, error) {
-		return foldNameExtension(ctx.OriginalFilename), nil
+		return ctx.OriginalFilename, nil
 	}
 	registry["FILENAMEEXT"] = registry["FILENAME_EXT"]
 	registry["FIRSTNAME"] = func(ctx *Context) (string, error) { return ctx.FirstName, nil }

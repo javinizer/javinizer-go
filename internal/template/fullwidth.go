@@ -64,25 +64,3 @@ func splitRawExtension(name string) (stem, ext string) {
 	runes := []rune(name)
 	return string(runes[:len(runes)-n]), string(runes[len(runes)-n:])
 }
-
-// foldNameExtension returns a filename with its extension spelling folded
-// to halfwidth ASCII — mirroring the scanner's and worker's same-named
-// helpers (internal/scanner/fullwidth.go, internal/worker/fullwidth.go,
-// both package-private): RCT-156-HD．ｍｋｖ emits RCT-156-HD.mkv, so the
-// <FILENAME_EXT> tag yields a name whose extension the ASCII-only world
-// (filepath.Ext, video extension filters) recognizes. Only the extension's
-// spelling folds: the stem keeps its raw form, and the raw on-disk spelling
-// stays in Movie.OriginalFileName (round 40a) — the fold happens at tag
-// resolution, not in the metadata field.
-func foldNameExtension(name string) string {
-	folded := foldFullwidthASCII(name)
-	ext := filepath.Ext(folded)
-	if ext == "" || folded == name {
-		return name
-	}
-	// foldFullwidthASCII maps rune-to-rune, so the raw spelling of ext is
-	// exactly the last len([]rune(ext)) runes of name; replacing that tail
-	// with ext folds the extension without touching the stem.
-	runes := []rune(name)
-	return string(runes[:len(runes)-len([]rune(ext))]) + ext
-}

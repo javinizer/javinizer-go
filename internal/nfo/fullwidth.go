@@ -79,5 +79,10 @@ func nfoSidecarFilenames(videoFilePath string) []string {
 	if containsFullwidthASCII(filepath.Base(videoFilePath)) {
 		names = append(names, stem+nfoExtensionFullwidth)
 	}
+	// Prefer the exact raw stem above. A folded equivalent is a fallback
+	// filename in the same directory, never a normalized filesystem path.
+	if folded := foldFullwidthASCII(stem); folded != stem && !strings.ContainsAny(folded, `/\:`) && filepath.IsLocal(folded+nfoExtension) {
+		names = append(names, folded+nfoExtension, folded+nfoExtensionFullwidth)
+	}
 	return names
 }

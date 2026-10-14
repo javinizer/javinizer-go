@@ -7,8 +7,8 @@ package template
 // and the organizer appended the folded .mkv on top
 // (RCT-156-HD．ｍｋｖ.mkv). The filename tags now split fold-aware at tag
 // resolution: <FILENAME> strips the fullwidth extension from the raw stem,
-// <FILENAME_EXT> folds the extension spelling (round-30 classification
-// contract), and ASCII input stays byte-identical. The metadata field
+// <FILENAME_EXT> preserves the raw extension spelling, and ASCII input
+// stays byte-identical. The metadata field
 // itself is untouched (round 40a keeps it raw).
 
 import (
@@ -34,17 +34,17 @@ func TestTemplateFilenameTags_FullwidthExtension(t *testing.T) {
 		assert.Equal(t, "RCT-156-HD.nfo", got)
 	})
 
-	t.Run("FILENAME_EXT folds the extension spelling", func(t *testing.T) {
+	t.Run("FILENAME_EXT preserves the raw spelling", func(t *testing.T) {
 		got, err := e.Execute("<FILENAME_EXT>", &Context{OriginalFilename: "RCT-156-HD．ｍｋｖ"})
 		require.NoError(t, err)
-		assert.Equal(t, "RCT-156-HD.mkv", got,
-			"the ext-style tag yields the folded .mkv spelling, never the fullwidth one")
+		assert.Equal(t, "RCT-156-HD．ｍｋｖ", got,
+			"the ext-style tag must name the actual original file")
 	})
 
-	t.Run("FILENAMEEXT alias folds the extension spelling", func(t *testing.T) {
+	t.Run("FILENAMEEXT alias preserves the raw spelling", func(t *testing.T) {
 		got, err := e.Execute("<FILENAMEEXT>", &Context{OriginalFilename: "RCT-156-HD．ｍｋｖ"})
 		require.NoError(t, err)
-		assert.Equal(t, "RCT-156-HD.mkv", got)
+		assert.Equal(t, "RCT-156-HD．ｍｋｖ", got)
 	})
 
 	t.Run("ASCII input is byte-identical", func(t *testing.T) {
@@ -65,7 +65,7 @@ func TestTemplateFilenameTags_FullwidthExtension(t *testing.T) {
 
 		got, err = e.Execute("<FILENAME_EXT>", &Context{OriginalFilename: "ＲＣＴ-156-ＨＤ．ｍｋｖ"})
 		require.NoError(t, err)
-		assert.Equal(t, "ＲＣＴ-156-ＨＤ.mkv", got, "only the extension spelling folds")
+		assert.Equal(t, "ＲＣＴ-156-ＨＤ．ｍｋｖ", got, "the original filename stays raw")
 	})
 
 	t.Run("no extension, empty, and dotfiles unchanged", func(t *testing.T) {
@@ -111,32 +111,4 @@ func TestSplitRawExtension_TemplateMirror(t *testing.T) {
 	stem, ext = splitRawExtension("ＲＣＴ-156-ＨＤ．ｍｋｖ")
 	assert.Equal(t, "ＲＣＴ-156-ＨＤ", stem, "the stem keeps its fullwidth spelling")
 	assert.Equal(t, "．ｍｋｖ", ext)
-}
-
-// TestFoldNameExtension_TemplateMirror pins the template-local mirror of
-// the scanner's/worker's round-30 fold contract: only the extension's
-// spelling folds; the stem and ASCII-only input are returned unchanged.
-func TestFoldNameExtension_TemplateMirror(t *testing.T) {
-	assert.Equal(t, "RCT-156-HD.mkv", foldNameExtension("RCT-156-HD．ｍｋｖ"),
-		"the extension spelling folds to halfwidth")
-	assert.Equal(t, "ＲＣＴ-156-ＨＤ.mkv", foldNameExtension("ＲＣＴ-156-ＨＤ．ｍｋｖ"),
-		"only the extension folds, the stem keeps its raw spelling")
-	assert.Equal(t, "RCT-156-HD.mkv", foldNameExtension("RCT-156-HD.mkv"),
-		"ASCII-only input is returned unchanged")
-	assert.Equal(t, "STARS-136", foldNameExtension("STARS-136"),
-		"no extension stays whole")
-	assert.Equal(t, ".hidden", foldNameExtension(".hidden"),
-		"dotfiles keep their leading dot")
-	assert.Equal(t, "", foldNameExtension(""))
-}
-
-// TestFoldFullwidthASCII_TemplateMirror pins the template-local fold
-// shared with matcher/organizer/scanner/worker.
-func TestFoldFullwidthASCII_TemplateMirror(t *testing.T) {
-	assert.Equal(t, "RCT-156-HD", foldFullwidthASCII("ＲＣＴ-156-ＨＤ"))
-	assert.Equal(t, ".mkv", foldFullwidthASCII("．ｍｋｖ"))
-	assert.Equal(t, "RCT-156-HD", foldFullwidthASCII("RCT-156-HD"),
-		"ASCII-only input is returned unchanged")
-	assert.Equal(t, "RCT 156 アイ", foldFullwidthASCII("ＲＣＴ　１５６　アイ"),
-		"kana survives while the ideographic space folds")
 }
