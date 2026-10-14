@@ -16,8 +16,8 @@ vi.mock('svelte/transition', () => ({
 }));
 
 vi.mock('$app/stores', async () => {
-	const { readable } = await import('svelte/store');
-	return { page: readable({ params: { jobId: 'undo-job' }, url: { pathname: '/jobs/undo-job' } }) };
+	const { writable } = await import('svelte/store');
+	return { page: writable({ params: { jobId: 'undo-job' }, url: { pathname: '/jobs/undo-job' } }) };
 });
 vi.mock('$lib/api/client', () => ({
 	apiClient: {
@@ -64,12 +64,16 @@ const failure: RevertResultResponse = {
 		},
 	],
 };
+const pageStore = (await import('$app/stores')).page as unknown as {
+	set: (value: { params: { jobId: string }; url: { pathname: string } }) => void;
+};
 let client: QueryClient;
 let currentStatus: string;
 
 beforeEach(() => {
-	vi.clearAllMocks();
+	vi.resetAllMocks();
 	toastStore.clear();
+	pageStore.set({ params: { jobId: 'undo-job' }, url: { pathname: '/jobs/undo-job' } });
 	currentStatus = 'applied';
 	client = new QueryClient({
 		defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -123,9 +127,12 @@ describe('job history Undo outcomes', () => {
 		expect(view.getByRole('alert').textContent).toContain(operation.new_path);
 		await waitFor(() => expect(view.queryByRole('dialog')).toBeNull());
 		await waitFor(() => expect(view.getByRole('button', { name: 'Revert File' })).toBeTruthy());
-		expect(invalidate).toHaveBeenCalledWith({ queryKey: ['job', 'undo-job', 'operations'] });
+		expect(invalidate).toHaveBeenCalledWith({ queryKey: ['job', 'undo-job'] });
 		expect(invalidate).toHaveBeenCalledWith({ queryKey: ['batch-jobs'] });
-		vi.mocked(apiClient.revertJobOperation).mockResolvedValueOnce(success);
+		vi.mocked(apiClient.revertJobOperation).mockImplementationOnce(async () => {
+			currentStatus = 'reverted';
+			return success;
+		});
 		await confirmOperation(view);
 		await waitFor(() =>
 			expect(get(toastStore).at(-1)).toMatchObject({
@@ -133,7 +140,7 @@ describe('job history Undo outcomes', () => {
 				message: 'Reverted TEST-001',
 			}),
 		);
-		expect(view.queryByRole('alert')).toBeNull();
+		await waitFor(() => expect(view.queryByRole('alert')).toBeNull());
 		expect(apiClient.revertJobOperation).toHaveBeenCalledTimes(2);
 	});
 
@@ -228,4 +235,232 @@ describe('job history Undo outcomes', () => {
 		);
 		await waitFor(() => expect(get(toastStore)[0]).toMatchObject({ type: 'warning' }));
 	});
+});
+
+async function retryMovie(view: ReturnType<typeof showPage>, movieId: string) {
+	const label = await view.findByText(movieId, { selector: 'span.font-semibold.text-sm' });
+	const rowHeader = label.parentElement!.parentElement!;
+	await fireEvent.click(within(rowHeader).getByRole('button', { name: 'Revert File' }));
+	await fireEvent.click(
+		within(view.getByRole('dialog')).getByRole('button', { name: 'Revert file' }),
+	);
+	await waitFor(() => expect(view.queryByRole('dialog')).toBeNull());
+}
+
+async function undoBatch(view: ReturnType<typeof showPage>, count: number) {
+	await fireEvent.click(await view.findByRole('button', { name: /Revert Batch/ }));
+	await fireEvent.click(
+		within(view.getByRole('dialog')).getByRole('button', {
+			name: `Revert ${count} ${count === 1 ? 'file' : 'files'}`,
+		}),
+	);
+	await waitFor(() => expect(view.queryByRole('dialog')).toBeNull());
+}
+
+describe('unresolved Undo details across scoped retries', () => {
+	it('keeps another movie’s skipped paths through a failed retry and a successful retry', async () => {
+		const other = {
+			...operation,
+			id: 2,
+			movie_id: 'TEST-002',
+			original_path: '/incoming/TEST-002.mp4',
+			new_path: '/library/TEST-002.mp4',
+		};
+		let rows = [{ ...operation }, other];
+		vi.mocked(apiClient.getJobOperations).mockImplementation(async () => ({
+			job_id: 'undo-job',
+			job_status: 'organized',
+			total: rows.length,
+			operations: rows,
+		}));
+		const skipped = {
+			...failure.errors![0],
+			operation_id: 2,
+			movie_id: other.movie_id,
+			original_path: other.original_path,
+			new_path: other.new_path,
+			error: '',
+			reason: 'anchor_missing',
+			outcome: 'skipped',
+		};
+		vi.mocked(apiClient.revertBatchJob).mockImplementation(async () => {
+			rows = rows.map((row) => ({ ...row, revert_status: row.id === 1 ? 'failed' : 'applied' }));
+			return { ...failure, total: 2, skipped: 1, errors: [...failure.errors!, skipped] };
+		});
+		const view = showPage();
+		await undoBatch(view, 2);
+		await waitFor(() =>
+			expect(within(view.getByRole('alert')).getAllByRole('listitem')).toHaveLength(2),
+		);
+		vi.mocked(apiClient.revertJobOperation).mockResolvedValueOnce({
+			...failure,
+			errors: [{ ...failure.errors![0], error: 'destination conflict after retry' }],
+		});
+		await retryMovie(view, 'TEST-001');
+		expect(view.getByRole('alert').textContent).toContain('destination conflict after retry');
+		expect(view.getByRole('alert').textContent).toContain('anchor_missing');
+		expect(view.getByRole('alert').textContent).toContain(other.new_path);
+		expect(view.getByRole('alert').textContent).not.toContain('invalid cross-device link');
+		vi.mocked(apiClient.revertJobOperation).mockImplementationOnce(async () => {
+			rows = rows.map((row) => (row.id === 1 ? { ...row, revert_status: 'reverted' } : row));
+			return success;
+		});
+		await retryMovie(view, 'TEST-001');
+		await waitFor(() =>
+			expect(within(view.getByRole('alert')).getAllByRole('listitem')).toHaveLength(1),
+		);
+		expect(view.getByRole('alert').textContent).toContain('anchor_missing');
+		expect(view.getByRole('alert').textContent).toContain(other.original_path);
+		expect(view.getByRole('alert').textContent).not.toContain('destination conflict');
+		vi.mocked(apiClient.revertJobOperation).mockImplementationOnce(async () => {
+			rows = rows.map((row) => ({ ...row, revert_status: 'reverted' }));
+			return success;
+		});
+		await retryMovie(view, 'TEST-002');
+		await waitFor(() => expect(view.queryByRole('alert')).toBeNull());
+	});
+
+	it('does not erase excluded errors when a subsequent batch only attempts another row', async () => {
+		const other = { ...operation, id: 2, movie_id: 'TEST-002' };
+		let rows = [{ ...operation }, other];
+		vi.mocked(apiClient.getJobOperations).mockImplementation(async () => ({
+			job_id: 'undo-job',
+			job_status: 'organized',
+			total: 2,
+			operations: rows,
+		}));
+		vi.mocked(apiClient.revertBatchJob).mockResolvedValueOnce({
+			...failure,
+			total: 2,
+			failed: 2,
+			errors: [
+				...failure.errors!,
+				{
+					...failure.errors![0],
+					operation_id: 2,
+					movie_id: 'TEST-002',
+					error: 'excluded row still needs attention',
+				},
+			],
+		});
+		const view = showPage();
+		await undoBatch(view, 2);
+		rows = [{ ...operation }, { ...other, revert_status: 'pending' }];
+		await client.invalidateQueries({ queryKey: ['job', 'undo-job'] });
+		vi.mocked(apiClient.revertBatchJob).mockImplementationOnce(async () => {
+			rows = [
+				{ ...operation, revert_status: 'reverted' },
+				{ ...other, revert_status: 'pending' },
+			];
+			return success;
+		});
+		await undoBatch(view, 1);
+		await waitFor(() =>
+			expect(within(view.getByRole('alert')).getAllByRole('listitem')).toHaveLength(1),
+		);
+		expect(view.getByRole('alert').textContent).toContain('excluded row still needs attention');
+	});
+
+	it('reconciles a successful retry after a failed immediate refresh later recovers', async () => {
+		vi.mocked(apiClient.revertJobOperation).mockResolvedValueOnce(failure);
+		const view = showPage();
+		await retryMovie(view, 'TEST-001');
+		expect(view.getByRole('alert').textContent).toContain('invalid cross-device link');
+		vi.mocked(apiClient.revertJobOperation).mockImplementationOnce(async () => {
+			currentStatus = 'reverted';
+			vi.mocked(apiClient.getJobOperations).mockRejectedValueOnce(new Error('refresh interrupted'));
+			return success;
+		});
+		await retryMovie(view, 'TEST-001');
+		await view.findByText('refresh interrupted');
+		await client.invalidateQueries({ queryKey: ['job', 'undo-job'] });
+		await waitFor(() => expect(view.queryByRole('alert')).toBeNull());
+		expect(view.getByRole('button', { name: 'Reverted ✓' })).toBeTruthy();
+	});
+
+	it('keeps a newer failure authoritative over an older deferred successful retry', async () => {
+		vi.mocked(apiClient.revertJobOperation).mockResolvedValueOnce(failure);
+		const view = showPage();
+		await retryMovie(view, 'TEST-001');
+		vi.mocked(apiClient.revertJobOperation).mockImplementationOnce(async () => {
+			vi.mocked(apiClient.getJobOperations).mockRejectedValueOnce(new Error('refresh interrupted'));
+			return success;
+		});
+		await retryMovie(view, 'TEST-001');
+		await view.findByText('refresh interrupted');
+		await client.invalidateQueries({ queryKey: ['job', 'undo-job'] });
+		await waitFor(() => expect(view.getByRole('button', { name: 'Revert File' })).toBeTruthy());
+		vi.mocked(apiClient.revertJobOperation).mockResolvedValueOnce({
+			...failure,
+			errors: [{ ...failure.errors![0], error: 'newer retry failed' }],
+		});
+		await retryMovie(view, 'TEST-001');
+		currentStatus = 'reverted';
+		await client.invalidateQueries({ queryKey: ['job', 'undo-job'] });
+		expect(view.getByRole('alert').textContent).toContain('newer retry failed');
+	});
+
+	it('ignores a result after leaving the detail view entirely', async () => {
+		let resolve!: (result: RevertResultResponse) => void;
+		vi.mocked(apiClient.revertJobOperation).mockImplementationOnce(
+			() =>
+				new Promise((done) => {
+					resolve = done;
+				}),
+		);
+		const view = showPage();
+		await confirmOperation(view);
+		await waitFor(() => expect(apiClient.revertJobOperation).toHaveBeenCalledTimes(1));
+		view.unmount();
+		resolve(failure);
+		await new Promise((done) => setTimeout(done, 0));
+		expect(get(toastStore)).toEqual([]);
+	});
+
+	it.each(['response', 'error'])(
+		'clears on job switch and ignores a late old-job %s',
+		async (kind) => {
+			vi.mocked(apiClient.getJob).mockImplementation(
+				async (id) => ({ id, status: 'organized', started_at: '2026-01-01T00:00:00Z' }) as never,
+			);
+			vi.mocked(apiClient.getJobOperations).mockImplementation(async (id) => ({
+				job_id: id,
+				job_status: 'organized',
+				total: 1,
+				operations: [{ ...operation }],
+			}));
+			vi.mocked(apiClient.revertJobOperation).mockResolvedValueOnce(failure);
+			const view = showPage();
+			await confirmOperation(view);
+			await waitFor(() => expect(view.getByRole('alert')).toBeTruthy());
+			let resolve!: (result: RevertResultResponse) => void;
+			let reject!: (error: Error) => void;
+			vi.mocked(apiClient.revertJobOperation).mockImplementationOnce(
+				() =>
+					new Promise((done, fail) => {
+						resolve = done;
+						reject = fail;
+					}),
+			);
+			await confirmOperation(view);
+			await waitFor(() => expect(apiClient.revertJobOperation).toHaveBeenCalledTimes(2));
+			pageStore.set({ params: { jobId: 'another-job' }, url: { pathname: '/jobs/another-job' } });
+			await waitFor(() => expect(apiClient.getJobOperations).toHaveBeenCalledWith('another-job'));
+			await waitFor(() => expect(view.queryByRole('alert')).toBeNull());
+			await waitFor(() => expect(view.queryByRole('dialog')).toBeNull());
+			await fireEvent.click(view.getByRole('button', { name: 'Revert File' }));
+			const newConfirm = within(view.getByRole('dialog')).getByRole('button', {
+				name: 'Revert file',
+			}) as HTMLButtonElement;
+			expect(newConfirm.disabled).toBe(false);
+			toastStore.clear();
+			if (kind === 'response') resolve(failure);
+			else reject(new Error('old request failed'));
+			await new Promise((resolve) => setTimeout(resolve, 0));
+			expect(get(toastStore)).toEqual([]);
+			expect(view.queryByRole('alert')).toBeNull();
+			expect(newConfirm.disabled).toBe(false);
+			expect(view.getByRole('dialog')).toBeTruthy();
+		},
+	);
 });

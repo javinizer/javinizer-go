@@ -942,6 +942,7 @@
       }
     }
   ],
+  "jobs_revert_unresolved": "Some operations still need attention.",
   "jobs_review": "Review",
   "jobs_review_failed": "Review Failed",
   "jobs_review_organize": "Review & Organize",

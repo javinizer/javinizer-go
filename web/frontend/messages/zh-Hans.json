@@ -944,6 +944,7 @@
       }
     }
   ],
+  "jobs_revert_unresolved": "部分操作仍需处理。",
   "jobs_review": "审查",
   "jobs_review_failed": "审查失败",
   "jobs_review_organize": "审查并整理",

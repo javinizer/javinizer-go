@@ -944,6 +944,7 @@
       }
     }
   ],
+  "jobs_revert_unresolved": "部分操作仍需處理。",
   "jobs_review": "檢閱",
   "jobs_review_failed": "檢閱失敗",
   "jobs_review_organize": "檢閱與整理",

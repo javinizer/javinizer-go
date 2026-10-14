@@ -944,6 +944,7 @@
       }
     }
   ],
+  "jobs_revert_unresolved": "まだ対応が必要な操作があります。",
   "jobs_review": "レビュー",
   "jobs_review_failed": "レビュー失敗",
   "jobs_review_organize": "レビュー & 整理",
