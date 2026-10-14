@@ -303,6 +303,7 @@ func NewOrganizer(fs afero.Fs, cfg *Config, engine template.EngineInterface, m m
 type OrganizeResult struct {
 	// PrimaryResident marks an admission-proven pre-existing primary. NewPath
 	// is for display/artifact placement only and grants no Undo ownership.
+	DirectoryMove   *models.DirectoryMove
 	PrimaryResident bool
 	OriginalPath    string
 	NewPath         string

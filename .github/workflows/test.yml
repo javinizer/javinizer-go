@@ -219,6 +219,11 @@ jobs:
         go test -short -count=1 -v ./internal/api/r18devdump
         -run '^(TestStartDownload_(SlowButSteadySucceeds|StallAborts|HeadersStallAborts)|TestStallWatchdog)'
 
+    - name: Verify in-place resident directory compensation on Windows
+      run: >-
+        go test -short -count=1 -v ./internal/workflow ./internal/history
+        -run '^(TestIndependent(NativeWindowsCaseAliasDirectoryUndo|InPlaceResidentDirectoryUndo|ResidentDirectory|ResidentInterruptedDirectoryUndo|DirectoryUndo|CopyIntentBoundary)|TestInPlaceResidentDirectoryArtifactUndo|TestResidentNativeIdentitySnapshot|TestResidentNestedArtifactDirectoryUndo|TestIndependentResident(CaseOnlyDirectoryNestedCleanup|CleanupKeepsEmptyRootAndOutsideParents)|TestResidentCleanup)'
+
     - name: Verify Windows artifact regressions with native-volume evidence
       run: >-
         go test -short -count=1 -v ./internal/workflow ./internal/organizer ./internal/fsutil

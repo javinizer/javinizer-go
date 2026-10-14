@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/javinizer/javinizer-go/internal/fsutil"
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
 	"github.com/javinizer/javinizer-go/internal/organizer"
 )
@@ -19,6 +21,7 @@ type artifactInPlaceDirectoryMove struct {
 	newDir     string
 	currentDir string
 	identity   artifactStageDirIdentity
+	journal    *models.DirectoryMove
 }
 
 func (s *artifactStage) relocateInPlaceDirectory(ctx context.Context, o *applyOrchImpl, opID OperationID, state *applyPipelineState) error {
@@ -40,13 +43,29 @@ func (s *artifactStage) relocateInPlaceDirectory(ctx context.Context, o *applyOr
 		return err
 	}
 	oldDir := filepath.Dir(s.sourcePath)
-	if !plan.RenameFolder || filepath.Clean(oldDir) == filepath.Clean(plan.TargetDir) {
+	if !plan.RenameFolder || filepath.Clean(oldDir) == filepath.Clean(plan.TargetDir) || (s.sourceDirIdentity.hasDevIno && artifactStageDirMatches(s.fs, plan.TargetDir, s.sourceDirIdentity)) {
 		return nil
 	}
 	if artifactDirectoryPath(oldDir, ".", plan.TargetDir) != plan.TargetDir {
 		return fmt.Errorf("cannot move in-place source directory into itself")
 	}
+	// Residency must be known before the first directory checkpoint. The
+	// target filename currently lives in the admitted directory, before relocation.
+	resident := false
+	if filepath.Clean(s.sourcePath) != filepath.Join(oldDir, filepath.Base(plan.TargetPath)) {
+		resident, err = s.stagedVideoResident("", filepath.Join(oldDir, filepath.Base(plan.TargetPath)), true)
+	}
+	if err != nil {
+		return err
+	}
+	if resident && !s.sourceDirIdentity.hasDevIno {
+		return fmt.Errorf("resident directory relocation requires strong identity")
+	}
+	s.inPlaceResident = resident
 	move := &artifactInPlaceDirectoryMove{oldDir: oldDir, newDir: plan.TargetDir, currentDir: oldDir, identity: s.sourceDirIdentity}
+	if resident {
+		move.journal = &models.DirectoryMove{Original: oldDir, Device: move.identity.dev, Inode: move.identity.ino}
+	}
 	s.directoryMove = move
 	location, err := s.moveInPlaceDirectory(ctx, o, opID, oldDir, move.newDir, move.identity)
 	move.currentDir = location
@@ -126,6 +145,17 @@ func (s *artifactStage) checkpointInPlaceDirectory(ctx context.Context, o *apply
 	if o.revertLog == nil || opID == "" {
 		return nil
 	}
+	if s.inPlaceResident {
+		move := s.directoryMove
+		if !slices.Contains(move.journal.Locations, dir) {
+			move.journal.Locations = append(move.journal.Locations, dir)
+		}
+		result := &organizer.OrganizeResult{PrimaryResident: true, DirectoryMove: move.journal, OriginalPath: s.directoryOriginalPath(s.sourcePath), FolderPath: dir, InPlaceRenamed: true, OldDirectoryPath: move.oldDir}
+		if err := o.revertLog.Complete(ctx, opID, &ApplyResult{OrganizeResult: result, Movie: s.original.Movie, OperationID: opID}); err != nil {
+			return fmt.Errorf("persist resident directory relocation: %w", err)
+		}
+		return nil
+	}
 	original := s.directoryOriginalPath(s.sourcePath)
 	current := filepath.Join(dir, filepath.Base(s.sourcePath))
 	if err := o.revertLog.RecordMoveIntent(ctx, opID, original, current); err != nil {
@@ -198,6 +228,8 @@ func (s *artifactStage) directoryOriginalPath(path string) string {
 
 func (s *artifactStage) annotateInPlaceDirectory(result *organizer.OrganizeResult) {
 	if move := s.directoryMove; move != nil && result != nil {
+		result.DirectoryMove = move.journal
+		result.PrimaryResident = result.PrimaryResident || s.inPlaceResident
 		result.OriginalPath = s.directoryOriginalPath(result.OriginalPath)
 		result.InPlaceRenamed = true
 		result.OldDirectoryPath, result.NewDirectoryPath = move.oldDir, move.newDir
