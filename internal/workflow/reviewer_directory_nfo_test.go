@@ -63,25 +63,25 @@ func independentResidentDirectoryNFO(t *testing.T, nativeCase bool) {
 						target := filepath.Join(dir, "ABC-123.mp4")
 						require.NoError(t, afero.WriteFile(fs, source, []byte("resident video"), 0644))
 						if nativeCase {
-							a, e := fs.Stat(source)
+							a, e := statResidentTestIdentity(t, fs, source)
 							require.NoError(t, e)
-							b, e := fs.Stat(target)
-							if e != nil || !os.SameFile(a, b) {
+							b, e := statResidentTestIdentity(t, fs, target)
+							if e != nil || !sameResidentTestIdentity(a, b) {
 								t.Skip("fixture volume is case-sensitive")
 							}
 						} else {
 							require.NoError(t, os.Link(source, target))
 						}
-						primaryBefore, err := fs.Stat(source)
+						primaryBefore, err := statResidentTestIdentity(t, fs, source)
 						require.NoError(t, err)
-						directoryBefore, err := fs.Stat(dir)
+						directoryBefore, err := statResidentTestIdentity(t, fs, dir)
 						require.NoError(t, err)
 						companions := map[string]string{sourceBase + "-cd2.mp4": "part two", sourceBase + ".en.srt": "subtitle"}
 						companionBefore := map[string]os.FileInfo{}
 						for name, body := range companions {
 							p := filepath.Join(dir, name)
 							require.NoError(t, afero.WriteFile(fs, p, []byte(body), 0644))
-							companionBefore[name], err = fs.Stat(p)
+							companionBefore[name], err = statResidentTestIdentity(t, fs, p)
 							require.NoError(t, err)
 						}
 						dsn := filepath.Join(root, "ledger.sqlite")
@@ -112,13 +112,13 @@ func independentResidentDirectoryNFO(t *testing.T, nativeCase bool) {
 						if physicalMove {
 							publishedDir = filepath.Join(library, "ABC-123")
 						}
-						di, err := fs.Stat(publishedDir)
+						di, err := statResidentTestIdentity(t, fs, publishedDir)
 						require.NoError(t, err)
-						require.True(t, os.SameFile(directoryBefore, di), "directory must physically relocate, not be recreated")
+						require.True(t, sameResidentTestIdentity(directoryBefore, di), "directory must physically relocate, not be recreated")
 						for _, name := range []string{sourceBase + ".mp4", "ABC-123.mp4"} {
-							now, e := fs.Stat(filepath.Join(publishedDir, name))
+							now, e := statResidentTestIdentity(t, fs, filepath.Join(publishedDir, name))
 							require.NoError(t, e)
-							require.True(t, os.SameFile(primaryBefore, now))
+							require.True(t, sameResidentTestIdentity(primaryBefore, now))
 						}
 						// The alias lane has a real renaming plan, so normal companions should run.
 						require.FileExists(t, filepath.Join(publishedDir, "ABC-123-cd2.mp4"))
@@ -141,7 +141,7 @@ func independentResidentDirectoryNFO(t *testing.T, nativeCase bool) {
 							if mutation == "replace-"+which {
 								require.NoError(t, fs.Remove(p))
 								require.NoError(t, afero.WriteFile(fs, p, []byte("foreign "+which), 0644))
-								foreign[name], err = fs.Stat(p)
+								foreign[name], err = statResidentTestIdentity(t, fs, p)
 								require.NoError(t, err)
 							}
 						}
@@ -169,27 +169,27 @@ func independentResidentDirectoryNFO(t *testing.T, nativeCase bool) {
 								b, e := afero.ReadFile(fs, filepath.Join(publishedDir, "foreign.txt"))
 								require.NoError(t, e)
 								require.Equal(t, "foreign directory", string(b))
-								saved, e := fs.Stat(savedDir)
+								saved, e := statResidentTestIdentity(t, fs, savedDir)
 								require.NoError(t, e)
-								require.True(t, os.SameFile(directoryBefore, saved))
+								require.True(t, sameResidentTestIdentity(directoryBefore, saved))
 							} else {
 								b, e := afero.ReadFile(fs, filepath.Join(dir, "foreign.txt"))
 								require.NoError(t, e)
 								require.Equal(t, "old directory occupant", string(b))
-								saved, e := fs.Stat(publishedDir)
+								saved, e := statResidentTestIdentity(t, fs, publishedDir)
 								require.NoError(t, e)
-								require.True(t, os.SameFile(directoryBefore, saved))
+								require.True(t, sameResidentTestIdentity(directoryBefore, saved))
 							}
 							return
 						}
 						require.Equal(t, 1, undo.Succeeded)
 						require.Zero(t, undo.Failed)
-						di, err = fs.Stat(dir)
+						di, err = statResidentTestIdentity(t, fs, dir)
 						require.NoError(t, err)
-						require.True(t, os.SameFile(directoryBefore, di))
+						require.True(t, sameResidentTestIdentity(directoryBefore, di))
 						for _, name := range []string{sourceBase + ".mp4", "ABC-123.mp4"} {
 							p := filepath.Join(dir, name)
-							now, e := fs.Stat(p)
+							now, e := statResidentTestIdentity(t, fs, p)
 							if deleted[name] {
 								require.True(t, os.IsNotExist(e), "Undo resurrected deleted alias %s", name)
 								continue
@@ -199,22 +199,22 @@ func independentResidentDirectoryNFO(t *testing.T, nativeCase bool) {
 							if f, ok := foreign[name]; ok {
 								want = f
 							}
-							require.True(t, os.SameFile(want, now), "Undo touched user-owned primary %s", name)
+							require.True(t, sameResidentTestIdentity(want, now), "Undo touched user-owned primary %s", name)
 						}
 						for name, body := range companions {
 							p := filepath.Join(dir, name)
 							b, e := afero.ReadFile(fs, p)
 							require.NoError(t, e)
 							require.Equal(t, body, string(b))
-							now, e := fs.Stat(p)
+							now, e := statResidentTestIdentity(t, fs, p)
 							require.NoError(t, e)
-							require.True(t, os.SameFile(companionBefore[name], now))
+							require.True(t, sameResidentTestIdentity(companionBefore[name], now))
 						}
 						b, e := afero.ReadFile(fs, filepath.Join(dir, "movie.nfo"))
 						require.NoError(t, e)
 						require.Equal(t, oldNFO, b)
 						if physicalMove {
-							_, e = fs.Stat(publishedDir)
+							_, e = statResidentTestIdentity(t, fs, publishedDir)
 							require.True(t, os.IsNotExist(e), "Undo recreated moved directory for NFO")
 						}
 						_, err = history.NewReverter(fs, repo).RevertBatch(context.Background(), "independent-inplace")

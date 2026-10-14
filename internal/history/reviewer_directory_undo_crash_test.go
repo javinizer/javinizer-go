@@ -40,9 +40,9 @@ func TestIndependentResidentInterruptedDirectoryUndo(t *testing.T) {
 			require.NoError(t, base.Mkdir(cur, 0755))
 			require.NoError(t, afero.WriteFile(base, filepath.Join(cur, "poster.jpg"), []byte("owned poster"), 0644))
 			require.NoError(t, afero.WriteFile(base, filepath.Join(cur, "ABC-123.mp4"), []byte("resident"), 0644))
-			primary, e := base.Stat(filepath.Join(cur, "ABC-123.mp4"))
+			primary, e := statResidentTestIdentity(t, base, filepath.Join(cur, "ABC-123.mp4"))
 			require.NoError(t, e)
-			info, e := base.Stat(cur)
+			info, e := statResidentTestIdentity(t, base, cur)
 			require.NoError(t, e)
 			dev, ino, ok := fsutil.BoundObjectIdentity(base, cur, info)
 			require.True(t, ok)
@@ -57,7 +57,7 @@ func TestIndependentResidentInterruptedDirectoryUndo(t *testing.T) {
 			db := open()
 			repo := database.NewBatchFileOperationRepository(db)
 			move := &models.DirectoryMove{Original: old, Locations: []string{cur}, Device: dev, Inode: ino}
-			op := &models.BatchFileOperation{BatchJobID: "undo-crash", MovieID: "ABC-123", OperationType: models.OperationTypeMove, RevertStatus: models.RevertStatusApplied, OriginalPath: filepath.Join(old, "abc-123.mp4"), OriginalDirPath: old, InPlaceRenamed: true, GeneratedFiles: models.MarshalLedgerJSON(models.GeneratedFilesJSON{PrimaryResident: true, DirectoryMove: move, Delete: []string{filepath.Join(cur, "poster.jpg")}})}
+			op := &models.BatchFileOperation{BatchJobID: "undo-crash", MovieID: "ABC-123", OperationType: models.OperationTypeMove, RevertStatus: models.RevertStatusApplied, OriginalPath: filepath.Join(old, "abc-123-source.mp4"), OriginalDirPath: old, InPlaceRenamed: true, GeneratedFiles: models.MarshalLedgerJSON(models.GeneratedFilesJSON{PrimaryResident: true, DirectoryMove: move, Delete: []string{filepath.Join(cur, "poster.jpg")}})}
 			require.NoError(t, repo.Create(context.Background(), op))
 			func() {
 				defer func() {
@@ -76,15 +76,15 @@ func TestIndependentResidentInterruptedDirectoryUndo(t *testing.T) {
 			require.NoError(t, e)
 			require.Equal(t, 1, result.Succeeded)
 			require.Zero(t, result.Failed)
-			now, e := base.Stat(old)
+			now, e := statResidentTestIdentity(t, base, old)
 			require.NoError(t, e)
-			require.True(t, os.SameFile(info, now))
-			now, e = base.Stat(filepath.Join(old, "ABC-123.mp4"))
+			require.True(t, sameResidentTestIdentity(info, now))
+			now, e = statResidentTestIdentity(t, base, filepath.Join(old, "ABC-123.mp4"))
 			require.NoError(t, e)
-			require.True(t, os.SameFile(primary, now))
-			_, e = base.Stat(filepath.Join(old, "abc-123.mp4"))
+			require.True(t, sameResidentTestIdentity(primary, now))
+			_, e = statResidentTestIdentity(t, base, filepath.Join(old, "abc-123-source.mp4"))
 			require.True(t, os.IsNotExist(e))
-			_, e = base.Stat(filepath.Join(old, "poster.jpg"))
+			_, e = statResidentTestIdentity(t, base, filepath.Join(old, "poster.jpg"))
 			require.True(t, os.IsNotExist(e))
 		})
 	}

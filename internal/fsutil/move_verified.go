@@ -390,13 +390,13 @@ func streamVerifiedSourceDigest(fs afero.Fs, srcFile afero.File, src, dst string
 // trip). A rename moves the NAME, not the handle legs — the dev/inode or
 // volume/index pair plus size and last write time all hold across one —
 // while an in-place truncate/rewrite of the pinned object moves the size or
-// write-time legs and refuses with the ErrTakeAsideForeign class; the shared
+// write-time or permission-mode legs and refuses with ErrTakeAsideForeign; the shared
 // tail discards the staged copy (nothing published, no digest attributed).
 // Handles exposing no comparable kernel key (virtual filesystems, wrapping
 // handles) keep the size+modtime legs only, the POSIX in-memory posture.
 func reproofStreamedSource(srcFile afero.File, admitted os.FileInfo, src, op, noun string) func() error {
 	admDevice, admInode, admStrong := streamedHandleIdentity(srcFile, admitted)
-	admSize, admModTime := admitted.Size(), admitted.ModTime()
+	admSize, admModTime, admMode := admitted.Size(), admitted.ModTime(), admitted.Mode().Perm()
 	return func() error {
 		info, err := srcFile.Stat()
 		if err != nil {
@@ -404,7 +404,7 @@ func reproofStreamedSource(srcFile afero.File, admitted os.FileInfo, src, op, no
 		}
 		curDevice, curInode, curStrong := streamedHandleIdentity(srcFile, info)
 		if curStrong != admStrong || (admStrong && (curDevice != admDevice || curInode != admInode)) ||
-			info.Size() != admSize || !info.ModTime().Equal(admModTime) {
+			info.Size() != admSize || !info.ModTime().Equal(admModTime) || info.Mode().Perm() != admMode {
 			return fmt.Errorf("%s: the streamed %s %s drifted from its admitted object mid-stream (%w)", op, noun, src, ErrTakeAsideForeign)
 		}
 		return nil

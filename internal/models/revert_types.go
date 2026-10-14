@@ -77,11 +77,15 @@ type DeleteEntry struct {
 	// (dev+ino/volume+index) with the same size and modification time.
 	// IdentityStrong asserts the dev/ino pair was captured from the platform
 	// identity route (in-memory filesystems pin only the metadata legs).
-	IdentityStrong  bool   `json:"identity_strong,omitempty"`
-	IdentityDev     uint64 `json:"identity_dev,omitempty"`
-	IdentityIno     uint64 `json:"identity_ino,omitempty"`
-	IdentitySize    int64  `json:"identity_size,omitempty"`
-	IdentityModUnix int64  `json:"identity_mod_unix,omitempty"`
+	// IdentityMode preserves the installed permission bits for a proof-backed
+	// move's cross-device inverse. A pointer distinguishes mode 0000 from old
+	// records that never captured mode; those records cannot authorize a move.
+	IdentityMode    *uint32 `json:"identity_mode,omitempty"`
+	IdentityStrong  bool    `json:"identity_strong,omitempty"`
+	IdentityDev     uint64  `json:"identity_dev,omitempty"`
+	IdentityIno     uint64  `json:"identity_ino,omitempty"`
+	IdentitySize    int64   `json:"identity_size,omitempty"`
+	IdentityModUnix int64   `json:"identity_mod_unix,omitempty"`
 	// IdentityPinned is the hard-link pin's explicit presence marker (codex
 	// P2, PRRT_kwDORn9KaM6nHyl5): an epoch-dated source — a restored or
 	// normalized media file — serializes IdentityModUnix as zero, so the

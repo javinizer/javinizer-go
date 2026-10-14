@@ -110,7 +110,7 @@ func TestResidentDirectoryRecoveryFaults(t *testing.T) {
 			root := t.TempDir()
 			old, current := filepath.Join(root, "old"), filepath.Join(root, "new")
 			require.NoError(t, base.Mkdir(current, 0755))
-			info, err := base.Stat(current)
+			info, err := statResidentTestIdentity(t, base, current)
 			require.NoError(t, err)
 			dev, ino, strong := fsutil.BoundObjectIdentity(base, current, info)
 			require.True(t, strong)
@@ -137,9 +137,9 @@ func TestResidentDirectoryRecoveryFaults(t *testing.T) {
 			err = r.restoreResidentDirectory(t.Context(), op, move)
 			if fault == "none" || fault == "already-restored" {
 				require.NoError(t, err)
-				after, e := base.Stat(old)
+				after, e := statResidentTestIdentity(t, base, old)
 				require.NoError(t, e)
-				require.True(t, os.SameFile(info, after))
+				require.True(t, sameResidentTestIdentity(info, after))
 			} else {
 				require.Error(t, err)
 			}

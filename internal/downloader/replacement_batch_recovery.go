@@ -26,7 +26,8 @@ func (b *ReplacementBatch) RecoverySnapshot() *models.PublicationRecovery {
 			proof = models.DeleteEntry{Path: leg.destination, RecoveryUnproven: true}
 		} else if info := leg.installedID.FileInfo(); info != nil {
 			if dev, ino, strong := leg.installedID.ObjectIdentity(); strong {
-				proof = models.DeleteEntry{Path: leg.destination, IdentityPinned: true, IdentityStrong: true, IdentityDev: dev, IdentityIno: ino, IdentitySize: info.Size(), IdentityModUnix: info.ModTime().Unix()}
+				mode := uint32(info.Mode().Perm())
+				proof = models.DeleteEntry{IdentityMode: &mode, Path: leg.destination, IdentityPinned: true, IdentityStrong: true, IdentityDev: dev, IdentityIno: ino, IdentitySize: info.Size(), IdentityModUnix: info.ModTime().Unix()}
 			}
 		}
 		proof.RecoveryPublication = true

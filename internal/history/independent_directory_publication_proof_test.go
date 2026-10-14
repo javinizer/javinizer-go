@@ -47,15 +47,16 @@ func TestIndependentDirectoryPublicationProofRecovery(t *testing.T) {
 				require.NoError(t, base.Mkdir(cur, 0755))
 				published := filepath.Join(cur, "published.srt")
 				require.NoError(t, afero.WriteFile(base, published, []byte("owned publication"), 0644))
-				pi, e := base.Stat(published)
+				pi, e := statResidentTestIdentity(t, base, published)
 				require.NoError(t, e)
 				dev, ino, ok := fsutil.BoundObjectIdentity(base, published, pi)
 				require.True(t, ok)
-				di, e := base.Stat(cur)
+				di, e := statResidentTestIdentity(t, base, cur)
 				require.NoError(t, e)
 				ddev, dino, ok := fsutil.BoundObjectIdentity(base, cur, di)
 				require.True(t, ok)
-				proof := models.DeleteEntry{Path: published, RecoveryPublication: true, IdentityStrong: true, IdentityPinned: true, IdentityDev: dev, IdentityIno: ino, IdentitySize: pi.Size(), IdentityModUnix: pi.ModTime().Unix()}
+				mode := uint32(pi.Mode().Perm())
+				proof := models.DeleteEntry{IdentityMode: &mode, Path: published, RecoveryPublication: true, IdentityStrong: true, IdentityPinned: true, IdentityDev: dev, IdentityIno: ino, IdentitySize: pi.Size(), IdentityModUnix: pi.ModTime().Unix()}
 				ledger := models.GeneratedFilesJSON{PrimaryResident: true, DirectoryMove: &models.DirectoryMove{Original: old, Locations: []string{cur}, Device: ddev, Inode: dino}}
 				if kind == "delete" {
 					ledger.PlannedDeletes = []models.DeleteEntry{proof}
@@ -68,7 +69,7 @@ func TestIndependentDirectoryPublicationProofRecovery(t *testing.T) {
 					require.NoError(t, base.Rename(published, published+".saved"))
 					if mutation == "foreign" {
 						require.NoError(t, afero.WriteFile(base, published, []byte("foreign publication"), 0644))
-						foreign, e = base.Stat(published)
+						foreign, e = statResidentTestIdentity(t, base, published)
 						require.NoError(t, e)
 					} else {
 						require.NoError(t, afero.WriteFile(base, external, []byte("external"), 0644))
@@ -99,17 +100,17 @@ func TestIndependentDirectoryPublicationProofRecovery(t *testing.T) {
 				result, e := NewReverter(block, repo).RevertBatch(context.Background(), op.BatchJobID)
 				require.NoError(t, e)
 				t.Logf("initial Undo %+v", result)
-				restored, e := base.Stat(old)
+				restored, e := statResidentTestIdentity(t, base, old)
 				require.NoError(t, e)
-				require.True(t, os.SameFile(di, restored))
+				require.True(t, sameResidentTestIdentity(di, restored))
 				nowPath := filepath.Join(old, "published.srt")
 				if mutation == "owned-blocked" {
 					require.True(t, block.blocked, "injected cleanup refusal must execute after directory return")
 					require.Zero(t, result.Succeeded)
 					require.Equal(t, 1, result.Failed)
-					now, e := base.Stat(nowPath)
+					now, e := statResidentTestIdentity(t, base, nowPath)
 					require.NoError(t, e)
-					require.True(t, os.SameFile(pi, now))
+					require.True(t, sameResidentTestIdentity(pi, now))
 					row, e := repo.FindByID(context.Background(), op.ID)
 					require.NoError(t, e)
 					saved, e := models.ParseGeneratedFiles(row.GeneratedFiles)
@@ -131,21 +132,21 @@ func TestIndependentDirectoryPublicationProofRecovery(t *testing.T) {
 					t.Logf("retry %+v", retry)
 					require.Equal(t, 1, retry.Succeeded)
 					require.Zero(t, retry.Failed)
-					_, e = base.Stat(nowPath)
+					_, e = statResidentTestIdentity(t, base, nowPath)
 					require.True(t, os.IsNotExist(e))
 					if kind == "move" {
-						now, e := base.Stat(filepath.Join(old, "original.srt"))
+						now, e := statResidentTestIdentity(t, base, filepath.Join(old, "original.srt"))
 						require.NoError(t, e)
-						require.True(t, os.SameFile(pi, now))
+						require.True(t, sameResidentTestIdentity(pi, now))
 					}
 				} else {
 					defer db.Close()
 					require.Equal(t, 1, result.Succeeded)
 					require.Zero(t, result.Failed)
 					if mutation == "foreign" {
-						now, e := base.Stat(nowPath)
+						now, e := statResidentTestIdentity(t, base, nowPath)
 						require.NoError(t, e)
-						require.True(t, os.SameFile(foreign, now))
+						require.True(t, sameResidentTestIdentity(foreign, now))
 						body, e := afero.ReadFile(base, nowPath)
 						require.NoError(t, e)
 						require.Equal(t, "foreign publication", string(body))
@@ -157,7 +158,7 @@ func TestIndependentDirectoryPublicationProofRecovery(t *testing.T) {
 						require.NoError(t, e)
 						require.Equal(t, "external", string(body))
 					}
-					_, e = base.Stat(filepath.Join(old, "original.srt"))
+					_, e = statResidentTestIdentity(t, base, filepath.Join(old, "original.srt"))
 					require.True(t, os.IsNotExist(e), fmt.Sprint("foreign successor must not be moved", e))
 				}
 			})
