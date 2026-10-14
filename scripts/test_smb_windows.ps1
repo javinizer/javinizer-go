@@ -15,7 +15,13 @@ function Assert-That([bool]$Condition, [string]$Message) {
 }
 
 Assert-That ($IsWindows -and $env:GITHUB_ACTIONS -eq 'true' -and $env:RUNNER_ENVIRONMENT -eq 'github-hosted') 'Only a fresh GitHub-hosted Windows runner is allowed.'
-Assert-That ($env:ImageOS -eq 'win25') 'This harness is reviewed only for the windows-2025 image.'
+# Both exact ImageOS values are official Windows Server 2025 image variants.
+# Validate the actual OS as well; never accept arbitrary win25-* labels.
+Assert-That ($env:ImageOS -ceq 'win25' -or $env:ImageOS -ceq 'win25-vs2026') 'This harness requires an approved Windows Server 2025 image variant.'
+$os = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop
+$osVersion = [version]$os.Version
+Assert-That ($os.ProductType -eq 3 -and $os.Caption -match '^Microsoft Windows Server 2025(?:\s|$)' -and $os.BuildNumber -eq '26100' -and $osVersion.Major -eq 10 -and $osVersion.Minor -eq 0 -and $osVersion.Build -eq 26100) 'The actual OS must be Windows Server 2025, version 10.0.26100.'
+Write-Host "Verified runner image: ImageOS=$($env:ImageOS), ImageVersion=$($env:ImageVersion), OS=$($os.Caption), Version=$($os.Version), Build=$($os.BuildNumber)"
 Assert-That ($env:GITHUB_RUN_ID -match '^\d+$' -and $env:GITHUB_RUN_ATTEMPT -match '^\d+$') 'Missing GitHub run identity.'
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = [Security.Principal.WindowsPrincipal]::new($identity)

@@ -15,7 +15,10 @@ actions. It never merges a PR. `workflow_dispatch` is also available once GitHub
 has registered the workflow on the default branch.
 
 Do not run the setup script on a workstation or self-hosted runner. It requires
-an elevated GitHub-hosted Windows 2025 runner and rejects other environments.
+an elevated GitHub-hosted Windows Server 2025 runner and rejects other environments.
+Only the official `ImageOS` values `win25` and `win25-vs2026` are accepted. A
+read-only OS query additionally requires the Server 2025 product, server product
+type, and version/build family 10.0.26100; future patch revisions remain allowed.
 Compile the native test binary before setup; compilation does not create a
 share. The workflow performs a native PowerShell parse before compilation.
 
@@ -114,3 +117,5 @@ cleanup outcome when reporting results.
 - [Protect SMB traffic from external networks](https://learn.microsoft.com/en-us/windows-server/storage/file-server/smb-secure-traffic)
 - [SMB-over-QUIC certificate mappings](https://learn.microsoft.com/en-us/powershell/module/smbshare/get-smbservercertificatemapping?view=windowsserver2025-ps)
 - [SMB server interfaces and RDMA capability](https://learn.microsoft.com/en-us/powershell/module/smbshare/get-smbservernetworkinterface?view=windowsserver2025-ps)
+- [Official ImageOS values for Windows 2025 variants](https://github.com/actions/runner-images/blob/win25-vs2026/20260925.250/helpers/GenerateResourcesAndImage.ps1)
+- [Windows Server 2025 / VS2026 image version and OS build](https://github.com/actions/runner-images/blob/win25-vs2026/20260925.250/images/windows/Windows2025-VS2026-Readme.md)
