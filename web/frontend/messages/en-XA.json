@@ -1573,6 +1573,8 @@
   "settings_r18dev_phase_starting": "[ Štårtíñg... ]",
   "settings_r18dev_present": "[ Dümp ís prësëñt åñd rëådy ]",
   "settings_r18dev_refresh": "[ Rëfrësh ]",
+  "settings_r18dev_upload_dump": "[ Üplöåd Dümp ]",
+  "settings_r18dev_upload_failed": "[ Üplöåd fåílëd ]",
   "settings_r18dev_rows": "[ Röws ]",
   "settings_r18dev_search_button": "[ Šëårçh ]",
   "settings_r18dev_search_content_id": "[ çöñtëñt_íd: ]",

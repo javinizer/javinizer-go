@@ -160,6 +160,42 @@ javinizer scrape IPX-535 --scrapers dmm
 - Add a per-scraper delay in milliseconds (e.g. `scrapers.r18dev.rate_limit`; r18dev defaults to 0 (no delay))
 - Spread batch operations out over time
 
+## r18.dev Dump Upload Issues
+
+### Upload rejected by proxy before reaching Javinizer
+
+**Problem**: Uploading a dump via the WebUI fails instantly, times out before
+Javinizer logs anything, or the reverse proxy returns 413/502.
+
+If Javinizer sits behind nginx, Traefik, or Cloudflare, upload size and idle
+limits apply before the app ever sees the request:
+
+- nginx: raise `client_max_body_size` (the raw dump is ~250 MB; the built
+  sidecar can be larger) and `proxy_read_timeout` (multi-minute imports are
+  normal; the app streams progress over WebSocket while it works).
+- Cloudflare free/proxy: 100 MB request body limit — upload over the LAN
+  directly or use the CLI path (`javinizer dump download` on a well-connected
+  host, then copy `data/r18dev/r18dev_dump.db` into place and use WebUI
+  Update to activate it).
+
+### Upload response 408 (Request Timeout)
+
+The upload receive phase aborts after 5 minutes without incoming bytes
+(dead-client detection). The connection is disposed deliberately (HTTP/1:
+`Connection: close`; HTTP/2: GOAWAY) — retry on a fresh connection. A 408
+wording of "server receive timeout" (rather than "receive stalled") indicates
+a pre-existing server timer raced the per-request deadline lift; retrying is
+equally correct. On HTTP/2 a pre-lift server write-timer race can surface as
+a transport-level stream reset instead of a 408 — again, retry on a fresh
+connection.
+
+### Upload hangs on the desktop app
+
+The desktop server uses 30-second read/write deadlines; the upload endpoint
+lifts them per-request, so large uploads work. If you still see immediate
+failures behind extra middleware that wraps the response writer, report the
+"response writer does not support deadline control" message.
+
 ## File Matching Issues
 
 ### "No files found"

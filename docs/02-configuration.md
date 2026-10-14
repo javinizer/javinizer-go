@@ -421,6 +421,8 @@ flag never blocks scraping.
 DB). Point this at a shared location to reuse one dump across multiple
 Javinizer installs.
 
+Besides `javinizer dump download`, the WebUI settings page can upload a dump manually (`r18.dev Dump` section): either the raw `r18dotdev_dump_YYYY-MM-DD.sql.gz` (downloaded anywhere — browser, another machine) or an already-built `r18dev_dump.db` sidecar copied from another install. Both are validated and hot-swapped; provenance for raw uploads comes from the filename, and embedded provenance of copied sidecars is preserved.
+
 The dump is managed with the `javinizer dump` command group — see
 [`dump` in the CLI Reference](./03-cli-reference.md#dump) for `download`,
 `update`, `status`, and `search`. The dump URL can be overridden with the

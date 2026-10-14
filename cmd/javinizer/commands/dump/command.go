@@ -107,13 +107,14 @@ func runDownload(ctx context.Context, w io.Writer, configFile string, updateOnly
 	}
 	path := resolveDumpPath(cfg)
 
-	var currentSourceURL string
+	var currentSourceURL, currentSourceDate string
 	if updateOnly {
 		if store, err := r18devdump.Open(path); err == nil {
 			stats, err := store.Stats(ctx)
 			_ = store.Close()
 			if err == nil {
 				currentSourceURL = stats.SourceURL
+				currentSourceDate = stats.SourceDate
 			}
 		}
 	}
@@ -132,7 +133,7 @@ func runDownload(ctx context.Context, w io.Writer, configFile string, updateOnly
 		}
 	}
 
-	res, err := r18devdump.Download(ctx, client, currentSourceURL, progress, func(r io.Reader, d r18devdump.DownloadResult) error {
+	res, err := r18devdump.Download(ctx, client, currentSourceURL, currentSourceDate, progress, func(r io.Reader, d r18devdump.DownloadResult) error {
 		fmt.Fprintf(w, "Importing dump (source: %s, date: %s)...\n", d.FinalURL, d.SourceDate)
 		bar = newProgressBar(w, 0)
 		impRes, err := r18devdump.Import(ctx, r, path, r18devdump.ImportOptions{

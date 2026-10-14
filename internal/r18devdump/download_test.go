@@ -63,7 +63,7 @@ func TestDownload_Import(t *testing.T) {
 
 	var received strings.Builder
 	gotURL := ""
-	res, err := Download(context.Background(), srv.Client(), "", nil, func(r io.Reader, d DownloadResult) error {
+	res, err := Download(context.Background(), srv.Client(), "", "", nil, func(r io.Reader, d DownloadResult) error {
 		gotURL = d.FinalURL
 		_, err := io.Copy(&received, r)
 		return err
@@ -93,7 +93,7 @@ func TestDownload_UnchangedSkipsImport(t *testing.T) {
 	defer setLatestDumpURL(orig)
 
 	// First download to discover the final (dated) URL.
-	first, err := Download(context.Background(), srv.Client(), "", nil, func(io.Reader, DownloadResult) error { return nil })
+	first, err := Download(context.Background(), srv.Client(), "", "", nil, func(io.Reader, DownloadResult) error { return nil })
 	if err != nil {
 		t.Fatalf("first Download: %v", err)
 	}
@@ -101,7 +101,7 @@ func TestDownload_UnchangedSkipsImport(t *testing.T) {
 
 	// Second download with currentSourceURL == finalURL must skip.
 	importCalled := false
-	res, err := Download(context.Background(), srv.Client(), finalURL, nil, func(io.Reader, DownloadResult) error {
+	res, err := Download(context.Background(), srv.Client(), finalURL, "", nil, func(io.Reader, DownloadResult) error {
 		importCalled = true
 		return nil
 	})
@@ -125,7 +125,7 @@ func TestDownload_ProgressReported(t *testing.T) {
 
 	var lastProgress int64
 	var lastTotal int64
-	res, err := Download(context.Background(), srv.Client(), "", func(n, total int64) {
+	res, err := Download(context.Background(), srv.Client(), "", "", func(n, total int64) {
 		lastProgress = n
 		lastTotal = total
 	}, func(r io.Reader, d DownloadResult) error {
@@ -169,7 +169,7 @@ func TestDownload_ProgressReported_ChunkedUnknownTotal(t *testing.T) {
 	defer setLatestDumpURL(orig)
 
 	var lastTotal int64 = -1
-	res, err := Download(context.Background(), srv.Client(), "", func(n, total int64) {
+	res, err := Download(context.Background(), srv.Client(), "", "", func(n, total int64) {
 		lastTotal = total
 	}, func(r io.Reader, d DownloadResult) error {
 		_, _ = io.Copy(io.Discard, r)
@@ -195,7 +195,7 @@ func TestDownload_NonOKStatus(t *testing.T) {
 	setLatestDumpURL(srv.URL)
 	defer setLatestDumpURL(orig)
 
-	_, err := Download(context.Background(), srv.Client(), "", nil, func(io.Reader, DownloadResult) error { return nil })
+	_, err := Download(context.Background(), srv.Client(), "", "", nil, func(io.Reader, DownloadResult) error { return nil })
 	if err == nil {
 		t.Fatal("expected error for non-200 status")
 	}
@@ -210,7 +210,7 @@ func TestDownload_InvalidGzip(t *testing.T) {
 	setLatestDumpURL(srv.URL)
 	defer setLatestDumpURL(orig)
 
-	_, err := Download(context.Background(), srv.Client(), "", nil, func(io.Reader, DownloadResult) error { return nil })
+	_, err := Download(context.Background(), srv.Client(), "", "", nil, func(io.Reader, DownloadResult) error { return nil })
 	if err == nil {
 		t.Fatal("expected gunzip error for non-gzip body")
 	}
@@ -274,7 +274,7 @@ func TestDownload_ResumesAfterTruncation(t *testing.T) {
 
 	var lastProgress, lastTotal int64
 	var received bytes.Buffer
-	_, err := Download(context.Background(), srv.Client(), "", func(n, total int64) {
+	_, err := Download(context.Background(), srv.Client(), "", "", func(n, total int64) {
 		lastProgress, lastTotal = n, total
 	}, func(r io.Reader, d DownloadResult) error {
 		_, err := io.Copy(&received, r)
@@ -323,7 +323,7 @@ func TestDownload_ResumeFailsWhenRangeIgnored(t *testing.T) {
 	defer setLatestDumpURL(orig)
 	shrinkResumeBackoff(t)
 
-	_, err := Download(context.Background(), srv.Client(), "", nil, func(r io.Reader, d DownloadResult) error {
+	_, err := Download(context.Background(), srv.Client(), "", "", nil, func(r io.Reader, d DownloadResult) error {
 		_, err := io.Copy(io.Discard, r)
 		return err
 	})
@@ -360,7 +360,7 @@ func TestDownload_ResumeFailsWhenObjectChanges(t *testing.T) {
 	defer setLatestDumpURL(orig)
 	shrinkResumeBackoff(t)
 
-	_, err := Download(context.Background(), srv.Client(), "", nil, func(r io.Reader, d DownloadResult) error {
+	_, err := Download(context.Background(), srv.Client(), "", "", nil, func(r io.Reader, d DownloadResult) error {
 		_, err := io.Copy(io.Discard, r)
 		return err
 	})
@@ -623,7 +623,7 @@ func TestDownload_ResumePrefersLastModifiedOverWeakETag(t *testing.T) {
 	defer setLatestDumpURL(orig)
 	shrinkResumeBackoff(t)
 
-	_, err := Download(context.Background(), srv.Client(), "", nil, func(r io.Reader, d DownloadResult) error {
+	_, err := Download(context.Background(), srv.Client(), "", "", nil, func(r io.Reader, d DownloadResult) error {
 		_, err := io.Copy(io.Discard, r)
 		return err
 	})
@@ -675,7 +675,7 @@ func TestDownload_UnknownLengthTruncationResumedByProbe(t *testing.T) {
 	shrinkResumeBackoff(t)
 
 	var received bytes.Buffer
-	_, err := Download(context.Background(), srv.Client(), "", nil, func(r io.Reader, d DownloadResult) error {
+	_, err := Download(context.Background(), srv.Client(), "", "", nil, func(r io.Reader, d DownloadResult) error {
 		_, err := io.Copy(&received, r)
 		return err
 	})
@@ -713,7 +713,7 @@ func TestDownload_UnknownLengthGenuineEOFConfirmedBy416(t *testing.T) {
 	shrinkResumeBackoff(t)
 
 	var received bytes.Buffer
-	_, err := Download(context.Background(), srv.Client(), "", nil, func(r io.Reader, d DownloadResult) error {
+	_, err := Download(context.Background(), srv.Client(), "", "", nil, func(r io.Reader, d DownloadResult) error {
 		_, err := io.Copy(&received, r)
 		return err
 	})
@@ -765,7 +765,7 @@ func TestDownload_UnknownLengthTruncationVia416ThenResume(t *testing.T) {
 	shrinkResumeBackoff(t)
 
 	var received bytes.Buffer
-	_, err := Download(context.Background(), srv.Client(), "", nil, func(r io.Reader, d DownloadResult) error {
+	_, err := Download(context.Background(), srv.Client(), "", "", nil, func(r io.Reader, d DownloadResult) error {
 		_, err := io.Copy(&received, r)
 		return err
 	})
@@ -803,7 +803,7 @@ func TestDownload_UnknownLengthDeferToGzipWhenProbeInconclusive(t *testing.T) {
 	defer setLatestDumpURL(orig)
 	shrinkResumeBackoff(t)
 
-	_, err := Download(context.Background(), srv.Client(), "", nil, func(r io.Reader, d DownloadResult) error {
+	_, err := Download(context.Background(), srv.Client(), "", "", nil, func(r io.Reader, d DownloadResult) error {
 		_, err := io.Copy(io.Discard, r)
 		return err
 	})
@@ -941,7 +941,7 @@ func TestDownload_ResumeRefusedWithoutValidator(t *testing.T) {
 	defer setLatestDumpURL(orig)
 	shrinkResumeBackoff(t)
 
-	_, err := Download(context.Background(), srv.Client(), "", nil, func(r io.Reader, d DownloadResult) error {
+	_, err := Download(context.Background(), srv.Client(), "", "", nil, func(r io.Reader, d DownloadResult) error {
 		_, err := io.Copy(io.Discard, r)
 		return err
 	})
@@ -1064,7 +1064,7 @@ func TestDownload_FetchError(t *testing.T) {
 	setLatestDumpURL("http://127.0.0.1:1/unreachable") // port 1: connection refused
 	defer setLatestDumpURL(orig)
 
-	_, err := Download(context.Background(), &http.Client{}, "", nil, func(io.Reader, DownloadResult) error { return nil })
+	_, err := Download(context.Background(), &http.Client{}, "", "", nil, func(io.Reader, DownloadResult) error { return nil })
 	if err == nil {
 		t.Fatal("expected a fetch error for an unreachable endpoint")
 	}
@@ -1079,7 +1079,7 @@ func TestDownload_BuildRequestError(t *testing.T) {
 	setLatestDumpURL("http://example.com/\x7f")
 	defer setLatestDumpURL(orig)
 
-	_, err := Download(context.Background(), &http.Client{}, "", nil, func(io.Reader, DownloadResult) error { return nil })
+	_, err := Download(context.Background(), &http.Client{}, "", "", nil, func(io.Reader, DownloadResult) error { return nil })
 	if err == nil || !strings.Contains(err.Error(), "build request") {
 		t.Fatalf("expected build-request error, got: %v", err)
 	}
@@ -1097,10 +1097,65 @@ func TestDownload_ImportFnError(t *testing.T) {
 	defer setLatestDumpURL(orig)
 
 	importErr := errors.New("import failed")
-	_, err := Download(context.Background(), srv.Client(), "", nil, func(io.Reader, DownloadResult) error {
+	_, err := Download(context.Background(), srv.Client(), "", "", nil, func(io.Reader, DownloadResult) error {
 		return importErr
 	})
 	if err != importErr {
 		t.Fatalf("expected importFn error, got: %v", err)
+	}
+}
+
+func TestDownload_DateAwareSkipForTokenProvenance(t *testing.T) {
+	dumpBody := "COPY public.derived_video (content_id, dvd_id) FROM stdin;\n118ipx00535\tIPX-535\n\\.\n"
+	gz := gzipped(t, dumpBody)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/latest" {
+			http.Redirect(w, r, "/dumps/r18dotdev_dump_2026-09-20.sql.gz", http.StatusFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/gzip")
+		_, _ = w.Write(gz)
+	}))
+	defer srv.Close()
+
+	imported := false
+	imp := func(r io.Reader, d DownloadResult) error { imported = true; return nil }
+
+	orig := LatestDumpURL
+	defer func() { LatestDumpURL = orig }()
+	LatestDumpURL = srv.URL + "/latest"
+
+	res, err := Download(context.Background(), srv.Client(), "r18dotdev_dump_2026-09-20.sql.gz", "2026-09-20", nil, imp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Unchanged {
+		t.Fatal("same-date token provenance should report the dump unchanged")
+	}
+	if imported {
+		t.Fatal("unchanged result must not invoke the importer")
+	}
+	if res.SourceDate != "2026-09-20" {
+		t.Fatalf("source date = %q, want 2026-09-20", res.SourceDate)
+	}
+
+	imported = false
+	res, err = Download(context.Background(), srv.Client(), "r18dotdev_dump_2026-09-20.sql.gz", "2026-09-19", nil, imp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Unchanged {
+		t.Fatal("newer upstream date must not be skipped")
+	}
+	if !imported {
+		t.Fatal("a newer dated dump must import")
+	}
+
+	res, err = Download(context.Background(), srv.Client(), srv.URL+"/dumps/r18dotdev_dump_2026-09-20.sql.gz", "2026-09-20", nil, imp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Unchanged {
+		t.Fatal("identical redirect target URL should report unchanged")
 	}
 }

@@ -2236,6 +2236,8 @@
   "settings_r18dev_phase_starting": "啟動中…",
   "settings_r18dev_present": "傾印已存在且就緒",
   "settings_r18dev_refresh": "重新整理",
+  "settings_r18dev_upload_dump": "上傳傾印",
+  "settings_r18dev_upload_failed": "上傳失敗",
   "settings_r18dev_rows": "列數",
   "settings_r18dev_search_button": "搜尋",
   "settings_r18dev_search_content_id": "content_id：",

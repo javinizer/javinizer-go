@@ -157,7 +157,9 @@ func TestParseVideos_CopyHeaderMissingColumns(t *testing.T) {
 	tests := []struct{ name, dump string }{
 		{"missing content_id", "COPY public.derived_video (dvd_id) FROM stdin;\na\tb\n\\.\n"},
 		{"missing dvd_id", "COPY public.derived_video (content_id) FROM stdin;\na\tb\n\\.\n"},
-		{"no parens no columns", "COPY public.derived_video FROM stdin;\n\n"},
+		// A COPY block accepted without a column list must still terminate
+		// with pg_dump's \. marker (the parser tolerates the header shape).
+		{"no parens no columns", "COPY public.derived_video FROM stdin;\n\n\\.\n"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

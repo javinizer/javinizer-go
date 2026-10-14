@@ -5,7 +5,7 @@
 	import { apiClient as api } from '$lib/api/client';
 	import { websocketStore } from '$lib/stores/websocket';
 	import type { DumpSearchResult, DumpStatus } from '$lib/api/types';
-	import { Download, RefreshCw, Search, CheckCircle, AlertCircle, Database, Trash2 } from 'lucide-svelte';
+	import { Download, RefreshCw, Search, CheckCircle, AlertCircle, Database, Trash2, Upload } from 'lucide-svelte';
 
 	interface Props {
 		onConfigChange?: (enabled: boolean) => void;
@@ -23,7 +23,7 @@
 	let dumpEnabled = $state(true);
 
 	// Subscribe to WebSocket messages for dump download progress.
-	let wsState = $state<{ messages: { job_id: string; progress: number; message: string; status: string }[] }>({
+	let wsState = $state<{ messages: { job_id: string; progress: number; message: string; status: string; error?: string }[] }>({
 		messages: [],
 	});
 	$effect(() => {
@@ -74,6 +74,31 @@
 	}
 
 	let polling = $state(false);
+	let fileInput = $state<HTMLInputElement | null>(null);
+
+	// upload shares the download progress plumbing: after the 202 staging
+	// response the same WS phases (downloading → importing → done/error) and
+	// status polling apply. File selection never touches settings state or
+	// the config-change callback.
+	async function upload(file: File) {
+		downloadError = '';
+		downloading = true;
+		websocketStore.clearMessages('r18dev-dump-download');
+		try {
+			await api.r18dev.uploadDump(file);
+			await pollDownloadProgress();
+		} catch (e) {
+			downloadError = e instanceof Error ? e.message : m.settings_r18dev_upload_failed();
+			downloading = false;
+		}
+	}
+
+	function chooseFile(event: Event) {
+		const input = event.currentTarget as HTMLInputElement;
+		const file = input.files?.[0];
+		input.value = ''; // allow re-picking the same file
+		if (file) upload(file);
+	}
 
 	async function pollDownloadProgress() {
 		polling = true;
@@ -82,13 +107,13 @@
 		const wasPresent = status?.present ?? false;
 		const prevImportedAt = status?.imported_at ?? '';
 		const prevSourceDate = status?.source_date ?? '';
-		// The backend download context may run for up to 30 minutes on slow
-		// connections or slow imports. Poll for the full server-side window
-		// instead of stopping after a fixed iteration count, and rely on the
-		// `running` flag (and WS terminal frames) to determine completion.
+		// Codex #273: uploads/downloads have no server-side wall-clock cap, so
+		// a fixed UI deadline would sit silent mid-import on slow storage.
+		// Poll until the server stops reporting the job running (every exit
+		// path below is completion-based; component unmount stops via polling
+		// being cleared).
 		const pollIntervalMs = 3000;
-		const deadline = Date.now() + 30 * 60 * 1000;
-		while (Date.now() < deadline) {
+		for (;;) {
 			if (!polling) return; // stopped by component unmount
 			await new Promise((r) => setTimeout(r, pollIntervalMs));
 			if (!polling) return;
@@ -100,7 +125,14 @@
 					downloading = false;
 					polling = false;
 					if (wsStatus === 'error') {
-						downloadError = m.settings_r18dev_download_failed_msg();
+						// Render the server's real error (upload failures, download
+						// stalls); fall back to the generic string only when absent.
+						const kind = status?.last_error_kind;
+						const text =
+							downloadProgress.error ||
+							status?.last_error ||
+							m.settings_r18dev_download_failed_msg();
+						downloadError = kind ? `[${kind}] ${text}` : text;
 					}
 					return;
 				}
@@ -111,6 +143,16 @@
 				status = s;
 				// Fallback: if the dump was absent before and is now present,
 				// the download completed (WS frame may have been missed).
+				// Failure wins over presence: a renamed-but-not-reloaded
+				// upload reports present:true with a nonempty last_error.
+				if (!s.running && s.last_error) {
+					downloadError = s.last_error_kind
+						? `[${s.last_error_kind}] ${s.last_error}`
+						: s.last_error;
+					downloading = false;
+					polling = false;
+					return;
+				}
 				if (!wasPresent && s.present) {
 					downloading = false;
 					polling = false;
@@ -124,9 +166,11 @@
 				// always sets last_error on completion). This covers the
 				// unchanged case where neither imported_at nor source_date
 				// changes and the WebSocket terminal frame was missed.
-				if (!s.running) {
+			if (!s.running) {
 					if (s.last_error) {
-						downloadError = s.last_error;
+						downloadError = s.last_error_kind
+							? `[${s.last_error_kind}] ${s.last_error}`
+							: s.last_error;
 					}
 					downloading = false;
 					polling = false;
@@ -248,6 +292,16 @@
 	});
 </script>
 
+<input
+	type="file"
+	accept=".db,.gz"
+	class="hidden"
+	bind:this={fileInput}
+	onchange={chooseFile}
+	aria-hidden="true"
+	tabindex="-1"
+/>
+
 <SettingsSection title={m.settings_r18dev_title()} description={m.settings_r18dev_desc()} defaultExpanded={false}>
 	<!-- Enable/Disable toggle -->
 	<div class="flex items-center justify-between mb-4">
@@ -348,6 +402,15 @@
 						</button>
 						<button
 							type="button"
+							class="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-md border border-input bg-background hover:bg-accent disabled:opacity-50 disabled:cursor-not-allowed"
+							onclick={() => fileInput?.click()}
+							disabled={downloading || clearing}
+						>
+							<Upload class="h-4 w-4"></Upload>
+							{m.settings_r18dev_upload_dump()}
+						</button>
+						<button
+							type="button"
 							class="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-md border border-input bg-background hover:bg-accent"
 							onclick={fetchStatus}
 						>
@@ -396,16 +459,27 @@
 							<div class="text-xs text-muted-foreground text-right">{Math.round(downloadProgress.progress)}%</div>
 						{/if}
 					</div>
-				{:else}
-					<button
-						type="button"
-						class="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
-						onclick={() => download(false)}
-						disabled={downloading}
-					>
-						<Download class="h-4 w-4"></Download>
-						{m.settings_r18dev_download_dump()}
-					</button>
+			{:else}
+					<div class="flex gap-2">
+						<button
+							type="button"
+							class="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+							onclick={() => download(false)}
+							disabled={downloading}
+						>
+							<Download class="h-4 w-4"></Download>
+							{m.settings_r18dev_download_dump()}
+						</button>
+						<button
+							type="button"
+							class="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-md border border-input bg-background hover:bg-accent disabled:opacity-50 disabled:cursor-not-allowed"
+							onclick={() => fileInput?.click()}
+							disabled={downloading}
+						>
+							<Upload class="h-4 w-4"></Upload>
+							{m.settings_r18dev_upload_dump()}
+						</button>
+					</div>
 				{/if}
 			</div>
 		{/if}

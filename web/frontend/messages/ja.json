@@ -2236,6 +2236,8 @@
   "settings_r18dev_phase_starting": "開始中...",
   "settings_r18dev_present": "ダンプは存在し利用可能です",
   "settings_r18dev_refresh": "更新",
+  "settings_r18dev_upload_dump": "ダンプをアップロード",
+  "settings_r18dev_upload_failed": "アップロードに失敗しました",
   "settings_r18dev_rows": "行数",
   "settings_r18dev_search_button": "検索",
   "settings_r18dev_search_content_id": "content_id:",
