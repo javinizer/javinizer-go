@@ -115,7 +115,10 @@
 		const data = movie.credits ?? [];
 		untrack(() => {
 			const sameMovie = creditMovieKey === movieKey;
-			const previous = new Map(previousCredits.map((credit) => [credit.id, credit]));
+			// The same input array is an ordinary metadata overlay, not a new
+			// credit snapshot. New arrays are authoritative even when their values
+			// equal an earlier snapshot (for example an override reverted elsewhere).
+			if (sameMovie && data === previousCredits) return;
 			const local = new Map(creditStates.map((credit) => [credit.id, credit]));
 			const drafts: Record<number, string> = {};
 			const errors: Record<number, boolean> = {};
@@ -124,18 +127,8 @@
 				const next = { ...credit };
 				if (typeof credit.id !== 'number') return next;
 				const old = sameMovie ? local.get(credit.id) : undefined;
-				const source = previous.get(credit.id);
 				const sameCredit = old && old.actress_id === credit.actress_id;
 				if (sameCredit) {
-					// A metadata-only overlay still contains the pre-save credit. Keep
-					// an acknowledged local save until the server's override changes.
-					if (
-						source?.override_name === credit.override_name &&
-						source?.user_override === credit.user_override
-					) {
-						next.override_name = old.override_name;
-						next.user_override = old.user_override;
-					}
 					const draft = overrideDrafts[credit.id] ?? '';
 					drafts[credit.id] = draft !== (old.override_name ?? '')
 						? draft
@@ -153,7 +146,7 @@
 			overrideDrafts = drafts;
 			creditUpdateErrors = errors;
 			creditMovieKey = movieKey;
-			previousCredits = data.map((credit) => ({ ...credit }));
+			previousCredits = data;
 		});
 	});
 

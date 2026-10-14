@@ -216,6 +216,31 @@ describe('ActressEditor production persistence', () => {
 		expect(view.getByText('Movie-specific name')).toBeTruthy();
 	});
 
+	it('accepts an authoritative revert to the exact pre-save value', async () => {
+		vi.spyOn(apiClient, 'updateCreditOverride').mockResolvedValue();
+		const movie = creditMovie();
+		const view = render(ActressEditor, { movie, onUpdate: vi.fn() });
+		await fireEvent.click(view.getByRole('button', { name: 'This movie only' }));
+		await fireEvent.input(view.getByLabelText('Name for this movie'), {
+			target: { value: 'Saved name' },
+		});
+		await fireEvent.click(view.getByRole('button', { name: 'Set name' }));
+		await waitFor(() => expect(view.getByText('Movie-specific name')).toBeTruthy());
+		// Another client clears the override before this component ever receives
+		// a snapshot containing the acknowledged save. Equal values do not mean
+		// a newly supplied server snapshot is stale.
+		await view.rerender({
+			movie: { ...movie, credits: movie.credits.map((credit) => ({ ...credit })) },
+		});
+		expect((view.getByLabelText('Name for this movie') as HTMLInputElement).value).toBe('');
+		expect(view.queryByText('Movie-specific name')).toBeNull();
+		await view.rerender({
+			movie: { ...movie, credits: movie.credits.map((credit) => ({ ...credit })) },
+		});
+		expect((view.getByLabelText('Name for this movie') as HTMLInputElement).value).toBe('');
+		expect(view.queryByText('Movie-specific name')).toBeNull();
+	});
+
 	it('keeps a failed-save draft and error across unrelated updates, then allows retry', async () => {
 		vi.spyOn(console, 'error').mockImplementation(() => {});
 		const save = vi
