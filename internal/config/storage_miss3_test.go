@@ -166,9 +166,9 @@ func TestMiss3_AtomicReplaceFile_Valid(t *testing.T) {
 	assert.Equal(t, "content", string(data))
 }
 
-// --- replaceFileOnWindows: 87.5% ---
+// --- replaceFile: 87.5% ---
 
-func TestMiss3_ReplaceFileOnWindows_StatPermissionDenied(t *testing.T) {
+func TestMiss3_ReplaceFile_PermissionDenied(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix-specific permission test")
 	}
@@ -182,17 +182,18 @@ func TestMiss3_ReplaceFileOnWindows_StatPermissionDenied(t *testing.T) {
 	require.NoError(t, os.Chmod(subdir, 0o000))
 	defer os.Chmod(subdir, 0o755)
 
-	err := replaceFileOnWindows(filepath.Join(subdir, "dest.yaml"), tmpPath)
+	err := replaceFile(filepath.Join(subdir, "dest.yaml"), tmpPath)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to stat destination")
+	assert.Contains(t, err.Error(), "failed to atomically replace config file")
+	assert.ErrorIs(t, err, os.ErrPermission)
 }
 
-func TestMiss3_ReplaceFileOnWindows_RollbackAfterFailedRename(t *testing.T) {
+func TestMiss3_ReplaceFile_PreservesDestinationAfterFailedRename(t *testing.T) {
 	dir := t.TempDir()
 	destPath := filepath.Join(dir, "dest.yaml")
 	require.NoError(t, os.WriteFile(destPath, []byte("original"), 0o644))
 
-	err := replaceFileOnWindows(destPath, filepath.Join(dir, "nonexistent-tmp.yaml"))
+	err := replaceFile(destPath, filepath.Join(dir, "nonexistent-tmp.yaml"))
 	require.Error(t, err)
 
 	data, err := os.ReadFile(destPath)
