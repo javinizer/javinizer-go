@@ -53,6 +53,8 @@ type artifactSibling struct {
 	sourcePath string
 	stagedPath string
 	identity   artifactSourceIdentity
+	// subtitle records configured admission independently of execution results.
+	subtitle bool
 	// deferred marks a multipart video sibling admitted without staged bytes:
 	// it installs by the verified move lane straight off its real source at
 	// publication, like the deferred primary (codex P2, PRRT_kwDORn9KaM6rLI28).
@@ -89,6 +91,16 @@ type artifactStage struct {
 	// to the staged payload (installPaths sameBytes skip): this apply landed
 	// nothing there, so the path must never enter the revert delete ledger.
 	identicalSkips map[string]bool
+	// Staged subtitle inputs already handled by the initial organizer must
+	// not become independent outputs during the later tree publication.
+	excludedStagedSubtitleInputs map[string]bool
+	stagedSubtitleOutputs        map[string]int
+	stagedSubtitleResults        []organizer.SubtitleResult
+	// Only admitted source videos use the no-clobber tree lane. The value
+	// distinguishes the requested primary from automatically included parts.
+	stagedVideoOutputs map[string]bool
+	publishVideoLog    RevertLog
+	publishVideoOpID   OperationID
 }
 
 var errArtifactDirtyAdmission = errors.New("artifact publication preparation failed")
@@ -250,7 +262,7 @@ func (o *applyOrchImpl) prepareArtifact(ctx context.Context, cmd ApplyCmd) (*art
 			if !siblingInfo.Mode().IsRegular() {
 				continue
 			}
-			admitted := artifactSibling{sourcePath: sibling, identity: captureArtifactSourceIdentity(o.fs, sibling, siblingInfo)}
+			admitted := artifactSibling{sourcePath: sibling, identity: captureArtifactSourceIdentity(o.fs, sibling, siblingInfo), subtitle: selectedSubtitles[filepath.Clean(sibling)]}
 			if cmd.Organize.MoveFiles && isStagedArtifactVideoExtension(strings.ToLower(filepath.Ext(entry.Name()))) {
 				// Defer multipart video siblings with the primary in MOVE flows
 				// (codex P2, PRRT_kwDORn9KaM6rLI28): the publication installs
@@ -529,10 +541,12 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 		return err
 	}
 	s.publishBatch, s.publishCtx = batch, ctx
+	s.publishVideoLog, s.publishVideoOpID = o.revertLog, opID
 	committed := false
 	createdFinalParent := ""
 	defer func() {
 		s.publishBatch, s.publishCtx = nil, nil
+		s.publishVideoLog, s.publishVideoOpID = nil, ""
 		if !committed {
 			if rollbackErr := batch.Rollback(context.WithoutCancel(ctx)); rollbackErr != nil {
 				s.unresolvedBatch = batch
@@ -595,6 +609,9 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 		if err := s.relocateInPlaceDirectory(ctx, o, opID, state); err != nil {
 			return err
 		}
+		if err := s.collectStagedSubtitleOutputs(state.organizeResult); err != nil {
+			return err
+		}
 		stagedVideo = state.organizeResult.NewPath
 		if stagedVideo == "" {
 			stagedVideo = s.stagedSource
@@ -610,6 +627,12 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 		}
 		match.Name = filepath.Base(match.Path)
 		organizeCmd := organizer.OrganizeCmd{Match: match, Movie: s.original.Movie, DestDir: s.finalRoot, ForceUpdate: s.original.Organize.ForceUpdate, MoveFiles: s.original.Organize.MoveFiles, LinkMode: s.original.Organize.LinkMode, OperationMode: s.original.OperationMode, ForceRenameFile: s.original.Organize.ForceRenameFile}
+		if s.inPlace && !s.videoDeferred {
+			// The real final directory was resolved before staging. Keep this
+			// execute within the stage; fenced tree publication applies the move.
+			organizeCmd.OperationMode = operationmode.OperationModeInPlaceNoRenameFolder
+			organizeCmd.StagingFinalDir = s.finalRoot
+		}
 		plan, err := executor.PlanOrganize(ctx, organizeCmd)
 		if err != nil {
 			return fmt.Errorf("replan artifact publication: %w", err)
@@ -1145,20 +1168,13 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 			}
 		}
 	}
-	// Deferred organize MOVED sidecars install through the organizer (or the
-	// post-publish sidecar block for un-moved remainder); rehoming the staged
-	// copies into the tree would collide at the final targets with those
-	// installs. Deferred copy flows publish only through this tree — minus any
-	// subtitle the organizer lane reported as skipped-on-occupancy: its staged
-	// copy stays in the staging residue so the tree install can never republish
-	// over the foreign occupant the organizer refused to touch. Seats proving
-	// THIS apply installed the destination (Copied, or a publish-completed
-	// error) stay out for the same reason in reverse: their staged duplicates
-	// must never re-aim the endpoint through installPaths, where a foreign
-	// writer's post-copy swap would no longer compare byte-identical and read
-	// as replaceable (codex P2, PRRT_kwDORn9KaM6m7CBi).
+	// Admitted subtitles publish only through their dedicated planned lanes.
+	// Rehoming is for other staged artifacts, never an implicit subtitle retry
+	// after a skipped, failed, or omitted result. Preserve result-based exclusions
+	// for older/untyped stage records too, including installed outputs whose
+	// destination may since have been claimed by a different writer.
 	if !s.videoDeferred || !s.original.Organize.MoveFiles {
-		excluded := s.occupiedSkipExcludedSiblings(stagedVideo, finalResult)
+		excluded := s.refusedSidecarExcludedSiblings(finalResult)
 		for staged := range s.installedSidecarExcludedSiblings(finalResult) {
 			if excluded == nil {
 				excluded = map[string]bool{}
@@ -1198,6 +1214,14 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 		}
 		return nil
 	}
+	if err := s.publishStagedSubtitles(ctx, o, opID, finalResult); err != nil {
+		return err
+	}
+	stagedPrimary := ""
+	if s.inPlace && !s.videoDeferred && finalResult != nil {
+		stagedPrimary = finalResult.NewPath
+	}
+	s.registerStagedVideoOutputs(stagedVideo, stagedPrimary)
 	preservedMedia, err := s.installTree(installSkipVideo, artifactSkipDir, state.downloadPaths, stagedArtifactDir, finalArtifactDir, journalDeleteIntent)
 	if err != nil {
 		return err
@@ -1250,126 +1274,80 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 		steps.PosterVerified = false
 	}
 	if !s.original.Organize.Skip && s.original.Organize.MoveFiles && s.sourcePath != "" && filepath.Clean(s.sourcePath) != filepath.Clean(finalResult.NewPath) {
-		// Planned execution publishes the video, but may leave copied siblings
-		// under .source. Publish them before removing any original sidecar.
-		// Subtitle seats the organizer lane already MOVED own their endpoint:
-		// the apply published the real source (never a staged twin), and
-		// language normalization can re-derive a leaf stagedArtifactSiblingName
-		// never reproduces (e.g. .en.srt installing as .eng.srt), so probing a
-		// trampoline-derived name for them double-delivers the twin under the
-		// un-normalized name and the removal leg below then revalidates an
-		// already-consumed source. Skip them in BOTH legs.
-		movedByOrganizer := map[string]bool{}
-		skipped := map[string]bool{}
+		// Only admitted deferred multipart videos publish here. Subtitle sources
+		// belong exclusively to the organizer's verified canonical lane; there
+		// is no generic subtitle copy or cleanup fallback.
+		failed := map[string]bool{}
 		if s.videoDeferred && finalResult != nil {
 			for _, sr := range finalResult.Subtitles {
-				// A publish-completed subtitle IS installed at its (possibly
-				// language-normalized) endpoint: classify it exactly like the
-				// rollback arm and reconcile keep-list above, or the fallback
-				// double-delivers the staged twin under the un-normalized leaf
-				// and the removal leg revalidates an already-consumed source.
-				if (sr.Moved || fsutil.PublishCompleted(sr.Error)) && sr.OriginalPath != "" {
-					movedByOrganizer[filepath.Clean(sr.OriginalPath)] = true
-				}
-				if sr.Skipped && sr.OriginalPath != "" {
-					skipped[filepath.Clean(sr.OriginalPath)] = true
+				if sr.Error != nil && !fsutil.PublishCompleted(sr.Error) && sr.OriginalPath != "" {
+					failed[filepath.Clean(sr.OriginalPath)] = true
 				}
 			}
 		}
-		published := map[string]bool{}
 		deferredSiblingProofs := s.siblingSourceProofs()
 		for _, sibling := range s.siblings {
-			// A skipped source must not publish under an unnormalized fallback
-			// name either; retain the organizer's refusal in both move legs.
-			if movedByOrganizer[filepath.Clean(sibling.sourcePath)] || skipped[filepath.Clean(sibling.sourcePath)] {
-				continue
-			}
-			target := filepath.Join(filepath.Dir(finalResult.NewPath), stagedArtifactSiblingName(filepath.Base(s.sourcePath), filepath.Base(finalResult.NewPath), filepath.Base(sibling.sourcePath)))
-			if sibling.deferred {
-				// A deferred video sibling (codex P2, PRRT_kwDORn9KaM6rLI28)
-				// installs by the verified move lane straight off its real
-				// source, mirroring the deferred primary: the admission identity
-				// is re-proven at consumption, the MoveBack inverse is journaled
-				// pre-move, and the install binds the identity the move lane
-				// produced rather than re-deriving it from the destination name.
-				if _, statErr := s.fs.Stat(target); statErr == nil {
-					continue
-				} else if !os.IsNotExist(statErr) {
-					return fmt.Errorf("inspect deferred publication sibling: %w", statErr)
-				}
-				if _, armErr := batch.BeforePublish(ctx, target, false); armErr != nil {
-					return armErr
-				}
-				if o.revertLog != nil && opID != "" {
-					if err := o.revertLog.RecordMoveIntent(ctx, opID, s.directoryOriginalPath(sibling.sourcePath), target); err != nil {
-						return fmt.Errorf("journal deferred sibling move intent: %w", err)
-					}
-				}
+			// Subtitle sources never publish under an unnormalized fallback name;
+			// absent or failed result seats do not grant replacement authority.
+			if failed[filepath.Clean(sibling.sourcePath)] {
+				// Preserve the move lane's admission failure, without retrying a
+				// failed subtitle under a different generic fallback name.
 				if err := s.revalidateAdmittedSource(sibling.sourcePath, sibling.identity); err != nil {
 					return err
 				}
-				proof := deferredSiblingProofs[filepath.Clean(sibling.sourcePath)]
-				if proof == nil {
-					return fmt.Errorf("publish deferred sibling from source %s: admission identity unavailable", sibling.sourcePath)
-				}
-				movedID, moveErr := fsutil.MoveFileNoReplaceVerifiedMode(s.fs, sibling.sourcePath, target, proof, sibling.identity.perm)
-				if moveErr == nil || (fsutil.PublishCompleted(moveErr) && !fsutil.PublishSuccessorUnproven(moveErr)) {
-					if armErr := batch.SetRollbackOriginBound(target, sibling.sourcePath, movedID); armErr != nil {
-						rollbackProof := fsutil.VerifiedSourceProofFromBoundInstallIdentity(s.fs, movedID)
-						mode := sibling.identity.perm
-						if movedID != nil && movedID.FileInfo() != nil {
-							mode = movedID.FileInfo().Mode().Perm()
-						}
-						if _, rollbackErr := fsutil.MoveFileNoReplaceVerifiedMode(s.fs, target, sibling.sourcePath, rollbackProof, mode); rollbackErr != nil {
-							return errors.Join(moveErr, armErr, fmt.Errorf("restore deferred sibling after rollback arm refusal: %w", rollbackErr))
-						}
-						return errors.Join(moveErr, armErr)
-					}
-				}
-				if moveErr != nil {
-					return fmt.Errorf("publish deferred sibling from source: %w", moveErr)
-				}
-				if confirmErr := batch.ConfirmPublish(ctx, target); confirmErr != nil {
-					return confirmErr
-				}
-				published[filepath.Clean(target)] = true
+			}
+			if !sibling.deferred || sibling.subtitle {
 				continue
 			}
-			if _, statErr := s.fs.Stat(target); os.IsNotExist(statErr) {
-				info, sourceErr := s.fs.Stat(sibling.stagedPath)
-				if sourceErr != nil {
-					return fmt.Errorf("inspect staged publication sidecar: %w", sourceErr)
+			target := filepath.Join(filepath.Dir(finalResult.NewPath), stagedArtifactSiblingName(filepath.Base(s.sourcePath), filepath.Base(finalResult.NewPath), filepath.Base(sibling.sourcePath)))
+			// A deferred video sibling (codex P2, PRRT_kwDORn9KaM6rLI28)
+			// installs by the verified move lane straight off its real
+			// source, mirroring the deferred primary: the admission identity
+			// is re-proven at consumption, the MoveBack inverse is journaled
+			// pre-move, and the install binds the identity the move lane
+			// produced rather than re-deriving it from the destination name.
+			if _, statErr := s.fs.Stat(target); statErr == nil {
+				continue
+			} else if !os.IsNotExist(statErr) {
+				return fmt.Errorf("inspect deferred publication sibling: %w", statErr)
+			}
+			if _, armErr := batch.BeforePublish(ctx, target, false); armErr != nil {
+				return armErr
+			}
+			if o.revertLog != nil && opID != "" {
+				if err := o.revertLog.RecordMoveIntent(ctx, opID, s.directoryOriginalPath(sibling.sourcePath), target); err != nil {
+					return fmt.Errorf("journal deferred sibling move intent: %w", err)
 				}
-				if _, armErr := batch.BeforePublish(ctx, target, false); armErr != nil {
-					return armErr
-				}
-				// Pin the incoming bytes durably BEFORE copying: a crash between the
-				// copy and the MoveBack arming must still prove the destination's
-				// bytes are ours (the owner-pinned Delete intent then clears them
-				// and retains the untouched source).
-				if o.revertLog != nil && opID != "" {
-					digest, dErr := artifactDigest(s.fs, sibling.stagedPath)
-					if dErr != nil {
-						return dErr
+			}
+			if err := s.revalidateAdmittedSource(sibling.sourcePath, sibling.identity); err != nil {
+				return err
+			}
+			proof := deferredSiblingProofs[filepath.Clean(sibling.sourcePath)]
+			if proof == nil {
+				return fmt.Errorf("publish deferred sibling from source %s: admission identity unavailable", sibling.sourcePath)
+			}
+			movedID, moveErr := fsutil.MoveFileNoReplaceVerifiedMode(s.fs, sibling.sourcePath, target, proof, sibling.identity.perm)
+			if moveErr == nil || (fsutil.PublishCompleted(moveErr) && !fsutil.PublishSuccessorUnproven(moveErr)) {
+				if armErr := batch.SetRollbackOriginBound(target, sibling.sourcePath, movedID); armErr != nil {
+					rollbackProof := fsutil.VerifiedSourceProofFromBoundInstallIdentity(s.fs, movedID)
+					mode := sibling.identity.perm
+					if movedID != nil && movedID.FileInfo() != nil {
+						mode = movedID.FileInfo().Mode().Perm()
 					}
-					if recErr := o.revertLog.RecordDeleteIntent(ctx, opID, []models.DeleteEntry{{Path: target, SHA256: digest}}); recErr != nil {
-						return recErr
+					if _, rollbackErr := fsutil.MoveFileNoReplaceVerifiedMode(s.fs, target, sibling.sourcePath, rollbackProof, mode); rollbackErr != nil {
+						return errors.Join(moveErr, armErr, fmt.Errorf("restore deferred sibling after rollback arm refusal: %w", rollbackErr))
 					}
+					return errors.Join(moveErr, armErr)
 				}
-				if copyErr := copyArtifactFile(s.fs, sibling.stagedPath, target, info.Mode().Perm()); copyErr != nil {
-					return fmt.Errorf("publish sidecar before source cleanup: %w", copyErr)
-				}
-				if confirmErr := batch.ConfirmPublish(ctx, target); confirmErr != nil {
-					return confirmErr
-				}
-				published[filepath.Clean(target)] = true
-				// This block runs in move mode only: published sibling targets are
-				// MoveBack-owned (inverse recorded above), never enrolled in the
-				// ordinary Delete ledger — a revert moves them back.
-			} else if statErr != nil {
-				return fmt.Errorf("inspect publication sidecar: %w", statErr)
+			}
+			if moveErr != nil {
+				return fmt.Errorf("publish deferred sibling from source: %w", moveErr)
+			}
+			if confirmErr := batch.ConfirmPublish(ctx, target); confirmErr != nil {
+				return confirmErr
 			}
 		}
+
 		if s.videoDeferred {
 			// The direct publication already journaled the inverse and armed
 			// rollback; the move consumed the original, so there is no
@@ -1398,54 +1376,6 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 				return fmt.Errorf("remove original after artifact publication: %w", err)
 			}
 		}
-		for _, sibling := range s.siblings {
-			target := filepath.Join(filepath.Dir(finalResult.NewPath), stagedArtifactSiblingName(filepath.Base(s.sourcePath), filepath.Base(finalResult.NewPath), filepath.Base(sibling.sourcePath)))
-			// A subtitle the organizer skipped (its destination was occupied) keeps
-			// its source: no journal inverse exists to rebuild a deleted original.
-			if skipped[filepath.Clean(sibling.sourcePath)] {
-				continue
-			}
-			// A subtitle the organizer MOVED already had its source consumed by
-			// the install leg (and its inverse journaled pre-execution); the
-			// trampoline twin was never published for it.
-			if movedByOrganizer[filepath.Clean(sibling.sourcePath)] {
-				continue
-			}
-			// Only an apply that actually published the staged copy may consume the
-			// original: an occupied target that nothing wrote stays foreign, and
-			// removing the source would leave a permanent MoveBack rename of
-			// foreign bytes onto it.
-			if sibling.deferred {
-				// The deferred move leg consumed the source at install time.
-				continue
-			}
-			if !published[filepath.Clean(target)] {
-				continue
-			}
-			// This apply published the ADMITTED staged copy: refuse to consume an
-			// original that changed since admission — those bytes are foreign.
-			if err := s.revalidateAdmittedSource(sibling.sourcePath, sibling.identity); err != nil {
-				return err
-			}
-			if o.revertLog != nil && opID != "" {
-				// Persist this sibling inverse before removing its source: a generic
-				// staged sibling (e.g. a multipart sibling video published through
-				// the sidecar block) has no other durable entry if the process dies
-				// before the outcome completion.
-				if err := o.revertLog.RecordMoveIntent(ctx, opID, s.directoryOriginalPath(sibling.sourcePath), target); err != nil {
-					return fmt.Errorf("journal sibling move intent: %w", err)
-				}
-			}
-			if err := batch.SetRollbackOrigin(target, sibling.sourcePath); err != nil {
-				return err
-			}
-			if err := s.fs.Remove(sibling.sourcePath); err != nil {
-				_ = batch.SetRollbackOrigin(target, "")
-				if !os.IsNotExist(err) {
-					return fmt.Errorf("remove original sidecar after artifact publication: %w", err)
-				}
-			}
-		}
 		if s.inPlace && finalResult.FolderPath != "" {
 			oldDir := filepath.Dir(s.sourcePath)
 			if filepath.Clean(oldDir) != filepath.Clean(finalResult.FolderPath) {
@@ -1464,37 +1394,29 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 	return nil
 }
 
-// occupiedSkipExcludedSiblings names the staged sibling copies the rehome leg
-// must NOT pull into the install tree (codex P1, PRRT_kwDORn9KaM6m3ujF). In a
-// deferred copy the organizer lane owns subtitle delivery, and a Skipped
-// outcome is a refusal. Occupancy is the determinant: a skip whose destination
-// is provably ABSENT (a refused publish on a no-replace-unsupported volume)
-// has no foreign occupant, so the staged copy may still install through the
-// tree; a skip whose destination exists — or whose state cannot be proven
-// absent — owns a foreign file there, and installing the staged copy would
-// overwrite exactly what the organizer refused to touch. Returned keys are
-// cleaned staged paths. Match the skipped source to its admitted sibling:
-// normalized language suffixes can give the organizer a different target name
-// from the generic staged-sibling fallback.
-func (s *artifactStage) occupiedSkipExcludedSiblings(stagedVideo string, finalResult *organizer.OrganizeResult) map[string]bool {
-	if !s.videoDeferred || s.original.Organize.MoveFiles || s.original.Organize.LinkMode != organizer.LinkModeNone || stagedVideo == "" || s.stagedSource == "" || finalResult == nil || finalResult.NewPath == "" {
+// refusedSidecarExcludedSiblings preserves the organizer's refusal for each
+// admitted subtitle source. A skipped or failed source must never re-enter publication
+// through the generic tree, even if its destination later disappears, is a
+// dangling symlink, or cannot be inspected. Re-probing occupancy would lose
+// that refusal and allow a later foreign file to be treated as replaceable.
+// Match sources rather than target names because language normalization can
+// produce a different destination from the generic sibling fallback.
+func (s *artifactStage) refusedSidecarExcludedSiblings(finalResult *organizer.OrganizeResult) map[string]bool {
+	if !s.videoDeferred || s.original.Organize.MoveFiles || s.original.Organize.LinkMode != organizer.LinkModeNone || finalResult == nil {
 		return nil
 	}
-	occupied := make(map[string]bool, len(finalResult.Subtitles))
+	skipped := make(map[string]bool, len(finalResult.Subtitles))
 	for _, sr := range finalResult.Subtitles {
-		if !sr.Skipped || sr.NewPath == "" || sr.OriginalPath == "" {
-			continue
-		}
-		if _, statErr := s.fs.Stat(sr.NewPath); statErr == nil || !os.IsNotExist(statErr) {
-			occupied[filepath.Clean(sr.OriginalPath)] = true
+		if (sr.Skipped || (sr.Error != nil && !fsutil.PublishCompleted(sr.Error))) && sr.OriginalPath != "" {
+			skipped[filepath.Clean(sr.OriginalPath)] = true
 		}
 	}
-	if len(occupied) == 0 {
+	if len(skipped) == 0 {
 		return nil
 	}
 	excluded := make(map[string]bool)
 	for _, sibling := range s.siblings {
-		if occupied[filepath.Clean(sibling.sourcePath)] {
+		if skipped[filepath.Clean(sibling.sourcePath)] {
 			excluded[filepath.Clean(sibling.stagedPath)] = true
 		}
 	}
@@ -1582,7 +1504,7 @@ func (s *artifactStage) rehomeRemainingSiblings(stagedVideo string, excluded map
 			// straight off its real source by the verified move lane.
 			continue
 		}
-		if excluded[filepath.Clean(sibling.stagedPath)] {
+		if sibling.subtitle || excluded[filepath.Clean(sibling.stagedPath)] || s.excludedStagedSubtitleInputs[filepath.Clean(sibling.stagedPath)] {
 			continue
 		}
 		if _, err := s.fs.Stat(sibling.stagedPath); err != nil {
@@ -1645,6 +1567,9 @@ func (s *artifactStage) treeDestinations(skipFile, skipDir, stagedArtifactDir, f
 			return nil
 		}
 		clean := filepath.Clean(path)
+		if s.excludedStagedSubtitleInputs[clean] || s.isStagedSubtitleOutput(clean) {
+			return nil
+		}
 		if info.Name() == artifactStageManifestName && filepath.Clean(filepath.Dir(path)) == filepath.Clean(s.root) {
 			return nil
 		}
@@ -1686,6 +1611,9 @@ func (s *artifactStage) installTree(skipFile, skipDir string, preserve []string,
 			return nil
 		}
 		clean := filepath.Clean(path)
+		if s.excludedStagedSubtitleInputs[clean] || s.isStagedSubtitleOutput(clean) {
+			return nil
+		}
 		if info.Name() == artifactStageManifestName && filepath.Clean(filepath.Dir(path)) == filepath.Clean(s.root) {
 			return nil
 		}
@@ -1713,6 +1641,8 @@ func (s *artifactStage) installPaths(paths, preserve []string, stagedArtifactDir
 		skip           bool
 		replace        bool
 		sharedOwner    bool
+		video          bool
+		primary        bool
 	}
 	plans := make([]installPath, 0, len(paths))
 	preserved := false
@@ -1733,6 +1663,19 @@ func (s *artifactStage) installPaths(paths, preserve []string, stagedArtifactDir
 		}
 
 		plan := installPath{source: source, target: target}
+		plan.primary, plan.video = s.stagedVideoOutputs[filepath.Clean(source)]
+		if plan.video {
+			resident, err := s.stagedVideoResident(target, plan.primary)
+			if err != nil {
+				return false, err
+			}
+			if resident {
+				plan.skip = true
+				s.markIdenticalSkipped(target)
+				plans = append(plans, plan)
+				continue
+			}
+		}
 		if coordinator := s.original.ArtifactCoordinator; coordinator != nil {
 			digest, digestErr := artifactDigest(s.fs, source)
 			if digestErr != nil {
@@ -1766,7 +1709,10 @@ func (s *artifactStage) installPaths(paths, preserve []string, stagedArtifactDir
 			if info.IsDir() {
 				return false, fmt.Errorf("artifact destination is a directory: %s", target)
 			}
-			if digestEq, eqErr := sameBytes(s.fs, source, target); eqErr == nil && digestEq {
+			if plan.video && !(plan.primary && s.original.Organize.ForceUpdate) {
+				return false, fmt.Errorf("%w: staged video destination %s", fsutil.ErrPublishCollision, target)
+			}
+			if digestEq, eqErr := sameBytes(s.fs, source, target); !plan.video && eqErr == nil && digestEq {
 				// Byte-identical (e.g. this operation just copy-installed through the
 				// memberdBatch route): no duplicate install, no replacement journal.
 				// Track the skip: this apply landed nothing at the destination, so
@@ -1814,6 +1760,12 @@ func (s *artifactStage) installPaths(paths, preserve []string, stagedArtifactDir
 		}
 		if plan.sharedOwner {
 			s.sharedPublishBegan = true
+		}
+		if plan.video {
+			if err := s.publishStagedVideo(plan.source, plan.target, plan.primary && s.original.Organize.ForceUpdate); err != nil {
+				return false, err
+			}
+			continue
 		}
 
 		// The verdict that matters is the ARMING one: preflight's stale

@@ -108,23 +108,6 @@ func subtitleStagingOrganizer(fs afero.Fs) *organizer.Organizer {
 	return organizer.NewOrganizer(fs, &organizer.Config{MoveSubtitles: true, SubtitleExtensions: []string{".srt"}}, nil, nil)
 }
 
-// stagedSubtitleFallbackOrganizer models a selected subtitle the execution
-// seam leaves to the generic staged-sibling lane. Fault-injection tests use
-// this explicitly so their fallback/rollback coverage does not depend on
-// disabled subtitles being admitted by the real organizer.
-type stagedSubtitleFallbackOrganizer struct {
-	deferredOrganizerBase
-	selector *organizer.Organizer
-}
-
-func (o stagedSubtitleFallbackOrganizer) SubtitleSourcePaths(match models.FileMatchInfo) []string {
-	return o.selector.SubtitleSourcePaths(match)
-}
-
-func withStagedSubtitleFallback(fs afero.Fs, org organizer.OrganizerInterface) organizer.OrganizerInterface {
-	return stagedSubtitleFallbackOrganizer{deferredOrganizerBase: deferredOrganizerBase{org}, selector: subtitleStagingOrganizer(fs)}
-}
-
 // Hide the selection capability to verify an unrelated organizer implementation
 // cannot accidentally opt in to subtitle publication through the fallback.
 type organizerWithoutSubtitleSelection struct {

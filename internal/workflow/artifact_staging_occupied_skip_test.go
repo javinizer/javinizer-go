@@ -85,15 +85,12 @@ func TestDeferredCopyOccupiedSkipNeverOverwritesOccupant(t *testing.T) {
 	pr260AssertRetained(t, env.fs, env.source, env.subtitle, env.multipart, env.unrelated)
 }
 
-// Occupancy is the exclusion determinant for the deferred-copy rehome: only a
-// skipped subtitle whose destination EXISTS (or cannot be proven absent) marks
-// its staged sibling for exclusion; the copy-install fallbacks (absent
-// destination) and every non-deferred flow stay installable.
-func TestOccupiedSkipExcludedSiblings(t *testing.T) {
+// A skipped source is excluded regardless of later destination occupancy.
+// Non-skipped sources and non-deferred flows keep their existing behavior.
+func TestRefusedSidecarExcludedSiblings(t *testing.T) {
 	const (
 		stagedSource = "/stage/.source/MOV-1.mp4"
 		stagedSrt    = "/stage/.source/MOV-1.srt"
-		stagedVideo  = "/stage/final/RENAMED.mp4"
 		finalDir     = "/library/Occupied"
 	)
 	subTarget := filepath.Join(finalDir, "RENAMED.srt")
@@ -123,19 +120,19 @@ func TestOccupiedSkipExcludedSiblings(t *testing.T) {
 		fs := afero.NewMemMapFs()
 		require.NoError(t, fs.MkdirAll(finalDir, 0o755))
 		require.NoError(t, afero.WriteFile(fs, subTarget, []byte("foreign"), 0o644))
-		excluded := newStage(fs).occupiedSkipExcludedSiblings(stagedVideo, skippedResult())
+		excluded := newStage(fs).refusedSidecarExcludedSiblings(skippedResult())
 		require.True(t, excluded[filepath.Clean(stagedSrt)], "staged path keys the exclusion")
 	})
 
-	t.Run("absent destination stays installable (failed-publish fallback)", func(t *testing.T) {
-		excluded := newStage(afero.NewMemMapFs()).occupiedSkipExcludedSiblings(stagedVideo, skippedResult())
-		require.Empty(t, excluded)
+	t.Run("absent destination still excludes the refused source", func(t *testing.T) {
+		excluded := newStage(afero.NewMemMapFs()).refusedSidecarExcludedSiblings(skippedResult())
+		require.True(t, excluded[filepath.Clean(stagedSrt)])
 	})
 
 	t.Run("unprovable destination state excludes fail-closed", func(t *testing.T) {
 		base := afero.NewMemMapFs()
 		fs := &pr260StatFailureFs{Fs: base, path: subTarget}
-		excluded := newStage(fs).occupiedSkipExcludedSiblings(stagedVideo, skippedResult())
+		excluded := newStage(fs).refusedSidecarExcludedSiblings(skippedResult())
 		require.True(t, excluded[filepath.Clean(stagedSrt)], "uncertainty must never license an overwrite the organizer refused")
 	})
 
@@ -146,7 +143,7 @@ func TestOccupiedSkipExcludedSiblings(t *testing.T) {
 		res := skippedResult()
 		res.Subtitles[0].Skipped = false
 		res.Subtitles[0].Copied = true
-		require.Empty(t, newStage(fs).occupiedSkipExcludedSiblings(stagedVideo, res))
+		require.Empty(t, newStage(fs).refusedSidecarExcludedSiblings(res))
 	})
 
 	t.Run("publish-completed error seat was installed — never excluded", func(t *testing.T) {
@@ -156,14 +153,15 @@ func TestOccupiedSkipExcludedSiblings(t *testing.T) {
 		res := skippedResult()
 		res.Subtitles[0].Skipped = false
 		res.Subtitles[0].Error = fmt.Errorf("subtitle published but source cleanup refused: %w", fsutil.ErrPublishCompleted)
-		require.Empty(t, newStage(fs).occupiedSkipExcludedSiblings(stagedVideo, res),
+		require.Empty(t, newStage(fs).refusedSidecarExcludedSiblings(res),
 			"an ErrPublishCompleted error slot proves this apply's own install, not a foreign occupant")
 	})
 
-	t.Run("skipped with empty target does not exclude", func(t *testing.T) {
+	t.Run("skipped source stays excluded even without a target", func(t *testing.T) {
 		res := skippedResult()
 		res.Subtitles[0].NewPath = ""
-		require.Empty(t, newStage(afero.NewMemMapFs()).occupiedSkipExcludedSiblings(stagedVideo, res))
+		excluded := newStage(afero.NewMemMapFs()).refusedSidecarExcludedSiblings(res)
+		require.True(t, excluded[filepath.Clean(stagedSrt)])
 	})
 
 	t.Run("skipped with empty source does not exclude", func(t *testing.T) {
@@ -172,7 +170,7 @@ func TestOccupiedSkipExcludedSiblings(t *testing.T) {
 		require.NoError(t, afero.WriteFile(fs, subTarget, []byte("foreign"), 0o644))
 		res := skippedResult()
 		res.Subtitles[0].OriginalPath = ""
-		require.Empty(t, newStage(fs).occupiedSkipExcludedSiblings(stagedVideo, res))
+		require.Empty(t, newStage(fs).refusedSidecarExcludedSiblings(res))
 	})
 
 	t.Run("different source does not exclude an admitted sibling", func(t *testing.T) {
@@ -181,7 +179,7 @@ func TestOccupiedSkipExcludedSiblings(t *testing.T) {
 		require.NoError(t, afero.WriteFile(fs, subTarget, []byte("foreign"), 0o644))
 		res := skippedResult()
 		res.Subtitles[0].OriginalPath = "/src/other.srt"
-		require.Empty(t, newStage(fs).occupiedSkipExcludedSiblings(stagedVideo, res))
+		require.Empty(t, newStage(fs).refusedSidecarExcludedSiblings(res))
 	})
 
 	t.Run("non-deferred and copy-suppressed shapes never exclude", func(t *testing.T) {
@@ -190,25 +188,23 @@ func TestOccupiedSkipExcludedSiblings(t *testing.T) {
 		require.NoError(t, afero.WriteFile(fs, subTarget, []byte("foreign"), 0o644))
 		moveStage := newStage(fs)
 		moveStage.original.Organize.MoveFiles = true
-		require.Empty(t, moveStage.occupiedSkipExcludedSiblings(stagedVideo, skippedResult()))
+		require.Empty(t, moveStage.refusedSidecarExcludedSiblings(skippedResult()))
 		linkStage := newStage(fs)
 		linkStage.original.Organize.LinkMode = organizer.LinkModeHard
-		require.Empty(t, linkStage.occupiedSkipExcludedSiblings(stagedVideo, skippedResult()))
+		require.Empty(t, linkStage.refusedSidecarExcludedSiblings(skippedResult()))
 		stagedStage := newStage(fs)
 		stagedStage.videoDeferred = false
-		require.Empty(t, stagedStage.occupiedSkipExcludedSiblings(stagedVideo, skippedResult()))
-		require.Empty(t, newStage(fs).occupiedSkipExcludedSiblings(stagedVideo, nil))
-		require.Empty(t, newStage(fs).occupiedSkipExcludedSiblings("", skippedResult()))
+		require.Empty(t, stagedStage.refusedSidecarExcludedSiblings(skippedResult()))
+		require.Empty(t, newStage(fs).refusedSidecarExcludedSiblings(nil))
 	})
 }
 
 // Exclusion follows the skipped source even when FolderPath is empty or the
 // organizer's occupied target does not live beside the primary video.
-func TestOccupiedSkipExcludedSiblingsTracksSourceWithoutFolderPath(t *testing.T) {
+func TestRefusedSidecarExcludedSiblingsTracksSourceWithoutFolderPath(t *testing.T) {
 	const (
 		stagedSource = "/stage/.source/MOV-2.mp4"
 		stagedSrt    = "/stage/.source/MOV-2.srt"
-		stagedVideo  = "/stage/final/RENAMED.mp4"
 		finalDir     = "/library/Fallback"
 	)
 
@@ -238,7 +234,7 @@ func TestOccupiedSkipExcludedSiblingsTracksSourceWithoutFolderPath(t *testing.T)
 		fs := afero.NewMemMapFs()
 		require.NoError(t, fs.MkdirAll(finalDir, 0o755))
 		require.NoError(t, afero.WriteFile(fs, res.Subtitles[0].NewPath, []byte("foreign"), 0o644))
-		excluded := newStage(fs).occupiedSkipExcludedSiblings(stagedVideo, res)
+		excluded := newStage(fs).refusedSidecarExcludedSiblings(res)
 		require.True(t, excluded[filepath.Clean(stagedSrt)], "the skipped source identifies its staged sibling")
 	})
 
@@ -247,7 +243,7 @@ func TestOccupiedSkipExcludedSiblingsTracksSourceWithoutFolderPath(t *testing.T)
 		fs := afero.NewMemMapFs()
 		require.NoError(t, fs.MkdirAll("/elsewhere", 0o755))
 		require.NoError(t, afero.WriteFile(fs, res.Subtitles[0].NewPath, []byte("foreign"), 0o644))
-		excluded := newStage(fs).occupiedSkipExcludedSiblings(stagedVideo, res)
+		excluded := newStage(fs).refusedSidecarExcludedSiblings(res)
 		require.True(t, excluded[filepath.Clean(stagedSrt)], "the source stays excluded regardless of the organizer's target directory")
 	})
 }
@@ -257,10 +253,9 @@ func TestOccupiedSkipExcludedSiblingsTracksSourceWithoutFolderPath(t *testing.T)
 // probe runs (the endpoint is omitted from every armed pin/intent), and the
 // occupant vacates between the arm and the execute. The organizer lane must
 // REFUSE the now-vacant slot — nothing durable journaled that endpoint — and
-// report Skipped; the deferred-copy tree leg then delivers the staged sibling
-// through its own journaled install, so the apply still completes and the
-// revert cleans exactly the ledgered bytes.
-func TestDeferredCopyProbeOmittedEndpointRefusesVacatedInstall(t *testing.T) {
+// report Skipped. The staged copy must honor that refusal even though the
+// endpoint is now vacant; the rest of the apply completes and reverts normally.
+func TestDeferredCopyProbeOmittedEndpointKeepsVacatedSkip(t *testing.T) {
 	env := setupCopyIntentE2E(t, "copy-probe-gate")
 	probePlan, planErr := env.org.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: env.match, Movie: &env.movie, DestDir: env.dest, ForceUpdate: true, OperationMode: operationmode.OperationModeOrganize})
 	require.NoError(t, planErr)
@@ -294,29 +289,23 @@ func TestDeferredCopyProbeOmittedEndpointRefusesVacatedInstall(t *testing.T) {
 	}
 	require.True(t, skipped, "the gated endpoint reports through the skip classification")
 
-	installed, readErr := afero.ReadFile(env.fs, subTarget)
-	require.NoError(t, readErr, "the staged sibling still delivers through the journaled tree leg")
-	assert.Equal(t, "subtitle", string(installed))
+	require.NoFileExists(t, subTarget, "a skipped source never re-enters the tree publication lane")
 	pr260AssertRetained(t, env.fs, env.source, env.subtitle, env.multipart, env.unrelated)
 	pr260AssertStageGone(t, env.fs, filepath.Dir(env.dest))
 
 	ledger := p3Ledger(t, env.repo, result.OperationID)
-	pinned := false
 	for _, pd := range ledger.PlannedDeletes {
 		assert.NotEqual(t, video, pd.Path, "the graduated primary pin was consumed")
-		if filepath.Clean(pd.Path) == filepath.Clean(subTarget) {
-			require.NotEmpty(t, pd.SHA256, "the tree pin keeps its content proof")
-			pinned = true
-		}
+		assert.NotEqual(t, filepath.Clean(subTarget), filepath.Clean(pd.Path), "the refused subtitle has no tree install pin")
 	}
-	assert.True(t, pinned, "the journaled tree install leaves a durable hash-pinned delete record")
+	assert.NotContains(t, ledger.Delete, subTarget)
 
 	res, revErr := history.NewReverter(env.fs, env.repo).RevertBatch(t.Context(), env.jobID)
 	require.NoError(t, revErr)
 	require.Equal(t, 1, res.Succeeded)
 	subGone, statErr := afero.Exists(env.fs, subTarget)
 	require.NoError(t, statErr)
-	assert.False(t, subGone, "revert reaps the journaled tree install")
+	assert.False(t, subGone, "the refused subtitle remains absent after revert")
 	require.FileExists(t, video, "the installed copy primary is retained")
 	pr260AssertRetained(t, env.fs, env.source, env.subtitle, env.multipart, env.unrelated)
 }

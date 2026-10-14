@@ -259,10 +259,10 @@ func (f *denyOpenReadFS) Open(name string) (afero.File, error) {
 	return f.Fs.Open(name)
 }
 
-// Contrast leg: a genuinely UNINSTALLED sidecar (plain subtitle error, target
-// left absent) keeps the existing rehome path — its staged copy publishes
-// through the tree with its own fresh pin, and a revert reaps it.
-func TestDeferredCopyPlainErrorSidecarStillRehomeInstalls(t *testing.T) {
+// A genuinely uninstalled sidecar keeps its reported refusal. Its staged copy
+// cannot enter the generic replacement tree or acquire an Undo deletion pin,
+// even when the canonical destination is absent.
+func TestDeferredCopyPlainErrorSidecarRetainsRefusal(t *testing.T) {
 	env := setupCopyIntentE2E(t, "copy-plain-error-rehome")
 	probePlan, err := env.org.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: env.match, Movie: &env.movie, DestDir: env.dest, ForceUpdate: true, OperationMode: operationmode.OperationModeOrganize})
 	require.NoError(t, err)
@@ -297,12 +297,10 @@ func TestDeferredCopyPlainErrorSidecarStillRehomeInstalls(t *testing.T) {
 	}
 	require.True(t, reported)
 
-	rehomed, err := afero.ReadFile(env.fs, subTarget)
-	require.NoError(t, err, "the genuinely uninstalled sidecar still rehome-installs through the tree")
-	assert.Equal(t, "subtitle", string(rehomed))
+	require.NoFileExists(t, subTarget, "a failed subtitle must not gain generic fallback publication authority")
 	busy, err := afero.Exists(env.fs, subTarget+fsutil.ReplacementBusySuffix)
 	require.NoError(t, err)
-	assert.False(t, busy, "the around-execute sidecar leg released and the tree leg confirmed")
+	assert.False(t, busy, "the failed sidecar released its claim without publishing")
 	pr260AssertRetained(t, env.fs, env.source, env.subtitle, env.multipart, env.unrelated)
 	pr260AssertStageGone(t, env.fs, filepath.Dir(env.dest))
 
@@ -314,14 +312,15 @@ func TestDeferredCopyPlainErrorSidecarStillRehomeInstalls(t *testing.T) {
 		}
 		assert.NotEqual(t, video, pd.Path, "the graduated primary pin was consumed")
 	}
-	assert.True(t, pinned, "the tree lane journaled its own fresh pin for the fallback install")
+	assert.False(t, pinned, "the failed subtitle acquires no fallback ownership pin")
+	assert.NotContains(t, ledger.Delete, subTarget)
 
 	res, revErr := history.NewReverter(env.fs, env.repo).RevertBatch(t.Context(), env.jobID)
 	require.NoError(t, revErr)
 	require.Equal(t, 1, res.Succeeded)
 	gone, err := afero.Exists(env.fs, subTarget)
 	require.NoError(t, err)
-	assert.False(t, gone, "revert reaps the fallback-installed sidecar")
+	assert.False(t, gone, "no refused sidecar is published before or after revert")
 	require.FileExists(t, video, "the installed copy primary is retained")
 	pr260AssertRetained(t, env.fs, env.source, env.subtitle, env.multipart, env.unrelated)
 }
