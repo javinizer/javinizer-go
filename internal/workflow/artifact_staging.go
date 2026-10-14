@@ -42,6 +42,13 @@ type artifactPlanExecutor interface {
 	PlanSubtitleMoves(*organizer.OrganizePlan) []models.SubtitleMove
 }
 
+// artifactSubtitleSelector exposes the organizer's configured source policy
+// independently of destination planning and its probe/admission freeze.
+// Organizers without this seam do not authorize subtitle staging.
+type artifactSubtitleSelector interface {
+	SubtitleSourcePaths(models.FileMatchInfo) []string
+}
+
 type artifactSibling struct {
 	sourcePath string
 	stagedPath string
@@ -221,11 +228,18 @@ func (o *applyOrchImpl) prepareArtifact(ctx context.Context, cmd ApplyCmd) (*art
 			stage.cleanup()
 			return nil, cmd, fmt.Errorf("artifact staging source directory: %w", readErr)
 		}
+		selectedSubtitles := map[string]bool{}
+		if selector, ok := o.organizer.(artifactSubtitleSelector); ok {
+			for _, path := range selector.SubtitleSourcePaths(cmd.Match) {
+				selectedSubtitles[filepath.Clean(path)] = true
+			}
+		}
 		for _, entry := range entries {
-			if entry.Name() == base || entry.IsDir() || !isStagedArtifactSibling(base, entry.Name()) {
+			sibling := filepath.Join(filepath.Dir(sourcePath), entry.Name())
+			if entry.Name() == base || entry.IsDir() ||
+				(!selectedSubtitles[filepath.Clean(sibling)] && !isStagedArtifactVideoSibling(base, entry.Name())) {
 				continue
 			}
-			sibling := filepath.Join(filepath.Dir(sourcePath), entry.Name())
 			// No-follow like the video admission: a symlinked sibling is skipped,
 			// never pinned as a source the publication may consume.
 			siblingInfo, siblingErr := lstatArtifactSource(o.fs, sibling)
@@ -263,13 +277,10 @@ func (o *applyOrchImpl) prepareArtifact(ctx context.Context, cmd ApplyCmd) (*art
 	return stage, stagedCmd, nil
 }
 
-func isStagedArtifactSibling(sourceName, siblingName string) bool {
+func isStagedArtifactVideoSibling(sourceName, siblingName string) bool {
 	sourceStem := strings.TrimSuffix(strings.ToLower(sourceName), strings.ToLower(filepath.Ext(sourceName)))
 	siblingExt := strings.ToLower(filepath.Ext(siblingName))
 	siblingStem := strings.TrimSuffix(strings.ToLower(siblingName), siblingExt)
-	if isStagedArtifactSubtitleExtension(siblingExt) {
-		return siblingStem == sourceStem || isStagedArtifactPrefixedStem(sourceStem, siblingStem)
-	}
 	if !isStagedArtifactVideoExtension(siblingExt) {
 		return false
 	}
@@ -279,23 +290,6 @@ func isStagedArtifactSibling(sourceName, siblingName string) bool {
 	sourcePart := stagedArtifactMultipartRoot(sourceStem)
 	siblingPart := stagedArtifactMultipartRoot(siblingStem)
 	return siblingPart == sourceStem || sourcePart == siblingStem || (sourcePart != "" && sourcePart == siblingPart)
-}
-
-func isStagedArtifactPrefixedStem(sourceStem, siblingStem string) bool {
-	if !strings.HasPrefix(siblingStem, sourceStem) || len(siblingStem) == len(sourceStem) {
-		return false
-	}
-	separator := siblingStem[len(sourceStem)]
-	return separator == '.' || separator == '-' || separator == '_'
-}
-
-func isStagedArtifactSubtitleExtension(ext string) bool {
-	switch ext {
-	case ".srt", ".ass", ".ssa", ".sub", ".idx", ".sup", ".vtt", ".smi", ".sami":
-		return true
-	default:
-		return false
-	}
 }
 
 func isStagedArtifactVideoExtension(ext string) bool {

@@ -163,7 +163,7 @@ func TestDeferredMovePublishesAdmittedDespitePostClaimPlant(t *testing.T) {
 	base, root, source, subtitle, multipart, unrelated, match := verifiedMemFixture(t, "verified-plant-move")
 	dest := filepath.Join(root, "library")
 	faultFS := &plantAfterSourceRenameFS{Fs: base, sourcePath: source, plant: []byte("planted foreign video")}
-	org := organizer.NewOrganizer(faultFS, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize}, template.NewEngine(), nil)
+	org := organizer.NewOrganizer(faultFS, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, MoveSubtitles: true, SubtitleExtensions: []string{".srt"}, OperationMode: operationmode.OperationModeOrganize}, template.NewEngine(), nil)
 	orch := &applyOrchImpl{fs: faultFS, organizer: org}
 	cmd := pr260ArtifactFailureCommand(&models.Movie{ContentID: "verified-plant-move"}, match, dest)
 	cmd.Organize.Skip = false

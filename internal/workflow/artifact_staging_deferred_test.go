@@ -33,7 +33,7 @@ func TestPrepareArtifactOrganizeDefersVideoCopy(t *testing.T) {
 		Download:         true,
 	}
 
-	stage, staged, err := (&applyOrchImpl{fs: base}).prepareArtifact(context.Background(), cmd)
+	stage, staged, err := (&applyOrchImpl{fs: base, organizer: subtitleStagingOrganizer(base)}).prepareArtifact(context.Background(), cmd)
 	require.NoError(t, err)
 	require.NotNil(t, stage)
 	defer stage.cleanup()
@@ -1115,7 +1115,7 @@ func TestDeferredMoveSiblingIntentFaultAborts(t *testing.T) {
 	base, root, source, subtitle, _, _, match := pr260FencedFiles(t, "deferred-sibling-intent-fault")
 	dest := filepath.Join(root, "library")
 	org := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize}, template.NewEngine(), nil)
-	orch := &applyOrchImpl{fs: base, organizer: org, revertLog: &completeCallFaultLog{intentFailAt: 3}}
+	orch := &applyOrchImpl{fs: base, organizer: withStagedSubtitleFallback(base, org), revertLog: &completeCallFaultLog{intentFailAt: 3}}
 	cmd := pr260ArtifactFailureCommand(&models.Movie{ContentID: "deferred-sibling-intent-fault"}, match, dest)
 	cmd.Organize.Skip = false
 	cmd.Organize.MoveFiles = true
@@ -1135,11 +1135,9 @@ func TestDeferredMoveSiblingIntentFaultAborts(t *testing.T) {
 
 }
 
-// Deferred copy mode with MoveSubtitles disabled: the organizer never touches
-// sidecars, the staged copy publishes through the sidecar block and joins the
-// ledger's Delete list (copy semantics: revert removes the install, keeps the
-// source).
-func TestDeferredCopyPublishesStagedSiblingWithoutOrganizer(t *testing.T) {
+// Deferred copy mode with MoveSubtitles disabled must not let the generic
+// staged-sibling lane bypass the organizer's selection policy.
+func TestDeferredCopyRetainsDisabledSubtitle(t *testing.T) {
 	base, root, source, subtitle, multipart, unrelated, match := pr260FencedFiles(t, "deferred-copy-sidecar-publish")
 	dest := filepath.Join(root, "library")
 	org := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize}, template.NewEngine(), nil)
@@ -1162,7 +1160,7 @@ func TestDeferredCopyPublishesStagedSiblingWithoutOrganizer(t *testing.T) {
 
 	require.FileExists(t, finalPlan.TargetPath)
 	subTarget := filepath.Join(filepath.Dir(finalPlan.TargetPath), stagedArtifactSiblingName(filepath.Base(source), filepath.Base(finalPlan.TargetPath), filepath.Base(subtitle)))
-	require.FileExists(t, subTarget, "staged sidecar published on copy mode")
+	require.NoFileExists(t, subTarget, "disabled subtitles never enter the staged fallback")
 	ret, _ := afero.Exists(base, source)
 	assert.True(t, ret, "copy leaves the video source in place")
 	retSub, _ := afero.Exists(base, subtitle)
@@ -1299,7 +1297,7 @@ func TestDeferredPublishGenericSiblingPinsInstallIntent(t *testing.T) {
 	dest := filepath.Join(root, "library")
 	real := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize}, template.NewEngine(), nil)
 	capture := &genericSiblingIntentCapture{}
-	orch := &applyOrchImpl{fs: base, organizer: real, revertLog: capture}
+	orch := &applyOrchImpl{fs: base, organizer: withStagedSubtitleFallback(base, real), revertLog: capture}
 	cmd := pr260ArtifactFailureCommand(&models.Movie{ContentID: "deferred-sibling-intent"}, match, dest)
 	cmd.Organize.Skip = false
 	cmd.Organize.MoveFiles = true
@@ -1334,7 +1332,7 @@ func TestDeferredPublishGenericSiblingPinsIntentFaults(t *testing.T) {
 		base, root, _, _, _, _, match := pr260FencedFiles(t, "deferred-sibling-intent-rec")
 		dest := filepath.Join(root, "library")
 		real := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize}, template.NewEngine(), nil)
-		orch := &applyOrchImpl{fs: base, organizer: real, revertLog: faultSiblingIntentRecorder{}}
+		orch := &applyOrchImpl{fs: base, organizer: withStagedSubtitleFallback(base, real), revertLog: faultSiblingIntentRecorder{}}
 		cmd := pr260ArtifactFailureCommand(&models.Movie{ContentID: "deferred-sibling-intent-rec"}, match, dest)
 		cmd.Organize.Skip = false
 		cmd.Organize.MoveFiles = true
@@ -1355,7 +1353,7 @@ func TestDeferredPublishGenericSiblingPinsIntentFaults(t *testing.T) {
 		base, root, _, _, _, _, match := pr260FencedFiles(t, "deferred-sibling-intent-dig")
 		dest := filepath.Join(root, "library")
 		real := organizer.NewOrganizer(base, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize}, template.NewEngine(), nil)
-		orch := &applyOrchImpl{fs: base, organizer: real, revertLog: noOpRevertLog{}}
+		orch := &applyOrchImpl{fs: base, organizer: withStagedSubtitleFallback(base, real), revertLog: noOpRevertLog{}}
 		cmd := pr260ArtifactFailureCommand(&models.Movie{ContentID: "deferred-sibling-intent-dig"}, match, dest)
 		cmd.Organize.Skip = false
 		cmd.Organize.MoveFiles = true

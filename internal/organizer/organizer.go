@@ -880,7 +880,7 @@ var (
 )
 
 func (o *Organizer) handleSubtitles(plan *OrganizePlan, result *OrganizeResult, install subtitleInstall) {
-	subtitles := o.subtitleHandler.FindSubtitles(o.subtitleFileInfo(plan))
+	subtitles := o.selectedSubtitles(o.subtitleFileInfo(plan))
 	if len(subtitles) == 0 {
 		return
 	}

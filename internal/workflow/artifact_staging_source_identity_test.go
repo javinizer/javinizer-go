@@ -731,7 +731,7 @@ func TestPrepareArtifactSkipsSymlinkedSibling(t *testing.T) {
 	dest := filepath.Join(root, "published")
 	cmd := pr260ArtifactFailureCommand(&models.Movie{ContentID: "admit-symlink-sibling"}, match, dest)
 	cmd.Organize.Skip = false
-	stage, _, err := (&applyOrchImpl{fs: base}).prepareArtifact(context.Background(), cmd)
+	stage, _, err := (&applyOrchImpl{fs: base, organizer: subtitleStagingOrganizer(base)}).prepareArtifact(context.Background(), cmd)
 	require.NoError(t, err)
 	defer stage.cleanup()
 	require.True(t, stage.sourceIdentity.known, "the regular video still admits")

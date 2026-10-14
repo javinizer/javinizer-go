@@ -64,6 +64,7 @@ func TestPR260PublicationFinalCleanupFaults(t *testing.T) {
 			}
 			dest := filepath.Join(root, "library")
 			orch := pr260RealApply(fs, &movie, organizer.MediaFormatConfig{}, nil, false)
+			orch.organizer = withStagedSubtitleFallback(fs, orch.organizer)
 			cmd := pr260FencedCommand(&movie, match, dest, pr260FencedCounter(t, db), operationmode.OperationModeOrganize, false, true, organizer.LinkModeNone, false, false)
 			stage, _, err := orch.prepareArtifact(context.Background(), cmd)
 			require.NoError(t, err)
@@ -113,6 +114,7 @@ func TestPR260PublicationSidecarFinalizeFaults(t *testing.T) {
 			fs := &pr260PublishFinalFS{Fs: base, op: tc.op}
 			dest := filepath.Join(root, "library")
 			orch := pr260RealApply(fs, &movie, organizer.MediaFormatConfig{}, nil, false)
+			orch.organizer = withStagedSubtitleFallback(fs, orch.organizer)
 			cmd := pr260FencedCommand(&movie, match, dest, pr260FencedCounter(t, db), operationmode.OperationModeOrganize, false, true, organizer.LinkModeNone, false, false)
 			stage, _, err := orch.prepareArtifact(context.Background(), cmd)
 			require.NoError(t, err)

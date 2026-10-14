@@ -16,7 +16,7 @@ func TestPR260ExactSiblingCopyAndMissingMetadataSource(t *testing.T) {
 	dest := filepath.Join(root, "published")
 	cmd := pr260ArtifactFailureCommand(&models.Movie{ContentID: "exact-sidecopy"}, match, dest)
 	cmd.Organize.Skip = false
-	stage, _, err := (&applyOrchImpl{fs: fs}).prepareArtifact(context.Background(), cmd)
+	stage, _, err := (&applyOrchImpl{fs: fs, organizer: subtitleStagingOrganizer(fs)}).prepareArtifact(context.Background(), cmd)
 	require.Nil(t, stage)
 	require.ErrorContains(t, err, "create staged source")
 	pr260AssertRetained(t, base, source, sub, part, other)

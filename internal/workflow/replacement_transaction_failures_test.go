@@ -223,7 +223,7 @@ func TestSidecarPublicationFaultsRestorePublishedVideo(t *testing.T) {
 			dest := filepath.Join(root, "library")
 			movie := models.Movie{ContentID: "sidecar-" + mode, RenderGeneration: 1}
 			real := organizer.NewOrganizer(fs, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize}, template.NewEngine(), nil)
-			orch := &applyOrchImpl{fs: fs, organizer: real}
+			orch := &applyOrchImpl{fs: fs, organizer: withStagedSubtitleFallback(fs, real)}
 			cmd := pr260ArtifactFailureCommand(&movie, match, dest)
 			cmd.Download = false
 			cmd.Organize.Skip = false
