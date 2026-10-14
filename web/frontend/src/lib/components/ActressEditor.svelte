@@ -40,7 +40,8 @@
 	let creditMovieKey: string | undefined;
 	let previousCredits: MovieCredit[] = [];
 	let updatingCreditID = $state<number | null>(null);
-	let creditUpdateErrors = $state<Record<number, boolean>>({});
+	type CreditOverrideAttempt = { name: string; userOverride: boolean };
+	let creditUpdateErrors = $state<Record<number, CreditOverrideAttempt | undefined>>({});
 	let showEditModal = $state(false);
 	let editingIndex = $state<number | null>(null);
 	let editingActress = $state<Actress>({
@@ -121,7 +122,7 @@
 			if (sameMovie && data === previousCredits) return;
 			const local = new Map(creditStates.map((credit) => [credit.id, credit]));
 			const drafts: Record<number, string> = {};
-			const errors: Record<number, boolean> = {};
+			const errors: Record<number, CreditOverrideAttempt | undefined> = {};
 			let keepExpanded = false;
 			creditStates = data.map((credit) => {
 				const next = { ...credit };
@@ -133,7 +134,13 @@
 					drafts[credit.id] = draft !== (old.override_name ?? '')
 						? draft
 						: (next.override_name ?? '');
-					errors[credit.id] = creditUpdateErrors[credit.id] ?? false;
+					const failed = creditUpdateErrors[credit.id];
+					// A lost response can report failure after the write reached the
+					// server. Confirm the attempted state, not the current draft, which
+					// the user may already have edited again.
+					errors[credit.id] = failed && !matchesCreditOverride(next, failed)
+						? failed
+						: undefined;
 					if (expandedCreditID === credit.id) keepExpanded = true;
 				} else {
 					drafts[credit.id] = next.override_name ?? '';
@@ -347,11 +354,17 @@
 		);
 	}
 
+	function matchesCreditOverride(credit: MovieCredit | undefined, attempt: CreditOverrideAttempt): boolean {
+		return !!credit &&
+			(credit.override_name ?? '') === attempt.name &&
+			(credit.user_override ?? false) === attempt.userOverride;
+	}
+
 	function toggleMovieNameEditor(credit: MovieCredit) {
 		if (typeof credit.id !== 'number') return;
 		expandedCreditID = expandedCreditID === credit.id ? null : credit.id;
 		overrideDrafts = { ...overrideDrafts, [credit.id]: credit.override_name ?? '' };
-		creditUpdateErrors = { ...creditUpdateErrors, [credit.id]: false };
+		creditUpdateErrors = { ...creditUpdateErrors, [credit.id]: undefined };
 	}
 
 	async function updateMovieSpecificName(credit: MovieCredit, clear: boolean) {
@@ -360,7 +373,7 @@
 		if (!clear && !name) return;
 
 		updatingCreditID = credit.id;
-		creditUpdateErrors = { ...creditUpdateErrors, [credit.id]: false };
+		creditUpdateErrors = { ...creditUpdateErrors, [credit.id]: undefined };
 		try {
 			await apiClient.updateCreditOverride(credit.id, name, !clear);
 			const nextCredits = (movie.credits ?? []).map((item) =>
@@ -373,7 +386,12 @@
 			await onCreditOverridePersisted?.(movie.code ?? movie.content_id ?? movie.id);
 		} catch (error) {
 			console.error('Failed to update movie-specific actress name:', error);
-			creditUpdateErrors = { ...creditUpdateErrors, [credit.id]: true };
+			const attempt = { name, userOverride: !clear };
+			const current = creditStates.find((item) => item.id === credit.id);
+			creditUpdateErrors = {
+				...creditUpdateErrors,
+				[credit.id]: matchesCreditOverride(current, attempt) ? undefined : attempt
+			};
 		} finally {
 			updatingCreditID = null;
 		}

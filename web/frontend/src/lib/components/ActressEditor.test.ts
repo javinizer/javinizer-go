@@ -265,6 +265,113 @@ describe('ActressEditor production persistence', () => {
 		await waitFor(() => expect(view.queryByRole('alert')).toBeNull());
 	});
 
+	it.each([
+		{ clear: false, newerDraft: false },
+		{ clear: false, newerDraft: true },
+		{ clear: true, newerDraft: false },
+		{ clear: true, newerDraft: true },
+	])(
+		'clears a confirmed failed override (clear=$clear, newer draft=$newerDraft)',
+		async ({ clear, newerDraft }) => {
+			vi.spyOn(console, 'error').mockImplementation(() => {});
+			vi.spyOn(apiClient, 'updateCreditOverride').mockRejectedValue(new Error('response lost'));
+			const movie = creditMovie();
+			if (clear)
+				movie.credits[0] = {
+					...movie.credits[0],
+					override_name: 'Existing name',
+					user_override: true,
+				};
+			const view = render(ActressEditor, { movie, onUpdate: vi.fn() });
+			await fireEvent.click(view.getByRole('button', { name: 'This movie only' }));
+			if (!clear) {
+				await fireEvent.input(view.getByLabelText('Name for this movie'), {
+					target: { value: 'Attempted name' },
+				});
+			}
+			await fireEvent.click(
+				view.getByRole('button', { name: clear ? 'Clear override' : 'Set name' }),
+			);
+			await view.findByRole('alert');
+			if (newerDraft) {
+				await fireEvent.input(view.getByLabelText('Name for this movie'), {
+					target: { value: 'Next unsaved draft' },
+				});
+			}
+			// Unrelated refreshes and partial matches cannot confirm the write.
+			await view.rerender({
+				movie: { ...movie, credits: movie.credits.map((credit) => ({ ...credit })) },
+			});
+			expect(view.getByRole('alert')).toBeTruthy();
+			await view.rerender({
+				movie: {
+					...movie,
+					credits: [
+						{
+							...movie.credits[0],
+							override_name: clear ? 'Existing name' : 'Attempted name',
+							user_override: false,
+						},
+					],
+				},
+			});
+			expect(view.getByRole('alert')).toBeTruthy();
+			const confirmed = {
+				...movie,
+				credits: [
+					{
+						...movie.credits[0],
+						override_name: clear ? '' : 'Attempted name',
+						user_override: !clear,
+					},
+				],
+			};
+			await view.rerender({ movie: confirmed });
+			expect(view.queryByRole('alert')).toBeNull();
+			expect((view.getByLabelText('Name for this movie') as HTMLInputElement).value).toBe(
+				newerDraft ? 'Next unsaved draft' : clear ? '' : 'Attempted name',
+			);
+			if (clear) expect(view.queryByText('Movie-specific name')).toBeNull();
+			else expect(view.getByText('Movie-specific name')).toBeTruthy();
+			await view.rerender({
+				movie: { ...confirmed, credits: confirmed.credits.map((credit) => ({ ...credit })) },
+			});
+			expect(view.queryByRole('alert')).toBeNull();
+		},
+	);
+
+	it('does not show a late request error after an authoritative snapshot confirmed the write', async () => {
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		let rejectRequest!: (reason: Error) => void;
+		vi.spyOn(apiClient, 'updateCreditOverride').mockImplementation(
+			() =>
+				new Promise<void>((_, reject) => {
+					rejectRequest = reject;
+				}),
+		);
+		const movie = creditMovie();
+		const view = render(ActressEditor, { movie, onUpdate: vi.fn() });
+		await fireEvent.click(view.getByRole('button', { name: 'This movie only' }));
+		await fireEvent.input(view.getByLabelText('Name for this movie'), {
+			target: { value: 'Confirmed name' },
+		});
+		await fireEvent.click(view.getByRole('button', { name: 'Set name' }));
+		await view.rerender({
+			movie: {
+				...movie,
+				credits: [{ ...movie.credits[0], override_name: 'Confirmed name', user_override: true }],
+			},
+		});
+		rejectRequest(new Error('response lost'));
+		await waitFor(() =>
+			expect((view.getByRole('button', { name: 'Set name' }) as HTMLButtonElement).disabled).toBe(
+				false,
+			),
+		);
+		expect(view.queryByRole('alert')).toBeNull();
+		expect(view.getByText('Movie-specific name')).toBeTruthy();
+	});
+
 	it.each(['id', 'code', 'content_id'] as const)(
 		'resets the editor when movie %s changes, even with reused credit IDs',
 		async (identity) => {
