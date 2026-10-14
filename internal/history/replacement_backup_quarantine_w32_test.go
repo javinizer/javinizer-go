@@ -463,7 +463,7 @@ func TestRestoreReplacementJournalW32_VanishedUnlinkUpgradesToJournalOnlyKind(t 
 	fs := &w8RemoveFs{Fs: base, notExist: true, fail: true}
 	repo := newP3OpRepo()
 	op, dest, backup := w25ArmedOpInDir(t, fs, repo, t.TempDir(), "W32V", []byte("new poster"), []byte("original poster"), "stamped")
-	fs.victim = backup
+	fs.victim = filepath.ToSlash(backup)
 
 	_, err := NewReverter(fs, repo).restoreReplacementJournal(context.Background(), op)
 	require.Error(t, err)
