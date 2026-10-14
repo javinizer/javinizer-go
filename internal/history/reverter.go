@@ -263,6 +263,8 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 		hydratedPendingIntent = op.NewPath != ""
 	}
 
+	r.recoverInPlaceMoveAnchor(op)
+
 	// P3: replay the replacement journal BEFORE the anchor check AND before
 	// any operation-type leg (codex P3 R2-1/R6-in-2): a deleted primary
 	// anchor must not strand independently recoverable overwritten media —
@@ -487,6 +489,32 @@ func pendingMoveIntentAnchor(op *models.BatchFileOperation) string {
 		}
 	}
 	return ""
+}
+
+func (r *Reverter) recoverInPlaceMoveAnchor(op *models.BatchFileOperation) {
+	if !op.InPlaceRenamed || op.OperationType != models.OperationTypeMove || op.NewPath == "" {
+		return
+	}
+	if _, err := lstatRestoreSource(r.fs, op.NewPath); !os.IsNotExist(err) {
+		return
+	}
+	if _, err := lstatRestoreSource(r.fs, op.OriginalPath); !os.IsNotExist(err) {
+		return
+	}
+	gf, err := models.ParseGeneratedFiles(op.GeneratedFiles)
+	if err != nil {
+		return
+	}
+	for _, fm := range gf.MoveBack {
+		if fm.OriginalPath != op.OriginalPath || fm.NewPath == "" {
+			continue
+		}
+		info, err := lstatRestoreSource(r.fs, fm.NewPath)
+		if err == nil && info.Mode().IsRegular() {
+			op.NewPath = fm.NewPath
+			return
+		}
+	}
 }
 
 func (r *Reverter) checkAnchor(ctx context.Context, op *models.BatchFileOperation) (*RevertFileResult, error) {
@@ -715,6 +743,29 @@ func cleanupGeneratedFilesFS(fs afero.Fs, op *models.BatchFileOperation, stopAt 
 	var gf models.GeneratedFilesJSON
 	if err := json.Unmarshal([]byte(op.GeneratedFiles), &gf); err != nil {
 		return
+	}
+	if op.InPlaceRenamed && op.OriginalDirPath != "" && op.NewPath != "" {
+		currentDir := filepath.Dir(op.NewPath)
+		remap := func(path string) string {
+			if path == "" {
+				return path
+			}
+			rel, err := filepath.Rel(currentDir, path)
+			if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+				return path
+			}
+			return filepath.Join(op.OriginalDirPath, rel)
+		}
+		for i := range gf.Delete {
+			gf.Delete[i] = remap(gf.Delete[i])
+		}
+		for i := range gf.PlannedDeletes {
+			gf.PlannedDeletes[i].Path = remap(gf.PlannedDeletes[i].Path)
+		}
+		for i := range gf.MoveBack {
+			gf.MoveBack[i].OriginalPath = remap(gf.MoveBack[i].OriginalPath)
+			gf.MoveBack[i].NewPath = remap(gf.MoveBack[i].NewPath)
+		}
 	}
 	// Track parent directories of deleted files for cleanup
 	dirsToCheck := make(map[string]bool)
