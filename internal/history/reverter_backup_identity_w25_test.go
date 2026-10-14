@@ -232,9 +232,31 @@ func w25SweepCrashOp(t *testing.T, fs afero.Fs, repo *p3OpRepo, movieID string, 
 // Sweeper crash-window restore with matching stamped facts: restore, unlink,
 // consume — healed.
 func TestSweepW25_CrashWindowRestoreMatchingFactsHeals(t *testing.T) {
-	fs := afero.NewMemMapFs()
+	// Use real read-only handles: MemMapFs treats O_RDONLY|O_NOFOLLOW as
+	// writable, so closing the restore source can change its mtime and make
+	// the correctly stamped backup fail cleanup across a Unix-second boundary.
+	fs := afero.NewOsFs()
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "poster.jpg")
+	backup := dest + ".dlbak.aaaaaaaaaaaaaaaa"
+	require.NoError(t, afero.WriteFile(fs, backup, []byte("original bytes"), config.FilePerm))
+	size, modUnix := w25StampBackupFacts(t, fs, backup)
 	repo := newP3OpRepo()
-	op, dest, backup := w25SweepCrashOp(t, fs, repo, "W25F", []byte("original bytes"), "stamped")
+	op := &models.BatchFileOperation{
+		BatchJobID:    "job-W25F",
+		MovieID:       "W25F",
+		OriginalPath:  filepath.Join(dir, "src", "W25F.mkv"),
+		NewPath:       filepath.Join(dir, "W25F.mkv"),
+		OperationType: models.OperationTypeMove,
+		GeneratedFiles: models.MarshalLedgerJSON(models.GeneratedFilesJSON{
+			Replacements: []models.ReplacementEntry{{
+				Destination: dest, Backup: backup, DestSeq: 1,
+				BackupSize: size, BackupModUnix: modUnix,
+			}},
+		}),
+		RevertStatus: models.RevertStatusApplied,
+	}
+	require.NoError(t, repo.Create(context.Background(), op))
 
 	healed, err := NewReplacementSweeper(fs, repo).Sweep(context.Background())
 	require.NoError(t, err)
