@@ -18,14 +18,18 @@ func recoverPublicationMove(fs afero.Fs, move models.FileMove) error {
 	if !entry.IdentityStrong {
 		return fmt.Errorf("publication move has no strong install identity: %s", move.NewPath)
 	}
+	if entry.IdentityMode == nil || *entry.IdentityMode > 0777 {
+		return fmt.Errorf("publication move has no valid installed permission mode: %s", move.NewPath)
+	}
+	mode := os.FileMode(*entry.IdentityMode)
 	proof := func(path string, info os.FileInfo) error {
 		dev, ino, ok := fsutil.BoundObjectIdentity(fs, path, info)
-		if !ok || !info.Mode().IsRegular() || dev != entry.IdentityDev || ino != entry.IdentityIno || info.Size() != entry.IdentitySize || info.ModTime().Unix() != entry.IdentityModUnix {
+		if !ok || !info.Mode().IsRegular() || dev != entry.IdentityDev || ino != entry.IdentityIno || info.Size() != entry.IdentitySize || info.ModTime().Unix() != entry.IdentityModUnix || info.Mode().Perm() != mode {
 			return fmt.Errorf("publication move identity changed: %s", path)
 		}
 		return nil
 	}
-	_, err := fsutil.MoveFileNoReplaceVerifiedMode(fs, move.NewPath, move.OriginalPath, proof, fsutil.StagingFileMode())
+	_, err := fsutil.MoveFileNoReplaceVerifiedMode(fs, move.NewPath, move.OriginalPath, proof, mode)
 	return err
 }
 

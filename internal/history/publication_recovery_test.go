@@ -13,7 +13,7 @@ import (
 )
 
 func TestRecoverPublicationMoveBoundIdentity(t *testing.T) {
-	for _, kind := range []string{"same", "foreign", "weak"} {
+	for _, kind := range []string{"same", "foreign", "weak", "missing mode", "invalid mode", "changed mode"} {
 		t.Run(kind, func(t *testing.T) {
 			fs := afero.NewOsFs()
 			root := t.TempDir()
@@ -23,7 +23,8 @@ func TestRecoverPublicationMoveBoundIdentity(t *testing.T) {
 			require.NoError(t, err)
 			dev, ino, strong := fsutil.BoundObjectIdentity(fs, source, info)
 			require.True(t, strong)
-			proof := &models.DeleteEntry{Path: source, IdentityPinned: true, IdentityStrong: true, IdentityDev: dev, IdentityIno: ino, IdentitySize: info.Size(), IdentityModUnix: info.ModTime().Unix()}
+			mode := uint32(info.Mode().Perm())
+			proof := &models.DeleteEntry{IdentityMode: &mode, Path: source, IdentityPinned: true, IdentityStrong: true, IdentityDev: dev, IdentityIno: ino, IdentitySize: info.Size(), IdentityModUnix: info.ModTime().Unix()}
 			if kind == "foreign" {
 				require.NoError(t, fs.Rename(source, source+".saved"))
 				require.NoError(t, afero.WriteFile(fs, source, []byte("bytes"), 0600))
@@ -31,6 +32,17 @@ func TestRecoverPublicationMoveBoundIdentity(t *testing.T) {
 			}
 			if kind == "weak" {
 				proof.IdentityStrong = false
+			}
+			if kind == "missing mode" {
+				proof.IdentityMode = nil
+			}
+			if kind == "invalid mode" {
+				invalid := uint32(01000)
+				proof.IdentityMode = &invalid
+			}
+			if kind == "changed mode" {
+				require.NoError(t, fs.Chmod(source, 0444))
+				t.Cleanup(func() { _ = fs.Chmod(source, 0600) })
 			}
 			err = recoverPublicationMove(fs, models.FileMove{OriginalPath: target, NewPath: source, Proof: proof})
 			if kind == "same" {
