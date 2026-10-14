@@ -263,6 +263,53 @@ jobs:
         fail_ci_if_error: true
         verbose: true
 
+    # Native before/after regression evidence for 85201f8:
+    # https://github.com/javinizer/javinizer-go/actions/runs/38643999346
+    - name: Verify fixed native Windows NFO paths and collect coverage
+      shell: python {0}
+      run: |
+        import json, pathlib, subprocess
+
+        result = subprocess.run([
+            "go", "test", "-short", "-count=1", "-json", "-covermode=atomic",
+            "-coverprofile=coverage-nfo-native-windows.out",
+            "./internal/history", "./internal/workflow", "-run", "^TestNFONative",
+        ], capture_output=True, text=True)
+        pathlib.Path("nfo-native-fixed.jsonl").write_text(result.stdout, encoding="utf-8")
+        print(result.stdout, end="")
+        print(result.stderr, end="")
+        assert result.returncode == 0, "Fixed native Windows NFO tests failed"
+        events = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
+        passed = {event.get("Test") for event in events if event["Action"] == "pass"}
+        assert not any(event["Action"] == "skip" for event in events), "Native NFO scenarios must not skip"
+        for name in ("TestNFONativeWindowsRestoreKeepsVolume", "TestNFONativeWindowsLegacyVolumeLossRefused", "TestNFONativeWindowsSnapshotRetainsVolume"):
+            assert name in passed, "Missing native Windows runtime proof: " + name
+        coverage = pathlib.Path("coverage-nfo-native-windows.out").read_text().splitlines()
+        assert coverage[0] == "mode: atomic" and len(coverage) > 1
+        for source in ("internal/history/reverter.go", "internal/workflow/revert_log.go"):
+            assert any(source + ":" in line and int(line.split()[-1]) > 0 for line in coverage[1:]), "Missing production coverage: " + source
+
+    - name: Upload native Windows NFO coverage to Codecov
+      uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7
+      with:
+        files: ./coverage-nfo-native-windows.out
+        disable_search: true
+        flags: unittests
+        name: codecov-javinizer-nfo-native-windows
+        token: ${{ secrets.CODECOV_TOKEN }}
+        fail_ci_if_error: true
+        verbose: true
+
+    - name: Archive native Windows NFO regression evidence
+      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      with:
+        name: nfo-native-windows-evidence
+        path: |
+          nfo-native-fixed.jsonl
+          coverage-nfo-native-windows.out
+        if-no-files-found: error
+        retention-days: 30
+
     - name: Run unit tests
       run: go test -short ./...
 

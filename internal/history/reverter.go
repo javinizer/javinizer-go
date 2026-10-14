@@ -716,6 +716,14 @@ func restoreNFOFS(ctx context.Context, fs afero.Fs, batchFileOpRepo database.Bat
 		return "", nil
 	}
 
+	// Older Windows snapshots could persist a rooted path after discarding its
+	// volume. The original video's volume cannot prove the NFO's old volume.
+	// Refuse that ambiguous native record before either restore mode writes.
+	if filepath.IsAbs(op.OriginalPath) && filepath.VolumeName(op.OriginalPath) != "" &&
+		filepath.VolumeName(nfoPath) == "" && os.IsPathSeparator(nfoPath[0]) {
+		return "", failRevert(ctx, batchFileOpRepo, op, models.RevertReasonNFORestoreFailed, "NFO snapshot path has no volume; cannot safely restore a legacy native path")
+	}
+
 	if hardFailure {
 		return restoreNFOHardFailure(ctx, fs, batchFileOpRepo, op, nfoPath)
 	}
@@ -728,10 +736,16 @@ func restoreNFOHardFailure(ctx context.Context, fs afero.Fs, batchFileOpRepo dat
 	if err != nil {
 		return "", failRevert(ctx, batchFileOpRepo, op, models.RevertReasonNFORestoreFailed, fmt.Sprintf("failed to canonicalize NFO path: %v", err))
 	}
+	if filepath.IsAbs(nfoDir) {
+		canonicalNfoDir = filepath.Clean(nfoDir)
+	}
 	if err := fs.MkdirAll(canonicalNfoDir, config.DirPerm); err != nil {
 		return "", failRevert(ctx, batchFileOpRepo, op, models.RevertReasonNFORestoreFailed, fmt.Sprintf("failed to create NFO directory: %v", err))
 	}
-	canonicalNfoPath := fsutil.NormalizePath(filepath.Join(canonicalNfoDir, filepath.Base(nfoPath)))
+	canonicalNfoPath := filepath.Join(canonicalNfoDir, filepath.Base(nfoPath))
+	if !filepath.IsAbs(nfoDir) {
+		canonicalNfoPath = fsutil.NormalizePath(canonicalNfoPath)
+	}
 	if err := afero.WriteFile(fs, canonicalNfoPath, []byte(op.NFOSnapshot), config.FilePerm); err != nil {
 		return "", failRevert(ctx, batchFileOpRepo, op, models.RevertReasonNFORestoreFailed, fmt.Sprintf("failed to restore NFO: %v", err))
 	}
@@ -746,8 +760,14 @@ func restoreNFOSoftFailure(fs afero.Fs, op *models.BatchFileOperation, nfoPath s
 		logging.Warnf("restoreNFOSoftFailure: failed to resolve absolute path for %q: %v", nfoDir, err)
 		canonicalNfoDir = filepath.Clean(nfoDir)
 	}
+	if filepath.IsAbs(nfoDir) {
+		canonicalNfoDir = filepath.Clean(nfoDir)
+	}
 	_ = fs.MkdirAll(canonicalNfoDir, config.DirPerm)
-	restorePath := fsutil.NormalizePath(filepath.Join(canonicalNfoDir, filepath.Base(nfoPath)))
+	restorePath := filepath.Join(canonicalNfoDir, filepath.Base(nfoPath))
+	if !filepath.IsAbs(nfoDir) {
+		restorePath = fsutil.NormalizePath(restorePath)
+	}
 	if err := afero.WriteFile(fs, restorePath, []byte(op.NFOSnapshot), config.FilePerm); err != nil {
 		logging.Warnf("Failed to restore NFO for op %d: %v (move-mode: treating as warning)", op.ID, err)
 		return fmt.Sprintf("NFO restore failed: %v", err), nil

@@ -282,6 +282,10 @@ func readNFOSnapshot(logger logging.Logger, fs afero.Fs, candidatePaths ...strin
 		if err != nil {
 			continue
 		}
+		// Native absolute paths are I/O addresses, not volume-free virtual keys.
+		if filepath.IsAbs(p) {
+			canonical = filepath.Clean(p)
+		}
 		data, err := afero.ReadFile(fs, canonical)
 		if err == nil {
 			return nfoSnapshotResult{Content: string(data), FoundPath: canonical}
