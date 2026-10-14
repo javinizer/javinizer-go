@@ -17,7 +17,7 @@ import (
 // openAIChatRequest represents a chat completion request for OpenAI-compatible APIs.
 type openAIChatRequest struct {
 	Model              string              `json:"model"`
-	Temperature        float64             `json:"temperature"`
+	Temperature        *float64            `json:"temperature,omitempty"`
 	Messages           []openAIChatMessage `json:"messages"`
 	ChatTemplateKwargs map[string]any      `json:"chat_template_kwargs,omitempty"`
 	ReasoningEffort    string              `json:"reasoning_effort,omitempty"`
@@ -227,17 +227,21 @@ func executeOpenAIChatTranslation(ctx context.Context, httpClient httpclient.HTT
 
 // openAIChatAdapter implements LLMChatAdapter for OpenAI-compatible chat APIs.
 type openAIChatAdapter struct {
-	headers map[string]string
+	headers         map[string]string
+	omitTemperature bool
 }
 
 func (a *openAIChatAdapter) BuildRequest(ctx context.Context, baseURL, model string, systemPrompt, userPrompt string, textCount int) (*http.Request, error) {
 	request := openAIChatRequest{
 		Model:       model,
-		Temperature: 0,
+		Temperature: new(float64),
 		Messages: []openAIChatMessage{
 			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: userPrompt},
 		},
+	}
+	if a.omitTemperature {
+		request.Temperature = nil
 	}
 	body, err := json.Marshal(request)
 	if err != nil {
