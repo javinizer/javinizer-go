@@ -11,6 +11,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/nfo"
+	"github.com/javinizer/javinizer-go/internal/operationmode"
 	"github.com/javinizer/javinizer-go/internal/organizer"
 	"github.com/javinizer/javinizer-go/internal/progress"
 	"github.com/javinizer/javinizer-go/internal/template"
@@ -138,6 +139,8 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult
 	if cmd.ArtifactCoordinator != nil {
 		defer cmd.ArtifactCoordinator.Done(cmd.ArtifactOwnerKey)
 	}
+
+	cmd = normalizeInPlaceLinkMode(cmd)
 
 	// Step 0: Begin revert log BEFORE any filesystem mutation.
 	opID, beginErr := o.beginRevertLog(ctx, cmd)
@@ -464,6 +467,31 @@ func (o *applyOrchImpl) stepOrganize(ctx context.Context, cmd ApplyCmd, state *a
 		}
 		steps.Organized = true
 		return nil
+	}
+	if state.artifact != nil && state.artifact.inPlace {
+		// Copy-only in-place work must stay inside the private stage. Planning
+		// against the real source preserves dedicated-folder selection and
+		// conflict checks, but the first execute may only rename staged files.
+		planner, ok := o.organizer.(artifactPlanExecutor)
+		if !ok {
+			return fmt.Errorf("in-place staged organize requires the organizer planning seam")
+		}
+		finalCmd := organizeCmd
+		finalCmd.Match = state.artifact.original.Match
+		finalCmd.Match.Path = state.artifact.sourcePath
+		finalCmd.DestDir = state.artifact.original.DestPath
+		plan, err := planner.PlanOrganize(ctx, finalCmd)
+		if err != nil {
+			return err
+		}
+		if err := state.artifact.setInPlaceFinalRoot(plan.TargetDir); err != nil {
+			return err
+		}
+		if len(plan.Conflicts) != 0 {
+			return fmt.Errorf("in-place staged organize destination conflict: %s", plan.Conflicts[0].Path)
+		}
+		organizeCmd.OperationMode = operationmode.OperationModeInPlaceNoRenameFolder
+		organizeCmd.StagingFinalDir = state.artifact.finalRoot
 	}
 	var organizeErr error
 	state.organizeResult, organizeErr = o.organizer.Organize(ctx, organizeCmd)

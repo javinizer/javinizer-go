@@ -81,13 +81,16 @@ func TestDeferredCopyDuplicateSubtitleEndpointsSinglePin(t *testing.T) {
 	require.NoError(t, err)
 	wantPart, err := artifactDigest(base, multipart)
 	require.NoError(t, err)
+	wantPartInfo, wantPartPartial, err := fsutil.PartialCopyDigest(base, multipart)
+	require.NoError(t, err)
+	partTarget := filepath.Join(finalPlan.TargetDir, "movie-cd2.mp4")
 	require.Equal(t, []models.DeleteEntry{
 		{Path: subMoves[0].NewPath, SHA256: wantFirst},
 		{Path: finalPlan.TargetPath, CopySize: wantVideoInfo.Size(), CopyPartialSHA256: wantVideoPartial},
-		{Path: filepath.Join(finalPlan.TargetDir, "movie-cd2.mp4"), SHA256: wantPart},
-	}, ledger.deletePaths, "exactly one pin per normalized endpoint, digest of the FIRST planned source — never the skipped duplicate's bytes (the tree lane pins its own multipart install); the primary pins the interim partial shape (codex P2, PRRT_kwDORn9KaM6nBUrF)")
-	require.Equal(t, []sealedCopyDigest{{path: finalPlan.TargetPath, sha256: wantVideo}}, ledger.sealsCaptured,
-		"the publish stream's teed digest seals the interim pin — and it must equal the independently computed source digest, proving the tee counted the admitted bytes")
+		{Path: partTarget, CopySize: wantPartInfo.Size(), CopyPartialSHA256: wantPartPartial},
+	}, ledger.deletePaths, "one subtitle pin follows the first planned source; primary and multipart pins stay partial until verified publication")
+	require.Equal(t, []sealedCopyDigest{{path: finalPlan.TargetPath, sha256: wantVideo}, {path: partTarget, sha256: wantPart}}, ledger.sealsCaptured,
+		"only verified installs seal primary and multipart ownership with the admitted bytes' full digest")
 	pinHits := 0
 	for _, pd := range ledger.deletePaths {
 		if pd.Path == subMoves[0].NewPath {
@@ -439,9 +442,9 @@ func TestDeferredMoveDuplicateWinnerRefusalBlocksSecond(t *testing.T) {
 // refusal — bytes the surviving pin can never authenticate, so a later
 // revert's verified unlink refused and STRANDED the installed sidecar. Now
 // the duplicate is blocked (Skipped, never Copied), the released pin is
-// reconciled away, and the endpoint settles only through hash-coherent lanes
-// (the staged-twin tree install pins exactly the bytes it lands), so
-// recovery reaps precisely what this apply published.
+// reconciled away, and the skipped duplicate stays excluded even though the
+// shared endpoint is vacant. The failed winner also retains its refusal:
+// neither staged twin can be published under an alternate fallback name.
 func TestDeferredCopyDuplicateWinnerRefusalBlocksSecond(t *testing.T) {
 	db, _ := pr260ArtifactDB(t)
 	slug := "copy-dup-winner-refusal"
@@ -493,40 +496,18 @@ func TestDeferredCopyDuplicateWinnerRefusalBlocksSecond(t *testing.T) {
 	assert.True(t, dup.Skipped, "strict first-wins blocks the duplicate after the winner's failed attempt")
 	assert.False(t, dup.Copied, "pre-fix the duplicate copied bytes the armed pin could never authenticate")
 
-	// The armed first-source pin released and reconciled away; the endpoint
-	// reaches the destination only through the staged-twin tree install, which
-	// pins exactly the bytes it lands — so recovery reaps the endpoint instead
-	// of stranding it behind a hash it can never match.
+	// Both refused sources stay out of the generic tree. A failed normalized
+	// install cannot authorize an unnormalized output or overwrite a foreign
+	// fallback, and neither endpoint may acquire a destructive ledger entry.
 	stem := strings.TrimSuffix(filepath.Base(video), filepath.Ext(video))
 	winnerTwin := filepath.Join(filepath.Dir(video), stem+".en.srt")
-	twinBytes, err := afero.ReadFile(fs, winnerTwin)
-	require.NoError(t, err, "the refused winner's admitted staged twin installs through the tree (un-normalized leaf)")
-	assert.Equal(t, "english-sub-first", string(twinBytes))
-	endpointBytes, err := afero.ReadFile(fs, subTarget)
-	require.NoError(t, err, "the shared endpoint is delivered by the hash-pinned tree twin")
-	assert.Equal(t, "english-sub-second", string(endpointBytes))
+	require.NoFileExists(t, winnerTwin, "a failed subtitle cannot retry through its staged twin")
+	require.NoFileExists(t, subTarget, "the skipped duplicate must not re-enter publication through its staged twin")
 	ledger := p3Ledger(t, repo, result.OperationID)
-	// Nothing graduated through the organizer lane (no Copied seat restates the
-	// endpoint at completion), so the tree installs stay hash-pinned planned
-	// deletes the reverter verifies — exactly the crash-window shape. The
-	// endpoint's single surviving pin must authenticate the bytes that actually
-	// landed: pre-fix it carried the FIRST source's armed digest against the
-	// second source's installed bytes (unlinkable on mismatch in the crash
-	// window); post-fix the failed winner's armed pin is retracted and the
-	// landed twin's own pin takes over.
-	var endpointPins []models.DeleteEntry
 	for _, pd := range ledger.PlannedDeletes {
-		if pd.Path == subTarget {
-			endpointPins = append(endpointPins, pd)
-		}
+		assert.NotEqual(t, subTarget, pd.Path, "the skipped duplicate has no surviving install pin")
 	}
-	require.Len(t, endpointPins, 1, "exactly one surviving pin for the normalized endpoint")
-	landedDigest, err := artifactDigest(fs, subSecond)
-	require.NoError(t, err)
-	assert.Equal(t, landedDigest, endpointPins[0].SHA256, "the surviving pin authenticates the bytes that actually landed")
-	failedWinnerDigest, err := artifactDigest(fs, aside)
-	require.NoError(t, err)
-	assert.NotEqual(t, failedWinnerDigest, endpointPins[0].SHA256, "the retracted armed pin carried the failed winner's digest — it must not survive")
+	assert.NotContains(t, ledger.Delete, subTarget)
 	for _, rp := range ledger.Replacements {
 		assert.NotEqual(t, subTarget, rp.Destination, "the endpoint never registered as a replacement")
 	}
@@ -537,7 +518,7 @@ func TestDeferredCopyDuplicateWinnerRefusalBlocksSecond(t *testing.T) {
 	for _, reaped := range []string{subTarget, winnerTwin} {
 		gone, statErr := afero.Exists(fs, reaped)
 		require.NoError(t, statErr)
-		assert.False(t, gone, "revert reaps the tree-installed sidecar: %s", reaped)
+		assert.False(t, gone, "neither refused subtitle is published before or after revert: %s", reaped)
 	}
 	require.FileExists(t, video, "copy-mode revert retains the installed primary")
 	pr260AssertRetained(t, fs, source, subFirst, multipart, unrelated)

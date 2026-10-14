@@ -106,7 +106,7 @@ func TestPrepareArtifactOrganizeDefersMultipartSiblingCopies(t *testing.T) {
 		Download:         true,
 	}
 
-	stage, staged, err := (&applyOrchImpl{fs: base}).prepareArtifact(context.Background(), cmd)
+	stage, staged, err := (&applyOrchImpl{fs: base, organizer: subtitleStagingOrganizer(base)}).prepareArtifact(context.Background(), cmd)
 	require.NoError(t, err)
 	require.NotNil(t, stage)
 	defer stage.cleanup()
