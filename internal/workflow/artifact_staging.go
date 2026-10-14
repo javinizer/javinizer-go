@@ -73,6 +73,7 @@ type artifactStage struct {
 	stagedSource       string
 	siblings           []artifactSibling
 	inPlace            bool
+	inPlaceResident    bool
 	videoDeferred      bool
 	original           ApplyCmd
 	rejected           bool
@@ -687,10 +688,13 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 		if err := batch.Preflight(append([]string{plan.TargetPath}, artifactDestinations...)); err != nil {
 			return err
 		}
-		if !s.inPlace && s.videoDeferred && filepath.Clean(plan.SourcePath) == filepath.Clean(s.sourcePath) && filepath.Clean(plan.SourcePath) != filepath.Clean(plan.TargetPath) {
+		if (!s.inPlace || s.original.Organize.MoveFiles) && s.videoDeferred && filepath.Clean(plan.SourcePath) == filepath.Clean(s.sourcePath) && filepath.Clean(plan.SourcePath) != filepath.Clean(plan.TargetPath) {
 			primaryResident, err = s.stagedVideoResident("", plan.TargetPath, true)
 			if err != nil {
 				return err
+			}
+			if s.inPlaceResident && !primaryResident {
+				return fmt.Errorf("resident primary changed after directory relocation")
 			}
 			if primaryResident {
 				s.residentPrimary = true

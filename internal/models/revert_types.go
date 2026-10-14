@@ -12,6 +12,7 @@ import (
 type GeneratedFilesJSON struct {
 	// PrimaryResident excludes an admission-proven pre-existing primary from
 	// Undo ownership, while preserving independently installed artifact inverses.
+	DirectoryMove   *DirectoryMove     `json:"directory_move,omitempty"`
 	PrimaryResident bool               `json:"primary_resident,omitempty"`
 	Delete          []string           `json:"delete,omitempty"`       // Files to delete on revert (NFO, images, screenshots)
 	MoveBack        []FileMove         `json:"move_back,omitempty"`    // Files to move back on revert (subtitles)
@@ -291,4 +292,13 @@ func ParseGeneratedFiles(raw string) (GeneratedFilesJSON, error) {
 		return GeneratedFilesJSON{}, err
 	}
 	return gf, nil
+}
+
+// DirectoryMove owns only a physical directory relocation, never a resident
+// primary filename. Locations includes durable pre-publication scratch names.
+type DirectoryMove struct {
+	Original  string   `json:"original"`
+	Locations []string `json:"locations"`
+	Device    uint64   `json:"device"`
+	Inode     uint64   `json:"inode"`
 }
