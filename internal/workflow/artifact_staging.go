@@ -756,7 +756,10 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 				}
 			}
 		}
-		if s.videoDeferred && !publishMove {
+		// ExecuteOrganizePlan reports subtitles without installing them when the
+		// primary plan is a no-op. Do not claim or pin those planned endpoints:
+		// they remain unowned, and the publish reconciliation has no install.
+		if s.videoDeferred && !publishMove && plan.WillMove {
 			// Copy/link executions install sidecars directly into the destination
 			// during execute. Arm each as a rollback-tracked created output now, or
 			// a later failed leg would strand an untracked copy at the destination.
