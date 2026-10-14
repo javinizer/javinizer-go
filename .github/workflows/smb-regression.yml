@@ -1,0 +1,58 @@
+name: Synthetic Windows SMB Regression
+
+# Publication of changes to this workflow/script requires independent code and
+# security review FIRST: opening or updating a matching PR executes the job.
+on:
+  pull_request:
+    paths:
+      - .github/workflows/smb-regression.yml
+      - scripts/test_smb_windows.ps1
+      - internal/workflow/**
+      - internal/organizer/**
+      - internal/fsutil/**
+      - internal/downloader/**
+      - internal/nfo/**
+      - go.mod
+      - go.sum
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+jobs:
+  smb-regression:
+    name: Real UNC synthetic regression (Windows SMB3)
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - name: Checkout reviewed candidate
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Parse harness without executing setup
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $parseErrors = $null
+          $null = [System.Management.Automation.Language.Parser]::ParseFile("$PWD/scripts/test_smb_windows.ps1", [ref]$tokens, [ref]$parseErrors)
+          if ($parseErrors.Count) { $parseErrors | Format-List; throw 'SMB harness parse failed' }
+      - name: Build native Windows tests before creating a share
+        shell: pwsh
+        run: |
+          go test -c -o "$env:RUNNER_TEMP/javinizer-smb-tests.exe" ./internal/workflow
+          if ($LASTEXITCODE -ne 0) { throw 'Windows test compilation failed' }
+      - name: Verify isolation and run synthetic UNC cases
+        shell: pwsh
+        run: ./scripts/test_smb_windows.ps1
+      - name: Verify exact-resource cleanup even after failure
+        if: always()
+        shell: pwsh
+        run: ./scripts/test_smb_windows.ps1 -CleanupOnly
