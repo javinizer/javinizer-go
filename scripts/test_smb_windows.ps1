@@ -98,6 +98,38 @@ function Assert-SameSet($Actual, $Expected, [string]$Message) {
     Assert-That ((@($Actual | Sort-Object) -join ',') -eq (@($Expected | Sort-Object) -join ',')) $Message
 }
 
+function Write-EnforcementDiagnostics($Rule) {
+    # Read-only evidence for a rejected guard. This does not relax enforcement
+    # or continue to share creation when a provider returns unfamiliar values.
+    $statuses = @($Rule.EnforcementStatus | ForEach-Object {
+        $type = $_.GetType()
+        $enumValues = @()
+        if ($type.IsEnum) {
+            $enumValues = @([Enum]::GetValues($type) | ForEach-Object {
+                [ordered]@{ Name = [string]$_; Value = [int]$_ }
+            })
+        }
+        [ordered]@{ Name = [string]$_; Value = [int]$_; Type = $type.FullName; EnumValues = $enumValues }
+    })
+    $class = Get-CimClass -Namespace root/standardcimv2 -ClassName MSFT_NetFirewallRule
+    $qualifiers = @($class.CimClassProperties['EnforcementStatus'].Qualifiers | ForEach-Object {
+        [ordered]@{ Name = $_.Name; Value = $_.Value }
+    })
+    $firewall = New-Object -ComObject HNetCfg.FwPolicy2
+    try { $activeProfileMask = [int]$firewall.CurrentProfileTypes } finally { $null = [Runtime.InteropServices.Marshal]::FinalReleaseComObject($firewall) }
+    $diagnostic = [ordered]@{
+        Rule = ($Rule | Select-Object -Property @('Name', 'Enabled', 'Direction', 'Action', 'Profile', 'PrimaryStatus', 'Status', 'StatusCode'))
+        Enforcement = $statuses
+        EnforcementCimQualifiers = $qualifiers
+        CurrentProfileTypes = $activeProfileMask
+        FirewallProfiles = @(Get-NetFirewallProfile -PolicyStore ActiveStore | Select-Object -Property @('Name', 'Enabled', 'AllowLocalFirewallRules', 'DisabledInterfaceAliases'))
+        ConnectionProfiles = @(Get-NetConnectionProfile | Select-Object -Property @('InterfaceIndex', 'InterfaceAlias', 'NetworkCategory', 'IPv4Connectivity', 'IPv6Connectivity'))
+        IPInterfaces = @(Get-NetIPInterface | Select-Object -Property @('InterfaceIndex', 'InterfaceAlias', 'AddressFamily', 'ConnectionState'))
+        IPAddresses = @(Get-NetIPAddress | Select-Object -Property @('InterfaceIndex', 'InterfaceAlias', 'AddressFamily', 'IPAddress', 'AddressState'))
+    }
+    Write-Host ('Rejected enforcement guard diagnostics: ' + ($diagnostic | ConvertTo-Json -Depth 8 -Compress))
+}
+
 function Assert-Isolation($State) {
     Assert-ServicesAndProfiles
     foreach ($spec in $ruleSpecs) {
@@ -107,7 +139,9 @@ function Assert-Isolation($State) {
         $rule = $rules[0]
         Assert-That ([string]$rule.Enabled -eq 'True' -and [string]$rule.Action -eq 'Block' -and [string]$rule.Direction -eq $spec.Direction -and [string]$rule.Profile -eq 'Any') "Incorrect effective isolation rule: $name"
         Assert-That ($rule.Description -ceq $State.Token) "Isolation rule has the wrong ownership marker: $name"
-        Assert-That ([string]$rule.PrimaryStatus -eq 'OK' -and @($rule.EnforcementStatus).Count -eq 1 -and [string]$rule.EnforcementStatus[0] -eq 'Full') "Isolation rule is not fully enforced: $name ($($rule.EnforcementStatus))"
+        $fullyEnforced = [string]$rule.PrimaryStatus -eq 'OK' -and @($rule.EnforcementStatus).Count -eq 1 -and [string]$rule.EnforcementStatus[0] -eq 'Full'
+        if (-not $fullyEnforced) { Write-EnforcementDiagnostics $rule }
+        Assert-That $fullyEnforced "Isolation rule is not fully enforced: $name ($($rule.EnforcementStatus))"
         $address = $rule | Get-NetFirewallAddressFilter
         Assert-SameSet ($address.RemoteAddress | ForEach-Object { Normalize-Address $_ }) ($remoteAddresses | ForEach-Object { Normalize-Address $_ }) "Wrong address coverage: $name"
         Assert-SameSet $address.LocalAddress @('Any') "Local addresses restricted unexpectedly: $name"

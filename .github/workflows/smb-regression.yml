@@ -12,6 +12,9 @@ on:
       - internal/fsutil/**
       - internal/downloader/**
       - internal/nfo/**
+      - internal/operationmode/**
+      - internal/template/**
+      - internal/models/**
       - go.mod
       - go.sum
   workflow_dispatch:
