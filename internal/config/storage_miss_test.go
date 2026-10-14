@@ -352,11 +352,11 @@ func TestSave_ReadPermissionDenied(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// replaceFileOnWindows: 81.2% → uncovered: stat error that is NOT IsNotExist
+// replaceFile: 81.2% → uncovered: stat error that is NOT IsNotExist
 // (e.g., permission denied on stat).
 // ---------------------------------------------------------------------------
 
-func TestReplaceFileOnWindows_StatErrorNotNotExist(t *testing.T) {
+func TestReplaceFile_PermissionError(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix-specific permission test")
 	}
@@ -378,9 +378,10 @@ func TestReplaceFileOnWindows_StatErrorNotNotExist(t *testing.T) {
 	require.NoError(t, os.Chmod(subdir, 0o000))
 	defer os.Chmod(subdir, 0o755)
 
-	err := replaceFileOnWindows(blockedPath, tmpPath)
+	err := replaceFile(blockedPath, tmpPath)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to stat destination")
+	assert.Contains(t, err.Error(), "failed to atomically replace config file")
+	assert.ErrorIs(t, err, os.ErrPermission)
 }
 
 // ---------------------------------------------------------------------------

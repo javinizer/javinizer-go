@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -339,15 +340,20 @@ func TestAtomicReplaceFile_ConcurrentWrites(t *testing.T) {
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	errs := make([]error, 0, writers)
+	succeeded := make(map[string]bool, writers)
 
 	for i := range writers {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			if err := atomicReplaceFile(path, []byte("writer-"+string(rune('0'+idx))), 0644); err != nil {
-				mu.Lock()
-				errs = append(errs, err)
-				mu.Unlock()
+			payload := fmt.Sprintf("writer-%d", idx)
+			err := atomicReplaceFile(path, []byte(payload), 0644)
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				errs = append(errs, fmt.Errorf("writer %d: %w", idx, err))
+			} else {
+				succeeded[payload] = true
 			}
 		}(i)
 		// Small sleep to reduce temp filename collisions from identical nanosecond timestamps.
@@ -357,6 +363,15 @@ func TestAtomicReplaceFile_ConcurrentWrites(t *testing.T) {
 	}
 
 	wg.Wait()
+	if len(errs) > 0 {
+		t.Logf("writer errors: %v; successful payloads: %v", errs, succeeded)
+	}
+	t.Cleanup(func() {
+		if t.Failed() {
+			entries, err := os.ReadDir(dir)
+			t.Logf("surviving files: %v; directory read error: %v", entries, err)
+		}
+	})
 
 	// At least some writers should have succeeded; temp file collisions are possible
 	// on fast machines, so we tolerate partial failures.
@@ -368,6 +383,7 @@ func TestAtomicReplaceFile_ConcurrentWrites(t *testing.T) {
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
 	assert.NotEmpty(t, data)
+	assert.True(t, succeeded[string(data)], "final config must belong to a successful writer, got %q", data)
 }
 
 func TestAtomicReplaceFile_EmptyData(t *testing.T) {

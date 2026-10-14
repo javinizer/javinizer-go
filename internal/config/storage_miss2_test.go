@@ -369,11 +369,11 @@ func TestSave_NewFileCreation(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// replaceFileOnWindows: 87.5% → miss line 404 (stat error not IsNotExist).
+// replaceFile: 87.5% → miss line 404 (stat error not IsNotExist).
 // This requires the destination to be in an inaccessible directory.
 // ---------------------------------------------------------------------------
 
-func TestReplaceFileOnWindows_StatPermissionDenied(t *testing.T) {
+func TestReplaceFile_PermissionDenied(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix-specific permission test")
 	}
@@ -384,26 +384,26 @@ func TestReplaceFileOnWindows_StatPermissionDenied(t *testing.T) {
 	tmpPath := filepath.Join(dir, "tmp.yaml")
 	require.NoError(t, os.WriteFile(tmpPath, []byte("data"), 0o644))
 
-	// Make the directory inaccessible so os.Stat fails with permission error
+	// Make the directory inaccessible so Rename fails with permission error
 	require.NoError(t, os.Chmod(subdir, 0o000))
 	defer os.Chmod(subdir, 0o755)
 
 	destPath := filepath.Join(subdir, "dest.yaml")
-	err := replaceFileOnWindows(destPath, tmpPath)
+	err := replaceFile(destPath, tmpPath)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to stat destination")
+	assert.Contains(t, err.Error(), "failed to atomically replace config file")
+	assert.ErrorIs(t, err, os.ErrPermission)
 }
 
-func TestReplaceFileOnWindows_BackupRestoreOnFailure(t *testing.T) {
-	// When the rename from tmp to dest fails, and a backup was created,
-	// the backup should be restored.
+func TestReplaceFile_PreservesDestinationOnFailure(t *testing.T) {
+	// A failed rename must preserve the original destination.
 	dir := t.TempDir()
 	destPath := filepath.Join(dir, "dest.yaml")
 	require.NoError(t, os.WriteFile(destPath, []byte("original"), 0o644))
 
 	// Use a non-existent tmp file to trigger rename failure
 	missingTmp := filepath.Join(dir, "nonexistent-tmp.yaml")
-	err := replaceFileOnWindows(destPath, missingTmp)
+	err := replaceFile(destPath, missingTmp)
 	require.Error(t, err)
 
 	// Original content should be preserved
@@ -654,17 +654,17 @@ func TestShouldReapConfigLock_CorruptLockStale(t *testing.T) {
 
 // ---------------------------------------------------------------------------
 // atomicReplaceFile: test the Windows rename path by calling
-// replaceFileOnWindows directly.
+// replaceFile directly.
 // ---------------------------------------------------------------------------
 
-func TestAtomicReplaceFile_WindowsPathViaReplaceFileOnWindows(t *testing.T) {
+func TestAtomicReplaceFile_WindowsPathViaReplaceFile(t *testing.T) {
 	dir := t.TempDir()
 	destPath := filepath.Join(dir, "dest.yaml")
 	tmpPath := filepath.Join(dir, "tmp.yaml")
 
 	// Test case: destination doesn't exist, tmp exists
 	require.NoError(t, os.WriteFile(tmpPath, []byte("new-content"), 0o644))
-	require.NoError(t, replaceFileOnWindows(destPath, tmpPath))
+	require.NoError(t, replaceFile(destPath, tmpPath))
 
 	data, err := os.ReadFile(destPath)
 	require.NoError(t, err)

@@ -199,6 +199,11 @@ jobs:
     - name: Run unit tests
       run: go test -short ./...
 
+    - name: Verify native Windows config publication and initialization
+      run: >-
+        go test -short -count=20 -v ./internal/config
+        -run '^(TestAtomicReplace_WindowsSharingViolationPreservesCommittedConfig|TestAtomicReplaceFile_ConcurrentWrites|TestAtomicReplace_(FailuresPreserveCommittedConfig|LeavesDestinationVisibleUntilPublication)|TestLoadOrCreate_(PreservesSaveAfterMissingStat|HoldsLockThroughInitDefaults|ConcurrentInitializersPreserveWinner|InitialConfigIsPublishedOnlyWhenComplete))$'
+
     - name: Verify Windows artifact regressions with native-volume evidence
       run: >-
         go test -short -count=1 -v ./internal/workflow ./internal/organizer ./internal/fsutil

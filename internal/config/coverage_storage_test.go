@@ -137,30 +137,49 @@ func TestCovAtomicReplace_RenameError(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to atomically replace config file")
 }
 
-func TestCovReplaceFileOnWindows_BackupRenameError(t *testing.T) {
+func TestCovReplaceFile_RenameErrorPreservesDestination(t *testing.T) {
 	base := afero.NewMemMapFs()
 	require.NoError(t, afero.WriteFile(base, "/dest.yaml", []byte("old"), 0o644))
-	cs := NewConfigStorage(&countingFs{Fs: base, openFailAfter: -1, renameFailAfter: 0}, noopLockFactory)
-	err := cs.replaceFileOnWindows("/dest.yaml", "/tmp.yaml")
+	require.NoError(t, afero.WriteFile(base, "/tmp.yaml", []byte("new"), 0o644))
+	fs := &countingFs{Fs: base, openFailAfter: -1, renameFailAfter: 0}
+	cs := NewConfigStorage(fs, noopLockFactory)
+	err := cs.replaceFile("/dest.yaml", "/tmp.yaml")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to create backup")
+	assert.Contains(t, err.Error(), "failed to atomically replace config file")
+	assert.Contains(t, err.Error(), "rename boom")
+	assert.Equal(t, 1, fs.renameCount, "a failed rename must not move the destination to a backup")
+	got, readErr := afero.ReadFile(base, "/dest.yaml")
+	require.NoError(t, readErr)
+	assert.Equal(t, "old", string(got))
+	pending, readErr := afero.ReadFile(base, "/tmp.yaml")
+	require.NoError(t, readErr)
+	assert.Equal(t, "new", string(pending))
 }
 
-func TestCovReplaceFileOnWindows_RestoreError(t *testing.T) {
+func TestCovReplaceFile_MissingTempPreservesDestination(t *testing.T) {
 	base := afero.NewMemMapFs()
 	require.NoError(t, afero.WriteFile(base, "/dest.yaml", []byte("old"), 0o644))
-	cs := NewConfigStorage(&countingFs{Fs: base, openFailAfter: -1, renameFailAfter: 1}, noopLockFactory)
-	err := cs.replaceFileOnWindows("/dest.yaml", "/missing-tmp.yaml")
+	fs := &countingFs{Fs: base, openFailAfter: -1, renameFailAfter: 1}
+	cs := NewConfigStorage(fs, noopLockFactory)
+	err := cs.replaceFile("/dest.yaml", "/missing-tmp.yaml")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "rollback failed")
+	assert.ErrorIs(t, err, os.ErrNotExist)
+	assert.Contains(t, err.Error(), "failed to atomically replace config file")
+	assert.Equal(t, 1, fs.renameCount, "failure must not require rollback")
+	got, readErr := afero.ReadFile(base, "/dest.yaml")
+	require.NoError(t, readErr)
+	assert.Equal(t, "old", string(got))
 }
 
-func TestCovReplaceFileOnWindows_StatError(t *testing.T) {
+func TestCovReplaceFile_DoesNotNeedDestinationStat(t *testing.T) {
 	base := afero.NewMemMapFs()
+	require.NoError(t, afero.WriteFile(base, "/dest.yaml", []byte("old"), 0o644))
+	require.NoError(t, afero.WriteFile(base, "/tmp.yaml", []byte("new"), 0o644))
 	cs := NewConfigStorage(&statErrFs{Fs: base, statErr: errors.New("stat boom")}, noopLockFactory)
-	err := cs.replaceFileOnWindows("/dest.yaml", "/tmp.yaml")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to stat destination")
+	require.NoError(t, cs.replaceFile("/dest.yaml", "/tmp.yaml"))
+	got, err := afero.ReadFile(base, "/dest.yaml")
+	require.NoError(t, err)
+	assert.Equal(t, "new", string(got))
 }
 
 func TestCovUpdate_LockAcquireError(t *testing.T) {
