@@ -238,11 +238,20 @@ func TestArtifactStageReadonlyLongFolder(t *testing.T) {
 	source := filepath.Join(root, "ABC-123.mkv")
 	require.NoError(t, afero.WriteFile(fs, source, []byte("video"), 0o644))
 	movie := models.Movie{ID: "ABC-123", ContentID: "long-folder", RenderGeneration: 1}
-	org := organizer.NewOrganizer(fs, &organizer.Config{FolderFormat: strings.Repeat("m", 140), FileFormat: "movie", RenameFile: true, MaxPathLength: 240, OperationMode: operationmode.OperationModeOrganize}, template.NewEngine(), nil)
+	folderName := strings.Repeat("m", 140)
+	expectedPath := filepath.Join(library, folderName, "movie.mkv")
+	// Budget from the actual temp-root length: Windows runners have longer
+	// roots, but the final path must be valid on every platform. The small
+	// spare budget still cannot accommodate a duplicated folder template.
+	maxPathLength := len(expectedPath) + 8
+	org := organizer.NewOrganizer(fs, &organizer.Config{FolderFormat: folderName, FileFormat: "movie", RenameFile: true, MaxPathLength: maxPathLength, OperationMode: operationmode.OperationModeOrganize}, template.NewEngine(), nil)
 	match := models.FileMatchInfo{Path: source, Name: filepath.Base(source), Extension: ".mkv", MovieID: movie.ID}
 	plan, err := org.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: match, Movie: &movie, DestDir: library, MoveFiles: true, OperationMode: operationmode.OperationModeOrganize})
 	require.NoError(t, err)
-	require.LessOrEqual(t, len(plan.TargetPath), 240)
+	require.Equal(t, expectedPath, plan.TargetPath)
+	require.LessOrEqual(t, len(plan.TargetPath), maxPathLength)
+	_, stagedErr := org.PlanOrganize(context.Background(), organizer.OrganizeCmd{Match: match, Movie: &movie, DestDir: filepath.Join(plan.TargetDir, artifactStageDirPrefix+"probe"), MoveFiles: true, OperationMode: operationmode.OperationModeOrganize})
+	require.Error(t, stagedErr, "the old temporary-root planning must still exceed this fixture's path budget")
 	require.NoError(t, fs.MkdirAll(plan.TargetDir, 0o755))
 	orch := pr260RealApply(fs, &movie, organizer.MediaFormatConfig{}, nil, true)
 	orch.organizer = org
