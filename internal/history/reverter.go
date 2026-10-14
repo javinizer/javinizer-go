@@ -340,6 +340,8 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 		return result, err
 	}
 
+	ledger, _ := models.ParseGeneratedFiles(op.GeneratedFiles)
+	primaryResident := ledger.PrimaryResident
 	isUpdate := op.OperationType == models.OperationTypeUpdate
 
 	// codex P2 (PR #241 F1): anchor semantics apply ONLY to the legs that
@@ -351,7 +353,7 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 	// GeneratedFiles cleanup — gating here orphaned every journaled copied
 	// subtitle/NFO/download behind an anchor_missing skip. Those rows run
 	// cleanup independently of the primary anchor below.
-	if op.OperationType == models.OperationTypeMove || isUpdate {
+	if !primaryResident && (op.OperationType == models.OperationTypeMove || isUpdate) {
 		if primaryReplacement {
 			if _, statErr := r.fs.Stat(op.NewPath); os.IsNotExist(statErr) {
 				primaryRestored, restoreErr := r.restoreReplacementJournalWhere(ctx, op, func(destination string) bool {
@@ -379,8 +381,10 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 	case models.OperationTypeUpdate:
 		r.fsReverter.cleanupGeneratedFiles(op, filepath.Dir(filepath.Dir(op.OriginalPath)))
 	case models.OperationTypeMove:
-		if result, err := r.fsReverter.revertPrimaryFile(ctx, op); result != nil || err != nil {
-			return result, err
+		if !primaryResident {
+			if result, err := r.fsReverter.revertPrimaryFile(ctx, op); result != nil || err != nil {
+				return result, err
+			}
 		}
 		if primaryReplacement {
 			primaryRestored, restoreErr := r.restoreReplacementJournalWhere(ctx, op, func(destination string) bool {

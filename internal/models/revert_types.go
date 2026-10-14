@@ -10,10 +10,13 @@ import (
 // eliminate duplicate type definitions with drift risk. The JSON schema is a
 // persistence contract — one source of truth.
 type GeneratedFilesJSON struct {
-	Delete       []string           `json:"delete,omitempty"`       // Files to delete on revert (NFO, images, screenshots)
-	MoveBack     []FileMove         `json:"move_back,omitempty"`    // Files to move back on revert (subtitles)
-	Replacements []ReplacementEntry `json:"replacements,omitempty"` // Overwritten byte pairs journaled before the replace landed (P3)
-	Roots        []string           `json:"roots,omitempty"`        // Destination roots seeded at Begin — sweeper discovery independent of any later journal (P3 R3-3)
+	// PrimaryResident excludes an admission-proven pre-existing primary from
+	// Undo ownership, while preserving independently installed artifact inverses.
+	PrimaryResident bool               `json:"primary_resident,omitempty"`
+	Delete          []string           `json:"delete,omitempty"`       // Files to delete on revert (NFO, images, screenshots)
+	MoveBack        []FileMove         `json:"move_back,omitempty"`    // Files to move back on revert (subtitles)
+	Replacements    []ReplacementEntry `json:"replacements,omitempty"` // Overwritten byte pairs journaled before the replace landed (P3)
+	Roots           []string           `json:"roots,omitempty"`        // Destination roots seeded at Begin — sweeper discovery independent of any later journal (P3 R3-3)
 	// PlannedDeletes journals artifacts BEFORE they install at their final
 	// destination (deferred artifact publication): the hash pins the intended
 	// content so a revert deletes only bytes this operation published, never

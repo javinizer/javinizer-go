@@ -204,6 +204,11 @@ jobs:
         go test -short -count=20 -v ./internal/config
         -run '^(TestAtomicReplace_WindowsSharingViolationPreservesCommittedConfig|TestAtomicReplaceFile_ConcurrentWrites|TestAtomicReplace_(FailuresPreserveCommittedConfig|LeavesDestinationVisibleUntilPublication)|TestLoadOrCreate_(PreservesSaveAfterMissingStat|HoldsLockThroughInitDefaults|ConcurrentInitializersPreserveWinner|InitialConfigIsPublishedOnlyWhenComplete))$'
 
+    - name: Verify resident aliases on the native Windows filesystem
+      run: >-
+        go test -short -count=1 -v ./internal/workflow
+        -run '^TestResidentPrimaryCaseAliasRepeatAndUndo/native=true/'
+
     - name: Verify Windows artifact regressions with native-volume evidence
       run: >-
         go test -short -count=1 -v ./internal/workflow ./internal/organizer ./internal/fsutil
