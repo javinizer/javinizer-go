@@ -181,7 +181,6 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 	if stallTimeout <= 0 {
 		stallTimeout = dumpStallTimeout
 	}
-	watchdog := newStallWatchdog(stallTimeout)
 
 	// For update-only, check the current source URL so the download skips if
 	// the version is unchanged.
@@ -197,6 +196,8 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 		}
 		h.dumpMu.RUnlock()
 	}
+
+	watchdog := newStallWatchdog(stallTimeout)
 
 	var (
 		progressMu     sync.Mutex
@@ -218,8 +219,8 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 	}
 
 	// Run the download in a background goroutine. The HTTP response is already
-	// sent as 202. The context from the request keeps it cancellable if the
-	// client disconnects.
+	// sent as 202. The detached context keeps it alive if the client
+	// disconnects; the watchdog cancels a stalled network wait.
 	client := h.httpClient
 	if client == nil {
 		client = &http.Client{}
@@ -252,11 +253,11 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 			}
 		}()
 		res, err := r18devdump.Download(ctx, client, currentSourceURL, progress, func(r io.Reader, d r18devdump.DownloadResult) error {
-			// Response headers arrived: record activity. Import runs its local
-			// setup (DB open, schema, BeginTx) before reading the first body
-			// byte, so without this ping a slow pre-import window reads as a
-			// stall even though the network is alive.
-			watchdog.Ping()
+			// Import pulls the stream synchronously. Watch only reads, not its
+			// local SQLite setup or batch flushes: a slow disk is not a stalled
+			// network. Preserve the idle budget across these pauses; byte
+			// progress (above) is the only activity that resets it.
+			r = watchdog.reader(r)
 			// The download streams the response body through gzip into Import,
 			// so the download progress callback and the SQL import run
 			// concurrently: Import pulls compressed bytes through the

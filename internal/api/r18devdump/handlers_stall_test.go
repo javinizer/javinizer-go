@@ -2,6 +2,7 @@ package r18devdump
 
 import (
 	"compress/gzip"
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -28,6 +29,7 @@ func TestStartDownload_StallAborts(t *testing.T) {
 	// clear stall error instead of hanging forever (and locking retries out
 	// with 409s until server restart).
 	serverBlocked := make(chan struct{})
+	releaseServer := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/gzip")
 		gw := gzip.NewWriter(w)
@@ -37,18 +39,20 @@ func TestStartDownload_StallAborts(t *testing.T) {
 			f.Flush()
 		}
 		close(serverBlocked)
-		<-r.Context().Done()
+		select {
+		case <-r.Context().Done():
+		case <-releaseServer:
+		}
 	}))
 	defer srv.Close()
+	defer close(releaseServer)
 
 	h, dumpPath, _ := newTestHandlerWithHub(t)
 	h.httpClient = srv.Client()
 	h.reloadFn = func(_ *config.Config, _ bool) error { return nil }
 	h.stallTimeout = 100 * time.Millisecond
 
-	orig := r18devdump.LatestDumpURL
-	r18devdump.LatestDumpURL = srv.URL + "/dump.sql.gz"
-	defer func() { r18devdump.LatestDumpURL = orig }()
+	t.Setenv("JAVINIZER_R18DEV_DUMP_URL", srv.URL+"/dump.sql.gz")
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
@@ -75,6 +79,7 @@ func TestStartDownload_StallAborts(t *testing.T) {
 	h.mu.Unlock()
 	assert.False(t, running, "handler must release the download lock so retries return 202, not 409")
 	assert.Contains(t, lastErr, "download stalled (no data received for 100ms)")
+	assert.Contains(t, lastErr, "parse dump:", "the timeout must occur while consuming the stream, not during SQLite setup")
 
 	_, err := os.Stat(dumpPath)
 	assert.True(t, os.IsNotExist(err), "stalled download must not leave a dump DB behind")
@@ -92,7 +97,9 @@ func TestStartDownload_SlowButSteadySucceeds(t *testing.T) {
 	}
 	dumpBody.WriteString("\\.\n")
 
+	transferDuration := make(chan time.Duration, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		started := time.Now()
 		w.Header().Set("Content-Type", "application/gzip")
 		gw := gzip.NewWriter(w)
 		flusher, _ := w.(http.Flusher)
@@ -105,26 +112,27 @@ func TestStartDownload_SlowButSteadySucceeds(t *testing.T) {
 			if flusher != nil {
 				flusher.Flush()
 			}
-			time.Sleep(120 * time.Millisecond)
+			select {
+			case <-r.Context().Done():
+				return
+			case <-time.After(120 * time.Millisecond):
+			}
 		}
 		_ = gw.Close()
+		transferDuration <- time.Since(started)
 	}))
 	defer srv.Close()
 
 	// 22 lines x 120ms ~= 2.6s total, >2x the stall timeout: proves no
 	// wall-clock cutoff, while 120ms gaps keep the watchdog fed (~8x margin).
-	// The stall timeout includes ~4x headroom over the pre-import local setup
-	// window (mkdir, SQLite WAL open, schema creation) — that window was
-	// empirically blowable on loaded CI runners at 250ms (observed flakes on
-	// merge-queue runs of #266 and #272, Windows Defender + race scheduling).
+	// Local SQLite setup and batch work are outside the network idle budget,
+	// so the test does not rely on disk setup fitting within this timeout.
 	h, dumpPath, _ := newTestHandlerWithHub(t)
 	h.httpClient = srv.Client()
 	h.reloadFn = func(_ *config.Config, _ bool) error { return nil }
 	h.stallTimeout = 1 * time.Second
 
-	orig := r18devdump.LatestDumpURL
-	r18devdump.LatestDumpURL = srv.URL + "/dump.sql.gz"
-	defer func() { r18devdump.LatestDumpURL = orig }()
+	t.Setenv("JAVINIZER_R18DEV_DUMP_URL", srv.URL+"/dump.sql.gz")
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
@@ -146,4 +154,56 @@ func TestStartDownload_SlowButSteadySucceeds(t *testing.T) {
 
 	_, err := os.Stat(dumpPath)
 	require.NoError(t, err, "dump DB should be imported after a slow-but-healthy transfer")
+	assert.Greater(t, <-transferDuration, 2*h.stallTimeout, "healthy transfer must outlast the nominal timeout")
+	store, err := r18devdump.Open(dumpPath)
+	require.NoError(t, err)
+	defer func() { _ = store.Close() }()
+	stats, err := store.Stats(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, int64(20), stats.RowCount, "all rows must survive the slow transfer")
+}
+
+func TestStartDownload_HeadersStallAborts(t *testing.T) {
+	requested := make(chan struct{})
+	releaseServer := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(requested)
+		// Send neither headers nor a body. Release on failure as well.
+		select {
+		case <-r.Context().Done():
+		case <-releaseServer:
+		}
+	}))
+	defer srv.Close()
+	defer close(releaseServer)
+
+	h, dumpPath, _ := newTestHandlerWithHub(t)
+	h.httpClient = srv.Client()
+	h.stallTimeout = 100 * time.Millisecond
+	t.Setenv("JAVINIZER_R18DEV_DUMP_URL", srv.URL+"/dump.sql.gz")
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/r18dev/dump/download", nil)
+	h.startDownload(c)
+	require.Equal(t, http.StatusAccepted, w.Code)
+
+	select {
+	case <-requested:
+	case <-time.After(5 * time.Second):
+		t.Fatal("test server should have received the request")
+	}
+	select {
+	case <-h.done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("waiting for response headers must still be protected by the watchdog")
+	}
+	h.mu.Lock()
+	running, lastErr := h.running, h.lastError
+	h.mu.Unlock()
+	assert.False(t, running)
+	assert.Contains(t, lastErr, "download stalled (no data received for 100ms)")
+	assert.Contains(t, lastErr, "fetch dump:")
+	_, err := os.Stat(dumpPath)
+	assert.True(t, os.IsNotExist(err))
 }
