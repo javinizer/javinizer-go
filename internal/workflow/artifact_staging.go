@@ -288,10 +288,35 @@ func (o *applyOrchImpl) prepareArtifact(ctx context.Context, cmd ApplyCmd) (*art
 			stage.siblings = append(stage.siblings, admitted)
 		}
 		stagedCmd.Match.Path = stage.stagedSource
-		stagedCmd.Match.Name = base
+		stagedCmd.Match.Name, stagedCmd.Match.Extension = artifactMatchName(base)
 	}
 	stagedCmd.DestPath = root
 	return stage, stagedCmd, nil
+}
+
+// artifactMatchName reconstructs the scanner's FileMatchInfo spelling contract
+// after a path changes: keep the current raw stem, fold only the extension.
+// Never copy the old Name: organizing within the stage may have renamed it.
+// This mirrors scanner.foldNameExtension and fileExtension; Path stays raw.
+func artifactMatchName(base string) (name, extension string) {
+	folded := strings.Map(func(r rune) rune {
+		switch {
+		case r >= 0xFF01 && r <= 0xFF5E:
+			return r - 0xFEE0
+		case r == 0x3000:
+			return ' '
+		default:
+			return r
+		}
+	}, base)
+	extension = filepath.Ext(folded)
+	if extension == "" || folded == base {
+		return base, extension
+	}
+	// Folding maps rune-to-rune, so the raw extension occupies the same
+	// number of runes even when its fullwidth spelling occupies more bytes.
+	runes := []rune(base)
+	return string(runes[:len(runes)-len([]rune(extension))]) + extension, extension
 }
 
 func isStagedArtifactVideoSibling(sourceName, siblingName string) bool {
@@ -630,7 +655,7 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 		if s.videoDeferred || (!s.original.Organize.MoveFiles && s.original.Organize.LinkMode != organizer.LinkModeNone) {
 			match.Path = s.sourcePath
 		}
-		match.Name = filepath.Base(match.Path)
+		match.Name, match.Extension = artifactMatchName(filepath.Base(match.Path))
 		organizeCmd := organizer.OrganizeCmd{Match: match, Movie: s.original.Movie, DestDir: s.finalRoot, ForceUpdate: s.original.Organize.ForceUpdate, MoveFiles: s.original.Organize.MoveFiles, LinkMode: s.original.Organize.LinkMode, OperationMode: s.original.OperationMode, ForceRenameFile: s.original.Organize.ForceRenameFile}
 		if s.inPlace && !s.videoDeferred {
 			// The real final directory was resolved before staging. Keep this
