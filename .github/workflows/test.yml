@@ -212,7 +212,7 @@ jobs:
     - name: Verify persisted resident-publication recovery on Windows
       run: >-
         go test -short -count=1 -v ./internal/workflow ./internal/history ./internal/fsutil
-        -run '^(TestResidentPublication|TestPublicationRecovery|TestRecoverPublicationMove|TestBoundRecoveryIdentity)'
+        -run '^(TestResidentPublication|TestPublicationRecovery|TestRecoverPublicationMove|TestBoundRecoveryIdentity|TestWrapperCopy)'
 
     - name: Verify Windows artifact regressions with native-volume evidence
       run: >-
