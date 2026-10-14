@@ -165,8 +165,13 @@ func (s *scraper) tryDirectURLs(ctx context.Context, contentID string) []urlCand
 			logging.Debugf("DMM: Rate limit wait failed for direct URL: %v", err)
 			continue
 		}
+		// An immediately available rate-limit slot may not check cancellation.
+		if ctx.Err() != nil {
+			return candidates
+		}
 
 		resp, err := s.client.R().
+			SetContext(ctx).
 			SetDoNotParseResponse(true).
 			Get(directURL)
 		if err != nil {
