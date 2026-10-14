@@ -233,7 +233,7 @@ jobs:
     - name: Verify native Windows primary Undo contracts with coverage
       run: >-
         go test -short -count=1 -v -covermode=atomic
-        -coverprofile=coverage-primary-undo-windows.out ./internal/history
+        '-coverprofile=coverage-primary-undo-windows.out' ./internal/history
         -run '^(TestPrimaryUndoWindows.*|TestPrimaryUndoIdentityAdmissionRefusals|TestPrimaryUndoWeakMutationWitnessRefused)$'
 
     - name: Archive native Windows primary Undo coverage
