@@ -1,12 +1,12 @@
 package sort_test
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/cmd/javinizer/commands/sort"
-	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -88,7 +88,7 @@ func TestRun_Integration_NoVideoFiles(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(tmpDir)
 
-	configPath, _ := testutil.CreateTestConfig(t, nil)
+	configPath, _ := createOfflineSortConfig(t, nil)
 
 	// Create a non-video file
 	textFile := filepath.Join(tmpDir, "readme.txt")
@@ -102,7 +102,7 @@ func TestRun_Integration_NoVideoFiles(t *testing.T) {
 
 // TestRun_Integration_InvalidPath tests error handling for invalid paths
 func TestRun_Integration_InvalidPath(t *testing.T) {
-	configPath, _ := testutil.CreateTestConfig(t, nil)
+	configPath, _ := createOfflineSortConfig(t, nil)
 
 	cmd := sort.NewCommand()
 	err := sort.Run(cmd, []string{"/nonexistent/path/that/does/not/exist"}, configPath)
@@ -139,43 +139,44 @@ func TestRun_LinkModeWithMoveRejected(t *testing.T) {
 }
 
 func TestRun_Integration_DryRunMode(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration test")
-	}
-
 	tmpDir, err := os.MkdirTemp("", t.Name())
 	require.NoError(t, err)
 	defer os.RemoveAll(tmpDir)
 
-	configPath, _ := testutil.CreateTestConfig(t, nil)
-	videoFile := testutil.CreateTestVideoFile(t, tmpDir, "IPX-123.mp4")
+	configPath, _ := createOfflineSortConfig(t, nil)
+	videoFile := testutil.CreateTestVideoFile(t, tmpDir, "GOOD-123.mp4")
 
 	cmd := sort.NewCommand()
-	cmd.SetArgs([]string{tmpDir, "--dry-run"})
+	require.NoError(t, cmd.Flags().Set("dry-run", "true"))
+	var output bytes.Buffer
+	cmd.SetOut(&output)
 	runErr := sort.Run(cmd, []string{tmpDir}, configPath)
 
 	assert.NoError(t, runErr)
 	// File should still exist in original location (dry-run doesn't move)
-	assert.FileExists(t, videoFile)
+	assertSyntheticVideo(t, videoFile)
+	assert.NoDirExists(t, filepath.Join(tmpDir, "GOOD-123"))
+	assert.Contains(t, output.String(), "Would organize 1 file(s)")
 }
 
 func TestRun_Integration_FlagOverrides(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration test")
-	}
-
 	tmpDir, err := os.MkdirTemp("", t.Name())
 	require.NoError(t, err)
 	defer os.RemoveAll(tmpDir)
 
-	configPath, _ := testutil.CreateTestConfig(t, func(c *config.Config) {
-		c.Output.Download.DownloadExtrafanart = false
-	})
-	testutil.CreateTestVideoFile(t, tmpDir, "IPX-123.mp4")
+	configPath, imageData := createLocalMediaSortConfig(t)
+	testutil.CreateTestVideoFile(t, tmpDir, "GOOD-123.mp4")
 
 	cmd := sort.NewCommand()
-	cmd.SetArgs([]string{tmpDir, "--extrafanart", "--scrapers=r18dev,dmm"})
+	require.NoError(t, cmd.Flags().Set("extrafanart", "true"))
+	require.NoError(t, cmd.Flags().Set("scrapers", "libredmm"))
+	var output bytes.Buffer
+	cmd.SetOut(&output)
 	err = sort.Run(cmd, []string{tmpDir}, configPath)
 
-	assert.NoError(t, err)
+	require.NoError(t, err)
+	assertSortCompleted(t, output.String(), tmpDir, "GOOD-123")
+	downloaded, err := os.ReadFile(filepath.Join(tmpDir, "GOOD-123", "extrafanart", "fanart1.jpg"))
+	require.NoError(t, err)
+	assert.Equal(t, imageData, downloaded)
 }

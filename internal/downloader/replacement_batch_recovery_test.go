@@ -83,7 +83,7 @@ func TestReplacementBatchRecoveryReleasedUninstalled(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, batch.ReleaseUninstalled("/out/pending"))
 	snapshot := batch.RecoverySnapshot()
-	require.Equal(t, []string{"/out/pending"}, snapshot.Managed)
+	require.Equal(t, []string{filepath.Clean("/out/pending")}, snapshot.Managed)
 	require.False(t, snapshot.Unresolved)
 	require.Empty(t, snapshot.Deletes)
 }
