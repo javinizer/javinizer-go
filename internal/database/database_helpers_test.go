@@ -275,15 +275,15 @@ func TestUpsertActressAliases(t *testing.T) {
 	require.NoError(t, db.DB.Create(&existing).Error)
 
 	aliases := []string{"AliasA", "aliasa", "AliasB", "  AliasC  ", "", "Main"}
-	require.NoError(t, upsertActressAliases(db.DB, aliases, "Main"))
+	require.ErrorIs(t, upsertActressAliases(db.DB, aliases, "Main"), ErrActressAliasOwnershipConflict)
 
 	var gotA models.ActressAlias
 	require.NoError(t, db.DB.First(&gotA, "alias_name = ?", "AliasA").Error)
-	assert.Equal(t, "Main", gotA.CanonicalName)
+	assert.Equal(t, "Old", gotA.CanonicalName)
 
 	var count int64
 	require.NoError(t, db.DB.Model(&models.ActressAlias{}).Count(&count).Error)
-	assert.Equal(t, int64(3), count)
+	assert.Equal(t, int64(1), count)
 }
 
 func TestMoveMovieAssociations(t *testing.T) {

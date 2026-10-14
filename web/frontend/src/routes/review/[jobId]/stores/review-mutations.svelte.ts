@@ -47,6 +47,8 @@ interface ReviewMutationsDeps {
 	getCropMetrics: () => PosterCropMetrics | null;
 	getCropBox: () => PosterCropBox | null;
 	getQueryClient: () => QueryClient;
+	onRefreshFailure?: (error: unknown) => void;
+	onRefreshSuccess?: () => void;
 	getCurrentMovieIndex: () => number;
 	setCurrentMovieIndex: (index: number) => void;
 	getMovieResultsLength: () => number;
@@ -392,7 +394,14 @@ const ops = Array.from(latestByFamily.entries());
 			// completed fetch counts as refreshed.
 			const qk = ['batch-job', mutationJobId];
 			const before = queryClient.getQueryState(qk)?.dataUpdatedAt ?? 0;
-			await invalidateJobQueries(mutationJobId).catch(() => {});
+			let refreshSucceeded = true;
+			try {
+				await invalidateJobQueries(mutationJobId);
+				deps.onRefreshSuccess?.();
+			} catch (error) {
+				refreshSucceeded = false;
+				deps.onRefreshFailure?.(error);
+			}
 			if (!isCurrentJob(mutationJobId, mutationGeneration)) {
 				// The mutation may finish after navigation. Reconcile only job-scoped
 				// storage for the old route; never mutate the new route's UI state.
@@ -406,7 +415,7 @@ const ops = Array.from(latestByFamily.entries());
 			}
 			const post = queryClient.getQueryState(qk);
 			const refreshed = (() => {
-				if (post?.status !== 'success') return false;
+				if (!refreshSucceeded || post?.status !== 'success') return false;
 				return (post.dataUpdatedAt ?? 0) > before;
 			})();
 			// codex cloud P2 (@338): fulfilled families clear on PATCH SUCCESS alone — a

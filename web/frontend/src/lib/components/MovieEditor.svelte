@@ -1,9 +1,11 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import * as m from '$lib/paraglide/messages';
 	import type { Movie, Genre, FieldDifference } from '$lib/api/types';
 	import { apiClient } from '$lib/api/client';
 	import { CircleAlert, LoaderCircle, X, Plus, Check, Star } from 'lucide-svelte';
 	import NfoDiffBadge from './NfoDiffBadge.svelte';
+	import { buildDisplayTitlePreviewSignature } from '$lib/utils/display-title-preview';
 
 	interface Props {
 		movie: Movie;
@@ -36,34 +38,22 @@
 	let previewTimer: ReturnType<typeof setTimeout> | undefined;
 	let previewGeneration = 0;
 
-	const previewSignature = $derived(
-		JSON.stringify({
-			id: editedMovie.id,
-			code: editedMovie.code,
-			title: editedMovie.title,
-			original_title: editedMovie.original_title,
-			description: editedMovie.description,
-			actresses: editedMovie.actresses,
-			genres: editedMovie.genres,
-			runtime: editedMovie.runtime,
-			release_year: editedMovie.release_year,
-			release_date: editedMovie.release_date,
-			director: editedMovie.director,
-			maker: editedMovie.maker,
-			label: editedMovie.label,
-			series: editedMovie.series,
-			rating_score: editedMovie.rating_score,
-			poster_url: editedMovie.poster_url,
-			cover_url: editedMovie.cover_url,
-			trailer_url: editedMovie.trailer_url,
-			original_filename: editedMovie.original_filename,
-		}),
-	);
+	const previewSignature = $derived(buildDisplayTitlePreviewSignature(editedMovie));
+	const previewRequestKey = $derived(JSON.stringify([jobId ?? '', resultId ?? '', previewSignature]));
+
+	let previewTargetKey = '';
 
 	$effect(() => {
-		const sig = previewSignature;
-		const jid = jobId;
-		const rid = resultId;
+		const [jid, rid] = JSON.parse(previewRequestKey) as [string, string, string];
+		const gen = ++previewGeneration;
+		clearTimeout(previewTimer);
+		const targetKey = JSON.stringify([jid, rid]);
+		if (targetKey !== previewTargetKey) {
+			previewTargetKey = targetKey;
+			previewDisplayTitle = null;
+			previewLoading = false;
+			previewError = false;
+		}
 		if (!jid || !rid) {
 			previewDisplayTitle = null;
 			previewLoading = false;
@@ -72,9 +62,9 @@
 		}
 		previewLoading = true;
 		previewError = false;
-		clearTimeout(previewTimer);
-		const snapshot = { ...editedMovie };
-		const gen = ++previewGeneration;
+		// stale-while-revalidate: keep the last rendered title visible; a
+		// refire (including poll-driven rebases) must not blank the pane.
+		const snapshot = untrack(() => ({ ...editedMovie }));
 		previewTimer = setTimeout(async () => {
 			try {
 				const resp = await apiClient.previewDisplayTitle(jid, rid, { movie: snapshot });
@@ -84,7 +74,6 @@
 			} catch {
 				if (gen !== previewGeneration) return;
 				previewError = true;
-				previewDisplayTitle = null;
 			} finally {
 				if (gen === previewGeneration) {
 					previewLoading = false;
@@ -274,18 +263,23 @@
 			/>
 			{#if jobId && resultId}
 				<div class="mt-1.5 min-h-4">
-					{#if previewLoading}
+					{#if previewDisplayTitle !== null}
+						<p class="text-xs text-muted-foreground flex items-center gap-1">
+							{m.movie_display_title_preview_label()}:
+							<span class="font-medium text-foreground">{previewDisplayTitle}</span>
+							{#if previewLoading}
+								<LoaderCircle class="h-3 w-3 animate-spin shrink-0" />
+							{:else if previewError}
+								<CircleAlert class="h-3 w-3 text-orange-600 dark:text-orange-400 shrink-0" />
+							{/if}
+						</p>
+					{:else if previewLoading}
 						<p class="text-xs text-muted-foreground flex items-center gap-1">
 							<LoaderCircle class="h-3 w-3 animate-spin" />
 							{m.movie_display_title_preview_loading()}
 						</p>
 					{:else if previewError}
 						<p class="text-xs text-muted-foreground">{m.movie_display_title_preview_error()}</p>
-					{:else if previewDisplayTitle !== null}
-						<p class="text-xs text-muted-foreground">
-							{m.movie_display_title_preview_label()}:
-							<span class="font-medium text-foreground">{previewDisplayTitle}</span>
-						</p>
 					{/if}
 				</div>
 			{/if}

@@ -320,6 +320,8 @@ func TestCreateActress_Handler(t *testing.T) {
 	assert.Equal(t, "Test", created.FirstName)
 	assert.Equal(t, "テスト", created.JapaneseName)
 	assert.NotZero(t, created.ID)
+	assert.True(t, created.Verified)
+	assert.Equal(t, database.ActressOriginUser, created.Origin)
 }
 
 func TestCreateActress_InvalidPayload(t *testing.T) {

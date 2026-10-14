@@ -278,8 +278,8 @@ func TestActressImport_WithIDs(t *testing.T) {
 
 	updated, err := repo.FindByID(context.TODO(), 1)
 	require.NoError(t, err)
-	assert.Equal(t, "Updated", updated.FirstName)
-	assert.Equal(t, "オリジナル更新", updated.JapaneseName)
+	assert.Equal(t, "Original", updated.FirstName)
+	assert.Equal(t, "オリジナル", updated.JapaneseName)
 }
 
 func TestActressImport_WithoutIDs(t *testing.T) {

@@ -178,6 +178,26 @@ func subtitleStemMatches(cand, base string) bool {
 			strings.ContainsRune("._-", rune(cand[len(base)])))
 }
 
+// SubtitleSourcePaths returns the configured subtitle candidates for a video.
+// It only selects source names: callers must still admit regular files and pin
+// their identities before consuming them. Destination conflicts belong to
+// PlanSubtitleMoves, not to source admission.
+func (o *Organizer) SubtitleSourcePaths(videoFile models.FileMatchInfo) []string {
+	matches := o.selectedSubtitles(videoFile)
+	paths := make([]string, 0, len(matches))
+	for _, match := range matches {
+		paths = append(paths, match.OriginalPath)
+	}
+	return paths
+}
+
+func (o *Organizer) selectedSubtitles(videoFile models.FileMatchInfo) []subtitleMatch {
+	if !o.config.MoveSubtitles {
+		return nil
+	}
+	return o.subtitleHandler.FindSubtitles(videoFile)
+}
+
 // isSubtitleFile checks if a filename has a subtitle extension. The
 // extension is derived from the FOLDED spelling: filepath.Ext is ASCII-only
 // and does not recognize the fullwidth dot, so a sidecar admitted beside a

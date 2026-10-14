@@ -671,7 +671,7 @@ func TestActressRepository_Merge_UpsertsSourceAliasEvenWhenAlreadyOnTarget(t *te
 	require.NoError(t, repo.Create(context.TODO(), target))
 	require.NoError(t, repo.Create(context.TODO(), source))
 
-	// Seed outdated alias mapping that should be corrected by merge.
+	// Seed an unrelated alias mapping that the merge must not steal.
 	stale := &models.ActressAlias{
 		AliasName:     "SourceAlias",
 		CanonicalName: "Old Canonical",
@@ -681,9 +681,10 @@ func TestActressRepository_Merge_UpsertsSourceAliasEvenWhenAlreadyOnTarget(t *te
 	_, err = repo.Merge(context.TODO(), target.ID, source.ID, map[string]string{
 		"dmm_id": "target",
 	})
-	require.NoError(t, err)
+	require.ErrorIs(t, err, ErrActressAliasOwnershipConflict)
 
 	var alias models.ActressAlias
 	require.NoError(t, db.DB.First(&alias, "alias_name = ?", "SourceAlias").Error)
-	assert.Equal(t, "ターゲット", alias.CanonicalName)
+	assert.Equal(t, "Old Canonical", alias.CanonicalName)
+	require.NoError(t, db.DB.First(&models.Actress{}, source.ID).Error)
 }

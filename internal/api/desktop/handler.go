@@ -36,34 +36,34 @@ type upgradeResponse struct {
 func upgrade(deps commandutil.CoreDepsReader) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if deps.InstallEnvironment() != system.EnvironmentDesktop {
-			c.JSON(http.StatusNotFound, gin.H{"error": "desktop self-upgrade is not available in this environment"})
+			c.JSON(http.StatusNotFound, gin.H{errorResponseKey: "desktop self-upgrade is not available in this environment"})
 			return
 		}
 		u := deps.BundleUpdater()
 		if u == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "desktop self-upgrade is not available"})
+			c.JSON(http.StatusNotFound, gin.H{errorResponseKey: "desktop self-upgrade is not available"})
 			return
 		}
 
 		status := u.Status()
 		if status.State != updater.StateIdle && status.State != updater.StateFailed {
-			c.JSON(http.StatusConflict, gin.H{"error": "a bundle upgrade is already in progress", "state": status.State})
+			c.JSON(http.StatusConflict, gin.H{errorResponseKey: "a bundle upgrade is already in progress", "state": status.State})
 			return
 		}
 
 		var req upgradeRequest
 		if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body: " + err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{errorResponseKey: "invalid request body: " + err.Error()})
 			return
 		}
 
 		result, err := u.Upgrade(context.Background(), updater.UpgradeOptions{Force: req.Force})
 		if err != nil {
 			if errors.Is(err, updater.ErrAlreadyInProgress) {
-				c.JSON(http.StatusConflict, gin.H{"error": "a bundle upgrade is already in progress"})
+				c.JSON(http.StatusConflict, gin.H{errorResponseKey: "a bundle upgrade is already in progress"})
 				return
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{errorResponseKey: err.Error()})
 			return
 		}
 
@@ -95,12 +95,12 @@ func upgrade(deps commandutil.CoreDepsReader) gin.HandlerFunc {
 func upgradeStatus(deps commandutil.CoreDepsReader) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if deps.InstallEnvironment() != system.EnvironmentDesktop {
-			c.JSON(http.StatusNotFound, gin.H{"error": "desktop self-upgrade is not available in this environment"})
+			c.JSON(http.StatusNotFound, gin.H{errorResponseKey: "desktop self-upgrade is not available in this environment"})
 			return
 		}
 		u := deps.BundleUpdater()
 		if u == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "desktop self-upgrade is not available"})
+			c.JSON(http.StatusNotFound, gin.H{errorResponseKey: "desktop self-upgrade is not available"})
 			return
 		}
 		c.JSON(http.StatusOK, u.Status())

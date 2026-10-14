@@ -18,16 +18,44 @@ import (
 
 // ActressView is the API-layer projection of models.Actress.
 type ActressView struct {
-	ID           uint                     `json:"id"`
-	DMMID        int                      `json:"dmm_id"`
-	FirstName    string                   `json:"first_name"`
-	LastName     string                   `json:"last_name"`
-	JapaneseName string                   `json:"japanese_name"`
-	ThumbURL     string                   `json:"thumb_url"`
+	ID           uint   `json:"id"`
+	DMMID        int    `json:"dmm_id"`
+	FirstName    string `json:"first_name"`
+	LastName     string `json:"last_name"`
+	JapaneseName string `json:"japanese_name"`
+	ThumbURL     string `json:"thumb_url"`
+	// ThumbEdited marks an explicit client edit of thumb_url so the server never
+	// infers thumbnail intent from snapshot or database comparisons.
+	ThumbEdited  bool                     `json:"thumb_edited,omitempty"`
 	Aliases      string                   `json:"aliases"`
+	Verified     bool                     `json:"verified"`
+	Origin       string                   `json:"origin"`
+	NameKey      string                   `json:"name_key"`
 	Translations []ActressTranslationView `json:"translations,omitempty"`
 	CreatedAt    time.Time                `json:"created_at"`
 	UpdatedAt    time.Time                `json:"updated_at"`
+}
+
+// MovieCreditView is the read-only API projection of a per-movie actress credit.
+// Credit mutations use dedicated endpoints; review PATCH payloads must not map
+// these rows back into models.Movie.
+type MovieCreditView struct {
+	ID                   uint   `json:"id"`
+	ActressID            uint   `json:"actress_id"`
+	CreditedName         string `json:"credited_name"`
+	CreditedJapaneseName string `json:"credited_japanese_name"`
+	ReportedThumbURL     string `json:"reported_thumb_url"`
+	OverrideName         string `json:"override_name"`
+	UserOverride         bool   `json:"user_override"`
+	// DisplayForceCanonical selects the catalog name even when credited names
+	// are enabled, so clients must include it in display-preview invalidation.
+	DisplayForceCanonical bool `json:"display_force_canonical"`
+	Suppressed            bool `json:"suppressed"`
+	OrderIndex            int  `json:"order_index"`
+	// RenderVisible mirrors MovieCredit.RenderVisible: false when the credit
+	// cannot contribute names to rendered output (suppressed, no actress, or
+	// the actress is ambiguity-quarantined without verification).
+	RenderVisible bool `json:"render_visible"`
 }
 
 // GenreView is the API-layer projection of models.Genre.
@@ -95,6 +123,9 @@ func ActressViewFromModel(a *models.Actress) *ActressView {
 		JapaneseName: a.JapaneseName,
 		ThumbURL:     a.ThumbURL,
 		Aliases:      a.Aliases,
+		Verified:     a.Verified,
+		Origin:       a.Origin,
+		NameKey:      a.NameKey,
 		Translations: ActressTranslationViewSliceFromModels(a.Translations),
 		CreatedAt:    a.CreatedAt,
 		UpdatedAt:    a.UpdatedAt,
@@ -114,10 +145,32 @@ func ActressViewToModel(v *ActressView) *models.Actress {
 		LastName:     v.LastName,
 		JapaneseName: v.JapaneseName,
 		ThumbURL:     v.ThumbURL,
+		ThumbEdited:  v.ThumbEdited,
 		Aliases:      v.Aliases,
 		Translations: ActressTranslationViewSliceToModels(v.Translations),
 		CreatedAt:    v.CreatedAt,
 		UpdatedAt:    v.UpdatedAt,
+	}
+}
+
+// MovieCreditViewFromModel maps the read-only fields of a persistence-layer
+// MovieCredit to its API projection.
+func MovieCreditViewFromModel(c *models.MovieCredit) *MovieCreditView {
+	if c == nil {
+		return nil
+	}
+	return &MovieCreditView{
+		ID:                    c.ID,
+		ActressID:             c.ActressID,
+		CreditedName:          c.CreditedName,
+		CreditedJapaneseName:  c.CreditedJapaneseName,
+		ReportedThumbURL:      c.ReportedThumbURL,
+		OverrideName:          c.OverrideName,
+		UserOverride:          c.UserOverride,
+		DisplayForceCanonical: c.DisplayForceCanonical,
+		Suppressed:            c.Suppressed,
+		OrderIndex:            c.OrderIndex,
+		RenderVisible:         c.RenderVisible(),
 	}
 }
 
@@ -303,6 +356,11 @@ func sliceToModels[V any, M any](vs []V, conv func(*V) *M) []M {
 // A nil input yields a nil result so the JSON shape (null vs []) is preserved.
 func ActressViewSliceFromModels(ms []models.Actress) []ActressView {
 	return sliceFromModels(ms, ActressViewFromModel)
+}
+
+// MovieCreditViewSliceFromModels maps movie credits to read-only API views.
+func MovieCreditViewSliceFromModels(ms []models.MovieCredit) []MovieCreditView {
+	return sliceFromModels(ms, MovieCreditViewFromModel)
 }
 
 // ActressViewSliceToModels maps a slice of ActressViews to Actresses.

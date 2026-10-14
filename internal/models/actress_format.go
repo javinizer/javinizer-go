@@ -1,6 +1,10 @@
 package models
 
-import "strings"
+import (
+	"strings"
+
+	"golang.org/x/text/unicode/norm"
+)
 
 // FormatActressNameOptions holds configuration for actress name formatting.
 type FormatActressNameOptions struct {
@@ -73,10 +77,12 @@ func SplitFullName(fullName string) (firstName, lastName string) {
 	}
 }
 
-// NormalizeActressNameKey normalizes an actress name for comparison purposes.
-// It trims whitespace, lowercases, and collapses internal whitespace.
+// NormalizeActressNameKey returns the stable identity key used for actress names.
+// NFKC makes canonically-equivalent Japanese text and compatibility-width forms
+// compare alike before case folding and Unicode whitespace collapsing.
 func NormalizeActressNameKey(name string) string {
-	return strings.Join(strings.Fields(strings.ToLower(strings.TrimSpace(name))), " ")
+	name = norm.NFKC.String(name)
+	return strings.Join(strings.Fields(strings.ToLower(name)), " ")
 }
 
 // formatActressNameSimple builds a display name from actress name components.

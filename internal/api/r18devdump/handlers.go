@@ -38,6 +38,7 @@ type dumpHandler struct {
 	running             bool
 	lastError           string // last download outcome; non-empty when the most recent run failed
 	httpClient          *http.Client
+	stallTimeout        time.Duration // stall watchdog timeout; zero falls back to dumpStallTimeout (tests override)
 	reloadFn            func(cfg *config.Config, lockHeld bool) error
 	removeFn            func(string) error
 	broadcastProgressFn func(phase string, bytes, total int64)
@@ -45,7 +46,7 @@ type dumpHandler struct {
 }
 
 func newDumpHandler(rt *core.APIRuntime) *dumpHandler {
-	h := &dumpHandler{rt: rt, httpClient: &http.Client{}, removeFn: os.Remove}
+	h := &dumpHandler{rt: rt, httpClient: &http.Client{}, stallTimeout: dumpStallTimeout, removeFn: os.Remove}
 	h.reloadFn = func(cfg *config.Config, lockHeld bool) error {
 		if lockHeld {
 			return h.rt.ReloadConfigLocked(cfg)
@@ -158,7 +159,7 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 	h.mu.Lock()
 	if h.running {
 		h.mu.Unlock()
-		c.JSON(http.StatusConflict, gin.H{"error": "a dump download is already in progress"})
+		c.JSON(http.StatusConflict, gin.H{errorResponseKey: "a dump download is already in progress"})
 		return
 	}
 	h.running = true
@@ -168,10 +169,19 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 
 	cfg := h.rt.Deps().CoreDeps.GetConfig()
 	path := resolveDumpPath(cfg)
-	// Use a detached context with a generous timeout so the download goroutine
-	// survives the HTTP response being sent (202). The request context is
-	// cancelled when the handler returns, which would abort the download.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	// Use a detached context without a wall-clock deadline so the download
+	// goroutine survives the HTTP response being sent (202) and slow-but-healthy
+	// transfers run to completion. The stall watchdog (below) is the failure
+	// signal instead: it cancels the context only when no bytes arrive for
+	// stallTimeout. A fixed deadline would abort a slow download mid-import and
+	// roll back all progress (single transaction) with an opaque error.
+	ctx, cancel := context.WithCancel(context.Background())
+
+	stallTimeout := h.stallTimeout
+	if stallTimeout <= 0 {
+		stallTimeout = dumpStallTimeout
+	}
+	watchdog := newStallWatchdog(stallTimeout)
 
 	// For update-only, check the current source URL so the download skips if
 	// the version is unchanged.
@@ -194,6 +204,7 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 		progressSeen   bool
 	)
 	progress := func(bytes, total int64) {
+		watchdog.Ping()
 		progressMu.Lock()
 		now := time.Now()
 		if progressSeen && now.Sub(lastProgressAt) < 500*time.Millisecond {
@@ -218,6 +229,11 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 	go func() {
 		defer cancel()
 		defer close(done)
+		defer watchdog.Stop()
+		go watchdog.run(ctx, func() {
+			logging.Warnf("r18dev dump download stalled: no data received for %s, aborting", stallTimeout)
+			cancel()
+		})
 		var succeeded bool
 		var failErr error
 		defer func() {
@@ -236,6 +252,11 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 			}
 		}()
 		res, err := r18devdump.Download(ctx, client, currentSourceURL, progress, func(r io.Reader, d r18devdump.DownloadResult) error {
+			// Response headers arrived: record activity. Import runs its local
+			// setup (DB open, schema, BeginTx) before reading the first body
+			// byte, so without this ping a slow pre-import window reads as a
+			// stall even though the network is alive.
+			watchdog.Ping()
 			// The download streams the response body through gzip into Import,
 			// so the download progress callback and the SQL import run
 			// concurrently: Import pulls compressed bytes through the
@@ -249,7 +270,13 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 			streamConsumed := make(chan struct{})
 			go h.runImportHeartbeat(streamConsumed, importDone, importHeartbeatInterval)
 			defer close(importDone)
-			r = &eofDetectReader{r: r, onEOF: sync.OnceFunc(func() { close(streamConsumed) })}
+			r = &eofDetectReader{r: r, onEOF: sync.OnceFunc(func() {
+				// Stream fully consumed: only local disk work remains (final
+				// batches, meta, commit, WAL checkpoint), which must never be
+				// aborted by the stall watchdog.
+				watchdog.Stop()
+				close(streamConsumed)
+			})}
 			var unlockReload func()
 			impRes, importErr := r18devdump.Import(ctx, r, path, r18devdump.ImportOptions{
 				SourceURL:  d.FinalURL,
@@ -276,15 +303,22 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 			if importErr != nil {
 				// Import failed — restore the old dump handle so the scraper
 				// can keep using the existing dump. The old file is intact
-				// (Import writes to .tmp and only renames on success).
-				if reloadErr := h.reloadDump(path); reloadErr != nil {
-					logging.Warnf("r18dev dump: failed to restore handle after import error: %v", reloadErr)
+				// (Import writes to .tmp and only renames on success). Skip the
+				// rebuild when no dump exists yet — reloading would only log a
+				// bogus "hot-swapped" line for a missing file.
+				if _, statErr := os.Stat(path); statErr == nil {
+					if reloadErr := h.reloadDump(path); reloadErr != nil {
+						logging.Warnf("r18dev dump: failed to restore handle after import error: %v", reloadErr)
+					}
 				}
 				return importErr
 			}
 			return nil
 		})
 		if err != nil {
+			if watchdog.Fired() {
+				err = fmt.Errorf("download stalled (no data received for %s): %w", stallTimeout, err)
+			}
 			logging.Warnf("r18dev dump download failed: %v", err)
 			failErr = err
 			// Clean up only temp files — the existing dump (if any) is still
@@ -295,11 +329,15 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 				_ = os.Remove(p)
 			}
 			// Re-open the dump handle if we closed it above (restore the
-			// previous dump so the scraper can keep using it).
-			if reloadErr := h.reloadDump(path); reloadErr != nil {
-				logging.Warnf("r18dev dump: failed to restore handle after failed download: %v", reloadErr)
+			// previous dump so the scraper can keep using it). Skip when the
+			// dump file doesn't exist — nothing to restore, and reloading
+			// would log "hot-swapped" for a missing file.
+			if _, statErr := os.Stat(path); statErr == nil {
+				if reloadErr := h.reloadDump(path); reloadErr != nil {
+					logging.Warnf("r18dev dump: failed to restore handle after failed download: %v", reloadErr)
+				}
 			}
-			h.broadcastProgress("error", 0, 0)
+			h.broadcastProgress(errorResponseKey, 0, 0)
 			return
 		}
 		if res.Unchanged {
@@ -370,7 +408,7 @@ type dumpMatchView struct {
 func (h *dumpHandler) search(c *gin.Context) {
 	query := c.Query("q")
 	if query == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "query parameter 'q' is required"})
+		c.JSON(http.StatusBadRequest, gin.H{errorResponseKey: "query parameter 'q' is required"})
 		return
 	}
 
@@ -383,7 +421,7 @@ func (h *dumpHandler) search(c *gin.Context) {
 	running := h.running
 	h.mu.Unlock()
 	if running {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "dump import in progress"})
+		c.JSON(http.StatusServiceUnavailable, gin.H{errorResponseKey: "dump import in progress"})
 		return
 	}
 
@@ -391,7 +429,7 @@ func (h *dumpHandler) search(c *gin.Context) {
 	defer h.dumpMu.RUnlock()
 	store, err := r18devdump.Open(path)
 	if err != nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "dump not downloaded"})
+		c.JSON(http.StatusServiceUnavailable, gin.H{errorResponseKey: "dump not downloaded"})
 		return
 	}
 	defer func() { _ = store.Close() }()
@@ -402,7 +440,7 @@ func (h *dumpHandler) search(c *gin.Context) {
 		if !errors.Is(err, models.ErrDumpMiss) {
 			logging.Warnf("r18dev dump search: lookup failed for %s: %v", query, err)
 		}
-		c.JSON(http.StatusNotFound, gin.H{"error": "not found in dump"})
+		c.JSON(http.StatusNotFound, gin.H{errorResponseKey: "not found in dump"})
 		return
 	}
 
@@ -442,7 +480,7 @@ func (h *dumpHandler) clearDump(c *gin.Context) {
 	h.mu.Lock()
 	if h.running {
 		h.mu.Unlock()
-		c.JSON(http.StatusConflict, gin.H{"error": "a dump download is already in progress"})
+		c.JSON(http.StatusConflict, gin.H{errorResponseKey: "a dump download is already in progress"})
 		return
 	}
 	// Keep the lock held for the entire clear operation so a concurrent
@@ -453,7 +491,7 @@ func (h *dumpHandler) clearDump(c *gin.Context) {
 	path := resolveDumpPath(cfg)
 
 	if _, err := os.Stat(path); err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "dump not present"})
+		c.JSON(http.StatusNotFound, gin.H{errorResponseKey: "dump not present"})
 		return
 	}
 
@@ -464,7 +502,7 @@ func (h *dumpHandler) clearDump(c *gin.Context) {
 	}
 	if err != nil {
 		logging.Warnf("r18dev dump clear: refusing to delete invalid dump database %s: %v", path, err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "file is not a valid r18.dev dump database"})
+		c.JSON(http.StatusBadRequest, gin.H{errorResponseKey: "file is not a valid r18.dev dump database"})
 		return
 	}
 
@@ -492,7 +530,7 @@ func (h *dumpHandler) clearDump(c *gin.Context) {
 		if reloadErr := h.reloadDumpLocked(path); reloadErr != nil {
 			logging.Warnf("r18dev dump clear: failed to restore handle after delete error: %v", reloadErr)
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to delete dump file: %v", removeErr)})
+		c.JSON(http.StatusInternalServerError, gin.H{errorResponseKey: fmt.Sprintf("failed to delete dump file: %v", removeErr)})
 		return
 	}
 
@@ -531,7 +569,7 @@ func (h *dumpHandler) broadcastProgress(phase string, bytes, total int64) {
 		msg.Status = ws.ProgressStatusSuccess
 		msg.Progress = 100
 	}
-	if phase == "error" {
+	if phase == errorResponseKey {
 		msg.Status = ws.ProgressStatusError
 		msg.Error = "dump download failed"
 	}

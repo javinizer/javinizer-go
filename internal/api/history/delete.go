@@ -92,7 +92,7 @@ func deleteHistoryBulk(repo database.HistoryRepositoryInterface) gin.HandlerFunc
 
 			countBefore, err := repo.Count(c.Request.Context())
 			if err != nil {
-				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: "Failed to count history"})
+				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: countHistoryErrorMessage})
 				return
 			}
 
@@ -103,7 +103,7 @@ func deleteHistoryBulk(repo database.HistoryRepositoryInterface) gin.HandlerFunc
 
 			countAfter, err := repo.Count(c.Request.Context())
 			if err != nil {
-				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: "Failed to count history"})
+				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: countHistoryErrorMessage})
 				return
 			}
 			deleted = countBefore - countAfter

@@ -454,10 +454,12 @@ metadata:
     actress_as_tag: false            # Add actress names as tags
     add_generic_role: false          # Add generic "Actress" role to all actresses
     alt_name_role: false             # Use alternate (Japanese) name in role field
+    use_credited_name: false          # Use each movie's credited actress name
     include_originalpath: false      # Include source filename in NFO
     include_stream_details: false    # Include video stream metadata
     include_fanart: true             # Include fanart URL
     include_trailer: true            # Include trailer URL
+    include_actress_images: true     # Include actress image URLs in NFO actor thumbs
     rating_source: r18dev            # Rating source identifier
     tag: []                          # Additional custom tags
     tagline: ""                      # Custom tagline template
@@ -490,6 +492,8 @@ metadata:
 
 **alt_name_role**: If true, uses the alternate (Japanese) name in the actress `<role>` field.
 
+**use_credited_name**: If true, uses each movie's credited actress name instead of the canonical database name when generating NFO files.
+
 **include_originalpath**: If true, records the original source filename in the NFO. Note the spelling: `include_originalpath` (no underscore between `original` and `path`).
 
 **include_stream_details**: Adds `<fileinfo><streamdetails>` section (requires video file analysis - not yet implemented).
@@ -497,6 +501,10 @@ metadata:
 **include_fanart**: Includes `<fanart>` URL in NFO.
 
 **include_trailer**: Includes `<trailer>` URL in NFO.
+
+**include_actress_images**: Includes actress image URLs in `<actor><thumb>` metadata. Independent of
+`output.download.download_actress`, which saves actress image files to disk — disable this to stop media
+servers such as Emby, Jellyfin, or Plex from fetching actress images out of the NFO.
 
 **rating_source**: Source identifier for the rating. Defaults to the first scraper in `scrapers.priority` (`r18dev` with the default priority list). Common values: `r18dev`, `dmm`, `libredmm`, or any scraper name.
 
@@ -1433,10 +1441,12 @@ metadata:
     actress_as_tag: false
     add_generic_role: false
     alt_name_role: false
+    use_credited_name: false
     include_originalpath: false
     include_stream_details: false
     include_fanart: true
     include_trailer: true
+    include_actress_images: true
     rating_source: "r18dev"  # First scraper in default priority list
     tag: []
     tagline: ""

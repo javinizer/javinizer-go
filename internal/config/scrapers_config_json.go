@@ -37,7 +37,7 @@ func (s *ScrapersConfig) UnmarshalJSON(data []byte) error {
 			if err := json.Unmarshal(rawVal, &s.RequestTimeoutSeconds); err != nil {
 				return fmt.Errorf("request_timeout_seconds must be an integer: %w", err)
 			}
-		case "priority":
+		case priorityKey:
 			if err := json.Unmarshal(rawVal, &s.Priority); err != nil {
 				return fmt.Errorf("priority must be an array of strings: %w", err)
 			}
@@ -140,7 +140,7 @@ func (s *ScrapersConfig) marshalScrapersMap(effective bool) map[string]any {
 	m["referer"] = s.Referer
 	m["timeout_seconds"] = s.TimeoutSeconds
 	m["request_timeout_seconds"] = s.RequestTimeoutSeconds
-	m["priority"] = s.Priority
+	m[priorityKey] = s.Priority
 	m["proxy"] = s.Proxy
 	m["flaresolverr"] = s.FlareSolverr
 	m["scrape_actress"] = s.ScrapeActress

@@ -57,13 +57,13 @@ func getHistory(repo database.HistoryRepositoryInterface) gin.HandlerFunc {
 			var err error
 			total, err = repo.CountByMovieID(c.Request.Context(), movieID)
 			if err != nil {
-				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: "Failed to count history"})
+				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: countHistoryErrorMessage})
 				return
 			}
 
 			history, findErr := repo.ListByMovieID(c.Request.Context(), movieID, limit, offset)
 			if findErr != nil {
-				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: "Failed to retrieve history"})
+				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: retrieveHistoryErrorMessage})
 				return
 			}
 
@@ -75,13 +75,13 @@ func getHistory(repo database.HistoryRepositoryInterface) gin.HandlerFunc {
 			var err error
 			total, err = repo.CountByOperation(c.Request.Context(), models.HistoryOperation(operation))
 			if err != nil {
-				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: "Failed to count history"})
+				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: countHistoryErrorMessage})
 				return
 			}
 
 			history, findErr := repo.ListByOperation(c.Request.Context(), models.HistoryOperation(operation), limit, offset)
 			if findErr != nil {
-				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: "Failed to retrieve history"})
+				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: retrieveHistoryErrorMessage})
 				return
 			}
 
@@ -93,13 +93,13 @@ func getHistory(repo database.HistoryRepositoryInterface) gin.HandlerFunc {
 			var err error
 			total, err = repo.CountByStatus(c.Request.Context(), models.HistoryStatus(status))
 			if err != nil {
-				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: "Failed to count history"})
+				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: countHistoryErrorMessage})
 				return
 			}
 
 			history, findErr := repo.ListByStatus(c.Request.Context(), models.HistoryStatus(status), limit, offset)
 			if findErr != nil {
-				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: "Failed to retrieve history"})
+				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: retrieveHistoryErrorMessage})
 				return
 			}
 
@@ -111,13 +111,13 @@ func getHistory(repo database.HistoryRepositoryInterface) gin.HandlerFunc {
 			var err error
 			total, err = repo.Count(c.Request.Context())
 			if err != nil {
-				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: "Failed to count history"})
+				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: countHistoryErrorMessage})
 				return
 			}
 
 			history, findErr := repo.List(c.Request.Context(), limit, offset)
 			if findErr != nil {
-				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: "Failed to retrieve history"})
+				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: retrieveHistoryErrorMessage})
 				return
 			}
 

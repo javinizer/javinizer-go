@@ -13,7 +13,7 @@ import (
 // the store (noop store writes, or RuntimeGenreConfigStore before runtime
 // init). Handlers map it to HTTP 503 to distinguish "not configured" from a
 // genuine internal error (500).
-var ErrGenreConfigStoreNotConfigured = errors.New("genre config store is not configured")
+var ErrGenreConfigStoreNotConfigured = errors.New(genreStoreUnavailableMessage)
 
 // GenreConfigStore provides read/write access to the config-backed genre lists
 // managed from the Genres page: ignore_genres (excluded from scraping) and

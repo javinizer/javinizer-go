@@ -7,7 +7,7 @@
 	import { alertDialog, confirmDialog } from '$lib/stores/dialog.svelte';
 	import { portalToBody } from '$lib/actions/portal';
 	import { apiClient } from '$lib/api/client';
-	import type { Movie, Actress, ActressAliasGroup } from '$lib/api/types';
+	import type { Movie, Actress, ActressAliasGroup, MovieCredit } from '$lib/api/types';
 	import { formatActressName } from '$lib/utils/actress';
 	import { createConfigQuery } from '$lib/query/queries';
 	import Button from './ui/Button.svelte';
@@ -18,13 +18,14 @@
 		movie: Movie;
 		onUpdate: (movie: Movie) => void;
 		onPersistEdits?: () => void | Promise<void>;
+		onCreditOverridePersisted?: (movieContentId: string) => void | Promise<void>;
 		actressSources?: Record<string, string>;
 		showFieldSources?: boolean;
 		savingEdits?: boolean;
 		organizing?: boolean;
 	}
 
-	let { movie, onUpdate, onPersistEdits, actressSources, showFieldSources = false, savingEdits = false, organizing = false }: Props = $props();
+	let { movie, onUpdate, onPersistEdits, onCreditOverridePersisted, actressSources, showFieldSources = false, savingEdits = false, organizing = false }: Props = $props();
 	const configQuery = createConfigQuery();
 	let firstNameOrder = $derived(configQuery.data?.output?.first_name_order ?? false);
 	let japaneseNames = $derived(
@@ -33,6 +34,17 @@
 	);
 
 	let actresses = $state<Actress[]>([]);
+	let creditStates = $state<MovieCredit[]>([]);
+	let expandedCreditID = $state<number | null>(null);
+	let overrideDrafts = $state<Record<number, string>>({});
+	const overrideDraftVersions: Record<number, number> = {};
+	let cleanDraftVersions: Record<number, number> = {};
+	let creditMovieKey: string | undefined;
+	let previousCredits: MovieCredit[] = [];
+	let updatingCreditIDs = $state<Record<number, boolean>>({});
+	type CreditOverrideAttempt = { name: string; userOverride: boolean; draftVersion: number };
+	let creditUpdateErrors = $state<Record<number, CreditOverrideAttempt | undefined>>({});
+	const pendingCreditOverrides: Record<number, CreditOverrideAttempt | undefined> = {};
 	let showEditModal = $state(false);
 	let editingIndex = $state<number | null>(null);
 	let editingActress = $state<Actress>({
@@ -41,6 +53,9 @@
 		japanese_name: '',
 		thumb_url: ''
 	});
+	// Original thumbnail of the row being edited, used to decide whether the user
+	// actually changed the field (explicit intent travels with the save).
+	let originalThumbURL = $state('');
 
 	// Whether the thumbnail preview failed to load for the current URL. Reset
 	// whenever the URL changes so a corrected URL re-fetches instead of staying
@@ -97,6 +112,67 @@
 	$effect(() => {
 		const data = movie.actresses;
 		untrack(() => { actresses = data || []; });
+	});
+
+	$effect(() => {
+		const movieKey = movie.code ?? movie.content_id ?? movie.id;
+		const data = movie.credits ?? [];
+		untrack(() => {
+			const sameMovie = creditMovieKey === movieKey;
+			// The same input array is an ordinary metadata overlay, not a new
+			// credit snapshot. New arrays are authoritative even when their values
+			// equal an earlier snapshot (for example an override reverted elsewhere).
+			if (sameMovie && data === previousCredits) return;
+			const local = new Map(creditStates.map((credit) => [credit.id, credit]));
+			const drafts: Record<number, string> = {};
+			const cleanVersions: Record<number, number> = {};
+			const errors: Record<number, CreditOverrideAttempt | undefined> = {};
+			let keepExpanded = false;
+			creditStates = data.map((credit) => {
+				const next = { ...credit };
+				if (typeof credit.id !== 'number') return next;
+				const old = sameMovie ? local.get(credit.id) : undefined;
+				const sameCredit = old && old.actress_id === credit.actress_id;
+				const version = overrideDraftVersions[credit.id] ?? 0;
+				if (sameCredit) {
+					const cleanVersion = cleanDraftVersions[credit.id] ?? 0;
+					// Input can return to the old baseline while a write is pending.
+					// Revisions retain that newer intent even before its response arrives.
+					drafts[credit.id] = version !== cleanVersion
+						? (overrideDrafts[credit.id] ?? '')
+						: (next.override_name ?? '');
+					cleanVersions[credit.id] = cleanVersion;
+					const failed = creditUpdateErrors[credit.id];
+					// A lost response can report failure after the write reached the
+					// server. Confirm the attempted state, not the current draft, which
+					// the user may already have edited again.
+					errors[credit.id] = failed && !matchesCreditOverride(next, failed)
+						? failed
+						: undefined;
+					if (failed && !errors[credit.id] && version === failed.draftVersion) {
+						drafts[credit.id] = next.override_name ?? '';
+					}
+					const unconfirmed = pendingCreditOverrides[credit.id] ?? failed;
+					if (drafts[credit.id] === (next.override_name ?? '') &&
+						(!unconfirmed || matchesCreditOverride(next, unconfirmed))) {
+						cleanVersions[credit.id] = version;
+					}
+					if (expandedCreditID === credit.id) keepExpanded = true;
+				} else {
+					drafts[credit.id] = next.override_name ?? '';
+					cleanVersions[credit.id] = version;
+				}
+				return next;
+			});
+			// Movie/credit identity changes discard drafts; ordinary updates rebase
+			// clean values and leave an open, dirty movie-specific editor intact.
+			if (!keepExpanded) expandedCreditID = null;
+			overrideDrafts = drafts;
+			cleanDraftVersions = cleanVersions;
+			creditUpdateErrors = errors;
+			creditMovieKey = movieKey;
+			previousCredits = data;
+		});
 	});
 
 	// Reset the thumbnail preview error whenever the URL being edited changes
@@ -208,6 +284,7 @@
 			japanese_name: '',
 			thumb_url: ''
 		};
+		originalThumbURL = '';
 		aliasGroup = null;
 		showEditModal = true;
 		loadAllActresses(); // Load actresses when opening modal
@@ -216,6 +293,7 @@
 	function openEditActress(index: number) {
 		editingIndex = index;
 		editingActress = { ...actresses[index] };
+		originalThumbURL = actresses[index].thumb_url ?? '';
 		aliasGroup = null;
 		showEditModal = true;
 		loadAllActresses(); // Load actresses when opening modal
@@ -262,6 +340,12 @@
 	// Select an actress from search results
 	function selectActressFromSearch(actress: Actress) {
 		editingActress = { ...actress };
+		// Re-baseline the thumbnail comparison against the SELECTED actress: the
+		// editor may have opened on a different row whose thumb_url would
+		// otherwise stay the baseline, and restoring the selected actress's own
+		// thumbnail would still be flagged as an edit — submitting an
+		// unnecessary shared-identity thumbnail write on save.
+		originalThumbURL = actress.thumb_url ?? '';
 		searchQuery = getFullName(actress); // Show selected name in input
 		showSearchResults = false;
 	}
@@ -278,6 +362,89 @@
 		setTimeout(() => {
 			showSearchResults = false;
 		}, 200);
+	}
+
+
+	function creditForActress(actress: Actress): MovieCredit | undefined {
+		if (typeof actress.id !== 'number') return undefined;
+		return creditStates.find(
+			(credit) => credit.actress_id === actress.id && typeof credit.id === 'number' && credit.id > 0
+		);
+	}
+
+	function matchesCreditOverride(credit: MovieCredit | undefined, attempt: CreditOverrideAttempt): boolean {
+		return !!credit &&
+			(credit.override_name ?? '') === attempt.name &&
+			(credit.user_override ?? false) === attempt.userOverride;
+	}
+
+	function acceptPersistedDraft(creditID: number, attempt: CreditOverrideAttempt) {
+		const version = overrideDraftVersions[creditID] ?? 0;
+		if (version === attempt.draftVersion) {
+			overrideDrafts = { ...overrideDrafts, [creditID]: attempt.name };
+		}
+		// Newer input that exactly matches the confirmed value is now clean.
+		// Other newer text, including a name typed during Clear, stays dirty.
+		if ((overrideDrafts[creditID] ?? '') === attempt.name) {
+			cleanDraftVersions[creditID] = version;
+		}
+	}
+
+	function editMovieNameDraft(credit: MovieCredit, value: string) {
+		if (typeof credit.id !== 'number') return;
+		const version = (overrideDraftVersions[credit.id] ?? 0) + 1;
+		overrideDraftVersions[credit.id] = version;
+		if (!pendingCreditOverrides[credit.id] && !creditUpdateErrors[credit.id] &&
+			value === (credit.override_name ?? '')) {
+			cleanDraftVersions[credit.id] = version;
+		}
+		overrideDrafts = { ...overrideDrafts, [credit.id]: value };
+	}
+
+	function toggleMovieNameEditor(credit: MovieCredit) {
+		if (typeof credit.id !== 'number' || updatingCreditIDs[credit.id]) return;
+		expandedCreditID = expandedCreditID === credit.id ? null : credit.id;
+		overrideDrafts = { ...overrideDrafts, [credit.id]: credit.override_name ?? '' };
+		cleanDraftVersions[credit.id] = overrideDraftVersions[credit.id] ?? 0;
+		creditUpdateErrors = { ...creditUpdateErrors, [credit.id]: undefined };
+	}
+
+	async function updateMovieSpecificName(credit: MovieCredit, clear: boolean) {
+		if (typeof credit.id !== 'number' || updatingCreditIDs[credit.id]) return;
+		const name = clear ? '' : (overrideDrafts[credit.id] ?? '').trim();
+		const draftVersion = overrideDraftVersions[credit.id] ?? 0;
+		if (!clear && !name) return;
+		const attempt = { name, userOverride: !clear, draftVersion };
+		pendingCreditOverrides[credit.id] = attempt;
+
+		updatingCreditIDs = { ...updatingCreditIDs, [credit.id]: true };
+		creditUpdateErrors = { ...creditUpdateErrors, [credit.id]: undefined };
+		try {
+			await apiClient.updateCreditOverride(credit.id, name, !clear);
+			delete pendingCreditOverrides[credit.id];
+			// Change only this row: other requests may already have acknowledged
+			// sibling overrides while the parent refresh is still pending/failed.
+			creditStates = creditStates.map((item) =>
+				item.id === credit.id ? { ...item, override_name: name, user_override: !clear } : item
+			);
+			acceptPersistedDraft(credit.id, attempt);
+			// This endpoint is already persisted. Refresh the authoritative batch result
+			// instead of adding it to the parent's pending movie-edit overlay.
+			await onCreditOverridePersisted?.(movie.code ?? movie.content_id ?? movie.id);
+		} catch (error) {
+			console.error('Failed to update movie-specific actress name:', error);
+			delete pendingCreditOverrides[credit.id];
+			const current = creditStates.find((item) => item.id === credit.id);
+			if (matchesCreditOverride(current, attempt)) {
+				acceptPersistedDraft(credit.id, attempt);
+			}
+			creditUpdateErrors = {
+				...creditUpdateErrors,
+				[credit.id]: matchesCreditOverride(current, attempt) ? undefined : attempt
+			};
+		} finally {
+			updatingCreditIDs = { ...updatingCreditIDs, [credit.id]: false };
+		}
 	}
 
 	function normalizeName(value: string | undefined): string {
@@ -356,6 +523,7 @@
 	{:else}
 		<div class="grid grid-cols-[repeat(auto-fill,minmax(10rem,1fr))] gap-4">
 			{#each actresses as actress, index (actress.id || `${actress.first_name}-${actress.last_name}-${actress.japanese_name}-${index}`)}
+				{@const credit = creditForActress(actress)}
 				<div animate:flip={{ duration: 220, easing: quintOut }}>
 					<Card class="p-3 w-full max-w-[10rem] hover:shadow-md transition-shadow">
 					<div class="space-y-2">
@@ -391,8 +559,77 @@
 							{/if}
 						</div>
 
+
+						{#if credit?.id}
+							<div class="space-y-2 border-t pt-2">
+								{#if credit.user_override}
+									<span class="inline-flex rounded-full bg-primary/10 px-2 py-0.5 text-[0.7rem] font-medium text-primary">
+										{m.editor_movie_name_badge()}
+									</span>
+								{/if}
+								<Button
+									variant="ghost"
+									size="sm"
+									class="h-7 w-full text-xs"
+									onclick={() => toggleMovieNameEditor(credit)}
+									disabled={savingEdits || organizing || updatingCreditIDs[credit.id]}
+								>
+									{#snippet children()}{m.editor_movie_name_button()}{/snippet}
+								</Button>
+								{#if expandedCreditID === credit.id}
+									<div class="space-y-2 rounded-md bg-muted/50 p-2">
+										<label class="block text-xs font-medium" for={`movie-credit-name-${credit.id}`}>
+											{m.editor_movie_name_label()}
+										</label>
+										<input
+											id={`movie-credit-name-${credit.id}`}
+											type="text"
+											value={overrideDrafts[credit.id] ?? ''}
+											oninput={(event) => editMovieNameDraft(credit, event.currentTarget.value)}
+											placeholder={m.editor_movie_name_placeholder()}
+											class="w-full rounded-md border bg-background px-2 py-1.5 text-xs focus:border-primary focus:ring-2 focus:ring-primary"
+										/>
+										<p class="text-[0.7rem] leading-snug text-muted-foreground">
+											{m.editor_movie_name_hint()}
+										</p>
+										<div class="flex flex-wrap gap-1">
+											<Button
+												size="sm"
+												class="h-7 text-xs"
+												onclick={() => updateMovieSpecificName(credit, false)}
+												disabled={updatingCreditIDs[credit.id] || !(overrideDrafts[credit.id] ?? '').trim()}
+											>
+												{#snippet children()}{m.editor_movie_name_save()}{/snippet}
+											</Button>
+											{#if credit.user_override}
+												<Button
+													variant="outline"
+													size="sm"
+													class="h-7 text-xs"
+													onclick={() => updateMovieSpecificName(credit, true)}
+													disabled={updatingCreditIDs[credit.id]}
+												>
+													{#snippet children()}{m.editor_movie_name_clear()}{/snippet}
+												</Button>
+											{/if}
+										</div>
+										{#if creditUpdateErrors[credit.id]}
+											<p role="alert" class="text-xs text-destructive">{m.editor_movie_name_update_failed()}</p>
+										{/if}
+									</div>
+								{/if}
+							</div>
+						{/if}
+
 						<div class="flex gap-1">
-							<Button variant="outline" size="sm" onclick={() => openEditActress(index)} class="flex-1" disabled={savingEdits || organizing}>
+							<Button
+								variant="outline"
+								size="sm"
+								onclick={() => openEditActress(index)}
+								class="flex-1"
+								aria-label={m.editor_edit_actress()}
+								disabled={savingEdits || organizing}
+							>
 								{#snippet children()}
 									<SquarePen class="h-3 w-3" />
 								{/snippet}
@@ -401,7 +638,9 @@
 								variant="outline"
 								size="sm"
 								onclick={() => removeActress(index)}
-								class="flex-1 text-destructive hover:bg-destructive/10" disabled={savingEdits || organizing}
+								class="flex-1 text-destructive hover:bg-destructive/10"
+								aria-label={m.editor_remove_actress_action()}
+								disabled={savingEdits || organizing}
 							>
 								{#snippet children()}
 									<Trash2 class="h-3 w-3" />
@@ -568,7 +807,15 @@
 							<input
 								id="actress-thumb-url"
 								type="url"
-								bind:value={editingActress.thumb_url}
+								value={editingActress.thumb_url ?? ''}
+								oninput={(event) => {
+									const value = event.currentTarget.value;
+									editingActress = {
+										...editingActress,
+										thumb_url: value,
+										thumb_edited: value.trim() !== originalThumbURL.trim()
+									};
+								}}
 								placeholder="https://..."
 								class="w-full px-3 py-2 border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all font-mono text-sm"
 							/>

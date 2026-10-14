@@ -64,7 +64,7 @@ var tableSchema = map[string]struct {
 			site_id           TEXT,
 			service_code      TEXT
 		)`,
-		columns: []string{"content_id", "dvd_id", "dvd_id_norm", "title_en", "title_ja", "comment_en", "comment_ja", "runtime_mins", "release_date", "sample_url", "maker_id", "label_id", "series_id", "jacket_full_url", "jacket_thumb_url", "gallery_full_first", "gallery_full_last", "gallery_thumb_first", "gallery_thumb_last", "site_id", "service_code"},
+		columns: []string{contentIDColumn, "dvd_id", "dvd_id_norm", "title_en", "title_ja", "comment_en", "comment_ja", "runtime_mins", "release_date", "sample_url", "maker_id", "label_id", "series_id", "jacket_full_url", "jacket_thumb_url", "gallery_full_first", "gallery_full_last", "gallery_thumb_first", "gallery_thumb_last", "site_id", "service_code"},
 	},
 	"derived_actress": {
 		create: `CREATE TABLE actresses (
@@ -82,7 +82,7 @@ var tableSchema = map[string]struct {
 			name_en TEXT,
 			name_ja TEXT
 		)`,
-		columns: []string{"id", "name_en", "name_ja"},
+		columns: []string{"id", nameENColumn, nameJAColumn},
 	},
 	"derived_label": {
 		create: `CREATE TABLE labels (
@@ -90,7 +90,7 @@ var tableSchema = map[string]struct {
 			name_en TEXT,
 			name_ja TEXT
 		)`,
-		columns: []string{"id", "name_en", "name_ja"},
+		columns: []string{"id", nameENColumn, nameJAColumn},
 	},
 	"derived_series": {
 		create: `CREATE TABLE series (
@@ -98,7 +98,7 @@ var tableSchema = map[string]struct {
 			name_en TEXT,
 			name_ja TEXT
 		)`,
-		columns: []string{"id", "name_en", "name_ja"},
+		columns: []string{"id", nameENColumn, nameJAColumn},
 	},
 	"derived_director": {
 		create: `CREATE TABLE directors (
@@ -115,7 +115,7 @@ var tableSchema = map[string]struct {
 			name_en TEXT,
 			name_ja TEXT
 		)`,
-		columns: []string{"id", "name_en", "name_ja"},
+		columns: []string{"id", nameENColumn, nameJAColumn},
 	},
 	"derived_video_actress": {
 		create: `CREATE TABLE video_actresses (
@@ -125,7 +125,7 @@ var tableSchema = map[string]struct {
 			release_date TEXT,
 			PRIMARY KEY (content_id, actress_id)
 		)`,
-		columns: []string{"content_id", "actress_id", "ordinality", "release_date"},
+		columns: []string{contentIDColumn, "actress_id", "ordinality", "release_date"},
 	},
 	"derived_video_category": {
 		create: `CREATE TABLE video_categories (
@@ -134,7 +134,7 @@ var tableSchema = map[string]struct {
 			release_date TEXT,
 			PRIMARY KEY (content_id, category_id)
 		)`,
-		columns: []string{"content_id", "category_id", "release_date"},
+		columns: []string{contentIDColumn, "category_id", "release_date"},
 	},
 	"derived_video_director": {
 		create: `CREATE TABLE video_directors (
@@ -142,14 +142,14 @@ var tableSchema = map[string]struct {
 			director_id TEXT NOT NULL,
 			PRIMARY KEY (content_id, director_id)
 		)`,
-		columns: []string{"content_id", "director_id"},
+		columns: []string{contentIDColumn, "director_id"},
 	},
 	"source_dmm_trailer": {
 		create: `CREATE TABLE trailers (
 			content_id TEXT NOT NULL PRIMARY KEY,
 			url        TEXT
 		)`,
-		columns: []string{"content_id", "url"},
+		columns: []string{contentIDColumn, "url"},
 	},
 }
 

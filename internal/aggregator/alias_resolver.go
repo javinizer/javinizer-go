@@ -88,7 +88,7 @@ func (ar *aliasResolver) Resolve(actress *models.Actress) {
 	// the Japanese path first so its precedence and write behavior are
 	// preserved — lookupLocked itself is precedence-agnostic about the result.
 	if actress.JapaneseName != "" {
-		if canonical, found := ar.cache[actress.JapaneseName]; found {
+		if canonical, found := ar.lookupLocked(actress.JapaneseName, "", ""); found {
 			actress.JapaneseName = canonical
 			return
 		}
@@ -127,21 +127,32 @@ func (ar *aliasResolver) CanonicalName(japaneseName, firstName, lastName string)
 	return ""
 }
 
+func (ar *aliasResolver) cacheLookupLocked(name string) (string, bool) {
+	if canonical, found := ar.cache[models.NormalizeActressNameKey(name)]; found {
+		return canonical, true
+	}
+	// Preserve the direct-cache test seam and compatibility with callers that
+	// construct an in-memory resolver without loadCache. Production caches are
+	// normalized during loading and never depend on this fallback.
+	canonical, found := ar.cache[name]
+	return canonical, found
+}
+
 // lookupLocked performs the alias cache lookup shared by Resolve and
 // CanonicalName. Caller must hold ar.mu (read or write).
 // Precedence: JapaneseName, then "FirstName LastName", then "LastName FirstName".
 func (ar *aliasResolver) lookupLocked(japaneseName, firstName, lastName string) (string, bool) {
 	if japaneseName != "" {
-		if canonical, found := ar.cache[japaneseName]; found {
+		if canonical, found := ar.cacheLookupLocked(japaneseName); found {
 			return canonical, true
 		}
 	}
 
 	if firstName != "" && lastName != "" {
-		if canonical, found := ar.cache[firstName+" "+lastName]; found {
+		if canonical, found := ar.cacheLookupLocked(firstName + " " + lastName); found {
 			return canonical, true
 		}
-		if canonical, found := ar.cache[lastName+" "+firstName]; found {
+		if canonical, found := ar.cacheLookupLocked(lastName + " " + firstName); found {
 			return canonical, true
 		}
 	}
@@ -168,8 +179,15 @@ func (ar *aliasResolver) loadCache(ctx context.Context) {
 
 	aliasMap, err := ar.repo.GetAliasMap(ctx)
 	if err == nil {
+		normalized := make(map[string]string, len(aliasMap))
+		for alias, canonical := range aliasMap {
+			key := models.NormalizeActressNameKey(alias)
+			if key != "" {
+				normalized[key] = canonical
+			}
+		}
 		ar.mu.Lock()
-		ar.cache = aliasMap
+		ar.cache = normalized
 		ar.mu.Unlock()
 	} else {
 		logging.Warnf("aliasResolver: failed to load actress aliases: %v", err)

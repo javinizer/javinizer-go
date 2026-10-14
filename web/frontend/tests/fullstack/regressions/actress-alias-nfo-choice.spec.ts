@@ -59,9 +59,9 @@ async function focusMovie(page: Page, movieId: string): Promise<void> {
 
 /**
  * Open the actress edit modal by clicking the pencil button on the actress
- * card whose japanese_name matches `jpName`. The pencil is the first button
- * in the card's action row (SquarePen icon); scope to the actress Card
- * containing the name and click that specific button.
+ * card whose japanese_name matches `jpName`. Both icon-only actions carry
+ * accessible labels, so the card's edit button is selected by name instead
+ * of by position.
  */
 async function openActressEdit(page: Page, jpName: string): Promise<void> {
 	const nameEl = page.locator(`p[title="${jpName}"]`).first();
@@ -74,7 +74,9 @@ async function openActressEdit(page: Page, jpName: string): Promise<void> {
 	// the xpath ancestor axis with [1] selects the closest card ancestor —
 	// the inner per-actress Card whose action row holds the pencil + trash.
 	const actressCard = nameEl.locator('xpath=ancestor::*[contains(@class,"card")][1]');
-	await actressCard.locator('button').first().click();
+	// Target the labelled edit action: the card also hosts the per-movie
+	// override control, so positional selection is no longer stable.
+	await actressCard.getByRole('button', { name: 'Edit Actress' }).click();
 	await expect(page.getByRole('heading', { name: 'Edit Actress' })).toBeVisible({
 		timeout: 10_000,
 	});

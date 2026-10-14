@@ -1,0 +1,292 @@
+import { describe, it, expect } from 'vitest';
+import creditSelectionFixture from '../../../../../internal/api/contracts/testdata/display_title_credit_selection.json';
+import { buildDisplayTitlePreviewSignature } from './display-title-preview';
+import { rebaseOverlayOntoMovie } from '../../routes/review/[jobId]/stores/save-helpers';
+import type { Actress, Movie, MovieCredit } from '$lib/api/types';
+
+function makeActress(over: Partial<Actress>): Actress {
+	return {
+		id: 7,
+		dmm_id: 12,
+		first_name: 'Yui',
+		last_name: 'Hatano',
+		japanese_name: '波多野結衣',
+		...over,
+	};
+}
+
+function makeCredit(over: Partial<MovieCredit>): MovieCredit {
+	return {
+		actress_id: 7,
+		credited_name: 'Yui Hatano',
+		suppressed: false,
+		order_index: 0,
+		render_visible: true,
+		...over,
+	};
+}
+
+function makeMovie(actresses: Actress[], credits?: MovieCredit[]): Movie {
+	return {
+		id: 'ABC-123',
+		title: 'Some Title',
+		actresses,
+		credits,
+		genres: [],
+		poster_url: 'https://cdn.example/p.jpg',
+	} as Movie;
+}
+
+describe('buildDisplayTitlePreviewSignature', () => {
+	it('invalidates after Keep catalog using real API-projected credits', () => {
+		// The Go contract test validates this shared fixture against MovieView JSON
+		// and the actual title renderer before/after the collision decision.
+		const [alias, canonical] = creditSelectionFixture;
+		const actress = makeActress({ first_name: 'Canonical', last_name: 'Name', japanese_name: '' });
+		const before = makeMovie([actress], alias.credits);
+		const after = makeMovie([actress], canonical.credits);
+		expect(alias.rendered_title).not.toBe(canonical.rendered_title);
+		expect(buildDisplayTitlePreviewSignature(after)).not.toBe(
+			buildDisplayTitlePreviewSignature(before),
+		);
+	});
+
+	it('ignores canonical selection changes on hidden credits', () => {
+		const before = makeMovie(
+			[],
+			[makeCredit({ render_visible: false, display_force_canonical: false })],
+		);
+		const after = makeMovie(
+			[],
+			[makeCredit({ render_visible: false, display_force_canonical: true })],
+		);
+		expect(buildDisplayTitlePreviewSignature(after)).toBe(
+			buildDisplayTitlePreviewSignature(before),
+		);
+	});
+
+	it('is stable when only volatile actress fields churn between polls', () => {
+		const before = makeMovie([
+			makeActress({ thumb_url: '', origin: 'scrape', name_key: '', aliases: '' }),
+		]);
+		const after = makeMovie([
+			makeActress({
+				thumb_url: 'https://cdn.example/t.jpg',
+				origin: 'identity',
+				name_key: 'hatano yui',
+				aliases: 'Y.H.',
+			}),
+		]);
+		expect(buildDisplayTitlePreviewSignature(after)).toBe(
+			buildDisplayTitlePreviewSignature(before),
+		);
+	});
+
+	it('rebase after cast_version churn does not alter the preview signature', () => {
+		const baseline = { ...makeMovie([makeActress({ thumb_url: '' })]), cast_version: 'vA' };
+		const overlay = { ...baseline };
+		const fresh = {
+			...makeMovie([makeActress({ thumb_url: 'https://cdn.example/t.jpg' })]),
+			cast_version: 'vB',
+		};
+		const rebased = rebaseOverlayOntoMovie(baseline, overlay, fresh);
+		expect(rebased.actresses?.[0]?.thumb_url).toBe('https://cdn.example/t.jpg');
+		expect(buildDisplayTitlePreviewSignature(rebased)).toBe(
+			buildDisplayTitlePreviewSignature(overlay),
+		);
+	});
+
+	it('is stable when a raw verified flag flips (render gate is quarantine-based)', () => {
+		// v1.6.1 follow-up: #265 gates rendering on verified || !quarantined, so a
+		// bare verified transition does not change the rendered title.
+		const a = makeMovie([makeActress({ verified: false })]);
+		const b = makeMovie([makeActress({ verified: true })]);
+		expect(buildDisplayTitlePreviewSignature(b)).toBe(buildDisplayTitlePreviewSignature(a));
+	});
+
+	it('is stable when dmm_id is assigned mid-job', () => {
+		const a = makeMovie([makeActress({ dmm_id: 0 })]);
+		const b = makeMovie([makeActress({ dmm_id: 999 })]);
+		expect(buildDisplayTitlePreviewSignature(b)).toBe(buildDisplayTitlePreviewSignature(a));
+	});
+
+	it('is stable when poster_url churns (not a display-title template input)', () => {
+		const a = makeMovie([makeActress({})]);
+		const b = { ...makeMovie([makeActress({})]), poster_url: 'https://cdn.example/new.jpg' };
+		expect(buildDisplayTitlePreviewSignature(b)).toBe(buildDisplayTitlePreviewSignature(a));
+	});
+
+	it('ignores movie.actresses churn while credits drive the render', () => {
+		const credits = [makeCredit({})];
+		const a = makeMovie([makeActress({})], credits);
+		const b = makeMovie(
+			[makeActress({}), { ...makeActress({}), id: 9, first_name: 'Appended' }],
+			credits,
+		);
+		expect(buildDisplayTitlePreviewSignature(b)).toBe(buildDisplayTitlePreviewSignature(a));
+	});
+
+	it('changes when a credit-referenced actress canonical name changes', () => {
+		// Default canonical-name rendering draws the rendered name from the
+		// identity row: a rename must refire even when credit fields are static.
+		const credits = [makeCredit({})];
+		const a = makeMovie([makeActress({})], credits);
+		const b = makeMovie([makeActress({ first_name: 'Aoi' })], credits);
+		expect(buildDisplayTitlePreviewSignature(b)).not.toBe(buildDisplayTitlePreviewSignature(a));
+	});
+
+	it('is stable when an unreferenced actress name changes (credits render)', () => {
+		const credits = [makeCredit({})];
+		const stranger = makeActress({
+			id: 99,
+			first_name: 'Aoi',
+			last_name: 'Sora',
+			japanese_name: '',
+		});
+		const a = makeMovie([makeActress({}), stranger], credits);
+		const b = makeMovie([makeActress({}), { ...stranger, first_name: 'Renamed' }], credits);
+		expect(buildDisplayTitlePreviewSignature(b)).toBe(buildDisplayTitlePreviewSignature(a));
+	});
+
+	it('is stable when a hidden credit churns actress_id (identity reconciliation)', () => {
+		// Hidden credits never render: identity reconciliation re-pointing
+		// their actress_id must not refire the preview.
+		const a = makeMovie([], [makeCredit({ render_visible: false, actress_id: 7 })]);
+		const b = makeMovie([], [makeCredit({ render_visible: false, actress_id: 42 })]);
+		expect(buildDisplayTitlePreviewSignature(b)).toBe(buildDisplayTitlePreviewSignature(a));
+	});
+
+	it('changes when a visible credit churns actress_id', () => {
+		// Visible credits stay identity-bearing (both the render token and the
+		// referenced-actress token), so an identity re-point refires.
+		const a = makeMovie([], [makeCredit({ actress_id: 7 })]);
+		const b = makeMovie([], [makeCredit({ actress_id: 42 })]);
+		expect(buildDisplayTitlePreviewSignature(b)).not.toBe(buildDisplayTitlePreviewSignature(a));
+	});
+
+	it('hidden markers pad slots: moving a visible credit past a hidden one changes the signature', () => {
+		const visible = makeCredit({ actress_id: 9, credited_name: 'Aoi Sora' });
+		const hidden = makeCredit({ render_visible: false, actress_id: 7 });
+		const a = makeMovie([], [visible, hidden]);
+		const b = makeMovie([], [hidden, visible]);
+		expect(buildDisplayTitlePreviewSignature(b)).not.toBe(buildDisplayTitlePreviewSignature(a));
+	});
+
+	it('is stable when the actress of a hidden credit churns', () => {
+		const credits = [makeCredit({ render_visible: false })];
+		const a = makeMovie([makeActress({})], credits);
+		const b = makeMovie([makeActress({ first_name: 'Aoi' })], credits);
+		expect(buildDisplayTitlePreviewSignature(b)).toBe(buildDisplayTitlePreviewSignature(a));
+	});
+
+	it('changes when credit render visibility transitions', () => {
+		const a = makeMovie([], [makeCredit({ render_visible: false })]);
+		const b = makeMovie([], [makeCredit({ render_visible: true })]);
+		expect(buildDisplayTitlePreviewSignature(b)).not.toBe(buildDisplayTitlePreviewSignature(a));
+	});
+
+	it('is stable when an invisible credit churns names or order', () => {
+		const a = makeMovie([], [makeCredit({ render_visible: false })]);
+		const b = makeMovie(
+			[],
+			[makeCredit({ render_visible: false, credited_name: 'Renamed', order_index: 5 })],
+		);
+		expect(buildDisplayTitlePreviewSignature(b)).toBe(buildDisplayTitlePreviewSignature(a));
+	});
+
+	it('treats a locally suppressed credit as invisible', () => {
+		const a = makeMovie([], [makeCredit({})]);
+		const b = makeMovie([], [makeCredit({ suppressed: true })]);
+		expect(buildDisplayTitlePreviewSignature(b)).not.toBe(buildDisplayTitlePreviewSignature(a));
+	});
+
+	it('changes when user_override toggles with the same override text', () => {
+		// RenderNameWithSelection applies override_name only when user_override is
+		// set, so the boolean is render-relevant independent of the text.
+		const a = makeMovie([], [makeCredit({ override_name: 'Alias', user_override: false })]);
+		const b = makeMovie([], [makeCredit({ override_name: 'Alias', user_override: true })]);
+		expect(buildDisplayTitlePreviewSignature(b)).not.toBe(buildDisplayTitlePreviewSignature(a));
+	});
+
+	it("is stable when an override-bearing credit's referenced actress canonical name changes", () => {
+		// user_override + non-blank override_name: RenderNameWithSelection
+		// renders the override regardless of the canonical identity row, so
+		// canonical-name churn must not refire the preview.
+		const credits = [makeCredit({ user_override: true, override_name: 'Alias A' })];
+		const a = makeMovie([makeActress({})], credits);
+		const b = makeMovie(
+			[makeActress({ first_name: 'Aoi', last_name: 'Sora', japanese_name: '蒼井そら' })],
+			credits,
+		);
+		expect(buildDisplayTitlePreviewSignature(b)).toBe(buildDisplayTitlePreviewSignature(a));
+	});
+
+	it('changes when the override is blank or unset so canonical churn reaches the render', () => {
+		// A blank override falls through to credited/canonical rendering
+		// (RenderNameWithSelection trims), so canonical churn must refire.
+		const blank = [makeCredit({ user_override: true, override_name: '   ' })];
+		const a = makeMovie([makeActress({})], blank);
+		const b = makeMovie([makeActress({ first_name: 'Aoi' })], blank);
+		expect(buildDisplayTitlePreviewSignature(b)).not.toBe(buildDisplayTitlePreviewSignature(a));
+	});
+
+	it('keeps the override credit slot positional: sibling canonical churn still refires', () => {
+		const overrideCredit = makeCredit({
+			actress_id: 7,
+			user_override: true,
+			override_name: 'Alias A',
+		});
+		const plain = makeCredit({ actress_id: 9, credited_name: 'Aoi Sora', order_index: 1 });
+		const a = makeMovie(
+			[makeActress({}), makeActress({ id: 9, first_name: 'Aoi', last_name: 'Sora' })],
+			[overrideCredit, plain],
+		);
+		const overrideActressChurn = makeMovie(
+			[
+				makeActress({ first_name: 'Renamed' }),
+				makeActress({ id: 9, first_name: 'Aoi', last_name: 'Sora' }),
+			],
+			[overrideCredit, plain],
+		);
+		const siblingActressChurn = makeMovie(
+			[makeActress({}), makeActress({ id: 9, first_name: 'Yui' })],
+			[overrideCredit, plain],
+		);
+		expect(buildDisplayTitlePreviewSignature(overrideActressChurn)).toBe(
+			buildDisplayTitlePreviewSignature(a),
+		);
+		expect(buildDisplayTitlePreviewSignature(siblingActressChurn)).not.toBe(
+			buildDisplayTitlePreviewSignature(a),
+		);
+	});
+
+	it('changes when a visible credit render token changes', () => {
+		const a = makeMovie([], [makeCredit({})]);
+		const b = makeMovie([], [makeCredit({ override_name: 'Alias' })]);
+		expect(buildDisplayTitlePreviewSignature(b)).not.toBe(buildDisplayTitlePreviewSignature(a));
+	});
+
+	it('changes when an actress display name changes (creditless render)', () => {
+		const a = makeMovie([makeActress({})]);
+		const b = makeMovie([makeActress({ first_name: 'Aoi' })]);
+		expect(buildDisplayTitlePreviewSignature(b)).not.toBe(buildDisplayTitlePreviewSignature(a));
+	});
+
+	it('changes when actress order changes (creditless render)', () => {
+		const other = makeActress({
+			id: 9,
+			first_name: 'Aoi',
+			last_name: 'Sora',
+			japanese_name: '蒼井そら',
+		});
+		const a = makeMovie([makeActress({}), other]);
+		const b = makeMovie([other, makeActress({})]);
+		expect(buildDisplayTitlePreviewSignature(b)).not.toBe(buildDisplayTitlePreviewSignature(a));
+	});
+
+	it('changes when scalar template inputs change', () => {
+		const a = makeMovie([makeActress({})]);
+		const b = { ...makeMovie([makeActress({})]), title: 'Different Title' };
+		expect(buildDisplayTitlePreviewSignature(b)).not.toBe(buildDisplayTitlePreviewSignature(a));
+	});
+});

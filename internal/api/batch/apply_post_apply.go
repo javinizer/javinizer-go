@@ -77,14 +77,14 @@ func makeOrganizePostApplyAuditHook(deps *core.APIDeps, job worker.BatchJobInter
 			// cancellation landed, and the success-history row the worker writes
 			// for a canceled partial move reads the same Warnings slice.
 			if !errors.Is(afr.Err, context.Canceled) {
-				failCtx := map[string]any{"job_id": job.GetID(), "movie_id": afc.Movie.ID, "error": afr.Err.Error(), "apply_generation": loadApplyGeneration(applyGenerationRef)}
+				failCtx := map[string]any{jobIDKey: job.GetID(), movieIDKey: afc.Movie.ID, errorResponseKey: afr.Err.Error(), applyGenerationKey: loadApplyGeneration(applyGenerationRef)}
 				if len(warnings) > 0 {
 					failCtx["warnings"] = warnings
 				}
 				emit("file_move", fmt.Sprintf("Organize failed for %s", afc.Movie.ID), models.SeverityError, failCtx)
 			}
 			for _, warning := range warnings {
-				emit("file_move", fmt.Sprintf("Organize warning for %s: %s", afc.Movie.ID, warning), models.SeverityWarn, map[string]any{"job_id": job.GetID(), "movie_id": afc.Movie.ID, "file": afc.FilePath, "new_path": newPath, "warning": warning, "error": afr.Err.Error(), "apply_generation": loadApplyGeneration(applyGenerationRef)})
+				emit("file_move", fmt.Sprintf("Organize warning for %s: %s", afc.Movie.ID, warning), models.SeverityWarn, map[string]any{jobIDKey: job.GetID(), movieIDKey: afc.Movie.ID, "file": afc.FilePath, "new_path": newPath, "warning": warning, errorResponseKey: afr.Err.Error(), applyGenerationKey: loadApplyGeneration(applyGenerationRef)})
 			}
 			return
 		}
@@ -92,13 +92,13 @@ func makeOrganizePostApplyAuditHook(deps *core.APIDeps, job worker.BatchJobInter
 		if afr.Result != nil && afr.Result.OrganizeResult != nil {
 			newPath = afr.Result.OrganizeResult.NewPath
 		}
-		emit("file_move", fmt.Sprintf("Organized %s", afc.Movie.ID), models.SeverityInfo, map[string]any{"job_id": job.GetID(), "movie_id": afc.Movie.ID, "file": afc.FilePath, "new_path": newPath, "apply_generation": loadApplyGeneration(applyGenerationRef)})
+		emit("file_move", fmt.Sprintf("Organized %s", afc.Movie.ID), models.SeverityInfo, map[string]any{jobIDKey: job.GetID(), movieIDKey: afc.Movie.ID, "file": afc.FilePath, "new_path": newPath, applyGenerationKey: loadApplyGeneration(applyGenerationRef)})
 		// #224 phase E: authorized intra-batch duplicates are demoted from
 		// conflicts to per-file warnings; each warning gets its own audit
 		// event via the existing eventlog.
 		if afr.Result != nil && afr.Result.OrganizeResult != nil {
 			for _, warning := range afr.Result.OrganizeResult.Warnings {
-				emit("file_move", fmt.Sprintf("Organize warning for %s: %s", afc.Movie.ID, warning), models.SeverityWarn, map[string]any{"job_id": job.GetID(), "movie_id": afc.Movie.ID, "file": afc.FilePath, "new_path": newPath, "warning": warning, "apply_generation": loadApplyGeneration(applyGenerationRef)})
+				emit("file_move", fmt.Sprintf("Organize warning for %s: %s", afc.Movie.ID, warning), models.SeverityWarn, map[string]any{jobIDKey: job.GetID(), movieIDKey: afc.Movie.ID, "file": afc.FilePath, "new_path": newPath, "warning": warning, applyGenerationKey: loadApplyGeneration(applyGenerationRef)})
 			}
 		}
 	}
@@ -127,7 +127,7 @@ func makeUpdatePostApplyAuditHook(deps *core.APIDeps, job worker.BatchJobInterfa
 			// aggregated budget).
 			auditCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			postApplyAuditEmit(auditCtx, emitter, job.GetID())("nfo_gen", fmt.Sprintf("Update failed for %s", afc.Movie.ID), models.SeverityError, map[string]any{"job_id": job.GetID(), "movie_id": afc.Movie.ID, "error": afr.Err.Error(), "apply_generation": loadApplyGeneration(applyGenerationRef)})
+			postApplyAuditEmit(auditCtx, emitter, job.GetID())("nfo_gen", fmt.Sprintf("Update failed for %s", afc.Movie.ID), models.SeverityError, map[string]any{jobIDKey: job.GetID(), movieIDKey: afc.Movie.ID, errorResponseKey: afr.Err.Error(), applyGenerationKey: loadApplyGeneration(applyGenerationRef)})
 		}
 	}
 }

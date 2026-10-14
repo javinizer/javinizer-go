@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/downloader"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -60,6 +61,16 @@ type applyItem struct {
 // workers later execute, so PreApply-hook mutations reach both, and every
 // hook still runs exactly once per file. baseline is the phase-entry movie
 // clone (codex r51), frozen before the hook could mutate the live pointer.
+func artifactMovieKey(item applyItem) string {
+	if item.movie != nil && item.movie.ContentID != "" {
+		return item.movie.ContentID
+	}
+	if item.fileResult != nil && item.fileResult.FileMatchInfo.MovieID != "" {
+		return item.fileResult.FileMatchInfo.MovieID
+	}
+	return item.filePath
+}
+
 type preparedApplyFile struct {
 	cmd      workflow.ApplyCmd
 	afc      *ApplyFileContext
@@ -279,6 +290,79 @@ func recoverRunPanic(inputs applyPhaseInputs, r any) {
 	inputs.Lifecycle.MarkFailed()
 }
 
+func refreshApplyMovieIdentity(ctx context.Context, repo database.MovieRepositoryInterface, results map[string]*resultstore.MovieResult) map[string]bool {
+	known := make(map[string]bool)
+	if repo == nil {
+		return known
+	}
+	persistedByContentID := make(map[string]*models.Movie)
+	for _, fileResult := range results {
+		if fileResult == nil || fileResult.Movie == nil {
+			continue
+		}
+		contentID := strings.TrimSpace(fileResult.Movie.ContentID)
+		if contentID == "" {
+			continue
+		}
+		known[contentID] = known[contentID] || fileResult.PersistedMovie
+		if _, ok := persistedByContentID[contentID]; ok {
+			continue
+		}
+		persisted, err := repo.FindByContentID(ctx, contentID)
+		if err != nil {
+			logging.Warnf("[Apply] failed to refresh persisted movie %s: %v", contentID, err)
+			continue
+		}
+		if persisted != nil {
+			persistedByContentID[contentID] = persisted
+			known[contentID] = true
+		}
+	}
+	for _, fileResult := range results {
+		if fileResult == nil || fileResult.Movie == nil {
+			continue
+		}
+		persisted := persistedByContentID[strings.TrimSpace(fileResult.Movie.ContentID)]
+		if persisted == nil {
+			continue
+		}
+		refreshed := persisted.Clone()
+		fileResult.Movie = refreshed
+		known[strings.TrimSpace(refreshed.ContentID)] = true
+	}
+	return known
+}
+
+// markCollisionGateFailure publishes a collision gate block through the ordinary per-file failure lane.
+func markCollisionGateFailure(inputs applyPhaseInputs, cfg ApplyPhaseConfig, filePath string, fileResult *resultstore.MovieResult, reason string) {
+	now := time.Now()
+	err := inputs.Updater.AtomicUpdateFileResult(filePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
+		current.Status = models.JobStatusFailed
+		current.Error = reason
+		current.ErrorCode = string(models.ScraperErrorKindBlocked)
+		current.EndedAt = &now
+		return current, nil
+	})
+	if err != nil {
+		inputs.Updater.UpdateFileResult(filePath, &resultstore.MovieResult{
+			FileMatchInfo: fileResult.FileMatchInfo,
+			Movie:         fileResult.Movie,
+			Status:        models.JobStatusFailed,
+			Error:         reason,
+			ErrorCode:     string(models.ScraperErrorKindBlocked),
+			StartedAt:     fileResult.StartedAt,
+			EndedAt:       &now,
+		})
+	}
+	inputs.Broadcaster.Send(JobEvent{
+		JobID: inputs.JobID, MovieID: fileResult.Movie.ID, Phase: jobEventPhaseApply,
+		Step: StepFailed, Message: reason, Timestamp: now,
+	})
+	if cfg.OnFileFailed != nil {
+		cfg.OnFileFailed(filePath, reason)
+	}
+}
+
 // Run executes the apply phase: setup errgroup → iterate files → dispatch
 // applyFile → collect outcomes → track results → report status.
 func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg ApplyPhaseConfig) {
@@ -297,6 +381,15 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 		}
 	}()
 
+	reviewBaselines := make(map[string]*models.Movie, len(inputs.Results))
+	for filePath, fileResult := range inputs.Results {
+		if fileResult != nil {
+			reviewBaselines[filePath] = fileResult.Movie.Clone()
+		}
+	}
+	inputs.ReviewBaselines = reviewBaselines
+	inputs.PersistedMovies = refreshApplyMovieIdentity(ctx, inputs.MovieRepo, inputs.Results)
+
 	excludedSnapshot := make(map[string]bool, len(inputs.Results))
 	for filePath := range inputs.Results {
 		excludedSnapshot[filePath] = inputs.Excluded[filePath]
@@ -312,7 +405,50 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 	for _, filePath := range cfg.RetryFilePaths {
 		retryPaths[filePath] = struct{}{}
 	}
+	blockedCollisions := map[string]bool{}
+	blockedReasons := map[string]string{}
+	if inputs.CollisionRepo != nil {
+		movieIDs := make([]string, 0, len(inputs.Results))
+		seen := make(map[string]bool, len(inputs.Results))
+		for _, fileResult := range inputs.Results {
+			if fileResult.Movie == nil || fileResult.Movie.ContentID == "" || seen[fileResult.Movie.ContentID] {
+				continue
+			}
+			seen[fileResult.Movie.ContentID] = true
+			movieIDs = append(movieIDs, fileResult.Movie.ContentID)
+		}
+		counts, err := inputs.CollisionRepo.CountOpenByMovieBatch(ctx, movieIDs)
+		if ctx.Err() != nil {
+			inputs.Lifecycle.MarkCancelled()
+			return
+		}
+		if err != nil {
+			logging.Errorf("[Apply] collision gate lookup failed; failing closed for this run: %v", err)
+			for filePath, fileResult := range inputs.Results {
+				if fileResult.Movie != nil && fileResult.Movie.ContentID != "" {
+					logging.Infof("[Apply] Collision gate unavailable: skipping %s (movie %s)", filePath, fileResult.Movie.ContentID)
+					blockedCollisions[fileResult.Movie.ContentID] = true
+					blockedReasons[fileResult.Movie.ContentID] = "apply blocked because credit collision status is unavailable"
+				}
+				_ = filePath
+			}
+		} else {
+			for id, count := range counts {
+				if count > 0 {
+					blockedCollisions[id] = true
+					blockedReasons[id] = "apply blocked by an open credit collision"
+				}
+			}
+		}
+		for _, fileResult := range inputs.Results {
+			if fileResult.Movie != nil && blockedCollisions[fileResult.Movie.ContentID] {
+				logging.Infof("[Apply] Collision gate: skipping movie %s (open collisions)", fileResult.Movie.ContentID)
+			}
+		}
+	}
+
 	items := make([]applyItem, 0, len(inputs.Results))
+	collisionGateFailures := make(map[string]struct{})
 	for filePath, fileResult := range inputs.Results {
 		_, retryFailed := retryPaths[filePath]
 		if fileResult.Movie == nil {
@@ -329,11 +465,23 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 			logging.Infof("Skipping excluded file: %s", filePath)
 			continue
 		}
+		if blockedCollisions[fileResult.Movie.ContentID] {
+			markCollisionGateFailure(inputs, cfg, filePath, fileResult, blockedReasons[fileResult.Movie.ContentID])
+			collisionGateFailures[filePath] = struct{}{}
+			continue
+		}
 		items = append(items, applyItem{
 			filePath:   filePath,
 			fileResult: fileResult,
 			movie:      fileResult.Movie,
 		})
+	}
+	if len(collisionGateFailures) > 0 && len(items) == 0 {
+		if cfg.OnPhaseComplete != nil {
+			cfg.OnPhaseComplete(0, len(collisionGateFailures))
+		}
+		inputs.Lifecycle.MarkFailed()
+		return
 	}
 
 	// Apply workers are intentionally concurrent, so slice order alone cannot
@@ -395,8 +543,22 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 		}
 		items = ordered
 	}
+	artifactOwners := make(map[string][]string)
+	for _, item := range items {
+		artifactOwners[artifactMovieKey(item)] = append(artifactOwners[artifactMovieKey(item)], item.filePath)
+	}
+	artifactCoordinators := make(map[string]*workflow.SharedArtifactCoordinator, len(artifactOwners))
+	for movieKey, owners := range artifactOwners {
+		artifactCoordinators[movieKey] = workflow.NewSharedArtifactCoordinator(owners)
+	}
+	for _, item := range items {
+		prepared[item.filePath].cmd.ArtifactCoordinator = artifactCoordinators[artifactMovieKey(item)]
+		prepared[item.filePath].cmd.ArtifactOwnerKey = item.filePath
+	}
 	outcomes := fanout.BoundedFanOut(ctx, inputs.Concurrency.MaxWorkers, items,
 		func(egCtx context.Context, item applyItem) applyFileOutcome {
+			coordinator := prepared[item.filePath].cmd.ArtifactCoordinator
+			defer coordinator.Done(item.filePath)
 			outcome := applyFile(egCtx, wf, item.filePath, item.fileResult, item.movie, prepared[item.filePath], inputs, cfg)
 			// Report per-file progress so the frontend bar advances 0→100 across
 			// files instead of jumping straight to 100 on OnPhaseComplete. A file
@@ -434,6 +596,13 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 	failCount := atomic.LoadInt64(&failed)
 	if len(cfg.RetryFilePaths) > 0 {
 		failCount = countRemainingApplyFailures(inputs, outcomes)
+		for filePath := range collisionGateFailures {
+			if result := inputs.Results[filePath]; result == nil || result.Status != models.JobStatusFailed {
+				failCount++
+			}
+		}
+	} else {
+		failCount += int64(len(collisionGateFailures))
 	}
 
 	// Broadcast the final organization_completed / update_completed WebSocket
@@ -616,8 +785,15 @@ func buildApplyCmd(
 		}
 	}
 
+	publicationFence := inputs.PublicationFence
+	if publicationFence == nil && inputs.MovieRepo != nil {
+		publicationFence, _ = inputs.MovieRepo.(database.ApplyPublicationFencer)
+	}
+
 	applyCmd := workflow.ApplyCmd{
 		Movie:                  movie,
+		PublicationFence:       publicationFence,
+		PersistedMovie:         inputs.PersistedMovies[strings.TrimSpace(movie.ContentID)],
 		Match:                  match,
 		DestPath:               destPath,
 		DryRun:                 cfg.DryRun,
@@ -636,11 +812,14 @@ func buildApplyCmd(
 	applyCmd.GenerateNFO = cfg.GenerateNFO && (inputs.NFOEnabled || cfg.ForceNFO)
 
 	afc := &ApplyFileContext{
-		FilePath:    filePath,
-		Movie:       movie,
-		MovieResult: fileResult,
-		Match:       match,
-		Destination: destPath,
+		FilePath:              filePath,
+		Movie:                 movie,
+		MovieResult:           fileResult,
+		reviewBaseline:        inputs.ReviewBaselines[filePath],
+		PublicationGeneration: movie.RenderGeneration,
+		PersistedMovie:        applyCmd.PersistedMovie,
+		Match:                 match,
+		Destination:           destPath,
 	}
 
 	if cfg.PreApplyFunc != nil {
@@ -740,56 +919,67 @@ func interpretApplyResult(
 		} else if !writebackPreSkipped(inputs.Updater, movie, filePath, "Apply") {
 			// R10-6: state+provenance publish under ONE acquisition — a persist
 			// snapshot between the two never observes mismatched halves.
-			errUp := inputs.Updater.AtomicUpdateFileResultWithProvenance(filePath, func(current *resultstore.MovieResult, prov *resultstore.ProvenanceData) (*resultstore.MovieResult, *resultstore.ProvenanceData, error) {
-				if applyWritebackIdentityMismatch(movie, current) {
-					logging.Warnf("[Apply] skipping write-back for %s — result rekeyed to %s mid-phase", filePath, current.FileMatchInfo.MovieID)
-					return current, prov, nil
-				}
-				fm := applyMatchFollowedByLiveIdentity(afc.Match, current)
-				current.FileMatchInfo = fm
-				current.Movie = mergeLiveReviewEdits(movie, movie, current.Movie)
-				current.Status = fileStatus
-				current.Error = errMsg
-				if errorCode != "" && samePosterCropIntent(movie, current.Movie) &&
-					// codex r7 P2: never resurrect a marker whose slot an interim edit
-					// (removal/override) deliberately cleared — in an unmeasured-crop
-					// state the bounds are nil on both sides, so intent alone cannot
-					// distinguish stale from fresh. Only stamp when the row still
-					// carries the mark the apply saw.
-					(afc.MovieResult == nil || current.ErrorCode == afc.MovieResult.ErrorCode) {
-					// codex r7 P2: never resurrect a marker whose slot an interim
-					// edit (removal/override) deliberately cleared — in an
-					// unmeasured-crop state the bounds are nil on both sides, so
-					// intent alone cannot distinguish stale from fresh. Only
-					// stamp when the row still carries the mark the apply saw.
-					baselineCode := ""
-					if afc.MovieResult != nil {
-						baselineCode = afc.MovieResult.ErrorCode
+			publicationStale := errors.Is(applyErr, database.ErrApplyPublicationStale)
+			updateFailure := func() error {
+				return inputs.Updater.AtomicUpdateFileResultWithProvenance(filePath, func(current *resultstore.MovieResult, prov *resultstore.ProvenanceData) (*resultstore.MovieResult, *resultstore.ProvenanceData, error) {
+					if applyWritebackIdentityMismatch(movie, current) {
+						logging.Warnf("[Apply] skipping write-back for %s — result rekeyed to %s mid-phase", filePath, current.FileMatchInfo.MovieID)
+						return current, prov, nil
 					}
-					if current.ErrorCode == baselineCode {
-						current.ErrorCode = errorCode
+					fm := applyMatchFollowedByLiveIdentity(afc.Match, current)
+					if !publicationStale {
+						current.FileMatchInfo = fm
+						current.Movie = mergeApplyWritebackMovie(afc.reviewBaseline, movie, movie, current.Movie, afc.MovieResult, current, inputs.MovieRepo != nil)
 					}
-				}
+					current.Status = fileStatus
+					current.Error = errMsg
+					if errorCode != "" && samePosterCropIntent(movie, current.Movie) &&
+						// codex r7 P2: never resurrect a marker whose slot an interim edit
+						// (removal/override) deliberately cleared — in an unmeasured-crop
+						// state the bounds are nil on both sides, so intent alone cannot
+						// distinguish stale from fresh. Only stamp when the row still
+						// carries the mark the apply saw.
+						(afc.MovieResult == nil || current.ErrorCode == afc.MovieResult.ErrorCode) {
+						// codex r7 P2: never resurrect a marker whose slot an interim
+						// edit (removal/override) deliberately cleared — in an
+						// unmeasured-crop state the bounds are nil on both sides, so
+						// intent alone cannot distinguish stale from fresh. Only
+						// stamp when the row still carries the mark the apply saw.
+						baselineCode := ""
+						if afc.MovieResult != nil {
+							baselineCode = afc.MovieResult.ErrorCode
+						}
+						if current.ErrorCode == baselineCode {
+							current.ErrorCode = errorCode
+						}
+					}
 
-				// codex r9 P2b: a PARTIAL failure whose poster leg verified must not keep
-				// refusing later overwrite retries as still-unverified. Only clear when
-				// this apply actually installed a fingerprint-matched poster this run
-				// (Steps.PosterVerified), the row actually carries crop bounds to
-				// discharge (r10 P1: a legacy preview-only crop leaves nil bounds, and
-				// a fresh install against nil bounds ran NO fingerprint verification
-				// — marker must persist), and the new failure is a different failure
-				// class (not a fresh recrop refusal from this same download).
-				hasCropToDischarge := current.Movie != nil && current.Movie.Poster.PosterCropBounds != nil
-				if result != nil && result.Steps.PosterVerified && hasCropToDischarge &&
-					errorCode != downloader.PosterRecropRequiredCode &&
-					current.ErrorCode == downloader.PosterRecropRequiredCode {
-					current.ErrorCode = ""
-				}
-				current.StartedAt = startTime
-				current.EndedAt = &now
-				return current, mergeWriteBackProvenance(inputs.Provenance[filePath], prov), nil
-			})
-			if errUp != nil {
+					// codex r9 P2b: a PARTIAL failure whose poster leg verified must not keep
+					// refusing later overwrite retries as still-unverified. Only clear when
+					// this apply actually installed a fingerprint-matched poster this run
+					// (Steps.PosterVerified), the row actually carries crop bounds to
+					// discharge (r10 P1: a legacy preview-only crop leaves nil bounds, and
+					// a fresh install against nil bounds ran NO fingerprint verification
+					// — marker must persist), and the new failure is a different failure
+					// class (not a fresh recrop refusal from this same download).
+					hasCropToDischarge := current.Movie != nil && current.Movie.Poster.PosterCropBounds != nil
+					if result != nil && result.Steps.PosterVerified && hasCropToDischarge &&
+						errorCode != downloader.PosterRecropRequiredCode &&
+						current.ErrorCode == downloader.PosterRecropRequiredCode {
+						current.ErrorCode = ""
+					}
+					current.StartedAt = startTime
+					current.EndedAt = &now
+					return current, mergeWriteBackProvenance(inputs.Provenance[filePath], prov), nil
+				})
+			}
+			var errUp error
+			if publicationStale {
+				errUp = updateFailure()
+			} else {
+				errUp = withApplyPublicationFence(taskCtx, inputs, movie, afc, updateFailure)
+			}
+			if errUp != nil && !errors.Is(errUp, errApplyPublicationFence) {
 				upsertWriteBackResultWithProvenance(inputs.Updater, filePath, &resultstore.MovieResult{
 					FileMatchInfo: afc.Match,
 					Movie:         movie,
@@ -856,34 +1046,36 @@ func interpretApplyResult(
 				// failed refresh committed and discard its recovery state.
 				logging.Warnf("[Apply] skipping success write-back for %s — promote witness for %s unresolved; restart reconciles", filePath, mid)
 			} else {
-				err2 := inputs.Updater.AtomicUpdateFileResultWithProvenance(filePath, func(current *resultstore.MovieResult, prov *resultstore.ProvenanceData) (*resultstore.MovieResult, *resultstore.ProvenanceData, error) {
-					if applyWritebackIdentityMismatch(movie, current) {
-						logging.Warnf("[Apply] skipping success write-back for %s — result rekeyed to %s mid-phase", filePath, current.FileMatchInfo.MovieID)
-						return current, prov, nil
-					}
-					current.Movie = mergeLiveReviewEdits(movie, result.Movie, current.Movie)
-					// A successful explicit retry must clear the prior apply failure so
-					// later retries and reloads do not keep treating this row as failed.
-					if current.Status == models.JobStatusFailed {
-						current.Status = models.JobStatusCompleted
-						current.Error = ""
-					}
-					// codex r9 P2: clear the marker only when this retry fetched AND
-					// installed a poster after the download step's verification — Steps.
-					// Downloaded alone also fires on cover/trailer-only or dedup-skipped
-					// runs, which would unsafely clear a recrop refusal that nothing
-					// discharged. Skip-download, dry-run, no-poster-URL, and
-					// overwrite-refused retries all leave PosterVerified=false, so the
-					// stale-geometry gate still fires for a later poster-capable retry.
-					// codex r10 P1: legacy preview-only crops leave nil bounds. A fresh
-					// install against nil bounds ran NO fingerprint verification, so a
-					// marker gated only on PosterVerified would let a stale recrop
-					// block evaporate without ever discharging. Require non-nil bounds.
-					hasCropToDischarge := current.Movie != nil && current.Movie.Poster.PosterCropBounds != nil
-					if current.ErrorCode == downloader.PosterRecropRequiredCode && hasCropToDischarge && result != nil && result.Steps.PosterVerified {
-						current.ErrorCode = ""
-					}
-					return current, mergeWriteBackProvenance(inputs.Provenance[filePath], prov), nil
+				err2 := withApplyPublicationFence(taskCtx, inputs, movie, afc, func() error {
+					return inputs.Updater.AtomicUpdateFileResultWithProvenance(filePath, func(current *resultstore.MovieResult, prov *resultstore.ProvenanceData) (*resultstore.MovieResult, *resultstore.ProvenanceData, error) {
+						if applyWritebackIdentityMismatch(movie, current) {
+							logging.Warnf("[Apply] skipping success write-back for %s — result rekeyed to %s mid-phase", filePath, current.FileMatchInfo.MovieID)
+							return current, prov, nil
+						}
+						current.Movie = mergeApplyWritebackMovie(afc.reviewBaseline, movie, result.Movie, current.Movie, afc.MovieResult, current, inputs.MovieRepo != nil)
+						// A successful explicit retry must clear the prior apply failure so
+						// later retries and reloads do not keep treating this row as failed.
+						if current.Status == models.JobStatusFailed {
+							current.Status = models.JobStatusCompleted
+							current.Error = ""
+						}
+						// codex r9 P2: clear the marker only when this retry fetched AND
+						// installed a poster after the download step's verification — Steps.
+						// Downloaded alone also fires on cover/trailer-only or dedup-skipped
+						// runs, which would unsafely clear a recrop refusal that nothing
+						// discharged. Skip-download, dry-run, no-poster-URL, and
+						// overwrite-refused retries all leave PosterVerified=false, so the
+						// stale-geometry gate still fires for a later poster-capable retry.
+						// codex r10 P1: legacy preview-only crops leave nil bounds. A fresh
+						// install against nil bounds ran NO fingerprint verification, so a
+						// marker gated only on PosterVerified would let a stale recrop
+						// block evaporate without ever discharging. Require non-nil bounds.
+						hasCropToDischarge := current.Movie != nil && current.Movie.Poster.PosterCropBounds != nil
+						if current.ErrorCode == downloader.PosterRecropRequiredCode && hasCropToDischarge && result != nil && result.Steps.PosterVerified {
+							current.ErrorCode = ""
+						}
+						return current, mergeWriteBackProvenance(inputs.Provenance[filePath], prov), nil
+					})
 				})
 				if err2 != nil {
 					logging.Warnf("Failed to update movie result for %s after apply: %v", filePath, err2)

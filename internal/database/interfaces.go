@@ -4,10 +4,24 @@ import (
 	"context"
 	"time"
 
+	"gorm.io/gorm"
+
 	"github.com/javinizer/javinizer-go/internal/models"
 )
 
-// MovieRepositoryInterface defines the contract for movie database operations
+// AuthoritativeMovieProjection indexes the narrow movie/credit API projection.
+type AuthoritativeMovieProjection struct {
+	ByContentID           map[string]*models.Movie
+	ByCanonicalID         map[string]*models.Movie
+	AmbiguousCanonicalIDs map[string]struct{}
+}
+
+// MovieProjectionRepositoryInterface batches authoritative API movie projections.
+type MovieProjectionRepositoryInterface interface {
+	FindAuthoritativeProjections(ctx context.Context, contentIDs, canonicalIDs []string) (*AuthoritativeMovieProjection, error)
+}
+
+// MovieRepositoryInterface defines the contract for movie database operations.
 type MovieRepositoryInterface interface {
 	Create(ctx context.Context, movie *models.Movie) error
 	Update(ctx context.Context, movie *models.Movie) error
@@ -19,11 +33,23 @@ type MovieRepositoryInterface interface {
 	List(ctx context.Context, limit, offset int) ([]models.Movie, error)
 }
 
+// ApplyPublicationFencer validates a movie generation while publishing under a database transaction.
+type ApplyPublicationFencer interface {
+	WithApplyPublicationFence(ctx context.Context, contentID string, expectedGeneration int64, publish func(*models.Movie) error) error
+}
+
+// ApplyArtifactPublicationFencer admits artifact publication only when generation and collision state allow it.
+type ApplyArtifactPublicationFencer interface {
+	WithApplyArtifactPublicationFence(ctx context.Context, contentID string, expectedGeneration int64, publish func(*models.Movie) error) error
+}
+
 // ActressRepositoryInterface defines the contract for actress database operations
 type ActressRepositoryInterface interface {
 	Create(ctx context.Context, actress *models.Actress) error
 	Update(ctx context.Context, actress *models.Actress) error
 	RenameNameFields(ctx context.Context, id uint, firstName, lastName, japaneseName string) error
+	// RenameIdentityFields applies an explicit identity edit including the thumbnail.
+	RenameIdentityFields(ctx context.Context, id uint, firstName, lastName, japaneseName, thumbURL string) error
 	FindByID(ctx context.Context, id uint) (*models.Actress, error)
 	FindByDMMID(ctx context.Context, dmmID int) (*models.Actress, error)
 	FindByFirstNameLastName(ctx context.Context, firstName, lastName string) (*models.Actress, error)
@@ -40,6 +66,48 @@ type ActressRepositoryInterface interface {
 	Delete(ctx context.Context, id uint) error
 	PreviewMerge(ctx context.Context, targetID, sourceID uint) (*ActressMergePreview, error)
 	Merge(ctx context.Context, targetID, sourceID uint, resolutions map[string]string) (*ActressMergeResult, error)
+	FindVerifiedByDMMID(ctx context.Context, dmmID int) (*models.Actress, error)
+	FindVerifiedByAlias(ctx context.Context, aliasName string) (*models.Actress, error)
+	FindVerifiedByExactName(ctx context.Context, japaneseName, firstName, lastName string) ([]models.Actress, error)
+	ListCandidates(ctx context.Context, limit, offset int) ([]models.Actress, error)
+	CountCandidates(ctx context.Context) (int64, error)
+	PromoteCandidate(ctx context.Context, id uint, firstName, lastName, japaneseName, thumbURL string) error
+	SetUserOwned(ctx context.Context, id uint) error
+	UpdateCanonicalFields(ctx context.Context, id uint, firstName, lastName, japaneseName, thumbURL string) error
+	ImportUpsert(ctx context.Context, incoming *models.Actress) error
+	DeleteStaleCandidates(ctx context.Context, olderThan time.Time) (int64, error)
+}
+
+// MovieCreditRepositoryInterface defines the contract for per-movie credit operations.
+type MovieCreditRepositoryInterface interface {
+	ListByMovie(ctx context.Context, movieContentID string) ([]models.MovieCredit, error)
+	FindByMovieAndActress(ctx context.Context, movieContentID string, actressID uint) (*models.MovieCredit, error)
+	UpsertTx(tx *gorm.DB, credit *models.MovieCredit) error
+	DeleteTx(tx *gorm.DB, movieContentID string, actressID uint) error
+	DeleteByIDTx(tx *gorm.DB, id uint) error
+	UpdateOverride(ctx context.Context, creditID uint, overrideName string, userOverride bool) error
+	UpdateSuppressed(ctx context.Context, creditID uint, suppressed bool) error
+	UpdateOrderPinned(ctx context.Context, creditID uint, orderIndex int, pinned bool) error
+	SetDisplayForceCanonical(ctx context.Context, creditID uint, forced bool) error
+	CountByActress(ctx context.Context, actressID uint) (int64, error)
+	ListByActress(ctx context.Context, actressID uint) ([]models.MovieCredit, error)
+	FindByCreditID(ctx context.Context, creditID uint) (*models.MovieCredit, error)
+	ReassignCredit(ctx context.Context, credit *models.MovieCredit, targetActressID uint) error
+}
+
+// CreditCollisionRepositoryInterface defines the contract for collision lifecycle operations.
+type CreditCollisionRepositoryInterface interface {
+	RecordTx(tx *gorm.DB, collision *models.CreditCollision, source string) error
+	ListOpenByMovie(ctx context.Context, movieContentID string) ([]models.CreditCollision, error)
+	HasOpenForMovie(ctx context.Context, movieContentID string) (bool, error)
+	ListOpenByActress(ctx context.Context, actressID uint) ([]models.CreditCollision, error)
+	Resolve(ctx context.Context, collisionID uint, resolution string) error
+	Reopen(ctx context.Context, collisionID uint) error
+	TransferTx(tx *gorm.DB, fromCreditID, toCreditID uint, toMovieContentID string) error
+	CloseByCreditTx(tx *gorm.DB, creditID uint, resolution string) error
+	CountOpenByMovieBatch(ctx context.Context, movieIDs []string) (map[string]int64, error)
+	FindByID(ctx context.Context, id uint) (*models.CreditCollision, error)
+	CloseByCredit(ctx context.Context, creditID uint, resolution string) error
 }
 
 // GenreTranslationRepositoryInterface defines the contract for genre translation operations

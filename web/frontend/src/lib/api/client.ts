@@ -240,6 +240,9 @@ class APIClient {
 	async listActresses(params?: Parameters<ActressClient['listActresses']>[0]) {
 		return this.actresses.listActresses(params);
 	}
+	async searchActresses(query: string) {
+		return this.actresses.searchActresses(query);
+	}
 	async getActress(id: number) {
 		return this.actresses.getActress(id);
 	}
@@ -263,6 +266,36 @@ class APIClient {
 	}
 	async importActresses(request: Parameters<ActressClient['importActresses']>[0]) {
 		return this.actresses.importActresses(request);
+	}
+
+	// Actress identity / credit operations
+	async listCandidates(limit = 50, offset = 0) {
+		return this.actresses.listCandidates(limit, offset);
+	}
+	async promoteCandidate(
+		id: number,
+		request?: Parameters<ActressClient['promoteCandidate']>[1],
+	) {
+		return this.actresses.promoteCandidate(id, request);
+	}
+	async listCollisions(movieId: string) {
+		return this.actresses.listCollisions(movieId);
+	}
+	async resolveCollision(
+		id: number,
+		request: Parameters<ActressClient['resolveCollision']>[1],
+	) {
+		return this.actresses.resolveCollision(id, request);
+	}
+	async updateCreditOverride(
+		creditId: number,
+		overrideName: string,
+		userOverride: boolean,
+	) {
+		return this.actresses.updateCreditOverride(creditId, overrideName, userOverride);
+	}
+	async suppressCredit(creditId: number, suppressed: boolean) {
+		return this.actresses.suppressCredit(creditId, suppressed);
 	}
 
 	// Replacements

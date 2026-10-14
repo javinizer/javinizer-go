@@ -56,6 +56,7 @@ curl -o ./data/config.yaml \
   https://raw.githubusercontent.com/javinizer/javinizer-go/main/configs/config.yaml.example
 
 docker run --rm \
+  --hostname javinizer \
   -e JAVINIZER_SETUP_TRUSTED_CIDRS=172.16.0.0/12 \
   --user "$(id -u):$(id -g)" \
   -p 8765:8765 \
@@ -452,6 +453,7 @@ Docker deployments support environment-variable overrides. Defaults shown are fo
 |----------|-------------|---------|
 | `PUID` / `PGID` | Runtime user/group ID for the container process | `1000` |
 | `USER_ID` / `GROUP_ID` | Legacy aliases for `PUID`/`PGID` | `1000` |
+| `JAVINIZER_HOME` | Persistent application state; sweep signing key is stored in `cache/Javinizer` | `/javinizer` |
 | `JAVINIZER_CONFIG` | Path to config file | `/javinizer/config.yaml` |
 | `JAVINIZER_DB` | Path to SQLite database | `/javinizer/javinizer.db` |
 | `JAVINIZER_LOG_DIR` | Relocate file log targets to this directory | `/javinizer/logs` |

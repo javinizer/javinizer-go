@@ -104,7 +104,7 @@ func (r *EventRepository) CountGroupBySource(ctx context.Context) (map[string]in
 		Count  int64
 	}
 	var results []result
-	err := r.GetDB().WithContext(ctx).Model(&models.Event{}).Select("source, count(*) as count").Group("source").Find(&results).Error
+	err := r.GetDB().WithContext(ctx).Model(&models.Event{}).Select("source, count(*) as count").Group(colSource).Find(&results).Error
 	if err != nil {
 		return nil, wrapDBErr("count", "events grouped by source", err)
 	}

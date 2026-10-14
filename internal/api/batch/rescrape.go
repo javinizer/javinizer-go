@@ -57,7 +57,7 @@ func rescrapeBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 			case errors.Is(aErr, worker.ErrJobGone):
 				writeErrorResponse(c, http.StatusGone, true, "Job has been deleted")
 			case errors.Is(aErr, worker.ErrJobNotFound):
-				writeErrorResponse(c, http.StatusNotFound, true, "Job not found")
+				writeErrorResponse(c, http.StatusNotFound, true, jobNotFoundMessage)
 			default:
 				status := models.JobStatusPending
 				var busy *worker.EditPhaseBusyError
@@ -114,7 +114,7 @@ func rescrapeBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 		// Delegate to orchestrator for resolve→construct→execute pipeline.
 		factory := snap.BatchJobFactory()
 		if factory == nil {
-			c.JSON(http.StatusServiceUnavailable, contracts.ErrorResponse{Error: "batch job factory unavailable — workflow factory not ready; retry the request"})
+			c.JSON(http.StatusServiceUnavailable, contracts.ErrorResponse{Error: factoryUnavailableMessage})
 			return
 		}
 		orch := NewRescrapeOrchestrator(RescrapeDeps{

@@ -4,12 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
+	"strings"
 
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/downloader"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/nfo"
+	"github.com/javinizer/javinizer-go/internal/operationmode"
 	"github.com/javinizer/javinizer-go/internal/organizer"
 	"github.com/javinizer/javinizer-go/internal/progress"
 	"github.com/javinizer/javinizer-go/internal/template"
@@ -31,16 +34,17 @@ type applyOrchestrator interface {
 // eliminated — the orchestrator always receives real dependencies (or no-ops), so nil-checks
 // are honest checks for optional features, not defensive nil guards.
 type applyOrchImpl struct {
-	fs             afero.Fs
-	organizer      organizer.OrganizerInterface
-	downloader     downloader.DownloaderInterface
-	nfoGen         nfo.GeneratorInterface
-	nfo            nfo.NFOFileMerger
-	applyCfg       ApplyConfig
-	templateEngine template.EngineInterface
-	revertLog      RevertLog
-	tagRepo        database.MovieTagRepositoryInterface
-	logger         logging.Logger
+	fs               afero.Fs
+	organizer        organizer.OrganizerInterface
+	downloader       downloader.DownloaderInterface
+	nfoGen           nfo.GeneratorInterface
+	nfo              nfo.NFOFileMerger
+	applyCfg         ApplyConfig
+	templateEngine   template.EngineInterface
+	revertLog        RevertLog
+	tagRepo          database.MovieTagRepositoryInterface
+	logger           logging.Logger
+	artifactPrepared func()
 }
 
 var _ applyOrchestrator = (*applyOrchImpl)(nil)
@@ -133,6 +137,11 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult
 	if cmd.Movie == nil {
 		return nil, fmt.Errorf("movie is nil")
 	}
+	if cmd.ArtifactCoordinator != nil {
+		defer cmd.ArtifactCoordinator.Done(cmd.ArtifactOwnerKey)
+	}
+
+	cmd = normalizeInPlaceLinkMode(cmd)
 
 	// Step 0: Begin revert log BEFORE any filesystem mutation.
 	opID, beginErr := o.beginRevertLog(ctx, cmd)
@@ -142,6 +151,19 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult
 			OperationID: opID,
 			FailedStep:  "revert_begin",
 		}, beginErr
+	}
+
+	artifact, stagedCmd, artifactErr := o.prepareArtifact(ctx, cmd)
+	if artifactErr != nil {
+		markArtifactDirty(cmd)
+		if o.revertLog != nil && opID != "" {
+			_ = o.revertLog.CompleteFailed(ctx, opID, &ApplyResult{Movie: cmd.Movie, OperationID: opID, PrePublication: true})
+		}
+		return &ApplyResult{Movie: cmd.Movie, OperationID: opID, FailedStep: "artifact_staging", PrePublication: true}, artifactErr
+	}
+	if artifact != nil {
+		defer artifact.cleanup()
+		cmd = stagedCmd
 	}
 
 	movie := cmd.Movie
@@ -154,6 +176,8 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult
 		movie:          movie,
 		targetDir:      targetDir,
 		finalDir:       targetDir,
+		artifact:       artifact,
+		operationID:    opID,
 		organizeResult: nil,
 		merged:         false,
 		foundNFOPath:   "",
@@ -179,7 +203,10 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult
 	// probes as anchor_missing forever, holding the batch off fully-reverted —
 	// or worse, journaling a shared intent path a promoted claimant publishes.
 	onStepFail := func(stepName string, failMsg string, stepErr error, stepsSoFar stepCompletion) onStepFailResult {
-		prePub := stepName == "organize" && (state.organizeResult == nil || state.organizeResult.PrePublication)
+		prePub := artifact != nil || (stepName == "organize" && (state.organizeResult == nil || state.organizeResult.PrePublication))
+		if artifact != nil {
+			markArtifactDirty(artifact.original)
+		}
 		o.completeRevertLogWithState(ctx, opID, state, prePub)
 		return onStepFailResult{
 			result: &ApplyResult{
@@ -279,6 +306,27 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult
 	failResult, failErr := o.executeSteps(ctx, pipelineSteps, &steps, onStepFail, dupGate)
 	if failResult != nil {
 		return failResult, failErr
+	}
+
+	if artifact != nil {
+		if o.artifactPrepared != nil {
+			o.artifactPrepared()
+		}
+		if err := artifact.publish(ctx, o, state, &steps); err != nil {
+			markArtifactDirty(artifact.original)
+			prePublication := !artifact.sourceCleanupArmed
+			o.completeRevertLogWithState(ctx, opID, state, prePublication)
+			return &ApplyResult{
+				OrganizeResult: state.organizeResult,
+				Movie:          state.movie,
+				DownloadPaths:  state.downloadPaths,
+				NFOPath:        state.nfoPath,
+				OperationID:    opID,
+				Steps:          steps,
+				FailedStep:     "artifact_publication",
+				PrePublication: prePublication,
+			}, fmt.Errorf("artifact publication failed: %w", err)
+		}
 	}
 
 	// Step 6: Complete revert log AFTER all filesystem mutations succeed.
@@ -383,6 +431,81 @@ func (o *applyOrchImpl) stepOrganize(ctx context.Context, cmd ApplyCmd, state *a
 		ForceRenameFile:  cmd.Organize.ForceRenameFile,
 		DuplicateTracker: cmd.Organize.DuplicateTracker,
 	}
+	// A video-deferred artifact stage keeps the real source file in place
+	// until the fenced publication: organize here is plan-only so downloads
+	// and the NFO still target the staged folder structure without the
+	// multi-GB payload ever being copied into the staging tree.
+	if state.artifact != nil && state.artifact.videoStagingDeferred() {
+		planner, ok := o.organizer.(artifactPlanExecutor)
+		if !ok {
+			return fmt.Errorf("video-deferred organize requires the organizer planning seam")
+		}
+		organizeToDestination := cmd.OperationMode == "" || cmd.OperationMode == operationmode.OperationModeOrganize
+		if state.artifact.inPlace || organizeToDestination {
+			// Apply path budgets to the real destination. A temporary stage
+			// beneath the movie folder must not consume that budget twice.
+			organizeCmd.Match = state.artifact.original.Match
+			organizeCmd.Match.Path = state.artifact.sourcePath
+			organizeCmd.DestDir = state.artifact.finalRoot
+		}
+		plan, planErr := planner.PlanOrganize(ctx, organizeCmd)
+		if planErr != nil {
+			return planErr
+		}
+		targetDir, targetPath := plan.TargetDir, plan.TargetPath
+		if state.artifact.inPlace {
+			if err := state.artifact.setInPlaceFinalRoot(plan.TargetDir); err != nil {
+				return err
+			}
+			targetDir = state.artifact.root
+			targetPath = filepath.Join(targetDir, filepath.Base(plan.TargetPath))
+		} else if organizeToDestination {
+			rel, relErr := filepath.Rel(state.artifact.finalRoot, plan.TargetDir)
+			if relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+				return fmt.Errorf("planned artifact path escapes destination: %s", plan.TargetDir)
+			}
+			// Keep the final relative layout so NFO merging and publication
+			// map temporary paths back to the same canonical output paths.
+			targetDir = filepath.Join(state.artifact.root, rel)
+			targetPath = filepath.Join(targetDir, filepath.Base(plan.TargetPath))
+		}
+		state.organizeResult = &organizer.OrganizeResult{
+			NewPath:    targetPath,
+			FolderPath: targetDir,
+			FileName:   filepath.Base(targetPath),
+		}
+		if state.organizeResult.FolderPath != "" {
+			state.targetDir = state.organizeResult.FolderPath
+			state.finalDir = state.organizeResult.FolderPath
+		}
+		steps.Organized = true
+		return nil
+	}
+	if state.artifact != nil && state.artifact.inPlace {
+		// Copy-only in-place work must stay inside the private stage. Planning
+		// against the real source preserves dedicated-folder selection and
+		// conflict checks, but the first execute may only rename staged files.
+		planner, ok := o.organizer.(artifactPlanExecutor)
+		if !ok {
+			return fmt.Errorf("in-place staged organize requires the organizer planning seam")
+		}
+		finalCmd := organizeCmd
+		finalCmd.Match = state.artifact.original.Match
+		finalCmd.Match.Path = state.artifact.sourcePath
+		finalCmd.DestDir = state.artifact.original.DestPath
+		plan, err := planner.PlanOrganize(ctx, finalCmd)
+		if err != nil {
+			return err
+		}
+		if err := state.artifact.setInPlaceFinalRoot(plan.TargetDir); err != nil {
+			return err
+		}
+		if len(plan.Conflicts) != 0 {
+			return fmt.Errorf("in-place staged organize destination conflict: %s", plan.Conflicts[0].Path)
+		}
+		organizeCmd.OperationMode = operationmode.OperationModeInPlaceNoRenameFolder
+		organizeCmd.StagingFinalDir = state.artifact.finalRoot
+	}
 	var organizeErr error
 	state.organizeResult, organizeErr = o.organizer.Organize(ctx, organizeCmd)
 	if organizeErr != nil {
@@ -412,8 +535,16 @@ func (o *applyOrchImpl) stepMerge(cmd ApplyCmd, state *applyPipelineState, steps
 		preBounds = state.movie.Poster.PosterCropBounds
 		preFull = state.movie.Poster.PosterCropSourceFull
 	}
+	mergeMatch := cmd.Match
+	if state.artifact != nil {
+		var matchErr error
+		mergeMatch, matchErr = state.artifact.mergeMatch(state, mergeMatch)
+		if matchErr != nil {
+			return matchErr
+		}
+	}
 	mergeRes := o.nfo.MergeWithExistingNFO(state.movie, nfo.MergeWithExistingOptions{
-		Match:          cmd.Match,
+		Match:          mergeMatch,
 		ForceOverwrite: cmd.Merge.ForceOverwrite,
 		PreserveNFO:    cmd.Merge.PreserveNFO,
 		ScalarStrategy: cmd.Merge.ScalarStrategy,
@@ -483,12 +614,12 @@ func (o *applyOrchImpl) stepDownload(ctx context.Context, cmd ApplyCmd, opID Ope
 	// as the discovery root pre-download; a DESTRUCTIVE run must never
 	// proceed with an unseeded discovery path (the startup sweep would be
 	// blind to a pre-journal crash window there).
-	if rl, ok := o.revertLog.(*dbRevertLog); ok && opID != "" && state.finalDir != "" {
+	if rl, ok := o.revertLog.(*dbRevertLog); ok && opID != "" && state.finalDir != "" && state.artifact == nil {
 		if sErr := rl.seedRoot(ctx, opID, state.finalDir); sErr != nil && cmd.OverwriteExistingMedia {
 			return fmt.Errorf("discovery-root seed failed for overwrite run: %w", sErr)
 		}
 	}
-	outcome, dlErr := o.downloader.Download(ctx, downloader.DownloadCmd{
+	downloadCmd := downloader.DownloadCmd{
 		Movie:                  downloadMovie,
 		DestDir:                state.finalDir,
 		Multipart:              multipart,
@@ -497,9 +628,12 @@ func (o *applyOrchImpl) stepDownload(ctx context.Context, cmd ApplyCmd, opID Ope
 		Dedup:                  cmd.Dedup,
 		DedupOwnerKey:          cmd.DedupOwnerKey,
 		DedupLogicalKey:        cmd.DedupLogicalKey,
-		OperationID:            opID,
-		Recorder:               replacementRecorder(o.revertLog),
-	})
+	}
+	if state.artifact == nil {
+		downloadCmd.OperationID = opID
+		downloadCmd.Recorder = replacementRecorder(o.revertLog)
+	}
+	outcome, dlErr := o.downloader.Download(ctx, downloadCmd)
 	if dlErr != nil {
 		if outcome != nil {
 			state.downloadPaths = outcome.CreatedPaths
@@ -537,9 +671,13 @@ func (o *applyOrchImpl) stepNFO(ctx context.Context, cmd ApplyCmd, state *applyP
 
 	var movieTags []string
 	if o.tagRepo != nil {
-		tags, tagErr := o.tagRepo.GetTagsForMovie(ctx, state.movie.ID)
+		movieID := state.movie.ContentID
+		if movieID == "" {
+			movieID = state.movie.ID
+		}
+		tags, tagErr := o.tagRepo.GetTagsForMovie(ctx, movieID)
 		if tagErr != nil {
-			resolveLogger(o.logger).Warnf("[workflow] Failed to load tags for %s: %v", state.movie.ID, tagErr)
+			resolveLogger(o.logger).Warnf("[workflow] Failed to load tags for %s: %v", movieID, tagErr)
 		} else {
 			movieTags = tags
 		}
@@ -555,7 +693,11 @@ func (o *applyOrchImpl) stepNFO(ctx context.Context, cmd ApplyCmd, state *applyP
 	// Falling back to cmd.Match.Path preserves the original behavior when
 	// organize is skipped or copy/in-place (file remains at source).
 	videoPath := cmd.Match.Path
-	if state.organizeResult != nil && state.organizeResult.NewPath != "" {
+	if state.artifact != nil && state.artifact.videoStagingDeferred() {
+		// The video is still at its real source: no rename has run yet, so the
+		// planned (staged) NewPath names nothing on disk.
+		videoPath = state.artifact.sourcePath
+	} else if state.organizeResult != nil && state.organizeResult.NewPath != "" {
 		videoPath = state.organizeResult.NewPath
 	}
 
@@ -582,6 +724,8 @@ type applyPipelineState struct {
 	downloadPaths    []string
 	nfoPath          string
 	scrapedMediaURLs *scrapedMediaSnapshot
+	artifact         *artifactStage
+	operationID      OperationID
 }
 
 // completeRevertLogWithState marks an in-progress revert operation as failed,
@@ -591,22 +735,27 @@ type applyPipelineState struct {
 // moved file. Per CONTEXT.md: called on error paths to prevent orphaned
 // RevertStatusApplied records while keeping revert actionable.
 func (o *applyOrchImpl) completeRevertLogWithState(ctx context.Context, opID OperationID, state *applyPipelineState, prePublication bool) {
-	if o.revertLog != nil && opID != "" {
-		partial := &ApplyResult{
-			OrganizeResult: state.organizeResult,
-			Movie:          state.movie,
-			DownloadPaths:  state.downloadPaths,
-			NFOPath:        state.nfoPath,
-			FoundNFOPath:   state.foundNFOPath,
-			Merged:         state.merged,
-			OperationID:    opID,
-			Steps:          stepCompletion{},
-			PrePublication: prePublication,
-		}
-		if completeErr := o.revertLog.CompleteFailed(ctx, opID, partial); completeErr != nil {
-			resolveLogger(o.logger).Warnf("[workflow] RevertLog.CompleteFailed error for %s: %v", opID, completeErr)
-		}
+	if err := o.completeRevertLogWithStateErr(ctx, opID, state, prePublication); err != nil {
+		resolveLogger(o.logger).Warnf("[workflow] RevertLog.CompleteFailed error for %s: %v", opID, err)
 	}
+}
+
+func (o *applyOrchImpl) completeRevertLogWithStateErr(ctx context.Context, opID OperationID, state *applyPipelineState, prePublication bool) error {
+	if o.revertLog == nil || opID == "" {
+		return nil
+	}
+	partial := &ApplyResult{
+		OrganizeResult: state.organizeResult,
+		Movie:          state.movie,
+		DownloadPaths:  state.downloadPaths,
+		NFOPath:        state.nfoPath,
+		FoundNFOPath:   state.foundNFOPath,
+		Merged:         state.merged,
+		OperationID:    opID,
+		Steps:          stepCompletion{},
+		PrePublication: prePublication,
+	}
+	return o.revertLog.CompleteFailed(ctx, opID, partial)
 }
 
 // beginRevertLog starts a revert log entry before filesystem mutation.

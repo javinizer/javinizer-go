@@ -113,6 +113,6 @@ func TestPreviewOrganizeErrorPaths(t *testing.T) {
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
-		assert.Contains(t, w.Body.String(), "Preview failed")
+		assert.Contains(t, w.Body.String(), "context canceled")
 	})
 }

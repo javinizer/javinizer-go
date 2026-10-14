@@ -227,7 +227,7 @@ func ClearMissingTempPosters(fs afero.Fs, tempDir, jobID string, results map[str
 		existing[e.Name()] = true
 	}
 	for _, result := range toCheck {
-		if !existing[result.Movie.ID+".jpg"] {
+		if !existing[result.Movie.ID+jpgExtension] {
 			result.Movie.Poster.CroppedPosterURL = ""
 			logging.Debugf("[Job %s] Cleared missing temp poster URL for %s", jobID, result.Movie.ID)
 		}
@@ -403,7 +403,7 @@ func (c *TempDirCleaner) ReconcileRekeyWitnesses(ctx context.Context) (int, erro
 				// reverse rename SUCCEEDED; a transient Stat/Rename failure
 				// keeps it for the next startup.
 				reversalClean := true
-				for _, sfx := range []string{"-full.jpg", ".jpg"} {
+				for _, sfx := range []string{fullImageSuffix, jpgExtension} {
 					newPath := filepath.Join(dir, w.NewID+sfx)
 					oldPath := filepath.Join(dir, w.OldID+sfx)
 					if _, err := c.fs.Stat(newPath); err != nil {
@@ -630,10 +630,10 @@ func (c *TempDirCleaner) reconcileParkedPosterBackups(ctx context.Context, jobID
 		}
 		base := canon
 		switch {
-		case strings.HasSuffix(base, "-full.jpg"):
-			base = strings.TrimSuffix(base, "-full.jpg")
+		case strings.HasSuffix(base, fullImageSuffix):
+			base = strings.TrimSuffix(base, fullImageSuffix)
 		default:
-			base = strings.TrimSuffix(base, ".jpg")
+			base = strings.TrimSuffix(base, jpgExtension)
 		}
 		if _, fenced := witnessed[base]; fenced {
 			continue // arbitrators own this poster (F-R5-2)
@@ -689,10 +689,10 @@ func (c *TempDirCleaner) reconcileParkedPosterBackups(ctx context.Context, jobID
 			}
 			remaining[n2[idx+len(".rsbak."):]] = true
 			cb := n2[:idx]
-			if strings.HasSuffix(cb, "-full.jpg") {
-				cb = strings.TrimSuffix(cb, "-full.jpg")
+			if strings.HasSuffix(cb, fullImageSuffix) {
+				cb = strings.TrimSuffix(cb, fullImageSuffix)
 			} else {
-				cb = strings.TrimSuffix(cb, ".jpg")
+				cb = strings.TrimSuffix(cb, jpgExtension)
 			}
 			// codex cloud P2 (@685): case-fold the pending-base key — a winner's
 			// token must attribute either spelling of the stranded backup's ID.
@@ -816,10 +816,10 @@ func (c *TempDirCleaner) arbitrateParkedRescrapeBackups(ctx context.Context, job
 				continue
 			}
 			base := p.canon
-			if strings.HasSuffix(base, "-full.jpg") {
-				base = strings.TrimSuffix(base, "-full.jpg")
+			if strings.HasSuffix(base, fullImageSuffix) {
+				base = strings.TrimSuffix(base, fullImageSuffix)
 			} else {
-				base = strings.TrimSuffix(base, ".jpg")
+				base = strings.TrimSuffix(base, jpgExtension)
 			}
 			if !strings.EqualFold(strings.TrimSpace(meta.PosterID), base) {
 				logging.Warnf("parked backup sweep %s: provenance id %q mismatches owner %q — kept both", parked, meta.PosterID, base)
@@ -955,7 +955,7 @@ func isParkedBackupName(name string) bool {
 		return false
 	}
 	pre := name[:i]
-	return strings.HasSuffix(pre, "-full.jpg") || strings.HasSuffix(pre, ".jpg")
+	return strings.HasSuffix(pre, fullImageSuffix) || strings.HasSuffix(pre, jpgExtension)
 } // commitToken couples an op-attributed commit payload with its filename parts.
 type commitToken struct {
 	name  string
@@ -997,7 +997,7 @@ func foreignTokensForBase(tokens []commitToken, base, nonce string) []commitToke
 
 // tokenLegSHA picks the token's SHA matching the canonical leg form.// tokenLegSHA picks the token's SHA matching the canonical leg form.
 func tokenLegSHA(m commitMeta, canon string) string {
-	if strings.HasSuffix(canon, "-full.jpg") {
+	if strings.HasSuffix(canon, fullImageSuffix) {
 		return m.FullSHA
 	}
 	return m.CropSHA
@@ -1122,7 +1122,7 @@ func (c *TempDirCleaner) reconcilePromoteWitness(ctx context.Context, dir, jobID
 		// witness's pre-op snapshots — an already-restored canon hashes equal
 		// and survives even when its .bak was consumed by an earlier startup;
 		// mismatching canon bytes are uncommitted and dropped before restoring.
-		for _, leg := range []struct{ key, sfx string }{{"full", "-full.jpg"}, {"crop", ".jpg"}} {
+		for _, leg := range []struct{ key, sfx string }{{"full", fullImageSuffix}, {"crop", jpgExtension}} {
 			canon := filepath.Join(dir, w.PosterID+leg.sfx)
 			bak := canon + ".bak"
 			oldSHA := w.OldSHA[leg.key]
@@ -1196,7 +1196,7 @@ func (c *TempDirCleaner) reconcilePromoteWitness(ctx context.Context, dir, jobID
 	// r53 P2: committed promotion leaves parked .bak files behind — sweep
 	// them BEFORE the witness so a cleanup failure keeps the witness (and a
 	// retry completes the sweep) rather than orphaning large backups.
-	for _, sfx := range []string{"-full.jpg", ".jpg"} {
+	for _, sfx := range []string{fullImageSuffix, jpgExtension} {
 		bak := filepath.Join(dir, w.PosterID+sfx+".bak")
 		if rmErr := c.fs.Remove(bak); rmErr != nil && !os.IsNotExist(rmErr) {
 			logging.Warnf("promote reconcile: bak sweep %s: %v", bak, rmErr)
@@ -1250,8 +1250,8 @@ func (c *TempDirCleaner) reconcileCropWitness(ctx context.Context, dir, jobID, w
 			}
 		}
 	}
-	staged := filepath.Join(dir, w.StageID+".jpg")
-	canon := filepath.Join(dir, w.PosterID+".jpg")
+	staged := filepath.Join(dir, w.StageID+jpgExtension)
+	canon := filepath.Join(dir, w.PosterID+jpgExtension)
 	promoted := 0
 	if committed {
 		if _, err := c.fs.Stat(staged); err == nil {
@@ -1275,8 +1275,8 @@ func (c *TempDirCleaner) reconcileCropWitness(ctx context.Context, dir, jobID, w
 	// r52 P2: the staged full-size copy is only needed by the crop operation
 	// itself, never at reconcile time — free it as soon as the crop leg is
 	// settled (applied or dropped).
-	if rmErr := c.fs.Remove(filepath.Join(dir, w.StageID+"-full.jpg")); rmErr != nil && !os.IsNotExist(rmErr) {
-		logging.Warnf("crop reconcile: drop staged full %s: %v", w.StageID+"-full.jpg", rmErr)
+	if rmErr := c.fs.Remove(filepath.Join(dir, w.StageID+fullImageSuffix)); rmErr != nil && !os.IsNotExist(rmErr) {
+		logging.Warnf("crop reconcile: drop staged full %s: %v", w.StageID+fullImageSuffix, rmErr)
 	}
 	if rmErr := c.fs.Remove(wpath); rmErr != nil && !os.IsNotExist(rmErr) {
 		logging.Warnf("crop witness sweep %s: %v", wpath, rmErr)

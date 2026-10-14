@@ -63,7 +63,20 @@ linters:
         - name: redefines-builtin-id
           disabled: true
   exclusions:
+    paths:
+      - web/frontend/node_modules/
     rules:
+      - path: internal/r18devdump/content_id_prefixes\.go
+        linters:
+          - goconst
+      - path: internal/api/auth/session\.go
+        linters:
+          - gosec
+        text: 'G124:'
+      - path: internal/httpclient/flaresolverr\.go
+        linters:
+          - gosec
+        text: 'G124:'
       - path: _test\.go
         linters:
           - errcheck

@@ -17,6 +17,7 @@ func TestConfigFromAppConfig_NFO(t *testing.T) {
 		cfg := &config.Config{
 			Metadata: config.MetadataConfig{
 				NFO: config.NFOConfig{
+					Feature: config.NFOFeatureConfig{UseCreditedName: true},
 					Format: config.NFOFormatConfig{
 						FilenameTemplate: "{id}",
 						FirstNameOrder:   true,
@@ -28,6 +29,7 @@ func TestConfigFromAppConfig_NFO(t *testing.T) {
 		require.NotNil(t, result)
 		assert.Equal(t, "{id}", result.FilenameTemplate)
 		assert.True(t, result.FirstNameOrder)
+		assert.True(t, result.UseCreditedName)
 	})
 }
 

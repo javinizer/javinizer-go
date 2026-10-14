@@ -361,7 +361,18 @@ func (m *LockedMovieOps) legacyRenames(ctx context.Context, plan *EditCommitPlan
 			}
 			return fmt.Errorf("load actress for rename: %w", err)
 		}
-		if existing == nil || (existing.FirstName == rn.FirstName && existing.LastName == rn.LastName && existing.JapaneseName == rn.JapaneseName) {
+		if existing == nil {
+			continue
+		}
+		namesUnchanged := existing.FirstName == rn.FirstName && existing.LastName == rn.LastName && existing.JapaneseName == rn.JapaneseName
+		thumbChanged := rn.ThumbEdited
+		if namesUnchanged && !thumbChanged {
+			continue
+		}
+		if thumbChanged {
+			if err := actressRepo.RenameIdentityFields(ctx, rn.ID, rn.FirstName, rn.LastName, rn.JapaneseName, rn.ThumbURL); err != nil {
+				return fmt.Errorf("persist actress identity edit: %w", err)
+			}
 			continue
 		}
 		if err := actressRepo.RenameNameFields(ctx, rn.ID, rn.FirstName, rn.LastName, rn.JapaneseName); err != nil {
@@ -372,6 +383,20 @@ func (m *LockedMovieOps) legacyRenames(ctx context.Context, plan *EditCommitPlan
 }
 
 // fileFirstMovieResult returns the first family file's non-nil result.
+// actressThumbEdited reports whether the client explicitly edited this actress
+// thumbnail. Intent travels in the request (Actress.ThumbEdited) instead of
+// being inferred: inference from any baseline can revert a newer database value
+// (stale cache) or silently drop a legitimate edit when the client's projection
+// is fresher than the cache. The intent flag itself distinguishes a clear from
+// an omitted field: thumb_edited=true with an empty URL is an explicit CLEAR
+// that must reach RenameIdentityFields (otherwise the stored thumbnail
+// survives the save and the next refresh restores it, so the editor could
+// never clear a thumbnail), while an omitted field (no flag) leaves the shared
+// identity thumbnail untouched.
+func actressThumbEdited(a models.Actress) bool {
+	return a.ThumbEdited
+}
+
 func fileFirstMovieResult(m *LockedMovieOps, filePaths []string) *resultstore.MovieResult {
 	for _, fp := range filePaths {
 		if r, err := m.pe.lookup.GetMovieResult(fp); err == nil && r != nil && r.Movie != nil {
@@ -640,11 +665,11 @@ func rewriteTempPosterURL(rawURL, jobID, oldID, newID string) string {
 	if i := strings.Index(rawURL, "?"); i >= 0 {
 		path, suffix = rawURL[:i], rawURL[i:]
 	}
-	oldSegment := "/" + url.PathEscape(jobID) + "/" + url.PathEscape(oldID) + ".jpg"
+	oldSegment := "/" + url.PathEscape(jobID) + "/" + url.PathEscape(oldID) + jpgExtension
 	if !strings.HasSuffix(path, oldSegment) {
 		return rawURL
 	}
-	return path[:len(path)-len(oldSegment)] + "/" + url.PathEscape(jobID) + "/" + url.PathEscape(newID) + ".jpg" + suffix
+	return path[:len(path)-len(oldSegment)] + "/" + url.PathEscape(jobID) + "/" + url.PathEscape(newID) + jpgExtension + suffix
 }
 
 // evictStalePosterPair removes the installed preview pair for a source that
@@ -664,7 +689,7 @@ func (m *LockedMovieOps) evictStalePosterPair(posterID, wpath string) {
 	// codex cloud P2 (@rrHy): a failed leg remove keeps the witness — swept
 	// post-commit records orphan it if written over the remaining files.
 	failed := false
-	for _, name := range []string{posterID + "-full.jpg", posterID + ".jpg"} {
+	for _, name := range []string{posterID + fullImageSuffix, posterID + jpgExtension} {
 		if err := env.fs.Remove(filepath.Join(dir, name)); err != nil && !errors.Is(err, afero.ErrFileNotFound) {
 			failed = true
 			logging.Warnf("stale poster evict %s: %v (witness kept for startup)", name, err)
@@ -786,6 +811,10 @@ func (m *LockedMovieOps) UpdatePosterFromURL(ctx context.Context, posterURL stri
 // WithMovieEditLock. Geometry sanitization runs against the FIRST family
 // file's current state (deterministic, family-scoped).
 func (m *LockedMovieOps) UpdateMovieFamily(ctx context.Context, movie *models.Movie) error {
+	return m.updateMovieFamily(ctx, movie, nil)
+}
+
+func (m *LockedMovieOps) updateMovieFamily(ctx context.Context, movie *models.Movie, guard *ActressEditGuard) error {
 	if movie == nil {
 		return fmt.Errorf("movie is required")
 	}
@@ -810,7 +839,7 @@ func (m *LockedMovieOps) UpdateMovieFamily(ctx context.Context, movie *models.Mo
 		if a.ID == 0 {
 			continue
 		}
-		renames = append(renames, ActressRenamePlan{ID: a.ID, FirstName: a.FirstName, LastName: a.LastName, JapaneseName: a.JapaneseName})
+		renames = append(renames, ActressRenamePlan{ID: a.ID, FirstName: a.FirstName, LastName: a.LastName, JapaneseName: a.JapaneseName, ThumbURL: a.ThumbURL, ThumbEdited: actressThumbEdited(a)})
 	}
 
 	// Family-scoped sanitize against the first file WITH a movie (legacy
@@ -1020,7 +1049,7 @@ func (m *LockedMovieOps) UpdateMovieFamily(ctx context.Context, movie *models.Mo
 				}
 				rekeyWitnessPath = witnessPath
 				failedErr := error(nil)
-				for _, suffix := range []string{"-full.jpg", ".jpg"} {
+				for _, suffix := range []string{fullImageSuffix, jpgExtension} {
 					src := filepath.Join(dir, canonicalOldPosterID+suffix)
 					dst := filepath.Join(dir, newID+suffix)
 					if _, err := env.fs.Stat(src); err != nil {
@@ -1105,6 +1134,11 @@ func (m *LockedMovieOps) UpdateMovieFamily(ctx context.Context, movie *models.Mo
 	err = m.commitCandidate(ctx, candidates, nil, func(plan *EditCommitPlan) {
 		plan.UpsertMovie = movie
 		plan.Renames = renames
+		if guard != nil {
+			plan.Validate = func(ctx context.Context, u database.EditUnit) error {
+				return validateActressEdit(ctx, u, movie, guard)
+			}
+		}
 	})
 	if err != nil && evictWitnessPath != "" {
 		// commit never landed — no eviction happened and none is due: the record
@@ -1287,7 +1321,7 @@ func (m *LockedMovieOps) ApplyFieldOverride(ctx context.Context, resultID, field
 		if a.ID == 0 {
 			continue
 		}
-		renames = append(renames, ActressRenamePlan{ID: a.ID, FirstName: a.FirstName, LastName: a.LastName, JapaneseName: a.JapaneseName})
+		renames = append(renames, ActressRenamePlan{ID: a.ID, FirstName: a.FirstName, LastName: a.LastName, JapaneseName: a.JapaneseName, ThumbURL: a.ThumbURL, ThumbEdited: actressThumbEdited(a)})
 	}
 	if err := m.commitCandidate(ctx, candidates, map[string]*resultstore.ProvenanceData{filePath: prov}, func(plan *EditCommitPlan) {
 		plan.UpsertMovie = movie
@@ -1574,7 +1608,7 @@ func (m *LockedMovieOps) updateMovieSingleLocked(ctx context.Context, filePath s
 		if a.ID == 0 {
 			continue
 		}
-		renames = append(renames, ActressRenamePlan{ID: a.ID, FirstName: a.FirstName, LastName: a.LastName, JapaneseName: a.JapaneseName})
+		renames = append(renames, ActressRenamePlan{ID: a.ID, FirstName: a.FirstName, LastName: a.LastName, JapaneseName: a.JapaneseName, ThumbURL: a.ThumbURL, ThumbEdited: actressThumbEdited(a)})
 	}
 	current, err := m.pe.lookup.GetMovieResult(filePath)
 	if err != nil || current == nil {
@@ -1634,13 +1668,48 @@ func (pe *PosterEditor) UpdatePosterFromURL(ctx context.Context, movieID string,
 	})
 }
 
-// FamilySaveOptions carries the soft guards on a family save: the
-// omitted-bounds carry (geometry re-read under the family key) and an
-// optional result-revision CAS (D12: stale clients 409 instead of clobbering
-// a newer committed edit).
+// ActressEditGuard requires the persisted cast to match the expected version before an edit.
+type ActressEditGuard struct {
+	ExpectedCastVersion string
+	KnownPersisted      bool
+}
+
+func validateActressEdit(ctx context.Context, u database.EditUnit, movie *models.Movie, guard *ActressEditGuard) error {
+	if guard == nil || movie == nil || u.Movies == nil {
+		return nil
+	}
+	contentID := strings.TrimSpace(movie.ContentID)
+	if contentID == "" {
+		contentID = strings.TrimSpace(movie.ID)
+	}
+	current, err := u.Movies.FindByContentID(ctx, contentID)
+	if err != nil {
+		if database.IsNotFound(err) {
+			if guard.KnownPersisted {
+				return &EditAdmissionConflictError{Message: "persisted movie missing in database; refresh and retry"}
+			}
+			return nil
+		}
+		return err
+	}
+	if current == nil {
+		if guard.KnownPersisted {
+			return &EditAdmissionConflictError{Message: "persisted movie missing in database; refresh and retry"}
+		}
+		return nil
+	}
+	if strings.TrimSpace(guard.ExpectedCastVersion) == "" || strings.TrimSpace(guard.ExpectedCastVersion) != models.ActressCastVersion(current.Actresses) {
+		return &EditAdmissionConflictError{Message: "movie cast changed in database; refresh and retry"}
+	}
+	return nil
+}
+
+// FamilySaveOptions controls geometry carry and revision guards for a family save.
 type FamilySaveOptions struct {
-	CarryCropGeometry      bool
-	ExpectedResultRevision *uint64
+	CarryCropGeometry       bool
+	PreserveCachedActresses bool
+	ActressEditGuard        *ActressEditGuard
+	ExpectedResultRevision  *uint64
 	// ExpectedResultRevisions — multipart CAS: EVERY listed result must be at
 	// the mapped revision or the save 409s before ANY write (codex r39).
 	ExpectedResultRevisions map[string]uint64
@@ -1676,6 +1745,11 @@ func (pe *PosterEditor) UpdateMovieFamilyWithEcho(ctx context.Context, movieID, 
 			}
 			if curFam != "" && !strings.EqualFold(curFam, strings.TrimSpace(movieID)) {
 				return &EditAdmissionConflictError{Message: fmt.Sprintf("result %s moved to family %s during save; retry", resultID, curFam)}
+			}
+		}
+		if opts.ActressEditGuard != nil {
+			if cur, _, ok := m.pe.lookup.GetFileResultByResultID(resultID); ok && cur != nil {
+				opts.ActressEditGuard.KnownPersisted = cur.PersistedMovie
 			}
 		}
 		if opts.ExpectedResultRevision != nil {
@@ -1739,7 +1813,34 @@ func (pe *PosterEditor) UpdateMovieFamilyWithEcho(ctx context.Context, movieID, 
 				}
 			}
 		}
-		if err := m.UpdateMovieFamily(ctx, movie); err != nil {
+		if opts.PreserveCachedActresses {
+			var authoritative []models.Actress
+			found := false
+			if repo := m.pe.currentMovieRepo(); repo != nil {
+				contentID := strings.TrimSpace(movie.ContentID)
+				if contentID == "" {
+					contentID = strings.TrimSpace(movie.ID)
+				}
+				current, readErr := repo.FindByContentID(ctx, contentID)
+				if readErr == nil && current != nil {
+					authoritative = current.Actresses
+					found = true
+				} else if readErr != nil && !database.IsNotFound(readErr) {
+					return readErr
+				}
+			}
+			if !found {
+				if current, _, ok := m.pe.lookup.GetFileResultByResultID(resultID); ok && current != nil && current.Movie != nil {
+					authoritative = current.Movie.Actresses
+					found = true
+				}
+			}
+			if found {
+				movie.Actresses = make([]models.Actress, len(authoritative))
+				copy(movie.Actresses, authoritative)
+			}
+		}
+		if err := m.updateMovieFamily(ctx, movie, opts.ActressEditGuard); err != nil {
 			return err
 		}
 		// in-key echo capture (audit F-R15-1): result + folded-family map at

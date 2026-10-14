@@ -64,6 +64,8 @@
 //	cfg.Metadata                             → aggregator
 //	cfg.Metadata.ActressDatabase.ConvertAlias → aggregator
 //	cfg.Metadata.ActressDatabase.Enabled    → aggregator, scrape
+//	cfg.Metadata.ActressDatabase.CollisionPolicy         → scrape
+//	cfg.Metadata.ActressDatabase.TrustedCollisionSources → scrape
 //	cfg.Metadata.GenreReplacement.AutoAdd   → aggregator
 //	cfg.Metadata.GenreReplacement.Enabled   → aggregator
 //	cfg.Metadata.IgnoreGenres                → aggregator
@@ -71,12 +73,14 @@
 //	cfg.Metadata.NFO.Format.ActressLanguageJA      → downloader, nfo
 //	cfg.Metadata.NFO.Feature.AddGenericRole         → nfo
 //	cfg.Metadata.NFO.Feature.AltNameRole            → nfo
+//	cfg.Metadata.NFO.Feature.UseCreditedName        → downloader, nfo, organizer
 //	cfg.Metadata.NFO.Extra.Credits                → nfo
 //	cfg.Metadata.NFO.Format.DisplayTitle            → api/core, workflow
 //	cfg.Metadata.NFO.Feature.Enabled                → nfo, workflow
 //	cfg.Metadata.NFO.Format.FirstNameOrder         → downloader, nfo, organizer, workflow
 //	cfg.Metadata.NFO.Format.FilenameTemplate       → api/core, nfo, workflow
 //	cfg.Metadata.NFO.Feature.IncludeFanart          → nfo
+//	cfg.Metadata.NFO.Feature.IncludeActressImages   → nfo
 //	cfg.Metadata.NFO.Feature.IncludeOriginalPath    → nfo
 //	cfg.Metadata.NFO.Feature.IncludeStreamDetails   → nfo
 //	cfg.Metadata.NFO.Feature.IncludeTrailer         → nfo

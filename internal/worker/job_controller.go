@@ -408,6 +408,9 @@ func (c *jobController) setDepsFromConfig(cfg *JobConfig) {
 		c.job.deps.MovieRepo = cfg.MovieRepo
 		c.job.posterEditor.setMovieRepo(cfg.MovieRepo)
 	}
+	if cfg.PublicationFence != nil {
+		c.job.deps.PublicationFence = cfg.PublicationFence
+	}
 	if cfg.ActressRepo != nil {
 		c.job.deps.ActressRepo = cfg.ActressRepo
 	}
@@ -481,6 +484,8 @@ func (c *jobController) buildApplyInputs(wf workflow.WorkflowInterface, batchCfg
 	upd := c.job.cfg.update
 	opMode := string(c.job.cfg.operationMode)
 	histRepo := c.job.deps.HistoryRepo
+	movieRepo := c.job.deps.MovieRepo
+	publicationFence := c.job.deps.PublicationFence
 	c.job.mu.RUnlock()
 	if opMode == "" {
 		opMode = "organize"
@@ -500,6 +505,9 @@ func (c *jobController) buildApplyInputs(wf workflow.WorkflowInterface, batchCfg
 		Destination:      cfg.Destination,
 		Update:           upd,
 		HistoryRepo:      histRepo,
+		MovieRepo:        movieRepo,
+		PublicationFence: publicationFence,
+		CollisionRepo:    c.job.deps.CollisionRepo,
 		OperationMode:    opMode,
 		OrganizeSkipped:  cfg.OrganizeOptions.Skip,
 		Broadcaster:      broadcaster,

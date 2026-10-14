@@ -53,6 +53,7 @@ type PreviewConfig struct {
 	DisplayTitle                string
 	OpMode                      operationmode.OperationMode
 	MaxPathLength               int
+	UseCreditedName             bool
 	Downloads                   downloadToggles
 }
 

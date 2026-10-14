@@ -7,10 +7,15 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 )
 
+// ReplacementInstalledFactsRecorder is an optional recorder extension used by
+// staged publication to persist the exact installed output identity.
+type ReplacementInstalledFactsRecorder interface {
+	ConfirmReplacementInstalled(ctx context.Context, opID, replacedPath, backupPath string, facts models.ReplacementBackupFacts) error
+}
+
 // ReplacementRecorder is owned by the downloader and implemented by the
-// workflow's RevertLog: every replaced byte pair (destination + backup) is
-// journaled for the move-back machinery BEFORE the replace lands
-// (POSTER-WRITE-HARDENING P3 D8).
+// workflow's RevertLog. Every replaced byte pair is journaled before the
+// replacement lands.
 type ReplacementRecorder interface {
 	// RecordReplacement persists the (replaced → backup) mapping for opID.
 	// It runs AFTER the backup has been renamed aside and BEFORE the new

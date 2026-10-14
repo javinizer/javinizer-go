@@ -54,26 +54,26 @@ func updateSecurityConfig(rt *core.APIRuntime) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		body, err := io.ReadAll(c.Request.Body)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "Invalid security configuration format", Code: "CONFIG_INVALID"})
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "Invalid security configuration format", Code: configInvalidCode})
 			return
 		}
 
 		var raw map[string]json.RawMessage
 		if err := json.Unmarshal(body, &raw); err != nil {
-			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "Invalid security configuration format", Code: "CONFIG_INVALID"})
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "Invalid security configuration format", Code: configInvalidCode})
 			return
 		}
 
 		for _, key := range []string{"allowed_directories", "denied_directories", "allow_unc", "allowed_unc_servers"} {
 			if _, ok := raw[key]; !ok {
-				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "Missing required field: " + key, Code: "CONFIG_INVALID"})
+				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "Missing required field: " + key, Code: configInvalidCode})
 				return
 			}
 		}
 
 		var req SecurityUpdateRequest
 		if err := json.Unmarshal(body, &req); err != nil {
-			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "Invalid security configuration format", Code: "CONFIG_INVALID"})
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "Invalid security configuration format", Code: configInvalidCode})
 			return
 		}
 
@@ -84,7 +84,7 @@ func updateSecurityConfig(rt *core.APIRuntime) gin.HandlerFunc {
 			expanded := core.ExpandHomeDir(dir)
 			abs, err := filepathAbs(expanded)
 			if err != nil {
-				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: fmt.Sprintf("allowed_directories entry %q could not be resolved to an absolute path", dir), Code: "CONFIG_INVALID"})
+				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: fmt.Sprintf("allowed_directories entry %q could not be resolved to an absolute path", dir), Code: configInvalidCode})
 				return
 			}
 			resolved, err := filepath.EvalSymlinks(abs)
@@ -92,7 +92,7 @@ func updateSecurityConfig(rt *core.APIRuntime) gin.HandlerFunc {
 				resolved = abs
 			}
 			if core.IsFilesystemRoot(resolved) {
-				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: fmt.Sprintf("allowed_directories entry %q resolves to filesystem root; choose a specific folder", dir), Code: "CONFIG_INVALID"})
+				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: fmt.Sprintf("allowed_directories entry %q resolves to filesystem root; choose a specific folder", dir), Code: configInvalidCode})
 				return
 			}
 		}

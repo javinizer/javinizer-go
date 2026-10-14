@@ -17,10 +17,19 @@ func NewMockScraper(t interface {
 	mock.TestingT
 	Cleanup(func())
 }) *MockScraper {
+	if helper, ok := t.(interface{ Helper() }); ok {
+		helper.Helper()
+	}
+
 	mock := &MockScraper{}
 	mock.Mock.Test(t)
 
-	t.Cleanup(func() { mock.AssertExpectations(t) })
+	t.Cleanup(func() {
+		if helper, ok := t.(interface{ Helper() }); ok {
+			helper.Helper()
+		}
+		mock.AssertExpectations(t)
+	})
 
 	return mock
 }
@@ -118,8 +127,8 @@ func (_c *MockScraper_Config_Call) Run(run func()) *MockScraper_Config_Call {
 	return _c
 }
 
-func (_c *MockScraper_Config_Call) Return(v *models.ScraperSettings) *MockScraper_Config_Call {
-	_c.Call.Return(v)
+func (_c *MockScraper_Config_Call) Return(scraperSettings *models.ScraperSettings) *MockScraper_Config_Call {
+	_c.Call.Return(scraperSettings)
 	return _c
 }
 

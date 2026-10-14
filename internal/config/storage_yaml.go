@@ -118,7 +118,7 @@ func pruneMetadataPriorityFields(dst, src *yaml.Node) {
 	if dstMetadata == nil || dstMetadata.Kind != yaml.MappingNode {
 		return
 	}
-	dstPriorityIdx := findMappingValueIndex(dstMetadata, "priority")
+	dstPriorityIdx := findMappingValueIndex(dstMetadata, priorityKey)
 	if dstPriorityIdx == -1 {
 		return
 	}
@@ -126,7 +126,7 @@ func pruneMetadataPriorityFields(dst, src *yaml.Node) {
 	if dstPriority.Kind != yaml.MappingNode {
 		return
 	}
-	srcPriority := navigateToMapping(src, "metadata", "priority")
+	srcPriority := navigateToMapping(src, "metadata", priorityKey)
 	if srcPriority == nil || srcPriority.Kind != yaml.MappingNode {
 		keyIdx := dstPriorityIdx - 1
 		dstMetadata.Content = append(dstMetadata.Content[:keyIdx], dstMetadata.Content[dstPriorityIdx+1:]...)

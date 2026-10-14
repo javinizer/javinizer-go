@@ -83,6 +83,7 @@ func TestDefaultConfigMatchesExample(t *testing.T) {
 		assert.Equal(t, exampleCfg.Metadata.NFO.Feature.PerFile, defaultCfg.Metadata.NFO.Feature.PerFile, "metadata.nfo.per_file mismatch")
 		assert.Equal(t, exampleCfg.Metadata.NFO.Feature.AddGenericRole, defaultCfg.Metadata.NFO.Feature.AddGenericRole, "metadata.nfo.add_generic_role mismatch")
 		assert.Equal(t, exampleCfg.Metadata.NFO.Feature.AltNameRole, defaultCfg.Metadata.NFO.Feature.AltNameRole, "metadata.nfo.alt_name_role mismatch")
+		assert.Equal(t, exampleCfg.Metadata.NFO.Feature.UseCreditedName, defaultCfg.Metadata.NFO.Feature.UseCreditedName, "metadata.nfo.use_credited_name mismatch")
 		assert.Equal(t, exampleCfg.Metadata.NFO.Feature.IncludeOriginalPath, defaultCfg.Metadata.NFO.Feature.IncludeOriginalPath, "metadata.nfo.include_originalpath mismatch")
 	})
 

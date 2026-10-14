@@ -206,6 +206,19 @@ func TestRunActressImport_SkipIdenticalByID(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, buf.String(), "Skipped: 1")
 }
+func TestImportActressRecords_ImportUpsertError(t *testing.T) {
+	db, err := database.New(&database.Config{Type: "sqlite", DSN: ":memory:", LogLevel: "silent"})
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
+	repo := database.NewActressRepository(db)
+	require.NoError(t, db.Exec("CREATE TRIGGER block_actress_import BEFORE INSERT ON actresses BEGIN SELECT RAISE(ABORT, 'blocked import'); END;").Error)
+
+	imported, skipped, errorsCount := importActressRecords(context.Background(), repo, []models.Actress{{FirstName: "Blocked"}})
+	assert.Zero(t, imported)
+	assert.Zero(t, skipped)
+	assert.Equal(t, 1, errorsCount)
+}
 
 // --- runActressImport with existing actress by ID but different data (update, line 248) ---
 
