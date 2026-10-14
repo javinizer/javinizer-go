@@ -196,56 +196,8 @@ jobs:
     - name: Download dependencies
       run: go mod download
 
-    - name: Prove native Windows NFO regressions before the fix
-      shell: python {0}
-      run: |
-        import json, os, pathlib, subprocess, tempfile
-
-        assert subprocess.check_output(["go", "env", "GOOS"], text=True).strip() == "windows"
-        baseline = "bd0a6156c84c32ab86777dafb4627688f72d5862"
-        subprocess.run(["git", "fetch", "--no-tags", "--depth=1", "origin", baseline], check=True)
-        package = "github.com/javinizer/javinizer-go/internal/"
-        expected = {
-            (package + "history", "TestNFONativeWindowsRestoreKeepsVolume"):
-                (6, "nfo_native_path_windows_test.go:65", "Not equal:"),
-            (package + "history", "TestNFONativeWindowsLegacyVolumeLossRefused"):
-                (8, "nfo_native_path_windows_test.go:89", "Expected value not to be nil."),
-            (package + "workflow", "TestNFONativeWindowsSnapshotRetainsVolume"):
-                (3, "nfo_native_snapshot_windows_test.go:13", "Not equal:"),
-        }
-        with tempfile.TemporaryDirectory(prefix="nfo-baseline-", dir=os.environ["RUNNER_TEMP"]) as temporary:
-            replacements = {}
-            for relative in ("internal/history/reverter.go", "internal/workflow/revert_log.go"):
-                original = pathlib.Path(relative).resolve()
-                replacement = pathlib.Path(temporary) / original.name
-                replacement.write_bytes(subprocess.check_output(["git", "show", baseline + ":" + relative]))
-                replacements[str(original)] = str(replacement)
-            overlay = pathlib.Path(temporary) / "overlay.json"
-            overlay.write_text(json.dumps({"Replace": replacements}), encoding="utf-8")
-            selector = "^(" + "|".join(name for _, name in expected) + ")$"
-            result = subprocess.run([
-                "go", "test", "-short", "-count=1", "-json", "-overlay=" + str(overlay),
-                "./internal/history", "./internal/workflow", "-run", selector,
-            ], capture_output=True, text=True)
-        pathlib.Path("nfo-native-baseline.jsonl").write_text(result.stdout, encoding="utf-8")
-        print(result.stdout, end="")
-        print(result.stderr, end="")
-        assert result.returncode == 1, "Baseline must fail through the expected test assertions"
-        events = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
-        assert not any(event["Action"] in ("skip", "build-fail") for event in events)
-        runs = {(event["Package"], event["Test"]) for event in events if event["Action"] == "run"}
-        failures = {(event["Package"], event["Test"]) for event in events if event["Action"] == "fail" and event.get("Test")}
-        assert runs == failures, "Every selected baseline test must run and fail, with no build-only failure"
-        assert len(failures) == len(expected) + sum(count for count, _, _ in expected.values())
-        for (pkg, name), (count, trace, assertion) in expected.items():
-            assert (pkg, name) in failures, "Missing baseline failure: " + name
-            children = {key for key in failures if key[0] == pkg and key[1].startswith(name + "/")}
-            assert len(children) == count, "Missing baseline scenarios: " + name
-            for key in children:
-                output = "".join(event.get("Output", "") for event in events if (event.get("Package"), event.get("Test")) == key)
-                assert trace in output and assertion in output, "Unexpected baseline failure: " + key[1]
-        print("Confirmed all 17 native Windows NFO regression scenarios fail at their intended assertions.")
-
+    # Native before/after regression evidence for 85201f8:
+    # https://github.com/javinizer/javinizer-go/actions/runs/38643999346
     - name: Verify fixed native Windows NFO paths and collect coverage
       shell: python {0}
       run: |
@@ -286,7 +238,6 @@ jobs:
       with:
         name: nfo-native-windows-evidence
         path: |
-          nfo-native-baseline.jsonl
           nfo-native-fixed.jsonl
           coverage-nfo-native-windows.out
         if-no-files-found: error
