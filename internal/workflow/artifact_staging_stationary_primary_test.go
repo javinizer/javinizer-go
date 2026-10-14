@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/database"
+	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/history"
 	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -184,6 +185,14 @@ func TestStationaryPrimaryOwnershipControls(t *testing.T) {
 			}
 			before, err := env.fs.Stat(env.source)
 			require.NoError(t, err)
+			// Windows path-derived FileInfo loads its file ID lazily in SameFile.
+			// Pin the admitted object now, before the late-execute hook vacates or
+			// replaces its pathname; comparing that stale FileInfo would reopen
+			// the successor instead of identifying the preserved original.
+			beforeDev, beforeIno, beforeKnown := fsutil.BoundObjectIdentity(env.fs, env.source, before)
+			require.True(t, beforeKnown, "real filesystem fixture requires eager native identity")
+			beforeBody, err := afero.ReadFile(env.fs, env.source)
+			require.NoError(t, err)
 			result, err := env.orch.Execute(ctx, cmd)
 			if kind == "cancelled" || kind == "checkpoint failure" {
 				require.Error(t, err)
@@ -195,9 +204,16 @@ func TestStationaryPrimaryOwnershipControls(t *testing.T) {
 			if kind == "late foreign" || kind == "late missing" || kind == "late symlink" {
 				require.Error(t, err)
 				require.NotNil(t, result)
-				info, e := env.fs.Stat(env.source + ".saved")
+				saved := env.source + ".saved"
+				info, e := env.fs.Stat(saved)
 				require.NoError(t, e)
-				require.True(t, os.SameFile(before, info))
+				afterDev, afterIno, afterKnown := fsutil.BoundObjectIdentity(env.fs, saved, info)
+				require.True(t, afterKnown, "preserved original requires eager native identity")
+				require.Equal(t, beforeDev, afterDev)
+				require.Equal(t, beforeIno, afterIno)
+				savedBody, e := afero.ReadFile(env.fs, saved)
+				require.NoError(t, e)
+				require.Equal(t, beforeBody, savedBody)
 				ledger := p3Ledger(t, env.repo, result.OperationID)
 				require.Empty(t, ledger.MoveBack)
 				require.Empty(t, ledger.Delete)

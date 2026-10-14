@@ -63,6 +63,8 @@ func TestReplacementBatchRecoveryOwnership(t *testing.T) {
 			if kind == "owned move" {
 				require.Len(t, recovery.Moves, 1)
 				require.True(t, recovery.Moves[0].Proof.IdentityStrong)
+				require.NotNil(t, recovery.Moves[0].Proof.IdentityMode)
+				require.Equal(t, uint32(info.Mode().Perm()), *recovery.Moves[0].Proof.IdentityMode)
 			} else if kind == "replaced" {
 				require.Empty(t, recovery.Deletes)
 			} else {
