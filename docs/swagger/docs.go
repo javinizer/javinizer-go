@@ -5595,6 +5595,10 @@ const docTemplate = `{
                 "credited_name": {
                     "type": "string"
                 },
+                "display_force_canonical": {
+                    "description": "DisplayForceCanonical selects the catalog name even when credited names\nare enabled, so clients must include it in display-preview invalidation.",
+                    "type": "boolean"
+                },
                 "id": {
                     "type": "integer"
                 },
