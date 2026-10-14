@@ -99,35 +99,59 @@ function Assert-SameSet($Actual, $Expected, [string]$Message) {
 }
 
 function Write-EnforcementDiagnostics($Rule) {
-    # Read-only evidence for a rejected guard. This does not relax enforcement
-    # or continue to share creation when a provider returns unfamiliar values.
-    $statuses = @($Rule.EnforcementStatus | ForEach-Object {
-        $type = $_.GetType()
-        $enumValues = @()
-        if ($type.IsEnum) {
-            $enumValues = @([Enum]::GetValues($type) | ForEach-Object {
-                [ordered]@{ Name = [string]$_; Value = [int]$_ }
-            })
+    # Read-only evidence for a rejected guard. Providers can expose formatted
+    # strings instead of numeric enums; retain the value and type without casts.
+    # Emit each section independently so unavailable metadata cannot hide the
+    # profile/interface evidence. The caller still rejects the original guard.
+    function Describe-Value($Value) {
+        [ordered]@{
+            Name = [string]$Value
+            Value = $Value
+            Type = if ($null -eq $Value) { '<null>' } else { $Value.GetType().FullName }
         }
-        [ordered]@{ Name = [string]$_; Value = [int]$_; Type = $type.FullName; EnumValues = $enumValues }
-    })
-    $class = Get-CimClass -Namespace root/standardcimv2 -ClassName MSFT_NetFirewallRule
-    $qualifiers = @($class.CimClassProperties['EnforcementStatus'].Qualifiers | ForEach-Object {
-        [ordered]@{ Name = $_.Name; Value = $_.Value }
-    })
-    $firewall = New-Object -ComObject HNetCfg.FwPolicy2
-    try { $activeProfileMask = [int]$firewall.CurrentProfileTypes } finally { $null = [Runtime.InteropServices.Marshal]::FinalReleaseComObject($firewall) }
-    $diagnostic = [ordered]@{
-        Rule = ($Rule | Select-Object -Property @('Name', 'Enabled', 'Direction', 'Action', 'Profile', 'PrimaryStatus', 'Status', 'StatusCode'))
-        Enforcement = $statuses
-        EnforcementCimQualifiers = $qualifiers
-        CurrentProfileTypes = $activeProfileMask
-        FirewallProfiles = @(Get-NetFirewallProfile -PolicyStore ActiveStore | Select-Object -Property @('Name', 'Enabled', 'AllowLocalFirewallRules', 'DisabledInterfaceAliases'))
-        ConnectionProfiles = @(Get-NetConnectionProfile | Select-Object -Property @('InterfaceIndex', 'InterfaceAlias', 'NetworkCategory', 'IPv4Connectivity', 'IPv6Connectivity'))
-        IPInterfaces = @(Get-NetIPInterface | Select-Object -Property @('InterfaceIndex', 'InterfaceAlias', 'AddressFamily', 'ConnectionState'))
-        IPAddresses = @(Get-NetIPAddress | Select-Object -Property @('InterfaceIndex', 'InterfaceAlias', 'AddressFamily', 'IPAddress', 'AddressState'))
     }
-    Write-Host ('Rejected enforcement guard diagnostics: ' + ($diagnostic | ConvertTo-Json -Depth 8 -Compress))
+    $sections = [ordered]@{
+        Enforcement = { @($Rule.EnforcementStatus | ForEach-Object { Describe-Value $_ }) }
+        Rule = { $Rule | Select-Object -Property @('Name', 'Enabled', 'Direction', 'Action', 'Profile', 'PrimaryStatus', 'Status', 'StatusCode') }
+        EnforcementCimInstanceProperty = {
+            $property = $Rule.CimInstanceProperties['EnforcementStatus']
+            if ($null -eq $property) { throw 'EnforcementStatus CIM instance property is unavailable.' }
+            [ordered]@{
+                Name = $property.Name
+                CimType = [string]$property.CimType
+                Value = (Describe-Value $property.Value)
+                Elements = @($property.Value | ForEach-Object { Describe-Value $_ })
+            }
+        }
+        EnforcementCimClassProperty = {
+            $class = Get-CimClass -Namespace root/standardcimv2 -ClassName MSFT_NetFirewallRule
+            $property = $class.CimClassProperties['EnforcementStatus']
+            if ($null -eq $property) { throw 'EnforcementStatus CIM class property is unavailable.' }
+            [ordered]@{
+                Name = $property.Name
+                CimType = [string]$property.CimType
+                Qualifiers = @($property.Qualifiers | ForEach-Object {
+                    [ordered]@{ Name = $_.Name; Value = (Describe-Value $_.Value) }
+                })
+            }
+        }
+        CurrentProfileTypes = {
+            $firewall = New-Object -ComObject HNetCfg.FwPolicy2
+            try { Describe-Value $firewall.CurrentProfileTypes } finally { $null = [Runtime.InteropServices.Marshal]::FinalReleaseComObject($firewall) }
+        }
+        FirewallProfiles = { @(Get-NetFirewallProfile -PolicyStore ActiveStore | Select-Object -Property @('Name', 'Enabled', 'AllowLocalFirewallRules', 'DisabledInterfaceAliases')) }
+        ConnectionProfiles = { @(Get-NetConnectionProfile | Select-Object -Property @('InterfaceIndex', 'InterfaceAlias', 'NetworkCategory', 'IPv4Connectivity', 'IPv6Connectivity')) }
+        IPInterfaces = { @(Get-NetIPInterface | Select-Object -Property @('InterfaceIndex', 'InterfaceAlias', 'AddressFamily', 'ConnectionState')) }
+        IPAddresses = { @(Get-NetIPAddress | Select-Object -Property @('InterfaceIndex', 'InterfaceAlias', 'AddressFamily', 'IPAddress', 'AddressState')) }
+    }
+    foreach ($section in $sections.GetEnumerator()) {
+        try {
+            $value = & $section.Value
+            Write-Host ("Rejected enforcement guard diagnostics [$($section.Key)]: " + ($value | ConvertTo-Json -Depth 8 -Compress))
+        } catch {
+            Write-Host ("Rejected enforcement guard diagnostics [$($section.Key)] unavailable: " + $_.Exception.Message)
+        }
+    }
 }
 
 function Assert-Isolation($State) {
