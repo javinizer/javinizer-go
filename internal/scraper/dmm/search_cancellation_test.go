@@ -78,6 +78,31 @@ func (ctx *dmmObservedWaitContext) Done() <-chan struct{} {
 	return ctx.Context.Done()
 }
 
+func assertDMMImmediateRateLimitSlot(t *testing.T, limiter *ratelimit.Limiter) {
+	t.Helper()
+	// Observe entry into the blocking select instead of measuring elapsed time.
+	ctx, cancel := context.WithCancel(context.Background())
+	observed := &dmmObservedWaitContext{Context: ctx, waiting: make(chan struct{})}
+	result := make(chan error, 1)
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		result <- limiter.Wait(observed)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-finished
+	})
+	select {
+	case err := <-result:
+		require.NoError(t, err)
+	case <-observed.waiting:
+		t.Fatal("cancelled direct probe consumed the next valid caller's immediate rate-limit slot")
+	case <-time.After(2 * time.Second):
+		t.Fatal("next rate-limit call did not complete or enter its blocking select")
+	}
+}
+
 func TestTryDirectURLs_CancelledProbeDoesNotReserveRateLimitSlot(t *testing.T) {
 	for _, expired := range []bool{false, true} {
 		name := "cancelled"
@@ -102,28 +127,7 @@ func TestTryDirectURLs_CancelledProbeDoesNotReserveRateLimitSlot(t *testing.T) {
 			assert.Nil(t, s.tryDirectURLs(ctx, "h_123ipx00535"))
 			assert.Zero(t, requests)
 
-			// A valid next caller must get the unused immediate slot. Observe entry
-			// into the limiter's blocking select instead of measuring elapsed time.
-			nextCtx, cancelNext := context.WithCancel(context.Background())
-			observed := &dmmObservedWaitContext{Context: nextCtx, waiting: make(chan struct{})}
-			result := make(chan error, 1)
-			finished := make(chan struct{})
-			go func() {
-				defer close(finished)
-				result <- s.rateLimiter.Wait(observed)
-			}()
-			t.Cleanup(func() {
-				cancelNext()
-				<-finished
-			})
-			select {
-			case err := <-result:
-				require.NoError(t, err)
-			case <-observed.waiting:
-				t.Fatal("cancelled direct probe consumed the next valid caller's immediate rate-limit slot")
-			case <-time.After(2 * time.Second):
-				t.Fatal("next rate-limit call did not complete or enter its blocking select")
-			}
+			assertDMMImmediateRateLimitSlot(t, s.rateLimiter)
 		})
 	}
 }
@@ -156,6 +160,7 @@ func TestTryDirectURLs_CancellationAfterPreflightStopsBeforeHTTP(t *testing.T) {
 			assert.Nil(t, s.tryDirectURLs(dmmCancelAfterCheckContext{Context: ctx, cancel: cancel}, "h_123ipx00535"))
 			require.ErrorIs(t, ctx.Err(), context.Canceled)
 			assert.Zero(t, requests, "cancellation after preflight must still stop before HTTP")
+			assertDMMImmediateRateLimitSlot(t, s.rateLimiter)
 		})
 	}
 }
