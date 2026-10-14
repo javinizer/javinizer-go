@@ -687,7 +687,10 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 		if err := batch.Preflight(append([]string{plan.TargetPath}, artifactDestinations...)); err != nil {
 			return err
 		}
-		if !s.inPlace && s.videoDeferred && filepath.Clean(plan.SourcePath) == filepath.Clean(s.sourcePath) && filepath.Clean(plan.SourcePath) != filepath.Clean(plan.TargetPath) {
+		// A stationary exact-path move owns no primary. Directory relocation
+		// remains owned work and must retain its existing inverse.
+		stationaryPrimary := s.original.Organize.MoveFiles && s.directoryMove == nil && filepath.Clean(plan.SourcePath) == filepath.Clean(plan.TargetPath)
+		if s.videoDeferred && filepath.Clean(plan.SourcePath) == filepath.Clean(s.sourcePath) && (stationaryPrimary || (!s.inPlace && filepath.Clean(plan.SourcePath) != filepath.Clean(plan.TargetPath))) {
 			primaryResident, err = s.stagedVideoResident("", plan.TargetPath, true)
 			if err != nil {
 				return err
