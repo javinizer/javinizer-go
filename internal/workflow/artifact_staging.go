@@ -102,6 +102,9 @@ type artifactStage struct {
 	stagedVideoSources map[string]artifactSibling
 	publishVideoLog    RevertLog
 	publishVideoOpID   OperationID
+
+	// Resident primary ownership stays separate from unresolved sidecar moves.
+	residentSidecarMutation bool
 }
 
 var errArtifactDirtyAdmission = errors.New("artifact publication preparation failed")
@@ -517,9 +520,12 @@ func (s *artifactStage) publish(ctx context.Context, o *applyOrchImpl, state *ap
 		} else if directoryErr := s.rollbackInPlaceDirectory(context.WithoutCancel(ctx), o, state); directoryErr != nil {
 			s.sharedPoisoned = true
 			returnErr = errors.Join(returnErr, directoryErr)
-		} else if s.directOriginArmed {
-			s.sourceCleanupArmed = false
-			s.directOriginArmed = false
+		} else {
+			s.clearRestoredResidentSidecars()
+			if s.directOriginArmed {
+				s.sourceCleanupArmed = false
+				s.directOriginArmed = false
+			}
 		}
 	}
 	s.completedBatch, s.unresolvedBatch = nil, nil
@@ -560,11 +566,14 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 			} else if directoryErr := s.rollbackInPlaceDirectory(context.WithoutCancel(ctx), o, state); directoryErr != nil {
 				s.sharedPoisoned = true
 				returnErr = errors.Join(returnErr, directoryErr)
-			} else if s.directOriginArmed {
-				// The rollback moved the video back onto the source path: the
-				// apply terminates pre-publication despite the armed marker.
-				s.sourceCleanupArmed = false
-				s.directOriginArmed = false
+			} else {
+				s.clearRestoredResidentSidecars()
+				if s.directOriginArmed {
+					// The rollback moved the video back onto the source path: the
+					// apply terminates pre-publication despite the armed marker.
+					s.sourceCleanupArmed = false
+					s.directOriginArmed = false
+				}
 			}
 			if createdFinalParent != "" {
 				_ = s.fs.Remove(createdFinalParent)
@@ -902,6 +911,16 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 			plan.BindVerifiedSubtitleSources(s.siblingSourceProofs())
 		}
 		finalResult, err = executor.ExecuteOrganizePlan(plan, publishMove, s.original.Organize.LinkMode)
+		if primaryResident && publishMove && finalResult != nil {
+			// A later failure must report final resident/sidecar outcomes, not
+			// the temporary staging result still held by the pipeline.
+			state.organizeResult = finalResult
+			for _, sr := range finalResult.Subtitles {
+				if sr.Moved || fsutil.PublishCompleted(sr.Error) {
+					s.residentSidecarMutation = true
+				}
+			}
+		}
 		s.annotateInPlaceDirectory(finalResult)
 		if filepath.Clean(plan.SourcePath) != filepath.Clean(plan.TargetPath) && (err == nil || fsutil.PublishCompleted(err)) {
 			// An explicitly-unproven successor is NOT this batch's installed
@@ -1359,6 +1378,9 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 				return fmt.Errorf("publish deferred sibling from source %s: admission identity unavailable", sibling.sourcePath)
 			}
 			movedID, moveErr := fsutil.MoveFileNoReplaceVerifiedMode(s.fs, sibling.sourcePath, target, proof, sibling.identity.perm)
+			if primaryResident && (moveErr == nil || fsutil.PublishCompleted(moveErr)) {
+				s.residentSidecarMutation = true
+			}
 			if moveErr == nil || (fsutil.PublishCompleted(moveErr) && !fsutil.PublishSuccessorUnproven(moveErr)) {
 				if armErr := batch.SetRollbackOriginBound(target, sibling.sourcePath, movedID); armErr != nil {
 					rollbackProof := fsutil.VerifiedSourceProofFromBoundInstallIdentity(s.fs, movedID)
@@ -2020,4 +2042,21 @@ func containsPath(paths []string, path string) bool {
 		}
 	}
 	return false
+}
+
+// A successful batch rollback is not enough if a sidecar failed before its
+// inverse could be armed. Re-prove admitted source identities before treating
+// a resident-only publication as fully compensated.
+func (s *artifactStage) clearRestoredResidentSidecars() {
+	if !s.residentSidecarMutation {
+		return
+	}
+	for _, sibling := range s.siblings {
+		if sibling.subtitle || sibling.deferred {
+			if err := s.revalidateAdmittedSource(sibling.sourcePath, sibling.identity); err != nil {
+				return
+			}
+		}
+	}
+	s.residentSidecarMutation = false
 }

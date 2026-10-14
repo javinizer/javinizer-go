@@ -314,7 +314,7 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult
 		}
 		if err := artifact.publish(ctx, o, state, &steps); err != nil {
 			markArtifactDirty(artifact.original)
-			prePublication := !artifact.sourceCleanupArmed
+			prePublication := !artifact.sourceCleanupArmed && !artifact.residentSidecarMutation
 			o.completeRevertLogWithState(ctx, opID, state, prePublication)
 			return &ApplyResult{
 				OrganizeResult: state.organizeResult,
