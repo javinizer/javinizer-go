@@ -33,13 +33,26 @@ share. The workflow performs a native PowerShell parse before compilation.
 - Before sharing, add four uniquely named **Block** rules in every firewall
   profile: inbound local/outbound remote TCP 139/445 and UDP 137/138. Address
   ranges cover IPv4 and IPv6 except 127.0.0.0/8 and ::1. Verify the effective
-  ActiveStore rules, exact ports/addresses, and full enforcement. Reject enabled
+  ActiveStore rules, exact ports/addresses, and full enforcement. Require exactly
+  one active firewall profile, all three profiles enabled with local rules
+  allowed and no excluded interfaces in either effective policy or the COM
+  exclusion API, and Any interface/interface-type rule
+  filters. The raw CIM enforcement set must contain Full (1) and may additionally
+  contain only InactiveProfile (5); missing, malformed, or other statuses fail.
+  Do not infer a profile from status-array position or formatted status names.
+  Snapshot every host IP interface/address, including unclassified vEthernet
+  NAT interfaces; absence from Get-NetConnectionProfile does not exclude an
+  interface from the all-profile/all-interface coverage proof. Known connection
+  profiles must match the single active-profile mask, and the snapshot must stay
+  identical before/after rule verification and across the tests. Reject enabled
   authenticated bypass rules. A loopback UNC path alone does not restrict a
   server listener. Read-only checks also reject any SMB-over-QUIC certificate
   mapping or RDMA-capable SMB server interface, since QUIC and SMB Direct can
   bypass these TCP/NetBIOS rules. Missing inspection support fails closed. These
   checks run during preflight and both isolation verifications; neither feature
-  is disabled or reconfigured.
+  is disabled or reconfigured. Pure synthetic guard self-checks run before
+  resource creation, rejecting malformed status values, policy exclusions,
+  ambiguous profiles, restricted interfaces, and changed coverage snapshots.
 - Create a temporary, encrypted, non-caching share. Use only
   `\\127.0.0.1\javinizer-smb-<GUID>\fixtures`. Keep its marker open over UNC while
   proving a real `Get-SmbConnection` session for this share and account, an SMB3
@@ -119,3 +132,11 @@ cleanup outcome when reporting results.
 - [SMB server interfaces and RDMA capability](https://learn.microsoft.com/en-us/powershell/module/smbshare/get-smbservernetworkinterface?view=windowsserver2025-ps)
 - [Official ImageOS values for Windows 2025 variants](https://github.com/actions/runner-images/blob/win25-vs2026/20260925.250/helpers/GenerateResourcesAndImage.ps1)
 - [Windows Server 2025 / VS2026 image version and OS build](https://github.com/actions/runner-images/blob/win25-vs2026/20260925.250/images/windows/Windows2025-VS2026-Readme.md)
+
+- [Authoritative active firewall profile bitmask](https://learn.microsoft.com/en-us/windows/win32/api/netfw/nf-netfw-inetfwpolicy2-get_currentprofiletypes)
+- [Firewall profile options, including excluded interfaces](https://learn.microsoft.com/en-us/powershell/module/netsecurity/set-netfirewallprofile?view=windowsserver2025-ps)
+- [Connection profiles and physical network adapters](https://learn.microsoft.com/en-us/powershell/module/netconnection/get-netconnectionprofile?view=windowsserver2025-ps)
+- [Effective interface filters](https://learn.microsoft.com/en-us/powershell/module/netsecurity/get-netfirewallinterfacefilter?view=windowsserver2025-ps)
+- [Effective interface type filters](https://learn.microsoft.com/en-us/powershell/module/netsecurity/get-netfirewallinterfacetypefilter?view=windowsserver2025-ps)
+- [MS-FASP enforcement-state semantics](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-fasp/4767a26e-0687-4c4f-ad94-8de700e5cf83)
+- [COM firewall interface exclusions](https://learn.microsoft.com/en-us/windows/win32/api/netfw/nf-netfw-inetfwpolicy2-get_excludedinterfaces)

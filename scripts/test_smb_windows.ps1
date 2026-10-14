@@ -66,18 +66,22 @@ function Assert-NoAlternateSMBTransports {
     Write-Host 'Verified alternate SMB transports absent: no QUIC certificate mappings or RDMA-capable server interfaces.'
 }
 
+function Assert-EffectiveFirewallProfiles($Profiles) {
+    Assert-SameSet $Profiles.Name @('Domain', 'Private', 'Public') 'Could not inspect every effective firewall profile.'
+    foreach ($profile in $Profiles) {
+        Assert-That ([string]$profile.Enabled -eq 'True') "Firewall profile is disabled: $($profile.Name)"
+        Assert-That ([string]$profile.AllowLocalFirewallRules -eq 'True') "Local firewall rule enforcement is not enabled: $($profile.Name)"
+        Assert-That (@($profile.DisabledInterfaceAliases | Where-Object { $null -ne $_ }).Count -eq 0) "Firewall profile has excluded interfaces: $($profile.Name)"
+    }
+}
+
 function Assert-ServicesAndProfiles {
     # Fail rather than starting services or enabling a firewall on an unexpected
     # host. There is consequently no service state to restore in cleanup.
     foreach ($name in @('LanmanServer', 'LanmanWorkstation', 'MpsSvc', 'BFE')) {
         Assert-That ((Get-Service -Name $name).Status -eq 'Running') "Required service is not already running: $name"
     }
-    $profiles = @(Get-NetFirewallProfile -PolicyStore ActiveStore)
-    Assert-That ($profiles.Count -eq 3) 'Could not inspect every effective firewall profile.'
-    foreach ($profile in $profiles) {
-        Assert-That ([string]$profile.Enabled -eq 'True') "Firewall profile is disabled: $($profile.Name)"
-        Assert-That ([string]$profile.AllowLocalFirewallRules -ne 'False') "Local firewall rules are disallowed: $($profile.Name)"
-    }
+    Assert-EffectiveFirewallProfiles @(Get-NetFirewallProfile -PolicyStore ActiveStore)
     # Authenticated bypass rules can override blocks. This fresh test VM must
     # have none; do not delete or alter somebody else's rule to make it pass.
     $bypass = @(Get-NetFirewallRule -PolicyStore ActiveStore -Enabled True |
@@ -154,8 +158,131 @@ function Write-EnforcementDiagnostics($Rule) {
     }
 }
 
+function Get-NetworkCoverageSnapshot {
+    $firewall = New-Object -ComObject HNetCfg.FwPolicy2
+    try {
+        $activeProfile = $firewall.CurrentProfileTypes
+        $comProfiles = @(foreach ($profileBit in @(1, 2, 4)) {
+            $excluded = @($firewall.ExcludedInterfaces($profileBit) | Where-Object { $null -ne $_ })
+            [ordered]@{ Profile = $profileBit; ExcludedInterfaces = $excluded }
+        })
+    } finally { $null = [Runtime.InteropServices.Marshal]::FinalReleaseComObject($firewall) }
+    $connections = @(Get-NetConnectionProfile | Sort-Object InterfaceIndex | Select-Object -Property @('InterfaceIndex', 'InterfaceAlias', 'NetworkCategory'))
+    $interfaces = @(Get-NetIPInterface | Sort-Object -Property @('InterfaceIndex', 'AddressFamily') | Select-Object -Property @('InterfaceIndex', 'InterfaceAlias', 'AddressFamily', 'ConnectionState'))
+    $addresses = @(Get-NetIPAddress | Sort-Object -Property @('InterfaceIndex', 'AddressFamily', 'IPAddress') | Select-Object -Property @('InterfaceIndex', 'InterfaceAlias', 'AddressFamily', 'IPAddress', 'AddressState'))
+    return ConvertTo-NetworkCoverageSnapshot $activeProfile $comProfiles $connections $interfaces $addresses
+}
+
+function ConvertTo-NetworkCoverageSnapshot($activeProfile, $comProfiles, $connections, $interfaces, $addresses) {
+    # A single active profile makes the status set unambiguous. Do not infer
+    # array-position/profile associations or accept multiple/unknown profiles.
+    Assert-That ($activeProfile -is [int] -and $activeProfile -in @(1, 2, 4)) 'Exactly one known active firewall profile is required.'
+    Assert-SameSet $comProfiles.Profile @(1, 2, 4) 'Could not inspect COM exclusions for every firewall profile.'
+    foreach ($profile in $comProfiles) {
+        Assert-That (@($profile.ExcludedInterfaces | Where-Object { $null -ne $_ }).Count -eq 0) "COM firewall profile $($profile.Profile) has excluded interfaces."
+    }
+    Assert-That ($connections.Count -gt 0 -and $interfaces.Count -gt 0 -and $addresses.Count -gt 0) 'Network coverage information is incomplete.'
+    $profileBits = @{ DomainAuthenticated = 1; Private = 2; Public = 4 }
+    foreach ($connection in $connections) {
+        $category = [string]$connection.NetworkCategory
+        Assert-That ($profileBits.ContainsKey($category) -and $profileBits[$category] -eq $activeProfile) 'A connection profile disagrees with the active firewall profile.'
+        Assert-That ($connection.InterfaceIndex -in $interfaces.InterfaceIndex) 'A connection profile has no inspected IP interface.'
+    }
+    foreach ($address in $addresses) {
+        Assert-That ($address.InterfaceIndex -in $interfaces.InterfaceIndex) 'An IP address has no inspected interface.'
+        $null = [Net.IPAddress]::Parse($address.IPAddress)
+    }
+    # Get-NetConnectionProfile describes physical-adapter connection profiles,
+    # not every host IP interface. Keep unclassified host interfaces (including
+    # vEthernet NAT) in the snapshot: no interface is omitted from the proof.
+    # Coverage comes from all three enabled profiles with NO exclusions, the
+    # single authoritative active-profile mask, and each rule's Any profile,
+    # interface alias and interface type, not an invented NAT network category.
+    $unclassified = @($interfaces | Where-Object { $_.InterfaceIndex -notin $connections.InterfaceIndex } | Select-Object -Property @('InterfaceIndex', 'InterfaceAlias') -Unique)
+    return [ordered]@{
+        CurrentProfileTypes = $activeProfile
+        COMProfiles = $comProfiles
+        ConnectionProfiles = $connections
+        IPInterfaces = $interfaces
+        IPAddresses = $addresses
+        InterfacesWithoutConnectionProfile = $unclassified
+    } | ConvertTo-Json -Depth 5 -Compress
+}
+
+function Test-FullActiveEnforcement($Property) {
+    # MSFT_NetFirewallRule documents UInt16[]: Full=1, InactiveProfile=5.
+    # MS-FASP defines 5 as at least one target profile inactive; it is not an
+    # array-position mapping. Require actual enforcement (1), never 5 alone.
+    # Native NetSecurity formats these as strings Enforced/ProfileInactive.
+    # Read the raw CIM value; never coerce names or assume status array order.
+    return ($null -ne $Property -and [string]$Property.CimType -eq 'UInt16Array' -and
+        $Property.Value -is [uint16[]] -and $Property.Value.Count -gt 0 -and
+        $Property.Value -contains 1 -and @($Property.Value | Where-Object { $_ -notin @(1, 5) }).Count -eq 0)
+}
+
+function Assert-StableNetworkCoverage([string]$Current, [string]$Expected) {
+    Assert-That ($Current -ceq $Expected) 'Network profile/interface coverage changed.'
+}
+
+function Assert-IsolationGuardContracts {
+    # Pure synthetic guard checks: no services, firewall, share or network I/O.
+    $cases = @(
+        @{ Name = 'full'; Value = [uint16[]]@(1); Accept = $true },
+        @{ Name = 'inactive-and-full'; Value = [uint16[]]@(5, 1); Accept = $true },
+        @{ Name = 'full-and-inactive'; Value = [uint16[]]@(1, 5); Accept = $true },
+        @{ Name = 'inactive-only'; Value = [uint16[]]@(5); Accept = $false },
+        @{ Name = 'empty'; Value = [uint16[]]@(); Accept = $false },
+        @{ Name = 'null'; Value = $null; Accept = $false },
+        @{ Name = 'formatted-strings'; Value = @('ProfileInactive', 'Enforced'); Accept = $false },
+        @{ Name = 'numeric-strings'; Value = @('5', '1'); Accept = $false },
+        @{ Name = 'wrong-numeric-type'; Value = [int[]]@(5, 1); Accept = $false },
+        @{ Name = 'scalar'; Value = [uint16]1; Accept = $false },
+        @{ Name = 'enum'; Value = [DayOfWeek]::Monday; Accept = $false }
+    )
+    foreach ($code in @(0..25) + @(65535)) {
+        if ($code -notin @(1, 5)) { $cases += @{ Name = "error-$code"; Value = [uint16[]]@(1, $code); Accept = $false } }
+    }
+    foreach ($case in $cases) {
+        $property = [pscustomobject]@{ CimType = 'UInt16Array'; Value = $case.Value }
+        Assert-That ((Test-FullActiveEnforcement $property) -eq $case.Accept) "Enforcement decoder contract failed: $($case.Name)"
+    }
+    Assert-That (-not (Test-FullActiveEnforcement $null)) 'Missing enforcement property was accepted.'
+    Assert-That (-not (Test-FullActiveEnforcement ([pscustomobject]@{ CimType = 'StringArray'; Value = [uint16[]]@(1) }))) 'Incorrect CIM type was accepted.'
+    $profiles = @(foreach ($name in @('Domain', 'Private', 'Public')) { [pscustomobject]@{ Name = $name; Enabled = 'True'; AllowLocalFirewallRules = 'True'; DisabledInterfaceAliases = $null } })
+    $com = @(foreach ($bit in @(1, 2, 4)) { [pscustomobject]@{ Profile = $bit; ExcludedInterfaces = $null } })
+    $connections = @([pscustomobject]@{ InterfaceIndex = 14; InterfaceAlias = 'test-ethernet'; NetworkCategory = 'Public' })
+    $interfaces = @([pscustomobject]@{ InterfaceIndex = 14; InterfaceAlias = 'test-ethernet' }, [pscustomobject]@{ InterfaceIndex = 10; InterfaceAlias = 'test-unclassified-nat' })
+    $addresses = @([pscustomobject]@{ InterfaceIndex = 14; IPAddress = '10.1.0.1' }, [pscustomobject]@{ InterfaceIndex = 10; IPAddress = '172.27.0.1' })
+    Assert-EffectiveFirewallProfiles $profiles
+    $snapshot = ConvertTo-NetworkCoverageSnapshot 4 $com $connections $interfaces $addresses
+    Assert-StableNetworkCoverage $snapshot $snapshot
+    $rejects = [ordered]@{
+        'no-active-profile' = { $null = ConvertTo-NetworkCoverageSnapshot 0 $com $connections $interfaces $addresses }
+        'missing-effective-profile' = { Assert-EffectiveFirewallProfiles @($profiles[0], $profiles[1]) }
+        'restricted-interface' = { Assert-SameSet @('test-unclassified-nat') @('Any') 'Restricted interface must reject.' }
+        'restricted-interface-type' = { Assert-SameSet @('Wired') @('Any') 'Restricted interface type must reject.' }
+        'mixed-active-profiles' = { $null = ConvertTo-NetworkCoverageSnapshot 6 $com $connections $interfaces $addresses }
+        'unknown-active-profile' = { $null = ConvertTo-NetworkCoverageSnapshot 8 $com $connections $interfaces $addresses }
+        'string-active-profile' = { $null = ConvertTo-NetworkCoverageSnapshot '4' $com $connections $interfaces $addresses }
+        'disabled-profile' = { try { $profiles[0].Enabled = 'False'; Assert-EffectiveFirewallProfiles $profiles } finally { $profiles[0].Enabled = 'True' } }
+        'local-rules-disallowed' = { try { $profiles[0].AllowLocalFirewallRules = 'False'; Assert-EffectiveFirewallProfiles $profiles } finally { $profiles[0].AllowLocalFirewallRules = 'True' } }
+        'local-rules-unknown' = { try { $profiles[0].AllowLocalFirewallRules = 'NotConfigured'; Assert-EffectiveFirewallProfiles $profiles } finally { $profiles[0].AllowLocalFirewallRules = 'True' } }
+        'excluded-effective-interface' = { try { $profiles[0].DisabledInterfaceAliases = @('test-unclassified-nat'); Assert-EffectiveFirewallProfiles $profiles } finally { $profiles[0].DisabledInterfaceAliases = $null } }
+        'excluded-com-interface' = { try { $com[0].ExcludedInterfaces = @('test-unclassified-nat'); $null = ConvertTo-NetworkCoverageSnapshot 4 $com $connections $interfaces $addresses } finally { $com[0].ExcludedInterfaces = $null } }
+        'conflicting-nlm-category' = { try { $connections[0].NetworkCategory = 'Private'; $null = ConvertTo-NetworkCoverageSnapshot 4 $com $connections $interfaces $addresses } finally { $connections[0].NetworkCategory = 'Public' } }
+        'changed-snapshot' = { Assert-StableNetworkCoverage ($snapshot + 'changed') $snapshot }
+    }
+    foreach ($case in $rejects.GetEnumerator()) {
+        $rejected = $false
+        try { & $case.Value } catch { $rejected = $true }
+        Assert-That $rejected "Isolation guard contract did not reject: $($case.Key)"
+    }
+    Write-Host "Isolation guard contracts passed: $($cases.Count + 2) decoder cases, valid unclassified-interface coverage, and $($rejects.Count) rejected policy/snapshot cases."
+}
+
 function Assert-Isolation($State) {
     Assert-ServicesAndProfiles
+    $networkBefore = Get-NetworkCoverageSnapshot
     foreach ($spec in $ruleSpecs) {
         $name = "$($State.Share)-$($spec.Suffix)"
         $rules = @(Get-NetFirewallRule -PolicyStore ActiveStore -Name $name)
@@ -163,7 +290,7 @@ function Assert-Isolation($State) {
         $rule = $rules[0]
         Assert-That ([string]$rule.Enabled -eq 'True' -and [string]$rule.Action -eq 'Block' -and [string]$rule.Direction -eq $spec.Direction -and [string]$rule.Profile -eq 'Any') "Incorrect effective isolation rule: $name"
         Assert-That ($rule.Description -ceq $State.Token) "Isolation rule has the wrong ownership marker: $name"
-        $fullyEnforced = [string]$rule.PrimaryStatus -eq 'OK' -and @($rule.EnforcementStatus).Count -eq 1 -and [string]$rule.EnforcementStatus[0] -eq 'Full'
+        $fullyEnforced = [string]$rule.PrimaryStatus -eq 'OK' -and (Test-FullActiveEnforcement $rule.CimInstanceProperties['EnforcementStatus'])
         if (-not $fullyEnforced) { Write-EnforcementDiagnostics $rule }
         Assert-That $fullyEnforced "Isolation rule is not fully enforced: $name ($($rule.EnforcementStatus))"
         $address = $rule | Get-NetFirewallAddressFilter
@@ -181,8 +308,14 @@ function Assert-Isolation($State) {
         }
         Assert-SameSet ($rule | Get-NetFirewallApplicationFilter).Program @('Any') "Unexpected application filter: $name"
         Assert-SameSet ($rule | Get-NetFirewallServiceFilter).Service @('Any') "Unexpected service filter: $name"
+        Assert-SameSet ($rule | Get-NetFirewallInterfaceFilter).InterfaceAlias @('Any') "Unexpected interface restriction: $name"
+        Assert-SameSet ($rule | Get-NetFirewallInterfaceTypeFilter).InterfaceType @('Any') "Unexpected interface-type restriction: $name"
         Write-Host "Verified enforced isolation: $name, $($spec.Direction), $($spec.Protocol), ports $($spec.Ports -join ',')"
     }
+    Assert-ServicesAndProfiles
+    Assert-StableNetworkCoverage (Get-NetworkCoverageSnapshot) $networkBefore
+    Write-Host "Verified all-profile/all-interface coverage (including unclassified host interfaces): $networkBefore"
+    return $networkBefore
 }
 
 function Set-PrivateDirectory([string]$Path) {
@@ -290,6 +423,7 @@ if ($CleanupOnly) {
     return
 }
 
+Assert-IsolationGuardContracts
 Assert-That (-not (Test-Path -LiteralPath $statePath)) 'Previous state exists; cleanup is required before another run.'
 Assert-That (Test-Path -LiteralPath $binaryPath -PathType Leaf) 'Compile the Windows integration test binary before exposing any share.'
 Assert-ServicesAndProfiles
@@ -318,7 +452,7 @@ try {
         if ($spec.Direction -eq 'Inbound') { $params.LocalPort = $spec.Ports } else { $params.RemotePort = $spec.Ports }
         $null = New-NetFirewallRule @params
     }
-    Assert-Isolation $state
+    $networkCoverage = Assert-Isolation $state
     Assert-That (@(Get-SmbShare | Where-Object Name -eq $state.Share).Count -eq 0) 'Share name collision.'
     # New-SmbShare -WhatIf is NOT a dry run (documented ineffective). Only this
     # reviewed execution path creates the temporary, current-account-only share.
@@ -353,7 +487,7 @@ try {
         Assert-That ($runs.Count -eq 1 -and $passes.Count -eq 1) "Required case did not execute and pass exactly once: $fullName"
     }
     Assert-That (@($events | Where-Object { $_.Action -eq 'pass' -and $_['Test'] -eq 'TestSMBRegression' }).Count -eq 1) 'Top-level real SMB suite did not pass.'
-    Assert-Isolation $state
+    Assert-StableNetworkCoverage (Assert-Isolation $state) $networkCoverage
     Assert-Share $state
     $null = Assert-Session $state
     Assert-That ((Get-SecurityDefaults) -ceq $defaults) 'Global SMB security defaults changed during execution.'
