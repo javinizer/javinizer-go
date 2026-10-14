@@ -268,7 +268,8 @@ func (o *applyOrchImpl) prepareArtifact(ctx context.Context, cmd ApplyCmd) (*art
 				continue
 			}
 			admitted := artifactSibling{sourcePath: sibling, identity: captureArtifactSourceIdentity(o.fs, sibling, siblingInfo), subtitle: selectedSubtitles[filepath.Clean(sibling)]}
-			if cmd.Organize.MoveFiles && isStagedArtifactVideoExtension(strings.ToLower(filepath.Ext(entry.Name()))) {
+			_, siblingExtension := artifactMatchName(entry.Name())
+			if cmd.Organize.MoveFiles && isStagedArtifactVideoExtension(strings.ToLower(siblingExtension)) {
 				// Defer multipart video siblings with the primary in MOVE flows
 				// (codex P2, PRRT_kwDORn9KaM6rLI28): the publication installs
 				// them straight off the real source by the verified move lane,
@@ -320,9 +321,11 @@ func artifactMatchName(base string) (name, extension string) {
 }
 
 func isStagedArtifactVideoSibling(sourceName, siblingName string) bool {
-	sourceStem := strings.TrimSuffix(strings.ToLower(sourceName), strings.ToLower(filepath.Ext(sourceName)))
-	siblingExt := strings.ToLower(filepath.Ext(siblingName))
-	siblingStem := strings.TrimSuffix(strings.ToLower(siblingName), siblingExt)
+	sourceName, sourceExt := artifactMatchName(sourceName)
+	siblingName, siblingExt := artifactMatchName(siblingName)
+	sourceStem := strings.ToLower(strings.TrimSuffix(sourceName, sourceExt))
+	siblingStem := strings.ToLower(strings.TrimSuffix(siblingName, siblingExt))
+	siblingExt = strings.ToLower(siblingExt)
 	if !isStagedArtifactVideoExtension(siblingExt) {
 		return false
 	}
@@ -1571,11 +1574,12 @@ func (s *artifactStage) rehomeRemainingSiblings(stagedVideo string, excluded map
 }
 
 func stagedArtifactSiblingName(sourceName, targetName, siblingName string) string {
-	sourceExt := filepath.Ext(sourceName)
+	sourceName, sourceExt := artifactMatchName(sourceName)
+	siblingNormalized, siblingExt := artifactMatchName(siblingName)
+	targetName, targetExt := artifactMatchName(targetName)
 	sourceStem := strings.TrimSuffix(sourceName, sourceExt)
-	siblingExt := filepath.Ext(siblingName)
-	siblingStem := strings.TrimSuffix(siblingName, siblingExt)
-	targetStem := strings.TrimSuffix(targetName, filepath.Ext(targetName))
+	siblingStem := strings.TrimSuffix(siblingNormalized, siblingExt)
+	targetStem := strings.TrimSuffix(targetName, targetExt)
 	if strings.EqualFold(siblingStem, sourceStem) {
 		return targetStem + siblingExt
 	}

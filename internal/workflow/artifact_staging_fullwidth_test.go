@@ -61,7 +61,7 @@ func TestArtifactStagingFullwidthSubtitlePolicy(t *testing.T) {
 					admitted[sibling.sourcePath] = true
 				}
 				assert.Equal(t, policy.selected, admitted[sub])
-				assert.False(t, admitted[part], "raw fullwidth-extension multipart support is outside this reconciliation")
+				assert.True(t, admitted[part], "multipart video admission is independent of subtitle policy")
 				assert.False(t, admitted[unrelated])
 				stage.cleanup()
 
@@ -232,6 +232,44 @@ func TestArtifactStagingFullwidthCaseAndMultipartSafety(t *testing.T) {
 					exists, err = afero.Exists(fs, sub)
 					require.NoError(t, err)
 					assert.Equal(t, !move || occupied, exists)
+				})
+			}
+		}
+	}
+}
+
+func TestArtifactStagingFullwidthMultipartPublication(t *testing.T) {
+	for _, primary := range []string{"RCT-156-HD.mkv", "RCT-156-HD．ｍｋｖ"} {
+		for _, sibling := range []string{"RCT-156-HD-cd2.mkv", "RCT-156-HD-cd2．ｍｋｖ"} {
+			for _, move := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/%s/move=%t", primary, sibling, move), func(t *testing.T) {
+					fs := afero.NewOsFs()
+					root := t.TempDir()
+					src := filepath.Join(root, "incoming", primary)
+					part := filepath.Join(root, "incoming", sibling)
+					require.NoError(t, fs.MkdirAll(filepath.Dir(src), 0o755))
+					require.NoError(t, afero.WriteFile(fs, src, []byte("primary"), 0o644))
+					require.NoError(t, afero.WriteFile(fs, part, []byte("part two"), 0o644))
+					org := organizer.NewOrganizer(fs, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize}, template.NewEngine(), nil)
+					orch := &applyOrchImpl{fs: fs, organizer: org}
+					name, ext := artifactMatchName(primary)
+					cmd := ApplyCmd{Movie: &models.Movie{ContentID: "fullwidth-parts", ID: "RCT-156H"}, Match: models.FileMatchInfo{Path: src, Name: name, Extension: ext}, DestPath: filepath.Join(root, "library"), Organize: OrganizeOptions{MoveFiles: move}, OperationMode: operationmode.OperationModeOrganize, PublicationFence: pr260FailureArtifactFencer{}}
+					stage, _, err := orch.prepareArtifact(t.Context(), cmd)
+					require.NoError(t, err)
+					require.Len(t, stage.siblings, 1)
+					assert.Equal(t, part, stage.siblings[0].sourcePath)
+					assert.Equal(t, move, stage.siblings[0].deferred, "fullwidth videos use the same deferred move lane")
+					stage.cleanup()
+					result, err := orch.Execute(t.Context(), cmd)
+					require.NoError(t, err)
+					require.NotNil(t, result.OrganizeResult)
+					target := filepath.Join(filepath.Dir(result.OrganizeResult.NewPath), "movie-cd2.mkv")
+					body, err := afero.ReadFile(fs, target)
+					require.NoError(t, err)
+					assert.Equal(t, "part two", string(body))
+					exists, err := afero.Exists(fs, part)
+					require.NoError(t, err)
+					assert.Equal(t, !move, exists)
 				})
 			}
 		}

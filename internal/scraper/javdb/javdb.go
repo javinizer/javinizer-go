@@ -305,7 +305,10 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 	// If ID looks like a JavDB video code (alphanumeric, short), try direct URL first
 	// JavDB URLs are /v/{code} where code is typically 4-6 alphanumeric characters
 	cleanID := strings.TrimSpace(id)
-	if isJavDBVideoCode(cleanID) {
+	queryKey := foldRemasterMarkerKey(cleanID)
+	// Raw AI catalog IDs are not JavDB video codes. Resolve their unique
+	// display listing before allowing the number-free identity bridge.
+	if isJavDBVideoCode(cleanID) && !(queryKey.rawCID && queryKey.marker == "AI") {
 		directURL := fmt.Sprintf("%s/v/%s", s.baseURL, cleanID)
 		logging.Debugf("JavDB: ID '%s' looks like video code, trying direct URL: %s", cleanID, directURL)
 
@@ -323,7 +326,7 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		logging.Debugf("JavDB: Direct URL lookup failed for '%s', falling back to search", cleanID)
 	}
 
-	detailURL, err := s.findDetailURLCtx(ctx, id)
+	detailURL, selectedID, err := s.findDetailSelectionCtx(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -344,7 +347,7 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 	}
 
 	if hasDetailMetadata(result, id) {
-		if !detailIdentityMatchesQuery(result, id) {
+		if !detailIdentityMatchesQuery(result, selectedID) {
 			// The selected detail page publishes another release's identity
 			// than the marker query's — the post-fetch guard the DMM side's
 			// pageDisplayIdentityMatchesQuery performs (see
@@ -373,7 +376,7 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 	if !hasDetailMetadata(retryResult, id) {
 		return nil, fmt.Errorf("JavDB returned non-detail content for %s", detailURL)
 	}
-	if !detailIdentityMatchesQuery(retryResult, id) {
+	if !detailIdentityMatchesQuery(retryResult, selectedID) {
 		// The retried page publishes another release's identity too: the
 		// same post-fetch guard as the primary parse above.
 		return nil, models.NewScraperNotFoundError("JavDB", fmt.Sprintf("JavDB page for %s publishes a different release", id))
@@ -382,19 +385,26 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 }
 
 func (s *scraper) findDetailURLCtx(ctx context.Context, id string) (string, error) {
+	url, _, err := s.findDetailSelectionCtx(ctx, id)
+	return url, err
+}
+
+// findDetailSelectionCtx carries the selected display identity through to the
+// detail guard: a unique AI bridge must not accept a redirected neighbor.
+func (s *scraper) findDetailSelectionCtx(ctx context.Context, id string) (string, string, error) {
 	searchURL, err := s.GetURL(ctx, id)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	html, err := s.fetchPageCtx(ctx, searchURL)
 	if err != nil {
-		return "", fmt.Errorf("failed to fetch search page: %w", err)
+		return "", "", fmt.Errorf("failed to fetch search page: %w", err)
 	}
 
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
 	if err != nil {
-		return "", fmt.Errorf("failed to parse search page HTML: %w", err)
+		return "", "", fmt.Errorf("failed to parse search page HTML: %w", err)
 	}
 
 	targetID := normalizeIDForCompare(id)
@@ -432,7 +442,8 @@ func (s *scraper) findDetailURLCtx(ctx context.Context, id string) (string, erro
 	// compares series, catalog suffix and AI marker class against a display
 	// listing without the number — the number-free exception the DMM/R18
 	// identity code already applies (rawDisplayMatchesCID /
-	// pageDisplayIdentityForCID). Raw H/HD cids keep binding the number
+	// pageDisplayIdentityForCID), but only for a unique display candidate.
+	// Raw H/HD cids keep binding the number
 	// (1rct00156h is RCT-156H, and 1rct00157h must not match RCT-156-HD),
 	// display AI queries keep binding it too, and a raw cid listing facing
 	// a raw cid query still binds literally — only the raw-cid-query vs
@@ -442,10 +453,12 @@ func (s *scraper) findDetailURLCtx(ctx context.Context, id string) (string, erro
 		foldedTargetKey = foldRemasterMarkerKey(id)
 	}
 	var (
-		foundURL  string
-		bestMatch idMatchType
+		foundURL   string
+		selectedID = id
+		bestMatch  idMatchType
 	)
 
+	bridgedCandidates := make(map[string]bool)
 	doc.Find(".movie-list .item").EachWithBreak(func(i int, item *goquery.Selection) bool {
 		link := item.Find("a[href]").First()
 		href, exists := link.Attr("href")
@@ -478,9 +491,22 @@ func (s *scraper) findDetailURLCtx(ctx context.Context, id string) (string, erro
 				// suffix: the base release must not stand in for the remaster.
 				match = idMatchNone
 			}
+			if markerQuery && foldedTargetKey.rawCID && foldedTargetKey.marker == "AI" && match != idMatchNone {
+				candidateKey := foldRemasterMarkerKey(c)
+				if !candidateKey.rawCID {
+					// Slot/display number equality is coincidental, never stronger
+					// evidence than any other same-series AI display candidate.
+					match = idMatchNormalized
+					key := candidateKey.series + ":" + trimRemasterNumberPadding(candidateKey.number) + ":" + candidateKey.catalogSuffix + ":" + scraperutil.ResolveURL(s.baseURL, href)
+					bridgedCandidates[key] = true
+				}
+			}
 			if match > bestMatch {
 				bestMatch = match
 				foundURL = scraperutil.ResolveURL(s.baseURL, href)
+				if markerQuery {
+					selectedID = c
+				}
 			}
 			if match == idMatchExact {
 				return false
@@ -489,8 +515,8 @@ func (s *scraper) findDetailURLCtx(ctx context.Context, id string) (string, erro
 		return true
 	})
 
-	if foundURL != "" {
-		return foundURL, nil
+	if foundURL != "" && !(bestMatch == idMatchNormalized && len(bridgedCandidates) > 1) {
+		return foundURL, selectedID, nil
 	}
 
 	// Fallback: if only one detail link exists, use it.
@@ -504,10 +530,10 @@ func (s *scraper) findDetailURLCtx(ctx context.Context, id string) (string, erro
 	// assumed to be the requested remaster (DV-818 must not stand in for
 	// DV-818AI).
 	if len(detailLinks) == 1 && !markerQuery {
-		return detailLinks[0], nil
+		return detailLinks[0], id, nil
 	}
 
-	return "", models.NewScraperNotFoundError("JavDB", fmt.Sprintf("movie %s not found on JavDB", id))
+	return "", "", models.NewScraperNotFoundError("JavDB", fmt.Sprintf("movie %s not found on JavDB", id))
 }
 
 // validateFetchURL enforces the SSRF/allowed-host contract at the fetch
@@ -1356,11 +1382,10 @@ func remasterFoldMatchRank(candidate string, target remasterFoldKey) idMatchType
 			// same-series, same-suffix, same-class display listing
 			// satisfies the identity — the honest reading the DMM/R18
 			// identity code already applies (rawDisplayMatchesCID /
-			// pageDisplayIdentityForCID). The rank stays below exact so
-			// a listing numbering the cid's own digits still outranks
-			// it, and the candidate guard keeps raw cid listings on
-			// the literal comparison: a different slot is a different
-			// release.
+			// pageDisplayIdentityForCID). Search selection treats ALL display
+			// candidates at this rank, including coincidentally equal numbers,
+			// and requires uniqueness before bridging to a display identity.
+			// Raw cid listings keep their number-bound rank.
 			return idMatchNormalized
 		}
 		return idMatchNone
