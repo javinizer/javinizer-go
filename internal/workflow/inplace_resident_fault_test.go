@@ -139,3 +139,31 @@ func TestResidentDirectoryCreatedReplacementCaseOwnership(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []string{lower}, got.Delete)
 }
+
+func TestInPlaceLateResidentTransitionRefused(t *testing.T) {
+	stage, orch, state, old, target := directoryMoveFixture(t)
+	original := stage.sourcePath
+	before, err := os.Stat(original)
+	require.NoError(t, err)
+	base := stage.fs
+	injected := false
+	fs := &directoryFaultFS{Fs: base, afterRename: func(_, dst string) error {
+		if dst == target && !injected {
+			injected = true
+			return os.Link(filepath.Join(target, filepath.Base(original)), filepath.Join(target, "IPX-123.mkv"))
+		}
+		return nil
+	}}
+	stage.fs, orch.fs = fs, fs
+	require.ErrorContains(t, stage.publish(t.Context(), orch, state, nil), "resident primary changed after directory relocation")
+	require.True(t, injected)
+	require.False(t, stage.residentPrimary)
+	require.False(t, stage.inPlaceResident)
+	for _, path := range []string{original, filepath.Join(old, "IPX-123.mkv")} {
+		after, err := os.Stat(path)
+		require.NoError(t, err)
+		require.True(t, os.SameFile(before, after))
+	}
+	_, err = os.Stat(target)
+	require.True(t, os.IsNotExist(err))
+}

@@ -693,7 +693,15 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 			if err != nil {
 				return err
 			}
-			if s.inPlaceResident && !primaryResident {
+			// The directory checkpoint froze whether its inverse owns the primary.
+			// Neither transition may replace that durable ownership contract.
+			if s.directoryMove != nil && s.inPlaceResident != primaryResident {
+				if !s.inPlaceResident {
+					// Failure must retain the relocated source anchor, rather than
+					// the earlier staging result, if directory rollback is blocked.
+					state.organizeResult = &organizer.OrganizeResult{OriginalPath: s.sourcePath, NewPath: s.sourcePath, FolderPath: plan.TargetDir, Moved: true}
+					s.annotateInPlaceDirectory(state.organizeResult)
+				}
 				return fmt.Errorf("resident primary changed after directory relocation")
 			}
 			if primaryResident {
