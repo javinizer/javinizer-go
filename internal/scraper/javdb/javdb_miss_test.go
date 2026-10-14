@@ -507,7 +507,7 @@ func TestSearch_DirectURLFails_FallbackToSearch(t *testing.T) {
 	assert.Equal(t, "Fallback Movie", result.Title)
 }
 
-// --- findDetailURLCtx edge cases (88.2% → higher) ---
+// --- findDetailSelectionCtx edge cases (88.2% → higher) ---
 
 func TestFindDetailURLCtx_EmptySearchResults(t *testing.T) {
 	searchHTML := `<html><body><div class="movie-list"></div></body></html>`
@@ -527,7 +527,7 @@ func TestFindDetailURLCtx_EmptySearchResults(t *testing.T) {
 		settings:    models.ScraperSettings{Enabled: true},
 	}
 
-	_, err := s.findDetailURLCtx(context.Background(), "NOTFOUND-999")
+	_, _, err := s.findDetailSelectionCtx(context.Background(), "NOTFOUND-999")
 	require.Error(t, err)
 }
 
@@ -560,7 +560,7 @@ func TestFindDetailURLCtx_VariantMatch(t *testing.T) {
 		settings:    models.ScraperSettings{Enabled: true},
 	}
 
-	url, err := s.findDetailURLCtx(context.Background(), "VAR-123")
+	url, _, err := s.findDetailSelectionCtx(context.Background(), "VAR-123")
 	require.NoError(t, err)
 	assert.Equal(t, "https://javdb.test/v/var123", url)
 }

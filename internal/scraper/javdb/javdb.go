@@ -308,7 +308,7 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 	queryKey := foldRemasterMarkerKey(cleanID)
 	// Raw AI catalog IDs are not JavDB video codes. Resolve their unique
 	// display listing before allowing the number-free identity bridge.
-	if isJavDBVideoCode(cleanID) && !(queryKey.rawCID && queryKey.marker == "AI") {
+	if isJavDBVideoCode(cleanID) && (!queryKey.rawCID || queryKey.marker != "AI") {
 		directURL := fmt.Sprintf("%s/v/%s", s.baseURL, cleanID)
 		logging.Debugf("JavDB: ID '%s' looks like video code, trying direct URL: %s", cleanID, directURL)
 
@@ -382,11 +382,6 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		return nil, models.NewScraperNotFoundError("JavDB", fmt.Sprintf("JavDB page for %s publishes a different release", id))
 	}
 	return retryResult, nil
-}
-
-func (s *scraper) findDetailURLCtx(ctx context.Context, id string) (string, error) {
-	url, _, err := s.findDetailSelectionCtx(ctx, id)
-	return url, err
 }
 
 // findDetailSelectionCtx carries the selected display identity through to the
@@ -515,7 +510,7 @@ func (s *scraper) findDetailSelectionCtx(ctx context.Context, id string) (string
 		return true
 	})
 
-	if foundURL != "" && !(bestMatch == idMatchNormalized && len(bridgedCandidates) > 1) {
+	if foundURL != "" && (bestMatch != idMatchNormalized || len(bridgedCandidates) <= 1) {
 		return foundURL, selectedID, nil
 	}
 
@@ -709,7 +704,7 @@ func hasDetailMetadata(result *models.ScraperResult, fallbackID string) bool {
 // detailIdentityMatchesQuery reports whether the parsed detail result's
 // published ID satisfies the query's remaster identity — the post-fetch
 // guard the DMM side performs on its fetched pages
-// (pageDisplayIdentityMatchesQuery, rounds 16a/18/20a). findDetailURLCtx
+// (pageDisplayIdentityMatchesQuery, rounds 16a/18/20a). findDetailSelectionCtx
 // validates only the ID the SEARCH card showed, so a stale or redirected
 // detail URL can serve another release's page: an RCT-156H query whose
 // selected link serves RCT-156 (the base) or RCT-157-HD (another
