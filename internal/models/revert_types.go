@@ -58,8 +58,14 @@ type GeneratedFilesJSON struct {
 // SHA256 leg (an empty hash never matches — retain), preserving the legacy
 // posture byte-for-byte.
 type DeleteEntry struct {
-	Path   string `json:"path"`
-	SHA256 string `json:"sha256"`
+	// RecoveryPublication selects strict status checks for failed-publication
+	// proofs: unavailable identity or incomplete cleanup must remain retryable.
+	RecoveryPublication bool `json:"recovery_publication,omitempty"`
+	// RecoveryUnproven retains an output without a portable install identity.
+	// Undo requires manual recovery while any entry remains at its path.
+	RecoveryUnproven bool   `json:"recovery_unproven,omitempty"`
+	Path             string `json:"path"`
+	SHA256           string `json:"sha256"`
 	// LinkTarget pins a soft-link install: the expected readlink payload of
 	// the destination entry (the string the organizer's symlink leg passes,
 	// computed by organizer.SymlinkLinkTarget). Non-empty selects the
@@ -268,8 +274,9 @@ func (e *ReplacementEntry) SetRestorePending(kind string) bool {
 
 // FileMove represents a file that was moved during organize and should be moved back on revert.
 type FileMove struct {
-	OriginalPath string `json:"original_path"` // Where the file was before organize
-	NewPath      string `json:"new_path"`      // Where the file is after organize
+	Proof        *DeleteEntry `json:"proof,omitempty"`
+	OriginalPath string       `json:"original_path"` // Where the file was before organize
+	NewPath      string       `json:"new_path"`      // Where the file is after organize
 }
 
 // ParseGeneratedFiles decodes the persisted ledger blob. Empty content decodes

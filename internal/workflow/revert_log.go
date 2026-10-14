@@ -393,6 +393,29 @@ func mergeReplacementLedgerIntents(priorRaw, newRaw string, promotePinnedDeletes
 		return newRaw
 	}
 	fresh.PrimaryResident = fresh.PrimaryResident || prior.PrimaryResident
+	// Completion reports an NFO path even when publication replaced an
+	// existing NFO. A replacement alone does not grant deletion ownership:
+	// retain it only if the pre-completion ledger already recorded a create
+	// intent (a legitimate create-then-replace chain). Otherwise Undo would
+	// restore the backup and then delete it, including after folder rebasing.
+	keys := fsutil.NewDestKeyResolver()
+	preexisting := make(map[string]bool, len(prior.Replacements))
+	for _, replacement := range prior.Replacements {
+		preexisting[keys.Key(replacement.Destination)] = true
+	}
+	for _, path := range prior.Delete {
+		delete(preexisting, keys.Key(path))
+	}
+	for _, entry := range prior.PlannedDeletes {
+		delete(preexisting, keys.Key(entry.Path))
+	}
+	deletes := fresh.Delete[:0]
+	for _, path := range fresh.Delete {
+		if !preexisting[keys.Key(path)] {
+			deletes = append(deletes, path)
+		}
+	}
+	fresh.Delete = deletes
 	fresh.Replacements = prior.Replacements
 	if len(fresh.Roots) == 0 {
 		fresh.Roots = prior.Roots
@@ -531,10 +554,17 @@ func updatePostOrganize(op *models.BatchFileOperation, newPath string, inPlaceRe
 // actually lands there, so the sweeper's bounded recursion starts there).
 // persist=false reports an idempotent no-op (merged bytes identical to what
 // the row already carries, e.g. a retried completion).
-func completionLedgerMergeOpt(currentRaw, newRaw, folderRoot string, promotePinnedDeletes bool) (next models.GeneratedFilesJSON, persist bool, merged string, err error) {
+func completionLedgerMergeOpt(currentRaw, newRaw, folderRoot string, promotePinnedDeletes bool, recovery ...*models.PublicationRecovery) (next models.GeneratedFilesJSON, persist bool, merged string, err error) {
 	merged = mergeReplacementLedgerIntents(currentRaw, newRaw, promotePinnedDeletes)
 	if folderRoot != "" {
 		merged = appendLedgerRoot(merged, folderRoot)
+	}
+	if len(recovery) > 0 && recovery[0] != nil {
+		ledger, parseErr := models.ParseGeneratedFiles(merged)
+		if parseErr != nil {
+			return models.GeneratedFilesJSON{}, false, "", parseErr
+		}
+		merged = models.MarshalLedgerJSON(reconcilePublicationRecovery(ledger, recovery[0]))
 	}
 	if merged == currentRaw {
 		return models.GeneratedFilesJSON{}, false, merged, nil
@@ -561,14 +591,14 @@ func completionLedgerMergeOpt(currentRaw, newRaw, folderRoot string, promotePinn
 // follow-up full Save used to re-persist the tx-derived bytes, which still
 // clobbered any journal mutation committed between the tx commit and the
 // Save), so generated_files is owned exclusively by UpdateJournalInTx.
-func (l *dbRevertLog) mergeJournalInTx(ctx context.Context, recordID uint, opID OperationID, caller, newRaw, folderRoot string) (string, error) {
-	return l.mergeJournalInTxOpt(ctx, recordID, opID, caller, newRaw, folderRoot, true)
+func (l *dbRevertLog) mergeJournalInTx(ctx context.Context, recordID uint, opID OperationID, caller, newRaw, folderRoot string, recovery ...*models.PublicationRecovery) (string, error) {
+	return l.mergeJournalInTxOpt(ctx, recordID, opID, caller, newRaw, folderRoot, true, recovery...)
 }
 
-func (l *dbRevertLog) mergeJournalInTxOpt(ctx context.Context, recordID uint, opID OperationID, caller, newRaw, folderRoot string, promotePinnedDeletes bool) (string, error) {
+func (l *dbRevertLog) mergeJournalInTxOpt(ctx context.Context, recordID uint, opID OperationID, caller, newRaw, folderRoot string, promotePinnedDeletes bool, recovery ...*models.PublicationRecovery) (string, error) {
 	var merged string
 	txErr := l.repo.UpdateJournalInTx(ctx, recordID, func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
-		next, persist, m, err := completionLedgerMergeOpt(current.GeneratedFiles, newRaw, folderRoot, promotePinnedDeletes)
+		next, persist, m, err := completionLedgerMergeOpt(current.GeneratedFiles, newRaw, folderRoot, promotePinnedDeletes, recovery...)
 		merged = m
 		return next, persist, err
 	})
@@ -1138,7 +1168,7 @@ func (l *dbRevertLog) CompleteFailed(ctx context.Context, opID OperationID, resu
 	// is no longer clobbered by the re-persist (UpdateJournalInTx owns that
 	// column exclusively).
 	mergedJournal, err := l.mergeJournalInTx(ctx, recordID, opID, "CompleteFailed",
-		buildGeneratedFilesJSON(resolveLogger(l.logger), nfoPath, subtitles, downloadPaths, result.OrganizeResult != nil && result.OrganizeResult.PrimaryResident), "")
+		buildGeneratedFilesJSON(resolveLogger(l.logger), nfoPath, subtitles, downloadPaths, result.OrganizeResult != nil && result.OrganizeResult.PrimaryResident), "", result.PublicationRecovery)
 	if err != nil {
 		return err
 	}

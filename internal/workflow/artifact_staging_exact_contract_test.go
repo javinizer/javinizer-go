@@ -64,7 +64,7 @@ func TestPR260ExactPreservedPosterInvalidatesVerification(t *testing.T) {
 	b, e := afero.ReadFile(base, target)
 	require.NoError(t, e)
 	require.Equal(t, "current", string(b))
-	require.Equal(t, target, state.downloadPaths[0])
+	require.Empty(t, state.downloadPaths, "preserved artwork is not owned by this apply")
 	stage.cleanup()
 	pr260AssertRetained(t, base, source, sub, part, other)
 	pr260AssertStageGone(t, base, root)

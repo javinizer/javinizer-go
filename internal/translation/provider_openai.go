@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/javinizer/javinizer-go/internal/logging"
@@ -53,6 +54,7 @@ func (p *OpenAIProvider) Translate(ctx context.Context, sourceLang, targetLang s
 	}
 
 	adapter := &openAIChatAdapter{
+		omitTemperature: openAIUsesDefaultTemperature(model),
 		headers: map[string]string{
 			"Authorization": "Bearer " + apiKey,
 		},
@@ -107,7 +109,7 @@ func (p *OpenAICompatibleProvider) Translate(ctx context.Context, sourceLang, ta
 
 	baseRequest := openAIChatRequest{
 		Model:       model,
-		Temperature: 0,
+		Temperature: new(float64),
 		Messages: []openAIChatMessage{
 			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: userPrompt},
@@ -143,4 +145,28 @@ func (p *OpenAICompatibleProvider) Translate(ctx context.Context, sourceLang, ta
 	}
 
 	return nil, lastErr
+}
+
+// openAIUsesDefaultTemperature omits sampling overrides for known reasoning-default models.
+// This provider does not set reasoning_effort, and temperature can be rejected at
+// the model's default effort. Models defaulting to none retain explicit zero.
+// See https://developers.openai.com/api/docs/guides/latest-model#update-api-and-model-parameters.
+// Keep this list explicit: custom/compatible models and unknown future families
+// must not acquire capabilities based on a broad prefix. Dated snapshots inherit
+// their known alias's policy; chat-latest and other suffixes do not.
+func openAIUsesDefaultTemperature(model string) bool {
+	if len(model) > 11 && model[len(model)-11] == '-' {
+		if _, err := time.Parse("2006-01-02", model[len(model)-10:]); err == nil {
+			model = model[:len(model)-11]
+		}
+	}
+	switch model {
+	case "gpt-5", "gpt-5-mini", "gpt-5-nano", "gpt-5.5",
+		"gpt-5.6", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
+		"gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-6.1-sol",
+		"o1", "o1-mini", "o1-preview", "o3", "o3-mini", "o4-mini":
+		return true
+	default:
+		return false
+	}
 }
