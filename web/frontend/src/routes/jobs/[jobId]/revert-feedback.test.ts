@@ -77,9 +77,42 @@ describe('scoped unresolved Undo feedback', () => {
 	it('recognizes an attempted noop as terminal while preserving returned errors', () => {
 		const old = mergeRevertFeedback(null, result([error(1)]), [1]);
 		expect(reconcileRevertFeedback(old, result(), [1], rows({ 1: 'noop' })).errors).toEqual([]);
+		for (const status of ['reverted', 'noop']) {
+			expect(
+				reconcileRevertFeedback(old, result([error(1)]), [1], rows({ 1: status })).errors,
+			).toEqual([error(1)]);
+		}
+	});
+	it('resolves returned skipped details when authoritative recovery settled noop', () => {
+		const skipped = { ...error(1), error: '', outcome: 'skipped', reason: 'anchor_missing' };
+		const response = result([skipped, error(2, 'B')], { total: 2, failed: 1, skipped: 1 });
+		const feedback = mergeRevertFeedback(null, response, [1, 2]);
 		expect(
-			reconcileRevertFeedback(old, result([error(1)]), [1], rows({ 1: 'reverted' })).errors,
-		).toEqual([error(1)]);
+			reconcileRevertFeedback(feedback, response, [1, 2], rows({ 1: 'noop', 2: 'failed' })).errors,
+		).toEqual([error(2, 'B')]);
+	});
+	it.each(['applied', 'failed', 'pending', 'unknown', 'reverted'])(
+		'keeps a returned skip without matching authoritative noop (%s)',
+		(status) => {
+			const skipped = { ...error(1), outcome: 'skipped' };
+			const response = result([skipped], { failed: 0, skipped: 1 });
+			const feedback = mergeRevertFeedback(null, response, [1]);
+			expect(reconcileRevertFeedback(feedback, response, [1], rows({ 1: status })).errors).toEqual([
+				skipped,
+			]);
+		},
+	);
+	it('does not resurrect superseded scope from an older response’s errors', () => {
+		const oldResponse = result([{ ...error(1), outcome: 'skipped' }, error(2, 'B')]);
+		const feedback = mergeRevertFeedback(
+			null,
+			result([error(1, 'A', 'newer failure'), error(2, 'B')]),
+			[1, 2],
+		);
+		// A newer response removed ID 1 from this older deferred record.
+		expect(
+			reconcileRevertFeedback(feedback, oldResponse, [2], rows({ 1: 'noop', 2: 'failed' })).errors,
+		).toEqual(feedback.errors);
 	});
 	it('keeps detail-less outcomes conservative and resolves their scope across individual retries', () => {
 		const response = result([], { total: 2, succeeded: 0, failed: 2 });

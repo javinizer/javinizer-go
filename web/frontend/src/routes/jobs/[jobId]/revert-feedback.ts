@@ -28,26 +28,35 @@ export function mergeRevertFeedback(
 export function reconcileRevertFeedback(
 	feedback: RevertFeedback,
 	result: RevertResultResponse,
-	attemptedIds: number[],
+	scopedIds: number[],
 	operations: OperationListResponse | undefined,
 ): RevertFeedback {
 	if (!operations || operations.job_id !== feedback.jobId) return feedback;
 	// Counts do not identify successful operations. Only a freshly loaded
 	// terminal status can resolve a previous error, and only inside this
 	// request's attempted/returned scope. Excluded rows retain their details.
-	const scope = new Set([
-		...attemptedIds,
-		...(result.errors ?? []).map((entry) => entry.operation_id),
-	]);
-	const returnedErrors = new Set((result.errors ?? []).map((entry) => entry.operation_id));
-	const terminal = new Set(
+	// The caller already combined attempted and returned IDs and removed
+	// any IDs superseded by newer responses. Never re-expand that scope.
+	const scope = new Set(scopedIds);
+	const returnedErrors = new Map((result.errors ?? []).map((entry) => [entry.operation_id, entry]));
+	const terminal = new Map(
 		operations.operations
 			.filter(
 				(operation) => operation.revert_status === 'reverted' || operation.revert_status === 'noop',
 			)
-			.map((operation) => operation.id),
+			.map((operation) => [operation.id, operation.revert_status]),
 	);
-	const resolved = (id: number) => scope.has(id) && terminal.has(id) && !returnedErrors.has(id);
+	const resolved = (id: number) => {
+		// Pending-move recovery settles noop but reports skipped/anchor_missing.
+		// A fresh authoritative noop resolves that skip. Keep explicit failures
+		// conservative even when their snapshot appears terminal.
+		const returned = returnedErrors.get(id);
+		return (
+			scope.has(id) &&
+			terminal.has(id) &&
+			(!returned || (returned.outcome === 'skipped' && terminal.get(id) === 'noop'))
+		);
+	};
 	return {
 		...feedback,
 		errors: feedback.errors.filter((entry) => !resolved(entry.operation_id)),

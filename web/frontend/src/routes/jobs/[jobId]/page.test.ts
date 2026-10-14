@@ -361,6 +361,69 @@ describe('unresolved Undo details across scoped retries', () => {
 		expect(view.getByRole('alert').textContent).toContain('excluded row still needs attention');
 	});
 
+	it('clears a settled noop skip only after fresh rows while retaining a retryable failure', async () => {
+		const other = { ...operation, id: 2, movie_id: 'TEST-002' };
+		const snapshot = (firstStatus: string) => ({
+			job_id: 'undo-job',
+			job_status: 'organized',
+			total: 2,
+			operations: [
+				{ ...operation, revert_status: firstStatus },
+				{ ...other, revert_status: 'failed' },
+			],
+		});
+		vi.mocked(apiClient.getJobOperations).mockResolvedValue(snapshot('applied'));
+		const skipped = {
+			...failure.errors![0],
+			error: '',
+			outcome: 'skipped',
+			reason: 'anchor_missing',
+		};
+		let refresh!: (value: ReturnType<typeof snapshot>) => void;
+		vi.mocked(apiClient.revertBatchJob).mockImplementationOnce(async () => {
+			vi.mocked(apiClient.getJobOperations).mockImplementationOnce(
+				() =>
+					new Promise((resolve) => {
+						refresh = resolve;
+					}),
+			);
+			return {
+				...failure,
+				total: 2,
+				skipped: 1,
+				errors: [
+					skipped,
+					{
+						...failure.errors![0],
+						operation_id: 2,
+						movie_id: 'TEST-002',
+						error: 'other row still blocked',
+					},
+				],
+			};
+		});
+		const view = showPage();
+		await undoBatch(view, 2);
+		await waitFor(() =>
+			expect(within(view.getByRole('alert')).getAllByRole('listitem')).toHaveLength(2),
+		);
+		expect(view.getByRole('alert').textContent).toContain('anchor_missing');
+		refresh(snapshot('noop'));
+		await waitFor(() =>
+			expect(within(view.getByRole('alert')).getAllByRole('listitem')).toHaveLength(1),
+		);
+		expect(view.getByRole('alert').textContent).toContain('other row still blocked');
+		expect(view.getByRole('alert').textContent).not.toContain('anchor_missing');
+		expect(
+			(view.getByRole('button', { name: 'Nothing to revert' }) as HTMLButtonElement).disabled,
+		).toBe(true);
+		await waitFor(() =>
+			expect(
+				(view.getByRole('button', { name: 'Revert File' }) as HTMLButtonElement).disabled,
+			).toBe(false),
+		);
+	});
+
 	it('reconciles a successful retry after a failed immediate refresh later recovers', async () => {
 		vi.mocked(apiClient.revertJobOperation).mockResolvedValueOnce(failure);
 		const view = showPage();

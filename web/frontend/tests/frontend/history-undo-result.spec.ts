@@ -6,7 +6,7 @@ const originalPath = '/synthetic/incoming/TEST-001.mp4';
 const newPath = '/synthetic/library/TEST-001.mp4';
 const failureText = 'failed to revert move: invalid cross-device link';
 
-async function setup(page: Page, outcomes: Array<'failure' | 'success' | 'skipped'>) {
+async function setup(page: Page, outcomes: Array<'failure' | 'success' | 'skipped' | 'noop'>) {
 	let status = 'applied';
 	let calls = 0;
 	const unhandled: string[] = [];
@@ -40,13 +40,13 @@ async function setup(page: Page, outcomes: Array<'failure' | 'success' | 'skippe
 		else if (url.pathname === `/api/v1/jobs/${jobId}`)
 			json = {
 				id: jobId,
-				status: status === 'reverted' ? 'reverted' : 'organized',
+				status: status === 'reverted' || status === 'noop' ? 'reverted' : 'organized',
 				started_at: '2026-01-01T00:00:00Z',
 			};
 		else if (url.pathname === `/api/v1/jobs/${jobId}/operations`)
 			json = {
 				job_id: jobId,
-				job_status: status === 'reverted' ? 'reverted' : 'organized',
+				job_status: status === 'reverted' || status === 'noop' ? 'reverted' : 'organized',
 				total: 1,
 				operations: [
 					{
@@ -71,14 +71,21 @@ async function setup(page: Page, outcomes: Array<'failure' | 'success' | 'skippe
 				await route.abort();
 				return;
 			}
-			status = outcome === 'success' ? 'reverted' : outcome === 'failure' ? 'failed' : 'applied';
+			status =
+				outcome === 'success'
+					? 'reverted'
+					: outcome === 'failure'
+						? 'failed'
+						: outcome === 'noop'
+							? 'noop'
+							: 'applied';
 			json = {
 				job_id: jobId,
-				status: status === 'reverted' ? 'reverted' : 'organized',
+				status: status === 'reverted' || status === 'noop' ? 'reverted' : 'organized',
 				total: 1,
 				succeeded: outcome === 'success' ? 1 : 0,
 				failed: outcome === 'failure' ? 1 : 0,
-				skipped: outcome === 'skipped' ? 1 : 0,
+				skipped: outcome === 'skipped' || outcome === 'noop' ? 1 : 0,
 				errors:
 					outcome === 'success'
 						? []
@@ -147,6 +154,27 @@ test('HTTP 200 skipped Undo warns instead of claiming success', async ({ page })
 	await expect(page.getByRole('alert').filter({ hasText: '0 failed, 1 skipped.' })).toBeVisible();
 	await expect(page.getByText(`Reverted ${movieId}`, { exact: true })).toHaveCount(0);
 	await expect(page.getByRole('button', { name: 'Revert File', exact: true })).toBeEnabled();
+	expect(fixture.calls()).toBe(1);
+	expect(fixture.unhandled).toEqual([]);
+});
+
+test('recovered pending move reports skipped but authoritative noop clears attention and disables retry', async ({
+	page,
+}) => {
+	const fixture = await setup(page, ['noop']);
+	await page.goto(`/jobs/${jobId}`);
+	await undo(page);
+	await expect(page.getByRole('alert').filter({ hasText: '0 failed, 1 skipped.' })).toBeVisible();
+	await expect(page.getByRole('button', { name: 'Nothing to revert', exact: true })).toBeDisabled();
+	await expect(
+		page.getByRole('alert').filter({ hasText: 'Some operations still need attention.' }),
+	).toHaveCount(0);
+	await expect(page.getByRole('button', { name: 'Revert File', exact: true })).toHaveCount(0);
+	await page.reload();
+	await expect(page.getByRole('button', { name: 'Nothing to revert', exact: true })).toBeDisabled();
+	await expect(
+		page.getByRole('alert').filter({ hasText: 'Some operations still need attention.' }),
+	).toHaveCount(0);
 	expect(fixture.calls()).toBe(1);
 	expect(fixture.unhandled).toEqual([]);
 });
