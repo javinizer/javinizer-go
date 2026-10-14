@@ -26,6 +26,8 @@ var primaryUndoRandom io.Reader = rand.Reader
 var primaryUndoSyncParent = primaryUndoSyncDir
 var primaryUndoPrepareStage = fsutil.SyncStagedMetadata
 
+const primaryUndoPlannedState = "planned"
+
 func primaryUndoToken() (string, error) {
 	var token [16]byte
 	if _, err := io.ReadFull(primaryUndoRandom, token[:]); err != nil {
@@ -70,7 +72,7 @@ func primaryUndoOpenPinned(fs afero.Fs, path string, expected models.PrimaryUndo
 		err = fmt.Errorf("primary Undo refuses changed object at %s", path)
 	}
 	if err != nil {
-		file.Close()
+		_ = file.Close() // Read-only pin; retain the ownership/admission error.
 		return nil, err
 	}
 	return file, nil
@@ -89,7 +91,7 @@ func primaryUndoVerifyWitness(fs afero.Fs, path string, expected models.PrimaryU
 	if err != nil {
 		return empty, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }() // Read-only hash handle; no writes to flush.
 	witness, err := primaryUndoObserveChange(file)
 	if err != nil {
 		return empty, err
@@ -147,7 +149,7 @@ func primaryUndoWrite(ctx context.Context, repo database.BatchFileOperationRepos
 		if err != nil {
 			return ledger, false, err
 		}
-		if ledger.PrimaryResident {
+		if ledger.PrimaryResident || ledger.DirectoryMove != nil {
 			return ledger, false, fmt.Errorf("conflicting resident and primary Undo ownership; manual recovery required")
 		}
 		if current.RevertStatus != models.RevertStatusApplied && current.RevertStatus != models.RevertStatusFailed {
@@ -196,7 +198,7 @@ func beginPrimaryUndo(ctx context.Context, fs afero.Fs, repo database.BatchFileO
 		return err
 	}
 	identity, _, err := primaryUndoIdentity(source)
-	source.Close()
+	_ = source.Close() // Read-only identity probe; no writes to flush.
 	if err != nil {
 		return err
 	}
@@ -204,7 +206,7 @@ func beginPrimaryUndo(ctx context.Context, fs afero.Fs, repo database.BatchFileO
 	if err != nil {
 		return err
 	}
-	j := &models.PrimaryUndo{Token: token, State: "planned", Source: op.NewPath, Destination: op.OriginalPath, Stage: op.OriginalPath + ".undo." + token, SourceIdentity: identity}
+	j := &models.PrimaryUndo{Token: token, State: primaryUndoPlannedState, Source: op.NewPath, Destination: op.OriginalPath, Stage: op.OriginalPath + ".undo." + token, SourceIdentity: identity}
 	if err := primaryUndoWrite(ctx, repo, op, nil, j); err != nil {
 		return err
 	}
@@ -242,7 +244,7 @@ func rotatePrimaryUndoStage(ctx context.Context, repo database.BatchFileOperatio
 	next.Stage = j.Destination + ".undo." + j.Token + "." + token
 	next.StageIdentity = models.PrimaryUndoIdentity{}
 	next.SHA256 = ""
-	next.State = "planned"
+	next.State = primaryUndoPlannedState
 	if err := primaryUndoWrite(ctx, repo, op, j, &next); err != nil {
 		return err
 	}
@@ -304,7 +306,7 @@ func resumePrimaryUndo(ctx context.Context, fs afero.Fs, repo database.BatchFile
 		}
 	}
 	switch j.State {
-	case "planned":
+	case primaryUndoPlannedState:
 		if _, err := lstatRestoreSource(fs, j.Destination); !os.IsNotExist(err) {
 			return fmt.Errorf("primary Undo destination is occupied or unreadable: %s", j.Destination)
 		}
@@ -361,19 +363,21 @@ func copyPrimaryUndo(ctx context.Context, fs afero.Fs, repo database.BatchFileOp
 	if err != nil {
 		return err
 	}
-	defer source.Close()
+	defer func() { _ = source.Close() }() // Read-only source pin; no writes to flush.
 	_, sourceInfo, err := primaryUndoIdentity(source)
 	if err != nil {
 		return err
 	}
-	if j.State != "planned" {
+	if j.State != primaryUndoPlannedState {
 		return fmt.Errorf("primary Undo copy requires a fresh planned generation")
 	}
 	stage, err := fs.OpenFile(j.Stage, os.O_CREATE|os.O_EXCL|os.O_RDWR, sourceInfo.Mode().Perm())
 	if err != nil {
 		return fmt.Errorf("create primary Undo stage (an existing unsealed name requires manual recovery): %w", err)
 	}
-	defer stage.Close()
+	// Error-path cleanup only; the writable stage's successful Close is checked
+	// explicitly below before the sealed journal can authorize publication.
+	defer func() { _ = stage.Close() }()
 	identity, _, err := primaryUndoIdentity(stage)
 	if err != nil {
 		return err
@@ -467,20 +471,18 @@ func cleanupPrimaryUndo(ctx context.Context, fs afero.Fs, repo database.BatchFil
 	if err := primaryUndoVerify(fs, location, j.SourceIdentity, j.SHA256); err != nil {
 		return err
 	}
-	// All long streams and durable writes precede this fresh terminal take.
-	// The only unlink addresses its unpredictable destination, with a
-	// constant-time no-follow strong identity reproof at syscall adjacency.
+	// The only unlink addresses this unpredictable, durably recorded terminal.
 	// Only this live producer may use its newly committed claim. A restarted
 	// process retains that claim for manual recovery rather than superseding
 	// an endpoint a delayed producer may still use. No hop is unjournaled.
 	if err := primaryUndoPublish(fs, location, j.Cleanup); err != nil {
 		return fmt.Errorf("take primary Undo cleanup claim: %w", err)
 	}
-	pinned, err := primaryUndoOpenPinned(fs, j.Cleanup, j.SourceIdentity, true)
+	// Rename changes native change time, so a pre-take witness cannot prove
+	// content afterwards. Rehash the claimed source and capture its post-take
+	// witness: same-size, mtime-restamped edits during the take must survive.
+	sourceWitness, err := primaryUndoVerifyWitness(fs, j.Cleanup, j.SourceIdentity, j.SHA256)
 	if err != nil {
-		return err
-	}
-	if err := pinned.Close(); err != nil {
 		return err
 	}
 	if err := primaryUndoRecheckWitness(fs, j.Destination, j.StageIdentity, destinationWitness); err != nil {
@@ -488,6 +490,12 @@ func cleanupPrimaryUndo(ctx context.Context, fs afero.Fs, repo database.BatchFil
 	}
 	if _, err := lstatRestoreSource(fs, location); !os.IsNotExist(err) {
 		return fmt.Errorf("primary Undo cleanup source reoccupied or unreadable; terminal retained")
+	}
+	// No long read or journal write follows this final source witness check.
+	// This is not an atomic conditional unlink: an unconstrained writer can
+	// still modify an already-open object after the check and before removal.
+	if err := primaryUndoRecheckWitness(fs, j.Cleanup, j.SourceIdentity, sourceWitness); err != nil {
+		return err
 	}
 	if err := primaryUndoRemove(fs, j.Cleanup); err != nil {
 		return fmt.Errorf("remove primary Undo cleanup claim: %w", err)

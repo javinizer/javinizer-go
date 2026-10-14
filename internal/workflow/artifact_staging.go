@@ -73,6 +73,7 @@ type artifactStage struct {
 	stagedSource       string
 	siblings           []artifactSibling
 	inPlace            bool
+	inPlaceResident    bool
 	videoDeferred      bool
 	original           ApplyCmd
 	rejected           bool
@@ -687,10 +688,24 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 		if err := batch.Preflight(append([]string{plan.TargetPath}, artifactDestinations...)); err != nil {
 			return err
 		}
-		if !s.inPlace && s.videoDeferred && filepath.Clean(plan.SourcePath) == filepath.Clean(s.sourcePath) && filepath.Clean(plan.SourcePath) != filepath.Clean(plan.TargetPath) {
+		// A stationary exact-path move owns no primary. Directory relocation
+		// remains owned work and must retain its existing inverse.
+		stationaryPrimary := s.original.Organize.MoveFiles && s.directoryMove == nil && filepath.Clean(plan.SourcePath) == filepath.Clean(plan.TargetPath)
+		if s.videoDeferred && filepath.Clean(plan.SourcePath) == filepath.Clean(s.sourcePath) && (stationaryPrimary || ((!s.inPlace || s.original.Organize.MoveFiles) && filepath.Clean(plan.SourcePath) != filepath.Clean(plan.TargetPath))) {
 			primaryResident, err = s.stagedVideoResident("", plan.TargetPath, true)
 			if err != nil {
 				return err
+			}
+			// The directory checkpoint froze whether its inverse owns the primary.
+			// Neither transition may replace that durable ownership contract.
+			if s.directoryMove != nil && s.inPlaceResident != primaryResident {
+				if !s.inPlaceResident {
+					// Failure must retain the relocated source anchor, rather than
+					// the earlier staging result, if directory rollback is blocked.
+					state.organizeResult = &organizer.OrganizeResult{OriginalPath: s.sourcePath, NewPath: s.sourcePath, FolderPath: plan.TargetDir, Moved: true}
+					s.annotateInPlaceDirectory(state.organizeResult)
+				}
+				return fmt.Errorf("resident primary changed after directory relocation")
 			}
 			if primaryResident {
 				s.residentPrimary = true

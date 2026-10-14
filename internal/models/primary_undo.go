@@ -60,7 +60,7 @@ func PrimaryUndoNeedsRetention(op BatchFileOperation) bool {
 	}
 	token, tokenErr := hex.DecodeString(j.Token)
 	digest, digestErr := hex.DecodeString(j.SHA256)
-	return ledger.PrimaryResident || j.State != "done" || len(j.SupersededStages) != 0 ||
+	return ledger.PrimaryResident || ledger.DirectoryMove != nil || j.State != "done" || len(j.SupersededStages) != 0 ||
 		tokenErr != nil || len(token) != 16 || digestErr != nil || len(digest) != 32 ||
 		!j.SourceIdentity.Strong || !j.StageIdentity.Strong ||
 		j.Source == "" || j.Destination == "" || j.Source == j.Destination ||

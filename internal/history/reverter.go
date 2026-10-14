@@ -251,6 +251,24 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 		return result, err
 	}
 
+	residentDirectoryRestored := false
+	ledgerBefore, _ := models.ParseGeneratedFiles(op.GeneratedFiles)
+	// Directory compensation and resident admission exclude primary ownership.
+	// Reject contradictory recovery journals before even inspecting directory
+	// locations, without overwriting a concurrent primary Undo terminal status.
+	if ledgerBefore.PrimaryUndo != nil && (ledgerBefore.PrimaryResident || ledgerBefore.DirectoryMove != nil) {
+		return primaryUndoFailure(op, fmt.Errorf("conflicting resident and primary Undo ownership; manual recovery required")), nil
+	}
+	if ledgerBefore.DirectoryMove != nil {
+		if !ledgerBefore.PrimaryResident {
+			return failRevert(ctx, r.batchFileOpRepo, op, models.RevertReasonUnexpectedPathState, "directory inverse requires resident ownership"), nil
+		}
+		location, err := r.residentDirectoryLocation(ledgerBefore.DirectoryMove)
+		if err != nil {
+			return failRevert(ctx, r.batchFileOpRepo, op, models.RevertReasonDestinationConflict, err.Error()), nil
+		}
+		residentDirectoryRestored = location == ledgerBefore.DirectoryMove.Original
+	}
 	// only a hydrated pending intent gets the unexecuted-intent settle below.
 	hydratedPendingIntent := false
 	if op.NewPath == "" && op.OperationType == models.OperationTypeMove {
@@ -267,11 +285,6 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 
 	primaryUndoComplete := false
 	if ledger, err := models.ParseGeneratedFiles(op.GeneratedFiles); err == nil && ledger.PrimaryUndo != nil {
-		// Resident admission excludes primary ownership. A contradictory
-		// recovery journal must not authorize either inverse.
-		if ledger.PrimaryResident {
-			return primaryUndoFailure(op, fmt.Errorf("conflicting resident and primary Undo ownership; manual recovery required")), nil
-		}
 		// A resumed primary can consume the library anchor before reaching
 		// the ordinary primary leg. Preserve failed-publication admission
 		// checks here as well as the original later pre/post checks.
@@ -360,6 +373,9 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 	}
 
 	ledger, _ := models.ParseGeneratedFiles(op.GeneratedFiles)
+	if residentDirectoryRestored {
+		remapResidentDirectoryLedger(&ledger)
+	}
 	if err := checkPublicationRecovery(r.fs, ledger, false); err != nil {
 		return failRevert(ctx, r.batchFileOpRepo, op, models.RevertReasonUnexpectedPathState, err.Error()), nil
 	}
@@ -403,6 +419,13 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 	case models.OperationTypeUpdate:
 		r.fsReverter.cleanupGeneratedFiles(op, filepath.Dir(filepath.Dir(op.OriginalPath)))
 	case models.OperationTypeMove:
+		if ledger.DirectoryMove != nil {
+			if err := r.restoreResidentDirectory(ctx, op, ledger.DirectoryMove); err != nil {
+				return failRevert(ctx, r.batchFileOpRepo, op, models.RevertReasonDestinationConflict, err.Error()), nil
+			}
+			op.NFOPath = remapResidentDirectoryPath(ledger.DirectoryMove, op.NFOPath)
+			remapResidentDirectoryLedger(&ledger)
+		}
 		if !primaryUndoComplete && !primaryResident {
 			if result, err := r.fsReverter.revertPrimaryFile(ctx, op); result != nil || err != nil {
 				return result, err
@@ -420,8 +443,16 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 			}
 		}
 		destRoot := filepath.Dir(filepath.Dir(op.NewPath))
+		if primaryResident {
+			// This is only a stop boundary for parents of journaled artifacts.
+			// The resident primary and its containing directory are never owned.
+			destRoot = filepath.Dir(op.OriginalPath)
+			if ledger.DirectoryMove != nil {
+				destRoot = ledger.DirectoryMove.Original
+			}
+		}
 		r.fsReverter.cleanupGeneratedFiles(op, destRoot)
-		if !op.InPlaceRenamed {
+		if !primaryResident && !op.InPlaceRenamed {
 			r.fsReverter.cleanupEmptyDir(filepath.Dir(op.NewPath), destRoot)
 		}
 	case models.OperationTypeCopy, models.OperationTypeHardlink, models.OperationTypeSymlink:
@@ -637,6 +668,12 @@ func revertPrimaryFileFS(ctx context.Context, fs afero.Fs, batchFileOpRepo datab
 		if err != nil {
 			return failRevert(ctx, batchFileOpRepo, op, models.RevertReasonUnexpectedPathState, fmt.Sprintf("failed to canonicalize directory path: %v", err)), nil
 		}
+		// CanonicalizePath deliberately strips drive letters for virtual path
+		// keys. A native absolute destination must keep its volume when creating
+		// the parent; otherwise Windows can create it on the working drive.
+		if filepath.IsAbs(targetDir) {
+			canonicalDir = filepath.Clean(targetDir)
+		}
 		if err := fs.MkdirAll(canonicalDir, config.DirPerm); err != nil {
 			return failRevert(ctx, batchFileOpRepo, op, models.RevertReasonAccessDenied, fmt.Sprintf("failed to recreate original directory: %v", err)), nil
 		}
@@ -781,6 +818,7 @@ func cleanupGeneratedFilesFS(fs afero.Fs, op *models.BatchFileOperation, stopAt 
 	if err := json.Unmarshal([]byte(op.GeneratedFiles), &gf); err != nil {
 		return
 	}
+	remapResidentDirectoryLedger(&gf)
 	if op.InPlaceRenamed && op.OriginalDirPath != "" && op.NewPath != "" {
 		currentDir := filepath.Dir(op.NewPath)
 		remap := func(path string) string {
@@ -1104,11 +1142,15 @@ func cleanupGeneratedFilesFS(fs afero.Fs, op *models.BatchFileOperation, stopAt 
 	batchRoot := filepath.Clean(stopAt)
 	for dir := range dirsToCheck {
 		cleanDir := filepath.Clean(dir)
-		if !isDescendant(cleanDir, batchRoot) {
+		boundary := batchRoot
+		if gf.PrimaryResident && !isDescendant(cleanDir, boundary) {
+			boundary = residentCleanupAliasBoundary(fs, cleanDir, boundary)
+		}
+		if boundary == "" || !isDescendant(cleanDir, boundary) {
 			logging.Warnf("Skipping cleanup of directory %q: outside batch root %q", cleanDir, batchRoot)
 			continue
 		}
-		cleanupEmptyDirDownwardFS(fs, cleanDir, stopAt)
+		cleanupEmptyDirDownwardFS(fs, cleanDir, boundary)
 	}
 }
 

@@ -17,5 +17,5 @@ func primaryUndoObserveChange(file afero.File) (primaryUndoChangeWitness, error)
 	if !ok || stat == nil {
 		return primaryUndoChangeWitness{}, fmt.Errorf("primary Undo requires a native mutation witness")
 	}
-	return primaryUndoChangeWitness{Seconds: int64(stat.Ctim.Sec), Nanoseconds: int64(stat.Ctim.Nsec)}, nil
+	return primaryUndoChangeWitness{Seconds: int64(stat.Ctim.Sec), Nanoseconds: int64(stat.Ctim.Nsec)}, nil //nolint:unconvert // Stat_t time fields are int32 on Linux/386 and other 32-bit targets.
 }

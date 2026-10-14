@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -363,7 +364,7 @@ func mergeReplacementLedgerIntents(priorRaw, newRaw string, promotePinnedDeletes
 		return newRaw
 	}
 	prior, err := models.ParseGeneratedFiles(priorRaw)
-	if err != nil || (!prior.PrimaryResident && prior.PrimaryUndo == nil && len(prior.Replacements) == 0 && len(prior.Roots) == 0 && len(prior.MoveBack) == 0 && len(prior.Delete) == 0 && len(prior.PlannedDeletes) == 0) {
+	if err != nil || (prior.DirectoryMove == nil && !prior.PrimaryResident && prior.PrimaryUndo == nil && len(prior.Replacements) == 0 && len(prior.Roots) == 0 && len(prior.MoveBack) == 0 && len(prior.Delete) == 0 && len(prior.PlannedDeletes) == 0) {
 		return newRaw
 	}
 	if newRaw == "" {
@@ -386,7 +387,7 @@ func mergeReplacementLedgerIntents(priorRaw, newRaw string, promotePinnedDeletes
 			}
 			retained = kept
 		}
-		return models.MarshalLedgerJSON(models.GeneratedFilesJSON{PrimaryUndo: prior.PrimaryUndo, PrimaryResident: prior.PrimaryResident, Replacements: prior.Replacements, Roots: prior.Roots, MoveBack: prior.MoveBack, Delete: prior.Delete, PlannedDeletes: retained})
+		return models.MarshalLedgerJSON(models.GeneratedFilesJSON{DirectoryMove: prior.DirectoryMove, PrimaryUndo: prior.PrimaryUndo, PrimaryResident: prior.PrimaryResident, Replacements: prior.Replacements, Roots: prior.Roots, MoveBack: prior.MoveBack, Delete: prior.Delete, PlannedDeletes: retained})
 	}
 	fresh, err := models.ParseGeneratedFiles(newRaw)
 	if err != nil {
@@ -417,6 +418,15 @@ func mergeReplacementLedgerIntents(priorRaw, newRaw string, promotePinnedDeletes
 	}
 	fresh.Delete = deletes
 	fresh.PrimaryUndo = prior.PrimaryUndo
+	if fresh.DirectoryMove == nil {
+		fresh.DirectoryMove = prior.DirectoryMove
+	} else if prior.DirectoryMove != nil {
+		for _, path := range prior.DirectoryMove.Locations {
+			if !slices.Contains(fresh.DirectoryMove.Locations, path) {
+				fresh.DirectoryMove.Locations = append(fresh.DirectoryMove.Locations, path)
+			}
+		}
+	}
 	fresh.Replacements = prior.Replacements
 	if len(fresh.Roots) == 0 {
 		fresh.Roots = prior.Roots
@@ -490,6 +500,27 @@ func mergeReplacementLedgerIntents(priorRaw, newRaw string, promotePinnedDeletes
 		if !dupe {
 			fresh.PlannedDeletes = append(fresh.PlannedDeletes, priorPD)
 		}
+	}
+	// A restored replacement remains user-owned after the directory inverse.
+	// Keep that exclusion durable: replay consumes replacement entries before
+	// directory restoration, so a later retry cannot reconstruct it from them.
+	// An earlier create/delete intent still owns its output even when that
+	// same operation subsequently replaces it; preserve that original inverse.
+	if fresh.DirectoryMove != nil {
+		owned := make(map[string]bool, len(prior.Delete)+len(prior.PlannedDeletes))
+		for _, path := range prior.Delete {
+			owned[keys.Key(path)] = true
+		}
+		for _, entry := range prior.PlannedDeletes {
+			owned[keys.Key(entry.Path)] = true
+		}
+		replaced := make(map[string]bool, len(fresh.Replacements))
+		for _, entry := range fresh.Replacements {
+			path := keys.Key(entry.Destination)
+			replaced[path] = !owned[path]
+		}
+		fresh.Delete = slices.DeleteFunc(fresh.Delete, func(path string) bool { return replaced[keys.Key(path)] })
+		fresh.PlannedDeletes = slices.DeleteFunc(fresh.PlannedDeletes, func(entry models.DeleteEntry) bool { return replaced[keys.Key(entry.Path)] })
 	}
 	return models.MarshalLedgerJSON(fresh)
 }
@@ -1054,7 +1085,7 @@ func (l *dbRevertLog) Complete(ctx context.Context, opID OperationID, result *Ap
 		folderRoot = org.FolderPath
 	}
 	mergedJournal, err := l.mergeJournalInTx(ctx, recordID, opID, "Complete",
-		buildGeneratedFilesJSON(resolveLogger(l.logger), nfoPath, subtitles, downloadPaths, result.OrganizeResult != nil && result.OrganizeResult.PrimaryResident), folderRoot)
+		buildResultGeneratedFilesJSON(resolveLogger(l.logger), nfoPath, subtitles, downloadPaths, result.OrganizeResult), folderRoot)
 	if err != nil {
 		return err
 	}
@@ -1169,7 +1200,7 @@ func (l *dbRevertLog) CompleteFailed(ctx context.Context, opID OperationID, resu
 	// is no longer clobbered by the re-persist (UpdateJournalInTx owns that
 	// column exclusively).
 	mergedJournal, err := l.mergeJournalInTx(ctx, recordID, opID, "CompleteFailed",
-		buildGeneratedFilesJSON(resolveLogger(l.logger), nfoPath, subtitles, downloadPaths, result.OrganizeResult != nil && result.OrganizeResult.PrimaryResident), "", result.PublicationRecovery)
+		buildResultGeneratedFilesJSON(resolveLogger(l.logger), nfoPath, subtitles, downloadPaths, result.OrganizeResult), "", result.PublicationRecovery)
 	if err != nil {
 		return err
 	}
@@ -1549,4 +1580,14 @@ func NewRevertLogFromConfig(repo database.BatchFileOperationRepositoryInterface,
 		return noOpRevertLog{}
 	}
 	return NewDBRevertLog(repo, cfg, jobID, fs, templateEngine, nfoFieldMerger, logger)
+}
+
+func buildResultGeneratedFilesJSON(logger logging.Logger, nfoPath string, subtitles []models.SubtitleMove, downloads []string, result *organizer.OrganizeResult) string {
+	raw := buildGeneratedFilesJSON(logger, nfoPath, subtitles, downloads, result != nil && result.PrimaryResident)
+	if result == nil || result.DirectoryMove == nil {
+		return raw
+	}
+	ledger, _ := models.ParseGeneratedFiles(raw)
+	ledger.DirectoryMove = result.DirectoryMove
+	return models.MarshalLedgerJSON(ledger)
 }

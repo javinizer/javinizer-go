@@ -90,7 +90,7 @@ func TestResidentPrimaryAliasAdmissionDrift(t *testing.T) {
 	require.ErrorIs(t, stage.publish(t.Context(), env.orch, state, nil), errArtifactSourceChanged)
 }
 
-func TestResidentPrimaryAliasInPlaceRemainsRefused(t *testing.T) {
+func TestResidentPrimaryAliasInPlacePreservesOwnership(t *testing.T) {
 	for _, mode := range []operationmode.OperationMode{operationmode.OperationModeInPlace, operationmode.OperationModeInPlaceNoRenameFolder} {
 		t.Run(string(mode), func(t *testing.T) {
 			env := setupCopyIntentE2E(t, "resident-inplace-boundary")
@@ -100,8 +100,9 @@ func TestResidentPrimaryAliasInPlaceRemainsRefused(t *testing.T) {
 			env.orch.organizer = organizer.NewOrganizer(env.fs, &organizer.Config{FileFormat: "<ID>", RenameFile: true, OperationMode: mode}, template.NewEngine(), nil)
 			cmd := pr260FencedCommand(&env.movie, env.match, incoming, pr260FencedCounter(t, env.db), mode, false, true, organizer.LinkModeNone, false, false)
 			cmd.Organize.ForceUpdate = false
-			_, err := env.orch.Execute(t.Context(), cmd)
-			require.ErrorContains(t, err, "overwrite is disabled")
+			result, err := env.orch.Execute(t.Context(), cmd)
+			require.NoError(t, err)
+			require.True(t, result.OrganizeResult.PrimaryResident)
 			info, err := env.fs.Stat(env.source)
 			require.NoError(t, err)
 			other, err := env.fs.Stat(target)
