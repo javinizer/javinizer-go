@@ -361,6 +361,7 @@ func TestPrimaryUndoNativeCrossVolumeReverter(t *testing.T) {
 	if aID.Device == bID.Device {
 		t.Skip("native cross-volume gate needs JAVINIZER_TEST_SECOND_VOLUME on a different volume")
 	}
+	t.Logf("native cross-volume source device=%d inode=%d, destination device=%d", aID.Device, aID.Inode, bID.Device)
 	require.NoError(t, os.Remove(f.op.NewPath))
 	f.op.NewPath = source
 	require.NoError(t, f.repo.UpdateNonJournalFields(context.Background(), f.op))
@@ -368,6 +369,17 @@ func TestPrimaryUndoNativeCrossVolumeReverter(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, models.RevertOutcomeReverted, result.Outcome, result.Error)
 	f.success()
+	journal := f.journal()
+	require.Equal(t, aID, journal.SourceIdentity, "durable source proof must match the admitted native object")
+	restored, err := os.Open(f.op.OriginalPath)
+	require.NoError(t, err)
+	restoredID, _, err := primaryUndoIdentity(restored)
+	require.NoError(t, err)
+	require.NoError(t, restored.Close())
+	require.True(t, primaryUndoSameObject(journal.StageIdentity, restoredID), "restored file must be the journal-owned published stage")
+	require.Equal(t, bID.Device, restoredID.Device)
+	require.Equal(t, aID.Mode, restoredID.Mode)
+	t.Logf("native restored device=%d inode=%d; admitted source consumed only after owned publication", restoredID.Device, restoredID.Inode)
 }
 
 func TestPrimaryUndoRealSQLiteFaultRetainsSealedSource(t *testing.T) {

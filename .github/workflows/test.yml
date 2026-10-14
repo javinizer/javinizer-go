@@ -53,13 +53,19 @@ jobs:
     - name: Download dependencies
       run: go mod download
 
-    - name: Verify primary Undo subprocess coverage evidence
+    - name: Verify primary Undo native-volume and subprocess coverage evidence
       env:
         PRIMARY_UNDO_SUBPROCESS_COVERPROFILE: ${{ github.workspace }}/coverage-primary-undo-linux-child.out
+        JAVINIZER_TEST_SECOND_VOLUME: /dev/shm
       run: |
+        set -o pipefail
+        stat -c '%d %n' "$JAVINIZER_TEST_SECOND_VOLUME" "${TMPDIR:-/tmp}"
+        test "$(stat -c '%d' "$JAVINIZER_TEST_SECOND_VOLUME")" != "$(stat -c '%d' "${TMPDIR:-/tmp}")"
         go test -short -count=1 -v -covermode=atomic \
           -coverprofile=coverage-primary-undo-linux.out ./internal/history \
-          -run '^TestPrimaryUndoMissingWorkingDirectorySubprocess$'
+          -run '^(TestPrimaryUndoMissingWorkingDirectorySubprocess|TestPrimaryUndoNativeCrossVolumeReverter)$' \
+          | tee coverage-primary-undo-linux.log
+        grep -F -- '--- PASS: TestPrimaryUndoNativeCrossVolumeReverter ' coverage-primary-undo-linux.log
         test -s coverage-primary-undo-linux.out
         test -s coverage-primary-undo-linux-child.out
         go tool cover -func=coverage-primary-undo-linux-child.out
