@@ -42,7 +42,9 @@ func (o *applyOrchImpl) allocateArtifactStageForApply(ctx context.Context, final
 	// An already-organized, artifact-free operation need not write its movie
 	// folder. Preserve no-op applies to read-only folders without allowing
 	// this placement for any primary, subtitle, multipart, or metadata output.
-	if !cmd.Download && !cmd.GenerateNFO && plan.SourcePath != "" && filepath.Clean(plan.SourcePath) == filepath.Clean(plan.TargetPath) {
+	if !cmd.Download && !cmd.GenerateNFO && plan.SourcePath != "" &&
+		(filepath.Clean(plan.SourcePath) == filepath.Clean(plan.TargetPath) ||
+			(inPlace && !cmd.Organize.MoveFiles && artifactSameRegularFile(o.fs, plan.SourcePath, plan.TargetPath))) {
 		entries, err := afero.ReadDir(o.fs, filepath.Dir(plan.SourcePath))
 		if err != nil {
 			return "", fmt.Errorf("inspect stationary artifact source: %w", err)
@@ -50,7 +52,14 @@ func (o *applyOrchImpl) allocateArtifactStageForApply(ctx context.Context, final
 		hasSiblings := len(o.organizer.(artifactPlanExecutor).PlanSubtitleMoves(plan)) != 0
 		for _, entry := range entries {
 			if !entry.IsDir() && isStagedArtifactVideoSibling(filepath.Base(plan.SourcePath), entry.Name()) {
-				hasSiblings = true
+				// In-place copied multipart videos already at their final names
+				// are resident sources too; their verified publisher writes nothing.
+				source := filepath.Join(filepath.Dir(plan.SourcePath), entry.Name())
+				target := filepath.Join(plan.TargetDir, stagedArtifactSiblingName(filepath.Base(plan.SourcePath), filepath.Base(plan.TargetPath), entry.Name()))
+				if !inPlace || (filepath.Clean(source) != filepath.Clean(target) &&
+					(cmd.Organize.MoveFiles || !artifactSameRegularFile(o.fs, source, target))) {
+					hasSiblings = true
+				}
 			}
 		}
 		if !hasSiblings {

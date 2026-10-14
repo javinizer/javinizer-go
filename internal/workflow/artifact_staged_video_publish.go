@@ -25,6 +25,7 @@ var stagedVideoConfirmPublish = (*downloader.ReplacementBatch).ConfirmPublish
 // other generated media in this lane.
 func (s *artifactStage) registerStagedVideoOutputs(stagedVideo, primary string) {
 	s.stagedVideoOutputs = make(map[string]bool)
+	s.stagedVideoSources = make(map[string]artifactSibling)
 	if primary != "" {
 		s.stagedVideoOutputs[filepath.Clean(primary)] = true
 	}
@@ -37,22 +38,68 @@ func (s *artifactStage) registerStagedVideoOutputs(stagedVideo, primary string) 
 			path = filepath.Join(filepath.Dir(stagedVideo), stagedArtifactSiblingName(filepath.Base(s.stagedSource), filepath.Base(stagedVideo), filepath.Base(path)))
 		}
 		s.stagedVideoOutputs[filepath.Clean(path)] = false
+		s.stagedVideoSources[filepath.Clean(path)] = sibling
 	}
+}
+
+// A case-only organizer no-op can leave the staged directory entry spelled
+// differently from its reported output. Recover that output's exact admission
+// key only through strong no-follow identity, never by folding names alone.
+func (s *artifactStage) stagedVideoOutput(path string) (key string, primary, video bool, err error) {
+	path = filepath.Clean(path)
+	if primary, ok := s.stagedVideoOutputs[path]; ok {
+		return path, primary, true, nil
+	}
+	for registered, primary := range s.stagedVideoOutputs {
+		if !strings.EqualFold(path, registered) {
+			continue
+		}
+		if artifactSameRegularFile(s.fs, registered, path) {
+			return registered, primary, true, nil
+		}
+		// An indeterminate spelling alias must not fall back to the generic
+		// replacement lane, even when its identity cannot be recovered.
+		return "", false, false, fmt.Errorf("cannot prove staged video spelling alias %s: %w", path, errArtifactSourceChanged)
+	}
+	return "", false, false, nil
 }
 
 // An already-normalized in-place source needs no publication at all. Prove
 // that its final name still holds the admitted source; matching bytes alone
 // cannot grant ownership of a foreign file or authorize a delete intent.
-func (s *artifactStage) stagedVideoResident(target string, primary bool) (bool, error) {
-	if primary {
-		if s.sourceIdentity.known && filepath.Clean(target) == filepath.Clean(s.sourcePath) {
-			return true, s.revalidateAdmittedSource(target, s.sourceIdentity)
+func (s *artifactStage) stagedVideoResident(staged, target string, primary bool) (bool, error) {
+	source, admitted := s.sourcePath, s.sourceIdentity
+	if !primary {
+		// Bind each multipart output to its own admitted source. An alias of
+		// another admitted part cannot satisfy this output's no-op contract.
+		sibling, ok := s.stagedVideoSources[filepath.Clean(staged)]
+		if !ok {
+			return false, nil
 		}
-		return false, nil
+		source, admitted = sibling.sourcePath, sibling.identity
 	}
-	for _, sibling := range s.siblings {
-		if sibling.identity.known && filepath.Clean(target) == filepath.Clean(sibling.sourcePath) {
-			return true, s.revalidateAdmittedSource(target, sibling.identity)
+	if admitted.known && filepath.Clean(target) == filepath.Clean(source) {
+		return true, s.revalidateAdmittedSource(target, admitted)
+	}
+	// A distinct hardlink or case-only alias can already name the admitted
+	// source. Only a strong eager key may establish that; metadata or byte
+	// equality cannot. Keep the lookup no-follow, and revalidate the original
+	// name before accepting the alias.
+	if admitted.hasDevIno {
+		info, err := lstatArtifactSource(s.fs, target)
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		if err != nil {
+			return false, fmt.Errorf("inspect resident video alias %s: %w", target, err)
+		}
+		if admitted.matches(s.fs, target, info) {
+			if err := s.revalidateAdmittedSource(source, admitted); err != nil {
+				return true, err
+			}
+			if artifactSameRegularFile(s.fs, source, target) {
+				return true, s.revalidateAdmittedSource(source, admitted)
+			}
 		}
 	}
 	return false, nil

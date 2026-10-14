@@ -46,10 +46,10 @@ func (s *artifactStage) collectStagedSubtitleOutputs(result *organizer.OrganizeR
 	for i := range s.stagedSubtitleResults {
 		sr := &s.stagedSubtitleResults[i]
 		selfPath := sr.OriginalPath != "" && filepath.Clean(sr.OriginalPath) == filepath.Clean(sr.NewPath)
-		source := ""
+		source, stagedInput := "", ""
 		for _, sibling := range s.siblings {
 			if sibling.subtitle && filepath.Clean(sibling.stagedPath) == filepath.Clean(sr.OriginalPath) {
-				source = sibling.sourcePath
+				source, stagedInput = sibling.sourcePath, sibling.stagedPath
 				break
 			}
 		}
@@ -65,6 +65,12 @@ func (s *artifactStage) collectStagedSubtitleOutputs(result *organizer.OrganizeR
 			return fmt.Errorf("staged subtitle output escapes staging area: %s", staged)
 		}
 		sr.NewPath = filepath.Join(s.finalRoot, rel)
+		// Case-insensitive filesystems may report a self-skip using a different
+		// spelling. Enroll only a strongly proven alias of this admitted private
+		// input; a distinct occupied output remains a terminal skip.
+		if !selfPath && stagedInput != "" && sr.Skipped && sr.Error == nil {
+			selfPath = artifactSameRegularFile(s.fs, stagedInput, staged)
+		}
 		// A self-path skip owns a private canonical input, not the final target.
 		// It still needs final no-replace publication when the folder changes.
 		if sr.Copied || sr.Moved || sr.Planned || fsutil.PublishCompleted(sr.Error) || (selfPath && sr.Error == nil) {
@@ -81,8 +87,19 @@ func (s *artifactStage) collectStagedSubtitleOutputs(result *organizer.OrganizeR
 }
 
 func (s *artifactStage) isStagedSubtitleOutput(path string) bool {
-	_, ok := s.stagedSubtitleOutputs[filepath.Clean(path)]
-	return ok
+	path = filepath.Clean(path)
+	if _, ok := s.stagedSubtitleOutputs[path]; ok {
+		return true
+	}
+	// This is an exclusion only, never an ownership proof. Do not let a
+	// case-spelling alias fall into generic replacement if an identity lookup
+	// is unavailable; enrollment and publication still prove their own input.
+	for output := range s.stagedSubtitleOutputs {
+		if strings.EqualFold(path, output) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *artifactStage) publishStagedSubtitles(ctx context.Context, o *applyOrchImpl, opID OperationID, result *organizer.OrganizeResult) error {

@@ -141,6 +141,8 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult
 		defer cmd.ArtifactCoordinator.Done(cmd.ArtifactOwnerKey)
 	}
 
+	cmd = normalizeInPlaceLinkMode(cmd)
+
 	// Step 0: Begin revert log BEFORE any filesystem mutation.
 	opID, beginErr := o.beginRevertLog(ctx, cmd)
 	if beginErr != nil {

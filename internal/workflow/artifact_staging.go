@@ -99,6 +99,7 @@ type artifactStage struct {
 	// Only admitted source videos use the no-clobber tree lane. The value
 	// distinguishes the requested primary from automatically included parts.
 	stagedVideoOutputs map[string]bool
+	stagedVideoSources map[string]artifactSibling
 	publishVideoLog    RevertLog
 	publishVideoOpID   OperationID
 }
@@ -121,6 +122,7 @@ func markArtifactDirty(cmd ApplyCmd) {
 }
 
 func (o *applyOrchImpl) prepareArtifact(ctx context.Context, cmd ApplyCmd) (*artifactStage, ApplyCmd, error) {
+	cmd = normalizeInPlaceLinkMode(cmd)
 	if cmd.DryRun {
 		return nil, cmd, nil
 	}
@@ -1520,10 +1522,16 @@ func (s *artifactStage) rehomeRemainingSiblings(stagedVideo string, excluded map
 		if filepath.Clean(target) == filepath.Clean(sibling.stagedPath) {
 			continue
 		}
+		if artifactSameRegularFile(s.fs, sibling.stagedPath, target) {
+			continue
+		}
 		if err := s.fs.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 			return fmt.Errorf("create staged sidecar directory: %w", err)
 		}
 		if _, err := s.fs.Stat(target); err == nil {
+			if strings.EqualFold(filepath.Clean(target), filepath.Clean(sibling.stagedPath)) {
+				return fmt.Errorf("cannot prove staged sidecar spelling alias %s: %w", target, errArtifactSourceChanged)
+			}
 			if err := s.fs.Remove(target); err != nil {
 				return fmt.Errorf("replace staged sidecar %s: %w", target, err)
 			}
@@ -1666,9 +1674,13 @@ func (s *artifactStage) installPaths(paths, preserve []string, stagedArtifactDir
 		}
 
 		plan := installPath{source: source, target: target}
-		plan.primary, plan.video = s.stagedVideoOutputs[filepath.Clean(source)]
+		registered, primary, video, roleErr := s.stagedVideoOutput(source)
+		if roleErr != nil {
+			return false, roleErr
+		}
+		plan.primary, plan.video = primary, video
 		if plan.video {
-			resident, err := s.stagedVideoResident(target, plan.primary)
+			resident, err := s.stagedVideoResident(registered, target, plan.primary)
 			if err != nil {
 				return false, err
 			}

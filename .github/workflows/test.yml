@@ -202,7 +202,7 @@ jobs:
     - name: Verify Windows artifact regressions with native-volume evidence
       run: >-
         go test -short -count=1 -v ./internal/workflow ./internal/organizer ./internal/fsutil
-        -run '^(TestArtifactStage(NativeCrossDeviceDestination|PlannedMountDestination|InPlacePlannedMount|ReadonlyCrossDeviceDestination|ReadonlyLongFolder|ReadonlyInPlaceStationaryBoundary|PlannedDestinationBoundaries)|TestArtifactInPlaceCopy|TestArtifactSubtitle|TestStaged(Subtitle|Video)|TestCollectStagedSubtitle|TestDeferredSubtitleErrorNeverPublishesFallback|TestDeferredCopyPublishesAdmittedSubtitleDespitePostOpenSwap|TestStagingPathBudgetIsLocalAndSigned|TestCopyFileNoReplaceVerifiedSourceHandleClosedOnReturn|TestOpenVerifiedSourcePinSharesDelete|TestNativeArtifactCrossDeviceError)'
+        -run '^(TestArtifactStage(NativeCrossDeviceDestination|PlannedMountDestination|InPlacePlannedMount|ReadonlyCrossDeviceDestination|ReadonlyLongFolder|ReadonlyInPlaceStationaryBoundary|ResidentAliasProof|ReadonlyResidentAliases|PlannedDestinationBoundaries)|TestArtifactInPlaceCopy|TestArtifact(InPlaceIgnoresIrrelevantLinkMode|ResidentInPlaceCopyIgnoresIrrelevantLinkMode)|TestNormalizeInPlaceLinkMode|TestPrepareArtifactNormalizesInPlaceLinkMode|TestArtifactSubtitle|TestStaged(Subtitle|Video)|TestCollectStagedSubtitle|TestDeferredSubtitleErrorNeverPublishesFallback|TestDeferredCopyPublishesAdmittedSubtitleDespitePostOpenSwap|TestStagingPathBudgetIsLocalAndSigned|TestCopyFileNoReplaceVerifiedSourceHandleClosedOnReturn|TestOpenVerifiedSourcePinSharesDelete|TestNativeArtifactCrossDeviceError|TestAdversarial(PrimaryModeCrossProduct|SidecarModeCrossProduct|NonOrganizeModeCrossProduct))'
 
   # Job 5: Frontend Tests
   frontend-tests:
