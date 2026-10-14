@@ -927,6 +927,7 @@
     }
   ],
   "jobs_revert_failed": "差し戻しに失敗しました: {error}",
+  "jobs_revert_incomplete": "{total} 件中 {succeeded} 件を元に戻しました。失敗 {failed} 件、スキップ {skipped} 件。",
   "jobs_revert_partial": "{total} 件中 {succeeded} 件を差し戻しました。{failed} 件失敗。",
   "jobs_revert_success": [
     {

@@ -925,6 +925,7 @@
     }
   ],
   "jobs_revert_failed": "Revert failed: {error}",
+  "jobs_revert_incomplete": "Reverted {succeeded} of {total}. {failed} failed, {skipped} skipped.",
   "jobs_revert_partial": "Reverted {succeeded} of {total}. {failed} failed.",
   "jobs_revert_success": [
     {

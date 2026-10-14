@@ -639,6 +639,7 @@
     }
   ],
   "jobs_revert_failed": "[ Rëvërt fåílëd: {error} ]",
+  "jobs_revert_incomplete": "[Řëṽëřţëď {succeeded} öƒ {total}. {failed} ƒåïļëď, {skipped} šķïþþëď.]",
   "jobs_revert_partial": "[ Rëvërtëd {succeeded} öf {total}. {failed} fåílëd. ]",
   "jobs_revert_success": [
     {

@@ -927,6 +927,7 @@
     }
   ],
   "jobs_revert_failed": "还原失败：{error}",
+  "jobs_revert_incomplete": "已撤销 {total} 项中的 {succeeded} 项。{failed} 项失败，{skipped} 项跳过。",
   "jobs_revert_partial": "已还原 {succeeded} / {total}。{failed} 个失败。",
   "jobs_revert_success": [
     {

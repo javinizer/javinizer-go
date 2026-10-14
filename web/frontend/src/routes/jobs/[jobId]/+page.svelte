@@ -20,7 +20,7 @@
 	import { apiClient } from '$lib/api/client';
 	import { toastStore } from '$lib/stores/toast';
 	import { createJobDetailQuery, createJobOperationsQuery, createConfigQuery } from '$lib/query/queries';
-	import type { OperationItem } from '$lib/api/types';
+	import type { RevertResultResponse } from '$lib/api/types';
 
 	let jobId = $derived($page.params.jobId ?? '');
 
@@ -43,6 +43,17 @@
 	let revertTargetFileName = $state('');
 	let revertFileCount = $state(0);
 	let revertingMovieIds = $state<Set<string>>(new Set());
+	let incompleteRevert = $state<RevertResultResponse | null>(null);
+
+	function reportRevertResult(result: RevertResultResponse, movieId?: string) {
+		if (result.failed > 0 || result.skipped > 0) {
+			incompleteRevert = result;
+			toastStore.warning(m.jobs_revert_incomplete(result));
+		} else {
+			incompleteRevert = null;
+			toastStore.success(movieId ? m.jobs_operation_reverted({ movieId }) : m.jobs_revert_success({ count: result.succeeded }));
+		}
+	}
 
 	const revertEligibleCount = $derived(operations.filter((o) => o.revert_status === 'applied' || o.revert_status === 'failed').length);
 
@@ -50,11 +61,7 @@
 		mutationFn: () => apiClient.revertBatchJob(jobId),
 		onSuccess: (result) => {
 			revertModalOpen = false;
-			if (result.failed === 0) {
-				toastStore.success(m.jobs_revert_success({ count: result.succeeded }));
-			} else {
-				toastStore.warning(m.jobs_revert_partial({ succeeded: result.succeeded, total: result.total, failed: result.failed }));
-			}
+			reportRevertResult(result);
 			void queryClient.invalidateQueries({ queryKey: ['job', jobId] });
 			void queryClient.invalidateQueries({ queryKey: ['job', jobId, 'operations'] });
 			void queryClient.invalidateQueries({ queryKey: ['batch-jobs'] });
@@ -68,9 +75,9 @@
 
 	const revertOperationMutation = createMutation(() => ({
 		mutationFn: (movieId: string) => apiClient.revertJobOperation(jobId, movieId),
-		onSuccess: (_, movieId) => {
+		onSuccess: (result, movieId) => {
 			revertModalOpen = false;
-			toastStore.success(m.jobs_operation_reverted({ movieId }));
+			reportRevertResult(result, movieId);
 			void queryClient.invalidateQueries({ queryKey: ['job', jobId] });
 			void queryClient.invalidateQueries({ queryKey: ['job', jobId, 'operations'] });
 			void queryClient.invalidateQueries({ queryKey: ['batch-jobs'] });
@@ -111,13 +118,12 @@
 		revertingMovieIds = new Set([...revertingMovieIds, movieId]);
 	}
 
-	function handleRevertConfirm(): Promise<void> {
+	async function handleRevertConfirm(): Promise<void> {
 		if (revertModalMode === 'batch') {
-			revertBatchMutation.mutate();
+			await revertBatchMutation.mutateAsync();
 		} else {
-			revertOperationMutation.mutate(revertTargetMovieId);
+			await revertOperationMutation.mutateAsync(revertTargetMovieId);
 		}
-		return Promise.resolve();
 	}
 
 	function formatDate(dateStr: string) {
@@ -222,6 +228,23 @@
 					{/if}
 				</Card>
 			</div>
+
+			{#if incompleteRevert?.job_id === jobId}
+				<div role="alert" class="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 space-y-2">
+					<p class="font-medium">{m.jobs_revert_incomplete(incompleteRevert)}</p>
+					{#if incompleteRevert.errors?.length}
+						<ul class="space-y-2 text-sm">
+							{#each incompleteRevert.errors as failure}
+								<li class="break-words">
+									<p><span class="font-semibold">{failure.movie_id}</span>: {failure.error || failure.reason || failure.outcome}</p>
+									{#if failure.original_path}<p>{m.history_from_label()} {failure.original_path}</p>{/if}
+									{#if failure.new_path}<p>{m.history_to_label()} {failure.new_path}</p>{/if}
+								</li>
+							{/each}
+						</ul>
+					{/if}
+				</div>
+			{/if}
 
 			<!-- File List -->
 			<div class="space-y-3">
