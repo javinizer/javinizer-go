@@ -154,9 +154,9 @@ func fixedW31Time() (t time.Time) {
 // consumption — backup retained, entry left armed (NOT marked pending),
 // destination untouched. The next explicit retry heals from the armed state.
 func TestRestoreReplacementJournalW31_DestSwapRefusesRemovalAndConsumption(t *testing.T) {
-	fs := afero.NewMemMapFs()
+	fs := afero.NewOsFs()
 	repo := newP3OpRepo()
-	op, dest, backup := w25ArmedOp(t, fs, repo, "W31A", []byte("new poster"), []byte("original poster"), "stamped")
+	op, dest, backup := w25ArmedOpInDir(t, fs, repo, t.TempDir(), "W31A", []byte("new poster"), []byte("original poster"), "stamped")
 
 	w31SwapRestoredDestSeam(t, false)
 
