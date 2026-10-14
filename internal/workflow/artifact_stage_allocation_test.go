@@ -8,6 +8,8 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/javinizer/javinizer-go/internal/fsutil"
+	"github.com/javinizer/javinizer-go/internal/operationmode"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 )
@@ -78,4 +80,98 @@ func TestAllocateArtifactStageFallbackBoundaries(t *testing.T) {
 	root, err := allocateArtifactStage(fs, string(filepath.Separator))
 	require.ErrorIs(t, err, os.ErrPermission)
 	require.Empty(t, root)
+}
+
+func TestAllocateArtifactStageExistingDestination(t *testing.T) {
+	parent := filepath.Join(string(filepath.Separator), "library")
+	dest := filepath.Join(parent, "movie")
+	for _, tc := range []struct {
+		name     string
+		destTemp error
+	}{
+		{name: "stage inside existing destination"},
+		{name: "do not fall back outside destination", destTemp: os.ErrPermission},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fs := &allocationFailureFS{Fs: afero.NewMemMapFs(), parent: parent, dest: dest, destTemp: tc.destTemp}
+			require.NoError(t, fs.MkdirAll(dest, 0o755))
+			root, err := allocateArtifactStage(fs, dest)
+			if tc.destTemp != nil {
+				require.ErrorIs(t, err, tc.destTemp)
+				require.Empty(t, root)
+				entries, readErr := afero.ReadDir(fs, parent)
+				require.NoError(t, readErr)
+				require.Len(t, entries, 1, "must not create a stage on the parent's potentially different filesystem")
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, dest, filepath.Dir(root))
+			info, statErr := fs.Stat(root)
+			require.NoError(t, statErr)
+			require.True(t, info.IsDir())
+		})
+	}
+}
+
+func TestAllocateArtifactStageNativeSameFilesystem(t *testing.T) {
+	fs := afero.NewOsFs()
+	parent := t.TempDir()
+	dest := filepath.Join(parent, "movie")
+	require.NoError(t, fs.Mkdir(dest, 0o755))
+	root, err := allocateArtifactStage(fs, dest)
+	require.NoError(t, err)
+	require.Equal(t, dest, filepath.Dir(root), "equal device IDs do not rule out a bind-mount rename boundary")
+}
+
+func TestAllocateArtifactStageSweepsBothLocations(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	parent := filepath.Join(string(filepath.Separator), "library")
+	dest := filepath.Join(parent, "movie")
+	require.NoError(t, fs.MkdirAll(dest, 0o755))
+	setSweepSeams(t, fsutil.ProcessDead, nil)
+	oldSibling := seedStagingRoot(t, fs, parent, nil)
+	oldChild := seedStagingRoot(t, fs, dest, nil)
+	foreign := filepath.Join(parent, artifactStageDirPrefix+"unverified")
+	require.NoError(t, fs.Mkdir(foreign, 0o755))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(foreign, "keep"), []byte("foreign"), 0o644))
+
+	root, err := allocateArtifactStage(fs, dest)
+	require.NoError(t, err)
+	require.Equal(t, dest, filepath.Dir(root))
+	for _, path := range []string{oldSibling, oldChild} {
+		exists, statErr := afero.Exists(fs, path)
+		require.NoError(t, statErr)
+		require.False(t, exists, "authenticated dead-owner residue must still be swept: %s", path)
+	}
+	got, err := afero.ReadFile(fs, filepath.Join(foreign, "keep"))
+	require.NoError(t, err)
+	require.Equal(t, "foreign", string(got))
+}
+
+func TestAllocateArtifactStageApplyPlacement(t *testing.T) {
+	for _, tc := range []struct {
+		name                string
+		mode                operationmode.OperationMode
+		move, skip, sibling bool
+	}{
+		{name: "organize copy", mode: operationmode.OperationModeOrganize},
+		{name: "in-place copy", mode: operationmode.OperationModeInPlace, sibling: true},
+		{name: "in-place move", mode: operationmode.OperationModeInPlace, move: true},
+		{name: "in-place skipped organization", mode: operationmode.OperationModeInPlace, skip: true},
+		{name: "in-place no folder rename copy", mode: operationmode.OperationModeInPlaceNoRenameFolder},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fs := afero.NewMemMapFs()
+			parent := filepath.Join(string(filepath.Separator), "library")
+			dest := filepath.Join(parent, "movie")
+			require.NoError(t, fs.MkdirAll(dest, 0o755))
+			root, err := allocateArtifactStageForApply(fs, dest, ApplyCmd{OperationMode: tc.mode, Organize: OrganizeOptions{MoveFiles: tc.move, Skip: tc.skip}})
+			require.NoError(t, err)
+			want := dest
+			if tc.sibling {
+				want = parent
+			}
+			require.Equal(t, want, filepath.Dir(root))
+		})
+	}
 }
