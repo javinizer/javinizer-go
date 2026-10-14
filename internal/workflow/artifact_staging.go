@@ -1260,6 +1260,7 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 		// un-normalized name and the removal leg below then revalidates an
 		// already-consumed source. Skip them in BOTH legs.
 		movedByOrganizer := map[string]bool{}
+		skipped := map[string]bool{}
 		if s.videoDeferred && finalResult != nil {
 			for _, sr := range finalResult.Subtitles {
 				// A publish-completed subtitle IS installed at its (possibly
@@ -1270,12 +1271,17 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 				if (sr.Moved || fsutil.PublishCompleted(sr.Error)) && sr.OriginalPath != "" {
 					movedByOrganizer[filepath.Clean(sr.OriginalPath)] = true
 				}
+				if sr.Skipped && sr.OriginalPath != "" {
+					skipped[filepath.Clean(sr.OriginalPath)] = true
+				}
 			}
 		}
 		published := map[string]bool{}
 		deferredSiblingProofs := s.siblingSourceProofs()
 		for _, sibling := range s.siblings {
-			if movedByOrganizer[filepath.Clean(sibling.sourcePath)] {
+			// A skipped source must not publish under an unnormalized fallback
+			// name either; retain the organizer's refusal in both move legs.
+			if movedByOrganizer[filepath.Clean(sibling.sourcePath)] || skipped[filepath.Clean(sibling.sourcePath)] {
 				continue
 			}
 			target := filepath.Join(filepath.Dir(finalResult.NewPath), stagedArtifactSiblingName(filepath.Base(s.sourcePath), filepath.Base(finalResult.NewPath), filepath.Base(sibling.sourcePath)))
@@ -1392,14 +1398,6 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 				return fmt.Errorf("remove original after artifact publication: %w", err)
 			}
 		}
-		skipped := map[string]bool{}
-		if s.videoDeferred && finalResult != nil {
-			for _, sr := range finalResult.Subtitles {
-				if sr.Skipped && sr.OriginalPath != "" {
-					skipped[filepath.Clean(sr.OriginalPath)] = true
-				}
-			}
-		}
 		for _, sibling := range s.siblings {
 			target := filepath.Join(filepath.Dir(finalResult.NewPath), stagedArtifactSiblingName(filepath.Base(s.sourcePath), filepath.Base(finalResult.NewPath), filepath.Base(sibling.sourcePath)))
 			// A subtitle the organizer skipped (its destination was occupied) keeps
@@ -1475,33 +1473,28 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 // tree; a skip whose destination exists — or whose state cannot be proven
 // absent — owns a foreign file there, and installing the staged copy would
 // overwrite exactly what the organizer refused to touch. Returned keys are
-// cleaned staged paths.
+// cleaned staged paths. Match the skipped source to its admitted sibling:
+// normalized language suffixes can give the organizer a different target name
+// from the generic staged-sibling fallback.
 func (s *artifactStage) occupiedSkipExcludedSiblings(stagedVideo string, finalResult *organizer.OrganizeResult) map[string]bool {
 	if !s.videoDeferred || s.original.Organize.MoveFiles || s.original.Organize.LinkMode != organizer.LinkModeNone || stagedVideo == "" || s.stagedSource == "" || finalResult == nil || finalResult.NewPath == "" {
 		return nil
 	}
-	finalDir := finalResult.FolderPath
-	if finalDir == "" {
-		finalDir = filepath.Dir(finalResult.NewPath)
-	}
 	occupied := make(map[string]bool, len(finalResult.Subtitles))
 	for _, sr := range finalResult.Subtitles {
-		if !sr.Skipped || sr.NewPath == "" {
+		if !sr.Skipped || sr.NewPath == "" || sr.OriginalPath == "" {
 			continue
 		}
 		if _, statErr := s.fs.Stat(sr.NewPath); statErr == nil || !os.IsNotExist(statErr) {
-			occupied[filepath.Clean(sr.NewPath)] = true
+			occupied[filepath.Clean(sr.OriginalPath)] = true
 		}
 	}
 	if len(occupied) == 0 {
 		return nil
 	}
 	excluded := make(map[string]bool)
-	sourceName := filepath.Base(s.stagedSource)
-	targetName := filepath.Base(stagedVideo)
 	for _, sibling := range s.siblings {
-		target := filepath.Join(finalDir, stagedArtifactSiblingName(sourceName, targetName, filepath.Base(sibling.stagedPath)))
-		if occupied[filepath.Clean(target)] {
+		if occupied[filepath.Clean(sibling.sourcePath)] {
 			excluded[filepath.Clean(sibling.stagedPath)] = true
 		}
 	}
