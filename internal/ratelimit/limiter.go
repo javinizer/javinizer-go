@@ -19,12 +19,19 @@ func NewLimiter(delay time.Duration) *Limiter {
 }
 
 // Wait blocks until the next allowed slot, respecting ctx cancellation.
+// Cancellation observed before reservation leaves the schedule unchanged. A
+// cancelled pending waiter releases only a tail reservation, preserving later
+// callers' slots. Cancellation racing a successful grant may consume that slot.
 func (l *Limiter) Wait(ctx context.Context) error {
 	if l.delay <= 0 {
 		return nil
 	}
 
 	l.mu.Lock()
+	if err := ctx.Err(); err != nil {
+		l.mu.Unlock()
+		return err
+	}
 
 	now := time.Now()
 	if l.nextAllowedTime.IsZero() || now.After(l.nextAllowedTime) {
