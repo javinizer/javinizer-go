@@ -248,7 +248,7 @@ type JournalUpdateFn func(current *models.BatchFileOperation) (next models.Gener
 // non-journal column writes are never clobbered. fn owns the merge
 // discipline (armed/installed/pending invariants live with the callers); a
 // missing row reports ErrNotFound before fn runs.
-func (r *BatchFileOperationRepository) UpdateJournalInTx(ctx context.Context, id uint, fn JournalUpdateFn) error {
+func (r *BatchFileOperationRepository) UpdateJournalInTx(ctx context.Context, id uint, fn JournalUpdateFn) (retErr error) {
 	label := fmt.Sprintf("batch file operation %d", id)
 	if fn == nil {
 		return fmt.Errorf("update journal for %s: merge function must not be nil", label)
@@ -262,6 +262,16 @@ func (r *BatchFileOperationRepository) UpdateJournalInTx(ctx context.Context, id
 		return wrapDBErr("update journal", label, err)
 	}
 	defer func() { _ = conn.Close() }()
+
+	if durable, _ := ctx.Value(durableJournalContextKey{}).(bool); durable {
+		restore, err := prepareDurableJournal(ctx, nativeDurableJournalConnection{conn})
+		if restore != nil {
+			defer func() { retErr = errors.Join(retErr, restore()) }()
+		}
+		if err != nil {
+			return wrapDBErr("prepare durable journal", label, err)
+		}
+	}
 
 	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
 		return wrapDBErr("update journal", label, err)

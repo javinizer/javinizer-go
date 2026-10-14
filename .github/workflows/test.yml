@@ -53,6 +53,46 @@ jobs:
     - name: Download dependencies
       run: go mod download
 
+    - name: Verify primary Undo native-volume and subprocess coverage evidence
+      env:
+        PRIMARY_UNDO_SUBPROCESS_COVERPROFILE: ${{ github.workspace }}/coverage-primary-undo-linux-child.out
+        JAVINIZER_TEST_SECOND_VOLUME: /dev/shm
+      run: |
+        set -o pipefail
+        stat -c '%d %n' "$JAVINIZER_TEST_SECOND_VOLUME" "${TMPDIR:-/tmp}"
+        test "$(stat -c '%d' "$JAVINIZER_TEST_SECOND_VOLUME")" != "$(stat -c '%d' "${TMPDIR:-/tmp}")"
+        go test -short -count=1 -v -covermode=atomic \
+          -coverprofile=coverage-primary-undo-linux.out ./internal/history \
+          -run '^(TestPrimaryUndoMissingWorkingDirectorySubprocess|TestPrimaryUndoNativeCrossVolumeReverter)$' \
+          | tee coverage-primary-undo-linux.log
+        grep -F -- '--- PASS: TestPrimaryUndoNativeCrossVolumeReverter ' coverage-primary-undo-linux.log
+        test -s coverage-primary-undo-linux.out
+        test -s coverage-primary-undo-linux-child.out
+        go tool cover -func=coverage-primary-undo-linux-child.out
+
+    - name: Archive primary Undo subprocess coverage
+      if: steps.detect.outputs.running_in_act != 'true'
+      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      with:
+        name: coverage-primary-undo-linux-subprocess
+        path: |
+          coverage-primary-undo-linux.out
+          coverage-primary-undo-linux-child.out
+        if-no-files-found: error
+        retention-days: 30
+
+    - name: Upload primary Undo subprocess coverage to Codecov
+      if: steps.detect.outputs.running_in_act != 'true'
+      uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7
+      with:
+        files: ./coverage-primary-undo-linux.out,./coverage-primary-undo-linux-child.out
+        disable_search: true
+        flags: unittests
+        name: codecov-primary-undo-linux-subprocess
+        token: ${{ secrets.CODECOV_TOKEN }}
+        fail_ci_if_error: true
+        verbose: true
+
     - name: Run unit tests
       run: go test -v ./...
 
@@ -196,6 +236,33 @@ jobs:
     - name: Download dependencies
       run: go mod download
 
+    - name: Verify native Windows primary Undo contracts with coverage
+      run: >-
+        go test -short -count=1 -v -covermode=atomic
+        '-coverprofile=coverage-primary-undo-windows.out' ./internal/history
+        -run '^(TestPrimaryUndoWindows.*|TestPrimaryUndoIdentityAdmissionRefusals|TestPrimaryUndoWeakMutationWitnessRefused)$'
+
+    - name: Archive native Windows primary Undo coverage
+      if: ${{ !env.ACT }}
+      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      with:
+        name: coverage-primary-undo-windows
+        path: coverage-primary-undo-windows.out
+        if-no-files-found: error
+        retention-days: 30
+
+    - name: Upload native Windows primary Undo coverage to Codecov
+      if: ${{ !env.ACT }}
+      uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7
+      with:
+        files: ./coverage-primary-undo-windows.out
+        disable_search: true
+        flags: unittests
+        name: codecov-primary-undo-windows
+        token: ${{ secrets.CODECOV_TOKEN }}
+        fail_ci_if_error: true
+        verbose: true
+
     - name: Verify native Windows remaster filename contracts
       shell: python {0}
       run: |
@@ -300,6 +367,55 @@ jobs:
       run: >-
         go test -short -count=1 -v ./internal/workflow ./internal/organizer ./internal/fsutil
         -run '^(TestArtifactStage(NativeCrossDeviceDestination|PlannedMountDestination|InPlacePlannedMount|ReadonlyCrossDeviceDestination|ReadonlyLongFolder|ReadonlyInPlaceStationaryBoundary|ResidentAliasProof|ReadonlyResidentAliases|PlannedDestinationBoundaries)|TestArtifactInPlaceCopy|TestArtifact(InPlaceIgnoresIrrelevantLinkMode|ResidentInPlaceCopyIgnoresIrrelevantLinkMode)|TestNormalizeInPlaceLinkMode|TestPrepareArtifactNormalizesInPlaceLinkMode|TestArtifactSubtitle|TestStaged(Subtitle|Video)|TestCollectStagedSubtitle|TestDeferredSubtitleErrorNeverPublishesFallback|TestDeferredCopyPublishesAdmittedSubtitleDespitePostOpenSwap|TestStagingPathBudgetIsLocalAndSigned|TestCopyFileNoReplaceVerifiedSourceHandleClosedOnReturn|TestOpenVerifiedSourcePinSharesDelete|TestNativeArtifactCrossDeviceError|TestAdversarial(PrimaryModeCrossProduct|SidecarModeCrossProduct|NonOrganizeModeCrossProduct))'
+
+  # Focused native Darwin coverage; does not provision a second volume.
+  primary-undo-macos:
+    name: Primary Undo Contracts (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 20
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      with:
+        persist-credentials: false
+
+    - name: Set up Go
+      uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      with:
+        go-version-file: ${{ env.GO_VERSION_FILE }}
+        cache: true
+
+    - name: Download dependencies
+      run: go mod download
+
+    - name: Verify native Darwin primary Undo contracts with coverage
+      run: >-
+        go test -short -count=1 -v -covermode=atomic
+        -coverprofile=coverage-primary-undo-macos.out
+        ./internal/history ./internal/fsutil ./internal/models ./internal/database ./internal/workflow
+        -run '^(TestPrimaryUndo|TestReviewPrimaryUndo|TestDurableJournal|TestDurableStaging)'
+
+    - name: Archive native Darwin primary Undo coverage
+      if: ${{ !env.ACT }}
+      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      with:
+        name: coverage-primary-undo-macos
+        path: coverage-primary-undo-macos.out
+        if-no-files-found: error
+        retention-days: 30
+
+    - name: Upload native Darwin primary Undo coverage to Codecov
+      if: ${{ !env.ACT }}
+      uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7
+      with:
+        files: ./coverage-primary-undo-macos.out
+        disable_search: true
+        flags: unittests
+        name: codecov-primary-undo-macos
+        token: ${{ secrets.CODECOV_TOKEN }}
+        fail_ci_if_error: true
+        verbose: true
 
   # Job 5: Frontend Tests
   frontend-tests:
