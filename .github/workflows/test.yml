@@ -360,8 +360,32 @@ jobs:
       with:
         persist-credentials: false
 
+    # Fetch the unchanged pin via Git while hosted action archive downloads return 404.
+    # Keep this ref and the verification SHA below in sync with the other setup-go pins.
+    - name: Checkout pinned Go setup action
+      uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      with:
+        repository: actions/setup-go
+        ref: 924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        path: .ci-actions/setup-go
+        persist-credentials: false
+        fetch-depth: 1
+
+    - name: Verify pinned Go setup action
+      shell: bash
+      run: |
+        set -euo pipefail
+        test -d .ci-actions/setup-go/.git
+        test "$(git -C .ci-actions/setup-go rev-parse HEAD)" = 924ae3a1cded613372ab5595356fb5720e22ba16
+        git -C .ci-actions/setup-go diff --exit-code HEAD --
+        status="$(git -C .ci-actions/setup-go status --porcelain --untracked-files=all --ignored)"
+        test -z "$status"
+        test -s .ci-actions/setup-go/action.yml
+        test -s .ci-actions/setup-go/dist/setup/index.js
+        test -s .ci-actions/setup-go/dist/cache-save/index.js
+
     - name: Set up Go
-      uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      uses: ./.ci-actions/setup-go
       with:
         go-version-file: ${{ env.GO_VERSION_FILE }}
         cache: true
