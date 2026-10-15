@@ -49,8 +49,8 @@ func TestNewServer(t *testing.T) {
 		JobStore: worker.NewJobStore(nil, nil, nil, "", nil, nil),
 		Repos: database.Repositories{
 			ContentRepos: database.ContentRepos{
-				MovieRepo:   newMockMovieRepo(),
-				ActressRepo: newMockActressRepo(),
+				MovieRepo:   newMockMovieRepo(t),
+				ActressRepo: newMockActressRepo(t),
 			},
 		},
 	}
@@ -168,8 +168,8 @@ func TestNewServer_RouteParity(t *testing.T) {
 		JobStore: worker.NewJobStore(nil, nil, nil, "", nil, nil),
 		Repos: database.Repositories{
 			ContentRepos: database.ContentRepos{
-				MovieRepo:   newMockMovieRepo(),
-				ActressRepo: newMockActressRepo(),
+				MovieRepo:   newMockMovieRepo(t),
+				ActressRepo: newMockActressRepo(t),
 			},
 		},
 	}
@@ -374,8 +374,8 @@ func TestNewServer_CORSHeaders(t *testing.T) {
 		JobStore: worker.NewJobStore(nil, nil, nil, "", nil, nil),
 		Repos: database.Repositories{
 			ContentRepos: database.ContentRepos{
-				MovieRepo:   newMockMovieRepo(),
-				ActressRepo: newMockActressRepo(),
+				MovieRepo:   newMockMovieRepo(t),
+				ActressRepo: newMockActressRepo(t),
 			},
 		},
 	}
@@ -422,8 +422,8 @@ func TestNewServer_StaticFiles(t *testing.T) {
 		JobStore: worker.NewJobStore(nil, nil, nil, "", nil, nil),
 		Repos: database.Repositories{
 			ContentRepos: database.ContentRepos{
-				MovieRepo:   newMockMovieRepo(),
-				ActressRepo: newMockActressRepo(),
+				MovieRepo:   newMockMovieRepo(t),
+				ActressRepo: newMockActressRepo(t),
 			},
 		},
 	}
@@ -466,8 +466,8 @@ func TestServeScalarDocs(t *testing.T) {
 		JobStore: worker.NewJobStore(nil, nil, nil, "", nil, nil),
 		Repos: database.Repositories{
 			ContentRepos: database.ContentRepos{
-				MovieRepo:   newMockMovieRepo(),
-				ActressRepo: newMockActressRepo(),
+				MovieRepo:   newMockMovieRepo(t),
+				ActressRepo: newMockActressRepo(t),
 			},
 		},
 	}
@@ -547,8 +547,8 @@ func TestNewServer_GinMode(t *testing.T) {
 				JobStore:   worker.NewJobStore(nil, nil, nil, "", nil, nil),
 				Repos: database.Repositories{
 					ContentRepos: database.ContentRepos{
-						MovieRepo:   newMockMovieRepo(),
-						ActressRepo: newMockActressRepo(),
+						MovieRepo:   newMockMovieRepo(t),
+						ActressRepo: newMockActressRepo(t),
 					},
 				},
 			}
@@ -667,8 +667,8 @@ func TestNewServer_SecurityHeaders(t *testing.T) {
 		JobStore: worker.NewJobStore(nil, nil, nil, "", nil, nil),
 		Repos: database.Repositories{
 			ContentRepos: database.ContentRepos{
-				MovieRepo:   newMockMovieRepo(),
-				ActressRepo: newMockActressRepo(),
+				MovieRepo:   newMockMovieRepo(t),
+				ActressRepo: newMockActressRepo(t),
 			},
 		},
 	}
@@ -725,8 +725,8 @@ func TestNewServer_InvalidRoutes(t *testing.T) {
 		JobStore: worker.NewJobStore(nil, nil, nil, "", nil, nil),
 		Repos: database.Repositories{
 			ContentRepos: database.ContentRepos{
-				MovieRepo:   newMockMovieRepo(),
-				ActressRepo: newMockActressRepo(),
+				MovieRepo:   newMockMovieRepo(t),
+				ActressRepo: newMockActressRepo(t),
 			},
 		},
 	}
@@ -778,8 +778,8 @@ func TestNewServer_SPARouteFallbackForHTML(t *testing.T) {
 		JobStore: worker.NewJobStore(nil, nil, nil, "", nil, nil),
 		Repos: database.Repositories{
 			ContentRepos: database.ContentRepos{
-				MovieRepo:   newMockMovieRepo(),
-				ActressRepo: newMockActressRepo(),
+				MovieRepo:   newMockMovieRepo(t),
+				ActressRepo: newMockActressRepo(t),
 			},
 		},
 	}
@@ -833,8 +833,8 @@ func TestNewServer_RobotsTxtServed(t *testing.T) {
 		JobStore: worker.NewJobStore(nil, nil, nil, "", nil, nil),
 		Repos: database.Repositories{
 			ContentRepos: database.ContentRepos{
-				MovieRepo:   newMockMovieRepo(),
-				ActressRepo: newMockActressRepo(),
+				MovieRepo:   newMockMovieRepo(t),
+				ActressRepo: newMockActressRepo(t),
 			},
 		},
 	}
@@ -874,12 +874,13 @@ func TestServerDependencies_Shutdown(t *testing.T) {
 		JobStore: worker.NewJobStore(nil, nil, nil, "", nil, nil),
 		Repos: database.Repositories{
 			ContentRepos: database.ContentRepos{
-				MovieRepo:   newMockMovieRepo(),
-				ActressRepo: newMockActressRepo(),
+				MovieRepo:   newMockMovieRepo(t),
+				ActressRepo: newMockActressRepo(t),
 			},
 		},
 	}
 	testkit.GetTestRuntime(deps)
+	t.Cleanup(func() { cleanupServerHub(t, deps) })
 	testkit.GetTestRuntime(deps).SetConfig(cfg)
 
 	// Create server to initialize wsCancel
@@ -906,6 +907,7 @@ func TestServerDependencies_ShutdownWithNilCancel(t *testing.T) {
 	// Test Shutdown with nil wsCancel
 	deps := &ServerDependencies{}
 	testkit.GetTestRuntime(deps)
+	t.Cleanup(func() { cleanupServerHub(t, deps) })
 
 	// Should not panic even if runtime is nil
 	assert.NotPanics(t, func() {
@@ -919,6 +921,7 @@ func TestServerDependencies_ShutdownWithNilCancel(t *testing.T) {
 func TestServerDependencies_GetSetConfig(t *testing.T) {
 	deps := &ServerDependencies{}
 	testkit.GetTestRuntime(deps)
+	t.Cleanup(func() { cleanupServerHub(t, deps) })
 
 	cfg := &config.Config{
 		Server: config.ServerConfig{
@@ -946,6 +949,7 @@ func TestServerDependencies_GetConfigPanicsOnNil(t *testing.T) {
 func TestServerDependencies_SetConfigPanicsOnNil(t *testing.T) {
 	deps := &ServerDependencies{}
 	rt := testkit.GetTestRuntime(deps)
+	t.Cleanup(func() { cleanupServerHub(t, deps) })
 	assert.Panics(t, func() {
 		rt.SetConfig(nil)
 	}, "SetConfig should panic when called with nil config")
@@ -1077,8 +1081,8 @@ func TestNewServer_GenreDepsCallbackWired(t *testing.T) {
 		JobStore: worker.NewJobStore(nil, nil, nil, "", nil, nil),
 		Repos: database.Repositories{
 			ContentRepos: database.ContentRepos{
-				MovieRepo:   newMockMovieRepo(),
-				ActressRepo: newMockActressRepo(),
+				MovieRepo:   newMockMovieRepo(t),
+				ActressRepo: newMockActressRepo(t),
 			},
 		},
 	}

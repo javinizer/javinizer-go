@@ -17,6 +17,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/scraperutil"
 	"github.com/javinizer/javinizer-go/internal/worker"
+	"github.com/stretchr/testify/require"
 )
 
 // Test helpers for creating mock repositories
@@ -75,34 +76,26 @@ func NewMockScraperWithResults(name string, enabled bool, result *models.Scraper
 	}
 }
 
-// NewMockMovieRepo creates a test movie repository with in-memory database.
-func NewMockMovieRepo() *database.MovieRepository {
-	db, err := database.New(&database.Config{
-		Type: "sqlite",
-		DSN:  ":memory:",
-	})
-	if err != nil {
-		panic(err)
-	}
-	if err := db.RunMigrationsOnStartup(context.Background()); err != nil {
-		panic(err)
-	}
-	return database.NewMovieRepository(db)
+// NewMockMovieRepo creates a migrated in-memory repository owned by t.
+func NewMockMovieRepo(t *testing.T) *database.MovieRepository {
+	t.Helper()
+	return database.NewMovieRepository(newMockDB(t))
 }
 
-// NewMockActressRepo creates a test actress repository with in-memory database.
-func NewMockActressRepo() *database.ActressRepository {
-	db, err := database.New(&database.Config{
-		Type: "sqlite",
-		DSN:  ":memory:",
-	})
-	if err != nil {
-		panic(err)
-	}
-	if err := db.RunMigrationsOnStartup(context.Background()); err != nil {
-		panic(err)
-	}
-	return database.NewActressRepository(db)
+// NewMockActressRepo creates a migrated in-memory repository owned by t.
+func NewMockActressRepo(t *testing.T) *database.ActressRepository {
+	t.Helper()
+	return database.NewActressRepository(newMockDB(t))
+}
+
+func newMockDB(t *testing.T) *database.DB {
+	t.Helper()
+	db, err := database.New(&database.Config{Type: "sqlite", DSN: ":memory:"})
+	require.NoError(t, err)
+	// Register ownership before migration, including its failure path.
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
+	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
+	return db
 }
 
 // NoOpAuth is a test-only commandutil.AuthProvider that bypasses authentication.
@@ -312,6 +305,14 @@ func InitTestWebSocket(t *testing.T, runtime *core.RuntimeState) {
 	})
 }
 
+// CleanupTestRuntime releases an existing association without creating a runtime.
+func CleanupTestRuntime(t *testing.T, deps *core.APIDeps) {
+	t.Helper()
+	if value, ok := runtimeMap.Load(deps); ok {
+		CleanupServerHub(t, value.(*core.APIRuntime))
+	}
+}
+
 // CleanupServerHub gracefully shuts down websocket runtime for the given APIRuntime.
 func CleanupServerHub(t *testing.T, rt *core.APIRuntime) {
 	t.Helper()
@@ -321,8 +322,11 @@ func CleanupServerHub(t *testing.T, rt *core.APIRuntime) {
 	rtState := rt.GetRuntime()
 	if rtState != nil {
 		rtState.Shutdown()
+		drainBackgroundTasks(t, rt, backgroundTaskDrainBudget)
+	} else {
+		rt.Shutdown()
 	}
-	time.Sleep(100 * time.Millisecond)
+	runtimeMap.CompareAndDelete(rt.Deps(), rt)
 }
 
 // waitForFileRelease waits until the SQLite DB file and its WAL/SHM sidecars

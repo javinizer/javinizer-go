@@ -50,12 +50,12 @@ func TestMockScraperWithResults_Close(t *testing.T) {
 }
 
 func TestNewMockMovieRepo(t *testing.T) {
-	repo := NewMockMovieRepo()
+	repo := NewMockMovieRepo(t)
 	assert.NotNil(t, repo)
 }
 
 func TestNewMockActressRepo(t *testing.T) {
-	repo := NewMockActressRepo()
+	repo := NewMockActressRepo(t)
 	assert.NotNil(t, repo)
 }
 

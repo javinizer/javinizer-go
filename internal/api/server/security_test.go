@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gorilla/websocket"
 	"github.com/javinizer/javinizer-go/internal/api/core"
 	"github.com/javinizer/javinizer-go/internal/api/testkit"
 	"github.com/javinizer/javinizer-go/internal/commandutil"
@@ -133,8 +134,8 @@ func TestCORS_OriginValidation(t *testing.T) {
 				JobStore: worker.NewJobStore(nil, nil, nil, "", nil, nil),
 				Repos: database.Repositories{
 					ContentRepos: database.ContentRepos{
-						MovieRepo:   newMockMovieRepo(),
-						ActressRepo: newMockActressRepo(),
+						MovieRepo:   newMockMovieRepo(t),
+						ActressRepo: newMockActressRepo(t),
 					},
 				},
 			}
@@ -224,8 +225,8 @@ func TestCORS_PreflightRequest(t *testing.T) {
 				JobStore: worker.NewJobStore(nil, nil, nil, "", nil, nil),
 				Repos: database.Repositories{
 					ContentRepos: database.ContentRepos{
-						MovieRepo:   newMockMovieRepo(),
-						ActressRepo: newMockActressRepo(),
+						MovieRepo:   newMockMovieRepo(t),
+						ActressRepo: newMockActressRepo(t),
 					},
 				},
 			}
@@ -420,8 +421,8 @@ func TestSecurity_InputValidation(t *testing.T) {
 		JobStore: worker.NewJobStore(nil, nil, nil, "", nil, nil),
 		Repos: database.Repositories{
 			ContentRepos: database.ContentRepos{
-				MovieRepo:   newMockMovieRepo(),
-				ActressRepo: newMockActressRepo(),
+				MovieRepo:   newMockMovieRepo(t),
+				ActressRepo: newMockActressRepo(t),
 			},
 		},
 	}
@@ -642,8 +643,8 @@ func TestSecurity_ErrorMessageLeakage(t *testing.T) {
 		JobStore: worker.NewJobStore(nil, nil, nil, "", nil, nil),
 		Repos: database.Repositories{
 			ContentRepos: database.ContentRepos{
-				MovieRepo:   newMockMovieRepo(),
-				ActressRepo: newMockActressRepo(),
+				MovieRepo:   newMockMovieRepo(t),
+				ActressRepo: newMockActressRepo(t),
 			},
 		},
 	}
@@ -713,8 +714,8 @@ func TestSecurity_RateLimitingHeaders(t *testing.T) {
 		JobStore: worker.NewJobStore(nil, nil, nil, "", nil, nil),
 		Repos: database.Repositories{
 			ContentRepos: database.ContentRepos{
-				MovieRepo:   newMockMovieRepo(),
-				ActressRepo: newMockActressRepo(),
+				MovieRepo:   newMockMovieRepo(t),
+				ActressRepo: newMockActressRepo(t),
 			},
 		},
 	}
@@ -814,8 +815,8 @@ func TestSecurity_WebSocketOriginValidation(t *testing.T) {
 				JobStore: worker.NewJobStore(nil, nil, nil, "", nil, nil),
 				Repos: database.Repositories{
 					ContentRepos: database.ContentRepos{
-						MovieRepo:   newMockMovieRepo(),
-						ActressRepo: newMockActressRepo(),
+						MovieRepo:   newMockMovieRepo(t),
+						ActressRepo: newMockActressRepo(t),
 					},
 				},
 			}
@@ -826,27 +827,28 @@ func TestSecurity_WebSocketOriginValidation(t *testing.T) {
 			router := NewServer(testkit.GetTestRuntime(deps))
 			defer cleanupServerHub(t, deps)
 
-			// Create WebSocket upgrade request
-			req := httptest.NewRequest("GET", "/ws/progress", nil)
-			req.Header.Set("Origin", tt.requestOrigin)
-			req.Header.Set("Upgrade", "websocket")
-			req.Header.Set("Connection", "Upgrade")
-			req.Header.Set("Sec-WebSocket-Version", "13")
-			req.Header.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
-			req.Host = "localhost:8080"
-			w := httptest.NewRecorder()
-
-			router.ServeHTTP(w, req)
-
+			// Exercise a real HTTP upgrade: ResponseRecorder cannot hijack and
+			// would let recovery mask an invalid fixture as a successful test.
+			server := httptest.NewServer(router)
+			defer server.Close()
+			headers := http.Header{"Host": []string{"localhost:8080"}}
+			if tt.requestOrigin != "" {
+				headers.Set("Origin", tt.requestOrigin)
+			}
+			conn, response, err := websocket.DefaultDialer.Dial(
+				"ws"+strings.TrimPrefix(server.URL, "http")+"/ws/progress", headers)
+			if conn != nil {
+				defer conn.Close()
+			}
+			require.NotNil(t, response)
+			defer response.Body.Close()
 			if tt.shouldAllowUpgrade {
-				// Should attempt upgrade (will return 200 with panic recovery in test due to ResponseRecorder limitations)
-				// In test environment, httptest.ResponseRecorder can't hijack connections,
-				// so valid upgrade attempts return 200 instead of 101
-				assert.True(t, w.Code == 200 || w.Code == 400 || w.Code == 101,
-					"Expected upgrade attempt (200/400/101), got %d", w.Code)
+				require.NoError(t, err)
+				require.NotNil(t, conn)
+				assert.Equal(t, http.StatusSwitchingProtocols, response.StatusCode)
 			} else {
-				// Should reject before upgrade attempt
-				assert.Equal(t, 403, w.Code, "Should reject WebSocket connection with forbidden origin")
+				require.Error(t, err)
+				assert.Equal(t, http.StatusForbidden, response.StatusCode)
 			}
 		})
 	}

@@ -586,6 +586,7 @@ func TestNormalizePathForPlatform_NonWindows_EarlyReturn(t *testing.T) {
 
 func TestTokenStore_CreateValidateAndCleanup(t *testing.T) {
 	ts := NewTokenStore()
+	t.Cleanup(func() { CloseTokenStore(ts) })
 
 	token, expiresAt, err := ts.Create("global", "hash123")
 	require.NoError(t, err)
@@ -604,6 +605,7 @@ func TestTokenStore_CreateValidateAndCleanup(t *testing.T) {
 
 func TestTokenStore_ExpiredTokenManualExpiry(t *testing.T) {
 	ts := NewTokenStore()
+	t.Cleanup(func() { CloseTokenStore(ts) })
 
 	token, _, err := ts.Create("global", "hash123")
 	require.NoError(t, err)
@@ -1090,6 +1092,7 @@ func TestRuntimeState_Shutdown_WithActiveHub(t *testing.T) {
 
 func TestTokenStore_CreateMultipleTokens(t *testing.T) {
 	ts := NewTokenStore()
+	t.Cleanup(func() { CloseTokenStore(ts) })
 
 	tokens := make(map[string]bool)
 	for i := 0; i < 10; i++ {

@@ -34,6 +34,11 @@ func (r *APIRuntime) Shutdown() {
 	if r.serverCancel != nil {
 		r.serverCancel()
 	}
+	// The runtime owns its built-in dependency token store. RuntimeState.Shutdown
+	// also runs during WebSocket hub resets, so token cleanup belongs here.
+	if r.deps != nil {
+		CloseTokenStore(r.deps.TokenStore)
+	}
 	// Join the background update checker (when it was started) so its goroutine
 	// is confirmed exited — and done writing to the on-disk state cache —
 	// before teardown completes. Nil-safe: startUpdateChecker leaves the field

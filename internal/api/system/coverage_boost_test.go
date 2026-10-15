@@ -71,6 +71,7 @@ func TestValidateAndApply_ValidationError(t *testing.T) {
 	rt.SetConfig(oldCfg)
 	testkit.SetTestRuntime(deps, rt)
 	deps.TokenStore = core.NewTokenStore()
+	t.Cleanup(func() { core.CloseTokenStore(deps.TokenStore) })
 
 	svc := NewConfigUpdateService(testkit.GetTestRuntime(deps), t.TempDir()+"/config.yaml")
 
@@ -102,6 +103,7 @@ func TestValidateAndApply_PersistError(t *testing.T) {
 	rt.SetConfig(defaultTestConfig())
 	testkit.SetTestRuntime(deps, rt)
 	deps.TokenStore = core.NewTokenStore()
+	t.Cleanup(func() { core.CloseTokenStore(deps.TokenStore) })
 
 	svc := NewConfigUpdateService(testkit.GetTestRuntime(deps), configPath)
 	oldCfg := defaultTestConfig()
@@ -124,6 +126,7 @@ func TestValidateAndApply_Success(t *testing.T) {
 	rt.SetConfig(defaultTestConfig())
 	testkit.SetTestRuntime(deps, rt)
 	deps.TokenStore = core.NewTokenStore()
+	t.Cleanup(func() { core.CloseTokenStore(deps.TokenStore) })
 
 	svc := NewConfigUpdateService(testkit.GetTestRuntime(deps), configFile)
 	oldCfg := defaultTestConfig()

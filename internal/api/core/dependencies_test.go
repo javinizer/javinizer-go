@@ -275,6 +275,7 @@ func TestAPIDeps_AllFields(t *testing.T) {
 	jobStore := &worker.JobStore{}
 	rs := NewRuntimeState()
 	tokenStore := NewTokenStore()
+	t.Cleanup(func() { CloseTokenStore(tokenStore) })
 
 	deps := &APIDeps{
 		CoreDeps: &commandutil.CoreDeps{

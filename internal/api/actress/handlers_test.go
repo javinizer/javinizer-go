@@ -100,7 +100,7 @@ func TestSearchActresses(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockRepo := newMockActressRepo()
+			mockRepo := newMockActressRepo(t)
 			tt.setupRepo(mockRepo)
 
 			router := gin.New()
@@ -125,7 +125,7 @@ func TestSearchActresses(t *testing.T) {
 
 func TestSearchActresses_SQLInjectionPrevention(t *testing.T) {
 	// Test that SQL injection attempts are safely handled using URL encoding
-	mockRepo := newMockActressRepo()
+	mockRepo := newMockActressRepo(t)
 	setupActresses(t, mockRepo, []models.Actress{
 		{DMMID: 1, FirstName: "Yui", LastName: "Hatano"},
 	})
@@ -177,7 +177,7 @@ func TestSearchActresses_SQLInjectionPrevention(t *testing.T) {
 }
 
 func TestSearchActresses_SpecialCharacters(t *testing.T) {
-	mockRepo := newMockActressRepo()
+	mockRepo := newMockActressRepo(t)
 	setupActresses(t, mockRepo, []models.Actress{
 		{DMMID: 1, FirstName: "Yui", LastName: "Hatano"},
 	})
@@ -208,7 +208,7 @@ func TestSearchActresses_SpecialCharacters(t *testing.T) {
 }
 
 func TestSearchActresses_CaseInsensitivity(t *testing.T) {
-	mockRepo := newMockActressRepo()
+	mockRepo := newMockActressRepo(t)
 	setupActresses(t, mockRepo, []models.Actress{
 		{DMMID: 1, FirstName: "Yui", LastName: "Hatano"},
 	})
@@ -232,7 +232,7 @@ func TestSearchActresses_CaseInsensitivity(t *testing.T) {
 }
 
 func TestSearchActresses_URLEncoding(t *testing.T) {
-	mockRepo := newMockActressRepo()
+	mockRepo := newMockActressRepo(t)
 	setupActresses(t, mockRepo, []models.Actress{
 		{DMMID: 1, FirstName: "Test Name", LastName: "With Spaces"},
 	})
@@ -250,7 +250,7 @@ func TestSearchActresses_URLEncoding(t *testing.T) {
 }
 
 func TestSearchActresses_EmptyDatabase(t *testing.T) {
-	mockRepo := newMockActressRepo()
+	mockRepo := newMockActressRepo(t)
 	// Empty database
 
 	router := gin.New()
@@ -274,7 +274,7 @@ func TestSearchActresses_LargeResultSet(t *testing.T) {
 		t.Skip("skipping large result set test in short mode")
 	}
 
-	mockRepo := newMockActressRepo()
+	mockRepo := newMockActressRepo(t)
 
 	// Create many actresses to test the repository's built-in limit
 	// Note: ActressRepository.Search intentionally caps empty-query responses at 100
@@ -307,7 +307,7 @@ func TestSearchActresses_LargeResultSet(t *testing.T) {
 }
 
 func TestActressCRUDHandlers(t *testing.T) {
-	mockRepo := newMockActressRepo()
+	mockRepo := newMockActressRepo(t)
 
 	router := gin.New()
 	router.GET("/actresses", listActresses(ActressDeps{ContentRepos: database.ContentRepos{ActressRepo: mockRepo}}))
@@ -463,7 +463,7 @@ func TestDeleteActress(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockRepo := newMockActressRepo()
+			mockRepo := newMockActressRepo(t)
 
 			// Pre-populate with one actress for delete existing test
 			if tt.setupRepo != nil && tt.actressID == "1" {
@@ -492,7 +492,7 @@ func TestDeleteActress(t *testing.T) {
 }
 
 func TestCreateActress_Validation(t *testing.T) {
-	mockRepo := newMockActressRepo()
+	mockRepo := newMockActressRepo(t)
 
 	router := gin.New()
 	router.POST("/actresses", createActress(ActressDeps{ContentRepos: database.ContentRepos{ActressRepo: mockRepo}}))
@@ -513,7 +513,7 @@ func TestCreateActress_Validation(t *testing.T) {
 }
 
 func TestListActresses_Sorting(t *testing.T) {
-	mockRepo := newMockActressRepo()
+	mockRepo := newMockActressRepo(t)
 	setupActresses(t, mockRepo, []models.Actress{
 		{DMMID: 30, FirstName: "A", LastName: "One", JapaneseName: "あ"},
 		{DMMID: 10, FirstName: "B", LastName: "Two", JapaneseName: "い"},
@@ -541,7 +541,7 @@ func TestListActresses_Sorting(t *testing.T) {
 func TestExportActresses(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	repo := newMockActressRepo()
+	repo := newMockActressRepo(t)
 	setupActresses(t, repo, []models.Actress{
 		{DMMID: 100, FirstName: "Yui", LastName: "Hatano", JapaneseName: "波多野結衣"},
 		{DMMID: 101, FirstName: "Ai", LastName: "Uehara", JapaneseName: "上原亜衣"},
@@ -564,7 +564,7 @@ func TestExportActresses(t *testing.T) {
 func TestExportActresses_Empty(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	repo := newMockActressRepo()
+	repo := newMockActressRepo(t)
 
 	router := gin.New()
 	router.GET("/actresses/export", exportActresses(ActressDeps{ContentRepos: database.ContentRepos{ActressRepo: repo}}))
@@ -583,7 +583,7 @@ func TestExportActresses_Empty(t *testing.T) {
 func TestImportActresses(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	repo := newMockActressRepo()
+	repo := newMockActressRepo(t)
 
 	router := gin.New()
 	router.POST("/actresses/import", importActresses(ActressDeps{ContentRepos: database.ContentRepos{ActressRepo: repo}}))
@@ -613,7 +613,7 @@ func TestImportActresses(t *testing.T) {
 func TestImportActresses_PromotesDMMlessCandidate(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	repo := newMockActressRepo()
+	repo := newMockActressRepo(t)
 	candidate := &models.Actress{
 		FirstName: "Candidate",
 		LastName:  "Only",
@@ -640,7 +640,7 @@ func TestImportActresses_PromotesDMMlessCandidate(t *testing.T) {
 func TestImportActresses_InvalidJSON(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	repo := newMockActressRepo()
+	repo := newMockActressRepo(t)
 
 	router := gin.New()
 	router.POST("/actresses/import", importActresses(ActressDeps{ContentRepos: database.ContentRepos{ActressRepo: repo}}))
@@ -656,7 +656,7 @@ func TestImportActresses_InvalidJSON(t *testing.T) {
 func TestImportActresses_SkipsInvalid(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	repo := newMockActressRepo()
+	repo := newMockActressRepo(t)
 
 	router := gin.New()
 	router.POST("/actresses/import", importActresses(ActressDeps{ContentRepos: database.ContentRepos{ActressRepo: repo}}))
@@ -686,7 +686,7 @@ func TestImportActresses_SkipsInvalid(t *testing.T) {
 func TestImportActresses_ExistingUnchanged(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	repo := newMockActressRepo()
+	repo := newMockActressRepo(t)
 	require.NoError(t, repo.Create(context.Background(), &models.Actress{DMMID: 400, FirstName: "Existing", JapaneseName: "既存"}))
 
 	router := gin.New()
@@ -715,7 +715,7 @@ func TestImportActresses_ExistingUnchanged(t *testing.T) {
 func TestImportActresses_ExistingUpdated(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	repo := newMockActressRepo()
+	repo := newMockActressRepo(t)
 	require.NoError(t, repo.Create(context.Background(), &models.Actress{DMMID: 500, FirstName: "OldName", JapaneseName: "旧名"}))
 
 	router := gin.New()
@@ -744,7 +744,7 @@ func TestImportActresses_ExistingUpdated(t *testing.T) {
 func TestListActresses_EmptyDatabase(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	repo := newMockActressRepo()
+	repo := newMockActressRepo(t)
 
 	router := gin.New()
 	router.GET("/actresses", listActresses(ActressDeps{ContentRepos: database.ContentRepos{ActressRepo: repo}}))
@@ -764,7 +764,7 @@ func TestListActresses_EmptyDatabase(t *testing.T) {
 func TestListActresses_Pagination(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	repo := newMockActressRepo()
+	repo := newMockActressRepo(t)
 	for i := 0; i < 5; i++ {
 		require.NoError(t, repo.Create(context.Background(), &models.Actress{
 			DMMID:     600 + i,
@@ -792,7 +792,7 @@ func TestListActresses_Pagination(t *testing.T) {
 func TestUpdateActress_NotFound(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	repo := newMockActressRepo()
+	repo := newMockActressRepo(t)
 
 	router := gin.New()
 	router.PUT("/actresses/:id", updateActress(ActressDeps{ContentRepos: database.ContentRepos{ActressRepo: repo}}))
@@ -851,7 +851,7 @@ func TestParseActressID(t *testing.T) {
 }
 
 func TestActressMergePreviewAndApply(t *testing.T) {
-	mockRepo := newMockActressRepo()
+	mockRepo := newMockActressRepo(t)
 	target := &models.Actress{
 		DMMID:        70001,
 		FirstName:    "Target",
@@ -945,7 +945,7 @@ func TestActressMergeAcceptsOmittedAndEmptyResolutions(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			repo := newMockActressRepo()
+			repo := newMockActressRepo(t)
 			target := &models.Actress{FirstName: "Target"}
 			source := &models.Actress{FirstName: "Source"}
 			require.NoError(t, repo.Create(t.Context(), target))
@@ -969,7 +969,7 @@ func TestActressMergeAcceptsOmittedAndEmptyResolutions(t *testing.T) {
 }
 
 func TestActressMergeValidationAndNotFound(t *testing.T) {
-	mockRepo := newMockActressRepo()
+	mockRepo := newMockActressRepo(t)
 	target := &models.Actress{
 		DMMID:        71001,
 		FirstName:    "Target",
@@ -1010,7 +1010,7 @@ func TestActressMergeValidationAndNotFound(t *testing.T) {
 }
 
 func TestActressMergeInvalidResolutionPayload(t *testing.T) {
-	mockRepo := newMockActressRepo()
+	mockRepo := newMockActressRepo(t)
 	target := &models.Actress{DMMID: 72001, FirstName: "Target", JapaneseName: "ターゲット"}
 	source := &models.Actress{DMMID: 72002, FirstName: "Source", JapaneseName: "ソース"}
 	require.NoError(t, mockRepo.Create(context.Background(), target))

@@ -318,6 +318,87 @@ jobs:
     - name: Run unit tests
       run: go test -short ./...
 
+    - name: Repeat full Windows API server suite in fresh processes
+      id: server_lifecycle_repeats
+      timeout-minutes: 14
+      shell: python {0}
+      run: |
+        import collections, json, pathlib, subprocess, sys
+
+        sys.stdout.reconfigure(encoding="utf-8")
+        evidence = pathlib.Path("server-lifecycle-windows")
+        evidence.mkdir()
+        package = "github.com/javinizer/javinizer-go/internal/api/server"
+        websocket = "TestSecurity_WebSocketOriginValidation"
+        required = {
+            "TestInjectSSRState_InitializedAuth", "TestDeepIntegration_GenreEndpoints",
+            "TestDeepIntegration_JobEndpoints", "TestDeepIntegration_EventEndpoints",
+            "TestDeepIntegration_TokenEndpoints", websocket,
+            *(websocket + "/" + name for name in (
+                "wildcard_is_rejected_for_security_(WebSocket)",
+                "empty_config_allows_same-origin", "empty_config_blocks_different_origin",
+                "specific_origin_allowed", "specific_origin_blocked",
+                "same-origin_allowed_even_when_AllowedOrigins_is_configured",
+                "empty_origin_blocked_when_AllowedOrigins_is_configured",
+            )),
+        }
+        failures = []
+        for attempt in range(1, 4):
+            prefix = evidence / ("attempt-" + str(attempt))
+            cleanup_failed = False
+            try:
+                with prefix.with_suffix(".jsonl").open("wb") as stdout, prefix.with_suffix(".stderr.log").open("wb") as stderr:
+                    process = subprocess.Popen([
+                        "go", "test", "-short", "-count=1", "-timeout=180s", "-json",
+                        "./internal/api/server",
+                    ], stdout=stdout, stderr=stderr)
+                    try:
+                        code = process.wait(timeout=240)
+                    except subprocess.TimeoutExpired:
+                        failures.append({"attempt": attempt, "reason": "wall timeout"})
+                        # Terminate only this owned Go process and its descendants.
+                        with prefix.with_suffix(".kill.log").open("wb") as kill_log:
+                            try:
+                                killed = subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                                                        stdout=kill_log, stderr=subprocess.STDOUT, timeout=15)
+                                code = process.wait(timeout=15)
+                                cleanup_failed = killed.returncode != 0
+                            except Exception as exc:
+                                kill_log.write((repr(exc) + "\n").encode("utf-8"))
+                                cleanup_failed = True
+                                code = process.poll()
+                    prefix.with_suffix(".exit").write_text(str(code) + "\n", encoding="utf-8")
+                if cleanup_failed:
+                    raise RuntimeError("Owned process-tree termination unconfirmed; later attempts withheld")
+                output = prefix.with_suffix(".jsonl").read_text(encoding="utf-8")
+                print("API server attempt", attempt, "exit", code)
+                print(output, end="")
+                print(prefix.with_suffix(".stderr.log").read_text(encoding="utf-8"), end="")
+                events = [json.loads(line) for line in output.splitlines() if line.strip()]
+                passed = [event.get("Package") for event in events if not event.get("Test") and event["Action"] == "pass"]
+                if code != 0 or passed != [package] or any(event["Action"] == "fail" for event in events):
+                    failures.append({"attempt": attempt, "reason": "test failure or missing package result"})
+                for name in required:
+                    counts = collections.Counter(event["Action"] for event in events if event.get("Package") == package and event.get("Test") == name)
+                    if counts["run"] != 1 or counts["pass"] != 1 or counts["skip"] or counts["fail"]:
+                        failures.append({"attempt": attempt, "reason": "missing or skipped critical test", "test": name})
+            except Exception as exc:
+                prefix.with_suffix(".error.log").write_text(repr(exc) + "\n", encoding="utf-8")
+                failures.append({"attempt": attempt, "reason": repr(exc)})
+            if cleanup_failed:
+                break
+        (evidence / "failures.json").write_text(json.dumps(failures, indent=2) + "\n", encoding="utf-8")
+        assert not failures, "API server process failures: " + repr(failures)
+
+    - name: Archive Windows API server lifecycle repetitions
+      if: ${{ always() && steps.server_lifecycle_repeats.outcome != 'skipped' }}
+      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      with:
+        name: server-lifecycle-windows
+        path: server-lifecycle-windows/
+        if-no-files-found: error
+        retention-days: 30
+
     - name: Verify native Windows config publication and initialization
       run: >-
         go test -short -count=20 -v ./internal/config
