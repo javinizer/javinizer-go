@@ -338,6 +338,11 @@ jobs:
         go test -short -count=1 -v ./internal/api/r18devdump
         -run '^(TestStartDownload_(SlowButSteadySucceeds|StallAborts|HeadersStallAborts)|TestStallWatchdog)'
 
+    - name: Repeat Windows dump cancellation lifecycle regressions
+      run: >-
+        go test -short -count=10 -timeout=120s -v ./internal/r18devdump ./internal/api/r18devdump
+        -run '^(TestImport_(CancellationWaitsForRollback|CanceledBeforeCommitRollsBack|CanceledAfterSchemaDoesNotBegin|CanceledDuringBeginDoesNotRead|CanceledStreamCleansUpAndRetries)|TestStartDownload_StallAborts)$'
+
     - name: Verify in-place resident directory compensation on Windows
       run: >-
         go test -short -count=1 -v ./internal/workflow ./internal/history

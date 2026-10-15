@@ -51,8 +51,8 @@ jobs:
         include:
           - os: ubuntu-latest
             package_timeout: 120s
-          # SQLite-heavy packages take over 200s on Windows; this is a package
-          # budget, while native guard canaries retain their 120s deadline.
+          # Hosted Windows batch has 641 root tests and can exceed 300s cumulatively.
+          # Only that package gets 600s; other packages keep their existing budget.
           - os: windows-latest
             package_timeout: 300s
     steps:
@@ -84,23 +84,28 @@ jobs:
           for key in ("JAVINIZER_RUN_LIVE_API_TESTS", "JAVINIZER_RUN_FLARESOLVERR_TESTS"):
               env.pop(key, None)
 
-          def run(name, directory, timeout="120s"):
+          def run(name, directory, timeout="120s", packages=None):
               audit = evidence / (name + ".audit.log")
               audit.write_text("", encoding="utf-8")
               env["OFFLINE279_AUDIT_LOG"] = str(audit)
               with (evidence / (name + ".jsonl")).open("w", encoding="utf-8") as stdout, \
                    (evidence / (name + ".stderr.log")).open("w", encoding="utf-8") as stderr:
-                  result = subprocess.run(["go", "test", "-short", "-count=1", "-timeout=" + timeout, "-json", "./..."],
-                                          cwd=directory, env=env, stdout=stdout, stderr=stderr)
-              (evidence / (name + ".exit")).write_text(str(result.returncode) + "\n", encoding="utf-8")
+                  try:
+                      result = subprocess.run(["go", "test", "-short", "-count=1", "-timeout=" + timeout, "-json", *(packages or ["./..."])],
+                                              cwd=directory, env=env, stdout=stdout, stderr=stderr)
+                      code = result.returncode
+                  except OSError as exc:
+                      stderr.write(repr(exc) + "\n")
+                      code = 127
+              (evidence / (name + ".exit")).write_text(str(code) + "\n", encoding="utf-8")
               events = [json.loads(line) for line in (evidence / (name + ".jsonl")).read_text(encoding="utf-8").splitlines() if line.strip()]
               failures = [event for event in events if event["Action"] == "fail"]
               skips = [event for event in events if event["Action"] == "skip"]
-              print(name, "exit", result.returncode, "failures", failures, "skips", skips)
-              assert result.returncode == 0, name + " failed; inspect archived JSON and stderr"
-              return events, audit.read_text(encoding="utf-8").splitlines()
+              print(name, "exit", code, "failures", failures, "skips", skips)
+              return events, audit.read_text(encoding="utf-8").splitlines(), code
 
-          events, markers = run("canaries", "test/offlineguard")
+          events, markers, code = run("canaries", "test/offlineguard")
+          assert code == 0, "Guard canaries failed"
           required = {"TestExternalBeforeDNS", "TestDirectDialAndUDPWrites", "TestLoopbackAllowed",
                       "TestHTTPExternalTargetBlockedBeforeProxy", "TestHTTPExternalTargetBlockedBeforeSOCKS",
                       "TestInfrastructureProxyEndpointBlocked", "TestHTTPLoopbackAllowed"}
@@ -108,8 +113,65 @@ jobs:
           assert required <= passed, "Missing native guard canaries"
           assert not any(event["Action"] == "skip" for event in events), "Guard canaries cannot skip"
           assert collections.Counter(markers) == {"OFFLINE279_BLOCKED": 26, "OFFLINE279_BLOCKED_HTTP_TARGET": 4}, "Unexpected guard audit"
-          events, markers = run("short-tests", ".", "${{ matrix.package_timeout }}")
-          assert not markers, "Short tests attempted external I/O; inspect audit and JSON, do not suppress it"
+          if "${{ matrix.os }}" != "windows-latest":
+              events, markers, code = run("short-tests", ".", "${{ matrix.package_timeout }}")
+              assert code == 0, "Short tests failed; inspect archived JSON and stderr"
+              assert not markers, "Short tests attempted external I/O; inspect audit and JSON, do not suppress it"
+          else:
+              # Derive the complete inventory under the same offline environment.
+              env["OFFLINE279_AUDIT_LOG"] = str(evidence / "package-inventory.audit.log")
+              pathlib.Path(env["OFFLINE279_AUDIT_LOG"]).write_text("", encoding="utf-8")
+              inventory = subprocess.run(["go", "list", "./..."], cwd=".", env=env,
+                                         capture_output=True, text=True)
+              (evidence / "package-inventory.txt").write_text(inventory.stdout, encoding="utf-8")
+              (evidence / "package-inventory.stderr.log").write_text(inventory.stderr, encoding="utf-8")
+              (evidence / "package-inventory.exit").write_text(str(inventory.returncode) + "\n", encoding="utf-8")
+              assert inventory.returncode == 0, "Could not enumerate all packages"
+              assert not pathlib.Path(env["OFFLINE279_AUDIT_LOG"]).read_text(encoding="utf-8"), "Inventory attempted external I/O"
+              packages = inventory.stdout.splitlines()
+              batch = "github.com/javinizer/javinizer-go/internal/api/batch"
+              groups = [
+                  ("short-tests-batch", "600s", [package for package in packages if package == batch]),
+                  ("short-tests-rest", "300s", [package for package in packages if package != batch]),
+              ]
+              flattened = [package for _, _, members in groups for package in members]
+              proof = {
+                  "inventory": packages,
+                  "groups": [{"name": name, "timeout": timeout, "packages": members}
+                             for name, timeout, members in groups],
+                  "unique_inventory": len(packages) == len(set(packages)),
+                  "disjoint": len(flattened) == len(set(flattened)),
+                  "exhaustive": collections.Counter(flattened) == collections.Counter(packages),
+              }
+              (evidence / "package-partition.json").write_text(json.dumps(proof, indent=2) + "\n", encoding="utf-8")
+              assert packages and all(packages), "Empty package inventory"
+              assert proof["unique_inventory"] and proof["disjoint"] and proof["exhaustive"], "Invalid package partition"
+              assert groups[0][2] == [batch] and groups[1][2], "Expected batch and remaining packages"
+
+              # Run both groups even if either exits nonzero or emits malformed JSON.
+              errors = []
+              terminals = []
+              for name, timeout, members in groups:
+                  try:
+                      events, markers, code = run(name, ".", timeout, members)
+                      observed = {event["Package"] for event in events if "Package" in event}
+                      finished = [event["Package"] for event in events
+                                  if not event.get("Test") and event["Action"] in ("pass", "fail", "skip")]
+                      terminals.extend(finished)
+                      # Package-level skip is Go's normal terminal event for no-test packages.
+                      if observed != set(members) or collections.Counter(finished) != collections.Counter(members):
+                          errors.append(name + ": missing, extra, or duplicate package events")
+                      if code != 0 or any(event["Action"] == "fail" for event in events):
+                          errors.append(name + ": test failure")
+                      if markers:
+                          errors.append(name + ": attempted external I/O")
+                  except Exception as exc:
+                      errors.append(name + ": " + repr(exc))
+              if collections.Counter(terminals) != collections.Counter(packages):
+                  errors.append("Aggregate terminal package events do not match inventory")
+              (evidence / "package-results.json").write_text(
+                  json.dumps({"terminal_packages": terminals, "errors": errors}, indent=2) + "\n", encoding="utf-8")
+              assert not errors, "; ".join(errors)
       - name: Archive offline proof
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
