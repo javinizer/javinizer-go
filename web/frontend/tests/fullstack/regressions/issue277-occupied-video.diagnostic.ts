@@ -5,7 +5,15 @@
  */
 import { test as base, expect } from '@playwright/test';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, linkSync } from 'node:fs';
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	writeFileSync,
+	linkSync,
+	lstatSync,
+} from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { DEFAULT_INPUT_DIR, DEFAULT_OUTPUT_DIR } from '../helpers';
 
@@ -58,11 +66,22 @@ const test = base.extend<{ guardEgress: void }>({
 
 type Fixture = 'absent' | 'different-bytes' | 'same-bytes' | 'hardlink';
 const fixtures: Fixture[] = ['absent', 'different-bytes', 'same-bytes', 'hardlink'];
-const snapshot = (path: string) => ({
-	path,
-	exists: existsSync(path),
-	sha256: existsSync(path) ? createHash('sha256').update(readFileSync(path)).digest('hex') : null,
-});
+const snapshot = (path: string) => {
+	try {
+		const stat = lstatSync(path, { bigint: true });
+		return {
+			path,
+			exists: true,
+			regularFile: stat.isFile(),
+			sha256: createHash('sha256').update(readFileSync(path)).digest('hex'),
+			// Bigints avoid rounding Windows' 64-bit file indexes in evidence.
+			identity: { device: stat.dev.toString(), inode: stat.ino.toString() },
+		};
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+		return { path, exists: false, regularFile: false, sha256: null, identity: null };
+	}
+};
 const sourcePlaceholder = 'Enter path (e.g., /path/to/videos)';
 const destinationPlaceholder = 'Enter destination path (e.g., /path/to/output)';
 
@@ -189,6 +208,23 @@ for (const operation of ['move', 'copy'] as const) {
 				if (fixture === 'hardlink') linkSync(source, target);
 				const before = { source: snapshot(source), target: snapshot(target) };
 				evidence.before = before;
+				expect(before.source.exists).toBe(true);
+				expect(before.source.regularFile).toBe(true);
+				expect(before.source.identity?.inode).not.toBe('0');
+				expect(before.source.identity).not.toBeNull();
+				// This fixture intentionally tests same-volume move/copy semantics.
+				expect(lstatSync(dirname(target), { bigint: true }).dev.toString()).toBe(
+					before.source.identity!.device,
+				);
+				expect(before.target.exists).toBe(fixture !== 'absent');
+				if (fixture !== 'absent') {
+					expect(before.target.regularFile).toBe(true);
+					expect(before.target.identity?.inode).not.toBe('0');
+					expect(before.target.identity).not.toBeNull();
+					if (fixture === 'hardlink')
+						expect(before.target.identity).toEqual(before.source.identity);
+					else expect(before.target.identity).not.toEqual(before.source.identity);
+				}
 				const organizeResponsePromise = page.waitForResponse(
 					(r) =>
 						r.request().method() === 'POST' &&
@@ -232,7 +268,8 @@ for (const operation of ['move', 'copy'] as const) {
 					status: string;
 					error?: string;
 				};
-				evidence.after = { source: snapshot(source), target: snapshot(target) };
+				const after = { source: snapshot(source), target: snapshot(target) };
+				evidence.after = after;
 				if (fixture === 'different-bytes' || fixture === 'same-bytes') {
 					expect(finalResult.status).toBe('failed');
 					if (process.env.ISSUE277_SOURCE_REVISION === '17092b84850713a3bee8c32390aa56b726942b5c') {
@@ -240,20 +277,48 @@ for (const operation of ['move', 'copy'] as const) {
 							'artifact publication failed: staged publication destination exists and overwrite is disabled:',
 						);
 					} else {
-						// Baseline may refuse earlier with older wording; preserve its exact
-						// error in evidence rather than requiring the newer text.
-						expect(finalResult.error).toMatch(/exist|overwrite|conflict/i);
+						expect(process.env.ISSUE277_SOURCE_REVISION).toBe(
+							'6e016085be7efded5f3d30f2932c2ad9a7cb2a36',
+						);
+						// The pinned v1.5.2 rejects this occupied target during validation.
+						expect(finalResult.error).toBe(
+							`organization failed: organization validation failed: [${target}]`,
+						);
 					}
 					expect(finalResult.error).toContain(target);
 					await expect(page.getByText(finalResult.error!, { exact: true }).first()).toBeVisible({
 						timeout: 15_000,
 					});
-					expect(snapshot(source)).toEqual(before.source);
-					expect(snapshot(target)).toEqual(before.target);
+					expect(after.source).toEqual(before.source);
+					expect(after.target).toEqual(before.target);
 				} else {
 					expect(finalResult.status, JSON.stringify(finalResult)).toBe('completed');
-					expect(snapshot(target).sha256).toBe(before.source.sha256);
-					if (operation === 'copy') expect(snapshot(source).sha256).toBe(before.source.sha256);
+					expect(after.target.exists).toBe(true);
+					expect(after.target.regularFile).toBe(true);
+					expect(after.target.sha256).toBe(before.source.sha256);
+					expect(after.target.identity).not.toBeNull();
+					expect(after.target.identity?.inode).not.toBe('0');
+					if (fixture === 'hardlink') {
+						// Both pinned versions treat an existing alias as a no-op,
+						// even when Move is selected: both names retain the same object.
+						expect(after.source).toEqual(before.source);
+						expect(after.target).toEqual(before.target);
+						expect(after.target.identity).toEqual(after.source.identity);
+					} else if (operation === 'copy') {
+						expect(after.source).toEqual(before.source);
+						expect(after.target.identity).not.toEqual(before.source.identity);
+						expect(after.target.identity!.device).toBe(before.source.identity!.device);
+					} else {
+						expect(after.source).toEqual({
+							path: source,
+							exists: false,
+							regularFile: false,
+							sha256: null,
+							identity: null,
+						});
+						// Same-volume fresh-target Move renames the original video.
+						expect(after.target.identity).toEqual(before.source.identity);
+					}
 				}
 				await page.screenshot({
 					path: testInfo.outputPath('03-apply-outcome.png'),

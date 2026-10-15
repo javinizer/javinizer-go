@@ -7,6 +7,7 @@ on:
       - '.github/workflows/issue277-browser-diagnostic.yml'
       - 'scripts/diagnostics/issue277_browser_guard.py'
       - 'web/frontend/playwright.issue277.config.ts'
+      - 'web/frontend/vite.issue277-preview.config.ts'
       - 'web/frontend/tests/fullstack/issue277-setup.ts'
       - 'web/frontend/tests/fullstack/regressions/issue277-occupied-video.diagnostic.ts'
 permissions:
@@ -42,6 +43,7 @@ jobs:
           import os, pathlib, shutil
           files = [
             'web/frontend/playwright.issue277.config.ts',
+            'web/frontend/vite.issue277-preview.config.ts',
             'web/frontend/tests/fullstack/issue277-setup.ts',
             'web/frontend/tests/fullstack/regressions/issue277-occupied-video.diagnostic.ts',
           ]
@@ -71,6 +73,22 @@ jobs:
       - name: Install only frontend dependencies
         working-directory: source/web/frontend
         run: npm ci
+      - name: Generate Paraglide messages (fail closed)
+        working-directory: source/web/frontend
+        # Do not rely on the package prepare script, which masks failures.
+        run: node node_modules/@inlang/paraglide-js/bin/run.js compile --project ./project.inlang --outdir ./src/lib/paraglide
+      - name: Build the pinned subject's production UI
+        working-directory: source/web/frontend
+        # The subject's normal Vite config also generates Paraglide with its
+        # production options. Finish all compilation before the offline run.
+        run: npm run build
+      - name: Verify generated frontend artifacts
+        working-directory: source/web/frontend
+        shell: python
+        run: |
+          import pathlib
+          for name in ('src/lib/paraglide/messages.js', 'src/lib/paraglide/runtime.js', 'build/index.html'):
+              assert pathlib.Path(name).is_file(), f'Missing generated frontend artifact: {name}'
       - name: Install hosted Chromium
         working-directory: source/web/frontend
         run: npx playwright install --with-deps chromium

@@ -3,7 +3,7 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // Explicit fixture roots are required, particularly on native Windows. Never
-// run this diagnostic against user files. Backend must be prebuilt separately.
+// run this diagnostic against user files. Backend and production UI must be prebuilt.
 for (const key of [
 	'JAVINIZER_E2E_INPUT_DIR',
 	'JAVINIZER_E2E_OUTPUT_DIR',
@@ -48,7 +48,7 @@ export default defineConfig({
 		},
 		{
 			name: 'issue277-real-frontend',
-			command: 'npm run dev -- --config vite.fullstack.config.ts --port 5175 --strictPort',
+			command: 'npm run preview -- --config vite.issue277-preview.config.ts',
 			cwd: frontend,
 			url: 'http://localhost:5175',
 			timeout: 120_000,
