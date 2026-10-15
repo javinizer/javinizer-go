@@ -15,6 +15,10 @@ const osWindows = "windows"
 // exercise the Windows code paths on non-Windows platforms.
 var currentOS = runtime.GOOS
 
+// resolveShortPathNameFunc is a test seam for Windows GetLongPathName, which
+// accesses the host filesystem even when a PathValidator uses an in-memory fs.
+var resolveShortPathNameFunc = resolveShortPathName
+
 var windowsReservedNames = []string{
 	"CON", "PRN", "AUX", "NUL",
 	"COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
@@ -182,6 +186,6 @@ func normalizePathForPlatform(path string) string {
 
 	path = normalizeWindowsPath(path)
 	path = stripTrailingChars(path)
-	path = resolveShortPathName(path)
+	path = resolveShortPathNameFunc(path)
 	return path
 }
