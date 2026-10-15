@@ -112,11 +112,16 @@ func TestPrimaryUndoCanceledMutationStillSyncsAndPreservesErrors(t *testing.T) {
 		calls++
 		return syncFailure
 	}
-	require.ErrorIs(t, primaryUndoCanceledMutation(ctx, "synthetic-mutated-path", original), original)
+	require.NoError(t, primaryUndoCanceledMutation(ctx, "", nil))
+	require.Same(t, original, primaryUndoCanceledMutation(ctx, "", original))
+	require.Same(t, original, primaryUndoCanceledMutation(ctx, "synthetic-mutated-path", original))
 	cancel()
-	require.ErrorIs(t, primaryUndoCanceledMutation(ctx, "", original), original)
+	require.ErrorIs(t, primaryUndoCanceledMutation(ctx, "", nil), context.Canceled)
+	err := primaryUndoCanceledMutation(ctx, "", original)
+	require.ErrorIs(t, err, original)
+	require.ErrorIs(t, err, context.Canceled)
 	require.Zero(t, calls)
-	err := primaryUndoCanceledMutation(ctx, "synthetic-mutated-path", original)
+	err = primaryUndoCanceledMutation(ctx, "synthetic-mutated-path", original)
 	require.ErrorIs(t, err, original)
 	require.ErrorIs(t, err, context.Canceled)
 	require.ErrorIs(t, err, syncFailure)

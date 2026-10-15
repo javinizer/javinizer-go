@@ -45,12 +45,16 @@ func primaryUndoCopyContext(ctx context.Context, dst io.Writer, src io.Reader) (
 	return io.CopyBuffer(primaryUndoContextWriter{ctx: ctx, dst: dst}, primaryUndoContextReader{ctx: ctx, src: src}, make([]byte, primaryUndoCopyChunk))
 }
 
-// Cancellation stops new work, but a completed namespace mutation still needs
-// its directory-sync tail. Retain all errors and the durable recovery journal;
-// this does not grant permission to continue hashing, taking claims, or unlinking.
+// Report cancellation even when it arrives during a deferred read-only Close
+// without a namespace mutation. A completed mutation still needs its directory-
+// sync tail. Retain all errors and the durable recovery journal; this does not
+// grant permission to continue hashing, taking claims, or unlinking.
 func primaryUndoCanceledMutation(ctx context.Context, path string, err error) error {
-	if path == "" || ctx.Err() == nil {
+	if ctx.Err() == nil {
 		return err
+	}
+	if path == "" {
+		return errors.Join(err, ctx.Err())
 	}
 	return errors.Join(err, ctx.Err(), primaryUndoSyncParent(path))
 }
