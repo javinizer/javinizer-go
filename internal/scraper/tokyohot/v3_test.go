@@ -2,6 +2,7 @@ package tokyohot
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -136,18 +137,27 @@ func TestScrapeURLV3_URLNotHandled(t *testing.T) {
 	require.Error(t, err)
 }
 
-// TestScrapeURLV3_Disabled tests ScrapeURL when disabled
-func TestScrapeURLV3_Disabled(t *testing.T) {
+// TestScrapeURLV3_FetchError verifies the direct-page fetch error without network.
+// The enabled flag gates Search, so it cannot stand in for a response fixture.
+func TestScrapeURLV3_FetchError(t *testing.T) {
+	const target = "https://www.tokyo-hot.com/product/KB-123/"
+	fetchErr := errors.New("synthetic detail fetch failure")
+	transport := &thMockTransport{err: fetchErr}
 	scraper := &scraper{
-		client:      resty.New(),
-		enabled:     false,
+		client:      resty.New().SetTransport(transport),
+		enabled:     true,
 		baseURL:     "https://www.tokyo-hot.com",
 		rateLimiter: ratelimit.NewLimiter(0),
-		settings:    models.ScraperSettings{Enabled: false},
+		settings:    models.ScraperSettings{Enabled: true},
 	}
 
-	_, err := scraper.ScrapeURL(context.Background(), "https://www.tokyo-hot.com/product/KB-123/")
-	require.Error(t, err)
+	result, err := scraper.ScrapeURL(context.Background(), target)
+	assert.Nil(t, result)
+	require.ErrorIs(t, err, fetchErr)
+	assert.Contains(t, err.Error(), "failed to fetch TokyoHot detail page")
+	require.Len(t, transport.requests, 1)
+	assert.Equal(t, http.MethodGet, transport.requests[0].Method)
+	assert.Equal(t, target+"?lang=en", transport.requests[0].URL.String())
 }
 
 // TestGetURLCtxV3 tests getURLCtx with various inputs
@@ -210,11 +220,17 @@ func TestCanHandleURLV3(t *testing.T) {
 
 // thMockTransport is a mock transport for testing
 type thMockTransport struct {
+	err        error
+	requests   []*http.Request
 	response   string
 	statusCode int
 }
 
 func (mt *thMockTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	mt.requests = append(mt.requests, req)
+	if mt.err != nil {
+		return nil, mt.err
+	}
 	return &http.Response{
 		StatusCode: mt.statusCode,
 		Header:     http.Header{"Content-Type": []string{"text/html; charset=UTF-8"}},

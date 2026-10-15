@@ -353,13 +353,17 @@ func (s *scraper) tryActressThumbURLs(ctx context.Context, firstName, lastName s
 		}
 	}
 
-	testClient, err := httpclient.NewRestyClient(s.proxyProfile, 5*time.Second, 0)
-	if err != nil {
-		// Warn (not Debug): falling back to an explicit no-proxy client can
-		// expose the caller's direct IP when the configured proxy is unreachable,
-		// so this must be visible at the default log level, not debug-only.
-		logging.Warnf("DMM: Failed to create thumbnail probe client with scraper proxy: %v, using explicit no-proxy fallback", err)
-		testClient = httpclient.NewRestyClientNoProxy(5*time.Second, 0)
+	testClient := s.thumbnailClient
+	if testClient == nil {
+		var err error
+		testClient, err = httpclient.NewRestyClient(s.proxyProfile, 5*time.Second, 0)
+		if err != nil {
+			// Warn (not Debug): falling back to an explicit no-proxy client can
+			// expose the caller's direct IP when the configured proxy is unreachable,
+			// so this must be visible at the default log level, not debug-only.
+			logging.Warnf("DMM: Failed to create thumbnail probe client with scraper proxy: %v, using explicit no-proxy fallback", err)
+			testClient = httpclient.NewRestyClientNoProxy(5*time.Second, 0)
+		}
 	}
 	testClient.SetRedirectPolicy(resty.NoRedirectPolicy())
 

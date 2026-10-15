@@ -2,8 +2,12 @@ package core
 
 import (
 	"context"
+	"io"
+	"net/http"
 	"path/filepath"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -126,4 +130,42 @@ func TestStartUpdateChecker_NilConfigIsSafe(t *testing.T) {
 		startUpdateChecker(rt, nil, stubOpts(t, chk))
 	})
 	assert.Equal(t, 0, chk.callsCount())
+}
+
+// bootstrapReleaseTransport never delegates to a socket transport. Tests that
+// replace the process-wide default transport must remain non-parallel.
+type bootstrapReleaseTransport func(*http.Request) (*http.Response, error)
+
+func (f bootstrapReleaseTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+// mockBootstrapRelease keeps BootstrapAPI's production update wiring enabled,
+// while satisfying its release request entirely in memory. Runtime shutdown
+// must be registered after this helper so it precedes transport restoration.
+func mockBootstrapRelease(t *testing.T) {
+	t.Helper()
+	t.Setenv("JAVINIZER_DATA_DIR", t.TempDir())
+	// Bootstrap only needs the scraper lifecycle here. Use its existing mock
+	// registry seam so scraper constructors do not clone the default transport
+	// while the update checker uses this in-memory RoundTripper.
+	t.Setenv("JAVINIZER_E2E_SCRAPERS", "true")
+	var calls atomic.Int32
+	original := http.DefaultTransport
+	http.DefaultTransport = bootstrapReleaseTransport(func(req *http.Request) (*http.Response, error) {
+		calls.Add(1)
+		assert.Equal(t, http.MethodGet, req.Method)
+		assert.Equal(t, "https://api.github.com/repos/javinizer/javinizer-go/releases/latest", req.URL.String())
+		assert.Equal(t, "Javinizer-Updater", req.Header.Get("User-Agent"))
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(`{"tag_name":"v9.9.9","prerelease":false}`)),
+			Request:    req,
+		}, nil
+	})
+	t.Cleanup(func() {
+		http.DefaultTransport = original
+		assert.Equal(t, int32(1), calls.Load(), "bootstrap must make exactly one warm-up check")
+	})
 }

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-resty/resty/v2"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -125,6 +126,7 @@ func TestGetURLAndSearch_SuccessWithCachedContentID(t *testing.T) {
 		},
 	}
 	scraper.client.SetTransport(transport)
+	scraper.thumbnailClient = resty.New().SetTransport(transport)
 
 	foundURL, err := scraper.GetURL(context.Background(), "IPX-535")
 	require.NoError(t, err)

@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-resty/resty/v2"
@@ -182,15 +184,34 @@ func TestNewScraperV5(t *testing.T) {
 
 // TestSearchV5_NotFound tests Search with 404
 func TestSearchV5_NotFound(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(404)
-		fmt.Fprint(w, `{"status_code":404,"message":"Not Found"}`)
+	// Search uses absolute URLs, so SetBaseURL cannot intercept this flow.
+	// Pin the DVD lookup, candidate probes, and final normalized-ID fallback.
+	wantURLs := []string{
+		"https://r18.dev/videos/vod/movies/detail/-/dvd_id=notfound999/json",
+		"https://r18.dev/videos/vod/movies/detail/-/combined=notfound00999/json",
+		"https://r18.dev/videos/vod/movies/detail/-/combined=notfound999/json",
+		"https://r18.dev/videos/vod/movies/detail/-/combined=1notfound00999/json",
+		"https://r18.dev/videos/vod/movies/detail/-/combined=1notfound999/json",
+		"https://r18.dev/videos/vod/movies/detail/-/combined=notfound999/json",
+	}
+	var requested []string
+	client := resty.New().SetTransport(roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		i := len(requested)
+		requested = append(requested, r.URL.String())
+		assert.Equal(t, http.MethodGet, r.Method)
+		if i >= len(wantURLs) || r.URL.String() != wantURLs[i] {
+			t.Errorf("unexpected request %d: %s", i, r.URL)
+			return nil, fmt.Errorf("unexpected fixture URL")
+		}
+		return &http.Response{
+			StatusCode: http.StatusNotFound,
+			Header:     http.Header{"Content-Type": {"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"status_code":404,"message":"Not Found"}`)),
+			Request:    r,
+		}, nil
 	}))
-	defer ts.Close()
-
 	s := &scraper{
-		client:            resty.New().SetBaseURL(ts.URL),
+		client:            client,
 		enabled:           true,
 		language:          "ja",
 		maxRetries:        1,
@@ -198,10 +219,13 @@ func TestSearchV5_NotFound(t *testing.T) {
 		rateLimiter:       ratelimit.NewLimiter(0),
 		settings:          models.ScraperSettings{Enabled: true},
 	}
-
 	result, err := s.Search(context.Background(), "NOTFOUND-999")
+	require.Error(t, err)
 	assert.Nil(t, result)
-	assert.Error(t, err)
+	scraperErr, ok := models.AsScraperError(err)
+	require.True(t, ok)
+	assert.Equal(t, http.StatusNotFound, scraperErr.StatusCode)
+	assert.Equal(t, wantURLs, requested)
 }
 
 // TestNormalizeIDForSearchV5 tests ID normalization

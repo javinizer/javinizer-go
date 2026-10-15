@@ -3,6 +3,7 @@ package dmm
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -95,9 +96,9 @@ func TestFetchWithBrowser_WithProxyProfileWithCredentials(t *testing.T) {
 		Password: "pass",
 	}
 
-	// Should not panic; will fail because no Chrome is available
-	_, err := fetchWithBrowser(context.Background(), "https://www.dmm.co.jp/", 1, proxyProfile, os.Getenv, afero.NewOsFs())
-	_ = err
+	// An explicitly nonexistent executable prevents host Chrome discovery.
+	_, err := fetchWithBrowser(context.Background(), "https://www.dmm.co.jp/", 1, proxyProfile, missingChromeEnv(t, "CHROME_BIN"), afero.NewMemMapFs())
+	require.ErrorContains(t, err, "offline-chrome-does-not-exist")
 }
 
 func TestFetchWithBrowser_WithProxyProfileNoCredentials(t *testing.T) {
@@ -105,8 +106,8 @@ func TestFetchWithBrowser_WithProxyProfileNoCredentials(t *testing.T) {
 		URL: "http://proxy.example.com:8080",
 	}
 
-	_, err := fetchWithBrowser(context.Background(), "https://www.dmm.co.jp/", 1, proxyProfile, os.Getenv, afero.NewOsFs())
-	_ = err
+	_, err := fetchWithBrowser(context.Background(), "https://www.dmm.co.jp/", 1, proxyProfile, missingChromeEnv(t, "CHROME_BIN"), afero.NewMemMapFs())
+	require.ErrorContains(t, err, "offline-chrome-does-not-exist")
 }
 
 func TestFetchWithBrowser_ProxyProfileMissingScheme(t *testing.T) {
@@ -118,14 +119,14 @@ func TestFetchWithBrowser_ProxyProfileMissingScheme(t *testing.T) {
 
 	// This tests the code path where proxy URL doesn't have "://" separator
 	// The warn path should be hit but the function should continue
-	_, err := fetchWithBrowser(context.Background(), "https://www.dmm.co.jp/", 1, proxyProfile, os.Getenv, afero.NewOsFs())
-	_ = err
+	_, err := fetchWithBrowser(context.Background(), "https://www.dmm.co.jp/", 1, proxyProfile, missingChromeEnv(t, "CHROME_BIN"), afero.NewMemMapFs())
+	require.ErrorContains(t, err, "offline-chrome-does-not-exist")
 }
 
 func TestFetchWithBrowser_NilProxyProfile(t *testing.T) {
-	// Should not panic with nil proxy profile
-	_, err := fetchWithBrowser(context.Background(), "https://www.dmm.co.jp/", 1, nil, os.Getenv, afero.NewOsFs())
-	_ = err
+	// A nil proxy must still reach the deterministic launch error.
+	_, err := fetchWithBrowser(context.Background(), "https://www.dmm.co.jp/", 1, nil, missingChromeEnv(t, "CHROME_BIN"), afero.NewMemMapFs())
+	require.ErrorContains(t, err, "offline-chrome-does-not-exist")
 }
 
 // --- fetchWithBrowser: context cancellation ---
@@ -134,7 +135,7 @@ func TestFetchWithBrowser_CancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := fetchWithBrowser(ctx, "https://www.dmm.co.jp/", 5, nil, os.Getenv, afero.NewOsFs())
+	_, err := fetchWithBrowser(ctx, "https://www.dmm.co.jp/", 5, nil, missingChromeEnv(t, "CHROME_BIN"), afero.NewMemMapFs())
 	require.Error(t, err)
 }
 
@@ -142,43 +143,21 @@ func TestFetchWithBrowser_CancelledContext(t *testing.T) {
 
 func TestFetchWithBrowser_ZeroTimeoutUsesDefault(t *testing.T) {
 	// Zero timeout should default to 30s, but validation of URL happens first
-	_, err := fetchWithBrowser(context.Background(), "", 0, nil, os.Getenv, afero.NewOsFs())
+	_, err := fetchWithBrowser(context.Background(), "", 0, nil, missingChromeEnv(t, "CHROME_BIN"), afero.NewMemMapFs())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "required")
 }
 
 // --- fetchWithBrowser: container detection affects Chrome flags ---
 
-func TestFetchWithBrowser_ContainerDetectionViaChromeBin(t *testing.T) {
-	origChromeBin := os.Getenv("CHROME_BIN")
-	os.Setenv("CHROME_BIN", "/usr/bin/chromium")
-	defer func() {
-		if origChromeBin != "" {
-			os.Setenv("CHROME_BIN", origChromeBin)
-		} else {
-			os.Unsetenv("CHROME_BIN")
-		}
-	}()
-
-	// Will fail because chromedp can't actually launch Chrome, but tests the code path
-	// that adds --no-sandbox and --disable-setuid-sandbox flags
-	_, err := fetchWithBrowser(context.Background(), "https://www.dmm.co.jp/", 1, nil, os.Getenv, afero.NewOsFs())
-	_ = err
+func TestFetchWithBrowser_ExplicitChromeBin(t *testing.T) {
+	_, err := fetchWithBrowser(context.Background(), "https://www.dmm.co.jp/", 1, nil, missingChromeEnv(t, "CHROME_BIN"), afero.NewMemMapFs())
+	require.ErrorContains(t, err, "offline-chrome-does-not-exist")
 }
 
-func TestFetchWithBrowser_ContainerDetectionViaChromePath(t *testing.T) {
-	origChromePath := os.Getenv("CHROME_PATH")
-	os.Setenv("CHROME_PATH", "/usr/bin/google-chrome")
-	defer func() {
-		if origChromePath != "" {
-			os.Setenv("CHROME_PATH", origChromePath)
-		} else {
-			os.Unsetenv("CHROME_PATH")
-		}
-	}()
-
-	_, err := fetchWithBrowser(context.Background(), "https://www.dmm.co.jp/", 1, nil, os.Getenv, afero.NewOsFs())
-	_ = err
+func TestFetchWithBrowser_ExplicitChromePath(t *testing.T) {
+	_, err := fetchWithBrowser(context.Background(), "https://www.dmm.co.jp/", 1, nil, missingChromeEnv(t, "CHROME_PATH"), afero.NewMemMapFs())
+	require.ErrorContains(t, err, "offline-chrome-does-not-exist")
 }
 
 // TestFetchWithBrowser_ContainerDetectedDisablesSandbox exercises the
@@ -187,7 +166,7 @@ func TestFetchWithBrowser_ContainerDetectionViaChromePath(t *testing.T) {
 // filesystem returns false, so without this test the no-sandbox flag path
 // (the container-detected true branch) is never covered. The call still fails
 // when chromedp tries to launch Chrome — we only need it to reach past the
-// container-detection branch, mirroring the ViaChromeBin/ViaChromePath tests
+// container-detection branch, with an explicit nonexistent executable as in the tests
 // above.
 func TestFetchWithBrowser_ContainerDetectedDisablesSandbox(t *testing.T) {
 	fs := afero.NewMemMapFs()
@@ -196,6 +175,19 @@ func TestFetchWithBrowser_ContainerDetectedDisablesSandbox(t *testing.T) {
 	}
 	require.True(t, system.IsRunningInContainer(fs), "test setup: fs must read as container")
 
-	_, err := fetchWithBrowser(context.Background(), "https://www.dmm.co.jp/", 1, nil, os.Getenv, fs)
-	_ = err
+	_, err := fetchWithBrowser(context.Background(), "https://www.dmm.co.jp/", 1, nil, missingChromeEnv(t, "CHROME_BIN"), fs)
+	require.ErrorContains(t, err, "offline-chrome-does-not-exist")
+}
+
+// missingChromeEnv ensures these configuration/error tests cannot discover or
+// launch a real browser, regardless of the host's installed software or env.
+func missingChromeEnv(t *testing.T, key string) func(string) string {
+	t.Helper()
+	missing := filepath.Join(t.TempDir(), "offline-chrome-does-not-exist")
+	return func(name string) string {
+		if name == key {
+			return missing
+		}
+		return ""
+	}
 }

@@ -122,12 +122,15 @@ func TestScrapePosterGenerator_UsesCoverURLFallback(t *testing.T) {
 }
 
 func TestScrapePosterGenerator_DownloadError_Sanitized(t *testing.T) {
-	pm := NewPosterManager(afero.NewMemMapFs(), "/tmp", &genFailingHTTPClient{}, 0)
+	// Isolate sanitization of the mocked download failure from DNS validation.
+	pm := NewPosterManager(afero.NewMemMapFs(), "/tmp", &genFailingHTTPClient{}, 0).WithSSRFCheck(func(_ string) error { return nil })
 	gen := NewScrapePosterGenerator(pm, "", "")
 
 	movie := &models.Movie{ID: "TEST-003", Poster: models.PosterState{PosterURL: "http://example.com/poster.jpg"}}
 	err := gen.GeneratePoster(context.Background(), "test-job", movie)
-	assert.Error(t, err)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to download image")
+	assert.Contains(t, err.Error(), "network failure")
 
 	var se *sanitizedError
 	assert.True(t, errors.As(err, &se), "error should be a sanitizedError")

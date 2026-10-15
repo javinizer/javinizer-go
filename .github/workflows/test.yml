@@ -99,6 +99,9 @@ jobs:
     - name: Generate coverage report
       run: make coverage
 
+    - name: Generate offline fixture helper coverage
+      run: go test -short -count=1 -timeout=120s -covermode=atomic -coverprofile=coverage-testutil.out ./internal/testutil
+
     - name: Check coverage threshold
       run: ./scripts/check_coverage.sh 75 coverage.out
 
@@ -106,7 +109,7 @@ jobs:
       if: steps.detect.outputs.running_in_act != 'true'
       uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7
       with:
-        files: ./coverage.out
+        files: ./coverage.out,./coverage-testutil.out
         flags: unittests
         name: codecov-javinizer
         token: ${{ secrets.CODECOV_TOKEN }}
@@ -118,7 +121,9 @@ jobs:
       uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
       with:
         name: coverage-report
-        path: coverage.out
+        path: |
+          coverage.out
+          coverage-testutil.out
         retention-days: 30
 
     - name: Display coverage report (act only)

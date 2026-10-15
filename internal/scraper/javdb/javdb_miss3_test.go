@@ -100,11 +100,12 @@ func TestScrapeURL_Miss3_FetchReturnsScraperError(t *testing.T) {
 	}
 
 	// Use a cancelled context to trigger an error from fetchPageCtx
+	s.client = newCancelledFixtureClient(t, map[string]int{"GET https://javdb.com/v/abc123": 1})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
 	_, err := s.ScrapeURL(ctx, "https://javdb.com/v/abc123")
-	require.Error(t, err)
+	requireCancelledScraperError(t, err)
 }
 
 // --- Search: disabled scraper ---
@@ -278,20 +279,21 @@ func TestFetchPageCtx_Miss3_CloudflarePageNoFlareSolverr(t *testing.T) {
 	}
 }
 
-// --- fetchPageCtx: rate limiter wait cancelled ---
+// --- fetchPageCtx: cancelled request ---
 
-func TestFetchPageCtx_Miss3_RateLimitCancelled(t *testing.T) {
+func TestFetchPageCtx_Miss3_CancelledRequest(t *testing.T) {
 	s := &scraper{
 		rateLimiter: ratelimit.NewLimiter(0),
 		client:      resty.New(),
 		settings:    models.ScraperSettings{Enabled: true},
 	}
 
+	s.client = newCancelledFixtureClient(t, map[string]int{"GET https://javdb.com/v/test": 1})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
 	_, err := s.fetchPageCtx(ctx, "https://javdb.com/v/test")
-	require.Error(t, err)
+	requireCancelledScraperError(t, err)
 }
 
 // --- findDetailURLCtx: cancelled context ---
@@ -304,11 +306,12 @@ func TestFindDetailURLCtx_Miss3_CancelledContext(t *testing.T) {
 		settings:    models.ScraperSettings{Enabled: true},
 	}
 
+	s.client = newCancelledFixtureClient(t, map[string]int{"GET https://javdb.com/search?q=IPX-535&f=all": 1})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
 	_, err := s.findDetailURLCtx(ctx, "IPX-535")
-	require.Error(t, err)
+	requireCancelledScraperError(t, err)
 }
 
 // --- GetURL: empty ID ---

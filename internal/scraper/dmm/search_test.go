@@ -97,6 +97,7 @@ func TestParseHTMLWithGoldenFiles(t *testing.T) {
 			scraper := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{}, createTestDMMOptions(true, false))
 
 			// Call parseHTML
+			stubDMMMetadataRequests(t, scraper)
 			result, err := scraper.parseHTML(context.Background(), doc, tt.sourceURL)
 
 			// Check error expectations
@@ -156,6 +157,7 @@ func TestParseHTMLFieldExtraction(t *testing.T) {
 	}
 	scraper := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{}, createTestDMMOptions(true, false))
 
+	stubDMMMetadataRequests(t, scraper)
 	result, err := scraper.parseHTML(context.Background(), doc, "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=abc00123/")
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -223,6 +225,7 @@ func TestParseHTMLActressDisabled(t *testing.T) {
 	}
 	scraper := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{}, createTestDMMOptions(false, false))
 
+	stubDMMMetadataRequests(t, scraper)
 	result, err := scraper.parseHTML(context.Background(), doc, "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=abc00123/")
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -247,6 +250,7 @@ func TestParseHTMLMultipleActresses(t *testing.T) {
 	}
 	scraper := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{}, createTestDMMOptions(true, false))
 
+	stubDMMMetadataRequests(t, scraper)
 	result, err := scraper.parseHTML(context.Background(), doc, "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=ghi00789/")
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -278,6 +282,7 @@ func TestParseHTMLEmptyActressList(t *testing.T) {
 	}
 	scraper := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{}, createTestDMMOptions(true, false))
 
+	stubDMMMetadataRequests(t, scraper)
 	result, err := scraper.parseHTML(context.Background(), doc, "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=def00456/")
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -303,6 +308,7 @@ func TestParseHTMLMalformedHTML(t *testing.T) {
 	scraper := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{}, createTestDMMOptions(true, false))
 
 	// parseHTML should not panic or error on malformed HTML
+	stubDMMMetadataRequests(t, scraper)
 	result, err := scraper.parseHTML(context.Background(), doc, "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=jkl00999/")
 
 	assert.NoError(t, err, "parseHTML should handle malformed HTML gracefully")
@@ -328,6 +334,7 @@ func TestParseHTML404Page(t *testing.T) {
 	}
 	scraper := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{}, createTestDMMOptions(true, false))
 
+	stubDMMMetadataRequests(t, scraper)
 	result, err := scraper.parseHTML(context.Background(), doc, "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=notfound/")
 
 	// parseHTML should not error on 404 pages (HTTP layer should catch 404)

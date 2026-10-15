@@ -25,12 +25,28 @@ func TestScrapeURL_Miss2_ExtractIDFailure(t *testing.T) {
 		settings:    models.ScraperSettings{Enabled: true},
 	}
 
-	// URL is on javdb.com but doesn't have /v/ path, so ExtractIDFromURL fails
-	// This tests the "videoID = ''" path
-	_, err := s.ScrapeURL(context.Background(), "https://javdb.com/search?q=test")
-	// Should still try to scrape, might fail due to network, but shouldn't panic
-	// The key test is that it doesn't crash when ExtractIDFromURL fails
-	_ = err
+	const target = "https://javdb.com/search?q=test"
+	const detail = `<html><body>
+<h2 class="title is-4"><strong>IPX-999</strong> Local fallback title</h2>
+<div class="movie-panel-info"><div class="panel-block"><strong>片商:</strong><span class="value"><a>Fixture maker</a></span></div></div>
+</body></html>`
+	requests := 0
+	s.client.SetTransport(offlineFixtureTransport(func(req *http.Request) (*http.Response, error) {
+		requests++
+		assert.Equal(t, http.MethodGet, req.Method)
+		assert.Equal(t, target, req.URL.String())
+		return (&staticRoundTripper{responses: map[string]string{target: detail}}).RoundTrip(req)
+	}))
+
+	// A URL without /v/ has no fallback ID, but metadata still supplies one.
+	result, err := s.ScrapeURL(context.Background(), target)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, "IPX-999", result.ID)
+	assert.Equal(t, "Local fallback title", result.Title)
+	assert.Equal(t, "Fixture maker", result.Maker)
+	assert.Equal(t, target, result.SourceURL)
+	assert.Equal(t, 1, requests)
 }
 
 // --- ScrapeURL: sparse detail page triggers direct retry ---
@@ -225,11 +241,12 @@ func TestFetchPageDirectCtx_Miss2_CancelledContext(t *testing.T) {
 		client:      resty.New(),
 	}
 
+	s.client = newCancelledFixtureClient(t, map[string]int{"GET https://javdb.com/test": 1})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
 	_, err := s.fetchPageDirectCtx(ctx, "https://javdb.com/test")
-	require.Error(t, err)
+	requireCancelledScraperError(t, err)
 }
 
 // --- fetchPageDirectCtx: non-200 returns status error ---

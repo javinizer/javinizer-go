@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -52,49 +51,26 @@ func buildMGStageDetailHTMLV5(id, title, date, runtime, maker, label, series, ge
 </html>`, title, id, date, runtime, maker, label, series, genreLinks, actressLinks, coverURL)
 }
 
-// TestSearchV5_Disabled tests Search when disabled
+// Search's URL lookup does not check registry enablement directly.
 func TestSearchV5_Disabled(t *testing.T) {
-	s := &scraper{
-		client:      resty.New(),
-		enabled:     false,
-		rateLimiter: ratelimit.NewLimiter(0),
-		settings:    models.ScraperSettings{Enabled: false},
-	}
-
-	// MGStage Search doesn't check enabled flag directly - it goes through getURLCtx
-	// Let's test a simpler case
+	s := newMissingMGStageScraper(t, false)
 	_, err := s.getURLCtx(context.Background(), "INVALID-ID")
-	assert.Error(t, err)
+	require.Error(t, err)
+	scraperErr, ok := models.AsScraperError(err)
+	require.True(t, ok)
+	assert.Equal(t, models.ScraperErrorKindNotFound, scraperErr.Kind)
 }
 
-// TestGetURLV5 tests GetURL
 func TestGetURLV5(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=UTF-8")
-		if strings.Contains(r.URL.Path, "/search/") {
-			// Search results page with matching product
-			fmt.Fprintf(w, `<html><body>
-<a href="https://www.mgstage.com/product/product_detail/GANA-2850/">GANA-2850</a>
-</body></html>`)
-			return
-		}
-		// Detail page
-		fmt.Fprint(w, buildMGStageDetailHTMLV5("GANA-2850", "Test Movie", "2024/01/15", "90", "MakerA", "LabelB", "SeriesC", "Action", "Actress A", "https://pics.mgs.com/cover.jpg"))
-	}))
-	defer ts.Close()
-
-	s := &scraper{
-		client:      resty.New().SetBaseURL(ts.URL),
-		enabled:     true,
-		rateLimiter: ratelimit.NewLimiter(0),
-		settings:    models.ScraperSettings{Enabled: true},
-	}
-
+	s := newScriptedMGStageScraper(t, true, map[string]mockHTTPResponse{
+		"/search/cSearch.php?search_word=GANA-2850&type=top&page=1&list_cnt=120": {
+			statusCode: http.StatusOK,
+			body:       `<a href="https://www.mgstage.com/product/product_detail/GANA-2850/">Synthetic product</a>`,
+		},
+	})
 	url, err := s.GetURL(context.Background(), "GANA-2850")
-	// MGStage search may fail because the mock server URL doesn't match mgstage.com
-	// Just verify it doesn't panic
-	_ = url
-	_ = err
+	require.NoError(t, err)
+	assert.Equal(t, "https://www.mgstage.com/product/product_detail/GANA-2850/", url)
 }
 
 // TestResolveSearchQueryV5 tests ResolveSearchQuery

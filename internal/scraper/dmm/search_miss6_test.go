@@ -198,11 +198,12 @@ func TestMiss6_ScrapeURL_RateLimitWaitFailure(t *testing.T) {
 		settings:    models.ScraperSettings{Enabled: true},
 	}
 
+	stubDMMCanceledRequest(t, s, "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=ipx00535/")
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
 	_, err := s.ScrapeURL(ctx, "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=ipx00535/")
-	require.Error(t, err)
+	require.ErrorContains(t, err, context.Canceled.Error())
 }
 
 // --- ScrapeURL: successful parse ---

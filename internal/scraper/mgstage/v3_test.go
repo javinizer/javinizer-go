@@ -15,31 +15,23 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestSearchV3_Disabled tests Search when disabled - MGStage doesn't check enabled in Search, so it will try to fetch
+// Search does not check enablement directly; pin its deterministic not-found result.
 func TestSearchV3_Disabled(t *testing.T) {
-	scraper := &scraper{
-		client:      resty.New(),
-		enabled:     false,
-		rateLimiter: ratelimit.NewLimiter(0),
-		settings:    models.ScraperSettings{Enabled: false},
-	}
-
-	_, err := scraper.Search(context.Background(), "AB-123")
-	// Search doesn't check enabled flag in MGStage, it will fail with a network error or not found
+	s := newMissingMGStageScraper(t, false)
+	_, err := s.Search(context.Background(), "INVALID-ID")
 	require.Error(t, err)
+	scraperErr, ok := models.AsScraperError(err)
+	require.True(t, ok)
+	assert.Equal(t, models.ScraperErrorKindNotFound, scraperErr.Kind)
 }
 
-// TestScrapeURLV3_Disabled tests ScrapeURL when disabled
+// ScrapeURL, like Search, is callable independently of registry enablement.
 func TestScrapeURLV3_Disabled(t *testing.T) {
-	scraper := &scraper{
-		client:      resty.New(),
-		enabled:     false,
-		rateLimiter: ratelimit.NewLimiter(0),
-		settings:    models.ScraperSettings{Enabled: false},
-	}
-
-	_, err := scraper.ScrapeURL(context.Background(), "https://www.mgstage.com/product/product_detail/AB-123/")
-	require.Error(t, err)
+	s := newScriptedMGStageScraper(t, false, map[string]mockHTTPResponse{
+		"/product/product_detail/AB-123/": {statusCode: http.StatusNotFound},
+	})
+	_, err := s.ScrapeURL(context.Background(), "https://www.mgstage.com/product/product_detail/AB-123/")
+	require.EqualError(t, err, "page not found")
 }
 
 // TestScrapeURLV3_URLNotHandled tests ScrapeURL with non-MGStage URL

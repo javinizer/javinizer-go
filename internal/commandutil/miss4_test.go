@@ -12,6 +12,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/scraperutil"
+	"github.com/javinizer/javinizer-go/internal/testutil"
 	"github.com/javinizer/javinizer-go/internal/workflow"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -302,6 +303,7 @@ func TestRunBatchCommand_SummaryPrinterBackwardCompat_WithFiles(t *testing.T) {
 	require.NoError(t, err)
 
 	cfg := config.DefaultConfig(nil, nil)
+	fixture := testutil.ConfigureLocalScraper(t, cfg, false)
 	cfg.Database.DSN = dbPath
 	cfg.Matching.Extensions = []string{".mp4", ".mkv", ".avi", ".wmv"}
 	cfg.Matching.MinSizeMB = 0
@@ -319,13 +321,16 @@ func TestRunBatchCommand_SummaryPrinterBackwardCompat_WithFiles(t *testing.T) {
 		Presenter:   &SilentBatchCommandPresenter{},
 		SummaryPrinter: func(w io.Writer, o BatchCommandOptions, r BatchCommandResult) {
 			summaryCalled = true
+			assert.Equal(t, 1, r.SuccessCount)
+			assert.Zero(t, r.FailedCount)
 		},
 		Resolved: &workflow.ResolvedSeamStrings{},
 	}
 
 	err = RunBatchCommand(context.Background(), &buf, opts)
-	_ = err
-	_ = summaryCalled
+	require.NoError(t, err)
+	assert.True(t, summaryCalled)
+	assert.Equal(t, []string{"ABC-123"}, fixture.SearchIDs())
 }
 
 // --- CoreDeps: SetConfig and GetConfig round-trip ---

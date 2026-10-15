@@ -8,8 +8,8 @@ package commandutil
 // unqueryable pre-generated id) and says setup failed, and `history list
 // --batch <id>` answers 'batch job not found' consistently with that message.
 //
-// Fixtures build on the batch_history_w244_test.go pattern (the e2emock
-// scraper seam, filepath.Join/t.TempDir paths) so the tests stay
+// Fixtures build on the batch_history_w244_test.go pattern (loopback metadata,
+// filepath.Join/t.TempDir paths) so the tests stay
 // Windows-safe.
 
 import (

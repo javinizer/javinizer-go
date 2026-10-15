@@ -161,11 +161,12 @@ func TestFetchPageCtx_ContextCancelled(t *testing.T) {
 		settings:    models.ScraperSettings{},
 	}
 
+	s.client = newCancelledFixtureClient(t, map[string]int{"GET https://javdb.com/test": 1})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
 	_, err := s.fetchPageCtx(ctx, "https://javdb.com/test")
-	require.Error(t, err)
+	requireCancelledScraperError(t, err)
 }
 
 // --- fetchPageDirectCtx tests (75.0% → higher) ---

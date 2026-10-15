@@ -268,7 +268,7 @@ func TestMiss5_ScrapeURL_DisabledScraper(t *testing.T) {
 	assert.Nil(t, result)
 }
 
-// --- fetchPageDirectCtx: rate limit wait failure ---
+// --- fetchPageDirectCtx: cancelled request ---
 
 func TestMiss5_FetchPageDirectCtx_CancelledContext(t *testing.T) {
 	s := &scraper{
@@ -277,11 +277,12 @@ func TestMiss5_FetchPageDirectCtx_CancelledContext(t *testing.T) {
 		settings:    models.ScraperSettings{Enabled: true},
 	}
 
+	s.client = newCancelledFixtureClient(t, map[string]int{"GET https://javdb.com/v/abc123": 1})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
 	_, err := s.fetchPageDirectCtx(ctx, "https://javdb.com/v/abc123")
-	require.Error(t, err)
+	requireCancelledScraperError(t, err)
 }
 
 // --- ExtractIDFromURL: valid and invalid URLs ---

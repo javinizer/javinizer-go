@@ -2,12 +2,12 @@ package caribbeancom
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/go-resty/resty/v2"
@@ -145,35 +145,45 @@ func TestGetURLV5(t *testing.T) {
 
 // TestScrapeURLV5_StatusCodes tests ScrapeURL with various HTTP status codes
 func TestScrapeURLV5_StatusCodes(t *testing.T) {
+	const target = "https://www.caribbeancom.com/moviepages/060924-001/index.html"
 	tests := []struct {
-		name       string
-		statusCode int
+		statusCode  int
+		wantStatus  int
+		wantKind    models.ScraperErrorKind
+		wantMessage string
+		retryable   bool
 	}{
-		{"404", 404},
-		{"429", 429},
-		{"403", 403},
-		{"451", 451},
-		{"500", 500},
+		{http.StatusNotFound, 0, models.ScraperErrorKindNotFound, "page not found", false},
+		{http.StatusTooManyRequests, http.StatusTooManyRequests, models.ScraperErrorKindRateLimited, "rate limited", true},
+		{http.StatusForbidden, http.StatusForbidden, models.ScraperErrorKindBlocked, "access blocked", false},
+		{http.StatusUnavailableForLegalReasons, http.StatusUnavailableForLegalReasons, models.ScraperErrorKindBlocked, "access blocked", false},
+		{http.StatusInternalServerError, http.StatusInternalServerError, models.ScraperErrorKindUnavailable, "Caribbeancom returned status code 500", true},
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(tt.statusCode)
-			}))
-			defer ts.Close()
-
+		t.Run(fmt.Sprint(tt.statusCode), func(t *testing.T) {
+			transport := &ccMockTransport{statusCode: tt.statusCode}
 			s := &scraper{
-				client:      resty.New().SetBaseURL(ts.URL),
+				client:      resty.New().SetTransport(transport),
 				enabled:     true,
 				baseURL:     "https://www.caribbeancom.com",
 				rateLimiter: ratelimit.NewLimiter(0),
 				settings:    models.ScraperSettings{Enabled: true},
 			}
 
-			result, err := s.ScrapeURL(context.Background(), "https://www.caribbeancom.com/moviepages/060924-001/index.html")
+			result, err := s.ScrapeURL(context.Background(), target)
 			assert.Nil(t, result)
-			assert.Error(t, err)
+			var scraperErr *models.ScraperError
+			require.ErrorAs(t, err, &scraperErr)
+			assert.Equal(t, "Caribbeancom", scraperErr.Scraper)
+			assert.Equal(t, tt.wantStatus, scraperErr.StatusCode)
+			assert.Equal(t, tt.wantKind, scraperErr.Kind)
+			assert.Equal(t, tt.wantMessage, scraperErr.Message)
+			assert.Equal(t, tt.retryable, scraperErr.Retryable)
+			assert.Equal(t, tt.retryable, scraperErr.Temporary)
+			require.Len(t, transport.requests, 1)
+			assert.Equal(t, http.MethodGet, transport.requests[0].Method)
+			assert.Equal(t, target, transport.requests[0].URL.String())
 		})
 	}
 }
@@ -602,17 +612,22 @@ func TestSearchV5_NotFound(t *testing.T) {
 
 // TestFetchPageCtxV5_NetworkError tests fetchPageCtx with connection error
 func TestFetchPageCtxV5_NetworkError(t *testing.T) {
+	const target = "https://www.caribbeancom.com/moviepages/060924-001/index.html"
+	fetchErr := errors.New("synthetic connection failure")
+	transport := &ccMockTransport{err: fetchErr}
 	s := &scraper{
-		client:      resty.New().SetBaseURL("http://127.0.0.1:1"),
+		client:      resty.New().SetTransport(transport),
 		enabled:     true,
 		baseURL:     "https://www.caribbeancom.com",
 		rateLimiter: ratelimit.NewLimiter(0),
 		settings:    models.ScraperSettings{Enabled: true},
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	_, _, err := s.fetchPageCtx(ctx, "http://127.0.0.1:1/nonexistent")
-	assert.Error(t, err)
+	body, status, err := s.fetchPageCtx(context.Background(), target)
+	require.ErrorIs(t, err, fetchErr)
+	assert.Empty(t, body)
+	assert.Zero(t, status)
+	require.Len(t, transport.requests, 1)
+	assert.Equal(t, http.MethodGet, transport.requests[0].Method)
+	assert.Equal(t, target, transport.requests[0].URL.String())
 }

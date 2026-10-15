@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/testutil"
 	"github.com/javinizer/javinizer-go/internal/workflow"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -28,12 +29,10 @@ import (
 // via ScrapePhaseConfig.FileMatchInfo, so the sort pipeline honors part info
 // exactly like batch apply does.
 //
-// The JAVINIZER_E2E_SCRAPERS seam (Bootstrap substitutes the offline
-// e2emock scraper for GOOD-* IDs) keeps these tests deterministic and
-// network-free, exercising the real scan → match → scrape → apply chain.
+// A loopback LibreDMM fixture serves synthetic metadata, exercising the real
+// scan → match → scrape → apply chain without external network access.
 func setupMultipartPartSuffixChain(t *testing.T) (configPath, src, dest string) {
 	t.Helper()
-	t.Setenv("JAVINIZER_E2E_SCRAPERS", "true")
 
 	tmpDir := t.TempDir()
 	src = filepath.Join(tmpDir, "lib")
@@ -46,6 +45,7 @@ func setupMultipartPartSuffixChain(t *testing.T) (configPath, src, dest string) 
 	}
 
 	cfg := config.DefaultConfig(nil, nil)
+	testutil.ConfigureLocalScraper(t, cfg, false)
 	cfg.Database.DSN = filepath.Join(tmpDir, "javinizer.db")
 	cfg.Matching.Extensions = []string{".mp4"}
 	cfg.Matching.MinSizeMB = 0
@@ -53,8 +53,7 @@ func setupMultipartPartSuffixChain(t *testing.T) (configPath, src, dest string) 
 	cfg.Output.Template.SubfolderFormat = []string{}
 	cfg.Output.Template.FileFormat = "<ID><PARTSUFFIX>"
 	cfg.Output.Operation.RenameFile = true
-	// e2emock media URLs are non-resolvable (e2e.invalid); downloads are
-	// irrelevant to the plan/drop being pinned, so turn them all off.
+	// Media downloads are irrelevant to the plan/drop being pinned.
 	cfg.Output.Download.DownloadCover = false
 	cfg.Output.Download.DownloadPoster = false
 	cfg.Output.Download.DownloadExtrafanart = false

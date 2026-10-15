@@ -13,8 +13,10 @@ import (
 	"github.com/javinizer/javinizer-go/internal/commandutil"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/r18devdump"
 	"github.com/javinizer/javinizer-go/internal/scraperutil"
+	"github.com/javinizer/javinizer-go/internal/update"
 	"github.com/javinizer/javinizer-go/internal/workflow"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
@@ -32,8 +34,11 @@ func TestBootstrapAPI_NilConfig(t *testing.T) {
 }
 
 func TestBootstrapAPI_ValidConfig(t *testing.T) {
+	mockBootstrapRelease(t)
 	cfg := config.DefaultConfig(nil, nil)
 	cfg.Database.DSN = ":memory:"
+	cfg.System.VersionCheckEnabled = true
+	cfg.System.VersionCheckIntervalHours = 24
 
 	deps, rt, err := BootstrapAPI(cfg, "config.yaml", nil)
 	require.NoError(t, err)
@@ -51,9 +56,23 @@ func TestBootstrapAPI_ValidConfig(t *testing.T) {
 	assert.NotNil(t, deps.CoreDeps)
 	assert.NotNil(t, deps.Repos)
 	assert.NotNil(t, deps.EventEmitter)
+	emitted, failed := deps.EventEmitter.Stats()
+	assert.Equal(t, int64(1), emitted)
+	assert.Zero(t, failed)
 	assert.NotNil(t, deps.Reverter)
 	assert.NotNil(t, deps.JobStore)
 	assert.NotNil(t, deps.TokenStore)
+	assert.NotNil(t, rt.updateCheckerDone, "enabled bootstrap starts the checker lifecycle")
+
+	// Bootstrap warms the cache before returning; the fixture must reach the
+	// real checker/service rather than being accepted as a swallowed error.
+	state, err := update.NewService(update.UpdateConfig{Enabled: true}).GetStatus(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "v9.9.9", state.Version)
+	assert.Equal(t, update.UpdateSourceFresh, state.Source)
+	assert.True(t, state.Available)
+	assert.NotEmpty(t, state.CheckedAt)
+	assert.Empty(t, state.Error)
 
 	// APIConfig should be accessible through the bootstrap runtime with config synced
 	rt.SetConfig(cfg)
@@ -982,21 +1001,30 @@ func TestValidateAndOpenPath_FileReplacedAfterValidation(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestBootstrapAPI_EmitEventError(t *testing.T) {
+	mockBootstrapRelease(t)
 	cfg := config.DefaultConfig(nil, nil)
 	cfg.Database.DSN = ":memory:"
+	cfg.System.VersionCheckEnabled = true
+	cfg.System.VersionCheckIntervalHours = 24
 
-	// This exercises the emit event error path (line 63-65)
-	// The event emitter may fail if the DB isn't fully ready, but BootstrapAPI
-	// only logs the warning and continues.
-	deps, rt, err := BootstrapAPI(cfg, "config.yaml", nil)
+	coreDeps, err := commandutil.NewDependencies(cfg)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = coreDeps.Close() })
+	// Make event persistence fail deterministically, instead of relying on a
+	// possibly unready database. The rest of the bootstrap must still succeed.
+	require.NoError(t, coreDeps.DB.Migrator().DropTable(&models.Event{}))
+	deps, rt, err := bootstrapAPIDeps(cfg, "config.yaml", nil, coreDeps)
 	require.NoError(t, err)
 	require.NotNil(t, deps)
-	t.Cleanup(func() {
-		rt.Shutdown()
-		if deps.CoreDeps.DB != nil {
-			_ = deps.CoreDeps.DB.Close()
-		}
-	})
+	require.NotNil(t, rt)
+	t.Cleanup(rt.Shutdown)
+	assert.NotNil(t, deps.EventEmitter)
+	assert.NotNil(t, deps.JobStore)
+	assert.NotNil(t, rt.updateCheckerDone)
+	assert.False(t, coreDeps.DB.Migrator().HasTable(&models.Event{}))
+	emitted, failed := deps.EventEmitter.Stats()
+	assert.Zero(t, emitted)
+	assert.Equal(t, int64(1), failed, "bootstrap must attempt the startup event and tolerate its write failure")
 }
 
 // ---------------------------------------------------------------------------

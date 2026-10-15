@@ -835,10 +835,29 @@ func TestCheckLatestVersion_PreReleaseEmptyList(t *testing.T) {
 func TestNewChecker_DefaultRepo(t *testing.T) {
 	chk := NewChecker(defaultRepo)
 	require.NotNil(t, chk)
-	// The returned checker must be usable: a CheckLatestVersion call should
-	// not panic and should return a typed result or error (network errors are
-	// fine in tests without network; we only assert the constructor wires up).
-	_, _ = chk.CheckLatestVersion(context.Background())
+	github, ok := chk.(*githubChecker)
+	require.True(t, ok)
+	var calls int
+	// Keep the public constructor and its default repository/base URL, but
+	// satisfy the request in memory instead of accepting a live network error.
+	github.httpClient.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		calls++
+		assert.Equal(t, http.MethodGet, req.Method)
+		assert.Equal(t, "https://api.github.com/repos/javinizer/javinizer-go/releases/latest", req.URL.String())
+		assert.Equal(t, "Javinizer-Updater", req.Header.Get("User-Agent"))
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Etag": []string{`"fixture-release"`}},
+			Body:       io.NopCloser(strings.NewReader(`{"tag_name":"v9.9.9","prerelease":false,"published_at":"2026-01-01T00:00:00Z"}`)),
+			Request:    req,
+		}, nil
+	})
+	info, err := chk.CheckLatestVersion(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 1, calls)
+	assert.Equal(t, &versionInfo{
+		Version: "v9.9.9", TagName: "v9.9.9", PublishedAt: "2026-01-01T00:00:00Z", ETag: `"fixture-release"`,
+	}, info)
 }
 
 func TestNewCheckerWithBaseURL(t *testing.T) {

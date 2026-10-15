@@ -1,6 +1,7 @@
 package dmm
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"os"
@@ -55,6 +56,9 @@ type scraper struct {
 	settings      models.ScraperSettings
 	envLookup     func(string) string
 	fs            afero.Fs
+	// Optional per-instance I/O dependencies; nil preserves the production defaults.
+	browserFetch    func(context.Context, string) (string, error)
+	thumbnailClient *resty.Client
 }
 
 func resolveTimeout(scraperTimeout, globalTimeout int) int {

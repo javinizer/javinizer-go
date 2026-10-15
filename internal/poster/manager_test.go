@@ -379,7 +379,8 @@ func TestDownloadFromURL_CropFallbackToCopy(t *testing.T) {
 }
 
 func TestDownloadFromURL_HTTPClientError(t *testing.T) {
-	pm := newTestManager(&failingHTTPClient{})
+	// Isolate the HTTP error path from DNS-based SSRF validation.
+	pm := newTestManagerBypassSSRF(&failingHTTPClient{})
 
 	_, err := pm.DownloadFromURL(
 		context.Background(), "job1", "ABC-123",

@@ -179,3 +179,11 @@ func fetchWithBrowser(parentCtx context.Context, url string, timeout int, proxyP
 	logging.Debugf("DMM Browser: ✓ Successfully fetched %d characters", len(bodyHTML))
 	return bodyHTML, nil
 }
+
+// fetchBrowserHTML uses the configured browser fetcher, or Chrome in production.
+func (s *scraper) fetchBrowserHTML(ctx context.Context, url string) (string, error) {
+	if s.browserFetch != nil {
+		return s.browserFetch(ctx, url)
+	}
+	return fetchWithBrowser(ctx, url, s.browserConfig.Timeout, s.proxyProfile, s.getEnvLookup(), s.getFs())
+}
