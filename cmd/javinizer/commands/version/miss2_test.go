@@ -38,62 +38,6 @@ system:
 	assert.Contains(t, stdout.String(), "disabled")
 }
 
-// TestNewCommand_CheckForceCheckError hits the error path where ForceCheck
-// returns an error (network failure).
-func TestNewCommand_CheckForceCheckError(t *testing.T) {
-	tmpDir := t.TempDir()
-	configPath := tmpDir + "/config.yaml"
-	configContent := `config_version: 3
-database:
-  dsn: ":memory:"
-  type: sqlite
-system:
-  version_check_enabled: true
-  version_check_interval_hours: 24
-`
-	require.NoError(t, os.WriteFile(configPath, []byte(configContent), 0644))
-
-	t.Setenv("JAVINIZER_CONFIG", configPath)
-
-	cmd := versioncmd.NewCommand()
-	var stdout, stderr bytes.Buffer
-	cmd.SetOut(&stdout)
-	cmd.SetErr(&stderr)
-	cmd.SetArgs([]string{"--check"})
-
-	// This will try to reach GitHub and fail, producing the error path
-	err := cmd.Execute()
-	// The command should succeed (exit 0) but print error to stderr
-	// OR it may return an error depending on how the check fails
-	_ = err
-}
-
-// TestNewCommand_CheckUpdateAvailable hits the "Update available" output path.
-func TestNewCommand_CheckUpdateAvailable(t *testing.T) {
-	tmpDir := t.TempDir()
-	configPath := tmpDir + "/config.yaml"
-	configContent := `config_version: 3
-database:
-  dsn: ":memory:"
-  type: sqlite
-system:
-  version_check_enabled: true
-  version_check_interval_hours: 24
-`
-	require.NoError(t, os.WriteFile(configPath, []byte(configContent), 0644))
-
-	t.Setenv("JAVINIZER_CONFIG", configPath)
-
-	cmd := versioncmd.NewCommand()
-	var stdout, stderr bytes.Buffer
-	cmd.SetOut(&stdout)
-	cmd.SetErr(&stderr)
-	cmd.SetArgs([]string{"--check"})
-
-	// Execute - will hit GitHub API and likely fail (network error path)
-	_ = cmd.Execute()
-}
-
 // TestNewCommand_DefaultOutputVersion2 tests the default (no flags) path
 // that prints version.Info().
 func TestNewCommand_DefaultOutputVersion2(t *testing.T) {
@@ -157,6 +101,8 @@ func TestLoadConfigForCheck_InvalidConfig(t *testing.T) {
 database:
   dsn: ":memory:"
   type: sqlite
+system:
+  version_check_enabled: false
 metadata:
   translation:
     enabled: true
@@ -167,6 +113,9 @@ metadata:
 	require.NoError(t, os.WriteFile(configPath, []byte(configContent), 0644))
 
 	t.Setenv("JAVINIZER_CONFIG", configPath)
+	t.Setenv("DEEPL_API_KEY", "")
+	t.Setenv("TRANSLATION_PROVIDER", "")
+	t.Setenv("METADATA_TRANSLATION_PROVIDER", "")
 
 	cmd := versioncmd.NewCommand()
 	var stderr bytes.Buffer
@@ -175,6 +124,7 @@ metadata:
 
 	// This should fail because the config is invalid (deepl without api key)
 	err := cmd.Execute()
-	// The command may return an error or print to stderr
-	_ = err
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to load config")
+	assert.Contains(t, err.Error(), "metadata.translation.deepl.api_key is required")
 }

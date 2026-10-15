@@ -2,6 +2,7 @@ package dmm
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -37,17 +38,15 @@ func TestSearch_Miss4_BrowserMode_VideoDMM(t *testing.T) {
 		},
 	}
 
-	settings := models.ScraperSettings{Enabled: true}
+	settings := models.ScraperSettings{Enabled: true, UseBrowser: true}
 	scraper := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{},
 		dmmOptions{ScrapeActress: false, Browser: models.BrowserConfig{Enabled: true, Timeout: 30}, ContentIDRepo: repo})
 	scraper.client.SetTransport(transport)
 
-	// Search with browser mode enabled and video.dmm.co.jp URL.
-	// This will attempt browser fetch, which will fail (no Chrome), hitting the
-	// "browser fetch failed" error path.
+	wantErr := errors.New("fixture browser failed")
+	stubDMMBrowser(t, scraper, "https://video.dmm.co.jp/av/content/?id=brow00001", "", wantErr)
 	_, err := scraper.Search(context.Background(), "BROW-001")
-	// Browser mode will fail since no Chrome is available
-	require.Error(t, err)
+	require.ErrorIs(t, err, wantErr)
 }
 
 // --- Search: rate limiter wait failure in else branch ---
@@ -135,7 +134,7 @@ func TestScrapeURL_Miss4_BrowserModeVideoDMM(t *testing.T) {
 		browserConfig: models.BrowserConfig{Enabled: true, Timeout: 1},
 	}
 
-	// Browser fetch will fail (no Chrome), hitting the "browser fetch failed" error path
+	stubDMMBrowser(t, s, "https://video.dmm.co.jp/av/content/?id=test001/", "", errors.New("fixture browser failed"))
 	_, err := s.ScrapeURL(context.Background(), "https://video.dmm.co.jp/av/content/?id=test001/")
 	require.Error(t, err)
 }
@@ -311,11 +310,12 @@ func TestScrapeURL_Miss4_RateLimitWaitFailed(t *testing.T) {
 		useBrowser:  false,
 	}
 
+	stubDMMCanceledRequest(t, s, "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=rl001/")
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
 	_, err := s.ScrapeURL(ctx, "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=rl001/")
-	require.Error(t, err)
+	require.ErrorContains(t, err, context.Canceled.Error())
 }
 
 // --- ScrapeURL: request error ---
@@ -351,11 +351,12 @@ func TestGetURLCtx_Miss4_RateLimitWaitFailsForQuery(t *testing.T) {
 		dmmOptions{ScrapeActress: false, Browser: models.BrowserConfig{Enabled: false, Timeout: 30}, ContentIDRepo: repo})
 
 	// Use a cancelled context - rate limiter wait will fail
+	stubDMMCanceledRequest(t, scraper, "https://www.dmm.co.jp/search/=/searchstr=rlq001/")
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
 	_, err := scraper.getURLCtx(ctx, "RLQ-001")
-	require.Error(t, err)
+	require.ErrorContains(t, err, context.Canceled.Error())
 }
 
 // --- tryDirectURLs: context cancelled during rate limiter wait ---
@@ -433,11 +434,12 @@ func TestGetURLCtx_Miss4_ContextCancelledMidSearch(t *testing.T) {
 		dmmOptions{ScrapeActress: false, Browser: models.BrowserConfig{Enabled: false, Timeout: 30}, ContentIDRepo: repo})
 
 	// Use cancelled context
+	stubDMMCanceledRequest(t, scraper, "https://www.dmm.co.jp/search/=/searchstr=mid001/")
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
 	_, err := scraper.getURLCtx(ctx, "MID-001")
-	require.Error(t, err)
+	require.ErrorContains(t, err, context.Canceled.Error())
 }
 
 // --- getURLCtx: search request fails for a query ---
@@ -479,16 +481,13 @@ func TestScrapeURL_Miss4_BrowserFetchFails(t *testing.T) {
 		browserConfig: models.BrowserConfig{Enabled: true, Timeout: 1},
 	}
 
+	stubDMMBrowser(t, s, "https://video.dmm.co.jp/av/content/?id=bf001/", "", errors.New("fixture browser failed"))
 	_, err := s.ScrapeURL(context.Background(), "https://video.dmm.co.jp/av/content/?id=bf001/")
 	require.Error(t, err)
 	scraperErr, ok := models.AsScraperError(err)
 	require.True(t, ok)
 	assert.Contains(t, scraperErr.Message, "browser fetch failed")
 }
-
-// --- ScrapeURL: video.dmm.co.jp URL with browser mode, successful fetch but parse error ---
-// This would require a mockable fetchWithBrowser which isn't available,
-// so we focus on the paths we can reach.
 
 // --- ScrapeURL: non-DMM URL returns not found ---
 

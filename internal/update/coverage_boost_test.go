@@ -151,20 +151,34 @@ func TestService_GetStatus_StaleTriggersBg(t *testing.T) {
 	oldTime := time.Now().Add(-48 * time.Hour).UTC().Format(time.RFC3339)
 	store.SetState(&updateState{Version: "v0.9.0", CheckedAt: oldTime, Source: UpdateSourceCached})
 
+	chk := &countingChecker{version: &versionInfo{Version: "v9.9.9", TagName: "v9.9.9"}}
 	svc := &Service{
-		checker:   newGitHubChecker("javinizer/Javinizer"),
+		checker:   chk,
 		store:     store,
 		statePath: statePath,
 		interval:  24 * time.Hour,
 		enabled:   true,
 	}
 
+	t.Cleanup(svc.Wait)
 	status, err := svc.GetStatus(context.Background())
 	require.NoError(t, err)
 	assert.Equal(t, "v0.9.0", status.Version)
+	assert.Equal(t, oldTime, status.CheckedAt)
+	assert.Equal(t, UpdateSourceCached, status.Source)
 	// Background check triggered — wait for it to finish so t.TempDir cleanup
 	// does not race with a still-running background write.
 	svc.Wait()
+	assert.Equal(t, 1, chk.callsCount())
+	fresh, err := newStateStore(statePath, defaultCheckInterval).LoadState()
+	require.NoError(t, err)
+	require.NotNil(t, fresh)
+	assert.Equal(t, "v9.9.9", fresh.Version)
+	assert.Equal(t, UpdateSourceFresh, fresh.Source)
+	assert.True(t, fresh.Available)
+	assert.NotEmpty(t, fresh.CheckedAt)
+	assert.NotEqual(t, oldTime, fresh.CheckedAt)
+	assert.Empty(t, fresh.Error)
 }
 
 func TestService_IsUpdateAvailable_Cached(t *testing.T) {

@@ -2,10 +2,12 @@ package libredmm
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -263,7 +265,20 @@ func TestSearch_MissTest_ContextCancelledDuringPoll(t *testing.T) {
 // --- Search: success path with full payload ---
 
 func TestSearch_MissTest_FullPayload(t *testing.T) {
+	poster := posterFixture(t, 600, 800)
+	var posterRequests atomic.Int32
+	const posterURL = "https://awsimgsrc.dmm.com/dig/digital/video/ipx00535/ipx00535ps.jpg"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/dig/digital/video/ipx00535/ipx00535ps.jpg" {
+			assert.Equal(t, http.MethodGet, r.Method)
+			posterRequests.Add(1)
+			w.Header().Set("Content-Type", "image/png")
+			_, _ = w.Write(poster)
+			return
+		}
+		assert.Equal(t, "/search", r.URL.Path)
+		assert.Equal(t, "IPX-535", r.URL.Query().Get("q"))
+		assert.Equal(t, "json", r.URL.Query().Get("format"))
 		payload := moviePayload{
 			NormalizedID:  "IPX-535",
 			Subtitle:      "ipx00535",
@@ -287,6 +302,7 @@ func TestSearch_MissTest_FullPayload(t *testing.T) {
 
 	settings := testSettings(server.URL)
 	s := newScraper(&settings, nil, models.FlareSolverrConfig{})
+	s.client.SetTransport(fixtureTransport(t, server, posterURL))
 	result, err := s.Search(context.Background(), "IPX-535")
 	require.NoError(t, err)
 	assert.Equal(t, "IPX-535", result.ID)
@@ -301,6 +317,10 @@ func TestSearch_MissTest_FullPayload(t *testing.T) {
 	assert.Equal(t, "花子", result.Actresses[0].JapaneseName)
 	assert.NotNil(t, result.Rating)
 	assert.Equal(t, 7.5, result.Rating.Score)
+	assert.Equal(t, "https://awsimgsrc.dmm.com/dig/digital/video/ipx00535/ipx00535pl.jpg", result.CoverURL)
+	assert.Equal(t, posterURL, result.PosterURL)
+	assert.False(t, result.ShouldCropPoster)
+	assert.Equal(t, int32(1), posterRequests.Load())
 }
 
 // --- getURLCtx: HTTP URL input ---
@@ -337,15 +357,45 @@ func TestFilterPlaceholderScreenshotsCtx_NoScreenshots(t *testing.T) {
 }
 
 func TestFilterPlaceholderScreenshotsCtx_WithScreenshots(t *testing.T) {
-	settings := testSettings("https://libredmm.com")
+	placeholder := posterFixture(t, 1, 1)
+	hash := sha256.Sum256(placeholder)
+	var headRequests, getRequests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodHead:
+			headRequests.Add(1)
+			switch r.URL.Path {
+			case "/placeholder.png":
+				w.Header().Set("Content-Length", fmt.Sprint(len(placeholder)))
+			case "/large.png":
+				w.Header().Set("Content-Length", "16384")
+			default:
+				t.Errorf("unexpected HEAD fixture: %s", r.URL.Path)
+				http.NotFound(w, r)
+			}
+		case http.MethodGet:
+			getRequests.Add(1)
+			assert.Equal(t, "/placeholder.png", r.URL.Path)
+			_, _ = w.Write(placeholder)
+		default:
+			t.Errorf("unexpected method: %s", r.Method)
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	}))
+	defer server.Close()
+
+	settings := testSettings(server.URL)
 	settings.PlaceholderThresholdKB = 10
+	settings.ExtraPlaceholderHashes = []string{fmt.Sprintf("%x", hash)}
 	s := newScraper(&settings, nil, models.FlareSolverrConfig{})
+	s.client.SetTransport(fixtureTransport(t, server))
 	result := &models.ScraperResult{
-		ScreenshotURL: []string{"https://example.com/s1.jpg"},
+		ScreenshotURL: []string{server.URL + "/placeholder.png", server.URL + "/large.png"},
 	}
-	// With screenshots present, filterPlaceholderScreenshotsCtx will attempt to filter
 	s.filterPlaceholderScreenshotsCtx(context.Background(), result)
-	// The placeholder filter may error on unreachable URLs, but should not panic
+	assert.Equal(t, []string{server.URL + "/large.png"}, result.ScreenshotURL)
+	assert.Equal(t, int32(2), headRequests.Load())
+	assert.Equal(t, int32(1), getRequests.Load())
 }
 
 // --- normalizeMovieURL: edge cases ---

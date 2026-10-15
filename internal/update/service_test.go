@@ -68,58 +68,41 @@ func TestService_GetStatus_Disabled(t *testing.T) {
 }
 
 func TestService_ForceCheck(t *testing.T) {
-	tmpDir := t.TempDir()
-	statePath := filepath.Join(tmpDir, "update_cache.json")
+	service, chk := newStubService(t, true)
+	chk.version = &versionInfo{Version: "v9.9.9", TagName: "v9.9.9"}
 
-	service := &Service{
-		checker:   newGitHubChecker("javinizer/Javinizer"),
-		store:     newStateStore(statePath, defaultCheckInterval),
-		statePath: statePath,
-		interval:  24 * time.Hour,
-		enabled:   true,
-	}
-
-	// Force check - may succeed or fail depending on network
 	status, err := service.ForceCheck(context.Background())
+	require.NoError(t, err)
+	require.NotNil(t, status)
+	assert.Equal(t, 1, chk.callsCount())
+	assert.Equal(t, UpdateSourceFresh, status.Source)
+	assert.Equal(t, "v9.9.9", status.Version)
+	assert.True(t, status.Available)
+	assert.False(t, status.Prerelease)
+	assert.NotEmpty(t, status.CheckedAt)
+	assert.Empty(t, status.Error)
 
-	// Should not return an error, even if network fails
-	assert.NoError(t, err)
-
-	// Verify state was saved
-	assert.NotEmpty(t, status.Source)
-
-	// If we have a version, it should be populated
-	if status.Version != "" {
-		assert.NotEmpty(t, status.CheckedAt)
-	}
+	saved, err := loadStateFromFile(afero.NewOsFs(), service.statePath)
+	require.NoError(t, err)
+	assert.Equal(t, status, saved, "force-check must persist the successful fixture result")
 }
 
 func TestService_BackgroundCheck(t *testing.T) {
-	tmpDir := t.TempDir()
-	statePath := filepath.Join(tmpDir, "update_cache.json")
+	service, chk := newStubService(t, true)
+	chk.version = &versionInfo{Version: "v9.9.9", TagName: "v9.9.9"}
 
-	store := newStateStore(statePath, defaultCheckInterval)
-	service := &Service{
-		checker:   newGitHubChecker("javinizer/Javinizer"),
-		store:     store,
-		statePath: statePath,
-		interval:  24 * time.Hour,
-		enabled:   true,
-	}
-
-	// Background check should not block (no context argument now)
-	done := make(chan struct{})
-	go func() {
-		service.BackgroundCheck(context.Background())
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		// Success - check completed
-	case <-time.After(10 * time.Second):
-		t.Fatal("Background check did not complete within timeout")
-	}
+	// BackgroundCheck itself is synchronous; its caller owns dispatch. It
+	// must finish writing the result before returning.
+	service.BackgroundCheck(context.Background())
+	assert.Equal(t, 1, chk.callsCount())
+	saved, err := loadStateFromFile(afero.NewOsFs(), service.statePath)
+	require.NoError(t, err)
+	require.NotNil(t, saved)
+	assert.Equal(t, UpdateSourceFresh, saved.Source)
+	assert.Equal(t, "v9.9.9", saved.Version)
+	assert.True(t, saved.Available)
+	assert.NotEmpty(t, saved.CheckedAt)
+	assert.Empty(t, saved.Error)
 }
 
 func TestFormatUpdateMessage(t *testing.T) {
@@ -186,37 +169,30 @@ func TestService_GetLatestVersion(t *testing.T) {
 }
 
 func TestService_StartBackgroundCheck(t *testing.T) {
-	tmpDir := t.TempDir()
-	statePath := filepath.Join(tmpDir, "update_cache.json")
-
-	store := newStateStore(statePath, defaultCheckInterval)
-	service := &Service{
-		checker:   newGitHubChecker("javinizer/Javinizer"),
-		store:     store,
-		statePath: statePath,
-		interval:  24 * time.Hour,
-		enabled:   true,
-	}
-
+	service, chk := newStubService(t, true)
+	chk.version = &versionInfo{Version: "v9.9.9", TagName: "v9.9.9"}
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	done := service.StartBackgroundCheck(ctx, 20*time.Millisecond)
+	// Register the join before any fatal assertion so even a failed test cannot
+	// leave the ticker writing into t.TempDir during cleanup.
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
 
-	// Start background check
-	done := service.StartBackgroundCheck(ctx, 1*time.Second)
-
-	// Wait a bit to let it run
-	time.Sleep(1500 * time.Millisecond)
-
-	// Join the ticker before returning so t.TempDir cleanup cannot race a
-	// final state-store write by the still-running goroutine.
+	require.Eventually(t, func() bool { return chk.callsCount() >= 2 }, 2*time.Second, 5*time.Millisecond,
+		"background checker must query the fixture on multiple ticks")
 	cancel()
 	<-done
 
-	// Verify state was updated (or at least tried)
-	state, _ := store.LoadState()
-	if state != nil {
-		assert.NotEmpty(t, state.Source)
-	}
+	saved, err := loadStateFromFile(afero.NewOsFs(), service.statePath)
+	require.NoError(t, err)
+	require.NotNil(t, saved)
+	assert.Equal(t, UpdateSourceFresh, saved.Source)
+	assert.Equal(t, "v9.9.9", saved.Version)
+	assert.True(t, saved.Available)
+	assert.NotEmpty(t, saved.CheckedAt)
+	assert.Empty(t, saved.Error)
 }
 
 func TestService_StartBackgroundCheck_Disabled(t *testing.T) {

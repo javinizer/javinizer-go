@@ -1,0 +1,114 @@
+name: Offline Short Tests
+
+on:
+  pull_request:
+    branches: [master, main, develop]
+    paths:
+      - '**/*.go'
+      - '**/go.mod'
+      - '**/go.sum'
+      - 'internal/**/testdata/**'
+      - 'testdata/**'
+      - 'configs/config.yaml.example'
+      - 'internal/config/config.yaml.example'
+      - 'test/**'
+      - Makefile
+      - scripts/build_offline_test_overlay.py
+      - .github/workflows/offline-short.yml
+  push:
+    branches: [master, main, develop]
+    paths:
+      - '**/*.go'
+      - '**/go.mod'
+      - '**/go.sum'
+      - 'internal/**/testdata/**'
+      - 'testdata/**'
+      - 'configs/config.yaml.example'
+      - 'internal/config/config.yaml.example'
+      - 'test/**'
+      - Makefile
+      - scripts/build_offline_test_overlay.py
+      - .github/workflows/offline-short.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+jobs:
+  offline-short:
+    name: Offline short (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+      - name: Set up reviewed Go toolchain
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.27.2'
+          cache: true
+      - name: Download dependencies before offline runtime
+        run: go mod download
+      - name: Build verified test-only network overlay
+        run: python scripts/build_offline_test_overlay.py --output offline-evidence/overlay
+      - name: Verify native guard and run offline short tests
+        shell: python {0}
+        run: |
+          import collections, json, os, pathlib, subprocess, sys
+
+          sys.stdout.reconfigure(encoding="utf-8")
+          evidence = pathlib.Path("offline-evidence").resolve()
+          overlay = (evidence / "overlay" / "overlay.json").as_posix()
+          env = os.environ.copy()
+          env.update({"GOFLAGS": "'-overlay=" + overlay + "'", "GOTOOLCHAIN": "local",
+                      "GOPROXY": "off", "GONOPROXY": "none", "GOSUMDB": "off",
+                      "GOVCS": "*:off", "GODEBUG": "netdns=go"})
+          for key in ("JAVINIZER_RUN_LIVE_API_TESTS", "JAVINIZER_RUN_FLARESOLVERR_TESTS"):
+              env.pop(key, None)
+
+          def run(name, directory):
+              audit = evidence / (name + ".audit.log")
+              audit.write_text("", encoding="utf-8")
+              env["OFFLINE279_AUDIT_LOG"] = str(audit)
+              with (evidence / (name + ".jsonl")).open("w", encoding="utf-8") as stdout, \
+                   (evidence / (name + ".stderr.log")).open("w", encoding="utf-8") as stderr:
+                  result = subprocess.run(["go", "test", "-short", "-count=1", "-timeout=120s", "-json", "./..."],
+                                          cwd=directory, env=env, stdout=stdout, stderr=stderr)
+              (evidence / (name + ".exit")).write_text(str(result.returncode) + "\n", encoding="utf-8")
+              events = [json.loads(line) for line in (evidence / (name + ".jsonl")).read_text(encoding="utf-8").splitlines() if line.strip()]
+              failures = [event for event in events if event["Action"] == "fail"]
+              skips = [event for event in events if event["Action"] == "skip"]
+              print(name, "exit", result.returncode, "failures", failures, "skips", skips)
+              assert result.returncode == 0, name + " failed; inspect archived JSON and stderr"
+              return events, audit.read_text(encoding="utf-8").splitlines()
+
+          events, markers = run("canaries", "test/offlineguard")
+          required = {"TestExternalBeforeDNS", "TestDirectDialAndUDPWrites", "TestLoopbackAllowed",
+                      "TestHTTPExternalTargetBlockedBeforeProxy", "TestHTTPExternalTargetBlockedBeforeSOCKS",
+                      "TestInfrastructureProxyEndpointBlocked", "TestHTTPLoopbackAllowed"}
+          passed = {event.get("Test") for event in events if event["Action"] == "pass"}
+          assert required <= passed, "Missing native guard canaries"
+          assert not any(event["Action"] == "skip" for event in events), "Guard canaries cannot skip"
+          assert collections.Counter(markers) == {"OFFLINE279_BLOCKED": 26, "OFFLINE279_BLOCKED_HTTP_TARGET": 4}, "Unexpected guard audit"
+          events, markers = run("short-tests", ".")
+          assert not markers, "Short tests attempted external I/O; inspect audit and JSON, do not suppress it"
+      - name: Archive offline proof
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: offline-short-${{ matrix.os }}
+          path: offline-evidence/
+          if-no-files-found: error
+          retention-days: 30

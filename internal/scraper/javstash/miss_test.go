@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/go-resty/resty/v2"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/ratelimit"
 	"github.com/stretchr/testify/assert"
@@ -321,21 +321,31 @@ func TestScraper_Close_MissTest(t *testing.T) {
 // This tests the rate limiter Wait path, which errors when context is cancelled
 
 func TestScraper_Search_RateLimitContextCancelled(t *testing.T) {
-	// Use a long rate limit so context times out before Wait returns
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+	// Reserve the first slot so Search must wait rather than immediately fetch.
 	s := &scraper{
 		enabled:     true,
 		apiKey:      "test-key",
-		baseURL:     "https://javstash.org/graphql",
-		client:      resty.New(),
+		baseURL:     server.URL,
+		client:      NewTestClient(server),
 		rateLimiter: ratelimit.NewLimiter(10 * time.Second),
 		settings:    models.ScraperSettings{},
 	}
+
+	require.NoError(t, s.rateLimiter.Wait(context.Background()))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
 
 	_, err := s.Search(ctx, "IPX-535")
-	require.Error(t, err)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.Contains(t, err.Error(), "rate limit wait failed")
+	assert.Zero(t, requests.Load(), "cancelled rate-limit wait must not issue HTTP")
 }
 
 // --- Search with full scene result covering all fields ---

@@ -12,7 +12,7 @@ package commandutil
 // discard) if emission still fails.
 //
 // Fixtures follow batch_history_w244_test.go conventions: the
-// JAVINIZER_E2E_SCRAPERS seam substitutes the offline e2emock scraper, and
+// loopback LibreDMM fixture supplies synthetic metadata, and
 // all paths are built with filepath.Join/t.TempDir (never POSIX literals) so
 // the tests stay Windows-safe.
 
@@ -32,6 +32,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
+	"github.com/javinizer/javinizer-go/internal/testutil"
 	"github.com/javinizer/javinizer-go/internal/worker"
 	"github.com/javinizer/javinizer-go/internal/workflow"
 	"github.com/stretchr/testify/assert"
@@ -39,11 +40,10 @@ import (
 )
 
 // setupSingleFileBatch writes a one-file fixture: src/<ID>.mp4 matched by the
-// e2emock scraper. The update run leaves the video in place; the sort control
+// loopback fixture. The update run leaves the video in place; the sort control
 // copies it into a separate dest root.
 func setupSingleFileBatch(t *testing.T, id string) (configPath, src, dest, dbPath string) {
 	t.Helper()
-	t.Setenv("JAVINIZER_E2E_SCRAPERS", "true")
 
 	tmpDir := t.TempDir()
 	src = filepath.Join(tmpDir, "src")
@@ -54,6 +54,7 @@ func setupSingleFileBatch(t *testing.T, id string) (configPath, src, dest, dbPat
 
 	dbPath = filepath.Join(tmpDir, "javinizer.db")
 	cfg := config.DefaultConfig(nil, nil)
+	testutil.ConfigureLocalScraper(t, cfg, false)
 	cfg.Database.DSN = dbPath
 	cfg.Database.LogLevel = "silent"
 	cfg.Matching.Extensions = []string{".mp4"}
@@ -62,7 +63,7 @@ func setupSingleFileBatch(t *testing.T, id string) (configPath, src, dest, dbPat
 	cfg.Output.Template.SubfolderFormat = []string{}
 	cfg.Output.Template.FileFormat = "<ID>"
 	cfg.Output.Operation.RenameFile = true
-	// e2emock media URLs are non-resolvable; downloads are irrelevant here.
+	// Media downloads are irrelevant to these metadata/organize regressions.
 	cfg.Output.Download.DownloadCover = false
 	cfg.Output.Download.DownloadPoster = false
 	cfg.Output.Download.DownloadExtrafanart = false

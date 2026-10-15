@@ -2,9 +2,6 @@ package version_test
 
 import (
 	"bytes"
-	"context"
-	"errors"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,12 +12,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-type failingWriter struct{}
-
-func (w failingWriter) Write(_ []byte) (int, error) {
-	return 0, errors.New("write failed")
-}
 
 func TestVersionCommand_Default(t *testing.T) {
 	origVersion := appversion.Version
@@ -96,29 +87,4 @@ system:
 
 	assert.Contains(t, strings.TrimSpace(out.String()), "Update checks are disabled in configuration")
 	assert.Equal(t, "", strings.TrimSpace(errBuf.String()))
-}
-
-func TestVersionCommand_CheckReturnsStderrWriteError(t *testing.T) {
-	tmpDir := t.TempDir()
-	cfgPath := filepath.Join(tmpDir, "config.yaml")
-	configText := `config_version: 3
-system:
-  version_check_enabled: true
-  version_check_interval_hours: 24
-`
-	require.NoError(t, os.WriteFile(cfgPath, []byte(configText), 0644))
-	t.Setenv("JAVINIZER_CONFIG", cfgPath)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	cmd := versioncmd.NewCommand()
-	cmd.SetContext(ctx)
-	cmd.SetOut(io.Discard)
-	cmd.SetErr(failingWriter{})
-	cmd.SetArgs([]string{"--check"})
-
-	err := cmd.Execute()
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "write failed")
 }

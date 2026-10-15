@@ -137,9 +137,12 @@ run-api-dev:
 test:
 	go test -v ./...
 
+# Per-package timeout for short tests (can be overridden)
+TEST_SHORT_TIMEOUT ?= 120s
+
 # Run short/fast tests (for pre-commit hooks)
 test-short:
-	go test -short ./...
+	go test -short -timeout=$(TEST_SHORT_TIMEOUT) ./...
 
 # Run tests with race detector (critical for concurrent code)
 test-race:

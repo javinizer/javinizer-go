@@ -278,15 +278,18 @@ func TestCoverage_AtomicRenameOtherError(t *testing.T) {
 }
 
 func TestCoverage_FetchAndCacheRequestError(t *testing.T) {
-	cleanup := ssrf.SetLookupIPForTest(lookupPublicIP)
-	t.Cleanup(cleanup)
-
+	wantErr := errors.New("synthetic request failure")
+	calls := 0
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		calls++
+		assert.Equal(t, "http://fixture.invalid/img.jpg", req.URL.String())
+		assert.Equal(t, "test-agent", req.Header.Get("User-Agent"))
+		return nil, wantErr
+	})}
 	fs := afero.NewMemMapFs()
-	tempDir := t.TempDir()
-	client := ssrf.NewSSRFSafeClient(60 * time.Second)
-
-	result := fetchAndCache(context.Background(), fs, tempDir, "http://nonexistent.invalid/img.jpg", "http://nonexistent.invalid/img.jpg", client, "test-agent", "", 0)
-	assert.Error(t, result.err)
+	result := fetchAndCache(context.Background(), fs, t.TempDir(), "fixture-key", "http://fixture.invalid/img.jpg", client, "test-agent", "", 0)
+	require.ErrorIs(t, result.err, wantErr)
+	assert.Equal(t, 1, calls)
 }
 
 func TestCoverage_FetchAndCacheNon200Status(t *testing.T) {

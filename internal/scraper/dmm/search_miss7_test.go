@@ -218,20 +218,19 @@ func TestMiss7_ScrapeURL_RateLimitWaitFailure(t *testing.T) {
 		settings:    models.ScraperSettings{Enabled: true},
 	}
 
+	stubDMMCanceledRequest(t, s, "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=ipx00535/")
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
 	result, err := s.ScrapeURL(ctx, "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=ipx00535/")
-	require.Error(t, err)
+	require.ErrorContains(t, err, context.Canceled.Error())
 	assert.Nil(t, result)
 }
 
 // --- ScrapeURL: HTTP request error ---
 
 func TestMiss7_ScrapeURL_HTTPRequestError(t *testing.T) {
-	// Use a client pointed at a non-existent server to trigger connection error
 	client := resty.New()
-	client.SetTimeout(1)
 
 	s := &scraper{
 		client:      client,
@@ -240,8 +239,10 @@ func TestMiss7_ScrapeURL_HTTPRequestError(t *testing.T) {
 		settings:    models.ScraperSettings{Enabled: true},
 	}
 
+	stubDMMFetchError(t, s, "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=ipx00535/")
 	result, err := s.ScrapeURL(context.Background(), "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=ipx00535/")
-	require.Error(t, err)
+	require.ErrorContains(t, err, "fixture connection failure")
+	require.ErrorContains(t, err, "failed to fetch URL")
 	assert.Nil(t, result)
 }
 
@@ -424,7 +425,7 @@ func TestMiss7_ScrapeURL_SuccessfulResponse(t *testing.T) {
 // --- ScrapeURL: URL not handled by DMM ---
 
 func TestMiss7_ScrapeURL_URLNotHandled(t *testing.T) {
-	s := newTestDMMScraper()
+	s := newTestDMMScraper(t)
 
 	result, err := s.ScrapeURL(context.Background(), "https://www.example.com/some/page")
 	require.Error(t, err)
@@ -499,7 +500,7 @@ func TestMiss7_ParseHTML_BasicDocument(t *testing.T) {
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
 	require.NoError(t, err)
 
-	s := newTestDMMScraper()
+	s := newTestDMMScraper(t)
 	result, err := s.parseHTML(context.Background(), doc, "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=test/")
 	require.NoError(t, err)
 	assert.NotNil(t, result)

@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -93,6 +94,8 @@ func TestParseDetailPage(t *testing.T) {
 }
 
 func TestSearch_SearchResultFlow_VideoThumbList(t *testing.T) {
+	poster := posterFixture(t, 600, 800)
+	var posterRequests atomic.Int32
 	searchHTML := `<html><body><div class="videothumblist"><div class="videos">
 <div class="video" id="vid_javliat76u"><a href="./javliat76u.html" title="ONED-025 Play Erotic Woman"><div class="id">ONED-025</div><div class="title">Play Erotic Woman</div></a></div>
 <div class="video" id="vid_javliaze24"><a href="./javliaze24.html" title="ONED-250 Other"><div class="id">ONED-250</div><div class="title">Other</div></a></div>
@@ -113,7 +116,13 @@ func TestSearch_SearchResultFlow_VideoThumbList(t *testing.T) {
 			_, _ = fmt.Fprint(w, searchHTML)
 		case r.URL.Path == "/en/" && r.URL.Query().Get("v") == "javliat76u":
 			_, _ = fmt.Fprint(w, detailHTML)
+		case r.URL.Path == "/dig/mono/movie/oned025/oned025ps.jpg":
+			assert.Equal(t, http.MethodGet, r.Method)
+			posterRequests.Add(1)
+			w.Header().Set("Content-Type", "image/png")
+			_, _ = w.Write(poster)
 		default:
+			t.Errorf("unexpected fixture request: %s %s", r.Method, r.URL)
 			http.NotFound(w, r)
 		}
 	}))
@@ -125,6 +134,8 @@ func TestSearch_SearchResultFlow_VideoThumbList(t *testing.T) {
 		BaseURL:  server.URL,
 	}
 	s := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{})
+	// Direct page fetches and DMM poster probes must both stay on the fixture server.
+	s.client.SetTransport(&urlRewriteTransport{base: server.Client().Transport, rewrite: server.URL})
 
 	result, err := s.Search(context.Background(), "ONED-025")
 	if err != nil {
@@ -140,6 +151,10 @@ func TestSearch_SearchResultFlow_VideoThumbList(t *testing.T) {
 	if result.Title != "Play Erotic Woman" {
 		t.Fatalf("Title = %q", result.Title)
 	}
+	assert.Equal(t, "https://awsimgsrc.dmm.com/dig/mono/movie/oned025/oned025pl.jpg", result.CoverURL)
+	assert.Equal(t, "https://awsimgsrc.dmm.com/dig/mono/movie/oned025/oned025ps.jpg", result.PosterURL)
+	assert.False(t, result.ShouldCropPoster)
+	assert.Equal(t, int32(1), posterRequests.Load())
 }
 
 func TestSearch_LegacyHrefWithLanguagePrefix(t *testing.T) {
@@ -599,6 +614,7 @@ type urlRewriteTransport struct {
 
 func (t *urlRewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	target, _ := url.Parse(t.rewrite)
+	req = req.Clone(req.Context())
 	req.URL.Scheme = target.Scheme
 	req.URL.Host = target.Host
 	req.Host = target.Host

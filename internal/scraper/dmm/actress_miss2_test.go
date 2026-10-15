@@ -18,7 +18,7 @@ import (
 func TestExtractActressesFromStreamingPage_Miss2_DLMetadata(t *testing.T) {
 	html := `<dl><a href="?actress=650">DL Actress</a></dl>`
 	doc := docFromHTMLDMM(t, html)
-	s := newTestDMMScraper()
+	s := newTestDMMScraper(t)
 	actresses := s.extractActressesFromStreamingPage(context.Background(), doc)
 	assert.Len(t, actresses, 1)
 	assert.Equal(t, 650, actresses[0].DMMID)
@@ -35,7 +35,7 @@ func TestExtractActressesFromStreamingPage_Miss2_HeadingWithContainer(t *testing
 		</p>
 	</div>`
 	doc := docFromHTMLDMM(t, html)
-	s := newTestDMMScraper()
+	s := newTestDMMScraper(t)
 	actresses := s.extractActressesFromStreamingPage(context.Background(), doc)
 	assert.GreaterOrEqual(t, len(actresses), 1)
 }
@@ -46,7 +46,7 @@ func TestExtractActressFromLink_Miss2_NoHref(t *testing.T) {
 	html := `<a>No href</a>`
 	doc := docFromHTMLDMM(t, html)
 	sel := doc.Find("a").First()
-	s := newTestDMMScraper()
+	s := newTestDMMScraper(t)
 	actress := s.extractActressFromLink(context.Background(), sel)
 	assert.Equal(t, 0, actress.DMMID)
 }
@@ -57,7 +57,7 @@ func TestExtractActressFromLink_Miss2_NoActressID(t *testing.T) {
 	html := `<a href="/some/other/page">No ID</a>`
 	doc := docFromHTMLDMM(t, html)
 	sel := doc.Find("a").First()
-	s := newTestDMMScraper()
+	s := newTestDMMScraper(t)
 	actress := s.extractActressFromLink(context.Background(), sel)
 	assert.Equal(t, 0, actress.DMMID)
 }
@@ -80,7 +80,7 @@ func TestExtractActressFromLink_Miss2_SkipName(t *testing.T) {
 			html := `<a href="` + tt.href + `">` + tt.text + `</a>`
 			doc := docFromHTMLDMM(t, html)
 			sel := doc.Find("a").First()
-			s := newTestDMMScraper()
+			s := newTestDMMScraper(t)
 			actress := s.extractActressFromLink(context.Background(), sel)
 			assert.Equal(t, 0, actress.DMMID, "should skip name: %q", tt.text)
 		})
@@ -93,7 +93,7 @@ func TestExtractActressFromLink_Miss2_JapaneseName(t *testing.T) {
 	html := `<a href="?actress=777">波多野結衣</a>`
 	doc := docFromHTMLDMM(t, html)
 	sel := doc.Find("a").First()
-	s := newTestDMMScraper()
+	s := newTestDMMScraper(t)
 	actress := s.extractActressFromLink(context.Background(), sel)
 	assert.Equal(t, 777, actress.DMMID)
 	assert.Equal(t, "波多野結衣", actress.JapaneseName)
@@ -236,21 +236,41 @@ func TestNormalizeActressThumbURL_Miss2_RelativePath(t *testing.T) {
 // --- tryActressThumbURLs: with first and last name ---
 
 func TestTryActressThumbURLs_Miss2_WithNames(t *testing.T) {
-	s := newTestDMMScraper()
+	s := newTestDMMScraper(t)
+	var requested []string
+	s.thumbnailClient.SetTransport(dmmFixtureTransport(func(r *http.Request) (*http.Response, error) {
+		assert.Equal(t, http.MethodHead, r.Method)
+		requested = append(requested, r.URL.String())
+		status := http.StatusNotFound
+		if r.URL.String() == "https://pics.dmm.co.jp/mono/actjpgs/yui_hatano.jpg" {
+			status = http.StatusOK
+		}
+		return dmmFixtureResponse(r, status, ""), nil
+	}))
 	result := s.tryActressThumbURLs(context.Background(), "Yui", "Hatano", 0)
-	// The function may or may not find a real URL depending on network access.
-	// The key test is that it doesn't panic.
-	_ = result
+	assert.Equal(t, "https://pics.dmm.co.jp/mono/actjpgs/yui_hatano.jpg", result)
+	assert.Equal(t, []string{"https://pics.dmm.co.jp/mono/actjpgs/hatano_yui.jpg", "https://pics.dmm.co.jp/mono/actjpgs/yui_hatano.jpg"}, requested)
 }
 
-// --- tryActressThumbURLs: with DMM ID but no names ---
-
 func TestTryActressThumbURLs_Miss2_WithDMMIDNoNames(t *testing.T) {
-	s := newTestDMMScraper()
-	// With empty names and a DMM ID, should try actress page romaji variants
+	s := newTestDMMScraper(t)
+	pageCalls, imageCalls := 0, 0
+	s.client.SetTransport(dmmFixtureTransport(func(r *http.Request) (*http.Response, error) {
+		pageCalls++
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "https://www.dmm.co.jp/mono/dvd/-/list/=/article=actress/id=12345/", r.URL.String())
+		return dmmFixtureResponse(r, http.StatusOK, `<html><title>女優(あいうえ)</title></html>`), nil
+	}))
+	s.thumbnailClient.SetTransport(dmmFixtureTransport(func(r *http.Request) (*http.Response, error) {
+		imageCalls++
+		assert.Equal(t, http.MethodHead, r.Method)
+		assert.Equal(t, "https://pics.dmm.co.jp/mono/actjpgs/ai_ue.jpg", r.URL.String())
+		return dmmFixtureResponse(r, http.StatusOK, ""), nil
+	}))
 	result := s.tryActressThumbURLs(context.Background(), "", "", 12345)
-	// May be empty since no real server responds, but should not panic
-	_ = result
+	assert.Equal(t, "https://pics.dmm.co.jp/mono/actjpgs/ai_ue.jpg", result)
+	assert.Equal(t, 1, pageCalls)
+	assert.Equal(t, 1, imageCalls)
 }
 
 // --- extractRomajiVariantsFromActressPageCtx: with actual hiragana variants ---

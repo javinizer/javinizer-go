@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -37,11 +40,19 @@ func TestTransCov_FetchOpenAIModels_Success(t *testing.T) {
 // --- fetchOpenAICompatibleModels: context cancellation ---
 
 func TestTransCov_FetchOpenAIModels_ContextCancelled(t *testing.T) {
+	var requests atomic.Int64
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		t.Errorf("cancelled request reached upstream: %s", r.URL)
+		http.Error(w, "unexpected request", http.StatusInternalServerError)
+	}))
+	defer upstream.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := fetchOpenAICompatibleModels(ctx, "https://example.com", "key")
-	require.Error(t, err)
+	_, err := fetchOpenAICompatibleModels(ctx, upstream.URL, "key")
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Zero(t, requests.Load())
 }
 
 // --- fetchOpenAICompatibleModels: non-200 status ---
@@ -79,11 +90,19 @@ func TestTransCov_FetchAnthropicModels_Success(t *testing.T) {
 // --- fetchAnthropicModels: context cancellation ---
 
 func TestTransCov_FetchAnthropicModels_ContextCancelled(t *testing.T) {
+	var requests atomic.Int64
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		t.Errorf("cancelled request reached upstream: %s", r.URL)
+		http.Error(w, "unexpected request", http.StatusInternalServerError)
+	}))
+	defer upstream.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := fetchAnthropicModels(ctx, "https://example.com", "key")
-	require.Error(t, err)
+	_, err := fetchAnthropicModels(ctx, upstream.URL, "key")
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Zero(t, requests.Load())
 }
 
 // --- fetchAnthropicModels: non-200 status ---
@@ -162,11 +181,19 @@ func TestTransCov_FetchDeepLUsage_Non200Status(t *testing.T) {
 // --- fetchDeepLUsage: context cancellation ---
 
 func TestTransCov_FetchDeepLUsage_ContextCancelled(t *testing.T) {
+	var requests atomic.Int64
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		t.Errorf("cancelled request reached upstream: %s", r.URL)
+		http.Error(w, "unexpected request", http.StatusInternalServerError)
+	}))
+	defer upstream.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := fetchDeepLUsage(ctx, "https://api-free.deepl.com", "key")
-	require.Error(t, err)
+	_, err := fetchDeepLUsage(ctx, upstream.URL, "key")
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Zero(t, requests.Load())
 }
 
 // --- fetchDeepLUsage: invalid response body ---
@@ -279,53 +306,49 @@ func TestTransCov_GetTranslationModels_AnthropicInvalidURL(t *testing.T) {
 
 // --- getDeepLUsage: pro mode with default base URL ---
 
-func TestTransCov_GetDeepLUsage_ProDefaultURL(t *testing.T) {
+// These tests replace the transport itself, so the default production URL is
+// asserted in memory without ever reaching DNS, a proxy, or a socket.
+type translationRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f translationRoundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func testDeepLDefaultURL(t *testing.T, mode, expectedURL string) {
+	t.Helper()
+	original := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = original })
+	var requests atomic.Int64
+	http.DefaultTransport = translationRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		requests.Add(1)
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, expectedURL, r.URL.String())
+		assert.Equal(t, "DeepL-Auth-Key test-key", r.Header.Get("Authorization"))
+		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header),
+			Body: io.NopCloser(strings.NewReader(`{"character_count":100,"character_limit":500000}`)), Request: r}, nil
+	})
 	cfg := config.DefaultConfig(nil, nil)
-	deps := newTestDeps(cfg)
-
 	router := gin.New()
-	router.POST("/deepl/usage", getDeepLUsage(deps))
-
-	// Pro mode with empty base_url should use api.deepl.com
-	body := `{"mode":"pro","base_url":"","api_key":"test-key"}`
-	req := httptest.NewRequest(http.MethodPost, "/deepl/usage", bytes.NewBufferString(body))
+	router.POST("/deepl/usage", getDeepLUsage(newTestDeps(cfg)))
+	body, err := json.Marshal(DeepLUsageRequest{Mode: mode, APIKey: "test-key"})
+	require.NoError(t, err)
+	req := httptest.NewRequest(http.MethodPost, "/deepl/usage", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
-
-	// Will fail because we can't actually reach DeepL, but validates the mode was accepted
-	// (not a 400 "invalid mode" error)
-	assert.NotContains(t, w.Body.String(), "mode must be either")
-}
-
-// --- getDeepLUsage: free mode with default base URL ---
-
-func TestTransCov_GetDeepLUsage_FreeDefaultURL(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"character_count":100,"character_limit":500000}`))
-	}))
-	defer upstream.Close()
-
-	cfg := config.DefaultConfig(nil, nil)
-	deps := newTestDeps(cfg)
-
-	router := gin.New()
-	router.POST("/deepl/usage", getDeepLUsage(deps))
-
-	// Free mode with explicit base_url pointing to our test server
-	body := `{"mode":"free","base_url":"` + upstream.URL + `","api_key":"test-key"}`
-	req := httptest.NewRequest(http.MethodPost, "/deepl/usage", bytes.NewBufferString(body))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	require.Equal(t, http.StatusOK, w.Code)
-
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	var response DeepLUsageResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
 	assert.Equal(t, int64(100), response.CharacterCount)
 	assert.Equal(t, int64(500000), response.CharacterLimit)
+	assert.Equal(t, int64(1), requests.Load())
+}
+
+func TestTransCov_GetDeepLUsage_ProDefaultURL(t *testing.T) {
+	testDeepLDefaultURL(t, "pro", "https://api.deepl.com/v2/usage")
+}
+
+func TestTransCov_GetDeepLUsage_FreeDefaultURL(t *testing.T) {
+	testDeepLDefaultURL(t, "free", "https://api-free.deepl.com/v2/usage")
 }
 
 // --- fetchOpenAICompatibleModels: whitespace trimming in model IDs ---

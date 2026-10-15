@@ -89,6 +89,7 @@ func TestErrorMessages_ContainScraperName(t *testing.T) {
 			setupFunc: func() (*scraper, error) {
 				settings := models.ScraperSettings{Enabled: true}
 				scraper := newScraper(&settings, nil, models.FlareSolverrConfig{}, nil)
+				stubR18EmptyIDRequests(t, scraper)
 				_, err := scraper.Search(context.Background(), "")
 				return scraper, err
 			},
@@ -100,8 +101,7 @@ func TestErrorMessages_ContainScraperName(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := tt.setupFunc()
 
-			// Some errors may not happen in all environments
-			// Just verify that if there is an error, it's descriptive
+			require.Error(t, err)
 			if err != nil {
 				errMsg := err.Error()
 				assert.NotEmpty(t, errMsg, "Error message should not be empty")
@@ -115,6 +115,7 @@ func TestErrorMessages_ContainScraperName(t *testing.T) {
 func TestErrorMessages_NoSensitiveData(t *testing.T) {
 	settings := models.ScraperSettings{Enabled: true}
 	scraper := newScraper(&settings, nil, models.FlareSolverrConfig{}, nil)
+	stubR18EmptyIDRequests(t, scraper)
 
 	// Trigger various errors and check none leak sensitive data
 	sensitivePatterns := []string{
@@ -127,8 +128,9 @@ func TestErrorMessages_NoSensitiveData(t *testing.T) {
 	}
 
 	testCases := []struct {
-		name   string
-		action func() error
+		name      string
+		action    func() error
+		wantError bool
 	}{
 		{
 			name: "GetURL with empty ID",
@@ -138,7 +140,8 @@ func TestErrorMessages_NoSensitiveData(t *testing.T) {
 			},
 		},
 		{
-			name: "Search with empty ID",
+			name:      "Search with empty ID",
+			wantError: true,
 			action: func() error {
 				_, err := scraper.Search(context.Background(), "")
 				return err
@@ -149,6 +152,11 @@ func TestErrorMessages_NoSensitiveData(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			err := tc.action()
+			if tc.wantError {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
 			if err != nil {
 				errMsg := err.Error()
 				for _, pattern := range sensitivePatterns {

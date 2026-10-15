@@ -28,7 +28,7 @@ import (
 // setupLiveBatchConfig writes an offline-live batch config plus empty
 // source/destination trees. Mirrors batch_history_w244's setupDuplicateBatch
 // config minus the fixture files, so each test plants exactly the files its
-// leg needs. Downloads are disabled — e2emock media URLs are non-resolvable.
+// leg needs. The empty-scan legs never invoke a scraper.
 func setupLiveBatchConfig(t *testing.T) (configPath, src, dest, dbPath string) {
 	t.Helper()
 
@@ -129,7 +129,7 @@ func TestRunBatchCommand_LiveUnmatchedFiles_PrintsNoBatchJobToken(t *testing.T) 
 // (post-persist console placement: the identity renders after processing
 // started, i.e. after runtime construction wrote the row).
 func TestRunBatchCommand_LiveRun_PrintsIDAfterPersist(t *testing.T) {
-	// One matchable file on the e2emock scraper seam (offline) — the
+	// One matchable file on the loopback metadata fixture — the
 	// batch_update_mode_w248 fixture.
 	configPath, src, dest, dbPath := setupSingleFileBatch(t, "GOOD-700")
 

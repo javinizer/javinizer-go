@@ -6,15 +6,18 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/api/auth"
 	"github.com/javinizer/javinizer-go/internal/api/testkit"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/ssrf"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -508,22 +511,40 @@ func TestComprehensiveE2E(t *testing.T) {
 	// 11. SYSTEM: Proxy test, Translation models, Scrapers
 	// ══════════════════════════════════════════════════════════════════════
 	t.Run("System_ProxyAndTranslation", func(t *testing.T) {
+		t.Cleanup(ssrf.SetLookupIPForTest(func(string) ([]net.IP, error) {
+			return []net.IP{net.ParseIP("8.8.8.8")}, nil
+		}))
+		var modelRequests atomic.Int64
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			modelRequests.Add(1)
+			assert.Equal(t, http.MethodGet, r.Method)
+			assert.Equal(t, "/v1/models", r.URL.Path)
+			assert.Equal(t, "Bearer test-key", r.Header.Get("Authorization"))
+			w.Header().Set("Content-Type", "application/json")
+			_, err := io.WriteString(w, `{"data":[{"id":"fixture-model"}]}`)
+			assert.NoError(t, err)
+		}))
+		defer upstream.Close()
 		// Proxy test
 		w := doReq("POST", "/api/v1/proxy/test", map[string]any{
-			"mode": "direct",
+			"mode":       "direct",
+			"target_url": upstream.URL,
 			"proxy": map[string]any{
 				"enabled": false,
 			},
 		})
-		assert.Contains(t, []int{http.StatusOK, http.StatusBadRequest}, w.Code)
+		require.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "proxy.enabled=true")
 
 		// Translation models
 		w = doReq("POST", "/api/v1/translation/models", map[string]any{
 			"provider": "openai",
-			"base_url": "https://api.openai.com/v1",
+			"base_url": upstream.URL + "/v1",
 			"api_key":  "test-key",
 		})
-		assert.Contains(t, []int{http.StatusOK, http.StatusBadRequest, http.StatusBadGateway}, w.Code)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		assert.JSONEq(t, `{"models":["fixture-model"]}`, w.Body.String())
+		assert.Equal(t, int64(1), modelRequests.Load())
 
 		// Available scrapers
 		w = doReq("GET", "/api/v1/scrapers", nil)
@@ -537,6 +558,7 @@ func TestComprehensiveE2E(t *testing.T) {
 	// 12. VERSION: Status, Check
 	// ══════════════════════════════════════════════════════════════════════
 	t.Run("Version_StatusAndCheck", func(t *testing.T) {
+		mockVersionRelease(t)
 		w := doReq("GET", "/api/v1/version", nil)
 		assert.Equal(t, http.StatusOK, w.Code)
 		var verResp map[string]any
@@ -545,7 +567,12 @@ func TestComprehensiveE2E(t *testing.T) {
 		assert.Contains(t, verResp, "source")
 
 		w = doReq("POST", "/api/v1/version/check", nil)
-		assert.Equal(t, http.StatusOK, w.Code)
+		require.Equal(t, http.StatusOK, w.Code)
+		parseJSON(w, &verResp)
+		assert.Equal(t, "fresh", verResp["source"])
+		assert.Equal(t, "v99.0.0", verResp["latest"])
+		assert.Equal(t, true, verResp["update_available"])
+		assert.Empty(t, verResp["error"])
 	})
 
 	// ══════════════════════════════════════════════════════════════════════

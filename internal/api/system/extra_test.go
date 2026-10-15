@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -487,11 +489,13 @@ func TestTestProxy_AdditionalBranches(t *testing.T) {
 	})
 
 	t.Run("direct proxy request failure returns structured response", func(t *testing.T) {
+		closedProxy := httptest.NewServer(http.NotFoundHandler())
+		closedProxy.Close()
 		cfg := config.DefaultConfig(nil, nil)
 		cfg.Scrapers.Proxy.Enabled = true
 		cfg.Scrapers.Proxy.DefaultProfile = "main"
 		cfg.Scrapers.Proxy.Profiles = map[string]models.ProxyProfile{
-			"main": {URL: "http://127.0.0.1:1"}, // Invalid port to force connection error
+			"main": {URL: closedProxy.URL}, // Owned, closed listener forces connection refusal
 		}
 
 		testCfg := cfg
@@ -502,7 +506,7 @@ func TestTestProxy_AdditionalBranches(t *testing.T) {
 
 		reqBody := contracts.ProxyTestRequest{
 			Mode:      "direct",
-			TargetURL: "https://example.com",
+			TargetURL: closedProxy.URL,
 			Proxy: models.ProxyConfig{
 				Enabled: true,
 			},
@@ -520,11 +524,17 @@ func TestTestProxy_AdditionalBranches(t *testing.T) {
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
 		assert.False(t, response.Success)
 		assert.Contains(t, response.Message, "direct proxy request failed")
+		assert.Contains(t, strings.ToLower(response.Message), "refused")
+		assert.Equal(t, closedProxy.URL, response.ProxyURL)
+		assert.Equal(t, 0, response.StatusCode)
 		assert.GreaterOrEqual(t, response.DurationMS, int64(0))
 	})
 
 	t.Run("direct proxy method not allowed adds endpoint guidance", func(t *testing.T) {
+		var connects atomic.Int64
 		nonProxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			connects.Add(1)
+			assert.Equal(t, http.MethodConnect, r.Method)
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}))
 		defer nonProxy.Close()
@@ -544,7 +554,7 @@ func TestTestProxy_AdditionalBranches(t *testing.T) {
 
 		reqBody := contracts.ProxyTestRequest{
 			Mode:      "direct",
-			TargetURL: "https://example.com",
+			TargetURL: "https" + strings.TrimPrefix(nonProxy.URL, "http"),
 			Proxy: models.ProxyConfig{
 				Enabled: true,
 			},
@@ -563,6 +573,7 @@ func TestTestProxy_AdditionalBranches(t *testing.T) {
 		assert.False(t, response.Success)
 		assert.Contains(t, response.Message, "direct proxy request failed")
 		assert.Contains(t, response.Message, "not a forward proxy")
+		assert.Equal(t, int64(1), connects.Load())
 	})
 
 	t.Run("flaresolverr request failure returns structured response", func(t *testing.T) {

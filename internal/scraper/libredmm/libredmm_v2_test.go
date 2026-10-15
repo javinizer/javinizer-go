@@ -3,6 +3,7 @@ package libredmm
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -370,21 +371,24 @@ func TestExtractIDFromURLV2(t *testing.T) {
 
 // TestFilterPlaceholderScreenshotsCtxV2 tests filterPlaceholderScreenshotsCtx
 func TestFilterPlaceholderScreenshotsCtxV2(t *testing.T) {
+	urls := []string{"https://example.com/shot1.jpg", "https://example.com/shot2.jpg"}
+	var requests []string
+	client := resty.New().SetTransport(roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		assert.Equal(t, http.MethodHead, req.Method)
+		requests = append(requests, req.URL.String())
+		return nil, fmt.Errorf("synthetic image service failure")
+	}))
 	scraper := &scraper{
-		client:      resty.New(),
+		client:      client,
 		enabled:     true,
 		baseURL:     "https://www.libredmm.com",
 		rateLimiter: ratelimit.NewLimiter(0),
 		settings:    models.ScraperSettings{Enabled: true},
 	}
-
-	// Test with a result that has screenshot URLs
-	result := &models.ScraperResult{
-		ScreenshotURL: []string{"https://example.com/shot1.jpg", "https://example.com/shot2.jpg"},
-	}
+	result := &models.ScraperResult{ScreenshotURL: append([]string(nil), urls...)}
 	scraper.filterPlaceholderScreenshotsCtx(context.Background(), result)
-	// Should not panic; screenshots remain if not placeholder
-	assert.Len(t, result.ScreenshotURL, 2)
+	assert.Equal(t, urls, requests)
+	assert.Equal(t, urls, result.ScreenshotURL, "probe failures must preserve screenshots")
 }
 
 // TestNormalizeMovieURLV2 tests normalizeMovieURL with various inputs

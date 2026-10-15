@@ -17,7 +17,7 @@ import (
 // --- ScrapeURL: non-DMM URL returns not-found error ---
 
 func TestScrapeURL_Miss2_WrongHost(t *testing.T) {
-	s := newTestDMMScraper()
+	s := newTestDMMScraper(t)
 	_, err := s.ScrapeURL(context.Background(), "https://example.com/some/page")
 	require.Error(t, err)
 	scraperErr, ok := models.AsScraperError(err)
@@ -263,15 +263,23 @@ func TestSearch_Miss2_FetchError(t *testing.T) {
 
 func TestGetURLCtx_Miss2_ContentIDResolutionFailure(t *testing.T) {
 	repo := newDMMTestRepo(t)
-	// Don't create any mapping — resolution will fail
+	// A cache miss must consult the search fixture and report its 404.
 
 	settings := models.ScraperSettings{Enabled: true}
 	scraper := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{},
 		dmmOptions{ScrapeActress: false, Browser: models.BrowserConfig{Enabled: false, Timeout: 30}, ContentIDRepo: repo})
 
+	calls := 0
+	scraper.client.SetTransport(dmmFixtureTransport(func(r *http.Request) (*http.Response, error) {
+		calls++
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, searchURLFor("nomap001"), r.URL.String())
+		return dmmFixtureResponse(r, http.StatusNotFound, ""), nil
+	}))
 	_, err := scraper.getURLCtx(context.Background(), "NO-MAP-001")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "movie not found")
+	assert.Equal(t, 1, calls)
 }
 
 // --- tryDirectURLs: all direct URLs return non-200/non-302 ---

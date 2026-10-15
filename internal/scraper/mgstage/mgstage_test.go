@@ -6,7 +6,6 @@ import (
 	"context"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -1430,55 +1429,31 @@ func TestSearchIntegration(t *testing.T) {
 	assert.Equal(t, "女優 B", result.Actresses[1].JapaneseName)
 }
 
-// TestSearch_ErrorPaths tests error paths in Search
+// TestSearch_ErrorPaths reaches each detail-fetch error through a successful
+// search. Both absolute MGStage URLs are handled by an asserting transport.
 func TestSearch_ErrorPaths(t *testing.T) {
 	tests := []struct {
-		name    string
-		html    string
-		status  int
-		wantErr bool
+		name      string
+		html      string
+		status    int
+		wantError string
 	}{
-		{
-			name:    "404 status code",
-			html:    `<html><body>Not Found</body></html>`,
-			status:  http.StatusNotFound,
-			wantErr: true,
-		},
-		{
-			name:    "generic landing page detected",
-			html:    `<html><head><title>エロ動画・アダルトビデオ -MGS動画＜プレステージ グループ＞</title></head><body></body></html>`,
-			status:  http.StatusOK,
-			wantErr: true,
-		},
+		{"404 status code", `<html><body>Not Found</body></html>`, http.StatusNotFound, "MGStage detail returned status code 404"},
+		{"generic landing page detected", `<html><head><title>エロ動画・アダルトビデオ -MGS動画＜プレステージ グループ＞</title></head><body></body></html>`, http.StatusOK, "movie TEST-000 not found on MGStage"},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Set("Content-Type", "text/html")
-				w.WriteHeader(tt.status)
-				_, _ = w.Write([]byte(tt.html))
-			}))
-			defer server.Close()
-
-			// Create custom resty client with our test server
-			client := resty.New()
-			client.SetBaseURL(server.URL)
-			client.SetHeader("User-Agent", "Mozilla/5.0")
-			client.SetHeader("Cookie", "adc=1")
-
-			scraper := &scraper{
-				client:      client,
-				enabled:     true,
-				rateLimiter: ratelimit.NewLimiter(0),
-			}
-
-			result, err := scraper.Search(context.Background(), "TEST-000")
-
-			assert.Equal(t, tt.wantErr, err != nil)
-			if tt.wantErr {
-				assert.Nil(t, result)
-			}
+			s := newScriptedMGStageScraper(t, true, map[string]mockHTTPResponse{
+				"/search/cSearch.php?search_word=TEST-000&type=top&page=1&list_cnt=120": {
+					statusCode: http.StatusOK,
+					body:       `<a href="/product/product_detail/TEST-000/">Synthetic product</a>`,
+				},
+				"/product/product_detail/TEST-000/": {statusCode: tt.status, body: tt.html},
+			})
+			result, err := s.Search(context.Background(), "TEST-000")
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantError)
+			assert.Nil(t, result)
 		})
 	}
 }

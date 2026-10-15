@@ -137,18 +137,13 @@ func TestValidateNFOPath_SymlinkAttack(t *testing.T) {
 }
 
 func TestValidateNFOPath_TildeExpansion(t *testing.T) {
-	// Get user home directory
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		t.Skipf("Cannot get user home dir: %v", err)
-	}
+	// Expand against an isolated home on Unix/macOS and Windows.
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	t.Setenv("USERPROFILE", homeDir)
 
 	// Create a subdirectory in home for testing
 	testSubdir := filepath.Join(homeDir, ".javinizer-test-nfo-validation")
-	defer func() {
-		_ = os.RemoveAll(testSubdir)
-	}()
-
 	require.NoError(t, os.Mkdir(testSubdir, 0755))
 
 	// Create a test file in the subdirectory
@@ -157,8 +152,11 @@ func TestValidateNFOPath_TildeExpansion(t *testing.T) {
 
 	// Test with tilde in allowed dirs - use subdirectory path with tilde
 	tildeSubdir := "~/.javinizer-test-nfo-validation"
-	_, err = validateNFOPath(testFile, []string{tildeSubdir})
-	assert.NoError(t, err, "tilde should expand to user home directory")
+	got, err := validateNFOPath(testFile, []string{tildeSubdir})
+	require.NoError(t, err, "tilde should expand to user home directory")
+	want, err := filepath.EvalSymlinks(testFile)
+	require.NoError(t, err)
+	assert.Equal(t, want, got)
 }
 
 func TestValidateNFOPath_MultipleAllowedDirs(t *testing.T) {
