@@ -64,10 +64,6 @@ func setupTestDB(t *testing.T) *database.DB {
 	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
 	require.NoError(t, err, "Failed to create test database")
 
-	// Run migrations to create schema
-	err = db.RunMigrationsOnStartup(context.Background())
-	require.NoError(t, err, "Failed to run database migrations")
-
 	// Cleanup: Close database connection after test
 	t.Cleanup(func() {
 		err := db.Close()
@@ -75,6 +71,10 @@ func setupTestDB(t *testing.T) *database.DB {
 			t.Logf("Warning: Failed to close test database: %v", err)
 		}
 	})
+
+	// Run migrations to create schema
+	err = db.RunMigrationsOnStartup(context.Background())
+	require.NoError(t, err, "Failed to run database migrations")
 
 	return db
 }

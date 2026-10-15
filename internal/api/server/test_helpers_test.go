@@ -26,13 +26,13 @@ func createTestDeps(t *testing.T, cfg *config.Config, configFile string) *core.A
 	return deps
 }
 
-func newMockMovieRepo() *database.MovieRepository { return testkit.NewMockMovieRepo() }
-func newMockActressRepo() *database.ActressRepository {
-	return testkit.NewMockActressRepo()
+func newMockMovieRepo(t *testing.T) *database.MovieRepository { return testkit.NewMockMovieRepo(t) }
+func newMockActressRepo(t *testing.T) *database.ActressRepository {
+	return testkit.NewMockActressRepo(t)
 }
 
 func cleanupServerHub(t *testing.T, deps *core.APIDeps) {
-	testkit.CleanupServerHub(t, testkit.GetTestRuntime(deps))
+	testkit.CleanupTestRuntime(t, deps)
 }
 
 func setupAuthenticatedTestServer(t *testing.T) (*gin.Engine, *core.APIDeps) {

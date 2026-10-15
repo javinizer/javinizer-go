@@ -179,6 +179,10 @@ type APIRuntime struct {
 }
 
 // NewAPIRuntime creates an APIRuntime that manages the given APIDeps.
+// It takes ownership of the built-in TokenStore cleanup worker; call Shutdown
+// when done. Shared users must coordinate their lifetime: the first Shutdown
+// stops periodic token reclamation for all of them. Dependencies must not be
+// replaced after runtime use begins.
 // Per DEEP-2: the back-reference on APIDeps has been removed; callers that
 // need both DI and lifecycle access hold *APIRuntime directly and call
 // rt.Deps() for the immutable container.

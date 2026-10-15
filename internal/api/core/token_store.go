@@ -30,14 +30,21 @@ type TokenStoreInterface interface {
 
 // tokenStore manages verification tokens in-memory
 type tokenStore struct {
-	mu     sync.RWMutex
-	tokens map[string]verificationToken
+	mu       sync.RWMutex
+	tokens   map[string]verificationToken
+	stopOnce sync.Once
+	stop     chan struct{}
+	done     chan struct{}
 }
 
-// NewTokenStore creates a new token store with background cleanup
+// NewTokenStore creates a new token store with background cleanup.
+// Its owner must call CloseTokenStore when done, or transfer ownership to an
+// APIRuntime, whose Shutdown stops and joins the cleanup worker.
 func NewTokenStore() TokenStoreInterface {
 	ts := &tokenStore{
 		tokens: make(map[string]verificationToken),
+		stop:   make(chan struct{}),
+		done:   make(chan struct{}),
 	}
 
 	// Start background cleanup every 10 minutes
@@ -45,12 +52,30 @@ func NewTokenStore() TokenStoreInterface {
 	return ts
 }
 
+// CloseTokenStore stops and joins the worker of a store created by NewTokenStore.
+// It is safe to call concurrently or repeatedly. Nil and other implementations
+// are left alone, so TokenStoreInterface implementations need no lifecycle method.
+// Token creation, validation (including expiration), and manual cleanup remain
+// usable after closing; only periodic reclamation stops.
+func CloseTokenStore(store TokenStoreInterface) {
+	if s, ok := store.(*tokenStore); ok && s != nil {
+		s.stopOnce.Do(func() { close(s.stop) })
+		<-s.done
+	}
+}
+
 func (s *tokenStore) backgroundCleanup() {
+	defer close(s.done)
 	ticker := time.NewTicker(10 * time.Minute)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		s.CleanupExpired()
+	for {
+		select {
+		case <-s.stop:
+			return
+		case <-ticker.C:
+			s.CleanupExpired()
+		}
 	}
 }
 
