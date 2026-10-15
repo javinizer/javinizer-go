@@ -112,3 +112,26 @@ func TestSplitRawExtension_TemplateMirror(t *testing.T) {
 	assert.Equal(t, "ＲＣＴ-156-ＨＤ", stem, "the stem keeps its fullwidth spelling")
 	assert.Equal(t, "．ｍｋｖ", ext)
 }
+
+// Ideographic spaces participate in matching normalization, while filename
+// tags must retain the actual source spelling on either side of the split.
+func TestTemplateFilenameTags_IdeographicSpace(t *testing.T) {
+	filename := "作品　ＲＣＴ．ｍｋｖ"
+	assert.Equal(t, "作品 RCT.mkv", foldFullwidthASCII(filename))
+	stem, ext := splitRawExtension(filename)
+	assert.Equal(t, "作品　ＲＣＴ", stem)
+	assert.Equal(t, "．ｍｋｖ", ext)
+
+	ctx := &Context{OriginalFilename: filename}
+	for _, tt := range []struct{ tag, want string }{
+		{"<FILENAME>", "作品　ＲＣＴ"},
+		{"<FILENAME>.nfo", "作品　ＲＣＴ.nfo"},
+		{"<FILENAME_EXT>", filename},
+		{"<FILENAMEEXT>", filename},
+	} {
+		got, err := NewEngine().Execute(tt.tag, ctx)
+		require.NoError(t, err)
+		assert.Equal(t, tt.want, got, tt.tag)
+		assert.Equal(t, filename, ctx.OriginalFilename, "template evaluation must not normalize source metadata")
+	}
+}
