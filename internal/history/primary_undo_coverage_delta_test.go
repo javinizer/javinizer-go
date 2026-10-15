@@ -53,7 +53,7 @@ func TestPrimaryUndoLateHandleStatFailuresRetainData(t *testing.T) {
 			}
 			var err error
 			if state == "sealed" {
-				err = primaryUndoVerify(f.fs, j.Stage, j.StageIdentity, j.SHA256)
+				err = primaryUndoVerify(context.Background(), f.fs, j.Stage, j.StageIdentity, j.SHA256)
 			} else {
 				err = copyPrimaryUndo(context.Background(), f.fs, f.repo, f.op, j)
 			}
@@ -100,7 +100,7 @@ func TestPrimaryUndoNamedWitnessRestampRefusesStage(t *testing.T) {
 			return nil
 		}}, nil
 	}
-	require.ErrorContains(t, primaryUndoVerify(f.fs, j.Stage, j.StageIdentity, j.SHA256), "after hashing")
+	require.ErrorContains(t, primaryUndoVerify(context.Background(), f.fs, j.Stage, j.StageIdentity, j.SHA256), "after hashing")
 	require.Equal(t, 1, mutations)
 	require.FileExists(t, j.Source)
 	require.NoFileExists(t, j.Destination)

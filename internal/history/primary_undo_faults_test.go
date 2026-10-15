@@ -180,7 +180,7 @@ func TestPrimaryUndoDigestFaults(t *testing.T) {
 			if fault == "changed-content" {
 				digest = "wrong"
 			}
-			require.Error(t, primaryUndoVerify(f.fs, j.Stage, j.StageIdentity, digest))
+			require.Error(t, primaryUndoVerify(context.Background(), f.fs, j.Stage, j.StageIdentity, digest))
 			require.FileExists(t, j.Source)
 			require.FileExists(t, j.Stage)
 		})

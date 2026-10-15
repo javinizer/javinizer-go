@@ -94,13 +94,16 @@ func primaryUndoOpenPinned(fs afero.Fs, path string, expected models.PrimaryUndo
 
 type primaryUndoChangeWitness struct{ Seconds, Nanoseconds int64 }
 
-func primaryUndoVerify(fs afero.Fs, path string, expected models.PrimaryUndoIdentity, digest string) error {
-	_, err := primaryUndoVerifyWitness(fs, path, expected, digest)
+func primaryUndoVerify(ctx context.Context, fs afero.Fs, path string, expected models.PrimaryUndoIdentity, digest string) error {
+	_, err := primaryUndoVerifyWitness(ctx, fs, path, expected, digest)
 	return err
 }
 
-func primaryUndoVerifyWitness(fs afero.Fs, path string, expected models.PrimaryUndoIdentity, digest string) (primaryUndoChangeWitness, error) {
+func primaryUndoVerifyWitness(ctx context.Context, fs afero.Fs, path string, expected models.PrimaryUndoIdentity, digest string) (primaryUndoChangeWitness, error) {
 	empty := primaryUndoChangeWitness{}
+	if err := ctx.Err(); err != nil {
+		return empty, err
+	}
 	file, err := primaryUndoOpenPinned(fs, path, expected, true)
 	if err != nil {
 		return empty, err
@@ -111,7 +114,7 @@ func primaryUndoVerifyWitness(fs afero.Fs, path string, expected models.PrimaryU
 		return empty, err
 	}
 	sum := sha256.New()
-	if _, err := io.Copy(sum, file); err != nil {
+	if _, err := primaryUndoCopyContext(ctx, sum, file); err != nil {
 		return empty, err
 	}
 	after, _, err := primaryUndoIdentity(file)
@@ -137,7 +140,7 @@ func primaryUndoVerifyWitness(fs afero.Fs, path string, expected models.PrimaryU
 	if namedWitness != witness {
 		return empty, fmt.Errorf("primary Undo content changed after hashing %s", path)
 	}
-	return witness, nil
+	return witness, ctx.Err()
 }
 
 func primaryUndoRecheckWitness(fs afero.Fs, path string, expected models.PrimaryUndoIdentity, witness primaryUndoChangeWitness) error {
@@ -199,6 +202,9 @@ func primaryUndoState(ctx context.Context, repo database.BatchFileOperationRepos
 // its ownership proof are durably journaled.
 func beginPrimaryUndo(ctx context.Context, fs afero.Fs, repo database.BatchFileOperationRepositoryInterface, op *models.BatchFileOperation) error {
 	if err := primaryUndoDurabilitySupported(); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if op.InPlaceRenamed || op.OperationType != models.OperationTypeMove {
@@ -304,8 +310,13 @@ func validatePrimaryUndo(op *models.BatchFileOperation, j *models.PrimaryUndo) e
 	return nil
 }
 
-func resumePrimaryUndo(ctx context.Context, fs afero.Fs, repo database.BatchFileOperationRepositoryInterface, op *models.BatchFileOperation, j *models.PrimaryUndo) error {
+func resumePrimaryUndo(ctx context.Context, fs afero.Fs, repo database.BatchFileOperationRepositoryInterface, op *models.BatchFileOperation, j *models.PrimaryUndo) (retErr error) {
+	mutated := ""
+	defer func() { retErr = primaryUndoCanceledMutation(ctx, mutated, retErr) }()
 	if err := primaryUndoDurabilitySupported(); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if err := validatePrimaryUndo(op, j); err != nil {
@@ -330,19 +341,23 @@ func resumePrimaryUndo(ctx context.Context, fs afero.Fs, repo database.BatchFile
 		fallthrough
 	case "sealed":
 		if _, err := lstatRestoreSource(fs, j.Destination); os.IsNotExist(err) {
-			if err := primaryUndoVerify(fs, j.Stage, j.StageIdentity, j.SHA256); err != nil {
+			if err := primaryUndoVerify(ctx, fs, j.Stage, j.StageIdentity, j.SHA256); err != nil {
 				return err
 			}
 			// The one sealed inode is published exactly once; no helper may restage
 			// it to an unjournaled identity. A substitution retains the library copy.
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			pubErr := primaryUndoPublish(fs, j.Stage, j.Destination)
 			if pubErr != nil && !errors.Is(pubErr, fsutil.ErrPublishCompleted) {
 				return fmt.Errorf("publish primary Undo: %w", pubErr)
 			}
+			mutated = j.Destination
 		} else if err != nil {
 			return err
 		}
-		if err := primaryUndoVerify(fs, j.Destination, j.StageIdentity, j.SHA256); err != nil {
+		if err := primaryUndoVerify(ctx, fs, j.Destination, j.StageIdentity, j.SHA256); err != nil {
 			return err
 		}
 		if _, err := lstatRestoreSource(fs, j.Stage); !os.IsNotExist(err) {
@@ -366,13 +381,16 @@ func resumePrimaryUndo(ctx context.Context, fs afero.Fs, repo database.BatchFile
 		}
 		fallthrough
 	case "done":
-		return primaryUndoVerify(fs, j.Destination, j.StageIdentity, j.SHA256)
+		return primaryUndoVerify(ctx, fs, j.Destination, j.StageIdentity, j.SHA256)
 	default:
 		return fmt.Errorf("unknown primary Undo recovery state %q", j.State)
 	}
 }
 
 func copyPrimaryUndo(ctx context.Context, fs afero.Fs, repo database.BatchFileOperationRepositoryInterface, op *models.BatchFileOperation, j *models.PrimaryUndo) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	source, err := primaryUndoOpenPinned(fs, j.Source, j.SourceIdentity, true)
 	if err != nil {
 		return err
@@ -384,6 +402,9 @@ func copyPrimaryUndo(ctx context.Context, fs afero.Fs, repo database.BatchFileOp
 	}
 	if j.State != primaryUndoPlannedState {
 		return fmt.Errorf("primary Undo copy requires a fresh planned generation")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	stage, err := fs.OpenFile(j.Stage, os.O_CREATE|os.O_EXCL|os.O_RDWR, sourceInfo.Mode().Perm())
 	if err != nil {
@@ -411,7 +432,7 @@ func copyPrimaryUndo(ctx context.Context, fs afero.Fs, repo database.BatchFileOp
 		return err
 	}
 	hash := sha256.New()
-	n, err := io.CopyBuffer(stage, io.TeeReader(source, hash), make([]byte, 256*1024))
+	n, err := primaryUndoCopyContext(ctx, stage, io.TeeReader(source, hash))
 	if err != nil {
 		return err
 	}
@@ -425,6 +446,9 @@ func copyPrimaryUndo(ctx context.Context, fs afero.Fs, repo database.BatchFileOp
 	}
 	if after != j.SourceIdentity || afterWitness != sourceWitness || n != j.SourceIdentity.Size {
 		return fmt.Errorf("primary Undo source changed while copying")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	if err := primaryUndoPrepareStage(fs, stage, sourceInfo); err != nil {
 		return err
@@ -447,8 +471,10 @@ func copyPrimaryUndo(ctx context.Context, fs afero.Fs, repo database.BatchFileOp
 	return nil
 }
 
-func cleanupPrimaryUndo(ctx context.Context, fs afero.Fs, repo database.BatchFileOperationRepositoryInterface, op *models.BatchFileOperation, j *models.PrimaryUndo) error {
-	if err := primaryUndoVerify(fs, j.Destination, j.StageIdentity, j.SHA256); err != nil {
+func cleanupPrimaryUndo(ctx context.Context, fs afero.Fs, repo database.BatchFileOperationRepositoryInterface, op *models.BatchFileOperation, j *models.PrimaryUndo) (retErr error) {
+	mutated := ""
+	defer func() { retErr = primaryUndoCanceledMutation(ctx, mutated, retErr) }()
+	if err := primaryUndoVerify(ctx, fs, j.Destination, j.StageIdentity, j.SHA256); err != nil {
 		return err
 	}
 	location := j.Source
@@ -461,7 +487,7 @@ func cleanupPrimaryUndo(ctx context.Context, fs afero.Fs, repo database.BatchFil
 	if j.State != "published" {
 		return fmt.Errorf("invalid primary Undo cleanup state %q", j.State)
 	}
-	if err := primaryUndoVerify(fs, location, j.SourceIdentity, j.SHA256); err != nil {
+	if err := primaryUndoVerify(ctx, fs, location, j.SourceIdentity, j.SHA256); err != nil {
 		return err
 	}
 	token, err := primaryUndoToken()
@@ -476,26 +502,33 @@ func cleanupPrimaryUndo(ctx context.Context, fs afero.Fs, repo database.BatchFil
 		return err
 	}
 	*j = next
-	destinationWitness, err := primaryUndoVerifyWitness(fs, j.Destination, j.StageIdentity, j.SHA256)
+	destinationWitness, err := primaryUndoVerifyWitness(ctx, fs, j.Destination, j.StageIdentity, j.SHA256)
 	if err != nil {
 		return err
 	}
 	// The source's FINAL full hash follows every long SQL/destination proof.
 	// Native change-time checks detect same-size, mtime-restamped edits.
-	if err := primaryUndoVerify(fs, location, j.SourceIdentity, j.SHA256); err != nil {
+	if err := primaryUndoVerify(ctx, fs, location, j.SourceIdentity, j.SHA256); err != nil {
 		return err
 	}
 	// The only unlink addresses this unpredictable, durably recorded terminal.
 	// Only this live producer may use its newly committed claim. A restarted
 	// process retains that claim for manual recovery rather than superseding
 	// an endpoint a delayed producer may still use. No hop is unjournaled.
-	if err := primaryUndoPublish(fs, location, j.Cleanup); err != nil {
-		return fmt.Errorf("take primary Undo cleanup claim: %w", err)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	takeErr := primaryUndoPublish(fs, location, j.Cleanup)
+	if takeErr == nil || errors.Is(takeErr, fsutil.ErrPublishCompleted) {
+		mutated = j.Cleanup
+	}
+	if takeErr != nil {
+		return fmt.Errorf("take primary Undo cleanup claim: %w", takeErr)
 	}
 	// Rename changes native change time, so a pre-take witness cannot prove
 	// content afterwards. Rehash the claimed source and capture its post-take
 	// witness: same-size, mtime-restamped edits during the take must survive.
-	sourceWitness, err := primaryUndoVerifyWitness(fs, j.Cleanup, j.SourceIdentity, j.SHA256)
+	sourceWitness, err := primaryUndoVerifyWitness(ctx, fs, j.Cleanup, j.SourceIdentity, j.SHA256)
 	if err != nil {
 		return err
 	}
@@ -511,6 +544,9 @@ func cleanupPrimaryUndo(ctx context.Context, fs afero.Fs, repo database.BatchFil
 	if err := primaryUndoRecheckWitness(fs, j.Cleanup, j.SourceIdentity, sourceWitness); err != nil {
 		return err
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := primaryUndoRemove(fs, j.Cleanup); err != nil {
 		return fmt.Errorf("remove primary Undo cleanup claim: %w", err)
 	}
@@ -520,9 +556,11 @@ func cleanupPrimaryUndo(ctx context.Context, fs afero.Fs, repo database.BatchFil
 	return primaryUndoState(ctx, repo, op, j, "primary_removed")
 }
 
-func cleanupSupersededPrimaryUndo(ctx context.Context, fs afero.Fs, repo database.BatchFileOperationRepositoryInterface, op *models.BatchFileOperation, j *models.PrimaryUndo) error {
+func cleanupSupersededPrimaryUndo(ctx context.Context, fs afero.Fs, repo database.BatchFileOperationRepositoryInterface, op *models.BatchFileOperation, j *models.PrimaryUndo) (retErr error) {
+	mutated := ""
+	defer func() { retErr = primaryUndoCanceledMutation(ctx, mutated, retErr) }()
 	for len(j.SupersededStages) > 0 {
-		if err := primaryUndoVerify(fs, j.Destination, j.StageIdentity, j.SHA256); err != nil {
+		if err := primaryUndoVerify(ctx, fs, j.Destination, j.StageIdentity, j.SHA256); err != nil {
 			return err
 		}
 		stage := j.SupersededStages[0]
@@ -549,7 +587,7 @@ func cleanupSupersededPrimaryUndo(ctx context.Context, fs afero.Fs, repo databas
 			return err
 		}
 		*j = next
-		destinationWitness, err := primaryUndoVerifyWitness(fs, j.Destination, j.StageIdentity, j.SHA256)
+		destinationWitness, err := primaryUndoVerifyWitness(ctx, fs, j.Destination, j.StageIdentity, j.SHA256)
 		if err != nil {
 			return err
 		}
@@ -557,8 +595,15 @@ func cleanupSupersededPrimaryUndo(ctx context.Context, fs afero.Fs, repo databas
 		// scratch inode. It can never publish after losing its generation
 		// CAS. Ownership uses its strong object key, never mutable size/time
 		// or equal bytes. No old generation is ever opened for writes here.
-		if err := primaryUndoPublish(fs, location, stage.Cleanup); err != nil {
+		if err := ctx.Err(); err != nil {
 			return err
+		}
+		takeErr := primaryUndoPublish(fs, location, stage.Cleanup)
+		if takeErr == nil || errors.Is(takeErr, fsutil.ErrPublishCompleted) {
+			mutated = stage.Cleanup
+		}
+		if takeErr != nil {
+			return takeErr
 		}
 		owned, err = primaryUndoOpenPinned(fs, stage.Cleanup, stage.Identity, false)
 		if err != nil {
@@ -568,6 +613,9 @@ func cleanupSupersededPrimaryUndo(ctx context.Context, fs afero.Fs, repo databas
 			return err
 		}
 		if err := primaryUndoRecheckWitness(fs, j.Destination, j.StageIdentity, destinationWitness); err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
 			return err
 		}
 		if err := primaryUndoRemove(fs, stage.Cleanup); err != nil {
