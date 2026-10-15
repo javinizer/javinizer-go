@@ -318,6 +318,10 @@ jobs:
     - name: Run unit tests
       run: go test -short ./...
 
+    - name: Repeat Windows nil dependency panic contracts
+      run: |
+        go test -short -count=20 -timeout=120s -v ./internal/commandutil ./internal/api/core -run '^(TestCoreDeps_NilReceiverAccessors|TestDependencies_GetConfig_PanicsOnNil|TestDependencies_GetRegistry_PanicsOnNil|TestAPIDeps_GetConfig|TestAPIDeps_NilCoreDeps_Panics)$'
+
     - name: Repeat full Windows API server suite in fresh processes
       id: server_lifecycle_repeats
       timeout-minutes: 14
