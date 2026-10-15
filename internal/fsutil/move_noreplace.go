@@ -265,6 +265,9 @@ func copyStreamNoReplaceReproof(fs afero.Fs, srcFile afero.File, dst string, rep
 //     at the destination) with the lookup error, never asserting an
 //     identity. Error legs are exactly the digest twin's.
 func copyStreamNoReplaceInstallReproof(fs afero.Fs, srcFile afero.File, dst string, reproof func() error) (*BoundInstallIdentity, error) {
+	if err := ProbeNoClobberPublish(fs, filepath.Dir(dst)); err != nil {
+		return nil, err
+	}
 	staged, handle, err := CreateExclusiveStagingFile(fs, dst, ".nrstg", noreplaceOrdinal.Add(1), stagingFileMode())
 	if err != nil {
 		return nil, fmt.Errorf("no-replace copy: exclusive staging for %s: %w", dst, err)
@@ -332,6 +335,12 @@ func copyStreamNoReplaceInstallReproof(fs afero.Fs, srcFile afero.File, dst stri
 // composites hand down the ADMITTED source's bits (codex P2,
 // PRRT_kwDORn9KaM6pw_EY), every other caller passes stagingFileMode().
 func copyStreamNoReplaceDigestReproof(fs afero.Fs, srcFile afero.File, dst string, reproof func() error, mode os.FileMode) (string, *BoundInstallIdentity, error) {
+	// All streaming entry points, including the verified composites, must
+	// reject incapable destinations before creating or filling payload staging.
+	// A positive probe is advisory; the bound atomic publish below still decides.
+	if err := ProbeNoClobberPublish(fs, filepath.Dir(dst)); err != nil {
+		return "", nil, err
+	}
 	staged, handle, err := CreateExclusiveStagingFile(fs, dst, ".nrstg", noreplaceOrdinal.Add(1), mode)
 	if err != nil {
 		return "", nil, fmt.Errorf("no-replace copy: exclusive staging for %s: %w", dst, err)

@@ -219,11 +219,10 @@ func streamVerifiedSource(fs afero.Fs, srcFile afero.File, src, dst string, proo
 // inside the window cannot retarget the staged bytes — either the admission
 // identity publishes, or a pre-verify swap refuses typed (ErrTakeAsideForeign)
 // having landed nothing. Classification, occupancy, and publish classes mirror
-// CopyFileNoReplace. The no-clobber capability preflight is deliberately left
-// to the bound publish itself: the probe's verdict and the publish's refusal
-// derive from the same volumes, and the take-aside / staged-publish legs
-// already refuse unsupported volumes with the identical typed class. A nil
-// proof preserves the legacy by-name behavior unchanged.
+// CopyFileNoReplace. The shared streaming tail probes destination capability
+// before creating payload staging, so an unsupported volume refuses before
+// any source bytes flow. A positive probe never replaces the final bound
+// no-clobber publish. A nil proof preserves the legacy by-name behavior unchanged.
 func CopyFileNoReplaceVerified(fs afero.Fs, src, dst string, proof VerifiedSourceProof) error {
 	_, err := CopyFileNoReplaceVerifiedMode(fs, src, dst, proof, stagingFileMode())
 	return err
