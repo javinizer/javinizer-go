@@ -2,6 +2,7 @@ package caribbeancom
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -29,18 +30,27 @@ func TestSearchV3_Disabled(t *testing.T) {
 	assert.Contains(t, err.Error(), "disabled")
 }
 
-// TestScrapeURLV3_Disabled tests ScrapeURL when disabled
-func TestScrapeURLV3_Disabled(t *testing.T) {
+// TestScrapeURLV3_FetchError verifies the direct-page fetch error without network.
+// The enabled flag gates Search, so it cannot stand in for a response fixture.
+func TestScrapeURLV3_FetchError(t *testing.T) {
+	const target = "https://www.caribbeancom.com/moviepages/012345-001/"
+	fetchErr := errors.New("synthetic detail fetch failure")
+	transport := &ccMockTransport{err: fetchErr}
 	scraper := &scraper{
-		client:      resty.New(),
-		enabled:     false,
+		client:      resty.New().SetTransport(transport),
+		enabled:     true,
 		baseURL:     "https://www.caribbeancom.com",
 		rateLimiter: ratelimit.NewLimiter(0),
-		settings:    models.ScraperSettings{Enabled: false},
+		settings:    models.ScraperSettings{Enabled: true},
 	}
 
-	_, err := scraper.ScrapeURL(context.Background(), "https://www.caribbeancom.com/moviepages/012345-001/")
-	require.Error(t, err)
+	result, err := scraper.ScrapeURL(context.Background(), target)
+	assert.Nil(t, result)
+	require.ErrorIs(t, err, fetchErr)
+	assert.Contains(t, err.Error(), "failed to fetch Caribbeancom detail page")
+	require.Len(t, transport.requests, 1)
+	assert.Equal(t, http.MethodGet, transport.requests[0].Method)
+	assert.Equal(t, target, transport.requests[0].URL.String())
 }
 
 // TestScrapeURLV3_URLNotHandled tests ScrapeURL with non-Caribbeancom URL
@@ -144,11 +154,17 @@ func TestGetURLCtxV3(t *testing.T) {
 
 // ccMockTransport is a mock transport for testing
 type ccMockTransport struct {
+	err        error
+	requests   []*http.Request
 	response   string
 	statusCode int
 }
 
 func (mt *ccMockTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	mt.requests = append(mt.requests, req)
+	if mt.err != nil {
+		return nil, mt.err
+	}
 	body := mt.response
 	if body == "" {
 		body = "<html><body>mock response</body></html>"

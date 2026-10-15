@@ -73,11 +73,12 @@ func TestGetURLCtx_CancelledContext(t *testing.T) {
 	scraper := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{},
 		dmmOptions{ScrapeActress: false, Browser: models.BrowserConfig{Enabled: false, Timeout: 30}, ContentIDRepo: repo})
 
+	stubDMMCanceledRequest(t, scraper, "https://www.dmm.co.jp/search/=/searchstr=ipx535/")
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
 	_, err := scraper.getURLCtx(ctx, "IPX-535")
-	require.Error(t, err)
+	require.ErrorContains(t, err, context.Canceled.Error())
 }
 
 // --- getURLCtx: search fails for all queries, tries direct URLs ---
@@ -260,10 +261,6 @@ func TestTryDirectURLs_302RedirectAccepted(t *testing.T) {
 // --- Search: browser mode path ---
 
 func TestSearch_BrowserModeForVideoDmm(t *testing.T) {
-	// This tests the browser mode code path declaration.
-	// Since we can't actually run a browser in tests, we test that when useBrowser
-	// is true and the URL contains video.dmm.co.jp, the correct path is taken.
-	// The fetchWithBrowser function will fail early (no Chrome available), which is fine.
 
 	repo := newDMMTestRepo(t)
 	require.NoError(t, repo.Create(context.TODO(), &models.ContentIDMapping{
@@ -290,11 +287,11 @@ func TestSearch_BrowserModeForVideoDmm(t *testing.T) {
 		dmmOptions{ScrapeActress: false, Browser: models.BrowserConfig{Enabled: true, Timeout: 5}, ContentIDRepo: repo})
 	scraper.client.SetTransport(transport)
 
-	// This will try browser mode for video.dmm.co.jp URL which will fail
-	// since there's no Chrome. We just verify it doesn't panic.
+	wantErr := errors.New("fixture browser failed")
+	stubDMMBrowser(t, scraper, "https://video.dmm.co.jp/av/content/?id=ssis00200", "", wantErr)
 	_, err := scraper.Search(context.Background(), "SSIS-200")
-	// Error is expected since browser isn't available
-	_ = err
+	require.ErrorIs(t, err, wantErr)
+	require.ErrorContains(t, err, "browser fetch failed")
 }
 
 // --- Search: cancelled context ---
@@ -427,9 +424,6 @@ func (rt *detailFetchErrorRoundTripper) RoundTrip(req *http.Request) (*http.Resp
 // --- ScrapeURL: browser mode path for video.dmm.co.jp ---
 
 func TestScrapeURL_BrowserModeVideoDMM(t *testing.T) {
-	if testing.Short() {
-		t.Skip("live-network browser fetch; a locally available Chrome succeeds where CI has none")
-	}
 	s := &scraper{
 		enabled:       true,
 		useBrowser:    true,
@@ -443,6 +437,7 @@ func TestScrapeURL_BrowserModeVideoDMM(t *testing.T) {
 	// installed on the test host, while still proving the command fails cleanly.
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
+	s.browserFetch = func(ctx context.Context, _ string) (string, error) { return "", ctx.Err() }
 	_, err := s.ScrapeURL(ctx, "https://video.dmm.co.jp/av/content/?id=test123")
 	require.ErrorContains(t, err, context.Canceled.Error())
 }
@@ -457,11 +452,12 @@ func TestScrapeURL_RateLimitError(t *testing.T) {
 		settings:    models.ScraperSettings{Enabled: true},
 	}
 
+	stubDMMCanceledRequest(t, s, "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=test001/")
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
 	_, err := s.ScrapeURL(ctx, "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=test001/")
-	require.Error(t, err)
+	require.ErrorContains(t, err, context.Canceled.Error())
 }
 
 // --- ScrapeURL: HTML parse error ---
@@ -736,13 +732,16 @@ func docFromHTMLDMM(t *testing.T, raw string) *goquery.Document {
 	return doc
 }
 
-func newTestDMMScraper() *scraper {
-	return &scraper{
+func newTestDMMScraper(t *testing.T) *scraper {
+	t.Helper()
+	s := &scraper{
 		enabled:     true,
 		rateLimiter: ratelimit.NewLimiter(0),
 		client:      resty.New(),
 		settings:    models.ScraperSettings{Enabled: true},
 	}
+	stubDMMMetadataRequests(t, s)
+	return s
 }
 
 type dmmResponse struct {

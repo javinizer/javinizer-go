@@ -302,7 +302,7 @@ func TestScraper_SearchDisabled(t *testing.T) {
 }
 
 // Integration test that requires a running FlareSolverr instance
-// Run with: go test -v -timeout 120s ./internal/scraper/javlibrary/... -run TestIntegration_Search
+// Run with: JAVINIZER_RUN_FLARESOLVERR_TESTS=1 go test -v -timeout 120s ./internal/scraper/javlibrary/... -run TestIntegration_Search
 func TestIntegration_Search(t *testing.T) {
 	requireJavLibraryIntegration(t)
 
@@ -319,11 +319,8 @@ func TestIntegration_Search(t *testing.T) {
 	scraper := newScraper(&settings, proxyCfg, models.FlareSolverrConfig{})
 
 	result, err := scraper.Search(context.Background(), "IPX-123")
-	if err != nil {
-		t.Skipf("FlareSolverr may not be running: %v", err)
-	}
-
-	assert.NotNil(t, result)
+	require.NoError(t, err, "explicitly enabled JavLibrary integration request failed")
+	require.NotNil(t, result)
 	assert.Equal(t, "javlibrary", result.Source)
 	assert.Equal(t, "IPX-123", result.ID)
 	assert.NotEmpty(t, result.Title)

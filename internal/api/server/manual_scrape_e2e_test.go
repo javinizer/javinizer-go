@@ -2,10 +2,17 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
+	"image"
+	"image/jpeg"
+	"net"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -17,7 +24,9 @@ import (
 	"github.com/javinizer/javinizer-go/internal/api/contracts"
 	"github.com/javinizer/javinizer-go/internal/api/testkit"
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/scraper/e2emock"
+	"github.com/javinizer/javinizer-go/internal/ssrf"
 )
 
 type batchScrapeResponse struct {
@@ -30,15 +39,50 @@ type batchJobResponse struct {
 	Results map[string]*contracts.BatchFileResult `json:"results"`
 }
 
-func setupManualScrapeE2E(t *testing.T) (*gin.Engine, string) {
+// Preserve the e2emock metadata and manual-ID behavior while serving its artwork
+// from an owned fixture instead of the intentionally nonexistent e2e.invalid.
+type manualScrapeFixture struct {
+	*e2emock.Scraper
+	imageURL string
+}
+
+func (s *manualScrapeFixture) Search(ctx context.Context, id string) (*models.ScraperResult, error) {
+	result, err := s.Scraper.Search(ctx, id)
+	if result != nil {
+		result.CoverURL = s.imageURL
+		result.PosterURL = s.imageURL
+	}
+	return result, err
+}
+
+func setupManualScrapeE2E(t *testing.T) (*gin.Engine, string, *atomic.Int64) {
 	t.Helper()
 
 	tempDir := t.TempDir()
+	var imageData bytes.Buffer
+	require.NoError(t, jpeg.Encode(&imageData, image.NewRGBA(image.Rect(0, 0, 20, 30)), nil))
+	var imageRequests atomic.Int64
+	artwork := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		imageRequests.Add(1)
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/poster.jpg", r.URL.Path)
+		w.Header().Set("Content-Type", "image/jpeg")
+		_, err := w.Write(imageData.Bytes())
+		assert.NoError(t, err)
+	}))
+	t.Cleanup(artwork.Close)
+	t.Cleanup(ssrf.SetLookupIPForTest(func(host string) ([]net.IP, error) {
+		if host != "127.0.0.1" {
+			return nil, fmt.Errorf("unexpected poster hostname: %s", host)
+		}
+		return []net.IP{net.ParseIP("8.8.8.8")}, nil
+	}))
 	filePath := filepath.Join(tempDir, "ABC-123.mp4")
 	require.NoError(t, os.WriteFile(filePath, []byte("fake"), 0o644))
 
 	cfg := &config.Config{
 		Logging: config.LoggingConfig{Level: "error"},
+		System:  config.SystemConfig{TempDir: t.TempDir()},
 		Matching: config.MatchingConfig{
 			RegexEnabled: false,
 		},
@@ -56,16 +100,16 @@ func setupManualScrapeE2E(t *testing.T) (*gin.Engine, string) {
 	}
 
 	deps := testkit.CreateTestDeps(t, cfg, "")
-	deps.CoreDeps.ScraperRegistry.RegisterInstance(&e2emock.Scraper{})
+	deps.CoreDeps.ScraperRegistry.RegisterInstance(&manualScrapeFixture{Scraper: &e2emock.Scraper{}, imageURL: artwork.URL + "/poster.jpg"})
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	batch.RegisterRoutes(router.Group(""), testkit.GetTestRuntime(deps))
-	return router, filePath
+	return router, filePath, &imageRequests
 }
 
 func TestE2E_ManualScrapeInputFlowsAsMovieID(t *testing.T) {
-	router, filePath := setupManualScrapeE2E(t)
+	router, filePath, imageRequests := setupManualScrapeE2E(t)
 
 	reqBody, _ := json.Marshal(map[string]any{
 		"files":         []string{filePath},
@@ -92,7 +136,11 @@ func TestE2E_ManualScrapeInputFlowsAsMovieID(t *testing.T) {
 			continue
 		}
 		require.NoError(t, json.Unmarshal(gW.Body.Bytes(), &jobResp))
-		if r, ok := jobResp.Results[filePath]; ok && r.MovieID != "" {
+		if r, ok := jobResp.Results[filePath]; ok && r.Status == models.JobStatusCompleted {
+			require.Empty(t, r.Error)
+			require.NotNil(t, r.Movie)
+			assert.NotEmpty(t, r.Movie.CroppedPosterURL, "local artwork must produce a review poster")
+			assert.Equal(t, int64(1), imageRequests.Load())
 			assert.Equal(t, "GOOD-999", r.MovieID, "manual input must flow end-to-end as the scrape MovieID, bypassing the matcher")
 			assert.NotEqual(t, "ABC-123", r.MovieID, "the filename matcher (ABC-123) must be bypassed when a manual input is present")
 			if r.Movie != nil {
@@ -106,7 +154,7 @@ func TestE2E_ManualScrapeInputFlowsAsMovieID(t *testing.T) {
 }
 
 func TestE2E_ManualScrapeOrphanKeyRejected(t *testing.T) {
-	router, filePath := setupManualScrapeE2E(t)
+	router, filePath, imageRequests := setupManualScrapeE2E(t)
 
 	orphanPath := filepath.Join(filepath.Dir(filePath), "NONEXISTENT-999.mp4")
 	reqBody, _ := json.Marshal(map[string]any{
@@ -119,4 +167,5 @@ func TestE2E_ManualScrapeOrphanKeyRejected(t *testing.T) {
 	router.ServeHTTP(w, req)
 	assert.Equal(t, 400, w.Code, "manual_inputs key not present in files must be rejected (task-30 cross-check)")
 	assert.Contains(t, w.Body.String(), "is not in files")
+	assert.Zero(t, imageRequests.Load())
 }

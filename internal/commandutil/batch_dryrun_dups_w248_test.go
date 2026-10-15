@@ -11,7 +11,7 @@ package commandutil
 // summary reuses the live arithmetic (completed minus SkippedDuplicates).
 //
 // Fixtures follow batch_history_w244_test.go conventions: the
-// JAVINIZER_E2E_SCRAPERS seam substitutes the offline e2emock scraper, and all
+// loopback LibreDMM fixture supplies synthetic metadata, and all
 // paths are built with filepath.Join/t.TempDir (never POSIX literals) so the
 // tests stay Windows-safe.
 
@@ -24,6 +24,7 @@ import (
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/testutil"
 	"github.com/javinizer/javinizer-go/internal/workflow"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -37,7 +38,6 @@ import (
 // without it the mover loses through the ordinary conflict pipeline.
 func setupResidentMoverDryRunBatch(t *testing.T) (configPath, scan, moverSrc, residentPath string) {
 	t.Helper()
-	t.Setenv("JAVINIZER_E2E_SCRAPERS", "true")
 
 	tmpDir := t.TempDir()
 	scan = filepath.Join(tmpDir, "scan")
@@ -51,6 +51,7 @@ func setupResidentMoverDryRunBatch(t *testing.T) (configPath, scan, moverSrc, re
 	require.NoError(t, os.WriteFile(residentPath, []byte("resident bytes"), 0o600))
 
 	cfg := config.DefaultConfig(nil, nil)
+	testutil.ConfigureLocalScraper(t, cfg, false)
 	cfg.Database.DSN = filepath.Join(tmpDir, "javinizer.db")
 	cfg.Database.LogLevel = "silent"
 	cfg.Matching.Extensions = []string{".mp4"}
@@ -59,7 +60,7 @@ func setupResidentMoverDryRunBatch(t *testing.T) (configPath, scan, moverSrc, re
 	cfg.Output.Template.SubfolderFormat = []string{}
 	cfg.Output.Template.FileFormat = "<ID>"
 	cfg.Output.Operation.RenameFile = true
-	// e2emock media URLs are non-resolvable; downloads are irrelevant here.
+	// Media downloads are irrelevant to these metadata/organize regressions.
 	cfg.Output.Download.DownloadCover = false
 	cfg.Output.Download.DownloadPoster = false
 	cfg.Output.Download.DownloadExtrafanart = false

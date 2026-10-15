@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -413,6 +414,63 @@ func TestTranslateTexts_ConnectionFailure(t *testing.T) {
 // translateTexts tests - provider dispatch
 // =============================================================================
 
+// newProviderDispatchClient checks the selected provider's real default endpoint
+// and wire format without handing that URL to any network-capable client.
+func newProviderDispatchClient(t *testing.T, provider string) *mockHTTPClient {
+	t.Helper()
+	provider = strings.ToLower(provider)
+	expectedURLs := map[string]string{
+		"openai":            "https://api.openai.com/v1/chat/completions",
+		"deepl":             "https://api-free.deepl.com/v2/translate",
+		"openai-compatible": "http://localhost:11434/v1/chat/completions",
+		"anthropic":         "https://api.anthropic.com/v1/messages",
+	}
+	expectedURL, sendsRequest := expectedURLs[provider]
+	calls := 0
+	t.Cleanup(func() {
+		expectedCalls := 0
+		if sendsRequest {
+			expectedCalls = 1
+		}
+		assert.Equal(t, expectedCalls, calls, "provider dispatch request count")
+	})
+	return &mockHTTPClient{doFunc: func(req *http.Request) (*http.Response, error) {
+		calls++
+		require.True(t, sendsRequest, "validation failure must not make a request")
+		assert.Equal(t, http.MethodPost, req.Method)
+		assert.Equal(t, expectedURL, req.URL.String())
+		assert.Equal(t, "application/json", req.Header.Get("Content-Type"))
+		var payload map[string]json.RawMessage
+		require.NoError(t, json.NewDecoder(req.Body).Decode(&payload))
+		if provider == "deepl" {
+			assert.Equal(t, "DeepL-Auth-Key test-key", req.Header.Get("Authorization"))
+			assert.JSONEq(t, `["test"]`, string(payload["text"]))
+			assert.JSONEq(t, `"JA"`, string(payload["source_lang"]))
+			assert.JSONEq(t, `"EN"`, string(payload["target_lang"]))
+		} else {
+			model := "gpt-4o-mini"
+			if provider == "anthropic" {
+				model = "claude-sonnet-4-20250514"
+				assert.Equal(t, "test-key", req.Header.Get("x-api-key"))
+				assert.Equal(t, "2023-06-01", req.Header.Get("anthropic-version"))
+			} else if provider == "openai-compatible" {
+				model = "llama3"
+				assert.Empty(t, req.Header.Get("Authorization"))
+			} else {
+				assert.Equal(t, "Bearer test-key", req.Header.Get("Authorization"))
+			}
+			assert.JSONEq(t, `"`+model+`"`, string(payload["model"]))
+			assert.Contains(t, string(payload["messages"]), "test")
+		}
+		return &http.Response{
+			StatusCode: http.StatusForbidden,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(`{"error":"synthetic dispatch rejection"}`)),
+			Request:    req,
+		}, nil
+	}}
+}
+
 func TestTranslateTexts_Dispatch(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -429,19 +487,10 @@ func TestTranslateTexts_Dispatch(t *testing.T) {
 				TargetLanguage: "en",
 				SourceLanguage: "ja",
 				OpenAI: openAIConfig{
-					BaseURL: func() string {
-						// Create a test server that immediately closes to force connection refused
-						s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-							w.WriteHeader(http.StatusOK)
-						}))
-						// Close the server immediately so the URL becomes unreachable
-						s.Close()
-						return s.URL
-					}(),
 					APIKey: "test-key",
 				},
 			},
-			wantErr: true, // Error due to connection failure
+			wantErr: true, // Synthetic provider HTTP error
 		},
 		{
 			name:     "deepl provider",
@@ -451,19 +500,10 @@ func TestTranslateTexts_Dispatch(t *testing.T) {
 				TargetLanguage: "en",
 				SourceLanguage: "ja",
 				DeepL: deepLConfig{
-					BaseURL: func() string {
-						// Create a test server that immediately closes to force connection refused
-						s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-							w.WriteHeader(http.StatusOK)
-						}))
-						// Close the server immediately so the URL becomes unreachable
-						s.Close()
-						return s.URL
-					}(),
 					APIKey: "test-key",
 				},
 			},
-			wantErr: true, // Error due to connection failure
+			wantErr: true, // Synthetic provider HTTP error
 		},
 		{
 			name:     "google paid mode requires api key",
@@ -521,7 +561,7 @@ func TestTranslateTexts_Dispatch(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			httpClient := &http.Client{}
+			httpClient := newProviderDispatchClient(t, tt.provider)
 			s := New(tt.cfg,
 				NewOpenAIProvider(tt.cfg, httpClient),
 				NewOpenAICompatibleProvider(tt.cfg, httpClient),
@@ -536,6 +576,12 @@ func TestTranslateTexts_Dispatch(t *testing.T) {
 				require.Error(t, err)
 				if tt.errContains != "" {
 					assert.Contains(t, err.Error(), tt.errContains)
+				} else {
+					var typed *translationError
+					require.ErrorAs(t, err, &typed)
+					assert.Equal(t, TranslationErrorHTTPStatus, typed.Kind)
+					assert.Equal(t, http.StatusForbidden, typed.StatusCode)
+					assert.Equal(t, strings.ToLower(tt.provider)+" translation failed with status 403", typed.Message)
 				}
 			} else {
 				require.NoError(t, err)
@@ -3230,7 +3276,7 @@ func TestTranslateTexts_Dispatch_NewProviders(t *testing.T) {
 					Model: "llama3",
 				},
 			},
-			wantErr: true, // Error due to connection failure (no server)
+			wantErr: true, // Synthetic provider HTTP error
 		},
 		{
 			name:     "anthropic provider dispatch",
@@ -3243,7 +3289,7 @@ func TestTranslateTexts_Dispatch_NewProviders(t *testing.T) {
 					APIKey: "test-key",
 				},
 			},
-			wantErr: true, // Error due to connection failure (no server)
+			wantErr: true, // Synthetic provider HTTP error
 		},
 		{
 			name:     "uppercase openai-compatible provider",
@@ -3275,7 +3321,7 @@ func TestTranslateTexts_Dispatch_NewProviders(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			httpClient := &http.Client{}
+			httpClient := newProviderDispatchClient(t, tt.provider)
 			s := New(tt.cfg,
 				NewOpenAIProvider(tt.cfg, httpClient),
 				NewOpenAICompatibleProvider(tt.cfg, httpClient),
@@ -3290,6 +3336,12 @@ func TestTranslateTexts_Dispatch_NewProviders(t *testing.T) {
 				require.Error(t, err)
 				if tt.errContains != "" {
 					assert.Contains(t, err.Error(), tt.errContains)
+				} else {
+					var typed *translationError
+					require.ErrorAs(t, err, &typed)
+					assert.Equal(t, TranslationErrorHTTPStatus, typed.Kind)
+					assert.Equal(t, http.StatusForbidden, typed.StatusCode)
+					assert.Equal(t, strings.ToLower(tt.provider)+" translation failed with status 403", typed.Message)
 				}
 			} else {
 				require.NoError(t, err)

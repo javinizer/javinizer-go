@@ -1,14 +1,19 @@
 package r18dev
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/png"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -192,18 +197,12 @@ func TestScraper_Search_Success(t *testing.T) {
 	// Override base URL for testing (we need to modify the client to use test server)
 	// For now, we'll test the parsing logic separately since we can't easily override the URL
 
-	// Disable network for the poster dimension probe so the poster falls back to
-	// the cover deterministically (the awsimgsrc poster URL is otherwise fetched
-	// against the real CDN, making the assertion network-dependent).
-	scraper.client.GetClient().Transport = roundTripperFunc(func(*http.Request) (*http.Response, error) {
-		return nil, fmt.Errorf("network disabled")
-	})
-
 	// Test parseResponse directly instead
 	var data r18Response
 	err := json.Unmarshal(loadTestData(t, "ipx535_full_response.json"), &data)
 	require.NoError(t, err)
 
+	stubR18MetadataRequests(t, scraper)
 	result, err := scraper.parseResponse(context.Background(), &data, "https://r18.dev/test")
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -254,7 +253,7 @@ func TestScraper_Search_Success(t *testing.T) {
 	assert.Contains(t, actress.ThumbURL, "sakura_momo.jpg")
 
 	// Verify cover/poster URLs (cover upgraded to awsimgsrc CDN; poster falls back
-	// to the cover because the dimension probe is network-disabled).
+	// to the cover because the dimension fixture returns HTTP 404).
 	expectedCoverURL := "https://awsimgsrc.dmm.com/dig/digital/video/ipx00535/ipx00535pl.jpg"
 	assert.Equal(t, expectedCoverURL, result.PosterURL)
 	assert.Equal(t, expectedCoverURL, result.CoverURL)
@@ -276,6 +275,7 @@ func TestScraper_Search_LegacyFormat(t *testing.T) {
 	err := json.Unmarshal(loadTestData(t, "legacy_format_response.json"), &data)
 	require.NoError(t, err)
 
+	stubR18MetadataRequests(t, scraper)
 	result, err := scraper.parseResponse(context.Background(), &data, "https://r18.dev/test")
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -308,6 +308,7 @@ func TestScraper_Search_MinimalData(t *testing.T) {
 	err := json.Unmarshal(loadTestData(t, "minimal_response.json"), &data)
 	require.NoError(t, err)
 
+	stubR18MetadataRequests(t, scraper)
 	result, err := scraper.parseResponse(context.Background(), &data, "https://r18.dev/test")
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -337,6 +338,7 @@ func TestScraper_Search_EmptyArrays(t *testing.T) {
 	err := json.Unmarshal(loadTestData(t, "empty_arrays_response.json"), &data)
 	require.NoError(t, err)
 
+	stubR18MetadataRequests(t, scraper)
 	result, err := scraper.parseResponse(context.Background(), &data, "https://r18.dev/test")
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -656,6 +658,7 @@ func TestActressThumbURLGeneration(t *testing.T) {
 				},
 			}
 
+			stubR18MetadataRequests(t, scraper)
 			result, err := scraper.parseResponse(context.Background(), data, "https://r18.dev/test")
 			require.NoError(t, err)
 			require.Len(t, result.Actresses, 1)
@@ -676,6 +679,7 @@ func TestInvalidDateParsing(t *testing.T) {
 		ReleaseDate: "invalid-date-format",
 	}
 
+	stubR18MetadataRequests(t, scraper)
 	result, err := scraper.parseResponse(context.Background(), data, "https://r18.dev/test")
 	require.NoError(t, err)
 
@@ -750,6 +754,7 @@ func TestFallbackBehavior(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			stubR18MetadataRequests(t, scraper)
 			result, err := scraper.parseResponse(context.Background(), tt.data, "https://r18.dev/test")
 			require.NoError(t, err, tt.description)
 
@@ -851,6 +856,7 @@ func TestImageURLFallbacks(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			stubR18MetadataRequests(t, scraper)
 			result, err := scraper.parseResponse(context.Background(), tt.data, "https://r18.dev/test")
 			require.NoError(t, err, tt.description)
 
@@ -930,6 +936,7 @@ func TestScreenshotURLFallbacks(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			stubR18MetadataRequests(t, scraper)
 			result, err := scraper.parseResponse(context.Background(), tt.data, "https://r18.dev/test")
 			require.NoError(t, err, tt.description)
 			assert.Len(t, result.ScreenshotURL, tt.expectedCount, tt.description)
@@ -1005,6 +1012,7 @@ func TestTrailerURLFallbacks(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			stubR18MetadataRequests(t, scraper)
 			result, err := scraper.parseResponse(context.Background(), tt.data, "https://r18.dev/test")
 			require.NoError(t, err, tt.description)
 
@@ -1067,6 +1075,7 @@ func TestSeriesFallbackPriority(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			stubR18MetadataRequests(t, scraper)
 			result, err := scraper.parseResponse(context.Background(), tt.data, "https://r18.dev/test")
 			require.NoError(t, err)
 			assert.Equal(t, tt.expected, result.Series)
@@ -1166,6 +1175,7 @@ func TestActressNameParsing(t *testing.T) {
 				},
 			}
 
+			stubR18MetadataRequests(t, scraper)
 			result, err := scraper.parseResponse(context.Background(), data, "https://r18.dev/test")
 			require.NoError(t, err)
 			require.Len(t, result.Actresses, 1)
@@ -1220,6 +1230,7 @@ func TestIDResolution(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			stubR18MetadataRequests(t, scraper)
 			result, err := scraper.parseResponse(context.Background(), tt.data, "https://r18.dev/test")
 			require.NoError(t, err, tt.description)
 			assert.Equal(t, tt.expectedID, result.ID, tt.description)
@@ -1241,6 +1252,7 @@ func TestParseResponse_LanguageHandling(t *testing.T) {
 		cfg.Language = "en"
 		scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr, nil)
 
+		stubR18MetadataRequests(t, scraper)
 		result, err := scraper.parseResponse(context.Background(), data, "https://r18.dev/test")
 		require.NoError(t, err)
 
@@ -1254,6 +1266,7 @@ func TestParseResponse_LanguageHandling(t *testing.T) {
 		cfg.Language = "ja"
 		scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr, nil)
 
+		stubR18MetadataRequests(t, scraper)
 		result, err := scraper.parseResponse(context.Background(), data, "https://r18.dev/test")
 		require.NoError(t, err)
 
@@ -1325,6 +1338,7 @@ func TestParseResponse_TitleFallback(t *testing.T) {
 				TitleJA:   tt.title,
 			}
 
+			stubR18MetadataRequests(t, scraper)
 			result, err := scraper.parseResponse(context.Background(), data, "https://r18.dev/test")
 			require.NoError(t, err)
 
@@ -1375,6 +1389,7 @@ func TestParseResponse_DescriptionFallback(t *testing.T) {
 				Description:   tt.desc,
 			}
 
+			stubR18MetadataRequests(t, scraper)
 			result, err := scraper.parseResponse(context.Background(), data, "https://r18.dev/test")
 			require.NoError(t, err)
 
@@ -1426,6 +1441,7 @@ func TestParseResponse_ReleaseDateVariants(t *testing.T) {
 				ReleaseDate: tt.releaseDate,
 			}
 
+			stubR18MetadataRequests(t, scraper)
 			result, err := scraper.parseResponse(context.Background(), data, "https://r18.dev/test")
 			require.NoError(t, err)
 
@@ -1480,6 +1496,7 @@ func TestParseResponse_RuntimeVariants(t *testing.T) {
 				Runtime:   tt.runtime,
 			}
 
+			stubR18MetadataRequests(t, scraper)
 			result, err := scraper.parseResponse(context.Background(), data, "https://r18.dev/test")
 			require.NoError(t, err)
 
@@ -1501,6 +1518,7 @@ func TestParseResponse_EmptyFields(t *testing.T) {
 		// All optional fields left empty
 	}
 
+	stubR18MetadataRequests(t, scraper)
 	result, err := scraper.parseResponse(context.Background(), data, "https://r18.dev/test")
 	require.NoError(t, err)
 
@@ -1595,6 +1613,7 @@ func TestActressThumbURLFallback(t *testing.T) {
 				},
 			}
 
+			stubR18MetadataRequests(t, scraper)
 			result, err := scraper.parseResponse(context.Background(), data, "https://r18.dev/test")
 			require.NoError(t, err, tt.description)
 			require.Len(t, result.Actresses, 1, tt.description)
@@ -1694,6 +1713,7 @@ func TestCategoryParsing(t *testing.T) {
 				Categories: tt.categories,
 			}
 
+			stubR18MetadataRequests(t, scraper)
 			result, err := scraper.parseResponse(context.Background(), data, "https://r18.dev/test")
 			require.NoError(t, err)
 
@@ -1753,33 +1773,60 @@ func TestContentIDToID_SpecialPrefixes(t *testing.T) {
 }
 
 func TestSearch_Success(t *testing.T) {
-	// Create mock HTTP server
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.Contains(r.URL.Path, "dvd_id") {
-			// Return DVD ID lookup response
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write(loadTestData(t, "ipx535_dvdid_response.json"))
-		} else if strings.Contains(r.URL.Path, "combined") {
-			// Return full movie data
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write(loadTestData(t, "ipx535_full_response.json"))
-		} else {
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
-
+	// Exercise the actual public Search flow, including DVD-ID resolution,
+	// combined-detail parsing, poster dimensions, and screenshot filtering.
+	// Every response is local; an unexpected method or URL fails the test.
+	data := loadTestData(t, "ipx535_full_response.json")
+	var poster bytes.Buffer
+	require.NoError(t, png.Encode(&poster, image.NewRGBA(image.Rect(0, 0, 600, 800))))
+	dvdURL := "https://r18.dev/videos/vod/movies/detail/-/dvd_id=ipx535/json"
+	combinedURL := "https://r18.dev/videos/vod/movies/detail/-/combined=1ipx00535/json"
+	posterURL := "https://awsimgsrc.dmm.com/dig/digital/video/ipx00535/ipx00535ps.jpg"
+	responses := map[string][]byte{
+		dvdURL:      data,
+		combinedURL: data,
+		posterURL:   poster.Bytes(),
+		"https://pics.dmm.co.jp/digital/video/ipx00535/ipx00535jp-1.jpg": poster.Bytes(),
+		"https://pics.dmm.co.jp/digital/video/ipx00535/ipx00535jp-2.jpg": poster.Bytes(),
+	}
+	var mu sync.Mutex
+	calls := make(map[string]int)
 	cfg := createTestSettings(true)
 	scraper := newScraper(&cfg, testGlobalProxy, testGlobalFlareSolverr, nil)
-
-	// The search will hit the real API since baseURL is a const
-	// This is a design limitation - for full testing we'd need DI
-	_, err := scraper.Search(context.Background(), "ipx-535")
-
-	// Test will fail with real API, but exercises the code paths
-	if err != nil {
-		t.Logf("Search failed as expected in test environment: %v", err)
-	}
+	scraper.client.SetTransport(roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		body, ok := responses[r.URL.String()]
+		if !ok || (r.Method != http.MethodGet && !(r.Method == http.MethodHead && r.URL.Host == "pics.dmm.co.jp")) {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL)
+			return nil, fmt.Errorf("unexpected fixture request: %s %s", r.Method, r.URL)
+		}
+		calls[r.Method+" "+r.URL.String()]++
+		contentType := "application/json"
+		if r.URL.Host != "r18.dev" {
+			contentType = "image/png"
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {contentType}}, Body: io.NopCloser(bytes.NewReader(body)), Request: r}, nil
+	}))
+	scraper.client.SetRetryCount(0)
+	result, err := scraper.Search(context.Background(), "ipx-535")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, "IPX-535", result.ID)
+	assert.Equal(t, "1ipx00535", result.ContentID)
+	assert.Equal(t, "Ultimate Soapland Story Vol.95", result.Title)
+	assert.Equal(t, combinedURL, result.SourceURL)
+	assert.Equal(t, posterURL, result.PosterURL)
+	assert.False(t, result.ShouldCropPoster)
+	assert.Len(t, result.Actresses, 1)
+	assert.Len(t, result.ScreenshotURL, 2)
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, map[string]int{"GET " + dvdURL: 1, "GET " + combinedURL: 1, "GET " + posterURL: 1,
+		"HEAD https://pics.dmm.co.jp/digital/video/ipx00535/ipx00535jp-1.jpg": 1,
+		"GET https://pics.dmm.co.jp/digital/video/ipx00535/ipx00535jp-1.jpg":  1,
+		"HEAD https://pics.dmm.co.jp/digital/video/ipx00535/ipx00535jp-2.jpg": 1,
+		"GET https://pics.dmm.co.jp/digital/video/ipx00535/ipx00535jp-2.jpg":  1}, calls)
 }
 
 // TestSearch_NotFound exercises the not-found path against the real r18.dev API.
@@ -1878,6 +1925,7 @@ func TestScraper_Search_ROYD191(t *testing.T) {
 	err := json.Unmarshal(loadTestData(t, "royd191_response.json"), &data)
 	require.NoError(t, err)
 
+	stubR18MetadataRequests(t, scraper)
 	result, err := scraper.parseResponse(context.Background(), &data, "https://r18.dev/test")
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -1913,6 +1961,7 @@ func TestScraper_Search_ROYD191_Japanese(t *testing.T) {
 	err := json.Unmarshal(loadTestData(t, "royd191_response.json"), &data)
 	require.NoError(t, err)
 
+	stubR18MetadataRequests(t, scraper)
 	result, err := scraper.parseResponse(context.Background(), &data, "https://r18.dev/test")
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -1939,6 +1988,7 @@ func TestScraper_TranslationsPopulated(t *testing.T) {
 	err := json.Unmarshal(loadTestData(t, "royd191_response.json"), &data)
 	require.NoError(t, err)
 
+	stubR18MetadataRequests(t, scraper)
 	result, err := scraper.parseResponse(context.Background(), &data, "https://r18.dev/test")
 	require.NoError(t, err)
 	require.NotNil(t, result)

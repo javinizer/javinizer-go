@@ -1,10 +1,12 @@
 package imageutil
 
 import (
+	"bytes"
 	"fmt"
 	"image"
 	"image/color"
 	"image/jpeg"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -32,63 +34,55 @@ func TestGetOptimalPosterURL_ConstructURLFails(t *testing.T) {
 	assert.True(t, shouldCrop)
 }
 
-func TestGetOptimalPosterURL_AwsimgsrcDirect(t *testing.T) {
-	// Test with an already-awsimgsrc URL
-	coverURL := "https://awsimgsrc.dmm.com/dig/digital/video/ipx00535/ipx00535pl.jpg"
-
-	// Create a small test image for the server to serve
-	img := image.NewRGBA(image.Rect(0, 0, 1000, 1500))
-	for y := 0; y < 1500; y++ {
-		for x := 0; x < 1000; x++ {
-			img.Set(x, y, color.RGBA{R: 128, G: 128, B: 128, A: 255})
+// posterResponseTransport verifies the CDN request without dialing or resolving it.
+func posterResponseTransport(t *testing.T, wantURL string, status int, body []byte) http.RoundTripper {
+	t.Helper()
+	calls := 0
+	t.Cleanup(func() { assert.Equal(t, 1, calls, "poster request count") })
+	return roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		calls++
+		if req.Method != http.MethodGet || req.URL.String() != wantURL {
+			t.Errorf("unexpected poster request: %s %s", req.Method, req.URL)
+			return nil, fmt.Errorf("unexpected poster request")
 		}
-	}
+		return &http.Response{
+			StatusCode: status,
+			Header:     http.Header{"Content-Type": []string{"image/jpeg"}},
+			Body:       io.NopCloser(bytes.NewReader(body)),
+			Request:    req,
+		}, nil
+	})
+}
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "image/jpeg")
-		_ = jpeg.Encode(w, img, &jpeg.Options{Quality: 85})
-	}))
-	defer server.Close()
+func TestGetOptimalPosterURL_AwsimgsrcDirect(t *testing.T) {
+	coverURL := "https://awsimgsrc.dmm.com/dig/digital/video/ipx00535/ipx00535pl.jpg"
+	wantURL := "https://awsimgsrc.dmm.com/dig/digital/video/ipx00535/ipx00535ps.jpg"
+	client := &http.Client{Transport: posterResponseTransport(t, wantURL, http.StatusOK, createTestJPEG(t, 1000, 1500))}
 
-	// Override the URL to point to our test server
-	testURL := server.URL + "/dig/digital/video/ipx00535/ipx00535ps.jpg"
-	posterURL, shouldCrop := GetOptimalPosterURL(coverURL, server.Client())
-	// The URL construction changes pl.jpg -> ps.jpg for awsimgsrc
-	// Since it can't reach the real server, it falls back
-	_ = testURL
-	_ = posterURL
-	_ = shouldCrop
+	posterURL, shouldCrop := GetOptimalPosterURL(coverURL, client)
+	assert.Equal(t, wantURL, posterURL)
+	assert.False(t, shouldCrop)
 }
 
 func TestGetOptimalPosterURL_DigitalVideoPattern(t *testing.T) {
-	// Create a valid-size image for the poster server to serve
-	img := image.NewRGBA(image.Rect(0, 0, 800, 1200))
-	for y := 0; y < 1200; y++ {
-		for x := 0; x < 800; x++ {
-			img.Set(x, y, color.RGBA{R: 200, G: 100, B: 50, A: 255})
-		}
-	}
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "image/jpeg")
-		_ = jpeg.Encode(w, img, &jpeg.Options{Quality: 85})
-	}))
-	defer server.Close()
-
 	coverURL := "https://pics.dmm.co.jp/digital/video/sone00860/sone00860pl.jpg"
-	posterURL, shouldCrop := GetOptimalPosterURL(coverURL, server.Client())
-	// The constructAwsimgsrcPosterURL will produce an awsimgsrc URL, but the server
-	// can't serve from that domain, so it falls back to cover
-	_ = posterURL
-	_ = shouldCrop
+	wantURL := "https://awsimgsrc.dmm.com/dig/digital/video/sone00860/sone00860ps.jpg"
+	client := &http.Client{Transport: posterResponseTransport(t, wantURL, http.StatusOK, createTestJPEG(t, 800, 1200))}
+
+	posterURL, shouldCrop := GetOptimalPosterURL(coverURL, client)
+	assert.Equal(t, wantURL, posterURL)
+	assert.False(t, shouldCrop)
 }
 
 func TestGetOptimalPosterURL_NilClient(t *testing.T) {
-	// Test with nil client - should use default client. Use a content ID that
-	// does not exist on the CDN so the poster fetch reliably fails and the
-	// function falls back to cropping the cover (deterministic, no network
-	// dependency on a live title).
-	coverURL := "https://pics.dmm.co.jp/digital/video/zznonexistenttest999/zznonexistenttest999pl.jpg"
+	// Keep this test sequential: the nil-client path uses the default transport.
+	// A synthetic 404 exercises fallback without depending on a missing CDN title.
+	coverURL := "https://pics.dmm.co.jp/digital/video/test001/test001pl.jpg"
+	wantURL := "https://awsimgsrc.dmm.com/dig/digital/video/test001/test001ps.jpg"
+	originalTransport := http.DefaultTransport
+	http.DefaultTransport = posterResponseTransport(t, wantURL, http.StatusNotFound, nil)
+	t.Cleanup(func() { http.DefaultTransport = originalTransport })
+
 	posterURL, shouldCrop := GetOptimalPosterURL(coverURL, nil)
 	assert.True(t, shouldCrop)
 	assert.Equal(t, coverURL, posterURL)

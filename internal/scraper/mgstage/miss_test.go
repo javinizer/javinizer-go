@@ -94,15 +94,15 @@ func buildMGStageMissDetailHTML(id, title, date, runtime, maker, label, series, 
 // Search tests
 // ============================================================
 
+// Search is callable independently of registry enablement; its missing-product
+// result must come from the fixture, not an unreachable production endpoint.
 func TestMiss_Search_Disabled(t *testing.T) {
-	s := &scraper{
-		client:      resty.New(),
-		enabled:     false,
-		rateLimiter: ratelimit.NewLimiter(0),
-		settings:    models.ScraperSettings{Enabled: false},
-	}
-	_, err := s.Search(context.Background(), "GANA-2850")
+	s := newMissingMGStageScraper(t, false)
+	_, err := s.Search(context.Background(), "INVALID-ID")
 	require.Error(t, err)
+	scraperErr, ok := models.AsScraperError(err)
+	require.True(t, ok)
+	assert.Equal(t, models.ScraperErrorKindNotFound, scraperErr.Kind)
 }
 
 func TestMiss_Search_Success(t *testing.T) {

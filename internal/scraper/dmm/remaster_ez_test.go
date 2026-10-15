@@ -92,6 +92,7 @@ func (t *cancelTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 func TestRemasterVerifyCancellation(t *testing.T) {
 	s, _ := newRemasterTestScraper(t)
+	stubDMMCanceledRequest(t, s, "https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=1rct00156h/")
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	st, err := s.verifyCandidateDisplayID(ctx, "rct156h", []string{"https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=1rct00156h/"})

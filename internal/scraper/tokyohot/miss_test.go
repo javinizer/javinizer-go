@@ -197,27 +197,25 @@ func TestSearch_Disabled_MissTest(t *testing.T) {
 	assert.Contains(t, err.Error(), "disabled")
 }
 
-// --- ScrapeURL: detail page-level status code tests using direct URL ---
-// ScrapeURL needs CanHandleURL to pass. We can test the status code handling
-// by using the ScrapeURL method with a URL that points to the test server
-// but uses a tokyo-hot.com hostname. Since we can't fake DNS in unit tests,
-// we instead verify the internal fetchPageCtx returns correctly for various
-// status codes (already covered by Search tests above).
-
-// --- ScrapeURL: disabled scraper is NOT checked in ScrapeURL, only in Search ---
-// ScrapeURL goes straight to fetchPageCtx without checking enabled flag.
-// The disabled check only exists in the Search method.
-
+// ScrapeURL handles an explicit page independently of Search's enabled gate.
+// Its response must come from a fixture even when settings.Enabled is false.
 func TestScrapeURL_MissTest_DisabledNotCheckedInScrapeURL(t *testing.T) {
+	const target = "https://www.tokyo-hot.com/product/N1234/"
 	settings := testSettings("https://www.tokyo-hot.com")
 	settings.Enabled = false
 	s := newScraper(settings, nil, models.FlareSolverrConfig{})
-	// ScrapeURL doesn't check enabled flag, it will try to fetch
-	// This will fail because the URL points to a non-existent server
-	_, err := s.ScrapeURL(context.Background(), "https://www.tokyo-hot.com/product/N1234/")
-	// Expected: either a fetch error or a parse error, not a "disabled" error
-	// The important thing is that it does NOT return "disabled"
-	if err != nil {
-		assert.NotContains(t, err.Error(), "disabled")
-	}
+	transport := &thMockTransport{statusCode: http.StatusNotFound}
+	s.client.SetTransport(transport)
+
+	result, err := s.ScrapeURL(context.Background(), target)
+	assert.Nil(t, result)
+	var scraperErr *models.ScraperError
+	require.ErrorAs(t, err, &scraperErr)
+	assert.Equal(t, "TokyoHot", scraperErr.Scraper)
+	assert.Equal(t, models.ScraperErrorKindNotFound, scraperErr.Kind)
+	assert.Equal(t, "page not found", scraperErr.Message)
+	assert.False(t, scraperErr.Retryable)
+	require.Len(t, transport.requests, 1)
+	assert.Equal(t, http.MethodGet, transport.requests[0].Method)
+	assert.Equal(t, target+"?lang=en", transport.requests[0].URL.String())
 }

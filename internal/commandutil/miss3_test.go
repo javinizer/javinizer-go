@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/testutil"
 	"github.com/javinizer/javinizer-go/internal/worker"
 	"github.com/javinizer/javinizer-go/internal/workflow"
 	"github.com/stretchr/testify/assert"
@@ -31,6 +32,7 @@ func TestRunBatchCommand_WithVideoFile_FullPipeline(t *testing.T) {
 	require.NoError(t, err)
 
 	cfg := config.DefaultConfig(nil, nil)
+	fixture := testutil.ConfigureLocalScraper(t, cfg, false)
 	cfg.Database.DSN = dbPath
 	cfg.Matching.Extensions = []string{".mp4", ".mkv", ".avi", ".wmv"}
 	cfg.Matching.MinSizeMB = 0
@@ -52,12 +54,11 @@ func TestRunBatchCommand_WithVideoFile_FullPipeline(t *testing.T) {
 	}
 
 	err = RunBatchCommand(context.Background(), &buf, opts)
-	// The batch job may fail because there's no actual scraper to get metadata,
-	// but the important thing is that we cover the pipeline up to the batch job execution
-	_ = err
-	// Check that the scanner found the file and the pipeline progressed
-	output := buf.String()
-	t.Logf("Output:\n%s", output)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"ABC-123"}, fixture.SearchIDs())
+	assert.Contains(t, buf.String(), "Metadata found: 1")
+	assert.Contains(t, buf.String(), "Would organize 1 file(s)")
+	assert.FileExists(t, videoFile)
 }
 
 func TestRunBatchCommand_WithVideoFile_SilentPresenter(t *testing.T) {
@@ -71,6 +72,7 @@ func TestRunBatchCommand_WithVideoFile_SilentPresenter(t *testing.T) {
 	require.NoError(t, err)
 
 	cfg := config.DefaultConfig(nil, nil)
+	fixture := testutil.ConfigureLocalScraper(t, cfg, false)
 	cfg.Database.DSN = dbPath
 	cfg.Matching.Extensions = []string{".mp4", ".mkv", ".avi", ".wmv"}
 	cfg.Matching.MinSizeMB = 0
@@ -92,8 +94,9 @@ func TestRunBatchCommand_WithVideoFile_SilentPresenter(t *testing.T) {
 	}
 
 	err = RunBatchCommand(context.Background(), &buf, opts)
-	// May fail due to no scraper results, but should not panic
-	_ = err
+	require.NoError(t, err)
+	assert.Equal(t, []string{"DEF-456"}, fixture.SearchIDs())
+	assert.FileExists(t, videoFile)
 }
 
 func TestRunBatchCommand_WithVideoFile_CustomEventHandler(t *testing.T) {
@@ -110,6 +113,7 @@ func TestRunBatchCommand_WithVideoFile_CustomEventHandler(t *testing.T) {
 	require.NoError(t, err)
 
 	cfg := config.DefaultConfig(nil, nil)
+	fixture := testutil.ConfigureLocalScraper(t, cfg, false)
 	cfg.Database.DSN = dbPath
 	cfg.Matching.Extensions = []string{".mp4", ".mkv", ".avi", ".wmv"}
 	cfg.Matching.MinSizeMB = 0
@@ -139,8 +143,9 @@ func TestRunBatchCommand_WithVideoFile_CustomEventHandler(t *testing.T) {
 	}
 
 	err = RunBatchCommand(context.Background(), &buf, opts)
-	_ = err
-	_ = eventMessages
+	require.NoError(t, err)
+	assert.Equal(t, []string{"GHI-789"}, fixture.SearchIDs())
+	assert.NotEmpty(t, eventMessages, "the custom handler must receive pipeline events")
 }
 
 func TestRunBatchCommand_WithVideoFile_CustomSummaryPrinter(t *testing.T) {
@@ -154,6 +159,7 @@ func TestRunBatchCommand_WithVideoFile_CustomSummaryPrinter(t *testing.T) {
 	require.NoError(t, err)
 
 	cfg := config.DefaultConfig(nil, nil)
+	fixture := testutil.ConfigureLocalScraper(t, cfg, false)
 	cfg.Database.DSN = dbPath
 	cfg.Matching.Extensions = []string{".mp4", ".mkv", ".avi", ".wmv"}
 	cfg.Matching.MinSizeMB = 0
@@ -164,6 +170,9 @@ func TestRunBatchCommand_WithVideoFile_CustomSummaryPrinter(t *testing.T) {
 	summaryCalled := false
 	summaryPrinter := func(w io.Writer, o BatchCommandOptions, r BatchCommandResult) {
 		summaryCalled = true
+		assert.Equal(t, 1, r.SuccessCount)
+		assert.Zero(t, r.FailedCount)
+		assert.Len(t, r.Movies, 1)
 	}
 
 	opts := BatchCommandOptions{
@@ -181,10 +190,9 @@ func TestRunBatchCommand_WithVideoFile_CustomSummaryPrinter(t *testing.T) {
 	}
 
 	err = RunBatchCommand(context.Background(), &buf, opts)
-	_ = err
-	// SummaryPrinter may or may not be called depending on whether
-	// the batch job succeeds/fails
-	_ = summaryCalled
+	require.NoError(t, err)
+	assert.True(t, summaryCalled)
+	assert.Equal(t, []string{"JKL-012"}, fixture.SearchIDs())
 }
 
 func TestRunBatchCommand_WithVideoFile_RecursiveSearch(t *testing.T) {
@@ -201,6 +209,7 @@ func TestRunBatchCommand_WithVideoFile_RecursiveSearch(t *testing.T) {
 	require.NoError(t, err)
 
 	cfg := config.DefaultConfig(nil, nil)
+	fixture := testutil.ConfigureLocalScraper(t, cfg, false)
 	cfg.Database.DSN = dbPath
 	cfg.Matching.Extensions = []string{".mp4", ".mkv", ".avi", ".wmv"}
 	cfg.Matching.MinSizeMB = 0
@@ -218,7 +227,7 @@ func TestRunBatchCommand_WithVideoFile_RecursiveSearch(t *testing.T) {
 
 	err = RunBatchCommand(context.Background(), &buf, opts)
 	assert.NoError(t, err)
-	// No files found in root (non-recursive), should succeed with no files
+	assert.Empty(t, fixture.SearchIDs(), "non-recursive scan must not scrape the nested video")
 }
 
 func TestRunBatchCommand_Recursive_FindsFiles(t *testing.T) {
@@ -238,6 +247,7 @@ func TestRunBatchCommand_Recursive_FindsFiles(t *testing.T) {
 	require.NoError(t, err)
 
 	cfg := config.DefaultConfig(nil, nil)
+	fixture := testutil.ConfigureLocalScraper(t, cfg, false)
 	cfg.Database.DSN = dbPath
 	cfg.Matching.Extensions = []string{".mp4", ".mkv", ".avi", ".wmv"}
 	cfg.Matching.MinSizeMB = 0
@@ -256,6 +266,7 @@ func TestRunBatchCommand_Recursive_FindsFiles(t *testing.T) {
 	}
 
 	err = RunBatchCommand(context.Background(), &buf, opts)
-	// Should find the file in subdirectory
-	_ = err
+	require.NoError(t, err)
+	assert.Equal(t, []string{"PQR-678"}, fixture.SearchIDs())
+	assert.FileExists(t, videoFile)
 }

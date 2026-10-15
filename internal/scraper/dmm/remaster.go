@@ -522,13 +522,6 @@ func (s *scraper) cacheContentID(ctx context.Context, searchID, contentID string
 	}
 }
 
-func (s *scraper) fetchBrowserPage(ctx context.Context, url string) (string, error) {
-	if s.browserFetch != nil {
-		return s.browserFetch(ctx, url)
-	}
-	return fetchWithBrowser(ctx, url, s.browserConfig.Timeout, s.proxyProfile, s.getEnvLookup(), s.getFs())
-}
-
 type displayStatus int
 
 const (
@@ -553,7 +546,7 @@ func (s *scraper) verifyCandidateDisplayID(ctx context.Context, id string, urls 
 		var body string
 		if strings.HasPrefix(u, "https://video.dmm.co.jp/") && s.useBrowser {
 			var err error
-			body, err = s.fetchBrowserPage(ctx, u)
+			body, err = s.fetchBrowserHTML(ctx, u)
 			if err != nil {
 				if ctx.Err() != nil {
 					return displayUnverifiable, ctx.Err()

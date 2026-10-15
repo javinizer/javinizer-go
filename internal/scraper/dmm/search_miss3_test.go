@@ -2,6 +2,7 @@ package dmm
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -195,11 +196,12 @@ func TestScrapeURL_Miss3_RateLimitWaitFailed(t *testing.T) {
 		useBrowser:  false,
 	}
 
+	stubDMMCanceledRequest(t, s, "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=rl001/")
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
 	_, err := s.ScrapeURL(ctx, "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=rl001/")
-	require.Error(t, err)
+	require.ErrorContains(t, err, context.Canceled.Error())
 }
 
 // --- ScrapeURL: disabled scraper ---
@@ -244,11 +246,12 @@ func TestGetURLCtx_Miss3_ContextCancelledDuringWait(t *testing.T) {
 	scraper := newScraper(&settings, &models.ProxyConfig{}, models.FlareSolverrConfig{},
 		dmmOptions{ScrapeActress: false, Browser: models.BrowserConfig{Enabled: false, Timeout: 30}, ContentIDRepo: repo})
 
+	stubDMMCanceledRequest(t, scraper, "https://www.dmm.co.jp/search/=/searchstr=ctx001/")
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
 	_, err := scraper.getURLCtx(ctx, "CTX-001")
-	require.Error(t, err)
+	require.ErrorContains(t, err, context.Canceled.Error())
 	// Should be "DMM search cancelled" since context was cancelled
 	assert.Contains(t, err.Error(), "movie not found")
 }
@@ -405,10 +408,9 @@ func TestMaxPriority_Miss3(t *testing.T) {
 	assert.Equal(t, 350, maxPriority([]urlCandidate{{priority: 100}, {priority: 350}}))
 }
 
-// --- ScrapeURL: new-site URL (video.dmm.co.jp) with useBrowser=true but browser fails ---
+// --- ScrapeURL: browser fetch error propagation with a deterministic fetcher ---
 
 func TestScrapeURL_Miss3_VideoDMMWithBrowserFetchFails(t *testing.T) {
-	t.Skip("browser mode requires chromedp, flaky without it")
 	s := &scraper{
 		enabled:     true,
 		rateLimiter: ratelimit.NewLimiter(0),
@@ -421,18 +423,23 @@ func TestScrapeURL_Miss3_VideoDMMWithBrowserFetchFails(t *testing.T) {
 		},
 	}
 
-	// Browser fetch will fail because we're not in a container and chromedp is likely unavailable
+	stubDMMBrowser(t, s, "https://video.dmm.co.jp/av/content/?id=brow001", "", errors.New("fixture browser failed"))
 	_, err := s.ScrapeURL(context.Background(), "https://video.dmm.co.jp/av/content/?id=brow001")
-	// Should fail - either browser not available or can't fetch
-	require.Error(t, err)
+	// The injected failure must be surfaced as a scraper error.
+	require.ErrorContains(t, err, "browser fetch failed: fixture browser failed")
 }
 
-// --- ScrapeURL: new-site URL with useBrowser=true, parse HTML from browser fails ---
+// --- ScrapeURL: browser-rendered HTML is parsed without launching Chrome ---
 
-func TestScrapeURL_Miss3_VideoDMMBrowserParseFails(t *testing.T) {
-	// This is hard to test without mocking fetchWithBrowser directly.
-	// The browser mode paths require chromedp which isn't available in test.
-	// Test the else path for non-video.dmm.co.jp URLs instead.
-	// The browser mode branches are tested via the fetchWithBrowser tests.
-	t.Skip("browser mode requires chromedp")
+func TestScrapeURL_Miss3_VideoDMMBrowserParseSuccess(t *testing.T) {
+	s := newTestDMMScraper(t)
+	s.useBrowser = true
+	url := "https://video.dmm.co.jp/av/content/?id=brow00001"
+	stubDMMBrowser(t, s, url, `<html><body><h1>Browser fixture title</h1></body></html>`, nil)
+	result, err := s.ScrapeURL(context.Background(), url)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, "Browser fixture title", result.Title)
+	assert.Equal(t, "brow00001", result.ContentID)
+	assert.Equal(t, url, result.SourceURL)
 }

@@ -10,16 +10,16 @@ import (
 	"github.com/javinizer/javinizer-go/internal/api/core"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/update"
-	appversion "github.com/javinizer/javinizer-go/internal/version"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/javinizer/javinizer-go/internal/api/testkit"
 )
 
-// --- versionCheck: enabled with check reaching GitHub (fresh or error state) ---
+// --- versionCheck: enabled with a deterministic successful release response ---
 
-func TestVersionCheck_EnabledReachesGitHub(t *testing.T) {
+func TestVersionCheck_EnabledReleaseFixture(t *testing.T) {
+	mockVersionRelease(t, http.StatusOK, `{"tag_name":"v9.9.9","prerelease":false}`)
 	gin.SetMode(gin.TestMode)
 
 	tempDataDir := t.TempDir()
@@ -44,8 +44,20 @@ func TestVersionCheck_EnabledReachesGitHub(t *testing.T) {
 
 	var resp VersionStatusResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	assert.Equal(t, appversion.Short(), resp.Current)
-	assert.NotEmpty(t, resp.Source)
-	// Source is either "fresh" (GitHub reachable) or "error" (GitHub unreachable)
-	assert.Contains(t, []string{string(update.UpdateSourceFresh), string(update.UpdateSourceError), string(update.UpdateSourceCached)}, resp.Source)
+	assertVersionBuildMetadata(t, resp)
+	assert.Equal(t, string(update.UpdateSourceFresh), resp.Source)
+	assert.Equal(t, "v9.9.9", resp.Latest)
+	assert.True(t, resp.UpdateAvailable)
+	assert.False(t, resp.Prerelease)
+	assert.NotEmpty(t, resp.CheckedAt)
+	assert.Empty(t, resp.Error)
+
+	state, err := update.NewService(update.UpdateConfig{Enabled: true}).GetStatus(req.Context())
+	require.NoError(t, err)
+	assert.Equal(t, update.UpdateSourceFresh, state.Source)
+	assert.Equal(t, resp.Latest, state.Version)
+	assert.Equal(t, resp.CheckedAt, state.CheckedAt)
+	assert.Equal(t, resp.UpdateAvailable, state.Available)
+	assert.Equal(t, resp.Prerelease, state.Prerelease)
+	assert.Empty(t, state.Error)
 }

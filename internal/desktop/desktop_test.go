@@ -7,7 +7,18 @@ import (
 	"testing"
 )
 
+// isolateUserConfigDir keeps portable-path tests out of the real user profile.
+func isolateUserConfigDir(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("AppData", dir)
+	t.Setenv("USERPROFILE", dir)
+}
+
 func TestUserDataDir_CreatesDir(t *testing.T) {
+	isolateUserConfigDir(t)
 	dir, err := UserDataDir()
 	if err != nil {
 		t.Fatalf("UserDataDir() error: %v", err)
@@ -25,6 +36,7 @@ func TestUserDataDir_CreatesDir(t *testing.T) {
 }
 
 func TestDefaultConfigPath_UnderUserDataDir(t *testing.T) {
+	isolateUserConfigDir(t)
 	dir, _ := UserDataDir()
 	cfg := DefaultConfigPath()
 	want := filepath.Join(dir, "config.yaml")
@@ -34,10 +46,12 @@ func TestDefaultConfigPath_UnderUserDataDir(t *testing.T) {
 }
 
 func TestSetupPortableEnv_SetsEnvWhenAbsent(t *testing.T) {
+	isolateUserConfigDir(t)
 	t.Setenv("JAVINIZER_DB", "")
 	t.Setenv("JAVINIZER_LOG_DIR", "")
 	t.Setenv("JAVINIZER_DATA_DIR", "")
 	t.Setenv("JAVINIZER_TEMP_DIR", "")
+	t.Setenv("JAVINIZER_R18DEV_DUMP_PATH", "")
 
 	if err := SetupPortableEnv(); err != nil {
 		t.Fatalf("SetupPortableEnv() error: %v", err)
@@ -61,13 +75,18 @@ func TestSetupPortableEnv_SetsEnvWhenAbsent(t *testing.T) {
 	if got := os.Getenv("JAVINIZER_TEMP_DIR"); got != wantTempDir {
 		t.Errorf("JAVINIZER_TEMP_DIR = %q, want %q (temp posters must be portable, not CWD-relative)", got, wantTempDir)
 	}
+	if got, want := os.Getenv("JAVINIZER_R18DEV_DUMP_PATH"), filepath.Join(dir, "data", "r18dev", "r18dev_dump.db"); got != want {
+		t.Errorf("JAVINIZER_R18DEV_DUMP_PATH = %q, want %q", got, want)
+	}
 }
 
 func TestSetupPortableEnv_PreservesExistingEnv(t *testing.T) {
+	isolateUserConfigDir(t)
 	t.Setenv("JAVINIZER_DB", "/custom/db.sqlite")
 	t.Setenv("JAVINIZER_LOG_DIR", "/custom/logs")
 	t.Setenv("JAVINIZER_DATA_DIR", "/custom/data")
 	t.Setenv("JAVINIZER_TEMP_DIR", "/custom/temp")
+	t.Setenv("JAVINIZER_R18DEV_DUMP_PATH", "/custom/r18dev_dump.db")
 
 	if err := SetupPortableEnv(); err != nil {
 		t.Fatalf("SetupPortableEnv() error: %v", err)
@@ -84,6 +103,9 @@ func TestSetupPortableEnv_PreservesExistingEnv(t *testing.T) {
 	}
 	if got := os.Getenv("JAVINIZER_TEMP_DIR"); got != "/custom/temp" {
 		t.Errorf("JAVINIZER_TEMP_DIR = %q, want /custom/temp (existing value must be preserved)", got)
+	}
+	if got := os.Getenv("JAVINIZER_R18DEV_DUMP_PATH"); got != "/custom/r18dev_dump.db" {
+		t.Errorf("JAVINIZER_R18DEV_DUMP_PATH = %q, want /custom/r18dev_dump.db (existing value must be preserved)", got)
 	}
 }
 

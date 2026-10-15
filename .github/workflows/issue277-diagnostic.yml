@@ -1,0 +1,85 @@
+name: Issue 277 native diagnostic
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - '.github/workflows/issue277-diagnostic.yml'
+      - 'scripts/diagnostics/issue277.py'
+      - 'scripts/diagnostics/issue277_test.py'
+      - 'scripts/diagnostics/issue277_native_diagnostic_test.go.txt'
+permissions:
+  contents: read
+jobs:
+  windows-diagnostic:
+    name: Native Windows issue277 (${{ matrix.version }})
+    runs-on: windows-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - version: v1.5.2
+            revision: 6e016085be7efded5f3d30f2932c2ad9a7cb2a36
+          - version: v1.6.0
+            revision: 2e019b5756d1919795fa45cfb5e76c4114d34888
+          - version: v1.6.1
+            revision: ad50dffc690e7ecfbd789341c580f841df1c7866
+          - version: main-17092b8
+            revision: 17092b84850713a3bee8c32390aa56b726942b5c
+    steps:
+      - name: Checkout diagnostic harness
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          path: harness
+          persist-credentials: false
+      - name: Checkout pinned subject
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: ${{ matrix.revision }}
+          path: subject
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.27.2'
+          cache: true
+          cache-dependency-path: subject/go.sum
+      - name: Prepare synthetic-only diagnostic
+        shell: pwsh
+        run: |
+          python -m unittest discover -s harness/scripts/diagnostics -p issue277_test.py
+          if ($LASTEXITCODE -ne 0) { throw 'Evidence validator adversarial tests failed' }
+          Copy-Item harness/scripts/diagnostics/issue277_native_diagnostic_test.go.txt subject/internal/workflow/issue277_native_diagnostic_test.go
+          Set-Location subject
+          if ((git rev-parse HEAD).Trim() -ne '${{ matrix.revision }}') { throw 'Subject SHA mismatch' }
+          go mod download
+          if ($LASTEXITCODE -ne 0) { throw 'Dependency preparation failed' }
+          python ../harness/scripts/diagnostics/issue277.py prepare ../evidence
+          if ($LASTEXITCODE -ne 0) { throw 'Offline guard preparation failed' }
+      - name: Run actual Windows filesystem cases
+        shell: pwsh
+        env:
+          GOPROXY: off
+          GOSUMDB: off
+          GOTOOLCHAIN: local
+          GOMAXPROCS: '2'
+          ISSUE277_SUBJECT_VERSION: ${{ matrix.version }}
+          ISSUE277_SUBJECT_REVISION: ${{ matrix.revision }}
+        run: |
+          Set-Location subject
+          go test '-overlay=../evidence/offline-overlay.json' -count=1 -timeout=10m -json ./internal/workflow -run '^TestIssue277NativeDiagnostic' | Out-File -Encoding utf8 ../evidence/go-test.jsonl
+          $testExit = $LASTEXITCODE
+          python ../harness/scripts/diagnostics/issue277.py collect ../evidence/go-test.jsonl ../evidence '${{ matrix.version }}' '${{ matrix.revision }}' windows | Tee-Object ../evidence/summary.txt
+          if ($LASTEXITCODE -ne 0 -or $testExit -ne 0) { throw 'Diagnostic execution or evidence validation failed' }
+      - name: Archive complete diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: issue277-windows-${{ matrix.version }}
+          path: |
+            evidence/go-test.jsonl
+            evidence/results.json
+            evidence/summary.txt
+          if-no-files-found: error
+          retention-days: 30

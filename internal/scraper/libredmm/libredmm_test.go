@@ -918,9 +918,13 @@ func TestPayloadToResult_CoverURLFallback(t *testing.T) {
 		Title:             "Movie Title",
 	}
 
-	// Force poster probe to fail immediately
+	// Force the exact poster probe to fail before any DNS or socket calls.
+	requests := 0
 	client := &http.Client{
-		Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			requests++
+			assert.Equal(t, http.MethodGet, req.Method)
+			assert.Equal(t, "https://awsimgsrc.dmm.com/dig/digital/video/118abp880/118abp880ps.jpg", req.URL.String())
 			return nil, fmt.Errorf("network disabled")
 		}),
 	}
@@ -930,6 +934,8 @@ func TestPayloadToResult_CoverURLFallback(t *testing.T) {
 	expectedCoverURL := "https://awsimgsrc.dmm.com/dig/digital/video/118abp880/118abp880pl.jpg"
 	assert.Equal(t, expectedCoverURL, result.CoverURL)
 	assert.Equal(t, expectedCoverURL, result.PosterURL)
+	assert.True(t, result.ShouldCropPoster)
+	assert.Equal(t, 1, requests)
 }
 
 // TestStripJSONSuffix tests JSON suffix stripping

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/mocks"
@@ -72,76 +73,74 @@ func TestDownloadWithRetry_TransientErrors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Setup
-			mockHTTP := mocks.NewMockHTTPClient(t)
-			memFS := afero.NewMemMapFs()
+			synctest.Test(t, func(t *testing.T) {
+				// Setup
+				mockHTTP := mocks.NewMockHTTPClient(t)
+				memFS := afero.NewMemMapFs()
 
-			// Configure mock expectations for status sequence
-			for i, status := range tt.statusSequence {
-				if status == 200 {
-					// Success response with golden data
-					mockHTTP.EXPECT().
-						Do(mock.Anything).
-						Return(&http.Response{
-							StatusCode: status,
-							Body:       io.NopCloser(bytes.NewReader(goldenData)),
-						}, nil).
-						Once()
+				// Configure mock expectations for status sequence
+				for i, status := range tt.statusSequence {
+					if status == 200 {
+						// Success response with golden data
+						mockHTTP.EXPECT().
+							Do(mock.Anything).
+							Return(&http.Response{
+								StatusCode: status,
+								Body:       io.NopCloser(bytes.NewReader(goldenData)),
+							}, nil).
+							Once()
+					} else {
+						// Error response with no body
+						mockHTTP.EXPECT().
+							Do(mock.Anything).
+							Return(&http.Response{
+								StatusCode: status,
+								Body:       http.NoBody,
+							}, nil).
+							Once()
+					}
+
+					// Log for debugging
+					t.Logf("Configured mock expectation %d: HTTP %d", i+1, status)
+				}
+
+				cfg := &Config{
+					DownloadTimeout: 60,
+				}
+				downloader := NewDownloader(mockHTTP, memFS, cfg, nil)
+
+				// Fake time measures retry delays without scheduler or CI-load variance.
+				start := time.Now()
+				ctx := context.Background()
+				err := downloader.DownloadWithRetry(ctx, "https://example.com/test.jpg", "/tmp/output.jpg", tt.maxRetries)
+				elapsed := time.Since(start)
+
+				// Verify
+				if tt.wantErr {
+					assert.Error(t, err)
 				} else {
-					// Error response with no body
-					mockHTTP.EXPECT().
-						Do(mock.Anything).
-						Return(&http.Response{
-							StatusCode: status,
-							Body:       http.NoBody,
-						}, nil).
-						Once()
+					assert.NoError(t, err)
+
+					// Verify file was written with correct content
+					content, readErr := afero.ReadFile(memFS, "/tmp/output.jpg")
+					assert.NoError(t, readErr)
+					assert.Equal(t, goldenData, content, "Downloaded content should match golden file")
 				}
 
-				// Log for debugging
-				t.Logf("Configured mock expectation %d: HTTP %d", i+1, status)
-			}
+				// Verify correct number of HTTP calls
+				mockHTTP.AssertNumberOfCalls(t, "Do", tt.wantCallCount)
 
-			cfg := &Config{
-				DownloadTimeout: 60,
-			}
-			downloader := NewDownloader(mockHTTP, memFS, cfg, nil)
+				// Validate backoff timing if requested (AC1, AC5)
+				if tt.validateBackoff {
+					totalExpectedDelay := time.Duration(0)
+					for _, d := range tt.expectedBackoffs {
+						totalExpectedDelay += d
+					}
 
-			// Execute with timing measurement if backoff validation requested
-			start := time.Now()
-			ctx := context.Background()
-			err := downloader.DownloadWithRetry(ctx, "https://example.com/test.jpg", "/tmp/output.jpg", tt.maxRetries)
-			elapsed := time.Since(start)
-
-			// Verify
-			if tt.wantErr {
-				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
-
-				// Verify file was written with correct content
-				content, readErr := afero.ReadFile(memFS, "/tmp/output.jpg")
-				assert.NoError(t, readErr)
-				assert.Equal(t, goldenData, content, "Downloaded content should match golden file")
-			}
-
-			// Verify correct number of HTTP calls
-			mockHTTP.AssertNumberOfCalls(t, "Do", tt.wantCallCount)
-
-			// Validate backoff timing if requested (AC1, AC5)
-			if tt.validateBackoff {
-				totalExpectedDelay := time.Duration(0)
-				for _, d := range tt.expectedBackoffs {
-					totalExpectedDelay += d
+					assert.Equal(t, totalExpectedDelay, elapsed,
+						"Total fake elapsed time should equal the expected backoff delays")
 				}
-
-				// Allow ±20% tolerance for CI reliability (AC5)
-				tolerance := float64(totalExpectedDelay) * 0.2
-				assert.InDelta(t, float64(totalExpectedDelay), float64(elapsed), tolerance,
-					"Total elapsed time should match expected backoff delays within ±20%%")
-
-				t.Logf("Backoff timing: elapsed=%v, expected=%v, tolerance=±20%%", elapsed, totalExpectedDelay)
-			}
+			})
 		})
 	}
 }
@@ -355,78 +354,65 @@ func TestDownloadWithRetry_ContextCancellation(t *testing.T) {
 // TestDownloadWithRetry_ExponentialBackoff tests backoff delay calculations
 // Covers AC5: Exponential Backoff Validation
 func TestDownloadWithRetry_ExponentialBackoff(t *testing.T) {
+	goldenData, err := os.ReadFile(filepath.Join("testdata", "poster.jpg.golden"))
+	require.NoError(t, err)
+
 	t.Run("backoff timing validation", func(t *testing.T) {
-		// Setup
-		mockHTTP := mocks.NewMockHTTPClient(t)
-		memFS := afero.NewMemMapFs()
+		synctest.Test(t, func(t *testing.T) {
+			mockHTTP := mocks.NewMockHTTPClient(t)
+			memFS := afero.NewMemMapFs()
+			start := time.Now()
+			var attemptTimes []time.Duration
+			recordAttempt := func(_ *http.Request) {
+				attemptTimes = append(attemptTimes, time.Since(start))
+			}
 
-		goldenPath := filepath.Join("testdata", "poster.jpg.golden")
-		goldenData, err := os.ReadFile(goldenPath)
-		if err != nil {
-			t.Fatalf("Failed to load golden file: %v", err)
-		}
+			// All I/O is in memory; fake time advances only through real retry timers.
+			for i := 0; i < 2; i++ {
+				mockHTTP.EXPECT().Do(mock.Anything).Run(recordAttempt).
+					Return(&http.Response{StatusCode: 503, Body: http.NoBody}, nil).Once()
+			}
+			mockHTTP.EXPECT().Do(mock.Anything).Run(recordAttempt).
+				Return(&http.Response{StatusCode: 200, Body: io.NopCloser(bytes.NewReader(goldenData))}, nil).Once()
 
-		// Configure mock: 503, 503, 200
-		mockHTTP.EXPECT().Do(mock.Anything).Return(&http.Response{StatusCode: 503, Body: http.NoBody}, nil).Once()
-		mockHTTP.EXPECT().Do(mock.Anything).Return(&http.Response{StatusCode: 503, Body: http.NoBody}, nil).Once()
-		mockHTTP.EXPECT().Do(mock.Anything).Return(&http.Response{
-			StatusCode: 200,
-			Body:       io.NopCloser(bytes.NewReader(goldenData)),
-		}, nil).Once()
+			downloader := NewDownloader(mockHTTP, memFS, &Config{DownloadTimeout: 60}, nil)
+			err := downloader.DownloadWithRetry(context.Background(), "https://example.com/test.jpg", "/tmp/output.jpg", 3)
 
-		cfg := &Config{DownloadTimeout: 60}
-		downloader := NewDownloader(mockHTTP, memFS, cfg, nil)
-
-		// Execute with timing measurement
-		start := time.Now()
-		ctx := context.Background()
-		err = downloader.DownloadWithRetry(ctx, "https://example.com/test.jpg", "/tmp/output.jpg", 3)
-		elapsed := time.Since(start)
-
-		// Verify success
-		assert.NoError(t, err)
-
-		// Verify backoff timing: ~100ms + ~200ms = ~300ms total (±20% = 240-360ms)
-		expectedDelay := 300 * time.Millisecond
-		tolerance := float64(expectedDelay) * 0.2
-		assert.InDelta(t, float64(expectedDelay), float64(elapsed), tolerance,
-			"Total elapsed time should match expected backoff delays within ±20%%")
-
-		t.Logf("Backoff timing: elapsed=%v, expected=%v (±20%% tolerance)", elapsed, expectedDelay)
+			require.NoError(t, err)
+			assert.Equal(t, []time.Duration{0, 100 * time.Millisecond, 300 * time.Millisecond}, attemptTimes)
+			assert.Equal(t, 300*time.Millisecond, time.Since(start))
+			mockHTTP.AssertNumberOfCalls(t, "Do", 3)
+			content, err := afero.ReadFile(memFS, "/tmp/output.jpg")
+			require.NoError(t, err)
+			assert.Equal(t, goldenData, content)
+		})
 	})
 
 	t.Run("max delay capping at 10 seconds", func(t *testing.T) {
-		// Setup
-		mockHTTP := mocks.NewMockHTTPClient(t)
-		memFS := afero.NewMemMapFs()
+		synctest.Test(t, func(t *testing.T) {
+			mockHTTP := mocks.NewMockHTTPClient(t)
+			memFS := afero.NewMemMapFs()
+			start := time.Now()
+			var attemptTimes []time.Duration
 
-		// Configure mock: Many 503 responses to trigger max delay capping
-		for i := 0; i < 8; i++ {
-			mockHTTP.EXPECT().Do(mock.Anything).Return(&http.Response{StatusCode: 503, Body: http.NoBody}, nil).Once()
-		}
+			// Nine retries exercise both the first capped delay and the next one.
+			for i := 0; i < 10; i++ {
+				mockHTTP.EXPECT().Do(mock.Anything).
+					Run(func(_ *http.Request) { attemptTimes = append(attemptTimes, time.Since(start)) }).
+					Return(&http.Response{StatusCode: 503, Body: http.NoBody}, nil).Once()
+			}
+			downloader := NewDownloader(mockHTTP, memFS, &Config{DownloadTimeout: 60}, nil)
+			err := downloader.DownloadWithRetry(context.Background(), "https://example.com/test.jpg", "/tmp/output.jpg", 9)
 
-		cfg := &Config{DownloadTimeout: 60}
-		downloader := NewDownloader(mockHTTP, memFS, cfg, nil)
-
-		// Execute with timing measurement
-		start := time.Now()
-		ctx := context.Background()
-		err := downloader.DownloadWithRetry(ctx, "https://example.com/test.jpg", "/tmp/output.jpg", 7)
-		elapsed := time.Since(start)
-
-		// Verify error
-		assert.Error(t, err)
-
-		// Calculate expected total delay with max capping at 10s
-		// Delays: 100ms, 200ms, 400ms, 800ms, 1600ms, 3200ms, 6400ms
-		// 100+200+400+800+1600+3200+6400 = 12700ms = 12.7s
-		expectedDelay := 12700 * time.Millisecond
-		tolerance := float64(expectedDelay) * 0.2
-
-		assert.InDelta(t, float64(expectedDelay), float64(elapsed), tolerance,
-			"Total elapsed time should respect exponential backoff with max cap")
-
-		t.Logf("Max capping test: elapsed=%v, expected=%v (±20%% tolerance)", elapsed, expectedDelay)
+			require.EqualError(t, err, "download failed after 10 attempt(s): https://example.com/test.jpg returned HTTP 503")
+			assert.Equal(t, []time.Duration{
+				0, 100 * time.Millisecond, 300 * time.Millisecond, 700 * time.Millisecond,
+				1500 * time.Millisecond, 3100 * time.Millisecond, 6300 * time.Millisecond,
+				12700 * time.Millisecond, 22700 * time.Millisecond, 32700 * time.Millisecond,
+			}, attemptTimes, "retry delays must double up to the 10-second cap")
+			assert.Equal(t, 32700*time.Millisecond, time.Since(start), "no delay after the final attempt")
+			mockHTTP.AssertNumberOfCalls(t, "Do", 10)
+		})
 	})
 }
 

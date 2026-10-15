@@ -19,7 +19,7 @@ func TestMiss3_ExtractActresses_JapaneseAndEnglishFlip(t *testing.T) {
 		<a href="?actress=9001">Smith Jane</a>
 	</td></tr></table>`
 	doc := docFromHTMLDMM(t, html)
-	s := newTestDMMScraper()
+	s := newTestDMMScraper(t)
 	actresses := s.extractActresses(context.Background(), doc)
 	if assert.Len(t, actresses, 1) {
 		assert.Equal(t, "Jane", actresses[0].FirstName)
@@ -34,7 +34,7 @@ func TestMiss3_ExtractActresses_JapaneseName(t *testing.T) {
 		<a href="?actress=9002">波多野結衣</a>
 	</td></tr></table>`
 	doc := docFromHTMLDMM(t, html)
-	s := newTestDMMScraper()
+	s := newTestDMMScraper(t)
 	actresses := s.extractActresses(context.Background(), doc)
 	if assert.Len(t, actresses, 1) {
 		assert.Equal(t, "波多野結衣", actresses[0].JapaneseName)
@@ -49,7 +49,7 @@ func TestMiss3_ExtractActresses_DuplicateUpsert(t *testing.T) {
 		<a href="?actress=9003">NameTwo</a>
 	</td></tr></table>`
 	doc := docFromHTMLDMM(t, html)
-	s := newTestDMMScraper()
+	s := newTestDMMScraper(t)
 	actresses := s.extractActresses(context.Background(), doc)
 	assert.Len(t, actresses, 1)
 	assert.Equal(t, "NameOne", actresses[0].FirstName)
@@ -61,7 +61,7 @@ func TestMiss3_ExtractActressFromLink_SingleWordName(t *testing.T) {
 	html := `<a href="?actress=9004">Mononym</a>`
 	doc := docFromHTMLDMM(t, html)
 	sel := doc.Find("a").First()
-	s := newTestDMMScraper()
+	s := newTestDMMScraper(t)
 	actress := s.extractActressFromLink(context.Background(), sel)
 	assert.Equal(t, 9004, actress.DMMID)
 	assert.Equal(t, "Mononym", actress.FirstName)
@@ -121,7 +121,7 @@ func TestMiss3_UpsertActressInfo_FillMissingFields(t *testing.T) {
 func TestMiss3_ExtractActresses_NoContentCell(t *testing.T) {
 	html := `<table><tr><td>Actress</td></tr></table>`
 	doc := docFromHTMLDMM(t, html)
-	s := newTestDMMScraper()
+	s := newTestDMMScraper(t)
 	actresses := s.extractActresses(context.Background(), doc)
 	assert.Len(t, actresses, 0)
 }
@@ -131,7 +131,7 @@ func TestMiss3_ExtractActresses_NoContentCell(t *testing.T) {
 func TestMiss3_ExtractActresses_NoLabelCell(t *testing.T) {
 	html := `<table><tr><td></td><td><a href="?actress=9005">Test</a></td></tr></table>`
 	doc := docFromHTMLDMM(t, html)
-	s := newTestDMMScraper()
+	s := newTestDMMScraper(t)
 	actresses := s.extractActresses(context.Background(), doc)
 	assert.Len(t, actresses, 0)
 }
@@ -142,7 +142,7 @@ func TestMiss3_ExtractActressFromLink_WithThumb(t *testing.T) {
 	html := `<a href="?actress=9006"><img src="http://pics.dmm.co.jp/thumb.jpg"/>Test Actress</a>`
 	doc := docFromHTMLDMM(t, html)
 	sel := doc.Find("a").First()
-	s := newTestDMMScraper()
+	s := newTestDMMScraper(t)
 	actress := s.extractActressFromLink(context.Background(), sel)
 	assert.Equal(t, 9006, actress.DMMID)
 	assert.NotEmpty(t, actress.ThumbURL)
@@ -154,7 +154,7 @@ func TestMiss3_ExtractActressFromLink_ParentThumb(t *testing.T) {
 	html := `<p><a href="?actress=9007">Actress Name</a></p>`
 	doc := docFromHTMLDMM(t, html)
 	sel := doc.Find("a").First()
-	s := newTestDMMScraper()
+	s := newTestDMMScraper(t)
 	actress := s.extractActressFromLink(context.Background(), sel)
 	assert.Equal(t, 9007, actress.DMMID)
 }
@@ -166,7 +166,7 @@ func TestMiss3_ExtractActresses_ShortLabel(t *testing.T) {
 		<a href="?actress=9008">テスト女優</a>
 	</td></tr></table>`
 	doc := docFromHTMLDMM(t, html)
-	s := newTestDMMScraper()
+	s := newTestDMMScraper(t)
 	actresses := s.extractActresses(context.Background(), doc)
 	if assert.Len(t, actresses, 1) {
 		assert.Equal(t, "テスト女優", actresses[0].JapaneseName)
@@ -179,7 +179,7 @@ func TestMiss3_ExtractActressFromLink_JapaneseNameDetection(t *testing.T) {
 	html := `<a href="?actress=9009">さくらこ</a>`
 	doc := docFromHTMLDMM(t, html)
 	sel := doc.Find("a").First()
-	s := newTestDMMScraper()
+	s := newTestDMMScraper(t)
 	actress := s.extractActressFromLink(context.Background(), sel)
 	assert.Equal(t, "さくらこ", actress.JapaneseName)
 	assert.Equal(t, "", actress.FirstName)
