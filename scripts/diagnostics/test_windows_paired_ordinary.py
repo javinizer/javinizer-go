@@ -1,7 +1,10 @@
-"""Controller-only simulations; no Go, Windows, or product test execution."""
+"""Controller mocks and safe Python emitter subprocesses; no Go or product tests."""
 import collections
 import importlib.util
 import json
+import io
+import os
+import sys
 from pathlib import Path
 import subprocess
 import tempfile
@@ -58,6 +61,71 @@ class ParserTests(unittest.TestCase):
             self.assertEqual(items.count(('core', m.PREFIX)), 1)
             self.assertEqual(items.count(('core', m.CORE)), 1)
             self.assertEqual(items.count(('server', {m.AUTH})), 1)
+
+
+class WorkflowScopeTests(unittest.TestCase):
+    def test_expensive_matrix_is_manual_only_and_pr_job_is_lightweight(self):
+        workflow = (Path(__file__).resolve().parents[2] / '.github/workflows/windows-paired-ordinary.yml').read_text(encoding='utf-8')
+        jobs = workflow.split('jobs:\n', 1)[1]
+        checks, compare = jobs.split('  compare:\n', 1)
+        guard = "    if: github.event_name == 'workflow_dispatch'\n"
+        self.assertEqual(compare.count(guard), 1)
+        self.assertLess(compare.index(guard), compare.index('    runs-on:'))
+        self.assertLess(compare.index(guard), compare.index('    strategy:'))
+        self.assertIn("    if: github.event_name == 'pull_request'\n", checks)
+        self.assertIn('    timeout-minutes: 5\n', checks)
+        self.assertNotIn('strategy:', checks)
+        self.assertNotIn('setup-go', checks)
+        commands = [line.strip()[5:] for line in checks.splitlines() if line.strip().startswith('run: ')]
+        self.assertEqual(commands, ['python -m unittest discover -s scripts/diagnostics -p test_windows_paired_ordinary.py -v'])
+
+
+class EmitterTests(unittest.TestCase):
+    def test_cp1252_stream_reconfigured_without_mutating_raw_evidence(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            evidence = root / 'paired-evidence'
+            evidence.mkdir()
+            source = evidence / '日本語-🙂.log'
+            raw = '漢字 🙂 λ\n::error::synthetic message\n'.encode('utf-8') + b'\xff'
+            source.write_bytes(raw)
+            out_buffer, err_buffer = io.BytesIO(), io.BytesIO()
+            out = io.TextIOWrapper(out_buffer, encoding='cp1252', errors='strict')
+            err = io.TextIOWrapper(err_buffer, encoding='cp1252', errors='strict')
+            with patch.object(m.sys, 'stdout', out), patch.object(m.sys, 'stderr', err):
+                m.emit_logs(root)
+                self.assertEqual(out.encoding, 'utf-8')
+                self.assertEqual(err.encoding, 'utf-8')
+                rendered = out_buffer.getvalue().decode('utf-8')
+            self.assertIn('日本語-🙂.log', rendered)
+            self.assertIn('EVIDENCE 漢字 🙂 λ', rendered)
+            self.assertIn('EVIDENCE ::error::synthetic message', rendered)
+            self.assertIn('EVIDENCE \ufffd', rendered)
+            self.assertEqual(source.read_bytes(), raw)
+
+    def test_actual_emit_subprocess_forced_cp1252(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            evidence = root / 'paired-evidence'
+            evidence.mkdir()
+            source = evidence / '証拠-🙂.txt'
+            raw = '日本語 🙂 λ\n::warning::synthetic warning\r\n'.encode('utf-8')
+            source.write_bytes(raw)
+            env = os.environ.copy()
+            env.update(PYTHONIOENCODING='cp1252:strict', PYTHONUTF8='0', PYTHONCOERCECLOCALE='0')
+            script = str(Path(m.__file__).resolve())
+            encoding = subprocess.run([sys.executable, '-c', 'import sys; print(sys.stdout.encoding)'], cwd=root, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15, check=False)
+            self.assertEqual(encoding.returncode, 0)
+            self.assertEqual(encoding.stdout.strip().lower(), b'cp1252')
+            result = subprocess.run([sys.executable, script, '--emit-logs'], cwd=root, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15, check=False)
+            self.assertEqual(result.returncode, 0, result.stderr.decode('utf-8', errors='replace'))
+            rendered = result.stdout.decode('utf-8')
+            self.assertIn('証拠-🙂.txt', rendered)
+            self.assertIn('EVIDENCE 日本語 🙂 λ', rendered)
+            self.assertIn('EVIDENCE ::warning::synthetic warning', rendered)
+            self.assertTrue(all(not line.startswith('::') for line in rendered.splitlines()))
+            self.assertEqual(source.read_bytes(), raw)
+            self.assertEqual(result.stderr, b'')
 
 
 class MetadataTests(unittest.TestCase):

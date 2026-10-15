@@ -299,6 +299,9 @@ class Controller:
 
 
 def emit_logs(root):
+    # Windows redirected streams may default to cp1252; CI text is explicitly UTF-8.
+    sys.stdout.reconfigure(encoding='utf-8', errors='backslashreplace')
+    sys.stderr.reconfigure(encoding='utf-8', errors='backslashreplace')
     # Complete raw evidence is uploaded separately. Logs retain command outputs/results.
     for path in sorted((Path(root) / 'paired-evidence').rglob('*')):
         if path.is_file() and path.suffix in {'.txt', '.json', '.log'} and not any(part.endswith('-overlay') for part in path.parts):

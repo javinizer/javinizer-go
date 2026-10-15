@@ -1,6 +1,6 @@
 # Bounded Windows ordinary-product comparison
 
-This diagnostic compares a fixed set of existing product tests on hosted Windows runners. Publishing a pull request that triggers it or dispatching it requires maintainer approval after review. It does not publish releases, packages, or containers.
+This diagnostic compares a fixed set of existing product tests on hosted Windows runners. Running the comparison requires an explicitly approved manual dispatch; pull requests run only lightweight controller checks. It does not publish releases, packages, or containers.
 
 ## Fixed source records
 
@@ -47,7 +47,9 @@ Every planned attempt is recorded before execution. Per-command outputs, exit/ti
 
 ## First-run feasibility and interpretation
 
-GitHub documents that workflow_dispatch requires the workflow to be on the default branch, while pull_request uses the PR merge context (https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows and https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow). The workflow therefore permits path-filtered `pull_request: opened` and `synchronize` events. Opening the diagnostic PR or publishing a reviewed controller correction starts one fixed sample; there is no automatic failed-job retry or sampling-until-green policy. Every update that would start another sample requires maintainer approval. This is an operational approval requirement, not a workflow-enforced gate: any matching synchronize event starts the three-host sample. All five controller/test/manifest/workflow paths are explicit; checkout credentials are not persisted; permissions are contents:read; hosted ephemeral runners receive no configured secrets. Opening or updating the PR is itself execution authorization and requires maintainer approval after review. Manual dispatch has no inputs and requires the workflow to be available through GitHub's normal workflow registration. No release workflows are invoked.
+The entire expensive comparison job has a job-level condition `github.event_name == 'workflow_dispatch'`, evaluated before matrix expansion and runner allocation. Pull-request opened/synchronize events matching the five explicit controller/test/manifest/workflow paths run only a separate Windows controller-check job with a five-minute limit. That job uses standard-library mocks and temporary-file Python emitter subprocesses; it does not install Go, download product dependencies, compile product binaries, or run the native comparison. Updating the PR therefore cannot start another three-host sample.
+
+Manual dispatch has no inputs and still requires maintainer approval for each bounded sample. Manual dispatch remains subject to GitHub registration and branch availability; the UI normally requires a default-branch workflow. This workflow has already run, but future branch dispatch availability must be verified before claiming it usable (https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflow_dispatch). PR checks do not depend on manual dispatch and do not substitute for manual comparison evidence. Checkout credentials are not persisted, permissions remain contents:read, and no release workflows are invoked.
 
 Recovered Gin nil/interface panic log occurrences are recorded separately; historical baseline fixture recoveries alone are not a native process failure. Counts are log-text occurrences, not measurements of hardware exceptions or assertions that internally recover panics. Native exits and test terminals remain authoritative.
 
@@ -57,8 +59,14 @@ Full success means only bounded non-reproduction in this guarded comparison. The
 
 The first hosted run, https://github.com/javinizer/javinizer-go/actions/runs/38734756609, stopped on all three hosts at the offline whole-module-graph metadata query. Dependency downloads returned success, but `go list -m -json all` attempted to resolve additional module metadata unavailable in the cache. All 54 planned product attempts were not run; this was a prerequisite failure, not evidence of a product crash or pass. The original logs and outcomes remain part of the investigation.
 
-The correction requests metadata only for the actual Windows-selected server/core test dependencies, with module edits prohibited and the same offline environment/audit. A reviewed update may initiate one new fixed sample after maintainer approval. This does not relax networking, alter pinned product sources, fetch optional modules solely for metadata, increase hosts/budgets, or erase the original failed setup outcome. Controller-only standard-library mocks run before the comparison in CI.
+The correction requests metadata only for the actual Windows-selected server/core test dependencies, with module edits prohibited and the same offline environment/audit. The reviewed recovery update initiated one corrected fixed sample. Further PR updates now run only lightweight checks; another comparison requires explicit manual dispatch. This does not relax networking, alter pinned product sources, fetch optional modules solely for metadata, increase hosts/budgets, or erase the original failed setup outcome. Controller-only standard-library mocks run before the comparison in CI.
+
+## Corrected sample and log-emitter cleanup
+
+The corrected hosted run, https://github.com/javinizer/javinizer-go/actions/runs/38737050455, completed all 54 planned product attempts with successful controller summaries on all three hosts. The CI log-emission step then failed while printing Unicode through a Windows cp1252 stream, so the workflow status must not be described as a wholly successful run. Raw evidence and binary artifacts were retained; the recorded results establish bounded non-reproduction, not resolution of the original Windows reliability risk.
+
+The emitter now explicitly configures stdout and stderr as UTF-8 and keeps the existing EVIDENCE prefixes. Invalid source UTF-8 is replaced only in the rendered log text; archived raw bytes are never rewritten. Regression tests force cp1252 in a real Python `--emit-logs` subprocess with Unicode filenames and content, check workflow-command-like text remains prefixed, and verify raw file integrity. This cleanup does not rerun or replace the historical sample.
 
 ## Local checks
 
-Run `python -m unittest discover -s scripts/diagnostics -p test_windows_paired_ordinary.py -v` for controller-only mocks. These never invoke Go, native Windows tests, custom faults, or remote actions. Native Windows process management and actual CI behavior remain unverified until the separately authorized hosted run.
+Run `python -m unittest discover -s scripts/diagnostics -p test_windows_paired_ordinary.py -v` for controller mocks and safe Python emitter subprocess tests. These never invoke Go, native product tests, custom faults, or remote actions. The recorded sample exercised native tests; timeout-cleanup failure paths remain mock-validated unless an actual execution reaches them.

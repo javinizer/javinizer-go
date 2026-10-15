@@ -1,6 +1,6 @@
 name: Windows paired ordinary tests
 on:
-  # Publishing a reviewed diagnostic change starts one fixed sample; no automatic retries.
+  # PR events run only lightweight controller checks; comparisons require manual dispatch.
   pull_request:
     types: [opened, synchronize]
     paths:
@@ -16,7 +16,22 @@ permissions:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 jobs:
+  controller-tests:
+    name: Controller and UTF-8 emitter checks
+    if: github.event_name == 'pull_request'
+    runs-on: windows-2025
+    timeout-minutes: 5
+    steps:
+      - name: Checkout controller
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          persist-credentials: false
+      - name: Run standard-library controller and emitter tests
+        shell: pwsh
+        run: python -m unittest discover -s scripts/diagnostics -p test_windows_paired_ordinary.py -v
   compare:
+    # Job-level guard is evaluated before matrix expansion and runner allocation.
+    if: github.event_name == 'workflow_dispatch'
     name: Paired ordinary tests (host ${{ matrix.host }})
     runs-on: windows-2025
     timeout-minutes: 40
