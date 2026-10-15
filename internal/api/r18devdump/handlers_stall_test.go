@@ -83,6 +83,9 @@ func TestStartDownload_StallAborts(t *testing.T) {
 
 	_, err := os.Stat(dumpPath)
 	assert.True(t, os.IsNotExist(err), "stalled download must not leave a dump DB behind")
+	for _, suffix := range []string{".tmp", ".tmp-wal", ".tmp-shm"} {
+		assert.NoFileExists(t, dumpPath+suffix, "stalled download must release and remove temporary database files before completion")
+	}
 }
 
 func TestStartDownload_SlowButSteadySucceeds(t *testing.T) {
