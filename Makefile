@@ -138,7 +138,11 @@ test:
 	go test -v ./...
 
 # Per-package timeout for short tests (can be overridden)
+ifeq ($(OS),Windows_NT)
+TEST_SHORT_TIMEOUT ?= 300s
+else
 TEST_SHORT_TIMEOUT ?= 120s
+endif
 
 # Run short/fast tests (for pre-commit hooks)
 test-short:

@@ -39,7 +39,7 @@ This project uses standard Go tooling for testing and coverage.
 | Command | Description | When to Use |
 |---------|-------------|-------------|
 | `make test` | Run all tests with verbose output | Default test command |
-| `make test-short` | Run fast, offline tests with a 120s per-package timeout | Quick validation, pre-commit |
+| `make test-short` | Run offline short tests with a 300s Windows / 120s other-platform per-package timeout | Quick validation, pre-commit |
 | `make test-race` | Run race detector on concurrent packages | Before committing concurrent code changes |
 | `make test-verbose` | Run tests with verbose output and no caching | Debugging test failures |
 | `make bench` | Run benchmark tests | Performance testing |
@@ -62,15 +62,18 @@ running in an offline environment.
 make test-short
 
 # Increase the per-package timeout on a slower machine
-make test-short TEST_SHORT_TIMEOUT=180s
+make test-short TEST_SHORT_TIMEOUT=360s
 
-# Equivalent direct invocation, without cached test results
+# Direct invocation on non-Windows platforms, without cached test results
 go test -short -count=1 -timeout=120s ./...
 ```
 
-`TEST_SHORT_TIMEOUT` defaults to `120s` so a stuck package fails promptly. Go's
-timeout applies to each package's test binary, not to the total build and test
-command. Short mode selects tests; it does not enforce network isolation.
+`TEST_SHORT_TIMEOUT` defaults to `300s` when `OS=Windows_NT` and `120s` otherwise.
+The Windows budget accommodates SQLite-heavy packages that take over 200 seconds
+on hosted runners; callers can override either default. Go's timeout applies to
+each package's test binary, not to the total build and test command. The offline
+CI uses the same platform budgets, while its guard canaries retain a 120-second
+deadline. Short mode selects tests; it does not enforce network isolation.
 
 Run live tests explicitly, without `-short`, when external services are available:
 

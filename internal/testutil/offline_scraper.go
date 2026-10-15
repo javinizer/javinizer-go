@@ -29,12 +29,14 @@ type LocalScraperFixture struct {
 	images    int
 }
 
+// SearchIDs returns a snapshot of the movie IDs requested from the fixture.
 func (f *LocalScraperFixture) SearchIDs() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]string(nil), f.searches...)
 }
 
+// ImageRequests returns the number of artwork requests received by the fixture.
 func (f *LocalScraperFixture) ImageRequests() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
