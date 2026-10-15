@@ -166,6 +166,43 @@ class ProcessTests(unittest.TestCase):
 
 
 class OrchestrationTests(unittest.TestCase):
+    def test_dependency_metadata_failure_retains_all_unstarted_attempts(self):
+        with tempfile.TemporaryDirectory() as temp:
+            c = m.Controller(temp)
+            called = []
+            def checked(name, argv, cwd, limit=30, env=None):
+                called.append((name, argv))
+                if name == 'go-version': return 'go version go1.27.2 windows/amd64'
+                if name == 'go-env': return json.dumps({'CGO_ENABLED': '1', 'GOAMD64': 'v1'})
+                for rev, (sha, tree) in m.REVISIONS.items():
+                    if name == rev + '-head': return sha
+                    if name == rev + '-tree': return tree
+                if name.endswith('-overlay-source'): return '10f013f25cb4aaa083de051e5315dcd927fded46'
+                if name.endswith('-guard-source'): return 'b967d5d8603a8cae61282e17902d3dec76b26adc'
+                if name.endswith('-make-overlay'):
+                    folder = Path(argv[-1]); folder.mkdir(); (folder / 'overlay.json').write_text('{}')
+                if name == 'original-package-dependencies':
+                    self.assertEqual(argv, ['go', 'list', '-mod=readonly', '-deps', '-test', '-json', './internal/api/server', './internal/api/core'])
+                    self.assertEqual(env['GOPROXY'], 'off')
+                    self.assertEqual(env['GOVCS'], '*:off')
+                    self.assertIn('-overlay=', env['GOFLAGS'])
+                    raise RuntimeError('setup/identity gate failed: original-package-dependencies')
+                return ''
+            def metadata(name, argv, cwd, limit=30, env=None):
+                self.assertTrue(name.startswith('metadata-'), 'No guard or product process may start after prerequisite failure')
+                folder = c.evidence / name; folder.mkdir(); (folder / 'stdout.txt').write_text('null')
+                return {'native_exit_code': 0, 'timed_out': False, 'launch_error': None}, folder
+            with patch.object(c, 'checked', side_effect=checked), patch.object(c, 'run', side_effect=metadata), patch.object(m.shutil, 'which', return_value=__file__), patch.object(m, 'Controller', return_value=c), patch.object(m.sys, 'platform', 'win32'), patch.object(m.sys, 'argv', ['controller']):
+                self.assertEqual(m.main(), 1)
+            self.assertEqual(len(c.records), 18)
+            self.assertTrue(all(r['status'] == 'not-run' and r['native_exit_code'] is None and r['started_at'] is None for r in c.records))
+            self.assertFalse(any(name.endswith('-compile') for name, _ in called))
+            self.assertTrue((c.evidence / 'manifest.json').is_file())
+            saved = json.loads((c.evidence / 'outcomes.json').read_text())
+            self.assertEqual(len(saved), 18)
+            self.assertTrue(all(r['status'] == 'not-run' and 'original-package-dependencies' in r['skipped_reason'] for r in saved))
+            self.assertFalse(json.loads((c.evidence / 'summary.json').read_text())['success'])
+
     def test_earlier_product_failure_survives_later_passes(self):
         with tempfile.TemporaryDirectory() as temp:
             c = m.Controller(temp)

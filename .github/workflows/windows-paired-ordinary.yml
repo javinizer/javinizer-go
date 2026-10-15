@@ -1,13 +1,14 @@
 name: Windows paired ordinary tests
 on:
-  # One automatic sample on opening the reviewed diagnostic PR, never retries on push.
+  # Publishing a reviewed diagnostic change starts one fixed sample; no automatic retries.
   pull_request:
-    types: [opened]
+    types: [opened, synchronize]
     paths:
       - .github/workflows/windows-paired-ordinary.yml
       - scripts/diagnostics/windows_paired_ordinary.py
       - scripts/diagnostics/windows_paired_skips.json
       - scripts/diagnostics/windows_core_prefix.json
+      - scripts/diagnostics/test_windows_paired_ordinary.py
   workflow_dispatch:
 permissions:
   contents: read
@@ -47,6 +48,9 @@ jobs:
           ref: 16043816a27007f304916739f1734dd0ba4d0ba0
           path: fixed
           persist-credentials: false
+      - name: Validate controller with standard-library mocks
+        shell: pwsh
+        run: python -m unittest discover -s harness/scripts/diagnostics -p test_windows_paired_ordinary.py -v
       - name: Install official Go toolchain
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
         with:

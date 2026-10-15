@@ -235,7 +235,7 @@ class Controller:
             env['GOFLAGS'] = "'-overlay=" + (overlay / 'overlay.json').as_posix() + "'"
             environments[rev] = env
             write(self.evidence / (rev + '-overlay-hashes.json'), {str(p.relative_to(overlay)): digest(p) for p in sorted(overlay.rglob('*')) if p.is_file()})
-            self.checked(rev + '-modules', ['go', 'list', '-m', '-json', 'all'], cwd, env=env)
+            self.checked(rev + '-package-dependencies', ['go', 'list', '-mod=readonly', '-deps', '-test', '-json', './internal/api/server', './internal/api/core'], cwd, env=env)
             result, folder = self.run(rev + '-guard', ['go', 'test', '-short', '-count=1', '-timeout=120s', '-json', './...'], cwd / 'test/offlineguard', 150, env)
             validation = validate((folder / 'stdout.txt').read_text(encoding='utf-8', errors='replace'), (folder / 'audit.log').read_text(), result['native_exit_code'], GUARDS, True, True)
             write(folder / 'validation.json', validation)
