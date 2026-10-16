@@ -226,7 +226,7 @@ func TestApplyPhaseCollisionGatePublishesPerFileFailurePR260(t *testing.T) {
 	row := inputs.Updater.(*stubUpdater).getResult("blocked.mp4")
 	require.NotNil(t, row)
 	assert.Equal(t, models.JobStatusFailed, row.Status)
-	assert.Equal(t, string(models.ScraperErrorKindBlocked), row.ErrorCode)
+	assert.Equal(t, models.FileErrorCodeCreditConflict, row.ErrorCode)
 	assert.Contains(t, row.Error, "open credit collision")
 	assert.Equal(t, 1, organized)
 	assert.Equal(t, 1, failed)

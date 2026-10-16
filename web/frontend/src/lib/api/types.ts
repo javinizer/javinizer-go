@@ -402,6 +402,11 @@ export interface BatchScrapeResponse {
 
 export type ScraperErrorKind = 'not_found' | 'unavailable' | 'rate_limited' | 'blocked' | 'unknown';
 
+export type FileResultErrorCode =
+	| ScraperErrorKind
+	| 'credit_conflict'
+	| 'credit_status_unavailable';
+
 export interface FileResult {
 	result_id: string;
 	file_path: string;
@@ -410,7 +415,7 @@ export interface FileResult {
 	/** POSTER-WRITE-HARDENING D12: server CAS token for review saves. */
 	revision?: number;
 	error?: string;
-	error_code?: ScraperErrorKind;
+	error_code?: FileResultErrorCode;
 	/**
 	 * Translation warning fields (full results). Slim payloads carry the code
 	 * only, so mid-run badges must key off `translation_warning_code` alone.
