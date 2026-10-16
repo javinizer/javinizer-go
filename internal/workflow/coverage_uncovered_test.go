@@ -1273,23 +1273,6 @@ func TestBuildGeneratedFilesJSON_SubtitleNotMoved(t *testing.T) {
 }
 
 // ============================================================
-// revert_log.go: updatePostOrganize
-// ============================================================
-
-func TestUpdatePostOrganize(t *testing.T) {
-	op := &models.BatchFileOperation{
-		BatchJobID: "job1",
-		MovieID:    "ABC-001",
-	}
-	updatePostOrganize(op, "/dest/ABC-001.mp4", true, "/source", `{"Delete":["/dest/ABC-001.nfo"]}`)
-
-	assert.Equal(t, "/dest/ABC-001.mp4", op.NewPath)
-	assert.True(t, op.InPlaceRenamed)
-	assert.Equal(t, "/source", op.OriginalDirPath)
-	assert.Equal(t, `{"Delete":["/dest/ABC-001.nfo"]}`, op.GeneratedFiles)
-}
-
-// ============================================================
 // revert_log.go: determineOperationType full coverage
 // ============================================================
 

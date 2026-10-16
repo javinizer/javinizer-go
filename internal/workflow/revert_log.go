@@ -578,13 +578,6 @@ func buildGeneratedFilesJSON(logger logging.Logger, nfoPath string, subtitleMove
 	return string(data)
 }
 
-func updatePostOrganize(op *models.BatchFileOperation, newPath string, inPlaceRenamed bool, originalDirPath string, generatedFilesJSON string) {
-	op.NewPath = newPath
-	op.InPlaceRenamed = inPlaceRenamed
-	op.OriginalDirPath = originalDirPath
-	op.GeneratedFiles = generatedFilesJSON
-}
-
 // completionLedgerMerge computes the completion-transaction journal: the apply
 // outcome's generated-files payload (newRaw) merges into the row's FRESH
 // in-transaction journal bytes (currentRaw) — replacement entries and seeded

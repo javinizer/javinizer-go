@@ -21,7 +21,7 @@ import (
 // --- Miss tests for revert_log.go ---
 // Focuses on: dbRevertLog.Begin, CaptureSnapshot, Complete error paths,
 // noOpRevertLog, NewRevertLogFromConfig, readNFOSnapshot, determineOperationType,
-// buildGeneratedFilesJSON, updatePostOrganize
+// buildGeneratedFilesJSON
 
 // noOpRevertLog: all methods return zero values
 func TestMiss_noOpRevertLog_Begin(t *testing.T) {
@@ -427,21 +427,6 @@ func TestMiss_buildGeneratedFilesJSON_SubtitleNotMoved(t *testing.T) {
 	}
 	result := buildGeneratedFilesJSON(logging.GlobalLogger(), "", subtitles, nil)
 	assert.Equal(t, "", result) // Not moved, no nfoPath, no downloads → empty
-}
-
-// updatePostOrganize: updates fields
-func TestMiss_updatePostOrganize(t *testing.T) {
-	op := &models.BatchFileOperation{
-		ID:           1,
-		BatchJobID:   "job1",
-		RevertStatus: models.RevertStatusApplied,
-	}
-	updatePostOrganize(op, "/new/path.mp4", true, "/original/dir", `{"delete":["/new/movie.nfo"]}`)
-
-	assert.Equal(t, "/new/path.mp4", op.NewPath)
-	assert.True(t, op.InPlaceRenamed)
-	assert.Equal(t, "/original/dir", op.OriginalDirPath)
-	assert.Equal(t, `{"delete":["/new/movie.nfo"]}`, op.GeneratedFiles)
 }
 
 // NewRevertLogConfig
