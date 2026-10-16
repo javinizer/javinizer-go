@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/downloader"
@@ -157,7 +158,7 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult
 	if artifactErr != nil {
 		markArtifactDirty(cmd)
 		if o.revertLog != nil && opID != "" {
-			_ = o.revertLog.CompleteFailed(ctx, opID, &ApplyResult{Movie: cmd.Movie, OperationID: opID, PrePublication: true})
+			_ = o.completeFailedRevertLog(ctx, opID, &ApplyResult{Movie: cmd.Movie, OperationID: opID, PrePublication: true})
 		}
 		return &ApplyResult{Movie: cmd.Movie, OperationID: opID, FailedStep: "artifact_staging", PrePublication: true}, artifactErr
 	}
@@ -758,7 +759,20 @@ func (o *applyOrchImpl) completeRevertLogWithStateErr(ctx context.Context, opID 
 		PrePublication: prePublication,
 	}
 	partial.PublicationRecovery = state.publicationRecovery
-	return o.revertLog.CompleteFailed(ctx, opID, partial)
+	return o.completeFailedRevertLog(ctx, opID, partial)
+}
+
+// Failed-apply bookkeeping is compensation, not additional Apply work. A late
+// request cancellation must not prevent its already-produced recovery proofs
+// from replacing promoted path-only claims in the durable ledger. Keep context
+// values but give cooperative repository calls their own bounded cleanup window;
+// this does not impose a wall-clock bound on filesystem or lock operations.
+const failedApplyReconcileTimeout = 30 * time.Second
+
+func (o *applyOrchImpl) completeFailedRevertLog(ctx context.Context, opID OperationID, partial *ApplyResult) error {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), failedApplyReconcileTimeout)
+	defer cancel()
+	return o.revertLog.CompleteFailed(cleanupCtx, opID, partial)
 }
 
 // beginRevertLog starts a revert log entry before filesystem mutation.
