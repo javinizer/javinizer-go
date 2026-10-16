@@ -1271,6 +1271,7 @@ func (s *ReplacementSweeper) sweepOne(ctx context.Context, idx *replacementLedge
 	claim, untrackSweepClaim := recordSweepBusyClaim(ctx, s.fs, dest, busyToken, busyRelease)
 	defer untrackSweepClaim()
 	defer claim.releaseAdmit() // wave-56 (finding F1): release the last admit gate at return
+
 	rawDestRelease := fsutil.SharedDestLocks().Acquire(dest)
 	if !claim.bindDestLock(rawDestRelease) {
 		// The claim was reclaimed DURING the dest-lock wait (the reclaim ran
@@ -1390,6 +1391,10 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 		defer release()
 	}
 	defer claim.releaseAdmit() // wave-56 (finding F1): release the last admit gate at return
+	// Keep indexed backups owned while publication reconciliation is pending.
+	if journalPublicationPending(row) {
+		return false
+	}
 
 	// A prior restore can leave the destination present when backup cleanup
 	// failed. Only the explicit pending marker (or the same-process fallback)
@@ -1421,6 +1426,8 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 			case ferErr != nil || freshOwner == nil:
 				logging.Warnf("replacement sweep %s: owner row unreadable before cleanup authorization (%v) — kept", backup, ferErr)
 				return false
+			case journalPublicationPending(freshOwner):
+				return false
 			case !journalEntryRestorePending(freshOwner, backupSlash):
 				warnRetainedUnjournaledBackup(backup)
 				return false
@@ -1444,7 +1451,7 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 		logging.Warnf("replacement sweep %s: owner row unreadable (%v) — kept", backup, frErr)
 		return false
 	}
-	if freshRow.RevertStatus == models.RevertStatusReverted {
+	if journalPublicationPending(freshRow) || freshRow.RevertStatus == models.RevertStatusReverted {
 		return false // consumed meanwhile
 	}
 	if journalEntryInstalled(freshRow, backupSlash) {
@@ -2325,4 +2332,10 @@ func (s *ReplacementSweeper) consumeRearmRefusedPending(ctx context.Context, idx
 		return 1
 	}
 	return 0
+}
+
+// The pending bit precedes all replacement intents for a guarded publication.
+func journalPublicationPending(row *models.BatchFileOperation) bool {
+	ledger, err := models.ParseGeneratedFiles(row.GeneratedFiles)
+	return err == nil && ledger.PublicationPending
 }

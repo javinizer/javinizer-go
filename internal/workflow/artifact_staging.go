@@ -715,7 +715,7 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 				// can be consumed; normal completion preserves this marker.
 				if o.revertLog != nil && opID != "" {
 					resident := &organizer.OrganizeResult{PrimaryResident: true, OriginalPath: s.sourcePath, FolderPath: plan.TargetDir}
-					if err := o.revertLog.Complete(ctx, opID, &ApplyResult{OrganizeResult: resident, Movie: state.movie, OperationID: opID}); err != nil {
+					if err := o.revertLog.Complete(ctx, opID, &ApplyResult{OrganizeResult: resident, Movie: state.movie, OperationID: opID, PublicationPending: true}); err != nil {
 						return fmt.Errorf("persist resident primary before sidecar publication: %w", err)
 					}
 				}

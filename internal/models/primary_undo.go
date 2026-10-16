@@ -51,7 +51,7 @@ type PrimaryUndoStage struct {
 // erase incomplete or malformed recovery ownership, even without a sweep hook.
 func PrimaryUndoNeedsRetention(op BatchFileOperation) bool {
 	ledger, err := ParseGeneratedFiles(op.GeneratedFiles)
-	if err != nil {
+	if err != nil || ledger.PublicationPending {
 		return true
 	}
 	j := ledger.PrimaryUndo

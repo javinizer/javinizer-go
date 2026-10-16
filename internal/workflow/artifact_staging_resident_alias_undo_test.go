@@ -56,6 +56,13 @@ func TestResidentPrimaryHardlinkUndoMissingOriginal(t *testing.T) {
 					require.NoError(t, fs.Remove(source))
 					reverted, err := history.NewReverter(fs, repo).RevertBatch(context.Background(), "reviewer")
 					require.NoError(t, err)
+					if phase == "checkpoint only" && mode == operationmode.OperationModeOrganize {
+						require.Equal(t, 1, reverted.Failed, "lost finalization must retain a fail-closed publication hold")
+						got, e := fs.Stat(target)
+						require.NoError(t, e)
+						require.True(t, os.SameFile(original, got))
+						return
+					}
 					require.Zero(t, reverted.Failed)
 					require.Equal(t, 1, reverted.Succeeded)
 					_, err = fs.Stat(source)

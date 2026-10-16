@@ -368,7 +368,7 @@ func mergeReplacementLedgerIntents(priorRaw, newRaw string, promotePinnedDeletes
 		return newRaw
 	}
 	prior, err := models.ParseGeneratedFiles(priorRaw)
-	if err != nil || (prior.DirectoryMove == nil && !prior.PrimaryResident && prior.PrimaryUndo == nil && len(prior.Replacements) == 0 && len(prior.Roots) == 0 && len(prior.MoveBack) == 0 && len(prior.Delete) == 0 && len(prior.PlannedDeletes) == 0) {
+	if err != nil || (!prior.PublicationPending && prior.DirectoryMove == nil && !prior.PrimaryResident && prior.PrimaryUndo == nil && len(prior.Replacements) == 0 && len(prior.Roots) == 0 && len(prior.MoveBack) == 0 && len(prior.Delete) == 0 && len(prior.PlannedDeletes) == 0) {
 		return newRaw
 	}
 	if newRaw == "" {
@@ -391,12 +391,13 @@ func mergeReplacementLedgerIntents(priorRaw, newRaw string, promotePinnedDeletes
 			}
 			retained = kept
 		}
-		return models.MarshalLedgerJSON(models.GeneratedFilesJSON{DirectoryMove: prior.DirectoryMove, PrimaryUndo: prior.PrimaryUndo, PrimaryResident: prior.PrimaryResident, Replacements: prior.Replacements, Roots: prior.Roots, MoveBack: prior.MoveBack, Delete: prior.Delete, PlannedDeletes: retained})
+		return models.MarshalLedgerJSON(models.GeneratedFilesJSON{PublicationPending: prior.PublicationPending, DirectoryMove: prior.DirectoryMove, PrimaryUndo: prior.PrimaryUndo, PrimaryResident: prior.PrimaryResident, Replacements: prior.Replacements, Roots: prior.Roots, MoveBack: prior.MoveBack, Delete: prior.Delete, PlannedDeletes: retained})
 	}
 	fresh, err := models.ParseGeneratedFiles(newRaw)
 	if err != nil {
 		return newRaw
 	}
+	fresh.PublicationPending = fresh.PublicationPending || prior.PublicationPending
 	fresh.PrimaryResident = fresh.PrimaryResident || prior.PrimaryResident
 	// Completion reports an NFO path even when publication replaced an
 	// existing NFO. A replacement alone does not grant deletion ownership:
@@ -632,9 +633,23 @@ func (l *dbRevertLog) mergeJournalInTx(ctx context.Context, recordID uint, opID 
 }
 
 func (l *dbRevertLog) mergeJournalInTxOpt(ctx context.Context, recordID uint, opID OperationID, caller, newRaw, folderRoot string, promotePinnedDeletes bool, recovery ...*models.PublicationRecovery) (string, error) {
+	return l.mergePublicationJournalInTx(ctx, recordID, opID, caller, newRaw, folderRoot, promotePinnedDeletes, false, false, recovery...)
+}
+
+// Publication guard changes commit atomically with the authoritative journal.
+func (l *dbRevertLog) mergePublicationJournalInTx(ctx context.Context, recordID uint, opID OperationID, caller, newRaw, folderRoot string, promotePinnedDeletes, pending, finalized bool, recovery ...*models.PublicationRecovery) (string, error) {
 	var merged string
 	txErr := l.repo.UpdateJournalInTx(ctx, recordID, func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
 		next, persist, m, err := completionLedgerMergeOpt(current.GeneratedFiles, newRaw, folderRoot, promotePinnedDeletes, recovery...)
+		if err == nil && (pending || finalized) {
+			// An idempotent merge returns a zero next value; parse its bytes.
+			next, err = models.ParseGeneratedFiles(m)
+			if err == nil {
+				next.PublicationPending = pending && !finalized
+				m = models.MarshalLedgerJSON(next)
+				persist = m != current.GeneratedFiles
+			}
+		}
 		merged = m
 		return next, persist, err
 	})
@@ -1088,8 +1103,8 @@ func (l *dbRevertLog) Complete(ctx context.Context, opID OperationID, result *Ap
 	if org := result.OrganizeResult; org != nil && !noopJournal(result) {
 		folderRoot = org.FolderPath
 	}
-	mergedJournal, err := l.mergeJournalInTx(ctx, recordID, opID, "Complete",
-		buildResultGeneratedFilesJSON(resolveLogger(l.logger), nfoPath, subtitles, downloadPaths, result.OrganizeResult), folderRoot)
+	mergedJournal, err := l.mergePublicationJournalInTx(ctx, recordID, opID, "Complete",
+		buildResultGeneratedFilesJSON(resolveLogger(l.logger), nfoPath, subtitles, downloadPaths, result.OrganizeResult), folderRoot, true, result.PublicationPending, result.PublicationFinalized)
 	if err != nil {
 		return err
 	}
@@ -1203,8 +1218,8 @@ func (l *dbRevertLog) CompleteFailed(ctx context.Context, opID OperationID, resu
 	// generated_files entirely, so a journal mutation committed after this tx
 	// is no longer clobbered by the re-persist (UpdateJournalInTx owns that
 	// column exclusively).
-	mergedJournal, err := l.mergeJournalInTx(ctx, recordID, opID, "CompleteFailed",
-		buildResultGeneratedFilesJSON(resolveLogger(l.logger), nfoPath, subtitles, downloadPaths, result.OrganizeResult), "", result.PublicationRecovery)
+	mergedJournal, err := l.mergePublicationJournalInTx(ctx, recordID, opID, "CompleteFailed",
+		buildResultGeneratedFilesJSON(resolveLogger(l.logger), nfoPath, subtitles, downloadPaths, result.OrganizeResult), "", true, false, result.PublicationRecovery != nil, result.PublicationRecovery)
 	if err != nil {
 		return err
 	}

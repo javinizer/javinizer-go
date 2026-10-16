@@ -253,6 +253,9 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 
 	residentDirectoryRestored := false
 	ledgerBefore, _ := models.ParseGeneratedFiles(op.GeneratedFiles)
+	if ledgerBefore.PublicationPending {
+		return primaryUndoFailure(op, fmt.Errorf("resident publication reconciliation is pending; manual recovery required")), nil
+	}
 	// Directory compensation and resident admission exclude primary ownership.
 	// Reject contradictory recovery journals before even inspecting directory
 	// locations, without overwriting a concurrent primary Undo terminal status.

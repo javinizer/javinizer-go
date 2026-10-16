@@ -10,7 +10,10 @@ import (
 // eliminate duplicate type definitions with drift risk. The JSON schema is a
 // persistence contract — one source of truth.
 type GeneratedFilesJSON struct {
-	PrimaryUndo *PrimaryUndo `json:"primary_undo,omitempty"`
+	// PublicationPending blocks Undo until resident publication or its rollback
+	// has been durably reconciled. A crash/write failure requires manual recovery.
+	PublicationPending bool         `json:"publication_pending,omitempty"`
+	PrimaryUndo        *PrimaryUndo `json:"primary_undo,omitempty"`
 	// PrimaryResident excludes an admission-proven pre-existing primary from
 	// Undo ownership, while preserving independently installed artifact inverses.
 	DirectoryMove   *DirectoryMove     `json:"directory_move,omitempty"`
