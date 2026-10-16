@@ -673,9 +673,8 @@ func (d *Downloader) downloadActressImages(ctx context.Context, movie *models.Mo
 		movie   *models.Movie
 	}
 	credits := make([]imageCredit, 0)
-	if len(movie.Credits) > 0 {
-		for i := range movie.Credits {
-			credit := movie.Credits[i]
+	if renderCredits, present := movie.RenderingCredits(); present {
+		for _, credit := range renderCredits {
 			if credit.Suppressed || credit.Actress == nil || (!credit.Actress.Verified && credit.Actress.AmbiguityQuarantined) {
 				continue
 			}
@@ -688,8 +687,8 @@ func (d *Downloader) downloadActressImages(ctx context.Context, movie *models.Mo
 				continue
 			}
 			creditMovie := movie.Clone()
-			creditMovie.Credits = []models.MovieCredit{creditMovie.Credits[i]}
-			creditMovie.Actresses = []models.Actress{*creditMovie.Credits[0].Actress}
+			creditMovie.Actresses = []models.Actress{*credit.Actress}
+			creditMovie.SetRenderCredits([]models.MovieCredit{credit})
 			credits = append(credits, imageCredit{actress: *credit.Actress, name: name, movie: creditMovie})
 		}
 	} else {

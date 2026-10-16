@@ -79,11 +79,21 @@ type rating struct {
 
 // actor represents an actress/actor in the movie
 type actor struct {
-	Name    string `xml:"name"`
-	AltName string `xml:"altname,omitempty"` // Alternative/romanized name
-	Role    string `xml:"role,omitempty"`
-	Order   int    `xml:"order,omitempty"`
-	Thumb   string `xml:"thumb,omitempty"`
+	PresentationLinks []actorPresentationLink `xml:"javinizer-credit,omitempty"`
+	Name              string                  `xml:"name"`
+	AltName           string                  `xml:"altname,omitempty"` // Alternative/romanized name
+	Role              string                  `xml:"role,omitempty"`
+	Order             int                     `xml:"order,omitempty"`
+	Thumb             string                  `xml:"thumb,omitempty"`
+}
+
+// actorPresentationLink links only to an existing same-movie credit for rendering.
+// It is deliberately not a Kodi identity ID or a durable actress association.
+type actorPresentationLink struct {
+	Version        string `xml:"version,attr"`
+	Selection      string `xml:"selection,attr,omitempty"`
+	MovieContentID string `xml:"movie,attr"`
+	CreditID       string `xml:"credit,attr"`
 }
 
 // Thumb represents a thumbnail/poster image
