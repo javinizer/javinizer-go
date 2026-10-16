@@ -41,6 +41,11 @@ type ApplyPhase interface {
 // F4 (no second full timeout) without a clock comparison at the worker.
 const applyBudgetFloor = time.Duration(0)
 
+// applyFailureWritebackTimeout bounds database work for terminal bookkeeping
+// after the apply context expires. Existing family/result-store mutexes are
+// context-unaware. This never extends the workflow's artifact-publication budget.
+const applyFailureWritebackTimeout = 5 * time.Second
+
 type applyPhase struct{}
 
 // NewApplyPhase returns the default ApplyPhase implementation.
@@ -992,7 +997,12 @@ func interpretApplyResult(
 			if publicationStale {
 				errUp = updateFailure()
 			} else {
-				errUp = withApplyPublicationFence(taskCtx, inputs, movie, afc, updateFailure)
+				// A timed-out/cancelled apply still needs its terminal result recorded.
+				// Detach only this guarded result-store write, not workflow publication;
+				// keep the generation fence and bound database lock/connection waits.
+				cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(taskCtx), applyFailureWritebackTimeout)
+				defer cleanupCancel()
+				errUp = withApplyPublicationFence(cleanupCtx, inputs, movie, afc, updateFailure)
 			}
 			if errUp != nil && !errors.Is(errUp, errApplyPublicationFence) {
 				upsertWriteBackResultWithProvenance(inputs.Updater, filePath, &resultstore.MovieResult{
