@@ -252,7 +252,7 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 				h.broadcastProgress("done", 0, 0)
 			}
 		}()
-		res, err := r18devdump.Download(ctx, client, currentSourceURL, progress, func(r io.Reader, d r18devdump.DownloadResult) error {
+		res, err := r18devdump.DownloadWithOptions(ctx, client, currentSourceURL, progress, func(r io.Reader, d r18devdump.DownloadResult) error {
 			// Import pulls the stream synchronously. Watch only reads, not its
 			// local SQLite setup or batch flushes: a slow disk is not a stalled
 			// network. Preserve the idle budget across these pauses; byte
@@ -315,6 +315,12 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 				return importErr
 			}
 			return nil
+		}, r18devdump.DownloadOptions{
+			// EOF probes have their own finite header budget. Preserve the
+			// remaining payload idle budget while waiting, then resume it
+			// before any adopted 206 body is read. This is not byte progress.
+			OnEOFProbeStart: watchdog.Pause,
+			OnEOFProbeDone:  watchdog.Resume,
 		})
 		if err != nil {
 			if watchdog.Fired() {

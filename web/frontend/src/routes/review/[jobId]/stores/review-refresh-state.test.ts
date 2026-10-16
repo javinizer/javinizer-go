@@ -1,8 +1,9 @@
 import { render, waitFor, cleanup } from '@testing-library/svelte';
-import { QueryClient } from '@tanstack/svelte-query';
+import { onlineManager, QueryClient } from '@tanstack/svelte-query';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import QueryClientWrapper from '$lib/components/QueryClientWrapper.svelte';
 import { apiClient } from '$lib/api/client';
+import { toastStore } from '$lib/stores/toast';
 import type { BatchJobResponse } from '$lib/api/types';
 import type { createReviewState } from './review-state.svelte';
 import Harness from '../../../../../test/harness/ReviewStateHarness.svelte';
@@ -32,9 +33,12 @@ const job = (id: string): BatchJobResponse =>
 	}) as unknown as BatchJobResponse;
 afterEach(() => {
 	cleanup();
+	onlineManager.setOnline(true);
+	toastStore.clear();
 	vi.restoreAllMocks();
 });
 beforeEach(() => {
+	vi.spyOn(toastStore, 'success');
 	vi.spyOn(apiClient, 'previewOrganize').mockResolvedValue({} as never);
 	vi.spyOn(apiClient, 'getExistingNFO').mockResolvedValue({} as never);
 });
@@ -369,5 +373,197 @@ it.each(['organize', 'update'] as const)(
 		expect(state.refreshError).toBe('authoritative refetch failed');
 		expect(apply).not.toHaveBeenCalled();
 		expect(state.organizing).toBe(false);
+	},
+);
+
+it.each(['organize', 'update'] as const)(
+	'stops %s after a rejected edit even when its authoritative refetch succeeds',
+	async (operation) => {
+		const baseline = job('job-a');
+		const fresh = structuredClone(baseline);
+		fresh.results['/job-a.mp4'].revision = 2;
+		fresh.results['/job-a.mp4'].movie!.director = 'Concurrent director';
+		const read = vi.spyOn(apiClient, 'getBatchJob').mockResolvedValue(baseline);
+		const save = vi
+			.spyOn(apiClient, 'updateBatchMovie')
+			.mockRejectedValueOnce(new Error('CAS conflict'))
+			.mockResolvedValue({} as never);
+		const apply = vi
+			.spyOn(apiClient, operation === 'organize' ? 'organizeBatchJob' : 'updateBatchJob')
+			.mockResolvedValue({} as never);
+		const client = new QueryClient({
+			defaultOptions: {
+				queries: { retry: false, gcTime: 0 },
+				mutations: { retry: false, gcTime: 0 },
+			},
+		});
+		let state!: ReturnType<typeof createReviewState>;
+		render(
+			Harness,
+			{
+				jobId: 'job-a',
+				capture: (s) => {
+					state = s;
+				},
+			},
+			{ wrapper: QueryClientWrapper, wrapperProps: { client } },
+		);
+		await waitFor(() => expect(state.job?.id).toBe('job-a'));
+		state.destinationPath = '/synthetic/destination';
+		state.updateCurrentMovie({ ...state.currentMovie!, title: 'Unsaved title' });
+		read.mockResolvedValue(fresh);
+		await (operation === 'organize' ? state.organizeAll() : state.updateAll());
+		expect(read).toHaveBeenCalledTimes(2);
+		expect(state.refreshError).toBeNull();
+		expect(apply).not.toHaveBeenCalled();
+		expect(state.organizing).toBe(false);
+		expect(state.editedMovies.get('/job-a.mp4')).toMatchObject({
+			title: 'Unsaved title',
+			director: 'Concurrent director',
+		});
+		expect(toastStore.success).not.toHaveBeenCalled();
+		// A successful explicit retry can save the rebased edit and then Apply.
+		await (operation === 'organize' ? state.organizeAll() : state.updateAll());
+		expect(save).toHaveBeenCalledTimes(2);
+		expect(save.mock.calls[1][3]).toBe(2);
+		expect(toastStore.success).toHaveBeenCalledOnce();
+		expect(apply).toHaveBeenCalledOnce();
+		expect(state.editedMovies.size).toBe(0);
+	},
+);
+it.each(['organize', 'update'] as const)(
+	'stops %s after a partially rejected batch while clearing only saved families',
+	async (operation) => {
+		const baseline = job('job-a');
+		Object.assign(baseline.results, job('job-b').results);
+		baseline.total_files = 2;
+		baseline.completed = 2;
+		vi.spyOn(apiClient, 'getBatchJob').mockResolvedValue(baseline);
+		const save = vi
+			.spyOn(apiClient, 'updateBatchMovie')
+			.mockImplementation(async (_id, resultId) => {
+				if (resultId === 'job-b') throw new Error('CAS conflict');
+				return {} as never;
+			});
+		const apply = vi
+			.spyOn(apiClient, operation === 'organize' ? 'organizeBatchJob' : 'updateBatchJob')
+			.mockResolvedValue({} as never);
+		const client = new QueryClient({
+			defaultOptions: {
+				queries: { retry: false, gcTime: 0 },
+				mutations: { retry: false, gcTime: 0 },
+			},
+		});
+		let state!: ReturnType<typeof createReviewState>;
+		render(
+			Harness,
+			{
+				jobId: 'job-a',
+				capture: (s) => {
+					state = s;
+				},
+			},
+			{ wrapper: QueryClientWrapper, wrapperProps: { client } },
+		);
+		await waitFor(() => expect(state.job?.id).toBe('job-a'));
+		state.destinationPath = '/synthetic/destination';
+		state.editedMovies.set('/job-a.mp4', {
+			...baseline.results['/job-a.mp4'].movie!,
+			title: 'Saved A',
+		});
+		state.editedMovies.set('/job-b.mp4', {
+			...baseline.results['/job-b.mp4'].movie!,
+			title: 'Rejected B',
+		});
+		await (operation === 'organize' ? state.organizeAll() : state.updateAll());
+		expect(save).toHaveBeenCalledTimes(2);
+		expect(apply).not.toHaveBeenCalled();
+		expect(state.organizing).toBe(false);
+		expect(state.editedMovies.has('/job-a.mp4')).toBe(false);
+		expect(state.editedMovies.get('/job-b.mp4')?.title).toBe('Rejected B');
+		expect(toastStore.success).not.toHaveBeenCalled();
+	},
+);
+it('reports a rejected Save All outcome after reconciling the refreshed job', async () => {
+	vi.spyOn(apiClient, 'getBatchJob').mockImplementation(async (id) => job(id));
+	vi.spyOn(apiClient, 'updateBatchMovie').mockRejectedValue(new Error('CAS conflict'));
+	const client = new QueryClient({
+		defaultOptions: {
+			queries: { retry: false, gcTime: 0 },
+			mutations: { retry: false, gcTime: 0 },
+		},
+	});
+	let state!: ReturnType<typeof createReviewState>;
+	render(
+		Harness,
+		{
+			jobId: 'job-a',
+			capture: (s) => {
+				state = s;
+			},
+		},
+		{ wrapper: QueryClientWrapper, wrapperProps: { client } },
+	);
+	await waitFor(() => expect(state.job?.id).toBe('job-a'));
+	state.updateCurrentMovie({ ...state.currentMovie!, title: 'Unsaved title' });
+	await expect(state.saveAllEdits()).rejects.toMatchObject({ code: 'APPLY_NOT_STARTED' });
+	expect(state.refreshError).toBeNull();
+	expect(state.editedMovies.get('/job-a.mp4')?.title).toBe('Unsaved title');
+});
+it.each(['organize', 'update'] as const)(
+	'stops %s when going offline pauses the post-save authoritative refetch',
+	async (operation) => {
+		const read = vi.spyOn(apiClient, 'getBatchJob').mockImplementation(async (id) => job(id));
+		const saveRequest = deferred<void>();
+		const save = vi
+			.spyOn(apiClient, 'updateBatchMovie')
+			.mockImplementationOnce(() => saveRequest.promise as never);
+		const apply = vi
+			.spyOn(apiClient, operation === 'organize' ? 'organizeBatchJob' : 'updateBatchJob')
+			.mockResolvedValue({} as never);
+		const client = new QueryClient({
+			defaultOptions: {
+				queries: { retry: false, gcTime: 0 },
+				mutations: { retry: false, gcTime: 0 },
+			},
+		});
+		let state!: ReturnType<typeof createReviewState>;
+		render(
+			Harness,
+			{
+				jobId: 'job-a',
+				capture: (s) => {
+					state = s;
+				},
+			},
+			{ wrapper: QueryClientWrapper, wrapperProps: { client } },
+		);
+		await waitFor(() => expect(state.job?.id).toBe('job-a'));
+		state.destinationPath = '/synthetic/destination';
+		state.updateCurrentMovie({ ...state.currentMovie!, title: 'Saved title' });
+		const applying = operation === 'organize' ? state.organizeAll() : state.updateAll();
+		await waitFor(() => expect(save).toHaveBeenCalledOnce());
+		const before = client.getQueryState(['batch-job', 'job-a'])!.dataUpdateCount;
+		onlineManager.setOnline(false);
+		saveRequest.resolve();
+		await applying;
+		expect(client.getQueryState(['batch-job', 'job-a'])).toMatchObject({
+			status: 'success',
+			fetchStatus: 'paused',
+			dataUpdateCount: before,
+			error: null,
+		});
+		expect(read).toHaveBeenCalledOnce();
+		expect(state.refreshError).toBeTruthy();
+		expect(apply).not.toHaveBeenCalled();
+		expect(state.organizing).toBe(false);
+		expect(toastStore.success).not.toHaveBeenCalled();
+		// Reconnecting alone must not launch Apply; explicit authoritative recovery unlocks it.
+		onlineManager.setOnline(true);
+		await state.retryLoad();
+		expect(state.refreshError).toBeNull();
+		expect(apply).not.toHaveBeenCalled();
+		await (operation === 'organize' ? state.organizeAll() : state.updateAll());
+		expect(apply).toHaveBeenCalledOnce();
 	},
 );

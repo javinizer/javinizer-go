@@ -418,7 +418,7 @@ const ops = Array.from(latestByFamily.entries());
 				return post.dataUpdateCount > before;
 			})();
 			if (refreshed) deps.onRefreshSuccess?.();
-			else if (refreshFailure || post?.error) deps.onRefreshFailure?.(refreshFailure ?? post?.error);
+			else deps.onRefreshFailure?.(refreshFailure ?? post?.error ?? new Error(m.review_refresh_error()));
 			// codex cloud P2 (@338): fulfilled families clear on PATCH SUCCESS alone — a
 			// failed refresh never strands them (a stale whole-movie overlay can
 			// resend the old snapshot and overwrite intervening changes).
@@ -429,7 +429,7 @@ const ops = Array.from(latestByFamily.entries());
 					// post-commit rekey the refetch has already installed).
 					for (const fp of ok.paths) editedMovies.delete(fp);
 				}
-				deps.toastSuccess(m.review_changes_saved());
+				if (failed.length === 0 && refreshed) deps.toastSuccess(m.review_changes_saved());
 			}
 			if (failed.length > 0) {
 				// Partial failure: clean families were cleared above; rejected

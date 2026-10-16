@@ -1151,9 +1151,19 @@ export function createReviewState(getJobId: () => string) {
 		if (reviewRefreshBlocked()) return;
 		const targetJobId = activeJobId();
 		const targetGeneration = activeGeneration();
-		await runForJob(targetJobId, () =>
+		const result = await runForJob(targetJobId, () =>
 			mutations.saveEditsMutation.mutateAsync({ jobId: targetJobId, generation: targetGeneration }),
 		);
+		// allSettled lets the mutation reconcile successful and rejected families.
+		// A fresh baseline does not mean every edit was saved: callers must stop
+		// before Apply when any family still needs an explicit save retry.
+		const rejected = result.rows.filter((row) => row.status === 'rejected');
+		if (rejected.length > 0) {
+			throw Object.assign(
+				new Error(m.review_save_edits_failed({ error: `${rejected.length} movie(s) rejected` })),
+				{ code: 'APPLY_NOT_STARTED' },
+			);
+		}
 	}
 
 	const organizeController = createOrganizeController({
