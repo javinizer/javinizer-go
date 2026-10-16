@@ -254,7 +254,7 @@ type cleanupFailingUpdater struct {
 	upserts int
 }
 
-func (u *cleanupFailingUpdater) AtomicUpdateFileResultWithProvenance(string, func(*resultstore.MovieResult, *resultstore.ProvenanceData) (*resultstore.MovieResult, *resultstore.ProvenanceData, error)) error {
+func (u *cleanupFailingUpdater) AtomicUpdateFileResultWithProvenanceAfter(string, func(func() error) error, func(*resultstore.MovieResult, *resultstore.ProvenanceData) (*resultstore.MovieResult, *resultstore.ProvenanceData, error)) error {
 	u.updates++
 	return errors.New("result write unavailable")
 }
