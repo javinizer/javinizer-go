@@ -340,6 +340,7 @@ export function createReviewState(getJobId: () => string) {
 	let refreshLoadError = $derived(formatReviewLoadError(jobQuery.error, m.review_refresh_error()));
 	let collisionRefreshError = $state<string | null>(null);
 	let collisionRefreshPending = $state(false);
+	let collisionRefreshToken = 0;
 	let refreshError = $derived(
 		collisionRefreshError ?? (loadPhase === 'refresh-error' ? refreshLoadError : null),
 	);
@@ -1147,12 +1148,22 @@ export function createReviewState(getJobId: () => string) {
 	}
 
 	async function saveAllEdits() {
-		if (collisionRefreshPending || collisionRefreshError) return;
+		if (reviewRefreshBlocked()) return;
 		const targetJobId = activeJobId();
 		const targetGeneration = activeGeneration();
-		await runForJob(targetJobId, () =>
+		const result = await runForJob(targetJobId, () =>
 			mutations.saveEditsMutation.mutateAsync({ jobId: targetJobId, generation: targetGeneration }),
 		);
+		// allSettled lets the mutation reconcile successful and rejected families.
+		// A fresh baseline does not mean every edit was saved: callers must stop
+		// before Apply when any family still needs an explicit save retry.
+		const rejected = result.rows.filter((row) => row.status === 'rejected');
+		if (rejected.length > 0) {
+			throw Object.assign(
+				new Error(m.review_save_edits_failed({ error: `${rejected.length} movie(s) rejected` })),
+				{ code: 'APPLY_NOT_STARTED' },
+			);
+		}
 	}
 
 	const organizeController = createOrganizeController({
@@ -1167,7 +1178,16 @@ export function createReviewState(getJobId: () => string) {
 		getOrganizeOperation: () => organizeOperation,
 		getOperationMode: () => getEffectiveOperationMode(),
 		getEditedMovies: () => editedMovies,
-		saveAllEdits,
+		saveAllEdits: async () => {
+			await saveAllEdits();
+			// A catalog refresh can fail while the pre-Apply save is in flight.
+			// Reject inside the controller's handled path before it starts Apply.
+			if (collisionRefreshPending || collisionRefreshError) {
+				throw Object.assign(new Error(collisionRefreshError ?? m.common_loading()), {
+					code: 'APPLY_NOT_STARTED',
+				});
+			}
+		},
 		getOrganizeStatus: () => organizeStatus,
 		setOrganizeStatus: (nextStatus) => {
 			organizeStatus = nextStatus;
@@ -1495,6 +1515,7 @@ export function createReviewState(getJobId: () => string) {
 		overridesArg = buildReviewOverrides(),
 		retryPaths: string[] = [],
 	) {
+		if (reviewRefreshBlocked()) return;
 		const targetJobId = jobId;
 		writeApplyRecovery({
 			jobId: targetJobId,
@@ -1515,6 +1536,7 @@ export function createReviewState(getJobId: () => string) {
 	}
 
 	async function updateAll(options?: UpdateRequest, retryPaths: string[] = []) {
+		if (reviewRefreshBlocked()) return;
 		const targetJobId = jobId;
 		const request: UpdateRequest = options ?? { overrides: buildReviewOverrides() };
 		writeApplyRecovery({
@@ -1534,6 +1556,7 @@ export function createReviewState(getJobId: () => string) {
 	}
 
 	async function retryFailed() {
+		if (reviewRefreshBlocked()) return;
 		const targetJobId = jobId;
 		const recovery = readApplyRecovery(targetJobId);
 		const retryPaths = new Set(Object.keys(recovery?.failed ?? {}));
@@ -1568,6 +1591,9 @@ export function createReviewState(getJobId: () => string) {
 		lastRouteJobId = currentJobId;
 		if (previousJobId) cancelJobDetailQuery(previousJobId);
 		routeGeneration += 1;
+		collisionRefreshToken += 1;
+		collisionRefreshPending = false;
+		collisionRefreshError = null;
 		operationScope = null;
 		mutations.posterFromUrlMutation.reset();
 		mutations.posterCropMutation.reset();
@@ -1928,7 +1954,11 @@ export function createReviewState(getJobId: () => string) {
 		posterCropController.cleanup();
 	});
 
-	let collisionRefreshToken = 0;
+	function reviewRefreshBlocked(): boolean {
+		if (!collisionRefreshPending && !collisionRefreshError) return false;
+		toastStore.warning(collisionRefreshError ?? m.common_loading());
+		return true;
+	}
 
 	async function refreshAfterCollision(movieContentId: string): Promise<void> {
 		const targetJobId = jobId;
@@ -1948,7 +1978,6 @@ export function createReviewState(getJobId: () => string) {
 				),
 			)
 			.map(([filePath]) => filePath);
-		const overlays = Array.from(editedMovies.entries());
 		collisionRefreshError = null;
 		collisionRefreshPending = true;
 
@@ -1971,10 +2000,12 @@ export function createReviewState(getJobId: () => string) {
 				return;
 			}
 			if (baselineJob) {
-				for (const [filePath, overlay] of overlays) {
+				// Rebase the latest local edits, including input received while this
+				// request was pending, so stale credit snapshots cannot hide the
+				// catalog change that this refresh has just confirmed.
+				for (const [filePath, overlay] of editedMovies) {
 					const baselineMovie = baselineJob.results[filePath]?.movie;
 					const freshMovie = nextJob.results[filePath]?.movie;
-					if (editedMovies.get(filePath) !== overlay) continue;
 					if (baselineMovie && freshMovie) {
 						editedMovies.set(filePath, rebaseOverlayOntoMovie(baselineMovie, overlay, freshMovie));
 					}
@@ -2005,8 +2036,7 @@ export function createReviewState(getJobId: () => string) {
 			return refreshError;
 		},
 		retryLoad() {
-			collisionRefreshError = null;
-			void jobQuery.refetch({ cancelRefetch: true });
+			return refreshAfterCollision('');
 		},
 		refreshAfterCollision,
 		get config() {
