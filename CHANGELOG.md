@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Keep completed dump imports from stalling on optional EOF probes while retaining resumed-payload stall detection (#316).
+- Isolate review refresh state between jobs and prevent Apply or retry after failed saves or non-authoritative refreshes (#317).
+
 - Avoid redundant staging copies for organize and in-place video moves; allocate staging on the planned destination filesystem, including writable destinations with read-only parents (#276, #282, #285).
 - Preserve configured subtitle policy and source ownership across copy, link, multipart and case-insensitive publication; keep internal busy markers out of published artifacts and allow safe cleanup retries (#281, #284, #290).
 - Preserve existing resident videos, aliases and unowned artwork during Apply and Undo; recover owned directory moves and retain unresolved recovery state (#291, #292, #295, #296).
