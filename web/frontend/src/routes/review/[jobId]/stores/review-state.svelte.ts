@@ -1556,6 +1556,7 @@ export function createReviewState(getJobId: () => string) {
 	}
 
 	async function retryFailed() {
+		if (reviewRefreshBlocked()) return;
 		const targetJobId = jobId;
 		const recovery = readApplyRecovery(targetJobId);
 		const retryPaths = new Set(Object.keys(recovery?.failed ?? {}));
