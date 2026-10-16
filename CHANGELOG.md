@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.6.2] - 2026-10-16
+
+### Fixed
+
+- Avoid redundant staging copies for organize and in-place video moves; allocate staging on the planned destination filesystem, including writable destinations with read-only parents (#276, #282, #285).
+- Preserve configured subtitle policy and source ownership across copy, link, multipart and case-insensitive publication; keep internal busy markers out of published artifacts and allow safe cleanup retries (#281, #284, #290).
+- Preserve existing resident videos, aliases and unowned artwork during Apply and Undo; recover owned directory moves and retain unresolved recovery state (#291, #292, #295, #296).
+- Preserve restored replacement files during cleanup; retain native Windows volumes when restoring primary files and NFO snapshots (#294, #303, #304).
+- Add journaled, copy-first cross-volume primary Undo on supported POSIX platforms, with identity checks, retry retention and cancellation checks before further mutations (#303, #306).
+- Show failed or skipped Undo outcomes accurately and keep eligible retries available (#300).
+- Keep failed-Apply recovery safe after cancellation; prevent late Apply updates from racing Undo, and commit recovery records together with their paths and status (#315).
+- Stabilize title previews across metadata refreshes and catalog-identity choices; preserve movie-specific actress-name drafts through refreshes and asynchronous saves (#276, #282, #283, #286).
+- Resume interrupted r18.dev dump downloads using validated HTTP Range requests; exclude local importer work from the network-stall budget and finish cancelled SQLite rollback before temporary-file cleanup (#272, #301, #309).
+- Honor cancellation during DMM direct URL probes (#299).
+- Omit unsupported temperature parameters for explicitly recognized OpenAI reasoning models while preserving other provider/model behavior (#288).
+- Preserve committed configuration during failed publication and concurrent initialization (#289).
+- Preflight no-clobber capability before verified payload streaming on unsupported destination volumes (#308).
+- Stop and join the API-owned token cleanup worker during shutdown and explicitly validate nil dependency receivers (#310, #311).
+
+### Changed
+
+- Replace live-network short-test dependencies with synthetic/offline fixtures and add guarded Linux/Windows CI; isolate the synthetic UNC fixture from host filesystem access (#298, #307, #312).
+- Expand native Windows, isolated SMB, FUSE, browser and recovery regression coverage; stabilize native identity and timing fixtures (#274, #287, #293, #297, #302, #305, #308).
+- Update the pinned linter for Go 1.27 export data (#271).
+
+### Known limitations
+
+- Existing distinct video files are still protected against overwrite. Issue #277 remains open; related resident-file fixes do not establish resolution of the original report.
+- Volumes lacking both supported atomic no-replace publication primitives remain unsupported. FUSE fixtures do not establish compatibility with a particular Unraid/shfs deployment; actual Unraid validation is deferred (#252).
+- Windows cross-volume primary Undo remains unsupported and fails closed. Ambiguous historical recovery records are not migrated; interrupted cleanup claims may require manual recovery. Legacy unowned staging directories are retained.
+- Unresolved failed-Apply reconciliation can leave Undo blocked and require manual recovery; missing recovery proofs are not reconstructed automatically. Do not clear recovery markers or use older binaries to Undo affected operations (#315).
+- AI-remastered title sorting (#254 / #257) is not included.
+- The historical Windows Go GC crash and subsequent test hang remain unexplained. The lifecycle/nil-validation fixes and successful bounded tests do not prove their cause or resolution. Diagnostic-only PR #313 is not included.
+
 ## [v1.6.1] - 2026-09-27
 
 ### Fixed
