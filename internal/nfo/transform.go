@@ -297,11 +297,6 @@ func (g *Generator) resolveCreditDisplayName(credit models.MovieCredit) string {
 	return credit.RenderName(g.config.UseCreditedName, canonical)
 }
 
-// buildActorsFromCredits renders actors from credit records, preserving cast order.
-func (g *Generator) buildActorsFromCredits(credits []models.MovieCredit) []actor {
-	return g.buildActorsFromCreditsForMovie(credits, "", credits)
-}
-
 func (g *Generator) buildActorsFromCreditsForMovie(credits []models.MovieCredit, contentID string, authority []models.MovieCredit) []actor {
 	if len(credits) == 0 {
 		return nil

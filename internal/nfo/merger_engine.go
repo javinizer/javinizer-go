@@ -134,7 +134,7 @@ type scalarMergeSpec[T comparable] struct {
 
 // stringMergeSpecs lists all string fields to merge in MergeMovieMetadataWithOptions.
 var stringMergeSpecs = []stringMergeSpec{
-	{"ContentID", func(m *models.Movie) string { return m.ContentID }, func(m *models.Movie) string { return m.ContentID }, func(m *models.Movie, v string) { m.ContentID = v }},
+	{contentIDField, func(m *models.Movie) string { return m.ContentID }, func(m *models.Movie) string { return m.ContentID }, func(m *models.Movie, v string) { m.ContentID = v }},
 	{"ID", func(m *models.Movie) string { return m.ID }, func(m *models.Movie) string { return m.ID }, func(m *models.Movie, v string) { m.ID = v }},
 	{"DisplayTitle", func(m *models.Movie) string { return m.DisplayTitle }, func(m *models.Movie) string { return m.DisplayTitle }, func(m *models.Movie, v string) { m.DisplayTitle = v }},
 	{"Title", func(m *models.Movie) string { return m.Title }, func(m *models.Movie) string { return m.Title }, func(m *models.Movie, v string) { m.Title = v }},
@@ -273,7 +273,7 @@ func mergeMovieMetadataWithRenderPolicy(scraped, nfo *models.Movie, scalarStrate
 	ownsCredits := scraped.ContentID != "" && slices.ContainsFunc(scraped.Credits, func(c models.MovieCredit) bool { return c.ID != 0 && c.MovieContentID == scraped.ContentID })
 	// Merge string fields using spec-driven loop via fieldMerger
 	for _, spec := range stringMergeSpecs {
-		if spec.name == "ContentID" && ownsCredits {
+		if spec.name == contentIDField && ownsCredits {
 			spec.setM(merged, scraped.ContentID)
 			fm.recordScraper(spec.name)
 			continue
@@ -554,7 +554,7 @@ func mergeStringSlice(fieldName string, scraped, nfo []string, strategy MergeStr
 
 // metadataFields lists all Movie fields tracked for provenance, excluding CreatedAt/UpdatedAt.
 var metadataFields = []string{
-	"ID", "ContentID", "DisplayTitle", "Title", "OriginalTitle",
+	"ID", contentIDField, "DisplayTitle", "Title", "OriginalTitle",
 	"Description", "ReleaseDate", "ReleaseYear", "Runtime",
 	"Director", "Maker", "Label", "Series",
 	"RatingScore", "RatingVotes",
