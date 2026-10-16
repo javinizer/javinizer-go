@@ -482,6 +482,27 @@ func (r *BatchFileOperationRepository) UpdateNonJournalFields(ctx context.Contex
 		return wrapDBErr("update non-journal fields", label, err)
 	}
 
+	// Optional completion admission shares the transaction's writer lock with
+	// the column writes: an intervening journal/status commit cannot slip
+	// between validation and either UPDATE. Unguarded callers keep their
+	// existing behavior, including the reverted-row metadata update contract.
+	if guard, _ := ctx.Value(operationColumnGuardContextKey{}).(func(*models.BatchFileOperation) error); guard != nil {
+		var raw, status sql.NullString
+		scanErr := conn.QueryRowContext(ctx,
+			"SELECT generated_files, revert_status FROM batch_file_operations WHERE id = ?", op.ID,
+		).Scan(&raw, &status)
+		switch {
+		case errors.Is(scanErr, sql.ErrNoRows):
+			// Preserve the existing missing-row no-op; no snapshot to validate.
+		case scanErr != nil:
+			return wrapDBErr("update non-journal fields", label, scanErr)
+		default:
+			if err := guard(&models.BatchFileOperation{ID: op.ID, GeneratedFiles: raw.String, RevertStatus: models.RevertStatusEnum(status.String)}); err != nil {
+				return wrapDBErr("update non-journal fields", label, err)
+			}
+		}
+	}
+
 	now := time.Now().UTC()
 	// (a) Non-status columns unconditionally — the wave-10 Save-parity set.
 	if _, err := conn.ExecContext(ctx,

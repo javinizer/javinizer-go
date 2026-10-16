@@ -59,7 +59,7 @@ func TestStationaryPrimaryMoveUndo(t *testing.T) {
 							require.True(t, result.OrganizeResult.PrimaryResident)
 							require.False(t, result.OrganizeResult.Moved)
 							if terminal == "failed" {
-								require.NoError(t, orch.revertLog.CompleteFailed(context.Background(), result.OperationID, result))
+								seedFailedHistoryStatus(t, repo, result.OperationID)
 							}
 							ledger := p3Ledger(t, repo, result.OperationID)
 							if terminal == "checkpoint only" {

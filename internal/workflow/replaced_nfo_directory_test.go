@@ -84,7 +84,7 @@ func TestMovedDirectoryReplacementSurvivesCleanup(t *testing.T) {
 					require.NoError(t, e)
 					require.True(t, result.OrganizeResult.InPlaceRenamed)
 					if state == "failed-terminal" {
-						require.NoError(t, log.CompleteFailed(context.Background(), result.OperationID, result))
+						seedFailedHistoryStatus(t, repo, result.OperationID)
 					}
 					var id uint
 					_, e = fmt.Sscanf(result.OperationID, "%d", &id)

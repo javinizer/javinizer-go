@@ -51,7 +51,7 @@ func TestResidentPrimaryHardlinkUndoMissingOriginal(t *testing.T) {
 					require.NoError(t, err)
 					require.False(t, result.OrganizeResult.Moved)
 					if phase == "failed" {
-						require.NoError(t, orch.revertLog.CompleteFailed(context.Background(), result.OperationID, result))
+						seedFailedHistoryStatus(t, repo, result.OperationID)
 					}
 					require.NoError(t, fs.Remove(source))
 					reverted, err := history.NewReverter(fs, repo).RevertBatch(context.Background(), "reviewer")
@@ -61,6 +61,20 @@ func TestResidentPrimaryHardlinkUndoMissingOriginal(t *testing.T) {
 						got, e := fs.Stat(target)
 						require.NoError(t, e)
 						require.True(t, os.SameFile(original, got))
+						// Held Undo must preserve the subtitle where Apply left it.
+						// Move mode has not been authorized to restore its original name.
+						subtitlePath := sub
+						if move {
+							require.Len(t, result.OrganizeResult.Subtitles, 1)
+							published := result.OrganizeResult.Subtitles[0]
+							require.True(t, published.Moved)
+							require.Equal(t, sub, published.OriginalPath)
+							require.NotEmpty(t, published.NewPath)
+							subtitlePath = published.NewPath
+						}
+						body, err := afero.ReadFile(fs, subtitlePath)
+						require.NoError(t, err)
+						require.Equal(t, "subtitle", string(body))
 						return
 					}
 					require.Zero(t, reverted.Failed)

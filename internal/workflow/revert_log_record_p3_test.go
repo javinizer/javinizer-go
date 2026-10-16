@@ -652,14 +652,26 @@ func TestRevertLog_MutatorLeanLegs(t *testing.T) {
 		"no matching entry — silent no-op")
 	require.Error(t, rl.ConfirmReplacement(ctx, "424242", dest, backup), "record not found")
 
-	// seedRoot on a row with broken stored JSON keeps the raw ledger.
+	// Malformed authoritative state refuses every writer without changing it.
 	row, err := repo.FindByID(ctx, uintFromOpID(t, opID))
 	require.NoError(t, err)
 	row.GeneratedFiles = "not-json"
 	require.NoError(t, repo.Update(ctx, row))
-	require.NoError(t, rl.(*dbRevertLog).seedRoot(ctx, opID, "/extra"))
+	before, err := repo.FindByID(ctx, row.ID)
+	require.NoError(t, err)
+	require.ErrorContains(t, rl.(*dbRevertLog).seedRoot(ctx, opID, "/extra"), "invalid character")
+	after, err := repo.FindByID(ctx, row.ID)
+	require.NoError(t, err)
+	require.Equal(t, before, after, "parse refusal preserves the malformed ledger and every column")
 
-	// now append works against clean ledger
-	// (applying via freshBeginToRow helper to satisfy any schemas)
-	require.NoError(t, rl.(*dbRevertLog).seedRoot(ctx, opID, "/extra"), "dedupe is a no-op")
+	// A separate active operation exercises valid append and idempotent dedupe.
+	cleanID := beginP3Op(t, rl, "LG-002")
+	require.NoError(t, rl.(*dbRevertLog).seedRoot(ctx, cleanID, "/extra"))
+	before, err = repo.FindByID(ctx, uintFromOpID(t, cleanID))
+	require.NoError(t, err)
+	require.Contains(t, p3Ledger(t, repo, cleanID).Roots, "/extra")
+	require.NoError(t, rl.(*dbRevertLog).seedRoot(ctx, cleanID, "/extra"), "dedupe is a no-op")
+	after, err = repo.FindByID(ctx, before.ID)
+	require.NoError(t, err)
+	require.Equal(t, before, after, "dedupe must not rewrite the journal or timestamps")
 }

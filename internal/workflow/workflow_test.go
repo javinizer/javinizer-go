@@ -997,8 +997,13 @@ func TestRevertLog_DBAdapter_Complete_NilResult(t *testing.T) {
 		"Record should be marked as failed when Complete is called with nil result")
 	assert.Empty(t, record.NewPath,
 		"NewPath should be empty for failed apply")
-	assert.Empty(t, record.GeneratedFiles,
-		"GeneratedFiles should be empty for failed apply")
+	ledger, err := models.ParseGeneratedFiles(record.GeneratedFiles)
+	require.NoError(t, err)
+	require.NotNil(t, ledger.ApplyTerminal)
+	assert.Equal(t, "failure", ledger.ApplyTerminal.Outcome)
+	assert.Len(t, ledger.ApplyTerminal.Fingerprint, 64)
+	assert.Equal(t, models.GeneratedFilesJSON{ApplyTerminal: ledger.ApplyTerminal}, ledger,
+		"nil-result failure must add only a terminal marker, without inventing inverse work")
 }
 
 // TestNewRevertLogFromConfig_DisabledByDefault guards the regression where completed jobs

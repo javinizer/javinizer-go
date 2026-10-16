@@ -102,9 +102,9 @@ func w10OperationJournal(t *testing.T, repo database.BatchFileOperationRepositor
 // TestW10CompletePreservesForeignAppendBetweenTxAndColumnUpdate is the
 // finding's regression (a): the completion's journal tx commits, THEN a
 // third-party UpdateJournalInTx append commits, THEN the completion's column
-// update lands. Deterministic ordering via the recording seam — under the
+// update is attempted. Deterministic ordering via the recording seam — under the
 // wave-9 full Save the foreign entry was erased by the tx-snapshot rewrite;
-// now the scoped update cannot touch generated_files at all.
+// now the fresh-row guard refuses all stale columns and preserves the append.
 func TestW10CompletePreservesForeignAppendBetweenTxAndColumnUpdate(t *testing.T) {
 	rl, rec := newW10RevertLog(t)
 	ctx := context.Background()
@@ -120,6 +120,7 @@ func TestW10CompletePreservesForeignAppendBetweenTxAndColumnUpdate(t *testing.T)
 
 	// Third-party append armed to land immediately before the completion's
 	// column update — i.e. strictly AFTER the completion's journal tx commit.
+	var authoritative *models.BatchFileOperation
 	rec.appendOnNonJournal = func() {
 		recordID, perr := strconv.ParseUint(opID, 10, 64)
 		require.NoError(t, perr)
@@ -133,14 +134,18 @@ func TestW10CompletePreservesForeignAppendBetweenTxAndColumnUpdate(t *testing.T)
 			})
 			return gf, true, nil
 		}))
+		var readErr error
+		authoritative, readErr = rec.BatchFileOperationRepositoryInterface.FindByID(ctx, uint(recordID))
+		require.NoError(t, readErr)
+		require.NotNil(t, authoritative)
 	}
 
-	require.NoError(t, rl.Complete(ctx, opID, &ApplyResult{
+	require.ErrorContains(t, rl.Complete(ctx, opID, &ApplyResult{
 		Movie:          &models.Movie{ID: "W10-R1"},
 		NFOPath:        "/dst/w10r1/lib/W10-R1.nfo",
 		DownloadPaths:  []string{"/dst/w10r1/lib/W10-R1-poster.jpg"},
 		OrganizeResult: &organizer.OrganizeResult{NewPath: "/dst/w10r1/lib/W10-R1.mp4", FolderPath: "/dst/w10r1/lib"},
-	}))
+	}), "Apply columns refused")
 	// Capture the completion's repo-call sequence BEFORE the assertions below
 	// run their own FindByID lookups.
 	seq := rec.sequence()
@@ -157,7 +162,8 @@ func TestW10CompletePreservesForeignAppendBetweenTxAndColumnUpdate(t *testing.T)
 	recordID, _ := strconv.ParseUint(opID, 10, 64)
 	row, err := rec.FindByID(ctx, uint(recordID))
 	require.NoError(t, err)
-	require.Equal(t, "/dst/w10r1/lib/W10-R1.mp4", row.NewPath, "completion's non-journal columns still persist")
+	require.Equal(t, authoritative, row, "refused column update preserves every authoritative field and timestamp")
+	require.Empty(t, row.NewPath, "stale completion metadata must not publish after a foreign append")
 	require.Equal(t, models.RevertStatusApplied, row.RevertStatus)
 
 	require.NotContains(t, seq, "Update", "completions never full-Save the journal anymore")
@@ -192,7 +198,11 @@ func TestW10CompletionFailuresPreserveJournalAndSkipFullSave(t *testing.T) {
 		require.NoError(t, rl.Complete(ctx, opID, nil))
 
 		after := w10OperationJournal(t, rec, opID)
-		require.Equal(t, before, after, "the journal column is untouched by a nil-result completion")
+		require.NotNil(t, after.ApplyTerminal)
+		require.Equal(t, "failure", after.ApplyTerminal.Outcome)
+		require.Len(t, after.ApplyTerminal.Fingerprint, 64)
+		before.ApplyTerminal = after.ApplyTerminal
+		require.Equal(t, before, after, "nil-result completion adds only the failure terminal; the inverse journal is unchanged")
 		recordID, _ := strconv.ParseUint(opID, 10, 64)
 		row, err := rec.FindByID(ctx, uint(recordID))
 		require.NoError(t, err)
@@ -206,7 +216,11 @@ func TestW10CompletionFailuresPreserveJournalAndSkipFullSave(t *testing.T) {
 		require.NoError(t, rl.CompleteFailed(ctx, opID, nil))
 
 		after := w10OperationJournal(t, rec, opID)
-		require.Equal(t, before, after, "the journal column is untouched by a nil-result failure completion")
+		require.NotNil(t, after.ApplyTerminal)
+		require.Equal(t, "failure", after.ApplyTerminal.Outcome)
+		require.Len(t, after.ApplyTerminal.Fingerprint, 64)
+		before.ApplyTerminal = after.ApplyTerminal
+		require.Equal(t, before, after, "nil-result failure adds only the failure terminal; the inverse journal is unchanged")
 		recordID, _ := strconv.ParseUint(opID, 10, 64)
 		row, err := rec.FindByID(ctx, uint(recordID))
 		require.NoError(t, err)

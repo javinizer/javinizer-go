@@ -542,3 +542,15 @@ that operation from admitting a new resident publication checkpoint. Failed or
 skipped Undo can still be retried; they do not reopen publication. Do not manually
 clear either admission marker. This arbitration does not make older binaries
 safe to run concurrently against this database.
+
+Apply journal completion is also durable. A committed `apply_terminal` record
+closes all Apply journal writers, including delayed replacement and intent
+updates. Only an exact retry of the same terminal payload may retry its metadata
+write; it does not merge journal entries again. A conflicting later completion
+is refused, so a delayed success cannot replace failed recovery history. Do not
+edit these terminal records or open the database with an older binary to bypass
+the refusal.
+A failure terminal committed without recovery proofs while publication is held
+cannot be replaced with a different result later; that row requires manual
+recovery. If the terminal transaction itself failed, retrying the original
+carried recovery result is still permitted.

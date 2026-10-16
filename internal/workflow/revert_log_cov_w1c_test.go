@@ -105,7 +105,7 @@ func TestW1CReleaseReplacementKeepsUnmatchedEntries(t *testing.T) {
 	// freshly re-read row; drive fn to prove the unmatched entry is untouched
 	// and persist stays false (idempotent no-op).
 	repo.On("UpdateJournalInTx", mock.Anything, uint(1), mock.Anything).Return(func(_ context.Context, _ uint, fn database.JournalUpdateFn) error {
-		next, persist, err := fn(&models.BatchFileOperation{ID: 1, GeneratedFiles: ledger})
+		next, persist, err := fn(&models.BatchFileOperation{ID: 1, RevertStatus: models.RevertStatusApplied, GeneratedFiles: ledger})
 		require.NoError(t, err)
 		require.False(t, persist, "unmatched release is a journal no-op")
 		require.Len(t, next.Replacements, 1, "unmatched entries are kept")
@@ -131,7 +131,7 @@ func TestW1CNextDestSequenceSkipsMalformedRows(t *testing.T) {
 	// The append lands through the journal transaction: drive fn against the
 	// lean row the production merge sees and attest the computed sequence.
 	repo.On("UpdateJournalInTx", mock.Anything, uint(1), mock.Anything).Return(func(_ context.Context, id uint, fn database.JournalUpdateFn) error {
-		next, persist, err := fn(&models.BatchFileOperation{ID: id, GeneratedFiles: `{}`})
+		next, persist, err := fn(&models.BatchFileOperation{ID: id, RevertStatus: models.RevertStatusApplied, GeneratedFiles: `{}`})
 		require.NoError(t, err)
 		require.True(t, persist, "a fresh append always persists")
 		require.Len(t, next.Replacements, 1)

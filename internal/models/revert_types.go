@@ -5,11 +5,18 @@ import (
 	"strings"
 )
 
+// ApplyTerminal closes Apply writers and identifies an exact terminal retry.
+type ApplyTerminal struct {
+	Outcome     string `json:"outcome"`
+	Fingerprint string `json:"fingerprint"`
+}
+
 // GeneratedFilesJSON is the JSON structure stored in BatchFileOperation.GeneratedFiles.
 // Moved from both workflow/revert_log.go and history/reverter.go to
 // eliminate duplicate type definitions with drift risk. The JSON schema is a
 // persistence contract — one source of truth.
 type GeneratedFilesJSON struct {
+	ApplyTerminal *ApplyTerminal `json:"apply_terminal,omitempty"`
 	// PublicationPending blocks Undo until resident publication or its rollback
 	// has been durably reconciled. A crash/write failure requires manual recovery.
 	PublicationPending bool `json:"publication_pending,omitempty"`
