@@ -389,18 +389,17 @@ const ops = Array.from(latestByFamily.entries());
 			// codex P3-B: if the refetch itself failed, the pane still carries
 			// PRE-save baselines; deleting overlays now would produce a 409 storm
 			// the next save. Keep them when the refresh failed (retry-prone but correct).
-			// codex P3-D: paused refetches keep dataUpdatedAt while reporting a
-			// prior success status. Gate on an ADVANCED dataUpdatedAt — only a
-			// completed fetch counts as refreshed.
+			// Paused refetches can retain a prior success status. Require a new
+			// completed data update; timestamps can collide within a millisecond.
 			const qk = ['batch-job', mutationJobId];
-			const before = queryClient.getQueryState(qk)?.dataUpdatedAt ?? 0;
+			const before = queryClient.getQueryState(qk)?.dataUpdateCount ?? 0;
 			let refreshSucceeded = true;
+			let refreshFailure: unknown;
 			try {
 				await invalidateJobQueries(mutationJobId);
-				deps.onRefreshSuccess?.();
 			} catch (error) {
 				refreshSucceeded = false;
-				deps.onRefreshFailure?.(error);
+				refreshFailure = error;
 			}
 			if (!isCurrentJob(mutationJobId, mutationGeneration)) {
 				// The mutation may finish after navigation. Reconcile only job-scoped
@@ -415,9 +414,11 @@ const ops = Array.from(latestByFamily.entries());
 			}
 			const post = queryClient.getQueryState(qk);
 			const refreshed = (() => {
-				if (!refreshSucceeded || post?.status !== 'success') return false;
-				return (post.dataUpdatedAt ?? 0) > before;
+				if (!refreshSucceeded || post?.status !== 'success' || post.fetchStatus !== 'idle') return false;
+				return post.dataUpdateCount > before;
 			})();
+			if (refreshed) deps.onRefreshSuccess?.();
+			else if (refreshFailure || post?.error) deps.onRefreshFailure?.(refreshFailure ?? post?.error);
 			// codex cloud P2 (@338): fulfilled families clear on PATCH SUCCESS alone — a
 			// failed refresh never strands them (a stale whole-movie overlay can
 			// resend the old snapshot and overwrite intervening changes).
