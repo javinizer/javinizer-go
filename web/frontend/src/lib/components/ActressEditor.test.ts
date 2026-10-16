@@ -837,4 +837,33 @@ describe('ActressEditor production persistence', () => {
 		});
 		expect(updated.actresses[0].thumb_edited).toBe(false);
 	});
+	it('does not dispatch a name write when the parent denies its start', async () => {
+		const update = vi.spyOn(apiClient, 'updateCreditOverride').mockResolvedValue();
+		const onCreditMutationStart = vi.fn(() => null);
+		const movie = { id: 'movie-1', title: 'Movie', actresses: [{ id: 7, first_name: 'Name' }], credits: [{ id: 41, actress_id: 7, override_name: 'Old', user_override: true }] };
+		const view = render(ActressEditor, { movie, onUpdate: vi.fn(), onCreditMutationStart });
+		await fireEvent.click(view.getByRole('button', { name: 'This movie only' }));
+		await fireEvent.click(view.getByRole('button', { name: 'Clear override' }));
+		expect(onCreditMutationStart).toHaveBeenCalledWith('credit:41', 'movie-1');
+		expect(update).not.toHaveBeenCalled();
+		await view.rerender({ organizing: true });
+		expect((view.getByRole('button', { name: 'Clear override' }) as HTMLButtonElement).disabled).toBe(true);
+		expect((view.getByRole('button', { name: 'Set name' }) as HTMLButtonElement).disabled).toBe(true);
+	});
+	it('settles a rejected name write after unmount without invoking a new parent callback', async () => {
+		let reject!: (error: unknown) => void;
+		vi.spyOn(apiClient, 'updateCreditOverride').mockImplementation(() => new Promise((_, no) => { reject = no; }));
+		const finish = vi.fn().mockResolvedValue(undefined);
+		const onCreditMutationStart = () => ({ isCurrent: () => false, finish });
+		const onCreditOverridePersisted = vi.fn();
+		const movie = { id: 'movie-1', title: 'Movie', actresses: [{ id: 7, first_name: 'Name' }], credits: [{ id: 41, actress_id: 7, override_name: 'Old', user_override: true }] };
+		const view = render(ActressEditor, { movie, onUpdate: vi.fn(), onCreditMutationStart, onCreditOverridePersisted });
+		await fireEvent.click(view.getByRole('button', { name: 'This movie only' }));
+		await fireEvent.click(view.getByRole('button', { name: 'Clear override' }));
+		view.unmount();
+		const failure = new Error('Old failure'); reject(failure);
+		await waitFor(() => expect(finish).toHaveBeenCalledWith(failure));
+		expect(onCreditOverridePersisted).not.toHaveBeenCalled();
+	});
+
 });

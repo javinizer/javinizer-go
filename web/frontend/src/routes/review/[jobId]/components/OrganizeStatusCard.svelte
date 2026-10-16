@@ -18,6 +18,7 @@
 		expectedOrganizeFilePaths: string[];
 		isUpdateMode: boolean;
 		onRetryFailed: () => void;
+		retryDisabled?: boolean;
 		onContinue: () => void;
 	}
 
@@ -28,6 +29,7 @@
 		expectedOrganizeFilePaths,
 		isUpdateMode,
 		onRetryFailed,
+		retryDisabled = false,
 		onContinue
 	}: Props = $props();
 
@@ -80,7 +82,7 @@
 	</Card>
 {/if}
 
-{#if organizeStatus === 'completed'}
+{#if organizeStatus === 'completed' || (organizeStatus === 'failed' && failures.length > 0)}
 	{#if failures.length === 0}
 		<Card class="p-6 border-green-500 dark:border-green-700 bg-green-50 dark:bg-green-900/20">
 			<div class="flex items-start gap-3">
@@ -109,7 +111,7 @@
 			<div class="flex items-start gap-3">
 				<CircleAlert class="h-6 w-6 text-orange-600 dark:text-orange-400 shrink-0" />
 				<div class="flex-1">
-					<h3 class="font-semibold mb-2">{m.review_org_completed_errors()}</h3>
+					<h3 class="font-semibold mb-2">{organizeStatus === 'failed' ? m.review_failed_files() : m.review_org_completed_errors()}</h3>
 					<p class="text-sm text-muted-foreground mb-4">
 						{m.review_org_partial_summary({ successes: successes.length, failures: failures.length })}
 					</p>
@@ -125,7 +127,7 @@
 					</div>
 
 					<div class="mt-4 flex gap-2">
-						<Button onclick={onRetryFailed}>
+						<Button onclick={onRetryFailed} disabled={retryDisabled}>
 							{#snippet children()}{m.review_retry_failed()}
 							{/snippet}
 						</Button>

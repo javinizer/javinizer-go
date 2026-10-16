@@ -53,6 +53,7 @@ import {
 	type PosterPreviewOverride,
 } from '../review-utils';
 import equal from 'fast-deep-equal';
+import type { BeginCreditMutation } from '$lib/utils/credit-mutation';
 import { calculateCompleteness, type CompletenessTier } from '$lib/utils/completeness';
 import { nextOrganizeProgress } from '$lib/utils/job-progress';
 import { createReviewMutations } from './review-mutations.svelte';
@@ -183,10 +184,16 @@ export function shouldClearUnstartedApplyRecovery(
 	);
 }
 
+export function isCreditBlockedResult(result: FileResult): boolean {
+	return result.status === 'failed' && !!result.movie &&
+		(result.error_code === 'credit_conflict' || result.error_code === 'credit_status_unavailable');
+}
+
 export function createReviewState(getJobId: () => string) {
 	const teardownJobId = getJobId();
 	let jobId = $derived(getJobId());
 	let routeGeneration = 0;
+	let disposed = false;
 	let operationScope: { jobId: string; generation: number } | null = null;
 	const activeJobId = () => operationScope?.jobId ?? jobId;
 	const activeGeneration = () => operationScope?.generation ?? routeGeneration;
@@ -341,8 +348,14 @@ export function createReviewState(getJobId: () => string) {
 	let collisionRefreshError = $state<string | null>(null);
 	let collisionRefreshPending = $state(false);
 	let collisionRefreshToken = 0;
+	const pendingCreditMutations = new SvelteSet<symbol>();
+	const creditMutationErrors = new SvelteMap<string, string>();
+	const creditMutationError = $derived(Array.from(creditMutationErrors.values())[0] ?? null);
+	const creditWritesBlocked = $derived(
+		pendingCreditMutations.size > 0 || collisionRefreshPending || !!collisionRefreshError || !!creditMutationError,
+	);
 	let refreshError = $derived(
-		collisionRefreshError ?? (loadPhase === 'refresh-error' ? refreshLoadError : null),
+		collisionRefreshError ?? creditMutationError ?? (loadPhase === 'refresh-error' ? refreshLoadError : null),
 	);
 
 	const configQuery = createConfigQuery();
@@ -359,6 +372,7 @@ export function createReviewState(getJobId: () => string) {
 	let completenessFilter = new SvelteSet<CompletenessTier>(['incomplete', 'partial', 'complete']);
 	let selectionMode = $state(false);
 	let organizing = $state(false);
+	let pendingMovieSave = $state<symbol | null>(null);
 	let destinationPath = $state('');
 	let organizeOperation = $state<OrganizeOperation>('move');
 	let showDestinationBrowser = $state(false);
@@ -499,7 +513,7 @@ export function createReviewState(getJobId: () => string) {
 					const allResults = (
 						Object.values((job as BatchJobResponse).results) as FileResult[]
 					).filter((r) => {
-						if (r.status !== 'completed' || !r.movie) {
+						if ((r.status !== 'completed' && !isCreditBlockedResult(r)) || !r.movie) {
 							return false;
 						}
 						if (excluded[r.file_path]) {
@@ -529,10 +543,18 @@ export function createReviewState(getJobId: () => string) {
 	const failedResults = $derived<FileResult[]>(
 		job
 			? (Object.values((job as BatchJobResponse).results) as FileResult[]).filter(
-					(r) => r.status === 'failed' && !((job as BatchJobResponse).excluded ?? {})[r.file_path],
+					(r) => r.status === 'failed' && !isCreditBlockedResult(r) && !((job as BatchJobResponse).excluded ?? {})[r.file_path],
 				)
 			: [],
 	);
+
+	const creditBlockedResults = $derived(
+		Object.values(job?.results ?? {}).filter((result) =>
+			isCreditBlockedResult(result) && !job?.excluded?.[result.file_path]),
+	);
+	const recoveredCreditStatuses = $derived(new Map<string, FileStatus>(
+		creditBlockedResults.map((result) => [result.file_path, { status: 'failed', error: result.error }]),
+	));
 
 	const tierCounts = $derived.by<Record<CompletenessTier, number>>(() => {
 		const counts: Record<CompletenessTier, number> = { incomplete: 0, partial: 0, complete: 0 };
@@ -1148,21 +1170,27 @@ export function createReviewState(getJobId: () => string) {
 	}
 
 	async function saveAllEdits() {
-		if (reviewRefreshBlocked()) return;
+		if (pendingMovieSave || reviewRefreshBlocked()) return;
 		const targetJobId = activeJobId();
 		const targetGeneration = activeGeneration();
-		const result = await runForJob(targetJobId, () =>
-			mutations.saveEditsMutation.mutateAsync({ jobId: targetJobId, generation: targetGeneration }),
-		);
-		// allSettled lets the mutation reconcile successful and rejected families.
-		// A fresh baseline does not mean every edit was saved: callers must stop
-		// before Apply when any family still needs an explicit save retry.
-		const rejected = result.rows.filter((row) => row.status === 'rejected');
-		if (rejected.length > 0) {
-			throw Object.assign(
-				new Error(m.review_save_edits_failed({ error: `${rejected.length} movie(s) rejected` })),
-				{ code: 'APPLY_NOT_STARTED' },
+		const token = Symbol('movie-save');
+		pendingMovieSave = token;
+		try {
+			const result = await runForJob(targetJobId, () =>
+				mutations.saveEditsMutation.mutateAsync({ jobId: targetJobId, generation: targetGeneration }),
 			);
+			// allSettled lets the mutation reconcile successful and rejected families.
+			// A fresh baseline does not mean every edit was saved: callers must stop
+			// before Apply when any family still needs an explicit save retry.
+			const rejected = result.rows.filter((row) => row.status === 'rejected');
+			if (rejected.length > 0) {
+				throw Object.assign(
+					new Error(m.review_save_edits_failed({ error: `${rejected.length} movie(s) rejected` })),
+					{ code: 'APPLY_NOT_STARTED' },
+				);
+			}
+		} finally {
+			if (pendingMovieSave === token) pendingMovieSave = null;
 		}
 	}
 
@@ -1182,8 +1210,8 @@ export function createReviewState(getJobId: () => string) {
 			await saveAllEdits();
 			// A catalog refresh can fail while the pre-Apply save is in flight.
 			// Reject inside the controller's handled path before it starts Apply.
-			if (collisionRefreshPending || collisionRefreshError) {
-				throw Object.assign(new Error(collisionRefreshError ?? m.common_loading()), {
+			if (creditWritesBlocked) {
+				throw Object.assign(new Error(creditMutationError ?? collisionRefreshError ?? m.common_loading()), {
 					code: 'APPLY_NOT_STARTED',
 				});
 			}
@@ -1509,13 +1537,21 @@ export function createReviewState(getJobId: () => string) {
 		);
 	}
 
+	function defaultApplyPaths(): string[] {
+		// A retry list is a server-side subset. The main Apply action must still
+		// include every reviewable file; Retry Failed supplies only failed paths.
+		return creditBlockedResults.length > 0
+			? [...getApplyEligibleFilePaths(job), ...creditBlockedResults.map((result) => result.file_path)]
+			: [];
+	}
+
 	async function organizeAll(
 		skipNfoArg = skipNfo,
 		skipDownloadArg = skipDownload,
 		overridesArg = buildReviewOverrides(),
-		retryPaths: string[] = [],
+		retryPaths: string[] = defaultApplyPaths(),
 	) {
-		if (reviewRefreshBlocked()) return;
+		if (organizing || pendingMovieSave !== null || reviewRefreshBlocked()) return;
 		const targetJobId = jobId;
 		writeApplyRecovery({
 			jobId: targetJobId,
@@ -1535,8 +1571,8 @@ export function createReviewState(getJobId: () => string) {
 		);
 	}
 
-	async function updateAll(options?: UpdateRequest, retryPaths: string[] = []) {
-		if (reviewRefreshBlocked()) return;
+	async function updateAll(options?: UpdateRequest, retryPaths: string[] = defaultApplyPaths()) {
+		if (organizing || pendingMovieSave !== null || reviewRefreshBlocked()) return;
 		const targetJobId = jobId;
 		const request: UpdateRequest = options ?? { overrides: buildReviewOverrides() };
 		writeApplyRecovery({
@@ -1556,7 +1592,7 @@ export function createReviewState(getJobId: () => string) {
 	}
 
 	async function retryFailed() {
-		if (reviewRefreshBlocked()) return;
+		if (organizing || pendingMovieSave !== null || reviewRefreshBlocked()) return;
 		const targetJobId = jobId;
 		const recovery = readApplyRecovery(targetJobId);
 		const retryPaths = new Set(Object.keys(recovery?.failed ?? {}));
@@ -1566,7 +1602,8 @@ export function createReviewState(getJobId: () => string) {
 		for (const [filePath, result] of Object.entries(job?.results ?? {})) {
 			if (result.status === 'failed' && result.movie) retryPaths.add(filePath);
 		}
-		const paths = Array.from(retryPaths);
+		const paths = Array.from(retryPaths).filter((filePath) => !job?.excluded?.[filePath]);
+		if (paths.length === 0) return;
 		if (recovery?.operation === 'update') {
 			await updateAll(recovery.updateOptions, paths);
 			return;
@@ -1575,7 +1612,13 @@ export function createReviewState(getJobId: () => string) {
 			await organizeAll(recovery.skipNfo, recovery.skipDownload, recovery.overrides, paths);
 			return;
 		}
-		await runForJob(targetJobId, () => organizeController.retryFailed());
+		if (fileStatuses.size > 0) {
+			await runForJob(targetJobId, () => organizeController.retryFailed());
+		} else if (isUpdateMode) {
+			await updateAll(undefined, paths);
+		} else {
+			await organizeAll(skipNfo, skipDownload, buildReviewOverrides(), paths);
+		}
 	}
 
 	let existingNfo = $state<ExistingNFOResponse | null>(null);
@@ -1591,6 +1634,9 @@ export function createReviewState(getJobId: () => string) {
 		lastRouteJobId = currentJobId;
 		if (previousJobId) cancelJobDetailQuery(previousJobId);
 		routeGeneration += 1;
+		pendingMovieSave = null;
+		pendingCreditMutations.clear();
+		creditMutationErrors.clear();
 		collisionRefreshToken += 1;
 		collisionRefreshPending = false;
 		collisionRefreshError = null;
@@ -1949,16 +1995,44 @@ export function createReviewState(getJobId: () => string) {
 	});
 
 	onDestroy(() => {
+		disposed = true;
 		cancelJobDetailQuery(lastRouteJobId);
 		organizeController.cleanup();
 		posterCropController.cleanup();
 	});
 
 	function reviewRefreshBlocked(): boolean {
-		if (!collisionRefreshPending && !collisionRefreshError) return false;
-		toastStore.warning(collisionRefreshError ?? m.common_loading());
+		if (!creditWritesBlocked) return false;
+		toastStore.warning(creditMutationError ?? collisionRefreshError ?? m.common_loading());
 		return true;
 	}
+
+	const beginCreditMutation: BeginCreditMutation = (key, movieContentId) => {
+		if (disposed || organizing || pendingMovieSave !== null || pendingCreditMutations.size > 0 || collisionRefreshPending) return null;
+		const targetJobId = jobId;
+		const targetGeneration = routeGeneration;
+		const token = Symbol(key);
+		let finished = false;
+		const isCurrent = () => !disposed && jobId === targetJobId && routeGeneration === targetGeneration;
+		pendingCreditMutations.add(token);
+		return {
+			isCurrent,
+			async finish(error) {
+				if (finished || !isCurrent() || !pendingCreditMutations.has(token)) return;
+				finished = true;
+				try {
+					if (error != null) {
+						creditMutationErrors.set(key, error instanceof Error && error.message ? error.message : m.editor_movie_name_update_failed());
+					} else {
+						creditMutationErrors.delete(key);
+						await refreshAfterCollision(movieContentId);
+					}
+				} finally {
+					if (isCurrent()) pendingCreditMutations.delete(token);
+				}
+			},
+		};
+	};
 
 	async function refreshAfterCollision(movieContentId: string): Promise<void> {
 		const targetJobId = jobId;
@@ -2035,10 +2109,25 @@ export function createReviewState(getJobId: () => string) {
 		get refreshError() {
 			return refreshError;
 		},
-		retryLoad() {
-			return refreshAfterCollision('');
+		async retryLoad() {
+			if (pendingCreditMutations.size > 0) return;
+			const targetJobId = jobId;
+			const targetGeneration = routeGeneration;
+			await refreshAfterCollision('');
+			// An explicit reload accepts the authoritative saved state after an
+			// ambiguous write failure, without discarding local movie drafts.
+			if (jobId === targetJobId && routeGeneration === targetGeneration && !collisionRefreshError) {
+				creditMutationErrors.clear();
+			}
 		},
 		refreshAfterCollision,
+		beginCreditMutation,
+		get creditMutationError() {
+			return creditMutationError;
+		},
+		get creditWritesBlocked() {
+			return creditWritesBlocked;
+		},
 		get config() {
 			return config;
 		},
@@ -2112,10 +2201,13 @@ export function createReviewState(getJobId: () => string) {
 			return organizeProgress;
 		},
 		get organizeStatus() {
-			return organizeStatus;
+			return organizeStatus === 'idle' && recoveredCreditStatuses.size > 0 ? 'failed' : organizeStatus;
 		},
 		set organizeStatus(v) {
 			organizeStatus = v;
+		},
+		get displayedFileStatuses() {
+			return fileStatuses.size > 0 ? fileStatuses : recoveredCreditStatuses;
 		},
 		get fileStatuses() {
 			return fileStatuses;
@@ -2450,7 +2542,7 @@ export function createReviewState(getJobId: () => string) {
 		useScreenshotAsCover,
 		saveAllEdits,
 		get isSavingEdits() {
-			return mutations.saveEditsMutation.isPending;
+			return pendingMovieSave !== null || pendingCreditMutations.size > 0 || collisionRefreshPending;
 		},
 		get editedMovieCount() {
 			return editedMovies.size;
