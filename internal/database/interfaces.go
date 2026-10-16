@@ -249,9 +249,9 @@ type BatchFileOperationRepositoryInterface interface {
 	FindOperationsWithLedger(ctx context.Context) ([]models.BatchFileOperation, error)
 	// UpdateJournalInTx atomically rewrites one row's generated-files journal:
 	// BEGIN IMMEDIATE → re-read the row → fn merges against that fresh state →
-	// UPDATE generated_files only → COMMIT (POSTER-WRITE-HARDENING review
-	// 4960250562 — durable cross-process serialization beyond the process-local
-	// journal locks and per-destination .dlbusy markers).
+	// UPDATE generated_files → optional WithJournalCompletionColumns update →
+	// COMMIT (POSTER-WRITE-HARDENING review 4960250562 — durable cross-process
+	// serialization beyond process-local journal locks and .dlbusy markers).
 	UpdateJournalInTx(ctx context.Context, id uint, fn JournalUpdateFn) error
 	// UpdateNonJournalFields persists one row's non-journal columns WITHOUT
 	// writing generated_files: the journal column is owned exclusively by

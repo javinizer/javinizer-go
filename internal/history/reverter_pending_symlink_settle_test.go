@@ -42,6 +42,7 @@ func TestRevertFile_UnexecutedMoveIntentDanglingSymlinkSourceSettlesNoOp(t *test
 	}
 	mockRepo := mocks.NewMockBatchFileOperationRepositoryInterface(t)
 	mockRepo.On("FindByID", mock.Anything, uint(810)).Return(op, nil)
+	expectMockUndoAdmission(t, mockRepo, op)
 	mockRepo.On("UpdateRevertStatus", mock.Anything, uint(810), models.RevertStatusNoOp).Return(nil)
 
 	r := NewReverter(fs, mockRepo)

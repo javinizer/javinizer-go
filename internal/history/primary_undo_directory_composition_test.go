@@ -64,7 +64,7 @@ func TestPrimaryUndoDirectoryCompositionContradictionsSurviveReopen(t *testing.T
 					}
 					require.NoError(t, jobs.DeleteOrganizedOlderThan(context.Background(), time.Now().Add(-24*time.Hour)))
 					f.reopen()
-					require.Equal(t, before, f.op.GeneratedFiles)
+					requireOnlyUndoAdmissionChanged(t, before, f.op.GeneratedFiles)
 					require.Equal(t, models.RevertStatusApplied, f.op.RevertStatus)
 					job, err := database.NewJobRepository(f.db).FindByID(context.Background(), f.op.BatchJobID)
 					require.NoError(t, err)

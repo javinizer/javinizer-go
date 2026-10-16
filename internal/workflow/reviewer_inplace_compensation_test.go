@@ -127,7 +127,7 @@ func independentInPlaceResidentDirectoryUndo(t *testing.T, nativeCase bool) {
 						require.FileExists(t, filepath.Join(publishedDir, "ABC-123-cd2.mp4"))
 						require.FileExists(t, filepath.Join(publishedDir, "ABC-123.eng.srt"))
 						if failedTerminal {
-							require.NoError(t, log.CompleteFailed(context.Background(), result.OperationID, result))
+							seedFailedHistoryStatus(t, repo, result.OperationID)
 						}
 						deleted := map[string]bool{}
 						foreign := map[string]os.FileInfo{}
