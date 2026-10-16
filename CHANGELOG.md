@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Keep completed dump imports from stalling on optional EOF probes while retaining resumed-payload stall detection (#316).
 - Isolate review refresh state between jobs and prevent Apply or retry after failed saves or non-authoritative refreshes (#317).
-
+- Fix native BSD lint validation while preserving primary Undo timestamp precision.
 - Avoid redundant staging copies for organize and in-place video moves; allocate staging on the planned destination filesystem, including writable destinations with read-only parents (#276, #282, #285).
 - Preserve configured subtitle policy and source ownership across copy, link, multipart and case-insensitive publication; keep internal busy markers out of published artifacts and allow safe cleanup retries (#281, #284, #290).
 - Preserve existing resident videos, aliases and unowned artwork during Apply and Undo; recover owned directory moves and retain unresolved recovery state (#291, #292, #295, #296).
@@ -1070,3 +1070,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 - Path traversal protection for API endpoints- CORS origin validation- Directory traversal prevention- SQL injection prevention- Header injection and path traversal sanitization in frontend
+
+[v1.6.2]: https://github.com/javinizer/javinizer-go/compare/v1.6.1...v1.6.2
