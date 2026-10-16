@@ -368,7 +368,7 @@ func mergeReplacementLedgerIntents(priorRaw, newRaw string, promotePinnedDeletes
 		return newRaw
 	}
 	prior, err := models.ParseGeneratedFiles(priorRaw)
-	if err != nil || (!prior.PublicationPending && prior.DirectoryMove == nil && !prior.PrimaryResident && prior.PrimaryUndo == nil && len(prior.Replacements) == 0 && len(prior.Roots) == 0 && len(prior.MoveBack) == 0 && len(prior.Delete) == 0 && len(prior.PlannedDeletes) == 0) {
+	if err != nil || (!prior.UndoStarted && !prior.PublicationPending && prior.DirectoryMove == nil && !prior.PrimaryResident && prior.PrimaryUndo == nil && len(prior.Replacements) == 0 && len(prior.Roots) == 0 && len(prior.MoveBack) == 0 && len(prior.Delete) == 0 && len(prior.PlannedDeletes) == 0) {
 		return newRaw
 	}
 	if newRaw == "" {
@@ -391,12 +391,13 @@ func mergeReplacementLedgerIntents(priorRaw, newRaw string, promotePinnedDeletes
 			}
 			retained = kept
 		}
-		return models.MarshalLedgerJSON(models.GeneratedFilesJSON{PublicationPending: prior.PublicationPending, DirectoryMove: prior.DirectoryMove, PrimaryUndo: prior.PrimaryUndo, PrimaryResident: prior.PrimaryResident, Replacements: prior.Replacements, Roots: prior.Roots, MoveBack: prior.MoveBack, Delete: prior.Delete, PlannedDeletes: retained})
+		return models.MarshalLedgerJSON(models.GeneratedFilesJSON{UndoStarted: prior.UndoStarted, PublicationPending: prior.PublicationPending, DirectoryMove: prior.DirectoryMove, PrimaryUndo: prior.PrimaryUndo, PrimaryResident: prior.PrimaryResident, Replacements: prior.Replacements, Roots: prior.Roots, MoveBack: prior.MoveBack, Delete: prior.Delete, PlannedDeletes: retained})
 	}
 	fresh, err := models.ParseGeneratedFiles(newRaw)
 	if err != nil {
 		return newRaw
 	}
+	fresh.UndoStarted = fresh.UndoStarted || prior.UndoStarted
 	fresh.PublicationPending = fresh.PublicationPending || prior.PublicationPending
 	fresh.PrimaryResident = fresh.PrimaryResident || prior.PrimaryResident
 	// Completion reports an NFO path even when publication replaced an
@@ -640,6 +641,15 @@ func (l *dbRevertLog) mergeJournalInTxOpt(ctx context.Context, recordID uint, op
 func (l *dbRevertLog) mergePublicationJournalInTx(ctx context.Context, recordID uint, opID OperationID, caller, newRaw, folderRoot string, promotePinnedDeletes, pending, finalized bool, recovery ...*models.PublicationRecovery) (string, error) {
 	var merged string
 	txErr := l.repo.UpdateJournalInTx(ctx, recordID, func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
+		ledger, parseErr := models.ParseGeneratedFiles(current.GeneratedFiles)
+		if parseErr != nil {
+			return models.GeneratedFilesJSON{}, false, parseErr
+		}
+		// Once Undo is admitted, even late failure reconciliation must not
+		// reintroduce claims from an Apply snapshot taken before Undo.
+		if ledger.UndoStarted || (pending && current.RevertStatus != models.RevertStatusApplied) {
+			return models.GeneratedFilesJSON{}, false, fmt.Errorf("publication completion refused: operation %s was admitted to Undo or is terminal", opID)
+		}
 		next, persist, m, err := completionLedgerMergeOpt(current.GeneratedFiles, newRaw, folderRoot, promotePinnedDeletes, recovery...)
 		if err == nil && (pending || finalized) {
 			// An idempotent merge returns a zero next value; parse its bytes.

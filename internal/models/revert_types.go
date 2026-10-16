@@ -12,8 +12,11 @@ import (
 type GeneratedFilesJSON struct {
 	// PublicationPending blocks Undo until resident publication or its rollback
 	// has been durably reconciled. A crash/write failure requires manual recovery.
-	PublicationPending bool         `json:"publication_pending,omitempty"`
-	PrimaryUndo        *PrimaryUndo `json:"primary_undo,omitempty"`
+	PublicationPending bool `json:"publication_pending,omitempty"`
+	// UndoStarted permanently excludes new publication on this operation row.
+	// Failed/skipped Undo can have changed files even when its status is unchanged.
+	UndoStarted bool         `json:"undo_started,omitempty"`
+	PrimaryUndo *PrimaryUndo `json:"primary_undo,omitempty"`
 	// PrimaryResident excludes an admission-proven pre-existing primary from
 	// Undo ownership, while preserving independently installed artifact inverses.
 	DirectoryMove   *DirectoryMove     `json:"directory_move,omitempty"`

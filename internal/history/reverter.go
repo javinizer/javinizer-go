@@ -251,11 +251,18 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 		return result, err
 	}
 
+	// Atomically arbitrate with the write-ahead publication checkpoint. A
+	// read-only pending check is insufficient: publication could commit after
+	// that read while this invocation is already on its way to filesystem I/O.
+	if err := r.admitUndo(ctx, op); err != nil {
+		return primaryUndoFailure(op, err), nil
+	}
+	if result, err := r.guardDoubleRevert(ctx, op); result != nil || err != nil {
+		return result, err
+	}
+
 	residentDirectoryRestored := false
 	ledgerBefore, _ := models.ParseGeneratedFiles(op.GeneratedFiles)
-	if ledgerBefore.PublicationPending {
-		return primaryUndoFailure(op, fmt.Errorf("resident publication reconciliation is pending; manual recovery required")), nil
-	}
 	// Directory compensation and resident admission exclude primary ownership.
 	// Reject contradictory recovery journals before even inspecting directory
 	// locations, without overwriting a concurrent primary Undo terminal status.
@@ -1408,7 +1415,7 @@ func (r *Reverter) RevertBatch(ctx context.Context, batchJobID string) (*RevertB
 	// ancestors (including the top-level output directory if it contains other
 	// files) are preserved. An empty output directory will be removed, which
 	// is the correct behavior after a full batch revert.
-	for dirPath := range collectDestRoots(processable) {
+	for dirPath := range successfulDestRoots(processable, outcomes) {
 		r.fsReverter.cleanupEmptyDir(filepath.Clean(dirPath), "")
 	}
 
@@ -1479,7 +1486,7 @@ func (r *Reverter) RevertScrape(ctx context.Context, batchJobID string, movieID 
 	outcomes := r.revertOperations(ctx, matching, r.revertFile)
 	succeeded, skipped, failed := summarizeOutcomes(outcomes)
 
-	for dirPath := range collectDestRoots(matching) {
+	for dirPath := range successfulDestRoots(matching, outcomes) {
 		r.fsReverter.cleanupEmptyDir(filepath.Clean(dirPath), "")
 	}
 
@@ -1490,4 +1497,44 @@ func (r *Reverter) RevertScrape(ctx context.Context, batchJobID string, movieID 
 		Failed:    failed,
 		Outcomes:  outcomes,
 	}, nil
+}
+
+// admitUndo runs inside the existing whole-operation Undo lock. Its durable
+// monotonic marker also arbitrates with publication in another process. Retried
+// Undo remains admitted; failed/skipped attempts must never reopen publication.
+func (r *Reverter) admitUndo(ctx context.Context, op *models.BatchFileOperation) error {
+	return admitOperationUndo(ctx, r.batchFileOpRepo, op)
+}
+
+func admitOperationUndo(ctx context.Context, repo database.BatchFileOperationRepositoryInterface, op *models.BatchFileOperation) error {
+	return repo.UpdateJournalInTx(ctx, op.ID, func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
+		ledger, err := models.ParseGeneratedFiles(current.GeneratedFiles)
+		if err != nil {
+			return models.GeneratedFilesJSON{}, false, err
+		}
+		if ledger.PublicationPending {
+			return models.GeneratedFilesJSON{}, false, fmt.Errorf("resident publication reconciliation is pending; manual recovery required")
+		}
+		op.RevertStatus = current.RevertStatus
+		op.GeneratedFiles = current.GeneratedFiles
+		if current.RevertStatus == models.RevertStatusReverted || current.RevertStatus == models.RevertStatusNoOp {
+			return ledger, false, nil
+		}
+		persist := !ledger.UndoStarted
+		ledger.UndoStarted = true
+		op.GeneratedFiles = models.MarshalLedgerJSON(ledger)
+		return ledger, persist, nil
+	})
+}
+
+// Failed admission must not escape through batch-level ancestor cleanup. A
+// successful sibling can share an ancestor with a held operation, so defer the
+// entire optional ancestor sweep whenever any operation remains unresolved.
+func successfulDestRoots(ops []models.BatchFileOperation, outcomes []RevertFileResult) map[string]bool {
+	for _, outcome := range outcomes {
+		if outcome.Outcome != models.RevertOutcomeReverted {
+			return nil
+		}
+	}
+	return collectDestRoots(ops)
 }

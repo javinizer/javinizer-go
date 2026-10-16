@@ -91,6 +91,7 @@ func TestRevertFile_PendingMoveDanglingSymlinkSourceConflictsRetainsBoth(t *test
 	op := pendingMoveIntentOp(t, 811, "ABC-123", src, dst)
 	mockRepo := mocks.NewMockBatchFileOperationRepositoryInterface(t)
 	mockRepo.On("FindByID", mock.Anything, uint(811)).Return(op, nil)
+	expectMockUndoAdmission(t, mockRepo, op).Twice()
 	mockRepo.On("UpdateRevertStatus", mock.Anything, uint(811), models.RevertStatusFailed).Return(nil)
 
 	r := NewReverter(fs, mockRepo)
@@ -142,6 +143,7 @@ func TestRevertFile_PendingMoveMemfsDanglingLinkSourceConflicts(t *testing.T) {
 	op := pendingMoveIntentOp(t, 812, "ABC-123", src, dst)
 	mockRepo := mocks.NewMockBatchFileOperationRepositoryInterface(t)
 	mockRepo.On("FindByID", mock.Anything, uint(812)).Return(op, nil)
+	expectMockUndoAdmission(t, mockRepo, op)
 	mockRepo.On("UpdateRevertStatus", mock.Anything, uint(812), models.RevertStatusFailed).Return(nil)
 
 	result, err := NewReverter(fs, mockRepo).revertFile(context.Background(), op)
@@ -176,6 +178,7 @@ func TestRevertFile_PendingMoveRegularFileSourceConflicts(t *testing.T) {
 	op := pendingMoveIntentOp(t, 813, "ABC-123", src, dst)
 	mockRepo := mocks.NewMockBatchFileOperationRepositoryInterface(t)
 	mockRepo.On("FindByID", mock.Anything, uint(813)).Return(op, nil)
+	expectMockUndoAdmission(t, mockRepo, op)
 	mockRepo.On("UpdateRevertStatus", mock.Anything, uint(813), models.RevertStatusFailed).Return(nil)
 
 	result, err := NewReverter(fs, mockRepo).revertFile(context.Background(), op)

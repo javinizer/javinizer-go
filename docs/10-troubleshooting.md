@@ -534,3 +534,11 @@ database: older versions do not recognize this safety hold. Recovery must use
 the original publication/rollback ownership proofs, not merely the current
 contents at the recorded paths. If the final write could not be retried before
 the process exited, automatic recovery of this row is intentionally unavailable.
+
+Undo and resident publication now arbitrate atomically through the same database
+journal, including requests using separate database connections. Once Undo (or
+journal-authorized backup recovery) begins, `undo_started` permanently prevents
+that operation from admitting a new resident publication checkpoint. Failed or
+skipped Undo can still be retried; they do not reopen publication. Do not manually
+clear either admission marker. This arbitration does not make older binaries
+safe to run concurrently against this database.

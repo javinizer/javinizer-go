@@ -156,10 +156,14 @@ func TestResidentPrimaryNonresidentConfirmFailure(t *testing.T) {
 // Simulate losing every completion after the durable pre-execution checkpoint.
 type residentCheckpointOnlyLog struct {
 	RevertLog
-	calls int
+	calls    int
+	terminal *ApplyResult
 }
 
 func (l *residentCheckpointOnlyLog) Complete(ctx context.Context, id OperationID, result *ApplyResult) error {
+	if result != nil && result.PublicationFinalized {
+		l.terminal = result
+	}
 	l.calls++
 	if l.calls > 1 || result.OrganizeResult == nil || !result.OrganizeResult.PrimaryResident || result.OrganizeResult.NewPath != "" || len(result.OrganizeResult.Subtitles) != 0 {
 		return nil

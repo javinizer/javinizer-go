@@ -168,7 +168,8 @@ func TestReplacementSweepCoverage_LiveLedgerParseErrorUndoesRestore(t *testing.T
 	malformed.GeneratedFiles = `{"replacements":broken`
 	repo := &covFindByIDRepo{
 		p3OpRepo: base,
-		results:  []covFindByIDResult{{row: op}, {row: &malformed}},
+		// The live read and Undo admission succeed before the post-restore fault.
+		results: []covFindByIDResult{{row: op}, {row: op}, {row: &malformed}},
 	}
 	idx := &replacementLedgerIndex{journaled: map[string]*models.BatchFileOperation{sweepSlash(backup): op}}
 	info, err := fs.Stat(backup)
@@ -197,7 +198,8 @@ func TestReplacementSweepCoverage_LiveRowGoneUndoRemoveError(t *testing.T) {
 	op := journalRow(t, base, "job-1", "COV-LIVE-GONE", dest, backup, 1, models.RevertStatusApplied)
 	repo := &covFindByIDRepo{
 		p3OpRepo: base,
-		results:  []covFindByIDResult{{row: op}, {err: errors.New("live row disappeared")}},
+		// The live read and Undo admission succeed before the post-restore fault.
+		results: []covFindByIDResult{{row: op}, {row: op}, {err: errors.New("live row disappeared")}},
 	}
 	idx := &replacementLedgerIndex{journaled: map[string]*models.BatchFileOperation{sweepSlash(backup): op}}
 	info, err := fs.Stat(backup)

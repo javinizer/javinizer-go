@@ -703,6 +703,9 @@ func (s *ReplacementSweeper) joinPruneRestoreFailure(opID uint, entry models.Rep
 func (s *ReplacementSweeper) markPruneCleanupPending(opID uint, entry models.ReplacementEntry) error {
 	ctx, cancel := context.WithTimeout(database.WithPruneMaintenance(context.Background()), 30*time.Second)
 	defer cancel()
+	if err := admitOperationUndo(ctx, s.repo, &models.BatchFileOperation{ID: opID}); err != nil {
+		return err
+	}
 	return markReplacementEntryRestorePendingKind(ctx, s.repo, opID, sweepSlash(entry.Backup), models.RestorePendingKindPrune)
 }
 
@@ -1454,6 +1457,15 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 	if journalPublicationPending(freshRow) || freshRow.RevertStatus == models.RevertStatusReverted {
 		return false // consumed meanwhile
 	}
+	// Persist exclusion before restore; this also refreshes the journal used
+	// below so an install confirmation racing the earlier read is observed.
+	if err := admitOperationUndo(ctx, s.repo, freshRow); err != nil {
+		logging.Warnf("replacement sweep %s: recovery admission refused (%v) — kept", backup, err)
+		return false
+	}
+	if freshRow.RevertStatus == models.RevertStatusReverted || freshRow.RevertStatus == models.RevertStatusNoOp {
+		return false
+	}
 	if journalEntryInstalled(freshRow, backupSlash) {
 		logging.Infof("replacement sweep %s: destination missing but install was confirmed — backup retained, no auto-restore", backup)
 		return false
@@ -1923,6 +1935,9 @@ func (s *ReplacementSweeper) retryPendingRemovalClaimed(ctx context.Context, row
 			fnErr = err
 			return models.GeneratedFilesJSON{}, false, err
 		}
+		if gf.PublicationPending {
+			return models.GeneratedFilesJSON{}, false, fmt.Errorf("publication reconciliation is pending")
+		}
 		for i := range gf.Replacements {
 			if sweepSlash(gf.Replacements[i].Backup) == backupSlash {
 				targetFound = true
@@ -1932,7 +1947,9 @@ func (s *ReplacementSweeper) retryPendingRemovalClaimed(ctx context.Context, row
 				break
 			}
 		}
-		return gf, false, nil
+		persist := !gf.UndoStarted
+		gf.UndoStarted = true
+		return gf, persist, nil
 	})
 	if err != nil {
 		if fnErr != nil {

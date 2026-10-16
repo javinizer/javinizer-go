@@ -1,12 +1,16 @@
 package history
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 
+	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/mocks"
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -53,4 +57,36 @@ func TestIsDescendant(t *testing.T) {
 	t.Run("relative paths work", func(t *testing.T) {
 		assert.True(t, isDescendant("out/sub/file.txt", "out/sub"))
 	})
+}
+
+// expectMockUndoAdmission runs the real admission callback against a lean,
+// detached row and persists its journal exactly like UpdateJournalInTx.
+func expectMockUndoAdmission(t *testing.T, repo *mocks.MockBatchFileOperationRepositoryInterface, stored *models.BatchFileOperation) *mock.Call {
+	t.Helper()
+	return repo.On("UpdateJournalInTx", mock.Anything, stored.ID, mock.Anything).Return(func(_ context.Context, _ uint, fn database.JournalUpdateFn) error {
+		current := &models.BatchFileOperation{ID: stored.ID, GeneratedFiles: stored.GeneratedFiles, RevertStatus: stored.RevertStatus}
+		before, err := models.ParseGeneratedFiles(current.GeneratedFiles)
+		require.NoError(t, err)
+		next, persist, err := fn(current)
+		if err != nil {
+			return err
+		}
+		require.Equal(t, !before.UndoStarted, persist, "Undo admission must persist once and remain monotonic on retry")
+		before.UndoStarted = true
+		require.Equal(t, before, next, "admission must retain the complete inverse journal")
+		if persist {
+			stored.GeneratedFiles = models.MarshalLedgerJSON(next)
+		}
+		return nil
+	}).Once()
+}
+
+// requireOnlyUndoAdmissionChanged retains the entire inverse journal while
+// requiring the one durable admission bit that remains set after refusal.
+func requireOnlyUndoAdmissionChanged(t *testing.T, before, after string) {
+	t.Helper()
+	want, err := models.ParseGeneratedFiles(before)
+	require.NoError(t, err)
+	want.UndoStarted = true
+	require.JSONEq(t, models.MarshalLedgerJSON(want), after)
 }
