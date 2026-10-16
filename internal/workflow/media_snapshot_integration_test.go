@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/downloader"
 	"github.com/javinizer/javinizer-go/internal/history"
 	"github.com/javinizer/javinizer-go/internal/mocks"
@@ -68,6 +69,17 @@ func TestUpdateMediaRevertPreservesReplacementsAndDeletesCreated(t *testing.T) {
 	}
 	repo.On("FindByBatchJobID", mock.Anything, "job-016").Return([]models.BatchFileOperation{op}, nil)
 	repo.On("FindByID", mock.Anything, uint(1600)).Return(&op, nil)
+	repo.On("UpdateJournalInTx", mock.Anything, op.ID, mock.Anything).Return(func(_ context.Context, _ uint, fn database.JournalUpdateFn) error {
+		current := &models.BatchFileOperation{ID: op.ID, GeneratedFiles: op.GeneratedFiles, RevertStatus: op.RevertStatus}
+		next, persist, err := fn(current)
+		if err != nil {
+			return err
+		}
+		require.True(t, persist)
+		require.True(t, next.UndoStarted)
+		op.GeneratedFiles = models.MarshalLedgerJSON(next)
+		return nil
+	}).Once()
 	repo.On("UpdateRevertStatus", mock.Anything, uint(1600), models.RevertStatusReverted).Return(nil)
 
 	result, err := history.NewReverter(fs, repo).RevertScrape(context.Background(), "job-016", "TEST-016")

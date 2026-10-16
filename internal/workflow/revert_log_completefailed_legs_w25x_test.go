@@ -36,9 +36,8 @@ func TestW25X_CompleteFailedEmptySourceDirFallsBackToOldDirectoryPath(t *testing
 		// fallback when assigning sourceDir.
 		OriginalDirPath: "",
 	}, nil)
-	runFnMock(repo, 21, &models.BatchFileOperation{ID: 21, RevertStatus: models.RevertStatusApplied}, &txPersisted)
-	repo.On("UpdateNonJournalFields", mock.Anything, mock.AnythingOfType("*models.BatchFileOperation")).
-		Run(func(args mock.Arguments) { saved = *args.Get(1).(*models.BatchFileOperation) }).Return(nil)
+	saved = models.BatchFileOperation{ID: 21, RevertStatus: models.RevertStatusApplied}
+	runFnMock(repo, 21, &saved, &txPersisted)
 
 	err := log.CompleteFailed(context.Background(), "21", &ApplyResult{
 		Movie:        &models.Movie{ID: "W25X-001"},

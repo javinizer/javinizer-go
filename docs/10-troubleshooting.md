@@ -520,3 +520,37 @@ javinizer sort /path --dry-run 2>&1 | tee debug.log
 ---
 
 **Return to**: [Getting Started](./01-getting-started.md)
+
+## Resident publication reconciliation is pending
+
+If Undo reports that resident publication reconciliation is pending, it has
+retained a durable safety hold because publication or rollback did not finish
+writing its history journal. Undo will refuse filesystem changes for that row;
+repeated Undo requests do not clear the hold. History retention also keeps it.
+
+Keep the database and affected files together for manual recovery. Do not clear
+`publication_pending` manually or run an older Javinizer binary against this
+database: older versions do not recognize this safety hold. Recovery must use
+the original publication/rollback ownership proofs, not merely the current
+contents at the recorded paths. If the final write could not be retried before
+the process exited, automatic recovery of this row is intentionally unavailable.
+
+Undo and resident publication now arbitrate atomically through the same database
+journal, including requests using separate database connections. Once Undo (or
+journal-authorized backup recovery) begins, `undo_started` permanently prevents
+that operation from admitting a new resident publication checkpoint. Failed or
+skipped Undo can still be retried; they do not reopen publication. Do not manually
+clear either admission marker. This arbitration does not make older binaries
+safe to run concurrently against this database.
+
+Apply journal completion is also durable. A committed `apply_terminal` record
+closes all Apply journal writers, including delayed replacement and intent
+updates. The terminal journal and its path/status metadata commit atomically.
+An exact retry of the same terminal payload is a no-op; it rewrites neither
+journal nor metadata. A conflicting later completion is refused, so a delayed success cannot replace failed recovery history. Do not
+edit these terminal records or open the database with an older binary to bypass
+the refusal.
+A failure terminal committed without recovery proofs while publication is held
+cannot be replaced with a different result later; that row requires manual
+recovery. If the terminal transaction itself failed, retrying the original
+carried recovery result is still permitted.

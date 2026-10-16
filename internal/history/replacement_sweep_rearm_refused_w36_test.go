@@ -137,7 +137,7 @@ func TestSweepW36_ArmedLegFailedMoveBackMarksRearmRefused(t *testing.T) {
 // journal-only, and the failure only surfaces.
 func TestSweepW36_ArmedLegFailedMoveBackMarkerPersistFailureKeepsArmed(t *testing.T) {
 	base := afero.NewOsFs()
-	repo := &w32FailNthJournalTxRepo{p3OpRepo: newP3OpRepo(), failAt: 2 /* 1 = the entry-presence read tx */, err: errors.New("w36 marker persist wedged")}
+	repo := &w32FailNthJournalTxRepo{p3OpRepo: newP3OpRepo(), failAt: 3 /* 1 = Undo admission, 2 = entry-presence read */, err: errors.New("w36 marker persist wedged")}
 	plantFs := &w36QuarMovePlantFs{Fs: base}
 	op, dest, backup := w25SweepCrashOpInDir(t, plantFs, repo.p3OpRepo, t.TempDir(), "W36B", []byte("original bytes"), "stamped")
 	plantFs.plant, plantFs.bytes = backup, []byte("foreign claimant at the journaled name")

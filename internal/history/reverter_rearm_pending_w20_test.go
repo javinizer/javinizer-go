@@ -383,7 +383,7 @@ func TestReplacementSweepPendingW20_RestoreAndConsumePublishCompletedPersistsCle
 	op := journalRow(t, baseRepo, "job-w20-sweep", "W20-RAC", dest, backup, 1, models.RevertStatusApplied)
 
 	consumeErr := errors.New("w20 consumption transaction wedged")
-	repo := &w18TxFailRepo{p3OpRepo: baseRepo, fail: map[int]error{2: consumeErr}}
+	repo := &w18TxFailRepo{p3OpRepo: baseRepo, fail: map[int]error{3: consumeErr}}
 	published := false
 	w21RearmPublishCompletedSeam(t, &published)
 

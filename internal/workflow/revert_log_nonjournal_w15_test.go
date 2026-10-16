@@ -3,13 +3,9 @@ package workflow
 // POSTER-WRITE-HARDENING wave-15 (codex follow-up, P1) — completion after a
 // concurrent revert: UpdateRevertStatus(Reverted) from another writer commits
 // between the completion's FindByID-hydrated snapshot and its
-// UpdateNonJournalFields publish. The repository (see the database w15 tests)
-// now suppresses the stale status write and reports ErrOperationRowReverted;
-// the revert log tolerates it through persistNonJournalColumns: warn through
-// the logger seam, reflect the reverted truth on the in-memory record, and
-// return nil — the external contract is unchanged except that a reverted row
-// is never flipped back to live. Deterministic replay via the repo wrapper
-// below (sqlite-backed).
+// authoritative transaction. Completion refuses both journal and narrow columns
+// atomically; CaptureSnapshot separately retains its guarded column write.
+// Deterministic replay via the sqlite-backed repo wrapper below.
 
 import (
 	"context"
@@ -24,23 +20,41 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// w15RevertingRepo wraps the real sqlite-backed repository: the FIRST
-// UpdateNonJournalFields call commits a concurrent revert
-// (UpdateRevertStatus(Reverted)) strictly after the caller hydrated its
-// snapshot and strictly before the completion's column publish — the
-// deterministic stand-in for the wave-15 completion-vs-revert race.
+// w15RevertingRepo commits an independent revert immediately before the selected
+// authoritative write: UpdateJournalInTx for completions, or the existing guarded
+// UpdateNonJournalFields for CaptureSnapshot. Both see the winning fresh row.
 type w15RevertingRepo struct {
 	database.BatchFileOperationRepositoryInterface
-	once    sync.Once
-	flipErr error
+	once            sync.Once
+	flipErr         error
+	authoritative   *models.BatchFileOperation
+	revertOnJournal bool
+}
+
+func (w *w15RevertingRepo) revertBeforeWrite(ctx context.Context, id uint) error {
+	w.once.Do(func() {
+		w.flipErr = w.BatchFileOperationRepositoryInterface.UpdateRevertStatus(ctx, id, models.RevertStatusReverted)
+		if w.flipErr == nil {
+			w.authoritative, w.flipErr = w.BatchFileOperationRepositoryInterface.FindByID(ctx, id)
+		}
+	})
+	return w.flipErr
+}
+
+func (w *w15RevertingRepo) UpdateJournalInTx(ctx context.Context, id uint, fn database.JournalUpdateFn) error {
+	if w.revertOnJournal {
+		if err := w.revertBeforeWrite(ctx, id); err != nil {
+			return err
+		}
+	}
+	return w.BatchFileOperationRepositoryInterface.UpdateJournalInTx(ctx, id, fn)
 }
 
 func (w *w15RevertingRepo) UpdateNonJournalFields(ctx context.Context, op *models.BatchFileOperation) error {
-	w.once.Do(func() {
-		w.flipErr = w.BatchFileOperationRepositoryInterface.UpdateRevertStatus(ctx, op.ID, models.RevertStatusReverted)
-	})
-	if w.flipErr != nil {
-		return w.flipErr
+	if !w.revertOnJournal {
+		if err := w.revertBeforeWrite(ctx, op.ID); err != nil {
+			return err
+		}
 	}
 	return w.BatchFileOperationRepositoryInterface.UpdateNonJournalFields(ctx, op)
 }
@@ -81,52 +95,56 @@ func w15Row(t *testing.T, repo database.BatchFileOperationRepositoryInterface, o
 }
 
 // Complete with a result: the concurrent revert keeps the row reverted while
-// the completion's non-journal columns and tx-merged journal still persist.
+// the incoming journal and all completion columns are refused together.
 func TestW15CompleteKeepsConcurrentRevert(t *testing.T) {
 	rl, rec := newW15RevertLog(t)
 	ctx := context.Background()
 	opID := w15Begin(t, rl, "W15-R1")
 	require.NoError(t, rl.RecordReplacement(ctx, opID, "/dst/W15-R1/poster.jpg", "/dst/W15-R1/poster.jpg.dlbak.1"))
 
-	require.NoError(t, rl.Complete(ctx, opID, &ApplyResult{
+	rec.revertOnJournal = true
+	require.ErrorContains(t, rl.Complete(ctx, opID, &ApplyResult{
 		Movie:          &models.Movie{ID: "W15-R1"},
 		NFOPath:        "/dst/W15-R1/lib/W15-R1.nfo",
 		DownloadPaths:  []string{"/dst/W15-R1/lib/W15-R1-poster.jpg"},
 		OrganizeResult: &organizer.OrganizeResult{NewPath: "/dst/W15-R1/lib/W15-R1.mp4", FolderPath: "/dst/W15-R1/lib"},
-	}), "the lost status race is tolerated, not surfaced as an apply error")
+	}), "admitted to Undo or is terminal")
 
 	row := w15Row(t, rec, opID)
+	require.NotNil(t, rec.authoritative)
+	require.Equal(t, rec.authoritative, row, "refusal preserves every concurrent-revert field and timestamp")
 	require.Equal(t, models.RevertStatusReverted, row.RevertStatus,
 		"the concurrent revert is never clobbered back to live by the completion")
 	require.NotNil(t, row.RevertedAt, "the revert stamp survives")
-	require.Equal(t, "/dst/W15-R1/lib/W15-R1.mp4", row.NewPath,
-		"the completion's non-journal columns still persisted")
+	require.Empty(t, row.NewPath, "stale completion columns must not persist")
 
 	gf, err := models.ParseGeneratedFiles(row.GeneratedFiles)
 	require.NoError(t, err)
-	require.Len(t, gf.Replacements, 1, "the tx-merged journal still landed")
-	require.Contains(t, gf.Delete, "/dst/W15-R1/lib/W15-R1.nfo")
+	require.Len(t, gf.Replacements, 1, "the previously armed journal remains unchanged")
+	require.Empty(t, gf.Delete, "refused completion cannot publish incoming inverse work")
 }
 
 // CompleteFailed with a result keeps the same posture: reverted stays
-// authoritative and the partial-failure columns persist.
+// authoritative and all partial-failure columns are refused.
 func TestW15CompleteFailedKeepsConcurrentRevert(t *testing.T) {
 	rl, rec := newW15RevertLog(t)
 	ctx := context.Background()
 	opID := w15Begin(t, rl, "W15-F1")
 
-	require.NoError(t, rl.CompleteFailed(ctx, opID, &ApplyResult{
+	rec.revertOnJournal = true
+	require.ErrorContains(t, rl.CompleteFailed(ctx, opID, &ApplyResult{
 		Movie:          &models.Movie{ID: "W15-F1"},
 		NFOPath:        "/dst/W15-F1/lib/W15-F1.nfo",
 		OrganizeResult: &organizer.OrganizeResult{NewPath: "/dst/W15-F1/lib/W15-F1.mp4"},
-	}))
+	}), "admitted to Undo or is terminal")
 
 	row := w15Row(t, rec, opID)
+	require.NotNil(t, rec.authoritative)
+	require.Equal(t, rec.authoritative, row, "refusal preserves every concurrent-revert field and timestamp")
 	require.Equal(t, models.RevertStatusReverted, row.RevertStatus,
 		"CompleteFailed's Failed mark never flips a concurrently reverted row back")
 	require.NotNil(t, row.RevertedAt)
-	require.Equal(t, "/dst/W15-F1/lib/W15-F1.mp4", row.NewPath,
-		"the partial state still persisted")
+	require.Empty(t, row.NewPath, "stale partial-failure columns must not persist")
 }
 
 // Complete with a nil result (the plain failure mark) never resurrects a
@@ -136,9 +154,12 @@ func TestW15CompleteNilResultKeepsConcurrentRevert(t *testing.T) {
 	ctx := context.Background()
 	opID := w15Begin(t, rl, "W15-N1")
 
-	require.NoError(t, rl.Complete(ctx, opID, nil))
+	rec.revertOnJournal = true
+	require.ErrorContains(t, rl.Complete(ctx, opID, nil), "admitted to Undo or is terminal")
 
 	row := w15Row(t, rec, opID)
+	require.NotNil(t, rec.authoritative)
+	require.Equal(t, rec.authoritative, row, "refusal preserves every concurrent-revert field and timestamp")
 	require.Equal(t, models.RevertStatusReverted, row.RevertStatus,
 		"the failed mark is suppressed, not clobbering the revert")
 	require.NotNil(t, row.RevertedAt)
@@ -150,15 +171,18 @@ func TestW15CompleteFailedNilResultKeepsConcurrentRevert(t *testing.T) {
 	ctx := context.Background()
 	opID := w15Begin(t, rl, "W15-N2")
 
-	require.NoError(t, rl.CompleteFailed(ctx, opID, nil))
+	rec.revertOnJournal = true
+	require.ErrorContains(t, rl.CompleteFailed(ctx, opID, nil), "admitted to Undo or is terminal")
 
 	row := w15Row(t, rec, opID)
+	require.NotNil(t, rec.authoritative)
+	require.Equal(t, rec.authoritative, row, "refusal preserves every concurrent-revert field and timestamp")
 	require.Equal(t, models.RevertStatusReverted, row.RevertStatus)
 	require.NotNil(t, row.RevertedAt)
 }
 
-// CaptureSnapshot tolerates the race too: snapshot columns persist, the
-// reverted status stays.
+// CaptureSnapshot has no error return, but its stale snapshot columns are
+// refused and the complete concurrent-revert row remains unchanged.
 func TestW15CaptureSnapshotKeepsConcurrentRevert(t *testing.T) {
 	rl, rec := newW15RevertLog(t)
 	ctx := context.Background()
@@ -170,6 +194,8 @@ func TestW15CaptureSnapshotKeepsConcurrentRevert(t *testing.T) {
 	})
 
 	row := w15Row(t, rec, opID)
+	require.NotNil(t, rec.authoritative)
+	require.Equal(t, rec.authoritative, row, "refusal preserves every concurrent-revert field and timestamp")
 	require.Equal(t, models.RevertStatusReverted, row.RevertStatus,
 		"the snapshot write never resurrects the concurrently reverted row")
 	require.NotNil(t, row.RevertedAt)
@@ -177,5 +203,5 @@ func TestW15CaptureSnapshotKeepsConcurrentRevert(t *testing.T) {
 	// separator spelling follows the host OS — compare slash-normalized (the
 	// wave-13 w7/r6 alignment pattern) instead of a literal "/src".
 	require.Equal(t, filepath.ToSlash("/src"), filepath.ToSlash(row.OriginalDirPath),
-		"the snapshot's non-journal columns still persisted")
+		"the original source directory remains unchanged")
 }

@@ -49,6 +49,7 @@ func TestStationaryPrimaryMoveUndo(t *testing.T) {
 						org := organizer.NewOrganizer(fs, &organizer.Config{FolderFormat: "<ID>", FileFormat: "<ID>", RenameFile: true, MoveSubtitles: true, SubtitleExtensions: []string{".srt"}, OperationMode: mode}, engine, mt)
 						orch := newApplyOrchestrator(fs, org, nil, nil, nil, ApplyConfig{}, engine, NewDBRevertLog(repo, NewRevertLogConfig(true, nil), "stationary", fs, nil, nil, nil), nil, nil)
 						cmd := ApplyCmd{Movie: &movie, Match: models.FileMatchInfo{Path: source, Name: filepath.Base(source), Extension: ".mp4", MovieID: movie.ID}, DestPath: library, Organize: OrganizeOptions{MoveFiles: true}, OperationMode: mode, PublicationFence: postPublishFence{movie: &movie}}
+						var terminalResults []*ApplyResult
 						for attempt := 0; attempt < 2; attempt++ {
 							if terminal == "checkpoint only" {
 								orch.revertLog = &residentCheckpointOnlyLog{RevertLog: NewDBRevertLog(repo, NewRevertLogConfig(true, nil), "stationary", fs, nil, nil, nil)}
@@ -58,9 +59,20 @@ func TestStationaryPrimaryMoveUndo(t *testing.T) {
 							require.True(t, result.OrganizeResult.PrimaryResident)
 							require.False(t, result.OrganizeResult.Moved)
 							if terminal == "failed" {
-								require.NoError(t, orch.revertLog.CompleteFailed(context.Background(), result.OperationID, result))
+								seedFailedHistoryStatus(t, repo, result.OperationID)
 							}
 							ledger := p3Ledger(t, repo, result.OperationID)
+							if terminal == "checkpoint only" {
+								require.True(t, ledger.PublicationPending)
+								captured := orch.revertLog.(*residentCheckpointOnlyLog).terminal
+								require.NotNil(t, captured, "capture the successful terminal completion that the fixture withheld")
+								require.True(t, captured.PublicationFinalized)
+								require.Equal(t, result.OperationID, captured.OperationID)
+								require.Empty(t, captured.FailedStep)
+								terminalResults = append(terminalResults, captured)
+							} else {
+								require.False(t, ledger.PublicationPending)
+							}
 							require.True(t, ledger.PrimaryResident)
 							require.Empty(t, ledger.MoveBack)
 							require.Empty(t, ledger.Delete)
@@ -93,7 +105,40 @@ func TestStationaryPrimaryMoveUndo(t *testing.T) {
 						recovered, e := database.New(&database.Config{Type: "sqlite", DSN: path, LogLevel: "error"})
 						require.NoError(t, e)
 						defer recovered.Close()
-						reverter := history.NewReverter(fs, database.NewBatchFileOperationRepository(recovered))
+						recoveredRepo := database.NewBatchFileOperationRepository(recovered)
+						if terminal == "checkpoint only" {
+							untouched := &publicationNoMutationFS{Fs: fs}
+							heldReverter := history.NewReverter(untouched, recoveredRepo)
+							for retry := 0; retry < 2; retry++ {
+								held, err := heldReverter.RevertBatch(context.Background(), "stationary")
+								require.NoError(t, err)
+								require.Equal(t, 2, held.Failed)
+								require.Zero(t, held.Succeeded)
+								require.Zero(t, held.Skipped)
+								require.Zero(t, untouched.writes, "checkpoint-only Undo must not touch any endpoint")
+								for _, outcome := range held.Outcomes {
+									require.Contains(t, outcome.Error, "publication reconciliation is pending")
+								}
+								rows, err := recoveredRepo.FindByBatchJobID(context.Background(), "stationary")
+								require.NoError(t, err)
+								require.Len(t, rows, 2)
+								for _, row := range rows {
+									require.Equal(t, models.RevertStatusApplied, row.RevertStatus, "refusal preserves the held status")
+									ledger, err := models.ParseGeneratedFiles(row.GeneratedFiles)
+									require.NoError(t, err)
+									require.True(t, ledger.PublicationPending)
+								}
+							}
+							// Retry the original successful terminal writes that the fixture
+							// withheld. Do not infer ownership from the mutated endpoints or
+							// clear the hold directly; Complete commits it with its journal.
+							log := NewDBRevertLog(recoveredRepo, NewRevertLogConfig(true, nil), "stationary", fs, nil, nil, nil)
+							for _, captured := range terminalResults {
+								require.NoError(t, log.Complete(context.Background(), captured.OperationID, captured))
+								require.False(t, p3Ledger(t, recoveredRepo, captured.OperationID).PublicationPending)
+							}
+						}
+						reverter := history.NewReverter(fs, recoveredRepo)
 						undo, e := reverter.RevertBatch(context.Background(), "stationary")
 						require.NoError(t, e)
 						require.Zero(t, undo.Failed, "%+v", undo.Outcomes)

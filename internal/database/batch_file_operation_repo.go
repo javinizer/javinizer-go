@@ -226,8 +226,9 @@ func (r *BatchFileOperationRepository) CountByBatchJobIDAndRevertStatus(ctx cont
 // re-read INSIDE that transaction: ID, GeneratedFiles, and RevertStatus are
 // hydrated from the latest committed state; every other field is zero, so
 // merge decisions must key off the ledger and status only. Returning
-// persist=false commits the transaction untouched (an idempotent no-op); a
-// non-nil error rolls it back and propagates verbatim.
+// persist=false skips the journal write; without an opted-in completion payload
+// it commits untouched (an idempotent no-op). A non-nil error rolls it back and
+// propagates verbatim.
 type JournalUpdateFn func(current *models.BatchFileOperation) (next models.GeneratedFilesJSON, persist bool, err error)
 
 // UpdateJournalInTx serializes generated-files journal read-modify-writes
@@ -244,10 +245,11 @@ type JournalUpdateFn func(current *models.BatchFileOperation) (next models.Gener
 // substitute: under WAL, a read-then-write upgrade after a concurrent commit
 // dies with SQLITE_BUSY_SNAPSHOT instead of waiting.
 //
-// ONLY generated_files (+updated_at, Save-parity) is written — concurrent
-// non-journal column writes are never clobbered. fn owns the merge
-// discipline (armed/installed/pending invariants live with the callers); a
-// missing row reports ErrNotFound before fn runs.
+// By default ONLY generated_files (+updated_at, Save-parity) is written.
+// WithJournalCompletionColumns opts into a narrow completion-column update on
+// this same connection before COMMIT; all other fresh metadata stays untouched.
+// fn owns the merge discipline (armed/installed/pending invariants live with the
+// callers); a missing row reports ErrNotFound before either callback runs.
 func (r *BatchFileOperationRepository) UpdateJournalInTx(ctx context.Context, id uint, fn JournalUpdateFn) (retErr error) {
 	label := fmt.Sprintf("batch file operation %d", id)
 	if fn == nil {
@@ -309,12 +311,29 @@ func (r *BatchFileOperationRepository) UpdateJournalInTx(ctx context.Context, id
 	if fnErr != nil {
 		return fnErr
 	}
+	columns, columnsErr := ResolveJournalCompletionColumns(ctx)
+	if columnsErr != nil {
+		return columnsErr
+	}
 	if persist {
 		if _, err := conn.ExecContext(ctx,
 			"UPDATE batch_file_operations SET generated_files = ?, updated_at = ? WHERE id = ?",
 			models.MarshalLedgerJSON(next), time.Now().UTC(), id,
 		); err != nil {
 			return wrapDBErr("update journal", label, err)
+		}
+	}
+	if columns != nil {
+		if _, err := conn.ExecContext(ctx, `UPDATE batch_file_operations SET
+			new_path = ?, in_place_renamed = ?, original_dir_path = ?,
+			revert_status = CASE WHEN ? = '' THEN revert_status ELSE ? END,
+			nfo_path = CASE WHEN ? <> '' THEN ? WHEN COALESCE(nfo_path, '') = '' THEN ? ELSE nfo_path END,
+			updated_at = ? WHERE id = ?`,
+			columns.NewPath, columns.InPlaceRenamed, columns.OriginalDirPath,
+			columns.RevertStatus, columns.RevertStatus,
+			columns.FoundNFOPath, columns.FoundNFOPath, columns.NFOPath, time.Now().UTC(), id,
+		); err != nil {
+			return wrapDBErr("update journal completion columns", label, err)
 		}
 	}
 	// COMMIT is branchless: wrapDBErr maps a nil error to nil, and the deferred
@@ -480,6 +499,27 @@ func (r *BatchFileOperationRepository) UpdateNonJournalFields(ctx context.Contex
 	}()
 	if err := ensureOperationWritableConn(ctx, conn, op.ID, false); err != nil {
 		return wrapDBErr("update non-journal fields", label, err)
+	}
+
+	// Optional completion admission shares the transaction's writer lock with
+	// the column writes: an intervening journal/status commit cannot slip
+	// between validation and either UPDATE. Unguarded callers keep their
+	// existing behavior, including the reverted-row metadata update contract.
+	if guard, _ := ctx.Value(operationColumnGuardContextKey{}).(func(*models.BatchFileOperation) error); guard != nil {
+		var raw, status sql.NullString
+		scanErr := conn.QueryRowContext(ctx,
+			"SELECT generated_files, revert_status FROM batch_file_operations WHERE id = ?", op.ID,
+		).Scan(&raw, &status)
+		switch {
+		case errors.Is(scanErr, sql.ErrNoRows):
+			// Preserve the existing missing-row no-op; no snapshot to validate.
+		case scanErr != nil:
+			return wrapDBErr("update non-journal fields", label, scanErr)
+		default:
+			if err := guard(&models.BatchFileOperation{ID: op.ID, GeneratedFiles: raw.String, RevertStatus: models.RevertStatusEnum(status.String)}); err != nil {
+				return wrapDBErr("update non-journal fields", label, err)
+			}
+		}
 	}
 
 	now := time.Now().UTC()

@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Preserve restored replacement files during cleanup; retain native Windows volumes when restoring primary files and NFO snapshots (#294, #303, #304).
 - Add journaled, copy-first cross-volume primary Undo on supported POSIX platforms, with identity checks, retry retention and cancellation checks before further mutations (#303, #306).
 - Show failed or skipped Undo outcomes accurately and keep eligible retries available (#300).
+- Keep failed-Apply recovery safe after cancellation; prevent late Apply updates from racing Undo, and commit recovery records together with their paths and status (#315).
 - Stabilize title previews across metadata refreshes and catalog-identity choices; preserve movie-specific actress-name drafts through refreshes and asynchronous saves (#276, #282, #283, #286).
 - Resume interrupted r18.dev dump downloads using validated HTTP Range requests; exclude local importer work from the network-stall budget and finish cancelled SQLite rollback before temporary-file cleanup (#272, #301, #309).
 - Honor cancellation during DMM direct URL probes (#299).
@@ -34,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Existing distinct video files are still protected against overwrite. Issue #277 remains open; related resident-file fixes do not establish resolution of the original report.
 - Volumes lacking both supported atomic no-replace publication primitives remain unsupported. FUSE fixtures do not establish compatibility with a particular Unraid/shfs deployment; actual Unraid validation is deferred (#252).
 - Windows cross-volume primary Undo remains unsupported and fails closed. Ambiguous historical recovery records are not migrated; interrupted cleanup claims may require manual recovery. Legacy unowned staging directories are retained.
+- Unresolved failed-Apply reconciliation can leave Undo blocked and require manual recovery; missing recovery proofs are not reconstructed automatically. Do not clear recovery markers or use older binaries to Undo affected operations (#315).
 - AI-remastered title sorting (#254 / #257) is not included.
 - The historical Windows Go GC crash and subsequent test hang remain unexplained. The lifecycle/nil-validation fixes and successful bounded tests do not prove their cause or resolution. Diagnostic-only PR #313 is not included.
 
