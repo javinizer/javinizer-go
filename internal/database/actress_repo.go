@@ -730,15 +730,20 @@ func (r *ActressRepository) ImportUpsert(ctx context.Context, incoming *models.A
 			incoming.DMMID = previousIdentity.DMMID
 		}
 		promotingCandidate := !previousIdentity.Verified
+		if promotingCandidate {
+			incoming.AmbiguityQuarantined = false
+		}
 		if previousIdentity.Verified && (previousIdentity.Origin == ActressOriginUser || previousIdentity.Origin == ActressOriginImport) {
 			incoming.Verified = previousIdentity.Verified
 			incoming.Origin = previousIdentity.Origin
 			incoming.DMMID = previousIdentity.DMMID
-			fillEmptyActressFields(&previousIdentity, incoming)
-			incoming.FirstName = previousIdentity.FirstName
-			incoming.LastName = previousIdentity.LastName
-			incoming.JapaneseName = previousIdentity.JapaneseName
-			incoming.ThumbURL = previousIdentity.ThumbURL
+			// Keep the before-image intact for canonical-name reconciliation.
+			protectedIdentity := previousIdentity
+			fillEmptyActressFields(&protectedIdentity, incoming)
+			incoming.FirstName = protectedIdentity.FirstName
+			incoming.LastName = protectedIdentity.LastName
+			incoming.JapaneseName = protectedIdentity.JapaneseName
+			incoming.ThumbURL = protectedIdentity.ThumbURL
 		}
 		contentIDs, err := movieContentIDsForActressesTx(tx, incoming.ID)
 		if err != nil {
@@ -755,17 +760,25 @@ func (r *ActressRepository) ImportUpsert(ctx context.Context, incoming *models.A
 			if err := deleteActressTranslationsTx(tx, incoming.ID); err != nil {
 				return err
 			}
-		}
-		if promotingCandidate {
-			if err := transitionActressCanonicalNamesTx(tx, incoming.ID, &previousIdentity); err != nil {
+			if err := refreshIdentitySnapshotCreditsTx(tx, incoming.ID, &previousIdentity, incoming.FirstName, incoming.LastName, incoming.JapaneseName); err != nil {
 				return err
 			}
+		}
+		if err := transitionActressCanonicalNamesTx(tx, incoming.ID, &previousIdentity); err != nil {
+			return err
+		}
+		if promotingCandidate {
 			if err := resolveCandidateIdentityCollisionsTx(tx, incoming.ID); err != nil {
 				return err
 			}
 			if err := restoreActressProjectionTx(tx, incoming.ID); err != nil {
 				return err
 			}
+		}
+		// Re-imports can repair matching collisions left open by older imports,
+		// even when the canonical fields are already unchanged.
+		if err := reconcileActressCollisionsTx(tx, incoming.ID); err != nil {
+			return err
 		}
 		if err := recomputeActressCandidateQuarantineTx(tx); err != nil {
 			return err

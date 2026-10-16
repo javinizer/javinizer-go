@@ -15,15 +15,24 @@ import (
 
 func TestCreditDisplayTitleSaveMatchesAuthoritativePreview(t *testing.T) {
 	for _, tc := range []struct {
-		name                                                     string
-		useCredited, override, forceCanonical, rename, emptyCast bool
-		want                                                     string
+		name                                                                         string
+		useCredited, override, forceCanonical, rename, emptyCast, snapshot, japanese bool
+		creditSource                                                                 string
+		want                                                                         string
 	}{
 		{name: "per-movie override", useCredited: true, override: true, want: "Per Movie Override - After"},
 		{name: "credited name", useCredited: true, want: "Reported Alias - After"},
 		{name: "canonical control", want: "Name Canonical - After"},
 		{name: "force canonical control", useCredited: true, forceCanonical: true, want: "Name Canonical - After"},
 		{name: "accepted canonical rename", rename: true, want: "Name Edited - After"},
+		{name: "rename retains per-movie override", rename: true, useCredited: true, override: true, want: "Per Movie Override - After"},
+		{name: "rename retains credited alias", rename: true, useCredited: true, want: "Reported Alias - After"},
+		{name: "rename force canonical", rename: true, useCredited: true, forceCanonical: true, want: "Name Edited - After"},
+		{name: "rename user identity snapshot", rename: true, useCredited: true, snapshot: true, want: "Name Edited - After"},
+		{name: "rename legacy identity snapshot", rename: true, useCredited: true, snapshot: true, creditSource: "legacy", want: "Name Edited - After"},
+		{name: "rename reported canonical name", rename: true, useCredited: true, snapshot: true, creditSource: "r18dev", want: "Name Canonical - After"},
+		{name: "rename Japanese fallback", rename: true, japanese: true, want: "新名 - After"},
+		{name: "rename Japanese identity snapshot", rename: true, japanese: true, useCredited: true, snapshot: true, want: "新名 - After"},
 		{name: "empty cast", emptyCast: true, want: ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -36,6 +45,9 @@ func TestCreditDisplayTitleSaveMatchesAuthoritativePreview(t *testing.T) {
 			cfg.Metadata.NFO.Feature.UseCreditedName = tc.useCredited
 			deps := createTestDeps(t, cfg, "")
 			a := models.Actress{FirstName: "Canonical", LastName: "Name", Verified: true, Origin: "user"}
+			if tc.japanese {
+				a.FirstName, a.LastName, a.JapaneseName = "", "", "旧名"
+			}
 			require.NoError(t, deps.Repos.DB.Create(&a).Error)
 			m := models.Movie{ContentID: "TITLE-401", ID: "TITLE-401", Title: "Before", DisplayTitle: "Old derived title"}
 			require.NoError(t, deps.Repos.DB.Create(&m).Error)
@@ -43,6 +55,10 @@ func TestCreditDisplayTitleSaveMatchesAuthoritativePreview(t *testing.T) {
 				require.NoError(t, deps.Repos.DB.Exec("INSERT INTO movie_actresses (movie_content_id,actress_id) VALUES (?,?)", m.ContentID, a.ID).Error)
 			}
 			credit := models.MovieCredit{MovieContentID: m.ContentID, ActressID: a.ID, CreditedName: "Reported Alias", UserOverride: tc.override, OverrideName: "Per Movie Override", DisplayForceCanonical: tc.forceCanonical, Origin: "user"}
+			credit.Source = tc.creditSource
+			if tc.snapshot {
+				credit.CreditedName = a.FullName()
+			}
 			if !tc.emptyCast {
 				require.NoError(t, deps.Repos.DB.Create(&credit).Error)
 			}
@@ -65,14 +81,34 @@ func TestCreditDisplayTitleSaveMatchesAuthoritativePreview(t *testing.T) {
 			request := contracts.UpdateMovieRequest{Movie: view}
 			if tc.rename {
 				view.Actresses[0].FirstName = "Edited"
+				if tc.japanese {
+					view.Actresses[0].FirstName, view.Actresses[0].JapaneseName = "", "新名"
+				}
 				revision := uint64(1)
 				request.ExpectedResultRevision = &revision
 			}
 			path := "/batch/" + job.GetID() + "/results/title-result"
+			beforePreview := authority.Clone()
+			beforeTables := previewTableSnapshot(t, deps.Repos.DB)
 			preview := doJSON(t, router, http.MethodPost, path+"/display-title-preview", contracts.DisplayTitlePreviewRequest{Movie: view})
 			require.Equal(t, http.StatusOK, preview.Code, preview.Body.String())
 			var p contracts.DisplayTitlePreviewResponse
 			require.NoError(t, json.Unmarshal(preview.Body.Bytes(), &p))
+			// Preview and organize preview share the read-only projection. Neither
+			// may alter the persisted identity, cached result, or caller DTO.
+			organize, _, resolveErr := ResolvePreviewData(t.Context(), deps, job.GetID(), "title-result", contracts.OrganizePreviewRequest{Movie: view})
+			require.Nil(t, resolveErr)
+			factory, err := rt.Snapshot().WorkflowFactory()
+			require.NoError(t, err)
+			require.Equal(t, p.DisplayTitle, factory.RenderDisplayTitle(t.Context(), organize))
+			afterPreview, err := deps.Repos.MovieRepo.FindByContentID(t.Context(), m.ContentID)
+			require.NoError(t, err)
+			require.Equal(t, beforeTables, previewTableSnapshot(t, deps.Repos.DB))
+			require.Equal(t, beforePreview, afterPreview)
+			require.Equal(t, beforePreview, authority)
+			if !tc.emptyCast {
+				require.Equal(t, uint(999999), view.Credits[0].ActressID)
+			}
 			patch := doJSON(t, router, http.MethodPatch, path, request)
 			require.Equal(t, http.StatusOK, patch.Code, patch.Body.String())
 			var response contracts.MovieResponse
@@ -81,9 +117,7 @@ func TestCreditDisplayTitleSaveMatchesAuthoritativePreview(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, tc.want, response.Movie.DisplayTitle)
 			require.Equal(t, tc.want, stored.DisplayTitle)
-			if !tc.rename {
-				require.Equal(t, p.DisplayTitle, stored.DisplayTitle)
-			}
+			require.Equal(t, p.DisplayTitle, stored.DisplayTitle)
 			if tc.emptyCast {
 				require.Empty(t, stored.Credits)
 			} else {

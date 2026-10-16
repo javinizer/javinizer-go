@@ -138,19 +138,21 @@ func authoritativePreviewMovie(ctx context.Context, deps *core.APIDeps, jobID, r
 	if authority == nil {
 		authority = result.Movie
 	}
+	authority = authority.Clone()
 	if override == nil {
-		copyMovie := *authority
-		copyMovie.Actresses = append([]models.Actress(nil), authority.Actresses...)
-		copyMovie.Credits = append([]models.MovieCredit(nil), authority.Credits...)
-		return &copyMovie, nil
+		return authority, nil
 	}
 	movie := contracts.MovieViewToModel(override)
 	movie.ContentID = authority.ContentID
 	if strings.TrimSpace(movie.ID) == "" {
 		movie.ID = authority.ID
 	}
-	movie.Actresses = append([]models.Actress(nil), authority.Actresses...)
-	movie.Credits = append([]models.MovieCredit(nil), authority.Credits...)
+	projection, previewErr := previewProposedCast(ctx, deps.Repos.DB, authority, result.Movie, movie, override, result.PersistedMovie)
+	if previewErr != nil {
+		return nil, previewErr
+	}
+	movie.Actresses = projection.Actresses
+	movie.Credits = projection.Credits
 	movie.CreatedAt = authority.CreatedAt
 	movie.UpdatedAt = authority.UpdatedAt
 	return movie, nil

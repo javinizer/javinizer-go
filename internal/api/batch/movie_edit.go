@@ -113,7 +113,7 @@ func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 		// Without a workflow factory, the title remains the no-template fallback.
 		movie := contracts.MovieViewToModel(req.Movie)
 		movie.DisplayTitle = movie.Title
-		preserveCachedActresses := shouldPreserveCachedActresses(movie, result.Movie)
+		preserveCachedActresses := shouldPreserveReviewCast(req.Movie, result.Movie)
 		if !preserveCachedActresses && (strings.TrimSpace(req.Movie.CastVersion) == "" || (req.ExpectedResultRevision == nil && len(req.ExpectedResultRevisions) == 0)) {
 			c.JSON(http.StatusConflict, contracts.ErrorResponse{Error: "explicit cast changes require an authoritative cast version and result revision; refresh the batch and retry"})
 			return

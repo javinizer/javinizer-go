@@ -148,28 +148,8 @@ func (c *EditCommitter) Commit(ctx context.Context, plan *EditCommitPlan) error 
 				return err
 			}
 		}
-		for _, rn := range plan.Renames {
-			existing, err := u.Actresses.FindByID(ctx, rn.ID)
-			switch {
-			case err != nil && !database.IsNotFound(err):
-				return fmt.Errorf("load actress for rename: %w", err)
-			case err != nil || existing == nil:
-				continue
-			}
-			namesUnchanged := existing.FirstName == rn.FirstName && existing.LastName == rn.LastName && existing.JapaneseName == rn.JapaneseName
-			thumbChanged := rn.ThumbEdited
-			if namesUnchanged && !thumbChanged {
-				continue
-			}
-			if thumbChanged {
-				if err := u.Actresses.RenameIdentityFields(ctx, rn.ID, rn.FirstName, rn.LastName, rn.JapaneseName, rn.ThumbURL); err != nil {
-					return fmt.Errorf("persist actress identity edit: %w", err)
-				}
-				continue
-			}
-			if err := u.Actresses.RenameNameFields(ctx, rn.ID, rn.FirstName, rn.LastName, rn.JapaneseName); err != nil {
-				return fmt.Errorf("persist actress name edit: %w", err)
-			}
+		if err := ApplyActressRenames(ctx, u.Actresses, plan.Renames); err != nil {
+			return err
 		}
 		if plan.UpsertMovie != nil {
 			var err error
