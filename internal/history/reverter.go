@@ -1507,7 +1507,7 @@ func (r *Reverter) admitUndo(ctx context.Context, op *models.BatchFileOperation)
 }
 
 func admitOperationUndo(ctx context.Context, repo database.BatchFileOperationRepositoryInterface, op *models.BatchFileOperation) error {
-	return repo.UpdateJournalInTx(ctx, op.ID, func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
+	err := repo.UpdateJournalInTx(ctx, op.ID, func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
 		ledger, err := models.ParseGeneratedFiles(current.GeneratedFiles)
 		if err != nil {
 			return models.GeneratedFilesJSON{}, false, err
@@ -1515,16 +1515,27 @@ func admitOperationUndo(ctx context.Context, repo database.BatchFileOperationRep
 		if ledger.PublicationPending {
 			return models.GeneratedFilesJSON{}, false, fmt.Errorf("resident publication reconciliation is pending; manual recovery required")
 		}
-		op.RevertStatus = current.RevertStatus
-		op.GeneratedFiles = current.GeneratedFiles
 		if current.RevertStatus == models.RevertStatusReverted || current.RevertStatus == models.RevertStatusNoOp {
 			return ledger, false, nil
 		}
 		persist := !ledger.UndoStarted
 		ledger.UndoStarted = true
-		op.GeneratedFiles = models.MarshalLedgerJSON(ledger)
 		return ledger, persist, nil
 	})
+	if err != nil {
+		return err
+	}
+	// Admission excludes every Apply writer before we refresh metadata. A read
+	// taken before waiting for the transaction could still contain old paths.
+	fresh, err := repo.FindByID(ctx, op.ID)
+	if err != nil {
+		return fmt.Errorf("reload admitted Undo operation: %w", err)
+	}
+	if fresh == nil {
+		return fmt.Errorf("reload admitted Undo operation: row not found")
+	}
+	*op = *fresh
+	return nil
 }
 
 // Failed admission must not escape through batch-level ancestor cleanup. A

@@ -489,26 +489,31 @@ func TestInPlaceResidentPublicationHoldAfterFailedReconciliation(t *testing.T) {
 	require.FileExists(t, env.subtitle)
 }
 
-type publicationColumnFaultRepo struct {
-	database.BatchFileOperationRepositoryInterface
-}
-
-func (r publicationColumnFaultRepo) UpdateNonJournalFields(context.Context, *models.BatchFileOperation) error {
-	return errReconcileTransaction
-}
-
-func TestPublicationPendingJournalCommitSurvivesColumnFailure(t *testing.T) {
+func TestPublicationPendingAtomicFailureRetainsHoldUntilRetry(t *testing.T) {
 	env := setupCopyIntentE2E(t, "publication-columns")
 	output := filepath.Join(filepath.Dir(env.source), "later.jpg")
 	require.NoError(t, afero.WriteFile(env.fs, output, []byte("unrelated"), 0644))
 	row := &models.BatchFileOperation{BatchJobID: env.jobID, MovieID: env.movie.ID, OriginalPath: env.source, OperationType: models.OperationTypeMove, RevertStatus: models.RevertStatusApplied, GeneratedFiles: models.MarshalLedgerJSON(models.GeneratedFilesJSON{PrimaryResident: true, PublicationPending: true, Delete: []string{output}})}
 	require.NoError(t, env.repo.Create(t.Context(), row))
 	id := strconv.FormatUint(uint64(row.ID), 10)
-	log := NewDBRevertLog(publicationColumnFaultRepo{env.repo}, NewRevertLogConfig(true, nil), env.jobID, env.fs, nil, nil, nil)
-	err := log.CompleteFailed(t.Context(), id, &ApplyResult{OrganizeResult: &organizer.OrganizeResult{PrimaryResident: true, OriginalPath: env.source}, PublicationRecovery: &models.PublicationRecovery{Managed: []string{output}}})
-	require.ErrorIs(t, err, errReconcileTransaction)
+	log := NewDBRevertLog(env.repo, NewRevertLogConfig(true, nil), env.jobID, env.fs, nil, nil, nil)
+	result := &ApplyResult{OrganizeResult: &organizer.OrganizeResult{PrimaryResident: true, OriginalPath: env.source}, PublicationRecovery: &models.PublicationRecovery{Managed: []string{output}}}
+	before, err := env.repo.FindByID(t.Context(), row.ID)
+	require.NoError(t, err)
+	releaseFailure := failCompletionSQL(t, env.repo)
+	require.ErrorContains(t, log.CompleteFailed(t.Context(), id, result), "injected atomic completion SQL failure")
+	after, err := env.repo.FindByID(t.Context(), row.ID)
+	require.NoError(t, err)
+	require.Equal(t, before, after, "failed completion must keep the original hold, journal and all metadata")
+	untouched := &publicationNoMutationFS{Fs: env.fs}
+	held, err := history.NewReverter(untouched, env.repo).RevertBatch(t.Context(), env.jobID)
+	require.NoError(t, err)
+	require.Equal(t, 1, held.Failed)
+	require.Zero(t, untouched.writes, "held Undo must not act after an aborted completion")
+	releaseFailure()
+	require.NoError(t, log.CompleteFailed(t.Context(), id, result))
 	ledger := p3Ledger(t, env.repo, id)
-	require.False(t, ledger.PublicationPending, "hold clears only with committed safe journal, even if subsequent status update fails")
+	require.False(t, ledger.PublicationPending, "retry clears the hold only with atomic journal and failure metadata")
 	require.Empty(t, ledger.Delete)
 	undone, err := history.NewReverter(env.fs, env.repo).RevertBatch(t.Context(), env.jobID)
 	require.NoError(t, err)

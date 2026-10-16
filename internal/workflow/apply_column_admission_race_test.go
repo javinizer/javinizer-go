@@ -19,10 +19,11 @@ import (
 
 type applyColumnBarrierRepo struct {
 	database.BatchFileOperationRepositoryInterface
-	ready  chan models.BatchFileOperation
-	resume chan struct{}
-	result chan error
-	calls  atomic.Int32
+	ready          chan models.BatchFileOperation
+	resume         chan struct{}
+	result         chan error
+	calls          atomic.Int32
+	journalBarrier bool
 }
 
 func (r *applyColumnBarrierRepo) UpdateNonJournalFields(ctx context.Context, row *models.BatchFileOperation) error {
@@ -32,6 +33,22 @@ func (r *applyColumnBarrierRepo) UpdateNonJournalFields(ctx context.Context, row
 		<-r.resume
 	}
 	err := r.BatchFileOperationRepositoryInterface.UpdateNonJournalFields(ctx, row)
+	r.result <- err
+	return err
+}
+
+func (r *applyColumnBarrierRepo) UpdateJournalInTx(ctx context.Context, id uint, fn database.JournalUpdateFn) error {
+	if !r.journalBarrier {
+		return r.BatchFileOperationRepositoryInterface.UpdateJournalInTx(ctx, id, fn)
+	}
+	r.calls.Add(1)
+	current, err := r.BatchFileOperationRepositoryInterface.FindByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	r.ready <- *current
+	<-r.resume
+	err = r.BatchFileOperationRepositoryInterface.UpdateJournalInTx(ctx, id, fn)
 	r.result <- err
 	return err
 }
@@ -97,7 +114,7 @@ func newApplyColumnFixture(t *testing.T) *applyColumnFixture {
 
 // An independent connection supplies both the authoritative state change and
 // unmistakable metadata. A stale snapshot would overwrite each of these fields
-// if the trailing column write were not guarded inside its SQLite transaction.
+// if a completion ignored its fresh journal row or snapshot capture ignored CAS.
 func (f *applyColumnFixture) changeWinner(t *testing.T, change string) *models.BatchFileOperation {
 	t.Helper()
 	row, err := f.other.FindByID(t.Context(), f.row.ID)
@@ -144,9 +161,14 @@ func (f *applyColumnFixture) changeWinner(t *testing.T, change string) *models.B
 
 func TestApplyColumnAdmissionRejectsChangedSnapshot(t *testing.T) {
 	for _, writer := range []string{"Complete", "CompleteIntermediate", "CompleteFailed", "CompleteNil", "CompleteFailedNil", "CaptureSnapshot"} {
-		for _, change := range []string{"undo", "terminal-failure", "reverted", "journal"} {
+		changes := []string{"undo", "terminal-failure", "reverted"}
+		if writer == "CaptureSnapshot" {
+			changes = append(changes, "journal")
+		}
+		for _, change := range changes {
 			t.Run(writer+"/"+change, func(t *testing.T) {
 				f := newApplyColumnFixture(t)
+				f.barrier.journalBarrier = writer != "CaptureSnapshot"
 				f.barrier.ready = make(chan models.BatchFileOperation, 1)
 				f.barrier.resume = make(chan struct{})
 				done := make(chan error, 1)
@@ -180,34 +202,28 @@ func TestApplyColumnAdmissionRejectsChangedSnapshot(t *testing.T) {
 				select {
 				case prepared = <-f.barrier.ready:
 				case err := <-done:
-					t.Fatalf("%s returned before the column-write barrier: %v", writer, err)
+					t.Fatalf("%s returned before the authoritative transaction barrier: %v", writer, err)
 				}
 				if writer == "CaptureSnapshot" {
 					require.Equal(t, int32(1), f.fs.reads.Load(), "snapshot file was read before admission changed")
 					require.Equal(t, "newly read NFO snapshot", prepared.NFOSnapshot)
 					require.Equal(t, f.fs.path, prepared.NFOPath)
 				} else {
-					merged := p3Ledger(t, f.other, f.id)
-					if writer == "CompleteIntermediate" {
-						require.Nil(t, merged.ApplyTerminal, "intermediate completion keeps Apply open")
-						require.Contains(t, merged.Delete, f.result.NFOPath, "intermediate journal merge committed before the column barrier")
-					} else {
-						require.NotNil(t, merged.ApplyTerminal, "terminal journal committed before the column barrier")
-					}
-					if writer == "Complete" || writer == "CompleteIntermediate" || writer == "CompleteFailed" {
-						require.Equal(t, f.result.OrganizeResult.NewPath, prepared.NewPath)
-						require.Equal(t, f.result.NFOPath, prepared.NFOPath)
-					}
+					before, err := f.other.FindByID(t.Context(), f.row.ID)
+					require.NoError(t, err)
+					require.Equal(t, f.row, before, "neither journal nor completion metadata may publish before the atomic transaction")
+					require.Equal(t, *before, prepared)
 				}
 				winner := f.changeWinner(t, change)
 				release.Do(func() { close(f.barrier.resume) })
 				publicErr := <-done
-				columnErr := <-f.barrier.result
-				require.ErrorContains(t, columnErr, "Apply columns refused")
+				writeErr := <-f.barrier.result
 				if writer == "CaptureSnapshot" {
+					require.ErrorContains(t, writeErr, "Apply columns refused")
 					require.NoError(t, publicErr, "snapshot refusal remains warn-only")
 				} else {
-					require.ErrorContains(t, publicErr, "Apply columns refused")
+					require.Error(t, writeErr, "fresh terminal or Undo state refuses the whole completion")
+					require.Error(t, publicErr)
 				}
 				after, err := f.other.FindByID(t.Context(), f.row.ID)
 				require.NoError(t, err)

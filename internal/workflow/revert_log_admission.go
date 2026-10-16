@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/models"
 )
 
@@ -13,6 +14,7 @@ import (
 // the transaction cannot authorize either an additive or subtractive mutation.
 type applyJournalRequest struct {
 	terminal *models.ApplyTerminal
+	columns  *database.JournalCompletionColumns
 }
 
 type applyJournalState struct {
@@ -56,6 +58,15 @@ type applyJournalUpdateFn func(*models.BatchFileOperation, models.GeneratedFiles
 
 func (l *dbRevertLog) updateApplyJournal(ctx context.Context, id uint, request applyJournalRequest, fn applyJournalUpdateFn) (applyJournalState, error) {
 	var state applyJournalState
+	replayed := false
+	if request.columns != nil {
+		ctx = database.WithJournalCompletionColumns(ctx, func() (*database.JournalCompletionColumns, error) {
+			if replayed {
+				return nil, nil
+			}
+			return request.columns, nil
+		})
+	}
 	err := l.repo.UpdateJournalInTx(ctx, id, func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
 		ledger, err := models.ParseGeneratedFiles(current.GeneratedFiles)
 		if err != nil {
@@ -67,6 +78,7 @@ func (l *dbRevertLog) updateApplyJournal(ctx context.Context, id uint, request a
 		}
 		state = applyJournalState{raw: current.GeneratedFiles, status: current.RevertStatus}
 		if replay {
+			replayed = true
 			return ledger, false, nil
 		}
 		next, persist, err := fn(current, ledger)

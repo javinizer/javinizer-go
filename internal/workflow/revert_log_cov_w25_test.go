@@ -6,10 +6,8 @@ package workflow
 //     set-aside identity facts (size + mtime seconds) land atomically in the
 //     same journal write as the entry itself; absent variadic args leave the
 //     entry unstamped (legacy shape, byte-identical blobs).
-//   - Completion-side error legs: persistNonJournalColumns (Complete nil and
-//     non-nil result, CompleteFailed nil result) and mergeJournalInTx
-//     (CompleteFailed non-nil result) — a non-reverted persistence failure
-//     must surface, never be swallowed.
+//   - Completion-side error legs: payload resolution and journal failures in
+//     the combined transaction must surface and preserve the complete row.
 
 import (
 	"context"
@@ -23,7 +21,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 )
 
-// w25FailNonJournalRepo fails ONLY UpdateNonJournalFields.
+// w25FailNonJournalRepo fails completion-column resolution inside the journal transaction.
 type w25FailNonJournalRepo struct {
 	repo *database.BatchFileOperationRepository
 	err  error
@@ -50,8 +48,21 @@ func (f *w25FailNonJournalRepo) Update(ctx context.Context, op *models.BatchFile
 func (f *w25FailNonJournalRepo) UpdateNonJournalFields(context.Context, *models.BatchFileOperation) error {
 	return f.err
 }
+
+// failAtomicCompletion resolves the real payload before injecting a failure;
+// the real repository must roll back journal and columns as one transaction.
+func failAtomicCompletion(ctx context.Context, injected error) context.Context {
+	return database.WithJournalCompletionColumns(ctx, func() (*database.JournalCompletionColumns, error) {
+		columns, err := database.ResolveJournalCompletionColumns(ctx)
+		if err != nil || columns == nil {
+			return columns, err
+		}
+		return nil, injected
+	})
+}
+
 func (f *w25FailNonJournalRepo) UpdateJournalInTx(ctx context.Context, id uint, fn database.JournalUpdateFn) error {
-	return f.repo.UpdateJournalInTx(ctx, id, fn)
+	return f.repo.UpdateJournalInTx(failAtomicCompletion(ctx, f.err), id, fn)
 }
 func (f *w25FailNonJournalRepo) UpdateRevertStatus(ctx context.Context, id uint, s models.RevertStatusEnum) error {
 	return f.repo.UpdateRevertStatus(ctx, id, s)
@@ -134,13 +145,18 @@ func TestRevertLogW25_CompleteNilResultPersistFailureSurfaces(t *testing.T) {
 	sentinel := errors.New("w25 column store wedged")
 	broken := NewDBRevertLog(&w25FailNonJournalRepo{repo: repo, err: sentinel},
 		NewRevertLogConfig(true, nil), "job-w25", afero.NewMemMapFs(), nil, nil, nil)
+	before, readErr := repo.FindByID(ctx, uintFromOpID(t, opID))
+	require.NoError(t, readErr)
 	err := broken.Complete(ctx, opID, nil)
 	require.ErrorIs(t, err, sentinel)
-	require.Contains(t, err.Error(), "mark record")
+	after, readErr := repo.FindByID(ctx, uintFromOpID(t, opID))
+	require.NoError(t, readErr)
+	require.Equal(t, before, after, "failed atomic completion preserves journal, metadata and timestamps")
+	require.Contains(t, err.Error(), sentinel.Error())
 }
 
-// Complete success path: the journal merge must succeed while only the
-// follow-up non-journal publish fails.
+// Complete success path: a failed completion payload rolls the journal back
+// with its narrow columns instead of exposing a split committed state.
 func TestRevertLogW25_CompletePostApplyPersistFailureSurfaces(t *testing.T) {
 	db, repo, _ := newP3RecorderHarness(t, ":memory:")
 	defer func() { _ = db.Close() }()
@@ -150,9 +166,14 @@ func TestRevertLogW25_CompletePostApplyPersistFailureSurfaces(t *testing.T) {
 	sentinel := errors.New("w25 column store wedged")
 	broken := NewDBRevertLog(&w25FailNonJournalRepo{repo: repo, err: sentinel},
 		NewRevertLogConfig(true, nil), "job-w25", afero.NewMemMapFs(), nil, nil, nil)
+	before, readErr := repo.FindByID(ctx, uintFromOpID(t, opID))
+	require.NoError(t, readErr)
 	err := broken.Complete(ctx, opID, &ApplyResult{Movie: &models.Movie{ID: "W25CPA-1"}})
 	require.ErrorIs(t, err, sentinel)
-	require.Contains(t, err.Error(), "update post-apply record")
+	after, readErr := repo.FindByID(ctx, uintFromOpID(t, opID))
+	require.NoError(t, readErr)
+	require.Equal(t, before, after, "failed atomic completion preserves journal, metadata and timestamps")
+	require.Contains(t, err.Error(), sentinel.Error())
 }
 
 // CompleteFailed nil-result mark-failed path: same surface contract.
@@ -165,9 +186,14 @@ func TestRevertLogW25_CompleteFailedNilResultPersistFailureSurfaces(t *testing.T
 	sentinel := errors.New("w25 column store wedged")
 	broken := NewDBRevertLog(&w25FailNonJournalRepo{repo: repo, err: sentinel},
 		NewRevertLogConfig(true, nil), "job-w25", afero.NewMemMapFs(), nil, nil, nil)
+	before, readErr := repo.FindByID(ctx, uintFromOpID(t, opID))
+	require.NoError(t, readErr)
 	err := broken.CompleteFailed(ctx, opID, nil)
 	require.ErrorIs(t, err, sentinel)
-	require.Contains(t, err.Error(), "mark record")
+	after, readErr := repo.FindByID(ctx, uintFromOpID(t, opID))
+	require.NoError(t, readErr)
+	require.Equal(t, before, after, "failed atomic completion preserves journal, metadata and timestamps")
+	require.Contains(t, err.Error(), sentinel.Error())
 }
 
 // CompleteFailed with a result: the journal merge inside the transaction is
@@ -181,8 +207,13 @@ func TestRevertLogW25_CompleteFailedJournalMergeFailureSurfaces(t *testing.T) {
 	sentinel := errors.New("w25 journal store wedged")
 	broken := NewDBRevertLog(&w25FailJournalRepo{w25FailNonJournalRepo{repo: repo, err: sentinel}},
 		NewRevertLogConfig(true, nil), "job-w25", afero.NewMemMapFs(), nil, nil, nil)
+	before, readErr := repo.FindByID(ctx, uintFromOpID(t, opID))
+	require.NoError(t, readErr)
 	err := broken.CompleteFailed(ctx, opID, &ApplyResult{Movie: &models.Movie{ID: "W25CFJ-1"}})
 	require.ErrorIs(t, err, sentinel)
+	after, readErr := repo.FindByID(ctx, uintFromOpID(t, opID))
+	require.NoError(t, readErr)
+	require.Equal(t, before, after, "failed atomic completion preserves journal, metadata and timestamps")
 	require.Contains(t, err.Error(), "persist journal")
 }
 

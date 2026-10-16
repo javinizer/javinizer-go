@@ -350,7 +350,7 @@ func TestApplyJournalTerminalPendingFailureRejectsChangedRecovery(t *testing.T) 
 				require.ErrorContains(t, f.log.CompleteFailed(t.Context(), f.id, recovery), "closed")
 				require.Equal(t, held, applyAdmissionRead(t, f), "different recovery cannot clear the hold or add paths, metadata, or proofs")
 			}
-			// The original terminal request itself remains a valid metadata retry.
+			// The original terminal request itself remains an exact no-write replay.
 			switch failure {
 			case "CompleteNil":
 				err = f.log.Complete(t.Context(), f.id, nil)
@@ -365,25 +365,27 @@ func TestApplyJournalTerminalPendingFailureRejectsChangedRecovery(t *testing.T) 
 	}
 }
 
-type applyAdmissionColumnFailureRepo struct {
-	database.BatchFileOperationRepositoryInterface
-	fail error
-}
-
-func (r *applyAdmissionColumnFailureRepo) UpdateNonJournalFields(ctx context.Context, row *models.BatchFileOperation) error {
-	if r.fail != nil {
-		return r.fail
+// failCompletionSQL installs a real SQLite failure on the completion UPDATE.
+// Both the journal and narrow columns must roll back; no mock transaction is used.
+func failCompletionSQL(t *testing.T, repo *database.BatchFileOperationRepository) func() {
+	t.Helper()
+	require.NoError(t, repo.GetDB().Exec(`CREATE TRIGGER test_completion_sql_failure BEFORE UPDATE OF new_path ON batch_file_operations BEGIN SELECT RAISE(ABORT, 'injected atomic completion SQL failure'); END`).Error)
+	var once sync.Once
+	release := func() {
+		once.Do(func() {
+			require.NoError(t, repo.GetDB().Exec(`DROP TRIGGER test_completion_sql_failure`).Error)
+		})
 	}
-	return r.BatchFileOperationRepositoryInterface.UpdateNonJournalFields(ctx, row)
+	t.Cleanup(release)
+	return release
 }
 
-func TestApplyJournalTerminalExactRetryRepairsFailedMetadataWrite(t *testing.T) {
+func TestApplyJournalTerminalExactRetryAfterAtomicSQLFailure(t *testing.T) {
 	for _, kind := range []string{"Success", "Failure", "CompleteNil", "CompleteFailedNil", "NoOpSuccess", "NoOpFailure"} {
 		t.Run(kind, func(t *testing.T) {
 			f := newApplyAdmissionFixture(t)
-			injected := errors.New("injected metadata write failure after journal commit")
-			repo := &applyAdmissionColumnFailureRepo{BatchFileOperationRepositoryInterface: f.publisherRepo, fail: injected}
-			log := NewDBRevertLog(repo, NewRevertLogConfig(true, nil), f.row.BatchJobID, f.fs, nil, nil, nil)
+			releaseFailure := failCompletionSQL(t, f.repo)
+			log := NewDBRevertLog(f.publisherRepo, NewRevertLogConfig(true, nil), f.row.BatchJobID, f.fs, nil, nil, nil)
 			result := applyAdmissionLateResult(f, false, true)
 			complete := log.Complete
 			wantStatus := models.RevertStatusApplied
@@ -413,23 +415,18 @@ func TestApplyJournalTerminalExactRetryRepairsFailedMetadataWrite(t *testing.T) 
 				}
 			}
 			before := applyAdmissionRead(t, f)
-			require.ErrorIs(t, complete(t.Context(), f.id, result), injected)
-			journalOnly := applyAdmissionRead(t, f)
-			require.NotNil(t, applyAdmissionLedger(t, journalOnly).ApplyTerminal)
-			require.Equal(t, before.RevertStatus, journalOnly.RevertStatus)
-			require.Equal(t, before.NewPath, journalOnly.NewPath)
-			require.Equal(t, before.NFOPath, journalOnly.NFOPath)
-			require.Equal(t, before.NFOSnapshot, journalOnly.NFOSnapshot)
-			repo.fail = nil
+			require.ErrorContains(t, complete(t.Context(), f.id, result), "injected atomic completion SQL failure")
+			require.Equal(t, before, applyAdmissionRead(t, f), "SQL failure rolls back the terminal journal and every completion column")
+			releaseFailure()
 			require.NoError(t, complete(t.Context(), f.id, result))
 			repaired := applyAdmissionRead(t, f)
-			require.Equal(t, journalOnly.GeneratedFiles, repaired.GeneratedFiles, "metadata retry cannot rerun the journal merge")
+			require.NotNil(t, applyAdmissionLedger(t, repaired).ApplyTerminal)
 			require.Equal(t, wantStatus, repaired.RevertStatus)
 			require.Equal(t, wantPath, repaired.NewPath)
 			require.Equal(t, wantNFO, repaired.NFOPath)
 			require.Equal(t, before.NFOSnapshot, repaired.NFOSnapshot)
 			require.NoError(t, complete(t.Context(), f.id, result), "identical terminal remains retryable after status changes")
-			require.Equal(t, repaired.GeneratedFiles, applyAdmissionRead(t, f).GeneratedFiles)
+			require.Equal(t, repaired, applyAdmissionRead(t, f), "exact replay must not rewrite metadata or timestamps")
 		})
 	}
 }

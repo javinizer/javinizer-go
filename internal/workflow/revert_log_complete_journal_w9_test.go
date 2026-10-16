@@ -21,31 +21,62 @@ import (
 // payload against the row re-read INSIDE the journal transaction — never
 // against the stale preRecord snapshot — so a concurrent journal mutation
 // (append/consume in another process) is neither resurrected nor erased by
-// the completion's full Save. Wave-10 (same review): the completion's
-// follow-up column write no longer persists generated_files AT ALL
-// (UpdateNonJournalFields) — UpdateJournalInTx owns the journal column — so
-// a mutation committed after the journal tx survives the follow-up.
+// the completion's full Save. Journal and narrow completion-owned columns now
+// share UpdateJournalInTx, eliminating a separate column-publication window.
 
-// runFnMock installs an UpdateJournalInTx expectation that executes fn
-// against current and returns fn's error, mirroring the repository contract.
+// applyMockJournalTransaction mirrors the combined repository transaction:
+// resolve completion columns after admission, then publish all changes together.
+func applyMockJournalTransaction(ctx context.Context, current *models.BatchFileOperation, fn database.JournalUpdateFn, completionErr error) error {
+	working := *current
+	next, persist, err := fn(&working)
+	if err != nil {
+		return err
+	}
+	columns, err := database.ResolveJournalCompletionColumns(ctx)
+	if err != nil {
+		return err
+	}
+	if columns != nil {
+		if completionErr != nil {
+			return completionErr
+		}
+		working.NewPath = columns.NewPath
+		working.InPlaceRenamed = columns.InPlaceRenamed
+		working.OriginalDirPath = columns.OriginalDirPath
+		if columns.RevertStatus != "" {
+			working.RevertStatus = columns.RevertStatus
+		}
+		if columns.FoundNFOPath != "" {
+			working.NFOPath = columns.FoundNFOPath
+		} else if working.NFOPath == "" {
+			working.NFOPath = columns.NFOPath
+		}
+	}
+	if persist {
+		working.GeneratedFiles = models.MarshalLedgerJSON(next)
+	}
+	*current = working
+	return nil
+}
+
 func runFnMock(repo *mocks.MockBatchFileOperationRepositoryInterface, id uint, current *models.BatchFileOperation, captured *string) {
 	repo.On("UpdateJournalInTx", mock.Anything, id, mock.Anything).
-		Return(func(_ context.Context, _ uint, fn database.JournalUpdateFn) error {
-			next, persist, err := fn(current)
-			if err == nil && persist && captured != nil {
-				*captured = models.MarshalLedgerJSON(next)
+		Return(func(ctx context.Context, _ uint, fn database.JournalUpdateFn) error {
+			if err := applyMockJournalTransaction(ctx, current, fn, nil); err != nil {
+				return err
 			}
-			return err
+			if captured != nil {
+				*captured = current.GeneratedFiles
+			}
+			return nil
 		})
 }
 
 // TestW9CompleteMergesAgainstFreshInTxRow: the row's journal CHANGES between
 // Complete's preRecord read and its journal transaction (a foreign process
 // appended a destination-B entry). The final journal must keep BOTH the
-// concurrent entry and Complete's own contribution, and the follow-up
-// non-journal column update carries the in-memory (tx-derived) journal bytes
-// — but as of wave-10 it never WRITES them (UpdateJournalInTx owns that
-// column), so nothing committed after the tx can be clobbered.
+// concurrent entry and Complete's own contribution. The same atomic transaction
+// publishes completion-owned columns without copying stale unrelated metadata.
 func TestW9CompleteMergesAgainstFreshInTxRow(t *testing.T) {
 	repo := mocks.NewMockBatchFileOperationRepositoryInterface(t)
 	log := NewDBRevertLog(repo, nil, "job-w9", nil, nil, nil, nil)
@@ -68,9 +99,8 @@ func TestW9CompleteMergesAgainstFreshInTxRow(t *testing.T) {
 		ID: 7, BatchJobID: "job-w9", MovieID: "W9-001",
 		RevertStatus: models.RevertStatusApplied, GeneratedFiles: staleJournal,
 	}, nil)
-	runFnMock(repo, 7, &models.BatchFileOperation{ID: 7, GeneratedFiles: freshJournal, RevertStatus: models.RevertStatusApplied}, &txPersisted)
-	repo.On("UpdateNonJournalFields", mock.Anything, mock.AnythingOfType("*models.BatchFileOperation")).
-		Run(func(args mock.Arguments) { saved = *args.Get(1).(*models.BatchFileOperation) }).Return(nil)
+	saved = models.BatchFileOperation{ID: 7, GeneratedFiles: freshJournal, RevertStatus: models.RevertStatusApplied}
+	runFnMock(repo, 7, &saved, &txPersisted)
 
 	err := log.Complete(context.Background(), "7", &ApplyResult{
 		Movie:          &models.Movie{ID: "W9-001"},
@@ -90,11 +120,12 @@ func TestW9CompleteMergesAgainstFreshInTxRow(t *testing.T) {
 	require.Contains(t, gf.Roots, "/dst/lib", "R4-2 organizer leaf folder seeds a root")
 
 	require.Equal(t, txPersisted, saved.GeneratedFiles,
-		"the column update's in-memory record carries the tx-derived journal, never the stale snapshot")
+		"atomic completion persists the fresh journal and columns together")
 	require.Equal(t, "/dst/w9.mp4", saved.NewPath)
 	require.Equal(t, models.RevertStatusApplied, saved.RevertStatus)
 	require.NotEqual(t, staleJournal, saved.GeneratedFiles, "the stale snapshot must not win")
 	repo.AssertNotCalled(t, "Update", mock.Anything, mock.Anything)
+	repo.AssertNotCalled(t, "UpdateNonJournalFields", mock.Anything, mock.Anything)
 }
 
 // TestW9CompleteFailedMergesAgainstFreshInTxRow is the CompleteFailed twin: a
@@ -122,9 +153,8 @@ func TestW9CompleteFailedMergesAgainstFreshInTxRow(t *testing.T) {
 		ID: 8, BatchJobID: "job-w9", MovieID: "W9-002",
 		RevertStatus: models.RevertStatusApplied, GeneratedFiles: staleJournal,
 	}, nil)
-	runFnMock(repo, 8, &models.BatchFileOperation{ID: 8, GeneratedFiles: freshJournal, RevertStatus: models.RevertStatusApplied}, &txPersisted)
-	repo.On("UpdateNonJournalFields", mock.Anything, mock.AnythingOfType("*models.BatchFileOperation")).
-		Run(func(args mock.Arguments) { saved = *args.Get(1).(*models.BatchFileOperation) }).Return(nil)
+	saved = models.BatchFileOperation{ID: 8, GeneratedFiles: freshJournal, RevertStatus: models.RevertStatusApplied}
+	runFnMock(repo, 8, &saved, &txPersisted)
 
 	err := log.CompleteFailed(context.Background(), "8", &ApplyResult{
 		Movie:          &models.Movie{ID: "W9-002"},
@@ -144,6 +174,7 @@ func TestW9CompleteFailedMergesAgainstFreshInTxRow(t *testing.T) {
 	require.Equal(t, models.RevertStatusFailed, saved.RevertStatus, "CompleteFailed still marks the record failed")
 	require.Equal(t, "/dst/w9b.mp4", saved.NewPath, "partial state remains persisted")
 	repo.AssertNotCalled(t, "Update", mock.Anything, mock.Anything)
+	repo.AssertNotCalled(t, "UpdateNonJournalFields", mock.Anything, mock.Anything)
 }
 
 // TestW9CompleteJournalTxNotFound: the row vanished between the preRecord
@@ -161,10 +192,11 @@ func TestW9CompleteJournalTxNotFound(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "record 9 not found")
 	repo.AssertNotCalled(t, "Update", mock.Anything, mock.Anything)
+	repo.AssertNotCalled(t, "UpdateNonJournalFields", mock.Anything, mock.Anything)
 }
 
 // TestW9CompleteFailedJournalTxError: a journal-transaction failure surfaces
-// with the caller name and blocks the non-journal Save.
+// with the caller name and blocks all completion-owned column changes.
 func TestW9CompleteFailedJournalTxError(t *testing.T) {
 	repo := mocks.NewMockBatchFileOperationRepositoryInterface(t)
 	log := NewDBRevertLog(repo, nil, "job-w9", nil, nil, nil, nil)
@@ -177,6 +209,7 @@ func TestW9CompleteFailedJournalTxError(t *testing.T) {
 	require.Contains(t, err.Error(), "revert log CompleteFailed: persist journal for record 10")
 	require.Contains(t, err.Error(), "disk I/O error")
 	repo.AssertNotCalled(t, "Update", mock.Anything, mock.Anything)
+	repo.AssertNotCalled(t, "UpdateNonJournalFields", mock.Anything, mock.Anything)
 }
 
 // TestW9CompletionLedgerMerge pins the merge helper: idempotent no-op when the
@@ -329,7 +362,6 @@ func TestW9CompleteJournalsCopiedSubtitlesAsDelete(t *testing.T) {
 		RevertStatus: models.RevertStatusApplied,
 	}, nil)
 	runFnMock(repo, 11, &models.BatchFileOperation{ID: 11, RevertStatus: models.RevertStatusApplied}, &txPersisted)
-	repo.On("UpdateNonJournalFields", mock.Anything, mock.AnythingOfType("*models.BatchFileOperation")).Return(nil)
 
 	err := log.Complete(context.Background(), "11", &ApplyResult{
 		Movie: &models.Movie{ID: "W9-011"},
@@ -365,9 +397,8 @@ func TestW9CompleteFailedJournalsCopiedSubtitlesAsDelete(t *testing.T) {
 		ID: 12, BatchJobID: "job-w9", MovieID: "W9-012",
 		RevertStatus: models.RevertStatusApplied,
 	}, nil)
-	runFnMock(repo, 12, &models.BatchFileOperation{ID: 12, RevertStatus: models.RevertStatusApplied}, &txPersisted)
-	repo.On("UpdateNonJournalFields", mock.Anything, mock.AnythingOfType("*models.BatchFileOperation")).
-		Run(func(args mock.Arguments) { saved = *args.Get(1).(*models.BatchFileOperation) }).Return(nil)
+	saved = models.BatchFileOperation{ID: 12, RevertStatus: models.RevertStatusApplied}
+	runFnMock(repo, 12, &saved, &txPersisted)
 
 	err := log.CompleteFailed(context.Background(), "12", &ApplyResult{
 		Movie: &models.Movie{ID: "W9-012"},

@@ -242,17 +242,13 @@ func TestMiss_dbRevertLog_Complete_FindNil(t *testing.T) {
 
 // expectMissCompletionJournal executes the real transaction callback against a
 // separate active-row snapshot and persists the journal only when requested.
-func expectMissCompletionJournal(repo *mocks.MockBatchFileOperationRepositoryInterface, row *models.BatchFileOperation) {
+func expectMissCompletionJournal(repo *mocks.MockBatchFileOperationRepositoryInterface, row *models.BatchFileOperation, completionErr error) *models.BatchFileOperation {
 	stored := *row
 	repo.On("UpdateJournalInTx", mock.Anything, row.ID, mock.Anything).
-		Return(func(_ context.Context, _ uint, fn database.JournalUpdateFn) error {
-			current := stored
-			next, persist, err := fn(&current)
-			if err == nil && persist {
-				stored.GeneratedFiles = models.MarshalLedgerJSON(next)
-			}
-			return err
+		Return(func(ctx context.Context, _ uint, fn database.JournalUpdateFn) error {
+			return applyMockJournalTransaction(ctx, &stored, fn, completionErr)
 		})
+	return &stored
 }
 
 // dbRevertLog.Complete: nil result → mark as failed
@@ -266,8 +262,7 @@ func TestMiss_dbRevertLog_Complete_NilResult(t *testing.T) {
 		RevertStatus: models.RevertStatusApplied,
 	}
 	mockRepo.On("FindByID", mock.Anything, uint(1)).Return(preRecord, nil)
-	expectMissCompletionJournal(mockRepo, preRecord)
-	mockRepo.On("UpdateNonJournalFields", mock.Anything, mock.AnythingOfType("*models.BatchFileOperation")).Return(nil)
+	expectMissCompletionJournal(mockRepo, preRecord, nil)
 
 	err := log.Complete(context.Background(), "1", nil)
 	assert.NoError(t, err)
@@ -284,12 +279,12 @@ func TestMiss_dbRevertLog_Complete_NilResultUpdateError(t *testing.T) {
 		RevertStatus: models.RevertStatusApplied,
 	}
 	mockRepo.On("FindByID", mock.Anything, uint(1)).Return(preRecord, nil)
-	expectMissCompletionJournal(mockRepo, preRecord)
-	mockRepo.On("UpdateNonJournalFields", mock.Anything, mock.AnythingOfType("*models.BatchFileOperation")).Return(fmt.Errorf("db error"))
+	stored := expectMissCompletionJournal(mockRepo, preRecord, fmt.Errorf("db error"))
 
 	err := log.Complete(context.Background(), "1", nil)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "mark record")
+	assert.Contains(t, err.Error(), "db error")
+	assert.Equal(t, preRecord, stored, "atomic failure preserves journal and columns")
 }
 
 // dbRevertLog.Complete: success result
@@ -305,8 +300,7 @@ func TestMiss_dbRevertLog_Complete_SuccessResult(t *testing.T) {
 	mockRepo.On("FindByID", mock.Anything, uint(1)).Return(preRecord, nil)
 	// Wave-9: the ledger merge runs through the journal transaction against the
 	// fresh row before the non-journal Save.
-	expectMissCompletionJournal(mockRepo, preRecord)
-	mockRepo.On("UpdateNonJournalFields", mock.Anything, mock.AnythingOfType("*models.BatchFileOperation")).Return(nil)
+	expectMissCompletionJournal(mockRepo, preRecord, nil)
 
 	result := &ApplyResult{
 		OrganizeResult: &organizer.OrganizeResult{
@@ -331,13 +325,13 @@ func TestMiss_dbRevertLog_Complete_SuccessResultUpdateError(t *testing.T) {
 		RevertStatus: models.RevertStatusApplied,
 	}
 	mockRepo.On("FindByID", mock.Anything, uint(1)).Return(preRecord, nil)
-	expectMissCompletionJournal(mockRepo, preRecord)
-	mockRepo.On("UpdateNonJournalFields", mock.Anything, mock.AnythingOfType("*models.BatchFileOperation")).Return(fmt.Errorf("db error"))
+	stored := expectMissCompletionJournal(mockRepo, preRecord, fmt.Errorf("db error"))
 
 	result := &ApplyResult{}
 	err := log.Complete(context.Background(), "1", result)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "update post-apply record")
+	assert.Contains(t, err.Error(), "db error")
+	assert.Equal(t, preRecord, stored, "atomic failure preserves journal and columns")
 }
 
 // readNFOSnapshot: empty path
