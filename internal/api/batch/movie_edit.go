@@ -10,6 +10,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/api/contracts"
 	"github.com/javinizer/javinizer-go/internal/api/core"
 	"github.com/javinizer/javinizer-go/internal/assetidentity"
+	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/worker"
@@ -107,13 +108,9 @@ func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 			req.Movie.PosterCropBounds.SourceFingerprint = fingerprint
 		}
 
-		// Convert once and re-derive display_title so a title edit is reflected
-		// immediately in persisted state and any client that renders display_title
-		// (grid cards, metadata headers) without waiting for organize. Title is
-		// never modified — RenderDisplayTitle only writes DisplayTitle — so this
-		// cannot reintroduce the title-doubling bug this PR fixes. If the workflow
-		// factory is unavailable, fall back to DisplayTitle = Title, matching the
-		// canonical no-template/error degradation (display_title.go).
+		// Echoed credits remain read-only. Derive display_title inside the family
+		// save after authoritative credit hydration and accepted cast edits.
+		// Without a workflow factory, the title remains the no-template fallback.
 		movie := contracts.MovieViewToModel(req.Movie)
 		movie.DisplayTitle = movie.Title
 		preserveCachedActresses := shouldPreserveCachedActresses(movie, result.Movie)
@@ -132,11 +129,10 @@ func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 		// resolved INSIDE the family key (below) so a concurrent crop commit
 		// between admission and lock-order can never be silently reverted
 		// by a stale pre-lock read.
+		var renderDisplayTitle database.DisplayTitleRenderer
 		if snap := rt.Snapshot(); snap != nil {
 			if factory, fErr := snap.WorkflowFactory(); fErr == nil && factory != nil {
-				if rendered := factory.RenderDisplayTitle(c.Request.Context(), movie); rendered != "" {
-					movie.DisplayTitle = rendered
-				}
+				renderDisplayTitle = factory.RenderDisplayTitle
 			} else if fErr != nil {
 				logging.Warnf("Failed to create workflow for display-title re-derive on save: %v", fErr)
 			}
@@ -150,7 +146,7 @@ func updateBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 		// Dual-key-locked family commit (D1): identity-changing PATCHes hold
 		// old+new keys atomically; the omitted-bounds carry re-reads stored
 		// geometry INSIDE the keys (never the handler's pre-lock read).
-		opRev, opFam, opErr := job.UpdateMovieFamilyWithEcho(c.Request.Context(), movieID, resultID, movie, worker.FamilySaveOptions{CarryCropGeometry: !req.PosterCropBoundsFieldPresent, ExpectedResultRevision: req.ExpectedResultRevision, ExpectedResultRevisions: req.ExpectedResultRevisions, PreserveCachedActresses: preserveCachedActresses, ActressEditGuard: actressEditGuard})
+		opRev, opFam, opErr := job.UpdateMovieFamilyWithEcho(c.Request.Context(), movieID, resultID, movie, worker.FamilySaveOptions{CarryCropGeometry: !req.PosterCropBoundsFieldPresent, ExpectedResultRevision: req.ExpectedResultRevision, ExpectedResultRevisions: req.ExpectedResultRevisions, PreserveCachedActresses: preserveCachedActresses, ActressEditGuard: actressEditGuard, RenderDisplayTitle: renderDisplayTitle})
 		if opErr != nil {
 			logging.Errorf("Failed to update movie family %s: %v", movieID, opErr)
 			writeEditOpError(c, fmt.Errorf("failed to update movie: %w", opErr))

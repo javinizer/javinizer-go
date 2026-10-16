@@ -137,6 +137,10 @@ func (u *MovieUpserter) Upsert(ctx context.Context, movie *models.Movie) (*model
 
 // UpsertWithTranslations inserts or updates a movie along with genre and actress translations.
 func (u *MovieUpserter) UpsertWithTranslations(ctx context.Context, movie *models.Movie, genreTranslations []models.GenreTranslationData, actressTranslations []models.ActressTranslationData) (*models.Movie, error) {
+	return u.upsertWithDisplayTitle(ctx, movie, genreTranslations, actressTranslations, nil)
+}
+
+func (u *MovieUpserter) upsertWithDisplayTitle(ctx context.Context, movie *models.Movie, genreTranslations []models.GenreTranslationData, actressTranslations []models.ActressTranslationData, render DisplayTitleRenderer) (*models.Movie, error) {
 	var result *models.Movie
 	callerActresses := make([]models.Actress, len(movie.Actresses))
 	copy(callerActresses, movie.Actresses)
@@ -239,11 +243,13 @@ func (u *MovieUpserter) UpsertWithTranslations(ctx context.Context, movie *model
 			if err := tx.Preload("Actresses").Preload("Genres").Preload("Translations", func(db *gorm.DB) *gorm.DB { return db.Order("language ASC") }).First(&loaded, "content_id = ?", movie.ContentID).Error; err != nil {
 				return wrapDBErr("reload", fmt.Sprintf("movie %s", movie.ContentID), err)
 			}
-			if err := invalidateChangedMovieRenderInputsTx(tx, beforeRender, []string{movie.ContentID}); err != nil {
-				return err
-			}
-			if err := tx.Model(&models.Movie{}).Select("render_dirty", "render_generation").Where("content_id = ?", movie.ContentID).First(&loaded).Error; err != nil {
-				return wrapDBErr("reload render state", fmt.Sprintf("movie %s", movie.ContentID), err)
+			if render == nil {
+				if err := invalidateChangedMovieRenderInputsTx(tx, beforeRender, []string{movie.ContentID}); err != nil {
+					return err
+				}
+				if err := tx.Model(&models.Movie{}).Select("render_dirty", "render_generation").Where("content_id = ?", movie.ContentID).First(&loaded).Error; err != nil {
+					return wrapDBErr("reload render state", fmt.Sprintf("movie %s", movie.ContentID), err)
+				}
 			}
 			if err := recomputeActressCandidateQuarantineTx(tx); err != nil {
 				return err
@@ -261,10 +267,30 @@ func (u *MovieUpserter) UpsertWithTranslations(ctx context.Context, movie *model
 				return err
 			}
 			loaded.Credits = credits
+			if render != nil {
+				// Render only after final identity/quarantine resolution. Updating
+				// this scalar here keeps the row and its returned snapshot atomic.
+				// Invalidate against the final title, never a provisional scrape title.
+				loaded.DisplayTitle = render(ctx, &loaded)
+				if err := tx.Model(&models.Movie{}).Where("content_id = ?", loaded.ContentID).UpdateColumn("display_title", loaded.DisplayTitle).Error; err != nil {
+					return wrapDBErr("update display title", fmt.Sprintf("movie %s", loaded.ContentID), err)
+				}
+				if err := invalidateChangedMovieRenderInputsTx(tx, beforeRender, []string{loaded.ContentID}); err != nil {
+					return err
+				}
+				if err := tx.Model(&models.Movie{}).Select("render_dirty", "render_generation").Where("content_id = ?", loaded.ContentID).First(&loaded).Error; err != nil {
+					return wrapDBErr("reload render state", fmt.Sprintf("movie %s", loaded.ContentID), err)
+				}
+			}
 			result = &loaded
 			return nil
 		})
 	})
+	if err == nil && render != nil {
+		movie.DisplayTitle = result.DisplayTitle
+		movie.RenderDirty = result.RenderDirty
+		movie.RenderGeneration = result.RenderGeneration
+	}
 	return result, err
 }
 

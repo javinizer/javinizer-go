@@ -308,6 +308,9 @@ func (m *LockedMovieOps) legacyDBLegs(ctx context.Context, plan *EditCommitPlan)
 	repo := m.pe.currentMovieRepo()
 	if plan.UpsertMovie != nil && repo == nil {
 		plan.Renames = nil // no DB row ⇒ actress renames would be discarded anyway
+		if plan.RenderDisplayTitle != nil {
+			plan.UpsertMovie.DisplayTitle = plan.RenderDisplayTitle(ctx, plan.UpsertMovie)
+		}
 	}
 	// Renames BEFORE the upsert (pre-hardening order): the upserter's
 	// fill-merge looks up actress rows by ID/name, so the renamed record must
@@ -316,7 +319,13 @@ func (m *LockedMovieOps) legacyDBLegs(ctx context.Context, plan *EditCommitPlan)
 		if err := m.legacyRenames(ctx, plan); err != nil {
 			return err
 		}
-		if _, err := repo.Upsert(ctx, plan.UpsertMovie); err != nil {
+		var err error
+		if plan.RenderDisplayTitle != nil {
+			_, err = database.UpsertWithDisplayTitle(ctx, repo, plan.UpsertMovie, nil, nil, plan.RenderDisplayTitle)
+		} else {
+			_, err = repo.Upsert(ctx, plan.UpsertMovie)
+		}
+		if err != nil {
 			return fmt.Errorf("persist movie update: %w", err)
 		}
 	}
@@ -811,10 +820,10 @@ func (m *LockedMovieOps) UpdatePosterFromURL(ctx context.Context, posterURL stri
 // WithMovieEditLock. Geometry sanitization runs against the FIRST family
 // file's current state (deterministic, family-scoped).
 func (m *LockedMovieOps) UpdateMovieFamily(ctx context.Context, movie *models.Movie) error {
-	return m.updateMovieFamily(ctx, movie, nil)
+	return m.updateMovieFamily(ctx, movie, nil, nil)
 }
 
-func (m *LockedMovieOps) updateMovieFamily(ctx context.Context, movie *models.Movie, guard *ActressEditGuard) error {
+func (m *LockedMovieOps) updateMovieFamily(ctx context.Context, movie *models.Movie, guard *ActressEditGuard, render database.DisplayTitleRenderer) error {
 	if movie == nil {
 		return fmt.Errorf("movie is required")
 	}
@@ -1133,6 +1142,7 @@ func (m *LockedMovieOps) updateMovieFamily(ctx context.Context, movie *models.Mo
 
 	err = m.commitCandidate(ctx, candidates, nil, func(plan *EditCommitPlan) {
 		plan.UpsertMovie = movie
+		plan.RenderDisplayTitle = render
 		plan.Renames = renames
 		if guard != nil {
 			plan.Validate = func(ctx context.Context, u database.EditUnit) error {
@@ -1706,6 +1716,7 @@ func validateActressEdit(ctx context.Context, u database.EditUnit, movie *models
 
 // FamilySaveOptions controls geometry carry and revision guards for a family save.
 type FamilySaveOptions struct {
+	RenderDisplayTitle      database.DisplayTitleRenderer
 	CarryCropGeometry       bool
 	PreserveCachedActresses bool
 	ActressEditGuard        *ActressEditGuard
@@ -1840,7 +1851,7 @@ func (pe *PosterEditor) UpdateMovieFamilyWithEcho(ctx context.Context, movieID, 
 				copy(movie.Actresses, authoritative)
 			}
 		}
-		if err := m.updateMovieFamily(ctx, movie, opts.ActressEditGuard); err != nil {
+		if err := m.updateMovieFamily(ctx, movie, opts.ActressEditGuard, opts.RenderDisplayTitle); err != nil {
 			return err
 		}
 		// in-key echo capture (audit F-R15-1): result + folded-family map at

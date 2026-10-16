@@ -41,6 +41,9 @@ type EditCommitPlan struct {
 	// UpsertMovie, when non-nil, is the candidate movie row to upsert FIRST
 	// (PATCH ordering contract: movie upsert precedes actress renames).
 	UpsertMovie *models.Movie
+	// RenderDisplayTitle runs after the upsert resolves authoritative credits,
+	// before the transaction encodes or publishes the candidate envelope.
+	RenderDisplayTitle database.DisplayTitleRenderer
 
 	// MutateMovieID + MutateMovie perform a find→mutate→upsert INSIDE the
 	// transaction (e.g. poster-from-URL field mutation of the canonical row).
@@ -169,7 +172,13 @@ func (c *EditCommitter) Commit(ctx context.Context, plan *EditCommitPlan) error 
 			}
 		}
 		if plan.UpsertMovie != nil {
-			if _, err := u.Movies.Upsert(ctx, plan.UpsertMovie); err != nil {
+			var err error
+			if plan.RenderDisplayTitle != nil {
+				_, err = database.UpsertWithDisplayTitle(ctx, u.Movies, plan.UpsertMovie, nil, nil, plan.RenderDisplayTitle)
+			} else {
+				_, err = u.Movies.Upsert(ctx, plan.UpsertMovie)
+			}
+			if err != nil {
 				return fmt.Errorf("persist movie update: %w", err)
 			}
 		}
