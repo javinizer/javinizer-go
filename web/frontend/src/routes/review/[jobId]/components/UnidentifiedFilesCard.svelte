@@ -18,6 +18,10 @@
 
 	function errorMessage(result: FileResult): string {
 		switch (result.error_code) {
+			case 'credit_conflict':
+				return m.review_error_credit_conflict();
+			case 'credit_status_unavailable':
+				return m.review_error_credit_status_unavailable();
 			case 'unavailable':
 				return m.review_error_unavailable();
 			case 'not_found':
@@ -29,6 +33,10 @@
 			default:
 				return result.error ?? '';
 		}
+	}
+
+	function isCreditError(result: FileResult): boolean {
+		return result.error_code === 'credit_conflict' || result.error_code === 'credit_status_unavailable';
 	}
 </script>
 
@@ -47,8 +55,11 @@
 						<p class="font-mono truncate" title={result.file_path}>
 							{basename(result.file_path)}
 						</p>
-						{#if result.error}
-							<p class="text-xs text-destructive mt-0.5 truncate" title={errorMessage(result)}>
+						{#if result.error || isCreditError(result)}
+							<p
+								class="text-xs text-destructive mt-0.5 truncate"
+								title={isCreditError(result) && result.error?.trim() ? result.error : errorMessage(result)}
+							>
 								{errorMessage(result)}
 							</p>
 						{/if}

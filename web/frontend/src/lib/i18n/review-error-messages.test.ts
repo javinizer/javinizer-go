@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
 	review_error_blocked,
+	review_error_credit_conflict,
+	review_error_credit_status_unavailable,
 	review_error_not_found,
 	review_error_rate_limited,
 	review_error_unavailable,
@@ -9,9 +11,26 @@ import {
 const locales = ['en', 'en-XA', 'ja', 'zh-Hans', 'zh-Hant'] as const;
 
 describe('review_error_* localized messages across all locales', () => {
+	it.each([
+		['en', 'Unresolved actress credit conflict', 'Actress credit status unavailable'],
+		['en-XA', '[ Üñrësölvëd åçtrëss çrëdít çöñflíçt ]', '[ Åçtrëss çrëdít ståtüs üñåvåílåblë ]'],
+		['ja', '出演者クレジットの競合が未解決です', '出演者クレジットの状態を確認できません'],
+		['zh-Hans', '演员署名冲突尚未解决', '无法确认演员署名状态'],
+		['zh-Hant', '演員署名衝突尚未解決', '無法確認演員署名狀態'],
+	] as const)(
+		'credit diagnostics are distinct and localized in %s',
+		(locale, conflict, unavailable) => {
+			expect(review_error_credit_conflict({}, { locale })).toBe(conflict);
+			expect(review_error_credit_status_unavailable({}, { locale })).toBe(unavailable);
+			expect(new Set([conflict, unavailable, review_error_blocked({}, { locale })]).size).toBe(3);
+		},
+	);
+
 	it('review_error_unavailable returns localized strings in every locale', () => {
 		expect(review_error_unavailable({}, { locale: 'en' })).toBe('Source temporarily unavailable');
-		expect(review_error_unavailable({}, { locale: 'en-XA' })).toBe('[ Šöürcë tëmpöråríly üñåvåílåblë ]');
+		expect(review_error_unavailable({}, { locale: 'en-XA' })).toBe(
+			'[ Šöürcë tëmpöråríly üñåvåílåblë ]',
+		);
 		expect(review_error_unavailable({}, { locale: 'ja' })).toBe('ソースは一時的に利用できません');
 		expect(review_error_unavailable({}, { locale: 'zh-Hans' })).toBe('来源暂时不可用');
 		expect(review_error_unavailable({}, { locale: 'zh-Hant' })).toBe('來源暫時無法使用');
@@ -27,8 +46,12 @@ describe('review_error_* localized messages across all locales', () => {
 
 	it('review_error_rate_limited returns localized strings in every locale', () => {
 		expect(review_error_rate_limited({}, { locale: 'en' })).toBe('Rate limited, try again later');
-		expect(review_error_rate_limited({}, { locale: 'en-XA' })).toBe('[ Råtë límítëd, try ågåíñ låtër ]');
-		expect(review_error_rate_limited({}, { locale: 'ja' })).toBe('レート制限中です。後で再試行してください');
+		expect(review_error_rate_limited({}, { locale: 'en-XA' })).toBe(
+			'[ Råtë límítëd, try ågåíñ låtër ]',
+		);
+		expect(review_error_rate_limited({}, { locale: 'ja' })).toBe(
+			'レート制限中です。後で再試行してください',
+		);
 		expect(review_error_rate_limited({}, { locale: 'zh-Hans' })).toBe('请求频率受限，请稍后重试');
 		expect(review_error_rate_limited({}, { locale: 'zh-Hant' })).toBe('請求頻率受限，請稍後重試');
 	});
@@ -43,6 +66,8 @@ describe('review_error_* localized messages across all locales', () => {
 
 	it('every key is present in every locale (no fallback leakage)', () => {
 		for (const locale of locales) {
+			expect(review_error_credit_conflict({}, { locale })).toBeTruthy();
+			expect(review_error_credit_status_unavailable({}, { locale })).toBeTruthy();
 			expect(review_error_unavailable({}, { locale })).toBeTruthy();
 			expect(review_error_not_found({}, { locale })).toBeTruthy();
 			expect(review_error_rate_limited({}, { locale })).toBeTruthy();

@@ -1403,6 +1403,8 @@
   "review_destination_placeholder": "輸入目的地路徑（例如 /path/to/output）",
   "review_downscaled_from": "↓ 由 {width}×{height} 縮小",
   "review_error_blocked": "被來源封鎖",
+  "review_error_credit_conflict": "演員署名衝突尚未解決",
+  "review_error_credit_status_unavailable": "無法確認演員署名狀態",
   "review_error_not_found": "找不到影片",
   "review_error_rate_limited": "請求頻率受限，請稍後重試",
   "review_error_title": "錯誤",

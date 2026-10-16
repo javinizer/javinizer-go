@@ -1403,6 +1403,8 @@
   "review_destination_placeholder": "输入目标路径（例如 /path/to/output）",
   "review_downscaled_from": "↓ 从 {width}×{height} 缩小",
   "review_error_blocked": "被来源屏蔽",
+  "review_error_credit_conflict": "演员署名冲突尚未解决",
+  "review_error_credit_status_unavailable": "无法确认演员署名状态",
   "review_error_not_found": "未找到影片",
   "review_error_rate_limited": "请求频率受限，请稍后重试",
   "review_error_title": "错误",

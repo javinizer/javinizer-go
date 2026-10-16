@@ -1401,6 +1401,8 @@
   "review_destination_placeholder": "Enter destination path (e.g., /path/to/output)",
   "review_downscaled_from": "↓ downscaled from {width}×{height}",
   "review_error_blocked": "Blocked by source",
+  "review_error_credit_conflict": "Unresolved actress credit conflict",
+  "review_error_credit_status_unavailable": "Actress credit status unavailable",
   "review_error_not_found": "Movie not found",
   "review_error_rate_limited": "Rate limited, try again later",
   "review_error_title": "Error",

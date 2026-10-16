@@ -334,12 +334,12 @@ func refreshApplyMovieIdentity(ctx context.Context, repo database.MovieRepositor
 }
 
 // markCollisionGateFailure publishes a collision gate block through the ordinary per-file failure lane.
-func markCollisionGateFailure(inputs applyPhaseInputs, cfg ApplyPhaseConfig, filePath string, fileResult *resultstore.MovieResult, reason string) {
+func markCollisionGateFailure(inputs applyPhaseInputs, cfg ApplyPhaseConfig, filePath string, fileResult *resultstore.MovieResult, reason, errorCode string) {
 	now := time.Now()
 	err := inputs.Updater.AtomicUpdateFileResult(filePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
 		current.Status = models.JobStatusFailed
 		current.Error = reason
-		current.ErrorCode = string(models.ScraperErrorKindBlocked)
+		current.ErrorCode = errorCode
 		current.EndedAt = &now
 		return current, nil
 	})
@@ -349,7 +349,7 @@ func markCollisionGateFailure(inputs applyPhaseInputs, cfg ApplyPhaseConfig, fil
 			Movie:         fileResult.Movie,
 			Status:        models.JobStatusFailed,
 			Error:         reason,
-			ErrorCode:     string(models.ScraperErrorKindBlocked),
+			ErrorCode:     errorCode,
 			StartedAt:     fileResult.StartedAt,
 			EndedAt:       &now,
 		})
@@ -360,6 +360,18 @@ func markCollisionGateFailure(inputs applyPhaseInputs, cfg ApplyPhaseConfig, fil
 	})
 	if cfg.OnFileFailed != nil {
 		cfg.OnFileFailed(filePath, reason)
+	}
+}
+
+// clearPriorCreditGateError discharges an old gate diagnostic after a retry
+// reaches Apply. Preserve a newer live diagnostic written after this snapshot.
+func clearPriorCreditGateError(current, baseline *resultstore.MovieResult) {
+	if baseline == nil || current.ErrorCode != baseline.ErrorCode {
+		return
+	}
+	switch current.ErrorCode {
+	case models.FileErrorCodeCreditConflict, models.FileErrorCodeCreditStatusUnavailable:
+		current.ErrorCode = ""
 	}
 }
 
@@ -407,6 +419,7 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 	}
 	blockedCollisions := map[string]bool{}
 	blockedReasons := map[string]string{}
+	blockedErrorCode := models.FileErrorCodeCreditConflict
 	if inputs.CollisionRepo != nil {
 		movieIDs := make([]string, 0, len(inputs.Results))
 		seen := make(map[string]bool, len(inputs.Results))
@@ -424,6 +437,7 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 		}
 		if err != nil {
 			logging.Errorf("[Apply] collision gate lookup failed; failing closed for this run: %v", err)
+			blockedErrorCode = models.FileErrorCodeCreditStatusUnavailable
 			for filePath, fileResult := range inputs.Results {
 				if fileResult.Movie != nil && fileResult.Movie.ContentID != "" {
 					logging.Infof("[Apply] Collision gate unavailable: skipping %s (movie %s)", filePath, fileResult.Movie.ContentID)
@@ -442,7 +456,7 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 		}
 		for _, fileResult := range inputs.Results {
 			if fileResult.Movie != nil && blockedCollisions[fileResult.Movie.ContentID] {
-				logging.Infof("[Apply] Collision gate: skipping movie %s (open collisions)", fileResult.Movie.ContentID)
+				logging.Infof("[Apply] Collision gate: skipping movie %s: %s", fileResult.Movie.ContentID, blockedReasons[fileResult.Movie.ContentID])
 			}
 		}
 	}
@@ -466,7 +480,7 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 			continue
 		}
 		if blockedCollisions[fileResult.Movie.ContentID] {
-			markCollisionGateFailure(inputs, cfg, filePath, fileResult, blockedReasons[fileResult.Movie.ContentID])
+			markCollisionGateFailure(inputs, cfg, filePath, fileResult, blockedReasons[fileResult.Movie.ContentID], blockedErrorCode)
 			collisionGateFailures[filePath] = struct{}{}
 			continue
 		}
@@ -968,6 +982,7 @@ func interpretApplyResult(
 						current.ErrorCode == downloader.PosterRecropRequiredCode {
 						current.ErrorCode = ""
 					}
+					clearPriorCreditGateError(current, afc.MovieResult)
 					current.StartedAt = startTime
 					current.EndedAt = &now
 					return current, mergeWriteBackProvenance(inputs.Provenance[filePath], prov), nil
@@ -1059,6 +1074,7 @@ func interpretApplyResult(
 							current.Status = models.JobStatusCompleted
 							current.Error = ""
 						}
+						clearPriorCreditGateError(current, afc.MovieResult)
 						// codex r9 P2: clear the marker only when this retry fetched AND
 						// installed a poster after the download step's verification — Steps.
 						// Downloaded alone also fires on cover/trailer-only or dedup-skipped

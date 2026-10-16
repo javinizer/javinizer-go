@@ -1082,6 +1082,8 @@
   "revert_reverting": "[ Rëvërtíñg... ]",
   "review_choose_output_alert": "[ Çhöösë ÑFÖ öütpüt, mëdíå döwñlöåds, ör böth bëförë åpplyíñg. ]",
   "review_error_blocked": "[ Blöçkëd by söürcë ]",
+  "review_error_credit_conflict": "[ Üñrësölvëd åçtrëss çrëdít çöñflíçt ]",
+  "review_error_credit_status_unavailable": "[ Åçtrëss çrëdít ståtüs üñåvåílåblë ]",
   "review_error_not_found": "[ Mövíë ñöt föüñd ]",
   "review_error_rate_limited": "[ Råtë límítëd, try ågåíñ låtër ]",
   "review_error_unavailable": "[ Šöürcë tëmpöråríly üñåvåílåblë ]",
