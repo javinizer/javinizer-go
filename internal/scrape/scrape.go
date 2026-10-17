@@ -70,7 +70,7 @@ type ScrapeCmd struct {
 	ParseWarning     string // Set when RawInput could not be parsed; used as-is for MovieID
 
 	// SkipPersist opts out of the scrape orchestrator's synchronous DB persist
-	// (step 4 of scrapeOrchestrator.Execute). Callers that set this MUST persist
+	// (the final step of scrapeOrchestrator.Execute). Callers that set this MUST persist
 	// the returned movie themselves — typically the batch scrape phase, which
 	// offloads persistence to a dedicated goroutine pool so the errgroup-gated
 	// scrape workers never block on SQLite's single-writer lock (the root cause
@@ -309,6 +309,13 @@ func postProcessScraped(ctx context.Context, scraped *models.Movie, results []*m
 	if scraped.Credits == nil && len(scraped.Actresses) > 0 && scrapeResultsContainActresses(results) {
 		BuildCreditsFromScrape(scraped, actressSources, results)
 	}
+	if scraped.Credits == nil && len(scraped.Actresses) == 0 {
+		// A missing cast supplies no new actor evidence; an explicit empty
+		// source cast still reconciles obsolete scrape-owned rows. Neither is
+		// an explicit user edit suppressing every durable movie credit.
+		scraped.Credits = []models.MovieCredit{}
+		scraped.SkipCreditReconcile = !scrapeResultsReportCast(results)
+	}
 	if scraped.Credits != nil {
 		AttachCreditPolicy(scraped, cfg)
 	}
@@ -407,6 +414,16 @@ func (s *Scraper) Scrape(ctx context.Context, cmd ScrapeCmd) (*ScrapeResult, err
 
 	progress.FromContext(ctx).Report(progress.ProgressStepScrape, 1.0, "Completed")
 	return result, nil
+}
+
+// scrapeResultsReportCast preserves the raw source's nil-versus-empty contract.
+func scrapeResultsReportCast(results []*models.ScraperResult) bool {
+	for _, result := range results {
+		if result != nil && result.Actresses != nil {
+			return true
+		}
+	}
+	return false
 }
 
 func scrapeResultsContainActresses(results []*models.ScraperResult) bool {

@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/logging"
@@ -59,11 +60,10 @@ func newScrapeOrchestrator(scraper scrape.ScraperInterface, movieRepo database.M
 	}
 }
 
-// Execute runs the 4-step Scrape sequence:
-//  1. ForceRefresh cache clear (if cmd.ForceRefresh && movieRepo != nil)
-//  2. Scrape via scraper.Scrape
-//  3. Prepare DisplayTitle via ApplyDisplayTitleFromSource
-//  4. Persist to DB and finalize DisplayTitle after credit hydration
+// Execute runs the Scrape sequence:
+//  1. Scrape via scraper.Scrape (which bypasses cache for ForceRefresh)
+//  2. Prepare DisplayTitle via ApplyDisplayTitleFromSource
+//  3. Persist to DB and finalize DisplayTitle after credit hydration
 //
 // Poster generation has been moved to the worker's scrape phase
 // (see scrape_phase.go) — the orchestrator is now a pure query + persist pipeline.
@@ -74,18 +74,12 @@ func (o *scrapeOrchImpl) Execute(ctx context.Context, cmd scrape.ScrapeCmd) (*sc
 
 	var meta OrchestrationMeta
 
-	// Step 1: ForceRefresh cache clear.
-	if cmd.ForceRefresh && o.movieRepo != nil {
-		if err := o.movieRepo.Delete(ctx, cmd.MovieID); err != nil {
-			resolveLogger(o.logger).Debugf("[workflow] Cache delete failed (may not exist): %v", err)
-		}
-	}
-
 	if o.scraper == nil {
 		return nil, nil, fmt.Errorf("workflow scraper not configured (scraper was nil at construction)")
 	}
 
-	// Step 2: Scrape (core query).
+	// Step 1: Scrape (core query). Keep the existing movie and durable credit
+	// decisions until the normal transactional upsert accepts fresh metadata.
 	result, err := o.scraper.Scrape(ctx, cmd)
 	if err != nil && (result == nil || result.Movie == nil) {
 		return result, nil, err
@@ -105,8 +99,11 @@ func (o *scrapeOrchImpl) Execute(ctx context.Context, cmd scrape.ScrapeCmd) (*sc
 		}
 	}
 
-	// Step 3: Prepare DisplayTitle, retaining its renderer for final persistence.
+	// Step 2: Prepare DisplayTitle, retaining its renderer for final persistence.
 	if result != nil && result.Movie != nil {
+		// An explicit fresh content identity must not inherit another movie's
+		// curation just because the scraper reused its display/search ID.
+		result.Movie.RequireExactContentID = cmd.ForceRefresh && strings.TrimSpace(result.Movie.ContentID) != ""
 		meta.RenderDisplayTitle = func(ctx context.Context, movie *models.Movie) string {
 			rendered := *movie
 			ApplyDisplayTitleFromSource(ctx, &rendered, movie, o.displayTitle, o.templateEngine, o.nameCfg)
@@ -116,7 +113,7 @@ func (o *scrapeOrchImpl) Execute(ctx context.Context, cmd scrape.ScrapeCmd) (*sc
 		meta.DisplayTitleApplied = true
 	}
 
-	// Step 4: Persist to database (Upsert).
+	// Step 3: Persist to database (Upsert).
 	// Pass genre/actress translations from TranslationOutput for ID resolution.
 	// Skipped when cmd.SkipPersist is set — the caller owns persistence in that
 	// case (the batch scrape phase offloads this to a dedicated goroutine pool so

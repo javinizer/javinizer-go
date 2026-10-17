@@ -18,8 +18,8 @@ type Workflow struct {
 	scanMatch scanAndMatchOrchestrator
 }
 
-// Scrape delegates to the internal scrapeOrchestrator which owns the 5 explicit
-// Scrape steps: cache clear, scrape, DisplayTitle, persist, poster.
+// Scrape delegates to the internal scrapeOrchestrator: query (with optional
+// cache bypass), DisplayTitle, and transactional persistence.
 // Returns the scrape result, orchestration metadata, and any error.
 func (w *Workflow) Scrape(ctx context.Context, cmd scrape.ScrapeCmd) (*scrape.ScrapeResult, *OrchestrationMeta, error) {
 	return w.scrape.Execute(ctx, cmd)

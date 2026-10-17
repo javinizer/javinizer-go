@@ -84,7 +84,9 @@ func TestGlobalDisabledWithoutPerScraperActressEvidenceCreatesNoCredits(t *testi
 	result, err := engine.Scrape(t.Context(), ScrapeCmd{MovieID: "OVERRIDE-EMPTY", ForceRefresh: true})
 	require.NoError(t, err)
 	require.Empty(t, result.Movie.Actresses)
-	require.Nil(t, result.Movie.Credits)
+	require.NotNil(t, result.Movie.Credits)
+	require.Empty(t, result.Movie.Credits)
+	require.True(t, result.Movie.SkipCreditReconcile, "disabled actor scraping is not a user cast removal")
 }
 
 func TestPostProcessPreservesExplicitCreditsWithoutDuplicatingAggregateEvidence(t *testing.T) {
@@ -101,4 +103,11 @@ func TestScrapeResultsContainActressesVariants(t *testing.T) {
 	require.False(t, scrapeResultsContainActresses(nil))
 	require.False(t, scrapeResultsContainActresses([]*models.ScraperResult{nil, {Source: "empty"}}))
 	require.True(t, scrapeResultsContainActresses([]*models.ScraperResult{{Actresses: []models.ActressInfo{{FirstName: "Evidence"}}}}))
+}
+
+func TestScrapeResultsReportCastPreservesAbsentVersusEmpty(t *testing.T) {
+	require.False(t, scrapeResultsReportCast(nil))
+	require.False(t, scrapeResultsReportCast([]*models.ScraperResult{nil, {Source: "absent"}}))
+	require.True(t, scrapeResultsReportCast([]*models.ScraperResult{{Actresses: []models.ActressInfo{}}}))
+	require.True(t, scrapeResultsReportCast([]*models.ScraperResult{{Actresses: []models.ActressInfo{{FirstName: "Reported"}}}}))
 }

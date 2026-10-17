@@ -141,6 +141,10 @@ func (u *MovieUpserter) UpsertWithTranslations(ctx context.Context, movie *model
 }
 
 func (u *MovieUpserter) upsertWithDisplayTitle(ctx context.Context, movie *models.Movie, genreTranslations []models.GenreTranslationData, actressTranslations []models.ActressTranslationData, render DisplayTitleRenderer) (*models.Movie, error) {
+	// Consume the operation-only identity constraint before retries or returning
+	// the caller's input; persisted and later ordinary saves must not inherit it.
+	requireExactContentID := movie.RequireExactContentID
+	movie.RequireExactContentID = false
 	var result *models.Movie
 	callerActresses := make([]models.Actress, len(movie.Actresses))
 	copy(callerActresses, movie.Actresses)
@@ -183,7 +187,7 @@ func (u *MovieUpserter) upsertWithDisplayTitle(ctx context.Context, movie *model
 			}
 
 			// Step 2: Find existing movie or create new
-			existingFound, err := u.findExistingMovieTx(tx, movie)
+			existingFound, err := u.findExistingMovieTx(tx, movie, requireExactContentID)
 			if err != nil {
 				return err
 			}
@@ -307,10 +311,15 @@ func (u *MovieUpserter) resolveContentID(_ *gorm.DB, movie *models.Movie) error 
 	return nil
 }
 
+// ErrMovieContentIDConflict prevents a forced refresh from adopting an unrelated
+// movie through its display/search ID or creating an ambiguous duplicate.
+var ErrMovieContentIDConflict = errors.New("scraped content ID conflicts with existing movie")
+
 // findExistingMovieTx looks up an existing movie by ContentID or ID.
+// A forced refresh with an explicit content identity rejects a mismatched fallback.
 // If found, it sets movie.ContentID and movie.CreatedAt from the existing record.
 // Returns whether an existing movie was found.
-func (u *MovieUpserter) findExistingMovieTx(tx *gorm.DB, movie *models.Movie) (bool, error) {
+func (u *MovieUpserter) findExistingMovieTx(tx *gorm.DB, movie *models.Movie, requireExactContentID bool) (bool, error) {
 	var existing models.Movie
 	var existingFound bool
 
@@ -320,6 +329,19 @@ func (u *MovieUpserter) findExistingMovieTx(tx *gorm.DB, movie *models.Movie) (b
 			existingFound = true
 		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return false, wrapDBErr("find", fmt.Sprintf("movie %s", movie.ContentID), err)
+		}
+	}
+
+	// Check even when the incoming content already exists: changing its display
+	// ID must not claim the ID of another movie and make later cache reads ambiguous.
+	if requireExactContentID && movie.ID != "" {
+		var conflicting models.Movie
+		err := tx.Select("content_id").First(&conflicting, "id = ? AND content_id <> ?", movie.ID, movie.ContentID).Error
+		if err == nil {
+			return false, fmt.Errorf("%w: %s is %s, received %s", ErrMovieContentIDConflict, movie.ID, conflicting.ContentID, movie.ContentID)
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return false, wrapDBErr("check refresh identity", fmt.Sprintf("movie %s", movie.ID), err)
 		}
 	}
 
@@ -901,7 +923,9 @@ func (u *MovieUpserter) ensureActressesExistTx(tx *gorm.DB, actresses []models.A
 
 func (u *MovieUpserter) persistCreditsTx(tx *gorm.DB, movie *models.Movie) error {
 	if movie.SkipCreditReconcile {
-		return nil
+		// Cache/no-cast refreshes retain the association from the transaction's
+		// current movie, never an empty or stale incoming actor projection.
+		return tx.Model(movie).Association("Actresses").Find(&movie.Actresses)
 	}
 	policy := NormalizeCollisionPolicy(movie.CreditPolicy)
 	trusted := make(map[string]bool, len(movie.TrustedCollisionSources))

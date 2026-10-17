@@ -328,6 +328,8 @@ javinizer scrape IPX-535
 javinizer scrape SSIS-123 --force   # force-refresh cached metadata
 ```
 
+`--force` bypasses cached scraper metadata while preserving movie-specific actor names, suppression, ordering, identity reassignments, and collision decisions. A failed or cancelled refresh leaves the saved movie intact. In batch jobs, forced refresh metadata becomes available for review only after it is saved successfully. If a scraper returns a different explicit content ID for a display ID already owned by another movie, the refresh reports a conflict instead of transferring those choices; search for the intended distinct movie ID to scrape it separately.
+
 ### Update metadata in place
 
 Re-scrape and merge into already-organized files (supports merge presets/strategies):
