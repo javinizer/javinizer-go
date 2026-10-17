@@ -7,6 +7,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -155,19 +156,44 @@ func TestStallWatchdog_CompletedPingSuppressesFire(t *testing.T) {
 }
 
 func TestStallWatchdog_StopDisarmsImmediatelyBeforeDeadline(t *testing.T) {
-	w := newStallWatchdog(50 * time.Millisecond)
-	fired := make(chan struct{})
-	go w.run(context.Background(), func() { close(fired) })
+	synctest.Test(t, func(t *testing.T) {
+		const timeout = 50 * time.Millisecond
+		w := newStallWatchdog(timeout)
+		fired := make(chan struct{})
+		done := make(chan struct{})
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		go func() {
+			w.run(ctx, func() { close(fired) })
+			close(done)
+		}()
+		synctest.Wait() // Start the ticker before advancing logical time.
 
-	time.Sleep(40 * time.Millisecond)
-	w.Stop()
+		// A real Sleep may resume after the deadline on a busy runner. Fake
+		// time makes this genuinely the last instant before expiry.
+		time.Sleep(timeout - time.Nanosecond)
+		synctest.Wait()
+		require.False(t, w.Fired(), "the watchdog must not fire before the deadline")
+		w.Stop()
+		synctest.Wait()
+		select {
+		case <-done:
+		default:
+			t.Fatal("Stop must wake the watchdog without waiting for another tick")
+		}
 
-	select {
-	case <-fired:
-		t.Fatal("stop just before the deadline must still disarm")
-	case <-time.After(200 * time.Millisecond):
-	}
-	require.False(t, w.Fired())
+		time.Sleep(200 * time.Millisecond)
+		synctest.Wait()
+		select {
+		case <-fired:
+			t.Fatal("stop just before the deadline must still disarm")
+		default:
+		}
+		require.False(t, w.tryFire(time.Now(), func() {
+			t.Error("Stop must also suppress an elapsed tick's timeout claim")
+		}))
+		require.False(t, w.Fired())
+	})
 }
 
 // These tests advance logical network-idle time rather than sleeping. They
