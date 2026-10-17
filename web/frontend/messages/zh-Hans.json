@@ -509,6 +509,7 @@
   "editor_select_search_actress": "选择或搜索女优",
   "editor_thumbnail_url": "缩略图 URL",
   "editor_unable_load_image": "无法加载图片",
+  "editor_duplicate_actress_body": "此女优已在演员列表中。请选择其他女优或编辑现有条目。",
   "editor_validation_body": "至少需要名或日文名",
   "editor_validation_title": "验证错误",
   "editor_via_merged": "经由合并数据",

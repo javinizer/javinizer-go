@@ -509,6 +509,7 @@
   "editor_select_search_actress": "女優を選択または検索",
   "editor_thumbnail_url": "サムネイル URL",
   "editor_unable_load_image": "画像を読み込めません",
+  "editor_duplicate_actress_body": "この女優はすでに出演者に含まれています。別の女優を選ぶか、既存の項目を編集してください。",
   "editor_validation_body": "少なくとも名または日本語名が必要です",
   "editor_validation_title": "バリデーションエラー",
   "editor_via_merged": "マージ済みデータ経由",

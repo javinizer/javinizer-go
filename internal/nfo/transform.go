@@ -289,12 +289,18 @@ func (g *Generator) creditAwareActors() bool {
 
 // resolveCreditDisplayName resolves the D8 precedence chain:
 // override_name > credited_name (when use_credited_name and not forced-canonical) > identity canonical.
+// An absent canonical name permits credited fallback before unknown substitution.
 func (g *Generator) resolveCreditDisplayName(credit models.MovieCredit) string {
 	canonical := ""
 	if credit.Actress != nil {
-		canonical = g.formatActressName(*credit.Actress)
+		canonical = g.formatCreditCanonicalName(*credit.Actress)
 	}
-	return credit.RenderName(g.config.UseCreditedName, canonical)
+	name := credit.RenderName(g.config.UseCreditedName, canonical)
+	if name == "" && credit.Actress != nil {
+		// Apply the configured unknown placeholder only after credit fallback.
+		return g.formatActressName(*credit.Actress)
+	}
+	return name
 }
 
 func (g *Generator) buildActorsFromCreditsForMovie(credits []models.MovieCredit, contentID string, authority []models.MovieCredit) []actor {
@@ -332,7 +338,7 @@ func (g *Generator) buildActorsFromCreditsForMovie(credits []models.MovieCredit,
 			selection := "canonical"
 			canonical := ""
 			if credit.Actress != nil {
-				canonical = g.formatActressName(*credit.Actress)
+				canonical = g.formatCreditCanonicalName(*credit.Actress)
 			}
 			if _, selected := credit.RenderNameWithSelection(g.config.UseCreditedName, canonical); selected {
 				selection = "credited"
@@ -569,5 +575,15 @@ func (g *Generator) formatActressName(actress models.Actress) string {
 		FirstNameOrder:     g.config.FirstNameOrder,
 		UnknownActress:     g.config.UnknownActressText,
 		UnknownActressMode: g.config.UnknownActressMode,
+	})
+}
+
+// formatCreditCanonicalName preserves an absent identity name for credit selection.
+// Unknown placeholders are presentation output, not canonical identity names.
+func (g *Generator) formatCreditCanonicalName(actress models.Actress) string {
+	return models.FormatActressName(actress, models.FormatActressNameOptions{
+		JapaneseNames:      g.config.ActressLanguageJA,
+		FirstNameOrder:     g.config.FirstNameOrder,
+		UnknownActressMode: models.UnknownActressModeSkip,
 	})
 }

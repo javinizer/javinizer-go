@@ -509,6 +509,7 @@
   "editor_select_search_actress": "選取或搜尋女優",
   "editor_thumbnail_url": "縮圖 URL",
   "editor_unable_load_image": "無法載入圖片",
+  "editor_duplicate_actress_body": "此女優已在演員清單中。請選擇其他女優或編輯現有項目。",
   "editor_validation_body": "名字或日文名稱至少需填一項",
   "editor_validation_title": "驗證錯誤",
   "editor_via_merged": "透過合併資料",

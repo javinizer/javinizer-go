@@ -507,6 +507,7 @@
   "editor_select_search_actress": "Select or Search Actress",
   "editor_thumbnail_url": "Thumbnail URL",
   "editor_unable_load_image": "Unable to load image",
+  "editor_duplicate_actress_body": "This actress is already in the cast. Choose a different actress or edit the existing entry.",
   "editor_validation_body": "At least first name or Japanese name is required",
   "editor_validation_title": "Validation Error",
   "editor_via_merged": "via merged data",
