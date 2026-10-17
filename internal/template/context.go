@@ -151,8 +151,15 @@ func NewContextFromMovieWithOptions(movie *models.Movie, opts ContextOptions) *C
 				continue
 			}
 			actress := *credit.Actress
-			canonical := models.FormatActressName(actress, models.FormatActressNameOptions{FirstNameOrder: opts.FirstNameOrder})
+			// Select against the actual identity name, before any Unknown placeholder.
+			canonical := models.FormatActressName(actress, models.FormatActressNameOptions{
+				FirstNameOrder: opts.FirstNameOrder, UnknownActressMode: models.UnknownActressModeSkip,
+			})
 			name, selected := credit.RenderNameWithSelection(opts.UseCreditedName, canonical)
+			if name == "" {
+				// Retain the legacy preformatted-list placeholder after selection.
+				name = models.FormatActressName(actress, models.FormatActressNameOptions{FirstNameOrder: opts.FirstNameOrder})
+			}
 			detail := ActressDetail{FirstName: actress.FirstName, LastName: actress.LastName, JapaneseName: actress.JapaneseName}
 			if selected {
 				detail = ActressDetail{FirstName: name}

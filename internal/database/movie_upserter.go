@@ -294,6 +294,13 @@ func (u *MovieUpserter) upsertWithDisplayTitle(ctx context.Context, movie *model
 			return nil
 		})
 	})
+	if err == nil {
+		// Callers publish this operation-owned input into review results and
+		// envelopes. Use the same unique, resolved cast as the transaction's
+		// returned snapshot, after translation mapping and reconciliation.
+		// Keep a detached projection; never re-read after releasing the lock.
+		movie.Actresses = result.Clone().Actresses
+	}
 	if err == nil && render != nil {
 		movie.DisplayTitle = result.DisplayTitle
 		movie.RenderDirty = result.RenderDirty

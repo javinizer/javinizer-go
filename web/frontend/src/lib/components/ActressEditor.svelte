@@ -309,6 +309,15 @@
 			return;
 		}
 
+		// Existing identities can occupy only one cast row. Keep the draft open
+		// rather than replacing another row or persisting a duplicate identity.
+		if (editingActress.id && editingActress.id > 0 && actresses.some(
+			(actress, index) => index !== editingIndex && actress.id === editingActress.id
+		)) {
+			void alertDialog(m.editor_validation_title(), m.editor_duplicate_actress_body());
+			return;
+		}
+
 		if (editingIndex !== null) {
 			actresses = actresses.map((a, i) => i === editingIndex ? editingActress : a);
 		} else {
