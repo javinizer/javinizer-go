@@ -80,7 +80,7 @@ async function mockAPI(context: BrowserContext, update = false) {
 	};
 	// Keep the frontend-only suite offline, including its otherwise reconnecting WS.
 	await context.routeWebSocket('**/ws/progress', () => {});
-	await context.route('**/api/**', async (route) => {
+	await context.route('**/api/v1/**', async (route) => {
 		const request = route.request();
 		const path = new URL(request.url()).pathname;
 		const method = request.method();
