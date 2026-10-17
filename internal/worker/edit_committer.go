@@ -38,8 +38,8 @@ type ActressRenamePlan struct {
 // all publication inside Publish: ANY leg failing rolls ALL DB writes back
 // and Publish never runs — no half-state ever becomes observable (D4).
 type EditCommitPlan struct {
-	// UpsertMovie, when non-nil, is the candidate movie row to upsert FIRST
-	// (PATCH ordering contract: movie upsert precedes actress renames).
+	// UpsertMovie, when non-nil, is upserted after validation and actress
+	// renames so credit reconciliation sees the accepted identity edits.
 	UpsertMovie *models.Movie
 	// RenderDisplayTitle runs after the upsert resolves authoritative credits,
 	// before the transaction encodes or publishes the candidate envelope.
@@ -51,7 +51,7 @@ type EditCommitPlan struct {
 	MutateMovieID string
 	MutateMovie   func(m *models.Movie)
 
-	// Renames are explicit actress name edits, executed after the upsert.
+	// Renames are explicit actress name edits, executed before the upsert.
 	Renames []ActressRenamePlan
 
 	// EnvelopeFn builds the candidate-merged job envelope row. Returning a
@@ -104,13 +104,13 @@ func NewEditCommitter(tx EditTransactor, locks *keyedMutexRegistry, jobKey strin
 }
 
 // Commit runs the plan atomically:
-//  1. Movie-row upsert (PATCH ordering contract)
-//  2. find→mutate→upsert row mutation
-//  3. Actress renames (preTx-snapshotted fields)
+//  1. Validate current state
+//  2. Actress renames (preTx-snapshotted fields)
+//  3. Movie-row upsert and optional find→mutate→upsert mutation
 //  4. Candidate-merged envelope build + upsert
 //  5. Publish (only after commit success)
 //
-// Any leg failing rolls ALL back and the caller turns it into a 5xx; nothing
+// Any leg failing rolls ALL back and the caller maps the error to HTTP; nothing
 // observable changes (no partial movie row, no stale-provenance envelope, no
 // in-memory divergence).
 func (c *EditCommitter) Commit(ctx context.Context, plan *EditCommitPlan) error {

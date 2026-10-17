@@ -62,7 +62,7 @@ func TestPreviewCastSkipsUnchangedAndStaleEchoes(t *testing.T) {
 }
 
 func TestPreviewCastErrorsNeverReturnProvisionalMovie(t *testing.T) {
-	for _, mode := range []string{"no database", "persisted missing", "cast changed", "lookup failed", "rename failed", "upsert failed", "rollback failed", "canceled"} {
+	for _, mode := range []string{"no database", "persisted missing", "cast changed", "lookup failed", "rename failed", "upsert failed", "rollback failed", "invalid rename and rollback failed", "canceled"} {
 		t.Run(mode, func(t *testing.T) {
 			deps := createTestDeps(t, newDisplayTitlePreviewConfig("<ACTORS>"), "")
 			a := models.Actress{FirstName: "Original", Verified: true, Origin: "user"}
@@ -91,7 +91,11 @@ func TestPreviewCastErrorsNeverReturnProvisionalMovie(t *testing.T) {
 				require.NoError(t, db.Exec("CREATE TRIGGER deny_preview_rename BEFORE UPDATE ON actresses BEGIN SELECT RAISE(ABORT,'denied rename'); END").Error)
 			case "upsert failed":
 				require.NoError(t, db.Exec("CREATE TRIGGER deny_preview_movie BEFORE UPDATE OF title ON movies BEGIN SELECT RAISE(ABORT,'denied upsert'); END").Error)
-			case "rollback failed":
+			case "rollback failed", "invalid rename and rollback failed":
+				if mode == "invalid rename and rollback failed" {
+					candidate.Actresses[0].FirstName = ""
+					status = http.StatusBadRequest
+				}
 				pool, err := db.DB.DB()
 				require.NoError(t, err)
 				pool.SetMaxOpenConns(1)
@@ -119,6 +123,13 @@ func TestPreviewCastErrorsNeverReturnProvisionalMovie(t *testing.T) {
 			require.Nil(t, projected)
 			require.NotNil(t, resolveErr)
 			require.Equal(t, status, resolveErr.Status, resolveErr.Err)
+			if mode == "invalid rename and rollback failed" {
+				// Preserve the existing joined-error classification convention:
+				// the typed input error still yields 400, but cleanup failure must
+				// never leak a provisional movie or durable writes.
+				require.Contains(t, resolveErr.Err, "must retain at least one non-empty name")
+				require.Contains(t, resolveErr.Err, "rollback movie preview")
+			}
 			require.Equal(t, before, previewTableSnapshot(t, deps.Repos.DB))
 			require.Equal(t, original, candidate)
 		})

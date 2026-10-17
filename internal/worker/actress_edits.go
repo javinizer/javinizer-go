@@ -3,9 +3,24 @@ package worker
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/javinizer/javinizer-go/internal/database"
 )
+
+// InvalidActressRenameError rejects clearing all names of a named identity.
+// Existing unnamed identities remain valid, including DMM-only records.
+type InvalidActressRenameError struct {
+	ActressID uint
+}
+
+func (e *InvalidActressRenameError) Error() string {
+	return fmt.Sprintf("actress %d must retain at least one non-empty name", e.ActressID)
+}
+
+func actressNamesEmpty(first, last, japanese string) bool {
+	return strings.TrimSpace(first) == "" && strings.TrimSpace(last) == "" && strings.TrimSpace(japanese) == ""
+}
 
 // ApplyActressRenames is the DB-only identity-edit leg shared by review saves
 // and rollback-only previews. The caller supplies transaction-scoped repositories.
@@ -18,6 +33,9 @@ func ApplyActressRenames(ctx context.Context, repo database.ActressRepositoryInt
 			return fmt.Errorf("load actress for rename: %w", err)
 		case err != nil || existing == nil:
 			continue
+		}
+		if !actressNamesEmpty(existing.FirstName, existing.LastName, existing.JapaneseName) && actressNamesEmpty(rn.FirstName, rn.LastName, rn.JapaneseName) {
+			return &InvalidActressRenameError{ActressID: rn.ID}
 		}
 		namesUnchanged := existing.FirstName == rn.FirstName && existing.LastName == rn.LastName && existing.JapaneseName == rn.JapaneseName
 		thumbChanged := rn.ThumbEdited
