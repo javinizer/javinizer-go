@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"database/sql"
 	"database/sql/driver"
 	"errors"
 	"fmt"
@@ -29,7 +30,15 @@ func (db *DB) WithPreviewTx(ctx context.Context, fn func(EditUnit) error) (err e
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
+	defer func() {
+		closeErr := conn.Close()
+		// Discarding after rollback/restoration failure already closes the
+		// sql.Conn. Preserve the original failure without adding ErrConnDone.
+		if errors.Is(closeErr, sql.ErrConnDone) {
+			return
+		}
+		err = errors.Join(err, closeErr)
+	}()
 	var busyTimeout int
 	if err := conn.QueryRowContext(ctx, "PRAGMA busy_timeout").Scan(&busyTimeout); err != nil {
 		return err

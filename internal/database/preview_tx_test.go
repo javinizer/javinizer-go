@@ -199,10 +199,14 @@ func TestPreviewTxRollbackFailureDiscardsDirtyConnection(t *testing.T) {
 				return nil
 			}))
 			require.NoError(t, conn.Close())
+			callbackErr := errors.New("preview callback failed")
 			err = db.WithPreviewTx(t.Context(), func(u EditUnit) error {
-				return u.Movies.(*MovieRepository).GetDB().Exec("INSERT INTO preview_probe VALUES (1, 'tentative')").Error
+				require.NoError(t, u.Movies.(*MovieRepository).GetDB().Exec("INSERT INTO preview_probe VALUES (1, 'tentative')").Error)
+				return callbackErr
 			})
 			require.ErrorContains(t, err, "rollback movie preview")
+			require.ErrorIs(t, err, callbackErr, "cleanup must retain the original callback error")
+			require.NotErrorIs(t, err, sql.ErrConnDone, "closing an already discarded connection is expected")
 			if closeFault {
 				require.Equal(t, int32(1), closes.Load())
 			}
