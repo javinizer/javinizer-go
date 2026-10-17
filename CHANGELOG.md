@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.6.3] - 2026-10-18
+
+### Fixed
+
+- Retain selected raw actor evidence across alias conversion (#333).
+- Preserve legacy actor thumbnail edits and omit blank separators (#332).
+- Keep actor selection, save receipts and credited fallback consistent (#331).
+- Preserve actor-credit choices during forced rescrape (#329).
+- Reject destructive empty actor renames in movie edits (#330).
+- Refresh inferred legacy single-part actor names safely (#328).
+- Handle pinned preview connection cleanup errors.
+- Retain NFO cast projection across rescrape ID correction.
+- Preserve actor credit choices across NFO merges (#325).
+- Reconcile actor identity lifecycle during import (#323).
+- Stage timeout outcomes until the database fence commits.
+- Preserve credit review recovery and mutation ordering.
+- Derive display titles from authoritative credits.
+- Retain credit-fenced Apply timeout outcomes.
+- Align the organize credit gate with live credits (#320).
+- Truncate multiline Discord release notes correctly (#319).
+
+### Changed
+
+- Avoid intercepting Vite imports in retry browser mocks.
+- Make watchdog and idle-reclaim timing deterministic (#326).
+- Use native paths for rescraped actor images.
+- Synchronize expired writeback with completed SQLite rollback.
+
 ## [v1.6.2] - 2026-10-16
 
 ### Fixed
@@ -1071,4 +1099,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Path traversal protection for API endpoints- CORS origin validation- Directory traversal prevention- SQL injection prevention- Header injection and path traversal sanitization in frontend
 
+[v1.6.3]: https://github.com/javinizer/javinizer-go/compare/v1.6.2...v1.6.3
 [v1.6.2]: https://github.com/javinizer/javinizer-go/compare/v1.6.1...v1.6.2
