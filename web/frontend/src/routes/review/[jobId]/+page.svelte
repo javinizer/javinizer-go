@@ -174,6 +174,7 @@
 				expectedOrganizeFilePaths={s.expectedOrganizeFilePaths}
 				isUpdateMode={s.isUpdateMode}
 				retryDisabled={s.creditWritesBlocked || s.isSavingEdits || s.organizing}
+				retryAvailable={s.canRetryFailed}
 				onRetryFailed={() => s.retryFailed()}
 				onContinue={() => goto('/browse')}
 			/>

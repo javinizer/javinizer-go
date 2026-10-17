@@ -1665,6 +1665,8 @@
   "review_reset_to_config": "Reset to config",
   "review_reset_to_original": "Reset to Original",
   "review_retry_failed": "Retry Failed",
+  "review_retry_operation_unknown": "The original file operation is unavailable, so Retry Failed is disabled. Review the file operation and settings, then use Organize to start a new attempt.",
+  "review_retry_storage_unavailable": "The previous retry settings could not be replaced or removed, so no new operation was started. Free browser storage or restore access, then review the file operation and try Apply again.",
   "review_retry_load": "Retry load",
   "review_return_to_browse_now": "Return to Browse Now",
   "review_runtime_value": "{value} min",

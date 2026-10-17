@@ -19,6 +19,7 @@
 		isUpdateMode: boolean;
 		onRetryFailed: () => void;
 		retryDisabled?: boolean;
+		retryAvailable?: boolean;
 		onContinue: () => void;
 	}
 
@@ -30,6 +31,7 @@
 		isUpdateMode,
 		onRetryFailed,
 		retryDisabled = false,
+		retryAvailable = true,
 		onContinue
 	}: Props = $props();
 
@@ -126,8 +128,11 @@
 						{/each}
 					</div>
 
+					{#if !retryAvailable}
+						<p role="status" class="mt-4 text-sm text-muted-foreground">{m.review_retry_operation_unknown()}</p>
+					{/if}
 					<div class="mt-4 flex gap-2">
-						<Button onclick={onRetryFailed} disabled={retryDisabled}>
+						<Button onclick={onRetryFailed} disabled={retryDisabled || !retryAvailable}>
 							{#snippet children()}{m.review_retry_failed()}
 							{/snippet}
 						</Button>

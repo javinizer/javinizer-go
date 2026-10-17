@@ -554,3 +554,19 @@ describe('organize-controller handleWebSocketMessage progress gating (NEW-1)', (
 		});
 	});
 });
+
+it('requires an originating retry context and revokes it on cleanup', async () => {
+	const apply = vi.fn().mockResolvedValue(undefined);
+	const { deps, fileStatuses } = makeDeps({ organizeBatchJob: apply });
+	const controller = createOrganizeController(deps);
+	fileStatuses.set('/synthetic/failed.mp4', { status: 'failed', error: 'Credit conflict' });
+	expect(controller.hasRetryContext).toBe(false);
+	await controller.retryFailed();
+	expect(apply).not.toHaveBeenCalled();
+	await controller.organizeAll();
+	expect(controller.hasRetryContext).toBe(true);
+	controller.cleanup();
+	expect(controller.hasRetryContext).toBe(false);
+	await controller.retryFailed();
+	expect(apply).toHaveBeenCalledOnce();
+});

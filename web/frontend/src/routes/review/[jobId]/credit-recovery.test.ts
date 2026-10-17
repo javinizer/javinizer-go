@@ -305,7 +305,7 @@ it.each([true, false])(
 );
 
 it.each(['credit_conflict', 'credit_status_unavailable'] as const)(
-	'restores %s recovery after reload while keeping scraper failures separate',
+	'retains %s resolution after reload without inventing retry options',
 	async (errorCode) => {
 		const current = original();
 		current.results[filePath].status = 'failed';
@@ -330,17 +330,14 @@ it.each(['credit_conflict', 'credit_status_unavailable'] as const)(
 		const view = mount();
 		await fireEvent.click(await view.findByRole('button', { name: /Keep catalog/ }));
 		await waitFor(() => expect(resolve).toHaveBeenCalledOnce());
-		await waitFor(() =>
-			expect(
-				(view.getByRole('button', { name: /Retry Failed/i }) as HTMLButtonElement).disabled,
-			).toBe(false),
-		);
+		await waitFor(() => expect(observedReview.state?.isSavingEdits).toBe(false));
+		expect((view.getByRole('button', { name: /Retry Failed/i }) as HTMLButtonElement).disabled).toBe(true);
+		expect(view.getByText(/original file operation is unavailable/i)).toBeTruthy();
 		await fireEvent.click(view.getByRole('tab', { name: /Failed/ }));
 		expect(view.getAllByRole('button', { name: /Search Manually/i })).toHaveLength(1);
 		expect(view.getByText('unidentified.mp4')).toBeTruthy();
-		await fireEvent.click(view.getByRole('button', { name: /Retry Failed/i }));
-		await waitFor(() => expect(apply).toHaveBeenCalledOnce());
-		expect(apply.mock.calls[0][1].retry_file_paths).toEqual([filePath]);
+		await observedReview.state?.retryFailed();
+		expect(apply).not.toHaveBeenCalled();
 	},
 );
 

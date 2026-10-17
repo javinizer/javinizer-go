@@ -352,7 +352,16 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 	let lastSkipDownload = false;
 	let lastOrganizeOverrides: ReviewApplyOverrides | undefined;
 	let lastOrganizeOperation: OrganizeOperation = 'move';
+	let lastApplyOperation: 'organize' | 'update' | null = null;
+	let lastPreApplyGeneration: number | undefined;
 	let lastRecoveryFailedPaths: string[] = [];
+
+	function hasRetryContext(): boolean {
+		const generation = deps.getJob()?.apply_generation;
+		return lastApplyOperation !== null && (generation === undefined ||
+			(lastPreApplyGeneration !== undefined &&
+				(generation === lastPreApplyGeneration || generation === lastPreApplyGeneration + 1)));
+	}
 
 	function forgetRecoveryRetryPath(filePath: string) {
 		lastRecoveryFailedPaths = lastRecoveryFailedPaths.filter((path) => path !== filePath);
@@ -363,10 +372,11 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 		skipDownload?: boolean,
 		overrides?: ReviewApplyOverrides,
 		retryPaths: string[] = [],
+		operationOverride?: OrganizeOperation,
 	) {
 		const operationJobId = deps.getJobId();
 		const operationGeneration = deps.getRouteGeneration?.() ?? 0;
-		const operation = deps.getOrganizeOperation();
+		const operation = operationOverride ?? deps.getOrganizeOperation();
 		const effectiveMode = deps.getOperationMode();
 		const operationDestination = deps.getDestinationPath();
 		const needsDestination = effectiveMode === 'organize';
@@ -380,10 +390,12 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 		lastSkipDownload = skipDownload ?? false;
 		lastOrganizeOverrides = overrides;
 		lastOrganizeOperation = operation;
+		lastApplyOperation = 'organize';
 		lastRecoveryFailedPaths = Array.from(new Set(retryPaths));
 
 		const { copyOnly, linkMode } = getOrganizeRequestOptions(operation);
 		const preApplyGeneration = deps.getJob()?.apply_generation;
+		lastPreApplyGeneration = preApplyGeneration;
 		prepareOrganizeRun(retryPaths);
 		const operationToken = organizeRunToken;
 		let requestPending = false;
@@ -438,10 +450,12 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 	}
 
 	async function updateAll(options?: UpdateRequest, retryPaths: string[] = []) {
+		lastApplyOperation = 'update';
 		const operationJobId = deps.getJobId();
 		const operationGeneration = deps.getRouteGeneration?.() ?? 0;
 		lastRecoveryFailedPaths = Array.from(new Set(retryPaths));
 		const preApplyGeneration = deps.getJob()?.apply_generation;
+		lastPreApplyGeneration = preApplyGeneration;
 		prepareOrganizeRun(retryPaths);
 		const operationToken = organizeRunToken;
 		let requestPending = false;
@@ -490,21 +504,20 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 	}
 
 	async function retryFailed() {
-		const failedCount = Array.from(deps.getFileStatuses().values()).filter(
-			(s) => s.status === 'failed',
-		).length;
+		if (!hasRetryContext()) return;
+		const retryPaths = Array.from(deps.getFileStatuses().entries())
+			.filter(([, status]) => status.status === 'failed')
+			.map(([filePath]) => filePath);
+		const failedCount = retryPaths.length;
 		if (failedCount === 0) return;
 
 		deps.toastInfo(`Retrying ${failedCount} failed file${failedCount > 1 ? 's' : ''}...`);
 
-		const retryPaths = Array.from(deps.getFileStatuses().entries())
-			.filter(([, status]) => status.status === 'failed')
-			.map(([filePath]) => filePath);
 		const allRetryPaths = Array.from(new Set([...lastRecoveryFailedPaths, ...retryPaths]));
-		if (deps.getIsUpdateMode()) {
+		if (lastApplyOperation === 'update') {
 			await updateAll(lastUpdateOptions, allRetryPaths);
 		} else {
-			await organizeAll(lastSkipNfo, lastSkipDownload, lastOrganizeOverrides, allRetryPaths);
+			await organizeAll(lastSkipNfo, lastSkipDownload, lastOrganizeOverrides, allRetryPaths, lastOrganizeOperation);
 		}
 	}
 
@@ -557,6 +570,7 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 	}
 
 	function cleanup() {
+		lastApplyOperation = null;
 		organizeRunToken += 1;
 		ignoreWebSocketMessages = true;
 		activeApplyGeneration = undefined;
@@ -582,6 +596,8 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 			(expectedApplyGeneration !== undefined && job.apply_generation === expectedApplyGeneration) ||
 			!!hasRecordedApplyOutcome;
 		if (recovery) {
+			lastApplyOperation = recovery.operation;
+			lastPreApplyGeneration = recovery.preApplyGeneration;
 			lastSkipNfo = recovery.skipNfo;
 			lastSkipDownload = recovery.skipDownload;
 			lastOrganizeOverrides = recovery.overrides;
@@ -628,6 +644,18 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 	}
 
 	return {
+		get hasRetryContext() { return hasRetryContext(); },
+		get retryOptions() {
+			if (!hasRetryContext() || !lastApplyOperation) return null;
+			return {
+				operation: lastApplyOperation,
+				organizeOperation: lastOrganizeOperation,
+				skipNfo: lastSkipNfo,
+				skipDownload: lastSkipDownload,
+				overrides: lastOrganizeOverrides,
+				updateOptions: lastUpdateOptions,
+			};
+		},
 		organizeAll,
 		updateAll,
 		retryFailed,

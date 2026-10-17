@@ -141,8 +141,12 @@ it.each(cases)(
 		} else await state.retryLoad();
 		expect(state.refreshError).toBeNull();
 		await state.retryFailed();
-		expect(apply).toHaveBeenCalledOnce();
-		expect(apply.mock.calls[0][1]).toMatchObject({ retry_file_paths: [filePath] });
+		if (operation === 'organize' && recovery === 'missing') {
+			expect(apply).not.toHaveBeenCalled();
+		} else {
+			expect(apply).toHaveBeenCalledOnce();
+			expect(apply.mock.calls[0][1]).toMatchObject({ retry_file_paths: [filePath] });
+		}
 		expect(save).not.toHaveBeenCalled();
 	},
 );
