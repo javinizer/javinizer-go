@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"sort"
+	"sync/atomic"
 
 	"github.com/gin-gonic/gin"
 	"github.com/javinizer/javinizer-go/internal/api/contracts"
@@ -47,6 +48,14 @@ func prepareAndLaunchApply(
 	// phase-goroutine setup, then returns; the long-running work is joined below.
 	done := rt.TrackBackgroundTask()
 	if err := job.StartApply(rt.ServerCtx(), applyOpts); err != nil {
+		if errors.Is(err, worker.ErrApplyGenerationMismatch) {
+			done()
+			c.AbortWithStatusJSON(http.StatusConflict, contracts.ErrorResponse{
+				Error: err.Error(),
+				Code:  "APPLY_GENERATION_MISMATCH",
+			})
+			return
+		}
 		logging.Errorf("BatchJob.StartApply failed: %v", err)
 		if perr := rt.Deps().GetJobStore().PersistJobByID(job.GetID()); perr != nil {
 			logging.Warnf("[Apply] envelope persist failed for job %s: %v", job.GetID(), perr)
@@ -65,7 +74,16 @@ func prepareAndLaunchApply(
 		}
 	}()
 
-	c.JSON(http.StatusOK, gin.H{messageResponseKey: successMessage})
+	response := contracts.ApplyStartResponse{Message: successMessage}
+	// StartApply stamps this request's admission receipt before starting work.
+	// A later job snapshot could already belong to another apply generation.
+	// Nil/zero refs (including canceled admissions) cannot prove a launch.
+	if applyOpts.ApplyGenerationRef != nil {
+		if generation := atomic.LoadUint64(applyOpts.ApplyGenerationRef); generation != 0 {
+			response.ApplyGeneration = generation
+		}
+	}
+	c.JSON(http.StatusOK, response)
 }
 
 // organizeJob godoc
@@ -76,10 +94,10 @@ func prepareAndLaunchApply(
 // @Produce json
 // @Param id path string true "Job ID"
 // @Param request body contracts.OrganizeRequest true "Organization parameters"
-// @Success 200 {object} map[string]string
+// @Success 200 {object} contracts.ApplyStartResponse
 // @Failure 400 {object} contracts.ErrorResponse
 // @Failure 404 {object} contracts.ErrorResponse
-// @Failure 409 {object} contracts.ErrorResponse "Persisted update plan must go through the update endpoint"
+// @Failure 409 {object} contracts.ErrorResponse "Apply generation mismatch or persisted update plan must go through the update endpoint"
 // @Router /api/v1/batch/{id}/organize [post]
 func organizeJob(rt *core.APIRuntime) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -130,10 +148,10 @@ func organizeJob(rt *core.APIRuntime) gin.HandlerFunc {
 // @Produce json
 // @Param id path string true "Job ID"
 // @Param request body contracts.UpdateRequest false "Update options (optional, backward compatible)"
-// @Success 200 {object} map[string]string
+// @Success 200 {object} contracts.ApplyStartResponse
 // @Failure 400 {object} contracts.ErrorResponse
 // @Failure 404 {object} contracts.ErrorResponse
-// @Failure 409 {object} contracts.ErrorResponse "Persisted organize plan must go through the organize endpoint"
+// @Failure 409 {object} contracts.ErrorResponse "Apply generation mismatch or persisted organize plan must go through the organize endpoint"
 // @Router /api/v1/batch/{id}/update [post]
 func updateBatchJob(rt *core.APIRuntime) gin.HandlerFunc {
 	return func(c *gin.Context) {

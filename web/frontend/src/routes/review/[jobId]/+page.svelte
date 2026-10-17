@@ -167,6 +167,17 @@
 					<Button variant="outline" size="sm" onclick={s.retryLoad}>{m.review_retry_load()}</Button>
 				</div>
 			{/if}
+			<OrganizeStatusCard
+				organizeStatus={s.organizeStatus}
+				organizeProgress={s.organizeProgress}
+				fileStatuses={s.displayedFileStatuses}
+				expectedOrganizeFilePaths={s.expectedOrganizeFilePaths}
+				isUpdateMode={s.isUpdateMode}
+				retryDisabled={s.creditWritesBlocked || s.isSavingEdits || s.organizing}
+				retryAvailable={s.canRetryFailed}
+				onRetryFailed={() => s.retryFailed()}
+				onContinue={() => goto('/browse')}
+			/>
 			<div class="border-b border-border">
 				<nav class="flex gap-1" aria-label={m.review_tabs_aria()}>
 					<button
@@ -231,7 +242,7 @@
 						movieResultsLength={s.movieResults.length}
 						destinationPath={s.destinationPath}
 						operationMode={s.getEffectiveOperationMode()}
-						applyInvalid={s.applyInvalid}
+						applyInvalid={s.applyInvalid || s.creditWritesBlocked || s.isSavingEdits}
 						bind:viewMode={s.viewMode}
 						bind:forceOverwrite={s.forceOverwrite}
 						bind:preserveNfo={s.preserveNfo}
@@ -264,15 +275,6 @@
 						savingEdits={s.isSavingEdits}
 					/>
 
-					<OrganizeStatusCard
-						organizeStatus={s.organizeStatus}
-						organizeProgress={s.organizeProgress}
-						fileStatuses={s.fileStatuses}
-						expectedOrganizeFilePaths={s.expectedOrganizeFilePaths}
-						isUpdateMode={s.isUpdateMode}
-						onRetryFailed={() => s.retryFailed()}
-						onContinue={() => goto('/browse')}
-					/>
 
 					{#if s.viewMode === 'grid-poster' || s.viewMode === 'grid-cover'}
 						<div class="grid {s.viewMode === 'grid-cover' ? 'grid-cols-[repeat(auto-fill,minmax(min(22rem,100%),1fr))]' : 'grid-cols-[repeat(auto-fill,minmax(min(11rem,100%),1fr))]'} {s.viewMode === 'grid-cover' ? 'gap-2' : 'gap-4'}">
@@ -305,7 +307,7 @@
 							{/each}
 						</div>
 					{:else}
-						{#key s.currentResult.file_path}
+						{#key `${$page.params.jobId}:${s.currentResult.file_path}`}
 							<div class="grid grid-cols-1 gap-4 lg:grid-cols-[clamp(20rem,24vw,22.5rem)_minmax(0,1fr)] lg:gap-6" in:fade|local={{ duration: 180 }}>
 							<div class="lg:col-start-2 lg:row-start-1 sticky top-16 z-30 bg-background lg:static lg:z-auto lg:bg-transparent">
 							<MovieNavigationCard
@@ -362,7 +364,8 @@
 							{#if s.currentMovie?.code}
 								<CollisionPanel
 									movieContentId={s.currentMovie.code}
-									onResolved={(_, movieContentId) => s.refreshAfterCollision(movieContentId)}
+									onMutationStart={s.beginCreditMutation}
+									disabled={s.organizing || s.isSavingEdits}
 								/>
 							{/if}
 
@@ -370,7 +373,7 @@
 								<ActressEditor
 									movie={s.currentMovie!}
 									onUpdate={s.updateCurrentMovie}
-									onCreditOverridePersisted={s.refreshAfterCollision}
+									onCreditMutationStart={s.beginCreditMutation}
 								onPersistEdits={s.saveAllEdits}
 								savingEdits={s.isSavingEdits}
 								organizing={s.organizing}
@@ -402,7 +405,7 @@
 									organizing={s.organizing}
 									destinationPath={s.destinationPath}
 									operationMode={s.getEffectiveOperationMode()}
-									applyInvalid={s.applyInvalid}
+									applyInvalid={s.applyInvalid || s.creditWritesBlocked || s.isSavingEdits}
 									movieResultsLength={s.movieResults.length}
 									onCancel={() => goto('/browse')}
 									onOrganizeAll={() => s.organizeAll()}

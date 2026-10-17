@@ -152,20 +152,56 @@ func (ru *resultUpdater) AtomicUpdateFileResult(filePath string, updateFn func(*
 // publishes NEITHER half. updateFn MUST NOT call methods on the same Store —
 // it executes under the write lock and re-entering will deadlock.
 func (ru *resultUpdater) AtomicUpdateFileResultWithProvenance(filePath string, updateFn func(*MovieResult, *ProvenanceData) (*MovieResult, *ProvenanceData, error)) error {
-	ru.mu.Lock()
-	defer ru.mu.Unlock()
-	current, exists := ru.Results[filePath]
-	if !exists || current == nil {
-		return fmt.Errorf("file result not found: %s", filePath)
-	}
-	var provCopy *ProvenanceData
-	if p := ru.Provenance[filePath]; p != nil {
-		provCopy = p.Clone()
-	}
-	curArg := current.Clone()
-	updated, newProv, err := updateFn(curArg, provCopy)
+	return ru.AtomicUpdateFileResultWithProvenanceAfter(filePath, func(prepare func() error) error {
+		return prepare()
+	}, updateFn)
+}
+
+// AtomicUpdateFileResultWithProvenanceAfter stages the update inside transaction
+// and publishes only after transaction succeeds. transaction must call prepare
+// synchronously, at most once. No call means no publication (a skipped fence).
+// The store lock is acquired by prepare and retained through the transaction's
+// outcome, preserving DB -> store ordering without exposing provisional state.
+// updateFn must not call the store. After prepare, transaction must not access
+// the store either; both callbacks must return before publication.
+func (ru *resultUpdater) AtomicUpdateFileResultWithProvenanceAfter(filePath string, transaction func(prepare func() error) error, updateFn func(*MovieResult, *ProvenanceData) (*MovieResult, *ProvenanceData, error)) error {
+	var current, curArg, updated *MovieResult
+	var provCopy, newProv *ProvenanceData
+	var prepareErr error
+	called, locked := false, false
+	defer func() {
+		if locked {
+			ru.mu.Unlock()
+		}
+	}()
+	err := transaction(func() error {
+		if called {
+			prepareErr = fmt.Errorf("file result update prepared more than once: %s", filePath)
+			return prepareErr
+		}
+		called = true
+		ru.mu.Lock()
+		locked = true
+		current = ru.Results[filePath]
+		if current == nil {
+			prepareErr = fmt.Errorf("file result not found: %s", filePath)
+			return prepareErr
+		}
+		if p := ru.Provenance[filePath]; p != nil {
+			provCopy = p.Clone()
+		}
+		curArg = current.Clone()
+		updated, newProv, prepareErr = updateFn(curArg, provCopy)
+		return prepareErr
+	})
 	if err != nil {
 		return err
+	}
+	if prepareErr != nil {
+		return prepareErr
+	}
+	if !called {
+		return nil
 	}
 	// P3 R13-1: a callback returning its inputs UNMUTATED declined the
 	// write (identity-mismatch skips on concurrent rekey return the captured

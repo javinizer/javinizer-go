@@ -61,7 +61,7 @@ func (c *jobController) StartScrape(ctx context.Context, files []string, cfg Scr
 		return ErrJobGone // gone check first (admit-before-state contract)
 	}
 	ctx, cancel := context.WithCancel(ctx)
-	pd, err := c.markStarted(models.JobStatusPending, JobPhaseScrape, cancel)
+	pd, _, err := c.markStarted(models.JobStatusPending, JobPhaseScrape, cancel)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			cancel()
@@ -164,19 +164,9 @@ func (c *jobController) StartApply(ctx context.Context, cfg ApplyPhaseConfig) er
 		return ErrJobGone // gone check first (documented admit-before-state order)
 	}
 	ctx, cancel := context.WithCancel(ctx)
-	c.job.lifecycle.mu.RLock()
-	previousApplyGeneration := c.job.lifecycle.applyGeneration
-	c.job.lifecycle.mu.RUnlock()
-	rollbackApplyGeneration := func() {
-		c.job.lifecycle.mu.Lock()
-		if c.job.lifecycle.applyGeneration == previousApplyGeneration+1 {
-			c.job.lifecycle.applyGeneration = previousApplyGeneration
-		}
-		c.job.lifecycle.mu.Unlock()
-	}
 	// codex P1-G: the admission winner installs the CancelFunc below — a
 	// queued start never supplants the running phase's cancel handle.
-	pd, err := c.markStarted(models.JobStatusCompleted, JobPhaseApply, cancel)
+	pd, applyGeneration, err := c.markStarted(models.JobStatusCompleted, JobPhaseApply, cancel, cfg.ExpectedApplyGeneration)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			cancel()
@@ -184,6 +174,15 @@ func (c *jobController) StartApply(ctx context.Context, cfg ApplyPhaseConfig) er
 		}
 		cancel()
 		return err // CAS loser: duplicate launch rejected up-front
+	}
+	// Roll back only this claim. A pre-claim snapshot can already be stale,
+	// and another lifecycle must never inherit this failed launch's rollback.
+	rollbackApplyGeneration := func() {
+		c.job.lifecycle.mu.Lock()
+		if c.job.lifecycle.phaseDone == pd && c.job.lifecycle.applyGeneration == applyGeneration {
+			c.job.lifecycle.applyGeneration = applyGeneration - 1
+		}
+		c.job.lifecycle.mu.Unlock()
 	}
 	entry, err := c.job.admission.BeginPhase(ctx)
 	if err != nil {
@@ -210,11 +209,6 @@ func (c *jobController) StartApply(ctx context.Context, cfg ApplyPhaseConfig) er
 		return err
 	}
 	release := entry.Downgrade()
-	if cfg.ApplyGenerationRef != nil {
-		lifecycleSnapshot := c.job.lifecycle.StatusSnapshot()
-		atomic.StoreUint64(cfg.ApplyGenerationRef, lifecycleSnapshot.ApplyGeneration)
-	}
-
 	// Commit apply-phase config values ONLY after markStarted succeeds, so a
 	// losing concurrent StartApply cannot clobber the winner's values. Both
 	// calls previously wrote cfg before racing on markStarted; the loser then
@@ -249,6 +243,12 @@ func (c *jobController) StartApply(ctx context.Context, cfg ApplyPhaseConfig) er
 			}
 			return fmt.Errorf("job %s: persist phase-entry marker: %w", c.job.ID.String(), err)
 		}
+	}
+
+	// Publish this request's exact claim only after admission persistence has
+	// succeeded, before any callbacks run. Failed/canceled starts have no proof.
+	if cfg.ApplyGenerationRef != nil {
+		atomic.StoreUint64(cfg.ApplyGenerationRef, applyGeneration)
 	}
 
 	go func() {
@@ -340,8 +340,9 @@ func (c *jobController) Wait() error {
 }
 
 // markStarted transitions the job from expectedFrom to running state and creates
-// fresh Done/phaseDone channels, returning the phaseDone channel the phase
-// goroutine must close when it fully returns. It performs a compare-and-swap:
+// fresh Done/phaseDone channels, returning the phaseDone channel and the apply
+// generation captured under the same lock. The phase goroutine must close the
+// channel when it fully returns. It performs a compare-and-swap:
 // if the lifecycle status is not expectedFrom when the lock is acquired, it
 // returns an error without modifying state.
 // This prevents the TOCTOU race where an API handler checks status == Completed but
@@ -350,16 +351,23 @@ func (c *jobController) Wait() error {
 // SAME critical section — a cancellation racing claim→bind previously marked
 // the job Cancelled while leaving this launch's ctx unbound, so BeginPhase
 // would start work after cancellation.
-func (c *jobController) markStarted(expectedFrom models.JobStatus, phase JobPhase, cancelFunc context.CancelFunc) (chan struct{}, error) {
+func (c *jobController) markStarted(expectedFrom models.JobStatus, phase JobPhase, cancelFunc context.CancelFunc, expectedApplyGeneration ...*uint64) (chan struct{}, uint64, error) {
 	c.job.lifecycle.mu.Lock()
+	// Compare under the same lock as the winning launch claim. A handler's
+	// earlier snapshot cannot fence a competing apply that finishes meanwhile.
+	if len(expectedApplyGeneration) > 0 && expectedApplyGeneration[0] != nil && *expectedApplyGeneration[0] != c.job.lifecycle.applyGeneration {
+		actual := c.job.lifecycle.applyGeneration
+		c.job.lifecycle.mu.Unlock()
+		return nil, 0, fmt.Errorf("%w: expected %d but got %d", ErrApplyGenerationMismatch, *expectedApplyGeneration[0], actual)
+	}
 	if c.job.lifecycle.Status != expectedFrom {
 		actual := c.job.lifecycle.Status
 		c.job.lifecycle.mu.Unlock()
-		return nil, fmt.Errorf("job %s: cannot start — expected status %s but got %s", c.job.ID.String(), expectedFrom, actual)
+		return nil, 0, fmt.Errorf("job %s: cannot start — expected status %s but got %s", c.job.ID.String(), expectedFrom, actual)
 	}
 	if c.job.lifecycle.cancelled {
 		c.job.lifecycle.mu.Unlock()
-		return nil, context.Canceled // a cancel landed before the claim
+		return nil, 0, context.Canceled // a cancel landed before the claim
 	}
 	c.job.lifecycle.CancelFunc = cancelFunc
 	c.job.lifecycle.Status = models.JobStatusRunning
@@ -372,13 +380,14 @@ func (c *jobController) markStarted(expectedFrom models.JobStatus, phase JobPhas
 	c.job.lifecycle.done = make(chan struct{})
 	c.job.lifecycle.phaseDone = make(chan struct{})
 	pd := c.job.lifecycle.phaseDone
+	applyGeneration := c.job.lifecycle.applyGeneration
 	c.job.lifecycle.mu.Unlock()
 
 	c.job.mu.Lock()
 	c.job.StartedAt = time.Now()
 	c.job.mu.Unlock()
 
-	return pd, nil
+	return pd, applyGeneration, nil
 }
 
 // setDepsFromConfig applies JobConfig fields to the job's deps.

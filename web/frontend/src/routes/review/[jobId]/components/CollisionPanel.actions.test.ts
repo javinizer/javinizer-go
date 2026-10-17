@@ -168,3 +168,82 @@ describe('CollisionPanel server-derived actions', () => {
 		expect(listCollisions).toHaveBeenCalledTimes(1);
 	});
 });
+
+it.each(['success', 'stale', 'failure'])(
+	'settles the originating mutation after a %s resolution', async (outcome) => {
+		const { ApiError } = await import('$lib/api/clients/common');
+		const error = new ApiError('Resolution failed', undefined, null, outcome === 'stale' ? 409 : 500);
+		if (outcome === 'success') resolveCollision.mockResolvedValue({ resolved: true, remaining_open: 0 });
+		else resolveCollision.mockRejectedValue(error);
+		listCollisions.mockResolvedValue({ collisions: [collision({})] });
+		const finish = vi.fn().mockResolvedValue(undefined);
+		const onMutationStart = vi.fn(() => ({ isCurrent: () => true, finish }));
+		const onResolved = vi.fn();
+		const view = render(CollisionPanel, { movieContentId: 'movie-1', onMutationStart, onResolved }, {
+			wrapper: QueryClientWrapper, wrapperProps: { client: new QueryClient({ defaultOptions: { queries: { retry: false } } }) },
+		});
+		await fireEvent.click(await view.findByRole('button', { name: /Adopt as truth/ }));
+		await waitFor(() => expect(finish).toHaveBeenCalledOnce());
+		expect(onMutationStart).toHaveBeenCalledWith('collision:1', 'movie-1');
+		expect(finish).toHaveBeenCalledWith(outcome === 'failure' ? error : outcome === 'stale' ? undefined : null);
+		expect(onResolved).not.toHaveBeenCalled();
+	},
+);
+it.each(['success', 'failure'])(
+	'ignores a late %s from a disposed collision panel before any refetch', async (outcome) => {
+		let complete!: (value: any) => void;
+		resolveCollision.mockImplementation(() => new Promise((resolve, reject) => { complete = outcome === 'success' ? resolve : reject; }));
+		listCollisions.mockResolvedValue({ collisions: [collision({})] });
+		const finish = vi.fn().mockResolvedValue(undefined);
+		const onMutationStart = () => ({ isCurrent: () => false, finish });
+		const onResolved = vi.fn();
+		const view = render(CollisionPanel, { movieContentId: 'movie-1', onMutationStart, onResolved }, {
+			wrapper: QueryClientWrapper, wrapperProps: { client: new QueryClient({ defaultOptions: { queries: { retry: false } } }) },
+		});
+		await fireEvent.click(await view.findByRole('button', { name: /Adopt as truth/ }));
+		await waitFor(() => expect(resolveCollision).toHaveBeenCalledOnce());
+		view.unmount();
+		complete(outcome === 'success' ? { resolved: true, remaining_open: 0 } : new Error('Old failure'));
+		await waitFor(() => expect(finish).toHaveBeenCalledOnce());
+		expect(listCollisions).toHaveBeenCalledOnce();
+		expect(onResolved).not.toHaveBeenCalled();
+	},
+);
+it('honors a denied mutation start for direct and relink actions', async () => {
+	listCollisions.mockResolvedValue({ collisions: [collision({})] });
+	searchActresses.mockResolvedValue([{ id: 8, first_name: 'Verified', last_name: 'Target', verified: true }]);
+	const onMutationStart = vi.fn(() => null);
+	const view = render(CollisionPanel, { movieContentId: 'movie-1', onMutationStart }, {
+		wrapper: QueryClientWrapper, wrapperProps: { client: new QueryClient({ defaultOptions: { queries: { retry: false } } }) },
+	});
+	await fireEvent.click(await view.findByRole('button', { name: /Adopt as truth/ }));
+	await fireEvent.click(view.getByRole('button', { name: 'Relink' }));
+	await fireEvent.click(await view.findByRole('button', { name: /Target Verified.*#8/ }));
+	await fireEvent.click(view.getByRole('button', { name: 'Confirm relink' }));
+	expect(onMutationStart).toHaveBeenCalledTimes(2);
+	expect(resolveCollision).not.toHaveBeenCalled();
+	await view.rerender({ disabled: true });
+	expect((view.getByRole('button', { name: 'Confirm relink' }) as HTMLButtonElement).disabled).toBe(true);
+});
+
+
+it('guards queued direct and relink clicks even before disabled DOM state catches up', async () => {
+	listCollisions.mockResolvedValue({ collisions: [collision({})] });
+	searchActresses.mockResolvedValue([{ id: 8, first_name: 'Verified', last_name: 'Target', verified: true }]);
+	const onMutationStart = vi.fn(() => null);
+	const view = render(CollisionPanel, { movieContentId: 'movie-1', onMutationStart }, {
+		wrapper: QueryClientWrapper, wrapperProps: { client: new QueryClient({ defaultOptions: { queries: { retry: false } } }) },
+	});
+	await fireEvent.click(await view.findByRole('button', { name: 'Relink' }));
+	await fireEvent.click(await view.findByRole('button', { name: /Target Verified.*#8/ }));
+	await view.rerender({ disabled: true });
+	for (const name of [/Adopt as truth/, 'Confirm relink']) {
+		const button = view.getByRole('button', { name }) as HTMLButtonElement;
+		// Model a queued event against stale DOM: the handler must enforce the
+		// current parent gate independently of the button's disabled attribute.
+		button.disabled = false;
+		await fireEvent.click(button);
+	}
+	expect(onMutationStart).not.toHaveBeenCalled();
+	expect(resolveCollision).not.toHaveBeenCalled();
+});

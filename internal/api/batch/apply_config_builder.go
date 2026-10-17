@@ -96,6 +96,7 @@ func resolveOrganizeApplyConfig(
 	applyOpts.ForceNFO = planAware && !skipNFO
 	applyOpts.Download = !skipDownload
 	applyOpts.RetryFilePaths = append([]string(nil), req.RetryFilePaths...)
+	applyOpts.ExpectedApplyGeneration = req.ExpectedApplyGeneration
 	applyOpts.OperationModeOverride = resolved.OperationMode
 	sink := newOrganizeBroadcastSink(snap.RT())
 	applyGenerationRef := new(uint64)
@@ -206,6 +207,7 @@ func resolveUpdateApplyConfig(
 		applyOpts.OverwriteExistingMedia = overwriteExistingMedia
 	}
 	applyOpts.RetryFilePaths = append([]string(nil), req.RetryFilePaths...)
+	applyOpts.ExpectedApplyGeneration = req.ExpectedApplyGeneration
 	sink := newOrganizeBroadcastSink(snap.RT())
 	applyGenerationRef := new(uint64)
 	applyOpts.ApplyGenerationRef = applyGenerationRef
