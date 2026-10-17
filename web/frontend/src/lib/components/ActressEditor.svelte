@@ -60,6 +60,9 @@
 	// Original thumbnail of the row being edited, used to decide whether the user
 	// actually changed the field (explicit intent travels with the save).
 	let originalThumbURL = $state('');
+	// Only the existing row opened for editing can retain legacy name shapes.
+	// Keep this separate from the mutable draft and catalog search selection.
+	let originalActress: Actress | null = null;
 
 	// Whether the thumbnail preview failed to load for the current URL. Reset
 	// whenever the URL changes so a corrected URL re-fetches instead of staying
@@ -281,6 +284,7 @@
 	}
 
 	function openAddActress() {
+		originalActress = null;
 		editingIndex = null;
 		editingActress = {
 			first_name: '',
@@ -296,6 +300,7 @@
 
 	function openEditActress(index: number) {
 		editingIndex = index;
+		originalActress = { ...actresses[index] };
 		editingActress = { ...actresses[index] };
 		originalThumbURL = actresses[index].thumb_url ?? '';
 		aliasGroup = null;
@@ -304,7 +309,13 @@
 	}
 
 	function saveActress() {
-		if (!editingActress.first_name?.trim() && !editingActress.japanese_name?.trim()) {
+		const unchangedExistingName = originalActress !== null &&
+			typeof editingActress.id === 'number' && editingActress.id > 0 &&
+			editingActress.id === originalActress.id &&
+			editingActress.first_name === originalActress.first_name &&
+			editingActress.last_name === originalActress.last_name &&
+			editingActress.japanese_name === originalActress.japanese_name;
+		if (!editingActress.first_name?.trim() && !editingActress.japanese_name?.trim() && !unchangedExistingName) {
 			void alertDialog(m.editor_validation_title(), m.editor_validation_body());
 			return;
 		}
