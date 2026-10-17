@@ -107,12 +107,12 @@ func TestFindDetailURL_Fallbacks(t *testing.T) {
 			settings:    models.ScraperSettings{Enabled: true},
 		}
 
-		got, err := scraper.findDetailURLCtx(context.Background(), "XYZ-999")
+		got, _, err := scraper.findDetailSelectionCtx(context.Background(), "XYZ-999")
 		if err != nil {
-			t.Fatalf("findDetailURLCtx() error = %v", err)
+			t.Fatalf("findDetailSelectionCtx() error = %v", err)
 		}
 		if got != "https://javdb.test/v/fallback" {
-			t.Fatalf("findDetailURLCtx() = %q", got)
+			t.Fatalf("findDetailSelectionCtx() = %q", got)
 		}
 	})
 
@@ -132,9 +132,9 @@ func TestFindDetailURL_Fallbacks(t *testing.T) {
 			settings:    models.ScraperSettings{Enabled: true},
 		}
 
-		_, err := scraper.findDetailURLCtx(context.Background(), "XYZ-999")
+		_, _, err := scraper.findDetailSelectionCtx(context.Background(), "XYZ-999")
 		if err == nil {
-			t.Fatal("expected findDetailURLCtx to fail")
+			t.Fatal("expected findDetailSelectionCtx to fail")
 		}
 		scraperErr, ok := models.AsScraperError(err)
 		if !ok || scraperErr.Kind != models.ScraperErrorKindNotFound {

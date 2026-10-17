@@ -42,6 +42,11 @@ type artifactPlanExecutor interface {
 	PlanSubtitleMoves(*organizer.OrganizePlan) []models.SubtitleMove
 }
 
+// artifactFilenamePolicy exposes the effective per-command filename policy.
+type artifactFilenamePolicy interface {
+	PreservesOriginalFilenames(forceRename bool) bool
+}
+
 // artifactSubtitleSelector exposes the organizer's configured source policy
 // independently of destination planning and its probe/admission freeze.
 // Organizers without this seam do not authorize subtitle staging.
@@ -62,6 +67,8 @@ type artifactSibling struct {
 }
 
 type artifactStage struct {
+	preserveSiblingNames bool
+
 	fs                 afero.Fs
 	fencer             database.ApplyArtifactPublicationFencer
 	root               string
@@ -193,6 +200,9 @@ func (o *applyOrchImpl) prepareArtifact(ctx context.Context, cmd ApplyCmd) (*art
 	}
 	writeArtifactStageManifest(o.fs, root)
 	stage := &artifactStage{fs: o.fs, fencer: artifactFencer(cmd), root: root, finalRoot: finalRoot, sourcePath: cmd.Match.Path, inPlace: inPlace, original: cmd, duplicatePlan: duplicatePlan}
+	if policy, ok := o.organizer.(artifactFilenamePolicy); ok {
+		stage.preserveSiblingNames = policy.PreservesOriginalFilenames(cmd.Organize.ForceRenameFile)
+	}
 	stagedCmd := cmd
 	if duplicatePlan != nil {
 		stagedCmd.Organize.DuplicateTracker = nil
@@ -234,6 +244,16 @@ func (o *applyOrchImpl) prepareArtifact(ctx context.Context, cmd ApplyCmd) (*art
 			stagedDir = root
 		}
 		stage.stagedSource = filepath.Join(stagedDir, base)
+
+		entries, readErr := afero.ReadDir(o.fs, filepath.Dir(sourcePath))
+		if readErr != nil {
+			stage.cleanup()
+			return nil, cmd, fmt.Errorf("artifact staging source directory: %w", readErr)
+		}
+		if err := validateArtifactVideoSiblingNames(base, entries, stage.preserveSiblingNames); err != nil {
+			stage.cleanup()
+			return nil, cmd, err
+		}
 		if inPlace && !cmd.Organize.MoveFiles {
 			if err := copyArtifactFile(o.fs, sourcePath, stage.stagedSource, sourceInfo.Mode().Perm()); err != nil {
 				stage.cleanup()
@@ -245,11 +265,6 @@ func (o *applyOrchImpl) prepareArtifact(ctx context.Context, cmd ApplyCmd) (*art
 			// a rename again instead of a full copy through .javinizer-apply-*.
 			stage.videoDeferred = true
 		}
-		entries, readErr := afero.ReadDir(o.fs, filepath.Dir(sourcePath))
-		if readErr != nil {
-			stage.cleanup()
-			return nil, cmd, fmt.Errorf("artifact staging source directory: %w", readErr)
-		}
 		selectedSubtitles := map[string]bool{}
 		if selector, ok := o.organizer.(artifactSubtitleSelector); ok {
 			for _, path := range selector.SubtitleSourcePaths(cmd.Match) {
@@ -258,7 +273,7 @@ func (o *applyOrchImpl) prepareArtifact(ctx context.Context, cmd ApplyCmd) (*art
 		}
 		for _, entry := range entries {
 			sibling := filepath.Join(filepath.Dir(sourcePath), entry.Name())
-			if entry.Name() == base || entry.IsDir() ||
+			if entry.Name() == base || !entry.Mode().IsRegular() ||
 				(!selectedSubtitles[filepath.Clean(sibling)] && !isStagedArtifactVideoSibling(base, entry.Name())) {
 				continue
 			}
@@ -273,7 +288,8 @@ func (o *applyOrchImpl) prepareArtifact(ctx context.Context, cmd ApplyCmd) (*art
 				continue
 			}
 			admitted := artifactSibling{sourcePath: sibling, identity: captureArtifactSourceIdentity(o.fs, sibling, siblingInfo), subtitle: selectedSubtitles[filepath.Clean(sibling)]}
-			if cmd.Organize.MoveFiles && isStagedArtifactVideoExtension(strings.ToLower(filepath.Ext(entry.Name()))) {
+			_, siblingExtension := artifactMatchName(entry.Name())
+			if cmd.Organize.MoveFiles && isStagedArtifactVideoExtension(strings.ToLower(siblingExtension)) {
 				// Defer multipart video siblings with the primary in MOVE flows
 				// (codex P2, PRRT_kwDORn9KaM6rLI28): the publication installs
 				// them straight off the real source by the verified move lane,
@@ -293,16 +309,71 @@ func (o *applyOrchImpl) prepareArtifact(ctx context.Context, cmd ApplyCmd) (*art
 			stage.siblings = append(stage.siblings, admitted)
 		}
 		stagedCmd.Match.Path = stage.stagedSource
-		stagedCmd.Match.Name = base
+		stagedCmd.Match.Name, stagedCmd.Match.Extension = artifactMatchName(base)
 	}
 	stagedCmd.DestPath = root
 	return stage, stagedCmd, nil
 }
 
+// artifactMatchName reconstructs the scanner's FileMatchInfo spelling contract
+// after a path changes: keep the current raw stem, fold only the extension.
+// Never copy the old Name: organizing within the stage may have renamed it.
+// This mirrors scanner.foldNameExtension and fileExtension; Path stays raw.
+func artifactMatchName(base string) (name, extension string) {
+	folded := foldArtifactASCII(base)
+	extension = filepath.Ext(folded)
+	if extension == "" || folded == base {
+		return base, extension
+	}
+	// Folding maps rune-to-rune, so the raw extension occupies the same
+	// number of runes even when its fullwidth spelling occupies more bytes.
+	runes := []rune(base)
+	return string(runes[:len(runes)-len([]rune(extension))]) + extension, extension
+}
+
+// foldArtifactASCII is for matching only; physical source paths stay raw.
+func foldArtifactASCII(name string) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r >= 0xFF01 && r <= 0xFF5E:
+			return r - 0xFEE0
+		case r == 0x3000:
+			return ' '
+		default:
+			return r
+		}
+	}, name)
+}
+
+// Reject ambiguous multipart destinations before staging any source bytes.
+// Width/case normalization is many-to-one, so distinct regular directory
+// entries must not compete for one target. The staging loop skips the same
+// nonregular snapshot entries and re-proves regular sources without following links.
+func validateArtifactVideoSiblingNames(sourceName string, entries []os.FileInfo, preserveNames bool) error {
+	targets := make(map[string]string)
+	for _, entry := range entries {
+		if !entry.Mode().IsRegular() || !isStagedArtifactVideoSibling(sourceName, entry.Name()) {
+			continue
+		}
+		targetName := entry.Name()
+		if !preserveNames {
+			targetName = stagedArtifactSiblingName(sourceName, sourceName, targetName)
+		}
+		target := strings.ToLower(targetName)
+		if previous, exists := targets[target]; exists {
+			return fmt.Errorf("ambiguous multipart destination: %s and %s", previous, entry.Name())
+		}
+		targets[target] = entry.Name()
+	}
+	return nil
+}
+
 func isStagedArtifactVideoSibling(sourceName, siblingName string) bool {
-	sourceStem := strings.TrimSuffix(strings.ToLower(sourceName), strings.ToLower(filepath.Ext(sourceName)))
-	siblingExt := strings.ToLower(filepath.Ext(siblingName))
-	siblingStem := strings.TrimSuffix(strings.ToLower(siblingName), siblingExt)
+	sourceName, sourceExt := artifactMatchName(sourceName)
+	siblingName, siblingExt := artifactMatchName(siblingName)
+	sourceStem := strings.ToLower(foldArtifactASCII(strings.TrimSuffix(sourceName, sourceExt)))
+	siblingStem := strings.ToLower(foldArtifactASCII(strings.TrimSuffix(siblingName, siblingExt)))
+	siblingExt = strings.ToLower(siblingExt)
 	if !isStagedArtifactVideoExtension(siblingExt) {
 		return false
 	}
@@ -652,7 +723,7 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 		if s.videoDeferred || (!s.original.Organize.MoveFiles && s.original.Organize.LinkMode != organizer.LinkModeNone) {
 			match.Path = s.sourcePath
 		}
-		match.Name = filepath.Base(match.Path)
+		match.Name, match.Extension = artifactMatchName(filepath.Base(match.Path))
 		organizeCmd := organizer.OrganizeCmd{Match: match, Movie: s.original.Movie, DestDir: s.finalRoot, ForceUpdate: s.original.Organize.ForceUpdate, MoveFiles: s.original.Organize.MoveFiles, LinkMode: s.original.Organize.LinkMode, OperationMode: s.original.OperationMode, ForceRenameFile: s.original.Organize.ForceRenameFile}
 		if s.inPlace && !s.videoDeferred {
 			// The real final directory was resolved before staging. Keep this
@@ -1376,7 +1447,7 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 			if !sibling.deferred || sibling.subtitle {
 				continue
 			}
-			target := filepath.Join(filepath.Dir(finalResult.NewPath), stagedArtifactSiblingName(filepath.Base(s.sourcePath), filepath.Base(finalResult.NewPath), filepath.Base(sibling.sourcePath)))
+			target := filepath.Join(filepath.Dir(finalResult.NewPath), s.siblingTargetName(filepath.Base(s.sourcePath), filepath.Base(finalResult.NewPath), filepath.Base(sibling.sourcePath)))
 			// A deferred video sibling (codex P2, PRRT_kwDORn9KaM6rLI28)
 			// installs by the verified move lane straight off its real
 			// source, mirroring the deferred primary: the admission identity
@@ -1593,7 +1664,7 @@ func (s *artifactStage) rehomeRemainingSiblings(stagedVideo string, excluded map
 			}
 			return fmt.Errorf("inspect staged sidecar %s: %w", sibling.stagedPath, err)
 		}
-		target := filepath.Join(targetDir, stagedArtifactSiblingName(filepath.Base(s.stagedSource), filepath.Base(stagedVideo), filepath.Base(sibling.stagedPath)))
+		target := filepath.Join(targetDir, s.siblingTargetName(filepath.Base(s.stagedSource), filepath.Base(stagedVideo), filepath.Base(sibling.stagedPath)))
 		if filepath.Clean(target) == filepath.Clean(sibling.stagedPath) {
 			continue
 		}
@@ -1620,19 +1691,34 @@ func (s *artifactStage) rehomeRemainingSiblings(stagedVideo string, excluded map
 	return nil
 }
 
+// siblingTargetName keeps raw native basenames when file renaming is disabled.
+func (s *artifactStage) siblingTargetName(sourceName, targetName, siblingName string) string {
+	if s.preserveSiblingNames {
+		return siblingName
+	}
+	return stagedArtifactSiblingName(sourceName, targetName, siblingName)
+}
+
 func stagedArtifactSiblingName(sourceName, targetName, siblingName string) string {
-	sourceExt := filepath.Ext(sourceName)
+	sourceName, sourceExt := artifactMatchName(sourceName)
+	siblingNormalized, siblingExt := artifactMatchName(siblingName)
+	targetName, targetExt := artifactMatchName(targetName)
 	sourceStem := strings.TrimSuffix(sourceName, sourceExt)
-	siblingExt := filepath.Ext(siblingName)
-	siblingStem := strings.TrimSuffix(siblingName, siblingExt)
-	targetStem := strings.TrimSuffix(targetName, filepath.Ext(targetName))
-	if strings.EqualFold(siblingStem, sourceStem) {
+	siblingStem := strings.TrimSuffix(siblingNormalized, siblingExt)
+	targetStem := strings.TrimSuffix(targetName, targetExt)
+	foldedSource := foldArtifactASCII(sourceStem)
+	foldedSibling := foldArtifactASCII(siblingStem)
+	if strings.EqualFold(foldedSibling, foldedSource) {
 		return targetStem + siblingExt
 	}
-	if len(siblingStem) > len(sourceStem) && strings.EqualFold(siblingStem[:len(sourceStem)], sourceStem) {
-		separator := siblingStem[len(sourceStem)]
+	// Compare normalized identities, but split the original suffix by rune
+	// count: fullwidth and ASCII prefixes have different byte lengths.
+	sourceRunes := len([]rune(sourceStem))
+	siblingRunes := []rune(siblingStem)
+	if len(siblingRunes) > sourceRunes && strings.EqualFold(foldArtifactASCII(string(siblingRunes[:sourceRunes])), foldedSource) {
+		separator := []rune(foldedSibling)[sourceRunes]
 		if separator == '.' || separator == '-' || separator == '_' {
-			return targetStem + siblingStem[len(sourceStem):] + siblingExt
+			return targetStem + string(siblingRunes[sourceRunes:]) + siblingExt
 		}
 	}
 	return siblingName

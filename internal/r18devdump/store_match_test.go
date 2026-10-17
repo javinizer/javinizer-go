@@ -66,6 +66,77 @@ func TestMatchByDisplayID_CandidateExpansionOrderedMultiMatch(t *testing.T) {
 	assert.Equal(t, "", matches[0].DVDID)
 }
 
+func TestT28PinnedDVDNormCollisionSelectsMatchingRows(t *testing.T) {
+	fixture := "t28123h\tT-28123-HD\t\\N\t\\N\n" +
+		"9t28123h\tT28-123-HD\t\\N\t\\N"
+	store, err := Open(seedDumpFullCols(t, fixture))
+	require.NoError(t, err)
+	defer store.Close()
+
+	for _, tc := range []struct {
+		query, contentID, dvdID string
+	}{
+		{"T-28123-HD", "t28123h", "T-28123-HD"},
+		{"T28-123-HD", "9t28123h", "T28-123-HD"},
+	} {
+		t.Run(tc.query, func(t *testing.T) {
+			matches, err := store.MatchByDisplayID(context.Background(), tc.query)
+			require.NoError(t, err)
+			require.Len(t, matches, 1)
+			assert.Equal(t, tc.contentID, matches[0].ContentID)
+			assert.Equal(t, tc.dvdID, matches[0].DVDID)
+
+			contentID, err := store.LookupByDVDID(context.Background(), tc.query)
+			require.NoError(t, err)
+			assert.Equal(t, tc.contentID, contentID)
+
+			movie, err := store.LookupMovie(context.Background(), tc.query)
+			require.NoError(t, err)
+			require.NotNil(t, movie)
+			assert.Equal(t, tc.contentID, movie.ContentID)
+			assert.Equal(t, tc.dvdID, movie.DVDID)
+		})
+	}
+}
+
+// The finding's end-to-end scenario: a separator-pinned remaster query whose
+// dump row exists only under a catalog-prefixed content id (null dvd_id) must
+// resolve through candidate expansion. Pre-fix, T-28123-Z-HD collapsed to the
+// t28-series candidate set and the 55t28123zh row was never probed.
+func TestMatchByDisplayID_SeparatedEZSuffixResolvesCatalogPrefixedTSeriesRow(t *testing.T) {
+	store, err := Open(seedDump(t, "55t28123zh\t\\N"))
+	require.NoError(t, err)
+	defer store.Close()
+
+	matches, err := store.MatchByDisplayID(context.Background(), "T-28123-Z-HD")
+	require.NoError(t, err)
+	require.Len(t, matches, 1)
+	assert.Equal(t, "55t28123zh", matches[0].ContentID)
+}
+
+// Both releases normalize to the same dvd_id_norm key, so candidate priority
+// must pick the row the display spelling pinned: the T-28123-Z-HD query takes
+// the T-series row, not the T28-123-Z-HD release sharing its compacted shape.
+func TestMatchByDisplayID_SeparatedEZSuffixCollisionSelectsPinnedRow(t *testing.T) {
+	fixture := "55t28123zh\tT-28123-Z-HD\t\\N\t\\N\n" +
+		"9t28123zh\tT28-123-Z-HD\t\\N\t\\N"
+	store, err := Open(seedDumpFullCols(t, fixture))
+	require.NoError(t, err)
+	defer store.Close()
+
+	matches, err := store.MatchByDisplayID(context.Background(), "T-28123-Z-HD")
+	require.NoError(t, err)
+	require.Len(t, matches, 1)
+	assert.Equal(t, "55t28123zh", matches[0].ContentID)
+	assert.Equal(t, "T-28123-Z-HD", matches[0].DVDID)
+
+	matches, err = store.MatchByDisplayID(context.Background(), "T28-123-Z-HD")
+	require.NoError(t, err)
+	require.Len(t, matches, 1)
+	assert.Equal(t, "9t28123zh", matches[0].ContentID)
+	assert.Equal(t, "T28-123-Z-HD", matches[0].DVDID)
+}
+
 func TestMatchByDisplayID_DirectContentIDInputExpandsToo(t *testing.T) {
 	store, err := Open(seedDumpFullCols(t, matchFixture))
 	require.NoError(t, err)
@@ -143,6 +214,14 @@ func (c *faultyConn) QueryContext(_ context.Context, query string, _ []driver.Na
 	if strings.Contains(query, "IN (") {
 		return &faultyRows{mode: c.mode}, nil
 	}
+	if strings.Contains(query, "dvd_id_norm = ?") {
+		switch c.mode {
+		case "normBadcols":
+			return &faultyRows{mode: "badcols"}, nil
+		case "normFailingErr":
+			return &faultyRows{mode: "failingErr"}, nil
+		}
+	}
 	return &faultyRows{mode: "empty"}, nil
 }
 
@@ -159,6 +238,21 @@ func newFaultyStore(t *testing.T, mode string) *Store {
 	return &Store{db: db, path: ":faulty:"}
 }
 
+func TestSelectDVDRow_ScanError(t *testing.T) {
+	s := newFaultyStore(t, "normBadcols")
+	defer func() { _ = s.Close() }()
+	_, err := s.LookupByDVDID(context.Background(), "IPX-535")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "scan")
+}
+
+func TestSelectDVDRow_RowsErr(t *testing.T) {
+	s := newFaultyStore(t, "normFailingErr")
+	defer func() { _ = s.Close() }()
+	_, err := s.LookupByDVDID(context.Background(), "IPX-535")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "simulated iteration failure")
+}
 func TestMatchByDisplayID_CandidateScanError(t *testing.T) {
 	s := newFaultyStore(t, "badcols")
 	defer func() { _ = s.Close() }()

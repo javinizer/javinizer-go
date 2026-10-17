@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -471,8 +472,8 @@ func TestScrapePhase_Run_BackfillsNameAndExtensionOnMapMiss(t *testing.T) {
 	// while NFO/poster/fanart rows looked fine (they derive from movie.ID).
 	//
 	// Backfills Name + Extension alongside Path, mirroring scanner.go's
-	// FileMatchInfo construction (Name: filepath.Base(path);
-	// Extension: filepath.Ext(path)).
+	// FileMatchInfo construction (Name: foldNameExtension(base);
+	// Extension: fileExtension(path)) — see the fullwidth variant below.
 	wf := &stubWorkflow{scrapeResult: makeScrapeResult("ABF-346")}
 	inputs := makeInputs(wf)
 	// inputs.FileMatchInfo is intentionally nil — simulates the map-miss path.
@@ -514,6 +515,38 @@ func TestScrapePhase_Run_BackfillsNameAndExtensionOnMapMiss_FailedPath(t *testin
 	assert.Equal(t, models.JobStatusFailed, r.Status)
 	assert.Equal(t, "unmatched-file.mkv", r.FileMatchInfo.Name)
 	assert.Equal(t, ".mkv", r.FileMatchInfo.Extension)
+}
+
+func TestScrapePhase_Run_BackfillsNameAndExtensionOnMapMiss_FullwidthExtension(t *testing.T) {
+	// Regression (round 30 folded contract): the scanner admits fullwidth-
+	// extension files by folding the extension spelling to ASCII — Name
+	// carries the folded extension, Path stays raw. The fallback here
+	// previously used raw filepath.Ext, which is ASCII-only and returns an
+	// empty extension for a fullwidth spelling: a scanner-map miss on
+	// RCT-156-HD．ｍｋｖ reconstructed a FileMatchInfo with no Extension, so
+	// rename-enabled previews and organization produced a target without
+	// the .mkv suffix.
+	wf := &stubWorkflow{scrapeResult: makeScrapeResult("RCT-156")}
+	inputs := makeInputs(wf)
+	// inputs.FileMatchInfo is intentionally nil — simulates the map-miss path.
+	updater := inputs.Updater.(*stubUpdater)
+
+	filePath := "vids/RCT-156-HD．ｍｋｖ"
+	NewScrapePhase().Run(context.Background(), inputs, []string{filePath}, ScrapePhaseConfig{})
+
+	r := updater.getResult(filePath)
+	require.NotNil(t, r)
+	assert.Equal(t, models.JobStatusCompleted, r.Status,
+		"happy-path scrape must still complete successfully on a map-miss")
+	assert.Equal(t, filePath, r.FileMatchInfo.Path,
+		"fmi.Path keeps the raw on-disk spelling on map-miss (source of truth for file I/O)")
+	assert.Equal(t, "RCT-156-HD.mkv", r.FileMatchInfo.Name,
+		"fmi.Name must carry the folded extension on map-miss — the stem keeps its raw spelling")
+	assert.Equal(t, ".mkv", r.FileMatchInfo.Extension,
+		"fmi.Extension must fold the fullwidth spelling to .mkv — without it rename-enabled "+
+			"previews and organization produce a target without the extension")
+	assert.True(t, strings.HasSuffix(r.FileMatchInfo.Name, r.FileMatchInfo.Extension),
+		"the folded contract requires Extension to be a literal suffix of Name")
 }
 
 func TestScrapePhase_Run_NoResultPropagatesVerboseErrorMessage(t *testing.T) {

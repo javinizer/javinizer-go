@@ -29,7 +29,7 @@ func atoiSafe(s string) int {
 // placeholder filtering) is skipped — the dump's stored URLs are used directly.
 func (s *scraper) resultFromDump(d *models.DumpMovie) *models.ScraperResult {
 	movieID := d.DVDID
-	if movieID == "" && d.ContentID != "" {
+	if movieID == "" && d.ContentID != "" && !cidCarriesRemasterMarker(d.ContentID) {
 		movieID = contentIDToID(d.ContentID)
 	}
 
@@ -319,10 +319,19 @@ func (s *scraper) searchFromDump(ctx context.Context, id string) (*models.Scrape
 		// prefix order never picks, and a gappy list ([c0, c2]) would skip the
 		// intermediate candidate the resolver tries over the wire first.
 		all := r18devdump.ContentIDCandidates(id)
+		markerQuery := false
+		if marker, _ := classifyRemaster(id); marker != "" {
+			all = r18devdump.ContentIDCandidatesWithMarker(id)
+			markerQuery = true
+		}
 		trusted := len(all) >= len(candidates)
 		if trusted {
 			for i, c := range candidates {
-				if c.ContentID != all[i] {
+				// A dump row may state the padded server cid where the
+				// canonical expansion spells the unpadded query form
+				// (1rct00156h vs 1rct156h); padding-equivalent rows name
+				// the same product, so marker queries compare by identity.
+				if c.ContentID != all[i] && (!markerQuery || !rawRemasterCIDEqual(c.ContentID, all[i])) {
 					trusted = false
 					break
 				}
@@ -334,6 +343,9 @@ func (s *scraper) searchFromDump(ctx context.Context, id string) (*models.Scrape
 		}
 		logging.Debugf("R18: dump candidates for %s -> %s (+%d more)", id, candidates[0].ContentID, len(candidates)-1)
 		return nil, candidates
+	}
+	if marker, _ := classifyRemaster(id); marker != "" && !isRawRemasterContentIDQuery(id) && movie.DVDID != "" && !displayIDsMatchByIdentity(movie.DVDID, id) {
+		return nil, nil
 	}
 	logging.Debugf("R18: dump lookup resolved %s -> full metadata (zero HTTP)", id)
 	return s.resultFromDump(movie), nil

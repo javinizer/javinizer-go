@@ -64,7 +64,7 @@ type stringFieldSpec struct {
 
 // stringFieldSpecs lists all simple string fields assigned by priority.
 var stringFieldSpecs = []stringFieldSpec{
-	{"id", "ID", func(r *models.ScraperResult) string { return r.ID }, func(m *models.Movie, v string) { m.ID = v }},
+	{"id", "ID", func(r *models.ScraperResult) string { return r.ID }, func(m *models.Movie, v string) { m.ID = foldRemasterDisplayID(v) }},
 	{"content_id", "ContentID", func(r *models.ScraperResult) string { return r.ContentID }, func(m *models.Movie, v string) { m.ContentID = v }},
 	{"original_title", "OriginalTitle", func(r *models.ScraperResult) string { return r.OriginalTitle }, func(m *models.Movie, v string) { m.OriginalTitle = v }},
 	{"description", "Description", func(r *models.ScraperResult) string { return r.Description }, func(m *models.Movie, v string) { m.Description = v }},

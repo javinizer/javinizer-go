@@ -59,6 +59,24 @@ func (m *mockScraper) ScrapeURL(_ context.Context, _ string) (*models.ScraperRes
 	return nil, nil
 }
 
+// Fullwidth ASCII spellings in manual queries fold to halfwidth so the
+// plain-ID path returns the ASCII spelling every scraper understands.
+func TestParseInput_FoldsFullwidthPlainID(t *testing.T) {
+	parsed, err := ParseInput("ＲＣＴ-156-HD", nil)
+	require.NoError(t, err)
+	require.NotNil(t, parsed)
+	assert.False(t, parsed.IsURL)
+	assert.Equal(t, "RCT-156-HD", parsed.ID)
+
+	parsed, err = ParseInput("ＲＣＴ－１５６－ＨＤ", nil)
+	require.NoError(t, err)
+	assert.Equal(t, "RCT-156-HD", parsed.ID)
+
+	parsed, err = ParseInput("IPX-535", nil)
+	require.NoError(t, err)
+	assert.Equal(t, "IPX-535", parsed.ID)
+}
+
 func TestParseInput(t *testing.T) {
 	tests := []struct {
 		name          string
