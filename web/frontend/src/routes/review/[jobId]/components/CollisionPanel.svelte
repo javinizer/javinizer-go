@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { tick } from 'svelte';
+	import { onDestroy, tick } from 'svelte';
+	import type { BeginCreditMutation, CreditMutation } from '$lib/utils/credit-mutation';
 	import { fade } from 'svelte/transition';
 	import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query';
 	import { TriangleAlert, Loader2, Search, Tag, Unlink, X } from 'lucide-svelte';
@@ -12,12 +13,18 @@
 
 	let {
 		movieContentId,
+		onMutationStart,
+		disabled = false,
 		onResolved = () => {}
 	}: {
 		movieContentId: string;
+		onMutationStart?: BeginCreditMutation;
+		disabled?: boolean;
 		onResolved?: (remaining: number, movieContentId: string) => void | Promise<void>;
 	} = $props();
 
+	let disposed = false;
+	onDestroy(() => { disposed = true; });
 	const queryClient = useQueryClient();
 
 	const collisionsQuery = createQuery(() => ({
@@ -35,12 +42,14 @@
 			resolution: CollisionResolution;
 			targetActressId?: number;
 			movieContentId: string;
+			operation?: CreditMutation;
 		}) =>
 			apiClient.resolveCollision(input.collision.id, {
 				resolution: input.resolution,
 				target_actress_id: input.targetActressId
 			}),
 		onSuccess: async (res, variables) => {
+			if (disposed || (variables.operation && !variables.operation.isCurrent())) return;
 			if (variables.resolution === 'reassign' && relinkCollision?.id === variables.collision.id) {
 				closeRelink();
 			}
@@ -49,11 +58,12 @@
 				exact: true,
 				type: 'active'
 			});
-			if (variables.movieContentId === movieContentId) {
+			if (!variables.operation && !disposed && variables.movieContentId === movieContentId) {
 				await onResolved(res.remaining_open, variables.movieContentId);
 			}
 		},
 		onError: async (error, variables) => {
+			if (disposed || (variables.operation && !variables.operation.isCurrent())) return;
 			if (!(error instanceof ApiError) || error.status !== 409) return;
 			const queryKey = ['collisions', variables.movieContentId] as const;
 			await queryClient.refetchQueries({ queryKey, exact: true, type: 'active' });
@@ -73,8 +83,12 @@
 					closeRelink();
 				}
 			}
-			if (variables.movieContentId !== movieContentId) return;
+			if (disposed || variables.operation || variables.movieContentId !== movieContentId) return;
 			await onResolved(refreshed?.collisions.length ?? 0, variables.movieContentId);
+		},
+		onSettled: async (_data, error, variables) => {
+			// A stale collision (409) still needs an authoritative review refresh.
+			await variables.operation?.finish(error instanceof ApiError && error.status === 409 ? undefined : error);
 		}
 	}));
 
@@ -157,12 +171,16 @@
 	}
 
 	function confirmRelink() {
+		if (disabled || resolveMutation.isPending) return;
 		const collision = relinkCollision;
 		const target = selectedTarget;
 		if (!collision || !target || relinkMovieContentId !== movieContentId) return;
 		if (target.verified !== true || target.id === collision.current_actress_id) return;
+		const operation = onMutationStart?.(`collision:${collision.id}`, relinkMovieContentId);
+		if (onMutationStart && !operation) return;
 		reconciledConflict = null;
 		resolveMutation.mutate({
+			operation: operation ?? undefined,
 			collision,
 			resolution: 'reassign',
 			targetActressId: target.id,
@@ -171,13 +189,15 @@
 	}
 
 	function resolve(collision: CreditCollision, resolution: CollisionResolution) {
-		if (resolveMutation.isPending) return;
+		if (disabled || resolveMutation.isPending) return;
 		if (resolution === 'reassign') {
 			void openRelink(collision);
 			return;
 		}
+		const operation = onMutationStart?.(`collision:${collision.id}`, movieContentId);
+		if (onMutationStart && !operation) return;
 		reconciledConflict = null;
-		resolveMutation.mutate({ collision, resolution, movieContentId });
+		resolveMutation.mutate({ collision, resolution, movieContentId, operation: operation ?? undefined });
 	}
 
 	$effect(() => {
@@ -249,7 +269,7 @@
 								<Button
 									variant="outline"
 									size="sm"
-									disabled={resolveMutation.isPending}
+									disabled={disabled || resolveMutation.isPending}
 									onclick={() => resolve(collision, 'keep_identity')}
 								>
 									{#if pendingCollisionId === collision.id}<Loader2 class="size-3.5 animate-spin" />{/if}
@@ -260,7 +280,7 @@
 								<Button
 									variant="outline"
 									size="sm"
-									disabled={resolveMutation.isPending}
+									disabled={disabled || resolveMutation.isPending}
 									onclick={() => resolve(collision, 'adopt_canonical')}
 								>
 									{#if pendingCollisionId === collision.id}<Loader2 class="size-3.5 animate-spin" />{/if}
@@ -271,7 +291,7 @@
 								<Button
 									variant="outline"
 									size="sm"
-									disabled={resolveMutation.isPending}
+									disabled={disabled || resolveMutation.isPending}
 									onclick={() => resolve(collision, 'adopt_alias')}
 								>
 									Alias
@@ -281,7 +301,7 @@
 								<Button
 									variant="outline"
 									size="sm"
-									disabled={resolveMutation.isPending}
+									disabled={disabled || resolveMutation.isPending}
 									onclick={() => resolve(collision, 'reassign')}
 								>
 									Relink
@@ -349,8 +369,8 @@
 									</ul>
 								{/if}
 								<div class="flex flex-wrap justify-end gap-2">
-									<Button variant="outline" size="sm" onclick={closeRelink} disabled={resolveMutation.isPending}>Cancel</Button>
-									<Button size="sm" onclick={confirmRelink} disabled={!selectedTarget || resolveMutation.isPending}>
+									<Button variant="outline" size="sm" onclick={closeRelink} disabled={disabled || resolveMutation.isPending}>Cancel</Button>
+									<Button size="sm" onclick={confirmRelink} disabled={disabled || !selectedTarget || resolveMutation.isPending}>
 										{#if resolveMutation.isPending}<Loader2 class="size-4 animate-spin" />{/if}
 										Confirm relink
 									</Button>

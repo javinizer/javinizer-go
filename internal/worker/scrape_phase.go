@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/panicutil"
@@ -591,7 +592,11 @@ func persistScrapeOutcome(ctx context.Context, o scrapeFileOutcome, inputs scrap
 		genreTrans = o.Result.TranslationOutput.GenreTranslations
 		actressTrans = o.Result.TranslationOutput.ActressTranslations
 	}
-	saved, err := inputs.MovieRepo.UpsertWithTranslations(ctx, cloned, genreTrans, actressTrans)
+	var render database.DisplayTitleRenderer
+	if o.Meta != nil {
+		render = o.Meta.RenderDisplayTitle
+	}
+	saved, err := database.UpsertWithDisplayTitle(ctx, inputs.MovieRepo, cloned, genreTrans, actressTrans, render)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			return false

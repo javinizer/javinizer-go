@@ -249,8 +249,9 @@ func (r *CreditCollisionRepository) CloseByCredit(ctx context.Context, creditID 
 	})
 }
 
-// CountOpenByMovieBatch returns per-movie open-collision counts for the
-// given movie IDs.
+// CountOpenByMovieBatch returns per-movie open-collision counts attached to
+// current, unsuppressed credits. The collision's movie_content_id is historical
+// evidence; use the live credit's movie to match the final publication fence.
 func (r *CreditCollisionRepository) CountOpenByMovieBatch(ctx context.Context, movieIDs []string) (map[string]int64, error) {
 	type row struct {
 		MovieContentID string
@@ -258,9 +259,10 @@ func (r *CreditCollisionRepository) CountOpenByMovieBatch(ctx context.Context, m
 	}
 	var rows []row
 	err := r.GetDB().WithContext(ctx).Model(&models.CreditCollision{}).
-		Select("movie_content_id, COUNT(*) as count").
-		Where("movie_content_id IN ? AND status = ?", movieIDs, models.CollisionStatusOpen).
-		Group("movie_content_id").
+		Select("mc.movie_content_id, COUNT(*) as count").
+		Joins("JOIN movie_credits mc ON mc.id = credit_collisions.credit_id").
+		Where("mc.movie_content_id IN ? AND mc.suppressed = ? AND credit_collisions.status = ?", movieIDs, false, models.CollisionStatusOpen).
+		Group("mc.movie_content_id").
 		Scan(&rows).Error
 	if err != nil {
 		return nil, wrapDBErr("count", "open collisions batch", err)
