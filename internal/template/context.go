@@ -145,8 +145,8 @@ func NewContextFromMovieWithOptions(movie *models.Movie, opts ContextOptions) *C
 	}
 
 	// Build actress list using config-aware name formatting
-	if opts.RenderCredits && len(movie.Credits) > 0 {
-		for _, credit := range movie.Credits {
+	if credits, present := movie.RenderingCredits(); opts.RenderCredits && present {
+		for _, credit := range credits {
 			if !credit.RenderVisible() {
 				continue
 			}

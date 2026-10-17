@@ -212,6 +212,15 @@ func nfoToMovie(nfo *Movie) (*models.Movie, []string) {
 		movie.OriginalFileName = nfo.OriginalPath
 	}
 
+	// Preserve optional actor links separately from all durable model fields.
+	links := make([][]models.ActorPresentationLink, len(nfo.Actors))
+	for i, actor := range nfo.Actors {
+		for _, link := range actor.PresentationLinks {
+			links[i] = append(links[i], models.ActorPresentationLink{Version: link.Version, Selection: link.Selection, MovieContentID: link.MovieContentID, CreditID: link.CreditID})
+		}
+	}
+	movie.SetNFOActorLinks(links)
+
 	// Set source info
 	movie.SourceName = "nfo"
 

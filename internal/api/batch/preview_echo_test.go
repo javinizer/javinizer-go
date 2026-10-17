@@ -47,4 +47,5 @@ func TestCreditPreviewMixedCachedEchoAndCurrentVersion(t *testing.T) {
 	stored, err := deps.Repos.MovieRepo.FindByContentID(t.Context(), m.ContentID)
 	require.NoError(t, err)
 	require.Equal(t, p.DisplayTitle, stored.DisplayTitle)
+	require.Equal(t, "Original", stored.DisplayTitle, "current cast version explicitly accepts restoring the old cached name")
 }

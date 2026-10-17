@@ -30,7 +30,7 @@ func previewTableSnapshot(t *testing.T, db *database.DB) string {
 }
 
 func TestPreviewCastSkipsUnchangedAndStaleEchoes(t *testing.T) {
-	old := &models.Movie{Actresses: []models.Actress{{ID: 1, FirstName: "Original", Verified: true, Origin: "user"}}}
+	old := &models.Movie{Actresses: []models.Actress{{ID: 1, FirstName: "Original", NameKey: "original", Origin: "scrape"}}}
 	current := old.Clone()
 	current.Actresses[0].FirstName = "Current"
 	for _, tc := range []struct {
@@ -45,8 +45,16 @@ func TestPreviewCastSkipsUnchangedAndStaleEchoes(t *testing.T) {
 		{"old echo current version", old, models.ActressCastVersion(current.Actresses)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			proposed := contracts.MovieViewToModel(contracts.MovieViewFromModel(tc.cast))
-			projection, resolveErr := previewProposedCast(t.Context(), nil, current, old, proposed, previewCastView(proposed, tc.version), true)
+			view := contracts.MovieViewFromModel(tc.cast)
+			view.CastVersion = tc.version
+			proposed := contracts.MovieViewToModel(view)
+			projection, resolveErr := previewProposedCast(t.Context(), nil, current, old, proposed, view, true)
+			if tc.name == "old echo current version" {
+				require.Nil(t, projection)
+				require.NotNil(t, resolveErr)
+				require.Equal(t, http.StatusServiceUnavailable, resolveErr.Status, "fresh version makes this an explicit restore, requiring a database")
+				return
+			}
 			require.Nil(t, resolveErr)
 			require.Same(t, current, projection, "read-only echoes must not require a write transaction")
 		})

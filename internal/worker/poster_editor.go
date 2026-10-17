@@ -845,7 +845,7 @@ func (m *LockedMovieOps) updateMovieFamily(ctx context.Context, movie *models.Mo
 	// normalize movie.Actresses in place, so renames capture intent first.
 	renames := make([]ActressRenamePlan, 0, len(movie.Actresses))
 	for _, a := range movie.Actresses {
-		if a.ID == 0 {
+		if (guard != nil && guard.PreserveCurrent) || a.ID == 0 {
 			continue
 		}
 		renames = append(renames, ActressRenamePlan{ID: a.ID, FirstName: a.FirstName, LastName: a.LastName, JapaneseName: a.JapaneseName, ThumbURL: a.ThumbURL, ThumbEdited: actressThumbEdited(a)})
@@ -1682,6 +1682,8 @@ func (pe *PosterEditor) UpdatePosterFromURL(ctx context.Context, movieID string,
 type ActressEditGuard struct {
 	ExpectedCastVersion string
 	KnownPersisted      bool
+	// PreserveCurrent identifies an unchanged cast echo, not an explicit edit.
+	PreserveCurrent bool
 }
 
 func validateActressEdit(ctx context.Context, u database.EditUnit, movie *models.Movie, guard *ActressEditGuard) error {
@@ -1705,6 +1707,18 @@ func validateActressEdit(ctx context.Context, u database.EditUnit, movie *models
 	if current == nil {
 		if guard.KnownPersisted {
 			return &EditAdmissionConflictError{Message: "persisted movie missing in database; refresh and retry"}
+		}
+		return nil
+	}
+	if guard.PreserveCurrent {
+		// Read under the composite edit transaction: credit APIs do not acquire
+		// the job's family key, so a pre-transaction read is not authoritative.
+		current = current.Clone()
+		movie.Actresses = current.Actresses
+		movie.Credits = nil
+		movie.SkipCreditReconcile = len(current.Credits) > 0
+		if movie.SkipCreditReconcile {
+			movie.Credits = current.Credits
 		}
 		return nil
 	}
@@ -1757,6 +1771,9 @@ func (pe *PosterEditor) UpdateMovieFamilyWithEcho(ctx context.Context, movieID, 
 			if curFam != "" && !strings.EqualFold(curFam, strings.TrimSpace(movieID)) {
 				return &EditAdmissionConflictError{Message: fmt.Sprintf("result %s moved to family %s during save; retry", resultID, curFam)}
 			}
+		}
+		if opts.PreserveCachedActresses {
+			opts.ActressEditGuard = &ActressEditGuard{PreserveCurrent: true}
 		}
 		if opts.ActressEditGuard != nil {
 			if cur, _, ok := m.pe.lookup.GetFileResultByResultID(resultID); ok && cur != nil {
@@ -1829,6 +1846,11 @@ func (pe *PosterEditor) UpdateMovieFamilyWithEcho(ctx context.Context, movieID, 
 			found := false
 			if repo := m.pe.currentMovieRepo(); repo != nil {
 				contentID := strings.TrimSpace(movie.ContentID)
+				if contentID == "" {
+					if current, _, ok := m.pe.lookup.GetFileResultByResultID(resultID); ok && current != nil && current.Movie != nil {
+						contentID = strings.TrimSpace(current.Movie.ContentID)
+					}
+				}
 				if contentID == "" {
 					contentID = strings.TrimSpace(movie.ID)
 				}
