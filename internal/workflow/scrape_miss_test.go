@@ -48,7 +48,7 @@ func TestScrapeOrchImpl_Miss_ForceRefresh(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	assert.True(t, meta.Persisted)
-	assert.True(t, mockRepo.deleteCalled)
+	assert.False(t, mockRepo.deleteCalled, "force is a cache bypass, not a movie deletion")
 }
 
 // --- scrapeOrchImpl: nil scraper returns error ---
@@ -213,4 +213,16 @@ func (m *mockMovieRepoScrape) List(_ context.Context, _, _ int) ([]models.Movie,
 }
 func (m *mockMovieRepoScrape) Upsert(_ context.Context, _ *models.Movie) (*models.Movie, error) {
 	return nil, nil
+}
+
+func TestForcedRefreshWithoutRepositoryReturnsMetadata(t *testing.T) {
+	for _, deferred := range []bool{false, true} {
+		source := &mockScraperScrape{result: &scrape.ScrapeResult{Movie: &models.Movie{ID: "FORCE-001", ContentID: "force001", Title: "Fresh metadata"}, Status: testStatusCompleted}}
+		orch := newScrapeOrchestrator(source, nil, "", nil, nfo.NFONameConfig{}, nil)
+		result, meta, err := orch.Execute(context.Background(), scrape.ScrapeCmd{MovieID: "FORCE-001", ForceRefresh: true, SkipPersist: deferred})
+		require.NoError(t, err)
+		require.NotNil(t, result.Movie)
+		assert.Equal(t, "Fresh metadata", result.Movie.Title)
+		assert.False(t, meta.Persisted)
+	}
 }

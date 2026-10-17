@@ -101,8 +101,19 @@ type Movie struct {
 	CreditPolicy string `json:"-" gorm:"-"`
 	// TrustedCollisionSources lists scraper sources eligible for auto_alias.
 	TrustedCollisionSources []string `json:"-" gorm:"-"`
-	// SkipCreditReconcile marks a cache-hit re-persist: existing credits stay untouched.
+	// SkipCreditReconcile marks a cache-hit or no-cast scrape re-persist:
+	// existing credits and the stored actress association stay untouched.
 	SkipCreditReconcile bool `json:"-" gorm:"-"`
+	// RequireExactContentID keeps a forced refresh with an explicit content ID
+	// from adopting another movie through the display/search ID fallback.
+	// Transient, and retained by Clone for deferred scrape persistence.
+	RequireExactContentID bool `json:"-" gorm:"-"`
+	// RefreshMovieID binds that constraint to the parsed requested movie key,
+	// even when the source returns a changed or empty display ID.
+	RefreshMovieID string `json:"-" gorm:"-"`
+	// RefreshExpectedContentID prevents request-key ownership changes while a
+	// forced scrape is in flight from redirecting its later save.
+	RefreshExpectedContentID string `json:"-" gorm:"-"`
 
 	Genres      []Genre  `json:"genres" gorm:"many2many:movie_genres;foreignKey:ContentID;joinForeignKey:MovieContentID;References:ID;joinReferences:GenreID"`
 	Screenshots []string `json:"screenshot_urls" gorm:"serializer:json"`

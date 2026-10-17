@@ -229,7 +229,7 @@ func TestScrape_ForceRefresh_BypassesCache(t *testing.T) {
 	assert.Equal(t, "Freshly Scraped", result.Movie.Title)
 
 	// Scrape no longer persists — the cached movie remains unchanged.
-	// Callers (e.g. Workflow.Scrape) handle cache deletion and persistence.
+	// Callers (e.g. Workflow.Scrape) transactionally persist fresh metadata.
 	saved, err := f.movieRepo.FindByID(context.Background(), "TEST-001")
 	assert.NoError(t, err)
 	require.NotNil(t, saved)
@@ -376,16 +376,14 @@ func TestScrape_ForceRefresh_SkipsCache(t *testing.T) {
 	f.withScraper("mock", &models.ScraperResult{ID: "TEST-001", Title: "Force Refreshed"}, nil)
 	s := f.build()
 
-	// ForceRefresh skips the cache lookup and scrapes fresh.
-	// Cache deletion is now the caller's responsibility (not Scrape's).
+	// ForceRefresh reads only the prior identity and always scrapes fresh.
 	result, err := s.Scrape(context.Background(), ScrapeCmd{MovieID: "TEST-001", ForceRefresh: true})
 	assert.NoError(t, err)
 	require.NotNil(t, result)
 	require.NotNil(t, result.Movie)
 	assert.Equal(t, "Force Refreshed", result.Movie.Title)
 
-	// Note: Scrape no longer deletes from cache — the old cached movie still exists.
-	// Callers (e.g. Workflow.Scrape) handle cache deletion before calling Scrape.
+	// The old cached movie stays intact until transactional persistence succeeds.
 }
 
 func TestScrape_UpsertNotCalled(t *testing.T) {
@@ -643,4 +641,15 @@ func TestResolveScraperNames_PriorityOverrideScrapeCmd(t *testing.T) {
 	require.NotNil(t, result)
 	require.NotNil(t, result.Movie)
 	assert.Equal(t, "Override Win", result.Movie.Title)
+}
+
+func TestScrapeForcedIdentityReadErrorFailsClosed(t *testing.T) {
+	f := newFixture(t)
+	failure := errors.New("identity database unavailable")
+	f.withMockOverrides(nil, nil, failure)
+	f.withScraper("mock", &models.ScraperResult{ID: "TEST-001", Title: "Must not publish"}, nil)
+	result, err := f.build().Scrape(t.Context(), ScrapeCmd{MovieID: "TEST-001", ForceRefresh: true})
+	require.ErrorIs(t, err, failure)
+	require.ErrorContains(t, err, "read refresh identity")
+	require.Nil(t, result)
 }
