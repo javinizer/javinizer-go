@@ -148,6 +148,10 @@ type MovieTranslation struct {
 
 // Actress represents a JAV actress
 type Actress struct {
+	// scrapeEvidence is selected by aggregation before alias display conversion.
+	// It is server-only, transient, and copied by value with the actress.
+	scrapeEvidence actressScrapeEvidence
+
 	ID           uint   `json:"id" gorm:"primaryKey"`
 	DMMID        int    `json:"dmm_id"` // Real DMM actress ID when available (unique only for values > 0)
 	FirstName    string `json:"first_name"`
