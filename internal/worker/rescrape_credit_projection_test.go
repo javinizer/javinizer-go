@@ -82,13 +82,13 @@ func TestRescrapeCorrectedIDKeepsMergedCreditPresentation(t *testing.T) {
 				dl := downloader.NewDownloader(server.Client(), fs, &downloader.Config{DownloadActress: true, ActorFirstNameOrder: true, MediaFormatConfig: organizer.MediaFormatConfig{ActressFolder: ".actors", ActressFormat: "<ACTRESS>_<ACTORS>.jpg"}}, engine)
 				images, err := dl.Download(t.Context(), downloader.DownloadCmd{Movie: movie, DestDir: "/output"})
 				require.NoError(t, err)
-				assert.ElementsMatch(t, []string{filepath.Join("/output/.actors", wantName+"_"+wantName+".jpg"), "/output/.actors/Extra Person_Extra Person.jpg"}, images.DownloadedPaths)
+				assert.ElementsMatch(t, []string{filepath.Join("/output/.actors", wantName+"_"+wantName+".jpg"), filepath.Join("/output/.actors", "Extra Person_Extra Person.jpg")}, images.DownloadedPaths)
 				for _, result := range images.Results {
 					assert.NoError(t, result.Error)
 				}
 				for imagePath, wantBody := range map[string]string{
-					filepath.Join("/output/.actors", wantName+"_"+wantName+".jpg"): "/source",
-					"/output/.actors/Extra Person_Extra Person.jpg":                "/extra",
+					filepath.Join("/output/.actors", wantName+"_"+wantName+".jpg"):    "/source",
+					filepath.Join("/output/.actors", "Extra Person_Extra Person.jpg"): "/extra",
 				} {
 					data, readErr := afero.ReadFile(fs, imagePath)
 					assert.NoError(t, readErr)
