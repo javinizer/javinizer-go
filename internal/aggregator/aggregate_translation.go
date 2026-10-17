@@ -16,11 +16,14 @@ var translationPriorityKeys = [7]string{"Title", "OriginalTitle", "Description",
 // buildTranslations preserves first-seen language order and explicit translations
 // before legacy fields from the same scraper. Each field independently selects
 // the highest-priority source available for that language. An exclusive override
-// therefore also excludes unlisted sources from translated output.
+// therefore also excludes unlisted sources from translated output. SourceName
+// follows the retained Title, or the first nonempty field in the order above
+// when Title is absent; a single source label cannot describe every field.
 func (a *Aggregator) buildTranslations(results []*models.ScraperResult, scraped *models.Movie, priorityFunc func(string) []string) []models.MovieTranslation {
 	translations := make([]models.MovieTranslation, 0, len(results))
 	indices := make(map[string]int)
 	ranks := make(map[string][7]int)
+	primaryFields := make(map[string]int)
 	merge := func(trans models.MovieTranslation, source string) {
 		for field, value := range translationFields(&trans) {
 			rank := slices.Index(priorityFunc(translationPriorityKeys[field]), source)
@@ -35,6 +38,7 @@ func (a *Aggregator) buildTranslations(results []*models.ScraperResult, scraped 
 				}
 				idx = len(translations)
 				indices[trans.Language] = idx
+				primaryFields[trans.Language] = field
 				translations = append(translations, entry)
 			}
 			target := translationFields(&translations[idx])[field]
@@ -43,6 +47,13 @@ func (a *Aggregator) buildTranslations(results []*models.ScraperResult, scraped 
 				*target = *value
 				languageRanks[field] = rank
 				ranks[trans.Language] = languageRanks
+				if field <= primaryFields[trans.Language] {
+					primaryFields[trans.Language] = field
+					translations[idx].SourceName = trans.SourceName
+					if translations[idx].SourceName == "" {
+						translations[idx].SourceName = source
+					}
+				}
 			}
 		}
 	}

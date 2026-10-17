@@ -48,6 +48,7 @@ func TestTranslationPriorityPerFieldAndResultOrder(t *testing.T) {
 					got := movie.Translations[0]
 					require.Equal(t, []string{"c title", "b original", "a description", "b director", "a maker", "c label", "b series"}, []string{got.Title, got.OriginalTitle, got.Description, got.Director, got.Maker, got.Label, got.Series})
 					require.Equal(t, movie.Title, got.Title)
+					require.Equal(t, "c", got.SourceName)
 					ctx := template.NewContextFromMovie(movie)
 					ctx.DefaultLanguage = "ja"
 					for _, format := range []string{"<TITLE:JA>", "<TITLE>"} {
