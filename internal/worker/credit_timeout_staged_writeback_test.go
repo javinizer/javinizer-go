@@ -44,6 +44,13 @@ func TestApplyFailureWritebackDiscardsExpiredTransaction(t *testing.T) {
 	for _, mode := range []string{"before-store-lock", "after-prepare"} {
 		t.Run(mode, func(t *testing.T) {
 			inputs, store, db, path := newFailureWritebackFixture(t)
+			pool, err := db.DB.DB()
+			require.NoError(t, err)
+			// Context cancellation starts database/sql's asynchronous rollback;
+			// it does not signal that SQLite has released its writer. Reusing a
+			// single connection makes the generation update wait for completed
+			// rollback instead of racing it on a second connection's busy timeout.
+			pool.SetMaxOpenConns(1)
 			before, beforeCounts := store.SnapshotForStatus()
 			ctx, cancel := context.WithCancel(context.Background())
 			cancel()
@@ -83,7 +90,7 @@ func TestApplyFailureWritebackDiscardsExpiredTransaction(t *testing.T) {
 			defer writeCancel()
 			original := before.Results[path].Movie
 			require.NoError(t, db.WithContext(writeCtx).Model(&models.Movie{}).Where("content_id = ?", original.ContentID).
-				UpdateColumn("render_generation", original.RenderGeneration+1).Error, "the expired transaction must have released its DB writer")
+				UpdateColumn("render_generation", original.RenderGeneration+1).Error, "generation advances after rollback releases the connection, before publisher release")
 			unblock()
 			select {
 			case outcome := <-done:

@@ -14,6 +14,11 @@ import (
 
 func TestApplyFailureWritebackWaitingOnRealStoreMutexNeverPublishesExpiredTransaction(t *testing.T) {
 	inputs, store, db, path := newFailureWritebackFixture(t)
+	pool, err := db.DB.DB()
+	require.NoError(t, err)
+	// The generation update must wait for database/sql to finish rollback,
+	// not race the canceled transaction's writer on another connection.
+	pool.SetMaxOpenConns(1)
 	before, counts := store.SnapshotForStatus()
 	held, release, holderDone := make(chan struct{}), make(chan struct{}), make(chan error, 1)
 	var once sync.Once
