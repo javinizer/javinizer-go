@@ -1,5 +1,6 @@
 import { cleanup, render, waitFor } from '@testing-library/svelte';
 import { QueryClient } from '@tanstack/svelte-query';
+import { tick } from 'svelte';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { apiClient } from '$lib/api/client';
 import type { BatchJobResponse } from '$lib/api/types';
@@ -44,6 +45,37 @@ function fixture(): BatchJobResponse {
 		},
 	} as unknown as BatchJobResponse;
 }
+function failedGeneration(current: BatchJobResponse, generation: number): BatchJobResponse {
+	const failed = structuredClone(current);
+	failed.status = 'failed';
+	failed.apply_generation = generation;
+	failed.failed = 1;
+	failed.completed = 0;
+	failed.results[filePath].status = 'failed';
+	failed.results[filePath].error_code = 'credit_conflict';
+	return failed;
+}
+
+async function settleAcceptedApply(
+	state: ReturnType<typeof createReviewState>,
+	generation: number,
+	apply: () => Promise<void>,
+) {
+	// Keep the real controller polling path, including its normal 1500 ms interval.
+	// A resolved POST receipt alone does not settle the authoritative server outcome.
+	vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+	try {
+		await apply();
+		await vi.advanceTimersByTimeAsync(1500);
+		await tick();
+		expect(state.job?.apply_generation).toBe(generation);
+		expect(state.organizing).toBe(false);
+		expect(state.fileStatuses.get(filePath)?.status).toBe('failed');
+	} finally {
+		vi.useRealTimers();
+	}
+}
+
 async function mount() {
 	const client = new QueryClient({
 		defaultOptions: {
@@ -75,6 +107,7 @@ beforeEach(() => {
 });
 afterEach(() => {
 	cleanup();
+	vi.useRealTimers();
 	clients.splice(0).forEach((c) => c.clear());
 	vi.restoreAllMocks();
 	localStorage.clear();
@@ -83,33 +116,29 @@ afterEach(() => {
 const operations = ['move', 'copy', 'hardlink', 'softlink'] as const;
 
 it.each(['copy', 'hardlink', 'softlink'] as const)(
-	'newer in-memory %s context wins over an externally replaced valid move record',
+	'in-memory %s options win over an externally replaced matching-receipt move record',
 	async (operation) => {
 		let current = fixture();
 		vi.spyOn(apiClient, 'getBatchJob').mockImplementation(async () => structuredClone(current));
 		const apply = vi
 			.spyOn(apiClient, 'organizeBatchJob')
 			.mockImplementationOnce(async () => {
-				current = structuredClone(current);
-				current.status = 'failed';
-				current.apply_generation = 1;
-				current.failed = 1;
-				current.completed = 0;
-				current.results[filePath].status = 'failed';
-				current.results[filePath].error_code = 'credit_conflict';
-				throw new Error('Original non-move failed');
+				current = failedGeneration(current, 1);
+				return { message: 'Original operation accepted', apply_generation: 1 };
 			})
-			.mockResolvedValue({} as never);
+			.mockResolvedValue({ message: 'Retry accepted', apply_generation: 2 });
 		const { state } = await mount();
 		state.organizeOperation = operation;
-		await state.organizeAll(true, true);
-		await state.retryLoad();
-		localStorage.setItem(
+		await settleAcceptedApply(state, 1, () => state.organizeAll(true, true));
+		expect(state.canRetryFailed).toBe(true);
+		sessionStorage.setItem(
 			key,
 			JSON.stringify({
 				jobId: 'retry-job',
 				operation: 'organize',
+				operationMode: 'organize',
 				preApplyGeneration: 0,
+				acceptedApplyGeneration: 1,
 				destination: '/synthetic/output',
 				skipNfo: false,
 				skipDownload: false,
@@ -142,27 +171,22 @@ it.each(operations)(
 		let launches = 0;
 		const apply = vi.spyOn(apiClient, 'organizeBatchJob').mockImplementation(async () => {
 			launches += 1;
-			current = structuredClone(current);
-			current.status = 'failed';
-			current.apply_generation = launches;
-			current.failed = 1;
-			current.completed = 0;
-			current.results[filePath].status = 'failed';
-			current.results[filePath].error_code = 'credit_conflict';
-			throw new Error('Synthetic generation failed');
+			current = failedGeneration(current, launches);
+			return { message: 'Apply accepted', apply_generation: launches };
 		});
 		const first = await mount();
 		first.state.organizeOperation = operation;
-		await first.state.organizeAll(true, true);
-		await first.state.retryLoad();
+		await settleAcceptedApply(first.state, 1, () => first.state.organizeAll(true, true));
 		first.state.organizeOperation = operation === 'move' ? 'copy' : 'move';
-		await first.state.retryFailed();
-		await first.state.retryLoad();
+		await settleAcceptedApply(first.state, 2, () => first.state.retryFailed());
 		expect(apply).toHaveBeenCalledTimes(2);
 		expect(first.state.job?.apply_generation).toBe(2);
-		const record = JSON.parse(localStorage.getItem(key)!);
+		const record = JSON.parse(sessionStorage.getItem(key)!);
 		expect(record).toMatchObject({
 			preApplyGeneration: 1,
+			acceptedApplyGeneration: 2,
+			destination: '/synthetic/output',
+			operationMode: 'organize',
 			organizeOperation: operation,
 			skipNfo: true,
 			skipDownload: true,

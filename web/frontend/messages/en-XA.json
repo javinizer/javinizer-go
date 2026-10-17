@@ -1,5 +1,5 @@
 {
-  "review_retry_operation_unknown": "[The original file operation is unavailable, so Retry Failed is disabled. Review the file operation and settings, then use Organize to start a new attempt.]",
+  "review_retry_operation_unknown": "[Ţĥē ōŕīĝīñāļ āƥƥļŷ āţţēɱƥţ ōŕ şēţţīñĝş ċōūļď ñōţ ƀē vēŕīƒīēď, şō Ŕēţŕŷ Ƒāīļēď īş ďīşāƀļēď. Ŕēƒŕēşĥ ţĥē ĵōƀ, ŕēvīēŵ ţĥē şēţţīñĝş, ţĥēñ ūşē Āƥƥļŷ ţō şţāŕţ ā ñēŵ āţţēɱƥţ.]",
   "review_retry_storage_unavailable": "[The previous retry settings could not be replaced or removed, so no new operation was started. Free browser storage or restore access, then review the file operation and try Apply again.]",
   "$schema": "https://inlang.com/schema/inlang-message-format",
   "apply_plan_destination": "[ Dëstíñåtíöñ: {destination} ]",

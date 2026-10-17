@@ -14,7 +14,9 @@ export interface ApplyRecoveryState {
 	jobId: string;
 	operation: 'organize' | 'update';
 	preApplyGeneration?: number;
+	acceptedApplyGeneration?: number;
 	destination: string;
+	operationMode?: string;
 	skipNfo: boolean;
 	skipDownload: boolean;
 	overrides?: ReviewApplyOverrides;
@@ -51,6 +53,7 @@ interface OrganizeControllerDeps {
 	toastSuccess: (message: string, duration?: number) => void;
 	toastError: (message: string, duration?: number) => void;
 	toastInfo: (message: string, duration?: number) => void;
+	recordApplyAccepted?: (generation: number) => void;
 	recordApplyFailure?: (filePath: string, error?: string) => void;
 	recordApplySuccess?: (filePath: string) => void;
 	clearApplyRecovery?: () => void;
@@ -70,6 +73,7 @@ interface OrganizeControllerDeps {
 				skip_download?: boolean;
 				overrides?: ReviewApplyOverrides;
 				retry_file_paths?: string[];
+				expected_apply_generation?: number;
 			},
 		) => Promise<unknown>;
 		updateBatchJob: (jobId: string, request?: UpdateRequest) => Promise<unknown>;
@@ -80,12 +84,12 @@ interface OrganizeControllerDeps {
 	redirectDelayMs?: number;
 }
 
-function isDefinitiveApplyLaunchRejection(error: unknown): boolean {
-	if (!error || typeof error !== 'object') return false;
-	if ('code' in error && error.code === 'APPLY_NOT_STARTED') return true;
-	if (!('status' in error)) return false;
-	const status = error.status;
-	return status === 400 || status === 403 || status === 404 || status === 409;
+function acceptedGeneration(response: unknown): number | undefined {
+	if (!response || typeof response !== 'object' || !('apply_generation' in response)) return;
+	const generation = response.apply_generation;
+	return typeof generation === 'number' && Number.isSafeInteger(generation) && generation > 0
+		? generation
+		: undefined;
 }
 
 function getOrganizeRequestOptions(operation: OrganizeOperation): {
@@ -216,15 +220,12 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 		operationJobId: string,
 		operationGeneration: number,
 		requestPending: () => boolean = () => false,
-		preApplyGeneration?: number,
-		applyAlreadyStarted = false,
 	) {
 		const runToken = ++organizeRunToken;
 		const isActiveRun = () => runToken === organizeRunToken;
 		clearOrganizePollTimer();
 		const startedAt = Date.now();
 		let lastPollError: string | null = null;
-		let applyTransitionObserved = applyAlreadyStarted;
 
 		const pollOnce = async () => {
 			if (!isActiveRun()) return;
@@ -252,38 +253,20 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 				}
 				deps.setJob(latestJob, operationJobId, operationGeneration);
 				lastPollError = null;
-				const expectedApplyGeneration =
-					preApplyGeneration !== undefined ? preApplyGeneration + 1 : undefined;
-				// A request recorded at generation N owns only the next atomic claim,
-				// N+1. A newer generation may belong to another tab or API client and
-				// must never be adopted as this run's terminal result.
-				const generationAdvanced =
-					expectedApplyGeneration !== undefined &&
-					latestJob.apply_generation === expectedApplyGeneration;
+				// Only this request's admission receipt owns a generation. A GET or
+				// WebSocket N+1 may belong to another tab, even while our POST waits.
 				const generationIsCurrent =
-					expectedApplyGeneration !== undefined
-						? latestJob.apply_generation === expectedApplyGeneration
-						: latestJob.apply_generation !== undefined
-							? activeApplyGeneration !== undefined
-								? latestJob.apply_generation === activeApplyGeneration
-								: applyAlreadyStarted
-							: activeApplyGeneration === undefined && applyAlreadyStarted;
-				if (generationAdvanced || (applyAlreadyStarted && generationIsCurrent)) {
-					applyTransitionObserved = true;
-					if (generationIsCurrent) {
-						activeApplyGeneration = latestJob.apply_generation;
-					}
-				}
-				const applyPhaseReached = applyAlreadyStarted ? generationIsCurrent : generationAdvanced;
+					acceptedApplyGeneration !== undefined &&
+					latestJob.apply_generation === acceptedApplyGeneration;
+				activeApplyGeneration = generationIsCurrent ? acceptedApplyGeneration : undefined;
 
 				const terminalSuccess =
 					latestJob.status === 'completed' ||
 					latestJob.status === 'organized' ||
 					latestJob.status === 'reverted';
-				if (terminalSuccess && (!applyTransitionObserved || !generationIsCurrent)) {
+				if (terminalSuccess && !generationIsCurrent) {
 					// A GET can race the POST and see the scrape-completed state. Do
-					// not report apply success until the server exposes a new apply
-					// generation.
+					// not report apply success without the exact admission receipt.
 				} else if (terminalSuccess) {
 					reconcileTerminalResults(latestJob);
 					const action = deps.getIsUpdateMode() ? 'Update' : 'Organization';
@@ -291,15 +274,15 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 					return;
 				}
 
-				if (latestJob.status === 'failed' && applyPhaseReached) {
-					reconcileTerminalResults(latestJob, applyPhaseReached);
+				if (latestJob.status === 'failed' && generationIsCurrent) {
+					reconcileTerminalResults(latestJob, true);
 					const action = deps.getIsUpdateMode() ? 'update' : 'organization';
 					finalizeOrganizeFailure(`The ${action} job failed.`);
 					return;
 				}
 
-				if (latestJob.status === 'cancelled' && applyPhaseReached) {
-					reconcileTerminalResults(latestJob, applyPhaseReached);
+				if (latestJob.status === 'cancelled' && generationIsCurrent) {
+					reconcileTerminalResults(latestJob, true);
 					const action = deps.getIsUpdateMode() ? 'Update' : 'Organization';
 					finalizeOrganizeFailure(`${action} was cancelled.`);
 					return;
@@ -352,15 +335,36 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 	let lastSkipDownload = false;
 	let lastOrganizeOverrides: ReviewApplyOverrides | undefined;
 	let lastOrganizeOperation: OrganizeOperation = 'move';
+	let lastDestination = '';
+	let lastOperationMode = '';
 	let lastApplyOperation: 'organize' | 'update' | null = null;
-	let lastPreApplyGeneration: number | undefined;
+	let acceptedApplyGeneration: number | undefined;
+	let hasLocalAttempt = false;
 	let lastRecoveryFailedPaths: string[] = [];
 
 	function hasRetryContext(): boolean {
-		const generation = deps.getJob()?.apply_generation;
-		return lastApplyOperation !== null && (generation === undefined ||
-			(lastPreApplyGeneration !== undefined &&
-				(generation === lastPreApplyGeneration || generation === lastPreApplyGeneration + 1)));
+		return (
+			lastApplyOperation !== null &&
+			acceptedApplyGeneration !== undefined &&
+			deps.getJob()?.apply_generation === acceptedApplyGeneration
+		);
+	}
+
+	function revokeRetryContext() {
+		lastApplyOperation = null;
+		acceptedApplyGeneration = undefined;
+		deps.clearApplyRecovery?.();
+	}
+
+	function confirmApplyReceipt(response: unknown) {
+		const generation = acceptedGeneration(response);
+		if (generation === undefined) {
+			throw new Error(
+				'The server did not confirm this apply attempt. Refresh the job, review the settings, and start a new attempt.',
+			);
+		}
+		acceptedApplyGeneration = generation;
+		deps.recordApplyAccepted?.(generation);
 	}
 
 	function forgetRecoveryRetryPath(filePath: string) {
@@ -373,12 +377,18 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 		overrides?: ReviewApplyOverrides,
 		retryPaths: string[] = [],
 		operationOverride?: OrganizeOperation,
+		destinationOverride?: string,
+		modeOverride?: string,
+		expectedApplyGeneration?: number,
 	) {
 		const operationJobId = deps.getJobId();
 		const operationGeneration = deps.getRouteGeneration?.() ?? 0;
+		hasLocalAttempt = true;
+		lastApplyOperation = null;
+		acceptedApplyGeneration = undefined;
 		const operation = operationOverride ?? deps.getOrganizeOperation();
-		const effectiveMode = deps.getOperationMode();
-		const operationDestination = deps.getDestinationPath();
+		const effectiveMode = modeOverride ?? deps.getOperationMode();
+		const operationDestination = destinationOverride ?? deps.getDestinationPath();
 		const needsDestination = effectiveMode === 'organize';
 		if (needsDestination && !operationDestination.trim()) {
 			deps.clearApplyRecovery?.();
@@ -388,14 +398,14 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 
 		lastSkipNfo = skipNfo ?? false;
 		lastSkipDownload = skipDownload ?? false;
-		lastOrganizeOverrides = overrides;
+		lastOrganizeOverrides = structuredClone(overrides);
+		lastDestination = operationDestination;
+		lastOperationMode = effectiveMode;
 		lastOrganizeOperation = operation;
 		lastApplyOperation = 'organize';
 		lastRecoveryFailedPaths = Array.from(new Set(retryPaths));
 
 		const { copyOnly, linkMode } = getOrganizeRequestOptions(operation);
-		const preApplyGeneration = deps.getJob()?.apply_generation;
-		lastPreApplyGeneration = preApplyGeneration;
 		prepareOrganizeRun(retryPaths);
 		const operationToken = organizeRunToken;
 		let requestPending = false;
@@ -412,35 +422,38 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 
 			requestPending = true;
 			const request = deps.api.organizeBatchJob(operationJobId, {
+				...(expectedApplyGeneration !== undefined
+					? { expected_apply_generation: expectedApplyGeneration }
+					: {}),
 				destination: operationDestination,
 				copy_only: copyOnly,
 				link_mode: linkMode,
 				operation_mode: effectiveMode as OperationMode,
 				skip_nfo: skipNfo || false,
 				skip_download: skipDownload || false,
-				overrides,
+				overrides: lastOrganizeOverrides,
 				retry_file_paths: retryPaths.length > 0 ? retryPaths : undefined,
 			});
 			pollingRunToken = startOrganizeCompletionPolling(
 				operationJobId,
 				operationGeneration,
 				() => requestPending,
-				preApplyGeneration,
 			);
-			await request;
+			const response = await request;
 			requestPending = false;
 
 			if (pollingRunToken !== organizeRunToken) return;
 			if (deps.isCurrentOperation && !deps.isCurrentOperation(operationJobId, operationGeneration))
 				return;
 			if (deps.getOrganizeStatus() !== 'organizing') return;
+			confirmApplyReceipt(response);
 		} catch (e) {
 			requestPending = false;
 			if (pollingRunToken !== organizeRunToken) return;
 			if (deps.isCurrentOperation && !deps.isCurrentOperation(operationJobId, operationGeneration))
 				return;
 			if (ignoreWebSocketMessages || deps.getOrganizeStatus() !== 'organizing') return;
-			if (isDefinitiveApplyLaunchRejection(e)) deps.clearApplyRecovery?.();
+			revokeRetryContext();
 			deps.setOrganizeStatus('failed');
 			deps.setOrganizing(false);
 			clearOrganizePollTimer();
@@ -449,52 +462,60 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 		}
 	}
 
-	async function updateAll(options?: UpdateRequest, retryPaths: string[] = []) {
+	async function updateAll(
+		options?: UpdateRequest,
+		retryPaths: string[] = [],
+		expectedApplyGeneration?: number,
+	) {
+		hasLocalAttempt = true;
+		acceptedApplyGeneration = undefined;
 		lastApplyOperation = 'update';
 		const operationJobId = deps.getJobId();
 		const operationGeneration = deps.getRouteGeneration?.() ?? 0;
 		lastRecoveryFailedPaths = Array.from(new Set(retryPaths));
-		const preApplyGeneration = deps.getJob()?.apply_generation;
-		lastPreApplyGeneration = preApplyGeneration;
 		prepareOrganizeRun(retryPaths);
 		const operationToken = organizeRunToken;
 		let requestPending = false;
 		let pollingRunToken = operationToken;
 
-		if (options) {
-			lastUpdateOptions = options;
-		}
+		lastUpdateOptions = structuredClone(options ?? {});
 
 		try {
 			if (deps.getEditedMovies().size > 0) {
 				await deps.saveAllEdits();
 			}
 
+			if (operationToken !== organizeRunToken) return;
 			if (deps.isCurrentOperation && !deps.isCurrentOperation(operationJobId, operationGeneration))
 				return;
 
 			requestPending = true;
-			const request =
-				retryPaths.length > 0 ? { ...options, retry_file_paths: retryPaths } : options;
+			const request = {
+				...lastUpdateOptions,
+				...(retryPaths.length > 0 ? { retry_file_paths: retryPaths } : {}),
+				...(expectedApplyGeneration !== undefined
+					? { expected_apply_generation: expectedApplyGeneration }
+					: {}),
+			};
 			pollingRunToken = startOrganizeCompletionPolling(
 				operationJobId,
 				operationGeneration,
 				() => requestPending,
-				preApplyGeneration,
 			);
-			await deps.api.updateBatchJob(operationJobId, request);
+			const response = await deps.api.updateBatchJob(operationJobId, request);
 			requestPending = false;
 			if (pollingRunToken !== organizeRunToken) return;
 			if (deps.isCurrentOperation && !deps.isCurrentOperation(operationJobId, operationGeneration))
 				return;
 			if (deps.getOrganizeStatus() !== 'organizing') return;
+			confirmApplyReceipt(response);
 		} catch (e) {
 			requestPending = false;
 			if (pollingRunToken !== organizeRunToken) return;
 			if (deps.isCurrentOperation && !deps.isCurrentOperation(operationJobId, operationGeneration))
 				return;
 			if (ignoreWebSocketMessages || deps.getOrganizeStatus() !== 'organizing') return;
-			if (isDefinitiveApplyLaunchRejection(e)) deps.clearApplyRecovery?.();
+			revokeRetryContext();
 			deps.setOrganizeStatus('failed');
 			deps.setOrganizing(false);
 			clearOrganizePollTimer();
@@ -514,10 +535,20 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 		deps.toastInfo(`Retrying ${failedCount} failed file${failedCount > 1 ? 's' : ''}...`);
 
 		const allRetryPaths = Array.from(new Set([...lastRecoveryFailedPaths, ...retryPaths]));
+		const expectedGeneration = acceptedApplyGeneration;
 		if (lastApplyOperation === 'update') {
-			await updateAll(lastUpdateOptions, allRetryPaths);
+			await updateAll(lastUpdateOptions, allRetryPaths, expectedGeneration);
 		} else {
-			await organizeAll(lastSkipNfo, lastSkipDownload, lastOrganizeOverrides, allRetryPaths, lastOrganizeOperation);
+			await organizeAll(
+				lastSkipNfo,
+				lastSkipDownload,
+				lastOrganizeOverrides,
+				allRetryPaths,
+				lastOrganizeOperation,
+				lastDestination,
+				lastOperationMode,
+				expectedGeneration,
+			);
 		}
 	}
 
@@ -527,6 +558,7 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 			ignoreWebSocketMessages ||
 			msg.job_id !== deps.getJobId() ||
 			deps.getOrganizeStatus() !== 'organizing' ||
+			!hasRetryContext() ||
 			activeApplyGeneration === undefined ||
 			msg.apply_generation !== activeApplyGeneration
 		) {
@@ -570,7 +602,9 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 	}
 
 	function cleanup() {
+		hasLocalAttempt = false;
 		lastApplyOperation = null;
+		acceptedApplyGeneration = undefined;
 		organizeRunToken += 1;
 		ignoreWebSocketMessages = true;
 		activeApplyGeneration = undefined;
@@ -584,30 +618,24 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 		const job = deps.getJob();
 		ignoreWebSocketMessages = false;
 		activeApplyGeneration = job?.apply_generation;
-		const hasRecordedApplyOutcome =
-			(recovery && Object.keys(recovery.failed).length > 0) ||
-			(recovery && recovery.succeeded.length > 0);
-		const expectedApplyGeneration =
-			recovery?.preApplyGeneration !== undefined ? recovery.preApplyGeneration + 1 : undefined;
-		const applyAlreadyStarted =
-			!recovery ||
-			recovery.preApplyGeneration === undefined ||
-			job?.apply_generation === undefined ||
-			(expectedApplyGeneration !== undefined && job.apply_generation === expectedApplyGeneration) ||
-			!!hasRecordedApplyOutcome;
+
 		if (recovery) {
 			lastApplyOperation = recovery.operation;
-			lastPreApplyGeneration = recovery.preApplyGeneration;
+			acceptedApplyGeneration = acceptedGeneration({
+				apply_generation: recovery.acceptedApplyGeneration,
+			});
 			lastSkipNfo = recovery.skipNfo;
 			lastSkipDownload = recovery.skipDownload;
-			lastOrganizeOverrides = recovery.overrides;
+			lastOrganizeOverrides = structuredClone(recovery.overrides);
+			lastDestination = recovery.destination;
+			lastOperationMode = recovery.operationMode ?? '';
 			lastOrganizeOperation = recovery.organizeOperation;
 			lastRecoveryFailedPaths = Object.keys(recovery.failed);
 			for (const [filePath, result] of Object.entries(job?.results ?? {})) {
 				if (result.status === 'failed' && result.movie) lastRecoveryFailedPaths.push(filePath);
 			}
 			lastRecoveryFailedPaths = Array.from(new Set(lastRecoveryFailedPaths));
-			lastUpdateOptions = recovery.updateOptions;
+			lastUpdateOptions = structuredClone(recovery.updateOptions);
 		}
 		deps.clearWebSocketMessages();
 		deps.setOrganizeStatus('organizing');
@@ -634,22 +662,24 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 				deps.getFileStatuses().set(filePath, { status: 'failed', error: result.error });
 			}
 		}
-		startOrganizeCompletionPolling(
-			operationJobId,
-			operationGeneration,
-			undefined,
-			recovery?.preApplyGeneration,
-			applyAlreadyStarted,
-		);
+		startOrganizeCompletionPolling(operationJobId, operationGeneration, undefined);
 	}
 
 	return {
-		get hasRetryContext() { return hasRetryContext(); },
+		get hasApplyContext() {
+			return hasLocalAttempt || lastApplyOperation !== null;
+		},
+		get hasRetryContext() {
+			return hasRetryContext();
+		},
 		get retryOptions() {
 			if (!hasRetryContext() || !lastApplyOperation) return null;
 			return {
 				operation: lastApplyOperation,
+				acceptedApplyGeneration,
 				organizeOperation: lastOrganizeOperation,
+				destination: lastDestination,
+				operationMode: lastOperationMode,
 				skipNfo: lastSkipNfo,
 				skipDownload: lastSkipDownload,
 				overrides: lastOrganizeOverrides,

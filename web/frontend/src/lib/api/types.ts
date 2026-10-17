@@ -792,6 +792,7 @@ export interface HealthResponse {
 }
 
 export interface UpdateRequest {
+	expected_apply_generation?: number;
 	overrides?: ReviewApplyOverrides;
 	force_overwrite?: boolean;
 	overwrite_existing_media?: boolean;
@@ -810,6 +811,7 @@ export interface UpdateRequest {
 }
 
 export interface OrganizeRequest {
+	expected_apply_generation?: number;
 	overrides?: ReviewApplyOverrides;
 	destination: string;
 	copy_only?: boolean;
@@ -822,6 +824,7 @@ export interface OrganizeRequest {
 
 export interface OrganizeResponse {
 	message: string;
+	apply_generation?: number;
 }
 
 export interface OrganizePreviewRequest {

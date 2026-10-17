@@ -41,8 +41,8 @@ function job(update: boolean): BatchJobResponse {
 }
 
 beforeEach(() => {
-	sessionStorage.clear();
 	localStorage.clear();
+	sessionStorage.clear();
 	vi.spyOn(apiClient, 'previewOrganize').mockResolvedValue({} as never);
 	vi.spyOn(apiClient, 'getExistingNFO').mockResolvedValue({} as never);
 });
@@ -50,8 +50,8 @@ afterEach(() => {
 	cleanup();
 	clients.splice(0).forEach((client) => client.clear());
 	vi.restoreAllMocks();
-	sessionStorage.clear();
 	localStorage.clear();
+	sessionStorage.clear();
 	toastStore.clear();
 });
 
@@ -108,7 +108,7 @@ it.each(cases)(
 			expect(apply).toHaveBeenCalledOnce();
 			apply.mockClear();
 		}
-		expect(localStorage.getItem(recoveryKey)).toBeNull();
+		expect(sessionStorage.getItem(recoveryKey)).toBeNull();
 		expect(state.editedMovies.size).toBe(0);
 		state.fileStatuses.set(filePath, { status: 'failed', error: 'Synthetic failed file' });
 
@@ -133,7 +133,7 @@ it.each(cases)(
 		expect(warning).toHaveBeenCalledTimes(2);
 		expect(state.organizing).toBe(false);
 		expect(state.fileStatuses.get(filePath)?.status).toBe('failed');
-		expect(localStorage.getItem(recoveryKey)).toBeNull();
+		expect(sessionStorage.getItem(recoveryKey)).toBeNull();
 
 		if (refresh === 'pending') {
 			finishRefresh(fixture);
@@ -141,12 +141,8 @@ it.each(cases)(
 		} else await state.retryLoad();
 		expect(state.refreshError).toBeNull();
 		await state.retryFailed();
-		if (operation === 'organize' && recovery === 'missing') {
-			expect(apply).not.toHaveBeenCalled();
-		} else {
-			expect(apply).toHaveBeenCalledOnce();
-			expect(apply.mock.calls[0][1]).toMatchObject({ retry_file_paths: [filePath] });
-		}
+		// Neither missing recovery nor an unconfirmed launch owns an apply attempt.
+		expect(apply).not.toHaveBeenCalled();
 		expect(save).not.toHaveBeenCalled();
 	},
 );

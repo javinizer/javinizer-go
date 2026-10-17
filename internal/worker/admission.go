@@ -25,6 +25,9 @@ var (
 	// ErrEditNotAdmitted — the job's lifecycle does not accept review edits
 	// right now (Pending or Running with an active scrape phase).
 	ErrEditNotAdmitted = errors.New("job does not accept edits in its current state")
+	// ErrApplyGenerationMismatch rejects a retry whose owning apply has been
+	// superseded. The launch claim checks this before changing lifecycle/config.
+	ErrApplyGenerationMismatch = errors.New("apply generation no longer matches the requested retry")
 	// ErrMovieFamilyEmpty — no in-memory results resolve to the requested movie
 	// inside the keyed edit section (e.g. concurrent rescrape rekey removed it).
 	ErrMovieFamilyEmpty = errors.New("movie result not found for family")

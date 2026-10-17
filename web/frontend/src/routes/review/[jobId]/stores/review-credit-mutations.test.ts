@@ -15,6 +15,7 @@ const fixture = (id: string): BatchJobResponse =>
 	({
 		id,
 		status: 'completed',
+		apply_generation: 0,
 		destination: '/synthetic/output',
 		results: {
 			'/synthetic/movie.mp4': {
@@ -41,6 +42,7 @@ afterEach(() => {
 	cleanup();
 	clients.splice(0).forEach((client) => client.clear());
 	vi.restoreAllMocks();
+	vi.useRealTimers();
 });
 async function mount() {
 	const client = new QueryClient({
@@ -199,7 +201,7 @@ it('refuses credit mutations during an ordinary save or Apply', async () => {
 	const save = state.saveAllEdits();
 	await waitFor(() => expect(state.isSavingEdits).toBe(true));
 	expect(state.beginCreditMutation('credit:41', 'a')).toBeNull();
-	const apply = vi.spyOn(apiClient, 'organizeBatchJob').mockResolvedValue({} as never);
+	const apply = vi.spyOn(apiClient, 'organizeBatchJob').mockResolvedValue({ apply_generation: 1 } as never);
 	await state.organizeAll();
 	expect(apply).not.toHaveBeenCalled();
 	saving.resolve({} as never);
@@ -264,10 +266,13 @@ it('does not retry excluded files or start Apply when no failures remain', async
 	expect(state.failedResults).toHaveLength(0);
 });
 it('preserves the controller retry options when persistent recovery is unavailable', async () => {
+	const job = fixture('a');
+	vi.mocked(apiClient.getBatchJob).mockResolvedValue(job);
 	const { state } = await mount();
+	vi.useFakeTimers();
 	const apply = vi
 		.spyOn(apiClient, 'organizeBatchJob')
-		.mockRejectedValueOnce(new Error('Initial launch failed'))
+		.mockResolvedValueOnce({ apply_generation: 1 } as never)
 		.mockResolvedValue({} as never);
 	await state.organizeAll(true, true, {
 		operation_mode: 'metadata-artwork',
@@ -275,6 +280,11 @@ it('preserves the controller retry options when persistent recovery is unavailab
 		skip_nfo: true,
 		skip_download: true,
 	});
+	job.apply_generation = 1;
+	job.status = 'failed';
+	job.results['/synthetic/movie.mp4'].status = 'failed';
+	await vi.advanceTimersByTimeAsync(1500);
+	vi.useRealTimers();
 	state.fileStatuses.set('/synthetic/movie.mp4', { status: 'failed', error: 'Retry me' });
 	await state.retryFailed();
 	expect(apply).toHaveBeenCalledTimes(2);
@@ -285,7 +295,7 @@ it('preserves the controller retry options when persistent recovery is unavailab
 		overrides: { operation_mode: 'metadata-artwork' },
 	});
 });
-it('retries a reloaded update-mode credit failure without a local recovery record', async () => {
+it('blocks a reloaded update-mode credit failure without a trusted request snapshot', async () => {
 	const job = fixture('a');
 	job.update = true;
 	job.results['/synthetic/movie.mp4'].status = 'failed';
@@ -294,8 +304,8 @@ it('retries a reloaded update-mode credit failure without a local recovery recor
 	const apply = vi.spyOn(apiClient, 'updateBatchJob').mockResolvedValue({} as never);
 	const { state } = await mount();
 	await state.retryFailed();
-	expect(apply).toHaveBeenCalledOnce();
-	expect(apply.mock.calls[0][1]?.retry_file_paths).toEqual(['/synthetic/movie.mp4']);
+	expect(apply).not.toHaveBeenCalled();
+	expect(state.canRetryFailed).toBe(false);
 });
 it('blocks new credit writes during a standalone authoritative refresh', async () => {
 	const { state } = await mount();

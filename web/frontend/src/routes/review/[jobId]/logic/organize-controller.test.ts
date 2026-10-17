@@ -109,7 +109,7 @@ function makeDeps(overrides: DepsOverrides = {}) {
 				// will re-evaluate status and finalize.
 				return currentJob ?? makeJob('organizing');
 			},
-			organizeBatchJob: overrides.organizeBatchJob ?? defaultOrganizeBatchJob,
+			organizeBatchJob: overrides.organizeBatchJob ?? vi.fn(async () => ({ apply_generation: (currentJob?.apply_generation ?? 0) + 1 })),
 			updateBatchJob:
 				overrides.updateBatchJob ?? (async (_jobId: string, _request?: UpdateRequest) => undefined),
 		},
@@ -187,11 +187,11 @@ describe('organize-controller pollOnce terminal-success branches', () => {
 		await organizeRequest;
 	});
 
-	it('polls to completion while the apply generation advances with a pending POST', async () => {
-		let resolvePost!: () => void;
+	it('waits for the receipt before completing a generation observed during pending POST', async () => {
+		let resolvePost!: (value: { apply_generation: number }) => void;
 		const post = vi.fn(
 			() =>
-				new Promise<void>((resolve) => {
+				new Promise<{ apply_generation: number }>((resolve) => {
 					resolvePost = resolve;
 				}),
 		);
@@ -207,9 +207,11 @@ describe('organize-controller pollOnce terminal-success branches', () => {
 		job.apply_generation = 3;
 		await vi.advanceTimersByTimeAsync(30);
 
-		expect(calls.setOrganizeStatus).toContain('completed');
-		resolvePost();
+		expect(calls.setOrganizeStatus).not.toContain('completed');
+		resolvePost({ apply_generation: 3 });
 		await organizeRequest;
+		await vi.advanceTimersByTimeAsync(10);
+		expect(calls.setOrganizeStatus).toContain('completed');
 		controller.cleanup();
 	});
 
@@ -247,6 +249,8 @@ describe('organize-controller pollOnce terminal-success branches', () => {
 			jobId: 'job-1',
 			operation: 'organize',
 			preApplyGeneration: 2,
+			acceptedApplyGeneration: 3,
+			operationMode: 'organize',
 			destination: '/out',
 			skipNfo: false,
 			skipDownload: false,
@@ -285,7 +289,7 @@ describe('organize-controller pollOnce terminal-success branches', () => {
 			job,
 			organizeBatchJob: vi.fn((_jobId, request) => {
 				requests.push(request);
-				return Promise.resolve();
+				return Promise.resolve({ apply_generation: 1 });
 			}),
 		});
 		const controller = createOrganizeController(deps);
@@ -556,14 +560,16 @@ describe('organize-controller handleWebSocketMessage progress gating (NEW-1)', (
 });
 
 it('requires an originating retry context and revokes it on cleanup', async () => {
-	const apply = vi.fn().mockResolvedValue(undefined);
-	const { deps, fileStatuses } = makeDeps({ organizeBatchJob: apply });
+	const apply = vi.fn().mockResolvedValue({ apply_generation: 1 });
+	const job = makeJob('failed');
+	const { deps, fileStatuses } = makeDeps({ job, organizeBatchJob: apply });
 	const controller = createOrganizeController(deps);
 	fileStatuses.set('/synthetic/failed.mp4', { status: 'failed', error: 'Credit conflict' });
 	expect(controller.hasRetryContext).toBe(false);
 	await controller.retryFailed();
 	expect(apply).not.toHaveBeenCalled();
 	await controller.organizeAll();
+	job.apply_generation = 1;
 	expect(controller.hasRetryContext).toBe(true);
 	controller.cleanup();
 	expect(controller.hasRetryContext).toBe(false);

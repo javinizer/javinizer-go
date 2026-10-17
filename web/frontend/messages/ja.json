@@ -1667,7 +1667,7 @@
   "review_reset_to_config": "設定にリセット",
   "review_reset_to_original": "オリジナルにリセット",
   "review_retry_failed": "失敗を再試行",
-  "review_retry_operation_unknown": "元のファイル操作を確認できないため、失敗の再試行は無効です。ファイル操作と設定を確認し、「整理」で新しい試行を開始してください。",
+  "review_retry_operation_unknown": "元の適用処理または設定を確認できないため、失敗したファイルの再試行は無効です。ジョブを更新して設定を確認し、適用から新しい処理を開始してください。",
   "review_retry_storage_unavailable": "以前の再試行設定を置換または削除できないため、新しい操作は開始されていません。ブラウザーの保存領域を確保するかアクセスを復元し、ファイル操作を確認して再度適用してください。",
   "review_retry_load": "読み込みを再試行",
   "review_return_to_browse_now": "今すぐ参照に戻る",

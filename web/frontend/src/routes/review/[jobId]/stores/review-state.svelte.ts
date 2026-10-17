@@ -57,10 +57,7 @@ import type { BeginCreditMutation } from '$lib/utils/credit-mutation';
 import { calculateCompleteness, type CompletenessTier } from '$lib/utils/completeness';
 import { nextOrganizeProgress } from '$lib/utils/job-progress';
 import { createReviewMutations } from './review-mutations.svelte';
-import {
-	buildMovieOverride,
-	rebaseOverlayOntoMovie,
-} from './save-helpers';
+import { buildMovieOverride, rebaseOverlayOntoMovie } from './save-helpers';
 import { clearCropGeometry, siblingResultFilePaths } from './poster-crop-sync';
 import { getReviewDetailTimeoutMs } from '../review-config';
 import {
@@ -185,8 +182,54 @@ export function shouldClearUnstartedApplyRecovery(
 }
 
 export function isCreditBlockedResult(result: FileResult): boolean {
-	return result.status === 'failed' && !!result.movie &&
-		(result.error_code === 'credit_conflict' || result.error_code === 'credit_status_unavailable');
+	return (
+		result.status === 'failed' &&
+		!!result.movie &&
+		(result.error_code === 'credit_conflict' || result.error_code === 'credit_status_unavailable')
+	);
+}
+
+function validRecoveryOptions(value: unknown): boolean {
+	if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+	const options = value as Record<string, unknown>;
+	for (const key of [
+		'force_overwrite',
+		'preserve_nfo',
+		'overwrite_existing_media',
+		'skip_nfo',
+		'skip_download',
+	]) {
+		if (options[key] !== undefined && typeof options[key] !== 'boolean') return false;
+	}
+	const choices: Record<string, string[]> = {
+		preset: ['conservative', 'gap-fill', 'aggressive'],
+		scalar_strategy: [
+			'prefer-nfo',
+			'prefer-scraper',
+			'preserve-existing',
+			'fill-missing-only',
+			'merge-arrays',
+		],
+		array_strategy: ['merge', 'replace'],
+		operation_mode: [
+			'organize',
+			'in-place',
+			'in-place-norenamefolder',
+			'metadata-artwork',
+			'preview',
+		],
+	};
+	for (const [key, allowed] of Object.entries(choices)) {
+		if (options[key] !== undefined && !allowed.includes(options[key] as string)) return false;
+	}
+	if (options.destination !== undefined && typeof options.destination !== 'string') return false;
+	if (
+		options.retry_file_paths !== undefined &&
+		(!Array.isArray(options.retry_file_paths) ||
+			options.retry_file_paths.some((path) => typeof path !== 'string'))
+	)
+		return false;
+	return options.overrides === undefined || validRecoveryOptions(options.overrides);
 }
 
 export function createReviewState(getJobId: () => string) {
@@ -208,37 +251,56 @@ export function createReviewState(getJobId: () => string) {
 		}
 	}
 
+	// Apply receipts belong to this tab. Session storage survives reloads without
+	// allowing another tab to overwrite or erase an in-flight attempt. Shared
+	// legacy localStorage recovery is deliberately not adopted.
 	const applyRecoveryKey = (targetJobId: string) => `javinizer.review.applyRecovery.${targetJobId}`;
 	const failedRecoveryWrites = new Set<string>();
+	const recoveryWriteSnapshots = new Map<string, string | null>();
+	let currentApplyRecovery: ApplyRecoveryState | null = null;
 
 	function readApplyRecovery(targetJobId: string): ApplyRecoveryState | null {
 		if (!browser || failedRecoveryWrites.has(targetJobId)) return null;
 		try {
-			const raw = localStorage.getItem(applyRecoveryKey(targetJobId));
+			const raw = sessionStorage.getItem(applyRecoveryKey(targetJobId));
 			if (!raw) return null;
 			const parsed = JSON.parse(raw) as Partial<ApplyRecoveryState>;
 			const organizeOperations: OrganizeOperation[] = ['move', 'copy', 'hardlink', 'softlink'];
+			const modes = [
+				'organize',
+				'in-place',
+				'in-place-norenamefolder',
+				'metadata-artwork',
+				'preview',
+			];
 			if (
 				parsed.jobId !== targetJobId ||
 				(parsed.operation !== 'organize' && parsed.operation !== 'update') ||
 				typeof parsed.skipNfo !== 'boolean' ||
 				typeof parsed.skipDownload !== 'boolean' ||
 				(parsed.operation === 'organize' &&
-					!organizeOperations.includes(parsed.organizeOperation as OrganizeOperation)) ||
+					(!organizeOperations.includes(parsed.organizeOperation as OrganizeOperation) ||
+						typeof parsed.destination !== 'string' ||
+						!modes.includes(parsed.operationMode ?? ''))) ||
 				(parsed.preApplyGeneration !== undefined &&
 					(typeof parsed.preApplyGeneration !== 'number' ||
 						!Number.isSafeInteger(parsed.preApplyGeneration) ||
 						parsed.preApplyGeneration < 0)) ||
-				(job?.id === targetJobId && job.apply_generation !== undefined &&
-					(parsed.preApplyGeneration === undefined ||
-						(job.apply_generation !== parsed.preApplyGeneration &&
-							job.apply_generation !== parsed.preApplyGeneration + 1))) ||
+				typeof parsed.acceptedApplyGeneration !== 'number' ||
+				!Number.isSafeInteger(parsed.acceptedApplyGeneration) ||
+				parsed.acceptedApplyGeneration <= 0 ||
+				(parsed.operation === 'update' && !validRecoveryOptions(parsed.updateOptions)) ||
+				(parsed.overrides !== undefined && !validRecoveryOptions(parsed.overrides)) ||
 				(parsed.eligibleFilePaths !== undefined && !Array.isArray(parsed.eligibleFilePaths)) ||
 				(parsed.succeeded !== undefined && !Array.isArray(parsed.succeeded))
 			) {
 				clearApplyRecovery(targetJobId);
 				return null;
 			}
+			// A valid record for a different generation may belong to another tab.
+			if (job?.id !== targetJobId || job.apply_generation !== parsed.acceptedApplyGeneration)
+				return null;
+			recoveryWriteSnapshots.set(targetJobId, raw);
 			const failed = parsed.failed && typeof parsed.failed === 'object' ? parsed.failed : {};
 			const eligibleFilePaths = Array.isArray(parsed.eligibleFilePaths)
 				? parsed.eligibleFilePaths.filter(
@@ -252,6 +314,8 @@ export function createReviewState(getJobId: () => string) {
 				jobId: parsed.jobId,
 				operation: parsed.operation,
 				preApplyGeneration: parsed.preApplyGeneration,
+				acceptedApplyGeneration: parsed.acceptedApplyGeneration,
+				operationMode: parsed.operationMode,
 				destination: typeof parsed.destination === 'string' ? parsed.destination : '',
 				skipNfo: parsed.skipNfo,
 				skipDownload: parsed.skipDownload,
@@ -272,12 +336,14 @@ export function createReviewState(getJobId: () => string) {
 		if (!browser) return true;
 		let previousRecord: string | null | undefined;
 		try {
-			previousRecord = localStorage.getItem(applyRecoveryKey(recovery.jobId));
+			previousRecord = sessionStorage.getItem(applyRecoveryKey(recovery.jobId));
 		} catch {
 			// Unreadable storage is not proof that no older authority exists.
 		}
 		try {
-			localStorage.setItem(applyRecoveryKey(recovery.jobId), JSON.stringify(recovery));
+			const raw = JSON.stringify(recovery);
+			sessionStorage.setItem(applyRecoveryKey(recovery.jobId), raw);
+			recoveryWriteSnapshots.set(recovery.jobId, raw);
 			failedRecoveryWrites.delete(recovery.jobId);
 			return true;
 		} catch {
@@ -285,19 +351,45 @@ export function createReviewState(getJobId: () => string) {
 			// Keep the active controller usable, but revoke stale disk recovery.
 			failedRecoveryWrites.add(recovery.jobId);
 			const removed = clearApplyRecovery(recovery.jobId);
-			return previousRecord === null || removed;
+			if (previousRecord === null || removed) {
+				recoveryWriteSnapshots.set(recovery.jobId, null);
+				return true;
+			}
+			recoveryWriteSnapshots.delete(recovery.jobId);
+			return false;
 		}
 	}
 
 	function clearApplyRecovery(targetJobId: string): boolean {
 		if (!browser) return true;
 		try {
-			localStorage.removeItem(applyRecoveryKey(targetJobId));
+			sessionStorage.removeItem(applyRecoveryKey(targetJobId));
 			return true;
 		} catch {
 			// Blocked storage cannot establish or clear a trusted retry context.
 			return false;
 		}
+	}
+
+	function ownsRecoveryStorage(targetJobId: string): boolean {
+		if (!browser) return true;
+		try {
+			if (
+				recoveryWriteSnapshots.has(targetJobId) &&
+				sessionStorage.getItem(applyRecoveryKey(targetJobId)) ===
+					recoveryWriteSnapshots.get(targetJobId)
+			)
+				return true;
+		} catch {
+			// A delayed callback cannot revoke or overwrite an unreadable owner.
+		}
+		failedRecoveryWrites.add(targetJobId);
+		recoveryWriteSnapshots.delete(targetJobId);
+		return false;
+	}
+
+	function writeOwnedApplyRecovery(recovery: ApplyRecoveryState) {
+		if (ownsRecoveryStorage(recovery.jobId)) writeApplyRecovery(recovery);
 	}
 
 	function getApplyEligibleFilePaths(batchJob: BatchJobResponse | null): string[] {
@@ -376,10 +468,16 @@ export function createReviewState(getJobId: () => string) {
 	const creditMutationErrors = new SvelteMap<string, string>();
 	const creditMutationError = $derived(Array.from(creditMutationErrors.values())[0] ?? null);
 	const creditWritesBlocked = $derived(
-		pendingCreditMutations.size > 0 || collisionRefreshPending || !!collisionRefreshError || !!creditMutationError,
+		pendingCreditMutations.size > 0 ||
+			collisionRefreshPending ||
+			!!collisionRefreshError ||
+			!!creditMutationError,
 	);
 	let refreshError = $derived(
-		collisionRefreshError ?? recoveryStorageError ?? creditMutationError ?? (loadPhase === 'refresh-error' ? refreshLoadError : null),
+		collisionRefreshError ??
+			recoveryStorageError ??
+			creditMutationError ??
+			(loadPhase === 'refresh-error' ? refreshLoadError : null),
 	);
 
 	const configQuery = createConfigQuery();
@@ -567,18 +665,27 @@ export function createReviewState(getJobId: () => string) {
 	const failedResults = $derived<FileResult[]>(
 		job
 			? (Object.values((job as BatchJobResponse).results) as FileResult[]).filter(
-					(r) => r.status === 'failed' && !isCreditBlockedResult(r) && !((job as BatchJobResponse).excluded ?? {})[r.file_path],
+					(r) =>
+						r.status === 'failed' &&
+						!isCreditBlockedResult(r) &&
+						!((job as BatchJobResponse).excluded ?? {})[r.file_path],
 				)
 			: [],
 	);
 
 	const creditBlockedResults = $derived(
-		Object.values(job?.results ?? {}).filter((result) =>
-			isCreditBlockedResult(result) && !job?.excluded?.[result.file_path]),
+		Object.values(job?.results ?? {}).filter(
+			(result) => isCreditBlockedResult(result) && !job?.excluded?.[result.file_path],
+		),
 	);
-	const recoveredCreditStatuses = $derived(new Map<string, FileStatus>(
-		creditBlockedResults.map((result) => [result.file_path, { status: 'failed', error: result.error }]),
-	));
+	const recoveredCreditStatuses = $derived(
+		new Map<string, FileStatus>(
+			creditBlockedResults.map((result) => [
+				result.file_path,
+				{ status: 'failed', error: result.error },
+			]),
+		),
+	);
 
 	const tierCounts = $derived.by<Record<CompletenessTier, number>>(() => {
 		const counts: Record<CompletenessTier, number> = { incomplete: 0, partial: 0, complete: 0 };
@@ -1201,7 +1308,10 @@ export function createReviewState(getJobId: () => string) {
 		pendingMovieSave = token;
 		try {
 			const result = await runForJob(targetJobId, () =>
-				mutations.saveEditsMutation.mutateAsync({ jobId: targetJobId, generation: targetGeneration }),
+				mutations.saveEditsMutation.mutateAsync({
+					jobId: targetJobId,
+					generation: targetGeneration,
+				}),
 			);
 			// allSettled lets the mutation reconcile successful and rejected families.
 			// A fresh baseline does not mean every edit was saved: callers must stop
@@ -1235,9 +1345,12 @@ export function createReviewState(getJobId: () => string) {
 			// A catalog refresh can fail while the pre-Apply save is in flight.
 			// Reject inside the controller's handled path before it starts Apply.
 			if (creditWritesBlocked) {
-				throw Object.assign(new Error(creditMutationError ?? collisionRefreshError ?? m.common_loading()), {
-					code: 'APPLY_NOT_STARTED',
-				});
+				throw Object.assign(
+					new Error(creditMutationError ?? collisionRefreshError ?? m.common_loading()),
+					{
+						code: 'APPLY_NOT_STARTED',
+					},
+				);
 			}
 		},
 		getOrganizeStatus: () => organizeStatus,
@@ -1268,22 +1381,32 @@ export function createReviewState(getJobId: () => string) {
 		toastSuccess: (message, duration) => toastStore.success(message, duration),
 		toastError: (message, duration) => toastStore.error(message, duration),
 		toastInfo: (message, duration) => toastStore.info(message, duration),
+		recordApplyAccepted: (generation) => {
+			if (!currentApplyRecovery || currentApplyRecovery.jobId !== jobId) return;
+			currentApplyRecovery.acceptedApplyGeneration = generation;
+			writeOwnedApplyRecovery(currentApplyRecovery);
+		},
 		recordApplyFailure: (filePath, error) => {
-			const recovery = readApplyRecovery(jobId);
+			const recovery = currentApplyRecovery ?? readApplyRecovery(jobId);
 			if (recovery) {
 				recovery.failed[filePath] = error ?? 'Operation failed';
-				writeApplyRecovery(recovery);
+				writeOwnedApplyRecovery(recovery);
 			}
 		},
 		recordApplySuccess: (filePath) => {
-			const recovery = readApplyRecovery(jobId);
+			const recovery = currentApplyRecovery ?? readApplyRecovery(jobId);
 			if (recovery) {
 				delete recovery.failed[filePath];
 				if (!recovery.succeeded.includes(filePath)) recovery.succeeded.push(filePath);
-				writeApplyRecovery(recovery);
+				writeOwnedApplyRecovery(recovery);
 			}
 		},
-		clearApplyRecovery: () => clearApplyRecovery(jobId),
+		clearApplyRecovery: () => {
+			currentApplyRecovery = null;
+			failedRecoveryWrites.add(jobId);
+			if (ownsRecoveryStorage(jobId)) clearApplyRecovery(jobId);
+			recoveryWriteSnapshots.delete(jobId);
+		},
 		navigateBrowse: () => {
 			void goto('/browse');
 		},
@@ -1565,16 +1688,22 @@ export function createReviewState(getJobId: () => string) {
 		// A retry list is a server-side subset. The main Apply action must still
 		// include every reviewable file; Retry Failed supplies only failed paths.
 		return creditBlockedResults.length > 0
-			? [...getApplyEligibleFilePaths(job), ...creditBlockedResults.map((result) => result.file_path)]
+			? [
+					...getApplyEligibleFilePaths(job),
+					...creditBlockedResults.map((result) => result.file_path),
+				]
 			: [];
 	}
 
 	function prepareApplyRecovery(recovery: ApplyRecoveryState): boolean {
+		recovery = structuredClone(recovery);
 		if (writeApplyRecovery(recovery)) {
+			currentApplyRecovery = recovery;
 			recoveryStorageError = null;
 			return true;
 		}
 		organizeController.cleanup();
+		currentApplyRecovery = null;
 		recoveryStorageError = m.review_retry_storage_unavailable();
 		return false;
 	}
@@ -1582,59 +1711,85 @@ export function createReviewState(getJobId: () => string) {
 	async function organizeAll(
 		skipNfoArg = skipNfo,
 		skipDownloadArg = skipDownload,
-		overridesArg = buildReviewOverrides(),
+		overridesArg: ReviewApplyOverrides | null = buildReviewOverrides(),
 		retryPaths: string[] = defaultApplyPaths(),
 		operationArg: OrganizeOperation = organizeOperation,
+		destinationArg = destinationPath,
+		modeArg = getEffectiveOperationMode(),
+		expectedApplyGeneration?: number,
 	) {
 		if (organizing || pendingMovieSave !== null || reviewRefreshBlocked()) return;
 		const targetJobId = jobId;
-		if (!prepareApplyRecovery({
-			jobId: targetJobId,
-			operation: 'organize',
-			preApplyGeneration: job?.apply_generation,
-			destination: destinationPath,
-			skipNfo: skipNfoArg,
-			skipDownload: skipDownloadArg,
-			organizeOperation: operationArg,
-			overrides: overridesArg,
-			failed: {},
-			succeeded: [],
-			eligibleFilePaths: Array.from(new Set([...getApplyEligibleFilePaths(job), ...retryPaths])),
-		})) return;
+		if (
+			!prepareApplyRecovery({
+				jobId: targetJobId,
+				operation: 'organize',
+				preApplyGeneration: job?.apply_generation,
+				destination: destinationArg,
+				operationMode: modeArg,
+				skipNfo: skipNfoArg,
+				skipDownload: skipDownloadArg,
+				organizeOperation: operationArg,
+				overrides: overridesArg ?? undefined,
+				failed: {},
+				succeeded: [],
+				eligibleFilePaths: Array.from(new Set([...getApplyEligibleFilePaths(job), ...retryPaths])),
+			})
+		)
+			return;
 		await runForJob(targetJobId, () =>
-			organizeController.organizeAll(skipNfoArg, skipDownloadArg, overridesArg, retryPaths, operationArg),
+			organizeController.organizeAll(
+				skipNfoArg,
+				skipDownloadArg,
+				overridesArg ?? undefined,
+				retryPaths,
+				operationArg,
+				destinationArg,
+				modeArg,
+				expectedApplyGeneration,
+			),
 		);
 	}
 
-	async function updateAll(options?: UpdateRequest, retryPaths: string[] = defaultApplyPaths()) {
+	async function updateAll(
+		options?: UpdateRequest,
+		retryPaths: string[] = defaultApplyPaths(),
+		expectedApplyGeneration?: number,
+	) {
 		if (organizing || pendingMovieSave !== null || reviewRefreshBlocked()) return;
 		const targetJobId = jobId;
 		const request: UpdateRequest = options ?? { overrides: buildReviewOverrides() };
-		if (!prepareApplyRecovery({
-			jobId: targetJobId,
-			operation: 'update',
-			preApplyGeneration: job?.apply_generation,
-			destination: '',
-			skipNfo: false,
-			skipDownload: false,
-			organizeOperation: 'move',
-			updateOptions: request,
-			failed: {},
-			succeeded: [],
-			eligibleFilePaths: Array.from(new Set([...getApplyEligibleFilePaths(job), ...retryPaths])),
-		})) return;
-		await runForJob(targetJobId, () => organizeController.updateAll(request, retryPaths));
+		if (
+			!prepareApplyRecovery({
+				jobId: targetJobId,
+				operation: 'update',
+				preApplyGeneration: job?.apply_generation,
+				destination: '',
+				skipNfo: false,
+				skipDownload: false,
+				organizeOperation: 'move',
+				updateOptions: request,
+				failed: {},
+				succeeded: [],
+				eligibleFilePaths: Array.from(new Set([...getApplyEligibleFilePaths(job), ...retryPaths])),
+			})
+		)
+			return;
+		await runForJob(targetJobId, () =>
+			organizeController.updateAll(request, retryPaths, expectedApplyGeneration),
+		);
 	}
 
 	async function retryFailed() {
-		if (recoveryStorageError || organizing || pendingMovieSave !== null || reviewRefreshBlocked()) return;
+		if (recoveryStorageError || organizing || pendingMovieSave !== null || reviewRefreshBlocked())
+			return;
 		const targetJobId = jobId;
 		const currentOptions = organizeController.retryOptions;
-		const recovery = currentOptions ? null : readApplyRecovery(targetJobId);
+		const recovery = organizeController.hasApplyContext ? null : readApplyRecovery(targetJobId);
 		const options = currentOptions ?? recovery;
 		// A failed row or apply_plan does not contain the original copy/link mode.
-		// Only a validated record or this controller's own run can authorize retry.
-		if (!options && !isUpdateMode) return;
+		// Only an exact accepted-generation receipt and its original options authorize retry.
+		if (!options) return;
 		const retryPaths = new Set(Object.keys(recovery?.failed ?? {}));
 		for (const [filePath, status] of fileStatuses) {
 			if (status.status === 'failed') retryPaths.add(filePath);
@@ -1645,15 +1800,21 @@ export function createReviewState(getJobId: () => string) {
 		const paths = Array.from(retryPaths).filter((filePath) => !job?.excluded?.[filePath]);
 		if (paths.length === 0) return;
 		if (options?.operation === 'update') {
-			await updateAll(options.updateOptions, paths);
+			await updateAll(options.updateOptions, paths, options.acceptedApplyGeneration);
 			return;
 		}
 		if (options?.operation === 'organize') {
-			await organizeAll(options.skipNfo, options.skipDownload, options.overrides, paths, options.organizeOperation);
+			await organizeAll(
+				options.skipNfo,
+				options.skipDownload,
+				options.overrides ?? null,
+				paths,
+				options.organizeOperation,
+				options.destination,
+				options.operationMode,
+				options.acceptedApplyGeneration,
+			);
 			return;
-		}
-		if (isUpdateMode) {
-			await updateAll(undefined, paths);
 		}
 	}
 
@@ -1677,6 +1838,7 @@ export function createReviewState(getJobId: () => string) {
 		collisionRefreshPending = false;
 		collisionRefreshError = null;
 		recoveryStorageError = null;
+		currentApplyRecovery = null;
 		operationScope = null;
 		mutations.posterFromUrlMutation.reset();
 		mutations.posterCropMutation.reset();
@@ -1767,49 +1929,17 @@ export function createReviewState(getJobId: () => string) {
 
 	$effect(() => {
 		const loadedJob = job;
-		if (!loadedJob || loadedJob.id !== jobId || organizeController.hasRetryContext) return;
+		// A local pending, rejected, or acknowledged attempt must not adopt disk
+		// authority belonging to another tab or clear it using a cached snapshot.
+		if (!loadedJob || loadedJob.id !== jobId || organizing || organizeController.hasApplyContext)
+			return;
 		const recovery = readApplyRecovery(loadedJob.id);
 		if (!recovery) return;
 		if (recovery.operation === 'organize') {
 			organizeOperation = recovery.organizeOperation;
 			if (recovery.destination) destinationPath = recovery.destination;
 		}
-		const hasRecordedApplyOutcome =
-			Object.keys(recovery.failed).length > 0 || recovery.succeeded.length > 0;
-		const applyStartedAfterRecord =
-			recovery.preApplyGeneration !== undefined &&
-			loadedJob.apply_generation !== undefined &&
-			loadedJob.apply_generation > recovery.preApplyGeneration;
-		// The backend increments apply_generation atomically with the Running
-		// claim. Equal generations therefore prove this record never launched
-		// an apply, unless a per-file outcome was already persisted.
-		// prepareOrganizeRun marks the local operation as organizing before
-		// saveAllEdits can refetch this still-pre-apply job. Preserve recovery
-		// metadata during that window; only a settled page may classify an equal
-		// generation as a launch failure.
-		const localApplyPending = organizing || organizeStatus === 'organizing';
-		const launchFailedBeforeStart = shouldClearUnstartedApplyRecovery(
-			loadedJob,
-			recovery,
-			localApplyPending,
-		);
-		if (launchFailedBeforeStart) {
-			clearApplyRecovery(loadedJob.id);
-			return;
-		}
-		const terminalRecoveryState =
-			loadedJob.status === 'organized' ||
-			loadedJob.status === 'failed' ||
-			loadedJob.status === 'cancelled' ||
-			loadedJob.status === 'reverted';
-		const needsRecoveryPolling =
-			loadedJob.status === 'running' ||
-			terminalRecoveryState ||
-			(loadedJob.status === 'completed' && loadedJob.failed > 0) ||
-			hasRecordedApplyOutcome ||
-			applyStartedAfterRecord;
-		if (!needsRecoveryPolling && !isApplyInProgress(loadedJob)) return;
-		if (organizeStatus === 'idle' && !organizing) organizeController.resumePolling(recovery);
+		if (organizeStatus === 'idle') organizeController.resumePolling(recovery);
 	});
 
 	$effect(() => {
@@ -2045,12 +2175,20 @@ export function createReviewState(getJobId: () => string) {
 	}
 
 	const beginCreditMutation: BeginCreditMutation = (key, movieContentId) => {
-		if (disposed || organizing || pendingMovieSave !== null || pendingCreditMutations.size > 0 || collisionRefreshPending) return null;
+		if (
+			disposed ||
+			organizing ||
+			pendingMovieSave !== null ||
+			pendingCreditMutations.size > 0 ||
+			collisionRefreshPending
+		)
+			return null;
 		const targetJobId = jobId;
 		const targetGeneration = routeGeneration;
 		const token = Symbol(key);
 		let finished = false;
-		const isCurrent = () => !disposed && jobId === targetJobId && routeGeneration === targetGeneration;
+		const isCurrent = () =>
+			!disposed && jobId === targetJobId && routeGeneration === targetGeneration;
 		pendingCreditMutations.add(token);
 		return {
 			isCurrent,
@@ -2059,7 +2197,12 @@ export function createReviewState(getJobId: () => string) {
 				finished = true;
 				try {
 					if (error != null) {
-						creditMutationErrors.set(key, error instanceof Error && error.message ? error.message : m.editor_movie_name_update_failed());
+						creditMutationErrors.set(
+							key,
+							error instanceof Error && error.message
+								? error.message
+								: m.editor_movie_name_update_failed(),
+						);
 					} else {
 						creditMutationErrors.delete(key);
 						await refreshAfterCollision(movieContentId);
@@ -2079,12 +2222,7 @@ export function createReviewState(getJobId: () => string) {
 		const baselineJob = job;
 		const targetFilePaths = Object.entries(baselineJob?.results ?? {})
 			.filter(([, result]) =>
-				[
-					result.movie_id,
-					result.movie?.id,
-					result.movie?.code,
-					result.movie?.content_id,
-				].some(
+				[result.movie_id, result.movie?.id, result.movie?.code, result.movie?.content_id].some(
 					(value) => typeof value === 'string' && value.trim().toLowerCase() === targetMovieKey,
 				),
 			)
@@ -2094,7 +2232,12 @@ export function createReviewState(getJobId: () => string) {
 
 		try {
 			const refreshed = await jobQuery.refetch({ cancelRefetch: true });
-			if (jobId !== targetJobId || routeGeneration !== targetGeneration || refreshToken !== collisionRefreshToken) return;
+			if (
+				jobId !== targetJobId ||
+				routeGeneration !== targetGeneration ||
+				refreshToken !== collisionRefreshToken
+			)
+				return;
 			if (refreshed.error) {
 				collisionRefreshError =
 					refreshed.error instanceof Error ? refreshed.error.message : m.review_refresh_error();
@@ -2106,7 +2249,10 @@ export function createReviewState(getJobId: () => string) {
 			}
 
 			const nextJob = JSON.parse(JSON.stringify(refreshed.data)) as BatchJobResponse;
-			if (targetFilePaths.length > 0 && !targetFilePaths.some((filePath) => nextJob.results[filePath])) {
+			if (
+				targetFilePaths.length > 0 &&
+				!targetFilePaths.some((filePath) => nextJob.results[filePath])
+			) {
 				collisionRefreshError = m.review_refresh_error();
 				return;
 			}
@@ -2122,12 +2268,22 @@ export function createReviewState(getJobId: () => string) {
 					}
 				}
 			}
-			if (jobId !== targetJobId || routeGeneration !== targetGeneration || refreshToken !== collisionRefreshToken) return;
+			if (
+				jobId !== targetJobId ||
+				routeGeneration !== targetGeneration ||
+				refreshToken !== collisionRefreshToken
+			)
+				return;
 			collisionRefreshError = null;
 			skipJobSync = true;
 			job = nextJob;
 		} catch (error) {
-			if (jobId !== targetJobId || routeGeneration !== targetGeneration || refreshToken !== collisionRefreshToken) return;
+			if (
+				jobId !== targetJobId ||
+				routeGeneration !== targetGeneration ||
+				refreshToken !== collisionRefreshToken
+			)
+				return;
 			collisionRefreshError = error instanceof Error ? error.message : m.review_refresh_error();
 		} finally {
 			if (refreshToken === collisionRefreshToken) collisionRefreshPending = false;
@@ -2239,10 +2395,14 @@ export function createReviewState(getJobId: () => string) {
 			return organizeProgress;
 		},
 		get organizeStatus() {
-			return organizeStatus === 'idle' && recoveredCreditStatuses.size > 0 ? 'failed' : organizeStatus;
+			return organizeStatus === 'idle' && recoveredCreditStatuses.size > 0
+				? 'failed'
+				: organizeStatus;
 		},
 		get canRetryFailed() {
-			return !recoveryStorageError && (isUpdateMode || (organizeStatus !== 'idle' && organizeController.hasRetryContext));
+			return (
+				!recoveryStorageError && organizeStatus !== 'idle' && organizeController.hasRetryContext
+			);
 		},
 		set organizeStatus(v) {
 			organizeStatus = v;
@@ -2583,7 +2743,9 @@ export function createReviewState(getJobId: () => string) {
 		useScreenshotAsCover,
 		saveAllEdits,
 		get isSavingEdits() {
-			return pendingMovieSave !== null || pendingCreditMutations.size > 0 || collisionRefreshPending;
+			return (
+				pendingMovieSave !== null || pendingCreditMutations.size > 0 || collisionRefreshPending
+			);
 		},
 		get editedMovieCount() {
 			return editedMovies.size;

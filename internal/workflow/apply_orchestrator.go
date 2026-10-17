@@ -144,6 +144,18 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult
 
 	cmd = normalizeInPlaceLinkMode(cmd)
 
+	// Unfenced legacy Apply may move the video during organize. Classify the
+	// existing cast before that mutation and reuse the read-only merge result.
+	// Fenced Apply merges in its private stage before publishing any files.
+	var preflightMerge *nfo.MergeWithExistingResult
+	if preflight, ok := o.nfo.(nfo.CastMergePreflighter); artifactFencer(cmd) == nil && ok {
+		result := preflight.PreflightCreditMerge(cmd.Movie, o.existingNFOMergeOptions(cmd.Match, cmd))
+		if result.Err != nil {
+			return &ApplyResult{Movie: cmd.Movie, FoundNFOPath: result.FoundNFOPath, FailedStep: "merge", PrePublication: true}, result.Err
+		}
+		preflightMerge = &result
+	}
+
 	// Step 0: Begin revert log BEFORE any filesystem mutation.
 	opID, beginErr := o.beginRevertLog(ctx, cmd)
 	if beginErr != nil {
@@ -175,6 +187,7 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult
 	// Build the pipeline state that steps mutate via closure.
 	state := &applyPipelineState{
 		movie:          movie,
+		preflightMerge: preflightMerge,
 		targetDir:      targetDir,
 		finalDir:       targetDir,
 		artifact:       artifact,
@@ -549,19 +562,34 @@ func (o *applyOrchImpl) stepMerge(cmd ApplyCmd, state *applyPipelineState, steps
 			return matchErr
 		}
 	}
-	mergeRes := o.nfo.MergeWithExistingNFO(state.movie, nfo.MergeWithExistingOptions{
-		Match:          mergeMatch,
-		ForceOverwrite: cmd.Merge.ForceOverwrite,
-		PreserveNFO:    cmd.Merge.PreserveNFO,
-		ScalarStrategy: cmd.Merge.ScalarStrategy,
-		ArrayStrategy:  cmd.Merge.ArrayStrategy,
-	})
+	mergeRes := state.preflightMerge
+	if mergeRes == nil {
+		result := o.mergeExistingNFO(state.movie, mergeMatch, cmd)
+		mergeRes = &result
+	}
+	if mergeRes.Err != nil {
+		state.foundNFOPath = mergeRes.FoundNFOPath
+		return mergeRes.Err
+	}
+
 	state.movie = mergeRes.Movie
 	carryPosterCropAcrossMerge(state.movie, preBounds, preFull)
 	state.merged = mergeRes.Merged
 	state.foundNFOPath = mergeRes.FoundNFOPath
 	steps.Merged = true
 	return nil
+}
+
+func (o *applyOrchImpl) mergeExistingNFO(movie *models.Movie, match models.FileMatchInfo, cmd ApplyCmd) nfo.MergeWithExistingResult {
+	return o.nfo.MergeWithExistingNFO(movie, o.existingNFOMergeOptions(match, cmd))
+}
+
+func (o *applyOrchImpl) existingNFOMergeOptions(match models.FileMatchInfo, cmd ApplyCmd) nfo.MergeWithExistingOptions {
+	return nfo.MergeWithExistingOptions{
+		Match: match, ForceOverwrite: cmd.Merge.ForceOverwrite, PreserveNFO: cmd.Merge.PreserveNFO,
+		ScalarStrategy: cmd.Merge.ScalarStrategy, ArrayStrategy: cmd.Merge.ArrayStrategy,
+		UseCreditedName: o.applyCfg.NFONameCfg.UseCreditedName,
+	}
 }
 
 // Full-source intent must reach the downloader even if NFO merge changes the URL;
@@ -721,6 +749,7 @@ func (o *applyOrchImpl) stepNFO(ctx context.Context, cmd ApplyCmd, state *applyP
 // applyPipelineState holds mutable state shared across the apply pipeline steps.
 // Steps mutate this via closure — eliminating the need for per-step return value plumbing.
 type applyPipelineState struct {
+	preflightMerge      *nfo.MergeWithExistingResult
 	publicationRecovery *models.PublicationRecovery
 
 	movie            *models.Movie

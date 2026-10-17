@@ -94,6 +94,7 @@ beforeEach(async () => {
 	});
 	vi.spyOn(apiClient, 'previewOrganize').mockResolvedValue({} as never);
 	vi.spyOn(apiClient, 'getExistingNFO').mockResolvedValue({} as never);
+	vi.spyOn(apiClient, 'previewDisplayTitle').mockResolvedValue({ display_title: 'Synthetic display title' });
 	vi.spyOn(apiClient, 'getScrapers').mockResolvedValue([
 		{ name: 'synthetic', enabled: true },
 	] as never);
@@ -146,7 +147,7 @@ it.each(['credit_conflict', 'credit_status_unavailable'] as const)(
 				errorCode === 'credit_conflict'
 					? 'apply blocked by an open credit collision'
 					: 'apply blocked because credit collision status is unavailable';
-			return {} as never;
+			return { apply_generation: current.apply_generation } as never;
 		});
 		const view = mount();
 		await waitFor(() => expect(view.getByRole('button', { name: /Keep catalog/ })).toBeTruthy());
@@ -202,7 +203,7 @@ it('blocks an expanded movie-specific editor during Organize', async () => {
 	vi.spyOn(apiClient, 'getBatchJob').mockResolvedValue(original());
 	vi.mocked(apiClient.listCollisions).mockResolvedValue({ collisions: [] });
 	const override = vi.spyOn(apiClient, 'updateCreditOverride').mockResolvedValue();
-	const apply = vi.spyOn(apiClient, 'organizeBatchJob').mockResolvedValue({} as never);
+	const apply = vi.spyOn(apiClient, 'organizeBatchJob').mockResolvedValue({ apply_generation: 1 } as never);
 	const view = mount();
 	await fireEvent.click(await view.findByRole('button', { name: 'This movie only' }));
 	await fireEvent.input(view.getByLabelText('Name for this movie'), {
@@ -332,7 +333,7 @@ it.each(['credit_conflict', 'credit_status_unavailable'] as const)(
 		await waitFor(() => expect(resolve).toHaveBeenCalledOnce());
 		await waitFor(() => expect(observedReview.state?.isSavingEdits).toBe(false));
 		expect((view.getByRole('button', { name: /Retry Failed/i }) as HTMLButtonElement).disabled).toBe(true);
-		expect(view.getByText(/original file operation is unavailable/i)).toBeTruthy();
+		expect(view.getByText(/original apply attempt or settings could not be verified/i)).toBeTruthy();
 		await fireEvent.click(view.getByRole('tab', { name: /Failed/ }));
 		expect(view.getAllByRole('button', { name: /Search Manually/i })).toHaveLength(1);
 		expect(view.getByText('unidentified.mp4')).toBeTruthy();
@@ -388,7 +389,7 @@ it('keeps the expected-file success summary and Continue action wired outside th
 		current = structuredClone(current);
 		current.status = 'organized';
 		current.apply_generation = 1;
-		return {} as never;
+		return { apply_generation: 1 } as never;
 	});
 	const view = mount();
 	await fireEvent.click((await view.findAllByRole('button', { name: /Organize.*1.*file/i }))[0]);

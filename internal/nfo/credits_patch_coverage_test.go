@@ -7,6 +7,11 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// buildActorsFromCredits exercises credit rendering without a movie ownership key.
+func (g *Generator) buildActorsFromCredits(credits []models.MovieCredit) []actor {
+	return g.buildActorsFromCreditsForMovie(credits, "", credits)
+}
+
 func TestBuildActorsForMoviePatchBranches(t *testing.T) {
 	movie := &models.Movie{Actresses: []models.Actress{{FirstName: "Legacy"}}}
 	withoutCredits := (&Generator{config: &Config{}}).buildActorsForMovie(movie)

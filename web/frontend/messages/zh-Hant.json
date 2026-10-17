@@ -1667,7 +1667,7 @@
   "review_reset_to_config": "重設為設定值",
   "review_reset_to_original": "重設為原始",
   "review_retry_failed": "重試失敗項目",
-  "review_retry_operation_unknown": "無法還原原始檔案操作，因此已停用重試。請檢查檔案操作和設定，然後使用「整理」開始新的嘗試。",
+  "review_retry_operation_unknown": "無法驗證原始套用作業或設定，因此已停用重試失敗項目。請重新整理工作、檢查設定，然後使用套用開始新的作業。",
   "review_retry_storage_unavailable": "無法取代或刪除先前的重試設定，因此未啟動新操作。請釋放瀏覽器儲存空間或恢復存取權限，然後檢查檔案操作並重新套用。",
   "review_retry_load": "重試載入",
   "review_return_to_browse_now": "立即返回瀏覽",
