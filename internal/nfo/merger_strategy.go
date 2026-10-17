@@ -21,12 +21,14 @@ const (
 	FillMissingOnly MergeStrategy = "fill-missing-only"
 )
 
+const contentIDField = "ContentID"
+
 // criticalFields defines fields that must never be empty, regardless of merge strategy
 // These fields will always fall back to NFO if scraper returns empty
 var criticalFields = map[string]bool{
-	"ID":        true,
-	"ContentID": true,
-	"Title":     true,
+	"ID":           true,
+	contentIDField: true,
+	"Title":        true,
 }
 
 func (s MergeStrategy) String() string {

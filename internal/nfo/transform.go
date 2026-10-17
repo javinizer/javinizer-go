@@ -3,6 +3,7 @@ package nfo
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 
 	"github.com/javinizer/javinizer-go/internal/logging"
@@ -276,8 +277,8 @@ func (g *Generator) resolveCredits() string {
 }
 
 func (g *Generator) buildActorsForMovie(movie *models.Movie) []actor {
-	if len(movie.Credits) > 0 && g.creditAwareActors() {
-		return g.buildActorsFromCredits(movie.Credits)
+	if credits, present := movie.RenderingCredits(); present && g.creditAwareActors() {
+		return g.buildActorsFromCreditsForMovie(credits, movie.ContentID, movie.Credits)
 	}
 	return g.buildActors(movie.Actresses)
 }
@@ -296,8 +297,7 @@ func (g *Generator) resolveCreditDisplayName(credit models.MovieCredit) string {
 	return credit.RenderName(g.config.UseCreditedName, canonical)
 }
 
-// buildActorsFromCredits renders actors from credit records, preserving cast order.
-func (g *Generator) buildActorsFromCredits(credits []models.MovieCredit) []actor {
+func (g *Generator) buildActorsFromCreditsForMovie(credits []models.MovieCredit, contentID string, authority []models.MovieCredit) []actor {
 	if len(credits) == 0 {
 		return nil
 	}
@@ -328,6 +328,20 @@ func (g *Generator) buildActorsFromCredits(credits []models.MovieCredit) []actor
 			Name:  name,
 			Order: len(actors),
 		}
+		if contentID != "" && credit.ID != 0 && credit.MovieContentID == contentID {
+			selection := "canonical"
+			canonical := ""
+			if credit.Actress != nil {
+				canonical = g.formatActressName(*credit.Actress)
+			}
+			if _, selected := credit.RenderNameWithSelection(g.config.UseCreditedName, canonical); selected {
+				selection = "credited"
+				if credit.UserOverride && strings.TrimSpace(credit.OverrideName) != "" {
+					selection = "override"
+				}
+			}
+			act.PresentationLinks = []actorPresentationLink{{Selection: selection, Version: "1", MovieContentID: contentID, CreditID: strconv.FormatUint(uint64(credit.ID), 10)}}
+		}
 		if g.config.AddGenericRole {
 			act.Role = "Actress"
 		}
@@ -341,6 +355,7 @@ func (g *Generator) buildActorsFromCredits(credits []models.MovieCredit) []actor
 		}
 		actors = append(actors, act)
 	}
+	stripAmbiguousGeneratedLinks(actors, authority, contentID)
 	return actors
 }
 

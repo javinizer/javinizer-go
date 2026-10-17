@@ -56,6 +56,11 @@ func TestApplyFailureWritebackWaitingOnRealStoreMutexNeverPublishesExpiredTransa
 		t.Fatal("failure cleanup context did not expire")
 	}
 	require.ErrorIs(t, writeCtx.Err(), context.DeadlineExceeded)
+	// Rollback may finish after cancellation. Give the generation write its
+	// own budget only after the sole transaction connection is released.
+	released, err := pool.Conn(t.Context())
+	require.NoError(t, err)
+	require.NoError(t, released.Close())
 	advanceCtx, advanceCancel := context.WithTimeout(t.Context(), time.Second)
 	defer advanceCancel()
 	require.NoError(t, db.WithContext(advanceCtx).Model(&models.Movie{}).Where("content_id = ?", before.Results[path].Movie.ContentID).UpdateColumn("render_generation", 4).Error)

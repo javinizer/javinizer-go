@@ -86,6 +86,11 @@ func TestApplyFailureWritebackDiscardsExpiredTransaction(t *testing.T) {
 			cleanupCtx := <-fenceCtx
 			<-cleanupCtx.Done()
 			require.ErrorIs(t, cleanupCtx.Err(), context.DeadlineExceeded)
+			// Wait for rollback to release the sole connection before starting
+			// the generation write's budget. Cancellation can precede release.
+			released, err := pool.Conn(t.Context())
+			require.NoError(t, err)
+			require.NoError(t, released.Close())
 			writeCtx, writeCancel := context.WithTimeout(context.Background(), time.Second)
 			defer writeCancel()
 			original := before.Results[path].Movie
