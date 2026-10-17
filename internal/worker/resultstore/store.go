@@ -29,6 +29,14 @@ type ResultUpdater interface {
 	MarkExcluded(filePath string)
 }
 
+// StagedResultUpdater keeps a result/provenance update private until its
+// enclosing transaction has succeeded. The transaction calls prepare at most
+// once, synchronously; prepare retains the store lock until transaction returns.
+// A skipped prepare or failed transaction publishes nothing.
+type StagedResultUpdater interface {
+	AtomicUpdateFileResultWithProvenanceAfter(filePath string, transaction func(prepare func() error) error, updateFn func(*MovieResult, *ProvenanceData) (*MovieResult, *ProvenanceData, error)) error
+}
+
 // ResultMapAccessor provides read-only and atomic-commit access to the result map.
 // *ResultTracker satisfies this interface.
 //
@@ -145,6 +153,7 @@ type ResultReadFacade interface {
 // interface — never through concrete struct types or unexported fields.
 type Store interface {
 	ResultUpdater
+	StagedResultUpdater
 	ResultMapAccessor
 	FileFinder
 	MovieLookup

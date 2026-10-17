@@ -1667,6 +1667,8 @@
   "review_reset_to_config": "重置为配置",
   "review_reset_to_original": "重置为原始",
   "review_retry_failed": "重试失败",
+  "review_retry_operation_unknown": "无法验证原始应用操作或设置，因此已禁用重试失败项。请刷新任务、检查设置，然后使用应用开始新的操作。",
+  "review_retry_storage_unavailable": "无法替换或删除之前的重试设置，因此未启动新操作。请释放浏览器存储空间或恢复访问权限，然后检查文件操作并重新应用。",
   "review_retry_load": "重试加载",
   "review_return_to_browse_now": "立即返回浏览",
   "review_runtime_value": "{value} 分钟",

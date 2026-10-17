@@ -1351,10 +1351,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ApplyStartResponse"
                         }
                     },
                     "400": {
@@ -1370,7 +1367,7 @@ const docTemplate = `{
                         }
                     },
                     "409": {
-                        "description": "Persisted update plan must go through the update endpoint",
+                        "description": "Apply generation mismatch or persisted update plan must go through the update endpoint",
                         "schema": {
                             "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
                         }
@@ -2069,10 +2066,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ApplyStartResponse"
                         }
                     },
                     "400": {
@@ -2088,7 +2082,7 @@ const docTemplate = `{
                         }
                     },
                     "409": {
-                        "description": "Persisted organize plan must go through the organize endpoint",
+                        "description": "Apply generation mismatch or persisted organize plan must go through the organize endpoint",
                         "schema": {
                             "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
                         }
@@ -4747,6 +4741,17 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_javinizer_javinizer-go_internal_api_contracts.ApplyStartResponse": {
+            "type": "object",
+            "properties": {
+                "apply_generation": {
+                    "type": "integer"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_javinizer_javinizer-go_internal_api_contracts.AuthCredentialsRequest": {
             "type": "object",
             "required": [
@@ -6198,6 +6203,9 @@ const docTemplate = `{
                     "type": "string",
                     "example": "/path/to/output"
                 },
+                "expected_apply_generation": {
+                    "type": "integer"
+                },
                 "link_mode": {
                     "description": "Validated at the API layer (HTTP 400 for invalid)",
                     "type": "string",
@@ -6878,6 +6886,9 @@ const docTemplate = `{
                         "merge",
                         "replace"
                     ]
+                },
+                "expected_apply_generation": {
+                    "type": "integer"
                 },
                 "force_overwrite": {
                     "type": "boolean"
