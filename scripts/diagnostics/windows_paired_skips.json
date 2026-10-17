@@ -1,0 +1,404 @@
+{
+  "server": [
+    "TestDeepIntegration_MovieCreateAndGet",
+    "TestDeepIntegration_MovieSearch",
+    "TestIntegrationDatabasePersistence",
+    "TestIntegrationServerInitialization",
+    "TestIntegrationFilesystemOperations",
+    "TestIntegrationPerformance",
+    "TestIntegrationWebSocketCleanup",
+    "TestIntegrationContextCancellation",
+    "TestIntegrationMovieCRUDOperations",
+    "TestIntegrationMovieWithRelationships",
+    "TestIntegrationConfigEndpoints",
+    "TestIntegrationErrorResponses"
+  ],
+  "core": [
+    "TestNormalizeWindowsPath_NonWindows_EarlyReturn",
+    "TestNormalizeUNCPath_NonWindows_EarlyReturn",
+    "TestStripTrailingChars_NonWindows_EarlyReturn",
+    "TestIsReservedDeviceName_NonWindows_EarlyReturn",
+    "TestNormalizePathForPlatform_NonWindows_EarlyReturn",
+    "TestPathValidator_ValidateDir_UNCPathBlocked",
+    "TestPathValidator_ValidateDir_UNCPathAllowed",
+    "TestPathValidator_IsAllowed_Miss_CanonicalizeError",
+    "TestPathValidator_CanonicalizePath_Miss_NonNotExistError",
+    "TestValidateScanPath_SystemDirectories",
+    "TestNormalizeWindowsPath_NonWindows",
+    "TestValidateScanPath_SymlinkResolution",
+    "TestIsDirAllowed_SymlinkResolution",
+    "TestValidateScanPath_MinimalDenylistOnly",
+    "TestStripTrailingChars_NoOp",
+    "TestIsReservedDeviceName_NoOp",
+    "TestNormalizeUNCPath_NoOp",
+    "TestNormalizePathForPlatform_NoOp",
+    "TestValidateScanPath_DenylistPrefix",
+    "TestValidateScanPath_Symlink",
+    "TestCanonicalizePath_SymlinkAncestor",
+    "TestCanonicalizePath_TransientMissingAncestor",
+    "TestCanonicalizePath_NonResolvableParent",
+    "TestValidateAndOpenPath_SymlinkTOCTOU",
+    "TestValidateAndOpenPath_SystemDirectory",
+    "TestValidateAndOpenBrowsePath_RealProcDenied",
+    "TestCanonicalizePath_NonWindows_StatSucceedingStillErrors",
+    "TestEffectiveAllowedBase_RootResolvingDotUnderRootCWD",
+    "TestValidateDir_DotUnderRootCWD_DeniesByDefault",
+    "TestValidateDir_MixedRootAndValid_AllowsValidOnly",
+    "TestIsDirAllowed_DotUnderRootCWD_ReturnsFalse",
+    "TestIsDirAllowed_MixedRootAndValid",
+    "TestValidateDir_DotWithSubpathOutsideCWD",
+    "TestPathValidator_IsDirAllowed_Uncovered_SystemDeniedPath",
+    "TestPathValidator_IsDenied_Uncovered_BuiltInDenied",
+    "TestIsReservedDeviceName_NonWindowsAlwaysFalse",
+    "TestStripTrailingChars_NonWindowsPassthrough",
+    "TestNormalizeWindowsPath_NonWindowsPassthrough",
+    "TestNormalizeUNCPath_NonWindowsPassthrough",
+    "TestNormalizePathForPlatform_NonWindowsPassthrough",
+    "TestResolveShortPathName_NonWindowsPassthrough"
+  ],
+  "core_subtests": [
+    "TestIsDirAllowed_BuiltInDenied/deny_/proc",
+    "TestIsDirAllowed_BuiltInDenied/deny_/sys",
+    "TestIsDirAllowed_BuiltInDenied/deny_/dev",
+    "TestValidateScanPath_TypedErrors/pseudo-filesystem_(/proc)_returns_ErrPathInDenylist_even_with_allowlist"
+  ],
+  "source_evidence": {
+    "server": [
+      {
+        "file": "internal/api/server/deep_integration_test.go",
+        "line": 175,
+        "test": "TestDeepIntegration_MovieCreateAndGet",
+        "context": "\nfunc TestDeepIntegration_MovieCreateAndGet(t *testing.T) {\n\tif testing.Short() {\n\t\tt.Skip(\"skipping integration test\")"
+      },
+      {
+        "file": "internal/api/server/deep_integration_test.go",
+        "line": 200,
+        "test": "TestDeepIntegration_MovieSearch",
+        "context": "\nfunc TestDeepIntegration_MovieSearch(t *testing.T) {\n\tif testing.Short() {\n\t\tt.Skip(\"skipping integration test\")"
+      },
+      {
+        "file": "internal/api/server/integration_test.go",
+        "line": 181,
+        "test": "TestIntegrationDatabasePersistence",
+        "context": "// AC-3.8.1: Real Database Integration\nfunc TestIntegrationDatabasePersistence(t *testing.T) {\n\tif testing.Short() {\n\t\tt.Skip(\"skipping integration test\")"
+      },
+      {
+        "file": "internal/api/server/integration_test.go",
+        "line": 213,
+        "test": "TestIntegrationServerInitialization",
+        "context": "// AC-3.8.3: Full Request/Response Cycle\nfunc TestIntegrationServerInitialization(t *testing.T) {\n\tif testing.Short() {\n\t\tt.Skip(\"skipping integration test\")"
+      },
+      {
+        "file": "internal/api/server/integration_test.go",
+        "line": 239,
+        "test": "TestIntegrationFilesystemOperations",
+        "context": "// AC-3.8.2: Real Filesystem Integration\nfunc TestIntegrationFilesystemOperations(t *testing.T) {\n\tif testing.Short() {\n\t\tt.Skip(\"skipping integration test\")"
+      },
+      {
+        "file": "internal/api/server/integration_test.go",
+        "line": 257,
+        "test": "TestIntegrationPerformance",
+        "context": "// AC-3.8.4: Testing Guards and Performance\nfunc TestIntegrationPerformance(t *testing.T) {\n\tif testing.Short() {\n\t\tt.Skip(\"skipping integration test\")"
+      },
+      {
+        "file": "internal/api/server/integration_test.go",
+        "line": 289,
+        "test": "TestIntegrationWebSocketCleanup",
+        "context": "// AC-3.8.3: Full Request/Response Cycle (WebSocket hub cleanup)\nfunc TestIntegrationWebSocketCleanup(t *testing.T) {\n\tif testing.Short() {\n\t\tt.Skip(\"skipping integration test\")"
+      },
+      {
+        "file": "internal/api/server/integration_test.go",
+        "line": 313,
+        "test": "TestIntegrationContextCancellation",
+        "context": "// AC-3.8.3: Full Request/Response Cycle (context handling)\nfunc TestIntegrationContextCancellation(t *testing.T) {\n\tif testing.Short() {\n\t\tt.Skip(\"skipping integration test\")"
+      },
+      {
+        "file": "internal/api/server/integration_test.go",
+        "line": 339,
+        "test": "TestIntegrationMovieCRUDOperations",
+        "context": "// AC-3.8.3: Full Request/Response Cycle\nfunc TestIntegrationMovieCRUDOperations(t *testing.T) {\n\tif testing.Short() {\n\t\tt.Skip(\"skipping integration test\")"
+      },
+      {
+        "file": "internal/api/server/integration_test.go",
+        "line": 412,
+        "test": "TestIntegrationMovieWithRelationships",
+        "context": "// AC-3.8.1: Real Database Integration (relationships: actresses, genres, tags)\nfunc TestIntegrationMovieWithRelationships(t *testing.T) {\n\tif testing.Short() {\n\t\tt.Skip(\"skipping integration test\")"
+      },
+      {
+        "file": "internal/api/server/integration_test.go",
+        "line": 464,
+        "test": "TestIntegrationConfigEndpoints",
+        "context": "// AC-3.8.3: Full Request/Response Cycle (middleware, config endpoints)\nfunc TestIntegrationConfigEndpoints(t *testing.T) {\n\tif testing.Short() {\n\t\tt.Skip(\"skipping integration test\")"
+      },
+      {
+        "file": "internal/api/server/integration_test.go",
+        "line": 498,
+        "test": "TestIntegrationErrorResponses",
+        "context": "// AC-3.8.3: Full Request/Response Cycle (error responses)\nfunc TestIntegrationErrorResponses(t *testing.T) {\n\tif testing.Short() {\n\t\tt.Skip(\"skipping integration test\")"
+      }
+    ],
+    "core": [
+      {
+        "file": "internal/api/core/coverage_uncovered_test.go",
+        "line": 532,
+        "test": "TestNormalizeWindowsPath_NonWindows_EarlyReturn",
+        "context": "\nfunc TestNormalizeWindowsPath_NonWindows_EarlyReturn(t *testing.T) {\n\tif runtime.GOOS == \"windows\" {\n\t\tt.Skip(\"Non-Windows test\")"
+      },
+      {
+        "file": "internal/api/core/coverage_uncovered_test.go",
+        "line": 550,
+        "test": "TestNormalizeUNCPath_NonWindows_EarlyReturn",
+        "context": "\nfunc TestNormalizeUNCPath_NonWindows_EarlyReturn(t *testing.T) {\n\tif runtime.GOOS == \"windows\" {\n\t\tt.Skip(\"Non-Windows test\")"
+      },
+      {
+        "file": "internal/api/core/coverage_uncovered_test.go",
+        "line": 559,
+        "test": "TestStripTrailingChars_NonWindows_EarlyReturn",
+        "context": "\nfunc TestStripTrailingChars_NonWindows_EarlyReturn(t *testing.T) {\n\tif runtime.GOOS == \"windows\" {\n\t\tt.Skip(\"Non-Windows test\")"
+      },
+      {
+        "file": "internal/api/core/coverage_uncovered_test.go",
+        "line": 568,
+        "test": "TestIsReservedDeviceName_NonWindows_EarlyReturn",
+        "context": "\nfunc TestIsReservedDeviceName_NonWindows_EarlyReturn(t *testing.T) {\n\tif runtime.GOOS == \"windows\" {\n\t\tt.Skip(\"Non-Windows test\")"
+      },
+      {
+        "file": "internal/api/core/coverage_uncovered_test.go",
+        "line": 576,
+        "test": "TestNormalizePathForPlatform_NonWindows_EarlyReturn",
+        "context": "\nfunc TestNormalizePathForPlatform_NonWindows_EarlyReturn(t *testing.T) {\n\tif runtime.GOOS == \"windows\" {\n\t\tt.Skip(\"Non-Windows test\")"
+      },
+      {
+        "file": "internal/api/core/coverage_uncovered_test.go",
+        "line": 870,
+        "test": "TestPathValidator_ValidateDir_UNCPathBlocked",
+        "context": "\nfunc TestPathValidator_ValidateDir_UNCPathBlocked(t *testing.T) {\n\tif runtime.GOOS == \"windows\" {\n\t\tt.Skip(\"Non-Windows UNC test\")"
+      },
+      {
+        "file": "internal/api/core/coverage_uncovered_test.go",
+        "line": 887,
+        "test": "TestPathValidator_ValidateDir_UNCPathAllowed",
+        "context": "\nfunc TestPathValidator_ValidateDir_UNCPathAllowed(t *testing.T) {\n\tif runtime.GOOS == \"windows\" {\n\t\tt.Skip(\"Non-Windows UNC test\")"
+      },
+      {
+        "file": "internal/api/core/path_miss_test.go",
+        "line": 98,
+        "test": "TestPathValidator_IsAllowed_Miss_CanonicalizeError",
+        "context": "// --- PathValidator.isAllowed: canonicalizePath error on allow entry skips it ---\n\nfunc TestPathValidator_IsAllowed_Miss_CanonicalizeError(t *testing.T) {\n\tt.Skip(\"requires statErrorFs which is in same package\")"
+      },
+      {
+        "file": "internal/api/core/path_miss_test.go",
+        "line": 104,
+        "test": "TestPathValidator_CanonicalizePath_Miss_NonNotExistError",
+        "context": "// --- PathValidator.canonicalizePath: non-NotExist error returns ErrPathUnresolvable ---\n\nfunc TestPathValidator_CanonicalizePath_Miss_NonNotExistError(t *testing.T) {\n\tt.Skip(\"requires statErrorFs which is in same package\")"
+      },
+      {
+        "file": "internal/api/core/path_validation_test.go",
+        "line": 116,
+        "test": "TestValidateScanPath_SystemDirectories",
+        "context": "\t}\n\n\tif runtime.GOOS == \"windows\" {\n\t\tt.Skip(\"Unix-specific test\")"
+      },
+      {
+        "file": "internal/api/core/path_validation_test.go",
+        "line": 609,
+        "test": "TestNormalizeWindowsPath_NonWindows",
+        "context": "func TestNormalizeWindowsPath_NonWindows(t *testing.T) {\n\t// Test that normalization is a no-op on non-Windows platforms\n\tif runtime.GOOS == \"windows\" {\n\t\tt.Skip(\"Skipping non-Windows test on Windows platform\")"
+      },
+      {
+        "file": "internal/api/core/path_validation_test.go",
+        "line": 714,
+        "test": "TestValidateScanPath_SymlinkResolution",
+        "context": "\nfunc TestValidateScanPath_SymlinkResolution(t *testing.T) {\n\tif runtime.GOOS == \"windows\" {\n\t\tt.Skip(\"Skipping symlink tests on Windows (requires admin privileges)\")"
+      },
+      {
+        "file": "internal/api/core/path_validation_test.go",
+        "line": 888,
+        "test": "TestIsDirAllowed_SymlinkResolution",
+        "context": "\nfunc TestIsDirAllowed_SymlinkResolution(t *testing.T) {\n\tif runtime.GOOS == \"windows\" {\n\t\tt.Skip(\"Skipping symlink tests on Windows (requires admin privileges)\")"
+      },
+      {
+        "file": "internal/api/core/path_validation_test.go",
+        "line": 1077,
+        "test": "TestValidateScanPath_MinimalDenylistOnly",
+        "context": "\nfunc TestValidateScanPath_MinimalDenylistOnly(t *testing.T) {\n\tif runtime.GOOS == \"windows\" {\n\t\tt.Skip(\"Unix-specific test\")"
+      },
+      {
+        "file": "internal/api/core/path_validation_test.go",
+        "line": 1174,
+        "test": "TestStripTrailingChars_NoOp",
+        "context": "\nfunc TestStripTrailingChars_NoOp(t *testing.T) {\n\tif runtime.GOOS == \"windows\" {\n\t\tt.Skip(\"Non-Windows test\")"
+      },
+      {
+        "file": "internal/api/core/path_validation_test.go",
+        "line": 1184,
+        "test": "TestIsReservedDeviceName_NoOp",
+        "context": "\nfunc TestIsReservedDeviceName_NoOp(t *testing.T) {\n\tif runtime.GOOS == \"windows\" {\n\t\tt.Skip(\"Non-Windows test\")"
+      },
+      {
+        "file": "internal/api/core/path_validation_test.go",
+        "line": 1193,
+        "test": "TestNormalizeUNCPath_NoOp",
+        "context": "\nfunc TestNormalizeUNCPath_NoOp(t *testing.T) {\n\tif runtime.GOOS == \"windows\" {\n\t\tt.Skip(\"Non-Windows test\")"
+      },
+      {
+        "file": "internal/api/core/path_validation_test.go",
+        "line": 1203,
+        "test": "TestNormalizePathForPlatform_NoOp",
+        "context": "\nfunc TestNormalizePathForPlatform_NoOp(t *testing.T) {\n\tif runtime.GOOS == \"windows\" {\n\t\tt.Skip(\"Non-Windows test\")"
+      },
+      {
+        "file": "internal/api/core/path_validation_test.go",
+        "line": 1213,
+        "test": "TestValidateScanPath_DenylistPrefix",
+        "context": "\nfunc TestValidateScanPath_DenylistPrefix(t *testing.T) {\n\tif runtime.GOOS == \"windows\" {\n\t\tt.Skip(\"Unix-specific test\")"
+      },
+      {
+        "file": "internal/api/core/path_validation_test.go",
+        "line": 1307,
+        "test": "TestValidateScanPath_Symlink",
+        "context": "\nfunc TestValidateScanPath_Symlink(t *testing.T) {\n\tif runtime.GOOS == \"windows\" {\n\t\tt.Skip(\"Skipping symlink tests on Windows (requires admin privileges)\")"
+      },
+      {
+        "file": "internal/api/core/path_validation_test.go",
+        "line": 1372,
+        "test": "TestCanonicalizePath_SymlinkAncestor",
+        "context": "// should be rejected rather than walked past, to prevent symlink-based attacks.\nfunc TestCanonicalizePath_SymlinkAncestor(t *testing.T) {\n\tif runtime.GOOS == \"windows\" {\n\t\tt.Skip(\"Skipping symlink tests on Windows (requires admin privileges)\")"
+      },
+      {
+        "file": "internal/api/core/path_validation_test.go",
+        "line": 1483,
+        "test": "TestCanonicalizePath_TransientMissingAncestor",
+        "context": "// and matches expected permissions before using it.\nfunc TestCanonicalizePath_TransientMissingAncestor(t *testing.T) {\n\tif runtime.GOOS == \"windows\" {\n\t\tt.Skip(\"Skipping symlink tests on Windows (requires admin privileges)\")"
+      },
+      {
+        "file": "internal/api/core/path_validation_test.go",
+        "line": 1533,
+        "test": "TestCanonicalizePath_NonResolvableParent",
+        "context": "// cannot be resolved, to prevent symlink-based directory escape attacks.\nfunc TestCanonicalizePath_NonResolvableParent(t *testing.T) {\n\tif runtime.GOOS == \"windows\" {\n\t\tt.Skip(\"Skipping symlink tests on Windows (requires admin privileges)\")"
+      },
+      {
+        "file": "internal/api/core/path_validation_test.go",
+        "line": 1685,
+        "test": "TestValidateAndOpenPath_SymlinkTOCTOU",
+        "context": "\nfunc TestValidateAndOpenPath_SymlinkTOCTOU(t *testing.T) {\n\tif runtime.GOOS == \"windows\" {\n\t\tt.Skip(\"Skipping symlink tests on Windows (requires admin privileges)\")"
+      },
+      {
+        "file": "internal/api/core/path_validation_test.go",
+        "line": 1713,
+        "test": "TestValidateAndOpenPath_SystemDirectory",
+        "context": "\nfunc TestValidateAndOpenPath_SystemDirectory(t *testing.T) {\n\tif runtime.GOOS == \"windows\" {\n\t\tt.Skip(\"Unix-specific test\")"
+      },
+      {
+        "file": "internal/api/core/path_validator_browse_test.go",
+        "line": 122,
+        "test": "TestValidateAndOpenBrowsePath_RealProcDenied",
+        "context": "// where /proc does not exist.\nfunc TestValidateAndOpenBrowsePath_RealProcDenied(t *testing.T) {\n\tif _, err := os.Stat(\"/proc\"); err != nil {\n\t\tt.Skip(\"/proc not present on this platform\")"
+      },
+      {
+        "file": "internal/api/core/path_validator_mountpoint_test.go",
+        "line": 120,
+        "test": "TestCanonicalizePath_NonWindows_StatSucceedingStillErrors",
+        "context": "// covers the opposite branch under runtime.GOOS == \"windows\".\nfunc TestCanonicalizePath_NonWindows_StatSucceedingStillErrors(t *testing.T) {\n\tif runtime.GOOS == \"windows\" {\n\t\tt.Skipf(\"non-Windows guard test; skipping on %s\", runtime.GOOS)"
+      },
+      {
+        "file": "internal/api/core/path_validator_root_allow_test.go",
+        "line": 60,
+        "test": "TestEffectiveAllowedBase_RootResolvingDotUnderRootCWD",
+        "context": "\nfunc TestEffectiveAllowedBase_RootResolvingDotUnderRootCWD(t *testing.T) {\n\tif runtime.GOOS == \"windows\" {\n\t\tt.Skip(\"Unix-specific CWD test\")"
+      },
+      {
+        "file": "internal/api/core/path_validator_root_allow_test.go",
+        "line": 93,
+        "test": "TestValidateDir_DotUnderRootCWD_DeniesByDefault",
+        "context": "\nfunc TestValidateDir_DotUnderRootCWD_DeniesByDefault(t *testing.T) {\n\tif runtime.GOOS == \"windows\" {\n\t\tt.Skip(\"Unix-specific CWD test\")"
+      },
+      {
+        "file": "internal/api/core/path_validator_root_allow_test.go",
+        "line": 119,
+        "test": "TestValidateDir_MixedRootAndValid_AllowsValidOnly",
+        "context": "\nfunc TestValidateDir_MixedRootAndValid_AllowsValidOnly(t *testing.T) {\n\tif runtime.GOOS == \"windows\" {\n\t\tt.Skip(\"Unix-specific CWD test\")"
+      },
+      {
+        "file": "internal/api/core/path_validator_root_allow_test.go",
+        "line": 151,
+        "test": "TestIsDirAllowed_DotUnderRootCWD_ReturnsFalse",
+        "context": "\nfunc TestIsDirAllowed_DotUnderRootCWD_ReturnsFalse(t *testing.T) {\n\tif runtime.GOOS == \"windows\" {\n\t\tt.Skip(\"Unix-specific CWD test\")"
+      },
+      {
+        "file": "internal/api/core/path_validator_root_allow_test.go",
+        "line": 182,
+        "test": "TestIsDirAllowed_MixedRootAndValid",
+        "context": "\nfunc TestIsDirAllowed_MixedRootAndValid(t *testing.T) {\n\tif runtime.GOOS == \"windows\" {\n\t\tt.Skip(\"Unix-specific CWD test\")"
+      },
+      {
+        "file": "internal/api/core/path_validator_root_allow_test.go",
+        "line": 197,
+        "test": "TestValidateDir_DotWithSubpathOutsideCWD",
+        "context": "\nfunc TestValidateDir_DotWithSubpathOutsideCWD(t *testing.T) {\n\tif runtime.GOOS == \"windows\" {\n\t\tt.Skip(\"Unix-specific CWD test\")"
+      },
+      {
+        "file": "internal/api/core/path_validator_uncovered_test.go",
+        "line": 80,
+        "test": "TestPathValidator_IsDirAllowed_Uncovered_SystemDeniedPath",
+        "context": "\nfunc TestPathValidator_IsDirAllowed_Uncovered_SystemDeniedPath(t *testing.T) {\n\tif runtime.GOOS == \"windows\" {\n\t\tt.Skip(\"Unix-specific test\")"
+      },
+      {
+        "file": "internal/api/core/path_validator_uncovered_test.go",
+        "line": 290,
+        "test": "TestPathValidator_IsDenied_Uncovered_BuiltInDenied",
+        "context": "\nfunc TestPathValidator_IsDenied_Uncovered_BuiltInDenied(t *testing.T) {\n\tif runtime.GOOS == \"windows\" {\n\t\tt.Skip(\"Unix-specific test\")"
+      },
+      {
+        "file": "internal/api/core/windows_normalization_test.go",
+        "line": 63,
+        "test": "TestIsReservedDeviceName_NonWindowsAlwaysFalse",
+        "context": "\nfunc TestIsReservedDeviceName_NonWindowsAlwaysFalse(t *testing.T) {\n\tif runtime.GOOS == \"windows\" {\n\t\tt.Skip(\"Windows-specific behavior tested separately\")"
+      },
+      {
+        "file": "internal/api/core/windows_normalization_test.go",
+        "line": 79,
+        "test": "TestStripTrailingChars_NonWindowsPassthrough",
+        "context": "\nfunc TestStripTrailingChars_NonWindowsPassthrough(t *testing.T) {\n\tif runtime.GOOS == \"windows\" {\n\t\tt.Skip(\"Windows-specific behavior tested separately\")"
+      },
+      {
+        "file": "internal/api/core/windows_normalization_test.go",
+        "line": 101,
+        "test": "TestNormalizeWindowsPath_NonWindowsPassthrough",
+        "context": "\nfunc TestNormalizeWindowsPath_NonWindowsPassthrough(t *testing.T) {\n\tif runtime.GOOS == \"windows\" {\n\t\tt.Skip(\"Windows-specific behavior tested separately\")"
+      },
+      {
+        "file": "internal/api/core/windows_normalization_test.go",
+        "line": 126,
+        "test": "TestNormalizeUNCPath_NonWindowsPassthrough",
+        "context": "\nfunc TestNormalizeUNCPath_NonWindowsPassthrough(t *testing.T) {\n\tif runtime.GOOS == \"windows\" {\n\t\tt.Skip(\"Windows-specific behavior tested separately\")"
+      },
+      {
+        "file": "internal/api/core/windows_normalization_test.go",
+        "line": 143,
+        "test": "TestNormalizePathForPlatform_NonWindowsPassthrough",
+        "context": "\nfunc TestNormalizePathForPlatform_NonWindowsPassthrough(t *testing.T) {\n\tif runtime.GOOS == \"windows\" {\n\t\tt.Skip(\"Windows-specific behavior tested separately\")"
+      },
+      {
+        "file": "internal/api/core/windows_normalization_test.go",
+        "line": 161,
+        "test": "TestResolveShortPathName_NonWindowsPassthrough",
+        "context": "\nfunc TestResolveShortPathName_NonWindowsPassthrough(t *testing.T) {\n\tif runtime.GOOS == \"windows\" {\n\t\tt.Skip(\"Windows-specific behavior tested separately\")"
+      }
+    ]
+  },
+  "notes": [
+    "These are Windows/short expected skip allowlists, not permission to omit inventory tests. Every top-level test still requires run and terminal exactly once.",
+    "Core /proc missing conditional skip allowed only for named top-level test.",
+    "Server six conditional web-UI skips intentionally NOT allowlisted: assets expected available.",
+    "Subtest names use Go space-to-underscore replacement; slash retained."
+  ],
+  "core_prefix": [
+    "TestNormalizeWindowsPath_NonWindows_EarlyReturn",
+    "TestNormalizeUNCPath_NonWindows_EarlyReturn",
+    "TestStripTrailingChars_NonWindows_EarlyReturn",
+    "TestIsReservedDeviceName_NonWindows_EarlyReturn",
+    "TestNormalizePathForPlatform_NonWindows_EarlyReturn",
+    "TestPathValidator_ValidateDir_UNCPathBlocked",
+    "TestPathValidator_ValidateDir_UNCPathAllowed"
+  ]
+}

@@ -1,0 +1,89 @@
+name: Windows paired ordinary tests
+on:
+  # PR events run only lightweight controller checks; comparisons require manual dispatch.
+  pull_request:
+    types: [opened, synchronize]
+    paths:
+      - .github/workflows/windows-paired-ordinary.yml
+      - scripts/diagnostics/windows_paired_ordinary.py
+      - scripts/diagnostics/windows_paired_skips.json
+      - scripts/diagnostics/windows_core_prefix.json
+      - scripts/diagnostics/test_windows_paired_ordinary.py
+  workflow_dispatch:
+permissions:
+  contents: read
+# No push, schedule, release trigger, or arbitrary revision inputs.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+jobs:
+  controller-tests:
+    name: Controller and UTF-8 emitter checks
+    if: github.event_name == 'pull_request'
+    runs-on: windows-2025
+    timeout-minutes: 5
+    steps:
+      - name: Checkout controller
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          persist-credentials: false
+      - name: Run standard-library controller and emitter tests
+        shell: pwsh
+        run: python -m unittest discover -s scripts/diagnostics -p test_windows_paired_ordinary.py -v
+  compare:
+    # Job-level guard is evaluated before matrix expansion and runner allocation.
+    if: github.event_name == 'workflow_dispatch'
+    name: Paired ordinary tests (host ${{ matrix.host }})
+    runs-on: windows-2025
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        host: [1, 2, 3]
+    steps:
+      - name: Checkout reviewed controller
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          path: harness
+          persist-credentials: false
+      - name: Checkout original failing tree equivalent
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: 2f97d9e75dd8402d17544c5501222400bdf233df
+          path: original
+          persist-credentials: false
+      - name: Checkout cleanup revision
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: 2895e16e1ab53a40cbc6c95ddd2242ff0be39554
+          path: cleanup
+          persist-credentials: false
+      - name: Checkout fixed revision
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: 16043816a27007f304916739f1734dd0ba4d0ba0
+          path: fixed
+          persist-credentials: false
+      - name: Validate controller with standard-library mocks
+        shell: pwsh
+        run: python -m unittest discover -s harness/scripts/diagnostics -p test_windows_paired_ordinary.py -v
+      - name: Install official Go toolchain
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
+        with:
+          go-version: '1.27.2'
+          cache: false
+      - name: Bounded paired ordinary comparison
+        shell: pwsh
+        run: python harness/scripts/diagnostics/windows_paired_ordinary.py
+      - name: Preserve complete text evidence in CI logs
+        if: always()
+        shell: pwsh
+        run: python harness/scripts/diagnostics/windows_paired_ordinary.py --emit-logs
+      - name: Retain ordinary test evidence and binaries
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: windows-paired-ordinary-host-${{ matrix.host }}
+          path: paired-evidence/
+          retention-days: 7
+          compression-level: 0
+          if-no-files-found: error
