@@ -87,6 +87,12 @@ type Movie struct {
 	Actresses []Actress     `json:"actresses" gorm:"many2many:movie_actresses;foreignKey:ContentID;joinForeignKey:MovieContentID;References:ID;joinReferences:ActressID"`
 	Credits   []MovieCredit `json:"credits" gorm:"-"`
 
+	// actorRenderState is presentation-only NFO merge state. Keeping it private
+	// prevents JSON round trips and GORM writes from granting identity authority
+	// to imported actor names. Credits remains the authoritative credit ledger.
+	actorRenderState *actorRenderState
+	nfoActorLinks    *nfoActorLinkState
+
 	RenderDirty      bool  `json:"render_dirty" gorm:"default:false"`
 	RenderGeneration int64 `json:"render_generation"`
 
@@ -348,6 +354,16 @@ func (m *Movie) Clone() *Movie {
 	if m.Translations != nil {
 		clone.Translations = make([]MovieTranslation, len(m.Translations))
 		copy(clone.Translations, m.Translations)
+	}
+	if m.actorRenderState != nil {
+		clone.actorRenderState = &actorRenderState{
+			source:     m.actorRenderState.source.Clone(),
+			credits:    cloneRenderCredits(m.actorRenderState.credits),
+			generation: m.actorRenderState.generation,
+		}
+	}
+	if m.nfoActorLinks != nil {
+		clone.nfoActorLinks = &nfoActorLinkState{actors: (&Movie{Actresses: m.nfoActorLinks.actors}).Clone().Actresses, links: cloneActorLinks(m.nfoActorLinks.links)}
 	}
 	return &clone
 }
