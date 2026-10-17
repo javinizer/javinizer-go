@@ -73,8 +73,11 @@ func previewProposedCast(ctx context.Context, db *database.DB, authority, baseli
 	if err != nil {
 		status := http.StatusInternalServerError
 		var conflict *worker.EditAdmissionConflictError
+		var invalid *worker.InvalidActressRenameError
 		if errors.As(err, &conflict) {
 			status = http.StatusConflict
+		} else if errors.As(err, &invalid) {
+			status = http.StatusBadRequest
 		} else if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 			status = http.StatusServiceUnavailable
 		}
