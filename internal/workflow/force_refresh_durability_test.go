@@ -186,7 +186,7 @@ func (f *durableRefreshFixture) assertChoices(t *testing.T, after durableRefresh
 }
 
 func TestForceRefreshPreservesDurableChoices(t *testing.T) {
-	for _, mode := range []string{"cache_control", "selected_fresh_control", "force_success", "force_content_key", "force_normalized_query", "force_changed_display_id", "force_missing_content_id", "force_new_evidence", "force_edit_during_scrape", "force_deferred"} {
+	for _, mode := range []string{"cache_control", "selected_fresh_control", "force_success", "force_content_key", "force_normalized_query", "force_unresolved_alias", "force_changed_display_id", "force_blank_display_id", "force_missing_content_id", "force_new_evidence", "force_edit_during_scrape", "force_deferred"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx := context.Background()
 			f := newDurableRefreshFixture(t)
@@ -207,8 +207,12 @@ func TestForceRefreshPreservesDurableChoices(t *testing.T) {
 			case "force_normalized_query":
 				cmd.MovieID = ""
 				cmd.RawInput = "  refresh-101  "
+			case "force_unresolved_alias":
+				cmd.MovieID = "REFRESH101"
 			case "force_changed_display_id":
 				source.result.ID = "CORRECTED-101"
+			case "force_blank_display_id":
+				source.result.ID = ""
 			case "force_missing_content_id":
 				source.result.ContentID = ""
 			case "force_new_evidence":
@@ -445,15 +449,18 @@ func TestForceRefreshNewMovieDoesNotInheritOtherContentChoices(t *testing.T) {
 }
 
 func TestFreshRefreshWithoutReportedCastPreservesChoices(t *testing.T) {
-	for _, mode := range []string{"force", "selected_fresh", "force_deferred"} {
+	for _, mode := range []string{"force", "selected_fresh", "force_deferred", "force_empty", "selected_empty"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx := context.Background()
 			f := newDurableRefreshFixture(t)
 			source := &durableRefreshSource{result: refreshSourceResult()}
 			source.result.Actresses = nil
+			if mode == "force_empty" || mode == "selected_empty" {
+				source.result.Actresses = []models.ActressInfo{}
+			}
 			source.result.Title = "Fresh title without cast"
-			cmd := scrape.ScrapeCmd{MovieID: "REFRESH-101", ForceRefresh: mode != "selected_fresh", SkipPersist: mode == "force_deferred"}
-			if mode == "selected_fresh" {
+			cmd := scrape.ScrapeCmd{MovieID: "REFRESH-101", ForceRefresh: mode != "selected_fresh" && mode != "selected_empty", SkipPersist: mode == "force_deferred"}
+			if mode == "selected_fresh" || mode == "selected_empty" {
 				cmd.SelectedScrapers = []string{source.Name()}
 			}
 			res, meta, err := durableRefreshWorkflow(f.db, source).Scrape(ctx, cmd)
@@ -497,7 +504,7 @@ func TestExplicitUserEmptyCastStillRemovesVisibleCredits(t *testing.T) {
 // Source-to-target reassignment survives membership omission without pinning an
 // absent scrape-owned credit forever. When the source returns, its choice reapplies.
 func TestFreshRefreshReappliesDurableReassignmentAfterOmission(t *testing.T) {
-	for _, mode := range []string{"force_partial", "selected_partial", "force_explicit_empty", "selected_explicit_empty"} {
+	for _, mode := range []string{"force_partial", "selected_partial"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx := context.Background()
 			f := newDurableRefreshFixture(t)
@@ -508,10 +515,7 @@ func TestFreshRefreshReappliesDurableReassignmentAfterOmission(t *testing.T) {
 			source := &durableRefreshSource{result: refreshSourceResult()}
 			source.result.Title = "Fresh reduced cast"
 			source.result.Actresses = source.result.Actresses[:2]
-			if mode == "force_explicit_empty" || mode == "selected_explicit_empty" {
-				source.result.Actresses = []models.ActressInfo{}
-			}
-			cmd := scrape.ScrapeCmd{MovieID: "REFRESH-101", ForceRefresh: mode == "force_partial" || mode == "force_explicit_empty"}
+			cmd := scrape.ScrapeCmd{MovieID: "REFRESH-101", ForceRefresh: mode == "force_partial"}
 			if !cmd.ForceRefresh {
 				cmd.SelectedScrapers = []string{source.Name()}
 			}

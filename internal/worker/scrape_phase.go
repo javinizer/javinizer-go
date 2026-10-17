@@ -339,7 +339,7 @@ func interpretScrapeResult(
 	// survive public/job JSON. Keep it private in outcome.Result until the
 	// transaction accepts it; cancellation, persistence errors, or a process
 	// restart must never turn it into unconstrained review/save input.
-	if cmd.SkipPersist && fileResult.Movie.RequireExactContentID {
+	if cmd.SkipPersist && cmd.ForceRefresh {
 		fileResult.Movie = nil
 	}
 	inputs.Updater.UpdateFileResult(filePath, fileResult)

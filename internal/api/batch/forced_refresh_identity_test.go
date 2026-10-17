@@ -30,7 +30,7 @@ func (s *forcedIdentitySource) Search(_ context.Context, id string) (*models.Scr
 // GET/PATCH boundary. A client may retain the candidate before cancellation,
 // but cannot convert it to an ordinary identity-changing save after restart.
 func TestForcedRefreshCancelledCandidateCannotBecomeRecoveredSave(t *testing.T) {
-	for _, mode := range []string{"missing_target", "existing_target", "identity_changes_after_scrape", "identity_changes_before_persist"} {
+	for _, mode := range []string{"missing_target", "existing_target", "identity_changes_after_scrape", "identity_changes_before_persist", "missing_content"} {
 		t.Run(mode, func(t *testing.T) {
 			gin.SetMode(gin.TestMode)
 			cfg := config.DefaultConfig(nil, nil)
@@ -39,7 +39,7 @@ func TestForcedRefreshCancelledCandidateCannotBecomeRecoveredSave(t *testing.T) 
 			deps := createTestDeps(t, cfg, "")
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
-			old, err := deps.Repos.MovieRepo.Upsert(ctx, &models.Movie{ID: "REFRESH-101", ContentID: "refresh00101", Title: "Saved original"})
+			old, err := deps.Repos.MovieRepo.Upsert(ctx, &models.Movie{ID: "REFRESH-101", ContentID: "refresh00101", Title: "Saved original", Credits: []models.MovieCredit{{CreditedName: "Retained actor", OverrideName: "Movie-only choice", UserOverride: true, Origin: "user", Scraped: models.Actress{FirstName: "Retained", LastName: "Actor"}}}})
 			require.NoError(t, err)
 			otherContent := "other00202"
 			if mode != "missing_target" {
@@ -47,6 +47,9 @@ func TestForcedRefreshCancelledCandidateCannotBecomeRecoveredSave(t *testing.T) 
 				require.NoError(t, err)
 			}
 			incomingContent := otherContent
+			if mode == "missing_content" {
+				incomingContent = ""
+			}
 			if mode == "identity_changes_after_scrape" || mode == "identity_changes_before_persist" {
 				incomingContent = old.ContentID // Initially valid; authority changes before persistence.
 			}
@@ -61,6 +64,7 @@ func TestForcedRefreshCancelledCandidateCannotBecomeRecoveredSave(t *testing.T) 
 			job := deps.JobStore.CreateJobBatch([]string{file})
 			job.Controller().SetWorkflow(wf)
 			var before []*models.Movie
+			var beforeCredits []models.MovieCredit
 			require.NoError(t, job.Controller().StartScrape(ctx, []string{file}, worker.ScrapePhaseConfig{
 				Force: true, SelectedScrapers: []string{"r18dev"}, MovieIDOverride: map[string]string{file: old.ID},
 				OnFileScraped: func(string, string, string) {
@@ -69,6 +73,7 @@ func TestForcedRefreshCancelledCandidateCannotBecomeRecoveredSave(t *testing.T) 
 						require.NoError(t, deps.Repos.DB.Model(&models.Movie{}).Where("content_id = ?", otherContent).Update("id", old.ID).Error)
 					}
 					require.NoError(t, deps.Repos.DB.Order("content_id").Find(&before).Error)
+					require.NoError(t, deps.Repos.DB.Order("id").Find(&beforeCredits).Error)
 					if mode != "identity_changes_before_persist" {
 						cancel()
 					}
@@ -108,6 +113,9 @@ func TestForcedRefreshCancelledCandidateCannotBecomeRecoveredSave(t *testing.T) 
 			var after []*models.Movie
 			require.NoError(t, deps.Repos.DB.Order("content_id").Find(&after).Error)
 			require.Equal(t, before, after)
+			var afterCredits []models.MovieCredit
+			require.NoError(t, deps.Repos.DB.Order("id").Find(&afterCredits).Error)
+			require.Equal(t, beforeCredits, afterCredits)
 			var count int64
 			require.NoError(t, deps.Repos.DB.Model(&models.Movie{}).Where("id = ?", old.ID).Count(&count).Error)
 			require.EqualValues(t, 1, count, "display-ID cache/read must remain unambiguous")

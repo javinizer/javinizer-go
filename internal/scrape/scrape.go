@@ -82,6 +82,12 @@ type ScrapeCmd struct {
 
 // ScrapeResult holds the output of a scrape operation: the aggregated movie, per-scraper results, field sources, and timing.
 type ScrapeResult struct {
+	// RequestedMovieID is the parsed input key, never a scraper-returned
+	// identity. The workflow uses it to constrain a forced refresh transaction.
+	RequestedMovieID string `json:"-"`
+	// ExpectedContentID captures a known request's owner before source queries.
+	ExpectedContentID string `json:"-"`
+
 	// Movie is the aggregated result from scraping.
 	// API handlers should use this field instead of calling conversion functions.
 	// Nil when Status != StatusSuccess.
@@ -309,12 +315,11 @@ func postProcessScraped(ctx context.Context, scraped *models.Movie, results []*m
 	if scraped.Credits == nil && len(scraped.Actresses) > 0 && scrapeResultsContainActresses(results) {
 		BuildCreditsFromScrape(scraped, actressSources, results)
 	}
-	if scraped.Credits == nil && len(scraped.Actresses) == 0 {
-		// A missing cast supplies no new actor evidence; an explicit empty
-		// source cast still reconciles obsolete scrape-owned rows. Neither is
-		// an explicit user edit suppressing every durable movie credit.
+	if scraped.Credits == nil {
+		// Adapters may allocate empty cast slices for absent or unparsed data.
+		// No usable cast is not evidence that the user removed every credit.
 		scraped.Credits = []models.MovieCredit{}
-		scraped.SkipCreditReconcile = !scrapeResultsReportCast(results)
+		scraped.SkipCreditReconcile = true
 	}
 	if scraped.Credits != nil {
 		AttachCreditPolicy(scraped, cfg)
@@ -329,6 +334,7 @@ func postProcessScraped(ctx context.Context, scraped *models.Movie, results []*m
 
 	now := time.Now()
 	result := &ScrapeResult{
+		RequestedMovieID:       cmd.MovieID,
 		Movie:                  scraped,
 		ScraperResults:         results,
 		FieldSources:           fieldSources,
@@ -359,6 +365,15 @@ func (s *Scraper) Scrape(ctx context.Context, cmd ScrapeCmd) (*ScrapeResult, err
 	cmd, err := resolveScrapeInput(ctx, cmd, s.registry, s.cfg)
 	if err != nil {
 		return nil, err
+	}
+	var expectedContentID string
+	if cmd.ForceRefresh && s.movieRepo != nil {
+		known, lookupErr := s.movieRepo.FindByID(ctx, cmd.MovieID)
+		if lookupErr == nil {
+			expectedContentID = known.ContentID
+		} else if !database.IsNotFound(lookupErr) {
+			return nil, fmt.Errorf("read refresh identity: %w", lookupErr)
+		}
 	}
 
 	var actressRepo database.ActressRepositoryInterface
@@ -411,19 +426,10 @@ func (s *Scraper) Scrape(ctx context.Context, cmd ScrapeCmd) (*ScrapeResult, err
 	if err != nil {
 		return nil, err
 	}
+	result.ExpectedContentID = expectedContentID
 
 	progress.FromContext(ctx).Report(progress.ProgressStepScrape, 1.0, "Completed")
 	return result, nil
-}
-
-// scrapeResultsReportCast preserves the raw source's nil-versus-empty contract.
-func scrapeResultsReportCast(results []*models.ScraperResult) bool {
-	for _, result := range results {
-		if result != nil && result.Actresses != nil {
-			return true
-		}
-	}
-	return false
 }
 
 func scrapeResultsContainActresses(results []*models.ScraperResult) bool {

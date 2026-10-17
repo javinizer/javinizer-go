@@ -108,6 +108,12 @@ type Movie struct {
 	// from adopting another movie through the display/search ID fallback.
 	// Transient, and retained by Clone for deferred scrape persistence.
 	RequireExactContentID bool `json:"-" gorm:"-"`
+	// RefreshMovieID binds that constraint to the parsed requested movie key,
+	// even when the source returns a changed or empty display ID.
+	RefreshMovieID string `json:"-" gorm:"-"`
+	// RefreshExpectedContentID prevents request-key ownership changes while a
+	// forced scrape is in flight from redirecting its later save.
+	RefreshExpectedContentID string `json:"-" gorm:"-"`
 
 	Genres      []Genre  `json:"genres" gorm:"many2many:movie_genres;foreignKey:ContentID;joinForeignKey:MovieContentID;References:ID;joinReferences:GenreID"`
 	Screenshots []string `json:"screenshot_urls" gorm:"serializer:json"`

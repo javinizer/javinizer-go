@@ -145,6 +145,10 @@ func (u *MovieUpserter) upsertWithDisplayTitle(ctx context.Context, movie *model
 	// the caller's input; persisted and later ordinary saves must not inherit it.
 	requireExactContentID := movie.RequireExactContentID
 	movie.RequireExactContentID = false
+	refreshMovieID := movie.RefreshMovieID
+	movie.RefreshMovieID = ""
+	expectedContentID := movie.RefreshExpectedContentID
+	movie.RefreshExpectedContentID = ""
 	var result *models.Movie
 	callerActresses := make([]models.Actress, len(movie.Actresses))
 	copy(callerActresses, movie.Actresses)
@@ -187,7 +191,7 @@ func (u *MovieUpserter) upsertWithDisplayTitle(ctx context.Context, movie *model
 			}
 
 			// Step 2: Find existing movie or create new
-			existingFound, err := u.findExistingMovieTx(tx, movie, requireExactContentID)
+			existingFound, err := u.findExistingMovieTx(tx, movie, requireExactContentID, refreshMovieID, expectedContentID)
 			if err != nil {
 				return err
 			}
@@ -319,26 +323,43 @@ var ErrMovieContentIDConflict = errors.New("scraped content ID conflicts with ex
 // A forced refresh with an explicit content identity rejects a mismatched fallback.
 // If found, it sets movie.ContentID and movie.CreatedAt from the existing record.
 // Returns whether an existing movie was found.
-func (u *MovieUpserter) findExistingMovieTx(tx *gorm.DB, movie *models.Movie, requireExactContentID bool) (bool, error) {
+func (u *MovieUpserter) findExistingMovieTx(tx *gorm.DB, movie *models.Movie, requireExactContentID bool, refreshMovieID, expectedContentID string) (bool, error) {
 	var existing models.Movie
 	var existingFound bool
 
-	if movie.ContentID != "" {
-		err := tx.Select("content_id", "created_at").First(&existing, "content_id = ?", movie.ContentID).Error
+	lookupID := movie.ContentID
+	if expectedContentID != "" {
+		lookupID = expectedContentID
+	}
+	if lookupID != "" {
+		err := tx.Select("content_id", "id", "created_at").First(&existing, "content_id = ?", lookupID).Error
 		if err == nil {
 			existingFound = true
 		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return false, wrapDBErr("find", fmt.Sprintf("movie %s", movie.ContentID), err)
 		}
 	}
+	if expectedContentID != "" {
+		if !existingFound || (requireExactContentID && movie.ContentID != expectedContentID) || (!requireExactContentID && movie.ID != existing.ID) {
+			return false, fmt.Errorf("%w: request %s expected %s, received %s/%s", ErrMovieContentIDConflict, refreshMovieID, expectedContentID, movie.ContentID, movie.ID)
+		}
+		movie.ContentID = expectedContentID
+	}
 
-	// Check even when the incoming content already exists: changing its display
-	// ID must not claim the ID of another movie and make later cache reads ambiguous.
-	if requireExactContentID && movie.ID != "" {
+	// Check the requested identity as well as the returned display ID, even
+	// when the incoming content exists. Without an explicit content ID, only
+	// the established same-display fallback is safe for a known request.
+	if (requireExactContentID && movie.ID != "") || refreshMovieID != "" {
 		var conflicting models.Movie
-		err := tx.Select("content_id").First(&conflicting, "id = ? AND content_id <> ?", movie.ID, movie.ContentID).Error
+		query := tx.Select("content_id", "id")
+		if requireExactContentID || expectedContentID != "" {
+			query = query.Where("((id <> '' AND id IN ?) OR content_id = ?) AND content_id <> ?", []string{movie.ID, refreshMovieID}, refreshMovieID, movie.ContentID)
+		} else {
+			query = query.Where("(id = ? OR content_id = ?) AND id <> ?", refreshMovieID, refreshMovieID, movie.ID)
+		}
+		err := query.First(&conflicting).Error
 		if err == nil {
-			return false, fmt.Errorf("%w: %s is %s, received %s", ErrMovieContentIDConflict, movie.ID, conflicting.ContentID, movie.ContentID)
+			return false, fmt.Errorf("%w: %s is %s, received %s", ErrMovieContentIDConflict, conflicting.ID, conflicting.ContentID, movie.ContentID)
 		}
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return false, wrapDBErr("check refresh identity", fmt.Sprintf("movie %s", movie.ID), err)
@@ -346,7 +367,7 @@ func (u *MovieUpserter) findExistingMovieTx(tx *gorm.DB, movie *models.Movie, re
 	}
 
 	if !existingFound && movie.ID != "" {
-		err := tx.Select("content_id", "created_at").First(&existing, "id = ?", movie.ID).Error
+		err := tx.Select("content_id", "id", "created_at").First(&existing, "id = ?", movie.ID).Error
 		if err == nil {
 			existingFound = true
 			movie.ContentID = existing.ContentID

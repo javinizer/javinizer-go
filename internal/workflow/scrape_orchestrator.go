@@ -104,6 +104,15 @@ func (o *scrapeOrchImpl) Execute(ctx context.Context, cmd scrape.ScrapeCmd) (*sc
 		// An explicit fresh content identity must not inherit another movie's
 		// curation just because the scraper reused its display/search ID.
 		result.Movie.RequireExactContentID = cmd.ForceRefresh && strings.TrimSpace(result.Movie.ContentID) != ""
+		result.Movie.RefreshMovieID = ""
+		result.Movie.RefreshExpectedContentID = ""
+		if cmd.ForceRefresh {
+			result.Movie.RefreshExpectedContentID = result.ExpectedContentID
+			result.Movie.RefreshMovieID = result.RequestedMovieID
+			if result.Movie.RefreshMovieID == "" {
+				result.Movie.RefreshMovieID = cmd.MovieID
+			}
+		}
 		meta.RenderDisplayTitle = func(ctx context.Context, movie *models.Movie) string {
 			rendered := *movie
 			ApplyDisplayTitleFromSource(ctx, &rendered, movie, o.displayTitle, o.templateEngine, o.nameCfg)

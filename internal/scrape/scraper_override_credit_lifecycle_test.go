@@ -104,10 +104,3 @@ func TestScrapeResultsContainActressesVariants(t *testing.T) {
 	require.False(t, scrapeResultsContainActresses([]*models.ScraperResult{nil, {Source: "empty"}}))
 	require.True(t, scrapeResultsContainActresses([]*models.ScraperResult{{Actresses: []models.ActressInfo{{FirstName: "Evidence"}}}}))
 }
-
-func TestScrapeResultsReportCastPreservesAbsentVersusEmpty(t *testing.T) {
-	require.False(t, scrapeResultsReportCast(nil))
-	require.False(t, scrapeResultsReportCast([]*models.ScraperResult{nil, {Source: "absent"}}))
-	require.True(t, scrapeResultsReportCast([]*models.ScraperResult{{Actresses: []models.ActressInfo{}}}))
-	require.True(t, scrapeResultsReportCast([]*models.ScraperResult{{Actresses: []models.ActressInfo{{FirstName: "Reported"}}}}))
-}
