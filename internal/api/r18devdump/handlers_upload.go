@@ -207,10 +207,10 @@ func (h *dumpHandler) startUpload(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{errorResponseKey: fmt.Sprintf("stage upload: %v", err)})
 		return
 	}
-	_, copyErr := io.Copy(dst, src)
+	_, copyErr := copyUploadStage(h.rt.ServerCtx(), dst, src)
 	closeSrcErr := src.Close()
 	closeDstErr := dst.Close()
-	if err := firstErr(copyErr, closeSrcErr, closeDstErr); err != nil {
+	if err := firstErr(copyErr, closeSrcErr, closeDstErr, h.rt.ServerCtx().Err()); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{errorResponseKey: fmt.Sprintf("stage upload: %v", err)})
 		return
 	}
