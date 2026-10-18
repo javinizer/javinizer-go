@@ -556,7 +556,7 @@ func TestFetchPageCtxV5_HTTPError(t *testing.T) {
 	assert.Error(t, err)
 }
 
-// TestFindDetailURLCtxV5 tests findDetailURLCtx
+// TestFindDetailURLCtxV5 tests findDetailSelectionCtx
 func TestFindDetailURLCtxV5(t *testing.T) {
 	searchHTML := buildJavDBSearchHTML("IPX-100", "/v/xyz123")
 
@@ -574,7 +574,7 @@ func TestFindDetailURLCtxV5(t *testing.T) {
 		settings:    models.ScraperSettings{Enabled: true},
 	}
 
-	url, err := s.findDetailURLCtx(context.Background(), "IPX-100")
+	url, _, err := s.findDetailSelectionCtx(context.Background(), "IPX-100")
 	require.NoError(t, err)
 	assert.Contains(t, url, "/v/xyz123")
 }
@@ -607,7 +607,7 @@ func TestFindDetailURLCtxV5_SingleFallback(t *testing.T) {
 	}
 
 	// When there's only one result but it doesn't match, it should still return the single candidate
-	url, err := s.findDetailURLCtx(context.Background(), "TARGET-999")
+	url, _, err := s.findDetailSelectionCtx(context.Background(), "TARGET-999")
 	require.NoError(t, err)
 	assert.Contains(t, url, "/v/single1")
 }

@@ -296,7 +296,7 @@ func TestFetchPageCtx_Miss3_CancelledRequest(t *testing.T) {
 	requireCancelledScraperError(t, err)
 }
 
-// --- findDetailURLCtx: cancelled context ---
+// --- findDetailSelectionCtx: cancelled context ---
 
 func TestFindDetailURLCtx_Miss3_CancelledContext(t *testing.T) {
 	s := &scraper{
@@ -310,7 +310,7 @@ func TestFindDetailURLCtx_Miss3_CancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := s.findDetailURLCtx(ctx, "IPX-535")
+	_, _, err := s.findDetailSelectionCtx(ctx, "IPX-535")
 	requireCancelledScraperError(t, err)
 }
 
@@ -405,7 +405,7 @@ func TestSearch_Miss3_SparseDetailRetryAlsoSparse(t *testing.T) {
 	require.Error(t, err)
 }
 
-// --- findDetailURLCtx: single fallback link ---
+// --- findDetailSelectionCtx: single fallback link ---
 
 func TestFindDetailURLCtx_Miss3_SingleFallbackLink(t *testing.T) {
 	searchHTML := `
