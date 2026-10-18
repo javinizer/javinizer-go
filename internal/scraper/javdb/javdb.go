@@ -305,10 +305,11 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 	// If ID looks like a JavDB video code (alphanumeric, short), try direct URL first
 	// JavDB URLs are /v/{code} where code is typically 4-6 alphanumeric characters
 	cleanID := strings.TrimSpace(id)
-	queryKey := foldRemasterMarkerKey(cleanID)
-	// Raw AI catalog IDs and ambiguous compact digit-led displays must
-	// resolve their unique search identity before accepting a detail page.
-	if isJavDBVideoCode(cleanID) && queryKey.compactDisplaySeries == "" && (!queryKey.rawCID || queryKey.marker != "AI") {
+	// Every marker-shaped bare input uses the same guarded search boundary,
+	// including forms whose folded key cannot pin a series/number split.
+	// A guessed detail page's fallback ID is not evidence of its identity.
+	// Explicit video URLs remain available through ScrapeURL.
+	if isJavDBVideoCode(cleanID) && remasterMarkerSuffix(cleanID) == "" {
 		directURL := fmt.Sprintf("%s/v/%s", s.baseURL, cleanID)
 		logging.Debugf("JavDB: ID '%s' looks like video code, trying direct URL: %s", cleanID, directURL)
 

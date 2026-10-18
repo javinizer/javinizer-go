@@ -194,9 +194,11 @@ For an exact JavDB video-code lookup, pass the full detail URL (for example,
 `https://javdb.com/v/5aB3h`) to the CLI or a manual URL input. The existing URL
 dispatcher calls `ScrapeURL`, so the page's published catalog ID can differ
 from its video slug. A bare code such as `5aB3h` also resembles a remaster
-catalog ID and stays on the guarded catalog-search path. Such ambiguous bare
-inputs may now return not found where the old guessed direct-URL shortcut
-returned a page; use the full URL to state which page you intend. This
+catalog ID. All bare inputs with a recognized H/HD/AI remaster tail, including
+E/Z catalog suffixes and letter-led forms such as `RCT156H`, use the guarded
+catalog-search path. Such ambiguous bare inputs may now return not found
+where the old guessed direct-URL shortcut returned a page; use the full URL
+to state which page you intend. This
 deliberately favors avoiding a wrong-release result over that shortcut's
 bare-code compatibility.
 

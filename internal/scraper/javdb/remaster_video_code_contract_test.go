@@ -17,7 +17,7 @@ import (
 // through the normal source dispatcher, even if its slug resembles a raw CID
 // or a digit-led remaster display. No database or aggregation is involved.
 func TestMarkerShapedVideoCodeExplicitURLContract(t *testing.T) {
-	for _, code := range []string{"5aB3h", "5ab3h", "5AB3H", "5aB3HD", "5aB3AI", "dv00899ai", "300MIUM700H"} {
+	for _, code := range []string{"5aB3h", "5ab3h", "5AB3H", "5aB3HD", "5aB3AI", "dv00899ai", "300MIUM700H", "RCT156H", "RCT156HD", "RCT156AI", "IPX535EH", "IPX535ZAI", "FC2PPV123H"} {
 		t.Run(code, func(t *testing.T) {
 			ctx := context.Background()
 			pageURL := "https://javdb.test/v/" + code
