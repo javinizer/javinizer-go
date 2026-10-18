@@ -348,15 +348,13 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		return nil, err
 	}
 
+	// An explicitly conflicting primary identity cannot be repaired by a
+	// sparse retry whose missing ID would inherit the selected card.
+	// Identity-less primary pages already carry selectedID as their fallback.
+	if !detailIdentityMatchesQuery(result, selectedID) {
+		return nil, models.NewScraperNotFoundError("JavDB", fmt.Sprintf("JavDB page for %s publishes a different release", id))
+	}
 	if hasDetailMetadata(result, selectedID) {
-		if !detailIdentityMatchesQuery(result, selectedID) {
-			// The selected detail page publishes another release's identity
-			// than the marker query's — the post-fetch guard the DMM side's
-			// pageDisplayIdentityMatchesQuery performs (see
-			// detailIdentityMatchesQuery): miss honestly instead of returning
-			// that release's metadata.
-			return nil, models.NewScraperNotFoundError("JavDB", fmt.Sprintf("JavDB page for %s publishes a different release", id))
-		}
 		return result, nil
 	}
 
