@@ -269,6 +269,10 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		}
 	}
 
+	foldedMarker, _, _, isCID := classifyRemasterQuery(id)
+	if foldedMarker != "" && !isCID && !pageDisplayIdentityMatchesQuery(doc, id) {
+		return nil, models.NewScraperNotFoundError("DMM", fmt.Sprintf("DMM page for %s publishes a different release", id))
+	}
 	return s.parseHTML(ctx, doc, url)
 }
 
@@ -330,5 +334,70 @@ func (s *scraper) ScrapeURL(ctx context.Context, url string) (*models.ScraperRes
 		}
 	}
 
-	return s.parseHTML(ctx, doc, url)
+	res, err := s.parseHTML(ctx, doc, url)
+	if err == nil {
+		fillMarkerIDFromURL(res, url)
+	}
+	return res, err
+}
+
+// fillMarkerIDFromURL ports Search's canonical-spelling fill to direct URL
+// scrapes: an H/HD-marker page whose 品番 row is absent publishes an empty
+// display ID, so derive the canonical spelling from the URL cid, whose
+// number matches the display number for H/HD releases. AI-marker cids do
+// not encode the display number (dv00899ai maps to DV-818AI), so they never
+// derive a spelling — only the page's authoritative 品番 may publish an
+// AI-remaster identity, and an absent row leaves the ID empty.
+func fillMarkerIDFromURL(res *models.ScraperResult, url string) {
+	if res == nil || res.ID != "" {
+		return
+	}
+	cid := stripRentalSuffixMarkerAware(extractContentIDFromURL(url))
+	if cid == "" {
+		return
+	}
+	if marker, _, _, _ := classifyRemasterQuery(cid); marker == "h" {
+		res.ID = canonicalRemasterDisplayID(cid)
+	}
+}
+
+// pageDisplayIdentityMatchesQuery reports whether the page's 品番, when it
+// publishes a parseable remaster display identity, names the queried release.
+// The page-supplied display identity is authoritative for display numbers
+// even on AI remasters (unlike cid numbers, which diverge), so a 品番 whose
+// padding-normalized identity names a different series, number, catalog
+// suffix or marker than the query belongs to the wrong release. A nonempty
+// markerless 品番 conflicts the same way on a marker-bearing query: it names
+// the base release — plain or carrying the E/Z catalog suffix — not the
+// remaster, so the page belongs to the wrong product. Pages without a 品番
+// row and unparseable queries publish nothing authoritative to compare and
+// keep the existing behavior.
+func pageDisplayIdentityMatchesQuery(doc *goquery.Document, query string) bool {
+	if doc == nil {
+		return true
+	}
+	display := extractDisplayID(doc)
+	if display == "" {
+		return true
+	}
+	// A parseable query is marker-bearing by construction — the tail regex
+	// requires the marker — so the query parse doubles as the marker-bearing
+	// request gate for the markerless row below.
+	qSeries, qNumber, qSuffix, qMarker, qOK := displayIdentityTuple(query)
+	pSeries, pNumber, pSuffix, pMarker, ok := displayIdentityTuple(display)
+	if !ok {
+		// A nonempty markerless 品番 (a cached RCT-156H query whose page
+		// publishes RCT-157, or its E/Z-suffixed spelling RCT-157E) names the
+		// base release, not the query's remaster: the page is the wrong
+		// product's and must miss honestly instead of publishing its metadata
+		// under the query's identity.
+		if qOK && isMarkerlessDisplayID(display) {
+			return false
+		}
+		return true
+	}
+	if !qOK {
+		return true
+	}
+	return pSeries == qSeries && pNumber == qNumber && pSuffix == qSuffix && pMarker == qMarker
 }
