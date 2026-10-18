@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/database"
-
 	"github.com/javinizer/javinizer-go/internal/models"
 	mock "github.com/stretchr/testify/mock"
 )
