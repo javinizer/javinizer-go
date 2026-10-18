@@ -7,6 +7,8 @@ import (
 	"strings"
 )
 
+const t28Series = "t28"
+
 var contentIDFullRegex = regexp.MustCompile(`^(\d*)([a-z]+)(\d+)(.*)$`)
 
 // wideNumericCIDRegex recognizes prefixless content IDs with at least five
@@ -54,11 +56,11 @@ func contentIDCandidates(id string, markerAware bool) []string {
 
 	if markerAware {
 		if m := t28RemasterBaseRegex.FindStringSubmatch(direct); m != nil {
-			series, numStr = "t28", m[1]
+			series, numStr = t28Series, m[1]
 		} else if m := prefixedT28RemasterBaseRegex.FindStringSubmatch(direct); m != nil {
 			switch m[1] {
 			case "9", "1":
-				series, numStr = "t28", m[2]
+				series, numStr = t28Series, m[2]
 			default:
 				// Known T catalog prefixes pin T; unknown prefixes leave the
 				// compact T/T28 boundary ambiguous, so retain only identity.
@@ -94,7 +96,7 @@ func expandCandidates(direct, series, numStr string, markerAware bool) []string 
 
 	// Look up known prefixes for this series from the r18.dev database dump
 	var prefixes []string
-	if markerAware && series == "t28" {
+	if markerAware && series == t28Series {
 		prefixes = []string{"9", "", "1"}
 	} else if lookup, ok := ContentIDPrefixLookup[series]; ok {
 		prefixes = lookup
@@ -215,7 +217,7 @@ func ContentIDCandidatesWithMarker(id string) []string {
 		if ts := tDisplayRemasterRegex.FindStringSubmatch(trimmedLower); ts != nil {
 			// A separator pins a real series, never an empty or malformed
 			// prefix that could manufacture numeric-only candidates.
-			if !isAlpha(ts[1]) && ts[1] != "t28" {
+			if !isAlpha(ts[1]) && ts[1] != t28Series {
 				return nil
 			}
 			base = expandCandidates(m[1], ts[1], ts[2], true)
@@ -227,7 +229,7 @@ func ContentIDCandidatesWithMarker(id string) []string {
 			// probe set alongside the pinned candidates — dump rows reached
 			// through the compact reading still resolve, while the pinned
 			// T-series boundary now leads the list.
-			if len(ts[3]) > 1 && ts[1] != "t28" && t28RemasterBaseRegex.MatchString(m[1]) {
+			if len(ts[3]) > 1 && ts[1] != t28Series && t28RemasterBaseRegex.MatchString(m[1]) {
 				base = appendUniqueCandidates(base, contentIDCandidates(m[1], true))
 			}
 		}
