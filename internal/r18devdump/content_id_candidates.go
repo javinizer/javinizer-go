@@ -55,6 +55,24 @@ func contentIDCandidates(id string, markerAware bool) []string {
 	if markerAware {
 		if m := t28RemasterBaseRegex.FindStringSubmatch(direct); m != nil {
 			series, numStr = "t28", m[1]
+		} else if m := prefixedT28RemasterBaseRegex.FindStringSubmatch(direct); m != nil {
+			switch m[1] {
+			case "9", "1":
+				series, numStr = "t28", m[2]
+			default:
+				// Known T catalog prefixes pin T; unknown prefixes leave the
+				// compact T/T28 boundary ambiguous, so retain only identity.
+				knownT := false
+				for _, prefix := range ContentIDPrefixLookup["t"] {
+					if prefix == m[1] {
+						knownT = true
+						break
+					}
+				}
+				if !knownT {
+					return []string{direct}
+				}
+			}
 		}
 	}
 	return expandCandidates(direct, series, numStr, markerAware)
@@ -138,6 +156,8 @@ func appendUniqueCandidates(base, extra []string) []string {
 	return base
 }
 
+var prefixedT28RemasterBaseRegex = regexp.MustCompile(`^(\d+)t28(\d+)$`)
+
 var t28RemasterBaseRegex = regexp.MustCompile(`(?i)^t28(\d+)$`)
 
 var remasterMarkerTailRgx = regexp.MustCompile(`(?i)^(.*\d)([ez]?)(hd|ai|h)$`)
@@ -193,6 +213,11 @@ func ContentIDCandidatesWithMarker(id string) []string {
 		// tail and expand directly so the T-series prefixes (55t28123h, ...)
 		// are generated instead of the t28-series set.
 		if ts := tDisplayRemasterRegex.FindStringSubmatch(trimmedLower); ts != nil {
+			// A separator pins a real series, never an empty or malformed
+			// prefix that could manufacture numeric-only candidates.
+			if !isAlpha(ts[1]) && ts[1] != "t28" {
+				return nil
+			}
 			base = expandCandidates(m[1], ts[1], ts[2], true)
 			// A separated E/Z suffix (T-28123-Z-HD) is the one spelling the
 			// pinned grammar above used to miss, so the compact t28 reading of
