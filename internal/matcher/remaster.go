@@ -938,10 +938,18 @@ func contentIDCandidate(s string) (start, end int, ok bool) {
 	return m[2], m[3], true
 }
 
+var channelContentIDPrefixRegex = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(` + channelContentIDPattern + `)$`)
+
 func contentIDPrefixMatch(s string) (idText string, remainder string) {
 	start, end, ok := contentIDCandidate(s)
 	if !ok {
 		return "", ""
+	}
+	// The raw candidate scan starts after the underscore. Restore only the
+	// adjacent, already-supported channel spelling of this selected span;
+	// neither an earlier duplicate nor a partial/malformed CID can extend it.
+	if channel := channelContentIDPrefixRegex.FindStringSubmatchIndex(s[:end]); channel != nil && channel[2]+2 == start {
+		start = channel[2]
 	}
 	return s[start:end], strings.TrimSpace(s[end:])
 }

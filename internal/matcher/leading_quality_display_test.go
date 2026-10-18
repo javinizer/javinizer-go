@@ -43,8 +43,8 @@ func TestLeadingQualityKeepsPrecedence(t *testing.T) {
 		{"x265 DTS-24 ABC-123-HD.mkv", "DTS-24"}, {"x265 AVC-123 ABC-123-HD.mkv", "AVC-123"},
 		{"189web00087 x265 ABC-123-HD.mkv", "189WEB00087"},
 		{"x265 1rct00156hd ABC-123-HD.mkv", "1RCT00156HD"},
-		// Preserve the existing raw fallback; this task does not change channel extraction.
-		{"x265 h_003rct00156hd ABC-123-HD.mkv", "003RCT00156HD"},
+		// The raw fallback retains the selected CID's supported channel spelling.
+		{"x265 h_003rct00156hd ABC-123-HD.mkv", "H_003RCT00156HD"},
 		{"h_003rct00156hd x265 ABC-123-HD.mkv", "H_003RCT00156HD"},
 		{"x265 189web00087 ABC-123-HD.mkv", "189WEB00087"},
 		{"x265 189dts00192 ABC-123-HD.mkv", "189DTS00192"},
