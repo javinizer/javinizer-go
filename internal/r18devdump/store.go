@@ -16,6 +16,8 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
+const channel003Prefix = "h_003"
+
 // dmmCDNBase is the host prefix for DMM image paths stored as relative paths
 // in the dump (e.g. "digital/video/118abw00013/118abw00013pl").
 const dmmCDNBase = "https://pics.dmm.co.jp/"
@@ -727,7 +729,7 @@ func dumpRawMarkerKey(id string) string {
 			// The same fixture-proven boundary as the source guard. Unknown
 			// prefixes cannot decide which digits are series versus number.
 			switch channel + m[1] {
-			case "9", "1", "h_003":
+			case "9", "1", channel003Prefix:
 			default:
 				return ""
 			}
