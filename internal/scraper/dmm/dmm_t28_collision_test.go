@@ -1,10 +1,43 @@
 package dmm
 
 import (
+	"context"
+	"testing"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"testing"
 )
+
+// The compacted forms of T-28123-HD and T28-123-HD are identical, so display
+// verification must compare separator-pinned identities: a candidate page
+// whose 品番 collides with the query under compaction is rejected instead of
+// accepting and caching metadata for the wrong release.
+func TestVerifyCandidateDisplayIDT28SeparatorCollision(t *testing.T) {
+	pageDisplay := func(display string) func(u string) (int, string) {
+		return func(u string) (int, string) {
+			return 200, `<html><body><table><tr><th>品番</th><td>` + display + `</td></tr></table></body></html>`
+		}
+	}
+
+	for _, tc := range []struct {
+		name, query, pageDisplay, cid string
+		want                          displayStatus
+	}{
+		{"t28 query vs T-series page", "T28-123-HD", "T-28123-HD", "1t28123h", displayRejected},
+		{"t query vs T28 page", "T-28123-HD", "T28-123-HD", "t28123h", displayRejected},
+		{"t28 query matching page", "T28-123-HD", "T28-123-HD", "1t28123h", displayVerified},
+		{"t query matching page", "T-28123-HD", "T-28123-HD", "t28123h", displayVerified},
+		{"separator variants of one identity", "T28.123.HD", "t28-123-HD", "1t28123h", displayVerified},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, _ := newRemasterTestScraper(t)
+			s.client.SetTransport(&remasterRoundTripper{serve: pageDisplay(tc.pageDisplay)})
+			st, err := s.verifyCandidateDisplayID(context.Background(), tc.query, []string{"https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=" + tc.cid + "/"})
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, st)
+		})
+	}
+}
 
 // displayIdentityTuple keeps the pinned split for separated forms and applies
 // the prefix-free disambiguation to compact ones.
