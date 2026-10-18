@@ -9,9 +9,10 @@ import (
 
 var contentIDFullRegex = regexp.MustCompile(`^(\d*)([a-z]+)(\d+)(.*)$`)
 
-// zeroPaddedCIDRegex matches prefixless digital content ids with a five-digit
-// zero-padded number (rct00156hd-class).
-var zeroPaddedCIDRegex = regexp.MustCompile(`^(?:t28|[a-z]+)\d{5}[a-z]{0,3}$`)
+// wideNumericCIDRegex recognizes prefixless content IDs with at least five
+// number digits. Five-digit raw identities keep their historical meaning;
+// wider server numbers must not lose their literal marker or leading zeros.
+var wideNumericCIDRegex = regexp.MustCompile(`^(?:t28|[a-z]+)\d{5,}[a-z]{0,3}$`)
 
 // underscoreContentIDRegex recognizes PPV-style content_ids (h_086mesu00103),
 // which SplitSeriesAndNumber cannot decompose because of the underscore.
@@ -181,7 +182,7 @@ func ContentIDCandidatesWithMarker(id string) []string {
 	// Only display spellings fold HD to H; separator evidence in the original
 	// input forces display semantics even when the compacted shape looks like
 	// a zero-padded content id (RCT-00156-HD vs raw rct00156hd).
-	if marker == "hd" && (hasSeparator || (!looksLikeContentID(strings.ToLower(compacted)) && !zeroPaddedCIDRegex.MatchString(strings.ToLower(compacted)))) {
+	if marker == "hd" && (hasSeparator || (!looksLikeContentID(strings.ToLower(compacted)) && !wideNumericCIDRegex.MatchString(strings.ToLower(compacted)))) {
 		marker = "h"
 	}
 	baseInput := m[1]
@@ -210,7 +211,8 @@ func ContentIDCandidatesWithMarker(id string) []string {
 		base = contentIDCandidates(baseInput, true)
 	}
 	out := make([]string, 0, len(base)+1)
-	if !hasSeparator && zeroPaddedCIDRegex.MatchString(raw) {
+	// Keep literal raw identity even if numeric expansion overflows int.
+	if !hasSeparator && ((looksLikeContentID(raw) && contentIDFullRegex.MatchString(raw)) || wideNumericCIDRegex.MatchString(raw)) {
 		out = append(out, raw)
 	}
 	for _, c := range base {
