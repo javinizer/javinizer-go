@@ -108,3 +108,92 @@ it('surfaces refetch errors without dropping already loaded configuration', asyn
 	expect(view.getByTestId('error').textContent).toBe('Refresh unavailable');
 	expect(view.getByTestId('loaded').textContent).toBe('true');
 });
+
+it('replaces a save failure with the newer reload failure, then clears on reload recovery', async () => {
+	vi.mocked(apiClient.request).mockRejectedValue(new Error('Save unavailable'));
+	const view = await loaded();
+	await fireEvent.click(view.getByRole('button', { name: 'Save' }));
+	await waitFor(() => expect(view.getByTestId('error').textContent).toBe('Save unavailable'));
+
+	vi.mocked(apiClient.getConfig).mockRejectedValue(new Error('Reload unavailable'));
+	await fireEvent.click(view.getByRole('button', { name: 'Reload' }));
+	await waitFor(() => expect(toastStore.error).toHaveBeenCalledWith('Reload unavailable', 5000));
+	expect(view.getByTestId('error').textContent).toBe('Reload unavailable');
+	expect(view.getByTestId('loaded').textContent).toBe('true');
+
+	vi.mocked(apiClient.getConfig).mockResolvedValue(config);
+	await fireEvent.click(view.getByRole('button', { name: 'Reload' }));
+	await waitFor(() => expect(toastStore.success).toHaveBeenCalledTimes(1));
+	expect(view.getByTestId('error').textContent).toBe('');
+});
+
+it('shows a newer save failure instead of the previous reload error', async () => {
+	const view = await loaded();
+	vi.mocked(apiClient.getConfig).mockRejectedValue(new Error('Reload unavailable'));
+	await fireEvent.click(view.getByRole('button', { name: 'Reload' }));
+	await waitFor(() => expect(toastStore.error).toHaveBeenCalledWith('Reload unavailable', 5000));
+
+	vi.mocked(apiClient.request).mockRejectedValue(new Error('New save failure'));
+	await fireEvent.click(view.getByRole('button', { name: 'Save' }));
+	await waitFor(() => expect(view.getByTestId('error').textContent).toBe('New save failure'));
+	expect(view.getByTestId('query-error').textContent).toBe('Reload unavailable');
+});
+
+it.each([true, false])(
+	'clears the local reload error after save success, with refetch success=%s',
+	async (refetchSucceeds) => {
+		const view = await loaded();
+		vi.mocked(apiClient.request).mockRejectedValueOnce(new Error('Save unavailable'));
+		await fireEvent.click(view.getByRole('button', { name: 'Save' }));
+		await waitFor(() => expect(view.getByTestId('error').textContent).toBe('Save unavailable'));
+		vi.mocked(apiClient.getConfig).mockRejectedValue(new Error('Reload unavailable'));
+		await fireEvent.click(view.getByRole('button', { name: 'Reload' }));
+		await waitFor(() => expect(toastStore.error).toHaveBeenCalledWith('Reload unavailable', 5000));
+		expect(view.getByTestId('error').textContent).toBe('Reload unavailable');
+
+		vi.mocked(apiClient.request).mockResolvedValue({});
+		if (refetchSucceeds) vi.mocked(apiClient.getConfig).mockResolvedValue(config);
+		else
+			vi.mocked(apiClient.getConfig).mockRejectedValue(new Error('Post-save refresh unavailable'));
+		await fireEvent.click(view.getByRole('button', { name: 'Save' }));
+		await waitFor(() => expect(toastStore.success).toHaveBeenCalledTimes(1));
+		await waitFor(() => expect(apiClient.getConfig).toHaveBeenCalledTimes(3));
+		await waitFor(() =>
+			expect(view.getByTestId('error').textContent).toBe(
+				refetchSucceeds ? '' : 'Post-save refresh unavailable',
+			),
+		);
+		expect(view.getByTestId('loaded').textContent).toBe('true');
+	},
+);
+
+it('clears the reload error when an automatic query retry succeeds after a save failure', async () => {
+	vi.mocked(apiClient.request).mockRejectedValue(new Error('Save unavailable'));
+	const view = await loaded();
+	await fireEvent.click(view.getByRole('button', { name: 'Save' }));
+	await waitFor(() => expect(view.getByTestId('error').textContent).toBe('Save unavailable'));
+	vi.mocked(apiClient.getConfig).mockRejectedValue(new Error('Reload unavailable'));
+	await fireEvent.click(view.getByRole('button', { name: 'Reload' }));
+	await waitFor(() => expect(view.getByTestId('error').textContent).toBe('Reload unavailable'));
+
+	vi.mocked(apiClient.getConfig).mockResolvedValue(config);
+	await client.refetchQueries({ queryKey: ['config'] });
+	await waitFor(() => expect(view.getByTestId('query-error').textContent).toBe(''));
+	expect(view.getByTestId('error').textContent).toBe('');
+	expect(toastStore.success).not.toHaveBeenCalled();
+});
+
+it('keeps a newer save error visible when the query recovers independently', async () => {
+	const view = await loaded();
+	vi.mocked(apiClient.getConfig).mockRejectedValue(new Error('Reload unavailable'));
+	await fireEvent.click(view.getByRole('button', { name: 'Reload' }));
+	await waitFor(() => expect(view.getByTestId('error').textContent).toBe('Reload unavailable'));
+	vi.mocked(apiClient.request).mockRejectedValue(new Error('New save failure'));
+	await fireEvent.click(view.getByRole('button', { name: 'Save' }));
+	await waitFor(() => expect(view.getByTestId('error').textContent).toBe('New save failure'));
+
+	vi.mocked(apiClient.getConfig).mockResolvedValue(config);
+	await client.refetchQueries({ queryKey: ['config'] });
+	await waitFor(() => expect(view.getByTestId('query-error').textContent).toBe(''));
+	expect(view.getByTestId('error').textContent).toBe('New save failure');
+});

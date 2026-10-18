@@ -270,6 +270,8 @@ export function createSettingsStore(deps: SettingsStoreDeps): SettingsStore {
 			toastStore.success(m.settings_config_reloaded_toast(), 4000);
 		} catch (e) {
 			const msg = e instanceof Error ? e.message : m.settings_config_reload_failed();
+			// Let the query own reload errors so a later refetch can clear them.
+			error = null;
 			toastStore.error(msg, 5000);
 		} finally {
 			reloading = false;
