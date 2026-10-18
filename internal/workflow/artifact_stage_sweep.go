@@ -468,7 +468,16 @@ func sweepArtifactStaging(fs afero.Fs, parent string) {
 		if err := removeArtifactTreeWithRetry(fs, candidate, identity); err != nil {
 			logging.Warnf("artifact staging sweep retained %s: %v", candidate, err)
 		} else {
-			_ = fs.Remove(artifactStageProofPath(candidate))
+			removeArtifactStageProofAfterTree(fs, artifactStageProofPath(candidate))
 		}
+	}
+}
+
+// removeArtifactStageProofAfterTree reports sidecar unlink failures only after
+// the owned staging tree has been removed. It does not broaden sweep eligibility
+// or remove existing orphan sidecars on a later run.
+func removeArtifactStageProofAfterTree(fs afero.Fs, path string) {
+	if err := fs.Remove(path); err != nil && !os.IsNotExist(err) {
+		logging.Warnf("artifact staging proof cleanup retained %s (staging tree removed): %v; preserve this sidecar for inspection", path, err)
 	}
 }

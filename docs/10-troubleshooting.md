@@ -61,15 +61,12 @@ javinizer --config /path/to/config.yaml scrape IPX-535
 **Problem**: Multiple instances accessing database simultaneously
 
 **Solutions**:
-```bash
-# Close other Javinizer processes
-killall javinizer
-
-# Or wait for operation to complete
-# Or delete lock file
-rm data/javinizer.db-wal
-rm data/javinizer.db-shm
-```
+- Wait for an active operation to finish, or close other Javinizer instances normally.
+- If the lock persists, preserve a consistent backup and inspect the database error
+  and configured path before further recovery.
+- Do not delete SQLite `-wal` or `-shm` files as lock-file cleanup. They belong to
+  the database's transaction state; deleting them can discard recoverable data.
+  Keep them with the database when preserving a stopped instance for diagnosis.
 
 ### "No such table"
 
@@ -514,8 +511,15 @@ javinizer sort /path --dry-run 2>&1 | tee debug.log
 
 ### "database schema mismatch"
 
-- Delete database: `rm data/javinizer.db`
-- Re-initialize: `javinizer init`
+Preserve the database and affected files before changing anything. Confirm the
+configured database path, application version, and startup migration error.
+Normal startup applies versioned migrations to the existing database; deleting it
+is a destructive reset, not a schema repair. Reinitialization cannot reconstruct
+saved credit decisions, mappings, history, or recovery journals.
+
+Use a compatible backup and a reviewed recovery procedure if migration failed.
+Do not run an older binary or clear recovery markers to bypass the error; see
+[resident publication reconciliation](#resident-publication-reconciliation-is-pending).
 
 ---
 
