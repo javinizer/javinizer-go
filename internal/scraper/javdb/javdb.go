@@ -341,12 +341,14 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		return nil, fmt.Errorf("failed to parse detail page HTML: %w", err)
 	}
 
-	result, err := s.parseDetailPage(doc, detailURL, id)
+	// Missing published IDs inherit the verified selected card identity,
+	// including raw AI queries whose catalog and display numbers differ.
+	result, err := s.parseDetailPage(doc, detailURL, selectedID)
 	if err != nil {
 		return nil, err
 	}
 
-	if hasDetailMetadata(result, id) {
+	if hasDetailMetadata(result, selectedID) {
 		if !detailIdentityMatchesQuery(result, selectedID) {
 			// The selected detail page publishes another release's identity
 			// than the marker query's — the post-fetch guard the DMM side's
@@ -369,11 +371,11 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse retried detail page HTML: %w", err)
 	}
-	retryResult, err := s.parseDetailPage(retryDoc, detailURL, id)
+	retryResult, err := s.parseDetailPage(retryDoc, detailURL, selectedID)
 	if err != nil {
 		return nil, err
 	}
-	if !hasDetailMetadata(retryResult, id) {
+	if !hasDetailMetadata(retryResult, selectedID) {
 		return nil, fmt.Errorf("JavDB returned non-detail content for %s", detailURL)
 	}
 	if !detailIdentityMatchesQuery(retryResult, selectedID) {
