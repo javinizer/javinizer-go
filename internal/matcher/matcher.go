@@ -8,6 +8,16 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 )
 
+type dirIDKey struct {
+	dir string
+	id  string
+}
+
+type demotion struct {
+	idx int
+	key dirIDKey
+}
+
 // Matcher identifies JAV IDs from filenames
 type Matcher struct {
 	config         *Config
@@ -26,6 +36,7 @@ type MatchResult struct {
 	MultipartPattern string // Pattern type: "explicit", "letter", "trailing", or "" (see PatternExplicit, PatternLetter, PatternTrailing, PatternNone)
 	TrailingPrefix   string // For PatternTrailing: noise portion before the part number (e.g., "-un-javgg.net")
 	strippedSuffix   string // E/Z catalog suffix stripped from the ID at match time; restored by ValidateMultipartInDirectory if the part does not confirm
+	RemasterMarker   string // "H", "HD", or "AI" when the extracted ID carries a remaster marker; "" otherwise
 }
 
 // NewMatcher creates a new file matcher
@@ -54,7 +65,7 @@ func NewMatcher(cfg *Config) (*Matcher, error) {
 	//   4. No-hyphen format: word boundary + 3-6 letters + 3-4 digits + word boundary
 	//      (prevents partial matches like "PPV1234" from "FC2PPV123456")
 	//   5. Hyphen format: letters + hyphen + digits (standard JAV)
-	builtinPattern := `(?i)((?:h_\d+[a-z]+\d+)|(?:\b\d{6}[-_]\d{2,3}-(?:1PON|10MU|CARIB)\b)|(?:\b[A-Za-z]{1,2}\d{3,5}\b)|(?:\b[A-Za-z]{3,6}\d{3,4}\b)|(?:(?:[A-Za-z]+|T28)-\d+(?:[ZE])?))`
+	builtinPattern := `(?i)((?:[hn]_\d+[a-z]+\d+(?:[ez](?:hd|ai|h)|[ez]|(?:hd|ai|h))?)|(?:\b\d{6}[-_]\d{2,3}-(?:1PON|10MU|CARIB)\b)|(?:\b[A-Za-z]{1,2}\d{3,5}\b)|(?:\b[A-Za-z]{3,6}\d{3,4}\b)|(?:(?:[A-Za-z]+|T28)-\d+(?:[ZE])?))`
 	m.builtinPattern = regexp.MustCompile(builtinPattern)
 
 	// Compile custom regex if enabled
@@ -88,28 +99,61 @@ func (m *Matcher) MatchFile(file models.FileMatchInfo) *MatchResult {
 	basename := filepath.Base(file.Name)
 	nameWithoutExt := strings.TrimSuffix(basename, file.Extension)
 
-	// Try custom regex first if enabled
+	// Custom regexes see the original stem first and outrank every
+	// automated tier. If Extension was absent, retry the ASCII video stem
+	// before normalization; neither attempt folds filename characters.
+	stem := stripVideoExtension(nameWithoutExt)
 	if m.config.RegexEnabled && m.regexPattern != nil {
 		if result := m.matchWithRegex(file, nameWithoutExt, m.regexPattern, "regex"); result != nil {
 			return result
 		}
+		if stem != nameWithoutExt && isASCII(nameWithoutExt) {
+			if result := m.matchWithRegex(file, stem, m.regexPattern, "regex"); result != nil {
+				return result
+			}
+		}
 	}
+	nameWithoutExt = stem
+
+	if normalized := normalizeFusedRemasterFilename(nameWithoutExt, m.builtinPattern); normalized != "" {
+		nameWithoutExt = normalized
+	}
+	nameWithoutExt = preferBuiltinAfterQuality(nameWithoutExt, m.builtinPattern)
 
 	// Fall back to built-in pattern
-	return m.matchWithRegex(file, nameWithoutExt, m.builtinPattern, "builtin")
+	if result := m.matchWithRegex(file, nameWithoutExt, m.builtinPattern, "builtin"); result != nil && !builtinMatchConflictsWithContentID(nameWithoutExt, m.builtinPattern) && !builtinQualityShadowsContentID(nameWithoutExt, result.ID) {
+		return result
+	}
+
+	if idText, remainder := contentIDPrefixMatch(nameWithoutExt); idText != "" {
+		result := &MatchResult{File: file, ID: strings.ToUpper(idText), MatchedBy: "contentid"}
+		if remainder != "" {
+			num, suffix, patternType, trailingPrefix := DetectPartSuffix(remainder, "")
+			result.PartNumber = num
+			result.PartSuffix = suffix
+			result.MultipartPattern = patternType
+			result.TrailingPrefix = trailingPrefix
+			result.IsMultiPart = patternType == PatternExplicit
+		}
+		return result
+	}
+	return nil
 }
 
 // matchWithRegex attempts to match a filename with a specific regex pattern
 func (m *Matcher) matchWithRegex(file models.FileMatchInfo, filename string, pattern *regexp.Regexp, matchType string) *MatchResult {
-	matches := pattern.FindStringSubmatch(filename)
-	if len(matches) == 0 {
+	loc := pattern.FindStringSubmatchIndex(filename)
+	if len(loc) == 0 {
 		return nil
 	}
-	if len(matches) <= 1 {
+	if len(loc) <= 2 {
 		// No capture group means no usable ID for matcher output.
 		return nil
 	}
-	id := strings.TrimSpace(matches[1])
+	if loc[2] < 0 || loc[3] < 0 {
+		return nil
+	}
+	id := strings.TrimSpace(filename[loc[2]:loc[3]])
 	if id == "" {
 		// Empty capture should be treated as no match to allow fallback behavior.
 		return nil
@@ -122,6 +166,29 @@ func (m *Matcher) matchWithRegex(file models.FileMatchInfo, filename string, pat
 
 	// First capture group is the ID.
 	result.ID = strings.ToUpper(id)
+
+	if matchType == "builtin" {
+		// The suffix comes after the actual match location: the id text may
+		// also occur earlier inside an ineligible token, and remainderAfterID
+		// would inspect the wrong occurrence.
+		if spelling, catalogSuffix, suffix := splitRemasterMarker(strings.TrimSpace(filename[loc[3]:])); spelling != "" {
+			result.ID += catalogSuffix + foldRemasterMarker(spelling)
+			result.RemasterMarker = spelling
+			num, partSuffix, patternType, trailingPrefix := DetectPartSuffix(suffix, "")
+			// A bare numeric right after a consumed marker is a part only
+			// within realistic part counts; fps shorthands ("-HD-60") are
+			// quality metadata, not part 60.
+			if isFPSLikeBarePartNumber(num, partSuffix) {
+				num, partSuffix, patternType, trailingPrefix = 0, "", PatternNone, ""
+			}
+			result.PartNumber = num
+			result.PartSuffix = partSuffix
+			result.MultipartPattern = patternType
+			result.TrailingPrefix = trailingPrefix
+			result.IsMultiPart = patternType == PatternExplicit
+			return result
+		}
+	}
 
 	// The built-in ID pattern optionally consumes a trailing E or Z as a catalog
 	// suffix (e.g. IPX-535Z). When that letter immediately precedes a digit-first
@@ -164,21 +231,39 @@ func (m *Matcher) matchWithRegex(file models.FileMatchInfo, filename string, pat
 
 // MatchString is a helper to extract ID from a string directly
 func (m *Matcher) MatchString(s string) string {
-	// Try custom regex first
+	// Custom regexes first see the argument exactly as supplied, preserving
+	// extension- and path-anchored configurations. A miss gets one retry
+	// against the ASCII video stem before the automated tiers. Filename
+	// characters remain unchanged; fullwidth folding is a separate feature.
+	raw := s
+	s = stripVideoExtension(filepath.Base(s))
 	if m.config.RegexEnabled && m.regexPattern != nil {
-		matches := m.regexPattern.FindStringSubmatch(s)
-		if len(matches) > 1 {
-			id := strings.TrimSpace(matches[1])
-			if id != "" {
-				return strings.ToUpper(id)
+		if id := m.matchStringCustomRegex(raw); id != "" {
+			return id
+		}
+		if s != raw && isASCII(raw) {
+			if id := m.matchStringCustomRegex(s); id != "" {
+				return id
 			}
 		}
 	}
 
+	if normalized := normalizeFusedRemasterFilename(s, m.builtinPattern); normalized != "" {
+		s = normalized
+	}
+	s = preferBuiltinAfterQuality(s, m.builtinPattern)
+
 	// Try built-in pattern
-	matches := m.builtinPattern.FindStringSubmatch(s)
-	if len(matches) > 1 {
-		id := strings.ToUpper(matches[1])
+	loc := m.builtinPattern.FindStringSubmatchIndex(s)
+	if loc != nil && !builtinMatchConflictsWithContentID(s, m.builtinPattern) && !builtinQualityShadowsContentID(s, strings.ToUpper(s[loc[2]:loc[3]])) {
+		id := strings.ToUpper(s[loc[2]:loc[3]])
+		// The suffix comes after the actual match location: the id text may
+		// also occur earlier inside an ineligible token. The E/Z catalog
+		// suffix letter rides onto the id ahead of the folded marker, exactly
+		// as matchWithRegex appends it for MatchFile parity.
+		if spelling, catalogSuffix := remasterMarkerSpelling(strings.TrimSpace(s[loc[1]:])); spelling != "" {
+			return id + catalogSuffix + foldRemasterMarker(spelling)
+		}
 		// Apply the same E/Z catalog-suffix stripping as matchWithRegex so MatchString
 		// stays consistent with MatchFile for downstream re-match callers (e.g. the
 		// scrape phase re-deriving a movie ID from a filename). A bare E/Z without a
@@ -193,7 +278,43 @@ func (m *Matcher) MatchString(s string) string {
 		return id
 	}
 
+	return matchContentIDShape(s)
+}
+
+// matchStringCustomRegex applies the user-specified custom regex to s and
+// returns the uppercased first capture group, or "" when the regex does not
+// produce a usable capture (missing group, non-participating group, or empty
+// capture). Raw and ASCII-stem attempts share this contract.
+func (m *Matcher) matchStringCustomRegex(s string) string {
+	matches := m.regexPattern.FindStringSubmatch(s)
+	if len(matches) > 1 {
+		id := strings.TrimSpace(matches[1])
+		if id != "" {
+			return strings.ToUpper(id)
+		}
+	}
 	return ""
+}
+
+// isASCII bounds the added custom-regex stem retry to ASCII inputs.
+// Non-ASCII custom expressions retain the baseline raw-input semantics.
+func isASCII(s string) bool {
+	for i := range s {
+		if s[i] >= 0x80 {
+			return false
+		}
+	}
+	return true
+}
+
+// stripVideoExtension returns s with a trailing video extension removed.
+func stripVideoExtension(s string) string {
+	ext := filepath.Ext(s)
+	switch strings.ToLower(ext) {
+	case ".mp4", ".mkv", ".avi", ".wmv", ".flv", ".mov", ".m4v", ".webm", ".mpg", ".mpeg", ".m2ts", ".ts":
+		return strings.TrimSuffix(s, ext)
+	}
+	return s
 }
 
 // ValidateMultipartInDirectory validates ambiguous multipart patterns
@@ -213,6 +334,11 @@ func (m *Matcher) MatchString(s string) string {
 //     AND same TrailingPrefix.
 //   - Any letter file not confirmed has PartNumber/PartSuffix cleared.
 //   - Letter part numbers must not collide with explicit/trailing-confirmed parts.
+//   - A bare-H remaster match demoted to part 8 (see applyRemasterDemotions)
+//     survives only when the augmented part set is coherent — the pinned
+//     A,B,H shape (parts 1, 2, 8) or a contiguous run 1..N completed by
+//     part 8; any other shape fails validation and restores the remaster
+//     spelling.
 //
 // This prevents false positives for:
 //   - "ABW-121-C.mp4" where -C means Chinese subtitles, not part 3
@@ -229,11 +355,124 @@ func ValidateMultipartInDirectory(results []MatchResult) []MatchResult {
 	validated := make([]MatchResult, len(results))
 	copy(validated, results)
 
-	// Group by (directory, movieID)
-	type dirIDKey struct {
-		dir string
-		id  string
+	demoted := applyRemasterDemotions(validated)
+	demotedIdx := make(map[int]bool, len(demoted))
+	for _, d := range demoted {
+		demotedIdx[d.idx] = true
 	}
+	validateMultipartGroups(validated, demotedIdx)
+
+	if len(demoted) > 0 {
+		failedGroups := make(map[dirIDKey]bool)
+		for _, d := range demoted {
+			if !validated[d.idx].IsMultiPart {
+				failedGroups[d.key] = true
+			}
+		}
+		if len(failedGroups) > 0 {
+			for i := range validated {
+				if failedGroups[dirIDKey{dir: filepath.Dir(validated[i].File.Path), id: validated[i].ID}] {
+					validated[i] = results[i]
+				}
+			}
+			validateMultipartGroups(validated, demotedIdx)
+		}
+		for _, d := range demoted {
+			if validated[d.idx].IsMultiPart {
+				validated[d.idx].RemasterMarker = ""
+			}
+		}
+	}
+
+	return validated
+}
+
+// applyRemasterDemotions tentatively rewrites bare-H remaster matches as
+// multipart part 8 of the base ID when at least two same-directory
+// bare-letter siblings with distinct part numbers corroborate the multipart
+// reading. Corroboration is deliberately permissive — any distinct letter
+// set qualifies, not only the classic A,B pair — because the bet stays
+// provisional: validateMultipartGroups keeps the demotion only when the
+// augmented part set is coherent (the pinned A,B,H shape, or a contiguous
+// run that part 8 completes), and any other shape rolls back to the
+// remaster spelling. Returns the indices that were demoted; callers must
+// treat demotion as provisional and roll everything back if a demoted
+// result fails validation.
+func applyRemasterDemotions(validated []MatchResult) []demotion {
+	var demoted []demotion
+	for i, r := range validated {
+		if r.RemasterMarker != "H" {
+			continue
+		}
+		if r.PartNumber != 0 || r.MultipartPattern != "" {
+			continue
+		}
+		baseID := strings.TrimSuffix(r.ID, "H")
+		if baseID == r.ID {
+			continue
+		}
+		dir := filepath.Dir(r.File.Path)
+		siblingParts := make(map[int]struct{})
+		for j, sib := range validated {
+			if j == i {
+				continue
+			}
+			if sib.ID != baseID || sib.MultipartPattern != PatternLetter || sib.TrailingPrefix != "" {
+				continue
+			}
+			if filepath.Dir(sib.File.Path) != dir {
+				continue
+			}
+			siblingParts[sib.PartNumber] = struct{}{}
+		}
+		// A single distinct bare-letter sibling (or none) does not
+		// corroborate the multipart reading; any distinct set of two or
+		// more does, and the group validation layer settles coherence.
+		if len(siblingParts) < 2 {
+			continue
+		}
+		validated[i].ID = baseID
+		validated[i].PartNumber = 8
+		validated[i].PartSuffix = "-H"
+		validated[i].MultipartPattern = PatternLetter
+		demoted = append(demoted, demotion{idx: i, key: dirIDKey{dir: dir, id: baseID}})
+	}
+	return demoted
+}
+
+// coherentDemotedPartSet reports whether an augmented bare-letter part set —
+// the corroborating siblings plus the demoted part 8 — is a shape the
+// directory can explain. Exactly two shapes qualify: the pinned A,B,H bet
+// (parts 1, 2 and 8 — the classic two-part original whose remaster files as
+// part 8 of the group), and a contiguous run 1..N that part 8 completes
+// (N >= 8; the H file is the genuine eighth part of an eight-or-more-part
+// original). Every other shape — a three-or-more-part original whose part 8
+// cannot exist, a gapped or offset run — is incoherent: the group must not
+// confirm, the demotion rolls back, and the remaster spelling survives.
+func coherentDemotedPartSet(countByPart map[int]int) bool {
+	if len(countByPart) == 3 {
+		_, hasA := countByPart[1]
+		_, hasB := countByPart[2]
+		_, hasH := countByPart[8]
+		return hasA && hasB && hasH
+	}
+	// A contiguous run 1..N with N == len(countByPart): every part from 1
+	// through N is present. Part 8 is always in the set (the demotion put
+	// it there), so a passing run always includes part 8.
+	n := len(countByPart)
+	for p := 1; p <= n; p++ {
+		if _, ok := countByPart[p]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// demotedIdx carries the indices applyRemasterDemotions tentatively
+// rewrote; a letter set containing one of them confirms only when the
+// augmented part set is coherent (see coherentDemotedPartSet).
+func validateMultipartGroups(validated []MatchResult, demotedIdx map[int]bool) {
+	// Group by (directory, movieID)
 	groups := make(map[dirIDKey][]int)
 
 	for i, r := range validated {
@@ -329,6 +568,19 @@ func ValidateMultipartInDirectory(results []MatchResult) []MatchResult {
 					return
 				}
 			}
+			// A set carrying a demoted part-8 entry confirms only when the
+			// augmented part set is coherent; an incoherent set does not
+			// confirm, so the demotion rolls back to the remaster spelling
+			// (the caller restores the original results and revalidates).
+			for _, idx := range set {
+				if !demotedIdx[idx] {
+					continue
+				}
+				if !coherentDemotedPartSet(countByPart) {
+					return
+				}
+				break
+			}
 			for _, idx := range set {
 				validated[idx].IsMultiPart = true
 			}
@@ -351,6 +603,4 @@ func ValidateMultipartInDirectory(results []MatchResult) []MatchResult {
 			validated[i].PartSuffix = ""
 		}
 	}
-
-	return validated
 }
