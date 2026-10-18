@@ -62,6 +62,8 @@ type dumpDVDRow struct {
 }
 
 func (s *Store) selectDVDRow(ctx context.Context, key, id string) (dumpDVDRow, bool, error) {
+	queryIdentity := dumpMarkerDisplayKey(id)
+	rawMarker := isRawDumpMarkerQuery(id)
 	rows, err := s.db.QueryContext(ctx,
 		"SELECT content_id, dvd_id, release_date, service_code FROM videos WHERE dvd_id_norm = ? ORDER BY content_id",
 		key,
@@ -81,6 +83,14 @@ func (s *Store) selectDVDRow(ctx context.Context, key, id string) (dumpDVDRow, b
 		row.dvdID = dvdID.String
 		row.releaseDate = releaseDate.String
 		row.serviceCode = serviceCode.String
+		// Normalization can erase the T/T28 boundary on both primary and
+		// derived keys. A CID candidate is not proof of a conflicting DVD ID.
+		rawOwned := rawMarker && dumpRawMarkerEqual(row.contentID, id)
+		if !rawOwned && (rawMarker || queryIdentity != "") {
+			if queryIdentity == "" || dumpMarkerDisplayKey(row.dvdID) != queryIdentity {
+				continue
+			}
+		}
 		matches = append(matches, row)
 	}
 	if err := rows.Err(); err != nil {
@@ -147,10 +157,14 @@ func (s *Store) LookupByContentID(ctx context.Context, contentID string) (string
 }
 
 // MatchByDisplayID resolves a display ID to all matching dump rows in
-// candidate priority order. An exact dvd_id_norm hit wins and returns a single
-// match (identical to LookupByDVDID semantics). Otherwise the display ID is
-// expanded into content_id candidates (ContentIDCandidates) and rows are
-// matched exactly by content_id, ordered by candidate priority. Returns
+// candidate priority order. An identity-compatible dvd_id_norm hit wins and
+// returns a single match (identical to LookupByDVDID semantics). Marker display
+// queries require the published DVD identity to preserve their series boundary.
+// Otherwise the display ID is expanded into content_id candidates
+// (ContentIDCandidates) and rows are matched exactly by content_id, ordered by
+// candidate priority. Null-DVD rows
+// are candidate evidence only, not verified display mappings; callers expose
+// that state explicitly and scrapers still verify the source response. Returns
 // models.ErrDumpMiss when nothing matches.
 func (s *Store) MatchByDisplayID(ctx context.Context, id string) ([]models.DumpMatch, error) {
 	if s == nil {
@@ -180,7 +194,7 @@ func (s *Store) MatchByDisplayID(ctx context.Context, id string) ([]models.DumpM
 	// set is the exact input first, then the expanded candidates, deduped —
 	// order within the result follows probe order.
 	exactID := strings.ToLower(strings.TrimSpace(id))
-	compacted := strings.NewReplacer("-", "", "_", "", ".", "", " ", "").Replace(strings.TrimSpace(id))
+	compacted := strings.NewReplacer("_", "", ".", "").Replace(normalizeDVDID(id))
 	candidates := ContentIDCandidates(id)
 	if remasterMarkerTailRgx.MatchString(compacted) {
 		candidates = ContentIDCandidatesWithMarker(id)
@@ -214,6 +228,8 @@ func (s *Store) MatchByDisplayID(ctx context.Context, id string) ([]models.DumpM
 	}
 	defer func() { _ = rows.Close() }()
 
+	queryIdentity := dumpMarkerDisplayKey(id)
+	rawMarker := isRawDumpMarkerQuery(id)
 	byContentID := make(map[string]models.DumpMatch, len(probe))
 	for rows.Next() {
 		var m models.DumpMatch
@@ -224,6 +240,14 @@ func (s *Store) MatchByDisplayID(ctx context.Context, id string) ([]models.DumpM
 		m.DVDID = dvdID.String
 		m.ReleaseDate = rel.String
 		m.ServiceCode = svc.String
+		// Preserve null-DVD candidate discovery and literal raw ownership,
+		// but never re-admit a conflicting published identity via expansion.
+		rawOwned := rawMarker && dumpRawMarkerEqual(m.ContentID, exactID)
+		if m.DVDID != "" && !rawOwned && (rawMarker || queryIdentity != "") {
+			if queryIdentity == "" || dumpMarkerDisplayKey(m.DVDID) != queryIdentity {
+				continue
+			}
+		}
 		byContentID[m.ContentID] = m
 	}
 	if err := rows.Err(); err != nil {
@@ -637,6 +661,99 @@ func normalizeDVDID(id string) string {
 var dumpPaddedMarkerRegex = regexp.MustCompile(`^((?:T28|[A-Z]+))([0-9]+)([EZ]?)(HD|H|AI)$`)
 
 var dumpMarkerTailRegex = regexp.MustCompile(`^((?:T28|[A-Z]+)[0-9]+[EZ]?)(H|AI)$`)
+
+var dumpMarkerSeriesRegex = regexp.MustCompile(`^(?:[0-9]*(?:T28|[A-Z]+))$`)
+var dumpMarkerPinnedTailRegex = regexp.MustCompile(`^([0-9]+)([EZ]?)(HD|H|AI)$`)
+
+// dumpMarkerDisplayKey retains the display-series boundary that normalized
+// DVD keys erase. It mirrors the source's prefix-free compact T/T28 grammar;
+// a separated series always wins, and only number-leading zeros are padding.
+func dumpMarkerDisplayKey(id string) string {
+	upper := strings.ToUpper(strings.TrimSpace(id))
+	parts := strings.FieldsFunc(upper, func(r rune) bool {
+		return r == '-' || r == '_' || r == '.' || unicode.IsSpace(r)
+	})
+	var series, number, suffix, marker string
+	if len(parts) >= 2 && dumpMarkerSeriesRegex.MatchString(parts[0]) {
+		if m := dumpMarkerPinnedTailRegex.FindStringSubmatch(strings.Join(parts[1:], "")); m != nil {
+			series, number, suffix, marker = parts[0], m[1], m[2], m[3]
+		}
+	}
+	if series == "" {
+		m := dumpPaddedMarkerRegex.FindStringSubmatch(strings.Join(parts, ""))
+		if m == nil {
+			return ""
+		}
+		series, number, suffix, marker = m[1], m[2], m[3], m[4]
+		if series == "T28" && (len(number) == 3 || len(number) == 4) {
+			series, number = "T", "28"+number
+		}
+	}
+	if marker == "HD" {
+		marker = "H"
+	}
+	number = strings.TrimLeft(number, "0")
+	if number == "" {
+		number = "0"
+	}
+	return series + "/" + number + "/" + suffix + "/" + marker
+}
+
+var dumpRawMarkerRegex = regexp.MustCompile(`^(\d*)((?:t28|[a-z]+))(\d+)([ez]?)(hd|ai|h)$`)
+
+// dumpRawMarkerEqual preserves established padding aliases without turning
+// candidate expansion into ownership of another catalog/channel or marker.
+func dumpRawMarkerEqual(left, right string) bool {
+	if strings.EqualFold(strings.TrimSpace(left), strings.TrimSpace(right)) {
+		return true
+	}
+	key := dumpRawMarkerKey(left)
+	return key != "" && key == dumpRawMarkerKey(right)
+}
+
+func dumpRawMarkerKey(id string) string {
+	raw := strings.ToLower(strings.TrimSpace(id))
+	channel := ""
+	if len(raw) > 2 && raw[1] == '_' {
+		channel, raw = raw[:2], raw[2:]
+	}
+	m := dumpRawMarkerRegex.FindStringSubmatch(raw)
+	if m == nil {
+		return ""
+	}
+	series, number := m[2], m[3]
+	if series == t28Series {
+		if m[1] != "" {
+			// The same fixture-proven boundary as the source guard. Unknown
+			// prefixes cannot decide which digits are series versus number.
+			switch channel + m[1] {
+			case "9", "1", "h_003":
+			default:
+				return ""
+			}
+		} else if len(number) == 3 || len(number) == 4 {
+			series, number = "t", "28"+number
+		}
+	}
+	return channel + m[1] + "/" + series + "/" + strings.TrimLeft(number, "0") + "/" + m[4] + "/" + m[5]
+}
+
+// isRawDumpMarkerQuery follows the marker candidate helper's literal-CID
+// contract. Raw ownership is independent of any DVD ID stored on that row.
+func isRawDumpMarkerQuery(id string) bool {
+	raw := strings.ToLower(strings.TrimSpace(id))
+	parts := remasterMarkerTailRgx.FindStringSubmatch(raw)
+	if parts == nil {
+		return false
+	}
+	if underscoreContentIDRegex.FindString(parts[1]) == parts[1] {
+		return true
+	}
+	if strings.ContainsAny(strings.Join(strings.Fields(raw), " "), "-_. ") {
+		return false
+	}
+	return (looksLikeContentID(raw) && contentIDFullRegex.MatchString(raw)) || wideNumericCIDRegex.MatchString(raw)
+}
 
 // dumpNormKeys returns all dvd_id_norm variants to probe for a query id: the
 // direct normalization plus, for canonical remaster ids (…156H), the stored

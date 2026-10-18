@@ -42,7 +42,9 @@ func TestSearchExplicitT28BoundaryRejectsOppositePage(t *testing.T) {
 					if query != display {
 						require.Error(t, err)
 						assert.Nil(t, result)
-						assert.Contains(t, err.Error(), "different release")
+						scraperErr, ok := models.AsScraperError(err)
+						require.True(t, ok)
+						assert.Equal(t, models.ScraperErrorKindNotFound, scraperErr.Kind)
 						return
 					}
 					require.NoError(t, err)

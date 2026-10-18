@@ -3,9 +3,10 @@ package dmm
 import (
 	"context"
 	"fmt"
-	"github.com/stretchr/testify/require"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestSearchDisplayQueryRejectsConflictingHCIDNumber(t *testing.T) {
@@ -25,6 +26,31 @@ func TestSearchDisplayQueryRejectsConflictingHCIDNumber(t *testing.T) {
 			result, err := s.Search(context.Background(), "RCT-156H")
 			require.Error(t, err)
 			require.Nil(t, result)
+		})
+	}
+}
+
+func TestVerifyCandidateDisplayIDRejectsCIDContradiction(t *testing.T) {
+	for _, tc := range []struct {
+		name, query, cid, display string
+		want                      displayStatus
+	}{
+		{"H number conflict", "RCT-156H", "1rct00157h", "RCT-156-HD", displayRejected},
+		{"HD number conflict", "RCT-156H", "1rct00157hd", "RCT-156-HD", displayRejected},
+		{"valid H padding", "RCT-156H", "1rct00156h", "RCT-00156-HD", displayVerified},
+		{"AI server slot differs", "DV-818AI", "dv00899ai", "DV-818AI", displayVerified},
+		{"old number-free H fixture rejects", "ABC-999H", "abc01234h", "ABC-999-HD", displayRejected},
+		{"prefix-free T CID conflicts", "T28-123-HD", "t28123h", "T28-123-HD", displayRejected},
+		{"base page conflicts", "RCT-156H", "1rct00156h", "RCT-156", displayRejected},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, _ := newRemasterTestScraper(t)
+			s.client.SetTransport(&remasterRoundTripper{serve: func(string) (int, string) {
+				return 200, fmt.Sprintf(`<table><tr><td>品番：</td><td>%s</td></tr></table>`, tc.display)
+			}})
+			status, err := s.verifyCandidateDisplayID(context.Background(), tc.query, []string{"https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=" + tc.cid + "/"})
+			require.NoError(t, err)
+			require.Equal(t, tc.want, status)
 		})
 	}
 }

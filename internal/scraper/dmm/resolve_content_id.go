@@ -25,17 +25,45 @@ func (s *scraper) ResolveContentIDCtx(ctx context.Context, id string) (string, e
 }
 
 func (s *scraper) resolveContentIDCtx(ctx context.Context, id string) (string, error) {
+	cid, _, err := s.resolveContentIDWithOrigin(ctx, id)
+	return cid, err
+}
+
+// resolveContentIDWithOrigin is resolveContentIDCtx plus the resolution
+// origin: fromCache reports whether the content id was served by the
+// persistent cache instead of this call's verified resolver. Search gates its
+// display-id fill on the origin — a cached AI mapping whose page publishes no
+// 品番 cannot be verified in-flow (AI cid numbers diverge from display
+// numbers), while a freshly resolved marker mapping was just verified
+// against a product-page 品番.
+func (s *scraper) resolveContentIDWithOrigin(ctx context.Context, id string) (string, bool, error) {
 	if s.contentIDRepo == nil {
-		return "", fmt.Errorf("content ID repository not available")
+		return "", false, fmt.Errorf("content ID repository not available")
 	}
 
 	normalizedID := strings.ToUpper(id)
-	if cached, err := s.contentIDRepo.FindBySearchID(ctx, normalizedID); err == nil {
+	foldedMarker, series, catalogSuffix, isContentID := classifyRemasterQuery(id)
+	if cached, err := s.contentIDRepo.FindBySearchID(ctx, normalizedID); err == nil && cachedRemasterIdentityMatches(id, cached.ContentID, foldedMarker, series, catalogSuffix, isContentID) {
 		logging.Debugf("DMM: Found cached content-id for %s: %s", id, cached.ContentID)
-		return cached.ContentID, nil
+		return cached.ContentID, true, nil
 	}
+	cid, err := s.resolveContentIDFresh(ctx, id, normalizedID, foldedMarker, series, catalogSuffix, isContentID)
+	return cid, false, err
+}
 
+// resolveContentIDFresh is the cache-miss half of resolution: the verified
+// resolver path, kept verbatim from the original resolveContentIDCtx body.
+func (s *scraper) resolveContentIDFresh(ctx context.Context, id, normalizedID, foldedMarker, series, catalogSuffix string, isContentID bool) (string, error) {
 	logging.Debugf("DMM: Content-id not cached for %s, attempting to resolve via search", id)
+
+	if isContentID {
+		cid := stripRentalSuffixMarkerAware(strings.ToLower(strings.TrimSpace(id)))
+		s.cacheContentID(ctx, normalizedID, cid)
+		return cid, nil
+	}
+	if foldedMarker != "" {
+		return s.resolveRemasterContentID(ctx, id, normalizedID, foldedMarker, series, catalogSuffix)
+	}
 
 	contentID := normalizeContentID(id)
 	searchQuery := strings.ToLower(strings.ReplaceAll(id, "-", ""))
@@ -111,7 +139,7 @@ func (s *scraper) resolveContentIDCtx(ctx context.Context, id string) (string, e
 	mapping := &models.ContentIDMapping{
 		SearchID:  normalizedID,
 		ContentID: foundContentID,
-		Source:    "dmm",
+		Source:    s.Name(),
 	}
 
 	if err := s.contentIDRepo.Create(ctx, mapping); err != nil {

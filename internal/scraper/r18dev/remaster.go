@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"regexp"
 	"strings"
+	"unicode"
 
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/r18devdump"
@@ -37,11 +38,8 @@ func r18RemasterStem(id string) string {
 // segment and marker-bearing remainder, pinning the series boundary that
 // compaction erases ("T-28123-HD" is series t, not series t28).
 func r18SeparatorSeriesTail(lower string) (seg, rest string, ok bool) {
-	if !strings.ContainsAny(lower, "-_. ") {
-		return "", "", false
-	}
 	parts := strings.FieldsFunc(lower, func(r rune) bool {
-		return r == '-' || r == '_' || r == '.' || r == ' '
+		return r == '-' || r == '_' || r == '.' || unicode.IsSpace(r)
 	})
 	if len(parts) < 2 || !r18SeriesSegmentRegex.MatchString(parts[0]) {
 		return "", "", false
