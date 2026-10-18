@@ -182,10 +182,21 @@ export function shouldClearUnstartedApplyRecovery(
 }
 
 export function isCreditBlockedResult(result: FileResult): boolean {
+	if (result.status !== 'failed' || !result.movie) return false;
+	if (result.error_code === 'credit_conflict' || result.error_code === 'credit_status_unavailable') {
+		return true;
+	}
+	// v1.6.2 persisted these exact terminal Apply-gate diagnostics as generic
+	// "blocked". Keep their metadata-bearing results in movie review after an
+	// upgrade without rewriting the stored result or treating provider blocks
+	// as credit failures. Retrying still goes through the live backend gate.
 	return (
-		result.status === 'failed' &&
-		!!result.movie &&
-		(result.error_code === 'credit_conflict' || result.error_code === 'credit_status_unavailable')
+		result.error_code === 'blocked' &&
+		!!result.movie.code &&
+		!!result.file_path &&
+		!!result.ended_at &&
+		(result.error === 'apply blocked by an open credit collision' ||
+			result.error === 'apply blocked because credit collision status is unavailable')
 	);
 }
 
