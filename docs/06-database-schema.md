@@ -520,13 +520,24 @@ ls -lh data/javinizer.db
 sqlite3 data/javinizer.db "VACUUM;"
 ```
 
-### Clear Cache
+### Preserve the database during recovery
 
-```bash
-# Delete database (will be recreated on next init)
-rm data/javinizer.db
-javinizer init
-```
+The database is a durable store, not a disposable cache. Deleting it removes
+saved metadata, credit decisions, custom mappings, job state, operation history,
+and recovery journals. Recreating the schema does not restore those records.
+Do not delete the database or the desktop application's entire data directory
+to resolve an organizing error or remove temporary staging files.
+
+Before troubleshooting an upgrade, preserve a consistent database backup and the
+affected files. Upgrade the existing database through normal startup migrations.
+Resolve active credit collisions in review; retrying or clearing temporary files
+does not resolve them. Keep staging ownership proofs and recovery markers until
+their state is understood. See [recovery-marker guidance](./10-troubleshooting.md#resident-publication-reconciliation-is-pending).
+
+The desktop data directory also contains configuration, logs, and temporary data.
+Clearing that whole directory is materially different from removing an identified
+disposable temporary file. Older unowned staging directories are intentionally
+retained; their names alone do not prove that their contents are safe to delete.
 
 ## Migration
 

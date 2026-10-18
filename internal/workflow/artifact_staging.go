@@ -433,8 +433,8 @@ func (s *artifactStage) cleanup() {
 		logging.Warnf("artifact staging cleanup retained %s: %v", s.root, err)
 		return
 	}
-	_ = s.fs.Remove(proofSrc)
-	_ = s.fs.Remove(proofDst)
+	removeArtifactStageProofAfterTree(s.fs, proofSrc)
+	removeArtifactStageProofAfterTree(s.fs, proofDst)
 }
 
 func (s *artifactStage) finalPath(path string) (string, error) {
