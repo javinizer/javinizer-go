@@ -139,6 +139,19 @@ func extractContentIDCandidates(doc *goquery.Document, searchIDs []string) []con
 	return candidates
 }
 
+// hrefPaddingEquivalentCID reports whether a search-result href carries a
+// cid whose padding-normalized identity equals id's: the unpadded raw
+// query spelling 1rct156h and the server's padded cid 1rct00156h name the
+// same product, but neither is a substring of the other. Markerless ids
+// never normalize, so only marker-bearing queries gain equivalence.
+func hrefPaddingEquivalentCID(href, id string) bool {
+	urlCID := extractContentIDFromURL(href)
+	if urlCID == "" {
+		return false
+	}
+	return normalizeCIDPadding(stripRentalSuffixMarkerAware(urlCID)) == normalizeCIDPadding(id)
+}
+
 // extractCandidateURLs extracts and prioritizes URLs from search results
 func (s *scraper) extractCandidateURLs(doc *goquery.Document, contentID string) []urlCandidate {
 	var candidates []urlCandidate
@@ -195,6 +208,14 @@ func (s *scraper) extractCandidateURLs(doc *goquery.Document, contentID string) 
 		logging.Debugf("DMM: Checking link href=%s, contains contentID=%v, contains baseID=%v",
 			hrefLower, strings.Contains(hrefLower, contentIDLower), strings.Contains(hrefLower, baseID))
 		containsID := strings.Contains(hrefLower, contentIDLower) || strings.Contains(hrefLower, baseID)
+		if !containsID {
+			// The unpadded spelling of a marker-bearing raw query (1rct156h)
+			// is never a substring of the server's padded href cid
+			// (1rct00156h); accept the href when its extracted cid is
+			// padding-equivalent. Markerless ids never normalize, so base
+			// content-id queries keep their exact substring semantics.
+			containsID = hrefPaddingEquivalentCID(href, contentIDLower) || hrefPaddingEquivalentCID(href, baseID)
+		}
 		if !containsID {
 			return
 		}

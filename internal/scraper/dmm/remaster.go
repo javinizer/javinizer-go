@@ -1,9 +1,15 @@
 package dmm
 
 import (
-	"github.com/PuerkitoBio/goquery"
+	"context"
+	"fmt"
 	"regexp"
+	"slices"
 	"strings"
+
+	"github.com/PuerkitoBio/goquery"
+	"github.com/javinizer/javinizer-go/internal/logging"
+	"github.com/javinizer/javinizer-go/internal/models"
 )
 
 var (
@@ -31,6 +37,48 @@ var (
 	nonAlnumRegex         = regexp.MustCompile(`[^a-z0-9]+`)
 	underscorePrefixRegex = regexp.MustCompile(`^[hn]_`)
 )
+
+// cachedRemasterIdentityMatches reports whether a cached content-id mapping
+// may stand in for the query without re-running resolution. Markerless
+// queries accept any mapping; raw content-id queries require the verbatim
+// cid. Display marker queries bind series, folded marker and E/Z suffix —
+// and, for H/HD mappings, the padding-normalized number: an H/HD remaster
+// cid keeps the display number (1rct00156h is RCT-156H), so a stale
+// same-series mapping for a different release (1rct00157h under RCT-156H)
+// must not short-circuit the verified resolver and publish the wrong movie.
+// AI mappings stay number-free: AI cids diverge from display numbers
+// (dv00899ai is DV-818AI), so the marker-based identity is the strongest
+// check available.
+func cachedRemasterIdentityMatches(id, cid, marker, series, suffix string, raw bool) bool {
+	if marker == "" {
+		return true
+	}
+	if raw {
+		return strings.EqualFold(strings.TrimSpace(id), strings.TrimSpace(cid))
+	}
+	clean := cleanPrefixRegex.ReplaceAllString(strings.ToLower(cid), "$1")
+	cachedMarker, cachedSuffix, ok := parseAnchoredMarkerCID(clean)
+	if !ok || !anchoredSeriesMatches(cid, series) || cachedMarker != marker || cachedSuffix != suffix {
+		return false
+	}
+	if marker == "ai" {
+		// AI content ids diverge from display numbers (dv00899ai is
+		// DV-818AI): the marker-based acceptance is already the strongest
+		// available identity check.
+		return true
+	}
+	qNumber, qOK := remasterTailNumber(id)
+	cNumber, cOK := remasterTailNumber(cid)
+	if !qOK || !cOK {
+		// No parseable number on either side: nothing to bind beyond the
+		// marker-based acceptance already applied.
+		return true
+	}
+	// H/HD remaster cids keep the display number: require the cached cid's
+	// padding-normalized number to equal the query's display number
+	// (1rct00156h matches RCT-156H and RCT-00156-HD; 1rct00157h does not).
+	return trimDisplayZeros(qNumber) == trimDisplayZeros(cNumber)
+}
 
 // remasterTailNumber extracts an id's display number through the same parse
 // classifyRemasterQuery applies: rental-normalized and compacted, with an
@@ -72,6 +120,24 @@ const t28Series = "t28"
 // T28.
 func t28TailDecodesTSeries(tail string) bool {
 	return len(tail) == 3 || len(tail) == 4
+}
+
+func anchoredSeriesMatches(rawCID, wantSeries string) bool {
+	norm := strings.ToLower(strings.ReplaceAll(rawCID, "-", ""))
+	norm = underscorePrefixRegex.ReplaceAllString(norm, "")
+	m := anchoredMarkerCIDReg.FindStringSubmatch(norm)
+	if m == nil {
+		return false
+	}
+	prefix, cidSeries, number := m[1], m[2], m[3]
+	switch wantSeries {
+	case "t":
+		return cidSeries == "t" || (prefix == "" && cidSeries == t28Series && t28TailDecodesTSeries(number))
+	case t28Series:
+		return cidSeries == t28Series && (prefix != "" || !t28TailDecodesTSeries(number))
+	default:
+		return cidSeries == wantSeries
+	}
 }
 
 func compactQueryID(id string) string {
@@ -234,6 +300,328 @@ func stripRentalSuffixMarkerAware(cid string) string {
 		}
 	}
 	return cid
+}
+
+// normalizeCIDPadding canonicalizes a marker-bearing content id by
+// stripping leading zeros from its number: the unpadded query spelling
+// 1rct156h and the server's padded cid 1rct00156h reduce to the same
+// identity. The [hn]_<digits> channel prefix, catalog digits, series, E/Z
+// suffix and marker stay verbatim; ids without a marker-bearing cid shape
+// (including markerless base cids) are returned unchanged so the
+// normalization never rewrites non-marker identities.
+func normalizeCIDPadding(cid string) string {
+	s := strings.ToLower(strings.TrimSpace(cid))
+	prefix := ""
+	core := s
+	if underscoreCIDShapeRegex.MatchString(s) {
+		// [hn]_<digits> channel prefix: keep it verbatim, normalize the rest.
+		rest := s[2:]
+		i := 0
+		for i < len(rest) && rest[i] >= '0' && rest[i] <= '9' {
+			i++
+		}
+		prefix, core = s[:2+i], rest[i:]
+	}
+	m := anchoredMarkerCIDReg.FindStringSubmatch(core)
+	if m == nil {
+		return s
+	}
+	n := strings.TrimLeft(m[3], "0")
+	if n == "" {
+		n = "0"
+	}
+	return prefix + m[1] + m[2] + n + m[4]
+}
+
+// bindResolvedCID reports whether a URL-extracted cid may stand in for the
+// resolved cid on marker paths: exact equality, or equality up to DMM
+// catalog-digit prefix stripping with the marker suffix intact.
+func bindResolvedCID(urlCID, resolved string, exact bool) bool {
+	if exact {
+		a := stripRentalSuffixMarkerAware(strings.ToLower(strings.TrimSpace(urlCID)))
+		b := stripRentalSuffixMarkerAware(strings.ToLower(strings.TrimSpace(resolved)))
+		// Raw queries may arrive unpadded (1rct156h) while the server states
+		// the padded cid (1rct00156h); the zero-trimmed identity is the same
+		// product, so compare padding-normalized spellings.
+		return a == b || normalizeCIDPadding(a) == normalizeCIDPadding(b)
+	}
+	a := stripRentalSuffixMarkerAware(compactQueryID(urlCID))
+	b := compactQueryID(resolved)
+	if a == b {
+		return true
+	}
+	ac := cleanPrefixRegex.ReplaceAllString(a, "$1")
+	bc := cleanPrefixRegex.ReplaceAllString(b, "$1")
+	return ac != "" && ac == bc
+}
+
+// remasterSearchSpellings adds marker-aware display forms to the search query
+// set (e.g. rct-156-hd, rct156hd for an H-marker query).
+func remasterSearchSpellings(id string) []string {
+	series, number, suffix, spelling, ok := parseRemasterTail(strings.ToLower(strings.TrimSpace(id)), compactQueryID(id))
+	if !ok {
+		return nil
+	}
+	padded := number
+	if len(padded) < 5 {
+		padded = strings.Repeat("0", 5-len(padded)) + padded
+	}
+	paddedSuffix := padded + suffix
+	displayMarker := "hd"
+	if spelling == "ai" {
+		displayMarker = "ai"
+	}
+	short := "h"
+	if spelling == "ai" {
+		short = "ai"
+	}
+	return []string{
+		series + "-" + number + suffix + "-" + displayMarker,
+		series + number + suffix + displayMarker,
+		series + paddedSuffix + displayMarker,
+		series + "-" + paddedSuffix + "-" + displayMarker,
+		series + number + suffix + short,
+		series + paddedSuffix + short,
+	}
+}
+
+// parseAnchoredMarkerCID parses a prefix-cleaned content id into series,
+// folded trailing marker and optional E/Z catalog suffix. Returns ok=false for
+// malformed ids or unrecognized suffix letters.
+func parseAnchoredMarkerCID(clean string) (folded string, suffix string, ok bool) {
+	m := anchoredMarkerCIDReg.FindStringSubmatch(clean)
+	if m == nil {
+		return "", "", false
+	}
+	tail := m[4]
+	switch {
+	case strings.HasSuffix(tail, "ai"):
+		suffix, folded = strings.TrimSuffix(tail, "ai"), "ai"
+	case strings.HasSuffix(tail, "hd"):
+		suffix, folded = strings.TrimSuffix(tail, "hd"), "h"
+	case strings.HasSuffix(tail, "h"):
+		suffix, folded = strings.TrimSuffix(tail, "h"), "h"
+	default:
+		return "", "", false
+	}
+	if suffix != "" && suffix != "e" && suffix != "z" {
+		return "", "", false
+	}
+	return folded, suffix, true
+}
+
+// extractRemasterContentIDCandidates scans a DMM search document for anchors
+// whose content id shares the query's series and folded marker (number-free:
+// the server owns the number). The persisted form is the verbatim
+// rental-normalized URL cid; candidates remain distinct when their normalized
+// content IDs differ.
+type remasterCandidate struct {
+	contentID string
+	cleanID   string
+	urls      []string
+	length    int
+}
+
+func extractRemasterContentIDCandidates(doc *goquery.Document, wantSeries, wantFoldedMarker, wantSuffix string) []remasterCandidate {
+	var out []remasterCandidate
+	if doc == nil {
+		return out
+	}
+	doc.Find("a").Each(func(i int, sel *goquery.Selection) {
+		href, exists := sel.Attr("href")
+		if !exists {
+			return
+		}
+		var rawCID string
+		if strings.Contains(href, "cid=") {
+			if mm := dmmCIDRegex.FindStringSubmatch(href); len(mm) > 1 {
+				rawCID = mm[1]
+			}
+		} else if strings.Contains(href, "video.dmm.co.jp") && strings.Contains(href, "id=") {
+			if mm := dmmIDRegex.FindStringSubmatch(href); len(mm) > 1 {
+				rawCID = mm[1]
+			}
+		}
+		if rawCID == "" {
+			return
+		}
+		rawCID = stripRentalSuffixMarkerAware(rawCID)
+		norm := strings.ToLower(strings.ReplaceAll(rawCID, "-", ""))
+		clean := cleanPrefixRegex.ReplaceAllString(norm, "$1")
+		folded, suffix, ok := parseAnchoredMarkerCID(clean)
+		// An unresolved prefixed T/T28 CID may only enter the candidate
+		// list here; mandatory product-page verification below must prove
+		// the requested explicit boundary before it can be selected.
+		_, unproven := unprovenT28CIDNumber(norm)
+		seriesMatches := anchoredSeriesMatches(norm, wantSeries) || (wantSeries == "t" && unproven)
+		if !ok || !seriesMatches || folded != wantFoldedMarker || suffix != wantSuffix {
+			return
+		}
+		fullURL := ""
+		if strings.HasPrefix(href, "/") {
+			fullURL = "https://www.dmm.co.jp" + href
+		} else if strings.HasPrefix(href, "http") {
+			fullURL = href
+		}
+		out = append(out, remasterCandidate{contentID: norm, cleanID: clean, urls: []string{fullURL}, length: len(clean)})
+	})
+	return out
+}
+
+// resolveRemasterContentID resolves a marker-bearing query via DMM search:
+// accumulate candidates across ALL query variations, dedupe repeated URLs
+// for the same normalized content ID, and verify candidates via product-page
+// display IDs.
+func (s *scraper) resolveRemasterContentID(ctx context.Context, id, normalizedID, foldedMarker, series, catalogSuffix string) (string, error) {
+	queries := uniqueNonEmptyStrings(append(buildResolveContentIDSearchQueries(id, normalizeContentID(id)), remasterSearchSpellings(id)...))
+
+	type aggCand struct {
+		contentID string
+		urls      []string
+	}
+	order := []string{}
+	byContentID := map[string]*aggCand{}
+
+	for _, query := range queries {
+		searchURLFormatted := fmt.Sprintf(searchURL, query)
+		logging.Debugf("DMM: remaster resolution query variation: %s", query)
+
+		if err := s.rateLimiter.Wait(ctx); err != nil {
+			return "", fmt.Errorf("DMM: rate limit wait failed: %w", err)
+		}
+		resp, err := s.client.R().SetContext(ctx).Get(searchURLFormatted)
+		if err != nil {
+			return "", fmt.Errorf("DMM search unavailable (possible geo-restriction or network error): %w", err)
+		}
+		if resp.StatusCode() == 403 || resp.StatusCode() == 451 {
+			return "", models.NewScraperStatusError("DMM", resp.StatusCode(), fmt.Sprintf("DMM access blocked (status %d, likely geo-restriction)", resp.StatusCode()))
+		}
+		if resp.StatusCode() != 200 {
+			return "", models.NewScraperStatusError("DMM", resp.StatusCode(), fmt.Sprintf("DMM search returned status code %d", resp.StatusCode()))
+		}
+		doc, err := goquery.NewDocumentFromReader(strings.NewReader(resp.String()))
+		var pageCands []remasterCandidate
+		if err == nil {
+			pageCands = extractRemasterContentIDCandidates(doc, series, foldedMarker, catalogSuffix)
+		}
+		for _, c := range pageCands {
+			if existing, ok := byContentID[c.contentID]; ok {
+				for _, u := range c.urls {
+					if !slices.Contains(existing.urls, u) {
+						existing.urls = append(existing.urls, u)
+					}
+				}
+				continue
+			}
+			byContentID[c.contentID] = &aggCand{contentID: c.contentID, urls: append([]string{}, c.urls...)}
+			order = append(order, c.contentID)
+		}
+	}
+
+	if len(order) == 0 {
+		return "", models.NewScraperNotFoundError("DMM", "no matching marker content-id found in DMM search results")
+	}
+
+	// Every search-derived candidate — singleton or ambiguous — is verified
+	// against product-page display IDs: admission is number-free by design, so
+	// only the page's display ID proves the requested release.
+	target := id
+	var verified []string
+	for _, contentID := range order {
+		c := byContentID[contentID]
+		status, err := s.verifyCandidateDisplayID(ctx, target, c.urls)
+		if err != nil {
+			return "", fmt.Errorf("DMM: remaster display verification for %s: %w", id, err)
+		}
+		if status == displayVerified {
+			verified = append(verified, contentID)
+		}
+	}
+	if len(verified) == 1 {
+		resolved := byContentID[verified[0]].contentID
+		s.cacheContentID(ctx, normalizedID, resolved)
+		return resolved, nil
+	}
+	return "", models.NewScraperNotFoundError("DMM", fmt.Sprintf("remaster resolution for %s could not verify a unique candidate (%d verified of %d distinct)", id, len(verified), len(order)))
+}
+
+func (s *scraper) cacheContentID(ctx context.Context, searchID, contentID string) {
+	mapping := &models.ContentIDMapping{SearchID: searchID, ContentID: contentID, Source: s.Name()}
+	if err := s.contentIDRepo.Create(ctx, mapping); err != nil {
+		logging.Debugf("DMM: Failed to cache content-id mapping for %s: %v", searchID, err)
+	}
+}
+
+type displayStatus int
+
+const (
+	displayVerified displayStatus = iota
+	displayRejected
+	displayUnverifiable
+)
+
+// verifyCandidateDisplayID fetches every eligible product page for a candidate
+// and combines the parseable display identities: zero parseable => unverified,
+// multiple distinct => unverifiable, exactly one => verified iff its pinned
+// identity equals the query's pinned identity.
+func (s *scraper) verifyCandidateDisplayID(ctx context.Context, id string, urls []string) (displayStatus, error) {
+	identities := map[string]struct{}{}
+	for _, u := range urls {
+		if u == "" || (!strings.HasPrefix(u, "https://www.dmm.co.jp/") && !strings.HasPrefix(u, "https://video.dmm.co.jp/")) {
+			continue
+		}
+		if err := s.rateLimiter.Wait(ctx); err != nil {
+			return displayUnverifiable, err
+		}
+		var body string
+		if strings.HasPrefix(u, "https://video.dmm.co.jp/") && s.useBrowser {
+			var err error
+			body, err = s.fetchBrowserHTML(ctx, u)
+			if err != nil {
+				if ctx.Err() != nil {
+					return displayUnverifiable, ctx.Err()
+				}
+				continue
+			}
+		} else {
+			resp, err := s.client.R().SetContext(ctx).Get(u)
+			if err != nil {
+				if ctx.Err() != nil {
+					return displayUnverifiable, ctx.Err()
+				}
+				continue
+			}
+			if resp.StatusCode() != 200 {
+				continue
+			}
+			body = resp.String()
+		}
+		if doc, err := goquery.NewDocumentFromReader(strings.NewReader(body)); err == nil {
+			// A matching display row cannot validate a contradictory URL CID.
+			// H/HD numbers must agree; AI keeps its server-owned slot number.
+			if rawRemasterCIDPageConflict(doc, u) {
+				return displayRejected, nil
+			}
+			if display := extractDisplayID(doc); display != "" {
+				// Equivalent spellings (RCT-156-HD, RCT156HD) parse to the same
+				// pinned identity; counting raw strings would reject an otherwise
+				// uniquely correct candidate as unverifiable.
+				if ds, dd, dsuf, dm, ok := displayIdentityTuple(display); ok {
+					identities[ds+"\x00"+dd+"\x00"+dsuf+"\x00"+dm] = struct{}{}
+				}
+			}
+		}
+	}
+	if len(identities) == 1 {
+		ts, td, tsuf, tm, tok := displayIdentityTuple(id)
+		if tok {
+			if _, ok := identities[ts+"\x00"+td+"\x00"+tsuf+"\x00"+tm]; ok {
+				return displayVerified, nil
+			}
+		}
+		return displayRejected, nil
+	}
+	return displayUnverifiable, nil
 }
 
 // extractDisplayID reads the display DVD ID (品番) from a DMM product page's
