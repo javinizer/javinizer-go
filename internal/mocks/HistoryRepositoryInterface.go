@@ -8,6 +8,8 @@ import (
 	"context"
 	"time"
 
+	"github.com/javinizer/javinizer-go/internal/database"
+
 	"github.com/javinizer/javinizer-go/internal/models"
 	mock "github.com/stretchr/testify/mock"
 )
@@ -302,6 +304,72 @@ func (_c *MockHistoryRepositoryInterface_CountByStatus_Call) Return(n int64, err
 }
 
 func (_c *MockHistoryRepositoryInterface_CountByStatus_Call) RunAndReturn(run func(ctx context.Context, status models.HistoryStatus) (int64, error)) *MockHistoryRepositoryInterface_CountByStatus_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CountFiltered provides a mock function for the type MockHistoryRepositoryInterface
+func (_mock *MockHistoryRepositoryInterface) CountFiltered(ctx context.Context, filter database.HistoryFilter) (int64, error) {
+	ret := _mock.Called(ctx, filter)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CountFiltered")
+	}
+
+	var r0 int64
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, database.HistoryFilter) (int64, error)); ok {
+		return returnFunc(ctx, filter)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, database.HistoryFilter) int64); ok {
+		r0 = returnFunc(ctx, filter)
+	} else {
+		r0 = ret.Get(0).(int64)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, database.HistoryFilter) error); ok {
+		r1 = returnFunc(ctx, filter)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockHistoryRepositoryInterface_CountFiltered_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CountFiltered'
+type MockHistoryRepositoryInterface_CountFiltered_Call struct {
+	*mock.Call
+}
+
+// CountFiltered is a helper method to define mock.On call
+//   - ctx context.Context
+//   - filter database.HistoryFilter
+func (_e *MockHistoryRepositoryInterface_Expecter) CountFiltered(ctx any, filter any) *MockHistoryRepositoryInterface_CountFiltered_Call {
+	return &MockHistoryRepositoryInterface_CountFiltered_Call{Call: _e.mock.On("CountFiltered", ctx, filter)}
+}
+
+func (_c *MockHistoryRepositoryInterface_CountFiltered_Call) Run(run func(ctx context.Context, filter database.HistoryFilter)) *MockHistoryRepositoryInterface_CountFiltered_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 database.HistoryFilter
+		if args[1] != nil {
+			arg1 = args[1].(database.HistoryFilter)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockHistoryRepositoryInterface_CountFiltered_Call) Return(n int64, err error) *MockHistoryRepositoryInterface_CountFiltered_Call {
+	_c.Call.Return(n, err)
+	return _c
+}
+
+func (_c *MockHistoryRepositoryInterface_CountFiltered_Call) RunAndReturn(run func(ctx context.Context, filter database.HistoryFilter) (int64, error)) *MockHistoryRepositoryInterface_CountFiltered_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1338,6 +1406,86 @@ func (_c *MockHistoryRepositoryInterface_ListByStatus_Call) Return(historys []mo
 }
 
 func (_c *MockHistoryRepositoryInterface_ListByStatus_Call) RunAndReturn(run func(ctx context.Context, status models.HistoryStatus, limit int, offset int) ([]models.History, error)) *MockHistoryRepositoryInterface_ListByStatus_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListFiltered provides a mock function for the type MockHistoryRepositoryInterface
+func (_mock *MockHistoryRepositoryInterface) ListFiltered(ctx context.Context, filter database.HistoryFilter, limit int, offset int) ([]models.History, error) {
+	ret := _mock.Called(ctx, filter, limit, offset)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListFiltered")
+	}
+
+	var r0 []models.History
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, database.HistoryFilter, int, int) ([]models.History, error)); ok {
+		return returnFunc(ctx, filter, limit, offset)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, database.HistoryFilter, int, int) []models.History); ok {
+		r0 = returnFunc(ctx, filter, limit, offset)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]models.History)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, database.HistoryFilter, int, int) error); ok {
+		r1 = returnFunc(ctx, filter, limit, offset)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockHistoryRepositoryInterface_ListFiltered_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListFiltered'
+type MockHistoryRepositoryInterface_ListFiltered_Call struct {
+	*mock.Call
+}
+
+// ListFiltered is a helper method to define mock.On call
+//   - ctx context.Context
+//   - filter database.HistoryFilter
+//   - limit int
+//   - offset int
+func (_e *MockHistoryRepositoryInterface_Expecter) ListFiltered(ctx any, filter any, limit any, offset any) *MockHistoryRepositoryInterface_ListFiltered_Call {
+	return &MockHistoryRepositoryInterface_ListFiltered_Call{Call: _e.mock.On("ListFiltered", ctx, filter, limit, offset)}
+}
+
+func (_c *MockHistoryRepositoryInterface_ListFiltered_Call) Run(run func(ctx context.Context, filter database.HistoryFilter, limit int, offset int)) *MockHistoryRepositoryInterface_ListFiltered_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 database.HistoryFilter
+		if args[1] != nil {
+			arg1 = args[1].(database.HistoryFilter)
+		}
+		var arg2 int
+		if args[2] != nil {
+			arg2 = args[2].(int)
+		}
+		var arg3 int
+		if args[3] != nil {
+			arg3 = args[3].(int)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+			arg3,
+		)
+	})
+	return _c
+}
+
+func (_c *MockHistoryRepositoryInterface_ListFiltered_Call) Return(historys []models.History, err error) *MockHistoryRepositoryInterface_ListFiltered_Call {
+	_c.Call.Return(historys, err)
+	return _c
+}
+
+func (_c *MockHistoryRepositoryInterface_ListFiltered_Call) RunAndReturn(run func(ctx context.Context, filter database.HistoryFilter, limit int, offset int) ([]models.History, error)) *MockHistoryRepositoryInterface_ListFiltered_Call {
 	_c.Call.Return(run)
 	return _c
 }

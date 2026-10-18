@@ -52,13 +52,7 @@ func listWordReplacements(deps GenreDeps) gin.HandlerFunc {
 
 		total := int64(len(replacements))
 
-		end := offset + limit
-		if end > len(replacements) {
-			end = len(replacements)
-		}
-		if offset > len(replacements) {
-			offset = len(replacements)
-		}
+		offset, end := core.PaginationBounds(len(replacements), limit, offset)
 
 		paged := replacements[offset:end]
 

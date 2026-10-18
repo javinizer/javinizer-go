@@ -142,6 +142,8 @@ type GenreReplacementRepositoryInterface interface {
 
 // HistoryRepositoryInterface defines the contract for history tracking operations
 type HistoryRepositoryInterface interface {
+	CountFiltered(ctx context.Context, filter HistoryFilter) (int64, error)
+	ListFiltered(ctx context.Context, filter HistoryFilter, limit, offset int) ([]models.History, error)
 	Create(ctx context.Context, history *models.History) error
 	FindByID(ctx context.Context, id uint) (*models.History, error)
 	FindByMovieID(ctx context.Context, movieID string) ([]models.History, error)
