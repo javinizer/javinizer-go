@@ -1,12 +1,16 @@
 package workflow
 
 import (
+	"bytes"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/logging"
+	"github.com/sirupsen/logrus"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 )
@@ -39,7 +43,7 @@ func TestArtifactProofCleanupFailureIsWarned(t *testing.T) {
 			require.NoError(t, base.MkdirAll(root, 0755))
 			writeArtifactStageManifest(base, root)
 			logPath := filepath.Join(parent, "cleanup.log")
-			require.NoError(t, logging.InitLogger(&logging.Config{Level: "warn", Format: "text", Output: logPath}))
+			require.NoError(t, logging.InitLogger(&logging.Config{Level: "warn", Format: "json", Output: logPath}))
 			defer logging.CloseLogger()
 			fs := &proofCleanupUnlinkFailureFS{Fs: base, denied: true}
 			if lane == "cleanup" {
@@ -66,9 +70,43 @@ func TestArtifactProofCleanupFailureIsWarned(t *testing.T) {
 			body, err := os.ReadFile(logPath)
 			require.NoError(t, err)
 			t.Logf("lane=%s proof_remove_attempts=%d residue=%s logfile=%s", lane, fs.attempts, proof, string(body))
-			require.Contains(t, string(body), "proof cleanup retained")
-			require.Contains(t, string(body), proof)
-			require.Contains(t, string(body), "staging tree removed")
+			var entry proofCleanupLogEntry
+			require.NoError(t, json.Unmarshal(body, &entry))
+			require.Equal(t, "warning", entry.Level)
+			require.Equal(t, fmt.Sprintf("artifact staging proof cleanup retained %s (staging tree removed): %v; preserve this sidecar for inspection", proof, os.ErrPermission), entry.Message)
+		})
+	}
+}
+
+// Decode the structured message before comparing filesystem paths: log
+// formatters escape Windows backslashes in their serialized output.
+type proofCleanupLogEntry struct {
+	Level   string `json:"level"`
+	Message string `json:"msg"`
+}
+
+func TestArtifactProofCleanupLogPathSerialization(t *testing.T) {
+	for _, path := range []string{
+		"/synthetic/sorting/.javinizer-apply-fixture.rm.token.proof",
+		`C:\synthetic\sorting\.javinizer-apply-fixture.rm.token.proof`,
+	} {
+		t.Run(path, func(t *testing.T) {
+			message := fmt.Sprintf("artifact staging proof cleanup retained %s (staging tree removed): %v; preserve this sidecar for inspection", path, os.ErrPermission)
+			logger := logrus.New()
+			var output bytes.Buffer
+			logger.SetOutput(&output)
+			for _, formatter := range []logrus.Formatter{&logrus.TextFormatter{DisableTimestamp: true}, &logrus.JSONFormatter{DisableTimestamp: true}} {
+				output.Reset()
+				logger.SetFormatter(formatter)
+				logger.Warn(message)
+				if strings.Contains(path, `\`) {
+					require.NotContains(t, output.String(), path, "raw Windows path must reproduce the serialized-path mismatch")
+				}
+			}
+			var entry proofCleanupLogEntry
+			require.NoError(t, json.Unmarshal(output.Bytes(), &entry))
+			require.Equal(t, "warning", entry.Level)
+			require.Equal(t, message, entry.Message)
 		})
 	}
 }
