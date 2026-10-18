@@ -805,6 +805,26 @@ type errorRevertLog struct {
 	completeErr error
 }
 
+func (e errorRevertLog) RecordMoveIntent(context.Context, OperationID, string, string) error {
+	return nil
+}
+
+func (e errorRevertLog) RecordDeleteIntent(context.Context, OperationID, []models.DeleteEntry) error {
+	return nil
+}
+
+func (e errorRevertLog) ReconcileMoveIntents(context.Context, OperationID, []models.FileMove) error {
+	return nil
+}
+
+func (e errorRevertLog) ReconcileDeleteIntents(context.Context, OperationID, []string) error {
+	return nil
+}
+
+func (e errorRevertLog) FinalizeDeleteIntentCopyDigest(context.Context, OperationID, string, string) error {
+	return nil
+}
+
 func (e errorRevertLog) Begin(_ context.Context, _ ApplyCmd) (OperationID, error) {
 	return "1", nil
 }
@@ -1250,23 +1270,6 @@ func TestBuildGeneratedFilesJSON_SubtitleNotMoved(t *testing.T) {
 	// Not-moved subtitles should not appear in MoveBack
 	result := buildGeneratedFilesJSON(logging.GlobalLogger(), "", subtitles, nil)
 	assert.Empty(t, result)
-}
-
-// ============================================================
-// revert_log.go: updatePostOrganize
-// ============================================================
-
-func TestUpdatePostOrganize(t *testing.T) {
-	op := &models.BatchFileOperation{
-		BatchJobID: "job1",
-		MovieID:    "ABC-001",
-	}
-	updatePostOrganize(op, "/dest/ABC-001.mp4", true, "/source", `{"Delete":["/dest/ABC-001.nfo"]}`)
-
-	assert.Equal(t, "/dest/ABC-001.mp4", op.NewPath)
-	assert.True(t, op.InPlaceRenamed)
-	assert.Equal(t, "/source", op.OriginalDirPath)
-	assert.Equal(t, `{"Delete":["/dest/ABC-001.nfo"]}`, op.GeneratedFiles)
 }
 
 // ============================================================

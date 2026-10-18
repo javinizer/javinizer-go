@@ -4,12 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/downloader"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/nfo"
+	"github.com/javinizer/javinizer-go/internal/operationmode"
 	"github.com/javinizer/javinizer-go/internal/organizer"
 	"github.com/javinizer/javinizer-go/internal/progress"
 	"github.com/javinizer/javinizer-go/internal/template"
@@ -138,6 +142,20 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult
 		defer cmd.ArtifactCoordinator.Done(cmd.ArtifactOwnerKey)
 	}
 
+	cmd = normalizeInPlaceLinkMode(cmd)
+
+	// Unfenced legacy Apply may move the video during organize. Classify the
+	// existing cast before that mutation and reuse the read-only merge result.
+	// Fenced Apply merges in its private stage before publishing any files.
+	var preflightMerge *nfo.MergeWithExistingResult
+	if preflight, ok := o.nfo.(nfo.CastMergePreflighter); artifactFencer(cmd) == nil && ok {
+		result := preflight.PreflightCreditMerge(cmd.Movie, o.existingNFOMergeOptions(cmd.Match, cmd))
+		if result.Err != nil {
+			return &ApplyResult{Movie: cmd.Movie, FoundNFOPath: result.FoundNFOPath, FailedStep: "merge", PrePublication: true}, result.Err
+		}
+		preflightMerge = &result
+	}
+
 	// Step 0: Begin revert log BEFORE any filesystem mutation.
 	opID, beginErr := o.beginRevertLog(ctx, cmd)
 	if beginErr != nil {
@@ -152,7 +170,7 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult
 	if artifactErr != nil {
 		markArtifactDirty(cmd)
 		if o.revertLog != nil && opID != "" {
-			_ = o.revertLog.CompleteFailed(ctx, opID, &ApplyResult{Movie: cmd.Movie, OperationID: opID, PrePublication: true})
+			_ = o.completeFailedRevertLog(ctx, opID, &ApplyResult{Movie: cmd.Movie, OperationID: opID, PrePublication: true})
 		}
 		return &ApplyResult{Movie: cmd.Movie, OperationID: opID, FailedStep: "artifact_staging", PrePublication: true}, artifactErr
 	}
@@ -169,6 +187,7 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult
 	// Build the pipeline state that steps mutate via closure.
 	state := &applyPipelineState{
 		movie:          movie,
+		preflightMerge: preflightMerge,
 		targetDir:      targetDir,
 		finalDir:       targetDir,
 		artifact:       artifact,
@@ -309,8 +328,8 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult
 		}
 		if err := artifact.publish(ctx, o, state, &steps); err != nil {
 			markArtifactDirty(artifact.original)
-			prePublication := !artifact.sourceCleanupArmed
-			o.completeRevertLogWithState(ctx, opID, state, prePublication)
+			prePublication := !artifact.sourceCleanupArmed && !artifact.residentSidecarMutation && (state.publicationRecovery == nil || !state.publicationRecovery.Unresolved) && (artifact.directoryMove == nil || artifact.directoryMove.currentDir == artifact.directoryMove.oldDir)
+			reconcileErr := o.completeRevertLogWithStateErr(ctx, opID, state, prePublication)
 			return &ApplyResult{
 				OrganizeResult: state.organizeResult,
 				Movie:          state.movie,
@@ -320,23 +339,28 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult
 				Steps:          steps,
 				FailedStep:     "artifact_publication",
 				PrePublication: prePublication,
-			}, fmt.Errorf("artifact publication failed: %w", err)
+			}, fmt.Errorf("artifact publication failed: %w", errors.Join(err, reconcileErr))
 		}
 	}
 
 	// Step 6: Complete revert log AFTER all filesystem mutations succeed.
 	if o.revertLog != nil && opID != "" {
 		applyResult := &ApplyResult{
-			OrganizeResult: state.organizeResult,
-			Movie:          state.movie,
-			DownloadPaths:  state.downloadPaths,
-			NFOPath:        state.nfoPath,
-			FoundNFOPath:   state.foundNFOPath,
-			Merged:         state.merged,
-			OperationID:    opID,
-			Steps:          steps,
+			PublicationFinalized: true,
+			OrganizeResult:       state.organizeResult,
+			Movie:                state.movie,
+			DownloadPaths:        state.downloadPaths,
+			NFOPath:              state.nfoPath,
+			FoundNFOPath:         state.foundNFOPath,
+			Merged:               state.merged,
+			OperationID:          opID,
+			Steps:                steps,
 		}
 		if completeErr := o.revertLog.Complete(ctx, opID, applyResult); completeErr != nil {
+			if artifact != nil && artifact.residentPrimary {
+				applyResult.FailedStep = "revert_log_finalization"
+				return applyResult, fmt.Errorf("resident publication reconciliation failed: %w", completeErr)
+			}
 			resolveLogger(o.logger).Warnf("[workflow] RevertLog.Complete failed for %s: %v (apply still succeeded)", cmd.Movie.ID, completeErr)
 		}
 	}
@@ -426,6 +450,81 @@ func (o *applyOrchImpl) stepOrganize(ctx context.Context, cmd ApplyCmd, state *a
 		ForceRenameFile:  cmd.Organize.ForceRenameFile,
 		DuplicateTracker: cmd.Organize.DuplicateTracker,
 	}
+	// A video-deferred artifact stage keeps the real source file in place
+	// until the fenced publication: organize here is plan-only so downloads
+	// and the NFO still target the staged folder structure without the
+	// multi-GB payload ever being copied into the staging tree.
+	if state.artifact != nil && state.artifact.videoStagingDeferred() {
+		planner, ok := o.organizer.(artifactPlanExecutor)
+		if !ok {
+			return fmt.Errorf("video-deferred organize requires the organizer planning seam")
+		}
+		organizeToDestination := cmd.OperationMode == "" || cmd.OperationMode == operationmode.OperationModeOrganize
+		if state.artifact.inPlace || organizeToDestination {
+			// Apply path budgets to the real destination. A temporary stage
+			// beneath the movie folder must not consume that budget twice.
+			organizeCmd.Match = state.artifact.original.Match
+			organizeCmd.Match.Path = state.artifact.sourcePath
+			organizeCmd.DestDir = state.artifact.finalRoot
+		}
+		plan, planErr := planner.PlanOrganize(ctx, organizeCmd)
+		if planErr != nil {
+			return planErr
+		}
+		targetDir, targetPath := plan.TargetDir, plan.TargetPath
+		if state.artifact.inPlace {
+			if err := state.artifact.setInPlaceFinalRoot(plan.TargetDir); err != nil {
+				return err
+			}
+			targetDir = state.artifact.root
+			targetPath = filepath.Join(targetDir, filepath.Base(plan.TargetPath))
+		} else if organizeToDestination {
+			rel, relErr := filepath.Rel(state.artifact.finalRoot, plan.TargetDir)
+			if relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+				return fmt.Errorf("planned artifact path escapes destination: %s", plan.TargetDir)
+			}
+			// Keep the final relative layout so NFO merging and publication
+			// map temporary paths back to the same canonical output paths.
+			targetDir = filepath.Join(state.artifact.root, rel)
+			targetPath = filepath.Join(targetDir, filepath.Base(plan.TargetPath))
+		}
+		state.organizeResult = &organizer.OrganizeResult{
+			NewPath:    targetPath,
+			FolderPath: targetDir,
+			FileName:   filepath.Base(targetPath),
+		}
+		if state.organizeResult.FolderPath != "" {
+			state.targetDir = state.organizeResult.FolderPath
+			state.finalDir = state.organizeResult.FolderPath
+		}
+		steps.Organized = true
+		return nil
+	}
+	if state.artifact != nil && state.artifact.inPlace {
+		// Copy-only in-place work must stay inside the private stage. Planning
+		// against the real source preserves dedicated-folder selection and
+		// conflict checks, but the first execute may only rename staged files.
+		planner, ok := o.organizer.(artifactPlanExecutor)
+		if !ok {
+			return fmt.Errorf("in-place staged organize requires the organizer planning seam")
+		}
+		finalCmd := organizeCmd
+		finalCmd.Match = state.artifact.original.Match
+		finalCmd.Match.Path = state.artifact.sourcePath
+		finalCmd.DestDir = state.artifact.original.DestPath
+		plan, err := planner.PlanOrganize(ctx, finalCmd)
+		if err != nil {
+			return err
+		}
+		if err := state.artifact.setInPlaceFinalRoot(plan.TargetDir); err != nil {
+			return err
+		}
+		if len(plan.Conflicts) != 0 {
+			return fmt.Errorf("in-place staged organize destination conflict: %s", plan.Conflicts[0].Path)
+		}
+		organizeCmd.OperationMode = operationmode.OperationModeInPlaceNoRenameFolder
+		organizeCmd.StagingFinalDir = state.artifact.finalRoot
+	}
 	var organizeErr error
 	state.organizeResult, organizeErr = o.organizer.Organize(ctx, organizeCmd)
 	if organizeErr != nil {
@@ -463,19 +562,34 @@ func (o *applyOrchImpl) stepMerge(cmd ApplyCmd, state *applyPipelineState, steps
 			return matchErr
 		}
 	}
-	mergeRes := o.nfo.MergeWithExistingNFO(state.movie, nfo.MergeWithExistingOptions{
-		Match:          mergeMatch,
-		ForceOverwrite: cmd.Merge.ForceOverwrite,
-		PreserveNFO:    cmd.Merge.PreserveNFO,
-		ScalarStrategy: cmd.Merge.ScalarStrategy,
-		ArrayStrategy:  cmd.Merge.ArrayStrategy,
-	})
+	mergeRes := state.preflightMerge
+	if mergeRes == nil {
+		result := o.mergeExistingNFO(state.movie, mergeMatch, cmd)
+		mergeRes = &result
+	}
+	if mergeRes.Err != nil {
+		state.foundNFOPath = mergeRes.FoundNFOPath
+		return mergeRes.Err
+	}
+
 	state.movie = mergeRes.Movie
 	carryPosterCropAcrossMerge(state.movie, preBounds, preFull)
 	state.merged = mergeRes.Merged
 	state.foundNFOPath = mergeRes.FoundNFOPath
 	steps.Merged = true
 	return nil
+}
+
+func (o *applyOrchImpl) mergeExistingNFO(movie *models.Movie, match models.FileMatchInfo, cmd ApplyCmd) nfo.MergeWithExistingResult {
+	return o.nfo.MergeWithExistingNFO(movie, o.existingNFOMergeOptions(match, cmd))
+}
+
+func (o *applyOrchImpl) existingNFOMergeOptions(match models.FileMatchInfo, cmd ApplyCmd) nfo.MergeWithExistingOptions {
+	return nfo.MergeWithExistingOptions{
+		Match: match, ForceOverwrite: cmd.Merge.ForceOverwrite, PreserveNFO: cmd.Merge.PreserveNFO,
+		ScalarStrategy: cmd.Merge.ScalarStrategy, ArrayStrategy: cmd.Merge.ArrayStrategy,
+		UseCreditedName: o.applyCfg.NFONameCfg.UseCreditedName,
+	}
 }
 
 // Full-source intent must reach the downloader even if NFO merge changes the URL;
@@ -613,7 +727,11 @@ func (o *applyOrchImpl) stepNFO(ctx context.Context, cmd ApplyCmd, state *applyP
 	// Falling back to cmd.Match.Path preserves the original behavior when
 	// organize is skipped or copy/in-place (file remains at source).
 	videoPath := cmd.Match.Path
-	if state.organizeResult != nil && state.organizeResult.NewPath != "" {
+	if state.artifact != nil && state.artifact.videoStagingDeferred() {
+		// The video is still at its real source: no rename has run yet, so the
+		// planned (staged) NewPath names nothing on disk.
+		videoPath = state.artifact.sourcePath
+	} else if state.organizeResult != nil && state.organizeResult.NewPath != "" {
 		videoPath = state.organizeResult.NewPath
 	}
 
@@ -631,6 +749,9 @@ func (o *applyOrchImpl) stepNFO(ctx context.Context, cmd ApplyCmd, state *applyP
 // applyPipelineState holds mutable state shared across the apply pipeline steps.
 // Steps mutate this via closure — eliminating the need for per-step return value plumbing.
 type applyPipelineState struct {
+	preflightMerge      *nfo.MergeWithExistingResult
+	publicationRecovery *models.PublicationRecovery
+
 	movie            *models.Movie
 	targetDir        string
 	finalDir         string
@@ -671,7 +792,21 @@ func (o *applyOrchImpl) completeRevertLogWithStateErr(ctx context.Context, opID 
 		Steps:          stepCompletion{},
 		PrePublication: prePublication,
 	}
-	return o.revertLog.CompleteFailed(ctx, opID, partial)
+	partial.PublicationRecovery = state.publicationRecovery
+	return o.completeFailedRevertLog(ctx, opID, partial)
+}
+
+// Failed-apply bookkeeping is compensation, not additional Apply work. A late
+// request cancellation must not prevent its already-produced recovery proofs
+// from replacing promoted path-only claims in the durable ledger. Keep context
+// values but give cooperative repository calls their own bounded cleanup window;
+// this does not impose a wall-clock bound on filesystem or lock operations.
+const failedApplyReconcileTimeout = 30 * time.Second
+
+func (o *applyOrchImpl) completeFailedRevertLog(ctx context.Context, opID OperationID, partial *ApplyResult) error {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), failedApplyReconcileTimeout)
+	defer cancel()
+	return o.revertLog.CompleteFailed(cleanupCtx, opID, partial)
 }
 
 // beginRevertLog starts a revert log entry before filesystem mutation.

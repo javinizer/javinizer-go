@@ -34,6 +34,8 @@ import (
 // w18TxFailRepo fails the chosen 1-based journal transaction calls, mimicking
 // the consumption-commit failure (and, for the deeper legs, the restore-
 // pending marker persistence failure) that drives the re-arm compensation.
+// An absent-destination restore now admits Undo in transaction 1 before the
+// presence check and consumption; pending-cleanup retries admit in their check.
 type w18TxFailRepo struct {
 	*p3OpRepo
 	calls int
@@ -87,7 +89,7 @@ func TestReplacementSweepCompensationW18C_ConsumeFailRearmCollisionRetainsDest(t
 	op := journalRow(t, baseRepo, "job-w18c", "W18C-COLLIDE", dest, backup, 1, models.RevertStatusApplied)
 
 	consumeErr := errors.New("w18c consumption transaction wedged")
-	repo := &w18TxFailRepo{p3OpRepo: baseRepo, fail: map[int]error{2: consumeErr}}
+	repo := &w18TxFailRepo{p3OpRepo: baseRepo, fail: map[int]error{3: consumeErr}}
 	fs := &w15BackupRaceFs{Fs: base, target: backup, foreign: []byte("foreign-bytes")}
 
 	var logs bytes.Buffer
@@ -160,7 +162,7 @@ func TestReplacementSweepCompensationW18C_ConsumeFailRearmSuccessUndoesRestore(t
 	op := journalRow(t, baseRepo, "job-w18c", "W18C-CONTROL", dest, backup, 1, models.RevertStatusApplied)
 
 	consumeErr := errors.New("w18c consumption transaction wedged")
-	repo := &w18TxFailRepo{p3OpRepo: baseRepo, fail: map[int]error{2: consumeErr}}
+	repo := &w18TxFailRepo{p3OpRepo: baseRepo, fail: map[int]error{3: consumeErr}}
 
 	var logs bytes.Buffer
 	restoreLog := logging.SetOutput(&logs)
@@ -206,7 +208,7 @@ func TestReplacementSweepCompensationW18C_ConsumeFailRearmCollisionMarkerFailure
 	op := journalRow(t, baseRepo, "job-w18c", "W18C-TRIPLE", dest, backup, 1, models.RevertStatusApplied)
 
 	consumeErr := errors.New("w18c consumption transaction wedged")
-	repo := &w18MalformedCallRepo{p3OpRepo: baseRepo, brokeAt: 3, fail: map[int]error{2: consumeErr}}
+	repo := &w18MalformedCallRepo{p3OpRepo: baseRepo, brokeAt: 4, fail: map[int]error{3: consumeErr}}
 	fs := &w15BackupRaceFs{Fs: base, target: backup, foreign: []byte("foreign-bytes")}
 
 	var logs bytes.Buffer

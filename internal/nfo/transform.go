@@ -3,6 +3,7 @@ package nfo
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 
 	"github.com/javinizer/javinizer-go/internal/logging"
@@ -276,8 +277,8 @@ func (g *Generator) resolveCredits() string {
 }
 
 func (g *Generator) buildActorsForMovie(movie *models.Movie) []actor {
-	if len(movie.Credits) > 0 && g.creditAwareActors() {
-		return g.buildActorsFromCredits(movie.Credits)
+	if credits, present := movie.RenderingCredits(); present && g.creditAwareActors() {
+		return g.buildActorsFromCreditsForMovie(credits, movie.ContentID, movie.Credits)
 	}
 	return g.buildActors(movie.Actresses)
 }
@@ -288,16 +289,21 @@ func (g *Generator) creditAwareActors() bool {
 
 // resolveCreditDisplayName resolves the D8 precedence chain:
 // override_name > credited_name (when use_credited_name and not forced-canonical) > identity canonical.
+// An absent canonical name permits credited fallback before unknown substitution.
 func (g *Generator) resolveCreditDisplayName(credit models.MovieCredit) string {
 	canonical := ""
 	if credit.Actress != nil {
-		canonical = g.formatActressName(*credit.Actress)
+		canonical = g.formatCreditCanonicalName(*credit.Actress)
 	}
-	return credit.RenderName(g.config.UseCreditedName, canonical)
+	name := credit.RenderName(g.config.UseCreditedName, canonical)
+	if name == "" && credit.Actress != nil {
+		// Apply the configured unknown placeholder only after credit fallback.
+		return g.formatActressName(*credit.Actress)
+	}
+	return name
 }
 
-// buildActorsFromCredits renders actors from credit records, preserving cast order.
-func (g *Generator) buildActorsFromCredits(credits []models.MovieCredit) []actor {
+func (g *Generator) buildActorsFromCreditsForMovie(credits []models.MovieCredit, contentID string, authority []models.MovieCredit) []actor {
 	if len(credits) == 0 {
 		return nil
 	}
@@ -328,6 +334,20 @@ func (g *Generator) buildActorsFromCredits(credits []models.MovieCredit) []actor
 			Name:  name,
 			Order: len(actors),
 		}
+		if contentID != "" && credit.ID != 0 && credit.MovieContentID == contentID {
+			selection := "canonical"
+			canonical := ""
+			if credit.Actress != nil {
+				canonical = g.formatCreditCanonicalName(*credit.Actress)
+			}
+			if _, selected := credit.RenderNameWithSelection(g.config.UseCreditedName, canonical); selected {
+				selection = "credited"
+				if credit.UserOverride && strings.TrimSpace(credit.OverrideName) != "" {
+					selection = "override"
+				}
+			}
+			act.PresentationLinks = []actorPresentationLink{{Selection: selection, Version: "1", MovieContentID: contentID, CreditID: strconv.FormatUint(uint64(credit.ID), 10)}}
+		}
 		if g.config.AddGenericRole {
 			act.Role = "Actress"
 		}
@@ -341,6 +361,7 @@ func (g *Generator) buildActorsFromCredits(credits []models.MovieCredit) []actor
 		}
 		actors = append(actors, act)
 	}
+	stripAmbiguousGeneratedLinks(actors, authority, contentID)
 	return actors
 }
 
@@ -554,5 +575,15 @@ func (g *Generator) formatActressName(actress models.Actress) string {
 		FirstNameOrder:     g.config.FirstNameOrder,
 		UnknownActress:     g.config.UnknownActressText,
 		UnknownActressMode: g.config.UnknownActressMode,
+	})
+}
+
+// formatCreditCanonicalName preserves an absent identity name for credit selection.
+// Unknown placeholders are presentation output, not canonical identity names.
+func (g *Generator) formatCreditCanonicalName(actress models.Actress) string {
+	return models.FormatActressName(actress, models.FormatActressNameOptions{
+		JapaneseNames:      g.config.ActressLanguageJA,
+		FirstNameOrder:     g.config.FirstNameOrder,
+		UnknownActressMode: models.UnknownActressModeSkip,
 	})
 }

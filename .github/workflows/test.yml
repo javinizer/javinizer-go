@@ -53,11 +53,54 @@ jobs:
     - name: Download dependencies
       run: go mod download
 
+    - name: Verify primary Undo native-volume and subprocess coverage evidence
+      env:
+        PRIMARY_UNDO_SUBPROCESS_COVERPROFILE: ${{ github.workspace }}/coverage-primary-undo-linux-child.out
+        JAVINIZER_TEST_SECOND_VOLUME: /dev/shm
+      run: |
+        set -o pipefail
+        stat -c '%d %n' "$JAVINIZER_TEST_SECOND_VOLUME" "${TMPDIR:-/tmp}"
+        test "$(stat -c '%d' "$JAVINIZER_TEST_SECOND_VOLUME")" != "$(stat -c '%d' "${TMPDIR:-/tmp}")"
+        go test -short -count=1 -v -covermode=atomic \
+          -coverprofile=coverage-primary-undo-linux.out ./internal/history \
+          -run '^(TestPrimaryUndoMissingWorkingDirectorySubprocess|TestPrimaryUndoNativeCrossVolumeReverter)$' \
+          | tee coverage-primary-undo-linux.log
+        grep -F -- '--- PASS: TestPrimaryUndoNativeCrossVolumeReverter ' coverage-primary-undo-linux.log
+        test -s coverage-primary-undo-linux.out
+        test -s coverage-primary-undo-linux-child.out
+        go tool cover -func=coverage-primary-undo-linux-child.out
+
+    - name: Archive primary Undo subprocess coverage
+      if: steps.detect.outputs.running_in_act != 'true'
+      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      with:
+        name: coverage-primary-undo-linux-subprocess
+        path: |
+          coverage-primary-undo-linux.out
+          coverage-primary-undo-linux-child.out
+        if-no-files-found: error
+        retention-days: 30
+
+    - name: Upload primary Undo subprocess coverage to Codecov
+      if: steps.detect.outputs.running_in_act != 'true'
+      uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7
+      with:
+        files: ./coverage-primary-undo-linux.out,./coverage-primary-undo-linux-child.out
+        disable_search: true
+        flags: unittests
+        name: codecov-primary-undo-linux-subprocess
+        token: ${{ secrets.CODECOV_TOKEN }}
+        fail_ci_if_error: true
+        verbose: true
+
     - name: Run unit tests
       run: go test -v ./...
 
     - name: Generate coverage report
       run: make coverage
+
+    - name: Generate offline fixture helper coverage
+      run: go test -short -count=1 -timeout=120s -covermode=atomic -coverprofile=coverage-testutil.out ./internal/testutil
 
     - name: Check coverage threshold
       run: ./scripts/check_coverage.sh 75 coverage.out
@@ -66,7 +109,7 @@ jobs:
       if: steps.detect.outputs.running_in_act != 'true'
       uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7
       with:
-        files: ./coverage.out
+        files: ./coverage.out,./coverage-testutil.out
         flags: unittests
         name: codecov-javinizer
         token: ${{ secrets.CODECOV_TOKEN }}
@@ -78,7 +121,9 @@ jobs:
       uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
       with:
         name: coverage-report
-        path: coverage.out
+        path: |
+          coverage.out
+          coverage-testutil.out
         retention-days: 30
 
     - name: Display coverage report (act only)
@@ -196,8 +241,357 @@ jobs:
     - name: Download dependencies
       run: go mod download
 
+    - name: Verify native Windows primary Undo contracts with coverage
+      run: >-
+        go test -short -count=1 -v -covermode=atomic
+        '-coverprofile=coverage-primary-undo-windows.out' ./internal/history
+        -run '^(TestPrimaryUndoWindows.*|TestPrimaryUndoIdentityAdmissionRefusals|TestPrimaryUndoWeakMutationWitnessRefused)$'
+
+    - name: Archive native Windows primary Undo coverage
+      if: ${{ !env.ACT }}
+      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      with:
+        name: coverage-primary-undo-windows
+        path: coverage-primary-undo-windows.out
+        if-no-files-found: error
+        retention-days: 30
+
+    - name: Upload native Windows primary Undo coverage to Codecov
+      if: ${{ !env.ACT }}
+      uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7
+      with:
+        files: ./coverage-primary-undo-windows.out
+        disable_search: true
+        flags: unittests
+        name: codecov-primary-undo-windows
+        token: ${{ secrets.CODECOV_TOKEN }}
+        fail_ci_if_error: true
+        verbose: true
+
+    # Native before/after regression evidence for 85201f8:
+    # https://github.com/javinizer/javinizer-go/actions/runs/38643999346
+    - name: Verify fixed native Windows NFO paths and collect coverage
+      shell: python {0}
+      run: |
+        import json, pathlib, subprocess
+
+        result = subprocess.run([
+            "go", "test", "-short", "-count=1", "-json", "-covermode=atomic",
+            "-coverprofile=coverage-nfo-native-windows.out",
+            "./internal/history", "./internal/workflow", "-run", "^TestNFONative",
+        ], capture_output=True, text=True)
+        pathlib.Path("nfo-native-fixed.jsonl").write_text(result.stdout, encoding="utf-8")
+        print(result.stdout, end="")
+        print(result.stderr, end="")
+        assert result.returncode == 0, "Fixed native Windows NFO tests failed"
+        events = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
+        passed = {event.get("Test") for event in events if event["Action"] == "pass"}
+        assert not any(event["Action"] == "skip" for event in events), "Native NFO scenarios must not skip"
+        for name in ("TestNFONativeWindowsRestoreKeepsVolume", "TestNFONativeWindowsLegacyVolumeLossRefused", "TestNFONativeWindowsSnapshotRetainsVolume"):
+            assert name in passed, "Missing native Windows runtime proof: " + name
+        coverage = pathlib.Path("coverage-nfo-native-windows.out").read_text().splitlines()
+        assert coverage[0] == "mode: atomic" and len(coverage) > 1
+        for source in ("internal/history/reverter.go", "internal/workflow/revert_log.go"):
+            assert any(source + ":" in line and int(line.split()[-1]) > 0 for line in coverage[1:]), "Missing production coverage: " + source
+
+    - name: Upload native Windows NFO coverage to Codecov
+      uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7
+      with:
+        files: ./coverage-nfo-native-windows.out
+        disable_search: true
+        flags: unittests
+        name: codecov-javinizer-nfo-native-windows
+        token: ${{ secrets.CODECOV_TOKEN }}
+        fail_ci_if_error: true
+        verbose: true
+
+    - name: Archive native Windows NFO regression evidence
+      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      with:
+        name: nfo-native-windows-evidence
+        path: |
+          nfo-native-fixed.jsonl
+          coverage-nfo-native-windows.out
+        if-no-files-found: error
+        retention-days: 30
+
     - name: Run unit tests
       run: go test -short ./...
+
+    - name: Repeat Windows nil dependency panic contracts
+      id: nil_dependency_contracts
+      timeout-minutes: 5
+      shell: python {0}
+      run: |
+        import collections, json, pathlib, subprocess, sys
+
+        sys.stdout.reconfigure(encoding="utf-8")
+        evidence = pathlib.Path("nil-dependency-windows")
+        evidence.mkdir()
+        packages = {
+            "github.com/javinizer/javinizer-go/internal/commandutil": {
+                "TestCoreDeps_NilReceiverAccessors",
+                "TestCoreDeps_NilReceiverAccessors/GetConfig",
+                "TestCoreDeps_NilReceiverAccessors/GetRegistry",
+                "TestDependencies_GetConfig_PanicsOnNil",
+                "TestDependencies_GetRegistry_PanicsOnNil",
+            },
+            "github.com/javinizer/javinizer-go/internal/api/core": {
+                "TestAPIDeps_GetConfig",
+                "TestAPIDeps_GetConfig/returns_config_when_set",
+                "TestAPIDeps_GetConfig/panics_when_CoreDeps_is_nil",
+                "TestAPIDeps_NilCoreDeps_Panics",
+            },
+        }
+        selector = "^(TestCoreDeps_NilReceiverAccessors|TestDependencies_GetConfig_PanicsOnNil|TestDependencies_GetRegistry_PanicsOnNil|TestAPIDeps_GetConfig|TestAPIDeps_NilCoreDeps_Panics)$"
+        failures = []
+        code = None
+        with (evidence / "tests.jsonl").open("wb") as stdout, (evidence / "tests.stderr.log").open("wb") as stderr:
+            try:
+                process = subprocess.Popen([
+                    "go", "test", "-short", "-count=20", "-timeout=120s", "-json",
+                    "./internal/commandutil", "./internal/api/core", "-run", selector,
+                ], stdout=stdout, stderr=stderr)
+            except OSError as exc:
+                failures.append("launch failure: " + repr(exc))
+            else:
+                try:
+                    code = process.wait(timeout=180)
+                except (subprocess.TimeoutExpired, OSError) as exc:
+                    failures.append("wall timeout" if isinstance(exc, subprocess.TimeoutExpired) else "process wait failed: " + repr(exc))
+                    # Terminate only this owned Go process and its descendants.
+                    try:
+                        with (evidence / "taskkill.log").open("wb") as kill_log:
+                            killed = subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                                                    stdout=kill_log, stderr=subprocess.STDOUT, timeout=15)
+                        if killed.returncode != 0:
+                            failures.append("owned process-tree cleanup not confirmed")
+                    except (OSError, subprocess.TimeoutExpired) as exc:
+                        failures.append("owned process-tree cleanup failed: " + repr(exc))
+                    try:
+                        code = process.wait(timeout=15)
+                    except (subprocess.TimeoutExpired, OSError) as exc:
+                        failures.append("owned Go process exit not confirmed: " + repr(exc))
+        (evidence / "tests.exit").write_text(str(code) + "\n", encoding="utf-8")
+        if code != 0:
+            failures.append("go test exit: " + str(code))
+        try:
+            events = [json.loads(line) for line in (evidence / "tests.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+            actions = {"start", "run", "pause", "cont", "pass", "bench", "fail", "output", "skip"}
+            assert all(isinstance(event, dict) and event.get("Package") in packages and event.get("Action") in actions for event in events), "unexpected package or malformed event"
+            assert not any(event.get("Action") in ("fail", "skip") for event in events), "failed or skipped event"
+            for package, required in packages.items():
+                selected = [event for event in events if event.get("Package") == package]
+                names = {event["Test"] for event in selected if event.get("Test")}
+                assert names == required, "missing or unexpected test names: " + package
+                for name in required:
+                    counts = collections.Counter(event.get("Action") for event in selected if event.get("Test") == name)
+                    assert counts["run"] == counts["pass"] == 20, "incorrect repetition count: " + name
+                terminals = [event.get("Action") for event in selected if not event.get("Test") and event.get("Action") in ("pass", "fail", "skip")]
+                assert terminals == ["pass"], "missing or duplicate package terminal: " + package
+        except (AssertionError, ValueError, TypeError, KeyError, UnicodeError) as exc:
+            failures.append("evidence validation: " + str(exc))
+        (evidence / "failures.json").write_text(json.dumps(failures, indent=2) + "\n", encoding="utf-8")
+        assert not failures, "; ".join(failures)
+        print("Verified 100 root passes and 80 child passes across both packages; no skips.")
+
+    - name: Archive Windows nil dependency panic contracts
+      if: ${{ always() && steps.nil_dependency_contracts.outcome != 'skipped' }}
+      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      with:
+        name: nil-dependency-windows
+        path: nil-dependency-windows/
+        retention-days: 30
+        if-no-files-found: error
+
+    - name: Repeat full Windows API server suite in fresh processes
+      id: server_lifecycle_repeats
+      timeout-minutes: 14
+      shell: python {0}
+      run: |
+        import collections, json, pathlib, subprocess, sys
+
+        sys.stdout.reconfigure(encoding="utf-8")
+        evidence = pathlib.Path("server-lifecycle-windows")
+        evidence.mkdir()
+        package = "github.com/javinizer/javinizer-go/internal/api/server"
+        websocket = "TestSecurity_WebSocketOriginValidation"
+        required = {
+            "TestInjectSSRState_InitializedAuth", "TestDeepIntegration_GenreEndpoints",
+            "TestDeepIntegration_JobEndpoints", "TestDeepIntegration_EventEndpoints",
+            "TestDeepIntegration_TokenEndpoints", websocket,
+            *(websocket + "/" + name for name in (
+                "wildcard_is_rejected_for_security_(WebSocket)",
+                "empty_config_allows_same-origin", "empty_config_blocks_different_origin",
+                "specific_origin_allowed", "specific_origin_blocked",
+                "same-origin_allowed_even_when_AllowedOrigins_is_configured",
+                "empty_origin_blocked_when_AllowedOrigins_is_configured",
+            )),
+        }
+        failures = []
+        for attempt in range(1, 4):
+            prefix = evidence / ("attempt-" + str(attempt))
+            cleanup_failed = False
+            try:
+                with prefix.with_suffix(".jsonl").open("wb") as stdout, prefix.with_suffix(".stderr.log").open("wb") as stderr:
+                    process = subprocess.Popen([
+                        "go", "test", "-short", "-count=1", "-timeout=180s", "-json",
+                        "./internal/api/server",
+                    ], stdout=stdout, stderr=stderr)
+                    try:
+                        code = process.wait(timeout=240)
+                    except subprocess.TimeoutExpired:
+                        failures.append({"attempt": attempt, "reason": "wall timeout"})
+                        # Terminate only this owned Go process and its descendants.
+                        with prefix.with_suffix(".kill.log").open("wb") as kill_log:
+                            try:
+                                killed = subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                                                        stdout=kill_log, stderr=subprocess.STDOUT, timeout=15)
+                                code = process.wait(timeout=15)
+                                cleanup_failed = killed.returncode != 0
+                            except Exception as exc:
+                                kill_log.write((repr(exc) + "\n").encode("utf-8"))
+                                cleanup_failed = True
+                                code = process.poll()
+                    prefix.with_suffix(".exit").write_text(str(code) + "\n", encoding="utf-8")
+                if cleanup_failed:
+                    raise RuntimeError("Owned process-tree termination unconfirmed; later attempts withheld")
+                output = prefix.with_suffix(".jsonl").read_text(encoding="utf-8")
+                print("API server attempt", attempt, "exit", code)
+                print(output, end="")
+                print(prefix.with_suffix(".stderr.log").read_text(encoding="utf-8"), end="")
+                events = [json.loads(line) for line in output.splitlines() if line.strip()]
+                passed = [event.get("Package") for event in events if not event.get("Test") and event["Action"] == "pass"]
+                if code != 0 or passed != [package] or any(event["Action"] == "fail" for event in events):
+                    failures.append({"attempt": attempt, "reason": "test failure or missing package result"})
+                for name in required:
+                    counts = collections.Counter(event["Action"] for event in events if event.get("Package") == package and event.get("Test") == name)
+                    if counts["run"] != 1 or counts["pass"] != 1 or counts["skip"] or counts["fail"]:
+                        failures.append({"attempt": attempt, "reason": "missing or skipped critical test", "test": name})
+            except Exception as exc:
+                prefix.with_suffix(".error.log").write_text(repr(exc) + "\n", encoding="utf-8")
+                failures.append({"attempt": attempt, "reason": repr(exc)})
+            if cleanup_failed:
+                break
+        (evidence / "failures.json").write_text(json.dumps(failures, indent=2) + "\n", encoding="utf-8")
+        assert not failures, "API server process failures: " + repr(failures)
+
+    - name: Archive Windows API server lifecycle repetitions
+      if: ${{ always() && steps.server_lifecycle_repeats.outcome != 'skipped' }}
+      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      with:
+        name: server-lifecycle-windows
+        path: server-lifecycle-windows/
+        if-no-files-found: error
+        retention-days: 30
+
+    - name: Verify native Windows config publication and initialization
+      run: >-
+        go test -short -count=20 -v ./internal/config
+        -run '^(TestAtomicReplace_WindowsSharingViolationPreservesCommittedConfig|TestAtomicReplaceFile_ConcurrentWrites|TestAtomicReplace_(FailuresPreserveCommittedConfig|LeavesDestinationVisibleUntilPublication)|TestLoadOrCreate_(PreservesSaveAfterMissingStat|HoldsLockThroughInitDefaults|ConcurrentInitializersPreserveWinner|InitialConfigIsPublishedOnlyWhenComplete))$'
+
+    - name: Verify resident aliases on the native Windows filesystem
+      run: >-
+        go test -short -count=1 -v ./internal/workflow
+        -run '^TestResidentPrimaryCaseAliasRepeatAndUndo/native=true/'
+
+    - name: Verify persisted resident-publication recovery on Windows
+      run: >-
+        go test -short -count=1 -v ./internal/workflow ./internal/history ./internal/fsutil
+        -run '^(TestResidentPublication|TestPublicationRecovery|TestRecoverPublicationMove|TestBoundRecoveryIdentity|TestStationaryPrimary|TestWrapperCopy|TestReproofStreamedSource)'
+
+    - name: Verify Windows dump stall phase regressions
+      run: >-
+        go test -short -count=1 -v ./internal/api/r18devdump
+        -run '^(TestStartDownload_(SlowButSteadySucceeds|StallAborts|HeadersStallAborts)|TestStallWatchdog)'
+
+    - name: Repeat Windows dump cancellation lifecycle regressions
+      run: >-
+        go test -short -count=10 -timeout=120s -v ./internal/r18devdump ./internal/api/r18devdump
+        -run '^(TestImport_(CancellationWaitsForRollback|CanceledBeforeCommitRollsBack|CanceledAfterSchemaDoesNotBegin|CanceledDuringBeginDoesNotRead|CanceledStreamCleansUpAndRetries)|TestStartDownload_StallAborts)$'
+
+    - name: Verify in-place resident directory compensation on Windows
+      run: >-
+        go test -short -count=1 -v ./internal/workflow ./internal/history
+        -run '^(TestIndependent(NativeWindowsCaseAliasDirectoryUndo|InPlaceResidentDirectoryUndo|ResidentDirectory|ResidentInterruptedDirectoryUndo|DirectoryUndo|CopyIntentBoundary)|TestInPlaceResidentDirectoryArtifactUndo|TestResidentNativeIdentitySnapshot|TestResidentNestedArtifactDirectoryUndo|TestIndependentResident(CaseOnlyDirectoryNestedCleanup|CleanupKeepsEmptyRootAndOutsideParents)|TestResidentCleanup)'
+
+    - name: Verify Windows artifact regressions with native-volume evidence
+      run: >-
+        go test -short -count=1 -v ./internal/workflow ./internal/organizer ./internal/fsutil
+        -run '^(TestArtifactStage(NativeCrossDeviceDestination|PlannedMountDestination|InPlacePlannedMount|ReadonlyCrossDeviceDestination|ReadonlyLongFolder|ReadonlyInPlaceStationaryBoundary|ResidentAliasProof|ReadonlyResidentAliases|PlannedDestinationBoundaries)|TestArtifactInPlaceCopy|TestArtifact(InPlaceIgnoresIrrelevantLinkMode|ResidentInPlaceCopyIgnoresIrrelevantLinkMode)|TestNormalizeInPlaceLinkMode|TestPrepareArtifactNormalizesInPlaceLinkMode|TestArtifactSubtitle|TestStaged(Subtitle|Video)|TestCollectStagedSubtitle|TestDeferredSubtitleErrorNeverPublishesFallback|TestDeferredCopyPublishesAdmittedSubtitleDespitePostOpenSwap|TestStagingPathBudgetIsLocalAndSigned|TestCopyFileNoReplaceVerifiedSourceHandleClosedOnReturn|TestOpenVerifiedSourcePinSharesDelete|TestNativeArtifactCrossDeviceError|TestAdversarial(PrimaryModeCrossProduct|SidecarModeCrossProduct|NonOrganizeModeCrossProduct))'
+
+  # Focused native Darwin coverage; does not provision a second volume.
+  primary-undo-macos:
+    name: Primary Undo Contracts (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 20
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      with:
+        persist-credentials: false
+
+    # Fetch the unchanged pin via Git while hosted action archive downloads return 404.
+    # Keep this ref and the verification SHA below in sync with the other setup-go pins.
+    - name: Checkout pinned Go setup action
+      uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      with:
+        repository: actions/setup-go
+        ref: 924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        path: .ci-actions/setup-go
+        persist-credentials: false
+        fetch-depth: 1
+
+    - name: Verify pinned Go setup action
+      shell: bash
+      run: |
+        set -euo pipefail
+        test -d .ci-actions/setup-go/.git
+        test "$(git -C .ci-actions/setup-go rev-parse HEAD)" = 924ae3a1cded613372ab5595356fb5720e22ba16
+        git -C .ci-actions/setup-go diff --exit-code HEAD --
+        status="$(git -C .ci-actions/setup-go status --porcelain --untracked-files=all --ignored)"
+        test -z "$status"
+        test -s .ci-actions/setup-go/action.yml
+        test -s .ci-actions/setup-go/dist/setup/index.js
+        test -s .ci-actions/setup-go/dist/cache-save/index.js
+
+    - name: Set up Go
+      uses: ./.ci-actions/setup-go
+      with:
+        go-version-file: ${{ env.GO_VERSION_FILE }}
+        cache: true
+
+    - name: Download dependencies
+      run: go mod download
+
+    - name: Verify native Darwin primary Undo contracts with coverage
+      run: >-
+        go test -short -count=1 -v -covermode=atomic
+        -coverprofile=coverage-primary-undo-macos.out
+        ./internal/history ./internal/fsutil ./internal/models ./internal/database ./internal/workflow
+        -run '^(TestPrimaryUndo|TestReviewPrimaryUndo|TestDurableJournal|TestDurableStaging)'
+
+    - name: Archive native Darwin primary Undo coverage
+      if: ${{ !env.ACT }}
+      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      with:
+        name: coverage-primary-undo-macos
+        path: coverage-primary-undo-macos.out
+        if-no-files-found: error
+        retention-days: 30
+
+    - name: Upload native Darwin primary Undo coverage to Codecov
+      if: ${{ !env.ACT }}
+      uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7
+      with:
+        files: ./coverage-primary-undo-macos.out
+        disable_search: true
+        flags: unittests
+        name: codecov-primary-undo-macos
+        token: ${{ secrets.CODECOV_TOKEN }}
+        fail_ci_if_error: true
+        verbose: true
 
   # Job 5: Frontend Tests
   frontend-tests:

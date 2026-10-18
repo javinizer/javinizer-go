@@ -23,6 +23,9 @@ import (
 // lost its bytes to the rename — no backup, no ledger, reported success.
 func PublishNoReplace(fs afero.Fs, src, dst string) error {
 	if _, ok := fs.(*afero.OsFs); ok {
+		if info, err := os.Lstat(src); err == nil && info.IsDir() {
+			return vacateLinkObjectOsFs(src, dst)
+		}
 		return publishNoReplaceOSFS(src, dst)
 	}
 	return publishNoReplaceVirtual(fs, src, dst)

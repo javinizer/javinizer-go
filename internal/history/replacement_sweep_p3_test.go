@@ -296,7 +296,7 @@ func TestReplacementSweeper_PruneOperationBackups_PendingMarkerFailureBlocksClea
 	delete(repo.ops, op.ID)
 
 	err := NewReplacementSweeper(fs, repo).PruneOperationBackups(context.Background(), []models.BatchFileOperation{*op})
-	require.Contains(t, err.Error(), "owner row")
+	require.ErrorIs(t, err, database.ErrNotFound)
 	exists, statErr := afero.Exists(fs, backup)
 	require.NoError(t, statErr)
 	require.True(t, exists)
@@ -877,7 +877,8 @@ type retractErrorRepo struct {
 
 func (r *retractErrorRepo) UpdateJournalInTx(ctx context.Context, id uint, fn database.JournalUpdateFn) error {
 	r.calls++
-	if r.calls > 1 {
+	// Admission and the prune-pending marker must commit before retraction fails.
+	if r.calls > 2 {
 		return r.err
 	}
 	return r.p3OpRepo.UpdateJournalInTx(ctx, id, fn)

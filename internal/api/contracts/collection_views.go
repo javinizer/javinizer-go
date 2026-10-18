@@ -47,8 +47,15 @@ type MovieCreditView struct {
 	ReportedThumbURL     string `json:"reported_thumb_url"`
 	OverrideName         string `json:"override_name"`
 	UserOverride         bool   `json:"user_override"`
-	Suppressed           bool   `json:"suppressed"`
-	OrderIndex           int    `json:"order_index"`
+	// DisplayForceCanonical selects the catalog name even when credited names
+	// are enabled, so clients must include it in display-preview invalidation.
+	DisplayForceCanonical bool `json:"display_force_canonical"`
+	Suppressed            bool `json:"suppressed"`
+	OrderIndex            int  `json:"order_index"`
+	// RenderVisible mirrors MovieCredit.RenderVisible: false when the credit
+	// cannot contribute names to rendered output (suppressed, no actress, or
+	// the actress is ambiguity-quarantined without verification).
+	RenderVisible bool `json:"render_visible"`
 }
 
 // GenreView is the API-layer projection of models.Genre.
@@ -153,15 +160,17 @@ func MovieCreditViewFromModel(c *models.MovieCredit) *MovieCreditView {
 		return nil
 	}
 	return &MovieCreditView{
-		ID:                   c.ID,
-		ActressID:            c.ActressID,
-		CreditedName:         c.CreditedName,
-		CreditedJapaneseName: c.CreditedJapaneseName,
-		ReportedThumbURL:     c.ReportedThumbURL,
-		OverrideName:         c.OverrideName,
-		UserOverride:         c.UserOverride,
-		Suppressed:           c.Suppressed,
-		OrderIndex:           c.OrderIndex,
+		ID:                    c.ID,
+		ActressID:             c.ActressID,
+		CreditedName:          c.CreditedName,
+		CreditedJapaneseName:  c.CreditedJapaneseName,
+		ReportedThumbURL:      c.ReportedThumbURL,
+		OverrideName:          c.OverrideName,
+		UserOverride:          c.UserOverride,
+		DisplayForceCanonical: c.DisplayForceCanonical,
+		Suppressed:            c.Suppressed,
+		OrderIndex:            c.OrderIndex,
+		RenderVisible:         c.RenderVisible(),
 	}
 }
 

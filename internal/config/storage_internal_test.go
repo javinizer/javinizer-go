@@ -210,25 +210,25 @@ func TestSyncAndAtomicReplaceFile(t *testing.T) {
 	})
 }
 
-func TestReplaceFileOnWindowsHelper(t *testing.T) {
+func TestReplaceFileHelper(t *testing.T) {
 	t.Run("replaces when destination does not exist", func(t *testing.T) {
 		dir := t.TempDir()
 		path := filepath.Join(dir, "dest.yaml")
 		tmpPath := filepath.Join(dir, "tmp.yaml")
 		require.NoError(t, os.WriteFile(tmpPath, []byte("new"), 0o644))
 
-		require.NoError(t, replaceFileOnWindows(path, tmpPath))
+		require.NoError(t, replaceFile(path, tmpPath))
 		got, err := os.ReadFile(path)
 		require.NoError(t, err)
 		assert.Equal(t, "new", string(got))
 	})
 
-	t.Run("restores backup on replace failure", func(t *testing.T) {
+	t.Run("preserves destination on replace failure", func(t *testing.T) {
 		dir := t.TempDir()
 		path := filepath.Join(dir, "dest.yaml")
 		require.NoError(t, os.WriteFile(path, []byte("old"), 0o644))
 
-		err := replaceFileOnWindows(path, filepath.Join(dir, "missing-tmp.yaml"))
+		err := replaceFile(path, filepath.Join(dir, "missing-tmp.yaml"))
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to atomically replace config file")
 
@@ -237,14 +237,14 @@ func TestReplaceFileOnWindowsHelper(t *testing.T) {
 		assert.Equal(t, "old", string(got))
 	})
 
-	t.Run("replaces existing destination and removes backup", func(t *testing.T) {
+	t.Run("replaces existing destination without a backup", func(t *testing.T) {
 		dir := t.TempDir()
 		path := filepath.Join(dir, "dest.yaml")
 		tmpPath := filepath.Join(dir, "tmp.yaml")
 		require.NoError(t, os.WriteFile(path, []byte("old"), 0o644))
 		require.NoError(t, os.WriteFile(tmpPath, []byte("new"), 0o644))
 
-		require.NoError(t, replaceFileOnWindows(path, tmpPath))
+		require.NoError(t, replaceFile(path, tmpPath))
 		got, err := os.ReadFile(path)
 		require.NoError(t, err)
 		assert.Equal(t, "new", string(got))

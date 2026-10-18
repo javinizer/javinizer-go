@@ -292,6 +292,9 @@ func (d *CoreDeps) GetLogger() logging.Logger {
 // Panics if no config has been set — this indicates a construction bug
 // (NewDependenciesWithOptions already validates cfg != nil).
 func (d *CoreDeps) GetConfig() *config.Config {
+	if d == nil {
+		panic("commandutil: GetConfig() called with nil CoreDeps — this is a construction bug")
+	}
 	cfg := d.config.Load()
 	if cfg == nil {
 		panic("commandutil: GetConfig() called with nil config — this is a construction bug; use NewDependenciesWithOptions to construct CoreDeps with a valid config")
@@ -358,6 +361,9 @@ func (d *CoreDeps) SetConfig(cfg *config.Config) {
 // Panics if ScraperRegistry is nil — this indicates a construction bug
 // (NewDependenciesWithOptions always initializes the registry).
 func (d *CoreDeps) GetRegistry() *scraperutil.ScraperRegistry {
+	if d == nil {
+		panic("commandutil: GetRegistry() called with nil CoreDeps — this is a construction bug")
+	}
 	d.mu.RLock()
 	reg := d.ScraperRegistry
 	d.mu.RUnlock()

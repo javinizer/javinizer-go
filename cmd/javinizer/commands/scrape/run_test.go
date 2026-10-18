@@ -184,7 +184,7 @@ func TestRun_CacheHit(t *testing.T) {
 	assert.NotEmpty(t, results[0].Source, "synthesized result must carry a source label")
 }
 
-// TestRun_ForceRefresh tests that --force flag clears cache and scrapes fresh
+// TestRun_ForceRefresh tests that --force bypasses cache and refreshes the same movie.
 func TestRun_ForceRefresh(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration test")
@@ -196,7 +196,10 @@ func TestRun_ForceRefresh(t *testing.T) {
 	// Pre-populate database with test movie
 	movieRepo := database.NewMovieRepository(db)
 	cachedMovie := createTestMovie("IPX-123", "Old Cached Movie")
-	_, err := movieRepo.Upsert(context.TODO(), cachedMovie)
+	// This is a same-content refresh: use the explicit content identity returned
+	// by MockScraper, rather than the different ID derived for missing metadata.
+	cachedMovie.ContentID = cachedMovie.ID
+	original, err := movieRepo.Upsert(context.TODO(), cachedMovie)
 	require.NoError(t, err)
 
 	// Create command with force flag
@@ -222,13 +225,22 @@ func TestRun_ForceRefresh(t *testing.T) {
 	// Run with force refresh - should ignore cache
 	movie, results, err := scrape.Run(context.Background(), cmd, []string{"IPX-123"}, configPath, deps)
 
-	assert.NoError(t, err)
-	assert.NotNil(t, movie)
+	require.NoError(t, err)
+	require.NotNil(t, movie)
 	assert.Equal(t, "IPX-123", movie.ID)
-	// Should get fresh data from mock scraper, not cached title
+	assert.Equal(t, original.ContentID, movie.ContentID)
+	assert.Equal(t, original.CreatedAt, movie.CreatedAt)
+	// Should get fresh data from mock scraper, not cached title.
 	assert.Equal(t, "Test Movie IPX-123", movie.Title)
 	assert.NotNil(t, results)
 	assert.Len(t, results, 1)
+	stored, err := movieRepo.FindByContentID(context.Background(), original.ContentID)
+	require.NoError(t, err)
+	assert.Equal(t, original.CreatedAt, stored.CreatedAt)
+	assert.Equal(t, movie.Title, stored.Title)
+	var count int64
+	require.NoError(t, db.Model(&models.Movie{}).Count(&count).Error)
+	assert.EqualValues(t, 1, count)
 }
 
 // TestRun_CustomScrapers tests --scrapers flag overrides config priority
@@ -529,4 +541,42 @@ func TestRun_EnvironmentOverridesValidated(t *testing.T) {
 	assert.Contains(t, err.Error(), "invalid configuration")
 	assert.Nil(t, movie)
 	assert.Nil(t, results)
+}
+
+// A different explicit content identity is a conflict, not a same-movie cache
+// refresh. This CLI boundary control runs in both short and ordinary suites.
+func TestRun_ForceRefreshRejectsDifferentContentIdentity(t *testing.T) {
+	configPath, db := setupTestDB(t)
+	defer func() { _ = db.Close() }()
+	ctx := context.Background()
+	repo := database.NewMovieRepository(db)
+	cachedMovie := createTestMovie("IPX-123", "Keep saved metadata")
+	cachedMovie.ContentID = "retained00999"
+	original, err := repo.Upsert(ctx, cachedMovie)
+	require.NoError(t, err)
+	require.Equal(t, "retained00999", original.ContentID)
+	cfg, err := config.Load(configPath)
+	require.NoError(t, err)
+	registry := scraperutil.NewScraperRegistry()
+	registry.RegisterInstance(NewMockScraper("mock1")) // Explicit ContentID is "IPX-123".
+	deps, err := commandutil.NewDependenciesWithOptions(cfg, &commandutil.DependenciesOptions{DB: db, ScraperRegistry: registry})
+	require.NoError(t, err)
+	defer func() { _ = deps.Close() }()
+	cmd := scrape.NewCommand()
+	require.NoError(t, cmd.Flags().Set("force", "true"))
+	_, _, err = scrape.Run(ctx, cmd, []string{"IPX-123"}, configPath, deps)
+	require.ErrorIs(t, err, database.ErrMovieContentIDConflict)
+	after, err := repo.FindByID(ctx, original.ID)
+	require.NoError(t, err)
+	assert.Equal(t, original, after)
+	var count int64
+	require.NoError(t, db.Model(&models.Movie{}).Count(&count).Error)
+	assert.EqualValues(t, 1, count)
+	// A subsequent ordinary scrape still returns the saved movie, not the
+	// rejected source metadata or an ambiguous duplicate display-ID record.
+	cached, _, err := scrape.Run(ctx, scrape.NewCommand(), []string{original.ID}, configPath, deps)
+	require.NoError(t, err)
+	require.NotNil(t, cached)
+	assert.Equal(t, original.ContentID, cached.ContentID)
+	assert.Equal(t, original.Title, cached.Title)
 }

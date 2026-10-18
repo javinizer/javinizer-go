@@ -15,7 +15,7 @@ func TestMiss4_ExtractActresses_EnshaLabel(t *testing.T) {
 		<a href="?actress=9101">Test Actress</a>
 	</td></tr></table>`
 	doc := docFromHTMLDMM(t, html)
-	s := newTestDMMScraper()
+	s := newTestDMMScraper(t)
 	actresses := s.extractActresses(context.Background(), doc)
 	if assert.Len(t, actresses, 1) {
 		assert.Equal(t, "Actress", actresses[0].FirstName) // Single word = first name only
@@ -27,7 +27,7 @@ func TestMiss4_ExtractActresses_EnshaLabel(t *testing.T) {
 func TestMiss4_ExtractActresses_NoContentCell(t *testing.T) {
 	html := `<table><tr><td>Actress</td></tr></table>`
 	doc := docFromHTMLDMM(t, html)
-	s := newTestDMMScraper()
+	s := newTestDMMScraper(t)
 	actresses := s.extractActresses(context.Background(), doc)
 	assert.Empty(t, actresses)
 }
@@ -37,7 +37,7 @@ func TestMiss4_ExtractActresses_NoContentCell(t *testing.T) {
 func TestMiss4_ExtractActresses_EmptyLabelCell(t *testing.T) {
 	html := `<table><tr><td></td><td><a href="?actress=9102">Someone</a></td></tr></table>`
 	doc := docFromHTMLDMM(t, html)
-	s := newTestDMMScraper()
+	s := newTestDMMScraper(t)
 	actresses := s.extractActresses(context.Background(), doc)
 	assert.Empty(t, actresses) // Empty label doesn't match actress keywords
 }
@@ -49,7 +49,7 @@ func TestMiss4_ExtractActresses_SkipPurchasePrefixName(t *testing.T) {
 		<a href="?actress=9103">購入前チェック</a>
 	</td></tr></table>`
 	doc := docFromHTMLDMM(t, html)
-	s := newTestDMMScraper()
+	s := newTestDMMScraper(t)
 	actresses := s.extractActresses(context.Background(), doc)
 	assert.Empty(t, actresses)
 }
@@ -61,7 +61,7 @@ func TestMiss4_ExtractActresses_SkipReviewName(t *testing.T) {
 		<a href="?actress=9104">レビュー投稿</a>
 	</td></tr></table>`
 	doc := docFromHTMLDMM(t, html)
-	s := newTestDMMScraper()
+	s := newTestDMMScraper(t)
 	actresses := s.extractActresses(context.Background(), doc)
 	assert.Empty(t, actresses)
 }
@@ -73,7 +73,7 @@ func TestMiss4_ExtractActresses_SkipPointsName(t *testing.T) {
 		<a href="?actress=9105">ポイント確認</a>
 	</td></tr></table>`
 	doc := docFromHTMLDMM(t, html)
-	s := newTestDMMScraper()
+	s := newTestDMMScraper(t)
 	actresses := s.extractActresses(context.Background(), doc)
 	assert.Empty(t, actresses)
 }
@@ -83,7 +83,7 @@ func TestMiss4_ExtractActresses_SkipPointsName(t *testing.T) {
 func TestMiss4_ExtractActressFromLink_NoHref(t *testing.T) {
 	html := `<a>No Href</a>`
 	doc := docFromHTMLDMM(t, html)
-	s := newTestDMMScraper()
+	s := newTestDMMScraper(t)
 	sel := doc.Find("a").First()
 	actress := s.extractActressFromLink(context.Background(), sel)
 	assert.Equal(t, models.ActressInfo{}, actress)
@@ -94,7 +94,7 @@ func TestMiss4_ExtractActressFromLink_NoHref(t *testing.T) {
 func TestMiss4_ExtractActressFromLink_NoActressIDInHref(t *testing.T) {
 	html := `<a href="/some/other/page">Name</a>`
 	doc := docFromHTMLDMM(t, html)
-	s := newTestDMMScraper()
+	s := newTestDMMScraper(t)
 	sel := doc.Find("a").First()
 	actress := s.extractActressFromLink(context.Background(), sel)
 	assert.Equal(t, models.ActressInfo{}, actress)
@@ -105,7 +105,7 @@ func TestMiss4_ExtractActressFromLink_NoActressIDInHref(t *testing.T) {
 func TestMiss4_ExtractActressFromLink_ArticleIDFormat(t *testing.T) {
 	html := `<a href="/article=actress/id=9200/">テスト女優</a>`
 	doc := docFromHTMLDMM(t, html)
-	s := newTestDMMScraper()
+	s := newTestDMMScraper(t)
 	sel := doc.Find("a").First()
 	actress := s.extractActressFromLink(context.Background(), sel)
 	assert.Equal(t, 9200, actress.DMMID)
@@ -117,7 +117,7 @@ func TestMiss4_ExtractActressFromLink_ArticleIDFormat(t *testing.T) {
 func TestMiss4_ExtractActressFromLink_ParenthesesStripped(t *testing.T) {
 	html := `<a href="?actress=9201">Name (Alias)</a>`
 	doc := docFromHTMLDMM(t, html)
-	s := newTestDMMScraper()
+	s := newTestDMMScraper(t)
 	sel := doc.Find("a").First()
 	actress := s.extractActressFromLink(context.Background(), sel)
 	assert.Equal(t, 9201, actress.DMMID)
@@ -130,7 +130,7 @@ func TestMiss4_ExtractActressFromLink_ParenthesesStripped(t *testing.T) {
 func TestMiss4_ExtractActressFromLink_FullwidthParenStripped(t *testing.T) {
 	html := `<a href="?actress=9202">名前（別名）</a>`
 	doc := docFromHTMLDMM(t, html)
-	s := newTestDMMScraper()
+	s := newTestDMMScraper(t)
 	sel := doc.Find("a").First()
 	actress := s.extractActressFromLink(context.Background(), sel)
 	assert.Equal(t, 9202, actress.DMMID)
@@ -147,7 +147,7 @@ func TestMiss4_ExtractActressesFromStreamingPage_HeadingMatch(t *testing.T) {
 		</div>
 	</div>`
 	doc := docFromHTMLDMM(t, html)
-	s := newTestDMMScraper()
+	s := newTestDMMScraper(t)
 	actresses := s.extractActressesFromStreamingPage(context.Background(), doc)
 	if assert.Len(t, actresses, 1) {
 		assert.Equal(t, 9300, actresses[0].DMMID)
@@ -161,7 +161,7 @@ func TestMiss4_ExtractActressesFromStreamingPage_MetadataFallback(t *testing.T) 
 		<a href="?actress=9301">Fallback Actress</a>
 	</dl>`
 	doc := docFromHTMLDMM(t, html)
-	s := newTestDMMScraper()
+	s := newTestDMMScraper(t)
 	actresses := s.extractActressesFromStreamingPage(context.Background(), doc)
 	// The dl selector pattern should match
 	if assert.NotEmpty(t, actresses) {
@@ -335,7 +335,7 @@ func TestMiss4_ExtractActressThumbURL_ImgInParent(t *testing.T) {
 func TestMiss4_ExtractActressFromLink_JapaneseNameNoFlip(t *testing.T) {
 	html := `<a href="?actress=9500">山田花子</a>`
 	doc := docFromHTMLDMM(t, html)
-	s := newTestDMMScraper()
+	s := newTestDMMScraper(t)
 	sel := doc.Find("a").First()
 	actress := s.extractActressFromLink(context.Background(), sel)
 	assert.Equal(t, "山田花子", actress.JapaneseName)

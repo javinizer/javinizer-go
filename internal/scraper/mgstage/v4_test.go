@@ -3,13 +3,10 @@ package mgstage
 import (
 	"context"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/PuerkitoBio/goquery"
-	"github.com/go-resty/resty/v2"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/ratelimit"
 	"github.com/stretchr/testify/assert"
@@ -21,30 +18,23 @@ func TestScrapeURLV4_StatusCodeErrors(t *testing.T) {
 	tests := []struct {
 		name       string
 		statusCode int
+		wantError  string
 	}{
-		{"404", 404},
-		{"403", 403},
-		{"429", 429},
-		{"500", 500},
+		{"404", 404, "page not found"},
+		{"403", 403, "access blocked"},
+		{"429", 429, "rate limited"},
+		{"500", 500, "MGStage detail returned status code 500"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(tt.statusCode)
-			}))
-			defer ts.Close()
-
-			s := &scraper{
-				client:      resty.New().SetBaseURL(ts.URL),
-				enabled:     true,
-				rateLimiter: ratelimit.NewLimiter(0),
-				settings:    models.ScraperSettings{Enabled: true},
-			}
-
-			result, err := s.ScrapeURL(context.Background(), ts.URL+"/product/product_detail/SIRO-1234/")
+			s := newScriptedMGStageScraper(t, true, map[string]mockHTTPResponse{
+				"/product/product_detail/SIRO-1234/": {statusCode: tt.statusCode},
+			})
+			result, err := s.ScrapeURL(context.Background(), "https://www.mgstage.com/product/product_detail/SIRO-1234/")
+			require.Error(t, err)
+			assert.EqualError(t, err, tt.wantError)
 			assert.Nil(t, result)
-			assert.Error(t, err)
 		})
 	}
 }

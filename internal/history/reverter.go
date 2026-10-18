@@ -2,12 +2,16 @@ package history
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/javinizer/javinizer-go/internal/config"
@@ -247,6 +251,62 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 		return result, err
 	}
 
+	// Atomically arbitrate with the write-ahead publication checkpoint. A
+	// read-only pending check is insufficient: publication could commit after
+	// that read while this invocation is already on its way to filesystem I/O.
+	if err := r.admitUndo(ctx, op); err != nil {
+		return primaryUndoFailure(op, err), nil
+	}
+	if result, err := r.guardDoubleRevert(ctx, op); result != nil || err != nil {
+		return result, err
+	}
+
+	residentDirectoryRestored := false
+	ledgerBefore, _ := models.ParseGeneratedFiles(op.GeneratedFiles)
+	// Directory compensation and resident admission exclude primary ownership.
+	// Reject contradictory recovery journals before even inspecting directory
+	// locations, without overwriting a concurrent primary Undo terminal status.
+	if ledgerBefore.PrimaryUndo != nil && (ledgerBefore.PrimaryResident || ledgerBefore.DirectoryMove != nil) {
+		return primaryUndoFailure(op, fmt.Errorf("conflicting resident and primary Undo ownership; manual recovery required")), nil
+	}
+	if ledgerBefore.DirectoryMove != nil {
+		if !ledgerBefore.PrimaryResident {
+			return failRevert(ctx, r.batchFileOpRepo, op, models.RevertReasonUnexpectedPathState, "directory inverse requires resident ownership"), nil
+		}
+		location, err := r.residentDirectoryLocation(ledgerBefore.DirectoryMove)
+		if err != nil {
+			return failRevert(ctx, r.batchFileOpRepo, op, models.RevertReasonDestinationConflict, err.Error()), nil
+		}
+		residentDirectoryRestored = location == ledgerBefore.DirectoryMove.Original
+	}
+	// only a hydrated pending intent gets the unexecuted-intent settle below.
+	hydratedPendingIntent := false
+	if op.NewPath == "" && op.OperationType == models.OperationTypeMove {
+		// A deferred-move row that crashed between publish and completion
+		// carries its primary endpoints ONLY as a pending MoveBack intent:
+		// hydrate BEFORE classification/replay — the replacement restore must
+		// never overwrite the freshly moved destination with its pre-overwrite
+		// backup (that would clobber the moved source's only remaining copy).
+		pendingMoveIntentAnchor(op)
+		hydratedPendingIntent = op.NewPath != ""
+	}
+
+	r.recoverInPlaceMoveAnchor(op)
+
+	primaryUndoComplete := false
+	if ledger, err := models.ParseGeneratedFiles(op.GeneratedFiles); err == nil && ledger.PrimaryUndo != nil {
+		// A resumed primary can consume the library anchor before reaching
+		// the ordinary primary leg. Preserve failed-publication admission
+		// checks here as well as the original later pre/post checks.
+		if err := checkPublicationRecovery(r.fs, ledger, false); err != nil {
+			return primaryUndoFailure(op, err), nil
+		}
+		if err := resumePrimaryUndo(ctx, r.fs, r.batchFileOpRepo, op, ledger.PrimaryUndo); err != nil {
+			return primaryUndoFailure(op, err), nil
+		}
+		primaryUndoComplete = true
+	}
+
 	// P3: replay the replacement journal BEFORE the anchor check AND before
 	// any operation-type leg (codex P3 R2-1/R6-in-2): a deleted primary
 	// anchor must not strand independently recoverable overwritten media —
@@ -266,6 +326,55 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 		logging.Debugf("Reverted %d journaled replacement(s) for op %d ahead of the %s leg", len(restored), op.ID, op.OperationType)
 	}
 
+	// Only after the journal replay may an unexecuted intent settle a no-op,
+	// because a crash-severed overwrite has already restored its prior bytes by
+	// now — destination-absent + source-present proves the move never ran.
+	if !primaryUndoComplete && hydratedPendingIntent && op.OperationType == models.OperationTypeMove {
+		_, dstErr := r.fs.Stat(op.NewPath)
+		// The source probe must NOT follow symlinks: a dangling symlink at the
+		// source pathname is an existing directory entry the move never
+		// consumed, and plain Stat would misread it as absent — the row then
+		// skips the anchor check unsettled and every retry stays incomplete.
+		_, srcErr := lstatRestoreSource(r.fs, op.OriginalPath)
+		if os.IsNotExist(dstErr) && srcErr == nil {
+			// The replay exclusion above stays correct OUTSIDE this guard: a
+			// hydrated intent whose destination is present can mean the publish
+			// DID land, and restoring the backup there would clobber the moved
+			// source's only remaining copy. Inside this guard the absent
+			// destination + present source prove the publish never ran, so the
+			// excluded entry is exactly the stranded forced-overwrite backup:
+			// restore it BEFORE the no-op verdict, or the terminal settle leaves
+			// the user's prior bytes at the backup path with the row no longer
+			// retryable.
+			if primaryReplacement {
+				primaryRestored, restoreErr := r.restoreReplacementJournalWhere(ctx, op, func(destination string) bool {
+					return filepath.Clean(destination) == filepath.Clean(op.NewPath)
+				})
+				if restoreErr != nil {
+					return rejectedRevert(op, restoreErr).withRetryable(restoreErr), nil
+				}
+				for path := range primaryRestored {
+					restored[path] = true
+				}
+			}
+			if uerr := r.batchFileOpRepo.UpdateRevertStatus(ctx, op.ID, models.RevertStatusNoOp); uerr != nil {
+				return failRevert(ctx, r.batchFileOpRepo, op, models.RevertReasonUnexpectedPathState, fmt.Sprintf("settle unexecuted pending intent for op %d: %v", op.ID, uerr)), nil
+			}
+			op.RevertStatus = models.RevertStatusNoOp
+			return &RevertFileResult{OperationID: op.ID, MovieID: op.MovieID, OriginalPath: op.OriginalPath, NewPath: op.NewPath, Outcome: models.RevertOutcomeSkipped, Reason: models.RevertReasonAnchorMissing}, nil
+		}
+		if dstErr == nil && srcErr == nil {
+			// codex P2 (PRRT_kwDORn9KaM6nD37F): destination present + ANY
+			// source-pathname entry — a dangling symlink included — must take
+			// the same conflict verdict revertPrimaryFileFS gives an occupied
+			// regular-file source there. A dangling link reads as vacant under
+			// that leg's following Stat, so the happy rename-back would POSIX
+			// rename the moved destination over the occupant; the conflict
+			// instead fails retryably and retains both sides byte-for-byte.
+			return failRevert(ctx, r.batchFileOpRepo, op, models.RevertReasonDestinationConflict, fmt.Sprintf("pending move intent retains both copies: source path %s is occupied (destination conflict)", op.OriginalPath)), nil
+		}
+	}
+
 	// Journal replay may have refreshed a stale caller snapshot. Re-check the
 	// status before touching the primary path so a request that entered just
 	// after another request finished cannot run the primary revert twice.
@@ -273,6 +382,14 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 		return result, err
 	}
 
+	ledger, _ := models.ParseGeneratedFiles(op.GeneratedFiles)
+	if residentDirectoryRestored {
+		remapResidentDirectoryLedger(&ledger)
+	}
+	if err := checkPublicationRecovery(r.fs, ledger, false); err != nil {
+		return failRevert(ctx, r.batchFileOpRepo, op, models.RevertReasonUnexpectedPathState, err.Error()), nil
+	}
+	primaryResident := ledger.PrimaryResident
 	isUpdate := op.OperationType == models.OperationTypeUpdate
 
 	// codex P2 (PR #241 F1): anchor semantics apply ONLY to the legs that
@@ -284,7 +401,7 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 	// GeneratedFiles cleanup — gating here orphaned every journaled copied
 	// subtitle/NFO/download behind an anchor_missing skip. Those rows run
 	// cleanup independently of the primary anchor below.
-	if op.OperationType == models.OperationTypeMove || isUpdate {
+	if !primaryUndoComplete && !primaryResident && (op.OperationType == models.OperationTypeMove || isUpdate) {
 		if primaryReplacement {
 			if _, statErr := r.fs.Stat(op.NewPath); os.IsNotExist(statErr) {
 				primaryRestored, restoreErr := r.restoreReplacementJournalWhere(ctx, op, func(destination string) bool {
@@ -312,8 +429,17 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 	case models.OperationTypeUpdate:
 		r.fsReverter.cleanupGeneratedFiles(op, filepath.Dir(filepath.Dir(op.OriginalPath)))
 	case models.OperationTypeMove:
-		if result, err := r.fsReverter.revertPrimaryFile(ctx, op); result != nil || err != nil {
-			return result, err
+		if ledger.DirectoryMove != nil {
+			if err := r.restoreResidentDirectory(ctx, op, ledger.DirectoryMove); err != nil {
+				return failRevert(ctx, r.batchFileOpRepo, op, models.RevertReasonDestinationConflict, err.Error()), nil
+			}
+			op.NFOPath = remapResidentDirectoryPath(ledger.DirectoryMove, op.NFOPath)
+			remapResidentDirectoryLedger(&ledger)
+		}
+		if !primaryUndoComplete && !primaryResident {
+			if result, err := r.fsReverter.revertPrimaryFile(ctx, op); result != nil || err != nil {
+				return result, err
+			}
 		}
 		if primaryReplacement {
 			primaryRestored, restoreErr := r.restoreReplacementJournalWhere(ctx, op, func(destination string) bool {
@@ -327,8 +453,16 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 			}
 		}
 		destRoot := filepath.Dir(filepath.Dir(op.NewPath))
+		if primaryResident {
+			// This is only a stop boundary for parents of journaled artifacts.
+			// The resident primary and its containing directory are never owned.
+			destRoot = filepath.Dir(op.OriginalPath)
+			if ledger.DirectoryMove != nil {
+				destRoot = ledger.DirectoryMove.Original
+			}
+		}
 		r.fsReverter.cleanupGeneratedFiles(op, destRoot)
-		if !op.InPlaceRenamed {
+		if !primaryResident && !op.InPlaceRenamed {
 			r.fsReverter.cleanupEmptyDir(filepath.Dir(op.NewPath), destRoot)
 		}
 	case models.OperationTypeCopy, models.OperationTypeHardlink, models.OperationTypeSymlink:
@@ -349,6 +483,10 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 		r.fsReverter.cleanupGeneratedFiles(op, filepath.Dir(filepath.Dir(op.NewPath)))
 	default:
 		return failRevert(ctx, r.batchFileOpRepo, op, models.RevertReasonUnexpectedPathState, fmt.Sprintf("unknown operation type %q cannot be reverted", op.OperationType)), nil
+	}
+
+	if err := checkPublicationRecovery(r.fs, ledger, true); err != nil {
+		return failRevert(ctx, r.batchFileOpRepo, op, models.RevertReasonUnexpectedPathState, err.Error()), nil
 	}
 
 	nfoWarning, failedResult := r.fsReverter.restoreNFO(ctx, op, isUpdate)
@@ -400,6 +538,54 @@ func (r *Reverter) guardDoubleRevert(ctx context.Context, op *models.BatchFileOp
 	}
 
 	return nil, nil
+}
+
+// pendingMoveIntentAnchor recovers a move row's primary destination from its
+// pending MoveBack intent ledger and stamps the row's column-shaped fields, so
+// later revert legs (checkAnchor, revertPrimaryFile, cleanup) see a coherent
+// operation. Only the intent whose source matches the row's OriginalPath can
+// pose as the primary move.
+func pendingMoveIntentAnchor(op *models.BatchFileOperation) string {
+	if op.OriginalPath == "" || op.GeneratedFiles == "" {
+		return ""
+	}
+	gf, err := models.ParseGeneratedFiles(op.GeneratedFiles)
+	if err != nil {
+		return ""
+	}
+	for _, fm := range gf.MoveBack {
+		if fm.OriginalPath == op.OriginalPath && fm.NewPath != "" {
+			op.NewPath = fm.NewPath
+			return fm.NewPath
+		}
+	}
+	return ""
+}
+
+func (r *Reverter) recoverInPlaceMoveAnchor(op *models.BatchFileOperation) {
+	if !op.InPlaceRenamed || op.OperationType != models.OperationTypeMove || op.NewPath == "" {
+		return
+	}
+	if _, err := lstatRestoreSource(r.fs, op.NewPath); !os.IsNotExist(err) {
+		return
+	}
+	if _, err := lstatRestoreSource(r.fs, op.OriginalPath); !os.IsNotExist(err) {
+		return
+	}
+	gf, err := models.ParseGeneratedFiles(op.GeneratedFiles)
+	if err != nil {
+		return
+	}
+	for _, fm := range gf.MoveBack {
+		if fm.OriginalPath != op.OriginalPath || fm.NewPath == "" {
+			continue
+		}
+		info, err := lstatRestoreSource(r.fs, fm.NewPath)
+		if err == nil && info.Mode().IsRegular() {
+			op.NewPath = fm.NewPath
+			return
+		}
+	}
 }
 
 func (r *Reverter) checkAnchor(ctx context.Context, op *models.BatchFileOperation) (*RevertFileResult, error) {
@@ -492,11 +678,24 @@ func revertPrimaryFileFS(ctx context.Context, fs afero.Fs, batchFileOpRepo datab
 		if err != nil {
 			return failRevert(ctx, batchFileOpRepo, op, models.RevertReasonUnexpectedPathState, fmt.Sprintf("failed to canonicalize directory path: %v", err)), nil
 		}
+		// CanonicalizePath deliberately strips drive letters for virtual path
+		// keys. A native absolute destination must keep its volume when creating
+		// the parent; otherwise Windows can create it on the working drive.
+		if filepath.IsAbs(targetDir) {
+			canonicalDir = filepath.Clean(targetDir)
+		}
 		if err := fs.MkdirAll(canonicalDir, config.DirPerm); err != nil {
 			return failRevert(ctx, batchFileOpRepo, op, models.RevertReasonAccessDenied, fmt.Sprintf("failed to recreate original directory: %v", err)), nil
 		}
 
 		if err := fs.Rename(paths.SourcePath, op.OriginalPath); err != nil {
+			if primaryUndoCrossDevice(err) {
+				if err := beginPrimaryUndo(ctx, fs, batchFileOpRepo, op); err != nil {
+					return primaryUndoFailure(op, err), nil
+				}
+				cleanupDirFn(filepath.Dir(op.NewPath), paths.DestRoot)
+				return nil, nil
+			}
 			reason := models.RevertReasonUnexpectedPathState
 			if os.IsPermission(err) {
 				reason = models.RevertReasonAccessDenied
@@ -527,6 +726,14 @@ func restoreNFOFS(ctx context.Context, fs afero.Fs, batchFileOpRepo database.Bat
 		return "", nil
 	}
 
+	// Older Windows snapshots could persist a rooted path after discarding its
+	// volume. The original video's volume cannot prove the NFO's old volume.
+	// Refuse that ambiguous native record before either restore mode writes.
+	if filepath.IsAbs(op.OriginalPath) && filepath.VolumeName(op.OriginalPath) != "" &&
+		filepath.VolumeName(nfoPath) == "" && os.IsPathSeparator(nfoPath[0]) {
+		return "", failRevert(ctx, batchFileOpRepo, op, models.RevertReasonNFORestoreFailed, "NFO snapshot path has no volume; cannot safely restore a legacy native path")
+	}
+
 	if hardFailure {
 		return restoreNFOHardFailure(ctx, fs, batchFileOpRepo, op, nfoPath)
 	}
@@ -539,10 +746,16 @@ func restoreNFOHardFailure(ctx context.Context, fs afero.Fs, batchFileOpRepo dat
 	if err != nil {
 		return "", failRevert(ctx, batchFileOpRepo, op, models.RevertReasonNFORestoreFailed, fmt.Sprintf("failed to canonicalize NFO path: %v", err))
 	}
+	if filepath.IsAbs(nfoDir) {
+		canonicalNfoDir = filepath.Clean(nfoDir)
+	}
 	if err := fs.MkdirAll(canonicalNfoDir, config.DirPerm); err != nil {
 		return "", failRevert(ctx, batchFileOpRepo, op, models.RevertReasonNFORestoreFailed, fmt.Sprintf("failed to create NFO directory: %v", err))
 	}
-	canonicalNfoPath := fsutil.NormalizePath(filepath.Join(canonicalNfoDir, filepath.Base(nfoPath)))
+	canonicalNfoPath := filepath.Join(canonicalNfoDir, filepath.Base(nfoPath))
+	if !filepath.IsAbs(nfoDir) {
+		canonicalNfoPath = fsutil.NormalizePath(canonicalNfoPath)
+	}
 	if err := afero.WriteFile(fs, canonicalNfoPath, []byte(op.NFOSnapshot), config.FilePerm); err != nil {
 		return "", failRevert(ctx, batchFileOpRepo, op, models.RevertReasonNFORestoreFailed, fmt.Sprintf("failed to restore NFO: %v", err))
 	}
@@ -557,8 +770,14 @@ func restoreNFOSoftFailure(fs afero.Fs, op *models.BatchFileOperation, nfoPath s
 		logging.Warnf("restoreNFOSoftFailure: failed to resolve absolute path for %q: %v", nfoDir, err)
 		canonicalNfoDir = filepath.Clean(nfoDir)
 	}
+	if filepath.IsAbs(nfoDir) {
+		canonicalNfoDir = filepath.Clean(nfoDir)
+	}
 	_ = fs.MkdirAll(canonicalNfoDir, config.DirPerm)
-	restorePath := fsutil.NormalizePath(filepath.Join(canonicalNfoDir, filepath.Base(nfoPath)))
+	restorePath := filepath.Join(canonicalNfoDir, filepath.Base(nfoPath))
+	if !filepath.IsAbs(nfoDir) {
+		restorePath = fsutil.NormalizePath(restorePath)
+	}
 	if err := afero.WriteFile(fs, restorePath, []byte(op.NFOSnapshot), config.FilePerm); err != nil {
 		logging.Warnf("Failed to restore NFO for op %d: %v (move-mode: treating as warning)", op.ID, err)
 		return fmt.Sprintf("NFO restore failed: %v", err), nil
@@ -629,6 +848,30 @@ func cleanupGeneratedFilesFS(fs afero.Fs, op *models.BatchFileOperation, stopAt 
 	if err := json.Unmarshal([]byte(op.GeneratedFiles), &gf); err != nil {
 		return
 	}
+	remapResidentDirectoryLedger(&gf)
+	if op.InPlaceRenamed && op.OriginalDirPath != "" && op.NewPath != "" {
+		currentDir := filepath.Dir(op.NewPath)
+		remap := func(path string) string {
+			if path == "" {
+				return path
+			}
+			rel, err := filepath.Rel(currentDir, path)
+			if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+				return path
+			}
+			return filepath.Join(op.OriginalDirPath, rel)
+		}
+		for i := range gf.Delete {
+			gf.Delete[i] = remap(gf.Delete[i])
+		}
+		for i := range gf.PlannedDeletes {
+			gf.PlannedDeletes[i].Path = remap(gf.PlannedDeletes[i].Path)
+		}
+		for i := range gf.MoveBack {
+			gf.MoveBack[i].OriginalPath = remap(gf.MoveBack[i].OriginalPath)
+			gf.MoveBack[i].NewPath = remap(gf.MoveBack[i].NewPath)
+		}
+	}
 	// Track parent directories of deleted files for cleanup
 	dirsToCheck := make(map[string]bool)
 	// Delete is populated at journal-write time from op-created paths only;
@@ -641,18 +884,286 @@ func cleanupGeneratedFilesFS(fs afero.Fs, op *models.BatchFileOperation, stopAt 
 		}
 		dirsToCheck[filepath.Dir(path)] = true
 	}
-	// Execute the MoveBack array (best-effort): rename-back for move-mode rows
-	// only; delete-the-installed-copy for every other mode's legacy entries
-	// (rename-over must NEVER run against a retained original — see the
-	// function doc above).
-	moveMode := op.OperationType == models.OperationTypeMove
+	// A MoveBack arm supersedes any pending delete pinned to the same
+	// destination in BOTH vacancy outcomes (rows journaled before the intent
+	// promoted with its arm): with the source absent the rename-back
+	// restores those bytes onto their source, so the pinned delete must
+	// never fire first and destroy them; with the source PRESENT the rename
+	// is suppressed and the pin must still not fire — source-present is
+	// ambiguous between "the move never consumed its source" and "the move
+	// consumed it and a foreign file reappeared afterwards", and without a
+	// durable source-consumed record the pin cannot tell those apart, so
+	// both paths are retained (a duplicate, never a lost last copy)
+	// (codex P1, PRRT_kwDORn9KaM6m5kmF).
+	moveBackTargets := make(map[string]bool, len(gf.MoveBack))
 	for _, fm := range gf.MoveBack {
+		moveBackTargets[fm.NewPath] = true
+	}
+	// A MoveBack entry whose ORIGINAL still exists names a move whose source
+	// was never consumed (an exit between the pending intent commit and the
+	// source removal) or whose source reappeared afterwards: running the
+	// rename-back would REPLACE those retained/foreign bytes on POSIX
+	// (codex P1, PRRT_kwDORn9KaM6m3ujI). Suppress the rename for such targets;
+	// the PlannedDeletes leg below retains a pinned copy of the same target as
+	// well — the pin would fire identically in the never-consumed shape and
+	// the consumed-then-foreignly-recreated one, so only retention protects
+	// both (codex P1, PRRT_kwDORn9KaM6m5kmF). A source whose state cannot be
+	// PROVEN absent suppresses too: uncertainty licenses neither a
+	// rename-over nor the delete. The vacancy probe never
+	// follows a final symlink (codex P2, PRRT_kwDORn9KaM6m5HFu): a link planted
+	// at the source — even a DANGLING one, which Stat reports as ENOENT — is
+	// itself a directory entry the POSIX rename back would REPLACE, so any
+	// occupant type suppresses exactly like a present file.
+	moveMode := op.OperationType == models.OperationTypeMove
+	renameSuppressed := make(map[string]bool, len(gf.MoveBack))
+	if moveMode {
+		for _, fm := range gf.MoveBack {
+			if fm.OriginalPath == "" || fm.NewPath == "" {
+				continue
+			}
+			if _, statErr := lstatRestoreSource(fs, fm.OriginalPath); statErr == nil || !os.IsNotExist(statErr) {
+				renameSuppressed[fm.NewPath] = true
+			}
+		}
+	}
+	// PlannedDeletes are intent entries pinned to the publisher's payload:
+	// delete only while the destination still carries exactly that payload —
+	// absent paths are consumed, rebuilt/touched or foreign occupants are
+	// kept. The pin shape keys on how the payload installed (models.DeleteEntry):
+	// a LinkTarget pin authenticates the link OBJECT by readlink, an Identity
+	// pin the hard-linked object by its admitted identity tuple, and a
+	// CopySize/CopyPartialSHA256 pin MARKS an in-flight copy intent —
+	// journaled before the stream exists, it is retain-only at recovery
+	// (codex P1, PRRT_kwDORn9KaM6novbT: the entry survives the very crash it
+	// covers, so its bounded head+tail proof can no longer distinguish the
+	// landed copy from a payload edited between the digest windows); only the
+	// sealed SHA256 shape authorizes a copy removal. None of the pin shapes
+	// ever hashes or follows a non-regular entry, so the full-hash leg's
+	// nonregular-retain rule (m5HF7) is preserved in every shape. Dispatch
+	// precedence is deterministic: LinkTarget, then the SHA-cleared
+	// identity/partial shapes, then the full-hash leg (an entry carrying
+	// SHA256 always hashes).
+	for _, entry := range gf.PlannedDeletes {
+		path := entry.Path
+		if moveBackTargets[path] {
+			continue
+		}
+		if entry.LinkTarget != "" {
+			// Soft-link pin (codex P2, PRRT_kwDORn9KaM6nBUq8): the install is
+			// the link OBJECT, authenticated solely by its readback payload.
+			// Any occupant that is not a symlink — a regular file holding any
+			// bytes at all, a directory — is foreign to this install shape and
+			// retains untouched, the m5HF7 partition applied from the other
+			// side (the hash leg retains every non-regular; this leg retains
+			// every non-link).
+			linkInfo, linkLstatErr := lstatRestoreSource(fs, path)
+			if os.IsNotExist(linkLstatErr) {
+				dirsToCheck[filepath.Dir(path)] = true
+				continue
+			}
+			if linkLstatErr != nil {
+				logging.Debugf("cleanupGeneratedFiles: pending symlink delete probe failed for %s: %v", path, linkLstatErr)
+				continue
+			}
+			if linkInfo.Mode()&os.ModeSymlink == 0 {
+				logging.Debugf("cleanupGeneratedFiles: pending symlink delete %s is not the pinned link object (mode %v) — retained", path, linkInfo.Mode())
+				continue
+			}
+			// The removal re-authenticates post-vacate (readlink of the
+			// terminal object), so a plant swapped onto path inside the
+			// probe→vacate window is rewound byte-intact, never unlinked.
+			if err := fsutil.UnlinkSymlinkVerified(fs, path, entry.LinkTarget); err != nil {
+				if errors.Is(err, fsutil.ErrTakeAsideVanished) {
+					dirsToCheck[filepath.Dir(path)] = true
+					continue
+				}
+				logging.Debugf("cleanupGeneratedFiles: pending symlink delete %s could not be removed link-verified — retained: %v", path, err)
+				continue
+			}
+			dirsToCheck[filepath.Dir(path)] = true
+			continue
+		}
+		if entry.SHA256 == "" && entry.HasIdentityPin() {
+			// Hard-link pin: presence is the explicit identity_pinned marker
+			// for new blobs, with the pre-marker evidence mapping folded into
+			// models.DeleteEntry.HasIdentityPin (the ModUnix sentinel, then
+			// the strong bool) — an epoch-dated source's pin never classifies
+			// through the timestamp alone. The published destination must BE
+			// the admitted source's object — link(2) shares the volume/index,
+			// so the identity tuple authenticates without reading a byte. The
+			// metadata legs (size + mtime-seconds) always run; the dev/inode
+			// legs run only against a strong pin and never degrade for one
+			// (a platform that re-probed no identity cannot authenticate a
+			// strong claim — retain, the admission-proof posture). Any
+			// non-regular occupant retains untouched (m5HF7 unchanged).
+			idInfo, idLstatErr := lstatRestoreSource(fs, path)
+			if os.IsNotExist(idLstatErr) {
+				dirsToCheck[filepath.Dir(path)] = true
+				continue
+			}
+			if idLstatErr != nil {
+				logging.Debugf("cleanupGeneratedFiles: pending identity delete probe failed for %s: %v", path, idLstatErr)
+				continue
+			}
+			if !idInfo.Mode().IsRegular() {
+				logging.Debugf("cleanupGeneratedFiles: pending identity delete %s is not a regular file (mode %v) — retained", path, idInfo.Mode())
+				continue
+			}
+			if entry.IdentityStrong {
+				dev, ino, identityOK := fsutil.BoundObjectIdentity(fs, path, idInfo)
+				if !identityOK {
+					logging.Debugf("cleanupGeneratedFiles: pending identity delete %s exposes no kernel identity for a strong pin — retained", path)
+					continue
+				}
+				if dev != entry.IdentityDev || ino != entry.IdentityIno {
+					logging.Debugf("cleanupGeneratedFiles: pending identity delete %s names a different object than the admitted source — retained", path)
+					continue
+				}
+			}
+			if idInfo.Size() != entry.IdentitySize || idInfo.ModTime().Unix() != entry.IdentityModUnix {
+				logging.Debugf("cleanupGeneratedFiles: pending identity delete %s no longer matches the pinned identity tuple — retained", path)
+				continue
+			}
+			// The lstat identity binds the verified unlink: a swap inside the
+			// probe→unlink window rides the vacate, fails the rebind, and is
+			// rewound byte-intact — never a pathname Remove of an unproven
+			// occupant.
+			if err := fsutil.UnlinkVerified(fs, path, idInfo); err != nil {
+				if errors.Is(err, fsutil.ErrTakeAsideVanished) {
+					dirsToCheck[filepath.Dir(path)] = true
+					continue
+				}
+				logging.Debugf("cleanupGeneratedFiles: pending identity delete %s could not be removed identity-verified — retained: %v", path, err)
+				continue
+			}
+			dirsToCheck[filepath.Dir(path)] = true
+			continue
+		}
+		if entry.SHA256 == "" && entry.CopyPartialSHA256 != "" {
+			// Interim copy pin that never graduated to the sealed full digest
+			// (the execute→seal crash window of a streaming copy install):
+			// RETAIN-ONLY (codex P1, PRRT_kwDORn9KaM6novbT). The pin was
+			// journaled before the stream existed, and the crash this entry
+			// covers leaves it durable for the whole crash→recovery interval —
+			// a payload edited only BETWEEN the digest windows afterwards
+			// still satisfies the bounded size+head/tail proof, so that proof
+			// can never authorize an unlink here. Only the sealed SHA256 (the
+			// full-hash leg below) may remove the destination. An absent path
+			// is still consumed bookkeeping: the install never landed (or was
+			// already cleaned), so prune the empty parent like every shape.
+			if _, interimLstatErr := lstatRestoreSource(fs, path); interimLstatErr == nil {
+				logging.Debugf("cleanupGeneratedFiles: pending interim copy delete %s carries no sealed full digest — retained (the unsealed size+edge proof is not deletion authorization)", path)
+				continue
+			} else if !os.IsNotExist(interimLstatErr) {
+				logging.Debugf("cleanupGeneratedFiles: pending interim copy delete probe failed for %s — retained: %v", path, interimLstatErr)
+				continue
+			}
+			dirsToCheck[filepath.Dir(path)] = true
+			continue
+		}
+		// The pin certifies the previously published REGULAR file only, so the
+		// occupancy check never follows a final symlink (codex P2,
+		// PRRT_kwDORn9KaM6m5HF7): a successor link whose TARGET happens to hold
+		// the pinned bytes is a foreign directory entry — hashing through it
+		// and removing the link would unlink an unrelated object.
+		info, lstatErr := lstatRestoreSource(fs, path)
+		if os.IsNotExist(lstatErr) {
+			dirsToCheck[filepath.Dir(path)] = true
+			continue
+		}
+		if lstatErr != nil {
+			logging.Debugf("cleanupGeneratedFiles: pending delete probe failed for %s: %v", path, lstatErr)
+			continue
+		}
+		if !info.Mode().IsRegular() {
+			logging.Debugf("cleanupGeneratedFiles: pending delete %s is not the pinned regular file (mode %v) — retained", path, info.Mode())
+			continue
+		}
+		file, openErr := fs.Open(path)
+		if os.IsNotExist(openErr) {
+			dirsToCheck[filepath.Dir(path)] = true
+			continue
+		}
+		if openErr != nil {
+			logging.Debugf("cleanupGeneratedFiles: pending delete probe failed for %s: %v", path, openErr)
+			continue
+		}
+		// The identity is captured from the OPEN HANDLE, never the pathname:
+		// the digest below authenticates exactly this object's bytes, so the
+		// removal must bind to the same object (codex P1,
+		// PRRT_kwDORn9KaM6m6WAj). A capture failure leaves nothing to bind the
+		// unlink to — retain rather than pathname-remove an unproven name.
+		pinned, pinnedErr := file.Stat()
+		h := sha256.New()
+		_, copyErr := io.Copy(h, file)
+		closeErr := file.Close()
+		if pinnedErr != nil {
+			logging.Debugf("cleanupGeneratedFiles: pending delete %s identity could not be captured — retained: %v", path, pinnedErr)
+			continue
+		}
+		if copyErr != nil || closeErr != nil {
+			logging.Debugf("cleanupGeneratedFiles: pending delete digest failed for %s: %v/%v", path, copyErr, closeErr)
+			continue
+		}
+		if hex.EncodeToString(h.Sum(nil)) != strings.ToLower(entry.SHA256) {
+			logging.Debugf("cleanupGeneratedFiles: pending delete %s no longer carries the pinned bytes — retained", path)
+			continue
+		}
+		// Identity-verified unlink (fsutil.UnlinkVerified — the same
+		// bound-unlink construction the quarantine holds carry): the hashed
+		// object vacates onto a fresh crypto-claimed terminal sibling, the
+		// terminal re-binds to the pinned identity, and ONLY the re-bound
+		// terminal is unlinked. A foreign occupant rename-swapped onto path
+		// inside the hash→unlink window rides the vacate onto the terminal,
+		// fails the rebind, and is rewound byte-intact — never a pathname
+		// Remove of an unproven occupant.
+		if err := fsutil.UnlinkVerified(fs, path, pinned); err != nil {
+			if errors.Is(err, fsutil.ErrTakeAsideVanished) {
+				// The pinned bytes vanished under the verified unlink — the
+				// entry consumed itself; prune the empty parent as consumed.
+				dirsToCheck[filepath.Dir(path)] = true
+				continue
+			}
+			logging.Debugf("cleanupGeneratedFiles: pending delete %s could not be removed identity-verified — retained: %v", path, err)
+			continue
+		}
+		dirsToCheck[filepath.Dir(path)] = true
+	}
+
+	// Execute the MoveBack array (best-effort): rename-back for move-mode rows
+	// whose source is GONE (the move consumed it); delete-the-installed-copy
+	// for every other mode's legacy entries (rename-over must NEVER run
+	// against a retained original — see the function doc above). A suppressed
+	// entry (source still present) does neither: the PlannedDeletes leg above
+	// already retained its published copy, pinned or not, alongside the
+	// occupied source — nothing is lost in either crash shape.
+	// The rename-back executes through the atomic NO-REPLACE primitive (codex
+	// P1, PRRT_kwDORn9KaM6npnwr): the no-follow vacancy prepass above and this
+	// mutation are temporally separated — the planned-delete hashes stream
+	// between them — so another process can recreate the original path inside
+	// the gap, and a plain POSIX rename would REPLACE and destroy that late
+	// occupant. MoveFileNoReplace re-proves the destination at the publish
+	// instant and refuses occupancy with the shared no-replace refusal
+	// classes, suppressing the recovery with BOTH objects retained byte-intact
+	// (the moved sibling, pinned or not, stays put alongside the occupant).
+	for _, fm := range gf.MoveBack {
+		if fm.NewPath == op.NewPath && fm.OriginalPath == op.OriginalPath {
+			// A pending move intent equal to the row columns: the primary move is
+			// already reverted by the column-driven arm — never double-drive it.
+			continue
+		}
 		if !moveMode {
 			if err := fs.Remove(fm.NewPath); err != nil && !os.IsNotExist(err) {
 				logging.Debugf("cleanupGeneratedFiles: failed to delete copy-installed artifact %s (original at %s retained): %v", fm.NewPath, fm.OriginalPath, err)
 			}
-		} else if err := fs.Rename(fm.NewPath, fm.OriginalPath); err != nil {
-			logging.Debugf("cleanupGeneratedFiles: failed to move back %s → %s: %v", fm.NewPath, fm.OriginalPath, err)
+		} else if renameSuppressed[fm.NewPath] {
+			logging.Debugf("cleanupGeneratedFiles: move-back %s → %s suppressed — the original still exists (the move intent was never consumed or the source reappeared); the destination, pinned or not, is retained alongside it", fm.NewPath, fm.OriginalPath)
+		} else if err := recoverPublicationMove(fs, fm); err != nil {
+			if fsutil.PublishRefusal(err) {
+				logging.Debugf("cleanupGeneratedFiles: move-back %s → %s suppressed by the atomic no-replace leg — an occupant claimed the original path after the vacancy probe (or the volume cannot express no-replace); both objects retained byte-intact: %v", fm.NewPath, fm.OriginalPath, err)
+			} else {
+				logging.Debugf("cleanupGeneratedFiles: failed to move back %s → %s: %v", fm.NewPath, fm.OriginalPath, err)
+			}
 		}
 		dirsToCheck[filepath.Dir(fm.NewPath)] = true
 	}
@@ -661,11 +1172,15 @@ func cleanupGeneratedFilesFS(fs afero.Fs, op *models.BatchFileOperation, stopAt 
 	batchRoot := filepath.Clean(stopAt)
 	for dir := range dirsToCheck {
 		cleanDir := filepath.Clean(dir)
-		if !isDescendant(cleanDir, batchRoot) {
+		boundary := batchRoot
+		if gf.PrimaryResident && !isDescendant(cleanDir, boundary) {
+			boundary = residentCleanupAliasBoundary(fs, cleanDir, boundary)
+		}
+		if boundary == "" || !isDescendant(cleanDir, boundary) {
 			logging.Warnf("Skipping cleanup of directory %q: outside batch root %q", cleanDir, batchRoot)
 			continue
 		}
-		cleanupEmptyDirDownwardFS(fs, cleanDir, stopAt)
+		cleanupEmptyDirDownwardFS(fs, cleanDir, boundary)
 	}
 }
 
@@ -900,7 +1415,7 @@ func (r *Reverter) RevertBatch(ctx context.Context, batchJobID string) (*RevertB
 	// ancestors (including the top-level output directory if it contains other
 	// files) are preserved. An empty output directory will be removed, which
 	// is the correct behavior after a full batch revert.
-	for dirPath := range collectDestRoots(processable) {
+	for dirPath := range successfulDestRoots(processable, outcomes) {
 		r.fsReverter.cleanupEmptyDir(filepath.Clean(dirPath), "")
 	}
 
@@ -971,7 +1486,7 @@ func (r *Reverter) RevertScrape(ctx context.Context, batchJobID string, movieID 
 	outcomes := r.revertOperations(ctx, matching, r.revertFile)
 	succeeded, skipped, failed := summarizeOutcomes(outcomes)
 
-	for dirPath := range collectDestRoots(matching) {
+	for dirPath := range successfulDestRoots(matching, outcomes) {
 		r.fsReverter.cleanupEmptyDir(filepath.Clean(dirPath), "")
 	}
 
@@ -982,4 +1497,55 @@ func (r *Reverter) RevertScrape(ctx context.Context, batchJobID string, movieID 
 		Failed:    failed,
 		Outcomes:  outcomes,
 	}, nil
+}
+
+// admitUndo runs inside the existing whole-operation Undo lock. Its durable
+// monotonic marker also arbitrates with publication in another process. Retried
+// Undo remains admitted; failed/skipped attempts must never reopen publication.
+func (r *Reverter) admitUndo(ctx context.Context, op *models.BatchFileOperation) error {
+	return admitOperationUndo(ctx, r.batchFileOpRepo, op)
+}
+
+func admitOperationUndo(ctx context.Context, repo database.BatchFileOperationRepositoryInterface, op *models.BatchFileOperation) error {
+	err := repo.UpdateJournalInTx(ctx, op.ID, func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
+		ledger, err := models.ParseGeneratedFiles(current.GeneratedFiles)
+		if err != nil {
+			return models.GeneratedFilesJSON{}, false, err
+		}
+		if ledger.PublicationPending {
+			return models.GeneratedFilesJSON{}, false, fmt.Errorf("resident publication reconciliation is pending; manual recovery required")
+		}
+		if current.RevertStatus == models.RevertStatusReverted || current.RevertStatus == models.RevertStatusNoOp {
+			return ledger, false, nil
+		}
+		persist := !ledger.UndoStarted
+		ledger.UndoStarted = true
+		return ledger, persist, nil
+	})
+	if err != nil {
+		return err
+	}
+	// Admission excludes every Apply writer before we refresh metadata. A read
+	// taken before waiting for the transaction could still contain old paths.
+	fresh, err := repo.FindByID(ctx, op.ID)
+	if err != nil {
+		return fmt.Errorf("reload admitted Undo operation: %w", err)
+	}
+	if fresh == nil {
+		return fmt.Errorf("reload admitted Undo operation: row not found")
+	}
+	*op = *fresh
+	return nil
+}
+
+// Failed admission must not escape through batch-level ancestor cleanup. A
+// successful sibling can share an ancestor with a held operation, so defer the
+// entire optional ancestor sweep whenever any operation remains unresolved.
+func successfulDestRoots(ops []models.BatchFileOperation, outcomes []RevertFileResult) map[string]bool {
+	for _, outcome := range outcomes {
+		if outcome.Outcome != models.RevertOutcomeReverted {
+			return nil
+		}
+	}
+	return collectDestRoots(ops)
 }

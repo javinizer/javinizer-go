@@ -172,7 +172,7 @@ func TestSweepW34_UndoRestoreRefusedAfterForeignDestSwap(t *testing.T) {
 	op := journalRow(t, baseRepo, "job-w34", "W34-UNDO", dest, backup, 1, models.RevertStatusApplied)
 
 	readErr := errors.New("w34 journal read wedged")
-	repo := &w34FailJournalTxRepo{p3OpRepo: baseRepo, failAt: 1, err: readErr, fs: base, dest: dest, foreign: []byte("w34 foreign swap-victim")}
+	repo := &w34FailJournalTxRepo{p3OpRepo: baseRepo, failAt: 2, err: readErr, fs: base, dest: dest, foreign: []byte("w34 foreign swap-victim")}
 	w32ScriptRestoredDestSeam(t, true, false)
 
 	var logs bytes.Buffer
@@ -212,7 +212,7 @@ func TestSweepW34_MarkerFailureUndoRefusedAfterDestDivergence(t *testing.T) {
 	op := journalRow(t, baseRepo, "job-w34", "W34-MARK", dest, backup, 1, models.RevertStatusApplied)
 
 	markErr := errors.New("w34 marker persist wedged")
-	repo := &w18TxFailRepo{p3OpRepo: baseRepo, fail: map[int]error{2: markErr}}
+	repo := &w18TxFailRepo{p3OpRepo: baseRepo, fail: map[int]error{3: markErr}}
 	removeErr := errors.New("w34 quarantine unlink wedged")
 	fs := &w34QuarantineUnlinkWedge{Fs: base, backup: backup, dest: dest, foreign: []byte("w34 dest plant"), err: removeErr}
 	w32ScriptRestoredDestSeam(t, true, true, false)
@@ -254,7 +254,7 @@ func TestSweepW34_ConsumptionFailureUndoRefusedAfterDestDivergence(t *testing.T)
 	op := journalRow(t, baseRepo, "job-w34", "W34-CONSUME", dest, backup, 1, models.RevertStatusApplied)
 
 	consumeErr := errors.New("w34 consumption transaction wedged")
-	repo := &w18TxFailRepo{p3OpRepo: baseRepo, fail: map[int]error{2: consumeErr}}
+	repo := &w18TxFailRepo{p3OpRepo: baseRepo, fail: map[int]error{3: consumeErr}}
 	w32ScriptRestoredDestSeam(t, true, true, false)
 
 	var logs bytes.Buffer

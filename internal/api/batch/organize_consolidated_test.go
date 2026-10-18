@@ -337,9 +337,13 @@ func TestMiss7_OrganizeJob_SuccessfulStart(t *testing.T) {
 
 	// Should succeed or fail with workflow error
 	if w.Code == http.StatusOK {
-		var resp map[string]string
+		var resp struct {
+			Message         string `json:"message"`
+			ApplyGeneration uint64 `json:"apply_generation"`
+		}
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-		assert.Equal(t, "Organization started", resp["message"])
+		assert.Equal(t, "Organization started", resp.Message)
+		assert.Positive(t, resp.ApplyGeneration)
 	}
 }
 

@@ -63,7 +63,7 @@ func TestReplacementSweepPendingKindW19_ConsumeFailRearmCollisionPersistsKind(t 
 	op := journalRow(t, baseRepo, "job-w19k-sweep", "W19K-DRIVE", dest, backup, 1, models.RevertStatusApplied)
 
 	consumeErr := errors.New("w19k consumption transaction wedged")
-	repo := &w18TxFailRepo{p3OpRepo: baseRepo, fail: map[int]error{2: consumeErr}}
+	repo := &w18TxFailRepo{p3OpRepo: baseRepo, fail: map[int]error{3: consumeErr}}
 	fs := &w15BackupRaceFs{Fs: base, target: backup, foreign: []byte("foreign-bytes")}
 
 	healed, err := NewReplacementSweeper(fs, repo).Sweep(ctx)

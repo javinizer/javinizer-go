@@ -122,21 +122,34 @@ func TestScrapeURLV3_SuccessWithMockServer(t *testing.T) {
 	require.NotNil(t, result)
 }
 
-// TestScrapeURLV3_Disabled tests ScrapeURL with disabled scraper
-func TestScrapeURLV3_Disabled(t *testing.T) {
+// Verify a direct-page HTTP failure without contacting the live site.
+func TestScrapeURLV3_FetchError(t *testing.T) {
+	requests := 0
+	client := resty.New().SetTransport(&jlMockTransport{
+		handler: func(req *http.Request) (*http.Response, error) {
+			requests++
+			assert.Equal(t, http.MethodGet, req.Method)
+			assert.Equal(t, "http://www.javlibrary.com/en/?v=test", req.URL.String())
+			return &http.Response{
+				StatusCode: http.StatusForbidden,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader("forbidden")),
+				Request:    req,
+			}, nil
+		},
+	})
 	scraper := &scraper{
-		client:      resty.New(),
-		enabled:     false,
+		client:      client,
+		enabled:     true,
 		baseURL:     "http://www.javlibrary.com",
 		rateLimiter: ratelimit.NewLimiter(0),
-		settings:    models.ScraperSettings{Enabled: false},
+		settings:    models.ScraperSettings{Enabled: true},
 	}
 
 	_, err := scraper.ScrapeURL(context.Background(), "http://www.javlibrary.com/en/?v=test")
-	// Should fail because CanHandleURL would fail for non-javlibrary URLs
-	// or because URL is not handled
-	// Note: when disabled, ScrapeURL still checks CanHandleURL first
-	_ = err
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "403")
+	assert.Equal(t, 1, requests)
 }
 
 // TestScrapeURLV3_URLNotHandled tests ScrapeURL with non-JavLibrary URL

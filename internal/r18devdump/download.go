@@ -27,6 +27,13 @@ const downloadUserAgent = "Mozilla/5.0 (compatible; Javinizer/1.0; +https://gith
 // truncations while a genuinely dead endpoint still fails fast.
 const maxResumeAttempts = 8
 
+// An unknown-length stream may already be complete when we probe its EOF.
+// Bound only the optional probe's header wait so an unresponsive Range endpoint
+// cannot indefinitely delay CLI imports or trigger the API's five-minute stall
+// watchdog after the full dump has arrived. A successful 206 body remains a
+// normal, potentially long-running transfer after this timer is stopped.
+const eofProbeHeaderTimeout = 10 * time.Second
+
 // resumeBackoffBase is the initial delay between stream-resume attempts; it
 // doubles per consecutive failure, capped at resumeBackoffMax. Package-level
 // vars so tests can shrink them.
@@ -51,6 +58,15 @@ type DownloadResult struct {
 	SourceDate string // date parsed from FinalURL, e.g. "2026-04-28"
 	Bytes      int64  // compressed bytes transferred (0 if skipped)
 	Unchanged  bool   // true when the version matches currentSourceURL
+}
+
+// DownloadOptions separates optional EOF-probe header waits from a caller's
+// payload-stall accounting. The callbacks run synchronously as a pair around
+// the bounded request for probe headers, never around an adopted 206 body.
+type DownloadOptions struct {
+	CurrentSourceDate string // optional date of a manually uploaded dump
+	OnEOFProbeStart   func()
+	OnEOFProbeDone    func()
 }
 
 // Download fetches the latest r18.dev dump, gunzips it, and pipes the
@@ -80,6 +96,12 @@ type DownloadResult struct {
 // unknown, e.g. chunked/streamed responses).
 func Download(ctx context.Context, client *http.Client, currentSourceURL, currentSourceDate string,
 	progress func(compressedBytes, totalBytes int64), importFn func(io.Reader, DownloadResult) error) (DownloadResult, error) {
+	return DownloadWithOptions(ctx, client, currentSourceURL, progress, importFn, DownloadOptions{CurrentSourceDate: currentSourceDate})
+}
+
+// DownloadWithOptions is Download with optional EOF-probe lifecycle callbacks.
+func DownloadWithOptions(ctx context.Context, client *http.Client, currentSourceURL string,
+	progress func(compressedBytes, totalBytes int64), importFn func(io.Reader, DownloadResult) error, opts DownloadOptions) (DownloadResult, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, DumpURLOverride(), nil)
 	if err != nil {
 		return DownloadResult{}, fmt.Errorf("build request: %w", err)
@@ -109,8 +131,8 @@ func Download(ctx context.Context, client *http.Client, currentSourceURL, curren
 	}
 	// Upload-token provenance: non-URL source values never equal a redirect
 	// URL, but an equal source date means the uploaded dump is already current.
-	if currentSourceDate != "" && !strings.Contains(currentSourceURL, "://") &&
-		currentSourceDate == res.SourceDate {
+	if opts.CurrentSourceDate != "" && !strings.Contains(currentSourceURL, "://") &&
+		opts.CurrentSourceDate == res.SourceDate {
 		_ = resp.Body.Close()
 		res.Unchanged = true
 		return res, nil
@@ -124,6 +146,7 @@ func Download(ctx context.Context, client *http.Client, currentSourceURL, curren
 		lastMod: resp.Header.Get("Last-Modified"),
 		total:   resp.ContentLength,
 		body:    resp.Body,
+		options: opts,
 	}
 	defer func() { _ = stream.Close() }()
 
@@ -167,6 +190,7 @@ type resumeReader struct {
 	total   int64 // expected total compressed bytes (-1 when unknown)
 	offset  int64 // compressed bytes delivered so far
 	body    io.ReadCloser
+	options DownloadOptions
 
 	consecFailures int // resume attempts since the stream last made progress
 }
@@ -317,18 +341,43 @@ func (r *resumeReader) classifyUnknownEOF() bool {
 		return true
 	}
 	r.consecFailures++
-	req, err := http.NewRequestWithContext(r.ctx, http.MethodGet, r.url, nil)
+	probeCtx, cancelProbe := context.WithCancel(r.ctx)
+	req, err := http.NewRequestWithContext(probeCtx, http.MethodGet, r.url, nil)
 	if err != nil {
+		cancelProbe()
 		return true
 	}
 	req.Header.Set("User-Agent", downloadUserAgent)
 	req.Header.Set("Accept", "*/*")
 	req.Header.Set("Range", fmt.Sprintf("bytes=%d-", r.offset))
 	req.Header.Set("If-Range", validator)
+	if r.options.OnEOFProbeStart != nil {
+		r.options.OnEOFProbeStart()
+	}
+	headerTimer := time.AfterFunc(eofProbeHeaderTimeout, cancelProbe)
 	resp, err := r.client.Do(req)
-	if err != nil {
+	headerInTime := headerTimer.Stop()
+	if r.options.OnEOFProbeDone != nil {
+		r.options.OnEOFProbeDone()
+	}
+	if !headerInTime {
+		// The timeout callback has started (or finished). Even if a transport
+		// concurrently returns headers, do not adopt a body whose context is
+		// being canceled. Treat this as the same inconclusive EOF probe.
+		cancelProbe()
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
+		}
 		return true
 	}
+	if err != nil {
+		cancelProbe()
+		return true
+	}
+	// Do not defer cancellation here: a 206 body is adopted by resumeReader
+	// and must stay readable after classifyUnknownEOF returns. Every response
+	// path either closes this wrapper now or transfers it to r.body.
+	resp.Body = &eofProbeBody{ReadCloser: resp.Body, cancel: cancelProbe}
 	switch resp.StatusCode {
 	case http.StatusPartialContent:
 		start, total, perr := parseContentRange(resp.Header.Get("Content-Range"))
@@ -354,6 +403,17 @@ func (r *resumeReader) classifyUnknownEOF() bool {
 		_ = resp.Body.Close()
 		return true
 	}
+}
+
+// eofProbeBody owns the child request context after response headers arrive.
+type eofProbeBody struct {
+	io.ReadCloser
+	cancel context.CancelFunc
+}
+
+func (b *eofProbeBody) Close() error {
+	b.cancel()
+	return b.ReadCloser.Close()
 }
 
 // parseRangeNotSatisfiableTotal parses the total size from a 416 response's

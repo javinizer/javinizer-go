@@ -258,3 +258,19 @@ func (r *countingHistoryRepo) DeleteOlderThan(_ context.Context, _ time.Time) er
 func (r *countingHistoryRepo) List(_ context.Context, _, _ int) ([]models.History, error) {
 	return nil, nil
 }
+
+func (r *failingHistoryRepo) CountFiltered(_ context.Context, _ database.HistoryFilter) (int64, error) {
+	return 0, nil
+}
+
+func (r *failingHistoryRepo) ListFiltered(_ context.Context, _ database.HistoryFilter, _, _ int) ([]models.History, error) {
+	return nil, nil
+}
+
+func (r *countingHistoryRepo) CountFiltered(_ context.Context, _ database.HistoryFilter) (int64, error) {
+	return 0, nil
+}
+
+func (r *countingHistoryRepo) ListFiltered(_ context.Context, _ database.HistoryFilter, _, _ int) ([]models.History, error) {
+	return nil, nil
+}

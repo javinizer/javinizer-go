@@ -152,7 +152,7 @@ func TestReplacementBusyW14A_ArbitrationErrors(t *testing.T) {
 	_, err = AcquireReplacementBusy(&w14ARemoveFailureFs{Fs: base, err: removeErr}, dest)
 	require.ErrorIs(t, err, removeErr)
 
-	releaseReplacementBusy(base, ReplacementBusyPath(dest), "not-the-owner")
+	releaseReplacementBusy(base, ReplacementBusyPath(dest), "not-the-owner", nil)
 }
 
 func writeW14ABusyToken(t *testing.T, fs afero.Fs, dest string, pid int, created time.Time) {

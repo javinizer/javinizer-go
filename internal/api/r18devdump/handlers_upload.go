@@ -49,18 +49,24 @@ const (
 // @Failure 500 {object} map[string]string "deadline lift unsupported, staging failure, or panic"
 // @Router /api/v1/r18dev/dump/upload [post]
 func (h *dumpHandler) startUpload(c *gin.Context) {
-	path := resolveDumpPath(h.rt.Deps().CoreDeps.GetConfig())
-	staged := path + ".upload"
-
 	if !h.tryAcquireDumpOp() {
 		c.JSON(http.StatusConflict, gin.H{errorResponseKey: "another dump operation is already in progress"})
 		return
 	}
+	taskDone := h.rt.TrackServerTask()
+	if taskDone == nil {
+		h.releaseDumpOp()
+		c.JSON(http.StatusServiceUnavailable, gin.H{errorResponseKey: "server is shutting down"})
+		return
+	}
+	path := resolveDumpPath(h.rt.Deps().CoreDeps.GetConfig())
+	staged := path + ".upload"
 	handedOff := false
 	defer func() {
 		if handedOff {
 			return
 		}
+		defer taskDone()
 		_ = os.Remove(staged)
 		if rec := recover(); rec != nil {
 			logging.Warnf("r18dev dump upload: panic during receive: %v", rec)
@@ -121,10 +127,22 @@ func (h *dumpHandler) startUpload(c *gin.Context) {
 		},
 	)
 	c.Request.Body = wrapped
-	runCtx, cancelRun := context.WithCancel(context.Background())
-	defer cancelRun()
-	go watchdog.run(runCtx, func() {
-		wrapped.onStall(func() { _ = rc.SetReadDeadline(time.Now()) })
+	runCtx, cancelRun := context.WithCancel(h.rt.ServerCtx())
+	var receiveWorkers sync.WaitGroup
+	defer func() { cancelRun(); receiveWorkers.Wait() }()
+	receiveWorkers.Go(func() {
+		select {
+		case <-h.rt.ServerCtx().Done():
+		case <-runCtx.Done():
+		}
+		if h.rt.ServerCtx().Err() != nil {
+			_ = rc.SetReadDeadline(time.Now())
+		}
+	})
+	receiveWorkers.Go(func() {
+		watchdog.run(runCtx, func() {
+			wrapped.onStall(func() { _ = rc.SetReadDeadline(time.Now()) })
+		})
 	})
 	defer watchdog.Stop()
 
@@ -133,7 +151,13 @@ func (h *dumpHandler) startUpload(c *gin.Context) {
 		defer func() { _ = c.Request.MultipartForm.RemoveAll() }()
 	}
 
-	switch wrapped.classify(parseErr) {
+	disposition := wrapped.classify(parseErr)
+	if h.rt.ServerCtx().Err() != nil {
+		c.Header("Connection", "close")
+		c.JSON(http.StatusServiceUnavailable, gin.H{errorResponseKey: "server is shutting down"})
+		return
+	}
+	switch disposition {
 	case dispOversize:
 		c.JSON(http.StatusRequestEntityTooLarge, gin.H{errorResponseKey: fmt.Sprintf("request body exceeds the %d-byte upload limit", maxBytes)})
 		return
@@ -197,8 +221,13 @@ func (h *dumpHandler) startUpload(c *gin.Context) {
 	h.done = make(chan struct{})
 	done := h.done
 	h.mu.Unlock()
+	cancelRun()
+	receiveWorkers.Wait()
 	handedOff = true
-	go h.runUploadJob(context.Background(), path, staged, prov, done)
+	go func() {
+		defer taskDone()
+		h.runUploadJob(h.rt.ServerCtx(), path, staged, prov, done)
+	}()
 	c.JSON(http.StatusAccepted, gin.H{"message": "upload staged; validation and install running"})
 }
 

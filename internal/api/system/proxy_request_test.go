@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -57,7 +58,15 @@ func TestProxy_RedactedRequestCredentials(t *testing.T) {
 		{"inherited credentials", models.ProxyProfile{Username: models.RedactedValue, Password: models.RedactedValue}, models.ProxyProfile{Username: "saved-user", Password: "saved-password"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			var targetURL string
+			var proxyRequests atomic.Int64
 			proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				proxyRequests.Add(1)
+				if r.Method != http.MethodGet || !r.URL.IsAbs() || r.URL.String() != targetURL {
+					t.Errorf("unexpected proxy request: %s %s", r.Method, r.URL)
+					http.Error(w, "unexpected proxy request", http.StatusBadRequest)
+					return
+				}
 				wantAuth := ""
 				if tc.expected.Username != "" || tc.expected.Password != "" {
 					wantAuth = "Basic " + base64.StdEncoding.EncodeToString([]byte(tc.expected.Username+":"+tc.expected.Password))
@@ -69,6 +78,7 @@ func TestProxy_RedactedRequestCredentials(t *testing.T) {
 				w.WriteHeader(http.StatusOK)
 			}))
 			defer proxy.Close()
+			targetURL = proxy.URL + "/proxy-probe"
 			cfg := config.DefaultConfig(nil, nil)
 			cfg.Scrapers.Proxy = models.ProxyConfig{Enabled: true, DefaultProfile: "main", Profiles: map[string]models.ProxyProfile{
 				"main":   {URL: "http://old-proxy:8080", Username: "saved-user", Password: "saved-password"},
@@ -77,6 +87,7 @@ func TestProxy_RedactedRequestCredentials(t *testing.T) {
 			before, err := json.Marshal(cfg.Scrapers.Proxy)
 			require.NoError(t, err)
 			tokens := core.NewTokenStore()
+			t.Cleanup(func() { core.CloseTokenStore(tokens) })
 			deps := newTestDeps(cfg, func(d *core.APIDeps) { d.TokenStore = tokens })
 			rt := testkit.GetTestRuntime(deps)
 			router := gin.New()
@@ -92,7 +103,7 @@ func TestProxy_RedactedRequestCredentials(t *testing.T) {
 				requestProxy.DefaultProfile = "main"
 				requestProxy.Profiles["backup"] = models.ProxyProfile{URL: proxy.URL}
 			}
-			body, err := json.Marshal(contracts.ProxyTestRequest{Mode: "direct", TargetURL: "http://example.com/proxy-probe", Proxy: requestProxy})
+			body, err := json.Marshal(contracts.ProxyTestRequest{Mode: "direct", TargetURL: targetURL, Proxy: requestProxy})
 			require.NoError(t, err)
 			req := httptest.NewRequest(http.MethodPost, "/proxy/test", bytes.NewReader(body))
 			req.Header.Set("Content-Type", "application/json")
@@ -102,6 +113,9 @@ func TestProxy_RedactedRequestCredentials(t *testing.T) {
 			var response contracts.ProxyTestResponse
 			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
 			require.True(t, response.Success, response.Message)
+			require.Equal(t, int64(1), proxyRequests.Load(), "must exercise the configured forward proxy")
+			require.Equal(t, http.StatusOK, response.StatusCode)
+			require.Equal(t, targetURL, response.TargetURL)
 			expected := tc.expected
 			expected.URL = proxy.URL
 			requestProxy.Profile = ""
@@ -139,16 +153,25 @@ func TestProxy_RequestProfiles(t *testing.T) {
 		{name: "enable disabled saved proxy", persisted: models.ProxyConfig{DefaultProfile: "main", Profiles: map[string]models.ProxyProfile{"main": {URL: "http://127.0.0.1:1"}}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			var targetURL string
+			var proxyRequests atomic.Int64
 			proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				require.Equal(t, "http://example.com/proxy-probe", r.URL.String())
+				proxyRequests.Add(1)
+				if r.Method != http.MethodGet || !r.URL.IsAbs() || r.URL.String() != targetURL {
+					t.Errorf("unexpected proxy request: %s %s", r.Method, r.URL)
+					http.Error(w, "unexpected proxy request", http.StatusBadRequest)
+					return
+				}
 				w.WriteHeader(http.StatusOK)
 			}))
 			defer proxy.Close()
+			targetURL = proxy.URL + "/proxy-probe"
 			cfg := config.DefaultConfig(nil, nil)
 			cfg.Scrapers.Proxy = tc.persisted
 			before, err := json.Marshal(cfg.Scrapers.Proxy)
 			require.NoError(t, err)
 			tokens := core.NewTokenStore()
+			t.Cleanup(func() { core.CloseTokenStore(tokens) })
 			deps := newTestDeps(cfg, func(d *core.APIDeps) { d.TokenStore = tokens })
 			rt := testkit.GetTestRuntime(deps)
 			router := gin.New()
@@ -158,7 +181,7 @@ func TestProxy_RequestProfiles(t *testing.T) {
 				requestProxy.Profile = ""
 				requestProxy.DefaultProfile = "main"
 			}
-			body, err := json.Marshal(contracts.ProxyTestRequest{Mode: "direct", TargetURL: "http://example.com/proxy-probe", Proxy: requestProxy})
+			body, err := json.Marshal(contracts.ProxyTestRequest{Mode: "direct", TargetURL: targetURL, Proxy: requestProxy})
 			require.NoError(t, err)
 			req := httptest.NewRequest(http.MethodPost, "/proxy/test", bytes.NewReader(body))
 			req.Header.Set("Content-Type", "application/json")
@@ -168,6 +191,9 @@ func TestProxy_RequestProfiles(t *testing.T) {
 			var response contracts.ProxyTestResponse
 			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
 			require.True(t, response.Success, response.Message)
+			require.Equal(t, int64(1), proxyRequests.Load(), "must exercise the configured forward proxy")
+			require.Equal(t, http.StatusOK, response.StatusCode)
+			require.Equal(t, targetURL, response.TargetURL)
 			requestProxy.Profile = ""
 			requestProxy.DefaultProfile = "main"
 			hash, err := core.HashProxyConfig(requestProxy)

@@ -3,6 +3,7 @@
 	import { formatDateTime } from '$lib/i18n/format';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
+	import { untrack } from 'svelte';
 	import { fade, fly } from 'svelte/transition';
 	import { quintOut } from 'svelte/easing';
 	import { createMutation, useQueryClient } from '@tanstack/svelte-query';
@@ -20,7 +21,8 @@
 	import { apiClient } from '$lib/api/client';
 	import { toastStore } from '$lib/stores/toast';
 	import { createJobDetailQuery, createJobOperationsQuery, createConfigQuery } from '$lib/query/queries';
-	import type { OperationItem } from '$lib/api/types';
+	import type { RevertResultResponse } from '$lib/api/types';
+	import { mergeRevertFeedback, reconcileRevertFeedback, type RevertFeedback } from './revert-feedback';
 
 	let jobId = $derived($page.params.jobId ?? '');
 
@@ -43,43 +45,102 @@
 	let revertTargetFileName = $state('');
 	let revertFileCount = $state(0);
 	let revertingMovieIds = $state<Set<string>>(new Set());
+	let incompleteRevert = $state<RevertFeedback | null>(null);
+	let viewEpoch = 0;
+	type Reconciliation = { result: RevertResultResponse; operationIds: number[]; afterUpdate: number };
+	let reconciliations = $state<Reconciliation[]>([]);
+
+	$effect(() => {
+		jobId;
+		untrack(() => {
+			viewEpoch += 1;
+			incompleteRevert = null;
+			reconciliations = [];
+			revertModalOpen = false;
+			revertingMovieIds = new Set();
+		});
+		return () => { viewEpoch += 1; };
+	});
+
+	$effect(() => {
+		const rows = operationsQuery.data;
+		const ready = operationsQuery.isSuccess && operationsQuery.fetchStatus === 'idle';
+		operationsQuery.dataUpdatedAt;
+		reconciliations;
+		untrack(() => {
+			if (!ready || rows?.job_id !== jobId || !incompleteRevert) return;
+			const update = queryClient.getQueryState(['job', jobId, 'operations'])?.dataUpdateCount ?? 0;
+			if (!reconciliations.some((entry) => update > entry.afterUpdate)) return;
+			for (const entry of reconciliations) {
+				if (update > entry.afterUpdate) {
+					incompleteRevert = reconcileRevertFeedback(incompleteRevert, entry.result, entry.operationIds, rows);
+				}
+			}
+			reconciliations = reconciliations.map((entry) => ({ ...entry, afterUpdate: update }));
+		});
+	});
+
+	type RevertAttempt = { jobId: string; epoch: number; operationIds: number[]; movieId?: string };
+	function newRevertAttempt(movieId?: string): RevertAttempt {
+		return {
+			jobId, epoch: viewEpoch, movieId,
+			operationIds: operations.filter((operation) =>
+				(operation.revert_status === 'applied' || operation.revert_status === 'failed') &&
+				(movieId === undefined || operation.movie_id === movieId)
+			).map((operation) => operation.id)
+		};
+	}
+	function isCurrentAttempt(attempt: RevertAttempt) {
+		return attempt.jobId === jobId && attempt.epoch === viewEpoch;
+	}
+
+	async function reportRevertResult(result: RevertResultResponse, attempt: RevertAttempt) {
+		if (isCurrentAttempt(attempt) && result.job_id === attempt.jobId) {
+			revertModalOpen = false;
+			incompleteRevert = mergeRevertFeedback(incompleteRevert, result, attempt.operationIds);
+			const scope = new Set([...attempt.operationIds, ...(result.errors ?? []).map((entry) => entry.operation_id)]);
+			// A newer response supersedes older deferred reconciliation for its
+			// own IDs only. A failed refresh can then recover on focus/reconnect.
+			reconciliations = reconciliations.map((entry) => ({
+				...entry, operationIds: entry.operationIds.filter((id) => !scope.has(id))
+			})).filter((entry) => entry.operationIds.length);
+			reconciliations.push({ result, operationIds: [...scope],
+				afterUpdate: queryClient.getQueryState(['job', attempt.jobId, 'operations'])?.dataUpdateCount ?? 0 });
+			if (result.failed > 0 || result.skipped > 0) {
+				toastStore.warning(m.jobs_revert_incomplete(result));
+			} else {
+				toastStore.success(attempt.movieId ? m.jobs_operation_reverted({ movieId: attempt.movieId }) : m.jobs_revert_success({ count: result.succeeded }));
+			}
+		}
+		// Invalidate the request's original job even if navigation happened.
+		// The reactive reconciliation also handles a later successful refresh.
+		void queryClient.invalidateQueries({ queryKey: ['batch-jobs'] });
+		await queryClient.invalidateQueries({ queryKey: ['job', attempt.jobId] });
+	}
 
 	const revertEligibleCount = $derived(operations.filter((o) => o.revert_status === 'applied' || o.revert_status === 'failed').length);
 
+	function reportRevertError(err: Error, attempt: RevertAttempt) {
+		if (!isCurrentAttempt(attempt)) return;
+		toastStore.error(m.jobs_revert_failed({ error: err.message }));
+		revertModalOpen = false;
+	}
+	function settleRevertAttempt(attempt: RevertAttempt) {
+		if (isCurrentAttempt(attempt)) revertingMovieIds = new Set();
+	}
+
 	const revertBatchMutation = createMutation(() => ({
-		mutationFn: () => apiClient.revertBatchJob(jobId),
-		onSuccess: (result) => {
-			revertModalOpen = false;
-			if (result.failed === 0) {
-				toastStore.success(m.jobs_revert_success({ count: result.succeeded }));
-			} else {
-				toastStore.warning(m.jobs_revert_partial({ succeeded: result.succeeded, total: result.total, failed: result.failed }));
-			}
-			void queryClient.invalidateQueries({ queryKey: ['job', jobId] });
-			void queryClient.invalidateQueries({ queryKey: ['job', jobId, 'operations'] });
-			void queryClient.invalidateQueries({ queryKey: ['batch-jobs'] });
-		},
-		onError: (err) => {
-			toastStore.error(m.jobs_revert_failed({ error: err.message }));
-			revertModalOpen = false;
-		},
-		onSettled: () => { revertingMovieIds = new Set(); }
+		mutationFn: (attempt: RevertAttempt) => apiClient.revertBatchJob(attempt.jobId),
+		onSuccess: reportRevertResult,
+		onError: reportRevertError,
+		onSettled: (_result, _error, attempt) => settleRevertAttempt(attempt)
 	}));
 
 	const revertOperationMutation = createMutation(() => ({
-		mutationFn: (movieId: string) => apiClient.revertJobOperation(jobId, movieId),
-		onSuccess: (_, movieId) => {
-			revertModalOpen = false;
-			toastStore.success(m.jobs_operation_reverted({ movieId }));
-			void queryClient.invalidateQueries({ queryKey: ['job', jobId] });
-			void queryClient.invalidateQueries({ queryKey: ['job', jobId, 'operations'] });
-			void queryClient.invalidateQueries({ queryKey: ['batch-jobs'] });
-		},
-		onError: (err) => {
-			toastStore.error(m.jobs_revert_failed({ error: err.message }));
-			revertModalOpen = false;
-		},
-		onSettled: () => { revertingMovieIds = new Set(); }
+		mutationFn: (attempt: RevertAttempt & { movieId: string }) => apiClient.revertJobOperation(attempt.jobId, attempt.movieId),
+		onSuccess: reportRevertResult,
+		onError: reportRevertError,
+		onSettled: (_result, _error, attempt) => settleRevertAttempt(attempt)
 	}));
 
 	function getStatusFromJobStatus(status: string): 'success' | 'failed' | 'reverted' | 'running' | 'organized' | 'cancelled' | 'partially-reverted' {
@@ -111,13 +172,12 @@
 		revertingMovieIds = new Set([...revertingMovieIds, movieId]);
 	}
 
-	function handleRevertConfirm(): Promise<void> {
+	async function handleRevertConfirm(): Promise<void> {
 		if (revertModalMode === 'batch') {
-			revertBatchMutation.mutate();
+			await revertBatchMutation.mutateAsync(newRevertAttempt());
 		} else {
-			revertOperationMutation.mutate(revertTargetMovieId);
+			await revertOperationMutation.mutateAsync({ ...newRevertAttempt(revertTargetMovieId), movieId: revertTargetMovieId });
 		}
-		return Promise.resolve();
 	}
 
 	function formatDate(dateStr: string) {
@@ -223,6 +283,23 @@
 				</Card>
 			</div>
 
+			{#if incompleteRevert?.jobId === jobId && (incompleteRevert.errors.length || incompleteRevert.unconfirmedScopes.length)}
+				<div role="alert" class="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 space-y-2">
+					<p class="font-medium">{m.jobs_revert_unresolved()}</p>
+					{#if incompleteRevert.errors?.length}
+						<ul class="space-y-2 text-sm">
+							{#each incompleteRevert.errors as failure}
+								<li class="break-words">
+									<p><span class="font-semibold">{failure.movie_id}</span>: {failure.error || failure.reason || failure.outcome}</p>
+									{#if failure.original_path}<p>{m.history_from_label()} {failure.original_path}</p>{/if}
+									{#if failure.new_path}<p>{m.history_to_label()} {failure.new_path}</p>{/if}
+								</li>
+							{/each}
+						</ul>
+					{/if}
+				</div>
+			{/if}
+
 			<!-- File List -->
 			<div class="space-y-3">
 				<h2 class="text-lg font-semibold">{m.jobs_files()}</h2>
@@ -251,6 +328,7 @@
 </div>
 
 <!-- Revert Confirmation Modal -->
+{#key jobId}
 <RevertConfirmationModal
 	bind:open={revertModalOpen}
 	mode={revertModalMode}
@@ -263,3 +341,4 @@
 		revertingMovieIds = new Set();
 	}}
 />
+{/key}

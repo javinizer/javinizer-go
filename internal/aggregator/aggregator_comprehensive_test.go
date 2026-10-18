@@ -364,7 +364,7 @@ func TestBuildTranslations(t *testing.T) {
 		Description: "Japanese Description", // from dmm
 	}
 
-	translations := agg.buildTranslations(results, movie)
+	translations := agg.buildTranslations(results, movie, func(field string) []string { return agg.resolvedPriorities[field] })
 	require.Len(t, translations, 2)
 
 	// Find each translation
@@ -408,7 +408,7 @@ func TestBuildTranslationsSkipsNoLanguage(t *testing.T) {
 	}
 
 	movie := &models.Movie{Title: "Title"}
-	translations := agg.buildTranslations(results, movie)
+	translations := agg.buildTranslations(results, movie, func(field string) []string { return agg.resolvedPriorities[field] })
 	assert.Len(t, translations, 0)
 }
 

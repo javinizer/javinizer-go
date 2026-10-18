@@ -188,6 +188,12 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 		c.JSON(http.StatusConflict, gin.H{errorResponseKey: "another dump operation is already in progress"})
 		return
 	}
+	taskDone := h.rt.TrackServerTask()
+	if taskDone == nil {
+		h.releaseDumpOp()
+		c.JSON(http.StatusServiceUnavailable, gin.H{errorResponseKey: "server is shutting down"})
+		return
+	}
 	h.mu.Lock()
 	h.lastError = ""
 	h.lastErrorKind = ""
@@ -196,19 +202,18 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 
 	cfg := h.rt.Deps().CoreDeps.GetConfig()
 	path := resolveDumpPath(cfg)
-	// Use a detached context without a wall-clock deadline so the download
+	// Use the server lifetime without a wall-clock deadline so the download
 	// goroutine survives the HTTP response being sent (202) and slow-but-healthy
 	// transfers run to completion. The stall watchdog (below) is the failure
-	// signal instead: it cancels the context only when no bytes arrive for
+	// signal during normal operation: it cancels when no bytes arrive for
 	// stallTimeout. A fixed deadline would abort a slow download mid-import and
 	// roll back all progress (single transaction) with an opaque error.
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(h.rt.ServerCtx())
 
 	stallTimeout := h.stallTimeout
 	if stallTimeout <= 0 {
 		stallTimeout = dumpStallTimeout
 	}
-	watchdog := newStallWatchdog(stallTimeout)
 
 	// For update-only, check the current source URL so the download skips if
 	// the version is unchanged.
@@ -225,6 +230,8 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 		}
 		h.dumpMu.RUnlock()
 	}
+
+	watchdog := newStallWatchdog(stallTimeout)
 
 	var (
 		progressMu     sync.Mutex
@@ -246,8 +253,8 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 	}
 
 	// Run the download in a background goroutine. The HTTP response is already
-	// sent as 202. The context from the request keeps it cancellable if the
-	// client disconnects.
+	// sent as 202. The server context keeps it alive if the client
+	// disconnects; the watchdog cancels a stalled network wait.
 	client := h.httpClient
 	if client == nil {
 		client = &http.Client{}
@@ -255,12 +262,17 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 
 	done := h.done
 	go func() {
-		defer cancel()
+		defer taskDone()
 		defer close(done)
+		var helpers sync.WaitGroup
+		defer helpers.Wait()
+		defer cancel()
 		defer watchdog.Stop()
-		go watchdog.run(ctx, func() {
-			logging.Warnf("r18dev dump download stalled: no data received for %s, aborting", stallTimeout)
-			cancel()
+		helpers.Go(func() {
+			watchdog.run(ctx, func() {
+				logging.Warnf("r18dev dump download stalled: no data received for %s, aborting", stallTimeout)
+				cancel()
+			})
 		})
 		var succeeded bool
 		var failErr error
@@ -281,12 +293,12 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 				h.broadcastProgress("done", 0, 0, "")
 			}
 		}()
-		res, err := r18devdump.Download(ctx, client, currentSourceURL, currentSourceDate, progress, func(r io.Reader, d r18devdump.DownloadResult) error {
-			// Response headers arrived: record activity. Import runs its local
-			// setup (DB open, schema, BeginTx) before reading the first body
-			// byte, so without this ping a slow pre-import window reads as a
-			// stall even though the network is alive.
-			watchdog.Ping()
+		res, err := r18devdump.DownloadWithOptions(ctx, client, currentSourceURL, progress, func(r io.Reader, d r18devdump.DownloadResult) error {
+			// Import pulls the stream synchronously. Watch only reads, not its
+			// local SQLite setup or batch flushes: a slow disk is not a stalled
+			// network. Preserve the idle budget across these pauses; byte
+			// progress (above) is the only activity that resets it.
+			r = watchdog.reader(r)
 			// The download streams the response body through gzip into Import,
 			// so the download progress callback and the SQL import run
 			// concurrently: Import pulls compressed bytes through the
@@ -298,7 +310,7 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 			// being reported.
 			importDone := make(chan struct{})
 			streamConsumed := make(chan struct{})
-			go h.runImportHeartbeat(streamConsumed, importDone, importHeartbeatInterval)
+			helpers.Go(func() { h.runImportHeartbeat(streamConsumed, importDone, importHeartbeatInterval) })
 			defer close(importDone)
 			r = &eofDetectReader{r: r, onEOF: sync.OnceFunc(func() {
 				// Stream fully consumed: only local disk work remains (final
@@ -344,6 +356,13 @@ func (h *dumpHandler) startDownloadOrUpdate(c *gin.Context, updateOnly bool) {
 				return importErr
 			}
 			return nil
+		}, r18devdump.DownloadOptions{
+			CurrentSourceDate: currentSourceDate,
+			// EOF probes have their own finite header budget. Preserve the
+			// remaining payload idle budget while waiting, then resume it
+			// before any adopted 206 body is read. This is not byte progress.
+			OnEOFProbeStart: watchdog.Pause,
+			OnEOFProbeDone:  watchdog.Resume,
 		})
 		if err != nil {
 			if watchdog.Fired() {

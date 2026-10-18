@@ -1,4 +1,6 @@
 {
+  "review_retry_operation_unknown": "[Ţĥē ōŕīĝīñāļ āƥƥļŷ āţţēɱƥţ ōŕ şēţţīñĝş ċōūļď ñōţ ƀē vēŕīƒīēď, şō Ŕēţŕŷ Ƒāīļēď īş ďīşāƀļēď. Ŕēƒŕēşĥ ţĥē ĵōƀ, ŕēvīēŵ ţĥē şēţţīñĝş, ţĥēñ ūşē Āƥƥļŷ ţō şţāŕţ ā ñēŵ āţţēɱƥţ.]",
+  "review_retry_storage_unavailable": "[The previous retry settings could not be replaced or removed, so no new operation was started. Free browser storage or restore access, then review the file operation and try Apply again.]",
   "$schema": "https://inlang.com/schema/inlang-message-format",
   "apply_plan_destination": "[ Dëstíñåtíöñ: {destination} ]",
   "apply_plan_err_array_strategy": "[ Üñsüppörtëd årråy mërgë stråtëgy. ]",
@@ -222,6 +224,7 @@
   "editor_select_search_actress": "[ Šëlëçt ör Šëårçh Åçtrëss ]",
   "editor_thumbnail_url": "[ Thümbñåíl ÜRL ]",
   "editor_unable_load_image": "[ Üñåblë tö löåd ímågë ]",
+  "editor_duplicate_actress_body": "[ This actress is already in the cast. Choose a different actress or edit the existing entry. ]",
   "editor_validation_body": "[ Åt lëåst fírst ñåmë ör Jåpåñësë ñåmë ís rëqüírëd ]",
   "editor_validation_title": "[ Vålídåtíöñ Ërrör ]",
   "editor_via_merged": "[ víå mërgëd dåtå ]",
@@ -639,6 +642,7 @@
     }
   ],
   "jobs_revert_failed": "[ Rëvërt fåílëd: {error} ]",
+  "jobs_revert_incomplete": "[Řëṽëřţëď {succeeded} öƒ {total}. {failed} ƒåïļëď, {skipped} šķïþþëď.]",
   "jobs_revert_partial": "[ Rëvërtëd {succeeded} öf {total}. {failed} fåílëd. ]",
   "jobs_revert_success": [
     {
@@ -655,6 +659,7 @@
       }
     }
   ],
+  "jobs_revert_unresolved": "[ Söme öpëråtíöns stíll nëëd åttëntíön. ]",
   "jobs_review": "[ Rëvíëw ]",
   "jobs_review_failed": "[ Rëvíëw Fåílëd ]",
   "jobs_review_organize": "[ Rëvíëw & Örgåñízë ]",
@@ -1080,6 +1085,8 @@
   "revert_reverting": "[ Rëvërtíñg... ]",
   "review_choose_output_alert": "[ Çhöösë ÑFÖ öütpüt, mëdíå döwñlöåds, ör böth bëförë åpplyíñg. ]",
   "review_error_blocked": "[ Blöçkëd by söürcë ]",
+  "review_error_credit_conflict": "[ Üñrësölvëd åçtrëss çrëdít çöñflíçt ]",
+  "review_error_credit_status_unavailable": "[ Åçtrëss çrëdít ståtüs üñåvåílåblë ]",
   "review_error_not_found": "[ Mövíë ñöt föüñd ]",
   "review_error_rate_limited": "[ Råtë límítëd, try ågåíñ låtër ]",
   "review_error_unavailable": "[ Šöürcë tëmpöråríly üñåvåílåblë ]",

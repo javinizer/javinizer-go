@@ -471,6 +471,9 @@ func (s *ReplacementSweeper) PruneOperationBackups(ctx context.Context, ops []mo
 
 	candidateIDs := make(map[uint]struct{}, len(ops))
 	for _, op := range ops {
+		if models.PrimaryUndoNeedsRetention(op) {
+			return fmt.Errorf("operation %d has pending or malformed primary Undo recovery; retain history", op.ID)
+		}
 		candidateIDs[op.ID] = struct{}{}
 	}
 	var errs []error
@@ -700,6 +703,9 @@ func (s *ReplacementSweeper) joinPruneRestoreFailure(opID uint, entry models.Rep
 func (s *ReplacementSweeper) markPruneCleanupPending(opID uint, entry models.ReplacementEntry) error {
 	ctx, cancel := context.WithTimeout(database.WithPruneMaintenance(context.Background()), 30*time.Second)
 	defer cancel()
+	if err := admitOperationUndo(ctx, s.repo, &models.BatchFileOperation{ID: opID}); err != nil {
+		return err
+	}
 	return markReplacementEntryRestorePendingKind(ctx, s.repo, opID, sweepSlash(entry.Backup), models.RestorePendingKindPrune)
 }
 
@@ -1268,6 +1274,7 @@ func (s *ReplacementSweeper) sweepOne(ctx context.Context, idx *replacementLedge
 	claim, untrackSweepClaim := recordSweepBusyClaim(ctx, s.fs, dest, busyToken, busyRelease)
 	defer untrackSweepClaim()
 	defer claim.releaseAdmit() // wave-56 (finding F1): release the last admit gate at return
+
 	rawDestRelease := fsutil.SharedDestLocks().Acquire(dest)
 	if !claim.bindDestLock(rawDestRelease) {
 		// The claim was reclaimed DURING the dest-lock wait (the reclaim ran
@@ -1387,6 +1394,10 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 		defer release()
 	}
 	defer claim.releaseAdmit() // wave-56 (finding F1): release the last admit gate at return
+	// Keep indexed backups owned while publication reconciliation is pending.
+	if journalPublicationPending(row) {
+		return false
+	}
 
 	// A prior restore can leave the destination present when backup cleanup
 	// failed. Only the explicit pending marker (or the same-process fallback)
@@ -1418,6 +1429,8 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 			case ferErr != nil || freshOwner == nil:
 				logging.Warnf("replacement sweep %s: owner row unreadable before cleanup authorization (%v) — kept", backup, ferErr)
 				return false
+			case journalPublicationPending(freshOwner):
+				return false
 			case !journalEntryRestorePending(freshOwner, backupSlash):
 				warnRetainedUnjournaledBackup(backup)
 				return false
@@ -1441,8 +1454,17 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 		logging.Warnf("replacement sweep %s: owner row unreadable (%v) — kept", backup, frErr)
 		return false
 	}
-	if freshRow.RevertStatus == models.RevertStatusReverted {
+	if journalPublicationPending(freshRow) || freshRow.RevertStatus == models.RevertStatusReverted {
 		return false // consumed meanwhile
+	}
+	// Persist exclusion before restore; this also refreshes the journal used
+	// below so an install confirmation racing the earlier read is observed.
+	if err := admitOperationUndo(ctx, s.repo, freshRow); err != nil {
+		logging.Warnf("replacement sweep %s: recovery admission refused (%v) — kept", backup, err)
+		return false
+	}
+	if freshRow.RevertStatus == models.RevertStatusReverted || freshRow.RevertStatus == models.RevertStatusNoOp {
+		return false
 	}
 	if journalEntryInstalled(freshRow, backupSlash) {
 		logging.Infof("replacement sweep %s: destination missing but install was confirmed — backup retained, no auto-restore", backup)
@@ -1913,6 +1935,9 @@ func (s *ReplacementSweeper) retryPendingRemovalClaimed(ctx context.Context, row
 			fnErr = err
 			return models.GeneratedFilesJSON{}, false, err
 		}
+		if gf.PublicationPending {
+			return models.GeneratedFilesJSON{}, false, fmt.Errorf("publication reconciliation is pending")
+		}
 		for i := range gf.Replacements {
 			if sweepSlash(gf.Replacements[i].Backup) == backupSlash {
 				targetFound = true
@@ -1922,7 +1947,9 @@ func (s *ReplacementSweeper) retryPendingRemovalClaimed(ctx context.Context, row
 				break
 			}
 		}
-		return gf, false, nil
+		persist := !gf.UndoStarted
+		gf.UndoStarted = true
+		return gf, persist, nil
 	})
 	if err != nil {
 		if fnErr != nil {
@@ -2322,4 +2349,10 @@ func (s *ReplacementSweeper) consumeRearmRefusedPending(ctx context.Context, idx
 		return 1
 	}
 	return 0
+}
+
+// The pending bit precedes all replacement intents for a guarded publication.
+func journalPublicationPending(row *models.BatchFileOperation) bool {
+	ledger, err := models.ParseGeneratedFiles(row.GeneratedFiles)
+	return err == nil && ledger.PublicationPending
 }

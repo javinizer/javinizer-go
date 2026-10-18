@@ -1,0 +1,104 @@
+name: Isolated FUSE Publication Tests
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [master, main, develop]
+    paths:
+      - internal/fsutil/**
+      - internal/config/**
+      - internal/logging/**
+      - tests/fuseintegration/**
+      - test/offlineguard/**
+      - go.mod
+      - go.sum
+      - scripts/build_offline_test_overlay.py
+      - scripts/run_fuse_integration.py
+      - .github/workflows/fuse-integration.yml
+  push:
+    branches: [master, main, develop]
+    paths:
+      - internal/fsutil/**
+      - internal/config/**
+      - internal/logging/**
+      - tests/fuseintegration/**
+      - test/offlineguard/**
+      - go.mod
+      - go.sum
+      - scripts/build_offline_test_overlay.py
+      - scripts/run_fuse_integration.py
+      - .github/workflows/fuse-integration.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+jobs:
+  kernel-fuse:
+    name: Real FUSE publication (synthetic local files)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+      - name: Set up reviewed Go toolchain
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.27.2'
+          cache: true
+          cache-dependency-path: tests/fuseintegration/go.sum
+      - name: Check existing unprivileged FUSE prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p fuse-evidence
+          {
+            id
+            uname -a
+            test "$(id -u)" -ne 0
+            test -c /dev/fuse && test -r /dev/fuse && test -w /dev/fuse
+            test -x /usr/bin/fusermount3
+            stat /dev/fuse /usr/bin/fusermount3
+            # Ubuntu Noble records /bin/fusermount3; usrmerge resolves it
+            # to /usr/bin/fusermount3. Verify package status and identity.
+            test "$(dpkg-query -W -f='${db:Status-Status}' fuse3)" = installed
+            package_files=$(dpkg-query -L fuse3)
+            selected_helper=$(readlink -e /usr/bin/fusermount3)
+            helper_is_packaged=false
+            while IFS= read -r package_path; do
+              case "$package_path" in
+                /bin/fusermount3|/usr/bin/fusermount3)
+                  if [ "$(readlink -e "$package_path")" = "$selected_helper" ]; then
+                    helper_is_packaged=true
+                    printf 'Verified fuse3 package helper: %s -> %s\n' "$package_path" "$selected_helper"
+                  fi
+                  ;;
+              esac
+            done <<< "$package_files"
+            test "$helper_is_packaged" = true
+            dpkg-query -W -f='${binary:Package} ${Version} ${db:Status-Status}\n' fuse3
+            /usr/bin/fusermount3 --version
+          } 2>&1 | tee fuse-evidence/prerequisites.log
+          # Deliberately no sudo, modprobe, mknod, chmod, capabilities,
+          # privileged Docker, AppArmor changes or automatic workaround.
+      - name: Fetch public dependencies before offline runtime
+        working-directory: tests/fuseintegration
+        run: go mod download
+      - name: Verify network guard and mandatory real FUSE cases
+        run: python3 scripts/run_fuse_integration.py --evidence fuse-evidence
+      - name: Archive kernel and offline evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: isolated-fuse-publication
+          path: fuse-evidence/
+          if-no-files-found: error
+          retention-days: 30

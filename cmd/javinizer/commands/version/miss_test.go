@@ -2,7 +2,6 @@ package version
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"github.com/javinizer/javinizer-go/internal/testutil"
 	"os"
@@ -167,27 +166,14 @@ func (missFailingWriter) Write(_ []byte) (int, error) {
 }
 
 func TestMiss_NewCommand_CheckWriteError(t *testing.T) {
-	tmpDir := t.TempDir()
-	cfgPath := filepath.Join(tmpDir, "config.yaml")
-	configText := `config_version: 3
-system:
-  version_check_enabled: true
-  version_check_interval_hours: 24
-`
-	require.NoError(t, os.WriteFile(cfgPath, []byte(configText), 0644))
-	t.Setenv("JAVINIZER_CONFIG", cfgPath)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	cmd := NewCommand()
-	cmd.SetContext(ctx)
+	checker := &offlineVersionChecker{err: errors.New("synthetic update failure")}
+	cmd, _ := newOfflineVersionCheck(t, checker)
 	cmd.SetOut(ioDiscard{})
 	cmd.SetErr(missFailingWriter{})
-	cmd.SetArgs([]string{"--check"})
 
 	err := cmd.Execute()
-	require.Error(t, err)
+	require.EqualError(t, err, "write failed")
+	assert.Equal(t, 1, checker.calls, "the real service must reach the injected checker")
 }
 
 // ioDiscard is a writer that discards all output.

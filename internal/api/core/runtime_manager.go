@@ -1,7 +1,6 @@
 package core
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"sync"
@@ -155,21 +154,7 @@ type APIRuntime struct {
 	reloadPauseAfterRegistry func()
 	reloadPauseAfterAPICfg   func()
 
-	// Server lifecycle — serverCtx is the server-lifetime context,
-	// cancelled on Shutdown(). Used by batch job launch goroutines so they
-	// receive a cancellation signal when the server shuts down.
-	serverCtxOnce sync.Once
-	serverCtx     context.Context
-	serverCancel  context.CancelFunc
-
-	// updateCheckerDone is the join handle for the background update-check
-	// goroutine started by startUpdateChecker: closed when that goroutine
-	// has fully exited (ticker stopped, in-flight check returned). Written
-	// once during bootstrap, before the server serves, and joined by
-	// Shutdown after cancelling serverCtx, so teardown cannot race the
-	// update checker's final state-store write. Nil when version checks
-	// are disabled (startUpdateChecker returned early).
-	updateCheckerDone <-chan struct{}
+	serverLifecycleState
 
 	// startupSweep is configured during bootstrap and started by the API server
 	// after bootstrap has returned. Once makes the startup repair one-shot even
@@ -179,6 +164,10 @@ type APIRuntime struct {
 }
 
 // NewAPIRuntime creates an APIRuntime that manages the given APIDeps.
+// It takes ownership of the built-in TokenStore cleanup worker; call Shutdown
+// when done. Shared users must coordinate their lifetime: the first Shutdown
+// stops periodic token reclamation for all of them. Dependencies must not be
+// replaced after runtime use begins.
 // Per DEEP-2: the back-reference on APIDeps has been removed; callers that
 // need both DI and lifecycle access hold *APIRuntime directly and call
 // rt.Deps() for the immutable container.

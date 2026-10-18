@@ -48,6 +48,7 @@ func TestProxyCov_DirectSuccessWithToken(t *testing.T) {
 
 	deps := newTestDeps(cfg, func(d *core.APIDeps) {
 		d.TokenStore = core.NewTokenStore()
+		t.Cleanup(func() { core.CloseTokenStore(d.TokenStore) })
 	})
 
 	router := gin.New()
@@ -216,6 +217,7 @@ func TestProxyCov_FlareSolverrWithProxy(t *testing.T) {
 
 	deps := newTestDeps(cfg, func(d *core.APIDeps) {
 		d.TokenStore = core.NewTokenStore()
+		t.Cleanup(func() { core.CloseTokenStore(d.TokenStore) })
 	})
 
 	router := gin.New()
@@ -252,6 +254,7 @@ func TestProxyCov_FlareSolverrSuccessWithToken(t *testing.T) {
 	cfg := config.DefaultConfig(nil, nil)
 	deps := newTestDeps(cfg, func(d *core.APIDeps) {
 		d.TokenStore = core.NewTokenStore()
+		t.Cleanup(func() { core.CloseTokenStore(d.TokenStore) })
 	})
 
 	router := gin.New()
@@ -375,6 +378,8 @@ func TestProxyCov_DirectTokenScopeIsGlobal(t *testing.T) {
 	}
 
 	tokenStore := core.NewTokenStore()
+
+	t.Cleanup(func() { core.CloseTokenStore(tokenStore) })
 	deps := newTestDeps(cfg, func(d *core.APIDeps) {
 		d.TokenStore = tokenStore
 	})

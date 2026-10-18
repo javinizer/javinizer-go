@@ -223,6 +223,12 @@ func runNoClobberProbeAttempt(fs afero.Fs, dir string) (bool, bool, uint64, erro
 		logging.Warnf("no-clobber probe cleanup retained %s / %s: %v", src, dst, cleanupErr)
 	}
 	if verdict != nil {
+		if PublishCompleted(verdict) {
+			// Completion belongs only to the synthetic probe, never the caller's
+			// payload. Strip that ownership marker and leave the verdict
+			// indeterminate so a later operation can retry the capability check.
+			return false, false, selected, fmt.Errorf("no-clobber preflight in %s: internal probe published with incomplete cleanup; scratch may remain at %s / %s; no payload published: %v", dir, src, dst, verdict)
+		}
 		if errors.Is(verdict, ErrPublishCollision) {
 			// Only the SYNTHETIC sibling was occupied — the verdict says nothing
 			// about the volume. Report the pair-collision so the caller retries

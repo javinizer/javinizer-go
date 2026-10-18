@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	sortcmd "github.com/javinizer/javinizer-go/cmd/javinizer/commands/sort"
@@ -25,10 +24,10 @@ func TestRun_SourceIsFile_DestIsFileDir(t *testing.T) {
 	// Create a subdirectory and a video file in it
 	subDir := filepath.Join(tmpDir, "videos")
 	require.NoError(t, os.MkdirAll(subDir, 0755))
-	videoFile := filepath.Join(subDir, "SSIS-001.mp4")
-	testutil.CreateTestVideoFile(t, subDir, "SSIS-001.mp4")
+	videoFile := filepath.Join(subDir, "unmatched.mp4")
+	testutil.CreateTestVideoFile(t, subDir, "unmatched.mp4")
 
-	configPath, _ := testutil.CreateTestConfig(t, nil)
+	configPath, _ := createOfflineSortConfig(t, nil)
 
 	cmd := sortcmd.NewCommand()
 	buf := new(bytes.Buffer)
@@ -55,15 +54,12 @@ func TestRun_InvalidLinkMode(t *testing.T) {
 
 // TestRun_MoveFlagWithNoLinkMode tests that --move without --link-mode works (copy → move).
 func TestRun_MoveFlagWithNoLinkMode(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration test")
-	}
 	tmpDir, err := os.MkdirTemp("", t.Name())
 	require.NoError(t, err)
 	defer os.RemoveAll(tmpDir)
 
-	configPath, _ := testutil.CreateTestConfig(t, nil)
-	testutil.CreateTestVideoFile(t, tmpDir, "ABP-001.mp4")
+	configPath, _ := createOfflineSortConfig(t, nil)
+	testutil.CreateTestVideoFile(t, tmpDir, "GOOD-001.mp4")
 
 	cmd := sortcmd.NewCommand()
 	require.NoError(t, cmd.Flags().Set("move", "true"))
@@ -74,6 +70,9 @@ func TestRun_MoveFlagWithNoLinkMode(t *testing.T) {
 	assert.NoError(t, runErr)
 	// Output should show MOVE operation
 	assert.Contains(t, buf.String(), "MOVE")
+	assertSortCompleted(t, buf.String(), tmpDir, "GOOD-001")
+	assert.NoFileExists(t, filepath.Join(tmpDir, "GOOD-001.mp4"))
+	assertSyntheticVideo(t, filepath.Join(tmpDir, "GOOD-001", "GOOD-001.mp4"))
 }
 
 // TestRun_LinkModeSoft tests soft link mode display.
@@ -82,15 +81,14 @@ func TestRun_LinkModeSoft(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(tmpDir)
 
-	// We just test that the flag validation works; the actual sort
-	// won't run without valid config/scrapers
+	configPath, _ := createOfflineSortConfig(t, nil)
 	cmd := sortcmd.NewCommand()
 	require.NoError(t, cmd.Flags().Set("link-mode", "soft"))
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 
-	// This will fail during bootstrap but the flag is parsed before that
-	_ = sortcmd.Run(cmd, []string{tmpDir}, "")
+	require.NoError(t, sortcmd.Run(cmd, []string{tmpDir}, configPath))
+	assert.Contains(t, buf.String(), "SOFTLINK")
 }
 
 // TestRun_LinkModeHard tests hard link mode display.
@@ -99,25 +97,24 @@ func TestRun_LinkModeHard(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(tmpDir)
 
+	configPath, _ := createOfflineSortConfig(t, nil)
 	cmd := sortcmd.NewCommand()
 	require.NoError(t, cmd.Flags().Set("link-mode", "hard"))
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 
-	_ = sortcmd.Run(cmd, []string{tmpDir}, "")
+	require.NoError(t, sortcmd.Run(cmd, []string{tmpDir}, configPath))
+	assert.Contains(t, buf.String(), "HARDLINK")
 }
 
 // TestRun_DryRunOutputFormat tests that dry-run mode shows the correct output labels.
 func TestRun_DryRunOutputFormat(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration test")
-	}
 	tmpDir, err := os.MkdirTemp("", t.Name())
 	require.NoError(t, err)
 	defer os.RemoveAll(tmpDir)
 
-	configPath, _ := testutil.CreateTestConfig(t, nil)
-	testutil.CreateTestVideoFile(t, tmpDir, "IPX-456.mp4")
+	configPath, _ := createOfflineSortConfig(t, nil)
+	testutil.CreateTestVideoFile(t, tmpDir, "GOOD-456.mp4")
 
 	cmd := sortcmd.NewCommand()
 	require.NoError(t, cmd.Flags().Set("dry-run", "true"))
@@ -128,18 +125,17 @@ func TestRun_DryRunOutputFormat(t *testing.T) {
 	assert.NoError(t, runErr)
 	// Dry run mode should show "DRY RUN"
 	assert.Contains(t, buf.String(), "DRY RUN")
+	assert.Contains(t, buf.String(), "Would organize 1 file(s)")
+	assert.NoDirExists(t, filepath.Join(tmpDir, "GOOD-456"))
 }
 
 // TestRun_NoMatchingIDs tests the branch where scanned files have no matching IDs.
 func TestRun_NoMatchingIDs(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration test")
-	}
 	tmpDir, err := os.MkdirTemp("", t.Name())
 	require.NoError(t, err)
 	defer os.RemoveAll(tmpDir)
 
-	configPath, _ := testutil.CreateTestConfig(t, nil)
+	configPath, _ := createOfflineSortConfig(t, nil)
 	// Create a video file with a name that won't match any JAV ID pattern
 	videoFile := filepath.Join(tmpDir, "random_video.mp4")
 	require.NoError(t, os.WriteFile(videoFile, []byte("fake video data"), 0644))
@@ -151,21 +147,18 @@ func TestRun_NoMatchingIDs(t *testing.T) {
 	runErr := sortcmd.Run(cmd, []string{tmpDir}, configPath)
 	// When no IDs match, the function returns nil (no error)
 	assert.NoError(t, runErr)
+	assert.FileExists(t, videoFile)
+	assert.NotContains(t, buf.String(), "Processing files")
 }
 
 // TestRun_ExtrafanartOverride tests that --extrafanart flag overrides config.
 func TestRun_ExtrafanartOverride(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration test")
-	}
 	tmpDir, err := os.MkdirTemp("", t.Name())
 	require.NoError(t, err)
 	defer os.RemoveAll(tmpDir)
 
-	configPath, _ := testutil.CreateTestConfig(t, func(c *config.Config) {
-		c.Output.Download.DownloadExtrafanart = false
-	})
-	testutil.CreateTestVideoFile(t, tmpDir, "IPX-789.mp4")
+	configPath, imageData := createLocalMediaSortConfig(t)
+	testutil.CreateTestVideoFile(t, tmpDir, "GOOD-789.mp4")
 
 	cmd := sortcmd.NewCommand()
 	require.NoError(t, cmd.Flags().Set("extrafanart", "true"))
@@ -173,14 +166,15 @@ func TestRun_ExtrafanartOverride(t *testing.T) {
 	cmd.SetOut(buf)
 
 	runErr := sortcmd.Run(cmd, []string{tmpDir}, configPath)
-	assert.NoError(t, runErr)
+	require.NoError(t, runErr)
+	assertSortCompleted(t, buf.String(), tmpDir, "GOOD-789")
+	downloaded, err := os.ReadFile(filepath.Join(tmpDir, "GOOD-789", "extrafanart", "fanart1.jpg"))
+	require.NoError(t, err)
+	assert.Equal(t, imageData, downloaded)
 }
 
 // TestRun_ExplicitDestPath tests providing an explicit --dest flag.
 func TestRun_ExplicitDestPath(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration test")
-	}
 	tmpDir, err := os.MkdirTemp("", t.Name())
 	require.NoError(t, err)
 	defer os.RemoveAll(tmpDir)
@@ -188,8 +182,8 @@ func TestRun_ExplicitDestPath(t *testing.T) {
 	destDir := filepath.Join(tmpDir, "output")
 	require.NoError(t, os.MkdirAll(destDir, 0755))
 
-	configPath, _ := testutil.CreateTestConfig(t, nil)
-	testutil.CreateTestVideoFile(t, tmpDir, "SSIS-100.mp4")
+	configPath, _ := createOfflineSortConfig(t, nil)
+	testutil.CreateTestVideoFile(t, tmpDir, "GOOD-100.mp4")
 
 	cmd := sortcmd.NewCommand()
 	require.NoError(t, cmd.Flags().Set("dest", destDir))
@@ -199,19 +193,18 @@ func TestRun_ExplicitDestPath(t *testing.T) {
 	runErr := sortcmd.Run(cmd, []string{tmpDir}, configPath)
 	assert.NoError(t, runErr)
 	assert.Contains(t, buf.String(), destDir)
+	assertSortCompleted(t, buf.String(), destDir, "GOOD-100")
+	assert.NoDirExists(t, filepath.Join(tmpDir, "GOOD-100"))
 }
 
 // TestRun_CopyOperationLabel tests that COPY is shown when no move/link flags set.
 func TestRun_CopyOperationLabel(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration test")
-	}
 	tmpDir, err := os.MkdirTemp("", t.Name())
 	require.NoError(t, err)
 	defer os.RemoveAll(tmpDir)
 
-	configPath, _ := testutil.CreateTestConfig(t, nil)
-	testutil.CreateTestVideoFile(t, tmpDir, "ABP-200.mp4")
+	configPath, _ := createOfflineSortConfig(t, nil)
+	testutil.CreateTestVideoFile(t, tmpDir, "GOOD-200.mp4")
 
 	cmd := sortcmd.NewCommand()
 	buf := new(bytes.Buffer)
@@ -220,6 +213,9 @@ func TestRun_CopyOperationLabel(t *testing.T) {
 	runErr := sortcmd.Run(cmd, []string{tmpDir}, configPath)
 	assert.NoError(t, runErr)
 	assert.Contains(t, buf.String(), "COPY")
+	assertSortCompleted(t, buf.String(), tmpDir, "GOOD-200")
+	assertSyntheticVideo(t, filepath.Join(tmpDir, "GOOD-200.mp4"))
+	assertSyntheticVideo(t, filepath.Join(tmpDir, "GOOD-200", "GOOD-200.mp4"))
 }
 
 // TestRun_NoVideoFiles tests when scan returns no files at all.
@@ -228,7 +224,7 @@ func TestRun_NoVideoFiles(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(tmpDir)
 
-	configPath, _ := testutil.CreateTestConfig(t, nil)
+	configPath, _ := createOfflineSortConfig(t, nil)
 
 	cmd := sortcmd.NewCommand()
 	buf := new(bytes.Buffer)
@@ -241,19 +237,17 @@ func TestRun_NoVideoFiles(t *testing.T) {
 
 // TestRun_NilContextFallback tests that Run works when cmd.Context() returns nil.
 func TestRun_NilContextFallback(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration test")
-	}
 	tmpDir, err := os.MkdirTemp("", t.Name())
 	require.NoError(t, err)
 	defer os.RemoveAll(tmpDir)
 
-	configPath, _ := testutil.CreateTestConfig(t, nil)
-	testutil.CreateTestVideoFile(t, tmpDir, "IPX-999.mp4")
+	configPath, _ := createOfflineSortConfig(t, nil)
+	testutil.CreateTestVideoFile(t, tmpDir, "GOOD-999.mp4")
 
 	// Create a bare command with nil context (not executed via Execute())
 	cmd := &cobra.Command{}
-	cmd.SetOut(new(bytes.Buffer))
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
 	// Set required flags
 	cmd.Flags().Bool("dry-run", false, "")
 	cmd.Flags().Bool("recursive", true, "")
@@ -269,20 +263,18 @@ func TestRun_NilContextFallback(t *testing.T) {
 
 	// This should not panic even with nil context
 	runErr := sortcmd.Run(cmd, []string{tmpDir}, configPath)
-	assert.NoError(t, runErr)
+	require.NoError(t, runErr)
+	assertSortCompleted(t, buf.String(), tmpDir, "GOOD-999")
 }
 
 // TestRun_ForceUpdateAndForceRefresh tests both force flags together.
 func TestRun_ForceUpdateAndForceRefresh(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration test")
-	}
 	tmpDir, err := os.MkdirTemp("", t.Name())
 	require.NoError(t, err)
 	defer os.RemoveAll(tmpDir)
 
-	configPath, _ := testutil.CreateTestConfig(t, nil)
-	testutil.CreateTestVideoFile(t, tmpDir, "SSIS-300.mp4")
+	configPath, _ := createOfflineSortConfig(t, nil)
+	testutil.CreateTestVideoFile(t, tmpDir, "GOOD-300.mp4")
 
 	cmd := sortcmd.NewCommand()
 	require.NoError(t, cmd.Flags().Set("force-update", "true"))
@@ -291,27 +283,26 @@ func TestRun_ForceUpdateAndForceRefresh(t *testing.T) {
 	cmd.SetOut(buf)
 
 	runErr := sortcmd.Run(cmd, []string{tmpDir}, configPath)
-	assert.NoError(t, runErr)
+	require.NoError(t, runErr)
+	assertSortCompleted(t, buf.String(), tmpDir, "GOOD-300")
 }
 
 // TestRun_PrintConfigOutput tests that the configuration summary is printed.
 func TestRun_PrintConfigOutput(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration test")
-	}
 	tmpDir, err := os.MkdirTemp("", t.Name())
 	require.NoError(t, err)
 	defer os.RemoveAll(tmpDir)
 
-	configPath, _ := testutil.CreateTestConfig(t, nil)
-	testutil.CreateTestVideoFile(t, tmpDir, "IPX-111.mp4")
+	configPath, _ := createOfflineSortConfig(t, nil)
+	testutil.CreateTestVideoFile(t, tmpDir, "GOOD-111.mp4")
 
 	cmd := sortcmd.NewCommand()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 
 	runErr := sortcmd.Run(cmd, []string{tmpDir}, configPath)
-	assert.NoError(t, runErr)
+	require.NoError(t, runErr)
+	assertSortCompleted(t, buf.String(), tmpDir, "GOOD-111")
 
 	output := buf.String()
 	assert.Contains(t, output, "=== Javinizer Sort ===")
@@ -323,40 +314,36 @@ func TestRun_PrintConfigOutput(t *testing.T) {
 
 // TestRun_ScraperPriorityFlag tests --scrapers flag.
 func TestRun_ScraperPriorityFlag(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration test")
-	}
 	tmpDir, err := os.MkdirTemp("", t.Name())
 	require.NoError(t, err)
 	defer os.RemoveAll(tmpDir)
 
-	configPath, _ := testutil.CreateTestConfig(t, nil)
-	testutil.CreateTestVideoFile(t, tmpDir, "ABP-333.mp4")
+	configPath, _ := createOfflineSortConfig(t, nil)
+	testutil.CreateTestVideoFile(t, tmpDir, "GOOD-333.mp4")
 
 	cmd := sortcmd.NewCommand()
-	require.NoError(t, cmd.Flags().Set("scrapers", "r18dev,dmm"))
+	require.NoError(t, cmd.Flags().Set("scrapers", "libredmm"))
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 
 	runErr := sortcmd.Run(cmd, []string{tmpDir}, configPath)
-	assert.NoError(t, runErr)
+	require.NoError(t, runErr)
+	assertSortCompleted(t, buf.String(), tmpDir, "GOOD-333")
 }
 
 // TestRun_NoNfoNoDownload tests with --nfo=false --download=false.
 func TestRun_NoNfoNoDownload(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration test")
-	}
 	tmpDir, err := os.MkdirTemp("", t.Name())
 	require.NoError(t, err)
 	defer os.RemoveAll(tmpDir)
 
-	configPath, _ := testutil.CreateTestConfig(t, nil)
-	testutil.CreateTestVideoFile(t, tmpDir, "SSIS-444.mp4")
+	configPath, _ := createLocalMediaSortConfig(t)
+	testutil.CreateTestVideoFile(t, tmpDir, "GOOD-444.mp4")
 
 	cmd := sortcmd.NewCommand()
 	require.NoError(t, cmd.Flags().Set("nfo", "false"))
 	require.NoError(t, cmd.Flags().Set("download", "false"))
+	require.NoError(t, cmd.Flags().Set("extrafanart", "true"))
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 
@@ -364,7 +351,10 @@ func TestRun_NoNfoNoDownload(t *testing.T) {
 	assert.NoError(t, runErr)
 	// Summary should not show NFO count
 	output := buf.String()
-	_ = output
+	assertSortCompleted(t, output, tmpDir, "GOOD-444")
+	assert.NotContains(t, output, "NFOs generated:")
+	assert.NoFileExists(t, filepath.Join(tmpDir, "GOOD-444", "GOOD-444.nfo"))
+	assert.NoDirExists(t, filepath.Join(tmpDir, "GOOD-444", "extrafanart"))
 }
 
 // TestRun_InvalidConfig tests the error path for invalid configuration.
@@ -383,20 +373,19 @@ func TestRun_InvalidConfig(t *testing.T) {
 	assert.Contains(t, runErr.Error(), "failed to load config")
 }
 
-// TestRun_LinkModeNoneWithMove tests that --link-mode=none with --move is rejected.
+// TestRun_LinkModeNoneWithMove tests that --link-mode=none permits --move.
 func TestRun_LinkModeNoneWithMove(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", t.Name())
 	require.NoError(t, err)
 	defer os.RemoveAll(tmpDir)
 
+	configPath, _ := createOfflineSortConfig(t, nil)
 	cmd := sortcmd.NewCommand()
 	require.NoError(t, cmd.Flags().Set("move", "true"))
 	require.NoError(t, cmd.Flags().Set("link-mode", "none"))
 
-	// "none" with move should be OK (it's the default)
-	// Actually "none" is the default and doesn't conflict with move
-	// The error is for non-none link-mode with move
-	_ = tmpDir
+	// The default link mode does not conflict with --move.
+	require.NoError(t, sortcmd.Run(cmd, []string{tmpDir}, configPath))
 }
 
 // TestRun_NonNoneLinkModeWithMoveRejected tests that non-none link-mode with --move is rejected.
@@ -421,31 +410,29 @@ func TestRun_InvalidPrepare(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	// Create a config with an invalid combination
-	configPath, cfg := testutil.CreateTestConfig(t, func(c *config.Config) {
-		// Set an empty scraper priority to trigger Prepare validation
-		c.Scrapers.Priority = []string{}
+	configPath, _ := createOfflineSortConfig(t, func(c *config.Config) {
+		// Use an out-of-range value that normalization does not default.
+		c.Performance.MaxWorkers = 101
 	})
 
 	cmd := sortcmd.NewCommand()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 
-	// This should either succeed or fail gracefully
-	_ = sortcmd.Run(cmd, []string{tmpDir}, configPath)
-	_ = cfg
+	err = sortcmd.Run(cmd, []string{tmpDir}, configPath)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid configuration")
+	assert.Contains(t, err.Error(), "performance.max_workers")
 }
 
 // TestRun_DryRunWouldOrganize tests dry-run message about "Would organize".
 func TestRun_DryRunWouldOrganize(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration test")
-	}
 	tmpDir, err := os.MkdirTemp("", t.Name())
 	require.NoError(t, err)
 	defer os.RemoveAll(tmpDir)
 
-	configPath, _ := testutil.CreateTestConfig(t, nil)
-	testutil.CreateTestVideoFile(t, tmpDir, "IPX-555.mp4")
+	configPath, _ := createOfflineSortConfig(t, nil)
+	testutil.CreateTestVideoFile(t, tmpDir, "GOOD-555.mp4")
 
 	cmd := sortcmd.NewCommand()
 	require.NoError(t, cmd.Flags().Set("dry-run", "true"))
@@ -456,23 +443,19 @@ func TestRun_DryRunWouldOrganize(t *testing.T) {
 	assert.NoError(t, runErr)
 
 	output := buf.String()
-	// Dry-run should show "Would organize" or "dry-run" label
-	if strings.Contains(output, "Would organize") || strings.Contains(output, "dry-run") || strings.Contains(output, "DRY RUN") {
-		// Expected dry-run output found
-	}
+	assert.Contains(t, output, "Would organize 1 file(s)")
+	assert.Contains(t, output, "Metadata found: 1")
+	assert.NoDirExists(t, filepath.Join(tmpDir, "GOOD-555"))
 }
 
 // TestRun_SortCompleteMessage tests that the sort complete message is shown in live mode.
 func TestRun_SortCompleteMessage(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration test")
-	}
 	tmpDir, err := os.MkdirTemp("", t.Name())
 	require.NoError(t, err)
 	defer os.RemoveAll(tmpDir)
 
-	configPath, _ := testutil.CreateTestConfig(t, nil)
-	testutil.CreateTestVideoFile(t, tmpDir, "ABP-777.mp4")
+	configPath, _ := createOfflineSortConfig(t, nil)
+	testutil.CreateTestVideoFile(t, tmpDir, "GOOD-777.mp4")
 
 	cmd := sortcmd.NewCommand()
 	// Not dry-run (live mode)
@@ -480,5 +463,9 @@ func TestRun_SortCompleteMessage(t *testing.T) {
 	cmd.SetOut(buf)
 
 	runErr := sortcmd.Run(cmd, []string{tmpDir}, configPath)
-	assert.NoError(t, runErr)
+	require.NoError(t, runErr)
+	assertSortCompleted(t, buf.String(), tmpDir, "GOOD-777")
+	nfo, err := os.ReadFile(filepath.Join(tmpDir, "GOOD-777", "GOOD-777.nfo"))
+	require.NoError(t, err)
+	assert.Contains(t, string(nfo), "Synthetic sort fixture GOOD-777")
 }

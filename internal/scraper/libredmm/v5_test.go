@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 
 // TestSearchV5_FullE2E tests Search with httptest JSON server
 func TestSearchV5_FullE2E(t *testing.T) {
+	var screenshotRequests atomic.Int32
 	payload := moviePayload{
 		NormalizedID:  "IPX-999",
 		Title:         "Test Movie",
@@ -39,6 +41,20 @@ func TestSearchV5_FullE2E(t *testing.T) {
 	}
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/sample1.jpg", "/sample2.jpg":
+			assert.Equal(t, http.MethodHead, r.Method)
+			screenshotRequests.Add(1)
+			w.Header().Set("Content-Length", "16384")
+			return
+		case "/search":
+			assert.Equal(t, "IPX-999", r.URL.Query().Get("q"))
+			assert.Equal(t, "json", r.URL.Query().Get("format"))
+		default:
+			t.Errorf("unexpected fixture path: %s", r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(200)
 		data, _ := json.Marshal(payload)
@@ -47,7 +63,7 @@ func TestSearchV5_FullE2E(t *testing.T) {
 	defer ts.Close()
 
 	s := &scraper{
-		client:          resty.New().SetBaseURL(ts.URL),
+		client:          resty.New().SetTransport(fixtureTransport(t, ts, payload.SampleImageURLs...)),
 		enabled:         true,
 		baseURL:         ts.URL,
 		rateLimiter:     ratelimit.NewLimiter(0),
@@ -69,6 +85,8 @@ func TestSearchV5_FullE2E(t *testing.T) {
 	assert.Len(t, result.Actresses, 1)
 	assert.NotNil(t, result.Rating)
 	assert.Equal(t, 4.5, result.Rating.Score)
+	assert.Equal(t, payload.SampleImageURLs, result.ScreenshotURL)
+	assert.Equal(t, int32(2), screenshotRequests.Load())
 }
 
 // TestSearchV5_Disabled tests Search when disabled

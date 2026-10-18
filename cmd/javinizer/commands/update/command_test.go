@@ -1,11 +1,14 @@
 package update_test
 
 import (
+	"bytes"
+	"encoding/xml"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/cmd/javinizer/commands/update"
+	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/nfo"
 	"github.com/javinizer/javinizer-go/internal/testutil"
@@ -125,7 +128,7 @@ func TestRun_Integration_NoVideoFiles(t *testing.T) {
 		t.Skip("skipping integration test in short mode")
 	}
 	tmpDir := t.TempDir()
-	configPath, _ := testutil.CreateTestConfig(t, nil)
+	configPath, _ := createOfflineUpdateConfig(t, false)
 
 	// Create a non-video file
 	textFile := filepath.Join(tmpDir, "readme.txt")
@@ -144,7 +147,7 @@ func TestRun_Integration_InvalidPath(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
 	}
-	configPath, _ := testutil.CreateTestConfig(t, nil)
+	configPath, _ := createOfflineUpdateConfig(t, false)
 
 	cmd := update.NewCommand()
 	err := update.Run(cmd, []string{"/nonexistent/path/that/does/not/exist"}, configPath)
@@ -159,21 +162,29 @@ func TestRun_Integration_DryRunMode(t *testing.T) {
 		t.Skip("skipping integration test in short mode")
 	}
 	tmpDir := t.TempDir()
-	configPath, _ := testutil.CreateTestConfig(t, nil)
+	configPath, fixture := createOfflineUpdateConfig(t, false)
 
 	// Create a test video file
 	videoFile := filepath.Join(tmpDir, "IPX-123.mp4")
 	require.NoError(t, os.WriteFile(videoFile, []byte("fake video"), 0644))
 
 	cmd := update.NewCommand()
+	var output bytes.Buffer
+	cmd.SetOut(&output)
 	_ = cmd.Flags().Set("dry-run", "true")
 
 	err := update.Run(cmd, []string{tmpDir}, configPath)
 	// Should succeed
-	assert.NoError(t, err)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"IPX-123"}, fixture.SearchIDs())
+	assert.Contains(t, output.String(), "Metadata found: 1")
+	assert.Contains(t, output.String(), "Would generate 1 NFO file(s)")
 
 	// Video file should still exist (dry-run doesn't move/modify)
 	assert.FileExists(t, videoFile)
+	videoBytes, err := os.ReadFile(videoFile)
+	require.NoError(t, err)
+	assert.Equal(t, "fake video", string(videoBytes))
 
 	// NFO should NOT be created in dry-run mode
 	nfoFile := filepath.Join(tmpDir, "IPX-123.nfo")
@@ -206,7 +217,7 @@ func TestRun_Integration_PresetApplication(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tmpDir := t.TempDir()
-			configPath, _ := testutil.CreateTestConfig(t, nil)
+			configPath, _ := createOfflineUpdateConfig(t, false)
 
 			// Create a non-video file (to avoid scraping)
 			textFile := filepath.Join(tmpDir, "readme.txt")
@@ -307,7 +318,11 @@ func TestRun_Integration_WithExistingNFO(t *testing.T) {
 		t.Skip("skipping integration test in short mode")
 	}
 	tmpDir := t.TempDir()
-	configPath, _ := testutil.CreateTestConfig(t, nil)
+	configPath, fixture := createOfflineUpdateConfig(t, false, func(cfg *config.Config) {
+		// Isolate base-field merging from the separate display-title template,
+		// which renders using the original scraper metadata in the apply phase.
+		cfg.Metadata.NFO.Format.DisplayTitle = ""
+	})
 
 	// Create a test video file
 	videoFile := filepath.Join(tmpDir, "IPX-123.mp4")
@@ -327,18 +342,18 @@ func TestRun_Integration_WithExistingNFO(t *testing.T) {
 	_ = cmd.Flags().Set("scalar-strategy", "prefer-nfo")
 	_ = cmd.Flags().Set("show-merge-stats", "true")
 
-	// This will exercise the NFO merge logic (lines 158-238)
 	err := update.Run(cmd, []string{tmpDir}, configPath)
-
-	// Should succeed even though scraper will fail (no real scraper data)
-	// The key is that it attempts to merge with existing NFO
-	if err != nil {
-		// Error is expected since we can't scrape real data, but merge logic was exercised
-		t.Logf("Expected error (no scraper data): %v", err)
-	}
-
-	// Verify existing NFO file still exists
-	assert.FileExists(t, existingNFO)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"IPX-123"}, fixture.SearchIDs())
+	data, err := os.ReadFile(existingNFO)
+	require.NoError(t, err)
+	var merged nfo.Movie
+	require.NoError(t, xml.Unmarshal(data, &merged))
+	assert.Contains(t, merged.Title, "Existing Title")
+	assert.Equal(t, "Existing plot from NFO", merged.Plot)
+	assert.Equal(t, "Existing Studio", merged.Studio)
+	assert.Contains(t, string(data), "IPX-123", "new scraper identity must be merged into the NFO")
+	assert.FileExists(t, videoFile)
 }
 
 // TestRun_Integration_InvalidConfig tests error handling for invalid config
@@ -389,7 +404,7 @@ func TestRun_Integration_MergeStrategies(t *testing.T) {
 	for _, tt := range strategies {
 		t.Run(tt.name, func(t *testing.T) {
 			tmpDir := t.TempDir()
-			configPath, _ := testutil.CreateTestConfig(t, nil)
+			configPath, _ := createOfflineUpdateConfig(t, false)
 
 			// Create a non-video file to avoid actual scraping
 			textFile := filepath.Join(tmpDir, "readme.txt")
@@ -412,7 +427,7 @@ func TestRun_Integration_DownloadMediaEnabled(t *testing.T) {
 		t.Skip("skipping integration test in short mode")
 	}
 	tmpDir := t.TempDir()
-	configPath, _ := testutil.CreateTestConfig(t, nil)
+	configPath, fixture := createOfflineUpdateConfig(t, true)
 
 	// Create a test video file
 	videoFile := filepath.Join(tmpDir, "IPX-123.mp4")
@@ -420,15 +435,18 @@ func TestRun_Integration_DownloadMediaEnabled(t *testing.T) {
 
 	cmd := update.NewCommand()
 	_ = cmd.Flags().Set("download", "true")
+	_ = cmd.Flags().Set("extrafanart", "true")
 	_ = cmd.Flags().Set("dry-run", "false")
 
-	// This will exercise the download media code path (lines 251-259)
 	err := update.Run(cmd, []string{tmpDir}, configPath)
-
-	// Error expected since scraper will fail, but download path was exercised
-	if err != nil {
-		t.Logf("Expected error (no scraper data): %v", err)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, []string{"IPX-123"}, fixture.SearchIDs())
+	assert.Positive(t, fixture.ImageRequests())
+	assert.FileExists(t, filepath.Join(tmpDir, "IPX-123.nfo"))
+	imageData, err := os.ReadFile(filepath.Join(tmpDir, "extrafanart", "fanart1.jpg"))
+	require.NoError(t, err)
+	assert.Equal(t, fixture.ImageData, imageData)
+	assert.FileExists(t, videoFile)
 }
 
 // TestConstructNFOPath_MultiPartSuffixVariations tests different multi-part suffix formats

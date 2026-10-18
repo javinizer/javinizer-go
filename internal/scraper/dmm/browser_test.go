@@ -59,7 +59,7 @@ func TestIsRunningInContainer(t *testing.T) {
 			tt.setup()
 			defer tt.cleanup()
 
-			result := system.IsRunningInContainer(afero.NewOsFs())
+			result := system.IsRunningInContainer(afero.NewMemMapFs())
 			assert.Equal(t, tt.expected, result, tt.description)
 		})
 	}

@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/panicutil"
@@ -74,7 +75,7 @@ func (p *scrapePhase) Run(ctx context.Context, inputs scrapePhaseInputs, files [
 		func(egCtx context.Context, filePath string) scrapeFileOutcome {
 			// scrapeFile does NOT persist to the database: buildScrapeCmd sets
 			// cmd.SkipPersist=true when inputs.MovieRepo is wired, so the workflow's
-			// scrape orchestrator skips its inline DB persist (step 4). Persistence
+			// scrape orchestrator skips its inline DB persist (step 3). Persistence
 			// runs after all scrape goroutines drain (see persistScrapeOutcomes
 			// below) — off the errgroup-gated critical path, so SQLite's
 			// single-writer lock never serializes the per-file scrape workers
@@ -334,6 +335,13 @@ func interpretScrapeResult(
 		establishScrapedBaseline(fileResult.Movie, fileResult.Movie)
 	}
 
+	// A forced candidate's identity constraint is operation-only and cannot
+	// survive public/job JSON. Keep it private in outcome.Result until the
+	// transaction accepts it; cancellation, persistence errors, or a process
+	// restart must never turn it into unconstrained review/save input.
+	if cmd.SkipPersist && cmd.ForceRefresh {
+		fileResult.Movie = nil
+	}
 	inputs.Updater.UpdateFileResult(filePath, fileResult)
 	if prov != nil {
 		inputs.Updater.SetProvenance(filePath, prov)
@@ -573,9 +581,9 @@ func persistScrapeOutcomes(ctx context.Context, ch <-chan scrapeFileOutcome, inp
 }
 
 // persistScrapeOutcome persists a single successful scrape's movie off the
-// per-goroutine critical path. The in-memory MovieResult.Movie is already
-// set (by interpretScrapeResult) before this runs; persist updates the
-// Persisted flag (and refreshes the movie with the DB-saved version) via
+// per-goroutine critical path. Ordinary MovieResult.Movie payloads are already
+// set by interpretScrapeResult; constrained forced candidates stay private.
+// Persist publishes the DB-saved movie and updates the Persisted flag via
 // AtomicUpdateFileResult so API/UI readers observe a consistent snapshot.
 // Persist failures surface on the MovieResult, preserving the original
 // error semantics (persist error → Status=Failed).
@@ -591,7 +599,11 @@ func persistScrapeOutcome(ctx context.Context, o scrapeFileOutcome, inputs scrap
 		genreTrans = o.Result.TranslationOutput.GenreTranslations
 		actressTrans = o.Result.TranslationOutput.ActressTranslations
 	}
-	saved, err := inputs.MovieRepo.UpsertWithTranslations(ctx, cloned, genreTrans, actressTrans)
+	var render database.DisplayTitleRenderer
+	if o.Meta != nil {
+		render = o.Meta.RenderDisplayTitle
+	}
+	saved, err := database.UpsertWithDisplayTitle(ctx, inputs.MovieRepo, cloned, genreTrans, actressTrans, render)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			return false

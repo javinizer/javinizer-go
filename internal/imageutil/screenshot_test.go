@@ -1,6 +1,10 @@
 package imageutil
 
 import (
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -204,6 +208,99 @@ func TestDiscoverScreenshots(t *testing.T) {
 		result := DiscoverScreenshots("https://pics.dmm.co.jp/digital/video/test/testps.jpg", nil)
 		assert.Nil(t, result)
 	})
+}
+
+// Discovery constructs CDN URLs internally, so serve every response in memory.
+// Unexpected requests fail instead of falling through to a network transport.
+func TestDiscoverScreenshots_OfflineResponses(t *testing.T) {
+	const baseURL = "https://pics.dmm.co.jp"
+	const original = "/digital/video/1test00001/1test00001jp-"
+	const depadded = "/digital/video/1test001/1test001jp-"
+	type probe struct {
+		path   string
+		status int
+	}
+	tests := []struct {
+		name      string
+		probes    []probe
+		wantPaths []string
+		nilClient bool
+	}{
+		{
+			name:      "original content ID until first missing screenshot",
+			probes:    []probe{{original + "1.jpg", 200}, {original + "2.jpg", 200}, {original + "3.jpg", 404}},
+			wantPaths: []string{original + "1.jpg", original + "2.jpg"},
+		},
+		{
+			name:      "depadded content ID fallback",
+			probes:    []probe{{original + "1.jpg", 404}, {depadded + "1.jpg", 200}, {depadded + "2.jpg", 404}},
+			wantPaths: []string{depadded + "1.jpg"},
+		},
+		{
+			name:      "placeholder redirect is not followed",
+			probes:    []probe{{original + "1.jpg", 200}, {original + "2.jpg", 302}},
+			wantPaths: []string{original + "1.jpg"},
+		},
+		{
+			name:   "missing screenshots on both candidates",
+			probes: []probe{{original + "1.jpg", 404}, {depadded + "1.jpg", 404}},
+		},
+		{
+			name:   "transport error on both candidates",
+			probes: []probe{{original + "1.jpg", 0}, {depadded + "1.jpg", 0}},
+		},
+		{
+			name:      "nil client uses default transport",
+			probes:    []probe{{original + "1.jpg", 200}, {original + "2.jpg", 404}},
+			wantPaths: []string{original + "1.jpg"},
+			nilClient: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			calls := 0
+			transport := roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+				if calls >= len(tt.probes) {
+					t.Errorf("unexpected extra probe: %s %s", req.Method, req.URL)
+					return nil, fmt.Errorf("unexpected extra screenshot probe")
+				}
+				p := tt.probes[calls]
+				calls++
+				if req.Method != http.MethodHead || req.URL.String() != baseURL+p.path {
+					t.Errorf("unexpected probe: %s %s; want HEAD %s%s", req.Method, req.URL, baseURL, p.path)
+					return nil, fmt.Errorf("unexpected screenshot probe")
+				}
+				if p.status == 0 {
+					return nil, fmt.Errorf("synthetic transport failure")
+				}
+				header := make(http.Header)
+				if p.status == http.StatusFound {
+					header.Set("Location", "https://placeholder.invalid/image.jpg")
+				}
+				return &http.Response{
+					StatusCode: p.status,
+					Header:     header,
+					Body:       io.NopCloser(strings.NewReader("")),
+					Request:    req,
+				}, nil
+			})
+			client := &http.Client{Transport: transport}
+			if tt.nilClient {
+				// This subtest must remain sequential while replacing global state.
+				originalTransport := http.DefaultTransport
+				http.DefaultTransport = transport
+				t.Cleanup(func() { http.DefaultTransport = originalTransport })
+				client = nil
+			}
+			var want []string
+			for _, path := range tt.wantPaths {
+				want = append(want, baseURL+path)
+			}
+			got := DiscoverScreenshots(baseURL+"/digital/video/1test00001/1test00001pl.jpg", client)
+			assert.Equal(t, want, got)
+			assert.Equal(t, len(tt.probes), calls, "screenshot request count")
+		})
+	}
 }
 
 func TestUpgradeCoverResolution(t *testing.T) {

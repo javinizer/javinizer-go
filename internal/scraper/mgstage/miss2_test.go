@@ -585,6 +585,7 @@ func TestMiss2_CheckDirectURL_CancelledContext(t *testing.T) {
 		client:      resty.New(),
 		settings:    models.ScraperSettings{Enabled: true},
 	}
+	s.client = newCancelledFixtureClient(t, map[string]int{"GET https://www.mgstage.com/product/product_detail/SIRO-5615/": 1})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	assert.False(t, s.checkDirectURL(ctx, "https://www.mgstage.com/product/product_detail/SIRO-5615/"))
@@ -619,10 +620,11 @@ func TestMiss2_SearchByID_CancelledContext(t *testing.T) {
 		client:      resty.New(),
 		settings:    models.ScraperSettings{Enabled: true},
 	}
+	s.client = newCancelledFixtureClient(t, map[string]int{"GET https://www.mgstage.com/search/cSearch.php?search_word=SIRO-5615&type=top&page=1&list_cnt=120": 1})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	_, err := s.searchByID(ctx, "SIRO-5615")
-	require.Error(t, err)
+	require.ErrorIs(t, err, context.Canceled)
 }
 
 // --- getURLCtx: search returns nothing, expands prefixes ---

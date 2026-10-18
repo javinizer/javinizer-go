@@ -100,6 +100,10 @@ type stepCompletion struct {
 // partial Steps AND a non-nil error — callers should check result != nil even
 // when err != nil. FailedStep identifies which step failed programmatically.
 type ApplyResult struct {
+	PublicationPending   bool                        `json:"-"`
+	PublicationFinalized bool                        `json:"-"`
+	PublicationRecovery  *models.PublicationRecovery `json:"-"`
+
 	OrganizeResult *organizer.OrganizeResult
 	Movie          *models.Movie
 	DownloadPaths  []string

@@ -135,6 +135,13 @@ definitions:
       verified:
         type: boolean
     type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.ApplyStartResponse:
+    properties:
+      apply_generation:
+        type: integer
+      message:
+        type: string
+    type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.AuthCredentialsRequest:
     properties:
       password:
@@ -764,12 +771,23 @@ definitions:
         type: string
       credited_name:
         type: string
+      display_force_canonical:
+        description: |-
+          DisplayForceCanonical selects the catalog name even when credited names
+          are enabled, so clients must include it in display-preview invalidation.
+        type: boolean
       id:
         type: integer
       order_index:
         type: integer
       override_name:
         type: string
+      render_visible:
+        description: |-
+          RenderVisible mirrors MovieCredit.RenderVisible: false when the credit
+          cannot contribute names to rendered output (suppressed, no actress, or
+          the actress is ambiguity-quarantined without verification).
+        type: boolean
       reported_thumb_url:
         type: string
       suppressed:
@@ -1182,6 +1200,8 @@ definitions:
         description: Required for organize mode; optional for in-place modes
         example: /path/to/output
         type: string
+      expected_apply_generation:
+        type: integer
       link_mode:
         description: Validated at the API layer (HTTP 400 for invalid)
         example: hard
@@ -1681,6 +1701,8 @@ definitions:
         - merge
         - replace
         type: string
+      expected_apply_generation:
+        type: integer
       force_overwrite:
         type: boolean
       overrides:
@@ -4518,9 +4540,7 @@ paths:
         "200":
           description: OK
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ApplyStartResponse'
         "400":
           description: Bad Request
           schema:
@@ -4530,7 +4550,8 @@ paths:
           schema:
             $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "409":
-          description: Persisted update plan must go through the update endpoint
+          description: Apply generation mismatch or persisted update plan must go
+            through the update endpoint
           schema:
             $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Organize batch job files
@@ -5011,9 +5032,7 @@ paths:
         "200":
           description: OK
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ApplyStartResponse'
         "400":
           description: Bad Request
           schema:
@@ -5023,7 +5042,8 @@ paths:
           schema:
             $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "409":
-          description: Persisted organize plan must go through the organize endpoint
+          description: Apply generation mismatch or persisted organize plan must go
+            through the organize endpoint
           schema:
             $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Update batch job files

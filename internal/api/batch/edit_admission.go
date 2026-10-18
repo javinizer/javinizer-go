@@ -19,6 +19,7 @@ import (
 //	worker.ErrJobGone                                     → 410
 //	worker.ErrEditNotAdmitted (incl. EditPhaseBusyError)  → 409
 //	*worker.EditAdmissionConflictError (D17 identity)     → 409
+//	*worker.InvalidActressRenameError                    → 400
 func mapBatchEditError(c *gin.Context, err error) bool {
 	switch {
 	case err == nil:
@@ -38,6 +39,11 @@ func mapBatchEditError(c *gin.Context, err error) bool {
 		var conflict *worker.EditAdmissionConflictError
 		if errors.As(err, &conflict) {
 			c.JSON(http.StatusConflict, contracts.ErrorResponse{Error: err.Error()})
+			return true
+		}
+		var invalid *worker.InvalidActressRenameError
+		if errors.As(err, &invalid) {
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
 			return true
 		}
 		return false
@@ -95,7 +101,7 @@ func familyRevisions(job worker.BatchJobInterface, resultID string) map[string]u
 }
 
 // writeEditOpError maps an in-operation typed error with a sensible fallback:
-// typed (404/409/410) via mapBatchEditError, downloader/SSRF-flavored strings
+// typed (400/404/409/410) via mapBatchEditError, downloader/SSRF-flavored strings
 // keep their historical 400/502 split, everything else 500.
 func writeEditOpError(c *gin.Context, err error) {
 	if mapBatchEditError(c, err) {

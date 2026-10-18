@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/desktop"
@@ -53,6 +54,16 @@ func TestInitDesktopDefault_DesktopBuildSetsRunE(t *testing.T) {
 // how the app was launched. Uses the `version` subcommand so shouldSkipConfigInit
 // short-circuits before initConfig() runs, avoiding broader config side effects.
 func TestPersistentPreRun_DesktopBuildSetsPortableConfig(t *testing.T) {
+	withIsolatedUserDataDir(t)
+	configDir, err := os.UserConfigDir()
+	require.NoError(t, err)
+	for _, key := range []string{
+		"JAVINIZER_DB", "JAVINIZER_LOG_DIR", "JAVINIZER_TEMP_DIR",
+		"JAVINIZER_DATA_DIR", "JAVINIZER_R18DEV_DUMP_PATH",
+	} {
+		t.Setenv(key, "")
+	}
+
 	orig := desktop.BuildDesktop
 	desktop.BuildDesktop = "1"
 	defer func() { desktop.BuildDesktop = orig }()
@@ -61,23 +72,19 @@ func TestPersistentPreRun_DesktopBuildSetsPortableConfig(t *testing.T) {
 	defer func() { cfgFile = origCfg }()
 	cfgFile = "configs/config.yaml"
 
-	origDB := os.Getenv("JAVINIZER_DB")
-	origLog := os.Getenv("JAVINIZER_LOG_DIR")
-	defer func() {
-		os.Setenv("JAVINIZER_DB", origDB)
-		os.Setenv("JAVINIZER_LOG_DIR", origLog)
-	}()
-
 	cmd := &cobra.Command{Use: "version"}
 	cmd.Flags().String("config", "configs/config.yaml", "config file path")
 
 	rootCmd.PersistentPreRun(cmd, nil)
 
 	got, _ := cmd.Flags().GetString("config")
-	assert.NotEqual(t, "configs/config.yaml", got, "desktop build should redirect --config to the portable path")
-	assert.Contains(t, got, "Javinizer", "portable config path should live under the Javinizer user-data dir")
-	assert.NotEmpty(t, os.Getenv("JAVINIZER_DB"), "desktop build should set JAVINIZER_DB to a portable path")
-	assert.NotEmpty(t, os.Getenv("JAVINIZER_LOG_DIR"), "desktop build should set JAVINIZER_LOG_DIR to a portable path")
+	dataDir := filepath.Join(configDir, "Javinizer", "data")
+	assert.Equal(t, filepath.Join(configDir, "Javinizer", "config.yaml"), got)
+	assert.Equal(t, filepath.Join(dataDir, "javinizer.db"), os.Getenv("JAVINIZER_DB"))
+	assert.Equal(t, filepath.Join(dataDir, "logs"), os.Getenv("JAVINIZER_LOG_DIR"))
+	assert.Equal(t, filepath.Join(dataDir, "temp"), os.Getenv("JAVINIZER_TEMP_DIR"))
+	assert.Equal(t, dataDir, os.Getenv("JAVINIZER_DATA_DIR"))
+	assert.Equal(t, filepath.Join(dataDir, "r18dev", "r18dev_dump.db"), os.Getenv("JAVINIZER_R18DEV_DUMP_PATH"))
 }
 
 // TestPersistentPreRun_CLIBuildLeavesConfigDefault verifies that in a CLI

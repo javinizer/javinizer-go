@@ -1,6 +1,8 @@
 package nfo
 
 import (
+	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 
@@ -10,19 +12,31 @@ import (
 
 // MergeWithExistingOptions configures how MergeWithExistingNFO combines scraped data with an existing NFO.
 type MergeWithExistingOptions struct {
-	Match          models.FileMatchInfo
-	ForceOverwrite bool
-	PreserveNFO    bool
-	ScalarStrategy MergeStrategy // resolved at boundary (includes preset application)
-	ArrayStrategy  bool          // true=merge, false=replace. Resolved at boundary
+	Match           models.FileMatchInfo
+	ForceOverwrite  bool
+	UseCreditedName bool
+	PreserveNFO     bool
+	ScalarStrategy  MergeStrategy // resolved at boundary (includes preset application)
+	ArrayStrategy   bool          // true=merge, false=replace. Resolved at boundary
 }
 
 // MergeWithExistingResult is the outcome of merging scraped metadata with an existing NFO.
 type MergeWithExistingResult struct {
+	Err          error // Blocking cast ambiguity; must never be treated as a successful fallback.
 	Movie        *models.Movie
 	Merged       bool
 	MergeStats   *MergeStats
 	FoundNFOPath string
+}
+
+// CastMergePreflighter is the optional read-only preflight seam for unfenced
+// Apply. Its cached result lets cast validation precede a legacy file move.
+type CastMergePreflighter interface {
+	PreflightCreditMerge(movie *models.Movie, opts MergeWithExistingOptions) MergeWithExistingResult
+}
+
+func (n nfoImplementor) PreflightCreditMerge(movie *models.Movie, opts MergeWithExistingOptions) MergeWithExistingResult {
+	return n.MergeWithExistingNFO(movie, opts)
 }
 
 func (n nfoImplementor) MergeWithExistingNFO(movie *models.Movie, opts MergeWithExistingOptions) MergeWithExistingResult {
@@ -74,8 +88,14 @@ func (n nfoImplementor) MergeWithExistingNFO(movie *models.Movie, opts MergeWith
 	if opts.PreserveNFO {
 		scalarStrategy = PreserveExisting
 	}
-	mergeResult, mergeErr := MergeMovieMetadataWithOptions(movie, parseResult.Movie, scalarStrategy, mergeArrays)
+	useCreditedName := opts.UseCreditedName || (nfoConfig != nil && nfoConfig.UseCreditedName)
+	mergeResult, mergeErr := mergeMovieMetadataWithRenderPolicy(movie, parseResult.Movie, scalarStrategy, mergeArrays, useCreditedName)
 	if mergeErr != nil {
+		var ambiguity *CastAmbiguityError
+		if errors.As(mergeErr, &ambiguity) {
+			result.Err = fmt.Errorf("existing NFO %s: %w", foundPath, mergeErr)
+			return result
+		}
 		logging.Warnf("[workflow] Failed to merge NFO data for %s: %v (using scraped data only)", movie.ID, mergeErr)
 		return result
 	}

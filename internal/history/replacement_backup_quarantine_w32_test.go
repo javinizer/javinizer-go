@@ -27,6 +27,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -361,9 +362,32 @@ func (f *w32DestPresenceGateFs) LstatIfPossible(name string) (os.FileInfo, bool,
 // nothing is unlinked, and the next explicit retry heals from the armed
 // state.
 func TestRestoreReplacementJournalW32_PostQuarantineDivergenceRetainsArmed(t *testing.T) {
-	fs := afero.NewMemMapFs()
+	// Use real read-only handles: MemMapFs treats O_RDONLY|O_NOFOLLOW as
+	// writable, so closing the restore source can change its mtime and make
+	// the correctly stamped backup fail cleanup across a Unix-second boundary.
+	fs := afero.NewOsFs()
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "poster.jpg")
+	backup := dest + ".dlbak.aaaaaaaaaaaaaaaa"
+	require.NoError(t, afero.WriteFile(fs, dest, []byte("new poster"), config.FilePerm))
+	require.NoError(t, afero.WriteFile(fs, backup, []byte("original poster"), config.FilePerm))
+	size, modUnix := w25StampBackupFacts(t, fs, backup)
 	repo := newP3OpRepo()
-	op, dest, backup := w25ArmedOp(t, fs, repo, "W32A", []byte("new poster"), []byte("original poster"), "stamped")
+	op := &models.BatchFileOperation{
+		BatchJobID:    "job-W32A",
+		MovieID:       "W32A",
+		OriginalPath:  filepath.Join(dir, "src", "W32A.mkv"),
+		NewPath:       filepath.Join(dir, "W32A.mkv"),
+		OperationType: models.OperationTypeMove,
+		GeneratedFiles: models.MarshalLedgerJSON(models.GeneratedFilesJSON{
+			Replacements: []models.ReplacementEntry{{
+				Destination: dest, Backup: backup, DestSeq: 1, Installed: true,
+				BackupSize: size, BackupModUnix: modUnix,
+			}},
+		}),
+		RevertStatus: models.RevertStatusApplied,
+	}
+	require.NoError(t, repo.Create(context.Background(), op))
 
 	w32ScriptRestoredDestSeam(t, true, false)
 
@@ -378,7 +402,7 @@ func TestRestoreReplacementJournalW32_PostQuarantineDivergenceRetainsArmed(t *te
 	entries := w25JournalEntries(t, repo, op.ID)
 	require.Len(t, entries, 1)
 	require.False(t, entries[0].RestorePending, "the entry stays ARMED — no marker certifies against an unproven destination")
-	require.Empty(t, w26DirQuarNames(t, fs, "/dst/W32A"))
+	require.Empty(t, w26DirQuarNames(t, fs, dir))
 
 	// The armed posture converges on retry.
 	restoredDestStillOurs = destStillNamesRestoredObject
@@ -435,11 +459,11 @@ func TestRestoreReplacementJournalW32_PendingCleanPresenceDivergenceRestoresBack
 // name is absent by construction. The explicit revert then converges
 // journal-only.
 func TestRestoreReplacementJournalW32_VanishedUnlinkUpgradesToJournalOnlyKind(t *testing.T) {
-	base := afero.NewMemMapFs()
+	base := afero.NewOsFs()
 	fs := &w8RemoveFs{Fs: base, notExist: true, fail: true}
 	repo := newP3OpRepo()
-	op, dest, backup := w25ArmedOp(t, fs, repo, "W32V", []byte("new poster"), []byte("original poster"), "stamped")
-	fs.victim = backup
+	op, dest, backup := w25ArmedOpInDir(t, fs, repo, t.TempDir(), "W32V", []byte("new poster"), []byte("original poster"), "stamped")
+	fs.victim = filepath.ToSlash(backup)
 
 	_, err := NewReverter(fs, repo).restoreReplacementJournal(context.Background(), op)
 	require.Error(t, err)
@@ -465,9 +489,9 @@ func TestRestoreReplacementJournalW32_VanishedUnlinkUpgradesToJournalOnlyKind(t 
 // the entry ARMED (never restore-pending), the backup restored to its
 // journaled name, the restored destination untouched.
 func TestSweepW32_ArmedLegPostQuarantineDivergenceRetainsArmed(t *testing.T) {
-	fs := afero.NewMemMapFs()
+	fs := afero.NewOsFs()
 	repo := newP3OpRepo()
-	op, dest, backup := w25SweepCrashOp(t, fs, repo, "W32B", []byte("original bytes"), "stamped")
+	op, dest, backup := w25SweepCrashOpInDir(t, fs, repo, t.TempDir(), "W32B", []byte("original bytes"), "stamped")
 
 	w32ScriptRestoredDestSeam(t, true, false)
 
@@ -481,7 +505,7 @@ func TestSweepW32_ArmedLegPostQuarantineDivergenceRetainsArmed(t *testing.T) {
 	entries := w25JournalEntries(t, repo, op.ID)
 	require.Len(t, entries, 1)
 	require.False(t, entries[0].RestorePending, "the entry stays ARMED — no marker against an unproven destination")
-	require.Empty(t, w26DirQuarNames(t, fs, "/dst/W32B"))
+	require.Empty(t, w26DirQuarNames(t, fs, filepath.Dir(backup)))
 }
 
 // R1 — sweeper ALREADY-CONSUMED leg: post-quarantine divergence restores the

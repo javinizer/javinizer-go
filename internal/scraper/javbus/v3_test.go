@@ -1,8 +1,11 @@
 package javbus
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"image"
+	"image/png"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -32,13 +35,12 @@ func TestScrapeURLV3_HTTPStatusErrors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(tt.statusCode)
-				fmt.Fprint(w, tt.body)
-			}))
-			defer ts.Close()
-
-			client := resty.New().SetBaseURL(ts.URL)
+			const detailURL = "https://www.javbus.com/IPX-999"
+			rt := &javbusRoundTripper{
+				responses: map[string]string{detailURL: tt.body},
+				statuses:  map[string]int{detailURL: tt.statusCode},
+			}
+			client := resty.New().SetTransport(rt)
 			scraper := &scraper{
 				client:      client,
 				enabled:     true,
@@ -47,8 +49,16 @@ func TestScrapeURLV3_HTTPStatusErrors(t *testing.T) {
 				settings:    models.ScraperSettings{Enabled: true},
 			}
 
-			_, err := scraper.ScrapeURL(context.Background(), "https://www.javbus.com/IPX-999")
+			_, err := scraper.ScrapeURL(context.Background(), detailURL)
 			require.Error(t, err)
+			scraperErr, ok := models.AsScraperError(err)
+			require.True(t, ok, "expected response classification, not a connection error")
+			if tt.statusCode == http.StatusNotFound {
+				assert.Equal(t, models.ScraperErrorKindNotFound, scraperErr.Kind)
+			} else {
+				assert.Equal(t, tt.statusCode, scraperErr.StatusCode)
+			}
+			assert.Equal(t, []string{detailURL}, rt.lastReqs)
 		})
 	}
 }
@@ -221,7 +231,11 @@ func TestParseDetailPageV3_Success(t *testing.T) {
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
 	require.NoError(t, err)
 
-	client := resty.New()
+	const posterURL = "https://awsimgsrc.dmm.com/dig/digital/video/ipx00789/ipx00789ps.jpg"
+	var poster bytes.Buffer
+	require.NoError(t, png.Encode(&poster, image.NewRGBA(image.Rect(0, 0, 700, 900))))
+	rt := &javbusRoundTripper{responses: map[string]string{posterURL: poster.String()}}
+	client := resty.New().SetTransport(rt)
 	scraper := &scraper{
 		client:      client,
 		enabled:     true,
@@ -242,6 +256,9 @@ func TestParseDetailPageV3_Success(t *testing.T) {
 	assert.Equal(t, "Series Name", result.Series)
 	assert.Equal(t, 120, result.Runtime)
 	assert.Contains(t, result.Genres, "Drama")
+	assert.Equal(t, posterURL, result.PosterURL)
+	assert.False(t, result.ShouldCropPoster)
+	assert.Equal(t, []string{posterURL}, rt.lastReqs)
 }
 
 // TestExtractActressesV3 tests extractActresses

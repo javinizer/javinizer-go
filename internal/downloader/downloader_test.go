@@ -14,6 +14,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -527,22 +529,31 @@ func TestDownloader_DownloadAll_MultiPartDeduplication(t *testing.T) {
 }
 
 func TestDownloader_DownloadAll(t *testing.T) {
+	var imageData bytes.Buffer
+	require.NoError(t, jpeg.Encode(&imageData, image.NewRGBA(image.Rect(0, 0, 100, 150)), nil))
+	var mu sync.Mutex
+	requests := make(map[string]int)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/octet-stream")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("test data"))
+		assert.Equal(t, http.MethodGet, r.Method)
+		mu.Lock()
+		requests[r.URL.Path]++
+		mu.Unlock()
+		w.Header().Set("Content-Type", "image/jpeg")
+		_, _ = w.Write(imageData.Bytes())
 	}))
 	defer server.Close()
 
 	tmpDir := t.TempDir()
 	movie := createTestMovie()
 	movie.Poster.CoverURL = server.URL + "/cover.jpg"
+	movie.Poster.PosterURL = server.URL + "/poster.jpg"
 	movie.TrailerURL = server.URL + "/trailer.mp4"
 	movie.Screenshots = []string{
 		server.URL + "/screenshot1.jpg",
 		server.URL + "/screenshot2.jpg",
 	}
 	movie.Actresses[0].ThumbURL = server.URL + "/actress1.jpg"
+	movie.Actresses[1].ThumbURL = ""
 
 	cfg := &Config{
 		DownloadCover:       true,
@@ -559,12 +570,18 @@ func TestDownloader_DownloadAll(t *testing.T) {
 		t.Fatalf("downloadAll failed: %v", err)
 	}
 
-	// Should have: cover, poster, 2 screenshots, trailer, 1 actress = 7 total
-	// (But actress 2 has no URL, so it won't be included)
-	expectedMin := 5 // At minimum: cover, poster, 2 screenshots, trailer
-	if len(results) < expectedMin {
-		t.Errorf("Expected at least %d results, got %d", expectedMin, len(results))
+	// Cover, poster, two screenshots, trailer and one actress are all local.
+	require.Len(t, results, 6)
+	for _, result := range results {
+		assert.NoError(t, result.Error)
+		assert.True(t, result.Downloaded, "media %s should be saved", result.Type)
 	}
+	mu.Lock()
+	assert.Equal(t, map[string]int{
+		"/cover.jpg": 1, "/poster.jpg": 1, "/screenshot1.jpg": 1,
+		"/screenshot2.jpg": 1, "/trailer.mp4": 1, "/actress1.jpg": 1,
+	}, requests)
+	mu.Unlock()
 
 	// Count by type
 	typeCounts := make(map[MediaType]int)
@@ -581,7 +598,11 @@ func TestDownloader_DownloadAll(t *testing.T) {
 }
 
 func TestDownloader_DownloadAll_IncludesFailedResults(t *testing.T) {
+	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/cover.jpg", r.URL.Path)
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer server.Close()
@@ -599,7 +620,7 @@ func TestDownloader_DownloadAll_IncludesFailedResults(t *testing.T) {
 	}
 
 	dl := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, nil)
-	results, err := dl.downloadAllWithExtrafanart(context.Background(), movie, tmpDir, nil, true)
+	results, err := dl.downloadAllWithExtrafanart(context.Background(), movie, tmpDir, nil, false)
 
 	// Cover is the only critical media and it failed — expect DownloadPartialError
 	var partial *DownloadPartialError
@@ -619,6 +640,7 @@ func TestDownloader_DownloadAll_IncludesFailedResults(t *testing.T) {
 	}
 
 	assert.True(t, foundCover, "expected cover result to be present even when download fails")
+	assert.Equal(t, int32(1), requests.Load(), "only the selected cover should be requested")
 }
 
 func TestResolveDownloadReferer(t *testing.T) {
@@ -1790,12 +1812,15 @@ func TestDownloader_DownloadAll_AllDisabled(t *testing.T) {
 		DownloadActress:     false,
 	}
 
-	downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), cfg, nil)
+	client := mocks.NewMockHTTPClient(t)
+	downloader := NewDownloader(client, afero.NewOsFs(), cfg, nil)
 
-	results, err := downloader.downloadAllWithExtrafanart(context.Background(), movie, tmpDir, nil, true)
+	results, err := downloader.downloadAllWithExtrafanart(context.Background(), movie, tmpDir, nil, false)
 	if err != nil {
 		t.Fatalf("downloadAll failed: %v", err)
 	}
+
+	client.AssertNotCalled(t, "Do", mock.Anything)
 
 	// Even when disabled, the methods return DownloadResult with Downloaded=false
 	// Verify that none were actually downloaded

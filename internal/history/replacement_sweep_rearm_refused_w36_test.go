@@ -106,10 +106,10 @@ func (f *w36DestGatePlantFs) LstatIfPossible(name string) (os.FileInfo, bool, er
 // onto the rearm-refused pending kind, the foreign claimant keeps the name,
 // and the verified bytes stay recoverable at the quarantine name.
 func TestSweepW36_ArmedLegFailedMoveBackMarksRearmRefused(t *testing.T) {
-	base := afero.NewMemMapFs()
+	base := afero.NewOsFs()
 	repo := newP3OpRepo()
 	plantFs := &w36QuarMovePlantFs{Fs: base}
-	op, dest, backup := w25SweepCrashOp(t, plantFs, repo, "W36A", []byte("original bytes"), "stamped")
+	op, dest, backup := w25SweepCrashOpInDir(t, plantFs, repo, t.TempDir(), "W36A", []byte("original bytes"), "stamped")
 	plantFs.plant, plantFs.bytes = backup, []byte("foreign claimant at the journaled name")
 
 	w32ScriptRestoredDestSeam(t, true, false)
@@ -136,10 +136,10 @@ func TestSweepW36_ArmedLegFailedMoveBackMarksRearmRefused(t *testing.T) {
 // in-process kind memory already routes this process's retries
 // journal-only, and the failure only surfaces.
 func TestSweepW36_ArmedLegFailedMoveBackMarkerPersistFailureKeepsArmed(t *testing.T) {
-	base := afero.NewMemMapFs()
-	repo := &w32FailNthJournalTxRepo{p3OpRepo: newP3OpRepo(), failAt: 2 /* 1 = the entry-presence read tx */, err: errors.New("w36 marker persist wedged")}
+	base := afero.NewOsFs()
+	repo := &w32FailNthJournalTxRepo{p3OpRepo: newP3OpRepo(), failAt: 3 /* 1 = Undo admission, 2 = entry-presence read */, err: errors.New("w36 marker persist wedged")}
 	plantFs := &w36QuarMovePlantFs{Fs: base}
-	op, dest, backup := w25SweepCrashOp(t, plantFs, repo.p3OpRepo, "W36B", []byte("original bytes"), "stamped")
+	op, dest, backup := w25SweepCrashOpInDir(t, plantFs, repo.p3OpRepo, t.TempDir(), "W36B", []byte("original bytes"), "stamped")
 	plantFs.plant, plantFs.bytes = backup, []byte("foreign claimant at the journaled name")
 
 	w32ScriptRestoredDestSeam(t, true, false)
@@ -306,10 +306,10 @@ func TestSweepW36_DurablePendingFailedMoveBackPersistFailureKeepsCleanDurable(t 
 // both causes, the durable entry is disarmed onto the rearm-refused pending
 // kind, and the verified bytes stay recoverable at the quarantine name.
 func TestRestoreReplacementJournalW36_FailedMoveBackMarksRearmRefused(t *testing.T) {
-	base := afero.NewMemMapFs()
+	base := afero.NewOsFs()
 	repo := newP3OpRepo()
 	plantFs := &w36QuarMovePlantFs{Fs: base}
-	op, dest, backup := w25ArmedOp(t, plantFs, repo, "W36R", []byte("new poster"), []byte("original poster"), "stamped")
+	op, dest, backup := w25ArmedOpInDir(t, plantFs, repo, t.TempDir(), "W36R", []byte("new poster"), []byte("original poster"), "stamped")
 	plantFs.plant, plantFs.bytes = backup, []byte("foreign claimant at the journaled name")
 
 	w32ScriptRestoredDestSeam(t, true, false)
@@ -335,10 +335,10 @@ func TestRestoreReplacementJournalW36_FailedMoveBackMarksRearmRefused(t *testing
 // both causes, but the durable entry keeps its ARMED posture (last-resort
 // logged) — never marked against the unproven name.
 func TestRestoreReplacementJournalW36_FailedMoveBackMarkerPersistFailureKeepsArmed(t *testing.T) {
-	base := afero.NewMemMapFs()
+	base := afero.NewOsFs()
 	repo := &w36FailFirstJournalTxRepo{p3OpRepo: newP3OpRepo(), err: errors.New("w36 marker persist wedged")}
 	plantFs := &w36QuarMovePlantFs{Fs: base}
-	op, dest, backup := w25ArmedOp(t, plantFs, repo.p3OpRepo, "W36P", []byte("new poster"), []byte("original poster"), "stamped")
+	op, dest, backup := w25ArmedOpInDir(t, plantFs, repo.p3OpRepo, t.TempDir(), "W36P", []byte("new poster"), []byte("original poster"), "stamped")
 	plantFs.plant, plantFs.bytes = backup, []byte("foreign claimant at the journaled name")
 
 	w32ScriptRestoredDestSeam(t, true, false)

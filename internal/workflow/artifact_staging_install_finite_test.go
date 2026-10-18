@@ -35,7 +35,7 @@ func TestPR260FiniteInstallRootInspectAndPreservedMedia(t *testing.T) {
 	stage.inPlace = true
 	fs.root = stage.root
 	fs.fail = true
-	_, err = stage.installTree("", "", nil, "", "")
+	_, err = stage.installTree("", "", nil, "", "", nil)
 	require.ErrorContains(t, err, "inspect staged artifact root")
 	pr260AssertNoFinals(t, base, dest)
 	pr260AssertRetained(t, base, source, subtitle, multipart, unrelated)
@@ -45,7 +45,7 @@ func TestPR260FiniteInstallRootInspectAndPreservedMedia(t *testing.T) {
 	require.NoError(t, afero.WriteFile(base, staged, []byte("replacement"), 0o644))
 	require.NoError(t, base.MkdirAll(dest, 0o755))
 	require.NoError(t, afero.WriteFile(base, target, []byte("current"), 0o644))
-	preserved, err := stage.installTree("", "", []string{staged}, "", "")
+	preserved, err := stage.installTree("", "", []string{staged}, "", "", nil)
 	require.NoError(t, err)
 	require.True(t, preserved)
 	b, err := afero.ReadFile(base, target)
@@ -55,7 +55,7 @@ func TestPR260FiniteInstallRootInspectAndPreservedMedia(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, exists)
 	stage.original.OverwriteExistingMedia = true
-	preserved, err = stage.installTree("", "", []string{staged}, "", "")
+	preserved, err = stage.installTree("", "", []string{staged}, "", "", nil)
 	require.NoError(t, err)
 	require.False(t, preserved)
 	b, err = afero.ReadFile(base, target)
@@ -73,7 +73,7 @@ func TestPR260FiniteInstallDirectoryTargetRetainsStagedPayload(t *testing.T) {
 	target := filepath.Join(dest, "artwork.jpg")
 	require.NoError(t, afero.WriteFile(base, staged, []byte("rendered"), 0o644))
 	require.NoError(t, base.MkdirAll(target, 0o755))
-	_, err = stage.installTree("", "", nil, "", "")
+	_, err = stage.installTree("", "", nil, "", "", nil)
 	require.ErrorContains(t, err, "artifact destination is a directory")
 	b, e := afero.ReadFile(base, staged)
 	require.NoError(t, e)

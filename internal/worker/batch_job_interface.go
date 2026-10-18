@@ -728,6 +728,8 @@ type ApplyPhaseConfig struct {
 	RetryFilePaths         []string // Apply only these previously failed result paths on retry
 	ApplyGenerationRef     *uint64  // Set to the actual lifecycle generation before apply starts
 
+	ExpectedApplyGeneration *uint64 // Optional retry fence checked atomically with the lifecycle launch claim
+
 	// Job-level config applied before apply starts
 	OperationModeOverride operationmode.OperationMode // resolved at factory boundary
 	Update                *bool                       // Update mode (in-place, no file organization); nil = don't change, true/false = set explicitly

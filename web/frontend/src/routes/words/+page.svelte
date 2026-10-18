@@ -42,6 +42,7 @@
 		replacementsQuery.error?.message ?? null,
 	);
 
+	let adding = $state(false);
 	let newOriginal = $state('');
 	let newReplacement = $state('');
 	let newMatchMode = $state<'literal' | 'wildcard'>('literal');
@@ -74,16 +75,33 @@
 
 	const addMutation = createMutation(() => ({
 		mutationFn: ({ original, replacement, match_mode }: { original: string; replacement: string; match_mode: 'literal' | 'wildcard' }) =>
-			apiClient.createWordReplacement({ original, replacement, match_mode }),
-		onSuccess: (_data, { original, replacement }) => {
-			newOriginal = '';
-			newReplacement = '';
-			newMatchMode = 'literal';
-			toastStore.success(m.words_added({ original, replacement }), 3000);
+			apiClient.createWordReplacement({
+				original: original.trim(),
+				replacement: replacement.trim(),
+				match_mode,
+			}),
+		onSuccess: (_data, { original, replacement, match_mode }) => {
+			// Clear only the submitted draft; inputs stay editable during the request.
+			if (
+				newOriginal === original &&
+				newReplacement === replacement &&
+				newMatchMode === match_mode
+			) {
+				newOriginal = '';
+				newReplacement = '';
+				newMatchMode = 'literal';
+			}
+			toastStore.success(
+				m.words_added({ original: original.trim(), replacement: replacement.trim() }),
+				3000,
+			);
 			void queryClient.invalidateQueries({ queryKey: ['word-replacements'] });
 		},
 		onError: (err: Error) => {
 			toastStore.error(err.message || m.words_add_failed(), 4000);
+		},
+		onSettled: () => {
+			adding = false;
 		}
 	}));
 
@@ -139,13 +157,20 @@
 	}));
 
 	function handleAdd() {
+		// Lock synchronously so rapid Enter/button events cannot race mutation state.
+		if (adding) return;
 		const original = newOriginal.trim();
 		const replacement = newReplacement.trim();
 		if (!original || !replacement) {
 			toastStore.error(m.words_both_fields_required(), 4000);
 			return;
 		}
-		addMutation.mutate({ original, replacement, match_mode: newMatchMode });
+		adding = true;
+		addMutation.mutate({
+			original: newOriginal,
+			replacement: newReplacement,
+			match_mode: newMatchMode,
+		});
 	}
 
 	function handleDelete(id: number) {
@@ -355,9 +380,9 @@
 								type="button"
 								size="sm"
 								onclick={handleAdd}
-								disabled={addMutation.isPending || !newOriginal.trim() || !newReplacement.trim()}
+								disabled={adding || !newOriginal.trim() || !newReplacement.trim()}
 							>
-								{#if addMutation.isPending}
+								{#if adding}
 									<Loader2 class="h-4 w-4 animate-spin mr-1" />
 								{:else}
 									<Plus class="h-4 w-4 mr-1" />

@@ -1351,10 +1351,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ApplyStartResponse"
                         }
                     },
                     "400": {
@@ -1370,7 +1367,7 @@ const docTemplate = `{
                         }
                     },
                     "409": {
-                        "description": "Persisted update plan must go through the update endpoint",
+                        "description": "Apply generation mismatch or persisted update plan must go through the update endpoint",
                         "schema": {
                             "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
                         }
@@ -2069,10 +2066,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ApplyStartResponse"
                         }
                     },
                     "400": {
@@ -2088,7 +2082,7 @@ const docTemplate = `{
                         }
                     },
                     "409": {
-                        "description": "Persisted organize plan must go through the organize endpoint",
+                        "description": "Apply generation mismatch or persisted organize plan must go through the organize endpoint",
                         "schema": {
                             "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
                         }
@@ -4827,6 +4821,17 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_javinizer_javinizer-go_internal_api_contracts.ApplyStartResponse": {
+            "type": "object",
+            "properties": {
+                "apply_generation": {
+                    "type": "integer"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_javinizer_javinizer-go_internal_api_contracts.AuthCredentialsRequest": {
             "type": "object",
             "required": [
@@ -5675,6 +5680,10 @@ const docTemplate = `{
                 "credited_name": {
                     "type": "string"
                 },
+                "display_force_canonical": {
+                    "description": "DisplayForceCanonical selects the catalog name even when credited names\nare enabled, so clients must include it in display-preview invalidation.",
+                    "type": "boolean"
+                },
                 "id": {
                     "type": "integer"
                 },
@@ -5683,6 +5692,10 @@ const docTemplate = `{
                 },
                 "override_name": {
                     "type": "string"
+                },
+                "render_visible": {
+                    "description": "RenderVisible mirrors MovieCredit.RenderVisible: false when the credit\ncannot contribute names to rendered output (suppressed, no actress, or\nthe actress is ambiguity-quarantined without verification).",
+                    "type": "boolean"
                 },
                 "reported_thumb_url": {
                     "type": "string"
@@ -6269,6 +6282,9 @@ const docTemplate = `{
                     "description": "Required for organize mode; optional for in-place modes",
                     "type": "string",
                     "example": "/path/to/output"
+                },
+                "expected_apply_generation": {
+                    "type": "integer"
                 },
                 "link_mode": {
                     "description": "Validated at the API layer (HTTP 400 for invalid)",
@@ -6950,6 +6966,9 @@ const docTemplate = `{
                         "merge",
                         "replace"
                     ]
+                },
+                "expected_apply_generation": {
+                    "type": "integer"
                 },
                 "force_overwrite": {
                     "type": "boolean"

@@ -252,42 +252,97 @@ video_file.avi
 
 ### "destination volume cannot express an atomic no-clobber write"
 
-**Problem**: Organize/move jobs fail per-file with this error when the destination volume cannot express an atomic no-replace publish — e.g. non-Linux POSIX volumes without hard links (exFAT on macOS is the typical case).
+**Problem**: A file cannot be published without risking replacement of an existing destination. On Linux, the no-replace rename and hard-link fallback must both be unavailable for this refusal.
 
-**Why**: Unauthorized organize writes are fail-closed: the alternative is a non-atomic publish that could overwrite a foreign file inside a race window — exactly what the #224 hardening rules out. Nothing was moved or deleted when this surfaces.
+**Why**: No-clobber writes fail closed. Checking that a destination is absent and then using an ordinary rename can overwrite a file created in between. Writing directly to an exclusively created final filename would expose incomplete contents. Neither is a substitute for atomic publication.
 
 **Solutions**:
 
-- Move the library destination onto a volume with atomic no-replace publish support (native Linux/Windows, or full POSIX volumes with hard links), or
-- run the organize in **force-update** mode deliberately for that library (authorized replace paths are unchanged), or
-- treat the affected files as conflicts and re-run after migrating the destination.
-
-
+- Use a publication path that supports an atomic no-replace operation under the application's actual account and mount configuration, or leave the affected files unprocessed.
+- Do not use force-update or relax permissions merely to bypass this safety refusal. Those changes do not establish the missing no-clobber guarantee.
 
 ### Unraid user shares (shfs): no-clobber preflight refuses
 
 An Unraid user-share destination such as `/mnt/user/Movies` may support neither
 `renameat2(RENAME_NOREPLACE)` nor hard links. A typical refusal reports
 `renameat2: invalid argument (EINVAL)` and `link: operation not permitted (EPERM)`.
-EPERM can also reflect hard-link protection policy, not just filesystem limitations.
+This does not mean all FUSE filesystems lack these operations: Linux FUSE supports
+both. In [Linux v6.18](https://github.com/torvalds/linux/blob/v6.18/fs/fuse/dir.c#L1097-L1164),
+a daemon's `ENOSYS` becomes `EINVAL` for rename-with-flags and `EPERM` for a link.
+That link-error mapping is kernel-dependent: older kernels can return `ENOSYS`
+instead. The daemon may also return `EINVAL` or `EPERM` directly, and `EPERM` can
+reflect hard-link protection policy. Errno alone does not identify the cause;
+see the [link error definitions](https://man7.org/linux/man-pages/man2/link.2.html).
+
+Docker bind mounts of local Unraid user shares use the local shfs path. This is
+different from an SMB client accessing a NAS; results from one do not validate
+the other.
 
 Javinizer probes the destination directory before streaming direct copies or
-cross-device moves, refusing unsupported destinations before any `.nrstg` payload
-is created. Same-volume moves still use their existing atomic publish directly.
+cross-device moves, including verified publication paths, refusing unsupported
+destinations before creating `.nrstg` payload staging or streaming the source
+payload into it. Earlier workflow admission or verification can still read files.
+Same-volume moves still use their existing atomic publish directly.
 Conclusive probe results are cached per directory for the process lifetime;
 transient failures are retried on a later file. Restart after changing mounts or
-hard-link policy. Every final file publish still enforces atomic no-clobber.
+account configuration. A successful probe is advisory: every final file publish
+still enforces atomic no-clobber.
 
-**Remedy**: bind-mount a native disk path, for example
-`/mnt/disk1/Movies:/storage` (generally `/mnt/diskN/...`), rather than an Unraid
-user-share path. Alternatively, organize into native-filesystem local staging,
-then use an external sync tool with your intended destination conflict policy.
-There is no non-atomic fallback for unauthorized writes.
+**Candidate workarounds, subject to the same capability checks**:
+
+- Bind-mount the actual disk or pool directory, such as
+  `/mnt/disk1/Movies:/storage` or `/mnt/pool-name/Movies:/storage`, to bypass shfs.
+  A disk path exposes only that disk's files, not the combined user share.
+- For a pool-only share, Unraid's **Exclusive Shares** can bypass shfs without
+  changing the share name. Enable **Permit exclusive shares**, select the pool
+  as Primary storage and `none` as Secondary storage, and verify **Exclusive
+  access: Yes**. The share must not also exist on other volumes. Exclusive shares
+  bypass the share/pool minimum-free-space settings; allow sufficient free space.
+  See [Unraid's prerequisites](https://docs.unraid.net/unraid-os/release-notes/6.12.0/#exclusive-shares).
+- Keep each temporary publication file and its final target on the same mounted
+  filesystem. Separate bind mounts can still produce `EXDEV`, even over the same
+  underlying filesystem; separate ZFS datasets are not one filesystem merely
+  because they share a pool. A cross-filesystem source can be copied, but final
+  publication must occur within the destination filesystem.
+  See [rename restrictions](https://man7.org/linux/man-pages/man2/renameat2.2.html).
+
+> **Critical: do not copy or move between `/mnt/user/...` and its
+> `/mnt/diskN/...` or `/mnt/pool-name/...` aliases.** They may name the same files.
+> Unraid warns that mixing these views can cause corruption or permanent data
+> loss. Changing a bind-mount path is not an instruction to migrate data between
+> those aliases. Follow the [official share guidelines](https://docs.unraid.net/unraid-os/using-unraid-to/manage-storage/shares/#disk-share-guidelines).
+
+Check the path named in the error, including hidden transaction directories.
+Older reports in [issue #252](https://github.com/javinizer/javinizer-go/issues/252)
+show source-adjacent `.javinizer-apply-*` staging. Current organize-mode staging
+uses the planned destination's deepest existing directory where available,
+including separately mounted movie folders; videos and multipart payloads are
+deferred to final publication rather than eagerly copied into `.source`.
+In-place copy operations can still copy inside staging. `system.temp_dir` does
+not override all atomic-publication staging locations. Source-side claims may
+also require a capable source path; changing only the destination mount does not
+resolve every source-side failure.
+
+Local staging followed by an external sync only preserves end-to-end no-clobber
+semantics if that sync independently provides them. Neither these workarounds nor
+a successful probe establish universal Unraid/NAS compatibility; there is no
+non-atomic fallback for no-clobber writes.
 
 If probe cleanup cannot prove ownership or unlink safely, a warning identifies
-the retained zero-byte `.nrprobe.*` file. Cleanup failure does not change the
-capability verdict. Inspect retained files before manually removing them; a
-foreign substitution must not be treated as disposable probe residue.
+the retained zero-byte `.nrprobe.*` file. A warning from later scratch cleanup
+does not change an already established capability verdict. Inspect retained
+files before manually removing them; a foreign substitution must not be treated
+as disposable probe residue.
+An `internal probe published with incomplete cleanup` error concerns only the
+synthetic probe, not publication of the requested payload. It stops that attempt
+and is retried on a later operation rather than cached as a capability result.
+
+**Developer validation**: the opt-in [isolated FUSE harness](../tests/fuseintegration/README.md)
+uses synthetic local fixtures and actual FUSE syscall paths on a disposable Linux
+host with FUSE already available. It does not need a personal NAS, network share,
+or real media. Compilation and injected-error tests do not count as a mounted
+FUSE pass; even a mounted pass does not validate Unraid's shfs implementation,
+SMB/NFS servers, or production NAS configuration.
 
 ### "File already exists"
 
@@ -501,3 +556,37 @@ javinizer sort /path --dry-run 2>&1 | tee debug.log
 ---
 
 **Return to**: [Getting Started](./01-getting-started.md)
+
+## Resident publication reconciliation is pending
+
+If Undo reports that resident publication reconciliation is pending, it has
+retained a durable safety hold because publication or rollback did not finish
+writing its history journal. Undo will refuse filesystem changes for that row;
+repeated Undo requests do not clear the hold. History retention also keeps it.
+
+Keep the database and affected files together for manual recovery. Do not clear
+`publication_pending` manually or run an older Javinizer binary against this
+database: older versions do not recognize this safety hold. Recovery must use
+the original publication/rollback ownership proofs, not merely the current
+contents at the recorded paths. If the final write could not be retried before
+the process exited, automatic recovery of this row is intentionally unavailable.
+
+Undo and resident publication now arbitrate atomically through the same database
+journal, including requests using separate database connections. Once Undo (or
+journal-authorized backup recovery) begins, `undo_started` permanently prevents
+that operation from admitting a new resident publication checkpoint. Failed or
+skipped Undo can still be retried; they do not reopen publication. Do not manually
+clear either admission marker. This arbitration does not make older binaries
+safe to run concurrently against this database.
+
+Apply journal completion is also durable. A committed `apply_terminal` record
+closes all Apply journal writers, including delayed replacement and intent
+updates. The terminal journal and its path/status metadata commit atomically.
+An exact retry of the same terminal payload is a no-op; it rewrites neither
+journal nor metadata. A conflicting later completion is refused, so a delayed success cannot replace failed recovery history. Do not
+edit these terminal records or open the database with an older binary to bypass
+the refusal.
+A failure terminal committed without recovery proofs while publication is held
+cannot be replaced with a different result later; that row requires manual
+recovery. If the terminal transaction itself failed, retrying the original
+carried recovery result is still permitted.

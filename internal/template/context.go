@@ -145,14 +145,21 @@ func NewContextFromMovieWithOptions(movie *models.Movie, opts ContextOptions) *C
 	}
 
 	// Build actress list using config-aware name formatting
-	if opts.RenderCredits && len(movie.Credits) > 0 {
-		for _, credit := range movie.Credits {
-			if credit.Suppressed || credit.Actress == nil || (!credit.Actress.Verified && credit.Actress.AmbiguityQuarantined) {
+	if credits, present := movie.RenderingCredits(); opts.RenderCredits && present {
+		for _, credit := range credits {
+			if !credit.RenderVisible() {
 				continue
 			}
 			actress := *credit.Actress
-			canonical := models.FormatActressName(actress, models.FormatActressNameOptions{FirstNameOrder: opts.FirstNameOrder})
+			// Select against the actual identity name, before any Unknown placeholder.
+			canonical := models.FormatActressName(actress, models.FormatActressNameOptions{
+				FirstNameOrder: opts.FirstNameOrder, UnknownActressMode: models.UnknownActressModeSkip,
+			})
 			name, selected := credit.RenderNameWithSelection(opts.UseCreditedName, canonical)
+			if name == "" {
+				// Retain the legacy preformatted-list placeholder after selection.
+				name = models.FormatActressName(actress, models.FormatActressNameOptions{FirstNameOrder: opts.FirstNameOrder})
+			}
 			detail := ActressDetail{FirstName: actress.FirstName, LastName: actress.LastName, JapaneseName: actress.JapaneseName}
 			if selected {
 				detail = ActressDetail{FirstName: name}

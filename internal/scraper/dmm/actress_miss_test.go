@@ -33,7 +33,7 @@ func TestExtractActresses_JapaneseLabelVariants(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			html := `<table><tr><td>` + tt.label + `</td><td><a href="?actress=777">Test Actress</a></td></tr></table>`
 			doc := docFromHTMLDMM(t, html)
-			s := newTestDMMScraper()
+			s := newTestDMMScraper(t)
 			actresses := s.extractActresses(context.Background(), doc)
 			assert.Len(t, actresses, tt.want)
 		})
@@ -48,7 +48,7 @@ func TestExtractActresses_MultipleRows_OnlyActressExtracted(t *testing.T) {
 		<tr><td>Maker:</td><td>Some Maker</td></tr>
 	</table>`
 	doc := docFromHTMLDMM(t, html)
-	s := newTestDMMScraper()
+	s := newTestDMMScraper(t)
 	actresses := s.extractActresses(context.Background(), doc)
 	assert.Len(t, actresses, 1)
 	assert.Equal(t, 10, actresses[0].DMMID)
@@ -57,7 +57,7 @@ func TestExtractActresses_MultipleRows_OnlyActressExtracted(t *testing.T) {
 func TestExtractActresses_EmptyContentCell(t *testing.T) {
 	html := `<table><tr><td>Actress:</td><td></td></tr></table>`
 	doc := docFromHTMLDMM(t, html)
-	s := newTestDMMScraper()
+	s := newTestDMMScraper(t)
 	actresses := s.extractActresses(context.Background(), doc)
 	assert.Len(t, actresses, 0)
 }
@@ -65,7 +65,7 @@ func TestExtractActresses_EmptyContentCell(t *testing.T) {
 func TestExtractActresses_NoContentCell(t *testing.T) {
 	html := `<table><tr><td>Actress:</td></tr></table>`
 	doc := docFromHTMLDMM(t, html)
-	s := newTestDMMScraper()
+	s := newTestDMMScraper(t)
 	actresses := s.extractActresses(context.Background(), doc)
 	assert.Len(t, actresses, 0)
 }
@@ -74,7 +74,7 @@ func TestExtractActresses_NameSwapWhenJapaneseEmpty(t *testing.T) {
 	// When JapaneseName is empty but FirstName and LastName are set, they should be swapped
 	html := `<table><tr><td>Actress:</td><td><a href="?actress=888">Hatano Yui</a></td></tr></table>`
 	doc := docFromHTMLDMM(t, html)
-	s := newTestDMMScraper()
+	s := newTestDMMScraper(t)
 	actresses := s.extractActresses(context.Background(), doc)
 	require.Len(t, actresses, 1)
 	// In the link extraction, romaji name "Hatano Yui" -> FirstName="Hatano", LastName="Yui"
@@ -88,7 +88,7 @@ func TestExtractActresses_NameSwapWhenJapaneseEmpty(t *testing.T) {
 func TestExtractActressesFromStreamingPage_DataE2eidWithNoValidActress(t *testing.T) {
 	html := `<div data-e2eid="actress-information"><a href="/no-actress-id">No ID</a></div>`
 	doc := docFromHTMLDMM(t, html)
-	s := newTestDMMScraper()
+	s := newTestDMMScraper(t)
 	actresses := s.extractActressesFromStreamingPage(context.Background(), doc)
 	assert.Len(t, actresses, 0)
 }
@@ -96,7 +96,7 @@ func TestExtractActressesFromStreamingPage_DataE2eidWithNoValidActress(t *testin
 func TestExtractActressesFromStreamingPage_ProductInfoMetadataFallback(t *testing.T) {
 	html := `<div class="product-info"><a href="?actress=700">PI Actress</a></div>`
 	doc := docFromHTMLDMM(t, html)
-	s := newTestDMMScraper()
+	s := newTestDMMScraper(t)
 	actresses := s.extractActressesFromStreamingPage(context.Background(), doc)
 	assert.Len(t, actresses, 1)
 	assert.Equal(t, 700, actresses[0].DMMID)
@@ -105,7 +105,7 @@ func TestExtractActressesFromStreamingPage_ProductInfoMetadataFallback(t *testin
 func TestExtractActressesFromStreamingPage_CmnDetailMetadataFallback(t *testing.T) {
 	html := `<div class="cmn-detail"><a href="?actress=800">Cmn Actress</a></div>`
 	doc := docFromHTMLDMM(t, html)
-	s := newTestDMMScraper()
+	s := newTestDMMScraper(t)
 	actresses := s.extractActressesFromStreamingPage(context.Background(), doc)
 	assert.Len(t, actresses, 1)
 	assert.Equal(t, 800, actresses[0].DMMID)
@@ -114,7 +114,7 @@ func TestExtractActressesFromStreamingPage_CmnDetailMetadataFallback(t *testing.
 func TestExtractActressesFromStreamingPage_ProductDataMetadataFallback(t *testing.T) {
 	html := `<div class="productData"><a href="?actress=900">PD Actress</a></div>`
 	doc := docFromHTMLDMM(t, html)
-	s := newTestDMMScraper()
+	s := newTestDMMScraper(t)
 	actresses := s.extractActressesFromStreamingPage(context.Background(), doc)
 	assert.Len(t, actresses, 1)
 	assert.Equal(t, 900, actresses[0].DMMID)
@@ -125,7 +125,7 @@ func TestExtractActressesFromStreamingPage_ProductDataMetadataFallback(t *testin
 func TestExtractActressFromLink_SingleWordName(t *testing.T) {
 	doc := docFromHTMLDMM(t, `<a href="?actress=555">Mononame</a>`)
 	sel := doc.Find("a").First()
-	s := newTestDMMScraper()
+	s := newTestDMMScraper(t)
 	actress := s.extractActressFromLink(context.Background(), sel)
 	assert.Equal(t, 555, actress.DMMID)
 	assert.Equal(t, "Mononame", actress.FirstName)
@@ -163,26 +163,23 @@ func TestNormalizeActressThumbURL_LeadingWhitespace(t *testing.T) {
 // --- tryActressThumbURLs: httptest server-based test ---
 
 func TestTryActressThumbURLs_FoundViaHTTP(t *testing.T) {
+	calls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodHead {
-			w.WriteHeader(http.StatusOK)
-		} else {
-			w.WriteHeader(http.StatusNotFound)
-		}
+		calls++
+		assert.Equal(t, http.MethodHead, r.Method)
+		assert.Equal(t, "/mono/actjpgs/hatano_yui.jpg", r.URL.Path)
+		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
-
-	// We can't easily control the candidate URL generation since it uses hardcoded domains,
-	// but we can test that the function doesn't panic and returns a result (possibly empty or real)
-	s := newTestDMMScraper()
-	result := s.tryActressThumbURLs(context.Background(), "Yui", "Hatano", 12345)
-	// The result may be empty (if DMM is unreachable) or a URL (if DMM responded)
-	// The key test is that it doesn't panic
-	_ = result
+	s := newTestDMMScraper(t)
+	s.thumbnailClient.SetTransport(&dmmTestTransport{server: server})
+	result := s.tryActressThumbURLs(context.Background(), "Yui", "Hatano", 0)
+	assert.Equal(t, "https://pics.dmm.co.jp/mono/actjpgs/hatano_yui.jpg", result)
+	assert.Equal(t, 1, calls)
 }
 
 func TestTryActressThumbURLs_NoCandidatesWhenNoNames(t *testing.T) {
-	s := newTestDMMScraper()
+	s := newTestDMMScraper(t)
 	// With empty names and no DMM ID, there should be no candidates
 	result := s.tryActressThumbURLs(context.Background(), "", "", 0)
 	assert.Empty(t, result)
@@ -220,7 +217,7 @@ func TestExtractRomajiVariantsFromActressPageCtx_Success(t *testing.T) {
 }
 
 func TestExtractRomajiVariantsFromActressPageCtx_HTTPErrors(t *testing.T) {
-	s := newTestDMMScraper()
+	s := newTestDMMScraper(t)
 	// With a cancelled context, the function should return nil
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -322,7 +319,7 @@ func TestExtractActressFromLink_ThumbFromParentImg(t *testing.T) {
 	html := `<td><img src="https://pics.dmm.co.jp/mono/actjpgs/parent_img.jpg" /><a href="?actress=333">Name</a></td>`
 	doc := docFromHTMLDMM(t, html)
 	sel := doc.Find("a").First()
-	s := newTestDMMScraper()
+	s := newTestDMMScraper(t)
 	actress := s.extractActressFromLink(context.Background(), sel)
 	assert.Equal(t, 333, actress.DMMID)
 	assert.Contains(t, actress.ThumbURL, "parent_img.jpg")
@@ -333,7 +330,7 @@ func TestExtractActressFromLink_ThumbFromParentImg(t *testing.T) {
 func TestExtractActresses_AmpersandActressParam(t *testing.T) {
 	html := `<table><tr><td>Actress:</td><td><a href="/search?sort=rank&actress=445">Amp Actress</a></td></tr></table>`
 	doc := docFromHTMLDMM(t, html)
-	s := newTestDMMScraper()
+	s := newTestDMMScraper(t)
 	actresses := s.extractActresses(context.Background(), doc)
 	require.Len(t, actresses, 1)
 	assert.Equal(t, 445, actresses[0].DMMID)
@@ -344,7 +341,7 @@ func TestExtractActresses_AmpersandActressParam(t *testing.T) {
 func TestExtractActresses_ArticleFormat(t *testing.T) {
 	html := `<table><tr><td>Actress:</td><td><a href="/mono/dvd/-/list/=/article=actress/id=5567/">Article Actress</a></td></tr></table>`
 	doc := docFromHTMLDMM(t, html)
-	s := newTestDMMScraper()
+	s := newTestDMMScraper(t)
 	actresses := s.extractActresses(context.Background(), doc)
 	require.Len(t, actresses, 1)
 	assert.Equal(t, 5567, actresses[0].DMMID)
@@ -355,7 +352,7 @@ func TestExtractActresses_ArticleFormat(t *testing.T) {
 func TestExtractActressesFromStreamingPage_HeadingNoContainer(t *testing.T) {
 	html := `<h2>この商品に出演しているAV女優</h2><p>No links here</p>`
 	doc := docFromHTMLDMM(t, html)
-	s := newTestDMMScraper()
+	s := newTestDMMScraper(t)
 	actresses := s.extractActressesFromStreamingPage(context.Background(), doc)
 	assert.Len(t, actresses, 0)
 }
@@ -374,7 +371,7 @@ func TestExtractActressesFromStreamingPage_HeadingStopsOnFirstMatch(t *testing.T
 		<a href="?actress=222">Second Match</a>
 	</div>`
 	doc := docFromHTMLDMM(t, html)
-	s := newTestDMMScraper()
+	s := newTestDMMScraper(t)
 	actresses := s.extractActressesFromStreamingPage(context.Background(), doc)
 	// Both headings match, and the function collects all of them (upsert prevents duplicates)
 	assert.GreaterOrEqual(t, len(actresses), 1)
@@ -387,7 +384,7 @@ func TestExtractActressesFromStreamingPage_TableMetadataActressParam(t *testing.
 	// which looks for a[href*='?actress='] within table elements
 	html := `<table><tr><td><a href="?actress=12345">Table Actress</a></td></tr></table>`
 	doc := docFromHTMLDMM(t, html)
-	s := newTestDMMScraper()
+	s := newTestDMMScraper(t)
 	actresses := s.extractActressesFromStreamingPage(context.Background(), doc)
 	// May or may not find depending on goquery CSS selector matching
 	// The key is it doesn't panic
@@ -421,7 +418,7 @@ func TestExtractActressFromLink_ImgSrcsetWithDescriptor(t *testing.T) {
 	html := `<a href="?actress=444"><img srcset="https://pics.dmm.co.jp/mono/actjpgs/srcset_desc.jpg 2x" />Name</a>`
 	doc := docFromHTMLDMM(t, html)
 	sel := doc.Find("a").First()
-	s := newTestDMMScraper()
+	s := newTestDMMScraper(t)
 	actress := s.extractActressFromLink(context.Background(), sel)
 	assert.Equal(t, 444, actress.DMMID)
 	assert.Contains(t, actress.ThumbURL, "srcset_desc.jpg")

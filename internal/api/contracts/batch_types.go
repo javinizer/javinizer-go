@@ -268,8 +268,16 @@ type ExistingNFOResponse struct {
 	NFODifferences []FieldDifference `json:"nfo_differences,omitempty"`
 }
 
+// ApplyStartResponse acknowledges an apply launch with its request-owned receipt.
+type ApplyStartResponse struct {
+	Message         string `json:"message"`
+	ApplyGeneration uint64 `json:"apply_generation,omitempty"`
+}
+
 // UpdateRequest represents a batch update request.
 type UpdateRequest struct {
+	ExpectedApplyGeneration *uint64 `json:"expected_apply_generation,omitempty"`
+
 	Overrides              *ReviewApplyOverrides `json:"overrides,omitempty"`
 	ForceOverwrite         bool                  `json:"force_overwrite"`
 	OverwriteExistingMedia bool                  `json:"overwrite_existing_media" example:"false" default:"false"`
@@ -300,6 +308,8 @@ func (r UpdateRequest) Has(field string) bool { return r.present[field] }
 
 // OrganizeRequest represents an organize request
 type OrganizeRequest struct {
+	ExpectedApplyGeneration *uint64 `json:"expected_apply_generation,omitempty"`
+
 	Overrides      *ReviewApplyOverrides `json:"overrides,omitempty"`
 	Destination    string                `json:"destination" example:"/path/to/output"` // Required for organize mode; optional for in-place modes
 	CopyOnly       bool                  `json:"copy_only" example:"false"`

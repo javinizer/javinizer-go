@@ -39,7 +39,7 @@ This project uses standard Go tooling for testing and coverage.
 | Command | Description | When to Use |
 |---------|-------------|-------------|
 | `make test` | Run all tests with verbose output | Default test command |
-| `make test-short` | Run only fast tests (skips slow integration tests) | Quick validation, pre-commit |
+| `make test-short` | Run offline short tests with a 300s Windows / 120s other-platform per-package timeout | Quick validation, pre-commit |
 | `make test-race` | Run race detector on concurrent packages | Before committing concurrent code changes |
 | `make test-verbose` | Run tests with verbose output and no caching | Debugging test failures |
 | `make bench` | Run benchmark tests | Performance testing |
@@ -48,6 +48,46 @@ This project uses standard Go tooling for testing and coverage.
 | `make coverage-pkg` | Display coverage breakdown by package | Identify specific gaps |
 | `make coverage-check` | Verify Codecov-compatible line coverage meets 75% threshold | Pre-push validation |
 | `make ci` | Run full CI suite locally (vet, lint, vuln, coverage-check, test-race, config-drift, check-import-guard, check-mocks) | Before opening PR |
+
+### Short Tests and Live-Network Opt-Ins
+
+Short tests must use synthetic fixtures, temporary local files/databases, local
+`httptest` servers, or mocked HTTP transports instead of depending on live
+services. Keep the live-test environment variables below unset for routine
+validation. Download the required Go toolchain and module dependencies before
+running in an offline environment.
+
+```bash
+# Fast regression suite, including deterministic network-error paths
+make test-short
+
+# Increase the per-package timeout on a slower machine
+make test-short TEST_SHORT_TIMEOUT=360s
+
+# Direct invocation on non-Windows platforms, without cached test results
+go test -short -count=1 -timeout=120s ./...
+```
+
+`TEST_SHORT_TIMEOUT` defaults to `300s` when `OS=Windows_NT` and `120s` otherwise.
+The Windows budget accommodates SQLite-heavy packages that take over 200 seconds
+on hosted runners; callers can override either default. Go's timeout applies to
+each package's test binary, not to the total build and test command. The offline
+CI uses the same platform budgets, while its guard canaries retain a 120-second
+deadline. Short mode selects tests; it does not enforce network isolation.
+
+Run live tests explicitly, without `-short`, when external services are available:
+
+```bash
+# Live API checks (r18.dev, AVEntertainment, and DLGetchu)
+JAVINIZER_RUN_LIVE_API_TESTS=1 go test -count=1 -v ./internal/scraper/r18dev ./internal/scraper/aventertainment ./internal/scraper/dlgetchu
+
+# Live DMM CDN sampling; also requires /tmp/r18dev_dump.sql
+JAVINIZER_RUN_LIVE_API_TESTS=1 go test -count=1 -v -run '^TestDiscoverScreenshotsSampling$' ./internal/imageutil
+
+# FlareSolverr/JavLibrary integration checks; requires a running FlareSolverr
+JAVINIZER_RUN_FLARESOLVERR_TESTS=1 go test -count=1 -v ./internal/httpclient ./internal/scraper/javlibrary
+```
+
 ### Running Specific Package Tests
 
 ```bash

@@ -402,6 +402,11 @@ export interface BatchScrapeResponse {
 
 export type ScraperErrorKind = 'not_found' | 'unavailable' | 'rate_limited' | 'blocked' | 'unknown';
 
+export type FileResultErrorCode =
+	| ScraperErrorKind
+	| 'credit_conflict'
+	| 'credit_status_unavailable';
+
 export interface FileResult {
 	result_id: string;
 	file_path: string;
@@ -410,7 +415,7 @@ export interface FileResult {
 	/** POSTER-WRITE-HARDENING D12: server CAS token for review saves. */
 	revision?: number;
 	error?: string;
-	error_code?: ScraperErrorKind;
+	error_code?: FileResultErrorCode;
 	/**
 	 * Translation warning fields (full results). Slim payloads carry the code
 	 * only, so mid-run badges must key off `translation_warning_code` alone.
@@ -644,6 +649,7 @@ export interface MovieCredit {
 	suppressed?: boolean;
 	legacy_inferred?: boolean;
 	display_force_canonical?: boolean;
+	render_visible?: boolean;
 	actress?: Actress;
 	created_at?: string;
 	updated_at?: string;
@@ -786,6 +792,7 @@ export interface HealthResponse {
 }
 
 export interface UpdateRequest {
+	expected_apply_generation?: number;
 	overrides?: ReviewApplyOverrides;
 	force_overwrite?: boolean;
 	overwrite_existing_media?: boolean;
@@ -804,6 +811,7 @@ export interface UpdateRequest {
 }
 
 export interface OrganizeRequest {
+	expected_apply_generation?: number;
 	overrides?: ReviewApplyOverrides;
 	destination: string;
 	copy_only?: boolean;
@@ -816,6 +824,7 @@ export interface OrganizeRequest {
 
 export interface OrganizeResponse {
 	message: string;
+	apply_generation?: number;
 }
 
 export interface OrganizePreviewRequest {

@@ -223,7 +223,7 @@ func TestDependencies_GetConfig_AtomicPointer(t *testing.T) {
 
 func TestDependencies_GetConfig_PanicsOnNil(t *testing.T) {
 	deps := &CoreDeps{}
-	assert.Panics(t, func() {
+	assert.PanicsWithValue(t, "commandutil: GetConfig() called with nil config — this is a construction bug; use NewDependenciesWithOptions to construct CoreDeps with a valid config", func() {
 		deps.GetConfig()
 	}, "GetConfig should panic when no config has been set")
 }
@@ -239,7 +239,7 @@ func TestDependencies_SetConfig_PanicsOnNil(t *testing.T) {
 // This indicates a construction bug — NewDependenciesWithOptions always initializes the registry.
 func TestDependencies_GetRegistry_PanicsOnNil(t *testing.T) {
 	deps := &CoreDeps{}
-	assert.Panics(t, func() {
+	assert.PanicsWithValue(t, "commandutil: GetRegistry() called with nil ScraperRegistry — this is a construction bug; use NewDependenciesWithOptions to construct CoreDeps properly", func() {
 		deps.GetRegistry()
 	}, "GetRegistry should panic when ScraperRegistry is nil")
 }
@@ -335,4 +335,20 @@ func TestCoreDeps_SetBundleUpdater(t *testing.T) {
 	assert.NotNil(t, deps.BundleUpdater(), "BundleUpdater should be set")
 	deps.SetBundleUpdater(nil)
 	assert.Nil(t, deps.BundleUpdater(), "BundleUpdater should be nil after reset")
+}
+
+// Nil receivers are construction errors, just like missing config or registry.
+// Require deliberate validation panics rather than incidental memory faults.
+func TestCoreDeps_NilReceiverAccessors(t *testing.T) {
+	var deps *CoreDeps
+	t.Run("GetConfig", func(t *testing.T) {
+		assert.PanicsWithValue(t, "commandutil: GetConfig() called with nil CoreDeps — this is a construction bug", func() {
+			deps.GetConfig()
+		})
+	})
+	t.Run("GetRegistry", func(t *testing.T) {
+		assert.PanicsWithValue(t, "commandutil: GetRegistry() called with nil CoreDeps — this is a construction bug", func() {
+			deps.GetRegistry()
+		})
+	})
 }

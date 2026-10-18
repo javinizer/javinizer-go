@@ -247,6 +247,7 @@ func TestPR260RealArtifactFencedModes(t *testing.T) {
 				return
 			}
 			orch := pr260RealApply(fs, &movie, media, server.Client(), true)
+			orch.organizer = organizer.NewOrganizer(fs, &organizer.Config{MediaFormatConfig: media, FolderFormat: "<ACTRESS>", FileFormat: "<ID>", RenameFile: true, MoveSubtitles: true, SubtitleExtensions: []string{".srt"}, OperationMode: operationmode.OperationModeOrganize}, nil, nil)
 			cmd := pr260FencedCommand(&movie, match, finalRoot, counter, tt.mode, tt.skip, tt.move, tt.link, true, true)
 			if tt.kind == "cancel" {
 				ctx, cancel := context.WithCancel(context.Background())

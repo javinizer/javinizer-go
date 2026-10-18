@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/javinizer/javinizer-go/internal/models"
 	"os"
 	"path/filepath"
+	"slices"
 
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/nfo"
@@ -115,10 +117,18 @@ func (o *compareOrchImpl) Execute(ctx context.Context, cmd CompareCmd) (*Compare
 	// DisplayTitle there), so merge with a remapped copy; NFOData keeps the raw
 	// file values for the diff view.
 	nfoForMerge := *result.NFOData
+	// Compare uses fresh raw scraper data, not the durable credit ledger. Its
+	// legacy-field preview cannot authenticate an existing presentation link.
+	// Apply reparses the file and validates links/choices before publication.
+	links, _ := nfoForMerge.NFOActorLinks()
+	if slices.ContainsFunc(links, func(row []models.ActorPresentationLink) bool { return len(row) > 0 }) {
+		resolveLogger(o.logger).Warnf("[workflow] Compare shows NFO presentation without validating credit links; Apply will validate the authoritative cast before publication")
+	}
+	nfoForMerge.SetNFOActorLinks(nil)
 	nfo.RemapParsedNFOTitleForMerge(&nfoForMerge, result.ScrapedData.Title)
 	mergeResult, mergeErr := nfo.MergeMovieMetadataWithOptions(result.ScrapedData, &nfoForMerge, scalarStrategy, mergeArrays)
 	if mergeErr != nil {
-		return nil, fmt.Errorf("%w: %s", ErrMergeFailed, mergeErr.Error())
+		return nil, fmt.Errorf("%w: %w", ErrMergeFailed, mergeErr)
 	}
 
 	result.Movie = mergeResult.Merged

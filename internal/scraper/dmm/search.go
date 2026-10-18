@@ -157,6 +157,10 @@ func (s *scraper) tryDirectURLs(ctx context.Context, contentID string) []urlCand
 
 	var candidates []urlCandidate
 	for _, directURL := range directURLs {
+		// A cancelled probe must not reserve a slot needed by another caller.
+		if ctx.Err() != nil {
+			return candidates
+		}
 		if err := s.rateLimiter.Wait(ctx); err != nil {
 			if ctx.Err() != nil {
 				logging.Debugf("DMM: Context cancelled trying direct URL")
@@ -165,8 +169,13 @@ func (s *scraper) tryDirectURLs(ctx context.Context, contentID string) []urlCand
 			logging.Debugf("DMM: Rate limit wait failed for direct URL: %v", err)
 			continue
 		}
+		// An immediately available rate-limit slot may not check cancellation.
+		if ctx.Err() != nil {
+			return candidates
+		}
 
 		resp, err := s.client.R().
+			SetContext(ctx).
 			SetDoNotParseResponse(true).
 			Get(directURL)
 		if err != nil {
@@ -227,7 +236,7 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 	if strings.Contains(url, "video.dmm.co.jp") && s.useBrowser {
 		logging.Debug("DMM: Using browser mode for video.dmm.co.jp page")
 
-		bodyHTML, err := fetchWithBrowser(ctx, url, s.browserConfig.Timeout, s.proxyProfile, s.getEnvLookup(), s.getFs())
+		bodyHTML, err := s.fetchBrowserHTML(ctx, url)
 		if err != nil {
 			return nil, fmt.Errorf("browser fetch failed: %w", err)
 		}
@@ -273,7 +282,7 @@ func (s *scraper) ScrapeURL(ctx context.Context, url string) (*models.ScraperRes
 	if strings.Contains(url, "video.dmm.co.jp") && s.useBrowser {
 		logging.Debug("DMM ScrapeURL: Using browser mode for video.dmm.co.jp page")
 
-		bodyHTML, err := fetchWithBrowser(ctx, url, s.browserConfig.Timeout, s.proxyProfile, s.getEnvLookup(), s.getFs())
+		bodyHTML, err := s.fetchBrowserHTML(ctx, url)
 		if err != nil {
 			return nil, models.NewScraperStatusError("DMM", 0, fmt.Sprintf("browser fetch failed: %v", err))
 		}

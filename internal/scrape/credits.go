@@ -47,6 +47,12 @@ func BuildCreditsFromScrape(movie *models.Movie, actressSources map[string]strin
 				}
 			}
 		}
+		// Aggregation retains the selected raw record across alias conversion.
+		// Do not infer its identity by matching a renamed canonical spelling.
+		if selectedSource, info, _ := actress.ScrapeEvidence(); strings.TrimSpace(selectedSource) != "" {
+			source = strings.TrimSpace(selectedSource)
+			creditedName, creditedJP, reportedThumb = infoFullName(info), info.JapaneseName, info.ThumbURL
+		}
 		actresses = append(actresses, actress)
 		credits = append(credits, models.MovieCredit{CreditedName: creditedName, CreditedJapaneseName: creditedJP, ReportedThumbURL: reportedThumb, Source: source, Origin: string(models.CreditOriginScrape), OrderIndex: len(credits), Scraped: actress})
 	}
@@ -243,6 +249,10 @@ func mergeActressComponent(actresses []models.Actress, component []int) models.A
 	merged := actresses[component[0]]
 	for _, index := range component[1:] {
 		candidate := actresses[index]
+		selectedSource, _, selectedPriority := merged.ScrapeEvidence()
+		if source, info, priority := candidate.ScrapeEvidence(); source != "" && (selectedSource == "" || priority < selectedPriority) {
+			merged.SetScrapeEvidence(source, info, priority)
+		}
 		if merged.ID == 0 {
 			merged.ID = candidate.ID
 		}

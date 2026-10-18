@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/logging"
@@ -24,6 +25,9 @@ import (
 type OrchestrationMeta struct {
 	models.OrchestrationState `json:",inline"`
 	NeedsPersistence          bool `json:"needs_persistence,omitempty"` // true if the scraper returned a cache hit that needs re-persistence (e.g. re-translated)
+	// RenderDisplayTitle travels with deferred persistence so it uses the same
+	// configuration after the repository has resolved authoritative credits.
+	RenderDisplayTitle database.DisplayTitleRenderer `json:"-"`
 }
 
 // scrapeOrchestrator is the internal interface for the Scrape phase.
@@ -56,11 +60,10 @@ func newScrapeOrchestrator(scraper scrape.ScraperInterface, movieRepo database.M
 	}
 }
 
-// Execute runs the 4-step Scrape sequence:
-//  1. ForceRefresh cache clear (if cmd.ForceRefresh && movieRepo != nil)
-//  2. Scrape via scraper.Scrape
-//  3. Apply DisplayTitle via ApplyDisplayTitleFromSource
-//  4. Persist to DB via movieRepo.UpsertWithTranslations
+// Execute runs the Scrape sequence:
+//  1. Scrape via scraper.Scrape (which bypasses cache for ForceRefresh)
+//  2. Prepare DisplayTitle via ApplyDisplayTitleFromSource
+//  3. Persist to DB and finalize DisplayTitle after credit hydration
 //
 // Poster generation has been moved to the worker's scrape phase
 // (see scrape_phase.go) — the orchestrator is now a pure query + persist pipeline.
@@ -71,18 +74,12 @@ func (o *scrapeOrchImpl) Execute(ctx context.Context, cmd scrape.ScrapeCmd) (*sc
 
 	var meta OrchestrationMeta
 
-	// Step 1: ForceRefresh cache clear.
-	if cmd.ForceRefresh && o.movieRepo != nil {
-		if err := o.movieRepo.Delete(ctx, cmd.MovieID); err != nil {
-			resolveLogger(o.logger).Debugf("[workflow] Cache delete failed (may not exist): %v", err)
-		}
-	}
-
 	if o.scraper == nil {
 		return nil, nil, fmt.Errorf("workflow scraper not configured (scraper was nil at construction)")
 	}
 
-	// Step 2: Scrape (core query).
+	// Step 1: Scrape (core query). Keep the existing movie and durable credit
+	// decisions until the normal transactional upsert accepts fresh metadata.
 	result, err := o.scraper.Scrape(ctx, cmd)
 	if err != nil && (result == nil || result.Movie == nil) {
 		return result, nil, err
@@ -102,13 +99,30 @@ func (o *scrapeOrchImpl) Execute(ctx context.Context, cmd scrape.ScrapeCmd) (*sc
 		}
 	}
 
-	// Step 3: Apply DisplayTitle — sole application point for the scrape path.
+	// Step 2: Prepare DisplayTitle, retaining its renderer for final persistence.
 	if result != nil && result.Movie != nil {
+		// An explicit fresh content identity must not inherit another movie's
+		// curation just because the scraper reused its display/search ID.
+		result.Movie.RequireExactContentID = cmd.ForceRefresh && strings.TrimSpace(result.Movie.ContentID) != ""
+		result.Movie.RefreshMovieID = ""
+		result.Movie.RefreshExpectedContentID = ""
+		if cmd.ForceRefresh {
+			result.Movie.RefreshExpectedContentID = result.ExpectedContentID
+			result.Movie.RefreshMovieID = result.RequestedMovieID
+			if result.Movie.RefreshMovieID == "" {
+				result.Movie.RefreshMovieID = cmd.MovieID
+			}
+		}
+		meta.RenderDisplayTitle = func(ctx context.Context, movie *models.Movie) string {
+			rendered := *movie
+			ApplyDisplayTitleFromSource(ctx, &rendered, movie, o.displayTitle, o.templateEngine, o.nameCfg)
+			return rendered.DisplayTitle
+		}
 		ApplyDisplayTitleFromSource(ctx, result.Movie, result.Movie, o.displayTitle, o.templateEngine, o.nameCfg)
 		meta.DisplayTitleApplied = true
 	}
 
-	// Step 4: Persist to database (Upsert).
+	// Step 3: Persist to database (Upsert).
 	// Pass genre/actress translations from TranslationOutput for ID resolution.
 	// Skipped when cmd.SkipPersist is set — the caller owns persistence in that
 	// case (the batch scrape phase offloads this to a dedicated goroutine pool so
@@ -120,7 +134,7 @@ func (o *scrapeOrchImpl) Execute(ctx context.Context, cmd scrape.ScrapeCmd) (*sc
 			genreTrans = result.TranslationOutput.GenreTranslations
 			actressTrans = result.TranslationOutput.ActressTranslations
 		}
-		savedMovie, upsertErr := o.movieRepo.UpsertWithTranslations(ctx, result.Movie, genreTrans, actressTrans)
+		savedMovie, upsertErr := database.UpsertWithDisplayTitle(ctx, o.movieRepo, result.Movie, genreTrans, actressTrans, meta.RenderDisplayTitle)
 		if upsertErr != nil {
 			resolveLogger(o.logger).Warnf("[workflow] Failed to persist %s: %v", result.Movie.ID, upsertErr)
 			return result, &meta, upsertErr

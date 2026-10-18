@@ -45,10 +45,11 @@ func TestMiss2_Search_Disabled(t *testing.T) {
 
 func TestMiss2_Search_CancelledContext(t *testing.T) {
 	s := newScraper(testSettings("https://jp.jav321.com"), nil, models.FlareSolverrConfig{})
+	s.client = newCancelledFixtureClient(t, map[string]int{"POST https://jp.jav321.com/search": 1})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	_, err := s.Search(ctx, "ABC-123")
-	require.Error(t, err)
+	require.ErrorIs(t, err, context.Canceled)
 }
 
 // --- getURLCtx: empty ID ---
@@ -73,10 +74,11 @@ func TestMiss2_GetURLCtx_URLInput(t *testing.T) {
 
 func TestMiss2_FetchPageCtx_CancelledContext(t *testing.T) {
 	s := newScraper(testSettings("https://jp.jav321.com"), nil, models.FlareSolverrConfig{})
+	s.client = newCancelledFixtureClient(t, map[string]int{"GET https://jp.jav321.com/video/abc123": 1})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	_, _, err := s.fetchPageCtx(ctx, "https://jp.jav321.com/video/abc123")
-	require.Error(t, err)
+	require.ErrorIs(t, err, context.Canceled)
 }
 
 // --- ResolveDownloadProxyForHost ---

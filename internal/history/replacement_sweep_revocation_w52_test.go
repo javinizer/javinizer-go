@@ -54,7 +54,8 @@ import (
 // w52StageRepo counts UpdateJournalInTx calls through the sweeper: onCall
 // runs synchronously at a chosen call's entry (the deterministic point to
 // cancel the sweep ctx and reclaim the claim), and fail answers chosen calls
-// with an injected error instead of running the transaction.
+// with an injected error instead of running the transaction. An absent-
+// destination restore uses call 1 for Undo admission before its fault stages.
 type w52StageRepo struct {
 	*p3OpRepo
 	onCall func(n int)
@@ -298,11 +299,11 @@ func TestSweepW52_JournalTxFailureGateSkipsRestoreUndo(t *testing.T) {
 	base := afero.NewMemMapFs()
 	inner := newP3OpRepo()
 	op, dest, backup := seedCrashWindow(t, base, inner, "job-w52-e1", "EJ1-001", "/w52-e1", p3HexA)
-	repo := &w52StageRepo{p3OpRepo: inner, fail: map[int]error{1: errors.New("w52 journal read wedged")}}
+	repo := &w52StageRepo{p3OpRepo: inner, fail: map[int]error{2: errors.New("w52 journal read wedged")}}
 	sweeper := NewReplacementSweeper(base, repo)
 	claim, _, reclaim := w52LiveClaim(t, filepath.ToSlash(dest))
 	repo.onCall = func(n int) {
-		if n == 1 {
+		if n == 2 {
 			reclaim()
 		}
 	}
@@ -338,7 +339,7 @@ func TestSweepW52_ConsumedEntryQuarantineGate(t *testing.T) {
 	sweeper := NewReplacementSweeper(base, repo)
 	claim, _, reclaim := w52LiveClaim(t, filepath.ToSlash(dest))
 	repo.onCall = func(n int) {
-		if n == 1 {
+		if n == 2 {
 			reclaim()
 		}
 	}
@@ -363,7 +364,7 @@ func TestSweepW52_ArmedEntryQuarantineGate(t *testing.T) {
 	sweeper := NewReplacementSweeper(base, repo)
 	claim, _, reclaim := w52LiveClaim(t, filepath.ToSlash(dest))
 	repo.onCall = func(n int) {
-		if n == 1 {
+		if n == 2 {
 			reclaim()
 		}
 	}
@@ -518,7 +519,7 @@ func TestSweepW52_ConsumptionGateRestagePersistFailure(t *testing.T) {
 	base := afero.NewMemMapFs()
 	inner := newP3OpRepo()
 	op, dest, backup := seedCrashWindow(t, base, inner, "job-w52-df", "CSF-001", "/w52-df", p3HexA)
-	repo := &w52StageRepo{p3OpRepo: inner, fail: map[int]error{2: errors.New("w52 persist wedged")}}
+	repo := &w52StageRepo{p3OpRepo: inner, fail: map[int]error{3: errors.New("w52 persist wedged")}}
 	sweeper := NewReplacementSweeper(base, repo)
 	claim, _, reclaim := w52LiveClaim(t, filepath.ToSlash(dest))
 
@@ -553,11 +554,11 @@ func TestSweepW52_ConsumptionFailureSkipsRearm(t *testing.T) {
 	base := afero.NewMemMapFs()
 	inner := newP3OpRepo()
 	op, dest, backup := seedCrashWindow(t, base, inner, "job-w52-e2", "CNC-001", "/w52-e2", p3HexA)
-	innerNoFail := &w52StageRepo{p3OpRepo: inner, fail: map[int]error{2: errors.New("w52 consumption wedged")}}
+	innerNoFail := &w52StageRepo{p3OpRepo: inner, fail: map[int]error{3: errors.New("w52 consumption wedged")}}
 	sweeper := NewReplacementSweeper(base, innerNoFail)
 	claim, _, reclaim := w52LiveClaim(t, filepath.ToSlash(dest))
 	innerNoFail.onCall = func(n int) {
-		if n == 2 { // the consumption transaction itself
+		if n == 3 { // the consumption transaction itself
 			reclaim()
 		}
 	}
@@ -586,13 +587,13 @@ func TestSweepW52_ConsumptionFailureRestagePersistFailure(t *testing.T) {
 	inner := newP3OpRepo()
 	op, dest, backup := seedCrashWindow(t, base, inner, "job-w52-e2f", "CNF-001", "/w52-e2f", p3HexA)
 	repo := &w52StageRepo{p3OpRepo: inner, fail: map[int]error{
-		2: errors.New("w52 consumption wedged"),
-		3: errors.New("w52 persist wedged"),
+		3: errors.New("w52 consumption wedged"),
+		4: errors.New("w52 persist wedged"),
 	}}
 	sweeper := NewReplacementSweeper(base, repo)
 	claim, _, reclaim := w52LiveClaim(t, filepath.ToSlash(dest))
 	repo.onCall = func(n int) {
-		if n == 2 {
+		if n == 3 {
 			reclaim()
 		}
 	}
@@ -619,7 +620,7 @@ func TestSweepW52_PostRearmUndoGate(t *testing.T) {
 	base := afero.NewMemMapFs()
 	inner := newP3OpRepo()
 	op, dest, backup := seedCrashWindow(t, base, inner, "job-w52-e3", "CNU-001", "/w52-e3", p3HexA)
-	repo := &w52StageRepo{p3OpRepo: inner, fail: map[int]error{2: errors.New("w52 consumption wedged")}}
+	repo := &w52StageRepo{p3OpRepo: inner, fail: map[int]error{3: errors.New("w52 consumption wedged")}}
 	sweeper := NewReplacementSweeper(base, repo)
 	claim, _, reclaim := w52LiveClaim(t, filepath.ToSlash(dest))
 

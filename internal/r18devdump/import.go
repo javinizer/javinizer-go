@@ -222,6 +222,10 @@ func sqliteTableName(dumpName string) string {
 // If an error occurs, any partial .tmp file is removed and path is left
 // untouched, so a failed import never corrupts a previously good dump.
 func Import(ctx context.Context, r io.Reader, path string, opts ImportOptions) (ImportResult, error) {
+	return importWithOpenDB(ctx, r, path, opts, sql.Open)
+}
+
+func importWithOpenDB(ctx context.Context, r io.Reader, path string, opts ImportOptions, openDB func(string, string) (*sql.DB, error)) (ImportResult, error) {
 	if path == "" {
 		return ImportResult{}, fmt.Errorf("dump db path is empty")
 	}
@@ -233,7 +237,7 @@ func Import(ctx context.Context, r io.Reader, path string, opts ImportOptions) (
 	_ = os.Remove(tmpPath + "-wal")
 	_ = os.Remove(tmpPath + "-shm")
 
-	db, err := sql.Open("sqlite3", tmpPath+"?_journal_mode=WAL&_busy_timeout=5000")
+	db, err := openDB("sqlite3", tmpPath+"?_journal_mode=WAL&_busy_timeout=5000")
 	if err != nil {
 		return ImportResult{}, fmt.Errorf("open temp dump db: %w", err)
 	}
@@ -263,12 +267,27 @@ func Import(ctx context.Context, r io.Reader, path string, opts ImportOptions) (
 		return ImportResult{}, fmt.Errorf("create schema: %w", err)
 	}
 
-	tx, err := db.BeginTx(ctx, nil)
+	// Own rollback synchronously. BeginTx(ctx) would let database/sql race us
+	// with its asynchronous cancellation rollback: our Rollback could return
+	// ErrTxDone while the driver still holds the file open. DB.Close does not
+	// wait for that active connection, so Windows cleanup/retry would fail.
+	// SQL operations retain ctx below, and cancellation is checked before
+	// beginning and committing. This database is private to this import.
+	if err := ctx.Err(); err != nil {
+		return ImportResult{}, fmt.Errorf("begin tx: %w", err)
+	}
+	tx, err := db.BeginTx(context.WithoutCancel(ctx), nil)
 	if err != nil {
 		return ImportResult{}, fmt.Errorf("begin tx: %w", err)
 	}
 
-	// Per-table batch accumulators and inserted-row tallies.
+	// Finish rollback before the database/file cleanup defer.
+	defer func() { _ = tx.Rollback() }()
+	if err := ctx.Err(); err != nil {
+		return ImportResult{}, fmt.Errorf("begin tx: %w", err)
+	}
+
+	// Per-table batch accumulators.
 	batches := make(map[string][]DumpRow)
 	tableCounts := make(map[string]int64)
 	var totalVideos int64
@@ -422,6 +441,9 @@ func Import(ctx context.Context, r io.Reader, path string, opts ImportOptions) (
 		return ImportResult{}, fmt.Errorf("write dump_meta: %w", err)
 	}
 
+	if err := ctx.Err(); err != nil {
+		return ImportResult{}, fmt.Errorf("commit: %w", err)
+	}
 	if err := tx.Commit(); err != nil {
 		return ImportResult{}, fmt.Errorf("commit: %w", err)
 	}

@@ -1,6 +1,7 @@
 package core
 
 import (
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -111,6 +112,41 @@ func TestParsePagination(t *testing.T) {
 			limit, offset := ParsePagination(c, tc.defaultLimit, tc.maxLimit)
 			assert.Equal(t, tc.wantLimit, limit)
 			assert.Equal(t, tc.wantOffset, offset)
+		})
+	}
+}
+
+func TestPaginationBounds(t *testing.T) {
+	tests := []struct {
+		name      string
+		length    int
+		limit     int
+		offset    int
+		wantStart int
+		wantEnd   int
+	}{
+		{name: "first page", length: 5, limit: 2, wantEnd: 2},
+		{name: "middle page", length: 5, limit: 2, offset: 2, wantStart: 2, wantEnd: 4},
+		{name: "partial last page", length: 5, limit: 2, offset: 4, wantStart: 4, wantEnd: 5},
+		{name: "exact last page", length: 5, limit: 2, offset: 3, wantStart: 3, wantEnd: 5},
+		{name: "offset at length", length: 5, limit: 2, offset: 5, wantStart: 5, wantEnd: 5},
+		{name: "offset beyond length", length: 5, limit: 2, offset: 6, wantStart: 5, wantEnd: 5},
+		{name: "empty data", limit: 2},
+		{name: "empty data beyond length", limit: math.MaxInt, offset: math.MaxInt},
+		{name: "zero limit", length: 5, offset: 2, wantStart: 2, wantEnd: 2},
+		{name: "MaxInt offset", length: 5, limit: 2, offset: math.MaxInt, wantStart: 5, wantEnd: 5},
+		{name: "MaxInt limit", length: 5, limit: math.MaxInt, offset: 2, wantStart: 2, wantEnd: 5},
+		{name: "MaxInt limit and offset", length: 5, limit: math.MaxInt, offset: math.MaxInt, wantStart: 5, wantEnd: 5},
+		{name: "MaxInt length", length: math.MaxInt, limit: math.MaxInt, wantEnd: math.MaxInt},
+		{name: "MaxInt length partial page", length: math.MaxInt, limit: math.MaxInt, offset: math.MaxInt - 1, wantStart: math.MaxInt - 1, wantEnd: math.MaxInt},
+		{name: "MaxInt length and offset", length: math.MaxInt, limit: math.MaxInt, offset: math.MaxInt, wantStart: math.MaxInt, wantEnd: math.MaxInt},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			start, end := PaginationBounds(tt.length, tt.limit, tt.offset)
+			assert.Equal(t, tt.wantStart, start)
+			assert.Equal(t, tt.wantEnd, end)
 		})
 	}
 }

@@ -110,6 +110,9 @@ func TestDiscoverScreenshotsSampling(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping external sampling test (requires r18dev database dump and HTTP requests)")
 	}
+	if os.Getenv("JAVINIZER_RUN_LIVE_API_TESTS") != "1" {
+		t.Skip("Set JAVINIZER_RUN_LIVE_API_TESTS=1 to sample the live DMM CDN")
+	}
 	dumpPath := "/tmp/r18dev_dump.sql"
 	entries, err := parseDumpEntries(dumpPath)
 	if err != nil {

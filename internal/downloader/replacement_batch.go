@@ -20,21 +20,24 @@ import (
 // same-directory backup and journaled before the publisher is allowed to run.
 // Rollback unwinds all published legs in reverse order.
 type ReplacementBatch struct {
-	fs       afero.Fs
-	opID     string
-	recorder ReplacementRecorder
-	legs     []*replacementBatchLeg
+	fs              afero.Fs
+	opID            string
+	recorder        ReplacementRecorder
+	legs            []*replacementBatchLeg
+	released        []string
+	unarmedRecovery []*replacementBatchLeg
 }
 
 type replacementBatchLeg struct {
-	destination    string
-	backup         string
-	replaced       bool
-	installed      bool
-	installedID    os.FileInfo
-	rollbackOrigin string
-	releaseLock    func()
-	releaseBusy    func()
+	destination      string
+	backup           string
+	replaced         bool
+	installed        bool
+	installedID      *fsutil.BoundInstallIdentity
+	rollbackOrigin   string
+	releaseLock      func()
+	releaseBusy      func()
+	retryBusyRelease func()
 }
 
 // NewReplacementBatch creates a staged publication transaction.
@@ -170,8 +173,65 @@ func (b *ReplacementBatch) ObservePublishResult(destination string) {
 		return
 	}
 	if info, err := lstatBackupCandidate(b.fs, leg.destination); err == nil {
-		leg.installed, leg.installedID = true, info
+		leg.installed, leg.installedID = true, observedInstallIdentity(b.fs, leg.destination, info)
 	}
+}
+
+// observedInstallIdentity records the observed install for the unverified
+// (name-based) recording seams (codex P1, PRRT_kwDORn9KaM6qKDM5): a symlink
+// occupant carries no kernel key a FileInfo can serve, so its readlink payload
+// — the entire ownership certificate for a link object — is captured with the
+// record; rollback then routes the link to the link-object unlink instead of
+// stranding it (the regular-file unlink has no link model). Regular files keep
+// an eager identity when the filesystem exposes one.
+func observedInstallIdentity(fs afero.Fs, destination string, info os.FileInfo) *fsutil.BoundInstallIdentity {
+	if info == nil {
+		return nil
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		if target, ok, rerr := fsutil.ReadlinkNoFollow(fs, destination); rerr == nil && ok && target != "" {
+			return fsutil.NewBoundInstallLinkIdentity(info, target)
+		}
+	}
+	return fsutil.NewObservedBoundInstallIdentity(fs, destination, info)
+}
+
+// ObservePublishResultBound is ObservePublishResult with the observation
+// bound to the identity the publish operation PRODUCED (codex P1, PR #276,
+// finding ntCe6) instead of whatever the destination name resolves to at
+// observation time: a publisher that released its destination lock before
+// this observation (the organizer's copied-sidecar lane) leaves a window in
+// which an external writer can replace the freshly installed bytes, and a
+// name-derived observation would record the foreign SUCCESSOR's identity as
+// this batch's install — arming rollback's UnlinkVerified against it (an
+// identity-verified delete of bytes the batch never wrote, executed before
+// any displaced-backup restore). The re-proof rides
+// fsutil.ObserveVerifiedInstall, the same predicate the rollback unlink
+// applies, so observation and deletion can never disagree on which object is
+// ours:
+//
+//   - match: the leg adopts the publish-time identity;
+//   - vacant/indeterminate lookup: nothing is adopted and no error is
+//     returned (the caller's ConfirmPublish surfaces the legacy failure);
+//   - affirmative divergence: the leg stays UNINSTALLED and the typed
+//     successor refusal propagates (ErrPublishSuccessorUnproven joined with
+//     ErrPublishCompleted) — the occupant is retained byte-intact, exactly
+//     the verified hard-link leg's post-link successor contract
+//     (PRRT_kwDORn9KaM6nsX9a) applied to the copy lane's record;
+//   - a nil installed identity is a caller bug and fails closed.
+func (b *ReplacementBatch) ObservePublishResultBound(destination string, installed *fsutil.BoundInstallIdentity) error {
+	leg := b.find(destination)
+	if leg == nil || leg.installed {
+		return nil
+	}
+	info, err := fsutil.ObserveVerifiedInstall(b.fs, leg.destination, installed)
+	if err != nil {
+		return err
+	}
+	if info != nil {
+		leg.installed, leg.installedID = true, installed
+	}
+	return nil
 }
 
 // ConfirmPublish marks the most recently armed destination installed only
@@ -188,11 +248,20 @@ func (b *ReplacementBatch) ConfirmPublish(ctx context.Context, destination strin
 	if info == nil || info.IsDir() {
 		return fmt.Errorf("staged publication did not install a file at %s", destination)
 	}
-	leg.installed, leg.installedID = true, info
+	leg.installed = true
+	// An identity an earlier observation bound to the publish's own output
+	// (ObservePublishResult's record or ObservePublishResultBound's proven
+	// install) outranks a fresh name lookup here: re-deriving the identity
+	// at confirmation time would re-anchor rollback to whatever occupies the
+	// name AFTER the observation window closed — exactly the successor
+	// substitution the bound observation exists to refuse (finding ntCe6).
+	if leg.installedID == nil {
+		leg.installedID = observedInstallIdentity(b.fs, leg.destination, info)
+	}
 	if leg.replaced {
 		var confirmErr error
 		if factual, ok := b.recorder.(ReplacementInstalledFactsRecorder); ok {
-			facts, factsErr := captureInstalledReplacementFacts(b.fs, leg.destination)
+			facts, factsErr := captureInstalledReplacementFacts(b.fs, leg.destination, leg.installedID)
 			if factsErr != nil {
 				return fmt.Errorf("capture staged replacement result %s: %w", destination, factsErr)
 			}
@@ -212,6 +281,36 @@ func (b *ReplacementBatch) ConfirmPublish(ctx context.Context, destination strin
 // during rollback instead of deleting it. The origin must already have been
 // removed by the caller; rollback uses no-replace move semantics.
 func (b *ReplacementBatch) SetRollbackOrigin(destination, origin string) error {
+	return b.setRollbackOrigin(destination, origin, nil)
+}
+
+// SetRollbackOriginBound is SetRollbackOrigin with the arm bound to the
+// publish-time identity the caller carried forward (codex P1,
+// PRRT_kwDORn9KaM6qLkJ4). It never creates or arms a rollback inverse from a
+// destination name lookup alone.
+func (b *ReplacementBatch) SetRollbackOriginBound(destination, origin string, installed *fsutil.BoundInstallIdentity) error {
+	var err error
+	if installed == nil || installed.FileInfo() == nil {
+		err = fmt.Errorf("staged publication destination %s requires a bound installed identity", destination)
+	} else {
+		err = b.setRollbackOrigin(destination, origin, installed)
+	}
+	if err != nil {
+		// The publisher already mutated this endpoint. A failed inverse arm must
+		// still revoke stale by-name claims and retain its carried recovery proof.
+		recoveryOrigin := ""
+		if strings.TrimSpace(origin) != "" {
+			recoveryOrigin = filepath.Clean(origin)
+		}
+		b.unarmedRecovery = append(b.unarmedRecovery, &replacementBatchLeg{
+			destination: filepath.Clean(destination), installed: true, installedID: installed,
+			rollbackOrigin: recoveryOrigin,
+		})
+	}
+	return err
+}
+
+func (b *ReplacementBatch) setRollbackOrigin(destination, origin string, installed *fsutil.BoundInstallIdentity) error {
 	leg := b.find(destination)
 	if leg == nil {
 		leg = &replacementBatchLeg{destination: filepath.Clean(destination)}
@@ -222,14 +321,27 @@ func (b *ReplacementBatch) SetRollbackOrigin(destination, origin string) error {
 			return fmt.Errorf("track staged publication destination %s: %w", destination, err)
 		}
 		leg.releaseBusy = busy
-		info, err := lstatBackupCandidate(b.fs, leg.destination)
-		if err != nil || info == nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-			leg.release()
-			return fmt.Errorf("staged publication destination has no regular installed output: %s: %w", destination, err)
+		if installed != nil {
+			if _, err := fsutil.ObserveVerifiedInstall(b.fs, leg.destination, installed); err != nil {
+				leg.release()
+				return fmt.Errorf("staged publication destination %s no longer names its bound installed output: %w", destination, err)
+			}
+			leg.installed, leg.installedID = true, installed
+		} else {
+			info, err := lstatBackupCandidate(b.fs, leg.destination)
+			if err != nil || info == nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+				leg.release()
+				return fmt.Errorf("staged publication destination has no regular installed output: %s: %w", destination, err)
+			}
+			leg.installed, leg.installedID = true, fsutil.NewWeakBoundInstallIdentity(info)
 		}
-		leg.installed, leg.installedID = true, info
 		b.legs = append(b.legs, leg)
 		leg.release()
+	} else if installed != nil {
+		if _, err := fsutil.ObserveVerifiedInstall(b.fs, leg.destination, installed); err != nil {
+			return fmt.Errorf("staged publication destination %s no longer names its bound installed output: %w", destination, err)
+		}
+		leg.installed, leg.installedID = true, installed
 	}
 	if !leg.installed {
 		return fmt.Errorf("staged publication destination has no installed output: %s", destination)
@@ -254,6 +366,9 @@ func (b *ReplacementBatch) rollback(ctx context.Context, releaseJournal bool) er
 			leg.releaseLock = fsutil.SharedDestLocks().Acquire(leg.destination)
 		}
 		if leg.releaseBusy == nil {
+			if leg.retryBusyRelease != nil {
+				leg.retryBusyRelease()
+			}
 			busy, err := fsutil.AcquireReplacementBusy(b.fs, leg.destination)
 			if err != nil {
 				joined = errors.Join(joined, fmt.Errorf("reacquire rollback destination %s: %w", leg.destination, err))
@@ -265,9 +380,31 @@ func (b *ReplacementBatch) rollback(ctx context.Context, releaseJournal bool) er
 		if leg.installed {
 			var err error
 			if leg.rollbackOrigin != "" {
-				err = fsutil.MoveFileNoReplace(b.fs, leg.destination, leg.rollbackOrigin)
+				// Identity-bound move-back (codex P1, PRRT_kwDORn9KaM6qLkJ9): the
+				// move composite re-proves the take-aside object against the install
+				// identity before publishing it back to the source. The proof and the
+				// path action are one operation, so a rename-swap inside the old
+				// ObserveVerifiedInstall→MoveFileNoReplace window is taken aside,
+				// rejected, and restored instead of being relocated onto origin.
+				proof := fsutil.VerifiedSourceProofFromBoundInstallIdentity(b.fs, leg.installedID)
+				mode := fsutil.StagingFileMode()
+				if leg.installedID != nil {
+					if info := leg.installedID.FileInfo(); info != nil {
+						mode = info.Mode().Perm()
+					}
+				}
+				_, err = fsutil.MoveFileNoReplaceVerifiedMode(b.fs, leg.destination, leg.rollbackOrigin, proof, mode)
 			} else {
-				err = fsutil.UnlinkVerified(b.fs, leg.destination, leg.installedID)
+				// A soft-link leg carries its ownership proof as the recorded
+				// readlink payload — a symlink has no kernel key the regular-file
+				// unlink can prove, so it rolls back through the link-object twin
+				// (codex P1, PRRT_kwDORn9KaM6qKDM5). Legacy recordings (no payload)
+				// keep the verified-unlink shape they always had.
+				if target := leg.installedID.LinkTarget(); target != "" {
+					err = fsutil.UnlinkSymlinkVerified(b.fs, leg.destination, target)
+				} else {
+					err = fsutil.UnlinkVerifiedInstall(b.fs, leg.destination, leg.installedID)
+				}
 			}
 			if err != nil {
 				joined = errors.Join(joined, fmt.Errorf("reverse staged publication %s during rollback: %w", leg.destination, err))
@@ -289,15 +426,33 @@ func (b *ReplacementBatch) rollback(ctx context.Context, releaseJournal bool) er
 						markRollbackRearmFailed(ctx, downloadLedger{opID: b.opID, recorder: b.recorder}, leg.destination, leg.backup, rearmErr)
 					}
 					joined = errors.Join(joined, fmt.Errorf("release rolled-back replacement %s: %w", leg.destination, err))
+					leg.release()
+					continue
 				}
 			}
+			leg.replaced = false
 		}
 		leg.release()
 	}
 	return joined
 }
 
-func captureInstalledReplacementFacts(fs afero.Fs, path string) (models.ReplacementBackupFacts, error) {
+func captureInstalledReplacementFacts(fs afero.Fs, path string, installed ...*fsutil.BoundInstallIdentity) (models.ReplacementBackupFacts, error) {
+	if len(installed) > 0 {
+		info, err := fsutil.ObserveVerifiedInstall(fs, path, installed[0])
+		if err != nil {
+			return models.ReplacementBackupFacts{}, err
+		}
+		if target := installed[0].LinkTarget(); target != "" {
+			sum := sha256.Sum256([]byte(target))
+			return models.ReplacementBackupFacts{Size: int64(len(target)), ModUnix: info.ModTime().Unix(), SHA256: hex.EncodeToString(sum[:])}, nil
+		}
+		expected := installed[0].FileInfo()
+		facts := models.ReplacementBackupFacts{Size: expected.Size(), ModUnix: expected.ModTime().Unix()}
+		facts.SHA256, err = digestVerifiedInstall(fs, path, installed[0])
+		return facts, err
+	}
+
 	info, err := lstatBackupCandidate(fs, path)
 	if err != nil {
 		return models.ReplacementBackupFacts{}, err
@@ -340,8 +495,30 @@ func (l *replacementBatchLeg) unlock() {
 	}
 }
 
+// ReleaseUninstalled frees a destination leg whose publish never landed
+// (armed but never confirmed): the destination lock and busy marker release,
+// and the leg drops out of the batch, so nothing observes ErrReplacementBusy
+// for the server's lifetime.
+func (b *ReplacementBatch) ReleaseUninstalled(destination string) error {
+	target := filepath.Clean(destination)
+	for i, leg := range b.legs {
+		if leg.destination != target {
+			continue
+		}
+		if leg.installed {
+			return fmt.Errorf("cannot release installed staged publication destination %s", target)
+		}
+		leg.release()
+		b.released = append(b.released, leg.destination)
+		b.legs = append(b.legs[:i], b.legs[i+1:]...)
+		return nil
+	}
+	return nil
+}
+
 func (l *replacementBatchLeg) release() {
 	if l.releaseBusy != nil {
+		l.retryBusyRelease = l.releaseBusy
 		l.releaseBusy()
 		l.releaseBusy = nil
 	}

@@ -5,15 +5,134 @@ import (
 	"strings"
 )
 
+// ApplyTerminal closes Apply writers and identifies an exact terminal retry.
+type ApplyTerminal struct {
+	Outcome     string `json:"outcome"`
+	Fingerprint string `json:"fingerprint"`
+}
+
 // GeneratedFilesJSON is the JSON structure stored in BatchFileOperation.GeneratedFiles.
 // Moved from both workflow/revert_log.go and history/reverter.go to
 // eliminate duplicate type definitions with drift risk. The JSON schema is a
 // persistence contract — one source of truth.
 type GeneratedFilesJSON struct {
-	Delete       []string           `json:"delete,omitempty"`       // Files to delete on revert (NFO, images, screenshots)
-	MoveBack     []FileMove         `json:"move_back,omitempty"`    // Files to move back on revert (subtitles)
-	Replacements []ReplacementEntry `json:"replacements,omitempty"` // Overwritten byte pairs journaled before the replace landed (P3)
-	Roots        []string           `json:"roots,omitempty"`        // Destination roots seeded at Begin — sweeper discovery independent of any later journal (P3 R3-3)
+	ApplyTerminal *ApplyTerminal `json:"apply_terminal,omitempty"`
+	// PublicationPending blocks Undo until resident publication or its rollback
+	// has been durably reconciled. A crash/write failure requires manual recovery.
+	PublicationPending bool `json:"publication_pending,omitempty"`
+	// UndoStarted permanently excludes new publication on this operation row.
+	// Failed/skipped Undo can have changed files even when its status is unchanged.
+	UndoStarted bool         `json:"undo_started,omitempty"`
+	PrimaryUndo *PrimaryUndo `json:"primary_undo,omitempty"`
+	// PrimaryResident excludes an admission-proven pre-existing primary from
+	// Undo ownership, while preserving independently installed artifact inverses.
+	DirectoryMove   *DirectoryMove     `json:"directory_move,omitempty"`
+	PrimaryResident bool               `json:"primary_resident,omitempty"`
+	Delete          []string           `json:"delete,omitempty"`       // Files to delete on revert (NFO, images, screenshots)
+	MoveBack        []FileMove         `json:"move_back,omitempty"`    // Files to move back on revert (subtitles)
+	Replacements    []ReplacementEntry `json:"replacements,omitempty"` // Overwritten byte pairs journaled before the replace landed (P3)
+	Roots           []string           `json:"roots,omitempty"`        // Destination roots seeded at Begin — sweeper discovery independent of any later journal (P3 R3-3)
+
+	// PlannedDeletes journals artifacts BEFORE they install at their final
+	// destination (deferred artifact publication): the hash pins the intended
+	// content so a revert deletes only bytes this operation published, never
+	// whatever unrelated file later occupies the path.
+	PlannedDeletes []DeleteEntry `json:"planned_deletes,omitempty"`
+}
+
+// DeleteEntry is a pending deletion pinned to the payload the publisher plans
+// to land at Path. The pin shape keys on HOW the payload installs:
+//
+//   - SHA256 (regular-file copy/move installs): the destination must hash to
+//     the pinned digest before the reverter removes it.
+//   - LinkTarget (LinkModeSoft installs): the publisher cannot know a content
+//     hash — the install is the link OBJECT, not bytes — so the pin is the
+//     exact readlink payload the soft-link leg resolves at journal time. The
+//     reverter removes the destination only while it is a symlink whose
+//     target matches (fsutil.UnlinkSymlinkVerified); the regular-file
+//     nonregular-retain rule stays in force for every other occupant shape.
+//   - Identity* (LinkModeHard installs): the hard-linked destination IS the
+//     source's object (same volume/index), so the admitted source identity
+//     tuple (dev/ino where the platform exposes one, plus size+mtime) IS the
+//     ownership certificate — constant-time, no payload read. IdentityStrong
+//     records whether dev/ino were capturable at pin time; a strong pin never
+//     degrades to the size+mtime legs at recovery.
+//   - CopySize/CopyPartialSHA256 (streaming copy installs, pre-graduation):
+//     the interim pin captured WITHOUT a second full read of the source —
+//     size plus a bounded head+tail digest (fsutil.CopyPartialDigestSpan).
+//     The copy leg tees the full digest during its single unavoidable stream
+//     and FinalizeDeleteIntentCopyDigest seals this entry into the SHA256
+//     shape as soon as the publish lands, so the interim shape covers only
+//     the execute→seal crash window. Recovery NEVER deletes on the interim
+//     shape (codex P1, PRRT_kwDORn9KaM6novbT): entries are journaled before
+//     the crash they cover, so by recovery time the bounded proof can match
+//     a payload edited only between the digest windows — retain until
+//     sealed.
+//
+// All newer fields are omitempty: blobs written before their introduction
+// parse into zero values, and the reverter's dispatch falls through to the
+// SHA256 leg (an empty hash never matches — retain), preserving the legacy
+// posture byte-for-byte.
+type DeleteEntry struct {
+	// RecoveryPublication selects strict status checks for failed-publication
+	// proofs: unavailable identity or incomplete cleanup must remain retryable.
+	RecoveryPublication bool `json:"recovery_publication,omitempty"`
+	// RecoveryUnproven retains an output without a portable install identity.
+	// Undo requires manual recovery while any entry remains at its path.
+	RecoveryUnproven bool   `json:"recovery_unproven,omitempty"`
+	Path             string `json:"path"`
+	SHA256           string `json:"sha256"`
+	// LinkTarget pins a soft-link install: the expected readlink payload of
+	// the destination entry (the string the organizer's symlink leg passes,
+	// computed by organizer.SymlinkLinkTarget). Non-empty selects the
+	// symlink-authenticated removal leg in the reverter.
+	LinkTarget string `json:"link_target,omitempty"`
+	// Identity* pin a hard-link install to the admitted source object's
+	// kernel identity: the destination must resolve to THE same object
+	// (dev+ino/volume+index) with the same size and modification time.
+	// IdentityStrong asserts the dev/ino pair was captured from the platform
+	// identity route (in-memory filesystems pin only the metadata legs).
+	// IdentityMode preserves the installed permission bits for a proof-backed
+	// move's cross-device inverse. A pointer distinguishes mode 0000 from old
+	// records that never captured mode; those records cannot authorize a move.
+	IdentityMode    *uint32 `json:"identity_mode,omitempty"`
+	IdentityStrong  bool    `json:"identity_strong,omitempty"`
+	IdentityDev     uint64  `json:"identity_dev,omitempty"`
+	IdentityIno     uint64  `json:"identity_ino,omitempty"`
+	IdentitySize    int64   `json:"identity_size,omitempty"`
+	IdentityModUnix int64   `json:"identity_mod_unix,omitempty"`
+	// IdentityPinned is the hard-link pin's explicit presence marker (codex
+	// P2, PRRT_kwDORn9KaM6nHyl5): an epoch-dated source — a restored or
+	// normalized media file — serializes IdentityModUnix as zero, so the
+	// timestamp must not double as the pin's sentinel. HasIdentityPin owns
+	// the classification, including the pre-marker row mapping.
+	IdentityPinned bool `json:"identity_pinned,omitempty"`
+	// CopySize/CopyPartialSHA256 record an in-flight streaming copy's install
+	// intent without a pre-pass: size plus the bounded head+tail digest
+	// (fsutil.PartialCopyDigest), sealed to SHA256 once the publish returns
+	// the streamed digest. The interim shape is intent evidence only (codex
+	// P1, PRRT_kwDORn9KaM6novbT): the entry survives the crash it was
+	// journaled against, so recovery can no longer tell the landed copy from
+	// a payload edited between the digest windows — it RETAINS any entry
+	// still carrying this shape, and only the sealed SHA256 authorizes
+	// removal.
+	CopySize          int64  `json:"copy_size,omitempty"`
+	CopyPartialSHA256 string `json:"copy_partial_sha256,omitempty"`
+}
+
+// HasIdentityPin reports whether the entry carries a hard-link identity
+// pin. IdentityPinned is authoritative for blobs written since its
+// introduction. Pre-marker rows are classified by their own evidence in
+// precedence order: IdentityModUnix != 0 (the original sentinel — pre-marker
+// code always journaled a non-epoch mtime), then IdentityStrong (a bool
+// omitempty keeps in the blob — a pre-marker row for an epoch-dated source on
+// an identity-exposing platform still carries identity_strong:true plus the
+// dev/ino pair, and no other pin arm ever sets them, so the strong evidence
+// overrides the zeroed sentinel). A pre-marker row whose evidence all
+// decodes zero — a weak epoch pin the sentinel could not express, or a plain
+// SHA row — keeps its old classification exactly and never flips branches.
+func (e DeleteEntry) HasIdentityPin() bool {
+	return e.IdentityPinned || e.IdentityModUnix != 0 || e.IdentityStrong
 }
 
 // ReplacementEntry journals one destructive media overwrite: the destination's
@@ -175,8 +294,9 @@ func (e *ReplacementEntry) SetRestorePending(kind string) bool {
 
 // FileMove represents a file that was moved during organize and should be moved back on revert.
 type FileMove struct {
-	OriginalPath string `json:"original_path"` // Where the file was before organize
-	NewPath      string `json:"new_path"`      // Where the file is after organize
+	Proof        *DeleteEntry `json:"proof,omitempty"`
+	OriginalPath string       `json:"original_path"` // Where the file was before organize
+	NewPath      string       `json:"new_path"`      // Where the file is after organize
 }
 
 // ParseGeneratedFiles decodes the persisted ledger blob. Empty content decodes
@@ -191,4 +311,13 @@ func ParseGeneratedFiles(raw string) (GeneratedFilesJSON, error) {
 		return GeneratedFilesJSON{}, err
 	}
 	return gf, nil
+}
+
+// DirectoryMove owns only a physical directory relocation, never a resident
+// primary filename. Locations includes durable pre-publication scratch names.
+type DirectoryMove struct {
+	Original  string   `json:"original"`
+	Locations []string `json:"locations"`
+	Device    uint64   `json:"device"`
+	Inode     uint64   `json:"inode"`
 }

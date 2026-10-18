@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/go-resty/resty/v2"
@@ -173,11 +174,12 @@ func TestScrapeURL_Miss_FetchError(t *testing.T) {
 		settings:    models.ScraperSettings{Enabled: true},
 	}
 
+	scraper.client = newCancelledFixtureClient(t, map[string]int{"GET https://www.javbus.com/CNC-001": 1})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
 	_, err := scraper.ScrapeURL(ctx, "https://www.javbus.com/CNC-001")
-	require.Error(t, err)
+	require.ErrorIs(t, err, context.Canceled)
 }
 
 // --- Search: disabled scraper ---
@@ -414,9 +416,9 @@ func TestNormalizeLanguage_Miss(t *testing.T) {
 	assert.Equal(t, "zh", normalizeLanguage("other")) // default
 }
 
-// --- getURLCtx: rate limit wait cancelled ---
+// --- getURLCtx: cancelled context reaches each request candidate ---
 
-func TestGetURLCtx_Miss_RateLimitCancelled(t *testing.T) {
+func TestGetURLCtx_Miss_CancelledRequests(t *testing.T) {
 	scraper := &scraper{
 		client:      resty.New(),
 		enabled:     true,
@@ -425,6 +427,12 @@ func TestGetURLCtx_Miss_RateLimitCancelled(t *testing.T) {
 		settings:    models.ScraperSettings{Enabled: true},
 	}
 
+	scraper.client = newCancelledFixtureClient(t, map[string]int{
+		"GET https://www.javbus.com/search/CNC-001&type=0&parent=uc":            1,
+		"GET https://www.javbus.com/uncensored/search/CNC-001&type=0&parent=uc": 1,
+		"GET https://www.javbus.org/search/CNC-001&type=0&parent=uc":            1,
+		"GET https://www.javbus.org/uncensored/search/CNC-001&type=0&parent=uc": 1,
+	})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
@@ -590,4 +598,24 @@ func docFromHTMLMissJavbus(t *testing.T, raw string) *goquery.Document {
 		t.Fatalf("goquery.NewDocumentFromReader() error = %v", err)
 	}
 	return doc
+}
+
+// A primed limiter exercises cancellation while actually waiting, not HTTP failure.
+func TestGetURLCtx_Miss_RateLimitCancelled(t *testing.T) {
+	scraper := &scraper{
+		client:      newCancelledFixtureClient(t, map[string]int{}),
+		enabled:     true,
+		baseURL:     "https://www.javbus.com",
+		rateLimiter: ratelimit.NewLimiter(10 * time.Second),
+		settings:    models.ScraperSettings{Enabled: true},
+	}
+	require.NoError(t, scraper.rateLimiter.Wait(context.Background()))
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	_, err := scraper.getURLCtx(ctx, "CNC-001")
+	require.Error(t, err)
+	require.ErrorIs(t, ctx.Err(), context.DeadlineExceeded)
+	classified, ok := models.AsScraperError(err)
+	require.True(t, ok)
+	assert.Equal(t, models.ScraperErrorKindNotFound, classified.Kind)
 }

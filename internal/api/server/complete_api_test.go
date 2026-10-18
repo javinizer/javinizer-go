@@ -308,6 +308,7 @@ func TestCompleteAPI_JobOperations(t *testing.T) {
 
 func TestCompleteAPI_VersionCheck(t *testing.T) {
 	router, _ := setupCompleteServer(t)
+	mockVersionRelease(t)
 
 	// Version status
 	w := httptest.NewRecorder()
@@ -319,8 +320,13 @@ func TestCompleteAPI_VersionCheck(t *testing.T) {
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("POST", "/api/v1/version/check", nil)
 	router.ServeHTTP(w, req)
-	// May fail due to no network, but should not 404
-	assert.NotEqual(t, http.StatusNotFound, w.Code)
+	require.Equal(t, http.StatusOK, w.Code)
+	var response map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	assert.Equal(t, "fresh", response["source"])
+	assert.Equal(t, "v99.0.0", response["latest"])
+	assert.Equal(t, true, response["update_available"])
+	assert.Empty(t, response["error"])
 }
 
 func TestCompleteAPI_ConfigEndpoints(t *testing.T) {

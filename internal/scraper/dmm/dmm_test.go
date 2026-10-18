@@ -442,6 +442,7 @@ func TestParseHTML_OldSite(t *testing.T) {
 	doc, err := parseHTMLString(htmlContent)
 	require.NoError(t, err)
 
+	stubDMMMetadataRequests(t, scraper)
 	result, err := scraper.parseHTML(context.Background(), doc, "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=ipx00535/")
 	require.NoError(t, err)
 
@@ -523,6 +524,7 @@ func TestParseHTML_NewSite(t *testing.T) {
 	doc, err := parseHTMLString(htmlContent)
 	require.NoError(t, err)
 
+	stubDMMMetadataRequests(t, scraper)
 	result, err := scraper.parseHTML(context.Background(), doc, "https://video.dmm.co.jp/av/content/?id=ipx00535")
 	require.NoError(t, err)
 
@@ -606,6 +608,7 @@ func TestExtractActresses(t *testing.T) {
 			doc, err := parseHTMLString(fmt.Sprintf("<html><body>%s</body></html>", tt.html))
 			require.NoError(t, err)
 
+			stubDMMMetadataRequests(t, scraper)
 			actresses := scraper.extractActresses(context.Background(), doc)
 			assert.Len(t, actresses, tt.expectedCount)
 
@@ -652,6 +655,7 @@ func TestExtractActressesFromStreamingPage_CastSectionPriority(t *testing.T) {
 	doc, err := parseHTMLString(html)
 	require.NoError(t, err)
 
+	stubDMMMetadataRequests(t, scraper)
 	actresses := scraper.extractActressesFromStreamingPage(context.Background(), doc)
 	require.Len(t, actresses, 1)
 	assert.Equal(t, 1056227, actresses[0].DMMID)
@@ -683,6 +687,7 @@ func TestExtractActressesFromStreamingPage_HeadingFallback(t *testing.T) {
 	doc, err := parseHTMLString(html)
 	require.NoError(t, err)
 
+	stubDMMMetadataRequests(t, scraper)
 	actresses := scraper.extractActressesFromStreamingPage(context.Background(), doc)
 	require.Len(t, actresses, 1)
 	assert.Equal(t, 2001, actresses[0].DMMID)
@@ -705,6 +710,7 @@ func TestExtractActressesFromStreamingPage_SkipsRecommendationOnlyLinks(t *testi
 	doc, err := parseHTMLString(html)
 	require.NoError(t, err)
 
+	stubDMMMetadataRequests(t, scraper)
 	actresses := scraper.extractActressesFromStreamingPage(context.Background(), doc)
 	assert.Len(t, actresses, 0)
 }
@@ -1332,6 +1338,7 @@ func TestParseHTML_ScrapeActressFlag(t *testing.T) {
 			doc, err := parseHTMLString(htmlContent)
 			require.NoError(t, err)
 
+			stubDMMMetadataRequests(t, scraper)
 			result, err := scraper.parseHTML(context.Background(), doc, "https://www.dmm.co.jp/test")
 			require.NoError(t, err)
 

@@ -67,7 +67,7 @@ func TestArtifactDigestErrorsPropagateFromSharedPreflight(t *testing.T) {
 				original:   ApplyCmd{ArtifactCoordinator: NewSharedArtifactCoordinator([]string{"part-1"}), ArtifactOwnerKey: "part-1"},
 				publishCtx: context.Background(),
 			}
-			_, err := stage.installPaths([]string{source}, nil, "", "")
+			_, err := stage.installPaths([]string{source}, nil, "", "", nil)
 			require.ErrorContains(t, err, tc.want)
 		})
 	}
@@ -106,6 +106,34 @@ func TestArtifactSharedConsumerSkipsInstallAndResultPaths(t *testing.T) {
 	require.Error(t, err, "consumer never publishes the shared target")
 }
 
+// Round-50 coverage: artifact_staging.go:1589-1590 — when the coordinator
+// grants shared ownership of a target the publication marks sharedPublishBegan
+// so a later panic reports as postpublication poison rather than prepublication
+// safe-to-promote.
+func TestArtifactSharedOwnerPublishMarksBegan(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	root := filepath.Join("stage", "ownerpublish")
+	finalRoot := filepath.Join("library", "movie")
+	source := filepath.Join(root, "movie.nfo")
+	target := filepath.Join(finalRoot, "movie.nfo")
+	require.NoError(t, fs.MkdirAll(filepath.Dir(source), 0o755))
+	require.NoError(t, afero.WriteFile(fs, source, []byte("metadata"), 0o644))
+
+	coordinator := NewSharedArtifactCoordinator([]string{"part-1"})
+	stage := &artifactStage{
+		fs: fs, root: root, finalRoot: finalRoot,
+		original:   ApplyCmd{Organize: OrganizeOptions{Skip: true}, ArtifactCoordinator: coordinator, ArtifactOwnerKey: "part-1"},
+		publishCtx: context.Background(),
+	}
+	_, err := stage.installPaths([]string{source}, nil, "", "", nil)
+	require.NoError(t, err)
+	require.True(t, stage.sharedPublishBegan, "owner publication marks the began flag immediately on publish")
+	got, readErr := afero.ReadFile(fs, target)
+	require.NoError(t, readErr)
+	require.Equal(t, "metadata", string(got))
+	require.Len(t, stage.sharedClaims, 1, "the shared claim is tracked for completion")
+}
+
 func TestArtifactSharedClaimRejectsUnknownContender(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	source := filepath.Join("stage", "owned", "movie.nfo")
@@ -116,7 +144,7 @@ func TestArtifactSharedClaimRejectsUnknownContender(t *testing.T) {
 		original:   ApplyCmd{ArtifactCoordinator: NewSharedArtifactCoordinator([]string{"part-1"}), ArtifactOwnerKey: "unknown"},
 		publishCtx: context.Background(),
 	}
-	_, err := stage.installPaths([]string{source}, nil, "", "")
+	_, err := stage.installPaths([]string{source}, nil, "", "", nil)
 	require.ErrorContains(t, err, "not registered")
 }
 

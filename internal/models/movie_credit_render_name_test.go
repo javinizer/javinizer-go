@@ -20,6 +20,8 @@ func TestRenderNameWithSelectionDistinguishesCreditNamesFromCanonicalFallback(t 
 		{name: "canonical fallback", credit: MovieCredit{CreditedName: "Alias"}, canonical: "Canonical Name", wantName: "Canonical Name"},
 		{name: "forced canonical fallback", credit: MovieCredit{CreditedName: "Alias", DisplayForceCanonical: true}, useCredited: true, canonical: "Canonical Name", wantName: "Canonical Name"},
 		{name: "credited fallback without canonical", credit: MovieCredit{CreditedName: " Alias "}, canonical: "", wantName: "Alias", wantSelected: true},
+		{name: "forced credited fallback without canonical", credit: MovieCredit{CreditedName: " Alias ", DisplayForceCanonical: true}, useCredited: true, wantName: "Alias", wantSelected: true},
+		{name: "forced override without canonical", credit: MovieCredit{CreditedName: "Alias", DisplayForceCanonical: true, UserOverride: true, OverrideName: " Chosen "}, useCredited: true, wantName: "Chosen", wantSelected: true},
 		{name: "empty fallback", credit: MovieCredit{}, canonical: "", wantName: ""},
 	}
 

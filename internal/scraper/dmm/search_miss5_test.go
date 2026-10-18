@@ -2,11 +2,8 @@ package dmm
 
 import (
 	"context"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/go-resty/resty/v2"
@@ -466,13 +463,7 @@ func TestMiss5_UpsertActressInfo(t *testing.T) {
 // --- ScrapeURL: fetch error ---
 
 func TestMiss5_ScrapeURL_FetchError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// This will be proxied but the transport won't handle it
-	}))
-	defer server.Close()
-
 	client := resty.New()
-	client.SetTimeout(1 * time.Second)
 
 	s := &scraper{
 		enabled:     true,
@@ -481,7 +472,9 @@ func TestMiss5_ScrapeURL_FetchError(t *testing.T) {
 		settings:    models.ScraperSettings{Enabled: true},
 	}
 
-	_, err := s.ScrapeURL(context.Background(), "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=err001/")
-	// Will likely fail with connection error or timeout
-	_ = err
+	stubDMMFetchError(t, s, "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=err001/")
+	result, err := s.ScrapeURL(context.Background(), "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=err001/")
+	require.ErrorContains(t, err, "failed to fetch URL")
+	require.ErrorContains(t, err, "fixture connection failure")
+	assert.Nil(t, result)
 }

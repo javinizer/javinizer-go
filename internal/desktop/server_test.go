@@ -387,6 +387,7 @@ func TestStartServer_PortReuse(t *testing.T) {
 		cfg.Server.Port = 9090
 		cfg.Database.DSN = ":memory:"
 		cfg.Database.Type = "sqlite"
+		cfg.System.VersionCheckEnabled = false // Port selection does not need release checks.
 		return cfg, nil
 	}
 	configPath := filepath.Join(t.TempDir(), "config.yaml")
@@ -427,6 +428,7 @@ func TestStartServer_PortFallback(t *testing.T) {
 		cfg.Server.Port = 9090
 		cfg.Database.DSN = ":memory:"
 		cfg.Database.Type = "sqlite"
+		cfg.System.VersionCheckEnabled = false // Port selection does not need release checks.
 		return cfg, nil
 	}
 

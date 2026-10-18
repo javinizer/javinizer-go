@@ -509,6 +509,7 @@
   "editor_select_search_actress": "选择或搜索女优",
   "editor_thumbnail_url": "缩略图 URL",
   "editor_unable_load_image": "无法加载图片",
+  "editor_duplicate_actress_body": "此女优已在演员列表中。请选择其他女优或编辑现有条目。",
   "editor_validation_body": "至少需要名或日文名",
   "editor_validation_title": "验证错误",
   "editor_via_merged": "经由合并数据",
@@ -927,6 +928,7 @@
     }
   ],
   "jobs_revert_failed": "还原失败：{error}",
+  "jobs_revert_incomplete": "已撤销 {total} 项中的 {succeeded} 项。{failed} 项失败，{skipped} 项跳过。",
   "jobs_revert_partial": "已还原 {succeeded} / {total}。{failed} 个失败。",
   "jobs_revert_success": [
     {
@@ -943,6 +945,7 @@
       }
     }
   ],
+  "jobs_revert_unresolved": "部分操作仍需处理。",
   "jobs_review": "审查",
   "jobs_review_failed": "审查失败",
   "jobs_review_organize": "审查并整理",
@@ -1401,6 +1404,8 @@
   "review_destination_placeholder": "输入目标路径（例如 /path/to/output）",
   "review_downscaled_from": "↓ 从 {width}×{height} 缩小",
   "review_error_blocked": "被来源屏蔽",
+  "review_error_credit_conflict": "演员署名冲突尚未解决",
+  "review_error_credit_status_unavailable": "无法确认演员署名状态",
   "review_error_not_found": "未找到影片",
   "review_error_rate_limited": "请求频率受限，请稍后重试",
   "review_error_title": "错误",
@@ -1663,6 +1668,8 @@
   "review_reset_to_config": "重置为配置",
   "review_reset_to_original": "重置为原始",
   "review_retry_failed": "重试失败",
+  "review_retry_operation_unknown": "无法验证原始应用操作或设置，因此已禁用重试失败项。请刷新任务、检查设置，然后使用应用开始新的操作。",
+  "review_retry_storage_unavailable": "无法替换或删除之前的重试设置，因此未启动新操作。请释放浏览器存储空间或恢复访问权限，然后检查文件操作并重新应用。",
   "review_retry_load": "重试加载",
   "review_return_to_browse_now": "立即返回浏览",
   "review_runtime_value": "{value} 分钟",

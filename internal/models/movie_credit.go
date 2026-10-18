@@ -71,6 +71,17 @@ func (MovieCredit) TableName() string {
 	return "movie_credits"
 }
 
+// RenderVisible reports whether the credit contributes names to rendered
+// output (display titles, folder/file names, NFO actors). A credit renders
+// unless it is suppressed, has no resolved actress, or its actress is both
+// unverified and ambiguity-quarantined.
+func (c *MovieCredit) RenderVisible() bool {
+	if c == nil || c.Suppressed || c.Actress == nil {
+		return false
+	}
+	return c.Actress.Verified || !c.Actress.AmbiguityQuarantined
+}
+
 // EffectiveOrigin defaults unspecified origins to scrape ownership.
 func (c *MovieCredit) EffectiveOrigin() string {
 	if c.Origin == string(CreditOriginUser) {
