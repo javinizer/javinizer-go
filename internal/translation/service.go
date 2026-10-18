@@ -242,15 +242,6 @@ func applyTranslatedField(scraped *models.Movie, field TranslationField, transla
 	}
 }
 
-// GroupByProvider groups translation fields by their provider for batch dispatch.
-// Currently all fields share the same provider, but this seam enables future
-// per-field provider routing (e.g., DeepL for titles, LLM for descriptions).
-func GroupByProvider(plan TranslationPlan, providerName string) map[string][]TranslationField {
-	groups := make(map[string][]TranslationField)
-	groups[providerName] = plan.Fields
-	return groups
-}
-
 // translationState holds mutable state shared between field collection and result application.
 type translationState struct {
 	genreTranslations   []models.GenreTranslationData
