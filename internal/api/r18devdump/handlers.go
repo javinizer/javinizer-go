@@ -51,25 +51,6 @@ type dumpHandler struct {
 	done                chan struct{} // closed when the operation goroutine finishes
 }
 
-// tryAcquireDumpOp atomically claims the shared dump-operation guard. Every
-// mutating dump operation (download, update, upload, clear) holds it for its
-// whole lifetime, giving 409 symmetry in every direction.
-func (h *dumpHandler) tryAcquireDumpOp() bool {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if h.running {
-		return false
-	}
-	h.running = true
-	return true
-}
-
-func (h *dumpHandler) releaseDumpOp() {
-	h.mu.Lock()
-	h.running = false
-	h.mu.Unlock()
-}
-
 func newDumpHandler(rt *core.APIRuntime) *dumpHandler {
 	h := &dumpHandler{rt: rt, httpClient: &http.Client{}, stallTimeout: dumpStallTimeout, renameFn: r18devdump.ReplaceFile, removeFn: os.Remove}
 	h.reloadFn = func(cfg *config.Config, lockHeld bool) error {
