@@ -390,7 +390,7 @@ func (r *r18ContentIDResolver) ResolveURL(ctx context.Context, id string) (strin
 			if !strings.Contains(contentType, "text/html") {
 				var lookupData contentIDLookupResponse
 				if err := json.Unmarshal(resp.Body(), &lookupData); err == nil && lookupData.ContentID != "" {
-					if foldedMarker != "" && !cidMatchesRemasterQuery(lookupData.ContentID, id, foldedMarker, markerSeries) {
+					if foldedMarker != "" && !cidMatchesRemasterEvidence(lookupData.ContentID, id, foldedMarker, markerSeries, lookupData.DVDID) {
 						continue
 					}
 					returnedDVDID := normalizeDVDID(lookupData.DVDID)
@@ -630,7 +630,9 @@ func (s *scraper) parseResponse(ctx context.Context, data *r18Response, sourceUR
 // would succeed with no identity to aggregate or organize. AI content ids
 // stay unset: r18.dev AI cid numbers are slot numbers, not display numbers
 // (dv00899ai is DV-818-AI), so deriving would fabricate a wrong ID; that
-// path publishes only the dvd_id the response itself supplies.
+// path publishes only the dvd_id the response itself supplies. Unresolved
+// prefixed T/T28 cids likewise need an actual dvd_id to establish their series
+// boundary; they must never inherit a guessed T28 identity from the parser.
 func resolveIDs(data *r18Response) string {
 	if data.DVDID != "" {
 		return data.DVDID
@@ -642,7 +644,7 @@ func resolveIDs(data *r18Response) string {
 	if !ok {
 		return contentIDToID(data.ContentID)
 	}
-	if marker == "ai" {
+	if _, unresolved := unprovenT28CIDNumber(data.ContentID); marker == "ai" || unresolved {
 		return ""
 	}
 	return remasterCIDDisplayID(series, number, ez)

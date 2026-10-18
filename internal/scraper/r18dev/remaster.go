@@ -76,6 +76,38 @@ func r18ParseRemasterTail(id string) (series, number, ez, marker string, ok bool
 	return series, number, m[4], m[5], true
 }
 
+// unprovenT28CIDNumber marks prefixed T/T28 content IDs whose catalog digits
+// do not establish a display-series boundary. Existing source fixtures bind
+// 9, 1 and h_003 to T28; all other prefixes need a published DVD ID, just as
+// the DMM page guard does. Candidate-generation prefix tables are not proof.
+func unprovenT28CIDNumber(cid string) (string, bool) {
+	lower := stripRentalSuffixMarkerAware(cid)
+	m := r18RemasterTailRegex.FindStringSubmatch(r18RemasterStem(lower))
+	if m == nil || m[2] != t28Series || m[1] == "" {
+		return "", false
+	}
+	prefix := m[1]
+	if strings.HasPrefix(lower, "h_") || strings.HasPrefix(lower, "n_") {
+		prefix = lower[:2] + prefix
+	}
+	switch prefix {
+	case "9", "1", "h_003":
+		return "", false
+	default:
+		return m[3], true
+	}
+}
+
+// cidMatchesRemasterEvidence binds an unresolved T/T28 candidate only through
+// its actual published DVD identity. Exact raw queries identify the content ID
+// itself, but cannot manufacture a display ID from the ambiguous spelling.
+func cidMatchesRemasterEvidence(contentID, queryID, marker, series, dvdID string) bool {
+	if _, unresolved := unprovenT28CIDNumber(contentID); unresolved && !isRawRemasterContentIDQuery(queryID) {
+		return displayIDsMatchByIdentity(dvdID, queryID) && rawDisplayMatchesCID(contentID, dvdID)
+	}
+	return cidMatchesRemasterQuery(contentID, queryID, marker, series)
+}
+
 // stripRentalSuffixMarkerAware removes a DMM rental 'r' suffix from a content
 // id: a digit-preceded terminal 'r' always strips (118abp00420r ->
 // 118abp00420), and a terminal 'r' whose remainder is a valid marker-bearing
@@ -290,6 +322,9 @@ func cidMatchesRemasterQuery(contentID, queryID, marker, series string) bool {
 // that does carry a dvd_id is instead verified through the display identity
 // comparison (displayIDsMatchByIdentity) before this predicate runs.
 func cidMatchesRemasterFuzzyQuery(contentID, queryID, marker, series string) bool {
+	if _, unresolved := unprovenT28CIDNumber(contentID); unresolved && !isRawRemasterContentIDQuery(queryID) {
+		return false
+	}
 	if !cidMatchesRemasterQuery(contentID, queryID, marker, series) {
 		return false
 	}
@@ -320,6 +355,14 @@ func cidMatchesRemasterFuzzyQuery(contentID, queryID, marker, series string) boo
 func rawRemasterCIDEqual(contentID, queryID string) bool {
 	if strings.EqualFold(strings.TrimSpace(contentID), strings.TrimSpace(queryID)) {
 		return true
+	}
+	// Padding after t28 can belong to a T-series release number. Until the
+	// boundary is known, 55t2800123h and 55t28123h are distinct raw identities.
+	if _, unresolved := unprovenT28CIDNumber(contentID); unresolved {
+		return false
+	}
+	if _, unresolved := unprovenT28CIDNumber(queryID); unresolved {
+		return false
 	}
 	return normalizeRawCIDPadding(contentID) == normalizeRawCIDPadding(queryID)
 }
@@ -384,7 +427,7 @@ func markerVariationAccept(body []byte, queryID, foldedMarker, series string) bo
 	if err := json.Unmarshal(body, &data); err != nil {
 		return false
 	}
-	if !cidMatchesRemasterQuery(data.ContentID, queryID, foldedMarker, series) {
+	if !cidMatchesRemasterEvidence(data.ContentID, queryID, foldedMarker, series, data.DVDID) {
 		return false
 	}
 	if isRawRemasterContentIDQuery(queryID) {
@@ -414,7 +457,7 @@ func markerVariationAccept(body []byte, queryID, foldedMarker, series string) bo
 // reaches the guard with a resolveIDs-derived display ID for H/HD cids (their
 // numbers are display numbers, bound by the admitting guards), while AI cids
 // — whose numbers are slot numbers, not display numbers (dv00899ai is
-// DV-818-AI) — and the dump path leave the ID unset.
+// DV-818-AI) — unresolved prefixed T/T28 cids and the dump path leave ID unset.
 func guardRemasterResult(id string, res *models.ScraperResult) (*models.ScraperResult, error) {
 	return guardRemasterResultWithIdentity(id, res, isRawRemasterContentIDQuery(id))
 }
@@ -429,7 +472,7 @@ func guardRemasterResultWithIdentity(id string, res *models.ScraperResult, rawCo
 	if foldedMarker == "" || res == nil {
 		return res, nil
 	}
-	if !cidMatchesRemasterQuery(res.ContentID, id, foldedMarker, series) ||
+	if !cidMatchesRemasterEvidence(res.ContentID, id, foldedMarker, series, res.ID) ||
 		(rawContentID && !rawRemasterCIDEqual(res.ContentID, id)) {
 		return nil, models.NewScraperNotFoundError("R18.dev", "response does not carry the requested remaster identity")
 	}
@@ -482,6 +525,16 @@ func rawDisplayMatchesCID(cid, display string) bool {
 	dSeries, dNumber, dEz, dMarker, dOk := r18ParseRemasterTail(display)
 	if !cOk || !dOk {
 		return false
+	}
+	if tail, unresolved := unprovenT28CIDNumber(cid); unresolved {
+		// A catalog-prefixed DVD echo repeats the unresolved CID; it does not
+		// supply a display-series boundary. Keep prefix-free display grammar.
+		if m := r18RemasterTailRegex.FindStringSubmatch(r18RemasterStem(display)); m != nil && m[1] != "" {
+			return false
+		}
+		if dSeries == "t" {
+			cSeries, cNumber = "t", "28"+tail
+		}
 	}
 	if cSeries != dSeries || cEz != dEz || foldMarkerSpelling(cMarker) != foldMarkerSpelling(dMarker) {
 		return false
