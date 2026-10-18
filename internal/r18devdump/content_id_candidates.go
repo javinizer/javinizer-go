@@ -166,8 +166,11 @@ func ContentIDCandidatesWithMarker(id string) []string {
 	// compacted shape collapses separator-pinned boundaries (T-28123-HD and
 	// T28-123-HD both compact to t28123hd), so when the input carries
 	// separators keep them in the split source and let the display pinning win.
-	hasSeparator := strings.ContainsAny(id, "-_. ")
-	trimmedLower := strings.ToLower(strings.TrimSpace(id))
+	// Surrounding whitespace does not make a literal raw CID a display ID.
+	// Internal Unicode whitespace is a display separator; collapse runs for
+	// both compaction and the separator-pinned series/number grammar.
+	trimmedLower := strings.Join(strings.Fields(raw), " ")
+	hasSeparator := strings.ContainsAny(trimmedLower, "-_. ")
 	compacted := strings.NewReplacer("-", "", "_", "", ".", "", " ", "").Replace(trimmedLower)
 	m := remasterMarkerTailRgx.FindStringSubmatch(compacted)
 	if m == nil {
