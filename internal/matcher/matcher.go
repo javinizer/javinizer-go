@@ -118,6 +118,7 @@ func (m *Matcher) MatchFile(file models.FileMatchInfo) *MatchResult {
 	if normalized := normalizeFusedRemasterFilename(nameWithoutExt, m.builtinPattern); normalized != "" {
 		nameWithoutExt = normalized
 	}
+	nameWithoutExt = preferBuiltinAfterQuality(nameWithoutExt, m.builtinPattern)
 
 	// Fall back to built-in pattern
 	if result := m.matchWithRegex(file, nameWithoutExt, m.builtinPattern, "builtin"); result != nil && !builtinMatchConflictsWithContentID(nameWithoutExt, m.builtinPattern) && !builtinQualityShadowsContentID(nameWithoutExt, result.ID) {
@@ -250,6 +251,7 @@ func (m *Matcher) MatchString(s string) string {
 	if normalized := normalizeFusedRemasterFilename(s, m.builtinPattern); normalized != "" {
 		s = normalized
 	}
+	s = preferBuiltinAfterQuality(s, m.builtinPattern)
 
 	// Try built-in pattern
 	loc := m.builtinPattern.FindStringSubmatchIndex(s)

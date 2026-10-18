@@ -538,6 +538,32 @@ func builtinQualityShadowsContentID(name, id string) bool {
 	return idText != ""
 }
 
+// Anchor the existing vocabulary so real hyphenated ids such as DTS-24 do
+// not become quality tags merely because their series word names a codec.
+var builtinQualitySpanRegex = regexp.MustCompile(`^(?:` + trailingQualityTagRegex.String() + `)$`)
+
+// preferBuiltinAfterQuality advances only a leading quality match to the
+// first later non-quality built-in candidate. Standalone tags retain their
+// legacy fallback, and a non-quality raw content-id candidate keeps its
+// existing tier precedence. A DL2160 fragment inside WEB-DL2160 is still
+// quality metadata. Returning the selected suffix preserves marker/part offsets.
+func preferBuiltinAfterQuality(name string, pattern *regexp.Regexp) string {
+	first := pattern.FindStringSubmatchIndex(name)
+	if first == nil || !builtinQualitySpanRegex.MatchString(trailingCandidateVetoSpan(name, first[2:4])) {
+		return name
+	}
+	if start, end, ok := contentIDCandidate(name); ok &&
+		!builtinQualitySpanRegex.MatchString(trailingCandidateVetoSpan(name, []int{start, end})) {
+		return name
+	}
+	for _, candidate := range pattern.FindAllStringSubmatchIndex(name, -1)[1:] {
+		if !builtinQualitySpanRegex.MatchString(trailingCandidateVetoSpan(name, candidate[2:4])) {
+			return name[candidate[2]:]
+		}
+	}
+	return name
+}
+
 // trailingCandidateVetoSpan returns the span a trailing-catalog candidate is
 // vetted against as a quality tag: the candidate itself, or the candidate
 // extended back over a compound source-tag prefix (web — optionally
