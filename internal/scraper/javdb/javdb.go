@@ -306,9 +306,9 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 	// JavDB URLs are /v/{code} where code is typically 4-6 alphanumeric characters
 	cleanID := strings.TrimSpace(id)
 	queryKey := foldRemasterMarkerKey(cleanID)
-	// Raw AI catalog IDs are not JavDB video codes. Resolve their unique
-	// display listing before allowing the number-free identity bridge.
-	if isJavDBVideoCode(cleanID) && (!queryKey.rawCID || queryKey.marker != "AI") {
+	// Raw AI catalog IDs and ambiguous compact digit-led displays must
+	// resolve their unique search identity before accepting a detail page.
+	if isJavDBVideoCode(cleanID) && queryKey.compactDisplaySeries == "" && (!queryKey.rawCID || queryKey.marker != "AI") {
 		directURL := fmt.Sprintf("%s/v/%s", s.baseURL, cleanID)
 		logging.Debugf("JavDB: ID '%s' looks like video code, trying direct URL: %s", cleanID, directURL)
 
@@ -486,11 +486,14 @@ func (s *scraper) findDetailSelectionCtx(ctx context.Context, id string) (string
 				// suffix: the base release must not stand in for the remaster.
 				match = idMatchNone
 			}
-			if markerQuery && foldedTargetKey.rawCID && foldedTargetKey.marker == "AI" && match != idMatchNone {
+			if markerQuery && match != idMatchNone && ((foldedTargetKey.rawCID && foldedTargetKey.marker == "AI") || foldedTargetKey.compactDisplaySeries != "") {
 				candidateKey := foldRemasterMarkerKey(c)
-				if !candidateKey.rawCID {
-					// Slot/display number equality is coincidental, never stronger
-					// evidence than any other same-series AI display candidate.
+				literalCompact := candidateKey.compactDisplaySeries != "" && candidateKey.compact == foldedTargetKey.compact
+				if !candidateKey.rawCID || (foldedTargetKey.compactDisplaySeries != "" && !literalCompact) {
+					// Neither AI slot/display number equality nor stripping an
+					// ambiguous compact catalog prefix proves a display identity.
+					// Require one interpretation; only a literal compact raw card,
+					// not another stripped catalog/channel prefix, stays exact.
 					match = idMatchNormalized
 					key := candidateKey.series + ":" + trimRemasterNumberPadding(candidateKey.number) + ":" + candidateKey.catalogSuffix + ":" + scraperutil.ResolveURL(s.baseURL, href)
 					bridgedCandidates[key] = true
@@ -1111,6 +1114,9 @@ type remasterFoldKey struct {
 	compact       string
 	pinned        bool
 	rawCID        bool
+	// A compact unpadded digit-led spelling may also name a display series
+	// (300MIUM700H). Keep this alternate separate from the raw CID key.
+	compactDisplaySeries string
 }
 
 // foldRemasterMarkerKey parses a display id's remaster identity with the
@@ -1121,10 +1127,11 @@ type remasterFoldKey struct {
 // decodes through the t28-first split under the shared t28 rule, so a
 // prefix-free t28123h reads as the T-series T+28123 while its
 // catalog-prefixed spellings (9t28123h) keep the T28 label's T28+123. A
-// compact id's leading 1-4 digit run is a DMM catalog/channel prefix, not
-// part of the series (1rct00156h is the RCT-156H remaster's cid), so it is
-// stripped from the pinned series the same way the DMM/R18 classifiers read
-// the spelling — see stripCompactCatalogPrefix — and a channel-prefixed
+// compact id's leading 1-4 digit run may be a DMM catalog/channel prefix
+// (1rct00156h is the RCT-156H remaster's cid), so its raw interpretation
+// strips that run as the DMM/R18 classifiers do. An unpadded compact form
+// also retains the possible digit-led display series for an exact-spelling
+// match; conflicting display interpretations must miss. A channel-prefixed
 // raw cid first drops its leading h_/n_ maker letter
 // (h_003abc00123hd -> ABC+00123+H; see stripRemasterChannelPrefix). The
 // tail grammar is splitRemasterMarkerTail's: the E/Z catalog
@@ -1185,14 +1192,14 @@ func foldRemasterMarkerKey(id string) remasterFoldKey {
 				key.pin("T28", m[3], suffix, marker)
 			}
 		} else {
-			// A leading 1-4 digit run on a compact marker-bearing id is a
-			// DMM catalog/channel prefix, not part of the series — every
-			// real prefixed cid's series part is letters-only, and the
-			// DMM/R18 classifiers read the same spelling through the same
-			// split — so 1rct00156h pins RCT+00156+H, the identity the
-			// RCT-156-HD display listing carries, instead of a 1RCT series
-			// no listing spells. stripCompactCatalogPrefix bounds the
-			// ambiguous digit runs.
+			// Preserve the raw catalog interpretation, but an unpadded,
+			// channel-free compact form can also spell a digit-led display
+			// series. Only an exact folded spelling with an explicit series
+			// boundary may establish that alternate; it never gets the AI
+			// number-free bridge. T28 retains its separate boundary rules.
+			if len(m[1]) > 0 && len(m[1]) <= maxCatalogPrefixDigits && m[3][0] != '0' && !strings.ContainsAny(trimmed, "-_. ") {
+				key.compactDisplaySeries = m[1] + m[2]
+			}
 			key.pin(stripCompactCatalogPrefix(m[1], m[2]), m[3], suffix, marker)
 		}
 	}
@@ -1217,11 +1224,12 @@ func t28TailDecodesTSeries(tail string) bool {
 const maxCatalogPrefixDigits = 4
 
 // stripCompactCatalogPrefix removes a compact id's leading DMM catalog or
-// channel prefix digits from its series when the digit run is unambiguous
-// maker junk. The catalog prefixes real prefixed cids carry (1rct00156h,
+// channel prefix digits for the raw interpretation of a compact id.
+// The catalog prefixes real prefixed cids carry (1rct00156h,
 // 118ipx00535h) run 1-4 digits and the series parts behind them are
-// letters-only in the r18.dev content-id prefix lookup, so a 1-4 digit run
-// is never part of the series — the DMM/R18 classifiers read the same
+// letters-only in the r18.dev content-id prefix lookup. Digit-led display
+// series remain a separate possibility for unpadded compact forms; this
+// helper keeps the raw interpretation the DMM/R18 classifiers give the same
 // spellings through the same split (parseRemasterTail /
 // r18ParseRemasterTail return the digit-free series group), and the raw
 // content ids the matcher's tier-2 propagates must fold onto the display
@@ -1361,6 +1369,15 @@ func trimRemasterNumberPadding(number string) string {
 // for the remaster.
 func remasterFoldMatchRank(candidate string, target remasterFoldKey) idMatchType {
 	c := foldRemasterMarkerKey(candidate)
+	// Exact compact evidence can retain a digit-led display series without
+	// reclassifying raw catalog IDs. Requiring that series on the explicitly
+	// pinned side excludes T/T28 collisions and keeps numbers and markers
+	// bound in both search-card and selected-detail comparisons.
+	if c.compact == target.compact &&
+		((target.compactDisplaySeries != "" && !c.rawCID && c.series == target.compactDisplaySeries) ||
+			(c.compactDisplaySeries != "" && !target.rawCID && target.series == c.compactDisplaySeries)) {
+		return idMatchNormalized
+	}
 	if target.pinned && c.pinned {
 		if c.series != target.series || c.catalogSuffix != target.catalogSuffix || c.marker != target.marker {
 			return idMatchNone
