@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	"gorm.io/gorm"
+
 	"github.com/javinizer/javinizer-go/internal/models"
 )
 
@@ -208,6 +210,50 @@ func (r *HistoryRepository) FindByBatchJobID(ctx context.Context, batchJobID str
 	err := r.GetDB().WithContext(ctx).Where("batch_job_id = ?", batchJobID).Order("created_at ASC").Find(&history).Error
 	if err != nil {
 		return nil, wrapDBErr("find", fmt.Sprintf("history for batch job %s", batchJobID), err)
+	}
+	return history, nil
+}
+
+// HistoryFilter combines optional history predicates. Empty fields are unfiltered.
+type HistoryFilter struct {
+	MovieID   string
+	Operation models.HistoryOperation
+	Status    models.HistoryStatus
+}
+
+func (r *HistoryRepository) filteredQuery(ctx context.Context, filter HistoryFilter) *gorm.DB {
+	query := r.GetDB().WithContext(ctx).Model(&models.History{})
+	if filter.MovieID != "" {
+		query = query.Where("movie_id = ?", filter.MovieID)
+	}
+	if filter.Operation != "" {
+		query = query.Where("operation = ?", filter.Operation)
+	}
+	if filter.Status != "" {
+		query = query.Where("status = ?", filter.Status)
+	}
+	return query
+}
+
+// CountFiltered counts records matching all supplied predicates, before pagination.
+func (r *HistoryRepository) CountFiltered(ctx context.Context, filter HistoryFilter) (int64, error) {
+	var count int64
+	if err := r.filteredQuery(ctx, filter).Count(&count).Error; err != nil {
+		return 0, wrapDBErr("count", "history", err)
+	}
+	return count, nil
+}
+
+// ListFiltered lists records matching all supplied predicates, newest first.
+// Nonpositive limits disable pagination, matching List's existing semantics.
+func (r *HistoryRepository) ListFiltered(ctx context.Context, filter HistoryFilter, limit, offset int) ([]models.History, error) {
+	var history []models.History
+	query := r.filteredQuery(ctx, filter).Order("created_at DESC")
+	if limit > 0 {
+		query = query.Limit(limit).Offset(offset)
+	}
+	if err := query.Find(&history).Error; err != nil {
+		return nil, wrapDBErr("find", "history", err)
 	}
 	return history, nil
 }
