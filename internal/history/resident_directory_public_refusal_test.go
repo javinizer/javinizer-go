@@ -63,7 +63,7 @@ func TestResidentDirectoryPublicUndoRefusesOccupiedOriginal(t *testing.T) {
 	stored, err := repo.FindByID(t.Context(), op.ID)
 	require.NoError(t, err)
 	require.Equal(t, models.RevertStatusFailed, stored.RevertStatus)
-	require.JSONEq(t, ledger, stored.GeneratedFiles)
+	requireOnlyUndoAdmissionChanged(t, ledger, stored.GeneratedFiles)
 	after, err := fs.Stat(current)
 	require.NoError(t, err)
 	afterDev, afterIno, afterStrong := fsutil.BoundObjectIdentity(fs, current, after)

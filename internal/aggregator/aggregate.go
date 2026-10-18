@@ -130,7 +130,7 @@ func (a *Aggregator) aggregateWithPriority(results []*models.ScraperResult, prio
 
 	a.assignSourceMetadata(scraped, resultsBySource, results, priorityFunc)
 
-	scraped.Translations = a.buildTranslations(results, scraped)
+	scraped.Translations = a.buildTranslations(results, scraped, priorityFunc)
 
 	if a.wordProcessor != nil {
 		a.wordProcessor.applyToMovie(scraped)
@@ -281,7 +281,7 @@ func (a *Aggregator) assignScreenshots(movie *models.Movie, resultsBySource map[
 
 // assignSourceMetadata sets SourceName and SourceURL from the first available result.
 func (a *Aggregator) assignSourceMetadata(movie *models.Movie, resultsBySource map[string]*models.ScraperResult, results []*models.ScraperResult, priorityFunc func(string) []string) {
-	sourcePriority := priorityFunc("title")
+	sourcePriority := priorityFunc("Title")
 	for _, source := range sourcePriority {
 		if result, exists := resultsBySource[source]; exists {
 			movie.SourceName = result.Source

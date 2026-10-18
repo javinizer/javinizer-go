@@ -104,7 +104,7 @@ func TestSweep_PreJournalCrashWindow_DiscoverableViaDeleteLedger(t *testing.T) {
 // retry repeats an idempotent restore instead of meeting a dangling pointer.
 func TestRevert_ConsumptionFailure_KeepsBackupRetryable(t *testing.T) {
 	fs := afero.NewMemMapFs()
-	repo := &failingUpdateRepo{p3OpRepo: newP3OpRepo()}
+	repo := &failingUpdateRepo{p3OpRepo: newP3OpRepo(), allowAdmission: true}
 	ctx := context.Background()
 
 	f := &p3Fixture{fs: fs, repo: repo.p3OpRepo}
@@ -136,16 +136,22 @@ func TestRevert_ConsumptionFailure_KeepsBackupRetryable(t *testing.T) {
 	require.Equal(t, "old", string(mustRead2(t, fs, dest)))
 }
 
-// failingUpdateRepo fails journal transaction calls until cleared. The
+// failingUpdateRepo fails journal transaction calls until cleared, optionally
+// allowing the initial Undo admission before injecting a consumption fault. The
 // consumption/marker persistence legs moved from Update to UpdateJournalInTx
 // (review 4960250562), so the failure injection rides the transaction seam.
 type failingUpdateRepo struct {
 	*p3OpRepo
-	updateErr error
+	updateErr      error
+	allowAdmission bool
 }
 
 func (m *failingUpdateRepo) UpdateJournalInTx(ctx context.Context, id uint, fn database.JournalUpdateFn) error {
 	if m.updateErr != nil {
+		if m.allowAdmission {
+			m.allowAdmission = false
+			return m.p3OpRepo.UpdateJournalInTx(ctx, id, fn)
+		}
 		return m.updateErr
 	}
 	return m.p3OpRepo.UpdateJournalInTx(ctx, id, fn)

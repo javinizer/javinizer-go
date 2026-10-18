@@ -117,7 +117,7 @@ func TestPrimaryUndoTerminalCloseCancellationBlocksMetadata(t *testing.T) {
 	restoreOpenReplacementSource = open
 	f.reopen()
 	require.Equal(t, beforeStatus, f.op.RevertStatus)
-	require.Equal(t, beforeLedger, f.op.GeneratedFiles)
+	requireOnlyUndoAdmissionChanged(t, beforeLedger, f.op.GeneratedFiles)
 	f.success()
 
 	result, err = NewReverter(f.fs, f.repo).revertFile(context.Background(), f.op)

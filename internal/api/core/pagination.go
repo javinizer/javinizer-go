@@ -30,3 +30,12 @@ func ParsePagination(c *gin.Context, defaultLimit, maxLimit int) (limit, offset 
 
 	return limit, offset
 }
+
+// PaginationBounds returns safe slice bounds for nonnegative length, limit, and offset.
+// It clamps the offset first and limits the page to the remaining elements before
+// adding, so even MaxInt pagination values cannot overflow.
+func PaginationBounds(length, limit, offset int) (start, end int) {
+	start = min(offset, length)
+	end = start + min(limit, length-start)
+	return start, end
+}

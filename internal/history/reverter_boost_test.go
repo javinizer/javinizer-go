@@ -799,6 +799,7 @@ func TestRevertBatch_SuccessfulRevert(t *testing.T) {
 	}
 	mockRepo.On("FindByBatchJobID", mock.Anything, "batch-1").Return(ops, nil)
 	mockRepo.On("FindByID", mock.Anything, uint(300)).Return(&ops[0], nil)
+	expectMockUndoAdmission(t, mockRepo, &ops[0])
 	mockRepo.On("UpdateRevertStatus", mock.Anything, uint(300), models.RevertStatusReverted).Return(nil)
 
 	r := NewReverter(fs, mockRepo)
@@ -840,6 +841,7 @@ func TestRevertBatch_MixedStatuses(t *testing.T) {
 	}
 	mockRepo.On("FindByBatchJobID", mock.Anything, "batch-1").Return(ops, nil)
 	mockRepo.On("FindByID", mock.Anything, uint(301)).Return(&ops[0], nil)
+	expectMockUndoAdmission(t, mockRepo, &ops[0])
 	mockRepo.On("UpdateRevertStatus", mock.Anything, uint(301), models.RevertStatusReverted).Return(nil)
 
 	r := NewReverter(fs, mockRepo)
@@ -934,6 +936,7 @@ func TestRevertScrape_Success(t *testing.T) {
 	}
 	mockRepo.On("FindByBatchJobID", mock.Anything, "batch-1").Return(ops, nil)
 	mockRepo.On("FindByID", mock.Anything, uint(401)).Return(&ops[0], nil)
+	expectMockUndoAdmission(t, mockRepo, &ops[0])
 	mockRepo.On("UpdateRevertStatus", mock.Anything, uint(401), models.RevertStatusReverted).Return(nil)
 
 	r := NewReverter(fs, mockRepo)
@@ -973,6 +976,7 @@ func TestRevertOperations_SystemError(t *testing.T) {
 	}
 	mockRepo.On("FindByBatchJobID", mock.Anything, "batch-1").Return(ops, nil)
 	mockRepo.On("FindByID", mock.Anything, uint(500)).Return(&ops[0], nil)
+	expectMockUndoAdmission(t, mockRepo, &ops[0])
 	mockRepo.On("UpdateRevertStatus", mock.Anything, uint(500), models.RevertStatusReverted).Return(errors.New("db persist failed"))
 
 	r := NewReverter(fs, mockRepo)
@@ -1049,6 +1053,7 @@ func TestRevertFile_CopyModeDeletesJournaledArtifacts(t *testing.T) {
 		}),
 	}
 	mockRepo.On("FindByID", mock.Anything, uint(600)).Return(op, nil)
+	expectMockUndoAdmission(t, mockRepo, op)
 	result, err := r.revertFile(context.Background(), op)
 	require.NoError(t, err)
 	assert.NotNil(t, result)
@@ -1084,6 +1089,7 @@ func TestRevertFile_UnknownOperationTypeStillRejected(t *testing.T) {
 		OriginalPath:  "/src/T601.mkv",
 	}
 	mockRepo.On("FindByID", mock.Anything, uint(601)).Return(op, nil)
+	expectMockUndoAdmission(t, mockRepo, op)
 	result, err := r.revertFile(context.Background(), op)
 	require.NoError(t, err)
 	assert.NotNil(t, result)
@@ -1191,6 +1197,7 @@ func TestRevertFile_UpdateOperation(t *testing.T) {
 		NFOPath:       "/src/ABC-123.nfo",
 	}
 	mockRepo.On("FindByID", mock.Anything, uint(800)).Return(op, nil)
+	expectMockUndoAdmission(t, mockRepo, op)
 	mockRepo.On("UpdateRevertStatus", mock.Anything, uint(800), models.RevertStatusReverted).Return(nil)
 
 	r := NewReverter(fs, mockRepo)
@@ -1216,6 +1223,7 @@ func TestRevertFile_MoveOperation(t *testing.T) {
 		RevertStatus:  models.RevertStatusApplied,
 	}
 	mockRepo.On("FindByID", mock.Anything, uint(801)).Return(op, nil)
+	expectMockUndoAdmission(t, mockRepo, op)
 	mockRepo.On("UpdateRevertStatus", mock.Anything, uint(801), models.RevertStatusReverted).Return(nil)
 
 	r := NewReverter(fs, mockRepo)
@@ -1260,6 +1268,7 @@ func TestRevertFile_AnchorMissing(t *testing.T) {
 		RevertStatus:  models.RevertStatusApplied,
 	}
 	mockRepo.On("FindByID", mock.Anything, uint(803)).Return(op, nil)
+	expectMockUndoAdmission(t, mockRepo, op)
 	result, err := r.revertFile(context.Background(), op)
 	require.NoError(t, err)
 	assert.Equal(t, models.RevertOutcomeSkipped, result.Outcome)
@@ -1282,6 +1291,7 @@ func TestRevertFile_DBPersistFails(t *testing.T) {
 		RevertStatus:  models.RevertStatusApplied,
 	}
 	mockRepo.On("FindByID", mock.Anything, uint(804)).Return(op, nil)
+	expectMockUndoAdmission(t, mockRepo, op)
 	mockRepo.On("UpdateRevertStatus", mock.Anything, uint(804), models.RevertStatusReverted).Return(errors.New("db write failed"))
 
 	r := NewReverter(fs, mockRepo)
@@ -1311,6 +1321,7 @@ func TestRevertFile_WithNFOWarning(t *testing.T) {
 	}
 	// NFO write will fail due to nfoWriteErrorFs, but it's a soft failure in move mode
 	mockRepo.On("FindByID", mock.Anything, uint(805)).Return(op, nil)
+	expectMockUndoAdmission(t, mockRepo, op)
 	mockRepo.On("UpdateRevertStatus", mock.Anything, uint(805), models.RevertStatusReverted).Return(nil)
 
 	errorFs := &nfoWriteErrorFs{Fs: fs}
@@ -1779,6 +1790,7 @@ func TestRevertFile_PendingMoveIntentDrivesHydratedRevert(t *testing.T) {
 		GeneratedFiles: string(gfJSON),
 	}
 	mockRepo.On("FindByID", mock.Anything, uint(805)).Return(op, nil)
+	expectMockUndoAdmission(t, mockRepo, op)
 	mockRepo.On("UpdateRevertStatus", mock.Anything, uint(805), models.RevertStatusReverted).Return(nil)
 
 	r := NewReverter(fs, mockRepo)
@@ -1814,6 +1826,7 @@ func TestRevertFile_UnexecutedMoveIntentSettlesNoOp(t *testing.T) {
 		GeneratedFiles: string(gfJSON),
 	}
 	mockRepo.On("FindByID", mock.Anything, uint(806)).Return(op, nil)
+	expectMockUndoAdmission(t, mockRepo, op)
 	mockRepo.On("UpdateRevertStatus", mock.Anything, uint(806), models.RevertStatusNoOp).Return(nil)
 
 	r := NewReverter(fs, mockRepo)
@@ -1846,6 +1859,7 @@ func TestRevertFile_UnexecutedIntentSettleFailurePropagates(t *testing.T) {
 		GeneratedFiles: string(gfJSON),
 	}
 	mockRepo.On("FindByID", mock.Anything, uint(807)).Return(op, nil)
+	expectMockUndoAdmission(t, mockRepo, op)
 	mockRepo.On("UpdateRevertStatus", mock.Anything, uint(807), models.RevertStatusNoOp).Return(errors.New("write fails"))
 	mockRepo.On("UpdateRevertStatus", mock.Anything, uint(807), models.RevertStatusFailed).Return(nil)
 
@@ -1877,6 +1891,7 @@ func TestRevertFile_HydratedIntentRevertsMove(t *testing.T) {
 		GeneratedFiles: string(gfJSON),
 	}
 	mockRepo.On("FindByID", mock.Anything, uint(808)).Return(op, nil)
+	expectMockUndoAdmission(t, mockRepo, op)
 	mockRepo.On("UpdateRevertStatus", mock.Anything, uint(808), models.RevertStatusReverted).Return(nil)
 
 	r := NewReverter(fs, mockRepo)

@@ -14,6 +14,7 @@ type scrapedMediaSnapshot struct {
 	TrailerURL       string
 	Screenshots      []string
 	Actresses        []models.Actress
+	Credits          []models.MovieCredit
 }
 
 func snapshotScrapedMedia(movie *models.Movie) *scrapedMediaSnapshot {
@@ -28,6 +29,7 @@ func snapshotScrapedMedia(movie *models.Movie) *scrapedMediaSnapshot {
 		TrailerURL:       movie.TrailerURL,
 		Screenshots:      append([]string(nil), movie.Screenshots...),
 		Actresses:        cloneActresses(movie.Actresses),
+		Credits:          (&models.Movie{Credits: movie.Credits}).Clone().Credits,
 	}
 }
 
@@ -45,7 +47,27 @@ func (s *scrapedMediaSnapshot) overlay(movie *models.Movie) *models.Movie {
 	result.Poster.ShouldCropPoster = s.ShouldCropPoster
 	result.TrailerURL = s.TrailerURL
 	result.Screenshots = append([]string(nil), s.Screenshots...)
+	renderCredits, hasRenderCredits := result.RenderingCredits()
 	result.Actresses = overlayActressThumbs(result.Actresses, s.Actresses)
+	if hasRenderCredits {
+		// Preserve merged names/order while restoring only authoritative fresh
+		// credit thumbnails. NFO-only actors have no identity link, so their
+		// stale NFO image URLs must not be downloaded during an overwrite.
+		for i := range renderCredits {
+			credit := &renderCredits[i]
+			if credit.Actress == nil {
+				continue
+			}
+			credit.Actress.ThumbURL = ""
+			for _, source := range s.Credits {
+				if credit.ActressID != 0 && credit.ActressID == source.ActressID && source.Actress != nil {
+					credit.Actress.ThumbURL = source.Actress.ThumbURL
+					break
+				}
+			}
+		}
+		result.SetRenderCredits(renderCredits)
+	}
 	return result
 }
 

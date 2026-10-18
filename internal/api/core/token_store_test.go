@@ -9,6 +9,7 @@ import (
 
 func TestTokenStore_CreateAndValidate(t *testing.T) {
 	store := NewTokenStore()
+	t.Cleanup(func() { CloseTokenStore(store) })
 
 	token, expiresAt, err := store.Create("global", "hash123")
 	assert.NoError(t, err)
@@ -30,6 +31,7 @@ func TestTokenStore_CreateAndValidate(t *testing.T) {
 
 func TestTokenStore_ExpiredToken(t *testing.T) {
 	store := NewTokenStore().(*tokenStore)
+	t.Cleanup(func() { CloseTokenStore(store) })
 
 	vt := verificationToken{
 		Token:      "expired_token",
@@ -47,6 +49,7 @@ func TestTokenStore_ExpiredToken(t *testing.T) {
 
 func TestTokenStore_CleanupExpired(t *testing.T) {
 	store := NewTokenStore().(*tokenStore)
+	t.Cleanup(func() { CloseTokenStore(store) })
 
 	store.tokens["expired"] = verificationToken{
 		Token:     "expired",

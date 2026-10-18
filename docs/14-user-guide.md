@@ -48,6 +48,16 @@ Update Metadata merges scraped data into the existing NFO on disk. The merge opt
 | `force_overwrite` | `true` / `false` | Ignore the existing NFO and use only scraper data (destructive) |
 | `overwrite_existing_media` | `true` / `false` | Re-download and atomically replace existing enabled media using freshly scraped URLs; default `false` |
 
+### Actor-credit choices during NFO merge
+
+Movie-only actor names, `use_credited_name`, forced canonical names, and suppressed credits take priority over old NFO cast, including with `prefer-nfo`. Other matched presentation fields still follow the selected merge strategy. For credit-aware movies, NFO-only actors are presentation data: importing their names does not create or verify database identities. The durable movie content ID and publication checks remain authoritative.
+
+Newly generated actors with durable credits carry an optional `javinizer-credit` XML extension linking their presentation to the same movie credit. This lets a later update recognize an old movie-only name after it changes or is cleared. The link is not an identity assertion or permission to bypass suppression, unresolved identities, or publication checks. Other XML readers can ignore the extension; tools that remove it leave a legacy name-only NFO.
+
+For a legacy NFO, an unknown actor name can be either a genuinely new actor or an obsolete movie-only alias. If a movie has explicit actor choices or retained user-edit history, merging such an unlinked name stops with **NFO cast requires review**, before publishing output. Back up and review the NFO: remove stale rows, or add genuinely new actors through the movie editor before retrying. Alternatively, deliberately use `force_overwrite`, or `prefer-scraper` with array replacement and an authoritative source cast, accepting replacement of the old NFO cast. Existing NFO and artwork are retained when this check fails. Unfenced Apply validates this before organizing, so an ambiguous duplicate can report a per-file error instead of reaching the usual duplicate no-op; other files can still proceed. Edited-movie detection covers normal override clearing; imported databases with missing edit history cannot be distinguished reliably.
+
+Read-only Compare shows legacy field differences without validating presentation links against the database. Its preview is not publication approval: Apply reparses the NFO and validates the authoritative cast. Render-only NFO cast and links are not saved as database credits or identities.
+
 ### What each mode writes to disk
 
 Both modes write the following to the source file's directory — the NFO file is gated by `metadata.nfo.enabled` (default `true`), and each media artifact is gated by its `output.download_*` option (all default `true`):

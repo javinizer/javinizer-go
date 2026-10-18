@@ -126,37 +126,10 @@ func executeLLMChatTranslation(ctx context.Context, httpClient httpclient.HTTPCl
 
 	logging.Debugf("Translation (%s): POST chat completion model=%s texts=%d", providerName, model, textCount)
 
-	start := time.Now()
-	resp, err := httpClient.Do(req)
+	respBody, err := executeLLMChatRequest(httpClient, req, providerName, time.Now(), false)
 	if err != nil {
-		logging.Debugf("Translation (%s): request failed after %v", providerName, time.Since(start))
-		return nil, &translationError{
-			Kind:    TranslationErrorProvider,
-			Message: fmt.Sprintf("%s translation request failed", providerName),
-		}
+		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxTranslationResponseSize))
-	if err != nil {
-		// Typed provider error (message only, raw cause dropped): truncated or
-		// failed response bodies classify as unavailable, not unknown.
-		return nil, &translationError{
-			Kind:    TranslationErrorProvider,
-			Message: fmt.Sprintf("%s translation response body read failed", providerName),
-		}
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		// Status-only message: do not embed the provider response body, which can
-		// contain diagnostics or echo the source text.
-		return nil, &translationError{
-			Kind:       TranslationErrorHTTPStatus,
-			StatusCode: resp.StatusCode,
-			Message:    fmt.Sprintf("%s translation failed with status %d", providerName, resp.StatusCode),
-		}
-	}
-
-	logging.Debugf("Translation (%s): response received (body length=%d)", providerName, len(respBody))
 	return adapter.DecodeResponse(providerName, respBody, textCount)
 }
 
@@ -187,18 +160,29 @@ func executeOpenAIChatTranslation(ctx context.Context, httpClient httpclient.HTT
 		start = time.Now()
 	}
 
+	respBody, err := executeLLMChatRequest(httpClient, req, opts.provider, start, opts.logTiming)
+	if err != nil {
+		return nil, err
+	}
+	return decodeOpenAIChatTranslation(opts.provider, respBody, opts.textCount)
+}
+
+// executeLLMChatRequest executes an already-built request and returns a bounded,
+// successful response body. A zero start disables failure timing; response timing
+// is independently enabled only by the legacy caller, preserving its log format.
+func executeLLMChatRequest(httpClient httpclient.HTTPClient, req *http.Request, provider string, start time.Time, logResponseTiming bool) ([]byte, error) {
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		if opts.logTiming {
-			logging.Debugf("Translation (%s): request failed after %v", opts.provider, time.Since(start))
+		if !start.IsZero() {
+			logging.Debugf("Translation (%s): request failed after %v", provider, time.Since(start))
 		}
 		return nil, &translationError{
 			Kind:    TranslationErrorProvider,
-			Message: fmt.Sprintf("%s translation request failed", opts.provider),
+			Message: fmt.Sprintf("%s translation request failed", provider),
 		}
 	}
-	if opts.logTiming {
-		logging.Debugf("Translation (%s): response received in %v (status %d)", opts.provider, time.Since(start), resp.StatusCode)
+	if logResponseTiming {
+		logging.Debugf("Translation (%s): response received in %v (status %d)", provider, time.Since(start), resp.StatusCode)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -208,7 +192,7 @@ func executeOpenAIChatTranslation(ctx context.Context, httpClient httpclient.HTT
 		// failed response bodies classify as unavailable, not unknown.
 		return nil, &translationError{
 			Kind:    TranslationErrorProvider,
-			Message: fmt.Sprintf("%s translation response body read failed", opts.provider),
+			Message: fmt.Sprintf("%s translation response body read failed", provider),
 		}
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -217,12 +201,12 @@ func executeOpenAIChatTranslation(ctx context.Context, httpClient httpclient.HTT
 		return nil, &translationError{
 			Kind:       TranslationErrorHTTPStatus,
 			StatusCode: resp.StatusCode,
-			Message:    fmt.Sprintf("%s translation failed with status %d", opts.provider, resp.StatusCode),
+			Message:    fmt.Sprintf("%s translation failed with status %d", provider, resp.StatusCode),
 		}
 	}
 
-	logging.Debugf("Translation (%s): response received (body length=%d)", opts.provider, len(respBody))
-	return decodeOpenAIChatTranslation(opts.provider, respBody, opts.textCount)
+	logging.Debugf("Translation (%s): response received (body length=%d)", provider, len(respBody))
+	return respBody, nil
 }
 
 // openAIChatAdapter implements LLMChatAdapter for OpenAI-compatible chat APIs.

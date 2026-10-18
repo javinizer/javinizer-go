@@ -173,6 +173,45 @@ func withApplyPublicationFence(ctx context.Context, inputs applyPhaseInputs, mov
 	return nil
 }
 
+// updateApplyFailureWithPublicationFence publishes staged result state only
+// after the generation-fenced DB transaction has successfully finished. The
+// DB writer is acquired before the result-store lock, matching review edits.
+// A cancelled transaction may release its DB writer while a store callback is
+// blocked; its eventual candidate must therefore remain private until outcome.
+func updateApplyFailureWithPublicationFence(ctx context.Context, inputs applyPhaseInputs, movie *models.Movie, afc *ApplyFileContext, filePath string, update func(*resultstore.MovieResult, *resultstore.ProvenanceData) (*resultstore.MovieResult, *resultstore.ProvenanceData, error)) error {
+	fencer, fenced := inputs.MovieRepo.(database.ApplyPublicationFencer)
+	if !fenced || movie == nil || strings.TrimSpace(movie.ContentID) == "" {
+		return inputs.Updater.AtomicUpdateFileResultWithProvenance(filePath, update)
+	}
+	staged, ok := inputs.Updater.(resultstore.StagedResultUpdater)
+	if !ok {
+		return fmt.Errorf("%w: result updater does not support staged publication", errApplyPublicationFence)
+	}
+	generation := movie.RenderGeneration
+	if afc != nil {
+		generation = afc.PublicationGeneration
+	}
+	err := staged.AtomicUpdateFileResultWithProvenanceAfter(filePath, func(prepare func() error) error {
+		err := fencer.WithApplyPublicationFence(ctx, movie.ContentID, generation, func(*models.Movie) error {
+			return prepare()
+		})
+		if errors.Is(err, database.ErrNotFound) && (afc == nil || !afc.PersistedMovie) {
+			return prepare()
+		}
+		return err
+	}, update)
+	if errors.Is(err, database.ErrApplyPublicationStale) {
+		// Translate a skipped generation only AFTER staging has discarded it.
+		logging.Warnf("[Apply] skipping failure write-back for %s — persisted generation changed during apply", filePath)
+		return nil
+	}
+	if err != nil {
+		// Never replace a row unfenced after staging or transaction failure.
+		return fmt.Errorf("%w: %w", errApplyPublicationFence, err)
+	}
+	return nil
+}
+
 // mergeWriteBackProvenance merges per-file provenance for a write-back commit
 // (D5): live (phase-time edited) attribution wins the keys it covers; the
 // phase-frozen snapshot fills keys the user never touched. Raw ScraperResults

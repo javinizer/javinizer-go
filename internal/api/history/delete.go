@@ -33,7 +33,11 @@ func deleteHistory(repo database.HistoryRepositoryInterface) gin.HandlerFunc {
 
 		_, err = repo.FindByID(c.Request.Context(), uint(id))
 		if err != nil {
-			c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "History record not found"})
+			if database.IsNotFound(err) {
+				c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "History record not found"})
+			} else {
+				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: retrieveHistoryErrorMessage})
+			}
 			return
 		}
 

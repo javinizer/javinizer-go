@@ -29,7 +29,11 @@
 
 	function handleInput(event: Event) {
 		const target = event.target as HTMLInputElement;
-		const numValue = parseInt(target.value, 10);
+		// Expand exponent notation before truncating to the existing integer callback contract.
+		// Keep non-exponent parsing unchanged, including leading-dot decimal handling.
+		const numValue = /e/i.test(target.value)
+			? Math.trunc(target.valueAsNumber)
+			: parseInt(target.value, 10);
 		if (!isNaN(numValue)) {
 			onchange(numValue);
 		}

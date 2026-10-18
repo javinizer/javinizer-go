@@ -5,6 +5,71 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.6.3] - 2026-10-18
+
+### Fixed
+
+- Retain selected raw actor evidence across alias conversion (#333).
+- Preserve legacy actor thumbnail edits and omit blank separators (#332).
+- Keep actor selection, save receipts and credited fallback consistent (#331).
+- Preserve actor-credit choices during forced rescrape (#329).
+- Reject destructive empty actor renames in movie edits (#330).
+- Refresh inferred legacy single-part actor names safely (#328).
+- Handle pinned preview connection cleanup errors.
+- Retain NFO cast projection across rescrape ID correction.
+- Preserve actor credit choices across NFO merges (#325).
+- Reconcile actor identity lifecycle during import (#323).
+- Stage timeout outcomes until the database fence commits.
+- Preserve credit review recovery and mutation ordering.
+- Derive display titles from authoritative credits.
+- Retain credit-fenced Apply timeout outcomes.
+- Align the organize credit gate with live credits (#320).
+- Truncate multiline Discord release notes correctly (#319).
+
+### Changed
+
+- Avoid intercepting Vite imports in retry browser mocks.
+- Make watchdog and idle-reclaim timing deterministic (#326).
+- Use native paths for rescraped actor images.
+- Synchronize expired writeback with completed SQLite rollback.
+
+## [v1.6.2] - 2026-10-16
+
+### Fixed
+
+- Keep completed dump imports from stalling on optional EOF probes while retaining resumed-payload stall detection (#316).
+- Isolate review refresh state between jobs and prevent Apply or retry after failed saves or non-authoritative refreshes (#317).
+- Fix native BSD lint validation while preserving primary Undo timestamp precision.
+- Avoid redundant staging copies for organize and in-place video moves; allocate staging on the planned destination filesystem, including writable destinations with read-only parents (#276, #282, #285).
+- Preserve configured subtitle policy and source ownership across copy, link, multipart and case-insensitive publication; keep internal busy markers out of published artifacts and allow safe cleanup retries (#281, #284, #290).
+- Preserve existing resident videos, aliases and unowned artwork during Apply and Undo; recover owned directory moves and retain unresolved recovery state (#291, #292, #295, #296).
+- Preserve restored replacement files during cleanup; retain native Windows volumes when restoring primary files and NFO snapshots (#294, #303, #304).
+- Add journaled, copy-first cross-volume primary Undo on supported POSIX platforms, with identity checks, retry retention and cancellation checks before further mutations (#303, #306).
+- Show failed or skipped Undo outcomes accurately and keep eligible retries available (#300).
+- Keep failed-Apply recovery safe after cancellation; prevent late Apply updates from racing Undo, and commit recovery records together with their paths and status (#315).
+- Stabilize title previews across metadata refreshes and catalog-identity choices; preserve movie-specific actress-name drafts through refreshes and asynchronous saves (#276, #282, #283, #286).
+- Resume interrupted r18.dev dump downloads using validated HTTP Range requests; exclude local importer work from the network-stall budget and finish cancelled SQLite rollback before temporary-file cleanup (#272, #301, #309).
+- Honor cancellation during DMM direct URL probes (#299).
+- Omit unsupported temperature parameters for explicitly recognized OpenAI reasoning models while preserving other provider/model behavior (#288).
+- Preserve committed configuration during failed publication and concurrent initialization (#289).
+- Preflight no-clobber capability before verified payload streaming on unsupported destination volumes (#308).
+- Stop and join the API-owned token cleanup worker during shutdown and explicitly validate nil dependency receivers (#310, #311).
+
+### Changed
+
+- Replace live-network short-test dependencies with synthetic/offline fixtures and add guarded Linux/Windows CI; isolate the synthetic UNC fixture from host filesystem access (#298, #307, #312).
+- Expand native Windows, isolated SMB, FUSE, browser and recovery regression coverage; stabilize native identity and timing fixtures (#274, #287, #293, #297, #302, #305, #308).
+- Update the pinned linter for Go 1.27 export data (#271).
+
+### Known limitations
+
+- Existing distinct video files are still protected against overwrite. Issue #277 remains open; related resident-file fixes do not establish resolution of the original report.
+- Volumes lacking both supported atomic no-replace publication primitives remain unsupported. FUSE fixtures do not establish compatibility with a particular Unraid/shfs deployment; actual Unraid validation is deferred (#252).
+- Windows cross-volume primary Undo remains unsupported and fails closed. Ambiguous historical recovery records are not migrated; interrupted cleanup claims may require manual recovery. Legacy unowned staging directories are retained.
+- Unresolved failed-Apply reconciliation can leave Undo blocked and require manual recovery; missing recovery proofs are not reconstructed automatically. Do not clear recovery markers or use older binaries to Undo affected operations (#315).
+- AI-remastered title sorting (#254 / #257) is not included.
+- The historical Windows Go GC crash and subsequent test hang remain unexplained. The lifecycle/nil-validation fixes and successful bounded tests do not prove their cause or resolution. Diagnostic-only PR #313 is not included.
+
 ## [v1.6.1] - 2026-09-27
 
 ### Fixed
@@ -1033,3 +1098,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 - Path traversal protection for API endpoints- CORS origin validation- Directory traversal prevention- SQL injection prevention- Header injection and path traversal sanitization in frontend
+
+[v1.6.3]: https://github.com/javinizer/javinizer-go/compare/v1.6.2...v1.6.3
+[v1.6.2]: https://github.com/javinizer/javinizer-go/compare/v1.6.1...v1.6.2

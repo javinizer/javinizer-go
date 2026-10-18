@@ -2,6 +2,7 @@ package nfo
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -133,7 +134,7 @@ type scalarMergeSpec[T comparable] struct {
 
 // stringMergeSpecs lists all string fields to merge in MergeMovieMetadataWithOptions.
 var stringMergeSpecs = []stringMergeSpec{
-	{"ContentID", func(m *models.Movie) string { return m.ContentID }, func(m *models.Movie) string { return m.ContentID }, func(m *models.Movie, v string) { m.ContentID = v }},
+	{contentIDField, func(m *models.Movie) string { return m.ContentID }, func(m *models.Movie) string { return m.ContentID }, func(m *models.Movie, v string) { m.ContentID = v }},
 	{"ID", func(m *models.Movie) string { return m.ID }, func(m *models.Movie) string { return m.ID }, func(m *models.Movie, v string) { m.ID = v }},
 	{"DisplayTitle", func(m *models.Movie) string { return m.DisplayTitle }, func(m *models.Movie) string { return m.DisplayTitle }, func(m *models.Movie, v string) { m.DisplayTitle = v }},
 	{"Title", func(m *models.Movie) string { return m.Title }, func(m *models.Movie) string { return m.Title }, func(m *models.Movie, v string) { m.Title = v }},
@@ -208,12 +209,20 @@ var timePtrMergeSpecs = []scalarMergeSpec[*time.Time]{
 // - Scalar fields (title, studio, etc): prefer NFO or prefer scraped
 // - Array fields (actresses, genres): merge both sources or replace
 func MergeMovieMetadataWithOptions(scraped, nfo *models.Movie, scalarStrategy MergeStrategy, mergeArrays bool) (*MergeResult, error) {
+	return mergeMovieMetadataWithRenderPolicy(scraped, nfo, scalarStrategy, mergeArrays, false)
+}
+
+func mergeMovieMetadataWithRenderPolicy(scraped, nfo *models.Movie, scalarStrategy MergeStrategy, mergeArrays, useCreditedName bool) (*MergeResult, error) {
 	if scraped == nil && nfo == nil {
 		return nil, fmt.Errorf("both scraped and nfo are nil")
 	}
 
 	// If only one source exists, use it
 	if scraped == nil {
+		links, _ := nfo.NFOActorLinks()
+		if err := bindPresentationLinks(&models.Movie{}, nfo.Actresses, links, nfoCastComponents(nfo.Actresses, nil)); err != nil {
+			return nil, err
+		}
 		return &MergeResult{
 			Merged:     nfo,
 			Provenance: makeProvenanceMap(nfo, "nfo"),
@@ -259,8 +268,16 @@ func MergeMovieMetadataWithOptions(scraped, nfo *models.Movie, scalarStrategy Me
 	// Create a fieldMerger to centralize provenance and stats tracking
 	fm := newFieldMerger(&stats, provenance, scrapedTS, nfoTS)
 
+	// A durable credit belongs to its source content ID. An NFO display ID
+	// fallback may differ and cannot rekey that authority during presentation.
+	ownsCredits := scraped.ContentID != "" && slices.ContainsFunc(scraped.Credits, func(c models.MovieCredit) bool { return c.ID != 0 && c.MovieContentID == scraped.ContentID })
 	// Merge string fields using spec-driven loop via fieldMerger
 	for _, spec := range stringMergeSpecs {
+		if spec.name == contentIDField && ownsCredits {
+			spec.setM(merged, scraped.ContentID)
+			fm.recordScraper(spec.name)
+			continue
+		}
 		spec.setM(merged, fm.mergeString(spec.name, spec.getS(scraped), spec.getN(nfo), scalarStrategy))
 	}
 
@@ -300,7 +317,18 @@ func MergeMovieMetadataWithOptions(scraped, nfo *models.Movie, scalarStrategy Me
 	if mergeArrays {
 		arrayStrategy = MergeArrays
 	}
-	merged.Actresses = mergeActresses("Actresses", scraped.Actresses, nfo.Actresses, arrayStrategy, fm)
+	nfoActresses := nfo.Actresses
+	// Explicitly suppressing the whole scraper cast is an intentional empty
+	// selection, not missing metadata to refill from a stale NFO. Keep ordinary
+	// fallback for absent or unresolved credits and other merge policies.
+	if arrayStrategy == PreferScraper && len(scraped.Actresses) == 0 && len(scraped.Credits) > 0 &&
+		!slices.ContainsFunc(scraped.Credits, func(c models.MovieCredit) bool { return !c.Suppressed }) {
+		nfoActresses = nil
+	}
+	merged.Actresses = mergeActresses("Actresses", scraped.Actresses, nfoActresses, arrayStrategy, fm)
+	if err := mergeCreditPresentation(merged, scraped, nfo, nfoActresses, arrayStrategy, provenance["Actresses"].Source == "scraper", useCreditedName); err != nil {
+		return nil, err
+	}
 	merged.Genres = mergeGenres("Genres", scraped.Genres, nfo.Genres, arrayStrategy, fm)
 	merged.Screenshots = mergeStringSlice("Screenshots", scraped.Screenshots, nfo.Screenshots, arrayStrategy, fm)
 
@@ -526,7 +554,7 @@ func mergeStringSlice(fieldName string, scraped, nfo []string, strategy MergeStr
 
 // metadataFields lists all Movie fields tracked for provenance, excluding CreatedAt/UpdatedAt.
 var metadataFields = []string{
-	"ID", "ContentID", "DisplayTitle", "Title", "OriginalTitle",
+	"ID", contentIDField, "DisplayTitle", "Title", "OriginalTitle",
 	"Description", "ReleaseDate", "ReleaseYear", "Runtime",
 	"Director", "Maker", "Label", "Series",
 	"RatingScore", "RatingVotes",

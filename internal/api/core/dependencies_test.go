@@ -147,7 +147,7 @@ func TestAPIDeps_GetConfig(t *testing.T) {
 
 	t.Run("panics when CoreDeps is nil", func(t *testing.T) {
 		deps := &APIDeps{}
-		assert.Panics(t, func() {
+		assert.PanicsWithValue(t, "commandutil: GetConfig() called with nil CoreDeps — this is a construction bug", func() {
 			deps.CoreDeps.GetConfig()
 		}, "GetConfig should panic when CoreDeps is nil")
 	})
@@ -239,7 +239,7 @@ func TestAPIDeps_ReplaceReloadable(t *testing.T) {
 func TestAPIDeps_NilCoreDeps_Panics(t *testing.T) {
 	deps := &APIDeps{}
 
-	assert.Panics(t, func() {
+	assert.PanicsWithValue(t, "commandutil: GetRegistry() called with nil CoreDeps — this is a construction bug", func() {
 		deps.CoreDeps.GetRegistry()
 	}, "GetRegistry should panic when CoreDeps is nil")
 }
@@ -275,6 +275,7 @@ func TestAPIDeps_AllFields(t *testing.T) {
 	jobStore := &worker.JobStore{}
 	rs := NewRuntimeState()
 	tokenStore := NewTokenStore()
+	t.Cleanup(func() { CloseTokenStore(tokenStore) })
 
 	deps := &APIDeps{
 		CoreDeps: &commandutil.CoreDeps{

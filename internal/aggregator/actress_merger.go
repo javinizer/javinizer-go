@@ -62,7 +62,7 @@ func (m *actressMerger) Merge(sources []actressSource, opts actressMergeOptions)
 
 	hadAnyActressFromScrapers := false
 
-	for _, src := range sources {
+	for priority, src := range sources {
 		if len(src.Actresses) == 0 {
 			continue
 		}
@@ -137,6 +137,8 @@ func (m *actressMerger) Merge(sources []actressSource, opts actressMergeOptions)
 					JapaneseName: info.JapaneseName,
 					ThumbURL:     info.ThumbURL,
 				}
+
+				actress.SetScrapeEvidence(src.Source, info, priority)
 
 				if info.DMMID != 0 {
 					actressByDMMID[info.DMMID] = actress

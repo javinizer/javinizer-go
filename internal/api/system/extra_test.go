@@ -708,6 +708,7 @@ func TestUpdateConfig_ProxyVerification(t *testing.T) {
 		deps := systemDepsFromCore(coreDeps)
 		// Initialize token store for this test
 		deps.TokenStore = core.NewTokenStore()
+		t.Cleanup(func() { core.CloseTokenStore(deps.TokenStore) })
 
 		router := gin.New()
 		router.PUT("/config", updateConfig(testkit.GetTestRuntime(deps)))
@@ -738,6 +739,7 @@ func TestUpdateConfig_ProxyVerification(t *testing.T) {
 		deps := systemDepsFromCore(coreDeps)
 		// Initialize token store
 		deps.TokenStore = core.NewTokenStore()
+		t.Cleanup(func() { core.CloseTokenStore(deps.TokenStore) })
 
 		router := gin.New()
 		router.PUT("/config", updateConfig(testkit.GetTestRuntime(deps)))
@@ -784,6 +786,7 @@ func TestUpdateConfig_ProxyVerification(t *testing.T) {
 		deps := systemDepsFromCore(coreDeps)
 		// Initialize token store
 		deps.TokenStore = core.NewTokenStore()
+		t.Cleanup(func() { core.CloseTokenStore(deps.TokenStore) })
 
 		router := gin.New()
 		router.PUT("/config", updateConfig(testkit.GetTestRuntime(deps)))
@@ -830,6 +833,7 @@ func TestUpdateConfig_ProxyVerification(t *testing.T) {
 		deps := systemDepsFromCore(coreDeps)
 		// Initialize token store
 		deps.TokenStore = core.NewTokenStore()
+		t.Cleanup(func() { core.CloseTokenStore(deps.TokenStore) })
 
 		router := gin.New()
 		router.PUT("/config", updateConfig(testkit.GetTestRuntime(deps)))
@@ -856,6 +860,7 @@ func TestUpdateConfig_ProxyVerification(t *testing.T) {
 		deps := systemDepsFromCore(coreDeps)
 		// Initialize token store
 		deps.TokenStore = core.NewTokenStore()
+		t.Cleanup(func() { core.CloseTokenStore(deps.TokenStore) })
 
 		router := gin.New()
 		router.PUT("/config", updateConfig(testkit.GetTestRuntime(deps)))

@@ -205,8 +205,30 @@ func refreshIdentitySnapshotCreditsTx(tx *gorm.DB, actressID uint, previous *mod
 	if strings.TrimSpace(name) == "" {
 		return nil
 	}
+	matchingName := tx.Where("credited_name = ?", previousName)
+	if (previous.FirstName == "") != (previous.LastName == "") {
+		// Migration 16 stored last + " " + first even for one-part names.
+		// Match only that exact synthetic spelling and its migration provenance;
+		// trimming every credited name would also claim real reported aliases.
+		// A name/identity decision or reassignment makes the credit historical
+		// attribution rather than an untouched identity snapshot.
+		matchingName = matchingName.Or(`
+			credited_name = ? AND source = 'legacy' AND legacy_inferred = ?
+			AND override_name = '' AND display_force_canonical = ?
+			AND NOT EXISTS (
+				SELECT 1 FROM credit_collisions cc
+				WHERE cc.credit_id = movie_credits.id AND cc.field IN (?, ?)
+			)
+			AND NOT EXISTS (
+				SELECT 1 FROM movie_credit_reassignments mr
+				WHERE mr.movie_content_id = movie_credits.movie_content_id
+				AND mr.target_actress_id = movie_credits.actress_id
+			)`, previous.LastName+" "+previous.FirstName, true, false,
+			models.CreditFieldCreditedName, models.CreditFieldIdentityLink)
+	}
 	if err := tx.Model(&models.MovieCredit{}).
-		Where("actress_id = ? AND user_override = ? AND credited_name = ? AND origin = ? AND source IN (?, ?)", actressID, false, previousName, string(models.CreditOriginUser), "", "legacy").
+		Where("actress_id = ? AND user_override = ? AND origin = ? AND source IN (?, ?)", actressID, false, string(models.CreditOriginUser), "", "legacy").
+		Where(matchingName).
 		Updates(map[string]interface{}{
 			"credited_name": name,
 			"credited_japanese_name": gorm.Expr(
@@ -730,15 +752,20 @@ func (r *ActressRepository) ImportUpsert(ctx context.Context, incoming *models.A
 			incoming.DMMID = previousIdentity.DMMID
 		}
 		promotingCandidate := !previousIdentity.Verified
+		if promotingCandidate {
+			incoming.AmbiguityQuarantined = false
+		}
 		if previousIdentity.Verified && (previousIdentity.Origin == ActressOriginUser || previousIdentity.Origin == ActressOriginImport) {
 			incoming.Verified = previousIdentity.Verified
 			incoming.Origin = previousIdentity.Origin
 			incoming.DMMID = previousIdentity.DMMID
-			fillEmptyActressFields(&previousIdentity, incoming)
-			incoming.FirstName = previousIdentity.FirstName
-			incoming.LastName = previousIdentity.LastName
-			incoming.JapaneseName = previousIdentity.JapaneseName
-			incoming.ThumbURL = previousIdentity.ThumbURL
+			// Keep the before-image intact for canonical-name reconciliation.
+			protectedIdentity := previousIdentity
+			fillEmptyActressFields(&protectedIdentity, incoming)
+			incoming.FirstName = protectedIdentity.FirstName
+			incoming.LastName = protectedIdentity.LastName
+			incoming.JapaneseName = protectedIdentity.JapaneseName
+			incoming.ThumbURL = protectedIdentity.ThumbURL
 		}
 		contentIDs, err := movieContentIDsForActressesTx(tx, incoming.ID)
 		if err != nil {
@@ -755,17 +782,25 @@ func (r *ActressRepository) ImportUpsert(ctx context.Context, incoming *models.A
 			if err := deleteActressTranslationsTx(tx, incoming.ID); err != nil {
 				return err
 			}
-		}
-		if promotingCandidate {
-			if err := transitionActressCanonicalNamesTx(tx, incoming.ID, &previousIdentity); err != nil {
+			if err := refreshIdentitySnapshotCreditsTx(tx, incoming.ID, &previousIdentity, incoming.FirstName, incoming.LastName, incoming.JapaneseName); err != nil {
 				return err
 			}
+		}
+		if err := transitionActressCanonicalNamesTx(tx, incoming.ID, &previousIdentity); err != nil {
+			return err
+		}
+		if promotingCandidate {
 			if err := resolveCandidateIdentityCollisionsTx(tx, incoming.ID); err != nil {
 				return err
 			}
 			if err := restoreActressProjectionTx(tx, incoming.ID); err != nil {
 				return err
 			}
+		}
+		// Re-imports can repair matching collisions left open by older imports,
+		// even when the canonical fields are already unchanged.
+		if err := reconcileActressCollisionsTx(tx, incoming.ID); err != nil {
+			return err
 		}
 		if err := recomputeActressCandidateQuarantineTx(tx); err != nil {
 			return err

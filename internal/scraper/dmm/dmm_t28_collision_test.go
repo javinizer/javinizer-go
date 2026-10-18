@@ -18,22 +18,21 @@ func TestVerifyCandidateDisplayIDT28SeparatorCollision(t *testing.T) {
 			return 200, `<html><body><table><tr><th>品番</th><td>` + display + `</td></tr></table></body></html>`
 		}
 	}
-	const productURL = "https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=t28123h/"
 
 	for _, tc := range []struct {
-		name, query, pageDisplay string
-		want                     displayStatus
+		name, query, pageDisplay, cid string
+		want                          displayStatus
 	}{
-		{"t28 query vs T-series page", "T28-123-HD", "T-28123-HD", displayRejected},
-		{"t query vs T28 page", "T-28123-HD", "T28-123-HD", displayRejected},
-		{"t28 query matching page", "T28-123-HD", "T28-123-HD", displayVerified},
-		{"t query matching page", "T-28123-HD", "T-28123-HD", displayVerified},
-		{"separator variants of one identity", "T28.123.HD", "t28-123-HD", displayVerified},
+		{"t28 query vs T-series page", "T28-123-HD", "T-28123-HD", "1t28123h", displayRejected},
+		{"t query vs T28 page", "T-28123-HD", "T28-123-HD", "t28123h", displayRejected},
+		{"t28 query matching page", "T28-123-HD", "T28-123-HD", "1t28123h", displayVerified},
+		{"t query matching page", "T-28123-HD", "T-28123-HD", "t28123h", displayVerified},
+		{"separator variants of one identity", "T28.123.HD", "t28-123-HD", "1t28123h", displayVerified},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s, _ := newRemasterTestScraper(t)
 			s.client.SetTransport(&remasterRoundTripper{serve: pageDisplay(tc.pageDisplay)})
-			st, err := s.verifyCandidateDisplayID(context.Background(), tc.query, []string{productURL})
+			st, err := s.verifyCandidateDisplayID(context.Background(), tc.query, []string{"https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=" + tc.cid + "/"})
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, st)
 		})

@@ -1082,10 +1082,17 @@ func (e *Engine) resolveActressListTag(modifier string, ctx *Context) string {
 			}
 			return groupName
 		}
-		return strings.Join(names, delimiter)
 	}
 
-	return strings.Join(names, delimiter)
+	// Omit blank display names only when joining. Keep the original count
+	// above for group and unknown substitution, and never mutate the context.
+	visibleNames := make([]string, 0, len(names))
+	for _, name := range names {
+		if strings.TrimSpace(name) != "" {
+			visibleNames = append(visibleNames, name)
+		}
+	}
+	return strings.Join(visibleNames, delimiter)
 }
 
 // resolveActressNameTag resolves the single-name actress tags

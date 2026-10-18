@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/downloader"
@@ -143,6 +144,18 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult
 
 	cmd = normalizeInPlaceLinkMode(cmd)
 
+	// Unfenced legacy Apply may move the video during organize. Classify the
+	// existing cast before that mutation and reuse the read-only merge result.
+	// Fenced Apply merges in its private stage before publishing any files.
+	var preflightMerge *nfo.MergeWithExistingResult
+	if preflight, ok := o.nfo.(nfo.CastMergePreflighter); artifactFencer(cmd) == nil && ok {
+		result := preflight.PreflightCreditMerge(cmd.Movie, o.existingNFOMergeOptions(cmd.Match, cmd))
+		if result.Err != nil {
+			return &ApplyResult{Movie: cmd.Movie, FoundNFOPath: result.FoundNFOPath, FailedStep: "merge", PrePublication: true}, result.Err
+		}
+		preflightMerge = &result
+	}
+
 	// Step 0: Begin revert log BEFORE any filesystem mutation.
 	opID, beginErr := o.beginRevertLog(ctx, cmd)
 	if beginErr != nil {
@@ -157,7 +170,7 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult
 	if artifactErr != nil {
 		markArtifactDirty(cmd)
 		if o.revertLog != nil && opID != "" {
-			_ = o.revertLog.CompleteFailed(ctx, opID, &ApplyResult{Movie: cmd.Movie, OperationID: opID, PrePublication: true})
+			_ = o.completeFailedRevertLog(ctx, opID, &ApplyResult{Movie: cmd.Movie, OperationID: opID, PrePublication: true})
 		}
 		return &ApplyResult{Movie: cmd.Movie, OperationID: opID, FailedStep: "artifact_staging", PrePublication: true}, artifactErr
 	}
@@ -174,6 +187,7 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult
 	// Build the pipeline state that steps mutate via closure.
 	state := &applyPipelineState{
 		movie:          movie,
+		preflightMerge: preflightMerge,
 		targetDir:      targetDir,
 		finalDir:       targetDir,
 		artifact:       artifact,
@@ -315,7 +329,7 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult
 		if err := artifact.publish(ctx, o, state, &steps); err != nil {
 			markArtifactDirty(artifact.original)
 			prePublication := !artifact.sourceCleanupArmed && !artifact.residentSidecarMutation && (state.publicationRecovery == nil || !state.publicationRecovery.Unresolved) && (artifact.directoryMove == nil || artifact.directoryMove.currentDir == artifact.directoryMove.oldDir)
-			o.completeRevertLogWithState(ctx, opID, state, prePublication)
+			reconcileErr := o.completeRevertLogWithStateErr(ctx, opID, state, prePublication)
 			return &ApplyResult{
 				OrganizeResult: state.organizeResult,
 				Movie:          state.movie,
@@ -325,23 +339,28 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult
 				Steps:          steps,
 				FailedStep:     "artifact_publication",
 				PrePublication: prePublication,
-			}, fmt.Errorf("artifact publication failed: %w", err)
+			}, fmt.Errorf("artifact publication failed: %w", errors.Join(err, reconcileErr))
 		}
 	}
 
 	// Step 6: Complete revert log AFTER all filesystem mutations succeed.
 	if o.revertLog != nil && opID != "" {
 		applyResult := &ApplyResult{
-			OrganizeResult: state.organizeResult,
-			Movie:          state.movie,
-			DownloadPaths:  state.downloadPaths,
-			NFOPath:        state.nfoPath,
-			FoundNFOPath:   state.foundNFOPath,
-			Merged:         state.merged,
-			OperationID:    opID,
-			Steps:          steps,
+			PublicationFinalized: true,
+			OrganizeResult:       state.organizeResult,
+			Movie:                state.movie,
+			DownloadPaths:        state.downloadPaths,
+			NFOPath:              state.nfoPath,
+			FoundNFOPath:         state.foundNFOPath,
+			Merged:               state.merged,
+			OperationID:          opID,
+			Steps:                steps,
 		}
 		if completeErr := o.revertLog.Complete(ctx, opID, applyResult); completeErr != nil {
+			if artifact != nil && artifact.residentPrimary {
+				applyResult.FailedStep = "revert_log_finalization"
+				return applyResult, fmt.Errorf("resident publication reconciliation failed: %w", completeErr)
+			}
 			resolveLogger(o.logger).Warnf("[workflow] RevertLog.Complete failed for %s: %v (apply still succeeded)", cmd.Movie.ID, completeErr)
 		}
 	}
@@ -543,19 +562,34 @@ func (o *applyOrchImpl) stepMerge(cmd ApplyCmd, state *applyPipelineState, steps
 			return matchErr
 		}
 	}
-	mergeRes := o.nfo.MergeWithExistingNFO(state.movie, nfo.MergeWithExistingOptions{
-		Match:          mergeMatch,
-		ForceOverwrite: cmd.Merge.ForceOverwrite,
-		PreserveNFO:    cmd.Merge.PreserveNFO,
-		ScalarStrategy: cmd.Merge.ScalarStrategy,
-		ArrayStrategy:  cmd.Merge.ArrayStrategy,
-	})
+	mergeRes := state.preflightMerge
+	if mergeRes == nil {
+		result := o.mergeExistingNFO(state.movie, mergeMatch, cmd)
+		mergeRes = &result
+	}
+	if mergeRes.Err != nil {
+		state.foundNFOPath = mergeRes.FoundNFOPath
+		return mergeRes.Err
+	}
+
 	state.movie = mergeRes.Movie
 	carryPosterCropAcrossMerge(state.movie, preBounds, preFull)
 	state.merged = mergeRes.Merged
 	state.foundNFOPath = mergeRes.FoundNFOPath
 	steps.Merged = true
 	return nil
+}
+
+func (o *applyOrchImpl) mergeExistingNFO(movie *models.Movie, match models.FileMatchInfo, cmd ApplyCmd) nfo.MergeWithExistingResult {
+	return o.nfo.MergeWithExistingNFO(movie, o.existingNFOMergeOptions(match, cmd))
+}
+
+func (o *applyOrchImpl) existingNFOMergeOptions(match models.FileMatchInfo, cmd ApplyCmd) nfo.MergeWithExistingOptions {
+	return nfo.MergeWithExistingOptions{
+		Match: match, ForceOverwrite: cmd.Merge.ForceOverwrite, PreserveNFO: cmd.Merge.PreserveNFO,
+		ScalarStrategy: cmd.Merge.ScalarStrategy, ArrayStrategy: cmd.Merge.ArrayStrategy,
+		UseCreditedName: o.applyCfg.NFONameCfg.UseCreditedName,
+	}
 }
 
 // Full-source intent must reach the downloader even if NFO merge changes the URL;
@@ -715,6 +749,7 @@ func (o *applyOrchImpl) stepNFO(ctx context.Context, cmd ApplyCmd, state *applyP
 // applyPipelineState holds mutable state shared across the apply pipeline steps.
 // Steps mutate this via closure — eliminating the need for per-step return value plumbing.
 type applyPipelineState struct {
+	preflightMerge      *nfo.MergeWithExistingResult
 	publicationRecovery *models.PublicationRecovery
 
 	movie            *models.Movie
@@ -758,7 +793,20 @@ func (o *applyOrchImpl) completeRevertLogWithStateErr(ctx context.Context, opID 
 		PrePublication: prePublication,
 	}
 	partial.PublicationRecovery = state.publicationRecovery
-	return o.revertLog.CompleteFailed(ctx, opID, partial)
+	return o.completeFailedRevertLog(ctx, opID, partial)
+}
+
+// Failed-apply bookkeeping is compensation, not additional Apply work. A late
+// request cancellation must not prevent its already-produced recovery proofs
+// from replacing promoted path-only claims in the durable ledger. Keep context
+// values but give cooperative repository calls their own bounded cleanup window;
+// this does not impose a wall-clock bound on filesystem or lock operations.
+const failedApplyReconcileTimeout = 30 * time.Second
+
+func (o *applyOrchImpl) completeFailedRevertLog(ctx context.Context, opID OperationID, partial *ApplyResult) error {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), failedApplyReconcileTimeout)
+	defer cancel()
+	return o.revertLog.CompleteFailed(cleanupCtx, opID, partial)
 }
 
 // beginRevertLog starts a revert log entry before filesystem mutation.

@@ -13,6 +13,7 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/fsutil"
@@ -80,27 +81,44 @@ func TestSweepBusyClaimW56_AdmitGateSerializesReclaimAgainstAdmittedStage(t *tes
 // wait: the gate is free, releaseForReclaim's TryLock succeeds immediately, and
 // the marker is taken aside at once — the same posture as before wave-56.
 func TestSweepBusyClaimW56_AdmitGateIdleReclaimIsUnchanged(t *testing.T) {
-	fs := afero.NewMemMapFs()
-	require.NoError(t, fs.MkdirAll("/w56-idle", 0o755))
-	dest := "/w56-idle/poster.jpg"
-	busyRelease, busyToken, err := fsutil.AcquireReplacementBusyEx(fs, dest)
-	require.NoError(t, err)
-	defer busyRelease()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	claim, untrack := recordSweepBusyClaim(ctx, fs, dest, busyToken, busyRelease)
-	defer untrack()
-	require.True(t, claim.bindDestLock(fsutil.SharedDestLocks().Acquire(dest)),
-		"the sweep's pending dest-lock cell takes the release")
-	// No admitted stage — the gate is free.
-	cancel()
-	start := time.Now()
-	require.True(t, reclaimAbandonedSweepBusyMarker(dest), "an idle claim reclaims immediately")
-	require.Less(t, time.Since(start), sweepReclaimAdmitGrace,
-		"no admitted stage → no admit-gate wait (same as before wave-56)")
-	markerPath := filepath.ToSlash(fsutil.ReplacementBusyPath(dest))
-	exists, _ := afero.Exists(fs, markerPath)
-	require.False(t, exists, "the marker was taken aside at once — the idle reclaim is unchanged")
+	// Measure the protocol's waits, not OS scheduling latency. In particular,
+	// starting the detached release goroutine may take longer than the admit
+	// grace on a busy runner even though the free gate never waits.
+	synctest.Test(t, func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		require.NoError(t, fs.MkdirAll("/w56-idle", 0o755))
+		dest := "/w56-idle/poster.jpg"
+		busyRelease, busyToken, err := fsutil.AcquireReplacementBusyEx(fs, dest)
+		require.NoError(t, err)
+		defer busyRelease()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		claim, untrack := recordSweepBusyClaim(ctx, fs, dest, busyToken, busyRelease)
+		defer untrack()
+		destRelease := fsutil.SharedDestLocks().Acquire(dest)
+		destReleased := make(chan struct{})
+		require.True(t, claim.bindDestLock(func() {
+			destRelease()
+			close(destReleased)
+		}), "the sweep's pending dest-lock cell takes the release")
+		defer claim.releaseDestLock()
+		// No admitted stage — the gate is free.
+		cancel()
+		start := time.Now()
+		require.True(t, reclaimAbandonedSweepBusyMarker(dest), "an idle claim reclaims immediately")
+		require.Less(t, time.Since(start), sweepReclaimAdmitGrace,
+			"no admitted stage → no admit-gate wait (same as before wave-56)")
+		require.True(t, claim.released.Load(), "both holds must be released before reclaim returns")
+		require.False(t, claim.wedged.Load(), "an idle claim must never be classified as wedged")
+		select {
+		case <-destReleased:
+		default:
+			t.Fatal("idle reclaim must release the destination lock before returning")
+		}
+		markerPath := filepath.ToSlash(fsutil.ReplacementBusyPath(dest))
+		exists, _ := afero.Exists(fs, markerPath)
+		require.False(t, exists, "the marker was taken aside at once — the idle reclaim is unchanged")
+	})
 }
 
 // The admit-gate TryLock contention arm (wave-56 finding F1): a sweep stage

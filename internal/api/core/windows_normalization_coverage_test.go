@@ -557,17 +557,27 @@ func TestPathValidation_SimWin_UNCBlocked(t *testing.T) {
 
 func TestPathValidation_SimWin_UNCAllowedButPathMissing(t *testing.T) {
 	setWindowsOSForTest(t)
+	fs := afero.NewMemMapFs()
+	// Replace all three filesystem routes: fs, EvalSymlinks, and Windows
+	// GetLongPathName. Allowlist normalization happens before the UNC gate,
+	// so leaving either host resolver in place can contact the synthetic host.
+	origShortPath := resolveShortPathNameFunc
+	resolveShortPathNameFunc = func(path string) string { return path }
+	t.Cleanup(func() { resolveShortPathNameFunc = origShortPath })
+	withEvalSymlinksFunc(t, func(path string) (string, error) {
+		_, err := fs.Stat(path)
+		return filepath.Clean(path), err
+	})
 	v := NewPathValidatorWithUNC(
-		afero.NewOsFs(),
-		[]string{"\\\\server\\share"},
+		fs,
+		[]string{`\\server\share`},
 		nil,
 		true,
 		[]string{"server"},
 	)
-	_, err := v.ValidateDir("\\\\server\\share")
-	// Should not be blocked by UNC, but path doesn't exist on disk
-	if err != nil {
-		assert.False(t, errors.Is(err, apperrors.ErrUNCPathBlocked),
-			"UNC should be allowed but got ErrUNCPathBlocked: %v", err)
-	}
+	_, err := v.ValidateDir(`\\server\share`)
+	// The server is allowed, but the in-memory share is deterministically
+	// absent. This must reach the existence check, not merely return any
+	// error other than ErrUNCPathBlocked (or accidentally succeed).
+	require.ErrorIs(t, err, apperrors.ErrPathNotExist)
 }

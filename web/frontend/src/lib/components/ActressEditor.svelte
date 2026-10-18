@@ -1,6 +1,7 @@
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages';
-	import { untrack } from 'svelte';
+	import { onDestroy, untrack } from 'svelte';
+	import type { BeginCreditMutation } from '$lib/utils/credit-mutation';
 	import { flip } from 'svelte/animate';
 	import { quintOut } from 'svelte/easing';
 	import { fade, scale } from 'svelte/transition';
@@ -18,6 +19,7 @@
 		movie: Movie;
 		onUpdate: (movie: Movie) => void;
 		onPersistEdits?: () => void | Promise<void>;
+		onCreditMutationStart?: BeginCreditMutation;
 		onCreditOverridePersisted?: (movieContentId: string) => void | Promise<void>;
 		actressSources?: Record<string, string>;
 		showFieldSources?: boolean;
@@ -25,7 +27,9 @@
 		organizing?: boolean;
 	}
 
-	let { movie, onUpdate, onPersistEdits, onCreditOverridePersisted, actressSources, showFieldSources = false, savingEdits = false, organizing = false }: Props = $props();
+	let { movie, onUpdate, onPersistEdits, onCreditMutationStart, onCreditOverridePersisted, actressSources, showFieldSources = false, savingEdits = false, organizing = false }: Props = $props();
+	let disposed = false;
+	onDestroy(() => { disposed = true; });
 	const configQuery = createConfigQuery();
 	let firstNameOrder = $derived(configQuery.data?.output?.first_name_order ?? false);
 	let japaneseNames = $derived(
@@ -56,6 +60,9 @@
 	// Original thumbnail of the row being edited, used to decide whether the user
 	// actually changed the field (explicit intent travels with the save).
 	let originalThumbURL = $state('');
+	// Only the existing row opened for editing can retain legacy name shapes.
+	// Keep this separate from the mutable draft and catalog search selection.
+	let originalActress: Actress | null = null;
 
 	// Whether the thumbnail preview failed to load for the current URL. Reset
 	// whenever the URL changes so a corrected URL re-fetches instead of staying
@@ -277,6 +284,7 @@
 	}
 
 	function openAddActress() {
+		originalActress = null;
 		editingIndex = null;
 		editingActress = {
 			first_name: '',
@@ -292,6 +300,7 @@
 
 	function openEditActress(index: number) {
 		editingIndex = index;
+		originalActress = { ...actresses[index] };
 		editingActress = { ...actresses[index] };
 		originalThumbURL = actresses[index].thumb_url ?? '';
 		aliasGroup = null;
@@ -300,8 +309,23 @@
 	}
 
 	function saveActress() {
-		if (!editingActress.first_name?.trim() && !editingActress.japanese_name?.trim()) {
+		const unchangedExistingName = originalActress !== null &&
+			typeof editingActress.id === 'number' && editingActress.id > 0 &&
+			editingActress.id === originalActress.id &&
+			editingActress.first_name === originalActress.first_name &&
+			editingActress.last_name === originalActress.last_name &&
+			editingActress.japanese_name === originalActress.japanese_name;
+		if (!editingActress.first_name?.trim() && !editingActress.japanese_name?.trim() && !unchangedExistingName) {
 			void alertDialog(m.editor_validation_title(), m.editor_validation_body());
+			return;
+		}
+
+		// Existing identities can occupy only one cast row. Keep the draft open
+		// rather than replacing another row or persisting a duplicate identity.
+		if (editingActress.id && editingActress.id > 0 && actresses.some(
+			(actress, index) => index !== editingIndex && actress.id === editingActress.id
+		)) {
+			void alertDialog(m.editor_validation_title(), m.editor_duplicate_actress_body());
 			return;
 		}
 
@@ -402,7 +426,7 @@
 	}
 
 	function toggleMovieNameEditor(credit: MovieCredit) {
-		if (typeof credit.id !== 'number' || updatingCreditIDs[credit.id]) return;
+		if (savingEdits || organizing || typeof credit.id !== 'number' || updatingCreditIDs[credit.id]) return;
 		expandedCreditID = expandedCreditID === credit.id ? null : credit.id;
 		overrideDrafts = { ...overrideDrafts, [credit.id]: credit.override_name ?? '' };
 		cleanDraftVersions[credit.id] = overrideDraftVersions[credit.id] ?? 0;
@@ -410,10 +434,16 @@
 	}
 
 	async function updateMovieSpecificName(credit: MovieCredit, clear: boolean) {
-		if (typeof credit.id !== 'number' || updatingCreditIDs[credit.id]) return;
+		if (savingEdits || organizing || typeof credit.id !== 'number' || updatingCreditIDs[credit.id]) return;
 		const name = clear ? '' : (overrideDrafts[credit.id] ?? '').trim();
 		const draftVersion = overrideDraftVersions[credit.id] ?? 0;
 		if (!clear && !name) return;
+		const movieContentId = movie.code ?? movie.content_id ?? movie.id;
+		const operation = onCreditMutationStart?.(`credit:${credit.id}`, movieContentId);
+		if (onCreditMutationStart && !operation) return;
+		const onPersisted = onCreditOverridePersisted;
+		const isCurrent = () => !disposed && movieContentId === (movie.code ?? movie.content_id ?? movie.id);
+		let failure: unknown;
 		const attempt = { name, userOverride: !clear, draftVersion };
 		pendingCreditOverrides[credit.id] = attempt;
 
@@ -421,6 +451,7 @@
 		creditUpdateErrors = { ...creditUpdateErrors, [credit.id]: undefined };
 		try {
 			await apiClient.updateCreditOverride(credit.id, name, !clear);
+			if (!isCurrent()) return;
 			delete pendingCreditOverrides[credit.id];
 			// Change only this row: other requests may already have acknowledged
 			// sibling overrides while the parent refresh is still pending/failed.
@@ -430,12 +461,15 @@
 			acceptPersistedDraft(credit.id, attempt);
 			// This endpoint is already persisted. Refresh the authoritative batch result
 			// instead of adding it to the parent's pending movie-edit overlay.
-			await onCreditOverridePersisted?.(movie.code ?? movie.content_id ?? movie.id);
+			if (!operation) await onPersisted?.(movieContentId);
 		} catch (error) {
+			failure = error ?? new Error(m.editor_movie_name_update_failed());
+			if (!isCurrent()) return;
 			console.error('Failed to update movie-specific actress name:', error);
 			delete pendingCreditOverrides[credit.id];
 			const current = creditStates.find((item) => item.id === credit.id);
 			if (matchesCreditOverride(current, attempt)) {
+				failure = undefined;
 				acceptPersistedDraft(credit.id, attempt);
 			}
 			creditUpdateErrors = {
@@ -443,7 +477,8 @@
 				[credit.id]: matchesCreditOverride(current, attempt) ? undefined : attempt
 			};
 		} finally {
-			updatingCreditIDs = { ...updatingCreditIDs, [credit.id]: false };
+			await operation?.finish(failure);
+			if (isCurrent()) updatingCreditIDs = { ...updatingCreditIDs, [credit.id]: false };
 		}
 	}
 
@@ -597,7 +632,7 @@
 												size="sm"
 												class="h-7 text-xs"
 												onclick={() => updateMovieSpecificName(credit, false)}
-												disabled={updatingCreditIDs[credit.id] || !(overrideDrafts[credit.id] ?? '').trim()}
+												disabled={savingEdits || organizing || updatingCreditIDs[credit.id] || !(overrideDrafts[credit.id] ?? '').trim()}
 											>
 												{#snippet children()}{m.editor_movie_name_save()}{/snippet}
 											</Button>
@@ -607,7 +642,7 @@
 													size="sm"
 													class="h-7 text-xs"
 													onclick={() => updateMovieSpecificName(credit, true)}
-													disabled={updatingCreditIDs[credit.id]}
+													disabled={savingEdits || organizing || updatingCreditIDs[credit.id]}
 												>
 													{#snippet children()}{m.editor_movie_name_clear()}{/snippet}
 												</Button>

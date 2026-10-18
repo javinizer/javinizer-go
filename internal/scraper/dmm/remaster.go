@@ -567,6 +567,11 @@ func (s *scraper) verifyCandidateDisplayID(ctx context.Context, id string, urls 
 			body = resp.String()
 		}
 		if doc, err := goquery.NewDocumentFromReader(strings.NewReader(body)); err == nil {
+			// A matching display row cannot validate a contradictory URL CID.
+			// H/HD numbers must agree; AI keeps its server-owned slot number.
+			if rawRemasterCIDPageConflict(doc, u) {
+				return displayRejected, nil
+			}
 			if display := extractDisplayID(doc); display != "" {
 				// Equivalent spellings (RCT-156-HD, RCT156HD) parse to the same
 				// pinned identity; counting raw strings would reject an otherwise

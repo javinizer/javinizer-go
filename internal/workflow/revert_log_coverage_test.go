@@ -133,34 +133,6 @@ func TestBuildGeneratedFilesJSON_AllComponentsPresent(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// updatePostOrganize — additional edge cases
-// ---------------------------------------------------------------------------
-
-func TestUpdatePostOrganize_EmptyGeneratedFiles(t *testing.T) {
-	op := &models.BatchFileOperation{BatchJobID: "job1"}
-	updatePostOrganize(op, "/dest/file.mp4", false, "/src", "")
-	assert.Equal(t, "/dest/file.mp4", op.NewPath)
-	assert.False(t, op.InPlaceRenamed)
-	assert.Equal(t, "/src", op.OriginalDirPath)
-	assert.Equal(t, "", op.GeneratedFiles)
-}
-
-func TestUpdatePostOrganize_OverwriteExistingFields(t *testing.T) {
-	op := &models.BatchFileOperation{
-		BatchJobID:      "job1",
-		NewPath:         "/old/dest.mp4",
-		InPlaceRenamed:  true,
-		OriginalDirPath: "/old-src",
-		GeneratedFiles:  `{"Delete":["/old.nfo"]}`,
-	}
-	updatePostOrganize(op, "/new/dest.mp4", false, "/new-src", `{"Delete":["/new.nfo"]}`)
-	assert.Equal(t, "/new/dest.mp4", op.NewPath)
-	assert.False(t, op.InPlaceRenamed)
-	assert.Equal(t, "/new-src", op.OriginalDirPath)
-	assert.Equal(t, `{"Delete":["/new.nfo"]}`, op.GeneratedFiles)
-}
-
-// ---------------------------------------------------------------------------
 // dbRevertLog.Begin — covers the Begin method
 // ---------------------------------------------------------------------------
 

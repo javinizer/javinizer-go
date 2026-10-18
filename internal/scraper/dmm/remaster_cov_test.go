@@ -314,13 +314,13 @@ func TestResolveRemaster_DisagreeingPagesUnverifiable(t *testing.T) {
 			return 200, `<html><body>` +
 				`<a href="/mono/dvd/-/detail/=/cid=abc00999h/">A-dvd</a>` +
 				`<a href="/digital/videoa/-/detail/=/cid=abc00999h/">A-digital</a>` +
-				`<a href="/digital/videoa/-/detail/=/cid=abc01234h/">B</a>` +
+				`<a href="/digital/videoa/-/detail/=/cid=1abc00999h/">B</a>` +
 				`</body></html>`
 		case strings.Contains(u, "cid=abc00999h") && strings.Contains(u, "/mono/"):
 			return 200, `<html><body><table><tr><td>品番：</td><td>ABC-111-HD</td></tr></table></body></html>`
 		case strings.Contains(u, "cid=abc00999h"):
 			return 200, `<html><body><table><tr><td>品番：</td><td>ABC-222-HD</td></tr></table></body></html>`
-		case strings.Contains(u, "cid=abc01234h"):
+		case strings.Contains(u, "cid=1abc00999h"):
 			return 200, `<html><body><table><tr><td>品番：</td><td>ABC-999-HD</td></tr></table></body></html>`
 		}
 		return 404, ""
@@ -328,7 +328,7 @@ func TestResolveRemaster_DisagreeingPagesUnverifiable(t *testing.T) {
 	s.client.SetTransport(rt)
 	cid, err := s.ResolveContentIDCtx(context.Background(), "ABC-999H")
 	require.NoError(t, err)
-	assert.Equal(t, "abc01234h", cid, "unverifiable cid must not compete; verified cid wins")
+	assert.Equal(t, "1abc00999h", cid, "unverifiable cid must not compete; verified cid wins")
 }
 
 // Padded display spellings must verify against unpadded product pages.

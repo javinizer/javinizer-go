@@ -47,9 +47,19 @@ func buildActressSourcesFromScrapeResults(
 	}
 
 	sourcesByActressKey := make(map[string]string)
+	selectedPriorities := make(map[string]int)
 	for _, actress := range actresses {
 		targetKey := ActressSourceKey(actress)
 		if targetKey == "" {
+			continue
+		}
+
+		if source, _, priority := actress.ScrapeEvidence(); strings.TrimSpace(source) != "" {
+			if previous, exists := selectedPriorities[targetKey]; exists && previous <= priority {
+				continue
+			}
+			selectedPriorities[targetKey] = priority
+			sourcesByActressKey[targetKey] = strings.TrimSpace(source)
 			continue
 		}
 

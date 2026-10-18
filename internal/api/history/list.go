@@ -46,85 +46,24 @@ func getHistory(repo database.HistoryRepositoryInterface) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		limit, offset := core.ParsePagination(c, 50, 500)
 
-		operation := c.Query("operation")
-		status := c.Query("status")
-		movieID := c.Query("movie_id")
-
-		var records []HistoryRecord
-		var total int64
-
-		if movieID != "" {
-			var err error
-			total, err = repo.CountByMovieID(c.Request.Context(), movieID)
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: countHistoryErrorMessage})
-				return
-			}
-
-			history, findErr := repo.ListByMovieID(c.Request.Context(), movieID, limit, offset)
-			if findErr != nil {
-				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: retrieveHistoryErrorMessage})
-				return
-			}
-
-			records = make([]HistoryRecord, 0, len(history))
-			for _, h := range history {
-				records = append(records, toHistoryRecord(h))
-			}
-		} else if operation != "" {
-			var err error
-			total, err = repo.CountByOperation(c.Request.Context(), models.HistoryOperation(operation))
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: countHistoryErrorMessage})
-				return
-			}
-
-			history, findErr := repo.ListByOperation(c.Request.Context(), models.HistoryOperation(operation), limit, offset)
-			if findErr != nil {
-				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: retrieveHistoryErrorMessage})
-				return
-			}
-
-			records = make([]HistoryRecord, 0, len(history))
-			for _, h := range history {
-				records = append(records, toHistoryRecord(h))
-			}
-		} else if status != "" {
-			var err error
-			total, err = repo.CountByStatus(c.Request.Context(), models.HistoryStatus(status))
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: countHistoryErrorMessage})
-				return
-			}
-
-			history, findErr := repo.ListByStatus(c.Request.Context(), models.HistoryStatus(status), limit, offset)
-			if findErr != nil {
-				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: retrieveHistoryErrorMessage})
-				return
-			}
-
-			records = make([]HistoryRecord, 0, len(history))
-			for _, h := range history {
-				records = append(records, toHistoryRecord(h))
-			}
-		} else {
-			var err error
-			total, err = repo.Count(c.Request.Context())
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: countHistoryErrorMessage})
-				return
-			}
-
-			history, findErr := repo.List(c.Request.Context(), limit, offset)
-			if findErr != nil {
-				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: retrieveHistoryErrorMessage})
-				return
-			}
-
-			records = make([]HistoryRecord, 0, len(history))
-			for _, h := range history {
-				records = append(records, toHistoryRecord(h))
-			}
+		filter := database.HistoryFilter{
+			MovieID:   c.Query("movie_id"),
+			Operation: models.HistoryOperation(c.Query("operation")),
+			Status:    models.HistoryStatus(c.Query("status")),
+		}
+		total, err := repo.CountFiltered(c.Request.Context(), filter)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: countHistoryErrorMessage})
+			return
+		}
+		history, err := repo.ListFiltered(c.Request.Context(), filter, limit, offset)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: retrieveHistoryErrorMessage})
+			return
+		}
+		records := make([]HistoryRecord, 0, len(history))
+		for _, h := range history {
+			records = append(records, toHistoryRecord(h))
 		}
 
 		c.JSON(http.StatusOK, HistoryListResponse{

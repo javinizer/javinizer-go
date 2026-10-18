@@ -210,7 +210,14 @@ func TestValidateDir_DotWithSubpathOutsideCWD(t *testing.T) {
 }
 
 func TestEffectiveAllowedBase_CanonicalizeError(t *testing.T) {
-	v := NewPathValidator(afero.NewOsFs(), []string{"/tmp"}, nil)
+	// An existing path can recover from an EvalSymlinks error via the Windows
+	// reparse-point fallback. Use a missing child in our own temp directory so
+	// canonicalization must fail on every platform, independent of host paths.
+	base := filepath.Join(t.TempDir(), "missing")
+	fs := afero.NewOsFs()
+	_, statErr := fs.Stat(base)
+	require.ErrorIs(t, statErr, os.ErrNotExist)
+	v := NewPathValidator(fs, []string{base}, nil)
 
 	origEval := evalSymlinksFunc
 	t.Cleanup(func() { evalSymlinksFunc = origEval })
@@ -219,8 +226,12 @@ func TestEffectiveAllowedBase_CanonicalizeError(t *testing.T) {
 		return "", assert.AnError
 	}
 
-	_, usable := v.effectiveAllowedBase("/tmp")
+	_, err := v.canonicalizePath(base)
+	require.ErrorIs(t, err, apperrors.ErrPathUnresolvable)
+
+	canonicalBase, usable := v.effectiveAllowedBase(base)
 	assert.False(t, usable, "canonicalizePath error should make entry unusable")
+	assert.Empty(t, canonicalBase)
 }
 
 func TestIsFilesystemRoot_NotRoot(t *testing.T) {

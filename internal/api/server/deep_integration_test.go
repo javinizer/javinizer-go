@@ -11,7 +11,6 @@ import (
 	"github.com/javinizer/javinizer-go/internal/api/core"
 	"github.com/javinizer/javinizer-go/internal/commandutil"
 	"github.com/javinizer/javinizer-go/internal/config"
-	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/scraperutil"
 	"github.com/javinizer/javinizer-go/internal/worker"
@@ -44,13 +43,8 @@ func setupFullTestServer(t *testing.T) (*gin.Engine, *core.APIDeps) {
 			DB:              db,
 		},
 		ConfigFile: "/tmp/config.yaml",
-		Repos: database.Repositories{
-			ContentRepos: database.ContentRepos{
-				MovieRepo:   database.NewMovieRepository(db),
-				ActressRepo: database.NewActressRepository(db),
-			},
-		},
-		JobStore: worker.NewJobStore(nil, nil, nil, "", nil, nil),
+		Repos:      db.Repositories(),
+		JobStore:   worker.NewJobStore(nil, nil, nil, "", nil, nil),
 	}
 	testkit.GetTestRuntime(deps)
 	testkit.GetTestRuntime(deps).SetConfig(cfg)
@@ -65,7 +59,7 @@ func setupFullTestServer(t *testing.T) (*gin.Engine, *core.APIDeps) {
 }
 
 // acceptableCodes returns accepted status codes for endpoint smoke tests.
-// Some endpoints may return 500 when optional dependencies are not wired.
+// Dependencies are fully wired; unexpected server errors must fail these tests.
 func acceptableCodes(codes ...int) []int { return codes }
 
 func TestDeepIntegration_HealthEndpoint(t *testing.T) {
@@ -85,7 +79,7 @@ func TestDeepIntegration_VersionEndpoint(t *testing.T) {
 	req, _ := http.NewRequest("GET", "/api/v1/version", nil)
 	router.ServeHTTP(w, req)
 
-	assert.Contains(t, acceptableCodes(http.StatusOK, http.StatusUnauthorized), w.Code)
+	assert.Equal(t, http.StatusOK, w.Code)
 }
 
 func TestDeepIntegration_MovieEndpoints(t *testing.T) {
@@ -95,13 +89,13 @@ func TestDeepIntegration_MovieEndpoints(t *testing.T) {
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("GET", "/api/v1/movies", nil)
 	router.ServeHTTP(w, req)
-	assert.Contains(t, acceptableCodes(http.StatusOK, http.StatusUnauthorized, http.StatusInternalServerError), w.Code)
+	assert.Equal(t, http.StatusOK, w.Code)
 
 	// Get movie by ID
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("GET", "/api/v1/movies/INT-001", nil)
 	router.ServeHTTP(w, req)
-	assert.Contains(t, acceptableCodes(http.StatusOK, http.StatusUnauthorized, http.StatusNotFound, http.StatusInternalServerError), w.Code)
+	assert.Contains(t, acceptableCodes(http.StatusOK, http.StatusUnauthorized, http.StatusNotFound), w.Code)
 }
 
 func TestDeepIntegration_GenreEndpoints(t *testing.T) {
@@ -110,7 +104,7 @@ func TestDeepIntegration_GenreEndpoints(t *testing.T) {
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("GET", "/api/v1/genres", nil)
 	router.ServeHTTP(w, req)
-	assert.Contains(t, acceptableCodes(http.StatusOK, http.StatusUnauthorized, http.StatusInternalServerError), w.Code)
+	assert.Equal(t, http.StatusOK, w.Code)
 }
 
 func TestDeepIntegration_ActressEndpoints(t *testing.T) {
@@ -119,7 +113,7 @@ func TestDeepIntegration_ActressEndpoints(t *testing.T) {
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("GET", "/api/v1/actresses", nil)
 	router.ServeHTTP(w, req)
-	assert.Contains(t, acceptableCodes(http.StatusOK, http.StatusUnauthorized, http.StatusInternalServerError), w.Code)
+	assert.Equal(t, http.StatusOK, w.Code)
 }
 
 func TestDeepIntegration_JobEndpoints(t *testing.T) {
@@ -128,7 +122,7 @@ func TestDeepIntegration_JobEndpoints(t *testing.T) {
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("GET", "/api/v1/jobs", nil)
 	router.ServeHTTP(w, req)
-	assert.Contains(t, acceptableCodes(http.StatusOK, http.StatusUnauthorized, http.StatusInternalServerError), w.Code)
+	assert.Equal(t, http.StatusOK, w.Code)
 }
 
 func TestDeepIntegration_EventEndpoints(t *testing.T) {
@@ -137,7 +131,7 @@ func TestDeepIntegration_EventEndpoints(t *testing.T) {
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("GET", "/api/v1/events", nil)
 	router.ServeHTTP(w, req)
-	assert.Contains(t, acceptableCodes(http.StatusOK, http.StatusUnauthorized, http.StatusInternalServerError), w.Code)
+	assert.Equal(t, http.StatusOK, w.Code)
 }
 
 func TestDeepIntegration_ConfigEndpoint(t *testing.T) {
@@ -146,7 +140,7 @@ func TestDeepIntegration_ConfigEndpoint(t *testing.T) {
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("GET", "/api/v1/config", nil)
 	router.ServeHTTP(w, req)
-	assert.Contains(t, acceptableCodes(http.StatusOK, http.StatusUnauthorized, http.StatusInternalServerError), w.Code)
+	assert.Equal(t, http.StatusOK, w.Code)
 }
 
 func TestDeepIntegration_TokenEndpoints(t *testing.T) {
@@ -155,7 +149,7 @@ func TestDeepIntegration_TokenEndpoints(t *testing.T) {
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("GET", "/api/v1/tokens", nil)
 	router.ServeHTTP(w, req)
-	assert.Contains(t, acceptableCodes(http.StatusOK, http.StatusUnauthorized, http.StatusInternalServerError), w.Code)
+	assert.Equal(t, http.StatusOK, w.Code)
 }
 
 func TestDeepIntegration_ScanEndpoint(t *testing.T) {
@@ -164,7 +158,7 @@ func TestDeepIntegration_ScanEndpoint(t *testing.T) {
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/api/v1/files/scan", nil)
 	router.ServeHTTP(w, req)
-	assert.Contains(t, acceptableCodes(http.StatusOK, http.StatusUnauthorized, http.StatusBadRequest, http.StatusInternalServerError, http.StatusNotFound), w.Code)
+	assert.Contains(t, acceptableCodes(http.StatusOK, http.StatusUnauthorized, http.StatusBadRequest, http.StatusNotFound), w.Code)
 }
 
 func TestDeepIntegration_SystemEndpoints(t *testing.T) {
@@ -173,7 +167,7 @@ func TestDeepIntegration_SystemEndpoints(t *testing.T) {
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("GET", "/api/v1/system/info", nil)
 	router.ServeHTTP(w, req)
-	assert.Contains(t, acceptableCodes(http.StatusOK, http.StatusUnauthorized, http.StatusInternalServerError, http.StatusNotFound), w.Code)
+	assert.Contains(t, acceptableCodes(http.StatusOK, http.StatusUnauthorized, http.StatusNotFound), w.Code)
 }
 
 func TestDeepIntegration_MovieCreateAndGet(t *testing.T) {
@@ -224,7 +218,7 @@ func TestDeepIntegration_MovieSearch(t *testing.T) {
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("GET", "/api/v1/movies?q=Search", nil)
 	router.ServeHTTP(w, req)
-	assert.Contains(t, acceptableCodes(http.StatusOK, http.StatusUnauthorized, http.StatusInternalServerError), w.Code)
+	assert.Equal(t, http.StatusOK, w.Code)
 }
 
 func TestDeepIntegration_ScraperListEndpoint(t *testing.T) {
@@ -233,7 +227,7 @@ func TestDeepIntegration_ScraperListEndpoint(t *testing.T) {
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("GET", "/api/v1/scrapers", nil)
 	router.ServeHTTP(w, req)
-	assert.Contains(t, acceptableCodes(http.StatusOK, http.StatusUnauthorized, http.StatusInternalServerError), w.Code)
+	assert.Equal(t, http.StatusOK, w.Code)
 }
 
 func TestDeepIntegration_NonexistentEndpoint(t *testing.T) {
@@ -251,5 +245,5 @@ func TestDeepIntegration_MovieGetInvalid(t *testing.T) {
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("GET", "/api/v1/movies/INVALID", nil)
 	router.ServeHTTP(w, req)
-	assert.Contains(t, acceptableCodes(http.StatusOK, http.StatusNotFound, http.StatusUnauthorized, http.StatusInternalServerError), w.Code)
+	assert.Contains(t, acceptableCodes(http.StatusOK, http.StatusNotFound, http.StatusUnauthorized), w.Code)
 }

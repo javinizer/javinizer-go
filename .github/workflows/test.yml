@@ -343,6 +343,173 @@ jobs:
     - name: Run unit tests
       run: go test -short ./...
 
+    - name: Repeat Windows nil dependency panic contracts
+      id: nil_dependency_contracts
+      timeout-minutes: 5
+      shell: python {0}
+      run: |
+        import collections, json, pathlib, subprocess, sys
+
+        sys.stdout.reconfigure(encoding="utf-8")
+        evidence = pathlib.Path("nil-dependency-windows")
+        evidence.mkdir()
+        packages = {
+            "github.com/javinizer/javinizer-go/internal/commandutil": {
+                "TestCoreDeps_NilReceiverAccessors",
+                "TestCoreDeps_NilReceiverAccessors/GetConfig",
+                "TestCoreDeps_NilReceiverAccessors/GetRegistry",
+                "TestDependencies_GetConfig_PanicsOnNil",
+                "TestDependencies_GetRegistry_PanicsOnNil",
+            },
+            "github.com/javinizer/javinizer-go/internal/api/core": {
+                "TestAPIDeps_GetConfig",
+                "TestAPIDeps_GetConfig/returns_config_when_set",
+                "TestAPIDeps_GetConfig/panics_when_CoreDeps_is_nil",
+                "TestAPIDeps_NilCoreDeps_Panics",
+            },
+        }
+        selector = "^(TestCoreDeps_NilReceiverAccessors|TestDependencies_GetConfig_PanicsOnNil|TestDependencies_GetRegistry_PanicsOnNil|TestAPIDeps_GetConfig|TestAPIDeps_NilCoreDeps_Panics)$"
+        failures = []
+        code = None
+        with (evidence / "tests.jsonl").open("wb") as stdout, (evidence / "tests.stderr.log").open("wb") as stderr:
+            try:
+                process = subprocess.Popen([
+                    "go", "test", "-short", "-count=20", "-timeout=120s", "-json",
+                    "./internal/commandutil", "./internal/api/core", "-run", selector,
+                ], stdout=stdout, stderr=stderr)
+            except OSError as exc:
+                failures.append("launch failure: " + repr(exc))
+            else:
+                try:
+                    code = process.wait(timeout=180)
+                except (subprocess.TimeoutExpired, OSError) as exc:
+                    failures.append("wall timeout" if isinstance(exc, subprocess.TimeoutExpired) else "process wait failed: " + repr(exc))
+                    # Terminate only this owned Go process and its descendants.
+                    try:
+                        with (evidence / "taskkill.log").open("wb") as kill_log:
+                            killed = subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                                                    stdout=kill_log, stderr=subprocess.STDOUT, timeout=15)
+                        if killed.returncode != 0:
+                            failures.append("owned process-tree cleanup not confirmed")
+                    except (OSError, subprocess.TimeoutExpired) as exc:
+                        failures.append("owned process-tree cleanup failed: " + repr(exc))
+                    try:
+                        code = process.wait(timeout=15)
+                    except (subprocess.TimeoutExpired, OSError) as exc:
+                        failures.append("owned Go process exit not confirmed: " + repr(exc))
+        (evidence / "tests.exit").write_text(str(code) + "\n", encoding="utf-8")
+        if code != 0:
+            failures.append("go test exit: " + str(code))
+        try:
+            events = [json.loads(line) for line in (evidence / "tests.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+            actions = {"start", "run", "pause", "cont", "pass", "bench", "fail", "output", "skip"}
+            assert all(isinstance(event, dict) and event.get("Package") in packages and event.get("Action") in actions for event in events), "unexpected package or malformed event"
+            assert not any(event.get("Action") in ("fail", "skip") for event in events), "failed or skipped event"
+            for package, required in packages.items():
+                selected = [event for event in events if event.get("Package") == package]
+                names = {event["Test"] for event in selected if event.get("Test")}
+                assert names == required, "missing or unexpected test names: " + package
+                for name in required:
+                    counts = collections.Counter(event.get("Action") for event in selected if event.get("Test") == name)
+                    assert counts["run"] == counts["pass"] == 20, "incorrect repetition count: " + name
+                terminals = [event.get("Action") for event in selected if not event.get("Test") and event.get("Action") in ("pass", "fail", "skip")]
+                assert terminals == ["pass"], "missing or duplicate package terminal: " + package
+        except (AssertionError, ValueError, TypeError, KeyError, UnicodeError) as exc:
+            failures.append("evidence validation: " + str(exc))
+        (evidence / "failures.json").write_text(json.dumps(failures, indent=2) + "\n", encoding="utf-8")
+        assert not failures, "; ".join(failures)
+        print("Verified 100 root passes and 80 child passes across both packages; no skips.")
+
+    - name: Archive Windows nil dependency panic contracts
+      if: ${{ always() && steps.nil_dependency_contracts.outcome != 'skipped' }}
+      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      with:
+        name: nil-dependency-windows
+        path: nil-dependency-windows/
+        retention-days: 30
+        if-no-files-found: error
+
+    - name: Repeat full Windows API server suite in fresh processes
+      id: server_lifecycle_repeats
+      timeout-minutes: 14
+      shell: python {0}
+      run: |
+        import collections, json, pathlib, subprocess, sys
+
+        sys.stdout.reconfigure(encoding="utf-8")
+        evidence = pathlib.Path("server-lifecycle-windows")
+        evidence.mkdir()
+        package = "github.com/javinizer/javinizer-go/internal/api/server"
+        websocket = "TestSecurity_WebSocketOriginValidation"
+        required = {
+            "TestInjectSSRState_InitializedAuth", "TestDeepIntegration_GenreEndpoints",
+            "TestDeepIntegration_JobEndpoints", "TestDeepIntegration_EventEndpoints",
+            "TestDeepIntegration_TokenEndpoints", websocket,
+            *(websocket + "/" + name for name in (
+                "wildcard_is_rejected_for_security_(WebSocket)",
+                "empty_config_allows_same-origin", "empty_config_blocks_different_origin",
+                "specific_origin_allowed", "specific_origin_blocked",
+                "same-origin_allowed_even_when_AllowedOrigins_is_configured",
+                "empty_origin_blocked_when_AllowedOrigins_is_configured",
+            )),
+        }
+        failures = []
+        for attempt in range(1, 4):
+            prefix = evidence / ("attempt-" + str(attempt))
+            cleanup_failed = False
+            try:
+                with prefix.with_suffix(".jsonl").open("wb") as stdout, prefix.with_suffix(".stderr.log").open("wb") as stderr:
+                    process = subprocess.Popen([
+                        "go", "test", "-short", "-count=1", "-timeout=180s", "-json",
+                        "./internal/api/server",
+                    ], stdout=stdout, stderr=stderr)
+                    try:
+                        code = process.wait(timeout=240)
+                    except subprocess.TimeoutExpired:
+                        failures.append({"attempt": attempt, "reason": "wall timeout"})
+                        # Terminate only this owned Go process and its descendants.
+                        with prefix.with_suffix(".kill.log").open("wb") as kill_log:
+                            try:
+                                killed = subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                                                        stdout=kill_log, stderr=subprocess.STDOUT, timeout=15)
+                                code = process.wait(timeout=15)
+                                cleanup_failed = killed.returncode != 0
+                            except Exception as exc:
+                                kill_log.write((repr(exc) + "\n").encode("utf-8"))
+                                cleanup_failed = True
+                                code = process.poll()
+                    prefix.with_suffix(".exit").write_text(str(code) + "\n", encoding="utf-8")
+                if cleanup_failed:
+                    raise RuntimeError("Owned process-tree termination unconfirmed; later attempts withheld")
+                output = prefix.with_suffix(".jsonl").read_text(encoding="utf-8")
+                print("API server attempt", attempt, "exit", code)
+                print(output, end="")
+                print(prefix.with_suffix(".stderr.log").read_text(encoding="utf-8"), end="")
+                events = [json.loads(line) for line in output.splitlines() if line.strip()]
+                passed = [event.get("Package") for event in events if not event.get("Test") and event["Action"] == "pass"]
+                if code != 0 or passed != [package] or any(event["Action"] == "fail" for event in events):
+                    failures.append({"attempt": attempt, "reason": "test failure or missing package result"})
+                for name in required:
+                    counts = collections.Counter(event["Action"] for event in events if event.get("Package") == package and event.get("Test") == name)
+                    if counts["run"] != 1 or counts["pass"] != 1 or counts["skip"] or counts["fail"]:
+                        failures.append({"attempt": attempt, "reason": "missing or skipped critical test", "test": name})
+            except Exception as exc:
+                prefix.with_suffix(".error.log").write_text(repr(exc) + "\n", encoding="utf-8")
+                failures.append({"attempt": attempt, "reason": repr(exc)})
+            if cleanup_failed:
+                break
+        (evidence / "failures.json").write_text(json.dumps(failures, indent=2) + "\n", encoding="utf-8")
+        assert not failures, "API server process failures: " + repr(failures)
+
+    - name: Archive Windows API server lifecycle repetitions
+      if: ${{ always() && steps.server_lifecycle_repeats.outcome != 'skipped' }}
+      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      with:
+        name: server-lifecycle-windows
+        path: server-lifecycle-windows/
+        if-no-files-found: error
+        retention-days: 30
+
     - name: Verify native Windows config publication and initialization
       run: >-
         go test -short -count=20 -v ./internal/config
@@ -362,6 +529,11 @@ jobs:
       run: >-
         go test -short -count=1 -v ./internal/api/r18devdump
         -run '^(TestStartDownload_(SlowButSteadySucceeds|StallAborts|HeadersStallAborts)|TestStallWatchdog)'
+
+    - name: Repeat Windows dump cancellation lifecycle regressions
+      run: >-
+        go test -short -count=10 -timeout=120s -v ./internal/r18devdump ./internal/api/r18devdump
+        -run '^(TestImport_(CancellationWaitsForRollback|CanceledBeforeCommitRollsBack|CanceledAfterSchemaDoesNotBegin|CanceledDuringBeginDoesNotRead|CanceledStreamCleansUpAndRetries)|TestStartDownload_StallAborts)$'
 
     - name: Verify in-place resident directory compensation on Windows
       run: >-
@@ -385,8 +557,32 @@ jobs:
       with:
         persist-credentials: false
 
+    # Fetch the unchanged pin via Git while hosted action archive downloads return 404.
+    # Keep this ref and the verification SHA below in sync with the other setup-go pins.
+    - name: Checkout pinned Go setup action
+      uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      with:
+        repository: actions/setup-go
+        ref: 924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        path: .ci-actions/setup-go
+        persist-credentials: false
+        fetch-depth: 1
+
+    - name: Verify pinned Go setup action
+      shell: bash
+      run: |
+        set -euo pipefail
+        test -d .ci-actions/setup-go/.git
+        test "$(git -C .ci-actions/setup-go rev-parse HEAD)" = 924ae3a1cded613372ab5595356fb5720e22ba16
+        git -C .ci-actions/setup-go diff --exit-code HEAD --
+        status="$(git -C .ci-actions/setup-go status --porcelain --untracked-files=all --ignored)"
+        test -z "$status"
+        test -s .ci-actions/setup-go/action.yml
+        test -s .ci-actions/setup-go/dist/setup/index.js
+        test -s .ci-actions/setup-go/dist/cache-save/index.js
+
     - name: Set up Go
-      uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      uses: ./.ci-actions/setup-go
       with:
         go-version-file: ${{ env.GO_VERSION_FILE }}
         cache: true

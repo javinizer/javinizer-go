@@ -314,7 +314,9 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		// number): a page publishing another release's identity means
 		// resolution landed on the wrong product (e.g. a stale same-series
 		// cache mapping), so miss honestly instead of returning it.
-		if !pageDisplayIdentityMatchesQuery(doc, id) {
+		// The resolved URL CID must also agree with that row: otherwise an
+		// H query can publish the requested title under another numeric ID.
+		if !pageDisplayIdentityMatchesQuery(doc, id) || rawRemasterCIDPageConflict(doc, url) {
 			if resolvedFromCache {
 				// A cached mapping whose page publishes a conflicting 品番
 				// is stale: DMM redirected the cached cid to another

@@ -1,12 +1,8 @@
 package workflow
 
-// POSTER-WRITE-HARDENING wave-30 — revert-log persist-failure coverage pins
-// left over from wave-22: every completion-side persistNonJournalColumns
-// failure leg must surface (warn or error) rather than being silently
-// dropped. The failure is replayed by wrapping the real sqlite repository
-// (the same fixture family as coverage_uncovered_test.go) with an
-// UpdateNonJournalFields override that returns a generic error — distinct
-// from the wave-15 ErrOperationRowReverted tolerance class.
+// POSTER-WRITE-HARDENING wave-30 persistence failure coverage: CaptureSnapshot
+// remains warn-only on a guarded column failure; CompleteFailed surfaces an
+// atomic completion-payload failure and leaves both journal and columns intact.
 
 import (
 	"context"
@@ -25,8 +21,8 @@ import (
 	"github.com/javinizer/javinizer-go/internal/template"
 )
 
-// w30FailNonJournalRepo wraps the production repository and fails
-// UpdateNonJournalFields with a caller-chosen generic error.
+// w30FailNonJournalRepo injects snapshot-column or atomic-completion failures
+// while delegating the transaction and rollback semantics to the real repository.
 type w30FailNonJournalRepo struct {
 	database.BatchFileOperationRepositoryInterface
 	failErr error
@@ -37,6 +33,13 @@ func (r *w30FailNonJournalRepo) UpdateNonJournalFields(ctx context.Context, op *
 		return r.failErr
 	}
 	return r.BatchFileOperationRepositoryInterface.UpdateNonJournalFields(ctx, op)
+}
+
+func (r *w30FailNonJournalRepo) UpdateJournalInTx(ctx context.Context, id uint, fn database.JournalUpdateFn) error {
+	if r.failErr != nil {
+		ctx = failAtomicCompletion(ctx, r.failErr)
+	}
+	return r.BatchFileOperationRepositoryInterface.UpdateJournalInTx(ctx, id, fn)
 }
 
 var _ database.BatchFileOperationRepositoryInterface = (*w30FailNonJournalRepo)(nil)
@@ -103,14 +106,17 @@ func TestDBRevertLogW30_CompleteFailedNilResultPersistFailureSurfaces(t *testing
 
 	broken := &w30FailNonJournalRepo{BatchFileOperationRepositoryInterface: repo, failErr: errors.New("replay: non-journal persist wedged")}
 	rl := w30RevertLog(t, broken, fs)
+	before, readErr := repo.FindByID(t.Context(), uint(parseOpIDForTest(t, opID)))
+	require.NoError(t, readErr)
 	err := rl.CompleteFailed(context.Background(), opID, nil)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "revert log CompleteFailed: mark record")
+	require.ErrorIs(t, err, broken.failErr)
+	after, readErr := repo.FindByID(t.Context(), before.ID)
+	require.NoError(t, readErr)
+	require.Equal(t, before, after, "failure must not publish only one half of completion")
 }
 
-// The post-mutation CompleteFailed leg: the journal merge lands first
-// (UpdateJournalInTx still healthy), then the non-journal persist fails and
-// surfaces through the "update failed record" wrap.
+// The post-mutation CompleteFailed leg: completion-column resolution fails
+// inside the authoritative transaction, rolling back its journal contribution.
 func TestDBRevertLogW30_CompleteFailedPostMutationPersistFailureSurfaces(t *testing.T) {
 	db := newInMemoryDB(t)
 	repo := database.NewBatchFileOperationRepository(db)
@@ -121,12 +127,16 @@ func TestDBRevertLogW30_CompleteFailedPostMutationPersistFailureSurfaces(t *test
 
 	broken := &w30FailNonJournalRepo{BatchFileOperationRepositoryInterface: repo, failErr: errors.New("replay: non-journal persist wedged")}
 	rl := w30RevertLog(t, broken, fs)
+	before, readErr := repo.FindByID(t.Context(), uint(parseOpIDForTest(t, opID)))
+	require.NoError(t, readErr)
 	err := rl.CompleteFailed(context.Background(), opID, &ApplyResult{
 		Movie:   &models.Movie{ID: "TEST-001"},
 		NFOPath: "/dest/TEST-001.nfo",
 	})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "revert log CompleteFailed: update failed record")
+	require.ErrorIs(t, err, broken.failErr)
+	after, readErr := repo.FindByID(t.Context(), before.ID)
+	require.NoError(t, readErr)
+	require.Equal(t, before, after, "failure must not publish only one half of completion")
 }
 
 func parseOpIDForTest(t *testing.T, opID string) uint64 {

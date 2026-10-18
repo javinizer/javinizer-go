@@ -835,7 +835,17 @@ func mergeRescrapeMovie(existing, scraped *models.Movie, opts workflow.MergeOpti
 		establishScrapedBaseline(scraped, scraped)
 		return scraped
 	}
-	merged.Merged.ID = scraped.ID
+	if merged.Merged.ID != scraped.ID {
+		// The rescrape deliberately corrects only the display ID. Rebase a
+		// currently valid cast projection before this assignment invalidates
+		// its snapshot; subsequent ownership, generation, or cast changes
+		// must still invalidate it normally.
+		credits, present := merged.Merged.RenderingCredits()
+		merged.Merged.ID = scraped.ID
+		if present {
+			merged.Merged.SetRenderCredits(credits)
+		}
+	}
 
 	// Image URLs (PosterURL/CoverURL) are content-bound scraped assets, not
 	// curated metadata. The generic merge treats them as ordinary string

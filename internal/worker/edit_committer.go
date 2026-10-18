@@ -38,9 +38,12 @@ type ActressRenamePlan struct {
 // all publication inside Publish: ANY leg failing rolls ALL DB writes back
 // and Publish never runs — no half-state ever becomes observable (D4).
 type EditCommitPlan struct {
-	// UpsertMovie, when non-nil, is the candidate movie row to upsert FIRST
-	// (PATCH ordering contract: movie upsert precedes actress renames).
+	// UpsertMovie, when non-nil, is upserted after validation and actress
+	// renames so credit reconciliation sees the accepted identity edits.
 	UpsertMovie *models.Movie
+	// RenderDisplayTitle runs after the upsert resolves authoritative credits,
+	// before the transaction encodes or publishes the candidate envelope.
+	RenderDisplayTitle database.DisplayTitleRenderer
 
 	// MutateMovieID + MutateMovie perform a find→mutate→upsert INSIDE the
 	// transaction (e.g. poster-from-URL field mutation of the canonical row).
@@ -48,7 +51,7 @@ type EditCommitPlan struct {
 	MutateMovieID string
 	MutateMovie   func(m *models.Movie)
 
-	// Renames are explicit actress name edits, executed after the upsert.
+	// Renames are explicit actress name edits, executed before the upsert.
 	Renames []ActressRenamePlan
 
 	// EnvelopeFn builds the candidate-merged job envelope row. Returning a
@@ -101,13 +104,13 @@ func NewEditCommitter(tx EditTransactor, locks *keyedMutexRegistry, jobKey strin
 }
 
 // Commit runs the plan atomically:
-//  1. Movie-row upsert (PATCH ordering contract)
-//  2. find→mutate→upsert row mutation
-//  3. Actress renames (preTx-snapshotted fields)
+//  1. Validate current state
+//  2. Actress renames (preTx-snapshotted fields)
+//  3. Movie-row upsert and optional find→mutate→upsert mutation
 //  4. Candidate-merged envelope build + upsert
 //  5. Publish (only after commit success)
 //
-// Any leg failing rolls ALL back and the caller turns it into a 5xx; nothing
+// Any leg failing rolls ALL back and the caller maps the error to HTTP; nothing
 // observable changes (no partial movie row, no stale-provenance envelope, no
 // in-memory divergence).
 func (c *EditCommitter) Commit(ctx context.Context, plan *EditCommitPlan) error {
@@ -145,31 +148,17 @@ func (c *EditCommitter) Commit(ctx context.Context, plan *EditCommitPlan) error 
 				return err
 			}
 		}
-		for _, rn := range plan.Renames {
-			existing, err := u.Actresses.FindByID(ctx, rn.ID)
-			switch {
-			case err != nil && !database.IsNotFound(err):
-				return fmt.Errorf("load actress for rename: %w", err)
-			case err != nil || existing == nil:
-				continue
-			}
-			namesUnchanged := existing.FirstName == rn.FirstName && existing.LastName == rn.LastName && existing.JapaneseName == rn.JapaneseName
-			thumbChanged := rn.ThumbEdited
-			if namesUnchanged && !thumbChanged {
-				continue
-			}
-			if thumbChanged {
-				if err := u.Actresses.RenameIdentityFields(ctx, rn.ID, rn.FirstName, rn.LastName, rn.JapaneseName, rn.ThumbURL); err != nil {
-					return fmt.Errorf("persist actress identity edit: %w", err)
-				}
-				continue
-			}
-			if err := u.Actresses.RenameNameFields(ctx, rn.ID, rn.FirstName, rn.LastName, rn.JapaneseName); err != nil {
-				return fmt.Errorf("persist actress name edit: %w", err)
-			}
+		if err := ApplyActressRenames(ctx, u.Actresses, plan.Renames); err != nil {
+			return err
 		}
 		if plan.UpsertMovie != nil {
-			if _, err := u.Movies.Upsert(ctx, plan.UpsertMovie); err != nil {
+			var err error
+			if plan.RenderDisplayTitle != nil {
+				_, err = database.UpsertWithDisplayTitle(ctx, u.Movies, plan.UpsertMovie, nil, nil, plan.RenderDisplayTitle)
+			} else {
+				_, err = u.Movies.Upsert(ctx, plan.UpsertMovie)
+			}
+			if err != nil {
 				return fmt.Errorf("persist movie update: %w", err)
 			}
 		}
