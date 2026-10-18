@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"sync"
 	"time"
 )
 
@@ -12,6 +13,29 @@ import (
 // goroutine teardown. Extracted from runtime_manager.go so that file focuses
 // on lazy init + factory construction.
 // ---------------------------------------------------------------------------
+
+// serverLifecycleState groups the server-owned context and task join handles.
+// Embedded by value in APIRuntime so its zero value remains ready for lazy init.
+type serverLifecycleState struct {
+	// Server lifecycle — serverCtx is the server-lifetime context,
+	// cancelled on Shutdown(). Used by batch job launch goroutines so they
+	// receive a cancellation signal when the server shuts down.
+	// serverTasksMu serializes task admission with shutdown cancellation.
+	serverTasksMu sync.Mutex
+	serverTasksWg sync.WaitGroup
+	serverCtxOnce sync.Once
+	serverCtx     context.Context
+	serverCancel  context.CancelFunc
+
+	// updateCheckerDone is the join handle for the background update-check
+	// goroutine started by startUpdateChecker: closed when that goroutine
+	// has fully exited (ticker stopped, in-flight check returned). Written
+	// once during bootstrap, before the server serves, and joined by
+	// Shutdown after cancelling serverCtx, so teardown cannot race the
+	// update checker's final state-store write. Nil when version checks
+	// are disabled (startUpdateChecker returned early).
+	updateCheckerDone <-chan struct{}
+}
 
 // ServerCtx returns the server-lifetime context. Cancelled on Shutdown().
 // Batch job launch goroutines should use this instead of context.Background()
