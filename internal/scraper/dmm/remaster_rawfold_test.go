@@ -16,7 +16,8 @@ func TestExtractIdentifiers_RawMarkerFold(t *testing.T) {
 		{"1ipx00535zhd", "IPX-535ZH"},
 		{"1dv00818ai", ""},
 		{"1ipx00535", "IPX-535"},
-		{"1t28000123hd", "T28-000123H"},
+		// The literal CID keeps padding; the T28 display number does not.
+		{"1t28000123hd", "T28-123H"},
 	} {
 		res := &models.ScraperResult{}
 		s.extractIdentifiers(res, nil, "https://www.dmm.co.jp/digital/videoa/-/detail/=/cid="+tc.cid+"/", true)

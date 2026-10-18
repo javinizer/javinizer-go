@@ -357,6 +357,9 @@ func fillMarkerIDFromURL(res *models.ScraperResult, url string) {
 		return
 	}
 	if marker, _, _, _ := classifyRemasterQuery(cid); marker == "h" {
+		if _, ambiguous := unprovenT28CIDNumber(cid); ambiguous {
+			return
+		}
 		res.ID = canonicalRemasterDisplayID(cid)
 	}
 }

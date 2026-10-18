@@ -178,19 +178,44 @@ func canonicalRemasterDisplayID(id string) string {
 
 // t28CidDisplayID renders the display identity of a t28-series content id.
 // A catalog-prefixed cid (9t28123h, h_003t28123h) is T28-123H; a bare
-// three-digit tail (t28123h) reads as the T-series release T-28123H, matching
-// the anchoredSeriesMatches disambiguation.
+// three/four-digit tail reads as the T series, matching the query parser.
+// Preserve that split explicitly while removing padding from T28 numbers.
 func t28CidDisplayID(cid string) string {
+	if _, ambiguous := unprovenT28CIDNumber(cid); ambiguous {
+		return ""
+	}
 	norm := strings.ToLower(strings.ReplaceAll(cid, "-", ""))
 	norm = underscorePrefixRegex.ReplaceAllString(norm, "")
 	m := anchoredMarkerCIDReg.FindStringSubmatch(norm)
-	if m == nil || m[2] != t28Series || len(m[3]) != 3 {
+	if m == nil || m[2] != t28Series {
 		return canonicalRemasterDisplayID(cleanPrefixRegex.ReplaceAllString(strings.ToLower(cid), "$1"))
 	}
-	if m[1] == "" {
+	if m[1] == "" && t28TailDecodesTSeries(m[3]) {
 		return canonicalRemasterDisplayID("t-28" + m[3] + m[4])
 	}
-	return canonicalRemasterDisplayID("t28-" + m[3] + m[4])
+	return canonicalRemasterDisplayID("t28-" + trimDisplayZeros(m[3]) + m[4])
+}
+
+// unprovenT28CIDNumber identifies prefixed T/T28 CIDs without an established
+// series boundary. Existing source fixtures bind 9, 1 and h_003 to T28; other
+// catalog/channel prefixes need a page 品番 instead of a guessed display ID.
+// The returned tail can match either T28-N or T-28N on a verified H/HD page.
+func unprovenT28CIDNumber(cid string) (string, bool) {
+	lower := strings.ToLower(stripRentalSuffixMarkerAware(cid))
+	m := remasterTailRegex.FindStringSubmatch(underscorePrefixRegex.ReplaceAllString(lower, ""))
+	if m == nil || m[2] != t28Series || m[1] == "" {
+		return "", false
+	}
+	prefix := m[1]
+	if strings.HasPrefix(lower, "h_") || strings.HasPrefix(lower, "n_") {
+		prefix = lower[:2] + prefix
+	}
+	switch prefix {
+	case "9", "1", "h_003":
+		return "", false
+	default:
+		return m[3], true
+	}
 }
 
 // stripRentalSuffixMarkerAware extends stripRentalSuffix: in addition to the
@@ -348,6 +373,13 @@ func pageDisplayIdentityForCID(doc *goquery.Document, cid, series, foldedMarker,
 	// suffix or marker line proves the page is another product's: the whole
 	// page is a conflict, not merely an unusable row whose override is
 	// dropped while the foreign metadata keeps the cid-derived identity.
+	ambiguousNumber, ambiguousCID := unprovenT28CIDNumber(cid)
+	if ambiguousCID && series == t28Series && pSeries == "t" {
+		// An unproven prefix cannot distinguish T-28N from T28-N. The
+		// explicit page boundary chooses the series; H/HD still binds its
+		// number below, and AI still requires the matching marker/suffix.
+		series = "t"
+	}
 	if pSeries != series || ez != catalogSuffix || marker != foldedMarker {
 		return "", true
 	}
@@ -358,6 +390,9 @@ func pageDisplayIdentityForCID(doc *goquery.Document, cid, series, foldedMarker,
 		// an unusable row. A cid without a parseable number binds nothing
 		// beyond the marker-based acceptance already applied.
 		cidNumber, cidOK := remasterTailNumber(cid)
+		if ambiguousCID && pSeries == "t" {
+			cidNumber = "28" + ambiguousNumber
+		}
 		if cidOK && trimDisplayZeros(cidNumber) != number {
 			return "", true
 		}
