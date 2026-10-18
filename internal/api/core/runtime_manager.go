@@ -158,6 +158,9 @@ type APIRuntime struct {
 	// Server lifecycle — serverCtx is the server-lifetime context,
 	// cancelled on Shutdown(). Used by batch job launch goroutines so they
 	// receive a cancellation signal when the server shuts down.
+	// serverTasksMu serializes task admission with shutdown cancellation.
+	serverTasksMu sync.Mutex
+	serverTasksWg sync.WaitGroup
 	serverCtxOnce sync.Once
 	serverCtx     context.Context
 	serverCancel  context.CancelFunc

@@ -30,10 +30,15 @@ func (r *APIRuntime) Shutdown() {
 	// serverCancel inside the Once, and only a Do() return establishes the
 	// happens-before edge that makes reading serverCancel here race-free
 	// (previously a shutdown racing a lazy ServerCtx() init was a data race).
+	r.serverTasksMu.Lock()
 	r.ServerCtx()
 	if r.serverCancel != nil {
 		r.serverCancel()
 	}
+	r.serverTasksMu.Unlock()
+	// Admission is closed by cancellation before waiting. Join server-owned
+	// tasks before closing dependencies or returning to the DB-close caller.
+	r.serverTasksWg.Wait()
 	// The runtime owns its built-in dependency token store. RuntimeState.Shutdown
 	// also runs during WebSocket hub resets, so token cleanup belongs here.
 	if r.deps != nil {
@@ -63,4 +68,24 @@ func (r *APIRuntime) TrackBackgroundTask() (done func()) {
 // (*RuntimeState).WaitBackgroundTasks.
 func (r *APIRuntime) WaitBackgroundTasks(timeout time.Duration) bool {
 	return r.GetRuntime().WaitBackgroundTasks(timeout)
+}
+
+// TrackServerTask registers work that Shutdown must cancel and join before
+// dependencies close. Call before accessing dependencies or launching work;
+// use ServerCtx for cancellation and defer the returned release in the worker.
+// Unlike legacy background tracking, admission is serialized with Shutdown,
+// so even a handler still running after HTTP drain timeout cannot add late work.
+// A nil release means shutdown has started and the caller must not start work.
+func (r *APIRuntime) TrackServerTask() (done func()) {
+	r.serverTasksMu.Lock()
+	defer r.serverTasksMu.Unlock()
+	if r.ServerCtx().Err() != nil {
+		return nil
+	}
+	r.serverTasksWg.Add(1)
+	backgroundDone := r.EnsureRuntime().TrackBackgroundTask()
+	return func() {
+		backgroundDone()
+		r.serverTasksWg.Done()
+	}
 }
