@@ -1993,7 +1993,7 @@ func TestAggregator_BuildTranslations(t *testing.T) {
 		}
 		movie := &models.Movie{Title: "English Title"}
 
-		translations := agg.buildTranslations(results, movie)
+		translations := agg.buildTranslations(results, movie, func(field string) []string { return agg.resolvedPriorities[field] })
 		assert.Len(t, translations, 2)
 
 		var enFound, jaFound bool
@@ -2023,7 +2023,7 @@ func TestAggregator_BuildTranslations(t *testing.T) {
 		}
 		movie := &models.Movie{}
 
-		translations := agg.buildTranslations(results, movie)
+		translations := agg.buildTranslations(results, movie, func(field string) []string { return agg.resolvedPriorities[field] })
 		assert.Len(t, translations, 1)
 		assert.Equal(t, "First Title", translations[0].Title)
 		assert.Equal(t, "Second desc", translations[0].Description)
@@ -2035,7 +2035,7 @@ func TestAggregator_BuildTranslations(t *testing.T) {
 		}
 		movie := &models.Movie{Title: "Winning Title"}
 
-		translations := agg.buildTranslations(results, movie)
+		translations := agg.buildTranslations(results, movie, func(field string) []string { return agg.resolvedPriorities[field] })
 		assert.Empty(t, translations)
 	})
 
@@ -2045,7 +2045,7 @@ func TestAggregator_BuildTranslations(t *testing.T) {
 		}
 		movie := &models.Movie{Title: "Winner"}
 
-		translations := agg.buildTranslations(results, movie)
+		translations := agg.buildTranslations(results, movie, func(field string) []string { return agg.resolvedPriorities[field] })
 		assert.Len(t, translations, 1)
 		assert.Equal(t, "en", translations[0].Language)
 		assert.Equal(t, "Winner", translations[0].Title)
@@ -2057,7 +2057,7 @@ func TestAggregator_BuildTranslations(t *testing.T) {
 		}
 		movie := &models.Movie{Title: "Title"}
 
-		translations := agg.buildTranslations(results, movie)
+		translations := agg.buildTranslations(results, movie, func(field string) []string { return agg.resolvedPriorities[field] })
 		assert.Empty(t, translations)
 	})
 
@@ -2067,7 +2067,7 @@ func TestAggregator_BuildTranslations(t *testing.T) {
 		}
 		movie := &models.Movie{OriginalTitle: "Original"}
 
-		translations := agg.buildTranslations(results, movie)
+		translations := agg.buildTranslations(results, movie, func(field string) []string { return agg.resolvedPriorities[field] })
 		assert.Len(t, translations, 1)
 		assert.Equal(t, "ja", translations[0].Language)
 	})
@@ -2078,7 +2078,7 @@ func TestAggregator_BuildTranslations(t *testing.T) {
 		}
 		movie := &models.Movie{Description: "Matched Desc"}
 
-		translations := agg.buildTranslations(results, movie)
+		translations := agg.buildTranslations(results, movie, func(field string) []string { return agg.resolvedPriorities[field] })
 		assert.Len(t, translations, 1)
 	})
 
@@ -2088,7 +2088,7 @@ func TestAggregator_BuildTranslations(t *testing.T) {
 		}
 		movie := &models.Movie{Director: "Director A"}
 
-		translations := agg.buildTranslations(results, movie)
+		translations := agg.buildTranslations(results, movie, func(field string) []string { return agg.resolvedPriorities[field] })
 		assert.Len(t, translations, 1)
 	})
 
@@ -2098,7 +2098,7 @@ func TestAggregator_BuildTranslations(t *testing.T) {
 		}
 		movie := &models.Movie{Maker: "Maker X"}
 
-		translations := agg.buildTranslations(results, movie)
+		translations := agg.buildTranslations(results, movie, func(field string) []string { return agg.resolvedPriorities[field] })
 		assert.Len(t, translations, 1)
 	})
 
@@ -2108,7 +2108,7 @@ func TestAggregator_BuildTranslations(t *testing.T) {
 		}
 		movie := &models.Movie{Label: "Label Y"}
 
-		translations := agg.buildTranslations(results, movie)
+		translations := agg.buildTranslations(results, movie, func(field string) []string { return agg.resolvedPriorities[field] })
 		assert.Len(t, translations, 1)
 	})
 
@@ -2118,7 +2118,7 @@ func TestAggregator_BuildTranslations(t *testing.T) {
 		}
 		movie := &models.Movie{Series: "Series Z"}
 
-		translations := agg.buildTranslations(results, movie)
+		translations := agg.buildTranslations(results, movie, func(field string) []string { return agg.resolvedPriorities[field] })
 		assert.Len(t, translations, 1)
 	})
 
@@ -2134,7 +2134,7 @@ func TestAggregator_BuildTranslations(t *testing.T) {
 		}
 		movie := &models.Movie{}
 
-		translations := agg.buildTranslations(results, movie)
+		translations := agg.buildTranslations(results, movie, func(field string) []string { return agg.resolvedPriorities[field] })
 		assert.Len(t, translations, 1)
 		assert.Equal(t, "Title Only", translations[0].Title)
 		assert.Equal(t, "Desc Added", translations[0].Description)
@@ -2156,7 +2156,7 @@ func TestAggregator_BuildTranslations(t *testing.T) {
 		}
 		movie := &models.Movie{}
 
-		translations := agg.buildTranslations(results, movie)
+		translations := agg.buildTranslations(results, movie, func(field string) []string { return agg.resolvedPriorities[field] })
 		assert.Len(t, translations, 1)
 		assert.Equal(t, "First Title", translations[0].Title)
 		assert.Equal(t, "First Desc", translations[0].Description)
@@ -2178,7 +2178,7 @@ func TestAggregator_BuildTranslations(t *testing.T) {
 		}
 		movie := &models.Movie{Title: "Title"}
 
-		translations := agg.buildTranslations(results, movie)
+		translations := agg.buildTranslations(results, movie, func(field string) []string { return agg.resolvedPriorities[field] })
 		assert.Len(t, translations, 1)
 		assert.Equal(t, "en", translations[0].Language)
 		assert.Equal(t, "Title", translations[0].Title)

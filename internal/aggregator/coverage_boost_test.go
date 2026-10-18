@@ -55,7 +55,7 @@ func TestBuildTranslations_ExplicitMergeFillsOriginalTitle(t *testing.T) {
 	}
 
 	movie := &models.Movie{}
-	translations := agg.buildTranslations(results, movie)
+	translations := agg.buildTranslations(results, movie, func(field string) []string { return agg.resolvedPriorities[field] })
 	require.Len(t, translations, 1)
 	assert.Equal(t, "Japanese Title", translations[0].Title)
 	assert.Equal(t, "Japanese Original Title", translations[0].OriginalTitle,
@@ -87,7 +87,7 @@ func TestBuildTranslations_LegacyMergeFillsTitleIntoExisting(t *testing.T) {
 	}
 
 	movie := &models.Movie{Title: "Winner Title"}
-	translations := agg.buildTranslations(results, movie)
+	translations := agg.buildTranslations(results, movie, func(field string) []string { return agg.resolvedPriorities[field] })
 	require.Len(t, translations, 1)
 	assert.Equal(t, "Winner Title", translations[0].Title,
 		"legacy merge should fill Title into existing translation")

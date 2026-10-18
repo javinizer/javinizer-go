@@ -227,7 +227,7 @@ func TestBuildTranslations_LegacyMergeIntoExisting(t *testing.T) {
 	// Movie has matching title → r18dev is a "winner"
 	movie := &models.Movie{Title: "English Title"}
 
-	translations := agg.buildTranslations(results, movie)
+	translations := agg.buildTranslations(results, movie, func(field string) []string { return agg.resolvedPriorities[field] })
 	require.Len(t, translations, 1)
 	assert.Equal(t, "en", translations[0].Language)
 	assert.Equal(t, "English Title", translations[0].Title)
@@ -271,7 +271,7 @@ func TestBuildTranslations_LegacyMergeFillsEmptyFields(t *testing.T) {
 	// Movie matches on Title so r18dev is a winner
 	movie := &models.Movie{Title: "Title", Director: "Dir", Maker: "Maker", Label: "Label", Series: "Series"}
 
-	translations := agg.buildTranslations(results, movie)
+	translations := agg.buildTranslations(results, movie, func(field string) []string { return agg.resolvedPriorities[field] })
 	require.Len(t, translations, 1)
 	assert.Equal(t, "Title", translations[0].Title)
 	assert.Equal(t, "Dir", translations[0].Director, "legacy merge should fill Director")
@@ -308,7 +308,7 @@ func TestBuildTranslations_LegacyMergeDoesNotOverwrite(t *testing.T) {
 
 	movie := &models.Movie{Title: "Winner Title"}
 
-	translations := agg.buildTranslations(results, movie)
+	translations := agg.buildTranslations(results, movie, func(field string) []string { return agg.resolvedPriorities[field] })
 	require.Len(t, translations, 1)
 	assert.Equal(t, "Explicit Title", translations[0].Title, "should NOT overwrite explicit Title with legacy Title")
 	assert.Equal(t, "Explicit Desc", translations[0].Description, "should keep explicit Description")
@@ -344,7 +344,7 @@ func TestBuildTranslations_LegacyMergeFillsOriginalTitleAndDescription(t *testin
 
 	movie := &models.Movie{Title: "Title", OriginalTitle: "Original", Description: "Desc"}
 
-	translations := agg.buildTranslations(results, movie)
+	translations := agg.buildTranslations(results, movie, func(field string) []string { return agg.resolvedPriorities[field] })
 	require.Len(t, translations, 1)
 	assert.Equal(t, "Title", translations[0].Title)
 	assert.Equal(t, "Original", translations[0].OriginalTitle, "legacy merge should fill OriginalTitle")

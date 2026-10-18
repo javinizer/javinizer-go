@@ -1,65 +1,71 @@
 package aggregator
 
 import (
+	"slices"
+
 	"github.com/javinizer/javinizer-go/internal/models"
 )
 
-// buildTranslations creates MovieTranslation records from scraper results
-// Only includes a scraper's translation if that scraper contributed to at least
-// one of the aggregated movie's fields (Title, OriginalTitle, or Description).
-// This ensures buildTranslations only captures translations from scrapers that
-// actually won the priority merge, preventing duplicate language entries.
-func (a *Aggregator) buildTranslations(results []*models.ScraperResult, scraped *models.Movie) []models.MovieTranslation {
+// translationFields returns fields in the same order as translationPriorityKeys.
+func translationFields(t *models.MovieTranslation) [7]*string {
+	return [7]*string{&t.Title, &t.OriginalTitle, &t.Description, &t.Director, &t.Maker, &t.Label, &t.Series}
+}
+
+var translationPriorityKeys = [7]string{"Title", "OriginalTitle", "Description", "Director", "Maker", "Label", "Series"}
+
+// buildTranslations preserves first-seen language order and explicit translations
+// before legacy fields from the same scraper. Each field independently selects
+// the highest-priority source available for that language. An exclusive override
+// therefore also excludes unlisted sources from translated output. SourceName
+// follows the retained Title, or the first nonempty field in the order above
+// when Title is absent; a single source label cannot describe every field.
+func (a *Aggregator) buildTranslations(results []*models.ScraperResult, scraped *models.Movie, priorityFunc func(string) []string) []models.MovieTranslation {
 	translations := make([]models.MovieTranslation, 0, len(results))
-
-	for _, result := range results {
-		// First, process any translations provided by the scraper (e.g., R18.dev provides both EN and JA)
-		if len(result.Translations) > 0 {
-			for _, trans := range result.Translations {
-				// Check if this translation language is already added
-				existingIdx := -1
-				for i, existing := range translations {
-					if existing.Language == trans.Language {
-						existingIdx = i
-						break
-					}
+	indices := make(map[string]int)
+	ranks := make(map[string][7]int)
+	primaryFields := make(map[string]int)
+	merge := func(trans models.MovieTranslation, source string) {
+		for field, value := range translationFields(&trans) {
+			rank := slices.Index(priorityFunc(translationPriorityKeys[field]), source)
+			if *value == "" || rank < 0 {
+				continue
+			}
+			idx, exists := indices[trans.Language]
+			if !exists {
+				entry := trans
+				for _, value := range translationFields(&entry) {
+					*value = ""
 				}
-
-				if existingIdx >= 0 {
-					// Merge with existing translation (prefer non-empty values)
-					if trans.Title != "" && translations[existingIdx].Title == "" {
-						translations[existingIdx].Title = trans.Title
+				idx = len(translations)
+				indices[trans.Language] = idx
+				primaryFields[trans.Language] = field
+				translations = append(translations, entry)
+			}
+			target := translationFields(&translations[idx])[field]
+			languageRanks := ranks[trans.Language]
+			if *target == "" || rank < languageRanks[field] {
+				*target = *value
+				languageRanks[field] = rank
+				ranks[trans.Language] = languageRanks
+				if field <= primaryFields[trans.Language] {
+					primaryFields[trans.Language] = field
+					translations[idx].SourceName = trans.SourceName
+					if translations[idx].SourceName == "" {
+						translations[idx].SourceName = source
 					}
-					if trans.OriginalTitle != "" && translations[existingIdx].OriginalTitle == "" {
-						translations[existingIdx].OriginalTitle = trans.OriginalTitle
-					}
-					if trans.Description != "" && translations[existingIdx].Description == "" {
-						translations[existingIdx].Description = trans.Description
-					}
-					if trans.Director != "" && translations[existingIdx].Director == "" {
-						translations[existingIdx].Director = trans.Director
-					}
-					if trans.Maker != "" && translations[existingIdx].Maker == "" {
-						translations[existingIdx].Maker = trans.Maker
-					}
-					if trans.Label != "" && translations[existingIdx].Label == "" {
-						translations[existingIdx].Label = trans.Label
-					}
-					if trans.Series != "" && translations[existingIdx].Series == "" {
-						translations[existingIdx].Series = trans.Series
-					}
-				} else {
-					// Add new translation
-					translations = append(translations, trans)
 				}
 			}
 		}
+	}
 
-		// Skip results without language metadata for the legacy path
+	for _, result := range results {
+		// Preserve genuinely alternative languages supplied by a scraper.
+		for _, trans := range result.Translations {
+			merge(trans, result.Source)
+		}
 		if result.Language == "" {
 			continue
 		}
-
 		// Check if this scraper is a "winner" by comparing ALL its translation fields
 		// to the aggregated movie. A scraper is a winner if ANY of its non-empty
 		// translation fields match the corresponding aggregated movie field.
@@ -91,54 +97,17 @@ func (a *Aggregator) buildTranslations(results []*models.ScraperResult, scraped 
 			continue
 		}
 
-		translation := models.MovieTranslation{
+		merge(models.MovieTranslation{
 			Language:      result.Language,
 			Title:         result.Title,
-			OriginalTitle: result.OriginalTitle, // Japanese/original language title
+			OriginalTitle: result.OriginalTitle,
 			Description:   result.Description,
 			Director:      result.Director,
 			Maker:         result.Maker,
 			Label:         result.Label,
 			Series:        result.Series,
 			SourceName:    result.Source,
-		}
-
-		// Check if this language already exists (from scraper translations above)
-		existingIdx := -1
-		for i, existing := range translations {
-			if existing.Language == result.Language {
-				existingIdx = i
-				break
-			}
-		}
-
-		if existingIdx >= 0 {
-			// Merge with existing translation (prefer non-empty values)
-			if translation.Title != "" && translations[existingIdx].Title == "" {
-				translations[existingIdx].Title = translation.Title
-			}
-			if translation.OriginalTitle != "" && translations[existingIdx].OriginalTitle == "" {
-				translations[existingIdx].OriginalTitle = translation.OriginalTitle
-			}
-			if translation.Description != "" && translations[existingIdx].Description == "" {
-				translations[existingIdx].Description = translation.Description
-			}
-			if translation.Director != "" && translations[existingIdx].Director == "" {
-				translations[existingIdx].Director = translation.Director
-			}
-			if translation.Maker != "" && translations[existingIdx].Maker == "" {
-				translations[existingIdx].Maker = translation.Maker
-			}
-			if translation.Label != "" && translations[existingIdx].Label == "" {
-				translations[existingIdx].Label = translation.Label
-			}
-			if translation.Series != "" && translations[existingIdx].Series == "" {
-				translations[existingIdx].Series = translation.Series
-			}
-		} else {
-			translations = append(translations, translation)
-		}
+		}, result.Source)
 	}
-
 	return translations
 }
