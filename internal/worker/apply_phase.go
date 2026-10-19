@@ -369,7 +369,8 @@ func markCollisionGateFailure(inputs applyPhaseInputs, cfg ApplyPhaseConfig, fil
 }
 
 // clearPriorCreditGateError discharges an old gate diagnostic after a retry
-// reaches Apply. Preserve a newer live diagnostic written after this snapshot.
+// reaches Apply, before replacing its status/message. Preserve a newer live
+// diagnostic written after this snapshot.
 func clearPriorCreditGateError(current, baseline *resultstore.MovieResult) {
 	if baseline == nil || current.ErrorCode != baseline.ErrorCode {
 		return
@@ -377,6 +378,12 @@ func clearPriorCreditGateError(current, baseline *resultstore.MovieResult) {
 	switch current.ErrorCode {
 	case models.FileErrorCodeCreditConflict, models.FileErrorCodeCreditStatusUnavailable:
 		current.ErrorCode = ""
+	case "blocked":
+		// v1.6.2 used the generic code. Match the unchanged gate diagnostic
+		// before a new outcome overwrites its only identifying message.
+		if current.Status == baseline.Status && current.Error == baseline.Error && isTerminalLegacyCreditGateFailure(baseline) {
+			current.ErrorCode = ""
+		}
 	}
 }
 
@@ -957,8 +964,6 @@ func interpretApplyResult(
 					current.FileMatchInfo = fm
 					current.Movie = mergeApplyWritebackMovie(afc.reviewBaseline, movie, movie, current.Movie, afc.MovieResult, current, inputs.MovieRepo != nil)
 				}
-				current.Status = fileStatus
-				current.Error = errMsg
 				if errorCode != "" && samePosterCropIntent(movie, current.Movie) &&
 					// codex r7 P2: never resurrect a marker whose slot an interim edit
 					// (removal/override) deliberately cleared — in an unmeasured-crop
@@ -995,6 +1000,8 @@ func interpretApplyResult(
 					current.ErrorCode = ""
 				}
 				clearPriorCreditGateError(current, afc.MovieResult)
+				current.Status = fileStatus
+				current.Error = errMsg
 				current.StartedAt = startTime
 				current.EndedAt = &now
 				return current, mergeWriteBackProvenance(inputs.Provenance[filePath], prov), nil
@@ -1084,13 +1091,13 @@ func interpretApplyResult(
 							return current, prov, nil
 						}
 						current.Movie = mergeApplyWritebackMovie(afc.reviewBaseline, movie, result.Movie, current.Movie, afc.MovieResult, current, inputs.MovieRepo != nil)
+						clearPriorCreditGateError(current, afc.MovieResult)
 						// A successful explicit retry must clear the prior apply failure so
 						// later retries and reloads do not keep treating this row as failed.
 						if current.Status == models.JobStatusFailed {
 							current.Status = models.JobStatusCompleted
 							current.Error = ""
 						}
-						clearPriorCreditGateError(current, afc.MovieResult)
 						// codex r9 P2: clear the marker only when this retry fetched AND
 						// installed a poster after the download step's verification — Steps.
 						// Downloaded alone also fires on cover/trailer-only or dedup-skipped
