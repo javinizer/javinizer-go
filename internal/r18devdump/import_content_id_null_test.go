@@ -50,9 +50,15 @@ func TestImport_RejectsNullOrMissingContentIDBeforeSwap(t *testing.T) {
 					BeforeSwap: func() error { beforeSwap = true; return nil },
 					AfterSwap:  func() { afterSwap = true },
 				})
-				assert.ErrorIs(t, err, ErrDumpNonCanonicalID)
+				wantErr := ErrDumpNonCanonicalID
+				wantDetail := sqliteTableName(tc.table) + ".content_id"
+				if shape == "short row" {
+					wantErr = ErrDumpInvalid
+					wantDetail = tc.table + " COPY row has 1 values for 2 columns"
+				}
+				assert.ErrorIs(t, err, wantErr)
 				if err != nil {
-					assert.Contains(t, err.Error(), sqliteTableName(tc.table)+".content_id")
+					assert.Contains(t, err.Error(), wantDetail)
 				}
 				assert.False(t, beforeSwap, "invalid content must fail before detaching the working handle")
 				assert.False(t, afterSwap)

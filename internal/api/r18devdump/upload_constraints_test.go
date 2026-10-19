@@ -33,6 +33,8 @@ func TestUpload_ConstraintViolationPreservesWorkingDump(t *testing.T) {
 		{"null entity id", "COPY public.derived_actress (id, name_romaji) FROM stdin;\n\\N\tSynthetic\n\\.\n", "derived_actress"},
 		{"null association id", "COPY public.derived_video_actress (content_id, actress_id) FROM stdin;\n118ipx00535\t\\N\n\\.\n", "derived_video_actress"},
 		{"missing association id", "COPY public.derived_video_category (content_id) FROM stdin;\n118ipx00535\n\\.\n", "derived_video_category"},
+		{"missing COPY field", "COPY public.derived_video (content_id, dvd_id) FROM stdin;\nshort00001\n\\.\n", "derived_video"},
+		{"excess COPY field", "COPY public.derived_video (content_id, dvd_id) FROM stdin;\nextra00001\tEXTRA-001\tignored\n\\.\n", "derived_video"},
 		{"duplicate video", "COPY public.derived_video (content_id, dvd_id) FROM stdin;\n118ipx00535\tOTHER-001\n\\.\n", "derived_video"},
 		{"duplicate entity", "COPY public.derived_maker (id, name_en) FROM stdin;\nid1\tFirst\nid1\tSecond\n\\.\n", "derived_maker"},
 		{"duplicate association", "COPY public.derived_video_actress (content_id, actress_id, ordinality) FROM stdin;\n118ipx00535\tid1\t1\n118ipx00535\tid1\t2\n\\.\n", "derived_video_actress"},

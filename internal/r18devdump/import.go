@@ -378,6 +378,9 @@ func importWithOpenDB(ctx context.Context, r io.Reader, path string, opts Import
 		if !ok {
 			return nil // skip tables we don't store
 		}
+		if len(row.Values) != len(row.Columns) {
+			return fmt.Errorf("%w: %s COPY row has %d values for %d columns", ErrDumpInvalid, row.Table, len(row.Values), len(row.Columns))
+		}
 		// Map dump column positions to our stored column order, then enforce
 		// INTEGER storage where scans will demand it.
 		mapped := mapDumpRow(row, schema.columns)
