@@ -568,6 +568,11 @@ func (h *dumpHandler) clearDump(c *gin.Context) {
 		logging.Warnf("r18dev dump cleared but hot-swap failed: %v", reloadErr)
 	}
 
+	h.mu.Lock()
+	h.lastError = ""
+	h.lastErrorKind = ""
+	h.mu.Unlock()
+
 	logging.Infof("r18dev dump cleared: %s", path)
 	c.JSON(http.StatusOK, gin.H{"message": "dump cleared"})
 }

@@ -209,6 +209,89 @@ describe('R18DevDumpSection reopened status', () => {
 		expect(screen.getByText('[staging] synthetic current failure')).toBeTruthy();
 	});
 
+	it.each(
+		['done', 'error'].flatMap((terminal) =>
+			[false, true].flatMap((present) =>
+				[false, true].map((fails) => ({ terminal, present, fails })),
+			),
+		),
+	)(
+		'ignores a stale $terminal frame throughout a newer running job: present=$present fails=$fails',
+		async ({ terminal, present, fails }) => {
+			ws.messages = [{ ...errorFrame('stale terminal failure'), message: terminal, status: terminal }];
+			let current = status({ present, running: true });
+			api.getDumpStatus.mockImplementation(() => Promise.resolve(current));
+			await mountSection();
+			for (let i = 0; i < 3; i++) {
+				await advancePoll();
+				expect(api.getDumpStatus).toHaveBeenCalledTimes(i + 2);
+				expect(screen.queryByRole('button', { name: /Upload Dump/ })).toBeNull();
+				expect(screen.queryByRole('button', { name: /^Clear Dump$/ })).toBeNull();
+				expect(screen.queryByText(/stale terminal failure/)).toBeNull();
+				// A changed sidecar snapshot must not override running:true either.
+				current = status({ present: true, running: true, imported_at: '2026-10-19T00:00:00Z' });
+			}
+			current = status({
+				present: true,
+				last_error: fails ? 'new job failed' : '',
+				last_error_kind: fails ? 'reload' : '',
+			});
+			await advancePoll();
+			expect(api.getDumpStatus).toHaveBeenCalledTimes(5);
+			expect(screen.getByRole('button', { name: /Upload Dump/ })).toBeTruthy();
+			expect(screen.queryByText(/stale terminal failure/)).toBeNull();
+			if (fails) expect(screen.getByText('[reload] new job failed')).toBeTruthy();
+			else expect(screen.queryByText(/new job failed/)).toBeNull();
+			await advancePoll();
+			expect(api.getDumpStatus).toHaveBeenCalledTimes(5);
+		},
+	);
+
+	it.each(
+		['done', 'error'].flatMap((terminal) => [false, true].map((fails) => ({ terminal, fails }))),
+	)(
+		'ignores the retained $terminal frame if the resumed job finishes before its first poll: fails=$fails',
+		async ({ terminal, fails }) => {
+			ws.messages = [{ ...errorFrame('retained old failure'), message: terminal, status: terminal }];
+			api.getDumpStatus
+				.mockResolvedValueOnce(status({ running: true }))
+				.mockResolvedValue(status({
+					present: true,
+					last_error: fails ? 'finished new job failure' : '',
+					last_error_kind: fails ? 'import' : '',
+				}));
+			await mountSection();
+			await advancePoll();
+			expect(screen.getByRole('button', { name: /Upload Dump/ })).toBeTruthy();
+			expect(screen.queryByText(/retained old failure/)).toBeNull();
+			if (fails) expect(screen.getByText('[import] finished new job failure')).toBeTruthy();
+			await advancePoll();
+			expect(api.getDumpStatus).toHaveBeenCalledTimes(2);
+		},
+	);
+
+	it.each(['done', 'error'])(
+		'keeps polling when a $terminal frame cannot be confirmed because status fails',
+		async (terminal) => {
+			ws.messages = [{ ...errorFrame('unconfirmed failure'), message: terminal, status: terminal }];
+			api.getDumpStatus
+				.mockResolvedValueOnce(status({ running: true }))
+				.mockRejectedValueOnce(new Error('temporary status failure'))
+				.mockResolvedValueOnce(status({ running: true }))
+				.mockResolvedValue(status({ present: true }));
+			await mountSection();
+			await advancePoll();
+			expect(screen.queryByText('unconfirmed failure')).toBeNull();
+			await advancePoll();
+			expect(api.getDumpStatus).toHaveBeenCalledTimes(3);
+			expect(screen.queryByRole('button', { name: /Upload Dump/ })).toBeNull();
+			await advancePoll();
+			expect(api.getDumpStatus).toHaveBeenCalledTimes(4);
+			expect(screen.getByRole('button', { name: /Upload Dump/ })).toBeTruthy();
+			expect(screen.queryByText('unconfirmed failure')).toBeNull();
+		},
+	);
+
 	it('keeps the current WebSocket terminal error when its status refresh has no saved error', async () => {
 		await mountSection();
 		await chooseUpload();

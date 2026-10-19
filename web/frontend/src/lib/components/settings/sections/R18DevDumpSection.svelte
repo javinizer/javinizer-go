@@ -69,6 +69,7 @@
 				downloading = true;
 				pollDownloadProgress();
 			}
+			return nextStatus;
 		} catch (e) {
 			if (requestVersion === statusRequestVersion && operationVersion === dumpOperationVersion) {
 				error = e instanceof Error ? e.message : m.settings_r18dev_fetch_status_failed();
@@ -137,24 +138,35 @@
 		// path below is completion-based; component unmount stops via polling
 		// being cleared).
 		const pollIntervalMs = 3000;
+		// A frame already retained when status resumes a running job is stale,
+		// even if that job finishes before the first poll.
+		let ignoredTerminalFrame = status?.running ? downloadProgress : null;
 		for (;;) {
 			if (!polling) return; // stopped by component unmount
 			await new Promise((r) => setTimeout(r, pollIntervalMs));
 			if (!polling) return;
 			// Check WebSocket terminal state first.
-			if (downloadProgress) {
-				const wsStatus = downloadProgress.message || downloadProgress.status;
+			const terminalFrame = downloadProgress;
+			if (terminalFrame && terminalFrame !== ignoredTerminalFrame) {
+				const wsStatus = terminalFrame.message || terminalFrame.status;
 				if (wsStatus === 'done' || wsStatus === 'error') {
-					await fetchStatus();
+					const refreshedStatus = await fetchStatus();
+					if (!polling || !refreshedStatus) continue;
+					// Every job shares one WS ID. A retained terminal frame cannot
+					// finish a newer job, including after its next status refresh.
+					if (refreshedStatus.running) {
+						ignoredTerminalFrame = terminalFrame;
+						continue;
+					}
 					downloading = false;
 					polling = false;
-					if (wsStatus === 'error') {
+					if (refreshedStatus.last_error || wsStatus === 'error') {
 						// Render the server's real error (upload failures, download
 						// stalls); fall back to the generic string only when absent.
-						const kind = status?.last_error_kind;
+						const kind = refreshedStatus.last_error_kind;
 						const text =
-							downloadProgress.error ||
-							status?.last_error ||
+							terminalFrame.error ||
+							refreshedStatus.last_error ||
 							m.settings_r18dev_download_failed_msg();
 						downloadError = kind ? `[${kind}] ${text}` : text;
 					}
@@ -169,6 +181,7 @@
 				if (requestVersion !== statusRequestVersion || operationVersion !== dumpOperationVersion) continue;
 				status = s;
 				loading = false;
+				if (s.running) continue;
 				// Fallback: if the dump was absent before and is now present,
 				// the download completed (WS frame may have been missed).
 				// Failure wins over presence: a renamed-but-not-reloaded
