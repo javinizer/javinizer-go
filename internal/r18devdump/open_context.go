@@ -2,22 +2,32 @@ package r18devdump
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 )
 
-// OpenContext opens a dump sidecar connection like Open, then re-probes
-// readiness honoring ctx cancellation. It exists for paths that gate on an
-// unknown or freshly staged file where the probe itself may block on a slow
-// or flaky filesystem; the first stage after OpenContext is the only
-// blocking operation beyond Open's own locally-fast ping.
+// OpenContext opens a read-only dump sidecar and uses ctx for its initial
+// readiness check. Cancellation is cooperative with the database driver; it
+// cannot interrupt a filesystem operation that does not honor context.
+// Once opened, the Store remains usable until Close, independently of ctx.
 func OpenContext(ctx context.Context, path string) (*Store, error) {
-	s, err := Open(path)
+	return openContextWithOpenDB(ctx, path, sql.Open)
+}
+
+func openContextWithOpenDB(ctx context.Context, path string, openDB func(string, string) (*sql.DB, error)) (*Store, error) {
+	dsn := fmt.Sprintf("file:%s?mode=ro&_busy_timeout=5000", path)
+	db, err := openDB("sqlite3", dsn)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("open dump db: %w", err)
 	}
-	if err := s.db.PingContext(ctx); err != nil {
-		_ = s.Close()
+	err = db.PingContext(ctx)
+	if err == nil {
+		// Some drivers return success even if cancellation happened during open.
+		err = ctx.Err()
+	}
+	if err != nil {
+		_ = db.Close()
 		return nil, fmt.Errorf("ping dump db: %w", err)
 	}
-	return s, nil
+	return &Store{db: db, path: path}, nil
 }

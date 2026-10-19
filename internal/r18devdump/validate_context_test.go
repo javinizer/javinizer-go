@@ -60,8 +60,7 @@ func TestInterpretQuickCheck(t *testing.T) {
 }
 
 func TestOpenContext_CancelledPing(t *testing.T) {
-	// Needs an openable database so Open succeeds and the cancelled-context
-	// ping is the failing operation.
+	// Cancellation rejects the initial readiness check even for a valid dump.
 	path := importFixture(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
