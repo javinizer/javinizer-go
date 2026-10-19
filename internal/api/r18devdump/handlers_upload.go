@@ -169,6 +169,9 @@ func (h *dumpHandler) startUpload(c *gin.Context) {
 		c.Header("Connection", "close")
 		c.JSON(http.StatusRequestTimeout, gin.H{errorResponseKey: ErrReceiveTimeout.Error()})
 		return
+	case dispSpoolFailure:
+		c.JSON(http.StatusInternalServerError, gin.H{errorResponseKey: fmt.Sprintf("stage upload: %v", parseErr)})
+		return
 	case dispEnvelope:
 		c.JSON(http.StatusBadRequest, gin.H{errorResponseKey: "malformed multipart body: expected exactly one file part"})
 		return

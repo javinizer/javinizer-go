@@ -116,7 +116,9 @@ func validateNoNullMetaKeys(ctx context.Context, db *sql.DB) error {
 		"(SELECT COUNT(*) - COUNT(DISTINCT key) FROM dump_meta)",
 	}
 	for _, k := range requiredKeys {
-		parts = append(parts, "(SELECT COUNT(*) FROM dump_meta WHERE key = '"+k+"')")
+		// loadMeta preserves spelling in a Go map; inherited NOCASE/RTRIM
+		// collation must not make a noncanonical key satisfy this contract.
+		parts = append(parts, "(SELECT COUNT(*) FROM dump_meta WHERE key COLLATE BINARY = '"+k+"')")
 	}
 	var nulls, dups, haveURL, haveDate, haveImportedAt int64
 	err := db.QueryRowContext(ctx,

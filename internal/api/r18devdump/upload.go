@@ -38,6 +38,7 @@ const (
 	dispOversize                                // 413
 	dispStalled                                 // 408 watchdog stall
 	dispServerTimeout                           // 408 server read-timer (pre-lift window)
+	dispSpoolFailure                            // 500 multipart temporary-file I/O
 )
 
 // receiveWrapper instruments the request body: counts bytes (for progress),
@@ -115,6 +116,12 @@ func (w *receiveWrapper) classify(parseErr error) receiveDisposition {
 	if w.state.CompareAndSwap(int32(recvActive), int32(recvCompleted)) {
 		if parseErr == nil {
 			return dispStaging
+		}
+		// Multipart may fail while creating, writing, or closing its disk
+		// spool. os.File.Write can also return a bare io.ErrShortWrite.
+		var pathErr *os.PathError
+		if errors.As(parseErr, &pathErr) || errors.Is(parseErr, io.ErrShortWrite) {
+			return dispSpoolFailure
 		}
 		return dispEnvelope
 	}
