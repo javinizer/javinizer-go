@@ -21,6 +21,10 @@
 	let searchError = $state('');
 	let error = $state('');
 	let dumpEnabled = $state(true);
+	// Request ownership only; keep these counters outside Svelte reactivity.
+	let statusRequestVersion = 0;
+	let dumpOperationVersion = 0;
+	let disposed = false;
 
 	// Subscribe to WebSocket messages for dump download progress.
 	let wsState = $state<{ messages: { job_id: string; progress: number; message: string; status: string; error?: string }[] }>({
@@ -37,28 +41,45 @@
 		wsState.messages.length > 0 ? wsState.messages[wsState.messages.length - 1] : null,
 	);
 
-	async function fetchStatus() {
+	async function fetchStatus(restoreCompletedError = false) {
+		const requestVersion = ++statusRequestVersion;
+		const operationVersion = dumpOperationVersion;
 		loading = true;
 		error = '';
 		try {
-			status = await api.r18dev.getDumpStatus();
+			const nextStatus = await api.r18dev.getDumpStatus();
+			if (requestVersion !== statusRequestVersion || operationVersion !== dumpOperationVersion) return;
+			status = nextStatus;
 			dumpEnabled = status.enabled;
+			// Recover a job that finished while Settings was closed. Internal
+			// refreshes after Clear or a WS terminal frame keep their own result.
+			if (restoreCompletedError && !downloading && !polling) {
+				downloadError = !status.running && status.last_error
+					? status.last_error_kind
+						? `[${status.last_error_kind}] ${status.last_error}`
+						: status.last_error
+					: '';
+			}
 			// Resume tracking an in-flight job: if the settings page was opened
 			// or refreshed while a dump download/update is already running on the
 			// backend, enter the progress/polling state so the UI follows the job
 			// instead of showing stale Download/Clear controls.
 			if (status.running && !downloading && !polling) {
+				downloadError = '';
 				downloading = true;
 				pollDownloadProgress();
 			}
 		} catch (e) {
-			error = e instanceof Error ? e.message : m.settings_r18dev_fetch_status_failed();
+			if (requestVersion === statusRequestVersion && operationVersion === dumpOperationVersion) {
+				error = e instanceof Error ? e.message : m.settings_r18dev_fetch_status_failed();
+			}
 		} finally {
-			loading = false;
+			if (requestVersion === statusRequestVersion) loading = false;
 		}
 	}
 
 	async function download(updateOnly = false) {
+		dumpOperationVersion++;
 		downloading = true;
 		downloadError = '';
 		websocketStore.clearMessages('r18dev-dump-download');
@@ -81,6 +102,7 @@
 	// status polling apply. File selection never touches settings state or
 	// the config-change callback.
 	async function upload(file: File) {
+		dumpOperationVersion++;
 		downloadError = '';
 		downloading = true;
 		websocketStore.clearMessages('r18dev-dump-download');
@@ -101,6 +123,8 @@
 	}
 
 	async function pollDownloadProgress() {
+		// An upload/download acknowledgement may arrive after teardown.
+		if (disposed) return;
 		polling = true;
 		// Record the pre-download state to detect completion as a fallback
 		// for when the WebSocket terminal frame is missed.
@@ -139,8 +163,12 @@
 			}
 			// Also refresh status for UI updates (progress bar, etc).
 			try {
+				const requestVersion = ++statusRequestVersion;
+				const operationVersion = dumpOperationVersion;
 				const s = await api.r18dev.getDumpStatus();
+				if (requestVersion !== statusRequestVersion || operationVersion !== dumpOperationVersion) continue;
 				status = s;
+				loading = false;
 				// Fallback: if the dump was absent before and is now present,
 				// the download completed (WS frame may have been missed).
 				// Failure wins over presence: a renamed-but-not-reloaded
@@ -227,6 +255,7 @@
 	let showClearConfirm = $state(false);
 
 	async function clearDump() {
+		dumpOperationVersion++;
 		clearing = true;
 		downloadError = '';
 		try {
@@ -241,6 +270,7 @@
 	}
 
 	async function toggleDumpEnabled() {
+		dumpOperationVersion++;
 		dumpEnabled = !dumpEnabled;
 		onConfigChange?.(dumpEnabled);
 		try {
@@ -287,8 +317,8 @@
 	);
 
 	$effect(() => {
-		fetchStatus();
-		return () => { polling = false; };
+		fetchStatus(true);
+		return () => { disposed = true; statusRequestVersion++; polling = false; };
 	});
 </script>
 
@@ -327,10 +357,10 @@
 			<RefreshCw class="h-4 w-4 animate-spin"></RefreshCw>
 			{m.settings_r18dev_loading()}
 		</div>
-	{:else if error}
+	{:else if error || (!status && downloadError)}
 		<div class="flex items-center gap-2 text-sm text-destructive py-4">
 			<AlertCircle class="h-4 w-4"></AlertCircle>
-			{error}
+			{error || downloadError}
 		</div>
 	{:else if status}
 		{#if status.present}
@@ -412,7 +442,7 @@
 						<button
 							type="button"
 							class="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-md border border-input bg-background hover:bg-accent"
-							onclick={fetchStatus}
+							onclick={() => fetchStatus(true)}
 						>
 							<RefreshCw class="h-4 w-4"></RefreshCw>
 							{m.settings_r18dev_refresh()}
