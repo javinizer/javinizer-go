@@ -5,7 +5,7 @@
 	import { apiClient as api } from '$lib/api/client';
 	import { websocketStore } from '$lib/stores/websocket';
 	import type { DumpSearchResult, DumpStatus } from '$lib/api/types';
-	import { Download, RefreshCw, Search, CheckCircle, AlertCircle, Database, Trash2 } from 'lucide-svelte';
+	import { Download, RefreshCw, Search, CheckCircle, AlertCircle, Database, Trash2, Upload } from 'lucide-svelte';
 
 	interface Props {
 		onConfigChange?: (enabled: boolean) => void;
@@ -21,9 +21,13 @@
 	let searchError = $state('');
 	let error = $state('');
 	let dumpEnabled = $state(true);
+	// Request ownership only; keep these counters outside Svelte reactivity.
+	let statusRequestVersion = 0;
+	let dumpOperationVersion = 0;
+	let disposed = false;
 
 	// Subscribe to WebSocket messages for dump download progress.
-	let wsState = $state<{ messages: { job_id: string; progress: number; message: string; status: string }[] }>({
+	let wsState = $state<{ messages: { job_id: string; progress: number; message: string; status: string; error?: string }[] }>({
 		messages: [],
 	});
 	$effect(() => {
@@ -37,28 +41,46 @@
 		wsState.messages.length > 0 ? wsState.messages[wsState.messages.length - 1] : null,
 	);
 
-	async function fetchStatus() {
+	async function fetchStatus(restoreCompletedError = false) {
+		const requestVersion = ++statusRequestVersion;
+		const operationVersion = dumpOperationVersion;
 		loading = true;
 		error = '';
 		try {
-			status = await api.r18dev.getDumpStatus();
+			const nextStatus = await api.r18dev.getDumpStatus();
+			if (requestVersion !== statusRequestVersion || operationVersion !== dumpOperationVersion) return;
+			status = nextStatus;
 			dumpEnabled = status.enabled;
+			// Recover a job that finished while Settings was closed. Internal
+			// refreshes after Clear or a WS terminal frame keep their own result.
+			if (restoreCompletedError && !downloading && !polling) {
+				downloadError = !status.running && status.last_error
+					? status.last_error_kind
+						? `[${status.last_error_kind}] ${status.last_error}`
+						: status.last_error
+					: '';
+			}
 			// Resume tracking an in-flight job: if the settings page was opened
 			// or refreshed while a dump download/update is already running on the
 			// backend, enter the progress/polling state so the UI follows the job
 			// instead of showing stale Download/Clear controls.
 			if (status.running && !downloading && !polling) {
+				downloadError = '';
 				downloading = true;
 				pollDownloadProgress();
 			}
+			return nextStatus;
 		} catch (e) {
-			error = e instanceof Error ? e.message : m.settings_r18dev_fetch_status_failed();
+			if (requestVersion === statusRequestVersion && operationVersion === dumpOperationVersion) {
+				error = e instanceof Error ? e.message : m.settings_r18dev_fetch_status_failed();
+			}
 		} finally {
-			loading = false;
+			if (requestVersion === statusRequestVersion) loading = false;
 		}
 	}
 
 	async function download(updateOnly = false) {
+		dumpOperationVersion++;
 		downloading = true;
 		downloadError = '';
 		websocketStore.clearMessages('r18dev-dump-download');
@@ -74,43 +96,104 @@
 	}
 
 	let polling = $state(false);
+	let fileInput = $state<HTMLInputElement | null>(null);
+
+	// upload shares the download progress plumbing: after the 202 staging
+	// response the same WS phases (downloading → importing → done/error) and
+	// status polling apply. File selection never touches settings state or
+	// the config-change callback.
+	async function upload(file: File) {
+		dumpOperationVersion++;
+		downloadError = '';
+		downloading = true;
+		websocketStore.clearMessages('r18dev-dump-download');
+		try {
+			await api.r18dev.uploadDump(file);
+			await pollDownloadProgress();
+		} catch (e) {
+			downloadError = e instanceof Error ? e.message : m.settings_r18dev_upload_failed();
+			downloading = false;
+		}
+	}
+
+	function chooseFile(event: Event) {
+		const input = event.currentTarget as HTMLInputElement;
+		const file = input.files?.[0];
+		input.value = ''; // allow re-picking the same file
+		if (file) upload(file);
+	}
 
 	async function pollDownloadProgress() {
+		// An upload/download acknowledgement may arrive after teardown.
+		if (disposed) return;
 		polling = true;
 		// Record the pre-download state to detect completion as a fallback
 		// for when the WebSocket terminal frame is missed.
 		const wasPresent = status?.present ?? false;
 		const prevImportedAt = status?.imported_at ?? '';
 		const prevSourceDate = status?.source_date ?? '';
-		// The backend download context may run for up to 30 minutes on slow
-		// connections or slow imports. Poll for the full server-side window
-		// instead of stopping after a fixed iteration count, and rely on the
-		// `running` flag (and WS terminal frames) to determine completion.
+		// Codex #273: uploads/downloads have no server-side wall-clock cap, so
+		// a fixed UI deadline would sit silent mid-import on slow storage.
+		// Poll until the server stops reporting the job running (every exit
+		// path below is completion-based; component unmount stops via polling
+		// being cleared).
 		const pollIntervalMs = 3000;
-		const deadline = Date.now() + 30 * 60 * 1000;
-		while (Date.now() < deadline) {
+		// A frame already retained when status resumes a running job is stale,
+		// even if that job finishes before the first poll.
+		let ignoredTerminalFrame = status?.running ? downloadProgress : null;
+		for (;;) {
 			if (!polling) return; // stopped by component unmount
 			await new Promise((r) => setTimeout(r, pollIntervalMs));
 			if (!polling) return;
 			// Check WebSocket terminal state first.
-			if (downloadProgress) {
-				const wsStatus = downloadProgress.message || downloadProgress.status;
+			const terminalFrame = downloadProgress;
+			if (terminalFrame && terminalFrame !== ignoredTerminalFrame) {
+				const wsStatus = terminalFrame.message || terminalFrame.status;
 				if (wsStatus === 'done' || wsStatus === 'error') {
-					await fetchStatus();
+					const refreshedStatus = await fetchStatus();
+					if (!polling || !refreshedStatus) continue;
+					// Every job shares one WS ID. A retained terminal frame cannot
+					// finish a newer job, including after its next status refresh.
+					if (refreshedStatus.running) {
+						ignoredTerminalFrame = terminalFrame;
+						continue;
+					}
 					downloading = false;
 					polling = false;
-					if (wsStatus === 'error') {
-						downloadError = m.settings_r18dev_download_failed_msg();
+					if (refreshedStatus.last_error || wsStatus === 'error') {
+						// Render the server's real error (upload failures, download
+						// stalls); fall back to the generic string only when absent.
+						const kind = refreshedStatus.last_error_kind;
+						const text =
+							terminalFrame.error ||
+							refreshedStatus.last_error ||
+							m.settings_r18dev_download_failed_msg();
+						downloadError = kind ? `[${kind}] ${text}` : text;
 					}
 					return;
 				}
 			}
 			// Also refresh status for UI updates (progress bar, etc).
 			try {
+				const requestVersion = ++statusRequestVersion;
+				const operationVersion = dumpOperationVersion;
 				const s = await api.r18dev.getDumpStatus();
+				if (requestVersion !== statusRequestVersion || operationVersion !== dumpOperationVersion) continue;
 				status = s;
+				loading = false;
+				if (s.running) continue;
 				// Fallback: if the dump was absent before and is now present,
 				// the download completed (WS frame may have been missed).
+				// Failure wins over presence: a renamed-but-not-reloaded
+				// upload reports present:true with a nonempty last_error.
+				if (!s.running && s.last_error) {
+					downloadError = s.last_error_kind
+						? `[${s.last_error_kind}] ${s.last_error}`
+						: s.last_error;
+					downloading = false;
+					polling = false;
+					return;
+				}
 				if (!wasPresent && s.present) {
 					downloading = false;
 					polling = false;
@@ -124,9 +207,11 @@
 				// always sets last_error on completion). This covers the
 				// unchanged case where neither imported_at nor source_date
 				// changes and the WebSocket terminal frame was missed.
-				if (!s.running) {
+			if (!s.running) {
 					if (s.last_error) {
-						downloadError = s.last_error;
+						downloadError = s.last_error_kind
+							? `[${s.last_error_kind}] ${s.last_error}`
+							: s.last_error;
 					}
 					downloading = false;
 					polling = false;
@@ -183,6 +268,7 @@
 	let showClearConfirm = $state(false);
 
 	async function clearDump() {
+		dumpOperationVersion++;
 		clearing = true;
 		downloadError = '';
 		try {
@@ -197,6 +283,7 @@
 	}
 
 	async function toggleDumpEnabled() {
+		dumpOperationVersion++;
 		dumpEnabled = !dumpEnabled;
 		onConfigChange?.(dumpEnabled);
 		try {
@@ -243,10 +330,20 @@
 	);
 
 	$effect(() => {
-		fetchStatus();
-		return () => { polling = false; };
+		fetchStatus(true);
+		return () => { disposed = true; statusRequestVersion++; polling = false; };
 	});
 </script>
+
+<input
+	type="file"
+	accept=".db,.gz"
+	class="hidden"
+	bind:this={fileInput}
+	onchange={chooseFile}
+	aria-hidden="true"
+	tabindex="-1"
+/>
 
 <SettingsSection title={m.settings_r18dev_title()} description={m.settings_r18dev_desc()} defaultExpanded={false}>
 	<!-- Enable/Disable toggle -->
@@ -273,10 +370,10 @@
 			<RefreshCw class="h-4 w-4 animate-spin"></RefreshCw>
 			{m.settings_r18dev_loading()}
 		</div>
-	{:else if error}
+	{:else if error || (!status && downloadError)}
 		<div class="flex items-center gap-2 text-sm text-destructive py-4">
 			<AlertCircle class="h-4 w-4"></AlertCircle>
-			{error}
+			{error || downloadError}
 		</div>
 	{:else if status}
 		{#if status.present}
@@ -348,8 +445,17 @@
 						</button>
 						<button
 							type="button"
+							class="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-md border border-input bg-background hover:bg-accent disabled:opacity-50 disabled:cursor-not-allowed"
+							onclick={() => fileInput?.click()}
+							disabled={downloading || clearing}
+						>
+							<Upload class="h-4 w-4"></Upload>
+							{m.settings_r18dev_upload_dump()}
+						</button>
+						<button
+							type="button"
 							class="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-md border border-input bg-background hover:bg-accent"
-							onclick={fetchStatus}
+							onclick={() => fetchStatus(true)}
 						>
 							<RefreshCw class="h-4 w-4"></RefreshCw>
 							{m.settings_r18dev_refresh()}
@@ -396,16 +502,27 @@
 							<div class="text-xs text-muted-foreground text-right">{Math.round(downloadProgress.progress)}%</div>
 						{/if}
 					</div>
-				{:else}
-					<button
-						type="button"
-						class="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
-						onclick={() => download(false)}
-						disabled={downloading}
-					>
-						<Download class="h-4 w-4"></Download>
-						{m.settings_r18dev_download_dump()}
-					</button>
+			{:else}
+					<div class="flex gap-2">
+						<button
+							type="button"
+							class="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+							onclick={() => download(false)}
+							disabled={downloading}
+						>
+							<Download class="h-4 w-4"></Download>
+							{m.settings_r18dev_download_dump()}
+						</button>
+						<button
+							type="button"
+							class="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-md border border-input bg-background hover:bg-accent disabled:opacity-50 disabled:cursor-not-allowed"
+							onclick={() => fileInput?.click()}
+							disabled={downloading}
+						>
+							<Upload class="h-4 w-4"></Upload>
+							{m.settings_r18dev_upload_dump()}
+						</button>
+					</div>
 				{/if}
 			</div>
 		{/if}

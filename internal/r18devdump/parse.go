@@ -8,10 +8,26 @@ package r18devdump
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 )
+
+// integerText reports whether s is a valid int64 text literal; the dump's
+// INTEGER-affinity columns feed sql.NullInt64 scans at lookup time, and the
+// SQLite integer storage class is the only other acceptable state (SQLite
+// coerces out-of-range digit strings to REAL, silently breaking Class scans).
+func integerText(s string) bool {
+	_, err := strconv.ParseInt(s, 10, 64)
+	return err == nil
+}
+
+// ErrTruncatedDump marks input that ends inside an open COPY block: pg_dump
+// streams that terminate without their . terminator are silently partial
+// data otherwise, and a truncated hand-built dump must never look importable.
+var ErrTruncatedDump = errors.New("truncated dump")
 
 // nullSentinel is the internal marker for a SQL NULL carried in a DumpRow's
 // Values. It is distinct from the dump's "\N" text marker: ParseDump detects
@@ -37,6 +53,18 @@ type DumpRow struct {
 // pg_dump encodes NULL values as the literal "\N"; callers receive them
 // verbatim and may interpret them as needed.
 func ParseDump(r io.Reader, emit func(DumpRow) error) error {
+	return parseDump(r, nil, emit)
+}
+
+// ParseDumpWithBlocks streams a pg_dump like ParseDump and additionally
+// invokes onBlock for every recognized COPY header — including empty blocks,
+// whose presence is the only signal Import's production-scale completeness
+// check can use without straining memory.
+func ParseDumpWithBlocks(r io.Reader, onBlock func(table string), emit func(DumpRow) error) error {
+	return parseDump(r, onBlock, emit)
+}
+
+func parseDump(r io.Reader, onBlock func(table string), emit func(DumpRow) error) error {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
 
@@ -54,6 +82,9 @@ func ParseDump(r io.Reader, emit func(DumpRow) error) error {
 				table = copyInfo.table
 				columns = copyInfo.columns
 				inCopy = true
+				if onBlock != nil {
+					onBlock(table)
+				}
 			}
 			continue
 		}
@@ -85,6 +116,9 @@ func ParseDump(r io.Reader, emit func(DumpRow) error) error {
 	}
 	if err := scanner.Err(); err != nil {
 		return fmt.Errorf("scanning dump: %w", err)
+	}
+	if inCopy {
+		return fmt.Errorf("%w: EOF inside COPY block for %s (missing \\. terminator)", ErrTruncatedDump, table)
 	}
 	return nil
 }
@@ -150,6 +184,18 @@ func parseCopyHeader(line string) (copyHeader, bool) {
 
 // derivedVideoTable is the dump table name for the main video metadata table.
 const derivedVideoTable = "derived_video"
+
+// trailerTable is the dump's canonical tail COPY block (source_dmm_trailer) —
+// production dumps always end with it populated.
+const trailerTable = "source_dmm_trailer"
+
+// Association dump table names (shared by tableSchema keys, the sqlite name
+// mapping, and emit-time per-row validation).
+const (
+	derivedVideoActressTable  = "derived_video_actress"
+	derivedVideoCategoryTable = "derived_video_category"
+	derivedVideoDirectorTable = "derived_video_director"
+)
 
 // decodeCopyField unescapes a single PostgreSQL COPY text-format field. The
 // pg_dump text format encodes special characters with a backslash escape:

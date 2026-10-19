@@ -61,7 +61,9 @@ describe('BaseClient.request lifecycle', () => {
 		BaseClient.setSessionID('session-123');
 		const controller = new AbortController();
 
-		await expect(client.request('/batch', { signal: controller.signal })).resolves.toEqual({ ok: true });
+		await expect(client.request('/batch', { signal: controller.signal })).resolves.toEqual({
+			ok: true,
+		});
 
 		const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
 		expect(init.credentials).toBe('same-origin');
@@ -72,16 +74,41 @@ describe('BaseClient.request lifecycle', () => {
 		});
 	});
 
+	it('omits Content-Type for FormData bodies and keeps the session header', async () => {
+		fetchMock.mockResolvedValue(okResponse());
+		BaseClient.setSessionID('session-123');
+		const form = new FormData();
+		form.append('file', new Blob(['x']), 'dump.db');
+
+		await client.request('/upload', { method: 'POST', body: form });
+
+		const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+		expect(init.headers).toEqual({ 'X-Session-ID': 'session-123' });
+		expect((init.headers as Record<string, string>)['Content-Type']).toBeUndefined();
+		expect(init.body).toBe(form);
+	});
+
+	it('keeps the JSON Content-Type for non-FormData bodies', async () => {
+		fetchMock.mockResolvedValue(okResponse());
+		await client.request('/json', { method: 'POST', body: '{}' });
+		const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+		expect((init.headers as Record<string, string>)['Content-Type']).toBe('application/json');
+	});
+
 	it('times out before response headers and classifies the error', async () => {
 		vi.useFakeTimers();
-		fetchMock.mockImplementation((_url: string, init: RequestInit) =>
-			new Promise((_resolve, reject) => {
-				init.signal?.addEventListener('abort', () => reject(abortError()), { once: true });
-			}),
+		fetchMock.mockImplementation(
+			(_url: string, init: RequestInit) =>
+				new Promise((_resolve, reject) => {
+					init.signal?.addEventListener('abort', () => reject(abortError()), { once: true });
+				}),
 		);
 
 		const request = client.request('/slow', { timeoutMs: 10 });
-		const assertion = expect(request).rejects.toMatchObject({ name: 'ApiError', code: 'REQUEST_TIMEOUT' });
+		const assertion = expect(request).rejects.toMatchObject({
+			name: 'ApiError',
+			code: 'REQUEST_TIMEOUT',
+		});
 		await vi.advanceTimersByTimeAsync(10);
 
 		await assertion;
@@ -109,10 +136,11 @@ describe('BaseClient.request lifecycle', () => {
 
 	it('preserves caller cancellation and does not relabel it as a timeout', async () => {
 		vi.useFakeTimers();
-		fetchMock.mockImplementation((_url: string, init: RequestInit) =>
-			new Promise((_resolve, reject) => {
-				init.signal?.addEventListener('abort', () => reject(abortError()), { once: true });
-			}),
+		fetchMock.mockImplementation(
+			(_url: string, init: RequestInit) =>
+				new Promise((_resolve, reject) => {
+					init.signal?.addEventListener('abort', () => reject(abortError()), { once: true });
+				}),
 		);
 		const controller = new AbortController();
 		const request = client.request('/cancel', { signal: controller.signal, timeoutMs: 50 });
@@ -147,10 +175,11 @@ describe('BaseClient.request lifecycle', () => {
 
 	it('classifies timeout before a later caller cancellation', async () => {
 		vi.useFakeTimers();
-		fetchMock.mockImplementation((_url: string, init: RequestInit) =>
-			new Promise((_resolve, reject) => {
-				init.signal?.addEventListener('abort', () => reject(abortError()), { once: true });
-			}),
+		fetchMock.mockImplementation(
+			(_url: string, init: RequestInit) =>
+				new Promise((_resolve, reject) => {
+					init.signal?.addEventListener('abort', () => reject(abortError()), { once: true });
+				}),
 		);
 		const controller = new AbortController();
 		const request = client.request('/timeout-first', { signal: controller.signal, timeoutMs: 10 });

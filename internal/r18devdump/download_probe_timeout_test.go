@@ -49,7 +49,7 @@ func TestDownload_EOFProbeTimeoutPreservesGzipValidation(t *testing.T) {
 						Header: http.Header{"Etag": {`"stable-v1"`}}, Body: io.NopCloser(bytes.NewReader(tc.body))}, nil
 				})}
 				var received []byte
-				_, err := Download(parent, client, "", nil, func(r io.Reader, _ DownloadResult) error {
+				_, err := Download(parent, client, "", "", nil, func(r io.Reader, _ DownloadResult) error {
 					var readErr error
 					received, readErr = io.ReadAll(r)
 					return readErr

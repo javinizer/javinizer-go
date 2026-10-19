@@ -3,22 +3,31 @@ package r18devdump
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
+	"unicode"
 
 	_ "github.com/mattn/go-sqlite3"
 )
 
-// ImportOptions carries provenance metadata stored alongside the imported rows.
+// ImportOptions controls row acceptance and carries provenance metadata.
 type ImportOptions struct {
 	SourceURL  string
 	SourceDate string
 	BeforeSwap func() error
 	AfterSwap  func()
+
+	// RequireAllRows rejects batches that drop rows for duplicate or NULL
+	// required keys. It applies only to stored tables; unknown tables remain
+	// ignored. Uploads enable this to prevent silent partial replacement.
+	// The default preserves legacy download/CLI first-duplicate-wins behavior.
+	RequireAllRows bool
 }
 
 // ImportResult describes a completed import.
@@ -26,6 +35,27 @@ type ImportResult struct {
 	Rows int64
 	Path string
 }
+
+// ErrDumpTypedValue marks a value whose storage class violates the column's
+// declared type (e.g. text in an INTEGER column). Import rejects such input
+// before swap instead of producing a sidecar whose lookups fail on scan.
+var ErrDumpTypedValue = errors.New("invalid typed value in dump")
+
+// ErrDumpNonCanonicalID marks a content_id whose stored form is not the
+// required non-NULL canonical lowercase that lookups bind — such rows are
+// otherwise discarded by INSERT OR IGNORE or become unreachable (lookups
+// lowercase-bind before comparing against BINARY primary keys).
+var ErrDumpNonCanonicalID = errors.New("non-canonical content_id casing")
+
+// ErrDumpSwap marks failures at the commit+swap boundary (checkpoint, close,
+// rename onto the destination). Upload handlers map them to the 'staging'
+// error kind (filesystem/install failures), not 'import'.
+var ErrDumpSwap = errors.New("dump swap failed")
+
+// ErrDumpNoRows marks import input that produced zero recognized dump rows —
+// fed garbage (e.g. compressed bytes or an error page) rather than a
+// decompressed pg_dump, import must fail instead of installing an empty DB.
+var ErrDumpNoRows = errors.New("dump import yielded no recognized rows")
 
 // importBatchSize is the number of rows per multi-row INSERT. The widest table
 // (derived_video) has 21 columns, so 40 rows = 840 bound parameters — safely
@@ -64,7 +94,7 @@ var tableSchema = map[string]struct {
 			site_id           TEXT,
 			service_code      TEXT
 		)`,
-		columns: []string{contentIDColumn, "dvd_id", "dvd_id_norm", "title_en", "title_ja", "comment_en", "comment_ja", "runtime_mins", "release_date", "sample_url", "maker_id", "label_id", "series_id", "jacket_full_url", "jacket_thumb_url", "gallery_full_first", "gallery_full_last", "gallery_thumb_first", "gallery_thumb_last", "site_id", "service_code"},
+		columns: []string{contentIDColumn, "dvd_id", dvdIDNormColumn, "title_en", "title_ja", "comment_en", "comment_ja", "runtime_mins", "release_date", "sample_url", "maker_id", "label_id", "series_id", "jacket_full_url", "jacket_thumb_url", "gallery_full_first", "gallery_full_last", "gallery_thumb_first", "gallery_thumb_last", "site_id", "service_code"},
 	},
 	"derived_actress": {
 		create: `CREATE TABLE actresses (
@@ -117,7 +147,7 @@ var tableSchema = map[string]struct {
 		)`,
 		columns: []string{"id", nameENColumn, nameJAColumn},
 	},
-	"derived_video_actress": {
+	derivedVideoActressTable: {
 		create: `CREATE TABLE video_actresses (
 			content_id  TEXT NOT NULL,
 			actress_id  TEXT NOT NULL,
@@ -127,7 +157,7 @@ var tableSchema = map[string]struct {
 		)`,
 		columns: []string{contentIDColumn, "actress_id", "ordinality", "release_date"},
 	},
-	"derived_video_category": {
+	derivedVideoCategoryTable: {
 		create: `CREATE TABLE video_categories (
 			content_id   TEXT NOT NULL,
 			category_id  TEXT NOT NULL,
@@ -136,7 +166,7 @@ var tableSchema = map[string]struct {
 		)`,
 		columns: []string{contentIDColumn, "category_id", "release_date"},
 	},
-	"derived_video_director": {
+	derivedVideoDirectorTable: {
 		create: `CREATE TABLE video_directors (
 			content_id TEXT NOT NULL,
 			director_id TEXT NOT NULL,
@@ -153,11 +183,20 @@ var tableSchema = map[string]struct {
 	},
 }
 
+// SQLite-side table names shared by import and validation.
+const (
+	videosTable          = "videos"
+	dvdIDNormColumn      = "dvd_id_norm"
+	videoActressesTable  = "video_actresses"
+	videoCategoriesTable = "video_categories"
+	videoDirectorsTable  = "video_directors"
+)
+
 // sqliteTableName maps a dump table name to its SQLite destination.
 func sqliteTableName(dumpName string) string {
 	switch dumpName {
 	case derivedVideoTable:
-		return "videos"
+		return videosTable
 	case "derived_actress":
 		return "actresses"
 	case "derived_maker":
@@ -171,11 +210,11 @@ func sqliteTableName(dumpName string) string {
 	case "derived_category":
 		return "categories"
 	case "derived_video_actress":
-		return "video_actresses"
+		return videoActressesTable
 	case "derived_video_category":
-		return "video_categories"
+		return videoCategoriesTable
 	case "derived_video_director":
-		return "video_directors"
+		return videoDirectorsTable
 	case "source_dmm_trailer":
 		return "trailers"
 	default:
@@ -258,6 +297,7 @@ func importWithOpenDB(ctx context.Context, r io.Reader, path string, opts Import
 
 	// Per-table batch accumulators.
 	batches := make(map[string][]DumpRow)
+	tableCounts := make(map[string]int64)
 	var totalVideos int64
 
 	flush := func(table string) error {
@@ -266,11 +306,18 @@ func importWithOpenDB(ctx context.Context, r io.Reader, path string, opts Import
 			return nil
 		}
 		n, err := insertBatch(ctx, tx, table, batch)
+		if err != nil {
+			return err
+		}
+		if opts.RequireAllRows && n != int64(len(batch)) {
+			return fmt.Errorf("%w: %s batch stored %d of %d rows (duplicate or NULL required keys)", ErrDumpInvalid, table, n, len(batch))
+		}
+		tableCounts[table] += n
 		if table == derivedVideoTable {
 			totalVideos += n
 		}
 		batches[table] = batch[:0]
-		return err
+		return nil
 	}
 	flushAll := func() error {
 		// Sort table names so the final residual-batch flush is deterministic,
@@ -288,6 +335,39 @@ func importWithOpenDB(ctx context.Context, r io.Reader, path string, opts Import
 		return nil
 	}
 
+	// Per emitted row, INTEGER-typed columns prove storage class (else the built
+	// sidecar fails NullInt64 scans at lookup time) and every content_id column
+	// proves canonical lowercase (lookups lowercase-bind before comparing against
+	// the BINARY primary key; uppercase-stored ids become unreachable). Indices
+	// resolve once per schema, up front.
+	type colCheck struct {
+		idx  int
+		name string
+	}
+	typedCols := map[string][]colCheck{}
+	casingCols := map[string][]colCheck{}
+	for table, cols := range map[string][]string{
+		derivedVideoTable:        {"runtime_mins"},
+		derivedVideoActressTable: {"ordinality"},
+	} {
+		schema := tableSchema[table]
+		for _, col := range cols {
+			for i, c := range schema.columns {
+				if c == col {
+					typedCols[table] = append(typedCols[table], colCheck{i, col})
+				}
+			}
+		}
+	}
+	for _, table := range []string{derivedVideoTable, trailerTable, derivedVideoActressTable, derivedVideoCategoryTable, derivedVideoDirectorTable} {
+		schema := tableSchema[table]
+		for i, c := range schema.columns {
+			if c == contentIDColumn {
+				casingCols[table] = []colCheck{{i, c}}
+			}
+		}
+	}
+
 	emit := func(row DumpRow) error {
 		// Honor cancellation between batch flushes so a large network-streamed
 		// dump can be aborted without waiting for the next tx.ExecContext.
@@ -298,8 +378,32 @@ func importWithOpenDB(ctx context.Context, r io.Reader, path string, opts Import
 		if !ok {
 			return nil // skip tables we don't store
 		}
-		// Map dump column positions to our stored column order.
+		if len(row.Values) != len(row.Columns) {
+			return fmt.Errorf("%w: %s COPY row has %d values for %d columns", ErrDumpInvalid, row.Table, len(row.Values), len(row.Columns))
+		}
+		// Map dump column positions to our stored column order, then enforce
+		// INTEGER storage where scans will demand it.
 		mapped := mapDumpRow(row, schema.columns)
+		for _, tc := range typedCols[row.Table] {
+			if tc.idx < len(mapped) {
+				v := mapped[tc.idx]
+				if v != nullSentinel && !integerText(v) {
+					return fmt.Errorf("%w: %s.%s = %q", ErrDumpTypedValue, sqliteTableName(row.Table), tc.name, v)
+				}
+			}
+		}
+		for _, cc := range casingCols[row.Table] {
+			if cc.idx < len(mapped) {
+				v := mapped[cc.idx]
+				// Canonical = non-NULL, nonempty, trimmed, already-lowercase.
+				// Reject missing/NULL keys before INSERT OR IGNORE silently
+				// drops them, even when other valid videos would allow a swap.
+				trimmed := strings.TrimSpace(v)
+				if v == nullSentinel || trimmed == "" || trimmed != v || v != strings.ToLower(v) || strings.ContainsAny(v, " \t\n\v\f\r") || strings.ContainsFunc(v, unicode.IsControl) {
+					return fmt.Errorf("%w: %s.%s = %q", ErrDumpNonCanonicalID, sqliteTableName(row.Table), cc.name, v)
+				}
+			}
+		}
 		batches[row.Table] = append(batches[row.Table], DumpRow{Table: row.Table, Values: mapped})
 		if len(batches[row.Table]) >= importBatchSize {
 			return flush(row.Table)
@@ -307,13 +411,41 @@ func importWithOpenDB(ctx context.Context, r io.Reader, path string, opts Import
 		return nil
 	}
 
-	if err := ParseDump(r, emit); err != nil {
+	// At production scale, completeness == every expected COPY block seen
+	// (headers included, even zero-row blocks — those are legal). Codex on the
+	// upload PR: the trailer-only rule let "videos + trailer" partials through.
+	seenBlocks := make(map[string]bool)
+	onBlock := func(table string) { seenBlocks[table] = true }
+	if err := ParseDumpWithBlocks(r, onBlock, emit); err != nil {
 		_ = tx.Rollback()
 		return ImportResult{}, fmt.Errorf("parse dump: %w", err)
 	}
 	if err := flushAll(); err != nil {
 		_ = tx.Rollback()
 		return ImportResult{}, fmt.Errorf("insert rows: %w", err)
+	}
+	// Count stored videos after the final flush, not merely recognized rows:
+	// empty or non-video-only input must never replace a working sidecar.
+	if totalVideos == 0 {
+		_ = tx.Rollback()
+		return ImportResult{}, fmt.Errorf("%w: no derived_video rows were stored (input missing them or every row was rejected)", ErrDumpNoRows)
+	}
+	// Production dumps always carry trailer rows last; a production-scale
+	// video set with none means the stream was truncated after its final
+	// completed COPY block. Tiny dumps are synthetic fixtures/mirrors and
+	// allowed (the rule only bites at production scale).
+	if totalVideos >= 1000 {
+		var missing []string
+		for table := range tableSchema {
+			if !seenBlocks[table] {
+				missing = append(missing, table)
+			}
+		}
+		if len(missing) > 0 {
+			sort.Strings(missing)
+			_ = tx.Rollback()
+			return ImportResult{}, fmt.Errorf("%w: production-scale dump (%d videos) is missing COPY blocks for: %s", ErrTruncatedDump, totalVideos, strings.Join(missing, ", "))
+		}
 	}
 
 	if err := writeMeta(ctx, tx, opts); err != nil {
@@ -350,8 +482,8 @@ func importWithOpenDB(ctx context.Context, r io.Reader, path string, opts Import
 	if opts.AfterSwap != nil {
 		defer opts.AfterSwap()
 	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		return ImportResult{}, fmt.Errorf("rename tmp db: %w", err)
+	if err := ReplaceFile(tmpPath, path); err != nil {
+		return ImportResult{}, fmt.Errorf("rename tmp db: %w: %w", ErrDumpSwap, err)
 	}
 	committed = true
 	return ImportResult{Rows: totalVideos, Path: path}, nil
@@ -396,7 +528,7 @@ func mapDumpRow(row DumpRow, storedCols []string) []string {
 	// an INTEGER column, breaking later NullInt64 scans.
 	if row.Table == derivedVideoTable {
 		for i, col := range storedCols {
-			if col == "dvd_id_norm" {
+			if col == dvdIDNormColumn {
 				did := colMap["dvd_id"]
 				if did == nullSentinel || did == "" {
 					mapped[i] = ""
@@ -447,7 +579,10 @@ func insertBatch(ctx context.Context, tx *sql.Tx, dumpTable string, batch []Dump
 	if err != nil {
 		return 0, fmt.Errorf("exec batch (%s, %d rows): %w", dumpTable, len(batch), err)
 	}
-	n, _ := res.RowsAffected()
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("count inserted rows (%s): %w", dumpTable, err)
+	}
 	return n, nil
 }
 

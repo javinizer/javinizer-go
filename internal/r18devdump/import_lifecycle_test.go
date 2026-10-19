@@ -91,7 +91,7 @@ func TestImport_CanceledBeforeCommitRollsBack(t *testing.T) {
 		}
 	}
 	path := filepath.Join(t.TempDir(), "dump.db")
-	_, err := importWithOpenDB(ctx, strings.NewReader(""), path, ImportOptions{}, d.open)
+	_, err := importWithOpenDB(ctx, strings.NewReader("COPY public.derived_video (content_id, dvd_id) FROM stdin;\nsynthetic001\tTEST-001\n\\.\n"), path, ImportOptions{}, d.open)
 	require.ErrorIs(t, err, context.Canceled)
 	require.False(t, d.committed)
 	waitLifecycle(t, d.rollbackStarted)
@@ -176,6 +176,7 @@ type importLifecycleDriver struct {
 	committed       bool
 	exec            func(string)
 	begin           func()
+	insertResult    driver.Result
 }
 
 func newImportLifecycleDriver() *importLifecycleDriver {
@@ -214,6 +215,12 @@ func (d *importLifecycleDriver) ExecContext(ctx context.Context, query string, _
 	}
 	if d.exec != nil {
 		d.exec(query)
+	}
+	if strings.HasPrefix(query, "INSERT OR IGNORE INTO videos") {
+		if d.insertResult != nil {
+			return d.insertResult, nil
+		}
+		return driver.RowsAffected(1), nil
 	}
 	return driver.RowsAffected(0), nil
 }

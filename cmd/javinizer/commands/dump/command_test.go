@@ -494,6 +494,18 @@ func TestRunDownload_ProgressOutput(t *testing.T) {
 		fmt.Fprintf(&rows, "118ipx%05d\tIPX-%d\n", i, i)
 	}
 	rows.WriteString("\\.\n")
+	// Production-scale video sets must carry a trailer block (Import's
+	// truncation invariant); production dumps always end with it populated.
+	rows.WriteString("COPY public.derived_actress (id, name_romaji) FROM stdin;\njanedoe	Jane Doe\n\\.\n")
+	rows.WriteString("COPY public.derived_maker (id, name_en) FROM stdin;\nm1	Maker\n\\.\n")
+	rows.WriteString("COPY public.derived_label (id, name_en) FROM stdin;\nl1	Label\n\\.\n")
+	rows.WriteString("COPY public.derived_series (id, name_en) FROM stdin;\ns1	Series\n\\.\n")
+	rows.WriteString("COPY public.derived_director (id, name_romaji) FROM stdin;\nd1	Dir\n\\.\n")
+	rows.WriteString("COPY public.derived_category (id, name_en) FROM stdin;\nc1	Cat\n\\.\n")
+	rows.WriteString("COPY public.derived_video_actress (content_id, actress_id) FROM stdin;\n118ipx00000	janedoe\n\\.\n")
+	rows.WriteString("COPY public.derived_video_category (content_id, category_id) FROM stdin;\n118ipx00000	c1\n\\.\n")
+	rows.WriteString("COPY public.derived_video_director (content_id, director_id) FROM stdin;\n118ipx00000	d1\n\\.\n")
+	rows.WriteString("COPY public.source_dmm_trailer (content_id, url) FROM stdin;\n118ipx00000\thttps://example/trailer.mp4\n\\.\n")
 	gz := gzipBytes(t, rows.String())
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/gzip")

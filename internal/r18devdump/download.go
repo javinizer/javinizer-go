@@ -64,8 +64,9 @@ type DownloadResult struct {
 // payload-stall accounting. The callbacks run synchronously as a pair around
 // the bounded request for probe headers, never around an adopted 206 body.
 type DownloadOptions struct {
-	OnEOFProbeStart func()
-	OnEOFProbeDone  func()
+	CurrentSourceDate string // optional date of a manually uploaded dump
+	OnEOFProbeStart   func()
+	OnEOFProbeDone    func()
 }
 
 // Download fetches the latest r18.dev dump, gunzips it, and pipes the
@@ -84,14 +85,18 @@ type DownloadOptions struct {
 //
 // When currentSourceURL is non-empty and equals the redirect target, the
 // download is skipped (Unchanged=true) and importFn is not called — this lets
-// `javinizer dump update` no-op when the dump hasn't changed.
+// `javinizer dump update` no-op when the dump hasn't changed. Manually
+// uploaded dumps carry a filename token (never a URL) plus a parsed
+// source_date: when that's non-empty and the redirect's embedded date is
+// equal, update can also no-op (the multi-GB rebuild would otherwise fire on
+// every Check Updates click for a dump the user already installed manually).
 //
 // progress, if non-nil, receives cumulative compressed byte counts during the
 // transfer. totalBytes is the response Content-Length when known (0 if
 // unknown, e.g. chunked/streamed responses).
-func Download(ctx context.Context, client *http.Client, currentSourceURL string,
+func Download(ctx context.Context, client *http.Client, currentSourceURL, currentSourceDate string,
 	progress func(compressedBytes, totalBytes int64), importFn func(io.Reader, DownloadResult) error) (DownloadResult, error) {
-	return DownloadWithOptions(ctx, client, currentSourceURL, progress, importFn, DownloadOptions{})
+	return DownloadWithOptions(ctx, client, currentSourceURL, progress, importFn, DownloadOptions{CurrentSourceDate: currentSourceDate})
 }
 
 // DownloadWithOptions is Download with optional EOF-probe lifecycle callbacks.
@@ -124,6 +129,14 @@ func DownloadWithOptions(ctx context.Context, client *http.Client, currentSource
 		res.Unchanged = true
 		return res, nil
 	}
+	// Upload-token provenance: non-URL source values never equal a redirect
+	// URL, but an equal source date means the uploaded dump is already current.
+	if opts.CurrentSourceDate != "" && strings.TrimSpace(currentSourceURL) != "" &&
+		!strings.Contains(currentSourceURL, "://") && opts.CurrentSourceDate == res.SourceDate {
+		_ = resp.Body.Close()
+		res.Unchanged = true
+		return res, nil
+	}
 
 	stream := &resumeReader{
 		ctx:     ctx,
@@ -150,9 +163,10 @@ func DownloadWithOptions(ctx context.Context, client *http.Client, currentSource
 	if err != nil {
 		return res, fmt.Errorf("gunzip dump: %w", err)
 	}
+	bounded := EnforceDumpSizeLimit(gz, MaxDecompressedDumpBytes)
 	defer func() { _ = gz.Close() }()
 
-	if err := importFn(gz, res); err != nil {
+	if err := importFn(bounded, res); err != nil {
 		return res, err
 	}
 	if cr, ok := body.(*countingReader); ok {

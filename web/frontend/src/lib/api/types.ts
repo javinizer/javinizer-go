@@ -1589,6 +1589,7 @@ export interface DumpStatus {
 	present: boolean;
 	running: boolean;
 	last_error?: string;
+	last_error_kind?: string;
 	row_count?: number;
 	source_url?: string;
 	source_date?: string;
