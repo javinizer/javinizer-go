@@ -377,6 +377,12 @@ func clearPriorCreditGateError(current, baseline *resultstore.MovieResult) {
 	switch current.ErrorCode {
 	case models.FileErrorCodeCreditConflict, models.FileErrorCodeCreditStatusUnavailable:
 		current.ErrorCode = ""
+	case "blocked":
+		// v1.6.2 used the generic code. Discharge only its exact gate
+		// diagnostic after successful retry, never a newer failure.
+		if current.Status == models.JobStatusCompleted && current.Error == "" && isTerminalLegacyCreditGateFailure(baseline) {
+			current.ErrorCode = ""
+		}
 	}
 }
 
