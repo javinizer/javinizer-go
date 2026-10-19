@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/downloader"
 	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -144,7 +145,7 @@ func (s *artifactStage) publishStagedSubtitle(ctx context.Context, o *applyOrchI
 		return fmt.Errorf("staged subtitle is not a regular file: %s", source)
 	}
 	admitted := captureArtifactSourceIdentity(s.fs, source, info)
-	if err := s.fs.MkdirAll(filepath.Dir(target), 0755); err != nil {
+	if err := s.fs.MkdirAll(filepath.Dir(target), config.DirPerm); err != nil {
 		return fmt.Errorf("create final subtitle directory: %w", err)
 	}
 	if _, err := stagedSubtitleBeforePublish(s.publishBatch, ctx, target, false); err != nil {

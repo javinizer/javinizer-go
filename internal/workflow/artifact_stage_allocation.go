@@ -9,6 +9,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
 	"github.com/javinizer/javinizer-go/internal/organizer"
 	"github.com/spf13/afero"
@@ -117,7 +118,7 @@ func allocateArtifactStageAt(fs afero.Fs, parent, fallback string) (string, erro
 	sweepArtifactStaging(fs, parent)
 	var root string
 	var err error
-	if err = fs.MkdirAll(parent, 0o755); err != nil {
+	if err = fs.MkdirAll(parent, config.DirPerm); err != nil {
 		err = fmt.Errorf("create artifact staging parent: %w", err)
 	} else if root, err = afero.TempDir(fs, parent, artifactStageDirPrefix); err != nil {
 		err = fmt.Errorf("create artifact staging area: %w", err)
@@ -128,7 +129,7 @@ func allocateArtifactStageAt(fs afero.Fs, parent, fallback string) (string, erro
 	if (!errors.Is(err, os.ErrPermission) && !errors.Is(err, syscall.EROFS)) || fallback == "" || filepath.Clean(fallback) == filepath.Clean(parent) {
 		return "", err
 	}
-	if mkdirErr := fs.MkdirAll(fallback, 0o755); mkdirErr != nil {
+	if mkdirErr := fs.MkdirAll(fallback, config.DirPerm); mkdirErr != nil {
 		return "", errors.Join(err, fmt.Errorf("create artifact staging fallback parent: %w", mkdirErr))
 	}
 	sweepArtifactStaging(fs, fallback)
