@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/downloader"
 	"github.com/javinizer/javinizer-go/internal/fsutil"
@@ -727,7 +728,7 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 				if _, err := s.fs.Stat(parent); os.IsNotExist(err) {
 					createdFinalParent = parent
 				}
-				if err := s.fs.MkdirAll(parent, 0o755); err != nil {
+				if err := s.fs.MkdirAll(parent, config.DirPerm); err != nil {
 					return fmt.Errorf("create final video destination: %w", err)
 				}
 			}
@@ -1847,7 +1848,7 @@ func (s *artifactStage) installPaths(paths, preserve []string, stagedArtifactDir
 		if plan.skip {
 			continue
 		}
-		if err := s.fs.MkdirAll(filepath.Dir(plan.target), 0o755); err != nil {
+		if err := s.fs.MkdirAll(filepath.Dir(plan.target), config.DirPerm); err != nil {
 			return false, fmt.Errorf("create artifact destination: %w", err)
 		}
 		if plan.sharedOwner {

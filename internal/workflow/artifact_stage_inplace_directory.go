@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
@@ -89,7 +90,7 @@ func (s *artifactStage) moveInPlaceDirectory(ctx context.Context, o *applyOrchIm
 	if _, err := lstatArtifactStageDir(s.fs, target); !os.IsNotExist(err) {
 		return source, fmt.Errorf("in-place directory destination is occupied or unavailable: %s", target)
 	}
-	if err := s.fs.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+	if err := s.fs.MkdirAll(filepath.Dir(target), config.DirPerm); err != nil {
 		return source, fmt.Errorf("create in-place directory parent: %w", err)
 	}
 	scratch := filepath.Join(filepath.Dir(source), ".javinizer-directory-"+rand.Text())
