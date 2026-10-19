@@ -60,14 +60,14 @@ func (h *dumpHandler) startUpload(c *gin.Context) {
 		return
 	}
 	path := resolveDumpPath(h.rt.Deps().CoreDeps.GetConfig())
-	staged := path + ".upload"
+	staged := "" // set only after this request exclusively creates its stage
 	handedOff := false
 	defer func() {
 		if handedOff {
 			return
 		}
 		defer taskDone()
-		_ = os.Remove(staged)
+		removeUploadStage(staged)
 		if rec := recover(); rec != nil {
 			logging.Warnf("r18dev dump upload: panic during receive: %v", rec)
 			h.releaseDumpOp()
@@ -196,17 +196,21 @@ func (h *dumpHandler) startUpload(c *gin.Context) {
 	}
 	// The dump's parent dir may not exist on a fresh install (nothing else
 	// creates it before the first upload).
-	if err := os.MkdirAll(filepath.Dir(staged), 0o750); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		_ = src.Close()
 		c.JSON(http.StatusInternalServerError, gin.H{errorResponseKey: fmt.Sprintf("stage upload: %v", err)})
 		return
 	}
-	dst, err := os.OpenFile(staged, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	// CreateTemp uses O_EXCL and mode 0600. Keep the stage on the dump's
+	// filesystem for atomic install, without opening or removing an existing
+	// .upload path (which could alias the working dump).
+	dst, err := os.CreateTemp(filepath.Dir(path), ".r18dev-dump-upload-*")
 	if err != nil {
 		_ = src.Close()
 		c.JSON(http.StatusInternalServerError, gin.H{errorResponseKey: fmt.Sprintf("stage upload: %v", err)})
 		return
 	}
+	staged = dst.Name()
 	_, copyErr := copyUploadStage(h.rt.ServerCtx(), dst, src)
 	closeSrcErr := src.Close()
 	closeDstErr := dst.Close()
@@ -312,7 +316,7 @@ func (h *dumpHandler) runUploadJob(ctx context.Context, path, staged string, pro
 	failErr := error(nil)
 	succeeded := false
 	defer func() {
-		_ = os.Remove(staged)
+		removeUploadStage(staged)
 		h.mu.Lock()
 		h.running = false
 		if succeeded {
@@ -387,6 +391,7 @@ func (h *dumpHandler) runRawDumpJob(ctx context.Context, br *bufio.Reader, path 
 	gzFault := &atomic.Bool{}
 	taggedGz := &fsTagReader{inner: bounded, failed: gzFault}
 	var unlockReload func()
+	swapStarted := false
 
 	impRes, importErr := r18devdump.Import(ctx, taggedGz, path, r18devdump.ImportOptions{
 		SourceURL:  token,
@@ -394,6 +399,14 @@ func (h *dumpHandler) runRawDumpJob(ctx context.Context, br *bufio.Reader, path 
 		BeforeSwap: func() error {
 			h.dumpMu.Lock()
 			unlockReload = h.rt.LockReload()
+			// Lock acquisition can outlive shutdown cancellation. Leave the
+			// working handle attached until this install is still admitted.
+			if err := ctx.Err(); err != nil {
+				unlockReload()
+				h.dumpMu.Unlock()
+				return err
+			}
+			swapStarted = true
 			old := h.rt.Deps().CoreDeps.ReplaceR18DevDumpCloser(nil)
 			if old != nil {
 				_ = old.Close()
@@ -420,9 +433,12 @@ func (h *dumpHandler) runRawDumpJob(ctx context.Context, br *bufio.Reader, path 
 			*failErr = importErr
 		}
 		h.broadcastProgress(errorResponseKey, 0, 0, (*failErr).Error())
-		// Import failure path restores the previous dump handle like download.
-		if reloadErr := h.reloadDump(path); reloadErr != nil {
-			logging.Warnf("r18dev dump upload: failed to restore handle after failed import: %v", reloadErr)
+		// A cancelled pre-swap worker has not detached the working handle.
+		// Keep it attached instead of rebuilding dependencies during shutdown.
+		if swapStarted || ctx.Err() == nil {
+			if reloadErr := h.reloadDump(path); reloadErr != nil {
+				logging.Warnf("r18dev dump upload: failed to restore handle after failed import: %v", reloadErr)
+			}
 		}
 		return
 	}
@@ -448,6 +464,16 @@ func (h *dumpHandler) runSidecarJob(ctx context.Context, staged, path string, fa
 
 	h.dumpMu.Lock()
 	unlockReload := h.rt.LockReload()
+	// Validation may finish before shutdown, then wait for either install
+	// lock. Recheck before detaching the working handle or replacing its file.
+	if err := ctx.Err(); err != nil {
+		unlockReload()
+		h.dumpMu.Unlock()
+		*failKind = kindStaging
+		*failErr = fmt.Errorf("install upload: %w", err)
+		h.broadcastProgress(errorResponseKey, 0, 0, (*failErr).Error())
+		return
+	}
 	old := h.rt.Deps().CoreDeps.ReplaceR18DevDumpCloser(nil)
 	if old != nil {
 		_ = old.Close()

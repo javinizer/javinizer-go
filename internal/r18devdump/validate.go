@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -167,10 +166,10 @@ func validateStructure(ctx context.Context, db *sql.DB) error {
 }
 
 // checkTableDDL enforces collation fidelity for the columns the lookups
-// depend on. SQLite DDL carries collations nowhere else (pragma metadata is
-// blind to them), and an incompatible collation on a key column changes
-// predicate semantics: split the DDL body into top-level comma segments,
-// and reject any REQUIRED column segment declaring a non-BINARY COLLATE.
+// depend on. Column collations are absent from pragma_table_info, and an
+// incompatible collation changes predicate semantics. Read column-level
+// constraints with SQLite quoting/comments respected; primary-key index
+// collations are checked separately through pragma_index_xinfo.
 // Additive columns keep their own collations (compatibility policy), as do
 // required non-key columns like videos.title_en — neither class is ever
 // compared by a runtime predicate (checked against store.go's WHERE
@@ -190,71 +189,12 @@ func checkTableDDL(ctx context.Context, db *sql.DB, table string, required []str
 			continue
 		}
 		for _, req := range required {
-			if name == req && !strings.EqualFold(coll, "BINARY") {
+			if strings.EqualFold(name, req) && !strings.EqualFold(coll, "BINARY") {
 				return fmt.Errorf("%w: %s.%s declares COLLATE %s (lookup needs BINARY)", ErrDumpInvalid, table, req, coll)
 			}
 		}
 	}
 	return nil
-}
-
-// ddlBody extracts the (...) body of a CREATE TABLE statement; malformed
-// input (missing or reversed delimiters) yields an empty body rather than
-// panicking (only reachable via a garbled sqlite_master row).
-func ddlBody(ddl string) string {
-	open := strings.IndexByte(ddl, '(')
-	closing := strings.LastIndexByte(ddl, ')')
-	if open >= 0 && closing > open {
-		return ddl[open+1 : closing]
-	}
-	return ""
-}
-
-// splitColumnsDDL splits a CREATE TABLE's (...) body at top-level commas.
-func splitColumnsDDL(body string) []string {
-	var out []string
-	depth := 0
-	start := 0
-	for i := 0; i < len(body); i++ {
-		switch body[i] {
-		case '(':
-			depth++
-		case ')':
-			depth--
-		case ',':
-			if depth == 0 {
-				out = append(out, body[start:i])
-				start = i + 1
-			}
-		}
-	}
-	return append(out, body[start:])
-}
-
-// unquoteIdent strips identifier quoting/brackets pairs a hand-built dump
-// may carry around key column names.
-func unquoteIdent(s string) string {
-	for _, c := range []byte{0x22, 0x27, 0x5B, 0x5D, 0x60} {
-		s = strings.Trim(s, string(c))
-	}
-	return s
-}
-
-// segmentColumnAndCollation reads one comma-segment: the first token is the
-// column name (quoted identifiers reduced); a COLLATE clause reports its name.
-var collRe = regexp.MustCompile(`(?i)\bCOLLATE\s+([A-Za-z_][A-Za-z0-9_]*)\b`)
-
-func segmentColumnAndCollation(seg string) (name, coll string, hasColl bool) {
-	fields := strings.Fields(strings.TrimSpace(seg))
-	if len(fields) == 0 {
-		return "", "", false
-	}
-	name = unquoteIdent(fields[0])
-	m := collRe.FindStringSubmatch(seg)
-	if m == nil {
-		return name, "", false
-	}
-	return name, m[1], true
 }
 
 // validateColumns probes each required column individually (separated from
@@ -324,7 +264,7 @@ func validateIndexes(ctx context.Context, db *sql.DB) error {
 		// The generated schema's columns all sort BINARY; a collated index (e.g.
 		// COLLATE NOCASE) matches the column probe but is unusable for the
 		// binary equality predicates every lookup issues.
-		if colls != "" && colls != "BINARY" {
+		if colls != "" && !strings.EqualFold(colls, "BINARY") {
 			return fmt.Errorf("%w: index %s on %s has collations [%s], want [BINARY]", ErrDumpInvalid, name, tbl, colls)
 		}
 	}
@@ -443,9 +383,12 @@ func checkLogicalKey(ctx context.Context, db *sql.DB, table string, keys []strin
 		"(SELECT COUNT(*) FROM (SELECT DISTINCT " + keysList + " FROM " + table + " WHERE " + notNullPred + ")), " +
 		"(SELECT COUNT(*) FROM pragma_table_info('" + table + "') WHERE " + orderedPkPredicate(keys) + "), " +
 		"(SELECT COUNT(*) FROM " + table + " WHERE " + notNullPred + " AND (" + strings.Join(typePreds, " OR ") + ")), " +
-		casingMetric
-	var nulls, total, distinct, pkOrdered, badTypes, badCasing int64
-	if err := db.QueryRowContext(ctx, q).Scan(&nulls, &total, &distinct, &pkOrdered, &badTypes, &badCasing); err != nil {
+		casingMetric + ", " +
+		"(SELECT COUNT(*) FROM pragma_index_list('" + table + "') AS idx, pragma_index_xinfo(idx.name) AS x " +
+		"WHERE idx.origin = 'pk' AND x.key = 1 AND x.seqno < " + strconv.Itoa(len(keys)) +
+		" AND UPPER(COALESCE(x.coll, '')) != 'BINARY')"
+	var nulls, total, distinct, pkOrdered, badTypes, badCasing, badPKCollations int64
+	if err := db.QueryRowContext(ctx, q).Scan(&nulls, &total, &distinct, &pkOrdered, &badTypes, &badCasing, &badPKCollations); err != nil {
 		return fmt.Errorf("%w: %s logical-key probe: %v", ErrDumpInvalid, table, err)
 	}
 	if nulls > 0 {
@@ -459,6 +402,9 @@ func checkLogicalKey(ctx context.Context, db *sql.DB, table string, keys []strin
 	}
 	if pkOrdered < int64(len(keys)) {
 		return fmt.Errorf("%w: table %s' primary key does not start with %s in order — lookups on it would full-scan", ErrDumpInvalid, table, keyList)
+	}
+	if badPKCollations > 0 {
+		return fmt.Errorf("%w: table %s primary key has non-BINARY COLLATE (lookup needs BINARY)", ErrDumpInvalid, table)
 	}
 	if badCasing > 0 {
 		return fmt.Errorf("%w: dump contains %s rows with noncanonical %s", ErrDumpInvalid, table, keyList)

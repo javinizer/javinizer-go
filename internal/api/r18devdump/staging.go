@@ -3,7 +3,20 @@ package r18devdump
 import (
 	"context"
 	"io"
+	"os"
 )
+
+// The upload owns the unique stage name and SQLite may create its WAL/SHM
+// siblings while validating a read-only sidecar. Close all handles before
+// cleanup; never clean up the old, predictable .upload name.
+func removeUploadStage(path string) {
+	if path == "" {
+		return
+	}
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		_ = os.Remove(path + suffix)
+	}
+}
 
 // copyUploadStage checks shutdown between bounded staging reads and writes.
 // Wrapping both ends prevents WriterTo/ReaderFrom from bypassing these checks.

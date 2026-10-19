@@ -315,6 +315,68 @@ jobs:
         if-no-files-found: error
         retention-days: 30
 
+    - name: Verify native Windows dump replacement and coverage
+      shell: python {0}
+      run: |
+        import json, pathlib, platform, subprocess, sys
+
+        assert sys.platform == "win32" and platform.system() == "Windows", "Requires a native Windows runner"
+        assert subprocess.check_output(["go", "env", "GOOS"], text=True).strip() == "windows"
+        checkout = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+        result = subprocess.run([
+            "go", "test", "-short", "-count=1", "-json", "-covermode=atomic",
+            "-coverprofile=coverage-r18devdump-windows.out",
+            "./internal/r18devdump", "-run", "^TestReplaceFile",
+        ], capture_output=True, text=True)
+        pathlib.Path("r18devdump-windows-tests.jsonl").write_text(result.stdout, encoding="utf-8")
+        print(result.stdout, end="")
+        print(result.stderr, end="")
+        assert result.returncode == 0, "Native Windows dump replacement tests failed"
+        events = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
+        passed = {event.get("Test") for event in events if event["Action"] == "pass"}
+        assert not any(event["Action"] == "skip" for event in events), "Replacement proof must not skip"
+        required = (
+            "TestReplaceFileWindowsInvalidPaths/source",
+            "TestReplaceFileWindowsInvalidPaths/destination",
+            "TestReplaceFileWindowsMissingSourcePreservesDestination",
+            "TestReplaceFileWindowsSharingFailurePreservesAndRetries",
+        )
+        assert all(name in passed for name in required), "Missing native replacement scenario"
+        coverage = pathlib.Path("coverage-r18devdump-windows.out").read_text().splitlines()
+        assert coverage[0] == "mode: atomic"
+        helper = [line.rsplit(" ", 2) for line in coverage[1:] if "/internal/r18devdump/replace_windows.go:" in line]
+        assert helper and all(int(row[2]) > 0 for row in helper), "Every Windows replacement block must be hit"
+        statements = sum(int(row[1]) for row in helper)
+        assert statements > 0
+        pathlib.Path("r18devdump-windows-proof.json").write_text(json.dumps({
+            "checkout_sha": checkout, "platform": platform.platform(),
+            "required_scenarios": required, "helper_blocks": len(helper),
+            "covered_statements": statements, "total_statements": statements,
+        }, indent=2), encoding="utf-8")
+
+    - name: Upload native Windows dump replacement coverage to Codecov
+      uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7
+      with:
+        files: ./coverage-r18devdump-windows.out
+        disable_search: true
+        flags: unittests
+        name: codecov-r18devdump-windows
+        token: ${{ secrets.CODECOV_TOKEN }}
+        fail_ci_if_error: true
+        verbose: true
+
+    - name: Archive native Windows dump replacement proof
+      if: ${{ always() && !env.ACT }}
+      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      with:
+        name: r18devdump-windows-evidence
+        path: |
+          r18devdump-windows-tests.jsonl
+          coverage-r18devdump-windows.out
+          r18devdump-windows-proof.json
+        if-no-files-found: error
+        retention-days: 30
+
     - name: Run unit tests
       run: go test -short ./...
 

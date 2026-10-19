@@ -130,6 +130,7 @@ func TestUploadShutdownDuringStageCleansAndJoins(t *testing.T) {
 	require.Nil(t, h.done, "canceled stage must not hand off a job")
 	require.False(t, h.running)
 	require.NoFileExists(t, path+".upload")
+	assertNoUploadStages(t, path)
 	require.NoFileExists(t, path)
 	require.True(t, h.rt.WaitBackgroundTasks(time.Second))
 }

@@ -23,6 +23,7 @@ func TestUploadShutdownRejectsAdmission(t *testing.T) {
 	require.Nil(t, h.done)
 	require.False(t, h.running)
 	require.NoFileExists(t, path+".upload")
+	assertNoUploadStages(t, path)
 }
 
 func TestUploadShutdownInterruptsReceive(t *testing.T) {
@@ -55,6 +56,7 @@ func TestUploadShutdownInterruptsReceive(t *testing.T) {
 	_, _, running := handlerState(h)
 	require.False(t, running)
 	require.NoFileExists(t, path+".upload")
+	assertNoUploadStages(t, path)
 	require.True(t, h.rt.WaitBackgroundTasks(time.Second))
 }
 
@@ -110,6 +112,7 @@ func TestUploadShutdownJoinsJobAndRequestIsDetached(t *testing.T) {
 				require.FileExists(t, path)
 			}
 			require.NoFileExists(t, path+".upload")
+			assertNoUploadStages(t, path)
 			for _, suffix := range []string{".tmp", ".tmp-wal", ".tmp-shm"} {
 				_, err := os.Stat(path + suffix)
 				require.True(t, os.IsNotExist(err))
