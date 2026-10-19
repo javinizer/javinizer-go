@@ -33,8 +33,12 @@ func TestRunBatchCommand_OpenCollisionBlocksCLIOrganize(t *testing.T) {
 	}).Error)
 	require.NoError(t, db.Close())
 
+	sourcePath := filepath.Join(src, "GOOD-704.mp4")
+	sourceBefore, err := os.ReadFile(sourcePath)
+	require.NoError(t, err)
+
 	var buf bytes.Buffer
-	err := RunBatchCommand(context.Background(), &buf, BatchCommandOptions{
+	err = RunBatchCommand(context.Background(), &buf, BatchCommandOptions{
 		ConfigFile:   configPath,
 		SourcePath:   src,
 		Destination:  dest,
@@ -44,9 +48,16 @@ func TestRunBatchCommand_OpenCollisionBlocksCLIOrganize(t *testing.T) {
 		ActionVerb:   "Processing files",
 		Resolved:     &workflow.ResolvedSeamStrings{},
 	})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "apply phase failed")
-	assert.FileExists(t, filepath.Join(src, "GOOD-704.mp4"))
+	// A retryable job envelope does not make the CLI command successful:
+	// RunBatchCommand reports its terminal per-file Apply failure count.
+	require.ErrorContains(t, err, "apply failed for 1 file(s)")
+	assert.Contains(t, buf.String(), "Files organized: 0")
+	assert.Contains(t, buf.String(), "Apply failed for 1 file(s)")
+	assert.NotContains(t, buf.String(), "Complete!")
+	assert.FileExists(t, sourcePath)
+	sourceAfter, readErr := os.ReadFile(sourcePath)
+	require.NoError(t, readErr)
+	assert.Equal(t, sourceBefore, sourceAfter)
 	assert.NoDirExists(t, filepath.Join(dest, "GOOD-704"))
 	assert.NotContains(t, buf.String(), "Organized 1 file(s)")
 
@@ -56,6 +67,11 @@ func TestRunBatchCommand_OpenCollisionBlocksCLIOrganize(t *testing.T) {
 		Where("movie_content_id = ? AND status = ?", movie.ContentID, models.CollisionStatusOpen).
 		Count(&openCount).Error)
 	assert.EqualValues(t, 1, openCount)
+	var organizedOps int64
+	require.NoError(t, verifyDB.DB.Model(&models.BatchFileOperation{}).
+		Where("batch_job_id = ?", batchIDFromOutput(t, buf.String())).
+		Count(&organizedOps).Error)
+	assert.Zero(t, organizedOps, "a blocked CLI run must not create organize operations")
 }
 
 func TestRunBatchCommand_ApplyFailureIsTerminal(t *testing.T) {
