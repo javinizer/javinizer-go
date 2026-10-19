@@ -558,3 +558,20 @@ A failure terminal committed without recovery proofs while publication is held
 cannot be replaced with a different result later; that row requires manual
 recovery. If the terminal transaction itself failed, retrying the original
 carried recovery result is still permitted.
+
+
+## Credit collision retries and older failed jobs
+
+New attempts blocked only by credit collisions remain ready for review and retry
+after the collisions are resolved. The live collision gate still runs on retry.
+
+An older job already saved as `failed` is not automatically reopened, even if its
+file errors mention only credit collisions. Older startup recovery could erase
+interruption evidence, leaving the same saved fields as a completed gate-only
+attempt. Resolving a collision or restarting repeatedly cannot establish that
+such a job is safe to resume.
+
+Preserve the database and affected files. These ambiguous older jobs require a
+separately reviewed, explicit recovery decision; no automatic recovery operation
+is provided here. Do not edit their status or clear application data to bypass
+admission.

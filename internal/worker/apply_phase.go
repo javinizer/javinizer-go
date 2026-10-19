@@ -499,7 +499,15 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 		if cfg.OnPhaseComplete != nil {
 			cfg.OnPhaseComplete(0, len(collisionGateFailures))
 		}
-		inputs.Lifecycle.MarkFailed()
+		if blockedErrorCode == models.FileErrorCodeCreditConflict {
+			// Confirmed collisions are per-file failures, as in a mixed
+			// batch. Keep the completed scrape retryable after resolution.
+			inputs.Lifecycle.MarkCompleted()
+		} else {
+			// An unavailable lookup proves no collision state. Preserve
+			// the existing run-level failure and fail closed.
+			inputs.Lifecycle.MarkFailed()
+		}
 		return
 	}
 
