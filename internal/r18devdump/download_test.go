@@ -1158,4 +1158,15 @@ func TestDownload_DateAwareSkipForTokenProvenance(t *testing.T) {
 	if !res.Unchanged {
 		t.Fatal("identical redirect target URL should report unchanged")
 	}
+
+	for _, source := range []string{"", " \t\r\n", "\u00a0\u2003"} {
+		imported = false
+		res, err = Download(context.Background(), srv.Client(), source, "2026-09-20", nil, imp)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Unchanged || !imported {
+			t.Fatalf("blank provenance %q skipped the download (unchanged=%v, imported=%v)", source, res.Unchanged, imported)
+		}
+	}
 }

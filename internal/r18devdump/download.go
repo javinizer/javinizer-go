@@ -131,8 +131,8 @@ func DownloadWithOptions(ctx context.Context, client *http.Client, currentSource
 	}
 	// Upload-token provenance: non-URL source values never equal a redirect
 	// URL, but an equal source date means the uploaded dump is already current.
-	if opts.CurrentSourceDate != "" && !strings.Contains(currentSourceURL, "://") &&
-		opts.CurrentSourceDate == res.SourceDate {
+	if opts.CurrentSourceDate != "" && strings.TrimSpace(currentSourceURL) != "" &&
+		!strings.Contains(currentSourceURL, "://") && opts.CurrentSourceDate == res.SourceDate {
 		_ = resp.Body.Close()
 		res.Unchanged = true
 		return res, nil

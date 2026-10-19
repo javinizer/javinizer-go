@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -395,7 +396,7 @@ func importWithOpenDB(ctx context.Context, r io.Reader, path string, opts Import
 				// Reject missing/NULL keys before INSERT OR IGNORE silently
 				// drops them, even when other valid videos would allow a swap.
 				trimmed := strings.TrimSpace(v)
-				if v == nullSentinel || trimmed == "" || trimmed != v || v != strings.ToLower(v) || strings.ContainsAny(v, " \t\n\v\f\r") {
+				if v == nullSentinel || trimmed == "" || trimmed != v || v != strings.ToLower(v) || strings.ContainsAny(v, " \t\n\v\f\r") || strings.ContainsFunc(v, unicode.IsControl) {
 					return fmt.Errorf("%w: %s.%s = %q", ErrDumpNonCanonicalID, sqliteTableName(row.Table), cc.name, v)
 				}
 			}

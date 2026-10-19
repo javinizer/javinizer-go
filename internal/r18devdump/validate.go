@@ -120,9 +120,14 @@ func validateNoNullMetaKeys(ctx context.Context, db *sql.DB) error {
 		// collation must not make a noncanonical key satisfy this contract.
 		parts = append(parts, "(SELECT COUNT(*) FROM dump_meta WHERE key COLLATE BINARY = '"+k+"')")
 	}
+	parts = append(parts,
+		"(SELECT value FROM dump_meta WHERE key COLLATE BINARY = 'source_url')",
+		"(SELECT value FROM dump_meta WHERE key COLLATE BINARY = 'imported_at')",
+	)
 	var nulls, dups, haveURL, haveDate, haveImportedAt int64
+	var sourceURL, importedAt sql.NullString
 	err := db.QueryRowContext(ctx,
-		"SELECT "+strings.Join(parts, ", ")).Scan(&nulls, &dups, &haveURL, &haveDate, &haveImportedAt)
+		"SELECT "+strings.Join(parts, ", ")).Scan(&nulls, &dups, &haveURL, &haveDate, &haveImportedAt, &sourceURL, &importedAt)
 	if err != nil {
 		return fmt.Errorf("%w: dump_meta key probe: %v", ErrDumpInvalid, err)
 	}
@@ -135,6 +140,9 @@ func validateNoNullMetaKeys(ctx context.Context, db *sql.DB) error {
 	presentKeyCount := haveURL + haveDate + haveImportedAt
 	if presentKeyCount < int64(len(requiredKeys)) {
 		return fmt.Errorf("%w: dump_meta is missing required provenance keys (has %d of %d)", ErrDumpInvalid, presentKeyCount, len(requiredKeys))
+	}
+	if strings.TrimSpace(sourceURL.String) == "" || strings.TrimSpace(importedAt.String) == "" {
+		return fmt.Errorf("%w: dump_meta requires nonempty source_url and imported_at provenance values", ErrDumpInvalid)
 	}
 	return nil
 }
@@ -372,7 +380,8 @@ func checkLogicalKey(ctx context.Context, db *sql.DB, table string, keys []strin
 			for _, ws := range []string{"' '", "char(9)", "char(10)", "char(11)", "char(12)", "char(13)"} {
 				internalWs = append(internalWs, "INSTR("+k+", "+ws+") > 0")
 			}
-			idHygiene = " AND (" + setTrim + " = '' OR " + k + " != LOWER(" + setTrim + ") OR (" + strings.Join(internalWs, " OR ") + "))"
+			controls := "INSTR(" + k + ", char(0)) > 0 OR " + k + " GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || ']*')"
+			idHygiene = " AND (" + setTrim + " = '' OR " + k + " != LOWER(" + setTrim + ") OR (" + strings.Join(internalWs, " OR ") + ") OR (" + controls + "))"
 		}
 	}
 	casingMetric := "0"
