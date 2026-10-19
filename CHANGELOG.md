@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.6.4] - 2026-10-20
+
+### Added
+
+- Add manual dump uploads (#273).
+- Activate ASCII remaster identity with guarded sources (#346).
+
+### Fixed
+
+- Honor umask for published directories (#358).
+- Omit empty FlareSolverr session IDs (#355).
+- Exercise concurrent sweeps on native filesystem (#356).
+- Discharge legacy credit errors after successful retry (#352).
+- Keep new collision-only attempts retryable (#351).
+- Preserve selection when movie groups change (#350).
+- Report retained staging proofs and preserve recovery state (#348).
+- Recognize persisted legacy credit gate failures (#349).
+- Preserve channel prefix on selected raw CID (#347).
+- Bind dump lookup and remaster source identities atomically (#344).
+- Resolve remaster queries with end-to-end identity guards (#345).
+- Guard raw CID and parsed page identity (#341).
+- Validate remaster selection and final detail identity (#342).
+- Add guarded marker-aware dump candidates (#340).
+- Expand exponent settings input before integer parsing (#338).
+- Compose history filters and bound replacement pagination (#337).
+- Cancel and join dump workers during runtime shutdown (#336).
+- Preserve word drafts and show current settings errors (#335).
+- Honor translated metadata priorities and source attribution (#334).
+
+### Changed
+
+- Isolate Windows workflow offline test budget (#353).
+- Remove superseded timing-based rollback assertion (#343).
+- Share LLM HTTP execution (#339).
+
 ## [v1.6.3] - 2026-10-18
 
 ### Fixed
