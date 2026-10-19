@@ -51,7 +51,7 @@ type flareSolverrRequest struct {
 	Cmd               string             `json:"cmd"`                           // "request.get" or "sessions.create"
 	URL               string             `json:"url"`                           // Target URL
 	MaxTimeout        int                `json:"maxTimeout"`                    // Timeout in milliseconds (FlareSolverr expects ms)
-	Session           string             `json:"session"`                       // Optional: reuse existing session
+	Session           string             `json:"session,omitempty"`             // Optional: reuse existing session
 	SessionTTLMinutes int                `json:"session_ttl_minutes,omitempty"` // Optional: rotate existing session when older than TTL
 	Proxy             *flareSolverrProxy `json:"proxy,omitempty"`               // Optional: proxy for target URL request
 }
@@ -69,6 +69,16 @@ type flareSolverrResponse struct {
 		UserAgent string `json:"userAgent"`
 	} `json:"solution"`
 	Session string `json:"session"`
+}
+
+// flareSolverrHTTPError intentionally excludes the response body: an upstream
+// error may echo target URLs, proxy credentials, or other request data.
+type flareSolverrHTTPError struct {
+	StatusCode int
+}
+
+func (e *flareSolverrHTTPError) Error() string {
+	return fmt.Sprintf("FlareSolverr returned status %d", e.StatusCode)
 }
 
 // newFlareSolverr creates a new FlareSolverr client
@@ -186,12 +196,13 @@ func (fs *FlareSolverr) resolveURLRequest(targetURL, sessionID string) (string, 
 		SetResult(&resp).
 		Post(fs.baseURL)
 
+	// Resty may return both an HTTP response and a body read/decode error.
+	// Preserve a received failure status instead of replacing it with that error.
+	if result != nil && result.StatusCode() != 0 && result.StatusCode() != http.StatusOK {
+		return "", nil, &flareSolverrHTTPError{StatusCode: result.StatusCode()}
+	}
 	if err != nil {
 		return "", nil, fmt.Errorf("FlareSolverr request failed: %w", err)
-	}
-
-	if result.StatusCode() != 200 {
-		return "", nil, fmt.Errorf("FlareSolverr returned status %d", result.StatusCode())
 	}
 
 	if resp.Status != "ok" {
@@ -222,17 +233,26 @@ func (fs *FlareSolverr) CreateSession() (string, error) {
 	}
 
 	var resp flareSolverrResponse
-	_, err := fs.client.R().
+	result, err := fs.client.R().
 		SetBody(req).
 		SetResult(&resp).
 		Post(fs.baseURL)
 
+	if result != nil && result.StatusCode() != 0 && result.StatusCode() != http.StatusOK {
+		return "", fmt.Errorf("failed to create FlareSolverr session: %w", &flareSolverrHTTPError{StatusCode: result.StatusCode()})
+	}
 	if err != nil {
 		return "", fmt.Errorf("failed to create FlareSolverr session: %w", err)
 	}
 
-	if resp.Status != "ok" || resp.Session == "" {
+	if resp.Status != "ok" {
+		if resp.Message == "" {
+			return "", fmt.Errorf("failed to create FlareSolverr session: response did not confirm success")
+		}
 		return "", fmt.Errorf("failed to create FlareSolverr session: %s", resp.Message)
+	}
+	if resp.Session == "" {
+		return "", fmt.Errorf("failed to create FlareSolverr session: successful response is missing a session ID")
 	}
 
 	// Store session info
@@ -254,7 +274,7 @@ func (fs *FlareSolverr) DestroySession(sessionID string) error {
 	}
 
 	var resp flareSolverrResponse
-	_, err := fs.client.R().
+	result, err := fs.client.R().
 		SetBody(req).
 		SetResult(&resp).
 		Post(fs.baseURL)
@@ -262,8 +282,14 @@ func (fs *FlareSolverr) DestroySession(sessionID string) error {
 	// Remove from local cache regardless of API result
 	fs.sessions.Delete(sessionID)
 
+	if result != nil && result.StatusCode() != 0 && result.StatusCode() != http.StatusOK {
+		return fmt.Errorf("failed to destroy FlareSolverr session: %w", &flareSolverrHTTPError{StatusCode: result.StatusCode()})
+	}
 	if err != nil {
 		return fmt.Errorf("failed to destroy FlareSolverr session: %w", err)
+	}
+	if resp.Status != "ok" {
+		return fmt.Errorf("failed to destroy FlareSolverr session: response did not confirm success")
 	}
 
 	return nil
