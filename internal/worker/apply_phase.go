@@ -499,7 +499,9 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 		if cfg.OnPhaseComplete != nil {
 			cfg.OnPhaseComplete(0, len(collisionGateFailures))
 		}
-		inputs.Lifecycle.MarkFailed()
+		// Gate blocks are per-file failures, as in a mixed batch. Keep
+		// this completed scrape retryable after resolving the collision.
+		inputs.Lifecycle.MarkCompleted()
 		return
 	}
 
