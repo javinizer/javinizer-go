@@ -61,11 +61,10 @@ func TestReplacementPendingCovW9_MarkerPersistFailureUndoesRestore(t *testing.T)
 }
 
 func TestReplacementPendingCovW9_ConcurrentSweepsSynchronizePendingState(t *testing.T) {
-	base := afero.NewMemMapFs()
-	fs := &w8RemoveFs{Fs: base, err: errors.New("backup remove wedged"), fail: true}
+	fs := &w8RemoveFs{Fs: afero.NewOsFs(), err: errors.New("backup remove wedged"), fail: true}
 	repo := newP3OpRepo()
 	ctx := context.Background()
-	dest := "/out/W9-RACE/poster.jpg"
+	dest := filepath.ToSlash(filepath.Join(t.TempDir(), "poster.jpg"))
 	backup := dest + ".dlbak." + p3HexA
 	require.NoError(t, fs.MkdirAll(filepath.Dir(dest), config.DirPerm))
 	writeSweepFile(t, fs, backup, "old", time.Hour)
