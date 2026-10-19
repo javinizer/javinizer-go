@@ -15,12 +15,18 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-// ImportOptions carries provenance metadata stored alongside the imported rows.
+// ImportOptions controls row acceptance and carries provenance metadata.
 type ImportOptions struct {
 	SourceURL  string
 	SourceDate string
 	BeforeSwap func() error
 	AfterSwap  func()
+
+	// RequireAllRows rejects batches that drop rows for duplicate or NULL
+	// required keys. It applies only to stored tables; unknown tables remain
+	// ignored. Uploads enable this to prevent silent partial replacement.
+	// The default preserves legacy download/CLI first-duplicate-wins behavior.
+	RequireAllRows bool
 }
 
 // ImportResult describes a completed import.
@@ -299,12 +305,18 @@ func importWithOpenDB(ctx context.Context, r io.Reader, path string, opts Import
 			return nil
 		}
 		n, err := insertBatch(ctx, tx, table, batch)
+		if err != nil {
+			return err
+		}
+		if opts.RequireAllRows && n != int64(len(batch)) {
+			return fmt.Errorf("%w: %s batch stored %d of %d rows (duplicate or NULL required keys)", ErrDumpInvalid, table, n, len(batch))
+		}
 		tableCounts[table] += n
 		if table == derivedVideoTable {
 			totalVideos += n
 		}
 		batches[table] = batch[:0]
-		return err
+		return nil
 	}
 	flushAll := func() error {
 		// Sort table names so the final residual-batch flush is deterministic,
@@ -563,7 +575,10 @@ func insertBatch(ctx context.Context, tx *sql.Tx, dumpTable string, batch []Dump
 	if err != nil {
 		return 0, fmt.Errorf("exec batch (%s, %d rows): %w", dumpTable, len(batch), err)
 	}
-	n, _ := res.RowsAffected()
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("count inserted rows (%s): %w", dumpTable, err)
+	}
 	return n, nil
 }
 

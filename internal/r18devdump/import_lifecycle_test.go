@@ -176,6 +176,7 @@ type importLifecycleDriver struct {
 	committed       bool
 	exec            func(string)
 	begin           func()
+	insertResult    driver.Result
 }
 
 func newImportLifecycleDriver() *importLifecycleDriver {
@@ -216,6 +217,9 @@ func (d *importLifecycleDriver) ExecContext(ctx context.Context, query string, _
 		d.exec(query)
 	}
 	if strings.HasPrefix(query, "INSERT OR IGNORE INTO videos") {
+		if d.insertResult != nil {
+			return d.insertResult, nil
+		}
 		return driver.RowsAffected(1), nil
 	}
 	return driver.RowsAffected(0), nil

@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-// ErrDumpInvalid marks a staged sidecar database that failed dump validation
+// ErrDumpInvalid marks rejected import rows or a staged sidecar that failed validation
 // (missing/empty/unreadable required content, schema drift, or failed
 // integrity check). Upload handlers map it to the async 'validation' error
 // kind.

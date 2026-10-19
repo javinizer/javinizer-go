@@ -30,6 +30,8 @@ func TestClassifyImportError_Table(t *testing.T) {
 		wantKind string
 	}{
 		{"fs fault wins first", fmt.Errorf("wrap: %w", r18devdump.ErrDumpNoRows), true, true, "staging"},
+		{"invalid rows is validation", fmt.Errorf("parse dump: %w", r18devdump.ErrDumpInvalid), false, false, "validation"},
+		{"staging beats invalid rows", fmt.Errorf("parse dump: %w", r18devdump.ErrDumpInvalid), true, true, "staging"},
 		{"zero rows is validation", fmt.Errorf("parse dump: %w", r18devdump.ErrDumpNoRows), false, false, "validation"},
 		{"gzip-layer fault is validation", errors.New("unexpected EOF in stream"), false, true, "validation"},
 		{"plain sqlite exec is import", errors.New("exec batch: constraint failed"), false, false, "import"},

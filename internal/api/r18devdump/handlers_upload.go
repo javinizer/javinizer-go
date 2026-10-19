@@ -254,14 +254,15 @@ func (h *dumpHandler) receiveStallTimeout() time.Duration {
 
 // classifyImportError attributes an Import failure to exactly one layer:
 // staged filesystem (staging), gzip-layer problems incl. truncation and the
-// zero-rows invariant (validation), or genuine parser/SQLite errors (import).
+// zero/skipped-row invariants (validation), or genuine parser/SQLite errors (import).
 func classifyImportError(importErr error, fsFault, gzFault bool) string {
 	switch {
 	// Staging wins first: staged-fs faults and update/swap (filesystem)
 	// failures are staging errors per the error-kind mapping.
 	case fsFault || errors.Is(importErr, r18devdump.ErrDumpSwap):
 		return kindStaging
-	case errors.Is(importErr, r18devdump.ErrDumpNoRows) ||
+	case errors.Is(importErr, r18devdump.ErrDumpInvalid) ||
+		errors.Is(importErr, r18devdump.ErrDumpNoRows) ||
 		errors.Is(importErr, r18devdump.ErrTruncatedDump) ||
 		errors.Is(importErr, r18devdump.ErrDumpTypedValue) ||
 		errors.Is(importErr, r18devdump.ErrDumpNonCanonicalID) ||
@@ -397,8 +398,9 @@ func (h *dumpHandler) runRawDumpJob(ctx context.Context, br *bufio.Reader, path 
 	swapStarted := false
 
 	impRes, importErr := r18devdump.Import(ctx, taggedGz, path, r18devdump.ImportOptions{
-		SourceURL:  token,
-		SourceDate: date,
+		RequireAllRows: true,
+		SourceURL:      token,
+		SourceDate:     date,
 		BeforeSwap: func() error {
 			h.dumpMu.Lock()
 			unlockReload = h.rt.LockReload()
