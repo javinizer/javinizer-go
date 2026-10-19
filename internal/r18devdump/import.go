@@ -35,8 +35,9 @@ type ImportResult struct {
 var ErrDumpTypedValue = errors.New("invalid typed value in dump")
 
 // ErrDumpNonCanonicalID marks a content_id whose stored form is not the
-// canonical lowercase that lookups bind — such rows become unreachable (the
-// lookups lowercase-bind before comparing against BINARY primary keys).
+// required non-NULL canonical lowercase that lookups bind — such rows are
+// otherwise discarded by INSERT OR IGNORE or become unreachable (lookups
+// lowercase-bind before comparing against BINARY primary keys).
 var ErrDumpNonCanonicalID = errors.New("non-canonical content_id casing")
 
 // ErrDumpSwap marks failures at the commit+swap boundary (checkpoint, close,
@@ -378,14 +379,12 @@ func importWithOpenDB(ctx context.Context, r io.Reader, path string, opts Import
 		for _, cc := range casingCols[row.Table] {
 			if cc.idx < len(mapped) {
 				v := mapped[cc.idx]
-				// Canonical = nonempty, trimmed, already-lowercase (both the
-				// empties that yield a tautological pass and padding that
-				// poisons the lookup key are rejected here).
-				if v != nullSentinel {
-					trimmed := strings.TrimSpace(v)
-					if trimmed == "" || trimmed != v || v != strings.ToLower(v) || strings.ContainsAny(v, " \t\n\v\f\r") {
-						return fmt.Errorf("%w: %s.%s = %q", ErrDumpNonCanonicalID, sqliteTableName(row.Table), cc.name, v)
-					}
+				// Canonical = non-NULL, nonempty, trimmed, already-lowercase.
+				// Reject missing/NULL keys before INSERT OR IGNORE silently
+				// drops them, even when other valid videos would allow a swap.
+				trimmed := strings.TrimSpace(v)
+				if v == nullSentinel || trimmed == "" || trimmed != v || v != strings.ToLower(v) || strings.ContainsAny(v, " \t\n\v\f\r") {
+					return fmt.Errorf("%w: %s.%s = %q", ErrDumpNonCanonicalID, sqliteTableName(row.Table), cc.name, v)
 				}
 			}
 		}
@@ -409,11 +408,8 @@ func importWithOpenDB(ctx context.Context, r io.Reader, path string, opts Import
 		_ = tx.Rollback()
 		return ImportResult{}, fmt.Errorf("insert rows: %w", err)
 	}
-	// INSERT OR IGNORE silently drops unsatisfiable video rows (e.g. \N
-	// content_id violating the NOT NULL primary key), so the invariant must
-	// count INSERTED rows, after the final flush: otherwise a dump whose
-	// every video row was ignored would pass and replace a working sidecar
-	// with an empty one.
+	// Count stored videos after the final flush, not merely recognized rows:
+	// empty or non-video-only input must never replace a working sidecar.
 	if totalVideos == 0 {
 		_ = tx.Rollback()
 		return ImportResult{}, fmt.Errorf("%w: no derived_video rows were stored (input missing them or every row was rejected)", ErrDumpNoRows)

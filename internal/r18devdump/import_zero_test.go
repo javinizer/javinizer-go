@@ -17,27 +17,27 @@ import (
 
 func TestImport_RejectsNoRecognizedRows(t *testing.T) {
 	cases := []struct {
-		name string
-		in   string
+		name    string
+		in      string
+		wantErr error
 	}{
-		{"empty input", ""},
-		{"garbage text", "<html><body>503 Service Unavailable</body></html>\n"},
-		{"copy header zero rows", "COPY public.derived_video (content_id, dvd_id) FROM stdin;\n\\.\n"},
-		{"unknown table with rows", "COPY public.not_a_dump_table (a) FROM stdin;\n1\n2\n\\.\n"},
+		{"empty input", "", ErrDumpNoRows},
+		{"garbage text", "<html><body>503 Service Unavailable</body></html>\n", ErrDumpNoRows},
+		{"copy header zero rows", "COPY public.derived_video (content_id, dvd_id) FROM stdin;\n\\.\n", ErrDumpNoRows},
+		{"unknown table with rows", "COPY public.not_a_dump_table (a) FROM stdin;\n1\n2\n\\.\n", ErrDumpNoRows},
 		// Codex round on #273: rows only for a non-video table are desynced
 		// garbage, not a dump — reject them like other tableless inputs.
-		{"non-video table rows only", "COPY public.derived_actress (id, name_romaji) FROM stdin;\n1\tJane\n\\.\n"},
-		// Rows that INSERT OR IGNORE silently discards (NULL content_id breaks
-		// the NOT NULL primary key) must also fail the import invariant — the
-		// gate counts inserted rows, not emitted ones.
-		{"null content_id row ignored", "COPY public.derived_video (content_id, dvd_id) FROM stdin;\n\\N\tIPX-535\n\\.\n"},
+		{"non-video table rows only", "COPY public.derived_actress (id, name_romaji) FROM stdin;\n1\tJane\n\\.\n", ErrDumpNoRows},
+		// A NULL content_id is rejected before insertion, even when it is
+		// the only video row and would also violate the nonempty invariant.
+		{"null content_id row rejected", "COPY public.derived_video (content_id, dvd_id) FROM stdin;\n\\N\tIPX-535\n\\.\n", ErrDumpNonCanonicalID},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "out.db")
 			_, err := Import(context.Background(), strings.NewReader(tc.in), path, ImportOptions{})
 			require.Error(t, err)
-			assert.True(t, errors.Is(err, ErrDumpNoRows), "want ErrDumpNoRows, got %v", err)
+			assert.ErrorIs(t, err, tc.wantErr)
 			_, statErr := os.Stat(path)
 			assert.True(t, os.IsNotExist(statErr), "no sidecar file may be installed on invariant failure")
 		})
