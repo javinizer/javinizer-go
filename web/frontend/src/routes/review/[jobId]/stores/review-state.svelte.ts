@@ -723,6 +723,30 @@ export function createReviewState(getJobId: () => string) {
 
 	const movieResults = $derived<FileResult[]>(movieGroups.map((g) => g.primaryResult));
 
+	// Polling and reload can move a credit failure out of Movies. Preserve the
+	// selected group when it remains, otherwise select a valid neighbour.
+	let previousMovieGroups: MovieGroup[] = [];
+	let previousMovieIndex = 0;
+	let previousSelectionJobId: string | null = null;
+	$effect(() => {
+		const groups = movieGroups;
+		const index = currentMovieIndex;
+		const selectionJobId = jobId;
+		untrack(() => {
+			const priorSelection = previousMovieGroups[previousMovieIndex]?.movieId;
+			const retainedIndex =
+				previousSelectionJobId === selectionJobId && index === previousMovieIndex
+					? groups.findIndex((group) => group.movieId === priorSelection)
+					: -1;
+			currentMovieIndex = retainedIndex >= 0
+				? retainedIndex
+				: Math.max(0, Math.min(index, groups.length - 1));
+			previousMovieGroups = groups;
+			previousMovieIndex = currentMovieIndex;
+			previousSelectionJobId = selectionJobId;
+		});
+	});
+
 	const currentMovieGroup = $derived<MovieGroup | undefined>(movieGroups[currentMovieIndex]);
 	const currentResult = $derived<FileResult | undefined>(currentMovieGroup?.primaryResult);
 	const currentMovie = $derived<Movie | null>(
