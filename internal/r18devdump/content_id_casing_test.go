@@ -246,6 +246,41 @@ func TestContentIDCasing_DistinctDVDIDsRemainAuthoritative(t *testing.T) {
 	}
 }
 
+func TestContentIDCasing_PublishedDVDWinsOverAmbiguousLiteralAlias(t *testing.T) {
+	for _, owner := range []string{"abc001", "ABC001"} {
+		other := "ABC001"
+		if owner == other {
+			other = "abc001"
+		}
+		for _, reverse := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/reverse_%t", owner, reverse), func(t *testing.T) {
+				store := casingStore(t, []string{owner + "\tABC-001\t2026-01-01\tdigital", other + "\tOTHER-002\t2026-02-02\tmono"}, reverse)
+				ctx := context.Background()
+				const display = "AbC001"
+				// A content-ID-only lookup cannot choose between these raw identities.
+				_, err := store.LookupByContentID(ctx, display)
+				require.ErrorIs(t, err, models.ErrDumpMiss)
+				// A display lookup has independent, authoritative published DVD evidence.
+				id, err := store.LookupByDVDID(ctx, display)
+				require.NoError(t, err)
+				assert.Equal(t, owner, id)
+				movie, err := store.LookupMovie(ctx, display)
+				require.NoError(t, err)
+				assert.Equal(t, owner, movie.ContentID)
+				assert.Equal(t, "ABC-001", movie.DVDID)
+				matches, err := store.MatchByDisplayID(ctx, display)
+				require.NoError(t, err)
+				assert.Equal(t, []models.DumpMatch{{ContentID: owner, DVDID: "ABC-001", ReleaseDate: "2026-01-01", ServiceCode: "digital"}}, matches)
+				// A literal raw identity still wins over the conflicting DVD spelling.
+				matches, err = store.MatchByDisplayID(ctx, other)
+				require.NoError(t, err)
+				require.Len(t, matches, 1)
+				assert.Equal(t, "OTHER-002", matches[0].DVDID)
+			})
+		}
+	}
+}
+
 func TestContentIDCasing_UniqueGeneratedAliasReturnsRawID(t *testing.T) {
 	store := casingStore(t, []string{"LuLu00441\t\\N\t2026-01-01\tdigital"}, false)
 	matches, err := store.MatchByDisplayID(context.Background(), "LULU-441")

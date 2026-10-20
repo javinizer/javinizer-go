@@ -183,9 +183,6 @@ func (s *Store) MatchByDisplayID(ctx context.Context, id string) ([]models.DumpM
 		if err != nil {
 			return nil, err
 		}
-		if len(exact) > 1 {
-			return nil, models.ErrDumpMiss
-		}
 	}
 	norm := normalizeDVDID(id)
 	if norm != "" && !hasExact {
@@ -203,6 +200,11 @@ func (s *Store) MatchByDisplayID(ctx context.Context, id string) ([]models.DumpM
 				}}, nil
 			}
 		}
+	}
+	// Published DVD evidence is independent of a folded content-ID alias.
+	// Without that evidence, an ambiguous literal must not enter expansion.
+	if len(exact) > 1 {
+		return nil, models.ErrDumpMiss
 	}
 
 	// An exact content_id row is honored before candidate expansion so a

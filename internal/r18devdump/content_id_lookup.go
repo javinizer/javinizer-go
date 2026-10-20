@@ -50,15 +50,15 @@ func (s *Store) queryContentIDs(ctx context.Context, ids []string, folded bool) 
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	collation := "BINARY"
-	if folded {
-		collation = "NOCASE"
-	}
 	args := make([]any, len(ids))
 	for i, id := range ids {
 		args[i] = id
 	}
-	query := "SELECT content_id, dvd_id, release_date, service_code FROM videos WHERE content_id COLLATE " + collation + " IN (" + strings.Repeat("?,", len(ids)-1) + "?)"
+	placeholders := strings.Repeat("?,", len(ids)-1) + "?"
+	query := "SELECT content_id, dvd_id, release_date, service_code FROM videos WHERE content_id COLLATE BINARY IN (" + placeholders + ")"
+	if folded {
+		query = "SELECT content_id, dvd_id, release_date, service_code FROM videos WHERE content_id COLLATE NOCASE IN (" + placeholders + ")"
+	}
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("dump content_id lookup failed: %w", err)
