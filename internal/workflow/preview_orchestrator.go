@@ -178,19 +178,7 @@ func (o *previewOrchImpl) resolveMediaPaths(
 
 	// Build a template context with GroupActress/GroupActressName set so that
 	// preview paths match the actual output (e.g., @Group folder naming).
-	previewTmplCtx := template.NewContextFromMovieWithOptions(movie, template.ContextOptions{
-		FirstNameOrder:  o.previewCfg.PathCfg.FirstNameOrder,
-		RenderCredits:   true,
-		UseCreditedName: o.previewCfg.UseCreditedName,
-	})
-	previewTmplCtx.GroupActress = o.previewCfg.PathCfg.GroupActress
-	previewTmplCtx.GroupActressMin = o.previewCfg.PathCfg.GroupActressMin
-	previewTmplCtx.GroupActressName = o.previewCfg.PathCfg.GroupActressName
-	previewTmplCtx.GroupUnknownActressName = o.previewCfg.PathCfg.GroupUnknownActressName
-	previewTmplCtx.UnknownActressMode = o.previewCfg.PathCfg.UnknownActressMode
-	previewTmplCtx.ActressDelimiter = o.previewCfg.PathCfg.ActressDelimiter
-	previewTmplCtx.FirstNameOrder = o.previewCfg.PathCfg.FirstNameOrder
-	previewTmplCtx.ActressLanguageJa = o.previewCfg.PathCfg.ActressLanguageJA
+	previewTmplCtx := organizer.RenderOptionsFromMediaFormat(o.previewCfg.PathCfg.MediaFormatConfig, o.previewCfg.UseCreditedName).NewContext(movie)
 
 	var nfoPath string
 	var nfoPaths []string

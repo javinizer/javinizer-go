@@ -168,3 +168,21 @@ func NFONameConfigFromAppConfig(cfg *config.Config) NFONameConfig {
 		UseCreditedName:         cfg.Metadata.NFO.Feature.UseCreditedName,
 	}
 }
+
+// TemplateRenderOptions returns the shared name policy for NFO and display templates.
+func (c NFONameConfig) TemplateRenderOptions() template.RenderOptions {
+	return template.RenderOptions{
+		ContextOptions: template.ContextOptions{
+			FirstNameOrder:  c.FirstNameOrder,
+			RenderCredits:   true,
+			UseCreditedName: c.UseCreditedName,
+		},
+		GroupActress:            c.GroupActress,
+		GroupActressMin:         c.GroupActressMin,
+		GroupActressName:        c.GroupActressName,
+		GroupUnknownActressName: c.GroupUnknownActressName,
+		UnknownActressMode:      c.UnknownActressMode,
+		ActressLanguageJa:       c.ActressLanguageJA,
+		ActressDelimiter:        c.ActressDelimiter,
+	}
+}
