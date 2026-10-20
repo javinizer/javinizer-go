@@ -193,6 +193,27 @@ lifts them per-request, so large uploads work. If you still see immediate
 failures behind extra middleware that wraps the response writer, report the
 "response writer does not support deadline control" message.
 
+### Upload fails with "batch stored X of Y rows"
+
+Raw uploads reject any batch that would silently discard rows. The error
+reports the table, required key columns, duplicate-key and NULL-key row counts,
+and the source table's row range. These are one-based record positions across
+that table's COPY blocks, not SQL file line numbers. A duplicate can match a
+row in an earlier batch. NULL values in optional metadata do not cause this
+error. The existing sidecar remains unchanged when this check fails.
+
+The server logs one upload-failure summary. For rejected batches it includes
+these same payload-free diagnostics; other failures retain their detailed
+error in the WebUI/dump status rather than copying arbitrary uploaded values
+into the log.
+
+To investigate a duplicate-key rejection, provide the dump filename/date,
+the affected table's CREATE TABLE and key/unique-constraint definitions, the
+COPY column header, and a minimal pair of rows sharing the reported key.
+Preserve differing key, site and service fields; unrelated text can be
+redacted. A full dump is not needed. These details distinguish repeated
+records from upstream identities that the sidecar schema cannot yet represent.
+
 ## File Matching Issues
 
 ### "No files found"

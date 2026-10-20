@@ -309,7 +309,7 @@ func importWithOpenDB(ctx context.Context, r io.Reader, path string, opts Import
 			return err
 		}
 		if opts.RequireAllRows && n != int64(len(batch)) {
-			return fmt.Errorf("%w: %s batch stored %d of %d rows (duplicate or NULL required keys)", ErrDumpInvalid, table, n, len(batch))
+			return newImportBatchError(table, batch, n, tableCounts[table]+1)
 		}
 		tableCounts[table] += n
 		if table == derivedVideoTable {

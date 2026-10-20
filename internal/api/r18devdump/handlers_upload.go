@@ -331,6 +331,9 @@ func (h *dumpHandler) runUploadJob(ctx context.Context, path, staged string, pro
 			h.lastErrorKind = failKind
 		}
 		h.mu.Unlock()
+		if !succeeded && failErr != nil {
+			logUploadFailure(failKind, failErr)
+		}
 		close(done)
 	}()
 
