@@ -49,6 +49,8 @@ func TestCreateExclusiveStagingFileW7B_ExactModeUnderRestrictiveUmask(t *testing
 }
 
 func TestCreateExclusiveStagingFileW7B_ModeRestoreFailureCleansUp(t *testing.T) {
+	old := syscall.Umask(0o077)
+	t.Cleanup(func() { syscall.Umask(old) })
 	base := afero.NewOsFs()
 	dir := t.TempDir()
 	fs := chmodFailFs{Fs: base}

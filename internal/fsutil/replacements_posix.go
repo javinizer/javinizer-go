@@ -27,10 +27,14 @@ var restoreFchown = unix.Fchown
 // path-based Chmod would then hit a planted symlink's target (wave-29,
 // codex P1). Virtual filesystems (test doubles with no symlink model) take
 // the name-based fallback against stagedVirtualModePath. POSIX Chmod is
-// authoritative either way, so a failure here must fail the staging attempt
-// (the caller closes and removes the staged inode) rather than silently
-// restore media with narrowed permissions.
+// authoritative when a change is needed, so a failure must fail the staging
+// attempt rather than silently restore media with narrowed permissions. A
+// handle that already has the exact permissions needs no chmod: ACL-managed
+// filesystems may reject even an otherwise redundant chmod.
 func restoreStagingMode(fs afero.Fs, staged string, fh afero.File, perm os.FileMode) error {
+	if nativeStagingModeMatches(fh, perm) {
+		return nil
+	}
 	if of, ok := osStagingHandle(fs, fh); ok {
 		return stagedHandleChmod(of, perm)
 	}
