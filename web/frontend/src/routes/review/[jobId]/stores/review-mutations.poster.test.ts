@@ -90,9 +90,20 @@ function makeResult(
 	};
 }
 function setup(kind: MutationKind, revisions: RevisionEcho = {}) {
-	const initialJob = {
+	const initialJob: BatchJobResponse = {
 		id: 'job-a',
 		status: 'completed',
+		total_files: 4,
+		completed: 4,
+		failed: 0,
+		operation_count: 0,
+		reverted_count: 0,
+		noop_count: 0,
+		excluded: {},
+		progress: 100,
+		destination: '/organized',
+		started_at: '',
+		update: false,
 		results: {
 			[targetPath]: makeResult(targetPath, 'target', 'MOVIE-001', 1),
 			[siblingPath]: makeResult(siblingPath, 'sibling', 'movie-001', 2),
@@ -102,7 +113,7 @@ function setup(kind: MutationKind, revisions: RevisionEcho = {}) {
 			},
 			[unrelatedPath]: makeResult(unrelatedPath, 'unrelated', 'OTHER-001', 4),
 		},
-	} as BatchJobResponse;
+	};
 	let job: BatchJobResponse | null = initialJob;
 	let currentResult: FileResult | undefined = initialJob.results[targetPath];
 	let currentJobId = 'job-a';
