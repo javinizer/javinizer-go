@@ -5,7 +5,7 @@
 	import { createBatchJobPollingQuery } from '$lib/query/queries';
 	import { websocketStore } from '$lib/stores/websocket';
 	import { getBackgroundJobState } from '$lib/stores/background-job.svelte';
-	import { isTerminalStatus, computeJobProgress } from '$lib/utils/job-progress';
+	import { isTerminalStatus, computeJobProgress, selectLatestJobCounts } from '$lib/utils/job-progress';
 	import { LoaderCircle, X, ChevronUp, ChevronDown, Check, XCircle, Ban, FolderInput } from 'lucide-svelte';
 
 	const iconMap = {
@@ -42,15 +42,7 @@
 	const wsState = $derived($websocketStore);
 	const messagesByFile = $derived(wsState.messagesByFile[jobId] || {});
 
-	const wsCounts = $derived.by(() => {
-		for (let i = wsState.messages.length - 1; i >= 0; i--) {
-			const m = wsState.messages[i];
-			if (m.job_id === jobId && typeof m.total_files === 'number' && m.total_files > 0) {
-				return { totalFiles: m.total_files, completed: m.completed ?? 0, failed: m.failed ?? 0 };
-			}
-		}
-		return null;
-	});
+	const wsCounts = $derived(selectLatestJobCounts(wsState.messages, jobId));
 
 	const hasWSData = $derived(Object.keys(messagesByFile).length > 0 || wsCounts !== null);
 

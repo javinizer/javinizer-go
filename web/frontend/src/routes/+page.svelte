@@ -24,7 +24,7 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import { apiClient } from '$lib/api/client';
 	import { websocketStore } from '$lib/stores/websocket';
-	import { isTerminalStatus, computeJobProgress } from '$lib/utils/job-progress';
+	import { isTerminalStatus, computeJobProgress, selectLatestJobCounts } from '$lib/utils/job-progress';
 	import type { HealthResponse, HistoryRecord, HistoryStats, ProgressMessage } from '$lib/api/types';
 	import * as m from '$lib/paraglide/messages';
 	import { formatDateTime } from '$lib/i18n/format';
@@ -177,24 +177,16 @@
 		// carries them (scan backwards). Invariant #1: NEVER use
 		// Object.values(files).length / msgs.length as total — that is the
 		// iter-6 MAJOR. The only exception is the early-window fallback below.
-		let totalFiles = 0;
-		let completed = 0;
-		let failed = 0;
-		for (let i = wsState.messages.length - 1; i >= 0; i--) {
-			const m = wsState.messages[i];
-			if (m.job_id === jobId && typeof m.total_files === 'number' && m.total_files > 0) {
-				totalFiles = m.total_files;
-				completed = m.completed ?? 0;
-				failed = m.failed ?? 0;
-				break;
-			}
-		}
+		const wsCounts = selectLatestJobCounts(wsState.messages, jobId);
+		let totalFiles = wsCounts?.totalFiles ?? 0;
+		let completed = wsCounts?.completed ?? 0;
+		let failed = wsCounts?.failed ?? 0;
 
 		// Early-scrape fallback ONLY: before any total-bearing message arrives,
 		// the only signal is how many per-file rows have appeared. Acceptable as a
 		// transient pre-total window; organize's first message is job-level and
 		// carries total, so this path is effectively scrape-only. Once totals
-		// arrive the loop above wins and this is bypassed.
+		// arrive the authoritative snapshot above wins and this is bypassed.
 		const filesForJob = wsState.messagesByFile[jobId];
 		if (totalFiles === 0) {
 			totalFiles = filesForJob ? Object.keys(filesForJob).length : 0;
