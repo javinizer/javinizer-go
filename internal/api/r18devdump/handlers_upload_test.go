@@ -571,15 +571,21 @@ func TestUpload_TextRuntimeValue_Validation(t *testing.T) {
 	assert.True(t, os.IsNotExist(statErr))
 }
 
-func TestUpload_UppercaseContentID_Validation(t *testing.T) {
-	h, _, srv := newUploadHandler(t)
+func TestUpload_UppercaseContentID_Preserved(t *testing.T) {
+	h, dumpPath, srv := newUploadHandler(t)
 	dump := "COPY public.derived_video (content_id, dvd_id) FROM stdin;\n118IPX00535\tIPX-535\n\\.\n"
 	status, _, _ := srv.doUpload(t, buildUploadBody(t, gzBytes(t, dump), "r18dotdev_dump_2026-09-20.sql.gz"))
 	require.Equal(t, http.StatusAccepted, status)
 	awaitDone(t, h, 10*time.Second)
 	lastErr, kind, _ := handlerState(h)
-	assert.Equal(t, "validation", kind)
-	assert.Contains(t, lastErr, "content_id")
+	assert.Empty(t, kind)
+	assert.Empty(t, lastErr)
+	store, err := r18devdump.Open(dumpPath)
+	require.NoError(t, err)
+	defer func() { _ = store.Close() }()
+	cid, err := store.LookupByDVDID(context.Background(), "IPX-535")
+	require.NoError(t, err)
+	assert.Equal(t, "118IPX00535", cid)
 }
 
 // --- swap failure paths ---

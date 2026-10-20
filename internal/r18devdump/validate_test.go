@@ -381,15 +381,17 @@ func TestValidateSidecar_OrphanNormRejected(t *testing.T) {
 	assert.Contains(t, err.Error(), dvdIDNormColumn)
 }
 
-func TestValidateSidecar_UppercaseContentIDRejected(t *testing.T) {
+func TestValidateSidecar_UppercaseContentIDAccepted(t *testing.T) {
 	path := looseTableFixture(t, "videos",
 		"content_id TEXT PRIMARY KEY, dvd_id TEXT, dvd_id_norm TEXT, title_en TEXT, title_ja TEXT, comment_en TEXT, comment_ja TEXT, runtime_mins INTEGER, release_date TEXT, sample_url TEXT, maker_id TEXT, label_id TEXT, series_id TEXT, jacket_full_url TEXT, jacket_thumb_url TEXT, gallery_full_first TEXT, gallery_full_last TEXT, gallery_thumb_first TEXT, gallery_thumb_last TEXT, site_id TEXT, service_code TEXT",
 		"INSERT INTO videos_loose (content_id, dvd_id, dvd_id_norm) VALUES ('118IPX00666', 'IPX-666', 'IPX666')")
 	alterFixture(t, path, "CREATE INDEX idx_videos_dvd_id_norm ON videos(dvd_id_norm)")
-	_, err := ValidateSidecar(context.Background(), path)
-	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrDumpInvalid)
-	assert.Contains(t, err.Error(), "noncanonical")
+	store, err := ValidateSidecar(context.Background(), path)
+	require.NoError(t, err)
+	defer func() { _ = store.Close() }()
+	dvd, err := store.LookupByContentID(context.Background(), "118ipx00666")
+	require.NoError(t, err)
+	assert.Equal(t, "IPX-666", dvd)
 }
 
 func TestValidateSidecar_DuplicateMetaKeysRejected(t *testing.T) {

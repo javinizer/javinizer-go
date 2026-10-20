@@ -44,15 +44,21 @@ func TestImport_RejectsNoRecognizedRows(t *testing.T) {
 	}
 }
 
-func TestImport_NonCanonicalContentID(t *testing.T) {
-	// Codex: lookups lowercase-bind before comparing against BINARY primary
-	// keys, so uppercase-stored ids become unreachable; emit must reject them.
+func TestImport_PreservesUppercaseContentID(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "out.db")
 	_, err := Import(context.Background(), strings.NewReader("COPY public.derived_video (content_id, dvd_id) FROM stdin;\n118IPX00535\tIPX-535\n\\.\n"), path, ImportOptions{})
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrDumpNonCanonicalID), "want ErrDumpNonCanonicalID, got %v", err)
-	_, statErr := os.Stat(path)
-	assert.True(t, os.IsNotExist(statErr))
+	require.NoError(t, err)
+	store, err := Open(path)
+	require.NoError(t, err)
+	defer func() { _ = store.Close() }()
+	var raw string
+	require.NoError(t, store.db.QueryRow("SELECT content_id FROM videos").Scan(&raw))
+	assert.Equal(t, "118IPX00535", raw)
+	for _, query := range []string{"118IPX00535", "118ipx00535"} {
+		dvd, err := store.LookupByContentID(context.Background(), query)
+		require.NoError(t, err)
+		assert.Equal(t, "IPX-535", dvd)
+	}
 }
 
 func TestImport_RejectsEmptyOrPaddedContentID(t *testing.T) {

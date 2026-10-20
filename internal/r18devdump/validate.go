@@ -359,9 +359,9 @@ func checkLogicalKey(ctx context.Context, db *sql.DB, table string, keys []strin
 	for _, k := range keys {
 		typePreds = append(typePreds, "(typeof("+k+") != 'text')")
 	}
-	// content_id carries THE only normalization contract (lookups lowercase
-	// and trim before BINARY compare); entity/association IDs are compared
-	// exactly, so hygiene metrics apply only to content_id columns.
+	// Raw content IDs retain source casing and BINARY identity. Only key
+	// hygiene, not lowercasing, is required; folded aliases must be unambiguous.
+	// Entity IDs remain exact and keep their existing validation contract.
 	idHygiene := ""
 	for _, k := range keys {
 		if k == contentIDColumn {
@@ -381,7 +381,7 @@ func checkLogicalKey(ctx context.Context, db *sql.DB, table string, keys []strin
 				internalWs = append(internalWs, "INSTR("+k+", "+ws+") > 0")
 			}
 			controls := "INSTR(" + k + ", char(0)) > 0 OR " + k + " GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || ']*')"
-			idHygiene = " AND (" + setTrim + " = '' OR " + k + " != LOWER(" + setTrim + ") OR (" + strings.Join(internalWs, " OR ") + ") OR (" + controls + "))"
+			idHygiene = " AND (" + setTrim + " = '' OR " + k + " != " + setTrim + " OR (" + strings.Join(internalWs, " OR ") + ") OR (" + controls + "))"
 		}
 	}
 	casingMetric := "0"

@@ -120,14 +120,13 @@ type R18DevDumpLookup interface {
 	// errors.Is(err, ErrDumpMiss) so existing miss-handling stays unchanged.
 	LookupByContentID(ctx context.Context, contentID string) (dvdID string, err error)
 
-	// MatchByDisplayID resolves a display ID to all matching dump rows, in
-	// candidate priority order: an identity-compatible dvd_id_norm hit (single
-	// match) if one exists, otherwise exact content_id matches against the
-	// expanded candidate set for the ID (e.g. LULU-441 → lulu00441 before lulu441).
-	// Rows with no
-	// dvd_id are returned with DVDID empty as unverified candidate evidence.
-	// Marker display queries reject conflicting published identities. Returns
-	// (nil, ErrDumpMiss) when nothing matches.
+	// MatchByDisplayID resolves a display ID to matching dump rows in candidate
+	// priority order. A literal case-sensitive content ID takes precedence;
+	// otherwise an identity-compatible dvd_id_norm hit wins before expansion.
+	// ASCII-case aliases must identify one raw content ID; ambiguous aliases
+	// are not selected. Null-DVD rows remain unverified candidate evidence.
+	// Marker queries reject conflicting published identities.
+	// Returns (nil, ErrDumpMiss) when nothing unambiguously matches.
 	MatchByDisplayID(ctx context.Context, id string) ([]DumpMatch, error)
 
 	// LookupMovie resolves a display dvd_id to a fully-populated DumpMovie —

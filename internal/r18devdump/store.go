@@ -93,16 +93,24 @@ func (s *Store) selectDVDRow(ctx context.Context, key, id string) (dumpDVDRow, b
 		return dumpDVDRow{}, false, nil
 	}
 
-	byContentID := make(map[string]dumpDVDRow, len(matches))
+	buckets := contentIDBuckets(matches)
+	literal := strings.TrimSpace(id)
 	for _, row := range matches {
-		byContentID[strings.ToLower(row.contentID)] = row
-	}
-	for _, candidate := range ContentIDCandidatesWithMarker(id) {
-		if row, ok := byContentID[strings.ToLower(candidate)]; ok {
+		if row.contentID == literal {
 			return row, true, nil
 		}
 	}
-	return matches[0], true, nil
+	for _, candidate := range ContentIDCandidatesWithMarker(id) {
+		if row, ok := selectContentID(buckets[foldContentID(candidate)], candidate, false); ok {
+			return row, true, nil
+		}
+	}
+	for _, row := range matches {
+		if len(buckets[foldContentID(row.contentID)]) == 1 {
+			return row, true, nil
+		}
+	}
+	return dumpDVDRow{}, false, nil
 }
 
 // LookupByDVDID resolves a display dvd_id (e.g. "IPX-535") to its DMM
@@ -126,45 +134,61 @@ func (s *Store) LookupByDVDID(ctx context.Context, dvdID string) (string, error)
 }
 
 // LookupByContentID resolves a DMM content_id back to its display dvd_id.
-// Returns models.ErrDumpMiss when the content_id is absent or its dvd_id is
-// NULL.
+// An exact raw ID wins; a uniquely matching ASCII-case alias is also accepted.
+// Absent or ambiguous aliases return ErrDumpMiss; a matched row without a DVD
+// ID returns ErrDumpNoDVDID.
 func (s *Store) LookupByContentID(ctx context.Context, contentID string) (string, error) {
 	if s == nil || contentID == "" {
 		return "", models.ErrDumpMiss
 	}
-	var dvdID sql.NullString
-	err := s.db.QueryRowContext(ctx,
-		"SELECT dvd_id FROM videos WHERE content_id = ? LIMIT 1",
-		strings.ToLower(contentID),
-	).Scan(&dvdID)
-	if errors.Is(err, sql.ErrNoRows) {
+	rows, err := s.queryContentIDs(ctx, []string{contentID}, false)
+	if err != nil {
+		return "", err
+	}
+	if len(rows) == 0 {
+		rows, err = s.queryContentIDs(ctx, []string{contentID}, true)
+		if err != nil {
+			return "", err
+		}
+	}
+	row, found := selectContentID(rows, contentID, true)
+	if !found {
 		return "", models.ErrDumpMiss
 	}
-	if err != nil {
-		return "", fmt.Errorf("dump lookup by content_id %q: %w", contentID, err)
-	}
-	if !dvdID.Valid || dvdID.String == "" {
+	if row.dvdID == "" {
 		return "", models.ErrDumpNoDVDID
 	}
-	return dvdID.String, nil
+	return row.dvdID, nil
 }
 
-// MatchByDisplayID resolves a display ID to all matching dump rows in
-// candidate priority order. An identity-compatible dvd_id_norm hit wins and
-// returns a single match (identical to LookupByDVDID semantics). Marker display
-// queries require the published DVD identity to preserve their series boundary.
-// Otherwise the display ID is expanded into content_id candidates
-// (ContentIDCandidates) and rows are matched exactly by content_id, ordered by
-// candidate priority. Null-DVD rows
-// are candidate evidence only, not verified display mappings; callers expose
-// that state explicitly and scrapers still verify the source response. Returns
-// models.ErrDumpMiss when nothing matches.
+// MatchByDisplayID resolves a display ID to matching dump rows in candidate
+// priority order. A literal BINARY content ID wins; otherwise an identity-
+// compatible dvd_id_norm hit wins before candidate expansion. Folded aliases
+// must identify exactly one raw ID, never merging case-distinct source keys.
+// Marker display queries preserve their published series boundary. Null-DVD
+// rows remain unverified candidate evidence; scrapers still verify the response.
+// Returns ErrDumpMiss when there is no unambiguous match.
 func (s *Store) MatchByDisplayID(ctx context.Context, id string) ([]models.DumpMatch, error) {
 	if s == nil {
 		return nil, models.ErrDumpMiss
 	}
+	literal := strings.TrimSpace(id)
+	exact, err := s.queryContentIDs(ctx, []string{literal}, false)
+	if err != nil {
+		return nil, err
+	}
+	hasExact := len(exact) != 0
+	if !hasExact {
+		exact, err = s.queryContentIDs(ctx, []string{literal}, true)
+		if err != nil {
+			return nil, err
+		}
+		if len(exact) > 1 {
+			return nil, models.ErrDumpMiss
+		}
+	}
 	norm := normalizeDVDID(id)
-	if norm != "" {
+	if norm != "" && !hasExact {
 		for _, key := range dumpNormKeys(id) {
 			row, found, err := s.selectDVDRow(ctx, key, id)
 			if err != nil {
@@ -186,7 +210,7 @@ func (s *Store) MatchByDisplayID(ctx context.Context, id string) ([]models.DumpM
 	// canonical zero-padded variants derived from the same display ID. The probe
 	// set is the exact input first, then the expanded candidates, deduped —
 	// order within the result follows probe order.
-	exactID := strings.ToLower(strings.TrimSpace(id))
+	exactID := literal
 	compacted := strings.NewReplacer("_", "", ".", "").Replace(normalizeDVDID(id))
 	candidates := ContentIDCandidates(id)
 	if remasterMarkerTailRgx.MatchString(compacted) {
@@ -196,12 +220,12 @@ func (s *Store) MatchByDisplayID(ctx context.Context, id string) ([]models.DumpM
 	probe := make([]string, 0, len(candidates)+1)
 	seen := make(map[string]bool, len(candidates)+1)
 	if exactID != "" {
-		seen[exactID] = true
+		seen[foldContentID(exactID)] = true
 		probe = append(probe, exactID)
 	}
 	for _, cand := range candidates {
-		if !seen[cand] {
-			seen[cand] = true
+		if !seen[foldContentID(cand)] {
+			seen[foldContentID(cand)] = true
 			probe = append(probe, cand)
 		}
 	}
@@ -209,49 +233,31 @@ func (s *Store) MatchByDisplayID(ctx context.Context, id string) ([]models.DumpM
 		return nil, models.ErrDumpMiss
 	}
 
-	placeholders := strings.Repeat("?,", len(probe)-1) + "?"
-	args := make([]any, len(probe))
-	for i, cand := range probe {
-		args[i] = cand
-	}
-	query := "SELECT content_id, dvd_id, release_date, service_code FROM videos WHERE content_id IN (" + placeholders + ")"
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	rows, err := s.queryContentIDs(ctx, probe, true)
 	if err != nil {
 		return nil, fmt.Errorf("dump candidate lookup failed for %q: %w", id, err)
 	}
-	defer func() { _ = rows.Close() }()
-
+	buckets := contentIDBuckets(rows)
 	queryIdentity := dumpMarkerDisplayKey(id)
 	rawMarker := isRawDumpMarkerQuery(id)
-	byContentID := make(map[string]models.DumpMatch, len(probe))
-	for rows.Next() {
-		var m models.DumpMatch
-		var dvdID, rel, svc sql.NullString
-		if err := rows.Scan(&m.ContentID, &dvdID, &rel, &svc); err != nil {
-			return nil, fmt.Errorf("dump candidate lookup failed for %q: scan: %w", id, err)
+	matches := make([]models.DumpMatch, 0, len(rows))
+	for _, candidate := range probe {
+		row, ok := selectContentID(buckets[foldContentID(candidate)], candidate, candidate == exactID)
+		if !ok {
+			continue
 		}
-		m.DVDID = dvdID.String
-		m.ReleaseDate = rel.String
-		m.ServiceCode = svc.String
-		// Preserve null-DVD candidate discovery and literal raw ownership,
-		// but never re-admit a conflicting published identity via expansion.
-		rawOwned := rawMarker && dumpRawMarkerEqual(m.ContentID, exactID)
-		if m.DVDID != "" && !rawOwned && (rawMarker || queryIdentity != "") {
-			if queryIdentity == "" || dumpMarkerDisplayKey(m.DVDID) != queryIdentity {
+		// Check ambiguity before published-identity filtering. A conflicting
+		// case-distinct row must never disappear to make an alias look unique.
+		rawOwned := rawMarker && dumpRawMarkerEqual(row.contentID, exactID)
+		if row.dvdID != "" && !rawOwned && (rawMarker || queryIdentity != "") {
+			if queryIdentity == "" || dumpMarkerDisplayKey(row.dvdID) != queryIdentity {
 				continue
 			}
 		}
-		byContentID[m.ContentID] = m
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("dump candidate lookup failed for %q: %w", id, err)
-	}
-
-	matches := make([]models.DumpMatch, 0, len(byContentID))
-	for _, cand := range probe {
-		if m, ok := byContentID[cand]; ok {
-			matches = append(matches, m)
-		}
+		matches = append(matches, models.DumpMatch{
+			ContentID: row.contentID, DVDID: row.dvdID,
+			ReleaseDate: row.releaseDate, ServiceCode: row.serviceCode,
+		})
 	}
 	if len(matches) == 0 {
 		return nil, models.ErrDumpMiss

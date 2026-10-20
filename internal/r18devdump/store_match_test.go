@@ -266,10 +266,10 @@ func TestMatchByDisplayID_CandidateRowsErr(t *testing.T) {
 	defer func() { _ = s.Close() }()
 	_, err := s.MatchByDisplayID(context.Background(), "IPX-535")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "candidate lookup failed")
+	assert.Contains(t, err.Error(), "content_id lookup failed")
 }
 
-func TestMatchByDisplayID_NormQueryErrorPropagated(t *testing.T) {
+func TestMatchByDisplayID_MalformedTableErrorPropagated(t *testing.T) {
 	path := seedDump(t, "118ipx00535\tIPX-535")
 	corruptor, err := sql.Open("sqlite3", path)
 	require.NoError(t, err)
@@ -282,7 +282,7 @@ func TestMatchByDisplayID_NormQueryErrorPropagated(t *testing.T) {
 	defer func() { _ = store.Close() }()
 	_, err = store.MatchByDisplayID(context.Background(), "IPX-535")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "dvd_id lookup failed")
+	assert.Contains(t, err.Error(), "content_id lookup failed")
 }
 
 func TestMatchByDisplayID_ClosedDBCandidateError(t *testing.T) {
