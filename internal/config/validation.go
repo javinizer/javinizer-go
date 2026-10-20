@@ -235,11 +235,9 @@ func ValidateScraperOverrides(c *Config) error {
 	return nil
 }
 
-// ValidateTranslationProvider validates cross-field translation provider configuration.
-// It checks provider-specific requirements (base URLs, API keys, modes) based on the
-// selected provider. When translation is disabled, all checks are skipped.
-//
-//nolint:goconst // duplicated from validateTranslationProviderInternal for credential-excluding validation
+// validateTranslationProviderExcludingCredentials checks provider structure but
+// allows credentials to be supplied later by runtime environment overrides.
+// When translation is disabled, all checks are skipped.
 func validateTranslationProviderExcludingCredentials(c *Config) error {
 	if c == nil {
 		return nil
@@ -338,9 +336,22 @@ const dbTypeSQLite = "sqlite"
 
 func validateConfigExcludingTranslationCredentials(cfg *Config) error {
 	cfg = cfg.Clone()
+	if err := validateConfigStructure(cfg); err != nil {
+		return err
+	}
+	return validateTranslationProviderExcludingCredentials(cfg)
+}
 
+// validateConfigStructure runs the shared checks in their first-error order.
+// Callers must pass a clone: delegated scraper validators may normalize it.
+// Translation validation follows separately so persistence can omit credentials.
+func validateConfigStructure(cfg *Config) error {
+	// --- Structural / field-level checks ---
+
+	// Validate database settings
 	dbType := strings.ToLower(strings.TrimSpace(cfg.Database.Type))
 	if dbType == "" {
+		// Backward compatibility: treat empty type as sqlite default.
 		dbType = dbTypeSQLite
 	}
 	if dbType != dbTypeSQLite {
@@ -351,6 +362,7 @@ func validateConfigExcludingTranslationCredentials(cfg *Config) error {
 		return fmt.Errorf("database.dsn is required")
 	}
 
+	// Validate scraper timeouts
 	if cfg.Scrapers.TimeoutSeconds < 1 || cfg.Scrapers.TimeoutSeconds > 300 {
 		return fmt.Errorf("scrapers.timeout_seconds must be between 1 and 300")
 	}
@@ -358,16 +370,20 @@ func validateConfigExcludingTranslationCredentials(cfg *Config) error {
 		return fmt.Errorf("scrapers.request_timeout_seconds must be between 1 and 600")
 	}
 
+	// Validate FlareSolverr config (global)
 	if err := cfg.Scrapers.FlareSolverr.Validate("scrapers.flaresolverr"); err != nil {
 		return err
 	}
 
+	// Validate Browser config (global)
 	if err := cfg.Scrapers.Browser.Validate("scrapers.browser"); err != nil {
 		return err
 	}
 
+	// Validate referer URL format
 	referer := strings.TrimSpace(cfg.Scrapers.Referer)
 	if referer == "" {
+		// Backward compatibility with old configs that omitted referer.
 		referer = dmmBaseURL
 	}
 	u, err := url.Parse(referer)
@@ -375,6 +391,7 @@ func validateConfigExcludingTranslationCredentials(cfg *Config) error {
 		return fmt.Errorf("scrapers.referer must be a valid http(s) URL with a host")
 	}
 
+	// Validate performance settings
 	if cfg.Performance.MaxWorkers < 1 || cfg.Performance.MaxWorkers > 100 {
 		return fmt.Errorf("performance.max_workers must be between 1 and 100")
 	}
@@ -385,6 +402,8 @@ func validateConfigExcludingTranslationCredentials(cfg *Config) error {
 		return fmt.Errorf("performance.update_interval must be between 10 and 5000")
 	}
 
+	// Validate update settings
+	// Allow 0 to mean "use default" (handled by DefaultConfig and migrations)
 	if cfg.System.VersionCheckIntervalHours != 0 && (cfg.System.VersionCheckIntervalHours < 1 || cfg.System.VersionCheckIntervalHours > 168) {
 		return fmt.Errorf("system.version_check_interval_hours must be between 1 and 168 (1 week), or 0 for default")
 	}
@@ -398,6 +417,7 @@ func validateConfigExcludingTranslationCredentials(cfg *Config) error {
 		return fmt.Errorf("system.image_cache_max_size_mb must be >= 0 (0 disables the quota)")
 	}
 
+	// Validate logging rotation settings
 	if cfg.Logging.MaxSizeMB < 0 {
 		return fmt.Errorf("logging.max_size_mb must be >= 0")
 	}
@@ -416,15 +436,22 @@ func validateConfigExcludingTranslationCredentials(cfg *Config) error {
 		}
 	}
 
+	// ui.language: "auto" or a syntactically valid BCP 47 tag. An unsupported
+	// but valid tag must not be rejected — runtimes fall back to English.
 	if err := validateUILanguage(cfg.UI.Language); err != nil {
 		return err
 	}
 
+	// Operation mode feeds workflow construction; a config typo must fail closed
+	// instead of silently defaulting to organize (which would run the wrong
+	// file-operation mode). Empty is allowed (defaults to organize elsewhere).
 	if rawMode := strings.TrimSpace(string(cfg.Output.Operation.OperationMode)); rawMode != "" {
 		if _, err := operationmode.ParseOperationMode(rawMode); err != nil {
 			return fmt.Errorf("output.operation_mode is invalid: %w", err)
 		}
 	}
+
+	// --- Cross-field validators ---
 
 	if err := ValidateScraperOverrides(cfg); err != nil {
 		return err
@@ -432,10 +459,6 @@ func validateConfigExcludingTranslationCredentials(cfg *Config) error {
 	if err := ValidateProxyProfiles(cfg); err != nil {
 		return err
 	}
-	if err := validateTranslationProviderExcludingCredentials(cfg); err != nil {
-		return err
-	}
-
 	return nil
 }
 
@@ -447,94 +470,28 @@ func ValidateTranslationProvider(c *Config) error {
 	return validateTranslationProviderInternal(c)
 }
 
-// validateTranslationProviderInternal contains the translation provider validation logic.
+// validateTranslationProviderInternal checks structure before credentials so
+// missing API keys never hide a malformed provider configuration.
 func validateTranslationProviderInternal(c *Config) error {
+	if err := validateTranslationProviderExcludingCredentials(c); err != nil {
+		return err
+	}
+	return validateTranslationCredentials(c)
+}
+
+// validateTranslationCredentials is the runtime-only tail. The provider's
+// structural settings must have been validated before calling it.
+func validateTranslationCredentials(c *Config) error {
 	t := c.Metadata.Translation
+	if !t.Enabled {
+		return nil
+	}
 
 	provider := strings.ToLower(strings.TrimSpace(t.Provider))
 	if provider == "" {
 		provider = translationProviderOpenAI
 	}
-
-	timeoutSeconds := t.TimeoutSeconds
-	if timeoutSeconds <= 0 {
-		timeoutSeconds = 60
-	}
-
-	openAIBaseURL := strings.TrimSpace(t.OpenAI.BaseURL)
-	if openAIBaseURL == "" {
-		openAIBaseURL = "https://api.openai.com/v1"
-	}
-
-	deepLMode := models.DeepLMode(strings.ToLower(strings.TrimSpace(string(t.DeepL.Mode))))
-	if deepLMode == "" {
-		deepLMode = models.DeepLModeFree
-	}
-
 	googleMode := models.GoogleMode(strings.ToLower(strings.TrimSpace(string(t.Google.Mode))))
-	if googleMode == "" {
-		googleMode = models.GoogleModeFree
-	}
-
-	if !t.Enabled {
-		return nil
-	}
-
-	if timeoutSeconds < 5 || timeoutSeconds > 300 {
-		return fmt.Errorf("metadata.translation.timeout_seconds must be between 5 and 300")
-	}
-
-	switch provider {
-	case translationProviderOpenAI:
-		if err := validateHTTPBaseURL("metadata.translation.openai.base_url", openAIBaseURL); err != nil {
-			return err
-		}
-	case "deepl":
-		if deepLMode != models.DeepLModeFree && deepLMode != models.DeepLModePro {
-			return fmt.Errorf("metadata.translation.deepl.mode must be either 'free' or 'pro'")
-		}
-		if strings.TrimSpace(t.DeepL.BaseURL) != "" {
-			if err := validateHTTPBaseURL("metadata.translation.deepl.base_url", t.DeepL.BaseURL); err != nil {
-				return err
-			}
-		}
-	case "google":
-		if googleMode != models.GoogleModeFree && googleMode != models.GoogleModePaid {
-			return fmt.Errorf("metadata.translation.google.mode must be either 'free' or 'paid'")
-		}
-		if strings.TrimSpace(t.Google.BaseURL) != "" {
-			if err := validateHTTPBaseURL("metadata.translation.google.base_url", t.Google.BaseURL); err != nil {
-				return err
-			}
-		}
-	case "openai-compatible":
-		if strings.TrimSpace(t.OpenAICompatible.BaseURL) == "" {
-			return fmt.Errorf("metadata.translation.openai_compatible.base_url is required when provider=openai-compatible")
-		}
-		if err := validateHTTPBaseURL("metadata.translation.openai_compatible.base_url", t.OpenAICompatible.BaseURL); err != nil {
-			return err
-		}
-		if strings.TrimSpace(t.OpenAICompatible.Model) == "" {
-			return fmt.Errorf("metadata.translation.openai_compatible.model is required when provider=openai-compatible")
-		}
-		switch t.OpenAICompatible.NormalizedBackendType() {
-		case "", "vllm", "ollama", "llama.cpp", "other":
-		default:
-			return fmt.Errorf("metadata.translation.openai_compatible.backend_type must be one of: auto, vllm, ollama, llama.cpp, other")
-		}
-	case "anthropic":
-		if strings.TrimSpace(t.Anthropic.BaseURL) == "" {
-			return fmt.Errorf("metadata.translation.anthropic.base_url is required when provider=anthropic")
-		}
-		if err := validateHTTPBaseURL("metadata.translation.anthropic.base_url", t.Anthropic.BaseURL); err != nil {
-			return err
-		}
-		if strings.TrimSpace(t.Anthropic.Model) == "" {
-			return fmt.Errorf("metadata.translation.anthropic.model is required when provider=anthropic")
-		}
-	default:
-		return fmt.Errorf("metadata.translation.provider must be one of: openai, openai-compatible, anthropic, deepl, google")
-	}
 
 	// REGV-04: Validate API key presence at config time
 	switch provider {
