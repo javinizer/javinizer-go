@@ -22,6 +22,25 @@ const exclusiveStagingAttempts = 64
 // re-assert requested without depending on host umask behavior.
 var stagedHandleChmod = func(f *os.File, mode os.FileMode) error { return f.Chmod(mode) }
 
+// nativeStagingModeMatches proves that an open native inode already has the
+// requested permissions. ACL-managed volumes can allow O_CREATE but forbid
+// even a no-op chmod (ZFS aclmode=restricted). Do not attempt that redundant
+// mutation, but still require chmod when umask/ACL inheritance changed the
+// mode. Include special bits: chmod(perm) would clear those too.
+//
+// Only the handle is inspected, never its possibly substituted name. Native
+// handles inside filesystem wrappers can supply this read-only proof too;
+// virtual filesystems retain their existing explicit Chmod contract.
+func nativeStagingModeMatches(file afero.File, perm os.FileMode) bool {
+	native, ok := file.(*os.File)
+	if !ok {
+		return false
+	}
+	info, err := native.Stat()
+	return err == nil && info.Mode().IsRegular() &&
+		info.Mode()&(os.ModePerm|os.ModeSetuid|os.ModeSetgid|os.ModeSticky) == perm
+}
+
 // osStagingHandle returns the *os.File behind fh ONLY when fs is the real
 // OsFs. wave-29 (codex P1, PR#215) moved every staging metadata operation
 // onto the open handle so a name planted mid-flow can never redirect it, but
@@ -79,8 +98,8 @@ func CreateExclusiveStagingFile(fs afero.Fs, dest, suffix string, start uint64, 
 			// (e.g. 0666 becomes 0644 under umask 0077) and nothing else
 			// re-applies it, so a restore staging for permissive media would
 			// silently narrow its permission bits. Re-assert the exact
-			// requested perms THROUGH THE OPEN HANDLE while the name is
-			// exclusively ours; see replacements_posix.go /
+			// requested perms THROUGH THE OPEN HANDLE if they are not
+			// already exact; see replacements_posix.go /
 			// replacements_windows.go for the strict-vs-best-effort split.
 			if cerr := restoreStagingMode(fs, staged, file, mode.Perm()); cerr != nil {
 				// wave-45 (codex P2, PR#215 finding F3): the cleanup is bound to

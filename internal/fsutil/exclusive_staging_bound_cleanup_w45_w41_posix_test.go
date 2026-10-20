@@ -12,6 +12,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 
 	"github.com/spf13/afero"
@@ -22,6 +23,10 @@ var errW45Chmod = errors.New("injected w45 handle chmod failure")
 
 func w45SwapChmodSeam(t *testing.T, plant func(name string)) {
 	t.Helper()
+	// Force a real mode change: an already-exact mode needs no chmod on
+	// ACL-managed volumes, regardless of the runner's ambient umask.
+	oldMask := syscall.Umask(0o077)
+	t.Cleanup(func() { syscall.Umask(oldMask) })
 	prev := stagedHandleChmod
 	stagedHandleChmod = func(f *os.File, _ os.FileMode) error {
 		if plant != nil {

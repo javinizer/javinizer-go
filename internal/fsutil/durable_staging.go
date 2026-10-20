@@ -16,8 +16,12 @@ func SyncStagedMetadata(fs afero.Fs, file afero.File, source os.FileInfo) error 
 		return fmt.Errorf("durable staging requires a native file handle")
 	}
 	RestoreStagingOwnership(fs, file, source)
-	if err := native.Chmod(source.Mode().Perm()); err != nil {
-		return err
+	// Ownership restoration can change permission bits. Re-prove the mode
+	// afterwards, and avoid a redundant chmod on ACL-managed destinations.
+	if mode := source.Mode().Perm(); !nativeStagingModeMatches(native, mode) {
+		if err := stagedHandleChmod(native, mode); err != nil {
+			return err
+		}
 	}
 	if err := stagedHandleChtimes(native.Fd(), source.ModTime(), source.ModTime()); err != nil {
 		return err
