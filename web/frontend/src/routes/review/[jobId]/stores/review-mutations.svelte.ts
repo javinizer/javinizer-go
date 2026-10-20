@@ -21,12 +21,8 @@ import {
 	type PosterCropMetrics,
 } from '../review-utils';
 import { overlayFieldOverride } from './overlay-field-override';
-import {
-	applyCropEcho,
-	clearCropGeometry,
-	rescrapeClearedMovieKeys,
-	siblingResultFilePaths,
-} from './poster-crop-sync';
+import { reconcilePosterSuccess } from './poster-success-reconciliation';
+import { applyCropEcho, clearCropGeometry, rescrapeClearedMovieKeys } from './poster-crop-sync';
 import { buildMovieToSave, rebaseOverlayOntoMovie } from './save-helpers';
 import * as m from '$lib/paraglide/messages';
 
@@ -149,69 +145,24 @@ export function createReviewMutations(deps: ReviewMutationsDeps) {
 			if (!isCurrentJob(mutationJobId, generation)) return;
 			const currentJob = deps.getJob();
 			if (currentJob) {
-				// The backend applies the new poster to every part of the movie —
-				// sync siblings too, or a stale sibling overlay would re-upload the
-				// old poster (and crop state) on the next save.
-				const partPaths = siblingResultFilePaths(
-					currentJob.results as Record<string, FileResult>,
-					resultId,
-				);
-				const fromUrlEcho = (movie: Movie): Movie =>
-					clearCropGeometry({
-						...movie,
-						poster_url: data.poster_url,
-						cropped_poster_url: data.cropped_poster_url,
-						should_crop_poster: false,
-					});
-				const updatedJob: BatchJobResponse = {
-					...currentJob,
-					results: { ...currentJob.results },
-				};
-				for (const filePath of partPaths) {
-					const r = updatedJob.results[filePath] as FileResult;
-					if (r?.movie) {
-						updatedJob.results[filePath] = { ...r, movie: fromUrlEcho(r.movie) };
-					}
-				}
-				// D12: advance the CAS baseline ONLY for the target part —
-				// siblings' fresh revisions arrive via the invalidated query
-				// (copying the target's revision onto them would lie, codex
-				// r24).
-				// Advance EVERY family part's CAS baseline from the committed
-				// revision map (codex r26); fall back to the single target
-				// field for older servers.
-				const advanceRevision = (filePath: string, rev: number) => {
-					const r = updatedJob.results[filePath] as FileResult | undefined;
-					if (r) updatedJob.results[filePath] = { ...r, revision: rev };
-				};
-				if (data.revisions && Object.keys(data.revisions).length > 0) {
-					const resultToPath = new Map(
-						Object.entries(updatedJob.results).map(([fp, r]) => [
-							(r as FileResult).result_id,
-							fp,
-						] as const),
-					);
-					for (const [rid, rev] of Object.entries(data.revisions)) {
-						const fp = resultToPath.get(rid);
-						if (fp) advanceRevision(fp, rev);
-					}
-				} else if (data.revision !== undefined) {
-					for (const [filePath, r0] of Object.entries(updatedJob.results)) {
-						const r = r0 as FileResult;
-						if (r?.result_id === resultId) {
-							updatedJob.results[filePath] = { ...r, revision: data.revision };
-						}
-					}
-				}
-				deps.skipJobSync();
-				deps.setJob(updatedJob, mutationJobId, generation);
-
 				const editedMovies = deps.getEditedMovies();
-				for (const filePath of partPaths) {
-					const movie = editedMovies.get(filePath);
-					if (movie) {
-						editedMovies.set(filePath, fromUrlEcho(movie));
-					}
+				const reconciled = reconcilePosterSuccess(
+					currentJob,
+					editedMovies,
+					resultId,
+					data,
+					(movie) =>
+						clearCropGeometry({
+							...movie,
+							poster_url: data.poster_url,
+							cropped_poster_url: data.cropped_poster_url,
+							should_crop_poster: false,
+						}),
+				);
+				deps.skipJobSync();
+				deps.setJob(reconciled.job, mutationJobId, generation);
+				for (const [filePath, movie] of reconciled.editedMovieUpdates) {
+					editedMovies.set(filePath, movie);
 				}
 			}
 
@@ -521,51 +472,14 @@ const ops = Array.from(latestByFamily.entries());
 			// the key — the server holds no applyable geometry either.
 			const job = deps.getJob();
 			if (job) {
-				// Same movie ID = same poster: the server applied the crop to every
-				// part, so sync every part here (multipart; see siblingResultFilePaths).
-				const partPaths = siblingResultFilePaths(
-					job.results as Record<string, FileResult>,
-					resultId,
-				);
-				const updatedJob: BatchJobResponse = { ...job, results: { ...job.results } };
-				for (const filePath of partPaths) {
-					const r = updatedJob.results[filePath] as FileResult;
-					if (r?.movie) {
-						updatedJob.results[filePath] = { ...r, movie: applyCropEcho(r.movie, response) };
-					}
-				}
-				const advanceRevision = (filePath: string, rev: number) => {
-					const r = updatedJob.results[filePath] as FileResult | undefined;
-					if (r) updatedJob.results[filePath] = { ...r, revision: rev };
-				};
-				if (response.revisions && Object.keys(response.revisions).length > 0) {
-					const resultToPath = new Map(
-						Object.entries(updatedJob.results).map(([fp, r]) => [
-							(r as FileResult).result_id,
-							fp,
-						] as const),
-					);
-					for (const [rid, rev] of Object.entries(response.revisions)) {
-						const fp = resultToPath.get(rid);
-						if (fp) advanceRevision(fp, rev);
-					}
-				} else if (response.revision !== undefined) {
-					for (const [filePath, r0] of Object.entries(updatedJob.results)) {
-						const r = r0 as FileResult;
-						if (r?.result_id === resultId) {
-							updatedJob.results[filePath] = { ...r, revision: response.revision };
-						}
-					}
-				}
-				deps.skipJobSync();
-				deps.setJob(updatedJob, mutationJobId, generation);
-
 				const editedMovies = deps.getEditedMovies();
-				for (const filePath of partPaths) {
-					const movie = editedMovies.get(filePath);
-					if (movie) {
-						editedMovies.set(filePath, applyCropEcho(movie, response));
-					}
+				const reconciled = reconcilePosterSuccess(job, editedMovies, resultId, response, (movie) =>
+					applyCropEcho(movie, response),
+				);
+				deps.skipJobSync();
+				deps.setJob(reconciled.job, mutationJobId, generation);
+				for (const [filePath, movie] of reconciled.editedMovieUpdates) {
+					editedMovies.set(filePath, movie);
 				}
 			}
 
