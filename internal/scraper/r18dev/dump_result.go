@@ -331,7 +331,7 @@ func (s *scraper) searchFromDump(ctx context.Context, id string) (*models.Scrape
 				// canonical expansion spells the unpadded query form
 				// (1rct00156h vs 1rct156h); padding-equivalent rows name
 				// the same product, so marker queries compare by identity.
-				if c.ContentID != all[i] && (!markerQuery || !rawRemasterCIDEqual(c.ContentID, all[i])) {
+				if !r18devdump.ContentIDsEqualFold(c.ContentID, all[i]) && (!markerQuery || !rawRemasterCIDEqual(c.ContentID, all[i])) {
 					trusted = false
 					break
 				}
@@ -344,7 +344,7 @@ func (s *scraper) searchFromDump(ctx context.Context, id string) (*models.Scrape
 		logging.Debugf("R18: dump candidates for %s -> %s (+%d more)", id, candidates[0].ContentID, len(candidates)-1)
 		return nil, candidates
 	}
-	if marker, _ := classifyRemaster(id); marker != "" && !isRawRemasterContentIDQuery(id) && movie.DVDID != "" && !displayIDsMatchByIdentity(movie.DVDID, id) {
+	if marker, _ := classifyRemaster(id); marker != "" && movie.ContentID != strings.TrimSpace(id) && !isRawRemasterContentIDQuery(id) && movie.DVDID != "" && !displayIDsMatchByIdentity(movie.DVDID, id) {
 		return nil, nil
 	}
 	logging.Debugf("R18: dump lookup resolved %s -> full metadata (zero HTTP)", id)

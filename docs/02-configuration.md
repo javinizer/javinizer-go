@@ -437,6 +437,10 @@ Besides `javinizer dump download`, the WebUI settings page can upload a dump man
 
 Raw `.sql.gz` uploads reject duplicate logical keys and NULL required keys before replacing the working dump; download/CLI imports retain their existing first-duplicate-wins behavior. Nullable fields and ignored tables remain allowed, with the existing optional-table rules unchanged.
 
+Content IDs retain their original source casing, including association keys and media paths. Exact content-ID lookups take priority; ASCII-case-insensitive aliases are used only when they identify one raw ID. Case-distinct IDs are never merged. Fresh imports include an additional lookup index; older sidecars remain compatible without migration, although folded probes may scan them.
+
+Rows without a published DVD ID remain unverified candidates, not full-metadata hits. A dump-candidate HTTP response must match the stored raw content ID exactly. Rejected candidates still fall through to the existing HTTP resolver, whose matching policy is unchanged and can independently choose a different content ID; that fallback uses HTTP metadata, not the rejected dump row.
+
 The dump is managed with the `javinizer dump` command group — see
 [`dump` in the CLI Reference](./03-cli-reference.md#dump) for `download`,
 `update`, `status`, and `search`. The dump URL can be overridden with the

@@ -41,10 +41,8 @@ type ImportResult struct {
 // before swap instead of producing a sidecar whose lookups fail on scan.
 var ErrDumpTypedValue = errors.New("invalid typed value in dump")
 
-// ErrDumpNonCanonicalID marks a content_id whose stored form is not the
-// required non-NULL canonical lowercase that lookups bind — such rows are
-// otherwise discarded by INSERT OR IGNORE or become unreachable (lookups
-// lowercase-bind before comparing against BINARY primary keys).
+// ErrDumpNonCanonicalID marks a NULL, blank, padded, or control-containing
+// content_id. Source casing is preserved: folded lookup is an alias, not identity.
 var ErrDumpNonCanonicalID = errors.New("non-canonical content_id casing")
 
 // ErrDumpSwap marks failures at the commit+swap boundary (checkpoint, close,
@@ -268,6 +266,7 @@ func importWithOpenDB(ctx context.Context, r io.Reader, path string, opts Import
 		schema += s.create + ";"
 	}
 	schema += `CREATE INDEX idx_videos_dvd_id_norm ON videos(dvd_id_norm);
+		CREATE INDEX idx_videos_content_id_fold ON videos(content_id COLLATE NOCASE);
 		CREATE INDEX idx_video_actresses_cid ON video_actresses(content_id);
 		CREATE INDEX idx_video_categories_cid ON video_categories(content_id);
 		CREATE INDEX idx_video_directors_cid ON video_directors(content_id);`
@@ -337,8 +336,8 @@ func importWithOpenDB(ctx context.Context, r io.Reader, path string, opts Import
 
 	// Per emitted row, INTEGER-typed columns prove storage class (else the built
 	// sidecar fails NullInt64 scans at lookup time) and every content_id column
-	// proves canonical lowercase (lookups lowercase-bind before comparing against
-	// the BINARY primary key; uppercase-stored ids become unreachable). Indices
+	// proves a usable raw key. Casing remains source identity; aliases are resolved
+	// unambiguously at lookup time rather than rewriting keys. Indices
 	// resolve once per schema, up front.
 	type colCheck struct {
 		idx  int
@@ -395,11 +394,11 @@ func importWithOpenDB(ctx context.Context, r io.Reader, path string, opts Import
 		for _, cc := range casingCols[row.Table] {
 			if cc.idx < len(mapped) {
 				v := mapped[cc.idx]
-				// Canonical = non-NULL, nonempty, trimmed, already-lowercase.
+				// Usable raw identity = non-NULL, nonempty, trimmed, no controls.
 				// Reject missing/NULL keys before INSERT OR IGNORE silently
 				// drops them, even when other valid videos would allow a swap.
 				trimmed := strings.TrimSpace(v)
-				if v == nullSentinel || trimmed == "" || trimmed != v || v != strings.ToLower(v) || strings.ContainsAny(v, " \t\n\v\f\r") || strings.ContainsFunc(v, unicode.IsControl) {
+				if v == nullSentinel || trimmed == "" || trimmed != v || strings.ContainsAny(v, " \t\n\v\f\r") || strings.ContainsFunc(v, unicode.IsControl) {
 					return fmt.Errorf("%w: %s.%s = %q", ErrDumpNonCanonicalID, sqliteTableName(row.Table), cc.name, v)
 				}
 			}

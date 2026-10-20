@@ -478,7 +478,7 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 	// DMM rental content ids (e.g. dv00899air, 1rct00156hr) never exist on
 	// r18.dev: normalize to the base identity before the dump lookup,
 	// classification, candidate generation and raw-identity comparisons.
-	id = stripRentalSuffixMarkerAware(id)
+	id = stripRentalSuffixPreserveCase(id)
 
 	// Dump fast path: on a dvd_id hit the dump returns a complete
 	// ScraperResult with no r18.dev API call at all; on a norm miss it may
@@ -487,7 +487,9 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 	// per-candidate fallthrough so a stale dump row never dead-ends the scrape.
 	result, dumpCandidates := s.searchFromDump(ctx, id)
 	if result != nil {
-		if guarded, err := guardRemasterResult(id, result); err == nil {
+		// Supply proven raw ownership without bypassing marker sanitization.
+		rawIdentity := result.ContentID == id || isRawRemasterContentIDQuery(id)
+		if guarded, err := guardRemasterResultWithIdentity(id, result, rawIdentity); err == nil {
 			return guarded, nil
 		}
 	}
@@ -538,7 +540,7 @@ func (s *scraper) fetchAndParseCandidate(ctx context.Context, url, wantContentID
 	if err != nil {
 		return nil, err
 	}
-	if res == nil || res.ContentID == "" || !strings.EqualFold(res.ContentID, wantContentID) {
+	if res == nil || res.ContentID == "" || res.ContentID != wantContentID {
 		got := ""
 		if res != nil {
 			got = res.ContentID
