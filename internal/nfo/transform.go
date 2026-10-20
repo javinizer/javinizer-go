@@ -225,24 +225,12 @@ func (g *Generator) resolveTagline(ctx context.Context, tmplCtx *template.Contex
 // <ACTORS>/<ACTRESSES> resolve identically to folder/file/display-title
 // templates.
 func (g *Generator) movieTemplateContext(applyCtx context.Context, movie *models.Movie, videoFilePath, partSuffix string, partNumber int, isMultiPart bool) *template.Context {
-	ctx := template.NewContextFromMovieWithOptions(movie, template.ContextOptions{
-		FirstNameOrder:  g.config.FirstNameOrder,
-		RenderCredits:   true,
-		UseCreditedName: g.config.UseCreditedName,
-	})
+	ctx := g.config.ToNFONameConfig(false, "", 0).TemplateRenderOptions().NewContext(movie)
 	ctx.SetExecCtx(applyCtx)
 	ctx.VideoFilePath = videoFilePath
 	ctx.PartSuffix = partSuffix
 	ctx.PartNumber = partNumber
 	ctx.IsMultiPart = isMultiPart
-	ctx.GroupActress = g.config.GroupActress
-	ctx.GroupActressMin = g.config.GroupActressMin
-	ctx.GroupActressName = g.config.GroupActressName
-	ctx.GroupUnknownActressName = g.config.GroupUnknownActressName
-	ctx.UnknownActressMode = g.config.UnknownActressMode
-	ctx.FirstNameOrder = g.config.FirstNameOrder
-	ctx.ActressLanguageJa = g.config.ActressLanguageJA
-	ctx.ActressDelimiter = g.config.ActressDelimiter
 	return ctx
 }
 

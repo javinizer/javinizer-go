@@ -1,6 +1,9 @@
 package organizer
 
-import "github.com/javinizer/javinizer-go/internal/models"
+import (
+	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/template"
+)
 
 // MediaFormatConfig holds shared media file naming/format configuration.
 // Both organizer.Config and downloader.Config embed this to avoid duplicating
@@ -22,4 +25,22 @@ type MediaFormatConfig struct {
 	ActressDelimiter        string // Delimiter between actress names when no DELIM= modifier is present (default: ", ")
 	FirstNameOrder          bool   // true = FirstName LastName, false = LastName FirstName (default: false)
 	ActressLanguageJA       bool   // true = prefer JapaneseName over First/Last (mirrors nfo.actress_language_ja)
+}
+
+// RenderOptionsFromMediaFormat returns the shared name policy for media templates.
+func RenderOptionsFromMediaFormat(c MediaFormatConfig, useCreditedName bool) template.RenderOptions {
+	return template.RenderOptions{
+		ContextOptions: template.ContextOptions{
+			FirstNameOrder:  c.FirstNameOrder,
+			RenderCredits:   true,
+			UseCreditedName: useCreditedName,
+		},
+		GroupActress:            c.GroupActress,
+		GroupActressMin:         c.GroupActressMin,
+		GroupActressName:        c.GroupActressName,
+		GroupUnknownActressName: c.GroupUnknownActressName,
+		UnknownActressMode:      c.UnknownActressMode,
+		ActressLanguageJa:       c.ActressLanguageJA,
+		ActressDelimiter:        c.ActressDelimiter,
+	}
 }

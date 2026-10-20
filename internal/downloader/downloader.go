@@ -13,6 +13,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/organizer"
 	"github.com/javinizer/javinizer-go/internal/template"
 )
 
@@ -177,20 +178,22 @@ func (d *Downloader) WithDestLocks(reg *fsutil.KeyedLockRegistry) *Downloader {
 	return &cp
 }
 
+func (d *Downloader) templateRenderOptions() template.RenderOptions {
+	opts := organizer.RenderOptionsFromMediaFormat(d.config.MediaFormatConfig, d.config.UseCreditedName)
+	// Keep the constructor snapshot and outer config fields authoritative.
+	opts.FirstNameOrder = d.actorFirstNameOrder
+	opts.ActressLanguageJa = d.config.ActorJapaneseNames
+	opts.ActressDelimiter = d.config.ActressDelimiter
+	opts.UnknownActressMode = d.config.UnknownActressMode
+	return opts
+}
+
 // buildTemplateContext creates a template.Context for media path resolution.
 // The context includes GroupActress, GroupActressName, FirstNameOrder, and
 // multipart info so that the MediaPathResolver can execute templates correctly.
 func (d *Downloader) buildTemplateContext(movie *models.Movie, multipart *MultipartInfo) *template.Context {
-	ctx := template.NewContextFromMovieWithOptions(movie, template.ContextOptions{FirstNameOrder: d.actorFirstNameOrder, RenderCredits: true, UseCreditedName: d.config.UseCreditedName})
+	ctx := d.templateRenderOptions().NewContext(movie)
 	ctx.Index = 0
-	ctx.GroupActress = d.config.GroupActress
-	ctx.GroupActressMin = d.config.GroupActressMin
-	ctx.GroupActressName = d.config.GroupActressName
-	ctx.GroupUnknownActressName = d.config.GroupUnknownActressName
-	ctx.UnknownActressMode = d.config.UnknownActressMode
-	ctx.ActressDelimiter = d.config.ActressDelimiter
-	ctx.FirstNameOrder = d.actorFirstNameOrder
-	ctx.ActressLanguageJa = d.config.ActorJapaneseNames
 
 	if multipart != nil {
 		ctx.IsMultiPart = multipart.IsMultiPart
@@ -205,16 +208,8 @@ func (d *Downloader) generateActressFilename(movie *models.Movie, actressName st
 		return ""
 	}
 
-	ctx := template.NewContextFromMovieWithOptions(movie, template.ContextOptions{FirstNameOrder: d.actorFirstNameOrder, RenderCredits: true, UseCreditedName: d.config.UseCreditedName})
+	ctx := d.templateRenderOptions().NewContext(movie)
 	ctx.ActressName = actressName
-	ctx.GroupActress = d.config.GroupActress
-	ctx.GroupActressMin = d.config.GroupActressMin
-	ctx.GroupActressName = d.config.GroupActressName
-	ctx.GroupUnknownActressName = d.config.GroupUnknownActressName
-	ctx.UnknownActressMode = d.config.UnknownActressMode
-	ctx.ActressDelimiter = d.config.ActressDelimiter
-	ctx.FirstNameOrder = d.actorFirstNameOrder
-	ctx.ActressLanguageJa = d.config.ActorJapaneseNames
 
 	engine := d.templateEngine
 	filename, err := engine.Execute(templateStr, ctx)

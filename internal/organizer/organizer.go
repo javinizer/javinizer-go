@@ -55,15 +55,7 @@ func resolveFileName(cfg *Config, engine template.EngineInterface, ctx *template
 
 func resolveBaseFileName(cfg *Config, engine template.EngineInterface, movie *models.Movie, match models.FileMatchInfo) string {
 	if cfg.RenameFile {
-		baseCtx := template.NewContextFromMovieWithOptions(movie, template.ContextOptions{FirstNameOrder: cfg.FirstNameOrder, RenderCredits: true, UseCreditedName: cfg.UseCreditedName})
-		baseCtx.GroupActress = cfg.GroupActress
-		baseCtx.GroupActressMin = cfg.GroupActressMin
-		baseCtx.GroupActressName = cfg.GroupActressName
-		baseCtx.GroupUnknownActressName = cfg.GroupUnknownActressName
-		baseCtx.UnknownActressMode = cfg.UnknownActressMode
-		baseCtx.FirstNameOrder = cfg.FirstNameOrder
-		baseCtx.ActressLanguageJa = cfg.ActressLanguageJA
-		baseCtx.ActressDelimiter = cfg.ActressDelimiter
+		baseCtx := cfg.templateRenderOptions().NewContext(movie)
 		applyTitleTruncation(engine, baseCtx, cfg.MaxTitleLength)
 
 		rendered, err := engine.Execute(cfg.FileFormat, baseCtx)
@@ -185,15 +177,7 @@ type planContext struct {
 }
 
 func buildPlanContext(cfg *Config, engine template.EngineInterface, movie *models.Movie, match models.FileMatchInfo) planContext {
-	ctx := template.NewContextFromMovieWithOptions(movie, template.ContextOptions{FirstNameOrder: cfg.FirstNameOrder, RenderCredits: true, UseCreditedName: cfg.UseCreditedName})
-	ctx.GroupActress = cfg.GroupActress
-	ctx.GroupActressMin = cfg.GroupActressMin
-	ctx.GroupActressName = cfg.GroupActressName
-	ctx.GroupUnknownActressName = cfg.GroupUnknownActressName
-	ctx.UnknownActressMode = cfg.UnknownActressMode
-	ctx.FirstNameOrder = cfg.FirstNameOrder
-	ctx.ActressLanguageJa = cfg.ActressLanguageJA
-	ctx.ActressDelimiter = cfg.ActressDelimiter
+	ctx := cfg.templateRenderOptions().NewContext(movie)
 
 	applyTitleTruncation(engine, ctx, cfg.MaxTitleLength)
 

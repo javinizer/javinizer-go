@@ -4,6 +4,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/nfo"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
+	"github.com/javinizer/javinizer-go/internal/template"
 )
 
 // Config holds the subset of application configuration needed by the Organizer.
@@ -91,4 +92,13 @@ func ConfigFromAppConfig(cfg *config.Config, nameCfg nfo.NFONameConfig) *Config 
 		MoveSubtitles:      cfg.Output.Operation.MoveSubtitles,
 		SubtitleExtensions: cfg.Output.Operation.SubtitleExtensions,
 	}
+}
+
+func (c *Config) templateRenderOptions() template.RenderOptions {
+	opts := RenderOptionsFromMediaFormat(c.MediaFormatConfig, c.UseCreditedName)
+	// These outer fields intentionally take precedence over the embedded copies.
+	opts.FirstNameOrder = c.FirstNameOrder
+	opts.ActressLanguageJa = c.ActressLanguageJA
+	opts.ActressDelimiter = c.ActressDelimiter
+	return opts
 }

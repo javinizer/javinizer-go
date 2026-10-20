@@ -436,19 +436,7 @@ func (g *Generator) extractStreamDetails(ctx context.Context, videoFilePath stri
 }
 
 func newNFOFilenameContext(movie *models.Movie, cfg NFONameConfig) *template.Context {
-	ctx := template.NewContextFromMovieWithOptions(movie, template.ContextOptions{
-		FirstNameOrder:  cfg.FirstNameOrder,
-		RenderCredits:   true,
-		UseCreditedName: cfg.UseCreditedName,
-	})
-	ctx.GroupActress = cfg.GroupActress
-	ctx.GroupActressMin = cfg.GroupActressMin
-	ctx.GroupActressName = cfg.GroupActressName
-	ctx.GroupUnknownActressName = cfg.GroupUnknownActressName
-	ctx.UnknownActressMode = cfg.UnknownActressMode
-	ctx.ActressLanguageJa = cfg.ActressLanguageJA
-	ctx.ActressDelimiter = cfg.ActressDelimiter
-	return ctx
+	return cfg.TemplateRenderOptions().NewContext(movie)
 }
 
 // ResolveNFOFilename computes the NFO filename for a movie using the same logic
