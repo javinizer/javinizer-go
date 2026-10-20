@@ -267,9 +267,11 @@ func (s *Store) MatchByDisplayID(ctx context.Context, id string) ([]models.DumpM
 	return matches, nil
 }
 
-// LookupMovie resolves a display dvd_id to a fully-populated DumpMovie with all
-// related entities joined. This is the zero-HTTP fast path for the r18.dev
-// scraper: when it hits, no r18.dev API call is needed at all. Returns
+// LookupMovie resolves an exact raw content_id or a display dvd_id to a
+// fully-populated DumpMovie with all related entities joined. Exact raw IDs
+// win over conflicting normalized DVD spellings, but null-DVD rows remain
+// unverified candidates, not full-movie hits. This is the zero-HTTP fast path
+// for the r18.dev scraper: when it hits, no r18.dev API call is needed. Returns
 // models.ErrDumpMiss on a miss; any other wrapped error indicates a degraded
 // dump (corrupt file, schema drift, I/O failure) that the caller should log
 // before falling back to HTTP.
@@ -278,6 +280,16 @@ func (s *Store) LookupMovie(ctx context.Context, dvdID string) (*models.DumpMovi
 		return nil, models.ErrDumpMiss
 	}
 	keys := dumpNormKeys(dvdID)
+	exact, err := s.queryContentIDs(ctx, []string{strings.TrimSpace(dvdID)}, false)
+	if err != nil {
+		return nil, err
+	}
+	if len(exact) != 0 {
+		if exact[0].dvdID == "" {
+			return nil, models.ErrDumpMiss
+		}
+		keys = dumpNormKeys(exact[0].dvdID)
+	}
 	if len(keys) == 0 {
 		return nil, models.ErrDumpMiss
 	}
@@ -293,15 +305,21 @@ func (s *Store) LookupMovie(ctx context.Context, dvdID string) (*models.DumpMovi
 	var thumbFirst, thumbLast sql.NullString
 	var siteID, serviceCode, releaseDate sql.NullString
 	var runtime sql.NullInt64
-	var err error
 	var found bool
 	for _, key := range keys {
-		row, rowFound, selectErr := s.selectDVDRow(ctx, key, dvdID)
-		if selectErr != nil {
-			return nil, selectErr
-		}
-		if !rowFound {
-			continue
+		var row dumpDVDRow
+		if len(exact) != 0 {
+			row = exact[0]
+		} else {
+			var rowFound bool
+			var selectErr error
+			row, rowFound, selectErr = s.selectDVDRow(ctx, key, dvdID)
+			if selectErr != nil {
+				return nil, selectErr
+			}
+			if !rowFound {
+				continue
+			}
 		}
 		err = s.db.QueryRowContext(ctx, `SELECT
 		content_id, dvd_id, title_en, title_ja, comment_en, comment_ja,

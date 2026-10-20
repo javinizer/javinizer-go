@@ -276,6 +276,10 @@ func TestContentIDCasing_PublishedDVDWinsOverAmbiguousLiteralAlias(t *testing.T)
 				require.NoError(t, err)
 				require.Len(t, matches, 1)
 				assert.Equal(t, "OTHER-002", matches[0].DVDID)
+				movie, err = store.LookupMovie(ctx, other)
+				require.NoError(t, err)
+				assert.Equal(t, other, movie.ContentID)
+				assert.Equal(t, "OTHER-002", movie.DVDID)
 			})
 		}
 	}
@@ -288,6 +292,8 @@ func TestContentIDCasing_UniqueGeneratedAliasReturnsRawID(t *testing.T) {
 	assert.Equal(t, []models.DumpMatch{{ContentID: "LuLu00441", ReleaseDate: "2026-01-01", ServiceCode: "digital"}}, matches)
 	_, err = store.LookupByContentID(context.Background(), "lulu00441")
 	require.ErrorIs(t, err, models.ErrDumpNoDVDID)
+	_, err = store.LookupMovie(context.Background(), "LuLu00441")
+	require.ErrorIs(t, err, models.ErrDumpMiss, "an exact null-DVD row is still only candidate evidence")
 }
 
 func TestContentIDCasing_FoldingMatchesSQLiteASCIIOnly(t *testing.T) {

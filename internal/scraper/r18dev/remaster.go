@@ -137,6 +137,16 @@ func stripRentalSuffixMarkerAware(id string) string {
 	return s
 }
 
+// stripRentalSuffixPreserveCase uses the same rental detection without erasing
+// the exact raw identity before the dump can distinguish case-sensitive keys.
+func stripRentalSuffixPreserveCase(id string) string {
+	raw := strings.TrimSpace(id)
+	if stripRentalSuffixMarkerAware(raw) != strings.ToLower(raw) {
+		return raw[:len(raw)-1]
+	}
+	return raw
+}
+
 func r18CompactID(id string) string {
 	return nonAlnumR18Regex.ReplaceAllString(strings.ToLower(strings.TrimSpace(id)), "")
 }

@@ -50,6 +50,10 @@ func TestContentIDLookupFaults(t *testing.T) {
 			_, err := casingFaultStore(t, failAt).LookupByContentID(context.Background(), "MiXeD")
 			require.ErrorContains(t, err, "synthetic casing query failure")
 		})
+		t.Run(fmt.Sprintf("movie/%d", failAt), func(t *testing.T) {
+			_, err := casingFaultStore(t, failAt).LookupMovie(context.Background(), "IPX-535")
+			require.ErrorContains(t, err, "synthetic casing query failure")
+		})
 	}
 	for _, tc := range []struct {
 		name, id string
@@ -71,6 +75,8 @@ func TestContentIDLookupFaults(t *testing.T) {
 }
 func TestContentIDLookupHelpers(t *testing.T) {
 	assert.Equal(t, "abc-ß-İ-K-01", foldContentID("AbC-ß-İ-K-01"))
+	assert.True(t, ContentIDsEqualFold("AbC001", "abc001"))
+	assert.False(t, ContentIDsEqualFold("K001", "k001"), "alias equality is ASCII-only")
 	var s *Store
 	rows, err := s.queryContentIDs(context.Background(), nil, true)
 	require.NoError(t, err)

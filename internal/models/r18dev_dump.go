@@ -129,7 +129,9 @@ type R18DevDumpLookup interface {
 	// Returns (nil, ErrDumpMiss) when nothing unambiguously matches.
 	MatchByDisplayID(ctx context.Context, id string) ([]DumpMatch, error)
 
-	// LookupMovie resolves a display dvd_id to a fully-populated DumpMovie —
+	// LookupMovie resolves an exact raw content_id before a display dvd_id to
+	// a fully-populated DumpMovie. Null-DVD rows remain candidate-only misses.
+	// The result includes
 	// titles, descriptions, runtime, release date, cover/poster/gallery URLs,
 	// actresses, maker, label, series, director, categories, and trailer. This
 	// is the zero-HTTP fast path: when it hits, the scraper needs no r18.dev

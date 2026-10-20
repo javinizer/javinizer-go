@@ -18,6 +18,12 @@ func foldContentID(id string) string {
 	}, id)
 }
 
+// ContentIDsEqualFold compares lookup aliases using SQLite's ASCII-only NOCASE
+// rules. It does not establish uniqueness or replace either raw source identity.
+func ContentIDsEqualFold(a, b string) bool {
+	return foldContentID(a) == foldContentID(b)
+}
+
 func contentIDBuckets(rows []dumpDVDRow) map[string][]dumpDVDRow {
 	buckets := make(map[string][]dumpDVDRow, len(rows))
 	for _, row := range rows {
