@@ -1385,47 +1385,7 @@ func (r *Reverter) RevertBatch(ctx context.Context, batchJobID string) (*RevertB
 		return nil, ErrNoOperationsFound
 	}
 
-	r.sweepJournaledDestinations(ctx, processable)
-
-	// leniently-promote reload: the sweep consumed/persisted; re-read the rows so
-	// the revert's in-memory journal can't chase backups the sweep deleted.
-	if len(processable) > 0 {
-		fresh, freshErr := r.batchFileOpRepo.FindByBatchJobID(ctx, processable[0].BatchJobID)
-		if freshErr == nil {
-			byID := make(map[uint]models.BatchFileOperation, len(fresh))
-			for i := range fresh {
-				byID[fresh[i].ID] = fresh[i]
-			}
-			for i := range processable {
-				if freshRow, ok := byID[processable[i].ID]; ok {
-					processable[i] = freshRow
-				}
-			}
-		}
-	}
-
-	outcomes := r.revertOperations(ctx, processable, r.revertFile)
-	succeeded, skipped, failed := summarizeOutcomes(outcomes)
-
-	// Batch-level cleanup: per-file cleanupEmptyDir uses destRoot as a stop
-	// boundary, which leaves intermediate parent directories behind (e.g.,
-	// out/ABP-880/ when the file was at out/ABP-880/dir/ABP-880.mp4).
-	// Sweep each destRoot with stopAt="" so cleanupEmptyDir walks all the
-	// way up. It stops automatically at non-empty directories, so populated
-	// ancestors (including the top-level output directory if it contains other
-	// files) are preserved. An empty output directory will be removed, which
-	// is the correct behavior after a full batch revert.
-	for dirPath := range successfulDestRoots(processable, outcomes) {
-		r.fsReverter.cleanupEmptyDir(filepath.Clean(dirPath), "")
-	}
-
-	return &RevertBatchResult{
-		Total:     len(processable),
-		Succeeded: succeeded,
-		Skipped:   skipped,
-		Failed:    failed,
-		Outcomes:  outcomes,
-	}, nil
+	return r.revertSelectedOperations(ctx, processable), nil
 }
 
 // RevertScrape reverts only the operations for a specific movie within a batch (HIST-04).
@@ -1466,37 +1426,52 @@ func (r *Reverter) RevertScrape(ctx context.Context, batchJobID string, movieID 
 		return nil, fmt.Errorf("no processable operations found for movie %s in batch %s", movieID, batchJobID)
 	}
 
-	r.sweepJournaledDestinations(ctx, matching)
+	return r.revertSelectedOperations(ctx, matching), nil
+}
 
-	if len(matching) > 0 {
-		fresh, freshErr := r.batchFileOpRepo.FindByBatchJobID(ctx, matching[0].BatchJobID)
-		if freshErr == nil {
-			byID := make(map[uint]models.BatchFileOperation, len(fresh))
-			for i := range fresh {
-				byID[fresh[i].ID] = fresh[i]
-			}
-			for i := range matching {
-				if freshRow, ok := byID[matching[i].ID]; ok {
-					matching[i] = freshRow
-				}
+// revertSelectedOperations runs the shared revert pipeline for a nonempty
+// selection. Refresh only those IDs after the sweep: returned row order, status,
+// and movie changes must not reselect or reorder the caller's work.
+func (r *Reverter) revertSelectedOperations(ctx context.Context, selected []models.BatchFileOperation) *RevertBatchResult {
+	r.sweepJournaledDestinations(ctx, selected)
+
+	// leniently-promote reload: the sweep consumed/persisted; re-read the rows so
+	// the revert's in-memory journal can't chase backups the sweep deleted.
+	fresh, freshErr := r.batchFileOpRepo.FindByBatchJobID(ctx, selected[0].BatchJobID)
+	if freshErr == nil {
+		byID := make(map[uint]models.BatchFileOperation, len(fresh))
+		for i := range fresh {
+			byID[fresh[i].ID] = fresh[i]
+		}
+		for i := range selected {
+			if freshRow, ok := byID[selected[i].ID]; ok {
+				selected[i] = freshRow
 			}
 		}
 	}
 
-	outcomes := r.revertOperations(ctx, matching, r.revertFile)
+	outcomes := r.revertOperations(ctx, selected, r.revertFile)
 	succeeded, skipped, failed := summarizeOutcomes(outcomes)
 
-	for dirPath := range successfulDestRoots(matching, outcomes) {
+	// Batch-level cleanup: per-file cleanupEmptyDir uses destRoot as a stop
+	// boundary, which leaves intermediate parent directories behind (e.g.,
+	// out/ABP-880/ when the file was at out/ABP-880/dir/ABP-880.mp4).
+	// Sweep each destRoot with stopAt="" so cleanupEmptyDir walks all the
+	// way up. It stops automatically at non-empty directories, so populated
+	// ancestors (including the top-level output directory if it contains other
+	// files) are preserved. An empty output directory will be removed, which
+	// is the correct behavior after a full batch revert.
+	for dirPath := range successfulDestRoots(selected, outcomes) {
 		r.fsReverter.cleanupEmptyDir(filepath.Clean(dirPath), "")
 	}
 
 	return &RevertBatchResult{
-		Total:     len(matching),
+		Total:     len(selected),
 		Succeeded: succeeded,
 		Skipped:   skipped,
 		Failed:    failed,
 		Outcomes:  outcomes,
-	}, nil
+	}
 }
 
 // admitUndo runs inside the existing whole-operation Undo lock. Its durable
