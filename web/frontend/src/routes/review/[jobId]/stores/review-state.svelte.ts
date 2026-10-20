@@ -54,7 +54,7 @@ import {
 } from '../review-utils';
 import equal from 'fast-deep-equal';
 import type { BeginCreditMutation } from '$lib/utils/credit-mutation';
-import { calculateCompleteness, type CompletenessTier } from '$lib/utils/completeness';
+import { createReviewSelectionModel } from './review-selection.svelte';
 import { nextOrganizeProgress } from '$lib/utils/job-progress';
 import { createReviewMutations } from './review-mutations.svelte';
 import { buildMovieOverride, rebaseOverlayOntoMovie } from './save-helpers';
@@ -500,10 +500,6 @@ export function createReviewState(getJobId: () => string) {
 
 	let currentMovieIndex = $state(0);
 	let editedMovies = new SvelteMap<string, Movie>();
-	let selectedMovieIds = new SvelteSet<string>();
-	let lastSelectedMovieId = $state<string | null>(null);
-	let completenessFilter = new SvelteSet<CompletenessTier>(['incomplete', 'partial', 'complete']);
-	let selectionMode = $state(false);
 	let organizing = $state(false);
 	let pendingMovieSave = $state<symbol | null>(null);
 	let destinationPath = $state('');
@@ -698,28 +694,13 @@ export function createReviewState(getJobId: () => string) {
 		),
 	);
 
-	const tierCounts = $derived.by<Record<CompletenessTier, number>>(() => {
-		const counts: Record<CompletenessTier, number> = { incomplete: 0, partial: 0, complete: 0 };
-		for (const group of movieGroups) {
-			const movie = getEffectiveMovie(group.primaryResult.file_path, group.primaryResult.movie);
-			if (movie) {
-				const { tier } = calculateCompleteness(movie, completenessConfig);
-				counts[tier]++;
-			}
-		}
-		return counts;
+	const selection = createReviewSelectionModel({
+		getMovieGroups: () => movieGroups,
+		getEffectiveMovie,
+		getCompletenessConfig: () => completenessConfig,
 	});
-
-	const filteredMovieGroups = $derived<MovieGroup[]>(
-		completenessFilter.size === 3
-			? movieGroups
-			: movieGroups.filter((group) => {
-					const movie = getEffectiveMovie(group.primaryResult.file_path, group.primaryResult.movie);
-					if (!movie) return false;
-					const { tier } = calculateCompleteness(movie, completenessConfig);
-					return completenessFilter.has(tier);
-				}),
-	);
+	const { selectedMovieIds } = selection;
+	const filteredMovieGroups = $derived(selection.filteredMovieGroups);
 
 	const movieResults = $derived<FileResult[]>(movieGroups.map((g) => g.primaryResult));
 
@@ -962,16 +943,8 @@ export function createReviewState(getJobId: () => string) {
 		bulkRescrapeMovies: (mutationJobId, request) =>
 			apiClient.bulkRescrapeMovies(mutationJobId, request),
 		getSelectedMovieIds: () => selectedMovieIds,
-		clearSelectedMovieIds: () => {
-			selectedMovieIds.clear();
-			lastSelectedMovieId = null;
-		},
-		deleteSelectedMovieId: (movieId: string) => {
-			selectedMovieIds.delete(movieId);
-			if (lastSelectedMovieId === movieId) {
-				lastSelectedMovieId = null;
-			}
-		},
+		clearSelectedMovieIds: selection.deselectAllMovies,
+		deleteSelectedMovieId: selection.deleteSelectedMovieId,
 		toastSuccess: (message, duration) => toastStore.success(message, duration),
 		toastError: (message, duration) => toastStore.error(message, duration),
 		clearEditStorage,
@@ -1006,68 +979,6 @@ export function createReviewState(getJobId: () => string) {
 		if (!currentResult?.movie) return;
 		editedMovies.delete(currentResult.file_path);
 	}
-
-	function toggleMovieSelection(movieId: string, shiftKey: boolean) {
-		if (!selectionMode) return;
-		if (shiftKey && lastSelectedMovieId !== null) {
-			const fromIndex = filteredMovieGroups.findIndex((g) => g.movieId === lastSelectedMovieId);
-			const toIndex = filteredMovieGroups.findIndex((g) => g.movieId === movieId);
-			if (fromIndex !== -1 && toIndex !== -1) {
-				selectMovieRange(fromIndex, toIndex);
-			}
-		} else {
-			if (selectedMovieIds.has(movieId)) {
-				selectedMovieIds.delete(movieId);
-			} else {
-				selectedMovieIds.add(movieId);
-				lastSelectedMovieId = movieId;
-			}
-		}
-	}
-
-	function selectMovieRange(fromIndex: number, toIndex: number) {
-		const start = Math.min(fromIndex, toIndex);
-		const end = Math.max(fromIndex, toIndex);
-		for (let i = start; i <= end; i++) {
-			const group = filteredMovieGroups[i];
-			if (group) {
-				selectedMovieIds.add(group.movieId);
-			}
-		}
-	}
-
-	function selectAllMovies() {
-		for (const group of filteredMovieGroups) {
-			selectedMovieIds.add(group.movieId);
-		}
-	}
-
-	function deselectAllMovies() {
-		selectedMovieIds.clear();
-		lastSelectedMovieId = null;
-	}
-
-	function toggleCompletenessTier(tier: CompletenessTier) {
-		if (completenessFilter.has(tier)) {
-			completenessFilter.delete(tier);
-		} else {
-			completenessFilter.add(tier);
-		}
-	}
-
-	function toggleSelectionMode() {
-		selectionMode = !selectionMode;
-		if (!selectionMode) {
-			selectedMovieIds.clear();
-			lastSelectedMovieId = null;
-		}
-	}
-
-	const selectedCount = $derived(selectedMovieIds.size);
-	const allSelected = $derived(
-		filteredMovieGroups.length > 0 &&
-			filteredMovieGroups.every((g) => selectedMovieIds.has(g.movieId)),
-	);
 
 	async function bulkExcludeMovies() {
 		if (selectedMovieIds.size === 0) return;
@@ -1891,13 +1802,7 @@ export function createReviewState(getJobId: () => string) {
 			skipJobSync = false;
 			job = null;
 			currentMovieIndex = 0;
-			selectedMovieIds.clear();
-			lastSelectedMovieId = null;
-			selectionMode = false;
-			completenessFilter.clear();
-			completenessFilter.add('incomplete');
-			completenessFilter.add('partial');
-			completenessFilter.add('complete');
+			selection.reset();
 			organizing = false;
 			organizeOperation = 'move';
 			organizeProgress = 0;
@@ -2789,29 +2694,29 @@ export function createReviewState(getJobId: () => string) {
 			return selectedMovieIds;
 		},
 		get selectedCount() {
-			return selectedCount;
+			return selection.selectedCount;
 		},
 		get allSelected() {
-			return allSelected;
+			return selection.allSelected;
 		},
-		toggleMovieSelection,
-		selectMovieRange,
-		selectAllMovies,
-		deselectAllMovies,
+		toggleMovieSelection: selection.toggleMovieSelection,
+		selectMovieRange: selection.selectMovieRange,
+		selectAllMovies: selection.selectAllMovies,
+		deselectAllMovies: selection.deselectAllMovies,
 		get completenessFilter() {
-			return completenessFilter;
+			return selection.completenessFilter;
 		},
 		get selectionMode() {
-			return selectionMode;
+			return selection.selectionMode;
 		},
 		get filteredMovieGroups() {
 			return filteredMovieGroups;
 		},
 		get tierCounts() {
-			return tierCounts;
+			return selection.tierCounts;
 		},
-		toggleCompletenessTier,
-		toggleSelectionMode,
+		toggleCompletenessTier: selection.toggleCompletenessTier,
+		toggleSelectionMode: selection.toggleSelectionMode,
 		bulkExcludeMovies,
 		get bulkRescraping() {
 			return bulkRescraping;
