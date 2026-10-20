@@ -8,7 +8,7 @@
 	import { apiClient } from '$lib/api/client';
 	import { websocketStore } from '$lib/stores/websocket';
 	import { dismiss as dismissJob } from '$lib/stores/background-job.svelte';
-	import { computeJobProgress, isTerminalStatus } from '$lib/utils/job-progress';
+	import { computeJobProgress, isTerminalStatus, selectLatestJobCounts } from '$lib/utils/job-progress';
 	import { createBatchJobPollingQuery, createConfigQuery } from '$lib/query/queries';
 	import { createMutation, useQueryClient } from '@tanstack/svelte-query';
 	import type { BatchJobResponse, FileResult } from '$lib/api/types';
@@ -99,15 +99,7 @@
 	// (WS-driven); fall back to the REST-polled job. Used for the header counts so
 	// they don't contradict the WS-driven bar (liveProgress) before the REST poll
 	// resolves. See batch.stampJobCounts.
-	const wsCounts = $derived.by(() => {
-		for (let i = wsState.messages.length - 1; i >= 0; i--) {
-			const m = wsState.messages[i];
-			if (m.job_id === jobId && typeof m.total_files === 'number' && m.total_files > 0) {
-				return { totalFiles: m.total_files, completed: m.completed ?? 0, failed: m.failed ?? 0 };
-			}
-		}
-		return null;
-	});
+	const wsCounts = $derived(selectLatestJobCounts(wsState.messages, jobId));
 	const displayTotal = $derived(wsCounts?.totalFiles ?? job?.total_files ?? 0);
 	const displayFinished = $derived((wsCounts?.completed ?? job?.completed ?? 0) + (wsCounts?.failed ?? job?.failed ?? 0));
 	const latestMessage = $derived.by(() => {
@@ -121,29 +113,17 @@
 		return jobMsgs[jobMsgs.length - 1];
 	});
 
-	const liveProgress = $derived.by(() => {
-		// Prefer authoritative WS-carried total_files/completed/failed when available
-		// (stamped by batch.stampJobCounts) so the bar is WS-driven even before the
-		// REST poll resolves; fall back to job?.total_files from REST. NEVER infer
-		// totals from message counts (iter-6 MAJOR, revert 30e6e53f).
-		let totalFiles = job?.total_files ?? 0;
-		let finishedCount = (job?.completed ?? 0) + (job?.failed ?? 0);
-		for (let i = wsState.messages.length - 1; i >= 0; i--) {
-			const m = wsState.messages[i];
-			if (m.job_id === jobId && typeof m.total_files === 'number' && m.total_files > 0) {
-				totalFiles = m.total_files;
-				finishedCount = (m.completed ?? 0) + (m.failed ?? 0);
-				break;
-			}
-		}
-		return computeJobProgress(
+	// Reuse the header's authoritative counts for the bar, keeping the modal's
+	// REST-based running-state policy. Never infer totals from message counts.
+	const liveProgress = $derived(
+		computeJobProgress(
 			wsState.messagesByFile[jobId],
-			totalFiles,
+			displayTotal,
 			job?.progress ?? 0,
 			job?.status?.toLowerCase() === 'running',
-			finishedCount,
-		);
-	});
+			displayFinished,
+		),
+	);
 
 	const activeFiles = $derived.by<FileResult[]>(() => {
 		if (!job?.results) return [];

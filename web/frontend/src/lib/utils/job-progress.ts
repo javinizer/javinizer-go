@@ -1,5 +1,33 @@
 import type { ProgressMessage } from '$lib/api/types';
 
+/**
+ * Select the newest authoritative count snapshot for a job by arrival order.
+ * Count-less frames do not replace an earlier snapshot. A positive numeric
+ * total is authoritative even without a file path; missing outcome counts mean
+ * zero, not a fallback to older WS or REST counts. Caller-specific fallbacks and
+ * running-state policy deliberately remain with each progress consumer.
+ */
+export function selectLatestJobCounts(
+	messages: readonly ProgressMessage[],
+	jobId: string,
+): { totalFiles: number; completed: number; failed: number } | null {
+	for (let i = messages.length - 1; i >= 0; i--) {
+		const message = messages[i];
+		if (
+			message.job_id === jobId &&
+			typeof message.total_files === 'number' &&
+			message.total_files > 0
+		) {
+			return {
+				totalFiles: message.total_files,
+				completed: message.completed ?? 0,
+				failed: message.failed ?? 0,
+			};
+		}
+	}
+	return null;
+}
+
 export const TERMINAL_STATUSES = new Set([
 	'completed',
 	'failed',

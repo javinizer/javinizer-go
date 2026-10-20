@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { computeJobProgress, isTerminalStatus, nextOrganizeProgress } from './job-progress';
+import {
+	computeJobProgress,
+	isTerminalStatus,
+	nextOrganizeProgress,
+	selectLatestJobCounts,
+} from './job-progress';
 import type { ProgressMessage } from '$lib/api/types';
 
 function makeMessage(overrides: Partial<ProgressMessage> = {}): ProgressMessage {
@@ -228,7 +233,7 @@ describe('computeJobProgress', () => {
 		function organizeMessages(done: number): Record<string, ProgressMessage> {
 			// 'done' terminal files at Progress:100 (organized) + one in-flight
 			// 'Organizing <file>' pending file at Progress:0 (the verbose per-file
-		// start message from OnFileOrganizeStart). Mirrors the live messagesByFile.
+			// start message from OnFileOrganizeStart). Mirrors the live messagesByFile.
 			const msgs: Record<string, ProgressMessage> = {};
 			for (let i = 0; i < done; i++) {
 				msgs[organizeFiles[i]] = makeMessage({
@@ -263,9 +268,9 @@ describe('computeJobProgress', () => {
 			let prev = 0;
 			for (let done = 1; done <= 10; done++) {
 				const isRunning = done < 10;
-			const result = computeJobProgress(organizeMessages(done), 10, 0, isRunning, done);
-			expect(result).toBeGreaterThanOrEqual(prev);
-			prev = result;
+				const result = computeJobProgress(organizeMessages(done), 10, 0, isRunning, done);
+				expect(result).toBeGreaterThanOrEqual(prev);
+				prev = result;
 			}
 			expect(prev).toBe(100);
 		});
@@ -358,5 +363,70 @@ describe('nextOrganizeProgress', () => {
 			observed.push(bar);
 		}
 		expect(observed).toEqual([100, 0, 25, 50, 75, 100]);
+	});
+});
+
+// Selection is independent of arithmetic and each view's fallback policy.
+describe('selectLatestJobCounts', () => {
+	it('returns null for an empty history or only other jobs', () => {
+		expect(selectLatestJobCounts([], 'job-1')).toBeNull();
+		expect(
+			selectLatestJobCounts([makeMessage({ job_id: 'other', total_files: 8 })], 'job-1'),
+		).toBeNull();
+	});
+
+	it.each([undefined, null, 0, -1, NaN, '12'])('ignores non-authoritative total %s', (total) => {
+		const messages = [makeMessage({ total_files: total as number | undefined, completed: 7 })];
+		expect(selectLatestJobCounts(messages, 'job-1')).toBeNull();
+	});
+
+	it('selects by arrival order, ignoring file index, path, status, and progress', () => {
+		const messages = Object.freeze([
+			Object.freeze(makeMessage({ total_files: 20, completed: 18, failed: 1, file_index: 100 })),
+			Object.freeze(
+				makeMessage({
+					total_files: 10,
+					completed: 2,
+					failed: 3,
+					file_path: '',
+					status: 'pending',
+					progress: 0,
+				}),
+			),
+			Object.freeze(makeMessage({ job_id: 'other', total_files: 30, completed: 30 })),
+			Object.freeze(makeMessage({ total_files: 0, completed: 9 })),
+			Object.freeze(makeMessage()),
+		]);
+		expect(selectLatestJobCounts(messages, 'job-1')).toEqual({
+			totalFiles: 10,
+			completed: 2,
+			failed: 3,
+		});
+		expect(messages[0].completed).toBe(18);
+	});
+
+	it.each([
+		{ completed: undefined, failed: undefined },
+		{ completed: null, failed: null },
+		{ completed: 0, failed: 0 },
+	])('treats missing or zero counts as zero instead of carrying older values: %j', (counts) => {
+		const messages = [
+			makeMessage({ total_files: 10, completed: 8, failed: 2 }),
+			makeMessage({ total_files: 10, ...counts } as Partial<ProgressMessage>),
+		];
+		expect(selectLatestJobCounts(messages, 'job-1')).toEqual({
+			totalFiles: 10,
+			completed: 0,
+			failed: 0,
+		});
+	});
+
+	it('preserves the existing positive-number predicate and does not sanitize outcome counts', () => {
+		expect(
+			selectLatestJobCounts(
+				[makeMessage({ total_files: Infinity, completed: -1, failed: NaN })],
+				'job-1',
+			),
+		).toEqual({ totalFiles: Infinity, completed: -1, failed: NaN });
 	});
 });
