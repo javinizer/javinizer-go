@@ -183,6 +183,52 @@ func (r *selectedRevertCleanupRecorder) cleanupEmptyDir(dirPath, stopAt string) 
 	r.fileSystemReverter.cleanupEmptyDir(dirPath, stopAt)
 }
 
+func TestSelectedRevert_AncestorCleanupUsesRefreshedSelectionSnapshot(t *testing.T) {
+	for _, entry := range selectedRevertEntryPoints() {
+		t.Run(entry.name, func(t *testing.T) {
+			fs := afero.NewMemMapFs()
+			initialRoot := filepath.FromSlash("/output/initial")
+			refreshedRoot := filepath.FromSlash("/output/refreshed")
+			admittedRoot := filepath.FromSlash("/output/admitted")
+			for _, root := range []string{initialRoot, refreshedRoot, admittedRoot} {
+				require.NoError(t, fs.MkdirAll(root, 0755))
+			}
+			initial := models.BatchFileOperation{
+				ID: 42, BatchJobID: "requested-batch", MovieID: "MOVIE", RevertStatus: models.RevertStatusApplied,
+				OperationType: models.OperationTypeCopy, OriginalPath: "/source/video.mp4", NewPath: filepath.Join(initialRoot, "movie", "video.mp4"),
+			}
+			refreshed := initial
+			refreshed.NewPath = filepath.Join(refreshedRoot, "movie", "video.mp4")
+			admitted := initial
+			admitted.NewPath = filepath.Join(admittedRoot, "movie", "video.mp4")
+
+			repo := mocks.NewMockBatchFileOperationRepositoryInterface(t)
+			repo.On("FindByBatchJobID", mock.Anything, "requested-batch").Return([]models.BatchFileOperation{initial}, nil).Once()
+			repo.On("FindByBatchJobID", mock.Anything, "requested-batch").Return([]models.BatchFileOperation{refreshed}, nil).Once()
+			repo.On("FindByID", mock.Anything, admitted.ID).Return(&admitted, nil).Twice()
+			expectMockUndoAdmission(t, repo, &admitted)
+			repo.On("UpdateRevertStatus", mock.Anything, admitted.ID, models.RevertStatusReverted).Return(nil).Once()
+			r := NewReverter(fs, repo)
+			recorder := &selectedRevertCleanupRecorder{fileSystemReverter: r.fsReverter}
+			r.fsReverter = recorder
+			result, err := entry.run(r)
+			require.NoError(t, err)
+			require.Equal(t, &RevertBatchResult{Total: 1, Succeeded: 1, Outcomes: []RevertFileResult{{
+				OperationID: admitted.ID, MovieID: admitted.MovieID, OriginalPath: admitted.OriginalPath,
+				NewPath: admitted.NewPath, Outcome: models.RevertOutcomeReverted,
+			}}}, result)
+			// Per-file lock/admission reloads mutate revertOperations' copy,
+			// not the selected snapshot used for the final ancestor sweep.
+			require.Equal(t, []string{refreshedRoot}, recorder.ancestorCalls)
+			for _, root := range []string{initialRoot, refreshedRoot, admittedRoot} {
+				exists, statErr := afero.DirExists(fs, root)
+				require.NoError(t, statErr)
+				require.Equal(t, root != refreshedRoot, exists, root)
+			}
+		})
+	}
+}
+
 func TestSelectedRevert_AncestorCleanupRequiresAllSuccess(t *testing.T) {
 	for _, entry := range selectedRevertEntryPoints() {
 		for _, outcome := range []models.RevertOutcomeEnum{models.RevertOutcomeReverted, models.RevertOutcomeSkipped, models.RevertOutcomeFailed} {
