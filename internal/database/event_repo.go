@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/models"
+	"gorm.io/gorm"
 )
 
 // EventRepository persists event log records.
@@ -35,34 +36,8 @@ func (r *EventRepository) FindByID(ctx context.Context, id uint) (*models.Event,
 	return r.BaseRepository.FindByID(ctx, id)
 }
 
-// FindFiltered returns events matching the filter, ordered newest-first with limit/offset paging.
-func (r *EventRepository) FindFiltered(ctx context.Context, filter EventFilter, limit, offset int) ([]models.Event, error) {
-	query := r.GetDB().WithContext(ctx).Order("created_at DESC").Limit(limit).Offset(offset)
-	if filter.EventType != "" {
-		query = query.Where("event_type = ?", filter.EventType)
-	}
-	if filter.Severity != "" {
-		query = query.Where("severity = ?", filter.Severity)
-	}
-	if filter.Source != "" {
-		query = query.Where("source = ?", filter.Source)
-	}
-	if filter.Start != nil {
-		query = query.Where("datetime(created_at) >= datetime(?)", filter.Start.UTC().Format(sqliteTimeFormat))
-	}
-	if filter.End != nil {
-		query = query.Where("datetime(created_at) < datetime(?)", filter.End.UTC().Format(sqliteTimeFormat))
-	}
-	var events []models.Event
-	err := query.Find(&events).Error
-	if err != nil {
-		return nil, wrapDBErr("find", "filtered events", err)
-	}
-	return events, nil
-}
-
-// CountFiltered returns the number of events matching the filter.
-func (r *EventRepository) CountFiltered(ctx context.Context, filter EventFilter) (int64, error) {
+// filteredQuery applies the shared predicates without ordering or pagination.
+func (r *EventRepository) filteredQuery(ctx context.Context, filter EventFilter) *gorm.DB {
 	query := r.GetDB().WithContext(ctx).Model(&models.Event{})
 	if filter.EventType != "" {
 		query = query.Where("event_type = ?", filter.EventType)
@@ -79,6 +54,23 @@ func (r *EventRepository) CountFiltered(ctx context.Context, filter EventFilter)
 	if filter.End != nil {
 		query = query.Where("datetime(created_at) < datetime(?)", filter.End.UTC().Format(sqliteTimeFormat))
 	}
+	return query
+}
+
+// FindFiltered returns events matching the filter, ordered newest-first with limit/offset paging.
+func (r *EventRepository) FindFiltered(ctx context.Context, filter EventFilter, limit, offset int) ([]models.Event, error) {
+	query := r.filteredQuery(ctx, filter).Order("created_at DESC").Limit(limit).Offset(offset)
+	var events []models.Event
+	err := query.Find(&events).Error
+	if err != nil {
+		return nil, wrapDBErr("find", "filtered events", err)
+	}
+	return events, nil
+}
+
+// CountFiltered returns the number of events matching the filter.
+func (r *EventRepository) CountFiltered(ctx context.Context, filter EventFilter) (int64, error) {
+	query := r.filteredQuery(ctx, filter)
 	var count int64
 	err := query.Count(&count).Error
 	if err != nil {
