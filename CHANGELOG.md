@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.6.5] - 2026-10-21
+
+### Added
+
+- Add optional center and fit poster fallbacks (#373).
+
+### Fixed
+
+- Isolate batch test working directories to prevent accumulated fixture timeouts.
+- Preserve indexed lookups for legacy R18 dump sidecars (#374).
+- Preserve upstream service variants and Unicode DVD IDs (#372).
+- Clarify strict-upload row rejection diagnostics (#371).
+- Avoid redundant chmod on exact-mode staging files (#370).
+- Preserve mixed-case source content IDs (#369).
+
+### Changed
+
+- Share poster success reconciliation (#365).
+- Extract production review selection model (#364).
+- Share selected operation revert runner (#363).
+- Centralize output rendering options (#362).
+- Share authoritative progress count selection (#361).
+- Remove unused genre replacement editor (#360).
+- Unify structural validation (#359).
+
 ## [v1.6.4] - 2026-10-20
 
 ### Added
