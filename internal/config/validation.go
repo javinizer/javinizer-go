@@ -451,6 +451,16 @@ func validateConfigStructure(cfg *Config) error {
 		}
 	}
 
+	switch cfg.Output.MediaFormat.PosterFallbackMode {
+	case "", "legacy":
+	case "center", "fit":
+		if height := cfg.Output.MediaFormat.MaxPosterHeight; height != 0 && height < 3 {
+			return fmt.Errorf("output.max_poster_height must be 0 or >= 3 for center or fit poster fallback")
+		}
+	default:
+		return fmt.Errorf("output.poster_fallback_mode must be one of: legacy, center, fit")
+	}
+
 	// --- Cross-field validators ---
 
 	if err := ValidateScraperOverrides(cfg); err != nil {

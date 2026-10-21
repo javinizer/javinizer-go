@@ -304,15 +304,16 @@ type OutputOperationConfig struct {
 
 // OutputMediaFormatConfig controls media filename templates.
 type OutputMediaFormatConfig struct {
-	PosterFormat      string `yaml:"poster_format" json:"poster_format"`
-	MaxPosterHeight   int    `yaml:"max_poster_height" json:"max_poster_height"` // Max height in px for cropped posters; 0 = no cap (preserve source resolution). When the cropped poster exceeds this height it is downscaled preserving aspect ratio.
-	FanartFormat      string `yaml:"fanart_format" json:"fanart_format"`
-	TrailerFormat     string `yaml:"trailer_format" json:"trailer_format"`
-	ScreenshotFormat  string `yaml:"screenshot_format" json:"screenshot_format"`
-	ScreenshotFolder  string `yaml:"screenshot_folder" json:"screenshot_folder"`
-	ScreenshotPadding int    `yaml:"screenshot_padding" json:"screenshot_padding"`
-	ActressFolder     string `yaml:"actress_folder" json:"actress_folder"`
-	ActressFormat     string `yaml:"actress_format" json:"actress_format"`
+	PosterFallbackMode string `yaml:"poster_fallback_mode" json:"poster_fallback_mode"` // Automatic fallback only: legacy, center, or fit; empty means legacy.
+	PosterFormat       string `yaml:"poster_format" json:"poster_format"`
+	MaxPosterHeight    int    `yaml:"max_poster_height" json:"max_poster_height"` // Max height in px for cropped posters; 0 = no cap (preserve source resolution). When the cropped poster exceeds this height it is downscaled preserving aspect ratio.
+	FanartFormat       string `yaml:"fanart_format" json:"fanart_format"`
+	TrailerFormat      string `yaml:"trailer_format" json:"trailer_format"`
+	ScreenshotFormat   string `yaml:"screenshot_format" json:"screenshot_format"`
+	ScreenshotFolder   string `yaml:"screenshot_folder" json:"screenshot_folder"`
+	ScreenshotPadding  int    `yaml:"screenshot_padding" json:"screenshot_padding"`
+	ActressFolder      string `yaml:"actress_folder" json:"actress_folder"`
+	ActressFormat      string `yaml:"actress_format" json:"actress_format"`
 }
 
 // OutputDownloadConfig controls which media types to download.

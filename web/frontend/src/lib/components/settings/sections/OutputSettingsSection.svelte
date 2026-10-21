@@ -214,6 +214,15 @@
 		</p>
 
 		<SettingsSubsection title={m.settings_output_media_subsection()}>
+			<div class="py-4 border-b border-border">
+				<label class="block text-sm font-medium mb-2" for="poster-fallback-mode">{m.settings_output_poster_fallback_label()}</label>
+				<select id="poster-fallback-mode" class={selectClass} value={config.output.poster_fallback_mode || 'legacy'} onchange={(event) => { config.output.poster_fallback_mode = event.currentTarget.value as 'legacy' | 'center' | 'fit'; }}>
+					<option value="legacy">{m.settings_output_poster_fallback_legacy()}</option>
+					<option value="center">{m.settings_output_poster_fallback_center()}</option>
+					<option value="fit">{m.settings_output_poster_fallback_fit()}</option>
+				</select>
+				<p class="text-xs text-muted-foreground mt-1">{m.settings_output_poster_fallback_desc()}</p>
+			</div>
 			<FormTemplateInput
 				label={m.settings_output_poster_format_label()}
 				description={m.settings_output_poster_format_desc()}

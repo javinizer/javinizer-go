@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { isFallbackSourcePreview, resolveFallbackPreviewUrl } from '$lib/utils/poster-fallback';
 	import type { Movie } from '$lib/api/types';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
@@ -8,13 +9,14 @@
 	interface Props {
 		currentMovie: Movie;
 		displayPosterUrl?: string;
+		posterFallbackMode?: string;
 		showPosterPanel: boolean;
 		showCoverPanel: boolean;
 		showTrailerPanel: boolean;
 		showScreenshotsPanel: boolean;
 		onOpenImageManager: () => void;
 		onOpenTrailerModal: () => void;
-		onOpenPosterViewer: () => void;
+		onOpenPosterViewer: (url: string) => void;
 		onOpenCoverViewer: () => void;
 		onOpenScreenshotViewer: (index: number) => void;
 		previewImageURL: (url: string | undefined) => string;
@@ -23,6 +25,7 @@
 	let {
 		currentMovie,
 		displayPosterUrl,
+		posterFallbackMode,
 		showPosterPanel,
 		showCoverPanel,
 		showTrailerPanel,
@@ -39,6 +42,9 @@
 
 	const PLACEHOLDER_SVG = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='450' fill='%23374151'%3E%3Crect width='300' height='450'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' fill='%239CA3AF' font-family='system-ui' font-size='14'%3ENo Poster%3C/text%3E%3C/svg%3E";
 	const COVER_PLACEHOLDER_SVG = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='225' fill='%23374151'%3E%3Crect width='400' height='225'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' fill='%239CA3AF' font-family='system-ui' font-size='14'%3ENo Cover%3C/text%3E%3C/svg%3E";
+	let fallbackSourcePreview = $derived(isFallbackSourcePreview(currentMovie, posterFallbackMode));
+	let posterPreviewUrl = $derived(resolveFallbackPreviewUrl(currentMovie, posterFallbackMode, displayPosterUrl));
+
 </script>
 
 <div class="space-y-4 lg:sticky lg:top-6 lg:self-start lg:max-h-[calc(100vh-8rem)] lg:overflow-y-auto">
@@ -53,13 +59,13 @@
 		{#if showPosterPanel || showCoverPanel || showTrailerPanel || showScreenshotsPanel}
 			{#if showPosterPanel}
 				<div class="mb-4">
-					<p class="text-xs font-medium text-muted-foreground mb-1.5">{currentMovie.should_crop_poster ? m.review_poster_cropped() : m.review_poster()}</p>
-					{#if displayPosterUrl}
-						<button onclick={onOpenPosterViewer} class="cursor-zoom-in hover:opacity-80 transition-opacity w-full block" title={m.review_view_poster_image()} aria-label={m.review_view_poster_image()}>
+					<p class="text-xs font-medium text-muted-foreground mb-1.5">{fallbackSourcePreview ? m.review_poster_fallback_source() : currentMovie.should_crop_poster ? m.review_poster_cropped() : m.review_poster()}</p>
+					{#if posterPreviewUrl}
+						<button onclick={() => { if (posterPreviewUrl) onOpenPosterViewer(posterPreviewUrl); }} class="cursor-zoom-in hover:opacity-80 transition-opacity w-full block" title={m.review_view_poster_image()} aria-label={m.review_view_poster_image()}>
 						<div class="w-full max-w-60 mx-auto aspect-2/3 overflow-hidden rounded border relative">
-							{#if currentMovie.should_crop_poster && !currentMovie.cropped_poster_url}
+							{#if currentMovie.should_crop_poster && !currentMovie.cropped_poster_url && !fallbackSourcePreview}
 								<img
-									src={previewImageURL(displayPosterUrl)}
+									src={previewImageURL(posterPreviewUrl)}
 									alt={m.review_poster_alt()}
 									class="absolute h-full"
 									style="right: 0; width: auto; min-width: 211.8%; object-fit: cover; object-position: right center;"
@@ -67,7 +73,7 @@
 								/>
 							{:else}
 								<img
-									src={previewImageURL(displayPosterUrl)}
+									src={previewImageURL(posterPreviewUrl)}
 									alt={m.review_poster_alt()}
 									class="w-full h-full object-contain"
 									onerror={(e) => { (e.currentTarget as HTMLImageElement).src = PLACEHOLDER_SVG; }}

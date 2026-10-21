@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { isFallbackSourcePreview, resolveFallbackPreviewUrl } from '$lib/utils/poster-fallback';
 	import type { FileResult, Movie, CompletenessConfig } from '$lib/api/types';
 	import { CircleAlert, Image as ImageIcon } from 'lucide-svelte';
 	import { calculateCompleteness } from '$lib/utils/completeness';
@@ -21,6 +22,7 @@
 		selectionMode: boolean;
 		effectiveMovie?: Movie;
 		displayPosterUrl?: string;
+		posterFallbackMode?: string;
 		displayCoverUrl?: string;
 		displayImageType?: 'poster' | 'cover';
 		previewImageURL: (url: string | undefined) => string;
@@ -36,6 +38,7 @@
 		selectionMode,
 		effectiveMovie,
 		displayPosterUrl,
+		posterFallbackMode,
 		displayCoverUrl,
 		displayImageType = 'poster',
 		previewImageURL,
@@ -44,10 +47,12 @@
 	}: Props = $props();
 
 	const movie = $derived(effectiveMovie ?? movieGroup.primaryResult.movie as Movie | undefined);
+	const fallbackSourcePreview = $derived(displayImageType === 'poster' && !!movie && isFallbackSourcePreview(movie, posterFallbackMode));
+	const posterPreviewUrl = $derived(movie ? resolveFallbackPreviewUrl(movie, posterFallbackMode, displayPosterUrl) : displayPosterUrl);
 	const imageSrc = $derived(
 		displayImageType === 'cover'
 			? (displayCoverUrl ? previewImageURL(displayCoverUrl) : undefined)
-			: (displayPosterUrl ? previewImageURL(displayPosterUrl) : undefined)
+			: (posterPreviewUrl ? previewImageURL(posterPreviewUrl) : undefined)
 	);
 
 	const completeness = $derived(
@@ -102,12 +107,16 @@
 		}
 	}}
 >
+	{#if fallbackSourcePreview}
+		<p class="text-xs text-muted-foreground px-2 py-1">{m.review_poster_fallback_source()}</p>
+	{/if}
+
 	<div class="relative w-full {displayImageType === 'cover' ? 'aspect-video' : 'aspect-2/3'} bg-muted">
 		{#if imageSrc}
 			<img
 				src={imageSrc}
 				alt={movie?.display_title || movieGroup.movieId}
-				class="w-full h-full object-cover"
+				class="w-full h-full {fallbackSourcePreview ? 'object-contain' : 'object-cover'}"
 				onerror={(e) => {
 					(e.currentTarget as HTMLImageElement).src = displayImageType === 'cover' ? COVER_PLACEHOLDER_SVG : PLACEHOLDER_SVG;
 				}}

@@ -258,15 +258,16 @@ func defaultOutputConfig() OutputConfig {
 			SubtitleExtensions:      []string{".srt", ".ass", ".ssa", ".smi", ".vtt"},
 		},
 		MediaFormat: OutputMediaFormatConfig{
-			PosterFormat:      "<ID><IF:MULTIPART>-pt<PART></IF>-poster.jpg",
-			MaxPosterHeight:   0, // No cap — preserve source resolution
-			FanartFormat:      "<ID><IF:MULTIPART>-pt<PART></IF>-fanart.jpg",
-			TrailerFormat:     "<ID>-trailer.mp4",
-			ScreenshotFormat:  "fanart<INDEX>.jpg",
-			ScreenshotFolder:  "extrafanart",
-			ScreenshotPadding: 1,
-			ActressFolder:     ".actors",
-			ActressFormat:     "<ACTORNAME>.jpg",
+			PosterFormat:       "<ID><IF:MULTIPART>-pt<PART></IF>-poster.jpg",
+			PosterFallbackMode: "legacy",
+			MaxPosterHeight:    0, // No cap — preserve source resolution
+			FanartFormat:       "<ID><IF:MULTIPART>-pt<PART></IF>-fanart.jpg",
+			TrailerFormat:      "<ID>-trailer.mp4",
+			ScreenshotFormat:   "fanart<INDEX>.jpg",
+			ScreenshotFolder:   "extrafanart",
+			ScreenshotPadding:  1,
+			ActressFolder:      ".actors",
+			ActressFormat:      "<ACTORNAME>.jpg",
 		},
 		Download: OutputDownloadConfig{
 			DownloadCover:       true,

@@ -13,6 +13,7 @@
 		currentMovie: Movie;
 		currentResult: FileResult;
 		displayPosterUrl?: string;
+		posterFallbackMode?: string;
 		showFieldScraperSources: boolean;
 		onUpdateCurrentMovie: (movie: Movie) => void;
 		onUseScreenshotAsPoster?: (url: string) => void;
@@ -25,6 +26,7 @@
 		currentMovie,
 		currentResult,
 		displayPosterUrl,
+		posterFallbackMode,
 		showFieldScraperSources,
 		onUpdateCurrentMovie,
 		onUseScreenshotAsPoster,
@@ -50,6 +52,7 @@
 			{#if showImagePanelContent}
 				<div transition:slide|local={{ duration: 200, easing: quintOut }}>
 					<ScreenshotManager
+						{posterFallbackMode}
 						movie={currentMovie}
 						displayPosterUrl={displayPosterUrl}
 						onUpdate={onUpdateCurrentMovie}

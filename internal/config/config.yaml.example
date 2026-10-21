@@ -425,6 +425,9 @@ output:
     # Max height in pixels for cropped posters. 0 = no cap (preserve source resolution).
     # When a cropped poster exceeds this height, it is downscaled preserving aspect ratio.
     max_poster_height: 0
+    # Automatic fallback only; native posters and manual crops are unchanged.
+    # legacy: existing behavior; center: centered 2:3 crop; fit: full image with dark padding.
+    poster_fallback_mode: legacy
     move_subtitles: false
     subtitle_extensions:
         - .srt

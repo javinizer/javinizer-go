@@ -2677,5 +2677,11 @@
   "words_mode_literal": "Exact match",
   "words_mode_wildcard": "Censor wildcard (?)",
   "words_mode_badge_wildcard": "wildcard",
-  "browse_plan_rename_in_place_desc_files_off": "Rename eligible dedicated folders without changing their parent location; video file names are kept (rename files is off)."
+  "browse_plan_rename_in_place_desc_files_off": "Rename eligible dedicated folders without changing their parent location; video file names are kept (rename files is off).",
+  "settings_output_poster_fallback_label": "Automatic poster fallback",
+  "settings_output_poster_fallback_legacy": "Legacy (existing behavior)",
+  "settings_output_poster_fallback_center": "Center crop (2:3)",
+  "settings_output_poster_fallback_fit": "Fit whole image (2:3 with dark padding)",
+  "settings_output_poster_fallback_desc": "Only affects automatic fallback posters during processing. Native posters and manual crops are unchanged. Center crops outer content; Fit keeps the whole image with dark padding. Center and Fit require a maximum poster height of 0 or at least 3 pixels.",
+  "review_poster_fallback_source": "Source preview; automatic poster fallback is applied during processing."
 }
