@@ -2677,5 +2677,16 @@
   "words_mode_literal": "精確匹配",
   "words_mode_wildcard": "遮蔽字萬用字元（?）",
   "words_mode_badge_wildcard": "萬用字元",
-  "browse_plan_rename_in_place_desc_files_off": "僅重新命名符合條件的專用資料夾，不改變所在位置；保留影片檔名（已關閉重新命名檔案）。"
+  "browse_plan_rename_in_place_desc_files_off": "僅重新命名符合條件的專用資料夾，不改變所在位置；保留影片檔名（已關閉重新命名檔案）。",
+  "review_credit_attempt_conflict": "此次操作因擷取資料與目錄中的女優演職員資訊存在未解決的衝突而遭到阻擋。開啟詳情，查看目前衝突並逐項選擇適當的解決方式。",
+  "review_credit_attempt_unavailable": "此次操作無法驗證女優演職員資訊的衝突狀態，並不代表一定存在衝突。請在詳情中檢查目前狀態；若載入失敗，請重試狀態檢查並查看伺服器記錄。",
+  "review_credit_open_conflicts": "查看女優演職員資訊衝突",
+  "review_credit_check_status": "檢查女優演職員資訊狀態",
+  "review_credit_movie_unavailable": "此檔案已無法在影片審核中查看。請先檢查工作詳情，再決定如何復原。",
+  "review_credit_job_not_retryable": "此已儲存的工作無法在此重試。請保留資料庫和受影響的檔案，檢查失敗工作後再決定復原方式。解決衝突不會重新開啟此工作。",
+  "review_credit_retry_guidance": "解決目前衝突，等待審核重新整理，然後在可用時使用「重試失敗項」。失敗檔案清單記錄的是上一次操作，解決後仍可能顯示。",
+  "review_credit_review_before_apply": "請先檢查目前衝突。沒有經過驗證的操作設定時無法重試；開始任何新操作前，請檢查工作和設定。",
+  "review_credit_panel_title": "女優演職員資訊衝突",
+  "review_credit_panel_guidance": "比較每項目前衝突的擷取值和目錄值，然後選擇適當的可用解決方式。解決衝突不會自動重試操作或重新開啟失敗工作。",
+  "review_credit_none_open": "最新檢查未發現未解決的女優演職員資訊衝突。上方的失敗記錄屬於之前的操作。繼續前請檢查工作是否可重試。"
 }

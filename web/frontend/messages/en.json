@@ -2683,5 +2683,16 @@
   "settings_output_poster_fallback_center": "Center crop (2:3)",
   "settings_output_poster_fallback_fit": "Fit whole image (2:3 with dark padding)",
   "settings_output_poster_fallback_desc": "Only affects automatic fallback posters during processing. Native posters and manual crops are unchanged. Center crops outer content; Fit keeps the whole image with dark padding. Center and Fit require a maximum poster height of 0 or at least 3 pixels.",
-  "review_poster_fallback_source": "Source preview; automatic poster fallback is applied during processing."
+  "review_poster_fallback_source": "Source preview; automatic poster fallback is applied during processing.",
+  "review_credit_attempt_conflict": "This attempt was blocked by an unresolved actress-credit conflict between scraped data and the catalog. Open Detail to check the current conflicts and choose the appropriate resolution for each one.",
+  "review_credit_attempt_unavailable": "This attempt could not verify actress-credit conflict status. This does not confirm a conflict. Check the current status in Detail; if loading fails, retry the status check and inspect the server logs.",
+  "review_credit_open_conflicts": "Review actress-credit conflicts",
+  "review_credit_check_status": "Check actress-credit status",
+  "review_credit_movie_unavailable": "This file is no longer available in movie review. Check the job details before deciding how to recover it.",
+  "review_credit_job_not_retryable": "This saved job cannot be retried here. Preserve the database and affected files, and review the failed job before deciding on recovery. Resolving conflicts does not reopen this job.",
+  "review_credit_retry_guidance": "Resolve any current conflicts, wait for the review to refresh, then use Retry Failed when it is enabled. The failed-file list records the previous attempt and may remain visible after resolution.",
+  "review_credit_review_before_apply": "Check the current conflicts first. Retry is unavailable without verified attempt settings; review the job and settings before starting any new attempt.",
+  "review_credit_panel_title": "Actress-credit conflicts",
+  "review_credit_panel_guidance": "Compare the reported and catalog values for each current conflict, then choose the appropriate available resolution. Resolving conflicts does not automatically retry an operation or reopen a failed job.",
+  "review_credit_none_open": "No open actress-credit conflicts were found in the latest check. The failure above belongs to the previous attempt. Check the job’s retry availability before proceeding."
 }

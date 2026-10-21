@@ -94,7 +94,9 @@ beforeEach(async () => {
 	});
 	vi.spyOn(apiClient, 'previewOrganize').mockResolvedValue({} as never);
 	vi.spyOn(apiClient, 'getExistingNFO').mockResolvedValue({} as never);
-	vi.spyOn(apiClient, 'previewDisplayTitle').mockResolvedValue({ display_title: 'Synthetic display title' });
+	vi.spyOn(apiClient, 'previewDisplayTitle').mockResolvedValue({
+		display_title: 'Synthetic display title',
+	});
 	vi.spyOn(apiClient, 'getScrapers').mockResolvedValue([
 		{ name: 'synthetic', enabled: true },
 	] as never);
@@ -131,13 +133,13 @@ function mount() {
 	return render(Page, {}, { wrapper: QueryClientWrapper, wrapperProps: { client } });
 }
 it.each(['credit_conflict', 'credit_status_unavailable'] as const)(
-	'keeps resolution and retry available after Apply failure %s',
+	'shows live Apply guidance and respects job retry eligibility for %s',
 	async (errorCode) => {
 		let current = original();
 		vi.spyOn(apiClient, 'getBatchJob').mockImplementation(async () => structuredClone(current));
 		const apply = vi.spyOn(apiClient, 'organizeBatchJob').mockImplementation(async () => {
 			current = structuredClone(current);
-			current.status = 'failed';
+			current.status = errorCode === 'credit_conflict' ? 'completed' : 'failed';
 			current.apply_generation = 1;
 			current.completed = 0;
 			current.failed = 1;
@@ -162,10 +164,25 @@ it.each(['credit_conflict', 'credit_status_unavailable'] as const)(
 		expect(view.getByRole('button', { name: /Adopt as truth/ })).toBeTruthy();
 		expect(view.getByRole('button', { name: /This movie only/i })).toBeTruthy();
 		expect(view.queryByRole('button', { name: /Search Manually/i })).toBeNull();
-		// Retrying never bypasses the live conflict gate.
-		await fireEvent.click(view.getByRole('button', { name: /Retry Failed/i }));
-		await waitFor(() => expect(apply).toHaveBeenCalledTimes(2));
-		expect(apply.mock.calls[1][1].retry_file_paths).toEqual([filePath]);
+		expect(
+			view.getByRole('button', {
+				name:
+					errorCode === 'credit_conflict'
+						? 'Review actress-credit conflicts'
+						: 'Check actress-credit status',
+			}),
+		).toBeTruthy();
+		const retry = view.getByRole('button', { name: /Retry Failed/i }) as HTMLButtonElement;
+		if (errorCode === 'credit_conflict') {
+			// Only the eligible completed job retries, still through the live conflict gate.
+			expect(retry.disabled).toBe(false);
+			await fireEvent.click(retry);
+			await waitFor(() => expect(apply).toHaveBeenCalledTimes(2));
+			expect(apply.mock.calls[1][1].retry_file_paths).toEqual([filePath]);
+		} else {
+			expect(retry.disabled).toBe(true);
+			expect(apply).toHaveBeenCalledOnce();
+		}
 		expect(apiClient.listCollisions).toHaveBeenCalledWith('mov001');
 	},
 );
@@ -203,7 +220,9 @@ it('blocks an expanded movie-specific editor during Organize', async () => {
 	vi.spyOn(apiClient, 'getBatchJob').mockResolvedValue(original());
 	vi.mocked(apiClient.listCollisions).mockResolvedValue({ collisions: [] });
 	const override = vi.spyOn(apiClient, 'updateCreditOverride').mockResolvedValue();
-	const apply = vi.spyOn(apiClient, 'organizeBatchJob').mockResolvedValue({ apply_generation: 1 } as never);
+	const apply = vi
+		.spyOn(apiClient, 'organizeBatchJob')
+		.mockResolvedValue({ apply_generation: 1 } as never);
 	const view = mount();
 	await fireEvent.click(await view.findByRole('button', { name: 'This movie only' }));
 	await fireEvent.input(view.getByLabelText('Name for this movie'), {
@@ -332,8 +351,10 @@ it.each(['credit_conflict', 'credit_status_unavailable'] as const)(
 		await fireEvent.click(await view.findByRole('button', { name: /Keep catalog/ }));
 		await waitFor(() => expect(resolve).toHaveBeenCalledOnce());
 		await waitFor(() => expect(observedReview.state?.isSavingEdits).toBe(false));
-		expect((view.getByRole('button', { name: /Retry Failed/i }) as HTMLButtonElement).disabled).toBe(true);
-		expect(view.getByText(/original apply attempt or settings could not be verified/i)).toBeTruthy();
+		expect(
+			(view.getByRole('button', { name: /Retry Failed/i }) as HTMLButtonElement).disabled,
+		).toBe(true);
+		expect(view.getByText(/This saved job cannot be retried here/i)).toBeTruthy();
 		await fireEvent.click(view.getByRole('tab', { name: /Failed/ }));
 		expect(view.getAllByRole('button', { name: /Search Manually/i })).toHaveLength(1);
 		expect(view.getByText('unidentified.mp4')).toBeTruthy();
@@ -397,9 +418,87 @@ it('keeps the expected-file success summary and Continue action wired outside th
 	// The status card supports a terminal notification without individual file
 	// outcomes. Exercise that fallback using the real page's captured state.
 	observedReview.state!.fileStatuses.clear();
-	await waitFor(() => expect(view.getByText(/All 1 file\(s\) organized successfully/)).toBeTruthy());
+	await waitFor(() =>
+		expect(view.getByText(/All 1 file\(s\) organized successfully/)).toBeTruthy(),
+	);
 	const { goto } = await import('$app/navigation');
 	vi.mocked(goto).mockClear();
 	await fireEvent.click(view.getByRole('button', { name: /Return to Browse now/i }));
 	expect(goto).toHaveBeenCalledWith('/browse');
+});
+it('error action opens exact second movie from poster grid, focuses live panel and fresh-checks again', async () => {
+	const current = original();
+	const second = '/synthetic/SECOND.mp4';
+	current.results[second] = {
+		...current.results[filePath],
+		file_path: second,
+		result_id: 'second',
+		movie_id: 'SECOND',
+		status: 'failed',
+		error_code: 'credit_conflict',
+		error: 'apply blocked by an open credit collision',
+		movie: { ...current.results[filePath].movie!, id: 'SECOND', code: 'second002' },
+	};
+	current.failed = 1;
+	vi.spyOn(apiClient, 'getBatchJob').mockResolvedValue(current);
+	vi.mocked(apiClient.listCollisions).mockResolvedValue({ collisions: [] });
+	Object.defineProperty(Element.prototype, 'scrollIntoView', {
+		configurable: true,
+		value: vi.fn(),
+	});
+	const { page } = await import('$app/stores');
+	(page as any).set({
+		params: { jobId: 'credit-job' },
+		url: new URL('http://localhost/review/credit-job?view=poster'),
+	});
+	const view = mount();
+	const action = await view.findByRole('button', { name: 'Review actress-credit conflicts' });
+	await fireEvent.click(action);
+	await waitFor(() => expect(apiClient.listCollisions).toHaveBeenCalledWith('second002'));
+	const panel = await view.findByRole('region', { name: 'Actress-credit conflicts' });
+	await waitFor(() => expect(document.activeElement).toBe(panel));
+	expect(observedReview.state?.currentMovie?.code).toBe('second002');
+	expect(observedReview.state?.viewMode).toBe('detail');
+	expect(await view.findByText(/No open actress-credit conflicts were found/)).toBeTruthy();
+	const n = vi.mocked(apiClient.listCollisions).mock.calls.length;
+	await fireEvent.click(action);
+	await waitFor(() =>
+		expect(vi.mocked(apiClient.listCollisions).mock.calls.length).toBeGreaterThan(n),
+	);
+});
+
+it('does not remount the collision panel through guidance while resolution is pending', async () => {
+	const current = original();
+	Object.assign(current.results[filePath], {
+		status: 'failed',
+		error_code: 'credit_conflict',
+		error: 'previous credit conflict',
+	});
+	vi.spyOn(apiClient, 'getBatchJob').mockResolvedValue(current);
+	let finish!: () => void;
+	vi.spyOn(apiClient, 'resolveCollision').mockImplementation(
+		() =>
+			new Promise((resolve) => {
+				finish = () => {
+					vi.mocked(apiClient.listCollisions).mockResolvedValue({ collisions: [] });
+					resolve({ remaining_open: 0 } as never);
+				};
+			}),
+	);
+	const view = mount();
+	const action = (await view.findByRole('button', {
+		name: 'Review actress-credit conflicts',
+	})) as HTMLButtonElement;
+	await fireEvent.click(await view.findByRole('button', { name: /Keep catalog/ }));
+	await waitFor(() => expect(action.disabled).toBe(true));
+	const request = observedReview.state!.creditGuidanceRequest;
+	const reads = vi.mocked(apiClient.listCollisions).mock.calls.length;
+	await fireEvent.click(action);
+	expect(observedReview.state!.openCreditGuidance(filePath)).toBe(false);
+	expect(observedReview.state!.creditGuidanceRequest).toBe(request);
+	expect(vi.mocked(apiClient.listCollisions).mock.calls.length).toBe(reads);
+	finish();
+	await waitFor(() => expect(action.disabled).toBe(false));
+	await waitFor(() => expect(view.queryByRole('button', { name: /Keep catalog/ })).toBeNull());
+	expect(vi.mocked(apiClient.listCollisions).mock.calls.length).toBeGreaterThan(reads);
 });
