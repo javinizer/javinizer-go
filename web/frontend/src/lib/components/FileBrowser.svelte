@@ -2,6 +2,7 @@
 	import { untrack } from 'svelte';
 	import { apiClient } from '$lib/api/client';
 	import { formatBytes } from '$lib/utils';
+	import { pruneStaleFileSelections } from '$lib/utils/file-selection';
 	import { formatDate } from '$lib/i18n/format';
 	import { splitPath, buildPathUp, buildBreadcrumbPath, isRootPath } from '$lib/utils/path';
 	import type { FileInfo, BrowseResponse } from '$lib/api/types';
@@ -75,14 +76,8 @@
 
 	$effect(() => {
 		if (!initialData) return;
-		const presentPaths = new Set(initialData.items.filter((i) => !i.is_dir).map((i) => i.path));
-		const normDir = (d: string): string => d.replace(/[\\/]+$/, '') || d;
-		const isChildOfCurrent = (p: string): boolean => {
-			const parent = p.substring(0, Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\')));
-			return normDir(parent) === normDir(initialData.current_path);
-		};
-		const pruned = externalSelectedFiles.filter(
-			(p) => !isChildOfCurrent(p) || presentPaths.has(p)
+		const pruned = pruneStaleFileSelections(
+			externalSelectedFiles, initialData.current_path, initialData.items
 		);
 		if (pruned.length !== externalSelectedFiles.length) {
 			untrack(() => {
@@ -231,29 +226,8 @@
 			items = response.items;
 			currentPage = 1;
 
-			// Prune "phantom" selections: a file that lived in THIS directory but has
-			// since been moved/renamed/deleted out from under us (e.g. the user ran
-			// Scrape & Organize and moved the movie + its art out, then hit Refresh)
-			// is no longer in the listing. Without this, its path lingers in the
-			// queue with no checkbox in the file list to toggle off, and a later
-			// scrape would error or write art/NFO for a file that's gone. Only
-			// entries that were children of the directory we just listed are
-			// candidates — selections from OTHER folders (recursive scans, other
-			// browsed dirs) are preserved untouched.
-			const currentDir = response.current_path;
-			const presentPaths = new Set(
-				items.filter((i) => !i.is_dir).map((i) => i.path)
-			);
-			const normDir = (d: string): string => d.replace(/[\\/]+$/, '') || d;
-			const isChildOfCurrent = (p: string): boolean => {
-				const parent = p.substring(
-					0,
-					Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'))
-				);
-				return normDir(parent) === normDir(currentDir);
-			};
-			const pruned = externalSelectedFiles.filter(
-				(p) => !isChildOfCurrent(p) || presentPaths.has(p)
+			const pruned = pruneStaleFileSelections(
+				externalSelectedFiles, response.current_path, items
 			);
 			if (pruned.length !== externalSelectedFiles.length) {
 				externalSelectedFiles = pruned;
