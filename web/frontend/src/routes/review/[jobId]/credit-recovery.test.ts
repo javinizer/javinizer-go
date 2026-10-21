@@ -260,7 +260,7 @@ it('removing an actor refreshes and clears its resolved collision panel', async 
 	await waitFor(() => expect(view.queryByRole('button', { name: 'This movie only' })).toBeNull());
 	expect(vi.mocked(apiClient.listCollisions).mock.calls.length).toBeGreaterThanOrEqual(2);
 	await waitFor(() => expect(view.queryByRole('button', { name: /Keep catalog/ })).toBeNull());
-	expect(view.queryByText(/Collisions.*organize is blocked until resolved/)).toBeNull();
+	expect(view.queryByText('Actress-credit conflicts', { exact: true })).toBeNull();
 });
 it.each([true, false])(
 	'ignores old override completion after job navigation (same file: %s)',

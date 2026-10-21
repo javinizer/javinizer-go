@@ -37,7 +37,10 @@
 		enabled: !!movieContentId
 	}));
 
-	let openCollisions = $derived(collisionsQuery.data?.collisions ?? []);
+	// A failed refetch retains cached data. Never present those rows as current, actionable conflicts.
+	let openCollisions = $derived(
+		collisionsQuery.isFetching || collisionsQuery.isError ? [] : (collisionsQuery.data?.collisions ?? [])
+	);
 	let reconciledConflict = $state<{ collisionId: number; movieContentId: string } | null>(null);
 
 	const resolveMutation = createMutation(() => ({
@@ -164,7 +167,7 @@
 	}
 
 	async function openRelink(collision: CreditCollision) {
-		if (resolveMutation.isPending) return;
+		if (resolveMutation.isPending || collisionsQuery.isFetching || collisionsQuery.isError) return;
 		relinkCollision = collision;
 		relinkMovieContentId = movieContentId;
 		searchQuery = '';
@@ -175,7 +178,7 @@
 	}
 
 	function confirmRelink() {
-		if (disabled || resolveMutation.isPending) return;
+		if (disabled || resolveMutation.isPending || collisionsQuery.isFetching || collisionsQuery.isError) return;
 		const collision = relinkCollision;
 		const target = selectedTarget;
 		if (!collision || !target || relinkMovieContentId !== movieContentId) return;
@@ -193,7 +196,7 @@
 	}
 
 	function resolve(collision: CreditCollision, resolution: CollisionResolution) {
-		if (disabled || resolveMutation.isPending) return;
+		if (disabled || resolveMutation.isPending || collisionsQuery.isFetching || collisionsQuery.isError) return;
 		if (resolution === 'reassign') {
 			void openRelink(collision);
 			return;
@@ -205,7 +208,7 @@
 	}
 
 	$effect(() => {
-		if (relinkCollision && relinkMovieContentId !== movieContentId) closeRelink();
+		if (relinkCollision && (relinkMovieContentId !== movieContentId || collisionsQuery.isError)) closeRelink();
 	});
 
 	const fieldLabel: Record<string, string> = {
