@@ -98,14 +98,7 @@ func resolveOrganizeApplyConfig(
 	applyOpts.RetryFilePaths = append([]string(nil), req.RetryFilePaths...)
 	applyOpts.ExpectedApplyGeneration = req.ExpectedApplyGeneration
 	applyOpts.OperationModeOverride = resolved.OperationMode
-	sink := newOrganizeBroadcastSink(snap.RT())
-	applyGenerationRef := new(uint64)
-	applyOpts.ApplyGenerationRef = applyGenerationRef
-	applyOpts.OnPhaseComplete = makeOrganizeCompleteBroadcaster(job, false /* isUpdate */, sink, applyGenerationRef)
-	applyOpts.OnFileProgress = makeOrganizeProgressBroadcaster(job, false /* isUpdate */, sink, applyGenerationRef)
-	applyOpts.OnFileOrganizeStart = makeOrganizeFileStartBroadcaster(job, false /* isUpdate */, sink, applyGenerationRef)
-	applyOpts.OnFileOrganized = makeOrganizeFileOrganizedBroadcaster(job, false /* isUpdate */, sink, applyGenerationRef)
-	applyOpts.OnFileFailed = makeOrganizeFileFailedBroadcaster(job, false /* isUpdate */, sink, applyGenerationRef)
+	applyGenerationRef := wireApplyProgressCallbacks(&applyOpts, job, false /* isUpdate */, newOrganizeBroadcastSink(snap.RT()))
 	applyOpts.PostApplyFunc = makeOrganizePostApplyAuditHook(deps, job, applyGenerationRef)
 
 	return applyOpts, nil
@@ -208,17 +201,24 @@ func resolveUpdateApplyConfig(
 	}
 	applyOpts.RetryFilePaths = append([]string(nil), req.RetryFilePaths...)
 	applyOpts.ExpectedApplyGeneration = req.ExpectedApplyGeneration
-	sink := newOrganizeBroadcastSink(snap.RT())
-	applyGenerationRef := new(uint64)
-	applyOpts.ApplyGenerationRef = applyGenerationRef
-	applyOpts.OnPhaseComplete = makeOrganizeCompleteBroadcaster(job, true /* isUpdate */, sink, applyGenerationRef)
-	applyOpts.OnFileProgress = makeOrganizeProgressBroadcaster(job, true /* isUpdate */, sink, applyGenerationRef)
-	applyOpts.OnFileOrganizeStart = makeOrganizeFileStartBroadcaster(job, true /* isUpdate */, sink, applyGenerationRef)
-	applyOpts.OnFileOrganized = makeOrganizeFileOrganizedBroadcaster(job, true /* isUpdate */, sink, applyGenerationRef)
-	applyOpts.OnFileFailed = makeOrganizeFileFailedBroadcaster(job, true /* isUpdate */, sink, applyGenerationRef)
+	applyGenerationRef := wireApplyProgressCallbacks(&applyOpts, job, true /* isUpdate */, newOrganizeBroadcastSink(snap.RT()))
 	applyOpts.PostApplyFunc = makeUpdatePostApplyAuditHook(deps, job, applyGenerationRef)
 
 	return applyOpts, nil
+}
+
+// wireApplyProgressCallbacks gives each config its own generation reference and
+// shares it with every progress callback. Callers use the returned reference for
+// their endpoint-specific audit hook so both paths retain the same generation.
+func wireApplyProgressCallbacks(applyOpts *worker.ApplyPhaseConfig, job worker.BatchJobInterface, isUpdate bool, sink progressSink) *uint64 {
+	generationRef := new(uint64)
+	applyOpts.ApplyGenerationRef = generationRef
+	applyOpts.OnPhaseComplete = makeOrganizeCompleteBroadcaster(job, isUpdate, sink, generationRef)
+	applyOpts.OnFileProgress = makeOrganizeProgressBroadcaster(job, isUpdate, sink, generationRef)
+	applyOpts.OnFileOrganizeStart = makeOrganizeFileStartBroadcaster(job, isUpdate, sink, generationRef)
+	applyOpts.OnFileOrganized = makeOrganizeFileOrganizedBroadcaster(job, isUpdate, sink, generationRef)
+	applyOpts.OnFileFailed = makeOrganizeFileFailedBroadcaster(job, isUpdate, sink, generationRef)
+	return generationRef
 }
 
 // stampJobCounts enriches a WebSocket ProgressMessage with AUTHORITATIVE
