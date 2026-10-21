@@ -195,12 +195,27 @@ failures behind extra middleware that wraps the response writer, report the
 
 ### Upload fails with "batch stored X of Y rows"
 
+The r18.dev video key is `(content_id, service_code)`. Current imports preserve
+different services for the same raw content ID instead of discarding them.
+When a content ID has multiple services, local metadata lookup does not pick
+one arbitrarily: it returns a miss and the caller's existing fallback applies.
+This is not a change to HTTP fallback matching or a promise of service-aware
+HTTP resolution. Upload the original `.sql.gz` again to recover service rows
+previously discarded by content-ID-only imports; checking for updates can
+otherwise skip an unchanged source. Older sidecars remain readable without
+migration; older applications cannot validate the new multi-service sidecar.
+DVD ID normalization is also validated with the same Unicode-aware transform
+used by import and lookup, including upstream IDs with ideographic spaces.
+
 Raw uploads reject any batch that would silently discard rows. The error
 reports the table, required key columns, duplicate-key and NULL-key row counts,
 and the source table's row range. These are one-based record positions across
 that table's COPY blocks, not SQL file line numbers. A duplicate can match a
 row in an earlier batch. NULL values in optional metadata do not cause this
-error. The existing sidecar remains unchanged when this check fails.
+error. For videos, repeating the same content ID and service still fails;
+missing/NULL service is supported for older inputs but must not repeat for
+the same content ID either. The existing sidecar remains unchanged when this
+check fails.
 
 The server logs one upload-failure summary. For rejected batches it includes
 these same payload-free diagnostics; other failures retain their detailed

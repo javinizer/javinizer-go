@@ -26,7 +26,8 @@ type ImportOptions struct {
 	// RequireAllRows rejects batches that drop rows for duplicate or NULL
 	// required keys. It applies only to stored tables; unknown tables remain
 	// ignored. Uploads enable this to prevent silent partial replacement.
-	// The default preserves legacy download/CLI first-duplicate-wins behavior.
+	// The default preserves download/CLI first-duplicate-wins behavior for an
+	// identical logical key. Distinct video services are distinct source rows.
 	RequireAllRows bool
 }
 
@@ -69,8 +70,11 @@ var tableSchema = map[string]struct {
 	columns []string
 }{
 	derivedVideoTable: {
+		// r18.dev's source identity is (content_id, service_code). Keep a NULL
+		// service for older/minimal COPY inputs; the partial unique index below
+		// prevents SQLite's nullable composite PK from admitting duplicates.
 		create: `CREATE TABLE videos (
-			content_id        TEXT NOT NULL PRIMARY KEY,
+			content_id        TEXT NOT NULL,
 			dvd_id            TEXT,
 			dvd_id_norm       TEXT,
 			title_en          TEXT,
@@ -90,9 +94,10 @@ var tableSchema = map[string]struct {
 			gallery_thumb_first TEXT,
 			gallery_thumb_last  TEXT,
 			site_id           TEXT,
-			service_code      TEXT
+			service_code      TEXT,
+			PRIMARY KEY (content_id, service_code)
 		)`,
-		columns: []string{contentIDColumn, "dvd_id", dvdIDNormColumn, "title_en", "title_ja", "comment_en", "comment_ja", "runtime_mins", "release_date", "sample_url", "maker_id", "label_id", "series_id", "jacket_full_url", "jacket_thumb_url", "gallery_full_first", "gallery_full_last", "gallery_thumb_first", "gallery_thumb_last", "site_id", "service_code"},
+		columns: []string{contentIDColumn, "dvd_id", dvdIDNormColumn, "title_en", "title_ja", "comment_en", "comment_ja", "runtime_mins", "release_date", "sample_url", "maker_id", "label_id", "series_id", "jacket_full_url", "jacket_thumb_url", "gallery_full_first", "gallery_full_last", "gallery_thumb_first", "gallery_thumb_last", "site_id", serviceCodeColumn},
 	},
 	"derived_actress": {
 		create: `CREATE TABLE actresses (
@@ -185,6 +190,7 @@ var tableSchema = map[string]struct {
 const (
 	videosTable          = "videos"
 	dvdIDNormColumn      = "dvd_id_norm"
+	serviceCodeColumn    = "service_code"
 	videoActressesTable  = "video_actresses"
 	videoCategoriesTable = "video_categories"
 	videoDirectorsTable  = "video_directors"
@@ -266,6 +272,7 @@ func importWithOpenDB(ctx context.Context, r io.Reader, path string, opts Import
 		schema += s.create + ";"
 	}
 	schema += `CREATE INDEX idx_videos_dvd_id_norm ON videos(dvd_id_norm);
+		CREATE UNIQUE INDEX idx_videos_missing_service ON videos(content_id) WHERE service_code IS NULL;
 		CREATE INDEX idx_videos_content_id_fold ON videos(content_id COLLATE NOCASE);
 		CREATE INDEX idx_video_actresses_cid ON video_actresses(content_id);
 		CREATE INDEX idx_video_categories_cid ON video_categories(content_id);

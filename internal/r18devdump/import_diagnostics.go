@@ -37,9 +37,17 @@ func newImportBatchError(table string, batch []DumpRow, stored, firstRow int64) 
 			break
 		}
 	}
+	if table == derivedVideoTable {
+		// The upstream key is composite. A missing service remains supported
+		// for legacy small dumps; its uniqueness is enforced separately.
+		e.keyColumns = []string{contentIDColumn, serviceCodeColumn}
+	}
 	var keyIndexes []int
 	for i, column := range tableSchema[table].columns {
 		for _, key := range e.keyColumns {
+			if table == derivedVideoTable && key == serviceCodeColumn {
+				continue // Nullable legacy service is not a rejected NULL key.
+			}
 			if column == key {
 				keyIndexes = append(keyIndexes, i)
 			}

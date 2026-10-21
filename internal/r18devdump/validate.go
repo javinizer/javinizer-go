@@ -294,9 +294,10 @@ func validateNonEmpty(ctx context.Context, db *sql.DB) error {
 	return nil
 }
 
-// logicalKeys pins the logical primary keys every lookup path relies on:
+// logicalKeys pins the legacy logical primary keys every lookup path relies on:
 // entity tables carry a single-column id; association tables carry a
-// composite (content_id, *_id) key. Both are modelled uniformly.
+// composite (content_id, *_id) key. Videos additionally accept the upstream
+// service-aware key through checkVideoLogicalKey.
 var logicalKeys = []struct {
 	table string
 	keys  []string
@@ -322,7 +323,8 @@ func collationScopeColumns(table string) []string {
 		// store.go compares dvd_id_norm (never dvd_id) in its WHERE clause;
 		// dvd_id_norm is an additive column, but when present its collation
 		// still governs predicate plan choice — hence it belongs in scope.
-		return []string{contentIDColumn, dvdIDNormColumn}
+		// Service comparisons must preserve the upstream composite identity.
+		return []string{contentIDColumn, dvdIDNormColumn, serviceCodeColumn}
 	default:
 		for _, lk := range logicalKeys {
 			if lk.table == table {
@@ -339,9 +341,42 @@ func collationScopeColumns(table string) []string {
 // joined results).
 func validateLogicalKeys(ctx context.Context, db *sql.DB) error {
 	for _, lk := range logicalKeys {
+		if lk.table == videosTable {
+			if err := checkVideoLogicalKey(ctx, db); err != nil {
+				return err
+			}
+			continue
+		}
 		if err := checkLogicalKey(ctx, db, lk.table, lk.keys); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// checkVideoLogicalKey accepts both legacy content-only sidecars and the
+// upstream (content_id, service_code) identity. Only the exact composite PK
+// enables variant rows; other shapes retain the legacy content-ID checks.
+// service_code may be NULL in older/minimal COPY inputs, but NULL is one
+// distinct service value for duplicate detection, not an escape from it.
+func checkVideoLogicalKey(ctx context.Context, db *sql.DB) error {
+	pk, err := queryString(ctx, db, `SELECT COALESCE((SELECT group_concat(name, ',')
+		FROM (SELECT name FROM pragma_table_info('videos') WHERE pk > 0 ORDER BY pk)), '')`)
+	if err != nil {
+		return fmt.Errorf("%w: videos primary-key probe: %v", ErrDumpInvalid, err)
+	}
+	if pk == "content_id,service_code" {
+		return checkLogicalKeyWithNullable(ctx, db, videosTable, []string{contentIDColumn, serviceCodeColumn}, serviceCodeColumn)
+	}
+	if err := checkLogicalKey(ctx, db, videosTable, []string{contentIDColumn}); err != nil {
+		return err
+	}
+	bad, err := queryCount(ctx, db, "SELECT COUNT(*) FROM videos WHERE service_code IS NOT NULL AND typeof(service_code) != 'text'")
+	if err != nil {
+		return fmt.Errorf("%w: videos.service_code type probe: %v", ErrDumpInvalid, err)
+	}
+	if bad > 0 {
+		return fmt.Errorf("%w: dump contains videos rows with non-TEXT service_code", ErrDumpInvalid)
 	}
 	return nil
 }
@@ -351,13 +386,27 @@ func validateLogicalKeys(ctx context.Context, db *sql.DB) error {
 // error branch for the row read, then decisions applied in NULL → duplicate →
 // primary-key order.
 func checkLogicalKey(ctx context.Context, db *sql.DB, table string, keys []string) error {
+	return checkLogicalKeyWithNullable(ctx, db, table, keys, "")
+}
+
+func checkLogicalKeyWithNullable(ctx context.Context, db *sql.DB, table string, keys []string, nullableKey string) error {
 	keyList := strings.Join(keys, "+")
-	nullPred := strings.Join(nullPredicates(keys), " OR ")
-	notNullPred := strings.Join(notNullPredicates(keys), " AND ")
+	requiredKeys := make([]string, 0, len(keys))
+	for _, key := range keys {
+		if key != nullableKey {
+			requiredKeys = append(requiredKeys, key)
+		}
+	}
+	nullPred := strings.Join(nullPredicates(requiredKeys), " OR ")
+	notNullPred := strings.Join(notNullPredicates(requiredKeys), " AND ")
 	keysList := strings.Join(keys, ", ")
 	typePreds := make([]string, 0, len(keys))
 	for _, k := range keys {
-		typePreds = append(typePreds, "(typeof("+k+") != 'text')")
+		if k == nullableKey {
+			typePreds = append(typePreds, "("+k+" IS NOT NULL AND typeof("+k+") != 'text')")
+		} else {
+			typePreds = append(typePreds, "(typeof("+k+") != 'text')")
+		}
 	}
 	// Raw content IDs retain source casing and BINARY identity. Only key
 	// hygiene, not lowercasing, is required; folded aliases must be unambiguous.
@@ -403,7 +452,7 @@ func checkLogicalKey(ctx context.Context, db *sql.DB, table string, keys []strin
 		return fmt.Errorf("%w: %s logical-key probe: %v", ErrDumpInvalid, table, err)
 	}
 	if nulls > 0 {
-		return fmt.Errorf("%w: dump contains %s rows with NULL %s", ErrDumpInvalid, table, keyList)
+		return fmt.Errorf("%w: dump contains %s rows with NULL %s", ErrDumpInvalid, table, strings.Join(requiredKeys, "+"))
 	}
 	if total > distinct {
 		return fmt.Errorf("%w: dump contains %s rows with duplicate %s", ErrDumpInvalid, table, keyList)
@@ -426,19 +475,6 @@ func checkLogicalKey(ctx context.Context, db *sql.DB, table string, keys []strin
 // orderedPkPredicate matches pk positions 1..len(keys) against the logical
 // key columns in order — membership alone accepts reordered keys (unusable as
 // a lookup prefix).
-// buildNormExpr returns the SQL expression computing the same transform as
-// normalizeDVDID: strip hyphen and the full ASCII whitespace set, then
-// uppercase. The chain is assembled afterhand so nesting is balanced by
-// construction.
-func buildNormExpr(col string) string {
-	expr := col
-	chain := "REPLACE(" + expr + ", '-', '')"
-	for _, cExpr := range []string{"' '", "char(9)", "char(10)", "char(11)", "char(12)", "char(13)"} {
-		chain = "REPLACE(" + chain + ", " + cExpr + ", '')"
-	}
-	return "UPPER(" + chain + ")"
-}
-
 func orderedPkPredicate(keys []string) string {
 	parts := make([]string, 0, len(keys))
 	for i, k := range keys {
@@ -494,20 +530,36 @@ func validateColumnTypes(ctx context.Context, db *sql.DB) error {
 // validateNormConsistency rejects rows whose stored dvd_id_norm disagrees
 // with normalization of the row's dvd_id (Import computes one from the other;
 // after install every DVD-ID lookup keys on dvd_id_norm only — a mismatched
-// row is unreachable or routes to the wrong content_id). The SQL mirrors
-// normalizeDVDID (upper, strip hyphens, strip spaces) for the ASCII-only
-// dvd_id domain; exotic unicode-space edges do not occur in DMM IDs (they are
-// ASCII by construction) and stay out of scope deliberately.
+// row is unreachable or routes to the wrong content_id). Stream the two
+// columns through the same Go normalization as import and lookup: SQLite's
+// built-in UPPER is ASCII-only, whereas source IDs can contain Unicode case
+// mappings and whitespace. Memory stays bounded regardless of dump size.
 func validateNormConsistency(ctx context.Context, db *sql.DB) error {
 	// Full equation: every row's stored norm must equal the normalization of
 	// its dvd_id — empty/NULL dvd_id requires an empty norm (an orphaned norm
 	// routes DVD-ID lookups at content with no DVD ID), and a nonempty dvd_id
 	// requires the agreeing norm (empty/NULL norms are invisible to lookups).
-	bad, err := queryCount(ctx, db,
-		"SELECT COUNT(*) FROM videos WHERE "+
-			"COALESCE(dvd_id_norm, '') != COALESCE("+buildNormExpr("dvd_id")+", '')")
+	rows, err := db.QueryContext(ctx, "SELECT dvd_id, dvd_id_norm, typeof(dvd_id_norm) FROM videos")
 	if err != nil {
 		return fmt.Errorf("%w: norm consistency probe: %v", ErrDumpInvalid, err)
+	}
+	defer func() { _ = rows.Close() }()
+	var bad int64
+	for rows.Next() {
+		var dvdID, norm sql.NullString
+		var normType string
+		if err := rows.Scan(&dvdID, &norm, &normType); err != nil {
+			return fmt.Errorf("%w: norm consistency probe: scan: %v", ErrDumpInvalid, err)
+		}
+		// NullString also converts BLOB/numeric values to strings. Equal
+		// spelling is insufficient: indexed lookups bind TEXT, which does not
+		// equal a BLOB/numeric value in a loosely typed uploaded sidecar.
+		if (normType != "text" && normType != "null") || norm.String != normalizeDVDID(dvdID.String) {
+			bad++
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("%w: norm consistency probe: iterate: %v", ErrDumpInvalid, err)
 	}
 	if bad > 0 {
 		return fmt.Errorf("%w: dump contains %d videos whose dvd_id_norm disagrees with its dvd_id", ErrDumpInvalid, bad)

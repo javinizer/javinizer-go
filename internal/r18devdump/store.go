@@ -52,13 +52,18 @@ type dumpDVDRow struct {
 	dvdID       string
 	releaseDate string
 	serviceCode string
+	// Set by DVD queries before filtering; zero means queryContentIDs already
+	// returned every service variant for ambiguity checks.
+	variantCount int64
 }
 
 func (s *Store) selectDVDRow(ctx context.Context, key, id string) (dumpDVDRow, bool, error) {
 	queryIdentity := dumpMarkerDisplayKey(id)
 	rawMarker := isRawDumpMarkerQuery(id)
 	rows, err := s.db.QueryContext(ctx,
-		"SELECT content_id, dvd_id, release_date, service_code FROM videos WHERE dvd_id_norm = ? ORDER BY content_id",
+		`SELECT content_id, dvd_id, release_date, service_code,
+		(SELECT COUNT(*) FROM videos AS all_variants WHERE all_variants.content_id = videos.content_id)
+		FROM videos WHERE dvd_id_norm = ? ORDER BY content_id`,
 		key,
 	)
 	if err != nil {
@@ -70,9 +75,13 @@ func (s *Store) selectDVDRow(ctx context.Context, key, id string) (dumpDVDRow, b
 	for rows.Next() {
 		var row dumpDVDRow
 		var dvdID, releaseDate, serviceCode sql.NullString
-		if err := rows.Scan(&row.contentID, &dvdID, &releaseDate, &serviceCode); err != nil {
+		var variants int64
+		if err := rows.Scan(&row.contentID, &dvdID, &releaseDate, &serviceCode, &variants); err != nil {
 			return dumpDVDRow{}, false, fmt.Errorf("dump dvd_id lookup failed for %q: scan: %w", key, err)
 		}
+		// A DVD predicate can hide a different service's DVD spelling. Never
+		// choose metadata until the complete raw content identity is unique.
+		row.variantCount = variants
 		row.dvdID = dvdID.String
 		row.releaseDate = releaseDate.String
 		row.serviceCode = serviceCode.String
@@ -96,7 +105,7 @@ func (s *Store) selectDVDRow(ctx context.Context, key, id string) (dumpDVDRow, b
 	buckets := contentIDBuckets(matches)
 	literal := strings.TrimSpace(id)
 	for _, row := range matches {
-		if row.contentID == literal {
+		if row.contentID == literal && row.variantCount == 1 {
 			return row, true, nil
 		}
 	}
@@ -106,7 +115,7 @@ func (s *Store) selectDVDRow(ctx context.Context, key, id string) (dumpDVDRow, b
 		}
 	}
 	for _, row := range matches {
-		if len(buckets[foldContentID(row.contentID)]) == 1 {
+		if len(buckets[foldContentID(row.contentID)]) == 1 && row.variantCount == 1 {
 			return row, true, nil
 		}
 	}
@@ -114,11 +123,19 @@ func (s *Store) selectDVDRow(ctx context.Context, key, id string) (dumpDVDRow, b
 }
 
 // LookupByDVDID resolves a display dvd_id (e.g. "IPX-535") to its DMM
-// content_id. The query is matched against a normalized dvd_id column
+// content_id, provided that raw ID has only one service row. The query is
+// matched against a normalized dvd_id column
 // (uppercase, hyphens and whitespace stripped), so "IPX-535", "ipx535", and
 // " IPX 535 " all resolve identically. Returns models.ErrDumpMiss on a miss.
 func (s *Store) LookupByDVDID(ctx context.Context, dvdID string) (string, error) {
 	if s == nil || dvdID == "" {
+		return "", models.ErrDumpMiss
+	}
+	exact, err := s.queryContentIDs(ctx, []string{strings.TrimSpace(dvdID)}, false)
+	if err != nil {
+		return "", err
+	}
+	if len(exact) > 1 {
 		return "", models.ErrDumpMiss
 	}
 	for _, key := range dumpNormKeys(dvdID) {
@@ -134,7 +151,8 @@ func (s *Store) LookupByDVDID(ctx context.Context, dvdID string) (string, error)
 }
 
 // LookupByContentID resolves a DMM content_id back to its display dvd_id.
-// An exact raw ID wins; a uniquely matching ASCII-case alias is also accepted.
+// An exact raw ID with one service row wins; a uniquely matching ASCII-case
+// alias is also accepted. Multiple services never select an arbitrary DVD.
 // Absent or ambiguous aliases return ErrDumpMiss; a matched row without a DVD
 // ID returns ErrDumpNoDVDID.
 func (s *Store) LookupByContentID(ctx context.Context, contentID string) (string, error) {
@@ -268,7 +286,8 @@ func (s *Store) MatchByDisplayID(ctx context.Context, id string) ([]models.DumpM
 }
 
 // LookupMovie resolves an exact raw content_id or a display dvd_id to a
-// fully-populated DumpMovie with all related entities joined. Exact raw IDs
+// fully-populated DumpMovie with all related entities joined. Multiple service
+// rows for a raw content ID return a miss rather than choosing metadata. Exact raw IDs
 // win over conflicting normalized DVD spellings, but null-DVD rows remain
 // unverified candidates, not full-movie hits. This is the zero-HTTP fast path
 // for the r18.dev scraper: when it hits, no r18.dev API call is needed. Returns
@@ -283,6 +302,9 @@ func (s *Store) LookupMovie(ctx context.Context, dvdID string) (*models.DumpMovi
 	exact, err := s.queryContentIDs(ctx, []string{strings.TrimSpace(dvdID)}, false)
 	if err != nil {
 		return nil, err
+	}
+	if len(exact) > 1 {
+		return nil, models.ErrDumpMiss
 	}
 	if len(exact) != 0 {
 		if exact[0].dvdID == "" {

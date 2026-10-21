@@ -65,6 +65,9 @@ func lookupCollationFixture(t *testing.T, columnDDL, primaryKey string) string {
 	path := importFixture(t)
 	schema := regexp.MustCompile(`dvd_id_norm\s+TEXT`).ReplaceAllString(tableSchema[derivedVideoTable].create, columnDDL)
 	if primaryKey != "" {
+		// Support both the historical inline key and the service-aware
+		// table-level key without leaving a dangling (content_id, service_code).
+		schema = regexp.MustCompile(`,\s*PRIMARY KEY\s*\([^)]*\)`).ReplaceAllString(schema, "")
 		schema = strings.Replace(schema, "PRIMARY KEY", "", 1)
 		end := strings.LastIndex(schema, ")")
 		schema = schema[:end] + ", " + primaryKey + schema[end:]

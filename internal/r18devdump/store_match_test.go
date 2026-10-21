@@ -173,13 +173,17 @@ func TestMatchByDisplayID_ExactContentIDRowLeadsCandidates(t *testing.T) {
 // empty (no rows), oneRow (one valid row), badcols (columns mismatch Scan),
 // and failingErr (rows.Err() non-nil after iteration).
 type faultyRows struct {
-	mode  string
-	dirty bool
+	mode         string
+	dirty        bool
+	withVariants bool
 }
 
 func (r *faultyRows) Columns() []string {
 	if r.mode == "badcols" {
 		return []string{"content_id", "dvd_id"}
+	}
+	if r.withVariants {
+		return []string{"content_id", "dvd_id", "release_date", "service_code", "variants"}
 	}
 	return []string{"content_id", "dvd_id", "release_date", "service_code"}
 }
@@ -194,6 +198,9 @@ func (r *faultyRows) Next(dest []driver.Value) error {
 		if r.mode != "badcols" {
 			dest[2] = "2013-03-01"
 			dest[3] = "digital"
+			if r.withVariants {
+				dest[4] = int64(1)
+			}
 		}
 		return nil
 	}
@@ -219,7 +226,7 @@ func (c *faultyConn) QueryContext(_ context.Context, query string, _ []driver.Na
 		case "normBadcols":
 			return &faultyRows{mode: "badcols"}, nil
 		case "normFailingErr":
-			return &faultyRows{mode: "failingErr"}, nil
+			return &faultyRows{mode: "failingErr", withVariants: true}, nil
 		}
 	}
 	return &faultyRows{mode: "empty"}, nil
