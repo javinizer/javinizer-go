@@ -50,3 +50,12 @@ func TestDownloadPartialError(t *testing.T) {
 	assert.Contains(t, err.Error(), "3 critical media attempted")
 	assert.Contains(t, err.Error(), "1 succeeded")
 }
+
+func TestConfigFromAppConfigPosterFallbackMode(t *testing.T) {
+	for _, mode := range []string{"", "legacy", "center", "fit"} {
+		cfg := config.DefaultConfig(nil, nil)
+		cfg.Output.MediaFormat.PosterFallbackMode = mode
+		actual := ConfigFromAppConfig(cfg, nfo.NFONameConfigFromAppConfig(cfg))
+		assert.Equal(t, mode, actual.PosterFallbackMode)
+	}
+}

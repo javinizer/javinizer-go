@@ -133,6 +133,7 @@
 //	cfg.Output.Template                             → nfo
 //	cfg.Output.Template.MaxTitleLength               → organizer
 //	cfg.Output.Operation.MoveSubtitles                → organizer
+//	cfg.Output.MediaFormat.PosterFallbackMode           → downloader
 //	cfg.Output.MediaFormat.PosterFormat                 → downloader, organizer
 //	cfg.Output.Operation.RenameFile                   → organizer
 //	cfg.Output.MediaFormat.ScreenshotFolder             → downloader, organizer

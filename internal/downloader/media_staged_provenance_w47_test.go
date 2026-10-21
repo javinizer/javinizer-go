@@ -180,50 +180,62 @@ func TestDownloadPosterW47_ProvenanceArmedCroppedInstallUnchanged(t *testing.T) 
 // journal entry is retracted with the consumed backup, and the foreign
 // substitute at the candidate name is preserved byte-intact.
 func TestDownloadPosterW47_ReplacePathRefusesSubstitutedCandidate(t *testing.T) {
-	server := serveTwoToneSource(t)
+	for _, mode := range []string{"legacy", "center", "fit"} {
+		t.Run(mode, func(t *testing.T) {
+			server := serveTwoToneSource(t)
 
-	base := afero.NewMemMapFs()
-	preExisting := []byte("pre-existing poster bytes — never published-over")
-	// fireOn 3: wave-66 added the producer-record capture at the crop (#1),
-	// so the publish-adjacent lookup the replace-path compensation is asserted
-	// against is #2 = the bind's Lstat, #3 = installOverwriting's re-proof.
-	fsW := &w47CropSwapFs{Fs: base, fireOn: 3, plant: []byte("w47 replace-window foreign substitute")}
-	movie := w42CropMovie("W47-REPLACE", server.URL+"/cover.jpg")
-	dest := w42ResolvePosterDest(NewDownloader(nil, base, w42CropPosterConfig(), nil), movie)
-	require.NoError(t, base.MkdirAll(filepath.Dir(dest), 0o755))
-	require.NoError(t, afero.WriteFile(base, dest, preExisting, 0o644))
+			base := afero.NewMemMapFs()
+			preExisting := []byte("pre-existing poster bytes — never published-over")
+			// fireOn 3: wave-66 added the producer-record capture at the crop (#1),
+			// so the publish-adjacent lookup the replace-path compensation is asserted
+			// against is #2 = the bind's Lstat, #3 = installOverwriting's re-proof.
+			fsW := &w47CropSwapFs{Fs: base, fireOn: 3, plant: []byte("w47 replace-window foreign substitute")}
+			movie := w42CropMovie("W47-REPLACE", server.URL+"/cover.jpg")
+			dest := w42ResolvePosterDest(NewDownloader(nil, base, w42CropPosterConfig(), nil), movie)
+			require.NoError(t, base.MkdirAll(filepath.Dir(dest), 0o755))
+			require.NoError(t, afero.WriteFile(base, dest, preExisting, 0o644))
 
-	var logs bytes.Buffer
-	restoreLog := logging.SetOutput(&logs)
-	defer restoreLog()
+			var logs bytes.Buffer
+			restoreLog := logging.SetOutput(&logs)
+			defer restoreLog()
 
-	recorder := &armedTestLedger{}
-	d := NewDownloader(server.Client(), fsW, w42CropPosterConfig(), nil)
-	result, err := d.downloadPoster(context.Background(), movie, "/output", nil, true, nil,
-		downloadLedger{opID: "w47-replace", recorder: recorder})
-	require.Error(t, err)
-	require.ErrorIs(t, err, errStagedInputSubstituted)
-	require.ErrorIs(t, result.Error, errStagedInputSubstituted)
-	require.False(t, result.Downloaded)
-	require.False(t, result.Replaced)
-	require.False(t, result.Skipped)
-	require.Empty(t, result.LocalPath)
+			recorder := &armedTestLedger{}
+			d := NewDownloader(server.Client(), fsW, w42CropPosterConfig(), nil)
+			d.config.PosterFallbackMode = mode
+			result, err := d.downloadPoster(context.Background(), movie, "/output", nil, true, nil,
+				downloadLedger{opID: "w47-replace", recorder: recorder})
+			require.Error(t, err)
+			require.ErrorIs(t, err, errStagedInputSubstituted)
+			require.ErrorIs(t, result.Error, errStagedInputSubstituted)
+			require.False(t, result.Downloaded)
+			require.False(t, result.Replaced)
+			require.False(t, result.Skipped)
+			require.Empty(t, result.LocalPath)
 
-	require.Equal(t, preExisting, mustReadDownloaderW7(t, base, dest),
-		"the publish-failure compensation restored the pre-existing destination bytes")
+			require.Equal(t, preExisting, mustReadDownloaderW7(t, base, dest),
+				"the publish-failure compensation restored the pre-existing destination bytes")
 
-	require.True(t, fsW.swapped, "the window swap replay fired")
-	require.Equal(t, fsW.plant, mustReadDownloaderW7(t, base, fsW.candidate),
-		"the substitute is preserved byte-intact at the retained candidate name")
+			require.True(t, fsW.swapped, "the window swap replay fired")
+			require.Equal(t, fsW.plant, mustReadDownloaderW7(t, base, fsW.candidate),
+				"the substitute is preserved byte-intact at the retained candidate name")
 
-	require.Empty(t, recorder.get(), "the armed journal entry was retracted with the rollback")
-	require.Len(t, recorder.released, 1)
-	_, berr := base.Stat(recorder.released[0].backupPath)
-	require.ErrorIs(t, berr, os.ErrNotExist, "the set-aside was consumed by the no-replace restore")
+			require.Empty(t, recorder.get(), "the armed journal entry was retracted with the rollback")
+			require.Len(t, recorder.released, 1)
+			_, berr := base.Stat(recorder.released[0].backupPath)
+			require.ErrorIs(t, berr, os.ErrNotExist, "the set-aside was consumed by the no-replace restore")
 
-	// The parked genuine object is the cropped candidate we produced.
-	_, w, _ := decodeResultPoster(t, base, fsW.candidate+".hidden")
-	require.InDelta(t, 472, w, 3)
+			// The parked genuine object is the cropped candidate we produced.
+			_, w, _ := decodeResultPoster(t, base, fsW.candidate+".hidden")
+			expectedWidth := 472
+			if mode == "center" {
+				expectedWidth = 400
+			} else if mode == "fit" {
+				expectedWidth = 1000
+			}
+			require.InDelta(t, expectedWidth, w, 3)
 
-	require.Contains(t, logs.String(), "no longer names the crop/write-produced object")
+			require.Contains(t, logs.String(), "no longer names the crop/write-produced object")
+
+		})
+	}
 }

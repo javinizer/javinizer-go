@@ -1357,6 +1357,16 @@ file_matching:
   regex_pattern: '([a-zA-Z|tT28]+-\d+[zZ]?[eE]?)(?:-pt)?(\d{1,2})?'
 ```
 
+### Automatic poster fallback
+
+`output.poster_fallback_mode` controls only automatically generated posters when a native poster is unavailable or the source requires fallback. Native poster downloads and explicit manual crops are unchanged.
+
+- `legacy` (default, also used for an empty value): preserve the existing crop behavior.
+- `center`: crop centrally to an exact 2:3 portrait, discarding outer image content as needed.
+- `fit`: preserve the whole image, centered on a dark neutral (RGB 32, 32, 32) 2:3 canvas without enlarging the image content.
+
+For `center` and `fit`, `max_poster_height` must be 0 (uncapped) or at least 3. Output height is rounded down to a multiple of 3 when capped to preserve exact integer 2:3 dimensions. Minimum output is 2×3 pixels; tiny inputs may be enlarged by `center`. New modes reject outputs exceeding 16 Mi pixels to prevent excessive canvas allocation, including very tall or narrow sources. Set `max_poster_height: 1500` (or another cap at most 5016) if this limit is reached. Review source previews for these modes are not a generated-output guarantee: automatic fallback is applied during processing. Manual crop adjustments still take precedence.
+
 ### Output Defaults
 
 ```yaml
@@ -1370,6 +1380,9 @@ output:
   # Max height in pixels for cropped posters. 0 = no cap (preserve source resolution).
   # When a cropped poster exceeds this height, it is downscaled preserving aspect ratio.
   max_poster_height: 0
+  # Automatic fallback only; native posters and manual crops are unchanged.
+  # legacy: existing behavior; center: centered 2:3 crop; fit: full image with dark padding.
+  poster_fallback_mode: legacy
   move_subtitles: false
   subtitle_extensions:
     - .srt

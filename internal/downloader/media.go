@@ -279,9 +279,9 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 		var cropInfo os.FileInfo
 		var cropErr error
 		if verifiedSource != nil {
-			cropInfo, cropErr = imageutil.CropPosterFromCoverReader(d.fs, bytes.NewReader(verifiedSource), cropPath, d.config.MaxPosterHeight)
+			cropInfo, cropErr = imageutil.RenderPosterFromCoverReader(d.fs, bytes.NewReader(verifiedSource), cropPath, d.config.MaxPosterHeight, d.config.PosterFallbackMode)
 		} else {
-			cropInfo, cropErr = imageutil.CropPosterFromCover(d.fs, fullPath, cropPath, d.config.MaxPosterHeight)
+			cropInfo, cropErr = imageutil.RenderPosterFromCover(d.fs, fullPath, cropPath, d.config.MaxPosterHeight, d.config.PosterFallbackMode)
 		}
 		if cropErr != nil {
 			fullResult.Error = fmt.Errorf("failed to crop poster: %w", cropErr)

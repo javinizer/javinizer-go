@@ -1205,6 +1205,7 @@ export interface OutputConfig {
 	first_name_order?: boolean;
 	actress_language_ja?: boolean;
 	max_poster_height: number;
+	poster_fallback_mode?: '' | 'legacy' | 'center' | 'fit';
 	move_subtitles: boolean;
 	subtitle_extensions: string[];
 	operation_mode: OperationMode;

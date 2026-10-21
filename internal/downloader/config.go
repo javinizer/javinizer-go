@@ -27,7 +27,8 @@ type Config struct {
 	DownloadTimeout     int
 
 	// Poster cropping cap (px); 0 = no cap, preserve source resolution.
-	MaxPosterHeight int
+	MaxPosterHeight    int
+	PosterFallbackMode string // Automatic fallback only; empty is legacy.
 
 	// HTTP client settings
 	UserAgent string // From Scrapers.UserAgent, resolved by bridge
@@ -55,7 +56,7 @@ type Config struct {
 // cfg.Output.Download.DownloadTimeout, cfg.Scrapers.UserAgent,
 // cfg.Metadata.NFO.Feature.UseCreditedName, cfg.Metadata.NFO.Format.ActressLanguageJA,
 // cfg.Metadata.NFO.Format.UnknownActressMode, cfg.Metadata.NFO.Format.UnknownActressText,
-// cfg.Output.MediaFormat.MaxPosterHeight
+// cfg.Output.MediaFormat.MaxPosterHeight, cfg.Output.MediaFormat.PosterFallbackMode
 // (Fields FirstNameOrder, GroupActress, GroupActressName are read via nameCfg — see NFONameConfigFromAppConfig)
 func ConfigFromAppConfig(cfg *config.Config, nameCfg nfo.NFONameConfig) *Config {
 	if cfg == nil {
@@ -87,6 +88,7 @@ func ConfigFromAppConfig(cfg *config.Config, nameCfg nfo.NFONameConfig) *Config 
 		DownloadActress:     cfg.Output.Download.DownloadActress,
 		DownloadTimeout:     cfg.Output.Download.DownloadTimeout,
 		MaxPosterHeight:     cfg.Output.MediaFormat.MaxPosterHeight,
+		PosterFallbackMode:  cfg.Output.MediaFormat.PosterFallbackMode,
 		UserAgent:           cfg.Scrapers.UserAgent,
 		ActorJapaneseNames:  cfg.Metadata.NFO.Format.ActressLanguageJA,
 		ActorFirstNameOrder: nameCfg.FirstNameOrder,

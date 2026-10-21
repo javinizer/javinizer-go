@@ -326,6 +326,7 @@
 							</div>
 							<div class="lg:col-start-1 lg:row-start-1 lg:row-span-2">
 							<ReviewMediaSidebar
+								posterFallbackMode={s.config?.output?.poster_fallback_mode}
 								currentMovie={s.currentMovie}
 								displayPosterUrl={s.displayPosterUrl}
 								showPosterPanel={s.showPosterPanel}
@@ -462,6 +463,7 @@
 
 {#if s.currentMovie && s.currentResult}
 	<ImageManagerModal
+		posterFallbackMode={s.config?.output?.poster_fallback_mode}
 		bind:show={s.showImageManagerModal}
 		currentMovie={s.currentMovie}
 		currentResult={s.currentResult}

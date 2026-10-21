@@ -616,30 +616,36 @@ func TestDownloadPoster_OverwriteCroppedCreatesNewFile(t *testing.T) {
 	assertNoUniqueTemps(t, fs, "/output")
 }
 func TestDownloadPoster_OverwriteCroppedReplacesAndCleansTemps(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		img := image.NewRGBA(image.Rect(0, 0, 600, 400))
-		w.Header().Set("Content-Type", "image/jpeg")
-		_ = jpeg.Encode(w, img, &jpeg.Options{Quality: 90})
-	}))
-	defer server.Close()
+	for _, mode := range []string{"legacy", "center", "fit"} {
+		t.Run(mode, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				img := image.NewRGBA(image.Rect(0, 0, 600, 400))
+				w.Header().Set("Content-Type", "image/jpeg")
+				_ = jpeg.Encode(w, img, &jpeg.Options{Quality: 90})
+			}))
+			defer server.Close()
 
-	fs := afero.NewMemMapFs()
-	posterPath := nativePath("/output/TEST-003-poster.jpg")
-	require.NoError(t, afero.WriteFile(fs, posterPath, []byte("old poster"), 0644))
-	d := NewDownloader(server.Client(), fs, &Config{
-		DownloadPoster:    true,
-		MediaFormatConfig: organizer.MediaFormatConfig{PosterFormat: "<ID>-poster.jpg"},
-	}, nil)
-	movie := &models.Movie{ID: "TEST-003", Poster: models.PosterState{CoverURL: server.URL + "/cover.jpg", ShouldCropPoster: true}}
-	result, err := d.downloadPoster(context.Background(), movie, "/output", nil, true, &sync.Map{}, downloadLedger{opID: "test-op-" + t.Name(), recorder: &armedTestLedger{}})
-	require.NoError(t, err)
-	require.True(t, result.Downloaded)
-	assert.True(t, result.Replaced)
-	assert.Equal(t, posterPath, result.LocalPath)
-	got, readErr := afero.ReadFile(fs, posterPath)
-	require.NoError(t, readErr)
-	assert.NotEqual(t, []byte("old poster"), got)
-	assertNoUniqueTemps(t, fs, "/output")
+			fs := afero.NewMemMapFs()
+			posterPath := nativePath("/output/TEST-003-poster.jpg")
+			require.NoError(t, afero.WriteFile(fs, posterPath, []byte("old poster"), 0644))
+			d := NewDownloader(server.Client(), fs, &Config{
+				DownloadPoster:     true,
+				PosterFallbackMode: mode,
+				MediaFormatConfig:  organizer.MediaFormatConfig{PosterFormat: "<ID>-poster.jpg"},
+			}, nil)
+			movie := &models.Movie{ID: "TEST-003", Poster: models.PosterState{CoverURL: server.URL + "/cover.jpg", ShouldCropPoster: true}}
+			result, err := d.downloadPoster(context.Background(), movie, "/output", nil, true, &sync.Map{}, downloadLedger{opID: "test-op-" + t.Name(), recorder: &armedTestLedger{}})
+			require.NoError(t, err)
+			require.True(t, result.Downloaded)
+			assert.True(t, result.Replaced)
+			assert.Equal(t, posterPath, result.LocalPath)
+			got, readErr := afero.ReadFile(fs, posterPath)
+			require.NoError(t, readErr)
+			assert.NotEqual(t, []byte("old poster"), got)
+			assertNoUniqueTemps(t, fs, "/output")
+
+		})
+	}
 }
 
 func TestDownloadPoster_OverwriteCropFailurePreservesExisting(t *testing.T) {

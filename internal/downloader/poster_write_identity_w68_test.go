@@ -100,45 +100,50 @@ func (f *w68CropPostCloseSwapFs) LstatIfPossible(name string) (os.FileInfo, bool
 // fire inside the producer), the returned record names the genuine object,
 // and bindCandidateProvenance refuses the substitute the bind's own Lstat reads.
 func TestCropProducerW68_PreCloseFstatSurvivesPostCloseSubstitution(t *testing.T) {
-	fs := afero.NewOsFs()
-	dir := t.TempDir()
-	cover := filepath.Join(dir, "cover.jpg")
-	poster := filepath.Join(dir, "poster.jpg")
-	w68WriteJPEG(t, fs, cover, 1000, 600, color.White) // landscape → right-side crop
+	for _, mode := range []string{"legacy", "center", "fit"} {
+		t.Run(mode, func(t *testing.T) {
+			fs := afero.NewOsFs()
+			dir := t.TempDir()
+			cover := filepath.Join(dir, "cover.jpg")
+			poster := filepath.Join(dir, "poster.jpg")
+			w68WriteJPEG(t, fs, cover, 1000, 600, color.White) // landscape → right-side crop
 
-	plant := []byte("w68 post-close substitute — foreign bytes")
-	swapFs := &w68CropPostCloseSwapFs{Fs: fs, poster: poster, plant: plant}
+			plant := []byte("w68 post-close substitute — foreign bytes")
+			swapFs := &w68CropPostCloseSwapFs{Fs: fs, poster: poster, plant: plant}
 
-	cropInfo, err := imageutil.CropPosterFromCover(swapFs, cover, poster, 0)
-	require.NoError(t, err)
-	require.NotNil(t, cropInfo)
-	require.False(t, swapFs.swapped, "the crop producer captured the identity from the open handle — no post-close lookup ran")
+			cropInfo, err := imageutil.RenderPosterFromCover(swapFs, cover, poster, 0, mode)
+			require.NoError(t, err)
+			require.NotNil(t, cropInfo)
+			require.False(t, swapFs.swapped, "the crop producer captured the identity from the open handle — no post-close lookup ran")
 
-	producer := installedIdentityFromFileInfo(cropInfo)
-	require.True(t, producer.known)
-	if runtime.GOOS == "windows" {
-		// F2 (windows posture): OsFs on windows hands back
-		// *syscall.Win32FileAttributeData from FileInfo.Sys() — non-nil, so the
-		// crop producer still takes the pre-close fstat leg (swapFs.swapped
-		// stays false above), but the struct carries no dev/inode. The size+mtime
-		// record is the MemMapFs-shaped fallback and still authenticates: the
-		// substitute planted below has a different size, so the bind's own Lstat
-		// reads it and refuses typed exactly like the posix leg.
-		require.False(t, producer.hasDevIno, "windows OsFs Sys() is *Win32FileAttributeData — no dev/inode; the size+mtime fallback binds instead")
-	} else {
-		require.True(t, producer.hasDevIno, "OsFs carries kernel identity through the open handle")
+			producer := installedIdentityFromFileInfo(cropInfo)
+			require.True(t, producer.known)
+			if runtime.GOOS == "windows" {
+				// F2 (windows posture): OsFs on windows hands back
+				// *syscall.Win32FileAttributeData from FileInfo.Sys() — non-nil, so the
+				// crop producer still takes the pre-close fstat leg (swapFs.swapped
+				// stays false above), but the struct carries no dev/inode. The size+mtime
+				// record is the MemMapFs-shaped fallback and still authenticates: the
+				// substitute planted below has a different size, so the bind's own Lstat
+				// reads it and refuses typed exactly like the posix leg.
+				require.False(t, producer.hasDevIno, "windows OsFs Sys() is *Win32FileAttributeData — no dev/inode; the size+mtime fallback binds instead")
+			} else {
+				require.True(t, producer.hasDevIno, "OsFs carries kernel identity through the open handle")
+			}
+
+			// The bind's Lstat is the first no-follow lookup — it fires the swap and
+			// reads the substitute; the producer record names the genuine object, so
+			// the bind refuses typed and the substitute stays byte-intact.
+			prov, bindErr := bindCandidateProvenance(swapFs, poster, producer)
+			require.ErrorIs(t, bindErr, errStagedInputSubstituted)
+			require.False(t, prov.identity.known, "nothing verifiable is handed down on the refusal")
+			require.Nil(t, prov.handle, "the refusal fires BEFORE any handle is opened")
+			got, rerr := os.ReadFile(poster)
+			require.NoError(t, rerr)
+			require.Equal(t, plant, got, "the substitute is preserved byte-intact for manual cleanup")
+
+		})
 	}
-
-	// The bind's Lstat is the first no-follow lookup — it fires the swap and
-	// reads the substitute; the producer record names the genuine object, so
-	// the bind refuses typed and the substitute stays byte-intact.
-	prov, bindErr := bindCandidateProvenance(swapFs, poster, producer)
-	require.ErrorIs(t, bindErr, errStagedInputSubstituted)
-	require.False(t, prov.identity.known, "nothing verifiable is handed down on the refusal")
-	require.Nil(t, prov.handle, "the refusal fires BEFORE any handle is opened")
-	got, rerr := os.ReadFile(poster)
-	require.NoError(t, rerr)
-	require.Equal(t, plant, got, "the substitute is preserved byte-intact for manual cleanup")
 }
 
 // TestDownloadW68_PublishCompletedWithIdentityFilesProducerRecord (F2): the

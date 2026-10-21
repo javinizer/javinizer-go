@@ -7651,6 +7651,10 @@
                     "description": "Max height in px for cropped posters; 0 = no cap (preserve source resolution). When the cropped poster exceeds this height it is downscaled preserving aspect ratio.",
                     "type": "integer"
                 },
+                "poster_fallback_mode": {
+                    "description": "Automatic fallback only: legacy, center, or fit; empty means legacy.",
+                    "type": "string"
+                },
                 "poster_format": {
                     "type": "string"
                 },

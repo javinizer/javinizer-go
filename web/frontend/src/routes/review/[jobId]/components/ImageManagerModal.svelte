@@ -14,6 +14,7 @@
 		currentMovie: Movie;
 		currentResult: FileResult;
 		displayPosterUrl?: string;
+		posterFallbackMode?: string;
 		showFieldScraperSources: boolean;
 		canResetPoster: boolean;
 		canResetCover: boolean;
@@ -30,6 +31,7 @@
 		currentMovie,
 		currentResult,
 		displayPosterUrl,
+		posterFallbackMode,
 		showFieldScraperSources,
 		canResetPoster,
 		canResetCover,
@@ -97,6 +99,7 @@
 
 				<div class="flex-1 overflow-y-auto p-6">
 					<ScreenshotManager
+						{posterFallbackMode}
 						movie={currentMovie}
 						{displayPosterUrl}
 						onUpdate={onUpdateCurrentMovie}

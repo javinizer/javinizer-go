@@ -2,6 +2,7 @@
 	import * as m from '$lib/paraglide/messages';
 	import { flip } from 'svelte/animate';
 	import { quintOut } from 'svelte/easing';
+	import { isFallbackSourcePreview } from '$lib/utils/poster-fallback';
 	import type { Movie } from '$lib/api/types';
 	import { apiClient } from '$lib/api/client';
 	import { confirmDialog } from '$lib/stores/dialog.svelte';
@@ -15,6 +16,7 @@ import { tooltip } from '$lib/actions/tooltip';
 	interface Props {
 		movie: Movie;
 		displayPosterUrl?: string;
+		posterFallbackMode?: string;
 		onUpdate: (movie: Movie) => void;
 		onUseScreenshotAsPoster?: (url: string) => void;
 		onUseScreenshotAsCover?: (url: string) => void;
@@ -22,7 +24,7 @@ import { tooltip } from '$lib/actions/tooltip';
 		showFieldSources?: boolean;
 	}
 
-	let { movie, displayPosterUrl, onUpdate, onUseScreenshotAsPoster, onUseScreenshotAsCover, fieldSources, showFieldSources = false }: Props = $props();
+	let { movie, displayPosterUrl, posterFallbackMode, onUpdate, onUseScreenshotAsPoster, onUseScreenshotAsCover, fieldSources, showFieldSources = false }: Props = $props();
 
 	let screenshots = $state<string[]>([]);
 	let posterUrl = $state('');
@@ -187,6 +189,8 @@ import { tooltip } from '$lib/actions/tooltip';
 		if (normalized === 'empty') return m.screenshot_empty_source();
 		return m.screenshot_via_source({ source });
 	}
+	let fallbackSourcePreview = $derived(isFallbackSourcePreview(movie, posterFallbackMode));
+
 </script>
 
 <div class="space-y-6">
@@ -217,11 +221,11 @@ import { tooltip } from '$lib/actions/tooltip';
 			</div>
 			<div>
 				<div class="text-sm font-medium mb-1 block">
-					{m.screenshot_preview()}{movie.should_crop_poster ? ' (' + m.screenshot_preview_cropped().replace('Preview (Cropped)', 'Cropped') + ')' : ''}
+					{fallbackSourcePreview ? m.review_poster_fallback_source() : m.screenshot_preview()}{!fallbackSourcePreview && movie.should_crop_poster ? ' (' + m.screenshot_preview_cropped().replace('Preview (Cropped)', 'Cropped') + ')' : ''}
 				</div>
 				{#if displayPosterUrl || posterUrl}
 					<div class="w-full max-w-xs aspect-2/3 overflow-hidden rounded border relative">
-						{#if movie.should_crop_poster && !displayPosterUrl}
+						{#if movie.should_crop_poster && !displayPosterUrl && !fallbackSourcePreview}
 							<!-- Crop to show only right 47.2% of image (removes promotional text on left) -->
 							<!-- Only apply cropping if displayPosterUrl is not available (displayPosterUrl is already cropped if temp_poster_url) -->
 							<img
