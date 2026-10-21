@@ -203,7 +203,12 @@ This is not a change to HTTP fallback matching or a promise of service-aware
 HTTP resolution. Upload the original `.sql.gz` again to recover service rows
 previously discarded by content-ID-only imports; checking for updates can
 otherwise skip an unchanged source. Older sidecars remain readable without
-migration; older applications cannot validate the new multi-service sidecar.
+migration. Ordinary exact, display-ID, and case-alias lookups use their existing
+indexes, so upgrading does not require rebuilding a retained sidecar. Dense or unusual
+case-variant key ranges may use a bounded fallback scan to preserve ambiguity
+checks. Newly imported sidecars have an additional case-insensitive
+index that also avoids that fallback. Read-only lookups never modify the sidecar.
+Older applications cannot validate the new multi-service sidecar.
 DVD ID normalization is also validated with the same Unicode-aware transform
 used by import and lookup, including upstream IDs with ideographic spaces.
 

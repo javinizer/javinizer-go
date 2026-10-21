@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode"
 
 	"github.com/javinizer/javinizer-go/internal/logging"
@@ -30,6 +31,10 @@ const dmmCDNBase = "https://pics.dmm.co.jp/"
 type Store struct {
 	db   *sql.DB
 	path string
+
+	contentIndexMu     sync.Mutex
+	contentIndexKnown  bool
+	contentFoldIndexed bool
 }
 
 // Open opens a read-only connection to the dump sidecar database. Returns an
@@ -196,12 +201,6 @@ func (s *Store) MatchByDisplayID(ctx context.Context, id string) ([]models.DumpM
 		return nil, err
 	}
 	hasExact := len(exact) != 0
-	if !hasExact {
-		exact, err = s.queryContentIDs(ctx, []string{literal}, true)
-		if err != nil {
-			return nil, err
-		}
-	}
 	norm := normalizeDVDID(id)
 	if norm != "" && !hasExact {
 		for _, key := range dumpNormKeys(id) {
@@ -217,6 +216,12 @@ func (s *Store) MatchByDisplayID(ctx context.Context, id string) ([]models.DumpM
 					ServiceCode: row.serviceCode,
 				}}, nil
 			}
+		}
+	}
+	if !hasExact {
+		exact, err = s.queryContentIDs(ctx, []string{literal}, true)
+		if err != nil {
+			return nil, err
 		}
 	}
 	// Published DVD evidence is independent of a folded content-ID alias.

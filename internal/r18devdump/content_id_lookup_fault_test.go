@@ -68,7 +68,7 @@ func TestContentIDLookupFaults(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			s := newFaultyStore(t, mode)
 			defer s.Close()
-			_, err := s.queryContentIDs(context.Background(), []string{"Mixed"}, true)
+			_, err := s.queryContentIDsSQL(context.Background(), []string{"Mixed"}, true)
 			require.Error(t, err)
 		})
 	}
