@@ -537,7 +537,7 @@ func TestValidateSidecar_InternalWhitespaceContentIDRejected(t *testing.T) {
 }
 
 func TestCollationScopeColumns(t *testing.T) {
-	assert.Equal(t, []string{contentIDColumn, dvdIDNormColumn}, collationScopeColumns(videosTable))
+	assert.Equal(t, []string{contentIDColumn, dvdIDNormColumn, "service_code"}, collationScopeColumns(videosTable))
 	assert.Equal(t, []string{"id"}, collationScopeColumns("actresses"))
 	assert.Equal(t, []string{contentIDColumn, "actress_id"}, collationScopeColumns(videoActressesTable))
 	assert.Nil(t, collationScopeColumns("must_never_exist"))

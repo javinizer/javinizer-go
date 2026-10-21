@@ -33,17 +33,27 @@ func contentIDBuckets(rows []dumpDVDRow) map[string][]dumpDVDRow {
 	return buckets
 }
 
-// selectContentID prefers an explicitly supplied raw identity. Generated
-// candidates are aliases, so their bucket must contain exactly one raw ID.
+// selectContentID prefers an explicitly supplied raw identity only when it
+// identifies one service row. Generated candidates are aliases, so their
+// bucket must contain exactly one row across all raw spellings and services.
 func selectContentID(rows []dumpDVDRow, id string, allowExact bool) (dumpDVDRow, bool) {
 	if allowExact {
+		var exact dumpDVDRow
+		count := 0
 		for _, row := range rows {
 			if row.contentID == id {
-				return row, true
+				exact = row
+				count++
 			}
 		}
+		if count == 1 && exact.variantCount <= 1 {
+			return exact, true
+		}
+		if count > 1 {
+			return dumpDVDRow{}, false
+		}
 	}
-	if len(rows) == 1 {
+	if len(rows) == 1 && rows[0].variantCount <= 1 {
 		return rows[0], true
 	}
 	return dumpDVDRow{}, false

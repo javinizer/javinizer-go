@@ -19,7 +19,7 @@ func TestImport_BatchDiagnosticCountsAndPositions(t *testing.T) {
 		fmt.Fprintf(&videos, "privatekey%03d\tPRIVATE-%03d\tdigital\tprivate title\n", i, i)
 	}
 	for i := 0; i < 7; i++ {
-		fmt.Fprintf(&videos, "privatekey%03d\tPRIVATE-%03d\tdvd\tprivate alternate title\n", i, i)
+		fmt.Fprintf(&videos, "privatekey%03d\tPRIVATE-%03d\tdigital\tprivate alternate title\n", i, i)
 	}
 	videos.WriteString("\\.\n")
 
@@ -35,8 +35,8 @@ func TestImport_BatchDiagnosticCountsAndPositions(t *testing.T) {
 		first, total, stored    int64
 		nulls, duplicates       int64
 	}{
-		{"reported batch", videos.String(), derivedVideoTable, contentIDColumn, 1, 40, 33, 0, 7},
-		{"across batches and blocks", earlier.String(), derivedVideoTable, contentIDColumn, 41, 2, 0, 0, 2},
+		{"same composite key batch", videos.String(), derivedVideoTable, "content_id+service_code", 1, 40, 33, 0, 7},
+		{"across batches and blocks", earlier.String(), derivedVideoTable, "content_id+service_code", 41, 2, 0, 0, 2},
 		{"NULL and duplicate entity keys", oneRowDump +
 			"COPY public.derived_actress (name_romaji, id) FROM stdin;\nprivate name\tprivatekey\nprivate name\t\\N\nprivate other name\tprivatekey\nprivate name\t\\N\n\\.\n",
 			"derived_actress", "id", 1, 4, 1, 2, 1},
