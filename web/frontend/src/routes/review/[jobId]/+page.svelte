@@ -281,6 +281,7 @@
 							{#each s.filteredMovieGroups as group}
 								{@const effMovie = s.getEffectiveMovie(group.primaryResult.file_path, group.primaryResult.movie)}
 								<ReviewGridCard
+									posterFallbackMode={s.config?.output?.poster_fallback_mode}
 									movieGroup={group}
 									isSelected={group.primaryResult.result_id === s.currentResult?.result_id}
 									isEdited={s.editedMovies.has(group.primaryResult.file_path)}
@@ -335,9 +336,8 @@
 								showScreenshotsPanel={s.showScreenshotsPanel}
 								onOpenImageManager={() => (s.showImageManagerModal = true)}
 							onOpenTrailerModal={() => (s.showTrailerModal = true)}
-							onOpenPosterViewer={() => {
-								if (!s.displayPosterUrl) return;
-								s.imageViewerImages = [s.reviewPageController.previewImageURL(s.displayPosterUrl)];
+							onOpenPosterViewer={(url) => {
+								s.imageViewerImages = [s.reviewPageController.previewImageURL(url)];
 								s.imageViewerIndex = 0;
 								s.imageViewerTitle = m.review_poster();
 								s.showImageViewer = true;

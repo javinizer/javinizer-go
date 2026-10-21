@@ -2,7 +2,7 @@
 	import * as m from '$lib/paraglide/messages';
 	import { flip } from 'svelte/animate';
 	import { quintOut } from 'svelte/easing';
-	import { isFallbackSourcePreview } from '$lib/utils/poster-fallback';
+	import { isFallbackSourcePreview, resolveFallbackPreviewUrl } from '$lib/utils/poster-fallback';
 	import type { Movie } from '$lib/api/types';
 	import { apiClient } from '$lib/api/client';
 	import { confirmDialog } from '$lib/stores/dialog.svelte';
@@ -66,7 +66,7 @@ import { tooltip } from '$lib/actions/tooltip';
 
 	// Reset preview-error state when the bound URL/list changes, so a corrected
 	// URL re-fetches instead of staying hidden by a stale onerror display:none.
-	$effect(() => { posterUrl; displayPosterUrl; posterPreviewError = false; });
+	$effect(() => { posterUrl; posterPreviewUrl; posterPreviewError = false; });
 	$effect(() => { coverUrl; coverPreviewError = false; });
 	// Track a derived signature of the screenshot URLs — not the array ref — so
 	// the reset fires only on actual content change. An identical-content
@@ -190,6 +190,7 @@ import { tooltip } from '$lib/actions/tooltip';
 		return m.screenshot_via_source({ source });
 	}
 	let fallbackSourcePreview = $derived(isFallbackSourcePreview(movie, posterFallbackMode));
+	let posterPreviewUrl = $derived(resolveFallbackPreviewUrl(movie, posterFallbackMode, displayPosterUrl));
 
 </script>
 
@@ -223,7 +224,7 @@ import { tooltip } from '$lib/actions/tooltip';
 				<div class="text-sm font-medium mb-1 block">
 					{fallbackSourcePreview ? m.review_poster_fallback_source() : m.screenshot_preview()}{!fallbackSourcePreview && movie.should_crop_poster ? ' (' + m.screenshot_preview_cropped().replace('Preview (Cropped)', 'Cropped') + ')' : ''}
 				</div>
-				{#if displayPosterUrl || posterUrl}
+				{#if posterPreviewUrl}
 					<div class="w-full max-w-xs aspect-2/3 overflow-hidden rounded border relative">
 						{#if movie.should_crop_poster && !displayPosterUrl && !fallbackSourcePreview}
 							<!-- Crop to show only right 47.2% of image (removes promotional text on left) -->
@@ -238,7 +239,7 @@ import { tooltip } from '$lib/actions/tooltip';
 						{:else}
 							<!-- Use displayPosterUrl (temp_poster_url if available) or posterUrl directly without cropping -->
 							<img
-								src={previewImageURL(displayPosterUrl || posterUrl)}
+								src={previewImageURL(posterPreviewUrl)}
 								alt={m.screenshot_poster_alt()}
 								class="w-full h-full object-contain" hidden={posterPreviewError}
 								onerror={() => { posterPreviewError = true; }}

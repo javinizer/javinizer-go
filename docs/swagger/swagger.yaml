@@ -2169,7 +2169,8 @@ definitions:
           preserving aspect ratio.
         type: integer
       poster_fallback_mode:
-        description: 'Automatic fallback only: legacy, center, or fit; empty means legacy.'
+        description: 'Automatic fallback only: legacy, center, or fit; empty means
+          legacy.'
         type: string
       poster_format:
         type: string

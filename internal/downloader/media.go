@@ -75,7 +75,8 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 	}
 
 	posterURL := movie.Poster.PosterURL
-	if posterURL == "" {
+	sourceWasCover := posterURL == ""
+	if sourceWasCover {
 		posterURL = movie.Poster.CoverURL
 	}
 	if posterURL == "" {
@@ -92,8 +93,13 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 	bounds := movie.Poster.PosterCropBounds
 	manualIntent := bounds != nil && movie.Poster.PosterCropSourceFull
 	geometryUsable := manualIntent && bounds.Valid()
+	// Clearing the poster URL leaves only the cover as a fallback source. New
+	// modes must render it even if an earlier native poster cleared the crop
+	// flag; retain the historical direct-download behavior for legacy mode.
+	autoFallback := movie.Poster.ShouldCropPoster || (sourceWasCover &&
+		(d.config.PosterFallbackMode == "center" || d.config.PosterFallbackMode == "fit"))
 
-	if !manualIntent && !movie.Poster.ShouldCropPoster {
+	if !manualIntent && !autoFallback {
 		if !overwriteExisting {
 			releaseDownloadOwnerClaim(dedup, owner.logicalKey, owner.ownerKey)
 		}
@@ -272,7 +278,7 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 			cropped = true
 		}
 	}
-	if !cropped && movie.Poster.ShouldCropPoster {
+	if !cropped && autoFallback {
 		// Auto-crop after manual verification must consume the verified byte
 		// snapshot — a scratch substitution between verify and crop must never
 		// reach the published output (codex P2 poster_recrop fallback).
