@@ -10,12 +10,13 @@ import (
 // foldContentID mirrors SQLite NOCASE: ASCII casing is a lookup alias only.
 // Non-ASCII characters and the stored source identity are never rewritten.
 func foldContentID(id string) string {
-	return strings.Map(func(r rune) rune {
-		if r >= 'A' && r <= 'Z' {
-			return r + ('a' - 'A')
+	b := []byte(id)
+	for i, c := range b {
+		if c >= 'A' && c <= 'Z' {
+			b[i] = c + ('a' - 'A')
 		}
-		return r
-	}, id)
+	}
+	return string(b)
 }
 
 // ContentIDsEqualFold compares lookup aliases using SQLite's ASCII-only NOCASE
@@ -66,6 +67,27 @@ func (s *Store) queryContentIDs(ctx context.Context, ids []string, folded bool) 
 	if len(ids) == 0 {
 		return nil, nil
 	}
+	if folded {
+		// SQLite NOCASE treats embedded NUL specially. Preserve its comparison
+		// semantics for malformed/control-containing requests rather than trying
+		// to enumerate their ordinary byte-wise aliases.
+		for _, id := range ids {
+			if strings.IndexByte(id, 0) >= 0 {
+				return s.queryContentIDsSQL(ctx, ids, true)
+			}
+		}
+		indexed, err := s.hasContentFoldIndex(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if !indexed {
+			return s.queryContentIDAliases(ctx, ids)
+		}
+	}
+	return s.queryContentIDsSQL(ctx, ids, folded)
+}
+
+func (s *Store) queryContentIDsSQL(ctx context.Context, ids []string, folded bool) ([]dumpDVDRow, error) {
 	args := make([]any, len(ids))
 	for i, id := range ids {
 		args[i] = id
